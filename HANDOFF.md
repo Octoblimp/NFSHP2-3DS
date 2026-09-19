@@ -115,3 +115,61 @@ are directly reusable -- only its **3DS-platform skeleton** is.
    bytes) as the index into `ZZDATA.BIN` (273MB). Look at what pulls in
    `bFile.obj`/`bFileE.obj`/`QueuedFile.obj` in the `.MAP` as the starting
    point for the loader code to decompile.
+
+---
+
+## Session 2 (2026-09-18 cont'd) -- `.mdebug` cracked without a MIPS toolchain
+
+**Goal:** unblock task 1 above (real struct/class layouts) without needing
+to source/install a MIPS-aware GDB or ps2dev toolchain, since installing an
+external binary would need explicit user sign-off first and a hand-rolled
+binary ECOFF (`HDRR`/`FDR`/`SYMR`) parser risks subtly wrong offsets that
+would poison every struct layout downstream.
+
+**Shortcut found:** ECOFF's local string pool -- where `.mdebug` stores
+every symbol/type *name* -- uses the exact same plain-ASCII a.out/GDB stab
+string grammar as a conventional `.stabstr` section (this is what plain
+`strings NFSHP2.ELF` was already showing back in Session 1, e.g.
+`DataEventSelectScreen:Tt1267=s16SelectedTreeType:1,0,32;...`). So instead
+of parsing ECOFF's binary record tables, `tools/mdebug_stabs_scan.py`
+regex-scans `.mdebug`'s raw bytes for stab-shaped strings and decodes the
+`name:T?t?<typenum>=s<size><fields>;<methods>;` struct/class grammar
+directly out of the text. No MIPS toolchain needed at all.
+
+**Result:** 68,317 unique stab-like strings harvested
+(`docs/mdebug_raw_strings.txt`), **1,432 struct/class definitions fully
+decoded** with exact size + every field's type#/byte-offset/bit-size
+(`docs/mdebug_structs.txt`). Method (C++ member function) entries are left
+as raw undecoded text -- full mangled-signature decoding is a much bigger
+chunk of GDB's `stabsread.c` for comparatively low payoff versus the field
+layouts. See `docs/formats/mdebug-stabs.md` for the grammar reference and
+tool usage.
+
+Spot-checked coverage against every phase's named systems in `TASKS.md`:
+confirmed present with real field layouts --
+`Car`/`CarState`/`CarController`/`CarDamage`/`CarDriver` (Phase 4 physics),
+`AICarController`/`AIDriver`/`AIAction*` (Phase 4 AI),
+`tCop`/`tAICop`/`tCopManager`/`tPursuit`/`tRoadBlock`/`tSpikeStrip`/
+`CopDriver`/`CopMover` (Phase 4 HP2-specific pursuit systems),
+`Camera`/`CameraMover`/`DriveCameraMover`/`BumperCameraMover` (Phase 3),
+`FrontendDatabase`/`NewMainMenu`/`PauseMenu`/`tHelpMenu`/
+`DataEventSelectScreen`/`DataSelectTrackScreen` (Phase 2 frontend).
+
+This means **task 1 above is superseded** -- a MIPS toolchain is no longer
+a blocker. `.symtab` (function addresses/names) + `docs/mdebug_structs.txt`
+(struct layouts) together cover most of what Ghidra decompilation needs
+type-wise; Ghidra is still useful for actual instruction-level decompilation
+of function *bodies*, but not for discovering type shapes from scratch.
+
+### Next session
+
+1. Ghidra project import of `NFSHP2.ELF` (MIPS R3000/R5900); check whether a
+   community PS2 EE processor extension is needed for MMI/VU-adjacent
+   instructions, or stock MIPS analysis suffices for bWare's mostly-scalar
+   game-logic code. Cross-reference decompiled accessor functions against
+   `docs/mdebug_structs.txt` field offsets to validate the stab-scan output
+   is trustworthy before leaning on it heavily.
+2. Start Phase 1: reverse-engineer `ZDIR.BIN`'s directory format (2,676
+   bytes) as the index into `ZZDATA.BIN` (273MB). Look at what pulls in
+   `bFile.obj`/`bFileE.obj`/`QueuedFile.obj` in the `.MAP` as the starting
+   point for the loader code to decompile.

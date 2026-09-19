@@ -10,16 +10,19 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
        heapcfg.c/.h, source/vp6/, jdlz.c/.h, build_cia.ps1, makerom/
        bannertool/dspenc binaries)
 3. [x] Placeholder `main.c` stub; verify full build (`.3dsx`/`.smdh`/`.cia`)
-4. [~] STABS/debug-info dumper -- `tools/stabs_dump.py` written and works,
-       but `.stab` turned out to only hold VU asm line info (1,691 entries).
-       The real struct/class layouts live in `.mdebug` (MIPS ECOFF symbolic
-       debug, ~24.9MB) -- **not yet readable**, no MIPS-aware
-       GDB/binutils/ps2dev installed on this machine. Blocks meaningful
-       Phase 1/2 RE work. See HANDOFF.md Session 1.
-5. [ ] Install/locate a MIPS-capable GDB or ps2dev toolchain; confirm it can
-       read `.mdebug` types/functions from `NFSHP2.ELF`
+4. [x] STABS/debug-info dumper -- `tools/stabs_dump.py` (small `.stab`
+       section, VU asm line info only) plus `tools/mdebug_stabs_scan.py`,
+       which cracked the real struct/class layouts out of `.mdebug` by
+       harvesting its embedded stab-syntax strings directly (no MIPS
+       toolchain needed). 1,432 struct/class definitions decoded with exact
+       sizes/field offsets -- `docs/mdebug_structs.txt`,
+       `docs/formats/mdebug-stabs.md`. See HANDOFF.md Session 2.
+5. [x] ~~Install/locate a MIPS-capable GDB or ps2dev toolchain~~ --
+       superseded by task 4's text-based `.mdebug` extraction; not needed.
 6. [ ] Ghidra project import of `NFSHP2.ELF` (MIPS R3000/R5900); check
-       whether a community PS2 EE processor extension is needed
+       whether a community PS2 EE processor extension is needed. Cross-check
+       a few decompiled accessor functions against `docs/mdebug_structs.txt`
+       offsets to validate the stab-scan output before relying on it heavily.
 7. [x] `HANDOFF.md`, `TASKS.md`, `README.md` created
 
 ## Phase 1 -- Asset extraction pipeline

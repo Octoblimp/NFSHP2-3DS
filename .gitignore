@@ -14,6 +14,11 @@
 extracted/
 assets_converted/
 
+# Regenerable RE dumps that are too large to usefully diff/commit
+# (regenerate with tools/mdebug_stabs_scan.py in ~1s); the curated
+# docs/mdebug_structs.txt this feeds is committed as the real artifact.
+docs/mdebug_raw_strings.txt
+
 # Python
 __pycache__/
 *.pyc
