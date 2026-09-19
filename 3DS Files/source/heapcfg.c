@@ -15,7 +15,7 @@
 //     vp6_display.c video textures), every VBO (model3d.c) and every ndsp
 //     audio buffer (audio.c, main.c) lives here.
 //   * the ordinary malloc heap -- normal CPU memory, backing every malloc()
-//     in the port: whole-file .BUN/.lzc loads, JDLZ output buffers,
+//     in the port: whole-file .BUN/.LZC loads, COMP output buffers,
 //     DXT->RGBA decode scratch.
 //
 // libctru 2.4.1 splits the available memory A like this when both of its weak

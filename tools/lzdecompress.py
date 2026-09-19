@@ -70,7 +70,8 @@ def decompress(buf):
                 out.append(buf[src])
                 src += 1
             ctrl >>= 1
-    del out_size  # header value is informational; engine returns the real count
+    if len(out) != out_size:
+        raise ValueError("COMP declared %d bytes, produced %d" % (out_size, len(out)))
     return bytes(out)
 
 

@@ -84,8 +84,9 @@ Four independent sources, in descending order of reliability:
 Most `.BIN`/`.BUN` files ship twice -- once raw, once as a `.LZC`. The `.LZC`
 is a `COMP` container, decompressed by `LZDecompress()` at `0x001aa460`
 (`LZCompress.obj`). HP2 predates EA Black Box's JDLZ, so the `source/jdlz.c`
-copied over from NFSU2-3DS is **not** applicable here and Phase 1 task 11 is
-answered: there is no `jdlz`/`JDLZ` symbol anywhere in the ELF or `.MAP`.
+copied over from NFSU2-3DS was **not** applicable here and has been deleted;
+there is no `jdlz`/`JDLZ` symbol anywhere in the ELF or `.MAP`. The runtime
+decoder is now `3DS Files/source/lzc.c`.
 
 Header (16 bytes, little-endian):
 

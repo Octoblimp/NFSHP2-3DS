@@ -57,8 +57,8 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         `LZDecompress()` (`LZCompress.obj`, 0x001aa460). Reimplemented in
         `tools/lzdecompress.py` and validated byte-exact against every raw
         twin in the archive, up to the 15 MB `FRONTEND\FRONTB.BUN`.
-        `3DS Files/source/jdlz.c` is therefore dead weight -- replace it with
-        a C port of `lzdecompress.py` during Phase 1 task 12.
+        `3DS Files/source/jdlz.c` was therefore dead weight and has been
+        deleted; the runtime decoder is now `3DS Files/source/lzc.c`.
 12. [~] Conversion tools. Done: `tools/texture_convert.py` -- walks any file
         (including nested `.BUN` bundles) for `0xb0300001` packs and writes one
         PNG per texture, stdlib only. 8-bit and 32-bit textures decode
@@ -68,7 +68,13 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         texture job. Everything ruled out so far is listed in
         `docs/formats/texture-pack.md`; the likely fix is transcribing the GS
         `blockTable4`/`columnWord4` tables instead of deriving from the 8-bit
-        case. Still to write: `tools/geometry_convert.py`,
+        case.
+        Also done: the runtime C decoder `3DS Files/source/lzc.c` / `lzc.h`,
+        ported from `tools/lzdecompress.py`, replacing the inapplicable
+        `jdlz.c`. Byte-identical to the Python reference on all 37 COMP files
+        in the archive (largest 15 MB), bounds-checked against corrupt
+        SD-card data (20,000 fuzzed blocks, no overruns), and it builds into
+        the .3dsx/.cia. Still to write: `tools/geometry_convert.py`,
         `tools/audio_convert.py` (DSPADPCM via existing `tools/bin/dspenc.exe`),
         `tools/video_extract.py` -- note this is **MV3-in-AVI**, not VP6/SCHl,
         so it needs a port of `MV3Codec::DecompressFrameShared()` +
