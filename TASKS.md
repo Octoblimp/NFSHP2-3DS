@@ -47,7 +47,7 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
        Format writeup: `docs/formats/zdir-archive.md`.
 9. [x] `tools/zdir_extract.py` -- extracts all 223 entries from `ZZDATA.BIN`
        into the original directory tree, with `--decompress` for `.LZC`.
-10. [~] Identify per-asset formats. Done so far: the `bChunk` container that
+10. [x] Identify per-asset formats. Done so far: the `bChunk` container that
         every asset is built from, and the complete chunk-type -> `Loader*()`
         map pulled straight out of `LoaderTable`
         (`docs/formats/bchunk.md`, `tools/chunk_loader_table.py`,
@@ -73,7 +73,19 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         inside its `eSolid` AABB, every normal is unit length, and 99.65% of
         triangles wind the way their normals say they should
         (`docs/formats/solid-geometry.md`).
-        Still open: the `ENGINE.CTB`/`.LTB` engine crossfade tables.
+        Also done: the `ENGINE.CTB`/`.LTB` engine crossfade tables -- a bare
+        360-byte `EngineDef` plus twelve 512-byte `EngineDefEntry` curves, no
+        `bChunk` wrapper, with self-relative pointer arrays that
+        `PlayerEngineSound::ResolveTables` fixes up in place. `.LTB` is the
+        **L**oad table (on throttle) and `.CTB` the **C**oast table (off
+        throttle); each holds three RPM bands heard through an engine and an
+        exhaust mic, named `lelo`/`lemd`/`lehi`/`lxlo`/... in an ELF `.sdata`
+        table, and those names concatenated with the car prefix are exactly
+        the patches in that car's `NEWE*.MSH` bank. The curve is indexed by
+        `min(440, 440 * rpm / maxrpm)` and crossfaded twice through an
+        equal-power sqrt table -- by throttle between the two files, by
+        `Timbre` between the two mics. `pbendtable` is relocated but never
+        read (`docs/formats/engine-table.md`, `tools/engine_table.py`).
         **Movies are not VP6**: `MOVIES\*.AVI` are RIFF/AVI with fourcc
         `MV30` (EA's MV3 codec, `MV3Codec`+`Huffman` in the ELF), 512x256.
         The `source/vp6/` decoder copied from NFSU2-3DS does not apply.
