@@ -19,26 +19,49 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
        `docs/formats/mdebug-stabs.md`. See HANDOFF.md Session 2.
 5. [x] ~~Install/locate a MIPS-capable GDB or ps2dev toolchain~~ --
        superseded by task 4's text-based `.mdebug` extraction; not needed.
-6. [ ] Ghidra project import of `NFSHP2.ELF` (MIPS R3000/R5900); check
-       whether a community PS2 EE processor extension is needed. Cross-check
-       a few decompiled accessor functions against `docs/mdebug_structs.txt`
-       offsets to validate the stab-scan output before relying on it heavily.
+6. [x] Ghidra project import of `NFSHP2.ELF`. No community PS2 EE extension
+       needed, but the language matters: import as **`MIPS:LE:64:64-32addr`
+       / `o32`**, not the default `MIPS:LE:32`. The EE code is MIPS III
+       (`sd`/`ld`/`daddu` everywhere), which MIPS32 rejects -- with the wrong
+       language nearly every function decompiles to `halt_baddata()`. Project
+       lives in `Development/GhidraProjects/NFSHP2` alongside the existing
+       NFSU2/LiquidTV projects. See HANDOFF.md Session 3.
 7. [x] `HANDOFF.md`, `TASKS.md`, `README.md` created
 
 ## Phase 1 -- Asset extraction pipeline
 
-8. [ ] Reverse-engineer `ZDIR.BIN` directory format (index into `ZZDATA.BIN`)
-       -- start from `bFile.obj`/`bFileE.obj`/`QueuedFile.obj` in `NFSHP2.MAP`
-9. [ ] `tools/zdir_extract.py` -- extract all entries from `ZZDATA.BIN`
-10. [ ] Identify per-asset formats (GS textures, VU1 geometry, bWare UI
-        format if any, SPU ADPCM audio, VP6/SCHl boot movies); write findings
-        to `docs/formats/*.md` as each is cracked
-11. [ ] Confirm whether HP2 actually uses JDLZ compression (check `.symtab`/
-        `.MAP` for `jdlz`/`JDLZ`/`bDecompress`-named symbols) before relying
-        on the copied `source/jdlz.c`
+8. [x] Reverse-engineer `ZDIR.BIN` directory format (index into `ZZDATA.BIN`).
+       223 x 12-byte `DirectoryEntry{Hash,Fad,Size}`; `Fad` is a 2048-byte CD
+       sector index. Filenames are stored only as `bStringHash()` (djb2 seeded
+       -1) of the uppercased path -- `tools/bhash.py` implements it plus a
+       meet-in-the-middle cracker. 200/223 names recovered
+       (`docs/zdir_names.txt`, `tools/zdir_names.py`).
+       Format writeup: `docs/formats/zdir-archive.md`.
+9. [x] `tools/zdir_extract.py` -- extracts all 223 entries from `ZZDATA.BIN`
+       into the original directory tree, with `--decompress` for `.LZC`.
+10. [~] Identify per-asset formats. Done so far: the `bChunk` container that
+        every asset is built from, and the complete chunk-type -> `Loader*()`
+        map pulled straight out of `LoaderTable`
+        (`docs/formats/bchunk.md`, `tools/chunk_loader_table.py`,
+        `tools/bchunk_dump.py`). Still open: the `0x00034005` VU1 geometry
+        packets, the `0xb0300001` GS texture pack, the `.MSB`/`.MSH` sample
+        bank record layout, and the `0x80010200` Flailer UI chunk.
+        **Movies are not VP6**: `MOVIES\*.AVI` are RIFF/AVI with fourcc
+        `MV30` (EA's MV3 codec, `MV3Codec`+`Huffman` in the ELF), 512x256.
+        The `source/vp6/` decoder copied from NFSU2-3DS does not apply.
+11. [x] JDLZ: **HP2 does not use it** -- no `jdlz`/`JDLZ` symbol in the ELF or
+        `.MAP`. `.LZC` files are a `COMP`-magic LZSS container handled by
+        `LZDecompress()` (`LZCompress.obj`, 0x001aa460). Reimplemented in
+        `tools/lzdecompress.py` and validated byte-exact against every raw
+        twin in the archive, up to the 15 MB `FRONTEND\FRONTB.BUN`.
+        `3DS Files/source/jdlz.c` is therefore dead weight -- replace it with
+        a C port of `lzdecompress.py` during Phase 1 task 12.
 12. [ ] Conversion tools: `tools/texture_convert.py`, `tools/geometry_convert.py`,
         `tools/audio_convert.py` (DSPADPCM via existing `tools/bin/dspenc.exe`),
-        `tools/video_extract.py` (VP6/SCHl, reusing `source/vp6/ea_demux.c` logic)
+        `tools/video_extract.py` -- note this is **MV3-in-AVI**, not VP6/SCHl,
+        so it needs a port of `MV3Codec::DecompressFrameShared()` +
+        `Huffman::Decompress()` rather than `source/vp6/ea_demux.c`.
+        Also port `tools/lzdecompress.py` to C for the runtime.
 13. [ ] Confirm asset delivery: external SD-card game directory (matching
         NFSU2-3DS), not ROMFS, given 273MB source archive size
 

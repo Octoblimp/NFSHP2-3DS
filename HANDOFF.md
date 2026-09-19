@@ -173,3 +173,120 @@ of function *bodies*, but not for discovering type shapes from scratch.
    bytes) as the index into `ZZDATA.BIN` (273MB). Look at what pulls in
    `bFile.obj`/`bFileE.obj`/`QueuedFile.obj` in the `.MAP` as the starting
    point for the loader code to decompile.
+
+---
+
+## Session 3 -- Ghidra set up properly, Phase 1 archive cracked
+
+**Goal:** the two things session 2 left open -- get Ghidra actually
+decompiling this ELF, and reverse `ZDIR.BIN`/`ZZDATA.BIN` so asset work can
+start. Both done; tasks 6, 8, 9 and 11 are closed and 10 is most of the way.
+
+### The Ghidra language gotcha (this was the whole blocker)
+
+Importing `NFSHP2.ELF` with Ghidra's default `MIPS:LE:32` *appears* to work:
+the loader accepts it, analysis runs, 8,333 functions get named from
+`.symtab`. But nearly every function then decompiles to a single
+`halt_baddata()` with "Control flow encountered bad instruction data".
+
+It is not the EE's MMI/VU instructions and it does **not** need a community
+PS2 processor extension. Dumping the raw words at a failing function shows
+opcode `0x3f` (`sd`) and SPECIAL funct `0x2d` (`daddu`) in the *prologue* --
+ordinary MIPS III. The EE is a 64-bit core and SN's compiler uses
+`sd`/`ld`/`daddu` for every register save and register-to-register move, so a
+MIPS32 decoder dies on instruction two.
+
+Re-importing as **`MIPS:LE:64:64-32addr` with cspec `o32`** fixes it outright:
+of the 12 functions that previously produced nothing, 11 now decompile fully.
+
+    analyzeHeadless <GhidraProjects> NFSHP2 -import NFSHP2.ELF \
+        -processor "MIPS:LE:64:64-32addr" -cspec o32 -overwrite
+
+Note `-processor` takes the 4-part language id only; appending the cspec to
+it (`...:o32`) is rejected as "Unsupported language". The project now lives in
+`Development/GhidraProjects/NFSHP2`, next to the existing NFSU2/LiquidTV
+ones, and `tools/ghidra_scripts/DecompileByName.java` batch-decompiles any
+list of symbols by name into a file.
+
+### `ZDIR.BIN` / `ZZDATA.BIN`
+
+Full writeup in `docs/formats/zdir-archive.md`. Summary:
+
+* 223 x 12-byte records, `{Hash, Fad, Size}` -- the `DirectoryEntry` struct
+  straight out of `docs/mdebug_structs.txt`, which is the first time the
+  session-2 stab-scan output has been validated against real data.
+* `Fad` is a 2048-byte CD sector index; the highest `Fad * 2048 + Size` across
+  all records lands 1,884 bytes short of `ZZDATA.BIN`'s length -- exact,
+  modulo trailing sector padding.
+* Names are stored only as `bStringHash()` -- djb2 seeded with -1 -- of the
+  **uppercased** path. `tools/bhash.py` has the hash plus a
+  meet-in-the-middle `crack()` that brute-forces a name back out of a 32-bit
+  hash (the hash is linear over the characters, so the middle can be split
+  and tabled).
+
+**200 of 223 names recovered** into `docs/zdir_names.txt`. The trick that got
+most of them: the assets still carry the authoring-machine path they were
+built from (`..\Psx2\CD\CARS\BARCHETTA\DASHGEOM.BIN`), so grepping the
+payloads and hash-checking everything after `\CD\` names them for free. The
+sound banks had to be brute-forced -- `SOUND\ALPINE`, `DESERT`, `GREECE`,
+`PARKLAND`, `TROPICS`, and 23 `SOUND\NEWE<car>.MSB`/`.MSH` engine banks.
+
+Still unnamed: 16 `REPLAY\*` attract-mode recordings (5 of them under
+`REPLAY\MAY31\`), 5 plain-text marker design notes, and a handful of sound
+entries. The directory's alphabetical sort brackets each one between its two
+named neighbours, so they are crackable with more CPU if it ever matters.
+
+### Compression -- and a correction to a Phase 0 assumption
+
+**HP2 does not use JDLZ.** There is no `jdlz`/`JDLZ` symbol anywhere in the
+ELF or the `.MAP`. `.LZC` files are a `COMP`-magic LZSS container from
+`LZCompress.obj`; the format is documented in `docs/formats/zdir-archive.md`
+and reimplemented in `tools/lzdecompress.py`, validated byte-exact against
+the raw twin of every compressed entry (including the 15 MB
+`FRONTEND\FRONTB.BUN`). `3DS Files/source/jdlz.c`, copied over from
+NFSU2-3DS, is dead weight and should be replaced by a C port of that script.
+
+**The movies are not VP6 either.** `MOVIES\*.AVI` is a plain RIFF/AVI with
+fourcc `MV30` at 512x256 -- EA's MV3 codec, whose decoder (`MV3Codec` +
+`Huffman`) is right there in the ELF. So `3DS Files/source/vp6/` does not
+apply to HP2 and task 12's video tool needs an MV3 port instead.
+
+### The chunk system
+
+Every asset is a flat `bChunk` stream (`{u32 Type; u32 Size;}`, size excludes
+the header, bit 31 of Type = container). `LoadChunks()` is a one-liner over
+`LoaderTable` (`0x003081d0`, 31 slots), and each `Loader*()` opens by
+rejecting chunks that are not its own type -- so `tools/chunk_loader_table.py`
+reads the table out of the ELF's program headers and decodes each guard's
+`lui`/`ori` pair to produce the **complete chunk-type -> asset-kind map with
+no decompiler involved at all**. Table and walker:
+`docs/formats/bchunk.md`, `tools/bchunk_dump.py`.
+
+Things that fell out of it for later phases: `0x80010200` is the "Flailer" UI
+system (Phase 2 task 16), `0x00034121` TrackRoutes (Phase 3 task 24),
+`0x80034405` Cameras (task 23), `0x00034600` CarInfo and `0x80034500` Cops
+(Phase 4).
+
+### What the disc actually holds
+
+`PS2 Files/` is a **demo disc**, which is worth knowing before anyone hunts
+for missing content: only track 12 ships, the jukebox is
+`JUKEBOXMDEMODISK.JBC`, speech is `DEMODISK*.PCK`. But there are 30 car
+models under `CARS\<NAME>\GEOMETRY.BIN` and 23 engine sound banks, so the car
+set is close to complete even though the track set is not.
+`LANGUAGES\FE_ENGLISH.BIN` already reads far enough to pull menu and event
+text (track names: Coastal Parklands, Calypso Coast, Ancient Ruins, Autumn
+Crossing, Alpine Trail, Tropical Paradise, National Forest).
+
+### Next session
+
+1. Task 12: the `0xb0300001` GS texture pack is the highest-value next
+   format -- it unblocks anything visual. `LoaderTexturePack` at `0x00100830`
+   decompiles properly now.
+2. Port `tools/lzdecompress.py` to C and drop `source/jdlz.c`.
+3. Task 10 leftovers: VU1 geometry `0x00034005`, the `.MSB`/`.MSH` sample
+   bank record layout, and `LoaderFlailerChunk` (`0x80010200`) -- the last
+   one also opens Phase 2 tasks 14/16, and `FlailerObjectChunk` /
+   `FlailerBitmapChunk` / `FlailerTextChunk` / `FlailerMenuItem` are already
+   in `docs/mdebug_structs.txt`.
+4. Optional: finish the last 23 filenames with a longer `bhash.crack()` run.
