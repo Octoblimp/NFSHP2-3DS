@@ -62,8 +62,18 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         and the `0x00039000` `LANGUAGES\FE_*.BIN` string tables that Flailer
         text objects resolve their `LanguageID` against
         (`docs/formats/language-table.md`, `tools/language_dump.py`).
-        Still open: the `0x00034005` VU1 geometry packets and the
-        `ENGINE.CTB`/`.LTB` engine crossfade tables.
+        Also done: the `0x80034000` eSolid solid lists -- the chunk tree,
+        `eSolid`/`eStripEntry`, and the `0x00034005` VU1 packets themselves:
+        XYZ and normals are transposed in groups of four vertices, ST too
+        except for an interleaved tail, colours are one RGBA5551 quad each,
+        and the quad at VU address 1 is a per-vertex ADC bitfield whose set
+        bits cancel a drawing kick. Verified over all 1,465 solids /
+        22,280 strips on the disc: every strip reproduces its
+        `eStripEntry.NumVerts` and `NumPolys` exactly, every vertex lands
+        inside its `eSolid` AABB, every normal is unit length, and 99.65% of
+        triangles wind the way their normals say they should
+        (`docs/formats/solid-geometry.md`).
+        Still open: the `ENGINE.CTB`/`.LTB` engine crossfade tables.
         **Movies are not VP6**: `MOVIES\*.AVI` are RIFF/AVI with fourcc
         `MV30` (EA's MV3 codec, `MV3Codec`+`Huffman` in the ELF), 512x256.
         The `source/vp6/` decoder copied from NFSU2-3DS does not apply.
@@ -108,8 +118,13 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         `.MSB` bank into 16-bit WAVs plus a `patches.csv` of rates, volumes
         and loop points, joining the stereo pairs. All 30 banks convert, 439
         WAVs. Feeding those to `tools/bin/dspenc.exe` for DSPADPCM is Phase 3
-        task 22. Still to write: `tools/geometry_convert.py`,
-        `tools/video_extract.py` -- note this is **MV3-in-AVI**, not VP6/SCHl,
+        task 22.
+        Also done: `tools/geometry_convert.py` -- decodes any file holding a
+        `0x80034000` solid list (including nested `.BUN` bundles) to Wavefront
+        OBJ + MTL, with per-vertex colours on the `v` lines, one group per
+        solid and one material per light material hash. All 35 geometry files
+        on the disc convert; see `docs/formats/solid-geometry.md`.
+        Still to write: `tools/video_extract.py` -- note this is **MV3-in-AVI**, not VP6/SCHl,
         so it needs a port of `MV3Codec::DecompressFrameShared()` +
         `Huffman::Decompress()` rather than `source/vp6/ea_demux.c`.
         Also port `tools/lzdecompress.py` to C for the runtime.
