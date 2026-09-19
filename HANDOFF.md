@@ -290,3 +290,106 @@ Crossing, Alpine Trail, Tropical Paradise, National Forest).
    `FlailerBitmapChunk` / `FlailerTextChunk` / `FlailerMenuItem` are already
    in `docs/mdebug_structs.txt`.
 4. Optional: finish the last 23 filenames with a longer `bhash.crack()` run.
+
+---
+
+## Session 4 -- Flailer UI and the string tables
+
+**Goal:** close the last of the session-3 leftovers that blocks Phase 2 --
+the `0x80010200` Flailer chunk, which is every menu and HUD screen in the
+game. Done, and it pulled the `FE_*.BIN` string tables in with it.
+
+### `0x80010200` -- Flailer
+
+Full writeup in `docs/formats/flailer-ui.md`; reader is
+`tools/flailer_dump.py`. Three files carry one project each (`FRONTB.BUN` 39
+screens, `INGAMEB.BUN` 29, `GLOBALB.BUN` 8), 76 screens and 2,252 objects
+total, all 640x480.
+
+The layout came straight out of `docs/mdebug_structs.txt` -- the on-disc
+chunk sizes are literally `sizeof()` (20/40/120) -- and the check that
+validates the whole thing is that `FlailerScreenChunk::NumObjects` equals the
+parsed child count on **all 76 screens**, with `ObjectType` agreeing with the
+chunk id on all 2,252 objects.
+
+Three things were not guessable from the type info and needed the code:
+
+* **`FormatOptions` bit order is not declaration order.** The seven
+  `Is*()` predicates are declared Centered, Left, Right, DarkBackground,
+  Clipped, Wrapped, FixedWidth, but the bits are `0x01` **right**, `0x02`
+  left, `0x04` **centered**. The renderer settles it -- `0x01` subtracts the
+  full `GetScaledWidth()` from the pen, `0x04` subtracts half -- and the data
+  agrees (median `TopLeftX` 490 / 172 / 365 on a 640-wide screen). Taking
+  declaration order on faith would have right-aligned every centred label in
+  the game. This was wrong in the first draft of the tool and is fixed.
+* **`Visible` on a screen is dead on disc.** `LoaderFlailerChunk` does
+  `sh 1,0x1e(screen)` on every screen it links, so they all start
+  `FLAILER_SCREEN_INVISIBLE`; the `0x0040` the exporter writes is padding.
+  `CallbackHash`/`HelpMenuHash`/`BackgroundHash` are `0xffffffff` (the
+  empty-string hash) on all 76 -- never authored, wired up at runtime.
+* **`Z` is a layer index, not a sort key.** `AddFlailerStrip` uses it to
+  index `FlailerRenderManager::LayerRenderInfoTable[29]`; values on disc run
+  0..28, exactly the table size.
+
+Fonts resolve 934/934 and textures 1307/1318, because a font's glyph sheet is
+a texture of the same name in the same pack (there is no name string in a
+font chunk -- `FindFont` matches `tTTFontHeader::mHashID` at offset 8). Ten
+fonts are in use. Screen names resolve only 18/76: those are the ones the
+frontend C++ names as literals, the rest exist only in the authoring tool.
+
+### `0x00039000` -- the `FE_*.BIN` string tables
+
+Writeup in `docs/formats/language-table.md`, reader
+`tools/language_dump.py`.
+
+This turned out to be mandatory rather than a bonus: **the string baked into
+a Flailer text chunk is only the authoring placeholder and is routinely
+stale.** When `LanguageID` is set the renderer draws
+`GetTranslatedString(LanguageID)` instead. The main menu ships `'Speed'`,
+`'Championship'` and `'Mode Select'` where the game draws `'World Racing'`,
+`'Hot Pursuit'` and `'Main Menu'` -- so a port built from the chunk strings
+alone would have had the wrong text on its very first screen.
+
+The format is a `LanguageDescription` header (again verbatim from
+`.mdebug`) plus three arrays that simply follow it; the stored pointers are
+dead PS2 addresses. `108 + 8*NumHash + 8*NumID + TextTableSize` accounts for
+every one of the eight files exactly, modulo the chunk's rounding to 4.
+1,896 IDs, 1,403 distinct strings. Two of the eight "languages" are build
+tools: `FE_LONGEST` holds the longest translation of each string for layout
+testing, `FE_ID` maps each ID to its own number.
+
+Two gotchas: the last string in the text table is **not** NUL-terminated, so
+reads must clamp at `TextTableSize`; and both lookup tables are sorted as
+*signed* ints, because `GetString` binary-searches them with `slt`.
+
+### `tools/mipsdis.py`
+
+Each of the last three sessions has rebuilt a throwaway MIPS disassembler in
+the scratchpad, so this one is in the repo. MIPS III integer plus the 64-bit
+`ld`/`sd`/`daddu` that SN's compiler uses for every register save and move,
+the COP1 FPU, branch-likely forms, and `.symtab` names on jump targets. It is
+not a Ghidra replacement -- it exists to answer "which bit does this branch
+test", which is exactly what settled the `FormatOptions` order above.
+
+One trap it now handles: **`.symtab`'s `st_size` is unreliable in this ELF.**
+`RenderFlailerText` records 144 bytes, and it really is a 144-byte wrapper,
+but reading past it silently walks into `Render__16FlailerTextChunk` --
+which is how the real renderer got mis-attributed at first. `mipsdis` now
+defaults to the gap to the next symbol instead.
+
+### Next session
+
+1. **Task 12, PSMT4.** Still the biggest single gap: 944 of the 1,438
+   textures in this build are 4-bit and decode wrong, so most of the UI
+   Flailer now describes cannot actually be looked at. `docs/formats/
+   texture-pack.md` lists what has been ruled out; the likely fix is
+   transcribing the GS `blockTable4`/`columnWord4` tables rather than
+   deriving them from the 8-bit case.
+2. **Task 16, the C side.** The Flailer data format is done, so `source/bui.c`
+   can start: load the chunk, resolve hashes, draw layers 0..28 via citro2d.
+   The behaviour half (`FlailerMenu`/`FlailerMenuItem`, which never appear on
+   disc) still needs the frontend C++ decompiled.
+3. Task 10 leftovers: `0x00034005` VU1 geometry, `ENGINE.CTB`/`.LTB`.
+4. Optional: `bhash.crack()` the 58 unnamed screens and the 23 unnamed
+   `ZDIR` entries -- the screen names use a plain `A-Z0-9_` alphabet, so
+   they should be cheap.

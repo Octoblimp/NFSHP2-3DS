@@ -10,6 +10,14 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
        heapcfg.c/.h, source/vp6/, jdlz.c/.h, build_cia.ps1, makerom/
        bannertool/dspenc binaries)
 3. [x] Placeholder `main.c` stub; verify full build (`.3dsx`/`.smdh`/`.cia`)
+3b. [x] `tools/mipsdis.py` -- a MIPS III / R5900 disassembler (integer,
+       64-bit `ld`/`sd`/`daddu`, COP1 FPU, branch-likely; MMI and COP2 shown
+       raw), resolving `.symtab` names on jump targets. Ghidra is still the
+       tool for whole-function decompilation, but this answers "which bit
+       does this branch test" in one command, and it was what settled the
+       Flailer `FormatOptions` bit order. Note `.symtab`'s `st_size` is
+       unreliable in this ELF, so it defaults to the gap to the next symbol.
+
 4. [x] STABS/debug-info dumper -- `tools/stabs_dump.py` (small `.stab`
        section, VU asm line info only) plus `tools/mdebug_stabs_scan.py`,
        which cracked the real struct/class layouts out of `.mdebug` by
@@ -48,10 +56,14 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         PSMT8 swizzle (`docs/formats/texture-pack.md`), and the
         `.MSH`/`.MSB` sound banks -- `SOUND_MSH_HEADER_INFO` and
         `SOUND_PATCH_INFO` straight out of the `.mdebug` type info, over plain
-        SPU ADPCM (`docs/formats/sound-bank.md`). Still open: the
-        `0x00034005` VU1 geometry packets, the PSMT4 swizzle (see task 12),
-        the `0x80010200` Flailer UI chunk, and the `ENGINE.CTB`/`.LTB` engine
-        crossfade tables.
+        SPU ADPCM (`docs/formats/sound-bank.md`); the `0x80010200` Flailer UI
+        chunk -- the project/screen/bitmap/text tree every menu and HUD screen
+        is built from (`docs/formats/flailer-ui.md`, `tools/flailer_dump.py`);
+        and the `0x00039000` `LANGUAGES\FE_*.BIN` string tables that Flailer
+        text objects resolve their `LanguageID` against
+        (`docs/formats/language-table.md`, `tools/language_dump.py`).
+        Still open: the `0x00034005` VU1 geometry packets, the PSMT4 swizzle
+        (see task 12), and the `ENGINE.CTB`/`.LTB` engine crossfade tables.
         **Movies are not VP6**: `MOVIES\*.AVI` are RIFF/AVI with fourcc
         `MV30` (EA's MV3 codec, `MV3Codec`+`Huffman` in the ELF), 512x256.
         The `source/vp6/` decoder copied from NFSU2-3DS does not apply.
@@ -78,6 +90,12 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         in the archive (largest 15 MB), bounds-checked against corrupt
         SD-card data (20,000 fuzzed blocks, no overruns), and it builds into
         the .3dsx/.cia.
+        Also done: `tools/flailer_dump.py` -- decodes the `0x80010200` UI
+        tree into a screen-by-screen listing or JSON, resolving texture,
+        font, screen and object hashes back to names and replacing every
+        text object's stale authoring placeholder with the real string, and
+        `tools/language_dump.py` -- reads any `FE_*.BIN` and can emit a
+        1,896-row x 8-language CSV of every string in the game.
         Also done: `tools/audio_convert.py` -- unpacks any `SOUND\*.MSH` +
         `.MSB` bank into 16-bit WAVs plus a `patches.csv` of rates, volumes
         and loop points, joining the stereo pairs. All 30 banks convert, 439
@@ -96,9 +114,19 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         equivalent class in the recovered `.mdebug` type info
 15. [ ] Reimplement as `kVideoStages[]`-style table in `main.c` (pattern
         already proven in NFSU2-3DS)
-16. [ ] Reimplement bWare's menu/UI system once its format is understood
-        (working name: `source/bui.c`); `DataEventSelectScreen` (seen in the
-        `.mdebug` strings survey) is a concrete first screen-data class
+16. [~] Reimplement bWare's menu/UI system (working name: `source/bui.c`).
+        **The format is no longer the blocker** -- `0x80010200` is fully
+        decoded (`docs/formats/flailer-ui.md`): 76 screens across the three
+        bundles, each a list of `FlailerBitmapChunk`/`FlailerTextChunk`
+        objects carrying position, scale, per-corner RGBA, UVs, a font hash
+        and a render layer, plus the `FE_*.BIN` string table their text
+        really comes from (`docs/formats/language-table.md`). What is left is
+        the C side: load the chunk, resolve texture/font hashes, draw layers
+        0..28 through citro2d. Note `FlailerMenu`/`FlailerMenuItem` never
+        appear on disc -- navigation and highlight behaviour live in the
+        frontend C++ and still have to be decompiled.
+        `DataEventSelectScreen` (seen in the `.mdebug` strings survey) is a
+        concrete first screen-data class
 17. [ ] Wire hid input -> menu navigation, citro2d text, citro3d backgrounds
 18. [ ] Milestone acceptance: EA logo -> publisher logos -> legal/PSA
         screens -> main menu, real assets, navigable on 3DS controls
