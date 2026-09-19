@@ -43,9 +43,12 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         every asset is built from, and the complete chunk-type -> `Loader*()`
         map pulled straight out of `LoaderTable`
         (`docs/formats/bchunk.md`, `tools/chunk_loader_table.py`,
-        `tools/bchunk_dump.py`). Still open: the `0x00034005` VU1 geometry
-        packets, the `0xb0300001` GS texture pack, the `.MSB`/`.MSH` sample
-        bank record layout, and the `0x80010200` Flailer UI chunk.
+        `tools/bchunk_dump.py`) and the `0xb0300001` GS texture pack --
+        container, the 164-byte `TextureInfo` record, the linear CLUT and the
+        PSMT8 swizzle (`docs/formats/texture-pack.md`). Still open: the
+        `0x00034005` VU1 geometry packets, the PSMT4 swizzle (see task 12),
+        the `.MSB`/`.MSH` sample bank record layout, and the `0x80010200`
+        Flailer UI chunk.
         **Movies are not VP6**: `MOVIES\*.AVI` are RIFF/AVI with fourcc
         `MV30` (EA's MV3 codec, `MV3Codec`+`Huffman` in the ELF), 512x256.
         The `source/vp6/` decoder copied from NFSU2-3DS does not apply.
@@ -56,7 +59,16 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         twin in the archive, up to the 15 MB `FRONTEND\FRONTB.BUN`.
         `3DS Files/source/jdlz.c` is therefore dead weight -- replace it with
         a C port of `lzdecompress.py` during Phase 1 task 12.
-12. [ ] Conversion tools: `tools/texture_convert.py`, `tools/geometry_convert.py`,
+12. [~] Conversion tools. Done: `tools/texture_convert.py` -- walks any file
+        (including nested `.BUN` bundles) for `0xb0300001` packs and writes one
+        PNG per texture, stdlib only. 8-bit and 32-bit textures decode
+        correctly (verified on the HUD dials and the car drop-shadows);
+        **4-bit (PSMT4) is unsolved and its output is wrong** -- 944 of the
+        1438 textures in this build are 4-bit, so closing this is the next
+        texture job. Everything ruled out so far is listed in
+        `docs/formats/texture-pack.md`; the likely fix is transcribing the GS
+        `blockTable4`/`columnWord4` tables instead of deriving from the 8-bit
+        case. Still to write: `tools/geometry_convert.py`,
         `tools/audio_convert.py` (DSPADPCM via existing `tools/bin/dspenc.exe`),
         `tools/video_extract.py` -- note this is **MV3-in-AVI**, not VP6/SCHl,
         so it needs a port of `MV3Codec::DecompressFrameShared()` +
