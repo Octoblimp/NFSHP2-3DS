@@ -45,10 +45,13 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         (`docs/formats/bchunk.md`, `tools/chunk_loader_table.py`,
         `tools/bchunk_dump.py`) and the `0xb0300001` GS texture pack --
         container, the 164-byte `TextureInfo` record, the linear CLUT and the
-        PSMT8 swizzle (`docs/formats/texture-pack.md`). Still open: the
+        PSMT8 swizzle (`docs/formats/texture-pack.md`), and the
+        `.MSH`/`.MSB` sound banks -- `SOUND_MSH_HEADER_INFO` and
+        `SOUND_PATCH_INFO` straight out of the `.mdebug` type info, over plain
+        SPU ADPCM (`docs/formats/sound-bank.md`). Still open: the
         `0x00034005` VU1 geometry packets, the PSMT4 swizzle (see task 12),
-        the `.MSB`/`.MSH` sample bank record layout, and the `0x80010200`
-        Flailer UI chunk.
+        the `0x80010200` Flailer UI chunk, and the `ENGINE.CTB`/`.LTB` engine
+        crossfade tables.
         **Movies are not VP6**: `MOVIES\*.AVI` are RIFF/AVI with fourcc
         `MV30` (EA's MV3 codec, `MV3Codec`+`Huffman` in the ELF), 512x256.
         The `source/vp6/` decoder copied from NFSU2-3DS does not apply.
@@ -74,8 +77,12 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         `jdlz.c`. Byte-identical to the Python reference on all 37 COMP files
         in the archive (largest 15 MB), bounds-checked against corrupt
         SD-card data (20,000 fuzzed blocks, no overruns), and it builds into
-        the .3dsx/.cia. Still to write: `tools/geometry_convert.py`,
-        `tools/audio_convert.py` (DSPADPCM via existing `tools/bin/dspenc.exe`),
+        the .3dsx/.cia.
+        Also done: `tools/audio_convert.py` -- unpacks any `SOUND\*.MSH` +
+        `.MSB` bank into 16-bit WAVs plus a `patches.csv` of rates, volumes
+        and loop points, joining the stereo pairs. All 30 banks convert, 439
+        WAVs. Feeding those to `tools/bin/dspenc.exe` for DSPADPCM is Phase 3
+        task 22. Still to write: `tools/geometry_convert.py`,
         `tools/video_extract.py` -- note this is **MV3-in-AVI**, not VP6/SCHl,
         so it needs a port of `MV3Codec::DecompressFrameShared()` +
         `Huffman::Decompress()` rather than `source/vp6/ea_demux.c`.
