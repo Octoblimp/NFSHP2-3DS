@@ -393,3 +393,109 @@ defaults to the gap to the next symbol instead.
 4. Optional: `bhash.crack()` the 58 unnamed screens and the 23 unnamed
    `ZDIR` entries -- the screen names use a plain `A-Z0-9_` alphabet, so
    they should be cheap.
+
+---
+
+## Session 5 (2026-09-19) -- PSMT4 cracked; the swizzle is per-texture
+
+**Goal:** task 12's last gap -- the 4-bit texture swizzle, which session 4
+left as the biggest single blocker (944 of 1,438 textures in the frontend
+build are 4-bit, so most of the UI could not be looked at).
+
+Solved, and the answer moved the ground under the 8-bit case too.
+
+### The finding: swizzling is a property of the texture, not the format
+
+Every previous attempt assumed "PSMT4 data is swizzled, find the permutation".
+It is not that simple. `AttachTextureDownloadPacket` builds a native
+PSMT8/PSMT4 host-to-local transfer at the real size -- for those the GS does
+the swizzling itself and the file holds plain raster data. But
+`FillVramWithTextures` (`0x001081f8`) then *rewrites* that packet for any mip
+level whose flag byte is set, at `0x0010850c`:
+
+    flag == 0  ->  leave it: native PSM upload, file data is raster
+    flag == 1  ->  DPSM = PSMCT32, (width/2, height/2) for 8bpp or
+                   (width/2, height/4) for 4bpp, DBW = TBW/2
+
+The flag lives at `0x55`, which turned out to be part of a per-mip array at
+`0x52` -- so the long-documented "`0x54` = TBW" is just level 0's entry, and
+the real mip count is the `s8` at `0x6e`. A chain of `0x6e + 1` halving levels
+accounts for the pixel byte count exactly on all 2,267 textures that own their
+pixels, which confirms the array walk.
+
+Then, checking that against `docs/mdebug_structs.txt`, it turned out bWare had
+already named all of it for us and the answer had been sitting in the repo
+since session 2:
+
+    struct/class TextureImageInfo (size=4 bytes) [type#227]
+        TextureBasePointerOffset     u16   offset=0
+        TextureBufferWidth           u8    offset=16
+        Is32BitSwizzelled            s8    offset=24
+
+with `ImageInfos: ar1;0;6;227,656,224` (seven of them at bit 656 = `0x52`) and
+`NumMipMapLevels` at bit 880 = `0x6e`. **`Is32BitSwizzelled`** -- the field
+says in so many words that a swizzled texture is swizzled *as a 32-bit image*,
+which is the whole finding. Worth remembering for the next format: the
+`.mdebug` type info is the first place to look, not the last.
+
+So a flagged texture is a 32-bit image the GS re-reads as PSMT4/PSMT8, and the
+right question is not "what is the PSMT4 permutation" but "where does the GS
+find texel (x, y) inside that 32-bit image".
+
+### The 4-bit map
+
+In host-image space it falls out of the page/block/column geometry. Pages line
+up one-for-one (PSMT4 128x128 <-> PSMCT32 64x32), and the one twist is that a
+PSMT4 page's 4x8 block grid is the **transpose** of PSMCT32's 8x4 -- a PSMT4
+block's x index picks the host *row*, its y index the host *column*. That
+transposition is why nothing derived by analogy from the 8-bit case ever
+worked. Inside a block the free bits land as:
+
+    cx0, cx1, cx2 ^ swap -> host x        (swap = cy1 ^ col0, the GS column swap)
+    cx3, cx4             -> nibble 1, 2
+    cy0                  -> host y
+    cy1                  -> nibble 0
+
+i.e. one host 32-bit word holds the texels `(x, x+8, x+16, x+24)` of two rows
+two apart. The same derivation with `cx4` dropped reproduces the shipping,
+eye-verified 8-bit permutation *exactly*, at every flagged size in the build
+including non-power-of-two widths -- that agreement is the reason to trust the
+4-bit result, which has no such prior.
+
+Checks, all of them re-run this session:
+
+* `LOGOTRACK*` (4-bit 256x128) now reads "Desert Heat", "Outback", "Alpine
+  Trail"; the 4-bit car skin atlases resolve into panels, lights and wheels.
+* flat-8x8-tile count over all 200 whole-page flagged 4-bit textures: winner
+  0.292, runners-up 0.264 / 0.251. Sharp, unlike neighbour-similarity scoring,
+  which session 4 had already found to be a dead end.
+* the column swap, which the tile test is blind to, settled separately by
+  horizontal continuity per `x % 8`: spread 0.242 with it vs 0.332 without,
+  the 8-bit control showing the same signature (0.091 vs 0.121).
+* geometry closes on all 809 flagged textures in the archive, no exceptions.
+
+### Consequence: 1,337 textures were being decoded wrong the *other* way
+
+The old converter guessed from the size (`w % 16`, `h % 16`) and so unswizzled
+1,337 textures that are plain raster -- DODGE_BADGE, the event flags, the
+small maps, every HUD pip. `texture_convert.py` now follows the flag:
+`--swizzle auto` (default) unswizzles exactly the flagged ones, `none` and
+`all` remain as escape hatches, and `--list` prints the flag and mip count.
+2,642 records across the archive; 809 flagged (426 4-bit, 383 8-bit), no
+32-bit ones. `CARS/TEXTURES.BIN` converts 772/772 with none skipped.
+
+### Next session
+
+1. **Task 16, the C side.** Nothing in the asset pipeline blocks the frontend
+   any more: Flailer describes the screens, the string tables give the text,
+   and every texture they reference now decodes. `source/bui.c` can start --
+   load the chunk, resolve texture/font hashes, draw layers 0..28 via citro2d.
+   The behaviour half (`FlailerMenu`/`FlailerMenuItem`, never on disc) still
+   needs the frontend C++ decompiled.
+2. **Mip levels.** Only the base level is emitted. The chain is understood now
+   (`0x52` array, `0x6e` count) so emitting or discarding it is a small job,
+   and the 3DS side will want mips.
+3. Task 10 leftovers: `0x00034005` VU1 geometry packets, `ENGINE.CTB`/`.LTB`.
+4. The `0xb0300100` TextureAnimPack sibling container (52-byte records,
+   scrolling/flipbook animations referencing textures by hash) is still
+   undecoded -- cheap now that the texture side is closed.

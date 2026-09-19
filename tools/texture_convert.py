@@ -31,16 +31,29 @@ GS memory with DPSM taken from `+0x4a` and TRXREG from `+0x24`/`+0x26`.
                      0 if it owns them -- palette-swapped variants (the four
                      driver bodies, the cop skins) share a single image
     +0x48  u8[4]     TW, TH, PSM, CPSM
-    +0x54  u8        TBW
+    +0x52  TextureImageInfo[7]   per mip level, from the .mdebug type info:
+                     {u16 TextureBasePointerOffset, u8 TextureBufferWidth,
+                      s8 Is32BitSwizzelled} -- so +0x54 is level 0's TBW and
+                     +0x55 is level 0's Is32BitSwizzelled
+    +0x6e  s8        NumMipMapLevels -- levels after the base, so 0 means one
 
 Palettes are RGBA8 with PS2 alpha (0x80 = opaque), stored linearly: the game
 uploads them to the GS verbatim and only ever calls `RemapLinearIntoClut8()`
 on palettes it builds at runtime (fog, focus, movie YUV), never on these.
 
-Pixel data is pre-swizzled into the PS2's texture layout. The 8-bit layout is
-confirmed -- the HUD speedometer dials come out with their "200 300 km/h"
-legends readable. The 4-bit one is NOT confirmed; see docs/formats/texture-pack.md.
-`--swizzle none` dumps either verbatim.
+Whether the pixels are swizzled is decided by that +0x55 flag -- bWare calls
+it `Is32BitSwizzelled`, which says what it is outright -- and
+`FillVramWithTextures` (0x001081f8) reads it at 0x0010850c:
+
+    flag == 0   upload with DPSM = PSM at the real size -- plain raster data
+    flag == 1   upload with DPSM = PSMCT32 at (width/2, height/2) for 8bpp or
+                (width/2, height/4) for 4bpp, and DBW = TBW/2 -- the file holds
+                a 32-bit image that the GS re-reads as PSMT8/PSMT4, i.e. the
+                pixels are pre-swizzled into GS page/block/column order
+
+So the "PS2 texture swizzle" here is not a property of the format but of the
+individual texture, and both readings are needed. See
+docs/formats/texture-pack.md for the layout the swizzled case unpicks.
 
 Mipmapped textures store the chain after the base level (data size is then
 4/3 of width*height*bpp/8); only the base level is emitted.
@@ -113,19 +126,40 @@ def textures(info):
          t["palette_size"]) = struct.unpack_from("<4I", info, r + 0x30)
         (t["shares_with"],) = struct.unpack_from("<I", info, r + 0x40)
         t["tw"], t["th"], t["psm"], t["cpsm"] = struct.unpack_from("<4B", info, r + 0x48)
-        (t["tbw"],) = struct.unpack_from("<B", info, r + 0x54)
+        # +0x52 is TextureImageInfo[7], one per mip level; +0x54/+0x55 are
+        # level 0's TextureBufferWidth and Is32BitSwizzelled.
+        (t["tbw"], t["is32bit_swizzled"]) = struct.unpack_from("<Bb", info, r + 0x54)
+        (t["levels"],) = struct.unpack_from("<b", info, r + 0x6E)
+        t["levels"] += 1                       # NumMipMapLevels excludes the base
         yield t
 
 
 # --- PS2 texture swizzle -------------------------------------------------
 #
-# GS memory is organised in 8KB pages of 32 blocks of 4 columns, and an 8-bit
-# texture laid into it ends up interleaved the way unswizzle_map8() undoes.
-# Reading it as a bit permutation of the linear address makes the structure
-# plain: bit0 <- y1, bit1 <- x3, bits 2..4 <- x0, x1, x2^y1^y2, then the rest
-# of x, then y0, y2, y3, then the rest of y. The `x2^y1^y2` term is the GS's
-# column swap; dropping it still leaves the image legible, but shifted in
-# alternating 4-row bands -- the usual sign of getting this wrong.
+# A flagged texture is uploaded as PSMCT32 and read back as PSMT8/PSMT4, so
+# the file holds a 32-bit raster `width/2` texels wide -- half as many rows
+# again for 8bpp, a quarter for 4bpp -- and the job is to work out where the
+# GS finds texel (x, y) inside it.
+#
+# GS memory is pages of 32 blocks of 4 columns, and each format tiles them
+# differently: a PSMCT32 page is 64x32 texels of 8x8 blocks, a PSMT8 page is
+# 128x64 of 16x16, a PSMT4 page is 128x128 of 32x16. Pages therefore line up
+# exactly, and so does the 8x4 block grid inside a PSMT8 page. A PSMT4 page's
+# block grid is 4x8, the *transpose* of PSMCT32's -- which is the one thing
+# that makes 4-bit differ in shape from 8-bit rather than just in scale.
+#
+# Inside a block, the source bits land like this (cx, cy are the coordinates
+# within the block, `col` = cy >> 2 the column, `swap` the GS column swizzle):
+#
+#     8bpp                            4bpp
+#     cx0, cx1, cx2^swap -> host x    cx0, cx1, cx2^swap -> host x
+#     cx3                -> byte 1    cx3, cx4           -> nibble 1, 2
+#     cy0                -> host y    cy0                -> host y
+#     cy1                -> byte 0    cy1                -> nibble 0
+#
+# so one host 32-bit word holds the 4bpp texels (x, x+8, x+16, x+24) of two
+# rows 2 apart. Dropping the `swap` term leaves the image recognisable but
+# torn into alternating 4-row bands -- the useful failure signature.
 
 _cache = {}
 
@@ -136,41 +170,54 @@ def unswizzle_map8(w, h):
     if key not in _cache:
         m = [0] * (w * h)
         for y in range(h):
-            band = (y & ~0xF) * w
-            swap = (((y + 2) >> 2) & 1) * 4
-            col = ((((y & ~3) >> 1) + (y & 1)) & 7) * w * 2 + ((y >> 1) & 1)
-            row = y * w
+            page_y, py = y >> 6, y & 63
+            block_y, cy = py >> 4, py & 15
+            col = cy >> 2
+            swap = ((cy >> 1) & 1) ^ (col & 1)
+            base = (page_y * 64 * w + block_y * 16 * w + col * 4 * w
+                    + (cy & 1) * 2 * w + ((cy >> 1) & 1))
             for x in range(w):
-                m[row + x] = (band + (x & ~0xF) * 2 + col
-                              + ((x + swap) & 7) * 4 + ((x >> 2) & 2))
+                page_x, px = x >> 7, x & 127
+                block_x, cx = px >> 4, px & 15
+                m[y * w + x] = (base + page_x * 256 + block_x * 32
+                                + ((cx >> 3) & 1) * 2
+                                + (cx & 1) * 4 + ((cx >> 1) & 1) * 8
+                                + (((cx >> 2) & 1) ^ swap) * 16)
         _cache[key] = m
     return _cache[key]
 
 
 def unswizzle_map4(w, h):
-    """dst linear index -> src *nibble* offset (byte * 2 + low/high), PSMT4.
-
-    UNVERIFIED. This is the 8-bit layout scaled to nibbles: it produces a
-    bijective mapping over exactly the right address range, but it does not
-    reconstruct recognisable art, so the real PSMT4 column order must differ.
-    Kept so the 4-bit path is at least deterministic and easy to correct;
-    `--swizzle none` is the honest fallback until it is solved.
-    """
+    """dst linear index -> src *nibble* offset (byte * 2 + low/high), PSMT4."""
     key = (4, w, h)
     if key not in _cache:
         m = [0] * (w * h)
         for y in range(h):
-            band = (y & ~0xF) * (w >> 1)
-            swap = (((y + 2) >> 2) & 1) * 4
-            col = ((((y & ~3) >> 1) + (y & 1)) & 7) * w
-            hi = (y >> 1) & 1
-            row = y * w
+            page_y, py = y >> 7, y & 127
+            block_y, cy = py >> 4, py & 15
+            col = cy >> 2
+            swap = ((cy >> 1) & 1) ^ (col & 1)
+            base = (page_y * 128 * w + col * 8 * w + (cy & 1) * 4 * w
+                    + block_y * 64 + ((cy >> 1) & 1))
             for x in range(w):
-                byte = (band + col + (x >> 5) * 32
-                        + ((x + swap) & 7) * 4 + ((x >> 3) & 3))
-                m[row + x] = byte * 2 + hi
+                page_x, px = x >> 7, x & 127
+                block_x, cx = px >> 5, px & 31
+                m[y * w + x] = (base + page_x * 512 + block_x * 32 * w
+                                + ((cx >> 3) & 1) * 2 + ((cx >> 4) & 1) * 4
+                                + (cx & 1) * 8 + ((cx >> 1) & 1) * 16
+                                + (((cx >> 2) & 1) ^ swap) * 32)
         _cache[key] = m
     return _cache[key]
+
+
+def geometry_closes(w, h, bpp):
+    """Can the swizzle be undone in closed form at this size?
+
+    The host raster has to be a whole number of PSMCT32 pages wide (64 texels,
+    so 128 of ours) and a whole number of blocks tall. Every flagged texture
+    in the build satisfies this; nothing else is expected to reach it.
+    """
+    return w % 128 == 0 and h % (64 if bpp == 8 else 128) == 0
 
 
 def read_palette(pal):
@@ -183,7 +230,7 @@ def read_palette(pal):
     return out, entries
 
 
-def decode(t, data, swizzle=True):
+def decode(t, data, swizzle="auto"):
     """Return (width, height, RGBA bytes) for one texture, or None if unsupported."""
     w, h, bpp = t["width"], t["height"], t["bpp"]
     if w == 0 or h == 0:
@@ -204,23 +251,21 @@ def decode(t, data, swizzle=True):
         return None
     rgba, entries = read_palette(pal)
 
-    # The block geometry only closes on 16x16 (8-bit) / 32x16 (4-bit)
-    # boundaries. Anything smaller -- HUD pips, 8x8 lens flares -- fits inside
-    # one block and is stored linearly, so fall back rather than reading off
-    # the end of the buffer.
+    # Only the textures flagged at +0x55 are swizzled; the rest are plain
+    # raster. `all` forces the unswizzle anyway, for checking a hunch.
+    unswizzle = (swizzle == "all"
+                 or (swizzle == "auto" and t["is32bit_swizzled"] == 1))
+    unswizzle = unswizzle and geometry_closes(w, h, bpp)
+
     if bpp == 8:
         if len(px) < w * h:
             return None
-        src = range(w * h)
-        if swizzle and w % 16 == 0 and h % 16 == 0:
-            src = unswizzle_map8(w, h)
+        src = unswizzle_map8(w, h) if unswizzle else range(w * h)
         idx = [px[a] for a in src]
     else:
         if len(px) * 2 < w * h:
             return None
-        src = range(w * h)
-        if swizzle and w % 32 == 0 and h % 16 == 0:
-            src = unswizzle_map4(w, h)
+        src = unswizzle_map4(w, h) if unswizzle else range(w * h)
         idx = [(px[a >> 1] >> ((a & 1) * 4)) & 0xF for a in src]
 
     out = bytearray(w * h * 4)
@@ -259,7 +304,10 @@ def main():
     ap.add_argument("file")
     ap.add_argument("out_dir", nargs="?")
     ap.add_argument("--list", action="store_true", help="print the table, convert nothing")
-    ap.add_argument("--swizzle", choices=("ps2", "none"), default="ps2")
+    ap.add_argument("--swizzle", choices=("auto", "none", "all"), default="auto",
+                    help="auto: unswizzle exactly the textures flagged at +0x55 "
+                         "(the default, and what the game does); none: dump the "
+                         "data as stored; all: unswizzle every paletted texture")
     a = ap.parse_args()
     if not a.list and not a.out_dir:
         ap.error("give an output directory, or --list")
@@ -275,17 +323,19 @@ def main():
         if a.list:
             print("== pack %r @0x%x: %d textures, %d bytes of pixel data =="
                   % (pack_name, off, len(info) // RECORD_SIZE, len(data)))
-            print("%-26s %5s %5s %4s %-8s %9s %8s %s"
-                  % ("name", "w", "h", "bpp", "psm", "data", "palette", "shares"))
+            print("%-26s %5s %5s %4s %-8s %9s %8s %4s %3s %s"
+                  % ("name", "w", "h", "bpp", "psm", "data", "palette",
+                     "swiz", "mip", "shares"))
         for t in textures(info):
             if a.list:
-                print("%-26s %5d %5d %4d %-8s %9d %8d %s"
+                print("%-26s %5d %5d %4d %-8s %9d %8d %4s %3d %s"
                       % (t["name"], t["width"], t["height"], t["bpp"],
                          PSM_NAMES.get(t["psm"], "0x%02x" % t["psm"]),
                          t["data_size"], t["palette_size"],
+                         "yes" if t["is32bit_swizzled"] == 1 else "no", t["levels"],
                          "%08x" % t["shares_with"] if t["shares_with"] else ""))
                 continue
-            got = decode(t, data, a.swizzle == "ps2")
+            got = decode(t, data, a.swizzle)
             if got is None:
                 print("skipped %s (%dx%d %dbpp)"
                       % (t["name"], t["width"], t["height"], t["bpp"]), file=sys.stderr)

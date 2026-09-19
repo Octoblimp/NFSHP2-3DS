@@ -52,8 +52,8 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         map pulled straight out of `LoaderTable`
         (`docs/formats/bchunk.md`, `tools/chunk_loader_table.py`,
         `tools/bchunk_dump.py`) and the `0xb0300001` GS texture pack --
-        container, the 164-byte `TextureInfo` record, the linear CLUT and the
-        PSMT8 swizzle (`docs/formats/texture-pack.md`), and the
+        container, the 164-byte `TextureInfo` record, the linear CLUT and
+        both GS swizzles (`docs/formats/texture-pack.md`), and the
         `.MSH`/`.MSB` sound banks -- `SOUND_MSH_HEADER_INFO` and
         `SOUND_PATCH_INFO` straight out of the `.mdebug` type info, over plain
         SPU ADPCM (`docs/formats/sound-bank.md`); the `0x80010200` Flailer UI
@@ -62,8 +62,8 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         and the `0x00039000` `LANGUAGES\FE_*.BIN` string tables that Flailer
         text objects resolve their `LanguageID` against
         (`docs/formats/language-table.md`, `tools/language_dump.py`).
-        Still open: the `0x00034005` VU1 geometry packets, the PSMT4 swizzle
-        (see task 12), and the `ENGINE.CTB`/`.LTB` engine crossfade tables.
+        Still open: the `0x00034005` VU1 geometry packets and the
+        `ENGINE.CTB`/`.LTB` engine crossfade tables.
         **Movies are not VP6**: `MOVIES\*.AVI` are RIFF/AVI with fourcc
         `MV30` (EA's MV3 codec, `MV3Codec`+`Huffman` in the ELF), 512x256.
         The `source/vp6/` decoder copied from NFSU2-3DS does not apply.
@@ -76,14 +76,22 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         deleted; the runtime decoder is now `3DS Files/source/lzc.c`.
 12. [~] Conversion tools. Done: `tools/texture_convert.py` -- walks any file
         (including nested `.BUN` bundles) for `0xb0300001` packs and writes one
-        PNG per texture, stdlib only. 8-bit and 32-bit textures decode
-        correctly (verified on the HUD dials and the car drop-shadows);
-        **4-bit (PSMT4) is unsolved and its output is wrong** -- 944 of the
-        1438 textures in this build are 4-bit, so closing this is the next
-        texture job. Everything ruled out so far is listed in
-        `docs/formats/texture-pack.md`; the likely fix is transcribing the GS
-        `blockTable4`/`columnWord4` tables instead of deriving from the 8-bit
-        case.
+        PNG per texture, stdlib only. **All three pixel formats now decode**,
+        including PSMT4. The key was that being swizzled is a property of the
+        individual texture, not of the format: byte `0x55` of the record is
+        `Is32BitSwizzelled` (bWare's own name, straight out of the `.mdebug`
+        `TextureImageInfo`), read by `FillVramWithTextures`, and when it is
+        set the texture is
+        uploaded as a PSMCT32 image half the width (and half or a quarter the
+        height) and read back as PSMT8/PSMT4. Working in that host image's
+        page/block/column space -- where a PSMT4 page's block grid is the
+        transpose of PSMCT32's -- gives the 4-bit map, and reproduces the
+        already-confirmed 8-bit one exactly. 809 of the 2642 texture records
+        in the archive are flagged; the other 1833 are plain raster and were
+        previously being unswizzled wrongly. Verified on the `LOGOTRACK*`
+        wordmarks (legible), the 4-bit car skin atlases, and two objective
+        tests over all 200 whole-page flagged 4-bit textures
+        (`docs/formats/texture-pack.md`).
         Also done: the runtime C decoder `3DS Files/source/lzc.c` / `lzc.h`,
         ported from `tools/lzdecompress.py`, replacing the inapplicable
         `jdlz.c`. Byte-identical to the Python reference on all 37 COMP files
