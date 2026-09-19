@@ -499,3 +499,11 @@ small maps, every HUD pip. `texture_convert.py` now follows the flag:
 4. The `0xb0300100` TextureAnimPack sibling container (52-byte records,
    scrolling/flipbook animations referencing textures by hash) is still
    undecoded -- cheap now that the texture side is closed.
+
+Housekeeping: the archive extract these sessions have been working from lives
+in a session scratchpad, not in the repo. Re-make it with
+`python tools/zdir_extract.py --decompress` into the gitignored `extracted/`
+before starting asset work. Only 13 files in it carry texture packs:
+`CARS\TEXTURES.BIN`, `GLOBAL\{HUDTEX,DRIVTEX,DYNTEX}.BIN`, the three
+`*B.BUN` bundles, `FRONTEND\{FRONTB.BUN,TSELECT.BIN}` and
+`TRACKS\TEX12*.BIN`.
