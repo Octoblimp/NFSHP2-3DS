@@ -1,0 +1,232 @@
+BasicInfo:
+  Title                   : "NFSHP2 3DS"
+  ProductCode             : "NFHP3DS"
+  Logo                    : Homebrew # Nintendo / Licensed / Distributed / iQue / iQueForSystem / Homebrew
+
+# No RomFs section -- the CIA ships as an engine/launcher only, with zero
+# bundled game data. Real game assets are read at runtime from an external
+# SD-card directory named by nfshp2_config.txt (DirectSdmc access below).
+
+TitleInfo:
+  Category                : Application
+  UniqueId                : 0xFF3FF # within the reserved Evaluation/Prototype range; one past NFSU2-3DS's 0xFF3FE so both can coexist on one SD card
+
+Option:
+  UseOnSD                 : true # install to SD card (via FBI)
+  FreeProductCode         : true # ProductCode above doesn't follow the retail CTR-P-XXXX pattern
+  MediaFootPadding        : false
+  EnableCrypt             : false
+  EnableCompress          : true
+
+AccessControlInfo:
+  CoreVersion                   : 2
+  DescVersion                   : 2
+  ReleaseKernelMajor            : "02"
+  ReleaseKernelMinor            : "33"
+
+  UseExtSaveData                : false
+
+  # Only what the current skeleton (gfx/citro3d/hid) plus the near-term asset
+  # pipeline (reading romfs/sdmc files) actually needs. Add more services here
+  # only when a concrete feature needs them (e.g. csnd:SND for audio, soc:U
+  # for netplay).
+  FileSystemAccess:
+   - DirectSdmc
+
+  MemoryType                    : Application
+  # 96MB (was 64MB) = the Old3DS "dev1" APPMEMTYPE, the largest APPLICATION
+  # region the console can grant. FCRAM is 128MB split three ways
+  # (APPLICATION / SYSTEM / BASE), and the system mode picks the split:
+  #   64MB "prod" : 64MB app / 44MB system / 20MB base   <- what this was
+  #   72MB "dev3" : 72MB app / 36MB system / 20MB base
+  #   80MB "dev2" : 80MB app / 28MB system / 20MB base
+  #   96MB "dev1" : 96MB app / 12MB system / 20MB base   <- now
+  # (sizes cross-checked against Azahar's own kernel/memory.cpp region table,
+  # which is where the emulator reproduces the hardware split.)
+  #
+  # The cost is the SYSTEM region, which is where the HOME Menu lives: at
+  # 12MB the HOME Menu cannot stay resident, so the console terminates it to
+  # launch us and firm-reboots back into it on exit. That means no HOME
+  # suspend/resume, no screenshots and no Miiverse/browser while running --
+  # this is the documented, retail-legitimate "extended memory mode" that
+  # Smash Bros. for 3DS, Monster Hunter 4/Generations and Pokemon Sun all
+  # ship with, not a dev-unit-only setting. Killing the HOME Menu for the
+  # RAM is the deliberate trade here.
+  #
+  # Only the CIA gets this: a .3dsx runs inside whichever host process
+  # launched it and inherits that process's memory grant, so the .3dsx build
+  # still sees whatever the Homebrew Launcher had.
+  SystemMode                    : 96MB
+  IdealProcessor                : 0
+  # 3 (was 1) = cores 0 and 1 both allowed, not just core0 -- needed so the
+  # Old3DS decode-worker thread (main.c's initPlatformPerf() / vp6_display.c,
+  # pinned to core0 there via APT_SetAppCpuTimeLimit) is actually permitted
+  # to run alongside the main thread instead of being restricted to whatever
+  # single core AffinityMask allowed before.
+  AffinityMask                  : 3
+  Priority                      : 16
+  # Raised from 0: ceiling for APT_SetAppCpuTimeLimit(), which
+  # initPlatformPerf() calls (requesting 80) so the Old3DS decode-worker
+  # thread gets real time on core0 instead of the call being a no-op.
+  MaxCpu                        : 80
+  HandleTableSize               : 0x200
+  DisableDebug                  : false
+  EnableForceDebug               : false
+  CanWriteSharedPage            : true
+  CanUsePrivilegedPriority      : false
+  CanUseNonAlphabetAndNumber    : true
+  PermitMainFunctionArgument    : true
+  CanShareDeviceMemory          : true
+  RunnableOnSleep               : false
+  SpecialMemoryArrange          : true
+
+  # 178MB (was Legacy) = the New3DS extended APPMEMTYPE. New3DS has 256MB of
+  # FCRAM and its own two-entry split table, consulted only when running on a
+  # New3DS (Legacy meant "fall back to the Old3DS SystemMode above", i.e. the
+  # extra 128MB of New3DS RAM went unused):
+  #   Legacy : uses the Old3DS split above
+  #   124MB  : 124MB app / 100MB system / 32MB base
+  #   178MB  : 178MB app /  46MB system / 32MB base   <- now
+  # This is the same per-model mechanism as CpuSpeed/EnableL2Cache/
+  # CanAccessCore2 below: both fields ship in the ExHeader and the kernel
+  # picks by console, so one build still boots on both models and there is no
+  # New3DS exclusivity implied.
+  #
+  # 178MB leaves 46MB of SYSTEM -- slightly *more* than the 44MB the old 64MB
+  # "prod" mode left -- so on New3DS this costs nothing that mode did not
+  # already cost, beyond the HOME Menu itself (178MB terminates it for the
+  # same reason 96MB does on Old3DS).
+  SystemModeExt                 : 178MB
+  # 804MHz (was 268MHz) + EnableL2Cache true: requests the New3DS "CPU Speed"
+  # and "Enable L2 Cache" ExHeader flags. Actually taking effect at runtime
+  # still requires osSetSpeedupEnable(true) after checking APT_CheckNew3DS()
+  # (see main.c's initPlatformPerf()) -- these flags only grant the
+  # permission, matching the documented ExHeader mechanism for New3DS
+  # speedup. No effect on Old3DS (falls back to the base 268MHz clock).
+  CpuSpeed                      : 804MHz
+  EnableL2Cache                 : true
+  # Grants access to core2, a real dedicated extra CPU core on New3DS only
+  # (in addition to core0/core1 covered by AffinityMask above), used by the
+  # VP6 decode worker thread (vp6_display.c) so it runs on a genuinely
+  # separate core from the main render/audio/input thread rather than
+  # sharing time with it.
+  CanAccessCore2                 : true
+
+  # IORegisterMapping (added session 22 continued, 2026-08-30): the DSP's two
+  # 0x8000-byte shared-memory areas at 0x1FF50000/0x1FF70000 (used by
+  # ndspSetCounter/DSP_SetSemaphore for the real-time semaphore/counter
+  # handshake with the DSP coprocessor) are NOT reachable via the dsp::DSP
+  # service permission or dspfirm.cdc alone -- they're a static physical
+  # memory mapping the kernel only grants if the ExHeader explicitly lists
+  # this range, exactly like VRAM below. Missing this is what caused BOTH
+  # real-hardware crash attempts (data abort, translation fault/page --
+  # entirely unmapped -- write, FAR square in this range e.g. 0x1ff57ffe),
+  # even after fixing dsp::DSP and confirming dspfirm.cdc was dumped/rebooted.
+  # Azahar's DSP HLE never touches real shared memory for this, so it could
+  # never have caught this class of bug either. Confirmed via a working
+  # reference (devkitPro sm64-port's 3ds/template.rsf) using the identical
+  # "1ff00000-1ff7ffff (DSP memory)" range.
+  IORegisterMapping:
+   - 1ff00000-1ff7ffff # DSP memory
+
+  MemoryMapping:
+   - 1f000000-1f5fffff:r # VRAM
+
+  SystemCallAccess:
+    ArbitrateAddress: 34
+    Break: 60
+    CancelTimer: 28
+    ClearEvent: 25
+    ClearTimer: 29
+    CloseHandle: 35
+    ConnectToPort: 45
+    ControlMemory: 1
+    CreateAddressArbiter: 33
+    CreateEvent: 23
+    CreateMemoryBlock: 30
+    CreateMutex: 19
+    CreateSemaphore: 21
+    CreateThread: 8
+    CreateTimer: 26
+    DuplicateHandle: 39
+    ExitProcess: 3
+    ExitThread: 9
+    GetCurrentProcessorNumber: 17
+    GetHandleInfo: 41
+    GetProcessId: 53
+    GetProcessIdOfThread: 54
+    GetProcessIdealProcessor: 6
+    GetProcessInfo: 43
+    GetResourceLimit: 56
+    GetResourceLimitCurrentValues: 58
+    GetResourceLimitLimitValues: 57
+    GetSystemInfo: 42
+    GetSystemTick: 40
+    GetThreadContext: 59
+    GetThreadId: 55
+    GetThreadIdealProcessor: 15
+    GetThreadInfo: 44
+    GetThreadPriority: 11
+    MapMemoryBlock: 31
+    OutputDebugString: 61
+    QueryMemory: 2
+    ReleaseMutex: 20
+    ReleaseSemaphore: 22
+    SendSyncRequest1: 46
+    SendSyncRequest2: 47
+    SendSyncRequest3: 48
+    SendSyncRequest4: 49
+    SendSyncRequest: 50
+    SetThreadPriority: 12
+    SetTimer: 27
+    SignalEvent: 24
+    SleepThread: 10
+    UnmapMemoryBlock: 32
+    WaitSynchronization1: 36
+    WaitSynchronizationN: 37
+    Backdoor: 123
+
+  # Services actually used by libctru's gfx/C3D/hid init in the current
+  # skeleton, plus cfg/ac/ndm/ptm which those transitively require at startup.
+  # dsp::DSP added session 22 (2026-08-30): main.c calls ndspInit()/
+  # DSP_FlushDataCache for the real boot-movie audio, but this permission was
+  # missing -- Azahar doesn't enforce ExHeader ServiceAccessControl strictly,
+  # so it never surfaced in emulator testing, but on real hardware it left the
+  # DSP process's shared memory unmapped, which crashed with a data abort
+  # (translation fault, write) at a fault address squarely in the DSP shared
+  # memory region, right after config load and before C3D_Init -- exactly
+  # where ndspInit() runs. First real-hardware boot ever attempted for this
+  # project caught it.
+  ServiceAccessControl:
+   - cfg:u
+   - gsp::Gpu
+   - hid:USER
+   - APT:U
+   - ac:u
+   - ndm:u
+   - ptm:u
+   - dsp::DSP
+
+SystemControlInfo:
+  SaveDataSize: 0KB
+  RemasterVersion: 0
+  # 256KB, not the 16KB this started at. The frontend loader chain --
+  # loadFngScreen() (25868B frame) -> texpack_load() -> scan_containers()
+  # -> parse_container() (8776B frame) -- needs ~35KB, so on a 16KB stack it
+  # ran off the bottom and silently scribbled over whatever sat below it.
+  # It did not crash: parse_container() just came back with garbage locals and
+  # reported zero textures, so every .fng screen drew untextured (black) while
+  # the very same texpack_load() call from main() at startup -- only ~12KB
+  # deep, so still inside the stack -- scanned all 211 textures fine.
+  StackSize: 0x40000
+
+  # Modules backing the services above.
+  Dependency:
+    ac: 0x0004013000002402
+    am: 0x0004013000001502
+    cfg: 0x0004013000001702
+    gsp: 0x0004013000001c02
+    hid: 0x0004013000001d02
+    ndm: 0x0004013000002b02
+    pdn: 0x0004013000002102
+    ptm: 0x0004013000002202
