@@ -26,3 +26,6 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Cross-check transcripts (tools/*_check.py --keep writes these side by side)
+/py.*.txt

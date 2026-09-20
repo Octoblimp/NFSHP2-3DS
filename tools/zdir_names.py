@@ -62,6 +62,15 @@ KNOWN = {
     "SOUND" + B + "FRONTEND.MSB", "SOUND" + B + "FRONTEND.MSH",
     "SOUND" + B + "INGAME.MSB", "SOUND" + B + "INGAME.MSH",
     "HOTCHUNK.TAG",
+    # Authoring leftovers, not referenced by the ELF at all. Found by testing
+    # a vocabulary against the hash rather than by brute force: the five .TXT
+    # files are the art punch-lists that pair with MARKERS\MARKERS<nn>.BIN
+    # (same nn set: 11, 12, 21, 22, 32), and KEY.TXT is the 130-byte
+    # "x<128 hex digits>x" line that sits between IRX243\ and LANGUAGES\.
+    "MARKERS" + B + "TRACK11.TXT", "MARKERS" + B + "TRACK12.TXT",
+    "MARKERS" + B + "TRACK21.TXT", "MARKERS" + B + "TRACK22.TXT",
+    "MARKERS" + B + "TRACK32.TXT",
+    "KEY.TXT",
 }
 # Per-car engine sample banks: SOUND\NEWE<code>.MSB / .MSH
 for _code in ("348 360 360D 911 993 BMW BMW2 BRU BXR CAM CSS CTR CVC DNF GTI "

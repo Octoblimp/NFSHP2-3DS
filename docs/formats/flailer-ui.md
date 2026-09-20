@@ -142,6 +142,40 @@ before appending the object's strip to that layer's list;
 9 is skipped). `SortFlailerObjectFunction` (`0x00144258`) orders by the same
 byte ascending.
 
+### Layer draw order
+
+Higher `Z` is *further back*, and the order is not a plain sweep.
+`eDisplayFrame` (`0x00112858`) calls `RenderLayer` from four separate loops,
+and every one of them counts **down**:
+
+| loop | layers | where in the frame |
+|------|--------|--------------------|
+| `0x00112b58` | 24 -> 20 | before the world, into the render targets |
+| `0x00113680` | 15 -> 0  | the main pass |
+| `0x001136c0` | 19 -> 16 | |
+| `0x00113708` | 28 -> 25 | last, so 25 ends up frontmost of all |
+
+Flattened, back to front:
+
+```
+24 23 22 21 20  15 14 13 .. 2 1 0  19 18 17 16  28 27 26 25
+```
+
+The four ranges cover 0..28 exactly once, which is how you know there is no
+fifth loop hiding somewhere. Each loop looks like this -- the decrement and
+the `slti` bound are the whole story:
+
+```
+001136ec  addiu  s0,s0,-1
+001136f0  slti   v0,s0,16
+001136f4  beq    v0,zero,0x001136c0
+```
+
+This matters: `NEW_MAIN_MENU` puts its 512x384 backgrounds at Z 7..10 and
+the title logo at Z 0. Draw the layers ascending and the backgrounds bury
+the menu. Within one layer the file order *is* the draw order, because
+`AddFlailerStrip` appends to the tail of that layer's list.
+
 ## `FlailerBitmapChunk`, 120 bytes
 
 Continues the object header at offset 56.
@@ -228,11 +262,13 @@ Combinations actually used: `0x02` (689), `0x04` (180), `0x4a`
 
 ### Fonts
 
-`FontHash` is matched against `tTTFontHeader::mHashID`, at offset 8 of each
-`0x00030200` font chunk -- `FindFont` (`0x0013db08`) is a linear walk of the
-loaded font list comparing that word. There is no name string in the font
-chunk, but every font's glyph sheet is a texture of the same name in the
-texture pack, so all ten fonts in use resolve for free:
+`FontHash` is matched against `tTTFontHeader::mHashID`, the first word of
+each **`0x00015010`** font chunk's payload -- `FindFont` (`0x0013db08`) is a
+linear walk of the loaded font list comparing that word. (`LoaderFontInfo`
+also accepts `0x00030200` and then does nothing with it; no chunk of that
+type exists on this disc. Layout in `docs/formats/bchunk.md`.) There is no
+name string in the font chunk, but every font's glyph sheet is a texture of
+the same name in the texture pack, so all ten fonts in use resolve for free:
 
 | font | text objects |
 |------|-------------:|
@@ -252,6 +288,98 @@ index `Font.CharacterLookupTable[c]`, take the float at `+20` of the glyph
 record, sum, multiply by `ScaleX`. It measures the *translated* string when
 `LanguageID` is set, which is why justification stays correct across
 languages.
+
+## Drawing a screen
+
+The layout is data; these are the parts of the *behaviour* that a
+reimplementation has to copy or the screens come out wrong.
+
+### Bitmap size
+
+`RenderSingleFlailerBitmap` (`0x00140538`) ignores the UV rectangle when
+sizing the quad. It takes the width and height from the resolved
+`TextureInfo` and truncates:
+
+```
+w = (int)(TextureInfo.Width  * ScaleX)
+h = (int)(TextureInfo.Height * ScaleY)
+```
+
+The UVs only pick which part of the sheet is sampled. Every UV rect on disc
+is axis-aligned, so the four corners collapse to a min/max box, but
+`GouradColors` really is per-corner and the engine interpolates it.
+
+### Glyph metrics, including the shipped bug
+
+`RenderCharacter` (`0x0013f698`) multiplies the glyph's width by `ScaleX`
+**twice** -- `mul.s` at `0x0013f750` and again at `0x0013f794` -- while the
+height is scaled once and the pen advances once. The raw instruction words
+were decoded by hand to rule out a disassembler artifact. It is a bug, but
+the screens were authored against it, so a port has to reproduce it:
+
+```
+glyphW = Width  * ScaleX * ScaleX
+glyphH = Height * ScaleY
+penX  += Advance * ScaleX
+```
+
+Measurement is unaffected: `GetScaledWidth` sums the advances and scales
+once, so justification uses the honest width.
+
+### Fixed width
+
+`RenderStringFixedWidth` (`0x0013fb78`) gives every character a cell of
+`Font::FixedWidthCell` and centres the glyph in it:
+
+```
+inset = (FixedWidthCell - Advance) * 0.5      // added to an already-scaled pen
+penX += FixedWidthCell * ScaleX
+```
+
+`FixedWidthCell` is not stored in the font chunk; `Font::Font`
+(`0x0013dd60`) computes it as `GetWidestCharacter(this, "1234567890:- ")` --
+the widest `mAdvance` among those thirteen characters. That is what makes
+lap times and scores line up as they count.
+
+`ColonCrapola`, a gp-relative global, would give `:` and `.` their own
+proportional advance instead. It is 0 in initialised data and nothing on
+this disc writes it, so that path is dead. The other three globals the
+renderer reads -- `KerningEnabled`, `RenderFixedWidthStrings`,
+`TranslationEnable` -- are all 1 and likewise never written.
+
+### Help characters
+
+Bytes `0x80`..`0x91` in a string are button icons, not text.
+`RenderHelpCharacter` (`0x0013f9b8`) hashes `"BUTTONSOUT"`, calls `FindFont`,
+and indexes an 18-byte table at `0x002e8a10` to get the glyph to draw:
+
+```
+0x80..0x91 -> 'a' 'b' 'd' 'e' 'f' 'g' 'i' 'j' 'h' 'k' 'n' 'o' 'l' 'm' 'c' 'c' 'c' 'c'
+```
+
+The last four all map to `'c'`. The glyph comes from `BUTTONSOUT` regardless
+of the text object's own `FontHash`, and the pen advances by that glyph's
+advance.
+
+## The port
+
+`3DS Files/source/bui.[ch]` parses the format; `3DS Files/source/uirender.c`
+draws it with citro2d. Everything above is implemented there, including the
+`ScaleX`-squared bug. Textures come from `texpack.c`, fonts from `bfont.c`,
+strings from `langtab.c`.
+
+`tools/flailer_render.py` is the same renderer in pure Python, compositing a
+screen to a PNG with no dependencies. It exists to check the port by eye and
+to make the format falsifiable: if a screen does not come out looking like
+the game, something above is wrong. `tools/bui_check.py` does the exact
+check, diffing `bui.c`'s parse against `flailer_dump.py` -- 2,331 lines
+across the three bundles, 0 differ.
+
+```
+python3 tools/flailer_render.py extracted/FRONTEND/FRONTB.BUN 0 \
+        --also extracted/GLOBAL/GLOBALB.BUN \
+        --language extracted/LANGUAGES/FE_ENGLISH.BIN -o menu.png
+```
 
 ## Names
 
@@ -283,13 +411,19 @@ and the uppercase-plus-underscore alphabet these names use makes it cheap.
 | `Render__16FlailerTextChunkP8bVector2T1f` | `0x0013ff40` | the text renderer |
 | `RenderSingleFlailerBitmap__20FlailerRenderManager...` | `0x00140538` | the bitmap renderer |
 | `FindFont__Fi` | `0x0013db08` | font hash lookup |
+| `LoaderFontInfo__FP6bChunk` | `0x0013db58` | parses the `0x00015010` font chunk |
 | `GetScaledWidth__16FlailerTextChunk` | `0x0013e8b0` | text measurement |
 | `FlailerSetScreenVisibility__FUi23FlailerScreenVisibility` | | show/hide by hash |
 | `FlailerSetGroupVisibility__Fiii` | | show/hide by `GroupHash` |
 
 `FlailerMenu`, `FlailerMenuItem`, `FlailerScreen` and `FlailerSlider` are all
 in the type info but **never appear on disc** -- menus are assembled in code
-from the objects a screen already contains (`FlailerMenuItem` holds
-`Highlight`/`UnHighlight` callbacks and an `AlignBar` that moves a
-`FlailerBitmapChunk`). So a reimplementation needs this format for the
-*layout* and the frontend C++ for the *behaviour*.
+from the objects a screen already contains. So a reimplementation needs this
+format for the *layout* and the frontend C++ for the *behaviour*.
+
+That behaviour is now decompiled and written up separately, in
+[flailer-menu.md](flailer-menu.md): a menu is the screen's text objects
+called `MENUITEM_0` through `MENUITEM_15`, navigation recolours them in
+place through `SetColor__16FlailerTextChunk`, and `AlignBar` turns out to be
+dead code -- no bundle on the disc contains the `HIGHLIGHT_BAR` object it
+would move.

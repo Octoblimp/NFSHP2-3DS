@@ -93,7 +93,7 @@
  89 03be79a1   36930       6553 ondisc    IRX243\SIO2MAN.IRX
  90 ed3af694   36934     282068 ondisc    IRX243\STREAM.IRX
  91 1d724c16   37072      34873 ondisc    IRX243\USBD.IRX
- 92 48671a56   37090        130 -         ?
+ 92 48671a56   37090        130 cracked   KEY.TXT
  93 0e1049ed   37091      82368 literal   LANGUAGES\FE_ENGLISH.BIN
  94 0ce74979   37132      85300 literal   LANGUAGES\FE_FRENCH.BIN
  95 d4bff1fd   37174      84756 literal   LANGUAGES\FE_GERMAN.BIN
@@ -107,11 +107,11 @@
 103 97bc65ef   37408       1568 template  MARKERS\MARKERS21.BIN
 104 97ce7e70   37409       1280 template  MARKERS\MARKERS22.BIN
 105 9a23a711   37410         16 template  MARKERS\MARKERS32.BIN
-106 406cb595   37411       4775 -         ?
-107 407ece16   37414       3910 -         ?
-108 42c1de36   37416       7267 -         ?
-109 42d3f6b7   37420       4501 -         ?
-110 45291f58   37423         54 -         ?
+106 406cb595   37411       4775 cracked   MARKERS\TRACK11.TXT
+107 407ece16   37414       3910 cracked   MARKERS\TRACK12.TXT
+108 42c1de36   37416       7267 cracked   MARKERS\TRACK21.TXT
+109 42d3f6b7   37420       4501 cracked   MARKERS\TRACK22.TXT
+110 45291f58   37423         54 cracked   MARKERS\TRACK32.TXT
 111 34073f4d   37424     955904 literal   MOVIES\INTRO\EALOGO_EN.AVI
 112 313e6330   37891         10 -         ?
 113 5986d8a5   37892      61048 literal   NFS6.ICO

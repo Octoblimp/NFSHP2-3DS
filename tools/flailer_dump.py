@@ -181,6 +181,29 @@ def parse(data, off, size):
 
 # -- name resolution ---------------------------------------------------------
 
+# Numbered objects are never spelled out: the frontend builds the name with
+# bSPrintf and hashes the result, so the ELF holds `MENUITEM_%d` and the
+# chunk holds sixteen unrelated-looking hashes. Expanding one integer
+# conversion over a small range recovers all of them. 32 is generous --
+# `FlailerMenu` itself stops looking at 16.
+_FORMAT = re.compile(r"^([^%]*)%(0?[0-9]?)[di]([^%]*)$")
+
+
+def _expand(s, limit=32):
+    m = _FORMAT.match(s)
+    if not m:
+        return
+    head, flag, tail = m.groups()
+    for n in range(limit):
+        if flag.startswith("0") and len(flag) > 1:
+            body = str(n).rjust(int(flag[1:]), "0")
+        elif flag:
+            body = str(n).rjust(int(flag))
+        else:
+            body = str(n)
+        yield head + body + tail
+
+
 def elf_names(path):
     """Every printable run in the ELF, as {hash: name}. Screen, object, font
     and callback names are all string literals in the frontend code."""
@@ -193,6 +216,8 @@ def elf_names(path):
         s = m.group().decode("latin-1")
         for cand in (s, s.upper()):
             out.setdefault(bhash(cand), cand)
+            for grown in _expand(cand):
+                out.setdefault(bhash(grown), grown)
     return out
 
 

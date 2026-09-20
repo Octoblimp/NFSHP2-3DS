@@ -76,7 +76,17 @@ therefore starts with the negative hashes.
 * **`HashEngTable`** is keyed by `bStringHash()` of the English text itself
   (case-sensitive, verified against all 1,896 entries), so code holding an
   English literal can look up its translation without knowing an ID. It has
-  1,403 entries rather than 1,896 because duplicate English strings collapse.
+  1,896 entries too, but only 1,403 distinct keys: 1,403 distinct strings
+  carry 1,896 IDs, and a string used under several IDs is stored once per ID
+  and listed once per copy, so 205 keys repeat.
+
+  **Do not port a lookup onto this table.** Duplicate keys are harmless in
+  `FE_ENGLISH.BIN`, where every copy is the same string by construction, but
+  translations are context-sensitive: in `FE_FRENCH.BIN` 55 English hashes
+  reach two or more *different* French strings (`Modifier le paramètre` vs
+  `Modifier un paramètre`; `E3_HP1_TITLE` vs `Livraison de la Lotus Elise`).
+  A binary search returns whichever copy it lands on. The ID table is the
+  authoritative one and is strictly ascending with no duplicates at all.
 
 One wrinkle worth knowing before porting `GetString`: it picks the table from
 its `bool` argument but takes the entry count from `NumIDEntries` either way,
@@ -96,3 +106,22 @@ every file on this disc, so the bug is latent.
 `LanguageManager` is `{bTList LoadedLanguages; LanguageDescription
 *CurrentLanguageDescription; e_Languages CurrLanguage;}` -- several languages
 can be resident at once and `SetCurrLanguage` swaps the active description.
+
+## The port
+
+`3DS Files/source/langtab.c` is the handheld's reader: `langtab_parse()` over
+a `0x00039000` payload, then `langtab_get(id)` / `langtab_copy(id, buf, cap)`.
+It repeats `GetString`'s signed binary search but takes each table's own
+count rather than reproducing the `NumIDEntries` bug, and it clamps the last
+string at `TextTableSize` rather than scanning for a NUL.
+
+`tools/langtab_check.py` builds it for the host and diffs every string
+against `language_dump.py`: **all 1,896 IDs in all eight files agree** (15,168
+strings), as do all 1,403 distinct English hashes in `FE_ENGLISH.BIN`.
+
+One offset trap worth restating, because the table above is written from the
+chunk header: the *payload* a reader is handed starts 8 bytes later, so
+`LanguageEnum` is at payload+72 and the arrays begin at payload+100, not 80
+and 108. `LanguageDescription` is exactly 100 bytes -- `bNode`(8) +
+`FileName[64]` + `LanguageEnum`(4) + three counts(12) + three dead
+pointers(12) -- which is the arithmetic to check a port against.

@@ -32,7 +32,31 @@ powershell -ExecutionPolicy Bypass -File tools/build_cia.ps1
 Requires `DEVKITPRO`/`DEVKITARM` set up (standard devkitPro 3DS install).
 Produces `3DS Files/NFSHP2-3DS.3dsx` and `.cia`.
 
+## Preparing the data
+
+The `.cia`/`.3dsx` ships engine-only -- the extracted disc is 273 MB, so the
+game reads it off the SD card. Extract the archive, then bake the intro movie:
+
+```powershell
+python tools/zdir_extract.py "PS2 Files/ZDIR.BIN" "PS2 Files/ZZDATA.BIN" extracted/ --decompress
+python tools/video_extract.py extracted/MOVIES/INTRO/EALOGO_EN.AVI out/
+python tools/movie_bake.py out/EALOGO_EN extracted/MOVIES/INTRO/EALOGO_EN.M3V
+```
+
+`video_extract.py` decodes MV3 by running the PS2's own decoder under an
+emulator, which costs about five seconds a frame -- 90 frames, so give it
+seven minutes. It only has to happen once.
+
+Copy `extracted/` to the SD card as `sdmc:/3ds/NFSHP2-3DS/data` or
+`sdmc:/NFSHP2`, or point `nfshp2_config.txt` at wherever you put it. Only
+`GLOBAL/`, `FRONTEND/`, `LANGUAGES/` and `MOVIES/INTRO/EALOGO_EN.M3V` are
+needed to reach the main menu -- about 22 MB.
+
 ## Status
 
-Phase 0 (project scaffolding) in progress: build skeleton boots to a
-diagnostic stub screen. See `TASKS.md` for current phase and next steps.
+Phase 2 (boot flow and frontend menus) complete: the port boots the way the
+PS2 game boots -- `BootAutoload`, the title screen with the EA logo movie
+playing into its movie plane, `PRESS START`, then the main menu, navigable on
+the D-pad, with the real textures, fonts and translated strings in any of the
+eight shipped languages. See `TASKS.md` for the current phase and
+`HANDOFF.md` for how each format was cracked.

@@ -41,6 +41,7 @@ OPS = {
     0x0c: "andi", 0x0d: "ori", 0x0e: "xori", 0x0f: "lui",
     0x14: "beql", 0x15: "bnel", 0x16: "blezl", 0x17: "bgtzl",
     0x18: "daddi", 0x19: "daddiu", 0x1a: "ldl", 0x1b: "ldr",
+    0x1e: "lq", 0x1f: "sq",
     0x20: "lb", 0x21: "lh", 0x22: "lwl", 0x23: "lw", 0x24: "lbu",
     0x25: "lhu", 0x26: "lwr", 0x27: "lwu", 0x28: "sb", 0x29: "sh",
     0x2a: "swl", 0x2b: "sw", 0x2c: "sdl", 0x2d: "sdr", 0x2e: "swr",
@@ -61,6 +62,60 @@ SPECIAL = {
     0x2f: "dsubu", 0x38: "dsll", 0x3a: "dsrl", 0x3b: "dsra",
     0x3c: "dsll32", 0x3e: "dsrl32", 0x3f: "dsra32",
 }
+# MMI (opcode 0x1c), the EE's 128-bit multimedia set. funct -> mnemonic,
+# except for the four sub-class escapes MMI0/1/2/3, which are dispatched on
+# the `sa` field. Only the integer ops matter here; the codec uses the second
+# multiplier pipeline (mult1/mfhi1/mflo1) to overlap its IDCT multiplies.
+MMI = {
+    0x00: "madd", 0x01: "maddu", 0x04: "plzcw",
+    0x08: "MMI0", 0x09: "MMI2", 0x28: "MMI1", 0x29: "MMI3",
+    0x10: "mfhi1", 0x11: "mthi1", 0x12: "mflo1", 0x13: "mtlo1",
+    0x18: "mult1", 0x19: "multu1", 0x1a: "div1", 0x1b: "divu1",
+    0x20: "madd1", 0x21: "maddu1",
+    0x30: "pmfhl", 0x31: "pmthl",
+    0x34: "psllh", 0x36: "psrlh", 0x37: "psrah",
+    0x3c: "psllw", 0x3e: "psrlw", 0x3f: "psraw",
+}
+MMI0 = {
+    0x00: "paddw", 0x01: "psubw", 0x02: "pcgtw", 0x03: "pmaxw",
+    0x04: "paddh", 0x05: "psubh", 0x06: "pcgth", 0x07: "pmaxh",
+    0x08: "paddb", 0x09: "psubb", 0x0a: "pcgtb",
+    0x10: "paddsw", 0x11: "psubsw", 0x12: "pextlw", 0x13: "ppacw",
+    0x14: "paddsh", 0x15: "psubsh", 0x16: "pextlh", 0x17: "ppach",
+    0x18: "paddsb", 0x19: "psubsb", 0x1a: "pextlb", 0x1b: "ppacb",
+    0x1e: "pext5", 0x1f: "ppac5",
+}
+MMI1 = {
+    0x01: "pabsw", 0x02: "pceqw", 0x03: "pminw",
+    0x04: "padsbh", 0x05: "pabsh", 0x06: "pceqh", 0x07: "pminh",
+    0x0a: "pceqb",
+    0x10: "padduw", 0x11: "psubuw", 0x12: "pextuw",
+    0x14: "padduh", 0x15: "psubuh", 0x16: "pextuh",
+    0x18: "paddub", 0x19: "psubub", 0x1a: "pextub", 0x1b: "qfsrv",
+}
+MMI2 = {
+    0x00: "pmaddw", 0x02: "psllvw", 0x03: "psrlvw", 0x04: "pmsubw",
+    0x08: "pmfhi", 0x09: "pmflo", 0x0a: "pinth", 0x0c: "pmultw",
+    0x0d: "pdivw", 0x0e: "pcpyld",
+    0x10: "pmaddh", 0x11: "phmadh", 0x12: "pand", 0x13: "pxor",
+    0x14: "pmsubh", 0x15: "phmsbh", 0x1a: "pexeh", 0x1b: "prevh",
+    0x1c: "pmulth", 0x1d: "pdivbw", 0x1e: "pexew", 0x1f: "prot3w",
+}
+MMI3 = {
+    0x00: "pmadduw", 0x03: "psravw", 0x08: "pmthi", 0x09: "pmtlo",
+    0x0a: "pinteh", 0x0c: "pmultuw", 0x0d: "pdivuw", 0x0e: "pcpyud",
+    0x12: "por", 0x13: "pnor", 0x1a: "pexch", 0x1b: "pcpyh",
+    0x1e: "pexcw",
+}
+MMI_SUB = {"MMI0": MMI0, "MMI1": MMI1, "MMI2": MMI2, "MMI3": MMI3}
+# these take rd only, or rs only, rather than the usual rd,rs,rt
+MMI_RD_ONLY = ("mfhi1", "mflo1", "pmfhi", "pmflo")
+MMI_RS_ONLY = ("mthi1", "mtlo1", "pmthi", "pmtlo")
+MMI_SHIFT = ("psllh", "psrlh", "psrah", "psllw", "psrlw", "psraw")
+# and these leave rs unused: they only rearrange rt into rd
+MMI_RD_RT = ("pcpyh", "pabsw", "pabsh", "prevh", "pexeh", "pexew",
+             "pexch", "pexcw", "prot3w", "pext5", "ppac5")
+
 # REGIMM (opcode 1) rt -> mnemonic
 REGIMM = {0x00: "bltz", 0x01: "bgez", 0x02: "bltzl", 0x03: "bgezl",
           0x10: "bltzal", 0x11: "bgezal", 0x12: "bltzall", 0x13: "bgezall"}
@@ -106,8 +161,28 @@ class Elf(object):
                 n = d[p:d.index(b"\0", p)].decode("latin-1")
                 if n:
                     self.syms[n] = (val, size)
-                    self.by_addr.setdefault(val, n)
+                    if self._better(val, n, size):
+                        self.by_addr[val] = n
         self.sorted_syms = sorted((v, k) for k, (v, _s) in self.syms.items())
+
+
+    # Every compilation unit emits a zero-sized marker -- `gcc2_compiled.`,
+    # `__gnu_compiled_cplusplus`, and the source file name itself -- at the
+    # address of its first function. Taking the first symbol at an address
+    # therefore labels real calls `gcc2_compiled.`, which is how
+    # `bStringHash` and `bList::GetNode` hid inside FlailerMenu for a whole
+    # session. Prefer a named, sized symbol over a marker.
+    _MARKERS = ("gcc2_compiled.", "__gnu_compiled_c", "__gnu_compiled_cplusplus")
+
+    def _better(self, addr, name, size):
+        cur = self.by_addr.get(addr)
+        if cur is None:
+            return True
+        def rank(n, sz):
+            if n in self._MARKERS or "\\" in n or "/" in n or n.endswith((".c", ".s", ".cpp")):
+                return 0
+            return 2 if sz else 1
+        return rank(name, size) > rank(cur, self.syms[cur][1])
 
     def read(self, addr, n):
         for s in self.secs:
@@ -183,6 +258,43 @@ def _fpu(w):
     return "%-6s $f%d,$f%d,$f%d" % (name + "." + fmt, fd, fs, ft)
 
 
+def _mmi(w):
+    """One MMI (opcode 0x1c) word -> text."""
+    rs, rt, rd = (w >> 21) & 31, (w >> 16) & 31, (w >> 11) & 31
+    sa, fn = (w >> 6) & 31, w & 63
+    name = MMI.get(fn)
+    if name is None:
+        return "mmi    0x%08x" % w
+    if name in MMI_SUB:
+        name = MMI_SUB[name].get(sa)
+        if name is None:
+            return "mmi    0x%08x" % w
+    if name in MMI_RD_ONLY:
+        return "%-6s %s" % (name, REG[rd])
+    if name in MMI_RS_ONLY:
+        return "%-6s %s" % (name, REG[rs])
+    if name in MMI_SHIFT:
+        return "%-6s %s,%s,%d" % (name, REG[rd], REG[rt], sa)
+    if name in MMI_RD_RT:
+        return "%-6s %s,%s" % (name, REG[rd], REG[rt])
+    if name in ("madd", "maddu", "madd1", "maddu1", "mult1", "multu1"):
+        # these write rd as well when it is not $zero (the EE three-operand form)
+        if rd:
+            return "%-6s %s,%s,%s" % (name, REG[rd], REG[rs], REG[rt])
+        return "%-6s %s,%s" % (name, REG[rs], REG[rt])
+    if name in ("div1", "divu1"):
+        return "%-6s %s,%s" % (name, REG[rs], REG[rt])
+    if name == "plzcw":
+        return "%-6s %s,%s" % (name, REG[rd], REG[rs])
+    if name == "pmfhl":
+        # the sa field picks which halves of HI/LO are gathered
+        fmt = {0: "lw", 1: "uw", 2: "slw", 3: "lh", 4: "sh"}.get(sa, "?")
+        return "%-6s %s" % ("pmfhl." + fmt, REG[rd])
+    if name == "pmthl":
+        return "%-6s %s" % ("pmthl.lw", REG[rs])
+    return "%-6s %s,%s,%s" % (name, REG[rd], REG[rs], REG[rt])
+
+
 def decode(w, addr, elf=None):
     """One instruction word -> (text, branch target or None)."""
     op = w >> 26
@@ -205,11 +317,16 @@ def decode(w, addr, elf=None):
             return "%-6s %s" % (name, REG[rd]), None
         if name in ("mult", "multu", "div", "divu", "dmult", "dmultu",
                     "ddiv", "ddivu"):
+            # the EE gives mult/multu a third operand: lo is copied to rd
+            if rd and name in ("mult", "multu"):
+                return "%-6s %s,%s,%s" % (name, REG[rd], REG[rs], REG[rt]), None
             return "%-6s %s,%s" % (name, REG[rs], REG[rt]), None
         if name in ("syscall", "break", "sync"):
             return name, None
-        if name.startswith(("sll", "srl", "sra", "dsll", "dsrl", "dsra")) \
-                and not name.endswith("v"):
+        if name.startswith(("sll", "srl", "sra", "dsll", "dsrl", "dsra")):
+            if name.endswith("v"):
+                # variable shifts read rd,rt,rs -- the amount comes last
+                return "%-6s %s,%s,%s" % (name, REG[rd], REG[rt], REG[rs]), None
             return "%-6s %s,%s,%d" % (name, REG[rd], REG[rt], sa), None
         # `daddu rd,rs,zero` is how SN's compiler spells a register move
         if name in ("daddu", "addu", "or") and rt == 0:
@@ -223,7 +340,7 @@ def decode(w, addr, elf=None):
     if op in (0x12, 0x13):
         return "cop2   0x%08x" % w, None
     if op == 0x1c:
-        return "mmi    0x%08x" % w, None
+        return _mmi(w), None
 
     name = OPS.get(op)
     if name is None:
@@ -245,7 +362,7 @@ def decode(w, addr, elf=None):
         return "%-6s $f%d,%d(%s)" % (name, rt, simm, REG[rs]), None
     if op in (0x36, 0x3e):                      # lqc2 / sqc2
         return "%-6s vf%d,%d(%s)" % (name, rt, simm, REG[rs]), None
-    if 0x20 <= op <= 0x3f or op in (0x1a, 0x1b):
+    if 0x20 <= op <= 0x3f or op in (0x1a, 0x1b, 0x1e, 0x1f):
         return "%-6s %s,%d(%s)" % (name, REG[rt], simm, REG[rs]), None
     return "%-6s %s,%s,%d" % (name, REG[rt], REG[rs], simm), None
 
@@ -266,6 +383,30 @@ def disassemble(elf, addr, count, out=sys.stdout):
         print("%s %08x  %s" % (">" if a in targets else " ", a, text), file=out)
 
 
+def callers(elf, target):
+    """Every `jal`/`j` site in the image that lands on `target`.
+
+    Only the direct forms: a call through `jalr` (a virtual, or a jump
+    table like the one in FlailerMenuItem::JoyHandler) leaves no target in
+    the instruction and has to be chased by hand.
+
+    Yields (site address, containing symbol).
+    """
+    out = []
+    for s in elf.secs:
+        if s["type"] == 8 or not s["addr"] or not (s["flags"] & 0x4):
+            continue                      # SHT_NOBITS, or not SHF_EXECINSTR
+        blob = elf.data[s["off"]:s["off"] + s["size"]]
+        for i in range(0, len(blob) - 3, 4):
+            w = struct.unpack_from("<I", blob, i)[0]
+            if (w >> 26) not in (2, 3):   # j, jal
+                continue
+            addr = s["addr"] + i
+            if ((addr + 4) & 0xF0000000) | ((w & 0x03FFFFFF) << 2) == target:
+                out.append((addr, elf.label(addr)))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("symbol", nargs="?", help="a .symtab symbol name")
@@ -274,6 +415,8 @@ def main():
     ap.add_argument("--count", type=int, default=0,
                     help="instructions (default: the symbol's whole size)")
     ap.add_argument("--grep", help="list symbols matching this regex and exit")
+    ap.add_argument("--callers", action="store_true",
+                    help="list what calls the symbol instead of disassembling")
     a = ap.parse_args()
 
     elf = Elf(a.elf)
@@ -293,6 +436,13 @@ def main():
         print("no symbol %r (try --grep)" % a.symbol, file=sys.stderr)
         return 1
     addr = elf.syms[a.symbol][0]
+    if a.callers:
+        sites = callers(elf, addr)
+        print("--- %d call sites for %s @ 0x%08x ---"
+              % (len(sites), a.symbol, addr))
+        for site, who in sites:
+            print("  %08x  %s" % (site, who))
+        return 0
     size = elf.extent(a.symbol)
     print("--- %s @ 0x%08x (%d bytes) ---" % (a.symbol, addr, size))
     disassemble(elf, addr, a.count or size // 4)

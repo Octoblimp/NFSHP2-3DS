@@ -18,10 +18,34 @@ writes one PNG per texture; stdlib only, no PIL).
 | `0x30300003` | n * 164    | the `TextureInfo` table, one record per texture |
 | `0x30300004` | large      | all CLUTs and all pixel data, back to back |
 
-A sibling container `0xb0300100` usually follows with the same three-leaf shape
-(`0x30300101` / `0x30300102` / `0x30300103`) but 52-byte records -- that is the
-TextureAnimPack (scrolling/flipbook animations referencing textures by hash).
-It is not decoded yet.
+A sibling container `0xb0300100` follows with the same three-leaf shape
+(`0x30300101` / `0x30300102` / `0x30300103`) -- that is the TextureAnimPack,
+the flipbook animations. It is decoded too; see the bottom of this file.
+
+### The data base is 128-byte aligned, not the payload
+
+`ImagePlacement` and `PalettePlacement` are offsets from the `0x30300004`
+payload **rounded up to a 128-byte boundary**, not from the payload itself.
+`LoaderTexturePack` (`0x00100830`):
+
+```
+001008a8  addiu  s2,v0,143      ; v0 + 8 (the payload) + 135
+001008b0  and    s2,s2,a3       ; a3 = -128
+```
+
+`v0` is the data chunk's header, so `v0 + 8` is the payload and `s2` is that
+address rounded up. The packer leaves room for it: the payload starts with
+0 to 127 bytes of `0x11` filler. In this build the three UI bundles need 120,
+108 and 88 bytes of it.
+
+The bundle is loaded at a 128-byte-aligned address, so aligning the offset
+within the file gives the same answer as aligning the pointer does.
+
+Miss this and everything still parses -- the table is read from a different
+chunk -- but every texture comes out rolled sideways by up to 127 bytes, one
+scanline wrapping into the next. Small flat UI sprites survive it looking
+almost right, which is what makes it easy to miss; photographs and logos do
+not.
 
 ## `TextureInfo` -- 164 bytes
 
@@ -59,6 +83,38 @@ memory. Sizes in the struct are byte counts unless stated otherwise.
 | `0x55` | `s8`       | level 0's `Is32BitSwizzelled` -- **this is what says whether the pixels are swizzled** |
 | `0x6e` | `s8`       | `NumMipMapLevels` -- levels *after* the base, so `0` means one level |
 | `0x84` | `f32`      | `1.0f` |
+| `0x90` | `u32`      | runtime pointer to the pixel bytes in main memory (0 on disc) |
+| `0x94` | `u32`      | runtime pointer to the CLUT in main memory (0 on disc) |
+
+`0x90` and `0x94` are set when the pack is loaded and are the two fields the
+texture animations rewrite -- see below.
+
+### The mip chain
+
+The levels sit one after another in the `0x30300004` blob, base level first,
+each halving both dimensions, with no padding between them. The check is
+arithmetic and it is decisive: summing `max(1, w >> L) * max(1, h >> L) *
+bpp / 8` over `NumMipMapLevels + 1` levels reproduces the record's own `0x38`
+byte count **exactly**, on all 1,755 textures in the archive that own their
+pixels, at every level count from 1 to 7.
+
+Each level carries its own `Is32BitSwizzelled`, and they genuinely differ:
+`BEAVER_SIGN` (256x128 PSMT4, 5 levels) is flagged at the base and raster at
+every level below it. So a chain has to be decoded level by level, not
+unswizzled wholesale.
+
+`TextureImageInfo.TextureBasePointerOffset` is **not** the file offset. It is
+the level's base pointer in GS memory, in 256-byte blocks, and it obeys the
+GS's own page alignment: for `BEAVER_SIGN` it happens to match the packed
+file offsets (0, 64, 80, 84, 85), but for a 64x128 PSMT8 texture it runs
+0, 48, 60, 63 where the file offsets are 0, 32, 40, 42. Only 74 of 265
+mipmapped textures agree. Use the arithmetic chain for file offsets and this
+field only if you are reproducing the VRAM layout.
+
+`tools/texture_convert.py --mips` writes the sub-levels as
+`<name>.mip<N>.png`. They render as coherent, legible smaller copies of the
+base image; they are *not* pixel-exact box downsamples of it, because the
+art is dithered 16-colour and the levels were quantised independently.
 
 The `0x52` array and the two fields around it are not inferred -- they are in
 the `.mdebug` type info verbatim (`docs/mdebug_structs.txt`), which is also
@@ -98,15 +154,52 @@ base level, largest first. `texture_convert.py` emits only the base level.
 
 ## CLUT
 
-RGBA8, `CPSM` = PSMCT32, and **stored linearly** -- index *n* is the *n*-th
-4-byte entry, with no CSM1 column shuffle. Two independent confirmations:
+RGBA8 and `CPSM` = PSMCT32 throughout. A **256-entry** CLUT is stored in GS
+CSM1 order, not linearly: inside every group of 32 entries, 8..15 and 16..23
+are exchanged, which is the same thing as swapping bits 3 and 4 of the index.
+A **16-entry** CLUT is linear -- bit 4 is outside the palette, so there is
+nothing to exchange.
 
-* `RemapLinearIntoClut8__FPUiT0` (`0x00118878`) is the only CLUT-reordering
-  routine in the ELF, and its only callers are `eAttachDepthIntoAlpha`,
-  `CreateFogPalette`, `CreateFocusPalette`, `SetupBlackAndWhite` and
-  `BuildYUV2ABGRPalettes` -- all palettes the engine *builds at runtime*.
-  Nothing on the texture-pack path touches it.
-* Applying the CSM1 bit3/bit4 swap to a pack CLUT visibly wrecks the image.
+`RemapLinearIntoClut8__FPUiT0` (`0x00118878`) *is* that permutation, and bWare
+named it. It is eight passes over 32 entries, and each pass moves two quadword
+pairs across each other and copies the rest straight through:
+
+```
+00118894  lq  t0,32(t2)     ; source entries  8..11
+0011889c  lq  v0,64(t2)     ;         "      16..19
+001188b8  sq  v0,32(t3)     ; 16..19 stored where  8..11 would be
+001188c0  sq  t0,64(t3)     ;  8..11 stored where 16..19 would be
+```
+
+The name says which direction it runs: linear in, CLUT8 out. Its callers --
+`eAttachDepthIntoAlpha`, `CreateFogPalette`, `CreateFocusPalette`,
+`SetupBlackAndWhite`, `BuildYUV2ABGRPalettes` -- are all palettes the engine
+*builds at runtime* in the obvious order and then has to convert. A pack CLUT
+is uploaded to GS memory without that call, so it must already be in CLUT8
+order, and a host decoder has to undo it. The permutation is an involution,
+so one table does both directions.
+
+Two checks, neither of which depends on anyone's taste in gauge faces:
+
+* 173 of the 256-entry CLUTs on the disc have at least eight unused (all
+  zero) entries. In CSM1 order those unused entries form a clean tail --
+  logical indices *n*..255 -- for 54 of them, and for the other 119 the test
+  cannot tell (all-zero tails that survive either reading, or palettes whose
+  gaps are not a tail at all). Read linearly, **not one** of the 173 has its
+  unused entries at the end.
+* Decoding every 8-bit texture both ways and measuring the mean colour step
+  between horizontally adjacent texels -- real art is locally smooth -- picks
+  CSM1 order for 559 of 588 textures, by factors of up to 15x. The 29 that
+  prefer linear are flat 16x16 UI sprites, 176x16 bars and the `MOVIE_*`
+  planes whose on-disc CLUTs are placeholders, i.e. every case where the
+  measurement has nothing to work with.
+
+An earlier revision of this document claimed the opposite, on the grounds
+that the swap "visibly wrecks the image". That test could not have worked:
+it predates the 128-byte data base fix above, and `PalettePlacement` is
+measured from the same base, so the CLUT being read was itself 120 bytes --
+thirty entries -- off the real one. Both readings of a wrong palette are
+wrecked; the swap took the blame for the offset.
 
 Alpha is PS2-scale: `0x80` is fully opaque, so it doubles to reach 0..255.
 (One texture, `OPEL_KMH`, carries alpha up to `0xfb`, so the doubling is a
@@ -249,14 +342,136 @@ build is flagged.
 python tools/texture_convert.py out/GLOBAL/HUDTEX.BIN --list
 python tools/texture_convert.py out/GLOBAL/HUDTEX.BIN png/
 python tools/texture_convert.py out/TRACKS/TRACKB12.BUN png/ --swizzle none
+python tools/texture_convert.py out/TRACKS/TEX12LOCATION.BIN png/ --mips
 ```
 
 `--swizzle auto` (the default) unswizzles exactly the textures flagged at
 `0x55`, which is what the game does. `none` dumps the data as stored and
 `all` forces the unswizzle on every paletted texture; both are for checking a
 hunch, not for output. `--list` prints the flag in its `swiz` column and the
-mip level count in `mip`.
+mip level count in `mip`. `--mips` additionally writes every level below the
+base as `<name>.mip<N>.png`.
 
 Output is one PNG per texture under `<outdir>/<pack name>/`. On this build:
 84 textures in `GLOBAL/HUDTEX.BIN` (pack `HUD`), 772 in `CARS/TEXTURES.BIN`
 (pack `CARTEXTURES`) and 396 in `TRACKS/TEX12LOCATION.BIN` (pack `TRACK`).
+
+---
+
+## TextureAnimPack -- chunk `0xb0300100`
+
+The flipbook animations. Same three-leaf container shape as the texture pack,
+and loaded by the same function: `LoaderTexturePack` (`0x00100830`) branches
+on the container type and, for `0xb0300100`, walks the leaves by size and
+hands them to `TextureAnimPack::TextureAnimPack` (`0x001a1650`).
+
+| type         | size            | contents |
+|--------------|----------------:|----------|
+| `0x30300101` | 16              | `TextureAnimPackHeader`: `u32 Version` (1), `u32 pTextureAnimPack` (0 on disc, patched at load), `u32 pad[2]` |
+| `0x30300102` | n * 52          | the `TextureAnim` table |
+| `0x30300103` | m * 16          | the `TextureAnimEntry` table, one flat run |
+
+The loader refuses anything whose `Version` is not 1; every pack on this disc
+is version 1. Neither count is stored -- `n` and `m` are the leaf sizes
+divided by 52 and 16.
+
+All the layouts below are the `.mdebug` type info verbatim
+(`docs/mdebug_structs.txt`), confirmed against the loader and
+`InitAnims`/`UpdateTextureAnimations`.
+
+### `TextureAnim` -- 52 bytes
+
+| offset | type | field |
+|-------:|------|-------|
+| `0x00` | `char[24]` | `Name`, NUL padded |
+| `0x18` | `u32` | `NameHash` -- also the hash of frame 0's texture |
+| `0x1c` | `s32` | `NumFrames` |
+| `0x20` | `s32` | `FramesPerSecond` |
+| `0x24` | `s32` | `TimeBase` -- picks which of two clocks drives it |
+| `0x28` | `u32` | `TextureAnimTable` -- 0 on disc; the constructor points it into the entry table |
+| `0x2c` | `s32` | `Valid` -- 0 on disc; `InitAnims` sets it, and clears it if any frame's texture is missing |
+| `0x30` | `s32` | `CurrentFrame` -- runtime |
+
+### `TextureAnimEntry` -- 16 bytes
+
+| offset | type | field |
+|-------:|------|-------|
+| `0x00` | `u32` | `NameHash` of this frame's texture |
+| `0x04` | `u32` | `pTextureInfo` -- 0 on disc; `InitAnims` resolves it via `GetTextureInfo` |
+| `0x08` | `u32` | `OriginalImageData` -- 0 on disc; a copy of that texture's `0x90` |
+| `0x0c` | `u32` | `OriginalPaletteData` -- 0 on disc; a copy of its `0x94` |
+
+Only `NameHash` carries data on disc. The other three are the runtime's
+scratch.
+
+### How the entry table is split
+
+It is one flat run, and nothing in the file says where one animation's frames
+end. The constructor implies it:
+
+```
+cursor = TextureAnimEntryTable
+for each TextureAnim:
+    anim->TextureAnimTable = cursor
+    cursor += anim->NumFrames * 16
+```
+
+So animation *k*'s frames are the next `NumFrames` entries, in play order, and
+the totals have to add up -- which they do: 4+8+4 = 16 in `GLOBAL/INGAMEB.BUN`
+and 2+5+3+5+15 = 30 in `TRACKS/TEX12LOCATION.BIN`.
+
+### What an animation actually does
+
+`UpdateTextureAnimations` (`0x001a17e8`) walks the global
+`TextureAnimPackList` every frame. For each `Valid` animation it computes
+
+```
+frame = (int)(fps * clock) % NumFrames
+```
+
+where `clock` is one of two global timers -- `TimeBase == 1` selects the
+second -- and `fps` comes from a global override if one is set, otherwise from
+`FramesPerSecond`. If the frame changed, it then does, for every `j` in
+`0 .. NumFrames-1`:
+
+```
+dst = entry[j].pTextureInfo
+src = entry[(j + frame) % NumFrames]
+dst->0x90 = src->OriginalImageData
+dst->0x94 = src->OriginalPaletteData
+```
+
+That is the whole mechanism: the frames' `TextureInfo` records have their
+pixel and CLUT pointers **rotated** among themselves. Nothing re-uploads and
+nothing re-binds, so any geometry referencing *any* one of the frame textures
+animates, and the textures are otherwise ordinary members of the pack.
+
+### On this disc
+
+Only two of the thirteen anim packs are non-empty; the other eleven are
+present but hold zero animations.
+
+| file | animations |
+|------|------------|
+| `GLOBAL/INGAMEB.BUN` | `BULB` (4 frames, 7 fps), `SMOKE` (8, 0 fps), `TRACK_BARRIER_NEON` (4, 4 fps) |
+| `TRACKS/TEX12LOCATION.BIN` | `D_BARRIERLIGHTFLASH` (2, 15), `D_LIGHTTUNNELLIGHT` (5, 7), `HELI_ROTOR` (3, 30), `W_TUNNELREFLECT` (5, 7), `WATERC` (15, 15) |
+
+Every one of the 46 frame hashes resolves to a texture in the same file, and
+the names confirm the reading: `WATERC` then `WATERC001`..`WATERC014`,
+`HELI_ROTOR` then `HELI_ROTOR001`/`002`, and so on -- frame 0 is always the
+texture the animation is named after. Independently: calling the engine's own
+`bStringHash("WATERC")` under `tools/mipsemu.py` returns `0x82be0ae5`, which
+is the `NameHash` in the record, so the field offsets are pinned to the
+engine's hash rather than only to a name lookup. `SMOKE`'s `FramesPerSecond` of 0 is not
+a parse error; it relies on the global rate override.
+
+### Usage
+
+```bash
+python tools/texture_convert.py out/TRACKS/TEX12LOCATION.BIN --anims
+```
+
+`--anims` prints each animation with its frames resolved back to texture
+names. A normal conversion run also drops an `anims.csv` beside the PNGs --
+one row per frame in play order, with the PNG filename -- so a sequence can be
+rebuilt without re-reading the chunk.

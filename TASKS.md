@@ -96,7 +96,7 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         twin in the archive, up to the 15 MB `FRONTEND\FRONTB.BUN`.
         `3DS Files/source/jdlz.c` was therefore dead weight and has been
         deleted; the runtime decoder is now `3DS Files/source/lzc.c`.
-12. [~] Conversion tools. Done: `tools/texture_convert.py` -- walks any file
+12. [x] Conversion tools. Done: `tools/texture_convert.py` -- walks any file
         (including nested `.BUN` bundles) for `0xb0300001` packs and writes one
         PNG per texture, stdlib only. **All three pixel formats now decode**,
         including PSMT4. The key was that being swizzled is a property of the
@@ -136,35 +136,301 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         OBJ + MTL, with per-vertex colours on the `v` lines, one group per
         solid and one material per light material hash. All 35 geometry files
         on the disc convert; see `docs/formats/solid-geometry.md`.
-        Still to write: `tools/video_extract.py` -- note this is **MV3-in-AVI**, not VP6/SCHl,
-        so it needs a port of `MV3Codec::DecompressFrameShared()` +
-        `Huffman::Decompress()` rather than `source/vp6/ea_demux.c`.
-        Also port `tools/lzdecompress.py` to C for the runtime.
-13. [ ] Confirm asset delivery: external SD-card game directory (matching
-        NFSU2-3DS), not ROMFS, given 273MB source archive size
+        Also done: `tools/video_extract.py` -- demuxes any `MOVIES\*.AVI` and
+        writes one PNG per frame plus the soundtrack as a WAV and a
+        `frames.csv`. This is **MV3-in-AVI**, not VP6/SCHl, so
+        `source/vp6/ea_demux.c` does not apply. Rather than transcribe
+        ~5,000 instructions of fixed-point, MMI-vectorised IDCT, the tool
+        *runs the shipped decoder*: `tools/mipsemu.py` (new) is a small R5900
+        interpreter that loads `NFSHP2.ELF` into a flat memory image and
+        calls `MV3Codec::DecompressFrameShared()` directly, so the frames are
+        the PS2's own output. ~16 s/frame; the disc has exactly one movie
+        (`MOVIES\INTRO\EALOGO_EN.AVI`, 512x256, 90 frames, 3 s of 8-bit PCM)
+        so that is fine. The format is disassembled and documented anyway in
+        `docs/formats/mv3-video.md` -- frame header, the two `pCompData`
+        layouts, the 2-bit-per-block DCT type array, the prefix/escape
+        entropy coder, IJG quality scaling with an AAN prescale, the
+        copy/skip bit-planes, and the BT.601 clamp-table conversion --
+        because a Phase 3 C port (or a build-time pre-decode) needs it.
+        Fixing `tools/mipsdis.py` was a prerequisite: variable shifts
+        (`sllv`/`srlv`/`srav`) print `rd,rt,rs`, not `rd,rs,rt`, and had been
+        coming out with their operands swapped; the EE's 3-operand
+        `mult`/`multu`, the MMI opcode space and `lq`/`sq` were missing too.
+        Also done: the `0xb0300100` **TextureAnimPack** sibling container --
+        the flipbook animations, same three-leaf shape as the texture pack
+        and loaded by the same `LoaderTexturePack`. A 52-byte `TextureAnim`
+        per animation (name, hash, frame count, fps, time base) over one flat
+        run of 16-byte `TextureAnimEntry` records, split by the constructor
+        `NumFrames` at a time. The runtime plays an animation by *rotating*
+        the frames' pixel and CLUT pointers among their own `TextureInfo`
+        records, so nothing re-uploads. `texture_convert.py --anims` lists
+        them and a conversion run writes an `anims.csv`. Eight animations
+        across the disc (three in `GLOBAL\INGAMEB.BUN`, five in
+        `TRACKS\TEX12LOCATION.BIN`); all 46 frame hashes resolve to textures
+        in the same file.
+        Also done: **mip levels**. The chain is stored base-first, tightly
+        packed, each level halving both dimensions -- the sum reproduces the
+        record's own `0x38` byte count exactly on all 1,755 textures that own
+        their pixels. Each level has its own `Is32BitSwizzelled`, and they do
+        differ within one chain, so `--mips` decodes level by level.
+        `TextureBasePointerOffset` is a GS address, not a file offset, and
+        disagrees with the file layout on 191 of 265 mipmapped textures.
+        That leaves `3DS Files/source/vp6/` as dead weight the way `jdlz.c`
+        was -- nothing on this disc is VP6 -- but it is left in place for now
+        rather than deleted, in case the Phase 3 intro ends up reusing its
+        player scaffolding around a pre-decoded frame sequence.
+        **Correction, and it was a big one**: `ImagePlacement` /
+        `PalettePlacement` are relative to the `0x30300004` payload *rounded
+        up to 128 bytes*, not to the payload -- `LoaderTexturePack`
+        (`0x001008a8`: `addiu s2,v0,143` / `and s2,s2,-128`), with the packer
+        leaving 0 to 127 bytes of `0x11` filler to make room. Every texture
+        had been coming out rolled sideways by that much, which flat UI
+        sprites hide and photographs do not. Fixed in `texture_convert.py`
+        and `3DS Files/source/texpack.c`; the two still agree texture for
+        texture on all three UI bundles.
+        **Second correction, from the same sweep**: a PSMT8 CLUT is stored in
+        GS **CSM1 order**, not linearly -- entries 8..15 and 16..23 of every
+        group of 32 are exchanged. bWare names the permutation:
+        `RemapLinearIntoClut8` (`0x00118878`) is eight passes that swap
+        exactly those two quadword pairs, and the engine calls it on palettes
+        it *builds*, never on a pack CLUT, so a pack CLUT is already in that
+        order. PSMT4 CLUTs are linear. This document previously claimed the
+        opposite; that test predates the 128-byte fix above, and since
+        `PalettePlacement` shares the same base it was comparing two readings
+        of a palette that was thirty entries out of place. Both decoders now
+        apply it and still agree on all 2,040 textures in the ten packs on
+        the disc.
+13. [x] Confirm asset delivery: external SD-card game directory (matching
+        NFSU2-3DS), not ROMFS, given 273MB source archive size.
+        Implemented in `3DS Files/source/gamedata.c`. Resolution order, first
+        hit wins: `nfshp2_config.txt` (looked for next to the executable then
+        in `sdmc:/3ds/NFSHP2-3DS/`, first non-comment line is the directory),
+        then `sdmc:/3ds/NFSHP2-3DS/data`, then `sdmc:/NFSHP2`. A candidate
+        only counts when `GLOBAL/GLOBALB.BUN` is actually in it, so a stale
+        config file falls through to a working default instead of leaving the
+        game pointed at nothing.
 
 ## Phase 2 -- Boot flow & frontend menus (first milestone)
 
-14. [ ] Decompile boot/logo sequence driver; look for a `BootFlowManager`-
-        equivalent class in the recovered `.mdebug` type info
-15. [ ] Reimplement as `kVideoStages[]`-style table in `main.c` (pattern
+14. [x] Decompile boot/logo sequence driver; look for a `BootFlowManager`-
+        equivalent class in the recovered `.mdebug` type info.
+        There is no `BootFlowManager` class -- the boot sequence is two
+        separate mechanisms and the `.mdebug` type info names neither as a
+        driver. Written up in `docs/formats/boot-flow.md`, address per rule.
+        The outer one is a table-driven state machine:
+        `GameFlowStateInfoTable` (`0x002f2eb0`), 10 states x
+        `{const char *Name; void (*Begin)(); void (*End)(); void (*Loop)();}`.
+        `main` (`0x0012da88`) asks for `LOADING_FRONTEND` and then hands the
+        thread to `MainLoop`, which calls `ServiceGameFlow` (`0x001636f8`)
+        *twice* per frame. `ServiceGameFlow` loops until the desired state
+        stops changing, so a state whose `Begin` immediately redirects costs
+        no frame -- that is how loading chains without a visible hitch.
+        The inner one is `LaunchFrontendMenus` (`0x0016aa40`): it pushes
+        screen names onto a 388-byte LIFO `ScreenStack` (12 x 32 bytes +
+        index) in the order `Title Screen`, `Legal MumboJumbo`,
+        `Language Options Pre FE`, `BootAutoload`, then enters the one on
+        *top*, i.e. the last push that passed its predicate. So the push list
+        reads backwards from the boot order.
+        Four things a reimplementation gets wrong if it guesses:
+        `ShouldSeeLegalMumboJumbo` (`0x0016aa28`) is `return 0` -- the legal
+        screen is authored (`0xdd4197c9` in `FRONTB.BUN`, with its text
+        object `0xdd479599`) and unreachable. `TheDemoDiscManager`
+        (`0x002e8120`) is a 48-byte object rather than a pointer, its ctor
+        clears `bActive` and nothing ever sets it, so every demo-disc branch
+        is dead. `FlailerScreenVisibility` is `VISIBLE=0 / INVISIBLE=1` but
+        `FlailerObjectVisibility` is `INVISIBLE=0 / VISIBLE=1` -- opposite
+        polarities, used one line apart in `TitleScreen::HandleTick`, and
+        reading them the same way makes the flow look nonsensical. And the EA
+        logo cannot be skipped while the NFS intro can: `HandleEvent`
+        (`0x0016a148`) gates the advance on
+        `Mode == 1 || (Mode == 2 && MovieIndex != 0)`.
+        `TitleMoviesToPlay` (`0x002f3770`) is 8 language rows x 2 x
+        `{const char *Name; int Letterboxed}`, but only
+        `MOVIES\INTRO\EALOGO_EN.AVI` is on this disc -- `NFSINTRO_EN.AVI` is
+        absent from all 223 entries in `docs/zdir_names.txt`. So the retail
+        boot is `BootAutoload` -> (`Language Options` on PAL) ->
+        `Title Screen` (one movie) -> `New Main Menu`.
+        Both clocks pinned down while in there (`AdvanceRealTime`
+        `0x00199410`): `RealTime` is 60 Hz ticks and is forced to advance at
+        least 1 per frame, `RealTimer` is in 1/4000 s units because
+        `Timer::SetTime(float)` (`0x00134ef0`) is `(int)(f * 4000.0f)`. The
+        shipped timeouts are `LegalScreenTimeout` = `AntiPiracyTimeout` =
+        7.0s, `BeginDemoModeTimeout` = 30.0s, `DemoModeTimeout` = 120.0s.
+        The one piece of data this needed had no table to read: the screen
+        registry. Every `ChangeToScreen("...")` resolves through a linked
+        list of `FlailerScreenConfig` built one `jal` at a time by
+        `_GLOBAL_$I$*` constructors across a dozen object files. So
+        `tools/screen_registry.py` walks `.text`, finds every call to either
+        constructor, and back-propagates the argument registers out of the
+        enclosing block -- a backward walk, because a forward sweep loses
+        every value at a branch. It recovers 49 of the 51 sites (the other
+        two are the 4-arg ctor forwarding to the 7-arg one) = 49 configs and
+        49 flailer screens, all of which exist in the bundles.
+        That turned up the last surprise: `ScreenName` and `FlailerHashes[0]`
+        are different strings. The flow code says `"Title Screen"`; the
+        bundle screen is `bhash("TITLE_SCREEN")` = `0xb5761d00`, and
+        `bhash("Title Screen")` is in no bundle. Two namespaces, joined only
+        by `FlailerScreenConfig`, which the port has to carry
+15. [x] Reimplement as `kVideoStages[]`-style table in `main.c` (pattern
         already proven in NFSU2-3DS)
-16. [~] Reimplement bWare's menu/UI system (working name: `source/bui.c`).
-        **The format is no longer the blocker** -- `0x80010200` is fully
-        decoded (`docs/formats/flailer-ui.md`): 76 screens across the three
-        bundles, each a list of `FlailerBitmapChunk`/`FlailerTextChunk`
-        objects carrying position, scale, per-corner RGBA, UVs, a font hash
-        and a render layer, plus the `FE_*.BIN` string table their text
-        really comes from (`docs/formats/language-table.md`). What is left is
-        the C side: load the chunk, resolve texture/font hashes, draw layers
-        0..28 through citro2d. Note `FlailerMenu`/`FlailerMenuItem` never
-        appear on disc -- navigation and highlight behaviour live in the
-        frontend C++ and still have to be decompiled.
-        `DataEventSelectScreen` (seen in the `.mdebug` strings survey) is a
-        concrete first screen-data class
-17. [ ] Wire hid input -> menu navigation, citro2d text, citro3d backgrounds
-18. [ ] Milestone acceptance: EA logo -> publisher logos -> legal/PSA
-        screens -> main menu, real assets, navigable on 3DS controls
+        `3DS Files/source/gameflow.c` + `.h` (1,200 lines) is the port of the
+        whole boot flow: `GameFlowStateInfoTable` as
+        `BGameFlowStateInfo[BGF_NUM_STATES]`, `ServiceGameFlow`'s
+        End-then-Begin loop-until-settled, the 388-byte 12x32 `ScreenStack`
+        with `ChangeToScreen` / `MoveToPreviousScreen` / `PopUntil`, the
+        `LaunchFrontendMenus` backwards push order and its four predicates,
+        and the `TitleScreen` movie sequencer. `main.c` holds the three
+        concrete tables, and `kBootStages[]` is the `kVideoStages[]`
+        analogue:
+            { "Title Screen",            bgf_should_see_title_sequence },
+            { "Legal MumboJumbo",        bgf_should_see_legal_mumbo_jumbo },
+            { "Language Options Pre FE", bgf_should_see_language_select },
+            { "BootAutoload",            bgf_should_see_autoload },
+        Everything the flow touches on the outside -- screen and object
+        visibility, texture changes, movies, resource loads, save jobs, sound
+        -- goes through a `BGameFlowHooks` vtable, so the module builds on
+        the host with no `<3ds.h>`; `main.c` wires the hooks to `bui.c` and
+        `uirender.c`. One hook was missing on the `bui` side and is new:
+        `bui_set_object_visible` writes `FlailerObjectVisibility` at +17 and
+        the dirty byte at +19.
+        Checked the usual two ways. `tools/bootflow_check.py` is a second,
+        independent implementation in Python -- including a float32 emulation
+        for the frame clock, because `RealTime` advances by
+        `(int)(accum * 60.0f)` in C `float` and a Python double drifts off it
+        -- and it diffs a full transcript over 12 scenarios (ntsc, pal,
+        nolang, skipmovies, relaunch, demodisc, attract, select, skipintro,
+        mainmenu, mumbo, legal): **3,659 lines, 0 differ**. Three of those scenarios
+        exist because the first pass silently covered nothing: an event
+        injected at frame 0 is overwritten by the boot itself, and a "skip"
+        pressed after the movie already ended never reaches the
+        "the EA logo cannot be skipped" branch.
+        And looked at, which is the part a cross-check cannot do. Rendering
+        the four boot screens turned up one thing the transcript could never
+        have shown: **`Title Screen` composites to solid black as authored**,
+        because its two movie planes draw `SPLASH_SCREEN` -- a 512x256 buffer
+        that is 131,072 pixels of opaque black, the blit target, not art --
+        and layer 0 is the *frontmost* layer of the main pass, so they cover
+        `PRESS START` at layer 13 and the logo at layer 24. Hide them, as
+        `HandleTick` does when the last movie ends, and the retail title
+        screen appears. A port that skipped that one line would have shipped
+        a black title screen and no way to tell why. Also: `BootAutoload` has
+        zero objects in both bundles, and `Legal MumboJumbo` draws `EA_LEGAL`
+        out of `GLOBAL\DYNTEX.BIN`, which reads "PLACEHOLDER LEGAL SCREEN" --
+        independent confirmation that `ShouldSeeLegalMumboJumbo` really is
+        `return 0` and the screen never shipped. All of it is in
+        `docs/formats/boot-flow.md`.
+16. [~] Reimplement bWare's menu/UI system (`source/bui.c` + `uirender.c`).
+        **The data half is done and on screen.** `bui.c` parses the
+        `0x80010200` tree; `uirender.c` draws a screen through citro2d with
+        real textures, real fonts and real translated strings; `main.c` is a
+        viewer that pages through all 76 screens in any of the 8 languages.
+        Every module is cross-checked against its Python reference rather
+        than trusted on inspection: texpack 397/397 textures, langtab 15,168
+        strings across 8 files, bfont 953 lines, bui 2,331 lines -- 0 differ
+        in each. `tools/flailer_render.py` composites the same screens to PNG
+        for eyeballing, and the main menu, the option screens and the help
+        screen all come out looking like the game.
+        Two engine behaviours that had to be recovered for that: the layer
+        draw order is back-to-front in a fixed *non*-monotonic sequence
+        (`24..20`, `15..0`, `19..16`, `28..25` -- four descending loops in
+        `eDisplayFrame`), and `RenderCharacter` scales glyph width by
+        `ScaleX` twice, a shipped bug the screens were authored against.
+        Both are written up in `docs/formats/flailer-ui.md`.
+        The behaviour half is task 17 and is now done too, in
+        `source/bmenu.c`. `DataEventSelectScreen` (seen in the `.mdebug`
+        strings survey) is a concrete first screen-data class
+17. [x] Wire hid input -> menu navigation, citro2d text, citro3d backgrounds.
+        `3DS Files/source/bmenu.c` is the port of `FlailerMenu` /
+        `FlailerMenuItem` / `FlailerScreen`'s JoyHandler, decompiled out of
+        the ELF because none of those classes ships as a chunk. Written up
+        with an address per rule in `docs/formats/flailer-menu.md`.
+        The headline finding is how a menu is built at all: there is exactly
+        one construction site in the game, `Activate__13FlailerScreen+0x3c`,
+        and it passes the literal `"MENUITEM_%d"`. So a menu is simply the
+        screen's text objects named `MENUITEM_0` .. `MENUITEM_15`, gaps
+        allowed -- `NEW_MAIN_MENU` uses 1, 2 and 3 and skips 0. 46 screens
+        on the disc have one, from 1 to 10 items.
+        Two things that a reimplementation gets wrong if it guesses:
+        `SetColor__16FlailerTextChunk` (`0x0013e820`) replaces only the low
+        24 bits and keeps the chunk's alpha, and the colours are written
+        straight back into the loaded chunk because there is no separate
+        runtime copy. And `AlignBar` is dead: it has zero callers, and no
+        bundle on the disc contains the `HIGHLIGHT_BAR` object it would move
+        -- 0 hits across all 2,252 objects. Screens animate their own
+        highlight instead (`NewMainMenu` through `tHighlightAnimation`).
+        The shipped values of the gp globals came out of `.data`, since
+        nothing writes them: `LoopingMenuScrollMode` is 1, so wrapping with
+        disabled items skipped is the real behaviour, and the highlight is
+        `HighlightR/G/B` = 128/64/0, the frontend's orange.
+        Checked the same way as everything else: `tools/bmenu_check.py`
+        diffs the C against a second Python implementation over an identical
+        event script -- messages, per-item state and live colour after every
+        step -- 3,234 lines on `FRONTB.BUN` and 1,783 on `INGAMEB.BUN`, 0
+        differ. And looked at: `tools/flailer_render.py --menu-item N
+        --gray M` applies the same recolouring to a composited PNG, and
+        `NEW_MAIN_MENU` comes out with the right entry in the right orange.
+        `main.c` now navigates the screen it is showing with the D-pad.
+18. [x] Milestone acceptance: EA logo -> publisher logos -> legal/PSA
+        screens -> main menu, real assets, navigable on 3DS controls.
+        **Accepted, on the emulator, with the sequence trimmed to what the
+        disc actually contains.** Two of the four things this milestone names
+        do not exist on NFSHP2: there are no publisher logos beyond EA's --
+        `MOVIES\INTRO` holds `EALOGO_EN.AVI` and a `NFSINTRO_EN.AVI` that was
+        never pressed (task 15) -- and the legal/PSA screens are gated off by
+        `ShouldSeeLegalMumboJumbo` (`0x0016a648`), which is `return 0`, with
+        `EA_LEGAL` in `DYNTEX.BIN` reading "PLACEHOLDER LEGAL SCREEN". So the
+        shipped sequence is BootAutoload -> title screen with the EA logo
+        movie -> PRESS START -> main menu, and that is what the port does.
+        `tools/run_azahar_test.ps1` is the acceptance test: it boots the
+        `.3dsx` in Azahar, waits on lines in `sdmc:/nfshp2_debug.txt`, drives
+        START / D-pad / A / B / SELECT in with `PostMessage`, captures the
+        window at each step with `PrintWindow(PW_RENDERFULLCONTENT)`, and
+        asks the app to leave its main loop rather than killing it so the
+        texture tally comes out with it. Method lifted wholesale from
+        NFSU2-3DS; the three things that make it work at all (`.3dsx` not
+        `.cia`, `PW_RENDERFULLCONTENT`, `SetProcessDPIAware` first) are in
+        the script's header. Current verdict: **PASS -- booted, movie played
+        90/90 frames at 512x256/30fps, reached the main menu, exited
+        cleanly; 19 textures cached, 0 missing, 0 fonts missing**, 60 fps at
+        100% speed, nine screenshots.
+        Looking at those screenshots found two defects a cross-check could
+        not, which is exactly why the rule exists:
+        **The title screen rendered as PRESS START on an empty field** -- no
+        NFS logo, no top border. `texpack_upload` refused anything that was
+        not a power of two, on a comment that claimed "every texture in these
+        packs already satisfies" it. Nothing had checked: **292 of FRONTB's
+        397 are not**, nor are `LOADING` (512x184) or `TOP_BORDER` (512x24).
+        The GS takes any size, the PICA200 does not. Fixed by padding the
+        allocation up to the next power of two per axis with the image in the
+        top-left and the edge texel repeated into the pad (so GPU_LINEAR at
+        the image edge blends with a copy of itself, as CLAMP_TO_EDGE did),
+        the caller sizing the quad from `TexInfo` and taking UVs against
+        `C3D_Tex`'s padded `width`/`height`. The title screen and the main
+        menu's grid, panels and logo all appear.
+        **Selecting anything in the main menu did nothing**, and B then
+        dropped to the title screen, which replays the EA logo -- which is
+        what it looked like from the outside. Two separate causes.
+        `New Main Menu` was registered with `bgf_plain_screen_callback`, and
+        `menuCallback` threw away the item hash and sent the *screen's*, so a
+        three-way test on the item could never have matched. Ported
+        `NewMainMenu::HandleEvent` (`0x00203768`) properly: SELECT routes
+        `MENUITEM_1` "Hot Pursuit" to `CopsOn = 1` + `"Cops On Mode Select"`
+        (`0x00203800`), `MENUITEM_2` "World Racing" to `CopsOn = 0` +
+        `"Cops Off Mode Select"` (`0x00203818`), and `MENUITEM_3` "Options"
+        to `"Options"` (`0x00203830`); added `bgf_menu_item_event()` so the
+        item's own hash goes with the message. None of those three screens is
+        in the registry yet, so the flow traces `unregistered Options` and is
+        left with no current screen -- which is also what `ChangeToScreen`
+        does, since it clears `pCurrent` *before* the lookup. All three push
+        `New Main Menu`, so B comes back. Covered by a new `mainmenu`
+        scenario in the boot-flow cross-check (12 scenarios, 3,659 lines, 0
+        differ), and `final` now prints `CopsOn`.
+        One thing that looks like a bug and is not: re-entering the title
+        screen replays the EA logo from the start. `TitleScreen::Callback`
+        (`0x0016a590`) allocates a **new** `TitleScreen` on every ACTIVATE,
+        and the constructor (`0x0016a1d0`) stores zero to `movieIndex` at
+        `0x0016a224` and opens movie 0 unconditionally. The PS2 does the
+        same thing.
 
 ## Phase 3 -- Core engine systems
 

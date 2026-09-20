@@ -58,8 +58,17 @@ docs/formats/texture-pack.md for the layout the swizzled case unpicks.
 Mipmapped textures store the chain after the base level (data size is then
 4/3 of width*height*bpp/8); only the base level is emitted.
 
+The sibling container 0xb0300100 is the TextureAnimPack: the flipbook
+animations, in the same three-leaf shape (0x30300101 header, 0x30300102 a
+table of 52-byte TextureAnim records, 0x30300103 one flat run of 16-byte
+TextureAnimEntry records). An animation owns the next NumFrames entries, and
+the runtime plays it by rotating the frames' pixel/CLUT pointers among their
+TextureInfo records rather than re-uploading anything. `--anims` lists them;
+a conversion run writes an anims.csv beside the PNGs.
+
 Usage:
     python tools/texture_convert.py <file> --list
+    python tools/texture_convert.py <file> --anims
     python tools/texture_convert.py <file> <outdir>
     python tools/texture_convert.py <file> <outdir> --swizzle none
 """
@@ -75,11 +84,19 @@ PACK_INFO = 0x30300003
 PACK_DATA = 0x30300004
 RECORD_SIZE = 164
 
+# The TextureAnimPack sibling container, same three-leaf shape.
+ANIM_PACK = 0xB0300100
+ANIM_HEADER = 0x30300101
+ANIM_INFO = 0x30300102
+ANIM_ENTRIES = 0x30300103
+ANIM_SIZE = 52
+ANIM_ENTRY_SIZE = 16
+
 PSM_NAMES = {0x00: "PSMCT32", 0x13: "PSMT8", 0x14: "PSMT4"}
 
 
-def find_packs(buf, off=0, end=None, depth=0):
-    """Yield (offset, size) of every 0xb0300001 chunk, including nested ones."""
+def find_packs(buf, off=0, end=None, depth=0, want=TEXTURE_PACK):
+    """Yield (offset, size) of every `want` chunk, including nested ones."""
     if end is None:
         end = len(buf)
     while off + 8 <= end:
@@ -89,16 +106,34 @@ def find_packs(buf, off=0, end=None, depth=0):
         cend = off + 8 + csize
         if cend > end:
             break
-        if ctype == TEXTURE_PACK:
+        if ctype == want:
             yield off, csize
         elif ctype & 0x80000000 and depth < 8:
             # A .BUN bundle nests its packs inside other containers.
-            for hit in find_packs(buf, off + 8, cend, depth + 1):
+            for hit in find_packs(buf, off + 8, cend, depth + 1, want):
                 yield hit
         off = cend
 
 
+def align_up(x, n):
+    return (x + n - 1) & ~(n - 1)
+
+
 def parse_pack(buf, off, size):
+    """Return (name, info, data) for one 0xb0300001 texture pack.
+
+    `data` is what ImagePlacement and PalettePlacement are relative to, and
+    that is not the 0x30300004 payload: LoaderTexturePack (0x00100830)
+    rounds the payload address up to a 128-byte boundary first --
+
+        001008a8  addiu  s2,v0,143      ; v0 + 8 (the payload) + 135
+        001008b0  and    s2,s2,a3       ; a3 = -128
+
+    -- and the packer pads the gap with 0x11 bytes. The bundle is loaded at
+    a 128-byte-aligned address, so the file offset aligns the same way.
+    Miss this and every texture is shifted by up to 127 bytes, which reads
+    as a horizontal roll of the image.
+    """
     name, info, data = "", b"", b""
     p, end = off + 8, off + 8 + size
     while p + 8 <= end:
@@ -109,9 +144,46 @@ def parse_pack(buf, off, size):
         elif ctype == PACK_INFO:
             info = payload
         elif ctype == PACK_DATA:
-            data = payload
+            data = buf[align_up(p + 8, 128):p + 8 + csize]
         p += 8 + csize
     return name, info, data
+
+
+def parse_anim_pack(buf, off, size):
+    version, anims, entries = None, b"", b""
+    p, end = off + 8, off + 8 + size
+    while p + 8 <= end:
+        ctype, csize = struct.unpack_from("<II", buf, p)
+        payload = buf[p + 8:p + 8 + csize]
+        if ctype == ANIM_HEADER and csize >= 4:
+            version = struct.unpack_from("<I", payload, 0)[0]
+        elif ctype == ANIM_INFO:
+            anims = payload
+        elif ctype == ANIM_ENTRIES:
+            entries = payload
+        p += 8 + csize
+    return version, anims, entries
+
+
+def animations(anims, entries):
+    """Yield one dict per `TextureAnim` (52 bytes).
+
+    The entry table is one flat run of 16-byte `TextureAnimEntry` records,
+    `NumFrames` of them per animation in table order: the pack constructor
+    (`0x001a1650`) hands each animation a pointer into it and advances by
+    `NumFrames * 16`, so the split is implied rather than stored.
+    """
+    cursor = 0
+    for r in range(0, len(anims) - ANIM_SIZE + 1, ANIM_SIZE):
+        rec = anims[r:r + ANIM_SIZE]
+        a = {"name": rec[:24].split(b"\0")[0].decode("latin-1")}
+        a["hash"], a["frames"], a["fps"], a["timebase"] =             struct.unpack_from("<Iiii", rec, 24)
+        a["frame_hashes"] = [
+            struct.unpack_from("<I", entries, (cursor + i) * ANIM_ENTRY_SIZE)[0]
+            for i in range(max(0, a["frames"]))
+            if (cursor + i + 1) * ANIM_ENTRY_SIZE <= len(entries)]
+        cursor += max(0, a["frames"])
+        yield a
 
 
 def textures(info):
@@ -131,7 +203,27 @@ def textures(info):
         (t["tbw"], t["is32bit_swizzled"]) = struct.unpack_from("<Bb", info, r + 0x54)
         (t["levels"],) = struct.unpack_from("<b", info, r + 0x6E)
         t["levels"] += 1                       # NumMipMapLevels excludes the base
+        t["image_infos"] = [
+            struct.unpack_from("<HBb", info, r + 0x52 + i * 4)
+            for i in range(min(7, max(1, t["levels"])))]
         yield t
+
+
+def mip_chain(t):
+    """Yield (level, width, height, offset, nbytes) for a texture's mip chain.
+
+    The levels sit one after another in the pack's data blob, base first,
+    each halving both dimensions. Checked across the archive: the sum matches
+    the record's own `0x38` byte count on all 1,755 textures that own their
+    pixels, at every level count from 1 to 7.
+    """
+    off = 0
+    for level in range(max(1, t["levels"])):
+        w = max(1, t["width"] >> level)
+        h = max(1, t["height"] >> level)
+        n = w * h * t["bpp"] // 8
+        yield level, w, h, off, n
+        off += n
 
 
 # --- PS2 texture swizzle -------------------------------------------------
@@ -220,22 +312,66 @@ def geometry_closes(w, h, bpp):
     return w % 128 == 0 and h % (64 if bpp == 8 else 128) == 0
 
 
-def read_palette(pal):
+# A PSMT8 CLUT is stored in GS CSM1 order, so entries 8..15 and 16..23 of
+# every group of 32 are the other way round. bWare names the permutation
+# itself: `RemapLinearIntoClut8__FPUiT0` (0x00118878) is the routine that puts
+# a palette the engine *built* into that order, and all it does is swap those
+# two quadword pairs --
+#
+#   0011889c  lq  v0,64(t2)   ; entries 16..19
+#   001188b8  sq  v0,32(t3)   ; ... stored where 8..11 would be
+#   00118894  lq  t0,32(t2)   ; entries 8..11
+#   001188c0  sq  t0,64(t3)   ; ... stored where 16..19 would be
+#
+# eight times over 32 entries a pass. Pack CLUTs are uploaded raw, never
+# through that routine, so they are already in CSM1 order and the host has to
+# undo it. The permutation is an involution, so the same table does both.
+#
+# A PSMT4 CLUT is linear: its CSM1 region is 8x2 words, with nothing to
+# exchange. The two sizes are told apart by `bpp`, not by the entry count --
+# `TUNNELROADSIDEB` carries a 32-entry PSMT8 CLUT and needs the swap inside
+# that one group just as much (its grey ramp runs 1..7 then 16..23, with
+# 9..15 left white).
+
+
+def clut_order(entries, bpp):
+    """Stored index for each logical palette index."""
+    if bpp != 8:
+        return range(entries)
+    out = []
+    for i in range(entries):
+        j = i ^ 0x18 if (i & 0x18) in (0x08, 0x10) else i
+        out.append(j if j < entries else i)
+    return out
+
+
+def read_palette(pal, bpp=8):
     """PS2 RGBA8 -> RGBA8888. Alpha is 0..128, so it doubles into 0..255."""
     entries = len(pal) // 4
     out = bytearray(entries * 4)
-    for i in range(entries):
-        out[i * 4:i * 4 + 3] = pal[i * 4:i * 4 + 3]
-        out[i * 4 + 3] = min(255, pal[i * 4 + 3] * 2)
+    for i, s in enumerate(clut_order(entries, bpp)):
+        out[i * 4:i * 4 + 3] = pal[s * 4:s * 4 + 3]
+        out[i * 4 + 3] = min(255, pal[s * 4 + 3] * 2)
     return out, entries
 
 
-def decode(t, data, swizzle="auto"):
-    """Return (width, height, RGBA bytes) for one texture, or None if unsupported."""
-    w, h, bpp = t["width"], t["height"], t["bpp"]
-    if w == 0 or h == 0:
+def decode(t, data, swizzle="auto", level=0):
+    """Return (width, height, RGBA bytes) for one mip level, or None.
+
+    `level` 0 is the base image. Each level carries its own
+    `Is32BitSwizzelled` flag in the `0x52` array, so a chain can be swizzled
+    at some sizes and raster at others.
+    """
+    bpp = t["bpp"]
+    for lvl, lw, lh, loff, lsize in mip_chain(t):
+        if lvl == level:
+            w, h, base, size = lw, lh, t["data_offset"] + loff, lsize
+            break
+    else:
         return None
-    px = data[t["data_offset"]:t["data_offset"] + t["data_size"]]
+    if w == 0 or h == 0 or size == 0:
+        return None
+    px = data[base:base + size]
     pal = data[t["palette_offset"]:t["palette_offset"] + t["palette_size"]]
 
     if bpp == 32:
@@ -249,12 +385,13 @@ def decode(t, data, swizzle="auto"):
 
     if bpp not in (4, 8) or not pal:
         return None
-    rgba, entries = read_palette(pal)
+    rgba, entries = read_palette(pal, bpp)
 
     # Only the textures flagged at +0x55 are swizzled; the rest are plain
     # raster. `all` forces the unswizzle anyway, for checking a hunch.
-    unswizzle = (swizzle == "all"
-                 or (swizzle == "auto" and t["is32bit_swizzled"] == 1))
+    infos = t.get("image_infos") or []
+    flag = infos[level][2] if level < len(infos) else t["is32bit_swizzled"]
+    unswizzle = swizzle == "all" or (swizzle == "auto" and flag == 1)
     unswizzle = unswizzle and geometry_closes(w, h, bpp)
 
     if bpp == 8:
@@ -304,18 +441,50 @@ def main():
     ap.add_argument("file")
     ap.add_argument("out_dir", nargs="?")
     ap.add_argument("--list", action="store_true", help="print the table, convert nothing")
+    ap.add_argument("--anims", action="store_true",
+                    help="print the 0xb0300100 TextureAnimPack table, convert nothing")
+    ap.add_argument("--mips", action="store_true",
+                    help="also write every mip level below the base, as "
+                         "<name>.mip<N>.png")
     ap.add_argument("--swizzle", choices=("auto", "none", "all"), default="auto",
                     help="auto: unswizzle exactly the textures flagged at +0x55 "
                          "(the default, and what the game does); none: dump the "
                          "data as stored; all: unswizzle every paletted texture")
     a = ap.parse_args()
-    if not a.list and not a.out_dir:
-        ap.error("give an output directory, or --list")
+    if not a.list and not a.anims and not a.out_dir:
+        ap.error("give an output directory, or --list, or --anims")
 
     buf = Path(a.file).read_bytes()
     packs = list(find_packs(buf))
-    if not packs:
+    anim_packs = list(find_packs(buf, want=ANIM_PACK))
+    if not packs and not anim_packs:
         raise SystemExit("no 0xb0300001 texture pack in %s" % a.file)
+
+    # Animations reference their frames by name hash, so build the reverse map
+    # from every texture table in the file before anything else.
+    by_hash = {}
+    for off, size in packs:
+        _pname, info, _data = parse_pack(buf, off, size)
+        for t in textures(info):
+            by_hash.setdefault(t["hash"], t["name"])
+
+    if a.anims:
+        if not anim_packs:
+            print("no 0xb0300100 anim pack in %s" % a.file)
+            return
+        for off, size in anim_packs:
+            version, anims, entries = parse_anim_pack(buf, off, size)
+            rows = list(animations(anims, entries))
+            print("== anim pack @0x%x: version %s, %d animations, %d frames =="
+                  % (off, version, len(rows), len(entries) // ANIM_ENTRY_SIZE))
+            for an in rows:
+                print("%-26s %08x  %2d frames  %3d fps  timebase %d"
+                      % (an["name"], an["hash"], an["frames"], an["fps"],
+                         an["timebase"]))
+                for i, h in enumerate(an["frame_hashes"]):
+                    print("    %2d  %08x  %s"
+                          % (i, h, by_hash.get(h, "<not in this file>")))
+        return
 
     written = skipped = 0
     for off, size in packs:
@@ -345,8 +514,36 @@ def main():
             d.mkdir(parents=True, exist_ok=True)
             write_png(d / (safe_name(t) + ".png"), *got)
             written += 1
-    if not a.list:
-        print("wrote %d PNGs (%d skipped) to %s" % (written, skipped, a.out_dir))
+            if a.mips and not t["shares_with"]:
+                for level in range(1, t["levels"]):
+                    sub = decode(t, data, a.swizzle, level)
+                    if sub is None:
+                        continue
+                    write_png(d / ("%s.mip%d.png" % (safe_name(t), level)), *sub)
+                    written += 1
+    if a.list:
+        return
+
+    # One row per frame, in play order, so the sequence can be rebuilt from
+    # the PNGs without re-reading the chunk.
+    rows = [("animation", "hash", "frames", "fps", "timebase",
+             "frame", "texture", "file")]
+    for off, size in anim_packs:
+        _version, anims, entries = parse_anim_pack(buf, off, size)
+        for an in animations(anims, entries):
+            for i, h in enumerate(an["frame_hashes"]):
+                name = by_hash.get(h, "")
+                rows.append((an["name"], "%08x" % an["hash"], an["frames"],
+                             an["fps"], an["timebase"], i, name,
+                             (name + ".png") if name else ""))
+    if len(rows) > 1:
+        out = Path(a.out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        with open(out / "anims.csv", "w", encoding="utf-8", newline="\n") as f:
+            for row in rows:
+                f.write(",".join(str(c) for c in row) + "\n")
+    print("wrote %d PNGs (%d skipped) and %d animation frames to %s"
+          % (written, skipped, len(rows) - 1, a.out_dir))
 
 
 if __name__ == "__main__":
