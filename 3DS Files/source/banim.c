@@ -1,5 +1,7 @@
 #include "banim.h"
 
+#include "bmath.h"
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -431,46 +433,6 @@ int banim_exit_message(BAnim* a, BExitAnim* e, int message,
     return 1;
 }
 
-// ------------------------------------------------------------------- bSin
-//
-// bSin(float) (0x00241e98) is two functions: the float overload converts
-// radians to a 16-bit binary angle and the unsigned-short one turns that
-// back into radians and runs a five-term Taylor series. So the sine is
-// quantised to 1/65536 of a turn on the way in, and the two constants that
-// do the converting are not exact inverses (10430.37793 and 9.587380191e-05
-// against 65536/2pi = 10430.3783505 and 2pi/65536 = 9.58737992e-05).
-// Reproduced rather than replaced with sinf(), because the bloom's easing
-// is visible and stepping is part of it.
-
-#define BANIM_RAD_TO_BAM  10430.37793f
-#define BANIM_BAM_TO_RAD  9.587380191e-05f
-
-float banim_bsin(float radians)
-{
-    // (unsigned short)(int)(radians * 10430.37793f). The cast to int
-    // truncates toward zero and the mask makes it an unsigned angle, so a
-    // negative argument wraps rather than clamping.
-    uint16_t bam = (uint16_t)(uint32_t)(int32_t)(radians * BANIM_RAD_TO_BAM);
-    float    x   = (float)bam * BANIM_BAM_TO_RAD;
-    float    sign = 1.0f;
-    float    x2, x3, x5, x7, x9;
-
-    if (4.712388992f <= x) x -= 6.283185482f;    // >= 3pi/2: subtract a turn
-    if (1.570796371f <= x) {                     // >= pi/2: reflect
-        sign = -1.0f;
-        x -= 3.141592741f;
-    }
-    // Written in the order the FPU does it, because the terms are added and
-    // subtracted in that order and float addition is not associative.
-    x2 = x * x;
-    x3 = x * x2;
-    x5 = x3 * x2;
-    x7 = x5 * x2;
-    x9 = x7 * x2;
-    return (((x - x3 * 0.1666666716f) + x5 * 0.008333333768f)
-            - x7 * 0.0001984127011f + x9 * 2.755731884e-06f) * sign;
-}
-
 // --------------------------------------------------- tHighlightAnimation
 
 void banim_highlight_init(BAnim* a, BHighlightAnim* h, uint32_t screen,
@@ -523,10 +485,10 @@ void banim_highlight_animate(BAnim* a, BHighlightAnim* h)
         // that shipped. At t = HighlightAnimationTime the argument is
         // therefore just short of the peak and bSin returns 0.99999994.
         float u     = (t * 1.57075f) / BANIM_HL_TIME;
-        float s     = banim_bsin(u);
+        float s     = bSinF(u);
         float alpha = BANIM_HL_START_ALPHA
                       + (BANIM_HL_END_ALPHA - BANIM_HL_START_ALPHA)
-                        * banim_bsin(u);
+                        * bSinF(u);
         int   src   = hObjectExists(a, h->screen, h->currentItem,
                                     BANIM_TYPE_TEXT);
         int   dst   = hObjectExists(a, h->screen, h->textObject,

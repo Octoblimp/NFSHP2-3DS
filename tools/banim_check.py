@@ -44,7 +44,10 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild                                    # noqa: E402
 
-SOURCES = ["tools/src/banim_test.c", "3DS Files/source/banim.c"]
+SOURCES = ["tools/src/banim_test.c",
+           "3DS Files/source/banim.c",
+           "3DS Files/source/bmath.c",
+           "3DS Files/source/bmathtab.c"]
 
 NL = chr(10)
 
@@ -587,29 +590,11 @@ class Exit(object):
 
 # -------------------------------------------------------------------- bSin
 
-RAD_TO_BAM = f32(10430.37793)
-BAM_TO_RAD = f32(9.587380191e-05)
-
-
-def bsin(radians):
-    bam = trunc(f32(f32(radians) * RAD_TO_BAM)) & 0xffff
-    x = f32(f32(bam) * BAM_TO_RAD)
-    sign = f32(1.0)
-    if f32(4.712388992) <= x:
-        x = f32(x - f32(6.283185482))
-    if f32(1.570796371) <= x:
-        sign = f32(-1.0)
-        x = f32(x - f32(3.141592741))
-    x2 = f32(x * x)
-    x3 = f32(x * x2)
-    x5 = f32(x3 * x2)
-    x7 = f32(x5 * x2)
-    x9 = f32(x7 * x2)
-    r = f32(x - f32(x3 * f32(0.1666666716)))
-    r = f32(r + f32(x5 * f32(0.008333333768)))
-    r = f32(r - f32(x7 * f32(0.0001984127011)))
-    r = f32(r + f32(x9 * f32(2.755731884e-06)))
-    return f32(r * sign)
+# This file used to carry its own five-term series. bmath_check.py now has
+# the same one, written from the same listing at 0x00241df8 and mutation-
+# tested against 3DS Files/source/bmath.c, so there is no reason to keep two
+# Python copies that can drift apart.
+from bmath_check import bSinF as bsin                             # noqa: E402
 
 
 # ---------------------------------------------------- tHighlightAnimation

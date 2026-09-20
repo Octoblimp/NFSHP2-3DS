@@ -294,12 +294,9 @@ void banim_highlight_set_item(BAnim* a, BHighlightAnim* h, uint32_t item);
 void banim_highlight_force_start(BAnim* a, BHighlightAnim* h);
 void banim_highlight_animate(BAnim* a, BHighlightAnim* h);
 
-// bSin (0x00241e98 -> 0x00241df8). Exported because the bloom's easing is
-// the only thing in the frontend that uses it, and because it is worth
-// being able to test on its own: the float overload quantises its argument
-// to a 16-bit binary angle before the polynomial runs, so the curve steps.
-// bMath is task 19; when that lands, this moves there.
-float banim_bsin(float radians);
+// bSin used to live here as banim_bsin, because the bloom's easing is the
+// only thing in the frontend that calls it and bMath had not been ported
+// yet. It is bmath.h's bSinF now; banim.c includes that.
 
 // ------------------------------------------------------ feAnimAlphaElement
 

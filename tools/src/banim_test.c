@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "banim.h"
+#include "bmath.h"
 
 #define SIXTIETH (1.0f / 60.0f)
 
@@ -374,7 +375,7 @@ static void scBsin(void)
         -0.5f, -1.5707963f, 0.0099f, 1.57075f, 0.7853750f
     };
     for (int i = 0; i < (int)(sizeof(kAngles) / sizeof(kAngles[0])); i++) {
-        float r = banim_bsin(kAngles[i]);
+        float r = bSinF(kAngles[i]);
         printf("bsin %.9g = %.9g\n", (double)kAngles[i], (double)r);
     }
 }

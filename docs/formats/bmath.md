@@ -1,16 +1,20 @@
 # bMath, bVector, bMatrix, bQuaternion
 
-**Status: decode notes. Nothing here is ported yet.** This is the raw material
-for task 19, written down at the end of Session 11 so the disassembly does not
-have to be redone. Every rule below carries the address it came from; where a
-claim rests on something weaker than a direct reading, it says so.
+**Status: ported and cross-checked.** All four objects are in
+`3DS Files/source` as `bmath.c`, `bmathtab.c`, `bvector.c`, `bmatrix.c` and
+`bquat.c`. Two checkers hold them to this document: `tools/bmath_check.py`
+(18 scenarios) and `tools/bvector_check.py` (27), each a Python model written
+from the disassembly and diffed against the C line for line, and each
+mutation-tested so that a checker which cannot fail does not get to claim a
+pass. Every rule below carries the address it came from; where a claim rests
+on something weaker than a direct reading, it says so.
 
 Four contiguous objects, 10.3 KB of `.text`, 73 functions:
 
 | object | range | functions | decoded |
 |--------|-------|-----------|---------|
 | `bVector.obj` | `0x00240198`-`0x002411f0` | 38 | all |
-| `bQuaternion.obj` | `0x002411f0`-`0x00241bc8` | 9 + 1 initialiser | 3 of 9 |
+| `bQuaternion.obj` | `0x002411f0`-`0x00241bc8` | 9 + 1 initialiser | all |
 | `bMath.obj` | `0x00241bc8`-`0x002424f8` | 19 | all |
 | `bMatrix.obj` | `0x002424f8`-`0x00242890` | 7 | all |
 
@@ -29,10 +33,11 @@ bFixVector3  12 B   int x, y, z                  (Q16)
 
 Angles are **BAM**: a 16-bit binary angle, `0x4000` = 90 degrees. The two
 conversion constants appear all over the engine and are float32 literals, not
-the exact ratios: `RAD_TO_BAM = 10430.37793` (`0x4622f9b4`) and
-`BAM_TO_RAD = 9.587380191e-05`. `32768/pi` is `10430.378350...`, so the shipped
-constant is 3.3e-5 low. That difference is load-bearing in at least one place
--- see the atan tables below.
+the exact ratios: `RAD_TO_BAM = 10430.37793` (`0x4622f983`) and
+`BAM_TO_RAD = 9.587380191e-05` (`0x38c90fdb`). `32768/pi` is
+`10430.3783504705`, so the shipped constant is the correctly-rounded float32
+of it, 4.2e-4 below -- 0.04 ppm. That sounds far too small to matter anywhere
+and it decides the atan tables; see below.
 
 ---
 
@@ -419,9 +424,13 @@ vmaddw  vf12, vf11, vf4w     ; vf4..vf7  = *m2 (the third argument)
 ```
 
 so `o.row[i] = sum_j m2[i][j] * m1.row[j]`, i.e. **`*o = *m2 * *m1`** -- the
-arguments multiply right-to-left. This is decoded from the instruction
-encodings, not yet cross-checked against a caller, so verify it before relying
-on it. The four COP2 words are `0x4be441bc`, `0x4be448bd`, `0x4be450be`,
+arguments multiply right-to-left. This is decoded from the instruction encodings. It does not need a caller to
+confirm it: the vector overload at `0x00242770` runs the same four-instruction
+pattern with a *vector* in the broadcast slot, which can only be
+`out = v.x*m.row0 + v.y*m.row1 + v.z*m.row2 + v.w*m.row3` -- a row vector on
+the left. The matrix-matrix form puts `m2`'s rows in that same slot, so it
+transforms each row of `m2` by `m1`, and the arguments multiply right to
+left. The four COP2 words are `0x4be441bc`, `0x4be448bd`, `0x4be450be`,
 `0x4be45b0b`; the fields are `dest = bits 24..21`, `ft = 20..16`, `fs = 15..11`,
 `fd = 10..6`, `function = 5..0`, and for functions `0x3c`-`0x3f` the real
 opcode is the Special2 entry at index `(fd << 2) | (function & 3)`.
@@ -441,8 +450,6 @@ sixteen floats before writing any, so `o == m` is safe.
 ---
 
 ## bQuaternion.obj
-
-Three of nine decoded.
 
 **`bQuaternion::bQuaternion(const bMatrix4&)`** `0x002411f0` -- Shepperd's
 method, with the usual two branches. The trace test goes through the soft-float
@@ -474,7 +481,10 @@ if ((double)trace > 0.0) {
 ```
 
 Note the guard is `s != 0` and it leaves `s` un-reciprocated when `s == 0`,
-rather than zeroing the three outputs.
+rather than zeroing the three outputs. It is also dead code: `s == 0` means
+`m[i][i] + 1 == m[j][j] + m[k][k]`, and because `i` indexes the largest
+diagonal that forces `m[i][i] >= 1` and so a trace of `2*m[i][i] + 1 >= 3`,
+which would have taken the branch above. Ported anyway.
 
 **`bQuaternion::GetMatrix(bMatrix4*)`** `0x002414b0` -- the standard
 quaternion-to-matrix expansion off `x+x`, `y+y`, `z+z`, writing the fourth row
@@ -484,12 +494,50 @@ and column as `(0,0,0,1)`. The exact add/subtract order is at
 **`bIdentityQuaternion`** `0x00315290`, set to `(0, 0, 0, 1)` by
 `_GLOBAL_$I$bIdentityQuaternion` at `0x00241ba0`.
 
-Not yet decoded: **`bSlerp`** `0x00241570` (384 B, uses VU0 -- the listing is in
-`dis_bquat.txt` from `0x002415a8`), **`bConjugate`** `0x002416f0`,
-**`bLength`** `0x00241728`, **`bNormalize`** `0x00241758`, **`bMult`**
-`0x00241798`, **`bQuaternionToMatrix`** `0x00241800`, **`bMatrixToQuaternion`**
-`0x002418c0` (732 B, the largest in the object -- presumably the same Shepperd
-branch as the constructor, but confirm rather than assume).
+**`bLength`** `0x00241728` -- `sqrtf(((x*x + y*y) + z*z) + w*w)`. The sum
+accumulates in the x lane of a VU0 register, one `vadd?.x` per component, so
+that order is the hardware's and not a choice.
+
+**`bNormalize`** `0x00241758` -- the same sum, then `VRSQRT` against `vf0.w`
+(`0x0024176c`: `fsf` selects w, `ftf` selects x) and all four lanes scaled by
+the result. No zero guard. The port uses `1.0f / sqrtf()`, which is more
+accurate than the VU's estimate; that is the one deliberate numeric
+divergence in the whole library.
+
+**`bConjugate`** `0x002416f0` -- negates x, y, z, copies w, returns `a0`.
+
+**`bMult`** `0x00241798` -- the Hamilton product. `vopmula.xyz` on
+(`vf3`=a, `vf2`=b) followed by `vopmsub.xyz vf4, vf2, vf3` is the cross
+product `a x b`; the vector part is then built as
+`a*b.w + (b*a.w + (a x b))`, in that grouping, and
+`w = a.w*b.w - dot3(a.xyz, b.xyz)` comes off the scalar FPU and is stored
+last, over the w lane the quadword store just wrote.
+
+**`bSlerp`** `0x00241570` -- `cos = dot4(a, b)` on VU0. If
+`0.05 < 1 - |cos|` (the epsilon is at `gp-26976` = `0x00322290`,
+`0x3d4ccccd`): `theta = 16384 - bASin(|cos|)`, `sin = bSinBam(theta)`, and
+the two weights are `bSinBam((u16)(int)((1-t)*theta)) / sin` and
+`bSinBam((u16)(int)(t*theta)) / sin`. Otherwise it is a plain lerp,
+`ka = 1-t`, `kb = t`, with no renormalise. Then `if (cos < 0) ka = -ka` --
+a's weight only, which is what takes the short way round -- and
+`o = b*kb + a*ka`.
+
+The epsilon test is what keeps `bASin`'s argument inside the table. `bASin`
+indexes `bASinTable` from `x * 65536` and an argument above 1 indexes past the
+end of it, so **callers must pass unit quaternions**. Nothing in the routine
+checks.
+
+**`bQuaternionToMatrix`** `0x00241800` -- the same matrix as `GetMatrix`,
+built in a different order: `m00 = (1 - yy2) - zz2` here against
+`m00 = 1 - (yy2 + zz2)` there. The two disagree in the last bit and both ship
+with callers, so the port keeps both.
+
+**`bMatrixToQuaternion`** `0x002418c0` (732 B, the largest in the object) --
+the constructor's Shepperd branch again, instruction for instruction, with the
+matrix staged at `sp+16` (row-major, `m[i][i]` at `20i`), `next[]` copied to
+`sp+80` and `q4[]` at `sp+0`. One difference: the `s != 0` test is a plain
+`c.eq.s` rather than the soft-double pair. Same predicate, so the port has one
+function for both.
 
 ---
 
@@ -506,7 +554,7 @@ Data tables:
 
 | symbol | address | size | contents |
 |--------|---------|------|----------|
-| `bASinTable` | `0x003152a0` | 1672 B | 209 x `{u16 angle; u16 pad; float slope}`, 192 used |
+| `bASinTable` | `0x003152a0` | 1672 B | 209 x `{u16 angle; u16 pad; float slope}`, 0..207 reachable |
 | `bSinTable` | `0x00315928` | 1026 B | 513 x `s16` |
 | `bFixATanTableLow` | `0x00315d30` | 258 B | 129 x `u16` |
 | `bFixATanTableHigh` | `0x00315e38` | 258 B | 129 x `u16` |

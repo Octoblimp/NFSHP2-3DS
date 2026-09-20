@@ -26,7 +26,10 @@ BS = chr(92)
 NL = chr(10)
 
 MSYS_BASH = Path("C:/devkitPro/msys2/usr/bin/bash.exe")
-FLAGS = ["-O2", "-std=c11", "-Wall", "-Wextra"]
+# -ffp-contract=off so the host cannot fuse a multiply and an add into
+# one rounding step. The PS2 does not fuse, and a checker that let the
+# host do it would report a diff that only exists on this machine.
+FLAGS = ["-O2", "-std=c11", "-Wall", "-Wextra", "-ffp-contract=off"]
 
 
 def msys(path):

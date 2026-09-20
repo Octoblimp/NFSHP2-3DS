@@ -542,32 +542,38 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
 
 ## Phase 3 -- Core engine systems
 
-19. [~] Math/vector/quaternion/matrix (`bMath`, `bVector`, `bQuaternion`,
+19. [x] Math/vector/quaternion/matrix (`bMath`, `bVector`, `bQuaternion`,
         `bMatrix`). Four contiguous objects, 73 functions, 10.3 KB of
         `.text`: `bVector.obj` `0x00240198`, `bQuaternion.obj` `0x002411f0`,
-        `bMath.obj` `0x00241bc8`, `bMatrix.obj` `0x002424f8`.
-        **Decode is written up in `docs/formats/bmath.md`; no code is
-        written yet.** Done: all 19 of `bMath.obj`, all 38 of
-        `bVector.obj`, all 7 of `bMatrix.obj`, 3 of 9 in
-        `bQuaternion.obj`. Remaining to decode: `bSlerp` (`0x00241570`),
-        `bConjugate` (`0x002416f0`), `bLength` (`0x00241728`),
-        `bNormalize` (`0x00241758`), `bMult` (`0x00241798`),
-        `bQuaternionToMatrix` (`0x00241800`), `bMatrixToQuaternion`
-        (`0x002418c0`).
-        Four data tables have to come across with the code: `bASinTable`
-        (`0x003152a0`), `bSinTable` (`0x00315928`), `bFixATanTableLow`
-        (`0x00315d30`) and `bFixATanTableHigh` (`0x00315e38`). The two
-        atan tables regenerate exactly as
+        `bMath.obj` `0x00241bc8`, `bMatrix.obj` `0x002424f8`. All 73
+        decoded and ported: `bmath.c`, `bmathtab.c`, `bvector.c`,
+        `bmatrix.c` and `bquat.c` with their headers, in
+        `3DS Files/source`. The decode is written up in
+        `docs/formats/bmath.md`, address by address.
+        Two checkers hold the C to that document, each an independent
+        Python model written from the disassembly and diffed line for
+        line, each mutation-tested so a checker that cannot fail does not
+        get to claim a pass: `tools/bmath_check.py` (18 scenarios, 6065
+        lines, 12 of 12 mutations caught) and `tools/bvector_check.py`
+        (27 scenarios, 5721 lines, 23 of 23).
+        `tools/gen_bmath_tables.py --check` holds `bmathtab.c` to the ELF.
+        The two atan tables regenerate exactly as
         `(int)(atan(i/s) * 10430.3779296875)` -- the float32-rounded BAM
-        constant, not `32768/pi`; `bSinTable` does not regenerate from any
-        model found and must be embedded verbatim.
-        When `bmath.c` lands, `banim.c` loses its private `banim_bsin` and
-        calls `bMath`'s `bSin` instead. `tCubic1D` stays in `banim.c` --
-        it is `Point.obj`, game code, not bware.
-        Still to do: write `bmath.c`/`.h`, `bvector.c`/`.h`,
-        `bmatrix.c`/`.h`, `bquat.c`/`.h`; `tools/src/bmath_test.c` +
-        `tools/bmath_check.py` as the usual independent model; then
-        mutation-test it and fold `banim_bsin` out.
+        constant, not `32768/pi`; `bSinTable` and `bASinTable` do not
+        regenerate from any model found and are embedded verbatim.
+        `banim.c`'s private `banim_bsin` is gone, folded into `bMath`'s
+        `bSinF`. `tCubic1D` stays in `banim.c` -- it is `Point.obj`, game
+        code, not bware.
+        Two deliberate divergences, both stated at the site: the
+        quaternion `bNormalize` uses a true reciprocal square root where
+        VU0 uses a hardware estimate, and the host checker build compiles
+        with `-ffp-contract=off` so it cannot fuse a multiply-add that the
+        EE does not fuse.
+        Hazard carried forward: `bSlerp`'s 0.05 epsilon is the only thing
+        keeping `bASin`'s argument inside `bASinTable`. Callers must pass
+        unit quaternions; nothing in the routine checks, and an
+        out-of-range argument reads past the end of the table rather than
+        returning a wrong answer.
 20. [ ] Memory/slot-pool allocator (`bSlotPool`/`bNewSlotPool`) on top of `heapcfg.c`
 21. [ ] Rendering: VU1 geometry submission -> citro3d equivalent
 22. [ ] Sound: new 3DS DSP driver behind the recovered `bDriver`/`bSnd` interface
