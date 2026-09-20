@@ -1944,3 +1944,135 @@ top of `bvector_test.c` so the gap is a decision and not an oversight.
 Task 20, `bSlotPool` / `bNewSlotPool` (`0x0023f508`-`0x00240198`), sitting
 directly below `bVector.obj` in `.text`, on top of the existing `heapcfg.c`.
 `CONTINUE.md` has the pick-up-here list.
+
+---
+
+## Session 13 (2026-09-20) -- the slot-pool allocator, and what a leak looks like
+
+Task 20. `bSlotPool.obj`, `0x0023f508`-`0x00240198`, 3216 bytes, 34 symbols,
+all decoded and ported. `3DS Files/source/bslotpool.c` / `.h`, written up
+address by address in `docs/formats/bslotpool.md`,
+`tools/src/bslotpool_test.c` driving the C and `tools/bslotpool_check.py`
+modelling it again in Python from the listing.
+
+```
+17 scenarios, 990 lines, 0 differ   (37/37 mutations caught)
+```
+
+The shape is three layers: thin `bMalloc`/`bFree`-style forwarders, the
+`SlotPool` that does the work, and a `SlotPoolManager` holding every pool on
+bWare's intrusive `bTList`. Fixed-size blocks come out of one allocation, a
+free list runs through word 0 of every free slot, and a pool that runs dry
+grows a second pool chained behind the first.
+
+### An allocator's cross-check has to compare sequences
+
+`Malloc` returning "the third slot" is right or wrong only relative to every
+allocate, release, expand and clean-up before it, so nothing here compares a
+return value on its own. After every step both sides print the pool chain,
+the free list in walk order, the six counters, and -- as of this session --
+which arena blocks are still checked out. Three counters disagree with each
+other on purpose and the model reproduces all three: `numAllocatedSlots` on
+an expansion pool is not maintained during normal use at all (cleanup
+reconstructs it at `0x0023f858`/`0x0023f880`), `FlushSlotPool` rebuilds every
+free list but leaves the counters alone, and the printed Overflow column is
+`TotalNumSlots - NumSlots`, which is only ever non-zero after an expand.
+
+### The mutation test found one real hole
+
+**A `bDeleteSlotPool` that frees the head of an expansion chain and drops the
+rest moved 0 of 990 lines.** The transcript named a block's liveness only as
+a side effect of printing a pointer into it -- `P2!+0` marks a released block
+-- and after a teardown nothing prints one, so a leaked expansion pool was
+invisible in a transcript that otherwise reported everything. Both sides now
+end every scenario with an `arena:` line stating outright which blocks the
+arena handed out and which are still live. The mutation moves 10 lines.
+
+Same lesson as session 12's two: a passing cross-check proves the model and
+the code agree on what it was shown, and nothing else. The deck has to be
+asked whether it *can* see the failure, not just whether it passes.
+
+Two of the four first-round misses were defective mutations rather than deck
+holes, and both looked identical to a real hole at first:
+
+* clobbering only `node.next` in `new_pool` left `node.prev` NULL, so
+  `list_remove`'s guard still fired and the mutant behaved exactly like the
+  port. The divergence being tested is that *both* links start as garbage.
+* dropping the `oldFree` splice in `bExpandSlotPool` left the variable
+  unused, so `-Wall` caught it before the checker could. A mutation the
+  compiler rejects tests the compiler.
+
+One is a genuine equivalent mutant and is now recorded as such in the
+runner's `EQUIVALENT` list, so a later session does not re-add it as a miss:
+`bNewSlotPool` tests the manager's sentinel against 1 while
+`bDeleteSlotPool` tests it against 0, and since only init and shutdown ever
+write that file-static field it is never anything but 0 or 1. The asymmetry
+is real in the ROM and unobservable from outside it.
+
+### The mutation runner is kept this time
+
+`tools/bslotpool_mutate.py`, not a scratchpad script. The bvector and bmath
+runners were thrown away after use and rebuilding this one from nothing cost
+a session; the mutation set is worth more than the run, because it is a list
+of every behavioural claim the module makes in a form that fails loudly when
+one of them stops being checked. It edits a tracked file in place and
+restores it in a `finally`, with a `.mutate-backup` beside the source that a
+hard kill leaves behind and the next run refuses to start over.
+
+Six of the 37 are caught by the harness segfaulting rather than by a
+transcript difference. That is detection, but weaker: a diff says which
+behaviour changed, a crash only says that something did.
+
+### Divergences and hazards
+
+Four deliberate divergences, all stated at the site and listed in the doc:
+`ExpandSlotPool` checks its allocation where `0x0023f7c8` dereferences it
+unconditionally; `new_pool` clears the `bTNode` links the original leaves as
+garbage, which fixes the one case the original supports and then breaks (a
+pool created while the sentinel is clear, deleted once it is set); cleanup
+keeps a pool whose recount disagrees instead of trapping at `0x0023f9bc`; and
+the header size is computed from the host's pointer width, so the module is
+right at 8-byte pointers and reduces to the PS2's 48-byte header at 4.
+
+Hazards kept because the ROM has them: `Free` has no NULL check, no ownership
+check and no double-free check, so `numAllocatedSlots` can go negative;
+`GetSlotNumber` divides *unsigned* (`0x0023f5d4`), so a pointer below the
+slot array reads back as 357913939 rather than -2; `FlushSlotPool` on an
+expanded pool strands every expanded slot, which is safe only where the
+original uses it -- inside `NewSlotPool`, on a chain one long.
+
+`PrintAllSlotPools` is **compiled into the retail build**, not stubbed -- a
+real prologue at `0x0023fef8`, 304 bytes -- so this allocator's high-water
+mark was readable on a shipped disc, and the port keeps the whole debug path
+rather than eliding it. `main.c` points the hook at the debug log through a
+line buffer, because a row arrives in up to six `bPrintf` calls and only the
+last of them ends the line.
+
+Nothing calls the allocator yet; tasks 21 onward are its callers. It is live
+in the build rather than dead-stripped: `main.c` builds the manager where
+`_GLOBAL_$I$` (`0x00240070`) builds it at load time, and releases the pools
+on the way out, which the original does not do -- `~SlotPoolManager` clears
+the sentinel and then walks an already-emptied list, so every pool made
+through the manager is leaked at shutdown by construction.
+
+### Things that bit
+
+* **devkitARM makes `int32_t` a `long`.** The shipped `%d` format strings are
+  kept byte for byte out of `.rodata` so a log from the port lines up with
+  one from the PS2, which means the *arguments* get cast at the call sites
+  rather than the formats being changed. Four sites.
+* **The checker reported a bare `2816` for a crashed harness.** That is
+  cygwin's `signal << 8`, i.e. SIGSEGV. It says `killed by signal 11` now.
+* **Reading the failure reason off line 1 hides it** -- the same tooling bug
+  as session 12's, from the other end. `hostbuild` prints `compiler
+  warnings:` first and keeps going, so line 1 is the compiler's and the last
+  line is whatever stderr trailed off with. The runner looks for the line
+  starting `harness failed`.
+
+Built and walked on Azahar: **PASS**, 13 screenshots, 19 textures cached, 0
+missing, 0 fonts missing, exits cleanly.
+
+### Next session
+
+Task 21, VU1 geometry submission to citro3d. The survey work is already in
+`docs/formats/solid-geometry.md`. `CONTINUE.md` has the pick-up-here list.

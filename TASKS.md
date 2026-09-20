@@ -574,7 +574,58 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
         unit quaternions; nothing in the routine checks, and an
         out-of-range argument reads past the end of the table rather than
         returning a wrong answer.
-20. [ ] Memory/slot-pool allocator (`bSlotPool`/`bNewSlotPool`) on top of `heapcfg.c`
+20. [x] Memory/slot-pool allocator (`bSlotPool`/`bNewSlotPool`) on top of
+        `heapcfg.c`. `bSlotPool.obj` `0x0023f508`-`0x00240198`, 3216 bytes,
+        34 symbols, all decoded and ported: `3DS Files/source/bslotpool.c`
+        and `.h`, written up address by address in
+        `docs/formats/bslotpool.md`. Fixed-size blocks carved out of one
+        allocation, a free list threaded through word 0 of every free slot,
+        an expansion chain when a pool runs dry, and a manager holding every
+        pool on bWare's intrusive `bTList` so the lot can be printed.
+        `main.c` builds the manager explicitly where `_GLOBAL_$I$`
+        (`0x00240070`) builds it at load time, and points the `bPrintf` hook
+        at the debug log through a line buffer, because a
+        `PrintAllSlotPools` row arrives in up to six separate calls and only
+        the last ends the line. The allocator hook is left at its default,
+        `malloc`, which is already the heap `heapcfg.c` sized.
+        `tools/bslotpool_check.py` is an independent Python model written
+        from the disassembly, not from the C: 17 scenarios, 990 lines,
+        0 differ. An allocator has no return value worth checking on its
+        own, so what is compared is the *sequence* -- after every step both
+        sides print the pool chain, the free list in order, the six counters
+        and which arena blocks are still checked out.
+        `tools/bslotpool_mutate.py` holds it honest, 37 of 37 caught, and
+        unlike the bvector and bmath runners it is kept: the mutation set is
+        a list of every behavioural claim the module makes, and rebuilding
+        it from nothing cost a session.
+        The mutation test found one real hole. Freeing only the head of an
+        expansion chain and dropping the rest moved 0 lines, because the
+        transcript reported a block's liveness only as a side effect of
+        printing a pointer into it and after a teardown nothing does. Both
+        sides now end every scenario with an `arena:` line; the mutation
+        moves 10.
+        Four deliberate divergences, all stated at the site and listed in
+        the doc: `ExpandSlotPool` checks its allocation where the original
+        dereferences it unconditionally (`0x0023f7c8`); `new_pool` clears
+        the `bTNode` links the original leaves as garbage, so a pool made
+        while the manager is down can be deleted once it is up;
+        `CleanupExpandedSlotPools` keeps a pool whose recount disagrees
+        instead of trapping (`0x0023f9bc`); and the header-size arithmetic
+        is computed from the host's pointer width so the module is correct
+        at 8-byte pointers and reduces to the PS2's 48-byte header at 4.
+        `PrintAllSlotPools` is compiled into the retail build, not stubbed
+        -- a real prologue at `0x0023fef8` and a 304-byte body -- so the
+        high-water mark was readable on a shipped disc and the port keeps
+        the whole debug path.
+        Hazards carried forward, all faithful to the ROM: `Free` has no
+        NULL check, no ownership check and no double-free check, so a
+        double free corrupts the list silently and `numAllocatedSlots` can
+        go negative; `GetSlotNumber` divides unsigned (`0x0023f5d4`), so a
+        pointer below the slot array comes back as 357913939 rather than
+        -2; and `FlushSlotPool` on a pool that has expanded strands every
+        expanded slot, which is safe only where the original uses it.
+        Built and walked on Azahar: PASS, 13 screenshots, 19 textures
+        cached, 0 missing, exits cleanly.
 21. [ ] Rendering: VU1 geometry submission -> citro3d equivalent
 22. [ ] Sound: new 3DS DSP driver behind the recovered `bDriver`/`bSnd` interface
 23. [ ] Camera (`Camera.obj`, `CameraMover.obj`)

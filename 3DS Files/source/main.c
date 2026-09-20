@@ -38,6 +38,7 @@
 #include <string.h>
 
 #include "bmenu.h"
+#include "bslotpool.h"
 #include "bscreens.h"
 #include "gamedata.h"
 #include "gameflow.h"
@@ -190,6 +191,31 @@ static void logPrintf(const char* fmt, ...)
         size_t n = strlen(line);
         while (n > 0 && line[n - 1] == '\n') line[--n] = '\0';
         logLine("%s", line);
+    }
+}
+
+// bSlotPool's printf hook is handed a PrintAllSlotPools row in up to six
+// pieces and only the last of them ends the line, so this buffers until a
+// newline arrives. logPrintf ends a line per call, which would otherwise
+// split one row across six lines of the log.
+static char     g_slotLog[192];
+static unsigned g_slotLogLen;
+
+static void slotPoolLog(const char* text)
+{
+    while (*text) {
+        char c = *text++;
+
+        if (c == '\n' || g_slotLogLen == sizeof g_slotLog - 1) {
+            g_slotLog[g_slotLogLen] = 0;
+            logPrintf("%s\n", g_slotLog);
+            g_slotLogLen = 0;
+            if (c != '\n') {
+                g_slotLog[g_slotLogLen++] = c;
+            }
+        } else {
+            g_slotLog[g_slotLogLen++] = c;
+        }
     }
 }
 
@@ -814,6 +840,14 @@ int main(int argc, char** argv)
     initPlatformPerf();
     logOpen();
 
+    // The original builds a SlotPoolManager at load time through
+    // _GLOBAL_$I$ (0x00240070); this is that, done explicitly. It has to be
+    // up before anything can call bNewSlotPool, and the allocator hook is
+    // left at its default, which is malloc -- i.e. the heap heapcfg.c
+    // already sized.
+    bSlotPoolManagerInit();
+    bSetSlotPoolPrintf(slotPoolLog);
+
     logPrintf("NFSHP2-3DS -- boot flow\n");
     logPrintf("Heap: asked=%luKB got=%luKB linear=%luKB\n",
               (unsigned long)(g_heapInfo.heapAsked / 1024),
@@ -1089,6 +1123,15 @@ int main(int argc, char** argv)
     bgf_change_to_screen(&g_flow, NULL, 0);
     if (vHasMenu) bmenu_unactivate(&vMenu);
     uirender_free(&ui);
+
+    // ~SlotPoolManager clears the sentinel and walks an already-emptied
+    // list, so the original leaks every pool at shutdown by construction
+    // (docs/formats/bslotpool.md). Releasing them first is the port's
+    // addition; it costs nothing here and means a leak check on the way out
+    // is reading the real number.
+    bDeleteAllSlotPools();
+    bSlotPoolManagerShutdown();
+
     C2D_Fini();
     C3D_Fini();
     gfxExit();
