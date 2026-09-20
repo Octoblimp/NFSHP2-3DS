@@ -2076,3 +2076,150 @@ missing, 0 fonts missing, exits cleanly.
 
 Task 21, VU1 geometry submission to citro3d. The survey work is already in
 `docs/formats/solid-geometry.md`. `CONTINUE.md` has the pick-up-here list.
+
+## Session 14 (2026-09-20) -- the geometry decoder, and what a mutation is for
+
+Task 21 split in two on the way in, and 21a -- the decoder -- is done. 21b,
+the citro3d submission path, is written and compiling but not yet wired to
+anything on screen.
+
+### The decoder
+
+`3DS Files/source/geometry.c`/`.h`, written from
+`docs/formats/solid-geometry.md` and deliberately not from
+`tools/geometry_convert.py`, which is the other half of the cross-check. It
+reads the `0x80034000` chunk tree, the 64-byte `eStripEntry` table and the
+VU1 packets in `0x00034005`, replays the VIF UNPACKs into an image of
+quadwords, and reads back transposed XYZ and normals, interleaved trailing-
+group ST, per-vertex RGBA5551, the ADC suppression bitfield and the winding
+that follows from it.
+
+Nothing in it allocates. A strip cannot exceed 30 vertices -- the VU1 input
+buffer is what bounds it -- so `GeoStrip` is a fixed scratch buffer the
+caller owns and reuses. That matters for a 1,135-solid track bundle on a
+handheld, and it is the reason the API is a cursor rather than an index:
+`geo_decode_strip(solid, i, ...)` has to add up every preceding
+`DataQWordSize` to find strip i's slice, which is quadratic across a
+253-strip solid. `geo_decode_next` carries the running offset instead.
+
+### The cross-check is shaped differently, for a reason
+
+Every earlier checker in `tools/` drives scripted scenarios, because the only
+oracle available was a second implementation written from the same
+disassembly. Here there was a real one. `tools/geometry_convert.py` came
+first and was validated against the shipped data itself, not against a port:
+every vertex of all 1,465 solids inside its own AABB, the ADC rule
+reproducing `eStripEntry.NumPolys` for all 22,280 strips, unit-length
+normals. So `tools/geometry_check.py` drives the *disc*.
+
+    python tools/geometry_check.py
+    30 files, 42047 lines, 0 differ
+
+A full per-vertex dump of that would be tens of millions of lines, so the
+transcript has two densities and both sides print both: an FNV-1a digest per
+strip and per solid, which covers every vertex without printing one, and the
+invariant counts recomputed independently on each side. `--detail NAME`
+switches one named solid to a full per-vertex dump on both sides, which is
+what to reach for when a digest differs. Floats are never recomputed -- XYZ
+and ST are read verbatim out of the file -- so unlike bmath's checker there
+is no float-determinism problem here at all and the digest can be taken over
+raw bit patterns.
+
+`tools/geometry_mutate.py`: 51 of 51 caught, about two minutes over a
+three-file subset (911TURBO, BARCHETTA, and TRACKA12 for the failure path).
+`--full` runs all thirty.
+
+### What the port found
+
+Five corrections to `docs/formats/solid-geometry.md`, all now in it:
+
+* **Normals are 125..127, not "126 or 127".** The old claim rejects 16% of
+  the real data. They are unit vectors quantised onto a radius-127 sphere and
+  rounding costs up to about 1.6. Measured over all 28 cars: 192,822 of
+  192,822 non-zero normals inside the band, shortest 125.355. 53 of the
+  192,875 are exactly zero -- in the data, not a decode failure, and *not*
+  the same condition as "this strip has no normal field", which is about 17%
+  of strips. Test whether the `V4-8` unpack at address 92 happened; do not
+  test for a zero vector.
+* **`eSolid.NumTextureTableEntries` at 0xAC is dead.** Zero on all 1,411
+  solids, including one whose `0x00034006` table has 28 entries. The field is
+  real -- it is where `eSolid::GetNumTextures()` reads -- but nothing the
+  exporter ran ever wrote it. Count the chunk. `NumLightMaterials` at 0xAE,
+  two bytes along, agrees with its table on all 1,411.
+* **`eStripEntry.TextureNumber` at offset 0x00 was missing from the document
+  altogether**, and it is the only link between geometry and the
+  `0xb0300001` packs. 25 strips across the disc carry `TextureNumber ==
+  NumTextures` -- one past the end -- which is the untextured sentinel: one
+  strip of `TS50_C` and four each in the four `XS_CURVE35*_S*_00` track
+  pieces. Range-check it; do not index with it.
+* **The entry table is a redundant copy.** `NumVerts`, `NumPolys` and
+  `LightMaterialIndex` agree with the strip's own VU header quad on all
+  18,848 strips, zero disagreements. A renderer can size every buffer and
+  skip every strip it does not want from the 64-byte table without replaying
+  a single packet -- which is exactly what `georender_bake` does.
+* **`TRACKS\TRACKA12.BUN` has no `0x80034000` at all.** All 1,135 track
+  solids are in B12. A reader pointed at A12 should say "no solid list", not
+  treat an empty result as a parse failure.
+
+### And one real defect, found by a mutation
+
+`geo_decode_next` did not advance its cursor past a strip it could not
+decode. The natural caller loop -- decode, report the error, continue -- then
+never terminates. Nothing on the disc triggers it, so no amount of running
+the checker would have found it; the mutation that made `vif_replay` reject
+every packet did, by printing 72 million copies of one line in sixty seconds.
+The cursor now advances on every outcome but `GEO_EEND`, and `geometry.h`
+says so with the loop it is protecting spelled out.
+
+That run also exposed a deadlock in the checker worth remembering, because
+every other checker in `tools/` has the same shape. `subprocess.run` with
+`capture_output=True` needs the parent to drain a pipe the child is filling;
+when the child runs away, the parent blocks on the drain, and `timeout=` does
+not help because killing a cygwin-built exe from Windows does not reliably
+close its handles. Fifteen minutes of a mutation run went into one hung
+mutant. Harness stdout now goes to a **file**, not a pipe, and the transcript
+is capped at two million lines -- the whole disc is 42,047.
+
+Two mutations turned out to be equivalent only because of what this disc
+contains, and both are written down with the measurement rather than quietly
+dropped: starting the triangle loop at vertex 1 instead of 2 is invisible
+because ADC bits 0 and 1 are set on all 18,848 strips, and making the
+`adc_bit` range guard return 1 instead of 0 is invisible because the only
+strips that could show it -- 17 vertices with bit 16 set -- do not exist here
+(75 have 17 vertices; none has the bit).
+
+### 21b, where it stands
+
+`3DS Files/source/geosolid.v.pica` and `georender.c`/`.h` are written,
+compile for ARM and link; the CIA still builds. Nothing is on screen yet.
+
+The shader transforms and lights in view space, which is the same place in
+the pipeline VU1 did it. Two PICA200 constraints cost an iteration each and
+are worth knowing before writing another one: at most one uniform per
+instruction and only in the **first** source slot, so `dp3 r3, r2, lightVec`
+is rejected while the same operands reversed are fine; and `mad` cannot take
+a uniform in either of the slots it leaves over, so ambient-plus-diffuse is
+spelled as `mul` then `add`.
+
+`georender_bake` sorts a solid's strips by `TextureNumber` before baking, so
+a solid draws in one call per distinct texture rather than one per strip --
+cheap, because the entry table already carries the texture number and the
+triangle count. The vertex is 28 bytes; a triangle list rather than indexed,
+because strips share no vertices in the source data and the largest solid on
+the disc (911TURBO_A, 4,139 triangles) costs 348 KB. Cull mode is
+`GPU_CULL_NONE`: the GS had no hardware backface culling, the VU did it in
+software, and nothing in the data forces a consistent winding between the two
+mirrored sides of a car body.
+
+### Next session
+
+21b's remaining work: wire `georender` into `main.c` behind the existing
+viewer mode, resolve each `eTextureTable` hash through `texpack_find` and
+`texpack_upload` (which already returns a `C3D_Tex`), and get one car on the
+top screen from `CARS\*\GEOMETRY.BIN`. A single car is one solid list and
+needs no streaming decision, which is why it is the cheapest first milestone.
+
+Also carried: the user wants Phase 4's HUD designed for **two screens** from
+the start -- some readouts on the bottom screen rather than stacked on the
+top one. Recorded at the head of Phase 4 in `TASKS.md`.
+

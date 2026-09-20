@@ -626,13 +626,97 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
         expanded slot, which is safe only where the original uses it.
         Built and walked on Azahar: PASS, 13 screenshots, 19 textures
         cached, 0 missing, exits cleanly.
-21. [ ] Rendering: VU1 geometry submission -> citro3d equivalent
+21. [~] Rendering: VU1 geometry submission -> citro3d equivalent.
+        Split in two; **21a, the decoder, is done**, 21b is in progress.
+
+        **21a.** `3DS Files/source/geometry.c`/`.h` reads the `0x80034000`
+        chunk tree, the 64-byte `eStripEntry` table and the VU1 packets
+        inside `0x00034005`, and turns each strip into a triangle list with
+        position, ST, RGBA5551 colour and a signed-byte normal. Written from
+        `docs/formats/solid-geometry.md` and never from
+        `tools/geometry_convert.py`, so the two are independent. Nothing in
+        it allocates: a strip is bounded at 30 vertices by the format, so
+        `GeoStrip` is a fixed scratch buffer the caller owns, and
+        `GeoStripCursor` walks a solid in one pass instead of the O(n^2) the
+        naive "add up every preceding DataQWordSize" would cost on a
+        253-strip solid.
+
+        Unlike every checker before it this one drives the *disc*, not a
+        script, because for once there was a real oracle: the Python came
+        first and was validated against the shipped data itself.
+        `tools/geometry_check.py` diffs the two transcripts over 28 car
+        files and both track bundles --
+        **30 files, 42047 lines, 0 differ** -- carrying an FNV-1a digest per
+        strip and per solid so every vertex is covered without printing tens
+        of millions of lines, plus the invariants recomputed on both sides:
+        1,411 solids, 18,848 strips, 0 vertices outside their AABB, 0
+        normals outside the 125..127 band, and decoded triangles equal to
+        `eStripEntry.NumPolys` on every strip. `--detail NAME` switches one
+        solid to a full per-vertex dump on both sides.
+        `tools/geometry_mutate.py`: **51 of 51 mutations caught**, about two
+        minutes, with six more listed as equivalent and the measurement that
+        proves each one cannot reach the output.
+
+        Five things the port found that the document had wrong or missing,
+        all now fixed in `docs/formats/solid-geometry.md`:
+
+        * normals were documented as "length 126 or 127"; the real band is
+          **125..127** and the old claim rejects 16% of the data. 53 of the
+          192,875 normals across the car set are exactly zero, which is in
+          the data and is not the same condition as "this strip has no
+          normal field" (about 17% of strips).
+        * `eSolid.NumTextureTableEntries` at 0xAC is **zero on all 1,411
+          solids**, including one whose table has 28 entries. Count the
+          `0x00034006` chunk instead. `NumLightMaterials` at 0xAE, by
+          contrast, agrees with its table everywhere.
+        * `eStripEntry.TextureNumber` at offset 0x00 was missing from the
+          document's table entirely -- and it is the only link between
+          geometry and the texture packs. 25 strips carry `TextureNumber ==
+          NumTextures`, one past the end: the untextured sentinel.
+        * `eStripEntry`'s NumVerts/NumPolys/LightMaterialIndex are an exact
+          copy of the VU header quad on all 18,848 strips, so a renderer can
+          size buffers and skip strips without replaying a packet.
+        * `TRACKS\TRACKA12.BUN` holds no solid list at all; all 1,135 track
+          solids are in B12.
+
+        And one real defect in the port itself, found by a mutation rather
+        than by review: `geo_decode_next` did not advance its cursor past a
+        strip it could not decode, so the obvious caller loop spun forever.
+        The mutation that made every packet unreadable printed 72 million
+        lines in sixty seconds. The cursor now advances on every outcome but
+        GEO_EEND, and the contract says so. The same run exposed a deadlock
+        in the checker -- a pipe the parent could not drain while the timeout
+        could not kill a cygwin-built child -- so harness output now goes to
+        a file and is capped.
+
+        **21b, in progress.** `geosolid.v.pica` (transform + one directional
+        light in view space, normals scaled by 1/127 in the shader rather
+        than widened to floats in the vertex buffer) and
+        `georender.c`/`.h` (28-byte vertex, bake a solid into one linear-heap
+        triangle list sorted by TextureNumber so a solid draws in one call
+        per distinct texture, `GPU_CULL_NONE` because the GS had no hardware
+        culling and nothing in the data forces a consistent winding). Both
+        compile and link for ARM; the CIA still builds. **Not yet wired into
+        main.c, so nothing is on screen yet** -- that is the next step,
+        together with resolving each `eTextureTable` hash through
+        `texpack_find`/`texpack_upload`.
 22. [ ] Sound: new 3DS DSP driver behind the recovered `bDriver`/`bSnd` interface
 23. [ ] Camera (`Camera.obj`, `CameraMover.obj`)
 24. [ ] Track/route system (`TrackRoute.obj`, `espEmptyLayer` -- "Esp" spline/
         track-layer format, needs `docs/formats/track-route.md`)
 
 ## Phase 4 -- Car physics & gameplay
+
+**Standing constraint for this phase: the HUD is two screens, not one.**
+The user wants gameplay readouts split across the top and bottom screens
+rather than stacked on the top one, to keep the view of the road clear --
+the PS2 drew one 4:3 screen with everything on it and the 3DS top screen is
+400x240. Which elements go below is not decided yet (candidates: minimap,
+lap/position, speedo/tach, pursuit meter, objective text); ask before
+implementing. Design tasks 25-27's HUD as two surfaces from the start rather
+than building a top-screen HUD and splitting it afterwards. `uirender.c` is
+citro2d and is the natural home for the bottom-screen widgets; `georender.c`
+is citro3d and owns the top.
 
 25. [ ] Car simulation (recovered car-state struct layout from `.mdebug`)
 26. [ ] Race/event logic, cop AI, pursuit (roadblocks, spike strips) --

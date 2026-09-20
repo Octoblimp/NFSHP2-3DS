@@ -66,12 +66,27 @@ inside its own box, which is the cheapest check that a decoder is correct.
 the sum of its own strips' `eStripEntry.NumPolys`. The per-strip counts are
 the truth; the header field is stale in the shipped data.
 
+`NumTextureTableEntries` at 0xAC is worse than stale: it is **zero on every
+one of the 1,411 solids** in `CARS\*\GEOMETRY.BIN` and the two track
+bundles, including the solid whose `0x00034006` table has 28 entries. The
+field is real -- it is where `eSolid::GetNumTextures()` reads -- but nothing
+the exporter ran ever wrote it, so the only way to know how many textures a
+solid references is to divide the `0x00034006` chunk's own size by 8. A port
+that sizes a texture array from the header field gets zero textures on the
+whole disc and no error to go with it.
+
+`NumLightMaterials` at 0xAE, two bytes further on, is the opposite: it agrees
+with the size of its `0x0003401d` table on all 1,411. Either source works for
+that one.
+
 ## `eStripEntry`, 64 bytes, one per strip
 
 | offset | type    | field |
 |-------:|---------|-------|
+| 0x00   | `u32`   | `TextureNumber` -- indexes this solid's `0x00034006` table |
 | 0x04   | `u16`   | `TextureWidthScale` |
 | 0x06   | `u16`   | `TextureHeightScale` |
+| 0x08   | `ptr`   | `Data` (fixed up at load; meaningless in a file) |
 | 0x0C   | `u16`   | `DataQWordSize` |
 | 0x0E   | `u16`   | `Flags` |
 | 0x10   | `float[3]` | `AABBMin` |
@@ -80,15 +95,38 @@ the truth; the header field is stale in the shipped data.
 | 0x1E   | `u8`    | `NumPolys` |
 | 0x1F   | `s8`    | `LightMaterialIndex` (-1 = none) |
 | 0x20   | `float[3]` | `AABBMax` |
+| 0x2C   | `u32`   | `pad` |
 | 0x30   | `u16[4]`| `Nx`, `Ny`, `Nz`, `Nt` |
 | 0x38   | `f32`   | `MaterialDensity` |
+| 0x3C   | `u16`   | `MipMapK` |
+| 0x3E   | `s8`    | `MipMapL` |
+| 0x3F   | `s8`    | padding |
 
 `DataQWordSize * 16` is the strip's slice of `0x00034005`; walking the entries
 in order walks the packet data in order.
 
+`NumVerts`, `NumPolys` and `LightMaterialIndex` are **an exact copy** of what
+the strip's own VU header quad says -- checked on all 18,848 strips of the 28
+car files and the two track bundles, zero disagreements. (`LightMaterialIndex`
+is the packet's byte divided by four; see the header quad below.) That
+redundancy is worth knowing about, because it means a renderer can size every
+buffer it needs, and skip every strip it does not want, straight from the
+64-byte entry table without replaying a single VIF packet.
+
 `TextureWidthScale`/`TextureHeightScale` are 1.15 fixed point and are 32768
 (= 1.0) for every strip on the disc, so `eSolid::FixStripSTs()` is a no-op
 here and ST needs no scaling.
+
+`TextureNumber` is how a strip finds its texture, and it is the only link
+between geometry and the `0xb0300001` packs. It indexes the solid's own
+`0x00034006` table, which is the table whose length the `eSolid` header
+refuses to tell you (above). Of the 18,848 strips, 18,823 index inside their
+table -- and **25 index exactly one past the end**, `TextureNumber ==
+NumTextures`: one strip of `TS50_C`, and four each in the four
+`XS_CURVE35*_S*_00` track pieces. That is the untextured sentinel, so a
+renderer must test `TextureNumber >= NumTextures` and draw those strips
+untextured rather than trusting the index. Nothing larger than that occurs;
+the values run 0..27 across the disc.
 
 ## The VU1 packet, `0x00034005`
 
@@ -140,9 +178,21 @@ Colours are never transposed. The `V4-5` unpack expands one RGBA5551 halfword
 per vertex into the quad at `52 + v`, with R in bits 0..4, G in 5..9, B in
 10..14 and A in bit 15.
 
-Normals are signed bytes of length 126 or 127 -- true unit vectors, which is
-the other cheap check that a decoder is correct. Roughly 17% of strips have
-no normal field at all.
+Normals are signed bytes: unit vectors quantised onto a sphere of radius 127.
+Their integer length therefore lands in **125..127** -- never above, because
+127 is the radius, and never far below, because only the rounding of three
+components loses any. Measured over every strip of all 28 `CARS\*\GEOMETRY.BIN`,
+192,822 of 192,822 non-zero normals are inside that band and the shortest is
+125.355. That band is the other cheap check that a decoder is correct; an
+earlier draft of this file said "126 or 127", which rejects 16% of the real
+data.
+
+53 of those 192,875 normals are **exactly zero**. They are in the shipped
+data, so a decoder should not treat a zero normal as a failure -- but it also
+must not treat one as "this strip has no normals", because roughly 17% of
+strips genuinely have no normal field at all and that is a different
+condition. Test whether the `V4-8` unpack at address 92 ever happened, not
+whether a vector is zero.
 
 ### The ADC bits
 
@@ -200,6 +250,54 @@ evidence for it.
 `0x0003401d` is `eLightMaterialEntry[NumLightMaterials]` and `0x00034006` is
 `eTextureTable[NumTextureTableEntries]`; both are 8 bytes per entry, a
 `bStringHash` name hash followed by a pointer fixed up at load time.
-`eStripEntry.LightMaterialIndex` indexes the first. Resolve the hashes with
-`tools/bhash.py`; the texture hashes point into the `0xb0300001` packs
-described in `docs/formats/texture-pack.md`.
+`eStripEntry.LightMaterialIndex` indexes the first and `eStripEntry`'s
+`TextureNumber` the second. Resolve the hashes with `tools/bhash.py`; the
+texture hashes point into the `0xb0300001` packs described in
+`docs/formats/texture-pack.md`, where `texpack_find()` takes a name hash
+directly and `texpack_upload()` hands back a `C3D_Tex`.
+
+`TRACKS\TRACKA12.BUN` contains **no** `0x80034000` at all -- it is the other
+half of the track data. All 1,135 track solids are in `TRACKB12.BUN`. A
+reader pointed at A12 should report "no solid list" rather than treat an
+empty result as a parse failure.
+
+## Cross-check
+
+`3DS Files/source/geometry.c` implements all of the above and is diffed
+against `tools/geometry_convert.py` over the shipped data itself, not against
+a script:
+
+```bash
+python tools/geometry_check.py
+```
+
+```
+30 files, 42047 lines, 0 differ      (51/51 mutations caught)
+```
+
+The transcript carries a per-strip and per-solid FNV-1a digest -- which
+covers every vertex without printing tens of millions of lines -- plus the
+invariant counts recomputed on both sides. `--detail NAME` switches one named
+solid to a full per-vertex dump on both sides, which is what to reach for
+when a digest differs.
+
+Over all 30 files: 1,411 solids, 18,848 strips, 0 vertices outside their
+solid's AABB, 0 normals outside the 125..127 band, and the decoded triangle
+count equal to `eStripEntry.NumPolys` on every single strip.
+
+`python tools/geometry_mutate.py` is the deck that keeps that honest: 51
+single-edit changes to the decoder, each one a behavioural claim made above,
+all 51 caught, in about two minutes. Six further changes are listed there as
+*equivalent* rather than missed, each with the measurement that proves it
+cannot reach the output -- the VIFcode census, the always-set ADC bits 0 and
+1, the redundant entry table, and so on. Two of those are equivalent only
+because of what this particular disc contains, and say so.
+
+Two defects came out of writing the port, both fixed above:
+
+* this document said normals were "length 126 or 127", which rejects 16% of
+  the real data;
+* the first `geo_decode_next` did not advance its cursor past a strip it
+  could not decode, so the obvious caller loop spun forever on damaged data.
+  A mutation that made every packet unreadable found it by printing 72
+  million lines in sixty seconds.

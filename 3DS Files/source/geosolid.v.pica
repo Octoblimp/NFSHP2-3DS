@@ -1,0 +1,87 @@
+; Vertex shader for eSolid geometry -- see docs/formats/solid-geometry.md.
+;
+; One strip's vertices arrive as the decoder hands them over: position and ST
+; verbatim out of the VU1 packet, the RGBA5551 colour widened to four bytes,
+; and the signed-byte normal. The PS2 did its lighting on VU1 before the
+; packet ever reached the GS; here the PICA200's vertex stage does it, which
+; is the same place in the pipeline and the reason this is a vertex shader
+; rather than anything in the fragment combiner.
+;
+; The light is a single directional one in *view* space, so a solid that
+; turns relights itself without the caller having to re-transform anything.
+; Normals arrive as raw signed bytes on a radius-127 sphere rather than unit
+; length -- that is how the format quantises them -- so they are scaled by
+; 1/127 here. Doing it on the CPU instead would mean widening the normal to
+; three floats in the vertex buffer, which costs nine bytes a vertex against
+; one shader instruction.
+
+; Uniforms the caller sets. The two matrices are separate rather than
+; pre-multiplied because the lighting needs the view-space position.
+.fvec projection[4], modelView[4]
+.fvec lightVec, lightClr, ambientClr
+
+.constf consts(0.0, 1.0, -1.0, 0.5)
+.alias  zeros consts.xxxx
+.alias  ones  consts.yyyy
+
+; 1/127. See the note above about the normals' radius.
+.constf normScale(0.00787402, 0.0, 0.0, 0.0)
+
+.in inpos  v0
+.in intex  v1
+.in inclr  v2
+.in innrm  v3
+
+.out outpos position
+.out outtex texcoord0
+.out outclr color
+
+.entry vmain
+.proc vmain
+    ; Position: model -> view -> clip.
+    mov r0.xyz, inpos
+    mov r0.w,   ones
+
+    dp4 r1.x, modelView[0], r0
+    dp4 r1.y, modelView[1], r0
+    dp4 r1.z, modelView[2], r0
+    mov r1.w, ones
+
+    dp4 outpos.x, projection[0], r1
+    dp4 outpos.y, projection[1], r1
+    dp4 outpos.z, projection[2], r1
+    dp4 outpos.w, projection[3], r1
+
+    mov outtex, intex
+
+    ; The normal is rotated by the model-view's upper 3x3 -- dp3, not dp4,
+    ; so the translation column cannot move a direction.
+    mul r0.xyz, normScale.xxx, innrm
+    mov r0.w,   zeros
+    dp3 r2.x, modelView[0], r0
+    dp3 r2.y, modelView[1], r0
+    dp3 r2.z, modelView[2], r0
+    mov r2.w, zeros
+
+    ; Lambert, clamped at zero. lightVec points *towards* the light, so the
+    ; dot is taken directly rather than against its negation.
+    ;
+    ; The uniform goes in src1 throughout this block: the PICA200 allows at
+    ; most one uniform read per instruction and only in the first source
+    ; slot, so `dp3 r3, r2, lightVec` is rejected by the assembler while the
+    ; same operands the other way round are fine.
+    dp3 r3, lightVec, r2
+    max r3, zeros, r3
+
+    ; colour = vertex colour * (ambient + N.L * light), alpha untouched.
+    ; Spelled out as mul-then-add rather than one mad, because mad reads two
+    ; of its three sources from the wide slots and picasso will not take a
+    ; uniform in either of the ones left over.
+    mul r5.xyz, lightClr,   r3
+    add r4.xyz, ambientClr, r5
+    mul r4.xyz, r4, inclr
+    mov r4.w,   inclr.w
+
+    mov outclr, r4
+    end
+.end

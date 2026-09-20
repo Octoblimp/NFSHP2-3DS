@@ -239,7 +239,8 @@ def read_strip(buf, off, size):
             normal.append(tuple(lane(mem, NORM_ADDR + 3 * g + c, i, 0) for c in range(3)))
 
     dead = suppressed(quad, nverts, nloops)
-    return {"nverts": nverts, "nloops": nloops,
+    return {"nverts": nverts, "nloops": nloops, "adc": quad,
+            "lightmat_raw": lightmat - 256 if lightmat > 127 else lightmat,
             "lightmat": (lightmat - 256 if lightmat > 127 else lightmat) // 4,
             "pos": pos, "st": st, "colour": colour, "normal": normal or None,
             "dead": sorted(dead), "tris": triangles(nverts, dead)}
@@ -260,6 +261,7 @@ def read_solid(buf, off, size):
         return None
 
     head, _ = unfiller(buf, *parts[SOLID_HEADER])
+    namehash, = struct.unpack_from("<I", buf, head + 0x08)
     name = buf[head + 0x10:head + 0x28].split(b"\0")[0].decode("latin-1")
     nstrips, npolys, nverts = struct.unpack_from("<3H", buf, head + 0x34)
     aabb = (struct.unpack_from("<3f", buf, head + 0x40),
@@ -272,21 +274,25 @@ def read_solid(buf, off, size):
     lightmats = hashes(buf, *parts[LIGHT_MATERIALS]) if LIGHT_MATERIALS in parts else []
     textures = hashes(buf, *parts[TEXTURE_TABLE]) if TEXTURE_TABLE in parts else []
 
-    strips, p = [], data_at
+    strips, skipped, p = [], [], data_at
     for i in range(nstrips):
         e = entries + i * 64
+        texnum, = struct.unpack_from("<I", buf, e + 0x00)
         qwords, flags = struct.unpack_from("<2H", buf, e + 0x0C)
         group, ev, ep, elm = struct.unpack_from("<3Bb", buf, e + 0x1C)
         s = read_strip(buf, p, qwords * 16)
         p += qwords * 16
         if s is None:
+            skipped.append(i)
             continue
-        s.update({"entry_verts": ev, "entry_polys": ep, "group": group,
+        s.update({"index": i, "qwords": qwords, "entry_texture": texnum,
+                  "entry_verts": ev, "entry_polys": ep, "group": group,
                   "entry_lightmat": elm, "flags": flags})
         strips.append(s)
-    return {"name": name, "nstrips": nstrips, "npolys": npolys, "nverts": nverts,
-            "aabb": aabb, "strips": strips, "lightmats": lightmats,
-            "textures": textures}
+    return {"name": name, "namehash": namehash,
+            "nstrips": nstrips, "npolys": npolys, "nverts": nverts,
+            "aabb": aabb, "strips": strips, "skipped": skipped,
+            "lightmats": lightmats, "textures": textures}
 
 
 def solids(buf):

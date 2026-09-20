@@ -29,3 +29,7 @@ Thumbs.db
 
 # Cross-check transcripts (tools/*_check.py --keep writes these side by side)
 /py.*.txt
+
+# tools/*_mutate.py parks the pristine source here while a run is in
+# flight, so a killed run can be recovered from. Never committed.
+*.mutate-backup
