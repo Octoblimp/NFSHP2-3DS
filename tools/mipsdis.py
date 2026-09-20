@@ -125,11 +125,18 @@ COP1_FN = {
     0x05: "abs", 0x06: "mov", 0x07: "neg", 0x0c: "round.w",
     0x0d: "trunc.w", 0x0e: "ceil.w", 0x0f: "floor.w", 0x18: "adda",
     0x1c: "madd", 0x1d: "msub", 0x20: "cvt.s", 0x24: "cvt.w",
+    0x28: "max", 0x29: "min",
     0x30: "c.f", 0x32: "c.eq", 0x34: "c.lt", 0x36: "c.le",
 }
 COP1_FMT = {0x10: "s", 0x11: "d", 0x14: "w"}
-UNARY = ("sqrt", "abs", "mov", "neg", "cvt.s", "cvt.w",
+UNARY = ("abs", "mov", "neg", "cvt.s", "cvt.w",
          "round.w", "trunc.w", "ceil.w", "floor.w")
+# SQRT is NOT in UNARY: the R5900 spells it `SQRT.S fd, ft` and leaves the fs
+# field zero, where every other one-operand COP1 op reads fs. Printing it as
+# `fd, fs` turns `sqrt.s $f1,$f1` into `sqrt.s $f1,$f0` and invents a bug --
+# bATan (0x00242148) reads as a broken atan2 that way. All 306 SQRT.S in
+# .text have fs == 0 and 74 of them have a non-zero ft, which is the proof.
+SQRT = 0x04
 # opcodes whose target is pc-relative
 REL_BRANCH = set(range(0x04, 0x08)) | set(range(0x14, 0x18))
 
@@ -235,7 +242,7 @@ class Elf(object):
         return max(size, nxt - addr, 8)
 
 
-def _fpu(w):
+def _fpu(w, addr=0):
     rs, ft, fs, fd, fn = ((w >> 21) & 31, (w >> 16) & 31, (w >> 11) & 31,
                           (w >> 6) & 31, w & 63)
     if rs == 0x00:
@@ -247,12 +254,23 @@ def _fpu(w):
     if rs == 0x06:
         return "ctc1   %s,$f%d" % (REG[ft], fs)
     if rs == 0x08:
-        return "bc1%s" % {0: "f", 1: "t", 2: "fl", 3: "tl"}.get(ft, "?")
+        # BC1F/T/FL/TL. These carry a 16-bit relative target like any other
+        # branch, and printing them bare (as this did) makes an FP compare
+        # look like a fall-through -- bFMod at 0x00241d80 reads backwards
+        # without it.
+        simm = w & 0xffff
+        if simm & 0x8000:
+            simm -= 0x10000
+        tgt = addr + 4 + simm * 4
+        return ("%-6s 0x%08x" % ("bc1" + {0: "f", 1: "t", 2: "fl",
+                                          3: "tl"}.get(ft, "?"), tgt), tgt)
     fmt, name = COP1_FMT.get(rs), COP1_FN.get(fn)
     if fmt is None or name is None:
         return "cop1   0x%08x" % w
     if name.startswith("c."):
         return "%-6s $f%d,$f%d" % (name + "." + fmt, fs, ft)
+    if fn == SQRT:
+        return "%-6s $f%d,$f%d" % (name + "." + fmt, fd, ft)
     if name in UNARY:
         return "%-6s $f%d,$f%d" % (name + "." + fmt, fd, fs)
     return "%-6s $f%d,$f%d,$f%d" % (name + "." + fmt, fd, fs, ft)
@@ -336,7 +354,8 @@ def decode(w, addr, elf=None):
         tgt = addr + 4 + simm * 4
         return "%-6s %s,0x%08x" % (REGIMM.get(rt, "regimm"), REG[rs], tgt), tgt
     if op == 0x11:
-        return _fpu(w), None
+        r = _fpu(w, addr)
+        return r if isinstance(r, tuple) else (r, None)
     if op in (0x12, 0x13):
         return "cop2   0x%08x" % w, None
     if op == 0x1c:

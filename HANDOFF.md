@@ -1622,10 +1622,11 @@ and scrolls, and the brackets and bloom track the current item.
 
 Phase 2 is done: the frontend boots, plays the logo, reaches the main menu,
 walks into all three screens it leads to, and now animates doing it. Phase 3
-starts at task 19 (`bMath`/`bVector`/`bQuaternion`/`bMatrix`) -- `bSin` and
-`tCubic1D` are already ported into `banim.c` and should move out into a
-`bmath.c` when that lands rather than being duplicated. Task 21, VU1 geometry
-to citro3d, is the one with the survey work already done, in
+starts at task 19 (`bMath`/`bVector`/`bQuaternion`/`bMatrix`). `banim_bsin`
+is `bMath.obj`'s `bSin` and should move out into a `bmath.c` when that lands
+rather than being duplicated; `tCubic1D` and `SplineSeek` should not -- the
+map puts them in `Point.obj`, which is game code, not bware. Task 21, VU1
+geometry to citro3d, is the one with the survey work already done, in
 `docs/formats/solid-geometry.md`.
 
 The two scrolling textures found in Session 9 (`SCREEN_LINES`, `ROADLINES`,
