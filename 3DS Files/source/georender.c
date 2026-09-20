@@ -22,6 +22,7 @@ static int s_uModelView  = -1;
 static int s_uLightVec   = -1;
 static int s_uLightClr   = -1;
 static int s_uAmbient    = -1;
+static int s_uUvScale    = -1;
 
 static C3D_Mtx s_projection;
 static C3D_Mtx s_modelView;
@@ -52,6 +53,8 @@ bool georender_init(void)
                                                      "lightClr");
     s_uAmbient    = shaderInstanceGetUniformLocation(s_program.vertexShader,
                                                      "ambientClr");
+    s_uUvScale    = shaderInstanceGetUniformLocation(s_program.vertexShader,
+                                                     "uvScale");
 
     // The order here is the shader's v0..v3 and the order of the fields in
     // GeoRenderVertex; the two have to agree and there is nothing that
@@ -286,7 +289,7 @@ void georender_set_light(float x, float y, float z,
     s_ambient     = ambient;
 }
 
-void georender_draw(const GeoMesh* mesh, C3D_Tex* const* textures,
+void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
                     int numTextures)
 {
     C3D_BufInfo* buf;
@@ -322,25 +325,30 @@ void georender_draw(const GeoMesh* mesh, C3D_Tex* const* textures,
     C3D_DepthTest(true, GPU_GREATER, GPU_WRITE_ALL);
 
     for (i = 0; i < mesh->numBatches; i++) {
-        const GeoBatch* b   = &mesh->batch[i];
-        C3D_Tex*        tex = NULL;
+        const GeoBatch*   b  = &mesh->batch[i];
+        const GeoTexture* gt = NULL;
 
         if (b->count <= 0) {
             continue;
         }
-        if (b->texture >= 0 && b->texture < numTextures && textures) {
-            tex = textures[b->texture];
+        if (b->texture >= 0 && b->texture < numTextures && textures
+            && textures[b->texture].tex) {
+            gt = &textures[b->texture];
         }
 
         env = C3D_GetTexEnv(0);
         C3D_TexEnvInit(env);
-        if (tex) {
-            C3D_TexBind(0, tex);
+        if (gt) {
+            C3D_TexBind(0, gt->tex);
+            C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale,
+                          gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
             C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
             C3D_TexEnvFunc(env, C3D_Both, GPU_MODULATE);
         } else {
             // No texture: the vertex colour alone, which is what the 25
             // sentinel strips and any unresolved hash fall back to.
+            C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale,
+                          1.0f, 1.0f, 0.0f, 1.0f);
             C3D_TexEnvSrc(env, C3D_Both, GPU_PRIMARY_COLOR, 0, 0);
             C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
         }

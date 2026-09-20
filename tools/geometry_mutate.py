@@ -14,13 +14,15 @@ python tools/geometry_mutate.py --list
 python tools/geometry_mutate.py --full          # all 30 files, much slower
 ```
 
-The default file set is three files rather than the checker's thirty:
+The default file set is four files rather than the checker's thirty:
 911TURBO (16 solids, normals, three zero normals), BARCHETTA (15 solids, a
-different strip mix) and TRACKA12.BUN (no solid list at all, which is the
-only file that exercises the failure path). That is 2,379 transcript lines
-and four seconds, and every mutation below is caught by it. `--full` runs
-the whole disc for when a new mutation is not caught and the question is
-whether the deck or the data is the reason.
+different strip mix), TS50 (whose TS50_C is one of only five solids on the
+disc whose texture table starts with a hash ending in 0x11, and so the only
+cheap way to reach the chunk-filler rule) and TRACKA12.BUN (no solid list at
+all, which is the only file that exercises the failure path). Every mutation
+below is caught by that set. `--full` runs the whole disc for when a new
+mutation is not caught and the question is whether the deck or the data is
+the reason.
 
 This edits a tracked source file in place and puts it back in a `finally`,
 so an ordinary failure or a Ctrl-C leaves the tree clean. A hard kill does
@@ -40,14 +42,52 @@ BACKUP = SRC + ".mutate-backup"
 CHECK = [sys.executable, "tools/geometry_check.py"]
 FAST_FILES = ["--file", "extracted/CARS/911TURBO/GEOMETRY.BIN",
               "--file", "extracted/CARS/BARCHETTA/GEOMETRY.BIN",
+              "--file", "extracted/CARS/TS50/GEOMETRY.BIN",
               "--file", "extracted/TRACKS/TRACKA12.BUN"]
 
 # (name, old, new) -- `old` must occur exactly once.
 MUTANTS = [
     # ------------------------------------------------------- the chunk tree
+    # Both filler mutations keep calling both skip functions, on a throwaway
+    # copy of the cursor where that is the point of the mutation. Dropping the
+    # call instead leaves a static function with no callers, and then it is
+    # the compiler that catches the mutation and not the cross-check, which
+    # tells us nothing about the deck.
     ("index-skips-unfiller",
-     "        unfiller(&p, &n);" + NL + NL + "        switch (c.type) {",
-     "        switch (c.type) {"),
+     "        if (c.type == TYPE_TEXTURES || c.type == TYPE_LIGHT_MATS) {" + NL
+     + "            unfiller_table(&p, &n);" + NL
+     + "        } else {" + NL
+     + "            unfiller(&p, &n);" + NL
+     + "        }",
+     "        {" + NL
+     + "            const uint8_t* t = p;" + NL
+     + "            size_t         u = n;" + NL
+     + "            unfiller_table(&t, &u);" + NL
+     + "            unfiller(&t, &u);" + NL
+     + "        }"),
+    # The byte-at-a-time scan, which is what unfiller_table exists to replace.
+    # Only TS50_C and the four XS_CURVE35 track pieces have a texture table
+    # whose first hash ends in 0x11, so this needs TS50 in the file set to be
+    # caught at all -- which is why TS50 is in FAST_FILES.
+    ("table-filler-byte-at-a-time",
+     "    int            i;" + NL + NL
+     + "    for (;;) {" + NL
+     + "        if (n + TABLE_ENTRY_SIZE > *size) {" + NL
+     + "            break;" + NL
+     + "        }" + NL
+     + "        for (i = 0; i < TABLE_ENTRY_SIZE; i++) {" + NL
+     + "            if (q[n + i] != CHUNK_FILLER) {" + NL
+     + "                break;" + NL
+     + "            }" + NL
+     + "        }" + NL
+     + "        if (i != TABLE_ENTRY_SIZE) {" + NL
+     + "            break;" + NL
+     + "        }" + NL
+     + "        n += TABLE_ENTRY_SIZE;" + NL
+     + "    }",
+     "    while (n < *size && q[n] == CHUNK_FILLER) {" + NL
+     + "        n++;" + NL
+     + "    }"),
     ("texcount-back-to-header",
      "    s->numTextures = (int)(textureBytes / TABLE_ENTRY_SIZE);",
      "    (void)textureBytes;" + NL + "    s->numTextures = 0;"),
@@ -114,17 +154,23 @@ MUTANTS = [
     ("xyz-component-order",
      "            dst->pos[c] = lane_f32(&vu, transposed_quad(VU_XYZ, v, c), lane);",
      "            dst->pos[c] = lane_f32(&vu, transposed_quad(VU_XYZ, v, 2 - c), lane);"),
-    ("st-full-group-stride",
-     "        *quad = VU_ST + 2 * (v / 4) + component;",
-     "        *quad = VU_ST + 3 * (v / 4) + component;"),
-    ("st-tail-not-interleaved",
-     "        int k    = v - fullGroups * 4;" + NL
-     + "        int slot = 2 * k + component;",
-     "        int k    = v - fullGroups * 4;" + NL
-     + "        int slot = 4 * component + k;"),
-    ("st-tail-base",
-     "        *quad = VU_ST + 2 * fullGroups + slot / 4;",
-     "        *quad = VU_ST + 2 * fullGroups + slot / 2;"),
+    # ST: two vertices to a quad, the odd one's pair mirrored. Each of these
+    # is a reading that was plausible enough to ship once; see
+    # docs/formats/solid-geometry.md.
+    ("st-one-vertex-per-quad",
+     "    *quad = VU_ST + (v >> 1);",
+     "    *quad = VU_ST + v;"),
+    ("st-transposed-like-xyz",
+     "    *quad = VU_ST + (v >> 1);" + NL
+     + "    *lane = (v & 1) ? 3 - component : component;",
+     "    *quad = VU_ST + 2 * (v / 4) + component;" + NL
+     + "    *lane = v % 4;"),
+    ("st-not-mirrored",
+     "    *lane = (v & 1) ? 3 - component : component;",
+     "    *lane = (v & 1) ? 2 + component : component;"),
+    ("st-parity-inverted",
+     "    *lane = (v & 1) ? 3 - component : component;",
+     "    *lane = (v & 1) ? component : 3 - component;"),
     ("rgba-transposed-too",
      "        dst->colour = (uint16_t)(vu.q[VU_RGBA + v][0] & 0xffffu);",
      "        dst->colour = (uint16_t)(vu.q[VU_RGBA + v / 4][v % 4] & 0xffffu);"),

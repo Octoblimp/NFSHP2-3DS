@@ -24,16 +24,24 @@
 
 #include "geometry.h"
 
-// One vertex as the PICA reads it. 28 bytes, and the layout is the attribute
-// order in georender_init: three floats of position, two of ST, three signed
-// bytes of normal (scaled by 1/127 in the shader) and four unsigned bytes of
-// colour. The pad byte keeps the colour 4-byte aligned inside the stride.
+// One vertex as the PICA reads it. 28 bytes.
+//
+// The field order IS the attribute layout: the PICA walks one vertex by
+// consuming the AttrInfo_AddLoader() calls in the order they were made, so
+// the struct has to be in that order too and there is nothing that checks
+// it. Three floats of position, two of ST, four unsigned bytes of colour,
+// three signed bytes of normal, and a pad byte to round the stride to 28.
+//
+// Both byte fields reach the shader as the plain integer value, 0..255 and
+// -128..127 -- the PICA does not normalise an integer attribute -- so the
+// shader scales the colour by 1/255 and the normal by 1/127. See
+// geosolid.v.pica.
 typedef struct {
     float   pos[3];
     float   st[2];
+    uint8_t colour[4];
     int8_t  normal[3];
     uint8_t pad;
-    uint8_t colour[4];
 } GeoRenderVertex;
 
 // A run of triangles sharing one texture. Strips are sorted by TextureNumber
@@ -46,6 +54,16 @@ typedef struct {
 } GeoBatch;
 
 #define GEO_MAX_BATCHES 32
+
+// One entry of a solid's texture table, resolved. `uvScale` is the image's
+// size over the allocation's, because texpack_upload() pads to a power of
+// two and puts the image in the top-left -- so a 512x320 skin in a 512x512
+// allocation needs (1.0, 0.625) here. It goes to the shader as a uniform per
+// batch; see geosolid.v.pica.
+typedef struct {
+    C3D_Tex* tex;               // NULL when the hash resolved to nothing
+    float    uvScale[2];
+} GeoTexture;
 
 typedef struct {
     GeoRenderVertex* vbo;               // linearAlloc'd; georender_free owns it
@@ -87,11 +105,13 @@ void georender_set_light(float x, float y, float z,
                          float r, float g, float b,
                          float ambient);
 
-// `textures` is the solid's texture table already resolved to uploaded
-// C3D_Tex, one per eTextureTable entry, with NULL for any that could not be
-// found. A batch whose texture is -1, out of range, or NULL draws with
-// vertex colour alone rather than being skipped.
-void georender_draw(const GeoMesh* mesh, C3D_Tex* const* textures,
+// `textures` is the solid's texture table already resolved, one entry per
+// eTextureTable entry, with a NULL `tex` for any hash that could not be
+// found -- which is not an unusual case: 13 of the 142 hashes the car
+// geometry refers to are in no pack on the disc. A batch whose texture is
+// -1, out of range, or NULL draws with vertex colour alone rather than being
+// skipped.
+void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
                     int numTextures);
 
 #endif

@@ -20,12 +20,27 @@
 .fvec projection[4], modelView[4]
 .fvec lightVec, lightClr, ambientClr
 
+; ST scale for the texture bound to the current draw. The PICA200 takes
+; power-of-two textures only and texpack_upload() pads to one, putting the
+; image in the top-left corner, so a 512x320 skin lives in a 512x512
+; allocation and its ST of 1.0 has to land at 320/512. The scale is per
+; texture, not per vertex, so it is a uniform the draw sets once per batch
+; rather than nine more bytes baked into every vertex -- and baking it in
+; would be wrong anyway, because the same mesh can be bound to a texture of
+; a different size.
+.fvec uvScale
+
 .constf consts(0.0, 1.0, -1.0, 0.5)
 .alias  zeros consts.xxxx
 .alias  ones  consts.yyyy
 
-; 1/127. See the note above about the normals' radius.
+; 1/127 for the normal and 1/255 for the colour. Neither byte attribute is
+; normalised by the PICA on its way in -- an attribute declared GPU_BYTE or
+; GPU_UNSIGNED_BYTE arrives as the plain integer value -- so both scales are
+; the shader's job. Leaving the colour unscaled is not subtle: every channel
+; comes through at up to 255 and the whole model saturates to white.
 .constf normScale(0.00787402, 0.0, 0.0, 0.0)
+.constf colScale(0.00392157, 0.0, 0.0, 0.0)
 
 .in inpos  v0
 .in intex  v1
@@ -52,7 +67,23 @@
     dp4 outpos.z, projection[2], r1
     dp4 outpos.w, projection[3], r1
 
-    mov outtex, intex
+    ; ST. S needs only the pad scale; T needs the scale and then a flip.
+    ;
+    ; The format's T counts down from the *top* row of the image, the way the
+    ; GS addressed a texture. citro2d -- and so the allocation texpack_upload
+    ; builds -- puts the first row in memory at v = 1 and counts down from
+    ; there; uirender.c's subtex_from_pixels does `1 - y / texH` for exactly
+    ; this reason, over the same upload path, verified on hardware. So
+    ; v = 1 - T * scale, and the scale comes first because the image sits at
+    ; the top of the padded allocation, not the bottom.
+    ;
+    ; Without the flip a car still draws, with the atlas mirrored top to
+    ; bottom -- the grille lands on the sill and the wheel hub in the middle
+    ; of a door -- which reads as "the UVs are wrong" rather than as an axis
+    ; convention, and is worth recognising on sight.
+    mul r7, uvScale, intex
+    mov outtex.x, r7.x
+    add outtex.y, ones, -r7.y
 
     ; The normal is rotated by the model-view's upper 3x3 -- dp3, not dp4,
     ; so the translation column cannot move a direction.
@@ -79,8 +110,9 @@
     ; uniform in either of the ones left over.
     mul r5.xyz, lightClr,   r3
     add r4.xyz, ambientClr, r5
-    mul r4.xyz, r4, inclr
-    mov r4.w,   inclr.w
+    mul r6, colScale.xxxx, inclr
+    mul r4.xyz, r4, r6
+    mov r4.w,   r6.w
 
     mov outclr, r4
     end

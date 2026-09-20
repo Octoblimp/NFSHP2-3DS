@@ -626,8 +626,10 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
         expanded slot, which is safe only where the original uses it.
         Built and walked on Azahar: PASS, 13 screenshots, 19 textures
         cached, 0 missing, exits cleanly.
-21. [~] Rendering: VU1 geometry submission -> citro3d equivalent.
-        Split in two; **21a, the decoder, is done**, 21b is in progress.
+21. [x] Rendering: VU1 geometry submission -> citro3d equivalent.
+        Split in two -- **21a the decoder, 21b the submission path** --
+        and both are done: cars draw on the top screen, with their own
+        textures, out of the shipped `CARS\*\GEOMETRY.BIN`.
 
         **21a.** `3DS Files/source/geometry.c`/`.h` reads the `0x80034000`
         chunk tree, the 64-byte `eStripEntry` table and the VU1 packets
@@ -689,17 +691,82 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
         could not kill a cygwin-built child -- so harness output now goes to
         a file and is capped.
 
-        **21b, in progress.** `geosolid.v.pica` (transform + one directional
-        light in view space, normals scaled by 1/127 in the shader rather
-        than widened to floats in the vertex buffer) and
-        `georender.c`/`.h` (28-byte vertex, bake a solid into one linear-heap
-        triangle list sorted by TextureNumber so a solid draws in one call
-        per distinct texture, `GPU_CULL_NONE` because the GS had no hardware
-        culling and nothing in the data forces a consistent winding). Both
-        compile and link for ARM; the CIA still builds. **Not yet wired into
-        main.c, so nothing is on screen yet** -- that is the next step,
-        together with resolving each `eTextureTable` hash through
-        `texpack_find`/`texpack_upload`.
+        **21b.** `geosolid.v.pica` (transform plus one directional light in
+        view space; normals scaled by 1/127 in the shader rather than widened
+        to floats in the vertex buffer, which costs one instruction against
+        nine bytes a vertex) and `georender.c`/`.h` (28-byte vertex, a solid
+        baked into one linear-heap triangle list sorted by `TextureNumber` so
+        it draws in one call per distinct texture, `GPU_CULL_NONE` because the
+        GS had no hardware culling and nothing in the data forces a consistent
+        winding). `geoview.c`/`.h` is the bring-up mode main.c's SELECT cycles
+        to: scan `CARS\`, load a car, orbit it, step solids, toggle textures.
+
+        `texsrc.c`/`.h` exists because `CARS\TEXTURES.BIN` is 15,300,536
+        bytes and one car needs about 400 KB of it, while the port already
+        holds 17.6 MB of UI bundles resident. It keeps only the 0x30300003
+        info tables in memory (126,608 bytes for the whole car set), leaves
+        the pixel blob on the card, and stages the two ranges one texture
+        needs at upload time. The decode is still `texpack.c`'s, unchanged, so
+        `tools/src/texpack_test.c` still covers it; `tools/texsrc_check.py`
+        diffs the streaming reader against the whole-file one --
+        **6 packs, 2 levels, 2952 textures, 0 differ**.
+
+        Three defects, and the interesting thing is that a passing
+        cross-check is what hid two of them:
+
+        * **ST is not transposed.** `docs/formats/solid-geometry.md` said it
+          was stored like XYZ -- a quad of four S, a quad of four T. It is
+          two vertices to a quad with the odd one's pair mirrored,
+          `(S_even, T_even, T_odd, S_odd)`, which is
+          `eStripDataE::GetElementST0` (`0x0011c8b0`) read literally. Both
+          decoders had the transposed reading and **agreed with each other
+          for four sessions**, digest and all, because `geometry.c` was
+          written from the document and the document from the Python. The
+          transposed reading still yields plausible UVs, so the symptom was a
+          car upholstered in smeared fragments of its own atlas rather than
+          anything that looks like a parse error. The cheap tell is the S==T
+          rate: 44.43% wrong against 1.68% right, over all 212,408 car
+          vertices.
+        * **The `0x11` filler scan has to step a whole entry on the two
+          8-byte tables.** A byte scan cannot tell filler from a payload
+          beginning `0x11`, and `TS50_C`'s first texture hash is
+          `0x4342fd11`. The table shifts right one byte and every hash in
+          that solid comes out 8 bits off -- silently, because a shifted hash
+          is indistinguishable from a texture the packs do not have. 5 of the
+          1,461 solids on the disc. Stepping 8 bytes cannot over-skip in
+          turn: the pointer half of an entry is zero in all 4,646 entries on
+          the disc. Verified against the sizes that the byte scan is still
+          right for the header, the entry table and the packet blob.
+        * **T counts down from the top row.** The shader needs
+          `v = 1 - T * scale`, the same convention `uirender.c`'s
+          `subtex_from_pixels` already uses over the same upload path.
+          Without it the atlas is mirrored top to bottom -- grille on the
+          sill, wheel hub mid-door.
+
+        The mutation deck grew to **53 of 53 caught**: four ST mutations for
+        the real layout, `table-filler-byte-at-a-time` for the filler rule,
+        and `TS50` added to the fast file set because it is the only cheap
+        file that can reach that rule. Both filler mutations deliberately
+        keep calling both skip functions, since dropping a call leaves an
+        uncalled static and then it is the compiler catching the mutation,
+        not the cross-check.
+
+        Two findings recorded rather than fixed, both out of scope here:
+        **58 of the 132 texture hashes** the car geometry refers to are in no
+        `0xb0300001` pack anywhere on the disc -- 729 of 8,114 strips, 9.0%,
+        with `0x7b220ddf` alone on 13 cars. Only `0xece04847` = `WIPER01` has
+        been cracked, and the busiest six survive a full `bhash_crack` sweep
+        to six characters. And there is **no alpha blending**: glass draws
+        opaque because the GS blend state has not been recovered. It is not
+        vertex alpha -- all 212,408 car vertex colours have the alpha bit
+        set -- so it is texture alpha plus a blend mode, and recovering it is
+        more ELF work.
+
+        Looked at on Azahar, which is the half a cross-check cannot do:
+        `4DR_SEDAN`, `4DR_SEDAN02`, `911TURBO` and `AMBULANCE` are
+        recognisably themselves, textures in the right places, smooth vertex
+        lighting, clean untextured geometry with X. 11 screenshots,
+        `19 textures cached, 0 missing`, exits cleanly.
 22. [ ] Sound: new 3DS DSP driver behind the recovered `bDriver`/`bSnd` interface
 23. [ ] Camera (`Camera.obj`, `CameraMover.obj`)
 24. [ ] Track/route system (`TrackRoute.obj`, `espEmptyLayer` -- "Esp" spline/

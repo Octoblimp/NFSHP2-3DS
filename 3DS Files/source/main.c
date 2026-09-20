@@ -25,10 +25,16 @@
 // no baked file answers "not there", which is exactly the path the flow
 // already takes for NFSINTRO_EN.AVI, a file that was never pressed.
 //
-// Controls, boot mode: D-pad navigates, A selects, START is the game's start
-// button, B goes back, SELECT switches to the viewer.
-// Viewer mode: L/R change screen, D-pad navigates, X cycles language,
-// SELECT returns to the boot flow, START exits.
+// Controls. SELECT cycles three modes: the boot flow, the screen viewer and
+// the geometry viewer.
+//   boot flow:       D-pad navigates, A selects, START is the game's start
+//                    button, B goes back.
+//   screen viewer:   L/R change screen, D-pad navigates, X cycles language,
+//                    START exits.
+//   geometry viewer: L/R change car, D-pad left/right change solid, D-pad
+//                    up/down zoom, circle pad orbits, A draws every solid,
+//                    X drops the textures, Y stops the spin, B recentres,
+//                    START exits. See source/geoview.c.
 
 #include <3ds.h>
 #include <citro2d.h>
@@ -43,8 +49,23 @@
 #include "gamedata.h"
 #include "gameflow.h"
 #include "heapcfg.h"
+#include "geoview.h"
+#include "georender.h"
 #include "movie.h"
 #include "uirender.h"
+
+// The top screen's render target is built here rather than by
+// C2D_CreateScreenTarget, which asks C3D_RenderTargetCreate for no depth
+// buffer at all. 2D does not need one; geoview.c does, and a depth test
+// against a target that has no depth buffer silently does nothing. These are
+// citro2d's own transfer flags, which is what makes the target still usable
+// for C2D_SceneBegin.
+static const u32 kDisplayTransferFlags =
+    GX_TRANSFER_FLIP_VERT(0) | GX_TRANSFER_OUT_TILED(0)
+    | GX_TRANSFER_RAW_COPY(0)
+    | GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8)
+    | GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB8)
+    | GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO);
 
 #define BUNDLE_FRONTEND "FRONTEND/FRONTB.BUN"
 #define BUNDLE_GLOBAL   "GLOBAL/GLOBALB.BUN"
@@ -151,6 +172,11 @@ typedef struct {
 static Boot g_boot;
 static BGameFlow g_flow;
 static BScreens g_uiScreens;
+
+// The geometry viewer's state. Static rather than automatic because it
+// carries a mesh and a texture table per solid and is about 100 KB; main's
+// stack is not the place for it.
+static GeoView g_geo;
 
 // ------------------------------------------------------- the run log
 //
@@ -869,7 +895,18 @@ int main(int argc, char** argv)
     C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
     C2D_Init(C2D_DEFAULT_MAX_OBJECTS);
     C2D_Prepare();
-    C3D_RenderTarget* top = C2D_CreateScreenTarget(GFX_TOP, GFX_LEFT);
+    C3D_RenderTarget* top = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8,
+                                                   GPU_RB_DEPTH24_STENCIL8);
+    if (!top) {
+        printf("\nno render target.\n");
+        waitForExit();
+        C2D_Fini();
+        C3D_Fini();
+        gfxExit();
+        return 1;
+    }
+    C3D_RenderTargetSetOutput(top, GFX_TOP, GFX_LEFT,
+                              kDisplayTransferFlags);
 
     static UIRenderer ui;
     uirender_init(&ui, 400.0f, 240.0f);
@@ -958,13 +995,28 @@ int main(int argc, char** argv)
     // ChangeGameFlow(LOADING_FRONTEND). MainLoop takes it from there.
     bgf_change_state(&g_flow, BGF_LOADING_FRONTEND, BGF_NONE);
 
+    if (!georender_init()) {
+        logPrintf("georender: shader would not load\n");
+    }
+    if (!geoview_init(&g_geo)) {
+        logPrintf("geoview: %s\n", g_geo.note);
+    } else {
+        logPrintf("geoview: %d cars, car pack %s, global pack %s\n",
+                  g_geo.numCars,
+                  g_geo.hasCarPack ? "open" : "missing",
+                  g_geo.hasGlobalPack ? "open" : "missing");
+    }
+
     printf("\nD-pad: menu  A: select  START: start  B: back\n");
-    printf("SELECT: screen viewer\n");
+    printf("SELECT: screen viewer, then geometry\n");
     // The marker tools/run_azahar_test.ps1 greps for: past this line the
     // bundles are resident, the flow is running and frames are being drawn.
     logLine("entering main loop");
 
-    bool     viewer  = false;
+    // SELECT cycles these rather than toggling one flag, because there are
+    // now three things to look at and the flow is the one to come back to.
+    enum { MODE_FLOW = 0, MODE_SCREENS, MODE_GEO, MODE_COUNT };
+    int      mode    = MODE_FLOW;
     uint32_t vIndex  = 0;
     uint32_t vShown  = 0xffffffffu;
     BUI*     vProj   = NULL;
@@ -979,13 +1031,33 @@ int main(int argc, char** argv)
         u32 kDown = hidKeysDown();
 
         if (kDown & KEY_SELECT) {
-            viewer = !viewer;
-            if (!viewer && vHasMenu) { bmenu_unactivate(&vMenu); vHasMenu = false; }
+            mode = (mode + 1) % MODE_COUNT;
+            if (mode != MODE_SCREENS && vHasMenu) {
+                bmenu_unactivate(&vMenu);
+                vHasMenu = false;
+            }
             vShown = 0xffffffffu;
             redraw = 1;
+            // The first car is read off the card the first time anyone asks
+            // to see one, not at boot: it is half a megabyte and a second of
+            // texture uploads that the frontend has no use for.
+            if (mode == MODE_GEO && g_geo.numCars > 0
+                && g_geo.numSolids == 0) {
+                geoview_load(&g_geo, 0);
+            }
+            // The mode is logged because tools/run_azahar_geo.ps1 has no
+            // other way to know a SELECT landed. Sleeping for "long enough"
+            // after the boot marker is not the same thing: a faster boot
+            // moves the keypress earlier, not later, and the run that found
+            // this captured the title screen and called it a car.
+            if (mode == MODE_GEO) {
+                logPrintf("geoview: entered, %s\n", g_geo.note);
+            } else {
+                logPrintf("mode %d\n", mode);
+            }
         }
 
-        if (!viewer) {
+        if (mode == MODE_FLOW) {
             // ---- the boot flow
             if (kDown & KEY_START) {
                 bgf_screen_event(&g_flow, BMSG_SCREEN_START_BUTTON, 0);
@@ -1042,6 +1114,53 @@ int main(int argc, char** argv)
             C2D_SceneBegin(top);
             if (g_boot.screen && g_boot.project)
                 uirender_draw_screen(&ui, g_boot.project, g_boot.screen, 1.0f);
+            C3D_FrameEnd(0);
+            continue;
+        }
+
+        if (mode == MODE_GEO) {
+            circlePosition pad;
+
+            if (kDown & KEY_START) break;
+            hidCircleRead(&pad);
+            geoview_input(&g_geo, kDown, pad.dx, pad.dy, BOOT_DT);
+
+            printf("\x1b[s\x1b[16;1H");
+            printf("car %2d/%-2d %-20s        \n",
+                   g_geo.numCars ? g_geo.curCar + 1 : 0, g_geo.numCars,
+                   g_geo.numCars ? g_geo.car[g_geo.curCar] : "-");
+            printf("solid %2d/%-2d %-24s\n",
+                   g_geo.numSolids ? g_geo.curSolid + 1 : 0, g_geo.numSolids,
+                   geoview_solid_name(&g_geo));
+            printf("%5d tris  %2d textures, %d missing   \n",
+                   g_geo.drawAll ? g_geo.loadedTris
+                                 : g_geo.mesh[g_geo.curSolid].numTris,
+                   g_geo.numTextures, g_geo.missingTextures);
+            printf("%-40s\n", g_geo.note);
+            // The camera is framed from the solid's own AABB, so when the
+            // top screen is empty these five numbers say whether the model
+            // is off camera or was never there.
+            printf("at %.1f %.1f %.1f r %.2f d %.2f v %d    \n",
+                   g_geo.centre[0], g_geo.centre[1], g_geo.centre[2],
+                   g_geo.radius, g_geo.dist,
+                   g_geo.mesh[g_geo.curSolid].numVerts);
+            printf("L/R car  <> solid  ^v zoom  A all  X tex \n");
+            printf("\x1b[u");
+            C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+            // Not C2D_TargetClear: this target has a depth buffer and the
+            // clear has to reach it, or the second frame tests against the
+            // first frame's depths. The byte swap is what citro2d does to a
+            // C2D_Color32 on its way to the GPU.
+            C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
+                                  __builtin_bswap32(clear), 0);
+            C3D_FrameDrawOn(top);
+            geoview_draw(&g_geo);
+            // geoview_draw leaves its own shader, attribute layout and depth
+            // test bound. C2D_Prepare puts citro2d's back, which is what the
+            // other two modes are about to assume; the depth test goes off
+            // explicitly because a 2D quad has nothing sensible to compare.
+            C2D_Prepare();
+            C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
             C3D_FrameEnd(0);
             continue;
         }
@@ -1122,6 +1241,8 @@ int main(int argc, char** argv)
     // going away. The viewer's menu is nobody's, so it just closes.
     bgf_change_to_screen(&g_flow, NULL, 0);
     if (vHasMenu) bmenu_unactivate(&vMenu);
+    geoview_free(&g_geo);
+    georender_exit();
     uirender_free(&ui);
 
     // ~SlotPoolManager clears the sentinel and walks an already-emptied

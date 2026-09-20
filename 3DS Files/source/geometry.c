@@ -61,13 +61,27 @@ static void rdf32v(const uint8_t* p, float* out, int n)
 
 // bWare 16-byte aligns a payload by padding its *front* with 0x11, so the
 // struct inside a chunk does not necessarily start at the payload's first
-// byte. Scanning for the filler run is what the format does; it is also the
-// one sharp edge in this reader, because a payload whose real first byte is
-// 0x11 would lose it. That does not happen on this disc -- every 0x00034003,
-// 0x00034004 and 0x00034005 on it decodes to a solid whose vertices land
-// inside its own AABB -- but it is worth knowing about before this reader
-// meets data from somewhere else.
+// byte.
+//
+// Scanning for the filler run byte by byte is the obvious way to skip it and
+// it is wrong, because a payload's real first byte can be 0x11 and then the
+// scan eats it and shifts everything after it by one. That is not
+// hypothetical: 5 of the 1,461 solids on this disc have a texture table
+// whose first entry hashes to something ending 0x11 -- TS50_C's first is
+// 0x4342fd11 -- and every texture in those five resolved to nothing, with no
+// error anywhere, because a shifted hash is still a plausible hash.
+//
+// So the byte scan is kept only for the two payloads that cannot be sized
+// any other way, and the tables use unfiller_table below. The header could
+// be exact too (its struct is 192 bytes, so the filler is size - 192, which
+// agrees with the scan on all 1,461 here); it is left scanning because
+// changing it would be a no-op on this disc and an unverified claim
+// anywhere else.
 #define CHUNK_FILLER      0x11
+
+// eTextureTable and eLightMaterialEntry are both {NameHash, pointer}; the
+// pointer half is fixed up at load time and means nothing in a file.
+#define TABLE_ENTRY_SIZE   8
 
 static void unfiller(const uint8_t** p, size_t* size)
 {
@@ -76,6 +90,36 @@ static void unfiller(const uint8_t** p, size_t* size)
 
     while (n < *size && q[n] == CHUNK_FILLER) {
         n++;
+    }
+    *p    += n;
+    *size -= n;
+}
+
+// The same skip for an 8-byte-per-entry table -- eTextureTable and
+// eLightMaterialTable -- done a whole entry at a time.
+//
+// This cannot eat a hash however the hash begins, because an entry is
+// {NameHash, pointer} and the pointer half is fixed up at load time and is
+// therefore zero in a file. Eight bytes of 0x11 is filler and nothing else.
+static void unfiller_table(const uint8_t** p, size_t* size)
+{
+    const uint8_t* q = *p;
+    size_t         n = 0;
+    int            i;
+
+    for (;;) {
+        if (n + TABLE_ENTRY_SIZE > *size) {
+            break;
+        }
+        for (i = 0; i < TABLE_ENTRY_SIZE; i++) {
+            if (q[n + i] != CHUNK_FILLER) {
+                break;
+            }
+        }
+        if (i != TABLE_ENTRY_SIZE) {
+            break;
+        }
+        n += TABLE_ENTRY_SIZE;
     }
     *p    += n;
     *size -= n;
@@ -137,10 +181,6 @@ static int chunk_next(const uint8_t* base, size_t bytes, size_t* off,
 #define SOLID_AABB_MAX     0x50
 #define SOLID_PIVOT        0x60
 #define SOLID_NUM_LIGHTMAT 0xae
-
-// eTextureTable and eLightMaterialEntry are both {NameHash, pointer}; the
-// pointer half is fixed up at load time and means nothing in a file.
-#define TABLE_ENTRY_SIZE   8
 
 // "eStripEntry, 64 bytes, one per strip".
 #define STRIP_ENTRY_SIZE   64
@@ -231,7 +271,11 @@ static int index_solid(GeoSolid* s, const uint8_t* payload, size_t size)
         const uint8_t* p = c.payload;
         size_t         n = c.size;
 
-        unfiller(&p, &n);
+        if (c.type == TYPE_TEXTURES || c.type == TYPE_LIGHT_MATS) {
+            unfiller_table(&p, &n);
+        } else {
+            unfiller(&p, &n);
+        }
 
         switch (c.type) {
         case TYPE_SOLID_HDR:
@@ -519,23 +563,31 @@ static int transposed_quad(int base, int v, int component)
     return base + 3 * (v / 4) + component;
 }
 
-// ST is transposed the same way but two wide, and its trailing group is
-// *interleaved* instead -- S and T pairs end to end from the quad after the
-// last full group.
+// ST is NOT transposed. It goes two vertices to a quad, and the odd vertex's
+// pair is stored *mirrored*: the quad is (S[even], T[even], T[odd], S[odd]).
+//
+// This is `GetElementST0__11eStripDataEiPPfT2` (0x0011c8b0) read literally.
+// It takes the quad at `base + (v >> 1)` and then hands back
+// `{quad + 0, quad + 4}` for an even vertex and `{quad + 12, quad + 8}` for
+// an odd one -- S first in both cases, so the T of the pair are the inner
+// two lanes and the S the outer two. A strip with an odd vertex count puts
+// the last vertex behind a VIFcode of its own as a plain (S, T), which is
+// the even rule again and needs no special case: v = numVerts - 1 is even
+// when numVerts is odd.
+//
+// Reading this as "one quad of four S, one of four T" -- the way XYZ and the
+// normals really are stored -- consumes exactly the same bytes and looks
+// right in a size check, which is how it survived in this decoder and in
+// tools/geometry_convert.py. What gives it away is that it makes S equal T
+// on 44.43% of the car set's 212,408 ST-carrying vertices, against 1.68%
+// for the real layout:
+// it reads two lanes that hold the S and T of *different* vertices of the
+// same pair, and a pair's two vertices usually share a texture edge.
 static void st_slot(int numVerts, int v, int component, int* quad, int* lane)
 {
-    int fullGroups = numVerts / 4;
-
-    if (v < fullGroups * 4) {
-        *quad = VU_ST + 2 * (v / 4) + component;
-        *lane = v % 4;
-    } else {
-        int k    = v - fullGroups * 4;
-        int slot = 2 * k + component;
-
-        *quad = VU_ST + 2 * fullGroups + slot / 4;
-        *lane = slot % 4;
-    }
+    (void)numVerts;
+    *quad = VU_ST + (v >> 1);
+    *lane = (v & 1) ? 3 - component : component;
 }
 
 // The ADC bitfield. Which of the quadword's four words is the low one depends

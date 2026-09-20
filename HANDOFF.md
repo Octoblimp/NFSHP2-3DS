@@ -2223,3 +2223,128 @@ Also carried: the user wants Phase 4's HUD designed for **two screens** from
 the start -- some readouts on the bottom screen rather than stacked on the
 top one. Recorded at the head of Phase 4 in `TASKS.md`.
 
+
+## Session 15 (2026-09-20) -- a car on screen, and two bugs a cross-check waved through
+
+Task 21 is closed. Cars draw on the top screen out of the shipped
+`CARS\*\GEOMETRY.BIN`, with their own textures, lit, at 144 FPS in Azahar.
+`4DR_SEDAN`, `4DR_SEDAN02`, `911TURBO` and `AMBULANCE` are recognisably
+themselves -- the ambulance has its blue star of life and its red belt line
+in the right places, which is the kind of evidence no digest gives you.
+
+### What got written
+
+`geoview.c`/`.h` is the third mode `main.c`'s SELECT cycles to: scan `CARS\`,
+load a car, orbit it with the circle pad, step solids one at a time, toggle
+textures with X. It deliberately does not place parts (wheels and mirrors are
+in their own local space and the part transforms are not decoded yet, so
+"draw everything" piles them at the origin) and does not pick a LOD beyond
+"largest by triangle count", which is the `_A` body.
+
+`texsrc.c`/`.h` reads a texture pack off the card a texture at a time.
+`CARS\TEXTURES.BIN` is 15,300,536 bytes and one car needs about 400 KB of it,
+while the port already holds 17.6 MB of UI bundles resident, so a second 15 MB
+is not available on an Old3DS. Only the `0x30300003` info tables stay in
+memory -- 126,608 bytes for the whole car set. The pixel blob stays on the
+card and the two ranges one texture needs are staged at upload time. Nothing
+about the format is re-implemented: `texsrc_upload` rewrites the offsets in a
+*copy* of the `TexInfo` and calls `texpack_upload`, so `texpack.c` is still
+the only decoder and `tools/src/texpack_test.c` still covers it.
+`tools/texsrc_check.py` diffs the streaming reader against the whole-file one:
+6 packs, 2 levels, 2952 textures, 0 differ.
+
+`main.c` swapped `C2D_CreateScreenTarget` for an explicit
+`C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8)`,
+because the citro2d helper gives no depth buffer and `C3D_DepthTest` against
+no depth buffer silently does nothing.
+
+### The two bugs, which is the part worth reading
+
+**ST was decoded wrong, and the cross-check passed the whole time.**
+`docs/formats/solid-geometry.md` said ST was transposed like XYZ -- a quad of
+four S, a quad of four T. It is two vertices to a quad with the odd vertex's
+pair mirrored: `(S_even, T_even, T_odd, S_odd)`, which is
+`eStripDataE::GetElementST0` (`0x0011c8b0`) read literally. Session 14's
+entry above says "interleaved trailing-group ST"; that was the wrong reading.
+
+`geometry.c` and `geometry_convert.py` agreed exactly, digest and all, for
+four sessions -- and the digest **does** cover every S and T. They agreed
+because `geometry.c` was written from the document and the document was
+written from the Python. Independence has to reach back to the source, not
+just to a second implementation. The transposed reading consumes the same
+bytes and yields plausible UVs in 0..1, so the symptom was a car upholstered
+in smeared fragments of its own atlas -- which reads as "something is off in
+the texture path", not as "the ST layout is wrong". The measurement that
+settles it without a screenshot is the S==T rate: **44.43%** under the
+transposed reading against **1.68%** under the right one, over all 212,408
+car vertices. Transposing a mirrored pair aliases the two components
+together, and real UVs almost never land on the diagonal.
+
+**The `0x11` filler scan ate a hash.** Chunk payloads are front-padded with
+`0x11` to a 16-byte boundary and every reader here skipped that run a byte at
+a time. A byte scan cannot tell filler from a payload that begins `0x11`, and
+`TS50_C`'s first texture hash is `0x4342fd11` -- little-endian puts the `0x11`
+first. The scan eats it, the table shifts right one byte, and every hash in
+that solid comes out as the real one shifted eight bits: not absent, not
+obviously wrong, just resolving to nothing. 5 of the 1,461 solids on the disc,
+silently, because a shifted hash is indistinguishable from a texture the packs
+genuinely do not have. Both readers now step the two 8-byte tables an entry at
+a time, which cannot over-skip in turn because the pointer half of an entry is
+zero in all 4,646 entries on the disc. Checked against the sizes the
+structures give: the byte scan is still right for the 192-byte header, the
+`64 * NumStrips` entry table and the packet blob, on all 1,461.
+
+Both bugs draw a car. That is the point. **A cross-check proves two decoders
+agree; only looking at the output proves either one is right** -- and even
+looking only found the first of these. The second took a specific suspicion
+and a measurement.
+
+The deck grew accordingly: `tools/geometry_mutate.py` is now 53 of 53, with
+four ST mutations for the real layout and `table-filler-byte-at-a-time` for
+the filler rule. `TS50` joined the fast file set because it is the only cheap
+file that can reach that rule at all. Both filler mutations keep calling both
+skip functions on a throwaway cursor, because dropping a call leaves an
+uncalled static and then it is the compiler catching the mutation rather than
+the cross-check, which says nothing about the deck.
+
+### Two harness bugs, same session, same shape
+
+The "untextured" screenshot came out identical to the textured one. The run
+script was pressing `X` = `0x58`, which is Azahar's **Y** button; its X is
+`Z` = `0x5A`. `%APPDATA%\Azahar\config\qt-config.ini` is the authority.
+
+And one run captured the title screen and labelled it "first car", because the
+script slept a fixed time after the boot marker and a *faster* boot moved the
+keypresses earlier rather than later. `main.c` now logs the mode on every
+SELECT and the script presses-and-confirms against the log instead of sleeping.
+Any screenshot harness that sleeps has this bug latent in it.
+
+### Recorded, not fixed
+
+**58 of the 132 texture hashes** the car geometry refers to are in no
+`0xb0300001` pack anywhere on the disc -- 729 of 8,114 strips, 9.0%.
+`0x7b220ddf` alone is 140 strips across 13 cars. One name cracked so far,
+`0xece04847` = `WIPER01`; the busiest six survive a full `bhash_crack` sweep
+to six characters, so the answer is a better guess about what they are *for*,
+not a bigger sweep. (The count before the filler fix was 68 of 142, ten of
+them phantoms -- that is how well a shifted hash hides.)
+
+**No alpha blending.** Glass draws opaque, white on the 911 and black on the
+sedan. It is not vertex alpha: all 212,408 car vertex colours have their alpha
+bit set. So it is texture alpha plus a GS blend mode, and recovering the blend
+state is ELF work nobody has done yet. Strip `Flags` high bytes seen so far:
+`0x4100` on body, `0xc100` on the unresolved textures, `0x5000`, `0x0c00`,
+`0x0000`.
+
+**Light materials** (`0x0003401d`) are still decoded and carried on every
+strip and read by nothing.
+
+### Next session
+
+Task 16 (`bui.c`/`uirender.c`) back to `[x]` -- the outstanding part is 18b's
+two scrolling background textures, `SCREEN_LINES` and `ROADLINES`. That closes
+Phase 2. Then 22 (sound/DSP) onwards in order.
+
+Still carried: Phase 4's HUD is to be designed for **two screens** from the
+start, keeping the top screen's view of the road clear. Which elements go
+below is the user's call and has not been asked yet.

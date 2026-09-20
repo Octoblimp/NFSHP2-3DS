@@ -33,6 +33,29 @@ filler bytes (see `docs/formats/bchunk.md`), so `0x00034003` is sometimes 204
 bytes rather than 192 and `0x00034004` sometimes `64 * NumStrips + 8`. Skip
 the leading `0x11` run before reading any of these.
 
+**Skip it a whole entry at a time on the two 8-byte tables.** A byte-at-a-time
+scan cannot tell filler from a payload that happens to start with `0x11`, and
+`0x00034006` is an array of `{NameHash, pointer}` whose first word is a hash.
+`TS50_C`'s first texture hash is `0x4342fd11`, and little-endian puts that
+`0x11` first; the scan eats it, the whole table shifts right by a byte, and
+every hash in that solid comes out as the real one shifted by 8 bits. Not
+absent, not obviously wrong -- eight bits off, and resolving to nothing. It
+hits **5 of the 1,461 solids** that carry a table (`TS50_C` and the four
+`XS_CURVE35*_S*_00` track pieces) and it is silent, because a shifted hash is
+indistinguishable from a texture the packs genuinely do not have.
+
+Stepping 8 bytes at a time fixes it and cannot over-skip in turn: an all-`0x11`
+entry would be the hash `0x11111111` paired with the pointer `0x11111111`, and
+the pointer word is zero in all 4,646 table entries on the disc -- it is a
+runtime field the packer never fills in. `0x0003401d` has the same shape and
+the same hazard; no light-material table trips it today.
+
+The byte scan is safe everywhere else in this format, which is why it went
+unnoticed. Checked against the sizes the structures themselves give
+(`192`, `64 * NumStrips`, `16 * sum(DataQWordSize)`), it gets the `0x00034003`
+header, the `0x00034004` entry table and the `0x00034005` packet blob right on
+all 1,461 solids.
+
 ## `eSolid`, 192 bytes
 
 | offset | type        | field |
@@ -170,10 +193,6 @@ XYZ, still `V4-8` for the normals. `eStripDataE::GetElementXYZ` walks exactly
 this: a 48-byte stride per group of four, `+16` for Y and `+32` for Z, `+4` at
 each group boundary to step over the VIFcode.
 
-ST is transposed the same way -- one quad of four S, one of four T, address
-`32 + 2 * (v // 4) + component` -- but its trailing group is **interleaved**
-instead: S and T pairs packed end to end from quad `32 + 2 * (NumVerts // 4)`.
-
 Colours are never transposed. The `V4-5` unpack expands one RGBA5551 halfword
 per vertex into the quad at `52 + v`, with R in bits 0..4, G in 5..9, B in
 10..14 and A in bit 15.
@@ -193,6 +212,51 @@ must not treat one as "this strip has no normals", because roughly 17% of
 strips genuinely have no normal field at all and that is a different
 condition. Test whether the `V4-8` unpack at address 92 ever happened, not
 whether a vector is zero.
+
+### ST is not transposed -- it is mirrored, two vertices to a quad
+
+ST looks like it should follow XYZ and does not. `eStripDataE::GetElementST0`
+at `0x0011c8b0` packs **two** vertices into each quad and writes the odd one's
+pair backwards:
+
+```
+quad 32 + (v >> 1)   holds   (S_even, T_even, T_odd, S_odd)
+
+v even    S = lane 0, T = lane 1
+v odd     S = lane 3, T = lane 2
+```
+
+There is no group of four here and no `component` stride. A strip with an odd
+`NumVerts` ends on a half-used quad, which the packer unpacks with a VIFcode
+of its own at the next address -- `V2-32 NUM=1` at `32 + (NumVerts >> 1)`,
+on all 2,508 odd strips of the car set, no exceptions -- carrying that last
+vertex as a plain `(S, T)`. Those are the same two lanes an even vertex reads,
+so the rule above already covers the tail and a decoder needs no special case
+for it.
+
+Reading ST the transposed way instead is wrong but not *visibly* wrong. It
+still yields well-formed UVs in 0..1 against the right texture, just the wrong
+part of it, so the car comes out upholstered in smeared fragments of its own
+atlas rather than blank or black -- which reads as "something is off in the
+texture path", not as "the ST layout is wrong". The cheap test that separates
+the two readings without a screenshot is how often S equals T, over all 212,408
+car vertices that have ST:
+
+| reading | S == T |
+|---------|-------:|
+| transposed (wrong) | 94,372 -- **44.43%** |
+| mirrored (right)   |  3,568 -- **1.68%** |
+
+Transposing a mirrored pair aliases the two components together; real UVs
+almost never land on the diagonal. Any decoder whose S==T rate is in the tens
+of percent is reading this field wrong.
+
+That mistake sat in this file for four sessions while `geometry.c` and
+`tools/geometry_convert.py` agreed with each other the whole time -- and the
+cross-check *does* cover ST, its per-strip digest includes every S and T. The
+two agreed because the C was written from this document and this document was
+written from the Python. A cross-check proves two implementations agree; it
+says nothing about whether either one matches the disc. The ELF settled it.
 
 ### The ADC bits
 
@@ -256,6 +320,37 @@ texture hashes point into the `0xb0300001` packs described in
 `docs/formats/texture-pack.md`, where `texpack_find()` takes a name hash
 directly and `texpack_upload()` hands back a `C3D_Tex`.
 
+**A large minority of the hashes resolve to nothing, and that is the data,
+not the decoder.** Sweeping every `0xb0300001` pack anywhere under the
+extracted disc gives 2,031 distinct texture hashes. The 28
+`CARS\*\GEOMETRY.BIN` reference 132 distinct hashes between them, and
+**58 of those 132 are in no pack on the disc** -- 729 of the 8,114 car strips,
+9.0%. They are not stragglers, either: `0x7b220ddf` alone is 140 strips shared
+by 13 different cars, and the next five are on seven to ten cars each. Only
+one has been cracked so far, `0xece04847` = `WIPER01`; the busiest six survive
+a full `bhash_crack` sweep to six characters, so their names are longer than
+that and the answer is a better guess about what they are *for*, not a bigger
+sweep.
+
+Whatever they are, they are not a bug to chase in the reader: the hashes are
+stable across cars, the resolution rate does not move when the decoder
+changes, and 74 of the 132 do resolve out of the same tables. A renderer has
+to draw those strips untextured -- the same path `TextureNumber >=
+NumTextures` takes -- rather than treat an unresolved hash as a failure.
+(A shifted hash from the filler bug above looks exactly like one of these,
+which is how that bug stayed hidden; the count with the byte-granular scan was
+68 of 142, ten of them phantoms.)
+
+**T counts down from the top row.** ST comes out of the packet the way the GS
+addressed a texture, with T = 0 at the image's first row in memory. citro2d
+and `texpack_upload` put that first row at `v = 1` -- `uirender.c`'s
+`subtex_from_pixels` does `1 - y / texH` over the same upload path -- so a
+citro3d renderer needs `v = 1 - T * scale`, scale first because
+`texpack_upload` pads to a power of two and leaves the image in the *top*-left
+of the allocation. `geosolid.v.pica` does this. Skipping the flip still draws
+a car, with its atlas mirrored top to bottom: the grille lands on the sill and
+a wheel hub in the middle of a door.
+
 `TRACKS\TRACKA12.BUN` contains **no** `0x80034000` at all -- it is the other
 half of the track data. All 1,135 track solids are in `TRACKB12.BUN`. A
 reader pointed at A12 should report "no solid list" rather than treat an
@@ -293,11 +388,27 @@ cannot reach the output -- the VIFcode census, the always-set ADC bits 0 and
 1, the redundant entry table, and so on. Two of those are equivalent only
 because of what this particular disc contains, and say so.
 
-Two defects came out of writing the port, both fixed above:
+Four defects came out of writing the port, all fixed above:
 
 * this document said normals were "length 126 or 127", which rejects 16% of
   the real data;
 * the first `geo_decode_next` did not advance its cursor past a strip it
   could not decode, so the obvious caller loop spun forever on damaged data.
   A mutation that made every packet unreadable found it by printing 72
-  million lines in sixty seconds.
+  million lines in sixty seconds;
+* ST was documented, and decoded, as transposed like XYZ. It is mirrored two
+  vertices to a quad;
+* the `0x11` filler scan ran a byte at a time and ate the first byte of a
+  texture table whose first hash ends in `0x11`, shifting the whole table.
+
+**The last two are the interesting ones, because the cross-check passed
+through both.** `geometry_check.py` diffs `geometry.c` against
+`geometry_convert.py`, its digest covers every S and T, and the two agreed
+exactly -- on the wrong answer, in both cases, because the C was written from
+this document and this document from the Python. Independence has to reach
+back to the source. What broke each of them was going to the original: the
+ELF for ST (`GetElementST0`, `0x0011c8b0`), and a screenshot for the filler,
+which is the other half of the rule -- **a cross-check proves two decoders
+agree; only looking at the output proves either is right.** Both bugs draw a
+car. One draws it wearing the wrong parts of its own texture; the other draws
+it correctly and silently loses every texture on five solids.

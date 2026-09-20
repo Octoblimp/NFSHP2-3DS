@@ -214,8 +214,6 @@ def read_strip(buf, off, size):
     if not 0 < nverts <= 30 or nloops not in ADC_LOW_WORD:
         return None
 
-    whole = nverts // 4 * 4                     # vertices in full groups of four
-    st_tail = ST_ADDR + 2 * (whole // 4)
     has_st, has_norm = ST_ADDR in mem, NORM_ADDR in mem
 
     pos, st, colour, normal = [], [], [], []
@@ -223,14 +221,22 @@ def read_strip(buf, off, size):
         g, i = v // 4, v % 4
         pos.append(tuple(lane(mem, XYZ_ADDR + 3 * g + c, i) for c in range(3)))
 
+        # ST is two vertices to a quad, mirrored: (S even, T even, T odd,
+        # S odd). GetElementST0__11eStripDataEiPPfT2 (0x0011c8b0) takes the
+        # quad at ST_ADDR + (v >> 1) and returns {+0, +4} for an even vertex
+        # and {+12, +8} for an odd one. It is *not* transposed in fours the
+        # way XYZ and the normals are -- an earlier draft of this file read
+        # it that way, which consumes the same bytes and made S equal T on
+        # 44.43% of the car set's 212,408 ST-carrying vertices against 1.68%
+        # for this layout.
         if not has_st:
             st.append((0.0, 0.0))
-        elif v < whole:
-            st.append((lane(mem, ST_ADDR + 2 * g, i), lane(mem, ST_ADDR + 2 * g + 1, i)))
-        else:                                   # the trailing group is interleaved
-            k = 2 * (v - whole)
-            st.append((lane(mem, st_tail + k // 4, k % 4),
-                       lane(mem, st_tail + (k + 1) // 4, (k + 1) % 4)))
+        elif v & 1:
+            st.append((lane(mem, ST_ADDR + (v >> 1), 3),
+                       lane(mem, ST_ADDR + (v >> 1), 2)))
+        else:
+            st.append((lane(mem, ST_ADDR + (v >> 1), 0),
+                       lane(mem, ST_ADDR + (v >> 1), 1)))
 
         r, gr, b, a = mem.get(RGBA_ADDR + v, (31, 31, 31, 1))
         colour.append((r * 255 // 31, gr * 255 // 31, b * 255 // 31, 255 if a else 0))
@@ -247,8 +253,21 @@ def read_strip(buf, off, size):
 
 
 def hashes(buf, off, size):
-    """The NameHash column of an 8-byte-per-entry table chunk."""
-    off, size = unfiller(buf, off, size)
+    """The NameHash column of an 8-byte-per-entry table chunk.
+
+    The front filler is skipped a whole entry at a time, not a byte at a
+    time. unfiller() below eats any leading 0x11 and a real NameHash is
+    allowed to end in one -- TS50_C's first texture is 0x4342fd11 -- which
+    shifts the whole table by a byte and turns every hash in it into a
+    plausible hash of nothing. Five of the 1,411 solids on this disc are
+    affected. An entry is {NameHash, pointer} and the pointer is fixed up at
+    load time, so it is zero in a file and eight bytes of 0x11 can only be
+    filler.
+    """
+    n = 0
+    while n + 8 <= size and buf[off + n:off + n + 8] == bytes([FILLER]) * 8:
+        n += 8
+    off, size = off + n, size - n
     return [struct.unpack_from("<I", buf, off + i * 8)[0] for i in range(size // 8)]
 
 
