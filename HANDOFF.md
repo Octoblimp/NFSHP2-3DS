@@ -1633,3 +1633,131 @@ The two scrolling textures found in Session 9 (`SCREEN_LINES`, `ROADLINES`,
 via `TextureInfo::GetScroll` at `0x00100a60`) are still not animated. They
 were filed under 18b but belong to the renderer, not the animation layer:
 `uirender.c` would offset the UVs, and nothing in `banim.c` touches them.
+
+---
+
+## Session 11 (2026-09-20) -- reading the math library
+
+A short session and an honest one: **no code was written.** Phase 3 opens at
+task 19, the bware math library, and the whole session went into disassembling
+it. The output is `docs/formats/bmath.md`, which is the decode of 67 of its 73
+functions with an address for every rule. Task 19 is `[~]`, not `[x]`.
+
+Four contiguous objects, 10.3 KB of `.text`, sitting between the slot-pool
+allocator and the network stubs:
+
+| object | range | functions | decoded |
+|--------|-------|-----------|---------|
+| `bVector.obj` | `0x00240198`-`0x002411f0` | 38 | all |
+| `bQuaternion.obj` | `0x002411f0`-`0x00241bc8` | 9 | 3 |
+| `bMath.obj` | `0x00241bc8`-`0x002424f8` | 19 | all |
+| `bMatrix.obj` | `0x002424f8`-`0x00242890` | 7 | all |
+
+`bVector` has no out-of-line member functions at all -- the class is inline in
+its header, and the object holds only free functions. That is worth knowing
+before going looking for `bVector3::Normalize`.
+
+### The tables are the interesting part
+
+Four data tables have to cross with the code, and three of them turned out to
+be reconstructible, which is the difference between porting a magic blob and
+porting a decision.
+
+`bFixATanTableLow` (`0x00315d30`) and `bFixATanTableHigh` (`0x00315e38`),
+129 `u16` each, both reproduce **exactly** as
+
+```python
+(int)(math.atan(i / 32.0) * 10430.3779296875)     # Low
+(int)(math.atan(i /  4.0) * 10430.3779296875)     # High
+```
+
+-- double `atan`, truncated, times the *float32-rounded* radians-to-BAM
+constant. Getting that last part right took one entry. `atan(1.0)` lands
+exactly on 8192 BAM; both tables store **8191** there (`lo[32]`, `hi[4]`). With
+the exact ratio `32768/pi` that entry rounds up and the model mismatches by
+one; with `10430.3779296875` it truncates down and all 258 entries match. A
+single off-by-one, and it is the only entry in either table that can tell the
+two constants apart.
+
+`bASinTable` (`0x003152a0`) is a 192-entry piecewise-linear table over twelve
+octaves of sixteen buckets, `{u16 angle; u16 pad; float slope}`, where the
+slope is in *turns* per unit x so the code's trailing `* 65536.0f` converts to
+BAM. The octave search in `bASin` is not a binary search despite looking like
+one: it only ever adds, walking `0x8000, 0xC000, 0xE000, ...` while it stays
+below the input, and the final add is backed out on the way out of the loop.
+Reimplemented in Python and swept against `math.asin` over 20,001 samples:
+max error **1.93 BAM = 0.0106 degrees**. That is the evidence the decode is
+right.
+
+`bSinTable` (`0x00315928`, 513 `s16`) is the one that did **not** fall. It is
+obviously `sin` scaled to 32767 -- peak at index 128, trough at 384 -- but the
+residual against `round(sin(2*pi*i/512) * 32767)` drifts 0 -> +3 at i=256 ->
+-6 at i=511 before being forced back to 0. A two-parameter fit lands on
+amplitude 32767 and an angular step 31 ppm short of `2*pi/512`, which
+reproduces every entry to within 1 LSB, but no plausible constant produces
+that step, and the game's own overshooting `bSin` does not generate it either
+(395 of 513 entries differ). Tried and rejected: `sin*32768` clamped, truncate
+instead of round, float32 accumulation of the angle, the BAM round-trip
+`i*128/10430.37793`. **Embed the 513 shipped values.** It is 1 KB and it is
+correct; a model that is right to 1 LSB is still wrong.
+
+### Two quirks that will matter when this is ported
+
+`bNormalize` has three degenerate cases and they disagree with each other.
+`bNormalize(bVector2*, v)` (`0x00240198`) and
+`bNormalize(bVector2*, v, len)` (`0x002401f0`) both write `(1, 0)` on a
+zero-length input -- the second one *ignores its own `len` argument* doing so.
+`bNormalize(bVector3*, v, len)` (`0x00240250`) writes `(len, 0, 0)`. All three
+are in the shipped code and all three should be reproduced.
+
+`bExpandBoundingBox(bVector3*, bVector3*, const bVector3*, float r)`
+(`0x00240f80`) builds its radius vector on the stack and writes only
+`sp[0..2]`, then loads all sixteen bytes into a VU register. The `w` lane --
+`bVector3::pad` -- is fed uninitialised stack and lands in both corners of the
+box. Harmless while nothing reads `.pad`, but the port cannot reproduce it and
+should not pretend to: operate on x/y/z and say so in a comment.
+
+### `bMulMatrix` multiplies right-to-left
+
+`bMulMatrix(out, m1, m2)` computes `out = m2 * m1`, not `m1 * m2`. The four
+VU0 macro-mode words load `vf8..vf11` from the **second** argument and
+`vf4..vf7` from the **third**, and the `vmulax/vmadday/vmaddaz/vmaddw` chain
+makes each row of the third argument a row-vector through the matrix in the
+second.
+
+This is decoded from the instruction encodings, not from a caller, and it is
+flagged as such in `docs/formats/bmath.md`. **Verify it against a caller
+before writing code against it.** The decode itself is solid -- the COP2 macro
+fields are `dest 24..21 / ft 20..16 / fs 15..11 / fd 10..6 / func 5..0`, and
+for func `0x3c`-`0x3f` the real opcode is the Special2 entry at
+`(fd << 2) | (func & 3)`, which puts `0x4be441bc` on VMULAx and `0x4be45b0b` on
+VMADDw -- but argument order is exactly the kind of thing that reads fine and
+is backwards.
+
+### Housekeeping
+
+`bSqrt32` (`0x00241c68`) was carried into this session from the last one with a
+note saying it "returns root >> 1", which reads like it returns half the root.
+It does not: the accumulator holds twice the root throughout, so the shift
+gives the root itself. Checked against `math.isqrt` over `0..3999` plus 40,000
+random 32-bit values plus the boundaries -- 0 mismatches, it is exactly the
+floor integer square root. The note was describing the instruction, not the
+function, and the distinction would have put a factor of two into every
+fixed-point normalise.
+
+All four cross-checkers still run clean, unchanged from Session 10:
+
+```
+banim_check        23 scenarios, 2219 lines, 0 differ
+bscreens_check     17 scenarios, 1246 lines, 0 differ
+bootflow_check     12 scenarios, 3659 lines, 0 differ
+bui_check          FRONTB.BUN     1395 lines, 0 differ
+```
+
+### Next session
+
+`CONTINUE.md` has the pick-up-here list. In short: finish the seven
+`bQuaternion` functions, then write `bmath.c`/`bvector.c`/`bmatrix.c`/
+`bquat.c` with their headers, then `tools/src/bmath_test.c` +
+`tools/bmath_check.py`, then mutation-test, then delete `banim_bsin` from
+`banim.c` and point it at the real `bSin`.

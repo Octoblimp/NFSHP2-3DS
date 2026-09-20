@@ -542,7 +542,32 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
 
 ## Phase 3 -- Core engine systems
 
-19. [ ] Math/vector/quaternion/matrix (`bMath`, `bVector`, `bQuaternion`, `bMatrix`)
+19. [~] Math/vector/quaternion/matrix (`bMath`, `bVector`, `bQuaternion`,
+        `bMatrix`). Four contiguous objects, 73 functions, 10.3 KB of
+        `.text`: `bVector.obj` `0x00240198`, `bQuaternion.obj` `0x002411f0`,
+        `bMath.obj` `0x00241bc8`, `bMatrix.obj` `0x002424f8`.
+        **Decode is written up in `docs/formats/bmath.md`; no code is
+        written yet.** Done: all 19 of `bMath.obj`, all 38 of
+        `bVector.obj`, all 7 of `bMatrix.obj`, 3 of 9 in
+        `bQuaternion.obj`. Remaining to decode: `bSlerp` (`0x00241570`),
+        `bConjugate` (`0x002416f0`), `bLength` (`0x00241728`),
+        `bNormalize` (`0x00241758`), `bMult` (`0x00241798`),
+        `bQuaternionToMatrix` (`0x00241800`), `bMatrixToQuaternion`
+        (`0x002418c0`).
+        Four data tables have to come across with the code: `bASinTable`
+        (`0x003152a0`), `bSinTable` (`0x00315928`), `bFixATanTableLow`
+        (`0x00315d30`) and `bFixATanTableHigh` (`0x00315e38`). The two
+        atan tables regenerate exactly as
+        `(int)(atan(i/s) * 10430.3779296875)` -- the float32-rounded BAM
+        constant, not `32768/pi`; `bSinTable` does not regenerate from any
+        model found and must be embedded verbatim.
+        When `bmath.c` lands, `banim.c` loses its private `banim_bsin` and
+        calls `bMath`'s `bSin` instead. `tCubic1D` stays in `banim.c` --
+        it is `Point.obj`, game code, not bware.
+        Still to do: write `bmath.c`/`.h`, `bvector.c`/`.h`,
+        `bmatrix.c`/`.h`, `bquat.c`/`.h`; `tools/src/bmath_test.c` +
+        `tools/bmath_check.py` as the usual independent model; then
+        mutation-test it and fold `banim_bsin` out.
 20. [ ] Memory/slot-pool allocator (`bSlotPool`/`bNewSlotPool`) on top of `heapcfg.c`
 21. [ ] Rendering: VU1 geometry submission -> citro3d equivalent
 22. [ ] Sound: new 3DS DSP driver behind the recovered `bDriver`/`bSnd` interface
