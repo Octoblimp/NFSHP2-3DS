@@ -83,21 +83,43 @@ STAB_LIKE = re.compile(
 )
 
 MIN_LEN = 8
+CONT = b"\\"   # a split stab string ends in a backslash
+
+
+# A stab string too long for the assembler's line limit is split across
+# consecutive symbol entries, every piece but the last ending in a backslash
+# and the next picking up mid-token. 10,318 of the 68,317 strings in this
+# .mdebug are continuations, and a struct whose definition straddles one
+# comes out silently truncated: RaceParameters stopped at CopStrength and
+# lost Boost, PlayerSettings, OpponentStrength and five more fields that
+# way. The pieces are adjacent in the pool, so joining them is just "keep
+# taking the next NUL-terminated string while this one ends in a backslash".
+MAX_CONTINUATIONS = 64
+
+
+def _string_at(blob, start, cap=4000):
+    """The NUL-terminated string at `start`, and the offset just past it."""
+    end = blob.find(b"\x00", start)
+    if end == -1:
+        end = len(blob)
+    end = min(end, start + cap)
+    return blob[start:end], end + 1
 
 
 def harvest_strings(blob):
     seen = Counter()
     for m in STAB_LIKE.finditer(blob):
-        s = m.group(0)
         # Extend forward from the regex's conservative match to the actual
-        # NUL terminator, so long type strings aren't truncated.
-        end = blob.find(b"\x00", m.end())
-        if end == -1:
-            end = len(blob)
-        # Cap how far we extend a single match to avoid runaway joins across
-        # unrelated adjacent strings if a NUL is missing for some reason.
-        end = min(end, m.end() + 4000)
-        full = blob[m.start():end]
+        # NUL terminator, so long type strings aren't truncated -- and then
+        # keep going through any continuation pieces.
+        full, nxt = _string_at(blob, m.start(), (m.end() - m.start()) + 4000)
+        joins = 0
+        while full.endswith(CONT) and joins < MAX_CONTINUATIONS:
+            more, nxt = _string_at(blob, nxt)
+            if not more:
+                break
+            full = full[:-1] + more
+            joins += 1
         if len(full) < MIN_LEN:
             continue
         try:
@@ -128,7 +150,21 @@ def split_members(body):
     return entries
 
 
-FIELD_RE = re.compile(r"^([A-Za-z_~][A-Za-z0-9_~]*):(\d+),(\d+),(\d+)$")
+# A data member is "name:<type>,<bit offset>,<bit size>". <type> is usually a
+# bare type number, but a member whose type is spelled out in place -- an
+# array, most often -- carries the whole definition instead:
+#
+#   PlayerStartPosition:1024=ar1;0;1;10,480,16
+#
+# and that definition has its own ';' and ',' in it. Anchoring the offset and
+# size to the END of the entry and letting the type run is what tells the two
+# apart; requiring a bare number, as this did, silently filed every array
+# field under "methods" and dropped it from the dump. RaceParameters lost
+# PlayerStartPosition and sObjective that way, both of which StartQuickRace
+# writes. Method entries are not at risk: they all use "::".
+FIELD_RE = re.compile(
+    r"^([A-Za-z_~][A-Za-z0-9_~]*):(\d+)(?:=.*)?,(\d+),(\d+)$", re.DOTALL
+)
 STRUCT_DEF_RE = re.compile(
     r"^([A-Za-z_~][A-Za-z0-9_~<>, ]*):(T?t?)(\d+)=([su])(\d+)(.*)$", re.DOTALL
 )

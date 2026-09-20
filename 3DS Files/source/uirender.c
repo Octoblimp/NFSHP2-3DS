@@ -476,6 +476,29 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
     }
 }
 
+bool uirender_object_bounds(UIRenderer* r, const BUI* ui, uint32_t index,
+                            float box[4])
+{
+    BUIObject o;
+    if (!r || !ui || !bui_object(ui, index, &o)) return false;
+    if (o.type != BUI_TYPE_BITMAP) return false;
+
+    int idx = find_texture(r, o.textureHash);
+    if (idx < 0) return false;
+    UITexture* t = &r->textures[idx];
+    if (!t->override && !t->valid) return false;
+
+    uint16_t tw = t->override ? t->overrideW : t->w;
+    uint16_t th = t->override ? t->overrideH : t->h;
+    // The same truncation draw_bitmap() does, because the original takes the
+    // size from the TextureInfo and casts.
+    box[0] = o.x;
+    box[1] = o.y;
+    box[2] = o.x + (float)(int)((float)tw * o.scaleX);
+    box[3] = o.y + (float)(int)((float)th * o.scaleY);
+    return true;
+}
+
 void uirender_draw_screen(UIRenderer* r, BUI* ui, const BUIScreen* screen,
                           float alpha)
 {

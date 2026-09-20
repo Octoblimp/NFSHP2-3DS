@@ -432,6 +432,75 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         `0x0016a224` and opens movie 0 unconditionally. The PS2 does the
         same thing.
 
+The two entries below are scope that only appeared once the main menu was
+on screen and its items led somewhere. They are lettered rather than
+numbered so that the Phase 3-5 numbers other documents already cite --
+task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
+-- keep pointing at the same work.
+
+18a.[x] The three screens the main menu leads to: `Cops On Mode Select`,
+        `Cops Off Mode Select`, `Options`. Ported to
+        `3DS Files/source/bscreens.c`, written up in
+        `docs/formats/frontend-screens.md`. These are real C++ classes in
+        the ELF, not chunk data: `CopsOnModeSelect` (`0x00204e10`),
+        `CopsOffModeSelect` (`0x00205a58`) and `tOptionsScreen` /
+        `OptionsScreenBase` (`0x001b8e30`), each reached through a
+        `FlailerScreenConfig` row that joins the authored `ScreenName`
+        ("Cops On Mode Select") to the hash of a quite different string
+        (`bhash("COPS_ON_MODE_SELECT")`). The two namespaces are joined
+        nowhere else, which is why the registry row is not optional.
+        What the port reproduces: the per-item blurb (`tAnimatedBlurb`
+        retargets `SCROLLING_TEXT` at a `LanguageID` from a table -- the
+        bundle ships the authoring placeholder "This text will scroll
+        sideways..." in that object, which is what you see if the blurb
+        never fires); the selection brackets (`MENUITEM_UNDERSCORE` /
+        `MENUITEM_OVERSCORE` snapped to the highlighted item's bitmap
+        bounds, offset -3.0 and +6.0 from two globals at `0x00324a1c` and
+        `0x00324a18`); `GrayMenuItem` (`0x001b8a18`) and which of its
+        three modes also hides the object; the exit animations, whose
+        0.25 / 0.20 / 0.40 s durations are `0.05 + n * 0.05` over the
+        screen's `MENUITEM_n_GROUP` count and were confirmed by counting
+        those groups in `FRONTB.BUN` rather than by reading the code;
+        and `StartQuickRace` (`0x001a8e08`), all 25 stores into
+        `RaceParameters`. `JOY_EVENT_MAIN_MENU_SELECT_TRANSMISSION` is a
+        *held* button, not a pressed one: the Mode Selects only remember
+        whether it is down and `StartQuickRace` reads that when it runs.
+        Cross-checked the usual way -- `tools/bscreens_check.py` is an
+        independent Python model of all three screens, 17 scenarios, 974
+        lines, 0 differ -- and walked on the emulator, which now enters
+        Cops On Mode Select and Options with the brackets and the blurb
+        already on the right item.
+        One ordering bug came out of that walk and is fixed in
+        `gameflow.c`: the `enterScreen` hook ran *before*
+        `SCREEN_ACTIVATE`, so the menu it builds delivered its opening
+        `MENUITEM_HIGHLIGHT` to a screen instance that did not exist yet
+        and the first highlight was dropped -- brackets and blurb sat
+        where the bundle authored them until the player pressed a
+        direction. In the original the menu is built by the screen's own
+        constructor, which runs on `SCREEN_ACTIVATE`, so the hook belongs
+        after the message. Same reasoning applies at exit, so `main.c`
+        now leaves through `bgf_change_to_screen(NULL)` instead of
+        closing the menu behind the flow's back.
+        Three object hashes in these screens are still uncracked:
+        `0x6eb9985d`, `0x70a404ec`, `0xab671c9a`. A 4,185-word list and an
+        exhaustive sweep of every string up to 4 characters missed all
+        three; they are named in the doc as unknowns rather than guessed.
+
+18b.[ ] The frontend animation layer. Everything in 18a happens instantly
+        because the classes that make it take time are not ported yet:
+        `tSlideAnimation` / `tSlideInAnimation` / `tSlideOutAnimation`
+        (items slide in and out per `MENUITEM_n_GROUP`),
+        `tHighlightAnimation` (the brackets travel instead of snapping),
+        `tAnimatedBlurb`'s scroll, `SelectionSet` / `AnimationGroup` and
+        `SplineSeek`, whose `SplineBaseDuration` and
+        `SplineDeltaDuration` (`0x00324db4`, `0x00324db8`) are both 0.05
+        -- the same two numbers the exit durations come out of. The port
+        already calls the hooks at the right moments, so this is a layer
+        on top rather than a rework: `bscreens.c` would keep deciding
+        *what* moves and the new module would decide *when* it arrives.
+        Note the 1/4000 s `RealTimer` when timing it (`Timer::SetTime` at
+        `0x00134ef0` is `(int)(f * 4000.0f)`).
+
 ## Phase 3 -- Core engine systems
 
 19. [ ] Math/vector/quaternion/matrix (`bMath`, `bVector`, `bQuaternion`, `bMatrix`)

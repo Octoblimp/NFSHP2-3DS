@@ -206,7 +206,26 @@ def textures(info):
         t["image_infos"] = [
             struct.unpack_from("<HBb", info, r + 0x52 + i * 4)
             for i in range(min(7, max(1, t["levels"])))]
+        # The UV animation: ScrollType at +0x79, then the two speeds and the
+        # time step. TextureInfo::GetScroll (0x00100a60) turns them into the
+        # offset added to U and V; see docs/formats/texture-pack.md.
+        (t["scroll_type"],) = struct.unpack_from("<b", info, r + 0x79)
+        (t["scroll_s"], t["scroll_t"],
+         t["scroll_step"]) = struct.unpack_from("<3f", info, r + 0x7C)
         yield t
+
+
+def scroll_uv(t, time):
+    """TextureInfo::GetScroll (0x00100a60), for both axes: (du, dv)."""
+    def one(speed):
+        if not t["scroll_type"]:
+            return 0.0
+        u = time
+        if t["scroll_type"] == 2:
+            u = float(int(u / t["scroll_step"])) if t["scroll_step"] else 0.0
+        f = u * speed
+        return f - float(int(f))
+    return one(t["scroll_s"]), one(t["scroll_t"])
 
 
 def mip_chain(t):
@@ -443,6 +462,9 @@ def main():
     ap.add_argument("--list", action="store_true", help="print the table, convert nothing")
     ap.add_argument("--anims", action="store_true",
                     help="print the 0xb0300100 TextureAnimPack table, convert nothing")
+    ap.add_argument("--scroll", action="store_true",
+                    help="print the UV-scrolling textures (ScrollType != 0), "
+                         "convert nothing")
     ap.add_argument("--mips", action="store_true",
                     help="also write every mip level below the base, as "
                          "<name>.mip<N>.png")
@@ -451,8 +473,8 @@ def main():
                          "(the default, and what the game does); none: dump the "
                          "data as stored; all: unswizzle every paletted texture")
     a = ap.parse_args()
-    if not a.list and not a.anims and not a.out_dir:
-        ap.error("give an output directory, or --list, or --anims")
+    if not a.list and not a.anims and not a.scroll and not a.out_dir:
+        ap.error("give an output directory, or --list, --anims or --scroll")
 
     buf = Path(a.file).read_bytes()
     packs = list(find_packs(buf))
@@ -484,6 +506,18 @@ def main():
                 for i, h in enumerate(an["frame_hashes"]):
                     print("    %2d  %08x  %s"
                           % (i, h, by_hash.get(h, "<not in this file>")))
+        return
+
+    if a.scroll:
+        for off, size in packs:
+            pack_name, info, _data = parse_pack(buf, off, size)
+            rows = [t for t in textures(info) if t["scroll_type"]]
+            print("== pack %r @0x%x: %d of %d textures scroll =="
+                  % (pack_name, off, len(rows), len(info) // RECORD_SIZE))
+            for t in rows:
+                print("%-26s type %d  S %+.6f  T %+.6f  step %g"
+                      % (t["name"], t["scroll_type"], t["scroll_s"],
+                         t["scroll_t"], t["scroll_step"]))
         return
 
     written = skipped = 0

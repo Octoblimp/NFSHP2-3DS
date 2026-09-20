@@ -358,6 +358,12 @@ def decode(w, addr, elf=None):
         return "%-6s %s,%s,0x%08x" % (name, REG[rs], REG[rt], tgt), tgt
     if op == 0x0f:
         return "%-6s %s,0x%04x" % (name, REG[rt], imm), None
+    if op in (0x0c, 0x0d, 0x0e):                # andi / ori / xori
+        # Zero-extended, not sign-extended. Printing these as signed decimal
+        # turns `ori a1,a1,0xe350` into `ori a1,a1,-7344`, and reading that
+        # back as a constant silently builds the wrong address -- which is
+        # exactly how a menu item hash table came out 0x40 off once.
+        return "%-6s %s,%s,0x%04x" % (name, REG[rt], REG[rs], imm), None
     if op in (0x31, 0x39):                      # lwc1 / swc1
         return "%-6s $f%d,%d(%s)" % (name, rt, simm, REG[rs]), None
     if op in (0x36, 0x3e):                      # lqc2 / sqc2

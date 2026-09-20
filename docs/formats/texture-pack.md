@@ -52,42 +52,132 @@ not.
 Offsets confirmed against `GetTex0__FP11TextureInfoUiUi` (`0x001094b8`), which
 assembles the GS `TEX0` register directly out of the struct, and against
 `AttachTextureDownloadPacket` (`0x00108938`), which DMAs the pixels to GS
-memory. Sizes in the struct are byte counts unless stated otherwise.
+memory. **Every field name below is bWare's own**, out of the `.mdebug` type
+info; the whole 164 bytes are now accounted for. Sizes in the struct are byte
+counts unless stated otherwise.
 
 | offset | type       | field |
 |-------:|------------|-------|
-| `0x00` | `u32`      | runtime GS address of the pixels (0 on disc) |
-| `0x04` | `u32`      | runtime GS address of the CLUT (0 on disc) |
-| `0x08` | `char[24]` | name, NUL padded |
-| `0x20` | `u32`      | `bStringHash(name)` -- the lookup key |
-| `0x24` | `u16`      | width |
-| `0x26` | `u16`      | height |
-| `0x28` | `u8`       | bits per pixel: 4, 8 or 32 |
+| `0x00` | `bTNode<TextureInfo>` | the base class: `pNext`/`pPrev`, 0 on disc |
+| `0x08` | `char[24]` | `DebugName`, NUL padded |
+| `0x20` | `u32`      | `NameHash` = `bStringHash(DebugName)` -- the lookup key |
+| `0x24` | `u16`      | `Width` |
+| `0x26` | `u16`      | `Height` |
+| `0x28` | `u8`       | `BitDepth`: 4, 8 or 32 |
 | `0x29` | `u8`       | `RenderingOrder` (0..7) -- the mip count is `0x6e`, not this |
-| `0x2a` | `u16`      | palette entry count: 16, 256, or 0 when 32bpp |
-| `0x2c` | `u16`      | palette size in 256-byte GS blocks |
-| `0x2e` | `u16`      | pixel size in 256-byte GS blocks |
-| `0x30` | `u32`      | pixel offset into the `0x30300004` blob |
-| `0x34` | `u32`      | CLUT offset into the same blob |
-| `0x38` | `u32`      | pixel byte count (the whole mip chain) |
-| `0x3c` | `u32`      | CLUT byte count |
-| `0x40` | `u32`      | name hash of the texture this one borrows its pixels from, 0 if it owns them |
-| `0x44` | `u32`      | repeat of `0x38` |
-| `0x48` | `u8`       | `TW` = log2(width) |
-| `0x49` | `u8`       | `TH` = log2(height) |
-| `0x4a` | `u8`       | `PSM`: `0x00` PSMCT32, `0x13` PSMT8, `0x14` PSMT4 |
-| `0x4b` | `u8`       | `CPSM` (CLUT format; `0x00` PSMCT32 throughout) |
-| `0x4e` | `u8`       | `TFX` |
-| `0x52` | `TextureImageInfo[7]` | one 4-byte entry per mip level (see below) |
+| `0x2a` | `u16`      | `NumPaletteEntries`: 16, 256, or 0 when 32bpp |
+| `0x2c` | `u16`      | `PaletteVramBlocksRequired` -- 256-byte GS blocks |
+| `0x2e` | `u16`      | `ImageVramBlocksRequired` -- ditto |
+| `0x30` | `u32`      | `ImagePlacement` -- pixel offset into the `0x30300004` blob |
+| `0x34` | `u32`      | `PalettePlacement` -- CLUT offset into the same blob |
+| `0x38` | `u32`      | `ImageSize` -- pixel byte count (the whole mip chain) |
+| `0x3c` | `u32`      | `PaletteSize` |
+| `0x40` | `u32`      | `ImageParentHash` -- the texture this one borrows its pixels from, 0 if it owns them |
+| `0x44` | `u32`      | `BaseImageSize` -- repeat of `0x38` |
+| `0x48` | `u8`       | `ShiftWidth` = `TW` = log2(width) |
+| `0x49` | `u8`       | `ShiftHeight` = `TH` = log2(height) |
+| `0x4a` | `u8`       | `PixelStorageMode` = `PSM`: `0x00` PSMCT32, `0x13` PSMT8, `0x14` PSMT4 |
+| `0x4b` | `u8`       | `ClutPixelStorageMode` = `CPSM` (`0x00` PSMCT32 throughout) |
+| `0x4c` | `u8`       | `TilableUV` |
+| `0x4d` | `u8`       | `ApplyAlphaSorting` |
+| `0x4e` | `u8`       | `TextureFx` = `TFX` |
+| `0x4f` | `u8`       | `IsAnySemitransparencyFlag` |
+| `0x50` | `u8`       | `bWriteZ` |
+| `0x52` | `TextureImageInfo[7]` | `ImageInfos`, one 4-byte entry per mip level (see below) |
 | `0x54` | `u8`       | level 0's `TextureBufferWidth` = `TBW` -- buffer width / 64; always equals `width / 64` here |
 | `0x55` | `s8`       | level 0's `Is32BitSwizzelled` -- **this is what says whether the pixels are swizzled** |
 | `0x6e` | `s8`       | `NumMipMapLevels` -- levels *after* the base, so `0` means one level |
-| `0x84` | `f32`      | `1.0f` |
-| `0x90` | `u32`      | runtime pointer to the pixel bytes in main memory (0 on disc) |
-| `0x94` | `u32`      | runtime pointer to the CLUT in main memory (0 on disc) |
+| `0x6f` | `u8`       | `MMag` -- GS magnification filter |
+| `0x70` | `u8`       | `MMin` -- GS minification filter |
+| `0x71` | `u8`       | `MipMapL` -- the `TEX1` LOD `L` |
+| `0x72` | `u16`      | `MipMapK` -- the `TEX1` LOD `K` |
+| `0x74` | `u8`       | `GlossMapInAlpha` |
+| `0x75` | `u8`       | `Padding` |
+| `0x76` | `u8`       | `AlphaBits` |
+| `0x77` | `u8`       | `AlphaFix` |
+| `0x78` | `u8`       | `UsedFlag` |
+| `0x79` | `u8`       | `ScrollType` |
+| `0x7c` | `f32`      | `ScrollSpeedS` |
+| `0x80` | `f32`      | `ScrollSpeedT` |
+| `0x84` | `f32`      | `ScrollTimeStep` -- see *Scrolling textures* below |
+| `0x88` | `u32`      | `pTexturePack` -- 0 on disc |
+| `0x8c` | `u32`      | `pImageParent` -- 0 on disc; resolved from `ImageParentHash` |
+| `0x90` | `u32`      | `ImageData` -- runtime pointer to the pixel bytes (0 on disc) |
+| `0x94` | `u32`      | `PaletteData` -- runtime pointer to the CLUT (0 on disc) |
+| `0x98` | `u32`      | `pActiveTexture` -- 0 on disc |
+| `0x9c` | `u32`      | `pStackedActiveTexture` -- 0 on disc |
+| `0xa0` | `u16`      | `PaletteVramAddress` -- 0 on disc |
+| `0xa2` | `u16`      | `ImageVramAddress` -- 0 on disc |
 
-`0x90` and `0x94` are set when the pack is loaded and are the two fields the
-texture animations rewrite -- see below.
+`ImageData` and `PaletteData` are set when the pack is loaded and are the two
+fields the texture animations rewrite -- see below.
+
+**Correction.** This table used to call `0x00`/`0x04` "the runtime GS address
+of the pixels / of the CLUT". They are not: they are the `bTNode<TextureInfo>`
+base class the record inherits from, `!1,020,1732;` in the type string with
+`1732 = bTNode<TextureInfo>, s8`. The GS addresses are the two `u16`s at the
+very end, `PaletteVramAddress` and `ImageVramAddress`, and `GetTex0` does not
+read either of them -- the caller passes both in as arguments. Nothing decoded
+the field either way, so no output changes; the entry was simply a guess that
+the completed type info now replaces.
+
+Everything from `0x4c` down used to be blank or guessed here. It is filled in
+because `tools/mdebug_stabs_scan.py` learned to join stab *continuations*: a
+type string too long for the assembler's line limit is split across
+consecutive symbol entries, each piece but the last ending in a backslash, and
+the harvester was keeping only the first piece. `TextureInfo` was one of
+thirteen structs that had been coming out truncated.
+
+### Scrolling textures
+
+`ScrollType`, `ScrollSpeedS`, `ScrollSpeedT` and `ScrollTimeStep` are a UV
+animation the GS does with no extra pixels: the texture stays put and its
+coordinates slide. `TextureInfo::GetScroll` (`0x00100a60`) is four
+instructions of arithmetic and returns the offset to add to U or V:
+
+```c
+float TextureInfo::GetScroll(float time, float speed, int type, float step) {
+    if (type == 0) return 0.0f;               // not a scrolling texture
+    if (type == 2) time = (float)(int)(time / step);   // quantised
+    float f = time * speed;
+    return f - (float)(int)f;                 // fractional part, so it wraps
+}
+```
+
+Type 1 slides continuously; type 2 snaps to whole `step`-second ticks, which
+is a strobe rather than a slide. The caller in `RenderSingleFlailerBitmap`
+(`0x00140600`) is what pins the offsets down independently of the type info:
+it reads `ScrollType` from `0x79` into the `int`, `ScrollSpeedS` from `0x7c`
+and then `ScrollSpeedT` from `0x80` into the speed, and `ScrollTimeStep` from
+`0x84` into the step, and it sets the bitmap chunk's dirty byte afterwards so
+the strip is rebuilt.
+
+27 of the 2,642 texture records on the disc scroll -- every one of them found
+by scanning the packs rather than by reading a list, since there is no list.
+`texture_convert.py --scroll` prints them for any file:
+
+```
+python tools/texture_convert.py out/TRACKS/TEX12LOCATION.BIN --scroll
+```
+
+
+| where | textures | type | what it is |
+|---|---|---|---|
+| `TRACKS\TEX12LOCATION.BIN` | `WATERC`, `WATERC001`..`WATERC014` | 1 | river water, V at -1/64 |
+| | `G_WATERFALL`, `G_WATERFALL_TOP` | 1 | V at -0.390625 |
+| | `G_WATERFALL2` | 1 | V at -0.2734375 |
+| | `W_BEACHWATER`, `W_LOGS3`, `W_MILLBELT` | 1 | U, the mill belt fastest at 1.03125 |
+| `FRONTEND\FRONTB.BUN` | `ROADLINES` | 1 | U at 0.78125 -- the menu background |
+| | `SCREEN_LINES` | 2 | the scanline overlay: -1/64 of V every 0.04s, i.e. 25 steps a second |
+| `GLOBAL\INGAMEB.BUN` | `ZONE_PREVIEW_RIBBON` | 1 | V at -0.0234375 |
+
+`SCREEN_LINES` is the only type 2 on the disc, and the only texture whose
+`ScrollTimeStep` is not `1.0f`.
+
+Everything else in the tail is inert on disc, and checked that way over all
+2,642 records: the `bTNode` at `0x00`, every pointer from `0x88` to `0x9c`,
+both VRAM addresses at `0xa0`/`0xa2`, and `UsedFlag` are zero in every single
+one.
 
 ### The mip chain
 

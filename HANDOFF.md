@@ -1221,3 +1221,179 @@ the main menu is a dead end: `Cops On Mode Select`, `Cops Off Mode Select` and
 and registering them is now only a matter of porting each screen's
 `HandleEvent` the way `NewMainMenu`'s was. `tools/screen_registry.py` already
 knows their name-to-hash pairs.
+
+## Session 9 (2026-09-19/20) -- the main menu leads somewhere
+
+Task 18a. Full writeup, address per rule, in `docs/formats/frontend-screens.md`.
+
+The main menu was a dead end at the end of Session 8: all three of its items
+called `ChangeToScreen` with a name the port had never registered. All three
+are registered now, and both of the reachable ones are walked by the
+acceptance test.
+
+**These screens are code, not data.** `NewMainMenu` was the exception that
+made the last session look easy -- most Flailer screens are a C++ class in the
+ELF with a `Callback(ScreenMessage, ScreenCallbackData *)`, plus a chunk in
+`FRONTB.BUN` holding only their art. The three here are `CopsOnModeSelect`
+(`0x00204e10`), `CopsOffModeSelect` (`0x00205a58`) and `tOptionsScreen` on top
+of `OptionsScreenBase` (`0x001b8e30`).
+
+**The two name namespaces, and why the registry row is not optional.** A
+screen has an authored `ScreenName` -- `"Cops On Mode Select"`, with spaces,
+which is what `ChangeToScreen` is called with -- and a chunk whose name hashes
+`bhash("COPS_ON_MODE_SELECT")`. Those are different strings and neither can be
+derived from the other. `FlailerScreenConfig` is the only place they are
+joined: one static row per screen, registered from the object file's
+`_GLOBAL_$I$` constructor. `tools/screen_registry.py` recovers all 64 rows.
+
+`gameflow.c` already had the dispatch, so the port is `bscreens.c`: one
+`BScreens` holding a small instance per live screen, driven by the messages
+the flow forwards. What it reproduces, in the order a player notices it:
+
+* **The blurb.** One text object, `SCROLLING_TEXT` (`0x75980cf0`), retargeted
+  at a different `LanguageID` per highlighted item -- `tAnimatedBlurb::NewText`
+  (`0x00232ef0`), ported as `bui_set_text_language`. Every screen in
+  `FRONTB.BUN` that has a blurb ships the same authoring placeholder in that
+  object ("This text will scroll sideways across the screen...") with
+  `LanguageID` 0, so if the blurb never fires you are looking at the
+  placeholder, not at a missing string. Resolved all of them in
+  `FE_ENGLISH.BIN` to check the tables were not off by one: 10014 "Fill your
+  ticket quota for big points!" is You're The Cop, 100025 "See who made this
+  game." is Credits, 100026 "Select a different language." is Languages.
+* **The selection brackets.** `MENUITEM_UNDERSCORE` and `MENUITEM_OVERSCORE`
+  moved in Y only to the highlighted item's bitmap bounds, plus two globals:
+  `UnderscoreOffset` (`0x00324a1c`) = **-3.0** and `OverscoreOffset`
+  (`0x00324a18`) = **+6.0**, the second subtracted. Needed
+  `FlailerGetBoundingBox` (`0x00141ed0`), ported as `uirender_object_bounds`.
+* **Greying out.** `GrayMenuItem` (`0x001b8a18`) takes a mode; only two of its
+  three modes also hide the object, which is why a disabled item is sometimes
+  dim and sometimes gone.
+* **The exit animations.** A screen does not change on SELECT -- it starts an
+  exit animation and changes when that finishes. `tExitScreenAnimation`'s
+  duration is `0.05 + n * 0.05` where `n` is the screen's `MENUITEM_n_GROUP`
+  count, giving 0.25 s for Cops On, 0.20 s for Cops Off and 0.40 s for
+  Options. **Confirmed from the bundle, not the code**: counted the groups
+  whose `GroupHash` is `bhash("MENUITEM_i_GROUP")` in each screen -- 4, 3 and
+  7. `SplineBaseDuration` and `SplineDeltaDuration` (`0x00324db4`,
+  `0x00324db8`) are both 0.05, which is where the two 0.05s come from.
+* **`StartQuickRace`** (`0x001a8e08`), all 25 stores into `RaceParameters`,
+  with offsets, in the doc.
+
+One behaviour worth remembering because it is not what it looks like:
+`JOY_EVENT_MAIN_MENU_SELECT_TRANSMISSION` is a **held** button. The Mode
+Selects register a handler that does nothing but record whether it is down,
+and `StartQuickRace` reads that flag at the moment it runs -- so the port
+pushes the state through every frame rather than on an edge.
+
+Cross-checked the usual way. `tools/bscreens_check.py` is an independent
+Python model of all three screens (it subclasses `bootflow_check.Flow` and
+replaces the registry and the dispatch): **17 scenarios, 974 lines, 0 differ**.
+
+### The ordering bug the emulator found
+
+The walkthrough screenshots showed both brackets still sitting where
+`FRONTB.BUN` authored them and the blurb still showing the placeholder, until
+the first D-pad press -- then everything worked. **The first
+`MENUITEM_HIGHLIGHT` was being dropped.** `gameflow.c` called the
+`enterScreen` hook *before* `bgf_send(SCREEN_ACTIVATE)`; `enterScreen` is
+where the port builds and activates the `BMenu`, and activating it highlights
+an item immediately, so that highlight arrived at a screen instance
+`bscreens.c` had not created yet.
+
+There is no `enterScreen` in the original -- it is the port's name for "build
+the menu" -- and in the original the menu is built by the screen's own
+constructor, which runs on `SCREEN_ACTIVATE`. So the hook belongs after the
+message, and now is; `leaveScreen` was already after `SCREEN_UNACTIVATE`.
+`bootflow_check.py` got the matching move (still 12 scenarios, 3,659 lines, 0
+differ). The same reasoning applied at exit, where `main.c` was calling
+`bmenu_unactivate` on the flow's own menu directly and so delivering an
+`UNHIGHLIGHT` and a run of `UNACTIVATE`s to a screen that had never been told
+it was going away -- it now leaves through `bgf_change_to_screen(NULL)`.
+
+Second regression fixed in passing: the screen *viewer* -- the debug mode that
+pages through all 76 screens -- shared `menuCallback` with the live menu, so
+browsing it forwarded one screen's `MENUITEM_2` into whichever screen the game
+was actually standing on. It has its own callback now.
+
+Acceptance test after both: **PASS -- booted, movie played 90/90 frames,
+walked Cops On Mode Select and Options and came back, exited cleanly; 6
+bracket moves, 6 blurb changes, 19 textures cached, 0 missing**, 13
+screenshots. The two entry screenshots now show the brackets around Quick Race
+and Audio with the matching blurb under them.
+
+### Three RE-tool bugs, all of which were hiding data
+
+None of the above would have been right with the tools as they were. All three
+were found by a field being *missing* rather than wrong, which is the failure
+mode to watch for here.
+
+1. **`tools/screen_registry.py` scanned for `jal` only.** gcc tail-calls the
+   last constructor in each `_GLOBAL_$I$` function, so that one is a `j`.
+   **13 of the 64 registrations on this disc are that tail call** -- the
+   scanner was silently losing the last screen of every object file that
+   registers more than one.
+2. **`tools/mdebug_stabs_scan.py` did not join split stab strings.** A stab
+   string too long for the assembler's line limit is broken across
+   consecutive symbol entries, each piece but the last ending in a backslash.
+   **10,318 of the 68,317 strings in this `.mdebug` are continuations.** Any
+   struct whose definition straddled one came out truncated with no warning:
+   `RaceParameters` stopped at `CopStrength` and lost `Boost`,
+   `PlayerSettings`, `OpponentStrength` and five more.
+3. **The same scanner's field regex required a bare type number.** A member
+   whose type is spelled out in place -- an array, usually -- carries the whole
+   definition instead, with its own `;` and `,` in it:
+   `PlayerStartPosition:1024=ar1;0;1;10,480,16`. Those were all being filed
+   under "methods" and dropped. `RaceParameters` lost `PlayerStartPosition`
+   and `sObjective` that way, both of which `StartQuickRace` writes. Anchoring
+   the offset and size to the *end* of the entry tells the two apart; method
+   entries are never at risk because they all use `::`.
+
+`docs/mdebug_structs.txt` is regenerated with all three fixed: +3,483 lines.
+`RaceParameters` is complete at 768 bytes, 42 fields.
+
+A fourth, smaller: `tools/mipsdis.py` printed `andi`/`ori`/`xori` immediates
+as signed decimal. They are zero-extended, so `ori a1,a1,0xe350` was coming
+out as `ori a1,a1,-7344` -- read back as a constant that builds the wrong
+address, which is how a menu-item hash table came out 0x40 off once.
+
+### `TextureInfo` finished, and scrolling textures
+
+With the stabs scanner fixed, `TextureInfo`'s own type info came out whole, so
+`docs/formats/texture-pack.md` now names **every field in all 164 bytes** in
+bWare's own spelling rather than describing half of them by what the code does
+with them. The fields that were still blank turned out to include a UV
+animation: `ScrollType` at `+0x79`, `ScrollSpeedS`/`ScrollSpeedT` at `+0x7c`
+and `+0x80`, `ScrollTimeStep` at `+0x84`, consumed by
+`TextureInfo::GetScroll` (`0x00100a60`) -- type 1 is continuous, type 2 steps
+in `ScrollTimeStep` quanta, and the result is the fractional part only.
+`tools/texture_convert.py --scroll` lists them. There are exactly two in
+`FRONTB`: `SCREEN_LINES` (type 2, T -0.015625, step 0.04 -- the scanlines
+crawling up the menu background) and `ROADLINES` (type 1, S +0.78125). Nothing
+draws them animated yet; that belongs with task 18b.
+
+### Object names cracked, and three that did not
+
+New this session, by hash search: `SCROLLING_TEXT` (`0x75980cf0`),
+`SCROLL_TEXT_CLIP` (`0x5e11b599`), `GRID_SHADOW` (`0x67d295ca`) and `GRID`
+(`0x00163ce5`). `bStringHash` is djb2 x33 seeded `0xFFFFFFFF` and incremental,
+so a constant delta between two hashes means a single varying character, which
+is what makes this tractable at all.
+
+**Three resisted**: `0x6eb9985d`, `0x70a404ec`, `0xab671c9a`. A 4,185-word
+list and an exhaustive sweep of every string up to 4 characters missed all
+three. They are in the doc as unknowns rather than guessed at.
+
+### Next session
+
+Task 18b, the frontend animation layer, is the obvious next thing: everything
+in 18a snaps instantly because `tSlideAnimation` / `tSlideInAnimation` /
+`tSlideOutAnimation`, `tHighlightAnimation`, `tAnimatedBlurb`'s scroll,
+`SelectionSet` / `AnimationGroup` and `SplineSeek` are not ported. The hooks
+already fire at the right moments, so it is a layer on top rather than a
+rework -- `bscreens.c` keeps deciding *what* moves, the new module decides
+*when* it arrives. Time it in the 1/4000 s `RealTimer` (`Timer::SetTime`,
+`0x00134ef0`, is `(int)(f * 4000.0f)`); at 60 fps it gains 66 a frame.
+
+Otherwise Phase 3 starts at task 19 (`bMath`/`bVector`/`bQuaternion`/
+`bMatrix`), and task 21 -- VU1 geometry to citro3d -- is the one with the
+survey work already done, in `docs/formats/solid-geometry.md`.

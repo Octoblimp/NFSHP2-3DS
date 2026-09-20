@@ -244,7 +244,11 @@ def main():
     sites = 0
     for i in range(0, len(code) - 4, 4):
         w, = struct.unpack_from("<I", code, i)
-        if (w >> 26) != 3:                            # jal
+        # `jal`, and `j` too: gcc tail-calls the LAST constructor in each
+        # _GLOBAL_$I$ function, and 13 of the 64 registrations on this disc
+        # are that tail call. Scanning only for `jal` loses the last screen
+        # of every object file that registers more than one.
+        if (w >> 26) not in (2, 3):
             continue
         tgt = ((base + i) & 0xF0000000) | ((w & 0x03FFFFFF) << 2)
         if tgt not in want:

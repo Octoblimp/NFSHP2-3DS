@@ -165,6 +165,12 @@ int32_t bui_find_object(const BUI* ui, const BUIScreen* screen,
 // into it rather than copying payloads.
 bool bui_set_text_color(BUI* ui, uint32_t index, uint32_t rgb);
 
+// Repoints a text object at a different row of the language table --
+// tAnimatedBlurb::NewText (0x00232ef0), which is how the one blurb line on
+// a menu screen says something different about each item. Same caveat about
+// a writable buffer.
+bool bui_set_text_language(BUI* ui, uint32_t index, uint32_t languageID);
+
 // Moves an object. Same caveat about a writable buffer.
 bool bui_set_object_pos(BUI* ui, uint32_t index, float x, float y);
 

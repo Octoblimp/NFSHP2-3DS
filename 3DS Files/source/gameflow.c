@@ -199,11 +199,21 @@ int bgf_change_to_screen(BGameFlow* gf, const char* name, int pushCurrent)
             BScreenCallbackData data;
             gf->screen = n;
             screenVisible(gf, n->hash, 1);
-            HOOK_VOID(gf, enterScreen, n);
             trace(gf, "enter %s %08x", n->name, (unsigned)n->hash);
             memset(&data, 0, sizeof(data));
             data.itemHash = n->hash;
             bgf_send(gf, BMSG_SCREEN_ACTIVATE, &data);
+            // After the message, not before. There is no enterScreen in the
+            // original -- it is the port's name for "build the menu" -- and
+            // in the original the menu is built by the screen's own
+            // constructor, which runs on SCREEN_ACTIVATE. A port that builds
+            // it first delivers the menu's opening MENUITEM_HIGHLIGHT to a
+            // screen object that does not exist yet, and the screen loses
+            // the one highlight it never asked for and always gets: the
+            // brackets and the blurb stay where the bundle authored them
+            // until the player moves. leaveScreen is already after
+            // SCREEN_UNACTIVATE for the same reason.
+            HOOK_VOID(gf, enterScreen, n);
         }
     }
     return gf->screen != NULL;

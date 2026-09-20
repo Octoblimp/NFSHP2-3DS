@@ -121,7 +121,10 @@ typedef struct {
                           uint32_t texture);
 
     // The UI layer: a screen became current, or stopped being current. This
-    // is where a port builds its BMenu and starts drawing.
+    // is where a port builds its BMenu and starts drawing. Both fire after
+    // the matching message, not before: the screen is live for the whole of
+    // enterScreen..leaveScreen, so the menu's opening highlight lands on a
+    // screen that exists. See bgf_change_to_screen.
     void (*enterScreen)(void* user, const BScreenConfig* cfg);
     void (*leaveScreen)(void* user, const BScreenConfig* cfg);
 

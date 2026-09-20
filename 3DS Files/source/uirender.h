@@ -117,4 +117,13 @@ void uirender_override_texture(UIRenderer* r, uint32_t hash, C3D_Tex* tex,
 // `alpha` is the renderer's global fade, the float every Render() takes.
 void uirender_draw_screen(UIRenderer* r, BUI* ui, const BUIScreen* screen,
                           float alpha);
+
+// FlailerGetBoundingBox (0x00141ed0) for one object, in the screen's own
+// 640x480 space: box = { left, top, right, bottom }. Only bitmaps have a
+// size the renderer can answer for -- it is the same (int)(texW * ScaleX)
+// by (int)(texH * ScaleY) rectangle draw_bitmap() lays down -- so a text
+// object or a missing texture returns false. bscreens.c needs this to put
+// the two highlight brackets around the current menu item.
+bool uirender_object_bounds(UIRenderer* r, const BUI* ui, uint32_t index,
+                            float box[4]);
 #endif  // __3DS__

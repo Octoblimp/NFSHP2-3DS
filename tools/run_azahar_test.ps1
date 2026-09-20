@@ -27,7 +27,7 @@
 
 param(
     [int]$BootSeconds = 12,       # before the first capture: bundles decode slowly
-    [int]$RunSeconds = 40,        # hard ceiling on the whole run
+    [int]$RunSeconds = 70,        # hard ceiling on the whole run
     [string]$AzaharExe = "C:\Program Files\Azahar\azahar.exe",
     [string]$Target3dsx = "",
     [string]$OutDir = ""
@@ -132,7 +132,8 @@ function Shot([string]$tag) {
 # --- the script the run follows -------------------------------------------
 # BootAutoload pops on its first tick, the title screen opens EALOGO_EN.M3V,
 # the movie runs three seconds, PRESS START comes up, START goes to the main
-# menu, and the D-pad walks it.
+# menu, and from there the run walks the two screens the main menu leads to
+# that the port has: Cops On Mode Select and Options.
 
 Write-Host "Waiting for the main loop..."
 $booted = Wait-ForLog "entering main loop" 60
@@ -156,20 +157,50 @@ if ($booted) {
     if (Wait-ForLog "flow enter New Main Menu" 10) {
         Start-Sleep -Milliseconds 900
         Shot "mainmenu"
-        [Hp2Cap]::PressKey($hwnd, $VK_G)      # D-pad down
-        Start-Sleep -Milliseconds 500
-        Shot "mainmenu-down"
-        [Hp2Cap]::PressKey($hwnd, $VK_G)
-        Start-Sleep -Milliseconds 500
-        Shot "mainmenu-down2"
-        # MENUITEM_3 is Options. The flow has no Options screen registered,
-        # so this is where it goes when asked for one it does not know.
+
+        # MENUITEM_1 is Hot Pursuit, which sets mPolice and goes to Cops On
+        # Mode Select -- a screen the port now has. Walking it down is the
+        # only way to see the two things bscreens.c drives that a log line
+        # cannot show: the brackets moving to the new item's box, and the
+        # blurb changing to that item's sentence.
         [Hp2Cap]::PressKey($hwnd, $VK_A)      # A, select
-        Start-Sleep -Milliseconds 1200
-        Shot "options"
-        [Hp2Cap]::PressKey($hwnd, $VK_S)      # B, back out of the dead end
-        Start-Sleep -Milliseconds 900
-        Shot "back-to-menu"
+        if (Wait-ForLog "flow enter Cops On Mode Select" 10) {
+            Start-Sleep -Milliseconds 900
+            Shot "copson"
+            [Hp2Cap]::PressKey($hwnd, $VK_G)  # D-pad down
+            Start-Sleep -Milliseconds 500
+            Shot "copson-down"
+            [Hp2Cap]::PressKey($hwnd, $VK_G)
+            Start-Sleep -Milliseconds 500
+            Shot "copson-down2"
+            [Hp2Cap]::PressKey($hwnd, $VK_S)  # B, back to the main menu
+            Start-Sleep -Milliseconds 900
+            Shot "back-to-menu"
+        } else {
+            Shot "copson-missing"
+        }
+
+        # MENUITEM_3 is Options, two down from the top.
+        [Hp2Cap]::PressKey($hwnd, $VK_G)
+        Start-Sleep -Milliseconds 400
+        [Hp2Cap]::PressKey($hwnd, $VK_G)
+        Start-Sleep -Milliseconds 400
+        Shot "mainmenu-down2"
+        [Hp2Cap]::PressKey($hwnd, $VK_A)      # A, select
+        if (Wait-ForLog "flow enter Options" 10) {
+            Start-Sleep -Milliseconds 1200
+            Shot "options"
+            [Hp2Cap]::PressKey($hwnd, $VK_G)
+            Start-Sleep -Milliseconds 500
+            [Hp2Cap]::PressKey($hwnd, $VK_G)
+            Start-Sleep -Milliseconds 500
+            Shot "options-down2"
+            [Hp2Cap]::PressKey($hwnd, $VK_S)  # B
+            Start-Sleep -Milliseconds 900
+            Shot "options-back"
+        } else {
+            Shot "options-missing"
+        }
     } else {
         Shot "start-did-nothing"
     }
@@ -204,6 +235,10 @@ $reached   = $dbg | Where-Object { $_ -match "entering main loop" }
 $movieOpen = $dbg | Where-Object { $_ -match "^movie open " }
 $movieDone = $dbg | Where-Object { $_ -match "^movie close after (\d+)/" }
 $atMenu    = $dbg | Where-Object { $_ -match "flow enter New Main Menu" }
+$atModes   = $dbg | Where-Object { $_ -match "flow enter Cops On Mode Select" }
+$atOptions = $dbg | Where-Object { $_ -match "flow enter Options" }
+$brackets  = $dbg | Where-Object { $_ -match "flow bracket " }
+$blurbs    = $dbg | Where-Object { $_ -match "flow blurb " }
 $leftLoop  = $dbg | Where-Object { $_ -match "^left main loop" }
 
 $verdict = "UNKNOWN"
@@ -211,9 +246,12 @@ if (-not $reached)      { $verdict = "FAIL (never reached the main loop)" }
 elseif ($crash)         { $verdict = "FAIL (crash: $($crash[0]))" }
 elseif (-not $movieOpen){ $verdict = "FAIL (title screen never opened a movie)" }
 elseif (-not $atMenu)   { $verdict = "PARTIAL (movie played, never reached the main menu)" }
-elseif ($leftLoop)      { $verdict = "PASS (booted, movie played, reached the main menu, exited cleanly)" }
-elseif (-not $survived) { $verdict = "FAIL (reached the menu, then died without leaving the main loop)" }
-else                    { $verdict = "PASS (booted, movie played, reached the main menu)" }
+elseif (-not $atModes)  { $verdict = "PARTIAL (reached the main menu, but not Cops On Mode Select)" }
+elseif (-not $atOptions){ $verdict = "PARTIAL (reached Cops On Mode Select, but not Options)" }
+elseif (-not $brackets) { $verdict = "PARTIAL (reached both screens, but nothing ever highlighted)" }
+elseif ($leftLoop)      { $verdict = "PASS (booted, movie played, walked the frontend, exited cleanly)" }
+elseif (-not $survived) { $verdict = "FAIL (walked the frontend, then died without leaving the main loop)" }
+else                    { $verdict = "PASS (booted, movie played, walked the frontend)" }
 
 Write-Host ""
 Write-Host "=== nfshp2_debug.txt (last 30) ==="
@@ -227,5 +265,6 @@ Write-Host "=== Result ==="
 Write-Host ("Verdict:    {0}" -f $verdict)
 if ($movieOpen) { Write-Host ("Movie:      {0}" -f ($movieOpen | Select-Object -First 1)) } else { Write-Host "Movie:      (none opened)" }
 if ($movieDone) { Write-Host ("Frames:     {0}" -f ($movieDone | Select-Object -First 1)) }
+Write-Host ("Frontend:   {0} bracket moves, {1} blurb changes" -f $brackets.Count, $blurbs.Count)
 if ($leftLoop)  { Write-Host ("Textures:   {0}" -f ($leftLoop  | Select-Object -Last 1)) }
 Write-Host ("Screenshots: {0} in {1}" -f $step, $OutDir)

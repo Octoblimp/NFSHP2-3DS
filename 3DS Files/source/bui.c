@@ -188,6 +188,16 @@ bool bui_set_text_color(BUI* ui, uint32_t index, uint32_t rgb)
     return true;
 }
 
+bool bui_set_text_language(BUI* ui, uint32_t index, uint32_t languageID)
+{
+    uint8_t* p = writable(ui, index, 76);
+    if (!p || (int8_t)p[16] != BUI_TYPE_TEXT) return false;
+    if (bchunk_u32(p + 72) == languageID) return true;
+    bchunk_put_u32(p + 72, languageID);
+    p[19] = 7;                        // DirtyFlag, same as SetColor
+    return true;
+}
+
 bool bui_set_object_pos(BUI* ui, uint32_t index, float x, float y)
 {
     uint8_t* p = writable(ui, index, 56);

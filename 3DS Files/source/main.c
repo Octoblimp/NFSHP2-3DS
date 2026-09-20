@@ -38,6 +38,7 @@
 #include <string.h>
 
 #include "bmenu.h"
+#include "bscreens.h"
 #include "gamedata.h"
 #include "gameflow.h"
 #include "heapcfg.h"
@@ -77,6 +78,16 @@ static const BScreenConfig kScreens[] = {
     // later build turns it back on.
     { "Legal MumboJumbo",        BGF_SCREEN_MUMBO_JUMBO,
       bgf_mumbo_jumbo_callback },
+    // The three the main menu leads to, ported in bscreens.c. Their
+    // callbacks find their state through the module instance bscr_init()
+    // installs, so that call has to have happened before the flow gets
+    // here; main() makes it next to bgf_init().
+    { "Cops On Mode Select",     BSCR_SCREEN_COPS_ON_MODE_SELECT,
+      bscr_cops_on_callback },
+    { "Cops Off Mode Select",    BSCR_SCREEN_COPS_OFF_MODE_SELECT,
+      bscr_cops_off_callback },
+    { "Options",                 BSCR_SCREEN_OPTIONS,
+      bscr_options_callback },
 };
 #define NUM_SCREENS ((int)(sizeof(kScreens) / sizeof(kScreens[0])))
 
@@ -138,6 +149,7 @@ typedef struct {
 
 static Boot g_boot;
 static BGameFlow g_flow;
+static BScreens g_uiScreens;
 
 // ------------------------------------------------------- the run log
 //
@@ -193,11 +205,25 @@ static void menuCallback(BMenu* m, BScreenMessage msg,
 {
     (void)m; (void)user;
     g_lastMsg = msg;
-    // A menu item selected on a boot screen is what advances it -- the title
-    // screen's MENUITEM_1 is how START reaches "New Main Menu" at all. The
-    // item's own hash has to go with it: NewMainMenu routes on nothing else.
-    if (msg == BMSG_MENUITEM_SELECT)
-        bgf_menu_item_event(&g_flow, msg, data ? data->itemHash : 0, 0);
+    // FlailerMenu hands the screen's own Callback the block it is holding --
+    // item hash, port, and the two reply fields -- and reads Noise back
+    // afterwards. Passing it straight down is what makes the screens in
+    // bscreens.c work: HIGHLIGHT is how the blurb and the brackets move, and
+    // an exit animation clears Param on PAD_UP/PAD_DOWN to freeze the
+    // selection while the items slide away. A fresh block, which is what
+    // this used to build, threw all of that away and forwarded SELECT only.
+    if (data) bgf_send(&g_flow, msg, data);
+}
+
+// The screen viewer's menu. It browses every screen in every bundle,
+// including screens the flow is not on and screens with no behaviour at all,
+// so it must not reach the flow: forwarding from here would send one screen's
+// MENUITEM_2 to whichever screen the game is actually standing on.
+static void viewerCallback(BMenu* m, BScreenMessage msg,
+                           BScreenCallbackData* data, void* user)
+{
+    (void)m; (void)data; (void)user;
+    g_lastMsg = msg;
 }
 
 static void hookEnterScreen(void* user, const BScreenConfig* cfg)
@@ -349,6 +375,119 @@ static void hookTrace(void* user, const char* line)
     logLine("flow %s", line);
 }
 
+// ------------------------------------------------- the frontend screens
+//
+// BScreensHooks: everything Cops On / Cops Off / Options do outside their
+// own state. All of it works on the screen whose hash the caller passes,
+// which is always the screen the flow has entered -- the originals pass
+// their own hash too.
+
+static void hookGrayMenuItem(void* user, uint32_t screen, uint32_t item,
+                             BScrGrayMode mode)
+{
+    Boot* b = (Boot*)user;
+    if (!b->hasMenu || !b->project || screen != b->screenHash) return;
+    for (int i = 0; i < b->menu.numItems; i++) {
+        const BMenuItem* mi = &b->menu.items[i];
+        if (mi->itemHash != item) continue;
+        // GrayMenuItem (0x00168498): mode 1 enables, 0 and 2 disable, and
+        // only 1 and 2 touch the object. Mode 0 is the one that leaves the
+        // item on screen, drawn in the grayed colour.
+        bmenu_set_item_enabled(&b->menu, mi->itemID,
+                               mode == BSCR_GRAY_ENABLE);
+        if (mode != BSCR_GRAY_DISABLE)
+            bui_set_object_visible(b->project, mi->object,
+                                   mode == BSCR_GRAY_ENABLE ? BUI_VISIBLE
+                                                            : BUI_INVISIBLE);
+        logLine("gray item=%08lx mode=%d", (unsigned long)item, (int)mode);
+        return;
+    }
+}
+
+// tAnimatedBlurb::NewText (0x00232ef0). The blurb is one text object per
+// screen and the sentence is a row of the language table, so changing it is
+// changing the object's LanguageID -- the renderer looks the row up every
+// frame, exactly as it does for a label.
+static void hookSetBlurb(void* user, uint32_t screen, int blurbId)
+{
+    Boot*      b  = (Boot*)user;
+    BUI*       ui = NULL;
+    BUIScreen* s  = uirender_find_screen(b->ui, screen, &ui);
+    int32_t    idx;
+    if (!s || !ui) return;
+    idx = bui_find_object(ui, s, BSCR_OBJ_SCROLLING_TEXT, BUI_TYPE_TEXT);
+    if (idx < 0) return;
+    bui_set_text_language(ui, (uint32_t)idx, (uint32_t)blurbId);
+}
+
+// SetupHighlight's other half: FlailerGetBoundingBox on the current item's
+// MI_n_MASK, then the two brackets to its edges. Only Y moves -- both
+// brackets keep the X they were authored at, which is why they span the
+// whole panel however short the label is.
+static void hookMoveBrackets(void* user, uint32_t screen, uint32_t mask,
+                             float under, float over)
+{
+    Boot*      b  = (Boot*)user;
+    BUI*       ui = NULL;
+    BUIScreen* s  = uirender_find_screen(b->ui, screen, &ui);
+    BUIObject  o;
+    float      box[4];
+    int32_t    maskIdx, idx;
+
+    // SetCurrentItem(0) happens on an out-of-range highlight, and the
+    // bounding box of nothing is not something to go looking for.
+    if (!s || !ui || !mask) return;
+    maskIdx = bui_find_object(ui, s, mask, BUI_TYPE_BITMAP);
+    if (maskIdx < 0) return;
+    if (!uirender_object_bounds(b->ui, ui, (uint32_t)maskIdx, box)) return;
+
+    idx = bui_find_object(ui, s, BSCR_OBJ_MI_UNDERSCORE, BUI_TYPE_NONE);
+    if (idx >= 0 && bui_object(ui, (uint32_t)idx, &o))
+        bui_set_object_pos(ui, (uint32_t)idx, o.x, box[3] + under);
+    idx = bui_find_object(ui, s, BSCR_OBJ_MI_OVERSCORE, BUI_TYPE_NONE);
+    if (idx >= 0 && bui_object(ui, (uint32_t)idx, &o))
+        bui_set_object_pos(ui, (uint32_t)idx, o.x, box[1] + over);
+}
+
+// FlailerScreenList::StartMovie. These are the panel movies that loop
+// behind the menu, blitted into the PANELMOVIE texture all three screens
+// share -- and not one of the three files is on the disc, so there is
+// nothing to open. Logged rather than counted: unlike the title movie, a
+// missing one here is the normal case and not a packaging mistake.
+static void hookScreenMovie(void* user, const char* path)
+{
+    (void)user;
+    logLine("panel movie %s (not on disc)", path);
+}
+
+static void hookScreenMovieStop(void* user) { (void)user; }
+
+static void hookJukebox(void* user, int start)
+{
+    (void)user;
+    logLine("jukebox %s", start ? "start" : "stop");
+}
+
+static void hookDisplayOptionsStart(void* user)
+{
+    (void)user;
+    logLine("display options snapshot");
+}
+
+// StartQuickRace's parameter block arrives complete; what it feeds -- the
+// track database and the race itself -- is Phase 4. Print it, so the one
+// thing the frontend produces is visible before there is anywhere to put it.
+static void hookStartQuickRace(void* user, const BQuickRace* p)
+{
+    (void)user;
+    bootNote("quick race");
+    logLine("quickrace track=%d laps=%d ai=%d start=%d maxcops=%d "
+            "tickets=%d boost=%d gearbox=%s",
+            p->trackNumber, p->numLapsInRace, p->numAICars,
+            p->playerStartPosition, p->maxCops, p->ticketsBeforeArrest,
+            p->boost, p->transmissionType ? "manual" : "automatic");
+}
+
 // ---------------------------------------------------------------- 3DS glue
 
 static void initPlatformPerf(void)
@@ -491,6 +630,21 @@ int main(int argc, char** argv)
     bgf_init(&g_flow, kGameFlowStages, BGF_NUM_STATES,
              kScreens, NUM_SCREENS, kBootStages, NUM_BOOT_STAGES, &hooks);
 
+    // After bgf_init: bscr_init copies the flow's VIDEO_MODE, which is what
+    // decides whether the Options screen has a Languages item at all.
+    BScreensHooks scrHooks;
+    memset(&scrHooks, 0, sizeof(scrHooks));
+    scrHooks.user                = &g_boot;
+    scrHooks.grayMenuItem        = hookGrayMenuItem;
+    scrHooks.setBlurb            = hookSetBlurb;
+    scrHooks.moveBrackets        = hookMoveBrackets;
+    scrHooks.startMovie          = hookScreenMovie;
+    scrHooks.stopMovie           = hookScreenMovieStop;
+    scrHooks.jukebox             = hookJukebox;
+    scrHooks.displayOptionsStart = hookDisplayOptionsStart;
+    scrHooks.startQuickRace      = hookStartQuickRace;
+    bscr_init(&g_uiScreens, &g_flow, &scrHooks);
+
     // main (0x0012da88): SkipFE ships as 0, so LoadLanguageInfo and then
     // ChangeGameFlow(LOADING_FRONTEND). MainLoop takes it from there.
     bgf_change_state(&g_flow, BGF_LOADING_FRONTEND, BGF_NONE);
@@ -532,6 +686,14 @@ int main(int argc, char** argv)
                 bgf_move_back_screen(&g_flow, 1);
                 redraw = 1;
             }
+            // JOY_EVENT_MAIN_MENU_SELECT_TRANSMISSION. The Mode Selects
+            // register a handler for it and do nothing but remember whether
+            // it is down; StartQuickRace reads that at the moment it runs.
+            // So it is a held button, not a pressed one, and the state goes
+            // through every frame rather than on an edge.
+            bscr_joy(&g_uiScreens, 0, BSCR_JOY_SELECT_TRANSMISSION,
+                     (hidKeysHeld() & KEY_X) ? 1 : 0);
+
             if (g_boot.hasMenu) {
                 for (int i = 0; i < NUM_BINDS; i++) {
                     if (!(kDown & kBinds[i].key)) continue;
@@ -594,7 +756,7 @@ int main(int argc, char** argv)
         }
         if (!vHasMenu && vScr && vProj) {
             g_lastMsg = BMSG_NONE;
-            if (bmenu_open(&vMenu, vProj, vScr, menuCallback, NULL)
+            if (bmenu_open(&vMenu, vProj, vScr, viewerCallback, NULL)
                 && vMenu.numItems > 0) {
                 bmenu_activate(&vMenu, 0);
                 vHasMenu = true;
@@ -642,8 +804,15 @@ int main(int argc, char** argv)
     logLine("left main loop: %d textures cached, %d missing, %d fonts missing",
             ui.numTextures, ui.missingTextures, ui.missingFonts);
 
+    // Leave through the flow rather than reaching past it into its menu.
+    // ChangeToScreen(NULL) hides the screen, sends it SCREEN_UNACTIVATE and
+    // only then calls leaveScreen, which is where the menu is torn down --
+    // so the screen hears about its own exit in the order it would in the
+    // original. Closing the menu directly delivered an UNHIGHLIGHT and a
+    // run of UNACTIVATEs to a screen that had never been told it was
+    // going away. The viewer's menu is nobody's, so it just closes.
+    bgf_change_to_screen(&g_flow, NULL, 0);
     if (vHasMenu) bmenu_unactivate(&vMenu);
-    if (g_boot.hasMenu) bmenu_unactivate(&g_boot.menu);
     uirender_free(&ui);
     C2D_Fini();
     C3D_Fini();

@@ -269,10 +269,15 @@ class Flow(object):
             else:
                 self.screen = found
                 self.screen_visible(found[1], 1)
-                self.say("ui enter %08x" % found[1])
                 self.say("enter %s %08x" % (found[0], found[1]))
                 self.send(SCREEN_ACTIVATE, {"itemHash": found[1], "port": 0,
                                             "param": 0, "noise": 0})
+                # After the message. The UI layer builds the screen's menu,
+                # and in the original that is the screen constructor, which
+                # runs on SCREEN_ACTIVATE -- so the menu cannot exist before
+                # the screen does. Matches HOOK_VOID(enterScreen) in
+                # gameflow.c, which sits after the same send.
+                self.say("ui enter %08x" % found[1])
         return 1 if self.screen else 0
 
     def move_to_previous_screen(self, n, send_back, port):
