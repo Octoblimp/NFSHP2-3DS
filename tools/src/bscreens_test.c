@@ -122,6 +122,178 @@ static void hQuickRace(void* user, const BQuickRace* p)
            (double)p->boostScale[1], p->transmissionType);
 }
 
+// -------------------------------------------------- the Flailer bundle
+
+// What FRONTB.BUN gives the animation kit, cut down to the objects it asks
+// about. Nothing here prints: banim's own traffic is tools/banim_check.py's
+// business, and what this file is for is what the SCREENS do -- which is
+// why the world exists at all. The exit-animation durations that used to be
+// three hand-computed constants in bscreens.h now come out of this table,
+// because tSlideOutAnimation takes the longest duration of the
+// MENUITEM_i_GROUPs it finds.
+//
+// The counts are from the bundle: MENUITEM_i_GROUP for i = 1..4 on Cops On,
+// 1..3 on Cops Off and 1..7 on Options. Group i runs for 0.05 + 0.05i
+// seconds, so the longest is the last one and the three screens take
+// 0.25s, 0.20s and 0.40s -- the three constants bscreens.h used to spell
+// out by hand. UNDERSCORE_GROUP is then added at that same duration, which
+// is why the numbers do not move when the brackets join in.
+typedef struct WObject {
+    uint32_t screen;
+    uint32_t name;
+    uint32_t group;
+    int      type;
+    float    x, y;
+} WObject;
+
+#define W_GROUP(i) (0x59c1995eu + (unsigned)(i) * 1291467969u)
+
+static WObject g_world[64];
+static int     g_numWorld;
+
+static void addObject(uint32_t screen, uint32_t name, uint32_t group,
+                      int type, float x, float y)
+{
+    WObject* o;
+    if (g_numWorld >= (int)(sizeof(g_world) / sizeof(g_world[0]))) return;
+    o = &g_world[g_numWorld++];
+    o->screen = screen;
+    o->name   = name;
+    o->group  = group;
+    o->type   = type;
+    o->x      = x;
+    o->y      = y;
+}
+
+static void addScreenObjects(uint32_t screen, int numItems)
+{
+    for (int i = 1; i <= numItems; i++) {
+        addObject(screen, BSCR_MI_MASK(i), W_GROUP(i), BANIM_TYPE_BITMAP,
+                  100.0f, 50.0f + (float)(i - 1) * 20.0f);
+        addObject(screen, BSCR_ITEM_MENUITEM(i), W_GROUP(i),
+                  BANIM_TYPE_TEXT, 120.0f, 50.0f + (float)(i - 1) * 20.0f);
+    }
+    addObject(screen, BSCR_OBJ_MI_UNDERSCORE, BSCR_GROUP_UNDERSCORE,
+              BANIM_TYPE_BITMAP, 95.0f, 50.0f);
+    addObject(screen, BSCR_OBJ_MI_OVERSCORE, BSCR_GROUP_UNDERSCORE,
+              BANIM_TYPE_BITMAP, 95.0f, 44.0f);
+    addObject(screen, BSCR_OBJ_SCROLLING_TEXT, 0, BANIM_TYPE_TEXT,
+              40.0f, 200.0f);
+    addObject(screen, BSCR_OBJ_WHITEOUT_BAR, 0, BANIM_TYPE_BITMAP,
+              40.0f, 198.0f);
+    addObject(screen, BSCR_OBJ_BLOOM_TEXT, 0, BANIM_TYPE_TEXT, 0.0f, 0.0f);
+    addObject(screen, BSCR_OBJ_BLOOM_TEXT_2, 0, BANIM_TYPE_TEXT, 0.0f, 0.0f);
+}
+
+static void buildWorld(void)
+{
+    g_numWorld = 0;
+    addScreenObjects(BSCR_SCREEN_COPS_ON_MODE_SELECT, 4);
+    addScreenObjects(BSCR_SCREEN_COPS_OFF_MODE_SELECT, 3);
+    addScreenObjects(BSCR_SCREEN_OPTIONS, 7);
+}
+
+static WObject* wFind(uint32_t screen, uint32_t name, int type)
+{
+    for (int i = 0; i < g_numWorld; i++) {
+        if (g_world[i].screen != screen || g_world[i].name != name) continue;
+        if (type != BANIM_TYPE_ANY && g_world[i].type != type) continue;
+        return &g_world[i];
+    }
+    return NULL;
+}
+
+static int aObjectExists(void* u, uint32_t s, uint32_t o, int t)
+{ (void)u; return wFind(s, o, t) != NULL; }
+
+static int aGroupExists(void* u, uint32_t s, uint32_t g, int t)
+{
+    (void)u;
+    if (!g) return 0;
+    for (int i = 0; i < g_numWorld; i++) {
+        if (g_world[i].screen != s || g_world[i].group != g) continue;
+        if (t != BANIM_TYPE_ANY && g_world[i].type != t) continue;
+        return 1;
+    }
+    return 0;
+}
+
+static int aObjectType(void* u, uint32_t s, uint32_t o)
+{ WObject* p = wFind(s, o, BANIM_TYPE_ANY); (void)u; return p ? p->type : 0; }
+
+static void aGetTopLeft(void* u, uint32_t s, uint32_t o, float* x, float* y)
+{
+    WObject* p = wFind(s, o, BANIM_TYPE_ANY);
+    (void)u;
+    if (!p) return;
+    *x = p->x;
+    *y = p->y;
+}
+
+static void aSetTopLeft(void* u, uint32_t s, uint32_t o, float x, float y)
+{
+    WObject* p = wFind(s, o, BANIM_TYPE_ANY);
+    (void)u;
+    if (!p) return;
+    p->x = x;
+    p->y = y;
+}
+
+static void aSetGroupPos(void* u, uint32_t s, uint32_t g, uint32_t m,
+                         float x, float y)
+{
+    WObject* master = wFind(s, m, BANIM_TYPE_ANY);
+    float    dx, dy;
+    (void)u;
+    if (!master) return;
+    dx = x - master->x;
+    dy = y - master->y;
+    for (int i = 0; i < g_numWorld; i++) {
+        if (g_world[i].screen != s || g_world[i].group != g) continue;
+        g_world[i].x += dx;
+        g_world[i].y += dy;
+    }
+    if (master->group != g) {
+        master->x = x;
+        master->y = y;
+    }
+}
+
+// The rest of the kit's world is write-only as far as these scenarios are
+// concerned -- alphas, colours, scales and strings change nothing the
+// screens can see -- so the hooks that only set are left unimplemented and
+// the ones that read answer with the authored value.
+static int aGetAlpha(void* u, uint32_t s, uint32_t o, int corner)
+{ (void)u; (void)s; (void)o; (void)corner; return 128; }
+
+static void aGetScale(void* u, uint32_t s, uint32_t o, float* sx, float* sy)
+{ (void)u; (void)s; (void)o; *sx = 1.0f; *sy = 1.0f; }
+
+static const char* aTranslate(void* u, int id)
+{
+    static char buf[32];
+    (void)u;
+    snprintf(buf, sizeof(buf), "<string %d>", id);
+    return buf;
+}
+
+static void setupAnimHooks(BAnimHooks* h)
+{
+    memset(h, 0, sizeof(*h));
+    h->objectExists = aObjectExists;
+    h->groupExists  = aGroupExists;
+    h->objectType   = aObjectType;
+    h->getTopLeft   = aGetTopLeft;
+    h->setTopLeft   = aSetTopLeft;
+    h->setGroupPos  = aSetGroupPos;
+    h->getAlpha     = aGetAlpha;
+    h->getScale     = aGetScale;
+    h->translate    = aTranslate;
+    // changeToScreen and trace are bscreens.c's; it installs its own over
+    // whatever is passed here, because both are free functions on a global
+    // in the original and neither belongs to the bundle.
+}
+
 // ------------------------------------------------------------ the registry
 
 // Only the three. The boot screens are bootflow_check.py's business, and
@@ -268,6 +440,7 @@ static void runScenario(const Scenario* sc)
     BGameFlow      gf;
     BGameFlowHooks hooks;
     BScreensHooks  sh;
+    BAnimHooks     ah;
 
     printf("scenario %s\n", sc->name);
 
@@ -296,6 +469,10 @@ static void runScenario(const Scenario* sc)
     sh.startQuickRace      = hQuickRace;
     // After the two gf fields: bscr_init takes its copy of VIDEO_MODE here.
     bscr_init(&g_screens, &gf, &sh);
+
+    buildWorld();
+    setupAnimHooks(&ah);
+    bscr_set_anim_hooks(&g_screens, &ah);
 
     // No boot sequence. The flow is parked in NONE with nothing to service,
     // and the scenario drops straight onto the screen under test -- which

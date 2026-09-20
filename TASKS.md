@@ -466,7 +466,7 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
         *held* button, not a pressed one: the Mode Selects only remember
         whether it is down and `StartQuickRace` reads that when it runs.
         Cross-checked the usual way -- `tools/bscreens_check.py` is an
-        independent Python model of all three screens, 17 scenarios, 974
+        independent Python model of all three screens, 17 scenarios, 1246
         lines, 0 differ -- and walked on the emulator, which now enters
         Cops On Mode Select and Options with the brackets and the blurb
         already on the right item.
@@ -481,25 +481,64 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
         after the message. Same reasoning applies at exit, so `main.c`
         now leaves through `bgf_change_to_screen(NULL)` instead of
         closing the menu behind the flow's back.
-        Three object hashes in these screens are still uncracked:
+        Three object hashes in these screens were still uncracked here:
         `0x6eb9985d`, `0x70a404ec`, `0xab671c9a`. A 4,185-word list and an
         exhaustive sweep of every string up to 4 characters missed all
-        three; they are named in the doc as unknowns rather than guessed.
+        three. 18b cracked the first two (`NONAME`, `WHITEOUT_BAR`) plus
+        `0x97bf4b25` (`UNDERSCORE_GROUP`) by working from the names the
+        animation layer already uses; `0xab671c9a` and `0x1042eac3` are
+        still named in the doc as unknowns rather than guessed.
 
-18b.[ ] The frontend animation layer. Everything in 18a happens instantly
-        because the classes that make it take time are not ported yet:
-        `tSlideAnimation` / `tSlideInAnimation` / `tSlideOutAnimation`
-        (items slide in and out per `MENUITEM_n_GROUP`),
-        `tHighlightAnimation` (the brackets travel instead of snapping),
-        `tAnimatedBlurb`'s scroll, `SelectionSet` / `AnimationGroup` and
-        `SplineSeek`, whose `SplineBaseDuration` and
-        `SplineDeltaDuration` (`0x00324db4`, `0x00324db8`) are both 0.05
-        -- the same two numbers the exit durations come out of. The port
-        already calls the hooks at the right moments, so this is a layer
-        on top rather than a rework: `bscreens.c` would keep deciding
-        *what* moves and the new module would decide *when* it arrives.
-        Note the 1/4000 s `RealTimer` when timing it (`Timer::SetTime` at
-        `0x00134ef0` is `(int)(f * 4000.0f)`).
+18b.[x] The frontend animation layer, ported to
+        `3DS Files/source/banim.c` (~700 lines) and written up in
+        `docs/formats/frontend-animation.md`. `tCubic1D` + `SplineSeek`
+        (`0x001d0790`), `AnimationGroup` (`0x00232010` / `0x002320d0`),
+        `tSlideAnimation` with its three uses -- `tSlideInAnimation`
+        (`0x00232a48`), `tSlideOutAnimation` (`0x00232958`),
+        `tExitScreenAnimation` (`0x00232b50`) -- `feAnimAlphaElement`
+        (`0x00231ba8`), `tHighlightAnimation` (`0x00232318`),
+        `tAnimatedBlurb` (`0x00232c18`) and `SelectionSet` (`0x00169358`).
+        The group and mask hashes are built at runtime by `SprintfAndHash`
+        (`0x001d1d98`), so the port computes them from the djb2 stride
+        rather than tabling them: `MENUITEM_n_GROUP = 0x59c1995e +
+        n*33^6` and `MI_n_MASK = 0x6bdfbaaf + n*33^5`, checked against
+        `tools/bhash.py` for n in 0..9.
+        The payoff at the screens layer: `BSCR_EXIT_COPS_ON/OFF/OPTIONS`
+        are gone. Those three hand-measured constants (0.25 / 0.20 /
+        0.40 s) are now what falls out of `tSlideOutAnimation` asking the
+        bundle which `MENUITEM_n_GROUP`s exist, and the harness prints
+        0.250 / 0.200 / 0.400 back unchanged -- derived instead of
+        asserted.
+        Four shipped oddities are reproduced rather than corrected,
+        because "the original does this" is what makes the two
+        implementations comparable: `bSin` called twice per bloom frame,
+        `FlailerGetScale` called twice in `SetCurrentMenuItem`,
+        `SetupToAnimate`'s dead `state = 2`, and `AddItems` counting a
+        mask the screen does not have so the item indices keep their hole.
+        `bSin` (`0x00241e98`) is a BAM table walk that overshoots to
+        1.00000358 at the peak, so it is ported rather than replaced with
+        `sinf`. `ClampSecondDerivative`'s argument bug (`0x001d0818` tests
+        the second-derivative limit, `0x001d0824` passes the first) is
+        documented in `banim.h` but not carried: the frontend's only
+        caller passes 0 for both.
+        Wiring: `gameflow.c` now also keeps `RealTimeElapsed`
+        (`0x00323cdc`) beside `RealTimer`, because the integrator wants
+        the frame delta and everything else wants the total; `bscreens.c`
+        owns one `BAnim` and re-slaves it from both at every entry point
+        rather than starting a second clock. `main.c` implements the
+        eighteen `BAnimHooks` against `bui.c`/`uirender.c`, which needed
+        five new primitives underneath -- `bui_get_object_alpha` /
+        `bui_set_object_alpha`, `bui_set_object_scale`,
+        `bui_set_text_string`, `bui_next_in_group` and
+        `uirender_text_extent` -- plus `ScaleAboutCenter`'s geometry
+        recovered from `0x0013eb20`.
+        Cross-checked the usual way: `tools/banim_check.py` is an
+        independent Python model, 23 scenarios, 2219 lines, 0 differ, and
+        mutation-tested (Taylor coefficient `2.755731884e-06` -> `e-05`
+        moves 28 lines, slide stride 0.05 -> 0.06 moves 173).
+        `tools/bscreens_check.py` and `tools/bootflow_check.py` still run
+        clean at 1246 and 3659 lines. Built and walked on Azahar: PASS,
+        13 screenshots, 19 textures cached, 0 missing.
 
 ## Phase 3 -- Core engine systems
 

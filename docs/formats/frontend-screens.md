@@ -22,7 +22,7 @@ useful thing that can happen to a decode.
 | `OptionsScreenBase` | `0x001e53d0` | `OptionsScreenBase.obj` |
 
 The port is `3DS Files/source/bscreens.c`, cross-checked against a second
-implementation by `tools/bscreens_check.py` (17 scenarios, 974 lines, 0
+implementation by `tools/bscreens_check.py` (17 scenarios, 1246 lines, 0
 differ).
 
 ## The short version
@@ -394,8 +394,12 @@ a `tExitScreenAnimation` -- it changes screen on the spot -- so its groups
 only ever run as the slide-*in*.)
 
 `0.05 + 4 * 0.05 = 0.25`. This is the one number in this document that comes
-from the data rather than the code, and it is the reason the port's exit
-animation is a plain stopwatch instead of a guess.
+from the data rather than the code. It was originally the reason the port's
+exit animation was a plain stopwatch: with no slide to time, the duration had
+to be measured here and written down. Now that `banim.c` builds the real
+`tSlideOutAnimation`, the table above is what the port *derives* rather than
+what it is told, and the three durations come back out of the harness
+unchanged.
 
 `IsFinished` (`0x00232828`) answers "no" while the stored start time is 0 or
 `0x7fffffff`. `Start` (`0x00232818`) stores `RealTimer`, which counts in
@@ -477,27 +481,44 @@ to change), and `uirender_object_bounds`, because `FlailerGetBoundingBox`
 needs the rendered size of a bitmap and only the renderer knows the texture's
 dimensions.
 
+The animation layer added five more underneath that: `bui_get_object_alpha`
+/ `bui_set_object_alpha`, `bui_set_object_scale`, `bui_set_text_string`,
+`bui_next_in_group` and `uirender_text_extent`. They are listed with their
+originals in [frontend-animation.md](frontend-animation.md).
+
 `main.c`'s `menuCallback` also changed. It used to build a fresh
 `ScreenCallbackData` and forward `MENUITEM_SELECT` alone; it now passes the
 block `FlailerMenu` is holding straight down. Both reply fields matter here:
 `Param` is how the exit animation freezes navigation, `Noise` is how it stays
 quiet, and `bmenu` reads `Noise` back after the callback returns.
 
-## What is still missing
+## The animation layer
 
-The animation layer. `tSlideAnimation`, `tSlideInAnimation`,
-`tSlideOutAnimation`, `tHighlightAnimation`, `tAnimatedBlurb`,
-`SelectionSet`, `AnimationGroup` and `SplineSeek` are a self-contained kit
-that moves Flailer objects along cubic splines, and none of it is ported: the
-items appear and disappear rather than sliding, the blurb changes rather than
-scrolling, and the brackets jump. The one piece whose *timing* changes what
-the screen does is modelled (`BExitAnimation`); the rest is cosmetic and is
-its own task.
+`tSlideAnimation`, `tSlideInAnimation`, `tSlideOutAnimation`,
+`tHighlightAnimation`, `tAnimatedBlurb`, `SelectionSet`, `AnimationGroup` and
+`SplineSeek` are a self-contained kit that moves Flailer objects along cubic
+splines. It was left out of the first pass on these screens and is now ported
+in `3DS Files/source/banim.c`; the decode is written up in
+[frontend-animation.md](frontend-animation.md).
 
-Three object hashes on these screens are still unnamed: `0x6eb9985d` (which
-appears on nearly every screen in the bundle), `0x70a404ec` (the dark bar
-behind the blurb) and `0xab671c9a` (a caption placed off-screen on Cops On,
-at y=539 of a 480-tall screen). None of the three resisted for want of
+One consequence reaches back into this document. The exit timings used to be
+three hand-measured constants -- 0.25 s for Cops On, 0.20 s for Cops Off,
+0.40 s for Options -- standing in for an animation that was not there. They
+are gone. `tSlideOutAnimation` gives slot i a duration of `0.05 + i*0.05`
+seconds, so the total is `0.05 * numGroups`, and asking the bundle which
+`MENUITEM_n_GROUP`s each screen has produces exactly 0.250, 0.200 and 0.400
+back. The numbers were right; they are now derived rather than asserted.
+
+Two of the three unnamed object hashes are also cracked, along with the
+group hash the brackets live in:
+
+| hash | name |
+|------|------|
+| `0x70a404ec` | `WHITEOUT_BAR` -- the dark bar behind the blurb |
+| `0x6eb9985d` | `NONAME` -- what the editor writes for an unnamed object, which is why it is on nearly every screen |
+| `0x97bf4b25` | `UNDERSCORE_GROUP` -- `MI_UNDERSCORE` and `MI_OVERSCORE` |
+
+`0xab671c9a` (a caption placed off-screen on Cops On, at y=539 of a 480-tall
+screen) and `0x1042eac3` are still unnamed. Neither resisted for want of
 trying: a 4,185-word list and an exhaustive sweep of every name up to four
-characters both came back empty. They belong to the animation layer's
-follow-up.
+characters both came back empty.

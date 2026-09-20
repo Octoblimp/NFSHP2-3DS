@@ -117,6 +117,7 @@ class Flow(object):
 
         self.real_time = 0
         self.real_timer = 0
+        self.real_elapsed = 0.0
         self.frame_counter = 0
         self.accum = 0.0
         self.begin_screen_fade_time = 0
@@ -347,6 +348,9 @@ class Flow(object):
         self.accum = f32(self.accum - f32(f32(n) * f32(1.0 / 60.0)))
         self.real_timer = (self.real_timer
                            + int(f32(dt * f32(4000.0)))) & 0xffffffff
+        # RealTimeElapsed (0x00323cdc), the second half of the clock. The
+        # boot flow never reads it; the frontend spline integrator does.
+        self.real_elapsed = dt
         self.frame_counter += 1
 
     def frame(self, dt):

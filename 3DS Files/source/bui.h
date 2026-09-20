@@ -153,6 +153,13 @@ bool bui_object(const BUI* ui, uint32_t index, BUIObject* out);
 int32_t bui_find_object(const BUI* ui, const BUIScreen* screen,
                         uint32_t nameHash, int type);
 
+// Walks the objects on a screen that carry a GroupHash. -1 for `after`
+// starts at the head; feed the previous result back to get the next one.
+// Returns -1 when there are no more. GroupHash is not a name -- several
+// objects share one, which is the whole point of a group.
+int32_t bui_next_in_group(const BUI* ui, const BUIScreen* screen,
+                          uint32_t groupHash, int type, int32_t after);
+
 // Writes a text object's Color back into the loaded chunk, which is how the
 // engine changes one: the renderer reads FlailerTextChunk::Color out of the
 // bundle every frame and there is no separate runtime copy.
@@ -178,6 +185,26 @@ bool bui_set_object_pos(BUI* ui, uint32_t index, float x, float y);
 // Note the polarity -- BUI_INVISIBLE is 0 and BUI_VISIBLE is 1, which is the
 // OPPOSITE of FlailerScreenVisibility on a screen. See gameflow.h.
 bool bui_set_object_visible(BUI* ui, uint32_t index, int visibility);
+
+// An object's alpha: the top byte of its colour word, or of one of a
+// bitmap's four corner words. `corner` is ignored on a text object, exactly
+// as FlailerObjectChunk::GetAlpha ignores it. -1 if the object has no
+// colour (a group node, or a chunk too short to hold one).
+int bui_get_object_alpha(const BUI* ui, uint32_t index, int corner);
+
+// Writes it back. On a bitmap, corner -1 means all four -- that is the
+// FlailerBitmapChunk::SetAlpha convention and the only one the frontend's
+// fades use. Same caveat about a writable buffer.
+bool bui_set_object_alpha(BUI* ui, uint32_t index, int corner, int alpha);
+
+// Writes ScaleX/ScaleY. Same caveat about a writable buffer.
+bool bui_set_object_scale(BUI* ui, uint32_t index, float sx, float sy);
+
+// Replaces a text object's inline string, truncating to the room the chunk
+// has. Returns the number of characters kept, 0 if the object is not text.
+// Note this only shows through if LanguageID is 0: the renderer prefers the
+// language table whenever one is set. See uirender.c's object_text().
+uint32_t bui_set_text_string(BUI* ui, uint32_t index, const char* s);
 
 // Splits a PS2 colour word into 0..255 components. The bytes are GS
 // convention -- 0x80 is full intensity, and the 0x81..0xff seen on some

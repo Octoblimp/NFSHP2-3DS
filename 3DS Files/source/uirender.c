@@ -476,6 +476,36 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
     }
 }
 
+// GetScaledWidth__16FlailerTextChunk (0x0013e8b0) and GetScaledHeight
+// (0x0013e858), which are what ScaleAboutCenter divides to find the centre
+// it scales about. Width is the same sum draw_text() lays down; height is
+// the font's line height truncated to an int *before* ScaleY multiplies it,
+// which is the cvt.w.s at 0x0013e880 and not a rounding accident. Both are
+// 0 for an object whose font is not loaded, exactly as the originals return
+// 0 when FindFont fails.
+bool uirender_text_extent(UIRenderer* r, const BUI* ui, uint32_t index,
+                          float* outW, float* outH)
+{
+    BUIObject   o;
+    UIFont*     f;
+    size_t      len = 0;
+    const char* str;
+
+    if (outW) *outW = 0.0f;
+    if (outH) *outH = 0.0f;
+    if (!r || !ui || !bui_object(ui, index, &o)) return false;
+    if (o.type != BUI_TYPE_TEXT) return false;
+    f = find_font(r, o.fontHash);
+    if (!f) return true;               // found, but measures 0 -- as on PS2
+
+    str = object_text(r, &o, &len);
+    if (outW && str)
+        *outW = measure(f, str, len, o.scaleX,
+                        (o.format & BUI_FMT_FIXEDWIDTH) != 0);
+    if (outH) *outH = (float)(int)f->font.height * o.scaleY;
+    return true;
+}
+
 bool uirender_object_bounds(UIRenderer* r, const BUI* ui, uint32_t index,
                             float box[4])
 {

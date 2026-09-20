@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "banim.h"
 #include "gameflow.h"
 
 // The three screens the main menu leads to.
@@ -26,9 +27,12 @@
 // What is NOT here is the drawing. Each of these screens owns a small
 // animation kit -- tSlideAnimation, tSlideInAnimation, tSlideOutAnimation,
 // tHighlightAnimation, tAnimatedBlurb, SelectionSet -- which moves Flailer
-// objects along cubic splines. Those are their own task. The one piece of it
-// whose TIMING changes what the screen does, tExitScreenAnimation, is
-// modelled here as a plain stopwatch; see BExitAnimation.
+// objects along cubic splines. That kit is banim.c, and each screen embeds
+// one of everything it uses. The kit needs to be able to ask the bundle
+// which MENUITEM_i_GROUPs a screen defines, so bscr_set_anim_hooks has to
+// be called for the animations to have anything to move; with no hooks the
+// screens still work, and every animation is simply over on the first
+// frame.
 
 // FlailerScreenConfig hashes, recovered by tools/screen_registry.py. As
 // everywhere in this port the registry name and the authored name are two
@@ -58,6 +62,23 @@
 // is 0 on disc, which is what NewText replaces.
 #define BSCR_OBJ_SCROLLING_TEXT    0x75980cf0u
 #define BSCR_OBJ_SCROLL_TEXT_CLIP  0x5e11b599u
+
+// The bar tAnimatedBlurb wipes the old line out with, and MENUITEM_n_GROUP's
+// sibling for the two brackets. Both were cracked from their hashes:
+// WHITEOUT_BAR is the fadeout half of the blurb and UNDERSCORE_GROUP is what
+// StartChangeToScreen (0x00203ec8) appends to the exit animation so the
+// brackets leave with the items.
+#define BSCR_OBJ_WHITEOUT_BAR      0x70a404ecu
+#define BSCR_GROUP_UNDERSCORE      0x97bf4b25u
+
+// The spare text objects tHighlightAnimation draws its scaled copy into.
+// Neither hash has been cracked -- a seven-character exhaustive sweep and a
+// 35,700-name compositional dictionary both came up empty -- so they are
+// carried as the numbers the ELF has. Every frontend screen passes the first
+// with BloomTargetColor; OptionsScreenBase (0x001e53d0) builds a second one
+// on top with colour -1, which leaves the copy whatever colour it came with.
+#define BSCR_OBJ_BLOOM_TEXT        0xab671c9au
+#define BSCR_OBJ_BLOOM_TEXT_2      0x1042eac3u
 
 // Where the two brackets sit relative to the current item's bounding box.
 // CopsOn/CopsOffModeSelect::SetupHighlight (0x00204160, 0x002047c8) use the
@@ -160,25 +181,16 @@ typedef struct {
     void (*startQuickRace)(void* user, const BQuickRace* p);
 } BScreensHooks;
 
-// tExitScreenAnimation (0x00232b50), as far as the flow can tell.
-//
-// The real thing is a tSlideOutAnimation -- a list of AnimationGroups, one
-// per MENUITEM_i_GROUP that the screen actually defines, each sliding its
-// objects to x = 650 along a cubic spline. What the flow sees is only how
-// long that takes and that the screen stops responding while it runs, so
-// this is a stopwatch with the right duration on it.
-//
-// The duration is tSlideAnimation's +16, the longest of the groups added:
-// group i runs for SplineBaseDuration + i * SplineDeltaDuration seconds,
-// both 0.05f (gp-15932, gp-15928), for i in 0..9. FRONTB.BUN defines
-// MENUITEM_i_GROUP for i = 1..4 on Cops On, 1..3 on Cops Off and 1..7 on
-// Options, so the three screens take 0.25s, 0.20s and 0.40s respectively.
-typedef struct {
-    bool     active;
-    char     name[BGF_NAME_LEN];  // +20: where it goes when it finishes
-    uint32_t started;             // +12: RealTimer at Start()
-    uint32_t ticks;               // the duration, in RealTimer's 1/4000 s
-} BExitAnimation;
+// How long each screen takes to leave used to be a constant here, worked
+// out by hand from the groups FRONTB.BUN defines: 0.25s on Cops On, 0.20s
+// on Cops Off, 0.40s on Options. It is no longer written down anywhere,
+// because banim's tSlideOutAnimation asks the bundle which
+// MENUITEM_i_GROUPs exist and takes the longest of their durations --
+// SplineBaseDuration + i * SplineDeltaDuration, both 0.05f (gp-15932,
+// gp-15928). The three numbers now come out rather than going in, which is
+// the whole reason to have ported the kit. What they come out as with no
+// animation hooks installed is zero, and a zero-length exit finishes on the
+// first tick.
 
 // The object each screen's Callback news on SCREEN_ACTIVATE and deletes on
 // SCREEN_UNACTIVATE, cut down to the fields anything outside the animation
@@ -190,7 +202,18 @@ typedef struct {
     uint32_t       currentMask;   // SelectionSet::CurrentObject
     int            blurb;         // the last id handed to tAnimatedBlurb
     int            transmission;  // +624 on the Mode Selects; see below
-    BExitAnimation exit;          // +620 on the Mode Selects, +92 on Options
+
+    // The animation kit, in the order the constructors build it. The
+    // original news each of these separately and keeps a pointer; the port
+    // embeds them, so `exitActive` stands in for the null check on +620.
+    BSelSet        sel;           // +4    IndicatorMode 1, MI_n_MASK table
+    BBlurb         blurbAnim;     // +152  SCROLLING_TEXT and WHITEOUT_BAR
+    BHighlightAnim bloom;         // +568  the copy that scales and fades
+    BHighlightAnim bloom2;        // Options only; see BSCR_OBJ_BLOOM_TEXT_2
+    bool           hasBloom2;
+    BSlideAnim     slideIn;       // +600  built and started on activate
+    BExitAnim      exit;          // +620 on the Mode Selects, +92 on Options
+    bool           exitActive;
 
     // How many times the screen's OnTick ran. Nothing in the game reads
     // this; it is here because CopsOnModeSelect::HandleEvent calls OnTick
@@ -202,6 +225,11 @@ typedef struct {
 typedef struct {
     BGameFlow*      gf;
     BScreensHooks   hooks;
+
+    // One BAnim for the module, because RealTimer and RealTimeElapsed are
+    // one global each. It is re-slaved to gf's copy at the top of every
+    // callback rather than ticked here, so the two cannot drift.
+    BAnim           anim;
 
     BScreenInstance copsOn;
     BScreenInstance copsOff;
@@ -224,6 +252,13 @@ typedef struct {
 // clears it. `hooks` may be NULL. Call before bgf_service() reaches any of
 // these screens; main() does it next to bgf_init().
 void bscr_init(BScreens* s, BGameFlow* gf, const BScreensHooks* hooks);
+
+// Hands the animation kit its window onto the bundle. Separate from
+// bscr_init because the two layers answer to different parts of main():
+// these hooks are FlailerObjectChunk operations and belong with bui.c,
+// while BScreensHooks is the game. May be NULL, and may be called before or
+// after bscr_init as long as it is before the first screen activates.
+void bscr_set_anim_hooks(BScreens* s, const BAnimHooks* hooks);
 
 // The three FlailerScreenConfig callbacks, to put in kScreens[].
 void bscr_cops_on_callback(BGameFlow* gf, BScreenMessage msg,

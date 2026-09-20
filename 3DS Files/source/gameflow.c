@@ -319,6 +319,7 @@ void bgf_advance_time(BGameFlow* gf, float dt)
     gf->realTime += (n != 0) ? (uint32_t)n : 1u;
     gf->accum -= (float)n * (1.0f / 60.0f);
     gf->realTimer += (uint32_t)(int)(dt * 4000.0f);
+    gf->realElapsed = dt;
     gf->frameCounter++;
 }
 

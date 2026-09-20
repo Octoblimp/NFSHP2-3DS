@@ -1397,3 +1397,238 @@ rework -- `bscreens.c` keeps deciding *what* moves, the new module decides
 Otherwise Phase 3 starts at task 19 (`bMath`/`bVector`/`bQuaternion`/
 `bMatrix`), and task 21 -- VU1 geometry to citro3d -- is the one with the
 survey work already done, in `docs/formats/solid-geometry.md`.
+
+---
+
+## Session 10 (2026-09-20) -- the menus move
+
+Task 18b, the frontend animation layer. Full writeup, address per rule, in
+`docs/formats/frontend-animation.md`. The port is `3DS Files/source/banim.c`
+(~700 lines), driven from `bscreens.c` and hooked to the real Flailer in
+`main.c`.
+
+Everything in 18a happened instantly because the classes that make it take
+time were not ported. They are now: `tCubic1D` + `SplineSeek`
+(`0x001d0790`), `AnimationGroup` (`0x00232010` and `0x002320d0`),
+`tSlideAnimation` with its three uses (`tSlideInAnimation` `0x00232a48`,
+`tSlideOutAnimation` `0x00232958`, `tExitScreenAnimation` `0x00232b50`),
+`feAnimAlphaElement` (`0x00231ba8`), `tHighlightAnimation` (`0x00232318`),
+`tAnimatedBlurb` (`0x00232c18`) and `SelectionSet` (`0x00169358`).
+
+### The `.mdebug` scanner was hiding the classes it needed
+
+Before any of that: `tools/mdebug_stabs_scan.py` reported `AnimationGroup`
+and `tHighlightAnimation` as having **no data members at all**. A 76-byte
+class with nothing in it should have been suspicious a session earlier.
+
+The field regex required a bare type number after the colon. A member of a
+*class* rather than a struct carries a visibility digit first -- `/0`
+private, `/1` protected, `/2` public -- so `ScreenHash:/01,64,32` never
+matched and got filed under "methods, raw, not decoded". 3,159 entries in
+this `.mdebug` have one. Static data members were being lost the same way:
+they have no offset or size, ending in their linker symbol instead
+(`HighlightAnimationTime:/014:_19tHighlightAnimation$HighlightAnimationTime`),
+which is exactly where the tuning constants live.
+
+Both are fixed and `docs/mdebug_structs.txt` is regenerated. The payoff was
+immediate and worth stating, because it is the difference between reading a
+layout and guessing one:
+
+```
+struct/class AnimationGroup (size=76 bytes)
+    ScreenHash   int    +8      GroupHash   int    +12
+    MasterHash   int    +16     SavedXPos   int    +20
+    SavedYPos    int    +24     Spline      tCubic1D +28
+
+struct/class tHighlightAnimation (size=32 bytes)
+    ScreenHash int +0   CurrentMenuItem int +4   AnimationTimer Timer +8
+    TextForAnimation int +12   TargetColor int +16
+    StartScale float +20   EndScale float +24   Timeout float +28
+    6 statics: HighlightAnimationTime StartHighlightScale EndHighlightScale
+               StartAlpha EndAlpha HighlightTimeout
+```
+
+`SavedXPos`/`SavedYPos` being `int` is not a detail. The constructor reads
+them through `FlailerGetTopLeftPosition`'s int overload (`0x00141d28`, which
+`cvt.w.s`'s both), and the port had them as floats. Fixed. It changes nothing
+visible -- all 2252 objects across the four bundles are authored on whole
+pixels, checked -- but the destructor's restore is where it would have shown.
+
+### Group 0 does not mean "the group whose hash is 0"
+
+The one thing in this layer that would have been a real bug. `Animate`
+(`0x00232290`) branches on the group field:
+
+```
+if (Group == 0) FlailerSetTopLeftPosition(Screen, Master, x, SavedYPos)
+else            FlailerSetGroupPosition  (Screen, Group, Master, x, SavedYPos)
+```
+
+Zero is the "no group, just move the master" flag. The blurb's own slide uses
+the five-argument `AnimationGroup` constructor, which writes 0 there; the menu
+rows use the six-argument one, which stores `MENUITEM_n_GROUP`. Reading it as
+a hash would have dragged every object whose `GroupHash` happens to be 0
+across the screen on every blurb change -- and `NONAME` objects, of which
+there are many, are exactly that.
+
+### Three constants deleted, which is the point
+
+`BSCR_EXIT_COPS_ON/OFF/OPTIONS` are gone. Session 9 measured them -- 0.25 s,
+0.20 s, 0.40 s -- by counting `MENUITEM_n_GROUP`s in `FRONTB.BUN`, because
+there was no animation to ask. `tSlideOutAnimation` gives slot i a duration of
+`SplineBaseDuration + i * SplineDeltaDuration` (`0x00324db4`, `0x00324db8`,
+both 0.05), so the total is `0.05 * numGroups`, and the harness now prints:
+
+```
+exit start Challenge          0.250s
+exit start View Event Tree    0.200s
+exit start Audio Options      0.400s
+```
+
+Same numbers, derived rather than asserted. This is the shape a port should
+converge on: a measurement in a header is a placeholder for a mechanism.
+
+### Four things that look like bugs and are kept
+
+* `bSin` is called **twice** per bloom frame -- once for the scale, again
+  inside the alpha expression.
+* `FlailerGetScale` is called **twice** in `SetCurrentMenuItem`, with the
+  scale reset to 1.0 before each.
+* `SetupToAnimate`'s first inlined `SetValDesired` writes `state = 2` and the
+  next instruction overwrites it with 0.
+* `SelectionSet::AddItems` increments `NumItems` for a mask the screen does
+  *not* have, leaving a hole so item indices stay aligned.
+
+All four are in the shipped code, all four were confirmed in the
+disassembly rather than assumed, and all four are reproduced. The first three
+are unobservable except as instruction count; the fourth is load-bearing on a
+screen with a gap in its `MENUITEM_n` sequence.
+
+`bSin` itself (`0x00241e98`) is a BAM table walk, not `sinf`: radians x
+`10430.37793`, truncated to a 16-bit binary angle, scaled back by
+`9.587380191e-05`, range-reduced, five-term Taylor. It **overshoots** -- at
+the peak it returns `1.00000358`. That is the number the bloom's scale and
+alpha come from, so it is ported rather than called out to libm.
+
+One genuine bug is documented and *not* carried: `ClampSecondDerivative`
+(`0x001d01f8`) guards on the second-derivative limit in `$f22` at
+`0x001d0818` and then passes the first-derivative limit in `$f20` from the
+delay slot at `0x001d0824`. The frontend's only caller passes 0 for both, so
+it cannot fire here. `banim.h` records it next to the declaration.
+
+### Wiring
+
+* `gameflow.c`/`.h` now keep `RealTimeElapsed` (`0x00323cdc`) beside
+  `RealTimer`. They are separate globals in the original because the spline
+  integrator wants the frame delta and everything else wants the total.
+* `bscreens.c` owns one `BAnim` and re-slaves it from both at every entry
+  point, rather than starting a second clock that could drift.
+* `BAnimHooks` has a single `user` pointer but two hooks with a different
+  owner: `ChangeToScreen` and the tracing are free functions on a global in
+  the original. `bscr_set_anim_hooks` installs the caller's table and then
+  overwrites those two slots with its own, which find the instance through a
+  file-static -- leaving `user` for the Flailer side.
+* `main.c` implements the other sixteen against `bui.c`/`uirender.c`.
+
+Five primitives had to go in underneath, each one an original:
+
+| new | original |
+|-----|----------|
+| `bui_get_object_alpha` / `bui_set_object_alpha` | `0x0013e098`/`0x0013ea48` (text), `0x0013efa8`/`0x0013ed50` (bitmap corner) |
+| `bui_set_object_scale` | the scale half of `ScaleAboutCenter` |
+| `bui_set_text_string` | `FlailerPrintf` (`0x00141ae8`) with a bare `"%s"` |
+| `bui_next_in_group` | `FindFlailerObjectByGroup` (`0x00141a50`) |
+| `uirender_text_extent` | `GetScaledWidth`/`GetScaledHeight` (`0x0013e8b0`, `0x0013e858`) |
+
+Two details from those worth keeping: alpha is the top byte of the colour
+word in both object types (`lbu v0,71(a0)` for text, `lbu v0,67(a0+corner*4)`
+for a bitmap), a bitmap `SetAlpha` with corner -1 writes all four, and
+`GetScaledHeight` truncates the font's line height to an int *before* `ScaleY`
+multiplies it.
+
+`ScaleAboutCenter` (`0x0013eb20`) is the one with geometry. It nudges the
+anchor by the half-extent the scale change costs so the glyphs grow out of the
+middle, and which coordinate moves depends on the justification bits --
+`LEFT` moves both, `CENTER` only Y, `RIGHT` moves Y down and X back, untagged
+moves neither.
+
+### Three more object names cracked
+
+New tool: `tools/bhash_crack.py`, a meet-in-the-middle preimage search.
+`bStringHash` splits as `h(p + q) = h(p) * 33**|q| + H(q)`, so tabulating
+every suffix once turns `37**8` into `37**4 + 37**4`. It also says when an
+answer means anything: at 32 bits a sweep of N names throws up about
+`N / 2**32` false preimages, which is 0.6 expected at six characters and 815
+at eight. Six is decisive, seven is eyeballable, past that only a word list
+works.
+
+| hash | name |
+|------|------|
+| `0x70a404ec` | `WHITEOUT_BAR` |
+| `0x6eb9985d` | `NONAME` |
+| `0x97bf4b25` | `UNDERSCORE_GROUP` |
+
+Honest about the method: `NONAME` and `WHITEOUT_BAR` both fell to a guess
+about what the object was *for*, once the animation layer made that clear --
+not to a bigger sweep. Cracking these is dictionary-bound, not
+compute-bound. `0xab671c9a` and `0x1042eac3`, the two bloom text objects, are
+still unnamed.
+
+### Checking it
+
+`tools/banim_check.py` is an independent Python model written from the
+disassembly, diffed against the C line for line: **23 scenarios, 2219 lines,
+0 differ**. `tools/bscreens_check.py` imports it wholesale -- one `Bundle`
+class subclassing `banim_check.World` -- so the screens model drives the real
+animation model rather than a second copy of it, and comes out at 17
+scenarios, 1246 lines, 0 differ. `tools/bootflow_check.py` is unchanged at 12
+scenarios, 3659 lines.
+
+Float determinism is the whole difficulty. The Python side rounds to float32
+after **every** operation; one unrounded intermediate moves a truncated pixel.
+Two constants nearly got written wrong from the decompiler's rendering:
+`0.00025f` is *not* `1.0f/4000.0f` (0x3983126f vs 0x3983126e, one ulp), and
+`BANIM_GROUP0` was typed from memory as `0x29dc47a1` before
+`bhash("MENUITEM_0_GROUP")` said `0x59c1995e`.
+
+Mutation-tested, because a cross-check that cannot fail proves nothing. Two
+first attempts changed nothing -- `4.712388992f` to `4.712389f` and
+`6.283185482f` to `6.2831855f` are the same float32. The ones that bite:
+Taylor coefficient `2.755731884e-06f` to `e-05f` moves 28 lines, slide stride
+`0.05f` to `0.06f` moves 173.
+
+Built and walked on Azahar: **PASS**, 13 screenshots, 19 textures cached, 0
+missing, 0 fonts missing, exits cleanly. The menus slide, the blurb whites out
+and scrolls, and the brackets and bloom track the current item.
+
+### Things that bit, for the next session
+
+* **Heredocs mangle backslashes.** Four separate failures this session
+  writing Python through `<<'PY'`: `\\n` inside the heredoc became a real
+  newline and `\\\\` collapsed to `\`. Use the `Write` tool for anything
+  large, or `BS = chr(92)` and concatenation.
+* **Line endings are per-file and must be preserved.** `gameflow.*` and
+  `TASKS.md` are CRLF; `bscreens.*`, `banim.*`, `bui.*`, `main.c`,
+  `uirender.*`, `tools/*.py`, `tools/src/*.c` and the docs are LF. A patch
+  script should detect and restore, not assume.
+* **gcc argument evaluation order is right-to-left here.** A harness line
+  that called `banim_exit_message(...)` inside a `printf` alongside the
+  out-params it writes printed stale values. Hoist the call.
+* **gcc from Git Bash cannot find its own `/usr/include`.** Always build host
+  harnesses through `tools/hostbuild.py`, which retries via the msys2 login
+  shell.
+
+### Next session
+
+Phase 2 is done: the frontend boots, plays the logo, reaches the main menu,
+walks into all three screens it leads to, and now animates doing it. Phase 3
+starts at task 19 (`bMath`/`bVector`/`bQuaternion`/`bMatrix`) -- `bSin` and
+`tCubic1D` are already ported into `banim.c` and should move out into a
+`bmath.c` when that lands rather than being duplicated. Task 21, VU1 geometry
+to citro3d, is the one with the survey work already done, in
+`docs/formats/solid-geometry.md`.
+
+The two scrolling textures found in Session 9 (`SCREEN_LINES`, `ROADLINES`,
+via `TextureInfo::GetScroll` at `0x00100a60`) are still not animated. They
+were filed under 18b but belong to the renderer, not the animation layer:
+`uirender.c` would offset the UVs, and nothing in `banim.c` touches them.

@@ -118,6 +118,13 @@ void uirender_override_texture(UIRenderer* r, uint32_t hash, C3D_Tex* tex,
 void uirender_draw_screen(UIRenderer* r, BUI* ui, const BUIScreen* screen,
                           float alpha);
 
+// The scaled width and height of a text object, as FlailerTextChunk's own
+// GetScaledWidth/GetScaledHeight compute them -- the pair ScaleAboutCenter
+// needs. False if the object is not text; true with both zero if its font
+// is missing, which is what the originals return too.
+bool uirender_text_extent(UIRenderer* r, const BUI* ui, uint32_t index,
+                          float* outW, float* outH);
+
 // FlailerGetBoundingBox (0x00141ed0) for one object, in the screen's own
 // 640x480 space: box = { left, top, right, bottom }. Only bitmaps have a
 // size the renderer can answer for -- it is the same (int)(texW * ScaleX)

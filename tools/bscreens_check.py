@@ -34,10 +34,12 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild                                    # noqa: E402
 import bootflow_check as bf                         # noqa: E402
+import banim_check as ba                            # noqa: E402
 
 SOURCES = ["tools/src/bscreens_test.c",
            "3DS Files/source/bscreens.c",
-           "3DS Files/source/gameflow.c"]
+           "3DS Files/source/gameflow.c",
+           "3DS Files/source/banim.c"]
 
 SIXTIETH = 1.0 / 60.0
 
@@ -67,7 +69,100 @@ def mask(n):
 UNDER_MODE, OVER_MODE = -3.0, -6.0
 UNDER_OPT, OVER_OPT = 0.0, -6.0
 
-EXIT_COPS_ON, EXIT_COPS_OFF, EXIT_OPTIONS = 0.25, 0.20, 0.40
+# How long each screen takes to leave is no longer a number in this file.
+# tSlideOutAnimation asks the bundle which MENUITEM_i_GROUPs the screen
+# defines and takes the longest of their durations, so 0.25 / 0.20 / 0.40
+# now fall out of AUTHORED_ITEMS below. If those three seconds ever stop
+# appearing in the transcript, either the bundle model or the kit is wrong,
+# and the diff says which.
+AUTHORED_ITEMS = {COPS_ON: 4, COPS_OFF: 3, OPTIONS: 7}
+
+BLOOM_TEXT = 0xab671c9a
+BLOOM_TEXT_2 = 0x1042eac3
+SCROLLING_TEXT = 0x75980cf0
+WHITEOUT_BAR = 0x70a404ec
+MI_UNDERSCORE = 0x32c91dae
+MI_OVERSCORE = 0xc671680c
+UNDERSCORE_GROUP = 0x97bf4b25
+
+MODE_MASKS = [mask(n) for n in range(1, 6)]
+OPTION_MASKS = [mask(n) for n in range(1, 9)]
+
+
+class Bundle(ba.World):
+    """FRONTB.BUN as far as the animation kit can see it.
+
+    The same objects tools/src/bscreens_test.c builds, and the same silences:
+    the hooks that only write are not installed on the C side, so they must
+    do nothing here too -- otherwise a second activation of the same screen
+    would read back an alpha the port never wrote.
+    """
+
+    def __init__(self, flow=None):
+        self.flow = flow
+        objs = []
+        for screen, n_items in sorted(AUTHORED_ITEMS.items()):
+            for i in range(1, n_items + 1):
+                y = 50.0 + (i - 1) * 20.0
+                objs.append(ba.Obj(screen, mask(i), ba.H_GROUP(i),
+                                   ba.TYPE_BITMAP, 100.0, y, 1.0, 1.0,
+                                   [128] * 4))
+                objs.append(ba.Obj(screen, item(i), ba.H_GROUP(i),
+                                   ba.TYPE_TEXT, 120.0, y, 1.0, 1.0,
+                                   [128] * 4))
+            objs.append(ba.Obj(screen, MI_UNDERSCORE, UNDERSCORE_GROUP,
+                               ba.TYPE_BITMAP, 95.0, 50.0, 1.0, 1.0,
+                               [128] * 4))
+            objs.append(ba.Obj(screen, MI_OVERSCORE, UNDERSCORE_GROUP,
+                               ba.TYPE_BITMAP, 95.0, 44.0, 1.0, 1.0,
+                               [128] * 4))
+            objs.append(ba.Obj(screen, SCROLLING_TEXT, 0, ba.TYPE_TEXT,
+                               40.0, 200.0, 1.0, 1.0, [128] * 4))
+            objs.append(ba.Obj(screen, WHITEOUT_BAR, 0, ba.TYPE_BITMAP,
+                               40.0, 198.0, 1.0, 1.0, [128] * 4))
+            objs.append(ba.Obj(screen, BLOOM_TEXT, 0, ba.TYPE_TEXT,
+                               0.0, 0.0, 1.0, 1.0, [128] * 4))
+            objs.append(ba.Obj(screen, BLOOM_TEXT_2, 0, ba.TYPE_TEXT,
+                               0.0, 0.0, 1.0, 1.0, [128] * 4))
+        ba.World.__init__(self, objs)
+
+    # Installed, and answering with the authored value rather than with
+    # whatever a previous fade left behind.
+    def get_alpha(self, screen, name, corner):
+        return 128
+
+    def get_scale(self, screen, name):
+        return ba.f32(1.0), ba.f32(1.0)
+
+    def translate(self, lid):
+        return "<string %d>" % lid
+
+    # Not installed on the C side: a null hook in BAnimHooks is a no-op.
+    def set_visible(self, screen, name, v):
+        pass
+
+    def set_alpha(self, screen, name, corner, a):
+        pass
+
+    def set_language_id(self, screen, name, lid):
+        pass
+
+    def print_text(self, screen, name, s):
+        pass
+
+    def copy_text(self, screen, dst, src):
+        pass
+
+    def scale_about_center(self, screen, name, scale):
+        pass
+
+    def set_color(self, screen, name, c):
+        pass
+
+    # bscreens.c installs its own over whatever the bundle passes, because
+    # ChangeToScreen (0x0014a438) is a free function on the one screen list.
+    def change_to_screen(self, name, push):
+        self.flow.change_to_screen(name, push)
 
 FRED_EXPRESS, FRED_ULTIMATE, FRED_HOTPURSUIT = 2, 8, 9
 
@@ -94,14 +189,14 @@ MODE_CONFIG = {
     "copson": {
         "name": "Cops On Mode Select", "hash": COPS_ON,
         "movie": "MOVIES\\hotpursuit_movie.AVI",
-        "exit": EXIT_COPS_ON, "doubleTick": True,
+        "doubleTick": True,
         "cases": 5, "items": COPS_ON_ITEMS,
     },
     # The space in "worldracing_ movie.AVI" is the shipped filename.
     "copsoff": {
         "name": "Cops Off Mode Select", "hash": COPS_OFF,
         "movie": "MOVIES\\worldracing_ movie.AVI",
-        "exit": EXIT_COPS_OFF, "doubleTick": False,
+        "doubleTick": False,
         "cases": 4, "items": COPS_OFF_ITEMS,
     },
 }
@@ -120,9 +215,12 @@ OPTION_ITEMS = [
 
 
 def new_instance():
+    # The animation kit's members are filled in by kit_construct; until then
+    # the instance is the memset the constructors start with.
     return {"live": False, "screen": 0, "cur": 0, "blurb": 0,
-            "transmission": 0, "ticks": 0,
-            "exit": {"active": False, "name": "", "started": 0, "ticks": 0}}
+            "transmission": 0, "ticks": 0, "exit": None, "exit_active": False,
+            "sel": None, "blurb_anim": None, "bloom": None, "bloom2": None,
+            "slide_in": None}
 
 
 class Screens(bf.Flow):
@@ -147,6 +245,53 @@ class Screens(bf.Flow):
         self.boost = 0
         self.inst = {"copson": new_instance(), "copsoff": new_instance(),
                      "options": new_instance()}
+        # One clock for the module, re-slaved to the flow's before every
+        # entry point, because RealTimer and RealTimeElapsed are one global
+        # each. banim's own trace goes into this transcript -- that is what
+        # bscreens.c's animTrace does -- and the hook traffic is dropped,
+        # because tools/banim_check.py is what checks that.
+        self.anim = ba.Anim(Bundle(self))
+        ba.EMIT[0] = None
+        ba.TRACE[0] = self.say
+
+    def clock(self):
+        self.anim.set_clock(ba.i32(self.real_timer), self.real_elapsed)
+        return self.anim
+
+    def top_left_x(self, screen, obj):
+        return self.anim.w.get_top_left(screen, obj)[0]
+
+    # -- the animation kit, as each constructor builds it ----------------
+    def kit_construct(self, inst, masks):
+        a = self.clock()
+        inst["sel"] = ba.SelSet(a, inst["screen"])
+        inst["sel"].indicator_mode = 1
+        inst["sel"].add_items(masks)
+        inst["blurb_anim"] = ba.Blurb(a, inst["screen"], SCROLLING_TEXT,
+                                      SCROLLING_TEXT, WHITEOUT_BAR)
+        inst["bloom"] = ba.Highlight(a, inst["screen"], BLOOM_TEXT,
+                                     ba.BLOOM_COLOR)
+        inst["slide_in"] = ba.slide_in(a, inst["screen"],
+                                       self.top_left_x(inst["screen"],
+                                                       mask(1)))
+
+    def kit_destruct(self, inst):
+        a = self.clock()
+        if inst["exit_active"]:
+            inst["exit"].slide.release()
+        inst["slide_in"].release()
+        inst["blurb_anim"].release()
+        del a
+
+    def kit_tick(self, inst):
+        a = self.clock()
+        inst["sel"].update()
+        inst["blurb_anim"].animate()
+        inst["bloom"].animate()
+        if inst["bloom2"] is not None:
+            inst["bloom2"].animate()
+        inst["slide_in"].animate()
+        del a
 
     # -- the hooks -------------------------------------------------------
     def hook_gray(self, screen, it, mode):
@@ -199,43 +344,34 @@ class Screens(bf.Flow):
     def set_current_item(self, inst, m, under, over):
         inst["cur"] = m
         self.hook_brackets(inst["screen"], m, under, over)
+        inst["sel"].set_current(m)
         self.say("bracket %08x" % m)
 
     def set_blurb(self, inst, blurb):
         inst["blurb"] = blurb
+        inst["blurb_anim"].new_text_id(blurb)
         self.hook_blurb(inst["screen"], blurb)
         self.say("blurb %d" % blurb)
 
-    # -- tExitScreenAnimation --------------------------------------------
-    def exit_start(self, inst, name, seconds):
-        ticks = int(bf.f32(bf.f32(seconds) * bf.f32(4000.0)))
-        inst["exit"] = {"active": True, "name": (name or "")[:31],
-                        "started": self.real_timer, "ticks": ticks}
-        self.say("exit start %s %ums" % (inst["exit"]["name"], ticks // 4))
-
-    def exit_finished(self, inst):
-        t0 = inst["exit"]["started"]
-        if t0 == 0 or t0 == 0x7fffffff:
-            return False
-        return ((self.real_timer - t0) & 0xffffffff) >= inst["exit"]["ticks"]
+    # -- StartChangeToScreen ---------------------------------------------
+    def exit_start(self, inst, name):
+        a = self.clock()
+        inst["exit"] = ba.Exit(a, inst["screen"], name or "")
+        inst["exit"].slide.add_group(UNDERSCORE_GROUP, MI_UNDERSCORE,
+                                     self.top_left_x(inst["screen"],
+                                                     MI_UNDERSCORE),
+                                     ba.OFFSCREEN_X,
+                                     inst["exit"].slide.total_time)
+        inst["exit_active"] = True
 
     def exit_messages(self, inst, msg, data):
-        # The store that clears Noise is in the delay slot of the test for
-        # SCREEN_BACK_BUTTON, so it happens whatever the message is: a
-        # screen on its way out is silent.
-        data["noise"] = 0
-        if msg == bf.SCREEN_BACK_BUTTON:
-            data["param"] = 0          # vetoes BACK for as long as it runs
-            return False
-        if msg in (bf.MENUITEM_PAD_UP, bf.MENUITEM_PAD_DOWN):
-            data["param"] = 1          # consumed: the highlight cannot move
-            return False
-        if msg != bf.SCREEN_TICK or not self.exit_finished(inst):
-            return False
-        name = inst["exit"]["name"]
-        self.say("exit finish %s" % name)
-        self.change_to_screen(name, 1)
-        return True
+        e = inst["exit"]
+        done, param, noise = e.message(msg)
+        if param is not None:
+            data["param"] = param
+        if noise is not None:
+            data["noise"] = noise
+        return done != 0
 
     # -- StartQuickRace (0x00203ae0) -------------------------------------
     def quick_race_params(self, transmission):
@@ -278,16 +414,23 @@ class Screens(bf.Flow):
         inst["live"] = True
         inst["screen"] = screen
         self.hook_movie(cfg["movie"])
+        # Both Mode Selects pass the same five-entry table however many
+        # items they have.
+        self.kit_construct(inst, MODE_MASKS)
         self.hook_jukebox(1)
         self.say("%s ctor %08x" % (cfg["name"], screen))
 
     def mode_destruct(self, cfg, inst):
         self.say("%s dtor" % cfg["name"])
+        self.kit_destruct(inst)
         inst.clear()
         inst.update(new_instance())
 
     def mode_highlight(self, cfg, inst, data):
         n = self.item_index(data["itemHash"], cfg["cases"])
+        # SetCurrentMenuItem takes the RAW hash and runs before the range
+        # check, so an item the switch does not know about still blooms.
+        inst["bloom"].set_item(data["itemHash"])
         if not n:
             return
         self.set_current_item(inst, mask(n), UNDER_MODE, OVER_MODE)
@@ -320,12 +463,13 @@ class Screens(bf.Flow):
             self.game_type = it["gameType"]
             self.num_player_cars = 1
             self.tree_type = it["treeType"]
-        self.exit_start(inst, it["screen"], cfg["exit"])
+        self.exit_start(inst, it["screen"])
 
     def mode_handle(self, cfg, inst, msg, data):
         if msg == bf.SCREEN_TICK:
+            self.kit_tick(inst)
             inst["ticks"] += 1
-        if inst["exit"]["active"]:
+        if inst["exit_active"]:
             self.exit_messages(inst, msg, data)
             return
         if msg == MENUITEM_HIGHLIGHT:
@@ -339,6 +483,7 @@ class Screens(bf.Flow):
         # CopsOnModeSelect runs OnTick twice a tick and CopsOffModeSelect
         # once. Nothing observable depends on it; the counter holds it still.
         if msg == bf.SCREEN_TICK and cfg["doubleTick"]:
+            self.kit_tick(inst)
             inst["ticks"] += 1
 
     def mode_callback(self, kind, msg, data):
@@ -369,6 +514,11 @@ class Screens(bf.Flow):
         inst.update(new_instance())
         inst["live"] = True
         inst["screen"] = screen
+        self.kit_construct(inst, OPTION_MASKS)
+        # The second bloom, with colour -1: the copy keeps whatever
+        # colour the object it was copied from had.
+        inst["bloom2"] = ba.Highlight(self.clock(), screen,
+                                      BLOOM_TEXT_2, -1)
         self.hook_movie("MOVIES\\options_movie_new.AVI")
         self.say("Options ctor %08x" % screen)
         # On NTSC there is no language to pick, so MENUITEM_7 is disabled
@@ -379,11 +529,15 @@ class Screens(bf.Flow):
 
     def options_destruct(self, inst):
         self.say("Options dtor")
+        self.kit_destruct(inst)
         inst.clear()
         inst.update(new_instance())
 
     def options_highlight(self, inst, data, override):
         m = override
+        # Both highlight animations, on the raw hash, before anything else.
+        inst["bloom"].set_item(data["itemHash"])
+        inst["bloom2"].set_item(data["itemHash"])
         if not m:
             n = self.item_index(data["itemHash"], 7)
             # Out of range leaves the mask at 0 and the rest runs anyway.
@@ -405,7 +559,7 @@ class Screens(bf.Flow):
         if now:
             self.change_to_screen(dest, 1)
             return True
-        self.exit_start(inst, dest, EXIT_OPTIONS)
+        self.exit_start(inst, dest)
         return False
 
     def options_handle(self, inst, msg, data):
@@ -419,6 +573,11 @@ class Screens(bf.Flow):
                 return self.options_select(inst, data)
             return False
         if msg == bf.SCREEN_TICK:
+            # The blurb is animated twice a tick on this screen: once here
+            # and once in FirstCrackAtMessage. Both call sites are in the
+            # disassembly, and the second does nothing new because RealTimer
+            # has not moved between them.
+            inst["blurb_anim"].animate()
             inst["ticks"] += 1
         return False
 
@@ -426,7 +585,9 @@ class Screens(bf.Flow):
         # The base gets every message first and runs the highlight itself.
         if msg == MENUITEM_HIGHLIGHT:
             self.options_highlight(inst, data, 0)
-        if inst["exit"]["active"]:
+        elif msg == bf.SCREEN_TICK:
+            self.kit_tick(inst)
+        if inst["exit_active"]:
             self.exit_messages(inst, msg, data)
             return
         self.options_handle(inst, msg, data)

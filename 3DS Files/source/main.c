@@ -449,6 +449,257 @@ static void hookMoveBrackets(void* user, uint32_t screen, uint32_t mask,
         bui_set_object_pos(ui, (uint32_t)idx, o.x, box[1] + over);
 }
 
+// ------------------------------------------- the frontend animation layer
+//
+// BAnimHooks: what banim.c needs from the Flailer, which is the object
+// layer and nothing else. Every one of these resolves the screen hash
+// first, because the animations outlive the screen they were built for --
+// a slide-out is still ticking while the flow has already left.
+
+static BUIScreen* animScreen(Boot* b, uint32_t screen, BUI** outUI)
+{
+    *outUI = NULL;
+    return uirender_find_screen(b->ui, screen, outUI);
+}
+
+// Resolves screen + object name to an index, or -1. `type` follows the
+// FindFlailerObject rule: 0 matches anything. BANIM_TYPE_TEXT/BITMAP are
+// the BUI_TYPE_ values, so they pass straight through.
+static int32_t animFind(Boot* b, uint32_t screen, uint32_t object, int type,
+                        BUI** outUI)
+{
+    BUIScreen* s = animScreen(b, screen, outUI);
+    if (!s || !*outUI) return -1;
+    return bui_find_object(*outUI, s, object, type);
+}
+
+static int hookAnimObjectExists(void* user, uint32_t screen, uint32_t object,
+                                int type)
+{
+    BUI* ui;
+    return animFind((Boot*)user, screen, object, type, &ui) >= 0;
+}
+
+static int hookAnimGroupExists(void* user, uint32_t screen, uint32_t group,
+                               int type)
+{
+    Boot*      b  = (Boot*)user;
+    BUI*       ui = NULL;
+    BUIScreen* s  = animScreen(b, screen, &ui);
+    if (!s || !ui) return 0;
+    return bui_next_in_group(ui, s, group, type, -1) >= 0;
+}
+
+static int hookAnimObjectType(void* user, uint32_t screen, uint32_t object)
+{
+    BUI*      ui;
+    BUIObject o;
+    int32_t   idx = animFind((Boot*)user, screen, object, BUI_TYPE_NONE, &ui);
+    if (idx < 0 || !bui_object(ui, (uint32_t)idx, &o)) return BUI_TYPE_NONE;
+    return o.type;
+}
+
+static void hookAnimGetTopLeft(void* user, uint32_t screen, uint32_t object,
+                               float* x, float* y)
+{
+    BUI*      ui;
+    BUIObject o;
+    int32_t   idx = animFind((Boot*)user, screen, object, BUI_TYPE_NONE, &ui);
+    *x = 0.0f;
+    *y = 0.0f;
+    if (idx < 0 || !bui_object(ui, (uint32_t)idx, &o)) return;
+    *x = o.x;
+    *y = o.y;
+}
+
+static void hookAnimSetTopLeft(void* user, uint32_t screen, uint32_t object,
+                               float x, float y)
+{
+    BUI*    ui;
+    int32_t idx = animFind((Boot*)user, screen, object, BUI_TYPE_NONE, &ui);
+    if (idx >= 0) bui_set_object_pos(ui, (uint32_t)idx, x, y);
+}
+
+// FlailerSetGroupPosition (0x00142f60): the delta that would put `master`
+// at (x, y), applied to every object carrying `group`. The master moves
+// only if it is itself in the group -- MENUITEM_n_MASK is, which is why
+// the slides can drive a whole row from one object's position.
+static void hookAnimSetGroupPos(void* user, uint32_t screen, uint32_t group,
+                                uint32_t master, float x, float y)
+{
+    Boot*      b  = (Boot*)user;
+    BUI*       ui = NULL;
+    BUIScreen* s  = animScreen(b, screen, &ui);
+    BUIObject  o;
+    float      dx, dy;
+    int32_t    idx;
+
+    if (!s || !ui) return;
+    idx = bui_find_object(ui, s, master, BUI_TYPE_NONE);
+    if (idx < 0 || !bui_object(ui, (uint32_t)idx, &o)) return;
+    dx = x - o.x;
+    dy = y - o.y;
+
+    for (idx = bui_next_in_group(ui, s, group, BUI_TYPE_NONE, -1); idx >= 0;
+         idx = bui_next_in_group(ui, s, group, BUI_TYPE_NONE, idx)) {
+        if (!bui_object(ui, (uint32_t)idx, &o)) continue;
+        bui_set_object_pos(ui, (uint32_t)idx, o.x + dx, o.y + dy);
+    }
+}
+
+static void hookAnimSetVisible(void* user, uint32_t screen, uint32_t object,
+                               int visible)
+{
+    BUI*    ui;
+    int32_t idx = animFind((Boot*)user, screen, object, BUI_TYPE_NONE, &ui);
+    if (idx >= 0)
+        bui_set_object_visible(ui, (uint32_t)idx,
+                               visible ? BUI_VISIBLE : BUI_INVISIBLE);
+}
+
+static int hookAnimGetAlpha(void* user, uint32_t screen, uint32_t object,
+                            int corner)
+{
+    BUI*    ui;
+    int32_t idx = animFind((Boot*)user, screen, object, BUI_TYPE_NONE, &ui);
+    int     a;
+    if (idx < 0) return 0;
+    a = bui_get_object_alpha(ui, (uint32_t)idx, corner);
+    return a < 0 ? 0 : a;
+}
+
+static void hookAnimSetAlpha(void* user, uint32_t screen, uint32_t object,
+                             int corner, int alpha)
+{
+    BUI*    ui;
+    int32_t idx = animFind((Boot*)user, screen, object, BUI_TYPE_NONE, &ui);
+    if (idx >= 0) bui_set_object_alpha(ui, (uint32_t)idx, corner, alpha);
+}
+
+static void hookAnimSetLanguageID(void* user, uint32_t screen,
+                                  uint32_t object, int languageID)
+{
+    BUI*    ui;
+    int32_t idx = animFind((Boot*)user, screen, object, BUI_TYPE_TEXT, &ui);
+    if (idx >= 0)
+        bui_set_text_language(ui, (uint32_t)idx, (uint32_t)languageID);
+}
+
+static void hookAnimPrintText(void* user, uint32_t screen, uint32_t object,
+                              const char* str)
+{
+    BUI*    ui;
+    int32_t idx = animFind((Boot*)user, screen, object, BUI_TYPE_TEXT, &ui);
+    if (idx >= 0) bui_set_text_string(ui, (uint32_t)idx, str);
+}
+
+// CopyFlailerText (0x0013ec18): src's *drawn* string into dst, which means
+// resolving src's LanguageID first -- the bloom is a copy of a menu label
+// and a menu label is a language row. dst then goes onto its own inline
+// string, or the table would keep winning and the copy never show.
+static void hookAnimCopyText(void* user, uint32_t screen, uint32_t dst,
+                             uint32_t src)
+{
+    Boot*      b  = (Boot*)user;
+    BUI*       ui = NULL;
+    BUIScreen* s  = animScreen(b, screen, &ui);
+    BUIObject  o;
+    char       text[128];
+    int32_t    si, di;
+    size_t     n = 0;
+
+    if (!s || !ui) return;
+    si = bui_find_object(ui, s, src, BUI_TYPE_TEXT);
+    di = bui_find_object(ui, s, dst, BUI_TYPE_TEXT);
+    if (si < 0 || di < 0 || !bui_object(ui, (uint32_t)si, &o)) return;
+
+    if (o.languageID && b->ui->hasLang)
+        n = langtab_copy(&b->ui->lang, (int32_t)o.languageID, text,
+                         sizeof(text));
+    if (n == 0) {
+        while (n + 1 < sizeof(text) && n < o.maxChars && o.string[n]) {
+            text[n] = o.string[n];
+            n++;
+        }
+        text[n] = 0;
+    }
+    bui_set_text_language(ui, (uint32_t)di, 0);
+    bui_set_text_string(ui, (uint32_t)di, text);
+}
+
+// FlailerTextChunk::ScaleAboutCenter (0x0013eb20). The scale is written
+// last; before it, X and Y are nudged by the half-extent the change costs,
+// so the glyphs grow out of the centre rather than off the anchor. Which
+// coordinate moves depends on the justification, and the untagged case --
+// no LEFT, CENTER or RIGHT bit -- moves neither.
+static void hookAnimScaleAboutCenter(void* user, uint32_t screen,
+                                     uint32_t object, float scale)
+{
+    Boot*     b  = (Boot*)user;
+    BUI*      ui = NULL;
+    BUIObject o;
+    float     w = 0.0f, h = 0.0f, halfW, halfH, x, y;
+    int32_t   idx = animFind(b, screen, object, BUI_TYPE_TEXT, &ui);
+
+    if (idx < 0 || !bui_object(ui, (uint32_t)idx, &o)) return;
+    if (o.scaleX == 0.0f || o.scaleY == 0.0f) return;
+    uirender_text_extent(b->ui, ui, (uint32_t)idx, &w, &h);
+    halfW = w / (o.scaleX + o.scaleX);
+    halfH = h / (o.scaleY + o.scaleY);
+    x = o.x;
+    y = o.y;
+
+    if (o.format & BUI_FMT_LEFT) {
+        y += halfH * (o.scaleY - scale);
+        x += halfW * (o.scaleX - scale);
+    } else if (o.format & BUI_FMT_CENTER) {
+        y += halfH * (o.scaleY - scale);
+    } else if (o.format & BUI_FMT_RIGHT) {
+        float d = o.scaleX - scale;
+        y += halfH * d;
+        x -= halfW * d;
+    }
+    bui_set_object_pos(ui, (uint32_t)idx, x, y);
+    bui_set_object_scale(ui, (uint32_t)idx, scale, scale);
+}
+
+static void hookAnimSetColor(void* user, uint32_t screen, uint32_t object,
+                             uint32_t color)
+{
+    BUI*    ui;
+    int32_t idx = animFind((Boot*)user, screen, object, BUI_TYPE_TEXT, &ui);
+    if (idx >= 0) bui_set_text_color(ui, (uint32_t)idx, color);
+}
+
+// FlailerGetScale (0x00142138) reads the authored pair back. A missing
+// object answers (1, 1): the highlight multiplies by it, and 0 would make
+// every bloom on a screen that has not loaded collapse to nothing.
+static void hookAnimGetScale(void* user, uint32_t screen, uint32_t object,
+                             float* sx, float* sy)
+{
+    BUI*      ui;
+    BUIObject o;
+    int32_t   idx = animFind((Boot*)user, screen, object, BUI_TYPE_NONE, &ui);
+    *sx = 1.0f;
+    *sy = 1.0f;
+    if (idx < 0 || !bui_object(ui, (uint32_t)idx, &o)) return;
+    *sx = o.scaleX;
+    *sy = o.scaleY;
+}
+
+// GetTranslatedString (0x0020b0e0). The caller copies out of this before
+// the next call, exactly as the original's shared buffer requires.
+static const char* hookAnimTranslate(void* user, int languageID)
+{
+    Boot*       b = (Boot*)user;
+    static char text[BBLURB_MAX_TEXT];
+    if (!b->ui->hasLang) return NULL;
+    if (langtab_copy(&b->ui->lang, (int32_t)languageID, text,
+                     sizeof(text)) == 0)
+        return NULL;
+    return text;
+}
+
 // FlailerScreenList::StartMovie. These are the panel movies that loop
 // behind the menu, blitted into the PANELMOVIE texture all three screens
 // share -- and not one of the three files is on the disc, so there is
@@ -644,6 +895,30 @@ int main(int argc, char** argv)
     scrHooks.displayOptionsStart = hookDisplayOptionsStart;
     scrHooks.startQuickRace      = hookStartQuickRace;
     bscr_init(&g_uiScreens, &g_flow, &scrHooks);
+
+    // And the animation layer the screens drive. bscr_set_anim_hooks keeps
+    // changeToScreen and trace for itself -- those two are free functions
+    // on a global in the original and belong to bscreens.c, not here.
+    BAnimHooks animHooks;
+    memset(&animHooks, 0, sizeof(animHooks));
+    animHooks.user             = &g_boot;
+    animHooks.objectExists     = hookAnimObjectExists;
+    animHooks.groupExists      = hookAnimGroupExists;
+    animHooks.objectType       = hookAnimObjectType;
+    animHooks.getTopLeft       = hookAnimGetTopLeft;
+    animHooks.setTopLeft       = hookAnimSetTopLeft;
+    animHooks.setGroupPos      = hookAnimSetGroupPos;
+    animHooks.setVisible       = hookAnimSetVisible;
+    animHooks.getAlpha         = hookAnimGetAlpha;
+    animHooks.setAlpha         = hookAnimSetAlpha;
+    animHooks.setLanguageID    = hookAnimSetLanguageID;
+    animHooks.printText        = hookAnimPrintText;
+    animHooks.copyText         = hookAnimCopyText;
+    animHooks.scaleAboutCenter = hookAnimScaleAboutCenter;
+    animHooks.setColor         = hookAnimSetColor;
+    animHooks.getScale         = hookAnimGetScale;
+    animHooks.translate        = hookAnimTranslate;
+    bscr_set_anim_hooks(&g_uiScreens, &animHooks);
 
     // main (0x0012da88): SkipFE ships as 0, so LoadLanguageInfo and then
     // ChangeGameFlow(LOADING_FRONTEND). MainLoop takes it from there.

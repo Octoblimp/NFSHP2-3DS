@@ -170,6 +170,26 @@ int32_t bui_find_object(const BUI* ui, const BUIScreen* screen,
 // The chunk payloads are pointers into the caller's buffer. Writing through
 // them is exactly what the engine does -- see bui.h -- so the const here is
 // about the reading API, not about the storage.
+// FindFlailerObjectByGroup (0x00141a50). The original takes the object to
+// resume after and returns the next one, which is how the group walks are
+// written; here that is an index, and -1 starts at the head. Same wildcard
+// rule as bui_find_object: type BUI_TYPE_NONE matches anything.
+int32_t bui_next_in_group(const BUI* ui, const BUIScreen* screen,
+                          uint32_t groupHash, int type, int32_t after)
+{
+    if (!screen) return -1;
+    for (uint32_t i = 0; i < screen->count; i++) {
+        uint32_t       idx = screen->first + i;
+        const uint8_t* p   = ui->objects[idx].payload;
+        if ((int32_t)idx <= after) continue;
+        if (ui->objects[idx].size < 56) continue;
+        if (bchunk_u32(p + 12) != groupHash) continue;
+        if (type != BUI_TYPE_NONE && (int8_t)p[16] != (int8_t)type) continue;
+        return (int32_t)idx;
+    }
+    return -1;
+}
+
 static uint8_t* writable(BUI* ui, uint32_t index, uint32_t need)
 {
     if (index >= ui->numObjects || ui->objects[index].size < need) return NULL;
@@ -215,6 +235,100 @@ bool bui_set_object_visible(BUI* ui, uint32_t index, int visibility)
     p[17] = (uint8_t)(int8_t)visibility;
     p[19] = 7;
     return true;
+}
+
+// GetAlpha__16FlailerTextChunk (0x0013ea80) is `lbu v0,71(a0)` and
+// GetAlpha__18FlailerBitmapChunki (0x0013efa8) is `lbu v0,67(a0+corner*4)`:
+// the alpha of a colour word is its top byte, and the only difference
+// between the two object types is which of the five words is meant. A text
+// object ignores `corner`, as FlailerObjectChunk::GetAlpha (0x0013e098)
+// does by passing 0. Returns -1 for an object that has no colour at all.
+int bui_get_object_alpha(const BUI* ui, uint32_t index, int corner)
+{
+    const uint8_t* p;
+    if (index >= ui->numObjects) return -1;
+    p = ui->objects[index].payload;
+    if ((int8_t)p[16] == BUI_TYPE_TEXT)
+        return ui->objects[index].size >= 76 ? p[71] : -1;
+    if ((int8_t)p[16] == BUI_TYPE_BITMAP) {
+        if (ui->objects[index].size < 120) return -1;
+        if (corner < 0 || corner > 3) corner = 0;
+        return p[67 + 4 * corner];
+    }
+    return -1;
+}
+
+// SetAlpha__16FlailerTextChunk (0x0013ea48) and
+// SetAlpha__18FlailerBitmapChunkii (0x0013ed50). Two differences worth
+// keeping: the text one skips the write when the alpha is already right
+// (and so leaves DirtyFlag alone) while the bitmap one always stamps it,
+// and a bitmap corner of -1 means all four. Both write DirtyFlag 6, not
+// the 7 SetColor uses -- 6 is "colours changed", 7 is "and the string".
+bool bui_set_object_alpha(BUI* ui, uint32_t index, int corner, int alpha)
+{
+    uint8_t* p;
+    uint32_t a = (uint32_t)(alpha & 0xff) << 24;
+
+    if (index >= ui->numObjects) return false;
+    p = (uint8_t*)ui->objects[index].payload;
+
+    if ((int8_t)p[16] == BUI_TYPE_TEXT) {
+        uint32_t cur, val;
+        if (ui->objects[index].size < 76) return false;
+        cur = bchunk_u32(p + 68);
+        val = (cur & 0x00ffffffu) | a;
+        if (val == cur) return true;
+        bchunk_put_u32(p + 68, val);
+        p[19] = 6;
+        return true;
+    }
+    if ((int8_t)p[16] == BUI_TYPE_BITMAP) {
+        int i, first, last;
+        if (ui->objects[index].size < 120) return false;
+        p[19] = 6;
+        first = corner < 0 ? 0 : corner;
+        last  = corner < 0 ? 3 : corner;
+        if (first > 3 || last > 3) return false;
+        for (i = first; i <= last; i++) {
+            uint32_t cur = bchunk_u32(p + 64 + 4 * i);
+            bchunk_put_u32(p + 64 + 4 * i, (cur & 0x00ffffffu) | a);
+        }
+        return true;
+    }
+    return false;
+}
+
+// The scale half of FlailerTextChunk::ScaleAboutCenter -- the position half
+// is the caller's, because only the renderer knows how wide the object is.
+// Same caveat about a writable buffer.
+bool bui_set_object_scale(BUI* ui, uint32_t index, float sx, float sy)
+{
+    uint8_t* p = writable(ui, index, 56);
+    if (!p) return false;
+    bchunk_put_f32(p + 32, sx);
+    bchunk_put_f32(p + 36, sy);
+    p[19] = 7;
+    return true;
+}
+
+// FlailerPrintf (0x00141ae8) with a bare "%s": replaces a text object's
+// inline string. On PS2 String is a heap block of MaxChars+1 and the
+// formatter writes straight into it; here the characters live inside the
+// chunk, so the room is whatever the chunk has after the 76-byte header --
+// which is MaxChars rounded up to 4, never less. Truncates rather than
+// overrun, and reports how much it kept.
+uint32_t bui_set_text_string(BUI* ui, uint32_t index, const char* s)
+{
+    uint8_t* p = writable(ui, index, 76);
+    uint32_t room, n = 0;
+    if (!p || (int8_t)p[16] != BUI_TYPE_TEXT) return 0;
+    room = ui->objects[index].size - 76;
+    if (room == 0) return 0;
+    if (!s) s = "";
+    while (n + 1 < room && s[n]) { p[76 + n] = (uint8_t)s[n]; n++; }
+    p[76 + n] = 0;
+    p[19] = 7;
+    return n;
 }
 
 void bui_color(uint32_t rgba, uint8_t out[4])

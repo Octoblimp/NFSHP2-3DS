@@ -162,9 +162,26 @@ def split_members(body):
 # field under "methods" and dropped it from the dump. RaceParameters lost
 # PlayerStartPosition and sObjective that way, both of which StartQuickRace
 # writes. Method entries are not at risk: they all use "::".
+# A member of a class rather than a struct also carries a visibility digit
+# ahead of its type -- /0 private, /1 protected, /2 public -- so
+# "ScreenHash:/01,64,32" is private, of type 1, at bit 64. 3,159 entries in
+# this .mdebug have one, and requiring a bare type number filed every one of
+# them under methods: AnimationGroup and tHighlightAnimation came out with no
+# data members at all, which is how a 76-byte class looked empty.
 FIELD_RE = re.compile(
-    r"^([A-Za-z_~][A-Za-z0-9_~]*):(\d+)(?:=.*)?,(\d+),(\d+)$", re.DOTALL
+    r"^([A-Za-z_~][A-Za-z0-9_~]*):(?:/([0-9]))?(\d+)(?:=.*)?,(\d+),(\d+)$",
+    re.DOTALL,
 )
+
+# A static data member has no offset or size -- it is a global, and the entry
+# ends in its linker symbol instead: "HighlightAnimationTime:/014:_19t...".
+# Worth keeping separate from the layout: these are the tuning constants.
+STATIC_RE = re.compile(
+    r"^([A-Za-z_~][A-Za-z0-9_~]*):(?:/([0-9]))?(\d+)(?:=.*)?:([A-Za-z_$][A-Za-z0-9_$.]*)$",
+    re.DOTALL,
+)
+
+VISIBILITY = {"0": "private", "1": "protected", "2": "public"}
 STRUCT_DEF_RE = re.compile(
     r"^([A-Za-z_~][A-Za-z0-9_~<>, ]*):(T?t?)(\d+)=([su])(\d+)(.*)$", re.DOTALL
 )
@@ -178,25 +195,38 @@ def decode_struct(name, text):
     tagname, descr, typenum, kind, size, body = m.groups()
     entries = split_members(body)
     fields = []
+    statics = []
     methods = []
     for entry in entries:
         fm = FIELD_RE.match(entry)
         if fm:
-            fname, ftype, foff, fsize = fm.groups()
-            fields.append((fname, int(ftype), int(foff), int(fsize)))
-        else:
-            methods.append(entry)
+            fname, vis, ftype, foff, fsize = fm.groups()
+            fields.append((fname, int(ftype), int(foff), int(fsize), vis))
+            continue
+        sm = STATIC_RE.match(entry)
+        if sm:
+            sname, vis, stype, sym = sm.groups()
+            statics.append((sname, int(stype), sym, vis))
+            continue
+        methods.append(entry)
     return dict(
         name=tagname, typenum=int(typenum), kind="struct/class" if kind == "s" else "union",
-        size=int(size), fields=fields, methods=methods,
+        size=int(size), fields=fields, statics=statics, methods=methods,
     )
 
 
 def format_struct(d):
     lines = []
     lines.append("%s %s (size=%d bytes) [type#%d]" % (d["kind"], d["name"], d["size"], d["typenum"]))
-    for fname, ftype, foff, fsize in d["fields"]:
-        lines.append("    %-28s type#%-6d offset=%-5d bits=%d" % (fname, ftype, foff, fsize))
+    for fname, ftype, foff, fsize, vis in d["fields"]:
+        lines.append(("    %-28s type#%-6d offset=%-5d bits=%-5d %s"
+                      % (fname, ftype, foff, fsize,
+                         VISIBILITY.get(vis, ""))).rstrip())
+    if d.get("statics"):
+        lines.append("    -- %d static members --" % len(d["statics"]))
+        for sname, stype, sym, vis in d["statics"]:
+            lines.append("    %-28s type#%-6d static %-8s %s"
+                         % (sname, stype, VISIBILITY.get(vis, ""), sym))
     if d["methods"]:
         lines.append("    -- %d method entries (raw, not decoded) --" % len(d["methods"]))
         for meth in d["methods"]:

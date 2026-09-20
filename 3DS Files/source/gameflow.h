@@ -212,6 +212,11 @@ struct BGameFlow {
     // Timer::SetTime(float) (0x00134ef0) is (int)(f * 4000.0f).
     uint32_t realTime;
     uint32_t realTimer;
+    // RealTimeElapsed (0x00323cdc), the frame's own delta in seconds. It is
+    // a separate global from RealTimer because the spline integrator wants
+    // the delta and everything else wants the running total; banim.c reads
+    // both through banim_set_clock rather than starting a second clock.
+    float    realElapsed;
     uint32_t frameCounter;
     float    accum;
     uint32_t beginScreenFadeTime;
