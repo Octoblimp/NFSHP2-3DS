@@ -28,6 +28,7 @@ constant arguments.
 Usage:
     python tools/screen_registry.py                 # the table
     python tools/screen_registry.py --json out.json
+    python tools/screen_registry.py --check-port    # against the 3DS port
 """
 import argparse
 import json
@@ -212,10 +213,134 @@ class Resolver:
         return None
 
 
+
+# ---------------------------------------------------------------------------
+# The port
+# ---------------------------------------------------------------------------
+#
+# `kScreens[]` in the port's main.c is this table, hand-written: one row per
+# screen the flow can be asked to change to, joining the name the flow code
+# uses to the hash of the Flailer screen chunk. Two things can go wrong with
+# a hand-written copy, and neither shows up until someone walks the frontend
+# on the emulator:
+#
+#   * a hash that disagrees with the ELF -- the screen is registered under
+#     the right name and draws the wrong chunk, or none;
+#   * a name the port's own code passes to bgf_change_to_screen() and the
+#     table does not carry. ChangeToScreen clears pCurrent before it looks
+#     the name up, so the flow ends with no screen at all: a black top
+#     screen until BACK, and one line of trace.
+#
+# This finds both. Names the port can reach are taken as every string
+# literal anywhere in its sources that the ELF registry also knows -- the
+# flow's own ChangeToScreen calls, the Mode Selects' item tables and the
+# Options pages all spell the name out, so a literal that matches a
+# registered screen name is a name the port can arrive at.
+
+DEFAULT_SOURCE = os.path.join(HERE, os.pardir, "3DS Files", "source")
+
+# { "Name", HASH_OR_DEFINE, callback },  -- across line breaks
+PORT_ROW = re.compile(r'\{\s*"([^"]+)"\s*,\s*([A-Za-z0-9_]+)\s*,'
+                      r'\s*([A-Za-z0-9_]+)\s*\}')
+PORT_DEFINE = re.compile(r'#define\s+([A-Z0-9_]+)\s+(0x[0-9a-fA-F]+)u?')
+LITERAL = re.compile(r'"([^"\\]{3,40})"')
+
+
+def read_sources(src):
+    text = {}
+    for name in sorted(os.listdir(src)):
+        if name.endswith((".c", ".h")):
+            with open(os.path.join(src, name), "r", errors="replace") as f:
+                text[name] = f.read()
+    return text
+
+
+def check_port(rows, src):
+    if not os.path.isdir(src):
+        print(f"\nno port sources at {src}", file=sys.stderr)
+        return 2
+    text = read_sources(src)
+    defines = {}
+    for body in text.values():
+        for name, val in PORT_DEFINE.findall(body):
+            defines[name] = int(val, 16)
+
+    main_c = text.get("main.c", "")
+    start = main_c.find("kScreens[] = {")
+    end = main_c.find("\n};", start) if start >= 0 else -1
+    if end < 0:
+        print("\nno kScreens[] in main.c", file=sys.stderr)
+        return 2
+    # Rows carry a trailing comment naming the ELF class, and it sits
+    # between two of the fields the row regex wants next to each other.
+    block = re.sub(r"//[^\n]*", "", main_c[start:end])
+
+    port = []
+    for name, hash_tok, cb in PORT_ROW.findall(block):
+        if hash_tok.startswith("0x"):
+            value = int(hash_tok.rstrip("uU"), 16)
+        elif hash_tok in defines:
+            value = defines[hash_tok]
+        else:
+            value = None
+        port.append((name, hash_tok, value, cb))
+
+    # name -> the hashes the ELF registers it with
+    elf = {}
+    for r in rows:
+        elf.setdefault(r["name"], []).append(
+            [s["hash"] for s in r["screens"]])
+    elf = {n: sorted({h for hs in v for h in hs}) for n, v in elf.items()}
+
+    bad = 0
+    print("\n--- the port's kScreens[] against the ELF ---")
+    w = max(len(n) for n, _, _, _ in port)
+    for name, tok, value, cb in port:
+        want = elf.get(name)
+        if want is None:
+            print(f"  {name:{w}s}  NOT A REGISTERED SCREEN NAME ON THE DISC")
+            bad += 1
+        elif value is None:
+            print(f"  {name:{w}s}  cannot resolve {tok}")
+            bad += 1
+        elif value not in want:
+            print(f"  {name:{w}s}  {value:08x} but the ELF says "
+                  + " ".join(f"{h:08x}" for h in want))
+            bad += 1
+        else:
+            kind = "plain" if cb.endswith("plain_screen_callback") else "ported"
+            print(f"  {name:{w}s}  {value:08x}  ok, {kind}")
+
+    # Everything the port names anywhere that the disc registers as a screen.
+    named = set()
+    for body in text.values():
+        for lit in LITERAL.findall(body):
+            if lit in elf:
+                named.add(lit)
+    missing = sorted(named - {n for n, _, _, _ in port})
+    print(f"\n--- names the port can reach and does not register: "
+          f"{len(missing)} ---")
+    for name in missing:
+        hs = " ".join(f"{h:08x}" for h in elf[name])
+        print(f"  {name:{w}s}  {hs}")
+
+    print(f"\n{len(port)} registered, {len(elf) - len(port)} of the disc's "
+          f"{len(elf)} screens still to go")
+    if bad:
+        print(f"{bad} rows disagree with the ELF")
+    return 1 if (bad or missing) else 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--elf", default=DEFAULT_ELF)
     ap.add_argument("--json")
+    ap.add_argument("--check-port", action="store_true",
+                    help="diff the port's kScreens[] against this registry "
+                         "and list every name the port can reach and has "
+                         "not registered")
+    ap.add_argument("--source", default=DEFAULT_SOURCE,
+                    help="the port's source directory")
     args = ap.parse_args()
 
     elf = Elf(args.elf)
@@ -301,6 +426,9 @@ def main():
             print(f"{nm:{w1}s}  {s['hash']:08x} {s['port']:4d}  {cb}")
     print(f"\n{len(rows)} screen configs, "
           f"{sum(len(r['screens']) for r in rows)} flailer screens")
+
+    if args.check_port:
+        sys.exit(check_port(rows, args.source))
 
 
 if __name__ == "__main__":

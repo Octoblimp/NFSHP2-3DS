@@ -2747,3 +2747,61 @@ shots with the zoom-creep test still passing at 0.015/255. The first pass of
 the panel also said the numbers were "in nfshp2_debug.txt"; FONT_A has no
 underscore, the glyph was dropped, and the screen confidently named a file
 that does not exist. It says "the debug log on the SD card" now.
+
+### Ten screens that were not there
+
+**33, `ChallengeBeACop` is unregistered.** It was, and so were nine others.
+The interesting part is not the missing rows, it is what a missing row
+costs. `ChangeToScreen` (`0x00167850`) unactivates the old screen and clears
+`pCurrent` *before* it looks the new name up, so a name with no registry row
+does not leave the player where they were -- it leaves the list with no
+current screen at all. On the port that is a black top screen, one line of
+trace, and BACK as the only way out. An unported screen is cheap; an
+unregistered name is a dead end.
+
+So the whole set got gathered at once instead of one at a time on the
+emulator. Ten names the port's own C can pass to `bgf_change_to_screen` had
+no row: `Challenge`, `ChallengeBeACop` and `View Event Tree` off the two
+Mode Selects, and the seven Options pages. All ten are registered now to
+`bgf_plain_screen_callback`, which is an empty function -- the chunk draws,
+`bmenu` moves the highlight, BACK works, A does nothing -- and every one of
+their chunks was already in `FRONTB.BUN`, so the CIA did not grow and the
+texture count went from 20 to 22.
+
+Two of the rows share a screen with a row that already existed, which is the
+ELF's doing rather than a shortcut: `Language Options` is the same chunk and
+the same class as `Language Options Pre FE` under a second name, and
+`NameEntry` draws the same chunk as `Username Options`.
+
+`tools/screen_registry.py --check-port` is the standing check, and it exists
+because a hand-written table of hashes is exactly the kind of thing that
+goes quietly wrong. It reads `FlailerScreenConfigList` out of the ELF and
+`kScreens[]` out of `main.c` and prints two lists: rows whose hash disagrees
+with the ELF, and screen names a source file mentions that the table does
+not carry. The second list is the useful one -- the Mode Selects' item
+tables and the Options pages spell their destinations out as literals, so a
+literal naming a registered screen is a name the player can reach. Both
+lists are empty: 18 of 62 registered, 44 to go.
+
+Looked at, not just diffed: `run_azahar_test.ps1` PASS, 14 shots, 22
+textures cached, 0 missing, 0 fonts missing, and the new `beacop` shot is
+"You're The Cop" with Players / Skill Level / Setup drawn where a black
+screen used to be. The panel underneath said nothing at all on the first
+pass, because it takes its line from `SCROLLING_TEXT` and a plain screen has
+no blurb -- an empty panel under a screen name reads as a bug, so there is a
+fixed line for plain screens now saying the class behind it is not ported
+and B is the way out. Written without an apostrophe, on the same grounds as
+last session's underscore.
+
+One thing the run caught that is worth remembering: the first attempt came
+back PARTIAL because a single A press at the main menu never registered, and
+the harness walked on to the wrong item. Re-running was clean. The harness
+drives Azahar by synthesised keystrokes and it can drop one; a PARTIAL is
+worth repeating before it is worth debugging.
+
+Two stale comments went with it. `gameflow.c` said `Challenge`,
+`ChallengeBeACop` and the Options pages were unregistered, which is what
+this task changed, and it also said `View Event Tree` "is in no screen
+config" -- it is (`tEventTreeView`, `0x147f8a59`); what is true is that
+nothing pushes it as a boot stage, so the `SelectedEventData` branch in
+`LaunchFrontendMenus` is dead for that reason and not the one written down.

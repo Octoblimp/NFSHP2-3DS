@@ -522,3 +522,54 @@ group hash the brackets live in:
 screen) and `0x1042eac3` are still unnamed. Neither resisted for want of
 trying: a 4,185-word list and an exhaustive sweep of every name up to four
 characters both came back empty.
+
+## Every name the frontend can reach
+
+`ChangeToScreen` (`0x00167850`) clears `pCurrent` *before* it looks the name
+up, so a name with no registry row does not leave the player where they
+were: it leaves the list with no current screen at all. On the port that is
+a black top screen and one line of trace, `flow unregistered <name>`, and
+the only way out is BACK. A name that is merely unported is therefore much
+worse than a screen that does nothing, and the fix is not to port the class
+-- it is to register the name.
+
+Ten names the port's own C can pass to `bgf_change_to_screen` had no row.
+They are registered now, to `bgf_plain_screen_callback`, which is an empty
+function: the screen draws, `bmenu` moves the highlight, BACK works, and A
+does nothing. Every one of their chunks is already in `FRONTB.BUN`, so
+nothing new is loaded.
+
+| name | hash | the ELF's class | reached from |
+|------|------|-----------------|--------------|
+| `Challenge` | `0x2d62cfe2` | `ChallengeScreenCallback` | both Mode Selects, `bscreens.c:337`, `:348` |
+| `ChallengeBeACop` | `0xe55f1297` | `BeACopChallengeSetup` | Cops On Mode Select, `bscreens.c:336` |
+| `View Event Tree` | `0x147f8a59` | `tEventTreeView` | both Mode Selects, `bscreens.c:339`, `:350` |
+| `Audio Options` | `0xe116761c` | `AudioOptionsScreen` | Options, `bscreens.c:555` |
+| `Joystick PreConfig` | `0x8bd5060b` | `JoystickPreConfig` | Options, `bscreens.c:556` |
+| `Display Options` | `0x8bc68340` | `tDisplayOptionsScreen` | Options, `bscreens.c:557` |
+| `Phils Load Save` | `0x9829bfab` | `LoadSaveWrapper` | Options, `bscreens.c:558` |
+| `NameEntry` | `0x617a4e0a` | `NameEntry` | Options, `bscreens.c:559` |
+| `Credits` | `0xfd8a3b6d` | `CreditsScreen` | Options, `bscreens.c:560` |
+| `Language Options` | `0x632b068e` | `LanguageOptionsScreenBase` | Options, `bscreens.c:561` |
+
+Two of those rows share a screen with a row that was already registered, and
+both pairs are in the ELF, not invented here: `Language Options` is the same
+chunk and the same class as `Language Options Pre FE`, entered under a
+second name once the frontend is up, and `NameEntry` draws the same chunk as
+`Username Options`.
+
+`python tools/screen_registry.py --check-port` is the standing check. It
+reads `FlailerScreenConfigList` out of the ELF and `kScreens[]` out of
+`main.c`, and prints two lists: every port row whose hash disagrees with the
+ELF, and every screen name that appears as a string literal anywhere in the
+port's sources and has no row. The second list is the one that matters --
+the Mode Selects' item tables and the Options pages spell their
+destinations out, so a literal that names a registered screen is a name the
+player can arrive at. Both lists are empty as of this work, against 62
+configs of which 18 are registered.
+
+A registered-but-unported screen says so. `main.c` draws
+`kPlainScreenNote` on the bottom panel whenever the current screen's
+callback is `bgf_plain_screen_callback`, because the panel takes its line
+from `SCROLLING_TEXT` and these screens have no blurb, so it would otherwise
+sit empty under the screen's name and read as a bug.

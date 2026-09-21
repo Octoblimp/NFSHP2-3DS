@@ -62,11 +62,10 @@ hours.
 three of them are uncatchable because the disc's velocity record is
 structurally zero. See `docs/formats/camera.md`.
 
-Open tasks: **9** (24-31, plus 33). Of the four the user asked for
-mid-session, 32 (stretch the frontend to the 3DS's 5:3 top screen), 34 (the
-menu description on the bottom screen, wrapped) and 35 (no console sharing
-that screen) are done and looked at on Azahar; 33 (`ChallengeBeACop`
-unregistered) is not.
+Open tasks: **8** (24-31). All four the user asked for mid-session are
+done and looked at on Azahar: 32 (stretch the frontend to the 3DS's 5:3 top
+screen), 33 (the ten unregistered screen names), 34 (the menu description on
+the bottom screen, wrapped) and 35 (no console sharing that screen).
 
 The bottom screen is a citro2d target now, not a console. Everything the
 console used to show is in `sdmc:/nfshp2_debug.txt`, which is opened `"w"`
@@ -80,15 +79,13 @@ and so replaced every boot.
 2. Then in order: 25 car sim, 26 race/cop AI, 27 track
    render/stream/collision, 28 New3DS perf, 29 save/options/sound mix,
    30 split-screen scope, 31 final CIA + Old3DS/New3DS pass.
-3. **Task 33**, the one still open of the four the user asked for:
-   `ChallengeBeACop` reaches the flow and finds no registered screen. The
-   survey is half done -- the names that resolve and then find nothing are
-   `Challenge`, `ChallengeBeACop` and `View Event Tree` (both Mode Selects,
-   `bscreens.c:334`) and the seven Options pages (`Audio Options`,
-   `Joystick PreConfig`, `Display Options`, `Phils Load Save`, `NameEntry`,
-   `Credits`, `Language Options`, `bscreens.c:554`). Registering one means
-   finding which authored BUI screen it is: `kScreens[]` maps a flow name
-   to a *screen* hash and those are cracked names, not the flow's strings.
+3. Whenever a screen class gets ported, take its row in `kScreens[]` off
+   `bgf_plain_screen_callback`. Ten of the eighteen are on it -- they draw
+   and answer the D-pad and nothing else -- and
+   `python tools/screen_registry.py --check-port` lists them, along with
+   anything new the port can reach and has not registered. Run it after any
+   change to `kScreens[]`: a hash typed by hand is not checked by anything
+   else, and a name with no row is a black top screen, not a no-op.
 
 **Phase 4 constraint, from the user:** the gameplay HUD is to be designed for
 **two screens from the start** -- some readouts on the bottom screen rather
@@ -100,6 +97,11 @@ Phase 4 in `TASKS.md` too.
 
 Ordered roughly by how much time it costs to rediscover.
 
+* **A PARTIAL from `run_azahar_test.ps1` is worth re-running before it is
+  worth debugging.** The harness drives Azahar with synthesised keystrokes
+  and it can drop one; a dropped A at the main menu walks the rest of the
+  script down the wrong branch and the verdict blames the wrong thing. The
+  same build went PARTIAL then PASS with nothing changed in between.
 * **The Bash tool eats one level of backslash inside a heredoc.** A patch
   script whose replacement string contains a C escape gets a real newline
   instead, the pattern stops matching, and the script cheerfully prints

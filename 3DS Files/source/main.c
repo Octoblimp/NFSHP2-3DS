@@ -112,6 +112,43 @@ static const BScreenConfig kScreens[] = {
       bscr_cops_off_callback },
     { "Options",                 BSCR_SCREEN_OPTIONS,
       bscr_options_callback },
+
+    // Registered, drawn, and not ported. Every name below is one the port's
+    // own code can ChangeToScreen() to -- the two Mode Selects' item tables
+    // and the seven Options pages, bscreens.c:334 and :554 -- and every one
+    // of their screen chunks is in FRONTB.BUN, which is already loaded. An
+    // unregistered name is worse than a dead one: ChangeToScreen clears
+    // pCurrent before it looks the name up, so the flow ends with no screen
+    // at all and the top screen goes black until BACK. That is what "flow
+    // unregistered ChallengeBeACop" looked like.
+    //
+    // So they draw, the menu is navigable and BACK works, and A does
+    // nothing because the class named in each comment -- the one the ELF's
+    // own FlailerScreenConfigList points at -- is still to be written. The
+    // hashes are the ELF's; `python tools/screen_registry.py --check-port`
+    // checks every row of this table against it and lists what is left.
+    { "Challenge",               0x2d62cfe2u,   // ChallengeScreenCallback
+      bgf_plain_screen_callback },
+    { "ChallengeBeACop",         0xe55f1297u,   // BeACopChallengeSetup
+      bgf_plain_screen_callback },
+    { "View Event Tree",         0x147f8a59u,   // tEventTreeView
+      bgf_plain_screen_callback },
+    { "Audio Options",           0xe116761cu,   // AudioOptionsScreen
+      bgf_plain_screen_callback },
+    { "Joystick PreConfig",      0x8bd5060bu,   // JoystickPreConfig
+      bgf_plain_screen_callback },
+    { "Display Options",         0x8bc68340u,   // tDisplayOptionsScreen
+      bgf_plain_screen_callback },
+    { "Phils Load Save",         0x9829bfabu,   // LoadSaveWrapper
+      bgf_plain_screen_callback },
+    { "NameEntry",               0x617a4e0au,   // NameEntry
+      bgf_plain_screen_callback },
+    { "Credits",                 0xfd8a3b6du,   // CreditsScreen
+      bgf_plain_screen_callback },
+    // Same Flailer screen as "Language Options Pre FE" above, entered under
+    // a second name from the Options menu. The ELF registers both.
+    { "Language Options",        0x632b068eu,   // LanguageOptionsScreenBase
+      bgf_plain_screen_callback },
 };
 #define NUM_SCREENS ((int)(sizeof(kScreens) / sizeof(kScreens[0])))
 
@@ -968,6 +1005,14 @@ static float g_blurbFade = 1.0f;
 // it. Drawing that would be drawing a note to the artist.
 static const char kBlurbPlaceholder[] = "This text will scroll sideways";
 
+// A screen registered to bgf_plain_screen_callback draws and answers the
+// D-pad and nothing else, and it has no blurb object, so the panel would
+// sit empty under its name and look like a bug. It says what it is instead.
+// No apostrophe: FONT_A drops a glyph it has not got, silently.
+static const char kPlainScreenNote[] =
+    "This screen is drawn from the disc. The class behind it is not ported "
+    "yet, so the highlight moves and B is the way out.";
+
 // The line the top screen would be drawing this frame. It is read out of
 // the object rather than remembered from the setBlurb hook because the hook
 // is not the only thing that writes it: tAnimatedBlurb resolves the
@@ -1396,10 +1441,18 @@ int main(int argc, char** argv)
             C2D_TargetClear(g_bot, BOT_BACK);
             C2D_SceneBegin(g_bot);
             {
-                char title[48];
+                char        title[48];
+                const char* body = g_blurbShown;
+                float       fade = g_blurbFade;
+
                 botTitle(title, sizeof title,
                          g_flow.screen ? g_flow.screen->name : "");
-                drawBotPanel(&ui, title, g_blurbShown, g_blurbFade,
+                if (g_flow.screen
+                    && g_flow.screen->callback == bgf_plain_screen_callback) {
+                    body = kPlainScreenNote;
+                    fade = 1.0f;
+                }
+                drawBotPanel(&ui, title, body, fade,
                              "A select   B back   START go   SELECT viewer");
             }
             C3D_FrameEnd(0);

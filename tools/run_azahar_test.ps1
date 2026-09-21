@@ -206,6 +206,23 @@ if ($booted) {
             [Hp2Cap]::PressKey($hwnd, $VK_G)
             Start-Sleep -Milliseconds 500
             Shot "copson-down2"
+
+            # MENUITEM_2, "You're The Cop", is ChallengeBeACop -- registered
+            # but not ported, so what this checks is that the flow lands on
+            # a screen at all. Unregistered, ChangeToScreen clears pCurrent
+            # and the top screen goes black until BACK.
+            [Hp2Cap]::PressKey($hwnd, $VK_T)  # D-pad up, back to item 2
+            Start-Sleep -Milliseconds 500
+            [Hp2Cap]::PressKey($hwnd, $VK_A)  # A, select
+            if (Wait-ForLog "flow enter ChallengeBeACop" 10) {
+                Start-Sleep -Milliseconds 1200
+                Shot "beacop"
+                [Hp2Cap]::PressKey($hwnd, $VK_S)  # B, back to Mode Select
+                Start-Sleep -Milliseconds 900
+            } else {
+                Shot "beacop-missing"
+            }
+
             [Hp2Cap]::PressKey($hwnd, $VK_S)  # B, back to the main menu
             Start-Sleep -Milliseconds 900
             Shot "back-to-menu"

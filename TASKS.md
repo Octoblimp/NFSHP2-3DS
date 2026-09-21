@@ -907,15 +907,34 @@ phases.
         authored, so nothing downstream had to change. The movie plane is a
         bitmap object like any other and comes along with it. Milestone test
         re-run: PASS, 13 screenshots, the menu art runs edge to edge.
-33. [ ] `ChallengeBeACop` is unregistered. It is in the blurb table
-        (`bscreens.c:336`, blurb 10014, `BMODE_BE_A_COP`) and the flow
-        changes to it -- the Azahar log shows `flow change ChallengeBeACop 1`
-        followed by `flow unregistered ChallengeBeACop` -- so the screen name
-        resolves but no screen class is registered for it, which leaves the
-        flow with no current screen. Same shape as the `Options` gap noted
-        under the main menu work in Phase 2; the list of names that get this
-        far and then find nothing should be gathered in one place rather
-        than found one at a time on the emulator.
+33. [x] `ChallengeBeACop` is unregistered, and the nine others with it.
+        It is in the blurb table (`bscreens.c:336`, blurb 10014,
+        `BMODE_BE_A_COP`) and the flow changed to it -- the Azahar log
+        showed `flow change ChallengeBeACop 1` followed by
+        `flow unregistered ChallengeBeACop` -- so the name resolved and no
+        screen was registered for it. That is worse than a screen that does
+        nothing: `ChangeToScreen` (`0x00167850`) clears `pCurrent` before it
+        looks the name up, so the flow is left with no current screen at
+        all, and the top screen goes black until BACK.
+        The whole set is gathered now rather than found one at a time on the
+        emulator. Ten names the port's own C can reach had no row --
+        `Challenge`, `ChallengeBeACop` and `View Event Tree` from the two
+        Mode Selects, and the seven Options pages (`Audio Options`,
+        `Joystick PreConfig`, `Display Options`, `Phils Load Save`,
+        `NameEntry`, `Credits`, `Language Options`) -- and all ten are in
+        `kScreens[]` now on `bgf_plain_screen_callback`, an empty function:
+        the screen draws, the highlight moves, BACK works, A does nothing.
+        Their chunks were already in `FRONTB.BUN`, so nothing new is loaded,
+        and the bottom panel says what they are (`kPlainScreenNote`) instead
+        of sitting empty, since a plain screen has no blurb.
+        `python tools/screen_registry.py --check-port` is the standing
+        check: it diffs `kScreens[]` against the ELF's
+        `FlailerScreenConfigList` row by row and lists every screen name a
+        source file mentions and the table does not carry. Both lists are
+        empty; 18 of the disc's 62 configs are registered. Milestone test
+        re-run: PASS, 14 screenshots, 22 textures cached, 0 missing, and
+        `beacop` shows "You're The Cop" drawn instead of a black screen.
+        Survey table in `docs/formats/frontend-screens.md`.
 34. [x] Move the menu description to the bottom screen. The blurb --
         `SCROLLING_TEXT`, driven by `tAnimatedBlurb` -- is about ten pixels
         tall in the disc's 480-line frame, which is five on the 3DS top
