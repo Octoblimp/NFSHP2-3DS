@@ -1,6 +1,6 @@
 # CONTINUE
 
-Where the next session picks up. Written at the end of Session 19
+Where the next session picks up. Written at the end of Session 20
 (2026-09-21). `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
@@ -16,10 +16,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Fourteen cross-checkers pass, plus the table generators:
+Eighteen cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
 ```
 
 ```
@@ -38,6 +38,10 @@ emath_check         9 scenarios,  2416 lines, 0 differ   (39/39 mutations caught
 camera_check        7 scenarios,  1200 lines, 0 differ   (40 caught, 7 equivalent)
 trackroute_check   10 scenarios,   671 lines, 0 differ   (52 caught, 1 equivalent)
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
+engine_check        8 scenarios,   413 lines, 0 differ   (54 caught, 2 equivalent)
+cartypeinfo_check   4 scenarios,   177 lines, 0 differ   (41/41 mutations caught)
+cardriver_check     5 scenarios,   118 lines, 0 differ   (48/48 mutations caught)
+steering_check      5 scenarios,   873 lines, 0 differ   (43 caught, 1 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 ```
@@ -79,13 +83,42 @@ and so replaced every boot.
 
 ## Next, in order
 
-1. **Task 25**, the car simulation -- part done. `CarState.obj` is
-   closed (`carstate.{c,h}`, `carstate_check.py`,
-   `docs/formats/car-state.md`). Still to port: `Car` (2016 B),
-   `PhysicsCar` (116 B), `Suspension` (176 B), `Wheel` (400 B),
-   `Engine` (92 B), `CarDriver` (560 B) and the rest of `CarTypeInfo`
-   (1376 B -- only the `CenterOfGravity` + `WheelInfo[4]` prefix that
-   CarState reads is decoded so far). The HUD split is settled, below.
+1. **Task 25**, the car simulation -- part done, and **much bigger than
+   the task list said**. Five slices are closed: `CarState`, `Engine` +
+   `Table`, `CarTypeInfo`, `CarDriver` + `DriveTarget`'s layout, and
+   `Steering` + `TwoWheelAckermanSteering`, each with a checker and a
+   doc under `docs/formats/car-*.md`.
+
+   The old "178 functions, 16680 bytes" note was wrong by an order of
+   magnitude -- it matched a narrow symbol pattern and missed most
+   methods. Remeasured by demangling every symbol to its owning class,
+   **~67.0 KB across ~355 functions** is still to go:
+
+   ```
+   Car 80 funcs 22876 B   DriveTarget (methods) 28 / 8636
+   PhysicsCar 16 / 8496   Wheel 73 / 7112
+   Mellovator 31 / 5420   DriveTrain 38 / 4920
+   RigidBody 47 / 4508    MellowMover 13 / 3096
+   Suspension 29 / 1944
+   ```
+
+   At this repo's verification standard that is several sessions, not
+   one. **`RigidBody` and `DriveTarget` are prerequisites the task list
+   never named** -- `Suspension`, `PhysicsCar` and `Car` all need
+   `RigidBody`. Next in order: `RigidBody`, `Suspension`, `Wheel`,
+   `DriveTrain`, `DriveTarget`'s 28 methods, `PhysicsCar`, `Car`, with
+   `Mellovator` and `MellowMover` last.
+
+   `Suspension` is already partly decoded and not yet written down in
+   code -- layout `SI 12, pSwayBar 16, State{z 20, v 24}, Force 28,
+   Position 32, Matrix 48, TouchingGround 112, MagicForce 116, RestLoad
+   120, RestPosition 128, pWheel 144, pBody 148, pSteering 152,
+   WheelPosition 156, GroundForce 160`, size 176; ctor at `0x0019bc58`.
+   `GetDamping` returns `SI->Damping[1]` when `State.v <= 0` and `[0]`
+   otherwise. `Calibrate(f)` sets `RestLoad = f` and
+   `RestPosition = *(pWheel+12) - *(pBody+352)`.
+
+   The HUD split is settled, below.
 2. Then in order: 26 race/cop AI, 27 track render/stream/collision,
    28 New3DS perf, 29 save/options/sound mix, 30 split-screen scope,
    31 final CIA + Old3DS/New3DS pass.
@@ -190,6 +223,23 @@ Ordered roughly by how much time it costs to rediscover.
   of `bsnd_check.py`'s survived because they were equivalent mutants -- a
   quadrant boundary where both arms compute the same number, and a float that
   rounds identically in double. Work out which before adding scenarios.
+
+  There is a third answer besides "hole" and "equivalent": **the mutation
+  itself was badly written.** `(uint16_t)(int16_t)x` on a `uint16_t` field
+  is a no-op by C's own rules and could never be caught; a mutation that
+  fails to compile because it used `memset` without `<string.h>` was
+  rejected by the compiler rather than by the transcript. Both were
+  rewritten into the transcription errors they were standing in for.
+* **An array's extent is part of the layout claim, and offsets do not pin
+  it.** Shrink an array, pad behind it, and every following offset *and*
+  the total size are unchanged -- the static assert passes. Nine
+  CarTypeInfo mutations and one Steering mutation exploited exactly that.
+  Print `sizeof` of each array, the element stride, and a width and
+  signedness probe per field.
+* **The vtable pointer is at the END of the object in this image.** Old
+  g++ ABI. `CarState` has none, `CarDriver`'s is at 556, `Steering`'s at
+  8, and every class still to come in task 25 is the same. Looking for it
+  at offset 0 will shift every field by four.
 
 * **The emulator harnesses are slow and flaky for a reason that is ours.**
   Once the boot flow's idle timer expires, `bgf_consider_start_demo_mode()`

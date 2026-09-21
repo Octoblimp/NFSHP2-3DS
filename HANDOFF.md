@@ -3002,3 +3002,90 @@ rewritten to actually give the brake matrix the spin.
 
 Task 25 is **not** finished: `Car`, `PhysicsCar`, `Suspension`, `Wheel`,
 `Engine`, `CarDriver` and the bulk of `CarTypeInfo` are still to port.
+
+---
+
+## Session 20 (2026-09-21) -- Task 25, four more slices of the car sim
+
+Ported, each with its own model, transcript, mutation pass and format doc:
+
+| Slice | Commit | Transcript | Mutations |
+|-------|--------|-----------|-----------|
+| `Engine.obj` + `Table` | `457967f` | 8 scen, 413 lines, 0 differ | 56, 54 caught, 2 equiv |
+| `CarTypeInfo.obj` | `2608924` | 4 scen, 177 lines, 0 differ | 41, 41 caught |
+| `CarDriver.obj` + `DriveTarget` layout | `85a27f8` | 5 scen, 118 lines, 0 differ | 48, 48 caught |
+| `Steering.obj` + `TwoWheelAckermanSteering.obj` | `c165c01` | 5 scen, 873 lines, 0 differ | 44, 43 caught, 1 equiv |
+
+`docs/formats/car-engine.md`, `car-type-info.md`, `car-driver.md` and
+`car-steering.md`.
+
+### The scope of task 25 was wrong by an order of magnitude
+
+An earlier note in `TASKS.md` put the remainder at "178 functions, 16680
+bytes". That tally matched only a narrow symbol pattern and missed most
+methods. Re-measured by demangling every symbol to its owning class, what
+was left at the start of this session was ~67.7 KB across ~366 functions
+-- roughly 19x the CarState slice -- and after these four it is ~67.0 KB
+across ~355. The corrected table is in `TASKS.md` under task 25.
+
+**`RigidBody` and `DriveTarget` are prerequisites the task list never
+named.** `Suspension`, `PhysicsCar` and `Car` all need `RigidBody`;
+`CarDriver` needed `DriveTarget`'s record, whose layout is now done and
+whose 28 methods are not. Suggested order for the rest: `RigidBody`,
+`Suspension`, `Wheel`, `DriveTrain`, `DriveTarget`'s methods,
+`PhysicsCar`, `Car`, with `Mellovator` and `MellowMover` last.
+
+At this verification standard that is several more sessions, not one.
+Task 25 stays `[~]`.
+
+### Findings
+
+* **The vtable pointer is at the END of every class in this image.** Old
+  g++ ABI: `CarDriver` 556, `Steering` 8. The instinct is to look for it
+  at offset 0, and every remaining class in task 25 has this shape.
+* **Array extents are part of a layout claim.** Nine CarTypeInfo
+  mutations survived the first pass, all of them shrink-an-array-and-pad.
+  That leaves every following offset *and* the total size unchanged, so
+  the static assert lets them through. They were a real coverage gap, not
+  equivalents: the transcript now prints each array's extent, its element
+  stride, and the field widths and signedness probes. The same trap
+  reappeared in `Steering` and has a padded mutation of its own there.
+* **Steering's pi is wrong in a useful direction.** The object carries
+  `0x40490fd0` (pi), `0x40c90fd0` (2pi) -- the same eleven-ulps-low pair
+  CarState has -- and `0x3fc90fdc` (pi/2), one ulp *high*, which reaches
+  every steer matrix because the cosine there is `bSinF(angle + pi/2)`
+  rather than a cosine call. Loosening the fold's `pi < rad` to `<=`
+  survives the mutation pass and is genuinely equivalent, *because* of
+  that constant: no 16-bit BAM produces exactly `0x40490fd0` (the
+  products step `0x40490e49 -> 0x40490fdb` straight across it), whereas
+  with the true float pi, BAM 32768 lands on it exactly and the two
+  comparisons would part company.
+* **SetSteering is Ackerman with tan(x) ~ x.**
+  `outer = (W * inner) / (W + T * inner)`, which is why there is a divide
+  and no atan. The port keeps the approximation including the angles
+  where the denominator nears zero and it blows up; the transcript has a
+  geometry that lands there on purpose.
+* **`SportGear` is never initialised.** `CarDriver`'s constructor memsets
+  the 528-byte `DriveTarget`, clears five inputs and sets `DesiredGear`
+  -- byte 548 is never written, and a fresh driver inherits whatever the
+  allocation held. Pinned by constructing over two byte patterns.
+* **A field the debug info omits.** `CarTypeInfo.pCarSpecs` at 1368,
+  recovered from `lw v0,1368(a0)` in all six string accessors. A second
+  witness for `sizeof` came from `GetCarTypeInfo` at 0x001801c0 emitting
+  `addiu v1,zero,1376` as a literal, in a different compilation unit from
+  the `.mdebug` entry.
+* **Two destructors leave the base class's vtable behind.**
+  `~TwoWheelAckermanSteering` writes its own, then `~Steering` writes the
+  base's over the top. The port keeps both writes in that order.
+* **`operator new` ignores its size argument** (both `CarTypeInfo`'s and
+  `TwoWheelAckermanSteering`'s) -- a bOMalloc on a slot pool, which only
+  ever hands out one size. Not ported; recorded because it matters if a
+  class grows.
+* **Argument evaluation order can silently break a transcript.**
+  `printf("%d %u", draw(&seed), seed)` read the global seed *before* the
+  call under gcc's right-to-left order, putting every seed line off by
+  one. Take the call into a variable first.
+
+Not ported, for the usual reason: `Engine::DoSnapshot`,
+`CarDriver::DoSnapshot`, `Steering::BaseDoSnapshot` and
+`TwoWheelAckermanSteering::DoSnapshot` all need `ReplaySnapshot`.
