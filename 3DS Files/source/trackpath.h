@@ -21,8 +21,10 @@
 // While it is not ported, trackpath_coord_update_position() leaves
 // DistanceAroundTrack alone, so a route's fStartDistance and fEndDistance
 // come out of SetFirstAndLast as zero and every signpost's Distance is zero.
-// That is visible rather than silent: trackpath_have_splines() says so, and
-// the route viewer prints it.
+// That is visible rather than silent: trackpath_have_splines() returns 0, so
+// a caller can tell "no distance yet" from a genuine zero. Ask it before
+// believing a distance; nothing in the port does yet, because nothing in the
+// port drives a route yet.
 //
 // `gTrackPathDistanceFn` is the seam. It is NULL on the handheld and the
 // cross-checker sets it to a closed-form stand-in, which is what lets

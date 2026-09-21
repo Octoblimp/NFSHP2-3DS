@@ -7,7 +7,9 @@
 //
 // This file ports the base and CM_ORBIT_CAR. The rest are deliberately left:
 // CM_DRIVE, CM_BUMPER and CM_REAR_VIEW_MIRROR need Car and its wheels
-// (task 25), CM_TRACK_CAR and CM_TRACK_FLY need TrackRoute (task 24), the
+// (task 25), CM_TRACK_CAR and CM_TRACK_FLY need a route that can answer
+// "how far around the lap is this" -- TrackRoute is ported now, but that
+// answer waits on QuickSpline.obj, which task 27 owes it -- the
 // CM_ZONE_* ones need the streaming world (task 27), and CM_DEBUG_WORLD,
 // CM_MAX and CM_TRACK_ROUTE_EDITOR are development tools that were left in
 // the build. CM_ORBIT_CAR comes first because it is the one the car select
