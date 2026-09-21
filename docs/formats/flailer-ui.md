@@ -381,6 +381,61 @@ python3 tools/flailer_render.py extracted/FRONTEND/FRONTB.BUN 0 \
         --language extracted/LANGUAGES/FE_ENGLISH.BIN -o menu.png
 ```
 
+### The port's own text, and the bottom screen
+
+Two things in `uirender.c` are **not** ports of anything, because the PS2
+had one screen and this machine has two. They are marked as such in the
+source and are listed here so nobody goes looking for the original.
+
+`uirender_draw_wrapped()` draws a string in the *target's* pixels rather
+than in the screen's 640x480 space, wrapping it into a box. It shares
+`draw_glyph()`, the kerning table and the help-character path with the
+screen renderer, and differs from it in exactly two ways:
+
+* it does **not** reproduce `RenderCharacter`'s double-`ScaleX` bug. The bug
+  is kept for the disc's own screens because they were laid out with it on
+  screen; a wrap width, though, has to agree with the width actually laid
+  down, or the last word of every line hangs off the edge.
+* it counts kerning when it measures. `GetScaledWidth` (`0x0013e8b0`) does
+  not, which is faithful and would be wrong here for the same reason.
+
+`FlailerTextChunk` has a `BUI_FMT_WRAP` bit (`0x20`) and no object on this
+disc sets it, so there is no engine wrap behaviour to copy either.
+
+The **blurb** is the one-line description under a menu -- `SCROLLING_TEXT`
+(`0x75980cf0`), driven by `tAnimatedBlurb` (`0x00232c18`, and
+`docs/formats/frontend-animation.md`). On the PS2 it is about ten pixels
+tall in a 480-line frame; on the 3DS top screen that is five pixels and it
+cannot be read. The port moves it to the bottom screen:
+
+* `uirender_hide_object()` takes `SCROLLING_TEXT` and `WHITEOUT_BAR`
+  (`0x70a404ec`) out of the top-screen draw at layer-walk time. It is a
+  draw-time skip rather than a visibility write because `tAnimatedBlurb`
+  writes that field itself every frame; the animation still runs, still
+  slides the object in and still wipes it, and nothing in the frontend has
+  to know where the line ended up.
+* `main.c` reads the line back out of the object each frame with
+  `uirender_object_string()` rather than remembering what `setBlurb` was
+  handed. The hook is not the only writer: at the end of its wipe
+  `tAnimatedBlurb` resolves the translation itself and *prints the result
+  into the object* (`banim.c:620`, `FlailerPrintf`), leaving `LanguageID`
+  at 0. The object is the only place the current line exists.
+* a screen whose blurb has not been set yet still carries the authoring
+  placeholder (`This text will scroll sideways across the screen...`),
+  which is why the panel checks for it and draws nothing.
+
+The bottom screen is a citro2d target and **not** a libctru console. The
+two cannot share it: `consoleInit` switches the bottom screen to RGB565
+while citro3d presents BGR8 into the same framebuffer, and the first run of
+the panel came out as two half-width copies of itself under a teal dither.
+The bring-up overlays that used to live on that console now go to
+`sdmc:/nfshp2_debug.txt` (opened `"w"`, so each boot replaces it), one line
+per slot and only when the line changes -- at Azahar's ~140 FPS, a line a
+frame is a megabyte a minute of identical text. The only console the port
+ever creates is on the *top* screen, in the three paths that are about to
+give up and exit.
+
+
 ## Names
 
 Everything cross-references by `bStringHash` (`tools/bhash.py`); the empty

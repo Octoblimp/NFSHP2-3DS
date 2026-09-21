@@ -24,6 +24,7 @@
 #define UIR_MAX_BUNDLES  4
 #define UIR_MAX_TEXTURES 256
 #define UIR_MAX_FONTS    16
+#define UIR_MAX_HIDDEN   8
 
 // The button icons embedded in UI strings. IsHelpCharacter (0x0013f9a8) is
 // literally `(u8)(c - 128) < 18`, and RenderHelpCharacter maps each to a
@@ -80,6 +81,11 @@ typedef struct {
     size_t    langLen;
     LangTable lang;
     bool      hasLang;
+
+    // Objects the port draws somewhere else, by NameHash. See
+    // uirender_hide_object().
+    uint32_t  hidden[UIR_MAX_HIDDEN];
+    int       numHidden;
 
     float     targetW, targetH;   // the C3D render target, e.g. 400x240
     float     scrollTime;         // seconds, for UV-scrolling textures
@@ -146,4 +152,59 @@ bool uirender_text_extent(UIRenderer* r, const BUI* ui, uint32_t index,
 // the two highlight brackets around the current menu item.
 bool uirender_object_bounds(UIRenderer* r, const BUI* ui, uint32_t index,
                             float box[4]);
+// ---------------------------------------------------------------------------
+// The port's own text
+// ---------------------------------------------------------------------------
+//
+// Everything above draws what the disc authored, in the screen's 640x480
+// space. This draws what the *port* needs to say -- the bottom-screen blurb
+// panel and the bring-up overlays -- in the target's own pixels, with word
+// wrap. FlailerTextChunk has a format bit for wrapping (BUI_FMT_WRAP) and no
+// screen on this disc sets it, so there is no original to copy here.
+//
+// It deliberately does not reproduce RenderCharacter's double-ScaleX bug
+// (0x0013f750). That bug is kept in the screen path because the disc's own
+// layouts were drawn with it on screen; nothing here was, and a wrap width
+// has to agree with the width actually laid down or the last word of every
+// line hangs off the edge.
+typedef struct {
+    uint32_t fontHash;   // 0 for the first loaded font that has a sheet
+    uint32_t color;      // a plain C2D_Color32 -- NOT a PS2 colour word
+    float    scale;      // multiplies the font's own glyph sizes
+    float    lineGap;    // extra pixels between one line and the next
+    bool     center;     // centre each line inside the box
+} UIWrapStyle;
+
+// The height of one line in this style, the gap included. 0 if the font is
+// not loaded, which is also what a caller should treat as "draw nothing".
+float uirender_line_height(UIRenderer* r, const UIWrapStyle* st);
+
+// How tall `text` comes out wrapped into `boxW` pixels, drawing nothing.
+// `len` is the string length, or 0 for strlen.
+float uirender_wrap_height(UIRenderer* r, const char* text, size_t len,
+                           const UIWrapStyle* st, float boxW);
+
+// Draws it into whatever target C2D_SceneBegin has bound -- (x, y) is the
+// top-left of the box -- and returns the height used. Lines break at a
+// space, at a newline in the string, and inside a word wider than the box
+// on its own. `alpha` scales the style's colour, for a fade.
+float uirender_draw_wrapped(UIRenderer* r, const char* text, size_t len,
+                            const UIWrapStyle* st, float x, float y,
+                            float boxW, float alpha);
+
+// The string a text object draws this frame: the row of the language table
+// its LanguageID names, or the placeholder baked into the chunk when it has
+// none. The blurb panel mirrors this rather than listening for changes --
+// tAnimatedBlurb resolves the translation itself and prints the result into
+// the object (banim.c:620), so the object is the only place the line the
+// player is meant to be reading actually exists.
+const char* uirender_object_string(UIRenderer* r, const BUI* ui,
+                                   uint32_t index, size_t* outLen);
+
+// An object the port draws somewhere else and the screen must not draw
+// again, by NameHash -- SCROLLING_TEXT and its wipe bar, which now live on
+// the bottom screen. Up to UIR_MAX_HIDDEN of them; a hash of 0 empties the
+// list. This is a draw-time skip rather than a visibility write because the
+// frontend's own animations set that field every frame.
+void uirender_hide_object(UIRenderer* r, uint32_t nameHash);
 #endif  // __3DS__

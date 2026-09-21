@@ -870,11 +870,13 @@ void bgf_plain_screen_callback(BGameFlow* gf, BScreenMessage msg,
 //   MENUITEM_2 "World Racing" -> CopsOn = 0, "Cops Off Mode Select"  0x00203818
 //   MENUITEM_3 "Options"      ->             "Options"               0x00203830
 //
-// All three push New Main Menu, so BACK returns here. None of the three
-// destinations is in the port's screen registry yet: bgf_change_to_screen
-// then traces "unregistered" and leaves the flow with no current screen,
-// which is what ChangeToScreen does too -- it clears pCurrent before it
-// looks the name up. BACK is still the way out.
+// All three push New Main Menu, so BACK returns here. All three are in the
+// port's screen registry as of the frontend-screens work (kScreens[] in
+// main.c, bscreens.c for the classes). A name that is NOT registered --
+// Challenge, ChallengeBeACop, View Event Tree and the seven Options pages,
+// see TASKS.md 33 -- makes bgf_change_to_screen trace "unregistered" and
+// leaves the flow with no current screen, which is what ChangeToScreen does
+// too: it clears pCurrent before it looks the name up. BACK is the way out.
 void bgf_new_main_menu_callback(BGameFlow* gf, BScreenMessage msg,
                                 BScreenCallbackData* data)
 {

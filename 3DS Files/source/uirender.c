@@ -249,9 +249,16 @@ static UITexture* font_sheet(UIRenderer* r, UIFont* f)
 // ---------------------------------------------------------------------------
 
 typedef struct {
-    float scale;          // 640x480 -> the render target
-    float originX, originY;
-    float alpha;          // the renderer's global fade
+    // 640x480 -> the render target, and the two axes scale independently.
+    // The PS2 drew 4:3 and the 3DS top screen is 400x240, which is 5:3, so
+    // fitting the screen inside it preserving aspect -- which is what this
+    // used to do -- left 20 px of nothing down each side. Filling the
+    // screen instead is what was asked for. Nothing downstream knows:
+    // object positions, hit boxes and the menu all stay in the 640x480
+    // space the disc authored, and only the final quad is stretched.
+    float scaleX, scaleY;
+    float originX, originY;   // 0 now; see uirender_draw_screen
+    float alpha;              // the renderer's global fade
 } UIView;
 
 // A sub-rectangle of a texture, in pixels, with row 0 at the top. v is
@@ -374,10 +381,10 @@ static void draw_bitmap(UIRenderer* r, const BUIObject* o, const UIView* v)
     C2D_Image img = { tex, &st };
     C2D_DrawParams p;
     memset(&p, 0, sizeof(p));
-    p.pos.x = v->originX + o->x * v->scale;
-    p.pos.y = v->originY + o->y * v->scale;
-    p.pos.w = w * v->scale;
-    p.pos.h = h * v->scale;
+    p.pos.x = v->originX + o->x * v->scaleX;
+    p.pos.y = v->originY + o->y * v->scaleY;
+    p.pos.w = w * v->scaleX;
+    p.pos.h = h * v->scaleY;
     if (o->animation == BUI_ROTATE_CENTER && o->rotation) {
         p.center.x = p.pos.w * 0.5f;
         p.center.y = p.pos.h * 0.5f;
@@ -424,6 +431,9 @@ static float measure(UIFont* f, const char* s, size_t len, float scaleX,
     return total * scaleX;
 }
 
+// `color` is a finished C2D colour, the view alpha already in it: the
+// screen path passes tint_color(o->color, v->alpha) and the port's own
+// wrapped text passes a plain colour of its own.
 static void draw_glyph(UIRenderer* r, UIFont* f, const BGlyph* g, float x,
                        float y, float w, float h, uint32_t color,
                        const UIView* v)
@@ -436,15 +446,15 @@ static void draw_glyph(UIRenderer* r, UIFont* f, const BGlyph* g, float x,
                        g->posX, g->posY, g->width, g->height);
 
     C2D_ImageTint tint;
-    C2D_PlainImageTint(&tint, tint_color(color, v->alpha), 1.0f);
+    C2D_PlainImageTint(&tint, color, 1.0f);
 
     C2D_Image img = { &t->tex, &st };
     C2D_DrawParams p;
     memset(&p, 0, sizeof(p));
-    p.pos.x = v->originX + x * v->scale;
-    p.pos.y = v->originY + y * v->scale;
-    p.pos.w = w * v->scale;
-    p.pos.h = h * v->scale;
+    p.pos.x = v->originX + x * v->scaleX;
+    p.pos.y = v->originY + y * v->scaleY;
+    p.pos.w = w * v->scaleX;
+    p.pos.h = h * v->scaleY;
     C2D_DrawImage(img, &p, &tint);
 }
 
@@ -470,10 +480,10 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
     if (o->format & BUI_FMT_DARKBG) {
         // RenderDarkBackground (0x0013fd80) puts a plain dark quad behind the
         // run. Only 32 objects use it and all of them are left-justified.
-        C2D_DrawRectSolid(v->originX + penX * v->scale,
-                          v->originY + o->y * v->scale, 0.0f,
-                          width * v->scale,
-                          f->font.height * o->scaleY * v->scale,
+        C2D_DrawRectSolid(v->originX + penX * v->scaleX,
+                          v->originY + o->y * v->scaleY, 0.0f,
+                          width * v->scaleX,
+                          f->font.height * o->scaleY * v->scaleY,
                           C2D_Color32(0, 0, 0, (uint8_t)(160.0f * v->alpha)));
     }
 
@@ -490,7 +500,7 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
                                   &hg)) {
                 draw_glyph(r, hf, &hg, penX, o->y + hg.offset * o->scaleY,
                            hg.width * o->scaleX, hg.height * o->scaleY,
-                           o->color, v);
+                           tint_color(o->color, v->alpha), v);
                 penX += hg.advance * o->scaleX;
             }
             prev = -1;
@@ -507,7 +517,8 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
             // already-scaled pen -- so this leaves it unscaled too.
             float inset = (f->fixedCell - g.advance) * 0.5f;
             draw_glyph(r, f, &g, penX + inset, o->y + g.offset * o->scaleY,
-                       g.width * o->scaleX, g.height * o->scaleY, o->color, v);
+                       g.width * o->scaleX, g.height * o->scaleY,
+                       tint_color(o->color, v->alpha), v);
             penX += f->fixedCell * o->scaleX;
             prev = -1;
             continue;
@@ -523,7 +534,7 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
         // reproduced here rather than quietly corrected.
         draw_glyph(r, f, &g, penX, o->y + g.offset * o->scaleY,
                    g.width * o->scaleX * o->scaleX, g.height * o->scaleY,
-                   o->color, v);
+                   tint_color(o->color, v->alpha), v);
         penX += g.advance * o->scaleX;
         prev = ch;
     }
@@ -536,6 +547,217 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
 // which is the cvt.w.s at 0x0013e880 and not a rounding accident. Both are
 // 0 for an object whose font is not loaded, exactly as the originals return
 // 0 when FindFont fails.
+// ---------------------------------------------------------------------------
+// The port's own text -- see the UIWrapStyle block in uirender.h
+// ---------------------------------------------------------------------------
+
+// The style's font, or the first one loaded that has a glyph sheet. Falling
+// back rather than failing is what makes a caller with nothing to say about
+// fonts -- the bring-up overlays -- work at all.
+static UIFont* wrap_font(UIRenderer* r, const UIWrapStyle* st)
+{
+    if (st->fontHash) return find_font(r, st->fontHash);
+    for (int i = 0; i < r->numFonts; i++)
+        if (font_sheet(r, &r->fonts[i])) return &r->fonts[i];
+    return NULL;
+}
+
+// One character's glyph, from the run's own font or -- for a button icon --
+// from BUTTONSOUT. Same test as draw_text(); see IsHelpCharacter.
+static bool wrap_glyph(UIRenderer* r, UIFont* f, unsigned char ch,
+                       UIFont** outFont, BGlyph* out)
+{
+    if ((unsigned)(ch - UIR_HELP_FIRST) < UIR_HELP_COUNT) {
+        UIFont* hf = find_font(r, HELP_FONT_HASH);
+        if (!hf) return false;
+        *outFont = hf;
+        return bfont_glyph(&hf->font, kHelpGlyph[ch - UIR_HELP_FIRST], out);
+    }
+    *outFont = f;
+    return bfont_glyph(&f->font, ch, out);
+}
+
+typedef struct {
+    size_t draw;    // characters of this line to draw
+    size_t next;    // characters to step over to reach the next line
+    float  width;   // what draw covers, scaled
+} UIWrapLine;
+
+// Greedy wrap: the longest run of whole words that fits in boxW. A word
+// wider than the box on its own is broken at the last character that fits,
+// because the alternative is a line that runs off the panel.
+//
+// Unlike GetScaledWidth (0x0013e8b0) this counts kerning, because the pen
+// below moves by it. The engine's own measurement does not, which is a
+// disc-accuracy detail of measure() and would be a bug here.
+static UIWrapLine wrap_next(UIRenderer* r, UIFont* f, const char* s,
+                            size_t len, float scale, float boxW)
+{
+    UIWrapLine ln;
+    size_t     lastSpace = (size_t)-1;
+    float      w = 0.0f, wAtSpace = 0.0f;
+    int        prev = -1;
+
+    for (size_t i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)s[i];
+        UIFont*       gf = f;
+        BGlyph        g;
+        float         adv = 0.0f;
+
+        if (ch == 10) {          // a hard break in the string itself
+            ln.draw = i; ln.next = i + 1; ln.width = w * scale;
+            return ln;
+        }
+        if (wrap_glyph(r, f, ch, &gf, &g)) {
+            if (KERNING_ENABLED && prev >= 0 && gf == f)
+                adv += bfont_kerning(&f->font, prev, ch);
+            adv += g.advance;
+            prev = (gf == f) ? (int)ch : -1;
+        } else {
+            prev = -1;
+        }
+        if (ch == ' ') { lastSpace = i; wAtSpace = w; }
+
+        // i > 0 guarantees progress: a single glyph wider than the whole box
+        // is drawn anyway rather than breaking before every character.
+        if (i > 0 && (w + adv) * scale > boxW) {
+            if (lastSpace != (size_t)-1) {
+                ln.draw = lastSpace; ln.next = lastSpace + 1;
+                ln.width = wAtSpace * scale;
+            } else {
+                ln.draw = i; ln.next = i; ln.width = w * scale;
+            }
+            return ln;
+        }
+        w += adv;
+    }
+    ln.draw = len; ln.next = len; ln.width = w * scale;
+    return ln;
+}
+
+// Lays the text out and, when `draw`, puts it on the bound target. One
+// function for both, so the height a caller centres against is measured by
+// the code that does the drawing and cannot drift from it.
+static float wrap_run(UIRenderer* r, const char* text, size_t len,
+                      const UIWrapStyle* st, float x, float y, float boxW,
+                      float alpha, bool draw)
+{
+    UIFont*  f;
+    UIView   v;
+    uint32_t color;
+    float    scale, lineH, top;
+    size_t   pos   = 0;
+    bool     first = true;
+
+    if (!r || !st || !text) return 0.0f;
+    if (len == 0) len = strlen(text);
+    if (len == 0) return 0.0f;
+    f = wrap_font(r, st);
+    if (!f) return 0.0f;
+
+    scale = st->scale > 0.0f ? st->scale : 1.0f;
+    lineH = f->font.height * scale + st->lineGap;
+
+    // Target pixels, so the view is the identity: the caller has already
+    // decided where on the screen this goes.
+    v.scaleX = v.scaleY = 1.0f;
+    v.originX = v.originY = 0.0f;
+    v.alpha   = 1.0f;
+
+    color = st->color;
+    if (alpha < 1.0f) {
+        float a = (float)(color >> 24) * (alpha > 0.0f ? alpha : 0.0f);
+        color = (color & 0x00ffffffu) | ((uint32_t)a << 24);
+    }
+
+    top = y;
+    while (pos < len) {
+        // Leading spaces on a continuation line are the break itself, not
+        // an indent.
+        if (!first) while (pos < len && text[pos] == ' ') pos++;
+        if (pos >= len) break;
+
+        UIWrapLine ln = wrap_next(r, f, text + pos, len - pos, scale, boxW);
+        if (draw) {
+            float penX = st->center ? x + (boxW - ln.width) * 0.5f : x;
+            int   prev = -1;
+            for (size_t i = 0; i < ln.draw; i++) {
+                unsigned char ch = (unsigned char)text[pos + i];
+                UIFont*       gf = f;
+                BGlyph        g;
+                if (!wrap_glyph(r, f, ch, &gf, &g)) { prev = -1; continue; }
+                if (KERNING_ENABLED && prev >= 0 && gf == f)
+                    penX += bfont_kerning(&f->font, prev, ch) * scale;
+                draw_glyph(r, gf, &g, penX, top + g.offset * scale,
+                           g.width * scale, g.height * scale, color, &v);
+                penX += g.advance * scale;
+                prev = (gf == f) ? (int)ch : -1;
+            }
+        }
+        top += lineH;
+        if (ln.next == 0) break;
+        pos += ln.next;
+        first = false;
+    }
+    return top - y;
+}
+
+float uirender_line_height(UIRenderer* r, const UIWrapStyle* st)
+{
+    UIFont* f;
+    if (!r || !st) return 0.0f;
+    f = wrap_font(r, st);
+    if (!f) return 0.0f;
+    return f->font.height * (st->scale > 0.0f ? st->scale : 1.0f)
+           + st->lineGap;
+}
+
+float uirender_wrap_height(UIRenderer* r, const char* text, size_t len,
+                           const UIWrapStyle* st, float boxW)
+{
+    return wrap_run(r, text, len, st, 0.0f, 0.0f, boxW, 1.0f, false);
+}
+
+float uirender_draw_wrapped(UIRenderer* r, const char* text, size_t len,
+                            const UIWrapStyle* st, float x, float y,
+                            float boxW, float alpha)
+{
+    // The bitmap path sets this too, and the bottom screen draws no bitmap.
+    C2D_SetTintMode(C2D_TintMult);
+    return wrap_run(r, text, len, st, x, y, boxW, alpha, true);
+}
+
+const char* uirender_object_string(UIRenderer* r, const BUI* ui,
+                                   uint32_t index, size_t* outLen)
+{
+    BUIObject   o;
+    const char* s;
+    size_t      n = 0;
+
+    if (outLen) *outLen = 0;
+    if (!r || !ui || !bui_object(ui, index, &o)) return NULL;
+    if (o.type != BUI_TYPE_TEXT) return NULL;
+    s = object_text(r, &o, &n);
+    if (outLen) *outLen = n;
+    return s;
+}
+
+void uirender_hide_object(UIRenderer* r, uint32_t nameHash)
+{
+    if (!r) return;
+    if (!nameHash) { r->numHidden = 0; return; }
+    for (int i = 0; i < r->numHidden; i++)
+        if (r->hidden[i] == nameHash) return;
+    if (r->numHidden < UIR_MAX_HIDDEN) r->hidden[r->numHidden++] = nameHash;
+}
+
+static bool object_hidden(const UIRenderer* r, uint32_t nameHash)
+{
+    for (int i = 0; i < r->numHidden; i++)
+        if (r->hidden[i] == nameHash) return true;
+    return false;
+}
+
 bool uirender_text_extent(UIRenderer* r, const BUI* ui, uint32_t index,
                           float* outW, float* outH)
 {
@@ -590,10 +812,14 @@ void uirender_draw_screen(UIRenderer* r, BUI* ui, const BUIScreen* screen,
     float resY = screen->resY ? (float)screen->resY : 480.0f;
 
     UIView v;
-    v.scale = r->targetH / resY;
-    if (resX * v.scale > r->targetW) v.scale = r->targetW / resX;
-    v.originX = (r->targetW - resX * v.scale) * 0.5f;
-    v.originY = (r->targetH - resY * v.scale) * 0.5f;
+    // Stretch to fill rather than fit inside: both origins are 0 and each
+    // axis gets its own scale. On the top screen that is 400/640 across
+    // and 240/480 down, so the picture comes out 25% wider relative to its
+    // height than the disc drew it.
+    v.scaleX  = r->targetW / resX;
+    v.scaleY  = r->targetH / resY;
+    v.originX = 0.0f;
+    v.originY = 0.0f;
     v.alpha   = alpha;
 
     C2D_SetTintMode(C2D_TintMult);
@@ -610,6 +836,8 @@ void uirender_draw_screen(UIRenderer* r, BUI* ui, const BUIScreen* screen,
             if (!bui_object(ui, screen->first + i, &o)) continue;
             if (o.z != layer) continue;
             if (o.visible != BUI_VISIBLE) continue;
+            // Drawn on the bottom screen instead; see uirender_hide_object.
+            if (object_hidden(r, o.nameHash)) continue;
             if (o.type == BUI_TYPE_BITMAP)    draw_bitmap(r, &o, &v);
             else if (o.type == BUI_TYPE_TEXT) draw_text(r, &o, &v);
         }

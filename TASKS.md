@@ -896,10 +896,17 @@ is citro3d and owns the top.
 Raised by the user mid-session; kept here so they do not get lost between
 phases.
 
-32. [ ] Stretch the frontend to the 3DS aspect. The PS2 drew a 4:3 screen
+32. [x] Stretch the frontend to the 3DS aspect. The PS2 drew a 4:3 screen
         and the 3DS top screen is 400x240 (5:3), so the screens as shipped
-        leave the sides of the top screen empty. The whole top screen should
-        be filled instead.
+        left 20 px of nothing down each side. `UIView` now carries a
+        `scaleX` and a `scaleY` instead of one `scale` and both origins are
+        0, so 640x480 maps to 400x240 by stretching: 400/640 across,
+        240/480 down, everything 25% wider relative to its height. Only the
+        final quad is stretched -- object positions, hit boxes, the menu and
+        the scroll demo all still work in the 640x480 space the disc
+        authored, so nothing downstream had to change. The movie plane is a
+        bitmap object like any other and comes along with it. Milestone test
+        re-run: PASS, 13 screenshots, the menu art runs edge to edge.
 33. [ ] `ChallengeBeACop` is unregistered. It is in the blurb table
         (`bscreens.c:336`, blurb 10014, `BMODE_BE_A_COP`) and the flow
         changes to it -- the Azahar log shows `flow change ChallengeBeACop 1`
@@ -909,3 +916,32 @@ phases.
         under the main menu work in Phase 2; the list of names that get this
         far and then find nothing should be gathered in one place rather
         than found one at a time on the emulator.
+34. [x] Move the menu description to the bottom screen. The blurb --
+        `SCROLLING_TEXT`, driven by `tAnimatedBlurb` -- is about ten pixels
+        tall in the disc's 480-line frame, which is five on the 3DS top
+        screen and unreadable. It is now skipped on the top screen
+        (`uirender_hide_object`, along with the `WHITEOUT_BAR` it is wiped
+        out with) and the bottom screen is given over to it: a panel with
+        the screen's name along the top under the frontend's red rule, the
+        line itself wrapped and centred in the game's own FONT_A at a
+        19 px line height, and the controls along the bottom. The line is
+        read back out of the object every frame rather than caught at the
+        `setBlurb` hook, because `tAnimatedBlurb` also prints into it
+        directly at the end of its wipe; a change crossfades, which is the
+        port's stand-in for a wipe that now animates an off-screen object.
+        New in `uirender`: `uirender_draw_wrapped` / `uirender_wrap_height`
+        / `uirender_line_height` (word wrap in target pixels, sharing
+        `draw_glyph` and the help-character path with the screen renderer,
+        but *without* the double-`ScaleX` bug, which a wrap width cannot
+        live with), `uirender_object_string` and `uirender_hide_object`.
+        Written up in `docs/formats/flailer-ui.md`.
+35. [x] No console on the bottom screen. It cannot share the screen with
+        citro2d -- `consoleInit` switches the bottom screen to RGB565 while
+        citro3d presents BGR8 into the same framebuffer, and the first run
+        of the panel came out as two half-width copies of itself under a
+        teal dither. The console is gone; the three bring-up overlays it
+        carried go to `sdmc:/nfshp2_debug.txt` (opened `"w"`, so each boot
+        replaces it) one line per slot and only when the line changes, and
+        the two viewer modes get the same panel with their controls on it.
+        The only console the port still creates is on the *top* screen, in
+        the three paths that are about to exit.

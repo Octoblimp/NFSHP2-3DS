@@ -431,7 +431,6 @@ static int  hookSavePoll(void* user)  { (void)user; return 1; }
 static void hookTrace(void* user, const char* line)
 {
     (void)user;
-    printf("%s\n", line);
     logLine("flow %s", line);
 }
 
@@ -853,6 +852,20 @@ static const struct { u32 key; BJoyEvent ev; } kBinds[] = {
 };
 #define NUM_BINDS ((int)(sizeof(kBinds) / sizeof(kBinds[0])))
 
+// The only console the port ever puts up, and only on the way out. There
+// used to be one on the bottom screen for the whole run; that screen is the
+// blurb panel's now, and the two cannot share it -- consoleInit switches
+// the bottom screen to RGB565 while citro3d presents BGR8 into the same
+// framebuffer, which came out as two half-width copies of the panel under a
+// teal dither. So: no console, the log file takes everything (it is opened
+// "w", so each boot replaces it), and a failure that has to be readable
+// without a card reader gets one on the TOP screen, where nothing else is
+// drawing yet.
+static void fatalConsole(void)
+{
+    consoleInit(GFX_TOP, NULL);
+}
+
 static void waitForExit(void)
 {
     printf("\nPress START to exit.\n");
@@ -865,12 +878,192 @@ static void waitForExit(void)
     }
 }
 
+// --------------------------------------------------------- the bottom screen
+//
+// The disc drew the one-line description -- the "blurb" -- inside the menu
+// screen itself, along the bottom of a 640x480 frame. Squeezed onto the 3DS
+// top screen that line comes out about five pixels tall and is not reading
+// material, so the port takes it off the top screen altogether
+// (uirender_hide_object, below) and gives it this whole screen: wrapped,
+// and at a size meant for 320x240.
+//
+// None of this is a port of anything. The PS2 had one screen, so there is
+// no original here to be accurate to -- only the game's own font, its red,
+// and the line it was trying to show the player.
+
+#define BOT_W     320.0f
+#define BOT_H     240.0f
+#define BOT_PAD    16.0f
+#define BOT_HDR    30.0f     // the header strip, and where the accent sits
+#define BOT_FOOT  204.0f     // the rule above the controls line
+
+// citro2d packs a colour r | g<<8 | b<<16 | a<<24, and C2D_Color32 is an
+// inline function rather than a macro, so a constant has to pack its own.
+#define RGBA8(r, g, b, a) \
+    ((u32)(r) | ((u32)(g) << 8) | ((u32)(b) << 16) | ((u32)(a) << 24))
+
+#define BOT_BACK   RGBA8(0x0b, 0x0d, 0x12, 0xff)
+#define BOT_HEAD   RGBA8(0x16, 0x1a, 0x23, 0xff)
+#define BOT_ACCENT RGBA8(0xc4, 0x1e, 0x24, 0xff)   // the frontend's own red
+#define BOT_RULE   RGBA8(0x2b, 0x33, 0x40, 0xff)
+#define BOT_TEXT   RGBA8(0xec, 0xef, 0xf4, 0xff)
+#define BOT_DIM    RGBA8(0x78, 0x85, 0x99, 0xff)
+
+static C3D_RenderTarget* g_bot;
+static uint32_t          g_botFont;   // FONT_A, 357 of the disc's text objects
+
+// A style at a chosen line height in pixels. A font's own height is
+// whatever its glyph sheet was authored at, which is not 19 px for any font
+// on the disc, so it is asked for and divided out rather than assumed. A
+// font that is not loaded measures 0 and the scale is left alone -- nothing
+// will draw anyway.
+static UIWrapStyle botStyle(UIRenderer* ui, uint32_t color, float px,
+                            bool center)
+{
+    UIWrapStyle st;
+    float       h;
+
+    st.fontHash = g_botFont;
+    st.color    = color;
+    st.scale    = 1.0f;
+    st.lineGap  = 0.0f;
+    st.center   = center;
+    h = uirender_line_height(ui, &st);
+    if (h > 0.0f) st.scale = px / h;
+    return st;
+}
+
+// The bring-up overlays that used to be printf'd to the console on the
+// bottom screen. They go to the log now -- and only when the line actually
+// changes, because at the emulator's 140 FPS a line a frame is a megabyte a
+// minute of the same text. One slot per line of the old overlay, so two
+// lines that alternate do not each count as a change of the other.
+#define DEV_SLOTS 12
+
+static void devLog(int slot, const char* fmt, ...)
+{
+    static char last[DEV_SLOTS][192];
+    char        line[192];
+    va_list     ap;
+
+    if (slot < 0 || slot >= DEV_SLOTS) return;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    if (strcmp(line, last[slot]) == 0) return;
+    memcpy(last[slot], line, sizeof last[slot]);
+    logLine("%s", line);
+}
+
+// What the panel is drawing, and how far through a change it is. When the
+// screen's line differs from this one the panel dips to nothing, swaps and
+// comes back -- the port's stand-in for tAnimatedBlurb's whiteout wipe
+// (banim.c:620), which animates an object that is no longer on screen.
+#define BLURB_MAX 256
+static char  g_blurbShown[BLURB_MAX];
+static float g_blurbFade = 1.0f;
+
+// Every screen in FRONTB.BUN ships the same authoring placeholder in
+// SCROLLING_TEXT and a screen whose blurb has not been set yet still has
+// it. Drawing that would be drawing a note to the artist.
+static const char kBlurbPlaceholder[] = "This text will scroll sideways";
+
+// The line the top screen would be drawing this frame. It is read out of
+// the object rather than remembered from the setBlurb hook because the hook
+// is not the only thing that writes it: tAnimatedBlurb resolves the
+// translation itself and prints the result into the object at the end of
+// its wipe, so the object is the one place the current line exists.
+static void liveBlurb(Boot* b, char* out, size_t cap)
+{
+    const char* s;
+    size_t      len = 0;
+    int32_t     idx;
+
+    out[0] = '\0';
+    if (!b->screen || !b->project) return;
+    idx = bui_find_object(b->project, b->screen, BSCR_OBJ_SCROLLING_TEXT,
+                          BUI_TYPE_TEXT);
+    if (idx < 0) return;
+    s = uirender_object_string(b->ui, b->project, (uint32_t)idx, &len);
+    if (!s || len == 0) return;
+    if (len >= sizeof kBlurbPlaceholder - 1
+        && memcmp(s, kBlurbPlaceholder, sizeof kBlurbPlaceholder - 1) == 0)
+        return;
+    // Not a C string: the language table hands back a pointer and a length,
+    // and an inline placeholder can fill MaxChars with no terminator.
+    if (len > cap - 1) len = cap - 1;
+    memcpy(out, s, len);
+    out[len] = '\0';
+}
+
+static void updateBlurb(Boot* b, float dt)
+{
+    char live[BLURB_MAX];
+
+    liveBlurb(b, live, sizeof live);
+    if (strcmp(live, g_blurbShown) != 0) {
+        g_blurbFade -= dt / 0.10f;
+        if (g_blurbFade <= 0.0f) {
+            g_blurbFade = 0.0f;
+            memcpy(g_blurbShown, live, sizeof g_blurbShown);
+        }
+    } else if (g_blurbFade < 1.0f) {
+        g_blurbFade += dt / 0.20f;
+        if (g_blurbFade > 1.0f) g_blurbFade = 1.0f;
+    }
+}
+
+// The flow's screen name, upper-cased for the header. The font has the
+// glyphs -- most of the frontend's own labels are upper case.
+static void botTitle(char* out, size_t cap, const char* s)
+{
+    size_t i = 0;
+    if (!s) s = "";
+    for (; s[i] && i + 1 < cap; i++)
+        out[i] = (s[i] >= 'a' && s[i] <= 'z') ? (char)(s[i] - 32) : s[i];
+    out[i] = '\0';
+}
+
+// title along the top, `body` wrapped and centred in the middle, `hint`
+// along the bottom. The body is passed in rather than read from
+// g_blurbShown because the two bring-up modes have no blurb and something
+// has to fill the panel there.
+static void drawBotPanel(UIRenderer* ui, const char* title, const char* body,
+                         float alpha, const char* hint)
+{
+    UIWrapStyle text  = botStyle(ui, BOT_TEXT, 19.0f, true);
+    UIWrapStyle small = botStyle(ui, BOT_DIM, 12.0f, false);
+    float       boxW  = BOT_W - BOT_PAD * 2.0f;
+    float       h, y;
+
+    C2D_DrawRectSolid(0.0f, 0.0f, 0.0f, BOT_W, BOT_H, BOT_BACK);
+    C2D_DrawRectSolid(0.0f, 0.0f, 0.0f, BOT_W, BOT_HDR, BOT_HEAD);
+    C2D_DrawRectSolid(0.0f, BOT_HDR, 0.0f, BOT_W, 2.0f, BOT_ACCENT);
+    if (title && *title)
+        uirender_draw_wrapped(ui, title, 0, &small, BOT_PAD, 9.0f, boxW,
+                              1.0f);
+
+    // The line is centred as a block between the header and the footer
+    // rule rather than pinned under the header: one short sentence floating
+    // in the middle of the panel reads as deliberate, and a three-line one
+    // still has the room.
+    text.lineGap = 4.0f;
+    h = uirender_wrap_height(ui, body, 0, &text, boxW);
+    y = BOT_HDR + 2.0f + (BOT_FOOT - BOT_HDR - 2.0f - h) * 0.5f;
+    if (y < BOT_HDR + 12.0f) y = BOT_HDR + 12.0f;
+    uirender_draw_wrapped(ui, body, 0, &text, BOT_PAD, y, boxW, alpha);
+
+    C2D_DrawRectSolid(BOT_PAD, BOT_FOOT, 0.0f, boxW, 1.0f, BOT_RULE);
+    if (hint && *hint)
+        uirender_draw_wrapped(ui, hint, 0, &small, BOT_PAD, BOT_FOOT + 9.0f,
+                              boxW, 1.0f);
+}
+
 int main(int argc, char** argv)
 {
     (void)argc; (void)argv;
 
     gfxInitDefault();
-    consoleInit(GFX_BOTTOM, NULL);
     initPlatformPerf();
     logOpen();
 
@@ -889,6 +1082,7 @@ int main(int argc, char** argv)
               (unsigned long)(g_heapInfo.linearGot / 1024));
 
     if (!gamedata_init()) {
+        fatalConsole();
         printf("\nNo game data found.\n");
         printf("Put the extracted disc on the SD card at\n");
         printf("  sdmc:/3ds/NFSHP2-3DS/data\n");
@@ -916,6 +1110,7 @@ int main(int argc, char** argv)
     C3D_RenderTarget* top = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8,
                                                    GPU_RB_DEPTH24_STENCIL8);
     if (!top) {
+        fatalConsole();
         printf("\nno render target.\n");
         waitForExit();
         C2D_Fini();
@@ -925,12 +1120,47 @@ int main(int argc, char** argv)
     }
     C3D_RenderTargetSetOutput(top, GFX_TOP, GFX_LEFT,
                               kDisplayTransferFlags);
+    // No depth buffer on this one: nothing 3D is ever drawn to it.
+    g_bot = C2D_CreateScreenTarget(GFX_BOTTOM, GFX_LEFT);
+    if (!g_bot) {
+        fatalConsole();
+        printf("\nno bottom render target.\n");
+        waitForExit();
+        C2D_Fini();
+        C3D_Fini();
+        gfxExit();
+        return 1;
+    }
 
     static UIRenderer ui;
     uirender_init(&ui, 400.0f, 240.0f);
     addBundle(&ui, BUNDLE_FRONTEND);
     addBundle(&ui, BUNDLE_GLOBAL);
     addBundle(&ui, BUNDLE_INGAME);
+
+    // The blurb moves to the bottom screen, so the top screen stops drawing
+    // it -- and stops drawing the bar tAnimatedBlurb wipes it out with,
+    // which on its own over an empty strip is just a flash of grey. The
+    // animations still run and still move the object; this is a draw-time
+    // skip, so nothing has to know.
+    uirender_hide_object(&ui, BSCR_OBJ_SCROLLING_TEXT);
+    uirender_hide_object(&ui, BSCR_OBJ_WHITEOUT_BAR);
+
+    // FONT_A is the frontend's body face -- 357 of the disc's 934 text
+    // objects use it -- and the panel is its only user here. A bundle
+    // without it falls the panel back to whatever font loaded first, which
+    // is worth knowing about rather than drawing nothing.
+    {
+        UIWrapStyle probe;
+        memset(&probe, 0, sizeof probe);
+        probe.fontHash = bchunk_hash("FONT_A");
+        probe.scale    = 1.0f;
+        if (uirender_line_height(&ui, &probe) > 0.0f) {
+            g_botFont = probe.fontHash;
+        } else {
+            logPrintf("FONT_A missing; the bottom screen takes what it can\n");
+        }
+    }
 
     int language = 0;
 
@@ -1025,9 +1255,12 @@ int main(int argc, char** argv)
                   g_geo.hasGlobalPack ? "open" : "missing");
     }
 
-    printf("\nD-pad: menu  A: select  START: start  B: back\n");
-    printf("SELECT: screen viewer, then geometry\n");
-    printf("In the viewer, B: scrolling-texture demo\n");
+    // The bottom screen prints the controls itself now, so these are for
+    // the log -- and for the console, in the half second before the first
+    // frame paints over it.
+    logPrintf("D-pad: menu  A: select  START: start  B: back\n");
+    logPrintf("SELECT: screen viewer, then geometry\n");
+    logPrintf("In the viewer, B: scrolling-texture demo\n");
     // The marker tools/run_azahar_test.ps1 greps for: past this line the
     // bundles are resident, the flow is running and frames are being drawn.
     logLine("entering main loop");
@@ -1130,33 +1363,45 @@ int main(int argc, char** argv)
             // vsynced below, so the timestep is a frame.
             bgf_frame(&g_flow, BOOT_DT);
 
+            // This used to be five lines of console on the bottom screen.
+            // The bottom screen is the blurb's now, and the flow's state is
+            // something only a developer reads, so it goes to the log -- on
+            // the same edge it used to repaint on, which makes it a trace of
+            // what changed rather than a snapshot of where it ended up.
             if (redraw) {
                 redraw = 0;
                 const BMenuItem* item =
                     g_boot.hasMenu ? bmenu_current(&g_boot.menu) : NULL;
-                printf("\x1b[s\x1b[16;1H");
-                printf("state %-20s          \n",
-                       bgf_state_name(&g_flow, g_flow.current));
-                printf("screen %-24s %08lx\n",
-                       g_flow.screen ? g_flow.screen->name : "-",
-                       (unsigned long)g_boot.screenHash);
-                printf("stack %d  menu %2d items, on MENUITEM_%-2d   \n",
-                       g_flow.stack.index,
-                       g_boot.hasMenu ? g_boot.menu.numItems : 0,
-                       item ? (int)item->itemID : -1);
-                printf("last %-12s  clock %lu/%lu       \n",
-                       messageName(g_lastMsg),
-                       (unsigned long)g_flow.realTime,
-                       (unsigned long)g_flow.realTimer);
-                printf("%-40s\n", g_boot.note);
-                printf("\x1b[u");
+                logLine("flow state %s screen %s %08lx stack %d menu %d "
+                        "item %d last %s clock %lu/%lu note %s",
+                        bgf_state_name(&g_flow, g_flow.current),
+                        g_flow.screen ? g_flow.screen->name : "-",
+                        (unsigned long)g_boot.screenHash,
+                        g_flow.stack.index,
+                        g_boot.hasMenu ? g_boot.menu.numItems : 0,
+                        item ? (int)item->itemID : -1,
+                        messageName(g_lastMsg),
+                        (unsigned long)g_flow.realTime,
+                        (unsigned long)g_flow.realTimer,
+                        g_boot.note);
             }
+
+            updateBlurb(&g_boot, BOOT_DT);
 
             C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
             C2D_TargetClear(top, clear);
             C2D_SceneBegin(top);
             if (g_boot.screen && g_boot.project)
                 uirender_draw_screen(&ui, g_boot.project, g_boot.screen, 1.0f);
+            C2D_TargetClear(g_bot, BOT_BACK);
+            C2D_SceneBegin(g_bot);
+            {
+                char title[48];
+                botTitle(title, sizeof title,
+                         g_flow.screen ? g_flow.screen->name : "");
+                drawBotPanel(&ui, title, g_blurbShown, g_blurbFade,
+                             "A select   B back   START go   SELECT viewer");
+            }
             C3D_FrameEnd(0);
             continue;
         }
@@ -1169,27 +1414,24 @@ int main(int argc, char** argv)
             geoview_input(&g_geo, kDown, hidKeysHeld(), pad.dx, pad.dy,
                           BOOT_DT);
 
-            printf("\x1b[s\x1b[16;1H");
-            printf("car %2d/%-2d %-20s        \n",
+            devLog(0, "geo car %d/%d %s",
                    g_geo.numCars ? g_geo.curCar + 1 : 0, g_geo.numCars,
                    g_geo.numCars ? g_geo.car[g_geo.curCar] : "-");
-            printf("solid %2d/%-2d %-24s\n",
+            devLog(1, "geo solid %d/%d %s  %d tris  %d textures, %d missing",
                    g_geo.numSolids ? g_geo.curSolid + 1 : 0, g_geo.numSolids,
-                   geoview_solid_name(&g_geo));
-            printf("%5d tris  %2d textures, %d missing   \n",
+                   geoview_solid_name(&g_geo),
                    g_geo.drawAll ? g_geo.loadedTris
                                  : g_geo.mesh[g_geo.curSolid].numTris,
                    g_geo.numTextures, g_geo.missingTextures);
-            printf("%-40s\n", g_geo.note);
+            devLog(2, "geo note %s", g_geo.note);
             // The camera is framed from the solid's own AABB, so when the
             // top screen is empty these five numbers say whether the model
             // is off camera or was never there.
-            printf("at %.1f %.1f %.1f r %.2f d %.2f v %d    \n",
+            devLog(3, "geo at %.1f %.1f %.1f r %.2f d %.2f v %d",
                    g_geo.centre[0], g_geo.centre[1], g_geo.centre[2],
                    g_geo.radius, g_geo.dist,
                    g_geo.mesh[g_geo.curSolid].numVerts);
-            printf("L/R car  <> solid  ^v zoom  A all  X tex \n");
-            printf("\x1b[u");
+
             C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
             // Not C2D_TargetClear: this target has a depth buffer and the
             // clear has to reach it, or the second frame tests against the
@@ -1205,6 +1447,16 @@ int main(int argc, char** argv)
             // explicitly because a 2D quad has nothing sensible to compare.
             C2D_Prepare();
             C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
+
+            C2D_TargetClear(g_bot, BOT_BACK);
+            C2D_SceneBegin(g_bot);
+            // FONT_A has no underscore and no angle brackets -- a glyph
+            // the font does not have is dropped, and a file name with a
+            // character missing is worse than not naming the file.
+            drawBotPanel(&ui, "GEOMETRY VIEWER",
+                         "Car, solid and camera numbers go to the debug "
+                         "log on the SD card.", 1.0f,
+                         "L/R car   D-pad solid, zoom   A all   X tex");
             C3D_FrameEnd(0);
             continue;
         }
@@ -1334,59 +1586,55 @@ int main(int argc, char** argv)
             }
         }
 
-        if (vScrollMode) redraw = 1;    // the clock below moves every frame
-        if (redraw) {
-            redraw = 0;
+        redraw = 0;                     // nothing on screen waits for it now
+        {
             const BMenuItem* item = vHasMenu ? bmenu_current(&vMenu) : NULL;
-            printf("\x1b[s\x1b[16;1H");
-            printf("viewer %3lu/%lu  hash %08lx  %lu objects   \n",
+            devLog(4, "viewer %lu/%lu  hash %08lx  %lu objects",
                    (unsigned long)(vIndex + 1), (unsigned long)screenCount,
                    (unsigned long)(vScr ? vScr->nameHash : 0),
                    (unsigned long)(vScr ? vScr->count : 0));
-            printf("lang %-24s\n", kLanguages[language] + 10);
-            printf("menu %2d items, on MENUITEM_%-2d        \n",
+            devLog(5, "viewer lang %s  menu %d items, on MENUITEM_%d  last %s",
+                   kLanguages[language] + 10,
                    vHasMenu ? vMenu.numItems : 0,
-                   item ? (int)item->itemID : -1);
-            printf("last %-12s                       \n",
-                   messageName(g_lastMsg));
-            printf("textures %d cached, %d missing; fonts %d missing \n",
+                   item ? (int)item->itemID : -1, messageName(g_lastMsg));
+            devLog(6, "viewer textures %d cached, %d missing; "
+                   "fonts %d missing",
                    ui.numTextures, ui.missingTextures, ui.missingFonts);
-            // On a line of its own rather than in the block above: the
-            // tally line is wider than the console and wraps, so anything
-            // printed after it lands a row lower than it did last time and
-            // the two overprint each other. A scroll offset read off a
-            // screenshot has to be the offset that drew that frame.
-            {
-                const char* nm = !vScrollMode ? "off"
-                    : (vScrollMode == 1 ? "ROADLINES" : "SCREEN_LINES");
-                float du = 0.0f, dv = 0.0f;
-                int   ty = 0;
-                if (vScrollMode) {
-                    uint32_t h = bchunk_hash(nm);
-                    for (int i = 0; i < ui.numTextures; i++) {
-                        if (ui.textures[i].hash != h) continue;
-                        ty = ui.textures[i].scrollType;
-                        du = texpack_scroll_axis(ui.scrollTime,
-                                                 ui.textures[i].scrollS, ty,
-                                                 ui.textures[i].scrollStep);
-                        dv = texpack_scroll_axis(ui.scrollTime,
-                                                 ui.textures[i].scrollT, ty,
-                                                 ui.textures[i].scrollStep);
-                        break;
-                    }
+            if (vScrollMode) {
+                // Twice a second, not every frame: the offsets move
+                // continuously and the point is that they are moving.
+                const char* nm = vScrollMode == 1 ? "ROADLINES"
+                                                  : "SCREEN_LINES";
+                uint32_t    h  = bchunk_hash(nm);
+                for (int i = 0; i < ui.numTextures; i++) {
+                    if (ui.textures[i].hash != h) continue;
+                    devLog(7, "scroll %s ty%d t%.1f du %+.4f dv %+.4f", nm,
+                           ui.textures[i].scrollType,
+                           (double)((int)(ui.scrollTime * 2.0f) * 0.5f),
+                           (double)texpack_scroll_axis(
+                               ui.scrollTime, ui.textures[i].scrollS,
+                               ui.textures[i].scrollType,
+                               ui.textures[i].scrollStep),
+                           (double)texpack_scroll_axis(
+                               ui.scrollTime, ui.textures[i].scrollT,
+                               ui.textures[i].scrollType,
+                               ui.textures[i].scrollStep));
+                    break;
                 }
-                printf("\x1b[s\x1b[26;1HB %-12s ty%d t%8.2f\n"
-                       "  du %+.4f dv %+.4f  \x1b[u",
-                       nm, ty, (double)ui.scrollTime,
-                       (double)du, (double)dv);
             }
-            printf("\x1b[u");
         }
 
         C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
         C2D_TargetClear(top, clear);
         C2D_SceneBegin(top);
         uirender_draw_screen(&ui, vProj, vScr, 1.0f);
+
+        C2D_TargetClear(g_bot, BOT_BACK);
+        C2D_SceneBegin(g_bot);
+        drawBotPanel(&ui, "SCREEN VIEWER",
+                     "Screen, language and texture numbers go to the debug "
+                     "log on the SD card.", 1.0f,
+                     "L/R screen   X language   B scroll   START exit");
         C3D_FrameEnd(0);
     }
 

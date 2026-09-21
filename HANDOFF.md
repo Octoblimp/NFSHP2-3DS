@@ -2687,3 +2687,63 @@ the boom. The viewer is wired the same way.
   leaving the 4:3 sides empty, and `ChallengeBeACop` -- which the flow
   changes to and then reports `unregistered`, the same shape as the
   `Options` gap from session 9.
+
+### The second screen finally does something
+
+Three requests arrived while task 23 was running. Two are done.
+
+**32, the aspect.** `UIView` carried one `scale` and centred what it drew;
+it now carries a `scaleX` and a `scaleY` with both origins at 0, so the
+disc's 640x480 maps onto the top screen by stretching -- 400/640 across,
+240/480 down -- instead of fitting inside it with 20 px of nothing down
+each side. Only the final quad is stretched: object positions, hit boxes,
+the menu and the scroll demo all still work in the space the disc authored,
+and the movie plane is a bitmap object like any other, so it comes along.
+
+**34, the blurb.** The one-line description under a menu is `SCROLLING_TEXT`
+driven by `tAnimatedBlurb`. It is about ten pixels tall in a 480-line frame,
+which is five on the top screen; the zoom of a frontend screenshot that
+settled it is unreadable at 6x. So it is off the top screen now
+(`uirender_hide_object` skips it and the `WHITEOUT_BAR` it is wiped out
+with, at layer-walk time rather than by writing the visibility field the
+animation owns) and the bottom screen is given over to it: the screen's name
+along the top under the frontend's red, the line wrapped and centred in
+FONT_A at a 19 px line height, the controls along the bottom.
+
+Two things were worth getting right rather than fast:
+
+* **Where the line lives.** Not at the `setBlurb` hook. `tAnimatedBlurb`
+  sets `LanguageID` back to 0 at the end of its wipe and *prints the
+  resolved translation into the object* (`banim.c:620`), so the hook sees
+  only some of the changes. The panel reads the object every frame instead,
+  through a new `uirender_object_string()`, and crossfades when the string
+  differs from the one it is drawing. That also means it tracks the wipe's
+  own 0.5 s debounce for free: holding a direction on the menu still reads
+  as one change, not one per item.
+* **The wrap does not reproduce the shipped bug.** `RenderCharacter`
+  multiplies a glyph's width by `ScaleX` twice (`0x0013f750` and
+  `0x0013f794`) and the screen path keeps it, because the disc's screens
+  were laid out with it on screen. A wrap width has to agree with the width
+  actually laid down, so `uirender_draw_wrapped()` does not -- and it counts
+  kerning when it measures, which `GetScaledWidth` also does not. Both
+  divergences are in `docs/formats/flailer-ui.md`.
+
+**35, no console on the bottom screen.** The first run of the panel came out
+as two half-width copies of itself under a teal dither, which is what
+`consoleInit(GFX_BOTTOM)` and citro3d look like sharing a framebuffer: the
+console switches that screen to RGB565 and citro3d keeps presenting BGR8
+into it. The console is gone. The three bring-up overlays it carried --
+flow state, geometry viewer, screen viewer -- go to `nfshp2_debug.txt`
+instead, one slot per line and only when the line changes, because at
+Azahar's 140 FPS a line a frame is a megabyte a minute of identical text.
+The two viewer modes get the same panel with their own controls on it, and
+the only console the port still creates is on the *top* screen, in the three
+paths that are about to exit.
+
+Looked at, not just diffed: `run_azahar_test.ps1` PASS (13 shots, 12 blurb
+changes, 20 textures cached, 0 missing, 0 fonts missing -- one more texture
+than before, which is FONT_A's glyph sheet) and `run_azahar_geo.ps1` 18
+shots with the zoom-creep test still passing at 0.015/255. The first pass of
+the panel also said the numbers were "in nfshp2_debug.txt"; FONT_A has no
+underscore, the glyph was dropped, and the screen confidently named a file
+that does not exist. It says "the debug log on the SD card" now.
