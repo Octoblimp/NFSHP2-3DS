@@ -90,20 +90,31 @@ bMatrix4 *steering_get_matrix(const Steering *s, int32_t wheel);
 
 // 144 bytes. The base is 12 and the array starts at 16, so the PS2 pads
 // 12..15 to get bMatrix4 onto a quadword boundary.
+//
+// That pad has to be written down rather than left to the compiler.
+// bMatrix4 is four floats and 4-aligned on both of our targets -- nothing
+// gives it the PS2's quadword alignment -- so an implicit pad is exactly
+// four bytes of nothing on ARM, where the array lands at 12 instead of
+// 16. It is only on a 64-bit host that it appears to work, and then by
+// accident: the two widened pointers have already pushed the base to 24
+// and supplied the four bytes for their own reason. Hence the pad below
+// is conditional -- four bytes on a 32-bit target, none on a 64-bit one,
+// where the slack has paid for it already.
 typedef struct TwoWheelAckermanSteering {
-    Steering base;                            //   0
+    Steering base;                              //   0
+#if __SIZEOF_POINTER__ == 4
+    uint8_t  _pad0[4];                          //  12
+#endif
     bMatrix4 AckermanMatrix[ACKERMAN_MATRICES]; //  16
 } TwoWheelAckermanSteering;
 
-// A caveat on checking this one with a single slack term. On a 64-bit
-// host the base grows to 24 -- two 8-byte pointers, a word, and four
-// bytes of tail padding to keep the struct 8-aligned -- and the array
-// lands at 24 = 16 + 2 * STEERING_SLACK, so the arithmetic works out.
-// But the two paddings exist for different reasons: the PS2's is
+// A caveat on checking this one with a single slack term. The assert
+// below holds on both targets now, but the two paddings it folds into
+// `2 * STEERING_SLACK` exist for different reasons: the PS2's is
 // quadword alignment for bMatrix4, the host's is pointer alignment for
-// the struct. They happen to come to the same number here. The assert is
-// still worth having; it just proves less than it looks like it does,
-// and the transcript is what carries the rest.
+// the struct. They come to the same number only by coincidence. The
+// assert is still worth having; it just proves less than it looks like
+// it does, and the transcript is what carries the rest.
 #ifndef STEERING_NO_ASSERT
 typedef char steering_layout_check[
     (offsetof(Steering, CTI) == 0
