@@ -102,10 +102,17 @@ and so replaced every boot.
    else, and a name with no row is a black top screen, not a no-op.
 
 **Phase 4 constraint, from the user:** the gameplay HUD is to be designed for
-**two screens from the start** -- some readouts on the bottom screen rather
-than all stacked on the top one, to keep the view of the road clear. Which
-elements go below is not decided; ask first. It is written at the head of
-Phase 4 in `TASKS.md` too.
+**two screens from the start** -- readouts on the bottom screen rather than
+all stacked on the top one, to keep the view of the road clear.
+
+The split is **decided** (2026-09-21, asked and answered): **bottom screen
+takes the minimap, lap/position and objective text; the top keeps the
+speedo/tach and the pursuit meter**, because those two are monitored
+continuously rather than glanced at and belong in the same eyeline as the
+road. Build tasks 25-27's HUD to that from the start rather than making a
+top-screen HUD and splitting it later. `uirender.c` (citro2d) is the home
+for the bottom-screen widgets; `georender.c` (citro3d) owns the top. Also
+at the head of Phase 4 in `TASKS.md`.
 
 ## What not to trust
 

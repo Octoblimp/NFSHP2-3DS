@@ -916,9 +916,15 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
 The user wants gameplay readouts split across the top and bottom screens
 rather than stacked on the top one, to keep the view of the road clear --
 the PS2 drew one 4:3 screen with everything on it and the 3DS top screen is
-400x240. Which elements go below is not decided yet (candidates: minimap,
-lap/position, speedo/tach, pursuit meter, objective text); ask before
-implementing. Design tasks 25-27's HUD as two surfaces from the start rather
+400x240.
+
+**Decided (2026-09-21, by the user): the bottom screen takes the minimap,
+lap/position and the objective text. The top screen keeps the speedo/tach
+and the pursuit meter**, because those two are monitored continuously rather
+than glanced at, and they belong in the same eyeline as the road. The
+remaining candidate list is settled; do not re-open it without asking.
+
+Design tasks 25-27's HUD as two surfaces from the start rather
 than building a top-screen HUD and splitting it afterwards. `uirender.c` is
 citro2d and is the natural home for the bottom-screen widgets; `georender.c`
 is citro3d and owns the top.
