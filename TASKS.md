@@ -959,10 +959,58 @@ is citro3d and owns the top.
         `DoSnapshot` (`0x001b6230`) is **not** ported -- it needs
         `ReplaySnapshot`.
 
-        Still open in this task: `Car` (2016 B), `PhysicsCar` (116 B),
-        `Suspension` (176 B), `Wheel` (400 B), `Engine` (92 B),
-        `CarDriver` (560 B) and the rest of `CarTypeInfo` (1376 B, of which
-        only the `CenterOfGravity` + `WheelInfo[4]` prefix is decoded).
+        **Also done since:** `Engine.obj` + `Table`
+        (`docs/formats/car-engine.md`, `tools/engine_check.py`; 8
+        scenarios, 413 lines, 0 differ; 56 mutations, 54 caught, 2
+        equivalent). **`CarTypeInfo.obj`**
+        (`docs/formats/car-type-info.md`, `tools/cartypeinfo_check.py`; 4
+        scenarios, 177 lines, 0 differ; 41 mutations, 41 caught).
+        **`CarDriver.obj` plus `DriveTarget`'s layout**
+        (`docs/formats/car-driver.md`, `tools/cardriver_check.py`; 5
+        scenarios, 118 lines, 0 differ; 48 mutations, 48 caught).
+        **`Steering.obj` + `TwoWheelAckermanSteering.obj`**
+        (`docs/formats/car-steering.md`, `tools/steering_check.py`; 5
+        scenarios, 873 lines, 0 differ; 44 mutations, 43 caught, 1
+        equivalent).
+
+        **Corrected scope -- read this before planning the rest.** An
+        earlier note in this task put the remainder at "178 functions,
+        16680 bytes". That was wrong by an order of magnitude: the tally
+        behind it matched only a narrow symbol pattern and missed most
+        methods. Re-measured by demangling every symbol to its owning
+        class, what is left is:
+
+        | Class | Funcs | Bytes |
+        |-------|------:|------:|
+        | Car | 80 | 22876 |
+        | DriveTarget (methods) | 28 | 8636 |
+        | PhysicsCar | 16 | 8496 |
+        | Wheel | 73 | 7112 |
+        | Mellovator | 31 | 5420 |
+        | DriveTrain | 38 | 4920 |
+        | RigidBody | 47 | 4508 |
+        | MellowMover | 13 | 3096 |
+        | Suspension | 29 | 1944 |
+        | TwoWheelAckermanSteering | 7 | 624 |
+        | Steering | 4 | 116 |
+
+        ~67.7 KB across ~366 functions, roughly 19x the CarState slice.
+        At the verification standard this repo holds -- exact port,
+        independent model, transcript diff, mutation pass with every
+        survivor argued -- that is several sessions, not one.
+
+        **RigidBody and DriveTarget are prerequisites the task list never
+        named.** Suspension, PhysicsCar and Car all need RigidBody;
+        CarDriver needed DriveTarget's record, whose layout is now done
+        and whose 28 methods are not.
+
+        Suggested order, smallest and most independent first, each
+        verified and committed on its own: ~~Steering +
+        TwoWheelAckermanSteering~~ (done), then RigidBody,
+        Suspension, Wheel, DriveTrain, DriveTarget's methods,
+        PhysicsCar, Car, with Mellovator and MellowMover last.
+
+        That leaves ~67.0 KB across ~355 functions still to go.
 26. [ ] Race/event logic, cop AI, pursuit (roadblocks, spike strips) --
         `HotPursuitEvent` already seen in the `.mdebug` strings survey
 27. [ ] Track rendering/streaming, collision. Carries a debt from task 24:
