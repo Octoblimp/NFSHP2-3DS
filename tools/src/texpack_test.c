@@ -3,7 +3,9 @@
 // Builds "3DS Files/source/texpack.c" and "bchunk.c" for the host and prints
 // one line per texture:
 //
-//     <index> <hash> <name> <width> <height> <bpp> <levels> <crc32>
+//     <index> <hash> <name> <width> <height> <bpp> <levels> <scroll> <crc32>
+//
+// plus one `scroll ...` line per UV-scrolling texture -- see scrollline.h.
 //
 // tools/texpack_check.py prints the same table from tools/texture_convert.py
 // and diffs the two, so the C decoder that will run on the 3DS is checked
@@ -21,6 +23,7 @@
 #include <string.h>
 
 #include "texpack.h"
+#include "scrollline.h"
 
 static uint32_t crc32_buf(const uint8_t* p, size_t n)
 {
@@ -82,11 +85,13 @@ int main(int argc, char** argv)
     for (uint32_t i = 0; i < tp.count; i++) {
         TexInfo ti;
         if (!texpack_get(&tp, i, &ti)) continue;
+        print_scroll_line(i, &ti);
 
         size_t need = texpack_decode_size(&ti, level);
         if (need == 0) {
-            printf("%u %08x %s - - %u %u skip\n",
-                   i, ti.hash, ti.name, ti.bpp, ti.levels);
+            printf("%u %08x %s - - %u %u %d skip\n",
+                   i, ti.hash, ti.name, ti.bpp, ti.levels,
+                   (int)ti.scrollType);
             continue;
         }
         if (need > cap) {
@@ -97,12 +102,14 @@ int main(int argc, char** argv)
         uint32_t w = 0, h = 0;
         texpack_level(&ti, level, &w, &h, NULL, NULL);
         if (!texpack_decode(&tp, &ti, level, rgba, cap)) {
-            printf("%u %08x %s %u %u %u %u skip\n",
-                   i, ti.hash, ti.name, w, h, ti.bpp, ti.levels);
+            printf("%u %08x %s %u %u %u %u %d skip\n",
+                   i, ti.hash, ti.name, w, h, ti.bpp, ti.levels,
+                   (int)ti.scrollType);
             continue;
         }
-        printf("%u %08x %s %u %u %u %u %08x\n", i, ti.hash, ti.name, w, h,
-               ti.bpp, ti.levels, crc32_buf(rgba, need));
+        printf("%u %08x %s %u %u %u %u %d %08x\n", i, ti.hash, ti.name, w,
+               h, ti.bpp, ti.levels, (int)ti.scrollType,
+               crc32_buf(rgba, need));
     }
     free(rgba);
     free(buf);

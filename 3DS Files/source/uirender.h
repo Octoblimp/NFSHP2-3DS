@@ -47,6 +47,11 @@ typedef struct {
     // own rather than into the bundle's.
     C3D_Tex* override;
     uint16_t overrideW, overrideH;
+
+    // The TextureInfo scroll fields, kept so draw_bitmap() does not have to
+    // reopen the pack every frame. See texpack_scroll().
+    int8_t   scrollType;
+    float    scrollS, scrollT, scrollStep;
 } UITexture;
 
 typedef struct {
@@ -77,6 +82,7 @@ typedef struct {
     bool      hasLang;
 
     float     targetW, targetH;   // the C3D render target, e.g. 400x240
+    float     scrollTime;         // seconds, for UV-scrolling textures
     int       missingTextures;    // counters, for a bring-up overlay
     int       missingFonts;
     int       missingStrings;
@@ -105,6 +111,13 @@ BUIScreen* uirender_screen_at(UIRenderer* r, uint32_t index, BUI** outUI);
 
 // How many screens uirender_screen_at() can reach.
 uint32_t uirender_screen_count(const UIRenderer* r);
+
+// The clock UV-scrolling textures run off. RenderSingleFlailerBitmap
+// (0x00140538) reads the global RealTimer and scales it by 0.00025, i.e.
+// RealTimer counts 1/4000 s; gameflow.c keeps the same counter, so a caller
+// with a GameFlow passes gf->realTimer * 0.00025f. Nothing scrolls until
+// this is called, because it starts at zero and a zero time scrolls nothing.
+void uirender_set_time(UIRenderer* r, float seconds);
 
 // Draws `tex` wherever `hash` would be drawn, at `w` x `h`. Passing NULL for
 // `tex` puts the bundle's own texture back. This is how a movie reaches the

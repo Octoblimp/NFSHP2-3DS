@@ -174,6 +174,71 @@ python tools/texture_convert.py out/TRACKS/TEX12LOCATION.BIN --scroll
 `SCREEN_LINES` is the only type 2 on the disc, and the only texture whose
 `ScrollTimeStep` is not `1.0f`.
 
+#### Nothing on the disc draws either frontend one
+
+`ROADLINES` (`0x63d32d60`) and `SCREEN_LINES` (`0x2cd838f9`) occur **exactly
+once each in the whole of `extracted/`** -- in their own `0x30300003` record,
+and nowhere else. No Flailer bitmap references either hash, no other pack
+holds a copy, and neither the name nor the hash appears anywhere in
+`NFSHP2.ELF`. A texture the frontend actually draws occurs 16 or 17 times
+(`GRID_BLUEPRINT1` 16, `PANELMOVIE` 17), so the count is not a quirk of the
+search. `ZONE_PREVIEW_RIBBON` in `GLOBAL\INGAMEB.BUN` is unreferenced the
+same way.
+
+So an earlier guess that `SCREEN_LINES` is "the scanlines crawling up the menu
+background" is wrong, and is corrected in `HANDOFF.md` where it was made: the
+menu background is `GRID_BLUEPRINT1`, and these two are cut content. The
+port's UV scrolling is therefore correct-but-inert in the shipped frontend,
+and `main.c`'s screen viewer has a B key that points the current screen's
+bitmaps at each in turn through `FlailerBitmapChunk::ChangeTexture`, which is
+the only way to see the feature run at all.
+
+#### `SCREEN_LINES` could never have animated
+
+Its image is 8x256 of a single colour, RGB `(0, 54, 99)`, carrying its pattern
+entirely in alpha: rows of 162, 162, 220, 220, repeating -- **a period of four
+rows**. One scroll step moves `ScrollSpeedT` = -1/64 of the padded height,
+which for a 256-row texture already a power of two is `0.015625 * 256` =
+**exactly four rows**. Every step therefore lands on an identical phase, and
+the strobe is invisible -- on the PICA200, and equally on the GS. Frames
+captured a second apart in the viewer are bit-identical, which is the correct
+result rather than a missing offset; `ROADLINES` in the same run moves.
+
+#### The half-texel inset is not ported
+
+`RenderSingleFlailerBitmap` scales its eight UV floats by the image size,
+divides them by the power-of-two allocation, insets each corner by half a
+texel of that allocation (`±0.5/potW`, `±0.5/potH`) and only then adds the
+scroll offset. The port does the first, second and fourth of those. The inset
+applies to all 397 textures in `FRONTB.BUN` rather than the two that scroll,
+so it is a change to every UI quad on screen and belongs to its own
+verification pass; `uirender.c`'s `draw_bitmap()` says so at the site.
+
+The order matters more than the inset does: because the divide comes before
+the add, **the scroll offset is in the padded texture's normalised space**,
+not the image's. A 3DS caller over `texpack_upload()` must therefore add it
+after converting pixels to UVs, which is what `draw_bitmap()` does. And
+because `subtex_from_pixels()` flips T to citro2d's axis, the engine's `+dv`
+is `-dv` there.
+
+#### Verified on the emulator, not just cross-checked
+
+`tools/run_azahar_scroll.ps1` drives the screen viewer and captures the
+offsets and the frame they drew together, because a cross-check between
+`texpack_scroll_axis()` and `texture_convert.py`'s `scroll_uv()` only proves
+the two agree.
+
+`ROADLINES`, type 1, speed 0.78125: at t = 50.34, 53.16 and 56.15 s the device
+reported du = +0.3293, +0.5336 and +0.8668, each the fractional part of
+`t * 0.78125` by hand. The screen's quad is 320 of the top screen's 400 px
+wide, 618 px in the capture; between those frames du grew by 0.2043 and
+0.3332, which predicts the image travelling 126 px and 206 px to the left.
+Circular cross-correlation of two separate row bands measures **126 px and
+206 px**. That it correlates *circularly* is the other half of the result: the
+texture wraps through the allocation, which is `GPU_REPEAT` on the scrolling
+axis working, and is why `find_texture()` sets it there and leaves the padded
+axis clamped.
+
 Everything else in the tail is inert on disc, and checked that way over all
 2,642 records: the `bTNode` at `0x00`, every pointer from `0x88` to `0x9c`,
 both VRAM addresses at `0xa0`/`0xa2`, and `UsedFlag` are zero in every single

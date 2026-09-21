@@ -298,6 +298,28 @@ bool bui_set_object_alpha(BUI* ui, uint32_t index, int corner, int alpha)
     return false;
 }
 
+// ChangeTexture__18FlailerBitmapChunki (0x0013eee0): repoints a bitmap at a
+// different texture by hash. The original then caches the resolved
+// TextureInfo* in the chunk at +60; the port resolves by hash through
+// uirender.c's own cache every draw and never reads that field, so it is
+// left alone rather than filled with a host pointer the chunk has no room
+// for. DirtyFlag 10 is the engine's own value here, distinct from the 6 and
+// 7 the colour setters use.
+//
+// Nothing in this build calls it -- FlailerChangeTexture (0x00142678) is the
+// wrapper, and no screen on the disc uses it -- so this exists for the
+// scrolling-texture demo in main.c, which is the only way to see a scrolling
+// texture on screen at all. Same caveat about a writable buffer.
+bool bui_set_bitmap_texture(BUI* ui, uint32_t index, uint32_t textureHash)
+{
+    uint8_t* p = writable(ui, index, 120);
+    if (!p || (int8_t)p[16] != BUI_TYPE_BITMAP) return false;
+    if (bchunk_u32(p + 56) == textureHash) return true;   // as the original
+    bchunk_put_u32(p + 56, textureHash);
+    p[19] = 10;
+    return true;
+}
+
 // The scale half of FlailerTextChunk::ScaleAboutCenter -- the position half
 // is the caller's, because only the renderer knows how wide the object is.
 // Same caveat about a writable buffer.

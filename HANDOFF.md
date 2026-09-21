@@ -1371,6 +1371,14 @@ in `ScrollTimeStep` quanta, and the result is the fractional part only.
 crawling up the menu background) and `ROADLINES` (type 1, S +0.78125). Nothing
 draws them animated yet; that belongs with task 18b.
 
+> **Corrected in Session 16.** "The scanlines crawling up the menu
+> background" was a guess and it is wrong twice over. The menu background is
+> `GRID_BLUEPRINT1`; both of these hashes occur exactly once in the whole of
+> `extracted/`, in their own record, so nothing on the disc draws either. And
+> `SCREEN_LINES` could not animate if it did: its alpha pattern repeats every
+> four rows and one step moves exactly four rows. See
+> `docs/formats/texture-pack.md`.
+
 ### Object names cracked, and three that did not
 
 New this session, by hash search: `SCROLLING_TEXT` (`0x75980cf0`),
@@ -2344,6 +2352,110 @@ strip and read by nothing.
 Task 16 (`bui.c`/`uirender.c`) back to `[x]` -- the outstanding part is 18b's
 two scrolling background textures, `SCREEN_LINES` and `ROADLINES`. That closes
 Phase 2. Then 22 (sound/DSP) onwards in order.
+
+Still carried: Phase 4's HUD is to be designed for **two screens** from the
+start, keeping the top screen's view of the road clear. Which elements go
+below is the user's call and has not been asked yet.
+
+---
+
+## Session 16 (2026-09-20) -- the scrolling textures, and what they turned out to be
+
+Task 16 was `[~]` on one outstanding item carried over from 18b: the two
+scrolling frontend background textures. It is `[x]` now, which closes Phase 2.
+
+### What got written
+
+* `texpack.h`/`texpack.c`: four scroll fields on `TexInfo` (`ScrollType` at
+  `0x79`, the two speeds at `0x7c`/`0x80`, `ScrollTimeStep` at `0x84`) and
+  `texpack_scroll_axis()` / `texpack_scroll()`, a port of
+  `TextureInfo::GetScroll` (`0x00100a60`).
+* `uirender.c`: `UITexture` carries the scroll fields, `find_texture()` puts
+  `GPU_REPEAT` on the scrolling axis (and only when the image fills that axis
+  of the padded allocation -- both of these do), `uirender_set_time()` takes
+  the clock, and `draw_bitmap()` offsets the subtexture after
+  `subtex_from_pixels()` rather than before, because the original divides by
+  the power-of-two size before adding.
+* `bui.c`: `bui_set_bitmap_texture()`, a port of
+  `FlailerBitmapChunk::ChangeTexture` (`0x0013eee0`), dirty byte 10 and all.
+  Nothing in this build calls the original; it exists so the viewer can point
+  a bitmap at a scrolling texture through the real draw path.
+* `main.c`: the viewer's B key cycles the current screen's bitmaps through
+  `ROADLINES`, `SCREEN_LINES` and back, sized to the screen, with a readout
+  line of its own carrying the clock and the two offsets.
+* `tools/src/scrollline.h`, shared by both texture harnesses, plus the
+  reference in `texpack_check.py`. The sample times are the point: a port
+  that reads all four fields correctly and *rounds* where `GetScroll`
+  truncates prints the same six fields and a different animation, and the
+  samples catch it (checked by making that exact change: 2 of 2 differ).
+  `texture_convert.py`'s `scroll_uv()` now rounds every intermediate to
+  single precision, because the EE has no double and neither does the port.
+
+### The two textures are cut content
+
+`ROADLINES` (`0x63d32d60`) and `SCREEN_LINES` (`0x2cd838f9`) occur **exactly
+once each in all of `extracted/`** -- their own `0x30300003` record. No
+Flailer bitmap, no second pack, and nothing in `NFSHP2.ELF`. A texture the
+frontend draws occurs 16 or 17 times, so the count means what it looks like.
+Session 9's guess that `SCREEN_LINES` is the menu background's scanlines is
+struck out above.
+
+And `SCREEN_LINES` could not have animated on the PS2 either: 8x256 of one
+colour with the pattern in alpha, `162,162,220,220` repeating -- period four
+rows -- while one step moves `0.015625 * 256` = exactly four rows. Every step
+lands on the same phase. Frames of it a second apart are bit-identical, and
+that is the right answer, not a missing offset.
+
+### Looking at it, which is the only thing that proves it
+
+`tools/run_azahar_scroll.ps1`. `ROADLINES` at t = 50.34, 53.16, 56.15 s: the
+device reported du = +0.3293, +0.5336, +0.8668, each the fractional part of
+`t * 0.78125` worked out by hand. du grew by 0.2043 then 0.3332 between the
+frames, which across the quad's 618 px in the capture predicts 126 px and
+206 px of travel leftwards; circular cross-correlation of two separate row
+bands measures 126 px and 206 px. `SCREEN_LINES` at t = 60.75, 63.53, 66.50:
+dv = -0.7188, -0.8125, -0.9688, each `frac(trunc(t/0.04) * -0.015625)` -- the
+type-2 truncation, on the device.
+
+That the correlation is *circular* is the other half: the texture wraps
+through the allocation instead of clamping, which is `GPU_REPEAT` doing its
+job on the scrolling axis.
+
+### Recorded, not fixed
+
+* **The half-texel inset.** `RenderSingleFlailerBitmap` insets every UV corner
+  by half a texel of the padded size before adding the scroll. The port does
+  not. It applies to all 397 textures in `FRONTB.BUN` rather than the two that
+  scroll, so it is a change to every UI quad and wants its own pass.
+* **`bgf_consider_start_demo_mode()` traces every frame once the idle timer
+  expires**, because the port's `startDemoMode` hook is a stub and never
+  changes state. That is two SD writes a frame; it slows the emulated app
+  enough that most `PostMessage` key presses fall inside one frame and are
+  never scanned, and it is why `run_azahar_scroll.ps1` presses SELECT up to
+  40 times. The fix belongs in `gameflow.c`, which `bootflow_check.py`
+  diffs transcripts of, so the Python reference has to move with it.
+
+  It makes `run_azahar_test.ps1` itself flaky, which cost a full
+  regression hunt this session. Two runs in a row came back PARTIAL --
+  once "reached the main menu, but not Cops On Mode Select", once
+  "movie played, never reached the main menu" -- both with 0 bracket
+  moves, and the two differed from each other, which is the tell. The
+  check that settled it: stash the source changes, rebuild at `0a58704`,
+  run -- PASS; restore, rebuild, run twice -- PASS, PASS. Three in a row
+  after two failures, so the verdict is load, not code. Both PARTIALs
+  followed a long `run_azahar_scroll.ps1` run on the same machine. A
+  PARTIAL from this harness is worth one re-run before it is believed;
+  a *repeatable* one, or one whose failure mode is the same twice, is
+  real.
+* **The bui setters are not cross-checked at all** -- `bui_check.py` covers
+  the parse path only, and `bui_set_bitmap_texture()` joins seven existing
+  setters outside it.
+
+### Next session
+
+Task 22, sound/DSP, then 23 Camera, 24 TrackRoute/Esp, 25 car sim, 26 race and
+cop AI, 27 track render/stream/collision, 28 New3DS perf, 29 save/options/
+sound mix, 30 split-screen, 31 the final CIA pass.
 
 Still carried: Phase 4's HUD is to be designed for **two screens** from the
 start, keeping the top screen's view of the road clear. Which elements go

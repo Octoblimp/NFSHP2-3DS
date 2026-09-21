@@ -200,6 +200,11 @@ bool bui_set_object_alpha(BUI* ui, uint32_t index, int corner, int alpha);
 // Writes ScaleX/ScaleY. Same caveat about a writable buffer.
 bool bui_set_object_scale(BUI* ui, uint32_t index, float sx, float sy);
 
+// Repoints a bitmap object at another texture by hash --
+// FlailerBitmapChunk::ChangeTexture (0x0013eee0). Same caveat about a
+// writable buffer.
+bool bui_set_bitmap_texture(BUI* ui, uint32_t index, uint32_t textureHash);
+
 // Replaces a text object's inline string, truncating to the room the chunk
 // has. Returns the number of characters kept, 0 if the object is not text.
 // Note this only shows through if LanguageID is 0: the renderer prefers the

@@ -2,7 +2,9 @@
 //
 // Prints exactly the table tools/src/texpack_test.c prints:
 //
-//     <index> <hash> <name> <width> <height> <bpp> <levels> <crc32>
+//     <index> <hash> <name> <width> <height> <bpp> <levels> <scroll> <crc32>
+//
+// plus one `scroll ...` line per UV-scrolling texture -- see scrollline.h.
 //
 // -- but produced by reading the pack off disk a texture at a time through
 // texsrc.c instead of holding the whole file in memory. tools/texsrc_check.py
@@ -29,6 +31,7 @@
 #include <string.h>
 
 #include "texsrc.h"
+#include "scrollline.h"
 
 static uint32_t crc32_buf(const uint8_t* p, size_t n)
 {
@@ -91,11 +94,13 @@ int main(int argc, char** argv)
         TexSrcEntry e;
         if (!texsrc_at(&ts, base + i, &e)) continue;
         const TexInfo* ti = &e.info;
+        print_scroll_line(i, ti);
 
         size_t need = texpack_decode_size(ti, level);
         if (need == 0) {
-            printf("%u %08x %s - - %u %u skip\n",
-                   i, ti->hash, ti->name, ti->bpp, ti->levels);
+            printf("%u %08x %s - - %u %u %d skip\n",
+                   i, ti->hash, ti->name, ti->bpp, ti->levels,
+                   (int)ti->scrollType);
             continue;
         }
         if (need > cap) {
@@ -112,13 +117,15 @@ int main(int argc, char** argv)
         if (!texsrc_stage(&ts, &e, level, &stage, &tp, &local)
             || !texpack_decode(&tp, &local, level, rgba, cap)) {
             free(stage);
-            printf("%u %08x %s %u %u %u %u skip\n",
-                   i, ti->hash, ti->name, w, h, ti->bpp, ti->levels);
+            printf("%u %08x %s %u %u %u %u %d skip\n",
+                   i, ti->hash, ti->name, w, h, ti->bpp, ti->levels,
+                   (int)ti->scrollType);
             continue;
         }
         free(stage);
-        printf("%u %08x %s %u %u %u %u %08x\n", i, ti->hash, ti->name, w, h,
-               ti->bpp, ti->levels, crc32_buf(rgba, need));
+        printf("%u %08x %s %u %u %u %u %d %08x\n", i, ti->hash, ti->name, w,
+               h, ti->bpp, ti->levels, (int)ti->scrollType,
+               crc32_buf(rgba, need));
     }
     free(rgba);
     texsrc_close(&ts);

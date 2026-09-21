@@ -319,8 +319,9 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         independent confirmation that `ShouldSeeLegalMumboJumbo` really is
         `return 0` and the screen never shipped. All of it is in
         `docs/formats/boot-flow.md`.
-16. [~] Reimplement bWare's menu/UI system (`source/bui.c` + `uirender.c`).
-        **The data half is done and on screen.** `bui.c` parses the
+16. [x] Reimplement bWare's menu/UI system (`source/bui.c` + `uirender.c`).
+        **Done, including the UV scrolling that was the last thing out, so
+        Phase 2 is closed.** `bui.c` parses the
         `0x80010200` tree; `uirender.c` draws a screen through citro2d with
         real textures, real fonts and real translated strings; `main.c` is a
         viewer that pages through all 76 screens in any of the 8 languages.
@@ -338,7 +339,46 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         Both are written up in `docs/formats/flailer-ui.md`.
         The behaviour half is task 17 and is now done too, in
         `source/bmenu.c`. `DataEventSelectScreen` (seen in the `.mdebug`
-        strings survey) is a concrete first screen-data class
+        strings survey) is a concrete first screen-data class.
+        **The scrolling textures**, carried over from 18b, were the last
+        thing outstanding. `texpack_scroll_axis()` is the port of
+        `TextureInfo::GetScroll` (`0x00100a60`); `uirender.c` caches the four
+        fields per texture, puts `GPU_REPEAT` on the scrolling axis, and
+        offsets the subtexture *after* `subtex_from_pixels()`, because the
+        original divides its UVs by the power-of-two allocation before adding
+        the offset -- so the offset is in padded space, and T's sign flips
+        with the axis. `bui_set_bitmap_texture()` joins it, a port of
+        `FlailerBitmapChunk::ChangeTexture` (`0x0013eee0`).
+        The cross-check samples the offset at five times rather than just
+        reading the four fields back, because a port that rounds where
+        `GetScroll` truncates gets every field right and the animation wrong;
+        making that exact change turns 0 differ into 2 differ.
+        The finding that made this worth doing properly: **nothing on the
+        disc draws either scrolling frontend texture.** `ROADLINES` and
+        `SCREEN_LINES` occur exactly once each in all of `extracted/`, in
+        their own record -- no Flailer bitmap, no second pack, nothing in the
+        ELF -- against 16 and 17 occurrences for textures the frontend really
+        uses. Session 9's guess that `SCREEN_LINES` is the menu background's
+        scanlines is struck out in `HANDOFF.md`. And it could never have
+        animated: its alpha pattern repeats every four rows and one step
+        moves exactly four rows, so every step lands on the same phase.
+        So the feature has no subject on the disc to be looked at over, and
+        `main.c`'s viewer grew a B key that points the current screen's
+        bitmaps at each in turn through the real draw path.
+        Looked at, with `tools/run_azahar_scroll.ps1`: `ROADLINES` at
+        t = 50.34/53.16/56.15 s reported du = +0.3293/+0.5336/+0.8668 on the
+        device, each the fractional part of `t * 0.78125` by hand; du grew by
+        0.2043 then 0.3332, predicting 126 px and 206 px of leftward travel
+        across the quad's 618 px in the capture, and circular
+        cross-correlation of two row bands measures 126 px and 206 px.
+        `SCREEN_LINES` reported dv = -0.7188/-0.8125/-0.9688, each
+        `frac(trunc(t/0.04) * -0.015625)`, and drew bit-identical frames,
+        which is the correct result for it. Written up in
+        `docs/formats/texture-pack.md`.
+        **Not ported:** `RenderSingleFlailerBitmap` also insets every UV
+        corner by half a texel of the padded size. That touches all 397
+        textures rather than the two that scroll, so it wants its own
+        verification pass; the omission is stated at the site.
 17. [x] Wire hid input -> menu navigation, citro2d text, citro3d backgrounds.
         `3DS Files/source/bmenu.c` is the port of `FlailerMenu` /
         `FlailerMenuItem` / `FlailerScreen`'s JoyHandler, decompiled out of

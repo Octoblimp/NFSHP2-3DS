@@ -1,16 +1,15 @@
 # CONTINUE
 
-Where the next session picks up. Written at the end of Session 15
+Where the next session picks up. Written at the end of Session 16
 (2026-09-20). `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
 
-Phase 3's task 21 is **done**: cars draw on the top screen out of
-`CARS\*\GEOMETRY.BIN` with their own textures, lit, reachable as the third
-mode SELECT cycles to. Phases 0-2 are complete except for one stub -- task 16
-is still `[~]` and the only thing outstanding in it is 18b's two scrolling
-background textures.
+**Phases 0-2 are closed.** Task 16 went `[x]` with the UV scrolling that was
+its last outstanding piece, and Phase 3's task 21 is done too: cars draw on
+the top screen out of `CARS\*\GEOMETRY.BIN` with their own textures, lit,
+reachable as the third mode SELECT cycles to.
 
 Nine cross-checkers pass, plus the table generator:
 
@@ -26,29 +25,27 @@ bscreens_check     17 scenarios,  1246 lines, 0 differ
 bootflow_check     12 scenarios,  3659 lines, 0 differ
 bslotpool_check    17 scenarios,   990 lines, 0 differ   (37/37 mutations caught)
 geometry_check     30 files,     42047 lines, 0 differ   (53/53 mutations caught)
-texsrc_check       6 packs, 2 levels, 2952 textures, 0 differ
+texsrc_check       6 packs, 2 levels, 2958 textures, 0 differ
 bui_check          FRONTB.BUN    1395 lines, 0 differ
 gen_bmath_tables --check           bmathtab.c is up to date
 ```
+
+`texpack_check.py` takes a file and is run per pack; it now also diffs the UV
+scroll, offsets and all: `FRONTB.BUN` 2 scrolling textures, `INGAMEB.BUN` 1,
+`TEX12LOCATION.BIN` 21, 0 differ.
 
 Two mutation runners are kept rather than thrown away:
 `python tools/bslotpool_mutate.py` (~20 minutes) and
 `python tools/geometry_mutate.py` (~2 minutes; `--full` for all 30 files).
 
-Open tasks: **10** (16 in progress, 22-31 not started).
+Open tasks: **10** (22-31, none started).
 
 ## Next, in order
 
-1. **Task 16** -- the two scrolling frontend background textures,
-   `SCREEN_LINES` and `ROADLINES`, carried over from 18b. That is the whole
-   of what is left in 16, and finishing it closes Phase 2. The scroll itself
-   is already decoded: `TextureInfo::GetScroll` (`0x00100a60`), `ScrollType`
-   at +0x79 and the two speeds and the time step at +0x7C, with
-   `tools/texture_convert.py`'s `scroll_uv(t, time)` as the reference.
-2. Then **22** (sound/DSP) onwards in order: 23 Camera, 24 TrackRoute/Esp,
-   25 car sim, 26 race/cop AI, 27 track render/stream/collision, 28 New3DS
-   perf, 29 save/options/sound mix, 30 split-screen scope, 31 final CIA +
-   Old3DS/New3DS pass.
+1. **Task 22**, sound/DSP.
+2. Then in order: 23 Camera, 24 TrackRoute/Esp, 25 car sim, 26 race/cop AI,
+   27 track render/stream/collision, 28 New3DS perf, 29 save/options/sound
+   mix, 30 split-screen scope, 31 final CIA + Old3DS/New3DS pass.
 
 **Phase 4 constraint, from the user:** the gameplay HUD is to be designed for
 **two screens from the start** -- some readouts on the bottom screen rather
@@ -60,6 +57,24 @@ Phase 4 in `TASKS.md` too.
 
 Ordered roughly by how much time it costs to rediscover.
 
+* **The emulator harnesses are slow and flaky for a reason that is ours.**
+  Once the boot flow's idle timer expires, `bgf_consider_start_demo_mode()`
+  traces every frame, because the port's `startDemoMode` hook is a stub that
+  never changes state. Two SD writes a frame slows the emulated app enough
+  that most `PostMessage` key presses fall inside a single frame and are
+  never scanned -- which looks exactly like a dead key binding.
+  `run_azahar_scroll.ps1` presses SELECT up to 40 times to get past it. The
+  fix belongs in `gameflow.c`, whose transcript `bootflow_check.py` diffs, so
+  the Python reference has to move with it.
+
+  It also makes `run_azahar_test.ps1` flaky: two PARTIALs in a row, with
+  *different* failure modes, then three PASSes in a row once the machine was
+  quiet -- including one at `0a58704` to rule out a regression. Re-run a
+  PARTIAL once before believing it; the same failure mode twice is real.
+* **A scroll offset is in the *padded* texture's space.** The original
+  divides its UVs by the power-of-two allocation and only then adds the
+  offset, so a citro3d caller adds it after converting pixels to UVs -- and
+  T's sign flips, because `subtex_from_pixels` has already flipped the axis.
 * **A passing cross-check does not mean the decoder is right.** Session 15
   found two decoder bugs `geometry_check.py` had been passing for four
   sessions, one of them in a field the digest explicitly covers. Both
@@ -135,8 +150,12 @@ Ordered roughly by how much time it costs to rediscover.
 
 ## Carried over, still open
 
-* Two scrolling textures (`SCREEN_LINES`, `ROADLINES`) in the frontend
-  background, from task 18b. This is task 16's remainder.
+* **The half-texel UV inset.** `RenderSingleFlailerBitmap` insets every
+  corner by half a texel of the padded size before adding the scroll offset;
+  the port does not. It touches all 397 textures in `FRONTB.BUN` rather than
+  the two that scroll, so it wants its own verification pass.
+* **`bui.c`'s eight setters are not cross-checked.** `bui_check.py` covers
+  the parse path only.
 * **No alpha blending on geometry.** Glass draws opaque. It is not vertex
   alpha -- all 212,408 car vertex colours have the alpha bit set -- so it is
   texture alpha plus a GS blend mode, and the blend state has not been

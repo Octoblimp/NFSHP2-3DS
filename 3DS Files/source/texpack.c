@@ -115,7 +115,37 @@ bool texpack_get(const TexPack* tp, uint32_t index, TexInfo* out)
     // TextureImageInfo[7] at 0x52: u16 base pointer, u8 TBW, s8 swizzle flag.
     for (int i = 0; i < levels; i++)
         out->swizzled[i] = (int8_t)r[0x52 + i * 4 + 3];
+
+    // The scroll tail. RenderSingleFlailerBitmap reads the type with `lb`, so
+    // it is signed; only 0, 1 and 2 occur on this disc.
+    out->scrollType = (int8_t)r[0x79];
+    out->scrollS    = bchunk_f32(r + 0x7c);
+    out->scrollT    = bchunk_f32(r + 0x80);
+    out->scrollStep = bchunk_f32(r + 0x84);
     return true;
+}
+
+float texpack_scroll_axis(float time, float speed, int type, float step)
+{
+    if (type == 0) return 0.0f;
+
+    // Type 2 steps: time / step truncated back to a whole number of steps.
+    // The original divides unguarded and would hand (int) an infinity if a
+    // step were zero; none on the disc is, and both this and the converter's
+    // scroll_uv() return 0 there rather than invoke undefined behaviour.
+    if (type == 2) time = (step != 0.0f) ? (float)(int)(time / step) : 0.0f;
+
+    // The EE's cvt.w.s truncates towards zero, which is what a C cast does.
+    float f = time * speed;
+    return f - (float)(int)f;
+}
+
+void texpack_scroll(const TexInfo* ti, float time, float* outS, float* outT)
+{
+    if (outS) *outS = texpack_scroll_axis(time, ti->scrollS, ti->scrollType,
+                                          ti->scrollStep);
+    if (outT) *outT = texpack_scroll_axis(time, ti->scrollT, ti->scrollType,
+                                          ti->scrollStep);
 }
 
 bool texpack_find(const TexPack* tp, uint32_t hash, TexInfo* out)

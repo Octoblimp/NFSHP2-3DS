@@ -197,6 +197,29 @@ static int find_texture(UIRenderer* r, uint32_t hash)
             slot->w     = ti.width;
             slot->h     = ti.height;
             slot->valid = true;
+
+            slot->scrollType = ti.scrollType;
+            slot->scrollS    = ti.scrollS;
+            slot->scrollT    = ti.scrollT;
+            slot->scrollStep = ti.scrollStep;
+
+            // A scrolling coordinate has to wrap, and on the PICA200 it wraps
+            // through the whole power-of-two allocation -- so GPU_REPEAT is
+            // only the right answer on an axis the image already fills.
+            // Both scrolling textures on the disc do fill theirs (ROADLINES
+            // is 512 wide and scrolls S, SCREEN_LINES is 256 tall and scrolls
+            // T), which is not a coincidence: the GS wrapped the same way.
+            // An axis that is padded stays clamped, so a texture authored
+            // wrong smears its last row instead of showing the padding.
+            if (ti.scrollType) {
+                bool repeatS = ti.scrollS != 0.0f
+                    && slot->tex.width  == slot->w;
+                bool repeatT = ti.scrollT != 0.0f
+                    && slot->tex.height == slot->h;
+                C3D_TexSetWrap(&slot->tex,
+                               repeatS ? GPU_REPEAT : GPU_CLAMP_TO_EDGE,
+                               repeatT ? GPU_REPEAT : GPU_CLAMP_TO_EDGE);
+            }
             return index;
         }
     }
@@ -269,6 +292,11 @@ static void fill_tint(C2D_ImageTint* tint, const uint32_t rgba[4], float alpha)
                          tint_color(rgba[kOrder[i]], alpha), 1.0f);
 }
 
+void uirender_set_time(UIRenderer* r, float seconds)
+{
+    r->scrollTime = seconds;
+}
+
 void uirender_override_texture(UIRenderer* r, uint32_t hash, C3D_Tex* tex,
                                uint16_t w, uint16_t h)
 {
@@ -314,6 +342,31 @@ static void draw_bitmap(UIRenderer* r, const BUIObject* o, const UIView* v)
     subtex_from_pixels(&st, (float)tex->width, (float)tex->height,
                        u0 * (float)tw, v0 * (float)th,
                        (u1 - u0) * (float)tw, (v1 - v0) * (float)th);
+
+    // UV scrolling. The original divides its four corners by the power-of-two
+    // allocation and only then adds the offset, so the offset is already in
+    // the padded texture's space -- exactly the space subtex_from_pixels has
+    // just produced, which is why this is added after it and not to u0/v0.
+    //
+    // T goes the other way: the format counts T down from the top row while
+    // subtex_from_pixels has flipped the axis to citro2d's, so the engine's
+    // +dv is -dv here. An override is skipped -- it is a different image in a
+    // different allocation, and the movie planes are the only ones on disc.
+    //
+    // Not ported: RenderSingleFlailerBitmap also insets every corner by half
+    // a texel of the padded size. That applies to all 397 textures rather
+    // than the two that scroll, so it belongs to its own verification pass
+    // and is left out here rather than smuggled in with this.
+    if (t->scrollType && !t->override) {
+        float du = texpack_scroll_axis(r->scrollTime, t->scrollS,
+                                       t->scrollType, t->scrollStep);
+        float dv = texpack_scroll_axis(r->scrollTime, t->scrollT,
+                                       t->scrollType, t->scrollStep);
+        st.left   += du;
+        st.right  += du;
+        st.top    -= dv;
+        st.bottom -= dv;
+    }
 
     C2D_ImageTint tint;
     fill_tint(&tint, o->colors, v->alpha);

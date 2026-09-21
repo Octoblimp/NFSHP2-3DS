@@ -52,6 +52,14 @@ typedef struct {
     // genuinely differ within a chain, so decoding has to consult this array
     // rather than the record's level-0 copy at 0x55.
     int8_t         swizzled[TEXPACK_MAX_LEVELS];
+
+    // The UV animation in the record's tail: ScrollType at 0x79, the two
+    // speeds at 0x7c and 0x80 and the time step at 0x84. 27 of the disc's
+    // texture records scroll; see texpack_scroll().
+    int8_t         scrollType;
+    float          scrollS;
+    float          scrollT;
+    float          scrollStep;
 } TexInfo;
 
 // Finds the first texture pack at or below buf[off, off+len) and fills `tp`.
@@ -85,6 +93,22 @@ bool texpack_decode(const TexPack* tp, const TexInfo* ti, int level,
 
 // Bytes texpack_decode() needs for a level, or 0 if there is no such level.
 size_t texpack_decode_size(const TexInfo* ti, int level);
+
+// TextureInfo::GetScroll (0x00100a60) for one axis: the fraction to add to a
+// texture coordinate at `time` seconds. Type 0 does not scroll; type 1 runs
+// continuously; type 2 quantises the time to whole `step` intervals first, so
+// it jumps rather than slides. The result is always the fractional part, so a
+// caller can add it to a coordinate and let GPU_REPEAT wrap.
+//
+// The offset is in the *padded* texture's normalised space -- the original
+// divides its UVs by the power-of-two allocation size before adding this, and
+// so must a citro3d caller over texpack_upload().
+float texpack_scroll_axis(float time, float speed, int type, float step);
+
+// Both axes at once, in the order RenderSingleFlailerBitmap (0x00140538)
+// reads them. The signs are the PS2's: S grows rightwards and T downwards,
+// so a renderer whose v counts up from the bottom subtracts *outT.
+void texpack_scroll(const TexInfo* ti, float time, float* outS, float* outT);
 
 #ifdef __3DS__
 #include <citro3d.h>

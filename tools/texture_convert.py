@@ -215,16 +215,26 @@ def textures(info):
         yield t
 
 
+def f32(x):
+    """Round to single precision. The EE's FPU has no double, and so neither
+    does the 3DS port's texpack_scroll_axis(), so every intermediate here is
+    rounded the same way -- otherwise the two agree to six decimals by luck
+    rather than by construction."""
+    return struct.unpack("<f", struct.pack("<f", x))[0]
+
+
 def scroll_uv(t, time):
     """TextureInfo::GetScroll (0x00100a60), for both axes: (du, dv)."""
     def one(speed):
         if not t["scroll_type"]:
             return 0.0
-        u = time
+        u = f32(time)
         if t["scroll_type"] == 2:
-            u = float(int(u / t["scroll_step"])) if t["scroll_step"] else 0.0
-        f = u * speed
-        return f - float(int(f))
+            # A zero step would divide by zero on the PS2; none on the disc
+            # does, and texpack_scroll_axis() guards it the same way.
+            u = f32(float(int(f32(u / t["scroll_step"]))))                 if t["scroll_step"] else 0.0
+        f = f32(u * speed)
+        return f32(f - float(int(f)))
     return one(t["scroll_s"]), one(t["scroll_t"])
 
 

@@ -1009,6 +1009,7 @@ int main(int argc, char** argv)
 
     printf("\nD-pad: menu  A: select  START: start  B: back\n");
     printf("SELECT: screen viewer, then geometry\n");
+    printf("In the viewer, B: scrolling-texture demo\n");
     // The marker tools/run_azahar_test.ps1 greps for: past this line the
     // bundles are resident, the flow is running and frames are being drawn.
     logLine("entering main loop");
@@ -1026,9 +1027,29 @@ int main(int argc, char** argv)
     int      redraw   = 1;
     u32      clear    = C2D_Color32(0x10, 0x10, 0x18, 0xFF);
 
+    // The scrolling-texture demo, below. vScrollNum is 0 when nothing on the
+    // current screen has been borrowed.
+#define VSCROLL_MAX 64
+    static struct {
+        uint32_t index, hash;
+        float    x, y, sx, sy;
+    } vScroll[VSCROLL_MAX];
+    int      vScrollNum  = 0;
+    int      vScrollMode = 0;
+
+    // The clock UV scrolling runs off, in the RealTimer units gameflow.c
+    // keeps -- 1/4000 s. The flow's own realTimer would do for MODE_FLOW,
+    // but bgf_frame only ticks in that mode and the screen viewer is where
+    // there is anything scrolling to look at, so the UI gets its own counter
+    // advanced exactly as gameflow.c:321 advances that one.
+    uint32_t uiTimer = 0;
+
     while (aptMainLoop()) {
         hidScanInput();
         u32 kDown = hidKeysDown();
+
+        uiTimer += (uint32_t)(int)(BOOT_DT * 4000.0f);
+        uirender_set_time(&ui, (float)uiTimer * 0.00025f);
 
         if (kDown & KEY_SELECT) {
             mode = (mode + 1) % MODE_COUNT;
@@ -1169,6 +1190,81 @@ int main(int argc, char** argv)
         if (kDown & KEY_START) break;
         if (kDown & KEY_R) vIndex = (vIndex + 1) % screenCount;
         if (kDown & KEY_L) vIndex = (vIndex + screenCount - 1) % screenCount;
+
+        // Nothing on the disc draws a scrolling texture. ROADLINES and
+        // SCREEN_LINES each occur exactly once in the whole of extracted/ --
+        // their own TextureInfo record, and no Flailer bitmap, no other pack
+        // and nothing in NFSHP2.ELF -- so the scroll path has no natural
+        // subject to be looked at over. B gives it one: it points the
+        // current screen's bitmaps at each in turn through the engine's own
+        // ChangeTexture, then back to their own textures.
+        if ((kDown & KEY_B) && vScr && vProj) {
+            static const char* const kScrollTex[] = {
+                "ROADLINES", "SCREEN_LINES"
+            };
+            if (vScrollNum == 0) {
+                // Every visible bitmap on the screen, not just the biggest.
+                // Both of these textures are nearly featureless -- ROADLINES
+                // is a 512x96 asphalt swatch that runs from luma 52 to 67 --
+                // so one of them behind the screen's own art is a change of a
+                // fraction of a percent a frame, which is indistinguishable
+                // from not scrolling at all. Taking the whole screen leaves
+                // nothing static in front of it.
+                for (uint32_t n = 0; n < vScr->count; n++) {
+                    BUIObject o;
+                    uint32_t  idx = vScr->first + n;
+                    if (vScrollNum >= VSCROLL_MAX) break;
+                    if (!bui_object(vProj, idx, &o)) continue;
+                    if (o.type != BUI_TYPE_BITMAP) continue;
+                    if (o.visible != BUI_VISIBLE) continue;
+                    vScroll[vScrollNum].index = idx;
+                    vScroll[vScrollNum].hash  = o.textureHash;
+                    vScroll[vScrollNum].x     = o.x;
+                    vScroll[vScrollNum].y     = o.y;
+                    vScroll[vScrollNum].sx    = o.scaleX;
+                    vScroll[vScrollNum].sy    = o.scaleY;
+                    vScrollNum++;
+                }
+                vScrollMode = 0;
+            }
+            if (vScrollNum > 0) {
+                vScrollMode = (vScrollMode + 1) % 3;
+                for (int n = 0; n < vScrollNum; n++) {
+                    uint32_t idx = vScroll[n].index;
+                    if (!vScrollMode) {
+                        bui_set_bitmap_texture(vProj, idx, vScroll[n].hash);
+                        bui_set_object_pos(vProj, idx, vScroll[n].x,
+                                           vScroll[n].y);
+                        bui_set_object_scale(vProj, idx, vScroll[n].sx,
+                                             vScroll[n].sy);
+                        continue;
+                    }
+                    bui_set_bitmap_texture(
+                        vProj, idx, bchunk_hash(kScrollTex[vScrollMode - 1]));
+                    // Sized to the screen rather than left at the object's
+                    // own scale. The authored scales are for the authored
+                    // art -- this screen's background is ScaleX 40 -- and a
+                    // texture stretched 40 times over travels its whole
+                    // width in a frame, which reads as noise however right
+                    // the offset is. At 1:1 with the 640x480 screen an
+                    // offset of du moves the image by du * 640, which is
+                    // something a screenshot can be measured against.
+                    float box[4];
+                    bui_set_object_pos(vProj, idx, 0.0f, 0.0f);
+                    bui_set_object_scale(vProj, idx, 1.0f, 1.0f);
+                    if (uirender_object_bounds(&ui, vProj, idx, box)
+                        && box[2] > box[0] && box[3] > box[1]) {
+                        bui_set_object_scale(vProj, idx,
+                                             640.0f / (box[2] - box[0]),
+                                             480.0f / (box[3] - box[1]));
+                    }
+                }
+                logPrintf("scroll demo: %d bitmaps -> %s\n", vScrollNum,
+                          vScrollMode ? kScrollTex[vScrollMode - 1]
+                                      : "their own textures");
+                redraw = 1;
+            }
+        }
         if (kDown & KEY_X) {
             language = (language + 1) % NUM_LANGUAGES;
             hookSetLanguage(&g_boot, language);
@@ -1176,6 +1272,21 @@ int main(int argc, char** argv)
         }
 
         if (vIndex != vShown) {
+            // Put the demo's borrowed object back before leaving the screen:
+            // the bundle is a single heap copy and the write is to the chunk
+            // itself, so it would otherwise still be there on the way round.
+            if (vScrollNum > 0 && vProj) {
+                for (int n = 0; n < vScrollNum; n++) {
+                    bui_set_bitmap_texture(vProj, vScroll[n].index,
+                                           vScroll[n].hash);
+                    bui_set_object_pos(vProj, vScroll[n].index,
+                                       vScroll[n].x, vScroll[n].y);
+                    bui_set_object_scale(vProj, vScroll[n].index,
+                                         vScroll[n].sx, vScroll[n].sy);
+                }
+                vScrollNum  = 0;
+                vScrollMode = 0;
+            }
             if (vHasMenu) bmenu_unactivate(&vMenu);
             vHasMenu = false;
             vShown   = vIndex;
@@ -1199,6 +1310,7 @@ int main(int argc, char** argv)
             }
         }
 
+        if (vScrollMode) redraw = 1;    // the clock below moves every frame
         if (redraw) {
             redraw = 0;
             const BMenuItem* item = vHasMenu ? bmenu_current(&vMenu) : NULL;
@@ -1215,6 +1327,35 @@ int main(int argc, char** argv)
                    messageName(g_lastMsg));
             printf("textures %d cached, %d missing; fonts %d missing \n",
                    ui.numTextures, ui.missingTextures, ui.missingFonts);
+            // On a line of its own rather than in the block above: the
+            // tally line is wider than the console and wraps, so anything
+            // printed after it lands a row lower than it did last time and
+            // the two overprint each other. A scroll offset read off a
+            // screenshot has to be the offset that drew that frame.
+            {
+                const char* nm = !vScrollMode ? "off"
+                    : (vScrollMode == 1 ? "ROADLINES" : "SCREEN_LINES");
+                float du = 0.0f, dv = 0.0f;
+                int   ty = 0;
+                if (vScrollMode) {
+                    uint32_t h = bchunk_hash(nm);
+                    for (int i = 0; i < ui.numTextures; i++) {
+                        if (ui.textures[i].hash != h) continue;
+                        ty = ui.textures[i].scrollType;
+                        du = texpack_scroll_axis(ui.scrollTime,
+                                                 ui.textures[i].scrollS, ty,
+                                                 ui.textures[i].scrollStep);
+                        dv = texpack_scroll_axis(ui.scrollTime,
+                                                 ui.textures[i].scrollT, ty,
+                                                 ui.textures[i].scrollStep);
+                        break;
+                    }
+                }
+                printf("\x1b[s\x1b[26;1HB %-12s ty%d t%8.2f\n"
+                       "  du %+.4f dv %+.4f  \x1b[u",
+                       nm, ty, (double)ui.scrollTime,
+                       (double)du, (double)dv);
+            }
             printf("\x1b[u");
         }
 
