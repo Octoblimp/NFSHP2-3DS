@@ -84,39 +84,43 @@ and so replaced every boot.
 ## Next, in order
 
 1. **Task 25**, the car simulation -- part done, and **much bigger than
-   the task list said**. Five slices are closed: `CarState`, `Engine` +
-   `Table`, `CarTypeInfo`, `CarDriver` + `DriveTarget`'s layout, and
-   `Steering` + `TwoWheelAckermanSteering`, each with a checker and a
-   doc under `docs/formats/car-*.md`.
+   the task list said**. Seven slices are closed: `CarState`, `Engine` +
+   `Table`, `CarTypeInfo`, `CarDriver` + `DriveTarget`'s layout,
+   `Steering` + `TwoWheelAckermanSteering`, `RigidBody`, and
+   `Suspension`, each with a checker and a doc under
+   `docs/formats/car-*.md` (`RigidBody`'s is `rigid-body.md`).
 
    The old "178 functions, 16680 bytes" note was wrong by an order of
    magnitude -- it matched a narrow symbol pattern and missed most
    methods. Remeasured by demangling every symbol to its owning class,
-   **~67.0 KB across ~355 functions** is still to go:
+   **~60.6 KB across ~279 functions** is still to go:
 
    ```
    Car 80 funcs 22876 B   DriveTarget (methods) 28 / 8636
    PhysicsCar 16 / 8496   Wheel 73 / 7112
    Mellovator 31 / 5420   DriveTrain 38 / 4920
-   RigidBody 47 / 4508    MellowMover 13 / 3096
-   Suspension 29 / 1944
+   MellowMover 13 / 3096
    ```
 
    At this repo's verification standard that is several sessions, not
    one. **`RigidBody` and `DriveTarget` are prerequisites the task list
    never named** -- `Suspension`, `PhysicsCar` and `Car` all need
-   `RigidBody`. Next in order: `RigidBody`, `Suspension`, `Wheel`,
-   `DriveTrain`, `DriveTarget`'s 28 methods, `PhysicsCar`, `Car`, with
-   `Mellovator` and `MellowMover` last.
+   `RigidBody`. Next in order: `Wheel`, `DriveTrain`, `DriveTarget`'s 28
+   methods, `PhysicsCar`, `Car`, with `Mellovator` and `MellowMover`
+   last.
 
-   `Suspension` is already partly decoded and not yet written down in
-   code -- layout `SI 12, pSwayBar 16, State{z 20, v 24}, Force 28,
-   Position 32, Matrix 48, TouchingGround 112, MagicForce 116, RestLoad
-   120, RestPosition 128, pWheel 144, pBody 148, pSteering 152,
-   WheelPosition 156, GroundForce 160`, size 176; ctor at `0x0019bc58`.
-   `GetDamping` returns `SI->Damping[1]` when `State.v <= 0` and `[0]`
-   otherwise. `Calibrate(f)` sets `RestLoad = f` and
-   `RestPosition = *(pWheel+12) - *(pBody+352)`.
+   **`Wheel` is the next slice and half of it is already written down.**
+   `3DS Files/source/wheel.h` is a 400-byte layout with no port behind
+   it -- it says so at the top -- put there so `Suspension` could index
+   into it. Porting `Wheel` means filling that in, and the first two
+   functions to do are the two `Suspension` has left as seams:
+   `Wheel::FindDrivingSurface` (`0x0019a2a0`, forwards to
+   `Wheel::CheckTerrain`) and `Wheel::ExchangeZForces` (`0x0019a1c8`,
+   rewrites four Wheel fields). `gWheelFindDrivingSurfaceFn` and
+   `gWheelExchangeZForcesFn` in `suspension.h` are the seams; they are
+   `NULL` on hardware today, and `suspension_check.py` covers both the
+   NULL state and the wired one, so pointing them at the real methods is
+   a two-line change plus a transcript rerun.
 
    The HUD split is settled, below.
 2. Then in order: 26 race/cop AI, 27 track render/stream/collision,
@@ -236,6 +240,18 @@ Ordered roughly by how much time it costs to rediscover.
   CarTypeInfo mutations and one Steering mutation exploited exactly that.
   Print `sizeof` of each array, the element stride, and a width and
   signedness probe per field.
+* **A layout is not checked until the ARM build compiles it.** The host
+  harness cross-checks *arithmetic*; it is not the target and its structs
+  are not the target's. `wheel.h`'s assert was wrapped in
+  `#if __SIZEOF_POINTER__ == 4`, so neither toolchain ever compiled it, and
+  when `tools/build_cia.ps1` finally did it failed. This port's `bVector4`
+  is four-byte aligned where the PS2's was a sixteen-byte quadword, so a
+  four-byte gap the PS2 record has before `Wheel::WorldGroundForce` did not
+  appear and the handheld's record came out 396 bytes instead of 400. On the
+  64-bit host the pointer widening cancelled the gap exactly, so the model
+  and the harness agreed on the wrong record. Never guard a layout assert
+  with a host test that makes it vanish on the host, and run the ARM build
+  before calling a slice with a record in it done.
 * **The vtable pointer is at the END of the object in this image.** Old
   g++ ABI. `CarState` has none, `CarDriver`'s is at 556, `Steering`'s at
   8, and every class still to come in task 25 is the same. Looking for it

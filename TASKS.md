@@ -971,6 +971,12 @@ is citro3d and owns the top.
         **`Steering.obj` + `TwoWheelAckermanSteering.obj`**
         (`docs/formats/car-steering.md`, `tools/steering_check.py`; 5
         scenarios, 873 lines, 0 differ; 44 mutations, 43 caught, 1
+        equivalent). **`RigidBody.obj`**
+        (`docs/formats/rigid-body.md`, `tools/rigidbody_check.py`; 10
+        scenarios, 935 lines, 0 differ; 77 mutations, 75 caught, 2
+        equivalent). **`Suspension.obj` plus `Wheel`'s layout**
+        (`docs/formats/car-suspension.md`, `tools/suspension_check.py`; 10
+        scenarios, 1108 lines, 0 differ; 68 mutations, 66 caught, 2
         equivalent).
 
         **Corrected scope -- read this before planning the rest.** An
@@ -988,13 +994,14 @@ is citro3d and owns the top.
         | Wheel | 73 | 7112 |
         | Mellovator | 31 | 5420 |
         | DriveTrain | 38 | 4920 |
-        | RigidBody | 47 | 4508 |
+        | ~~RigidBody~~ | ~~47~~ | ~~4508~~ |
         | MellowMover | 13 | 3096 |
-        | Suspension | 29 | 1944 |
-        | TwoWheelAckermanSteering | 7 | 624 |
-        | Steering | 4 | 116 |
+        | ~~Suspension~~ | ~~29~~ | ~~1944~~ |
+        | ~~TwoWheelAckermanSteering~~ | ~~7~~ | ~~624~~ |
+        | ~~Steering~~ | ~~4~~ | ~~116~~ |
 
-        ~67.7 KB across ~366 functions, roughly 19x the CarState slice.
+        ~67.7 KB across ~366 functions when it was measured, roughly 19x
+        the CarState slice.
         At the verification standard this repo holds -- exact port,
         independent model, transcript diff, mutation pass with every
         survivor argued -- that is several sessions, not one.
@@ -1006,11 +1013,28 @@ is citro3d and owns the top.
 
         Suggested order, smallest and most independent first, each
         verified and committed on its own: ~~Steering +
-        TwoWheelAckermanSteering~~ (done), then RigidBody,
-        Suspension, Wheel, DriveTrain, DriveTarget's methods,
-        PhysicsCar, Car, with Mellovator and MellowMover last.
+        TwoWheelAckermanSteering~~, ~~RigidBody~~, ~~Suspension~~ (all
+        done), then Wheel, DriveTrain, DriveTarget's methods, PhysicsCar,
+        Car, with Mellovator and MellowMover last.
 
-        That leaves ~67.0 KB across ~355 functions still to go.
+        Wheel is next, and two of its functions already have names: the
+        seams `Wheel::FindDrivingSurface` (`0x0019a2a0`) and
+        `Wheel::ExchangeZForces` (`0x0019a1c8`), which Suspension calls
+        through function pointers that are NULL until that slice lands.
+        `3DS Files/source/wheel.h` already carries the 400-byte record.
+
+        **Build for ARM before calling a record done.** `wheel.h`'s layout
+        assert was guarded with `#if __SIZEOF_POINTER__ == 4`, which meant
+        neither toolchain compiled it -- and when the ARM build finally
+        ran it failed. This port's `bVector4` is four-byte aligned where
+        the PS2's was a sixteen-byte quadword, so a four-byte gap the PS2
+        record has at 284 simply did not appear, and the handheld's Wheel
+        came out 396 bytes. On the 64-bit host the pointer widening
+        happened to cancel it exactly, so the model and the harness agreed
+        on the wrong record. Every remaining class in this task has
+        `bVector4` fields in it.
+
+        That leaves ~60.6 KB across ~279 functions still to go.
 26. [ ] Race/event logic, cop AI, pursuit (roadblocks, spike strips) --
         `HotPursuitEvent` already seen in the `.mdebug` strings survey
 27. [ ] Track rendering/streaming, collision. Carries a debt from task 24:

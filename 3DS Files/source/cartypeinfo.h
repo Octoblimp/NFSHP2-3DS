@@ -36,6 +36,7 @@
 #include "bmatrix.h"
 #include "engine.h"
 #include "langtab.h"
+#include "rigidbody.h"
 
 // -------------------------------------------------------- nested records
 
@@ -85,14 +86,11 @@ typedef struct DriveTrainInfo {
     float   GearRatios[8];   // 32
 } DriveTrainInfo;
 
-// 80 bytes. CarTypeInfo calls its copy `Body`.
-typedef struct RigidBodyInfo {
-    float    Mass;          //  0
-    float    Xdim;          //  4
-    float    Ydim;          //  8
-    float    Zdim;          // 12
-    bMatrix4 InertiaTensor; // 16
-} RigidBodyInfo;
+// 80 bytes, and it is rigidbody.h's -- CarTypeInfo calls its copy `Body`.
+// It was written out in both headers until Suspension became the first
+// translation unit to include the pair, at which point the two identical
+// definitions became a redefinition error rather than a duplication
+// nobody had to notice.
 
 // 16 bytes.
 typedef struct AeroInfo {

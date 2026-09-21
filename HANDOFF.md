@@ -3089,3 +3089,95 @@ Task 25 stays `[~]`.
 Not ported, for the usual reason: `Engine::DoSnapshot`,
 `CarDriver::DoSnapshot`, `Steering::BaseDoSnapshot` and
 `TwoWheelAckermanSteering::DoSnapshot` all need `ReplaySnapshot`.
+
+---
+
+## Session 21 (2026-09-21) -- Task 25, the rigid body and the suspension
+
+| Slice | Commit | Transcript | Mutations |
+|-------|--------|-----------|-----------|
+| `RigidBody.obj` | `c421118` | 10 scen, 935 lines, 0 differ | 77, 75 caught, 2 equiv |
+| `Suspension.obj` + `wheel.h` layout | this one | 10 scen, 1108 lines, 0 differ | 68, 66 caught, 2 equiv |
+
+`docs/formats/rigid-body.md` and `car-suspension.md`.
+
+`RigidBody` is 47 functions and 4508 bytes and was the prerequisite the
+task list never named -- `Suspension`, `PhysicsCar` and `Car` all sit on
+it. `Suspension` is 29 functions and 1944 bytes, and it needs two `Wheel`
+methods it does not own, so `wheel.h` carries Wheel's 400-byte record and
+the two entry points are function-pointer seams, the shape
+`gTrackPathDistanceFn` already has. That header is **a layout, not a
+port**; Wheel itself is the next slice.
+
+Remaining in task 25: ~60.6 KB across ~279 functions. Order from here:
+`Wheel`, `DriveTrain`, `DriveTarget`'s 28 methods, `PhysicsCar`, `Car`,
+with `Mellovator` and `MellowMover` last.
+
+### Build for ARM before calling a record done
+
+The strongest finding of the session is a process one. `wheel.h`'s layout
+assert was wrapped in `#if __SIZEOF_POINTER__ == 4`, reasoning that
+nothing depended on Wheel's *host* layout yet. The effect was that the
+claim was compiled by neither toolchain: the host build skipped it, and
+nobody had run the ARM build. When the ARM build finally ran, it failed.
+
+The PS2 record has four bytes of padding at 284 because `bVector4` is a
+quadword type there and starts 16-aligned. **This port's `bVector4` is a
+plain four-float struct with four-byte alignment**, so the gap does not
+appear by itself: the handheld's record came out 396 bytes with every
+contact vector four bytes early.
+
+On the 64-bit host it was invisible, and invisible in an actively
+misleading way. The four pointers in front widen by twenty bytes counting
+alignment, `WorldGroundForce` needed only sixteen, and the missing gap
+and the extra widening cancelled exactly. The model and the harness
+agreed, at a SLACK multiplier of 4 rather than 5, on a record that was
+wrong for the target. `wheel.h` writes the gap out as `_pad2[4]` now.
+
+Two rules out of it, both general:
+
+* **A claim no compiler checks is a comment.** Do not guard a layout
+  assert with a host test that makes it vanish on the host.
+* **The host harness cross-checks arithmetic, not layout.** It is not the
+  target, and on the target the same struct can be a different size. Run
+  `tools/build_cia.ps1` before a slice with a record in it is called done.
+
+### Other findings
+
+* **A constant the model caught because it reads the ELF.**
+  `suspension.h` had `SUSPENSION_IMAGE_HALF_PI 1.5708f` (0x3fc90ff9).
+  `ComputeAuxiliaries` loads `gp-29656` = 0x00321818, and that word is
+  **0x3fc90fdc** -- the same one-ulp-high pi/2 `Steering` takes from the
+  same pool, thirty ulps away from the rounded literal. The checker reads
+  its constants out of the ELF rather than out of the header, so the two
+  disagreed on the first run. A model that had copied the `#define`
+  would have agreed with the bug.
+* **A value that is zero makes the code that produced it invisible.**
+  Five mutations survived the first pass on one mistake: every
+  `[penalty]` case varied only the *z* lane of the contact normal, all
+  four approached away from the surface, and all four took the early
+  return, so the impulse, the mass factor, the `gNoWheels` path and the
+  `w` lane were never executed. Two more survived because the force floor
+  clamped a wrong answer and a right one to the same 0. The fixtures
+  carry a `grazing` zero normal and two raised rest loads now.
+* **Boundary fixtures have to be reachable.** A droop stop of -0.22f
+  could not be hit: the surface is `FindDrivingSurface() + Radius`, and
+  no float return value makes that sum exactly -0.22f, because the ulp at
+  0.57 is twice the ulp at 0.22 and 0xbe6147ae has an odd mantissa. -0.25
+  round-trips exactly (Sterbenz), so that is what the fixture uses. The
+  compression stop is not the same problem -- `x - y` is exact there for
+  the same reason -- which is why `su-bumpstop-inclusive` is a genuine
+  equivalent and `su-droop-inclusive` was a real gap.
+* **Two globals hide their own callers.** `gGroundPenaltyForce` ships as
+  0.0 and `gUglyTimestepHack` as 1.0, so the penetration term and the
+  divide are both dead at shipped values. The transcript moves them, the
+  way the debug menu could.
+* **`.sdata` tuning globals are worth reading rather than assuming.**
+  Ten of them, all reachable from the debug menu, and three of the five
+  coverage holes above were only visible once they moved.
+
+Not ported, same dependency as ever: `RigidBody::DoSnapshot` and
+`Suspension::DoSnapshot` need `ReplaySnapshot`, along with `CarState`,
+`Engine`, `CarDriver` and `Steering`. `RigidBody::PrintCurrentState` is
+ported empty -- it is not empty in the image, but the printf is gone, the
+function is void and every store is dead.
