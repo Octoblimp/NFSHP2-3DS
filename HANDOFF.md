@@ -2960,3 +2960,45 @@ Phase 4, task 25, the car simulation. **Its HUD is two screens from the
 start** -- the standing constraint is at the head of Phase 4 in `TASKS.md`
 and repeated in `CONTINUE.md`; which readouts go on the bottom screen is not
 decided and wants asking before anything is built.
+
+## Session 20 -- CarState.obj (task 25, first slice)
+
+Ported `CarState.obj` (`0x001b6170`..`0x001b6f60`), the car's state record
+and the sixteen functions that maintain it, to
+`3DS Files/source/carstate.{c,h}`. Cross-checked by
+`tools/carstate_check.py` against `tools/src/carstate_test.c`: 10
+scenarios, 653 lines, 0 differ; 63 mutations, 56 caught, 7 equivalent, 0
+unexplained. Written up in `docs/formats/car-state.md`.
+
+`DoSnapshot` (`0x001b6230`) is deliberately not ported -- it needs
+`ReplaySnapshot`, which belongs to a later task.
+
+Findings:
+
+* **The object carries its own pi.** `0x40490fd0`/`0x40c90fd0` at
+  `0x003219ec`, against bMath's `0x40490fdb`/`0x40c90fdb`. Not cosmetic:
+  `GetYawAlways` folds on `pi < rad`, and the products of the BAM
+  difference step past `0x40490fd0` through a 402-ulp gap, so every
+  wrapping angle folds -- whereas with bMath's value the exact half-turn
+  sits *on* the boundary and does not. Reproduced bit-for-bit; the
+  `pi-from-library` mutation is caught.
+* **Two quadword operations are decorative.** WorldToCar3's pad subtract
+  and CarToWorldUnadjusted's z both die on `eMulVector3` forcing w to 1.
+  Kept because the object does them, argued in `EQUIVALENT` rather than
+  dropped.
+* **`CARSTATE_SLACK`.** CarState's two pointers are dereferenced, so the
+  `uint32_t` trick used on TrackRoute's list links was not available. The
+  layout assert instead carries `2 * (sizeof(void *) - 4)`, so all ~40
+  offsets are still checked on a 64-bit host, and the harness dirties by
+  field rather than by byte pattern so the transcript means the same
+  thing on both widths.
+
+Two mutation survivors on the first pass were real coverage gaps, not
+equivalents, and the scenarios were extended to close them: nothing
+set RPM away from 1000 before `ResetCarForSound`, and no transform case
+had a z that decided the `lensq` branch. A third (`wheel-brake-gets-spin`)
+was a badly written mutation -- it applied a rotation by zero -- and was
+rewritten to actually give the brake matrix the spin.
+
+Task 25 is **not** finished: `Car`, `PhysicsCar`, `Suspension`, `Wheel`,
+`Engine`, `CarDriver` and the bulk of `CarTypeInfo` are still to port.

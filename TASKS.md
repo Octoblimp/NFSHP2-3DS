@@ -929,7 +929,40 @@ than building a top-screen HUD and splitting it afterwards. `uirender.c` is
 citro2d and is the natural home for the bottom-screen widgets; `georender.c`
 is citro3d and owns the top.
 
-25. [ ] Car simulation (recovered car-state struct layout from `.mdebug`)
+25. [~] Car simulation (recovered car-state struct layout from `.mdebug`).
+        **`CarState.obj` (`0x001b6170`) is done**; the rest of the object
+        list is not. Ported to `carstate.{c,h}`, cross-checked by
+        `tools/carstate_check.py` (10 scenarios, 653 lines, 0 differ; 63
+        mutations, 56 caught, 7 equivalent, 0 unexplained), written up in
+        `docs/formats/car-state.md`.
+
+        Three things worth carrying forward. **The object has its own pi.**
+        At `0x003219ec`/`0x003219f0` it holds `0x40490fd0`/`0x40c90fd0`
+        where bMath -- and `float(pi)` -- hold `0x40490fdb`/`0x40c90fdb`.
+        Substituting the library value is not cosmetic: `GetYawAlways`
+        folds on `pi < rad`, and with bMath's value the exact half-turn
+        lands on the boundary and stops folding. Reproduced bit-for-bit.
+
+        **Two of the quadword operations are decorative.** WorldToCar3
+        subtracts the pad and CarToWorldUnadjusted feeds a z, but
+        `eMulVector3` forces w to 1, so neither can reach the result. They
+        are kept because the object does them, and both are argued in the
+        checker's `EQUIVALENT` list rather than quietly dropped.
+
+        **`CARSTATE_SLACK`.** The two pointers are dereferenced, so they
+        could not be narrowed to `uint32_t` the way TrackRoute's list links
+        were. The layout assert carries `2 * (sizeof(void *) - 4)` as a
+        term instead, so it still checks all ~40 offsets on a 64-bit host.
+        The harness dirties by field rather than by byte pattern for the
+        same reason.
+
+        `DoSnapshot` (`0x001b6230`) is **not** ported -- it needs
+        `ReplaySnapshot`.
+
+        Still open in this task: `Car` (2016 B), `PhysicsCar` (116 B),
+        `Suspension` (176 B), `Wheel` (400 B), `Engine` (92 B),
+        `CarDriver` (560 B) and the rest of `CarTypeInfo` (1376 B, of which
+        only the `CenterOfGravity` + `WheelInfo[4]` prefix is decoded).
 26. [ ] Race/event logic, cop AI, pursuit (roadblocks, spike strips) --
         `HotPursuitEvent` already seen in the `.mdebug` strings survey
 27. [ ] Track rendering/streaming, collision. Carries a debt from task 24:

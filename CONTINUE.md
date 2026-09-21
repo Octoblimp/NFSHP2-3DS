@@ -19,7 +19,7 @@ run -- see "Next" below for why, and for what task 27 owes it.
 Fourteen cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
 ```
 
 ```
@@ -37,6 +37,7 @@ bsnd_check         12 scenarios,  5157 lines, 0 differ   (25/25 mutations caught
 emath_check         9 scenarios,  2416 lines, 0 differ   (39/39 mutations caught)
 camera_check        7 scenarios,  1200 lines, 0 differ   (40 caught, 7 equivalent)
 trackroute_check   10 scenarios,   671 lines, 0 differ   (52 caught, 1 equivalent)
+carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 ```
