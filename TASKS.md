@@ -830,7 +830,37 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
            already raised. Azahar: `Sound: 34 patches in 24 voices`, a
            stereo pair per press at 22042 Hz, voices retired every frame --
            and the sounds were heard.
-23. [ ] Camera (`Camera.obj`, `CameraMover.obj`)
+23. [x] Camera (`Camera.obj`, `CameraMover.obj`)
+        `camera.[ch]` is the whole of `Camera.obj`; `cammover.[ch]` is the
+        base `CameraMover` plus `CM_ORBIT_CAR`, which is the one the car
+        select and the replay orbit use. `tools/camera_check.py` 7 scenarios,
+        1200 lines, 0 differ; 47 mutations, 40 caught, 7 equivalent with a
+        written argument each, 0 unexplained. `docs/formats/camera.md`.
+
+        The finding: half the velocity record is dead on the disc, not here.
+        `SetCameraMatrix` copies CurrentKey over PreviousKey as its first act
+        and then recomputes only the matrix and the three vectors, so all six
+        scalar velocities are a word minus itself. Measured, not asserted --
+        all 44 velocity records in the transcript print
+        `scal 0 0 0 0 0 fov 0` -- and it is why three of the seven equivalent
+        mutants cannot be caught by any test.
+
+        Looked at on Azahar, and looking found a bug a passing cross-check
+        could not: `C3D_FVec` is declared `w, z, y, x`, so `r[i].c[j]` is
+        element `(i, 3 - j)` and the view matrix was being written with its
+        columns reversed -- the eye stuck at the world origin, inside the
+        car. The geometry viewer now drives the real Camera through a real
+        mover, and `tools/run_azahar_geo.ps1` captures the zoom (held,
+        released, and measured for creep: 0.011/255 against 1.009 for two
+        frames of the idle spin), the acceleration limiter, and the elevation
+        clamp. The jump table at `0x2950e0` also settled the pad signs: the
+        mover listens to the DEBUG camera joystick events, not the CARSEL
+        ones, and "up" asks for a negative vertical speed.
+
+        Two things the disc does that the port keeps and task 28 will have to
+        decide about: the rotation speeds and the zoom multiplier are per
+        *frame*, not per second, so both run four times too fast at the 139
+        FPS Azahar gives this build.
 24. [ ] Track/route system (`TrackRoute.obj`, `espEmptyLayer` -- "Esp" spline/
         track-layer format, needs `docs/formats/track-route.md`)
 
@@ -860,3 +890,22 @@ is citro3d and owns the top.
 30. [ ] Split-screen/multiplayer scope decision (HP2 supported split-screen;
         not committed to yet -- decide once single-player core is solid)
 31. [ ] Final CIA packaging + Old3DS/New3DS compatibility pass
+
+## Asked for during the port
+
+Raised by the user mid-session; kept here so they do not get lost between
+phases.
+
+32. [ ] Stretch the frontend to the 3DS aspect. The PS2 drew a 4:3 screen
+        and the 3DS top screen is 400x240 (5:3), so the screens as shipped
+        leave the sides of the top screen empty. The whole top screen should
+        be filled instead.
+33. [ ] `ChallengeBeACop` is unregistered. It is in the blurb table
+        (`bscreens.c:336`, blurb 10014, `BMODE_BE_A_COP`) and the flow
+        changes to it -- the Azahar log shows `flow change ChallengeBeACop 1`
+        followed by `flow unregistered ChallengeBeACop` -- so the screen name
+        resolves but no screen class is registered for it, which leaves the
+        flow with no current screen. Same shape as the `Options` gap noted
+        under the main menu work in Phase 2; the list of names that get this
+        far and then find nothing should be gathered in one place rather
+        than found one at a time on the emulator.

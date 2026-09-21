@@ -5,9 +5,10 @@ Enough of the EE instruction set to read bWare's scalar game-logic code
 without a MIPS toolchain: MIPS I/II/III integer ops (including the 64-bit
 `ld`/`sd`/`daddu` that SN's compiler emits for every register save and
 every register-to-register move), the COP1 FPU, and the branch-likely
-forms. MMI (the EE's 128-bit multimedia ops) and the COP2/VU transfers are
-printed as `mmi`/`cop2` with their raw word -- they appear in the geometry
-code that feeds VU1, not in the logic this is meant for.
+forms. MMI (the EE's 128-bit multimedia ops) are still printed as `mmi` with
+their raw word. COP2 is not: tools/vudis.py decodes the VU0 macro-mode
+instructions, which is most of the arithmetic in the camera, the car sim and
+the collision code.
 
 Symbols come from `.symtab`, which this ELF still has in full, so functions
 can be disassembled by their (GNU C++ v2 mangled) name:
@@ -25,6 +26,9 @@ import os
 import re
 import struct
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import vudis
 
 ELF = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "PS2 Files", "NFSHP2.ELF")
@@ -357,7 +361,7 @@ def decode(w, addr, elf=None):
         r = _fpu(w, addr)
         return r if isinstance(r, tuple) else (r, None)
     if op in (0x12, 0x13):
-        return "cop2   0x%08x" % w, None
+        return vudis.decode(w) or "cop2   0x%08x" % w, None
     if op == 0x1c:
         return _mmi(w), None
 

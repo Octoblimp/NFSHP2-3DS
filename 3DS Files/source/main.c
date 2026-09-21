@@ -1166,7 +1166,8 @@ int main(int argc, char** argv)
 
             if (kDown & KEY_START) break;
             hidCircleRead(&pad);
-            geoview_input(&g_geo, kDown, pad.dx, pad.dy, BOOT_DT);
+            geoview_input(&g_geo, kDown, hidKeysHeld(), pad.dx, pad.dy,
+                          BOOT_DT);
 
             printf("\x1b[s\x1b[16;1H");
             printf("car %2d/%-2d %-20s        \n",

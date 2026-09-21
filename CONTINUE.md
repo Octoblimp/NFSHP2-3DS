@@ -1,20 +1,22 @@
 # CONTINUE
 
-Where the next session picks up. Written at the end of Session 17
+Where the next session picks up. Written at the end of Session 18
 (2026-09-20). `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
 
-**Phases 0-2 are closed, and so is task 22.** Cars draw on the top screen out
-of `CARS\*\GEOMETRY.BIN` (task 21), and the frontend now makes the disc's own
-menu sounds through a ported `bSnd` over ndsp -- heard on Azahar, not just
+**Phases 0-2 are closed, and so are tasks 22 and 23.** Cars draw on the top
+screen out of `CARS\*\GEOMETRY.BIN` (task 21), the frontend makes the disc's
+own menu sounds through a ported `bSnd` over ndsp, and the geometry viewer is
+now framed by the shipped `CM_ORBIT_CAR` boom on the ported `Camera` rather
+than by a camera of its own -- all three heard or seen on Azahar, not just
 diffed.
 
-Eleven cross-checkers pass, plus the table generators:
+Thirteen cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
 ```
 
 ```
@@ -29,6 +31,8 @@ texsrc_check       6 packs, 2 levels, 2958 textures, 0 differ
 bui_check          FRONTB.BUN    1395 lines, 0 differ
 sndbank_check      30 banks,       908 lines, 0 differ   (20000 mutations, 0 disagree)
 bsnd_check         12 scenarios,  5157 lines, 0 differ   (25/25 mutations caught)
+emath_check         9 scenarios,  2416 lines, 0 differ   (39/39 mutations caught)
+camera_check        7 scenarios,  1200 lines, 0 differ   (40 caught, 7 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 ```
@@ -53,14 +57,25 @@ the data root `gamedata.c` resolves to on this machine, and the
 takes about ten minutes; `sndbank_check.py --mutate 20000` takes a couple of
 hours.
 
-Open tasks: **9** (23-31, none started).
+`camera_check.py --mutate` reports "7 equivalent, 0 unexplained" rather than
+"7 survived": the seven are named in the script with an argument each, and
+three of them are uncatchable because the disc's velocity record is
+structurally zero. See `docs/formats/camera.md`.
+
+Open tasks: **10** (24-31, plus 32 and 33 asked for mid-session).
 
 ## Next, in order
 
-1. **Task 23**, Camera (`Camera.obj`, `CameraMover.obj`).
-2. Then in order: 24 TrackRoute/Esp, 25 car sim, 26 race/cop AI, 27 track
+1. **Task 24**, the track/route system (`TrackRoute.obj`, `espEmptyLayer`).
+   It is the last of Phase 3 and it gates the CM_TRACK_* movers that
+   `cammover.c` deliberately left out.
+2. Then in order: 25 car sim, 26 race/cop AI, 27 track
    render/stream/collision, 28 New3DS perf, 29 save/options/sound mix,
    30 split-screen scope, 31 final CIA + Old3DS/New3DS pass.
+3. Two the user asked for while task 23 was running, both in `TASKS.md`:
+   **32**, stretch the frontend to fill the 3DS's 5:3 top screen instead of
+   leaving the 4:3 sides empty, and **33**, `ChallengeBeACop` reaches the
+   flow and finds no registered screen.
 
 **Phase 4 constraint, from the user:** the gameplay HUD is to be designed for
 **two screens from the start** -- some readouts on the bottom screen rather
@@ -78,6 +93,19 @@ Ordered roughly by how much time it costs to rediscover.
   "done" having changed nothing -- or worse, having applied half its edits.
   Build the backslash from `chr(92)`, or use the file-editing tool. This cost
   two broken source files this session.
+* **`C3D_FVec` is declared `w, z, y, x`.** `r[i].c[j]` is element
+  `(i, 3 - j)`, so a loop that fills `c[0..3]` as though they were columns
+  0..3 writes every row backwards. It cost a build this session: the camera's
+  view matrix came out transposed *and* mirrored, the eye never left the
+  world origin, and the car drew as a black fan of triangles seen from
+  inside the bodyshell. Nothing in the cross-check could see it. Use the
+  named `.x/.y/.z/.w` fields, or subtract.
+* **Azahar shows an "Update Available" dialog on launch** and it swallows
+  every `PostMessage` keypress aimed at the emulator window. All three
+  `run_azahar_*.ps1` scripts now close any visible top-level window of the
+  process that is not titled "Azahar" before they start pressing keys. A run
+  that does not is indistinguishable from a dead key binding: the app boots,
+  the log looks healthy, and nothing responds.
 * **`tools/hostbuild.py` is a library, not a CLI.** Running it as a script
   exits 0 and produces nothing. Call `hostbuild.build(tmp, sources, name=...)`.
 * **A survivor in a mutation run is not automatically a coverage hole.** Two

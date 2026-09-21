@@ -2563,3 +2563,127 @@ out which before writing more tests.
   and the second `SelectFinal` are four copies of the same 5728 bytes on the
   disc. That is the disc's doing, not the packer's -- checked against the
   `.MSB` before believing it.
+
+## Session 18 (2026-09-20) -- VU0 made readable, and the camera on the boom
+
+Task 23 closed, and the layer under it with it. Two objects ported
+(`Camera.obj`, and `CameraMover.obj`'s base plus `CM_ORBIT_CAR`), one new
+disassembler, two new cross-checkers, and a bug that only showed up when
+somebody looked at the screen.
+
+### `tools/vudis.py`, because none of this could be read
+
+Almost every line of `eMathE.obj` is VU0 macro mode -- COP2 opcodes in the EE
+instruction stream -- and `mipsdis.py` printed them as `cop2` plus a raw
+word. The new decoder is checked against sixteen hand-derived words and then
+against the whole image: 3087 COP2 words in `.text`, 41 distinct mnemonics,
+nothing left undecoded.
+
+### `eMathE.obj` -> `emath.[ch]`
+
+Twenty-six symbols, `docs/formats/emath.md`, and
+`tools/emath_check.py` at 9 scenarios / 2416 lines / 0 differ with 39 of 39
+mutations caught. Three traps are written up there: `eMulMatrix(o,a,b)` is
+`a*b` where `bMulMatrix` is `b*a`; `eInvertRotationMatrix` clears the corner
+as well as transposing; and `eNormalizedDirection` divides a 3D vector by its
+**2D** length, which is a bug in the original that the port keeps.
+
+### `Camera.obj` -> `camera.[ch]`
+
+The camera does not decide where it is. It is handed a matrix once a frame
+and pulls the eye, the direction, the target and the velocities out of it,
+and `SetCameraMatrix` is the whole object.
+
+**Half the velocity record is dead, and it is dead on the disc.**
+`SetCameraMatrix` copies `CurrentKey` over `PreviousKey` as its first act and
+then recomputes only the matrix and the three vectors, so when it reaches the
+six scalar subtractions each pair is the same word. All six velocities --
+target distance, focal distance, depth of field, near, far, field of view --
+are identically zero and nothing can arrange otherwise; every writer of those
+six writes before the call, never between the copy and the subtraction. That
+is measured, not argued: all 44 velocity records in the transcript print
+`scal 0 0 0 0 0 fov 0`. The u16 wrap and the truncation on the field of view
+are ported anyway, because that is what the instructions say, and three
+mutations of them are on the equivalent list as a result.
+
+Two more that a sensible re-implementation gets wrong: the fourth column of
+the matrix is never cleared, so the constructor's stray `100.0` lands in
+`Position` and the default eye is a hundred units short of its own
+translation row; and the negate is `vsub.xyzw vf02,vf00,vf02` against VU0's
+constant `(0,0,0,1)`, so the pad lane comes out `1 - w`. `bVector3` is a
+padded quadword and the pad is differenced and divided like everything else,
+so the port carries all four lanes.
+
+### `CameraMover.obj` -> `cammover.[ch]`
+
+The base class and `CM_ORBIT_CAR`, which is the boom the car select and the
+replay orbit ride. The other seventeen movers need `Car`, `TrackRoute` or the
+streaming world, so they wait for tasks 24-27.
+
+`Enable` and `Disable` are not symmetric and the asymmetry is load-bearing:
+`Disable` does not test `StopUpdating` at all, and it copies the camera's two
+render flags back *into* the mover on the way out, so a disable/enable pair
+round-trips whatever another mover left on the camera rather than restoring
+what this one first saw. The first port had `Disable` as a bare flag write;
+disassembling `0x154658` fixed it.
+
+`TweakOrbitFOV` is not behind `UseTweakables`. It lands on the camera every
+frame, so the constructor's `InGameFOV` of 13020 is overwritten before
+anything can use it and the orbit really is 8000 BAMs, about 44 degrees. A
+debug tweakable that shipped switched on.
+
+`tools/camera_check.py`: 7 scenarios, 1200 lines, 0 differ; 47 mutations, 40
+caught, **7 equivalent with a written argument each**, 0 unexplained. Four of
+the seven are arithmetic identities (a bounded approach whose step lands
+exactly on its target at a gap of exactly `accel`; the same argument for the
+80-BAM angle walk; clamping `Radius` or `DesiredRadius` first; and
+`TargetDistance = Radius` versus `DesiredRadius`, which the zoom transcript
+shows are equal on every frame). The other three are the dead FOV velocity.
+
+### Then somebody looked at it
+
+The geometry viewer no longer has a camera of its own. It builds a
+`CamCarView` at the current solid's AABB centre, runs a real
+`OrbitCarCameraMover` against a real `Camera`, and hands `CurrentKey.Matrix`
+and `CurrentKey.FieldOfView` to citro3d. The first run drew a black fan of
+triangles radiating from a point.
+
+**`C3D_FVec` is declared `w, z, y, x`, in that order.** So `r[i].c[j]` is
+element `(i, 3 - j)`, and the loop that transposed the engine's row-vector
+matrix into it was writing every row backwards: the translation ended up in
+column 0, the eye never left the world origin, and the car was being drawn
+from inside its own bodyshell. The cross-check could not have caught it --
+the matrix it diffs was correct -- and neither could code review, because a
+transposed-and-mirrored view matrix reads exactly like a transposed one.
+
+With `c[3 - c]` the cars are cars again, and `run_azahar_geo.ps1` now
+captures the boom doing each of its jobs: a held zoom and a shot 1.5 s after
+release that differs by 0.011/255 (two frames of the idle spin differ by
+1.009, so the test can fail), the acceleration limiter 150 ms into a held
+pad, and the elevation clamp stopping short of overhead.
+
+The pad signs came out of the ELF rather than out of taste: `JoyHandler`'s
+jump table at `0x2950e0` is nine **debug camera** events, 46..54, not the
+`JOY_EVENT_CARSEL_ORBIT_*` ones at 35..43 -- the car select screen drives
+this mover through its setters instead. `ROTATE_UP` asks for a *negative*
+vertical speed, so holding up walks `AngleV` toward `MaxAngleV` and lowers
+the boom. The viewer is wired the same way.
+
+### Also
+
+* **Azahar's "Update Available" dialog swallows every posted keypress.** The
+  geometry run pressed SELECT eight times into a modal dialog and reported
+  that the viewer was never reached, with a perfectly healthy log to go with
+  it. All three `run_azahar_*.ps1` now close any visible top-level window of
+  the emulator process that is not titled "Azahar" before they press
+  anything.
+* **The orbit is per frame, not per second.** Rotation speeds are BAMs per
+  frame and the zoom compounds 1% per frame, so at the 139 FPS Azahar gives
+  this build the zoom is a factor of four in a second and puts the eye inside
+  the car. That is the disc's own behaviour on a fixed console. Task 28 has
+  to decide whether the 3DS keeps it.
+* **Two requests arrived mid-session** and are written down as tasks 32 and
+  33: stretch the frontend to fill the 3DS's 5:3 top screen rather than
+  leaving the 4:3 sides empty, and `ChallengeBeACop` -- which the flow
+  changes to and then reports `unregistered`, the same shape as the
+  `Options` gap from session 9.

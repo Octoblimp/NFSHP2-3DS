@@ -4,6 +4,8 @@
 
 #include <citro3d.h>
 
+#include "camera.h"
+#include "cammover.h"
 #include "geometry.h"
 #include "georender.h"
 #include "texsrc.h"
@@ -80,12 +82,21 @@ typedef struct {
     GeoViewTex texture[GEOVIEW_MAX_TEXTURES];
     int        numTextures;
 
-    // --- the camera, an orbit around the current solid's AABB centre.
-    float centre[3];
-    float radius;
-    float yaw, pitch, dist;
-    bool  spin;
-    bool  textured;
+    // --- the camera. Not the viewer's own any more: this is the engine's
+    // Camera (task 23) driven by a real CM_ORBIT_CAR CameraMover, orbiting
+    // a CamCarView parked at the current solid's AABB centre. So what is on
+    // screen is the shipped boom arm -- its acceleration limiter, its
+    // elevation clamp, its 8000-BAM field of view -- and not an
+    // approximation of it. The AABB still decides where the car is and how
+    // long the boom starts out.
+    Camera              cam;
+    OrbitCarCameraMover orbit;
+    CamCarView          carView;
+    float               centre[3];
+    float               radius;
+    float               dist;
+    bool                spin;
+    bool                textured;
 
     // --- counters for the bring-up overlay.
     int  loadedTris;
@@ -104,9 +115,13 @@ void geoview_free(GeoView* v);
 // whatever was loaded before. False leaves the viewer empty but usable.
 bool geoview_load(GeoView* v, int index);
 
-// One frame of input. `kDown` is hidKeysDown(), `cpx`/`cpy` the circle pad in
-// its native -156..156.
-void geoview_input(GeoView* v, uint32_t kDown, int cpx, int cpy, float dt);
+// One frame of input, and one frame of the camera mover -- the mover runs
+// from here rather than from geoview_draw because this is where the frame
+// delta arrives. `kDown` is hidKeysDown(), `kHeld` hidKeysHeld() (the zoom
+// is a held button on the disc too), `cpx`/`cpy` the circle pad in its
+// native -156..156.
+void geoview_input(GeoView* v, uint32_t kDown, uint32_t kHeld, int cpx,
+                   int cpy, float dt);
 
 // Draws the current solid, or all of them. Assumes a render target with a
 // depth buffer is already bound (C3D_FrameDrawOn).

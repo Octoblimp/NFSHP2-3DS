@@ -49,8 +49,39 @@ if ($Target3dsx -like "*.cia") {
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Drawing;
 public class Hp2Cap {
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr p);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    public delegate bool EnumProc(IntPtr h, IntPtr p);
+    // Azahar's "Update Available" dialog takes the foreground on launch and
+    // blocks the emulator window from acting on posted keys, so a run that
+    // ignores it presses its way into a dialog and then reports that the
+    // app never got anywhere. Anything owned by the process that is
+    // visible, titled, and not titled "Azahar" is one of these; the
+    // emulator window and its Qt helper windows are all either titled
+    // "Azahar" or untitled. See docs/formats/camera.md.
+    static uint sPid; static IntPtr sKeep; static int sClosed;
+    public static int DismissPopups(uint pid, IntPtr keep) {
+        sPid = pid; sKeep = keep; sClosed = 0;
+        EnumWindows(delegate(IntPtr h, IntPtr p) {
+            uint q; GetWindowThreadProcessId(h, out q);
+            if (q != sPid || h == sKeep || !IsWindowVisible(h)) { return true; }
+            StringBuilder c = new StringBuilder(256); GetClassName(h, c, 256);
+            if (!c.ToString().StartsWith("Qt")) { return true; }
+            StringBuilder t = new StringBuilder(256); GetWindowText(h, t, 256);
+            string title = t.ToString();
+            if (title.Length == 0 || title.StartsWith("Azahar")) { return true; }
+            PostMessage(h, 0x0010, IntPtr.Zero, IntPtr.Zero);   // WM_CLOSE
+            sClosed++;
+            return true;
+        }, IntPtr.Zero);
+        return sClosed;
+    }
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] public static extern int PrintWindow(IntPtr h, IntPtr hdc, uint flags);
@@ -101,6 +132,8 @@ while ((Get-Date) -lt $deadline) {
 }
 $hwnd = $proc.MainWindowHandle
 if ($hwnd -eq 0) { $proc | Stop-Process -Force; throw "no Azahar window" }
+$closed = [Hp2Cap]::DismissPopups([uint32]$proc.Id, $hwnd)
+if ($closed -gt 0) { Write-Host "  dismissed $closed launch dialog(s)" }
 
 $start = Get-Date
 function Elapsed { ((Get-Date) - $start).TotalSeconds }

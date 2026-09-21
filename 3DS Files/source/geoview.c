@@ -8,6 +8,7 @@
 
 #include <3ds.h>
 
+#include "emath.h"
 #include "gamedata.h"
 
 #define CAR_DIR        "CARS"
@@ -15,9 +16,21 @@
 #define CAR_PACK       "CARS/TEXTURES.BIN"
 #define GLOBAL_PACK    "GLOBAL/GLOBALB.BUN"
 
-#define PITCH_LIMIT    1.45f        // just under 90 degrees
-#define SPIN_RATE      0.55f        // radians a second
 #define PAD_DEAD       24           // circle pad noise floor
+
+// The mover's rotation speeds are BAMs per FRAME, not per second -- that is
+// the disc's unit and the port keeps it -- so these are frame quantities.
+// ORBIT_JOY_SPEED (500) is what the PS2's stick sent at full deflection;
+// SPIN_SPEED is the viewer's own idle drift, about 40 degrees a second at
+// 60fps, slow enough to look at a car by.
+#define SPIN_SPEED     120
+
+// The camera's own axes are the engine's: +z forward and +y DOWN, because
+// the boom matrix ends with eRotateX(16384) then eRotateY(0xc000) and that
+// is where those two land world +x and world +z. citro3d wants +y up and
+// -z forward, so the view matrix is the transpose with rows 1 and 2 negated.
+#define VIEW_FLIP_Y    (-1.0f)
+#define VIEW_FLIP_Z    (-1.0f)
 
 // ------------------------------------------------------------------ the list
 
@@ -285,6 +298,34 @@ static void frame_camera(GeoView* v)
         v->radius = 0.01f;
     }
     v->dist = v->radius * 2.8f;
+
+    // Park the stand-in car on the AABB centre and give the mover a boom
+    // range to work in. MinRadius/MaxRadius are the mover's own clamp, so
+    // the zoom stops where the viewer says rather than where the disc's
+    // 1.0 .. 1000.0 defaults would.
+    v->carView.GeometryPosition.x = v->centre[0];
+    v->carView.GeometryPosition.y = v->centre[1];
+    v->carView.GeometryPosition.z = v->centre[2];
+    v->carView.GeometryPosition.pad = 0.0f;
+    v->carView.Position = v->carView.GeometryPosition;
+    eIdentity(&v->carView.BodyMatrix);
+
+    orbit_set_min_radius(&v->orbit, v->radius * 0.6f);
+    orbit_set_max_radius(&v->orbit, v->radius * 40.0f);
+    orbit_set_desired_radius(&v->orbit, v->dist);
+    orbit_set_radius(&v->orbit, v->dist);
+}
+
+// The mover holds pointers into the GeoView, so it is rebuilt whenever the
+// struct is cleared or a new car is framed rather than being set up once.
+static void reset_camera(GeoView* v)
+{
+    camera_init(&v->cam);
+    orbit_init(&v->orbit, 0, &v->cam, &v->carView, 0);
+    // The near plane the mover sets is 0.5 and its far plane 5000, which are
+    // the disc's and are wrong for a 4.5-metre car seen from 6 metres only
+    // in that they waste depth range. Left alone: they are what the camera
+    // ships with, and the depth buffer has 24 bits to spend.
 }
 
 bool geoview_load(GeoView* v, int index)
@@ -333,8 +374,7 @@ bool geoview_load(GeoView* v, int index)
 
     v->curSolid = biggest_solid(v);
     v->drawAll  = false;
-    v->yaw      = 2.3f;
-    v->pitch    = 0.35f;
+    reset_camera(v);
     frame_camera(v);
 
     v->loadMs = (int)(osGetTime() - t0);
@@ -357,10 +397,12 @@ void geoview_free(GeoView* v)
 
 // -------------------------------------------------------------------- input
 
-void geoview_input(GeoView* v, uint32_t kDown, int cpx, int cpy, float dt)
+void geoview_input(GeoView* v, uint32_t kDown, uint32_t kHeld, int cpx,
+                   int cpy, float dt)
 {
     bool reframe = false;
 
+    (void)dt;
     if (v->numCars == 0) {
         return;
     }
@@ -394,60 +436,99 @@ void geoview_input(GeoView* v, uint32_t kDown, int cpx, int cpy, float dt)
         v->textured = !v->textured;
     }
     if (kDown & KEY_B) {
-        v->yaw   = 2.3f;
-        v->pitch = 0.35f;
-        reframe  = true;
-    }
-    if (kDown & KEY_DUP) {
-        v->dist *= 0.8f;
-    }
-    if (kDown & KEY_DDOWN) {
-        v->dist *= 1.25f;
+        // Back to the angles the mover's own constructor picks, which is
+        // where the car select screen opens.
+        orbit_set_angles(&v->orbit, 26000, 0xf230);
+        reframe = true;
     }
     if (reframe) {
         frame_camera(v);
     }
 
-    // The circle pad drives the orbit directly and suspends the idle spin
-    // while it is off centre, rather than toggling it -- so a glance at the
-    // car does not leave it stopped.
+    // Zoom is the disc's: hold the button and RadiusMultiplier compounds
+    // 1% a frame into DesiredRadius. Releasing it must put the multiplier
+    // back to exactly 1.0, because Update tests for that and skips the
+    // multiply -- a multiplier of 0.999 left behind would creep for ever.
+    if (kHeld & KEY_DUP) {
+        orbit_set_radius_multiplier(&v->orbit, ORBIT_ZOOM_IN);
+    } else if (kHeld & KEY_DDOWN) {
+        orbit_set_radius_multiplier(&v->orbit, ORBIT_ZOOM_OUT);
+    } else {
+        orbit_set_radius_multiplier(&v->orbit, 1.0f);
+    }
+
+    // The circle pad asks for a rotation speed rather than setting an angle,
+    // and the mover ramps to it at MaxRotationAccel -- 24 BAMs per frame per
+    // frame -- so the orbit has the weight the shipped one has. The pad
+    // suspends the idle spin while it is off centre rather than toggling it.
     if (cpx > PAD_DEAD || cpx < -PAD_DEAD) {
-        v->yaw -= (float)cpx / 156.0f * 2.2f * dt;
-    } else if (v->spin) {
-        v->yaw += SPIN_RATE * dt;
+        orbit_set_desired_h_rotation_speed(
+            &v->orbit, -(int)((float)cpx / 156.0f * ORBIT_JOY_SPEED));
+    } else {
+        orbit_set_desired_h_rotation_speed(&v->orbit,
+                                           v->spin ? SPIN_SPEED : 0);
     }
     if (cpy > PAD_DEAD || cpy < -PAD_DEAD) {
-        v->pitch += (float)cpy / 156.0f * 1.6f * dt;
-        if (v->pitch >  PITCH_LIMIT) v->pitch =  PITCH_LIMIT;
-        if (v->pitch < -PITCH_LIMIT) v->pitch = -PITCH_LIMIT;
+        // Both signs are the disc's, from the jump table at 0x2950e0:
+        // ROTATE_RIGHT and ROTATE_UP ask for a NEGATIVE speed and their
+        // opposites for a positive one. Pad up therefore walks AngleV up
+        // toward MaxAngleV, which lowers the boom -- elevation is measured
+        // the other way round -- and that is what the disc does.
+        orbit_set_desired_v_rotation_speed(
+            &v->orbit, -(int)((float)cpy / 156.0f * ORBIT_JOY_SPEED));
+    } else {
+        orbit_set_desired_v_rotation_speed(&v->orbit, 0);
     }
+
+    // One frame of the real mover. IsGameFlowPaused is the caller's test on
+    // the disc and there is nothing to pause here.
+    orbit_update(&v->orbit, dt);
 }
 
 // --------------------------------------------------------------------- draw
 
 void geoview_draw(GeoView* v)
 {
-    C3D_Mtx    proj, view;
-    C3D_FVec   eye, at, up;
-    float      cp = cosf(v->pitch);
-    int        i;
+    C3D_Mtx          proj, view;
+    const bMatrix4*  m;
+    const float*     row;
+    int              i, c;
 
     if (v->numSolids == 0) {
         return;
     }
 
-    // Z is up in eSolid space -- a car's AABB is 4.46 long on X, 1.95 wide
-    // on Y and 1.45 tall on Z -- so the orbit is around Z and the up vector
-    // is +Z, not the +Y a citro3d example would use.
-    eye = FVec3_New(v->centre[0] + v->dist * cp * cosf(v->yaw),
-                    v->centre[1] + v->dist * cp * sinf(v->yaw),
-                    v->centre[2] + v->dist * sinf(v->pitch));
-    at  = FVec3_New(v->centre[0], v->centre[1], v->centre[2]);
-    up  = FVec3_New(0.0f, 0.0f, 1.0f);
+    // The view matrix is the camera's, straight out of CurrentKey, with two
+    // conversions and no third: bMatrix4 is row-vector (a point multiplies
+    // on the LEFT) where C3D_Mtx is column-vector, so it transposes; and the
+    // engine's view space is +y down, +z forward where citro3d's is +y up,
+    // -z forward, so rows 1 and 2 of the result are negated. Z is up in
+    // eSolid space and the mover already knows that -- its boom elevates
+    // around world Z and its final eRotateX/eRotateY are exactly the change
+    // of basis that puts it on screen.
+    m = &v->cam.CurrentKey.Matrix;
+    row = &m->v0.x;
+    for (i = 0; i < 4; i++) {
+        float sign = (i == 1) ? VIEW_FLIP_Y : (i == 2) ? VIEW_FLIP_Z : 1.0f;
+        for (c = 0; c < 4; c++) {
+            // C3D_FVec is declared w, z, y, x -- in that order -- so c[0]
+            // is the w lane and r[i].c[j] is element (i, 3 - j). Writing
+            // c[j] as though it were column j mirrors every row: the
+            // translation lands in column 0, the camera never leaves the
+            // origin, and the car draws as a fan of triangles seen from
+            // inside it. That is what the first emulator run showed.
+            view.r[i].c[3 - c] = sign * row[c * 4 + i];
+        }
+    }
 
-    Mtx_PerspTilt(&proj, C3D_AngleFromDegrees(45.0f), 400.0f / 240.0f,
-                  v->radius * 0.05f, v->radius * 40.0f, false);
-    Mtx_LookAt(&view, eye, at, up, false);
+    // And the projection is the camera's too: FieldOfView is a BAM, 65536 to
+    // the turn, and the mover writes 8000 of them (about 44 degrees) every
+    // frame. NearZ and FarZ come from the mover as well, 0.5 and 5000.
+    Mtx_PerspTilt(&proj,
+                  (float)v->cam.CurrentKey.FieldOfView * (2.0f * M_PI /
+                                                          65536.0f),
+                  400.0f / 240.0f, v->cam.CurrentKey.NearZ,
+                  v->cam.CurrentKey.FarZ, false);
 
     georender_set_camera(&proj, &view);
     // Over the viewer's left shoulder, in view space, so the car relights

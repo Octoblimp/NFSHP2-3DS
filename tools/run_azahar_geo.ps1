@@ -38,19 +38,75 @@ if (-not (Test-Path $Target3dsx)) { throw "Target .3dsx not found at $Target3dsx
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Drawing;
 public class Hp2Geo {
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] public static extern int PrintWindow(IntPtr h, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] public static extern IntPtr PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr p);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    public delegate bool EnumProc(IntPtr h, IntPtr p);
     public struct RECT { public int Left, Top, Right, Bottom; }
     public const uint WM_KEYDOWN = 0x0100;
     public const uint WM_KEYUP = 0x0101;
+    public const uint WM_CLOSE = 0x0010;
     public static void PressKey(IntPtr h, int vk) {
         PostMessage(h, WM_KEYDOWN, (IntPtr)vk, IntPtr.Zero);
         System.Threading.Thread.Sleep(140);
         PostMessage(h, WM_KEYUP, (IntPtr)vk, IntPtr.Zero);
+    }
+    // Held keys, so a shot can be taken while the button is still down.
+    // The zoom on the disc is a held button and the pad is a held
+    // direction; a 140ms tap is one frame of either at this frame rate.
+    public static void KeyDown(IntPtr h, int vk) { PostMessage(h, WM_KEYDOWN, (IntPtr)vk, IntPtr.Zero); }
+    public static void KeyUp(IntPtr h, int vk) { PostMessage(h, WM_KEYUP, (IntPtr)vk, IntPtr.Zero); }
+
+    // Azahar's "Update Available" dialog takes the foreground on launch and
+    // blocks the emulator window from acting on posted keys, so a run that
+    // ignores it presses SELECT eight times into a dialog and then reports
+    // that the geometry viewer was never reached. Anything owned by the
+    // process that is visible, titled, and not titled "Azahar" is one of
+    // these; the emulator window and its Qt helper windows are all either
+    // titled "Azahar" or untitled.
+    static uint sPid; static IntPtr sKeep; static int sClosed;
+    public static int DismissPopups(uint pid, IntPtr keep) {
+        sPid = pid; sKeep = keep; sClosed = 0;
+        EnumWindows(delegate(IntPtr h, IntPtr p) {
+            uint q; GetWindowThreadProcessId(h, out q);
+            if (q != sPid || h == sKeep || !IsWindowVisible(h)) { return true; }
+            StringBuilder c = new StringBuilder(256); GetClassName(h, c, 256);
+            if (!c.ToString().StartsWith("Qt")) { return true; }
+            StringBuilder t = new StringBuilder(256); GetWindowText(h, t, 256);
+            string title = t.ToString();
+            if (title.Length == 0 || title.StartsWith("Azahar")) { return true; }
+            PostMessage(h, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+            sClosed++;
+            return true;
+        }, IntPtr.Zero);
+        return sClosed;
+    }
+    // Mean absolute channel difference between two captures, 0..255. The
+    // creep test below needs a number: two dark shots of the same car look
+    // the same to a reader whatever the radius did between them.
+    public static double MeanDiff(string a, string b) {
+        using (Bitmap x = new Bitmap(a))
+        using (Bitmap y = new Bitmap(b)) {
+            if (x.Width != y.Width || x.Height != y.Height) { return 255.0; }
+            double sum = 0; int n = 0;
+            for (int j = 0; j < x.Height; j += 3) {
+                for (int i = 0; i < x.Width; i += 3) {
+                    Color p = x.GetPixel(i, j), q = y.GetPixel(i, j);
+                    sum += Math.Abs(p.R - q.R) + Math.Abs(p.G - q.G) + Math.Abs(p.B - q.B);
+                    n += 3;
+                }
+            }
+            return n == 0 ? 255.0 : sum / n;
+        }
     }
     public static void CaptureToFile(IntPtr h, string path) {
         RECT r; GetWindowRect(h, out r);
@@ -78,6 +134,9 @@ $VK_A = 65; $VK_S = 83; $VK_Z = 90; $VK_X = 88
 $VK_M = 77; $VK_N = 78
 $VK_T = 84; $VK_G = 71; $VK_F = 70; $VK_H = 72
 $VK_Q = 81; $VK_W = 87    # L and R
+# The circle pad is analog_from_button on the arrow keys: Qt 16777234..7
+# in qt-config.ini, which is Left/Up/Right/Down.
+$VK_LEFT = 37; $VK_UP = 38; $VK_RIGHT = 39; $VK_DOWN = 40
 
 $debugLog = Join-Path $env:APPDATA "Azahar\sdmc\nfshp2_debug.txt"
 Remove-Item $debugLog -ErrorAction SilentlyContinue
@@ -95,6 +154,8 @@ while ((Get-Date) -lt $deadline) {
 }
 $hwnd = $proc.MainWindowHandle
 if ($hwnd -eq 0) { $proc | Stop-Process -Force; throw "no Azahar window" }
+$closed = [Hp2Geo]::DismissPopups([uint32]$proc.Id, $hwnd)
+if ($closed -gt 0) { Write-Host "  dismissed $closed launch dialog(s)" }
 
 $start = Get-Date
 function Elapsed { ((Get-Date) - $start).TotalSeconds }
@@ -139,6 +200,7 @@ if (-not $booted) { $proc | Stop-Process -Force; throw "never reached the main l
 # them landed. Checking after every press is what stops it cycling past.
 $mode = $false
 for ($try = 1; $try -le 8 -and -not $mode; $try++) {
+    [void][Hp2Geo]::DismissPopups([uint32]$proc.Id, $hwnd)
     [Hp2Geo]::PressKey($hwnd, $VK_N)
     $mode = Wait-ForLog "geoview: entered" 20
 }
@@ -164,6 +226,75 @@ Start-Sleep -Milliseconds 700
 Shot "geo-untextured"
 [Hp2Geo]::PressKey($hwnd, $VK_Z)
 Start-Sleep -Milliseconds 500
+
+# ---- the camera (task 23).
+#
+# The viewer's own spherical orbit is gone: what frames the car now is the
+# ported Camera driven by a real CM_ORBIT_CAR CameraMover, so these shots
+# are the only place the boom's behaviour can be seen rather than asserted.
+# camera_check.py proves the port and an independent model of the ELF agree
+# about 1200 lines of numbers; it cannot say whether the view matrix handed
+# to the PICA200 points the right way, and the first thing a transposed or
+# unnegated one does is look correct from behind and inside-out from the
+# side.
+#
+# Zoom first, because it is the cheapest thing to be wrong: it is a HELD
+# button on the disc (RadiusMultiplier compounds 1% a frame while it is
+# down and must snap back to exactly 1.0 on release), so a tap proves
+# nothing and a stuck multiplier shows up as a car that keeps creeping
+# after the key is up.
+#
+# The idle spin comes off first: two shots of a spinning car differ
+# whatever the radius did, and the creep test below is a comparison.
+#
+# The hold is short because the emulator runs the app at two and a half
+# times hardware speed here -- 1% a frame compounds about fourfold in a
+# second at 139 FPS, which puts the eye inside the bodyshell. The disc
+# compounds per frame too; that is the mover, not the harness.
+[Hp2Geo]::PressKey($hwnd, $VK_X)             # Y button -> spin off
+Start-Sleep -Milliseconds 600
+Shot "cam-still"
+[Hp2Geo]::KeyDown($hwnd, $VK_T)              # D-pad up -> zoom in
+Start-Sleep -Milliseconds 260
+[Hp2Geo]::KeyUp($hwnd, $VK_T)
+Start-Sleep -Milliseconds 700
+Shot "cam-zoom-in"
+Start-Sleep -Milliseconds 1500
+Shot "cam-zoom-settled"
+$creep = [Hp2Geo]::MeanDiff((Join-Path $OutDir ("{0:d2}_cam-zoom-in.png" -f ($script:step - 1))),
+                            (Join-Path $OutDir ("{0:d2}_cam-zoom-settled.png" -f $script:step)))
+Write-Host ("  zoom creep after release: mean diff {0:N3}/255 -- {1}" -f $creep,
+            $(if ($creep -lt 0.5) { "PASS, the multiplier went back to 1.0" } else { "FAIL, still moving" }))
+[Hp2Geo]::KeyDown($hwnd, $VK_G)              # D-pad down -> zoom out
+Start-Sleep -Milliseconds 700
+[Hp2Geo]::KeyUp($hwnd, $VK_G)
+Start-Sleep -Milliseconds 500
+Shot "cam-zoom-out"
+
+# The pad asks for a rotation SPEED and the mover ramps to it at
+# MaxRotationAccel, 24 BAMs per frame per frame. A shot as the key goes
+# down and another a second later are the acceleration limiter; if the
+# first one has already swung, the limiter is not in the loop.
+[Hp2Geo]::KeyDown($hwnd, $VK_LEFT)
+Start-Sleep -Milliseconds 150
+Shot "cam-orbit-start"
+Start-Sleep -Milliseconds 1300
+Shot "cam-orbit-held"
+[Hp2Geo]::KeyUp($hwnd, $VK_LEFT)
+Start-Sleep -Milliseconds 400
+
+# Elevation is clamped to 280..350 BAM degrees, so holding up should stop
+# short of overhead instead of tumbling over the top and inverting.
+[Hp2Geo]::KeyDown($hwnd, $VK_UP)
+Start-Sleep -Milliseconds 1800
+Shot "cam-elev-clamped"
+[Hp2Geo]::KeyUp($hwnd, $VK_UP)
+Start-Sleep -Milliseconds 400
+[Hp2Geo]::PressKey($hwnd, $VK_S)             # B -> the mover ctor's angles
+Start-Sleep -Milliseconds 900
+Shot "cam-reset"
+[Hp2Geo]::PressKey($hwnd, $VK_X)             # Y -> spin back on
+Start-Sleep -Milliseconds 300
 
 # Every solid in the file, one at a time: body LODs, wheels, brakes, mirrors,
 # wipers, the scuff decals.
