@@ -79,9 +79,13 @@ and so replaced every boot.
 
 ## Next, in order
 
-1. **Task 25**, the car simulation. Phase 4 starts here, and its HUD
-   constraint is below -- ask before choosing which readouts go on the
-   bottom screen.
+1. **Task 25**, the car simulation -- part done. `CarState.obj` is
+   closed (`carstate.{c,h}`, `carstate_check.py`,
+   `docs/formats/car-state.md`). Still to port: `Car` (2016 B),
+   `PhysicsCar` (116 B), `Suspension` (176 B), `Wheel` (400 B),
+   `Engine` (92 B), `CarDriver` (560 B) and the rest of `CarTypeInfo`
+   (1376 B -- only the `CenterOfGravity` + `WheelInfo[4]` prefix that
+   CarState reads is decoded so far). The HUD split is settled, below.
 2. Then in order: 26 race/cop AI, 27 track render/stream/collision,
    28 New3DS perf, 29 save/options/sound mix, 30 split-screen scope,
    31 final CIA + Old3DS/New3DS pass.
