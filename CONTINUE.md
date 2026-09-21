@@ -1,20 +1,20 @@
 # CONTINUE
 
-Where the next session picks up. Written at the end of Session 16
+Where the next session picks up. Written at the end of Session 17
 (2026-09-20). `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
 
-**Phases 0-2 are closed.** Task 16 went `[x]` with the UV scrolling that was
-its last outstanding piece, and Phase 3's task 21 is done too: cars draw on
-the top screen out of `CARS\*\GEOMETRY.BIN` with their own textures, lit,
-reachable as the third mode SELECT cycles to.
+**Phases 0-2 are closed, and so is task 22.** Cars draw on the top screen out
+of `CARS\*\GEOMETRY.BIN` (task 21), and the frontend now makes the disc's own
+menu sounds through a ported `bSnd` over ndsp -- heard on Azahar, not just
+diffed.
 
-Nine cross-checkers pass, plus the table generator:
+Eleven cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/gen_bmath_tables.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
 ```
 
 ```
@@ -27,7 +27,10 @@ bslotpool_check    17 scenarios,   990 lines, 0 differ   (37/37 mutations caught
 geometry_check     30 files,     42047 lines, 0 differ   (53/53 mutations caught)
 texsrc_check       6 packs, 2 levels, 2958 textures, 0 differ
 bui_check          FRONTB.BUN    1395 lines, 0 differ
+sndbank_check      30 banks,       908 lines, 0 differ   (20000 mutations, 0 disagree)
+bsnd_check         12 scenarios,  5157 lines, 0 differ   (25/25 mutations caught)
 gen_bmath_tables --check           bmathtab.c is up to date
+gen_bsnd_tables  --check           bsndtab.c is up to date
 ```
 
 `texpack_check.py` takes a file and is run per pack; it now also diffs the UV
@@ -38,14 +41,26 @@ Two mutation runners are kept rather than thrown away:
 `python tools/bslotpool_mutate.py` (~20 minutes) and
 `python tools/geometry_mutate.py` (~2 minutes; `--full` for all 30 files).
 
-Open tasks: **10** (22-31, none started).
+Both sound checkers want a directory of `.SBK`. Build it first:
+
+```bash
+python tools/audio_pack.py extracted/SOUND out/SOUND
+```
+
+The emulator's copy lives at `%APPDATA%\Azahar\sdmc\NFSHP2\SOUND` -- that is
+the data root `gamedata.c` resolves to on this machine, and the
+`.SBK` files go beside the other converted assets. `bsnd_check.py --mutate`
+takes about ten minutes; `sndbank_check.py --mutate 20000` takes a couple of
+hours.
+
+Open tasks: **9** (23-31, none started).
 
 ## Next, in order
 
-1. **Task 22**, sound/DSP.
-2. Then in order: 23 Camera, 24 TrackRoute/Esp, 25 car sim, 26 race/cop AI,
-   27 track render/stream/collision, 28 New3DS perf, 29 save/options/sound
-   mix, 30 split-screen scope, 31 final CIA + Old3DS/New3DS pass.
+1. **Task 23**, Camera (`Camera.obj`, `CameraMover.obj`).
+2. Then in order: 24 TrackRoute/Esp, 25 car sim, 26 race/cop AI, 27 track
+   render/stream/collision, 28 New3DS perf, 29 save/options/sound mix,
+   30 split-screen scope, 31 final CIA + Old3DS/New3DS pass.
 
 **Phase 4 constraint, from the user:** the gameplay HUD is to be designed for
 **two screens from the start** -- some readouts on the bottom screen rather
@@ -56,6 +71,19 @@ Phase 4 in `TASKS.md` too.
 ## What not to trust
 
 Ordered roughly by how much time it costs to rediscover.
+
+* **The Bash tool eats one level of backslash inside a heredoc.** A patch
+  script whose replacement string contains a C escape gets a real newline
+  instead, the pattern stops matching, and the script cheerfully prints
+  "done" having changed nothing -- or worse, having applied half its edits.
+  Build the backslash from `chr(92)`, or use the file-editing tool. This cost
+  two broken source files this session.
+* **`tools/hostbuild.py` is a library, not a CLI.** Running it as a script
+  exits 0 and produces nothing. Call `hostbuild.build(tmp, sources, name=...)`.
+* **A survivor in a mutation run is not automatically a coverage hole.** Two
+  of `bsnd_check.py`'s survived because they were equivalent mutants -- a
+  quadrant boundary where both arms compute the same number, and a float that
+  rounds identically in double. Work out which before adding scenarios.
 
 * **The emulator harnesses are slow and flaky for a reason that is ours.**
   Once the boot flow's idle timer expires, `bgf_consider_start_demo_mode()`

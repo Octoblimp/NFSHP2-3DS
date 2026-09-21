@@ -44,9 +44,11 @@
 #include <string.h>
 
 #include "bmenu.h"
+#include "bsnd.h"
 #include "bslotpool.h"
 #include "bscreens.h"
 #include "gamedata.h"
+#include "fesound.h"
 #include "gameflow.h"
 #include "heapcfg.h"
 #include "geoview.h"
@@ -278,6 +280,11 @@ static void viewerCallback(BMenu* m, BScreenMessage msg,
     g_lastMsg = msg;
 }
 
+// The one driver, as the disc had one bSound. It outlives every screen
+// because the banks do: a .SBK loaded for the frontend is still the frontend's
+// when a screen comes back.
+static BsndDriver gSnd;
+
 static void hookEnterScreen(void* user, const BScreenConfig* cfg)
 {
     Boot* b = (Boot*)user;
@@ -288,6 +295,7 @@ static void hookEnterScreen(void* user, const BScreenConfig* cfg)
     if (b->screen && b->project
         && bmenu_open(&b->menu, b->project, b->screen, menuCallback, NULL)
         && b->menu.numItems > 0) {
+        b->menu.sound = fesound_play;      // MakeFrontendSound
         bmenu_activate(&b->menu, 0);
         b->hasMenu = true;
     }
@@ -892,6 +900,16 @@ int main(int argc, char** argv)
     }
     logPrintf("Data: %s\n", gamedata_root());
 
+    // ndsp and the menu banks. Silence is a survivable failure -- a card with
+    // no SOUND directory still runs the frontend -- so nothing below checks.
+    if (bsnd_hw_init(&gSnd)) {
+        fesound_init(&gSnd);
+        logPrintf("Sound: %u patches in %u voices\n",
+                  (unsigned)gSnd.patchCount, gSnd.voices);
+    } else {
+        logPrintf("Sound: ndsp unavailable, running silent\n");
+    }
+
     C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
     C2D_Init(C2D_DEFAULT_MAX_OBJECTS);
     C2D_Prepare();
@@ -1047,6 +1065,10 @@ int main(int argc, char** argv)
     while (aptMainLoop()) {
         hidScanInput();
         u32 kDown = hidKeysDown();
+
+        // bSound::updateCompletedVoices' slot in the frame. Without it the
+        // allocator hands out 24 channels and then never another.
+        bsnd_update(&gSnd);
 
         uiTimer += (uint32_t)(int)(BOOT_DT * 4000.0f);
         uirender_set_time(&ui, (float)uiTimer * 0.00025f);
@@ -1297,6 +1319,7 @@ int main(int argc, char** argv)
             g_lastMsg = BMSG_NONE;
             if (bmenu_open(&vMenu, vProj, vScr, viewerCallback, NULL)
                 && vMenu.numItems > 0) {
+                vMenu.sound = fesound_play;
                 bmenu_activate(&vMenu, 0);
                 vHasMenu = true;
                 redraw   = 1;
@@ -1383,6 +1406,7 @@ int main(int argc, char** argv)
     bgf_change_to_screen(&g_flow, NULL, 0);
     if (vHasMenu) bmenu_unactivate(&vMenu);
     geoview_free(&g_geo);
+    bsnd_hw_close(&gSnd);
     georender_exit();
     uirender_free(&ui);
 

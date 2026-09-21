@@ -1,0 +1,166 @@
+"""Emit 3DS Files/source/bsndtab.c from bSnd_nArraydBPanTable in the ELF.
+
+One table, 256 unsigned 16-bit entries at 0x00317d00, and the only lookup in
+the whole bSnd driver. `GetVolumesFromPan` (0x0024d928) reads it twice:
+
+    left  = (volume * bSnd_nArraydBPanTable[pan + 127]) >> 14
+    right = (volume * bSnd_nArraydBPanTable[127 - pan]) >> 14
+
+so with pan held to -127..+127 by GetPanFromAzimuth only entries 0..254 are
+ever reached; entry 255 is padding. Full scale is 16383, not 16384, which is
+why a centred sound comes out at 0.7114 rather than 0.7071 -- see below.
+
+Entries 0..224 are exactly floor(16383 * cos(i * pi / 512)), a constant-power
+law sampled over the first 225/256 of a quarter turn, and this script checks
+that they still are, so a bad read of the ELF cannot pass silently.
+
+Entries 225..255 are not on that curve: they carry an extra attenuation that
+steps down every four entries -- -1.11 dB, -2.23, -4.68, -7.14, -13.10,
+-19.07, -25.1, then the last three -- which drags the far edge from the
+cosine's -20 dB down to -78 dB, i.e. to silence. No formula has been found
+for the taper and it looks hand-tuned, so the file carries all 256 entries
+verbatim and the check covers the part that does regenerate. That is the same
+arrangement bSinTable gets in gen_bmath_tables.py, and for the same reason.
+
+    python tools/gen_bsnd_tables.py            # write the file
+    python tools/gen_bsnd_tables.py --check    # verify it is up to date
+"""
+import math
+import os
+import struct
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mipsdis
+
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                   "3DS Files", "source", "bsndtab.c")
+
+PAN_TABLE = 0x00317d00       # bSnd_nArraydBPanTable, 256 x u16
+PAN_FULL = 16383             # the table's own maximum, and its entry 0
+COSINE_ENTRIES = 225         # 0..224 regenerate; 225..255 are the taper
+
+
+def read_table():
+    elf = mipsdis.Elf()
+    table = list(struct.unpack("<256H", elf.read(PAN_TABLE, 512)))
+
+    for i in range(COSINE_ENTRIES):
+        want = int(PAN_FULL * math.cos(i * math.pi / 512.0))
+        if table[i] != want:
+            sys.exit("bSnd_nArraydBPanTable[%d] is %d, but the constant-power "
+                     "curve says %d -- the ELF read is wrong, or the table is "
+                     "not the one this script documents" % (i, table[i], want))
+    if table[COSINE_ENTRIES] == int(PAN_FULL * math.cos(COSINE_ENTRIES * math.pi / 512.0)):
+        sys.exit("bSnd_nArraydBPanTable[%d] is on the cosine after all -- the "
+                 "taper starts somewhere else and the comments are stale"
+                 % COSINE_ENTRIES)
+    return table
+
+
+SOUND_EVENTS = 0x002f30ac    # the FrontendSoundEvent table, 16 bytes each
+SOUND_EVENT_COUNT = 33       # InitFrontendSounds loops while i < 33 (0x00169254)
+
+
+def read_events():
+    """The table MakeFrontendSound indexes (0x001692c0): one record per
+    FrontendSoundEvent, holding which region the patch comes from and its
+    name. `fromFrontEnd` is what InitGlobalMenuSound tests to decide between
+    CommonRegion (0x00169188) and Region("FrontEnd") (0x00169224), which is
+    COMMON.SBK and FRONTEND.SBK here."""
+    elf = mipsdis.Elf()
+    out = []
+    for i in range(SOUND_EVENT_COUNT):
+        rec = elf.read(SOUND_EVENTS + i * 16, 16)
+        fromFE, nameAddr, sample, nxt = struct.unpack("<4I", rec)
+        if sample:
+            sys.exit("event %d already has a bSample in the image at %08x -- "
+                     "this is not the table this script documents" % (i, sample))
+        if nameAddr:
+            raw = elf.read(nameAddr, 64)
+            name = raw[:raw.index(b"\0")].decode("latin-1")
+        else:
+            name = None
+        out.append((name, fromFE))
+    # Event 0 is the "no sound" slot every callback leaves in place, and the
+    # engine indexes this table with it. If it ever names a patch, silence has
+    # stopped being free and every caller needs looking at.
+    if out[0][0] is not None:
+        sys.exit("FrontendSoundEvent 0 names %r -- it is meant to be silence"
+                 % out[0][0])
+    return out
+
+
+def rows(values, per, fmt):
+    out = []
+    for i in range(0, len(values), per):
+        out.append("    " + " ".join(fmt % v for v in values[i:i + per]))
+    return "\n".join(out)
+
+
+def event_rows(events):
+    out = []
+    for i, (name, fromFE) in enumerate(events):
+        if name is None:
+            out.append("    { NULL, NULL },%s" % (" " * 27 + "// %d" % i))
+        else:
+            bank = "kFrontend" if fromFE else "kCommon"
+            out.append('    { %s, "%s" },%s// %d'
+                       % (bank, name, " " * max(1, 34 - len(bank) - len(name)), i))
+    return "\n".join(out)
+
+
+def render():
+    table = read_table()
+    events = read_events()
+    return """\
+// Generated by tools/gen_bsnd_tables.py -- do not edit.
+//
+// bSnd_nArraydBPanTable, read out of NFSHP2.ELF at 0x00317d00. Entries 0..224
+// are floor(16383 * cos(i * pi / 512)); 225..255 add a hand-tuned taper that
+// takes the far edge down to silence. docs/formats/sound-driver.md has the
+// numbers; the generator re-checks the cosine half every time it runs.
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "fesound.h"
+
+const uint16_t bsnd_pan_table[256] = {
+%s
+};
+
+// The FrontendSoundEvent table at 0x002f30ac, which MakeFrontendSound indexes
+// straight (0x001692c0). Entry 0 is silence; the rest name a patch and the
+// region it lives in, which is COMMON.SBK for the menu's own noises and
+// FRONTEND.SBK for the screens that have their own.
+static const char kCommon[] = "COMMON";
+static const char kFrontend[] = "FRONTEND";
+
+const FeSoundEntry fesound_events[FESOUND_EVENT_COUNT] = {
+%s
+};
+""" % (rows(table, 8, "%6d,"), event_rows(events))
+
+
+def main():
+    text = render()
+    check = "--check" in sys.argv
+    old = None
+    if os.path.exists(OUT):
+        with open(OUT, "r", newline="") as fh:
+            old = fh.read()
+    if check:
+        if old == text:
+            print("bsndtab.c is up to date")
+            return 0
+        print("bsndtab.c is STALE -- re-run tools/gen_bsnd_tables.py")
+        return 1
+    with open(OUT, "w", newline="") as fh:
+        fh.write(text)
+    print("wrote %s (%d bytes)" % (OUT, len(text)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -807,7 +807,29 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
         recognisably themselves, textures in the right places, smooth vertex
         lighting, clean untextured geometry with X. 11 screenshots,
         `19 textures cached, 0 missing`, exits cleanly.
-22. [ ] Sound: new 3DS DSP driver behind the recovered `bDriver`/`bSnd` interface
+22. [x] Sound: new 3DS DSP driver behind the recovered `bDriver`/`bSnd`
+        interface. Split into three, because the asset side and the driver
+        side fail in completely different ways:
+    a. [x] Sound banks: the 30 `SOUND\*.MSH`+`.MSB` pairs (439 patches,
+           6.6 MB of PS2 SPU ADPCM) transcoded to a 3DS-native DSPADPCM
+           bank, with a reader in the port and a cross-check.
+           `tools/audio_pack.py` -> 30 `.SBK`, 6.51 MB; `sndbank.c` reads
+           them; `tools/sndbank_check.py` 908 lines 0 differ, worst
+           re-decoded SNR 22.59 dB over all 469 channels, 20000 byte
+           mutations 0 disagree. `docs/formats/sound-bank.md`.
+    b. [x] The driver: `bSnd_*` over ndsp -- voice allocation, the
+           volume/pan/pitch units recovered from the ELF, and the two
+           tables the engine looks them up in.
+           `bsnd.[ch]` + generated `bsndtab.c`; `tools/bsnd_check.py`
+           12 scenarios, 5157 lines, 0 differ, 25/25 mutations caught.
+           `docs/formats/sound-driver.md`.
+    c. [x] Wired into the frontend, so menu navigation makes the sounds the
+           disc recorded, and heard on Azahar rather than only diffed.
+           `fesound.[ch]` carries the FrontendSoundEvent table from
+           `0x002f30ac` and hangs off `BMenu::sound`, which `bmenu.c`
+           already raised. Azahar: `Sound: 34 patches in 24 voices`, a
+           stereo pair per press at 22042 Hz, voices retired every frame --
+           and the sounds were heard.
 23. [ ] Camera (`Camera.obj`, `CameraMover.obj`)
 24. [ ] Track/route system (`TrackRoute.obj`, `espEmptyLayer` -- "Esp" spline/
         track-layer format, needs `docs/formats/track-route.md`)

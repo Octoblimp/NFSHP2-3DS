@@ -2453,10 +2453,113 @@ job on the scrolling axis.
 
 ### Next session
 
-Task 22, sound/DSP, then 23 Camera, 24 TrackRoute/Esp, 25 car sim, 26 race and
-cop AI, 27 track render/stream/collision, 28 New3DS perf, 29 save/options/
-sound mix, 30 split-screen, 31 the final CIA pass.
+Task 23 Camera, then 24 TrackRoute/Esp, 25 car sim, 26 race and cop AI,
+27 track render/stream/collision, 28 New3DS perf, 29 save/options/sound mix,
+30 split-screen, 31 the final CIA pass.
 
 Still carried: Phase 4's HUD is to be designed for **two screens** from the
 start, keeping the top screen's view of the road clear. Which elements go
 below is the user's call and has not been asked yet.
+
+## Session 17 (2026-09-20) -- sound, and two checkers that were lying
+
+Task 22 closed, all three parts. The game makes noise now, and the noise is
+the disc's.
+
+### 22a, the banks
+
+`tools/audio_pack.py` transcodes the 30 `SOUND\*.MSH`+`.MSB` pairs into 30
+`.SBK` files, 439 patches and 6.51 MB of Nintendo DSPADPCM, joining each
+stereo pair into one record. `sndbank.c` reads them and refuses anything whose
+`dataSize` does not match its sample count. `tools/sndbank_check.py` diffs it
+against an independent Python reader: 908 lines, 0 differ, worst re-decoded
+SNR 22.59 dB across all 469 channels.
+
+One thing the pack now refuses: a record with a nonzero `Pan` or `ADSR`. All
+469 on this disc are 0, `.SBK` has nowhere to put them, and the port
+substitutes `BSND_PATCH_PAN` and the driver's `0x1a00000a` default. A bank
+that broke the assumption would otherwise have played centred and nobody
+would have known.
+
+### 22b, the driver
+
+`bsnd.[ch]` is the port of `bDriverPS2.o`'s voice layer -- allocation, the pan
+table, the volume/pitch units -- over ndsp. `docs/formats/sound-driver.md` is
+the writeup, and `tools/gen_bsnd_tables.py` extracts
+`bSnd_nArraydBPanTable` (`0x00317d00`) into `bsndtab.c`, re-verifying the
+cosine half every run.
+
+`tools/bsnd_check.py` drives both it and a second implementation through
+twelve scenarios: 5157 lines, 0 differ, and 25 of 25 deliberate breaks of the
+C caught.
+
+Three things the ELF corrected mid-port:
+
+* **The master `bSnd_VoicePlay` has no pan argument.** Placement is an
+  azimuth (`0x00247fac`), and every pan-taking overload converts through
+  `GetAzimuthFromPan` first. The first port took both and produced a voice
+  with `az=8192` and `pan=0`, which is not a state the engine can reach.
+* **`GetVolumesFromAzimuth` returns at its first branch unless the driver is
+  in Prologic.** So on a stereo TV an azimuth only ever reaches the mix
+  through `GetPanFromAzimuth`; what it otherwise changes is `Type`.
+* **The pan table is the equal-power law, not a linear fade.** Entry 127 --
+  dead centre -- is 11655, 0.711 of full, about 3 dB down each side. An
+  earlier draft of the doc called it "0.04 dB down", which was simply wrong
+  arithmetic and would have made a plausible-looking bug hard to find later.
+
+### 22c, the frontend
+
+`fesound.[ch]` is `MakeFrontendSound` (`0x001692c0`) and the 33-entry table it
+indexes (`0x002f30ac`), generated into `bsndtab.c` alongside the pan table.
+`bmenu.c` already raised the events -- `BMenuSoundFn`, from a previous session
+-- so wiring it up was installing `fesound_play` on two menus, `bsnd_hw_init`
+after `gamedata_init`, and `bsnd_update` once a frame.
+
+Azahar: `Sound: 34 patches in 24 voices`, a stereo pair per key press at
+22042 Hz, and the busy count never climbing past 2 across a whole run, which
+is what says the per-frame retirement works. The sounds were heard.
+
+### Two checkers that were lying, and what that cost
+
+**`sndbank_check.py` stripped every CR, not just the line endings.** Its
+`run_c()` did `.replace(CR, "")` to normalise Windows text mode. A mutation
+that flips a name byte to `0x0d` then vanished from the C transcript while the
+Python model still had it, and the run reported 11 disagreements that were
+nothing of the kind. The fix is to split on newlines first and drop one
+trailing CR per line. With that, 20000 mutations over 30 banks: 0 disagree.
+
+**Two of `bsnd_check.py`'s mutations were equivalent mutants.** They
+"survived", which looks exactly like a coverage hole:
+
+* `if (azimuth <= 0x4000)` -> `<` is identical on all 65536 azimuths, because
+  the first quadrant computes `az * 127` and the last computes
+  `(0x8000 - az) * 127`, and at `az == 0x4000` those are the same number.
+* `const float k` -> `const double k` is identical on all 256 pans: the
+  constant is exactly representable as a float and every product fits a
+  double exactly, so the double path rounds once, where the float path also
+  rounds once.
+
+Both were replaced with mutations that do change behaviour, and the reasoning
+is in a comment above the table so nobody re-adds them. A survivor is a claim
+about the scenarios *or* about the mutation, and it is worth a minute to find
+out which before writing more tests.
+
+### Also
+
+* **The Bash tool eats one level of backslash in a heredoc.** Two patch
+  scripts silently half-applied -- `
+` inside a replacement string became a
+  real newline, so the pattern never matched, and the script printed "done".
+  Any patch script whose replacement contains a C escape needs the backslash
+  built from `chr(92)`, or the edit made with the file-editing tool instead.
+* **`tools/hostbuild.py` has no CLI.** `python tools/hostbuild.py --out ...`
+  exits 0 and builds nothing. It is a library; call `hostbuild.build()`.
+* **A `printf` with a side-effecting argument makes the transcript
+  compiler-dependent.** `bsnd_test.c` had one call printing both
+  `bsnd_bank_register(...)` and `d.patchCount`; C does not order those, so the
+  count printed would depend on the toolchain. Split into two statements.
+* **FRONTEND has two patches named `SelectFinal` and four identical
+  waveforms at its tail.** `RewardEnter`, `RewardExit`, `AudioSliderUpDown`
+  and the second `SelectFinal` are four copies of the same 5728 bytes on the
+  disc. That is the disc's doing, not the packer's -- checked against the
+  `.MSB` before believing it.
