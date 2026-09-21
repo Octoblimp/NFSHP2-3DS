@@ -81,7 +81,12 @@ def walk(buf, off=0, end=None, depth=0, max_depth=8, out=None, stats=None,
     while off + 8 <= end:
         ctype, csize = struct.unpack_from("<II", buf, off)
         if ctype == 0 and csize == 0:
-            break
+            # Inter-chunk padding, not a terminator. bchunk.c has always
+            # skipped it; this stopped here instead, and reported 8 chunks
+            # in TRACKB12.BUN's 9 MB because the alignment run at 0x7048 is
+            # two of these. The correct walk finds 497.
+            off += 8
+            continue
         body = off + 8
         cend = body + csize
         if csize < 0 or cend > end:

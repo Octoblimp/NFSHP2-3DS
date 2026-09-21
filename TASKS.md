@@ -861,8 +861,54 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
         decide about: the rotation speeds and the zoom multiplier are per
         *frame*, not per second, so both run four times too fast at the 139
         FPS Azahar gives this build.
-24. [ ] Track/route system (`TrackRoute.obj`, `espEmptyLayer` -- "Esp" spline/
-        track-layer format, needs `docs/formats/track-route.md`)
+24. [x] Track/route system (`TrackRoute.obj`)
+        `trackroute.[ch]` is the whole of `TrackRoute.obj`: the routes, the
+        points, the twenty-one driving lines per point, the signposts, the
+        manager and its two chunk hooks. `trackpath.[ch]` is the boundary it
+        calls into. `tools/trackroute_check.py` 10 scenarios, 671 lines, 0
+        differ; 53 mutations, 52 caught, 1 equivalent with a written
+        argument, 0 unexplained. `docs/formats/track-route.md`.
+
+        **The task text was wrong and this entry corrects it.** There is no
+        `espEmptyLayer` spline format. *Espresso* is bware's live remote
+        editor protocol -- `EspressoServer` at file `0x1a40c8`, the version
+        handshake `Caffeine = %d, Espresso = %d` at `0x1a4142`, and an
+        `EspressoFunctions` enum in mdebug whose members are
+        `eEF_IsCaffeineRunning`, `EF_InitCommunication`, `EF_LoadWorld`,
+        `EF_ReloadWorld`. It is an RPC protocol spoken to a PC-side editor,
+        not a file format, and nothing on the disc is stored in it.
+        `TrackRoute::UpdateToCaffeine` (`0x1b7de8`) pushes a route down that
+        wire; its only caller is `TrackRouteEditor::Service`, dead in retail.
+        Not ported. What the tracks actually carry is two chunks:
+        `0x00034121` TrackRoutes and `0x00034122` Signposts.
+
+        The finding: TrackRoutes are **memory images the loader never
+        parses**. It casts the chunk bytes to `TrackRoute *` and registers
+        the pointer, so the on-disc record is the in-memory layout with the
+        1024-entry point table truncated to `NumPoints` -- stride
+        `115752 - (1024 - NumPoints) * 112`, and no count field on either
+        chunk. That forced the port's layout to be exact rather than merely
+        compatible: `pNext`/`pPrev` are `u32` slots holding disc garbage that
+        the manager overwrites, not host pointers, and `trackroute.h` carries
+        a `sizeof` assert so a 64-bit host cannot quietly widen the record
+        (it did, to 115760, and the harness caught it). The checker models
+        every record as a byte image with accessors at the listing's own
+        offsets for the same reason.
+
+        Two shipped quirks kept, both mutation-flagged so nobody "fixes"
+        them silently: `MovePoint` stores `pos->x` into `Elevation` and never
+        reads `pos->z`, and `GetPosition` (3D) leaves its `w` lane unwritten
+        because the VU0 macro ops read two uninitialised stack slots. Only
+        the editor called either, so neither ever ran in a shipped build.
+
+        Not runnable for real yet, and the reason is outside this object:
+        `TrackPathCoordinate::UpdatePosition` (`0x1f5dd0`) needs
+        `QuickSpline.obj` (`0x00227e98`) to turn a world position into a
+        distance around the track, and `SetFirstAndLastPoints`,
+        `SetDistances` and `TestSignpostConsistency` all route through it.
+        `gTrackPathDistanceFn` is that seam: `NULL` on hardware, and in the
+        harness a closed-form ramp built only from add/multiply/compare so
+        the model reproduces it bit for bit. `QuickSpline` belongs to task 27.
 
 ## Phase 4 -- Car physics & gameplay
 
@@ -880,7 +926,13 @@ is citro3d and owns the top.
 25. [ ] Car simulation (recovered car-state struct layout from `.mdebug`)
 26. [ ] Race/event logic, cop AI, pursuit (roadblocks, spike strips) --
         `HotPursuitEvent` already seen in the `.mdebug` strings survey
-27. [ ] Track rendering/streaming, collision
+27. [ ] Track rendering/streaming, collision. Carries a debt from task 24:
+        `QuickSpline.obj` (`0x00227e98`) is what turns a world position
+        into a distance around the track, and until it is ported
+        `trackpath.c`'s `TrackPathCoordinate::UpdatePosition` is a stub
+        and `gTrackPathDistanceFn` stays `NULL` on hardware. Three
+        TrackRoute entry points need it: `SetFirstAndLastPoints`,
+        `Signpost::SetDistances`, `TestSignpostConsistency`.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag
 

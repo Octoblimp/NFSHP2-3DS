@@ -2805,3 +2805,158 @@ this task changed, and it also said `View Event Tree` "is in no screen
 config" -- it is (`tEventTreeView`, `0x147f8a59`); what is true is that
 nothing pushes it as a boot stage, so the `SelectedEventData` branch in
 `LaunchFrontendMenus` is dead for that reason and not the one written down.
+
+## Session 19 (2026-09-21) -- the centreline, and a format that did not exist
+
+Task 24 closed, and Phase 3 with it. Two objects ported (`TrackRoute.obj`
+whole, and the slice of `TrackPath.obj` it reaches), one new cross-checker,
+one tool bug fixed, and a correction to the task list that was most of the
+first hour.
+
+### `espEmptyLayer` is not a format
+
+`TASKS.md` entry 24 asked for the "`espEmptyLayer` -- 'Esp' spline/track-layer
+format". There isn't one. **Espresso** is bware's live remote-editor
+protocol, spoken over `bFunk` to a PC-side server; **Caffeine** is the
+program on the other end. The evidence is all in the image:
+
+| where | what |
+|-------|------|
+| file `0x1a40c8` (VA `0x2a30c8`) | `EspressoServer` |
+| file `0x1a4142` | `Espresso version conflict.  Caffeine = %d, Espresso = %d` |
+| mdebug | `EspressoFunctions:t306=eEF_IsCaffeineRunning:0,EF_InitCommunication:...,EF_LoadWorld:3,EF_ReloadWorld:4,...` |
+| mdebug | `UpdateToCaffeine__10TrackRoute`, listed beside `EraseDrivingLine` |
+
+An enum of `EF_LoadWorld`/`EF_ReloadWorld` members and a version handshake is
+an RPC protocol, not a container. `EspClient.obj` is its client;
+`TrackRoute::UpdateToCaffeine` (`0x1b7de8`) pushes one route down the wire,
+and its only caller is `TrackRouteEditor::Service`, which is dead in the
+retail build. None of it is ported, none of it is on the disc, and the task
+entry now says so rather than sending the next session after it again.
+
+What the tracks actually carry is two chunks, both plain `bChunk` payloads
+inside the track bundle: `0x00034121` TrackRoutes and `0x00034122` Signposts.
+Neither has a count field.
+
+### The thing that made this port different
+
+**The loader does not parse.** `TrackRoutesLoader` casts the chunk bytes to
+`TrackRoute *` and registers the pointer. Nothing is copied, nothing is read
+field by field, and a `TrackRoute *` the game holds points straight into the
+loaded bundle -- which is why `Unloader` unlinks routes and never frees them.
+The on-disc record is therefore the in-memory layout exactly, with one
+economy: the 1024-entry point table is truncated to the points the route
+actually has, so the stride is
+
+    115752 - (1024 - NumPoints) * 112
+
+and the walk reads `NumPoints` out of each record to find the next. In
+`extracted/TRACKS/TRACKB12.BUN` that is 17 routes over 302008 bytes at
+`0x7af66c`, and 56 signposts over 448 bytes at `0x7f922c`.
+
+A format loaded by casting has no decode step that can fail loudly. A field
+at the wrong offset compiles, loads, and then reads nonsense. Two
+consequences, both of which the harness caught rather than review:
+
+* `sizeof(TrackRoute)` came out **115760** on the 64-bit host, not 115752.
+  The record's `bTNode` list links are host pointers in the original
+  declaration and they have to be `u32` slots here -- they hold disc garbage
+  that the manager overwrites on link anyway. `trackroute.h` now asserts the
+  size, and `TrackRouteManager` came to 832 bytes for the same reason.
+* `tools/trackroute_check.py` models every record as a **byte image** with
+  accessors at the offsets the listing loads and stores from, rather than as
+  a Python object with named fields. On a cast-loaded format that is the only
+  way a wrong offset moves a line in the transcript instead of hiding behind
+  a field name.
+
+Both are worth carrying to the next cast-loaded chunk, and the note is in
+`CONTINUE.md`.
+
+### `TrackPath.obj`, and an honest hole
+
+Three functions in `trackroute.c` want one number from `TrackPath` -- how far
+around the lap a position is: `Signpost::SetDistances`,
+`TrackRoute::SetFirstAndLastPoints` and `TestSignpostConsistency`. Nothing
+else in the object touches it. So `trackpath.[ch]` carries the three
+structures, the chunk loader and `CompareDistances` ported exactly, and stops
+at one declared hole: `TrackPathManager::UpdatePosition` (`0x1f5620`, reached
+from `0x1f5dd0`) refines against a `QuickSpline`, and `QuickSpline.obj`
+(`0x00227e98`, 0x1018 bytes -- basis matrices, arc-length calibration) is a
+separate library that is not ported.
+
+While it is not, distances come out zero, and that is *visible* rather than
+silent: `trackpath_have_splines()` says so and the route viewer prints it.
+`gTrackPathDistanceFn` is the seam -- `NULL` on the handheld, and in the
+harness a closed-form ramp built only from add, multiply and compare so the
+Python model reproduces it bit for bit. It exists to reach
+`SetFirstAndLastPoints` wrap detection, which is the one piece of TrackRoute
+arithmetic only a non-zero distance can get to. The debt is written onto
+task 27, where `QuickSpline` belongs.
+
+### Two shipped quirks, kept
+
+**`MovePoint` sets elevation from `pos->x`.** The listing stores the same
+register into `Position.x` and into `Elevation`; `pos->z`, the height the
+caller passes, is never read. **`GetPosition` (3D) does not write `pad`** --
+the VU0 macro-mode ops work four lanes at a time and the `w` lane two inputs
+are stack slots the function never initialises. Only the track-route editor
+called either, so neither ever ran in a shipped build. Both are kept as-is
+and both have a mutation pointed at them, so anyone who "corrects" one finds
+out from the checker rather than from a car driving underground.
+
+### The harness, and the one survivor
+
+10 scenarios, 671 lines, 0 differ; 53 mutations, 52 caught, 1 equivalent,
+0 unexplained. The survivor is `find-no-bbox-early-out`, and it is an
+argument rather than an excuse: the bounding box holds every point on the
+route, so a query outside it grown by `radius` is further than `radius` from
+every point in at least one axis, and the track-distance metric cannot rescue
+it either, because `GetDistanceAway` returns the larger of the plane distance
+and the along-track one and so is never below the plane distance. The
+early-out can save the loop; it cannot change what the loop returns.
+
+Three of the first four survivors *were* coverage holes and got scenarios.
+The fourth was a scenario that happened to be degenerate: the wide route two
+bucketings coincided, so retuning it to three points separated them.
+
+### `bchunk_dump.py` was stopping at the first pad
+
+Found while surveying the track bundle: the walker treated an all-zero
+eight-byte header as a terminator, so it reported **8 chunks** in
+TRACKB12.BUN 9 MB -- five at the top level and three nested, because the
+walk hit the alignment run at `0x7048` and stopped. `bchunk.c` had always
+skipped such headers, so the tool and the C had disagreed silently for as
+long as both existed. Skipping the pad and continuing finds **472 top-level
+chunks** (25 zero-pad headers among them) and **7076** counted recursively
+at the default depth. The dumper is not the authority on the format; the
+loader is.
+
+### Also
+
+`tools/trackroute_check.py` was written out with the file-editing tool rather
+than a heredoc, because the Bash tool mangles apostrophes as well as
+backslashes. The `CONTINUE.md` warning covered only backslashes and now
+covers both. It cost one failed command this session even after being
+written down, which is the argument for writing it down twice.
+
+The line-ending note in `CONTINUE.md` was inverted and is now measured. There
+is no `.gitattributes`, `core.autocrlf` is true, and **every blob in the repo
+is LF** -- so endings never reach a diff. The working tree is mixed, though:
+`TASKS.md`, `HANDOFF.md`, `CONTINUE.md`, the `.c`/`.h` under
+`3DS Files/source/` and `tools/geometry_convert.py` are CRLF; the other
+`tools/*.py`, `tools/src/*.c`, `README.md` and all of `docs/` are LF. Three
+files written this session were off-convention and were converted to match
+their neighbours.
+
+The build links clean with `trackroute.c`, `trackpath.c` and the rest
+(`tools/build_cia.ps1`; the `.note.GNU-stack` warning out of the devkitARM
+`crtn.o` is pre-existing). Nothing in the port calls into TrackRoute yet --
+there is no gameplay to call it -- so this is a diffed port, not a run one,
+and the task entry says so.
+
+### Next session
+
+Phase 4, task 25, the car simulation. **Its HUD is two screens from the
+start** -- the standing constraint is at the head of Phase 4 in `TASKS.md`
+and repeated in `CONTINUE.md`; which readouts go on the bottom screen is not
+decided and wants asking before anything is built.

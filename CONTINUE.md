@@ -1,22 +1,25 @@
 # CONTINUE
 
-Where the next session picks up. Written at the end of Session 18
-(2026-09-20). `HANDOFF.md` is the running narrative; this file is the short
+Where the next session picks up. Written at the end of Session 19
+(2026-09-21). `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
 
-**Phases 0-2 are closed, and so are tasks 22 and 23.** Cars draw on the top
-screen out of `CARS\*\GEOMETRY.BIN` (task 21), the frontend makes the disc's
-own menu sounds through a ported `bSnd` over ndsp, and the geometry viewer is
-now framed by the shipped `CM_ORBIT_CAR` boom on the ported `Camera` rather
-than by a camera of its own -- all three heard or seen on Azahar, not just
-diffed.
+**Phases 0-3 are closed.** Cars draw on the top screen out of
+`CARS\*\GEOMETRY.BIN` (task 21), the frontend makes the disc's own menu
+sounds through a ported `bSnd` over ndsp, and the geometry viewer is now
+framed by the shipped `CM_ORBIT_CAR` boom on the ported `Camera` rather than
+by a camera of its own -- all three heard or seen on Azahar, not just diffed.
 
-Thirteen cross-checkers pass, plus the table generators:
+Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
+centreline, its driving lines and its signposts all load. It is diffed, not
+run -- see "Next" below for why, and for what task 27 owes it.
+
+Fourteen cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
 ```
 
 ```
@@ -33,6 +36,7 @@ sndbank_check      30 banks,       908 lines, 0 differ   (20000 mutations, 0 dis
 bsnd_check         12 scenarios,  5157 lines, 0 differ   (25/25 mutations caught)
 emath_check         9 scenarios,  2416 lines, 0 differ   (39/39 mutations caught)
 camera_check        7 scenarios,  1200 lines, 0 differ   (40 caught, 7 equivalent)
+trackroute_check   10 scenarios,   671 lines, 0 differ   (52 caught, 1 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 ```
@@ -60,9 +64,10 @@ hours.
 `camera_check.py --mutate` reports "7 equivalent, 0 unexplained" rather than
 "7 survived": the seven are named in the script with an argument each, and
 three of them are uncatchable because the disc's velocity record is
-structurally zero. See `docs/formats/camera.md`.
+structurally zero. See `docs/formats/camera.md`. `trackroute_check.py
+--mutate` reads the same way and takes about four minutes.
 
-Open tasks: **8** (24-31). All four the user asked for mid-session are
+Open tasks: **7** (25-31). All four the user asked for mid-session are
 done and looked at on Azahar: 32 (stretch the frontend to the 3DS's 5:3 top
 screen), 33 (the ten unregistered screen names), 34 (the menu description on
 the bottom screen, wrapped) and 35 (no console sharing that screen).
@@ -73,13 +78,22 @@ and so replaced every boot.
 
 ## Next, in order
 
-1. **Task 24**, the track/route system (`TrackRoute.obj`, `espEmptyLayer`).
-   It is the last of Phase 3 and it gates the CM_TRACK_* movers that
-   `cammover.c` deliberately left out.
-2. Then in order: 25 car sim, 26 race/cop AI, 27 track
-   render/stream/collision, 28 New3DS perf, 29 save/options/sound mix,
-   30 split-screen scope, 31 final CIA + Old3DS/New3DS pass.
-3. Whenever a screen class gets ported, take its row in `kScreens[]` off
+1. **Task 25**, the car simulation. Phase 4 starts here, and its HUD
+   constraint is below -- ask before choosing which readouts go on the
+   bottom screen.
+2. Then in order: 26 race/cop AI, 27 track render/stream/collision,
+   28 New3DS perf, 29 save/options/sound mix, 30 split-screen scope,
+   31 final CIA + Old3DS/New3DS pass.
+3. **`QuickSpline.obj` (`0x00227e98`) is owed to task 24 and belongs to
+   task 27.** `trackroute.c` is diffed but cannot be run for real without
+   it: `TrackPathCoordinate::UpdatePosition` (`0x1f5dd0`) is the stub that
+   turns a world position into a distance around the track, and
+   `SetFirstAndLastPoints`, `Signpost::SetDistances` and
+   `TestSignpostConsistency` all go through it. `gTrackPathDistanceFn` is
+   the seam -- `NULL` on hardware, a closed-form ramp in the harness. Port
+   `QuickSpline`, point the seam at it, and those three become live.
+   The CM_TRACK_* movers `cammover.c` left out want the same thing.
+4. Whenever a screen class gets ported, take its row in `kScreens[]` off
    `bgf_plain_screen_callback`. Ten of the eighteen are on it -- they draw
    and answer the D-pad and nothing else -- and
    `python tools/screen_registry.py --check-port` lists them, along with
@@ -97,6 +111,32 @@ Phase 4 in `TASKS.md` too.
 
 Ordered roughly by how much time it costs to rediscover.
 
+* **A format loaded by casting has no parse step to get wrong -- the struct
+  layout *is* the format.** `TrackRoutesLoader` casts the chunk's bytes to
+  `TrackRoute *` and registers the pointer; nothing is copied and nothing is
+  read field by field. So a field at the wrong offset is not a compile error
+  and not a decode failure, it is a route that loads and then reads
+  nonsense. Two things follow, and both bit this session: the record's
+  `pNext`/`pPrev` are **32-bit slots holding disc garbage**, not host
+  pointers, and `sizeof` has to be asserted -- it came out 115760 instead of
+  115752 on the 64-bit host and only the harness noticed. Any future
+  cast-loaded chunk wants the same assert and the same byte-image model in
+  its checker.
+* **A `bChunk` header of all zeroes is padding, not a terminator.**
+  `bchunk_dump.py` stopped at the first one and so reported 8 chunks in
+  TRACKB12.BUN's 9 MB, having given up at the alignment run at `0x7048`
+  after five top-level chunks. The real counts are 472 top-level (25
+  zero-pad headers among them) and 7076 recursively. `bchunk.c` had always
+  skipped them, so the C and the tool disagreed silently. Fixed this session
+  -- but the lesson is that the dumper is not the authority, the loader is.
+* **The task list can be wrong about what a format even is.** Task 24 asked
+  for an "`espEmptyLayer` spline/track-layer format". No such format exists:
+  Espresso is bware's live editor RPC protocol and Caffeine is the PC end of
+  it, evidenced by `EspressoServer`, the `Caffeine = %d, Espresso = %d`
+  version handshake and an `EspressoFunctions` enum of `EF_LoadWorld`-style
+  members. Half a day can go into looking for a file format that was never
+  a file format. Check the strings and the mdebug enum before believing a
+  name in `TASKS.md`.
 * **A PARTIAL from `run_azahar_test.ps1` is worth re-running before it is
   worth debugging.** The harness drives Azahar with synthesised keystrokes
   and it can drop one; a dropped A at the main menu walks the rest of the
@@ -108,6 +148,11 @@ Ordered roughly by how much time it costs to rediscover.
   "done" having changed nothing -- or worse, having applied half its edits.
   Build the backslash from `chr(92)`, or use the file-editing tool. This cost
   two broken source files this session.
+
+  **Apostrophes go the same way**, which is why `tools/trackroute_check.py`
+  was written out with the file-editing tool rather than a heredoc. If a
+  script's content has either character in it, do not pipe it through a
+  shell.
 * **`C3D_FVec` is declared `w, z, y, x`.** `r[i].c[j]` is element
   `(i, 3 - j)`, so a loop that fills `c[0..3]` as though they were columns
   0..3 writes every row backwards. It cost a build this session: the camera's
@@ -201,10 +246,17 @@ Ordered roughly by how much time it costs to rediscover.
   keypresses earlier, not later, and the shot lands on the wrong screen.
   `main.c` logs its mode on every SELECT and `tools/run_azahar_geo.ps1`
   presses-and-confirms against the log.
-* **`.gitattributes` / `core.autocrlf=true`**: `TASKS.md` is CRLF and
-  `HANDOFF.md`, `CONTINUE.md`, every `.c`/`.h` and every `tools/*.py` except
-  `geometry_convert.py` (CRLF) are LF. Read and write with an explicit
-  newline; do not let a tool normalise a file.
+* **`.gitattributes` / `core.autocrlf=true`**: there is no `.gitattributes`,
+  and **every blob in the repo is LF** -- git normalises on commit, so line
+  endings never show up in a diff and never need fixing for git's sake. What
+  differs is the *working tree*, and the previous note here had it backwards.
+  Measured: `TASKS.md`, `HANDOFF.md`, `CONTINUE.md`, every `.c`/`.h` under
+  `3DS Files/source/` and `tools/geometry_convert.py` are **CRLF**;
+  `tools/*.py` (all the others), `tools/src/*.c`, `README.md` and everything
+  under `docs/` are **LF**. Match the neighbour when adding a file, and read
+  and write with an explicit newline rather than letting a tool normalise
+  one -- not because git minds, but because a whole-file rewrite buries the
+  change you actually made when someone reads the working tree.
 * **Checkers must not pipe harness stdout.** `subprocess.run` with
   `capture_output=True` deadlocks against a runaway child, and `timeout=`
   cannot rescue it because killing a cygwin-built exe from Windows does not
