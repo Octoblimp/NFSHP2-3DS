@@ -913,10 +913,21 @@ def model():
 # --------------------------------------------------------------- the driver
 
 
+# A mutation can turn a loop into one with no exit. With no deadline here
+# that mutant runs until something kills it and stalls the whole pass; the
+# harness itself runs in well under a second.
+HARNESS_TIMEOUT = 60
+
+
 def run_harness(exe, out_path):
-    with open(out_path, "w") as fh:
-        r = subprocess.run([str(exe)], stdout=fh,
-                           stderr=subprocess.PIPE, text=True)
+    try:
+        with open(out_path, "w") as fh:
+            r = subprocess.run([str(exe)], stdout=fh,
+                               stderr=subprocess.PIPE, text=True,
+                               timeout=HARNESS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        print("harness hung, killed after %d s" % HARNESS_TIMEOUT)
+        return -9999
     if r.returncode != 0:
         print("harness exited %d" % r.returncode)
         if r.stderr:
@@ -1238,6 +1249,11 @@ EQUIVALENT = [
 EXPECT_MISSING = []
 
 
+# The write, its OneDrive retry, and the journal that lets a killed pass be
+# recovered from are all hostbuild's.
+write_source = hostbuild.write_source
+
+
 def mutate_pass(quiet=False):
     import shutil
 
@@ -1261,14 +1277,21 @@ def mutate_pass(quiet=False):
     for name, rel, before, after in MUTATIONS:
         path = ROOT / rel
         text = path.read_text(encoding="utf-8", newline="")
-        if before not in text:
+        # The ported sources are CRLF and the tools are LF, so a multi-line
+        # pattern written with bare newlines misses every time against a
+        # source file -- silently, as a pattern that is not found rather
+        # than as a mutant that survived.
+        crlf = (chr(13) + NL) in text
+        probe = before.replace(NL, chr(13) + NL) if crlf else before
+        repl = after.replace(NL, chr(13) + NL) if crlf else after
+
+        if probe not in text:
             missing.append(name)
             if name not in EXPECT_MISSING:
                 print("  %-30s PATTERN NOT FOUND" % name)
             continue
         try:
-            path.write_text(text.replace(before, after, 1),
-                            encoding="utf-8", newline="")
+            write_source(path, text.replace(probe, repl, 1))
             with tempfile.TemporaryDirectory() as tmp:
                 try:
                     exe = hostbuild.build(tmp, SOURCES, name="carstate_test")
@@ -1294,10 +1317,20 @@ def mutate_pass(quiet=False):
                     print("  %-30s SURVIVED" % name)
                     survived.append(name)
         finally:
-            path.write_text(text, encoding="utf-8", newline="")
+            try:
+                write_source(path, text)
+            except OSError:
+                sys.exit("could not restore %s -- it still holds the "
+                         "mutation %s. Put the original line back before "
+                         "trusting anything printed above." % (rel, name))
 
     real = [m for m in MUTATIONS if m[0] not in missing]
     holes = [s for s in survived if s not in EQUIVALENT]
+    # A pattern that is not found is dropped from the denominator above, so
+    # without this the tally line reads clean while a mutation never ran.
+    if missing:
+        print("%d PATTERN NOT FOUND -- the tally above is over %d of %d"
+              % (len(missing), len(real), len(MUTATIONS)))
     print("%d mutations, %d caught, %d equivalent, %d unexplained"
           % (len(real), caught, len(EQUIVALENT), len(holes)))
     return 1 if holes else 0

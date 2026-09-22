@@ -685,8 +685,18 @@ def model():
 # --------------------------------------------------------------- the harness
 
 
+# A mutation can turn a loop into one with no exit. With no deadline here
+# that mutant runs until something kills it and stalls the whole pass; the
+# harness itself runs in well under a second.
+HARNESS_TIMEOUT = 60
+
+
 def run_c(exe):
-    r = subprocess.run([str(exe)], capture_output=True)
+    try:
+        r = subprocess.run([str(exe)], capture_output=True,
+                           timeout=HARNESS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        sys.exit("harness hung, killed after %d s" % HARNESS_TIMEOUT)
     if r.returncode != 0:
         sys.exit("harness failed (%d):%s%s"
                  % (r.returncode, NL, r.stderr.decode("latin-1")))
@@ -787,17 +797,31 @@ MUTATIONS = [
 ]
 
 
+# The write, its OneDrive retry, and the journal that lets a killed pass be
+# recovered from are all hostbuild's.
+write_source = hostbuild.write_source
+
+
 def mutate_pass(py_lines):
     src = ROOT / "3DS Files" / "source" / "emath.c"
-    original = src.read_text(encoding="utf-8")
+    # newline="" so the file's own line endings survive the round trip, and
+    # the patterns are translated to match rather than the file to match the
+    # patterns -- a universal-newlines read here would rewrite the source to
+    # LF on every write, and a bare-newline pattern would miss a CRLF file
+    # silently the other way round.
+    original = src.read_text(encoding="utf-8", newline="")
+    crlf = (chr(13) + NL) in original
     survived = []
     try:
         for name, old, new in MUTATIONS:
+            if crlf:
+                old = old.replace(NL, chr(13) + NL)
+                new = new.replace(NL, chr(13) + NL)
             if old not in original:
                 survived.append("%s (pattern gone: %r)" % (name, old))
                 print("  %-34s PATTERN GONE" % name)
                 continue
-            src.write_text(original.replace(old, new, 1), encoding="utf-8")
+            write_source(src, original.replace(old, new, 1))
             with tempfile.TemporaryDirectory() as tmp:
                 try:
                     exe = hostbuild.build(tmp, SOURCES, name="emath_test")
@@ -816,7 +840,12 @@ def mutate_pass(py_lines):
                 print("  %-34s SURVIVED" % name)
                 survived.append(name)
     finally:
-        src.write_text(original, encoding="utf-8")
+        try:
+            write_source(src, original)
+        except OSError:
+            sys.exit("could not restore %s -- it still holds a "
+                     "mutation. Put the original line back before "
+                     "trusting anything printed above." % src)
     return survived
 
 

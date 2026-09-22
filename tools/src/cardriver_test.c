@@ -9,6 +9,12 @@
 #include "cardriver.h"
 #include "drivetarget.h"
 
+// drivetarget.c reads the frame tick, which engine.c owns in the handheld
+// build. Defined here for the same reason drivetarget_test.c defines its
+// own: linking engine.c would drag Table, CarTypeInfo and Wheel in behind
+// it, and nothing in this harness calls the code that reads it.
+int32_t WorldTimer = 0;
+
 // ------------------------------------------------------------- the layout
 
 static void scenario_layout(void)

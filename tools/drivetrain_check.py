@@ -2122,10 +2122,22 @@ def model():
 
 # ------------------------------------------------------------------ driver
 
+# A mutation can turn a `for (;;)` into a loop with no exit. With no
+# deadline here that mutant spins until something kills it and stalls the
+# whole pass rather than being counted; the harness itself runs in well
+# under a second.
+HARNESS_TIMEOUT = 60
+HARNESS_HUNG = -9999
+
+
 def run_harness(exe, out_path):
-    with open(out_path, "w") as fh:
-        r = subprocess.run([str(exe)], stdout=fh, stderr=subprocess.PIPE,
-                           text=True)
+    try:
+        with open(out_path, "w") as fh:
+            r = subprocess.run([str(exe)], stdout=fh, stderr=subprocess.PIPE,
+                               text=True, timeout=HARNESS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        print("harness hung, killed after %d s" % HARNESS_TIMEOUT)
+        return HARNESS_HUNG
     if r.returncode != 0:
         print("harness exited %d" % r.returncode)
         if r.stderr:
@@ -2847,6 +2859,11 @@ EQUIVALENT = [
 ]
 
 
+# The write, its OneDrive retry, and the journal that lets a killed pass be
+# recovered from are all hostbuild's.
+write_source = hostbuild.write_source
+
+
 def mutate_pass():
     base_model = model()
     survived, missing, caught = [], [], 0
@@ -2877,8 +2894,7 @@ def mutate_pass():
             print("  %-34s PATTERN NOT FOUND" % name)
             continue
         try:
-            path.write_text(text.replace(probe, repl, 1),
-                            encoding="utf-8", newline="")
+            write_source(path, text.replace(probe, repl, 1))
             with tempfile.TemporaryDirectory() as tmp:
                 try:
                     exe = hostbuild.build(tmp, SOURCES,
@@ -2904,7 +2920,12 @@ def mutate_pass():
                     print("  %-34s SURVIVED" % name)
                     survived.append(name)
         finally:
-            path.write_text(text, encoding="utf-8", newline="")
+            try:
+                write_source(path, text)
+            except OSError:
+                sys.exit("could not restore %s -- it still holds the "
+                         "mutation %s. Put the original line back before "
+                         "trusting anything printed above." % (rel, name))
 
     real = [m for m in MUTATIONS if m[0] not in missing]
     holes = [s for s in survived if s not in EQUIVALENT]
@@ -2915,6 +2936,11 @@ def mutate_pass():
     # equivalent would make caught + equivalent overshoot the total.
     equiv = [name for name, _, _, _ in MUTATIONS
              if name in EQUIVALENT and name in equivalent_survivors]
+    # A pattern that is not found is dropped from the denominator above, so
+    # without this the tally line reads clean while a mutation never ran.
+    if missing:
+        print("%d PATTERN NOT FOUND -- the tally above is over %d of %d"
+              % (len(missing), len(real), len(MUTATIONS)))
     print("%d mutations, %d caught, %d equivalent, %d unexplained"
           % (len(real), caught, len(equiv), len(holes)))
     return 1 if (holes or missing) else 0

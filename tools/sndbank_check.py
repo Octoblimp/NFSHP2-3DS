@@ -116,12 +116,22 @@ def py_read(buf):
     return lines
 
 
+# A mutation can turn a loop into one with no exit. With no deadline here
+# that mutant runs until something kills it and stalls the whole pass; the
+# harness itself runs in well under a second.
+HARNESS_TIMEOUT = 60
+
+
 def run_c(exe, path):
     # Bytes, not text. A mutated record's name is arbitrary bytes, and letting
     # Python decode the pipe with the console codepage would turn a 0x80 into
     # a euro sign on this machine and a replacement character on another --
     # a diff that is the checker's, not the reader's. latin-1 is the identity.
-    r = subprocess.run([str(exe), str(path)], capture_output=True)
+    try:
+        r = subprocess.run([str(exe), str(path)], capture_output=True,
+                           timeout=HARNESS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        sys.exit("sndbank_test hung, killed after %d s" % HARNESS_TIMEOUT)
     if r.returncode not in (0, 1):
         sys.stderr.write(r.stderr.decode("latin-1"))
         sys.exit("sndbank_test failed on %s" % path)

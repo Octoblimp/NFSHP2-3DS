@@ -172,8 +172,15 @@ ported, because it would be a guess wearing a function's name.
 
 ```
 python tools/cartypeinfo_check.py            # 4 scenarios, 177 lines, 0 differ
-python tools/cartypeinfo_check.py --mutate   # 41 mutations, 41 caught
+python tools/cartypeinfo_check.py --mutate   # 40 mutations, 40 caught
 ```
+
+**Forty, where this said forty-one.** `rigidbodyinfo-tensor-at-12` moved
+to `rigidbody_check` when `RigidBodyInfo` moved out of `cartypeinfo.h`
+into `rigidbody.h` -- a checker mutates the file it owns. The offsets are
+still claimed here: the harness prints `Body.InertiaTensor`'s absolute
+offset, so a field moving inside `RigidBodyInfo` still shows up in this
+transcript.
 
 The model re-derives `bStringHash`, langtab's binary search and `bRandom`
 from the disassembly rather than importing the ported versions, so an

@@ -145,8 +145,16 @@ are in use.
 
 ```
 python tools/cardriver_check.py            # 5 scenarios, 118 lines, 0 differ
-python tools/cardriver_check.py --mutate   # 48 mutations, 48 caught
+python tools/cardriver_check.py --mutate   # 45 mutations, 45 caught
 ```
+
+**Forty-five, where this said forty-eight.** `drivetarget_assign` was
+defined at the top of `cardriver.c` while DriveTarget had no `.c` of its
+own; the DriveTarget slice moved it, and its three mutations went with it
+rather than being aimed across a file boundary -- `drivetarget_check`
+already carries `as-copies-half` and `as-returns-src`. The harness still
+*calls* `drivetarget_assign`, so the behaviour is still covered here; what
+moved is which checker is allowed to break the line.
 
 Seven mutations survived the first pass, in three groups, and each group
 needed a different answer:

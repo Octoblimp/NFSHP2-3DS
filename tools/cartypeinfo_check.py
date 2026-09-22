@@ -453,10 +453,22 @@ def model():
 
 # ----------------------------------------------------------------- running
 
+# A mutation can turn a `for (;;)` into a loop with no exit. With no
+# deadline here that mutant spins until something kills it and stalls the
+# whole pass rather than being counted; the harness itself runs in well
+# under a second.
+HARNESS_TIMEOUT = 60
+HARNESS_HUNG = -9999
+
+
 def run_harness(exe, out_path):
-    with open(out_path, "w") as fh:
-        r = subprocess.run([str(exe)], stdout=fh, stderr=subprocess.PIPE,
-                           text=True)
+    try:
+        with open(out_path, "w") as fh:
+            r = subprocess.run([str(exe)], stdout=fh, stderr=subprocess.PIPE,
+                               text=True, timeout=HARNESS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        print("harness hung, killed after %d s" % HARNESS_TIMEOUT)
+        return HARNESS_HUNG
     if r.returncode != 0:
         print("harness exited %d" % r.returncode)
         if r.stderr:
@@ -574,11 +586,12 @@ MUTATIONS = [
     ("drivetrain-finaldrive-one", CH,
      "    float   FinalDrive[2];   //  8",
      "    float   FinalDrive[1];   //  8" + NL + "    float   _fdpad;"),
-    ("rigidbodyinfo-tensor-at-12", CH,
-     "    float    Zdim;          // 12" + NL
-     + "    bMatrix4 InertiaTensor; // 16",
-     "    bMatrix4 InertiaTensor; // 12" + NL
-     + "    float    Zdim;          // 76"),
+    # rigidbodyinfo-tensor-at-12 used to sit here. RigidBodyInfo moved out
+    # of this header into rigidbody.h during the RigidBody slice, and the
+    # mutation went with it -- a checker mutates the file it owns. The
+    # offsets are still claimed here: the harness prints
+    # Body.InertiaTensor's absolute offset, so rigidbody.h moving a field
+    # is caught by this transcript as well as by rigidbody_check's.
     ("aeroinfo-order", CH,
      "    float FrontDownforce;       //  4" + NL
      + "    float RearDownforce;        //  8",
@@ -676,6 +689,11 @@ EQUIVALENT = []
 EXPECT_MISSING = []
 
 
+# The write, its OneDrive retry, and the journal that lets a killed pass be
+# recovered from are all hostbuild's.
+write_source = hostbuild.write_source
+
+
 def mutate_pass():
     base_model = model()
     survived, missing, caught = [], [], 0
@@ -691,13 +709,20 @@ def mutate_pass():
     for name, rel, before, after in MUTATIONS:
         path = ROOT / rel
         text = path.read_text(encoding="utf-8", newline="")
-        if before not in text:
+        # The ported sources are CRLF and the tools are LF, so a multi-line
+        # pattern written with bare newlines misses every time against a
+        # source file -- silently, as a pattern that is not found rather
+        # than as a mutant that survived.
+        crlf = (chr(13) + NL) in text
+        probe = before.replace(NL, chr(13) + NL) if crlf else before
+        repl = after.replace(NL, chr(13) + NL) if crlf else after
+
+        if probe not in text:
             missing.append(name)
             print("  %-32s PATTERN NOT FOUND" % name)
             continue
         try:
-            path.write_text(text.replace(before, after, 1),
-                            encoding="utf-8", newline="")
+            write_source(path, text.replace(probe, repl, 1))
             with tempfile.TemporaryDirectory() as tmp:
                 try:
                     exe = hostbuild.build(tmp, SOURCES,
@@ -722,11 +747,21 @@ def mutate_pass():
                     print("  %-32s SURVIVED" % name)
                     survived.append(name)
         finally:
-            path.write_text(text, encoding="utf-8", newline="")
+            try:
+                write_source(path, text)
+            except OSError:
+                sys.exit("could not restore %s -- it still holds the "
+                         "mutation %s. Put the original line back before "
+                         "trusting anything printed above." % (rel, name))
 
     real = [m for m in MUTATIONS if m[0] not in missing]
     holes = [s for s in survived if s not in EQUIVALENT]
     unexpected = [m for m in missing if m not in EXPECT_MISSING]
+    # A pattern that is not found is dropped from the denominator above, so
+    # without this the tally line reads clean while a mutation never ran.
+    if missing:
+        print("%d PATTERN NOT FOUND -- the tally above is over %d of %d"
+              % (len(missing), len(real), len(MUTATIONS)))
     print("%d mutations, %d caught, %d equivalent, %d unexplained"
           % (len(real), caught, len(EQUIVALENT), len(holes)))
     return 1 if (holes or unexpected) else 0

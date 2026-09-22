@@ -964,16 +964,16 @@ is citro3d and owns the top.
         scenarios, 413 lines, 0 differ; 56 mutations, 54 caught, 2
         equivalent). **`CarTypeInfo.obj`**
         (`docs/formats/car-type-info.md`, `tools/cartypeinfo_check.py`; 4
-        scenarios, 177 lines, 0 differ; 41 mutations, 41 caught).
+        scenarios, 177 lines, 0 differ; 40 mutations, 40 caught).
         **`CarDriver.obj` plus `DriveTarget`'s layout**
         (`docs/formats/car-driver.md`, `tools/cardriver_check.py`; 5
-        scenarios, 118 lines, 0 differ; 48 mutations, 48 caught).
+        scenarios, 118 lines, 0 differ; 45 mutations, 45 caught).
         **`Steering.obj` + `TwoWheelAckermanSteering.obj`**
         (`docs/formats/car-steering.md`, `tools/steering_check.py`; 5
         scenarios, 873 lines, 0 differ; 44 mutations, 43 caught, 1
         equivalent). **`RigidBody.obj`**
         (`docs/formats/rigid-body.md`, `tools/rigidbody_check.py`; 10
-        scenarios, 935 lines, 0 differ; 77 mutations, 75 caught, 2
+        scenarios, 935 lines, 0 differ; 78 mutations, 76 caught, 2
         equivalent). **`Suspension.obj` plus `Wheel`'s layout**
         (`docs/formats/car-suspension.md`, `tools/suspension_check.py`; 10
         scenarios, 1108 lines, 0 differ; 68 mutations, 66 caught, 2
@@ -983,6 +983,10 @@ is citro3d and owns the top.
         **`DriveTrain`** (`docs/formats/car-drivetrain.md`,
         `tools/drivetrain_check.py`; 18 scenarios, 492 lines, 0 differ;
         176 mutations, 173 caught, 3 equivalent, 0 unexplained).
+        **`DriveTarget`'s methods**
+        (`docs/formats/car-drive-target.md`,
+        `tools/drivetarget_check.py`; 22 scenarios, 821 lines, 0 differ;
+        259 mutations, 239 caught, 20 equivalent, 0 unexplained).
 
         **Wheel's first mutation pass came back with twelve unexplained
         survivors, and that is the part of the slice worth carrying
@@ -1026,7 +1030,7 @@ is citro3d and owns the top.
         | Class | Funcs | Bytes |
         |-------|------:|------:|
         | Car | 80 | 22876 |
-        | DriveTarget (methods) | 28 | 8636 |
+        | ~~DriveTarget (methods)~~ | ~~28~~ | ~~8636~~ |
         | PhysicsCar | 16 | 8496 |
         | ~~Wheel~~ | ~~73~~ | ~~7112~~ |
         | Mellovator | 31 | 5420 |
@@ -1038,7 +1042,9 @@ is citro3d and owns the top.
         | ~~Steering~~ | ~~4~~ | ~~116~~ |
 
         ~67.7 KB across ~366 functions when it was measured, roughly 19x
-        the CarState slice.
+        the CarState slice. What is still open is the four unstruck rows:
+        **~39.9 KB across 140 functions** -- Car, PhysicsCar, Mellovator
+        and MellowMover.
         At the verification standard this repo holds -- exact port,
         independent model, transcript diff, mutation pass with every
         survivor argued -- that is several sessions, not one.
@@ -1051,8 +1057,16 @@ is citro3d and owns the top.
         Suggested order, smallest and most independent first, each
         verified and committed on its own: ~~Steering +
         TwoWheelAckermanSteering~~, ~~RigidBody~~, ~~Suspension~~,
-        ~~Wheel~~, ~~DriveTrain~~ (all done), then DriveTarget's
-        methods, PhysicsCar, Car, with Mellovator and MellowMover last.
+        ~~Wheel~~, ~~DriveTrain~~, ~~DriveTarget's methods~~ (all done),
+        then Car, then PhysicsCar, with Mellovator and MellowMover last.
+
+        **That order used to read "PhysicsCar, Car" and it was wrong.**
+        `PhysicsCar::Move` (`0x00135c78`) calls three `Car` methods and
+        reads seven `Car` offsets outside the embedded `CarState`, so it
+        cannot be modelled against the `CarState`-only stand-in that
+        DriveTarget used. Car has to come first. Checked in the
+        disassembly rather than inferred, the same way DriveTarget's
+        independence from Car was.
 
         **DriveTrain's mutation pass came back with eighteen unexplained
         survivors**, on a transcript that agreed with the model on every
@@ -1069,7 +1083,7 @@ is citro3d and owns the top.
         because every engine's torque curve crossed over on the first
         probe.
 
-        **DriveTarget's 28 methods are next.** `DriveTarget.obj` is real
+        **DriveTarget's methods are done.** `DriveTarget.obj` is real
         -- `.text 0x002086f8`, `0x24d0` -- but it is not all DriveTarget:
         seven `OBB` methods and the free function `bDoublesBack`
         (`0x00208fa0`) are in it too, which is why the object is 9424
@@ -1078,17 +1092,14 @@ is citro3d and owns the top.
         `CarCollisionDetect.obj`. The tally of 28 reconciles: 26 methods
         in the object, that copy constructor outside it, and the
         `_GLOBAL_$I$` static-init thunk at `0x0020ab48` -- 8636 bytes
-        between them, so **26 functions to port**. The 528-byte record is
-        already in `3DS Files/source/drivetarget.h` and ARM-compiled, so
-        the layout is done.
+        between them, so **26 functions**, all ported into
+        `3DS Files/source/drivetarget.c` and ARM-compiled.
 
-        **`Car` is not a prerequisite for it, and that was checked
+        **`Car` was not a prerequisite for it, and that was checked
         rather than assumed.** Thirteen of the twenty-six take no
         `Car *` at all; the other thirteen reach `Car` only through the
-        `CarState` embedded at byte 64, which is ported. `Car` is 2016
-        bytes and its `.mdebug` entry carries `State:/0263,512,8192` --
-        bit 512, so byte 64, 1024 bytes -- and the only Car offsets
-        these methods touch are 64 (passed straight on as a
+        `CarState` embedded at byte 64, which is ported. The only Car
+        offsets these methods touch are 64 (passed straight on as a
         `CarState *`), 96 (`State.Position`) and 112
         (`State.Velocity`). The free functions are the same story:
         `IsPointAheadOfCar` (`0x001c0e30`) reads 96 and 112 and nothing
@@ -1096,23 +1107,183 @@ is citro3d and owns the top.
         `max(State.VelocityMagnitude * 2, 20)`, and
         `GetMaxLateralAcceleration(Car *)` never reads the car at all --
         it is a constant 30.0f in four instructions. A `Car` stand-in
-        whose only live member is a `CarState` covers the whole class,
-        so **DriveTarget can be done in full now**, not after Car.
+        whose only live member is a `CarState` covered the whole class.
 
-        Genuinely blocked, and only these three: `DoSnapshot` on
+        Three are still blocked, and only these three: `DoSnapshot` on
         `ReplaySnapshot`; `Dump` on `Car::WorldToCar`, which tail-jumps
         to `CarState::WorldToCar(bVector2 *, bVector2 *)` at
         `0x001b6ab0` and carstate.c does not carry that one yet; and the
         `DrivingLocation` overload of `AddPointToTarget` on
         `DrivingLocation::IsClear`, which is
-        `lw v0,0(a0); sltiu v0,v0,1` and needs a one-word stand-in until
-        task 26 brings the class. The gp-relative constants are resolved
-        and written down in `CONTINUE.md` (`_gp` is `0x00328bf0`), along
-        with two shapes to model carefully: `GetAngle` clamps its index
-        down to `NumPoints - 2` without clamping back up to 0, so a
-        `NumPoints` of 0 or 1 reads `Points[-2]`, and `SetPoint`'s
-        `bVector2` overload leaves the stack `bVector3`'s w untouched
-        before a sixteen-byte `lqc2`/`sqc2` copy.
+        `lw v0,0(a0); sltiu v0,v0,1` and is carried by a one-word
+        stand-in until task 26 brings the class. Two out-of-bounds
+        shapes in the shipped code are modelled rather than fixed:
+        `GetAngle` clamps its index down to `NumPoints - 2` without
+        clamping back up to 0, so a `NumPoints` of 0 or 1 reads
+        `Points[-2]`, and `SetPoint`'s `bVector2` overload leaves the
+        stack `bVector3`'s w untouched before a sixteen-byte
+        `lqc2`/`sqc2` copy.
+
+        **A survivor has two causes, not one -- this slice produced the
+        second.** Every earlier slice's unexplained survivors meant the
+        fixture never reached the branch. Two of DriveTarget's reached it
+        exactly and the dump still printed the same numbers, because the
+        branch's effect landed in fields that were zero on both sides.
+        `bl-window-inclusive` runs one extra blend pass that clamps to 1
+        and therefore moves nothing -- until the points are given a
+        non-zero z, which `SetPoint3` zeroes whatever the blend is.
+        `rs-inner-test-strict` needs `travelled == len[k]` exactly *and*
+        `fadd(P[k], fsub(P[k+1], P[k])) != P[k+1]` at the same k; the
+        separation goes in the pad, where `16777218 - 1` and
+        `1 + 16777216` are both ties landing on 16777216. Written out in
+        `docs/formats/car-drive-target.md` and `CONTINUE.md`.
+
+        **This said two small things came before Car. It was one, and
+        it is done.** `Graph` -- 8 bytes, two methods (`0x00187440`,
+        `0x00187450`), wanted by four Car methods -- is ported to
+        `3DS Files/source/graph.{c,h}`, cross-checked by
+        `tools/graph_check.py`: 16 scenarios, 151 lines, 0 differ;
+        25 mutations, 21 caught, 4 equivalent, 0 unexplained; written up
+        in `docs/formats/car-graph.md`.
+
+        The second, `CarState::WorldToCar` (`0x001b6ab0` and the
+        `bVector3` overload at `0x001b6b40`), **was already ported** --
+        by the CarState slice, as `carstate_world_to_car2` and
+        `carstate_world_to_car3`, with three mutations against them and
+        a paragraph in `docs/formats/car-state.md` about the quadword
+        subtract in the 3D one. This entry was written off a symbol
+        search of the ELF, and searching for `WorldToCar` does not find
+        `carstate_world_to_car2`. **Grep the ported sources under the
+        name the port would have given a function, not the name the ELF
+        has, before calling it outstanding.**
+
+        **And the same error was sitting one line below it.** This entry
+        then said `DriveTarget::Dump` was still blocked on
+        `Car::WorldToCar`. It was not. `drivetarget_dump` has been in
+        `drivetarget.c` since the DriveTarget slice and reaches the
+        transform the way the forwarder would --
+        `carstate_world_to_car2(&car->State, ...)`, which is the `+64`
+        written out -- and `docs/formats/car-drive-target.md` said so at
+        the time. DriveTarget has two blocked methods, not three, and had
+        two all along.
+
+        So the lesson is not about one symbol. **A plan's "blocked on"
+        list decays and the ported sources do not. Check the source
+        before believing the plan, including when the plan is this
+        file.**
+
+        `Car::WorldToCar` is ported now regardless: it is one of the
+        eighty and it is eight bytes, `j CarState::WorldToCar` with
+        `addiu a0,a0,64` in the delay slot. `Car::IsCarToLeft` and
+        `IsCarToRight` come with a later Car slice.
+
+        **Two constants that are the same float cost a mutation.** The
+        Graph epsilon is `0x358637bd`, which `1e-6f` also rounds to
+        exactly, so the obvious mutation of the spelled-out
+        `9.99999997e-07f` was a no-op that could never be caught. It was
+        rewritten as one ulp up. **A float mutation has to be checked as
+        bits, not as source text.**
+
+        **Car is the hub, not the physics, and that is measured.**
+        Eighty methods, 22876 bytes, `Car.obj` at `0x0012f150`
+        (`0x5e1c`); six are emitted outside that object, including the
+        eight-byte `Car::WorldToCar` at `0x00138e90`. The record is 2016
+        bytes with one non-virtual base at offset 0, `bTNode<Car>` --
+        **Car has no vtable**; the `__pure_virtual` the map shows against
+        `Car.obj` belongs to the `CarDriver` / `CarMover` /
+        `CarController` abstract bases that share the object.
+        Thirty-four of the eighty call nothing outside the class and are
+        pure state work; `Think` and `Drive` are among them because they
+        are pure dispatch -- load `pCarController` (offset 40) or
+        `pCarDriver` (44), read the (delta, fn) pair out of the vtable,
+        jump. The rest reach about a dozen subsystems belonging to tasks
+        26, 27 and 29. `SetMovementMode`'s physics arm is where
+        `wheel_install_seams()` finally belongs -- it is what constructs
+        the `PhysicsCar` that owns the `Suspension` and the four
+        `Wheel`s.
+
+        **Car's record is whole and its first code slice is closed.**
+        `3DS Files/source/car.h` carries all 2016 bytes -- 72 offsets,
+        each re-derived from a load or a store -- plus `RideInfo`,
+        `DriverInfo`, `OverrideRenderingPosition`, `CarNode` and the four
+        enums. `topology.h` came with it, layout only: Car embeds a
+        `TopologyCoordinate` by value and its `TrackPolygonTable` is 128
+        *pointers*, so an opaque 560-byte blob would have agreed with the
+        wrong number on the host and the right one only on ARM. The ARM
+        build has run: every `CAR_SLACK` term is zero there and
+        `CAR_AT(f, n, k)` reduces to the console's raw offset.
+
+        Eighteen methods are ported to `3DS Files/source/car.c` -- the
+        seventeen that reach nothing outside Car, CarState and the two
+        world clocks, plus `Car::WorldToCar`. `tools/car_check.py`:
+        20 scenarios, 1871 lines, 0 differ; 82 mutations, 78 caught,
+        4 equivalent, 0 unexplained. Written up in `docs/formats/car.md`.
+
+        **"Makes no call outside the class" is not "can be written
+        today", and the partition is 17 + 10 + 7.** Thirty-four of the
+        eighty make no outside call. Seventeen are done; ten are pure
+        vtable dispatch and wait on that seam; seven call only other Car
+        methods whose callees reach a task 26/27 class. The arithmetic
+        closing is the check that the three groups are a partition rather
+        than three overlapping lists -- it is spelled out at the bottom
+        of `car.c`.
+
+        **`cvt.w.s` saturates by the sign of the source, and a C cast
+        does not.** `CalculateDebugChecksum` is four instructions and it
+        was the one function in the slice whose first transcript did not
+        match. The R5900 gives `0x7fffffff` above 2^31 and `0x80000000`
+        below -2^31; ARM's `vcvt.s32.f32` agrees; x86-64's `cvttss2si`
+        returns `0x80000000` for both, and the C cast is undefined
+        behaviour besides. So the conversion is written out rather than
+        cast -- `camera_check.py`'s model function moved to the source
+        side. **Where a port casts a float to an int, ask what the three
+        targets do off the ends before trusting the cast.**
+
+        **A fixture holding the value a mutation writes cannot see that
+        mutation.** `stub-event-writes` makes `EventHandler` secretly set
+        `bPoofed = 1`; it survived because the `[stubs]` fixture had set
+        `bPoofed = 1` itself before snapshotting. A no-op fixture value is
+        a blind spot, and only a mutation finds it.
+
+        **A comment can be wrong in a way no test catches, until a
+        mutation asks.** `car.c` claimed `1.0f / 4000.0f` rounds one ulp
+        below the image's tick. It does not -- both spellings are
+        `0x3983126f`. The mutation swapping them survived against a clean
+        transcript because there was nothing to catch, which is what
+        exposed the comment. The word that *is* different, `0x3983126e`,
+        was not separated by any fixture either, so two boundary
+        scenarios were added: 4000 ticks of the right word is exactly
+        `1.0f`, and the blink's `<` and the honk's `<` fall on opposite
+        sides of it.
+
+        **Padding has to be asserted by width as well as by offset.**
+        Shortening `_hole56` from 8 bytes to 4 changes nothing on this
+        host, because CarState is 8-byte aligned here and the compiler
+        pads the gap straight back; on ARM the alignment is 4 and the
+        same edit slides the whole record. The mutation found it and the
+        seven holes now carry `sizeof` asserts too.
+
+        `drivetarget.h`'s stand-in `Car` is gone -- it includes `car.h`
+        now -- which retires the include-ordering rule and moved
+        `drivetarget_check`'s three Car offsets onto the real record's
+        host slack (18, 48, 112 here; 10, 24, 64 on ARM).
+
+        `car.h` names `CarTypeInfo` and `CarDriver` instead of including
+        them: `cardriver.h` -> `drivetarget.h` -> `car.h` is a cycle, and
+        with the include in place `cardriver.c` reached `struct Car`
+        before `CarDriver` was defined.
+
+        **A killed mutation pass strands its mutant, and a translating
+        write corrupts the restore.** `drivetarget.c` kept
+        `sr-count-signed` from a stopped run -- an equivalent mutant, so
+        plain runs stayed clean and only the next `--mutate`'s PATTERN
+        NOT FOUND saw it. And `camera_check`/`trackroute_check` read with
+        `newline=""` but wrote with the platform default, which put CR
+        CR LF on every line of three sources. Both are fixed in one
+        place: every checker's `write_source` is `hostbuild.write_source`,
+        which writes untranslated, parks the original as
+        `<name>.<pid>.mutate-backup`, and has `build()` restore any whose
+        process died. Tested with a child that hard-exits mid-mutant.
 
         **Build for ARM before calling a record done.** `wheel.h`'s layout
         assert was guarded with `#if __SIZEOF_POINTER__ == 4`, which meant
@@ -1125,7 +1296,13 @@ is citro3d and owns the top.
         on the wrong record. Every remaining class in this task has
         `bVector4` fields in it.
 
-        That leaves ~48.5 KB across ~168 functions still to go.
+        That leaves **38.0 KB across 122 functions** still to go: the
+        rest of `Car` (62 methods, 21912 B -- the eighteen ported are only
+        964 B, because the cheap ones went first), then `PhysicsCar`
+        (16 / 8496), `Mellovator` (31 / 5420) and `MellowMover`
+        (13 / 3096). The next slice is the vtable seam plus
+        `SetMovementMode`'s jump table, which unblocks ten methods at
+        once and carries `wheel_install_seams()` home.
 26. [ ] Race/event logic, cop AI, pursuit (roadblocks, spike strips) --
         `HotPursuitEvent` already seen in the `.mdebug` strings survey
 27. [ ] Track rendering/streaming, collision. Carries a debt from task 24:

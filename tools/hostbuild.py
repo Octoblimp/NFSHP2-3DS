@@ -18,6 +18,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -44,8 +45,126 @@ def quote(path):
     return "'" + msys(path).replace("'", "'" + BS + "''") + "'"
 
 
+# ------------------------------------------------------------------ mutants
+#
+# Every *_check.py --mutate writes a mutant into a ported source and puts the
+# original back in a `finally`. A process that is killed -- TaskStop, a closed
+# terminal -- never reaches the `finally`, and the source keeps the mutant.
+# That happened once: drivetarget.c kept `sr-count-signed` through a whole
+# session. The mutant was an equivalent one, so every plain run stayed clean,
+# and only the next --mutate run's PATTERN NOT FOUND gave it away.
+#
+# So the first write a process makes to a file parks the file's original
+# beside it as `<name>.<pid>.mutate-backup` (gitignored), and the write that
+# puts the original back removes it. build(), which every checker calls
+# before it runs anything, restores each backup whose process has gone.
+#
+# Windows returns EINVAL for a write to a file the OneDrive client has open
+# behind us, and a retry gets through -- hence WRITE_TRIES.
+
+BACKUP_SUFFIX = ".mutate-backup"
+BACKUP_DIRS = (SRC, ROOT / "tools" / "src")
+WRITE_TRIES = 5
+
+
+def _write(path, text):
+    for attempt in range(WRITE_TRIES):
+        try:
+            # newline="" both ways, always: the tree mixes CRLF and LF, and a
+            # translating write turns a CRLF original into CR CR LF on
+            # restore. camera_check and trackroute_check did exactly that to
+            # three sources, one extra CR per line per pass.
+            path.write_text(text, encoding="utf-8", newline="")
+            return
+        except OSError:
+            if attempt == WRITE_TRIES - 1:
+                raise
+            time.sleep(0.2 * (attempt + 1))
+
+
+def _alive(pid):
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+    # Not os.kill: on Windows signal 0 is CTRL_C_EVENT.
+    import ctypes
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.OpenProcess.restype = ctypes.c_void_p
+    k.GetExitCodeProcess.argtypes = [ctypes.c_void_p,
+                                     ctypes.POINTER(ctypes.c_ulong)]
+    k.CloseHandle.argtypes = [ctypes.c_void_p]
+    h = k.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return ctypes.get_last_error() == 5  # ERROR_ACCESS_DENIED: it exists
+    try:
+        code = ctypes.c_ulong()
+        if not k.GetExitCodeProcess(h, ctypes.byref(code)):
+            return True
+        return code.value == 259                # STILL_ACTIVE
+    finally:
+        k.CloseHandle(h)
+
+
+def _backup_path(path, pid):
+    return path.with_name("%s.%d%s" % (path.name, pid, BACKUP_SUFFIX))
+
+
+def _backups():
+    """(backup, source, pid) for every parked original."""
+    for d in BACKUP_DIRS:
+        for b in d.rglob("*" + BACKUP_SUFFIX):
+            base, _, pid = b.name[:-len(BACKUP_SUFFIX)].rpartition(".")
+            # bslotpool_mutate/geometry_mutate park `<name>.mutate-backup`,
+            # with no pid, and recover it themselves.
+            if base and pid.isdigit():
+                yield b, b.with_name(base), int(pid)
+
+
+def recover():
+    """Put back every original whose mutating process is gone."""
+    me = os.getpid()
+    for b, src, pid in list(_backups()):
+        if pid == me:
+            continue
+        if _alive(pid):
+            sys.stderr.write("warning: pid %d has a mutant of %s in flight; "
+                             "anything built from it now sees the mutant%s"
+                             % (pid, src.name, NL))
+            continue
+        _write(src, b.read_text(encoding="utf-8", newline=""))
+        b.unlink()
+        sys.stderr.write("restored %s: pid %d wrote a mutant into it and "
+                         "died before putting the original back%s"
+                         % (src.name, pid, NL))
+
+
+def write_source(path, text):
+    """Write a mutant, or put an original back. The checkers' own
+    write_source() is this."""
+    path = Path(path).resolve()
+    mine = _backup_path(path, os.getpid())
+    if not mine.exists():
+        for b, src, pid in list(_backups()):
+            if src.resolve() == path and pid != os.getpid():
+                if _alive(pid):
+                    sys.exit("pid %d is mutating %s already -- two passes "
+                             "over one file would restore each other's "
+                             "mutants" % (pid, path.name))
+                recover()
+        _write(mine, path.read_text(encoding="utf-8", newline=""))
+    _write(path, text)
+    if text == mine.read_text(encoding="utf-8", newline=""):
+        mine.unlink()
+
+
 def build(tmp, sources, name="hosttest", flags=None):
     """Compile `sources` into `tmp`, returning the executable's path."""
+    recover()
     flags = list(flags or FLAGS)
     srcs = [Path(s) if Path(s).is_absolute() else (ROOT / s) for s in sources]
     for s in srcs:

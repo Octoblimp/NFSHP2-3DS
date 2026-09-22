@@ -51,9 +51,23 @@ import hostbuild
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
 
+# drivetarget_assign used to be defined at the top of cardriver.c, because
+# SetDriveTarget tail-calls it and DriveTarget had no .c of its own yet. The
+# DriveTarget slice moved it to where it belongs, so the harness has to link
+# that file -- and, through it, everything drivetarget.c reaches.
 SOURCES = [
     "tools/src/cardriver_test.c",
     "3DS Files/source/cardriver.c",
+    "3DS Files/source/drivetarget.c",
+    "3DS Files/source/carstate.c",
+    "3DS Files/source/trackroute.c",
+    "3DS Files/source/trackpath.c",
+    "3DS Files/source/bchunk.c",
+    "3DS Files/source/emath.c",
+    "3DS Files/source/bmatrix.c",
+    "3DS Files/source/bvector.c",
+    "3DS Files/source/bmath.c",
+    "3DS Files/source/bmathtab.c",
 ]
 
 CD = "3DS Files/source/cardriver.c"
@@ -322,10 +336,22 @@ def model():
 
 # ----------------------------------------------------------------- running
 
+# A mutation can turn a `for (;;)` into a loop with no exit. With no
+# deadline here that mutant spins until something kills it and stalls the
+# whole pass rather than being counted; the harness itself runs in well
+# under a second.
+HARNESS_TIMEOUT = 60
+HARNESS_HUNG = -9999
+
+
 def run_harness(exe, out_path):
-    with open(out_path, "w") as fh:
-        r = subprocess.run([str(exe)], stdout=fh, stderr=subprocess.PIPE,
-                           text=True)
+    try:
+        with open(out_path, "w") as fh:
+            r = subprocess.run([str(exe)], stdout=fh, stderr=subprocess.PIPE,
+                               text=True, timeout=HARNESS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        print("harness hung, killed after %d s" % HARNESS_TIMEOUT)
+        return HARNESS_HUNG
     if r.returncode != 0:
         print("harness exited %d" % r.returncode)
         if r.stderr:
@@ -480,16 +506,12 @@ MUTATIONS = [
      "      { d->NitroFlag = on != 0; }"),
 
     # -- the target --------------------------------------------------------------
-    ("assign-partial", CD,
-     "    memcpy(dst, src, sizeof(DriveTarget));",
-     "    memcpy(dst, src, 512);"),
-    ("assign-too-much", CD,
-     "    memcpy(dst, src, sizeof(DriveTarget));",
-     "    memcpy(dst, src, sizeof(DriveTarget) + 8);"),
-    ("assign-returns-src", CD, "    memcpy(dst, src, sizeof(DriveTarget));"
-     + NL + "    return dst;",
-     "    memcpy(dst, src, sizeof(DriveTarget));" + NL
-     + "    return (DriveTarget *)src;"),
+    #
+    # drivetarget_assign's body used to be mutated here, because it used to
+    # live at the top of cardriver.c. It is drivetarget.c's now, and
+    # drivetarget_check.py mutates it there (`as-copies-half`,
+    # `as-returns-src`). A checker mutates the file it owns; what is left
+    # here is the call site, which is CarDriver's.
     ("set-target-aliases-wrong", CD,
      "    drivetarget_assign(&d->MyDriveTarget, t);",
      "    (void)t;"),
@@ -524,6 +546,11 @@ EQUIVALENT = []
 EXPECT_MISSING = []
 
 
+# The write, its OneDrive retry, and the journal that lets a killed pass be
+# recovered from are all hostbuild's.
+write_source = hostbuild.write_source
+
+
 def mutate_pass():
     base_model = model()
     survived, missing, caught = [], [], 0
@@ -539,13 +566,20 @@ def mutate_pass():
     for name, rel, before, after in MUTATIONS:
         path = ROOT / rel
         text = path.read_text(encoding="utf-8", newline="")
-        if before not in text:
+        # The ported sources are CRLF and the tools are LF, so a multi-line
+        # pattern written with bare newlines misses every time against a
+        # source file -- silently, as a pattern that is not found rather
+        # than as a mutant that survived.
+        crlf = (chr(13) + NL) in text
+        probe = before.replace(NL, chr(13) + NL) if crlf else before
+        repl = after.replace(NL, chr(13) + NL) if crlf else after
+
+        if probe not in text:
             missing.append(name)
             print("  %-32s PATTERN NOT FOUND" % name)
             continue
         try:
-            path.write_text(text.replace(before, after, 1),
-                            encoding="utf-8", newline="")
+            write_source(path, text.replace(probe, repl, 1))
             with tempfile.TemporaryDirectory() as tmp:
                 try:
                     exe = hostbuild.build(tmp, SOURCES, name="cardriver_test")
@@ -569,11 +603,21 @@ def mutate_pass():
                     print("  %-32s SURVIVED" % name)
                     survived.append(name)
         finally:
-            path.write_text(text, encoding="utf-8", newline="")
+            try:
+                write_source(path, text)
+            except OSError:
+                sys.exit("could not restore %s -- it still holds the "
+                         "mutation %s. Put the original line back before "
+                         "trusting anything printed above." % (rel, name))
 
     real = [m for m in MUTATIONS if m[0] not in missing]
     holes = [s for s in survived if s not in EQUIVALENT]
     unexpected = [m for m in missing if m not in EXPECT_MISSING]
+    # A pattern that is not found is dropped from the denominator above, so
+    # without this the tally line reads clean while a mutation never ran.
+    if missing:
+        print("%d PATTERN NOT FOUND -- the tally above is over %d of %d"
+              % (len(missing), len(real), len(MUTATIONS)))
     print("%d mutations, %d caught, %d equivalent, %d unexplained"
           % (len(real), caught, len(EQUIVALENT), len(holes)))
     return 1 if (holes or unexpected) else 0

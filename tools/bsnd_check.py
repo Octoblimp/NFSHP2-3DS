@@ -759,8 +759,18 @@ def transcript(common, frontend, table):
 
 # ----------------------------------------------------------------------- driver
 
+# A mutation can turn a loop into one with no exit. With no deadline here
+# that mutant runs until something kills it and stalls the whole pass; the
+# harness itself runs in well under a second.
+HARNESS_TIMEOUT = 60
+
+
 def run_c(exe, sbk_dir):
-    r = subprocess.run([str(exe), str(sbk_dir)], capture_output=True)
+    try:
+        r = subprocess.run([str(exe), str(sbk_dir)], capture_output=True,
+                           timeout=HARNESS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        sys.exit("bsnd_test hung, killed after %d s" % HARNESS_TIMEOUT)
     if r.returncode != 0:
         sys.stderr.write(r.stderr.decode("latin-1"))
         sys.exit("bsnd_test failed (exit %d)" % r.returncode)
@@ -832,16 +842,30 @@ MUTATIONS = [
 ]
 
 
+# The write, its OneDrive retry, and the journal that lets a killed pass be
+# recovered from are all hostbuild's.
+write_source = hostbuild.write_source
+
+
 def mutate_pass(sbk_dir, c_lines, py_lines, table):
     src = ROOT / "3DS Files" / "source" / "bsnd.c"
-    original = src.read_text(encoding="utf-8")
+    # newline="" so the file's own line endings survive the round trip, and
+    # the patterns are translated to match rather than the file to match the
+    # patterns -- a universal-newlines read here would rewrite the source to
+    # LF on every write, and a bare-newline pattern would miss a CRLF file
+    # silently the other way round.
+    original = src.read_text(encoding="utf-8", newline="")
+    crlf = (chr(13) + NL) in original
     survived = []
     try:
         for name, old, new in MUTATIONS:
+            if crlf:
+                old = old.replace(NL, chr(13) + NL)
+                new = new.replace(NL, chr(13) + NL)
             if old not in original:
                 survived.append("%s (pattern gone: %r)" % (name, old))
                 continue
-            src.write_text(original.replace(old, new, 1), encoding="utf-8")
+            write_source(src, original.replace(old, new, 1))
             with tempfile.TemporaryDirectory() as tmp:
                 try:
                     exe = hostbuild.build(tmp, SOURCES, name="bsnd_test")
@@ -860,7 +884,12 @@ def mutate_pass(sbk_dir, c_lines, py_lines, table):
                 print("  %-24s SURVIVED" % name)
                 survived.append(name)
     finally:
-        src.write_text(original, encoding="utf-8")
+        try:
+            write_source(src, original)
+        except OSError:
+            sys.exit("could not restore %s -- it still holds a "
+                     "mutation. Put the original line back before "
+                     "trusting anything printed above." % src)
     return survived
 
 

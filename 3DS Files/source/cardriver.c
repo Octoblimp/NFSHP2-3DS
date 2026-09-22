@@ -4,15 +4,6 @@
 
 #include <string.h>
 
-DriveTarget *drivetarget_assign(DriveTarget *dst, const DriveTarget *src)
-{
-    // 0x00208788: bMemCpy(a0, a1, 528), then `move v0,s0`. The size is an
-    // immediate, so it is the whole record every time regardless of how
-    // many points are actually in use.
-    memcpy(dst, src, sizeof(DriveTarget));
-    return dst;
-}
-
 void cardriver_init(CarDriver *d)
 {
     // The vtable is written *first*, before the DriveTarget constructor

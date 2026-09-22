@@ -1,7 +1,7 @@
 # CONTINUE
 
-Where the next session picks up. Written at the end of Session 20
-(2026-09-21). `HANDOFF.md` is the running narrative; this file is the short
+Where the next session picks up. Written at the end of Session 24
+(2026-09-22). `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -16,10 +16,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Twenty-three cross-checkers pass, plus the table generators:
+Twenty-six cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
 ```
 
 ```
@@ -39,13 +39,16 @@ camera_check        7 scenarios,  1200 lines, 0 differ   (40 caught, 7 equivalen
 trackroute_check   10 scenarios,   671 lines, 0 differ   (52 caught, 1 equivalent)
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
 engine_check        8 scenarios,   413 lines, 0 differ   (54 caught, 2 equivalent)
-cartypeinfo_check   4 scenarios,   177 lines, 0 differ   (41/41 mutations caught)
-cardriver_check     5 scenarios,   118 lines, 0 differ   (48/48 mutations caught)
+cartypeinfo_check   4 scenarios,   177 lines, 0 differ   (40/40 mutations caught)
+cardriver_check     5 scenarios,   118 lines, 0 differ   (45/45 mutations caught)
 steering_check      5 scenarios,   873 lines, 0 differ   (43 caught, 1 equivalent)
-rigidbody_check    10 scenarios,   935 lines, 0 differ   (75 caught, 2 equivalent)
+rigidbody_check    10 scenarios,   935 lines, 0 differ   (76 caught, 2 equivalent)
 suspension_check   10 scenarios,  1108 lines, 0 differ   (66 caught, 2 equivalent)
 wheel_check        19 scenarios, 10693 lines, 0 differ   (144 caught, 10 equivalent)
 drivetrain_check   18 scenarios,   492 lines, 0 differ   (173 caught, 3 equivalent)
+drivetarget_check  22 scenarios,   821 lines, 0 differ   (239 caught, 20 equivalent)
+graph_check        16 scenarios,   151 lines, 0 differ   (21 caught, 4 equivalent)
+car_check          20 scenarios,  1871 lines, 0 differ   (78 caught, 4 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 ```
@@ -88,116 +91,174 @@ and so replaced every boot.
 ## Next, in order
 
 1. **Task 25**, the car simulation -- part done, and **much bigger than
-   the task list said**. Nine slices are closed: `CarState`, `Engine` +
+   the task list said**. Twelve slices are closed: `CarState`, `Engine` +
    `Table`, `CarTypeInfo`, `CarDriver` + `DriveTarget`'s layout,
    `Steering` + `TwoWheelAckermanSteering`, `RigidBody`, `Suspension`,
-   `Wheel` and `DriveTrain`, each with a checker and a doc under
-   `docs/formats/car-*.md` (`RigidBody`'s is `rigid-body.md`).
+   `Wheel`, `DriveTrain`, `DriveTarget`'s methods, `Graph`, and **`Car`'s
+   record plus its first code slice**, each with a checker and a doc under
+   `docs/formats/car-*.md` (`RigidBody`'s is `rigid-body.md`, `Car`'s is
+   `car.md`).
 
    The old "178 functions, 16680 bytes" note was wrong by an order of
    magnitude -- it matched a narrow symbol pattern and missed most
    methods. Remeasured by demangling every symbol to its owning class,
-   **~48.5 KB across ~168 functions** is still to go:
+   task 25 was ~39.9 KB across 140 functions. Eighteen Car methods are
+   ported, so **38.0 KB across 122 functions** is still to go:
 
    ```
-   Car 80 funcs 22876 B   DriveTarget (methods) 28 / 8636
-   PhysicsCar 16 / 8496   Mellovator 31 / 5420
-   MellowMover 13 / 3096
+   Car 62 funcs 21912 B   PhysicsCar 16 / 8496
+   Mellovator 31 / 5420   MellowMover 13 / 3096
    ```
+
+   The eighteen are only 964 B of the 22876 -- the cheap ones went
+   first, and the expensive half of Car is the constructor, the reset
+   and damage groups and the render path.
 
    At this repo's verification standard that is several sessions, not
-   one. **`RigidBody` and `DriveTarget` are prerequisites the task list
-   never named** -- `Suspension`, `PhysicsCar` and `Car` all need
-   `RigidBody`. Next in order: `DriveTarget`'s 28 methods, `PhysicsCar`,
-   `Car`, with `Mellovator` and `MellowMover` last.
+   one. Next in order: the rest of `Car`, then `PhysicsCar`, with
+   `Mellovator` and `MellowMover` last. The prerequisites in front of them
+   are done.
 
-   **`DriveTarget`'s methods are the next slice**, and unlike `DriveTrain`
-   this one has an object of its own: `.text 0x002086f8`, `0x24d0` long,
-   `DriveTarget.obj`. The 528-byte record is already spelled out and
-   ARM-compiled in `3DS Files/source/drivetarget.h` -- `CarDriver` embeds
-   it at offset 0 -- so the layout is done and what is left is code.
+   **`Car`'s record is whole and its first code slice is closed.** The
+   2016-byte layout is in `3DS Files/source/car.h` -- 72 offsets, each
+   re-derived from a load or a store -- and it has been through the ARM
+   build, where every `CAR_SLACK` term is zero and `CAR_AT(f, n, k)`
+   reduces to the console's raw offset. `TopologyCoordinate` came with it,
+   layout only, in `topology.h`, because Car embeds one by value and its
+   128-pointer table would have made a blob agree with the wrong number on
+   the host.
 
-   Three things to know before starting it:
+   Eighteen methods are ported: the three retail stubs, the blinking, the
+   debug checksum, the two wheel aggregates, the two effect gates, the
+   forward acceleration, the horn request, the wiper window, the
+   borrowed steering angle and the eight-byte `WorldToCar` forwarder. 20
+   scenarios, 1871 lines, 0 differing; 82 mutations, 78 caught, 4
+   equivalent, 0 unexplained.
 
-   * **The object is not all DriveTarget.** `OBB` has seven methods in
-     it (`OBB::OBB`, `~OBB`, `operator=`, `Render`, `DoNotRender`,
-     `DoSnapshot`, `Print`) and the free function `bDoublesBack`
-     (`0x00208fa0`) sits in the middle of the run. That is why the
-     object is 9424 bytes where the DriveTarget tally is 8636.
-   * **The copy constructor is not in it either.**
-     `DriveTarget::DriveTarget(DriveTarget const &)` is emitted at
-     `0x001da210`, inside `CarCollisionDetect.obj` (`.text 0x001d8770`,
-     `0x1bf8` long). The tally of 28 reconciles exactly, and it is worth
-     knowing which 28: twenty-six methods in `DriveTarget.obj` (8304
-     bytes with the thunk), that copy constructor (332), and the
-     `_GLOBAL_$I$__11DriveTarget` static-init thunk at `0x0020ab48`
-     (16) -- 8636 between them. So there are **twenty-six functions to
-     port**, not twenty-eight.
-   * **`Car` is NOT a prerequisite -- this was checked, not assumed.**
-     Thirteen of the twenty-six take no `Car *` at all. The other
-     thirteen do, and **every one of them reaches `Car` only through
-     the `CarState` embedded at byte 64**, which is ported. `Car` is
-     2016 bytes with `State:/0263,512,8192` in its `.mdebug` entry --
-     bit 512, so byte 64, 1024 bytes -- and the only Car offsets any of
-     these methods touch are 64 (passed on as `CarState *`), 96
-     (`State.Position`) and 112 (`State.Velocity`). A `Car` stand-in
-     whose only live member is a `CarState` is enough for the whole
-     class. Two of the three free functions they call are the same
-     story: `IsPointAheadOfCar` (`0x001c0e30`) reads only 96 and 112,
-     and `CalculateLookAheadDistance` (`0x001c0c20`) is
-     `max(State.VelocityMagnitude * 2.0f, 20.0f)` and nothing else.
-     `GetMaxLateralAcceleration(Car *)` (`0x00209f30`) does not read
-     the car at all -- it is `lui at,0x41f0; mtc1 at,$f0`, a constant
-     30.0f in four instructions.
+   Read `docs/formats/car.md` before the next slice. Three things in it
+   cost time to find: `GetWheelTraction` pairs the **diagonals**, not the
+   axles; `IsBlinking` has **two** sentinels, 0 and `0x7fffffff`; and
+   `cvt.w.s` saturates by the sign of the source, which x86 does not do
+   and ARM does, so the conversion is written out rather than cast.
 
-   What is actually blocked, after reading every call site:
+   **That order used to read "PhysicsCar, Car" and it was wrong.**
+   `PhysicsCar::Move` (`0x00135c78`) calls three `Car` methods and reads
+   seven `Car` offsets outside the embedded `CarState`, so the
+   `CarState`-only stand-in that carried `DriveTarget` does not carry
+   `PhysicsCar`. `Car` comes first. Checked in the disassembly, the same
+   way `DriveTarget`'s independence from `Car` was.
+
+   **This said two small things came before `Car`. It was one.**
+   `Graph` (`0x00187440`, `0x00187450`) is ported. The second --
+   `CarState::WorldToCar` at `0x001b6ab0` -- turned out to have been
+   ported already, by the `CarState` slice: both overloads, three
+   mutations, and a paragraph in `docs/formats/car-state.md` about the
+   quadword subtract in the 3D one. The plan was written off a symbol
+   search rather than off `carstate.c`, and a search for the PS2 name
+   does not find `carstate_world_to_car2`. **Before porting anything a
+   plan calls a prerequisite, grep the ported sources for it under the
+   name the port would have given it, not the name the ELF has.**
 
    ```
-   DoSnapshot      0x00208830  ReplaySnapshot, as ever
-   Dump            0x002095f8  Car::WorldToCar -- a tail-jump to
-                               CarState::WorldToCar(bVector2*,bVector2*)
-                               at 0x001b6ab0, which carstate.c does not
-                               have yet. Debug output; port it last.
-   AddPointToTarget(bVector3*, DrivingLocation*, bool, Car*)
-                   0x00208e60  DrivingLocation::IsClear, which is
-                               `lw v0,0(a0); sltiu v0,v0,1` -- one word
-                               at offset 0. A two-field stand-in covers
-                               it; the class itself is task 26's.
-   FillWithCurrentAcceleration
-                   0x00209fb0  StraightLinePredict (0x001c3338), which
-                               is itself only CarState + Clear +
-                               AddPointToTarget, so it can come along.
+   Graph  0x00187440, 0x00187450   8 bytes, 2 methods; four Car methods
+                                   want it. Ported -- 16 scenarios,
+                                   25 mutations, docs/formats/car-graph.md
    ```
 
-   Constants already resolved, so they do not have to be found again
-   (`_gp` is `0x00328bf0`):
+   **And the same mistake was underneath it twice.** That paragraph used
+   to end by saying `DriveTarget::Dump` was still blocked on
+   `Car::WorldToCar`. It was not: `drivetarget_dump` has been in
+   `drivetarget.c` since the DriveTarget slice, and it reaches the
+   transform the way the forwarder would have -- `carstate_world_to_car2(
+   &car->State, ...)`, which is the `+64` written out. `docs/formats/
+   car-drive-target.md` said so at the time ("It is ported anyway, for two
+   reasons") and the planning note was never corrected to match.
 
-   ```
-   0x00321fa8  Clear's speed epsilon            0.001
-   0x00321fc0  CalculateTime's speed epsilon    0.001
-   0x00321fc4  CalculateTime's "no time" value  9999999.0
-   0x00323a50  look-ahead scale                 2.0
-   0x00323a54  look-ahead floor                 20.0
-   ```
+   So the lesson above is not about one symbol. **A plan's "blocked on"
+   list decays; the ported sources do not. Check the source before
+   believing the plan, every time, including when the plan is this file.**
 
-   And two shapes worth knowing before writing the model:
-   `GetAngle` clamps its index up to `NumPoints - 2` but never back up
-   to 0, so with `NumPoints` 0 or 1 it indexes `Points[-2]` and
-   `Points[-1]` -- a real out-of-bounds read in the shipped game, the
-   same flavour as `Table::GetValue`'s. And `SetPoint`'s `bVector2`
-   overload builds a stack `bVector3`, sets x, y and z and leaves w
-   alone, then the `bVector3` overload copies all sixteen bytes with
-   `lqc2`/`sqc2` -- so `Points[i].w` takes whatever was on the stack.
+   `Car::WorldToCar` (`0x00138e90`) is ported now regardless -- it is a
+   real method of the eighty and it is eight bytes, `j
+   CarState::WorldToCar; addiu a0,a0,64` -- so the forwarder exists under
+   its own name for the next caller that wants it.
 
-   **`Wheel`'s two seams are wired but nothing installs them.**
-   `wheel_install_seams()` points `gWheelFindDrivingSurfaceFn` and
-   `gWheelExchangeZForcesFn` at the real methods, and no code in
-   `3DS Files/source/` calls it, so they are still `NULL` on hardware.
-   That is correct today -- nothing constructs a `Suspension` or a
-   `Wheel` yet -- but **whichever slice first builds a car owes that
-   call**, before that car's first `ResolveForces`, or every corner
-   reports airborne. The seams are a port artifact: at `0x0019bdd4` and
-   `0x0019c104` the PS2 build makes two ordinary `jal`s.
+   **`Car` is the hub, not the physics -- measured, not assumed.**
+   Eighty methods, 22876 bytes, `Car.obj` at `0x0012f150` (`0x5e1c`).
+   Six are emitted outside that object, including the eight-byte
+   `Car::WorldToCar` at `0x00138e90`. The record is 2016 bytes with one
+   non-virtual base at offset 0, `bTNode<Car>` (8 bytes) -- **`Car` has
+   no vtable**; the `__pure_virtual` the map shows against `Car.obj`
+   belongs to the `CarDriver` / `CarMover` / `CarController` abstract
+   bases that share the object.
+
+   **Thirty-four of the eighty make no call outside the class, and that
+   splits three ways: 17 + 10 + 7.** Seventeen are ported. Ten are pure
+   dispatch -- load `pCarController` (offset 40) or `pCarDriver` (44),
+   read the (delta, fn) pair out of the vtable, jump -- and wait on the
+   vtable seam. Seven call only other Car methods, but those callees
+   reach a task 26/27 class, which is why "makes no call outside the
+   class" is not the same as "can be written today". The partition is
+   spelled out at the bottom of `car.c`; the arithmetic closing is what
+   checks it is a partition and not three overlapping lists.
+
+   The other forty-six reach about a dozen subsystems belonging to tasks
+   26, 27 and 29: replay, cop manager, the effect system, force feedback,
+   sound, topology, collision, render info, damage, `Player` and `Race`,
+   and eleven driver/mover classes that `SetControlMode` and
+   `SetMovementMode` construct between them. **Next slice: the vtable
+   seam and the `SetMovementMode` jump table**, which together unblock
+   the ten and carry `wheel_install_seams()` home. The reconnaissance is
+   in `HANDOFF.md`'s Session 24 entry.
+
+   Two `DriveTarget` methods are blocked, and always were two rather than
+   the three this file used to list: `DoSnapshot` on `ReplaySnapshot`, and
+   the `DrivingLocation` overload of `AddPointToTarget` on
+   `DrivingLocation::IsClear`, which is `lw v0,0(a0); sltiu v0,v0,1` and
+   has a one-word stand-in until task 26 brings the class.
+
+   `drivetarget.h`'s stand-in `Car` is **gone**; it includes `car.h` now.
+   Two consequences, both already handled. The include-ordering rule
+   car.h's header describes is retired -- either order gives the real
+   record. And `drivetarget_check`'s `[layout]` scenario changed, because
+   the stand-in's padding was written to cancel the host's pointer slack
+   and the real record does not: the three offsets read 18, 48 and 112 on
+   this host, which is `CAR_AT(DriverNumber, 10, 2)`,
+   `CAR_AT(pPlayer, 24, 6)` and `CAR_AT(State, 64, 12)`. On ARM they are
+   10, 24 and 64 again. The two mutations that used to aim at the stand-in
+   now aim at `car.h`.
+
+   `car.h` names `CarTypeInfo` and `CarDriver` rather than including
+   their headers, because `cardriver.h` -> `drivetarget.h` -> `car.h` is
+   a cycle: with the include in place, compiling `cardriver.c` reaches
+   `struct Car` before `CarDriver` is defined. `car.c` includes
+   `cardriver.h` itself for `pCarDriver->Steering`.
+
+   **Mutation passes are crash-safe now.** A stopped `drivetarget_check
+   --mutate` had left `sr-count-signed` in `drivetarget.c` -- equivalent,
+   so plain runs stayed clean -- and `camera_check`/`trackroute_check`
+   had been restoring with a translating write, which put CR CR LF on
+   every line of `camera.c`, `cammover.c` and `trackroute.c`. All four
+   repaired (the three are byte-identical to HEAD again), and every
+   checker's `write_source` is `hostbuild.write_source` now: it parks the
+   original as `<name>.<pid>.mutate-backup`, and `hostbuild.build()`
+   restores any whose process has died. **Still: never edit a source a
+   live pass compiles, and never run two passes that mutate one file
+   -- the second now stops at its first write to that file rather than
+   restore the first one's mutant for it.**
+
+   **`Wheel`'s two seams are wired but nothing installs them, and their
+   home is now known.** `wheel_install_seams()` points
+   `gWheelFindDrivingSurfaceFn` and `gWheelExchangeZForcesFn` at the
+   real methods, and no code in `3DS Files/source/` calls it, so they
+   are still `NULL` on hardware. That is correct today -- nothing
+   constructs a `Suspension` or a `Wheel` yet -- but the call belongs in
+   **`Car::SetMovementMode`'s `MM_PHYSICS` arm**, which is what
+   constructs the `PhysicsCar` that owns the `Suspension` and the four
+   `Wheel`s, and it has to happen before that car's first
+   `ResolveForces` or every corner reports airborne. The seams are a
+   port artifact: at `0x0019bdd4` and `0x0019c104` the PS2 build makes
+   two ordinary `jal`s.
 
    The HUD split is settled, below.
 2. Then in order: 26 race/cop AI, 27 track render/stream/collision,
@@ -355,6 +416,30 @@ Ordered roughly by how much time it costs to rediscover.
   and an all-zero one for the single case where two sides can be equal,
   killed both. Check that the *shape* of the fixture data exercises the
   loop before concluding the loop is equivalent.
+* **Reaching the branch is not enough -- the difference has to land
+  somewhere the dump prints.** Every survivor up to `DriveTarget` meant
+  the fixture never got to the code. Two of `DriveTarget`'s got to it
+  exactly, took different paths, and printed the same numbers.
+  `bl-window-inclusive` gives `BlendWithCurrentAcceleration` one extra
+  pass, but that pass blends at a weight which clamps to 1 and so moves
+  x and y not at all, and z, the pad and `CalculatedSpeed` were zero on
+  both sides -- until the fixture's points are given a z of 3, which
+  `SetPoint3` zeroes whatever the blend is. `rs-inner-test-strict` needs
+  `travelled == len[k]` exactly *and* `fadd(P[k], fsub(P[k+1], P[k])) !=
+  P[k+1]` at the same k, because the two arms otherwise emit the same
+  point; the separation goes in the pad, where `16777218 - 1` and
+  `1 + 16777216` are both round-half-to-even ties landing on 16777216.
+  So a survivor has two causes, not one, and the second is harder to
+  see: the fixture's comment says it is on the boundary and the comment
+  is right.
+* **Check which float of a fixture helper you are writing.**
+  `dt_point(t, i, x, y, z, speed, route, rpn, dl)`'s fourth float is the
+  `CalculatedSpeed`, and the helper writes 0.0 into every pad by design.
+  A kill built entirely around a pad value went into the speed column
+  instead and the mutation survived a fixture aimed straight at it. The
+  dump said so -- the number was sitting in `s`, with `0` in the pad --
+  which is the argument for a dump that prints **every** field rather
+  than the interesting ones.
 * **An explicit alignment pad cannot be checked by deleting it.** A
   `uint8_t _pad[2]` in front of a pointer is reinstated by the ABI the
   moment it is removed: every following offset, and `sizeof`, come out
@@ -469,6 +554,48 @@ Ordered roughly by how much time it costs to rediscover.
   and write with an explicit newline rather than letting a tool normalise
   one -- not because git minds, but because a whole-file rewrite buries the
   change you actually made when someone reads the working tree.
+* **A multi-line mutation pattern written with bare newlines misses a
+  CRLF source silently, and "not found" is not "survived".** `core.autocrlf`
+  is `true` with no `.gitattributes`, so a checked-out ported source is CRLF
+  while one a patch script wrote in place is LF -- the tree is a real mix,
+  51 files under `3DS Files/source/` are LF today. A pattern that misses
+  prints `PATTERN NOT FOUND` and is then dropped from the denominator, so
+  the tally line still reads clean. It is not even stable: `cardriver` was
+  honestly measured at 48/48 when its two files happened to be LF, and
+  reported 32/32 later with the checker unchanged. **Every runner now
+  detects the file's own newline and translates the pattern**; where a
+  runner instead read with universal newlines (`camera`, `trackroute`) it
+  was rewriting each file it touched from CRLF to LF and leaving it that
+  way, so those read with `newline=""` now too. Check the `NOT FOUND` count,
+  not just the last line.
+* **A checker mutates the file it owns.** When `drivetarget_assign` moved
+  out of `cardriver.c`, its three mutations went with it rather than being
+  retargeted across the file boundary -- `drivetarget_check` already had
+  them. `cardriver_check` is 45 mutations now, not 48, and 45 is the honest
+  number.
+* **A forward-ported helper in a neighbour's file is a link edge that
+  breaks when its real file arrives.** `drivetarget_assign` sat at the top
+  of `cardriver.c` for two slices because `SetDriveTarget` tail-calls it
+  and DriveTarget had no `.c` yet. Moving it home broke
+  `cardriver_check.py`'s link, and the checker that broke was not the one
+  being worked on. **Run the whole checker list before calling a slice
+  done, not just the new one.** The second failure was `WorldTimer`, which
+  `engine.c` owns: harnesses define their own tick rather than linking
+  Engine, Table, CarTypeInfo and Wheel behind it.
+* **A mutation runner's restore is the one write that must not fail
+  quietly.** These sources sit under OneDrive, and a write to a file the
+  sync client has open comes back `OSError: [Errno 22] Invalid argument`.
+  It is transient, but when the failing write is the **restore** in the
+  `finally`, the pass dies with the tree still holding the mutation, and
+  the traceback says only that a write failed. The next clean run then
+  disagrees with the model for a reason nothing in the diff explains.
+  All twelve mutation runners now retry the write five times and, if the
+  original truly cannot go back, `sys.exit` naming the file and the
+  mutation rather than letting the numbers that follow describe a source
+  nobody meant to write. That is the second repo-wide hole in the
+  runners found by a mutation happening to trigger it; the first was the
+  missing `timeout=`. **When a checker disagrees for no visible reason,
+  check `git diff` on the ported source before debugging the model.**
 * **Checkers must not pipe harness stdout.** `subprocess.run` with
   `capture_output=True` deadlocks against a runaway child, and `timeout=`
   cannot rescue it because killing a cygwin-built exe from Windows does not

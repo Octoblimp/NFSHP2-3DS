@@ -874,10 +874,22 @@ def model():
 
 # ----------------------------------------------------------------- harness
 
+# A mutation can turn a `for (;;)` into a loop with no exit. With no
+# deadline here that mutant spins until something kills it and stalls the
+# whole pass rather than being counted; the harness itself runs in well
+# under a second.
+HARNESS_TIMEOUT = 60
+HARNESS_HUNG = -9999
+
+
 def run_harness(exe, out_path):
-    with open(out_path, "w") as fh:
-        r = subprocess.run([str(exe)], stdout=fh, stderr=subprocess.PIPE,
-                           text=True)
+    try:
+        with open(out_path, "w") as fh:
+            r = subprocess.run([str(exe)], stdout=fh, stderr=subprocess.PIPE,
+                               text=True, timeout=HARNESS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        print("harness hung, killed after %d s" % HARNESS_TIMEOUT)
+        return HARNESS_HUNG
     if r.returncode != 0:
         print("harness exited %d" % r.returncode)
         if r.stderr:
@@ -933,6 +945,14 @@ MUTATIONS = [
     ("rb-info-dims-shifted", RH,
      "    float    Ydim;          //  8" + NL + "    float    Zdim;          // 12",
      "    float    Zdim;          //  8" + NL + "    float    Ydim;          // 12"),
+    # Inherited from cartypeinfo_check when RigidBodyInfo moved into this
+    # header: the tensor put where Zdim is, which shifts every field after
+    # it by four and is exactly the slip a hand-transcribed layout makes.
+    ("rb-info-tensor-at-12", RH,
+     "    float    Zdim;          // 12" + NL
+     + "    bMatrix4 InertiaTensor; // 16",
+     "    bMatrix4 InertiaTensor; // 12" + NL
+     + "    float    Zdim;          // 76"),
     ("rb-getsize-29", RH,
      "#define RIGIDBODY_STATE_FLOATS 32",
      "#define RIGIDBODY_STATE_FLOATS 29"),
@@ -1228,6 +1248,11 @@ EQUIVALENT = ["rb-clamp-inclusive", "rb-energy-halves-together"]
 EXPECT_MISSING = []
 
 
+# The write, its OneDrive retry, and the journal that lets a killed pass be
+# recovered from are all hostbuild's.
+write_source = hostbuild.write_source
+
+
 def mutate_pass():
     base_model = model()
     caught = 0
@@ -1245,8 +1270,7 @@ def mutate_pass():
             print("  %-32s PATTERN NOT FOUND" % name)
             continue
         try:
-            path.write_text(text.replace(probe, repl, 1),
-                            encoding="utf-8", newline="")
+            write_source(path, text.replace(probe, repl, 1))
             with tempfile.TemporaryDirectory() as tmp:
                 try:
                     exe = hostbuild.build(tmp, SOURCES, name="rigidbody_test")
@@ -1270,11 +1294,21 @@ def mutate_pass():
                     print("  %-32s SURVIVED" % name)
                     survived.append(name)
         finally:
-            path.write_text(text, encoding="utf-8", newline="")
+            try:
+                write_source(path, text)
+            except OSError:
+                sys.exit("could not restore %s -- it still holds the "
+                         "mutation %s. Put the original line back before "
+                         "trusting anything printed above." % (rel, name))
 
     real = [m for m in MUTATIONS if m[0] not in missing]
     holes = [s for s in survived if s not in EQUIVALENT]
     unexpected = [m for m in missing if m not in EXPECT_MISSING]
+    # A pattern that is not found is dropped from the denominator above, so
+    # without this the tally line reads clean while a mutation never ran.
+    if missing:
+        print("%d PATTERN NOT FOUND -- the tally above is over %d of %d"
+              % (len(missing), len(real), len(MUTATIONS)))
     print("%d mutations, %d caught, %d equivalent, %d unexplained"
           % (len(real), caught, len(EQUIVALENT), len(holes)))
     return 1 if (holes or unexpected) else 0

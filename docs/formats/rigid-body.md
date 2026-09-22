@@ -302,8 +302,14 @@ are not ported for the same reason as everywhere else.
 
 ```
 python tools/rigidbody_check.py            # 10 scenarios, 935 lines, 0 differ
-python tools/rigidbody_check.py --mutate   # 77 mutations, 75 caught, 2 equivalent
+python tools/rigidbody_check.py --mutate   # 78 mutations, 76 caught, 2 equivalent
 ```
+
+**Seventy-eight, where this said seventy-seven.** `rb-info-tensor-at-12`
+came over from `cartypeinfo_check` when `RigidBodyInfo` moved out of
+`cartypeinfo.h` and into this header -- a checker mutates the file it owns.
+It puts the inertia tensor where `Zdim` is, which shifts every field after
+it by four, and it is caught.
 
 Four survivors from the first pass needed work rather than acceptance:
 

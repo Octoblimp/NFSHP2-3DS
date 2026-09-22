@@ -33,5 +33,7 @@ Thumbs.db
 /py.*.txt
 
 # tools/*_mutate.py parks the pristine source here while a run is in
-# flight, so a killed run can be recovered from. Never committed.
+# flight, so a killed run can be recovered from, and hostbuild.write_source
+# does the same for every *_check.py --mutate as <name>.<pid>.mutate-backup.
+# Never committed.
 *.mutate-backup

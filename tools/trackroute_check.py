@@ -1612,14 +1612,24 @@ def model():
     return o.lines
 
 
+# A mutation can turn a loop into one with no exit. With no deadline here
+# that mutant runs until something kills it and stalls the whole pass; the
+# harness itself runs in well under a second.
+HARNESS_TIMEOUT = 60
+
+
 def run_c(exe):
     # No pipe: a runaway harness cannot be drained and cannot be killed
     # reliably from Windows, which is how geometry_check deadlocked.
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "out.txt"
         with open(path, "w", newline=NL) as fh:
-            rc = subprocess.call([str(exe)], stdout=fh,
-                                 stderr=subprocess.DEVNULL)
+            try:
+                rc = subprocess.run([str(exe)], stdout=fh,
+                                    stderr=subprocess.DEVNULL,
+                                    timeout=HARNESS_TIMEOUT).returncode
+            except subprocess.TimeoutExpired:
+                sys.exit("harness hung, killed after %d s" % HARNESS_TIMEOUT)
         if rc != 0:
             sys.exit("harness exited %d" % rc)
         with open(path, "r", newline=NL) as fh:
@@ -1836,6 +1846,11 @@ MUTATIONS = [
 EQUIVALENT = ["find-no-bbox-early-out"]
 
 
+# The write, its OneDrive retry, and the journal that lets a killed pass be
+# recovered from are all hostbuild's.
+write_source = hostbuild.write_source
+
+
 def mutate_pass(py_lines):
     survived = []
     originals = {}
@@ -1843,31 +1858,45 @@ def mutate_pass(py_lines):
     for _n, rel, _o, _r in MUTATIONS:
         if rel not in originals:
             paths[rel] = ROOT / rel
-            originals[rel] = paths[rel].read_text(encoding="utf-8")
+            # newline="" so the CRLF the ported sources carry survives the
+            # round trip. write_source writes with newline="" too, so a
+            # universal-newlines read here would quietly rewrite every
+            # mutated file to LF and leave it that way after the restore.
+            originals[rel] = paths[rel].read_text(encoding="utf-8",
+                                                  newline="")
     try:
         for name, rel, old, new in MUTATIONS:
             src = paths[rel]
             text = originals[rel]
+
+            # A multi-line pattern written with bare newlines misses every
+            # time against a CRLF source -- and here that reads as "hits 0
+            # times, skipped", which counts as a survivor rather than as a
+            # mutation that never ran.
+            crlf = (chr(13) + NL) in text
+            old = old.replace(NL, chr(13) + NL) if crlf else old
+            new = new.replace(NL, chr(13) + NL) if crlf else new
+
             if text.count(old) != 1:
                 print("  %-30s pattern hits %d times, skipped"
                       % (name, text.count(old)))
                 survived.append(name)
                 continue
-            src.write_text(text.replace(old, new, 1), encoding="utf-8")
+            write_source(src, text.replace(old, new, 1))
             with tempfile.TemporaryDirectory() as tmp:
                 try:
                     exe = hostbuild.build(tmp, SOURCES, name="trackroute_test")
                 except SystemExit:
                     print("  %-30s did not compile (counts as caught)" % name)
-                    src.write_text(text, encoding="utf-8")
+                    write_source(src, text)
                     continue
                 try:
                     got = run_c(exe)
                 except SystemExit:
                     print("  %-30s crashed the harness (caught)" % name)
-                    src.write_text(text, encoding="utf-8")
+                    write_source(src, text)
                     continue
-            src.write_text(text, encoding="utf-8")
+            write_source(src, text)
             _d, bad = diff(got, py_lines, limit=0)
             if bad:
                 print("  %-30s caught, %d lines" % (name, bad))
@@ -1879,7 +1908,12 @@ def mutate_pass(py_lines):
                 survived.append(name)
     finally:
         for rel, text in originals.items():
-            paths[rel].write_text(text, encoding="utf-8")
+            try:
+                write_source(paths[rel], text)
+            except OSError:
+                sys.exit("could not restore %s -- it still holds a mutation. "
+                         "Put the original line back before trusting "
+                         "anything printed above." % rel)
     return survived
 
 
