@@ -42,9 +42,14 @@
 
 #include "bmatrix.h"
 #include "bvector.h"
+#include "carcontroller.h"
 #include "carstate.h"
+#include "collisionbody.h"
+#include "graph.h"
+#include "table.h"
 #include "topology.h"
 #include "trackpath.h"
+#include "trackroute.h"
 
 // CarTypeInfo and CarDriver are held by pointer only, so they are named
 // rather than included -- and that is not a style choice. `cardriver.h`
@@ -69,11 +74,12 @@ typedef struct CarDriver   CarDriver;
 // Everything Car only ever holds a pointer to. None of these is task 25's:
 // they belong to the replay system, the cop manager, the effect system, the
 // render path and the sound mix, which are tasks 26, 27 and 29.
+// CarController and CarCollisionBody are not here: Car dispatches through
+// both vptrs and reads two of the body's fields, so the records are
+// carcontroller.h's and collisionbody.h's, included above.
 typedef struct Player            Player;
 typedef struct RacingCar         RacingCar;
-typedef struct CarController     CarController;
 typedef struct CarMover          CarMover;
-typedef struct CarCollisionBody  CarCollisionBody;
 typedef struct CarRenderInfo     CarRenderInfo;
 typedef struct AnimatedDriver    AnimatedDriver;
 typedef struct CarDamage         CarDamage;
@@ -388,5 +394,79 @@ typedef char car_layout_check[
      && sizeof(DriverInfo) == 20 + CAR_SLACK
      && sizeof(RideInfo) == 8) ? 1 : -1];
 #endif
+
+// -------------------------------------------------------------- the globals
+//
+// What `_GLOBAL_$I$fDraftFalloff` (0x001347c0) builds, named as the image
+// names them. Five are global in the stabs (`G`) and three file-static
+// (`S`: vRoadNoiseSpeedData, ObjectPoints, DamageAboveMatrix); the port
+// exports all eight so the transcript can print what the initialiser left
+// in them. fDraftFalloff is the one initialised in the image's .data; the
+// others are zero until car_static_init runs.
+extern const float fDraftFalloff[6];                    // 0x002e84a8
+extern bVector2    vDraftSpeedRange[4];                 // 0x002e84c0
+extern Table       tDraftFalloff;                       // 0x002e84e0
+extern Graph       gDraftSpeedRange;                    // 0x00323000
+extern bVector2    vRoadNoiseSpeedData[2];              // 0x00326cf0
+extern Graph       gRoadNoiseSpeedScale;                // 0x00323070
+extern bVector3    ObjectPoints[13];                    // 0x00326be0
+extern bVector4    DamageAboveMatrix[4];                // 0x00326cb0
+extern bVector2    PostCollisionYawControlProfileData[4]; // 0x002e8528
+extern Graph       PostCollisionYawControlProfile;      // 0x00323078
+
+// -------------------------------------------------------------- the methods
+//
+// car.c's exports. Declared here, where car.c includes them, so that a
+// definition drifting from its declaration is a compile error in car.c
+// rather than a silent reinterpretation at a call site in another file.
+
+void     car_static_init(void);                          // 0x001347c0
+
+void     car_fake_engine_task(Car *c);                   // 0x00130ff0
+void     car_event_handler(Car *c, void *event);         // 0x00131db0
+void     car_print_above(Car *c, const char *text, int colour); // 0x00184bc0
+void     car_start_blinking(Car *c, float duration);     // 0x00131628
+void     car_stop_blinking(Car *c);                      // 0x00131638
+int32_t  car_is_blinking(Car *c);                        // 0x00131640
+void     car_blink_blink_poof(Car *c);                   // 0x001315f0
+int32_t  car_is_poofed(Car *c);                          // 0x001316f8
+int32_t  car_calculate_debug_checksum(Car *c);           // 0x00130ee0
+float    car_get_wheels_on_ground(Car *c);               // 0x00133128
+float    car_get_wheel_traction(Car *c);                 // 0x001330e0
+int32_t  car_should_sound_effects_be_generated(Car *c);  // 0x00134188
+int32_t  car_should_visual_effects_be_generated(Car *c); // 0x00134130
+float    car_get_forward_acceleration(Car *c);           // 0x00133db8
+void     car_honk_and_or_blink_headlights(Car *c, float onDuration,
+                                          float offDuration, int32_t blink,
+                                          int32_t honk, int32_t two);
+                                                         // 0x00132508
+void     car_turn_wipers_on_for_duration(Car *c, int32_t on, int32_t off);
+                                                         // 0x001319c0
+void     car_world_to_car(Car *c, bVector2 *out, const bVector2 *in);
+                                                         // 0x00138e90
+uint16_t car_get_steering(Car *c);                       // 0x00131070
+
+// The draft. The two overloads of CalculateDraftFactor: the one-car form
+// is what `other` gives `c`, the no-argument form is the sum over the
+// world, capped.
+float    car_calculate_draft_factor_from(Car *c, Car *other); // 0x0012ffc8
+float    car_calculate_draft_factor(Car *c);             // 0x001300f0
+
+// The dispatchers.
+void     car_think(Car *c, float dt);                    // 0x00130180
+void     car_drive(Car *c, float dt);                    // 0x001301d0
+TrackRoute      *car_get_route(Car *c);                  // 0x00131740
+TrackRoutePoint *car_get_route_point(Car *c);            // 0x00131770
+float    car_get_amount_out_of_bounds(Car *c);           // 0x001317a0
+void     car_update_sound(Car *c);                       // 0x00133480
+int32_t  car_is_collideable(Car *c);                     // 0x001316a0
+int32_t  car_is_facing_wrong_way(Car *c);                // 0x001318b8
+void     car_update_headlights_and_horn(Car *c);         // 0x00132568
+
+// The borrowed fields, second helping.
+void     car_get_car_space_bounding_box(Car *c, bVector3 *min, bVector3 *max);
+                                                         // 0x001334c0
+Timer    car_get_last_penetration_time(Car *c);          // 0x001334e0
+float    car_get_tracked_acceleration(Car *c);           // 0x0012ff40
 
 #endif // CAR_H

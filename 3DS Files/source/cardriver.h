@@ -65,10 +65,26 @@ typedef char cardriver_layout_check[
 
 // The address the constructor and destructor both write to byte 556,
 // built as `lui v0,0x0029 ; addiu v0,v0,9384`. Nothing in this object
-// ever reads it -- the port keeps it so the transcript can show it being
-// written, and so a later slice that does dispatch through it has the
-// value to hand.
-#define CARDRIVER_VTABLE 0x002924a8u
+// ever reads it. Car does: Drive and UpdateHeadlightsAndHorn dispatch
+// through it with vtable.h's `vt_slot`, at the byte offsets below.
+//
+//      8  destructor          64  SetTarget          120  ZeroSteeringMemory
+//     16  Drive (pure)        72  SetSteerToPoint    128  ClearSteeringMemory
+//     24  DoSnapshot          80  GetDriverNumber    136  GetDesiredSpeed
+//     32  AddJoyHandlers          (pure)             144  GetDesiredTimeToSpeed
+//     40  RemoveJoyHandlers   88  StartHonkHorn      152  SetPhysicsMode
+//     48  SetLowGear (pure)   96  StopHonkHorn       160  GetSteerToPoint
+//     56  SetDesiredSpeed    104  IsHonking
+//         (pure)             112  MaxSpeedToTarget
+//
+// Names from NullDriver's table (0x00292400), which fills in every pure one.
+#define CARDRIVER_VTABLE  0x002924a8u
+#define NULLDRIVER_VTABLE 0x00292400u
+
+#define CARDRIVER_VT_DRIVE            16
+#define CARDRIVER_VT_START_HONK_HORN  88
+#define CARDRIVER_VT_STOP_HONK_HORN   96
+#define CARDRIVER_VT_IS_HONKING      104
 
 // 0x00134e40. Writes the vtable, runs the DriveTarget constructor, clears
 // the inputs and sets DesiredGear to 1.

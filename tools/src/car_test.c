@@ -1,6 +1,6 @@
-// Transcript harness for the first Car slice. Cross-checked by
-// tools/car_check.py, which models the same seventeen methods from the
-// disassembly without reading this file or car.c.
+// Transcript harness for Car, slices one and two. Cross-checked by
+// tools/car_check.py, which models the same methods from the disassembly
+// without reading this file or car.c.
 //
 // Every fixture float is its own decimal literal and none is computed from
 // another: a sum rounds twice where a literal rounds once, and the fixtures
@@ -10,6 +10,16 @@
 // for the reason tools/src/drivetarget_test.c gives for the same pair:
 // linking engine.c would drag Table, CarTypeInfo and Wheel in behind it, and
 // the point of the harness is to exercise Car.
+//
+// Slice two dispatches through vtables, so this file installs its own
+// tables at the image's addresses (vtable.h) and fills them with functions
+// that print what they were handed. What the transcript then shows is which
+// slot each dispatcher took, with which `this`, and in which order -- the
+// three things a virtual call can get wrong.
+//
+// Run with one argument, it instead drives one of vt_slot's refusals and
+// prints "returned" if the refusal did not happen; car_check.py runs each
+// mode and expects the process to abort.
 
 #include <stddef.h>
 #include <stdint.h>
@@ -22,33 +32,16 @@
 // the cardriver.h -> drivetarget.h -> car.h cycle. This file declares one
 // by value and reads Steering out of it, so it needs the complete record.
 #include "cardriver.h"
+#include "sound3d.h"
+#include "vtable.h"
+#include "world.h"
 
 int32_t WorldTimer = 0;
 int32_t WorldTimeFrames = 0;
 
-// The declarations car.c exports. Spelled here rather than pulled from a
-// header so that a prototype drifting apart from a definition shows up as a
-// compile error in this file and not as a silent reinterpretation.
-void     car_fake_engine_task(Car *c);
-void     car_event_handler(Car *c, void *event);
-void     car_print_above(Car *c, const char *text, int colour);
-void     car_start_blinking(Car *c, float duration);
-void     car_stop_blinking(Car *c);
-int32_t  car_is_blinking(Car *c);
-void     car_blink_blink_poof(Car *c);
-int32_t  car_is_poofed(Car *c);
-int32_t  car_calculate_debug_checksum(Car *c);
-float    car_get_wheels_on_ground(Car *c);
-float    car_get_wheel_traction(Car *c);
-int32_t  car_should_sound_effects_be_generated(Car *c);
-int32_t  car_should_visual_effects_be_generated(Car *c);
-float    car_get_forward_acceleration(Car *c);
-void     car_honk_and_or_blink_headlights(Car *c, float onDuration,
-                                          float offDuration, int32_t blink,
-                                          int32_t honk, int32_t two);
-void     car_turn_wipers_on_for_duration(Car *c, int32_t on, int32_t off);
-uint16_t car_get_steering(Car *c);
-void     car_world_to_car(Car *c, bVector2 *out, const bVector2 *in);
+// car.h declares everything car.c exports, and car.c includes car.h, so a
+// definition that drifts from its declaration is a compile error there. This
+// file uses those declarations and repeats none of them.
 
 static Car        g_car;
 static CarDriver  g_driver;
@@ -643,8 +636,1001 @@ static void scenario_steering(void)
     }
 }
 
-int main(void)
+// ===================================================================== slice 2
+
+// ------------------------------------------------------- layout, continued
+
+static void scenario_layout2(void)
 {
+    printf("[layout 2]\n");
+    pi("sizeof CarController", (int)sizeof(CarController));
+    pi("off CarController Driver", (int)offsetof(CarController, Driver));
+    pi("off CarController vptr", (int)offsetof(CarController, _vtable));
+    pi("off Tracked RoutePoint", (int)offsetof(TrackedController, RoutePoint));
+    pi("off Tracked Acceleration",
+       (int)offsetof(TrackedController, Acceleration));
+    pi("off Tracked PrevSpeed", (int)offsetof(TrackedController, PrevSpeed));
+    pi("off CarDriver vptr", (int)offsetof(CarDriver, _vtable));
+    pi("sizeof Sound3d", (int)sizeof(Sound3d));
+    pi("off Sound3d vptr", (int)offsetof(Sound3d, _vtable));
+    pi("sizeof CollisionBody", (int)sizeof(CollisionBody));
+    pi("off CollisionBody vptr", (int)offsetof(CollisionBody, _vtable));
+    pi("sizeof DynamicCollisionBody", (int)sizeof(DynamicCollisionBody));
+    pi("off Dynamic PhysicsMode",
+       (int)offsetof(DynamicCollisionBody, PhysicsMode));
+    pi("off Dynamic LocalBBMin", (int)offsetof(DynamicCollisionBody, LocalBBMin));
+    pi("off Dynamic LocalBBMax", (int)offsetof(DynamicCollisionBody, LocalBBMax));
+    pi("sizeof CarCollisionBody", (int)sizeof(CarCollisionBody));
+    pi("off CarBody pCar", (int)offsetof(CarCollisionBody, pCar));
+    pi("off CarBody LastPenetration",
+       (int)offsetof(CarCollisionBody, LastPenetrationTime));
+    pi("off CarBody LastYawControl",
+       (int)offsetof(CarCollisionBody, LastYawControlCollisionTime));
+    pi("off CarBody InertiaTensor",
+       (int)offsetof(CarCollisionBody, ScaledInverseInertiaTensor));
+    pi("sizeof Timer", (int)sizeof(Timer));
+    pi("off World TotalNumCars", (int)offsetof(World, TotalNumCars));
+    pi("off World CarTable", (int)offsetof(World, CarTable));
+    pi("world max cars", WORLD_MAX_CARS);
+    pi("off TRP Direction", (int)offsetof(TrackRoutePoint, Direction));
+    pi("off CarState BodyMatrix", (int)offsetof(CarState, BodyMatrix));
+    pi("off CarState VelocityMag", (int)offsetof(CarState, VelocityMagnitude));
+
+    printf("  %-28s %08x\n", "vt CarController", CARCONTROLLER_VTABLE);
+    printf("  %-28s %08x\n", "vt NullController", NULLCONTROLLER_VTABLE);
+    printf("  %-28s %08x\n", "vt AICarController", AICARCONTROLLER_VTABLE);
+    printf("  %-28s %08x\n", "vt RealController", REALCONTROLLER_VTABLE);
+    printf("  %-28s %08x\n", "vt CarDriver", CARDRIVER_VTABLE);
+    printf("  %-28s %08x\n", "vt NullDriver", NULLDRIVER_VTABLE);
+    printf("  %-28s %08x\n", "vt BaseCarSound", BASECARSOUND_VTABLE);
+    printf("  %-28s %08x\n", "vt BasePlayerCarSound", BASEPLAYERCARSOUND_VTABLE);
+    printf("  %-28s %08x\n", "vt BaseAICarSound", BASEAICARSOUND_VTABLE);
+    printf("  %-28s %08x\n", "vt CollisionBody", COLLISIONBODY_VTABLE);
+    printf("  %-28s %08x\n", "vt DynamicCollisionBody",
+           DYNAMICCOLLISIONBODY_VTABLE);
+    printf("  %-28s %08x\n", "vt CarCollisionBody", CARCOLLISIONBODY_VTABLE);
+
+    pi("slot Think", CARCONTROLLER_VT_THINK);
+    pi("slot GetCurrentRoute", CARCONTROLLER_VT_GET_CURRENT_ROUTE);
+    pi("slot GetCurrentRoutePoint", CARCONTROLLER_VT_GET_CURRENT_ROUTE_POINT);
+    pi("slot GetAmountOutOfBounds", CARCONTROLLER_VT_GET_AMOUNT_OUT_OF_BOUNDS);
+    pi("slot SetToPhysicsMode", CARCONTROLLER_VT_SET_TO_PHYSICS_MODE);
+    pi("slot Drive", CARDRIVER_VT_DRIVE);
+    pi("slot StartHonkHorn", CARDRIVER_VT_START_HONK_HORN);
+    pi("slot StopHonkHorn", CARDRIVER_VT_STOP_HONK_HORN);
+    pi("slot IsHonking", CARDRIVER_VT_IS_HONKING);
+    pi("slot Sound3d Update", SOUND3D_VT_UPDATE);
+    pi("slot AreCollisionsEnabled", COLLISIONBODY_VT_ARE_COLLISIONS_ENABLED);
+    pi("vt slot 104", VT_SLOT(104));
+}
+
+// ------------------------------------------------------- the static tables
+
+static uint32_t wbits(float f)
+{
+    uint32_t w;
+    memcpy(&w, &f, 4);
+    return w;
+}
+
+// Names an array the initialiser handed to a Graph or a Table, so the
+// transcript shows *which* array was aliased rather than an address.
+static const char *array_name(const void *p)
+{
+    if (p == (const void *)fDraftFalloff) return "fDraftFalloff";
+    if (p == (const void *)vDraftSpeedRange) return "vDraftSpeedRange";
+    if (p == (const void *)vRoadNoiseSpeedData) return "vRoadNoiseSpeedData";
+    if (p == (const void *)PostCollisionYawControlProfileData)
+        return "PostCollisionYawControlProfileData";
+    return "?";
+}
+
+static int nonzero_bytes(const void *p, size_t n)
+{
+    const unsigned char *b = (const unsigned char *)p;
+    int k = 0;
+    size_t i;
+
+    for (i = 0; i < n; i++)
+        if (b[i]) k++;
+    return k;
+}
+
+static void print_v2(const char *name, int i, const bVector2 *v)
+{
+    printf("  %s[%d] %08x %08x\n", name, i, wbits(v->x), wbits(v->y));
+}
+
+static void print_graph(const char *name, const Graph *g)
+{
+    printf("  %s points %s n %d\n", name, array_name(g->pPoints),
+           (int)g->NumPoints);
+}
+
+static void scenario_static_init(void)
+{
+    int i, before;
+
+    printf("[static init]\n");
+    before = nonzero_bytes(vDraftSpeedRange, sizeof vDraftSpeedRange)
+           + nonzero_bytes(&tDraftFalloff, sizeof tDraftFalloff)
+           + nonzero_bytes(&gDraftSpeedRange, sizeof gDraftSpeedRange)
+           + nonzero_bytes(vRoadNoiseSpeedData, sizeof vRoadNoiseSpeedData)
+           + nonzero_bytes(&gRoadNoiseSpeedScale, sizeof gRoadNoiseSpeedScale)
+           + nonzero_bytes(ObjectPoints, sizeof ObjectPoints)
+           + nonzero_bytes(DamageAboveMatrix, sizeof DamageAboveMatrix)
+           + nonzero_bytes(PostCollisionYawControlProfileData,
+                           sizeof PostCollisionYawControlProfileData)
+           + nonzero_bytes(&PostCollisionYawControlProfile,
+                           sizeof PostCollisionYawControlProfile);
+    pi("nonzero before init", before);
+
+    car_static_init();
+
+    for (i = 0; i < 6; i++)
+        printf("  fDraftFalloff[%d] %08x\n", i, wbits(fDraftFalloff[i]));
+    for (i = 0; i < 4; i++)
+        print_v2("vDraftSpeedRange", i, &vDraftSpeedRange[i]);
+    printf("  tDraftFalloff table %s n %d min %08x max %08x mult %08x\n",
+           array_name(tDraftFalloff.pTable), (int)tDraftFalloff.NumEntries,
+           wbits(tDraftFalloff.MinArg), wbits(tDraftFalloff.MaxArg),
+           wbits(tDraftFalloff.IndexMultiplier));
+    print_graph("gDraftSpeedRange", &gDraftSpeedRange);
+    for (i = 0; i < 2; i++)
+        print_v2("vRoadNoiseSpeedData", i, &vRoadNoiseSpeedData[i]);
+    print_graph("gRoadNoiseSpeedScale", &gRoadNoiseSpeedScale);
+    for (i = 0; i < 13; i++)
+        printf("  ObjectPoints[%d] %08x %08x %08x %08x\n", i,
+               wbits(ObjectPoints[i].x), wbits(ObjectPoints[i].y),
+               wbits(ObjectPoints[i].z), wbits(ObjectPoints[i].pad));
+    for (i = 0; i < 4; i++)
+        printf("  DamageAboveMatrix[%d] %08x %08x %08x %08x\n", i,
+               wbits(DamageAboveMatrix[i].x), wbits(DamageAboveMatrix[i].y),
+               wbits(DamageAboveMatrix[i].z), wbits(DamageAboveMatrix[i].w));
+    for (i = 0; i < 4; i++)
+        print_v2("PostCollisionYawControlProfileData", i,
+                 &PostCollisionYawControlProfileData[i]);
+    print_graph("PostCollisionYawControlProfile",
+                &PostCollisionYawControlProfile);
+}
+
+// ----------------------------------------------------------------- the draft
+
+static Car   g_others[5];
+static World g_world;
+
+static void set_car(Car *k, float px, float py, float pz,
+                    float vx, float vy, float vz, float speed)
+{
+    memset(k, 0, sizeof *k);
+    k->State.Position.x = px;
+    k->State.Position.y = py;
+    k->State.Position.z = pz;
+    k->State.Velocity.x = vx;
+    k->State.Velocity.y = vy;
+    k->State.Velocity.z = vz;
+    k->State.VelocityMagnitude = speed;
+}
+
+static void print_draft(const char *tag, float r)
+{
+    printf("  %s -> %.9g %08x\n", tag, (double)r, wbits(r));
+}
+
+static void scenario_draft_from(void)
+{
+    // The slowest a leader can be and still give a draft is the knee at
+    // vDraftSpeedRange[1].x, 1.0; the ulps either side are here.
+    static const float kSpeed[9] = {
+        0.5f, 0.99999994f, 1.0f, 1.00000012f, 3.0f, 5.0f, 100.0f, 150.0f,
+        200.0f
+    };
+    // other - c, with c at the origin. 1.97 and 1.98 straddle the edge of
+    // the cone for a leader six ahead travelling along +x, and 0.0197 and
+    // 0.0198 the same edge a hundred times closer, where the falloff has
+    // not yet reached zero; 59.9, 60 and 60.0001 straddle the distance cap.
+    static const float kRel[15][3] = {
+        { 12.0f,   0.0f,  0.0f }, {  0.0f, 12.0f,  0.0f },
+        { -12.0f,  0.0f,  0.0f }, {  6.0f,  1.0f,  0.0f },
+        {  6.0f,  1.97f,  0.0f }, {  6.0f,  1.98f, 0.0f },
+        { 59.9f,   0.0f,  0.0f }, { 60.0f,  0.0f,  0.0f },
+        { 60.0001f, 0.0f, 0.0f }, {  3.0f,  4.0f, 12.0f },
+        {  0.001f, 0.0f,  0.0f }, { 30.0f,  0.0f, -2.5f },
+        {  0.06f, 0.0197f, 0.0f }, {  0.06f, 0.0198f, 0.0f },
+        {  1.5f,  2.0f,  0.0f },
+    };
+    // The fourth leader is reversing, so the car behind it along -x gets
+    // the draft and the one ahead of it does not.
+    static const float kVel[4][3] = {
+        { 10.0f, 0.0f, 0.0f }, { 3.0f, 4.0f, 0.0f }, { 1.0f, 0.5f, 2.0f },
+        { -10.0f, 0.0f, 0.0f },
+    };
+    // Absolute pairs, to see the subtraction's direction and that c's own
+    // position is read rather than assumed to be the origin.
+    static const float kPair[4][6] = {
+        { 100.0f, -50.0f, 3.0f,  112.0f, -50.0f, 3.0f },
+        { 112.0f, -50.0f, 3.0f,  100.0f, -50.0f, 3.0f },
+        { -7.5f,   2.25f, 0.0f,   4.5f,   2.25f, 1.0f },
+        { 1000.0f, 1000.0f, 0.0f, 1010.0f, 1005.0f, 0.0f },
+    };
+    int s, r, v;
+    char tag[96];
+
+    printf("[draft from]\n");
+    for (s = 0; s < 9; s++) {
+        for (r = 0; r < 15; r++) {
+            for (v = 0; v < 4; v++) {
+                fresh();
+                set_car(&g_others[0], kRel[r][0], kRel[r][1], kRel[r][2],
+                        kVel[v][0], kVel[v][1], kVel[v][2], kSpeed[s]);
+                snprintf(tag, sizeof tag, "spd %.9g rel %d vel %d",
+                         (double)kSpeed[s], r, v);
+                print_draft(tag, car_calculate_draft_factor_from(
+                                     &g_car, &g_others[0]));
+            }
+        }
+    }
+
+    printf("[draft pairs]\n");
+    for (r = 0; r < 4; r++) {
+        fresh();
+        g_car.State.Position.x = kPair[r][0];
+        g_car.State.Position.y = kPair[r][1];
+        g_car.State.Position.z = kPair[r][2];
+        // c's own velocity and speed are noise: only the leader's are read.
+        g_car.State.Velocity.x = -3.0f;
+        g_car.State.VelocityMagnitude = 0.25f;
+        set_car(&g_others[0], kPair[r][3], kPair[r][4], kPair[r][5],
+                10.0f, 0.0f, 0.0f, 120.0f);
+        snprintf(tag, sizeof tag, "pair %d", r);
+        print_draft(tag, car_calculate_draft_factor_from(&g_car,
+                                                         &g_others[0]));
+    }
+
+    // Cases found by searching the model, each for the one rounding it
+    // turns on. At the reach, the draft is nonzero only if dot / dist
+    // rounds above 1 -- f then passes 1 and f * g passes 60 -- which no
+    // single-axis velocity can do: sqrtf of a correctly rounded a * a is
+    // |a| again. So the first two are diagonal: a leader exactly 60 away
+    // with a sliver of draft, and one a few ulps past 60 with none, which
+    // it would have if the reach were 150. The last two are the orders of
+    // the velocity's length and of the dot, each case one where the other
+    // grouping rounds differently.
+    static const float kRound[4][7] = {
+        { 35.793f, 32.2137f, 35.793f,   6.3f, 5.67f, 6.3f,  200.0f },
+        { 47.6164f, 16.52f, -32.5541f,  9.8f, 3.4f, -6.7f,  200.0f },
+        { 9.3f, 19.2f, 20.8f,           3.11f, 6.4f, 6.95f, 100.0f },
+        { 18.5f, 4.0f, -1.25f,          9.0f, 2.0f, -0.75f, 100.0f },
+    };
+
+    printf("[draft rounding]\n");
+    for (r = 0; r < 4; r++) {
+        fresh();
+        set_car(&g_others[0], kRound[r][0], kRound[r][1], kRound[r][2],
+                kRound[r][3], kRound[r][4], kRound[r][5], kRound[r][6]);
+        snprintf(tag, sizeof tag, "round %d", r);
+        print_draft(tag, car_calculate_draft_factor_from(&g_car,
+                                                         &g_others[0]));
+    }
+}
+
+// The five leaders the world scenarios draw on, each travelling along +x
+// at 200. Dead ahead of a car at the origin, 12 lands exactly on
+// fDraftFalloff[1] and gives 0.9f to the bit; 24 gives 0.75f, 48 gives 0.3f
+// and E, at 36, 0.55f. D is alongside and gives nothing.
+static void set_leaders(void)
+{
+    set_car(&g_others[0], 12.0f, 0.0f, 0.0f, 10.0f, 0.0f, 0.0f, 200.0f);
+    set_car(&g_others[1], 24.0f, 0.0f, 0.0f, 10.0f, 0.0f, 0.0f, 200.0f);
+    set_car(&g_others[2], 48.0f, 0.0f, 0.0f, 10.0f, 0.0f, 0.0f, 200.0f);
+    set_car(&g_others[3],  0.0f, 12.0f, 0.0f, 10.0f, 0.0f, 0.0f, 200.0f);
+    set_car(&g_others[4], 36.0f, 0.0f, 0.0f, 10.0f, 0.0f, 0.0f, 200.0f);
+}
+
+// A world as a string: 'A' to 'E' are the leaders, 's' is the car itself
+// and '0' is a null entry -- which the loop must never reach, because
+// dereferencing it crashes the harness. `n` is TotalNumCars and may be
+// shorter than the string, so the entry past the count is populated too.
+static void set_world(const char *cars, int n)
+{
+    int i;
+
+    memset(&g_world, 0, sizeof g_world);
+    g_world.TotalNumCars = n;
+    for (i = 0; cars[i]; i++) {
+        switch (cars[i]) {
+        case 's': g_world.CarTable[i] = &g_car; break;
+        case '0': g_world.CarTable[i] = NULL; break;
+        default:  g_world.CarTable[i] = &g_others[cars[i] - 'A']; break;
+        }
+    }
+    pCurrentWorld = &g_world;
+}
+
+// "BB" and "CB" overshoot: the early-out breaks after the add that crossed
+// 0.9, so only the cap brings them back to it. "CEC" stops at 0.85 on the
+// way, which is under the early-out and so must not stop the loop.
+static const char *const kWorld[15] = {
+    "", "s", "C", "CD", "CsC", "CCC0", "A0", "BC0", "CCB", "DsD", "sA0",
+    "CsCsC", "BB", "CB", "CEC"
+};
+static const int kWorldN[15] = { 0, 1, 1, 2, 3, 4, 2, 3, 2, 3, 3, 5, 2, 2, 3 };
+
+static void scenario_draft_sum(void)
+{
+    int i;
+    char tag[64];
+
+    printf("[draft sum]\n");
+    for (i = 0; i < 15; i++) {
+        fresh();
+        // c's own motion is not read by the sum -- unless it fails to skip
+        // c, which then drafts from itself: past the knee, a 0 / 0.
+        g_car.State.Velocity.x = 30.0f;
+        g_car.State.VelocityMagnitude = 30.0f;
+        set_leaders();
+        set_world(kWorld[i], kWorldN[i]);
+        snprintf(tag, sizeof tag, "world \"%s\" n %d", kWorld[i], kWorldN[i]);
+        print_draft(tag, car_calculate_draft_factor(&g_car));
+    }
+    pCurrentWorld = NULL;
+}
+
+// ------------------------------------------------------------ the fakes
+
+static CarController     g_ctl;
+static TrackedController g_tctl;
+static CarDriver         g_driver2;
+static Sound3d           g_sound;
+static CarCollisionBody  g_body;
+static TrackRoute        g_route;
+static TrackRoutePoint   g_rp;
+
+static float   g_oob;
+static int32_t g_enabled;
+static int32_t g_honking;
+static int     g_swap_driver;
+
+typedef struct Fixture {
+    const char *name;
+    const void *base;
+    size_t      size;
+} Fixture;
+
+// "<fixture>+<byte offset>" for whatever pointer a fake was handed. The
+// dispatch adds the entry's delta to the object before the call, so the
+// offset printed is the delta the call site applied.
+static void name_of(const void *p, char *buf, size_t n)
+{
+    const Fixture k[] = {
+        { "ctl",     &g_ctl,     sizeof g_ctl },
+        { "tctl",    &g_tctl,    sizeof g_tctl },
+        { "driver",  &g_driver,  sizeof g_driver },
+        { "driver2", &g_driver2, sizeof g_driver2 },
+        { "sound",   &g_sound,   sizeof g_sound },
+        { "body",    &g_body,    sizeof g_body },
+    };
+    uintptr_t q = (uintptr_t)p;
+    size_t i;
+
+    for (i = 0; i < sizeof k / sizeof k[0]; i++) {
+        uintptr_t b = (uintptr_t)k[i].base;
+        if (q >= b && q < b + k[i].size) {
+            snprintf(buf, n, "%s+%d", k[i].name, (int)(q - b));
+            return;
+        }
+    }
+    snprintf(buf, n, "?");
+}
+
+static void fk_think(void *self, float dt)
+{
+    char b[32];
+    name_of(self, b, sizeof b);
+    printf("    Think(%s, %.9g) sees draft %.9g\n", b, (double)dt,
+           (double)g_car.DraftFactor);
+}
+
+static void fk_drive(void *self, float dt)
+{
+    char b[32];
+    name_of(self, b, sizeof b);
+    printf("    Drive(%s, %.9g)\n", b, (double)dt);
+}
+
+static TrackRoute *fk_route(void *self)
+{
+    char b[32];
+    name_of(self, b, sizeof b);
+    printf("    GetCurrentRoute(%s)\n", b);
+    return &g_route;
+}
+
+static TrackRoutePoint *fk_route_point(void *self)
+{
+    char b[32];
+    name_of(self, b, sizeof b);
+    printf("    GetCurrentRoutePoint(%s)\n", b);
+    return &g_rp;
+}
+
+static float fk_oob(void *self)
+{
+    char b[32];
+    name_of(self, b, sizeof b);
+    printf("    GetAmountOutOfBounds(%s)\n", b);
+    return g_oob;
+}
+
+static void fk_update(void *self, float a, uint16_t s, float c)
+{
+    char b[32];
+    name_of(self, b, sizeof b);
+    printf("    Update(%s, %.9g, %u, %.9g)\n", b, (double)a, (unsigned)s,
+           (double)c);
+}
+
+static int32_t fk_enabled(void *self)
+{
+    char b[32];
+    name_of(self, b, sizeof b);
+    printf("    AreCollisionsEnabled(%s) = %d\n", b, (int)g_enabled);
+    return g_enabled;
+}
+
+// Hands the car a different driver when asked to, so the transcript shows
+// whether the second call of the pair reloads pCarDriver or reuses the one
+// the first call went through.
+static int32_t fk_is_honking(void *self)
+{
+    char b[32];
+    name_of(self, b, sizeof b);
+    printf("    IsHonking(%s) = %d\n", b, (int)g_honking);
+    if (g_swap_driver)
+        g_car.pCarDriver = &g_driver2;
+    return g_honking;
+}
+
+static void fk_start_honk(void *self)
+{
+    char b[32];
+    name_of(self, b, sizeof b);
+    printf("    StartHonkHorn(%s)\n", b);
+}
+
+static void fk_stop_honk(void *self)
+{
+    char b[32];
+    name_of(self, b, sizeof b);
+    printf("    StopHonkHorn(%s)\n", b);
+}
+
+// One table per (class, delta) pair. The controller and driver tables run
+// to +104, entry 13; the sound's to +24; the body's to +136.
+static VtEntry t_ctl0[14], t_ctl4[14], t_drv0[14], t_drv8[14];
+static VtEntry t_snd0[4], t_snd4[4], t_body0[18], t_body12[18];
+
+static void put(VtEntry *t, int slot, int delta, VtFn fn)
+{
+    t[VT_SLOT(slot)].delta = (int16_t)delta;
+    t[VT_SLOT(slot)].index = 0;
+    t[VT_SLOT(slot)].fn = fn;
+}
+
+static void fill_ctl(VtEntry *t, int d)
+{
+    memset(t, 0, 14 * sizeof *t);
+    put(t, CARCONTROLLER_VT_THINK, d, (VtFn)fk_think);
+    put(t, CARCONTROLLER_VT_GET_CURRENT_ROUTE, d, (VtFn)fk_route);
+    put(t, CARCONTROLLER_VT_GET_CURRENT_ROUTE_POINT, d, (VtFn)fk_route_point);
+    put(t, CARCONTROLLER_VT_GET_AMOUNT_OUT_OF_BOUNDS, d, (VtFn)fk_oob);
+}
+
+static void fill_drv(VtEntry *t, int d)
+{
+    memset(t, 0, 14 * sizeof *t);
+    put(t, CARDRIVER_VT_DRIVE, d, (VtFn)fk_drive);
+    put(t, CARDRIVER_VT_START_HONK_HORN, d, (VtFn)fk_start_honk);
+    put(t, CARDRIVER_VT_STOP_HONK_HORN, d, (VtFn)fk_stop_honk);
+    put(t, CARDRIVER_VT_IS_HONKING, d, (VtFn)fk_is_honking);
+}
+
+static void install_fakes(void)
+{
+    vt_reset();
+
+    fill_ctl(t_ctl0, 0);
+    fill_ctl(t_ctl4, 4);
+    vt_install(REALCONTROLLER_VTABLE, t_ctl0, 14);
+    vt_install(AICARCONTROLLER_VTABLE, t_ctl4, 14);
+
+    fill_drv(t_drv0, 0);
+    fill_drv(t_drv8, 8);
+    vt_install(NULLDRIVER_VTABLE, t_drv0, 14);
+    vt_install(CARDRIVER_VTABLE, t_drv8, 14);
+
+    memset(t_snd0, 0, sizeof t_snd0);
+    memset(t_snd4, 0, sizeof t_snd4);
+    put(t_snd0, SOUND3D_VT_UPDATE, 0, (VtFn)fk_update);
+    put(t_snd4, SOUND3D_VT_UPDATE, 4, (VtFn)fk_update);
+    vt_install(BASECARSOUND_VTABLE, t_snd0, 4);
+    vt_install(BASEAICARSOUND_VTABLE, t_snd4, 4);
+
+    memset(t_body0, 0, sizeof t_body0);
+    memset(t_body12, 0, sizeof t_body12);
+    put(t_body0, COLLISIONBODY_VT_ARE_COLLISIONS_ENABLED, 0, (VtFn)fk_enabled);
+    put(t_body12, COLLISIONBODY_VT_ARE_COLLISIONS_ENABLED, 12,
+        (VtFn)fk_enabled);
+    vt_install(CARCOLLISIONBODY_VTABLE, t_body0, 18);
+    vt_install(DYNAMICCOLLISIONBODY_VTABLE, t_body12, 18);
+}
+
+// fresh() plus every object slice two dispatches to, each carrying the
+// delta-0 table unless a scenario swaps it.
+static void fresh2(void)
+{
+    fresh();
+    memset(&g_ctl, 0, sizeof g_ctl);
+    memset(&g_tctl, 0, sizeof g_tctl);
+    memset(&g_driver2, 0, sizeof g_driver2);
+    memset(&g_sound, 0, sizeof g_sound);
+    memset(&g_body, 0, sizeof g_body);
+    memset(&g_rp, 0, sizeof g_rp);
+    g_ctl._vtable = REALCONTROLLER_VTABLE;
+    g_driver._vtable = NULLDRIVER_VTABLE;
+    g_driver2._vtable = CARDRIVER_VTABLE;
+    g_sound._vtable = BASECARSOUND_VTABLE;
+    g_body.Dynamic.Body._vtable = CARCOLLISIONBODY_VTABLE;
+    g_car.pCarController = &g_ctl;
+    g_car.pBaseCarSound = (BaseCarSound *)&g_sound;
+    g_car.pDynamicCollisionBody = &g_body;
+    g_oob = 0.0f;
+    g_enabled = 0;
+    g_honking = 0;
+    g_swap_driver = 0;
+}
+
+// ------------------------------------------------------------ the vtable seam
+
+static int g_mark;
+static void fk_mark_a(void) { g_mark = 1; }
+static void fk_mark_b(void) { g_mark = 2; }
+static void fk_mark_c(void) { g_mark = 3; }
+
+static int dispatch_mark(uint32_t image, int slot, int *delta)
+{
+    const VtEntry *e = vt_slot(image, slot);
+    g_mark = 0;
+    e->fn();
+    *delta = e->delta;
+    return g_mark;
+}
+
+static void scenario_vtable(void)
+{
+    static VtEntry a[3], b[3], c[3];
+    int d, m;
+
+    printf("[vtable]\n");
+    vt_reset();
+    memset(a, 0, sizeof a);
+    memset(b, 0, sizeof b);
+    memset(c, 0, sizeof c);
+    a[1].fn = (VtFn)fk_mark_a; a[2].fn = (VtFn)fk_mark_a; a[2].delta = -8;
+    b[1].fn = (VtFn)fk_mark_b; b[2].fn = (VtFn)fk_mark_b; b[2].delta = 16;
+    c[1].fn = (VtFn)fk_mark_c;
+
+    vt_install(0x00111110u, a, 3);
+    m = dispatch_mark(0x00111110u, 8, &d);
+    printf("  X+8 -> %d delta %d\n", m, d);
+    m = dispatch_mark(0x00111110u, 16, &d);
+    printf("  X+16 -> %d delta %d\n", m, d);
+
+    // Installing the same address again replaces its entries rather than
+    // adding a second registration behind the first.
+    vt_install(0x00111110u, b, 3);
+    m = dispatch_mark(0x00111110u, 8, &d);
+    printf("  X+8 after replace -> %d delta %d\n", m, d);
+    m = dispatch_mark(0x00111110u, 16, &d);
+    printf("  X+16 after replace -> %d delta %d\n", m, d);
+
+    vt_install(0x00222220u, c, 2);
+    m = dispatch_mark(0x00222220u, 8, &d);
+    printf("  Y+8 -> %d delta %d\n", m, d);
+    m = dispatch_mark(0x00111110u, 8, &d);
+    printf("  X+8 beside Y -> %d delta %d\n", m, d);
+
+    // vt_this is `obj + delta` in bytes, whatever obj's type.
+    {
+        VtEntry e;
+        char buf[64];
+        e.delta = -8; e.index = 0; e.fn = NULL;
+        printf("  this -8 -> %d\n", (int)((char *)vt_this(buf + 32, &e) - buf));
+        e.delta = 24;
+        printf("  this +24 -> %d\n", (int)((char *)vt_this(buf + 32, &e) - buf));
+    }
+    vt_reset();
+}
+
+// Each mode is one refusal. The table has a sixth entry past its count and a
+// live function in entry 0, so a vt_slot that forgot a bound would find
+// something callable and return rather than abort.
+static int abort_mode(const char *m)
+{
+    static VtEntry t[6];
+    const uint32_t A = 0x00123450u;
+    int i;
+
+    for (i = 0; i < 6; i++) {
+        t[i].delta = 0;
+        t[i].index = 0;
+        t[i].fn = (VtFn)fk_mark_a;
+    }
+    vt_reset();
+
+    if (!strcmp(m, "vt-missing")) {
+        vt_slot(A, 8);
+    } else if (!strcmp(m, "vt-reset")) {
+        vt_install(A, t, 5);
+        vt_reset();
+        vt_slot(A, 8);
+    } else if (!strcmp(m, "vt-misaligned")) {
+        vt_install(A, t, 5);
+        vt_slot(A, 12);
+    } else if (!strcmp(m, "vt-slot-zero")) {
+        vt_install(A, t, 5);
+        vt_slot(A, 0);
+    } else if (!strcmp(m, "vt-negative")) {
+        vt_install(A, t, 5);
+        vt_slot(A, -8);
+    } else if (!strcmp(m, "vt-past-end")) {
+        vt_install(A, t, 5);
+        vt_slot(A, 40);
+    } else if (!strcmp(m, "vt-null-fn")) {
+        t[2].fn = NULL;
+        vt_install(A, t, 5);
+        vt_slot(A, 16);
+    } else if (!strcmp(m, "vt-full")) {
+        // Ninety-six fit. The count goes out before the ninety-seventh,
+        // flushed, because abort() does not flush stdio.
+        for (i = 0; i < 96; i++)
+            vt_install(0x00100000u + 8u * (uint32_t)i, t, 5);
+        printf("%d installed\n", i);
+        fflush(stdout);
+        vt_install(0x00100000u + 8u * 96u, t, 5);
+    } else {
+        printf("unknown mode %s\n", m);
+        return 2;
+    }
+    printf("returned\n");
+    return 0;
+}
+
+// ------------------------------------------------------------- dispatchers
+
+static void scenario_think(void)
+{
+    static const float kDt[3] = { 0.0166666675f, 0.0f, -0.5f };
+    static const uint32_t kVt[2] = { REALCONTROLLER_VTABLE,
+                                     AICARCONTROLLER_VTABLE };
+    int v, d, w;
+
+    printf("[think]\n");
+    for (w = 0; w < 3; w++) {
+        for (v = 0; v < 2; v++) {
+            for (d = 0; d < 3; d++) {
+                fresh2();
+                set_leaders();
+                // "C", "BC0" and an empty world: 0.3, the cap, and 0.
+                set_world(w == 0 ? "C" : w == 1 ? "BC0" : "", w == 2 ? 0
+                          : w == 1 ? 3 : 1);
+                g_car.DraftFactor = 7.0f;
+                g_ctl._vtable = kVt[v];
+                printf("  world %d vt %d dt %.9g\n", w, v, (double)kDt[d]);
+                car_think(&g_car, kDt[d]);
+                printf("    after draft %.9g\n", (double)g_car.DraftFactor);
+            }
+        }
+    }
+    pCurrentWorld = NULL;
+}
+
+static void scenario_drive(void)
+{
+    static const float kDt[2] = { 0.0333333351f, 2.5f };
+    int v, d;
+
+    printf("[drive]\n");
+    for (v = 0; v < 2; v++) {
+        for (d = 0; d < 2; d++) {
+            fresh2();
+            if (v)
+                g_car.pCarDriver = &g_driver2;
+            printf("  driver %d dt %.9g\n", v, (double)kDt[d]);
+            car_drive(&g_car, kDt[d]);
+        }
+    }
+}
+
+static void scenario_route(void)
+{
+    static const float kOob[3] = { 0.0f, -2.5f, 1e30f };
+    int v, o;
+
+    printf("[route]\n");
+    for (v = 0; v < 2; v++) {
+        fresh2();
+        g_ctl._vtable = v ? AICARCONTROLLER_VTABLE : REALCONTROLLER_VTABLE;
+        printf("  vt %d\n", v);
+        printf("    route is g_route %d\n", car_get_route(&g_car) == &g_route);
+        printf("    point is g_rp %d\n", car_get_route_point(&g_car) == &g_rp);
+        for (o = 0; o < 3; o++) {
+            g_oob = kOob[o];
+            printf("    oob %.9g\n", (double)car_get_amount_out_of_bounds(&g_car));
+        }
+    }
+}
+
+static void scenario_sound(void)
+{
+    int v;
+
+    printf("[sound]\n");
+    fresh2();
+    g_car.pBaseCarSound = NULL;
+    printf("  no sound\n");
+    car_update_sound(&g_car);
+    for (v = 0; v < 2; v++) {
+        fresh2();
+        g_sound._vtable = v ? BASEAICARSOUND_VTABLE : BASECARSOUND_VTABLE;
+        // Fields a wrong-offset read would pick up instead of the vptr.
+        g_sound.Volume = 0.5f;
+        g_sound.Pitch = 2.0f;
+        printf("  vt %d\n", v);
+        car_update_sound(&g_car);
+    }
+}
+
+static void scenario_collideable(void)
+{
+    static const int32_t kAnswer[4] = { 0, 1, 2, -1 };
+    int b, a, v;
+
+    printf("[collideable]\n");
+    for (b = 0; b < 3; b++) {
+        for (v = 0; v < 2; v++) {
+            for (a = 0; a < 4; a++) {
+                fresh2();
+                // Not blinking; blinking for the next second; a blink that
+                // has run out.
+                WorldTimer = 10000;
+                if (b == 1) {
+                    g_car.BlinkTimer = 9000;
+                    g_car.BlinkDuration = 1.0f;
+                } else if (b == 2) {
+                    g_car.BlinkTimer = 1000;
+                    g_car.BlinkDuration = 1.0f;
+                }
+                g_body.Dynamic.Body._vtable =
+                    v ? DYNAMICCOLLISIONBODY_VTABLE : CARCOLLISIONBODY_VTABLE;
+                g_enabled = kAnswer[a];
+                printf("  blink %d vt %d answer %d\n", b, v, (int)kAnswer[a]);
+                printf("    -> %d\n", (int)car_is_collideable(&g_car));
+            }
+        }
+    }
+    WorldTimer = 0;
+}
+
+static void scenario_wrong_way(void)
+{
+    static const float kFwd[7][2] = {
+        { 1.0f, 0.0f }, { 0.0f, 1.0f }, { -1.0f, 0.0f }, { 0.6f, 0.8f },
+        { 1e-20f, 0.0f }, { -0.6f, 0.8f }, { 0.0f, -1.0f },
+    };
+    static const float kDir[5][2] = {
+        { 1.0f, 0.0f }, { 0.0f, 1.0f }, { -1.0f, 0.0f }, { 0.0f, -1.0f },
+        { 0.6f, -0.8f },
+    };
+    int f, d;
+
+    printf("[wrong way]\n");
+    for (f = 0; f < 7; f++) {
+        for (d = 0; d < 5; d++) {
+            fresh2();
+            g_car.State.BodyMatrix.v0.x = kFwd[f][0];
+            g_car.State.BodyMatrix.v0.y = kFwd[f][1];
+            // Everything else the test must not read: the forward axis's
+            // z, the side axis, and the route point's own position.
+            g_car.State.BodyMatrix.v0.z = -100.0f;
+            g_car.State.BodyMatrix.v1.x = -kFwd[f][1];
+            g_car.State.BodyMatrix.v1.y = kFwd[f][0];
+            g_rp.Position.x = 5.0f;
+            g_rp.Position.y = -5.0f;
+            g_rp.Direction.x = kDir[d][0];
+            g_rp.Direction.y = kDir[d][1];
+            printf("  fwd %d dir %d\n", f, d);
+            printf("    -> %d\n", (int)car_is_facing_wrong_way(&g_car));
+        }
+    }
+}
+
+static void scenario_headlights(void)
+{
+    // Ticks since the stamp, with on 0.5 s and off 0.25 s: inside the first
+    // on phase, both edges of the gap, the second on phase and its end, and
+    // a clock behind the stamp.
+    static const int32_t kTicks[9] = {
+        0, 1000, 2000, 2500, 3000, 4000, 5000, 8000, -400
+    };
+    static const int32_t kHonk[2] = { 0, 5 };
+    static const int32_t kIs[2] = { 0, 3 };
+    int t, two, bl, h, fo, is;
+
+    printf("[headlights]\n");
+    for (t = 0; t < 9; t++)
+    for (two = 0; two < 2; two++)
+    for (bl = 0; bl < 2; bl++)
+    for (h = 0; h < 2; h++)
+    for (fo = 0; fo < 2; fo++)
+    for (is = 0; is < 2; is++) {
+        fresh2();
+        WorldTimer = 50000 + kTicks[t];
+        g_car.HeadlightsAndHornStartTime = 50000;
+        g_car.HeadlightsAndHornOnDuration = 0.5f;
+        g_car.HeadlightsAndHornOffDuration = 0.25f;
+        g_car.WantTwoHonksAndOrBlinks = two;
+        g_car.WantToBlinkHeadlights = bl ? 7 : 0;
+        g_car.WantToHonkHorn = kHonk[h];
+        g_car.ForceHeadlightsOn = fo ? 2 : 0;
+        g_car.HeadlightsState = 9;
+        g_honking = kIs[is];
+        printf("  t %d two %d blink %d honk %d force %d is %d\n",
+               (int)kTicks[t], two, bl, (int)kHonk[h], fo, (int)kIs[is]);
+        car_update_headlights_and_horn(&g_car);
+        printf("    lights %d\n", (int)g_car.HeadlightsState);
+    }
+
+    // A player's car is left entirely alone: no lights, no calls.
+    printf("[headlights player]\n");
+    fresh2();
+    g_car.pPlayer = (Player *)&g_others[0];
+    g_car.WantToBlinkHeadlights = 1;
+    g_car.WantToHonkHorn = 1;
+    g_car.HeadlightsAndHornOnDuration = 5.0f;
+    g_car.HeadlightsState = 9;
+    car_update_headlights_and_horn(&g_car);
+    printf("  lights %d\n", (int)g_car.HeadlightsState);
+
+    // IsHonking hands the car driver2, whose table carries a delta of 8:
+    // the Start or Stop that follows must go to driver2+8.
+    printf("[headlights reload]\n");
+    WorldTimer = 0;
+    for (h = 0; h < 2; h++) {
+        fresh2();
+        g_car.HeadlightsAndHornOnDuration = 1.0f;
+        g_car.WantToHonkHorn = h;
+        g_honking = !h;
+        g_swap_driver = 1;
+        printf("  honk %d\n", h);
+        car_update_headlights_and_horn(&g_car);
+    }
+    WorldTimer = 0;
+}
+
+// --------------------------------------------------- borrowed fields again
+
+static void print_v3w(const char *tag, const bVector3 *v)
+{
+    printf("  %s %08x %08x %08x %08x\n", tag, wbits(v->x), wbits(v->y),
+           wbits(v->z), wbits(v->pad));
+}
+
+static void set_bbox(void)
+{
+    g_body.Dynamic.LocalBBMin.x = -1.5f;
+    g_body.Dynamic.LocalBBMin.y = -2.5f;
+    g_body.Dynamic.LocalBBMin.z = -0.25f;
+    g_body.Dynamic.LocalBBMin.pad = 11.0f;
+    g_body.Dynamic.LocalBBMax.x = 1.5f;
+    g_body.Dynamic.LocalBBMax.y = 2.5f;
+    g_body.Dynamic.LocalBBMax.z = 1.75f;
+    g_body.Dynamic.LocalBBMax.pad = -13.0f;
+    // The two neighbours of the box, so an off-by-a-field read shows.
+    g_body.Dynamic.Radius = 99.0f;
+    g_body.pCar = NULL;
+}
+
+static void scenario_bbox(void)
+{
+    bVector3 lo, hi;
+
+    printf("[bbox]\n");
+    fresh2();
+    set_bbox();
+    memset(&lo, 0, sizeof lo);
+    memset(&hi, 0, sizeof hi);
+    car_get_car_space_bounding_box(&g_car, &lo, &hi);
+    print_v3w("min", &lo);
+    print_v3w("max", &hi);
+
+    // min is the body's own LocalBBMax: written before max reads it.
+    printf("[bbox alias max]\n");
+    fresh2();
+    set_bbox();
+    memset(&hi, 0, sizeof hi);
+    car_get_car_space_bounding_box(&g_car, &g_body.Dynamic.LocalBBMax, &hi);
+    print_v3w("max out", &hi);
+    print_v3w("body max", &g_body.Dynamic.LocalBBMax);
+
+    // max is the body's own LocalBBMin: min has already read it.
+    printf("[bbox alias min]\n");
+    fresh2();
+    set_bbox();
+    memset(&lo, 0, sizeof lo);
+    car_get_car_space_bounding_box(&g_car, &lo, &g_body.Dynamic.LocalBBMin);
+    print_v3w("min out", &lo);
+    print_v3w("body min", &g_body.Dynamic.LocalBBMin);
+}
+
+static void scenario_penetration(void)
+{
+    static const uint32_t kWord[4] = { 0u, 1u, 0xdeadbeefu, 0x80000000u };
+    int i;
+
+    printf("[penetration]\n");
+    for (i = 0; i < 4; i++) {
+        Timer t;
+        fresh2();
+        g_body.LastPenetrationTime.PackedTime = kWord[i];
+        g_body.LastYawControlCollisionTime.PackedTime = 0x5a5a5a5au;
+        g_body.pCar = &g_car;
+        t = car_get_last_penetration_time(&g_car);
+        printf("  word %08x -> %08x\n", (unsigned)kWord[i],
+               (unsigned)t.PackedTime);
+    }
+}
+
+static void scenario_tracked(void)
+{
+    static const int32_t kMode[7] = { -1, 0, 1, 2, 3, 4, 5 };
+    static const float kAcc[2] = { 3.5f, -0.0f };
+    int m, a;
+
+    printf("[tracked acceleration]\n");
+    for (m = 0; m < 7; m++) {
+        for (a = 0; a < 2; a++) {
+            fresh2();
+            g_car.TheControlMode = kMode[m];
+            g_tctl.Acceleration = kAcc[a];
+            g_tctl.TimeBeforeUpdate = 77.0f;
+            g_tctl.PrevSpeed = 88.0f;
+            // Every mode has a controller that would answer, so a read in
+            // the wrong mode shows as a number rather than as nothing.
+            g_car.pCarController = (CarController *)&g_tctl;
+            printf("  mode %d acc %.9g -> %08x\n", (int)kMode[m],
+                   (double)kAcc[a], wbits(car_get_tracked_acceleration(&g_car)));
+        }
+    }
+
+    // And no controller at all outside REAL_CONTROL: the answer must come
+    // without the read, or the harness crashes.
+    for (m = 0; m < 7; m++) {
+        if (kMode[m] == 1)
+            continue;
+        fresh2();
+        g_car.TheControlMode = kMode[m];
+        g_car.pCarController = NULL;
+        printf("  mode %d no controller -> %08x\n", (int)kMode[m],
+               wbits(car_get_tracked_acceleration(&g_car)));
+    }
+}
+
+int main(int argc, char **argv)
+{
+    if (argc > 1)
+        return abort_mode(argv[1]);
+
     scenario_layout();
     scenario_stubs();
     scenario_blink();
@@ -660,5 +1646,22 @@ int main(void)
     scenario_wipers();
     scenario_world_to_car();
     scenario_steering();
+
+    scenario_layout2();
+    scenario_static_init();
+    scenario_draft_from();
+    scenario_draft_sum();
+    scenario_vtable();
+    install_fakes();
+    scenario_think();
+    scenario_drive();
+    scenario_route();
+    scenario_sound();
+    scenario_collideable();
+    scenario_wrong_way();
+    scenario_headlights();
+    scenario_bbox();
+    scenario_penetration();
+    scenario_tracked();
     return 0;
 }

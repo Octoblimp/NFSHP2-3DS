@@ -54,6 +54,7 @@
 #include "geoview.h"
 #include "georender.h"
 #include "movie.h"
+#include "sinit.h"
 #include "uirender.h"
 
 // The top screen's render target is built here rather than by
@@ -1112,12 +1113,13 @@ int main(int argc, char** argv)
     initPlatformPerf();
     logOpen();
 
-    // The original builds a SlotPoolManager at load time through
-    // _GLOBAL_$I$ (0x00240070); this is that, done explicitly. It has to be
-    // up before anything can call bNewSlotPool, and the allocator hook is
-    // left at its default, which is malloc -- i.e. the heap heapcfg.c
-    // already sized.
-    bSlotPoolManagerInit();
+    // The original runs every _GLOBAL_$I$ through __main before main()
+    // does anything of its own; sinit_run() is that walk over the ported
+    // ones. Among them is the SlotPoolManager, _GLOBAL_$I$bNewSlotPool
+    // (0x00240080 -- 0x00240070 beside it is the $D$), which has to be up
+    // before anything can call bNewSlotPool. Its allocator hook is left at
+    // the default, malloc -- i.e. the heap heapcfg.c already sized.
+    sinit_run();
     bSetSlotPoolPrintf(slotPoolLog);
 
     logPrintf("NFSHP2-3DS -- boot flow\n");

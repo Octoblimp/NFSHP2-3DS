@@ -1,20 +1,27 @@
 # Car
 
-The hub of task 25, and deliberately not its physics. Eighty methods,
-22876 bytes of code in `Car.obj` (`0x0012f150 .. 0x00134f6c`) plus six the
-compiler emitted elsewhere, and a 2016-byte record — but the simulation
-itself lives in the movers that `SetMovementMode` constructs. Car owns the
+The hub of task 25, and deliberately not its physics. Eighty methods and
+22876 bytes — seventy-four of them, 20460 bytes, in `Car.obj`
+(`0x0012f150 .. 0x00134f6c`), and six the compiler emitted in other objects
+— and a 2016-byte record. The simulation itself lives in the movers that
+`SetMovementMode` constructs. Car owns the
 state they write into, the lights, the horn, the wipers, the blown tyres
 and the blinking, and it hands everything else off.
 
-Ported in slices. This document covers the record, which is whole, and the
-first code slice: the seventeen methods that reach nothing outside Car,
-CarState and the two world clocks, plus `Car::WorldToCar`, which reaches
-only a CarState method that has been ported since that slice.
+Ported in slices. This document covers the record, which is whole, and
+two code slices. The first is the seventeen methods that reach nothing
+outside Car, CarState and the two world clocks, plus `Car::WorldToCar`,
+which reaches only a CarState method ported since. The second is the
+vtable seam, the nine methods that are pure dispatch through it, three
+fields Car borrows from other classes, the draft, and the object's static
+initialiser. Thirty-two of the eighty methods are ported, 2316 of the
+22876 bytes.
 
-Ported to `3DS Files/source/car.{c,h}` and `3DS Files/source/topology.h`.
-Cross-checked by `tools/car_check.py` — 20 scenarios, 1871 lines, 0
-differing; 82 mutations, 78 caught, 4 equivalent, 0 unexplained.
+Ported to `3DS Files/source/car.{c,h}`, `topology.h`, `vtable.{c,h}`,
+`world.{c,h}`, `collisionbody.h`, `carcontroller.h`, `sound3d.h` and
+`sinit.{c,h}`. Cross-checked by `tools/car_check.py` — 42 scenarios, 3864
+lines, 0 differing; 178 mutations, 169 caught, 9 equivalent, 0 unexplained — and the boot walk by
+`tools/sinit_check.py`, 6 mutations, 6 caught.
 
 ## Car has no vtable
 
@@ -337,32 +344,321 @@ under it. They are not under test here; `carstate_check` owns them. Linking
 the real ones rather than stubbing them is what makes the fixtures mean
 anything.
 
+## What is in the second code slice
+
+Thirteen methods and one static initialiser, on top of a seam:
+
+- **the vtable seam**, `vtable.{c,h}`, which every dispatch goes through;
+- **nine dispatchers** — `Think`, `Drive`, `GetRoute`, `GetRoutePoint`,
+  `GetAmountOutOfBounds`, `UpdateSound`, `IsCollideable`,
+  `IsFacingWrongWay`, `UpdateHeadlightsAndHorn`;
+- **three borrowed fields** — `GetCarSpaceBoundingBox` and
+  `GetLastPenetrationTime` from the `CarCollisionBody`, and
+  `GetTrackedAcceleration` from a `TrackedController`;
+- **the draft**, both overloads of `CalculateDraftFactor`;
+- **`_GLOBAL_$I$fDraftFalloff`** (`0x001347c0`), which builds the draft's
+  Table and Graph and five other tables the rest of Car reads.
+
+Each class the slice reaches into brought only what Car reads of it:
+`CarCollisionBody` and `Timer` in `collisionbody.h`, `TrackedController`
+in `carcontroller.h`, `Sound3d` in its own header, and the front of
+`World` — up to the end of `CarTable` and no further — in `world.{c,h}`.
+
+### The vtable seam
+
+g++ 2.9x makes a virtual call as four instructions, and every dispatcher
+in this slice is exactly those four:
+
+```
+lw   v0, V(obj)       # the vptr, at the class's own offset V
+lh   a0, S(v0)        # entry S: the this-adjustment ...
+lw   v1, S+4(v0)      #          ... and the function
+jalr v1 ; addu a0, obj, a0
+```
+
+A table is an array of eight-byte `{int16 delta, int16 index, fn}`
+entries with entry 0 empty, and a slot is named by its byte offset. The
+vptr is not at offset 0: g++ 2.9x puts it after the data of the first
+class that declares a virtual, so it is at 8 in `CarController`, 556 in
+`CarDriver`, 28 in `Sound3d` and 80 in `CollisionBody`.
+
+The port already kept every vptr as the image's own address, in a
+`uint32_t` at the image's offset. `vtable.c` adds the other half: a
+registry from that address to the port's entries. A call site is then
+written as the image writes it — same slot, same delta added to the same
+pointer — and a harness can install a recording table **at the real
+address** and watch which slot was taken.
+
+`car_test.c` does exactly that. Each class gets two tables: one with delta
+0 and one with a nonzero delta (4 for the AI controller and the AI car
+sound, 8 for `CarDriver`, 12 for `DynamicCollisionBody`), and every fake
+prints the `this` it was handed as `<fixture>+<offset>`. So the transcript
+shows the three things a virtual call can get wrong — the slot, the
+adjustment and the order — and a dispatcher that drops the `addu` prints
+`ctl+0` where the model says `ctl+4`.
+
+The deltas are port data, not the image's: a delta is a distance between
+two bases, and the host's slack moves bases. So each class that installs a
+real table will compute its deltas with `offsetof` rather than copy the
+image's `lh` values.
+
+`vt_slot` never returns NULL. It aborts on a vptr nobody installed, a slot
+that is not a multiple of eight, slot 0, a negative slot, a slot at or
+past the table's count, and an entry with no function — each of which
+means a class the port has not brought over was somehow constructed, a
+port bug rather than a game state. `vt_install` aborts past 96 tables.
+car_check runs every refusal as its own process and requires the abort and
+its message; the full-registry mode also prints how many installs
+succeeded first, so a limit of 95 or 97 shows.
+
+### The static initialiser, run rather than read
+
+Only `fDraftFalloff` is in `.data`. Everything else the initialiser
+touches — the speed-range knees, the Table, three Graphs, the thirteen
+`ObjectPoints`, the `DamageAboveMatrix` and the post-collision yaw profile
+— is zero until it runs.
+
+car_check does not transcribe it. It **runs** `_GLOBAL_$I$fDraftFalloff`
+in `mipsemu`, the Table and Graph constructors included, and prints every
+word left in memory, with each pointer named by the symbol it lands on.
+The Table's multiplier (5.0) is the image's own division, and the Graphs
+alias `vDraftSpeedRange`, `vRoadNoiseSpeedData` and
+`PostCollisionYawControlProfileData` rather than copying them.
+
+Two details that the run showed and a transcription could miss:
+
+- the initialiser never stores an `ObjectPoints` pad lane, so each stays
+  the zero `.bss` gives it — and `DamageAboveMatrix` stores all sixteen
+  words, the last row's `w` = 1 included;
+- the road-noise knees are `0x3fb1c71d` and `0x415e38e4` from `gp-31900`
+  and `gp-31896`, which are `1.388889f` and `13.888889f`: 5 and 50 km/h in
+  metres per second as the image rounded them, not as `5 / 3.6f` rounds.
+
+#### Nothing called it, or the other three
+
+The port had four ported static initialisers — Car's, RigidBody's,
+Wheel's and DriveTarget's — and **nothing ran any of them**. Every Table
+they fill would have been zero the first time the physics looked
+something up. The image never has that problem: `main+0x14` calls
+`__main`, which hands `bCallFunctions` the range after the count word at
+`__CTOR_LIST__` (`0x00314f78`, 109 entries), and `bCallFunctions` walks it
+forwards before `main` does anything of its own.
+
+`sinit.{c,h}` is that walk over the ported entries, in list order —
+`[14]` Car, `[41]` RigidBody, `[44]` Wheel, `[87]` DriveTarget and `[103]`
+the slot-pool manager — and `main.c` calls it where it used to call
+`bSlotPoolManagerInit` alone. `tools/sinit_check.py` holds each call to
+its list index and its symbol, requires the indices to increase, requires
+each function's own source to name the same address, and requires every
+`*_static_init` defined anywhere in the source to be called exactly once.
+Its six mutations are all caught.
+
+The walk also corrected a comment. `main.c` credited the manager to
+`_GLOBAL_$I$` at `0x00240070`; that address is the `$D$` beside it, which
+runs the destructor. The constructor is `_GLOBAL_$I$bNewSlotPool__FiiPCci`
+at `0x00240080`, and it is entry 103 — so on the console the manager is
+built *after* all four physics initialisers, which is where the walk puts
+it. None of the five reads anything another writes, so the order is kept
+because it is the image's, not because a different one would be seen.
+
+### The draft
+
+`CalculateDraftFactor(Car *other)` is what `other`, running ahead, gives
+`c`: zero unless the leader is fast enough, near enough, and has `c`
+inside a cone behind it; otherwise a falloff looked up by distance over a
+speed-scaled cone factor.
+
+It reads two of the speed-range knees *directly* as thresholds —
+`vDraftSpeedRange[1].x` (1.0) as the slowest leader worth drafting, and
+`vDraftSpeedRange[3].y` (60) as the farthest one can be. Both are read
+through the pointer the initialiser filled, and the model asserts the
+`lui`/`addiu` pair that builds it and the two displacements, 8 and 28.
+
+VU order throughout: `vmul.xyz`, `vaddy.x`, `vaddz.x`, so every length and
+dot is `((x + y) + z)`. The distance's root is the FPU's `sqrt.s`; the
+velocity's is `vrsqrt`, read as `1.0f / sqrtf` as the forward acceleration
+reads it. The cone constants are the image's words: `0.95f` (`0x3f733333`)
+and `19.999996f` (`0x419ffffe`) — which is `1 / (1 − 0.95f)` as float32
+arithmetic gives it, not the `20.0f` a person would type. The early-out
+and the cap are both `0.9f` but are two literal-pool words (`gp-32084` and
+`gp-32080`), so they are two `#define`s, and a mutation that moves one
+without the other is caught.
+
+**The slowest-leader test is redundant, and that is why two mutations of
+it are equivalent.** The speed Graph is 0 at every speed up to 1.0 — flat
+from `(0,0)` to `(1,0)`, and `p[0].y` below the first point — so a leader
+that slips past the test divides by zero, the Table clamps the `+inf` to
+its high end, and its last entry is 0: the same 0 the early return gives.
+Moving the threshold down, or making it `<=`, changes nothing a fixture can
+see. Moving it *up*, to `[2].x`, is caught, because a leader at 3 has a
+draft to lose. A third mutation, `f <= 0` for `f < 0`, is equivalent for
+the same reason: at `f == 0` the divisor is zero again.
+
+The sum walks `pCurrentWorld->CarTable`, reloading the world and the count
+every pass, skipping `c`, and testing the early-out after every car. The
+world fixtures are strings — `"CEC"`, `"sA0"` — with `0` a NULL entry the
+loop must never reach, so a loop that fails to stop crashes the harness.
+Two worlds (`"BB"`, `"CB"`) overshoot 0.9 on their last add so only the
+cap brings them back; `"CEC"` passes through 0.85, under the early-out, so
+an early-out at 0.8 stops it one car early and shows. Testing only after
+cars that are not `c` is equivalent: that test sees the sum the previous
+test already let through, or 0 when `c` comes first.
+
+#### A NaN the console cannot produce
+
+Two cars at exactly the same position make the distance 0, and `dot /
+dist` is 0/0. (A leader whose `VelocityMagnitude` is at least 1 but whose
+`Velocity` is zero would do the same to the normalisation; the two should
+agree, but nothing here enforces it.) The EE's FPU has no NaN — its zero
+divide saturates — so on the console the lookups carry on with large
+finite numbers. The port is IEEE, so the NaN reaches `table_get_value`,
+and what happens then is the host's float-to-int conversion: ARM
+saturates a NaN to 0 and the draft comes back NaN, while x86 gives
+`0x80000000` and indexes far outside the table. The sum then turns a NaN
+into the cap, because `sum < 0.9f` fails.
+
+No fixture builds this case, since it would crash the host harness. The
+port is left as the image is. The place to decide it is task 26, which
+owns spawning and so owns whether two cars can ever share a position.
+
+### The dispatchers
+
+Most are the four instructions and nothing else. The ones with something
+to get wrong:
+
+- **`IsFacingWrongWay`** is "not strictly positive": the car's forward
+  axis (`BodyMatrix` row 0, `Car+144` and `+148`) dotted with the route
+  point's direction in the ground plane, and `0 < dot` means right way. A
+  car exactly across the road is facing the wrong way, and so is a NaN.
+- **`UpdateHeadlightsAndHorn`** skips player cars entirely. The request is
+  on, off, on from the stamp. During the *off* phase `lit` is
+  `WantTwoHonksAndOrBlinks == 0` (`sltiu a0,v0,1`), so a single request
+  stays lit straight through the gap and only a double one goes dark;
+  after the second on phase it is simply off. The lights are
+  `(lit && WantToBlink) ? 1 : (ForceHeadlightsOn != 0)`. The horn is
+  edge-driven through the driver — `IsHonking` first, then `Start` or
+  `Stop` only on a change — and **`pCarDriver` is reloaded before the
+  second call**. The `[headlights reload]` fixture swaps the driver inside
+  `IsHonking` to one whose table has a delta of 8, so the reload shows as
+  `driver2+8`. The grid is 288 cases: nine moments across both phase edges
+  and a clock behind the stamp, against both values of each of the five
+  flags.
+- **`IsCollideable`** asks nothing of the body while the car is blinking,
+  and otherwise normalises the body's answer with `sltu s1,zero,v0` — a
+  body that answers 2 or −1 is collideable, and the fixtures include both.
+- **`UpdateSound`** does nothing without a sound, and otherwise calls
+  `Update(1.0f, 0, 1.0f)`: both floats from one `lui 0x3f80`, the short
+  zeroed in the delay slot of the null test.
+- **`Think`** stores the draft factor *before* dispatching, so the
+  controller's `Think` reads this frame's value. The fake prints what it
+  sees.
+
+### The borrowed fields
+
+- **`GetCarSpaceBoundingBox`** is two quadword copies, pad lanes included,
+  min before max. Two fixtures alias an output with the body's own box, so
+  the order shows.
+- **`GetLastPenetrationTime`** returns the one-word `Timer` in `v0`.
+- **`GetTrackedAcceleration`** reads `TrackedController::Acceleration` at
+  +20 only under `REAL_CONTROL`. The load is in the delay slot of a
+  `beql`, annulled when the test fails, so every other mode answers 0
+  **without reading the controller at all**. The fixture gives every mode
+  a controller that would answer, so a read in the wrong mode shows as a
+  number, and then gives every other mode none, so a read crashes.
+
+#### A layout assert that was wrong
+
+`CarCollisionBody`'s assert first said `pCar` was nine slacks past its
+console offset, on the reasoning that `DynamicCollisionBody` was already a
+multiple of eight on the host. It is not: 256 + 9 × 4 = 292, and a
+pointer's alignment rounds it to 296. So `pCar` is ten slacks on, and the
+pointer itself makes the eleventh. The host compile said so; on ARM every
+slack is 0 and both readings agree, which is exactly why only the host
+could find it.
+
+## Five survivors, and all five were fixtures
+
+The slice's first mutation pass left five mutants alive. None was
+equivalent.
+
+- **The reach, as `<=` and as `[3].x`** (150 rather than 60). Past 60,
+  the lookup's argument `dist / (f * g)` is below 1 only if `f * g` passes
+  60, and `g` tops out at 60 — so both mutations look equivalent, since
+  `f` is at most 1. But `f` is at most 1 only in exact arithmetic.
+  `dot / dist` can round above 1, `f` then passes 1, and a leader exactly
+  60 away keeps a sliver of draft (3.7e-6), which `<=` takes away. A leader
+  a few ulps past 60 would get a sliver if the reach were 150. No
+  single-axis fixture can produce this: `sqrtf(a * a)` is `|a|` again when
+  both roundings are correct, so `a * (1 / |a|)` never rounds past 1. That
+  is why the fixtures at 60 and 60.0001, which were all along x, could not.
+  The first two `[draft rounding]` cases are diagonal, found by searching
+  the model.
+- **`len2` and `dot`, regrouped.** In every fixture, each sum rounded the
+  same either way. The other two `[draft rounding]` cases each have three
+  awkward components.
+- **The sum counting `c`.** `c` stood still in every world, and a car below
+  the knee adds exactly 0. `c` now moves at 30, which the sum never reads.
+  A sum that fails to skip `c` drafts from itself at distance 0, which is
+  the NaN above, and on the host that crashes the harness. The crash is
+  the only way to catch it: every self-draft past the knee is that 0/0.
+
+The five equivalents the slice adds:
+
+| Mutation | Why nothing can see it |
+|---|---|
+| `sinit-graph-first` | `graph_init` stores the array's address and count and reads nothing in it |
+| `draft-knee-le` | at speed 1.0 the Graph is 0, the lookup `+inf`, the Table's last entry 0 |
+| `draft-knee-index-0` | the Graph is 0 at every speed up to 1.0: the same `+inf`, the same 0 |
+| `draft-cone-le` | `f == 0` makes the divisor 0: the same `+inf`, the same 0 |
+| `sum-test-inside-if` | the test on `c`'s pass sees the sum the previous test already let through |
+
 ## What is not ported yet
 
-Ten methods wait on a vtable seam. `CarController`, `CarDriver`,
-`CarMover`, `CarDamage` and `CollisionBody` are abstract bases whose
-vtable this port models as a stored word, so a call through one cannot be
-written until that seam exists:
+The measure that matters for planning is whether a method makes a direct
+call — a `jal`, or a `j` out of its own body — to anything that is not a
+Car method. Scanned over all eighty, that splits them 34 and 46.
 
-> `Think`, `Drive`, `GetRoute`, `GetRoutePoint`, `GetAmountOutOfBounds`,
-> `UpdateSound`, `IsCollideable`, `SetToPhysicsMode`,
-> `UpdateHeadlightsAndHorn`, `IsFacingWrongWay`
+Of the **thirty-four that make no outside call**, thirty are ported. The
+other four:
 
-Nine wait on a class that belongs to task 26 or 27: `UpdatePosition` and
-`MaybeCameraShake` on the effect system, `GetCarSpaceBoundingBox` and
-`GetLastPenetrationTime` on `CarCollisionBody`, `GetTrackedAcceleration`
-on a `RealController` field at +20, `SetFrictionBoost` on a `PhysicsCar`
-field at +108, `FixBlownTires` on `RealDriver::ForceEBrakeStop`,
-`CalculateDraftFactor` on `pCurrentWorld`'s car list, and `PutFlatOnTrack`
-with `FindFlatOnTrackPosition` on a real `TopologyCoordinate`.
+- `SetToPhysicsMode` dispatches through the controller, and its other arm
+  tail-calls `SetMovementMode(MELLOW_MOVEMENT)`, whose jump table
+  constructs every mover. It comes with `SetMovementMode` and PhysicsCar.
+- `SetFrictionBoost` stores into `PhysicsCar` at +108 when the car is under
+  `PHYSICS_MOVEMENT`: PhysicsCar's slice.
+- `DoWheelForces` is `if (pPlayer) CalcForceParameters(...)`, and that is
+  force feedback — six `PortSetForceConditionData`, six
+  `PortSetForcePeriodicData`, `PortPlayShake`. It drives the wheel
+  peripheral's motors, not the physics.
+- `PutFlatOnTrack` goes to `FindFlatOnTrackPosition`, which needs a real
+  `TopologyCoordinate` (task 27).
 
-The remaining fifty are the constructor and destructor, the reset and
-damage groups, the render and sound groups, and the two force-feedback
-methods.
+Of the **forty-six that do**, two are ported: `CalculateDraftFactor(Car *)`,
+whose calls are Graph and Table, and `WorldToCar`, whose one is
+`CarState::WorldToCar`. Six more call nothing outside Car that is not
+already ported, and they are the next slice:
+
+| Method | Size | Its outside callee |
+|---|---:|---|
+| `IsCarToLeft`, `IsCarToRight` | 68 + 68 | `CarState::WorldToCar`, ported |
+| `GetRelativeCarPosition` | 220 | `bNormalize2`, ported |
+| `GetPostCollisionYawControlBoost` | 132 | `Graph::GetValue`, ported |
+| `IsDrifting` | 116 | `CarState::GetYaw`, ported |
+| `ComputeFakeRPM` | 576 | `smooth<float>`, a 52-byte template in `Car.obj` |
+
+`IsCarInFront` (124) is one step further: its only callee is `bToPolar`
+(`0x002424a0`), which the math library port has not brought over yet.
+
+Everything else — the constructor and destructor, the reset and damage
+groups, the render and sound groups, force feedback, `SetMovementMode`
+and `SetControlMode` — reaches a class that belongs to tasks 26, 27 or 29,
+or the movers.
 
 One piece of carried debt lands here: `wheel_install_seams()` is defined
 in `wheel.c` and never called. Its home is the `MM_PHYSICS` arm of
-`Car::SetMovementMode`, which is in the vtable-seam slice.
+`Car::SetMovementMode`, which constructs the `PhysicsCar` that owns the
+`Suspension` and the four `Wheel`s. It has to run before that car's first
+`ResolveForces`, or every corner reports airborne.
 
 ## Includes, and the cycle underneath them
 

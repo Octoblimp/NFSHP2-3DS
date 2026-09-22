@@ -2058,7 +2058,7 @@ last of them ends the line.
 
 Nothing calls the allocator yet; tasks 21 onward are its callers. It is live
 in the build rather than dead-stripped: `main.c` builds the manager where
-`_GLOBAL_$I$` (`0x00240070`) builds it at load time, and releases the pools
+`_GLOBAL_$I$` (`0x00240080`) builds it at load time, and releases the pools
 on the way out, which the original does not do -- `~SlotPoolManager` clears
 the sentinel and then walks an already-emptied list, so every pool made
 through the manager is leaked at shutdown by construction.
@@ -4042,3 +4042,145 @@ keep their older pid-less `.mutate-backup` scheme, and the scan skips it.
 never run two passes that mutate the same file at once. `car_check` and
 `drivetarget_check` both mutate `car.h` now, so they run one after the
 other.
+
+## Session 25 (2026-09-22) -- Task 25, Car's second slice, and four initialisers nothing ran
+
+Car's second code slice is closed: the vtable seam, the nine methods that
+are pure dispatch through it, the three fields Car borrows from other
+classes, the draft, and `_GLOBAL_$I$fDraftFalloff`. Fourteen methods, which
+makes thirty-two of Car's eighty and 2316 of its 22876 bytes. 42 scenarios,
+3864 lines, 0 differ; 178 mutations, 169 caught, 9 equivalent, 0 unexplained. Write-up in `docs/formats/car.md`, which
+has the details; what is worth carrying forward is below.
+
+### The vtable seam is a registry keyed by the image's own address
+
+The port has always stored each vptr as the image's address, in a
+`uint32_t` at the image's offset. `vtable.{c,h}` adds the other half: a
+map from that address to the port's `{int16 delta, int16 index, fn}`
+entries. A call site is then the image's four instructions written out --
+`vt_slot(obj->_vtable, S)`, then `vt_this(obj, e)` -- and a harness can
+install a recording table *at the real address* and see which slot was
+taken, with which adjustment, in which order. `car_test.c` gives every
+class a table with delta 0 and one with a nonzero delta, and every fake
+prints its `this` as `<fixture>+<offset>`, so a dispatcher that drops the
+delta shows as `ctl+0` against the model's `ctl+4`.
+
+`vt_slot` never returns NULL: a vptr nobody installed, a misaligned slot,
+slot 0, a negative slot, a slot past the end and an empty entry each abort
+with a message, and `vt_install` aborts past 96 tables. Each refusal runs
+as its own process under `car_check`, message included.
+
+**The deltas in a real table are port data.** A delta is the distance
+between two bases, and the host's slack moves bases, so a class that
+installs a real table computes its deltas with `offsetof` rather than
+copying the image's `lh` values.
+
+### Four static initialisers had been ported and never run
+
+Car's, RigidBody's, Wheel's and DriveTarget's `*_static_init` all existed.
+Nothing called any of them. On hardware the rigid body's two damping
+Tables, the wheel's cornering-force and seven load-sensitivity Tables, the
+draft's Table and Graph, and `DriveTargetMinDistanceToPointSquared` would
+all have been zero the first time the physics read them.
+The image never has the problem: `main+0x14` calls `__main`, which walks
+`__CTOR_LIST__` (`0x00314f78`, 109 entries) forwards before `main` does
+anything of its own.
+
+`sinit.{c,h}` is that walk over the ported entries, in list order --
+`[14]` Car, `[41]` RigidBody, `[44]` Wheel, `[87]` DriveTarget, `[103]` the
+slot-pool manager -- and `main.c` calls `sinit_run()` where it used to call
+`bSlotPoolManagerInit()` alone. `tools/sinit_check.py` reads the calls'
+comments and holds each to its list entry and its symbol, requires the
+indices to increase and each function's own source to cite the same
+address, and fails if any `*_static_init` defined anywhere is not called
+exactly once. Six mutations, six caught -- including one that comments out
+the call in `main.c`, which survived until the check stopped counting
+comments.
+
+**The walk corrected an address.** `main.c`, this file and `TASKS.md` all
+credited the manager to `_GLOBAL_$I$` at `0x00240070`. That is the `$D$`
+beside it. The constructor is `_GLOBAL_$I$bNewSlotPool__FiiPCci` at
+`0x00240080`, entry 103 -- so on the console the manager is built *after*
+the physics tables, and the walk keeps that order. All three citations
+are fixed.
+
+### The static initialiser is run, not transcribed
+
+`car_check` runs `_GLOBAL_$I$fDraftFalloff` in `mipsemu`, the Table and
+Graph constructors included, and diffs every word it leaves against what
+`car_static_init` leaves. The run showed two things a transcription would
+have got wrong: the initialiser never stores an `ObjectPoints` pad lane,
+and the road-noise knees are the image's `1.388889f` and `13.888889f`, not
+what `5 / 3.6f` rounds to.
+
+### The draft: a redundant test, and a NaN the console cannot make
+
+The slowest-leader test (`speed < vDraftSpeedRange[1].x`) is redundant:
+the speed Graph is 0 at every speed up to 1.0, so a leader that slips past
+it divides by zero, the Table clamps `+inf` to its last entry, and that is
+0 -- the early return's answer. Two mutations of the test are equivalent
+for that reason, and `f <= 0` for `f < 0` is a third.
+
+Two cars at exactly the same position make `dot / dist` 0 / 0. The EE's
+FPU has no NaN, so the console carries on with large finite numbers; the
+port is IEEE, and the NaN reaches `table_get_value`'s `(int32_t)` cast --
+0 on ARM, a draft of NaN that the sum then turns into the cap, and
+`0x80000000` on x86, an index far outside the table. No fixture builds it.
+Whether two cars can ever share a position is task 26's question, because
+task 26 owns spawning.
+
+### Five survivors, all of them fixtures
+
+The first pass left five mutants alive, and none of them was equivalent:
+
+- **The reach, as `<=` and as 150.** The draft past 60 looks as if it is
+  always 0, because `f * g` is at most 60. That holds only in exact
+  arithmetic: `dot / dist` can round above 1, and then a leader exactly 60
+  away keeps 3.7e-6 of draft. No single-axis fixture can produce that,
+  since `sqrtf(a * a)` is `|a|` again when both roundings are correct --
+  which is why the existing fixtures at 60 and 60.0001, all along x, never
+  could. The two diagonal cases were found by searching the model.
+- **`len2` and `dot`, regrouped.** Every fixture's sums rounded the same
+  under either grouping. There is now one case with three awkward
+  components for each.
+- **The sum counting `c`.** `c` stood still in every world, and a car
+  below the knee adds exactly 0. It moves at 30 now, which the sum never
+  reads. A sum that counts `c` drafts from itself -- 0 / 0 -- and crashes
+  the host harness. That crash is the only way to catch it.
+
+**A fixture at a boundary is not a boundary test until you check that the
+boundary can be reached from it.** The 60 and 60.0001 fixtures were right
+at the reach, and still could not see the reach.
+
+### A layout assert only the host could see was wrong
+
+`CarCollisionBody`'s assert put `pCar` nine slacks past the console
+offset, on the reasoning that `DynamicCollisionBody` was already a multiple
+of eight on the host. It is 292, and a pointer's alignment rounds it to
+296, so the right count is ten. On ARM every slack is 0, and both readings
+agree there.
+
+### The 34/46 split, remeasured
+
+It is over all eighty, and seventy-four of the eighty are in `Car.obj`;
+the other six (`WorldToCar` and `PrintAbove` among them) were emitted in
+other objects. A rescan for any `jal`, or `j` out of the body, to a non-Car
+symbol gives the same 34 and 46, with `WorldToCar` in the 46. So thirty of
+the thirty-four are ported and two of the forty-six. `car.c`'s closing
+note had called `WorldToCar` "outside the eighty"; it is fixed.
+
+### Where the next slice starts
+
+Six methods whose outside callees are all ported: `IsCarToLeft` and
+`IsCarToRight` (`CarState::WorldToCar`), `GetRelativeCarPosition`
+(`bNormalize2`), `GetPostCollisionYawControlBoost` (`Graph::GetValue`),
+`IsDrifting` (`CarState::GetYaw`) and `ComputeFakeRPM` (`smooth<float>`, a
+52-byte template inside `Car.obj`). With them comes `IsCarInFront`, whose
+one callee `bToPolar` (`0x002424a0`) the math library has not ported yet.
+Then `SetMovementMode` / `SetControlMode` with `PhysicsCar`, which carries
+`SetToPhysicsMode`, `SetFrictionBoost` and the `wheel_install_seams()`
+call.
+
+36.7 KB across 108 functions left in task 25: the rest of `Car` (48 /
+20560), `PhysicsCar` (16 / 8496), `Mellovator` (31 / 5420), `MellowMover`
+(13 / 3096).

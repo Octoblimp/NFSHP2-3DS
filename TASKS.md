@@ -623,7 +623,7 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
         an expansion chain when a pool runs dry, and a manager holding every
         pool on bWare's intrusive `bTList` so the lot can be printed.
         `main.c` builds the manager explicitly where `_GLOBAL_$I$`
-        (`0x00240070`) builds it at load time, and points the `bPrintf` hook
+        (`0x00240080`) builds it at load time, and points the `bPrintf` hook
         at the debug log through a line buffer, because a
         `PrintAllSlotPools` row arrives in up to six separate calls and only
         the last ends the line. The allocator hook is left at its default,
@@ -1296,13 +1296,61 @@ is citro3d and owns the top.
         on the wrong record. Every remaining class in this task has
         `bVector4` fields in it.
 
-        That leaves **38.0 KB across 122 functions** still to go: the
-        rest of `Car` (62 methods, 21912 B -- the eighteen ported are only
-        964 B, because the cheap ones went first), then `PhysicsCar`
+        **Car's second code slice is closed: the vtable seam, and
+        fourteen more methods.** `vtable.{c,h}` is a registry from the
+        image's own vtable address to the port's `{delta, index, fn}`
+        entries, so a call site is written the way the image writes it --
+        same slot, same delta -- and a harness can install a recording
+        table at the real address. `vt_slot` aborts rather than return
+        NULL, on six distinct refusals, and `car_check` runs each one as
+        its own process. On top of it: the nine dispatchers,
+        `GetCarSpaceBoundingBox`, `GetLastPenetrationTime` and
+        `GetTrackedAcceleration`, both `CalculateDraftFactor`s, and
+        `_GLOBAL_$I$fDraftFalloff`, which `car_check` runs in `mipsemu`
+        and diffs word for word. 42 scenarios, 3864 lines, 0 differ;
+        178 mutations, 169 caught, 9 equivalent, 0 unexplained. Written up in `docs/formats/car.md`.
+
+        **Four ported static initialisers had never run.** Car's,
+        RigidBody's, Wheel's and DriveTarget's `*_static_init` existed and
+        nothing called them, so every Table and Graph they fill would have
+        been zero on hardware. `sinit.{c,h}` is the image's `__main` walk
+        over `__CTOR_LIST__` (`0x00314f78`, 109 entries), restricted to the
+        ported entries and kept in list order, and `main.c` calls it first
+        thing. `tools/sinit_check.py` holds each call to its list index
+        and its symbol, and fails if any `*_static_init` in the source is
+        not called exactly once: 6 mutations, 6 caught. The same walk
+        showed that the slot-pool manager's constructor is `0x00240080`;
+        the `0x00240070` this file and HANDOFF cited is the `$D$` beside
+        it.
+
+        **Five survivors, and all five were fixtures.** The draft's reach
+        can be seen only through a rounding: `dot / dist` has to come out
+        above 1. No single-axis fixture can produce that, because
+        `sqrtf(a * a)` is `|a|`, so two diagonal cases were found by
+        searching the model. Two more separate the groupings of the
+        velocity's length and of the dot. The sum's self-skip is caught
+        now that `c` moves, because a sum that counts `c` drafts from
+        itself: 0 / 0.
+
+        **The 34/46 split is over all eighty, and `WorldToCar` is in the
+        46.** Rescanned for any `jal`, or `j` out of the body, to a
+        non-Car symbol. Thirty of the thirty-four are ported, and two of
+        the forty-six: `CalculateDraftFactor(Car *)` and `WorldToCar`.
+        That is thirty-two of the eighty, 2316 of 22876 bytes. Seventy-four
+        of the eighty are in `Car.obj`; the other six, `WorldToCar` and
+        `PrintAbove` among them, were emitted in other objects.
+
+        That leaves **36.7 KB across 108 functions** still to go: the
+        rest of `Car` (48 methods, 20560 B), then `PhysicsCar`
         (16 / 8496), `Mellovator` (31 / 5420) and `MellowMover`
-        (13 / 3096). The next slice is the vtable seam plus
-        `SetMovementMode`'s jump table, which unblocks ten methods at
-        once and carries `wheel_install_seams()` home.
+        (13 / 3096). The next Car slice is six methods whose outside
+        callees are all ported -- `IsCarToLeft`, `IsCarToRight`,
+        `GetRelativeCarPosition`, `GetPostCollisionYawControlBoost`,
+        `IsDrifting`, and `ComputeFakeRPM` with its `smooth<float>` --
+        plus `IsCarInFront`, which brings `bToPolar` with it. After that
+        come `SetMovementMode` / `SetControlMode` with `PhysicsCar`, and
+        with them `SetToPhysicsMode`, `SetFrictionBoost` and the
+        `wheel_install_seams()` call.
 26. [ ] Race/event logic, cop AI, pursuit (roadblocks, spike strips) --
         `HotPursuitEvent` already seen in the `.mdebug` strings survey
 27. [ ] Track rendering/streaming, collision. Carries a debt from task 24:

@@ -1,6 +1,6 @@
 # CONTINUE
 
-Where the next session picks up. Written at the end of Session 24
+Where the next session picks up. Written at the end of Session 25
 (2026-09-22). `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
@@ -16,10 +16,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Twenty-six cross-checkers pass, plus the table generators:
+Twenty-seven cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/sinit_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
 ```
 
 ```
@@ -48,7 +48,8 @@ wheel_check        19 scenarios, 10693 lines, 0 differ   (144 caught, 10 equival
 drivetrain_check   18 scenarios,   492 lines, 0 differ   (173 caught, 3 equivalent)
 drivetarget_check  22 scenarios,   821 lines, 0 differ   (239 caught, 20 equivalent)
 graph_check        16 scenarios,   151 lines, 0 differ   (21 caught, 4 equivalent)
-car_check          20 scenarios,  1871 lines, 0 differ   (78 caught, 4 equivalent)
+car_check          42 scenarios,  3864 lines, 0 differ   (169 caught, 9 equivalent)
+sinit_check         5 calls,        0 problems           (6/6 mutations caught)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 ```
@@ -91,28 +92,55 @@ and so replaced every boot.
 ## Next, in order
 
 1. **Task 25**, the car simulation -- part done, and **much bigger than
-   the task list said**. Twelve slices are closed: `CarState`, `Engine` +
-   `Table`, `CarTypeInfo`, `CarDriver` + `DriveTarget`'s layout,
+   the task list said**. Thirteen slices are closed: `CarState`, `Engine`
+   + `Table`, `CarTypeInfo`, `CarDriver` + `DriveTarget`'s layout,
    `Steering` + `TwoWheelAckermanSteering`, `RigidBody`, `Suspension`,
    `Wheel`, `DriveTrain`, `DriveTarget`'s methods, `Graph`, and **`Car`'s
-   record plus its first code slice**, each with a checker and a doc under
+   record plus two code slices**, each with a checker and a doc under
    `docs/formats/car-*.md` (`RigidBody`'s is `rigid-body.md`, `Car`'s is
    `car.md`).
 
    The old "178 functions, 16680 bytes" note was wrong by an order of
    magnitude -- it matched a narrow symbol pattern and missed most
    methods. Remeasured by demangling every symbol to its owning class,
-   task 25 was ~39.9 KB across 140 functions. Eighteen Car methods are
-   ported, so **38.0 KB across 122 functions** is still to go:
+   task 25 was ~39.9 KB across 140 functions. Thirty-two Car methods are
+   ported, so **36.7 KB across 108 functions** is still to go:
 
    ```
-   Car 62 funcs 21912 B   PhysicsCar 16 / 8496
+   Car 48 funcs 20560 B   PhysicsCar 16 / 8496
    Mellovator 31 / 5420   MellowMover 13 / 3096
    ```
 
-   The eighteen are only 964 B of the 22876 -- the cheap ones went
+   The thirty-two are 2316 B of the 22876 -- the cheap ones went
    first, and the expensive half of Car is the constructor, the reset
    and damage groups and the render path.
+
+   **Car's second code slice is closed** -- the vtable seam
+   (`vtable.{c,h}`), the nine dispatchers, the three borrowed fields,
+   both `CalculateDraftFactor`s and `_GLOBAL_$I$fDraftFalloff`. 42
+   scenarios, 3864 lines, 0 differing; 178 mutations, 169 caught, 9 equivalent, 0 unexplained. Read the second half of
+   `docs/formats/car.md` before the next slice, and in particular:
+
+   - **Virtual calls go through `vt_slot` / `vt_this`**, keyed by the
+     image's own vtable address. A class that installs a real table
+     computes its deltas with `offsetof`: the host's slack moves bases.
+   - **Static initialisers run from `sinit_run()`**, which `main.c`
+     calls first thing, in `__CTOR_LIST__` order. A new `*_static_init`
+     that is not added there fails `sinit_check`. Four had been ported
+     and never run before this.
+   - **A boundary fixture is not a boundary test until the boundary can
+     be reached from it.** The draft's reach at 60 is visible only
+     through `dot / dist` rounding above 1, which no single-axis fixture
+     can produce.
+
+   **Next Car slice: six methods whose outside callees are all ported**
+   -- `IsCarToLeft`, `IsCarToRight`, `GetRelativeCarPosition`,
+   `GetPostCollisionYawControlBoost`, `IsDrifting`, and `ComputeFakeRPM`
+   with the 52-byte `smooth<float>` template -- plus `IsCarInFront`,
+   which brings `bToPolar` (`0x002424a0`) into the math library. Then
+   `SetMovementMode` / `SetControlMode` with `PhysicsCar`, which carries
+   `SetToPhysicsMode`, `SetFrictionBoost` and the `wheel_install_seams()`
+   call.
 
    At this repo's verification standard that is several sessions, not
    one. Next in order: the rest of `Car`, then `PhysicsCar`, with
@@ -128,12 +156,10 @@ and so replaced every boot.
    128-pointer table would have made a blob agree with the wrong number on
    the host.
 
-   Eighteen methods are ported: the three retail stubs, the blinking, the
-   debug checksum, the two wheel aggregates, the two effect gates, the
-   forward acceleration, the horn request, the wiper window, the
-   borrowed steering angle and the eight-byte `WorldToCar` forwarder. 20
-   scenarios, 1871 lines, 0 differing; 82 mutations, 78 caught, 4
-   equivalent, 0 unexplained.
+   The first slice's eighteen are the three retail stubs, the blinking,
+   the debug checksum, the two wheel aggregates, the two effect gates,
+   the forward acceleration, the horn request, the wiper window, the
+   borrowed steering angle and the eight-byte `WorldToCar` forwarder.
 
    Read `docs/formats/car.md` before the next slice. Three things in it
    cost time to find: `GetWheelTraction` pairs the **diagonals**, not the
@@ -192,24 +218,21 @@ and so replaced every boot.
    belongs to the `CarDriver` / `CarMover` / `CarController` abstract
    bases that share the object.
 
-   **Thirty-four of the eighty make no call outside the class, and that
-   splits three ways: 17 + 10 + 7.** Seventeen are ported. Ten are pure
-   dispatch -- load `pCarController` (offset 40) or `pCarDriver` (44),
-   read the (delta, fn) pair out of the vtable, jump -- and wait on the
-   vtable seam. Seven call only other Car methods, but those callees
-   reach a task 26/27 class, which is why "makes no call outside the
-   class" is not the same as "can be written today". The partition is
-   spelled out at the bottom of `car.c`; the arithmetic closing is what
-   checks it is a partition and not three overlapping lists.
+   **Thirty-four of the eighty make no call outside the class, and thirty
+   of them are ported.** The other four are `SetToPhysicsMode` and
+   `SetFrictionBoost` (both PhysicsCar's), `DoWheelForces` (force
+   feedback) and `PutFlatOnTrack` (a real `TopologyCoordinate`, task 27).
+   The split is over all eighty, and seventy-four of those are in
+   `Car.obj`; `WorldToCar` is one of the six emitted elsewhere, and it is
+   in the forty-six because its `j` leaves the class. Two of the forty-six
+   are ported. The partition is spelled out at the bottom of `car.c`.
 
    The other forty-six reach about a dozen subsystems belonging to tasks
    26, 27 and 29: replay, cop manager, the effect system, force feedback,
    sound, topology, collision, render info, damage, `Player` and `Race`,
    and eleven driver/mover classes that `SetControlMode` and
-   `SetMovementMode` construct between them. **Next slice: the vtable
-   seam and the `SetMovementMode` jump table**, which together unblock
-   the ten and carry `wheel_install_seams()` home. The reconnaissance is
-   in `HANDOFF.md`'s Session 24 entry.
+   `SetMovementMode` construct between them. The next slice is named
+   above; `HANDOFF.md`'s Session 25 entry has the scan behind it.
 
    Two `DriveTarget` methods are blocked, and always were two rather than
    the three this file used to list: `DoSnapshot` on `ReplaySnapshot`, and

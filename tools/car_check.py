@@ -71,15 +71,18 @@ import hostbuild
 import bmath_check
 import bvector_check
 import carstate_check
+import engine_check as EN
+import graph_check as GR
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
 
-# car.c's only call out of the class is Car::WorldToCar's tail call into
-# CarState, so the CarState slice and the four files under it come along.
-# They are not under test here -- carstate_check owns them -- but linking the
-# real ones rather than stubbing them is what makes the forwarder's fixtures
-# mean anything.
+# Slice one's only call out of the class is Car::WorldToCar's tail call
+# into CarState, so the CarState slice and the four files under it come
+# along. Slice two adds the registry, the World pointer, and the Graph and
+# Table the draft looks its answer up in. None of those is under test here
+# -- each has its own checker -- but linking the real ones rather than
+# stubbing them is what makes the fixtures mean anything.
 SOURCES = [
     "tools/src/car_test.c",
     "3DS Files/source/car.c",
@@ -89,11 +92,22 @@ SOURCES = [
     "3DS Files/source/bmathtab.c",
     "3DS Files/source/bmatrix.c",
     "3DS Files/source/emath.c",
+    "3DS Files/source/vtable.c",
+    "3DS Files/source/world.c",
+    "3DS Files/source/graph.c",
+    "3DS Files/source/table.c",
 ]
 
 CH = "3DS Files/source/car.h"
 CC = "3DS Files/source/car.c"
 TH = "3DS Files/source/topology.h"
+CTL = "3DS Files/source/carcontroller.h"
+CD = "3DS Files/source/cardriver.h"
+CB = "3DS Files/source/collisionbody.h"
+S3 = "3DS Files/source/sound3d.h"
+WH = "3DS Files/source/world.h"
+VTC = "3DS Files/source/vtable.c"
+VTH = "3DS Files/source/vtable.h"
 
 PTR = 8                       # the host, not the port
 SLACK = PTR - 4
@@ -104,6 +118,7 @@ fadd = bvector_check.fadd
 fsub = bvector_check.fsub
 fmul = bvector_check.fmul
 fdiv = bvector_check.fdiv
+fsqrt = bvector_check.fsqrt
 
 HARNESS_TIMEOUT = 300
 HARNESS_HUNG = -9999
@@ -623,7 +638,626 @@ def model():
     for bam in (0, 1, 16384, 32767, 32768, 49152, 65535, 12345):
         emit("  bam %-8d -> %d" % (bam, bam))
 
+    model_slice2()
     return list(OUT)
+
+
+# ================================================================ slice two
+#
+# Everything below reads the image three ways: gp-relative constants by
+# word, instruction immediates by decoding the instruction at a listed
+# address, and the static tables by *running* _GLOBAL_$I$fDraftFalloff in
+# mipsemu -- constructors and all -- and reading back what it left in
+# memory. None of it comes from car.c or car.h.
+
+def insn(addr):
+    return struct.unpack("<I", bmath_check.ELF.read(addr, 4))[0]
+
+
+def imm(addr, op):
+    """The signed 16-bit immediate of the instruction at `addr`, which must
+    have major opcode `op` -- so a listing address that drifts onto the
+    wrong instruction fails here rather than reading some other offset."""
+    w = insn(addr)
+    assert w >> 26 == op, (hex(addr), hex(w), op)
+    v = w & 0xffff
+    return v - 0x10000 if v & 0x8000 else v
+
+
+OP_ADDIU, OP_LUI, OP_LH, OP_LW, OP_LWC1 = 0x09, 0x0f, 0x21, 0x23, 0x31
+
+
+def slot_at(lh_addr):
+    """A dispatch's slot: the `lh a0,S(vt)` of the delta, with the `lw` of
+    the function at the next instruction reading S+4."""
+    s = imm(lh_addr, OP_LH)
+    assert imm(lh_addr + 4, OP_LW) == s + 4, hex(lh_addr)
+    return s
+
+
+# The slots, each from its call site.
+SLOT_THINK = slot_at(0x001301ac)          # Think__3Carf
+SLOT_ROUTE = slot_at(0x00131750)          # GetRoute__3Car
+SLOT_ROUTE_POINT = slot_at(0x00131780)    # GetRoutePoint__3Car
+SLOT_OOB = slot_at(0x001317b0)            # GetAmountOutOfBounds__3Car
+SLOT_PHYSICS = slot_at(0x0012ff80)        # SetToPhysicsMode__3CarP3Car
+SLOT_DRIVE = slot_at(0x001301e0)          # Drive__3Carf
+SLOT_START_HONK = slot_at(0x00132654)     # UpdateHeadlightsAndHorn
+SLOT_STOP_HONK = slot_at(0x00132690)
+SLOT_IS_HONKING = slot_at(0x00132634)
+assert slot_at(0x00132670) == SLOT_IS_HONKING
+SLOT_SOUND_UPDATE = slot_at(0x001334a0)   # UpdateSound__3Car
+SLOT_COLLISIONS = slot_at(0x001316cc)     # IsCollideable__3Car
+
+# The vptr offsets the same sites load, and the object offsets in Car.
+assert imm(0x001301a8, OP_LW) == 8        # CarController
+assert imm(0x001301dc, OP_LW) == 556      # CarDriver
+assert imm(0x00133494, OP_LW) == 28       # Sound3d, inside BaseCarSound
+assert imm(0x001316c8, OP_LW) == 80       # CollisionBody
+assert imm(0x0013019c, OP_LW) == 40       # Car::pCarController
+assert imm(0x001301d8, OP_LW) == 44       # Car::pCarDriver
+assert imm(0x00133488, OP_LW) == 1952     # Car::pBaseCarSound
+assert imm(0x001316c4, OP_LW) == 52       # Car::pDynamicCollisionBody
+assert imm(0x001301a4, 0x39) == 1096      # swc1 -> Car::DraftFactor
+
+# The draft's constants.
+DRAFT_COS_W = gpword(-32092)
+DRAFT_SCALE_W = gpword(-32088)
+DRAFT_EARLY_W = gpword(-32084)
+DRAFT_CAP_W = gpword(-32080)
+assert imm(0x00130040, OP_LWC1) == -32092
+assert imm(0x00130048, OP_LWC1) == -32088
+assert imm(0x00130110, OP_LWC1) == -32084
+assert imm(0x00130158, OP_LWC1) == -32080
+assert (DRAFT_COS_W, DRAFT_SCALE_W, DRAFT_EARLY_W, DRAFT_CAP_W) == (
+    0x3f733333, 0x419ffffe, 0x3f666666, 0x3f666666)
+DRAFT_COS = bits(DRAFT_COS_W)
+DRAFT_SCALE = bits(DRAFT_SCALE_W)
+DRAFT_EARLY = bits(DRAFT_EARLY_W)
+DRAFT_CAP = bits(DRAFT_CAP_W)
+
+# UpdateHeadlightsAndHorn's copy of the tick, the third one.
+assert imm(0x0013258c, OP_LWC1) == -31988
+assert gpword(-31988) == TICK_A
+
+# GetTrackedAcceleration: `addiu v1,zero,1` is REAL_CONTROL, and the
+# `lwc1 $f0,20(v0)` is TrackedController::Acceleration.
+TRACKED_MODE = imm(0x0012ff44, OP_ADDIU)
+assert imm(0x0012ff60, OP_LWC1) == 20
+
+# UpdateSound's two floats are one `lui 0x3f80`.
+SOUND_ARG = bits(imm(0x00133498, OP_LUI) << 16)
+
+SYM = bmath_check.ELF.syms
+
+
+def sym(name):
+    return SYM[name][0]
+
+
+def sym_at(addr):
+    names = sorted(k for k, v in SYM.items() if v[0] == addr
+                   and not k.startswith("_GLOBAL_"))
+    return names[0] if names else "?"
+
+
+# ------------------------------------------------ the static initialiser
+
+STATIC = (
+    ("vDraftSpeedRange", 32), ("tDraftFalloff", 20),
+    ("gDraftSpeedRange", 8), ("vRoadNoiseSpeedData", 16),
+    ("gRoadNoiseSpeedScale", 8), ("ObjectPoints", 13 * 16),
+    ("DamageAboveMatrix", 64), ("PostCollisionYawControlProfileData", 32),
+    ("PostCollisionYawControlProfile", 8),
+)
+
+
+def run_static_init():
+    import mipsemu
+    e = mipsemu.Emu()
+    before = sum(1 for name, n in STATIC
+                 for b in e.mem[sym(name):sym(name) + n] if b)
+    e.call("_GLOBAL_$I$fDraftFalloff")
+
+    def w(a):
+        return struct.unpack_from("<I", e.mem, a)[0]
+
+    return e, w, before
+
+
+def f32w(w):
+    return bits(w)
+
+
+# --------------------------------------------------------------- the draft
+
+def fdivz(a, b):
+    """div.s as IEEE has it, which Python's `/` does not: a zero divisor
+    gives a signed infinity, or a NaN over a zero or NaN numerator."""
+    if b == 0.0:
+        if a == 0.0 or a != a:
+            return float("nan")
+        return math.copysign(float("inf"), a) * math.copysign(1.0, b)
+    return fdiv(a, b)
+
+
+class Draft(object):
+    """The four knees, the falloff Table and the speed Graph, as the
+    initialiser left them."""
+
+    def __init__(self, w):
+        base = sym("vDraftSpeedRange")
+        # `lui v0,0x002f; addiu v0,v0,-31552` is vDraftSpeedRange, and the
+        # two thresholds are read at +8 and +28 of it.
+        assert (0x002f << 16) + imm(0x0012ffd4, OP_ADDIU) == base
+        assert imm(0x0012ffe4, OP_LWC1) == 8
+        assert imm(0x00130028, OP_LWC1) == 28
+        self.knee = f32w(w(base + 8))
+        self.cap = f32w(w(base + 28))
+
+        g = sym("gDraftSpeedRange")
+        assert GP + imm(0x001300bc, OP_ADDIU) == g
+        pts = w(g)
+        self.n = w(g + 4)
+        self.points = [(f32w(w(pts + 8 * i)), f32w(w(pts + 8 * i + 4)))
+                       for i in range(self.n)]
+
+        t = sym("tDraftFalloff")
+        assert (0x002f << 16) + imm(0x001300d0, OP_ADDIU) == t
+        self.table = EN.Table()
+        n = w(t + 4)
+        self.table.entries = [f32w(w(w(t) + 4 * i)) for i in range(n)]
+        self.table.n = n
+        self.table.lo = f32w(w(t + 8))
+        self.table.hi = f32w(w(t + 12))
+        self.table.mult = f32w(w(t + 16))
+
+
+def draft_from(D, me, other):
+    """0x0012ffc8. `me` and `other` are (pos, vel, speed) triples."""
+    pos0, _, _ = me
+    pos1, vel, speed = other
+
+    # c.lt.s speed, knee -> bc1t out
+    if speed < D.knee:
+        return 0.0
+
+    # vsub other - c; vmul.xyz; vaddy.x; vaddz.x; sqrt.s
+    d = [fsub(pos1[i], pos0[i]) for i in range(3)]
+    len2 = fadd(fadd(fmul(d[0], d[0]), fmul(d[1], d[1])), fmul(d[2], d[2]))
+    dist = fsqrt(len2)
+
+    # c.lt.s cap, dist -> bc1t out
+    if D.cap < dist:
+        return 0.0
+
+    # vmul.xyz; vaddy.x; vaddz.x; vrsqrt Q = 1 / sqrt; vmulx.xyzw
+    v2 = fadd(fadd(fmul(vel[0], vel[0]), fmul(vel[1], vel[1])),
+              fmul(vel[2], vel[2]))
+    q = fdivz(1.0, fsqrt(v2))
+    nv = [fmul(vel[i], q) for i in range(3)]
+
+    dot = fadd(fadd(fmul(d[0], nv[0]), fmul(d[1], nv[1])), fmul(d[2], nv[2]))
+
+    # div.s; sub.s; mul.s; c.lt.s f, 0 -> bc1f on
+    f = fmul(fsub(fdivz(dot, dist), DRAFT_COS), DRAFT_SCALE)
+    if f < 0.0:
+        return 0.0
+
+    g = GR.graph_get_value(D.points, D.n, speed)
+    return EN.table_get_value(D.table, fdivz(dist, fmul(f, g)))
+
+
+def draft_sum(D, me, table, n):
+    """0x001300f0. `table` holds cars, `"self"` or None; None is a car the
+    loop must not reach."""
+    s = 0.0
+    i = 0
+    while i < n:
+        o = table[i]
+        if o != "self":
+            assert o is not None, "the loop read a null CarTable entry"
+            s = fadd(s, draft_from(D, me, o))
+        # c.le.s early, sum -> bc1f loop
+        if DRAFT_EARLY <= s:
+            break
+        i += 1
+    # min.s
+    return s if s < DRAFT_CAP else DRAFT_CAP
+
+
+def gx(x):
+    return "%08x" % struct.unpack("<I", struct.pack("<f", x))[0]
+
+
+# The fakes' own table deltas, chosen by the harness: each class that gets
+# a table gets one entry with delta 0 and one with a nonzero delta, so the
+# transcript shows the adjustment being applied.
+DELTA = {
+    "_vt$14RealController": 0, "_vt$15AICarController": 4,
+    "_vt$10NullDriver": 0, "_vt$9CarDriver": 8,
+    "_vt$12BaseCarSound": 0, "_vt$14BaseAICarSound": 4,
+    "_vt$16CarCollisionBody": 0, "_vt$20DynamicCollisionBody": 12,
+}
+
+ABORT_MODES = (
+    ("vt-missing", "vt_slot: no entry at +8 of the vtable at 0x00123450"),
+    ("vt-reset", "vt_slot: no entry at +8 of the vtable at 0x00123450"),
+    ("vt-misaligned", "vt_slot: no entry at +12 of the vtable at 0x00123450"),
+    ("vt-slot-zero", "vt_slot: no entry at +0 of the vtable at 0x00123450"),
+    ("vt-negative", "vt_slot: no entry at +-8 of the vtable at 0x00123450"),
+    ("vt-past-end", "vt_slot: no entry at +40 of the vtable at 0x00123450"),
+    ("vt-null-fn", "vt_slot: no entry at +16 of the vtable at 0x00123450"),
+    ("vt-full", "vt_install: more than 96 vtables [96 installed]"),
+)
+
+
+def model_slice2():
+    def at(n, k):
+        return n + k * SLACK
+
+    def rnd(n):
+        return (n + PTR - 1) // PTR * PTR
+
+    def p(tag, v):
+        emit("  %-28s %d" % (tag, v))
+
+    # -- layout 2 -----------------------------------------------------------
+    emit("[layout 2]")
+    p("sizeof CarController", rnd(at(12, 2)))
+    p("off CarController Driver", at(4, 1))
+    p("off CarController vptr", at(8, 2))
+    p("off Tracked RoutePoint", at(12, 3))
+    p("off Tracked Acceleration", at(20, 4))
+    p("off Tracked PrevSpeed", at(24, 4))
+    p("off CarDriver vptr", 556)
+    p("sizeof Sound3d", 32)
+    p("off Sound3d vptr", 28)
+    p("sizeof CollisionBody", rnd(at(84, 4)))
+    p("off CollisionBody vptr", at(80, 4))
+    p("sizeof DynamicCollisionBody", rnd(at(256, 9)))
+    p("off Dynamic PhysicsMode", at(84, 5))
+    # lqc2 vf1,224(v0) and lqc2 vf2,240(v0) in GetCarSpaceBoundingBox.
+    assert imm(0x001334c4, 0x36) == 224 and imm(0x001334cc, 0x36) == 240
+    p("off Dynamic LocalBBMin", at(224, 9))
+    p("off Dynamic LocalBBMax", at(240, 9))
+    # DynamicCollisionBody rounds up to a pointer before pCar.
+    base = rnd(at(256, 9))
+    p("sizeof CarCollisionBody", rnd(base + (336 - 256) + 4 * 0 + SLACK))
+    p("off CarBody pCar", base)
+    # lw v0,260(v1) in GetLastPenetrationTime.
+    assert imm(0x001334e8, OP_LW) == 260
+    p("off CarBody LastPenetration", base + PTR)
+    p("off CarBody LastYawControl", base + PTR + 4)
+    p("off CarBody InertiaTensor", base + PTR + 12)
+    p("sizeof Timer", 4)
+    # lw v0,28(v1) and lw a1,44(v0) in CalculateDraftFactor__3Car.
+    assert imm(0x0013011c, OP_LW) == 28 and imm(0x00130130, OP_LW) == 44
+    p("off World TotalNumCars", at(28, 7))
+    p("off World CarTable", at(44, 7))
+    p("world max cars", (100 - 44) // 4)
+    # lwc1 $f3,12(v1) in IsFacingWrongWay.
+    assert imm(0x001318e4, OP_LWC1) == 12
+    p("off TRP Direction", 12)
+    # Car+144 is State (64) + BodyMatrix; Car+960 is State + the speed.
+    assert imm(0x001318d8, OP_LWC1) == 144
+    assert imm(0x0012ffe0, OP_LWC1) == 960
+    p("off CarState BodyMatrix", at(144 - 64, 2))
+    p("off CarState VelocityMag", at(960 - 64, 2))
+
+    for tag, name in (
+            ("vt CarController", "_vt$13CarController"),
+            ("vt NullController", "_vt$14NullController"),
+            ("vt AICarController", "_vt$15AICarController"),
+            ("vt RealController", "_vt$14RealController"),
+            ("vt CarDriver", "_vt$9CarDriver"),
+            ("vt NullDriver", "_vt$10NullDriver"),
+            ("vt BaseCarSound", "_vt$12BaseCarSound"),
+            ("vt BasePlayerCarSound", "_vt$18BasePlayerCarSound"),
+            ("vt BaseAICarSound", "_vt$14BaseAICarSound"),
+            ("vt CollisionBody", "_vt$13CollisionBody"),
+            ("vt DynamicCollisionBody", "_vt$20DynamicCollisionBody"),
+            ("vt CarCollisionBody", "_vt$16CarCollisionBody")):
+        emit("  %-28s %08x" % (tag, sym(name)))
+
+    p("slot Think", SLOT_THINK)
+    p("slot GetCurrentRoute", SLOT_ROUTE)
+    p("slot GetCurrentRoutePoint", SLOT_ROUTE_POINT)
+    p("slot GetAmountOutOfBounds", SLOT_OOB)
+    p("slot SetToPhysicsMode", SLOT_PHYSICS)
+    p("slot Drive", SLOT_DRIVE)
+    p("slot StartHonkHorn", SLOT_START_HONK)
+    p("slot StopHonkHorn", SLOT_STOP_HONK)
+    p("slot IsHonking", SLOT_IS_HONKING)
+    p("slot Sound3d Update", SLOT_SOUND_UPDATE)
+    p("slot AreCollisionsEnabled", SLOT_COLLISIONS)
+    p("vt slot 104", 104 // 8)
+
+    # -- static init --------------------------------------------------------
+    e, w, before = run_static_init()
+    emit("[static init]")
+    p("nonzero before init", before)
+
+    fd = sym("fDraftFalloff")
+    for i in range(6):
+        emit("  fDraftFalloff[%d] %08x" % (i, w(fd + 4 * i)))
+    vr = sym("vDraftSpeedRange")
+    for i in range(4):
+        emit("  vDraftSpeedRange[%d] %08x %08x"
+             % (i, w(vr + 8 * i), w(vr + 8 * i + 4)))
+    t = sym("tDraftFalloff")
+    emit("  tDraftFalloff table %s n %d min %08x max %08x mult %08x"
+         % (sym_at(w(t)), w(t + 4), w(t + 8), w(t + 12), w(t + 16)))
+
+    def graph(name):
+        g = sym(name)
+        emit("  %s points %s n %d" % (name, sym_at(w(g)), w(g + 4)))
+
+    graph("gDraftSpeedRange")
+    rn = sym("vRoadNoiseSpeedData")
+    for i in range(2):
+        emit("  vRoadNoiseSpeedData[%d] %08x %08x"
+             % (i, w(rn + 8 * i), w(rn + 8 * i + 4)))
+    graph("gRoadNoiseSpeedScale")
+    op = sym("ObjectPoints")
+    for i in range(13):
+        emit("  ObjectPoints[%d] %s" % (i, " ".join(
+            "%08x" % w(op + 16 * i + 4 * j) for j in range(4))))
+    dm = sym("DamageAboveMatrix")
+    for i in range(4):
+        emit("  DamageAboveMatrix[%d] %s" % (i, " ".join(
+            "%08x" % w(dm + 16 * i + 4 * j) for j in range(4))))
+    pc = sym("PostCollisionYawControlProfileData")
+    for i in range(4):
+        emit("  PostCollisionYawControlProfileData[%d] %08x %08x"
+             % (i, w(pc + 8 * i), w(pc + 8 * i + 4)))
+    graph("PostCollisionYawControlProfile")
+
+    D = Draft(w)
+
+    # -- draft from ---------------------------------------------------------
+    speeds = [f32(x) for x in (0.5, 0.99999994, 1.0, 1.00000012, 3.0, 5.0,
+                               100.0, 150.0, 200.0)]
+    rels = [[f32(x) for x in r] for r in (
+        (12.0, 0.0, 0.0), (0.0, 12.0, 0.0), (-12.0, 0.0, 0.0),
+        (6.0, 1.0, 0.0), (6.0, 1.97, 0.0), (6.0, 1.98, 0.0),
+        (59.9, 0.0, 0.0), (60.0, 0.0, 0.0), (60.0001, 0.0, 0.0),
+        (3.0, 4.0, 12.0), (0.001, 0.0, 0.0), (30.0, 0.0, -2.5),
+        (0.06, 0.0197, 0.0), (0.06, 0.0198, 0.0), (1.5, 2.0, 0.0))]
+    vels = [[f32(x) for x in v] for v in (
+        (10.0, 0.0, 0.0), (3.0, 4.0, 0.0), (1.0, 0.5, 2.0),
+        (-10.0, 0.0, 0.0))]
+    origin = ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0], 0.0)
+
+    def pd(tag, r):
+        emit("  %s -> %s %s" % (tag, g9(r), gx(r)))
+
+    emit("[draft from]")
+    for s in speeds:
+        for ri, r in enumerate(rels):
+            for vi, v in enumerate(vels):
+                pd("spd %s rel %d vel %d" % (g9(s), ri, vi),
+                   draft_from(D, origin, (r, v, s)))
+
+    emit("[draft pairs]")
+    for i, pr in enumerate((
+            (100.0, -50.0, 3.0, 112.0, -50.0, 3.0),
+            (112.0, -50.0, 3.0, 100.0, -50.0, 3.0),
+            (-7.5, 2.25, 0.0, 4.5, 2.25, 1.0),
+            (1000.0, 1000.0, 0.0, 1010.0, 1005.0, 0.0))):
+        pr = [f32(x) for x in pr]
+        me = (pr[0:3], [f32(-3.0), 0.0, 0.0], f32(0.25))
+        other = (pr[3:6], [f32(10.0), 0.0, 0.0], f32(120.0))
+        pd("pair %d" % i, draft_from(D, me, other))
+
+    # Each case turns one rounding on: dot / dist above 1 exactly at the
+    # reach, and a few ulps past it; then the two groupings of the sums.
+    emit("[draft rounding]")
+    for i, rc in enumerate((
+            (35.793, 32.2137, 35.793, 6.3, 5.67, 6.3, 200.0),
+            (47.6164, 16.52, -32.5541, 9.8, 3.4, -6.7, 200.0),
+            (9.3, 19.2, 20.8, 3.11, 6.4, 6.95, 100.0),
+            (18.5, 4.0, -1.25, 9.0, 2.0, -0.75, 100.0))):
+        rc = [f32(x) for x in rc]
+        pd("round %d" % i, draft_from(D, origin, (rc[0:3], rc[3:6], rc[6])))
+
+    fast = [f32(10.0), 0.0, 0.0]
+    leaders = {
+        "A": ([f32(12.0), 0.0, 0.0], fast, f32(200.0)),
+        "B": ([f32(24.0), 0.0, 0.0], fast, f32(200.0)),
+        "C": ([f32(48.0), 0.0, 0.0], fast, f32(200.0)),
+        "D": ([0.0, f32(12.0), 0.0], fast, f32(200.0)),
+        "E": ([f32(36.0), 0.0, 0.0], fast, f32(200.0)),
+        "s": "self", "0": None,
+    }
+
+    def world(cars):
+        return [leaders[ch] for ch in cars]
+
+    emit("[draft sum]")
+    for cars, n in (("", 0), ("s", 1), ("C", 1), ("CD", 2), ("CsC", 3),
+                    ("CCC0", 4), ("A0", 2), ("BC0", 3), ("CCB", 2),
+                    ("DsD", 3), ("sA0", 3), ("CsCsC", 5), ("BB", 2),
+                    ("CB", 2), ("CEC", 3)):
+        # c moves at 30, which the sum never reads: it skips c.
+        pd('world "%s" n %d' % (cars, n),
+           draft_sum(D, ([0.0, 0.0, 0.0], [f32(30.0), 0.0, 0.0], f32(30.0)),
+                     world(cars), n))
+
+    # -- the registry -------------------------------------------------------
+    # Port-side: vt_install replaces on a repeat address, keeps tables
+    # apart, and vt_this is a byte add.
+    emit("[vtable]")
+    emit("  X+8 -> 1 delta 0")
+    emit("  X+16 -> 1 delta -8")
+    emit("  X+8 after replace -> 2 delta 0")
+    emit("  X+16 after replace -> 2 delta 16")
+    emit("  Y+8 -> 3 delta 0")
+    emit("  X+8 beside Y -> 2 delta 0")
+    emit("  this -8 -> 24")
+    emit("  this +24 -> 56")
+
+    ctl = {0: "ctl+%d" % DELTA["_vt$14RealController"],
+           1: "ctl+%d" % DELTA["_vt$15AICarController"]}
+
+    # -- think --------------------------------------------------------------
+    emit("[think]")
+    for wi, (cars, n) in enumerate((("C", 1), ("BC0", 3), ("", 0))):
+        for v in range(2):
+            for dt in (f32(0.0166666675), 0.0, f32(-0.5)):
+                emit("  world %d vt %d dt %s" % (wi, v, g9(dt)))
+                # sw of the draft at 0x001301a4 precedes the jalr.
+                d = draft_sum(D, origin, world(cars), n)
+                emit("    Think(%s, %s) sees draft %s"
+                     % (ctl[v], g9(dt), g9(d)))
+                emit("    after draft %s" % g9(d))
+
+    # -- drive --------------------------------------------------------------
+    emit("[drive]")
+    drv = {0: "driver+%d" % DELTA["_vt$10NullDriver"],
+           1: "driver2+%d" % DELTA["_vt$9CarDriver"]}
+    for v in range(2):
+        for dt in (f32(0.0333333351), f32(2.5)):
+            emit("  driver %d dt %s" % (v, g9(dt)))
+            emit("    Drive(%s, %s)" % (drv[v], g9(dt)))
+
+    # -- route --------------------------------------------------------------
+    emit("[route]")
+    for v in range(2):
+        emit("  vt %d" % v)
+        emit("    GetCurrentRoute(%s)" % ctl[v])
+        emit("    route is g_route 1")
+        emit("    GetCurrentRoutePoint(%s)" % ctl[v])
+        emit("    point is g_rp 1")
+        for oob in (0.0, f32(-2.5), f32(1e30)):
+            emit("    GetAmountOutOfBounds(%s)" % ctl[v])
+            emit("    oob %s" % g9(oob))
+
+    # -- sound --------------------------------------------------------------
+    emit("[sound]")
+    emit("  no sound")
+    for v, name in enumerate(("_vt$12BaseCarSound", "_vt$14BaseAICarSound")):
+        emit("  vt %d" % v)
+        # a1 is zeroed in the delay slot of the null test.
+        emit("    Update(sound+%d, %s, 0, %s)"
+             % (DELTA[name], g9(SOUND_ARG), g9(SOUND_ARG)))
+
+    # -- collideable --------------------------------------------------------
+    emit("[collideable]")
+    for b, (timer, dur) in enumerate(((0, 0.0), (9000, 1.0), (1000, 1.0))):
+        for v, name in enumerate(("_vt$16CarCollisionBody",
+                                  "_vt$20DynamicCollisionBody")):
+            for ans in (0, 1, 2, -1):
+                emit("  blink %d vt %d answer %d" % (b, v, ans))
+                if not is_blinking(timer, 10000, f32(dur)):
+                    emit("    AreCollisionsEnabled(body+%d) = %d"
+                         % (DELTA[name], ans))
+                    # sltu s1,zero,v0
+                    emit("    -> %d" % (1 if ans & 0xffffffff else 0))
+                else:
+                    emit("    -> 0")
+
+    # -- wrong way ----------------------------------------------------------
+    emit("[wrong way]")
+    fwds = [[f32(x) for x in f] for f in (
+        (1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.6, 0.8), (1e-20, 0.0),
+        (-0.6, 0.8), (0.0, -1.0))]
+    dirs = [[f32(x) for x in d] for d in (
+        (1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0), (0.6, -0.8))]
+    for fi, fw in enumerate(fwds):
+        for di, dr in enumerate(dirs):
+            emit("  fwd %d dir %d" % (fi, di))
+            emit("    GetCurrentRoutePoint(%s)" % ctl[0])
+            # mul.s 144*12; mul.s 148*16; add.s; c.lt.s 0, dot
+            dot = fadd(fmul(fw[0], dr[0]), fmul(fw[1], dr[1]))
+            emit("    -> %d" % (0 if 0.0 < dot else 1))
+
+    # -- headlights ---------------------------------------------------------
+    def lights(now, start, on, off, two, blink, hk, force, honking, dname,
+               dname2=None):
+        elapsed = fmul(f32(float(i32(now - start))), TICK)
+        if elapsed < on:
+            lit = 1
+        else:
+            t = fsub(elapsed, on)
+            if t < off:
+                lit = 1 if two == 0 else 0          # sltiu a0,v0,1
+            else:
+                lit = 1 if fsub(t, off) < on else 0
+        state = 1 if (lit and blink != 0) else (1 if force != 0 else 0)
+        honk = (1 if hk != 0 else 0) if lit else 0
+        emit("    IsHonking(%s) = %d" % (dname, honking))
+        # The second call of each pair reloads Car::pCarDriver.
+        d2 = dname2 or dname
+        if honk and not honking:
+            emit("    StartHonkHorn(%s)" % d2)
+        elif not honk and honking:
+            emit("    StopHonkHorn(%s)" % d2)
+        return state
+
+    emit("[headlights]")
+    for tk in (0, 1000, 2000, 2500, 3000, 4000, 5000, 8000, -400):
+        for two in (0, 1):
+            for bl in (0, 1):
+                for hk in (0, 5):
+                    for fo in (0, 1):
+                        for hs in (0, 3):
+                            emit("  t %d two %d blink %d honk %d force %d "
+                                 "is %d" % (tk, two, bl, hk, fo, hs))
+                            st = lights(50000 + tk, 50000, f32(0.5),
+                                        f32(0.25), two, 7 if bl else 0, hk,
+                                        2 if fo else 0, hs, drv[0])
+                            emit("    lights %d" % st)
+
+    # lw v0,24(s0); bne -> out: a player's car gets nothing.
+    assert imm(0x00132578, OP_LW) == 24
+    emit("[headlights player]")
+    emit("  lights 9")
+
+    emit("[headlights reload]")
+    for h in (0, 1):
+        emit("  honk %d" % h)
+        lights(0, 0, f32(1.0), 0.0, 0, 0, h, 0, 0 if h else 1, drv[0],
+               drv[1])
+
+    # -- bbox ---------------------------------------------------------------
+    lo = [f32(x) for x in (-1.5, -2.5, -0.25, 11.0)]
+    hi = [f32(x) for x in (1.5, 2.5, 1.75, -13.0)]
+
+    def v4(tag, v):
+        emit("  %s %s" % (tag, " ".join(gx(x) for x in v)))
+
+    # lqc2 224 -> sqc2 (a1), then lqc2 240 -> sqc2 (a2): the whole
+    # quadword, pad lane included, min first.
+    emit("[bbox]")
+    v4("min", lo)
+    v4("max", hi)
+    emit("[bbox alias max]")
+    v4("max out", lo)
+    v4("body max", lo)
+    emit("[bbox alias min]")
+    v4("min out", lo)
+    v4("body min", hi)
+
+    # -- penetration --------------------------------------------------------
+    emit("[penetration]")
+    for word in (0, 1, 0xdeadbeef, 0x80000000):
+        emit("  word %08x -> %08x" % (word, word))
+
+    # -- tracked acceleration -----------------------------------------------
+    emit("[tracked acceleration]")
+    for mode in (-1, 0, 1, 2, 3, 4, 5):
+        for acc in (f32(3.5), -0.0):
+            r = acc if mode == TRACKED_MODE else 0.0
+            emit("  mode %d acc %s -> %s" % (mode, g9(acc), gx(r)))
+    # beql: the controller load is annulled when the mode test fails.
+    for mode in (-1, 0, 2, 3, 4, 5):
+        emit("  mode %d no controller -> %s" % (mode, gx(0.0)))
+
+    # -- the refusals -------------------------------------------------------
+    emit("[abort modes]")
+    for mode, msg in ABORT_MODES:
+        emit("  %s -> aborted: %s" % (mode, msg))
 
 
 def run_harness(exe, out_path):
@@ -637,6 +1271,38 @@ def run_harness(exe, out_path):
     if r.returncode != 0:
         sys.stderr.write(r.stderr)
     return r.returncode
+
+
+def run_abort_modes(exe):
+    """Each of vt_slot's and vt_install's refusals, one process per mode.
+    A mode passes when the process dies and its first `vt_` line on stderr
+    is the refusal; one that prints "returned" did not refuse at all."""
+    lines = ["[abort modes]"]
+    for mode, _ in ABORT_MODES:
+        try:
+            r = subprocess.run([str(exe), mode], capture_output=True,
+                               text=True, timeout=HARNESS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            lines.append("  %s -> hung" % mode)
+            continue
+        msg = [ln.strip() for ln in r.stderr.splitlines()
+               if ln.startswith("vt_")]
+        out = r.stdout.strip()
+        if r.returncode != 0 and "returned" not in out and msg:
+            lines.append("  %s -> aborted: %s%s"
+                         % (mode, msg[0], " [%s]" % out if out else ""))
+        else:
+            lines.append("  %s -> rc %d, %s" % (mode, r.returncode,
+                                                 r.stdout.strip() or "-"))
+    return lines
+
+
+def harness_lines(exe, out_path):
+    """The transcript, then the refusals. rc is the transcript run's."""
+    rc = run_harness(exe, out_path)
+    if rc != 0:
+        return rc, out_path.read_text().splitlines()
+    return rc, out_path.read_text().splitlines() + run_abort_modes(exe)
 
 
 def diff(model_lines, harness_lines, quiet=False):
@@ -880,7 +1546,9 @@ MUTATIONS = [
      "    return nx * a->x + ny * a->y + nz * a->z;",
      "    return nx * a->x + ny * a->y;"),
     ("fa-divides-not-rsqrt", CC,
+     "    len2 = v->x * v->x + v->y * v->y + v->z * v->z;" + NL +
      "    inv  = 1.0f / sqrtf(len2);",
+     "    len2 = v->x * v->x + v->y * v->y + v->z * v->z;" + NL +
      "    inv  = 1.0f / len2;"),
 
     # -- the horn -----------------------------------------------------------
@@ -966,6 +1634,358 @@ MUTATIONS = [
      "    return c->pCarDriver->Steering;",
      "uint16_t car_get_steering(Car *c)" + NL + "{" + NL +
      "    return (uint16_t)(int16_t)c->pCarDriver->Steering;"),
+
+    # ============================================================ slice two
+
+    # -- the static initialiser ---------------------------------------------
+    ("sinit-knee-2", CC,
+     "    set2(&vDraftSpeedRange[1],   1.0f,  0.0f);",
+     "    set2(&vDraftSpeedRange[1],   2.0f,  0.0f);"),
+    ("sinit-reach-50", CC,
+     "    set2(&vDraftSpeedRange[3], 150.0f, 60.0f);",
+     "    set2(&vDraftSpeedRange[3], 150.0f, 50.0f);"),
+    ("sinit-knee2-swapped", CC,
+     "    set2(&vDraftSpeedRange[2],   5.0f, 10.0f);",
+     "    set2(&vDraftSpeedRange[2],  10.0f,  5.0f);"),
+    ("sinit-table-n5", CC,
+     "    table_init(&tDraftFalloff, fDraftFalloff, 6, 0.0f, 1.0f);",
+     "    table_init(&tDraftFalloff, fDraftFalloff, 5, 0.0f, 1.0f);"),
+    ("sinit-table-hi-2", CC,
+     "    table_init(&tDraftFalloff, fDraftFalloff, 6, 0.0f, 1.0f);",
+     "    table_init(&tDraftFalloff, fDraftFalloff, 6, 0.0f, 2.0f);"),
+    ("sinit-graph-n3", CC,
+     "    graph_init(&gDraftSpeedRange, vDraftSpeedRange, 4);",
+     "    graph_init(&gDraftSpeedRange, vDraftSpeedRange, 3);"),
+    ("sinit-graph-first", CC,
+     "    set2(&vDraftSpeedRange[0],   0.0f,  0.0f);" + NL +
+     "    set2(&vDraftSpeedRange[1],   1.0f,  0.0f);" + NL +
+     "    set2(&vDraftSpeedRange[2],   5.0f, 10.0f);" + NL +
+     "    set2(&vDraftSpeedRange[3], 150.0f, 60.0f);" + NL + NL +
+     "    table_init(&tDraftFalloff, fDraftFalloff, 6, 0.0f, 1.0f);" + NL +
+     "    graph_init(&gDraftSpeedRange, vDraftSpeedRange, 4);",
+     "    graph_init(&gDraftSpeedRange, vDraftSpeedRange, 4);" + NL +
+     "    set2(&vDraftSpeedRange[0],   0.0f,  0.0f);" + NL +
+     "    set2(&vDraftSpeedRange[1],   1.0f,  0.0f);" + NL +
+     "    set2(&vDraftSpeedRange[2],   5.0f, 10.0f);" + NL +
+     "    set2(&vDraftSpeedRange[3], 150.0f, 60.0f);" + NL + NL +
+     "    table_init(&tDraftFalloff, fDraftFalloff, 6, 0.0f, 1.0f);"),
+    ("sinit-falloff-half", CC,
+     "    1.0f, 0.9f, 0.75f, 0.55f, 0.3f, 0.0f",
+     "    1.0f, 0.9f, 0.75f, 0.5f, 0.3f, 0.0f"),
+    ("sinit-roadnoise-typed", CC,
+     "    set2(&vRoadNoiseSpeedData[0],  1.388889f, 0.0f);",
+     "    set2(&vRoadNoiseSpeedData[0],  1.3888888f, 0.0f);"),
+    ("sinit-roadnoise-n1", CC,
+     "    graph_init(&gRoadNoiseSpeedScale, vRoadNoiseSpeedData, 2);",
+     "    graph_init(&gRoadNoiseSpeedScale, vRoadNoiseSpeedData, 1);"),
+    ("sinit-ring-order", CC,
+     "    set3(&ObjectPoints[2],   0.0f, -3.0f, 3.0f);",
+     "    set3(&ObjectPoints[2],   0.0f,  3.0f, 3.0f);"),
+    ("sinit-points-pad", CC,
+     "    v->y = y;" + NL + "    v->z = z;" + NL + "}" + NL + NL +
+     "static void set4",
+     "    v->y = y;" + NL + "    v->z = z;" + NL + "    v->pad = 1.0f;" +
+     NL + "}" + NL + NL + "static void set4"),
+    ("sinit-damage-w0", CC,
+     "    set4(&DamageAboveMatrix[3], 0.0f, 0.0f, 1.0f, 1.0f);",
+     "    set4(&DamageAboveMatrix[3], 0.0f, 0.0f, 1.0f, 0.0f);"),
+    ("sinit-pcy-half", CC,
+     "    set2(&PostCollisionYawControlProfileData[1], 0.4f, 1.0f);",
+     "    set2(&PostCollisionYawControlProfileData[1], 0.5f, 1.0f);"),
+    ("sinit-pcy-wrong-array", CC,
+     "    graph_init(&PostCollisionYawControlProfile," + NL +
+     "               PostCollisionYawControlProfileData, 4);",
+     "    graph_init(&PostCollisionYawControlProfile," + NL +
+     "               vDraftSpeedRange, 4);"),
+
+    # -- the draft ----------------------------------------------------------
+    ("draft-speed-of-self", CC,
+     "    float speed = other->State.VelocityMagnitude;",
+     "    float speed = c->State.VelocityMagnitude;"),
+    ("draft-velocity-of-self", CC,
+     "    const bVector3 *v = &other->State.Velocity;",
+     "    const bVector3 *v = &c->State.Velocity;"),
+    ("draft-knee-le", CC,
+     "    if (speed < vDraftSpeedRange[1].x)",
+     "    if (speed <= vDraftSpeedRange[1].x)"),
+    ("draft-knee-index-0", CC,
+     "    if (speed < vDraftSpeedRange[1].x)",
+     "    if (speed < vDraftSpeedRange[0].x)"),
+    ("draft-knee-index-2", CC,
+     "    if (speed < vDraftSpeedRange[1].x)",
+     "    if (speed < vDraftSpeedRange[2].x)"),
+    ("draft-delta-backwards", CC,
+     "    dx = other->State.Position.x - c->State.Position.x;",
+     "    dx = c->State.Position.x - other->State.Position.x;"),
+    ("draft-dist-2d", CC,
+     "    dist = sqrtf((dx * dx + dy * dy) + dz * dz);",
+     "    dist = sqrtf(dx * dx + dy * dy);"),
+    ("draft-reach-le", CC,
+     "    if (vDraftSpeedRange[3].y < dist)",
+     "    if (vDraftSpeedRange[3].y <= dist)"),
+    ("draft-reach-x", CC,
+     "    if (vDraftSpeedRange[3].y < dist)",
+     "    if (vDraftSpeedRange[3].x < dist)"),
+    ("draft-len2-order", CC,
+     "    len2 = (v->x * v->x + v->y * v->y) + v->z * v->z;",
+     "    len2 = v->x * v->x + (v->y * v->y + v->z * v->z);"),
+    ("draft-no-normalise", CC,
+     "    len2 = (v->x * v->x + v->y * v->y) + v->z * v->z;" + NL +
+     "    inv  = 1.0f / sqrtf(len2);",
+     "    len2 = (v->x * v->x + v->y * v->y) + v->z * v->z;" + NL +
+     "    inv  = 1.0f;"),
+    ("draft-dot-order", CC,
+     "    dot = (dx * nx + dy * ny) + dz * nz;",
+     "    dot = dx * nx + (dy * ny + dz * nz);"),
+    ("draft-cos-09", CC,
+     "#define CAR_DRAFT_CONE_COS   0.95f",
+     "#define CAR_DRAFT_CONE_COS   0.9f"),
+    ("draft-scale-20", CC,
+     "#define CAR_DRAFT_CONE_SCALE 19.999996f",
+     "#define CAR_DRAFT_CONE_SCALE 20.0f"),
+    ("draft-cone-le", CC,
+     "    if (f < 0.0f)" + NL + "        return 0.0f;" + NL + NL +
+     "    g = graph_get_value",
+     "    if (f <= 0.0f)" + NL + "        return 0.0f;" + NL + NL +
+     "    g = graph_get_value"),
+    ("draft-graph-by-dist", CC,
+     "    g = graph_get_value(&gDraftSpeedRange, speed);",
+     "    g = graph_get_value(&gDraftSpeedRange, dist);"),
+    ("draft-lookup-inverted", CC,
+     "    return table_get_value(&tDraftFalloff, dist / (f * g));",
+     "    return table_get_value(&tDraftFalloff, (f * g) / dist);"),
+
+    ("sum-counts-self", CC,
+     "        if (o != c)" + NL + "            sum = sum",
+     "        if (1)" + NL + "            sum = sum"),
+    ("sum-early-lt", CC,
+     "        if (CAR_DRAFT_EARLY_OUT <= sum)",
+     "        if (CAR_DRAFT_EARLY_OUT < sum)"),
+    ("sum-no-early-out", CC,
+     "        if (CAR_DRAFT_EARLY_OUT <= sum)" + NL + "            break;" + NL,
+     ""),
+    ("sum-test-inside-if", CC,
+     "        if (o != c)" + NL +
+     "            sum = sum + car_calculate_draft_factor_from(c, o);" + NL +
+     "        if (CAR_DRAFT_EARLY_OUT <= sum)" + NL +
+     "            break;",
+     "        if (o != c) {" + NL +
+     "            sum = sum + car_calculate_draft_factor_from(c, o);" + NL +
+     "            if (CAR_DRAFT_EARLY_OUT <= sum)" + NL +
+     "                break;" + NL +
+     "        }"),
+    ("sum-uncapped", CC,
+     "    return (sum < CAR_DRAFT_CAP) ? sum : CAR_DRAFT_CAP;",
+     "    return sum;"),
+    ("sum-early-08", CC,
+     "#define CAR_DRAFT_EARLY_OUT 0.9f",
+     "#define CAR_DRAFT_EARLY_OUT 0.8f"),
+    ("sum-cap-08", CC,
+     "#define CAR_DRAFT_CAP       0.9f",
+     "#define CAR_DRAFT_CAP       0.8f"),
+    ("sum-whole-table", CC,
+     "    for (i = 0; i < pCurrentWorld->TotalNumCars; i++) {",
+     "    for (i = 0; i < WORLD_MAX_CARS; i++) {"),
+
+    # -- the dispatchers ----------------------------------------------------
+    ("think-draft-after", CC,
+     "    c->DraftFactor = car_calculate_draft_factor(c);" + NL + NL +
+     "    ctl = c->pCarController;" + NL +
+     "    e = vt_slot(ctl->_vtable, CARCONTROLLER_VT_THINK);" + NL +
+     "    ((VtVoidFloatFn)e->fn)(vt_this(ctl, e), dt);",
+     "    ctl = c->pCarController;" + NL +
+     "    e = vt_slot(ctl->_vtable, CARCONTROLLER_VT_THINK);" + NL +
+     "    ((VtVoidFloatFn)e->fn)(vt_this(ctl, e), dt);" + NL + NL +
+     "    c->DraftFactor = car_calculate_draft_factor(c);"),
+    ("think-no-delta", CC,
+     "    ((VtVoidFloatFn)e->fn)(vt_this(ctl, e), dt);",
+     "    ((VtVoidFloatFn)e->fn)(ctl, dt);"),
+    ("think-dt-zero", CC,
+     "    ((VtVoidFloatFn)e->fn)(vt_this(ctl, e), dt);",
+     "    ((VtVoidFloatFn)e->fn)(vt_this(ctl, e), 0.0f);"),
+    ("drive-no-delta", CC,
+     "    ((VtVoidFloatFn)e->fn)(vt_this(d, e), dt);",
+     "    ((VtVoidFloatFn)e->fn)(d, dt);"),
+    ("route-no-delta", CC,
+     "    return ((VtRouteFn)e->fn)(vt_this(ctl, e));",
+     "    return ((VtRouteFn)e->fn)(ctl);"),
+    ("route-point-takes-route", CC,
+     "                               CARCONTROLLER_VT_GET_CURRENT_ROUTE_POINT);",
+     "                               CARCONTROLLER_VT_GET_CURRENT_ROUTE);"),
+    ("oob-no-delta", CC,
+     "    return ((VtFloatFn)e->fn)(vt_this(ctl, e));",
+     "    return ((VtFloatFn)e->fn)(ctl);"),
+    ("sound-no-null-test", CC,
+     "    if (!snd)" + NL + "        return;" + NL,
+     ""),
+    ("sound-short-1", CC,
+     "    ((VtSoundUpdateFn)e->fn)(vt_this(snd, e), 1.0f, 0, 1.0f);",
+     "    ((VtSoundUpdateFn)e->fn)(vt_this(snd, e), 1.0f, 1, 1.0f);"),
+    ("sound-first-0", CC,
+     "    ((VtSoundUpdateFn)e->fn)(vt_this(snd, e), 1.0f, 0, 1.0f);",
+     "    ((VtSoundUpdateFn)e->fn)(vt_this(snd, e), 0.0f, 0, 1.0f);"),
+    ("sound-no-delta", CC,
+     "    ((VtSoundUpdateFn)e->fn)(vt_this(snd, e), 1.0f, 0, 1.0f);",
+     "    ((VtSoundUpdateFn)e->fn)(snd, 1.0f, 0, 1.0f);"),
+    ("sound-vptr-at-0", CC,
+     "    e = vt_slot(((Sound3d *)snd)->_vtable, SOUND3D_VT_UPDATE);",
+     "    e = vt_slot(*(uint32_t *)snd, SOUND3D_VT_UPDATE);"),
+    ("collide-ignores-blink", CC,
+     "    if (car_is_blinking(c))" + NL + "        return 0;" + NL + NL +
+     "    b = c->pDynamicCollisionBody;",
+     "    b = c->pDynamicCollisionBody;"),
+    ("collide-raw-answer", CC,
+     "    return ((VtBoolFn)e->fn)(vt_this(b, e)) != 0;",
+     "    return ((VtBoolFn)e->fn)(vt_this(b, e));"),
+    ("collide-no-delta", CC,
+     "    return ((VtBoolFn)e->fn)(vt_this(b, e)) != 0;",
+     "    return ((VtBoolFn)e->fn)(b) != 0;"),
+    ("wrongway-le", CC,
+     "    return (0.0f < dot) ? 0 : 1;",
+     "    return (0.0f <= dot) ? 0 : 1;"),
+    ("wrongway-side-axis", CC,
+     "    const bVector4 *fwd = &c->State.BodyMatrix.v0;",
+     "    const bVector4 *fwd = &c->State.BodyMatrix.v1;"),
+    ("wrongway-crossed", CC,
+     "    float dot = fwd->x * rp->Direction.x + fwd->y * rp->Direction.y;",
+     "    float dot = fwd->x * rp->Direction.y + fwd->y * rp->Direction.x;"),
+
+    ("lights-player-too", CC,
+     "    if (c->pPlayer)" + NL + "        return;" + NL + NL +
+     "    elapsed = ",
+     "    elapsed = "),
+    ("lights-first-le", CC,
+     "    if (elapsed < on) {",
+     "    if (elapsed <= on) {"),
+    ("lights-gap-inverted", CC,
+     "            lit = (c->WantTwoHonksAndOrBlinks == 0);",
+     "            lit = (c->WantTwoHonksAndOrBlinks != 0);"),
+    ("lights-second-le", CC,
+     "            lit = (t - c->HeadlightsAndHornOffDuration < on);",
+     "            lit = (t - c->HeadlightsAndHornOffDuration <= on);"),
+    ("lights-second-off", CC,
+     "            lit = (t - c->HeadlightsAndHornOffDuration < on);",
+     "            lit = 0;"),
+    ("lights-blink-unlit", CC,
+     "    c->HeadlightsState = (lit && c->WantToBlinkHeadlights)",
+     "    c->HeadlightsState = (c->WantToBlinkHeadlights != 0)"),
+    ("lights-no-force", CC,
+     "                         ? 1 : (c->ForceHeadlightsOn != 0);",
+     "                         ? 1 : 0;"),
+    ("lights-force-raw", CC,
+     "                         ? 1 : (c->ForceHeadlightsOn != 0);",
+     "                         ? 1 : c->ForceHeadlightsOn;"),
+    ("horn-ignores-lit", CC,
+     "    honk = lit ? (c->WantToHonkHorn != 0) : 0;",
+     "    honk = (c->WantToHonkHorn != 0);"),
+    ("horn-start-no-reload", CC,
+     "        d = c->pCarDriver;" + NL +
+     "        e = vt_slot(d->_vtable, CARDRIVER_VT_START_HONK_HORN);",
+     "        e = vt_slot(d->_vtable, CARDRIVER_VT_START_HONK_HORN);"),
+    ("horn-stop-no-reload", CC,
+     "        d = c->pCarDriver;" + NL +
+     "        e = vt_slot(d->_vtable, CARDRIVER_VT_STOP_HONK_HORN);",
+     "        e = vt_slot(d->_vtable, CARDRIVER_VT_STOP_HONK_HORN);"),
+    ("horn-start-is-stop", CC,
+     "        e = vt_slot(d->_vtable, CARDRIVER_VT_START_HONK_HORN);",
+     "        e = vt_slot(d->_vtable, CARDRIVER_VT_STOP_HONK_HORN);"),
+    ("horn-start-unguarded", CC,
+     "        if (((VtBoolFn)e->fn)(vt_this(d, e)))" + NL +
+     "            return;" + NL,
+     ""),
+    ("horn-stop-guard-inverted", CC,
+     "        if (!((VtBoolFn)e->fn)(vt_this(d, e)))",
+     "        if (((VtBoolFn)e->fn)(vt_this(d, e)))"),
+
+    # -- the borrowed fields ------------------------------------------------
+    ("bbox-max-first", CC,
+     "    *min = b->Dynamic.LocalBBMin;" + NL +
+     "    *max = b->Dynamic.LocalBBMax;",
+     "    *max = b->Dynamic.LocalBBMax;" + NL +
+     "    *min = b->Dynamic.LocalBBMin;"),
+    ("bbox-no-pad", CC,
+     "    *min = b->Dynamic.LocalBBMin;",
+     "    min->x = b->Dynamic.LocalBBMin.x;" + NL +
+     "    min->y = b->Dynamic.LocalBBMin.y;" + NL +
+     "    min->z = b->Dynamic.LocalBBMin.z;"),
+    ("bbox-max-is-min", CC,
+     "    *max = b->Dynamic.LocalBBMax;",
+     "    *max = b->Dynamic.LocalBBMin;"),
+    ("penetration-is-yaw", CC,
+     "    return c->pDynamicCollisionBody->LastPenetrationTime;",
+     "    return c->pDynamicCollisionBody->LastYawControlCollisionTime;"),
+    ("tracked-when-present", CC,
+     "    if (c->TheControlMode == REAL_CONTROL)" + NL +
+     "        return ((TrackedController *)",
+     "    if (c->pCarController)" + NL +
+     "        return ((TrackedController *)"),
+    ("tracked-prev-speed", CC,
+     "        return ((TrackedController *)c->pCarController)->Acceleration;",
+     "        return ((TrackedController *)c->pCarController)->PrevSpeed;"),
+
+    # -- the headers the dispatch reads -------------------------------------
+    ("ctl-think-40", CTL,
+     "#define CARCONTROLLER_VT_THINK                    32",
+     "#define CARCONTROLLER_VT_THINK                    40"),
+    ("ctl-real-vtable", CTL,
+     "#define REALCONTROLLER_VTABLE    0x002a0b00u",
+     "#define REALCONTROLLER_VTABLE    0x002a0b08u"),
+    ("ctl-tracked-swapped", CTL,
+     "    float         Acceleration;           // 20" + NL +
+     "    float         PrevSpeed;              // 24",
+     "    float         PrevSpeed;              // 20" + NL +
+     "    float         Acceleration;           // 24"),
+    ("drv-is-honking-112", CD,
+     "#define CARDRIVER_VT_IS_HONKING      104",
+     "#define CARDRIVER_VT_IS_HONKING      112"),
+    ("cb-collisions-128", CB,
+     "#define COLLISIONBODY_VT_ARE_COLLISIONS_ENABLED 136",
+     "#define COLLISIONBODY_VT_ARE_COLLISIONS_ENABLED 128"),
+    ("cb-timers-swapped", CB,
+     "    Timer     LastPenetrationTime;              // 260" + NL +
+     "    Timer     LastYawControlCollisionTime;      // 264",
+     "    Timer     LastYawControlCollisionTime;      // 260" + NL +
+     "    Timer     LastPenetrationTime;              // 264"),
+    ("s3d-update-32", S3,
+     "#define SOUND3D_VT_UPDATE 24",
+     "#define SOUND3D_VT_UPDATE 32"),
+    ("world-13-cars", WH,
+     "#define WORLD_MAX_CARS 14",
+     "#define WORLD_MAX_CARS 13"),
+
+    # -- the registry -------------------------------------------------------
+    ("vt-count-inclusive", VTC,
+     "k >= vt_tables[i].count",
+     "k > vt_tables[i].count"),
+    ("vt-slot-zero-ok", VTC,
+     "k <= 0 ||",
+     "k < 0 ||"),
+    ("vt-any-alignment", VTC,
+     "slot % 8 != 0 || ",
+     ""),
+    ("vt-null-fn-ok", VTC,
+     NL + "            || !vt_tables[i].entries[k].fn)",
+     ")"),
+    ("vt-install-appends", VTC,
+     "    for (i = 0; i < vt_count; i++) {" + NL +
+     "        if (vt_tables[i].image == image) {",
+     "    for (i = 0; i < 0; i++) {" + NL +
+     "        if (vt_tables[i].image == image) {"),
+    ("vt-reset-keeps", VTC,
+     "    vt_count = 0;",
+     "    (void)vt_count;"),
+    ("vt-full-early", VTC,
+     "    if (vt_count == VT_MAX) {",
+     "    if (vt_count == VT_MAX - 1) {"),
+    ("vt-max-97", VTC,
+     "#define VT_MAX 96",
+     "#define VT_MAX 97"),
+    ("vt-this-subtracts", VTH,
+     "    return (char *)obj + e->delta;",
+     "    return (char *)obj - e->delta;"),
+    ("vt-slot-per-word", VTH,
+     "#define VT_SLOT(S) ((S) / 8)",
+     "#define VT_SLOT(S) ((S) / 4)"),
 ]
 
 EQUIVALENT = {
@@ -1008,6 +2028,35 @@ EQUIVALENT = {
     # who "fixes" the signedness here changes nothing.
     "steering-signed":
         "a uint16_t round-tripped through int16_t is the identity",
+    # -- slice two ----------------------------------------------------------
+    "sinit-graph-first":
+        "graph_init stores the array's address and count and reads nothing "
+        "in the array, so building the Graph before the stores fill it "
+        "leaves every word the same; the order is the image's, kept, not "
+        "something a transcript can see",
+
+    # At a speed of exactly 1.0 the Graph answers 0 -- 1.0 opens the
+    # (1,0)-(5,10) segment -- so the lookup's argument is dist / 0 = +inf,
+    # the Table clamps it to its high end and returns its last entry, 0:
+    # the same 0 the early return gives. Only a leader at distance 0 could
+    # tell, and that is the NaN the doc describes, which no fixture builds.
+    "draft-knee-le":
+        "at speed 1.0 the Graph is 0, the lookup argument +inf, and the "
+        "Table's last entry 0 -- the early return's answer",
+    "draft-knee-index-0":
+        "the Graph is 0 at every speed up to 1.0, so a lower threshold only "
+        "lets those speeds through to the same +inf lookup and the same 0",
+    "draft-cone-le":
+        "f == 0 makes f * g zero and the lookup argument +inf, so the Table "
+        "gives its last entry, 0 -- the early return's answer",
+
+    # The test after skipping `c` sees the sum the previous pass's test
+    # already saw and let through, or the loop would have stopped; when `c`
+    # comes first that sum is 0, under the early-out. Skipping the test on
+    # `c` never moves the break. The listing's order is kept anyway.
+    "sum-test-inside-if":
+        "the test on c's pass sees the sum the previous test already let "
+        "through, or 0 when c is first",
 }
 
 for _name in EQUIVALENT:
@@ -1031,8 +2080,8 @@ def mutate_pass():
     with tempfile.TemporaryDirectory() as tmp:
         exe = hostbuild.build(tmp, SOURCES, name="car_test")
         out = Path(tmp) / "base.txt"
-        run_harness(exe, out)
-        if diff(base_model, out.read_text().splitlines(), quiet=True):
+        _, base = harness_lines(exe, out)
+        if diff(base_model, base, quiet=True):
             print("base already differs -- fix that before mutating")
             return 1
 
@@ -1062,7 +2111,7 @@ def mutate_pass():
                     caught += 1
                     continue
                 out = Path(tmp) / "m.txt"
-                rc = run_harness(exe, out)
+                rc, got = harness_lines(exe, out)
                 if rc == HARNESS_HUNG:
                     print("  %-32s hung the harness (caught)" % name)
                     caught += 1
@@ -1071,7 +2120,7 @@ def mutate_pass():
                     print("  %-32s crashed the harness (caught)" % name)
                     caught += 1
                     continue
-                n = diff(base_model, out.read_text().splitlines(), quiet=True)
+                n = diff(base_model, got, quiet=True)
                 if n:
                     print("  %-32s caught, %d lines" % (name, n))
                     caught += 1
@@ -1116,8 +2165,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         exe = hostbuild.build(tmp, SOURCES, name="car_test")
         out = Path(tmp) / "harness.txt"
-        run_harness(exe, out)
-        harness = out.read_text().splitlines()
+        _, harness = harness_lines(exe, out)
 
         if args.dump:
             d = Path(args.dump)
