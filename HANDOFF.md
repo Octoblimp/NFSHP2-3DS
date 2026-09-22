@@ -3181,3 +3181,107 @@ Not ported, same dependency as ever: `RigidBody::DoSnapshot` and
 `Engine`, `CarDriver` and `Steering`. `RigidBody::PrintCurrentState` is
 ported empty -- it is not empty in the image, but the printf is gone, the
 function is void and every store is dead.
+
+## Session 22 (2026-09-21) -- Task 25, the wheel, and twelve survivors
+
+`Wheel.obj` is ported: `3DS Files/source/wheel.{c,h}`, cross-checked by
+`tools/wheel_check.py` (19 scenarios, 10693 lines, 0 differ; 154 mutations,
+144 caught, 10 equivalent, 0 unexplained), written up in
+`docs/formats/car-wheel.md`. `wheel.h` stops being "a layout, not a port";
+the 400-byte record it carried for `Suspension` now has the object behind
+it. The ARM build compiles both layout asserts unguarded, which is what
+found the four-byte `_pad2` in the first place.
+
+The port itself went the way the previous two slices did. The part worth
+writing down is what happened afterwards.
+
+### The mutation pass came back with twelve unexplained survivors
+
+Not two or three -- twelve, on the biggest mutation list in the repo. Six
+were real coverage holes, six were equivalent, and two of the twelve
+mutations were themselves badly written and meant nothing until they were
+rewritten. The whole triage is in `docs/formats/car-wheel.md`; these are
+the three that generalise.
+
+**A comment claiming a case is covered is not coverage, and it is worse
+than no comment.** Both the harness and the model said, in prose, that a
+vx of 0.4 with a spin of 1.25 put the slip at exactly zero and so reached
+`GuessGroundForce`'s zero-magnitude early-out. `1.25 * 0.32f` is
+0.399999976. The slip was -2.98e-08, the magnitude with it, and the guard
+was never reached at any point in the transcript. The mutation that
+deletes it survived, and the comment was twice the reason to look
+somewhere else for the explanation. `37.5 * 0.32f` is 12 with nothing left
+over, and that pair now has a block of its own -- run both loaded-and-free
+and barely-loaded-and-braked, because `perMag` is read only on the
+slipping arm.
+
+**A boundary fixture can be masked by the test after it.** `|slip|`
+exactly `gMaxStaticSlip` was already in the transcript, and had been since
+the slice was written -- with a vx of 0 and a vy of -3, which puts the
+slip angle far past `MaxSlipAngle` and sets `Slipping` on the *next*
+test whichever way the trigger goes. The equality was pinned for
+`CurrentSlip` and not for the branch, so `<` against `<=` survived a
+fixture built for it. The new pair keeps vy at zero and vx positive.
+
+**Two mutations could not have been caught by anything.** One wrote only
+to its own parameters (`lo = hi = value;` in an empty function) -- three
+dead stores. Rewritten to assign the global a debug slider plausibly
+would, it still survived: the call passed 0.5 and `gMaxStaticSlip` already
+*is* 0.5, so it wrote back the number that was there. It took a third
+version -- call with 0.375, and re-dump the tuning block straight after
+the call -- before "SetSliderValue is empty" became a checked claim rather
+than a comment. The other deleted an explicit two-byte alignment pad in
+front of a pointer, which the ABI puts straight back; that one is
+equivalent by construction and is argued rather than rewritten.
+
+### Other findings
+
+* **`ExchangeZForces` returns 0.0f on every path.** Both exits end
+  `mtc1 zero,$f0`. `Suspension::ResolveForces` writes that return value
+  into its own `GroundForce`, so that field is zero on every frame of the
+  shipped game. The transcript prints the return and the stored `ZForce`
+  side by side so the two can never be conflated.
+* **Negative zero is a distinguishable input.** `!(0.0f < z)` and
+  `z < 0.0f` agree on every float except `-0.0f`, where the first is
+  airborne and stores a clean `+0` and the second computes `-0.0f * d`.
+  `%.9g` prints the sign, so one fixture value separates them.
+* **One ulp in a dot product is not enough on its own.** Frames 2 and 3
+  spend the dot on `N * -d + row`, where both terms are the same size and
+  the last bit rounds straight back off. The row has to be nearly parallel
+  to the contact normal first, so flattening cancels almost all of it and
+  the residue carries the whole error; frame 3 then normalises the residue
+  and it reaches the fifth significant digit of the world force.
+* **A guard can be protecting the read rather than the number.**
+  `Table::GetValue` returns `pTable[i]` outright at `i == last`. Delete it
+  and the interpolation weight is exactly zero, so the arithmetic comes
+  out identical -- off the back of a load one element past the end of the
+  array. No transcript can see that; a sanitiser build would.
+* **Two globals hide two thirds of this object.** `gUseNewTireForces` is 1
+  and `gWheelForceFrame` is 1, which makes the old tyre model and three of
+  the four force frames unreachable at shipped values. Both are `.sdata`
+  the debug menu writes, so the transcript moves them.
+* **`wheel.h` and `wheel.c` were written LF** while every other `.c`/`.h`
+  under `3DS Files/source/` is CRLF in the working tree, and `carstate.h`
+  got flipped to LF by a whole-file rewrite. Git normalises on commit so
+  none of it showed in a diff. All three are back to CRLF.
+
+**The two seams are wired but nothing installs them.**
+`wheel_install_seams()` points `gWheelFindDrivingSurfaceFn` and
+`gWheelExchangeZForcesFn` at the real methods, and nothing in
+`3DS Files/source/` calls it -- so on the handheld they are still NULL.
+That is right for now, because no car is constructed yet, but whichever
+slice first builds a car owes that call before its first `ResolveForces`.
+The seams are a port artifact and not something the image has: at
+`0x0019bdd4` and `0x0019c104` the PS2 build makes two ordinary `jal`s.
+
+Not ported: `MaybeMakeSkids` needs the `SkidMaker` and belongs to task 27
+with the skid trails. `MaybeMakeSmoke` and `MaybeMakeTireSpew` are each a
+bare `jr ra` in the shipped image and are ported empty, with a note rather
+than a TODO. `DoSnapshot` needs `ReplaySnapshot`, the same dependency
+`CarState`, `Engine`, `CarDriver`, `Steering`, `RigidBody` and
+`Suspension` are all waiting on.
+
+**Next is `DriveTrain`** -- 39 symbols, 5484 bytes, one contiguous run from
+`0x00182828`, a 148-byte record fully named in the `.mdebug`, and every
+dependency (`Engine`, `Table`, `Wheel`) already ported. The layout and the
+reading order are in `CONTINUE.md`.

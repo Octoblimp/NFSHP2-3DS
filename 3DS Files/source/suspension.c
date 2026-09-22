@@ -16,8 +16,11 @@ float   gMaxGroundPenetration     = 0.15f;
 float   gProgressiveDampingFactor = 0.1f;
 int32_t gNoWheels                 = 0;
 
-WheelFindDrivingSurfaceFn gWheelFindDrivingSurfaceFn;
-WheelExchangeZForcesFn    gWheelExchangeZForcesFn;
+// gWheelFindDrivingSurfaceFn and gWheelExchangeZForcesFn were defined here
+// while Wheel was only a layout. They are Wheel's methods and wheel.c
+// defines them now, along with wheel_install_seams to point them at the
+// real ones; this file is just a caller. Anything that links suspension.c
+// therefore links wheel.c too.
 
 // `max.s $f1,$f4,$f22` against a register the function zeroed. Written as
 // the comparison it is rather than as fmaxf, which would drag in a NaN

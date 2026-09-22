@@ -977,7 +977,41 @@ is citro3d and owns the top.
         equivalent). **`Suspension.obj` plus `Wheel`'s layout**
         (`docs/formats/car-suspension.md`, `tools/suspension_check.py`; 10
         scenarios, 1108 lines, 0 differ; 68 mutations, 66 caught, 2
-        equivalent).
+        equivalent). **`Wheel.obj`** (`docs/formats/car-wheel.md`,
+        `tools/wheel_check.py`; 19 scenarios, 10693 lines, 0 differ; 154
+        mutations, 144 caught, 10 equivalent, 0 unexplained).
+
+        **Wheel's first mutation pass came back with twelve unexplained
+        survivors, and that is the part of the slice worth carrying
+        forward.** Six were real coverage holes, six were equivalent, and
+        two of the mutations were themselves badly written and had to be
+        rewritten before they meant anything. The sharpest finding is that
+        **a comment claiming a case is covered is not coverage**: both the
+        harness and the model said vx 0.4 with a spin of 1.25 put the slip
+        at exactly zero and so reached `GuessGroundForce`'s zero-magnitude
+        early-out. It does not -- `1.25 * 0.32f` is 0.399999976, so the
+        guard was never reached at all, and the comment had twice been read
+        as the reason that survivor could not be a hole. The holes, the two
+        rewritten mutations and the six equivalence arguments are written
+        out in `docs/formats/car-wheel.md` and in `CONTINUE.md`'s "What not
+        to trust".
+
+        `MaybeMakeSkids` is **not** ported -- it needs the `SkidMaker`, and
+        it belongs to task 27 with the rest of the skid trails.
+        `MaybeMakeSmoke` and `MaybeMakeTireSpew` are each a bare `jr ra` in
+        the shipped image and are ported empty, with a note rather than a
+        TODO.
+
+        **The two seams Suspension calls through are wired but not
+        installed.** `wheel.c` defines `gWheelFindDrivingSurfaceFn` and
+        `gWheelExchangeZForcesFn`, and `wheel_install_seams()` points them
+        at the real methods -- but nothing in `3DS Files/source/` calls it,
+        so on the handheld they are still NULL. That is right for now,
+        because no car is constructed yet, but **whichever slice first
+        builds a car owes that call**, before that car's first
+        `ResolveForces`. The seams are a port artifact and not something
+        the image has: at 0x0019bdd4 and 0x0019c104 the PS2 build makes two
+        ordinary `jal`s.
 
         **Corrected scope -- read this before planning the rest.** An
         earlier note in this task put the remainder at "178 functions,
@@ -991,7 +1025,7 @@ is citro3d and owns the top.
         | Car | 80 | 22876 |
         | DriveTarget (methods) | 28 | 8636 |
         | PhysicsCar | 16 | 8496 |
-        | Wheel | 73 | 7112 |
+        | ~~Wheel~~ | ~~73~~ | ~~7112~~ |
         | Mellovator | 31 | 5420 |
         | DriveTrain | 38 | 4920 |
         | ~~RigidBody~~ | ~~47~~ | ~~4508~~ |
@@ -1013,15 +1047,17 @@ is citro3d and owns the top.
 
         Suggested order, smallest and most independent first, each
         verified and committed on its own: ~~Steering +
-        TwoWheelAckermanSteering~~, ~~RigidBody~~, ~~Suspension~~ (all
-        done), then Wheel, DriveTrain, DriveTarget's methods, PhysicsCar,
-        Car, with Mellovator and MellowMover last.
+        TwoWheelAckermanSteering~~, ~~RigidBody~~, ~~Suspension~~,
+        ~~Wheel~~ (all done), then DriveTrain, DriveTarget's methods,
+        PhysicsCar, Car, with Mellovator and MellowMover last.
 
-        Wheel is next, and two of its functions already have names: the
-        seams `Wheel::FindDrivingSurface` (`0x0019a2a0`) and
-        `Wheel::ExchangeZForces` (`0x0019a1c8`), which Suspension calls
-        through function pointers that are NULL until that slice lands.
-        `3DS Files/source/wheel.h` already carries the 400-byte record.
+        Wheel is done. **DriveTrain is next**, and it is the cleanest
+        slice left: 39 symbols and 5484 bytes in one contiguous run from
+        `0x00182828` to `0x00183e10`, a 148-byte record whose every field
+        is named in the `.mdebug`, a 64-byte `DriveTrainInfo` and a
+        four-byte `DriveTrainState` holding one clutch float. It needs
+        `Engine` and `Table`, which are done, and `Wheel`, which is now
+        done too -- `pDriveWheel` at offset 24 is `Wheel *[4]`.
 
         **Build for ARM before calling a record done.** `wheel.h`'s layout
         assert was guarded with `#if __SIZEOF_POINTER__ == 4`, which meant
@@ -1034,7 +1070,7 @@ is citro3d and owns the top.
         on the wrong record. Every remaining class in this task has
         `bVector4` fields in it.
 
-        That leaves ~60.6 KB across ~279 functions still to go.
+        That leaves ~53.5 KB across ~206 functions still to go.
 26. [ ] Race/event logic, cop AI, pursuit (roadblocks, spike strips) --
         `HotPursuitEvent` already seen in the `.mdebug` strings survey
 27. [ ] Track rendering/streaming, collision. Carries a debt from task 24:

@@ -78,8 +78,11 @@ NL = chr(10)
 SOURCES = [
     "tools/src/suspension_test.c",
     "3DS Files/source/suspension.c",
+    "3DS Files/source/wheel.c",
     "3DS Files/source/steering.c",
     "3DS Files/source/rigidbody.c",
+    "3DS Files/source/carstate.c",   # wheel.c's SetState(CarState *, ...)
+    "3DS Files/source/emath.c",      # and the eMulMatrix it calls
     "3DS Files/source/bmatrix.c",
     "3DS Files/source/table.c",
     "3DS Files/source/bvector.c",
@@ -563,7 +566,7 @@ SUSP_OFFSETS = [
 WHEEL_OFFSETS = [
     ("WI", 12, 1), ("State", 28, 5), ("WorldMatrix", 112, 5),
     ("CarMatrix", 176, 5), ("Velocity", 240, 5), ("WorldGroundForce", 288, 5),
-    ("ContactPoint", 304, 5), ("ContactNormal", 320, 5), ("Damage", 364, 7),
+    ("ContactPoint", 304, 5), ("ContactNormal", 320, 5), ("Damage", 364, 5),
 ]
 
 STATE_OFF = 20 + 3 * SLACK
@@ -595,16 +598,25 @@ def s_layout():
     emit("arr _pad0 4")
     emit("arr _pad1 12")
 
-    # Six pointers in Wheel over a PS2 record of 400, plus the three pads
-    # the host's own alignment adds -- before WI, before Terrain and before
-    # TheSkidMaker -- then rounded up to the pointer.
+    # Five host-widened members in Wheel over a PS2 record of 400 -- WI,
+    # TI, CI, CS and the one pointer inside TheSkidMaker -- plus the two
+    # pads the host's own alignment adds, before WI and before
+    # TheSkidMaker, then rounded up to the pointer.
+    #
+    # Terrain is NOT one of them. `.mdebug` gives Wheel::Terrain as
+    # type#140 at offset=2688 bits=32, and SetTerrain takes `11TerrainType`
+    # -- a 32-bit enum, four bytes on both toolchains. An earlier draft of
+    # wheel.h had it as a bare `void *`, which cost a slack of its own and
+    # a pad in front of it and pushed everything from Damage on by eight;
+    # GetTerrain loads it with `lw` and GetDerivative multiplies it by 140
+    # to index the terrain table, so it was never a pointer.
     #
     # The PS2's quadword gap before WorldGroundForce is NOT subtracted here,
     # which is the correction the ARM build forced: wheel.h writes that gap
     # out as _pad2 now, because this port's bVector4 is four-byte aligned
     # and would otherwise close it on the handheld, where the record has to
     # be 400 bytes exactly.
-    wheel_bytes = 400 + 6 * SLACK + 3 * SLACK
+    wheel_bytes = 400 + 5 * SLACK + 2 * SLACK
     emit("sizeof Wheel %d" % ((wheel_bytes + PTR - 1) // PTR * PTR))
     for name, ps2, n in WHEEL_OFFSETS:
         emit("woff %s %d" % (pad(name, 20), ps2 + n * SLACK))

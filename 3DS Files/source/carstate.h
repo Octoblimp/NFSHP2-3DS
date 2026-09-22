@@ -57,15 +57,15 @@
 // quadword and then overwrites the fourth lane with 1.0f, so the radius
 // bleeds into the matrix for exactly one instruction. Kept, because a
 // three-float load would be a different instruction and this one is free.
-typedef struct WheelInfo {
-    float   PositionX, PositionY, PositionZ;   // 0
-    float   Radius;                            // 12
-    float   Width;                             // 16
-    int32_t WheelNumber;                       // 20
-    int32_t Padding[2];                        // 24
-} WheelInfo;
-
-typedef char carstate_wheelinfo_size_check[(sizeof(WheelInfo) == 32) ? 1 : -1];
+//
+// The record itself used to be written out here as well as in
+// cartypeinfo.h, from back when CarState was ported and CarTypeInfo was
+// not. Wheel is the first translation unit to include both headers, and
+// two identical definitions of one struct is a redefinition error rather
+// than a duplication nobody has to notice -- the same way RigidBodyInfo
+// went when Suspension first included rigidbody.h and cartypeinfo.h
+// together. cartypeinfo.h owns it now; the size check moved with it.
+#include "cartypeinfo.h"
 
 // Only the two fields CarState touches are named; the rest is the gap up to
 // them. `CarTypeInfoPrefix` rather than `CarTypeInfo` so that the real

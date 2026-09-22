@@ -64,10 +64,21 @@ from `State` to `RestPosition`, then climbs 4, 5, 6, 7 through the four
 pointers at the back. The header's assert spells out every one, because the
 alternative is a single term that happens to be right.
 
-`Wheel`'s is worse still, and `wheel.h` carries the same treatment: 1 at
-`WI`, 5 for the whole span from `State` to `ContactNormal`, then 7 at
-`Damage`, where the `Terrain` pointer has taken an alignment pad of its own
-on the way past.
+[Wheel](car-wheel.md)'s is the same shape and `wheel.h` carries the same
+treatment: the multiplier climbs 1, 2, 3, 4 across `WI`, `TI`, `CI` and
+`CS`, picks up the pad in front of `WI` to reach 5, holds 5 for the whole
+span from `State` to `CatchupFrictionMultiplier`, and reaches 6 at
+`TheSkidMaker`, where a second pad lands in front of the one pointer inside
+it.
+
+An earlier draft of this paragraph said 7 at `Damage`, on the theory that
+`Terrain` was a pointer. It is not: `.mdebug` gives `Wheel::Terrain` as
+type#140 at 32 bits, `SetTerrain` takes an `11TerrainType`, and
+`GetDerivative` multiplies the field by 140 to index the terrain table. A
+32-bit enum is four bytes on both toolchains and costs no slack at all. The
+mistake cost `suspension_check.py` four transcript lines the moment
+`wheel.c` was linked into it, which is the only reason it did not survive
+into the port.
 
 ### The four bytes the ARM build found
 
@@ -335,10 +346,24 @@ extern WheelFindDrivingSurfaceFn gWheelFindDrivingSurfaceFn;
 extern WheelExchangeZForcesFn    gWheelExchangeZForcesFn;
 ```
 
-Both are NULL until the Wheel slice lands, and both paths read that as zero
-and carry on rather than faulting. The transcript covers the NULL state as
-well as the wired one, because NULL is the state the handheld is actually in
-today.
+Both paths read a NULL seam as zero and carry on rather than faulting, and
+the transcript covers the NULL state as well as the wired one.
+
+**The Wheel slice has landed, and the handheld is still in the NULL state.**
+`wheel.c` defines both pointers and `wheel_install_seams()` points them at
+`Wheel::FindDrivingSurface` and `Wheel::ExchangeZForces` -- but nothing in
+`3DS Files/source/` calls it. That is not an oversight to fix here: there is
+no car on the handheld to install them for, because nothing constructs a
+`Suspension` or a `Wheel` yet. The call belongs to whichever slice first
+builds a car -- `PhysicsCar` or `Car` -- and it has to happen before the
+first `ResolveForces`, or the suspension silently runs with no ground under
+it. `tools/src/wheel_test.c`'s `[seams]` scenario is the only caller today,
+and it checks that installing twice is idempotent for that reason.
+
+The seams are a port artifact, not something the image has: the PS2 build
+calls both methods directly. They exist to keep `suspension.c` compilable
+before `wheel.c` existed, and once the car is built they could be collapsed
+back into direct calls.
 
 `wheel.h` exists only to give `Suspension` the offsets it indexes; it says
 so at the top, and it is **a layout, not a port**. Its assert is compiled on

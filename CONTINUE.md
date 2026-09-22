@@ -16,10 +16,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Eighteen cross-checkers pass, plus the table generators:
+Twenty-one cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
 ```
 
 ```
@@ -42,6 +42,9 @@ engine_check        8 scenarios,   413 lines, 0 differ   (54 caught, 2 equivalen
 cartypeinfo_check   4 scenarios,   177 lines, 0 differ   (41/41 mutations caught)
 cardriver_check     5 scenarios,   118 lines, 0 differ   (48/48 mutations caught)
 steering_check      5 scenarios,   873 lines, 0 differ   (43 caught, 1 equivalent)
+rigidbody_check    10 scenarios,   935 lines, 0 differ   (75 caught, 2 equivalent)
+suspension_check   10 scenarios,  1108 lines, 0 differ   (66 caught, 2 equivalent)
+wheel_check        19 scenarios, 10693 lines, 0 differ   (144 caught, 10 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 ```
@@ -84,43 +87,59 @@ and so replaced every boot.
 ## Next, in order
 
 1. **Task 25**, the car simulation -- part done, and **much bigger than
-   the task list said**. Seven slices are closed: `CarState`, `Engine` +
+   the task list said**. Eight slices are closed: `CarState`, `Engine` +
    `Table`, `CarTypeInfo`, `CarDriver` + `DriveTarget`'s layout,
-   `Steering` + `TwoWheelAckermanSteering`, `RigidBody`, and
-   `Suspension`, each with a checker and a doc under
+   `Steering` + `TwoWheelAckermanSteering`, `RigidBody`, `Suspension`
+   and `Wheel`, each with a checker and a doc under
    `docs/formats/car-*.md` (`RigidBody`'s is `rigid-body.md`).
 
    The old "178 functions, 16680 bytes" note was wrong by an order of
    magnitude -- it matched a narrow symbol pattern and missed most
    methods. Remeasured by demangling every symbol to its owning class,
-   **~60.6 KB across ~279 functions** is still to go:
+   **~53.5 KB across ~206 functions** is still to go:
 
    ```
    Car 80 funcs 22876 B   DriveTarget (methods) 28 / 8636
-   PhysicsCar 16 / 8496   Wheel 73 / 7112
-   Mellovator 31 / 5420   DriveTrain 38 / 4920
-   MellowMover 13 / 3096
+   PhysicsCar 16 / 8496   Mellovator 31 / 5420
+   DriveTrain 38 / 4920   MellowMover 13 / 3096
    ```
 
    At this repo's verification standard that is several sessions, not
    one. **`RigidBody` and `DriveTarget` are prerequisites the task list
    never named** -- `Suspension`, `PhysicsCar` and `Car` all need
-   `RigidBody`. Next in order: `Wheel`, `DriveTrain`, `DriveTarget`'s 28
-   methods, `PhysicsCar`, `Car`, with `Mellovator` and `MellowMover`
-   last.
+   `RigidBody`. Next in order: `DriveTrain`, `DriveTarget`'s 28 methods,
+   `PhysicsCar`, `Car`, with `Mellovator` and `MellowMover` last.
 
-   **`Wheel` is the next slice and half of it is already written down.**
-   `3DS Files/source/wheel.h` is a 400-byte layout with no port behind
-   it -- it says so at the top -- put there so `Suspension` could index
-   into it. Porting `Wheel` means filling that in, and the first two
-   functions to do are the two `Suspension` has left as seams:
-   `Wheel::FindDrivingSurface` (`0x0019a2a0`, forwards to
-   `Wheel::CheckTerrain`) and `Wheel::ExchangeZForces` (`0x0019a1c8`,
-   rewrites four Wheel fields). `gWheelFindDrivingSurfaceFn` and
-   `gWheelExchangeZForcesFn` in `suspension.h` are the seams; they are
-   `NULL` on hardware today, and `suspension_check.py` covers both the
-   NULL state and the wired one, so pointing them at the real methods is
-   a two-line change plus a transcript rerun.
+   **`DriveTrain` is the next slice, and it is the cleanest one left.**
+   39 symbols and 5484 bytes in one contiguous run from `0x00182828` to
+   `0x00183e10`, with every field of its 148-byte record named in the
+   `.mdebug`:
+
+   ```
+   State 12 (DriveTrainState, one clutch float)   DTI 16
+   pEngine 20   pDriveWheel 24 (Wheel *[4])       pCarState 40
+   DesiredGear 44  CurrentGear 48  PreviousGear 52
+   CurrentClutchState 56  Shifting 60
+   DifferentialAngularVelocity 64  GearHoldTime 68  SportGear 72
+   ShiftUpRPM 76 (float[9])   ShiftDownRPM 112 (float[9])
+   ```
+
+   Bytes 0..11 are the base class, and the vtable is at the end as
+   always in this image. `DriveTrainInfo` is 64 bytes and
+   `DriveTrainState` is 4. Its dependencies -- `Engine`, `Table` and
+   `Wheel` -- are all ported. `CalculateShiftPoints` (`0x00182828`, 564
+   bytes) is a free function in the same object and builds both RPM
+   arrays; it is the one to read first.
+
+   **`Wheel`'s two seams are wired but nothing installs them.**
+   `wheel_install_seams()` points `gWheelFindDrivingSurfaceFn` and
+   `gWheelExchangeZForcesFn` at the real methods, and no code in
+   `3DS Files/source/` calls it, so they are still `NULL` on hardware.
+   That is correct today -- nothing constructs a `Suspension` or a
+   `Wheel` yet -- but **whichever slice first builds a car owes that
+   call**, before that car's first `ResolveForces`, or every corner
+   reports airborne. The seams are a port artifact: at `0x0019bdd4` and
+   `0x0019c104` the PS2 build makes two ordinary `jal`s.
 
    The HUD split is settled, below.
 2. Then in order: 26 race/cop AI, 27 track render/stream/collision,
@@ -234,6 +253,37 @@ Ordered roughly by how much time it costs to rediscover.
   fails to compile because it used `memset` without `<string.h>` was
   rejected by the compiler rather than by the transcript. Both were
   rewritten into the transcription errors they were standing in for.
+
+  Two more shapes of the same mistake turned up in `Wheel`. A mutation
+  whose body writes only to **its own parameters** (`lo = hi = value;` in
+  an empty function) is three dead stores and cannot be caught by
+  anything. And a mutation that writes **the value the target already
+  held** -- `gMaxStaticSlip = value` where the call passed 0.5 and
+  `gMaxStaticSlip` is 0.5 -- leaves no trace either; the call site had to
+  pass 0.375 before the mutation meant anything.
+* **A comment claiming a case is covered is not coverage, and it is worse
+  than no comment.** `wheel_check.py` and `wheel_test.c` both said vx 0.4
+  with a spin of 1.25 put the slip at exactly zero and so reached
+  `GuessGroundForce`'s zero-magnitude early-out. `1.25 * 0.32f` is
+  0.399999976, so the slip was -2.98e-08 and the guard was never reached
+  at all. The mutation that deletes it survived a full pass, and the
+  comment was read twice as the reason it could not be a hole. Where a
+  case depends on an exact float, compute it rather than asserting it --
+  `37.5 * 0.32f` is 12 with nothing left over, and that is the pair that
+  works.
+* **An explicit alignment pad cannot be checked by deleting it.** A
+  `uint8_t _pad[2]` in front of a pointer is reinstated by the ABI the
+  moment it is removed: every following offset, and `sizeof`, come out
+  unchanged and the layout assert passes. What pins the field after it is
+  the `offsetof` in the assert. Do not read "the pad mutation survived" as
+  a coverage hole.
+* **A guard can be protecting the read rather than the number.**
+  `Table::GetValue` returns `pTable[i]` outright when `i == last`. Delete
+  that and the interpolation computes
+  `pTable[last] + (pTable[last + 1] - pTable[last]) * 0.0`, because the
+  weight is exactly zero there -- the same number, off the back of a load
+  one element past the end of the array. A transcript cannot see it and a
+  sanitiser build would.
 * **An array's extent is part of the layout claim, and offsets do not pin
   it.** Shrink an array, pad behind it, and every following offset *and*
   the total size are unchanged -- the static assert passes. Nine
