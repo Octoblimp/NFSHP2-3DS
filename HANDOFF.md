@@ -3454,10 +3454,55 @@ first `ResolveForces`.
 the same run, which is why the object is 9424 bytes against a DriveTarget
 tally of 8636. The copy constructor is emitted somewhere else again, at
 `0x001da210` inside `CarCollisionDetect.obj` (`.text 0x001d8770`, `0x1bf8`
-long). That makes twenty-six methods in the object plus one outside it,
-against a tally of twenty-eight -- **reconcile the count before planning
-the slice**, rather than assuming which of the two is wrong. The 528-byte
+long). The tally of 28 reconciles exactly once the two non-methods are
+named: twenty-six methods in the object, that copy constructor outside it,
+and the `_GLOBAL_$I$__11DriveTarget` static-init thunk at `0x0020ab48`,
+8636 bytes between them. **Twenty-six functions to port.** The 528-byte
 record is already spelled out and ARM-compiled in `drivetarget.h`, so the
-layout is done. Twelve methods take no `Car *` and depend only on ported
-code, and they are the part that can be started now; they are listed in
-`CONTINUE.md`.
+layout is done.
+
+### DriveTarget does not need Car, and that was checked
+
+The order recorded in `CONTINUE.md` and `TASKS.md` had DriveTarget waiting
+on `Car`, on the strength of thirteen of its twenty-six methods taking a
+`Car *`. They do, and it does not matter: **every one of them reaches
+`Car` only through the `CarState` embedded at byte 64**, which has been
+ported since the first slice of this task. `Car` is 2016 bytes and its
+`.mdebug` entry carries `State:/0263,512,8192` -- bit 512, so byte 64,
+1024 bytes -- and across `Clear`, `InterpolatePoint`, `Resample`,
+`EstimateScore`, `CalculateMaxSpeed`, the acceleration fillers and the
+four `AddPointToTarget` overloads the only Car offsets touched are 64
+(passed straight on as a `CarState *`), 96 (`State.Position`) and 112
+(`State.Velocity`). The three free functions in the call graph are the
+same story: `IsPointAheadOfCar` (`0x001c0e30`) reads 96 and 112 and
+nothing else, `CalculateLookAheadDistance` (`0x001c0c20`) is
+`max(State.VelocityMagnitude * 2.0f, 20.0f)` in six instructions, and
+`GetMaxLateralAcceleration(Car *)` (`0x00209f30`) never reads its
+argument -- it is `lui at,0x41f0; mtc1 at,$f0`, a constant 30.0f. A `Car`
+stand-in whose only live member is a `CarState` covers the class, so
+**DriveTarget can be ported in full now**, and the docs have been
+corrected to say so.
+
+Blocked, and only these three: `DoSnapshot` on `ReplaySnapshot`; `Dump` on
+`Car::WorldToCar`, which is a tail-jump to
+`CarState::WorldToCar(bVector2 *, bVector2 *)` at `0x001b6ab0` that
+`carstate.c` does not carry yet; and the `DrivingLocation` overload of
+`AddPointToTarget` on `DrivingLocation::IsClear`, which is
+`lw v0,0(a0); sltiu v0,v0,1` -- one word at offset 0, so a stand-in
+covers it until task 26 brings the class.
+
+The gp-relative constants are resolved and written into `CONTINUE.md` so
+they do not have to be found twice (`_gp` is `0x00328bf0`): `Clear`'s and
+`CalculateTime`'s speed epsilons are both 0.001 at `0x00321fa8` and
+`0x00321fc0`, `CalculateTime`'s "no time" return is 9999999.0 at
+`0x00321fc4`, and the look-ahead scale and floor are 2.0 and 20.0 at
+`0x00323a50` and `0x00323a54`.
+
+Two shapes to model carefully when the port is written. `GetAngle` clamps
+its index down to `NumPoints - 2` and never back up to 0, so a
+`NumPoints` of 0 or 1 indexes `Points[-2]` and `Points[-1]` -- a real
+out-of-bounds read in the shipped game, the same flavour as
+`Table::GetValue`'s. And `SetPoint`'s `bVector2` overload builds a stack
+`bVector3`, writes x, y and z and leaves w alone, then the `bVector3`
+overload copies all sixteen bytes with `lqc2`/`sqc2`, so `Points[i].w`
+takes whatever was on the stack.

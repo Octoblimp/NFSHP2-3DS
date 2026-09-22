@@ -127,24 +127,67 @@ and so replaced every boot.
    * **The copy constructor is not in it either.**
      `DriveTarget::DriveTarget(DriveTarget const &)` is emitted at
      `0x001da210`, inside `CarCollisionDetect.obj` (`.text 0x001d8770`,
-     `0x1bf8` long). Twenty-six DriveTarget methods are in
-     `DriveTarget.obj` and that one is not, which is twenty-seven
-     against a tally of twenty-eight -- **reconcile that count before
-     planning the slice** rather than assuming which of the two is
-     wrong.
-   * **Most of it wants `Car`, which is the last slice in the order.**
-     Twelve methods take no `Car *` at all and depend only on things
-     already ported: the constructor, the destructor, `operator=`,
-     `GetAngle`, `ShiftLeft`, `ShiftRight`, both `SetPoint`s,
-     `RecalculateLength`, `CalculateTime`, `GetFirstPoint(CarState *)`
-     and `GetRouteAndRoutePoint`, which wants `TrackRoute` and got it in
-     task 24. That is the part that can be ported and checked now. The
-     four `AddPointToTarget` overloads, `Resample`, `CalculateMaxSpeed`,
-     `EstimateScore`, `Clear`, `Dump` and the two acceleration fillers
-     all take a `Car *` and need reading before it is known how much of
-     `Car` they actually touch.
+     `0x1bf8` long). The tally of 28 reconciles exactly, and it is worth
+     knowing which 28: twenty-six methods in `DriveTarget.obj` (8304
+     bytes with the thunk), that copy constructor (332), and the
+     `_GLOBAL_$I$__11DriveTarget` static-init thunk at `0x0020ab48`
+     (16) -- 8636 between them. So there are **twenty-six functions to
+     port**, not twenty-eight.
+   * **`Car` is NOT a prerequisite -- this was checked, not assumed.**
+     Thirteen of the twenty-six take no `Car *` at all. The other
+     thirteen do, and **every one of them reaches `Car` only through
+     the `CarState` embedded at byte 64**, which is ported. `Car` is
+     2016 bytes with `State:/0263,512,8192` in its `.mdebug` entry --
+     bit 512, so byte 64, 1024 bytes -- and the only Car offsets any of
+     these methods touch are 64 (passed on as `CarState *`), 96
+     (`State.Position`) and 112 (`State.Velocity`). A `Car` stand-in
+     whose only live member is a `CarState` is enough for the whole
+     class. Two of the three free functions they call are the same
+     story: `IsPointAheadOfCar` (`0x001c0e30`) reads only 96 and 112,
+     and `CalculateLookAheadDistance` (`0x001c0c20`) is
+     `max(State.VelocityMagnitude * 2.0f, 20.0f)` and nothing else.
+     `GetMaxLateralAcceleration(Car *)` (`0x00209f30`) does not read
+     the car at all -- it is `lui at,0x41f0; mtc1 at,$f0`, a constant
+     30.0f in four instructions.
 
-   `DoSnapshot` (`0x00208830`) is `ReplaySnapshot` again.
+   What is actually blocked, after reading every call site:
+
+   ```
+   DoSnapshot      0x00208830  ReplaySnapshot, as ever
+   Dump            0x002095f8  Car::WorldToCar -- a tail-jump to
+                               CarState::WorldToCar(bVector2*,bVector2*)
+                               at 0x001b6ab0, which carstate.c does not
+                               have yet. Debug output; port it last.
+   AddPointToTarget(bVector3*, DrivingLocation*, bool, Car*)
+                   0x00208e60  DrivingLocation::IsClear, which is
+                               `lw v0,0(a0); sltiu v0,v0,1` -- one word
+                               at offset 0. A two-field stand-in covers
+                               it; the class itself is task 26's.
+   FillWithCurrentAcceleration
+                   0x00209fb0  StraightLinePredict (0x001c3338), which
+                               is itself only CarState + Clear +
+                               AddPointToTarget, so it can come along.
+   ```
+
+   Constants already resolved, so they do not have to be found again
+   (`_gp` is `0x00328bf0`):
+
+   ```
+   0x00321fa8  Clear's speed epsilon            0.001
+   0x00321fc0  CalculateTime's speed epsilon    0.001
+   0x00321fc4  CalculateTime's "no time" value  9999999.0
+   0x00323a50  look-ahead scale                 2.0
+   0x00323a54  look-ahead floor                 20.0
+   ```
+
+   And two shapes worth knowing before writing the model:
+   `GetAngle` clamps its index up to `NumPoints - 2` but never back up
+   to 0, so with `NumPoints` 0 or 1 it indexes `Points[-2]` and
+   `Points[-1]` -- a real out-of-bounds read in the shipped game, the
+   same flavour as `Table::GetValue`'s. And `SetPoint`'s `bVector2`
+   overload builds a stack `bVector3`, sets x, y and z and leaves w
+   alone, then the `bVector3` overload copies all sixteen bytes with
+   `lqc2`/`sqc2` -- so `Points[i].w` takes whatever was on the stack.
 
    **`Wheel`'s two seams are wired but nothing installs them.**
    `wheel_install_seams()` points `gWheelFindDrivingSurfaceFn` and

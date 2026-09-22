@@ -1075,16 +1075,44 @@ is citro3d and owns the top.
         (`0x00208fa0`) are in it too, which is why the object is 9424
         bytes against a DriveTarget tally of 8636. The copy constructor
         is emitted elsewhere again, at `0x001da210` in
-        `CarCollisionDetect.obj`. Twenty-six methods in the object plus
-        that one is twenty-seven, not twenty-eight: **reconcile the
-        count before planning the slice.** The 528-byte record is
+        `CarCollisionDetect.obj`. The tally of 28 reconciles: 26 methods
+        in the object, that copy constructor outside it, and the
+        `_GLOBAL_$I$` static-init thunk at `0x0020ab48` -- 8636 bytes
+        between them, so **26 functions to port**. The 528-byte record is
         already in `3DS Files/source/drivetarget.h` and ARM-compiled, so
-        the layout is done. Twelve methods take no `Car *` and depend
-        only on ported code -- ctor, dtor, `operator=`, `GetAngle`,
-        `ShiftLeft`, `ShiftRight`, both `SetPoint`s,
-        `RecalculateLength`, `CalculateTime`, `GetFirstPoint(CarState
-        *)` and `GetRouteAndRoutePoint` -- and are where to start, since
-        `Car` itself is the last slice in the order.
+        the layout is done.
+
+        **`Car` is not a prerequisite for it, and that was checked
+        rather than assumed.** Thirteen of the twenty-six take no
+        `Car *` at all; the other thirteen reach `Car` only through the
+        `CarState` embedded at byte 64, which is ported. `Car` is 2016
+        bytes and its `.mdebug` entry carries `State:/0263,512,8192` --
+        bit 512, so byte 64, 1024 bytes -- and the only Car offsets
+        these methods touch are 64 (passed straight on as a
+        `CarState *`), 96 (`State.Position`) and 112
+        (`State.Velocity`). The free functions are the same story:
+        `IsPointAheadOfCar` (`0x001c0e30`) reads 96 and 112 and nothing
+        else, `CalculateLookAheadDistance` (`0x001c0c20`) is
+        `max(State.VelocityMagnitude * 2, 20)`, and
+        `GetMaxLateralAcceleration(Car *)` never reads the car at all --
+        it is a constant 30.0f in four instructions. A `Car` stand-in
+        whose only live member is a `CarState` covers the whole class,
+        so **DriveTarget can be done in full now**, not after Car.
+
+        Genuinely blocked, and only these three: `DoSnapshot` on
+        `ReplaySnapshot`; `Dump` on `Car::WorldToCar`, which tail-jumps
+        to `CarState::WorldToCar(bVector2 *, bVector2 *)` at
+        `0x001b6ab0` and carstate.c does not carry that one yet; and the
+        `DrivingLocation` overload of `AddPointToTarget` on
+        `DrivingLocation::IsClear`, which is
+        `lw v0,0(a0); sltiu v0,v0,1` and needs a one-word stand-in until
+        task 26 brings the class. The gp-relative constants are resolved
+        and written down in `CONTINUE.md` (`_gp` is `0x00328bf0`), along
+        with two shapes to model carefully: `GetAngle` clamps its index
+        down to `NumPoints - 2` without clamping back up to 0, so a
+        `NumPoints` of 0 or 1 reads `Points[-2]`, and `SetPoint`'s
+        `bVector2` overload leaves the stack `bVector3`'s w untouched
+        before a sixteen-byte `lqc2`/`sqc2` copy.
 
         **Build for ARM before calling a record done.** `wheel.h`'s layout
         assert was guarded with `#if __SIZEOF_POINTER__ == 4`, which meant
