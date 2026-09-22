@@ -980,6 +980,9 @@ is citro3d and owns the top.
         equivalent). **`Wheel.obj`** (`docs/formats/car-wheel.md`,
         `tools/wheel_check.py`; 19 scenarios, 10693 lines, 0 differ; 154
         mutations, 144 caught, 10 equivalent, 0 unexplained).
+        **`DriveTrain`** (`docs/formats/car-drivetrain.md`,
+        `tools/drivetrain_check.py`; 18 scenarios, 492 lines, 0 differ;
+        176 mutations, 173 caught, 3 equivalent, 0 unexplained).
 
         **Wheel's first mutation pass came back with twelve unexplained
         survivors, and that is the part of the slice worth carrying
@@ -1027,7 +1030,7 @@ is citro3d and owns the top.
         | PhysicsCar | 16 | 8496 |
         | ~~Wheel~~ | ~~73~~ | ~~7112~~ |
         | Mellovator | 31 | 5420 |
-        | DriveTrain | 38 | 4920 |
+        | ~~DriveTrain~~ | ~~38~~ | ~~4920~~ |
         | ~~RigidBody~~ | ~~47~~ | ~~4508~~ |
         | MellowMover | 13 | 3096 |
         | ~~Suspension~~ | ~~29~~ | ~~1944~~ |
@@ -1048,16 +1051,40 @@ is citro3d and owns the top.
         Suggested order, smallest and most independent first, each
         verified and committed on its own: ~~Steering +
         TwoWheelAckermanSteering~~, ~~RigidBody~~, ~~Suspension~~,
-        ~~Wheel~~ (all done), then DriveTrain, DriveTarget's methods,
-        PhysicsCar, Car, with Mellovator and MellowMover last.
+        ~~Wheel~~, ~~DriveTrain~~ (all done), then DriveTarget's
+        methods, PhysicsCar, Car, with Mellovator and MellowMover last.
 
-        Wheel is done. **DriveTrain is next**, and it is the cleanest
-        slice left: 39 symbols and 5484 bytes in one contiguous run from
-        `0x00182828` to `0x00183e10`, a 148-byte record whose every field
-        is named in the `.mdebug`, a 64-byte `DriveTrainInfo` and a
-        four-byte `DriveTrainState` holding one clutch float. It needs
-        `Engine` and `Table`, which are done, and `Wheel`, which is now
-        done too -- `pDriveWheel` at offset 24 is `Wheel *[4]`.
+        **DriveTrain's mutation pass came back with eighteen unexplained
+        survivors**, on a transcript that agreed with the model on every
+        line -- which is the whole reason to run the pass: a clean diff
+        says the two sides compute the same thing, not that the
+        scenarios reach the code. Sixteen were real holes and are
+        killed; two are argued in `EQUIVALENT`. Three shapes are new and
+        are written out in `docs/formats/car-drivetrain.md` and in
+        `CONTINUE.md`'s "What not to trust": a **fixture that agrees
+        with itself** (swapping two globals the image ships at the same
+        value changes nothing), a `<`/`<=` boundary that can only be hit
+        by **feeding the computed value back in** rather than guessing a
+        number near it, and a **search loop no fixture ever made work**,
+        because every engine's torque curve crossed over on the first
+        probe.
+
+        **DriveTarget's 28 methods are next.** `DriveTarget.obj` is real
+        -- `.text 0x002086f8`, `0x24d0` -- but it is not all DriveTarget:
+        seven `OBB` methods and the free function `bDoublesBack`
+        (`0x00208fa0`) are in it too, which is why the object is 9424
+        bytes against a DriveTarget tally of 8636. The copy constructor
+        is emitted elsewhere again, at `0x001da210` in
+        `CarCollisionDetect.obj`. Twenty-six methods in the object plus
+        that one is twenty-seven, not twenty-eight: **reconcile the
+        count before planning the slice.** The 528-byte record is
+        already in `3DS Files/source/drivetarget.h` and ARM-compiled, so
+        the layout is done. Twelve methods take no `Car *` and depend
+        only on ported code -- ctor, dtor, `operator=`, `GetAngle`,
+        `ShiftLeft`, `ShiftRight`, both `SetPoint`s,
+        `RecalculateLength`, `CalculateTime`, `GetFirstPoint(CarState
+        *)` and `GetRouteAndRoutePoint` -- and are where to start, since
+        `Car` itself is the last slice in the order.
 
         **Build for ARM before calling a record done.** `wheel.h`'s layout
         assert was guarded with `#if __SIZEOF_POINTER__ == 4`, which meant
@@ -1070,7 +1097,7 @@ is citro3d and owns the top.
         on the wrong record. Every remaining class in this task has
         `bVector4` fields in it.
 
-        That leaves ~53.5 KB across ~206 functions still to go.
+        That leaves ~48.5 KB across ~168 functions still to go.
 26. [ ] Race/event logic, cop AI, pursuit (roadblocks, spike strips) --
         `HotPursuitEvent` already seen in the `.mdebug` strings survey
 27. [ ] Track rendering/streaming, collision. Carries a debt from task 24:

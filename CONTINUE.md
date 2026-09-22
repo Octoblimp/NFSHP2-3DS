@@ -16,10 +16,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Twenty-one cross-checkers pass, plus the table generators:
+Twenty-three cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
 ```
 
 ```
@@ -45,6 +45,7 @@ steering_check      5 scenarios,   873 lines, 0 differ   (43 caught, 1 equivalen
 rigidbody_check    10 scenarios,   935 lines, 0 differ   (75 caught, 2 equivalent)
 suspension_check   10 scenarios,  1108 lines, 0 differ   (66 caught, 2 equivalent)
 wheel_check        19 scenarios, 10693 lines, 0 differ   (144 caught, 10 equivalent)
+drivetrain_check   18 scenarios,   492 lines, 0 differ   (173 caught, 3 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 ```
@@ -87,49 +88,63 @@ and so replaced every boot.
 ## Next, in order
 
 1. **Task 25**, the car simulation -- part done, and **much bigger than
-   the task list said**. Eight slices are closed: `CarState`, `Engine` +
+   the task list said**. Nine slices are closed: `CarState`, `Engine` +
    `Table`, `CarTypeInfo`, `CarDriver` + `DriveTarget`'s layout,
-   `Steering` + `TwoWheelAckermanSteering`, `RigidBody`, `Suspension`
-   and `Wheel`, each with a checker and a doc under
+   `Steering` + `TwoWheelAckermanSteering`, `RigidBody`, `Suspension`,
+   `Wheel` and `DriveTrain`, each with a checker and a doc under
    `docs/formats/car-*.md` (`RigidBody`'s is `rigid-body.md`).
 
    The old "178 functions, 16680 bytes" note was wrong by an order of
    magnitude -- it matched a narrow symbol pattern and missed most
    methods. Remeasured by demangling every symbol to its owning class,
-   **~53.5 KB across ~206 functions** is still to go:
+   **~48.5 KB across ~168 functions** is still to go:
 
    ```
    Car 80 funcs 22876 B   DriveTarget (methods) 28 / 8636
    PhysicsCar 16 / 8496   Mellovator 31 / 5420
-   DriveTrain 38 / 4920   MellowMover 13 / 3096
+   MellowMover 13 / 3096
    ```
 
    At this repo's verification standard that is several sessions, not
    one. **`RigidBody` and `DriveTarget` are prerequisites the task list
    never named** -- `Suspension`, `PhysicsCar` and `Car` all need
-   `RigidBody`. Next in order: `DriveTrain`, `DriveTarget`'s 28 methods,
-   `PhysicsCar`, `Car`, with `Mellovator` and `MellowMover` last.
+   `RigidBody`. Next in order: `DriveTarget`'s 28 methods, `PhysicsCar`,
+   `Car`, with `Mellovator` and `MellowMover` last.
 
-   **`DriveTrain` is the next slice, and it is the cleanest one left.**
-   39 symbols and 5484 bytes in one contiguous run from `0x00182828` to
-   `0x00183e10`, with every field of its 148-byte record named in the
-   `.mdebug`:
+   **`DriveTarget`'s methods are the next slice**, and unlike `DriveTrain`
+   this one has an object of its own: `.text 0x002086f8`, `0x24d0` long,
+   `DriveTarget.obj`. The 528-byte record is already spelled out and
+   ARM-compiled in `3DS Files/source/drivetarget.h` -- `CarDriver` embeds
+   it at offset 0 -- so the layout is done and what is left is code.
 
-   ```
-   State 12 (DriveTrainState, one clutch float)   DTI 16
-   pEngine 20   pDriveWheel 24 (Wheel *[4])       pCarState 40
-   DesiredGear 44  CurrentGear 48  PreviousGear 52
-   CurrentClutchState 56  Shifting 60
-   DifferentialAngularVelocity 64  GearHoldTime 68  SportGear 72
-   ShiftUpRPM 76 (float[9])   ShiftDownRPM 112 (float[9])
-   ```
+   Three things to know before starting it:
 
-   Bytes 0..11 are the base class, and the vtable is at the end as
-   always in this image. `DriveTrainInfo` is 64 bytes and
-   `DriveTrainState` is 4. Its dependencies -- `Engine`, `Table` and
-   `Wheel` -- are all ported. `CalculateShiftPoints` (`0x00182828`, 564
-   bytes) is a free function in the same object and builds both RPM
-   arrays; it is the one to read first.
+   * **The object is not all DriveTarget.** `OBB` has seven methods in
+     it (`OBB::OBB`, `~OBB`, `operator=`, `Render`, `DoNotRender`,
+     `DoSnapshot`, `Print`) and the free function `bDoublesBack`
+     (`0x00208fa0`) sits in the middle of the run. That is why the
+     object is 9424 bytes where the DriveTarget tally is 8636.
+   * **The copy constructor is not in it either.**
+     `DriveTarget::DriveTarget(DriveTarget const &)` is emitted at
+     `0x001da210`, inside `CarCollisionDetect.obj` (`.text 0x001d8770`,
+     `0x1bf8` long). Twenty-six DriveTarget methods are in
+     `DriveTarget.obj` and that one is not, which is twenty-seven
+     against a tally of twenty-eight -- **reconcile that count before
+     planning the slice** rather than assuming which of the two is
+     wrong.
+   * **Most of it wants `Car`, which is the last slice in the order.**
+     Twelve methods take no `Car *` at all and depend only on things
+     already ported: the constructor, the destructor, `operator=`,
+     `GetAngle`, `ShiftLeft`, `ShiftRight`, both `SetPoint`s,
+     `RecalculateLength`, `CalculateTime`, `GetFirstPoint(CarState *)`
+     and `GetRouteAndRoutePoint`, which wants `TrackRoute` and got it in
+     task 24. That is the part that can be ported and checked now. The
+     four `AddPointToTarget` overloads, `Resample`, `CalculateMaxSpeed`,
+     `EstimateScore`, `Clear`, `Dump` and the two acceleration fillers
+     all take a `Car *` and need reading before it is known how much of
+     `Car` they actually touch.
+
+   `DoSnapshot` (`0x00208830`) is `ReplaySnapshot` again.
 
    **`Wheel`'s two seams are wired but nothing installs them.**
    `wheel_install_seams()` points `gWheelFindDrivingSurfaceFn` and
@@ -271,6 +286,32 @@ Ordered roughly by how much time it costs to rediscover.
   case depends on an exact float, compute it rather than asserting it --
   `37.5 * 0.32f` is 12 with nothing left over, and that is the pair that
   works.
+* **A mutation can survive because the fixture agrees with itself.**
+  Three of `DriveTrain`'s eighteen survivors were that shape: a swap of
+  `gShiftUpDetune` for `gShiftDownDetune` where the image ships both at
+  0.95, a dropped store of a pedal the constructor had already left at
+  the value the store writes, and a clamp to `FIRST_GEAR` of a
+  `DesiredGear` the constructor had already set to `FIRST_GEAR`. Nothing
+  is wrong with the mutation or with the code -- the input cannot tell
+  them apart. Drive the fixture from a value the object would have to go
+  out of its way to produce (detunes of 0.8 and 0.6, a pedal at 0.25, a
+  gear of fifth) and all three die.
+* **A `<` against `<=` needs the two sides equal bit for bit, and
+  picking a likely number is not good enough.** `DriveTrain`'s inclusive
+  mutants are killed by writing the shift point back as the very RPM the
+  object computes, from the same product on both sides, so the compare
+  is against itself. Where the fixture cannot be fed back like that the
+  value has to be searched for: `94.2477036f` is the only float whose
+  product with the rads-to-RPM constant is exactly 900.0f, and both
+  neighbours land an ulp away.
+* **A mutation nothing reaches is not covered by the scenario next to
+  it.** Two of `DriveTrain`'s survivors were in the crossover search,
+  which only does work when the torque curve falls hard past its peak --
+  every fixture engine crossed over on the first probe or not at all, so
+  the search's own branches never ran. Two extra engines, a steep curve
+  and an all-zero one for the single case where two sides can be equal,
+  killed both. Check that the *shape* of the fixture data exercises the
+  loop before concluding the loop is equivalent.
 * **An explicit alignment pad cannot be checked by deleting it.** A
   `uint8_t _pad[2]` in front of a pointer is reinstated by the ABI the
   moment it is removed: every following offset, and `sizeof`, come out

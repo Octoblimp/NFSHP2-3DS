@@ -3281,7 +3281,183 @@ than a TODO. `DoSnapshot` needs `ReplaySnapshot`, the same dependency
 `CarState`, `Engine`, `CarDriver`, `Steering`, `RigidBody` and
 `Suspension` are all waiting on.
 
-**Next is `DriveTrain`** -- 39 symbols, 5484 bytes, one contiguous run from
+**Next is `DriveTrain`** -- 39 symbols, 5608 bytes, one contiguous run from
 `0x00182828`, a 148-byte record fully named in the `.mdebug`, and every
 dependency (`Engine`, `Table`, `Wheel`) already ported. The layout and the
 reading order are in `CONTINUE.md`.
+
+---
+
+## Session 23 (2026-09-21) -- Task 25, the drivetrain, and eighteen survivors
+
+`DriveTrain` is ported: `3DS Files/source/drivetrain.{c,h}`, cross-checked
+by `tools/drivetrain_check.py` against `tools/src/drivetrain_test.c` (18
+scenarios, 492 lines, 0 differ; 176 mutations, 173 caught, 3 equivalent, 0
+unexplained), written up in `docs/formats/car-drivetrain.md`. The ARM build
+compiles it and the 148-byte layout assert passes unguarded. Ninth slice of
+task 25, and the first whose every dependency -- `Engine`, `Table`, `Wheel`
+-- was already on the handheld.
+
+The gearbox, the clutch and the differential: everything between the
+crankshaft and the four rims. One state float, and it is not a physical
+quantity -- it is how far the clutch pedal is up, 0 to 1.
+
+### There is no DriveTrain.obj
+
+The class is a contiguous run of 39 symbols, `0x00182828 .. 0x00183e10`,
+5608 bytes, **inside `Engine.obj`** -- whose `.text` the map puts at
+`0x001823d8`, `0x1b98` long, with Engine's own nine functions below the run
+and twenty-five above it and none of Engine's interleaved. That is why the
+vtable, `ClutchSpeed` and the pooled literals are all quoted as Engine.obj's
+`.rodata`, `.data` and `.lit4`: DriveTrain has no sections of its own.
+
+The same check turned up an error in an earlier slice's doc.
+`docs/formats/car-steering.md` opened by quoting a `Steering.obj` and a
+`TwoWheelAckermanSteering.obj`, and neither exists: both classes live in
+`Suspension.obj` (`.text 0x0019ba98`, `0xb08`), and unlike DriveTrain they
+are *not* contiguous -- the three are interleaved, with
+`Steering::~Steering` as the object's first symbol and Suspension's 29
+methods sitting in the middle of TwoWheelAckerman's range. The doc now says
+so and lists the symbols in address order. `steering.h` was right all
+along, which is why it gives addresses one at a time.
+
+### The mutation pass came back with eighteen unexplained survivors
+
+On a transcript that agreed with the model on every one of its 443 lines.
+That is the reason to run the pass at all: **a clean diff says the two
+sides compute the same thing, not that the scenarios reach the code.**
+Sixteen were reachable and are now killed, which took the transcript to 492
+lines; two cannot be killed by any input and are argued in `EQUIVALENT`.
+Four groups, and three of them are shapes this repo had not seen before.
+
+**A fixture can agree with itself.** Three survivors were that.
+`ct-shift-points-use-down-detune` swaps which detune the constructor hands
+to `CalculateShiftPoints` -- and the image ships `gShiftUpDetune` and
+`gShiftDownDetune` both at 0.95, so the swap is invisible.
+`ca-neutral-skips-pedal` drops the pedal store in NEUTRAL, and
+`Engine::Engine` leaves `ThrottleOverride` at 1.0, which is exactly what
+the arm writes. `au-low-gear-bound` clamps `DesiredGear` to `FIRST_GEAR`
+when the constructor had already set it to `FIRST_GEAR`. Nothing is wrong
+with the mutation or with the code in any of the three; the input cannot
+tell them apart. Detunes of 0.8 and 0.6, a pedal pre-set to 0.25 and a
+`DesiredGear` of fifth kill all three.
+
+**An inclusive-comparison mutant needs the two sides equal bit for bit, and
+picking a likely number is not good enough.** `au-up-test-inclusive` and
+`au-down-inclusive` are killed by writing the shift point back as the very
+RPM the object will compute, from the same product on both sides, so the
+comparison is against itself -- choosing an engine speed and hoping the
+product lands on a table entry is only true to a few ulps.
+`ss-refuse-inclusive` could not be fed back that way: it needed an engine
+speed whose sport RPM is exactly second gear's 900 RPM crawl point, and a
+numeric search says `94.2477036f` is the one and only float whose product
+with the rads-to-RPM constant is exactly 900.0f. Both neighbours land an
+ulp off. `ss-limiter-margin` is a fourth boundary of a different shape --
+it deletes the 300 RPM margin below `MaxRPM`, and the two engine speeds
+already in the transcript were over both thresholds and under both; 720
+rad/s sits in the band at 6875.5.
+
+**A search loop can be in every scenario and never do any work.** The
+crossover search only does anything when the torque curve falls hard past
+its peak: the test compares the torque here against the torque at the
+geared probe scaled by the same ratio, and with that ratio around 0.7 the
+right side is already a third smaller before the curve is consulted. The
+first fixture engine fell gently, so four gears out of five took the
+fallback -- the loop ran and never found anything, and two of its mutations
+rested on nothing. `sp-midpoint-is-redline` moves the search's start from
+the midpoint of idle and `MaxRPM` to the midpoint of idle and
+`RedLineRPM`; both are on the 50 RPM grid and every fixture crossed over
+far above both, so the two starts converged. `sp-crossover-not-strict`
+needs the two sides exactly equal, and since the probe is scaled by a ratio
+below 1, a flat non-zero curve always comes out strictly smaller -- only an
+all-zero curve gives equality. A steep engine and a zero engine, both
+checked numerically before any code was written, kill the pair.
+
+**And one was killed with a signed zero.** `gc-disengaged-applies` makes
+the DISENGAGED arm apply a clutch torque of zero instead of returning.
+Adding zero to a float changes nothing -- unless the float is `-0.0f`,
+where `-0` plus `0 * share` is `+0`. `AppliedTorque` and `RoadTorque` start
+at `-0.0f` in that fixture and `%.9g` prints the sign, so the original
+prints `-0` and the mutant prints `0`. Both sides agreed, which also
+confirms C and Python print signed zero identically here.
+
+### The two that survive, and the one listed for another reason
+
+`gc-clamp-inclusive` makes the clutch limiter's comparison inclusive. The
+two differ on exactly one input, slip equal to `gClutchLimiter`, and there
+the mutant assigns the slip the value it already holds. The scenario *does*
+sit on that boundary -- `gc DISENGAGING slip 300` drives it exactly, the
+fixture putting the differential at 200 and the engine at 200 plus slip
+against a limiter of 300 -- and the mutant survives it. That is the
+argument, not a gap in it.
+
+`au-down-into-neutral` drops the second half of the automatic's downshift
+test, the part that refuses to shift below first. The arm is only reached
+past an earlier guard that returns outright when the current gear is below
+first, and nothing writes the gear in between -- it is read once from
+`CurrentGear` at the top. The image tests it anyway, because the PS2
+compiler reloaded `CurrentGear` and compared it again rather than proving
+the same thing.
+
+`h-slack-is-zero` is in `EQUIVALENT` for a different reason.
+`DRIVETRAIN_SLACK` is `sizeof(void *) - 4` and appears only in the layout
+assert, so pinning it to 0 makes the assert wrong on this 64-bit host and
+the mutant does not compile -- it is reported as *caught* here. It is named
+so that a future run on a 32-bit host, where the same edit compiles and
+changes nothing, reports it as equivalent instead of stopping on a hole
+that is not one. `mutate_pass` was changed to count the equivalents that
+actually survived rather than the length of the list, so naming it costs
+nothing on this machine: the summary says 3 equivalent, not 4.
+
+### Smaller findings
+
+* **Gear indices are the enum, not zero-based.** `GearRatios[2]` is first
+  gear. SPORT_SHIFT is -2, AUTOMATIC -1, REVERSE 0, NEUTRAL 1, FIRST_GEAR 2
+  through SEVENTH_GEAR 8, and both RPM arrays are `float[9]` indexed the
+  same way.
+* **Two of the three differential queries halve and one does not**, and
+  they disagree about when. The details are in the doc, because it is the
+  kind of asymmetry that reads as a transcription slip and is not one.
+* **The clutch torque split is diagonal under `BurnOutState`**, not
+  front/rear.
+* **Fixtures are spelled, not computed.** Every fixture float is its own
+  decimal literal on both sides. `0.32f + 0.01f` is 0.329999983, one ulp
+  below the float nearest 0.33: the model rounds a literal once and the C
+  rounds the sum twice. The `ac share` lines are tagged with the numerator
+  rather than the ratio for the same reason -- a ratio computed in double
+  on one side and in float on the other is a fixture disagreeing with
+  itself.
+* **`make` still only works through `tools/build_cia.ps1`.** Exporting
+  `DEVKITARM` by hand from Git-Bash and running `make` fails at the
+  top-level guard, which is a *different* failure from the one documented
+  at the top of this file, where the guard passes and `$(INCLUDE)` comes
+  out empty. Map a space-free drive letter with `subst` and go through
+  devkitPro's own msys2 login shell; nothing else has ever worked here.
+
+Not ported: `DoSnapshot` (`0x00182b00`) needs `ReplaySnapshot`, the same
+dependency `CarState`, `Engine`, `CarDriver`, `Steering`, `RigidBody`,
+`Suspension` and `Wheel` are all waiting on. `operator new` and
+`operator delete` are the PS2 slot allocator (`DriveTrainSlotPool`,
+`0x00323090`). `PrintCurrentState` (`0x00183c28`) is a bare `jr ra` in the
+shipped image and is ported empty, with a note rather than a TODO.
+`CheckFunction` is declared in `.mdebug` and has no code at all.
+
+**`Wheel`'s two seams are still wired and still not installed.** DriveTrain
+does not construct a car, so `wheel_install_seams()` remains uncalled and
+`gWheelFindDrivingSurfaceFn` and `gWheelExchangeZForcesFn` are NULL on
+hardware. Whichever slice first builds a car owes that call before its
+first `ResolveForces`.
+
+**Next is `DriveTarget`'s methods.** `DriveTarget.obj` exists this time --
+`.text 0x002086f8`, `0x24d0` long -- but it is not all DriveTarget: seven
+`OBB` methods and the free function `bDoublesBack` (`0x00208fa0`) are in
+the same run, which is why the object is 9424 bytes against a DriveTarget
+tally of 8636. The copy constructor is emitted somewhere else again, at
+`0x001da210` inside `CarCollisionDetect.obj` (`.text 0x001d8770`, `0x1bf8`
+long). That makes twenty-six methods in the object plus one outside it,
+against a tally of twenty-eight -- **reconcile the count before planning
+the slice**, rather than assuming which of the two is wrong. The 528-byte
+record is already spelled out and ARM-compiled in `drivetarget.h`, so the
+layout is done. Twelve methods take no `Car *` and depend only on ported
+code, and they are the part that can be started now; they are listed in
+`CONTINUE.md`.

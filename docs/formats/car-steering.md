@@ -1,8 +1,34 @@
 # Steering, and TwoWheelAckermanSteering
 
-`Steering.obj` (0x0019c548 .. 0x0019c5a0) and
-`TwoWheelAckermanSteering.obj` (0x0019ba98 .. 0x0019c544). The fifth slice
-of task 25, after [CarState](car-state.md), [Engine](car-engine.md),
+There is no `Steering.obj` and no `TwoWheelAckermanSteering.obj`. Both
+classes live in `Suspension.obj`, whose `.text` the linker map puts at
+0x0019ba98, 0xb08 long, and neither class is a contiguous run inside it
+— the three are interleaved:
+
+```
+0x0019ba98  Steering::~Steering
+0x0019bac0  TwoWheelAckermanSteering::DoSnapshot
+0x0019bb18  TwoWheelAckermanSteering::SetSteering
+0x0019bc58  Suspension::Suspension          <- 29 Suspension methods
+   ...                                         and GetPointVelocity
+0x0019c418  Suspension::~Suspension
+0x0019c468  TwoWheelAckermanSteering::operator delete
+0x0019c478  TwoWheelAckermanSteering::operator new
+0x0019c498  TwoWheelAckermanSteering::ComputeAuxiliaries
+0x0019c4a0  TwoWheelAckermanSteering::~TwoWheelAckermanSteering
+0x0019c500  TwoWheelAckermanSteering::TwoWheelAckermanSteering
+0x0019c548  Steering::GetMatrix
+0x0019c558  Steering::BaseDoSnapshot
+0x0019c580  Steering::Steering
+```
+
+Steering is four symbols and TwoWheelAckermanSteering is seven, and
+`Steering::~Steering` is the first symbol of the whole object, a long
+way below the other three. `steering.h` lists the addresses one at a
+time for that reason; an earlier draft of this file gave each class a
+range and an object file of its own, and both were invented.
+
+The fifth slice of task 25, after [CarState](car-state.md), [Engine](car-engine.md),
 [CarTypeInfo](car-type-info.md) and [CarDriver](car-driver.md).
 
 Ported to `3DS Files/source/steering.{c,h}`. Cross-checked by
