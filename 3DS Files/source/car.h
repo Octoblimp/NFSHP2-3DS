@@ -414,6 +414,22 @@ extern bVector4    DamageAboveMatrix[4];                // 0x00326cb0
 extern bVector2    PostCollisionYawControlProfileData[4]; // 0x002e8528
 extern Graph       PostCollisionYawControlProfile;      // 0x00323078
 
+// ComputeFakeRPM's tweakables, initialised in the image's .sdata, and the
+// RPM pairs in its .data. Exported so the transcript can print them and set
+// the two debug overrides.
+extern float GearRTo1Speed;                             // 0x00323044
+extern float Gear1To2Speed;                             // 0x00323048
+extern float Gear2To3Speed;                             // 0x0032304c
+extern float Gear3To4Speed;                             // 0x00323050
+extern float Gear4To5Speed;                             // 0x00323054
+extern float Gear5To6Speed;                             // 0x00323058
+extern float GearTopSpeed;                              // 0x0032305c
+extern float MaxRPMInc;                                 // 0x00323060
+extern float MaxSpeedInc;                               // 0x00323064
+extern float TestSpeed;                                 // 0x00323068
+extern float TestRPM;                                   // 0x003241cc
+extern float RPMTable[12];                              // 0x002e84f8
+
 // -------------------------------------------------------------- the methods
 //
 // car.c's exports. Declared here, where car.c includes them, so that a
@@ -468,5 +484,17 @@ void     car_get_car_space_bounding_box(Car *c, bVector3 *min, bVector3 *max);
                                                          // 0x001334c0
 Timer    car_get_last_penetration_time(Car *c);          // 0x001334e0
 float    car_get_tracked_acceleration(Car *c);           // 0x0012ff40
+
+// Slice three: where the other cars are, the yaw, and the fake engine.
+int32_t  car_is_car_to_left(Car *c, Car *other);         // 0x00131ca0
+int32_t  car_is_car_to_right(Car *c, Car *other);        // 0x00131ce8
+float    car_get_relative_car_position(Car *c, Car *other, float *lateral);
+                                                         // 0x00130f10
+int32_t  car_is_car_in_front(Car *c, Car *other, uint16_t angle);
+                                                         // 0x00131d30
+float    car_get_post_collision_yaw_control_boost(Car *c); // 0x001341d0
+int32_t  car_is_drifting(Car *c);                        // 0x00134258
+float    car_smooth(float cur, float target, float rate); // 0x00134788
+void     car_compute_fake_rpm(Car *c);                   // 0x00131080
 
 #endif // CAR_H

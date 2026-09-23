@@ -433,3 +433,21 @@ int32_t bFixATan2(int32_t x, int32_t y)
     default: return (-r) & 0xffff;
     }
 }
+
+// ------------------------------------------------------------------- polar
+
+// 0x002424a0. `(x * x) + (y * y)` and `sqrt.s`, then bATan with the two
+// components still in $f12 and $f13 -- x first, as always. The image stores
+// the angle before the radius, which nothing can see.
+//
+// Documented with the rest of bMath.obj from the start, and the nineteenth
+// of its nineteen functions, but the last to be ported: nothing called it
+// until Car::IsCarInFront.
+bPolar *bToPolar(bPolar *out, const bVector2 *v)
+{
+    float r = sqrtf(v->x * v->x + v->y * v->y);
+
+    out->a = (uint16_t)bATan(v->x, v->y);
+    out->r = r;
+    return out;
+}

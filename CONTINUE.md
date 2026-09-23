@@ -24,7 +24,7 @@ python tools/bvector_check.py && python tools/bmath_check.py && python tools/ban
 
 ```
 bvector_check      27 scenarios,  5721 lines, 0 differ   (23/23 mutations caught)
-bmath_check        18 scenarios,  6065 lines, 0 differ   (12/12 mutations caught)
+bmath_check        19 scenarios,  6391 lines, 0 differ   (9/9 mutations caught)
 banim_check        23 scenarios,  2219 lines, 0 differ
 bscreens_check     17 scenarios,  1246 lines, 0 differ
 bootflow_check     12 scenarios,  3659 lines, 0 differ
@@ -48,7 +48,7 @@ wheel_check        19 scenarios, 10693 lines, 0 differ   (144 caught, 10 equival
 drivetrain_check   18 scenarios,   492 lines, 0 differ   (173 caught, 3 equivalent)
 drivetarget_check  22 scenarios,   821 lines, 0 differ   (239 caught, 20 equivalent)
 graph_check        16 scenarios,   151 lines, 0 differ   (21 caught, 4 equivalent)
-car_check          42 scenarios,  3864 lines, 0 differ   (169 caught, 9 equivalent)
+car_check          58 scenarios,  4238 lines, 0 differ   (238 caught, 16 equivalent)
 sinit_check         5 calls,        0 problems           (6/6 mutations caught)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
@@ -96,24 +96,38 @@ and so replaced every boot.
    + `Table`, `CarTypeInfo`, `CarDriver` + `DriveTarget`'s layout,
    `Steering` + `TwoWheelAckermanSteering`, `RigidBody`, `Suspension`,
    `Wheel`, `DriveTrain`, `DriveTarget`'s methods, `Graph`, and **`Car`'s
-   record plus two code slices**, each with a checker and a doc under
+   record plus three code slices**, each with a checker and a doc under
    `docs/formats/car-*.md` (`RigidBody`'s is `rigid-body.md`, `Car`'s is
    `car.md`).
 
    The old "178 functions, 16680 bytes" note was wrong by an order of
    magnitude -- it matched a narrow symbol pattern and missed most
    methods. Remeasured by demangling every symbol to its owning class,
-   task 25 was ~39.9 KB across 140 functions. Thirty-two Car methods are
-   ported, so **36.7 KB across 108 functions** is still to go:
+   task 25 was ~39.9 KB across 140 functions. Thirty-nine Car methods
+   are ported, so **35.4 KB across 101 functions** is still to go:
 
    ```
-   Car 48 funcs 20560 B   PhysicsCar 16 / 8496
+   Car 41 funcs 19256 B   PhysicsCar 16 / 8496
    Mellovator 31 / 5420   MellowMover 13 / 3096
    ```
 
-   The thirty-two are 2316 B of the 22876 -- the cheap ones went
+   plus `PhysicsSystem` (`0x00192460`, ~1.2 KB) and `Aerodynamics`
+   (`0x001a4b58`, ~0.65 KB), which `PhysicsCar`'s constructor needs and
+   the count never had.
+
+   The thirty-nine are 3620 B of the 22876 -- the cheap ones went
    first, and the expensive half of Car is the constructor, the reset
    and damage groups and the render path.
+
+   **Car's third code slice is closed** -- `IsCarToLeft`,
+   `IsCarToRight`, `GetRelativeCarPosition`, `IsCarInFront`,
+   `GetPostCollisionYawControlBoost`, `IsDrifting` and `ComputeFakeRPM`
+   with `smooth<float>`, and `bToPolar`, which `bmath.c` had never had
+   although `bmath.md` said all nineteen were ported. 58 scenarios,
+   4238 lines, 0 differing; 254 mutations, 238 caught, 16 equivalent, 0
+   unexplained. Poke an aliased array to make a shipped-invisible
+   branch visible: the yaw profile and `RPMTable`'s neighbours are both
+   fixtures now.
 
    **Car's second code slice is closed** -- the vtable seam
    (`vtable.{c,h}`), the nine dispatchers, the three borrowed fields,
@@ -133,14 +147,19 @@ and so replaced every boot.
      through `dot / dist` rounding above 1, which no single-axis fixture
      can produce.
 
-   **Next Car slice: six methods whose outside callees are all ported**
-   -- `IsCarToLeft`, `IsCarToRight`, `GetRelativeCarPosition`,
-   `GetPostCollisionYawControlBoost`, `IsDrifting`, and `ComputeFakeRPM`
-   with the 52-byte `smooth<float>` template -- plus `IsCarInFront`,
-   which brings `bToPolar` (`0x002424a0`) into the math library. Then
-   `SetMovementMode` / `SetControlMode` with `PhysicsCar`, which carries
-   `SetToPhysicsMode`, `SetFrictionBoost` and the `wheel_install_seams()`
-   call.
+   **Next: `PhysicsSystem` and `Aerodynamics`, then `PhysicsCar`.**
+   None of the other thirty-seven Car methods calls only ported code.
+   `PhysicsCar`'s constructor (`0x00135240`) builds a RigidBody, a
+   `TwoWheelAckermanSteering`, four Wheels and four Suspensions, an
+   Engine, a DriveTrain and an Aerodynamics, adds each to its
+   `PhysicsSystem`, and runs `Calibrate`, `InitializeStateFromCar` and
+   `ComputeAuxiliaries`. Its 116-byte record is `type#2835` in
+   `docs/mdebug_structs.txt`: `CarMover` at 0 and `PhysicsVehicle` at 8,
+   two vtables.
+   Then `SetMovementMode` / `SetControlMode`, which carry
+   `SetToPhysicsMode`, `SetFrictionBoost` and the
+   `wheel_install_seams()` call. `SetMovementMode` is a seven-way jump
+   table, and four of its arms construct task 26's movers.
 
    At this repo's verification standard that is several sessions, not
    one. Next in order: the rest of `Car`, then `PhysicsCar`, with

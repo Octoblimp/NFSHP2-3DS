@@ -1,4 +1,4 @@
-"""Cross-check 3DS Files/source/car.c against a model of Car, first slice.
+"""Cross-check 3DS Files/source/car.c against a model of Car, slices one to three.
 
 Car is the hub of task 25 -- eighty methods, 22876 bytes, a 2016-byte
 record -- and it is not the physics. The simulation lives in the movers
@@ -6,13 +6,19 @@ that `SetMovementMode` constructs; Car owns the state they write into and
 hands everything else off. Thirty-four of the eighty make no call outside
 the class at all.
 
-This checker covers the seventeen of those that also need no vtable: the
-three empty ones, the blinking, the two effect gates, the debug checksum,
-the two wheel aggregates, the forward acceleration, the horn request, the
-wiper window and the borrowed steering angle. What is left and what each
-piece waits on is listed at the bottom of car.c.
+Slice one is the seventeen of those that also need no vtable: the three
+empty ones, the blinking, the two effect gates, the debug checksum, the
+two wheel aggregates, the forward acceleration, the horn request, the
+wiper window and the borrowed steering angle -- and Car::WorldToCar.
+Slice two is the vtable seam, the nine dispatchers, three borrowed
+fields, the draft and the static initialiser, which is run in mipsemu
+rather than read. Slice three is seven methods that call out into code
+ported already: where the other cars are, the post-collision yaw boost,
+IsDrifting, and ComputeFakeRPM with its smooth<float>. What is left and
+what each piece waits on is listed at the bottom of car.c, and the
+write-up is docs/formats/car.md.
 
-Six things in this slice are easy to transcribe wrongly, and none of them
+Six things in slice one are easy to transcribe wrongly, and none of them
 shows in the shape of the code:
 
 **GetWheelTraction pairs the diagonals, not the axles.** 0x001330e0 adds
@@ -639,6 +645,8 @@ def model():
         emit("  bam %-8d -> %d" % (bam, bam))
 
     model_slice2()
+    model_slice3()
+    model_refusals()
     return list(OUT)
 
 
@@ -1254,7 +1262,383 @@ def model_slice2():
     for mode in (-1, 0, 2, 3, 4, 5):
         emit("  mode %d no controller -> %s" % (mode, gx(0.0)))
 
-    # -- the refusals -------------------------------------------------------
+
+
+# ============================================================== slice three
+#
+# Seven methods that call out of the class, each into a model another
+# checker already holds: CarState's WorldToCar and GetYaw (carstate_check),
+# bNormalize (bvector_check), Graph::GetValue (graph_check) and bToPolar
+# (bmath_check). Every constant, offset and gp displacement below is tied
+# to the instruction that loads it, and the tweakables and RPMTable are
+# read out of the ELF by symbol.
+
+OP_SLTI, OP_LHU, OP_SWC1 = 0x0a, 0x25, 0x39
+
+# IsCarToLeft / IsCarToRight: `addiu a2,a1,96` is other->State.Position,
+# `addiu a0,a0,64` this car's State.
+for base in (0x00131ca0, 0x00131ce8):
+    assert imm(base + 4, OP_ADDIU) == 96
+    assert imm(base + 12, OP_ADDIU) == 64
+
+# GetRelativeCarPosition: Velocity at Car+112, the two Positions at +96
+# and +100, `lui at,0x42c8` the 100 both tests share, gp-32032 the 999.
+assert imm(0x00130f2c, OP_ADDIU) == 112
+assert (imm(0x00130f3c, OP_LWC1), imm(0x00130f40, OP_LWC1),
+        imm(0x00130f48, OP_LWC1), imm(0x00130f50, OP_LWC1)) == (100, 100,
+                                                                 96, 96)
+REL_LIMIT = bits(imm(0x00130f8c, OP_LUI) << 16)
+assert imm(0x00130fbc, OP_LWC1) == -32032
+REL_FAR = bits(gpword(-32032))
+assert imm(0x00130fcc, OP_SWC1) == 0
+
+# IsCarInFront: both Positions, and State.Angle at 868 of Car+64.
+assert (imm(0x00131d50, OP_LWC1), imm(0x00131d54, OP_LWC1),
+        imm(0x00131d58, OP_LWC1), imm(0x00131d60, OP_LWC1)) == (100, 96,
+                                                                 100, 96)
+assert imm(0x00131d4c, OP_ADDIU) == 64
+assert imm(0x00131d78, OP_LHU) == 868
+
+# GetPostCollisionYawControlBoost: the body at Car+52, its stamp at +264,
+# WorldTimer, the tick, `lui at,0x4080`, and the Graph.
+assert imm(0x001341d8, OP_LW) == 52
+assert imm(0x001341dc, OP_LW) == 264
+assert imm(0x001341fc, OP_LW) == -20224
+assert imm(0x00134200, OP_LWC1) == -31908
+assert gpword(-31908) == TICK_A
+YAW_CUTOFF = bits(imm(0x00134208, OP_LUI) << 16)
+PCY_GRAPH = sym("PostCollisionYawControlProfile")
+assert GP + imm(0x00134230, OP_ADDIU) == PCY_GRAPH
+
+# IsDrifting: `slti v0,v0,2` on nWheelsTouchingGround, gp-31904, and
+# `lui at,0x4140` against ForwardSpeed.
+assert imm(0x00134268, OP_LW) == 888
+DRIFT_WHEELS = imm(0x0013426c, OP_SLTI)
+assert imm(0x00134284, OP_LWC1) == -31904
+DRIFT_YAW = bits(gpword(-31904))
+assert imm(0x00134298, OP_LWC1) == 892
+DRIFT_SPEED = bits(imm(0x0013429c, OP_LUI) << 16)
+
+# ComputeFakeRPM. Every gp load names its tweakable; the model then reads
+# the tweakable's initial word from the ELF, and a fixture that pokes one
+# pokes the model's copy the same way.
+for addr, name in ((0x00131084, "TestSpeed"), (0x001310c4, "GearTopSpeed"),
+                   (0x001310e4, "MaxSpeedInc"), (0x001310e8, "Gear1To2Speed"),
+                   (0x00131104, "GearRTo1Speed"), (0x00131144, "TestRPM"),
+                   (0x001311b0, "Gear2To3Speed"), (0x001311b8, "Gear3To4Speed"),
+                   (0x001311c0, "Gear4To5Speed"), (0x001311c4, "Gear5To6Speed"),
+                   (0x001311c8, "GearTopSpeed"), (0x001311e4, "TestRPM"),
+                   (0x00131268, "MaxRPMInc"), (0x00131274, "TestRPM")):
+    assert GP + imm(addr, OP_LWC1) == sym(name), (hex(addr), name)
+assert imm(0x001310d8, OP_LWC1) == -32028
+FAKE_CLAMP = bits(gpword(-32028))
+assert imm(0x001310bc, OP_LW) == 900          # CurrentGear, in s2 = Car+64
+assert imm(0x001310c0, OP_LWC1) == 896        # VelocityMagnitude
+assert imm(0x001310d4, OP_LWC1) == 1152       # Car::OldSpeed
+assert imm(0x001310f0, OP_SWC1) == 1152
+assert imm(0x00131264, OP_LWC1) == 908        # RPM
+assert imm(0x0013129c, OP_SWC1) == 908
+FAKE_UNSET = bits(imm(0x00131248, OP_LUI) << 16)
+assert bits(imm(0x0013127c, OP_LUI) << 16) == FAKE_UNSET
+FAKE_FIRST = imm(0x00131118, OP_ADDIU)        # addiu s1,zero,2
+assert insn(0x00131114) == 0x0000882d         # daddu s1,zero,zero: REVERSE
+FAKE_LOOP_START = imm(0x001311b4, OP_ADDIU)   # addiu a2,zero,1
+FAKE_LOOP_END = imm(0x00131230, OP_SLTI)      # slti v0,a2,6
+FAKE_PAIR_BIAS = imm(0x00131158, OP_ADDIU)    # addiu a0,a2,1
+FAKE_GEAR_BIAS = imm(0x00131178, OP_ADDIU)    # addiu s1,a2,2
+FAKE_GEAR_CAP = imm(0x00131190, OP_ADDIU)     # addiu v1,zero,6
+assert imm(0x00131194, OP_SLTI) == FAKE_GEAR_CAP + 1
+RPM_TABLE = sym("RPMTable")
+for hi, lo in ((0x00131130, 0x00131138), (0x00131160, 0x00131168)):
+    assert (imm(hi, OP_LUI) << 16) + imm(lo, OP_ADDIU) == RPM_TABLE
+# The pair past the end: RPMTable is 48 bytes, and the next symbol is the
+# yaw profile's points.
+assert SYM["RPMTable"][1] == 48
+assert RPM_TABLE + 48 == sym("PostCollisionYawControlProfileData")
+
+TWEAKS = ("GearRTo1Speed", "Gear1To2Speed", "Gear2To3Speed", "Gear3To4Speed",
+          "Gear4To5Speed", "Gear5To6Speed", "GearTopSpeed", "MaxRPMInc",
+          "MaxSpeedInc", "TestSpeed", "TestRPM")
+
+
+def elf_word(addr):
+    return struct.unpack("<I", bmath_check.ELF.read(addr, 4))[0]
+
+
+def smooth(cur, target, rate):
+    """0x00134788. add.s, c.lt.s hi,target; sub.s, c.lt.s target,lo."""
+    hi = fadd(cur, rate)
+    if hi < target:
+        return hi
+    lo = fsub(cur, rate)
+    if target < lo:
+        return lo
+    return target
+
+
+class Fake(object):
+    """The tweakables, RPMTable and the yaw profile's points, as the image
+    and the static initialiser leave them."""
+
+    def __init__(self, w):
+        self.T = dict((n, f32w(elf_word(sym(n)))) for n in TWEAKS)
+        self.rpm = [f32w(elf_word(RPM_TABLE + 4 * i)) for i in range(12)]
+        pc = sym("PostCollisionYawControlProfileData")
+        self.pcy = [[f32w(w(pc + 8 * i)), f32w(w(pc + 8 * i + 4))]
+                    for i in range(4)]
+        # The Graph aliases the array, so a poke to the array is a poke to
+        # the Graph.
+        assert w(PCY_GRAPH) == pc and w(PCY_GRAPH + 4) == 4
+
+
+def fake_rpm(F, car):
+    """0x00131080. `car` is a dict of vm, old, gear, rpm, updated in place."""
+    T = F.T
+    speed = T["TestSpeed"] if 0.0 < T["TestSpeed"] else car["vm"]
+    if T["GearTopSpeed"] <= speed:
+        speed = fsub(T["GearTopSpeed"], FAKE_CLAMP)
+    speed = smooth(car["old"], speed, T["MaxSpeedInc"])
+    car["old"] = speed
+
+    gear = car["gear"]
+    rpm = 0.0
+    g12 = T["Gear1To2Speed"]
+    R = F.rpm
+    if speed < g12:
+        gear = FAKE_FIRST if T["GearRTo1Speed"] <= speed else 0
+        frac = abs(speed)
+        if g12 < frac:                            # bc1tl: the move is taken
+            frac = g12
+        rpm = fadd(R[0], fmul(fdiv(frac, g12), fsub(R[1], R[0])))
+    else:
+        sp = [T[n] for n in ("Gear1To2Speed", "Gear2To3Speed",
+                             "Gear3To4Speed", "Gear4To5Speed",
+                             "Gear5To6Speed", "GearTopSpeed")]
+        # What the index reaches: RPMTable, then the eight bytes after it.
+        mem = R + F.pcy[0]
+        i = FAKE_LOOP_START
+        while i < FAKE_LOOP_END:
+            if speed < sp[i]:
+                k = 2 * (i + FAKE_PAIR_BIAS)
+                lo, hi = mem[k], mem[k + 1]
+                gear = i + FAKE_GEAR_BIAS
+                if not gear < FAKE_GEAR_CAP + 1:  # slti; movz
+                    gear = FAKE_GEAR_CAP
+                t = fdiv(fsub(speed, sp[i - 1]), fsub(sp[i], sp[i - 1]))
+                rpm = fadd(lo, fmul(t, fsub(hi, lo)))
+                break
+            i += 1
+
+    if car["gear"] == gear:
+        cur = car["rpm"] if T["TestRPM"] == FAKE_UNSET else T["TestRPM"]
+        rpm = smooth(cur, rpm, T["MaxRPMInc"])
+    car["gear"] = gear
+    car["rpm"] = rpm if T["TestRPM"] == FAKE_UNSET else T["TestRPM"]
+
+
+def model_slice3():
+    _, w, _ = run_static_init()
+    F = Fake(w)
+
+    # -- tweakables ---------------------------------------------------------
+    emit("[fake rpm tweakables]")
+    for n in TWEAKS:
+        emit("  %-14s %08x" % (n, elf_word(sym(n))))
+    for i in range(12):
+        emit("  RPMTable[%d] %08x" % (i, elf_word(RPM_TABLE + 4 * i)))
+
+    others = [(f32(x), f32(y)) for x, y in (
+        (10.0, -5.0), (11.0, -5.0), (10.0, -4.0), (9.0, -5.0), (10.0, -6.0),
+        (0.0, 0.0), (-3.0, 7.0), (1.0, 2.0), (100.0, 100.0), (12.5, -7.25),
+        (-40.0, 3.5))]
+
+    # -- left and right -----------------------------------------------------
+    emit("[left right]")
+    cars = ((0, 0.0, 0.0, 1.0, 10.0, -5.0), (16384, 0.0, 0.0, 1.0, 0.0, 0.0),
+            (8192, 0.0, 0.0, 1.0, -3.0, 7.0), (0, 3.0, 4.0, 5.0, 1.0, 2.0),
+            (49152, -2.0, 0.5, -1.0, 100.0, 100.0))
+    for i, (ang, vx, vy, fs, px, py) in enumerate(cars):
+        for j, q in enumerate(others):
+            s = carstate_check.State()
+            s.Angle = ang
+            s.Velocity = [f32(vx), f32(vy), f32(0.0), f32(0.0)]
+            s.ForwardSpeed = f32(fs)
+            s.Position = [f32(px), f32(py), f32(0.0), f32(0.0)]
+            s.MatrixValid = 0
+            left = 1 if carstate_check.world_to_car2(s, list(q))[0] < 0.0 \
+                else 0
+            s.MatrixValid = 0
+            right = 1 if 0.0 < carstate_check.world_to_car2(s, list(q))[0] \
+                else 0
+            emit("  car %d other %-2d -> left %d right %d"
+                 % (i, j, left, right))
+
+    # -- relative position --------------------------------------------------
+    emit("[relative position]")
+    rcars = ((0.0, 0.0, 1.0, 0.0), (5.0, -3.0, 3.0, 4.0), (0.0, 0.0, 0.0, 0.0),
+             (-20.0, 40.0, -0.6, 2.2))
+    rq = [(f32(x), f32(y)) for x, y in (
+        (0.0, 0.0), (100.0, 0.0), (100.00001, 0.0), (-100.0, 0.0),
+        (-100.00001, 0.0), (0.0, 100.0), (0.0, -100.00001), (50.0, 50.0),
+        (99.9, -99.9), (65.0, 77.0), (-30.0, 10.0), (5.0, -3.0))]
+    sentinel = f32(-12345.0)
+    for i, (px, py, vx, vy) in enumerate(rcars):
+        px, py, vx, vy = f32(px), f32(py), f32(vx), f32(vy)
+        for j, (qx, qy) in enumerate(rq):
+            n = bvector_check.bNormalize2((vx, vy))
+            dy = fsub(qy, py)
+            dx = fsub(qx, px)
+            across = fadd(fmul(n[1], dx), fmul(bvector_check.fneg(n[0]), dy))
+            along = fadd(fmul(n[0], dx), fmul(n[1], dy))
+            if REL_LIMIT < abs(along) or REL_LIMIT < abs(across):
+                along, lat = REL_FAR, sentinel
+            else:
+                lat = across
+            emit("  car %d other %-2d -> along %s lateral %s null %s"
+                 % (i, j, gx(along), gx(lat), gx(along)))
+
+    # -- in front -----------------------------------------------------------
+    fq = [(f32(x), f32(y)) for x, y in (
+        (10.0, 0.0), (0.0, 10.0), (-10.0, 0.0), (0.0, -10.0), (10.0, 10.0),
+        (-7.0, -3.0), (0.0, 0.0), (3.5, 0.25))]
+    within = (0, 1, 1000, 16384, 16385, 32767, 32768, 32769, 65535)
+
+    def in_front(ang, px, py, qx, qy, lim):
+        _, a = bmath_check.bToPolar(fsub(qx, px), fsub(qy, py))
+        diff = (a - ang) & 0xffff                 # subu; sll 16; sra 16
+        if diff & 0x8000:
+            diff -= 0x10000
+        return 1 if max(diff, -diff) < lim else 0  # pmaxw; slt
+
+    emit("[in front]")
+    for ang in (0, 1000, 16384, 65000, 32768):
+        for j, (qx, qy) in enumerate(fq):
+            r = "".join(str(in_front(ang, 0.0, 0.0, qx, qy, lim))
+                        for lim in within)
+            emit("  ang %-5d other %d -> %s" % (ang, j, r))
+    emit("[in front moved]")
+    for i, (px, py) in enumerate(((20.0, -4.0), (-20.0, 4.0))):
+        for j, (qx, qy) in enumerate(fq):
+            emit("  car %d other %d -> %d %d"
+                 % (i, j, in_front(0, f32(px), f32(py), qx, qy, 8192),
+                    in_front(0, f32(px), f32(py), qx, qy, 32768)))
+
+    # -- yaw boost ----------------------------------------------------------
+    cases = ((0, 2000), (0x7fffffff, 0x800007cf), (1000, 1000), (1000, 1400),
+             (1000, 2600), (1000, 3000), (1000, 7000), (1000, 9000),
+             (1000, 16999), (1000, 17000), (1000, 500), (5, 0x7fffffff),
+             (0x80000000, 0x7fffffff), (0xfffffff0, 0x00000010),
+             (0x7ffffffe, 0x800007cd), (1, 2001))
+    for wide in (0, 1):
+        emit("[yaw boost wide profile]" if wide else "[yaw boost]")
+        pts = [list(p) for p in F.pcy]
+        if wide:
+            pts[0][1] = f32(0.125)
+            pts[3] = [f32(8.0), f32(0.5)]
+        for stamp, now in cases:
+            # beq v1,zero; then xor/sltu against 0x7fffffff.
+            if stamp == 0 or stamp == BLINK_NEVER:
+                r = 0.0
+            else:
+                t = fmul(f32(float(i32(now - stamp))), TICK)
+                if t < YAW_CUTOFF:
+                    r = GR.graph_get_value(pts, 4, t)
+                else:
+                    r = 0.0
+            emit("  stamp %08x now %08x -> %s" % (stamp, now, gx(r)))
+
+    # -- drifting -----------------------------------------------------------
+    emit("[drifting]")
+    for nw in (1, 2, 4):
+        for ang in (1355, 1356, 64179, 64180, 16384):
+            r = ""
+            for fs in (12.0, 12.000001, 30.0, 4.9):
+                s = carstate_check.State()
+                s.nWheelsTouchingGround = nw
+                s.Angle = ang
+                s.Velocity = [f32(20.0), f32(0.0), f32(0.0), f32(0.0)]
+                s.ForwardSpeed = f32(fs)
+                s.VelocityMagnitude = f32(1.0)
+                if nw < DRIFT_WHEELS:
+                    d = 0
+                elif not DRIFT_YAW < abs(carstate_check.get_yaw(s)):
+                    d = 0
+                else:
+                    d = 1 if DRIFT_SPEED < s.ForwardSpeed else 0
+                r += str(d)
+            emit("  wheels %d ang %-5d -> %s" % (nw, ang, r))
+
+    # -- smooth -------------------------------------------------------------
+    emit("[smooth]")
+    for c, t, rt in ((0.0, 5.0, 1.0), (0.0, 1.0, 1.0), (0.0, 0.5, 1.0),
+                     (0.0, -1.0, 1.0), (0.0, -5.0, 1.0), (10.0, 10.0, 0.0),
+                     (-0.0, -0.0, 0.0), (0.0, -0.0, 0.0), (0.0, 0.5, -1.0),
+                     (5.0, 7.0, 1.5), (-3.25, -3.3, 0.01),
+                     (1000.0, 8500.0, 50.0)):
+        c, t, rt = f32(c), f32(t), f32(rt)
+        emit("  %s %s %s -> %s" % (g9(c), g9(t), g9(rt), gx(smooth(c, t, rt))))
+
+    # -- the fake engine ----------------------------------------------------
+    def twice(vm, old):
+        car = {"vm": f32(vm), "old": f32(old), "gear": 1,
+               "rpm": f32(1000.0)}
+        emit("  vm %s old %s" % (g9(car["vm"]), g9(car["old"])))
+        for tag in ("first", "second"):
+            fake_rpm(F, car)
+            emit("  %-10s old %s gear %d rpm %s"
+                 % (tag, gx(car["old"]), car["gear"], gx(car["rpm"])))
+
+    def restore():
+        F.__init__(w)
+
+    emit("[fake rpm bands]")
+    for sp in (-30.0, -25.38, -5.0, -2.00000024, -2.0, -1.0, -0.0, 0.0, 10.0, 25.3799973,
+               25.38, 30.0, 40.89, 50.0, 56.47, 60.0, 72.06, 75.0,
+               79.9999924, 80.0, 85.0, 89.5, 89.5099945, 89.51, 100.0):
+        twice(sp, sp)
+
+    emit("[fake rpm smoothing]")
+    for vm, old in ((50.0, 20.0), (10.0, 30.0), (30.0, 29.5), (89.0, 95.0),
+                    (120.0, 60.0)):
+        twice(vm, old)
+
+    emit("[fake rpm test speed]")
+    F.T["TestSpeed"] = f32(45.0)
+    twice(10.0, 45.0)
+    F.T["TestSpeed"] = f32(-1.0)
+    twice(10.0, 10.0)
+    restore()
+
+    emit("[fake rpm test rpm]")
+    F.T["TestRPM"] = f32(3000.0)
+    twice(30.0, 30.0)
+    F.T["TestRPM"] = f32(0.0)
+    twice(60.0, 60.0)
+    F.T["TestRPM"] = f32(100.0)
+    twice(60.0, 60.0)
+    restore()
+
+    emit("[fake rpm overread]")
+    F.pcy[0] = [f32(7000.0), f32(7500.0)]
+    twice(85.0, 85.0)
+    restore()
+
+    emit("[fake rpm pair one]")
+    F.rpm[2] = f32(1.0)
+    F.rpm[3] = f32(2.0)
+    twice(30.0, 30.0)
+    twice(10.0, 10.0)
+    restore()
+
+    emit("[fake rpm pair zero]")
+    F.rpm[0] = f32(1500.0)
+    F.rpm[1] = f32(4500.0)
+    twice(10.0, 10.0)
+    restore()
+
+
+def model_refusals():
+    # The harness runs these after the transcript, one process each.
     emit("[abort modes]")
     for mode, msg in ABORT_MODES:
         emit("  %s -> aborted: %s" % (mode, msg))
@@ -1986,6 +2370,270 @@ MUTATIONS = [
     ("vt-slot-per-word", VTH,
      "#define VT_SLOT(S) ((S) / 8)",
      "#define VT_SLOT(S) ((S) / 4)"),
+    # -- slice three: where the other cars are ------------------------------
+    ("left-le", CC,
+     "    return (local.x < 0.0f) ? 1 : 0;",
+     "    return (local.x <= 0.0f) ? 1 : 0;"),
+    ("right-le", CC,
+     "    return (0.0f < local.x) ? 1 : 0;",
+     "    return (0.0f <= local.x) ? 1 : 0;"),
+    ("left-reads-y", CC,
+     "    return (local.x < 0.0f) ? 1 : 0;",
+     "    return (local.y < 0.0f) ? 1 : 0;"),
+    ("right-is-left", CC,
+     "    return (0.0f < local.x) ? 1 : 0;",
+     "    return (local.x < 0.0f) ? 1 : 0;"),
+    ("left-geometry-position", CC,
+     "                           (const bVector2 *)&other->State.Position);" + NL +
+     "    return (local.x < 0.0f) ? 1 : 0;",
+     "                           (const bVector2 *)&other->State.GeometryPosition);" + NL +
+     "    return (local.x < 0.0f) ? 1 : 0;"),
+    ("right-others-frame", CC,
+     "    carstate_world_to_car2(&c->State, &local," + NL +
+     "                           (const bVector2 *)&other->State.Position);" + NL +
+     "    return (0.0f < local.x) ? 1 : 0;",
+     "    carstate_world_to_car2(&other->State, &local," + NL +
+     "                           (const bVector2 *)&other->State.Position);" + NL +
+     "    return (0.0f < local.x) ? 1 : 0;"),
+    ("rel-along-le", CC,
+     "    if (100.0f < fabsf(along) || 100.0f < fabsf(across))",
+     "    if (100.0f <= fabsf(along) || 100.0f < fabsf(across))"),
+    ("rel-across-le", CC,
+     "    if (100.0f < fabsf(along) || 100.0f < fabsf(across))",
+     "    if (100.0f < fabsf(along) || 100.0f <= fabsf(across))"),
+    ("rel-along-only", CC,
+     "    if (100.0f < fabsf(along) || 100.0f < fabsf(across))",
+     "    if (100.0f < fabsf(along))"),
+    ("rel-store-before-test", CC,
+     "    if (100.0f < fabsf(along) || 100.0f < fabsf(across))" + NL +
+     "        return CAR_RELATIVE_FAR;" + NL +
+     "    if (lateral)" + NL +
+     "        *lateral = across;" + NL,
+     "    if (lateral)" + NL +
+     "        *lateral = across;" + NL +
+     "    if (100.0f < fabsf(along) || 100.0f < fabsf(across))" + NL +
+     "        return CAR_RELATIVE_FAR;" + NL),
+    ("rel-returns-across", CC,
+     "        *lateral = across;" + NL + "    return along;",
+     "        *lateral = across;" + NL + "    return across;"),
+    ("rel-lateral-is-along", CC,
+     "        *lateral = across;",
+     "        *lateral = along;"),
+    ("rel-across-negated", CC,
+     "    across = n.y * dx + (-n.x) * dy;",
+     "    across = n.x * dy - n.y * dx;"),
+    ("rel-across-neg-product", CC,
+     "    across = n.y * dx + (-n.x) * dy;",
+     "    across = n.y * dx + -(n.x * dy);"),
+    ("rel-delta-reversed", CC,
+     "    dx = other->State.Position.x - c->State.Position.x;" + NL + NL +
+     "    across",
+     "    dx = c->State.Position.x - other->State.Position.x;" + NL + NL +
+     "    across"),
+    ("rel-unnormalised", CC,
+     "    bNormalize2(&n, (const bVector2 *)&c->State.Velocity);",
+     "    n.x = c->State.Velocity.x;" + NL + "    n.y = c->State.Velocity.y;"),
+    ("rel-far-minus-one", CC,
+     "#define CAR_RELATIVE_FAR 999.0f",
+     "#define CAR_RELATIVE_FAR -1.0f"),
+    ("front-le", CC,
+     "    return (((diff < 0) ? -diff : diff) < (int32_t)angle) ? 1 : 0;",
+     "    return (((diff < 0) ? -diff : diff) <= (int32_t)angle) ? 1 : 0;"),
+    ("front-unsigned-turn", CC,
+     "    diff = (int16_t)(uint16_t)(p.a - c->State.Angle);",
+     "    diff = (uint16_t)(p.a - c->State.Angle);"),
+    ("front-no-abs", CC,
+     "    return (((diff < 0) ? -diff : diff) < (int32_t)angle) ? 1 : 0;",
+     "    return (diff < (int32_t)angle) ? 1 : 0;"),
+    ("front-turn-reversed", CC,
+     "    diff = (int16_t)(uint16_t)(p.a - c->State.Angle);",
+     "    diff = (int16_t)(uint16_t)(c->State.Angle - p.a);"),
+    ("front-delta-reversed", CC,
+     "    d.y = other->State.Position.y - c->State.Position.y;" + NL +
+     "    d.x = other->State.Position.x - c->State.Position.x;",
+     "    d.y = c->State.Position.y - other->State.Position.y;" + NL +
+     "    d.x = c->State.Position.x - other->State.Position.x;"),
+    ("front-legs-swapped", CC,
+     "    d.y = other->State.Position.y - c->State.Position.y;" + NL +
+     "    d.x = other->State.Position.x - c->State.Position.x;",
+     "    d.x = other->State.Position.y - c->State.Position.y;" + NL +
+     "    d.y = other->State.Position.x - c->State.Position.x;"),
+    ("front-own-geometry", CC,
+     "    d.y = other->State.Position.y - c->State.Position.y;",
+     "    d.y = other->State.Position.y - c->State.GeometryPosition.y;"),
+
+    # -- slice three: the yaw -----------------------------------------------
+    ("yaw-no-zero-sentinel", CC,
+     "    if (stamp == 0 || stamp == 0x7fffffffu)",
+     "    if (stamp == 0x7fffffffu)"),
+    ("yaw-no-max-sentinel", CC,
+     "    if (stamp == 0 || stamp == 0x7fffffffu)",
+     "    if (stamp == 0)"),
+    ("yaw-sentinel-one-low", CC,
+     "    if (stamp == 0 || stamp == 0x7fffffffu)",
+     "    if (stamp == 0 || stamp == 0x7ffffffeu)"),
+    ("yaw-cutoff-le", CC,
+     "    if (!(t < 4.0f))",
+     "    if (!(t <= 4.0f))"),
+    ("yaw-cutoff-5", CC,
+     "    if (!(t < 4.0f))",
+     "    if (!(t < 5.0f))"),
+    ("yaw-penetration-stamp", CC,
+     "        c->pDynamicCollisionBody->LastYawControlCollisionTime.PackedTime;",
+     "        c->pDynamicCollisionBody->LastPenetrationTime.PackedTime;"),
+    ("yaw-unsigned-elapsed", CC,
+     "    t = (float)(int32_t)((uint32_t)WorldTimer - stamp) * CAR_TICK_SECONDS;",
+     "    t = (float)((uint32_t)WorldTimer - stamp) * CAR_TICK_SECONDS;"),
+    ("yaw-wrong-graph", CC,
+     "    return graph_get_value(&PostCollisionYawControlProfile, t);",
+     "    return graph_get_value(&gDraftSpeedRange, t);"),
+    ("drift-wheels-le", CC,
+     "    if (c->State.nWheelsTouchingGround < 2)",
+     "    if (c->State.nWheelsTouchingGround <= 2)"),
+    ("drift-wheels-1", CC,
+     "    if (c->State.nWheelsTouchingGround < 2)",
+     "    if (c->State.nWheelsTouchingGround < 1)"),
+    ("drift-signed-yaw", CC,
+     "    if (!(CAR_DRIFT_YAW < fabsf(carstate_get_yaw(&c->State))))",
+     "    if (!(CAR_DRIFT_YAW < carstate_get_yaw(&c->State)))"),
+    ("drift-yaw-le", CC,
+     "    if (!(CAR_DRIFT_YAW < fabsf(carstate_get_yaw(&c->State))))",
+     "    if (!(CAR_DRIFT_YAW <= fabsf(carstate_get_yaw(&c->State))))"),
+    ("drift-yaw-always", CC,
+     "    if (!(CAR_DRIFT_YAW < fabsf(carstate_get_yaw(&c->State))))",
+     "    if (!(CAR_DRIFT_YAW < fabsf(carstate_get_yaw_always(&c->State))))"),
+    ("drift-speed-le", CC,
+     "    return (12.0f < c->State.ForwardSpeed) ? 1 : 0;",
+     "    return (12.0f <= c->State.ForwardSpeed) ? 1 : 0;"),
+    ("drift-yaw-0.14", CC,
+     "#define CAR_DRIFT_YAW    0.13f",
+     "#define CAR_DRIFT_YAW    0.14f"),
+
+    # -- slice three: the fake engine ---------------------------------------
+    ("smooth-hi-le", CC,
+     "    if (hi < target)" + NL + "        return hi;",
+     "    if (hi <= target)" + NL + "        return hi;"),
+    ("smooth-lo-le", CC,
+     "    if (target < lo)" + NL + "        return lo;",
+     "    if (target <= lo)" + NL + "        return lo;"),
+    ("smooth-low-side-first", CC,
+     "    float hi = cur + rate, lo;" + NL + NL +
+     "    if (hi < target)" + NL + "        return hi;" + NL +
+     "    lo = cur - rate;" + NL +
+     "    if (target < lo)" + NL + "        return lo;",
+     "    float hi = cur + rate, lo;" + NL + NL +
+     "    lo = cur - rate;" + NL +
+     "    if (target < lo)" + NL + "        return lo;" + NL +
+     "    if (hi < target)" + NL + "        return hi;"),
+    ("smooth-hi-gives-target", CC,
+     "    if (hi < target)" + NL + "        return hi;",
+     "    if (hi < target)" + NL + "        return target;"),
+    ("fr-test-speed-le", CC,
+     "    speed = (0.0f < TestSpeed) ? TestSpeed : st->VelocityMagnitude;",
+     "    speed = (0.0f <= TestSpeed) ? TestSpeed : st->VelocityMagnitude;"),
+    ("fr-forward-speed", CC,
+     "    speed = (0.0f < TestSpeed) ? TestSpeed : st->VelocityMagnitude;",
+     "    speed = (0.0f < TestSpeed) ? TestSpeed : st->ForwardSpeed;"),
+    ("fr-clamp-lt", CC,
+     "    if (GearTopSpeed <= speed)",
+     "    if (GearTopSpeed < speed)"),
+    ("fr-clamp-0.02", CC,
+     "        speed = GearTopSpeed - 0.01f;",
+     "        speed = GearTopSpeed - 0.02f;"),
+    ("fr-speed-unsmoothed", CC,
+     "    speed = car_smooth(c->OldSpeed, speed, MaxSpeedInc);" + NL,
+     ""),
+    ("fr-speed-smooth-args", CC,
+     "    speed = car_smooth(c->OldSpeed, speed, MaxSpeedInc);",
+     "    speed = car_smooth(speed, c->OldSpeed, MaxSpeedInc);"),
+    ("fr-speed-by-rpm-inc", CC,
+     "    speed = car_smooth(c->OldSpeed, speed, MaxSpeedInc);",
+     "    speed = car_smooth(c->OldSpeed, speed, MaxRPMInc);"),
+    ("fr-old-speed-unstored", CC,
+     "    c->OldSpeed = speed;" + NL,
+     ""),
+    ("fr-reverse-lt", CC,
+     "        gear = (GearRTo1Speed <= speed) ? FIRST_GEAR : REVERSE;",
+     "        gear = (GearRTo1Speed < speed) ? FIRST_GEAR : REVERSE;"),
+    ("fr-reverse-swapped", CC,
+     "        gear = (GearRTo1Speed <= speed) ? FIRST_GEAR : REVERSE;",
+     "        gear = (GearRTo1Speed <= speed) ? REVERSE : FIRST_GEAR;"),
+    ("fr-signed-frac", CC,
+     "        frac = fabsf(speed);",
+     "        frac = speed;"),
+    ("fr-frac-unclamped", CC,
+     "        if (Gear1To2Speed < frac)" + NL +
+     "            frac = Gear1To2Speed;" + NL,
+     ""),
+    ("fr-frac-clamp-le", CC,
+     "        if (Gear1To2Speed < frac)",
+     "        if (Gear1To2Speed <= frac)"),
+    ("fr-band-le", CC,
+     "            if (speed < speeds[i]) {",
+     "            if (speed <= speeds[i]) {"),
+    ("fr-bands-from-0", CC,
+     "        for (i = 1; i < 6; i++) {",
+     "        for (i = 0; i < 6; i++) {"),
+    ("fr-bands-to-5", CC,
+     "        for (i = 1; i < 6; i++) {",
+     "        for (i = 1; i < 5; i++) {"),
+    ("fr-pair-is-index", CC,
+     "                pair = (i + 1 < 6) ? &RPMTable[2 * (i + 1)]",
+     "                pair = (i + 1 < 6) ? &RPMTable[2 * i]"),
+    ("fr-no-overread", CC,
+     "                                   : &PostCollisionYawControlProfileData[0].x;",
+     "                                   : &RPMTable[10];"),
+    ("fr-gear-uncapped", CC,
+     "                gear = (i + 2 < SIXTH_GEAR) ? (Gear)(i + 2) : FIFTH_GEAR;",
+     "                gear = (Gear)(i + 2);"),
+    ("fr-gear-one-past", CC,
+     "                gear = (i + 2 < SIXTH_GEAR) ? (Gear)(i + 2) : FIFTH_GEAR;",
+     "                gear = (i + 1 < SIXTH_GEAR) ? (Gear)(i + 1) : FIFTH_GEAR;"),
+    ("fr-interp-reversed", CC,
+     "                                * (pair[1] - pair[0]);",
+     "                                * (pair[0] - pair[1]);"),
+    ("fr-interp-over-top", CC,
+     "                                 / (speeds[i] - speeds[i - 1]))",
+     "                                 / speeds[i])"),
+    ("fr-rpm-starts-at-rpm", CC,
+     "    rpm = 0.0f;" + NL + "    if (speed < Gear1To2Speed) {",
+     "    rpm = st->RPM;" + NL + "    if (speed < Gear1To2Speed) {"),
+    ("fr-smooth-on-change", CC,
+     "    if (st->CurrentGear == gear)",
+     "    if (st->CurrentGear != gear)"),
+    ("fr-smooth-from-rpm-only", CC,
+     "        rpm = car_smooth((TestRPM == 100.0f) ? st->RPM : TestRPM, rpm,",
+     "        rpm = car_smooth(st->RPM, rpm,"),
+    ("fr-rpm-by-speed-inc", CC,
+     "                         MaxRPMInc);",
+     "                         MaxSpeedInc);"),
+    ("fr-test-rpm-unset-0", CC,
+     "    st->RPM = (TestRPM == 100.0f) ? rpm : TestRPM;",
+     "    st->RPM = (TestRPM == 0.0f) ? rpm : TestRPM;"),
+    ("fr-gear-unstored", CC,
+     "    st->CurrentGear = gear;" + NL + "    st->RPM",
+     "    st->RPM"),
+    ("fr-gear-stored-first", CC,
+     "    if (st->CurrentGear == gear)" + NL +
+     "        rpm = car_smooth((TestRPM == 100.0f) ? st->RPM : TestRPM, rpm," + NL +
+     "                         MaxRPMInc);" + NL +
+     "    st->CurrentGear = gear;" + NL,
+     "    st->CurrentGear = gear;" + NL +
+     "    if (st->CurrentGear == gear)" + NL +
+     "        rpm = car_smooth((TestRPM == 100.0f) ? st->RPM : TestRPM, rpm," + NL +
+     "                         MaxRPMInc);" + NL),
+    ("fr-top-band-clamped", CC,
+     "        speeds[5] = GearTopSpeed;",
+     "        speeds[5] = GearTopSpeed - 0.01f;"),
+    ("tweak-top-speed", CC,
+     "float GearTopSpeed  = 89.51f;",
+     "float GearTopSpeed  = 89.5f;"),
+    ("tweak-test-rpm-0", CC,
+     "float TestRPM       = 100.0f;",
+     "float TestRPM       = 0.0f;"),
+    ("tweak-rpm-table", CC,
+     "    5500.0f, 9000.0f,  6500.0f, 7200.0f,  6600.0f, 7000.0f,",
+     "    5500.0f, 9000.5f,  6500.0f, 7200.0f,  6600.0f, 7000.0f,"),
 ]
 
 EQUIVALENT = {
@@ -2057,6 +2705,37 @@ EQUIVALENT = {
     "sum-test-inside-if":
         "the test on c's pass sees the sum the previous test already let "
         "through, or 0 when c is first",
+    # -- slice three --------------------------------------------------------
+    # Negation is exact and IEEE rounding is symmetric in sign, so the
+    # product of a negated factor and the negated product are one word.
+    "rel-across-neg-product":
+        "(-a) * b and -(a * b) are the same float32 for every a and b",
+    # |(int16)(a - b)| and |(int16)(b - a)| agree: the two differ in sign
+    # except at 0x8000, where both are -32768.
+    "front-turn-reversed":
+        "the magnitude of a 16-bit turn is the same measured either way",
+    # No yaw GetYaw can return is exactly 0.13f: all 65536 BAM deltas,
+    # folded as GetYaw folds them, were checked, and none lands on it.
+    "drift-yaw-le":
+        "no reachable yaw equals 0.13f; checked over all 65536 BAM deltas",
+    # GetYaw differs from GetYawAlways only below a forward speed of 5, and
+    # there the test against 12 fails whatever the yaw was.
+    "drift-yaw-always":
+        "the forward-speed test against 12 fails wherever GetYaw's gate "
+        "at 5 would have answered 0",
+    # At |speed| == Gear1To2Speed the clamp stores the value frac holds.
+    "fr-frac-clamp-le":
+        "at equality the clamp assigns the value frac already has",
+    # The loop runs only when speed >= Gear1To2Speed, which is speeds[0],
+    # so a pass at i = 0 can never take the band.
+    "fr-bands-from-0":
+        "the else branch has speed >= speeds[0], so the i = 0 test cannot "
+        "pass",
+    # When TestRPM is set, st->RPM is stored as TestRPM whatever the
+    # smoothing computed, so where it started from cannot be seen.
+    "fr-smooth-from-rpm-only":
+        "with TestRPM set the smoothed value is discarded for TestRPM; the "
+        "arm is dead",
 }
 
 for _name in EQUIVALENT:

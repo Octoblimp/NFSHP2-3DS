@@ -35,10 +35,15 @@ What this does NOT model is the EE FPU's departures from IEEE -- it has no
 denormals, no infinities and no NaN, and it saturates where a host would
 overflow. The sweeps stay inside the normal range, where the two agree.
 
+The --mutate pass covers bToPolar, the last of the nineteen to be ported
+(Session 25). The twelve mutations that held the other eighteen to the
+transcript in Session 12 ran from a scratchpad script that was not kept.
+
 Usage:
     python tools/bmath_check.py
     python tools/bmath_check.py --scenario asin
     python tools/bmath_check.py --dump out.txt
+    python tools/bmath_check.py --mutate
 """
 import argparse
 import difflib
@@ -448,6 +453,14 @@ def bFixATan2(x, y):
     return _quadrant(q, r)
 
 
+def bToPolar(x, y):
+    """0x002424a0. `mul.s` each component by itself, `add.s` x's square to
+    y's, `sqrt.s`; then bATan(x, y) with the components still in $f12 and
+    $f13. Returns (radius, angle)."""
+    r = f32(math.sqrt(f32(f32(x * x) + f32(y * y))))
+    return r, bATan(x, y)
+
+
 # ------------------------------------------------------------------ scenarios
 
 OUT = []
@@ -635,6 +648,30 @@ def s_fixatan2():
             emit("fatan2 %11d %11d -> %11d" % (x, y, bFixATan2(x, y)))
 
 
+WIDE = ((2893789, 2707410), (2718082, 1925942), (1020165, 694390),
+        (2671451, 1521480), (2464977, 2338812), (3321659, 2144691))
+
+
+def s_topolar():
+    for ix in range(-8, 9):
+        for iy in range(-8, 9):
+            x = dy(ix, 2)
+            y = dy(iy, 2)
+            r, a = bToPolar(x, y)
+            emit("polar %.9g %.9g -> %.9g %5d" % (x, y, r, a))
+    for ix in range(1, 13):
+        x = dy(1 << ix, 0)
+        y = -1.0
+        r, a = bToPolar(x, y)
+        emit("polar %.9g %.9g -> %.9g %5d" % (x, y, r, a))
+    for wx, wy in WIDE:
+        for q in range(4):
+            x = dy(-wx if q & 1 else wx, 16)
+            y = dy(-wy if q & 2 else wy, 16)
+            r, a = bToPolar(x, y)
+            emit("polar %.9g %.9g -> %.9g %5d out" % (x, y, r, a))
+
+
 def s_tables():
     for i in range(513):
         emit("sintab %3d -> %11d" % (i, SIN_TABLE[i]))
@@ -664,6 +701,7 @@ SCENARIOS = [
     ("fixsincos", s_fixsincos),
     ("fixatan1", s_fixatan1),
     ("fixatan2", s_fixatan2),
+    ("topolar", s_topolar),
     ("tables", s_tables),
 ]
 
@@ -676,6 +714,129 @@ def model(names):
         emit("scenario %s" % name)
         fn()
     return NL.join(OUT) + NL
+
+
+# ------------------------------------------------------------------ mutants
+#
+# (name, source, before, after). The pass writes each into the source, runs
+# the whole transcript, and puts the original back.
+
+BM = "3DS Files/source/bmath.c"
+
+MUTATIONS = [
+    ("topolar-atan-swapped", BM,
+     "    out->a = (uint16_t)bATan(v->x, v->y);",
+     "    out->a = (uint16_t)bATan(v->y, v->x);"),
+    ("topolar-atan-y-negated", BM,
+     "    out->a = (uint16_t)bATan(v->x, v->y);",
+     "    out->a = (uint16_t)bATan(v->x, -v->y);"),
+    ("topolar-no-sqrt", BM,
+     "    float r = sqrtf(v->x * v->x + v->y * v->y);",
+     "    float r = v->x * v->x + v->y * v->y;"),
+    # hypotf rounds once where the listing rounds three times.
+    ("topolar-hypotf", BM,
+     "    float r = sqrtf(v->x * v->x + v->y * v->y);",
+     "    float r = hypotf(v->x, v->y);"),
+    ("topolar-in-double", BM,
+     "    float r = sqrtf(v->x * v->x + v->y * v->y);",
+     "    float r = (float)sqrt((double)v->x * v->x"
+     " + (double)v->y * v->y);"),
+    ("topolar-x-twice", BM,
+     "    float r = sqrtf(v->x * v->x + v->y * v->y);",
+     "    float r = sqrtf(v->x * v->x + v->x * v->x);"),
+    ("topolar-no-radius", BM,
+     "    out->r = r;" + NL,
+     ""),
+    ("topolar-no-angle", BM,
+     "    out->a = (uint16_t)bATan(v->x, v->y);" + NL,
+     ""),
+    ("topolar-returns-null", BM,
+     "    out->r = r;" + NL + "    return out;",
+     "    out->r = r;" + NL + "    return 0;"),
+]
+
+EQUIVALENT = {}
+
+for _name in EQUIVALENT:
+    assert any(_m[0] == _name for _m in MUTATIONS), _name
+
+_seen = set()
+for _m in MUTATIONS:
+    assert _m[0] not in _seen, _m[0]
+    _seen.add(_m[0])
+
+
+def run_port(tmp):
+    exe = hostbuild.build(tmp, SOURCES, name="bmath_test")
+    r = subprocess.run([str(exe)], capture_output=True, text=True,
+                       timeout=120)
+    return r.returncode, r.stdout.replace(chr(13) + NL, NL)
+
+
+def mutate_pass():
+    ours = model([]).splitlines()
+    with tempfile.TemporaryDirectory() as tmp:
+        rc, port = run_port(tmp)
+    if rc != 0 or port.splitlines() != ours:
+        print("base already differs -- fix that before mutating")
+        return 1
+
+    survived, missing, caught = [], [], 0
+    for name, rel, before, after in MUTATIONS:
+        path = hostbuild.ROOT / rel
+        text = path.read_text(encoding="utf-8", newline="")
+        crlf = (chr(13) + NL) in text
+        probe = before.replace(NL, chr(13) + NL) if crlf else before
+        repl = after.replace(NL, chr(13) + NL) if crlf else after
+        if probe not in text:
+            missing.append(name)
+            print("  %-28s PATTERN NOT FOUND" % name)
+            continue
+        try:
+            hostbuild.write_source(path, text.replace(probe, repl, 1))
+            with tempfile.TemporaryDirectory() as tmp:
+                try:
+                    rc, port = run_port(tmp)
+                except SystemExit:
+                    print("  %-28s did not compile (caught)" % name)
+                    caught += 1
+                    continue
+                except subprocess.TimeoutExpired:
+                    print("  %-28s hung the harness (caught)" % name)
+                    caught += 1
+                    continue
+            if rc != 0:
+                print("  %-28s crashed the harness (caught)" % name)
+                caught += 1
+                continue
+            got = port.splitlines()
+            n = sum(1 for a, b in zip(got, ours) if a != b)
+            n += abs(len(got) - len(ours))
+            if n:
+                print("  %-28s caught, %d lines" % (name, n))
+                caught += 1
+            elif name in EQUIVALENT:
+                print("  %-28s survived, equivalent by construction" % name)
+            else:
+                print("  %-28s SURVIVED" % name)
+                survived.append(name)
+        finally:
+            try:
+                hostbuild.write_source(path, text)
+            except OSError:
+                sys.exit("could not restore %s -- it still holds the "
+                         "mutation %s" % (rel, name))
+
+    real = [m for m in MUTATIONS if m[0] not in missing]
+    holes = [x for x in survived if x not in EQUIVALENT]
+    if missing:
+        print("%d PATTERN NOT FOUND -- the tally below is over %d of %d"
+              % (len(missing), len(real), len(MUTATIONS)))
+    print("%d mutations, %d caught, %d equivalent, %d unexplained"
+          % (len(real), caught, len(EQUIVALENT), len(holes)))
+    for x in holes:
+        print("  unexplained: %s" % x)
+    return 1 if (holes or missing) else 0
 
 
 # ---------------------------------------------------------- an extra sanity net
@@ -716,7 +877,12 @@ def main():
     ap.add_argument("--dump", help="write both transcripts next to this path")
     ap.add_argument("--selftest", action="store_true",
                     help="also check bSqrt32 and bASin against math")
+    ap.add_argument("--mutate", action="store_true",
+                    help="run the mutation pass instead")
     args = ap.parse_args()
+
+    if args.mutate:
+        return mutate_pass()
 
     names = args.scenario or []
     known = [s[0] for s in SCENARIOS]

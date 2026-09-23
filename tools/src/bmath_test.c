@@ -352,6 +352,55 @@ static void s_fixatan2(void)
     }
 }
 
+// -------------------------------------------------------------------- polar
+
+// The atan grid again, the long thin legs, and six wide pairs in all four
+// quadrants. The wide ones are there for the radius: their squares round,
+// so sqrtf of the rounded sum and a correctly-rounded hypotf disagree in
+// the last bit for each of them. The grid's squares are exact, and there
+// the two can never differ.
+static void s_topolar(void)
+{
+    static const int32_t wide[6][2] = {
+        {2893789, 2707410}, {2718082, 1925942}, {1020165, 694390},
+        {2671451, 1521480}, {2464977, 2338812}, {3321659, 2144691},
+    };
+    bVector2 v;
+    bPolar p;
+    const bPolar *ret;
+    int ix, iy, k, q;
+
+    for (ix = -8; ix <= 8; ix++) {
+        for (iy = -8; iy <= 8; iy++) {
+            v.x = dy(ix, 2);
+            v.y = dy(iy, 2);
+            bToPolar(&p, &v);
+            printf("polar %.9g %.9g -> %.9g %5u\n",
+                   (double)v.x, (double)v.y, (double)p.r, p.a);
+        }
+    }
+    for (ix = 1; ix <= 12; ix++) {
+        v.x = dy(1 << ix, 0);
+        v.y = -1.0f;
+        bToPolar(&p, &v);
+        printf("polar %.9g %.9g -> %.9g %5u\n",
+               (double)v.x, (double)v.y, (double)p.r, p.a);
+    }
+    for (k = 0; k < 6; k++) {
+        for (q = 0; q < 4; q++) {
+            v.x = dy((q & 1) ? -wide[k][0] : wide[k][0], 16);
+            v.y = dy((q & 2) ? -wide[k][1] : wide[k][1], 16);
+            // The return is `out`, and the checker holds it to that.
+            p.r = -1.0f;
+            p.a = 0xdead;
+            ret = bToPolar(&p, &v);
+            printf("polar %.9g %.9g -> %.9g %5u %s\n",
+                   (double)v.x, (double)v.y, (double)p.r, p.a,
+                   (ret == &p) ? "out" : "other");
+        }
+    }
+}
+
 // --------------------------------------------------------------- the tables
 
 // Not a function test -- a check that bmathtab.c holds what the ELF holds.
@@ -394,6 +443,7 @@ static const struct { const char *name; void (*fn)(void); } SCENARIOS[] = {
     {"fixsincos",  s_fixsincos},
     {"fixatan1",   s_fixatan1},
     {"fixatan2",   s_fixatan2},
+    {"topolar",    s_topolar},
     {"tables",     s_tables},
 };
 

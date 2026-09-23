@@ -4184,3 +4184,82 @@ call.
 36.7 KB across 108 functions left in task 25: the rest of `Car` (48 /
 20560), `PhysicsCar` (16 / 8496), `Mellovator` (31 / 5420), `MellowMover`
 (13 / 3096).
+
+## Session 25, continued -- Car's third slice, and a function the math library only said it had
+
+Car's third code slice is closed: `IsCarToLeft`, `IsCarToRight`,
+`GetRelativeCarPosition`, `IsCarInFront`, `GetPostCollisionYawControlBoost`,
+`IsDrifting` and `ComputeFakeRPM`, with the `smooth<float>` template it
+calls. Seven methods, 1304 bytes, which makes thirty-nine of Car's eighty
+and 3620 of its 22876 bytes. 58 scenarios, 4238
+lines, 0 differ; 254 mutations, 238 caught, 16 equivalent, 0
+unexplained. Write-up in
+`docs/formats/car.md`, "What is in the third code slice".
+
+### `bToPolar` had been documented as ported and never written
+
+`docs/formats/bmath.md` listed `bMath.obj` as nineteen functions, all
+ported, and `bmath_check` as covering them. `bmath.c` had eighteen.
+`bToPolar` (`0x002424a0`) was decoded, written up, and missing, and nothing
+noticed because nothing called it until `IsCarInFront`. It is in `bmath.c`
+now with a `topolar` scenario -- a 17x17 grid, twelve long legs and six
+awkward pairs in all four quadrants -- and `bmath_check` has a kept
+`--mutate` pass for it, 9 mutations, 9 caught. The document's claim is
+corrected.
+
+**A table in a document that says "all" is a claim, not a check.** The
+next time a module's document says every function is ported, grep the
+source for each address.
+
+### What the slice found in the image
+
+- **The drift threshold is not symmetric.** 1356 BAM is the first drifting
+  yaw one way and 1357 the other, because `GetYaw`'s fold subtracts 2 pi
+  in float32 and the `sub.s` rounds 64180 to -0.12999964. The first
+  fixture had 64180 and 64181 and so never saw the negative side's
+  boundary; it has 64179 now.
+- **`ComputeFakeRPM` reads past its table.** The band from 80 to 89.51
+  reads pair 6 of six, which is `PostCollisionYawControlProfileData[0]`,
+  (0, 0) -- so from 80 up the fake RPM heads for 0 at 50 a call. Pair 1 is
+  never read at all. The port names the overread element and `car_check`
+  asserts the adjacency from the symbol table.
+- **Two tests cannot be seen as shipped.** The yaw boost's four-second
+  cutoff sits past the profile's last knee, where it is 0 anyway, and a
+  stamp in the future lands before its first knee, also 0. The Graph
+  aliases a writable array, so the fixture pokes it -- a knee at 8 s, a
+  first value of 0.125 -- and both show.
+- **`GetRelativeCarPosition` uses the velocity, not the heading,** so a
+  stopped car measures along world x, and `IsCarInFront` treats a car at
+  the same position as a quarter-turn left, because `bATan(0, 0)` is 16384.
+
+### Fixtures, again
+
+Three weak fixtures were found by reading the transcript, before the
+mutation pass had a chance to: no negative-side drift boundary, no speed
+below -25.38 to exercise the reverse clamp, and an `IsCarInFront` pass
+off the origin whose other cars were all behind the car. Each has a case
+now.
+
+The pass then caught sixty-nine of the seventy-six new mutations on its
+first run and left seven, every one of them predicted and written into
+`EQUIVALENT` before the run with its reason: a negated product, a turn
+measured backwards, the 0.13 boundary no yaw reaches, `GetYaw`'s gate
+under the test against 12, a clamp that stores what is already there,
+a loop pass the branch above rules out, and the smoothing's start point
+when `TestRPM` throws the result away. `car.md` has the table.
+
+### Where the next slice starts
+
+`SetMovementMode` is a seven-way jump table (`0x00292200`): `NullMover`,
+`PhysicsCar`, `TrafficCar`, `DeliveryMover`, `MellowMover`, `CopMover`,
+`BeltMover`. Four of those are task 26's. `PhysicsCar` needs two classes
+the task-25 count never included: `PhysicsSystem` (`0x00192460`, the
+integrator the components hang from) and `Aerodynamics` (`0x001a4b58`).
+Its constructor builds a RigidBody, a `TwoWheelAckermanSteering`, four
+Wheels and four Suspensions, an Engine, a DriveTrain and the Aerodynamics,
+adds each to the system, then runs `Calibrate`, `InitializeStateFromCar`
+and `ComputeAuxiliaries`. `Move` alone is 3900 bytes.
+
+35.4 KB across 101 functions left in task 25: the rest of `Car` (41 /
+19256), `PhysicsCar` (16 / 8496), `Mellovator` (31 / 5420), `MellowMover`
+(13 / 3096) -- plus `PhysicsSystem` and `Aerodynamics`, about 1.9 KB more.

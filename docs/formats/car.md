@@ -9,18 +9,21 @@ state they write into, the lights, the horn, the wipers, the blown tyres
 and the blinking, and it hands everything else off.
 
 Ported in slices. This document covers the record, which is whole, and
-two code slices. The first is the seventeen methods that reach nothing
+three code slices. The first is the seventeen methods that reach nothing
 outside Car, CarState and the two world clocks, plus `Car::WorldToCar`,
 which reaches only a CarState method ported since. The second is the
 vtable seam, the nine methods that are pure dispatch through it, three
 fields Car borrows from other classes, the draft, and the object's static
-initialiser. Thirty-two of the eighty methods are ported, 2316 of the
-22876 bytes.
+initialiser. The third is seven methods that call out into code ported
+already: where the other cars are, the post-collision yaw boost,
+`IsDrifting`, and `ComputeFakeRPM`. Thirty-nine of the eighty methods are
+ported, 3620 of the 22876 bytes.
 
 Ported to `3DS Files/source/car.{c,h}`, `topology.h`, `vtable.{c,h}`,
 `world.{c,h}`, `collisionbody.h`, `carcontroller.h`, `sound3d.h` and
-`sinit.{c,h}`. Cross-checked by `tools/car_check.py` — 42 scenarios, 3864
-lines, 0 differing; 178 mutations, 169 caught, 9 equivalent, 0 unexplained — and the boot walk by
+`sinit.{c,h}`, with `bToPolar` added to `bmath.{c,h}`. Cross-checked by
+`tools/car_check.py` — 58 scenarios, 4238 lines, 0 differing; 254
+mutations, 238 caught, 16 equivalent, 0 unexplained — and the boot walk by
 `tools/sinit_check.py`, 6 mutations, 6 caught.
 
 ## Car has no vtable
@@ -612,6 +615,161 @@ The five equivalents the slice adds:
 | `draft-cone-le` | `f == 0` makes the divisor 0: the same `+inf`, the same 0 |
 | `sum-test-inside-if` | the test on `c`'s pass sees the sum the previous test already let through |
 
+## What is in the third code slice
+
+Seven methods, 1304 bytes, and the template function one of them calls.
+Every one calls out of the class, and every callee was ported already —
+except `bToPolar`, which the math library's document had counted as ported
+and its source had never had. It is in `bmath.c` now, with a `topolar`
+scenario in `bmath_check` and a mutation pass of its own there.
+
+| Method | Address | Size | Its outside callee |
+|---|---|---:|---|
+| `IsCarToLeft` | `0x00131ca0` | 68 | `CarState::WorldToCar` |
+| `IsCarToRight` | `0x00131ce8` | 68 | `CarState::WorldToCar` |
+| `GetRelativeCarPosition` | `0x00130f10` | 220 | `bNormalize` |
+| `IsCarInFront` | `0x00131d30` | 124 | `bToPolar` |
+| `GetPostCollisionYawControlBoost` | `0x001341d0` | 132 | `Graph::GetValue` |
+| `IsDrifting` | `0x00134258` | 116 | `CarState::GetYaw` |
+| `ComputeFakeRPM` | `0x00131080` | 576 | `smooth<float>` |
+
+`smooth<float>` (`0x00134788`, 52 bytes) is emitted in `Car.obj` and is
+not a method, so it is not one of the eighty.
+
+### Where the other cars are
+
+`IsCarToLeft` and `IsCarToRight` put the other car's `State.Position`
+(`+96`) into this car's frame and read the sign of x: left is `x < 0`,
+right is `0 < x`. Both are strict, so a car dead ahead or astern — or at
+`-0.0` — is on neither side.
+
+`GetRelativeCarPosition` does not use the heading. It normalises
+`State.Velocity` in the ground plane, so a car standing still measures
+along world x: `bNormalize` answers `(1, 0)` for a zero vector. The dot of
+the delta with that direction is returned and the cross goes through the
+pointer; either one past 100 answers 999 (`gp-32032`) and the pointer is
+not written. The store is in a `bnel`'s delay slot, annulled for NULL.
+
+`IsCarInFront` takes `bToPolar` of the world delta, subtracts
+`State.Angle` (`+868`), sign-extends the result from 16 bits, and compares
+its magnitude — `pmaxw` of it and its negation — strictly against the
+limit. Two consequences:
+
+- A car dead astern is a turn of -32768, whose magnitude is 32768, so a
+  limit of 32768 still excludes it and only `0x8001` and above take in the
+  whole circle.
+- A car at the same position has a zero delta, and `bATan(0, 0)` is
+  16384. It is a quarter-turn to the left, and in front for any limit
+  above that.
+
+### The yaw
+
+`GetPostCollisionYawControlBoost` reads the collision body's
+`LastYawControlCollisionTime` (`+264`) and answers 0 for the same two
+sentinels as `IsBlinking` — 0 and `0x7fffffff` — tested the same way. The
+elapsed time is the tick count difference as a **signed** 32-bit number
+times the tick; at 4 seconds or more (`lui 0x4080`, strict `<`) it is 0,
+and otherwise it is the Graph at `gp-23416`.
+
+As shipped the profile is `(0, 0) (0.4, 1) (1, 1) (2, 0)`, 0 from two
+seconds on, so the four-second test changes nothing, and it is 0 before
+its first knee too, so a stamp in the future cannot be told from one at
+the present. The Graph aliases a writable array, though, and the
+`[yaw boost wide profile]` pass pokes it — a last knee at 8 s, a first
+value of 0.125 — so that both the cutoff and the sign of the elapsed time
+show in the transcript.
+
+`IsDrifting` needs two wheels down (`+888`), a yaw of more than 0.13
+radians (`gp-31904`) either way, and a forward speed (`+892`) above 12
+(`lui 0x4140`). `GetYaw` is 0 below a forward speed of 5, so its gate
+cannot be seen from here.
+
+The threshold is **not symmetric**. The first drifting yaw is 1356 BAM one
+way and 1357 the other: `GetYaw` folds a delta of 64180 by subtracting
+2π in float32, and that `sub.s` rounds it to -0.12999964, inside the
+threshold, where 1356 gives +0.13000 and change. All 65536 deltas were
+run through the fold; none lands on 0.13f exactly, so `<` against `<=`
+cannot be seen either.
+
+### The fake engine
+
+`ComputeFakeRPM` gives a car whose engine is not simulated a plausible
+gear and RPM from its speed alone. Eleven tweakables drive it, all
+initialised `.sdata` words read through `gp`, and a twelve-entry table of
+(low, high) RPM pairs at `0x002e84f8`:
+
+| Tweakable | Address | Value |
+|---|---|---:|
+| `GearRTo1Speed` | `0x00323044` | -2 |
+| `Gear1To2Speed` | `0x00323048` | 25.38 |
+| `Gear2To3Speed` | `0x0032304c` | 40.89 |
+| `Gear3To4Speed` | `0x00323050` | 56.47 |
+| `Gear4To5Speed` | `0x00323054` | 72.06 |
+| `Gear5To6Speed` | `0x00323058` | 80 |
+| `GearTopSpeed` | `0x0032305c` | 89.51 |
+| `MaxRPMInc` | `0x00323060` | 50 |
+| `MaxSpeedInc` | `0x00323064` | 1 |
+| `TestSpeed` | `0x00323068` | 0 |
+| `TestRPM` | `0x003241cc` | 100 |
+
+```
+RPMTable  1000 8500 | 6500 8500 | 6500 8500 | 5500 9000 | 6500 7200 | 6600 7000
+```
+
+The speed is `TestSpeed` if that is above 0, else `VelocityMagnitude`;
+pulled to 0.01 under `GearTopSpeed` if it reaches it; and smoothed toward
+by `MaxSpeedInc` a call through `OldSpeed`. Below `Gear1To2Speed` the gear
+is first, or reverse under -2, and the RPM runs along pair 0 by `|speed|`
+clamped to 25.38 — so reversing at 30 revs the same as reversing at 25.38.
+Above it, the first band whose top exceeds the speed picks the gear (band
+`i` gives gear `i + 2`, capped at `FIFTH_GEAR`) and the RPM interpolates
+along pair `i + 1`. The RPM is smoothed by `MaxRPMInc` only when the gear
+did not change, and then the gear and RPM are stored.
+
+Four things in it are not what the tables suggest:
+
+- **Pair 1 is never read.** Band 1 reads pair 2. As shipped the two are
+  both (6500, 8500), so nothing shows; the fixture sets pair 1 to
+  (1, 2) to prove it.
+- **The last band reads past the table.** Band 5 — 80 to 89.51 — reads
+  pair 6, and there are six. The eight bytes after `RPMTable` are
+  `PostCollisionYawControlProfileData[0]`, which is (0, 0) once the static
+  initialiser has run, so from `Gear5To6Speed` up the fake RPM heads for
+  0, 50 a call. The port reads that element by name, and
+  `car_check` asserts the adjacency from the ELF's symbol table.
+- **Band 5's gear is fifth, not sixth.** `i + 2` is `SIXTH_GEAR` there and
+  the cap takes it back to `FIFTH_GEAR`. Band 4 is fifth as well.
+- **`TestRPM`'s "unset" is 100, not 0,** and when it is set the smoothed
+  value is thrown away for it, so the smoothing's starting point — `RPM`
+  or `TestRPM` — cannot be seen.
+
+`smooth<float>` is `cur + rate` if that is under the target, else
+`cur - rate` if the target is under that, else the target. The high side
+is tested first. A target exactly at an edge comes back as itself, which
+is the same number as the edge unless the two are zeros of opposite sign;
+the `[smooth]` fixtures use signed zeros to tell `<` from `<=`.
+
+### What the mutation pass said
+
+Seventy-six mutations for the slice, sixty-nine caught on the first pass
+and none unexplained. Three weak fixtures had been found by reading the
+transcript before the pass ran — no drift boundary on the negative side,
+no speed below -25.38 to reach the reverse clamp, and an off-origin
+`IsCarInFront` pass whose other cars were all behind the car — and each
+got a case first.
+
+The seven equivalents:
+
+| Mutation | Why nothing can see it |
+|---|---|
+| `rel-across-neg-product` | `(-a) * b` and `-(a * b)` are one float32 for every `a` and `b` |
+| `front-turn-reversed` | a 16-bit turn has the same magnitude measured either way, -32768 included |
+| `drift-yaw-le` | no reachable yaw is exactly 0.13f, over all 65536 deltas |
+| `drift-yaw-always` | the test against 12 fails wherever `GetYaw`'s gate at 5 would answer 0 |
+| `fr-frac-clamp-le` | at equality the clamp stores the value `frac` already holds |
+| `fr-bands-from-0` | the loop runs only when `speed >= speeds[0]`, so its `i = 0` test cannot pass |
+| `fr-smooth-from-rpm-only` | with `TestRPM` set the smoothed value is thrown away for it |
+
 ## What is not ported yet
 
 The measure that matters for planning is whether a method makes a direct
@@ -633,21 +791,20 @@ other four:
 - `PutFlatOnTrack` goes to `FindFlatOnTrackPosition`, which needs a real
   `TopologyCoordinate` (task 27).
 
-Of the **forty-six that do**, two are ported: `CalculateDraftFactor(Car *)`,
-whose calls are Graph and Table, and `WorldToCar`, whose one is
-`CarState::WorldToCar`. Six more call nothing outside Car that is not
-already ported, and they are the next slice:
+Of the **forty-six that do**, nine are ported: `CalculateDraftFactor(Car *)`,
+whose calls are Graph and Table; `WorldToCar`, whose one is
+`CarState::WorldToCar`; and the third slice's seven. None of the other
+thirty-seven calls only ported code.
 
-| Method | Size | Its outside callee |
-|---|---:|---|
-| `IsCarToLeft`, `IsCarToRight` | 68 + 68 | `CarState::WorldToCar`, ported |
-| `GetRelativeCarPosition` | 220 | `bNormalize2`, ported |
-| `GetPostCollisionYawControlBoost` | 132 | `Graph::GetValue`, ported |
-| `IsDrifting` | 116 | `CarState::GetYaw`, ported |
-| `ComputeFakeRPM` | 576 | `smooth<float>`, a 52-byte template in `Car.obj` |
-
-`IsCarInFront` (124) is one step further: its only callee is `bToPolar`
-(`0x002424a0`), which the math library port has not brought over yet.
+The next one to fall is `SetMovementMode` (484), and it is not small. It
+is a seven-way jump table at `0x00292200` — `NullMover`, `PhysicsCar`,
+`TrafficCar`, `DeliveryMover`, `MellowMover`, `CopMover`, `BeltMover` —
+and each arm allocates and constructs its mover, stores it at `+48`, and
+sets the collision body's `+84` to 1 for the two physics movers and 0 for
+the rest, before `CarCollisionBody::SetupPhysicsPointers`. Four of the
+seven movers are task 26's. `PhysicsCar` itself needs two classes the
+task-25 count never included, `PhysicsSystem` (`0x00192460`) and
+`Aerodynamics` (`0x001a4b58`).
 
 Everything else — the constructor and destructor, the reset and damage
 groups, the render and sound groups, force feedback, `SetMovementMode`

@@ -3,7 +3,7 @@
 **Status: ported and cross-checked.** All four objects are in
 `3DS Files/source` as `bmath.c`, `bmathtab.c`, `bvector.c`, `bmatrix.c` and
 `bquat.c`. Two checkers hold them to this document: `tools/bmath_check.py`
-(18 scenarios) and `tools/bvector_check.py` (27), each a Python model written
+(19 scenarios) and `tools/bvector_check.py` (27), each a Python model written
 from the disassembly and diffed against the C line for line, and each
 mutation-tested so that a checker which cannot fail does not get to claim a
 pass. Every rule below carries the address it came from; where a claim rests
@@ -299,6 +299,15 @@ return out;
 ```
 
 (Stores the angle first, at `+4`, then the radius. Order does not matter here.)
+
+This one was decoded with the rest and then **not ported** — the table
+above said "all" and `bmath.c` had eighteen of the nineteen until
+Session 25, when `Car::IsCarInFront` became its first caller. It has the
+`topolar` scenario now (a 17x17 grid, twelve long legs, six awkward pairs
+in four quadrants, and a check that the return is `out`) and the only
+kept mutation pass in `bmath_check`, `--mutate`: 9 mutations, 9 caught.
+`hypotf` in place of the listing's three roundings is one of them, caught
+on 12 lines.
 
 ---
 

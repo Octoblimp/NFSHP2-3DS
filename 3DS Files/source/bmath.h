@@ -20,6 +20,8 @@
 
 #include <stdint.h>
 
+#include "bvector.h"
+
 // ------------------------------------------------------------------- angles
 
 // Both constants are the float32 literals the game holds. RAD_TO_BAM is the
@@ -105,5 +107,10 @@ void    bFixSinCos(int32_t *s, int32_t *c, uint16_t bam);
 // atan of a Q16 tangent, and atan2 of a Q16 pair, both in BAM.
 int32_t bFixATan1(int32_t t);
 int32_t bFixATan2(int32_t x, int32_t y);
+
+// ------------------------------------------------------------------- polar
+
+// The length of `v` and bATan(v->x, v->y). Returns `out`.
+bPolar *bToPolar(bPolar *out, const bVector2 *v);
 
 #endif // BMATH_H

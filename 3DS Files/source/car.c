@@ -1,4 +1,4 @@
-// car -- Car.obj, slices one and two.
+// car -- Car.obj, slices one to three.
 //
 // Thirty-four of Car's eighty methods make no call outside the class.
 // That is not the same as "can be written today": the count is of `jal`
@@ -14,6 +14,11 @@
 // not are listed at the bottom with what each is waiting for, so the next
 // slice does not have to re-derive the dependency graph.
 //
+// Slice three is seven that do call out of the class, into code that was
+// already ported: where the other cars are (left, right, relative, in
+// front), the post-collision yaw boost, IsDrifting, and ComputeFakeRPM with
+// the smooth<float> it calls.
+//
 // Layout, enums, globals and every prototype: car.h. Cross-check:
 // tools/car_check.py. Write-up: docs/formats/car.md.
 
@@ -21,13 +26,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "bmath.h"
 #include "car.h"
 
 // car.h names CarDriver and CarTypeInfo without including their headers, to
 // keep out of the cycle cardriver.h -> drivetarget.h -> car.h. GetSteering
 // reads through the pointer and four methods dispatch through its vptr, so
-// the complete record is needed here.
+// the complete record is needed here. drivetrain.h is for the Gear values
+// ComputeFakeRPM stores, and bmath.h for bToPolar.
 #include "cardriver.h"
+#include "drivetrain.h"
 #include "sound3d.h"
 #include "vtable.h"
 #include "world.h"
@@ -796,6 +804,228 @@ float car_get_tracked_acceleration(Car *c)
     return 0.0f;
 }
 
+// ---------------------------------------------- where the other cars are
+//
+// Slice three. Every method from here to the fake engine calls out of the
+// class, and every callee is already ported: CarState::WorldToCar and
+// GetYaw, bNormalize, Graph::GetValue, and bToPolar, which came into
+// bmath.c for IsCarInFront.
+
+#define CAR_RELATIVE_FAR 999.0f         // gp-32032, 0x4479c000
+#define CAR_DRIFT_YAW    0.13f          // gp-31904, 0x3e051eb8
+
+// 0x00131ca0. `other`'s position in this car's frame; left is x < 0. Only
+// Position's x and y are read, as the 2D overload's input.
+int32_t car_is_car_to_left(Car *c, Car *other)
+{
+    bVector2 local;
+
+    carstate_world_to_car2(&c->State, &local,
+                           (const bVector2 *)&other->State.Position);
+    return (local.x < 0.0f) ? 1 : 0;
+}
+
+// 0x00131ce8. The same, and right is 0 < x. A car exactly on the axis is
+// neither, and so is one at -0.0.
+int32_t car_is_car_to_right(Car *c, Car *other)
+{
+    bVector2 local;
+
+    carstate_world_to_car2(&c->State, &local,
+                           (const bVector2 *)&other->State.Position);
+    return (0.0f < local.x) ? 1 : 0;
+}
+
+// 0x00130f10. `other` along this car's direction of travel, in the ground
+// plane: the dot of the delta with the normalised velocity is returned, and
+// the cross goes through `lateral` when it is not NULL -- a `bnel`, so the
+// store is annulled for NULL. Either one past 100 answers 999.0f (gp-32032)
+// and stores nothing. A car standing still normalises to (1, 0), which is
+// bNormalize's answer for a zero vector, not its heading.
+float car_get_relative_car_position(Car *c, Car *other, float *lateral)
+{
+    bVector2 n;
+    float dx, dy, along, across;
+
+    bNormalize2(&n, (const bVector2 *)&c->State.Velocity);
+    dy = other->State.Position.y - c->State.Position.y;
+    dx = other->State.Position.x - c->State.Position.x;
+
+    across = n.y * dx + (-n.x) * dy;
+    along  = n.x * dx + n.y * dy;
+
+    if (100.0f < fabsf(along) || 100.0f < fabsf(across))
+        return CAR_RELATIVE_FAR;
+    if (lateral)
+        *lateral = across;
+    return along;
+}
+
+// 0x00131d30. Whether `other` lies within `angle` of this car's heading:
+// the delta's polar angle less State.Angle, as a signed 16-bit turn (`sll`
+// then `sra` by 16), and its magnitude -- `pmaxw` of it and its negation --
+// strictly under `angle`. A car dead astern is -32768, whose magnitude is
+// 32768, so an `angle` of 0x8001 or more takes in the whole circle.
+int32_t car_is_car_in_front(Car *c, Car *other, uint16_t angle)
+{
+    bVector2 d;
+    bPolar p;
+    int32_t diff;
+
+    d.y = other->State.Position.y - c->State.Position.y;
+    d.x = other->State.Position.x - c->State.Position.x;
+    bToPolar(&p, &d);
+    diff = (int16_t)(uint16_t)(p.a - c->State.Angle);
+    return (((diff < 0) ? -diff : diff) < (int32_t)angle) ? 1 : 0;
+}
+
+// ------------------------------------------------------ the car's own yaw
+
+// 0x001341d0. The boost after a collision that asked for yaw control: none
+// if the body's stamp is 0 or 0x7fffffff (the same two sentinels as
+// IsBlinking, tested the same way), none four seconds or more after it,
+// and otherwise the profile Graph at the elapsed time.
+//
+// The profile is 0 from two seconds on, so as shipped the four-second test
+// changes nothing. It is kept because the Graph aliases a writable array.
+float car_get_post_collision_yaw_control_boost(Car *c)
+{
+    uint32_t stamp =
+        c->pDynamicCollisionBody->LastYawControlCollisionTime.PackedTime;
+    float t;
+
+    if (stamp == 0 || stamp == 0x7fffffffu)
+        return 0.0f;
+    t = (float)(int32_t)((uint32_t)WorldTimer - stamp) * CAR_TICK_SECONDS;
+    if (!(t < 4.0f))
+        return 0.0f;
+    return graph_get_value(&PostCollisionYawControlProfile, t);
+}
+
+// 0x00134258. Two wheels down, yawing by more than 0.13 radians (gp-31904)
+// either way, and faster than 12 forwards. GetYaw is 0 below a forward
+// speed of 5, so the order of the last two tests cannot be seen.
+int32_t car_is_drifting(Car *c)
+{
+    if (c->State.nWheelsTouchingGround < 2)
+        return 0;
+    if (!(CAR_DRIFT_YAW < fabsf(carstate_get_yaw(&c->State))))
+        return 0;
+    return (12.0f < c->State.ForwardSpeed) ? 1 : 0;
+}
+
+// --------------------------------------------------------- the fake engine
+//
+// ComputeFakeRPM's tweakables. Each is an initialised .sdata word, read
+// through gp, and each is here with the image's bits. The gear speeds are
+// the tops of the bands; TestSpeed and TestRPM are debug overrides, and
+// TestRPM's "unset" is 100.0, not 0.
+
+float GearRTo1Speed = -2.0f;                    // 0x00323044  c0000000
+float Gear1To2Speed = 25.38f;                   // 0x00323048  41cb0a3d
+float Gear2To3Speed = 40.89f;                   // 0x0032304c  42238f5c
+float Gear3To4Speed = 56.47f;                   // 0x00323050  4261e148
+float Gear4To5Speed = 72.06f;                   // 0x00323054  42901eb8
+float Gear5To6Speed = 80.0f;                    // 0x00323058  42a00000
+float GearTopSpeed  = 89.51f;                   // 0x0032305c  42b3051f
+float MaxRPMInc     = 50.0f;                    // 0x00323060  42480000
+float MaxSpeedInc   = 1.0f;                     // 0x00323064  3f800000
+float TestSpeed     = 0.0f;                     // 0x00323068  00000000
+float TestRPM       = 100.0f;                   // 0x003241cc  42c80000
+
+// (low, high) RPM pairs, 0x002e84f8, in .data. Pair 1 is never read.
+float RPMTable[12] = {
+    1000.0f, 8500.0f,  6500.0f, 8500.0f,  6500.0f, 8500.0f,
+    5500.0f, 9000.0f,  6500.0f, 7200.0f,  6600.0f, 7000.0f,
+};
+
+// 0x00134788. smooth<float>, emitted in Car.obj and not a method: `target`,
+// but no further than `rate` from `cur`. The high side is tested first and
+// returns `cur + rate`; a target exactly at either edge comes back as the
+// target itself, which is the same number unless the two are zeros of
+// opposite sign.
+float car_smooth(float cur, float target, float rate)
+{
+    float hi = cur + rate, lo;
+
+    if (hi < target)
+        return hi;
+    lo = cur - rate;
+    if (target < lo)
+        return lo;
+    return target;
+}
+
+// 0x00131080. A plausible gear and RPM from speed alone, for a car whose
+// engine is not simulated.
+//
+// The speed -- TestSpeed if it is above 0, else VelocityMagnitude -- is
+// pulled back to 0.01 under GearTopSpeed if it reaches it, and smoothed
+// toward by MaxSpeedInc a call, through OldSpeed. Below Gear1To2Speed the
+// gear is first, or reverse under GearRTo1Speed, and the RPM runs along
+// pair 0 by |speed|. Above, the first band whose top exceeds the speed
+// picks the gear, two past its index and capped at FIFTH_GEAR (the last
+// band would be SIXTH_GEAR), and the RPM interpolates along pair index+1.
+// No band at all -- a smoothed speed still above the top -- leaves the gear
+// alone and the RPM at 0.
+//
+// For the last band that pair is 6, and RPMTable has six. The image reads
+// the eight bytes after it, which are PostCollisionYawControlProfileData[0]
+// -- (0, 0) once the static initialiser has run -- so from Gear5To6Speed up
+// the fake RPM heads for 0. Kept, and the read is spelled out.
+//
+// The RPM is smoothed by MaxRPMInc, from RPM or TestRPM, only when the gear
+// did not change, and TestRPM, when set, is what is stored.
+void car_compute_fake_rpm(Car *c)
+{
+    CarState *st = &c->State;
+    float speeds[6];
+    float speed, rpm, frac;
+    const float *pair;
+    Gear gear = st->CurrentGear;
+    int32_t i;
+
+    speed = (0.0f < TestSpeed) ? TestSpeed : st->VelocityMagnitude;
+    if (GearTopSpeed <= speed)
+        speed = GearTopSpeed - 0.01f;
+    speed = car_smooth(c->OldSpeed, speed, MaxSpeedInc);
+    c->OldSpeed = speed;
+
+    rpm = 0.0f;
+    if (speed < Gear1To2Speed) {
+        gear = (GearRTo1Speed <= speed) ? FIRST_GEAR : REVERSE;
+        frac = fabsf(speed);
+        if (Gear1To2Speed < frac)
+            frac = Gear1To2Speed;
+        rpm = RPMTable[0]
+              + (frac / Gear1To2Speed) * (RPMTable[1] - RPMTable[0]);
+    } else {
+        speeds[0] = Gear1To2Speed;
+        speeds[1] = Gear2To3Speed;
+        speeds[2] = Gear3To4Speed;
+        speeds[3] = Gear4To5Speed;
+        speeds[4] = Gear5To6Speed;
+        speeds[5] = GearTopSpeed;
+        for (i = 1; i < 6; i++) {
+            if (speed < speeds[i]) {
+                pair = (i + 1 < 6) ? &RPMTable[2 * (i + 1)]
+                                   : &PostCollisionYawControlProfileData[0].x;
+                gear = (i + 2 < SIXTH_GEAR) ? (Gear)(i + 2) : FIFTH_GEAR;
+                rpm = pair[0] + ((speed - speeds[i - 1])
+                                 / (speeds[i] - speeds[i - 1]))
+                                * (pair[1] - pair[0]);
+                break;
+            }
+        }
+    }
+
+    if (st->CurrentGear == gear)
+        rpm = car_smooth((TestRPM == 100.0f) ? st->RPM : TestRPM, rpm,
+                         MaxRPMInc);
+    st->CurrentGear = gear;
+    st->RPM = (TestRPM == 100.0f) ? rpm : TestRPM;
+}
+
 // ---------------------------------------------------------------------------
 // What is NOT here, and what each one waits on. Measured from the listing,
 // not guessed.
@@ -821,14 +1051,15 @@ float car_get_tracked_acceleration(Car *c)
 // 30 + 4 = 34, and the arithmetic closing is the check that the groups are
 // a partition and not overlapping lists.
 //
-// Of the forty-six that call out of the class directly, two are here:
-// CalculateDraftFactor(Car *), whose calls are Graph and Table, and
-// car_world_to_car, whose `j` leaves the class for CarState::WorldToCar.
-// The other forty-four are the constructor and destructor, the reset and
-// damage groups, the render and sound groups, the two force-feedback
-// methods, and among them four that read as though they belonged above but
-// do not --
-// UpdatePosition and MaybeCameraShake (the effect system), FixBlownTires
+// Of the forty-six that call out of the class directly, nine are here:
+// CalculateDraftFactor(Car *), whose calls are Graph and Table;
+// car_world_to_car, whose `j` leaves the class for CarState::WorldToCar;
+// and slice three's seven, whose callees are CarState, bNormalize, Graph,
+// bToPolar and smooth<float>. The other thirty-seven are the constructor
+// and destructor, the reset and damage groups, the render and sound
+// groups, the two force-feedback methods, and among them four that read as
+// though they belonged above but do not -- UpdatePosition and
+// MaybeCameraShake (the effect system), FixBlownTires
 // (RealDriver::ForceEBrakeStop) and FindFlatOnTrackPosition
 // (TopologyCoordinate).
 //

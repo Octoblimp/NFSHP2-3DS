@@ -596,6 +596,11 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
         get to claim a pass: `tools/bmath_check.py` (18 scenarios, 6065
         lines, 12 of 12 mutations caught) and `tools/bvector_check.py`
         (27 scenarios, 5721 lines, 23 of 23).
+        **Corrected in Session 25:** "all 73 ported" was 72. `bToPolar`
+        (`0x002424a0`) was decoded and written up but never in
+        `bmath.c`, and nothing noticed until `Car::IsCarInFront` called
+        it. It is ported now: `bmath_check` is 19 scenarios, 6391
+        lines, 0 differ, and its kept `--mutate` pass is 9 of 9.
         `tools/gen_bmath_tables.py --check` holds `bmathtab.c` to the ELF.
         The two atan tables regenerate exactly as
         `(int)(atan(i/s) * 10430.3779296875)` -- the float32-rounded BAM
@@ -1351,6 +1356,32 @@ is citro3d and owns the top.
         come `SetMovementMode` / `SetControlMode` with `PhysicsCar`, and
         with them `SetToPhysicsMode`, `SetFrictionBoost` and the
         `wheel_install_seams()` call.
+
+        **Car's third code slice is closed: seven methods that call out
+        into ported code.** `IsCarToLeft`, `IsCarToRight`,
+        `GetRelativeCarPosition`, `IsCarInFront`,
+        `GetPostCollisionYawControlBoost`, `IsDrifting` and
+        `ComputeFakeRPM` with its `smooth<float>`, 1304 B, and `bToPolar`
+        in `bmath.c` for `IsCarInFront`. 58 scenarios, 4238 lines, 0
+        differ; 254 mutations, 238 caught, 16 equivalent, 0 unexplained.
+        Thirty-nine of the eighty, 3620 of 22876 bytes, nine of the
+        forty-six outside-call methods. Written up in
+        `docs/formats/car.md`: the drift threshold is 1356 BAM one way
+        and 1357 the other, `ComputeFakeRPM`'s top band reads the eight
+        bytes past `RPMTable` (so the fake RPM heads for 0 from 80 up),
+        and two tests that are invisible as shipped are made visible by
+        poking the Graph's aliased array.
+
+        That leaves **35.4 KB across 101 functions**: the rest of `Car`
+        (41 / 19256), `PhysicsCar` (16 / 8496), `Mellovator`
+        (31 / 5420), `MellowMover` (13 / 3096). **Plus two classes the
+        count never had:** `PhysicsCar`'s constructor adds every
+        component to a `PhysicsSystem` (`0x00192460`, ~1.2 KB) and
+        builds an `Aerodynamics` (`0x001a4b58`, ~0.65 KB), and neither is
+        ported. They come first. `SetMovementMode` is a seven-way jump
+        table (`0x00292200`) of which four arms -- `TrafficCar`,
+        `DeliveryMover`, `CopMover`, `BeltMover` -- construct task 26's
+        movers.
 26. [ ] Race/event logic, cop AI, pursuit (roadblocks, spike strips) --
         `HotPursuitEvent` already seen in the `.mdebug` strings survey
 27. [ ] Track rendering/streaming, collision. Carries a debt from task 24:

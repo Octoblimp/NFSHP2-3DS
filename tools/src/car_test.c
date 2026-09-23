@@ -1,4 +1,4 @@
-// Transcript harness for Car, slices one and two. Cross-checked by
+// Transcript harness for Car, slices one to three. Cross-checked by
 // tools/car_check.py, which models the same methods from the disassembly
 // without reading this file or car.c.
 //
@@ -1626,6 +1626,381 @@ static void scenario_tracked(void)
     }
 }
 
+// ===================================================================== slice 3
+
+// ComputeFakeRPM's tweakables, RPMTable and the yaw profile's points are
+// all writable globals, and four scenarios below poke one of them to make a
+// branch visible. Each poke is undone before the next fixture, from a copy
+// taken once the static initialiser has run.
+
+static float *const kTweak[11] = {
+    &GearRTo1Speed, &Gear1To2Speed, &Gear2To3Speed, &Gear3To4Speed,
+    &Gear4To5Speed, &Gear5To6Speed, &GearTopSpeed, &MaxRPMInc,
+    &MaxSpeedInc, &TestSpeed, &TestRPM,
+};
+static const char *const kTweakName[11] = {
+    "GearRTo1Speed", "Gear1To2Speed", "Gear2To3Speed", "Gear3To4Speed",
+    "Gear4To5Speed", "Gear5To6Speed", "GearTopSpeed", "MaxRPMInc",
+    "MaxSpeedInc", "TestSpeed", "TestRPM",
+};
+
+static float    s_tweak[11];
+static float    s_rpm[12];
+static bVector2 s_pcy[4];
+
+static void save_tweaks(void)
+{
+    int i;
+
+    for (i = 0; i < 11; i++)
+        s_tweak[i] = *kTweak[i];
+    memcpy(s_rpm, RPMTable, sizeof s_rpm);
+    memcpy(s_pcy, PostCollisionYawControlProfileData, sizeof s_pcy);
+}
+
+static void restore_tweaks(void)
+{
+    int i;
+
+    for (i = 0; i < 11; i++)
+        *kTweak[i] = s_tweak[i];
+    memcpy(RPMTable, s_rpm, sizeof s_rpm);
+    memcpy(PostCollisionYawControlProfileData, s_pcy, sizeof s_pcy);
+}
+
+static void scenario_tweakables(void)
+{
+    int i;
+
+    printf("[fake rpm tweakables]\n");
+    for (i = 0; i < 11; i++)
+        printf("  %-14s %08x\n", kTweakName[i], wbits(*kTweak[i]));
+    for (i = 0; i < 12; i++)
+        printf("  RPMTable[%d] %08x\n", i, wbits(RPMTable[i]));
+}
+
+// ------------------------------------------------ where the other cars are
+
+// Every `other` carries a GeometryPosition and a Velocity nothing should
+// read, so a method that takes the wrong field shows as a different answer.
+static void set_other(Car *k, float px, float py)
+{
+    memset(k, 0, sizeof *k);
+    k->State.Position.x = px;
+    k->State.Position.y = py;
+    k->State.Position.z = 3.0f;
+    k->State.GeometryPosition.x = 777.0f;
+    k->State.GeometryPosition.y = -777.0f;
+    k->State.Velocity.x = 55.0f;
+    k->State.Velocity.y = -66.0f;
+    k->State.Angle = 12345;
+}
+
+static const float kOx[11] = {
+    10.0f, 11.0f, 10.0f, 9.0f, 10.0f, 0.0f, -3.0f, 1.0f, 100.0f, 12.5f,
+    -40.0f
+};
+static const float kOy[11] = {
+    -5.0f, -5.0f, -4.0f, -5.0f, -6.0f, 0.0f, 7.0f, 2.0f, 100.0f, -7.25f,
+    3.5f
+};
+
+static void scenario_left_right(void)
+{
+    static const int   kAng[5] = { 0, 16384, 8192, 0, 49152 };
+    static const float kVx[5]  = { 0.0f, 0.0f, 0.0f, 3.0f, -2.0f };
+    static const float kVy[5]  = { 0.0f, 0.0f, 0.0f, 4.0f, 0.5f };
+    static const float kFs[5]  = { 1.0f, 1.0f, 1.0f, 5.0f, -1.0f };
+    static const float kPx[5]  = { 10.0f, 0.0f, -3.0f, 1.0f, 100.0f };
+    static const float kPy[5]  = { -5.0f, 0.0f, 7.0f, 2.0f, 100.0f };
+    int i, j;
+
+    printf("[left right]\n");
+    for (i = 0; i < 5; i++) {
+        for (j = 0; j < 11; j++) {
+            int l, r;
+
+            fresh();
+            g_car.State.Angle = (uint16_t)kAng[i];
+            g_car.State.Velocity.x = kVx[i];
+            g_car.State.Velocity.y = kVy[i];
+            g_car.State.ForwardSpeed = kFs[i];
+            g_car.State.Position.x = kPx[i];
+            g_car.State.Position.y = kPy[i];
+            set_other(&g_others[0], kOx[j], kOy[j]);
+            l = car_is_car_to_left(&g_car, &g_others[0]);
+            g_car.State.MatrixValid = 0;
+            r = car_is_car_to_right(&g_car, &g_others[0]);
+            printf("  car %d other %-2d -> left %d right %d\n", i, j, l, r);
+        }
+    }
+}
+
+static void scenario_relative(void)
+{
+    static const float kPx[4] = { 0.0f, 5.0f, 0.0f, -20.0f };
+    static const float kPy[4] = { 0.0f, -3.0f, 0.0f, 40.0f };
+    static const float kVx[4] = { 1.0f, 3.0f, 0.0f, -0.6f };
+    static const float kVy[4] = { 0.0f, 4.0f, 0.0f, 2.2f };
+    static const float kQx[12] = {
+        0.0f, 100.0f, 100.00001f, -100.0f, -100.00001f, 0.0f, 0.0f,
+        50.0f, 99.9f, 65.0f, -30.0f, 5.0f
+    };
+    static const float kQy[12] = {
+        0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 100.0f, -100.00001f,
+        50.0f, -99.9f, 77.0f, 10.0f, -3.0f
+    };
+    int i, j;
+
+    printf("[relative position]\n");
+    for (i = 0; i < 4; i++) {
+        for (j = 0; j < 12; j++) {
+            float lat = -12345.0f, a1, a2;
+
+            fresh();
+            g_car.State.Position.x = kPx[i];
+            g_car.State.Position.y = kPy[i];
+            g_car.State.Velocity.x = kVx[i];
+            g_car.State.Velocity.y = kVy[i];
+            g_car.State.Velocity.z = 9.0f;
+            set_other(&g_others[0], kQx[j], kQy[j]);
+            a1 = car_get_relative_car_position(&g_car, &g_others[0], &lat);
+            a2 = car_get_relative_car_position(&g_car, &g_others[0], NULL);
+            printf("  car %d other %-2d -> along %08x lateral %08x "
+                   "null %08x\n", i, j, wbits(a1), wbits(lat), wbits(a2));
+        }
+    }
+}
+
+static void scenario_in_front(void)
+{
+    static const int kAng[5] = { 0, 1000, 16384, 65000, 32768 };
+    static const float kQx[8] = {
+        10.0f, 0.0f, -10.0f, 0.0f, 10.0f, -7.0f, 0.0f, 3.5f
+    };
+    static const float kQy[8] = {
+        0.0f, 10.0f, 0.0f, -10.0f, 10.0f, -3.0f, 0.0f, 0.25f
+    };
+    static const uint16_t kWithin[9] = {
+        0, 1, 1000, 16384, 16385, 32767, 32768, 32769, 65535
+    };
+    int i, j, k;
+
+    printf("[in front]\n");
+    for (i = 0; i < 5; i++) {
+        for (j = 0; j < 8; j++) {
+            char r[10];
+
+            for (k = 0; k < 9; k++) {
+                fresh();
+                g_car.State.Angle = (uint16_t)kAng[i];
+                g_car.State.Position.x = 0.0f;
+                g_car.State.Position.y = 0.0f;
+                g_car.State.GeometryPosition.x = -555.0f;
+                g_car.State.GeometryPosition.y = 444.0f;
+                set_other(&g_others[0], kQx[j], kQy[j]);
+                r[k] = (char)('0' + car_is_car_in_front(&g_car, &g_others[0],
+                                                        kWithin[k]));
+            }
+            r[9] = 0;
+            printf("  ang %-5d other %d -> %s\n", kAng[i], j, r);
+        }
+    }
+
+    // And off the origin, one car with the others behind it and one with
+    // them ahead, so a delta taken the wrong way round shows.
+    printf("[in front moved]\n");
+    for (i = 0; i < 2; i++) {
+        for (j = 0; j < 8; j++) {
+            fresh();
+            g_car.State.Angle = 0;
+            g_car.State.Position.x = i ? -20.0f : 20.0f;
+            g_car.State.Position.y = i ? 4.0f : -4.0f;
+            set_other(&g_others[0], kQx[j], kQy[j]);
+            printf("  car %d other %d -> %d %d\n", i, j,
+                   car_is_car_in_front(&g_car, &g_others[0], 8192),
+                   car_is_car_in_front(&g_car, &g_others[0], 32768));
+        }
+    }
+}
+
+// ------------------------------------------------------ the car's own yaw
+
+static void scenario_yaw_boost(void)
+{
+    static const uint32_t kStamp[16] = {
+        0u, 0x7fffffffu, 1000u, 1000u, 1000u, 1000u, 1000u, 1000u,
+        1000u, 1000u, 1000u, 5u, 0x80000000u, 0xfffffff0u, 0x7ffffffeu, 1u
+    };
+    static const uint32_t kNow[16] = {
+        2000u, 0x800007cfu, 1000u, 1400u, 2600u, 3000u, 7000u, 9000u,
+        16999u, 17000u, 500u, 0x7fffffffu, 0x7fffffffu, 0x00000010u,
+        0x800007cdu, 2001u
+    };
+    int i, pass;
+
+    for (pass = 0; pass < 2; pass++) {
+        printf(pass ? "[yaw boost wide profile]\n" : "[yaw boost]\n");
+        for (i = 0; i < 16; i++) {
+            fresh2();
+            // The Graph aliases the array, so a poke is seen through it
+            // without running graph_init again. A last knee at 8 s makes
+            // the four-second cutoff visible, and a first value that is
+            // not 0 makes a negative elapsed time visible.
+            if (pass) {
+                PostCollisionYawControlProfileData[0].y = 0.125f;
+                PostCollisionYawControlProfileData[3].x = 8.0f;
+                PostCollisionYawControlProfileData[3].y = 0.5f;
+            }
+            g_body.LastPenetrationTime.PackedTime = 1u;
+            g_body.LastYawControlCollisionTime.PackedTime = kStamp[i];
+            WorldTimer = (int32_t)kNow[i];
+            printf("  stamp %08x now %08x -> %08x\n", (unsigned)kStamp[i],
+                   (unsigned)kNow[i],
+                   wbits(car_get_post_collision_yaw_control_boost(&g_car)));
+            restore_tweaks();
+        }
+    }
+    WorldTimer = 0;
+}
+
+static void scenario_drifting(void)
+{
+    static const int   kWheels[3] = { 1, 2, 4 };
+    // 1356 BAM is the first yaw past 0.13 one way; the other way it is
+    // 1357 (64179), because the fold's `sub.s` of 2 pi rounds 64180 to
+    // -0.12999964.
+    static const int   kAng[5] = { 1355, 1356, 64179, 64180, 16384 };
+    static const float kFs[4] = { 12.0f, 12.000001f, 30.0f, 4.9f };
+    int w, a, f;
+
+    printf("[drifting]\n");
+    for (w = 0; w < 3; w++) {
+        for (a = 0; a < 5; a++) {
+            char r[5];
+
+            for (f = 0; f < 4; f++) {
+                fresh();
+                g_car.State.nWheelsTouchingGround = kWheels[w];
+                g_car.State.Angle = (uint16_t)kAng[a];
+                g_car.State.Velocity.x = 20.0f;
+                g_car.State.Velocity.y = 0.0f;
+                g_car.State.ForwardSpeed = kFs[f];
+                g_car.State.VelocityMagnitude = 1.0f;
+                r[f] = (char)('0' + car_is_drifting(&g_car));
+            }
+            r[4] = 0;
+            printf("  wheels %d ang %-5d -> %s\n", kWheels[w], kAng[a], r);
+        }
+    }
+}
+
+// --------------------------------------------------------- the fake engine
+
+static void scenario_smooth(void)
+{
+    static const float kC[12] = {
+        0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 10.0f, -0.0f, 0.0f, 0.0f, 5.0f,
+        -3.25f, 1000.0f
+    };
+    static const float kT[12] = {
+        5.0f, 1.0f, 0.5f, -1.0f, -5.0f, 10.0f, -0.0f, -0.0f, 0.5f, 7.0f,
+        -3.3f, 8500.0f
+    };
+    static const float kR[12] = {
+        1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.5f,
+        0.01f, 50.0f
+    };
+    int i;
+
+    printf("[smooth]\n");
+    for (i = 0; i < 12; i++)
+        printf("  %.9g %.9g %.9g -> %08x\n", (double)kC[i], (double)kT[i],
+               (double)kR[i], wbits(car_smooth(kC[i], kT[i], kR[i])));
+}
+
+static void rpm_line(const char *tag)
+{
+    printf("  %-10s old %08x gear %d rpm %08x\n", tag, wbits(g_car.OldSpeed),
+           (int)g_car.State.CurrentGear, wbits(g_car.State.RPM));
+}
+
+// Two calls on one car: the first changes the gear from NEUTRAL, so its
+// RPM is not smoothed; the second finds the gear it left and smooths.
+static void rpm_twice(float vm, float old)
+{
+    fresh();
+    g_car.State.VelocityMagnitude = vm;
+    g_car.OldSpeed = old;
+    g_car.State.CurrentGear = 1;
+    g_car.State.RPM = 1000.0f;
+    printf("  vm %.9g old %.9g\n", (double)vm, (double)old);
+    car_compute_fake_rpm(&g_car);
+    rpm_line("first");
+    car_compute_fake_rpm(&g_car);
+    rpm_line("second");
+}
+
+static void scenario_fake_rpm(void)
+{
+    static const float kSpeed[25] = {
+        -30.0f, -25.38f, -5.0f, -2.00000024f, -2.0f, -1.0f, -0.0f, 0.0f, 10.0f, 25.3799973f,
+        25.38f, 30.0f, 40.89f, 50.0f, 56.47f, 60.0f, 72.06f, 75.0f,
+        79.9999924f, 80.0f, 85.0f, 89.5f, 89.5099945f, 89.51f, 100.0f
+    };
+    static const float kVm[5]  = { 50.0f, 10.0f, 30.0f, 89.0f, 120.0f };
+    static const float kOld[5] = { 20.0f, 30.0f, 29.5f, 95.0f, 60.0f };
+    int i;
+
+    printf("[fake rpm bands]\n");
+    for (i = 0; i < 25; i++)
+        rpm_twice(kSpeed[i], kSpeed[i]);
+
+    printf("[fake rpm smoothing]\n");
+    for (i = 0; i < 5; i++)
+        rpm_twice(kVm[i], kOld[i]);
+
+    // TestSpeed replaces the speed only when above 0.
+    printf("[fake rpm test speed]\n");
+    TestSpeed = 45.0f;
+    rpm_twice(10.0f, 45.0f);
+    TestSpeed = -1.0f;
+    rpm_twice(10.0f, 10.0f);
+    restore_tweaks();
+
+    // TestRPM is stored whenever it is not 100, and 0 is not 100.
+    printf("[fake rpm test rpm]\n");
+    TestRPM = 3000.0f;
+    rpm_twice(30.0f, 30.0f);
+    TestRPM = 0.0f;
+    rpm_twice(60.0f, 60.0f);
+    TestRPM = 100.0f;
+    rpm_twice(60.0f, 60.0f);
+    restore_tweaks();
+
+    // The last band reads the eight bytes after RPMTable.
+    printf("[fake rpm overread]\n");
+    PostCollisionYawControlProfileData[0].x = 7000.0f;
+    PostCollisionYawControlProfileData[0].y = 7500.0f;
+    rpm_twice(85.0f, 85.0f);
+    restore_tweaks();
+
+    // Pair 1 is never read: the first band above Gear1To2Speed uses pair 2.
+    printf("[fake rpm pair one]\n");
+    RPMTable[2] = 1.0f;
+    RPMTable[3] = 2.0f;
+    rpm_twice(30.0f, 30.0f);
+    rpm_twice(10.0f, 10.0f);
+    restore_tweaks();
+
+    // Pair 0 is what the bottom band reads, both ends.
+    printf("[fake rpm pair zero]\n");
+    RPMTable[0] = 1500.0f;
+    RPMTable[1] = 4500.0f;
+    rpm_twice(10.0f, 10.0f);
+    restore_tweaks();
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1)
@@ -1663,5 +2038,15 @@ int main(int argc, char **argv)
     scenario_bbox();
     scenario_penetration();
     scenario_tracked();
+
+    save_tweaks();
+    scenario_tweakables();
+    scenario_left_right();
+    scenario_relative();
+    scenario_in_front();
+    scenario_yaw_boost();
+    scenario_drifting();
+    scenario_smooth();
+    scenario_fake_rpm();
     return 0;
 }
