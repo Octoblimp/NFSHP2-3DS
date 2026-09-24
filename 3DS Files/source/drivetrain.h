@@ -448,9 +448,9 @@ int32_t          drivetrain_get_size(const DriveTrain *d);
 // DriveTrain::DoSnapshot (0x00182b00) is not ported: ReplaySnapshot, the
 // same dependency that has held up CarState, Engine, CarDriver, Steering,
 // RigidBody, Suspension and Wheel. operator new and operator delete are
-// the PS2 slot allocator -- DriveTrainSlotPool at 0x00323090 -- and are
-// not ported for the usual reason. The destructor is PhysicsComponent's
-// plus that delete, so it is not ported either.
+// the PS2 slot allocator -- DriveTrainSlotPool at 0x00323090. They and
+// the destructor, which is PhysicsComponent's plus that delete, are
+// physcomp.h's, beside `_vt$10DriveTrain`.
 //
 // CheckFunction is declared in `.mdebug` and has no code in the image.
 

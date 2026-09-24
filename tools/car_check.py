@@ -106,6 +106,9 @@ SOURCES = [
 
 CH = "3DS Files/source/car.h"
 CC = "3DS Files/source/car.c"
+# ee_trunc_w moved here from car.c when PhysicsCar became its second
+# caller; its mutations moved with it.
+EF = "3DS Files/source/eefpu.h"
 TH = "3DS Files/source/topology.h"
 CTL = "3DS Files/source/carcontroller.h"
 CD = "3DS Files/source/cardriver.h"
@@ -1825,37 +1828,37 @@ MUTATIONS = [
 
     # -- the checksum -------------------------------------------------------
     ("checksum-scale-32768", CC,
-     "    return car_trunc_w(s * 65536.0f);",
-     "    return car_trunc_w(s * 32768.0f);"),
+     "    return ee_trunc_w(s * 65536.0f);",
+     "    return ee_trunc_w(s * 32768.0f);"),
     ("checksum-rounds", CC,
-     "    return car_trunc_w(s * 65536.0f);",
-     "    return car_trunc_w(s * 65536.0f + 0.5f);"),
+     "    return ee_trunc_w(s * 65536.0f);",
+     "    return ee_trunc_w(s * 65536.0f + 0.5f);"),
 
     # -- the conversion ----------------------------------------------------
-    ("trunc-no-pos-saturation", CC,
+    ("trunc-no-pos-saturation", EF,
      "    if (x >= 2147483648.0f)" + NL +
      "        return (int32_t)0x7fffffff;" + NL,
      ""),
-    ("trunc-pos-saturates-low", CC,
+    ("trunc-pos-saturates-low", EF,
      "    if (x >= 2147483648.0f)" + NL +
      "        return (int32_t)0x7fffffff;",
      "    if (x >= 2147483648.0f)" + NL +
      "        return (int32_t)0x80000000;"),
-    ("trunc-pos-threshold-strict", CC,
+    ("trunc-pos-threshold-strict", EF,
      "    if (x >= 2147483648.0f)",
      "    if (x > 2147483648.0f)"),
-    ("trunc-no-neg-saturation", CC,
+    ("trunc-no-neg-saturation", EF,
      "    if (x < -2147483648.0f)" + NL +
      "        return (int32_t)0x80000000;" + NL,
      ""),
-    ("trunc-neg-threshold-le", CC,
+    ("trunc-neg-threshold-le", EF,
      "    if (x < -2147483648.0f)",
      "    if (x <= -2147483648.0f)"),
-    ("trunc-no-nan-arm", CC,
+    ("trunc-no-nan-arm", EF,
      "    if (x != x)                     // no NaN reaches the EE FPU; "
      "defined anyway" + NL + "        return 0;" + NL,
      ""),
-    ("trunc-nan-returns-low", CC,
+    ("trunc-nan-returns-low", EF,
      "        return 0;" + NL + "    if (x >= 2147483648.0f)",
      "        return (int32_t)0x80000000;" + NL + "    if (x >= 2147483648.0f)"),
     ("checksum-x-only", CC,

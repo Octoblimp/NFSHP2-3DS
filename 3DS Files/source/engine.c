@@ -26,10 +26,10 @@ int32_t WorldTimer = 0;
 
 void engine_init(Engine *e, const EngineInfo *ei, struct CarState *cs)
 {
-    // The ctor writes a vtable pointer (0x00297a78) at byte 8. Nothing in
-    // the port dispatches through it, but the slot is kept so the layout
-    // assert still means something.
-    e->_vtable = 0;
+    // `sw v0,8(s0)` at 0x00182404, before anything else is written. The
+    // port kept a zero here until PhysicsSystem started dispatching
+    // through component vptrs.
+    e->_vtable = ENGINE_VTABLE;
 
     table_init(&e->TorqueCurve,   ei->TorqueCurveTable,   9,
                ei->IdleRPM, ei->MaxRPM);

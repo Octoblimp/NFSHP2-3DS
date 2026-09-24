@@ -47,15 +47,29 @@
 #include "bsnd.h"
 #include "bslotpool.h"
 #include "bscreens.h"
+#include "carcontroller.h"
+#include "cardriver.h"
+#include "carmodes.h"
 #include "gamedata.h"
 #include "fesound.h"
 #include "gameflow.h"
 #include "heapcfg.h"
 #include "geoview.h"
 #include "georender.h"
+#include "joyevent.h"
+#include "joyhid.h"
+#include "joypad.h"
 #include "movie.h"
+#include "mellowmover.h"
+#include "physcomp.h"
+#include "physicscar.h"
+#include "physicssystem.h"
+#include "realcontroller.h"
+#include "realdriver.h"
+#include "realtime.h"
 #include "sinit.h"
 #include "uirender.h"
+#include "wheel.h"
 
 // The top screen's render target is built here rather than by
 // C2D_CreateScreenTarget, which asks C3D_RenderTargetCreate for no depth
@@ -1122,6 +1136,37 @@ int main(int argc, char** argv)
     sinit_run();
     bSetSlotPoolPrintf(slotPoolLog);
 
+    // The image's vtables are .data and need nothing done to them; the
+    // port's are registered with vtable.c, once, before any object that
+    // dispatches through one can be built.
+    physicssystem_install_vtables();
+    physcomp_install_vtables();
+    physicscar_install_vtables();
+    mellowmover_install_vtables();
+    nullmover_install_vtables();
+    carcontroller_install_vtables();
+    realcontroller_install_vtables();
+    cardriver_install_vtables();
+    realdriver_install_vtable();
+
+    // Car::SetControlMode reaches the controllers task 26 brings through
+    // seams; a NULL one is a class not ported yet, and the arm aborts.
+    gRealControllerCtorFn = realcontroller_construct;
+
+    // The two calls Suspension makes into Wheel go through pointers, left
+    // NULL until something says Wheel is linked -- which, in the game,
+    // it always is.
+    wheel_install_seams();
+
+    // The joystick layer: the ring of pad reads, the type monitor and the
+    // event-node pool (so after sinit_run, which brings the pool manager
+    // up). The 3DS's buttons reach it as a DualShock 2 through joyhid.c.
+    // Nothing registers a game handler yet -- the menus below still read
+    // kDown -- so for now it runs the type detection, which logs
+    // "joystick: port 0 type 121" once ten reads have agreed.
+    joyhid_install();
+    InitJoystick();
+
     logPrintf("NFSHP2-3DS -- boot flow\n");
     logPrintf("Heap: asked=%luKB got=%luKB linear=%luKB\n",
               (unsigned long)(g_heapInfo.heapAsked / 1024),
@@ -1341,6 +1386,7 @@ int main(int argc, char** argv)
     // there is anything scrolling to look at, so the UI gets its own counter
     // advanced exactly as gameflow.c:321 advances that one.
     uint32_t uiTimer = 0;
+    int32_t  joyType = -1;
 
     while (aptMainLoop()) {
         hidScanInput();
@@ -1352,6 +1398,19 @@ int main(int argc, char** argv)
 
         uiTimer += (uint32_t)(int)(BOOT_DT * 4000.0f);
         uirender_set_time(&ui, (float)uiTimer * 0.00025f);
+
+        // The PS2 reads the pads from its vertical-blank interrupt; here it
+        // is once a frame, after the HID scan the read is built from. The
+        // joystick's clocks are the UI's, which ticks in every mode, and a
+        // count of this loop.
+        FrameCounter++;
+        RealTimer = (int32_t)uiTimer;
+        ReadJoystickData();
+        GenerateJoyEvents();
+        if (GetJoystickType(0) != joyType) {
+            joyType = GetJoystickType(0);
+            logPrintf("joystick: port 0 type %d\n", (int)joyType);
+        }
 
         if (kDown & KEY_SELECT) {
             mode = (mode + 1) % MODE_COUNT;

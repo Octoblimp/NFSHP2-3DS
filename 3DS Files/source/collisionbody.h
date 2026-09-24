@@ -1,4 +1,5 @@
-// collisionbody -- CollisionBody and DynamicCollisionBody, layout only.
+// collisionbody -- CollisionBody, DynamicCollisionBody and CarCollisionBody:
+// the layouts, and the two methods Car's mode switches reach.
 //
 // All three belong to task 27 (track collision). Car holds a
 // CarCollisionBody pointer at offset 52 and touches it four ways:
@@ -17,8 +18,8 @@
 // The vptr is CollisionBody's, at 80 (`$vf4605:148,640`).
 //
 // Two widths the stabs give but not their signs -- Type, Dynamic and the
-// four counters are 8 bits, ID is 16 -- so they are unsigned here. Nothing
-// reads them yet.
+// four counters are 8 bits, ID is 16 -- so they are unsigned here. Only
+// Type is read, and only against zero.
 //
 // Task 27 should replace this notice when it ports the classes.
 
@@ -147,6 +148,28 @@ typedef char carcollisionbody_layout_check[
 #define DYNAMICCOLLISIONBODY_VTABLE 0x0029bcd8u
 #define CARCOLLISIONBODY_VTABLE     0x0029bc08u
 
+#define COLLISIONBODY_VT_SET_TO_PHYSICS_MODE    112
 #define COLLISIONBODY_VT_ARE_COLLISIONS_ENABLED 136
+
+// ------------------------------------------- the two methods Car needs
+//
+// collisionbody.c. Car's fourth slice brought them: SetMovementMode ends in
+// the first, and the second is the only caller of Car::SetToPhysicsMode.
+// Neither is in a table yet -- the tables are task 27's.
+
+// 0x001cda20. Clears pSystem and pBody. Then, if PhysicsMode is set and the
+// car moves by PHYSICS_MOVEMENT or MELLOW_MOVEMENT, points them at the
+// mover's PhysicsSystem base (mover + 8) and its RigidBody (mover + 24).
+// The image's movz guards a NULL mover in the first store and then reads
+// through it in the second; SetMovementMode never leaves one, and the port
+// aborts on it.
+void carcollisionbody_setup_physics_pointers(CarCollisionBody *b);
+
+// 0x001cda80, slot 112 of _vt$16CarCollisionBody. The car on the other
+// side -- `other`'s pCar if it is a car's body, Type 0 (`lb` at 12), NULL
+// otherwise or with no `other` -- goes to Car::SetToPhysicsMode, and the
+// pointers are set up again after it.
+void carcollisionbody_set_to_physics_mode(CarCollisionBody *b,
+                                          CollisionBody *other);
 
 #endif

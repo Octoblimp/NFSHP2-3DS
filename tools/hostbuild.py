@@ -12,12 +12,19 @@ and it finds its own /usr/include only when it runs in that environment --
 invoked from Git Bash it cannot even locate stdio.h. So: try `cc` directly,
 then retry through the msys2 login shell, which is what tools/build_cia.ps1
 does for `make` and for the same underlying reason.
+
+Every source is compiled on its own into an object cached by its content --
+see "the object cache" below -- so a mutation pass rebuilds the one file it
+changed rather than the whole harness.
 """
+import concurrent.futures
+import hashlib
 import io
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -162,6 +169,202 @@ def write_source(path, text):
         mine.unlink()
 
 
+# ------------------------------------------------------------ the object cache
+#
+# A mutation pass builds its harness once per mutant, and every mutant
+# changes one file of the twenty-odd the harness links; compiling them all
+# at -O2 each time was most of the pass. So each source is compiled alone,
+# with -c, and the object is kept under a key that covers everything the
+# compile reads that can change: the flags, the source's path and bytes,
+# and every header and .inc in `3DS Files/source` and beside each source.
+# System headers are taken as fixed. Changing any one header recompiles
+# everything, which is the safe way round. Nothing is cross-module at -O2
+# without LTO, so the objects link to the same program the single
+# `gcc a.c b.c ...` did.
+#
+# Sources inside `tmp` -- generated harnesses -- are compiled every time
+# and never kept. The misses compile in parallel. The cache lives in the
+# system temp directory, not the tree, which OneDrive syncs; entries
+# nothing has used for a week are dropped. HOSTBUILD_NO_CACHE=1 builds the
+# old way, in one gcc invocation.
+
+CACHE = Path(os.environ.get("HOSTBUILD_CACHE")
+             or Path(tempfile.gettempdir()) / "nfshp2-hostbuild")
+HEADER_SUFFIXES = (".h", ".inc")
+CACHE_DAYS = 7
+_pruned = False
+# "direct" or "msys", once a build that compiled something has told them
+# apart. A build whose objects all come from the cache only links, and the
+# link works outside msys2 where a compile cannot find <stddef.h>, so it
+# decides nothing. It once did: a --mutate pass whose first build was all
+# hits went direct, and every mutant after it failed to compile and was
+# counted as caught.
+_mode = None
+
+
+def _headers_digest(dirs):
+    h = hashlib.sha256()
+    for d in sorted(set(Path(x).resolve() for x in dirs)):
+        files = d.rglob("*") if d == SRC.resolve() else d.glob("*")
+        for f in sorted(files):
+            if f.suffix in HEADER_SUFFIXES and f.is_file():
+                h.update(str(f.relative_to(d)).encode() + bytes(1))
+                h.update(f.read_bytes() + bytes(1))
+    return h.hexdigest()
+
+
+def _key(src, flags, headers):
+    h = hashlib.sha256()
+    for part in (chr(1).join(flags), str(src.resolve()), headers):
+        h.update(part.encode() + bytes(1))
+    h.update(src.read_bytes())
+    return h.hexdigest()[:40]
+
+
+def _inside(path, d):
+    try:
+        path.resolve().relative_to(Path(d).resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _prune():
+    global _pruned
+    if _pruned:
+        return
+    _pruned = True
+    cutoff = time.time() - CACHE_DAYS * 86400
+    for f in CACHE.glob("*"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+        except OSError:
+            pass
+
+
+def _keep(obj, cached):
+    """Move a fresh object into the cache without a reader ever seeing half
+    of it: copy under a private name, then rename over."""
+    part = cached.with_name("%s.%d.part" % (cached.name, os.getpid()))
+    try:
+        shutil.copyfile(obj, part)
+        os.replace(part, cached)
+    except OSError:
+        try:
+            part.unlink()
+        except OSError:
+            pass
+
+
+class BuildEnvironmentError(RuntimeError):
+    """The toolchain failed and said nothing about the code: a locked
+    object on OneDrive, a shell that did not start. A mutation pass counts
+    a failed compile as a catch, so this is raised rather than exited --
+    it is not caught there, and the pass stops instead of scoring a broken
+    environment. One pass once reported nineteen mutants in a row as "did
+    not compile" with no diagnostic; rerun, all nineteen were caught on
+    the transcript."""
+
+
+def _fail(err, what):
+    sys.stderr.write(err)
+    if "error" not in err.lower():
+        raise BuildEnvironmentError("%s with no diagnostic -- the build "
+                                    "environment, not the code" % what)
+    sys.exit(what)
+
+
+def _compile_direct(cc, flags, todo, exe, objs):
+    env = dict(os.environ)
+    env.setdefault("TMPDIR", "/tmp")
+
+    def one(job):
+        src, obj = job
+        return subprocess.run([cc] + flags + ["-I", str(SRC), "-c", str(src),
+                               "-o", str(obj)],
+                              capture_output=True, text=True, env=env)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        rs = list(pool.map(one, todo))
+    err = "".join(r.stdout + r.stderr for r in rs)
+    if any(r.returncode for r in rs):
+        return False, err
+    r = subprocess.run([cc] + flags + ["-o", str(exe)] + [str(o) for o in objs],
+                       capture_output=True, text=True, env=env)
+    return r.returncode == 0, err + r.stdout + r.stderr
+
+
+def _compile_msys(tmp, flags, todo, exe, objs):
+    fl = " ".join(flags)
+    lines = ["fail=0"]
+    for i, (src, obj) in enumerate(todo):
+        lines.append("gcc %s -I %s -c %s -o %s 2>%s & p%d=$!"
+                     % (fl, quote(SRC), quote(src), quote(obj),
+                        quote(str(obj) + ".err"), i))
+    for i in range(len(todo)):
+        lines.append("wait $p%d || fail=1" % i)
+    for src, obj in todo:
+        lines.append("cat %s >&2" % quote(str(obj) + ".err"))
+    lines.append("[ $fail = 0 ] || exit 1")
+    lines.append("gcc %s -o %s %s" % (fl, quote(exe),
+                                      " ".join(quote(o) for o in objs)))
+    script = Path(tmp) / "build.sh"
+    with io.open(script, "w", encoding="utf-8", newline=NL) as fh:
+        fh.write(NL.join(lines) + NL)
+    r = subprocess.run([str(MSYS_BASH), "-l", msys(script)],
+                       capture_output=True, text=True)
+    return r.returncode == 0, r.stdout + r.stderr
+
+
+def _build_cached(tmp, srcs, exe, flags):
+    global _mode
+    tmp = Path(tmp)
+    CACHE.mkdir(parents=True, exist_ok=True)
+    _prune()
+    headers = _headers_digest([SRC] + [s.parent for s in srcs])
+    plan = []
+    for i, s in enumerate(srcs):
+        cached = (None if _inside(s, tmp)
+                  else CACHE / (_key(s, flags, headers) + ".o"))
+        fresh = tmp / ("%03d-%s.o" % (i, s.stem))
+        hit = cached is not None and cached.exists()
+        plan.append((s, cached, fresh, hit))
+    todo = [(s, fresh) for s, cached, fresh, hit in plan if not hit]
+    objs = [cached if hit else fresh for s, cached, fresh, hit in plan]
+    for s, cached, fresh, hit in plan:
+        if hit:
+            try:
+                os.utime(cached)
+            except OSError:
+                pass
+
+    cc = (os.environ.get("CC") or shutil.which("cc") or shutil.which("gcc")
+          or shutil.which("clang"))
+    ok, err, direct_err = False, "", ""
+    if cc and _mode != "msys":
+        ok, err = _compile_direct(cc, flags, todo, exe, objs)
+        if ok and todo:
+            _mode = "direct"
+        elif not ok:
+            direct_err = err
+    if not ok and _mode != "direct" and MSYS_BASH.exists():
+        ok, err = _compile_msys(tmp, flags, todo, exe, objs)
+        if ok and todo:
+            _mode = "msys"
+        else:
+            _fail(err, "compile failed (msys2 bash)")
+    if not ok:
+        if not cc:
+            sys.exit("no host C compiler found (set CC)")
+        _fail(direct_err or err, "compile failed")
+    if err.strip():
+        print("compiler warnings:" + NL + err.rstrip())
+    for s, cached, fresh, hit in plan:
+        if cached is not None and not hit:
+            _keep(fresh, cached)
+    return exe
+
+
 def build(tmp, sources, name="hosttest", flags=None):
     """Compile `sources` into `tmp`, returning the executable's path."""
     recover()
@@ -171,6 +374,8 @@ def build(tmp, sources, name="hosttest", flags=None):
         if not s.exists():
             sys.exit("no such source: %s" % s)
     exe = Path(tmp) / (name + (".exe" if os.name == "nt" else ""))
+    if not os.environ.get("HOSTBUILD_NO_CACHE"):
+        return _build_cached(tmp, srcs, exe, flags)
     direct_err = ""
 
     cc = (os.environ.get("CC") or shutil.which("cc") or shutil.which("gcc")
@@ -203,10 +408,8 @@ def build(tmp, sources, name="hosttest", flags=None):
             if r.stderr.strip():
                 print("compiler warnings:" + NL + r.stderr.rstrip())
             return exe
-        sys.stderr.write(r.stdout + r.stderr)
-        sys.exit("compile failed (msys2 bash)")
+        _fail(r.stdout + r.stderr, "compile failed (msys2 bash)")
 
     if not cc:
         sys.exit("no host C compiler found (set CC)")
-    sys.stderr.write(direct_err)
-    sys.exit("compile failed")
+    _fail(direct_err, "compile failed")

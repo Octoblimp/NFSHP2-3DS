@@ -11,8 +11,35 @@ Only what the asset code needs is implemented: the MIPS III integer set, the
 64-bit loads/stores SN's compiler emits, the EE's second multiplier
 (`mult1`/`mfhi1`/`mflo1`), and the handful of 128-bit MMI ops the IDCT uses
 (`pmulth`, `pcpyld`, `pcpyud`, `pcpyh`, `pmaxw`, `pmfhi`, `pmflo`, `lq`,
-`sq`). COP1 is there only because the codec accumulates profiling timers in
-floats. Anything else raises, rather than quietly computing the wrong thing.
+`sq`). Anything else raises, rather than quietly computing the wrong thing.
+
+The car simulation needed more, and `Emu(ieee=True)` is how it asks for it:
+the scalar FPU in full (`sqrt.s`, `abs.s`, `neg.s`, the compares and the
+four `bc1` branches, `max.s`/`min.s`), the VU0 macro-mode instructions the
+physics uses -- `lqc2`/`sqc2`, `qmfc2`/`qmtc2`, the lane-wise arithmetic,
+the ACC forms behind every matrix multiply, `vopmula`/`vopmsub` for cross
+products, and `vrsqrt` into Q -- and the four MMI ops bIdentity is made of.
+
+**The float model is IEEE single, not the EE's.** The EE rounds toward zero
+and has no infinities, NaNs or denormals; the port runs on an ARM11 and on
+the host, which are IEEE round-to-nearest. An oracle for the port has to
+check the *algorithm and its operation order* -- which operands, in which
+order, rounded where -- and that is what an IEEE interpreter of the
+shipped instruction stream does. Each operation is computed in a Python
+double and rounded once to float32, which is exact for add, sub, mul, div
+and sqrt. Division by zero gives a signed infinity (NaN for 0/0), overflow
+gives an infinity, and `cvt.w.s` saturates by sign as eefpu.h's ee_trunc_w
+does. Without `ieee=True` the old codec behaviour is kept exactly: a divide
+by zero gives 0.0 and an overflow raises.
+
+`Emu(ieee=True, eediv=True)` makes the one exception the car needs: a
+`div.s` or `vdiv` by zero -- or by a denormal, which the EE reads as zero --
+gives the EE's answer, +/-FLT_MAX by the XOR of the signs, 0/0 included,
+where IEEE has an infinity or a NaN. That is eefpu.h's ee_div. A stopped
+driven pair divides 0 by 0 every frame the car sits in gear, and the
+console carries on where an IEEE machine goes NaN. `eediv_pcs` collects
+each instruction that took the path, so a checker can say which sites the
+port has to spell with ee_div.
 
 Library calls are stubbed rather than executed: `bMalloc` hands out blocks
 from a bump allocator, `bMemSet`/`bMemCpy` run natively, and the tickers
@@ -25,9 +52,15 @@ functions of it -- out of the way.
     emu.call("bMemSet", p, 0x41, 64)
     print(emu.read(p, 64))
 
+`emu.hook(sym, fn)` runs `fn(emu)` just before the instruction at `sym` and
+then carries on, where `emu.stub` replaces the function outright; a hook on
+an entry point can, say, zero a stack frame the shipped code leaves
+uninitialised.
+
 Arguments go in a0-a3 then t0-t3: SN's compiler builds this ELF with the
 MIPS EABI, not o32, so the fifth argument is a register and not a stack slot.
 """
+import math
 import struct
 import sys
 
@@ -61,14 +94,75 @@ class MipsError(Exception):
     pass
 
 
+# ---- float32 as bit patterns ------------------------------------------------
+
+F_INF, F_NINF, F_NAN = 0x7F800000, 0xFF800000, 0x7FC00000
+F_ONE = 0x3F800000
+
+
+def fbits_to(b):
+    """A float32 bit pattern -> a Python float."""
+    return struct.unpack("<f", struct.pack("<I", b & M32))[0]
+
+
+def f_to_bits(v):
+    """A Python float -> the float32 bit pattern it rounds to (nearest-even).
+    An overflow is an infinity of the right sign, as IEEE has it."""
+    try:
+        return struct.unpack("<I", struct.pack("<f", v))[0]
+    except OverflowError:
+        return F_INF if v > 0 else F_NINF
+
+
+def f32(v):
+    """Round a Python float to the nearest float32, as a Python float."""
+    return fbits_to(f_to_bits(v))
+
+
+def ieee_div(a, b):
+    if b == 0.0:
+        if a == 0.0 or a != a:
+            return float("nan")
+        neg = (math.copysign(1.0, a) < 0) != (math.copysign(1.0, b) < 0)
+        return float("-inf") if neg else float("inf")
+    return a / b
+
+
+def ee_div_zero(a_bits, b_bits):
+    """The EE's quotient for a zero (or denormal) divisor, as bits: FLT_MAX
+    signed by the XOR of the operands' signs, whatever the dividend."""
+    return ((a_bits ^ b_bits) & 0x80000000) | 0x7F7FFFFF
+
+
+def ieee_sqrt(a):
+    if a != a or a < 0.0:
+        return float("nan")
+    return math.sqrt(a)            # sqrt(-0.0) is -0.0, as IEEE has it
+
+
+def ee_trunc_w(v):
+    """`cvt.w.s`: truncate, saturating by the sign of the source. The same
+    function as eefpu.h's ee_trunc_w and camera_check's trunc_w."""
+    if v != v:
+        return 0
+    if v >= 2147483648.0:
+        return 0x7FFFFFFF
+    if v < -2147483648.0:
+        return -0x80000000
+    return int(v)
+
+
 class Emu(object):
     """A flat 32 MB PS2 with one thread and no kernel."""
 
     RAM = 32 << 20
     RETURN = 0x0FFFFFF0        # sentinel return address: run() stops here
 
-    def __init__(self, path=ELF):
+    def __init__(self, path=ELF, ieee=False, eediv=False):
         self.elf = Elf(path)
+        self.ieee = ieee
+        self.eediv = eediv
+        self.eediv_pcs = set()
         self.mem = bytearray(self.RAM)
         for s in self.elf.secs:
             if not s["addr"] or not (s["flags"] & 2):
@@ -80,7 +174,15 @@ class Emu(object):
         self.reg = [0] * 32
         self.fpr = [0] * 32                         # raw 32-bit bit patterns
         self.hi = self.lo = self.hi1 = self.lo1 = 0
+        self.fcc = False                            # the COP1 condition bit
+        # VU0: 32 four-lane registers as bit patterns, vf00 fixed at
+        # (0, 0, 0, 1); the accumulator; and Q.
+        self.vf = [[0, 0, 0, 0] for _ in range(32)]
+        self.vf[0] = [0, 0, 0, F_ONE]
+        self.acc = [0, 0, 0, 0]
+        self.q = 0
         self.stubs = {}
+        self.hooks = {}
         self.watch = {}            # addr -> hit count, filled by watch_calls()
         self.icount = 0
         self.limit = 0
@@ -141,6 +243,17 @@ class Emu(object):
         """Run `fn(emu)` instead of the code at `sym`; its return value, if
         not None, becomes v0."""
         self.stubs[self.addr_of(sym)] = fn
+
+    def hook(self, sym, fn):
+        """Run `fn(emu)` before the instruction at `sym`, then carry on."""
+        self.hooks[self.addr_of(sym)] = fn
+
+    def f(self, i):
+        """FPR i as a Python float."""
+        return fbits_to(self.fpr[i])
+
+    def set_f(self, i, v):
+        self.fpr[i] = f_to_bits(v)
 
     def stub_bware(self):
         """Replace the bWare runtime with native equivalents."""
@@ -213,6 +326,10 @@ class Emu(object):
         while pc != self.RETURN:
             if pc in self.watch:
                 self.watch[pc] += 1
+            if self.hooks:
+                h = self.hooks.get(pc)
+                if h is not None:
+                    h(self)
             stub = self.stubs.get(pc)
             if stub is not None:
                 v = stub(self)
@@ -345,7 +462,17 @@ class Emu(object):
         elif op == 0x39:                              # swc1
             self.put32(s32(reg[rs]) + simm, self.fpr[rt])
         elif op == 0x11:                              # COP1
-            self._cop1(w, rs, rt, rd, sa, fn, pc)
+            r = self._cop1(w, rs, rt, rd, sa, fn, pc, simm)
+            reg[0] = 0
+            return r
+        elif op == 0x12:                              # COP2 (VU0 macro)
+            self._cop2(w, rs, rt, rd, sa, fn, pc)
+        elif op == 0x36:                              # lqc2
+            a = (s32(reg[rs]) + simm) & ~15
+            self._vput(rt, list(struct.unpack_from("<4I", self.mem, a)), 15)
+        elif op == 0x3e:                              # sqc2
+            a = (s32(reg[rs]) + simm) & ~15
+            struct.pack_into("<4I", self.mem, a, *self.vf[rt])
         elif op == 0x1c:                              # MMI
             self._mmi(w, rs, rt, rd, sa, fn, pc)
         else:
@@ -481,14 +608,24 @@ class Emu(object):
 
     # ---- COP1 -------------------------------------------------------------
 
-    def _cop1(self, w, rs, rt, rd, sa, fn, pc):
+    def _cop1(self, w, rs, rt, rd, sa, fn, pc, simm):
         f = lambda i: struct.unpack("<f", struct.pack("<I", self.fpr[i]))[0]
-        def put(i, v):
-            self.fpr[i] = struct.unpack("<I", struct.pack("<f", v))[0]
+        ieee = self.ieee
+        if ieee:
+            def put(i, v):
+                self.fpr[i] = f_to_bits(v)
+        else:
+            def put(i, v):
+                self.fpr[i] = struct.unpack("<I", struct.pack("<f", v))[0]
         if rs == 0x00:                                # mfc1
             self.reg[rt] = s32(self.fpr[rd]) & M64
         elif rs == 0x04:                              # mtc1
             self.fpr[rd] = self.reg[rt] & M32
+        elif rs == 0x08:                              # bc1f/t, bc1fl/tl
+            take = self.fcc if rt & 1 else not self.fcc
+            if take:
+                return (pc + 4 + simm * 4) & M32, False
+            return ((pc + 8) & M32, True) if rt & 2 else None
         elif rs == 0x10:                              # single
             if fn == 0x00:
                 put(sa, f(rd) + f(rt))
@@ -497,11 +634,40 @@ class Emu(object):
             elif fn == 0x02:
                 put(sa, f(rd) * f(rt))
             elif fn == 0x03:
-                put(sa, f(rd) / f(rt) if f(rt) else 0.0)
+                if self.eediv and not self.fpr[rt] & 0x7F800000:
+                    self.eediv_pcs.add(pc)
+                    self.fpr[sa] = ee_div_zero(self.fpr[rd], self.fpr[rt])
+                elif ieee:
+                    put(sa, ieee_div(f(rd), f(rt)))
+                else:
+                    put(sa, f(rd) / f(rt) if f(rt) else 0.0)
+            elif fn == 0x04:                          # sqrt.s fd, ft
+                put(sa, ieee_sqrt(f(rt)))
+            elif fn == 0x05:                          # abs.s
+                self.fpr[sa] = self.fpr[rd] & 0x7FFFFFFF
             elif fn == 0x06:
                 self.fpr[sa] = self.fpr[rd]
+            elif fn == 0x07:                          # neg.s
+                self.fpr[sa] = self.fpr[rd] ^ 0x80000000
             elif fn == 0x24:                          # cvt.w.s
-                self.fpr[sa] = int(f(rd)) & M32
+                if ieee:
+                    self.fpr[sa] = ee_trunc_w(f(rd)) & M32
+                else:
+                    self.fpr[sa] = int(f(rd)) & M32
+            elif fn == 0x28:                          # max.s
+                a, b = f(rd), f(rt)
+                self.fpr[sa] = self.fpr[rt] if a < b else self.fpr[rd]
+            elif fn == 0x29:                          # min.s
+                a, b = f(rd), f(rt)
+                self.fpr[sa] = self.fpr[rt] if b < a else self.fpr[rd]
+            elif fn == 0x30:                          # c.f.s
+                self.fcc = False
+            elif fn == 0x32:                          # c.eq.s
+                self.fcc = f(rd) == f(rt)
+            elif fn == 0x34:                          # c.lt.s
+                self.fcc = f(rd) < f(rt)
+            elif fn == 0x36:                          # c.le.s
+                self.fcc = f(rd) <= f(rt)
             else:
                 raise MipsError("cop1.s 0x%02x at 0x%08x" % (fn, pc))
         elif rs == 0x14:                              # word
@@ -511,6 +677,161 @@ class Emu(object):
                 raise MipsError("cop1.w 0x%02x at 0x%08x" % (fn, pc))
         else:
             raise MipsError("cop1 rs=0x%02x at 0x%08x" % (rs, pc))
+        return None
+
+    # ---- COP2: VU0 in macro mode -----------------------------------------
+    #
+    # Lane arithmetic is IEEE single, one rounding per operation, which is
+    # what the port's C does lane by lane. A multiply-add is two roundings --
+    # the product, then the sum -- because the port is built with
+    # -ffp-contract=off and so never fuses one.
+
+    def _vput(self, i, lanes, mask):
+        """Write the lanes whose bit is set in `mask` (8 = x ... 1 = w);
+        vf00 is read-only."""
+        if i == 0:
+            return
+        r = self.vf[i]
+        for k in range(4):
+            if mask & (8 >> k):
+                r[k] = lanes[k] & M32
+
+    def _acc_put(self, lanes, mask):
+        for k in range(4):
+            if mask & (8 >> k):
+                self.acc[k] = lanes[k] & M32
+
+    def _cop2(self, w, rs, rt, rd, sa, fn, pc):
+        ft, fs, fd = rt, rd, sa
+        if not (w >> 25) & 1:
+            if rs == 1:                               # qmfc2
+                v = self.vf[fs]
+                self.reg[ft] = v[0] | (v[1] << 32) | (v[2] << 64) | (v[3] << 96)
+            elif rs == 5:                             # qmtc2
+                x = self.reg[ft]
+                self._vput(fs, [(x >> (32 * k)) & M32 for k in range(4)], 15)
+            else:
+                raise MipsError("cop2 transfer rs=0x%02x at 0x%08x" % (rs, pc))
+            return
+        mask = (w >> 21) & 15
+        F = fbits_to
+        B = f_to_bits
+        S, T = list(self.vf[fs]), list(self.vf[ft])
+
+        def lanes(op, a, b):
+            return [B(op(F(a[k]), F(b[k]))) for k in range(4)]
+
+        add = lambda x, y: x + y
+        sub = lambda x, y: x - y
+        mul = lambda x, y: x * y
+
+        def vmax(x, y):
+            return y if x < y else x
+
+        def vmin(x, y):
+            return y if y < x else x
+
+        def madd(acc, x, y):
+            return [B(F(acc[k]) + F(B(F(x[k]) * F(y[k])))) for k in range(4)]
+
+        def msub(acc, x, y):
+            return [B(F(acc[k]) - F(B(F(x[k]) * F(y[k])))) for k in range(4)]
+
+        if fn < 0x3c:
+            if fn < 0x1c:                             # the .bc forms
+                kind, bc = fn >> 2, fn & 3
+                Tb = [T[bc]] * 4
+                if kind == 0:
+                    r = lanes(add, S, Tb)
+                elif kind == 1:
+                    r = lanes(sub, S, Tb)
+                elif kind == 2:                       # vmadd.bc
+                    r = madd(self.acc, S, Tb)
+                elif kind == 3:                       # vmsub.bc
+                    r = msub(self.acc, S, Tb)
+                elif kind == 4:
+                    r = lanes(vmax, S, Tb)
+                elif kind == 5:
+                    r = lanes(vmin, S, Tb)
+                else:
+                    r = lanes(mul, S, Tb)
+                self._vput(fd, r, mask)
+            elif fn == 0x1c:                          # vmulq
+                self._vput(fd, lanes(mul, S, [self.q] * 4), mask)
+            elif fn == 0x20:                          # vaddq
+                self._vput(fd, lanes(add, S, [self.q] * 4), mask)
+            elif fn == 0x24:                          # vsubq
+                self._vput(fd, lanes(sub, S, [self.q] * 4), mask)
+            elif fn == 0x28:
+                self._vput(fd, lanes(add, S, T), mask)
+            elif fn == 0x29:
+                self._vput(fd, madd(self.acc, S, T), mask)
+            elif fn == 0x2a:
+                self._vput(fd, lanes(mul, S, T), mask)
+            elif fn == 0x2b:
+                self._vput(fd, lanes(vmax, S, T), mask)
+            elif fn == 0x2c:
+                self._vput(fd, lanes(sub, S, T), mask)
+            elif fn == 0x2d:
+                self._vput(fd, msub(self.acc, S, T), mask)
+            elif fn == 0x2e:                          # vopmsub
+                Sr = [S[1], S[2], S[0], 0]
+                Tr = [T[2], T[0], T[1], 0]
+                self._vput(fd, msub(self.acc, Sr, Tr), mask & 14)
+            elif fn == 0x2f:
+                self._vput(fd, lanes(vmin, S, T), mask)
+            else:
+                raise MipsError("vu0 fn 0x%02x at 0x%08x" % (fn, pc))
+            return
+
+        idx = (w & 3) | ((w >> 4) & 0x7C)
+        acc = self.acc
+        if idx < 0x10:                                # vadda/vsuba/vmadda/vmsuba .bc
+            kind, bc = idx >> 2, w & 3
+            Tb = [T[bc]] * 4
+            r = (lanes(add, S, Tb), lanes(sub, S, Tb), madd(acc, S, Tb),
+                 msub(acc, S, Tb))[kind]
+            self._acc_put(r, mask)
+        elif 0x18 <= idx < 0x1c:                      # vmula.bc
+            self._acc_put(lanes(mul, S, [T[w & 3]] * 4), mask)
+        elif idx == 0x1d:                             # vabs
+            self._vput(ft, [x & 0x7FFFFFFF for x in S], mask)
+        elif idx == 0x28:
+            self._acc_put(lanes(add, S, T), mask)
+        elif idx == 0x29:
+            self._acc_put(madd(acc, S, T), mask)
+        elif idx == 0x2a:
+            self._acc_put(lanes(mul, S, T), mask)
+        elif idx == 0x2c:
+            self._acc_put(lanes(sub, S, T), mask)
+        elif idx == 0x2d:
+            self._acc_put(msub(acc, S, T), mask)
+        elif idx == 0x2e:                             # vopmula
+            Sr = [S[1], S[2], S[0], 0]
+            Tr = [T[2], T[0], T[1], 0]
+            self._acc_put(lanes(mul, Sr, Tr), mask & 14)
+        elif idx == 0x2f:                             # vnop
+            pass
+        elif idx == 0x30:                             # vmove
+            self._vput(ft, S, mask)
+        elif idx == 0x31:                             # vmr32: rotate lanes
+            self._vput(ft, [S[1], S[2], S[3], S[0]], mask)
+        elif idx in (0x38, 0x3a):                     # vdiv / vrsqrt
+            fsf, ftf = (w >> 21) & 3, (w >> 23) & 3
+            a, b = F(S[fsf]), F(T[ftf])
+            if idx == 0x3a:
+                b = F(B(ieee_sqrt(b)))
+            if self.eediv and not B(b) & 0x7F800000:
+                self.eediv_pcs.add(pc)
+                self.q = ee_div_zero(S[fsf], B(b))
+            else:
+                self.q = B(ieee_div(a, b))
+        elif idx == 0x39:                             # vsqrt
+            self.q = B(ieee_sqrt(F(T[(w >> 23) & 3])))
+        elif idx == 0x3b:                             # vwaitq
+            pass
+        else:
+            raise MipsError("vu0 special 0x%02x at 0x%08x" % (idx, pc))
 
     # ---- MMI --------------------------------------------------------------
 
@@ -556,6 +877,23 @@ class Emu(object):
                 a, b = reg[rs] & M32, reg[rt] & M32
                 q, r = (M32, a) if b == 0 else (a // b, a % b)
             self.lo1, self.hi1 = s32(q) & M64, s32(r) & M64
+        elif fn == 0x08 and sa == 0x12:               # pextlw
+            a, b = self._words(reg[rs]), self._words(reg[rt])
+            reg[rd] = self._pack_words([b[0], a[0], b[1], a[1]])
+        elif fn == 0x09 and sa == 0x1e:               # pexew
+            b = self._words(reg[rt])
+            reg[rd] = self._pack_words([b[2], b[1], b[0], b[3]])
+        elif fn == 0x29 and sa == 0x1e:               # pexcw
+            b = self._words(reg[rt])
+            reg[rd] = self._pack_words([b[0], b[2], b[1], b[3]])
+        elif fn == 0x29 and sa == 0x12:               # por
+            reg[rd] = (reg[rs] | reg[rt]) & M128
+        elif fn == 0x29 and sa == 0x13:               # pnor
+            reg[rd] = ~(reg[rs] | reg[rt]) & M128
+        elif fn == 0x09 and sa == 0x12:               # pand
+            reg[rd] = reg[rs] & reg[rt] & M128
+        elif fn == 0x09 and sa == 0x13:               # pxor
+            reg[rd] = (reg[rs] ^ reg[rt]) & M128
         elif fn == 0x08 and sa == 0x03:               # pmaxw
             reg[rd] = self._pack_words(
                 [max(a, b) for a, b in zip(self._words(reg[rs]),

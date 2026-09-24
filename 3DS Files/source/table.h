@@ -60,8 +60,19 @@ void table_init(Table *t, const float *entries, int32_t n,
 // rather than interpolated against an entry one past the end.
 float table_get_value(const Table *t, float arg);
 
-// 0x00187330 is Table::InverseLookup. Not ported -- nothing in the car
-// objects calls it; the tyre model (task 25's remaining work) is its only
-// caller in the image.
+// 0x00187330. The argument whose value is `value`: walks the entries for
+// the first pair that straddles it and interpolates the index between
+// them, as GetValue's inverse. An entry within 1e-6 of `value` answers its
+// own index exactly; a value past every entry answers MaxArg's index.
+//
+// Two quirks kept. An exact hit on entry 0 returns the *entry*, p[0], not
+// MinArg -- the listing moves $f2 into $f0 in the branch's delay slot and
+// returns it. The two agree only when p[0] == MinArg, which is true of
+// SteeringCurveData (0.0 over 0..1), the one table anything inverts.
+// And a table that is not monotonic is walked to its first crossing
+// rather than searched.
+//
+// RealDriver::DoSteering is its only caller in the image.
+float table_inverse_lookup(const Table *t, float value);
 
 #endif

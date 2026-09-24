@@ -599,7 +599,7 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
         **Corrected in Session 25:** "all 73 ported" was 72. `bToPolar`
         (`0x002424a0`) was decoded and written up but never in
         `bmath.c`, and nothing noticed until `Car::IsCarInFront` called
-        it. It is ported now: `bmath_check` is 19 scenarios, 6391
+        it. It is ported now: `bmath_check` is 19 scenarios, 6424
         lines, 0 differ, and its kept `--mutate` pass is 9 of 9.
         `tools/gen_bmath_tables.py --check` holds `bmathtab.c` to the ELF.
         The two atan tables regenerate exactly as
@@ -934,7 +934,7 @@ than building a top-screen HUD and splitting it afterwards. `uirender.c` is
 citro2d and is the natural home for the bottom-screen widgets; `georender.c`
 is citro3d and owns the top.
 
-25. [~] Car simulation (recovered car-state struct layout from `.mdebug`).
+25. [x] Car simulation (recovered car-state struct layout from `.mdebug`).
         **`CarState.obj` (`0x001b6170`) is done**; the rest of the object
         list is not. Ported to `carstate.{c,h}`, cross-checked by
         `tools/carstate_check.py` (10 scenarios, 653 lines, 0 differ; 63
@@ -1382,21 +1382,179 @@ is citro3d and owns the top.
         table (`0x00292200`) of which four arms -- `TrafficCar`,
         `DeliveryMover`, `CopMover`, `BeltMover` -- construct task 26's
         movers.
+
+        **`PhysicsSystem` and `Aerodynamics` are closed.** The system
+        came with the EE ticker (`bticker.{c,h}`) that times its
+        `ComputeAuxiliaries` walk, and with `p32.{c,h}`, which lets the
+        image's 32-bit link slots hold pointers on the 64-bit host so the
+        walk the checker runs is the walk the handheld runs.
+        `physicssystem_check`: 12 scenarios, 739 lines, 0 differ; 62
+        mutations, 61 caught, 1 equivalent. `aerodynamics_check`: 7
+        scenarios, 107 lines, 0 differ; 74 mutations, 74 caught. Written
+        up in `docs/formats/physics-system.md` and `aerodynamics.md`.
+        IntegrateEuler is the only integrator the image calls; a system
+        owns and destroys its components; `bGetTickerDifference` divides
+        by 300 MHz, not 294.912. `ApplyForceInFrame` is checked for the
+        first time, and `SetGroundEffect`, which the port lacked, is in.
+
+        **The component vtables are closed.** `physcomp.{c,h}` installs
+        the seven tables at the image's addresses -- RigidBody
+        `0x002987e8`, Wheel `0x00298f20`, Suspension `0x00298fb0`, Engine
+        `0x00297a78`, DriveTrain `0x00297a30`, the steering's
+        `0x00298ff8` / `0x00299018` -- with the eight destructors, every
+        operator new and delete, and `InitPhysics` / `ClosePhysics` with
+        their ten slot pools. `physcomp_check`: 8 scenarios, 239 lines, 0
+        differ; 47 mutations, 46 caught, 1 equivalent (Engine's dead vptr
+        store). Written up in `docs/formats/physics-components.md`. A new
+        component is zeroed by its pool; a destroyed one carries its
+        base's vptr; `~SkidMaker` is `MakeNoSkid`, behind a seam until
+        skids are ported. Ackerman's `DoSnapshot` is the one pending
+        entry.
+
+        **`PhysicsCar` is closed** but for `DoSnapshot`, with the three
+        small modules `Move` reads: `race.{c,h}`, `cardamage.{c,h}` and
+        `joystick.{c,h}`. `physicscar_check` is the first checker whose
+        oracle is the image itself: `mipsemu` runs the shipped
+        constructor, both integrators, `UpdateCar` and `Move` with every
+        component method they reach, and the harness runs the port on the
+        same records. 106 scenarios, 102908 lines, 0 differ; 263
+        mutations, 257 caught, 6 equivalent, 0 unexplained. Written up in
+        `docs/formats/physics-car.md`. Two older ports were wrong and
+        their hand-written models agreed with them (GetLateralForce's
+        curve scale is 12, and CheckTerrain's fifth argument is the
+        terrain it refreshes), and a car sitting in gear divides 0/0 in
+        the clutch split, which the EE answers with FLT_MAX.
+
+        **`MellowMover` and its `Mellovator` are closed** but for their
+        two `DoSnapshot`s. `mellowmover_check` runs the image the same
+        way, on PhysicsCar's four records plus three synthetic ones: 39
+        scenarios, 56080 lines, 0 differ; 346 mutations, 341 caught, 5
+        equivalent, 0 unexplained. Written up in
+        `docs/formats/mellow-mover.md`. The `.lit4` half-pi is one ulp
+        above the nearest float, and an airborne level car divides 0/0
+        in `bNormalize3To`, which now uses `ee_div`.
+
+        That leaves **18.8 KB across 41 functions**, all of it `Car`'s
+        (41 / 19256), plus three `DoSnapshot`s that wait on
+        `ReplaySnapshot`.
+
+        **Car's fourth code slice is closed: the movement and control
+        modes.** `SetMovementMode` (`0x0012fd58`), `SetControlMode`
+        (`0x0012fb50`), `SetToPhysicsMode` (`0x0012ff68`) and
+        `SetFrictionBoost` (`0x0012fd38`), 1092 B, with `NullMover`,
+        `NullController`, `NullDriver`, the `CarController` base,
+        `CarCollisionBody`'s `SetupPhysicsPointers` and `SetToPhysicsMode`,
+        and the five tables at the image's addresses. Task 26's four movers
+        and four controllers are behind constructor seams that abort,
+        naming the class, while NULL. `carmode_check` runs the shipped
+        image as the oracle: 74 transitions, 27324 lines, 0 differ; 114
+        mutations, 114 caught, 0 equivalent. Written up in
+        `docs/formats/car-modes.md`. Both methods store the mode *before*
+        the arm, which the stand-in constructors log; the first
+        NullMover's `Driver` stays 0 until the first switch; and a
+        SetFrictionBoost through the wrong type writes into the next pool
+        slot, which only a check past the mover's end can see.
+        `wheel_install_seams()` now runs at boot in `main.c`.
+
+        **Task 25 stops here, at the physics boundary.** Forty-three of
+        Car's eighty methods are ported (4712 of 22876 bytes). The other
+        thirty-seven (18164 B) each reach a class another task owns, and
+        they move to it: the constructor and destructor build the car's
+        sound (`CreatePlayerCarSound`, `espSetAttributeInt`; task 29), its
+        render info and `CarDamage`, its `CarCollisionBody` and its
+        `PutFlatOnTrack` (task 27); the reset group reaches `tCopManager`
+        and `Player` (task 26); force feedback drives the wheel's motors.
+        Three `DoSnapshot`s -- PhysicsCar's, MellowMover's, the
+        Mellovator's -- wait on `ReplaySnapshot`.
 26. [ ] Race/event logic, cop AI, pursuit (roadblocks, spike strips) --
         `HotPursuitEvent` already seen in the `.mdebug` strings survey
-27. [ ] Track rendering/streaming, collision. Carries a debt from task 24:
-        `QuickSpline.obj` (`0x00227e98`) is what turns a world position
-        into a distance around the track, and until it is ported
-        `trackpath.c`'s `TrackPathCoordinate::UpdatePosition` is a stub
-        and `gTrackPathDistanceFn` stays `NULL` on hardware. Three
-        TrackRoute entry points need it: `SetFirstAndLastPoints`,
-        `Signpost::SetDistances`, `TestSignpostConsistency`.
+        **Inherited from task 25:** the eight classes behind Car's
+        constructor seams (`gTrafficCarCtorFn` .. `gCopDriverCtorFn` in
+        `carmodes.h` -- set each at boot and change its `_SIZE` to
+        `sizeof`), and Car's `ResetToRoutePoint`, `PleaseResetMeLater`,
+        `GetDrivingLineSpeed`, `DeliverMeFromEvil`, `AssignAnimatedDriver`
+        / `UnAssignAnimatedDriver`, `ChangeGear` (the AnimatedDriver),
+        `CalculateNewCatchupMultipliers`, `FixBlownTires`,
+        `TriggerTireBlowOut`, `DamageAbove` and `DamageCap`. **First
+        slice: the player's input** -- `Joystick.obj` (0x00150a50 ..
+        0x00152860: event nodes, the eleven scanners, the queue,
+        `GenerateJoyEvents`), `ScannerConfigTable` (0x002dc6c0, 231 x 32
+        bytes) generated from the image, a 3DS backend in place of
+        `ReadRegularController` (0x0011d420) that fills the 32-byte
+        `scePadRead` buffer from the HID, and `RealDriver` (640 bytes,
+        26 functions) but for `DoSnapshot`.
+
+        **The first slice is closed.** `Joystick.obj` is ported as
+        `joyevent.{c,h}`, the pad ring as `joypad.{c,h}`, and the joylog's
+        two accessors as `joylog.{c,h}`. `gen_scanner_tables.py` writes
+        `scannertab.c` and `joyeventid.h` from the image. `joyhid.{c,h}`
+        builds a DualShock 2 buffer out of the 3DS's buttons, so the port
+        reads as type 121 and every shipped row works unchanged.
+        `joystick_check`: 64,240 ops, 75,891 lines, 0 differ; 253
+        mutations, 250 caught, 3 equivalent. `joyhid_check` presses every
+        key and stick through the tables. Written up in
+        `docs/formats/joystick.md`. `RealDriver` is ported but for
+        `DoSnapshot`, with its seven steering Tables (a new
+        `Table::InverseLookup`, the only one in the image) and
+        `DoesJoystickHaveStiffThrottle`. Its fourteen calls into other
+        tasks' classes go through seams that do nothing while NULL.
+        `realdriver_check` runs the image as the oracle: 152,455 ops,
+        41,163 lines, 0 differ; 122 mutations, 118 caught, 4 equivalent,
+        0 unexplained. Written up in `docs/formats/real-driver.md`. The
+        static constructor is `__CTOR_LIST__` [17] in `sinit.c`, and
+        `main.c` installs `_vt$10RealDriver` at boot. The route editor's
+        two hooks are live calls on retail, not dead code; the 0.6 that
+        latches reversing is a literal, not the `BrakingSpeed` global
+        beside it; and the analog e-brake doubles and *wraps*.
+
+        **What RealController stands on is done** (Session 29,
+        continued): `QuickSpline.obj`, `TrackPath.obj`, table.cpp's
+        Average / PidError / Linear, and the AI's four route helpers
+        (`airoute.{c,h}`). Each is checked against the image in mipsemu;
+        see `quickspline.md`, `track-path.md`, `average.md` and
+        `ai-route.md`.
+
+        **The second slice is closed:** `TrackedController` and
+        `RealController` (0x00224388 .. 0x002253fc) but for their two
+        `DoSnapshot`s, and `DriveTargetRenderer`'s flag-off path.
+        `main.c` installs both tables and sets `gRealControllerCtorFn`;
+        `REALCONTROLLER_SIZE` is `sizeof`. So a REAL_CONTROL car now
+        builds its RealDriver. `realcontroller_check` runs the image as the
+        oracle: 14,096 ops, 25,318 lines, 0 differ, and 129 of 140
+        mutations caught with 11 equivalent. Written up in
+        `docs/formats/real-controller.md`. The image check found
+        FillWithCurrentAcceleration's first test negated, in `drivetarget.c`
+        and in `drivetarget_check`'s model both; both are fixed. Seven of
+        the eight seams remain: the four movers, and AIDriver,
+        TrafficDriver and CopDriver.
+27. [ ] Track rendering/streaming, collision. Task 24's debt is paid:
+        `QuickSpline.obj` and `TrackPath.obj` are ported (Session 29,
+        continued), and `TrackPathCoordinate::UpdatePosition` measures
+        through the spline as shipped. `gTrackPathDistanceFn` is now only
+        `trackroute_check`'s closed form, and it is NULL on hardware.
+        **Inherited from task 25:** Car's constructor and destructor (a
+        `TopologyCoordinate`, a `TrackPathCoordinate`, the
+        `CarCollisionBody`, `CarDamage`, `PutFlatOnTrack`), the per-frame
+        `Move` / `BeginMovement` / `FinishMovement` (`0x00130200`,
+        `0x001303a8`, `0x00130480`), `FindFlatOnTrackPosition`,
+        `PutFlatOnTrack`, `ResetCore`, `ResetToPosition`,
+        `DebugSetPosition`, `AverageAir`, `TriggerEvents`,
+        `TriggerCarTerrainEffects`, `GetDistanceAndSpeed`, and the render
+        group: `InitRenderInfo`, `CloseRenderInfo`, `TriggerEffect`,
+        `SwitchSkin`.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag
 
 ## Phase 5 -- Polish
 
 29. [ ] Save data, options menus, final sound mix pass
+        **Inherited from task 25:** Car's `UpdatePosition` (the sound
+        object's position, `espSetObjectPosition`) and the sound half of
+        its constructor; the rumble and force-feedback group,
+        `MaybeRumble`, `MaybeCameraShake`, `DoWheelForces`,
+        `CalcForceParameters`, `StartForceImpact`, which the 3DS has no
+        motors for; and every `DoSnapshot`, which waits on
+        `ReplaySnapshot`.
 30. [ ] Split-screen/multiplayer scope decision (HP2 supported split-screen;
         not committed to yet -- decide once single-player core is solid)
 31. [ ] Final CIA packaging + Old3DS/New3DS compatibility pass

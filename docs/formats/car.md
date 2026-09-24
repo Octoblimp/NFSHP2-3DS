@@ -9,22 +9,26 @@ state they write into, the lights, the horn, the wipers, the blown tyres
 and the blinking, and it hands everything else off.
 
 Ported in slices. This document covers the record, which is whole, and
-three code slices. The first is the seventeen methods that reach nothing
+three code slices; the fourth, the movement and control modes, has
+[a document of its own](car-modes.md). The first is the seventeen methods that reach nothing
 outside Car, CarState and the two world clocks, plus `Car::WorldToCar`,
 which reaches only a CarState method ported since. The second is the
 vtable seam, the nine methods that are pure dispatch through it, three
 fields Car borrows from other classes, the draft, and the object's static
 initialiser. The third is seven methods that call out into code ported
 already: where the other cars are, the post-collision yaw boost,
-`IsDrifting`, and `ComputeFakeRPM`. Thirty-nine of the eighty methods are
-ported, 3620 of the 22876 bytes.
+`IsDrifting`, and `ComputeFakeRPM`. The fourth is `SetControlMode`,
+`SetMovementMode`, `SetToPhysicsMode` and `SetFrictionBoost`, with the
+null mover, controller and driver they build. Forty-three of the eighty
+methods are ported, 4712 of the 22876 bytes.
 
 Ported to `3DS Files/source/car.{c,h}`, `topology.h`, `vtable.{c,h}`,
 `world.{c,h}`, `collisionbody.h`, `carcontroller.h`, `sound3d.h` and
 `sinit.{c,h}`, with `bToPolar` added to `bmath.{c,h}`. Cross-checked by
 `tools/car_check.py` — 58 scenarios, 4238 lines, 0 differing; 254
 mutations, 238 caught, 16 equivalent, 0 unexplained — and the boot walk by
-`tools/sinit_check.py`, 6 mutations, 6 caught.
+`tools/sinit_check.py`, 6 mutations, 6 caught. The fourth slice's files
+and its checker are listed in [car-modes](car-modes.md).
 
 ## Car has no vtable
 
@@ -776,14 +780,10 @@ The measure that matters for planning is whether a method makes a direct
 call — a `jal`, or a `j` out of its own body — to anything that is not a
 Car method. Scanned over all eighty, that splits them 34 and 46.
 
-Of the **thirty-four that make no outside call**, thirty are ported. The
-other four:
+Of the **thirty-four that make no outside call**, thirty-two are ported —
+`SetToPhysicsMode` and `SetFrictionBoost` came with the fourth slice. The
+other two:
 
-- `SetToPhysicsMode` dispatches through the controller, and its other arm
-  tail-calls `SetMovementMode(MELLOW_MOVEMENT)`, whose jump table
-  constructs every mover. It comes with `SetMovementMode` and PhysicsCar.
-- `SetFrictionBoost` stores into `PhysicsCar` at +108 when the car is under
-  `PHYSICS_MOVEMENT`: PhysicsCar's slice.
 - `DoWheelForces` is `if (pPlayer) CalcForceParameters(...)`, and that is
   force feedback — six `PortSetForceConditionData`, six
   `PortSetForcePeriodicData`, `PortPlayShake`. It drives the wheel
@@ -791,31 +791,24 @@ other four:
 - `PutFlatOnTrack` goes to `FindFlatOnTrackPosition`, which needs a real
   `TopologyCoordinate` (task 27).
 
-Of the **forty-six that do**, nine are ported: `CalculateDraftFactor(Car *)`,
+Of the **forty-six that do**, eleven are ported: `CalculateDraftFactor(Car *)`,
 whose calls are Graph and Table; `WorldToCar`, whose one is
-`CarState::WorldToCar`; and the third slice's seven. None of the other
-thirty-seven calls only ported code.
-
-The next one to fall is `SetMovementMode` (484), and it is not small. It
-is a seven-way jump table at `0x00292200` — `NullMover`, `PhysicsCar`,
-`TrafficCar`, `DeliveryMover`, `MellowMover`, `CopMover`, `BeltMover` —
-and each arm allocates and constructs its mover, stores it at `+48`, and
-sets the collision body's `+84` to 1 for the two physics movers and 0 for
-the rest, before `CarCollisionBody::SetupPhysicsPointers`. Four of the
-seven movers are task 26's. `PhysicsCar` itself needs two classes the
-task-25 count never included, `PhysicsSystem` (`0x00192460`) and
-`Aerodynamics` (`0x001a4b58`).
+`CarState::WorldToCar`; the third slice's seven; and `SetControlMode` and
+`SetMovementMode`, whose outside calls are the movers' and controllers'
+constructors — eight of them task 26's, reached through seams
+([car-modes](car-modes.md)). None of the other thirty-five calls only
+ported code.
 
 Everything else — the constructor and destructor, the reset and damage
-groups, the render and sound groups, force feedback, `SetMovementMode`
-and `SetControlMode` — reaches a class that belongs to tasks 26, 27 or 29,
-or the movers.
+groups, the render and sound groups, force feedback — reaches a class
+that belongs to tasks 26, 27 or 29. The constructor is the nearest: it
+builds the null controller, driver and mover the fourth slice ported
+(`car_new_null_controller` is the first two), but among the sound and
+render objects that are task 29's.
 
-One piece of carried debt lands here: `wheel_install_seams()` is defined
-in `wheel.c` and never called. Its home is the `MM_PHYSICS` arm of
-`Car::SetMovementMode`, which constructs the `PhysicsCar` that owns the
-`Suspension` and the four `Wheel`s. It has to run before that car's first
-`ResolveForces`, or every corner reports airborne.
+The debt the third slice carried is paid: `wheel_install_seams()` runs
+once at boot in `main.c`, before anything can build the `PhysicsCar`
+whose `Suspension` needs it ([car-wheel](car-wheel.md)).
 
 ## Includes, and the cycle underneath them
 

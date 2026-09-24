@@ -283,6 +283,16 @@ which is 32, even though only 29 carry anything. The three past
 them around as whatever they were. Reporting 29 would be tidier and would
 also be a different program; the transcript pins 32.
 
+One thing does write them. `PhysicsSystem::IntegrateEuler` advances every
+component's state in place through the pointer `GetState()` returns, all
+`GetSize` words of it, and `GetDerivative` has written only 29 of the
+body's. So the pad words take `dt` times whatever the integrator's stack
+array held at those three slots, which on the PS2 is someone else's frame.
+Nothing reads them back. The port's integrator clears its array first
+(see [PhysicsSystem](physics-system.md#integrateeuler)), so on the 3DS
+the padding stays as the allocator left it. physicscar_check found this
+by running the shipped integrator over a whole car and dumping the body.
+
 ## What is not ported
 
 `PrintCurrentState` (0x00193c90) is ported as an empty function. It is not

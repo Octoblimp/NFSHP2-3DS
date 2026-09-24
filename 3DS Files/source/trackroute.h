@@ -391,7 +391,12 @@ static inline TrackRoute *trmgr_get_route(TrackRouteManager *m, int n)
 
 // ---------------------------------------------------------------- signposts
 
-// 0x001b6f60 / 0x001b6f88.
+// 0x001b6f60 / 0x001b6f88. The slot NewRoute names, and that route's point
+// NewPoint. **The NULL test in the second is the port's own**: the image's
+// guard is a `bltz` on a byte it loaded with `lbu`, so it never fires, and
+// an empty slot gives `0 + 1064 + 112 * NewPoint`. No sign on the one track
+// on hand names an empty slot (airoute_check hooks the case in the image).
+// A NewRoute of 100 or more reads past the table on both sides.
 TrackRoute      *signpost_get_new_route(const Signpost *s);
 TrackRoutePoint *signpost_get_new_route_point(const Signpost *s);
 

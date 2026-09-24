@@ -2,6 +2,8 @@
 
 #include "table.h"
 
+#include <math.h>
+
 void table_calc_index_multiplier(Table *t)
 {
     t->IndexMultiplier = (float)(t->NumEntries - 1) / (t->MaxArg - t->MinArg);
@@ -50,4 +52,38 @@ float table_get_value(const Table *t, float arg)
 
     return t->pTable[i]
          + (t->pTable[i + 1] - t->pTable[i]) * (frac - (float)i);
+}
+
+float table_inverse_lookup(const Table *t, float value)
+{
+    const float *p = t->pTable;
+    float   first = p[0];
+    int32_t i, n = t->NumEntries;
+    int32_t above, now;
+
+    // gp-30264, 0x003215b8: 1e-6 (0x358637bd).
+    if (fabsf(value - first) < 1e-6f)
+        return first;
+
+    // `c.lt.s $f2,$f12`: which side of the value the walk starts on.
+    above = first < value;
+
+    for (i = 1; i < n; i++) {
+        float v = p[i];
+
+        // gp-30260, 0x003215bc: the same 1e-6, pooled twice.
+        if (fabsf(value - v) < 1e-6f)
+            return t->MinArg + (float)i / t->IndexMultiplier;
+
+        now = v < value;
+        if (now != above) {
+            float prev = p[i - 1];
+            return t->MinArg
+                 + ((float)(i - 1) + (value - prev) / (v - prev))
+                   / t->IndexMultiplier;
+        }
+        above = now;
+    }
+
+    return t->MinArg + (float)(n - 1) / t->IndexMultiplier;
 }

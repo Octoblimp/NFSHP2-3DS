@@ -387,6 +387,41 @@ an explicit `name_first` argument rather than reproducing it by accident.
 A brake-locked wheel takes nothing, and its share is **not** redistributed
 to the other rim of the pair.
 
+### A pair standing still divides zero by zero
+
+Both pairs are split whatever `TorqueSplit` says, so on a rear-drive car
+the front pair is split too, with a torque of exactly 0. Two stopped rims
+make the share `0 / 0`. On a car sitting in gear on the grid, that happens
+every frame.
+
+IEEE answers NaN. The NaN is multiplied by the pair's torque, zero or not,
+and added into AppliedTorque, and from there it reaches the wheels, the body
+and the whole car within a frame. The R5900 has no NaN: a `div.s` by zero
+gives FLT_MAX signed by the XOR of the operands' signs, whatever the
+dividend. The clamp then turns +FLT_MAX into the small share for the named
+wheel, and -FLT_MAX into the large one.
+
+The port divides there with `eefpu.h`'s `ee_div`, which gives the EE's
+answer for a zero or denormal divisor and the plain quotient otherwise.
+`+0 + -0` is `+0`, so of the four signed-zero pairs, only `-0` over `+0`
+is negative:
+
+```
+ac still 0 0 -> 0 0 323.049988 1522.94995
+ac still -0 0 -> 0 0 1522.94995 323.050018
+```
+
+A pair spinning opposite ways at the same speed is also an exact zero
+divisor. IEEE gives that an infinity, which clamps the same as FLT_MAX
+would, so only the zeros tell the two apart. The mutation
+`ac-share-ieee-divide` puts the plain divide back, and the `ac still` block
+catches it.
+
+PhysicsCar's checker found this: it runs the shipped code under `mipsemu`
+with `eediv`, the same function on the model side, and lists every
+instruction that took it. These two divides are the only ones the car
+reaches ([PhysicsCar](physics-car.md#cross-check)).
+
 ## GuessClutchTorque and ModifyClutchTorque
 
 0x001835a8 and 0x00183688, called in that order.
@@ -478,7 +513,7 @@ model that already has its own transcript. `Wheel` and `CarState` are
 local stand-ins, because DriveTrain touches nine fields of the
 four-hundred-byte Wheel and three of CarState.
 
-Eighteen scenarios, 492 lines.
+Eighteen scenarios, 498 lines.
 
 ```
 python tools/drivetrain_check.py

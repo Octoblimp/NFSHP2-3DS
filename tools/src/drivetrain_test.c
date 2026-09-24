@@ -809,6 +809,24 @@ static void s_apply_clutch_torque(void)
     printf("ac tightslip w2 %.9g w3 %.9g\n", (double)r.w[2].AppliedTorque,
            (double)r.w[3].AppliedTorque);
     reset_globals();
+
+    // A pair standing still; see the model.
+    for (i = 0; i < 6; i++) {
+        static const float kStill[6][2] = {
+            { 0.0f, 0.0f }, { -0.0f, -0.0f }, { 0.0f, -0.0f },
+            { -0.0f, 0.0f }, { 5.0f, -5.0f }, { -5.0f, 5.0f },
+        };
+        rig(&r, 1.0f);
+        r.w[2].State.w = kStill[i][0];
+        r.w[3].State.w = kStill[i][1];
+        ground_all(&r);
+        r.d.CurrentGear = THIRD_GEAR;
+        drivetrain_apply_clutch_torque(&r.d, 400.0f);
+        printf("ac still %.9g %.9g -> %.9g %.9g %.9g %.9g\n",
+               (double)kStill[i][0], (double)kStill[i][1],
+               (double)r.w[0].AppliedTorque, (double)r.w[1].AppliedTorque,
+               (double)r.w[2].AppliedTorque, (double)r.w[3].AppliedTorque);
+    }
 }
 
 static void s_guess_clutch_torque(void)

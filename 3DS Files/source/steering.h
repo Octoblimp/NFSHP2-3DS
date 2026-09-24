@@ -176,10 +176,10 @@ void ackerman_set_steering(TwoWheelAckermanSteering *a, uint16_t bam);
 // TwoWheelAckermanSteering::operator new (0x0019c478) is
 // `bOMalloc(SlotPool at gp-23404)` -- it **ignores the requested size**,
 // because a slot pool only ever hands out one size. operator delete
-// (0x0019c468) is the matching `bFree`. Neither is ported: the port does
-// not use the PS2 slot allocator, and pretending to would be a lie about
-// where the memory comes from. They are recorded here because the size
-// being ignored is the kind of thing that matters if the class ever grows.
+// (0x0019c468) is the matching `bFree`. Both are physcomp.h's
+// ackerman_new and ackerman_delete, on TwoWheelAckermanSteeringSlotPool,
+// and so are the two destructors, the Ackerman's table and Steering's.
+// PhysicsCar's constructor inlines the new rather than calling it.
 
 // Steering::BaseDoSnapshot (0x0019c558) and
 // TwoWheelAckermanSteering::DoSnapshot (0x0019bac0) are **not** ported --

@@ -56,8 +56,8 @@ typedef struct EngineState {
 } EngineState;
 
 typedef struct Engine {
-    uint8_t           _head[8];    //  0  base, not touched by this object
-    const void       *_vtable;     //  8  written by the ctor, never read here
+    uint8_t           _head[8];    //  0  PhysicsComponent's two list links
+    uint32_t          _vtable;     //  8  ENGINE_VTABLE, from the ctor
     EngineState       State;       // 12
     const EngineInfo *EI;          // 16
     struct CarState  *pCarState;   // 20
@@ -73,9 +73,9 @@ typedef struct Engine {
 } Engine;
 
 // CarState could carry its widening as a single CARSTATE_SLACK term because
-// its pointers all sit at the front. Engine's do not: EI at 20 forces eight
-// bytes of alignment padding on a 64-bit host that has no PS2 counterpart,
-// so the shift is no longer a constant times the pointer growth.
+// its pointers all sit at the front. Engine's do not -- EI and pCarState
+// come after the state, and each Table carries one -- so on a 64-bit host
+// the shift is no longer a constant times the pointer growth.
 //
 // So the PS2 layout is recorded as a mirror with every pointer narrowed to
 // 32 bits. The mirror compiles to exactly the PS2 struct on any host, and
@@ -120,6 +120,11 @@ typedef char engine_size_check[
      && sizeof(EngineInfo) == 64
      ) ? 1 : -1];
 #endif
+
+// _vt$6Engine. The ctor builds it with `lui v0,0x29 ; addiu v0,v0,31352`
+// (0x001823dc, 0x001823e4) and so does the destructor (0x0018247c); the
+// entries are installed by physcomp.c.
+#define ENGINE_VTABLE 0x00297a78u
 
 // RPM <-> rad/s. 0x3dd67745 and 0x4118c9f3 in the constant pool; they are
 // 2pi/60 and 60/2pi to the bit. The object holds *two* copies of the

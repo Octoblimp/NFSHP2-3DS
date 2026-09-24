@@ -61,6 +61,11 @@ void vt_reset(void);
 // back something to call through the wrong signature.
 const VtEntry *vt_slot(uint32_t image, int slot);
 
+// The whole table installed for `image`, with its entry count in *count,
+// or NULL if there is none. For a harness that has to see a NULL entry --
+// a pure virtual, or a method not ported yet -- which vt_slot aborts on.
+const VtEntry *vt_table(uint32_t image, int *count);
+
 // `obj + e->delta`, which is the `addu a0, obj, a0` in the delay slot.
 static inline void *vt_this(void *obj, const VtEntry *e)
 {

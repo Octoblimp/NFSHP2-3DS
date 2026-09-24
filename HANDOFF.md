@@ -4263,3 +4263,799 @@ and `ComputeAuxiliaries`. `Move` alone is 3900 bytes.
 35.4 KB across 101 functions left in task 25: the rest of `Car` (41 /
 19256), `PhysicsCar` (16 / 8496), `Mellovator` (31 / 5420), `MellowMover`
 (13 / 3096) -- plus `PhysicsSystem` and `Aerodynamics`, about 1.9 KB more.
+
+## Session 26 (2026-09-22) -- Task 25, PhysicsSystem and Aerodynamics, the two classes the count never had
+
+The two classes `PhysicsCar`'s constructor needs and task 25's function
+count had left out are ported and checked. Each has a harness, a model
+written from the listing, a mutation pass and a document:
+
+```
+physicssystem_check  12 scenarios, 739 lines, 0 differ   62 mutations, 61 caught, 1 equivalent
+aerodynamics_check    7 scenarios, 107 lines, 0 differ   74 mutations, 74 caught
+```
+
+Both documents are new: `docs/formats/physics-system.md` and
+`docs/formats/aerodynamics.md`. The full list -- twenty-nine checkers
+and both table generators -- passes, and the CIA builds.
+
+### PhysicsSystem, the ticker, and p32
+
+`PhysicsSystem.obj` is a list of PhysicsComponents and a running total of
+their state sizes. It came with two things it needed:
+
+- **`bticker.{c,h}`**, the EE clock the system times `ComputeAuxiliaries`
+  with. **`bGetTickerDifference` divides by 300 MHz** rather than the
+  EE's 294.912, so every millisecond the game measures is 1.7% short;
+  kept. The unsigned difference is converted in two steps because
+  `cvt.s.w` is signed. The one equivalent mutant replaces that with a
+  direct unsigned conversion. The two are equal, and that was checked
+  over 723,967 values rather than argued.
+- **`p32.{c,h}`**, a registry that lets a 32-bit link slot hold a
+  pointer on the 64-bit host. On the 3DS it is two casts. The point is
+  that the list walk the checker runs is the same code the handheld
+  runs, and every component record still has the image's offsets.
+
+What the listing fixed, and the shape of the code did not:
+
+- **IntegrateEuler is the only integrator the game runs.** PhysicsCar,
+  MellowMover and Smokeable all call it. IntegrateRungeKutta is a textbook
+  RK4 -- h = dt/2, so the weights are 1/3, 2/3, 1/3, 1/6 -- with no caller
+  in the image. Ported anyway.
+- **The walk calls the slot, then asks the size, then reads the next
+  link.** A component that resizes itself or splices in a node during
+  the call is seen doing it. The fake components in the harness
+  misbehave on request, so each of those orders is in the transcript.
+- **A PhysicsSystem owns its components.** Its destructor destroys every
+  one of them with flags 3, then frees itself if asked. Anything that
+  also frees a component frees it twice.
+- **`AuxTime` is written and never read.** The store is the only
+  reference in the image.
+- **AddComponent reads `Size` after `GetSize` returns**, so a `GetSize`
+  that moves `Size` keeps its move.
+
+The first run had 0 differing lines. The mutation pass is what showed
+the diff could fail.
+
+### Aerodynamics
+
+Drag and two downforces, with no state and no vtable. Three findings:
+
+- **The downforce is linear in speed**, not quadratic; only the drag
+  multiplies s by the velocity again.
+- **The "direction" is not a unit vector unless Boost is 1.** ResolveForces
+  divides the velocity by s, and s is the speed over Boost.
+- **The drag's application point has an uninitialised w.** It flows into
+  `MomentAccumulator.w`, which nothing reads. The port zeroes it, the way
+  RigidBody's port zeroes the accumulators' own w lanes. This is the one
+  deviation, and it is written down in both the header and the document.
+
+**`ApplyForceInFrame` had no checker until this one.** It is two
+`bMulMatrixVector` calls, the first an eight-byte `j` thunk to
+`bMulMatrixVec3`, followed by `ApplyForce`. That is now modelled from
+`0x00193170`, and five of the mutations are in `rigidbody.c` and
+`bmatrix.c` on its account. **`SetGroundEffect` was missing from the
+port**, although the other three setters were there. It is in now,
+with a harness line and a mutation.
+
+### Fixtures, again
+
+One hole was found by reading the transcript, before any mutation ran.
+`at-floor` and `over-floor` printed identical lines, because both
+velocities lay along x, where the default direction (1, 0, 0) and the
+real one coincide. Both cases move along y now.
+
+The first mutation pass left two survivors:
+
+- `dot-bracket` survived because no velocity had squares that round
+  differently when grouped the other way. The fix came from a search of
+  the model over one-decimal velocities, which found (15, 4.3, 0.7).
+- `sdata-height` was a no-op: `-0.1f` is the same float as the image's
+  `-0.100000001f`.
+
+**A mutation that writes the value already there is not a mutation.**
+Before writing a float constant into a mutant, check its bits against
+the image's.
+
+### What PhysicsCar needs next
+
+**No component class installs its vtable.** Every caller so far has
+called `rigidbody_*`, `wheel_*` and the others directly, and the records
+carry the image's vptr values only as numbers. The first
+`physicssystem_add_component` given a real RigidBody therefore aborts in
+`vt_slot`. The tables are `_vt$9RigidBody` `0x002987e8`, `_vt$5Wheel`
+`0x00298f20`, `_vt$10Suspension` `0x00298fb0`, `_vt$6Engine` `0x00297a78`
+and `_vt$10DriveTrain` `0x00297a30`, plus the steering's `0x00298ff8`
+and `0x00299018`. Those come first, each held to the image's entries by
+its own checker.
+
+`PhysicsCar` is 116 bytes: `CarMover` at 0, a `PhysicsVehicle` (itself
+a `PhysicsSystem`) at 8, then eleven pointers and seven scalars. It has
+two vtables, `0x00292708` and `0x002926e8`. The constructor, the
+destructor and `Move` are dumped from the ELF, ready to read.
+
+## Session 26, continued -- the component vtables, destructors and pools
+
+The seven component tables are installed, so the first real
+`physicssystem_add_component` no longer aborts in `vt_slot`. With them
+came everything else the image gives each class as an object: its
+destructor, its operator new and delete, and the slot pool behind them.
+All of it is in `3DS Files/source/physcomp.{c,h}`, and the per-class
+`.c` files are untouched except `engine.c`, whose init stores
+`_vt$6Engine` now.
+
+```
+physcomp_check   8 scenarios, 239 lines, 0 differ   46 mutations, 45 caught, 1 equivalent
+```
+
+`docs/formats/physics-components.md` is new. The full list -- thirty
+checkers and both table generators -- passes, and the CIA builds.
+
+### What the listing fixed
+
+- **Every pool starts with flags 15, so every new component is zeroed.**
+  `bOMalloc` is `SlotPool::Malloc`, the full path, and it clears the
+  slot. The harness dirties each pool's first slot before the news to
+  prove it.
+- **A destroyed component carries PhysicsComponent's vptr**, and a
+  destroyed Ackerman carries Steering's, because each destructor stores
+  its base's table on the way down. The harness reads the vptr back from
+  the freed slot, which keeps everything except the free list's link.
+- **`~Engine`'s own store is dead.** The base overwrites it with no
+  virtual call in between. Kept, and listed as the one equivalent.
+- **`~SkidMaker` is `MakeNoSkid`**: it tells its `SkidSet` it is
+  finished and stores nothing. The set is not ported, so the call goes
+  through `gSkidSetFinishedAddingFn`, and a wheel that never got a set
+  never reaches it.
+- **RigidBody's GetSize is 32 but its array copies move 29 floats.**
+  PhysicsSystem still allots 32, so three derivative slots are never
+  written by the copies.
+- **The RigidBody pool is n + 32.** Three constructors draw on it --
+  PhysicsCar's, MellowMover's and Smokeable's -- and a car is one or the
+  other, so the 32 are the Smokeables'.
+- **Aerodynamics has a delete but no new.** PhysicsCar's and
+  MellowMover's constructors inline the `bOMalloc`; the port gives them
+  `aerodynamics_new`.
+- **The slot size is rounded up to 4** by `NewSlotPool`, which is why
+  the harness prints `sizeof` for each pool rather than a number: on the
+  host the records are wider and the round is the same.
+
+### Fixtures, again
+
+Two survivors on the first pass, both the harness's fault:
+
+- `dt-steering-no-fini`: the bare Steering test ran `~Steering` on an
+  object whose vptr was already Steering's, so a destructor that forgot
+  to store it looked right. The test now starts from Ackerman's table.
+- `h-mellovator-size`: the harness printed every pool's slot size as a
+  number, so a wrong constant for an unported class matched a wrong
+  model. Ported pools print `sizeof` when the slot is the rounded
+  `sizeof`, and the three unported ones are asserted against
+  `physcomp.h` inside the model.
+
+### Where PhysicsCar starts
+
+The four tables are dumped: `_vt$8CarMover` `0x002923e0` (destructor,
+a pure `Move`, `DoSnapshot`), `_vt$10PhysicsCar` `0x00292708`,
+`_vt$10PhysicsCar$14PhysicsVehicle` `0x002926e8` (delta -8 on every
+entry, the offset of the `PhysicsVehicle`), and `_vt$14PhysicsVehicle`
+`0x00292728`. The constructor, the destructor and the fourteen methods
+the constructor and `ResolveForces` need are read; `Move` is the second
+slice, with its seams into force feedback, damage, skids and race mode.
+
+## Session 27 (2026-09-23) -- Task 25, PhysicsCar and MellowMover, checked against the shipped code itself
+
+`PhysicsCar.obj` is ported except `DoSnapshot`, which waits on the replay:
+the constructor and destructor, the four tables, Calibrate,
+ComputeAuxiliaries, BottomOut and the damping test, ResolveForces and the
+five-pass IterateForces, UpdateCar, Move, the small methods and the static
+initialiser. `3DS Files/source/physicscar.{c,h}` is new, and three small
+modules Move reads came with it: `race.{c,h}` (GetRaceStage, the first word
+of a Race), `cardamage.{c,h}` (BodyDamage::GetVisibleTotalDamage) and
+`joystick.{c,h}` (the pad-type table and IsJoystickTypeWheel).
+
+```
+physicscar_check  106 scenarios, 102908 lines, 0 differ
+                  263 mutations, 257 caught, 6 equivalent, 0 unexplained
+```
+
+`docs/formats/physics-car.md` is new. Every checker in the run-all line passes, thirty-two and both table generators, once physcomp_check was brought up to date: it still asserted the Mellovator's and MellowMover's slot-size constants, which are `sizeof` now. Its pass is 47 mutations, 46 caught, 1 equivalent, 0 unexplained, with two new mutants: the Mellovator's pool sized as a MellowMover, and NullMover's constant moved.
+
+### The oracle is the image
+
+Every other car class has a Python model written from the listing.
+PhysicsCar is orchestration: which component is asked what, in which
+order, with whose output. A model of that would be a second port of the
+whole car, and would agree with the first for the same reasons the first
+was wrong. So `physicscar_check` runs the shipped code. `mipsemu` loads
+NFSHP2.ELF and runs the constructor, both integrators, UpdateCar, Move and
+the direct calls from the instruction stream, including every component
+method they reach, the VU0 macro code of the matrix library and the
+soft-float doubles, on a Car and a RealDriver laid out in emulated memory.
+The harness runs the port on the same records, and both print every field
+of every object the car owns. The dump is generated from the port's
+headers, and every offset is checked against the mdebug record first.
+
+That took three things from mipsemu:
+
+- **`Emu(ieee=True)`**: the scalar FPU in full, the VU0 macro-mode
+  instructions the physics uses, and the four MMI ops bIdentity is made
+  of. IEEE single, one rounding per operation, because the port runs on
+  IEEE hardware and has to match the algorithm and its operation order,
+  not the EE's round-toward-zero.
+- **`Emu(eediv=True)`**: division by zero the EE's way (below).
+- **`emu.hook(sym, fn)`**, which runs `fn` before an instruction and
+  carries on. The model zeroes the image's uninitialised stack words with
+  it, on the instruction before each is first read. There are six such
+  places now (`physics-car.md` has the table), and the port writes zero
+  in each.
+
+The stand-ins are identical on both sides: the terrain, the allocator, the
+ticker, the skids (MaybeMakeSkids logs its wheel and dt), and the race, a
+zeroed block whose first word is the stage.
+
+### What running the shipped code found
+
+- **Wheel::GetLateralForce's curve scale is 12, not 11** (`lui
+  at,0x4140`). The port and wheel_check's model had both read 11, so they
+  agreed with each other and every tyre-curve index was 11/12 of the
+  image's. The first sign was one ulp in a driven wheel's AppliedTorque
+  in the constructor's dump. Fixed in `wheel.c` and the model, with a
+  mutation.
+- **Wheel::CheckTerrain refreshes the wheel's terrain.** The `move` read
+  as a NULL terrain out-parameter is the *fifth* argument (raw word
+  `0x0000402d`, rd = 8); `a2` arrives holding the wheel's own Terrain,
+  and GetElevation writes through it. Port, model and stand-in all fixed;
+  the stand-in writes 77 so a dropped pointer shows.
+- **IntegrateEuler writes RigidBodyState's padding**: all 32 words of the
+  body are advanced in place from a derivative array the body fills 29 of.
+  The port's integrator now clears the array.
+- **A car sitting in gear divides zero by zero.** DriveTrain splits the
+  clutch torque by `w / (w + w')`, and a pair standing still -- including
+  the front pair of any rear-drive car, which is split too -- is 0/0 every
+  frame. The EE gives FLT_MAX, signed by the XOR of the signs, which the
+  clamp turns into the small share. IEEE gives NaN, and every car on the
+  grid would have gone NaN on its first frame. `eefpu.h` has `ee_div`,
+  the port's two share divides use it, and drivetrain_check has an
+  `ac still` scenario and a mutation for it. mipsemu's `eediv_pcs`
+  records every `div.s` that takes the path; those two are the only ones
+  the scenarios reach.
+- **The Ackerman matrices are zero out of the constructor**, which frames
+  the wheels from them, so a car already moving when it reaches its first
+  Move has front wheels with no frame. The game's cars come to Move from
+  rest. The scenarios start at speed, so both sides set the steering and
+  run ComputeAuxiliaries once first.
+- **One blown tyre cuts all four wheels' traction**: Move's per-wheel test
+  is `(1 << i) != 0`, which always holds.
+- **The joystick table is two bytes**, read with `lbu` and no bounds check.
+
+### A mutation pass that took minutes a mutant
+
+The first full pass ran at minutes a mutant. Each one rebuilt thirty-odd
+sources it had not touched, then diffed 94,909 lines with difflib. A
+mutant takes about 2 s now:
+
+- **`hostbuild` caches objects.** Each source is compiled alone and kept
+  in the system temp directory under a key made of the flags, the path,
+  the bytes and every header in the tree, so a mutant rebuilds one file.
+  The misses compile in parallel. drivetrain_check's build went from 6.2 s
+  to 1.6 s warm. `HOSTBUILD_NO_CACHE=1` builds the old way.
+- **The diff was the pass.** difflib over 94,909 lines takes minutes when
+  a mutant moves a third of them. `diff_count` compares line for line
+  when the lengths agree, which they do for nearly every mutant, and
+  gives difflib only the trimmed middle otherwise.
+- **A build that only links decides nothing.** hostbuild remembers
+  whether a compile worked straight from the host's `cc` or needed
+  msys2's shell. One pass's first build was all cache hits, so it only
+  linked, which works outside msys2, and the mode was set to direct.
+  Every mutant after it then failed to compile (no `<stddef.h>`) and was
+  counted as caught. Only a build that compiled something sets the mode
+  now, and that pass was run again.
+
+### What the mutation pass found
+
+The first pass left 16 of 263 alive. Six are equivalent, each checked in
+the image, and ten were holes in the scenarios. `physics-car.md` has all
+sixteen. Two are worth knowing before the next checker:
+
+- **Locked and gripping is out of any scenario's reach.** By the first
+  force pass, IntegrateEuler has moved the body on the constructor's
+  derivative, so no contact patch is still. `s_lock` stills the patches
+  by hand, one lock mask at a time, and calls IterateForces directly.
+- **The first frame hides the yaw boost.** VelocityMagnitude is 0 until
+  UpdateCar has run, so the collision boost was multiplied by zero in
+  every scenario that had one.
+
+`sinit_check`'s `swap-first-two` mutant swapped `car_static_init` with
+`rigidbody_static_init`, the next line down. `physicscar_static_init` [15]
+sits between them now, so the pattern stopped matching and the pass said
+PATTERN NOT FOUND. It swaps [14] and [15] now.
+
+### MellowMover and the Mellovator
+
+`MellowMover.obj` (`0x00206448` .. `0x002086f8`) is ported except its two
+DoSnapshots. `3DS Files/source/mellowmover.{c,h}` has the Mellovator's
+methods and MellowMover's, the three tables at the image's addresses, and
+`_GLOBAL_$I$MellowForceFeedbackGraph`. A MellowMover is the cheap car. A
+RigidBody and a Mellovator share one PhysicsSystem, the Mellovator's state
+is four wheel speeds, and the four Wheels are built only so the car can
+render and skid.
+
+```
+mellowmover_check  39 scenarios, 56080 lines, 0 differ
+                   346 mutations, 341 caught, 5 equivalent, 0 unexplained
+```
+
+`docs/formats/mellow-mover.md` is new. The checker runs the image, as
+physicscar_check does, on PhysicsCar's four records plus three synthetic
+ones.
+
+- **The `.lit4` half-pi is `0x3fc90fdc`**, one ulp above the float nearest
+  pi/2. It feeds `bSin`, which truncates to a BAM, so a heading a hair
+  under a BAM boundary lands on it in the image, and the tyre forces go
+  one BAM apart. The port's first BAM-to-radian constant was the same
+  mistake the other way, a decimal a digit short. The checker now reads
+  all eighteen pool constants back out and checks each against its
+  literal and the comment beside it.
+- **A level car in the air divides 0/0 in `bNormalize3To`**
+  (`0x00240274`). JumpStabilizer's level moment normalises a zero vector
+  to a zero length. The EE answers FLT_MAX, and the vector stays zero;
+  IEEE answered NaN into the angular momentum, and the harness died in
+  the first airborne scenario. `bvector.c` divides with `ee_div` now.
+  `eediv_pcs` shows it and JumpStabilizer's own `vrsqrt` as the only
+  divides by zero any scenario reaches.
+- **The pools balance.** The Mellovator's and MellowMover's slot sizes
+  are `sizeof` now, not image constants. `s_dtors` prints every pool
+  after each destructor, and a freed Mellovator's slot still shows
+  PhysicsComponent's vptr (`0x00298728`), since a freed slot keeps all
+  but its first word.
+- **The first pass left 28 of 346 alive**: five equivalent and 23 holes.
+  The holes wanted three records the shipped data does not have: car 34
+  for `FinalDrive[1]`, car 0 with CoG.y set, and car 0 with its droop
+  stops at -2. They also wanted hand-set shift points, grip knee and
+  slipping flags, a CarState that is not the Car's, and a frame under
+  the suspension's 0.0001 s floor. The last took two tries. A car at
+  rest has `p - old` of 0, so the floor cannot show until the car starts
+  above its rest height.
+- **In the game `State` is the Car's own CarState.** SetMovementMode's
+  MELLOW_MOVEMENT arm, the constructor's only caller, passes `car + 64`.
+  The port still reads each from where the image does.
+
+### Where the next slice starts
+
+Car's fourth slice: the movement and control modes. That is
+`SetMovementMode` (`0x0012fd58`), `SetControlMode` (`0x0012fb50`),
+`SetToPhysicsMode` (`0x0012ff68`) and `SetFrictionBoost` (`0x0012fd38`),
+with the `wheel_install_seams()` call in the physics arm.
+
+- **SetMovementMode's seven-way table** (`0x00292200`) builds, in
+  MovementMode order, a NullMover, a PhysicsCar, a TrafficCar, a
+  DeliveryMover, a MellowMover, a CopMover or a BeltMover.
+- **NullMover** (`_vt$9NullMover`, `0x002923c0`, a 12-byte slot) comes
+  with the slice. The four task 26 movers go behind a seam until then.
+- **SetControlMode** wants the `CarController` base (`0x0029a6e0`),
+  `NullController` (`0x00292350`) and `NullDriver` (`0x00292400`) the
+  same way.
+
+After that, task 25 is the rest of Car: 41 methods, 19256 bytes, most of
+them reaching into tasks 26, 27 and 29.
+
+## Session 28 (2026-09-23) -- Task 25 closed: the movement and control modes
+
+Car's fourth code slice:
+
+- **The four methods:** `SetMovementMode` (`0x0012fd58`),
+  `SetControlMode` (`0x0012fb50`), `SetToPhysicsMode` (`0x0012ff68`) and
+  `SetFrictionBoost` (`0x0012fd38`), 1092 bytes.
+- **The small classes they build or reach:** `NullMover`,
+  `NullController`, `NullDriver`, the `CarController` base, and
+  `CarCollisionBody`'s `SetupPhysicsPointers` and `SetToPhysicsMode`.
+- **The five vtables,** at the image's addresses.
+
+New sources: `carmodes.{c,h}`, `carcontroller.c` and `collisionbody.c`;
+the two headers were layouts before and gained the methods. `cardriver.c` gained NullDriver and both tables,
+and `main.c` installs every table at boot and calls
+`wheel_install_seams()`.
+
+```
+carmode_check      74 transitions, 27324 lines, 0 differ
+                   114 mutations, 114 caught, 0 equivalent, 0 unexplained
+cardriver_check    46 mutations, 45 caught, 1 equivalent, 0 unexplained
+```
+
+`docs/formats/car-modes.md` is new; `car.md`, `car-driver.md`,
+`car-wheel.md` and `physics-components.md` are brought up to date. All
+thirty-three checkers in the run-all line pass, with both table
+generators, and the ARM build links and packs the CIA.
+
+### The oracle is the image again
+
+`carmode_check` borrows `mellowmover_check`'s machinery, and `mipsemu`
+runs the shipped methods. The harness runs the port on the same records.
+
+**The general heap is hooked on both sides.** Every allocation logs its
+name, the image's size, its flags and its pool. A new block is filled
+with 0xa5 and a freed one with 0xdd, and neither is reused. So
+CarDriver's unwritten SportGear shows on both sides.
+
+**The eight task-26 classes are stand-ins** at fixed table addresses.
+Each logs what it is given and the two modes it finds on the car. That is
+what makes the mode-before-arm store observable. A port that stored the
+mode at the end would pass every check that looks only at the car
+afterwards.
+
+### Two survivors, and both were the dump not looking
+
+- **`friction-mellow-too`:** a SetFrictionBoost that also stores into a
+  MellowMover through the PhysicsCar type. PhysicsCar's FrictionBoost is
+  at 108 and a MellowMover is 64 bytes, so the store lands in the next
+  pool slot. No dump reaches a slot the car does not own. The friction
+  scenario now compares the 128 bytes past the mover around each call.
+- **`nc-dtor-driver-flags-1`:** NullController deleting its driver with 1
+  instead of 3. The CarDriver hierarchy tests only bit 0, so on a
+  NullDriver they are the same. A stand-in driver that logs its flags
+  now shows the 3 the image passes.
+
+### A broken build scored as nineteen catches
+
+The first cardriver rerun reported its last nineteen mutants as "did not
+compile (caught)", with no compiler output behind any of them. Run
+again, all nineteen were caught on the transcript. The build environment
+had failed, not the code -- most likely a locked file.
+
+**`hostbuild` now raises `BuildEnvironmentError`** when a build fails
+with no diagnostic. No checker catches it, so a pass stops instead of
+scoring it. **A "did not compile" line is only a catch if a compiler
+error sits above it.**
+
+### Task 25 closes at the physics boundary
+
+Forty-three of Car's eighty methods are ported, 4712 of 22876 bytes. The
+other thirty-seven (18164 B) each reach a class another task owns:
+
+- **The constructor** builds the car's sound (`CreatePlayerCarSound`,
+  `espSetAttributeInt`), its render info, `CarDamage`, the
+  `CarCollisionBody` and `PutFlatOnTrack`.
+- **`Move`** goes through `UpdatePosition` (the sound object) and
+  `ResetToRoutePoint`.
+- **`BeginMovement`** reaches `TopologyCoordinate`.
+- **`FinishMovement`** reaches `Collision`, the `Player`'s zones, `Race`
+  and `ReplayManager`.
+
+TASKS.md now lists every one under task 26, 27 or 29.
+
+### Where the next slice starts
+
+Task 26, the player's input: `Joystick.obj`, a generated
+`ScannerConfigTable`, a 3DS backend where `ReadRegularController` was,
+and `RealDriver`. CONTINUE.md has the addresses.
+
+## Session 29 (2026-09-23) -- Task 26's first slice: the player's input
+
+The first slice of task 26 is closed. It covers everything between the
+3DS's buttons and CarDriver's input record: the joystick layer, a
+generated `ScannerConfigTable`, a HID backend, and `RealDriver`.
+
+### The joystick layer
+
+- **`Joystick.obj`** is ported as `joyevent.{c,h}`: the event nodes, the
+  eleven scanners, the queue and `GenerateJoyEvents`.
+- **The pad ring** is `joypad.{c,h}`, and the joylog's two accessors are
+  `joylog.{c,h}`.
+- **The tables are generated.** `gen_scanner_tables.py` writes
+  `scannertab.c` and `joyeventid.h` from the image and the stabs, and
+  `--check`s they are current.
+- **The 3DS pretends to be a DualShock 2.** `joyhid.{c,h}` builds the
+  pad's 32-byte buffer from the HID, in pressure mode. The port reads as
+  type 121, takes configuration 30, and every shipped row works as it is.
+  Nothing in the joystick layer knows what a button is, which is what
+  makes that possible.
+
+`docs/formats/joystick.md` has the buffer, the rows, the scanners and the
+3DS map.
+
+```
+joystick_check     64240 ops, 75891 lines, 0 differ
+                   253 mutations, 250 caught, 3 equivalent, 0 unexplained
+joyhid_check       every key and stick reaches its event
+```
+
+The mutation pass ran in two halves. The first stopped after 106 mutants
+on a `BuildEnvironmentError`, a compile that failed with no diagnostic.
+That is the guard added in Session 28 doing its job: the pass stopped
+instead of scoring nineteen false catches. The other 139 ran with
+`--only`. One survived: `da-p1-repeat-n`, in the DigitalAnalog scanner's
+repeat. No script edge crossed that threshold from the side it tests, and
+an edge loop now does.
+
+The two type predicates are asked about all 256 type codes.
+`DoesJoystickHaveStiffThrottle` (0x0011daf8) is new with RealDriver,
+which is its only caller. It is true for types 83, 115 and 121.
+
+### RealDriver
+
+`RealDriver.obj` is ported but for `DoSnapshot`. That is 640 bytes and
+twenty-five functions, plus the static constructor that builds its seven
+steering Tables and `_vt$10RealDriver`. `table.c` gained
+`Table::InverseLookup`, which only DoSteering calls. It is ported with its
+quirk: an exact hit on the first entry answers the entry, not `MinArg`.
+
+Fourteen calls go into other tasks' classes, through seams that do nothing
+while NULL:
+
+- the route editor's two hooks;
+- the radial blur;
+- the replay's event log;
+- three Player methods;
+- two `tCopManager` methods;
+- `Car::ResetToRoutePoint`;
+- the horn's sound.
+
+None of them feeds the physics.
+
+`realdriver_static_init` is `__CTOR_LIST__` [17] in `sinit.c`, and
+`main.c` installs the table at boot. `docs/formats/real-driver.md` is new.
+
+```
+realdriver_check  152455 ops, 41163 lines, 0 differ
+                  122 mutations, 118 caught, 4 equivalent, 0 unexplained
+```
+
+### The image is the oracle, with the seams on a mask
+
+`realdriver_check` runs every RealDriver method but DoSnapshot in
+mipsemu. It also runs, as shipped, everything those methods call that
+the port has: the Tables, `GetYaw` and `bATan`, `GetRoute` and
+`GetRoutePoint`, CarDriver's constructor and destructor, DriveTarget and
+the vtable dispatch. The pad layer's five calls and the fourteen seams are
+stubs that log.
+
+- **The seam mask.** The image calls every seam unconditionally, and the
+  port skips a NULL one. So the script carries a mask. A clear bit leaves
+  the harness's pointer NULL and makes the model's stub silent,
+  answering what the port's NULL case assumes. That puts the port's
+  NULL branches under the same check as its calls.
+- **Poison.** The model's Car, CarTypeInfo and Player are filled with
+  0x55, and only the fields RealDriver should read are set. A field read
+  by one side and not the other shows up as a difference.
+
+### What reading the listing got wrong first
+
+Four transcription errors were caught before the checker existed, by
+reading each constant back to its pool entry:
+
+- **Globals, not literals.** DoThrottleBrakeReverse's speed thresholds and
+  DoSteering's `CounterSteerFadeStart`, `SteeringSpeed` and
+  `SteeringReturnFactor` are `.sdata` globals.
+- **The exception.** The 0.6 that latches reversing is a `.lit4` literal,
+  even though a `BrakingSpeed` global with the same value sits beside it.
+  Nothing reads that global.
+- **NitroWasActive's limit** is `NitrousActiveTime`, not 4.0.
+- **NitroActive tests validity** first.
+
+**The route editor's hooks are live.** `MaybeAddTrackRoutePoint` and
+`CancelTuningDrivingLines` looked like retail no-ops. But the editor is
+built on every track load (`EndGameFlowLoadingTrackSpecific` →
+`InitTrackRouteEditor`), so they are seams like the rest.
+
+### Seven survivors, three of them real
+
+- **`drive-order`.** Drive runs DoThrottleBrakeReverse and then
+  DoSteering. The two share no state, so their order shows only in what
+  each logs: the e-brake's replay event and the wheel query. No drive
+  frame had the e-brake on. Directed frames now do.
+- **`reset-cap`.** A `<=` in place of `min.s` differs only at a tie, and
+  at a tie only in the sign of a zero. The reset now runs ±0.0 against a
+  ∓0.0 cap.
+- **`nitro-age-scale`.** At 4 s, any scale within a part in 16000 flips
+  between the same two ticks. A 1000 s nitro separates 0.00025 from
+  0.00025001, and so does a frame time that falls between two ticks'
+  ages.
+
+The four equivalents are in `real-driver.md`:
+
+- **Two power-slide thresholds.** The yaw takes 65536 values, and neither
+  5.0 nor 7.0 is one of them.
+- **Two signs of a zero** that the steering arithmetic absorbs.
+
+### Where the next slice starts
+
+`RealController` (0x00224740, 84 bytes) has the image's only call to the
+RealDriver constructor. It sits on `TrackedController` (0x00224388),
+whose first 28 bytes `carcontroller.h` already has. Setting
+`gRealControllerCtorFn` is what lets `Car::SetControlMode` give a car to
+the player. CONTINUE.md has the addresses.
+
+
+## Session 29, continued (2026-09-23) -- What RealController stands on
+
+RealController needed four things the port did not have yet. All four are
+done now. Each runs against the image in mipsemu, with a checker and a doc
+under `docs/formats/`.
+
+### QuickSpline, TrackPath and Average
+
+- **`QuickSpline.obj`** (`quickspline.{c,h}`, 133/133 mutations caught).
+  It found a real bug below it. `bFMod` truncated with a C cast, which is
+  undefined past 2^31. The EE's `cvt.w.s` saturates. `bFMod` and `bSinF`
+  now use `ee_trunc_w`, and `bmath_check` tests quotients past 2^31.
+- **`TrackPath.obj`** (`trackpath.{c,h}`, 185 caught, 3 equivalent): the
+  manager, the loader, and TrackPathCoordinate. `UpdatePosition` is no
+  longer a stub. Five checkers that link `trackpath.c` needed
+  `quickspline.c` and `bmem.c` added to their sources.
+- **Average, PidError and Linear** (`average.{c,h}`, 64/64): table.cpp's
+  three filters. Average's two roundings, at a total of 2^24, are a
+  scenario of their own.
+
+### The route helpers
+
+`airoute.{c,h}` has GetNearestRoutePoint, GetNextRoutePoint,
+GetNextRoutePointAhead and NearestRoutePointInfo::IsValid. `airoute_check`
+runs the image's own FindClosestPoint, route manager and loader beneath
+them. So it also checks `trackroute.c`'s search against the shipped code,
+which `trackroute_check`'s Python model never could. 14,738 ops, 7,224
+lines; 86 of 91 mutations caught, 5 equivalent.
+
+- **No point keeps its index.** Every function divides the pointer
+  distance by 112 with the inverse of 7. For a foreign or misaligned
+  point that gives garbage, and the port reproduces the same garbage by
+  laying the routes out as the loader does.
+- **GetNextRoutePointAhead only looks further when the *start* point has a
+  signpost.** I first read it as testing the new point. The header had it
+  wrong until the transcript showed which step each case reached.
+- **GetNewRoutePoint on an empty slot is a divergence.** It stays one on
+  purpose. The image's NULL test is a `bltz` on an `lbu`, which can never
+  fire. The port's test is its own, and so was `trackroute_check`'s model,
+  which is why nobody noticed. No shipped sign names an empty slot. The
+  model now hooks the case, and `trackroute.h` says so.
+- **`TrackDirection`** (TheRaceParameters+12, 0x0031252c) is in `race.h`.
+  It is in `.data` and 0 on the disc.
+
+Four mutants survived the first pass, and each exposed a gap in the
+checking:
+
+- `RoutesToSearch` was an enum with no negative values. GCC makes that
+  unsigned, so the checker's -1 was not the image's -1, and two range
+  tests passed. It is an `int32_t` with defines now, like
+  `eTrackDirection`.
+- A step from below a route's table only lands right on a 64-bit host if
+  the offset is sign-extended. Nothing read through the result. Three
+  steps in a row now do.
+- Every scenario set the direction before searching, so the starting
+  value went unseen. One search now runs before any is set.
+
+The last full mutation pass stopped twice on `BuildEnvironmentError`: msys
+bash exited non-zero and printed nothing. Retrying five times in a row did
+not get past it. The same mutant then built and was caught when run alone,
+and 33 GB were free. The tally comes from two runs, and the doc says so.
+
+### Where the next slice starts
+
+TrackedController and RealController are read, not written. CONTINUE.md
+has what the disassembly says: field by field, the constants, and the one
+missing callee (`SetTargetToRender`, whose flag ships off).
+
+
+## Session 30 (2026-09-24) -- Task 26's second slice: RealController, and a DriveTarget test the wrong way round
+
+The second slice of task 26 is closed. `Car::SetControlMode(REAL_CONTROL)`
+now builds a RealController, and the RealController builds the player's
+RealDriver.
+
+### What is ported
+
+- **`realcontroller.{c,h}`**: TrackedController (0x00224388) and
+  RealController (0x00224740), but for their two DoSnapshots, which wait on
+  ReplaySnapshot. TrackedController's record is in `carcontroller.h`, so
+  that car.c can reach its Acceleration.
+- **`drivetargetrenderer.{c,h}`**: SetTargetToRender's flag-off path, and
+  DestroyTargetMarkers. `RenderDriveTargetPoints` is 0 on the disc; the
+  flag-on path builds WorldObjects and aborts.
+- **The boot wiring.** `main.c` installs both tables and sets
+  `gRealControllerCtorFn`. `REALCONTROLLER_SIZE` is `sizeof`: 84 bytes on
+  the console, 160 on a 64-bit host. `carmodes.h` now counts seven classes
+  unported, not eight.
+
+`docs/formats/real-controller.md` is new.
+
+```
+realcontroller_check  14096 ops, 25318 lines, 0 differ
+                      140 mutations, 129 caught, 11 equivalent, 0 unexplained
+```
+
+`realcontroller_check` runs the image in mipsemu as the oracle, and runs
+everything beneath the two classes as shipped: CarController, RealDriver
+and CarDriver, DriveTarget, the AI route helpers, TrackRoute's search,
+Average, QuickSpline and bMath. Only the edges are stubbed. bMalloc logs
+and maps the port's sizes to the image's, the pad calls exit, and
+SetMovementMode and RadialBlurOff log.
+
+### The image check found a DriveTarget bug that its own checker passed
+
+**FillWithCurrentAcceleration's first test was negated, in `drivetarget.c`
+and in `drivetarget_check.py`'s model both.** The image is `c.lt.s` of
+0.75 |v| against |a|, then `bc1f` past the StraightLinePredict call. So it
+integrates while the acceleration is at most three quarters of the speed,
+and draws a straight line past that. The port and the model had it the
+other way round, and they agreed. drivetarget_check passed, and its
+`fi-dominates-flipped` mutant was killed for the wrong reason.
+
+The first ComboPredict that fell through, with no acceleration at all, gave
+fifteen points in the image and one in the port. Both sides are fixed. Every
+`fi` fixture was re-derived so that it reaches the branch its label names,
+and `fi still` and `fi ratio over` are new. With `fi still` in the
+transcript, the twenty-point wall is no longer redundant, so `fi-no-wall`
+is caught and its EQUIVALENT argument is gone.
+
+```
+drivetarget_check  22 scenarios, 894 lines, 0 differ
+                   260 mutations, 241 caught, 19 equivalent, 0 unexplained
+```
+
+**The lesson is in CONTINUE's "What not to trust".** A model written from
+the disassembly can share a misreading with the port, and a check that runs
+the image cannot. Most of task 25's checkers are models: carstate, engine,
+cartypeinfo, cardriver, steering, rigidbody, suspension, wheel, drivetrain,
+drivetarget, graph, physicssystem, aerodynamics and physcomp. The rest of
+DriveTarget is still checked against its model alone: Resample,
+EstimateScore, GetFirstPoint, InterpolatePoint, the shifts and the copies.
+
+### Three things the listing says that are easy to miss
+
+- **A predicted point's pad is garbage on the console.**
+  `GetPosition(bVector3)` stores four VU0 lanes. The fourth comes from two
+  stack words, 12(sp) and 44(sp), that it never sets. The port's pad is the
+  car position's (STACK-W), and the checker compares no pad.
+- **Think's blend is dead.** BlendWithCurrentAcceleration returns at once
+  for a car with a Player, and Think has already read through pPlayer for
+  bWrongWay. So a human's target is never blended.
+- **ComboPredict has no caller.** No `jal` reaches it, and it is not
+  virtual. It is ported anyway, and its fall-through is what showed the
+  DriveTarget bug.
+
+Think's wrong-way test is `pPlayer->bWrongWay`: Car+24, then Player+736. An
+earlier CONTINUE note said pRideInfo, which was wrong.
+
+### The mutation pass
+
+The first pass left nineteen survivors. Eight were gaps in the script:
+
+- **FindWhereIAm's out-of-bounds drop, and its radius.** The network's
+  routes have random widths, and when the drop fired, the fallback found
+  the same point again. A traffic lane of known width, beside a racing
+  route, now makes a drop show.
+- **The two route tests, in Think and in RouteDeltaPredict.** They decide
+  only when the route is NULL and the point is not. Nothing passed that,
+  and it now does: a point whose route the manager does not hold, and a
+  direct call.
+- **Fill at a ForwardSpeed of exactly 10**, with nothing predicted.
+- **CalculateLateral's too-few exit after the Average had been fed.**
+
+The eleven that remain are argued in `EQUIVALENT` and listed in the doc.
+Two of them are facts about the class:
+
+- **No class in the image overrides FindWhereIAm.** The three tables that
+  hold it all hold 0x00224530: TrackedController's, RealController's and
+  CopDriver's (0x00298d68). CopDriver is a TrackedController too. Its own
+  fields start at 36, and its table shares slots 40 to 80 with
+  TrackedController's.
+- **The Clear at a route's end is repeated** by StraightLinePredict.
+
+**A pass can run from a copy of the tree.** RealController's harness links
+`drivetarget.c`, and DriveTarget's pass was mutating it, so the first
+RealController pass ran from a copy in the scratchpad. The checkers find
+their sources from their own path. A copy of `tools/`, `3DS Files/source/`,
+`PS2 Files/NFSHP2.ELF`, `docs/mdebug_structs.txt` and the two extracted
+bundles is enough.
+
+DriveTarget's own pass stopped once on a `BuildEnvironmentError`, after
+twelve mutants. The other 248 ran with the build retried on that error and
+the finished twelve skipped. The tally is the two runs together.
+
+### Where the next slice starts
+
+Seven of Car's eight constructor seams are still NULL: TrafficCar,
+DeliveryMover, CopMover and BeltMover, and AIDriver, TrafficDriver and
+CopDriver. CopDriver (0x00197d48, 76 bytes) is a TrackedController, so
+it can take FindWhereIAm, SetCurrentRoute and the rest from
+`realcontroller.c` as they stand.

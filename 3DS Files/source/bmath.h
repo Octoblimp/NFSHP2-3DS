@@ -76,6 +76,10 @@ int32_t bSetRandomSeed(uint32_t s, uint32_t *seed);
 int32_t bRandomI(int32_t range, uint32_t *seed);
 float   bRandomF(float f, uint32_t *seed);
 
+// gp-15456, 0x00324f90: the seed callers pass when they have none of their
+// own. 0x12345678 in the image.
+extern uint32_t bDefaultSeed;
+
 // ------------------------------------------------------------------- modulo
 
 // Floored, not truncated: the result is always in [0, |b|).

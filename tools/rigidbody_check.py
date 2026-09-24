@@ -38,7 +38,8 @@ the comparison does not see them.
 
 **GetSize answers 32, not 29.** The integrator is told the state is a
 whole RigidBodyState; the three floats past MotionDampingFactor are its
-tail padding and are never moved.
+tail padding, and GetState/SetState never move them. (IntegrateEuler
+writes them in place; see physicssystem.c.)
 
 The float layer and the matrix routines are imported from bvector_check
 -- itself a model of bVector.obj and bMatrix.obj written from the ELF --

@@ -105,6 +105,8 @@ SOURCES = [
     "3DS Files/source/carstate.c",
     "3DS Files/source/trackroute.c",   # drivetarget.c's trmgr_get_route
     "3DS Files/source/trackpath.c",    # and trackroute.c's own dependencies
+    "3DS Files/source/quickspline.c",
+    "3DS Files/source/bmem.c",
     "3DS Files/source/bchunk.c",
     "3DS Files/source/emath.c",
     "3DS Files/source/bmatrix.c",
@@ -1139,9 +1141,12 @@ def fill_with_current_acceleration(t, car):
     vx, vy = car.State.Velocity[0], car.State.Velocity[1]
     ax, ay = car.State.Acceleration[0], car.State.Acceleration[1]
 
-    # Below three quarters of the speed the acceleration is not worth
-    # integrating and a straight line will do.
-    if not (fmul(len2(vx, vy), K_ACC_DOMINATES) < len2(ax, ay)):
+    # Past three quarters of the speed the acceleration is not trusted and
+    # a straight line is used: `c.lt.s $f0,$f2` with $f0 the speed times
+    # 0.75 and $f2 the acceleration, then `bc1f` past the call. This model
+    # once had the test negated, and so did the port, and they agreed;
+    # realcontroller_check.py runs the image and is what found it.
+    if fmul(len2(vx, vy), K_ACC_DOMINATES) < len2(ax, ay):
         straight_line_predict(car, t)
         return
 
@@ -2350,68 +2355,97 @@ def s_fill():
     routes_init()
     timer(600)
 
-    # Acceleration small next to the speed: the straight-line predictor
-    # takes over and leaves exactly one point.
+    # Acceleration past three quarters of the speed -- 16 sideways
+    # against 20 forward, whose three quarters is 15 -- so the
+    # straight-line predictor takes over and leaves exactly one point.
     dt_straight(t)
-    car_set(car, 0.0, 0.0, 20.0, 0.0, 1.0, 0.0, 0, 20.0, 20.0)
+    car_set(car, 0.0, 0.0, 20.0, 0.0, 0.0, 16.0, 0, 20.0, 20.0)
     fill_with_current_acceleration(t, car)
     pdt("fi straight", t, 2)
 
-    # Stationary, where the straight line comes off State.Angle instead.
+    # Stationary but accelerating, which is past three quarters of no
+    # speed at all, so the straight line comes off State.Angle.
     timer(601)
     dt_straight(t)
-    car_set(car, 5.0, 6.0, 0.0, 0.0, 0.0, 0.0, 8192, 0.0, 0.0)
+    car_set(car, 5.0, 6.0, 0.0, 0.0, 0.5, 0.0, 8192, 0.0, 0.0)
     fill_with_current_acceleration(t, car)
     pdt("fi angle", t, 2)
 
-    # A real integration: hard cornering acceleration at a modest speed.
+    # A real integration: cornering acceleration of 5.39 at a modest
+    # speed of 8, under the bar of 6. The eighteenth step takes the
+    # walk past the 20 m look-ahead.
     timer(602)
     dt_straight(t)
-    car_set(car, 0.0, 0.0, 8.0, 0.0, 2.0, 9.0, 0, 8.0, 8.0)
+    car_set(car, 0.0, 0.0, 8.0, 0.0, 2.0, 5.0, 0, 8.0, 8.0)
     fill_with_current_acceleration(t, car)
-    pdt("fi integrate", t, 8)
+    pdt("fi integrate", t, 20)
 
-    # Braking hard enough to turn the velocity round.
+    # Braking at 2.8 against a speed of 4, under the bar of 3, for long
+    # enough to turn the velocity round. The fifteenth step doubles
+    # back, the checked AddPointToTarget refuses it, and the dot test
+    # ends the walk with fourteen points.
     timer(603)
     dt_straight(t)
-    car_set(car, 0.0, 0.0, 4.0, 0.0, -20.0, 0.0, 0, 4.0, 4.0)
+    car_set(car, 0.0, 0.0, 4.0, 0.0, -2.8, 0.0, 0, 4.0, 4.0)
     fill_with_current_acceleration(t, car)
-    pdt("fi brake", t, 6)
+    pdt("fi brake", t, 16)
 
-    # Enough acceleration and little enough distance per step that the
-    # twenty-point wall is what stops it.
+    # Enough acceleration, under the bar, and little enough distance
+    # per step that the twenty-point wall is what stops it.
     timer(604)
     dt_straight(t)
-    car_set(car, 0.0, 0.0, 0.5, 0.0, 3.0, 1.0, 0, 0.5, 0.5)
+    car_set(car, 0.0, 0.0, 5.0, 0.0, 1.0, 3.0, 0, 5.0, 5.0)
     fill_with_current_acceleration(t, car)
     pdt("fi full", t, 20)
 
-    # Three quarters exactly: a velocity of 10 against an acceleration of
-    # 6 does not clear the bar, so the straight line is what comes back.
+    # Three quarters exactly: a speed of 8 against an acceleration of
+    # 6. The test is strict, so this integrates, sixteen points to the
+    # look-ahead.
     timer(605)
     dt_straight(t)
-    car_set(car, 0.0, 0.0, 10.0, 0.0, 6.0, 0.0, 0, 10.0, 10.0)
+    car_set(car, 0.0, 0.0, 8.0, 0.0, 6.0, 0.0, 0, 8.0, 8.0)
     fill_with_current_acceleration(t, car)
-    pdt("fi ratio", t, 2)
+    pdt("fi ratio", t, 17)
 
-    # Braking across the lane. The velocity turns over between the third
-    # step and the fourth, so the third point doubles back on the leg
-    # before it -- and the integrator's AddPointToTarget is the checked
-    # one, so that point is refused before the turn-back test returns.
+    # Braking across the lane. The forward velocity turns over at the
+    # fourteenth step, but the constant sideways drift keeps every leg
+    # within a right angle of the one before, so AddPointToTarget
+    # takes each point. It is the dot against the car's own velocity,
+    # re-read every pass, that ends the walk a step later, with the
+    # fifteenth point in.
     timer(606)
     dt_straight(t)
-    car_set(car, 0.0, 0.0, 2.5, 0.25, -10.0, 0.0, 0, 2.5, 2.5125)
+    car_set(car, 0.0, 0.0, 2.5, 0.25, -1.8, 0.0, 0, 2.5, 2.5125)
     fill_with_current_acceleration(t, car)
-    pdt("fi turnback", t, 4)
+    pdt("fi turnback", t, 16)
 
-    # Nine steps of a car at 20 m/s gaining 20 m/s^2 cover 27 m exactly,
-    # and a VelocityMagnitude of 13.5 makes the look-ahead 27 m exactly
-    # too. The distance test is strict, so the ninth point is the last.
+    # Nine steps of a car at 20 m/s gaining 10 m/s^2 cover 22.5 m
+    # exactly, and a VelocityMagnitude of 11.25 makes the look-ahead
+    # 22.5 m exactly too. The distance test is strict, so the ninth
+    # point is the last.
     timer(607)
     dt_straight(t)
-    car_set(car, 0.0, 0.0, 20.0, 0.0, 20.0, 0.0, 0, 20.0, 13.5)
+    car_set(car, 0.0, 0.0, 20.0, 0.0, 10.0, 0.0, 0, 20.0, 11.25)
     fill_with_current_acceleration(t, car)
     pdt("fi look eq", t, 11)
+
+    # No speed and no acceleration. Nothing is past three quarters of
+    # nothing, so this integrates: every step lands on the car, the
+    # zero-length legs pass the strict doubling-back test, the dot is
+    # 0 and the distance never grows. The wall stops it at twenty.
+    timer(608)
+    dt_straight(t)
+    car_set(car, 5.0, 6.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0, 0.0)
+    fill_with_current_acceleration(t, car)
+    pdt("fi still", t, 20)
+
+    # Just past the bar: 6.01 against a speed of 8 is
+    # the straight line again.
+    timer(609)
+    dt_straight(t)
+    car_set(car, 0.0, 0.0, 8.0, 0.0, 6.01, 0.0, 0, 8.0, 8.0)
+    fill_with_current_acceleration(t, car)
+    pdt("fi ratio over", t, 2)
 
 
 def s_blend():
@@ -3406,12 +3440,17 @@ MUTATIONS += [
      "    drivetarget_clear(t, 0, 0.0f);" + NL
      + "    look = ai_calculate_look_ahead_distance(car);",
      "    look = ai_calculate_look_ahead_distance(car);"),
+    # The first is the bug the port shipped with, and this model agreed
+    # with it; see fill_with_current_acceleration.
     ("fi-dominates-flipped", DC,
-     "    if (!(dt_len2(vel.x, vel.y) * K_ACC_DOMINATES < dt_len2(acc.x, acc.y))) {",
-     "    if (dt_len2(vel.x, vel.y) * K_ACC_DOMINATES < dt_len2(acc.x, acc.y)) {"),
+     "    if (dt_len2(vel.x, vel.y) * K_ACC_DOMINATES < dt_len2(acc.x, acc.y)) {",
+     "    if (!(dt_len2(vel.x, vel.y) * K_ACC_DOMINATES < dt_len2(acc.x, acc.y))) {"),
+    ("fi-dominates-inclusive", DC,
+     "    if (dt_len2(vel.x, vel.y) * K_ACC_DOMINATES < dt_len2(acc.x, acc.y)) {",
+     "    if (dt_len2(vel.x, vel.y) * K_ACC_DOMINATES <= dt_len2(acc.x, acc.y)) {"),
     ("fi-dominates-scales-acc", DC,
-     "    if (!(dt_len2(vel.x, vel.y) * K_ACC_DOMINATES < dt_len2(acc.x, acc.y))) {",
-     "    if (!(dt_len2(vel.x, vel.y) < dt_len2(acc.x, acc.y) * K_ACC_DOMINATES)) {"),
+     "    if (dt_len2(vel.x, vel.y) * K_ACC_DOMINATES < dt_len2(acc.x, acc.y)) {",
+     "    if (dt_len2(vel.x, vel.y) < dt_len2(acc.x, acc.y) * K_ACC_DOMINATES) {"),
     ("fi-look-gate-inclusive", DC, "    if (!(0.0f < look)) return;",
      "    if (!(0.0f <= look)) return;"),
     ("fi-step-order-swapped", DC,
@@ -3674,14 +3713,6 @@ EQUIVALENT = {
         "max(VelocityMagnitude * AIDriverSecondsToLookAhead, "
         "AIDriverDefaultLookAhead), and the default in the image is 20.0f. "
         "No CarState drives that gate to zero.",
-    "fi-no-wall":
-        "The loop's closing twenty-point test is redundant with the one at "
-        "the top of AddPointToTarget, which refuses every store past the "
-        "twentieth point. Nothing else in the loop body touches the record "
-        "-- the integration, the distance accumulator and the turn-back dot "
-        "are all locals -- so the extra passes the mutant runs write "
-        "nothing, and the loop still leaves by the distance test or the "
-        "turn-back. The image checks twice; so does the port.",
 }
 
 

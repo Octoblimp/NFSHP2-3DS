@@ -388,13 +388,12 @@ extern const TerrainTypeInfo *gTerrainTypeInfoTable;
 
 // 0x0014f418, TopologyCoordinate::GetElevation. Returns the ground
 // height under `pos` and writes the surface's normal. The terrain
-// out-parameter is in the signature because the real function has one,
-// and which of Wheel's callers passes one is the difference between the
-// object's two ground queries: CheckTerrain runs `move a2,zero` and gets
-// nothing back, so the terrain it feeds to GetRoadNoise is whatever the
-// wheel was already carrying, while SetState(CarState *, ...) runs
-// `addiu a2,sp,192` and puts what comes back into both the wheel and the
-// CarState.
+// out-parameter is written whenever it is not NULL, and both of Wheel's
+// ground queries pass one: CheckTerrain forwards its own -- the wheel's
+// Terrain, through FindDrivingSurface -- so the terrain it then feeds to
+// GetRoadNoise is the one just reported, while SetState(CarState *, ...)
+// runs `addiu a2,sp,192` and puts what comes back into both the wheel and
+// the CarState.
 //
 // The mangled name ends `P8bVector3Pb`, so the real function takes a fifth
 // argument, a `bool *`. All four call sites in this object -- CheckTerrain
@@ -421,6 +420,13 @@ extern TerrainRoadNoiseFn     gTerrainRoadNoiseFn;
 // above ignores it.
 typedef void *(*WheelTopologyOfCarStateFn)(void *carState);
 extern WheelTopologyOfCarStateFn gWheelTopologyOfCarStateFn;
+
+// 0x0019b2d0, MaybeMakeSkids(float). Unlike MaybeMakeSmoke it still has a
+// body -- MakeSkid and MakeNoSkid on the SkidMaker at +384 -- and the skid
+// trail is task 27's, so wheel_maybe_make_skids hands the wheel and the
+// time step to this. NULL makes no skids.
+typedef void (*WheelMaybeMakeSkidsFn)(Wheel *w, float dt);
+extern WheelMaybeMakeSkidsFn gWheelMaybeMakeSkidsFn;
 
 // --------------------------------------------- what the replay wants
 //
@@ -528,6 +534,10 @@ bVector3 *wheel_get_horizontal_ground_force_car(Wheel *w, bVector3 *out);
 // 0x0019b2c8 and 0x0019b548, both empty in the shipped image.
 void wheel_maybe_make_smoke(Wheel *w, float v);
 void wheel_maybe_make_tire_spew(Wheel *w, float v);
+
+// 0x0019b2d0. Through gWheelMaybeMakeSkidsFn, above. PhysicsCar::Move
+// calls it for each wheel once a frame when the car's visual effects are on.
+void wheel_maybe_make_skids(Wheel *w, float dt);
 
 // 0x0019b230. A free function in this object file, not bVector.obj's:
 // out = M-transpose * v, the rotate-into-local-frame of a 3x3.

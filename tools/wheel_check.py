@@ -22,13 +22,16 @@ what comes back straight into its GroundForce, so that field is zero on
 every frame of the shipped game. The `ex` scenario prints the return
 alongside the ZForce it computed, so the two cannot be confused.
 
-**CheckTerrain does not ask for a terrain type.** `move a2,zero` at
-0x0019a300 hands GetElevation a NULL out-parameter, and `lw a1,0(s4)` three
-instructions later reads the type the wheel was already carrying to feed
-GetRoadNoise. Nothing in the function writes Terrain except the
-surface-facing-away arm, which clears it. The harness's stand-in writes 77
-through any out-parameter it is given, so a port that passed one would show
-a terrain of 77 rather than nothing at all.
+**CheckTerrain forwards its terrain out-parameter.** a2 arrives holding
+it and nothing before the `jal` touches it; the `move t0,zero` at
+0x0019a300 is the fifth argument, GetElevation's `bool *`, which is register
+8, not 6. GetElevation writes through a non-NULL pointer (0x0014f714), so
+the `lw a1,0(s4)` after the call feeds GetRoadNoise the terrain just
+reported. An earlier pass read that `move` as `a2` and ported a NULL, and
+the model agreed with it; a re-read of the raw word (rd = 8) caught it. The
+harness's
+stand-in writes 77 through the pointer, so a port that dropped it would show
+the stale terrain instead.
 
 **The slip angle folds twice and both folds use the object's own pi.** The
 pool holds 0x40490fd0, which is 3.14159012 -- one ulp below the pi in
@@ -670,8 +673,9 @@ def check_terrain(w, pos, r):
         SEAM.topology_hit = True
         SEAM.calls += 1
         SEAM.pos = (pos[0], pos[1], pos[2])
-        SEAM.terrain_out_null = True     # `move a2,zero`
+        SEAM.terrain_out_null = False    # a2 is the caller's, untouched
         w.ContactNormal = SEAM.normal
+        w.Terrain = 77                   # the stand-in's write
         elev = SEAM.ret
         SEAM.noise_calls += 1
         SEAM.noise_xy = (pos[0], pos[1])
@@ -775,7 +779,7 @@ def get_lateral_force(w, zforce, slip):
                     fmul(w.ZForce, f32(G_ZFORCE_SCALE)))
 
     load = fdiv(fmul(zforce, f32(G_LOAD_FACTOR)), w.TI.MaxLoad)
-    scale = fdiv(f32(11.0), w.TI.MaxSlipAngle)
+    scale = fdiv(f32(12.0), w.TI.MaxSlipAngle)     # lui at,0x4140
     index = fmul(fmul(fmul(slip, f32(K_RAD_TO_DEG)), scale), f32(0.5))
     i = int(index)                       # cvt.w.s, toward zero
     frac = fsub(index, f32(float(i)))
@@ -1118,8 +1122,8 @@ def set_state_from_car_state(w, cs, angle, angvel, steer, susp):
                   fadd(c[2], cs.Velocity[2]),
                   fadd(c[3], cs.Velocity[3]))
 
-    # `addiu a2,sp,192` -- a real out-parameter, unlike the `move a2,zero`
-    # in CheckTerrain. The topology comes straight out of the CarState.
+    # `addiu a2,sp,192` -- a stack slot, where CheckTerrain forwards the
+    # wheel's own field. The topology comes straight out of the CarState.
     pos = (world[12], world[13], world[14], world[15])
     terrain = 0
     if SEAM.on:
@@ -2474,10 +2478,9 @@ MUTATIONS = [
      "        cross3(&t, &w->WorldMatrix.v0, &w->ContactNormal);"),
 
     # -- CheckTerrain -------------------------------------------------------
-    ("wh-terrain-out-passed", WC,
-     "        elev = gTopologyGetElevationFn(topo, pos, NULL, normalOut);",
-     "        elev = gTopologyGetElevationFn(topo, pos, terrainOut,"
-     + NL + "                                       normalOut);"),
+    ("wh-terrain-out-null", WC,
+     "        elev = gTopologyGetElevationFn(topo, pos, terrainOut, normalOut);",
+     "        elev = gTopologyGetElevationFn(topo, pos, NULL, normalOut);"),
     ("wh-noise-not-stored", WC,
      "    w->RoadNoise = noise;",
      "    w->RoadNoise = 0.0f;"),
@@ -2577,8 +2580,13 @@ MUTATIONS = [
      "        float index = ((slipAngle * WHEEL_RAD_TO_DEG) * scale) * 0.5f;",
      "        float index = (slipAngle * WHEEL_RAD_TO_DEG) * scale;"),
     ("wh-lateral-scale-is-six", WC,
-     "        float scale = 11.0f / ti->MaxSlipAngle;",
+     "        float scale = 12.0f / ti->MaxSlipAngle;",
      "        float scale = 6.0f / ti->MaxSlipAngle;"),
+    # The port had this, and so did the model above it, until
+    # physicscar_check ran the shipped GetLateralForce.
+    ("wh-lateral-scale-is-eleven", WC,
+     "        float scale = 12.0f / ti->MaxSlipAngle;",
+     "        float scale = 11.0f / ti->MaxSlipAngle;"),
     ("wh-lateral-load-not-scaled", WC,
      "        float load  = (zforce * gLoadFactor) / ti->MaxLoad;",
      "        float load  = zforce / ti->MaxLoad;"),

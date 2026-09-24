@@ -30,6 +30,7 @@
 
 #include "bvector.h"
 #include "drivetarget.h"
+#include "joystick.h"
 
 // type#2869 in the debug info, stored as a 32-bit word. The ranges come
 // from the gearbox, which is not ported yet, so no names are invented
@@ -81,39 +82,52 @@ typedef char cardriver_layout_check[
 #define CARDRIVER_VTABLE  0x002924a8u
 #define NULLDRIVER_VTABLE 0x00292400u
 
+#define CARDRIVER_VT_DTOR              8
 #define CARDRIVER_VT_DRIVE            16
+#define CARDRIVER_VT_DO_SNAPSHOT      24
+#define CARDRIVER_VT_ADD_JOY_HANDLERS 32
+#define CARDRIVER_VT_REMOVE_JOY_HANDLERS 40
+#define CARDRIVER_VT_SET_LOW_GEAR     48
+#define CARDRIVER_VT_SET_DESIRED_SPEED 56
+#define CARDRIVER_VT_SET_TARGET       64
+#define CARDRIVER_VT_GET_DRIVER_NUMBER 80
 #define CARDRIVER_VT_START_HONK_HORN  88
 #define CARDRIVER_VT_STOP_HONK_HORN   96
 #define CARDRIVER_VT_IS_HONKING      104
 
+// Twenty-one entries in each table, the empty header included.
+#define CARDRIVER_VT_ENTRIES 21
+
 // 0x00134e40. Writes the vtable, runs the DriveTarget constructor, clears
-// the inputs and sets DesiredGear to 1.
+// the inputs, sets DesiredGear to 1 and Clears the target again.
 //
-// Two details the listing gives away and a re-implementation would not:
+// Three details the listing gives away and a re-implementation would not:
 //
 //  * **SportGear is never initialised.** The DriveTarget constructor
 //    memsets 528 bytes, which stops exactly at Steering, and the run of
 //    stores that follows covers Throttle, Brake, EBrake, NitroFlag and
 //    DesiredGear but not byte 548. A fresh CarDriver inherits whatever
 //    was in the allocation.
-//  * **DesiredGear = 1 is written in a delay slot**, after the call that
-//    uses the register, which is why it is easy to miss.
+//  * **DesiredGear = 1 is written in a delay slot**, the one under the
+//    `jal` to Clear, so it lands before Clear runs. Clear never reads it.
+//  * **The target is Cleared twice**: once inside its own constructor,
+//    with (NULL, 0.0f), and once here with (NULL, Throttle) -- Throttle
+//    reloaded after its own store, so 0.0f again. On a target the
+//    constructor has just emptied, both take Clear's NumPoints == 0 exit
+//    and zero Length and the two time stamps.
 //
-// DriveTarget's own constructor is not ported -- it calls Clear, which
-// reaches into Car -- so this does the part of it that is observable
-// from here and nothing more: `bMemSet(this, 0, 528)`, which is the
-// first thing that constructor does and the only part CarDriver's own
-// stores depend on. The Clear that follows it in the image is left to
-// the DriveTarget slice, and `cardriver_init` says so rather than
-// pretending the object is fully built.
+// Car's constructor and Car::SetControlMode's NullController arm inline
+// this whole sequence, store for store.
 void cardriver_init(CarDriver *d);
 
-// 0x00134de0. Rewrites the same vtable pointer, then runs the DriveTarget
-// destructor -- which is `if (flags & 1) operator delete(this)` and
-// nothing else -- and then applies its own flags the same way. The port
-// does the vtable write and leaves the freeing to the caller, since
-// nothing here owns memory.
+// 0x00134de0, with flags 0 or 2: the vtable pointer rewritten, then the
+// DriveTarget destructor with flags 2, which is `if (flags & 1) operator
+// delete(this)` and so nothing.
 void cardriver_fini(CarDriver *d);
+
+// 0x00134de0, all of it: cardriver_fini, then `__builtin_delete` if bit 0
+// of `flags`. What a table's destructor slot calls.
+void cardriver_destroy(CarDriver *d, int32_t flags);
 
 // 0x00134d50. `j __as__11DriveTargetR11DriveTarget` -- a tail call, with
 // a0 still the CarDriver. That works because MyDriveTarget is at offset
@@ -174,5 +188,38 @@ void      cardriver_remove_joy_handlers(CarDriver *d);         // 0x00134dc8
 // CarDriver::DoSnapshot (0x0012f150) is **not** ported: it needs
 // ReplaySnapshot, the same dependency that stopped CarState::DoSnapshot
 // and Engine::DoSnapshot.
+
+// ------------------------------------------------------------ NullDriver
+
+// 560 bytes, type#3148: CarDriver and nothing more. The driver a
+// NullController carries. Its own entries are the four CarDriver leaves
+// pure, SetTarget -- which drops the target CarDriver's would copy -- and
+// its destructor.
+typedef struct NullDriver {
+    CarDriver Base;        // 0
+} NullDriver;              // 560
+
+// 0x00134cc8. NullDriver's vptr, then `j ~CarDriver` with the caller's
+// flags -- which puts CarDriver's back, and frees on bit 0.
+void nulldriver_destroy(NullDriver *d, int32_t flags);
+
+// Each is `jr ra` with a nop, but GetDriverNumber, which is
+// `lui v0,0xfffe ; ori v0,v0,0x7961`: -99999.
+void    nulldriver_drive(NullDriver *d, float dt);                 // 0x00134cc0
+void    nulldriver_set_low_gear(NullDriver *d);                    // 0x00134c98
+void    nulldriver_set_desired_speed(NullDriver *d, float speed,
+                                     float time, int32_t flag);    // 0x00134cb8
+void    nulldriver_set_target(NullDriver *d, DriveTarget *t);      // 0x00134cb0
+int32_t nulldriver_get_driver_number(NullDriver *d);               // 0x00134ca0
+
+#define NULLDRIVER_DRIVER_NUMBER (-99999)
+
+// Installs _vt$9CarDriver (0x002924a8) and _vt$10NullDriver (0x00292400).
+// CarDriver's five pure entries are NULL, and so is DoSnapshot in both,
+// which vt_slot aborts on until ReplaySnapshot is ported. The game calls
+// it once at boot; a harness calls it after vt_reset().
+void cardriver_install_vtables(void);
+
+// RealDriver, the human's driver, is realdriver.h.
 
 #endif

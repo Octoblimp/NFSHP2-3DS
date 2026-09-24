@@ -327,7 +327,11 @@ degenerate case, and it still writes `(1, 0)` -- not `(len, 0)`. Quirk, keep.
 computes `x*x + y*y + z*z` on VU0 (`vmul.xyz`, `vaddy.x`, `vaddz.x`, then
 `qmfc2` the x lane back), so the summation order is `(x*x + y*y) + z*z`. Unlike
 the 2D pair it takes the reciprocal once and multiplies. Degenerate case writes
-**`(len, 0, 0)`** -- different again from the 2D versions.
+**`(len, 0, 0)`** -- different again from the 2D versions. The first divide
+(`0x00240274`, `sqrt(n) / len`) is 0/0 when both the vector and `len` are zero,
+which MellowMover's JumpStabilizer asks for on a level car. The EE answers
+`FLT_MAX`, so the degenerate case is not taken and the zero vector is scaled to
+zero; IEEE would answer NaN. The port divides with `ee_div` (`eefpu.h`).
 
 **`bScaleAdd(bVector2* o, const bVector2* a, const bVector2* b, float s)`**
 `0x002402d0` -- `o = a + b*s`.

@@ -61,3 +61,17 @@ const VtEntry *vt_slot(uint32_t image, int slot)
             slot, (unsigned long)image);
     abort();
 }
+
+const VtEntry *vt_table(uint32_t image, int *count)
+{
+    int i;
+
+    for (i = 0; i < vt_count; i++) {
+        if (vt_tables[i].image == image) {
+            *count = vt_tables[i].count;
+            return vt_tables[i].entries;
+        }
+    }
+    *count = 0;
+    return NULL;
+}

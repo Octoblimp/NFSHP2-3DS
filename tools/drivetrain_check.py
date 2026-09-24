@@ -24,7 +24,7 @@ duplicate a model that already has its own transcript. Wheel and CarState
 are local stand-ins, because DriveTrain only ever touches nine fields of
 the four-hundred-byte Wheel and three of CarState.
 
-Seven things the transcript exists to pin down.
+Eight things the transcript exists to pin down.
 
 **Two of the three differential queries halve, and they disagree about
 when.** GetDifferentialAngularVelocity and
@@ -61,6 +61,16 @@ prints all four AppliedTorques for both burnout values.
 return is before the subtraction, so a torque applied in neutral vanishes
 instead of braking the engine. The `ac` scenario applies one and prints
 RoadTorque either side.
+
+**A driven pair standing still divides zero by zero.** The share is
+w / (w + w'), and two stopped rims make it 0/0 on every frame a car sits in
+gear. IEEE says NaN, and the NaN would go on into AppliedTorque and from
+there everywhere; the R5900 says FLT_MAX, signed by the XOR of the signs,
+which the clamp turns into the small share. The port divides with eefpu.h's
+ee_div there, and this model with its own `ee_div`. The `ac still` scenario
+runs both zeros, both mixed-sign zeros and a pair spinning opposite ways --
+whose divide by an exact zero IEEE would answer with an infinity that
+clamps the same, so only the zeros tell the two apart.
 
 **Nineteen instructions of SetDesiredGear are unreachable.** The arm at
 0x00183b94 needs DesiredGear and SportGear to be neither equal nor
@@ -119,6 +129,18 @@ SLACK = PTR - 4
 f32 = BV.f32
 fmul, fadd, fsub, fdiv, fneg = BV.fmul, BV.fadd, BV.fsub, BV.fdiv, BV.fneg
 fabs32 = BV.fabs32
+
+
+def ee_div(a, b):
+    """`div.s` as the R5900 has it for a zero or denormal divisor: FLT_MAX
+    signed by the XOR of the operands' signs, whatever the dividend. eefpu.h's
+    ee_div; mipsemu's `eediv`."""
+    ab = struct.unpack("<I", struct.pack("<f", a))[0]
+    bb = struct.unpack("<I", struct.pack("<f", b))[0]
+    if not bb & 0x7F800000:
+        r = ((ab ^ bb) & 0x80000000) | 0x7F7FFFFF
+        return struct.unpack("<f", struct.pack("<I", r))[0]
+    return fdiv(a, b)
 
 ZERO = f32(0.0)
 ONE = f32(1.0)
@@ -607,7 +629,7 @@ def split_torque(d, torque, first, second, name_first):
     elif d.pCarState["BurnOutState"] == 2:
         share = threshold
     else:
-        share = fdiv(named.w, fadd(named.w, other.w))
+        share = ee_div(named.w, fadd(named.w, other.w))
 
         if share < threshold:
             share = fsub(ONE, fmul(G["LimitedSlip"], HALF))
@@ -1344,7 +1366,7 @@ def s_apply_clutch_torque():
         # The front pair is spun too even though this is a rear-drive car:
         # ApplyClutchTorque splits *both* pairs whatever TorqueSplit says,
         # so two stationary front rims would divide zero by zero. That is
-        # the image's behaviour and not this scenario's subject.
+        # `ac still`'s subject, not this one's.
         for i in range(4):
             wheels[i].w = f32(SPINS[i])
         wheels[2].w = f32(num)
@@ -1428,6 +1450,25 @@ def s_apply_clutch_torque():
     emit("ac tightslip w2 %s w3 %s"
          % (g9(wheels[2].AppliedTorque), g9(wheels[3].AppliedTorque)))
     reset_globals()
+
+    # A pair standing still. +0 + -0 is +0, so the mixed pairs differ only
+    # in the numerator's sign: -0 over +0 is -FLT_MAX and hands the named
+    # wheel the large share. The last two are an exact zero sum from
+    # nonzero spins. The rear-drive rig runs with its front pair stopped,
+    # the case the game hits on the grid.
+    for w2, w3 in ((0.0, 0.0), (-0.0, -0.0), (0.0, -0.0), (-0.0, 0.0),
+                   (5.0, -5.0), (-5.0, 5.0)):
+        d, e, wheels, cs, dti, ei = make_rig(1.0)
+        wheels[2].w = f32(w2)
+        wheels[3].w = f32(w3)
+        for w in wheels:
+            w.TouchingGround = 1
+        d.CurrentGear = THIRD_GEAR
+        apply_clutch_torque(d, f32(400.0))
+        emit("ac still %s %s -> %s %s %s %s"
+             % (g9(f32(w2)), g9(f32(w3)), g9(wheels[0].AppliedTorque),
+                g9(wheels[1].AppliedTorque), g9(wheels[2].AppliedTorque),
+                g9(wheels[3].AppliedTorque)))
 
 
 def s_guess_clutch_torque():
@@ -2408,6 +2449,9 @@ MUTATIONS = [
     ("ac-clamp-to-threshold", DC,
      "            share = 1.0f - gLimitedSlip * 0.5f;",
      "            share = 1.0f - gLimitedSlip;"),
+    ("ac-share-ieee-divide", DC,
+     "        share = ee_div(named->State.w, named->State.w + other->State.w);",
+     "        share = named->State.w / (named->State.w + other->State.w);"),
     ("ac-clamps-independent", DC,
      "        else if (1.0f - threshold < share)",
      "        if (1.0f - threshold < share)"),

@@ -61,8 +61,10 @@
 
 // GetSize (0x00193fb8) is `addiu v0,zero,32`: the integrator is told the
 // state is 32 floats, which is sizeof(RigidBodyState). GetState/SetState
-// only move 29 of them -- the last three are the tail padding after
-// MotionDampingFactor and are never written or read.
+// and GetDerivative only move 29 of them -- the last three are the tail
+// padding after MotionDampingFactor and nothing reads them. One thing
+// writes them: PhysicsSystem::IntegrateEuler advances all 32 words through
+// the pointer GetState() returns (see physicssystem.c).
 #define RIGIDBODY_STATE_FLOATS 32
 #define RIGIDBODY_STATE_USED   29
 
@@ -349,7 +351,8 @@ float rigidbody_get_moment_of_inertia_about_z(const RigidBody *rb);
 // RigidBody::operator new (0x00193f00) and operator delete (0x00193ef0)
 // are bOMalloc/bFree on the slot pool at gp-23408, and new ignores its
 // size argument for the same reason CarTypeInfo's and
-// TwoWheelAckermanSteering's do. Not ported.
+// TwoWheelAckermanSteering's do. Both are physcomp.h's rigidbody_new and
+// rigidbody_delete, beside the destructor and `_vt$9RigidBody`.
 //
 // RigidBody::DoSnapshot (0x00192d60) is not ported: ReplaySnapshot again.
 

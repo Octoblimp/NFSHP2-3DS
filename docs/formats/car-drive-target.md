@@ -453,6 +453,33 @@ the pointer has just had 1064 added to it, and is kept because it is there.
 
 **The `STACK-W` sites write 0.0f**, as above.
 
+## FillWithCurrentAcceleration trusts a small acceleration, not a large one
+
+    0020a074  mul.s  $f0,$f0,$f1        |Velocity| * 0.75
+    0020a078  c.lt.s $f0,$f2            < |Acceleration| ?
+    0020a080  bc1f   0x0020a098         no: integrate
+    0020a088  jal    StraightLinePredict
+
+The integration runs only while the acceleration stays at or under three
+quarters of the speed. Past that, the target is one straight-line point.
+The test is strict, so exactly three quarters integrates. A car with no
+speed and no acceleration integrates too: every step lands on the car, the
+zero-length legs pass AddPointToTarget's strict doubling-back test, and the
+twenty-point wall is what stops the loop.
+
+**The port and this checker's model both had the test negated**, and they
+agreed. `realcontroller_check.py` found it: it runs the image in mipsemu,
+and a ComboPredict that fell through with no acceleration gave fifteen
+points in the image and one in the port. Every `fi` fixture has been
+re-derived so that it reaches the branch its comment names. `fi still` and
+`fi ratio over` are new. With `fi still` in the transcript, the loop's own
+twenty-point test is no longer redundant, so `fi-no-wall` is caught and its
+equivalence argument is gone. Beneath the controller, `realcontroller_check`
+now runs the image's Clear, AddPointToTarget, StraightLinePredict, and both
+the Fill and the Blend. The rest of DriveTarget is still checked against a
+model alone: Resample, EstimateScore, GetFirstPoint, InterpolatePoint, the
+shifts and the copies.
+
 ## Cross-check
 
 `tools/drivetarget_check.py` models the class from the disassembly at
@@ -470,7 +497,7 @@ stand-ins, because DriveTarget touches five fields of one and two of the
 other.
 
 ```
-drivetarget_check   22 scenarios, 821 lines, 0 differ
+drivetarget_check   22 scenarios, 894 lines, 0 differ
 ```
 
 ### Fixtures are spelled, not computed
@@ -484,14 +511,18 @@ about them.
 ### What the mutation pass moved
 
 ```
-python tools/drivetarget_check.py --mutate   # 259 mutations, 239 caught,
-                                             # 20 equivalent, 0 unexplained
+python tools/drivetarget_check.py --mutate   # 260 mutations, 241 caught,
+                                             # 19 equivalent, 0 unexplained
 ```
+
+The tally since the Fill fix comes from two runs. The first stopped after
+twelve mutants on a `BuildEnvironmentError`. The other 248 then ran with
+the build retried on that error and the finished twelve skipped.
 
 The first full pass left **72 survivors** on a transcript that already
 agreed with the model on every one of its 660 lines. That is the whole
 reason to run the pass: a clean diff says the two sides compute the same
-thing, not that the scenarios ever reach the code. The transcript is 821
+thing, not that the scenarios ever reach the code. The transcript is 894
 lines now.
 
 **Boundaries nothing sat on.** Most of the survivors were a `<` turned into
@@ -557,7 +588,7 @@ first point to 6 m fixed it. The lesson is the repo's own rule read back at
 it: **a model used to design a fixture has to be initialised the same way
 the transcript initialises it.**
 
-#### The twenty that survive
+#### The nineteen that survive
 
 Each one is argued in the checker's `EQUIVALENT` dict rather than left as a
 number in the tally, and the import asserts that every name there is a

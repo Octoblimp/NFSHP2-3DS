@@ -1105,9 +1105,12 @@ void drivetarget_fill_with_current_acceleration(DriveTarget *t, Car *car)
     acc.x = car->State.Acceleration.x;
     acc.y = car->State.Acceleration.y;
 
-    // Below three quarters of the speed, the acceleration is not worth
-    // integrating and a straight line will do.
-    if (!(dt_len2(vel.x, vel.y) * K_ACC_DOMINATES < dt_len2(acc.x, acc.y))) {
+    // An acceleration past three quarters of the speed is not trusted to
+    // integrate, and a straight line along the velocity is used instead.
+    // `c.lt.s` then `bc1f` past the StraightLinePredict call: the strict
+    // test, so exactly three quarters integrates. A car with no speed and
+    // no acceleration integrates too, and the twenty-point wall stops it.
+    if (dt_len2(vel.x, vel.y) * K_ACC_DOMINATES < dt_len2(acc.x, acc.y)) {
         ai_straight_line_predict(car, t);
         return;
     }

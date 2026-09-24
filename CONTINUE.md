@@ -1,7 +1,7 @@
 # CONTINUE
 
-Where the next session picks up. Written at the end of Session 25
-(2026-09-22). `HANDOFF.md` is the running narrative; this file is the short
+Where the next session picks up. Updated in Session 29's
+continuation (2026-09-23). `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -16,15 +16,15 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Twenty-seven cross-checkers pass, plus the table generators:
+Forty-one cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/sinit_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check
 ```
 
 ```
 bvector_check      27 scenarios,  5721 lines, 0 differ   (23/23 mutations caught)
-bmath_check        19 scenarios,  6391 lines, 0 differ   (9/9 mutations caught)
+bmath_check        19 scenarios,  6424 lines, 0 differ   (9/9 mutations caught)
 banim_check        23 scenarios,  2219 lines, 0 differ
 bscreens_check     17 scenarios,  1246 lines, 0 differ
 bootflow_check     12 scenarios,  3659 lines, 0 differ
@@ -38,20 +38,35 @@ emath_check         9 scenarios,  2416 lines, 0 differ   (39/39 mutations caught
 camera_check        7 scenarios,  1200 lines, 0 differ   (40 caught, 7 equivalent)
 trackroute_check   10 scenarios,   671 lines, 0 differ   (52 caught, 1 equivalent)
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
-engine_check        8 scenarios,   413 lines, 0 differ   (54 caught, 2 equivalent)
+engine_check        8 scenarios,   414 lines, 0 differ   (56 caught, 2 equivalent)
 cartypeinfo_check   4 scenarios,   177 lines, 0 differ   (40/40 mutations caught)
-cardriver_check     5 scenarios,   118 lines, 0 differ   (45/45 mutations caught)
+cardriver_check     5 scenarios,   118 lines, 0 differ   (45 caught, 1 equivalent)
 steering_check      5 scenarios,   873 lines, 0 differ   (43 caught, 1 equivalent)
 rigidbody_check    10 scenarios,   935 lines, 0 differ   (76 caught, 2 equivalent)
 suspension_check   10 scenarios,  1108 lines, 0 differ   (66 caught, 2 equivalent)
 wheel_check        19 scenarios, 10693 lines, 0 differ   (144 caught, 10 equivalent)
-drivetrain_check   18 scenarios,   492 lines, 0 differ   (173 caught, 3 equivalent)
-drivetarget_check  22 scenarios,   821 lines, 0 differ   (239 caught, 20 equivalent)
+drivetrain_check   18 scenarios,   498 lines, 0 differ   (173 caught, 3 equivalent)
+drivetarget_check  22 scenarios,   894 lines, 0 differ   (241 caught, 19 equivalent)
 graph_check        16 scenarios,   151 lines, 0 differ   (21 caught, 4 equivalent)
 car_check          58 scenarios,  4238 lines, 0 differ   (238 caught, 16 equivalent)
-sinit_check         5 calls,        0 problems           (6/6 mutations caught)
+physicssystem_check 12 scenarios,  739 lines, 0 differ   (61 caught, 1 equivalent)
+aerodynamics_check  7 scenarios,   107 lines, 0 differ   (74/74 mutations caught)
+physcomp_check      8 scenarios,   239 lines, 0 differ   (46 caught, 1 equivalent)
+sinit_check        10 calls,        0 problems           (6/6 mutations caught)
+physicscar_check  106 scenarios, 102908 lines, 0 differ (257 caught, 6 equivalent)
+mellowmover_check  39 scenarios, 56080 lines, 0 differ  (341 caught, 5 equivalent)
+carmode_check      74 transitions, 27324 lines, 0 differ (114/114 mutations caught)
+joystick_check     64240 ops,    75891 lines, 0 differ  (250 caught, 3 equivalent)
+joyhid_check       every key and stick reaches its event
+realdriver_check  152455 ops,    41163 lines, 0 differ  (118 caught, 4 equivalent)
+quickspline_check   6640 ops,     6898 lines, 0 differ  (133/133 mutations caught)
+trackpath_check     4771 ops,     4707 lines, 0 differ  (185 caught, 3 equivalent)
+average_check        482 ops,      843 lines, 0 differ  (64/64 mutations caught)
+airoute_check      14738 ops,     7224 lines, 0 differ  (86 caught, 5 equivalent)
+realcontroller_check 14096 ops,  25318 lines, 0 differ  (129 caught, 11 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
+gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
 ```
 
 `texpack_check.py` takes a file and is run per pack; it now also diffs the UV
@@ -80,7 +95,7 @@ three of them are uncatchable because the disc's velocity record is
 structurally zero. See `docs/formats/camera.md`. `trackroute_check.py
 --mutate` reads the same way and takes about four minutes.
 
-Open tasks: **7** (25-31). All four the user asked for mid-session are
+Open tasks: **6** (26-31). All four the user asked for mid-session are
 done and looked at on Azahar: 32 (stretch the frontend to the 3DS's 5:3 top
 screen), 33 (the ten unregistered screen names), 34 (the menu description on
 the bottom screen, wrapped) and 35 (no console sharing that screen).
@@ -91,29 +106,68 @@ and so replaced every boot.
 
 ## Next, in order
 
-1. **Task 25**, the car simulation -- part done, and **much bigger than
-   the task list said**. Thirteen slices are closed: `CarState`, `Engine`
+1. **Task 26's second slice is closed: `TrackedController` and
+   `RealController`**, which is what builds a RealDriver, with
+   `DriveTargetRenderer`'s flag-off path. `gRealControllerCtorFn` is set at
+   boot and `REALCONTROLLER_SIZE` is `sizeof`. See
+   `docs/formats/real-controller.md`. `realcontroller_check` runs the
+   image in mipsemu as the oracle: 14,096 ops, 25,318 lines, 0 differ,
+   and 129 of 140 mutations caught with 11 equivalent.
+   The first slice (Session 29) was `Joystick.obj`, the generated
+   `ScannerConfigTable`, the 3DS HID backend and `RealDriver`; the
+   prerequisites were `QuickSpline.obj`, `TrackPath`'s manager and
+   coordinate, `Average` and the AI's four route helpers.
+
+   - **The image check found a DriveTarget bug that its own checker had
+     passed.** FillWithCurrentAcceleration integrates while the
+     acceleration is *under* three quarters of the speed, and falls back to
+     a straight line past it. The port and `drivetarget_check.py`'s model
+     both had it the other way round, so they agreed with each other. Both
+     are fixed, and the `fi` fixtures were re-derived. See "What not to
+     trust" and `car-drive-target.md`.
+   - **A predicted point's pad is garbage on the console**:
+     `GetPosition(bVector3)` stores a VU0 lane it never set. It is not
+     compared (STACK-W).
+   - Think's wrong-way test is `pPlayer->bWrongWay` (Car+24, then
+     Player+736). An earlier note here said pRideInfo; that was wrong.
+   - Then the rest of task 26: the other seven classes behind Car's
+     constructor seams (`carmodes.h`), Player, the race and cop AI, the
+     pursuit, and Car's reset and damage methods listed in TASKS.md.
+   - The menus still take their input from `kBinds` in `main.c`. It moves
+     onto the joystick path when the frontend's
+     `AddNormalMenuJoyHandlers` is ported with the screens that use it.
+
+   **Task 25**, the car simulation -- **closed**; the notes below are
+   kept for what they teach. It was **much bigger than the task list
+   said**. Nineteen slices are closed: `CarState`, `Engine`
    + `Table`, `CarTypeInfo`, `CarDriver` + `DriveTarget`'s layout,
    `Steering` + `TwoWheelAckermanSteering`, `RigidBody`, `Suspension`,
-   `Wheel`, `DriveTrain`, `DriveTarget`'s methods, `Graph`, and **`Car`'s
-   record plus three code slices**, each with a checker and a doc under
-   `docs/formats/car-*.md` (`RigidBody`'s is `rigid-body.md`, `Car`'s is
-   `car.md`).
+   `Wheel`, `DriveTrain`, `DriveTarget`'s methods, `Graph`, **`Car`'s
+   record plus three code slices**, `PhysicsSystem` and `Aerodynamics`,
+   the component vtables, **`PhysicsCar`**, and **`MellowMover` with its
+   `Mellovator`**. Each has a checker and a doc under `docs/formats/`.
+   Most are `car-*.md`; `RigidBody`'s is `rigid-body.md`, `Car`'s is
+   `car.md`, and the rest are `physics-system.md`, `aerodynamics.md`,
+   `physics-components.md`, `physics-car.md` and `mellow-mover.md`.
 
    The old "178 functions, 16680 bytes" note was wrong by an order of
    magnitude -- it matched a narrow symbol pattern and missed most
    methods. Remeasured by demangling every symbol to its owning class,
-   task 25 was ~39.9 KB across 140 functions. Thirty-nine Car methods
-   are ported, so **35.4 KB across 101 functions** is still to go:
+   task 25 was ~39.9 KB across 140 functions. Thirty-nine Car methods,
+   `PhysicsCar`, the `Mellovator` and `MellowMover` are ported, so
+   **18.8 KB across 41 functions** is still to go, all of it `Car`'s:
 
    ```
-   Car 41 funcs 19256 B   PhysicsCar 16 / 8496
-   Mellovator 31 / 5420   MellowMover 13 / 3096
+   Car 41 funcs 19256 B   (done: PhysicsCar 16 / 8496,
+                           Mellovator 31 / 5420, MellowMover 13 / 3096)
    ```
 
-   plus `PhysicsSystem` (`0x00192460`, ~1.2 KB) and `Aerodynamics`
+   Three `DoSnapshot`s are counted as done but are not: PhysicsCar's,
+   MellowMover's and the Mellovator's wait on `ReplaySnapshot`.
+
+   `PhysicsSystem` (`0x00192460`, ~1.2 KB) and `Aerodynamics`
    (`0x001a4b58`, ~0.65 KB), which `PhysicsCar`'s constructor needs and
-   the count never had.
+   the count never had, are ported now -- see below.
 
    The thirty-nine are 3620 B of the 22876 -- the cheap ones went
    first, and the expensive half of Car is the constructor, the reset
@@ -147,24 +201,108 @@ and so replaced every boot.
      through `dot / dist` rounding above 1, which no single-axis fixture
      can produce.
 
-   **Next: `PhysicsSystem` and `Aerodynamics`, then `PhysicsCar`.**
-   None of the other thirty-seven Car methods calls only ported code.
-   `PhysicsCar`'s constructor (`0x00135240`) builds a RigidBody, a
-   `TwoWheelAckermanSteering`, four Wheels and four Suspensions, an
-   Engine, a DriveTrain and an Aerodynamics, adds each to its
-   `PhysicsSystem`, and runs `Calibrate`, `InitializeStateFromCar` and
-   `ComputeAuxiliaries`. Its 116-byte record is `type#2835` in
-   `docs/mdebug_structs.txt`: `CarMover` at 0 and `PhysicsVehicle` at 8,
-   two vtables.
-   Then `SetMovementMode` / `SetControlMode`, which carry
-   `SetToPhysicsMode`, `SetFrictionBoost` and the
-   `wheel_install_seams()` call. `SetMovementMode` is a seven-way jump
-   table, and four of its arms construct task 26's movers.
+   **`PhysicsSystem` and `Aerodynamics` are closed**, with two pieces
+   the system needed: the EE ticker (`bticker.{c,h}`) that times
+   `ComputeAuxiliaries`, and `p32.{c,h}`, which lets a 32-bit link slot
+   hold a pointer on the 64-bit host, so the list walk the checker runs
+   is the code the handheld runs. `physicssystem_check`: 12 scenarios,
+   739 lines, 0 differ; 62 mutations, 61 caught, 1 equivalent -- and the
+   equivalent was checked over 723,967 inputs, not just argued.
+   `aerodynamics_check`: 7 scenarios, 107 lines, 0 differ; 74 mutations,
+   74 caught. What matters for `PhysicsCar`:
 
-   At this repo's verification standard that is several sessions, not
-   one. Next in order: the rest of `Car`, then `PhysicsCar`, with
-   `Mellovator` and `MellowMover` last. The prerequisites in front of them
-   are done.
+   - **IntegrateEuler is the only integrator the game runs.** RK4 is
+     ported and has no caller anywhere in the image.
+   - **A PhysicsSystem owns its components.** Its destructor destroys
+     every one with flags 3, so nothing else may free them.
+   - **The walk asks each component its size after the slot call**, and
+     reads the next link after it too. `Size` is only trusted by RK4.
+   - **Aerodynamics' downforce is linear in speed**, and its "direction"
+     is not a unit vector unless Boost is 1.
+   - **`ApplyForceInFrame` had no checker before this one.** It has now:
+     two `bMulMatrixVector`s, the first a `j` thunk, then `ApplyForce`.
+   - `SetGroundEffect` was missing from the port and is in it now.
+
+   **The component vtables are closed** -- `physcomp.{c,h}`: all seven
+   tables at the image's addresses, the eight destructors, every
+   operator new and delete, and `InitPhysics` / `ClosePhysics` with the
+   ten slot pools. `physcomp_check`: 8 scenarios, 239 lines, 0 differ;
+   47 mutations, 46 caught, 1 equivalent. `main.c` installs the tables
+   right after PhysicsSystem's. Read `docs/formats/physics-components.md`
+   first; what matters for `PhysicsCar`:
+
+   - **A new component is zeroed.** Every pool starts with flags 15, and
+     `bOMalloc` clears the slot, so the constructors lean on it.
+   - **After destruction a component carries PhysicsComponent's vptr**
+     and an Ackerman carries Steering's; a freed slot keeps everything
+     but its first word.
+   - **Engine's own vptr store in `~Engine` is dead** -- the base
+     overwrites it -- and is the one equivalent mutant.
+   - **`~SkidMaker` is `MakeNoSkid`**, which goes through a seam,
+     `gSkidSetFinishedAddingFn`; a wheel with no set never reaches it.
+   - **The pools take n as a parameter**, since the race parameters
+     are not ported. The RigidBody pool's 32 spare slots are the
+     Smokeables'. NullMover's slot size is an image constant in
+     `physcomp.h` until that class exists; the Mellovator's and
+     MellowMover's are `sizeof` now.
+   - Ackerman's `DoSnapshot` is the one NULL entry, pending
+     `ReplaySnapshot`, and the checker says so on every run.
+
+   **`PhysicsCar` is closed** but for `DoSnapshot`, and three small
+   modules `Move` reads came with it: `race.{c,h}`, `cardamage.{c,h}`
+   and `joystick.{c,h}`. `physicscar_check` is the first checker whose
+   oracle is the image itself. `mipsemu` runs the shipped constructor,
+   both integrators, UpdateCar and Move, with every component method
+   they reach, and the harness runs the port on the same records. 106
+   scenarios, 102908 lines, 0 differ; 263 mutations, 257 caught, 6
+   equivalent, 0 unexplained. Read `docs/formats/physics-car.md`. What
+   matters next:
+
+   - **Two older ports were wrong, and their models agreed with them.**
+     GetLateralForce's curve scale is 12 (`lui at,0x4140`), not 11, and
+     CheckTerrain's fifth argument is the terrain it refreshes. A model
+     written from the same reading as the port is not an oracle.
+   - **A car sitting in gear divides zero by zero**, in DriveTrain's
+     clutch split. The EE gives FLT_MAX and IEEE gives NaN. A divide that
+     can see 0/0 uses `ee_div` (`eefpu.h`), and mipsemu's `eediv_pcs`
+     lists every one a run reaches.
+   - **The image reads uninitialised stack words** in six places. The
+     port writes zero, and the model hooks the image to zero them too.
+   - **`hostbuild` caches objects**, so a mutant rebuilds one file, and
+     `diff_count` replaced difflib. A PhysicsCar mutant takes about 2 s,
+     down from minutes.
+
+   **`MellowMover` and its `Mellovator` are closed** but for their two
+   `DoSnapshot`s. `mellowmover_check` runs the image the same way: 39
+   scenarios, 56080 lines, 0 differ; 346 mutations, 341 caught, 5
+   equivalent, 0 unexplained. Read `docs/formats/mellow-mover.md`.
+   What matters next:
+
+   - **`.lit4` is not always the nearest float.** The half-pi is
+     `0x3fc90fdc`, one ulp high, and it feeds `bSin`'s truncation to a
+     BAM. The checker reads all eighteen pool constants back out.
+   - **An airborne, level car divides 0/0 in `bNormalize3To`**, which
+     now uses `ee_div`.
+   - **Three synthetic records**: car 0 with CoG.y 0.0625, car 0 with
+     the droop stops at -2, and car 34 for its two final drives. The
+     shipped data hides those branches.
+
+   **Car's fourth code slice is closed** -- `SetMovementMode`,
+   `SetControlMode`, `SetToPhysicsMode`, `SetFrictionBoost`, with
+   `NullMover`, `NullController`, `NullDriver`, the `CarController` base
+   and `CarCollisionBody`'s two methods. `carmode_check`: 74
+   transitions, 27324 lines, 0 differ; 114 mutations, 114 caught.
+   `wheel_install_seams()` runs at boot. Read `docs/formats/car-modes.md`;
+   what matters next:
+
+   - **Task 26's eight classes are behind constructor seams** in
+     `carmodes.h` (`gTrafficCarCtorFn` .. `gCopDriverCtorFn`). A NULL seam
+     aborts and names the class. Porting one means setting its seam at
+     boot and changing its `_SIZE` constant to `sizeof`.
+   - **Both methods store the mode before the arm runs**, so a
+     constructor that reads the car sees the new mode.
+   - **A store through the wrong type lands in the neighbour.** Check the
+     bytes past an object, not only its fields.
 
    **`Car`'s record is whole and its first code slice is closed.** The
    2016-byte layout is in `3DS Files/source/car.h` -- 72 offsets, each
@@ -287,7 +425,11 @@ and so replaced every boot.
    restores any whose process has died. **Still: never edit a source a
    live pass compiles, and never run two passes that mutate one file
    -- the second now stops at its first write to that file rather than
-   restore the first one's mutant for it.**
+   restore the first one's mutant for it.** A pass that must run beside
+   another that mutates a file it links can run from a copy of the tree:
+   every checker finds its sources from its own path, so `tools/`,
+   `3DS Files/source/`, the ELF, `docs/mdebug_structs.txt` and the two
+   extracted bundles are enough (Session 30).
 
    **`Wheel`'s two seams are wired but nothing installs them, and their
    home is now known.** `wheel_install_seams()` points
@@ -295,7 +437,7 @@ and so replaced every boot.
    real methods, and no code in `3DS Files/source/` calls it, so they
    are still `NULL` on hardware. That is correct today -- nothing
    constructs a `Suspension` or a `Wheel` yet -- but the call belongs in
-   **`Car::SetMovementMode`'s `MM_PHYSICS` arm**, which is what
+   **`Car::SetMovementMode`'s `PHYSICS_MOVEMENT` arm**, which is what
    constructs the `PhysicsCar` that owns the `Suspension` and the four
    `Wheel`s, and it has to happen before that car's first
    `ResolveForces` or every corner reports airborne. The seams are a
@@ -340,6 +482,47 @@ at the head of Phase 4 in `TASKS.md`.
 
 Ordered roughly by how much time it costs to rediscover.
 
+* **A checker whose model was written from the disassembly can share a
+  misreading with the port.** `drivetarget_check`'s model and
+  `drivetarget.c` both had FillWithCurrentAcceleration's first test
+  negated. The two agreed, and the checker's own `fi-dominates-flipped`
+  mutant was "caught" against the wrong answer. Only running the image
+  (`realcontroller_check`) showed it. The image-backed checkers are
+  airoute, average, car, carmode, joystick, mellowmover, physicscar,
+  quickspline, realcontroller, realdriver and trackpath. Every other
+  `*_check.py` compares against a Python model, which includes most of
+  task 25: carstate, engine, cartypeinfo, cardriver, steering, rigidbody,
+  suspension, wheel, drivetrain, drivetarget, graph, physicssystem,
+  aerodynamics and physcomp. car_check, physicscar_check and
+  mellowmover_check do run the image's copies of some of those beneath
+  them, but only as far as their scenarios reach. A model-only pass is
+  evidence that two readings agree, not that either matches the console.
+* **A scenario that hands a mover the Car's own CarState cannot tell
+  `State` from `pCar->State`.** MellowMover reads each in different
+  places. In the game they are the same object, so a port that mixed
+  them up would pass every such scenario. `mellowmover_check`'s
+  `c0-apart` passes a copy with a different ForwardSpeed, and task 26's
+  movers want the same.
+* **A NULL seam that the image calls unconditionally needs its NULL case
+  checked too.** `realdriver_check`'s seam mask does this: a clear bit
+  leaves the harness's pointer NULL and makes the model's stub silent,
+  answering what the port assumes. Without it, the port's "skip when
+  NULL" branches are code no checker has run.
+* **Two calls that share no state have an order only their logs can
+  show.** RealDriver's Drive could run DoSteering before
+  DoThrottleBrakeReverse and every dumped field would agree. A mutant
+  that swaps them needs a frame on which both of them log something.
+* **A decimal constant is not the pool's bits.** The `.lit4` half-pi is
+  one ulp above the float nearest pi/2, and the port's first BAM-to-radian
+  constant was a digit short. Write the bits beside the literal
+  (`// gp-27752  38d1b717`) and have the checker read the pool.
+* **Shipped data hides branches.** CoG.y is 0 in all 66 car records, 61
+  have equal final drives, and 21 have CoG.x 0. A survivor on shipped
+  records may want a copy of a real record with one field changed, not a
+  new scenario.
+* **The Microsoft Store Python virtualises writes under `AppData`.** A
+  file it writes there is not where the shell or a harness looks for it.
+  Debug output goes under the repo's `out/`.
 * **A format loaded by casting has no parse step to get wrong -- the struct
   layout *is* the format.** `TrackRoutesLoader` casts the chunk's bytes to
   `TrackRoute *` and registers the pointer; nothing is copied and nothing is
@@ -379,7 +562,9 @@ Ordered roughly by how much time it costs to rediscover.
   two broken source files this session.
 
   **Apostrophes go the same way**, which is why `tools/trackroute_check.py`
-  was written out with the file-editing tool rather than a heredoc. If a
+  was written out with the file-editing tool rather than a heredoc. A
+  heredoc with quotes nested inside quotes can also fail outright
+  ("unexpected EOF while looking for matching"). If a
   script's content has either character in it, do not pipe it through a
   shell.
 * **`C3D_FVec` is declared `w, z, y, x`.** `r[i].c[j]` is element

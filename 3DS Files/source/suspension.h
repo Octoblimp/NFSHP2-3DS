@@ -283,6 +283,7 @@ void suspension_set_magic_force(Suspension *s, float f);
 // Suspension::DoSnapshot (0x0019bc88) is not ported: ReplaySnapshot again,
 // the same dependency that has held up CarState, Engine, CarDriver,
 // Steering and RigidBody. operator new and operator delete are the PS2
-// slot allocator and are not ported for the usual reason.
+// slot allocator, SuspensionSlotPool; they, the destructor and
+// `_vt$10Suspension` are physcomp.h's.
 
 #endif // SUSPENSION_H

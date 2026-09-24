@@ -299,7 +299,7 @@ float drivetarget_calculate_time(DriveTarget *t, float a, float b, float c);
 // car's current acceleration forward in 0.1s steps until it has covered
 // the look-ahead distance, filled twenty points, or turned back on
 // itself. Hands off to ai_straight_line_predict when the acceleration is
-// small next to the speed.
+// more than three quarters of the speed -- large, not small.
 void drivetarget_fill_with_current_acceleration(DriveTarget *t, Car *car);
 
 // 0x0020a1d8. The same integration, but blended into the points already

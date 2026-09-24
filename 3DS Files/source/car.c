@@ -36,6 +36,7 @@
 // ComputeFakeRPM stores, and bmath.h for bToPolar.
 #include "cardriver.h"
 #include "drivetrain.h"
+#include "eefpu.h"
 #include "sound3d.h"
 #include "vtable.h"
 #include "world.h"
@@ -154,44 +155,16 @@ int32_t car_is_poofed(Car *c)
 
 // --------------------------------------------------------------- the state
 
-// `cvt.w.s`, all of it.
-//
-// Truncation toward zero is the easy half and a C cast already does it. The
-// other half is what happens off the ends: the R5900 saturates *by the sign
-// of the source*, 0x7fffffff for a value at or above 2^31 and 0x80000000 for
-// one below -2^31. A bare C cast does not reproduce that -- the conversion is
-// undefined behaviour in C, and the three targets disagree about it in
-// practice. ARM's `vcvt.s32.f32` saturates by sign and so agrees with the
-// R5900; x86-64's `cvttss2si` returns 0x80000000 for *either* overflow, so
-// the host build of this port would disagree with both the console and the
-// handheld on a positive one.
-//
-// So it is written out. tools/camera_check.py's `trunc_w` is the same
-// function on the model side and has been since the camera slice. The
-// negative threshold there is spelled `<= -2147483649.0`, which selects the
-// same set of float32 values as `< -2147483648.0f` does here: the next
-// float32 below -2^31 is -2147483904, and nothing lies between them.
-//
-// Static because Car is the first caller. When a second one appears this
-// moves to a header -- not bmath.h or emath.h, which are faithful ports of
-// bMath.obj and eMath.obj and own no invented functions.
-static int32_t car_trunc_w(float x)
-{
-    if (x != x)                     // no NaN reaches the EE FPU; defined anyway
-        return 0;
-    if (x >= 2147483648.0f)
-        return (int32_t)0x7fffffff;
-    if (x < -2147483648.0f)
-        return (int32_t)0x80000000;
-    return (int32_t)x;
-}
+// `cvt.w.s` is eefpu.h's ee_trunc_w, which saturates by the sign of the
+// source as the R5900 does. It lived here until PhysicsCar::UpdateCar became
+// its second caller.
 
 // 0x00130ee0. Position x + y, scaled by 65536 and truncated. A rounding
 // conversion would disagree on every negative half.
 int32_t car_calculate_debug_checksum(Car *c)
 {
     float s = c->State.Position.x + c->State.Position.y;
-    return car_trunc_w(s * 65536.0f);
+    return ee_trunc_w(s * 65536.0f);
 }
 
 // 0x00133128. A quarter per wheel on the ground, summed in wheel order --
@@ -913,6 +886,10 @@ int32_t car_is_drifting(Car *c)
         return 0;
     return (12.0f < c->State.ForwardSpeed) ? 1 : 0;
 }
+
+// RealDriver::JoyHandler_ResetCar's cap on the speed a reset car keeps,
+// 15 m/s. Car.obj's .sdata, read by RealDriver through gp.
+float RollingResetSpeed = 15.0f;                // 0x00323030  41700000
 
 // --------------------------------------------------------- the fake engine
 //

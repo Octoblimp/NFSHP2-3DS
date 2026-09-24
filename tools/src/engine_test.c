@@ -110,7 +110,7 @@ static void fill_pattern(Engine *e)
     g_dirt = 0;
 
     memset(e->_head, 0xA0, sizeof e->_head);
-    e->_vtable   = 0;
+    e->_vtable   = 0xA0A0A0A0u;
     e->State.w   = dirt();
     e->EI        = 0;
     e->pCarState = 0;
@@ -133,6 +133,7 @@ static void print_engine(const char *tag, const Engine *e)
     printf("  head       %02x%02x%02x%02x%02x%02x%02x%02x\n",
            e->_head[0], e->_head[1], e->_head[2], e->_head[3],
            e->_head[4], e->_head[5], e->_head[6], e->_head[7]);
+    printf("  vtable     0x%08x\n", (unsigned)e->_vtable);
     printf("  w %.9g  rpm %.9g\n", e->State.w,
            e->State.w * ENGINE_RADS_TO_RPM);
     printf("  ei %s  cs %s\n", e->EI ? "set" : "null",

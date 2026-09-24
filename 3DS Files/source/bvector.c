@@ -11,6 +11,7 @@
 #include <math.h>
 
 #include "bmath.h"
+#include "eefpu.h"
 
 // ------------------------------------------------------------------- Q16
 
@@ -102,10 +103,15 @@ void bNormalize2To(bVector2 *o, const bVector2 *v, float len)
 // 0x00240250. The length comes off VU0 as (x*x + y*y) + z*z -- vmul.xyz,
 // vaddy.x, vaddz.x, qmfc2 the x lane -- and then this one reciprocates once
 // and multiplies, where the 2D pair divides three times.
+//
+// The first divide, 0x00240274, is ee_div's. MellowMover::JumpStabilizer
+// asks for a length of zero whenever the car is already where it would
+// turn it, and then the vector is zero too: 0/0, a NaN here and FLT_MAX on
+// the console, whose reciprocal scales the zero to a zero.
 void bNormalize3To(bVector3 *o, const bVector3 *v, float len)
 {
     float n = (v->x * v->x + v->y * v->y) + v->z * v->z;
-    float k = sqrtf(n) / len;
+    float k = ee_div(sqrtf(n), len);
     float r;
 
     if (k == 0.0f) {

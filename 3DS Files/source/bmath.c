@@ -9,6 +9,8 @@
 
 #include <math.h>
 
+#include "eefpu.h"
+
 // The original negates with `subu x,zero,x` and takes absolute values with
 // `pmaxw x,x,-x`, both of which wrap silently at INT32_MIN. C's unary minus
 // does not -- it is undefined there -- so the wrap is spelled out.
@@ -99,6 +101,8 @@ uint32_t bSqrt32(uint32_t n)
 
 // ------------------------------------------------------------------ random
 
+uint32_t bDefaultSeed = 0x12345678u;   // 0x00324f90
+
 // 0x00241cc8. The value handed back is the OLD seed reduced mod range, and
 // the state moves afterwards -- so the draw immediately after a reseed is
 // the seed itself, not a function of it.
@@ -149,7 +153,11 @@ float bFMod(float a, float b)
 {
     float m = fabsf(b);
     float q = a / m;
-    float t = (float)(int32_t)q;        // cvt.w.s truncates toward zero
+    // cvt.w.s: toward zero, and saturating by sign past 2**31. A bare cast
+    // is undefined there and x86 answers 0x80000000 for both ends, so a
+    // quotient of 3e9 came back as 5.1e9 on the host. QuickSpline's
+    // ClampParam is the caller that found it.
+    float t = (float)ee_trunc_w(q);
 
     if (q < t) {
         t = t - 1.0f;
@@ -208,7 +216,9 @@ float bSinBam(uint16_t bam)
 // 0x00241e98.
 float bSinF(float radians)
 {
-    return bSinBam((uint16_t)(int32_t)(radians * C_RAD_TO_BAM));
+    // The same saturating cvt.w.s: past +/-2**31 BAM the image gets
+    // 0x7fffffff or 0x80000000, whose low sixteen bits are 0xffff and 0.
+    return bSinBam((uint16_t)ee_trunc_w(radians * C_RAD_TO_BAM));
 }
 
 // 0x00241ec8, minus a dead divide-by-360 guard the compiler left behind.

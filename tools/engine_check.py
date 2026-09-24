@@ -37,6 +37,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bmath_check
 import hostbuild
 from bvector_check import f32, fadd, fdiv, fmul, fneg, fsub
 
@@ -85,6 +86,20 @@ NITRO_SECS   = f32(4.0)           # 0x40800000
 LIMIT_MARGIN = f32(100.0)         # 0x42c80000
 
 DRIVER_PLAYER = 1
+
+
+def _insn(addr):
+    return struct.unpack("<I", bmath_check.ELF.read(addr, 4))[0]
+
+
+# _vt$6Engine, as the ctor builds it: `lui v0,0x29` at 0x001823dc and
+# `addiu v0,v0,31352` at 0x001823e4, stored by `sw v0,8(s0)` at 0x00182404.
+assert _insn(0x001823dc) >> 26 == 0x0f and _insn(0x001823e4) >> 26 == 0x09
+assert _insn(0x00182404) == 0xae020008          # sw v0,8(s0)
+ENGINE_VTABLE = (((_insn(0x001823dc) & 0xffff) << 16)
+                 + struct.unpack("<h", struct.pack("<H",
+                                 _insn(0x001823e4) & 0xffff))[0])
+assert ENGINE_VTABLE == bmath_check.ELF.syms["_vt$6Engine"][0]
 
 # The two RPM scales really are the same number in two pool slots.
 assert RADS_TO_RPM == bits(0x4118c9f3)
@@ -191,7 +206,7 @@ def engine_init(e, ei, cs):
     """0x001823d8. Note what it leaves alone: Throttle and RoadTorque are
     never written, so a fresh Engine inherits whatever was in the
     allocation."""
-    e.vtable = 0        # 0x00297a78 in the image; never read back
+    e.vtable = ENGINE_VTABLE
 
     table_init(e.TorqueCurve, ei.TorqueCurveTable, 9, ei.IdleRPM, ei.MaxRPM)
     table_init(e.EngineBraking, ei.EngineBrakingTable, 3,
@@ -329,7 +344,7 @@ class Dirt(object):
 def fill_pattern(e):
     d = Dirt()
     e.head = [0xA0] * 8
-    e.vtable = 0
+    e.vtable = 0xA0A0A0A0
     e.w = d.f()
     e.EI = None
     e.pCarState = None
@@ -362,6 +377,7 @@ def emit(s):
 def print_engine(tag, e):
     emit(tag)
     emit("  head       " + "".join("%02x" % b for b in e.head))
+    emit("  vtable     0x%08x" % e.vtable)
     emit("  w %s  rpm %s" % (g9(e.w), g9(fmul(e.w, RADS_TO_RPM))))
     emit("  ei %s  cs %s" % ("set" if e.EI else "null",
                              "set" if e.pCarState else "null"))
@@ -715,6 +731,10 @@ MUTATIONS = [
      "* (frac - (float)i);", "* frac;"),
 
     # -- ctor -----------------------------------------------------------
+    ("ctor-vtable-zero", EN, "    e->_vtable = ENGINE_VTABLE;",
+     "    e->_vtable = 0;"),
+    ("h-vtable", EH, "#define ENGINE_VTABLE 0x00297a78u",
+     "#define ENGINE_VTABLE 0x00297a70u"),
     ("ctor-curve-entries", EN,
      "    table_init(&e->TorqueCurve,   ei->TorqueCurveTable,   9,",
      "    table_init(&e->TorqueCurve,   ei->TorqueCurveTable,   8,"),

@@ -36,6 +36,7 @@ const TerrainTypeInfo *gTerrainTypeInfoTable = NULL;
 TopologyGetElevationFn    gTopologyGetElevationFn    = NULL;
 TerrainRoadNoiseFn        gTerrainRoadNoiseFn        = NULL;
 WheelTopologyOfCarStateFn gWheelTopologyOfCarStateFn = NULL;
+WheelMaybeMakeSkidsFn     gWheelMaybeMakeSkidsFn     = NULL;
 
 ReplayBeginSectionFn gReplayBeginSectionFn = NULL;
 ReplayEndSectionFn   gReplayEndSectionFn   = NULL;
@@ -415,17 +416,17 @@ float wheel_check_terrain(Wheel *w, bVector3 *normalOut, int32_t *terrainOut,
         void *topo = gWheelTopologyOfCarStateFn
                          ? gWheelTopologyOfCarStateFn(w->CS)
                          : NULL;
-        // NULL for the terrain out-parameter, not terrainOut: the image
-        // has `move a2,zero` at 0x0019a300, two instructions before the
-        // call. GetElevation is given nowhere to report a terrain type,
-        // so the type read three instructions later -- `lw a1,0(s4)`,
-        // feeding GetRoadNoise -- is the one the wheel already carried.
-        // Nothing in this function writes it except the reject path
-        // below. SetTerrain is how it gets set, from outside.
-        elev = gTopologyGetElevationFn(topo, pos, NULL, normalOut);
+        // terrainOut goes straight through: a2 arrives holding it and
+        // nothing before the `jal` touches a2. The `move t0,zero` at
+        // 0x0019a300 is the fifth argument, the `bool *` the seam leaves
+        // out -- register 8, not 6. GetElevation writes the polygon's
+        // type through a non-NULL pointer (0x0014f714), so the
+        // `lw a1,0(s4)` after the call feeds GetRoadNoise the terrain it
+        // just reported, not a stale one.
+        elev = gTopologyGetElevationFn(topo, pos, terrainOut, normalOut);
     } else {
-        // The normal only. Terrain is deliberately not touched, because
-        // the call this stands in for could not have touched it either.
+        // The normal only. With no topology there is no surface to report,
+        // so Terrain keeps whatever SetTerrain last put there.
         normalOut->x = 0.0f;
         normalOut->y = 0.0f;
         normalOut->z = 1.0f;
@@ -579,7 +580,9 @@ float wheel_get_lateral_force(Wheel *w, float zforce, float slipAngle)
     {
         const TireInfo *ti = w->TI;
         float load  = (zforce * gLoadFactor) / ti->MaxLoad;
-        float scale = 11.0f / ti->MaxSlipAngle;
+        // `lui at,0x4140`: twelve, so a slip angle equal to the tyre's own
+        // MaxSlipAngle lands the index on 6, the last curve, exactly.
+        float scale = 12.0f / ti->MaxSlipAngle;
         float index = ((slipAngle * WHEEL_RAD_TO_DEG) * scale) * 0.5f;
         int32_t i   = (int32_t)index;          // cvt.w.s, toward zero
         float frac  = index - (float)i;
@@ -936,7 +939,7 @@ bVector3 *wheel_get_horizontal_ground_force_car(Wheel *w, bVector3 *out)
 
 // 0x0019b2c8 and 0x0019b548. Both are `jr ra` in the shipped image: the
 // particle work they used to do was compiled out, unlike MaybeMakeSkids,
-// which still has a body and belongs to task 27.
+// which still has a body and is a seam until task 27.
 void wheel_maybe_make_smoke(Wheel *w, float v)
 {
     (void)w;
@@ -947,6 +950,12 @@ void wheel_maybe_make_tire_spew(Wheel *w, float v)
 {
     (void)w;
     (void)v;
+}
+
+void wheel_maybe_make_skids(Wheel *w, float dt)
+{
+    if (gWheelMaybeMakeSkidsFn)
+        gWheelMaybeMakeSkidsFn(w, dt);
 }
 
 // 0x00199c90. The replay serialiser. MoveData copies in whichever
@@ -1091,8 +1100,9 @@ void wheel_set_state_from_car_state(Wheel *w, void *carState, void *cti,
     w->Velocity.z = c.z + cs->Velocity.z;
     w->Velocity.w = c.w + cs->Velocity.pad;
 
-    // A real terrain out-parameter this time -- `addiu a2,sp,192`, not
-    // the `move a2,zero` CheckTerrain uses. The topology comes straight
+    // A terrain out-parameter again, but a stack slot this time --
+    // `addiu a2,sp,192` -- rather than the wheel's own field, which
+    // CheckTerrain forwards. The topology comes straight
     // out of CarState rather than through the seam CheckTerrain needs,
     // because here the CarState is typed.
     if (gTopologyGetElevationFn != NULL) {

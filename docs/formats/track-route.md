@@ -12,7 +12,7 @@ The port is `3DS Files/source/trackroute.c` and `trackroute.h`, cross-checked
 by `tools/trackroute_check.py` (671 transcript lines, 53 mutations, one of
 them equivalent and argued for in that file). It sits on `bvector.c`
 (`docs/formats/bmath.md`), on `bchunk.c` (`docs/formats/bchunk.md`), and on
-one function out of `trackpath.c`.
+`trackpath.c` (`docs/formats/track-path.md`) for the distance round the lap.
 
 ## A correction to the task list
 
@@ -314,14 +314,16 @@ port leaves `pad` alone rather than inventing a value.
 
 `UpdateToCaffeine` (`0x1b7de8`), for the reason at the top.
 
-`TrackPathCoordinate::UpdatePosition` (`0x1f5dd0`, into `0x1f5620`) is a hole
-in `trackpath.c`, not in this object, but it is the reason this one cannot be
-run for real yet: it needs `QuickSpline.obj` (`0x00227e98`) to turn a world
-position into a distance around the track. `SetFirstAndLastPoints`,
-`SetDistances` and `TestSignpostConsistency` all go through it. Until that
-lands, `gTrackPathDistanceFn` is a test seam: `NULL` on hardware, and in the
-harness a closed-form ramp built only out of add, multiply and compare so
-that the model reproduces it bit for bit.
+`TrackPathCoordinate::UpdatePosition` (`0x1f5dd0`, into `0x1f5620`) used to
+be a hole here: `SetFirstAndLastPoints`, `SetDistances` and
+`TestSignpostConsistency` all measure through it, and it needs
+`QuickSpline.obj`. Both are ported now (`docs/formats/track-path.md`,
+`docs/formats/quickspline.md`), so on hardware these run for real.
+`gTrackPathDistanceFn` stays as a test seam. It is `NULL` on hardware. In
+this checker it is a closed-form ramp, built only from add, multiply and
+compare so that the model reproduces it bit for bit. That keeps TrackRoute's
+own arithmetic checkable without a spline under it. `trackpath_check.py`
+checks the real measurement.
 
 ## Checking it
 

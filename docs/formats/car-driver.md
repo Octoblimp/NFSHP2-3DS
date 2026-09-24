@@ -90,6 +90,36 @@ applies its own flags the same way. Nothing here owns memory.
 `ReplaySnapshot`, the same dependency that stopped `CarState::DoSnapshot`
 and `Engine::DoSnapshot`.
 
+### The two tables, and NullDriver
+
+Car's fourth slice ([car-modes](car-modes.md)) installed the tables. It
+also added NullDriver, the driver a car with nothing to steer it gets.
+
+**`_vt$9CarDriver` (0x002924a8)** has twenty-one entries.
+
+- **Four are `__pure_virtual`:** Drive (16), SetLowGear (48),
+  SetDesiredSpeed (56) and GetDriverNumber (80).
+- **DoSnapshot (24) is left NULL**, for the reason above.
+
+`vt_slot` aborts on either kind.
+
+**`_vt$10NullDriver` (0x00292400)** is the same table with six entries of
+its own (0x00134c98 .. 0x00134cd0):
+
+- **Drive, SetLowGear and SetDesiredSpeed** are `jr ra`.
+- **GetDriverNumber** answers -99999.
+- **SetTarget drops the target.** CarDriver's copies it.
+- **The destructor** stores NullDriver's vptr and then runs CarDriver's.
+
+NullDriver has no fields of its own; the type is 560 bytes. The only code
+that builds one is inline, in Car's constructor and in `SetControlMode`'s
+null arm, and it runs the CarDriver constructor. So SportGear is
+unwritten there too.
+
+`tools/carmode_check.py` calls both tables entry by entry. It uses the
+car's NullDriver and a CarDriver built by the image's out-of-line
+constructor over the heap's 0xa5 pattern.
+
 ## DriveTarget -- layout only
 
 528 bytes: the short list of points the AI is steering through, and the
@@ -145,8 +175,18 @@ are in use.
 
 ```
 python tools/cardriver_check.py            # 5 scenarios, 118 lines, 0 differ
-python tools/cardriver_check.py --mutate   # 45 mutations, 45 caught
+python tools/cardriver_check.py --mutate   # 46 mutations, 45 caught, 1 equivalent
 ```
+
+**Forty-six, with one equivalent.** Car's fourth slice made the
+constructor run the real DriveTarget constructor, `drivetarget_init`, where
+the port had inlined its memset. The two memset mutations became
+`ctor-no-drivetarget-ctor` and `ctor-memset-whole-object`, and one was
+added: `ctor-no-second-clear`, which drops the constructor body's own
+`DriveTarget::Clear`. That one cannot be seen. The member's constructor
+has just run `Clear` on the same zeroed record, so the second call takes
+the same `NumPoints == 0` early-out and stores the same three zeros over
+themselves. The image makes both calls, so the port does too.
 
 **Forty-five, where this said forty-eight.** `drivetarget_assign` was
 defined at the top of `cardriver.c` while DriveTarget had no `.c` of its

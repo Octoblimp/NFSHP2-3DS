@@ -158,6 +158,22 @@ static void s_fmod(void)
                    (double)x, (double)y, (double)bFMod(x, y));
         }
     }
+    // Quotients past 2**31, where cvt.w.s saturates by sign. QuickSpline's
+    // ClampParam hands bFMod whatever t it is given.
+    {
+        static const int32_t ha[] = {
+            2000000000, -2000000000, 1500000000, 0x7fffff80, -0x7fffff80,
+        };
+        static const int32_t hb[][2] = {{1, 1}, {1, 2}, {-1, 3}, {3, 2}, {1, 0}};
+        for (i = 0; i < sizeof ha / sizeof ha[0]; i++) {
+            for (j = 0; j < sizeof hb / sizeof hb[0]; j++) {
+                float x = dy(ha[i], 0);
+                float y = dy(hb[j][0], hb[j][1]);
+                printf("fmod %.9g %.9g -> %.9g\n",
+                       (double)x, (double)y, (double)bFMod(x, y));
+            }
+        }
+    }
 }
 
 static void s_signedmod(void)
@@ -249,6 +265,19 @@ static void s_sinf(void)
     for (k = -256; k <= 256; k++) {
         float x = dy(k, 2);
         printf("sinf %.9g -> %.9g\n", (double)x, (double)bSinF(x));
+    }
+    // Whole radians big enough that the BAM product passes 2**31 and
+    // cvt.w.s saturates; 205887 is the last below.
+    {
+        static const int32_t big[] = {
+            205887, 205888, 300000, -300000, 1000000, -1000000,
+            2000000000, -2000000000,
+        };
+        size_t i;
+        for (i = 0; i < sizeof big / sizeof big[0]; i++) {
+            float x = dy(big[i], 0);
+            printf("sinf %.9g -> %.9g\n", (double)x, (double)bSinF(x));
+        }
     }
 }
 

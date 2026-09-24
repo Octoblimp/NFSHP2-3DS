@@ -1285,69 +1285,97 @@ static void s_fill(void)
     routes_init();
     WorldTimer = 600;
 
-    // Acceleration small next to the speed: the straight-line predictor
-    // takes over and leaves exactly one point.
+    // Acceleration past three quarters of the speed -- 16 sideways
+    // against 20 forward, whose three quarters is 15 -- so the
+    // straight-line predictor takes over and leaves exactly one point.
     dt_straight(&t);
-    car_set(&car, 0.0f, 0.0f, 20.0f, 0.0f, 1.0f, 0.0f, 0, 20.0f, 20.0f);
+    car_set(&car, 0.0f, 0.0f, 20.0f, 0.0f, 0.0f, 16.0f, 0, 20.0f, 20.0f);
     drivetarget_fill_with_current_acceleration(&t, &car);
     pdt("fi straight", &t, 2);
 
-    // Stationary, where the straight line comes off State.Angle instead.
+    // Stationary but accelerating, which is past three quarters of no
+    // speed at all, so the straight line comes off State.Angle.
     WorldTimer = 601;
     dt_straight(&t);
-    car_set(&car, 5.0f, 6.0f, 0.0f, 0.0f, 0.0f, 0.0f, 8192, 0.0f, 0.0f);
+    car_set(&car, 5.0f, 6.0f, 0.0f, 0.0f, 0.5f, 0.0f, 8192, 0.0f, 0.0f);
     drivetarget_fill_with_current_acceleration(&t, &car);
     pdt("fi angle", &t, 2);
 
-    // A real integration: hard cornering acceleration at a modest speed.
+    // A real integration: cornering acceleration of 5.39 at a modest
+    // speed of 8, under the bar of 6. The eighteenth step takes the
+    // walk past the 20 m look-ahead.
     WorldTimer = 602;
     dt_straight(&t);
-    car_set(&car, 0.0f, 0.0f, 8.0f, 0.0f, 2.0f, 9.0f, 0, 8.0f, 8.0f);
+    car_set(&car, 0.0f, 0.0f, 8.0f, 0.0f, 2.0f, 5.0f, 0, 8.0f, 8.0f);
     drivetarget_fill_with_current_acceleration(&t, &car);
-    pdt("fi integrate", &t, 8);
+    pdt("fi integrate", &t, 20);
 
-    // Braking hard enough to turn the velocity round, which stops the walk
-    // on the dot test rather than on the distance.
+    // Braking at 2.8 against a speed of 4, under the bar of 3, for long
+    // enough to turn the velocity round. The fifteenth step doubles
+    // back, the checked AddPointToTarget refuses it, and the dot test
+    // ends the walk with fourteen points.
     WorldTimer = 603;
     dt_straight(&t);
-    car_set(&car, 0.0f, 0.0f, 4.0f, 0.0f, -20.0f, 0.0f, 0, 4.0f, 4.0f);
+    car_set(&car, 0.0f, 0.0f, 4.0f, 0.0f, -2.8f, 0.0f, 0, 4.0f, 4.0f);
     drivetarget_fill_with_current_acceleration(&t, &car);
-    pdt("fi brake", &t, 6);
+    pdt("fi brake", &t, 16);
 
-    // Enough acceleration and little enough distance per step that the
-    // twenty-point wall is what stops it.
+    // Enough acceleration, under the bar, and little enough distance
+    // per step that the twenty-point wall is what stops it.
     WorldTimer = 604;
     dt_straight(&t);
-    car_set(&car, 0.0f, 0.0f, 0.5f, 0.0f, 3.0f, 1.0f, 0, 0.5f, 0.5f);
+    car_set(&car, 0.0f, 0.0f, 5.0f, 0.0f, 1.0f, 3.0f, 0, 5.0f, 5.0f);
     drivetarget_fill_with_current_acceleration(&t, &car);
     pdt("fi full", &t, 20);
 
-    // Three quarters exactly: a velocity of 10 against an acceleration of
-    // 6 does not clear the bar, so the straight line is what comes back.
+    // Three quarters exactly: a speed of 8 against an acceleration of
+    // 6. The test is strict, so this integrates, sixteen points to the
+    // look-ahead.
     WorldTimer = 605;
     dt_straight(&t);
-    car_set(&car, 0.0f, 0.0f, 10.0f, 0.0f, 6.0f, 0.0f, 0, 10.0f, 10.0f);
+    car_set(&car, 0.0f, 0.0f, 8.0f, 0.0f, 6.0f, 0.0f, 0, 8.0f, 8.0f);
     drivetarget_fill_with_current_acceleration(&t, &car);
-    pdt("fi ratio", &t, 2);
+    pdt("fi ratio", &t, 17);
 
-    // Braking across the lane. The velocity turns over between the third
-    // step and the fourth, so the third point doubles back on the leg
-    // before it -- and the integrator's AddPointToTarget is the checked
-    // one, so that point is refused before the turn-back test returns.
+    // Braking across the lane. The forward velocity turns over at the
+    // fourteenth step, but the constant sideways drift keeps every leg
+    // within a right angle of the one before, so AddPointToTarget
+    // takes each point. It is the dot against the car's own velocity,
+    // re-read every pass, that ends the walk a step later, with the
+    // fifteenth point in.
     WorldTimer = 606;
     dt_straight(&t);
-    car_set(&car, 0.0f, 0.0f, 2.5f, 0.25f, -10.0f, 0.0f, 0, 2.5f, 2.5125f);
+    car_set(&car, 0.0f, 0.0f, 2.5f, 0.25f, -1.8f, 0.0f, 0, 2.5f, 2.5125f);
     drivetarget_fill_with_current_acceleration(&t, &car);
-    pdt("fi turnback", &t, 4);
+    pdt("fi turnback", &t, 16);
 
-    // Nine steps of a car at 20 m/s gaining 20 m/s^2 cover 27 m exactly,
-    // and a VelocityMagnitude of 13.5 makes the look-ahead 27 m exactly
-    // too. The distance test is strict, so the ninth point is the last.
+    // Nine steps of a car at 20 m/s gaining 10 m/s^2 cover 22.5 m
+    // exactly, and a VelocityMagnitude of 11.25 makes the look-ahead
+    // 22.5 m exactly too. The distance test is strict, so the ninth
+    // point is the last.
     WorldTimer = 607;
     dt_straight(&t);
-    car_set(&car, 0.0f, 0.0f, 20.0f, 0.0f, 20.0f, 0.0f, 0, 20.0f, 13.5f);
+    car_set(&car, 0.0f, 0.0f, 20.0f, 0.0f, 10.0f, 0.0f, 0, 20.0f, 11.25f);
     drivetarget_fill_with_current_acceleration(&t, &car);
     pdt("fi look eq", &t, 11);
+
+    // No speed and no acceleration. Nothing is past three quarters of
+    // nothing, so this integrates: every step lands on the car, the
+    // zero-length legs pass the strict doubling-back test, the dot is
+    // 0 and the distance never grows. The wall stops it at twenty.
+    WorldTimer = 608;
+    dt_straight(&t);
+    car_set(&car, 5.0f, 6.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+    drivetarget_fill_with_current_acceleration(&t, &car);
+    pdt("fi still", &t, 20);
+
+    // Just past the bar: 6.01 against a speed of 8 is
+    // the straight line again.
+    WorldTimer = 609;
+    dt_straight(&t);
+    car_set(&car, 0.0f, 0.0f, 8.0f, 0.0f, 6.01f, 0.0f, 0, 8.0f, 8.0f);
+    drivetarget_fill_with_current_acceleration(&t, &car);
+    pdt("fi ratio over", &t, 2);
 }
 
 static void s_blend(void)

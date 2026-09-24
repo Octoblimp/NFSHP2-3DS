@@ -133,8 +133,8 @@ MUTATIONS = [
     ("swap-first-two",
      lambda s: s.replace(
          "    car_static_init();          // [14]  0x001347c0 _GLOBAL_$I$fDraftFalloff\r\n"
-         "    rigidbody_static_init();    // [41]  0x00193d20 _GLOBAL_$I$__9RigidBodyP13RigidBodyInfo\r\n",
-         "    rigidbody_static_init();    // [41]  0x00193d20 _GLOBAL_$I$__9RigidBodyP13RigidBodyInfo\r\n"
+         "    physicscar_static_init();   // [15]  0x00137438 _GLOBAL_$I$RigidBodySlotPool\r\n",
+         "    physicscar_static_init();   // [15]  0x00137438 _GLOBAL_$I$RigidBodySlotPool\r\n"
          "    car_static_init();          // [14]  0x001347c0 _GLOBAL_$I$fDraftFalloff\r\n"), None),
     ("drop-wheel",
      lambda s: s.replace(

@@ -95,7 +95,14 @@ def sdiv(a, b):
 
 
 def trunc32(x):
-    """cvt.w.s -- truncate toward zero into an int32."""
+    """cvt.w.s -- truncate toward zero into an int32, saturating by sign
+    past 2**31 as the R5900 does (camera_check's trunc_w, eefpu.h's
+    ee_trunc_w). A plain int() here once let bFMod's bare cast agree with a
+    model that never saturated either."""
+    if x >= 2147483648.0:
+        return 0x7fffffff
+    if x <= -2147483649.0:
+        return -0x80000000
     return int(x)
 
 
@@ -537,6 +544,13 @@ def s_fmod():
             x = dy(a, 2)
             y = dy(b, 0)
             emit("fmod %.9g %.9g -> %.9g" % (x, y, bFMod(x, y)))
+    # Quotients past 2**31, where cvt.w.s saturates by sign: the floor
+    # comes back as +/-2**31 and the "remainder" is most of the quotient.
+    for a in (2000000000, -2000000000, 1500000000, 0x7fffff80, -0x7fffff80):
+        for b, sh in ((1, 1), (1, 2), (-1, 3), (3, 2), (1, 0)):
+            x = dy(a, 0)
+            y = dy(b, sh)
+            emit("fmod %.9g %.9g -> %.9g" % (x, y, bFMod(x, y)))
 
 
 def s_signedmod():
@@ -589,6 +603,12 @@ def s_sinf():
         emit("sinf %.9g -> %.9g" % (x, bSinF(x)))
     for k in range(-256, 257):
         x = dy(k, 2)
+        emit("sinf %.9g -> %.9g" % (x, bSinF(x)))
+    # Past 2**31 BAM the truncation saturates, to 0xffff or 0 once cut to
+    # sixteen bits.
+    for k in (205887, 205888, 300000, -300000, 1000000, -1000000,
+              2000000000, -2000000000):
+        x = dy(k, 0)
         emit("sinf %.9g -> %.9g" % (x, bSinF(x)))
 
 

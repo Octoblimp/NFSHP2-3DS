@@ -12,6 +12,7 @@
 
 #include <math.h>
 
+#include "eefpu.h"
 #include "table.h"
 
 // ---------------------------------------------------------- the constants
@@ -429,7 +430,12 @@ static void drivetrain_split_torque(DriveTrain *d, float torque,
     } else if (d->pCarState->BurnOutState == 2) {
         share = threshold;
     } else {
-        share = named->State.w / (named->State.w + other->State.w);
+        // A pair standing still is 0/0 here, and the console's answer is
+        // FLT_MAX, which the clamp below turns into the small share for
+        // the named wheel. IEEE's NaN would go on into AppliedTorque, the
+        // wheels and the body -- a car sitting in gear on the grid does
+        // this every frame. See eefpu.h.
+        share = ee_div(named->State.w, named->State.w + other->State.w);
 
         // The clamp goes the other way on purpose: a rim whose share has
         // fallen below the threshold is the one being held back, so it is

@@ -414,6 +414,9 @@ extern bVector4    DamageAboveMatrix[4];                // 0x00326cb0
 extern bVector2    PostCollisionYawControlProfileData[4]; // 0x002e8528
 extern Graph       PostCollisionYawControlProfile;      // 0x00323078
 
+// A reset car keeps at most this much speed (RealDriver's reset handler).
+extern float RollingResetSpeed;                         // 0x00323030
+
 // ComputeFakeRPM's tweakables, initialised in the image's .sdata, and the
 // RPM pairs in its .data. Exported so the transcript can print them and set
 // the two debug overrides.
@@ -496,5 +499,11 @@ float    car_get_post_collision_yaw_control_boost(Car *c); // 0x001341d0
 int32_t  car_is_drifting(Car *c);                        // 0x00134258
 float    car_smooth(float cur, float target, float rate); // 0x00134788
 void     car_compute_fake_rpm(Car *c);                   // 0x00131080
+
+// Slice four: the modes. carmodes.c, which carmodes.h describes.
+void     car_set_control_mode(Car *c, ControlMode mode); // 0x0012fb50
+void     car_set_movement_mode(Car *c, MovementMode mode); // 0x0012fd58
+void     car_set_to_physics_mode(Car *c, Car *other);    // 0x0012ff68
+void     car_set_friction_boost(Car *c, float f);        // 0x0012fd38
 
 #endif // CAR_H

@@ -58,10 +58,13 @@ NL = chr(10)
 SOURCES = [
     "tools/src/cardriver_test.c",
     "3DS Files/source/cardriver.c",
+    "3DS Files/source/bmem.c",
+    "3DS Files/source/vtable.c",
     "3DS Files/source/drivetarget.c",
     "3DS Files/source/carstate.c",
     "3DS Files/source/trackroute.c",
     "3DS Files/source/trackpath.c",
+    "3DS Files/source/quickspline.c",
     "3DS Files/source/bchunk.c",
     "3DS Files/source/emath.c",
     "3DS Files/source/bmatrix.c",
@@ -457,18 +460,21 @@ MUTATIONS = [
      "    d->DesiredGear = 1;",
      "    d->DesiredGear = 1;" + NL + "    d->SportGear = 0;"),
     ("ctor-gear-zero", CD, "    d->DesiredGear = 1;", "    d->DesiredGear = 0;"),
-    ("ctor-no-memset", CD,
-     "    memset(&d->MyDriveTarget, 0, sizeof(DriveTarget));", ""),
+    ("ctor-no-drivetarget-ctor", CD,
+     "    drivetarget_init(&d->MyDriveTarget);" + NL, ""),
     ("ctor-memset-whole-object", CD,
-     "    memset(&d->MyDriveTarget, 0, sizeof(DriveTarget));",
-     "    memset(d, 0, sizeof(CarDriver));"),
+     "    drivetarget_init(&d->MyDriveTarget);",
+     "    __builtin_memset(d, 0, sizeof(CarDriver));" + NL
+     + "    drivetarget_init(&d->MyDriveTarget);"),
     ("ctor-no-vtable", CD,
      "    d->_vtable = CARDRIVER_VTABLE;" + NL + NL
-     + "    // The DriveTarget constructor's memset.", ""
-     + "    // The DriveTarget constructor's memset."),
+     + "    drivetarget_init(&d->MyDriveTarget);",
+     "    drivetarget_init(&d->MyDriveTarget);"),
+    ("ctor-no-second-clear", CD,
+     "    drivetarget_clear(&d->MyDriveTarget, NULL, d->Throttle);" + NL, ""),
     ("ctor-vtable-value", CH,
-     "#define CARDRIVER_VTABLE 0x002924a8u",
-     "#define CARDRIVER_VTABLE 0x002924b8u"),
+     "#define CARDRIVER_VTABLE  0x002924a8u",
+     "#define CARDRIVER_VTABLE  0x002924b8u"),
     ("ctor-no-nitro-clear", CD, "    d->NitroFlag = 0;", ""),
     ("ctor-no-steering-clear", CD, "    d->Steering = 0;", ""),
     ("ctor-no-ebrake-clear", CD, "    d->EBrake   = 0.0f;", ""),
@@ -542,7 +548,14 @@ MUTATIONS = [
      "void cardriver_clear_steering_memory(CarDriver *d) { d->Steering = 0; }"),
 ]
 
-EQUIVALENT = []
+EQUIVALENT = {
+    "ctor-no-second-clear":
+        "the DriveTarget constructor has just run Clear on the same zeroed "
+        "record, so the second takes the same NumPoints == 0 early-out and "
+        "stores the same three zeros over themselves; the image has it "
+        "because CarDriver's constructor body calls Clear as well, after "
+        "the member's constructor already has",
+}
 EXPECT_MISSING = []
 
 

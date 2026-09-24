@@ -43,7 +43,7 @@ static void pm(const char *tag, const bMatrix4 *m)
 
 static int      g_elev_calls;
 static void    *g_elev_topology;
-static int32_t *g_elev_terrain_out;   // NULL in the image; proved, not assumed
+static int32_t *g_elev_terrain_out;   // &w->Terrain in the image; proved, not assumed
 static float    g_elev_return;
 static bVector3 g_elev_normal;
 static bVector3 g_elev_pos;
@@ -56,9 +56,9 @@ static float fake_get_elevation(void *topology, const bVector3 *pos,
     g_elev_terrain_out = terrainOut;
     g_elev_pos = *pos;
     *normalOut = g_elev_normal;
-    // If the seam is ever handed an out-parameter, write something
-    // unmistakable through it, so a port that passes one shows up as a
-    // terrain of 77 rather than as nothing at all.
+    // Write something unmistakable through the out-parameter, so a port
+    // that drops it shows up as a stale terrain rather than as the 77
+    // every caller in the image gets back.
     if (terrainOut)
         *terrainOut = 77;
     return g_elev_return;

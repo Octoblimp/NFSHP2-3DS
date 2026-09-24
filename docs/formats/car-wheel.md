@@ -267,7 +267,7 @@ a wheel square to the ground and less as it leans. The affine map
 and the 0.3 floor then catches it — so a wheel leaning more than about 41
 degrees still carries 30% of its load rather than none.
 
-## CheckTerrain asks for a height, not a terrain
+## CheckTerrain asks for a height and a terrain
 
 `FindDrivingSurface` is a forty-byte forwarder: it calls `CheckTerrain`
 with the wheel's *own* `ContactNormal` and `Terrain` as the out-parameters.
@@ -276,30 +276,34 @@ the road noise, and returns how far the ground is along the suspension's
 axis:
 
 ```
-elev  = TopologyCoordinate::GetElevation(topo, pos, NULL, normalOut)
-noise = GetRoadNoise({pos.x, pos.y}, <the terrain the wheel already had>)
+elev  = TopologyCoordinate::GetElevation(topo, pos, terrainOut, normalOut, NULL)
+noise = GetRoadNoise({pos.x, pos.y}, *terrainOut)
 RoadNoise = noise
 align = normalOut . r.v2
 if (align < EPSILON) { *terrainOut = 0; return -100.0 }
 return (normalOut . ({pos.x, pos.y, elev + noise} - pos)) / align
 ```
 
-The third argument to `GetElevation` is `move a2,zero` at 0x0019a300 — a
-NULL terrain out-parameter. Two instructions later `lw a1,0(s4)` loads the
-terrain for `GetRoadNoise`, and `s4` is the wheel's `Terrain` field, not the
-stack slot a real out-parameter would have used. **`CheckTerrain` never
-learns what it is driving on.** The terrain type it feeds the road-noise
-query is whatever `SetTerrain` last put there, which is one frame stale by
-construction, and the only write in the whole function is the reject arm's
-`= 0`.
+`a2` arrives holding `terrainOut` — the wheel's own `Terrain`, through
+`FindDrivingSurface` — and nothing before the `jal` touches it. The
+`move t0,zero` at 0x0019a300 is the *fifth* argument, the `bool *` that the
+mangled name's trailing `Pb` promises; its raw word is `0x0000402d`, rd = 8.
+`GetElevation` writes the polygon's type byte through a non-NULL terrain
+pointer at 0x0014f714 (or 1, at 0x0014f744, when no polygon is found), so
+the `lw a1,0(s4)` after the call hands `GetRoadNoise` the terrain it has
+just been told. **`CheckTerrain` refreshes the wheel's terrain every
+call.** The reject arm's `= 0` then overrides it.
 
-The port had this wrong on the first pass — forwarding `terrainOut`, and
-writing 0 through it in the NULL-seam fallback — and the harness now proves
-the argument is NULL by *writing 77* through any out-parameter the stand-in
-is handed. A port that forwarded it would report a terrain of 77 and be
-caught on every scenario at once, rather than on none of them, which is
-what happens when the stand-in politely writes the terrain the caller
-expected.
+This was misread once. An earlier pass took the `move` for `a2`, ported a
+NULL, and wrote the model to agree, so the checker passed. Re-reading the
+raw word while planning the emulator oracle for `PhysicsCar` caught it. The
+stand-in writes *77* through the pointer, so the transcript now shows
+`terrain 77` and `noise_terrain 77` on every seam scenario; a port that
+dropped the pointer would show the stale terrain instead
+(`wh-terrain-out-null`).
+
+With the seam NULL — the handheld until the topology is ported — the port
+reports a straight-up normal and height 0 and leaves `Terrain` alone.
 
 `-100.0` is not a height. It is "no surface", and the suspension adds the
 wheel radius to it and falls through to the fully-extended arm.
@@ -432,7 +436,7 @@ The new model:
 
 ```
 load  = (zforce * gLoadFactor) / TI.MaxLoad
-index = ((slipAngle * 57.2957764) * (11 / TI.MaxSlipAngle)) * 0.5
+index = ((slipAngle * 57.2957764) * (12 / TI.MaxSlipAngle)) * 0.5
 i     = (int)index                       // truncates toward zero
 frac  = index - i
 if (i < 6) v = load[i] + frac * (load[i+1] - load[i])
@@ -440,9 +444,12 @@ else       v = load[6]
 return TI.ForceScale * gNewCorneringScale * v
 ```
 
-The `11 / MaxSlipAngle` and the 0.5 together map the tyre's own maximum
-slip angle onto 5.5 curve-steps, so a tyre with a bigger `MaxSlipAngle`
-reaches the same curve at a bigger angle. `slti v0,s1,6` is a **signed**
+The `12 / MaxSlipAngle` (`lui at,0x4140`) and the 0.5 together map the
+tyre's own maximum slip angle onto index 6, the last of the seven curves,
+exactly, so a tyre with a bigger `MaxSlipAngle` reaches the same curve at a
+bigger angle. The port and wheel_check's model both read the constant as
+11 until physicscar_check ran the shipped function: every index came out
+11/12 of the image's, and the gripping wheels' GroundForce[1] with it. `slti v0,s1,6` is a **signed**
 compare and nothing floors the index, so a negative slip angle would index
 behind `gLoadSensitivity` and interpolate against whatever is in front of
 it. Every caller passes `fabsf(angle)`, so it cannot happen in the game;
@@ -588,7 +595,9 @@ already decided that.
 
 `MaybeMakeSkids` (0x0019b2d0, 632 bytes) still has a body — it calls
 `MakeSkid` and `MakeNoSkid` on the `SkidMaker` — and belongs to task 27 with
-the rest of the skid trails. `MaybeMakeSmoke` (0x0019b2c8) and
+the rest of the skid trails. Until then `wheel_maybe_make_skids` passes the
+wheel and the time step to the `gWheelMaybeMakeSkidsFn` seam, which is NULL
+in the game and makes no skids. `MaybeMakeSmoke` (0x0019b2c8) and
 `MaybeMakeTireSpew` (0x0019b548) are each a bare `jr ra` in the shipped
 image: whatever particle work they used to do was compiled out, and the
 port is two empty functions with a note saying so rather than two TODOs.
@@ -609,7 +618,7 @@ of, and the rule that came out of it applies again: **a value that is zero,
 or one, or the wrong side of a floor makes the code that produced it
 invisible, and only the mutation pass will notice.**
 
-## The two seams, and the call that is owed
+## The two seams, and where they are installed
 
 `Suspension` reaches `Wheel::FindDrivingSurface` (0x0019a2a0) and
 `Wheel::ExchangeZForces` (0x0019a1c8) through `gWheelFindDrivingSurfaceFn`
@@ -619,15 +628,19 @@ two ordinary `jal`s -- and they exist only because `suspension.c` had to
 compile before `wheel.c` did. `wheel.c` owns both now, and
 `wheel_install_seams()` points them at the real methods.
 
-**Nothing in `3DS Files/source/` calls `wheel_install_seams()`, so on the
-handheld the seams are still NULL.** That is the honest state rather than a
-bug to paper over: no car is constructed on hardware yet, so there is no
-`Suspension` for them to serve. The call belongs to whichever slice first
-builds a car -- `PhysicsCar` or `Car` -- and it has to land before that
-car's first `ResolveForces`, or the suspension runs with no ground under it
-and every corner reports airborne. `tools/src/wheel_test.c`'s `[seams]`
-scenario is the only caller today; it installs twice and prints both
-results, so the idempotence the eventual caller will rely on is pinned.
+**`main.c` calls `wheel_install_seams()` once at boot**, beside the
+vtable installs and before anything can build a car. Car's fourth slice
+brought the first code that builds one -- `Car::SetMovementMode`'s
+`PHYSICS_MOVEMENT` arm constructs the `PhysicsCar` that owns the
+`Suspension` and the four `Wheel`s -- and the call had to be in place
+before that car's first `ResolveForces`, or the suspension would run with
+no ground under it and every corner would report airborne. It went to boot
+rather than into the arm because the image has no call to make there: the
+seams stand for two direct `jal`s, which are always linked, so installing
+them is linking, and linking happens once. Every harness that builds a car
+(`physicscar_test.c`, `mellowmover_test.c`, `carmode_test.c`) makes the
+same call in its `main`. `tools/src/wheel_test.c`'s `[seams]` scenario
+installs twice and prints both results, so the call is idempotent.
 
 ## Cross-check
 
