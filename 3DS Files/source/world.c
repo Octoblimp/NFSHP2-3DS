@@ -6,6 +6,7 @@
 #include <math.h>
 
 World  *pCurrentWorld;
+int32_t TweakerPauseWorld;
 
 // `min.s`, fs then ft.
 static float min_s(float fs, float ft)

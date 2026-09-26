@@ -16,10 +16,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Forty-eight cross-checkers pass, plus the table generators:
+Forty-nine cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -71,6 +71,7 @@ vclip_check        11890 ops,    22389 lines, 0 differ  (280 caught, 1 equivalen
 polyhedra_check    15907 ops,    64560 lines, 0 differ  (172 caught, 12 equivalent)
 collisionbody_check 1572 ops,    35426 lines, 0 differ  (622 caught, 24 equivalent)
 collision_check     3587 ops,     6859 lines, 0 differ  (121 caught, 10 equivalent)
+world_check         2173 ops,    12963 lines, 0 differ  (200/200 mutations caught)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -293,6 +294,24 @@ and so replaced every boot.
      and the port was found. The scrape's "faster body" test compares
      body 1's length with itself, so the particles always get body 1's
      velocity. Written up in `docs/formats/collision.md`.
+   - **The seventeenth slice is World's timestep**, in `worldstep.c`, with
+     bList::Sort in `blist.c`. That is the clock, the pause and the time
+     scale, GetTimestep, the car table, the Randoms,
+     GetDATToClosestPlayer, the checksums, DoTimestepMove,
+     DoTimestepCollisions and DoTimestep. The step's twenty calls out are
+     seams in `world.h`, skipped when NULL, apart from FinishMovement and
+     PlaceNewCar, which abort. `smokeable.h` names Smokeable up to
+     pSmokeableSpawner and has Break and DeleteFarAway as seams.
+     `world_check` is new: the image's World.obj, bRandom, bList::Sort and
+     the replay's clock helpers run against the port, with the Car
+     methods, the collision system, the replay's data and the seams as
+     logging stubs on both sides: 24 scenarios, 2,173 ops, 12,963 lines,
+     0 differ. Of its 200 mutations, all 200 are caught. The first pass
+     left seven, each a hole the script now covers (a NaN clock, the
+     ticker either side of exactly 0.3 s, a replay byte with high bits,
+     a loop count that is a multiple of 64 but not of 128, and cars at
+     exactly 100 and 150 from a player). No disagreement between the
+     image and the port was found. Written up in `docs/formats/world.md`.
 
    Things to know before the next slice:
    - **Nothing calls it on hardware yet.** The port has no `LoaderTable`,
@@ -396,11 +415,15 @@ and so replaced every boot.
      5 ticks (3aa3d70b against 3aa3d70a). Both of Update's mutants that
      changed the scale survived a script of round ages. A lifetime one
      ulp above each age's product, at 5, 1200 and 4000 ticks, kills them.
-   - **Next is the rest of the collision system**, which `FinishMovement`
-     needs: `World`'s timestep, from `0x0014a4e8`, with DoTimestepMove
-     (`0x0014b050`) and DoTimestepCollisions (`0x0014b110`), which asks
-     the witnesses for contacts and resolves them. `Collision` is done
-     (slice 16). After that come the track's rendering and streaming.
+   - **A NaN or an exact boundary is what tells an order apart.** Five
+     of the timestep's seven survivors swapped `min.s`/`max.s` operands or
+     turned a `<` into `<=`, and only a NaN clock or a value exactly on
+     the line (0.3 s of wait, 100 and 150 from a player) separates them.
+   - **Next is World's constructor and destructor** (`0x0014a4e8`,
+     `0x0014a748`), with the record's tail, the collision prediction's
+     recorders, DebugDisplay and UpdateAIDebugRendering; OBB's methods and
+     GetVectorOnTrack come with them. Then `Car::FinishMovement`. After
+     that come the track's rendering and streaming.
    - **The 3DS build compiles every file so far.** `tools/build_cia.ps1`
      built the CIA, 315,328 bytes, with the whole of `contact.c` in it.
      Nothing on the boot path calls it yet, so the size did not move.

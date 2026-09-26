@@ -21,6 +21,13 @@
 
 #include "bvector.h"
 
+struct Car;
+struct Chopper;
+struct DriverInfo;
+struct Race;
+struct RaceCoordinator;
+struct TrafficTeleporter;
+
 // A bTList is a bList, and a bList is its sentinel node: eight bytes, two
 // links.
 typedef struct WorldList {
@@ -91,6 +98,154 @@ float world_get_distance_to_closest_player(const World *w, const bVector3 *p);
 // floats.
 float world_get_distance_to_closest_player_2d(const World *w,
                                               const bVector2 *p);
+
+// gp-22620, 0x00323394, TweakerPauseWorld: a tweaker switch that holds the
+// world still. 0 on the disc.
+extern int32_t TweakerPauseWorld;
+
+// ------------------------------------------------------------ the timestep
+//
+// worldstep.c. Everything here but the distances above: the clock, the
+// pause and the time scale, the car table, the checksums, and the step
+// itself. It is apart from world.c because world.c links into six checkers
+// that have none of the collision system. docs/formats/world.md has the
+// decode.
+
+// 0x0014adf0. The scale the step is multiplied by, for `timer` seconds of
+// real time, and what to call with `param` when it runs out.
+void world_set_time_scale(World *w, float scale, float timer,
+                          void (*callback)(int32_t), int32_t param);
+
+// 0x0014ae08. Scale 1, no timer, no pause, no callback.
+void world_reset_time_scale(World *w);
+
+// 0x0014ae28. Paused for `seconds` of real time. The pause shares the time
+// scale's callback and its parameter.
+void world_set_world_paused(World *w, float seconds,
+                            void (*callback)(int32_t), int32_t param);
+
+// 0x0014ae38 and 0x0014ae40. Empty.
+void world_begin_pause(World *w);
+void world_end_pause(World *w);
+
+// 0x0014ae48. Counts the pause down by RealTimeElapsed. When it reaches 0 or
+// less, the pause is set to 0 and the callback runs once and is cleared.
+void world_update_world_paused(World *w);
+
+// 0x0014aeb0. Paused for some time still, or by the tweaker.
+int32_t world_is_world_paused(const World *w);
+
+// 0x0014aee8. The step, in seconds: RealTimeElapsedQuantized converted, or
+// the replay's recorded one while it plays back (and recorded while it
+// captures), times the time scale, whose timer it counts down. While the
+// replay plays back it also burns real time on the ticker until the step
+// has taken as long as it did when it was recorded, up to 0.3 s.
+// pReplayManager is read with no NULL test.
+float world_get_timestep(World *w);
+
+// 0x0014b480. One world step. docs/formats/world.md lists the order.
+void world_do_timestep(World *w, float dt);
+
+// 0x0014b050. Once every 128 steps, the far smokeables go. Then every
+// dynamic body on CollisionBodyList, taken in list order before any moves,
+// is moved through its table's Move (slot 64).
+void world_do_timestep_move(World *w, float dt);
+
+// 0x0014b110. The collisions: expired witnesses destroyed, new ones made,
+// the contacts found and resolved (earliest first, at most 20 rounds), the
+// broken smokeables' pieces tested again, and every Collision on the list
+// updated and ended once it has gone quiet.
+void world_do_timestep_collisions(World *w, float dt);
+
+// 0x0014bce0. Empty.
+void world_flush_collisions(World *w);
+
+// 0x0014bc98 and 0x0014bcc0. bRandom on the world's own seed.
+int32_t world_random_i(World *w, int32_t range);
+float   world_random_f(World *w, float f);
+
+// 0x0014bc18. The signed distance round the track from the nearer player,
+// by DAT: TrackPathManager::CompareDistances against each PlayerDAT, and
+// the one with the smaller magnitude. Player 1 wins a tie.
+float world_get_dat_to_closest_player(const World *w, float dat);
+
+// 0x0014ab08. The car table, from CarList: the players, the AI racers, the
+// cops and super cops, then the traffic, each group in list order, and the
+// counts and positions between them. Each car's CarIndex is its place.
+void world_build_car_table(World *w);
+
+// 0x0014acd8. The car in the table with DriverNumber n, or NULL.
+struct Car *world_get_car_by_number(const World *w, int32_t n);
+
+// 0x0014ada0, GetCarByDriverNumber. The same on pCurrentWorld.
+struct Car *world_get_car_by_driver_number(int32_t n);
+
+// 0x0014adc8, CarListCheckFlip: nonzero when a may stay in front of b on
+// CarList, which DoTimestep sorts by it -- a's x no greater than b's.
+int32_t world_car_list_check_flip(const struct Car *a, const struct Car *b);
+
+// 0x0014bce8. The teleporter places a new traffic car for `info`, and a car
+// it places goes on the end of CarList. TrafficTeleporter::PlaceNewCar is
+// not ported, and a NULL seam aborts: there is no car without it.
+void world_add_traffic_car(World *w, struct DriverInfo *info);
+
+// 0x0014b9e0. Each car's checksum folded into WorldTimer, times 33 plus
+// the next, and each car's position copied into CarPositionTable on the
+// way. Then the high half added to the low, and 16 bits kept.
+uint16_t world_calculate_debug_checksum(World *w);
+
+// 0x0014ba88. The checksum goes through the Joylog, and a byte of it
+// (with the seed's low byte) through the replay: recorded while it
+// captures, compared while it plays back. A mismatch posts RC_SKIP_REPLAY
+// to the race coordinator. pReplayManager is read with no NULL test.
+void world_verify_debug_checksums(World *w);
+
+// DoTimestepMove's stack array holds 176 bodies (704 bytes), and
+// DoTimestepCollisions' holds 8 broken pieces. The image does not check
+// either; the port aborts past them.
+#define WORLD_MAX_MOVING_BODIES 176
+#define WORLD_MAX_BROKEN_PIECES 8
+
+// DoTimestepCollisions' limit on rounds of resolving.
+#define WORLD_MAX_CONTACT_ROUNDS 20
+
+// The calls World's step makes into classes the port does not have yet.
+// The image makes each of them unconditionally, apart from the
+// teleporter's, the helicopter's and the race's, which each sit behind a
+// test of their own pointer. Here each call is a pointer, and a NULL one is
+// skipped -- all but FinishMovement, which moves a car to where its
+// collisions left it, so a step without it is not a step, and a NULL one
+// aborts. PlaceNewCar is AddTrafficCar's, and aborts the same way.
+extern void (*gTrafficTeleporterDoTimestepFn)(struct TrafficTeleporter *t,
+                                              float dt);    // 0x0020e6f8
+extern void (*gGlobalCopThinkFn)(float dt);                 // 0x002139d0
+extern void (*gCarDoWheelForcesFn)(struct Car *c);          // 0x00132a10
+extern void (*gChopperFlyFn)(struct Chopper *h, float dt);  // 0x001dcfa8
+extern void (*gCarFinishMovementFn)(struct Car *c, float dt);   // 0x00130480
+extern void (*gCarTriggerEventsFn)(struct Car *c);          // 0x00131a58
+extern void (*gCarMaybeCameraShakeFn)(struct Car *c);       // 0x001329e8
+extern void (*gCarMaybeRumbleFn)(struct Car *c);            // 0x00132740
+extern void (*gServiceParticleGroupsFn)(void);              // 0x001a3990
+// AcidEffectSystem::TweakerCheck and DoTimeStep, both on the image's one
+// AcidEffectSystem, WorldEffects (0x002e7780).
+extern void (*gWorldEffectsTweakerCheckFn)(void);           // 0x00125fe8
+extern void (*gWorldEffectsDoTimeStepFn)(float dt);         // 0x00127250
+extern void (*gEmProcessAllEventsFn)(void);                 // 0x001b0700
+extern void (*gUpdatePlayersGameStateFn)(void);             // 0x0017aa00
+extern void (*gRainTimeStepFn)(float dt);                   // 0x00128c08
+extern void (*gServiceFernFlattenersFn)(void);              // 0x001cf428
+extern void (*gServiceTweakerDamageFn)(void);               // 0x001ab6e8
+extern void (*gServiceTrackRouteEditorFn)(void);            // 0x001bbcd8
+extern void (*gRaceUpdateFn)(struct Race *r);               // 0x00146410
+extern struct Car *(*gTrafficTeleporterPlaceNewCarFn)(
+    struct TrafficTeleporter *t, struct DriverInfo *info);  // 0x0020e7f8
+// RaceCoordinator::PostMessage.
+extern void (*gRaceCoordinatorPostMessageFn)(struct RaceCoordinator *rc,
+                                             int32_t msg,
+                                             int32_t param); // 0x00147110
+
+// RCMessage 11, from the .mdebug enum.
+#define RC_SKIP_REPLAY 11
 
 // WorldLoopCounter, gp-20200, 0x00323d08: the world loop's step count,
 // 100000 in .sdata (0x000186a0), 0 after ResetWorldTime, and bumped by

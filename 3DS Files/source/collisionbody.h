@@ -391,9 +391,10 @@ extern BSlotPool *CollisionBodyWitnessSlotPool;
 #define COLLISIONBODY_BITFIELD_BYTES 5304
 #define COLLISIONBODY_SHORT_SLACK    1
 
-// Collision.obj's destructor (0x0020b358), which EndCollision calls. Not
-// ported yet: a witness with a collision is ended through this, and a
-// NULL seam aborts -- nothing in the port makes a collision yet.
+// Collision.obj's destructor (0x0020b358), which EndCollision calls: a
+// witness with a collision is ended through this. collision.c has it, and
+// main.c points this at it; it stays a pointer so the checkers that link
+// collisionbody.c need not link collision.c. A NULL seam aborts.
 extern void (*gCollisionDestroyFn)(struct Collision *c, int32_t flags);
 
 // Smokeable.obj's ConvertToSmokeable (0x0020c338), which MaybeCreateWitnesses
@@ -964,12 +965,14 @@ extern float MinimumContactImpulseFactor;   // 0.3
 extern float MinimumContactImpulseSpeed;    // 0.1
 extern float MaxFrictionScrapeSpeed;        // 1.0
 
-// Collision.obj, not ported yet: `new Collision(w, pt)` -- bOMalloc on
-// CollisionSlotPool, then the constructor (0x0020b290) -- which
-// BeginCollision makes, and Collision::AddImpulse (0x0020b450), which
-// CollisionImpulse calls with the contact point, the impulse on the second
-// body and the sliding speed. A collision is state the sound and the
-// damage read, so a NULL seam that is reached aborts.
+// Collision.obj's `new Collision(w, pt)` -- bOMalloc on CollisionSlotPool,
+// then the constructor (0x0020b290) -- which BeginCollision makes, and
+// Collision::AddImpulse (0x0020b450), which CollisionImpulse calls with the
+// contact point, the impulse on the second body and the sliding speed.
+// collision.c has both, and main.c points these at them; they stay
+// pointers so the checkers that link contact.c need not link collision.c.
+// A collision is state the sound and the damage read, so a NULL seam that
+// is reached aborts.
 extern struct Collision *(*gCollisionNewFn)(CollisionBodyWitness *w,
                                             bVector3 *pt);
 extern void (*gCollisionAddImpulseFn)(struct Collision *c, bVector3 *at,

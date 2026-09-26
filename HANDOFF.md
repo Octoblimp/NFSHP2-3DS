@@ -6648,3 +6648,113 @@ which asks the witnesses for contacts and resolves them, then
 FlushCollisions, Random, GetCarByNumber, GetDATToClosestPlayer and
 GetTimestep. Smokeable::Break and DeleteFarAwaySmokeableCollisionBodies
 become seams. Then `Car::FinishMovement`.
+
+## Session 30, continued (2026-09-26) -- Task 27's seventeenth slice: World's timestep
+
+The sixteenth slice went in as `4ad0652`. The seventeenth is the part of
+`World.obj` that runs every frame (`0x0014ab08` .. `0x0014bce0`), ported
+in `worldstep.c`, with bList::Sort (`0x00238328`) in `blist.c`. That is:
+
+- the clock: SetTimeScale, ResetTimeScale, SetWorldPaused, BeginPause,
+  EndPause, UpdateWorldPaused, IsWorldPaused and GetTimestep;
+- the car table: BuildCarTable, GetCarByNumber, GetCarByDriverNumber,
+  CarListCheckFlip and AddTrafficCar;
+- the two Random overloads, GetDATToClosestPlayer and FlushCollisions;
+- CalculateDebugChecksum and VerifyDebugChecksums;
+- DoTimestepMove, DoTimestepCollisions and DoTimestep.
+
+The constructor, the destructor, the collision prediction and the debug
+views are the next slice. DoPointerSnapshot waits on ReplaySnapshot. The
+decode is `docs/formats/world.md`.
+
+```
+world_check          24 scenarios, 2173 ops, 12963 lines, 0 differ; 85 steps
+                     200 mutations: 200 caught, 0 equivalent, 0 unexplained
+```
+
+### What came with it
+
+- **Twenty seams out**, in `world.h`: the teleporter's DoTimestep and
+  PlaceNewCar, GlobalCopThink, Chopper::Fly, five Car methods
+  (DoWheelForces, FinishMovement, TriggerEvents, MaybeCameraShake,
+  MaybeRumble), the particles, WorldEffects' TweakerCheck and DoTimeStep,
+  the events, the players' game state, the rain, the ferns, the tweaker
+  damage, the route editor, Race::Update and
+  RaceCoordinator::PostMessage. A NULL one is skipped, apart from
+  FinishMovement, which moves a car to where its collisions left it, and
+  PlaceNewCar, which AddTrafficCar has nothing to add without. Both
+  abort.
+- **`smokeable.h`**, Smokeable's head up to pSmokeableSpawner, with
+  Break (which aborts when reached unset) and
+  DeleteFarAwaySmokeableCollisionBodies (skipped) as seams.
+- **`blist.c`**: bList::Sort, a bubble sort that swaps a pair in place
+  and keeps going until a pass moves nothing.
+- `TweakerPauseWorld` (gp-22620) is defined in `world.c`.
+
+### What the listing says
+
+- **GetTimestep reads pReplayManager twice, with no NULL test.** While the
+  replay plays back, it spins on the ticker until the step has taken as
+  long as it did when it was recorded. The wait is
+  `min.s 0.3, max.s(x, 0)`, and with a NaN clock the order of the
+  operands decides whether 0.3 or NaN comes out. The spin compares the ticker's
+  milliseconds times 0.001 with `<`.
+- **The pause and the time scale share one callback.** Each clears it
+  after it runs. The pause counts down by RealTimeElapsed, the time scale
+  by the step.
+- **The car table leaves out a car of no known type.** It is players, AI
+  racers, cops and super cops, then traffic, each group in list order.
+- **DoTimestep reads the counts again after every car.** A player with no
+  player object gets 9999999 in three lanes and its fourth left alone.
+- **The shake test is made twice.** Once before the loop, and again
+  before each car's rumble, so a MaybeCameraShake that changes the race
+  state stops the rumble for the cars after it.
+- **DoTimestepCollisions resolves at most 20 rounds** and then destroys
+  what is left. A witness is tested once for each broken piece on it.
+- **VerifyDebugChecksums posts RC_SKIP_REPLAY** only while replaying,
+  only when not capturing, and only when the low byte differs.
+
+### How the checker runs it
+
+The model runs the image's World.obj, bRandom, bList::Sort,
+GetRealTimeElapsedFromQuantized, bGetTickerDifference, IsReplayDemoMode
+and ~bTList<Contact>, and the harness runs the port. Everything else the
+step calls is a stub on both sides with the same simple semantics:
+
+- the Car methods log;
+- a witness's destroy and a collision's End unlink the node and zero both
+  links, so a walk through a freed node falls over;
+- TestForContact and MaybeCreateWitnesses append what the script queued,
+  unless it is on the list already;
+- RemoveContacts unlinks every contact on a body, and Break writes the
+  pieces the script queued;
+- the replay's and the Joylog's data, CompareDistances and bGetTicker
+  answer from queues.
+
+MaybeCameraShake can change the race state from inside the loop.
+
+### The mutation pass
+
+200 mutations. The first pass caught 193 and left 7, each a hole:
+
+- **`waste min swapped` and `waste max swapped`**: the clock is now driven
+  through a NaN.
+- **`waste spin <=`**: ticker readings either side of exactly 0.3 s of
+  wait (89,999,996 to 90,000,011 ticks all give exactly 0.3f).
+- **`verify rget unmasked`**: a replay byte with high bits, after a drain
+  so no stale reading answers it.
+- **`move schedule 63`**: loop count 115, where `+ 77` is a multiple of 64
+  but not of 128.
+- **`step events <=` and `step terrain <=`**: player 0's car at the
+  origin, and cars exactly 100 and 150 from it.
+
+The rerun: 200 mutations, 200 caught, 0 equivalent, 0 unexplained. The
+CIA builds with no warnings.
+
+### Next: World's constructor and destructor
+
+The constructor (`0x0014a4e8`) and destructor (`0x0014a748`), the record's
+tail (the prediction's OBBs, positions, indices and drive targets, to
+5936), the collision prediction's recorders, DebugDisplay and
+UpdateAIDebugRendering. OBB's methods and GetVectorOnTrack come with them.
+Then `Car::FinishMovement`.

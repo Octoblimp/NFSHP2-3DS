@@ -1782,6 +1782,25 @@ is citro3d and owns the top.
         ROAD's scrape range is 50 to 50, and the port divides with
         `ee_div` there. No disagreement between the image and the port
         was found. Written up in `docs/formats/collision.md`.
+
+        **The seventeenth slice is closed: World's timestep**, in
+        `worldstep.c`, with bList::Sort in `blist.c`. That is the clock
+        (SetTimeScale, ResetTimeScale, SetWorldPaused, Begin- and
+        EndPause, UpdateWorldPaused, IsWorldPaused, GetTimestep), the car
+        table (BuildCarTable, GetCarByNumber, GetCarByDriverNumber,
+        CarListCheckFlip, AddTrafficCar), the two Randoms,
+        GetDATToClosestPlayer, FlushCollisions, Calculate- and
+        VerifyDebugChecksums, DoTimestepMove, DoTimestepCollisions and
+        DoTimestep. The twenty calls the step makes into classes the port
+        does not have are seams in `world.h`, skipped when NULL, apart
+        from FinishMovement and PlaceNewCar, which abort. Smokeable::Break
+        and DeleteFarAwaySmokeableCollisionBodies are `smokeable.h`'s.
+        `world_check` runs the image's World.obj in mipsemu against the
+        port: 24 scenarios, 2,173 ops, 12,963 lines, 0 differ. All 200 of
+        its mutations are caught. GetTimestep's wait for a replay's frame
+        is capped at `min.s 0.3, max(x, 0)`, and the shake test is made
+        again before each car's rumble. No disagreement between the image
+        and the port was found. Written up in `docs/formats/world.md`.
         CONTINUE.md has what is next.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag
