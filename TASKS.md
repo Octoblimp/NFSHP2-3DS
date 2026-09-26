@@ -1763,6 +1763,25 @@ is citro3d and owns the top.
         EE's division makes that 0 where IEEE makes it NaN, so the port
         calls `ee_div`. No disagreement between the image and the port
         was found. Written up in `docs/formats/collision-body.md`.
+
+        **The sixteenth slice is closed: `Collision.obj`**, in
+        `collision.c`, with World's two GetDistanceToClosestPlayer
+        overloads in `world.c`. That is InitCollision and CloseCollision,
+        the constructor and destructor, AddImpulse, Update, End,
+        GetTerrainType, IsTwoCarCollision, GetCollidingCars,
+        IsPlayerInvolved and IsSmokeableInvolved. DoSnapshot waits on
+        ReplaySnapshot. The sound's CreateSample, ReleaseSample and
+        PlayScrape and the particles' TriggerEffect are four seams that
+        are skipped when NULL. `main.c` fills the witness's three
+        Collision seams with it. `collision_check` runs the image's pool
+        and Collision in mipsemu against the port: 15 scenarios, 3,587
+        ops, 6,859 lines, 0 differ. Of its 131 mutations, 121 are caught
+        and 10 are equivalent. The scrape's particles look as if they get
+        the faster body's velocity, but both calls are on body 1 and the
+        test compares a length with itself, so they always get body 1's.
+        ROAD's scrape range is 50 to 50, and the port divides with
+        `ee_div` there. No disagreement between the image and the port
+        was found. Written up in `docs/formats/collision.md`.
         CONTINUE.md has what is next.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag

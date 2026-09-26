@@ -51,6 +51,7 @@
 #include "cardriver.h"
 #include "carmodes.h"
 #include "carstate.h"
+#include "collision.h"
 #include "collisionbody.h"
 #include "gamedata.h"
 #include "fesound.h"
@@ -1180,6 +1181,14 @@ int main(int argc, char** argv)
     // Car::ResetToRoutePoint, which carreset.c has ported since task 27's
     // third slice. Left NULL, the button did nothing.
     gCarResetToRoutePointFn = car_reset_to_route_point;
+
+    // Collision.obj is ported (collision.c), so a witness's first touch
+    // makes a real Collision, CollisionImpulse adds into it, and a
+    // witness's end destroys it. The sound and the particles it calls stay
+    // NULL until tasks 29 and 30, and it makes neither.
+    gCollisionNewFn        = collision_new;
+    gCollisionAddImpulseFn = collision_add_impulse;
+    gCollisionDestroyFn    = collision_destroy;
 
     // The two calls Suspension makes into Wheel go through pointers, left
     // NULL until something says Wheel is linked -- which, in the game,

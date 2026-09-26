@@ -6555,3 +6555,96 @@ above and slice A's `gCollisionDestroyFn`. DoSnapshot is the replay's.
 After it come `World`'s timestep (`0x0014a4e8` ..), whose
 DoTimestepCollisions (`0x0014b110`) asks the witnesses for contacts and
 resolves them, and `Car::FinishMovement`.
+
+## Session 30, continued (2026-09-26) -- Task 27's sixteenth slice: Collision
+
+Slices 1 to 15 went in as `b702739`. The sixteenth is `Collision.obj`
+(`0x0020b238` .. `0x0020b87c`), ported in `collision.{c,h}`, with World's
+two GetDistanceToClosestPlayer overloads (`0x0014bb60`, `0x0014bbb8`) in
+`world.c`. That is:
+
+- InitCollision and CloseCollision, on a 32-slot `CollisionSlotPool`;
+- the constructor, the destructor and the delete;
+- AddImpulse, which sums the impulse and its length and fires the scrape
+  and impact particles near a player;
+- Update, End and GetTerrainType;
+- IsTwoCarCollision, GetCollidingCars, IsPlayerInvolved and
+  IsSmokeableInvolved.
+
+DoSnapshot is the replay's and waits on ReplaySnapshot. The decode is
+`docs/formats/collision.md`.
+
+```
+collision_check      15 scenarios, 3587 ops, 6859 lines, 0 differ; 134 effects triggered
+                     131 mutations: 121 caught, 10 equivalent, 0 unexplained
+```
+
+### What came with it
+
+- **Four seams out, each skipped when NULL**: the sound's CreateSample,
+  ReleaseSample and PlayScrape (task 29), and
+  `TerrainEffectEmitters::TriggerEffect` (task 30). A skipped CreateSample
+  answers NULL, as the sound does with no voice free.
+- **Three seams in**: `main.c` now points `collisionbody.h`'s
+  `gCollisionNewFn`, `gCollisionAddImpulseFn` and `gCollisionDestroyFn` at
+  `collision.c`. A witness's first touch on hardware makes a real
+  Collision.
+- **World's fields up to PotentialDriveTargetID** in `world.h`, with
+  asserts on the console offsets. PlayerPositions (336, 352) is what the
+  distances read.
+
+### What the listing says
+
+- **The scrape's "faster body" is always body 1.** AddImpulse calls
+  GetVelocity on body 1 twice and compares the first length with itself.
+  The test never holds, so the particles get body 1's velocity. Both calls
+  are made, so the port makes both.
+- **ROAD's scrape range is 50 to 50.** The divide is x / 0 there, FLT_MAX
+  on the EE; the clamp brings it to 1 either way, but the port uses
+  `ee_div`.
+- **Update never reads its argument.** The age is
+  `(float)(int)(WorldTimer - LastContactTime) * 0.00025`, so a contact
+  stamped after now counts as live, and 1200 ticks is exactly 0.3's float,
+  not below it.
+- **The two distance overloads differ.** The bVector3 one is VU0 in three
+  dimensions and gates the sound at 100; the bVector2 one is scalar on the
+  ground plane and gates the particles at 50.
+
+### How the checker runs it
+
+The model runs the image's own InitCollision, bNewSlotPool, bOMalloc and
+bFree, and the harness runs `bslotpool.c`, each on a block the script owns.
+So a collision is labelled by its slot (Cn), and the order a freed slot
+comes back in is checked. R0 and R1 are built outside the pool on 0xa5
+memory, which shows every field the constructor skips. The bodies share one
+recording vtable, whose velocity and terrain slots take `this` eight bytes
+in. The sound, the particles and the witness's EndCollision log on both
+sides.
+
+### The mutation pass
+
+131 mutations. The first pass caught 119 and left 12:
+
+- **Ten are equivalent**, each listed with a reason:
+  - the lifetime one ulp down, since no whole number of ticks lands between;
+  - the scrape's floor and plain divide, and the impact's floor, since
+    each quotient is never negative;
+  - three on the scrape's velocity, since both calls answer body 1's;
+  - three on `min.s`, since a distance is never NaN or -0.
+- **Two were holes**: `tick-near` and `upd-divide`, both of which changed
+  how the age is scaled. `ticks * 0.00025f` and `ticks / 4000.0f` round
+  apart at 5 ticks (3aa3d70b against 3aa3d70a). The new scenario sets the
+  lifetime one ulp above each age's product at 5, 1200 and 4000 ticks.
+
+The rerun: 131 mutations, 121 caught, 10 equivalent, 0 unexplained. The
+checkers that link `world.c` or the witness (car, physicscar,
+realcontroller, realdriver, carmode, collisionbody) were rerun after it,
+all 0 differ, and the CIA built at 316,352 bytes.
+
+### Next: World's timestep
+
+DoTimestepMove (`0x0014b050`) and DoTimestepCollisions (`0x0014b110`),
+which asks the witnesses for contacts and resolves them, then
+FlushCollisions, Random, GetCarByNumber, GetDATToClosestPlayer and
+GetTimestep. Smokeable::Break and DeleteFarAwaySmokeableCollisionBodies
+become seams. Then `Car::FinishMovement`.

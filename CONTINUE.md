@@ -16,10 +16,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Forty-seven cross-checkers pass, plus the table generators:
+Forty-eight cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -70,6 +70,7 @@ track_check        16149 ops,    11790 lines, 0 differ  (266 caught, 5 equivalen
 vclip_check        11890 ops,    22389 lines, 0 differ  (280 caught, 1 equivalent)
 polyhedra_check    15907 ops,    64560 lines, 0 differ  (172 caught, 12 equivalent)
 collisionbody_check 1572 ops,    35426 lines, 0 differ  (622 caught, 24 equivalent)
+collision_check     3587 ops,     6859 lines, 0 differ  (121 caught, 10 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -269,13 +270,29 @@ and so replaced every boot.
      GetCollision, BeginCollision and TestForContact. They were done
      together because TestForContact builds a Contact. `Collision`'s
      constructor and AddImpulse are the seams `gCollisionNewFn` and
-     `gCollisionAddImpulseFn`, which abort if reached unset, and nothing
-     sets them yet. `collisionbody_check` runs the contacts on E0..E3,
+     `gCollisionAddImpulseFn`, which abort if reached unset. The
+     sixteenth slice fills them. `collisionbody_check` runs the contacts on E0..E3,
      bodies whose nineteen contact slots are logging stubs: 81 scenarios,
      1,572 ops, 35,426 lines, 89 dumps, 0 differ. Of its 646 mutations,
      622 are caught and 24 are equivalent, with 0 unexplained. No
      disagreement between the image and the port was found. Written up in
      `collision-body.md`.
+   - **The sixteenth slice is `Collision.obj`**, in `collision.{c,h}`,
+     with World's two GetDistanceToClosestPlayer overloads in `world.c`.
+     That is the pool, the constructor and destructor, AddImpulse, Update,
+     End, GetTerrainType and the four questions. DoSnapshot waits on
+     ReplaySnapshot. The sound's CreateSample, ReleaseSample and
+     PlayScrape and the particles' TriggerEffect are seams that a NULL
+     skips; tasks 29 and 30 fill them. `main.c` points the witness's
+     `gCollisionNewFn`, `gCollisionAddImpulseFn` and `gCollisionDestroyFn`
+     at it. `collision_check` is new: the image's own InitCollision,
+     bNewSlotPool, bOMalloc and bFree run against `bslotpool.c`, and two
+     more collisions are built on 0xa5 memory: 15 scenarios, 3,587 ops,
+     6,859 lines, 0 differ. Of its 131 mutations, 121 are caught and 10
+     are equivalent, with 0 unexplained. No disagreement between the image
+     and the port was found. The scrape's "faster body" test compares
+     body 1's length with itself, so the particles always get body 1's
+     velocity. Written up in `docs/formats/collision.md`.
 
    Things to know before the next slice:
    - **Nothing calls it on hardware yet.** The port has no `LoaderTable`,
@@ -374,13 +391,16 @@ and so replaced every boot.
      contacts' survivors had their case in the script, but the test after
      it stamped the same body again before any dump. The same thing hid
      the car count's highest in slice C.
+   - **A product and a quotient round apart.** Update's age is
+     `(float)ticks * 0.00025f`, and `ticks / 4000.0f` differs from it at
+     5 ticks (3aa3d70b against 3aa3d70a). Both of Update's mutants that
+     changed the scale survived a script of round ages. A lifetime one
+     ulp above each age's product, at 5, 1200 and 4000 ticks, kills them.
    - **Next is the rest of the collision system**, which `FinishMovement`
-     needs:
-     - `Collision`, from `0x0020b290`. It fills the two seams above;
-     - `World`'s timestep, from `0x0014a4e8`, with DoTimestepCollisions
-       (`0x0014b110`), which asks the witnesses for contacts and resolves
-       them.
-     After that come the track's rendering and streaming.
+     needs: `World`'s timestep, from `0x0014a4e8`, with DoTimestepMove
+     (`0x0014b050`) and DoTimestepCollisions (`0x0014b110`), which asks
+     the witnesses for contacts and resolves them. `Collision` is done
+     (slice 16). After that come the track's rendering and streaming.
    - **The 3DS build compiles every file so far.** `tools/build_cia.ps1`
      built the CIA, 315,328 bytes, with the whole of `contact.c` in it.
      Nothing on the boot path calls it yet, so the size did not move.

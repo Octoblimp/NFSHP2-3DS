@@ -1025,8 +1025,8 @@ makes the friction 0, and the friction's direction is −0 / 0. The EE's
 division answers FLT_MAX, and vt × FLT_MAX is 0. IEEE would answer NaN, and
 the NaN would reach both bodies. The port divides with `ee_div` (eefpu.h).
 
-**What the port does not have yet.** `Collision` is not ported, so two of
-its calls are seams in `collisionbody.h`:
+**Two calls go through seams.** Two of `Collision`'s calls are seams in
+`collisionbody.h`, so `collisionbody_check` can log them:
 
 - BeginCollision's `new Collision(w, pt)`, which is bOMalloc on
   CollisionSlotPool and then the constructor at 0x0020b290, is
@@ -1034,7 +1034,8 @@ its calls are seams in `collisionbody.h`:
 - `Collision::AddImpulse` (0x0020b450) is `gCollisionAddImpulseFn`.
 
 A collision is state the sound and the damage read, so a NULL one that is
-reached aborts. Nothing sets either yet.
+reached aborts. `Collision` is ported now (`collision.c`, see
+`collision.md`), and `main.c` sets both, and `gCollisionDestroyFn`, to it.
 
 ## The witness's contact tests
 
@@ -1136,7 +1137,8 @@ the port's size less the slack. Each pool gets one fixed block on each
 side, and slots are labelled by number, because the host's slots are wider.
 Both sides log every pool allocation and free, every bPrintf, and every
 `~Collision`. The port reaches `~Collision` through `gCollisionDestroyFn`,
-because Collision.obj is not ported.
+which the harness leaves as a logging stub. At boot `main.c` points it at
+`collision_destroy`.
 
 The script covers:
 
