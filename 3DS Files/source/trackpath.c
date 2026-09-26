@@ -556,6 +556,14 @@ void trackpath_coord_update_position(TrackPathCoordinate *c,
     trackpath_manager_update_position(&TheTrackPathManager, c, pos);
 }
 
+// 0x00134f18, in Car.obj.
+void trackpath_coord_reset_position(TrackPathCoordinate *c,
+                                    const bVector2 *pos)
+{
+    c->pTrackPoint = NULL;
+    trackpath_coord_update_position(c, pos);
+}
+
 // 0x001f5df8.
 void trackpath_coord_update_position_along(TrackPathCoordinate *c,
                                            float along, float side)

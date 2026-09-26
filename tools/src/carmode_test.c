@@ -28,6 +28,7 @@
 #include "bticker.h"
 #include "car.h"
 #include "cardamage.h"
+#include "collision.h"
 #include "collisionbody.h"
 #include "copmanager.h"
 #include "difficultyinfo.h"
@@ -44,6 +45,7 @@
 #include "topology.h"
 #include "trackpath.h"
 #include "trackroute.h"
+#include "world.h"
 
 // The clock object's globals that the linked files read. Defined here
 // rather than linked from realtime.c, which would bring the joylog in
@@ -52,6 +54,8 @@
 int32_t WorldTimer = 0;
 int32_t WorldTimeFrames = 0;
 float   WorldTimeElapsed = 0.0f;
+// FinishMovement's phase count: the disc's 100000 outside slice eleven.
+int32_t WorldLoopCounter = 100000;
 
 static float fb(uint32_t b)
 {
@@ -416,11 +420,25 @@ void topology_set_interest_bbox3(TopologyCoordinate *tc, const bVector3 *pos,
     abort();
 }
 
+// FinishMovement's topology test: the answers slice eleven's case scripts,
+// in order. Reaching it with none left is a harness bug.
+static int32_t g_fm_topo[2];
+static int     g_fm_ntopo;
+
 int topology_has_topology(TopologyCoordinate *tc, const bVector2 *xy)
 {
-    (void)tc; (void)xy;
-    printf("has_topology reached\n");
-    abort();
+    int32_t r;
+
+    if (g_fm_ntopo == 0) {
+        printf("has_topology reached with no answer scripted\n");
+        abort();
+    }
+    r = g_fm_topo[0];
+    g_fm_topo[0] = g_fm_topo[1];
+    g_fm_ntopo--;
+    printf("hastopo tc=%s xy=%08x %08x -> %d\n", label(tc), bf(xy->x),
+           bf(xy->y), (int)r);
+    return r;
 }
 
 // collisionbody.c's TrackPolygonCollisionBody wants the tree; carmode
@@ -1657,6 +1675,214 @@ static void s_terrain(void)
     car_set_movement_mode(c, eNO_MOVEMENT);
 }
 
+// ------------------------------------------------------------ slice eleven
+
+// FinishMovement's player: only the zone, the wrong way flag and the jump
+// cam's height are read, and the four Player calls are stand-ins that log.
+// ClearZone empties the zone; RequestZone answers as the case says, and
+// moves the player into the zone when it says yes.
+static struct Player g_fmplayer;
+static int32_t       g_fm_jc, g_fm_rz;
+
+static void fake_clear_zone(Player *p, int32_t sound)
+{
+    printf("clearzone p=%s sound=%d zone=%d\n", label(p), (int)sound,
+           (int)p->nZoneCurrent);
+    p->nZoneCurrent = 0;
+}
+
+static int32_t fake_request_zone(Player *p, int32_t zone, int32_t force,
+                                 int32_t b2, int32_t b3)
+{
+    printf("requestzone p=%s zone=%d force=%d b2=%d b3=%d -> %d\n", label(p),
+           (int)zone, (int)force, (int)b2, (int)b3, (int)g_fm_rz);
+    if (g_fm_rz)
+        p->nZoneCurrent = zone;
+    return g_fm_rz;
+}
+
+static int32_t fake_jump_cam(Player *p)
+{
+    printf("jumpcam p=%s -> %d\n", label(p), (int)g_fm_jc);
+    return g_fm_jc;
+}
+
+static void fake_clean_up(Player *p)
+{
+    printf("cleanupjumpcam p=%s\n", label(p));
+}
+
+static void put4(bVector3 *v, const uint32_t w[4])
+{
+    v->x = fb(w[0]);
+    v->y = fb(w[1]);
+    v->z = fb(w[2]);
+    v->pad = fb(w[3]);
+}
+
+static void identity(bMatrix4 *m)
+{
+    float *f = (float *)(void *)m;
+    int k;
+    for (k = 0; k < 16; k++)
+        f[k] = k % 5 == 0 ? 1.0f : 0.0f;
+}
+
+static void s_finish(void)
+{
+    Car *c = g_car;
+    CarState *cs = &c->State;
+    TrackPathCoordinate *t = &c->TheTrackPathCoordinate;
+    CollisionBody *self = &g_ccb->Dynamic.Body;
+    CollisionBodyWitness *const end =
+        (CollisionBodyWitness *)(void *)&CollisionBodyWitnessList;
+    Car *others[CM_FM_NCARS - 1];
+    World *world;
+    Collision *col;
+    CollisionBodyWitness *wit;
+    CollisionBody *body;
+    CollisionBodyWitnessNode wlist0;
+    int8_t type0[2];
+    MovementMode mode0;
+    Player *player0;
+    int paths0;
+    ReplayManager *rm0;
+    int n, i, k;
+
+    printf("== finish setup\n");
+    car_set_control_mode(c, eNO_CONTROL);
+    reg_add("fmplayer", &g_fmplayer, sizeof g_fmplayer, NULL);
+    world = calloc(1, sizeof(World));
+    reg_add("world", world, sizeof(World), NULL);
+    for (i = 0; i < CM_FM_NCARS - 1; i++) {
+        char nm[16];
+        snprintf(nm, sizeof nm, "other%d", i);
+        others[i] = calloc(1, sizeof(Car));
+        reg_add(nm, others[i], sizeof(Car), NULL);
+        world->CarTable[i + 1] = others[i];
+    }
+    world->CarTable[0] = c;
+    col = calloc(1, sizeof(Collision));
+    reg_add("col", col, sizeof(Collision), NULL);
+    wit = calloc(1, sizeof(CollisionBodyWitness));
+    reg_add("wit", wit, sizeof(CollisionBodyWitness), NULL);
+    body = calloc(1, sizeof(CollisionBody));
+    reg_add("obody", body, sizeof(CollisionBody), NULL);
+    col->pWitness = wit;
+    wlist0 = CollisionBodyWitnessList;
+    type0[0] = g_ccb->Dynamic.Body.Type;
+    type0[1] = g_ccb2->Dynamic.Body.Type;
+    mode0 = c->TheMovementMode;
+    player0 = c->pPlayer;
+    paths0 = TheTrackPathManager.NumPaths;
+    rm0 = pReplayManager;
+    identity(&cs->BodyMatrix);
+    identity(&cs->WheelMatrix[0]);
+    g_rm->CapturingFlag = 1;
+    pCurrentWorld = world;
+    for (n = 0; n < CM_N(cm_fm); n++) {
+        const CmFm *x = &cm_fm[n];
+        const TrackPathPoint *pt;
+
+        printf("== finish %d\n", n);
+        put4(&cs->Acceleration, cm_fm_acc);
+        put4(&cs->AngularAcceleration, cm_fm_acc);
+        put4(&cs->Velocity, x->vel);
+        put4(&c->vOldVel, cm_fm_oldvel);
+        put4(&cs->AngularVelocity, cm_fm_ang);
+        put4(&c->vOldAngVel, cm_fm_oldang);
+        put4(&cs->Position, x->pos);
+        cs->Odometer = fb(x->odo);
+        cs->VelocityMagnitude = fb(x->vmag);
+        cs->nWheelsTouchingGround = x->wheels;
+        cs->ForwardSpeed = fb(x->fwd);
+        cs->Angle = (uint16_t)x->angle;
+        t->Position.x = fb(x->pos[0]);
+        t->Position.y = fb(x->pos[1]);
+        t->pTrackPoint = x->tp < 0 ? NULL : TheTrackPathManager.pPoints + x->tp;
+        TheTrackPathManager.NumPaths = x->nopaths ? 0 : paths0;
+        c->TheMovementMode = (MovementMode)x->mode;
+        c->ResetMe = 0;
+        c->ForceHeadlightsOn = x->lights;
+        c->HeadlightsState = 0;
+        WorldLoopCounter = x->loop;
+        WorldTimer = x->now;
+        BoringAIForCameraTuningOn = x->boring;
+        g_DisableAutoReplay = x->disable;
+        c->pPlayer = x->player ? &g_fmplayer : NULL;
+        g_fmplayer.nZoneCurrent = x->zone;
+        g_fmplayer.bWrongWay = x->wrong;
+        g_fmplayer.EyeVerts[2].z = fb(x->eye);
+        c->AirTimeSwitch = fb(x->ats);
+        g_fm_ntopo = x->ntopo;
+        g_fm_topo[0] = x->topo[0];
+        g_fm_topo[1] = x->topo[1];
+        g_fm_jc = x->jc;
+        g_fm_rz = x->rz;
+        world->AICarPos = x->ai;
+        world->CopCarPos = x->cop;
+        for (i = 0; i < CM_FM_NCARS - 1; i++) {
+            others[i]->State.Position.x = fb(x->table[i][0]);
+            others[i]->State.Position.y = fb(x->table[i][1]);
+            others[i]->State.Position.z = fb(x->table[i][2]);
+        }
+        if (x->col) {
+            CollisionBody *other = x->iscar ? &g_ccb2->Dynamic.Body : body;
+            other->Type = (int8_t)x->type;
+            self->Type = (int8_t)x->selftype;
+            self->NumCollisions = 1;
+            wit->pBody1 = x->order == 0 ? self : other;
+            wit->pBody2 = x->order == 0 ? other : self;
+            wit->pCollision = x->has ? col : NULL;
+            wit->Link.next = end;
+            wit->Link.prev = end;
+            CollisionBodyWitnessList.next = wit;
+            CollisionBodyWitnessList.prev = wit;
+            col->LastContactTime.PackedTime =
+                (uint32_t)x->now - (uint32_t)x->ago;
+        }
+        pReplayManager = x->rm ? g_rm : NULL;
+        for (i = 0; i < CM_NSNAPS; i++)
+            g_snaps[i].TotalInterestingValue = 0.0f;
+        car_finish_movement(c, fb(x->dt));
+        if (g_fm_ntopo != 0) {
+            printf("finish %d left HasTopology answers\n", n);
+            abort();
+        }
+        CollisionBodyWitnessList = wlist0;
+        g_ccb->Dynamic.Body.Type = type0[0];
+        g_ccb2->Dynamic.Body.Type = type0[1];
+        self->NumCollisions = 0;
+        pt = t->pTrackPoint;
+        printf("fm acc=%08x %08x %08x %08x ang=%08x %08x %08x %08x odo=%08x "
+               "resetme=%d lights=%d\n",
+               bf(cs->Acceleration.x), bf(cs->Acceleration.y),
+               bf(cs->Acceleration.z), bf(cs->Acceleration.pad),
+               bf(cs->AngularAcceleration.x), bf(cs->AngularAcceleration.y),
+               bf(cs->AngularAcceleration.z),
+               bf(cs->AngularAcceleration.pad), bf(cs->Odometer),
+               (int)c->ResetMe, (int)c->HeadlightsState);
+        printf("fm tpc=%08x %08x pt=%d zone=%d eye=%08x ats=%08x tiv=",
+               bf(t->Position.x), bf(t->Position.y),
+               pt == NULL ? -1 : (int)(pt - TheTrackPathManager.pPoints),
+               (int)g_fmplayer.nZoneCurrent, bf(g_fmplayer.EyeVerts[2].z),
+               bf(c->AirTimeSwitch));
+        for (k = 0; k < CM_NSNAPS; k++)
+            printf("%s%08x", k ? " " : "",
+                   bf(g_snaps[k].TotalInterestingValue));
+        printf("\n");
+    }
+    c->pPlayer = player0;
+    c->TheMovementMode = mode0;
+    c->ResetMe = 0;
+    pCurrentWorld = NULL;
+    WorldLoopCounter = CM_LOOP0;
+    BoringAIForCameraTuningOn = 0;
+    g_DisableAutoReplay = 0;
+    pReplayManager = rm0;
+    TheTrackPathManager.NumPaths = paths0;
+}
+
 int main(void)
 {
     int i;
@@ -1686,6 +1912,10 @@ int main(void)
     gCopManagerIsBeingPursuedFn = fake_pursued;
     gAICarControllerGetCurrentDrivingLineSpeedFn = fake_line_speed;
     gDeliveryMoverSetDestinationFn = fake_setdest;
+    gPlayerClearZoneFn = fake_clear_zone;
+    gPlayerRequestZoneFn = fake_request_zone;
+    gPlayerIsJumpCamAvailableFn = fake_jump_cam;
+    gPlayerCleanUpJumpCamFn = fake_clean_up;
     wheel_install_seams();
     rigidbody_static_init();
     wheel_static_init();
@@ -1726,5 +1956,6 @@ int main(void)
     s_move();
     s_race();
     s_terrain();
+    s_finish();
     return 0;
 }

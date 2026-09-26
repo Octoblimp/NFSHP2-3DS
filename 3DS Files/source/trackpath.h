@@ -199,6 +199,13 @@ void trackpath_coord_init_at(TrackPathCoordinate *c, const bVector2 *pos);
 void trackpath_coord_update_position(TrackPathCoordinate *c,
                                      const bVector2 *pos);
 
+// 0x00134f18, twelve bytes that Car.obj emitted: pTrackPoint is zeroed in
+// the delay slot of a tail jump to UpdatePosition, so the search starts
+// afresh. FinishMovement, Chopper's ClearVariables and PlaceChopperInWorld,
+// and TrafficTeleporter::PlaceNewCar call it.
+void trackpath_coord_reset_position(TrackPathCoordinate *c,
+                                    const bVector2 *pos);
+
 // 0x001f5df8. TheTrackPathManager's UpdatePosition(along, side, 0).
 void trackpath_coord_update_position_along(TrackPathCoordinate *c,
                                            float along, float side);

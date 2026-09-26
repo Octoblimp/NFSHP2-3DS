@@ -6871,3 +6871,117 @@ for every car and which aborts while it is unset. `car.md` has its
 outline. Then the track's rendering and streaming, and
 RaceCoordinator::InitForRace (`0x001473c0`), which is what will build a
 World outside a harness.
+
+## Session 30, continued (2026-09-26) -- Task 27's nineteenth slice: Car::FinishMovement
+
+The eighteenth slice went in as `eac3756`. The nineteenth is
+`Car::FinishMovement` (`0x00130480`, 2008 bytes), which World's step calls
+for every car once the moves and the collisions are done. It is in
+`carfinish.c`, apart from `car.c`, because it reaches Collision, the
+world's car table and the Player, and `car.c` links into checkers that
+carry none of them. Car is 63 of 80 methods now, 12456 of 22876 bytes. The
+outline is in `docs/formats/car.md`.
+
+```
+carmode_check   74 transitions, 19 resets, 36396 lines, 103 masked, 0 differ
+                88 new mutations: 82 caught, 6 equivalent, 0 unexplained
+                505 in all: 491 caught, 14 equivalent
+```
+
+### What came with it
+
+- **`main.c` sets `gCarFinishMovementFn`**, which aborted while unset, so
+  World's step can run a car through to the end of its frame.
+- **Four Player seams**, in `car.h`: ClearZone (`0x00171c70`), RequestZone
+  (`0x00171610`), IsJumpCamAvailable (`0x00170408`) and CleanUpJumpCam
+  (`0x00170488`). They move the camera between zones, which changes the
+  game, so they abort when unset. Only a player's car reaches them.
+- **`player.h` names three more fields**: `nZoneCurrent` (76), `bWrongWay`
+  (736, already there) and `EyeVerts` (1600), with a layout check.
+- **`g_DisableAutoReplay`** (`0x00323040`), Car.obj's and 0 in the image,
+  is in `car.c`.
+- **TrackPathCoordinate::ResetPosition** (`0x00134f18`, twelve bytes Car.obj
+  emitted) is in `trackpath.c`. It zeroes the point in a tail jump's delay
+  slot, so UpdatePosition searches afresh.
+
+### What the listing says
+
+- **The accelerations are VU0's**, over all four lanes with the pad. A
+  denormal `dt` passes `0 < dt`, and the EE's `div.s` then reads it as
+  zero, so `1 / dt` is `ee_div`'s FLT_MAX.
+- **The odometer's two tests are both `<`**, so a NaN speed is added.
+- **The three phases never meet**: the topology on `loop ≡ 25 (mod 32)`, the
+  player's section on `loop ≡ 5 (mod 8)`, the search on a multiple of 60.
+  The remainder is signed, so -60 searches.
+- **The topology is asked twice**, at the car and a metre along +x, and only
+  a miss at both marks the car for a reset.
+- **A car past 5000 is never searched afresh**, even when the camera tuner
+  keeps it, because the two distance tests are an if and an else.
+- **The yaw is CarState::GetYaw's**, which is 0 below a ForwardSpeed of 5.
+- **AverageAir starts from three seconds.** A jump under 0.9 s switches the
+  zone back after five seconds, a longer one after half of it.
+- **The first RequestZone skips the zone's own timer**, and only its answer
+  decides the clean-up. The zone is read again after it.
+- **CloseCars runs `AICarPos` up to `CopCarPos`** with no NULL test on the
+  world, and does not skip the car itself.
+- **The contact's age is signed**, so a stamp in the future is young.
+- **RegisterInterestingEvent is called with no test** on `pReplayManager`.
+  The port tests it, as `carreset.c` does, and the name is never read.
+
+Three things are left out because they change nothing: the colliding cars'
+swap after CarCollision, which nothing reads (the call is kept); the debug
+tail behind `DoScreenPrintf` and `TerminalPrintPosition`, both 0; and the
+second `30 < speed`, which the first has passed.
+
+### How the checker runs it
+
+`carmode_check` runs one more scenario, 105 cases, after the terrain
+effects. Both sides make a player, a world whose table holds the car and
+four others, a Collision, a witness and a plain body. Each case sets the
+car's motion, the odometer, the wheels, the track path coordinate, the
+counters and switches, the player's three fields, the table's positions
+and the collision. The topology's answers are scripted one per question,
+and a leftover answer fails the case. The four Player calls log, and
+RequestZone answers as the case says. The replay's snapshots are zeroed
+before the call and printed after it, which is where the events show.
+
+The no-point case did not work the first time. With NumPoints at 0 the
+search still found a point, because `trackpath_find_closest_point` walks the
+paths. Zeroing NumPaths gives the NULL point, and the case is `nopaths` now.
+AverageAir's edges (exactly 0.9 s, exactly 0.5 s, exactly 1.5 high) were
+found by reading the image's frame after the call. The stack is scrubbed
+around the call, and no line of the scenario is masked.
+
+### The mutation pass
+
+88 mutations. Four cases went in for them before the pass: `+0` speed on a
+`-0` odometer, loop 9, a `-0` eye height under a `+0` car, and two cars at
+exactly 40. The first pass caught 82 and left 6, all equivalent:
+
+- **`fm-air-yaw-le` and `fm-slide-le`**: a yaw's `<` against `<=`. A scan of
+  all 65536 BAM differences finds none exactly on 3.14/32 or 3.14/8; the
+  cases sit on the nearest pairs (1023/1024 and 4093/4094).
+- **`fm-air-name`**: the event's name is never read.
+- **`fm-col-no-colliding-cars`**: the call's two answers are never read.
+- **`fm-col-smoke-no-else`**: the first branch needs two car bodies, and
+  then neither is smokeable.
+- **`fm-col-smoke-no-speed`**: the second `30 < speed`.
+
+Six mutants crash the harness, which counts as caught: the four that move,
+widen or cut short the topology's test, `fm-close-with-cop`, which reads a
+NULL slot past the table's cars, and `fm-replay-untested`. The eight
+equivalents from the earlier slices were rerun and still survive.
+
+The whole checker suite passes. The CIA builds with no warnings from the
+port's sources (only the devkitARM `crtn.o` one), at 319,936 bytes, up
+from 316,352: `main.c` now reaches `carfinish.c` and `collision.c`.
+
+### Next: the track's rendering and streaming, and InitForRace
+
+RaceCoordinator::InitForRace (`0x001473c0`, 500 bytes) is what will build a
+World outside a harness. Most of what it calls is not ported: the
+`Player(JoystickPort, int)` constructor, the ReplayManager and Race
+constructors, InitCars (`0x00147ce8`, which needs Car's constructor),
+InitPlayers (`0x001476e8`), Race::Init, SetupGhostCars,
+SetAIDriverModesFromPlayers, and the speech and collision-sound resets.
+The World constructor it calls is ported.

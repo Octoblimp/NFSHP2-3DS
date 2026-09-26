@@ -76,6 +76,7 @@
 #include "track.h"
 #include "uirender.h"
 #include "wheel.h"
+#include "world.h"
 
 // The top screen's render target is built here rather than by
 // C2D_CreateScreenTarget, which asks C3D_RenderTargetCreate for no depth
@@ -1189,6 +1190,12 @@ int main(int argc, char** argv)
     gCollisionNewFn        = collision_new;
     gCollisionAddImpulseFn = collision_add_impulse;
     gCollisionDestroyFn    = collision_destroy;
+
+    // World::DoTimestep ends every car's step with Car::FinishMovement,
+    // which carfinish.c has ported since task 27's eleventh Car slice.
+    // Left NULL, the step aborts. Its four Player calls stay NULL until
+    // task 26 brings Player, and only a player's car reaches them.
+    gCarFinishMovementFn = car_finish_movement;
 
     // The two calls Suspension makes into Wheel go through pointers, left
     // NULL until something says Wheel is linked -- which, in the game,

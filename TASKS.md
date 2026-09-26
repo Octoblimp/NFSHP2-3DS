@@ -1822,6 +1822,21 @@ is citro3d and owns the top.
         the listing in one place: UpdateAIDebugRendering dereferences
         the car of a driver number that no car has, and the port passes
         NULL. Written up in `docs/formats/world.md`.
+
+        **The nineteenth slice is closed: Car::FinishMovement**, in
+        `carfinish.c`, which makes Car 63 of 80 methods and 12,456 of
+        its 22,876 bytes. World's timestep calls it for every car
+        through `gCarFinishMovementFn`, and `main.c` sets it now. The
+        Player's ClearZone, RequestZone, IsJumpCamAvailable and
+        CleanUpJumpCam are four seams that abort when unset;
+        `player.h` names the three fields it reads.
+        `g_DisableAutoReplay` is in `car.c` and
+        TrackPathCoordinate::ResetPosition in `trackpath.c`.
+        `carmode_check` runs it in 105 cases, with the topology's
+        answers scripted: 36,396 lines, 0 differ. Of its 88 mutations,
+        82 are caught and 6 are equivalent. No disagreement between the
+        image and the port was found. Written up in
+        `docs/formats/car.md`.
         CONTINUE.md has what is next.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag

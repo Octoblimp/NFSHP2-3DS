@@ -96,6 +96,7 @@ on the disc takes.
     python tools/carmode_check.py --dump out/carmode
 """
 import argparse
+import math
 import os
 import struct
 import sys
@@ -127,6 +128,7 @@ TMC = "3DS Files/source/timer.c"
 RCC = "3DS Files/source/race.c"
 CRR = "3DS Files/source/carrace.c"
 CFX = "3DS Files/source/careffects.c"
+CFM = "3DS Files/source/carfinish.c"
 
 SOURCES_PORT = [CMC, CCC, CBC, CDC, CRC, RPC, CVC,
                 "3DS Files/source/espresso.c",
@@ -143,7 +145,10 @@ SOURCES_PORT = [CMC, CCC, CBC, CDC, CRC, RPC, CVC,
                 "3DS Files/source/collisionbody.c",
                 "3DS Files/source/polyhedra.c",
                 "3DS Files/source/vclip.c",
-                "3DS Files/source/terraintype.c"]
+                "3DS Files/source/terraintype.c",
+                # FinishMovement, and the Collision tests it asks: slice 11.
+                "3DS Files/source/carfinish.c",
+                "3DS Files/source/collision.c"]
 SOURCES_PORT += [s for s in mmc.SOURCES_PORT if s not in SOURCES_PORT]
 
 # ================================================================ the layout
@@ -335,6 +340,12 @@ SYM = {
     "setdest": "SetDestination__13DeliveryMoverP8bVector2Usff",
     "terrfx": "TriggerCarTerrainEffects__3Carf",
     "splash": "TriggerSplash__12BaseCarSoundii",
+    "finish": "FinishMovement__3Carf",
+    "hastopo": "HasTopology__18TopologyCoordinatePC8bVector2",
+    "clearzone": "ClearZone__6Playerb",
+    "requestzone": "RequestZone__6Playeribbb",
+    "jumpcam": "IsJumpCamAvailable__6Player",
+    "cleanup": "CleanUpJumpCam__6Player",
 }
 RESET_ENTRIES = ("reset-core", "reset-pos", "reset-route", "debug-pos")
 G_WORLD_TIMER = pcc.G_WORLDTIMER
@@ -790,6 +801,255 @@ FX = [
     fx(blown=(0xf8, 1), vmag=9.0),
 ]
 
+# ---- slice eleven: FinishMovement
+
+G_LOOP = GP - 20200                # WorldLoopCounter, 100000 on the disc
+G_BORING = GP - 23156              # BoringAIForCameraTuningOn
+G_NOREPLAY = GP - 23472            # g_DisableAutoReplay
+G_WORLD = GP - 22624               # pCurrentWorld
+G_WLIST = GP - 18352               # CollisionBodyWitnessList
+LOOP0 = 100000
+FM_CAR = {"vOldVel": 1120, "vOldAngVel": 1136, "AirTimeSwitch": 1156,
+          "ForceHeadlightsOn": 1916, "HeadlightsState": 1920}
+# The Player: all 2480 bytes, and the three fields FinishMovement reads.
+FM_PL_SIZE, FM_PL_ZONE, FM_PL_WRONG, FM_PL_EYEZ = 2480, 76, 736, 1640
+WD_AI, WD_COP, WD_TABLE = 32, 36, 44   # World
+FM_NCARS = 5                           # the table: this car, then four
+COL_SIZE, COL_LCT, COL_WIT = 96, 12, 84
+WIT_SIZE, WIT_B1, WIT_B2, WIT_COL = 112, 96, 100, 104
+CB_BODY_SIZE, CB_NCOL = 84, 18
+FM_KINDS = ["car", "smoke", "static"]  # the other body: ccb2, or a plain one
+FM_KIND_TYPE = {"car": 0, "smoke": 1, "static": 2}
+TP_NUMPATHS = 8                    # TheTrackPathManager.NumPaths
+FM_OLDVEL = (40.0, 1.5, -2.0, 0.125)
+FM_ANG = (0.5, -0.25, 2.0, 0.75)
+FM_OLDANG = (0.25, 0.5, -1.0, 0.0)
+FM_ACC = (111.0, 222.0, 333.0, 444.0)  # the accelerations before each case
+FM_NOW = 40000                     # WorldTimer: ten seconds
+FM_POS = (600.0, 10.0, 21.0, 0.25)
+FM_VEL = (44.0, 0.0, 0.0, 0.5)
+FM_FAR = ((1000.0, 0.0, 0.0), (0.0, 1000.0, 0.0), (0.0, 0.0, 1000.0),
+          (5.0, 0.0, 0.0))         # the four others, from the car
+# High enough that AverageAir's jump is long and high enough for the jump
+# cam. And the height at which, rising at 5, its highest point is exactly
+# 1.5 above the plane (found by reading the image's frame after the call).
+FM_JUMP = (600.0, 10.0, 26.0, 0.25)
+FM_H15 = 0x41a15446
+
+
+def fm_points():
+    t = tpc.Track()
+    t.add_path(tpc.circle(12, 200.0, 0.0, 0.0, 0.1), 1)
+    return t.pos
+
+
+def fm_offset(pos, pt):
+    """FinishMovement's distance to the track path's point, in float32."""
+    dx = tpc.f32(pos[0] - pt[0])
+    dy = tpc.f32(pos[1] - pt[1])
+    return tpc.f32(math.sqrt(tpc.f32(tpc.f32(dx * dx) + tpc.f32(dy * dy))))
+
+
+def fm_along(pt, dist):
+    """Two x's at pt's y: the first exactly `dist` from pt, and the first
+    past it."""
+    x = tpc.f32(pt[0] + dist)
+    step = lambda v, k: tpc.bf(fb(v) + k)
+    xs = [step(x, k) for k in range(-8, 9)]
+    eq = [v for v in xs if fm_offset((v, pt[1]), pt) == dist]
+    up = [v for v in xs if fm_offset((v, pt[1]), pt) > dist]
+    assert eq and up, (pt, dist)
+    return eq[0], up[0]
+
+
+FM_PT = fm_points()
+# 5000 from point 0 along +x, where point 0 is the nearest: exactly, and
+# the next float out. 300 from point 3 along +x, where point 1 is the
+# nearest but a search that starts at point 4 stops at point 3.
+FM_5000 = fm_along(FM_PT[0], 5000.0)
+FM_300 = fm_along(FM_PT[3], 300.0)
+
+
+def fm(dt=0.03125, vmag=45.0, odo=100.0, pos=FM_POS, vel=FM_VEL, tp=None,
+       nopaths=False, loop=5, now=FM_NOW, mode=7, topo=(), boring=0,
+       player=True, zone=0, wheels=0, wrong=0, jc=1, rz=1, disable=0,
+       angle=0, fwd=30.0, eye=0.0, ats=0.0, ai=1, cop=4, close=None,
+       col=None, rm=True, lights=0):
+    """A case. `tp` is the track path coordinate's point before, or None;
+    it is put at the car, so the search starts from that point. `close`
+    is up to four offsets from the car for the table's others (FM_FAR
+    otherwise). `col` is None for no collision, else (kind, ticks since
+    the last contact, which of the witness's two bodies is the car's,
+    whether the witness has its Collision, the car's own body's Type)."""
+    others = list(close or ()) + list(FM_FAR[len(close or ()):])
+    table = [tuple(tpc.f32(pos[k] + o[k]) for k in range(3)) for o in others]
+    return dict(dt=dt, vmag=vmag, odo=odo, pos=pos, vel=vel, tp=tp,
+                nopaths=nopaths, loop=loop, now=now, mode=mode,
+                topo=tuple(topo), boring=boring, player=player, zone=zone,
+                wheels=wheels, wrong=wrong, jc=jc, rz=rz, disable=disable,
+                angle=angle, fwd=fwd, eye=eye, ats=ats, ai=ai, cop=cop,
+                table=table, col=col, rm=rm, lights=lights)
+
+
+FINISH = [
+    # dt: none, negative, minus zero, a denormal (1/dt is FLT_MAX), large.
+    fm(dt=0.0, player=False, lights=1),
+    fm(dt=-0.03125, player=False),
+    fm(dt=-0.0, player=False),
+    fm(dt=tpc.bf(1), player=False),
+    fm(dt=2.0, player=False),
+    # The odometer: at 0 and at 1000 it runs (the 0 shows on a -0
+    # odometer, which it makes +0); below and above it does not; a NaN
+    # speed runs it.
+    fm(vmag=0.0, player=False), fm(vmag=-0.0, player=False),
+    fm(vmag=0.0, odo=-0.0, player=False),
+    fm(vmag=-1.0, player=False), fm(vmag=1000.0, player=False),
+    fm(vmag=1000.0001, player=False), fm(vmag=float("nan"), player=False),
+    # The topology test, every thirty-second step on (loop + 7) & 31: the
+    # car's own spot, then a metre along x; a car with no movement mode is
+    # not asked; nor is a step off the phase.
+    fm(loop=25, topo=(1,), player=False),
+    fm(loop=25, topo=(0, 1), player=False),
+    fm(loop=25, topo=(0, 0), player=False),
+    fm(loop=25, mode=0, player=False),
+    fm(loop=24, player=False),
+    fm(loop=-7, topo=(0, 0), player=False),
+    fm(loop=57, topo=(0, 1), player=False),
+    # Lost: exactly 5000 from the point, then the next float out; the
+    # camera tuner's boring AI keeps it.
+    fm(pos=(FM_5000[0], FM_PT[0][1], 21.0, 0.25), player=False),
+    fm(pos=(FM_5000[1], FM_PT[0][1], 21.0, 0.25), player=False),
+    fm(pos=(FM_5000[1], FM_PT[0][1], 21.0, 0.25), boring=1, player=False),
+    # Searched afresh: a search from point 4 stops at point 3, exactly 300
+    # away, though point 1 is nearer. Past 300, on a sixtieth step (0, 60
+    # and -60, a signed remainder) and moving, the coordinate forgets its
+    # point and finds point 1.
+    fm(pos=(FM_300[0], FM_PT[3][1], 21.0, 0.25), tp=4, loop=60,
+       player=False),
+    fm(pos=(FM_300[1], FM_PT[3][1], 21.0, 0.25), tp=4, loop=60,
+       player=False),
+    fm(pos=(FM_300[1], FM_PT[3][1], 21.0, 0.25), tp=4, loop=0,
+       player=False),
+    fm(pos=(FM_300[1], FM_PT[3][1], 21.0, 0.25), tp=4, loop=-60,
+       player=False),
+    fm(pos=(FM_300[1], FM_PT[3][1], 21.0, 0.25), tp=4, loop=30,
+       player=False),
+    fm(pos=(FM_300[1], FM_PT[3][1], 21.0, 0.25), tp=4, loop=60, mode=0,
+       player=False),
+    fm(pos=(FM_300[1], FM_PT[3][1], 21.0, 0.25), tp=4, loop=61,
+       player=False),
+    # Lost from point 3 as well, 5100 out: put back, and not searched.
+    fm(pos=(tpc.f32(FM_PT[3][0] + 5100.0), FM_PT[3][1], 21.0, 0.25), tp=4,
+       loop=60, player=False),
+    fm(pos=(tpc.f32(FM_PT[3][0] + 5100.0), FM_PT[3][1], 21.0, 0.25), tp=4,
+       loop=60, boring=1, player=False),
+    # No paths at all: no point, so a distance of 0 however far out.
+    fm(pos=(6000.0, 10.0, 21.0, 0.25), nopaths=True, loop=60,
+       player=False),
+    # A player's car: the lights are left alone. Off the eighth step, only
+    # the zone clear runs.
+    fm(lights=1, loop=6),
+    fm(zone=6, wheels=2, loop=6),
+    fm(zone=7, wheels=1, loop=6),
+    fm(zone=5, wheels=1, loop=6),
+    fm(zone=7, wheels=0, loop=6),
+    # Nor on 9, which a sixteenth step and a fourth would both take.
+    fm(loop=9),
+    # A cleared zone is read again: nothing of the jump cam's follows.
+    fm(zone=6, wheels=1, ats=0.0),
+    # The default: in the air above 40 and flying straight, but too low
+    # for the jump cam: AverageAir lands it inside half a second.
+    fm(),
+    fm(loop=-3),
+    # A jump the jump cam takes; falling, so the new zone, read again,
+    # keeps the height.
+    fm(pos=FM_JUMP),
+    fm(pos=FM_JUMP, vel=(44.0, 0.0, -1.0, 0.5)),
+    fm(pos=FM_JUMP, jc=0),
+    fm(pos=FM_JUMP, rz=0),
+    fm(pos=FM_JUMP, disable=1),
+    fm(pos=FM_JUMP, wrong=1),
+    fm(pos=FM_JUMP, wheels=-1),
+    fm(pos=FM_JUMP, wheels=3),
+    fm(pos=FM_JUMP, wheels=4),
+    fm(pos=FM_JUMP, zone=7),
+    # AverageAir's answers at the edges: exactly 0.9 s, so half of it;
+    # exactly 0.5 s, too short; exactly 1.5 high, too low, and the next
+    # float up; never down in the three seconds.
+    fm(pos=(600.0, 10.0, 28.0, 0.25), vmag=30.5),
+    fm(pos=(600.0, 10.0, 22.0, 0.25), vmag=30.5),
+    fm(pos=(600.0, 10.0, tpc.bf(FM_H15), 0.25), vel=(44.0, 0.0, 5.0, 0.5)),
+    fm(pos=(600.0, 10.0, tpc.bf(FM_H15 + 1), 0.25),
+       vel=(44.0, 0.0, 5.0, 0.5)),
+    fm(pos=FM_JUMP, vel=(44.0, 0.0, 60.0, 0.5)),
+    # The speeds: at 40, just over 30, at 30.
+    fm(pos=FM_JUMP, vmag=40.0),
+    fm(pos=FM_JUMP, vmag=tpc.bf(fb(30.0) + 1)),
+    fm(pos=FM_JUMP, vmag=30.0),
+    # The yaw either side of 3.14/32 -- 1023 and 1024 are the nearest two
+    # angles, and no angle is exactly on it -- both ways round; and too
+    # slow to have a yaw.
+    fm(angle=1023, wheels=2),
+    fm(angle=1024, wheels=2),
+    fm(angle=-1023, wheels=2),
+    fm(angle=-1024, wheels=2),
+    fm(angle=4000, fwd=4.9, wheels=2),
+    # In the jump cam's zone: the height kept while falling, the switch
+    # time either side of now, and the zone after.
+    fm(zone=6, vel=(44.0, 0.0, -1.0, 0.5), eye=0.0, ats=20.0),
+    fm(zone=6, vel=(44.0, 0.0, -1.0, 0.5), eye=21.0, ats=20.0),
+    fm(zone=6, vel=(44.0, 0.0, -1.0, 0.5), eye=30.0, ats=20.0),
+    fm(zone=6, pos=(600.0, 10.0, 0.0, 0.25), vel=(44.0, 0.0, -1.0, 0.5),
+       eye=-0.0, ats=20.0),
+    fm(zone=6, vel=(44.0, 0.0, 0.0, 0.5), eye=0.0, ats=20.0),
+    fm(zone=6, ats=10.0),
+    fm(zone=6, ats=tpc.bf(fb(10.0) - 1)),
+    fm(zone=6, ats=tpc.bf(fb(10.0) + 1)),
+    fm(zone=6, disable=1, ats=0.0, vel=(44.0, 0.0, -1.0, 0.5)),
+    fm(zone=7, ats=0.0, vel=(44.0, 0.0, -1.0, 0.5)),
+    # CloseCars: one, three, one at exactly 40, one just inside; the car
+    # itself when the AI run starts at it; the cop's slot; no AI at all.
+    fm(close=[(10.0, 0.0, 0.0)], wheels=4),
+    fm(close=[(10.0, 0.0, 0.0), (0.0, 20.0, 0.0), (0.0, 0.0, 30.0)],
+       wheels=4),
+    fm(close=[(40.0, 0.0, 0.0), (0.0, -40.0, 0.0), (0.0, 0.0, 40.0)],
+       wheels=4),
+    fm(close=[(39.999, 0.0, 0.0), (0.0, 0.0, -39.999)], wheels=4),
+    fm(close=[(20.0, 20.0, 20.0), (30.0, 30.0, 0.0)], wheels=4),
+    fm(ai=0, wheels=4),
+    fm(cop=5, wheels=4),
+    fm(ai=1, cop=1, close=[(1.0, 0.0, 0.0)], wheels=4),
+    fm(ai=3, cop=1, close=[(1.0, 0.0, 0.0)], wheels=4),
+    fm(vmag=40.0, close=[(1.0, 0.0, 0.0)], wheels=4),
+    # Sliding, either side of 3.14/8: 4093 and 4094 are the nearest two.
+    fm(angle=4093, wheels=4),
+    fm(angle=4094, wheels=4),
+    fm(angle=-4094, wheels=4),
+    fm(angle=-4093, wheels=4),
+    fm(angle=4100, vmag=30.0, wheels=4),
+    # The collision: two cars, above 40, under it and at it; a smokeable,
+    # either way round, above 30 and at it; a static body; a witness with
+    # no Collision; the half second; a car's own body that is not a car's,
+    # so no player is in it; no replay to tell.
+    fm(col=("car", 0, 0, True, 0), wheels=4),
+    fm(col=("car", 0, 1, True, 0), wheels=4),
+    fm(col=("car", 0, 0, True, 0), vmag=35.0, wheels=4),
+    fm(col=("car", 0, 0, True, 0), vmag=40.0, wheels=4),
+    fm(col=("smoke", 0, 0, True, 0), wheels=4),
+    fm(col=("smoke", 0, 1, True, 0), vmag=35.0, wheels=4),
+    fm(col=("smoke", 0, 0, True, 0), vmag=30.0, wheels=4),
+    fm(col=("static", 0, 0, True, 0), wheels=4),
+    fm(col=("car", 0, 0, False, 0), wheels=4),
+    fm(col=("smoke", 1999, 0, True, 0), wheels=4),
+    fm(col=("smoke", 2000, 0, True, 0), wheels=4),
+    fm(col=("smoke", -100, 0, True, 0), wheels=4),
+    fm(col=("smoke", -0x80000000, 0, True, 0), wheels=4),
+    fm(col=("smoke", 0, 0, True, 2), wheels=4),
+    fm(col=("car", 0, 1, True, 2), wheels=4),
+    fm(col=("car", 0, 0, True, 0), rm=False, angle=4100,
+       close=[(1.0, 0.0, 0.0)]),
+]
+
 
 def diff_chunk():
     with open(BUN, "rb") as f:
@@ -989,6 +1249,39 @@ def generate(cti):
               fb(pm[0]), fb(pm[1]), i32s((c["now"],))))
     w("};")
     w("")
+    w("#define CM_FM_PL_SIZE %d" % FM_PL_SIZE)
+    w("#define CM_FM_NCARS %d" % FM_NCARS)
+    w("#define CM_LOOP0 %d" % LOOP0)
+    for name, v in (("acc", FM_ACC), ("oldvel", FM_OLDVEL), ("ang", FM_ANG),
+                    ("oldang", FM_OLDANG)):
+        w("static const uint32_t cm_fm_%s[4] = {%s};" % (name, f32s(v)))
+    w("typedef struct CmFm { uint32_t dt, vmag, odo, pos[4], vel[4]; "
+      "int32_t tp, nopaths, loop, now, mode, ntopo, topo[2], boring, "
+      "player, zone, wheels, wrong, jc, rz, disable, angle; uint32_t fwd, "
+      "eye, ats; int32_t ai, cop; uint32_t table[4][3]; int32_t col, iscar, "
+      "type, ago, order, has, selftype, rm, lights; } CmFm;")
+    w("static const CmFm cm_fm[] = {")
+    for c in FINISH:
+        topo = list(c["topo"]) + [0] * (2 - len(c["topo"]))
+        col = c["col"] or ("car", 0, 0, False, 0)
+        kind, ago, order, has, selftype = col
+        w("    { 0x%08xu, 0x%08xu, 0x%08xu, {%s}, {%s}, %s, {%s}, %s, "
+          "0x%08xu, 0x%08xu, 0x%08xu, %s, {%s}, %s }," % (
+              fb(c["dt"]), fb(c["vmag"]), fb(c["odo"]), f32s(c["pos"]),
+              f32s(c["vel"]),
+              i32s((-1 if c["tp"] is None else c["tp"], int(c["nopaths"]),
+                    c["loop"], c["now"], c["mode"], len(c["topo"]))),
+              i32s(topo),
+              i32s((c["boring"], int(c["player"]), c["zone"], c["wheels"],
+                    c["wrong"], c["jc"], c["rz"], c["disable"], c["angle"])),
+              fb(c["fwd"]), fb(c["eye"]), fb(c["ats"]),
+              i32s((c["ai"], c["cop"])),
+              ", ".join("{%s}" % f32s(p) for p in c["table"]),
+              i32s((int(c["col"] is not None), int(kind == "car"),
+                    FM_KIND_TYPE[kind], ago,
+                    order, int(has), selftype, int(c["rm"]), c["lights"]))))
+    w("};")
+    w("")
     w("typedef struct CmFn { VtFn fn; uint32_t addr; } CmFn;")
     w("static const CmFn cm_fnmap[] = {")
     from mipsemu import Emu
@@ -1034,6 +1327,8 @@ class Model(mmc.Model):
         self.nline = 0
         self.ground = None         # slice ten's terrain under the car
         self.fxplayer = self.cdmg = 0
+        self.fm_topo = []          # slice eleven's scripted answers
+        self.fm_jc = self.fm_rz = 0
         e.stub("bMalloc__FiPCcii", self.on_malloc)
         e.stub("__builtin_delete", self.on_free)
         e.stub("bFree__FPv", self.on_free)
@@ -1047,7 +1342,12 @@ class Model(mmc.Model):
                       ("pursued", self.on_pursued),
                       ("ai-line", self.on_line_speed),
                       ("setdest", self.on_setdest),
-                      ("splash", self.on_splash)):
+                      ("splash", self.on_splash),
+                      ("hastopo", self.on_has_topology),
+                      ("clearzone", self.on_clear_zone),
+                      ("requestzone", self.on_request_zone),
+                      ("jumpcam", self.on_jump_cam),
+                      ("cleanup", self.on_clean_up)):
             e.stub(SYM[k], fn)
         self.install_fakes()
         self.put(pcc.G_USENEWCAL, 1)
@@ -1058,7 +1358,7 @@ class Model(mmc.Model):
             def scrub(em):
                 sp = em.reg[29] & M32
                 em.mem[sp - SCRUB:sp] = fill
-            for k in RESET_ENTRIES:
+            for k in RESET_ENTRIES + ("finish",):
                 e.hook(SYM[k], scrub)
 
     # ---- the heap
@@ -1172,6 +1472,41 @@ class Model(mmc.Model):
         self.say("setdest mover=%s pos=%s angle=%d speed=%08x time=%08x" % (
             self.label(em.reg[4] & M32), self.label(em.reg[5] & M32),
             s32(em.reg[6]), em.fpr[12] & M32, em.fpr[13] & M32))
+
+    # ---- slice eleven's topology test and the four Player seams
+
+    def on_has_topology(self, em):
+        xy = em.reg[5] & M32
+        if not self.fm_topo:
+            raise RuntimeError("HasTopology reached with no answer scripted")
+        r = self.fm_topo.pop(0)
+        self.say("hastopo tc=%s xy=%08x %08x -> %d" % (
+            self.label(em.reg[4] & M32), self.w(xy), self.w(xy + 4), r))
+        return r
+
+    def on_clear_zone(self, em):
+        p = em.reg[4] & M32
+        self.say("clearzone p=%s sound=%d zone=%d" % (
+            self.label(p), s32(em.reg[5]), s32(self.w(p + FM_PL_ZONE))))
+        self.put(p + FM_PL_ZONE, 0)
+
+    def on_request_zone(self, em):
+        p = em.reg[4] & M32
+        z = s32(em.reg[5])
+        self.say("requestzone p=%s zone=%d force=%d b2=%d b3=%d -> %d" % (
+            self.label(p), z, s32(em.reg[6]), s32(em.reg[7]),
+            s32(em.reg[8]), self.fm_rz))
+        if self.fm_rz:
+            self.put(p + FM_PL_ZONE, z & M32)
+        return self.fm_rz
+
+    def on_jump_cam(self, em):
+        self.say("jumpcam p=%s -> %d" % (self.label(em.reg[4] & M32),
+                                         self.fm_jc))
+        return self.fm_jc
+
+    def on_clean_up(self, em):
+        self.say("cleanupjumpcam p=%s" % self.label(em.reg[4] & M32))
 
     # ---- the stand-ins
 
@@ -2107,6 +2442,137 @@ class Model(mmc.Model):
         self.set_blown(0, 0)
         self.set_move(0)
 
+    def s_finish(self):
+        c = self.car
+        e = self.e
+        cs = c + CAR["State"]
+
+        def at(field, k=0):
+            return cs + OFF("CarState", field) + k
+        self.say("== finish setup")
+        self.set_ctrl(0)
+        pl = self.zalloc(FM_PL_SIZE)
+        self.register("fmplayer", pl, FM_PL_SIZE)
+        world = self.zalloc(WD_TABLE + 4 * FM_NCARS)
+        self.register("world", world, WD_TABLE + 4 * FM_NCARS)
+        others = []
+        for i in range(FM_NCARS - 1):
+            o = self.zalloc(CAR_SIZE)
+            self.register("other%d" % i, o, CAR_SIZE)
+            others.append(o)
+            self.put(world + WD_TABLE + 4 * (i + 1), o)
+        self.put(world + WD_TABLE, c)
+        col = self.zalloc(COL_SIZE)
+        self.register("col", col, COL_SIZE)
+        wit = self.zalloc(WIT_SIZE)
+        self.register("wit", wit, WIT_SIZE)
+        body = self.zalloc(CB_BODY_SIZE)
+        self.register("obody", body, CB_BODY_SIZE)
+        self.put(col + COL_WIT, wit)
+        wlist0 = (self.w(G_WLIST), self.w(G_WLIST + 4))
+        type0 = (e.mem[self.ccb + CB_TYPE], e.mem[self.ccb2 + CB_TYPE])
+        mode0 = self.w(c + CAR["TheMovementMode"])
+        player0 = self.w(c + CAR["pPlayer"])
+        paths0 = self.w(TP_MGR + TP_NUMPATHS)
+        rm0 = self.w(G_REPLAY)
+        for r in range(4):
+            for k in range(4):
+                v = fb(1.0 if r == k else 0.0)
+                self.put(at("BodyMatrix", 16 * r + 4 * k), v)
+                self.put(at("WheelMatrix", 16 * r + 4 * k), v)
+        self.put(self.rm + RM_CAPTURING, 1)
+        self.put(G_WORLD, world)
+        t = c + CAR["TheTrackPathCoordinate"]
+        for n, x in enumerate(FINISH):
+            self.say("== finish %d" % n)
+            for k in range(4):
+                self.put(at("Acceleration", 4 * k), fb(FM_ACC[k]))
+                self.put(at("AngularAcceleration", 4 * k), fb(FM_ACC[k]))
+                self.put(at("Velocity", 4 * k), fb(x["vel"][k]))
+                self.put(c + FM_CAR["vOldVel"] + 4 * k, fb(FM_OLDVEL[k]))
+                self.put(at("AngularVelocity", 4 * k), fb(FM_ANG[k]))
+                self.put(c + FM_CAR["vOldAngVel"] + 4 * k, fb(FM_OLDANG[k]))
+                self.put(at("Position", 4 * k), fb(x["pos"][k]))
+            self.put(at("Odometer"), fb(x["odo"]))
+            self.put(at("VelocityMagnitude"), fb(x["vmag"]))
+            self.put(at("nWheelsTouchingGround"), x["wheels"] & M32)
+            self.put(at("ForwardSpeed"), fb(x["fwd"]))
+            e.mem[at("Angle"):at("Angle") + 2] = struct.pack(
+                "<H", x["angle"] & 0xffff)
+            self.put(t, fb(x["pos"][0]))
+            self.put(t + 4, fb(x["pos"][1]))
+            self.put(t + 8, 0 if x["tp"] is None
+                     else self.w(TP_MGR + MGR_POINTS) + 20 * x["tp"])
+            self.put(TP_MGR + TP_NUMPATHS, 0 if x["nopaths"] else paths0)
+            self.put(c + CAR["TheMovementMode"], x["mode"] & M32)
+            self.put(c + CAR["ResetMe"], 0)
+            self.put(c + FM_CAR["ForceHeadlightsOn"], x["lights"])
+            self.put(c + FM_CAR["HeadlightsState"], 0)
+            self.put(G_LOOP, x["loop"] & M32)
+            self.put(G_WORLD_TIMER, x["now"] & M32)
+            self.put(G_BORING, x["boring"])
+            self.put(G_NOREPLAY, x["disable"])
+            self.put(c + CAR["pPlayer"], pl if x["player"] else 0)
+            self.put(pl + FM_PL_ZONE, x["zone"] & M32)
+            self.put(pl + FM_PL_WRONG, x["wrong"] & M32)
+            self.put(pl + FM_PL_EYEZ, fb(x["eye"]))
+            self.put(c + FM_CAR["AirTimeSwitch"], fb(x["ats"]))
+            self.fm_topo = list(x["topo"])
+            self.fm_jc, self.fm_rz = x["jc"], x["rz"]
+            self.put(world + WD_AI, x["ai"] & M32)
+            self.put(world + WD_COP, x["cop"] & M32)
+            for o, p in zip(others, x["table"]):
+                for k in range(3):
+                    self.put(o + CAR["State"] + OFF("CarState", "Position")
+                             + 4 * k, fb(p[k]))
+            if x["col"] is not None:
+                kind, ago, order, has, selftype = x["col"]
+                other = self.ccb2 if kind == "car" else body
+                e.mem[other + CB_TYPE] = FM_KIND_TYPE[kind]
+                e.mem[self.ccb + CB_TYPE] = selftype
+                e.mem[self.ccb + CB_NCOL] = 1
+                b1, b2 = (self.ccb, other) if order == 0 else (other, self.ccb)
+                self.put(wit + WIT_B1, b1)
+                self.put(wit + WIT_B2, b2)
+                self.put(wit + WIT_COL, col if has else 0)
+                self.put(wit, G_WLIST)
+                self.put(wit + 4, G_WLIST)
+                self.put(G_WLIST, wit)
+                self.put(G_WLIST + 4, wit)
+                self.put(col + COL_LCT, (x["now"] - ago) & M32)
+            self.put(G_REPLAY, self.rm if x["rm"] else 0)
+            for s in self.snaps:
+                self.put(s + SNAP_TIV, 0)
+            self.fcall(SYM["finish"], c, floats=[x["dt"]])
+            if self.fm_topo:
+                raise RuntimeError("finish %d left HasTopology answers" % n)
+            self.put(G_WLIST, wlist0[0])
+            self.put(G_WLIST + 4, wlist0[1])
+            e.mem[self.ccb + CB_TYPE], e.mem[self.ccb2 + CB_TYPE] = type0
+            e.mem[self.ccb + CB_NCOL] = 0
+            pt = self.w(t + 8)
+            idx = -1 if pt == 0 else s32(pt - self.w(TP_MGR + MGR_POINTS)) // 20
+            self.say("fm acc=%s ang=%s odo=%08x resetme=%d lights=%d" % (
+                hexw([self.w(at("Acceleration", 4 * k)) for k in range(4)]),
+                hexw([self.w(at("AngularAcceleration", 4 * k))
+                      for k in range(4)]),
+                self.w(at("Odometer")), s32(self.w(c + CAR["ResetMe"])),
+                s32(self.w(c + FM_CAR["HeadlightsState"]))))
+            self.say("fm tpc=%s pt=%d zone=%d eye=%08x ats=%08x tiv=%s" % (
+                hexw([self.w(t), self.w(t + 4)]), idx,
+                s32(self.w(pl + FM_PL_ZONE)), self.w(pl + FM_PL_EYEZ),
+                self.w(c + FM_CAR["AirTimeSwitch"]),
+                hexw([self.w(s + SNAP_TIV) for s in self.snaps])))
+        self.put(c + CAR["pPlayer"], player0)
+        self.put(c + CAR["TheMovementMode"], mode0)
+        self.put(c + CAR["ResetMe"], 0)
+        self.put(G_WORLD, 0)
+        self.put(G_LOOP, LOOP0)
+        self.put(G_BORING, 0)
+        self.put(G_NOREPLAY, 0)
+        self.put(G_REPLAY, rm0)
+        self.put(TP_MGR + TP_NUMPATHS, paths0)
+
     def run(self):
         self.s_tables()
         self.s_setup()
@@ -2124,6 +2590,7 @@ class Model(mmc.Model):
         self.s_move()
         self.s_race()
         self.s_terrain()
+        self.s_finish()
         return self.out
 
 
@@ -3301,6 +3768,213 @@ MUTATIONS = [
     ("fx-flat-no-floor", CFX, NL + "                            - CAR_FLAT_TIRE_MIN_MPH)", ")"),
     ("fx-flat-where", CFX, "CAR_WHEEL_WHERE0 + i * CAR_WHEEL_WHERE_STEP, NULL);",
      "CAR_WHEEL_WHERE0, NULL);"),
+    # ---- slice eleven: FinishMovement
+    # -- the accelerations, the odometer
+    ("fm-dt-le", CFM, "    if (0.0f < dt) {", "    if (0.0f <= dt) {"),
+    ("fm-dt-nonzero", CFM, "    if (0.0f < dt) {", "    if (dt != 0.0f) {"),
+    ("fm-plain-div", CFM, "float inv = ee_div(1.0f, dt);",
+     "float inv = 1.0f / dt;"),
+    ("fm-acc-times-dt", CFM,
+     "st->Acceleration.x = (st->Velocity.x - c->vOldVel.x) * inv;",
+     "st->Acceleration.x = (st->Velocity.x - c->vOldVel.x) * dt;"),
+    ("fm-acc-z-old-y", CFM, "(st->Velocity.z - c->vOldVel.z) * inv;",
+     "(st->Velocity.z - c->vOldVel.y) * inv;"),
+    ("fm-acc-no-pad", CFM, "        st->Acceleration.pad = (st->Velocity.pad"
+     " - c->vOldVel.pad) * inv;" + NL, ""),
+    ("fm-ang-from-vel", CFM, "(st->AngularVelocity.x - c->vOldAngVel.x)",
+     "(st->Velocity.x - c->vOldAngVel.x)"),
+    ("fm-ang-old-vel", CFM, "(st->AngularVelocity.y - c->vOldAngVel.y)",
+     "(st->AngularVelocity.y - c->vOldVel.y)"),
+    ("fm-ang-no-pad", CFM, "        st->AngularAcceleration.pad =" + NL
+     + "            (st->AngularVelocity.pad - c->vOldAngVel.pad) * inv;"
+     + NL, ""),
+    ("fm-odo-zero-le", CFM, "if (!(speed < 0.0f) && !(1000.0f < speed))",
+     "if (!(speed <= 0.0f) && !(1000.0f < speed))"),
+    ("fm-odo-1000-le", CFM, "if (!(speed < 0.0f) && !(1000.0f < speed))",
+     "if (!(speed < 0.0f) && !(1000.0f <= speed))"),
+    ("fm-odo-nan-skipped", CFM,
+     "if (!(speed < 0.0f) && !(1000.0f < speed))",
+     "if (0.0f <= speed && speed <= 1000.0f)"),
+    ("fm-odo-no-dt", CFM, "st->Odometer = st->Odometer + speed * dt;",
+     "st->Odometer = st->Odometer + speed;"),
+    ("fm-odo-forward-speed", CFM, "    speed = st->VelocityMagnitude;" + NL
+     + "    if (!(speed < 0.0f)", "    speed = st->ForwardSpeed;" + NL
+     + "    if (!(speed < 0.0f)"),
+    # -- the track, the topology, the lights
+    ("fm-no-update-position", CFM, "    trackpath_coord_update_position(tpc, "
+     "(const bVector2 *)&st->Position);" + NL, ""),
+    ("fm-topo-phase", CFM, "if (((WorldLoopCounter + 7) & 31) == 0",
+     "if (((WorldLoopCounter + 6) & 31) == 0"),
+    ("fm-topo-mask-15", CFM, "if (((WorldLoopCounter + 7) & 31) == 0",
+     "if (((WorldLoopCounter + 7) & 15) == 0"),
+    ("fm-topo-any-mode", CFM, "if (((WorldLoopCounter + 7) & 31) == 0 "
+     "&& c->TheMovementMode != 0", "if (((WorldLoopCounter + 7) & 31) == 0"),
+    ("fm-topo-one-probe", CFM, "        if (!topology_has_topology("
+     "&c->TheTopologyCoordinate, &q))", "        if (q.x == q.x)"),
+    ("fm-topo-probe-y", CFM, "        q.x = st->Position.x + 1.0f;" + NL
+     + "        q.y = st->Position.y;", "        q.x = st->Position.x;" + NL
+     + "        q.y = st->Position.y + 1.0f;"),
+    ("fm-topo-reset-2", CFM, "&q))" + NL + "            c->ResetMe = 1;",
+     "&q))" + NL + "            c->ResetMe = 2;"),
+    ("fm-lost-le", CFM, "    if (CAR_LOST_DISTANCE < track_offset(tpc)) {",
+     "    if (CAR_LOST_DISTANCE <= track_offset(tpc)) {"),
+    ("fm-lost-no-boring", CFM, "        if (!BoringAIForCameraTuningOn)" + NL
+     + "            c->ResetMe = 1;", "        c->ResetMe = 1;"),
+    ("fm-research-le", CFM, "} else if (CAR_RESEARCH_DISTANCE < track_offset",
+     "} else if (CAR_RESEARCH_DISTANCE <= track_offset"),
+    ("fm-research-no-else", CFM, "    } else if (CAR_RESEARCH_DISTANCE",
+     "    }" + NL + "    if (CAR_RESEARCH_DISTANCE"),
+    ("fm-research-unsigned", CFM, "&& WorldLoopCounter % 60 == 0",
+     "&& (uint32_t)WorldLoopCounter % 60 == 0"),
+    ("fm-research-any-mode", CFM, "&& WorldLoopCounter % 60 == 0 && "
+     "c->TheMovementMode != 0) {", "&& WorldLoopCounter % 60 == 0) {"),
+    ("fm-research-keeps-point", CFM,
+     "        trackpath_coord_reset_position(tpc,",
+     "        trackpath_coord_update_position(tpc,"),
+    ("fm-offset-squared", CFM, "    return sqrtf(dx * dx + dy * dy);",
+     "    return dx * dx + dy * dy;"),
+    ("fm-no-lights", CFM, "    car_update_headlights_and_horn(c);" + NL, ""),
+    # -- the player: the zone, the phase, CarInAir
+    ("fm-clear-jump-cam-only", CFM,
+     "        || p->nZoneCurrent == PLAYER_ZONE_AFTER_JUMP) {",
+     "        || p->nZoneCurrent == PLAYER_ZONE_JUMP_CAM) {"),
+    ("fm-clear-no-wheel", CFM, "        if (wheels > 0)" + NL
+     + "            clear_zone(p, 1);", "        if (wheels >= 0)" + NL
+     + "            clear_zone(p, 1);"),
+    ("fm-clear-silent", CFM, "            clear_zone(p, 1);",
+     "            clear_zone(p, 0);"),
+    ("fm-player-phase", CFM, "if (((WorldLoopCounter + 3) & 7) != 0)",
+     "if (((WorldLoopCounter + 4) & 7) != 0)"),
+    ("fm-player-mask-3", CFM, "if (((WorldLoopCounter + 3) & 7) != 0)",
+     "if (((WorldLoopCounter + 3) & 3) != 0)"),
+    ("fm-air-40-le", CFM, "    if (40.0f < speed && wheels < 4",
+     "    if (40.0f <= speed && wheels < 4"),
+    ("fm-air-four-wheels", CFM, "    if (40.0f < speed && wheels < 4",
+     "    if (40.0f < speed && wheels <= 4"),
+    ("fm-air-yaw-le", CFM,
+     "fabsf(carstate_get_yaw(st)) < CAR_AIR_STRAIGHT_YAW)",
+     "fabsf(carstate_get_yaw(st)) <= CAR_AIR_STRAIGHT_YAW)"),
+    ("fm-air-signed-yaw", CFM,
+     "fabsf(carstate_get_yaw(st)) < CAR_AIR_STRAIGHT_YAW)",
+     "carstate_get_yaw(st) < CAR_AIR_STRAIGHT_YAW)"),
+    ("fm-air-value", CFM, 'interesting(2.0f, "CarInAir");',
+     'interesting(1.0f, "CarInAir");'),
+    ("fm-air-name", CFM, 'interesting(2.0f, "CarInAir");',
+     'interesting(2.0f, "CarSlidingSideways");'),
+    # -- the jump cam
+    ("fm-jc-ignores-disable", CFM,
+     "    if (!g_DisableAutoReplay && zone != PLAYER_ZONE_JUMP_CAM",
+     "    if (zone != PLAYER_ZONE_JUMP_CAM"),
+    ("fm-jc-from-after-zone", CFM,
+     "        && zone != PLAYER_ZONE_AFTER_JUMP && wheels == 0",
+     "        && wheels == 0"),
+    ("fm-jc-wheels-le", CFM, "&& wheels == 0" + NL, "&& wheels <= 0" + NL),
+    ("fm-jc-wrong-way", CFM,
+     "        && c->pPlayer->bWrongWay == 0 && 30.0f < speed) {",
+     "        && 30.0f < speed) {"),
+    ("fm-jc-30-le", CFM, "bWrongWay == 0 && 30.0f < speed) {",
+     "bWrongWay == 0 && 30.0f <= speed) {"),
+    ("fm-jc-t-from-2", CFM, "        float t = 3.0f, h;",
+     "        float t = 2.0f, h;"),
+    ("fm-jc-tick", CFM, "        now = (float)WorldTimer * CAR_FINISH_TICK;",
+     "        now = (float)WorldTimer * 0.001f;"),
+    ("fm-jc-short-le", CFM, "        if (t < CAR_SHORT_JUMP)",
+     "        if (t <= CAR_SHORT_JUMP)"),
+    ("fm-jc-short-3", CFM, "c->AirTimeSwitch = now + 5.0f;",
+     "c->AirTimeSwitch = now + 3.0f;"),
+    ("fm-jc-whole-jump", CFM, "c->AirTimeSwitch = t * 0.5f + now;",
+     "c->AirTimeSwitch = t + now;"),
+    ("fm-jc-h-le", CFM, "        if (1.5f < h && 0.5f < t",
+     "        if (1.5f <= h && 0.5f < t"),
+    ("fm-jc-t-le", CFM, "        if (1.5f < h && 0.5f < t",
+     "        if (1.5f < h && 0.5f <= t"),
+    ("fm-jc-always-available", CFM,
+     "&& 0.5f < t && is_jump_cam_available(p)", "&& 0.5f < t"),
+    ("fm-jc-forced", CFM, "request_zone(p, PLAYER_ZONE_JUMP_CAM, 0, 1, 1))",
+     "request_zone(p, PLAYER_ZONE_JUMP_CAM, 1, 1, 1))"),
+    ("fm-jc-clean-up-on-yes", CFM,
+     "            && !request_zone(p, PLAYER_ZONE_JUMP_CAM",
+     "            && request_zone(p, PLAYER_ZONE_JUMP_CAM"),
+    ("fm-jc-zone-not-reread", CFM, "            clean_up_jump_cam(p);" + NL
+     + "        zone = p->nZoneCurrent;" + NL,
+     "            clean_up_jump_cam(p);" + NL),
+    # -- in the jump cam's zone
+    ("fm-eye-not-falling", CFM, "        if (st->Velocity.z < 0.0f && ",
+     "        if (st->Velocity.z <= 0.0f && "),
+    ("fm-eye-le", CFM, "p->EyeVerts[2].z < st->Position.z)",
+     "p->EyeVerts[2].z <= st->Position.z)"),
+    ("fm-eye-any-height", CFM, "        if (st->Velocity.z < 0.0f && "
+     "p->EyeVerts[2].z < st->Position.z)",
+     "        if (st->Velocity.z < 0.0f)"),
+    ("fm-eye-wrong-vert", CFM, "            p->EyeVerts[2].z = st->Position.z;",
+     "            p->EyeVerts[1].z = st->Position.z;"),
+    ("fm-switch-le", CFM, "        if (c->AirTimeSwitch < (float)WorldTimer",
+     "        if (c->AirTimeSwitch <= (float)WorldTimer"),
+    ("fm-switch-sound", CFM, "            clear_zone(p, 0);",
+     "            clear_zone(p, 1);"),
+    ("fm-switch-no-clear", CFM, "            clear_zone(p, 0);" + NL, ""),
+    ("fm-switch-args", CFM,
+     "request_zone(p, PLAYER_ZONE_AFTER_JUMP, 0, 0, 1);",
+     "request_zone(p, PLAYER_ZONE_AFTER_JUMP, 0, 1, 1);"),
+    # -- CloseCars
+    ("fm-close-40-le", CFM, "    if (40.0f < speed) {" + NL
+     + "        World *w", "    if (40.0f <= speed) {" + NL
+     + "        World *w"),
+    ("fm-close-dist-le", CFM, "dz * dz) < 40.0f)", "dz * dz) <= 40.0f)"),
+    ("fm-close-flat", CFM, "sqrtf((dx * dx + dy * dy) + dz * dz)",
+     "sqrtf(dx * dx + dy * dy)"),
+    ("fm-close-skip-first", CFM,
+     "        for (i = 0; i < w->CopCarPos - w->AICarPos; i++) {",
+     "        for (i = 1; i < w->CopCarPos - w->AICarPos; i++) {"),
+    ("fm-close-with-cop", CFM, "i < w->CopCarPos - w->AICarPos; i++) {",
+     "i <= w->CopCarPos - w->AICarPos; i++) {"),
+    ("fm-close-from-zero", CFM, "w->CarTable[w->AICarPos + i];",
+     "w->CarTable[i];"),
+    ("fm-close-whole", CFM, 'interesting((float)n * 0.5f, "CloseCars");',
+     'interesting((float)n, "CloseCars");'),
+    # -- sliding, the collision, the replay
+    ("fm-slide-30-le", CFM, "    if (30.0f < speed) {" + NL
+     + "        Collision *col;", "    if (30.0f <= speed) {" + NL
+     + "        Collision *col;"),
+    ("fm-slide-le", CFM, "if (CAR_SLIDING_YAW < fabsf(carstate_get_yaw(st)))",
+     "if (CAR_SLIDING_YAW <= fabsf(carstate_get_yaw(st)))"),
+    ("fm-slide-signed", CFM,
+     "if (CAR_SLIDING_YAW < fabsf(carstate_get_yaw(st)))",
+     "if (CAR_SLIDING_YAW < carstate_get_yaw(st))"),
+    ("fm-slide-value", CFM, 'interesting(1.0f, "CarSlidingSideways");',
+     'interesting(2.0f, "CarSlidingSideways");'),
+    ("fm-col-second", CFM, "&c->pDynamicCollisionBody->Dynamic.Body, 0);",
+     "&c->pDynamicCollisionBody->Dynamic.Body, 1);"),
+    ("fm-col-any-player", CFM,
+     "if (col != NULL && collision_is_player_involved(col)",
+     "if (col != NULL"),
+    ("fm-col-half-le", CFM, "* CAR_FINISH_TICK < 0.5f) {",
+     "* CAR_FINISH_TICK <= 0.5f) {"),
+    ("fm-col-unsigned", CFM, "&& (float)(int32_t)((uint32_t)WorldTimer",
+     "&& (float)((uint32_t)WorldTimer"),
+    ("fm-col-cars-40-le", CFM,
+     "collision_is_two_car_collision(col) && 40.0f < speed",
+     "collision_is_two_car_collision(col) && 40.0f <= speed"),
+    ("fm-col-cars-value", CFM, 'interesting(3.0f, "CarCollision");',
+     'interesting(5.0f, "CarCollision");'),
+    ("fm-col-no-colliding-cars", CFM,
+     "                collision_get_colliding_cars(col, &a, &b);",
+     "                (void)a; (void)b;"),
+    ("fm-col-smoke-no-else", CFM,
+     "            } else if (collision_is_smokeable_involved(col)",
+     "            }" + NL + "            if (collision_is_smokeable_involved(col)"),
+    ("fm-col-smoke-no-speed", CFM,
+     "collision_is_smokeable_involved(col)" + NL
+     + "                       && 30.0f < speed) {",
+     "collision_is_smokeable_involved(col)) {"),
+    ("fm-col-smoke-value", CFM, 'interesting(5.0f, "SmokeableCollision");',
+     'interesting(3.0f, "SmokeableCollision");'),
+    ("fm-col-smoke-is-cars", CFM,
+     "} else if (collision_is_smokeable_involved(col)",
+     "} else if (collision_is_two_car_collision(col)"),
+    ("fm-replay-untested", CFM, "    if (pReplayManager != NULL)" + NL
+     + "        ReplayManager_RegisterInterestingEvent",
+     "    ReplayManager_RegisterInterestingEvent"),
 ]
 
 EQUIVALENT = {
@@ -3348,6 +4022,34 @@ EQUIVALENT = {
     "fx-spew-min-le":
         "At slip.x equal to the minimum the scale is exactly 0, and only a "
         "scale above 0 goes off, so the gate's < and <= agree.",
+    # -- FinishMovement ---------------------------------------------------
+    "fm-air-yaw-le":
+        "GetYaw is 0 below a ForwardSpeed of 5, and otherwise a BAM "
+        "difference, one of 65536, times BAM_TO_RAD and folded past pi. "
+        "No difference gives exactly 3.14/32 (0.098125f) either way "
+        "round: the nearest are 1023 and 1024, and 64512 and 64513. The "
+        "< and <= only part on that value.",
+    "fm-slide-le":
+        "As fm-air-yaw-le: no BAM difference gives exactly 3.14/8 "
+        "(0.3925f); the nearest are 4093 and 4094, and 61442 and 61443.",
+    "fm-air-name":
+        "RegisterInterestingEvent ignores the description: it adds the "
+        "value to every snapshot named INSTANT_REPLAY while capturing, "
+        "and the name is read nowhere else.",
+    "fm-col-no-colliding-cars":
+        "The image asks for the colliding cars and swaps the two when the "
+        "second is the player's own, then reads neither. GetCollidingCars "
+        "only reads the witness, so dropping the call leaves nothing to "
+        "see.",
+    "fm-col-smoke-no-else":
+        "The first branch is taken only when both of the witness's bodies "
+        "are CAR_COLLISION_BODY, and then neither is smokeable, so the "
+        "smokeable test after it, run unconditionally, still fails.",
+    "fm-col-smoke-no-speed":
+        "The collision is only looked at inside `30 < speed`, and speed "
+        "is a local that nothing in between changes, so the second test "
+        "always passes. The image makes it anyway (the listing's third "
+        "left-out thing).",
 }
 
 

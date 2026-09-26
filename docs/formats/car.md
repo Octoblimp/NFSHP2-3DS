@@ -9,7 +9,7 @@ state they write into, the lights, the horn, the wipers, the blown tyres
 and the blinking, and it hands everything else off.
 
 Ported in slices. This document covers the record, which is whole, and
-eight code slices; the fourth, the movement and control modes, has
+eleven code slices; the fourth, the movement and control modes, has
 [a document of its own](car-modes.md). The first is the seventeen methods that reach nothing
 outside Car, CarState and the two world clocks, plus `Car::WorldToCar`,
 which reaches only a CarState method ported since. The second is the
@@ -28,8 +28,10 @@ each of its steps. The eighth is `Move`, the step itself, with the three
 it calls first: `ChangeGear`, `CalculateNewCatchupMultipliers` and
 `UpdatePosition`. The ninth is six that make one call out of Car each:
 the distance between two cars, the blown tyres, the deferred reset, the
-AI's driving line and the delivery. Sixty-one of the eighty methods are
-ported, 8576 of the 22876 bytes.
+AI's driving line and the delivery. The tenth is
+`TriggerCarTerrainEffects`, the smoke, spray and splash under the wheels.
+The eleventh is `FinishMovement`, the end of each step. Sixty-three of the
+eighty methods are ported, 12456 of the 22876 bytes.
 
 Ported to `3DS Files/source/car.{c,h}`, `topology.h`, `vtable.{c,h}`,
 `world.{c,h}`, `collisionbody.h`, `carcontroller.h`, `sound3d.h` and
@@ -44,7 +46,9 @@ methods in `replay.c`, checked by `tools/carmode_check.py`. The eighth is
 `carmove.c`, with `timer.c`, `player.c`, `difficultyinfo.{c,h}` and
 `Race::GetRacingCar` in `race.c`, checked by `carmode_check` too. The
 ninth is `carrace.c`, with `DynamicCollisionBody::GetDistanceAndSpeed` in
-`carcollisionbody.c`, checked by `carmode_check` as well.
+`carcollisionbody.c`, checked by `carmode_check` as well. The tenth is
+`careffects.c` and the eleventh `carfinish.c`, and `carmode_check` checks
+both.
 
 ## Car has no vtable
 
@@ -1643,6 +1647,218 @@ crashes on the first case without damage. That counts as caught.
 carmode_check --only (the 107)  107 mutations, 104 caught, 3 equivalent, 0 unexplained
 ```
 
+## What is in the eleventh code slice
+
+One method, in `carfinish.c`:
+- `FinishMovement` (`0x00130480`, 2008 bytes).
+
+That makes Car 63 of 80 methods. It has a file of its own because it
+reaches Collision, the world's car table and the Player, and `car.c`
+links into checkers that carry none of them. Its one caller is
+`World::DoTimestep`, ported with World's timestep in task 27. That calls
+it for every car once the moves and the collisions are done, through
+`gCarFinishMovementFn`, which aborted while unset. `main.c` sets it now.
+
+### What it does
+
+```
+0 < dt:  Acceleration        = (Velocity - vOldVel) * (1 / dt)
+         AngularAcceleration = (AngularVelocity - vOldAngVel) * (1 / dt)
+speed = VelocityMagnitude
+!(speed < 0) and !(1000 < speed):  Odometer += speed * dt
+the track path coordinate's UpdatePosition(Position)
+(loop + 7) & 31 == 0, a movement mode, no topology at Position
+    nor at Position + (1, 0):  ResetMe = 1
+off = |coordinate - its point| in the plane, 0 with no point
+off > 5000:  ResetMe = 1, unless BoringAIForCameraTuningOn
+else off > 300, loop % 60 == 0, a movement mode:  ResetPosition(Position)
+UpdateHeadlightsAndHorn
+no player: done
+in zone 6 or 7 with a wheel down:  ClearZone(sound)
+(loop + 3) & 7 != 0: done
+40 < speed, fewer than 4 wheels down, |yaw| < 3.14/32:  CarInAir, 2
+not g_DisableAutoReplay, in neither zone, no wheel down, not the wrong
+way, 30 < speed:
+    t = 3, AverageAir(&t, &h), now = WorldTimer * 0.00025
+    AirTimeSwitch = t < 0.9 ? now + 5 : t * 0.5 + now
+    1.5 < h, 0.5 < t, IsJumpCamAvailable:
+        RequestZone(6, 0, 1, 1), and CleanUpJumpCam if it says no
+    zone read again
+in zone 6:
+    falling, and EyeVerts[2].z below Position.z:  EyeVerts[2].z = Position.z
+    AirTimeSwitch < now:  ClearZone(no sound), RequestZone(7, 0, 0, 1)
+40 < speed:  CloseCars, half a point for each AI car within 40
+30 < speed:
+    3.14/8 < |yaw|:  CarSlidingSideways, 1
+    the body's first collision, a player's car in it, touched less than
+    half a second ago:
+        two cars and 40 < speed:  CarCollision, 3
+        else a smokeable body and 30 < speed:  SmokeableCollision, 5
+```
+
+`loop` is `WorldLoopCounter`. `speed` is read again once the eighth-step
+test passes, and the rest of the method uses that value.
+
+What the listing says:
+- **The accelerations are VU0's**, `vsub` and `vmulx` over all four lanes,
+  pad included. `-0` is not positive. A denormal `dt` is, and the EE's
+  `div.s` reads it as zero, so `1 / dt` is `ee_div`'s FLT_MAX.
+- **The odometer's tests are both `<`**, so a NaN speed is added, and at
+  a speed of `+0` a `-0` odometer becomes `+0`.
+- **The phases never meet.** The topology runs on `loop ≡ 25 (mod 32)`,
+  the player's section on `loop ≡ 5 (mod 8)`, and the search on a
+  multiple of 60. The first two are odd and never the same residue; the
+  third is even. The remainder is signed, so `-60` searches too.
+- **The topology is asked twice**, at the car and a metre along +x, and
+  only a miss at both marks the car.
+- **The distance is worked out twice**, the same way, both times from the
+  point the coordinate holds after its update. A car past 5000 is never
+  searched afresh, even when the camera tuner keeps it. With no paths at
+  all there is no point, and the distance is 0.
+- **The yaw is `CarState::GetYaw`'s**, which is 0 below a `ForwardSpeed`
+  of 5. So a car moving sideways at 50 counts as flying straight.
+- **AverageAir starts from three seconds.** `AirTimeSwitch` becomes half
+  the jump or, for one under 0.9 s, five seconds.
+- **`EyeVerts[2].z` keeps the highest point**: while the car falls it only
+  ever rises to meet it. The test is `<`, so a `-0` under a `+0` car stays.
+- **The first `RequestZone` skips the zone's own timer**, and only its
+  answer decides the clean-up. The zone is read again after it, so a
+  request that took shows in the next test at once.
+- **CloseCars runs `AICarPos` up to `CopCarPos`.** The world is not tested
+  for NULL, and the car itself is not skipped. Only a player's car gets
+  this far, so it would count itself only from inside that run.
+- **The contact's age is signed**: `WorldTimer` minus the stamp as an
+  `int32`, times the tick. A stamp in the future is less than half a
+  second old.
+- **RegisterInterestingEvent is called with no test** on
+  `pReplayManager`. The port tests it, as `carreset.c` does, because
+  there is no ReplayManager yet. The event's name is never read.
+
+Three things in the listing are left out, because they change nothing:
+- After CarCollision it asks for the colliding cars and swaps the two
+  when the second is the player's own. Nothing reads either afterwards.
+  The call is kept; it only reads.
+- The tail, reached when `DoScreenPrintf` or `TerminalPrintPosition` is
+  set and the camera follows this car. It calls
+  `Race::AreAllPlayersFinishedRacing`, `GetCurrentZoneNumber`,
+  `DisplayCullingStats` and `Race::GetRacingCar`, each for a print that
+  was compiled out. Both switches are 0 in the image.
+- The second `30 < speed` before the smokeable, which the first has
+  already passed.
+
+`g_DisableAutoReplay` (`0x00323040`) is Car.obj's, and 0 in the image. It
+is in `car.c`.
+
+### The seams
+
+Four calls go to the Player, which task 26 has not brought yet:
+
+```
+Player::ClearZone(bool)            0x00171c70  aborts if unset
+Player::RequestZone(int, 3 bools)  0x00171610  aborts if unset
+Player::IsJumpCamAvailable         0x00170408  aborts if unset
+Player::CleanUpJumpCam             0x00170488  aborts if unset
+```
+
+They move the camera between zones, which changes the game, so an unset
+one aborts. Only a player's car reaches them. `player.h` names the three
+fields the method reads, `nZoneCurrent` (76), `bWrongWay` (736) and
+`EyeVerts` (1600), with a layout check. `TrackPathCoordinate::ResetPosition`
+(`0x00134f18`, in Car.obj) is in `trackpath.c`: it forgets the point, then
+updates.
+
+### The check
+
+`carmode_check` runs one more scenario after the tenth slice's. Both sides
+set the car to no control, and make a player, a world with a five-car
+table (the car, then four others), a Collision, a witness and a plain
+body. Each case sets the velocities, the old velocities, the position,
+the odometer, the speed, the wheels, the yaw's two inputs, the track path
+coordinate, the counters and switches, the player's three fields, the
+table's positions and, if it has one, the collision. The topology's
+answers are scripted, one per question, and a leftover answer fails the
+case. The four Player calls log, and `RequestZone` answers as the case
+says and moves the player when it says yes. The replay's snapshots are
+zeroed before the call and printed after it, which is where the events
+show.
+
+The 105 cases:
+- `dt` at 0, negative, `-0`, a denormal and 2;
+- the odometer at 0, `-0`, below 0, at 1000, above it, NaN, and `+0` on a
+  `-0` odometer;
+- the topology on and off its phase, each answer pair, no movement mode;
+- lost exactly at 5000 and one float past it, and kept by the tuner;
+- searched afresh: exactly 300 and one float past it from a point that a
+  search stops at though another is nearer, at loop 0, 60 and -60, off
+  the phase, with no movement mode, and lost from there at 5100;
+- no paths at all;
+- a player off the eighth step: the zone clear in both zones, with and
+  without a wheel down, and loop 9, which a mask of 15 or 3 would take;
+- a jump the jump cam takes, falling and not, and each thing that stops
+  or undoes it;
+- AverageAir's edges, found by reading the image's frame after the call:
+  exactly 0.9 s, exactly 0.5 s, exactly 1.5 high and the next float up,
+  and never down in three seconds;
+- the speeds at 40, just over 30 and at 30;
+- the yaw at 1023 and 1024 BAM either way round, and too slow to have one;
+- the jump cam's zone: the height kept while falling, `-0` under a `+0`
+  car, the switch either side of now and at it, and the zone after;
+- CloseCars: one, three, three at exactly 40, two just inside, two off
+  the axes either side of 40, the car itself when the run starts at it,
+  a run one slot longer, no AI, a run that ends before it starts, and a
+  speed of 40;
+- sliding at 4093 and 4094 either way round, and at a speed of 30;
+- the collision: two cars above 40, at it and under it, a smokeable
+  either way round, a static body, a witness with no Collision, the half
+  second at 1999 and 2000 ticks, a stamp 100 ticks in the future and
+  one 2^31 away, a car's own body that is not a car's, and no replay.
+
+The poison runs cover it: the stack is scrubbed around the call, and no
+line of the scenario is masked.
+
+```
+carmode_check  74 transitions, 19 resets, 36396 lines, 103 masked, 0 differ
+```
+
+No disagreement between the image and the port was found.
+
+### What the mutation pass said
+
+There are 88 mutations for the slice. Four of the cases were added for
+them before the pass: `+0` on a `-0` odometer, loop 9, the `-0` height
+and two cars at exactly 40. Each one splits a `<` from a `<=`, or a mask
+from a narrower one, that no other case did. The first pass then caught
+82, and the 6 that survived are equivalent by construction:
+- `fm-air-yaw-le` and `fm-slide-le`: the yaw's `<` and `<=`. GetYaw is a
+  BAM difference, one of 65536, times `BAM_TO_RAD` and folded past pi. A
+  scan of all of them finds none exactly on 3.14/32 or 3.14/8. The
+  nearest are 1023 and 1024 (and 64512 and 64513) for the first, and
+  4093 and 4094 (and 61442 and 61443) for the second. The cases sit on
+  those.
+- `fm-air-name`: RegisterInterestingEvent never reads the event's name.
+- `fm-col-no-colliding-cars`: the call's two answers are never read.
+- `fm-col-smoke-no-else`: the first branch needs two car bodies, and then
+  neither is smokeable.
+- `fm-col-smoke-no-speed`: the second `30 < speed`, which the first has
+  passed, on a local nothing in between changes.
+
+Six mutants crash the harness, which counts as caught. The four that
+move, widen or cut short the topology's test either reach it with no
+answer scripted or leave one over. `fm-close-with-cop` reads a NULL slot
+past the table's cars. `fm-replay-untested` calls into no replay on the
+case that has none, which is the one place the port adds a test the
+image does not have.
+
+The rest of `carmode_check`'s mutations stand: the new scenario only adds
+lines after the others, so nothing caught before can be missed now, and
+the eight equivalents from the earlier slices were rerun and still
+survive.
+
+```
+carmode_check --only (the 88)  88 mutations, 82 caught, 6 equivalent, 0 unexplained
+carmode_check --only (the 8)   8 mutations, 0 caught, 8 equivalent, 0 unexplained
+```
+
 ## What is not ported yet
 
 The measure that matters for planning is whether a method makes a direct
@@ -1657,7 +1873,7 @@ is force feedback — six `PortSetForceConditionData`, six
 `PortSetForcePeriodicData`, `PortPlayShake`. It drives the wheel
 peripheral's motors, not the physics.
 
-Of the **forty-six that do**, twenty-nine are ported: `CalculateDraftFactor(Car *)`,
+Of the **forty-six that do**, thirty are ported: `CalculateDraftFactor(Car *)`,
 whose calls are Graph and Table; `WorldToCar`, whose one is
 `CarState::WorldToCar`; the third slice's seven; `SetControlMode` and
 `SetMovementMode`, whose outside calls are the movers' and controllers'
@@ -1674,14 +1890,15 @@ the Graph and `espSetObjectPosition`; and the ninth slice's six, whose are
 the cop manager, the AI's controller, the DeliveryMover and the car's
 sound; and the tenth slice's one, whose are GetElevation, `bMulMatrix`,
 `BodyDamage::GetVisibleTotalDamage`, `TriggerEffect` and
-`BaseCarSound::TriggerSplash`. The AnimatedDriver, the editor link, the
-ninth slice's four classes that are not ported and the splash are
-seams.
+`BaseCarSound::TriggerSplash`; and the eleventh slice's one, whose are the
+track path's `UpdatePosition` and `ResetPosition`, `HasTopology`,
+`CarState::GetYaw`, four Player methods, `CollisionBody::GetCollision`,
+Collision's four questions and the replay. The AnimatedDriver, the editor
+link, the ninth slice's four classes that are not ported, the splash and
+the Player's four are seams.
 
-Eighteen are left, and every one reaches a class that is not ported:
+Seventeen are left, and every one reaches a class that is not ported:
 - the constructor and destructor (`0x0012f240`, `0x0012f660`);
-- `FinishMovement` (`0x00130480`, 2008 bytes): Collision, the Player's
-  zones and jump cam, Race, the replay;
 - `TriggerEvents` (`0x00131a58`): the event manager, the ferns,
   `Player::TriggerVisibleDrivingLine`;
 - `AssignAnimatedDriver` and `UnAssignAnimatedDriver`;

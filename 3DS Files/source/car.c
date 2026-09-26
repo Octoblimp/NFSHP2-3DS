@@ -889,6 +889,11 @@ int32_t car_is_drifting(Car *c)
 // 15 m/s. Car.obj's .sdata, read by RealDriver through gp.
 float RollingResetSpeed = 15.0f;                // 0x00323030  41700000
 
+// FinishMovement's switch for the jump cam and its after-zone: while set,
+// only a player already in the jump cam's zone is looked after. Car.obj's
+// .sdata, zero in the image.
+int32_t g_DisableAutoReplay;                    // 0x00323040
+
 // --------------------------------------------------------- the fake engine
 //
 // ComputeFakeRPM's tweakables. Each is an initialised .sdata word, read

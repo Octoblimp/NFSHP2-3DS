@@ -56,7 +56,7 @@ physcomp_check      8 scenarios,   239 lines, 0 differ   (46 caught, 1 equivalen
 sinit_check        13 calls,        0 problems           (6/6 mutations caught)
 physicscar_check  106 scenarios, 102908 lines, 0 differ (257 caught, 6 equivalent)
 mellowmover_check  39 scenarios, 56080 lines, 0 differ  (341 caught, 5 equivalent)
-carmode_check      74 transitions, 19 resets, 35875 lines, 0 differ (409 caught, 8 equivalent)
+carmode_check      74 transitions, 19 resets, 36396 lines, 0 differ (491 caught, 14 equivalent)
 joystick_check     64240 ops,    75891 lines, 0 differ  (250 caught, 3 equivalent)
 joyhid_check       every key and stick reaches its event
 realtime_check     20 scenarios, 1044 ops, 3470 lines, 0 differ (91 caught, 2 equivalent)
@@ -334,6 +334,24 @@ and so replaced every boot.
      UpdateAIDebugRendering reads the word at 44 in low memory. The port
      passes NULL; the one renderer the game runs never reads its target.
      Written up in `docs/formats/world.md`.
+   - **The nineteenth slice is `Car::FinishMovement`** (`0x00130480`, 2008
+     bytes), in `carfinish.c`: the accelerations, the odometer, the track
+     path's update, the lost-car and search tests, the headlights, the
+     zone clear, the air, the jump cam and its zone, and the replay's
+     CarInAir, CloseCars, CarSlidingSideways, CarCollision and
+     SmokeableCollision. Car is 63 of 80 methods, 12456 of 22876 bytes.
+     `main.c` sets `gCarFinishMovementFn`, so World's step no longer
+     aborts there. The Player's ClearZone, RequestZone, IsJumpCamAvailable
+     and CleanUpJumpCam are seams that abort when unset (task 26), and
+     `player.h` names `nZoneCurrent`, `bWrongWay` and `EyeVerts`.
+     `g_DisableAutoReplay` is in `car.c`, and
+     TrackPathCoordinate::ResetPosition in `trackpath.c`. `carmode_check`
+     runs 105 cases after the terrain effects, with a player, a five-car
+     world table, a Collision and the topology's answers scripted one per
+     question: 36,396 lines, 0 differ, no line of it masked. Of its 88
+     mutations, 82 are caught and 6 are equivalent, with 0 unexplained.
+     No disagreement between the image and the port was found. Written
+     up in `car.md`.
 
    Things to know before the next slice:
    - **Nothing calls it on hardware yet.** The port has no `LoaderTable`,
@@ -355,9 +373,8 @@ and so replaced every boot.
      also in a comment above the code, the mutant edits the comment and
      survives. Two of the step's did that. Spell a pattern so it only
      matches code.
-   - **The rest of Car** is 18 methods, and every one reaches a class
-     that is not ported: the constructor and destructor, `FinishMovement`
-     (Collision, the Player's zones, the replay, Race), `TriggerEvents`
+   - **The rest of Car** is 17 methods, and every one reaches a class
+     that is not ported: the constructor and destructor, `TriggerEvents`
      (the ferns, the event manager, `Player::TriggerVisibleDrivingLine`),
      the AnimatedDriver pair, the damage, render and force-feedback
      groups, and `DoSnapshot`. `car.md` lists them.
@@ -446,11 +463,22 @@ and so replaced every boot.
      survived every random box. Each column of `I × m` adds the identity's
      fourth row times zero, a +0, so only an axis that is -0 in one lane
      and negative in the rest tells the two apart.
-   - **Next is `Car::FinishMovement`** (`0x00130480`, 2008 bytes), which
-     DoTimestep calls for every car and which aborts while it is unset.
-     `car.md` has its outline. After that come the track's rendering and
-     streaming, and RaceCoordinator's InitForRace (`0x001473c0`), which is
-     what will build a World outside a harness.
+   - **The closest-point search walks the paths, not the points.**
+     `trackpath_find_closest_point` loops over `NumPaths`, so a manager
+     with no points still hands back a point. To test "no point", zero
+     `NumPaths`, as `carmode_check`'s `nopaths` case does.
+   - **A BAM angle never lands on a round radian.** GetYaw is one of
+     65536 differences times `BAM_TO_RAD`, and a scan of all of them finds
+     none exactly on 3.14/32 or 3.14/8, so a yaw's `<` and `<=` are
+     equivalent. Scan before hunting for the boundary case.
+   - **Next are the track's rendering and streaming, and RaceCoordinator's
+     InitForRace** (`0x001473c0`, 500 bytes), which is what will build a
+     World outside a harness. InitForRace reaches much that is not ported:
+     the `Player(JoystickPort, int)` constructor, the ReplayManager and
+     Race constructors, InitCars (`0x00147ce8`, which needs Car's
+     constructor), InitPlayers (`0x001476e8`), Race::Init, SetupGhostCars,
+     SetAIDriverModesFromPlayers, and the speech and collision-sound
+     resets. The World constructor it calls is ported.
    - **The 3DS build compiles every file so far.** `tools/build_cia.ps1`
      built the CIA, 316,352 bytes, with `worldinit.c`, `obb.c` and
      `bplist.c` in it and no warnings from the port's sources. Nothing on

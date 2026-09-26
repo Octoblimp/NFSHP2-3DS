@@ -418,6 +418,10 @@ extern Graph       PostCollisionYawControlProfile;      // 0x00323078
 // A reset car keeps at most this much speed (RealDriver's reset handler).
 extern float RollingResetSpeed;                         // 0x00323030
 
+// While set, FinishMovement neither starts the jump cam nor leaves it for
+// the after-zone (carfinish.c).
+extern int32_t g_DisableAutoReplay;                     // 0x00323040
+
 // ComputeFakeRPM's tweakables, initialised in the image's .sdata, and the
 // RPM pairs in its .data. Exported so the transcript can print them and set
 // the two debug overrides.
@@ -645,5 +649,42 @@ void     car_trigger_car_terrain_effects(Car *c, float distance);
 typedef void    (*CarBaseCarSoundSplashFn)(BaseCarSound *s, int32_t right,
                                            int32_t level);
 extern CarBaseCarSoundSplashFn          gBaseCarSoundTriggerSplashFn;
+
+// Slice eleven: the end of a car's step. carfinish.c, apart from carmove.c
+// because it reaches Collision, the world's car table and the Player.
+// World::DoTimestep calls it for every car, through world.h's
+// gCarFinishMovementFn, after every car has moved.
+void     car_finish_movement(Car *c, float dt);          // 0x00130480
+
+// The four Player methods FinishMovement calls, for the camera zones and
+// the jump cam. Player is task 26's. A zone is the camera's, but
+// RequestZone also sets the world's time scale or pauses it
+// (World::SetTimeScale, SetWorldPaused), and ClearZone puts the scale back
+// (ResetTimeScale). So each seam aborts if it is reached unset, in
+// carmodes.h's style. Only a car with a Player reaches them, and nothing
+// in the port builds a Player yet.
+//
+//   Player::ClearZone(bool)             0x00171c70  `sound`: ClearZoneSound
+//   Player::RequestZone(int, 3 x bool)  0x00171610  answers whether it did
+//   Player::IsJumpCamAvailable          0x00170408  builds a PreviewRoute
+//   Player::CleanUpJumpCam              0x00170488  deletes it
+//
+// RequestZone's first bool skips the zone's own timer; FinishMovement
+// passes (6, 0, 1, 1) for the jump cam and (7, 0, 0, 1) after it.
+typedef void    (*PlayerClearZoneFn)(Player *p, int32_t sound);
+typedef int32_t (*PlayerRequestZoneFn)(Player *p, int32_t zone,
+                                       int32_t force, int32_t b2,
+                                       int32_t b3);
+typedef int32_t (*PlayerIsJumpCamAvailableFn)(Player *p);
+typedef void    (*PlayerCleanUpJumpCamFn)(Player *p);
+extern PlayerClearZoneFn          gPlayerClearZoneFn;
+extern PlayerRequestZoneFn        gPlayerRequestZoneFn;
+extern PlayerIsJumpCamAvailableFn gPlayerIsJumpCamAvailableFn;
+extern PlayerCleanUpJumpCamFn     gPlayerCleanUpJumpCamFn;
+
+// The camera zones FinishMovement names: 6 is the jump cam, 7 the zone it
+// asks for when the car has been in the air longer than AirTimeSwitch.
+#define PLAYER_ZONE_JUMP_CAM   6
+#define PLAYER_ZONE_AFTER_JUMP 7
 
 #endif // CAR_H
