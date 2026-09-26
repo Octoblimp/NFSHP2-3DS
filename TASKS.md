@@ -1837,6 +1837,17 @@ is citro3d and owns the top.
         82 are caught and 6 are equivalent. No disagreement between the
         image and the port was found. Written up in
         `docs/formats/car.md`.
+
+        **The twentieth slice is closed: Scenery.obj's data half**, in
+        `scenery.c`: the loader and unloader, the three finds, the
+        visible zones' lookups, the debug tables, CreateFacadeMatrix,
+        FlipObjectsOnBackwardsTrack and the statics
+        (`__CTOR_LIST__[21]`). eModel::Init and its deleting destructor
+        are seams that abort when unset. `scenery_check` loads all 122
+        of TRACKB12's sections and its 23 zones against the image: 17
+        scenarios, 3,450 ops, 16,724 lines, 0 differ. Of its 79
+        mutations, 77 are caught and 2 are equivalent. Written up in
+        `docs/formats/scenery.md`.
         CONTINUE.md has what is next.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag

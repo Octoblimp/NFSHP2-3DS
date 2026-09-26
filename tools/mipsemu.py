@@ -20,7 +20,8 @@ physics uses -- `lqc2`/`sqc2`, `qmfc2`/`qmtc2`, the lane-wise arithmetic,
 the ACC forms behind every matrix multiply, `vopmula`/`vopmsub` for cross
 products, and `vrsqrt` into Q -- and the four MMI ops bIdentity is made of.
 VClip added `vmuli` with the `ctc2` that loads I, and the `pextuw` and
-`prot3w` it unpacks a vector's lanes with.
+`prot3w` it unpacks a vector's lanes with. The scenery cull added
+`vclipw` and the `ctc2`/`cfc2` that seed and read the clip flags, vi18.
 
 **The float model is IEEE single, not the EE's.** The EE rounds toward zero
 and has no infinities, NaNs or denormals; the port runs on an ARM11 and on
@@ -193,6 +194,7 @@ class Emu(object):
         self.acc = [0, 0, 0, 0]
         self.q = 0
         self.i = 0                 # vi21, the I register, as a bit pattern
+        self.clip = 0              # vi18, the clip flags: four sets of six
         self.stubs = {}
         self.hooks = {}
         self.watch = {}            # addr -> hit count, filled by watch_calls()
@@ -733,6 +735,10 @@ class Emu(object):
                 self._vput(fs, [(x >> (32 * k)) & M32 for k in range(4)], 15)
             elif rs == 6 and fs == 21:                # ctc2 rt, vi21 (I)
                 self.i = self.reg[ft] & M32
+            elif rs == 6 and fs == 18:                # ctc2 rt, vi18 (clip)
+                self.clip = self.reg[ft] & 0xFFFFFF
+            elif rs == 2 and fs == 18:                # cfc2 rt, vi18 (clip)
+                self.reg[ft] = self.clip
             else:
                 raise MipsError("cop2 transfer rs=0x%02x at 0x%08x" % (rs, pc))
             return
@@ -819,6 +825,16 @@ class Emu(object):
             self._acc_put(r, mask)
         elif 0x18 <= idx < 0x1c:                      # vmula.bc
             self._acc_put(lanes(mul, S, [T[w & 3]] * 4), mask)
+        elif idx == 0x1f:                             # vclipw.xyz
+            # Six flags, +x -x +y -y +z -z from bit 0, each lane against
+            # |ft.w|, shifted in below the three older sets.
+            lim = abs(F(T[3]))
+            flags = 0
+            for k in range(3):
+                v = F(S[k])
+                flags |= (lim < v) << (2 * k)
+                flags |= (v < -lim) << (2 * k + 1)
+            self.clip = ((self.clip << 6) | flags) & 0xFFFFFF
         elif idx == 0x1d:                             # vabs
             self._vput(ft, [x & 0x7FFFFFFF for x in S], mask)
         elif idx == 0x28:

@@ -6985,3 +6985,76 @@ constructors, InitCars (`0x00147ce8`, which needs Car's constructor),
 InitPlayers (`0x001476e8`), Race::Init, SetupGhostCars,
 SetAIDriverModesFromPlayers, and the speech and collision-sound resets.
 The World constructor it calls is ported.
+
+## Session 30, continued (2026-09-26) -- Task 27's twentieth slice: Scenery.obj's data half
+
+The nineteenth slice went in as `16323fa`. The twentieth is the first of
+`Scenery.obj` (0x0014c3a0 .. 0x0014e734), the track's scenery as it comes
+off the disc and the visible zones that say which of it to draw. It is in
+`scenery.c`. This half is the data: the loader and the unloader, the three
+finds, the zones' lookups, the debug tables, the facade matrix, the
+backwards-track flip and the statics. The cull is the next slice. The
+decode is in `docs/formats/scenery.md`.
+
+```
+scenery_check   17 scenarios, 3450 ops, 16724 lines, 0 differ
+                2843 models built
+                79 mutations: 77 caught, 2 equivalent, 0 unexplained
+```
+
+### What the disc holds
+
+TRACKB12 has 122 section containers and one zone chunk of 23 zones.
+TRACKA12 is empty, and TRACKB12.BUN is loaded whole: no scenery streams by
+section. Each container's children come as header, objects, kinds, tree.
+There are 2108 kinds, 7765 objects and 1967 tree nodes; 28 kinds are
+facades, and no object has the flip's bit, 0x400.
+
+### What the listing says
+
+- **The loader trusts the order.** A child before the header writes
+  through a NULL header, and a second kinds chunk replaces the first.
+- **The objects' count is unsigned** after the pad, so a pad larger than
+  the chunk wraps it.
+- **A LOD with no name keeps its pointer from the disc**, and the unloader
+  destroys it if it is not NULL.
+- **The flip is on a direction of exactly 1.** A direction of 2 does not
+  flip. The position goes through the matrix's fourth row and back, pad
+  and all, and comes out unchanged.
+- **The unloader finds the header only as the first child.**
+- **FindVisibleZone moves the zone it finds to the list's head.**
+- **IsPointInPoly counts a vertex on the scanline for the edge above it
+  only**, and multiplies before it divides.
+- **FindNextFreeIndex does not catch a count past 64.**
+
+### What came with it
+
+- `sinit.c` calls `scenery_static_init` as `__CTOR_LIST__[21]`
+  (0x0014e718), which empties both lists.
+- eModel is named in `scenery.h`, 24 bytes. eModel::Init and the deleting
+  destructor are `gEModelInitFn` and `gEModelDestroyFn`, which abort when
+  reached unset; `eModelSlotPool` is NULL until the renderer makes it.
+- On a 64-bit host the header, the kinds and the zones widen, and the
+  harness rebuilds each container with them widened, each child at the
+  misalignment the image sees.
+
+### The mutation pass
+
+79 mutations, 77 caught and 2 equivalent: the model's pointer stored after
+Init rather than before (Init reads the model and the name, not the kind),
+and the flip's fourth row given a w of 0 (it is never read back). Eight
+mutants stop the harness: six crash it and two hang it, which is why the
+checker's timeout is 30 s now.
+
+The pass found one port bug. FindIndexTo read its shorts through
+`VisibleScenerySections[i]`, and GCC at -O2 took the array's 64 as a bound
+on the count, so `== 64` and `>= 64` compiled alike. It reads from the
+zone's base now.
+
+### Next: the cull
+
+ClassifyAABB (0x0010b940) is VU0: the eight corners through the clip
+matrix and `vclipw.xyz` on each, read back through the clip register.
+`mipsemu` now models `vclipw`, `ctc2` and `cfc2` on vi18. Then the tree
+cull, DrawAScenery, the section lists, DoCulling, StuffScenery and
+eDisplayFrame's SetupSceneryCullInfo, with Ecstasy.obj's frame malloc.

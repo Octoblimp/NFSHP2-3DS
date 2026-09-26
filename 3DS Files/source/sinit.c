@@ -4,8 +4,8 @@
 // and the _GLOBAL_$I$ it stands for. sinit_check reads those comments, so
 // their shape is fixed.
 //
-// None of the thirteen reads anything another one writes -- twelve fill
-// Tables, Graphs, list heads, hashes and constants, and the thirteenth
+// None of the fourteen reads anything another one writes -- thirteen fill
+// Tables, Graphs, list heads, hashes and constants, and the fourteenth
 // builds the slot-pool manager -- so the order is kept because it is the
 // image's, not because a different one would be observed. The manager comes
 // last for that reason too: it is entry 103, long after the physics tables.
@@ -26,6 +26,7 @@
 #include "physicscar.h"
 #include "realdriver.h"
 #include "rigidbody.h"
+#include "scenery.h"
 #include "terraintype.h"
 #include "track.h"
 #include "wheel.h"
@@ -35,6 +36,7 @@ void sinit_run(void)
     car_static_init();          // [14]  0x001347c0 _GLOBAL_$I$fDraftFalloff
     physicscar_static_init();   // [15]  0x00137438 _GLOBAL_$I$RigidBodySlotPool
     realdriver_static_init();   // [17]  0x0013aa88 _GLOBAL_$I$PowerSlideYawCoef
+    scenery_static_init();      // [21]  0x0014e718 _GLOBAL_$I$CurrentZoneNumber
     track_static_init();        // [22]  0x00150938 _GLOBAL_$I$TrackPositionMarkerList
     joyevent_static_init();     // [23]  0x00152588 _GLOBAL_$I$EventNodeSlotPool
     rigidbody_static_init();    // [41]  0x00193d20 _GLOBAL_$I$__9RigidBodyP13RigidBodyInfo
