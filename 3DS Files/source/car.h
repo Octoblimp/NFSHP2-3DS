@@ -84,6 +84,7 @@ typedef struct CarRenderInfo     CarRenderInfo;
 typedef struct AnimatedDriver    AnimatedDriver;
 typedef struct CarDamage         CarDamage;
 typedef struct BaseCarSound      BaseCarSound;
+typedef struct tCopManager       tCopManager;
 
 // ------------------------------------------------------------- small records
 
@@ -270,7 +271,7 @@ struct Car {
     bVector2          LastInTroughPosition;     // 1968
     int32_t           bPoofed;                  // 1976
     int32_t           bVisibleOnTrackMap;       // 1980
-    int32_t           NumTimesSkidding;         // 1984
+    uint8_t           NumTimesSkidding[4];      // 1984, a count a wheel
     uint8_t           RoadBumpBits;             // 1988
     uint8_t           _hole1989[3];             // 1989
     void             *pCaffeineObj;             // 1992
@@ -505,5 +506,144 @@ void     car_set_control_mode(Car *c, ControlMode mode); // 0x0012fb50
 void     car_set_movement_mode(Car *c, MovementMode mode); // 0x0012fd58
 void     car_set_to_physics_mode(Car *c, Car *other);    // 0x0012ff68
 void     car_set_friction_boost(Car *c, float f);        // 0x0012fd38
+
+// Slice five: on the track. cartrack.c, apart from car.c for the topology.
+void     car_find_flat_on_track_position(Car *c, bMatrix4 *m, bVector3 *pos,
+                                         uint16_t angle,
+                                         TopologyCoordinate *tc);
+                                                         // 0x00130c58
+void     car_put_flat_on_track(Car *c);                  // 0x00130e90
+
+// Slice six: the reset group. carreset.c, which reaches the modes and the
+// ground both.
+void     car_reset_core(Car *c, const bVector3 *pos, float speed,
+                        uint16_t angle);                 // 0x001312c0
+void     car_reset_to_position(Car *c, const bVector3 *pos, float speed,
+                               uint16_t angle);          // 0x00131418
+void     car_reset_to_route_point(Car *c, TrackRoute *route,
+                                  TrackRoutePoint *point, float speed,
+                                  int32_t blink, float direction);
+                                                         // 0x00131480
+void     car_debug_set_position(Car *c, const bVector3 *pos, float speed,
+                                uint16_t angle);         // 0x001317d0
+
+// Slice seven: the air under a car and the start of its step. cartrack.c.
+float    car_average_air(Car *c, float *time, float *height);
+                                                         // 0x00133e48
+void     car_begin_movement(Car *c, float dt);           // 0x001303a8
+
+// Slice eight: the step. carmove.c.
+float    car_move(Car *c, float dt);                     // 0x00130200
+void     car_change_gear(Car *c, Gear gear);             // 0x00130ff8
+void     car_calculate_new_catchup_multipliers(Car *c);  // 0x001334f0
+void     car_update_position(Car *c, bVector3 *pos);     // 0x00130388
+
+// The three AnimatedDriver methods ChangeGear calls, and the Espresso link
+// UpdatePosition calls. AnimatedDriver is the render path's (task 29) and
+// Espresso a development tool the port has no side of, so each is a seam
+// in carmodes.h's style: NULL is a call the port cannot make yet, and
+// reaching it aborts. Nothing sets pAnimatedDriver or pCaffeineObj yet.
+//
+//   BeginGearChange        0x0019f7a8  QueueAnimation(11)
+//   BeginDrivingBackwards  0x0019f7b0  byte 105 set, HandleDrivingBackwards
+//   EndDrivingBackwards    0x0019f7d0  byte 105 cleared, ReleaseAnimation(3)
+//   espSetObjectPosition   0x00243308  the object and three floats, queued
+//                                      for the editor
+typedef void (*CarAnimatedDriverFn)(AnimatedDriver *d);
+typedef void (*CarEspSetObjectPositionFn)(void *obj, bVector3 *pos);
+extern CarAnimatedDriverFn gAnimatedDriverBeginGearChangeFn;
+extern CarAnimatedDriverFn gAnimatedDriverBeginDrivingBackwardsFn;
+extern CarAnimatedDriverFn gAnimatedDriverEndDrivingBackwardsFn;
+extern CarEspSetObjectPositionFn gEspSetObjectPositionFn;
+
+// Slice nine: what the race, the AI and the pursuit ask of a car. carrace.c,
+// apart from car.c because DeliverMeFromEvil reaches SetMovementMode and
+// FixBlownTires RealDriver.
+float    car_get_distance_and_speed(float *speed, Car *a, Car *b);
+                                                         // 0x001326b0
+void     car_fix_blown_tires(Car *c);                    // 0x00133450
+void     car_trigger_tire_blow_out(Car *c, int32_t tires); // 0x00133368
+void     car_please_reset_me_later(Car *c);              // 0x00131580
+float    car_get_driving_line_speed(Car *c);             // 0x00131700
+void     car_deliver_me_from_evil(Car *c, bVector2 *pos, uint16_t angle,
+                                  float speed, float time);
+                                                         // 0x001326d0
+
+// 9CarEffect (type#1034). TriggerTireBlowOut asks for the blown tire; the
+// rest are the render path's, and are here so that its port has them.
+typedef int32_t CarEffect;
+
+#define CARFX_NONE                      ((CarEffect)0)
+#define CARFX_DRIVE_OVER                ((CarEffect)1)
+#define CARFX_DRIVE_OVER2               ((CarEffect)2)
+#define CARFX_SKID_SMOKE                ((CarEffect)3)
+#define CARFX_TIRE_SPEW                 ((CarEffect)4)
+#define CARFX_BOTTOM_OUT                ((CarEffect)5)
+#define CARFX_DAM_RADIATOR              ((CarEffect)6)
+#define CARFX_DAM_ENGINE                ((CarEffect)7)
+#define CARFX_BLOWN_TIRE                ((CarEffect)8)
+#define CARFX_DRIVE_ON_FLAT_TIRE        ((CarEffect)9)
+#define CARFX_NITRO                     ((CarEffect)10)
+#define CARFX_EXHAUST_SMOKE             ((CarEffect)11)
+#define CARFX_BREAK_SIDE_MIRROR_LEFT    ((CarEffect)12)
+#define CARFX_BREAK_SIDE_MIRROR_RIGHT   ((CarEffect)13)
+#define CARFX_BREAK_LICENSE_PLATE_FRONT ((CarEffect)14)
+#define CARFX_BREAK_LICENSE_PLATE_RIGHT ((CarEffect)15)
+#define CARFX_BREAK_HEADLIGHT_LEFT      ((CarEffect)16)
+#define CARFX_BREAK_HEADLIGHT_RIGHT     ((CarEffect)17)
+#define CARFX_BREAK_BRAKELIGHT_LEFT     ((CarEffect)18)
+#define CARFX_BREAK_BRAKELIGHT_RIGHT    ((CarEffect)19)
+#define CARFX_BREAK_WINDSHIELD          ((CarEffect)20)
+#define CARFX_BREAK_WINDOW_REAR         ((CarEffect)21)
+#define CARFX_BREAK_WINDOW_LEFT_FRONT   ((CarEffect)22)
+#define CARFX_BREAK_WINDOW_LEFT_REAR    ((CarEffect)23)
+#define CARFX_BREAK_WINDOW_RIGHT_FRONT  ((CarEffect)24)
+#define CARFX_BREAK_WINDOW_RIGHT_REAR   ((CarEffect)25)
+#define NUM_CARFX                       26
+
+// The five calls slice nine makes out of Car into classes the port does not
+// have yet. The three whose answer the car needs, or that move it, abort if
+// reached unset, in carmodes.h's style. The effect and the sound only show
+// and sound, and a NULL one is skipped, in RealDriver's.
+//
+//   tCopManager::IsBeingPursued                 0x00213128  task 26, aborts
+//   AICarController::GetCurrentDrivingLineSpeed 0x0018ad18  task 26, aborts
+//   DeliveryMover::SetDestination               0x001f0ba0  task 26, aborts
+//   Car::TriggerEffect                          0x0011e328  task 29, skipped
+//   BaseCarSound::TriggerTireBlowOut            0x00185200  task 29, skipped
+//
+// Car::TriggerEffect is Car's own, but it is not in Car.obj: it sits with
+// the effect system's code, and is that port's.
+typedef int32_t (*CarCopManagerIsBeingPursuedFn)(tCopManager *m, Car *c);
+typedef float   (*CarAIDrivingLineSpeedFn)(CarController *ctl);
+typedef void    (*CarDeliveryMoverSetDestinationFn)(CarMover *m, bVector2 *pos,
+                                                    uint16_t angle, float speed,
+                                                    float time);
+typedef void    (*CarTriggerEffectFn)(Car *c, CarEffect effect, float scale,
+                                      int32_t where, bVector3 *pos);
+typedef void    (*CarBaseCarSoundFn)(BaseCarSound *s);
+extern CarCopManagerIsBeingPursuedFn    gCopManagerIsBeingPursuedFn;
+extern CarAIDrivingLineSpeedFn          gAICarControllerGetCurrentDrivingLineSpeedFn;
+extern CarDeliveryMoverSetDestinationFn gDeliveryMoverSetDestinationFn;
+extern CarTriggerEffectFn               gCarTriggerEffectFn;
+extern CarBaseCarSoundFn                gBaseCarSoundTriggerTireBlowOutFn;
+
+// Slice ten: the effects the ground under a car makes. careffects.c, apart
+// from car.c because it reads the terrain table and the topology. The
+// effect goes through slice nine's gCarTriggerEffectFn.
+void     car_trigger_car_terrain_effects(Car *c, float distance);
+                                                         // 0x00131db8
+
+// BreakableCarItem (the stabs), the item whose damage the terrain effects
+// read. Each item has two bits of CarDamage's
+// BreakableCarItemDamageAmounts, item i at bit 2i.
+#define BREAKABLE_CAR_ITEM_RADIATOR 14
+
+// BaseCarSound::TriggerSplash, 0x00185038, task 29, skipped when NULL. On
+// the disc it is 24 bytes: `level` goes to SplashRight (40) if `right`,
+// and to SplashLeft (36) if not.
+typedef void    (*CarBaseCarSoundSplashFn)(BaseCarSound *s, int32_t right,
+                                           int32_t level);
+extern CarBaseCarSoundSplashFn          gBaseCarSoundTriggerSplashFn;
 
 #endif // CAR_H

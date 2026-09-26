@@ -416,6 +416,13 @@ class DrivingLocation(object):
 TRM = RouteManager()
 
 
+def is_clear(loc):
+    """DrivingLocation::IsClear, 0x00223fe8: `lw v0,0(a0) ; sltiu v0,v0,1`.
+    A function rather than an inline test so drivetarget_image_check.py
+    can put the image's own two instructions in its place."""
+    return 1 if loc.pRoute is None else 0
+
+
 # ------------------------------------------------------ the free functions
 
 def is_point_ahead_of_car(p, car, thresh):
@@ -444,9 +451,11 @@ def straight_line_predict(car, t):
         s, c = BM.bSinCos(car.State.Angle)
         d = [f32(c), f32(s), ZERO, ZERO]
     else:
+        # 0x001c3394: an inline vrsqrt over the three-lane sum and a
+        # vmulx.xyzw by it, so the pad is divided by |v.xyz| as well.
         v = car.State.Velocity
-        nx, ny, nz = BV.bNormalize3To((v[0], v[1], v[2]), ONE)
-        d = [nx, ny, nz, v[3]]
+        q = fdiv(ONE, len3(v[0], v[1], v[2]))
+        d = [fmul(v[k], q) for k in range(4)]
 
     p = [fadd(fmul(d[k], look), car.State.Position[k]) for k in range(4)]
     clear(t, None, ZERO)
@@ -2603,13 +2612,13 @@ def s_free():
 
     # IsClear reads pRoute and nothing else.
     loc = DrivingLocation(None, None, 1)
-    pint("fn clear 00", 1 if loc.pRoute is None else 0)
+    pint("fn clear 00", is_clear(loc))
     loc.pRoutePoint = 3
-    pint("fn clear 01", 1 if loc.pRoute is None else 0)
+    pint("fn clear 01", is_clear(loc))
     loc.pRoute, loc.pRoutePoint = ROUTE_B, None
-    pint("fn clear 10", 1 if loc.pRoute is None else 0)
+    pint("fn clear 10", is_clear(loc))
     loc.pRoutePoint = 3
-    pint("fn clear 11", 1 if loc.pRoute is None else 0)
+    pint("fn clear 11", is_clear(loc))
 
     # IsPointAheadOfCar. Straight ahead is a dot of exactly 1.0, which the
     # strict test refuses at a threshold of 1.0.
@@ -2646,7 +2655,7 @@ def s_free():
     pdt("fn slp slow", t, 2)
 
     # Above 1 m/s the velocity is used, all four lanes through the
-    # normalise.
+    # normalise: the pad comes back divided by |v.xyz| like the rest.
     dt_straight(t)
     car_set(car, 1.0, 2.0, 0.9, 1.2, 0.0, 0.0, 0x1555, 1.5, 1.5)
     car.State.Velocity[2] = f32(0.3)
@@ -2661,6 +2670,16 @@ def s_free():
     car.State.VelocityMagnitude = ONE
     straight_line_predict(car, t)
     pdt("fn slp at1", t, 2)
+
+    # A 3-4-5 velocity at 1.5 m/s: 0.9 * (1 / 1.5) and 0.9 / 1.5 round
+    # apart, so this is where the one reciprocal vrsqrt makes shows.
+    dt_straight(t)
+    car_set(car, 1.0, 2.0, 0.9, 1.2, 0.0, 0.0, 0x1555, 1.5, 1.5)
+    car.State.Velocity[3] = f32(0.7)
+    car.State.Position[2] = f32(4.0)
+    car.State.Position[3] = f32(8.0)
+    straight_line_predict(car, t)
+    pdt("fn slp divide", t, 2)
 
     # Rolling backwards with the body still pointing forwards: heading and
     # velocity oppose. The AddPointToTarget call is unchecked and carries
@@ -2844,6 +2863,18 @@ MUTATIONS = [
     ("fr-slp-checks", DC,
      "    drivetarget_add_point3(t, &p, -1, -1, -1, 0, 0);" + NL + "}",
      "    drivetarget_add_point3(t, &p, -1, -1, -1, 1, car);" + NL + "}"),
+    # The port's reading before drivetarget_image_check: the pad copied
+    # across the normalise instead of scaled by it.
+    ("fr-slp-pad-unscaled", DC,
+     "        dir.pad = v->pad * q;", "        dir.pad = v->pad;"),
+    # vrsqrt is one reciprocal and four multiplies, not four divides.
+    ("fr-slp-divides", DC,
+     "        float q = 1.0f / dt_len3(v->x, v->y, v->z);" + NL + NL
+     + "        dir.x = v->x * q;" + NL + "        dir.y = v->y * q;" + NL
+     + "        dir.z = v->z * q;" + NL + "        dir.pad = v->pad * q;",
+     "        float q = dt_len3(v->x, v->y, v->z);" + NL + NL
+     + "        dir.x = v->x / q;" + NL + "        dir.y = v->y / q;" + NL
+     + "        dir.z = v->z / q;" + NL + "        dir.pad = v->pad / q;"),
 
     # -- lifetime ------------------------------------------------------
     ("ct-no-memset", DC, "    memset(t, 0, sizeof(DriveTarget));",
@@ -3805,6 +3836,11 @@ def mutate_pass(only=None):
     holes = [s for s in survived if s not in EQUIVALENT]
     equiv = [name for name, _, _, _ in MUTATIONS
              if name in EQUIVALENT and name in equivalent_survivors]
+    # An entry whose mutant was caught is a wrong reason, not a spare one.
+    # The import-time check has already ruled out a name no mutation uses.
+    stale = [n for n in EQUIVALENT
+             if n not in equivalent_survivors and n not in missing
+             and (only is None or n in only)]
     # A pattern that is not found is dropped from the denominator above, so
     # without this the tally line reads clean while a mutation never ran.
     if missing:
@@ -3815,7 +3851,9 @@ def mutate_pass(only=None):
     # Named again here so the tail of a long run is enough to act on.
     for name in holes:
         print("  unexplained: %s" % name)
-    return 1 if (holes or missing) else 0
+    for name in stale:
+        print("  listed as equivalent but caught: %s" % name)
+    return 1 if (holes or missing or stale) else 0
 
 
 def main():

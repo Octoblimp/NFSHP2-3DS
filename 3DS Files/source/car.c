@@ -44,9 +44,8 @@
 // ----------------------------------------------------------- the two clocks
 //
 // `WorldTimer` (0x00323cf0) counts ticks of 0.00025 s and `WorldTimeFrames`
-// (0x00323cfc) counts frames. Both are engine.c's in the handheld build; the
-// declarations are here because Car reads them through `gp` and nothing else
-// in this file needs engine.h.
+// (0x00323cfc) counts frames. Both are the clock object's (realtime.c), and
+// Car reads them through `gp`.
 //
 // 0.000250000012f is the image's own word, 0x3983126f, and it is written as
 // a literal rather than as `1.0f / 4000.0f` only because the image holds a
@@ -58,8 +57,7 @@
 // hand-typed 0.00024999999f gives. That one is separated by the two boundary
 // fixtures in the transcript -- [blink tick] and [honk tick] -- because
 // nothing else in the slice is sensitive to a single ulp of the tick.
-extern int32_t WorldTimer;
-extern int32_t WorldTimeFrames;
+#include "realtime.h"
 
 #define CAR_TICK_SECONDS 0.000250000012f
 
@@ -1009,36 +1007,32 @@ void car_compute_fake_rpm(Car *c)
 //
 // Thirty of the thirty-four no-outside-call methods are in this file: the
 // seventeen of slice one, nine dispatchers, the three borrowed-field reads
-// above, and CalculateDraftFactor's no-argument form. The other four:
+// above, and CalculateDraftFactor's no-argument form. Three more are in
+// files of their own, for what they link: SetToPhysicsMode and
+// SetFrictionBoost in carmodes.c, with the movers SetMovementMode builds,
+// and PutFlatOnTrack in cartrack.c, with the topology. The one left:
 //
-//   SetToPhysicsMode    dispatches through the controller, and its other
-//                       arm tail-calls SetMovementMode(MELLOW_MOVEMENT),
-//                       whose jump table constructs every mover. It comes
-//                       with SetMovementMode and PhysicsCar.
-//   SetFrictionBoost    stores into PhysicsCar at +108 when the car is
-//                       under PHYSICS_MOVEMENT; PhysicsCar's slice.
 //   DoWheelForces       `if (pPlayer) CalcForceParameters(...)`, and that
 //                       is the force-feedback method: six
 //                       PortSetForceConditionData calls, six
 //                       PortSetForcePeriodicData, PortPlayShake. Not
 //                       physics -- the wheel peripheral's motors.
-//   PutFlatOnTrack      FindFlatOnTrackPosition, which needs a real
-//                       TopologyCoordinate (task 27).
 //
-// 30 + 4 = 34, and the arithmetic closing is the check that the groups are
-// a partition and not overlapping lists.
+// 30 + 3 + 1 = 34, and the arithmetic closing is the check that the groups
+// are a partition and not overlapping lists.
 //
 // Of the forty-six that call out of the class directly, nine are here:
 // CalculateDraftFactor(Car *), whose calls are Graph and Table;
 // car_world_to_car, whose `j` leaves the class for CarState::WorldToCar;
 // and slice three's seven, whose callees are CarState, bNormalize, Graph,
-// bToPolar and smooth<float>. The other thirty-seven are the constructor
-// and destructor, the reset and damage groups, the render and sound
-// groups, the two force-feedback methods, and among them four that read as
-// though they belonged above but do not -- UpdatePosition and
-// MaybeCameraShake (the effect system), FixBlownTires
-// (RealDriver::ForceEBrakeStop) and FindFlatOnTrackPosition
-// (TopologyCoordinate).
+// bToPolar and smooth<float>. Three more are elsewhere: SetControlMode and
+// SetMovementMode in carmodes.c, and FindFlatOnTrackPosition
+// (TopologyCoordinate) in cartrack.c. The other thirty-four are the
+// constructor and destructor, the reset and damage groups, the render and
+// sound groups, the two force-feedback methods, and among them three that
+// read as though they belonged above but do not -- UpdatePosition and
+// MaybeCameraShake (the effect system) and FixBlownTires
+// (RealDriver::ForceEBrakeStop).
 //
 // The eighty are the whole class. Seventy-four are in Car.obj; the other
 // six were emitted in other objects, car_world_to_car and car_print_above

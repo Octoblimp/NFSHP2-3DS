@@ -156,15 +156,11 @@ extern float   gClutchLimiter;          // 0x00323984  300.0
 extern float   gClutchMatchedThreshold; // 0x00323988  50.0
 extern float   gMaxDownShiftOver;       // 0x0032398c  1.1
 
-// 0x00323d00. Not DriveTrain's -- the game loop owns it and this object
-// only adds it to GearHoldTime. Named bare rather than with a `g`, like
-// engine.h's WorldTimer at gp-20224 and unlike the eight tuning knobs
-// above: it is a frame variable, not something the debug menu moves.
-//
-// It is 0.0 in the image because it is written every frame, which means a
-// transcript that never sets it sees the hold timer stand still. The
-// sport-shift scenario sets it.
-extern float   WorldTimeElapsed;
+// WorldTimeElapsed, 0x00323d00, is not DriveTrain's. The clock object owns
+// it (realtime.h, through engine.h), and this object only adds it to
+// GearHoldTime. It is 0.0 in the image because it is written every frame,
+// which means a transcript that never sets it sees the hold timer stand
+// still. The sport-shift scenario sets it.
 
 // ------------------------------------------------------------- the record
 

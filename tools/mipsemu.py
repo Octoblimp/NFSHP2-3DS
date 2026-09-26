@@ -19,6 +19,8 @@ four `bc1` branches, `max.s`/`min.s`), the VU0 macro-mode instructions the
 physics uses -- `lqc2`/`sqc2`, `qmfc2`/`qmtc2`, the lane-wise arithmetic,
 the ACC forms behind every matrix multiply, `vopmula`/`vopmsub` for cross
 products, and `vrsqrt` into Q -- and the four MMI ops bIdentity is made of.
+VClip added `vmuli` with the `ctc2` that loads I, and the `pextuw` and
+`prot3w` it unpacks a vector's lanes with.
 
 **The float model is IEEE single, not the EE's.** The EE rounds toward zero
 and has no infinities, NaNs or denormals; the port runs on an ARM11 and on
@@ -40,6 +42,13 @@ driven pair divides 0 by 0 every frame the car sits in gear, and the
 console carries on where an IEEE machine goes NaN. `eediv_pcs` collects
 each instruction that took the path, so a checker can say which sites the
 port has to spell with ee_div.
+
+`eesqrt=True` is the same for a square root: `sqrt.s`, `vsqrt` and
+`vrsqrt` of a negative take the root of its magnitude, as the EE does
+(raising an invalid flag nothing reads), where IEEE has a NaN. That is
+eefpu.h's ee_sqrt, and `eesqrt_pcs` collects the sites. DynamicCollisionBody
+::TrackPolygonCheck is the first: `sqrt(1 - d*d)` of a dot product that
+rounds past one.
 
 Library calls are stubbed rather than executed: `bMalloc` hands out blocks
 from a bump allocator, `bMemSet`/`bMemCpy` run natively, and the tickers
@@ -158,11 +167,13 @@ class Emu(object):
     RAM = 32 << 20
     RETURN = 0x0FFFFFF0        # sentinel return address: run() stops here
 
-    def __init__(self, path=ELF, ieee=False, eediv=False):
+    def __init__(self, path=ELF, ieee=False, eediv=False, eesqrt=False):
         self.elf = Elf(path)
         self.ieee = ieee
         self.eediv = eediv
         self.eediv_pcs = set()
+        self.eesqrt = eesqrt
+        self.eesqrt_pcs = set()
         self.mem = bytearray(self.RAM)
         for s in self.elf.secs:
             if not s["addr"] or not (s["flags"] & 2):
@@ -181,6 +192,7 @@ class Emu(object):
         self.vf[0] = [0, 0, 0, F_ONE]
         self.acc = [0, 0, 0, 0]
         self.q = 0
+        self.i = 0                 # vi21, the I register, as a bit pattern
         self.stubs = {}
         self.hooks = {}
         self.watch = {}            # addr -> hit count, filled by watch_calls()
@@ -254,6 +266,15 @@ class Emu(object):
 
     def set_f(self, i, v):
         self.fpr[i] = f_to_bits(v)
+
+    def _sqrt_arg(self, v, pc):
+        """A root's operand: its magnitude when `eesqrt` and it is below
+        zero, as the EE takes it. -0.0 is not below zero and keeps its
+        sign; a NaN stays one."""
+        if self.eesqrt and v < 0.0:
+            self.eesqrt_pcs.add(pc)
+            return -v
+        return v
 
     def stub_bware(self):
         """Replace the bWare runtime with native equivalents."""
@@ -642,7 +663,7 @@ class Emu(object):
                 else:
                     put(sa, f(rd) / f(rt) if f(rt) else 0.0)
             elif fn == 0x04:                          # sqrt.s fd, ft
-                put(sa, ieee_sqrt(f(rt)))
+                put(sa, ieee_sqrt(self._sqrt_arg(f(rt), pc)))
             elif fn == 0x05:                          # abs.s
                 self.fpr[sa] = self.fpr[rd] & 0x7FFFFFFF
             elif fn == 0x06:
@@ -710,6 +731,8 @@ class Emu(object):
             elif rs == 5:                             # qmtc2
                 x = self.reg[ft]
                 self._vput(fs, [(x >> (32 * k)) & M32 for k in range(4)], 15)
+            elif rs == 6 and fs == 21:                # ctc2 rt, vi21 (I)
+                self.i = self.reg[ft] & M32
             else:
                 raise MipsError("cop2 transfer rs=0x%02x at 0x%08x" % (rs, pc))
             return
@@ -758,6 +781,8 @@ class Emu(object):
                 self._vput(fd, r, mask)
             elif fn == 0x1c:                          # vmulq
                 self._vput(fd, lanes(mul, S, [self.q] * 4), mask)
+            elif fn == 0x1e:                          # vmuli
+                self._vput(fd, lanes(mul, S, [self.i] * 4), mask)
             elif fn == 0x20:                          # vaddq
                 self._vput(fd, lanes(add, S, [self.q] * 4), mask)
             elif fn == 0x24:                          # vsubq
@@ -820,14 +845,14 @@ class Emu(object):
             fsf, ftf = (w >> 21) & 3, (w >> 23) & 3
             a, b = F(S[fsf]), F(T[ftf])
             if idx == 0x3a:
-                b = F(B(ieee_sqrt(b)))
+                b = F(B(ieee_sqrt(self._sqrt_arg(b, pc))))
             if self.eediv and not B(b) & 0x7F800000:
                 self.eediv_pcs.add(pc)
                 self.q = ee_div_zero(S[fsf], B(b))
             else:
                 self.q = B(ieee_div(a, b))
         elif idx == 0x39:                             # vsqrt
-            self.q = B(ieee_sqrt(F(T[(w >> 23) & 3])))
+            self.q = B(ieee_sqrt(self._sqrt_arg(F(T[(w >> 23) & 3]), pc)))
         elif idx == 0x3b:                             # vwaitq
             pass
         else:
@@ -852,7 +877,21 @@ class Emu(object):
 
     def _mmi(self, w, rs, rt, rd, sa, fn, pc):
         reg = self.reg
-        if fn in (0x18, 0x19):                        # mult1 / multu1
+        if fn in (0x00, 0x01):                        # madd / maddu
+            # HI:LO's low words as one 64-bit accumulator, plus the
+            # product; each half goes back sign-extended, and rd gets LO.
+            acc = ((self.hi & M32) << 32) | (self.lo & M32)
+            a, b = (s32(reg[rs]), s32(reg[rt])) if fn == 0x00 else \
+                   (reg[rs] & M32, reg[rt] & M32)
+            acc = (acc + a * b) & M64
+            self.lo, self.hi = s32(acc) & M64, s32(acc >> 32) & M64
+            if rd:
+                reg[rd] = self.lo
+        elif fn == 0x28 and sa == 0x03:               # pminw
+            reg[rd] = self._pack_words(
+                [min(a, b) for a, b in zip(self._words(reg[rs]),
+                                           self._words(reg[rt]))])
+        elif fn in (0x18, 0x19):                      # mult1 / multu1
             a, b = (s32(reg[rs]), s32(reg[rt])) if fn == 0x18 else \
                    (reg[rs] & M32, reg[rt] & M32)
             p = a * b
@@ -880,6 +919,12 @@ class Emu(object):
         elif fn == 0x08 and sa == 0x12:               # pextlw
             a, b = self._words(reg[rs]), self._words(reg[rt])
             reg[rd] = self._pack_words([b[0], a[0], b[1], a[1]])
+        elif fn == 0x28 and sa == 0x12:               # pextuw
+            a, b = self._words(reg[rs]), self._words(reg[rt])
+            reg[rd] = self._pack_words([b[2], a[2], b[3], a[3]])
+        elif fn == 0x09 and sa == 0x1f:               # prot3w
+            b = self._words(reg[rt])
+            reg[rd] = self._pack_words([b[1], b[2], b[0], b[3]])
         elif fn == 0x09 and sa == 0x1e:               # pexew
             b = self._words(reg[rt])
             reg[rd] = self._pack_words([b[2], b[1], b[0], b[3]])

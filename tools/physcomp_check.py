@@ -1032,7 +1032,7 @@ def apply_mutation(text, edits):
 
 def mutate_pass():
     base_model = model()
-    survived, missing, caught = [], [], 0
+    survived, missing, equivalent, caught = [], [], [], 0
 
     with tempfile.TemporaryDirectory() as tmp:
         exe = hostbuild.build(tmp, SOURCES, name="physcomp_test")
@@ -1077,6 +1077,7 @@ def mutate_pass():
                 elif name in EQUIVALENT:
                     print("  %-34s survived, equivalent by construction"
                           % name)
+                    equivalent.append(name)
                 else:
                     print("  %-34s SURVIVED" % name)
                     survived.append(name)
@@ -1090,14 +1091,21 @@ def mutate_pass():
 
     real = [m for m in MUTATIONS if m[0] not in missing]
     holes = [s for s in survived if s not in EQUIVALENT]
+    # An entry whose mutant was caught is a wrong reason, not a spare one.
+    stale = [n for n in EQUIVALENT
+             if n not in equivalent and n not in missing]
     if missing:
         print("%d PATTERN NOT FOUND -- the tally below is over %d of %d"
               % (len(missing), len(real), len(MUTATIONS)))
     print("%d mutations, %d caught, %d equivalent, %d unexplained"
-          % (len(real), caught, len(EQUIVALENT), len(holes)))
+          % (len(real), caught, len(equivalent), len(holes)))
     for name in holes:
         print("  unexplained: %s" % name)
-    return 1 if (holes or missing) else 0
+    for name in stale:
+        ran = any(m[0] == name for m in MUTATIONS)
+        print("  listed as equivalent but %s: %s"
+              % ("caught" if ran else "names no mutation", name))
+    return 1 if (holes or missing or stale) else 0
 
 
 def main():

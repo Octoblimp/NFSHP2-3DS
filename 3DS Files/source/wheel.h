@@ -38,6 +38,7 @@
 #include "bvector.h"
 #include "cartypeinfo.h"
 #include "table.h"
+#include "terraintype.h"
 
 // 8 bytes. `a` is the rotation angle in radians and `w` the angular
 // velocity; Wheel::GetRotation (0x0019b930) returns the first and
@@ -285,106 +286,23 @@ extern float   gNewCorneringScale;               // 0x00323d5c  2.5
 
 // ------------------------------------------- TerrainTypeInfo, borrowed
 //
-// 140 bytes, `.mdebug` type#1584. Wheel reads four of its floats and
-// nothing else, but the whole record is spelled out because the stride is
-// what indexes it and a short struct would put every entry after the first
-// in the wrong place. The table itself (TerrainTypeInfoTable,
-// 0x00310a90) belongs to the terrain system and so to task 27; wheel.c
-// reaches it through a pointer the host sets, not through a copy.
-typedef struct TerrainTypeInfo {
-    const char *Name;                        //   0
-    uint32_t    NameHash;                    //   4
-    int32_t     Type;                        //   8
-    uint8_t     ShouldTireMakeRoadSound;     //  12
-    uint8_t     ShouldCameraGoThroughIt;     //  13
-    uint8_t     _pad0[2];                    //  14
-    const char *SkidTextureName;             //  16
-    float       RoadNoiseGridSpacingInverse; //  20
-    float       RoadNoiseScale;              //  24
-    float       StaticFrictionMultiplier;    //  28
-    float       DynamicFrictionMultiplier;   //  32
-    float       RollingFrictionMultiplier;   //  36
-    float       CollisionPriority;           //  40
-    float       ForceMagnitude;              //  44
-    float       ForceFrequency;              //  48
-    uint32_t    DebugTopologyColour;         //  52
-    int32_t     DriveOverEmitterGroup;       //  56
-    float       DriveOverMinSpeed;           //  60
-    float       DriveOverMaxSpeed;           //  64
-    int32_t     DriveOver2EmitterGroup;      //  68
-    float       DriveOver2MinSpeed;          //  72
-    float       DriveOver2MaxSpeed;          //  76
-    int32_t     SkidSmokeEmitterGroup;       //  80
-    float       SkidSmokeMinSpeed;           //  84
-    float       SkidSmokeMaxSpeed;           //  88
-    int32_t     TireSpewEmitterGroup;        //  92
-    float       TireSpewMinSpeed;            //  96
-    float       TireSpewMaxSpeed;            // 100
-    int32_t     BottomOutEmitterGroup;       // 104
-    float       BottomOutMinImpact;          // 108
-    float       BottomOutMaxImpact;          // 112
-    int32_t     CollisionImpactEmitterGroup; // 116
-    float       CollisionImpactMinForce;     // 120
-    float       CollisionImpactMaxForce;     // 124
-    int32_t     CollisionScrapeEmitterGroup; // 128
-    float       CollisionScrapeMinSpeed;     // 132
-    float       CollisionScrapeMaxSpeed;     // 136
-} TerrainTypeInfo;                           // 140
+// The record is terraintype.h's -- TerrainType.obj's -- and Wheel reads four
+// of its floats and nothing else. It indexes the table by stride, so the
+// whole record has to be right, and terraintype.h's assert holds it.
 
-// Two pointers on a 64-bit host where the PS2 had one word each, and the
-// second of them lands four bytes past an eight-byte boundary, so it takes
-// an alignment pad of its own on the way past. That makes the slack count
-// climb 1, 2, 3 rather than 1, 1, 2: one term for Name widening, a second
-// for the pad in front of SkidTextureName, a third for SkidTextureName
-// widening. Everything from RoadNoiseGridSpacingInverse to the end carries
-// all three.
-#define TERRAININFO_SLACK ((size_t)(sizeof(void *) - 4))
-
-// 140 bytes on the handheld; 152 on a 64-bit host.
-#define TERRAININFO_SIZEOF                                                  \
-    ((size_t)((140 + 3 * TERRAININFO_SLACK + sizeof(void *) - 1)            \
-              / sizeof(void *) * sizeof(void *)))
-
-#ifndef WHEEL_NO_ASSERT
-typedef char terraininfo_layout_check[
-    (offsetof(TerrainTypeInfo, NameHash) == 4 + 1 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, Type) == 8 + 1 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, ShouldTireMakeRoadSound)
-            == 12 + 1 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, ShouldCameraGoThroughIt)
-            == 13 + 1 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, SkidTextureName)
-            == 16 + 2 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, RoadNoiseGridSpacingInverse)
-            == 20 + 3 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, RoadNoiseScale)
-            == 24 + 3 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, StaticFrictionMultiplier)
-            == 28 + 3 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, DynamicFrictionMultiplier)
-            == 32 + 3 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, RollingFrictionMultiplier)
-            == 36 + 3 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, DebugTopologyColour)
-            == 52 + 3 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, CollisionScrapeMaxSpeed)
-            == 136 + 3 * TERRAININFO_SLACK
-     && sizeof(TerrainTypeInfo) == TERRAININFO_SIZEOF) ? 1 : -1];
-#endif
-
-// 0x00310a90. NULL until the terrain system exists; a NULL table makes
-// every multiplier read as 1.0 rather than crashing, which is what the
-// harness leans on and what keeps a wheel drivable before task 27.
+// 0x00310a90. NULL by default and pointed at TerrainTypeInfoTable by
+// main.c at boot. A NULL table makes every multiplier read as 1.0 rather
+// than crashing, which is what the harnesses lean on.
 extern const TerrainTypeInfo *gTerrainTypeInfoTable;
 
 // ---------------------------------------------------------- the seams
 //
-// Wheel reaches two systems that are not ported: the terrain query behind
-// CheckTerrain, and the skid trail behind MaybeMakeSkids. Both are task
-// 27's. They are function pointers for the same reason gTrackPathDistanceFn
-// is -- NULL on the handheld, pointed at stand-ins by
-// tools/wheel_check.py -- so that everything around them stays reachable
-// and diffable before they exist.
+// Wheel reaches two systems through pointers: the terrain query behind
+// CheckTerrain, which is Track.obj's (track.c; main.c points the seams at
+// it), and the skid trail behind MaybeMakeSkids, which is not ported. They
+// are function pointers for the same reason gTrackPathDistanceFn is --
+// NULL by default, pointed at stand-ins by tools/wheel_check.py -- so that
+// Wheel is checked on its own, whatever is behind them.
 
 // 0x0014f418, TopologyCoordinate::GetElevation. Returns the ground
 // height under `pos` and writes the surface's normal. The terrain

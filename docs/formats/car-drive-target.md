@@ -21,8 +21,11 @@ through, together with the speed it wants at each one. It is 528 bytes and
 it is embedded at offset 0 of every `CarDriver`, which is why the layout
 had to be spelled out before CarDriver could be ported at all.
 
-Ported to `3DS Files/source/drivetarget.{c,h}`. Cross-checked by
-`tools/drivetarget_check.py` against `tools/src/drivetarget_test.c`.
+Ported to `3DS Files/source/drivetarget.{c,h}`. Cross-checked against
+`tools/src/drivetarget_test.c` twice over: by `tools/drivetarget_check.py`,
+a model written from the disassembly, and by
+`tools/drivetarget_image_check.py`, which runs the same scenarios through
+the shipped code in `tools/mipsemu.py`.
 
 ## Car is not a prerequisite, and that was checked rather than assumed
 
@@ -228,9 +231,11 @@ Five places build a `bVector3` on the stack, fill x, y and z, and hand it
 to something that copies all sixteen bytes with `lqc2`/`sqc2`:
 `SetPoint`'s 2D overload, `AddPointToTarget`'s 2D overload,
 `AddPointToTarget`'s 2D `DrivingLocation` overload,
-`StraightLinePredict`'s heading, and the blended point in
+`StraightLinePredict`'s heading under 1 m/s, and the blended point in
 `BlendWithCurrentAcceleration`. In each, `Points[i].pad` ends up holding
-whatever the stack held.
+whatever the stack held. (`StraightLinePredict`'s other arm is not one of
+them: its heading is a whole quadword loaded from the velocity, and all
+four lanes of it are written. See below.)
 
 **This is the one place the port does not follow the image, and it is
 deliberate.** Reading an uninitialised automatic is undefined behaviour in
@@ -238,6 +243,12 @@ C, so those temporaries get a `pad` of 0.0f. Nothing on the disc can
 depend on the value either — it is a different number on every call — so
 the divergence costs a behaviour no caller could have had. Every site is
 marked `STACK-W` in `drivetarget.c`.
+
+The image check can tell these lanes from real values without being told
+where they are. It runs the image twice, over two different stack poisons,
+and a lane that changes with the poison is one of these. Across the
+transcript it finds 160 such lanes, and every one of them is at one of the
+five sites.
 
 ## Clear, and what survives a frame
 
@@ -440,7 +451,7 @@ function off in the shipped build: `CameraFollowDefaultCar` is 1.
 operator delete(this);` and nothing else — so there is no destructor body
 to port and the delete belongs to the caller.
 
-## Two divergences, both written down
+## Three divergences, all written down
 
 **`GetRouteAndRoutePoint` bounds `Route[i]` and the image does not.** The
 listing is `bltz` and then a raw `lw` off `pTrackRoutes`: the negative case
@@ -452,6 +463,15 @@ port uses `trmgr_get_route`'s bound instead and answers 0 above 99. The
 the pointer has just had 1064 added to it, and is kept because it is there.
 
 **The `STACK-W` sites write 0.0f**, as above.
+
+**`StraightLinePredict` divides a zero velocity the IEEE way.** On the VU,
+`vrsqrt` of a zero sum is FLT_MAX, the heading comes out zero, and the point
+lands on the car. On the 3DS it is an infinity and then a NaN. The port uses
+the plain divide anyway, because the input cannot arrive: the arm is taken
+only at a `VelocityMagnitude` of at least 1, and both places that write that
+field (`mellowmover.c` and `physicscar.c`) compute it from this same
+`Velocity`. `eefpu.h`'s `ee_div` is kept for divides by zero that the game
+actually takes, and this is not one of them.
 
 ## FillWithCurrentAcceleration trusts a small acceleration, not a large one
 
@@ -475,10 +495,45 @@ re-derived so that it reaches the branch its comment names. `fi still` and
 `fi ratio over` are new. With `fi still` in the transcript, the loop's own
 twenty-point test is no longer redundant, so `fi-no-wall` is caught and its
 equivalence argument is gone. Beneath the controller, `realcontroller_check`
-now runs the image's Clear, AddPointToTarget, StraightLinePredict, and both
-the Fill and the Blend. The rest of DriveTarget is still checked against a
-model alone: Resample, EstimateScore, GetFirstPoint, InterpolatePoint, the
-shifts and the copies.
+runs the image's Clear, AddPointToTarget, StraightLinePredict, and both the
+Fill and the Blend. `drivetarget_image_check` now runs the image of every
+method, so the rest of the class is no longer checked against a model
+alone.
+
+## StraightLinePredict divides the pad too
+
+The same shared misreading happened a second time, one lane over.
+`drivetarget_image_check` found it the first time it ran.
+
+    001c3394  lqc2       vf1,112(s0)          State.Velocity, all four lanes
+    001c3398  vmul.xyz   vf03,vf01,vf01
+    001c339c  vaddy.x    vf02,vf03,vf03y
+    001c33a0  vaddz.x    vf02,vf02,vf03z      (x*x + y*y) + z*z
+    001c33a4  vrsqrt     Q,vf00w,vf02x        1 / sqrt
+    001c33ac  vaddq.x    vf02,vf00,Q
+    001c33b8  vmulx.xyzw vf01,vf01,vf02x      all four lanes
+
+Above 1 m/s the heading is not a call to `bNormalize3To`. It is an inline
+VU0 normalise, and its last multiply is `.xyzw`: the lane `CarState` calls
+`pad` comes out divided by the length along with the other three. The port
+and the model both called `bNormalize3To` and then copied `Velocity.pad`
+across unscaled. The port's own comment said that all four lanes went
+through the normalise, and the code under it still did not scale the
+fourth.
+
+On `fn slp fast`, a velocity of (0.9, 1.2, 0.3, 0.7) looking 20 m ahead of a
+pad of 8, the image gives 0.7 / 1.5297 * 20 + 8 = 17.1520863 and the port
+gave 22. A sweep of 3000 random velocities matched on x, y and z every time
+-- the inline normalise rounds exactly the way `bNormalize3To` does with a
+target of 1 -- and differed on w every time. `realcontroller_check` runs
+this image too, but prints only x, y and z, which is why it never saw it.
+
+Both sides are fixed: the port now spells out the reciprocal and the four
+multiplies. `fr-slp-pad-unscaled` is the old line as a mutation.
+`fr-slp-divides` is the same normalise written as four divides, and it
+needed a fixture of its own. `fn slp divide` uses a 3-4-5 velocity at
+1.5 m/s, where 0.9 * (1 / 1.5) and 0.9 / 1.5 round apart; none of the
+existing fixtures could tell them apart.
 
 ## Cross-check
 
@@ -497,8 +552,40 @@ stand-ins, because DriveTarget touches five fields of one and two of the
 other.
 
 ```
-drivetarget_check   22 scenarios, 894 lines, 0 differ
+drivetarget_check        22 scenarios, 897 lines, 0 differ
+drivetarget_image_check  22 scenarios, 897 lines, 160 pad lanes masked, 0 differ
 ```
+
+### The image check
+
+A model and a port are two readings of one listing, and twice now they
+have shared a mistake: the Fill test above, and the StraightLinePredict pad.
+`tools/drivetarget_image_check.py` takes the reading out of the oracle. It
+imports `drivetarget_check`'s scenarios, fixtures and line formats
+unchanged, and replaces every function the model writes from the listing
+with a wrapper that:
+
+- puts the Python records into `mipsemu` at the image's own offsets;
+- calls the shipped function at its address; and
+- reads the records back.
+
+An import-time check fails if the model gains a function that no wrapper
+replaces. The coverage is the whole of 0x002086f8..0x0020a840 except the two
+`DoSnapshot`s, plus the copy constructor at 0x001da210, the three free
+functions, `DrivingLocation::IsClear` and the static initialiser.
+
+What is not the image is what the C harness also supplies. `Car` is a zeroed
+2016-byte block with the fields DriveTarget reads at their PS2 offsets. The
+three routes are zeroed 115752-byte records, with `TheTrackRouteManager`'s
+table rewritten before every call, and `pPlayer` is a dummy block that
+Blend only tests against zero.
+
+The `STACK-W` lanes are found by two runs over two stack poisons, as
+described above. A lane that differs between the runs is allowed only in a
+column the print wrapper marked as a pad. A difference anywhere else would
+mean the image's control flow read garbage, and the run stops. The oracle
+divides the EE's way (`Emu(eediv=True)`), and no scenario reaches a divide
+by zero.
 
 ### Fixtures are spelled, not computed
 
@@ -511,18 +598,30 @@ about them.
 ### What the mutation pass moved
 
 ```
-python tools/drivetarget_check.py --mutate   # 260 mutations, 241 caught,
-                                             # 19 equivalent, 0 unexplained
+python tools/drivetarget_check.py --mutate         # 262 mutations, 243 caught,
+                                                   # 19 equivalent, 0 unexplained
+python tools/drivetarget_image_check.py --mutate   # 262 mutations, 243 caught,
+                                                   # 19 equivalent, 0 unexplained
 ```
 
-The tally since the Fill fix comes from two runs. The first stopped after
-twelve mutants on a `BuildEnvironmentError`. The other 248 then ran with
-the build retried on that error and the finished twelve skipped.
+The two checkers share one mutation list and one set of equivalence
+arguments, and they agree on every verdict: nothing the model catches does
+the image miss, and nothing argued equivalent against the model turns out
+to be visible against the image. The two newest entries,
+`fr-slp-pad-unscaled` and `fr-slp-divides`, are the StraightLinePredict pad
+above.
+
+The model's tally is one uninterrupted run. The image's comes from two. The
+first stopped after 36 mutants on a `BuildEnvironmentError` -- the msys2
+toolchain returning a failure with no diagnostic, which `hostbuild` says to
+rerun -- and the other 226 then ran in a fresh process with the build
+retried on that error and the finished 36 skipped. Before the pad fix, the
+model's own tally also came from two runs, split the same way after twelve.
 
 The first full pass left **72 survivors** on a transcript that already
 agreed with the model on every one of its 660 lines. That is the whole
 reason to run the pass: a clean diff says the two sides compute the same
-thing, not that the scenarios ever reach the code. The transcript is 894
+thing, not that the scenarios ever reach the code. The transcript is 897
 lines now.
 
 **Boundaries nothing sat on.** Most of the survivors were a `<` turned into

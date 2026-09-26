@@ -160,7 +160,7 @@ static void scenario_stubs(void)
     g_car.BlinkTimer = 1234;
     g_car.bPoofed = 2;
     g_car.ResetMe = 2;
-    g_car.NumTimesSkidding = 2;
+    g_car.NumTimesSkidding[0] = 2;
     memcpy(before, &g_car, sizeof(Car));
 
     car_fake_engine_task(&g_car);

@@ -11,6 +11,10 @@
 #include "table.h"
 #include "carstate.h"
 
+// The clock object's tick, which DecrementNitro reads. Defined here rather
+// than linked from realtime.c, which would bring the joylog in behind it.
+int32_t WorldTimer = 0;
+
 static int g_dirt;
 
 static float dirt(void)

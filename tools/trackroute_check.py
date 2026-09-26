@@ -1856,6 +1856,7 @@ write_source = hostbuild.write_source
 
 def mutate_pass(py_lines):
     survived = []
+    skipped = []
     originals = {}
     paths = {}
     for _n, rel, _o, _r in MUTATIONS:
@@ -1883,7 +1884,7 @@ def mutate_pass(py_lines):
             if text.count(old) != 1:
                 print("  %-30s pattern hits %d times, skipped"
                       % (name, text.count(old)))
-                survived.append(name)
+                skipped.append(name)
                 continue
             write_source(src, text.replace(old, new, 1))
             with tempfile.TemporaryDirectory() as tmp:
@@ -1917,7 +1918,7 @@ def mutate_pass(py_lines):
                 sys.exit("could not restore %s -- it still holds a mutation. "
                          "Put the original line back before trusting "
                          "anything printed above." % rel)
-    return survived
+    return survived, skipped
 
 
 def main():
@@ -1947,14 +1948,26 @@ def main():
             print("not mutating while the baseline differs")
             return rc
         print("mutations:")
-        survived = mutate_pass(ours)
+        survived, skipped = mutate_pass(ours)
         holes = [s for s in survived if s not in EQUIVALENT]
+        # An entry whose mutant was caught is a wrong reason, not a spare
+        # one. A skipped pattern never ran, so it is neither.
+        stale = [n for n in EQUIVALENT
+                 if n not in survived and n not in skipped]
+        ran = len(MUTATIONS) - len(skipped)
+        if skipped:
+            print("%d PATTERNS SKIPPED -- the tally below is over %d of %d"
+                  % (len(skipped), ran, len(MUTATIONS)))
         print("%d mutations, %d caught, %d equivalent, %d unexplained"
-              % (len(MUTATIONS), len(MUTATIONS) - len(survived),
+              % (ran, ran - len(survived),
                  len(survived) - len(holes), len(holes)))
         for s in holes:
             print("  SURVIVED: %s" % s)
-        rc |= 1 if holes else 0
+        for name in stale:
+            known = any(m[0] == name for m in MUTATIONS)
+            print("  listed as equivalent but %s: %s"
+                  % ("caught" if known else "names no mutation", name))
+        rc |= 1 if (holes or skipped or stale) else 0
     return rc
 
 

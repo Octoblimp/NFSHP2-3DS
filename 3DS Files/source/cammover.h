@@ -163,10 +163,11 @@ extern uint16_t OrbitTweakOrbitFOV;    // 0x323510, 8000
 // 0.0 into its x. A debug hook that was left switched on and set to nothing.
 extern bVector3 OrbitBoomOffset;
 
-// `RealTimeElapsed` at 0x323cdc: seconds since the last frame. The disc's
-// Update reads it directly; the port's main loop writes it and orbit_update
-// takes it as an argument so the checker can drive it.
-extern float RealTimeElapsed;
+// `RealTimeElapsed` at 0x323cdc: seconds since the last frame. The clock
+// object owns it (realtime.c), and PrepareRealTimestep writes it at the top
+// of each frame. The disc's Update reads it directly; orbit_update takes it
+// as an argument so the checker can drive it.
+#include "realtime.h"
 
 // 0x00154728. `car` may be null, in which case the mover orbits the origin.
 void orbit_init(OrbitCarCameraMover *o, int viewID, Camera *cam,

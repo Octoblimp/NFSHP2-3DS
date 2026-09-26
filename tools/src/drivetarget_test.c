@@ -1580,7 +1580,8 @@ static void s_free(void)
     pdt("fn slp slow", &t, 2);
 
     // Above it the velocity is used, and all four lanes go through the
-    // normalise -- so z and the lane CarState calls pad ride along.
+    // normalise -- so z and the lane CarState calls pad ride along, the
+    // pad divided by |v.xyz| like the other three.
     dt_straight(&t);
     car_set(&car, 1.0f, 2.0f, 0.9f, 1.2f, 0.0f, 0.0f, 0x1555, 1.5f, 1.5f);
     car.State.Velocity.z = 0.3f;
@@ -1595,6 +1596,16 @@ static void s_free(void)
     car.State.VelocityMagnitude = 1.0f;
     ai_straight_line_predict(&car, &t);
     pdt("fn slp at1", &t, 2);
+
+    // A 3-4-5 velocity at 1.5 m/s: 0.9 * (1 / 1.5) and 0.9 / 1.5 round
+    // apart, so this is where the one reciprocal vrsqrt makes shows.
+    dt_straight(&t);
+    car_set(&car, 1.0f, 2.0f, 0.9f, 1.2f, 0.0f, 0.0f, 0x1555, 1.5f, 1.5f);
+    car.State.Velocity.pad = 0.7f;
+    car.State.Position.z = 4.0f;
+    car.State.Position.pad = 8.0f;
+    ai_straight_line_predict(&car, &t);
+    pdt("fn slp divide", &t, 2);
 
     // Rolling backwards with the body still pointing forwards: the heading
     // comes from the angle and points one way while the velocity points

@@ -411,6 +411,8 @@ static void scenario_layout(void)
     OFF(TerrainTypeInfo, StaticFrictionMultiplier);
     OFF(TerrainTypeInfo, DynamicFrictionMultiplier);
     OFF(TerrainTypeInfo, RollingFrictionMultiplier);
+    OFF(TerrainTypeInfo, DriveOverEmitterGroup);
+    OFF(TerrainTypeInfo, CollisionScrapeEmitterGroup);
     OFF(TerrainTypeInfo, CollisionScrapeMaxSpeed);
 
     // WheelState's own two floats. Nothing else pins their order: every

@@ -266,9 +266,11 @@ menus that use it. So for now it runs the type monitor, and logs
   also has an end-of-data arm -- it tells the repeat buffer it is finished
   and clears `pRepeat` and `ReplayingFlag` -- that the port does not carry:
   it is unreachable without a `bRepeat`, and the checker's never runs out.
-* `ReplayManager`: `replay.h` is its first 72 bytes and `GetData` /
-  `AddData` are seams. `pReplayManager` stays NULL until the replay is
-  ported.
+* `ReplayManager`: `replay.h` has all 116 bytes of it, and the 332 of
+  `ReplaySnapshot`. `RegisterInterestingEvent` and
+  `InvalidateInterestingEvents` are ported, for Car's resets
+  ([car](car.md)). `GetData` and `AddData` are still seams, and
+  `pReplayManager` stays NULL until the replay is ported.
 
 ## The checker
 

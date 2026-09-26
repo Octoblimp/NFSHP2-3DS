@@ -990,8 +990,10 @@ is citro3d and owns the top.
         176 mutations, 173 caught, 3 equivalent, 0 unexplained).
         **`DriveTarget`'s methods**
         (`docs/formats/car-drive-target.md`,
-        `tools/drivetarget_check.py`; 22 scenarios, 821 lines, 0 differ;
-        259 mutations, 239 caught, 20 equivalent, 0 unexplained).
+        `tools/drivetarget_check.py` and the image-backed
+        `tools/drivetarget_image_check.py`; 22 scenarios, 897 lines,
+        0 differ; 262 mutations, 243 caught, 19 equivalent, 0
+        unexplained on each).
 
         **Wheel's first mutation pass came back with twelve unexplained
         survivors, and that is the part of the slice worth carrying
@@ -1471,11 +1473,15 @@ is citro3d and owns the top.
         **Inherited from task 25:** the eight classes behind Car's
         constructor seams (`gTrafficCarCtorFn` .. `gCopDriverCtorFn` in
         `carmodes.h` -- set each at boot and change its `_SIZE` to
-        `sizeof`), and Car's `ResetToRoutePoint`, `PleaseResetMeLater`,
-        `GetDrivingLineSpeed`, `DeliverMeFromEvil`, `AssignAnimatedDriver`
-        / `UnAssignAnimatedDriver`, `ChangeGear` (the AnimatedDriver),
-        `CalculateNewCatchupMultipliers`, `FixBlownTires`,
-        `TriggerTireBlowOut`, `DamageAbove` and `DamageCap`. **First
+        `sizeof`), and Car's `ResetToRoutePoint`, `AssignAnimatedDriver`
+        / `UnAssignAnimatedDriver` and the three AnimatedDriver methods
+        behind `ChangeGear`'s seams, `DamageAbove` and `DamageCap`. Also
+        three seams in `car.h` that Car's ninth slice left:
+        `gCopManagerIsBeingPursuedFn`,
+        `gAICarControllerGetCurrentDrivingLineSpeedFn` and
+        `gDeliveryMoverSetDestinationFn`. `PleaseResetMeLater`,
+        `GetDrivingLineSpeed` and `DeliverMeFromEvil` abort on them until
+        they are set. **First
         slice: the player's input** -- `Joystick.obj` (0x00150a50 ..
         0x00152860: event nodes, the eleven scanners, the queue,
         `GenerateJoyEvents`), `ScannerConfigTable` (0x002dc6c0, 231 x 32
@@ -1524,7 +1530,12 @@ is citro3d and owns the top.
         mutations caught with 11 equivalent. Written up in
         `docs/formats/real-controller.md`. The image check found
         FillWithCurrentAcceleration's first test negated, in `drivetarget.c`
-        and in `drivetarget_check`'s model both; both are fixed. Seven of
+        and in `drivetarget_check`'s model both; both are fixed.
+        `drivetarget_image_check` (every DriveTarget method run in
+        mipsemu under the model's scenarios, STACK-W pads masked) then
+        found StraightLinePredict's inline VU0 normalise dividing the
+        pad lane too, which port and model had both copied across
+        unscaled; fixed, with `fn slp divide` and two mutants. Seven of
         the eight seams remain: the four movers, and AIDriver,
         TrafficDriver and CopDriver.
 27. [ ] Track rendering/streaming, collision. Task 24's debt is paid:
@@ -1539,18 +1550,230 @@ is citro3d and owns the top.
         `0x001303a8`, `0x00130480`), `FindFlatOnTrackPosition`,
         `PutFlatOnTrack`, `ResetCore`, `ResetToPosition`,
         `DebugSetPosition`, `AverageAir`, `TriggerEvents`,
-        `TriggerCarTerrainEffects`, `GetDistanceAndSpeed`, and the render
-        group: `InitRenderInfo`, `CloseRenderInfo`, `TriggerEffect`,
-        `SwitchSkin`.
+        `TriggerCarTerrainEffects`, and the render group: `InitRenderInfo`,
+        `CloseRenderInfo`, `TriggerEffect` (behind `gCarTriggerEffectFn`
+        now), `SwitchSkin`.
+
+        **The first slice is closed: the collision surface.** It is written
+        up in `docs/formats/topology.md`.
+        - `Track.obj` (0x0014e7d0 .. 0x001509d4) is ported as `track.c`,
+          `topology.h` and `track.h`. It carries the TopologyTree over the
+          four chunks, 0x34130 .. 0x34133, and the 1024-slot pool of
+          reference-counted TrackPolygons with its 101-at-a-time flush.
+        - It also carries TopologyCoordinate: SetInterestBBox's three
+          passes, GetElevation, HasTopology, SegmentIntersects and
+          ConstrainToTopology. With them come the position markers
+          (0x34146), GetTrackInfo over 0x34200 / 0x34201 (entry 54 cleared
+          on load), the road noise, and `LoaderTrackGeometry` with its
+          unloader.
+        - `TerrainType.obj` is ported as `terraintype.c`. Its 33-entry
+          table is `terraintypetab.c`, which `gen_terrain_table.py` writes
+          out of the ELF.
+        - `track_check` runs the image as the oracle, over a synthetic
+          world and over TRACKB12's 15708 polygons: 13,557 ops, 9,736
+          lines, 0 differ. Of 172 mutations, 170 are caught and 2 are
+          equivalent, with 0 unexplained. No disagreement between the
+          image and the port was found.
+        - Not wired yet: the port has no LoaderTable, so nothing calls the
+          loader outside the checker. Also not wired are the `InitTree`
+          call in `EndGameFlowLoadingTrackSpecific` and
+          TrackPolygonCollisionBody.
+
+        **The second slice is closed: Car on the ground.** Car's
+        `FindFlatOnTrackPosition` (0x00130c58) and `PutFlatOnTrack`
+        (0x00130e90) are ported in `cartrack.c`. It is kept apart from
+        `car.c` because `car.c` links into six checkers that have no
+        topology. The `SetInterestBBox(bVector3)` wrapper (0x00134f28),
+        which the compiler emitted in Car.obj, is in `track.c`.
+        `track_check` checks them over a synthetic world with a gap on
+        each axis, and over ninety cars set down on TRACKB12's road. It
+        is now 14,753 ops, 11,231 lines, 0 differ, and of 209 mutations
+        206 are caught and 3 are equivalent. The slope's BAM constant is
+        65536 / 6.28, not 65536 / 2 pi, and that is kept. Written up in
+        `docs/formats/car.md`.
+
+        **The third slice is closed: the resets.** `ResetCore`
+        (0x001312c0), `ResetToPosition`, `ResetToRoutePoint` (task 26's
+        inherited one) and `DebugSetPosition` are ported in `carreset.c`.
+        `ReplayManager::RegisterInterestingEvent` and
+        `InvalidateInterestingEvents` are ported in `replay.c`, whose
+        header now has the manager's 116 bytes and ReplaySnapshot's 332.
+        `carmode_check` runs them after its transitions. It uses its
+        stand-in controllers and drivers, a twelve-point looping track path
+        loaded through `LoaderTrackPath`, and a five-snapshot replay. That
+        is 19 resets, 32,797 lines, 0 differ. The checker's whole pass is
+        188 mutations, 185 caught and 3 equivalent, with 0 unexplained.
+        The image leaves two stack words in the state, both fourth lanes.
+        The checker poisons the stack two ways and masks just those.
+        The port tests `pReplayManager` for NULL where the image does not,
+        because the replay is not ported yet. No disagreement between the
+        image and the port was found. Written up in `docs/formats/car.md`.
+
+        **The fourth slice is closed: the air under the car.**
+        `AverageAir` (0x00133e48) and `BeginMovement` (0x001303a8) are
+        ported in `cartrack.c`, which makes Car 51 of 80 methods.
+        `track_check` runs them over the flat world: 16,149 ops, 11,790
+        lines, 0 differ. Of the slice's 62 mutations, 60 are caught and 2
+        are equivalent. The first 209, rerun since, are still 206 caught
+        and 3 equivalent. Every
+        wheel's contact goes through `WheelMatrix[0]`, and that is kept.
+        No disagreement between the image and the port was found. Written
+        up in `docs/formats/car.md`.
+
+        **The fifth slice is closed: the step.** `Car::Move`
+        (0x00130200), `ChangeGear`, `CalculateNewCatchupMultipliers` and
+        `UpdatePosition` are ported in `carmove.c`. That makes Car 55 of
+        80 methods, 7992 of 22876 bytes. Four pieces came with them:
+        - `timer.{c,h}`: Timer, moved out of `collisionbody.h`, and
+          `Timer::SetTime`.
+        - `player.c`: `NumPlayers` and `pPlayersByNumber`.
+        - `difficultyinfo.{c,h}`: the 744-byte table and chunk 0x34b00's
+          loader.
+        - `race.h`: the whole 192-byte `RacingCar`.
+        `carmode_check` runs seventy steps after its resets, over
+        GLOBALB.BUN's own difficulty table: 35,405 lines, 0 differ. Of the
+        slice's 79 mutations, 77 are caught and 2 are equivalent. The
+        AnimatedDriver's three methods and `espSetObjectPosition` are
+        seams that abort if reached unset. Nothing sets `pAnimatedDriver`
+        yet, and the image only ever stores zero in `pCaffeineObj`. No
+        disagreement between the image and the port was found. Written up
+        in `docs/formats/car.md`.
+
+        **The sixth slice is closed: Car's calls out.** Six methods that
+        make one outside call each are ported in `carrace.c`:
+        `GetDistanceAndSpeed`, `FixBlownTires`, `TriggerTireBlowOut`,
+        `PleaseResetMeLater`, `GetDrivingLineSpeed` and
+        `DeliverMeFromEvil`. `DynamicCollisionBody::GetDistanceAndSpeed`,
+        a 12-byte stub on the disc, came with them. That makes Car 61 of
+        80 methods, 8576 of 22876 bytes. Five calls are seams in `car.h`:
+        the cop manager, the AI's controller and the DeliveryMover abort
+        if reached unset, and the effect and the sound are skipped.
+        `carmode_check` runs a scenario for them after the steps: 35,602
+        lines, 0 differ. All 43 of the slice's mutations are caught. No
+        disagreement between the image and the port was found. Written up
+        in `docs/formats/car.md`.
+
+        **The seventh slice is closed: the terrain's effects.**
+        `TriggerCarTerrainEffects` (0x00131db8, 1872 bytes) is ported in
+        `careffects.c`. That makes Car 62 of 80 methods, 10448 of 22876
+        bytes. `BaseCarSound::TriggerSplash` is a seam in `car.h`, skipped
+        when NULL. `carmode_check` runs 54 cases after the sixth slice's:
+        35,875 lines, 0 differ. Of the slice's 107 mutations, 104 are
+        caught and 3 are equivalent. The listing found one disagreement
+        with the port: Car's `NumTimesSkidding` is four bytes, a count a
+        wheel, not one `int32_t`. It is fixed, and every checker still gives
+        0 differ. `mipsemu.py` now has the R5900's `madd`, `maddu` and
+        `pminw`. Written up in `docs/formats/car.md`.
+
+        **The eighth slice is closed: the clock object.** The video mode,
+        the real clock and the world clock (0x001992a0 .. 0x001995d8) are
+        ported in `realtime.c`, with all eighteen of their globals at the
+        image's initial values. Four globals that `engine.c`,
+        `drivetrain.c`, `world.c` and `cammover.c` had defined moved there.
+        `main.c` prepares and advances both clocks as MainLoop does with
+        no race. `realtime_check` is new, with the image as the oracle: 20
+        scenarios, 1,044 ops, 3,470 lines, 0 differ. Of its 86 mutations,
+        84 are caught and 2 are equivalent. No disagreement between the
+        image and the port was found. Written up in
+        `docs/formats/realtime.md`.
+
+        **The ninth slice is closed: VClip.** All of `VClip.obj`
+        (0x001c5d90 .. 0x001ca008, 54 functions) is ported in `vclip.c`
+        except `DoSnapshot`, which waits on ReplaySnapshot. That covers
+        the polyhedron, its Voronoi planes, the feature codes, memory
+        images, the transform, the clips, the checks and the walk. The
+        Caffeine plots reach the editor through the new `espresso.{c,h}`
+        seams. `vclip_check` is new, with the image as the oracle: 47
+        scenarios, 11,890 ops, 22,389 lines, 0 differ, over 2,001 VClips
+        and 938 single checks. Of its 281 mutations, 280 are caught and 1
+        is equivalent. No disagreement between the image and the port was
+        found. Written up in `docs/formats/vclip.md`.
+
+        **The tenth slice is closed: polyhedra.cpp.** All of it
+        (0x00205058 .. 0x00206440) is ported in `polyhedra.c`: the Rect,
+        Cube and Wafer polyhedra the collision bodies hand to VClip, the
+        loader and unloader for the disc's collision volumes, Find and
+        MoveCenterOfGravity, the list's globals, and the four debug tests.
+        `polyhedra_check` is new, with the image as the oracle: 55
+        scenarios, 15,907 ops, 64,560 lines, 0 differ, over all 15,708 of
+        TRACKB12's polygons and the disc's 43 volumes. Of its 184
+        mutations, 172 are caught and 12 are equivalent. No disagreement
+        between the image and the port was found. Written up in
+        `docs/formats/polyhedra.md`.
+
+        **The eleventh slice is closed: the bodies that do not move.** The
+        first part of `CollisionBody.obj` is ported in `collisionbody.c`:
+        the NumberAllocator, Init and Close, the stats, the base class and
+        its sorted list, StaticCollisionBody, TrackPolygonCollisionBody,
+        the witness's constructor, destructor and bookkeeping, the three
+        tables and the static initialiser and destructor. Car's two
+        CarCollisionBody methods are in `carcollisionbody.c`.
+        `collisionbody_check` is new, with the image as the oracle: 21
+        scenarios, 743 ops, 2,945 lines, 0 differ. Of its 184 mutations,
+        175 are caught and 9 are equivalent. No disagreement between the
+        image and the port was found. Written up in
+        `docs/formats/collision-body.md`.
+
+        **The twelfth slice is closed: DynamicCollisionBody.** The body
+        that moves is ported in `collisionbody.c`: its constructor and
+        destructor, the bounding volumes, UpdatePosition, BeginMove, the
+        two interpolations and Backup, the RigidBody and PhysicsSystem
+        pass-throughs, GetLocalCollisionBodies, MaybeCreateWitnesses,
+        CreateTrackPolygonCollisionBodies, TrackPolygonCheck, the inline
+        methods and its table. `collisionbody_check` runs it on bodies
+        whose four pure slots are logging stubs: 39 scenarios, 1,039 ops,
+        8,733 lines, 0 differ. Of its 329 mutations, 318 are caught
+        and 11 are equivalent. No disagreement between the image and
+        the port was found. Written up in
+        `docs/formats/collision-body.md`.
+
+        **The thirteenth slice is closed: CarCollisionBody.** The car's
+        body is ported in `carcollisionbody.c`: its constructor and
+        destructor, the getters, Move, ApplyImpulse, AddDamage,
+        AnimateCollisionReaction, AreCollisionsEnabled, the mass and
+        inertia, IsBlinking, the constants, the inline accessors and
+        its table. RaceCoordinator's pointer, state and
+        IsReplayDemoMode came with it, in `race.c`. The damage, the
+        pursuit, the driver's animation, the rumble and the force
+        feedback are five seams. `collisionbody_check` runs it on
+        stand-in Cars, with Car's four calls and the five seams logging
+        on both sides: 55 scenarios, 1,211 ops, 30,218 lines, 0 differ.
+        Of its 483 mutations, 462 are caught and 21 are equivalent. No
+        disagreement between the image and the port was found, but the
+        port's AI demo test subtracted in int32, which overflows at
+        INT_MIN. It subtracts unsigned now, as the image does. Written
+        up in `docs/formats/collision-body.md`.
+
+        **The fourteenth and fifteenth slices are closed: the contacts.**
+        The rest of `CollisionBody.obj` is ported in `contact.c`, the two
+        slices together because the witness's tests build a Contact. That
+        is InitContact and CloseContact, RemoveContacts, the sort and
+        `bList::AddSorted`, and all of Contact: its constructor,
+        FindContactTime, Crowbar, Resolve, the contact point and normal,
+        the planar contact point, the point velocity, the denominator term,
+        CollisionImpulse, and its inline destructor and delete. The
+        witness's FindWaferNormal, GetCollision, BeginCollision and
+        TestForContact came with them. `Collision`'s constructor and
+        AddImpulse are two seams that abort if reached unset.
+        `collisionbody_check` runs the contacts on bodies whose nineteen
+        contact slots are logging stubs: 81 scenarios, 1,572 ops, 35,426
+        lines, 0 differ. Of its 646 mutations, 622 are caught and 24 are
+        equivalent. CollisionImpulse's friction divides by the slide,
+        which is zero for a car dropped straight onto flat ground; the
+        EE's division makes that 0 where IEEE makes it NaN, so the port
+        calls `ee_div`. No disagreement between the image and the port
+        was found. Written up in `docs/formats/collision-body.md`.
+        CONTINUE.md has what is next.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag
 
 ## Phase 5 -- Polish
 
 29. [ ] Save data, options menus, final sound mix pass
-        **Inherited from task 25:** Car's `UpdatePosition` (the sound
-        object's position, `espSetObjectPosition`) and the sound half of
-        its constructor; the rumble and force-feedback group,
+        **Inherited from task 25:** the sound half of Car's constructor,
+        and `BaseCarSound::TriggerTireBlowOut` and `TriggerSplash` behind
+        `gBaseCarSoundTriggerTireBlowOutFn` and
+        `gBaseCarSoundTriggerSplashFn`; the rumble and force-feedback group,
         `MaybeRumble`, `MaybeCameraShake`, `DoWheelForces`,
         `CalcForceParameters`, `StartForceImpact`, which the 3DS has no
         motors for; and every `DoSnapshot`, which waits on

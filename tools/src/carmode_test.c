@@ -27,15 +27,31 @@
 #include "bslotpool.h"
 #include "bticker.h"
 #include "car.h"
+#include "cardamage.h"
 #include "collisionbody.h"
+#include "copmanager.h"
+#include "difficultyinfo.h"
+#include "engine.h"
 #include "p32.h"
 #include "physcomp.h"
 #include "physicssystem.h"
+#include "player.h"
 #include "race.h"
 #include "realcontroller.h"
+#include "realdriver.h"
+#include "replay.h"
+#include "terraintype.h"
+#include "topology.h"
+#include "trackpath.h"
+#include "trackroute.h"
 
-// car.c's, and nothing this harness runs reads it.
+// The clock object's globals that the linked files read. Defined here
+// rather than linked from realtime.c, which would bring the joylog in
+// behind it. The tick and the step are the image's 0; nothing this
+// harness runs reads the frame count.
+int32_t WorldTimer = 0;
 int32_t WorldTimeFrames = 0;
+float   WorldTimeElapsed = 0.0f;
 
 static float fb(uint32_t b)
 {
@@ -60,6 +76,28 @@ static DriverInfo       *g_di;
 static DriveTarget      *g_tgt;
 static char              g_topo[16];
 static int32_t           g_race[4];
+
+// The resets' fixtures: the replay and its four snapshots, a player, a
+// route (only ever passed along), a route point and the position handed
+// in. Set by s_reset; the labels name them from then on.
+static ReplayManager    *g_rm;
+static ReplaySnapshot    g_snaps[CM_NSNAPS];
+static char              g_player[16];
+static char              g_route[16];
+static TrackRoutePoint   g_rpt;
+static bVector3          g_vec;
+static uint32_t          g_track[CM_N(cm_track)];
+static ReplayManager     g_rm_store;
+
+// The step's: an animated driver and an editor object that are only ever
+// labels, the car's player and the two by number, whose cars are car3
+// (a blank one) and car2, and the three cars' RacingCars. Set by s_move.
+static char              g_adrv[CM_ADRV_SIZE];
+static char              g_caff[16];
+static struct Player     g_plc, g_pl[2];
+static struct RacingCar  g_rc[3];
+static Car              *g_car3;
+static int               g_nmove;
 
 // 1 while a dump prints: the current mover's components are named too.
 static int g_full;
@@ -122,6 +160,10 @@ static int objects(Obj *o)
     } while (0)
     if (g_car != NULL) {
         ADD("cs", &g_car->State, sizeof(CarState), &pct_CarState);
+        ADD("tc", &g_car->TheTopologyCoordinate, sizeof(TopologyCoordinate),
+            NULL);
+        ADD("tpc", &g_car->TheTrackPathCoordinate,
+            sizeof(TrackPathCoordinate), NULL);
         ADD("car", g_car, sizeof(Car), NULL);
         ADD("car2", g_car2, sizeof(Car), NULL);
         ADD("ccb", g_ccb, sizeof(CarCollisionBody), NULL);
@@ -130,6 +172,18 @@ static int objects(Obj *o)
         ADD("topo", g_topo, sizeof g_topo, NULL);
         ADD("di", g_di, sizeof(DriverInfo), NULL);
         ADD("tgt", g_tgt, sizeof(DriveTarget), NULL);
+        if (g_rm != NULL) {
+            static const char *const snap_name[CM_NSNAPS] = {
+                "snap0", "snap1", "snap2", "snap3", "snap4",
+            };
+            ADD("rm", g_rm, sizeof(ReplayManager), NULL);
+            for (i = 0; i < CM_NSNAPS; i++)
+                ADD(snap_name[i], &g_snaps[i], sizeof(ReplaySnapshot), NULL);
+            ADD("player", g_player, sizeof g_player, NULL);
+            ADD("route", g_route, sizeof g_route, NULL);
+            ADD("rpt", &g_rpt, sizeof g_rpt, NULL);
+            ADD("pos", &g_vec, sizeof g_vec, NULL);
+        }
         if (g_full && g_car->pCarMover != NULL) {
             CarMover *m = g_car->pCarMover;
             if (g_car->TheMovementMode == eNO_MOVEMENT) {
@@ -249,6 +303,10 @@ static const char *pc_sub(const char *pfx, const char *name)
 
 // ------------------------------------------------------------ the heap
 
+// 1 while the track path loads: its QuickSplines' blocks are neither logged
+// nor registered, on either side.
+static int g_quiet;
+
 static void *hook_malloc(int size, const char *name, int flags, int pool)
 {
     void *p = malloc((size_t)size);
@@ -258,6 +316,10 @@ static void *hook_malloc(int size, const char *name, int flags, int pool)
 
     if (p == NULL)
         abort();
+    if (g_quiet) {
+        memset(p, 0, (size_t)size);
+        return p;
+    }
     memset(p, 0xa5, (size_t)size);
     // The three records the port has are its own size; the log shows the
     // image's, so a wrong size still shows.
@@ -303,6 +365,9 @@ static uint32_t scripted_tick(void)
     return g_tick;
 }
 
+// Slice ten's terrain under the car, when it names one.
+static int32_t g_ground = -1;
+
 // physicscar_test.c's plane, normal, terrain and noise.
 static float fake_elevation(void *topology, const bVector3 *pos,
                             int32_t *terrainOut, bVector3 *normalOut)
@@ -312,13 +377,68 @@ static float fake_elevation(void *topology, const bVector3 *pos,
     printf("elev topo=%s pos=%08x %08x %08x tout=%s nout=%s\n",
            label(topology), bf(pos->x), bf(pos->y), bf(pos->z),
            label(terrainOut), label(normalOut));
-    normalOut->x = fb(CM_NORMAL_X);
-    normalOut->y = fb(CM_NORMAL_Y);
-    normalOut->z = fb(CM_NORMAL_Z);
-    normalOut->pad = 0.0f;
+    if (normalOut != NULL) {
+        normalOut->x = fb(CM_NORMAL_X);
+        normalOut->y = fb(CM_NORMAL_Y);
+        normalOut->z = fb(CM_NORMAL_Z);
+        normalOut->pad = 0.0f;
+    }
     if (terrainOut != NULL)
         *terrainOut = ((int32_t)(pos->x * 0.5f)) & 3;
+    if (terrainOut != NULL && g_ground >= 0)
+        *terrainOut = g_ground;
     return el;
+}
+
+// The topology cartrack.c and carreset.c call, which track.c has and this
+// harness does not link: the same plane, and a clear that logs.
+float topology_get_elevation(TopologyCoordinate *tc, const bVector3 *pt,
+                             int32_t *terrain, bVector3 *normal,
+                             int32_t *found)
+{
+    (void)found;
+    return fake_elevation(tc, pt, terrain, normal);
+}
+
+void topology_clear_interest_bbox(TopologyCoordinate *tc)
+{
+    printf("clearbbox tc=%s\n", label(tc));
+}
+
+// cartrack.c's BeginMovement calls these two. Nothing here runs it --
+// track_check does, over the real topology -- so reaching one is a
+// harness bug.
+void topology_set_interest_bbox3(TopologyCoordinate *tc, const bVector3 *pos,
+                                 float r, const bVector3 *vel)
+{
+    (void)tc; (void)pos; (void)r; (void)vel;
+    printf("set_interest_bbox3 reached\n");
+    abort();
+}
+
+int topology_has_topology(TopologyCoordinate *tc, const bVector2 *xy)
+{
+    (void)tc; (void)xy;
+    printf("has_topology reached\n");
+    abort();
+}
+
+// collisionbody.c's TrackPolygonCollisionBody wants the tree; carmode
+// links collisionbody.c for the car's body, and never makes a polygon's.
+TopologyTree TheTopologyTree;
+
+TrackPolygon *topotree_assign(TopologyTree *t, TopologyTreePolygon *p)
+{
+    (void)t; (void)p;
+    printf("topotree_assign reached\n");
+    abort();
+}
+
+void topotree_unassign(TopologyTree *t, TrackPolygon *tp)
+{
+    (void)t; (void)tp;
+    printf("topotree_unassign reached\n");
+    abort();
 }
 
 static float fake_road_noise(const bVector2 *xy, int32_t terrain)
@@ -418,16 +538,70 @@ static void fake_stpm(int k, void *self, Car *other)
            label(other));
 }
 
+// The three the resets reach.
+static void fake_setroute(int k, void *self, TrackRoute *route,
+                          TrackRoutePoint *point)
+{
+    printf("setroute %s this=%s route=%s point=%s\n", ctrl_cls[k],
+           label(self), label(route), label(point));
+}
+
+static void fake_findwhere(int k, void *self)
+{
+    printf("findwhere %s this=%s\n", ctrl_cls[k], label(self));
+}
+
+static void fake_justreset(int k, void *self)
+{
+    printf("justreset %s this=%s\n", ctrl_cls[k], label(self));
+}
+
+// The step's: each mover's Move, which answers 0.5, 0.75, ... in turn, and
+// the route and point a controller hands Move's reset.
+static float fake_move(int k, void *self, float dt)
+{
+    float r = fb(CM_MOVE_RET0) + 0.25f * (float)g_nmove++;
+
+    printf("mover-move %s this=%s dt=%08x -> %08x\n", mover_cls[k],
+           label(self), bf(dt), bf(r));
+    return r;
+}
+
+static TrackRoute *fake_getroute(int k, void *self)
+{
+    printf("getroute %s this=%s\n", ctrl_cls[k], label(self));
+    return (TrackRoute *)(void *)g_route;
+}
+
+static TrackRoutePoint *fake_getpoint(int k, void *self)
+{
+    printf("getpoint %s this=%s\n", ctrl_cls[k], label(self));
+    return &g_rpt;
+}
+
 #define FAKE_MOVER(k, cls)                                                  \
     static void fake_##cls##_dtor(void *s, int32_t f)                       \
     { fake_dtor(#cls, s, f); }                                              \
     static CarMover *fake_##cls##_ctor(void *m, Car *c)                     \
-    { return fake_mover_ctor(k, m, c); }
+    { return fake_mover_ctor(k, m, c); }                                    \
+    static float fake_##cls##_move(void *s, float dt)                       \
+    { return fake_move(k, s, dt); }
 #define FAKE_CTRL(k, cls)                                                   \
     static void fake_##cls##_dtor(void *s, int32_t f)                       \
     { fake_dtor(#cls, s, f); }                                              \
     static void fake_##cls##_stpm(void *s, Car *o)                          \
     { fake_stpm(k, s, o); }                                                 \
+    static void fake_##cls##_setroute(void *s, TrackRoute *r,               \
+                                      TrackRoutePoint *p)                   \
+    { fake_setroute(k, s, r, p); }                                          \
+    static void fake_##cls##_findwhere(void *s)                             \
+    { fake_findwhere(k, s); }                                               \
+    static void fake_##cls##_justreset(void *s)                             \
+    { fake_justreset(k, s); }                                               \
+    static TrackRoute *fake_##cls##_getroute(void *s)                       \
+    { return fake_getroute(k, s); }                                         \
+    static TrackRoutePoint *fake_##cls##_getpoint(void *s)                  \
+    { return fake_getpoint(k, s); }                                         \
     static CarController *fake_##cls##_ctor(void *m, Car *c)                \
     { return fake_ctrl_ctor(k, m, c); }
 
@@ -450,19 +624,28 @@ static void fdrv_snapshot(void *self, void *snap)
     printf("snapshot this=%s snap=%s\n", label(self), label(snap));
 }
 
+static void fdrv_lowgear(void *self)
+{
+    printf("lowgear fdrv this=%s\n", label(self));
+}
+
 #define E(f) { 0, 0, (VtFn)(f) }
 #define N    { 0, 0, NULL }
 
-static const VtEntry fake_mover_vt[4][2] = {
-    { N, E(fake_TrafficCar_dtor) },
-    { N, E(fake_DeliveryMover_dtor) },
-    { N, E(fake_CopMover_dtor) },
-    { N, E(fake_BeltMover_dtor) },
+// Slots 8 and 16, the destructor and the step's Move.
+static const VtEntry fake_mover_vt[4][3] = {
+    { N, E(fake_TrafficCar_dtor), E(fake_TrafficCar_move) },
+    { N, E(fake_DeliveryMover_dtor), E(fake_DeliveryMover_move) },
+    { N, E(fake_CopMover_dtor), E(fake_CopMover_move) },
+    { N, E(fake_BeltMover_dtor), E(fake_BeltMover_move) },
 };
 
-// Slots 8 and 88; nothing the four methods do reaches the rest.
+// Slots 8 and 88, the resets' 40, 72 and 80, and the step's 48 and 56;
+// nothing the methods do reaches the rest.
 #define CTRL_VT(cls)                                                        \
-    { N, E(fake_##cls##_dtor), N, N, N, N, N, N, N, N, N,                   \
+    { N, E(fake_##cls##_dtor), N, N, N, E(fake_##cls##_setroute),           \
+      E(fake_##cls##_getroute), E(fake_##cls##_getpoint), N,                \
+      E(fake_##cls##_findwhere), E(fake_##cls##_justreset),                 \
       E(fake_##cls##_stpm) }
 static const VtEntry fake_ctrl_vt[4][12] = {
     CTRL_VT(RealController),
@@ -471,8 +654,8 @@ static const VtEntry fake_ctrl_vt[4][12] = {
     CTRL_VT(CopDriver),
 };
 
-static const VtEntry fake_driver_vt[4] = {
-    N, E(fdrv_dtor), N, E(fdrv_snapshot),
+static const VtEntry fake_driver_vt[7] = {
+    N, E(fdrv_dtor), N, E(fdrv_snapshot), N, N, E(fdrv_lowgear),
 };
 
 #undef CTRL_VT
@@ -483,10 +666,10 @@ static void install_fakes(void)
 {
     int k;
     for (k = 0; k < 4; k++) {
-        vt_install(fake_vt(0, k), fake_mover_vt[k], 2);
+        vt_install(fake_vt(0, k), fake_mover_vt[k], 3);
         vt_install(fake_vt(1, k), fake_ctrl_vt[k], 12);
     }
-    vt_install(CM_FAKE_VT_DRIVER, fake_driver_vt, 4);
+    vt_install(CM_FAKE_VT_DRIVER, fake_driver_vt, 7);
 
     gTrafficCarCtorFn      = fake_TrafficCar_ctor;
     gDeliveryMoverCtorFn   = fake_DeliveryMover_ctor;
@@ -1005,6 +1188,475 @@ static void s_dtors(void)
     say_pools();
 }
 
+// ------------------------------------------------------------ the resets
+
+static void reset_setup(void)
+{
+    uint32_t *head;
+    uint32_t ring[CM_NSNAPS + 1];
+    int i;
+
+    printf("== reset setup\n");
+    memcpy(g_track, cm_track, sizeof g_track);
+    g_quiet = 1;
+    i = loader_track_path((uint8_t *)g_track);
+    g_quiet = 0;
+    printf("loader -> %d\n", i);
+    WorldTimer = CM_WORLD_TIMER;
+
+    g_rm = &g_rm_store;
+    g_rm->FreeReplaySnapshotList[0] = p32_of(g_rm->FreeReplaySnapshotList);
+    g_rm->FreeReplaySnapshotList[1] = p32_of(g_rm->FreeReplaySnapshotList);
+    head = g_rm->ReplaySnapshotList;
+    for (i = 0; i < CM_NSNAPS; i++) {
+        snprintf(g_snaps[i].Name, sizeof g_snaps[i].Name, "%s",
+                 cm_snap_name[i]);
+        g_snaps[i].TotalInterestingValue = fb(cm_snap_tiv[i]);
+    }
+    ring[0] = p32_of(head);
+    for (i = 0; i < CM_NSNAPS; i++)
+        ring[1 + i] = p32_of(&g_snaps[i]);
+    for (i = 0; i <= CM_NSNAPS; i++) {
+        uint32_t *node = p32_ptr(ring[i]);
+        node[0] = ring[(i + 1) % (CM_NSNAPS + 1)];
+        node[1] = ring[(i + CM_NSNAPS) % (CM_NSNAPS + 1)];
+    }
+    memcpy(&g_rpt, cm_rpt, sizeof cm_rpt);
+}
+
+static void reset_prep(int ctrl, int move, int player)
+{
+    if ((int)g_car->TheControlMode != ctrl)
+        car_set_control_mode(g_car, (ControlMode)ctrl);
+    car_set_movement_mode(g_car, (MovementMode)move);
+    g_car->pPlayer = player != 0 && player != 4
+                         ? (Player *)(void *)g_player : NULL;
+    pReplayManager = player == 3 ? NULL : g_rm;
+    g_rm->CapturingFlag = player == 2 || player == 4;
+    g_car->BlinkTimer = CM_BLINK0_TIMER;
+    g_car->BlinkDuration = fb(CM_BLINK0_DURATION);
+}
+
+static void reset_dump(void)
+{
+    const TrackPathCoordinate *t = &g_car->TheTrackPathCoordinate;
+    int i;
+
+    step("after", 0);
+    printf("tpc pos=%08x %08x pt=%d param=%08x ratio=%08x dist=%08x "
+           "dir=%08x %08x\n", bf(t->Position.x), bf(t->Position.y),
+           t->pTrackPoint != NULL
+               ? (int)(t->pTrackPoint - TheTrackPathManager.pPoints) : -1,
+           bf(t->SplineParam), bf(t->RatioAroundTrack),
+           bf(t->DistanceAroundTrack), bf(t->PathDirection.x),
+           bf(t->PathDirection.y));
+    printf("blink timer=%d duration=%08x\n", (int)g_car->BlinkTimer,
+           bf(g_car->BlinkDuration));
+    printf("replay tiv=");
+    for (i = 0; i < CM_NSNAPS; i++)
+        printf("%s%08x", i ? " " : "", bf(g_snaps[i].TotalInterestingValue));
+    printf("\n");
+}
+
+static void s_reset(void)
+{
+    int i;
+
+    reset_setup();
+    for (i = 0; i < CM_N(cm_resets); i++) {
+        const CmReset *r = &cm_resets[i];
+        static const char *const kind[3] = { "pos", "core", "debug" };
+
+        printf("== reset %d %s\n", i, kind[r->kind]);
+        reset_prep(r->ctrl, r->move, r->player);
+        g_vec.x = fb(r->pos[0]);
+        g_vec.y = fb(r->pos[1]);
+        g_vec.z = fb(r->pos[2]);
+        g_vec.pad = fb(r->pos[3]);
+        if (r->kind == 0)
+            car_reset_to_position(g_car, &g_vec, fb(r->speed),
+                                  (uint16_t)r->angle);
+        else if (r->kind == 1)
+            car_reset_core(g_car, &g_vec, fb(r->speed), (uint16_t)r->angle);
+        else
+            car_debug_set_position(g_car, &g_vec, fb(r->speed),
+                                   (uint16_t)r->angle);
+        reset_dump();
+    }
+    for (i = 0; i < CM_N(cm_route_resets); i++) {
+        const CmRouteReset *r = &cm_route_resets[i];
+
+        printf("== reset route %d\n", i);
+        reset_prep(r->ctrl, r->move, r->player);
+        car_reset_to_route_point(g_car,
+                                 r->route ? (TrackRoute *)(void *)g_route
+                                          : NULL,
+                                 r->point ? &g_rpt : NULL, fb(r->speed),
+                                 r->blink, fb(r->dir));
+        reset_dump();
+    }
+    car_set_control_mode(g_car, eNO_CONTROL);
+    car_set_movement_mode(g_car, eNO_MOVEMENT);
+}
+
+// ------------------------------------------------------------ the step
+
+static void adrv_begin_gear(AnimatedDriver *d)
+{
+    printf("adrv begin-gear this=%s\n", label(d));
+}
+
+static void adrv_begin_back(AnimatedDriver *d)
+{
+    printf("adrv begin-back this=%s\n", label(d));
+}
+
+static void adrv_end_back(AnimatedDriver *d)
+{
+    printf("adrv end-back this=%s\n", label(d));
+}
+
+static void fake_esp(void *obj, bVector3 *pos)
+{
+    printf("esp obj=%s pos=%s\n", label(obj), label(pos));
+}
+
+static void move_setup(void)
+{
+    int i;
+
+    printf("== move setup\n");
+    reg_add("adrv", g_adrv, sizeof g_adrv, NULL);
+    reg_add("caff", g_caff, sizeof g_caff, NULL);
+    g_car3 = calloc(1, sizeof(Car));
+    g_plc.MyCar = g_car;
+    g_pl[0].MyCar = g_car3;
+    g_pl[1].MyCar = g_car2;
+    for (i = 0; i < 2; i++) {
+        g_pl[i].PlayerNumber = i;
+        PlayerPlayersByNumber[i] = &g_pl[i];
+    }
+    g_car->pRacingCar = &g_rc[0];
+    g_car3->pRacingCar = &g_rc[1];
+    g_car2->pRacingCar = &g_rc[2];
+    printf("tracklength=%08x\n", bf(TheTrackPathManager.TrackLength));
+}
+
+static void diff_dump(void)
+{
+    const uint32_t *w = (const uint32_t *)(const void *)&TheDifficultyInfo;
+    int n = (int)(sizeof TheDifficultyInfo / 4);
+    int i, j;
+
+    for (i = 0; i < n; i += 12) {
+        printf("diff %d =", i);
+        for (j = i; j < n && j < i + 12; j++)
+            printf(" %08x", (unsigned)w[j]);
+        printf("\n");
+    }
+}
+
+static void move_case(int i, const CmMove *m)
+{
+    CarState *cs = &g_car->State;
+    float r;
+    int k;
+
+    printf("== move %d\n", i);
+    if ((int)g_car->TheControlMode != m->ctl)
+        car_set_control_mode(g_car, (ControlMode)m->ctl);
+    if ((int)g_car->TheMovementMode != m->move)
+        car_set_movement_mode(g_car, (MovementMode)m->move);
+    cs->CurrentGear = m->gear;
+    g_car->DispGear = m->disp;
+    g_car->pAnimatedDriver = m->adrv ? (AnimatedDriver *)(void *)g_adrv
+                                     : NULL;
+    g_car->ResetMe = m->reset;
+    g_car->BlinkTimer = (int32_t)m->bt;
+    g_car->BlinkDuration = fb(m->bd);
+    g_ccb->LastPenetrationTime.PackedTime = m->pen;
+    g_car->pCaffeineObj = m->caff ? g_caff : NULL;
+    g_car->pPlayer = m->player != CM_NO_PLAYER ? &g_plc : NULL;
+    g_plc.PlayerNumber = m->player;
+    RaceParametersBoost = m->boost;
+    PlayerNumPlayers = m->np;
+    for (k = 0; k < 3; k++)
+        g_rc[k].CurrentLapNumberExact = fb(m->laps[k]);
+    cs->BoostFactor = fb(CM_BOOST_MARK);
+    WorldTimer = (int32_t)m->now;
+    r = car_move(g_car, fb(CM_MOVE_DT));
+    printf("moved -> %08x gear=%d disp=%d resetme=%d blink=%d/%08x "
+           "boost=%08x\n", bf(r), (int)cs->CurrentGear, (int)g_car->DispGear,
+           (int)g_car->ResetMe, (int)g_car->BlinkTimer,
+           bf(g_car->BlinkDuration), bf(cs->BoostFactor));
+    if (m->full)
+        step("after", 0);
+}
+
+static void s_move(void)
+{
+    uint8_t good[CM_N(cm_diff)], bad[CM_N(cm_diff)];
+    int i;
+
+    move_setup();
+    memcpy(good, cm_diff, sizeof good);
+    memcpy(bad, cm_diff, sizeof bad);
+    bad[0] ^= 1;
+    printf("== difficulty\n");
+    printf("unload %d %d\n", unloader_difficulty_info(bad),
+           unloader_difficulty_info(good));
+    printf("load bad -> %d\n", loader_difficulty_info(bad));
+    diff_dump();
+    for (i = 0; i < CM_N(cm_catchup); i++)
+        move_case(-1 - i, &cm_catchup[i]);
+    printf("load -> %d\n", loader_difficulty_info(good));
+    diff_dump();
+    for (i = 0; i < CM_N(cm_moves); i++)
+        move_case(i, &cm_moves[i]);
+    car_set_control_mode(g_car, eNO_CONTROL);
+    car_set_movement_mode(g_car, eNO_MOVEMENT);
+}
+
+// ------------------------------------------------------------ slice nine
+
+static float   g_dist;
+static char    g_snd[CM_SND_SIZE];
+static char    g_copmgr[CM_COPMGR_SIZE];
+static char    g_dpos[8];
+static int32_t g_pursued;
+static int     g_nline;
+
+// RealDriver::ForceEBrakeStop is realdriver.c's, which is not linked here;
+// the model stubs the image's, and each side logs the call.
+void realdriver_force_ebrake_stop(RealDriver *d, int32_t on)
+{
+    printf("ebrake drv=%s on=%d\n", label(d), (int)on);
+}
+
+static void fake_effect(Car *c, CarEffect fx, float scale, int32_t where,
+                        bVector3 *pos)
+{
+    printf("effect car=%s fx=%d scale=%08x where=%08x pos=%s", label(c),
+           (int)fx, bf(scale), (unsigned)where, label(pos));
+    if (pos != NULL)
+        printf(" at=%08x %08x %08x %08x", bf(pos->x), bf(pos->y),
+               bf(pos->z), bf(pos->pad));
+    printf("\n");
+}
+
+static void fake_splash(BaseCarSound *snd, int32_t right, int32_t level)
+{
+    printf("splash snd=%s right=%d level=%d\n", label(snd), (int)right,
+           (int)level);
+}
+
+static void fake_snd_blow(BaseCarSound *snd)
+{
+    printf("sound blowout %s\n", label(snd));
+}
+
+static int32_t fake_pursued(tCopManager *m, Car *c)
+{
+    printf("pursued mgr=%s car=%s -> %d\n", label(m), label(c),
+           (int)g_pursued);
+    return g_pursued;
+}
+
+static float fake_line_speed(CarController *ctl)
+{
+    float r = fb(CM_LINE_SPEED0) + 0.5f * (float)g_nline++;
+
+    printf("linespeed ctl=%s -> %08x\n", label(ctl), bf(r));
+    return r;
+}
+
+static void fake_setdest(CarMover *m, bVector2 *pos, uint16_t angle,
+                         float speed, float time)
+{
+    printf("setdest mover=%s pos=%s angle=%d speed=%08x time=%08x\n",
+           label(m), label(pos), (int)angle, bf(speed), bf(time));
+}
+
+static void blown(const char *what)
+{
+    printf("%s bits=%02x num=%d timer=%08x\n", what,
+           (unsigned)g_car->BlownTireBits, (int)g_car->NumBlownTires,
+           bf(g_car->fBlownTireControllerRumbleTimer));
+}
+
+static void set_blown(int32_t bits, int32_t num)
+{
+    g_car->BlownTireBits = (uint8_t)bits;
+    g_car->NumBlownTires = (uint8_t)num;
+    g_car->fBlownTireControllerRumbleTimer = fb(CM_RACE_TIMER0);
+}
+
+static void s_race(void)
+{
+    DriverType dtype = g_di->TheDriverType;
+    uint32_t mark = CM_DIST_MARK;
+    float r;
+    int i;
+
+    printf("== race setup\n");
+    reg_add("dist", &g_dist, sizeof g_dist, NULL);
+    reg_add("snd", g_snd, sizeof g_snd, NULL);
+    reg_add("copmgr", g_copmgr, sizeof g_copmgr, NULL);
+    reg_add("dpos", g_dpos, sizeof g_dpos, NULL);
+    for (i = 0; i < 2; i++) {
+        printf("== dist %d\n", i);
+        memcpy(&g_dist, &mark, 4);
+        r = car_get_distance_and_speed(&g_dist, i ? g_car2 : g_car,
+                                       i ? g_car : g_car2);
+        printf("dist -> %08x speed=%08x\n", bf(r), bf(g_dist));
+    }
+    for (i = 0; i < CM_N(cm_fix); i++) {
+        printf("== fix %d\n", i);
+        if ((int32_t)g_car->TheControlMode != cm_fix[i])
+            car_set_control_mode(g_car, (ControlMode)cm_fix[i]);
+        set_blown(0x0b, 3);
+        car_fix_blown_tires(g_car);
+        blown("fixed");
+    }
+    car_set_control_mode(g_car, eNO_CONTROL);
+    for (i = 0; i < CM_N(cm_blow); i++) {
+        const CmBlow *b = &cm_blow[i];
+        printf("== blow %d\n", i);
+        set_blown(b->bits, b->num);
+        g_car->pBaseCarSound = b->snd ? (BaseCarSound *)(void *)g_snd : NULL;
+        car_trigger_tire_blow_out(g_car, b->tires);
+        blown("blown");
+    }
+    g_car->pBaseCarSound = NULL;
+    set_blown(0, 0);
+    g_car->fBlownTireControllerRumbleTimer = 0.0f;
+    for (i = 0; i < CM_N(cm_later); i++) {
+        const CmLater *l = &cm_later[i];
+        printf("== later %d\n", i);
+        RaceParametersBeACop = l->beacop;
+        RaceParametersMaxCops = l->maxcops;
+        g_di->TheDriverType = l->dtype;
+        g_pursued = l->pursued;
+        pCopManager = l->mgr ? (tCopManager *)(void *)g_copmgr : NULL;
+        g_car->ResetMe = CM_RESET_MARK;
+        car_please_reset_me_later(g_car);
+        printf("later resetme=%d\n", (int)g_car->ResetMe);
+    }
+    RaceParametersBeACop = 0;
+    RaceParametersMaxCops = 0;
+    g_di->TheDriverType = dtype;
+    pCopManager = NULL;
+    g_car->ResetMe = 0;
+    for (i = 0; i < CM_N(cm_line); i++) {
+        printf("== line %d\n", i);
+        if ((int32_t)g_car->TheControlMode != cm_line[i])
+            car_set_control_mode(g_car, (ControlMode)cm_line[i]);
+        r = car_get_driving_line_speed(g_car);
+        printf("line -> %08x\n", bf(r));
+    }
+    car_set_control_mode(g_car, eNO_CONTROL);
+    for (i = 0; i < CM_N(cm_deliver); i++) {
+        const CmDeliver *d = &cm_deliver[i];
+        printf("== deliver %d\n", i);
+        if ((int32_t)g_car->TheMovementMode != d->from)
+            car_set_movement_mode(g_car, (MovementMode)d->from);
+        car_deliver_me_from_evil(g_car, (bVector2 *)(void *)g_dpos,
+                                 (uint16_t)d->angle, fb(d->speed),
+                                 fb(d->time));
+        printf("delivered move=%d mover=%s\n", (int)g_car->TheMovementMode,
+               label(g_car->pCarMover));
+    }
+    car_set_movement_mode(g_car, eNO_MOVEMENT);
+}
+
+// ------------------------------------------------------------ slice ten
+
+static char      g_fxplayer[CM_FX_PLAYER_SIZE];
+static CarDamage g_cdmg;
+
+static void s_terrain(void)
+{
+    Car *c = g_car;
+    CarState *cs = &c->State;
+    TerrainTypeInfo *t4 = &TerrainTypeInfoTable[4];
+    float min0 = t4->DriveOverMinSpeed, max0 = t4->DriveOverMaxSpeed;
+    Player *player0 = c->pPlayer;
+    int n, i, k;
+
+    printf("== terrain setup\n");
+    reg_add("fxplayer", g_fxplayer, sizeof g_fxplayer, NULL);
+    reg_add("cdmg", &g_cdmg, sizeof g_cdmg, NULL);
+    cs->Position.x = fb(cm_fx_pos[0]);
+    cs->Position.y = fb(cm_fx_pos[1]);
+    cs->Position.z = fb(cm_fx_pos[2]);
+    cs->Position.pad = fb(cm_fx_pos[3]);
+    cs->Velocity.x = fb(cm_fx_vel[0]);
+    cs->Velocity.y = fb(cm_fx_vel[1]);
+    cs->Velocity.z = fb(cm_fx_vel[2]);
+    cs->Velocity.pad = fb(cm_fx_vel[3]);
+    for (i = 0; i < 4; i++)
+        for (k = 0; k < 16; k++)
+            ((float *)(void *)&cs->WheelMatrix[i])[k] = fb(cm_fx_matrix[i][k]);
+    for (n = 0; n < CM_N(cm_fx); n++) {
+        const CmFx *x = &cm_fx[n];
+
+        printf("== fx %d\n", n);
+        if ((int32_t)c->TheMovementMode != x->move)
+            car_set_movement_mode(c, (MovementMode)x->move);
+        if (x->move == 1)
+            ((PhysicsCar *)(void *)c->pCarMover)->pEngine->NitroFlag =
+                x->engine;
+        cs->VelocityMagnitude = fb(x->vmag);
+        for (i = 0; i < 4; i++) {
+            cs->WheelTouchingGround[i] = (int8_t)x->touch[i];
+            cs->WheelTerrain[i] = (TerrainType)x->terr[i];
+            cs->WheelSlip[i].x = fb(x->slip[i][0]);
+            cs->WheelSlip[i].y = fb(x->slip[i][1]);
+            cs->WheelBottomOutMagnitude[i] = fb(x->bo[i]);
+            c->NumTimesSkidding[i] = (uint8_t)x->nts[i];
+        }
+        if (!x->dmg) {
+            c->pCarDamage = NULL;
+            RaceParametersDamageEnabled = 0;
+        } else {
+            g_cdmg.BreakableCarItemDamageAmounts = (uint32_t)x->items;
+            g_cdmg.TheBodyDamage.CompressedTotalDamage = (uint16_t)x->total;
+            RaceParametersDamageEnabled = x->enabled;
+            c->pCarDamage = &g_cdmg;
+        }
+        c->pPlayer = x->player ? (Player *)(void *)g_fxplayer : NULL;
+        c->NitroEffectFlag = x->nitro;
+        c->BlownTireBits = (uint8_t)x->bits;
+        c->NumBlownTires = (uint8_t)x->num;
+        c->pBaseCarSound = x->snd ? (BaseCarSound *)(void *)g_snd : NULL;
+        c->WiperState = x->wstate;
+        c->WiperOnTime = (uint32_t)x->won;
+        c->WiperOffTime = (uint32_t)x->woff;
+        WorldTimeFrames = x->now;
+        if (x->patch) {
+            t4->DriveOverMinSpeed = fb(x->pmin);
+            t4->DriveOverMaxSpeed = fb(x->pmax);
+        }
+        g_ground = x->ground;
+        car_trigger_car_terrain_effects(c, fb(x->dist));
+        g_ground = -1;
+        t4->DriveOverMinSpeed = min0;
+        t4->DriveOverMaxSpeed = max0;
+        printf("fx nts=%d %d %d %d wipers=%d %d %d\n",
+               (int)c->NumTimesSkidding[0], (int)c->NumTimesSkidding[1],
+               (int)c->NumTimesSkidding[2], (int)c->NumTimesSkidding[3],
+               (int)(int32_t)c->WiperOnTime, (int)(int32_t)c->WiperOffTime,
+               (int)c->WiperState);
+    }
+    c->pPlayer = player0;
+    c->pCarDamage = NULL;
+    RaceParametersDamageEnabled = 0;
+    c->pBaseCarSound = NULL;
+    c->NitroEffectFlag = 0;
+    set_blown(0, 0);
+    car_set_movement_mode(c, eNO_MOVEMENT);
+}
+
 int main(void)
 {
     int i;
@@ -1024,6 +1676,16 @@ int main(void)
     carcontroller_install_vtables();
     cardriver_install_vtables();
     install_fakes();
+    gAnimatedDriverBeginGearChangeFn = adrv_begin_gear;
+    gAnimatedDriverBeginDrivingBackwardsFn = adrv_begin_back;
+    gAnimatedDriverEndDrivingBackwardsFn = adrv_end_back;
+    gEspSetObjectPositionFn = fake_esp;
+    gCarTriggerEffectFn = fake_effect;
+    gBaseCarSoundTriggerTireBlowOutFn = fake_snd_blow;
+    gBaseCarSoundTriggerSplashFn = fake_splash;
+    gCopManagerIsBeingPursuedFn = fake_pursued;
+    gAICarControllerGetCurrentDrivingLineSpeedFn = fake_line_speed;
+    gDeliveryMoverSetDestinationFn = fake_setdest;
     wheel_install_seams();
     rigidbody_static_init();
     wheel_static_init();
@@ -1060,5 +1722,9 @@ int main(void)
     s_nullcontroller();
     s_nulldriver();
     s_dtors();
+    s_reset();
+    s_move();
+    s_race();
+    s_terrain();
     return 0;
 }

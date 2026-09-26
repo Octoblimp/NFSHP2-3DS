@@ -21,6 +21,12 @@
 #include "engine.h"
 #include "wheel.h"
 
+// The clock object's two globals that DriveTrain and Engine read, both 0 in
+// the image. Defined here rather than linked from realtime.c, which would
+// bring the joylog in behind it. The sport-shift scenario sets the step.
+int32_t WorldTimer = 0;
+float   WorldTimeElapsed = 0.0f;
+
 // ----------------------------------------------------------------- output
 
 static void pf(const char *tag, float x)

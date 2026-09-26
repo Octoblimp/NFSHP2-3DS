@@ -1,7 +1,7 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 29's
-continuation (2026-09-23). `HANDOFF.md` is the running narrative; this file is the short
+Where the next session picks up. Updated in Session 30's
+continuation (2026-09-26). `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -16,10 +16,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Forty-one cross-checkers pass, plus the table generators:
+Forty-seven cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -44,29 +44,36 @@ cardriver_check     5 scenarios,   118 lines, 0 differ   (45 caught, 1 equivalen
 steering_check      5 scenarios,   873 lines, 0 differ   (43 caught, 1 equivalent)
 rigidbody_check    10 scenarios,   935 lines, 0 differ   (76 caught, 2 equivalent)
 suspension_check   10 scenarios,  1108 lines, 0 differ   (66 caught, 2 equivalent)
-wheel_check        19 scenarios, 10693 lines, 0 differ   (144 caught, 10 equivalent)
+wheel_check        19 scenarios, 10695 lines, 0 differ   (145 caught, 10 equivalent)
 drivetrain_check   18 scenarios,   498 lines, 0 differ   (173 caught, 3 equivalent)
-drivetarget_check  22 scenarios,   894 lines, 0 differ   (241 caught, 19 equivalent)
+drivetarget_check  22 scenarios,   897 lines, 0 differ   (243 caught, 19 equivalent)
+drivetarget_image_check 22 scenarios, 897 lines, 160 masked, 0 differ (243 caught, 19 equivalent)
 graph_check        16 scenarios,   151 lines, 0 differ   (21 caught, 4 equivalent)
 car_check          58 scenarios,  4238 lines, 0 differ   (238 caught, 16 equivalent)
 physicssystem_check 12 scenarios,  739 lines, 0 differ   (61 caught, 1 equivalent)
 aerodynamics_check  7 scenarios,   107 lines, 0 differ   (74/74 mutations caught)
 physcomp_check      8 scenarios,   239 lines, 0 differ   (46 caught, 1 equivalent)
-sinit_check        10 calls,        0 problems           (6/6 mutations caught)
+sinit_check        13 calls,        0 problems           (6/6 mutations caught)
 physicscar_check  106 scenarios, 102908 lines, 0 differ (257 caught, 6 equivalent)
 mellowmover_check  39 scenarios, 56080 lines, 0 differ  (341 caught, 5 equivalent)
-carmode_check      74 transitions, 27324 lines, 0 differ (114/114 mutations caught)
+carmode_check      74 transitions, 19 resets, 35875 lines, 0 differ (409 caught, 8 equivalent)
 joystick_check     64240 ops,    75891 lines, 0 differ  (250 caught, 3 equivalent)
 joyhid_check       every key and stick reaches its event
+realtime_check     20 scenarios, 1044 ops, 3470 lines, 0 differ (91 caught, 2 equivalent)
 realdriver_check  152455 ops,    41163 lines, 0 differ  (118 caught, 4 equivalent)
 quickspline_check   6640 ops,     6898 lines, 0 differ  (133/133 mutations caught)
 trackpath_check     4771 ops,     4707 lines, 0 differ  (185 caught, 3 equivalent)
 average_check        482 ops,      843 lines, 0 differ  (64/64 mutations caught)
 airoute_check      14738 ops,     7224 lines, 0 differ  (86 caught, 5 equivalent)
 realcontroller_check 14096 ops,  25318 lines, 0 differ  (129 caught, 11 equivalent)
+track_check        16149 ops,    11790 lines, 0 differ  (266 caught, 5 equivalent)
+vclip_check        11890 ops,    22389 lines, 0 differ  (280 caught, 1 equivalent)
+polyhedra_check    15907 ops,    64560 lines, 0 differ  (172 caught, 12 equivalent)
+collisionbody_check 1572 ops,    35426 lines, 0 differ  (622 caught, 24 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
+gen_terrain_table --check          terraintypetab.c is up to date
 ```
 
 `texpack_check.py` takes a file and is run per pack; it now also diffs the UV
@@ -106,7 +113,279 @@ and so replaced every boot.
 
 ## Next, in order
 
-1. **Task 26's second slice is closed: `TrackedController` and
+1. **Task 27's first slice is closed: `Track.obj` and `TerrainType.obj`**,
+   the track's collision surface. It is written up in
+   `docs/formats/topology.md`.
+   - `track.c`, `topology.h` and `track.h` carry the TopologyTree, the
+     pooled TrackPolygons, and TopologyCoordinate: the SetInterestBBox,
+     GetElevation and Constrain a car stands on. They also carry the
+     position markers, the track info table and the road noise.
+   - `terraintype.c` and the generated `terraintypetab.c` carry the 33
+     terrains.
+   - `track_check` runs the image in mipsemu as the oracle, over a
+     synthetic world and over TRACKB12 itself: 14,753 ops, 11,231 lines,
+     0 differ. Of 209 mutations, 206 are caught and 3 are equivalent,
+     with 0 unexplained.
+   - **The second slice is Car's first callers of it**, in `cartrack.c`:
+     `FindFlatOnTrackPosition` (`0x00130c58`) and `PutFlatOnTrack`
+     (`0x00130e90`), with the `SetInterestBBox(bVector3)` wrapper
+     (`0x00134f28`) in `track.c`. `track_check` checks them, and they are
+     written up in `car.md`. The slope's constant is 65536 / 6.28, not
+     65536 / 2 pi, and that is kept. They are apart from `car.c` because
+     `car.c` links into six checkers that have no topology.
+   - **The third slice is Car's reset group**, in `carreset.c`:
+     `ResetCore` (`0x001312c0`), `ResetToPosition`, `ResetToRoutePoint`
+     and `DebugSetPosition`, with `ReplayManager`'s
+     `RegisterInterestingEvent` and `InvalidateInterestingEvents` in
+     `replay.c`. `carmode_check` runs them after the transitions, over a
+     real looping track path loaded through `LoaderTrackPath`: 19 resets,
+     32,797 lines, 0 differ. Its whole pass is 188 mutations, 185 caught
+     and 3 equivalent, with 0 unexplained. Two words reach the state from
+     the stack. The checker poisons the stack two ways and masks only
+     those words' fourth lanes. The port tests `pReplayManager` for NULL
+     where the image does not, because the replay is not ported yet.
+     Written up in `car.md`.
+   - **The fourth slice is `AverageAir` and `BeginMovement`**, in
+     `cartrack.c`, checked by `track_check`: 16,149 ops, 11,790 lines,
+     0 differ. Of the slice's 62 mutations, 60 are caught and 2 are
+     equivalent. The first 209, rerun after its scenario went in, are
+     still 206 caught and 3 equivalent. Every wheel goes through `WheelMatrix[0]`, as shipped.
+   - **The fifth slice is the step**, in `carmove.c`: `Car::Move`
+     (`0x00130200`), `ChangeGear`, `CalculateNewCatchupMultipliers` and
+     `UpdatePosition`. `carmode_check` runs seventy steps after the
+     resets: 35,405 lines, 0 differ. Of the slice's 79 mutations, 77 are
+     caught and 2 are equivalent. Car is 55 of 80 methods. New files:
+     - `timer.{c,h}`: Timer, moved out of `collisionbody.h`, and
+       `Timer::SetTime`.
+     - `player.c`: `NumPlayers` and `pPlayersByNumber`.
+     - `difficultyinfo.{c,h}`: the table and chunk 0x34b00's loader. No
+       LoaderTable registers the loader yet.
+     `RacingCar` is whole in `race.h`.
+   - **The sixth slice is Car's calls out**, in `carrace.c`:
+     `GetDistanceAndSpeed`, `FixBlownTires`, `TriggerTireBlowOut`,
+     `PleaseResetMeLater`, `GetDrivingLineSpeed` and `DeliverMeFromEvil`,
+     with `DynamicCollisionBody::GetDistanceAndSpeed` in
+     `carcollisionbody.c`. `carmode_check` runs them after the steps: 35,602
+     lines, 0 differ, and all 43 of the slice's mutations are caught. Car
+     is 61 of 80 methods. Five calls are seams in `car.h`:
+     - the cop manager, the AI's controller and the DeliveryMover, which
+       abort if reached unset (task 26);
+     - `TriggerEffect` and `BaseCarSound::TriggerTireBlowOut`, which are
+       skipped (tasks 27 and 29).
+   - **The seventh slice is Car's terrain effects**, in `careffects.c`:
+     `TriggerCarTerrainEffects` (`0x00131db8`, 1872 bytes), the skid
+     smoke, tire spew, drive-over, bottom-out, splash, damage smoke, nitro
+     and flat-tire effects. `carmode_check` runs 54 cases after the sixth
+     slice's: 35,875 lines, 0 differ. Of its 107 mutations, 104 are caught
+     and 3 are equivalent. Car is 62 of 80 methods, 10448 of 22876 bytes.
+     `BaseCarSound::TriggerSplash` is a new seam, skipped when NULL (task
+     29).
+   - **One finding, fixed:** Car's `NumTimesSkidding` is `unsigned
+     char[4]` (stab `ar1;0;3;11`), a count a wheel, and not one
+     `int32_t`. The offset did not move, and every checker still gives 0
+     differ.
+   - Apart from that, the checks found no disagreement between the image
+     and the port.
+   - **The eighth slice is the clock object**, in `realtime.c`: the video
+     mode, the real clock and the world clock (`0x001992a0` ..
+     `0x001995d8`), and all eighteen globals at `0x00323cc8` ..
+     `0x00323d0c` with the image's initial values. `WorldTimer`,
+     `WorldTimeElapsed`, `WorldLoopCounter` and `RealTimeElapsed` moved
+     there from `engine.c`, `drivetrain.c`, `world.c` and `cammover.c`.
+     Harnesses that do not link `realtime.c` define the ones they read.
+     `main.c` drives both clocks the way MainLoop does with no race.
+     `realtime_check` is new: 20 scenarios, 1,044 ops, 3,470 lines, 0
+     differ. Of its 86 mutations, 84 are caught and 2 are equivalent.
+     NTSC's ceiling is `0x3d4cccce`, one ulp above 0.05f. Written up in
+     `docs/formats/realtime.md`. `WorldTimeDoSnapshot` waits on
+     ReplaySnapshot.
+   - **The ninth slice is VClip**, in `vclip.{c,h}`: all of `VClip.obj`
+     (`0x001c5d90` .. `0x001ca008`, 54 functions) but `DoSnapshot`, which
+     waits on ReplaySnapshot. That is the polyhedron and its Voronoi
+     planes, the feature codes and memory images, the transform, the
+     three clips, the five checks and the walk. The Caffeine plots go
+     through the new `espresso.{c,h}` seams, which abort if reached
+     unset. `gEspSetObjectPositionFn` is defined there now, so
+     `carmode_check` links `espresso.c`. `vclip_check` is new: 47
+     scenarios, 11,890 ops, 22,389 lines, 0 differ, over 2,001 VClips
+     and 938 single checks. Of its 281 mutations, 280 are caught and 1 is
+     equivalent, with 0 unexplained. Written up in
+     `docs/formats/vclip.md`.
+   - **The tenth slice is `polyhedra.cpp`**, in `polyhedra.{c,h}`: all of
+     `0x00205058` .. `0x00206440`, the polyhedra the collision bodies hand
+     to VClip. That is the Rect and Cube boxes, `WaferPolyhedron::Init`
+     for a track polygon, the loader and unloader for chunk `0x80034020`'s
+     collision volumes, `FindPipelinePolyhedron`, `MoveCenterOfGravity`,
+     the list's globals, and the four debug tests nothing calls.
+     `polyhedra_check` is new: 55 scenarios, 15,907 ops, 64,560 lines, 0
+     differ, over all 15,708 of TRACKB12's polygons and all 43 volumes on
+     the disc. Of its 184 mutations, 172 are caught and 12 are equivalent,
+     with 0 unexplained. No disagreement between the image and the port
+     was found. Written up in `docs/formats/polyhedra.md`.
+   - **The eleventh slice is the bodies that do not move**, the first part
+     of `CollisionBody.obj`, in `collisionbody.{c,h}`. That is the
+     NumberAllocator, `Init/CloseCollisionBody`, the stats, the base
+     class with its list sorted on BBoxMax.x, StaticCollisionBody and its
+     twenty-two methods, TrackPolygonCollisionBody, the witness's
+     constructor, destructor and bookkeeping, the three tables, and the
+     static initialiser and destructor. Car's two CarCollisionBody
+     methods moved to `carcollisionbody.c`, because they need car.h and
+     the movers. `collisionbody_check` is new: 21 scenarios, 743 ops,
+     2,945 lines, 39 dumps, 0 differ, with track-polygon bodies on seven
+     TRACKB12 polygons. Of its 184 mutations, 175 are caught and 9 are
+     equivalent, with 0 unexplained. No disagreement between the image and
+     the port was found. Written up in `docs/formats/collision-body.md`.
+   - **The twelfth slice is DynamicCollisionBody**, the second part of
+     `CollisionBody.obj`, in `collisionbody.{c,h}`: the constructor and
+     destructor, the bounding volumes, UpdatePosition, BeginMove, the two
+     interpolations and Backup, the RigidBody and PhysicsSystem
+     pass-throughs, GetLocalCollisionBodies, MaybeCreateWitnesses,
+     CreateTrackPolygonCollisionBodies, TrackPolygonCheck, the inline
+     methods and its table. `collisionbody_check` runs it on bodies whose
+     four pure slots are logging stubs: 39 scenarios, 1,039 ops, 8,733
+     lines, 60 dumps, 0 differ. Of its 329 mutations, 318 are caught
+     and 11 are equivalent, with 0 unexplained. No disagreement between
+     the image and the port was found. Written up in `collision-body.md`.
+   - **The thirteenth slice is CarCollisionBody**, the third part of
+     `CollisionBody.obj`, in `carcollisionbody.c`. That is its
+     constructor and destructor, the getters, Move, ApplyImpulse,
+     AddDamage, AnimateCollisionReaction, AreCollisionsEnabled, the mass
+     and inertia, IsBlinking, the constants, the inline accessors and
+     its table. RaceCoordinator's pointer, state and IsReplayDemoMode
+     are in `race.c`. The damage, the pursuit, the driver's animation,
+     the rumble and the force feedback are five seams, and `main.c` sets
+     none of them. `collisionbody_check` runs it on stand-in Cars: 55
+     scenarios, 1,211 ops, 30,218 lines, 73 dumps, 0 differ. Of its 483
+     mutations, 462 are caught and 21 are equivalent, with 0
+     unexplained. No disagreement between the image and the port was
+     found. The port's AI demo test overflowed an int32 at INT_MIN, and
+     it subtracts unsigned now, as the image does. Written up in
+     `collision-body.md`.
+   - **The fourteenth and fifteenth slices are the contacts**, the rest
+     of `CollisionBody.obj`, in `contact.c`: InitContact and CloseContact,
+     RemoveContacts, the sort and `bList::AddSorted`, all of Contact
+     (FindContactTime, Crowbar, Resolve, the contact point and normal,
+     CollisionImpulse and the rest), and the witness's FindWaferNormal,
+     GetCollision, BeginCollision and TestForContact. They were done
+     together because TestForContact builds a Contact. `Collision`'s
+     constructor and AddImpulse are the seams `gCollisionNewFn` and
+     `gCollisionAddImpulseFn`, which abort if reached unset, and nothing
+     sets them yet. `collisionbody_check` runs the contacts on E0..E3,
+     bodies whose nineteen contact slots are logging stubs: 81 scenarios,
+     1,572 ops, 35,426 lines, 89 dumps, 0 differ. Of its 646 mutations,
+     622 are caught and 24 are equivalent, with 0 unexplained. No
+     disagreement between the image and the port was found. Written up in
+     `collision-body.md`.
+
+   Things to know before the next slice:
+   - **Nothing calls it on hardware yet.** The port has no `LoaderTable`,
+     so only the checker reaches `track_loader_geometry`. The `InitTree`
+     call in `EndGameFlowLoadingTrackSpecific` (`0x0016461c`) is not wired
+     either. Those two are what will make the surface live. Car.obj's
+     `SetInterestBBox(bVector3)` wrapper (`0x00134f28`) is ported now.
+   - **`chunk_loader_table.py` misses five of LoaderTrackGeometry's seven
+     types**: `0x34146`, and `0x34130`..`0x34133`, which go through the
+     tail call into TopologyTree::Loader. `bchunk.md` explains the two
+     causes. Trust `topology.md`'s list over the tool's.
+   - **`NumUpsideDownTrackPolygons` holds (placed) minus (vertical)**, which
+     is the total for an all-floor build. Nothing in Track.obj reads it back.
+     Check any reader outside it.
+   - **`WorldTimer` is set per step case** in `carmode_check` (`mv(now=)`,
+     W by default). The blink tail's sentinels only show with a clock a
+     quarter second past them.
+   - **A mutation pattern replaces its first match.** If the pattern is
+     also in a comment above the code, the mutant edits the comment and
+     survives. Two of the step's did that. Spell a pattern so it only
+     matches code.
+   - **The rest of Car** is 18 methods, and every one reaches a class
+     that is not ported: the constructor and destructor, `FinishMovement`
+     (Collision, the Player's zones, the replay, Race), `TriggerEvents`
+     (the ferns, the event manager, `Player::TriggerVisibleDrivingLine`),
+     the AnimatedDriver pair, the damage, render and force-feedback
+     groups, and `DoSnapshot`. `car.md` lists them.
+   - **Two clocks are still apart from the clock object.** `gameflow.c`
+     keeps its own in the flow's record (`bgf_advance_time`), and
+     `main.c`'s `uiTimer` drives the scrolling textures. Both tick at the
+     same 1/60. Fold them in when the flow's MainLoop is.
+   - **A walk hides its steps.** VClip settles on the same closest pair
+     whichever way one step goes, so 21 mutants of the checks and clips
+     survived every whole-walk scenario. `OP_CHECK` runs one check on its
+     own, set up the way VClip sets it up, and the single-step scenarios
+     kill all 21. Build each survivor's harness once and run candidate
+     scripts through it without the emulator; that finds a killing
+     family in seconds. The model then confirms it.
+   - **`hostbuild` failed a link with every object cached** under msys2
+     ("compile failed (msys2 bash)" with no diagnostic). It treated
+     "nothing to compile" as failure. Fixed in `_build_cached`.
+   - **mipsemu zero-extends a call's arguments.** Pass anything the image
+     reads as signed through `s32` first. Find of a hash with the top bit
+     set missed in the model until `polyhedra_check` did.
+   - **A disc container only loads at its own 16-byte residue.** The
+     pipeline laid each array's pad out for where the container lies, and
+     the loader just rounds up. A copy moved anywhere else has to be
+     repacked first; `polyhedra_check` has the code.
+   - **Run a long `--mutate` with `python -u`** when its output goes to a
+     file, or nothing shows until it ends. A background shell's timeout
+     did not stop one either. Keep a copy of any untracked source a pass
+     edits, in case the run dies mid-mutant.
+   - **A guard the image does not have needs its own case.** The image
+     calls PortRumbleImpact and StartForceImpact with no test, so the
+     model always calls them, and the harness always set both seams.
+     The port's NULL tests never ran until `G_SEAMS` left the seams
+     NULL and quieted the model's two stubs.
+   - **A length only shows its sum's order off a tie.** Every impulse
+     in the first script summed exactly. (4.5, 0.1, 0.2) sums to
+     different floats the two ways, and the difference survives the
+     root. A quick search over float32 finds such a triple.
+   - **Two of Init's allocations are short, and the image reads past
+     both.** The NumberAllocator takes `n >> 3` bytes, so IDs 200 to 205
+     are in a twenty-sixth byte, and the witness bit field is 5304 bytes
+     for 42,436 bits. On the console both land in bMalloc's round-up.
+     The port asks for the byte more (`COLLISIONBODY_SHORT_SLACK`).
+   - **A witness never joins a body with a negative ID, or a body to
+     itself.** The pair bit `ID1 * 206 + ID2` would land before the
+     field, and the witness's last destructor would destroy a track body
+     twice. The game converts a virgin smokeable (ID `~index`) before it
+     builds a witness. A script that does either reads junk on the host.
+   - **A mutant that breaks the body list hangs the harness.**
+     `collisionbody_check`'s timeout is 30 s now, not 300. The first pass
+     ran with 300, and the hung harnesses were killed by hand after 30 s.
+   - **An equivalence has to hold for what is printed, not just for the
+     state.** The pair bits are symmetric, but DoesWitnessExist answers
+     the masked byte, so swapping the order was caught although it was
+     listed as equivalent. Every checker's tally now counts the
+     equivalents that survived, and fails on one whose mutant was caught
+     or that names no mutation. Eighteen of them printed the list's size
+     until this session; every mutation pass was rerun whole after the
+     change, with no stale entry and 0 unexplained.
+   - **A dot product's order only shows at a tie.** The script's values
+     summed exactly, so both association mutants of TrackPolygonCheck
+     survived. Put a compare one rounding away from its tie: 1.5 plus two
+     of -2^-24 is 1.5 added one way and just under it the other.
+   - **`MaxCollisionBodyWidthX` can be below a body's width.** When the
+     widest body narrows, the recount leaves it out, and MaybeCreateWitnesses'
+     walk then stops short of it.
+   - **CollisionImpulse divides by the slide**, and a car dropped straight
+     onto flat ground has none. The EE's −0 / 0 is FLT_MAX, which the zero
+     slide then makes 0; IEEE's is NaN, which would reach both bodies. The
+     port calls `ee_div` there, and `collisionbody_check` runs mipsemu with
+     `eediv` and stops if any other division sees a zero.
+   - **A stamp only shows if a dump comes before the next one.** Two of the
+     contacts' survivors had their case in the script, but the test after
+     it stamped the same body again before any dump. The same thing hid
+     the car count's highest in slice C.
+   - **Next is the rest of the collision system**, which `FinishMovement`
+     needs:
+     - `Collision`, from `0x0020b290`. It fills the two seams above;
+     - `World`'s timestep, from `0x0014a4e8`, with DoTimestepCollisions
+       (`0x0014b110`), which asks the witnesses for contacts and resolves
+       them.
+     After that come the track's rendering and streaming.
+   - **The 3DS build compiles every file so far.** `tools/build_cia.ps1`
+     built the CIA, 315,328 bytes, with the whole of `contact.c` in it.
+     Nothing on the boot path calls it yet, so the size did not move.
+
+2. **Task 26's second slice is closed: `TrackedController` and
    `RealController`**, which is what builds a RealDriver, with
    `DriveTargetRenderer`'s flag-off path. `gRealControllerCtorFn` is set at
    boot and `REALCONTROLLER_SIZE` is `sizeof`. See
@@ -125,6 +404,13 @@ and so replaced every boot.
      both had it the other way round, so they agreed with each other. Both
      are fixed, and the `fi` fixtures were re-derived. See "What not to
      trust" and `car-drive-target.md`.
+   - **`drivetarget_image_check` then found a second one.** Above 1 m/s
+     StraightLinePredict normalises the velocity inline on VU0, and the
+     last multiply is `.xyzw`: the pad lane is divided by the length too.
+     Port and model both copied it across unscaled. Fixed on both sides;
+     `fn slp divide` and two new mutants cover it. The image checker runs
+     every DriveTarget method in mipsemu with the model's scenarios, and
+     both passes come out 262 mutations, 243 caught, 19 equivalent.
    - **A predicted point's pad is garbage on the console**:
      `GetPosition(bVector3)` stores a VU0 lane it never set. It is not
      compared (STACK-W).
@@ -445,19 +731,17 @@ and so replaced every boot.
    two ordinary `jal`s.
 
    The HUD split is settled, below.
-2. Then in order: 26 race/cop AI, 27 track render/stream/collision,
+3. Then in order: 26 race/cop AI, 27 track render/stream/collision,
    28 New3DS perf, 29 save/options/sound mix, 30 split-screen scope,
    31 final CIA + Old3DS/New3DS pass.
-3. **`QuickSpline.obj` (`0x00227e98`) is owed to task 24 and belongs to
-   task 27.** `trackroute.c` is diffed but cannot be run for real without
-   it: `TrackPathCoordinate::UpdatePosition` (`0x1f5dd0`) is the stub that
-   turns a world position into a distance around the track, and
-   `SetFirstAndLastPoints`, `Signpost::SetDistances` and
-   `TestSignpostConsistency` all go through it. `gTrackPathDistanceFn` is
-   the seam -- `NULL` on hardware, a closed-form ramp in the harness. Port
-   `QuickSpline`, point the seam at it, and those three become live.
-   The CM_TRACK_* movers `cammover.c` left out want the same thing.
-4. Whenever a screen class gets ported, take its row in `kScreens[]` off
+4. **`QuickSpline.obj` is ported** (Session 29, continued), which pays
+   task 24's debt. `TrackPathCoordinate::UpdatePosition` now measures
+   through the spline, so `SetFirstAndLastPoints`, `Signpost::SetDistances`
+   and `TestSignpostConsistency` run for real. `gTrackPathDistanceFn` is
+   now only `trackroute_check`'s closed form, and it is `NULL` on
+   hardware. `cammover.c` still leaves out the CM_TRACK_CAR and
+   CM_TRACK_FLY movers, which needed the spline too.
+5. Whenever a screen class gets ported, take its row in `kScreens[]` off
    `bgf_plain_screen_callback`. Ten of the eighteen are on it -- they draw
    and answer the D-pad and nothing else -- and
    `python tools/screen_registry.py --check-port` lists them, along with
@@ -488,15 +772,18 @@ Ordered roughly by how much time it costs to rediscover.
   negated. The two agreed, and the checker's own `fi-dominates-flipped`
   mutant was "caught" against the wrong answer. Only running the image
   (`realcontroller_check`) showed it. The image-backed checkers are
-  airoute, average, car, carmode, joystick, mellowmover, physicscar,
-  quickspline, realcontroller, realdriver and trackpath. Every other
+  airoute, average, car, carmode, drivetarget_image, joystick,
+  mellowmover, physicscar, quickspline, realcontroller, realdriver and
+  trackpath. Every other
   `*_check.py` compares against a Python model, which includes most of
   task 25: carstate, engine, cartypeinfo, cardriver, steering, rigidbody,
-  suspension, wheel, drivetrain, drivetarget, graph, physicssystem,
+  suspension, wheel, drivetrain, graph, physicssystem,
   aerodynamics and physcomp. car_check, physicscar_check and
   mellowmover_check do run the image's copies of some of those beneath
   them, but only as far as their scenarios reach. A model-only pass is
   evidence that two readings agree, not that either matches the console.
+  DriveTarget did it twice (the Fill test, then StraightLinePredict's pad
+  lane) before `drivetarget_image_check` took the model out of the oracle.
 * **A scenario that hands a mover the Car's own CarState cannot tell
   `State` from `pCar->State`.** MellowMover reads each in different
   places. In the game they are the same object, so a port that mixed

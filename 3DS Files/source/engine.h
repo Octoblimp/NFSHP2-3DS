@@ -139,9 +139,9 @@ typedef char engine_size_check[
 
 // WorldTimer, the image's global tick counter (gp-20224), an int32 running
 // at 4000 Hz -- DecrementNitro scales it by 0.00025 to get seconds. The
-// object that owns the clock is not ported yet, so the port keeps its own
-// copy and the harness drives it directly.
-extern int32_t WorldTimer;
+// clock object owns it (realtime.c). A harness that does not link the clock
+// defines its own and drives it directly.
+#include "realtime.h"
 
 // 0x001823d8. Builds the two Tables over IdleRPM..MaxRPM, stores the two
 // pointers, and sets ThrottleOverride and CatchupTorqueMultiplier to 1.

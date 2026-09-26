@@ -3,9 +3,6 @@
 #include "engine.h"
 #include "carstate.h"
 
-// gp-20224. The image's 4000 Hz tick. Its real owner is not ported yet.
-int32_t WorldTimer = 0;
-
 // gp-30428, 0x3983126f. Seconds per WorldTimer tick.
 #define WORLD_TICK_SECONDS 0.000250000012f
 

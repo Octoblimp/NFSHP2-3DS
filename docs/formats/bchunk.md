@@ -71,7 +71,7 @@ python tools/chunk_loader_table.py "PS2 Files/NFSHP2.ELF"
 | `0x80034100` | `LoaderScenery`           | container |
 | `0x00034121` | `LoaderTrackRoutes`       | Phase 3 task 24; also takes `0x00034122` |
 | `0x80034147` | `LoaderTrackPath`         | container |
-| `0x00034200` | `LoaderTrackGeometry`     | also takes `0x00034201` |
+| `0x00034200` | `LoaderTrackGeometry`     | also takes `0x00034201`, `0x00034146` and, through `TopologyTree::Loader`, `0x00034130`..`0x00034133` -- the tool reports the first two only; see below and `topology.md` |
 | `0x00034202` | `LoaderSun`               | |
 | `0x00034250` | `LoaderWeatherMan`        | |
 | `0x00034301` | `LoaderCharacterInfo`     | |
@@ -108,6 +108,22 @@ modelled to get this right:
   the next guard is read. Without that, `LoaderFontInfo`'s `addiu v0,zero,1`
   overwrites the `lui v0,0x0001` belonging to the next comparison and
   `0x00015010` reads out as `0x00000001`.
+
+It still misses five types, all `LoaderTrackGeometry`'s (`0x00150660`),
+for two reasons:
+
+* **`0x00034146`, the position markers.** Its `lui` sits in the delay slot
+  at `0x001506a0` and its `ori` at `0x001506ec`, after a `lw v1,4(a1)`
+  (the size) that takes over the register holding the type. The rollback
+  restores the constants but not which register holds the type, so by the
+  time the compare comes the tool has lost track of it.
+* **`0x00034130`..`0x00034133`, the topology's four chunks.** Once its own
+  three guards fail, the loader tail-calls `TopologyTree::Loader`
+  (`jal 0x0014fc78` at `0x00150754`, `a0` = `&TheTopologyTree`). The tool
+  follows a `jal` only out of a loader that has matched nothing so far.
+
+Fixing the rollback for the first broke `LoaderTrackPath`, so the tool was
+left as it is. `topology.md` has the seven types from the listing.
 
 The one that mattered: **fonts are `0x00015010`, not `0x00030200`.**
 `LoaderFontInfo` takes `0x00030200` and returns 1 without doing anything --

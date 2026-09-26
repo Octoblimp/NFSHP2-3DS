@@ -16,6 +16,12 @@
 #include "cammover.h"
 #include "emath.h"
 
+// The clock object's frame step, which the orbit mover's Update thunk reads.
+// Defined here rather than linked from realtime.c, which would bring the
+// joylog in behind it, and a sixtieth as the mover's own file used to have
+// it.
+float RealTimeElapsed = 1.0f / 60.0f;
+
 // ------------------------------------------------------------------- output
 
 // All four lanes. The camera's three vectors are bVector3, which is a padded

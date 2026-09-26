@@ -6,9 +6,9 @@
 //
 //     realcontroller_test ops.bin > out.txt
 //
-// The two world clocks and the frame counter are defined here rather than
-// linked from engine.c and drivetrain.c, for the reason car_test.c gives:
-// those drag the rest of the car in behind them.
+// The world clock's globals are defined here rather than linked from
+// realtime.c, which would bring the joylog in behind it. The loop counter
+// starts at the image's 100000.
 
 #include <stddef.h>
 #include <stdint.h>
@@ -39,6 +39,7 @@
 int32_t WorldTimer;
 int32_t WorldTimeFrames;
 float   WorldTimeElapsed;
+int32_t WorldLoopCounter = 100000;
 
 enum {
     OP_TAG, OP_CLEAR, OP_WORDS, OP_ROUTE, OP_SIGNS, OP_RESET, OP_ADD,

@@ -62,9 +62,6 @@ float   gClutchLimiter          = 300.0f;          // 0x43960000
 float   gClutchMatchedThreshold = 50.0f;           // 0x42480000
 float   gMaxDownShiftOver       = 1.10000002f;     // 0x3f8ccccd
 
-// 0x00323d00. Zero in the image; the frame loop writes it.
-float   WorldTimeElapsed        = 0.0f;
-
 // ----------------------------------------------------------- the free one
 
 void drivetrain_calculate_shift_points(const DriveTrainInfo *dti,

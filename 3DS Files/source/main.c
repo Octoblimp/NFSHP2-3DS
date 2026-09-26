@@ -50,6 +50,8 @@
 #include "carcontroller.h"
 #include "cardriver.h"
 #include "carmodes.h"
+#include "carstate.h"
+#include "collisionbody.h"
 #include "gamedata.h"
 #include "fesound.h"
 #include "gameflow.h"
@@ -68,6 +70,9 @@
 #include "realdriver.h"
 #include "realtime.h"
 #include "sinit.h"
+#include "terraintype.h"
+#include "topology.h"
+#include "track.h"
 #include "uirender.h"
 #include "wheel.h"
 
@@ -1119,6 +1124,22 @@ static void drawBotPanel(UIRenderer* ui, const char* title, const char* body,
                               boxW, 1.0f);
 }
 
+// Wheel and MellowMover ask for the ground through a seam shaped for the
+// four arguments they pass. GetElevation's fifth, the `bool *`, is NULL at
+// every one of their call sites (`move t0,zero`), so it is NULL here too.
+static float topologyElevation(void* tc, const bVector3* pos,
+                               int32_t* terrain, bVector3* normal)
+{
+    return topology_get_elevation((TopologyCoordinate*)tc, pos, terrain,
+                                  normal, NULL);
+}
+
+// CheckTerrain's topology is the CarState's, which wheel.c holds untyped.
+static void* topologyOfCarState(void* cs)
+{
+    return ((CarState*)cs)->pTopologyCoordinate;
+}
+
 int main(int argc, char** argv)
 {
     (void)argc; (void)argv;
@@ -1148,15 +1169,34 @@ int main(int argc, char** argv)
     realcontroller_install_vtables();
     cardriver_install_vtables();
     realdriver_install_vtable();
+    collisionbody_install_vtables();
+    carcollisionbody_install_vtable();
 
     // Car::SetControlMode reaches the controllers task 26 brings through
     // seams; a NULL one is a class not ported yet, and the arm aborts.
     gRealControllerCtorFn = realcontroller_construct;
 
+    // RealDriver's reset button puts the car back on its route through
+    // Car::ResetToRoutePoint, which carreset.c has ported since task 27's
+    // third slice. Left NULL, the button did nothing.
+    gCarResetToRoutePointFn = car_reset_to_route_point;
+
     // The two calls Suspension makes into Wheel go through pointers, left
     // NULL until something says Wheel is linked -- which, in the game,
     // it always is.
     wheel_install_seams();
+
+    // Track.obj and TerrainType.obj are ported, so the ground queries
+    // Wheel and MellowMover make go to the real TopologyCoordinate, and
+    // their friction and road noise to the real terrain table. The tree
+    // has to hold a track's chunks before anything asks -- GetSquare walks
+    // the node table unguarded, in the image as here -- and in the game
+    // nothing drives before EndGameFlowLoadingTrackSpecific has loaded
+    // one and called InitTree (0x0016461c).
+    gTerrainTypeInfoTable      = TerrainTypeInfoTable;
+    gTerrainRoadNoiseFn        = track_get_road_noise;
+    gTopologyGetElevationFn    = topologyElevation;
+    gWheelTopologyOfCarStateFn = topologyOfCarState;
 
     // The joystick layer: the ring of pad reads, the type monitor and the
     // event-node pool (so after sinit_run, which brings the pool manager
@@ -1387,6 +1427,7 @@ int main(int argc, char** argv)
     // advanced exactly as gameflow.c:321 advances that one.
     uint32_t uiTimer = 0;
     int32_t  joyType = -1;
+    bool     clockStarted = false;
 
     while (aptMainLoop()) {
         hidScanInput();
@@ -1399,12 +1440,25 @@ int main(int argc, char** argv)
         uiTimer += (uint32_t)(int)(BOOT_DT * 4000.0f);
         uirender_set_time(&ui, (float)uiTimer * 0.00025f);
 
-        // The PS2 reads the pads from its vertical-blank interrupt; here it
-        // is once a frame, after the HID scan the read is built from. The
-        // joystick's clocks are the UI's, which ticks in every mode, and a
-        // count of this loop.
+        // MainLoop's clocks (0x0012dbd0). It prepares the real step at the
+        // top of a frame from the ticker, and the world's from the real one
+        // when there is no race, as there is not yet here. It advances both
+        // at the frame's end (0x0012de70), which here is the top of the
+        // next one. The ticker's measure is BOOT_DT, since the display is
+        // vsynced. FrameCounter is the PS2's vertical-blank count, and so
+        // one a frame.
+        if (clockStarted) {
+            AdvanceRealTime();
+            AdvanceWorldTime();
+        }
+        clockStarted = true;
         FrameCounter++;
-        RealTimer = (int32_t)uiTimer;
+        PrepareRealTimestep(BOOT_DT);
+        PrepareWorldTimestep(RealTimeElapsed);
+
+        // The PS2 reads the pads from its vertical-blank interrupt; here it
+        // is once a frame, after the HID scan the read is built from, and
+        // after the clocks, as GenerateJoyEvents is in MainLoop.
         ReadJoystickData();
         GenerateJoyEvents();
         if (GetJoystickType(0) != joyType) {

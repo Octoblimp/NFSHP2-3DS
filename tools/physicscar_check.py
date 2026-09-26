@@ -2790,6 +2790,7 @@ def mutate_pass():
     base = model(ctis)
     caught = 0
     survived = []
+    equivalent = []
     missing = []
 
     for m in MUTATIONS:
@@ -2831,6 +2832,7 @@ def mutate_pass():
                     caught += 1
                 elif name in EQUIVALENT:
                     print("  %-44s survived, equivalent by construction" % name)
+                    equivalent.append(name)
                 else:
                     print("  %-44s SURVIVED" % name)
                     survived.append(name)
@@ -2844,12 +2846,19 @@ def mutate_pass():
 
     real = [m for m in MUTATIONS if m[0] not in missing]
     holes = [s for s in survived if s not in EQUIVALENT]
+    # An entry whose mutant was caught is a wrong reason, not a spare one.
+    stale = [n for n in EQUIVALENT
+             if n not in equivalent and n not in missing]
     if missing:
         print("%d PATTERN NOT FOUND -- the tally above is over %d of %d"
               % (len(missing), len(real), len(MUTATIONS)))
     print("%d mutations, %d caught, %d equivalent, %d unexplained"
-          % (len(real), caught, len(EQUIVALENT), len(holes)))
-    return 1 if (holes or missing) else 0
+          % (len(real), caught, len(equivalent), len(holes)))
+    for name in stale:
+        ran = any(m[0] == name for m in MUTATIONS)
+        print("  listed as equivalent but %s: %s"
+              % ("caught" if ran else "names no mutation", name))
+    return 1 if (holes or missing or stale) else 0
 
 
 def main():

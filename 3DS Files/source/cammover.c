@@ -18,10 +18,6 @@ uint16_t OrbitTweakOrbitFOV = 8000;
 
 bVector3 OrbitBoomOffset = { 0.0f, 0.0f, 0.0f, 0.0f };
 
-// 0x323cdc. The disc's frame delta in seconds, which Update reads directly
-// and hands to SetCameraMatrix. The port's main loop writes it.
-float RealTimeElapsed = 1.0f / 60.0f;
-
 static const char *const MOVER_NAMES[] = {
     "CM_NONE", "CM_DRIVE", "CM_DEBUG_WORLD", "CM_TRACK_ROUTE_EDITOR",
     "CM_ORBIT_CAR", "CM_BUMPER", "CM_REAR_VIEW_MIRROR", "CM_TRACK_CAR",

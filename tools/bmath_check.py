@@ -801,7 +801,7 @@ def mutate_pass():
         print("base already differs -- fix that before mutating")
         return 1
 
-    survived, missing, caught = [], [], 0
+    survived, missing, equivalent, caught = [], [], [], 0
     for name, rel, before, after in MUTATIONS:
         path = hostbuild.ROOT / rel
         text = path.read_text(encoding="utf-8", newline="")
@@ -837,6 +837,7 @@ def mutate_pass():
                 caught += 1
             elif name in EQUIVALENT:
                 print("  %-28s survived, equivalent by construction" % name)
+                equivalent.append(name)
             else:
                 print("  %-28s SURVIVED" % name)
                 survived.append(name)
@@ -849,14 +850,21 @@ def mutate_pass():
 
     real = [m for m in MUTATIONS if m[0] not in missing]
     holes = [x for x in survived if x not in EQUIVALENT]
+    # An entry whose mutant was caught is a wrong reason, not a spare one.
+    stale = [n for n in EQUIVALENT
+             if n not in equivalent and n not in missing]
     if missing:
         print("%d PATTERN NOT FOUND -- the tally below is over %d of %d"
               % (len(missing), len(real), len(MUTATIONS)))
     print("%d mutations, %d caught, %d equivalent, %d unexplained"
-          % (len(real), caught, len(EQUIVALENT), len(holes)))
+          % (len(real), caught, len(equivalent), len(holes)))
     for x in holes:
         print("  unexplained: %s" % x)
-    return 1 if (holes or missing) else 0
+    for name in stale:
+        ran = any(m[0] == name for m in MUTATIONS)
+        print("  listed as equivalent but %s: %s"
+              % ("caught" if ran else "names no mutation", name))
+    return 1 if (holes or missing or stale) else 0
 
 
 # ---------------------------------------------------------- an extra sanity net

@@ -98,6 +98,7 @@ SOURCES = [
 ]
 
 WH = "3DS Files/source/wheel.h"
+TT = "3DS Files/source/terraintype.h"
 WC = "3DS Files/source/wheel.c"
 TC = "3DS Files/source/table.c"
 
@@ -1174,9 +1175,11 @@ WHEEL_OFFSETS = [
     ("Wheel.TheSkidMaker", 384, 6),
 ]
 
-# Two pointers over a 140-byte record, and the second lands four bytes past
-# an eight-byte boundary, so it takes a pad of its own on the way past: the
-# slack count climbs 1, 2, 3 rather than 1, 1, 2.
+# Nine pointers over a 140-byte record -- the name, the skid texture and
+# the seven emitter-group names -- and two of them land four bytes past an
+# eight-byte boundary and take a pad of their own on the way past: the
+# slack count climbs 1, 2, 3 to the skid texture, then 4 at the first
+# emitter group and one more past each of the other six, to 11.
 TERRAIN_OFFSETS = [
     ("TerrainTypeInfo.Name", 0, 0),
     ("TerrainTypeInfo.NameHash", 4, 1),
@@ -1187,7 +1190,9 @@ TERRAIN_OFFSETS = [
     ("TerrainTypeInfo.StaticFrictionMultiplier", 28, 3),
     ("TerrainTypeInfo.DynamicFrictionMultiplier", 32, 3),
     ("TerrainTypeInfo.RollingFrictionMultiplier", 36, 3),
-    ("TerrainTypeInfo.CollisionScrapeMaxSpeed", 136, 3),
+    ("TerrainTypeInfo.DriveOverEmitterGroup", 56, 4),
+    ("TerrainTypeInfo.CollisionScrapeEmitterGroup", 128, 10),
+    ("TerrainTypeInfo.CollisionScrapeMaxSpeed", 136, 11),
 ]
 
 
@@ -1208,7 +1213,7 @@ def s_layout():
     emit("sizeof WheelInfo 32")
     emit("sizeof TireInfo 32")
     emit("sizeof ControlInfo 48")
-    tsize = (140 + 3 * SLACK + PTR - 1) // PTR * PTR
+    tsize = (140 + 11 * SLACK + PTR - 1) // PTR * PTR
     emit("sizeof TerrainTypeInfo %d" % tsize)
     emit("sizeof terraininfo expected %d" % tsize)
 
@@ -2305,12 +2310,12 @@ MUTATIONS = [
      + "    float     AppliedTorque;             // 264",
      "    float     AppliedTorque;             // 256" + NL
      + "    float     Slip[2];                   // 260"),
-    ("wh-terraininfo-static-dynamic-swapped", WH,
+    ("wh-terraininfo-static-dynamic-swapped", TT,
      "    float       StaticFrictionMultiplier;    //  28" + NL
      + "    float       DynamicFrictionMultiplier;   //  32",
      "    float       DynamicFrictionMultiplier;   //  28" + NL
      + "    float       StaticFrictionMultiplier;    //  32"),
-    ("wh-terraininfo-no-pad", WH,
+    ("wh-terraininfo-no-pad", TT,
      "    uint8_t     _pad0[2];                    //  14",
      "    uint8_t     _pad0[0];                    //  14"),
 
@@ -2976,6 +2981,7 @@ def mutate_pass():
     base = model()
     caught = 0
     survived = []
+    equivalent = []
     missing = []
 
     for name, rel, before, after in MUTATIONS:
@@ -3008,6 +3014,7 @@ def mutate_pass():
                     caught += 1
                 elif name in EQUIVALENT:
                     print("  %-44s survived, equivalent by construction" % name)
+                    equivalent.append(name)
                 else:
                     print("  %-44s SURVIVED" % name)
                     survived.append(name)
@@ -3021,6 +3028,9 @@ def mutate_pass():
 
     real = [m for m in MUTATIONS if m[0] not in missing]
     holes = [s for s in survived if s not in EQUIVALENT]
+    # An entry whose mutant was caught is a wrong reason, not a spare one.
+    stale = [n for n in EQUIVALENT
+             if n not in equivalent and n not in missing]
     unexpected = [m for m in missing if m not in EXPECT_MISSING]
     # A pattern that is not found is dropped from the denominator above, so
     # without this the tally line reads clean while a mutation never ran.
@@ -3028,8 +3038,12 @@ def mutate_pass():
         print("%d PATTERN NOT FOUND -- the tally above is over %d of %d"
               % (len(missing), len(real), len(MUTATIONS)))
     print("%d mutations, %d caught, %d equivalent, %d unexplained"
-          % (len(real), caught, len(EQUIVALENT), len(holes)))
-    return 1 if (holes or unexpected) else 0
+          % (len(real), caught, len(equivalent), len(holes)))
+    for name in stale:
+        ran = any(m[0] == name for m in MUTATIONS)
+        print("  listed as equivalent but %s: %s"
+              % ("caught" if ran else "names no mutation", name))
+    return 1 if (holes or unexpected or stale) else 0
 
 
 def main():

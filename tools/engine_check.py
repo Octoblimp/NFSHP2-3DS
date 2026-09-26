@@ -943,7 +943,7 @@ write_source = hostbuild.write_source
 
 def mutate_pass():
     base_model = model()
-    survived, missing, caught = [], [], 0
+    survived, missing, equivalent, caught = [], [], [], 0
 
     with tempfile.TemporaryDirectory() as tmp:
         exe = hostbuild.build(tmp, SOURCES, name="engine_test")
@@ -989,6 +989,7 @@ def mutate_pass():
                 elif name in EQUIVALENT:
                     print("  %-32s survived, equivalent by construction"
                           % name)
+                    equivalent.append(name)
                 else:
                     print("  %-32s SURVIVED" % name)
                     survived.append(name)
@@ -1002,14 +1003,21 @@ def mutate_pass():
 
     real = [m for m in MUTATIONS if m[0] not in missing]
     holes = [s for s in survived if s not in EQUIVALENT]
+    # An entry whose mutant was caught is a wrong reason, not a spare one.
+    stale = [n for n in EQUIVALENT
+             if n not in equivalent and n not in missing]
     # A pattern that is not found is dropped from the denominator above, so
     # without this the tally line reads clean while a mutation never ran.
     if missing:
         print("%d PATTERN NOT FOUND -- the tally above is over %d of %d"
               % (len(missing), len(real), len(MUTATIONS)))
     print("%d mutations, %d caught, %d equivalent, %d unexplained"
-          % (len(real), caught, len(EQUIVALENT), len(holes)))
-    return 1 if (holes or missing) else 0
+          % (len(real), caught, len(equivalent), len(holes)))
+    for name in stale:
+        ran = any(m[0] == name for m in MUTATIONS)
+        print("  listed as equivalent but %s: %s"
+              % ("caught" if ran else "names no mutation", name))
+    return 1 if (holes or missing or stale) else 0
 
 
 def main():

@@ -2811,9 +2811,8 @@ MUTATIONS = [
     ("g-max-down-shift-over", DC,
      "float   gMaxDownShiftOver       = 1.10000002f;",
      "float   gMaxDownShiftOver       = 1.0f;"),
-    ("g-world-time-nonzero", DC,
-     "float   WorldTimeElapsed        = 0.0f;",
-     "float   WorldTimeElapsed        = 0.0166666675f;"),
+    # WorldTimeElapsed's initial value is realtime.c's now, and
+    # realtime_check's rt-init-welapsed; the harness here defines its own.
 
     # -- the header ----------------------------------------------------
     ("h-rpm-to-rads-rounded", DH,
@@ -2912,6 +2911,7 @@ def mutate_pass():
     base_model = model()
     survived, missing, caught = [], [], 0
     equivalent_survivors = []
+    uncompiled = []
 
     with tempfile.TemporaryDirectory() as tmp:
         exe = hostbuild.build(tmp, SOURCES, name="drivetrain_test")
@@ -2946,6 +2946,7 @@ def mutate_pass():
                 except SystemExit:
                     print("  %-34s did not compile (caught)" % name)
                     caught += 1
+                    uncompiled.append(name)
                     continue
                 out = Path(tmp) / "m.txt"
                 if run_harness(exe, out) != 0:
@@ -2980,6 +2981,12 @@ def mutate_pass():
     # equivalent would make caught + equivalent overshoot the total.
     equiv = [name for name, _, _, _ in MUTATIONS
              if name in EQUIVALENT and name in equivalent_survivors]
+    # Any other entry whose mutant was caught is a wrong reason, not a
+    # spare one. h-slack-is-zero is only judged by a build that took it:
+    # the argument above is for the host where it compiles.
+    stale = [n for n in EQUIVALENT
+             if n not in equivalent_survivors and n not in missing
+             and not (n == "h-slack-is-zero" and n in uncompiled)]
     # A pattern that is not found is dropped from the denominator above, so
     # without this the tally line reads clean while a mutation never ran.
     if missing:
@@ -2987,7 +2994,11 @@ def mutate_pass():
               % (len(missing), len(real), len(MUTATIONS)))
     print("%d mutations, %d caught, %d equivalent, %d unexplained"
           % (len(real), caught, len(equiv), len(holes)))
-    return 1 if (holes or missing) else 0
+    for name in stale:
+        ran = any(m[0] == name for m in MUTATIONS)
+        print("  listed as equivalent but %s: %s"
+              % ("caught" if ran else "names no mutation", name))
+    return 1 if (holes or missing or stale) else 0
 
 
 def main():

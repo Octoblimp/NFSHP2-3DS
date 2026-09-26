@@ -52,10 +52,10 @@ typedef char world_layout_check[
 // gp-22624, 0x00323390. NULL until task 26 builds a World.
 extern World *pCurrentWorld;
 
-// gp-20200, 0x00323d08. The world loop's frame count, 100000 in .data
-// (0x000186a0) so that nothing keyed on it sees a small number, and
-// bumped once a world step by World::Update (task 26). RealDriver reads
-// it to space its e-brake replay events eight frames apart.
-extern int32_t WorldLoopCounter;
+// WorldLoopCounter, gp-20200, 0x00323d08: the world loop's step count,
+// 100000 in .sdata (0x000186a0), 0 after ResetWorldTime, and bumped by
+// each AdvanceWorldTime that has a step. The clock object owns it. RealDriver
+// reads it to space its e-brake replay events eight frames apart.
+#include "realtime.h"
 
 #endif

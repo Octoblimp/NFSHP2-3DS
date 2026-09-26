@@ -155,12 +155,23 @@ void ai_straight_line_predict(Car *car, DriveTarget *t)
         dir.z = 0.0f;
         dir.pad = 0.0f;   // STACK-W
     } else {
-        // lqc2 of State.Velocity, so all four lanes go through the VU0
-        // normalise -- including the one CarState calls pad.
-        bVector3 v = car->State.Velocity;
+        // lqc2 of State.Velocity, then an inline VU0 normalise rather than
+        // a call: `vrsqrt Q,vf00w,vf02x` over the three-lane sum and
+        // `vmulx.xyzw` by it. The multiply is all four lanes, so the one
+        // CarState calls pad comes out divided by |v.xyz| too -- it is
+        // not the bNormalize3To it rounds the same as on x, y and z.
+        //
+        // A zero vector would be FLT_MAX on the VU and so a point on the
+        // car. It cannot arrive here: both writers of VelocityMagnitude
+        // take it from this Velocity, so 1 m/s of one is 1 m/s of the
+        // other, and the divide is the plain one.
+        const bVector3 *v = &car->State.Velocity;
+        float q = 1.0f / dt_len3(v->x, v->y, v->z);
 
-        bNormalize3To(&dir, &v, 1.0f);
-        dir.pad = v.pad;
+        dir.x = v->x * q;
+        dir.y = v->y * q;
+        dir.z = v->z * q;
+        dir.pad = v->pad * q;
     }
 
     // vmulx broadcasts the look-ahead over all four lanes and vadd.xyzw

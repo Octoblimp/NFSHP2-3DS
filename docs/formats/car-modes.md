@@ -28,7 +28,7 @@ Ported to:
 
 - `3DS Files/source/carmodes.{c,h}`
 - `carcontroller.{c,h}`
-- `collisionbody.{c,h}`
+- `carcollisionbody.c`, with the layouts in `collisionbody.h`
 - `cardriver.{c,h}`
 
 Cross-checked by `tools/carmode_check.py` against
@@ -297,7 +297,10 @@ It passes that car to `Car::SetToPhysicsMode`, then runs
 
 The whole of `CollisionBody`, `DynamicCollisionBody` and
 `CarCollisionBody` is laid out in `collisionbody.h`, field by field from
-the stabs. The classes themselves belong to task 27.
+the stabs. The classes themselves belong to task 27. Its first slice of
+them, the [bodies that do not move](collision-body.md), is
+`collisionbody.c`. The two methods here are in `carcollisionbody.c`,
+because they need `car.h` and the movers.
 
 ## The cross-check
 
@@ -305,6 +308,11 @@ the stabs. The classes themselves belong to task 27.
 python tools/carmode_check.py            # 74 transitions, 27324 lines, 0 differ
 python tools/carmode_check.py --mutate   # 114 mutations, 114 caught, 0 equivalent
 ```
+
+Those are this slice's figures. Car's reset group, the sixth slice, runs
+in the same checker after the transitions and brings it to 74
+transitions, 19 resets, 32797 lines, 0 differ, and 188 mutations, 185
+caught, 3 equivalent ([car](car.md)).
 
 The model borrows its machinery from `mellowmover_check` and
 `physicscar_check`: the header parse checked against mdebug, the

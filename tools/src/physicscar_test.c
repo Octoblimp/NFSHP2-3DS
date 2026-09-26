@@ -32,8 +32,13 @@
 #include "realdriver.h"
 #include "vtable.h"
 
-// car.c's, and nothing this harness runs reads it.
+// The clock object's globals that the linked files read. Defined here
+// rather than linked from realtime.c, which would bring the joylog in
+// behind it. The tick and the step are the image's 0; nothing this
+// harness runs reads the frame count.
+int32_t WorldTimer = 0;
 int32_t WorldTimeFrames = 0;
+float   WorldTimeElapsed = 0.0f;
 
 // The checker links with --wrap=free, so the destructor's delete can be
 // seen: while g_track_frees is set, every block freed is written down.

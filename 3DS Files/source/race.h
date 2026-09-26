@@ -4,16 +4,25 @@
 // Race is 1716 bytes (.mdebug type#1645) and RaceParameters 768
 // (type#3457); both are task 26's. PhysicsCar::Move reads one word of
 // each -- the race's stage through pCurrentRace, and DamageEnabled through
-// BodyDamage::GetVisibleTotalDamage -- RealDriver reads BeACop and the AI's
-// route search reads TrackDirection, so this declares those four, the two
-// enums, and nothing else. The struct stays incomplete: nothing in
-// the port allocates a Race yet, and a partial layout would invite
-// something to.
+// BodyDamage::GetVisibleTotalDamage -- RealDriver reads BeACop, the AI's
+// route search reads TrackDirection, Car's catchup reads Boost and
+// PleaseResetMeLater BeACop and nMaxCops, so this declares those six, the
+// two enums, RacingCar, and nothing else. Race
+// stays incomplete: nothing in the port allocates one yet, and a partial
+// layout would invite something to.
+//
+// RaceCoordinator (144 bytes, type#4165) is task 26's as well: the state
+// machine above the race, from the flyby to the replays and the demos.
+// A car's collision body asks it which state it is in, so this declares
+// the state, the pointer and the one method, and leaves it incomplete too.
 
 #ifndef RACE_H
 #define RACE_H
 
+#include <stddef.h>
 #include <stdint.h>
+
+#include "timer.h"
 
 // eRaceStage, from the .mdebug enum (the same in every unit that has it).
 typedef int32_t eRaceStage;
@@ -44,6 +53,11 @@ extern int32_t RaceParametersDamageEnabled;
 // InitWithDefaults; the Be A Cop setup screens set it.
 extern int32_t RaceParametersBeACop;
 
+// TheRaceParameters.nMaxCops, 0x0031277c (RaceParameters+604). How many
+// cops the race may have out at once. PleaseResetMeLater compares it
+// signed against 0 (`blez`).
+extern int32_t RaceParametersMaxCops;
+
 // eTrackDirection, from the .mdebug.
 typedef int32_t eTrackDirection;
 #define TRACK_DIRECTION_FORWARD  ((eTrackDirection)0)
@@ -53,5 +67,102 @@ typedef int32_t eTrackDirection;
 // from InitWithDefaults (`sw zero,12(s2)`). GetNearestRoutePoint reads it
 // to tell the traffic that runs with the player from the oncoming.
 extern eTrackDirection RaceParametersTrackDirection;
+
+// TheRaceParameters.Boost, 0x00312804 (RaceParameters+740). Nonzero turns
+// on the two-player catchup: Car::CalculateNewCatchupMultipliers returns
+// before reading anything else when it is 0.
+extern int32_t RaceParametersBoost;
+
+// ------------------------------------------------------------- RacingCar
+
+struct Car;
+
+// 192 bytes, type#1620: one car's standing in the race. Race keeps one per
+// car and Car points at its own at 28. Every field is private in the stab
+// and Race.obj's methods write them; the port only reads
+// CurrentLapNumberExact so far, which is laps done plus the fraction of the
+// current one, and is what the catchup compares.
+//
+// The eight one-byte fields are type 26, `char`, and the four two-byte
+// ones type 28, `short`; their signs are taken from those types. The
+// Timer arrays are 5 and 11 long, bounds [0;4] and [0;10].
+struct RacingCar {
+    struct Car *pCar;                           //   0
+    int16_t   CurrentBoundaryRegion;            //   4
+    int16_t   HighestBoundaryRegion;            //   6
+    int8_t    CurrentLapNumber;                 //   8
+    int8_t    NumLapsCompleted;                 //   9
+    int8_t    RacePosition;                     //  10
+    int8_t    PreviousRacePosition;             //  11
+    int8_t    FinishingOrder;                   //  12
+    int8_t    CrossedFinishLine;                //  13
+    int8_t    CompletedNewLap;                  //  14
+    int8_t    CrossedNewBoundary;               //  15
+    int16_t   NumLapsLed;                       //  16
+    int16_t   FinishReason;                     //  18
+    float     CurrentLapNumberExact;            //  20
+    float     dCurrentLapNumberExact;           //  24
+    float     PreviousDistanceAroundTrack;      //  28
+    float     FinishedLapNumberExact;           //  32
+    Timer     BoundaryCrossingTimes[5];         //  36
+    Timer     RunningTimes[5];                  //  56
+    Timer     PreviousRunningTimes[5];          //  76
+    Timer     BestRunningTimes[5];              //  96
+    Timer     PreviousBestRunningTimes[5];      // 116
+    Timer     LapTimes[11];                     // 136
+    Timer     RaceTime;                         // 180
+    float     TopSpeed;                         // 184
+    float     AverageSpeed;                     // 188
+};                                              // 192
+
+// One pointer leads, so a 64-bit host moves everything after it by four.
+#define RACINGCAR_SLACK ((size_t)(sizeof(void *) - 4))
+
+typedef char racingcar_layout_check[
+    (offsetof(struct RacingCar, CurrentBoundaryRegion) == 4 + RACINGCAR_SLACK
+     && offsetof(struct RacingCar, NumLapsLed) == 16 + RACINGCAR_SLACK
+     && offsetof(struct RacingCar, CurrentLapNumberExact)
+            == 20 + RACINGCAR_SLACK
+     && offsetof(struct RacingCar, BoundaryCrossingTimes)
+            == 36 + RACINGCAR_SLACK
+     && offsetof(struct RacingCar, LapTimes) == 136 + RACINGCAR_SLACK
+     && offsetof(struct RacingCar, AverageSpeed) == 188 + RACINGCAR_SLACK
+     && sizeof(struct RacingCar)
+            == ((192 + RACINGCAR_SLACK + sizeof(void *) - 1)
+                / sizeof(void *)) * sizeof(void *))
+    ? 1 : -1];
+
+// 0x00146ad8, eight bytes: `jr ra; lw v0,28(a1)`. The race is not read,
+// so this needs no Race layout; the car's own pointer is the answer.
+struct RacingCar *race_get_racing_car(Race *r, struct Car *c);
+
+// ------------------------------------------------------- RaceCoordinator
+
+// RCState, from the .mdebug enum (t1006).
+typedef int32_t RCState;
+#define RCSTATE_NONE              ((RCState)0)
+#define RCSTATE_CAMERA_FLYBY      ((RCState)1)
+#define RCSTATE_PRERACE           ((RCState)2)
+#define RCSTATE_RACE_IN_PROGRESS  ((RCState)3)
+#define RCSTATE_INSTANT_REPLAY    ((RCState)4)
+#define RCSTATE_AUTO_REPLAY       ((RCState)5)
+#define RCSTATE_PAUSE             ((RCState)6)
+#define RCSTATE_POSTRACE          ((RCState)7)
+#define RCSTATE_AI_DEMO_MODE      ((RCState)8)
+#define RCSTATE_REPLAY_DEMO_MODE  ((RCState)9)
+#define NUM_RCSTATES              ((RCState)10)
+
+typedef struct RaceCoordinator RaceCoordinator;
+
+// gp-22720, 0x00323330. NULL in the port until RaceCoordinator exists.
+extern RaceCoordinator *pRaceCoordinator;
+
+// RaceCoordinator::GetCurrentState, inlined everywhere as `lw v0,0(a0)`:
+// CurrentRCState is the first member.
+RCState racecoordinator_get_current_state(const RaceCoordinator *rc);
+
+// 0x00134b00, sixteen bytes: CurrentRCState == RCSTATE_REPLAY_DEMO_MODE.
+// The only one of the Is* tests the image keeps out of line.
+int32_t racecoordinator_is_replay_demo_mode(const RaceCoordinator *rc);
 
 #endif

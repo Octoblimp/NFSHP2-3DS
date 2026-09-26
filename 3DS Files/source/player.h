@@ -1,9 +1,11 @@
-// player -- the head of Player, which RealDriver and RealController read.
+// player -- the head of Player, which RealDriver, RealController and Car
+// read, and two of the class's statics.
 //
 // Player is 2480 bytes (.mdebug type#2091) and task 26's. RealDriver needs
 // one field of it, PlayerNumber, for the view its nitro blur is drawn in;
 // RealController needs bWrongWay at 736, which turns its route prediction
-// off. This names the five words up to PlayerNumber, then jumps to
+// off; Car's catchup reads PlayerNumber and the other player's MyCar. This
+// names the five words up to PlayerNumber, then jumps to
 // bWrongWay over a hole. The struct is left open at the end like
 // replay.h's: nothing in the port allocates a Player yet, and a partial
 // layout would invite something to.
@@ -44,5 +46,12 @@ typedef char player_layout_check[
      && offsetof(struct Player, PlayerNumber) == 16 + 2 * PLAYER_SLACK
      && offsetof(struct Player, bWrongWay) == 736 + 2 * PLAYER_SLACK)
     ? 1 : -1];
+
+// Player::NumPlayers, 0x003237e0 (gp-21520), and Player::pPlayersByNumber,
+// 0x003237d0 (gp-21536), the players by PlayerNumber. Player's constructor
+// keeps them; until it is ported, whatever builds the players sets them.
+// Car's catchup reads both and tests neither entry for NULL.
+extern int32_t        PlayerNumPlayers;
+extern struct Player *PlayerPlayersByNumber[2];
 
 #endif

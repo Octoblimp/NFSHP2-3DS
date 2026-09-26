@@ -28,6 +28,12 @@
 #include "physcomp.h"
 #include "vtable.h"
 
+// The clock object's two globals that engine.c and drivetrain.c read.
+// Defined here rather than linked from realtime.c, which would bring the
+// joylog in behind it.
+int32_t WorldTimer = 0;
+float   WorldTimeElapsed = 0.0f;
+
 // ------------------------------------------------------------ the names
 
 typedef struct Named {

@@ -1,5 +1,5 @@
-// eefpu -- the R5900 FPU's float-to-int conversion and its divide by zero,
-// as the port spells them.
+// eefpu -- the R5900 FPU's float-to-int conversion, its divide by zero and
+// its square root of a negative, as the port spells them.
 //
 // Not a port of any object. bmath.h and emath.h are faithful ports of
 // bMath.obj and eMath.obj and own no invented functions, so a helper that
@@ -10,6 +10,7 @@
 #ifndef EEFPU_H
 #define EEFPU_H
 
+#include <math.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -69,6 +70,21 @@ static inline float ee_div(float a, float b)
         return q;
     }
     return a / b;
+}
+
+// `sqrt.s` of a negative.
+//
+// IEEE gives a NaN. The R5900 takes the root of the magnitude and raises
+// its invalid flag, which nothing in the game reads. -0.0 is not below
+// zero and keeps its sign, as it does on both. tools/mipsemu.py's `eesqrt`
+// is the model's side, and its `eesqrt_pcs` finds the sites. The first is
+// DynamicCollisionBody::TrackPolygonCheck: `sqrt(1 - d*d)` of a dot
+// product of two unit vectors that rounds a little past one, where the
+// console gets a small root and an IEEE machine a NaN that fails every
+// test the polygon is put to.
+static inline float ee_sqrt(float x)
+{
+    return x < 0.0f ? sqrtf(-x) : sqrtf(x);
 }
 
 #endif

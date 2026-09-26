@@ -349,10 +349,10 @@ def _build_cached(tmp, srcs, exe, flags):
             direct_err = err
     if not ok and _mode != "direct" and MSYS_BASH.exists():
         ok, err = _compile_msys(tmp, flags, todo, exe, objs)
-        if ok and todo:
-            _mode = "msys"
-        else:
+        if not ok:
             _fail(err, "compile failed (msys2 bash)")
+        if todo:
+            _mode = "msys"
     if not ok:
         if not cc:
             sys.exit("no host C compiler found (set CC)")

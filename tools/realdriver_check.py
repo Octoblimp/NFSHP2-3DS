@@ -86,6 +86,7 @@ SOURCES = [HARNESS, RDC, TBC,
            "3DS Files/source/race.c",
            "3DS Files/source/copmanager.c",
            "3DS Files/source/replay.c",
+           "3DS Files/source/p32.c",
            "3DS Files/source/bmem.c",
            "3DS Files/source/vtable.c",
            "3DS Files/source/emath.c",
@@ -1868,12 +1869,21 @@ def mutate_pass(only=None):
 
     real = [m for m in todo if m[0] not in missing]
     holes = [s for s in survived if s not in EQUIVALENT]
+    # An entry whose mutant was caught is a wrong reason, not a spare one.
+    # --only leaves the others unrun, so only the ones that ran are judged.
+    ran = {m[0] for m in todo}
+    stale = [n for n in EQUIVALENT
+             if n not in equivalent and n not in missing
+             and (n in ran or only is None)]
     if missing:
         print("%d PATTERN NOT FOUND -- the tally above is over %d of %d"
               % (len(missing), len(real), len(todo)))
     print("%d mutations, %d caught, %d equivalent, %d unexplained"
           % (len(real), caught, len(equivalent), len(holes)))
-    return 1 if (holes or missing) else 0
+    for name in stale:
+        print("  listed as equivalent but %s: %s"
+              % ("caught" if name in ran else "names no mutation", name))
+    return 1 if (holes or missing or stale) else 0
 
 
 def main():
