@@ -28,7 +28,7 @@ bmath_check        19 scenarios,  6424 lines, 0 differ   (9/9 mutations caught)
 banim_check        23 scenarios,  2219 lines, 0 differ
 bscreens_check     17 scenarios,  1246 lines, 0 differ
 bootflow_check     12 scenarios,  3659 lines, 0 differ
-bslotpool_check    17 scenarios,   990 lines, 0 differ   (37/37 mutations caught)
+bslotpool_check    18 scenarios,  1025 lines, 0 differ   (47/47 mutations caught)
 geometry_check     30 files,     42047 lines, 0 differ   (53/53 mutations caught)
 texsrc_check       6 packs, 2 levels, 2958 textures, 0 differ
 bui_check          FRONTB.BUN    1395 lines, 0 differ
@@ -66,12 +66,12 @@ trackpath_check     4771 ops,     4707 lines, 0 differ  (185 caught, 3 equivalen
 average_check        482 ops,      843 lines, 0 differ  (64/64 mutations caught)
 airoute_check      14738 ops,     7224 lines, 0 differ  (86 caught, 5 equivalent)
 realcontroller_check 14096 ops,  25318 lines, 0 differ  (129 caught, 11 equivalent)
-track_check        16149 ops,    11790 lines, 0 differ  (266 caught, 5 equivalent)
+track_check        16212 ops,    11821 lines, 0 differ  (273 caught, 5 equivalent)
 vclip_check        11890 ops,    22389 lines, 0 differ  (280 caught, 1 equivalent)
 polyhedra_check    15907 ops,    64560 lines, 0 differ  (172 caught, 12 equivalent)
 collisionbody_check 1572 ops,    35426 lines, 0 differ  (622 caught, 24 equivalent)
 collision_check     3587 ops,     6859 lines, 0 differ  (121 caught, 10 equivalent)
-world_check         2173 ops,    12963 lines, 0 differ  (200/200 mutations caught)
+world_check         2742 ops,    15110 lines, 0 differ  (328/328 mutations caught)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -312,6 +312,28 @@ and so replaced every boot.
      a loop count that is a multiple of 64 but not of 128, and cars at
      exactly 100 and 150 from a player). No disagreement between the
      image and the port was found. Written up in `docs/formats/world.md`.
+   - **The eighteenth slice is World's constructor and destructor**, in
+     `worldinit.c`, with the record's tail in `world.h`: the constructor,
+     the destructor, DebugDisplay, the four recorders and
+     UpdateAIDebugRendering. Only DoSnapshot and DoPointerSnapshot of
+     World.obj are left, for ReplaySnapshot. OBB's methods are `obb.c`,
+     with the front of WorldObject in `worldobject.h`. The bPNode pool is
+     `bplist.c`, and GetVectorOnTrack is in `track.c`. The constructor's
+     eleven Init calls and the destructor's eleven Close calls are seams,
+     skipped when NULL. The teleporter's constructor and destructor and
+     Car's destructor are seams that abort when they are needed and
+     unset. `world_check` runs it all against the image: 32 scenarios,
+     2,742 ops, 15,110 lines, 0 differ. Of its 328 mutations, all 328
+     are caught. The first pass left one, `render mul order`, which the
+     new box covers (see below).
+     `bslotpool_check` has a bPList scenario (18 scenarios, 47/47
+     mutations caught), and `bslotpool_mutate.py` can now mutate a second
+     file. `track_check` puts 31 points on the ground with
+     GetVectorOnTrack (273 caught, 5 equivalent). The port departs from
+     the listing in one place: for a driver number that no car has,
+     UpdateAIDebugRendering reads the word at 44 in low memory. The port
+     passes NULL; the one renderer the game runs never reads its target.
+     Written up in `docs/formats/world.md`.
 
    Things to know before the next slice:
    - **Nothing calls it on hardware yet.** The port has no `LoaderTable`,
@@ -419,14 +441,21 @@ and so replaced every boot.
      of the timestep's seven survivors swapped `min.s`/`max.s` operands or
      turned a `<` into `<=`, and only a NaN clock or a value exactly on
      the line (0.3 s of wait, 100 and 150 from a player) separates them.
-   - **Next is World's constructor and destructor** (`0x0014a4e8`,
-     `0x0014a748`), with the record's tail, the collision prediction's
-     recorders, DebugDisplay and UpdateAIDebugRendering; OBB's methods and
-     GetVectorOnTrack come with them. Then `Car::FinishMovement`. After
-     that come the track's rendering and streaming.
+   - **A multiply by the identity is not a no-op for the check.** OBB's
+     Render takes `m × I`, and a mutant that swapped it for `I × m`
+     survived every random box. Each column of `I × m` adds the identity's
+     fourth row times zero, a +0, so only an axis that is -0 in one lane
+     and negative in the rest tells the two apart.
+   - **Next is `Car::FinishMovement`** (`0x00130480`, 2008 bytes), which
+     DoTimestep calls for every car and which aborts while it is unset.
+     `car.md` has its outline. After that come the track's rendering and
+     streaming, and RaceCoordinator's InitForRace (`0x001473c0`), which is
+     what will build a World outside a harness.
    - **The 3DS build compiles every file so far.** `tools/build_cia.ps1`
-     built the CIA, 315,328 bytes, with the whole of `contact.c` in it.
-     Nothing on the boot path calls it yet, so the size did not move.
+     built the CIA, 316,352 bytes, with `worldinit.c`, `obb.c` and
+     `bplist.c` in it and no warnings from the port's sources. Nothing on
+     the boot path calls them yet, so the linker drops them and the size
+     did not move.
 
 2. **Task 26's second slice is closed: `TrackedController` and
    `RealController`**, which is what builds a RealDriver, with

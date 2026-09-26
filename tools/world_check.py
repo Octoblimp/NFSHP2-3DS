@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Cross-check 3DS Files/source/worldstep.c against the image's World.obj.
+"""Cross-check 3DS Files/source/worldstep.c and worldinit.c against the
+image's World.obj, and obb.c against OBB's methods in DriveTarget.obj.
 
 What is checked: the clock, the pause and the time scale (SetTimeScale,
 ResetTimeScale, SetWorldPaused, Begin- and EndPause, UpdateWorldPaused,
@@ -9,7 +10,10 @@ bList::Sort, AddTrafficCar); the two Random overloads,
 GetDATToClosestPlayer, FlushCollisions; the checksums (Calculate- and
 VerifyDebugChecksums); and the step, DoTimestepMove, DoTimestepCollisions
 and DoTimestep. World's GetDistanceToClosestPlayer, which the step calls,
-runs from world.c. The image is the oracle. tools/mipsemu.py runs the
+runs from world.c. From worldinit.c: the constructor and the destructor,
+DebugDisplay, the collision prediction's four recorders and
+UpdateAIDebugRendering; and OBB's constructor, destructor, operator=,
+Render and DoNotRender from obb.c. The image is the oracle. tools/mipsemu.py runs the
 functions out of NFSHP2.ELF, the harness (tools/src/world_test.c) runs the
 port, both walk the same script, and the two transcripts are diffed.
 
@@ -23,6 +27,18 @@ script queued); the replay's and the Joylog's data; CompareDistances, which
 answers from a queue; bGetTicker, which does too; and the seams. The
 image's bRandom, GetRealTimeElapsedFromQuantized, bGetTickerDifference,
 IsReplayDemoMode, bList::Sort and ~bTList<Contact> run as themselves.
+
+The constructor and the destructor call out a good deal more, and each of
+those is a logging stub on both sides too: the eleven Init calls and the
+twelve Close calls, bMalloc and bFree, the TrafficTeleporter's constructor
+and destructor, the destructors of Car and Collision and bPNode::Free
+(each of which logs the node's links and then zeroes them), DriveTarget's
+constructor, destructor and operator=, the DriveTargetRenderer, and
+WorldObject's new and delete, which hand out cubes from a table. Two stubs
+change what the listing reads again: a controller's DebugDisplay can move
+AICarPos and CopCarPos, and GetVectorOnTrack, which swaps the two lanes so
+both calls show, can change the iteration to render. eIdentity and
+eMulMatrix run as themselves.
 
 What the listing says that is easy to get wrong, and which the script
 reaches:
@@ -43,6 +59,17 @@ reaches:
     is left; a witness is tested once for each piece it has on it.
   * VerifyDebugChecksums posts RC_SKIP_REPLAY only while replaying, only
     when not capturing, and only on a mismatch of the low byte.
+  * The constructor leaves the car table, the positions table and the
+    prediction's records alone; the destructor tears the members down in
+    reverse, the other car's boxes 19 to 0 before this car's, and each
+    list's nodes are unlinked with their own links left as they were.
+    It frees the World only when flags has bit 0.
+  * OBB's operator= copies all four lanes of each axis but not Position,
+    and moves the cube across, leaving the source without one.
+  * DebugDisplay reads AICarPos and CopCarPos again after every call.
+  * UpdateAIDebugRendering draws an iteration equal to the highest
+    recorded (the test is `max < it`) and reads the chosen iteration again
+    after the first GetVectorOnTrack.
 
     python tools/world_check.py
     python tools/world_check.py --mutate
@@ -68,7 +95,12 @@ M32 = 0xFFFFFFFF
 SOURCES = [
     "tools/src/world_test.c",
     "3DS Files/source/worldstep.c",
+    "3DS Files/source/worldinit.c",
     "3DS Files/source/world.c",
+    "3DS Files/source/obb.c",
+    "3DS Files/source/emath.c",
+    "3DS Files/source/bmatrix.c",
+    "3DS Files/source/bvector.c",
     "3DS Files/source/blist.c",
     "3DS Files/source/bmath.c",
     "3DS Files/source/bmathtab.c",
@@ -84,6 +116,8 @@ SOURCES = [
 ]
 
 WS = "3DS Files/source/worldstep.c"
+WI = "3DS Files/source/worldinit.c"
+OB = "3DS Files/source/obb.c"
 BL = "3DS Files/source/blist.c"
 
 GP = 0x00328bf0
@@ -100,12 +134,21 @@ G_RTE = GP - 20244                  # RealTimeElapsed
 G_RTEQ = GP - 20240                 # RealTimeElapsedQuantized
 G_BODIES = GP - 18392               # CollisionBodyList
 G_WITS = GP - 18352                 # CollisionBodyWitnessList
+G_WHICH_IT = GP - 22608             # WhichCollisionPredictionIteration..
+G_AITWEAKS = [GP - 22608, GP - 22604, GP - 22600, GP - 22596, GP - 22592]
+G_DSEED = GP - 15456                # bDefaultSeed
+G_WOPOOL = GP - 18712               # WorldObjectSlotPool
+G_CLOCK = [GP - 20224 + 4 * k for k in range(7)]    # WorldTimer .. Loop
 TPM = 0x00313768                    # TheTrackPathManager
+DTR = 0x0030c640                    # TheDriveTargetRenderer
 FX = 0x002e7780                     # WorldEffects
 
 NCAR, NB, NW, NK, NC = 14, 8, 8, 12, 4
+NP, NCUBE, NCTL = 8, 128, 4
+NOBB, NIT = 20, 40
 DELTA = 8
-FN_MOVE, FN_CB = 0x01F00000, 0x01F00010
+FN_MOVE, FN_CB, FN_DD = 0x01F00000, 0x01F00010, 0x01F00020
+FILL = 0xA5A5A5A5
 
 FN = dict(
     build=0x0014ab08, bynum=0x0014acd8, bydrv=0x0014ada0, flip=0x0014adc8,
@@ -115,6 +158,11 @@ FN = dict(
     step=0x0014b480, csum=0x0014b9e0, verify=0x0014ba88, dat=0x0014bc18,
     randi=0x0014bc98, randf=0x0014bcc0, flush=0x0014bce0,
     traffic=0x0014bce8, sort=0x0014c030,
+    ctor=0x0014a4e8, dtor=0x0014a748, debugdisp=0x0014bd30,
+    setobbs=0x0014bdc8, setdts=0x0014be38, recpot=0x0014be78,
+    reciter=0x0014be80, aidebug=0x0014bed0,
+    obbassign=0x0020a840, obbinit=0x0020a8c0, obbdtor=0x0020a8d0,
+    obbrender=0x0020a9e0, obbhide=0x0020ab28,
 )
 
 (OP_TAG, OP_CAR, OP_CARLIST, OP_PLAYER, OP_BUILD, OP_BYNUM, OP_BYDRV,
@@ -125,7 +173,11 @@ FN = dict(
  OP_LOOP, OP_BODY, OP_BODYLIST, OP_MOVE, OP_WIT, OP_WITLIST, OP_CREATEQ,
  OP_CONTACT, OP_TESTQ, OP_BREAKQ, OP_COL, OP_COLLIST, OP_COLLIDE,
  OP_STATE, OP_RC, OP_PTRS, OP_STEP, OP_FLUSH, OP_PPOS,
- OP_DRAIN, OP_SHAKEFLIP) = range(1, 56)
+ OP_DRAIN, OP_SHAKEFLIP, OP_WFILL, OP_WCTOR, OP_WDTOR, OP_WDUMP, OP_AILIST,
+ OP_OBB, OP_OBBDUMP, OP_OBBASSIGN, OP_OBBRENDER, OP_OBBHIDE, OP_OBBINIT,
+ OP_OBBDTOR, OP_SETOBBS, OP_SETDTS, OP_RECPOT, OP_RECITER, OP_PREDDUMP,
+ OP_CTL, OP_SETTABLE, OP_DDSET, OP_DEBUGDISP, OP_AITWEAK, OP_AIDEBUG,
+ OP_CUBES, OP_CUBE, OP_DSEED, OP_CLOCK, OP_VOTSET) = range(1, 84)
 
 bits = me.f_to_bits
 NAN = 0x7FC00000
@@ -205,6 +257,16 @@ class Script(object):
 
     def body(self, k, typ, dyn, act, strength=0.0):
         self.op(OP_BODY, k, typ & 0xFF, dyn & 0xFF, act & 0xFF, fw(strength))
+
+    def obb(self, which, k, words, cube=-1):
+        """A box: its position, three axes and three half-lengths (19
+        words, floats or bits) and its cube, WO<cube>, or none."""
+        assert len(words) == 19
+        self.op(OP_OBB, which, k, *([fw(v) for v in words] + [cube]))
+
+    def fresh(self):
+        self.op(OP_WFILL)
+        self.op(OP_WCTOR)
 
 
 FAR = 9999999.0
@@ -800,6 +862,233 @@ def walk_script(sc):
     sc.op(OP_REPLAY, 0, 0)
 
 
+def box(rnd, scale=50.0):
+    return [rnd.uniform(-scale, scale) for _ in range(16)] + [
+        rnd.uniform(0.0, scale / 4) for _ in range(3)]
+
+
+MY, OT, SM, SO = 0, 1, 2, 3
+
+
+def init_script(sc):
+    rnd = random.Random(18)
+
+    sc.tag("the constructor")
+    sc.op(OP_CLOCK, 0xDEAD, bits(9.5), 77, 88, bits(0.25), bits(0.125), 12345)
+    sc.op(OP_DSEED, 0x12345678)
+    sc.fresh()
+    sc.op(OP_PREDDUMP)
+    sc.op(OP_OBBDUMP, MY)
+    sc.op(OP_OBBDUMP, OT)
+    for seed in (0, 1, 0x7FFFFFFE, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF,
+                 0x1D872B41):
+        sc.op(OP_DSEED, seed)
+        sc.fresh()
+    sc.op(OP_WCTOR)                     # again, on a World that has one
+
+    sc.tag("the destructor")
+    sc.fresh()
+    sc.carlist([3, 1, 2])
+    sc.op(OP_AILIST, 2, 4, 1)
+    sc.collist([2, 0, 3])
+    for n, (which, k) in enumerate(((MY, 3), (OT, 0), (OT, 19), (MY, 19),
+                                    (MY, 0), (OT, 7))):
+        sc.op(OP_CUBE, 64 + n)
+        sc.obb(which, k, box(rnd), 64 + n)
+    sc.op(OP_CLOCK, 5, bits(2.0), 6, 7, bits(0.5), bits(0.75), 8)
+    sc.op(OP_WDTOR, 3)
+    sc.op(OP_CUBES, 64, 6)
+    for flags, tele, cars, ai, cols in (
+            (2, 0, [0], [], [1]), (0, 1, [], [0], []),
+            (1, 1, [5, 6], [2, 3, 5], [0, 1, 2, 3]),
+            (0xFFFFFFFE, 0, [], [], []), (5, 1, [7], [7], [3]),
+            (0x80000001, 1, [], [], [])):
+        sc.fresh()
+        sc.carlist(cars)
+        sc.op(OP_AILIST, len(ai), *ai)
+        sc.collist(cols)
+        if not tele:
+            sc.op(OP_PTRS, 0, 0, 0)
+        sc.op(OP_WDTOR, flags)
+    # Every box with a cube: the order is the other car's 19 down to 0,
+    # then this car's.
+    sc.fresh()
+    for k in range(NOBB):
+        sc.op(OP_CUBE, 64 + k)
+        sc.obb(MY, k, box(rnd), 64 + k)
+        sc.op(OP_CUBE, 84 + k)
+        sc.obb(OT, k, box(rnd), 84 + k)
+    sc.op(OP_WDTOR, 2)
+    sc.op(OP_CUBES, 64, 40)
+
+    sc.tag("the boxes")
+    sc.fresh()
+    sc.obb(SM, 0, box(rnd))
+    sc.op(OP_CUBE, 64)
+    sc.obb(MY, 0, box(rnd), 64)
+    sc.op(OP_OBBASSIGN, MY, 0, SM, 0)       # a cube, from none
+    sc.op(OP_CUBE, 65)
+    sc.obb(SM, 1, box(rnd), 65)
+    sc.obb(MY, 1, box(rnd))
+    sc.op(OP_OBBASSIGN, MY, 1, SM, 1)       # none, from a cube
+    sc.op(OP_CUBE, 66)
+    sc.op(OP_CUBE, 67)
+    sc.obb(SM, 2, box(rnd), 66)
+    sc.obb(MY, 2, box(rnd), 67)
+    sc.op(OP_OBBASSIGN, MY, 2, SM, 2)       # both
+    sc.op(OP_CUBE, 68)
+    sc.obb(MY, 3, box(rnd), 68)
+    sc.op(OP_OBBASSIGN, MY, 3, MY, 3)       # itself, with a cube
+    sc.obb(MY, 4, box(rnd))
+    sc.op(OP_OBBASSIGN, MY, 4, MY, 4)       # itself, without
+    sc.obb(OT, 4, box(rnd))
+    sc.op(OP_OBBASSIGN, OT, 4, MY, 1)       # the cube moves on again
+    sc.op(OP_CUBES, 64, 5)
+    sc.obb(MY, 5, [1.0, 2.0, 3.0, 4.0, 1.0, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0,
+                   -0.5, 0.0, 0.0, 1.0, 2.0, 1.5, 2.5, 0.75])
+    sc.op(OP_OBBRENDER, MY, 5, fw(10.0), fw(20.0), fw(30.0), fw(40.0))
+    sc.op(OP_CUBES, 0, 1)
+    sc.op(OP_OBBRENDER, MY, 5, fw(-1.5), fw(0.0), fw(-0.0), fw(7.0))
+    sc.op(OP_CUBES, 0, 1)
+    sc.op(OP_OBBHIDE, MY, 5)
+    sc.op(OP_CUBES, 0, 1)
+    sc.op(OP_OBBHIDE, MY, 6)                # no cube
+    sc.op(OP_CUBE, 70)
+    sc.obb(OT, 7, box(rnd), 70)
+    sc.op(OP_OBBRENDER, OT, 7, fw(3.0), fw(4.0), fw(5.0), fw(6.0))
+    sc.op(OP_CUBES, 70, 1)
+    for k, words in enumerate((
+            [0.0] * 16 + [0.0, 0.0, 0.0],
+            [-0.0] * 16 + [-0.0, -0.0, -0.0],
+            [0.0, 0.0, 0.0, 0.0, -1.0, -0.0, 3.0, -2.0, 1e-3, 1e3, -7.0,
+             0.25, 1e-20, -1e20, 5.0, -5.0, -1.0, 0.0, -2.5],
+            # Each axis -0 in one lane and negative in the rest, so only
+            # the rows (the axes) times the identity keep the -0: the
+            # identity times them adds its fourth row's +0.
+            [7.0, 8.0, 9.0, 1.0, -0.0, -1.0, -2.0, -3.0, -4.0, -0.0, -5.0,
+             -6.0, -7.0, -8.0, -9.0, -0.0, 0.5, 0.5, 0.5],
+            box(rnd, 1e6), box(rnd, 1e-6), box(rnd), box(rnd))):
+        sc.obb(SO, k, words)
+        p = [fw(rnd.uniform(-100, 100)) for _ in range(4)]
+        sc.op(OP_OBBRENDER, SO, k, *p)
+    sc.op(OP_CUBES, 1, 8)
+    sc.op(OP_CUBE, 71)
+    sc.obb(MY, 8, box(rnd), 71)
+    sc.op(OP_OBBINIT, MY, 8)                # the cube is forgotten
+    sc.op(OP_CUBE, 72)
+    sc.obb(MY, 9, box(rnd), 72)
+    sc.op(OP_OBBDTOR, MY, 9)                # deleted, and still pointed at
+    sc.op(OP_OBBDTOR, MY, 10)
+    sc.op(OP_CUBES, 70, 3)
+
+    sc.tag("the prediction's boxes")
+    sc.fresh()
+    cube = 64
+    for k in range(NOBB):
+        for which, has in ((SM, k % 3 == 0), (SO, k % 4 == 1),
+                           (MY, k % 5 == 2), (OT, k % 2 == 0)):
+            c = -1
+            if has:
+                c = cube
+                sc.op(OP_CUBE, c)
+                cube += 1
+            sc.obb(which, k, box(rnd), c)
+    sc.op(OP_SETOBBS)
+    sc.op(OP_CUBES, 64, cube - 64)
+    sc.op(OP_SETOBBS)                       # again: nothing left to move
+    sc.op(OP_CUBES, 64, cube - 64)
+
+    sc.tag("the prediction's drive targets")
+    sc.fresh()
+    sc.op(OP_SETDTS, 0, 1)
+    sc.op(OP_SETDTS, 1, 0)
+    sc.op(OP_SETDTS, 1, 1)
+    sc.op(OP_RECPOT, 0)
+    sc.op(OP_RECPOT, 1)
+
+    sc.tag("the prediction's iterations")
+    sc.fresh()
+    for it, mi, oi in ((0, 0, 0), (1, 5, 19), (39, -1, 127), (7, -128, 3),
+                       (3, 19, 0), (39, 2, 2), (12, 0x1FF, 0x180)):
+        sc.op(OP_RECITER, it, mi & 0xFF if mi < 0 else mi,
+              oi & 0xFF if oi < 0 else oi,
+              *[fw(rnd.uniform(-500, 500)) for _ in range(4)])
+    sc.op(OP_RECITER, 20, 1, 2, fw(-0.0), NAN, INF, 0x00000001)
+    sc.op(OP_PREDDUMP)
+
+    sc.tag("the debug display")
+    sc.fresh()
+    for k, c, d in ((0, 0, 0), (1, -1, 1), (2, 1, 2), (3, 2, -1), (4, 3, 4),
+                    (5, -1, -1), (6, 0, 6)):
+        sc.op(OP_CTL, k, c, d)
+    order = [0, 1, 2, 3, 4, 5, 6]
+    for ai, cop, dd in ((1, 5, None), (0, 0, None), (5, 2, None),
+                        (0, 7, None), (3, 3, None), (6, 7, None),
+                        (0, 3, (-1, 6)), (0, 5, (2, -1)), (0, 5, (-1, 1)),
+                        (1, 6, (3, 4)), (2, 4, (0, -1))):
+        sc.op(OP_SETTABLE, 7, ai, cop, 7, *order)
+        if dd:
+            sc.op(OP_DDSET, *dd)
+        sc.op(OP_DEBUGDISP)
+
+    sc.tag("the AI debug views")
+    sc.fresh()
+    for k in range(NOBB):
+        sc.obb(MY, k, box(rnd))
+        sc.obb(OT, k, box(rnd))
+    for it in range(6):
+        sc.op(OP_RECITER, it, (it * 3) % NOBB, (19 - 2 * it) % NOBB,
+              *[fw(rnd.uniform(-500, 500)) for _ in range(4)])
+    sc.car(0, 2, 5)
+    sc.car(1, 2, 6)
+    sc.car(2, 2, 7)
+    sc.op(OP_CTL, 0, -1, 0)
+    sc.op(OP_CTL, 1, -1, 1)
+    sc.op(OP_CTL, 2, -1, -1)
+    sc.op(OP_SETTABLE, 3, 0, 3, 3, 0, 1, 2)
+    sc.op(OP_TWEAK, 0)
+    sc.op(OP_AITWEAK, 0, 2)
+    sc.op(OP_AITWEAK, 2, 1)
+    sc.op(OP_AIDEBUG)                       # the world is not paused
+    sc.op(OP_TWEAK, 1)
+    sc.op(OP_AITWEAK, 0, -1)
+    sc.op(OP_AITWEAK, 2, 0)
+    sc.op(OP_AIDEBUG)                       # nothing chosen
+    for it in (2, 4, 5, 6, 0):              # 5 is the last recorded
+        sc.op(OP_AITWEAK, 0, it)
+        sc.op(OP_AIDEBUG)
+        sc.op(OP_CUBES, 0, 6)
+    sc.op(OP_WDUMP)
+    sc.op(OP_AITWEAK, 0, 1)
+    sc.op(OP_VOTSET, 3)                     # the second position reads again
+    sc.op(OP_AIDEBUG)
+    sc.op(OP_AITWEAK, 0, 1)
+    sc.op(OP_VOTSET, 5)
+    sc.op(OP_AIDEBUG)
+    sc.op(OP_CUBES, 0, 8)
+    sc.op(OP_AITWEAK, 0, -1)
+    for pot, my, ot, which in ((1, 0, 0, -1), (0, 1, 0, -1), (0, 0, 1, -1),
+                               (1, 1, 1, -1), (0, 1, 1, -1), (0, 0, 0, 5),
+                               (0, 0, 0, 6), (0, 0, 0, 7), (0, 0, 0, 99),
+                               (0, 0, 0, -2), (1, 0, 0, 5), (0, 0, 1, 6),
+                               (0, 1, 0, 7), (-1, 0, 0, -1), (0, 0, 0, -1)):
+        sc.op(OP_AITWEAK, 2, pot)
+        sc.op(OP_AITWEAK, 3, my)
+        sc.op(OP_AITWEAK, 4, ot)
+        sc.op(OP_AITWEAK, 1, which)
+        sc.op(OP_AIDEBUG)
+    sc.op(OP_AITWEAK, 0, 3)
+    sc.op(OP_AITWEAK, 4, 1)
+    sc.op(OP_AIDEBUG)                       # boxes and a target together
+    sc.op(OP_AITWEAK, 0, -5)
+    sc.op(OP_AIDEBUG)
+    sc.op(OP_CUBES, 0, 10)
+    sc.op(OP_AITWEAK, 0, -1)
+    sc.op(OP_AITWEAK, 1, -1)
+    sc.op(OP_AITWEAK, 4, 0)
+    sc.op(OP_TWEAK, 0)
+
+
 def script():
     sc = Script()
     time_script(sc)
@@ -810,6 +1099,7 @@ def script():
     collide_script(sc)
     step_script(sc)
     walk_script(sc)
+    init_script(sc)
     return sc
 
 
@@ -842,6 +1132,23 @@ class Model(object):
         self.heli = a(64, 16)
         self.carhead = self.world
         self.colhead = self.world + 16
+        self.aihead = self.world + 8
+        self.sm = a(NOBB * 80, 16)
+        self.so = a(NOBB * 80, 16)
+        self.cubes = [a(96, 16) for _ in range(NCUBE)]
+        self.cube_dead = [0] * NCUBE
+        self.next_cube = 0
+        self.pnodes = [a(16, 16) for _ in range(NP)]
+        self.ctls = [a(16, 16) for _ in range(NCTL)]
+        self.drvs = [a(16, 16) for _ in range(NCAR)]
+        self.dts = [a(528, 16) for _ in range(2)]
+        self.ttmem = a(96, 16)
+        self.vt2 = a(14 * 8, 16)
+        self.wopool = a(16, 16)
+        self.scratch = a(64, 16)
+        self.omalloc = []
+        self.dd = [-1, -1]
+        self.votset = -1
 
         self.createq, self.testq, self.breakq = [], [], []
         self.rgetq, self.jgetq, self.cmpq, self.tickq = [], [], [], []
@@ -866,6 +1173,11 @@ class Model(object):
             e.put32(b + 80, self.vt)
         e.write(self.vt + 64, bytes([DELTA, 0, 0, 0]))
         e.put32(self.vt + 68, FN_MOVE)
+        e.write(self.vt2 + 16, bytes([DELTA, 0, 0, 0]))
+        e.put32(self.vt2 + 20, FN_DD)
+        for c in self.ctls:
+            e.put32(c + 8, self.vt2)
+        e.put32(G_WOPOOL, self.wopool)
         self.stubs()
 
     def emit(self, s):
@@ -881,9 +1193,29 @@ class Model(object):
                  (FX, "FX"), (self.rm, "RM"), (self.rc, "RC"),
                  (self.race, "RACE"), (self.tele, "TT"), (self.heli, "HELI"),
                  (FN_CB, "CB")]
+        W = self.world
+        names += [(self.aihead, "ailist"), (W + 4336, "DTM"),
+                  (W + 4864, "DTO"), (W + 5392, "DTP"),
+                  (self.dts[0], "DTA"), (self.dts[1], "DTB"), (DTR, "DTR"),
+                  (self.ttmem, "TTMEM"), (FILL, "dirty")]
         for q, n in names:
             if p == q:
                 return n
+        for i in range(NOBB):
+            for pre, base in (("MY", W + 416), ("OT", W + 2016),
+                              ("SM", self.sm), ("SO", self.so)):
+                if p == base + 80 * i:
+                    return "%s%d" % (pre, i)
+        for i in range(NIT):
+            if p == W + 3616 + 8 * i:
+                return "MYPOS%d" % i
+            if p == W + 3936 + 8 * i:
+                return "OTPOS%d" % i
+        for pre, tab in (("WO", self.cubes), ("PN", self.pnodes),
+                         ("CTL", self.ctls), ("DRV", self.drvs)):
+            for i, q in enumerate(tab):
+                if p == q:
+                    return "%s%d" % (pre, i)
         for pre, tab in (("CAR", self.cars), ("DI", self.dis),
                          ("P", self.players), ("B", self.bodies),
                          ("W", self.wits), ("K", self.contacts),
@@ -1120,6 +1452,149 @@ class Model(object):
         e.stub(0x0020b6a8, end)
         self.placeq = []
         self.shakeflip = -1
+        self.stubs_init(arg, unlink)
+
+    def stubs_init(self, arg, unlink):
+        """The constructor's, the destructor's and the debug views'."""
+        e, L = self.e, self.label
+
+        def logger(text):
+            def fn(em):
+                self.emit("  " + text)
+            return fn
+
+        for addr, text in (
+                (0x0011dbf8, "init carfx"), (0x001a1090, "init clans"),
+                (0x001a0c40, "init skids"), (0x001a47a0, "init particles"),
+                (0x001b4660, "init munitions"),
+                (0x001cf328, "init fernflat"), (0x001cf9c0, "init fernshake"),
+                (0x0020bea8, "spawn smokeables"),
+                (0x0020e448, "init terrainfx"), (0x00213930, "init cops"),
+                (0x00237c58, "init trackgraph"),
+                (0x0020e488, "close terrainfx"), (0x00213978, "cleanup cops"),
+                (0x00237c88, "cleanup trackgraph"),
+                (0x001cc248, "eliminate witnesses"),
+                (0x0020bfe8, "clear smokeables"),
+                (0x001cfac8, "close fernshake"),
+                (0x001cf330, "close fernflat"),
+                (0x001b46a8, "close munitions"),
+                (0x001a4838, "close particles"), (0x001a1118, "close clans"),
+                (0x001a0cf8, "close skids"), (0x0011dcb8, "close carfx")):
+            e.stub(addr, logger(text))
+
+        def cstr(p):
+            b = bytearray()
+            while e.mem[p]:
+                b.append(e.mem[p])
+                p += 1
+            return b.decode("latin-1")
+
+        def malloc(em):
+            self.emit("  malloc %d %s %d %d -> %s"
+                      % (s32(arg(0)), cstr(arg(1)), s32(arg(2)), s32(arg(3)),
+                         L(self.ttmem)))
+            return self.ttmem
+
+        def free(em):
+            self.emit("  free %s" % L(arg(0)))
+
+        def tele_ctor(em):
+            self.emit("  teleporter ctor %s -> %s" % (L(arg(0)), L(self.tele)))
+            return self.tele
+
+        def tele_dtor(em):
+            self.emit("  teleporter dtor %s %d" % (L(arg(0)), s32(arg(1))))
+
+        def gone(what, p, flags=None):
+            if flags is None:
+                self.emit("  %s %s links %s %s"
+                          % (what, L(p), L(e.u32(p)), L(e.u32(p + 4))))
+            else:
+                self.emit("  %s %s %d links %s %s"
+                          % (what, L(p), flags, L(e.u32(p)), L(e.u32(p + 4))))
+            e.put32(p, 0)
+            e.put32(p + 4, 0)
+
+        def dt_init(em):
+            self.emit("  dt init %s" % L(arg(0)))
+            return arg(0)
+
+        def dt_destroy(em):
+            assert arg(1) == 2, arg(1)
+            self.emit("  dt destroy %s" % L(arg(0)))
+
+        def dt_assign(em):
+            self.emit("  dt assign %s %s" % (L(arg(0)), L(arg(1))))
+            return arg(0)
+
+        def target(em):
+            self.emit("  target %s %s" % (L(arg(0)), L(arg(1))))
+
+        def vot(em):
+            out, p = arg(0), arg(1)
+            x, y = e.u32(p), e.u32(p + 4)
+            self.emit("  vot %s %08x %08x" % (L(p), x, y))
+            e.put32(out, y)
+            e.put32(out + 4, x)
+            e.put32(out + 8, x ^ 0x80000000)
+            if self.votset != -1:
+                e.put32(G_WHICH_IT, self.votset)
+                self.votset = -1
+
+        def omalloc(em):
+            assert arg(0) == self.wopool, hex(arg(0))
+            k = self.next_cube
+            self.next_cube += 1
+            self.omalloc.append(self.cubes[k])
+            return self.cubes[k]
+
+        def wo_new(em):
+            p = arg(0)
+            assert self.omalloc and self.omalloc.pop() == p
+            self.emit("  new cube %s hash %08x matrix %s light %d"
+                      % (L(p), arg(1), L(arg(2)), s32(arg(3))))
+            self.fresh_cube(self.cubes.index(p))
+            return p
+
+        def wo_delete(em):
+            self.emit("  delete cube %s %d" % (L(arg(0)), s32(arg(1))))
+            self.cube_dead[self.cubes.index(arg(0))] = 1
+
+        def debug_display(em):
+            this = arg(0)
+            k = self.ctls.index(this - DELTA)
+            self.emit("  debugdisplay CTL%d" % k)
+            if self.dd[0] >= 0:
+                e.put32(self.world + 32, self.dd[0])
+            if self.dd[1] >= 0:
+                e.put32(self.world + 36, self.dd[1])
+            self.dd = [-1, -1]
+
+        e.stub("bMalloc__FiPCcii", malloc)
+        e.stub("bFree__FPv", free)
+        e.stub(0x0020e610, tele_ctor)
+        e.stub(0x0020e678, tele_dtor)
+        e.stub(0x0012f660, lambda em: gone("destroy car", arg(0),
+                                           s32(arg(1))))
+        e.stub(0x0020b358, lambda em: gone("destroy collision", arg(0),
+                                           s32(arg(1))))
+        e.stub(0x00238488, lambda em: gone("free pnode", arg(0)))
+        e.stub(0x002086f8, dt_init)
+        e.stub(0x00208768, dt_destroy)
+        e.stub(0x00208788, dt_assign)
+        e.stub(0x001c14c0, target)
+        e.stub(0x001c1210, vot)
+        e.stub("bOMalloc__FP8SlotPool", omalloc)
+        e.stub(0x001c35c0, wo_new)
+        e.stub(0x001c3688, wo_delete)
+        e.stub(FN_DD, debug_display)
+
+    def fresh_cube(self, k):
+        e, c = self.e, self.cubes[k]
+        e.put32(c + 12, 7)
+        for j in range(16):
+            e.put32(c + 32 + 4 * j, 0x5A5A0000 + (k << 4) + j)
+        self.cube_dead[k] = 0
 
     # ------------------------------------------------------------ dumps
 
@@ -1164,6 +1639,67 @@ class Model(object):
         for i in range(min(max(n, 0), NCAR)):
             self.emit("  pos %d" % i + "".join(
                 " %08x" % e.u32(w + 112 + 16 * i + 4 * j) for j in range(4)))
+
+    def vec(self, p):
+        return "".join(" %08x" % self.e.u32(p + 4 * j) for j in range(4))
+
+    def wdump(self):
+        e, L, w = self.e, self.label, self.world
+        self.walk(self.carhead, "cars")
+        self.walk(self.aihead, "ailist")
+        self.walk(self.colhead, "collisions")
+        self.emit("  counts n %d ai %d cop %d traffic %d ids %d %d heli %s"
+                  " tele %s"
+                  % (s32(e.u32(w + 28)), s32(e.u32(w + 32)),
+                     s32(e.u32(w + 36)), s32(e.u32(w + 40)), e.u32(w + 408),
+                     e.u32(w + 412), L(e.u32(w + 24)), L(e.u32(w + 404))))
+        self.state()
+        c = [e.u32(g) for g in G_CLOCK]
+        self.emit("  globals world %s timer %08x secs %08x time %08x frames"
+                  " %08x elapsed %08x frame %08x loop %08x dseed %08x"
+                  % tuple([L(e.u32(G_WORLD))] + c + [e.u32(G_DSEED)]))
+        self.emit("  untouched %s %s %08x %08x"
+                  % (L(e.u32(w + 44)), L(e.u32(w + 44 + 4 * 13)),
+                     e.u32(w + 112), e.u32(w + 112 + 16 * 13 + 12)))
+        self.emit("  cubes MY" + "".join(
+            " " + L(e.u32(w + 416 + 80 * k + 76)) for k in range(NOBB))
+            + " OT" + "".join(
+            " " + L(e.u32(w + 2016 + 80 * k + 76)) for k in range(NOBB)))
+
+    def obb_at(self, which, k):
+        base = (self.world + 416, self.world + 2016, self.sm, self.so)
+        return base[min(which, 3)] + 80 * k
+
+    def obbline(self, o):
+        e = self.e
+        self.emit("  %s%s%s%s%s %08x %08x %08x %s"
+                  % (self.label(o), self.vec(o), self.vec(o + 16),
+                     self.vec(o + 32), self.vec(o + 48), e.u32(o + 64),
+                     e.u32(o + 68), e.u32(o + 72), self.label(e.u32(o + 76))))
+
+    def obbdump(self, which):
+        for k in range(NOBB):
+            self.obbline(self.obb_at(which, k))
+
+    def iterline(self, k):
+        e, w = self.e, self.world
+
+        def s8(v):
+            return v - 256 if v & 0x80 else v
+        self.emit("  it %d %d %d %08x %08x %08x %08x"
+                  % (k, s8(e.u8(w + 4256 + k)), s8(e.u8(w + 4296 + k)),
+                     e.u32(w + 3616 + 8 * k), e.u32(w + 3620 + 8 * k),
+                     e.u32(w + 3936 + 8 * k), e.u32(w + 3940 + 8 * k)))
+
+    def cubedump(self, first, n):
+        e = self.e
+        for k in range(first, first + n):
+            c = self.cubes[k]
+            self.emit("  WO%d %s en %d%s"
+                      % (k, "dead" if self.cube_dead[k] else "live",
+                         s32(e.u32(c + 12)),
+                         "".join(" %08x" % e.u32(c + 32 + 4 * j)
+                                 for j in range(16))))
 
     def link(self, head, objs, ks):
         e = self.e
@@ -1297,6 +1833,9 @@ class Model(object):
                 self.createq, self.testq, self.breakq = [], [], []
                 self.placeq = []
                 self.shakeflip = -1
+                self.next_cube = 0
+                self.dd = [-1, -1]
+                self.votset = -1
             elif op == OP_SHAKEFLIP:
                 self.shakeflip = s32(arg())
                 emit("shakeflip %d" % self.shakeflip)
@@ -1447,9 +1986,155 @@ class Model(object):
                     e.put32(W + 336 + 16 * j + 4 * n, v[n])
                 e.put32(W + 368 + 4 * j, dat)
                 emit("ppos %d" % j)
+            elif op >= OP_WFILL:
+                self.run_init(op, arg, args)
             else:
                 raise SystemExit("op %d" % op)
         return self.out
+
+
+    def run_init(self, op, arg, args):
+        """Slice 18's ops: the constructor, the destructor, the boxes, the
+        prediction's records and the debug views."""
+        e, L, emit, W = self.e, self.label, self.emit, self.world
+
+        def call(name, *a, **kw):
+            return e.call(FN[name], *a, **kw)
+
+        if op == OP_WFILL:
+            e.write(W, bytes([0xA5]) * 5936)
+            emit("wfill")
+        elif op == OP_WCTOR:
+            emit("wctor")
+            r = call("ctor", W)
+            emit("  -> %s" % L(r))
+            self.wdump()
+        elif op == OP_WDTOR:
+            f = arg()
+            emit("wdtor %d" % s32(f))
+            call("dtor", W, f)
+            self.wdump()
+        elif op == OP_WDUMP:
+            emit("wdump")
+            self.wdump()
+        elif op == OP_AILIST:
+            ks = args(arg())
+            self.link(self.aihead, self.pnodes, ks)
+            emit("ailist")
+            self.walk(self.aihead, "ailist")
+        elif op == OP_OBB:
+            which, k = arg(), arg()
+            o = self.obb_at(which, k)
+            for j in range(19):
+                e.put32(o + 4 * j, arg())
+            c = s32(arg())
+            e.put32(o + 76, self.cubes[c] if c >= 0 else 0)
+            emit("obb %s" % L(o))
+        elif op == OP_OBBDUMP:
+            which = arg()
+            emit("obbdump %d" % which)
+            self.obbdump(which)
+        elif op == OP_OBBASSIGN:
+            d = self.obb_at(arg(), arg())
+            src = self.obb_at(arg(), arg())
+            emit("obbassign %s %s" % (L(d), L(src)))
+            r = call("obbassign", d, src)
+            emit("  -> %s" % L(r))
+            self.obbline(d)
+            self.obbline(src)
+        elif op == OP_OBBRENDER:
+            o = self.obb_at(arg(), arg())
+            for j in range(4):
+                e.put32(self.scratch + 4 * j, arg())
+            emit("obbrender %s" % L(o))
+            call("obbrender", o, self.scratch)
+            self.obbline(o)
+        elif op in (OP_OBBHIDE, OP_OBBINIT, OP_OBBDTOR):
+            o = self.obb_at(arg(), arg())
+            name = {OP_OBBHIDE: "obbhide", OP_OBBINIT: "obbinit",
+                    OP_OBBDTOR: "obbdtor"}[op]
+            emit("%s %s" % (name, L(o)))
+            r = call(name, o, 0)
+            if op == OP_OBBINIT:
+                emit("  -> %s" % L(r))
+            self.obbline(o)
+        elif op == OP_SETOBBS:
+            emit("setobbs")
+            call("setobbs", W, self.sm, self.so)
+            for which in range(4):
+                self.obbdump(which)
+        elif op == OP_SETDTS:
+            a, b = arg(), arg()
+            emit("setdts DT%s DT%s" % ("AB"[a], "AB"[b]))
+            call("setdts", W, self.dts[a], self.dts[b])
+        elif op == OP_RECPOT:
+            a = arg()
+            emit("recpot DT%s" % "AB"[a])
+            call("recpot", W, self.dts[a])
+        elif op == OP_RECITER:
+            it, mi, oi = s32(arg()), arg() & 0xFF, arg() & 0xFF
+            mi = mi - 256 if mi & 0x80 else mi
+            oi = oi - 256 if oi & 0x80 else oi
+            for j in range(4):
+                e.put32(self.scratch + 4 * j, arg())
+            emit("reciter %d %d %d" % (it, mi, oi))
+            call("reciter", W, it, mi, oi, self.scratch, self.scratch + 8)
+            emit("  max %d" % s32(e.u32(W + 5920)))
+            self.iterline(it)
+        elif op == OP_PREDDUMP:
+            emit("preddump")
+            emit("  max %d" % s32(e.u32(W + 5920)))
+            for k in range(NIT):
+                self.iterline(k)
+        elif op == OP_CTL:
+            k, c, d = arg(), s32(arg()), s32(arg())
+            e.put32(self.cars[k] + 40, self.ctls[c] if c >= 0 else 0)
+            e.put32(self.cars[k] + 44, self.drvs[d] if d >= 0 else 0)
+            emit("ctl CAR%d %d %d" % (k, c, d))
+        elif op == OP_SETTABLE:
+            n = arg()
+            e.put32(W + 28, n)
+            for off in (32, 36, 40):
+                e.put32(W + off, arg())
+            for j in range(n):
+                e.put32(W + 44 + 4 * j, self.cars[arg()])
+            emit("settable")
+            self.table()
+        elif op == OP_DDSET:
+            self.dd = [s32(arg()), s32(arg())]
+            emit("ddset %d %d" % tuple(self.dd))
+        elif op == OP_DEBUGDISP:
+            emit("debugdisplay")
+            call("debugdisp", W)
+        elif op == OP_AITWEAK:
+            which, v = arg(), arg()
+            e.put32(G_AITWEAKS[which], v)
+            emit("aitweak %d %d" % (which, s32(v)))
+        elif op == OP_AIDEBUG:
+            emit("aidebug")
+            call("aidebug", W)
+            emit("  it %d" % s32(e.u32(G_WHICH_IT)))
+        elif op == OP_CUBES:
+            first, n = arg(), arg()
+            emit("cubes %d %d" % (first, n))
+            self.cubedump(first, n)
+        elif op == OP_CUBE:
+            k = arg()
+            self.fresh_cube(k)
+            emit("cube WO%d" % k)
+        elif op == OP_DSEED:
+            v = arg()
+            e.put32(G_DSEED, v)
+            emit("dseed %08x" % v)
+        elif op == OP_CLOCK:
+            for g in G_CLOCK:
+                e.put32(g, arg())
+            emit("clock")
+        elif op == OP_VOTSET:
+            self.votset = s32(arg())
+            emit("votset %d" % self.votset)
+        else:
+            raise SystemExit("op %d" % op)
 
 
 FN_FLIP = FN["flip"]
@@ -1932,6 +2617,329 @@ _m("sort p next kept", "                p->next = b;\n", "", rel=BL)
 _m("sort b next kept", "                b->next->prev = b->prev;\n", "", rel=BL)
 _m("sort one node", "if (a == list || (b = a->next) == list)",
    "if (a == list || (b = a->next) == list || b->next == list)", rel=BL)
+
+
+# the constructor
+_m("ctor cars not emptied", "    empty(&w->CarList);\n", "", rel=WI)
+_m("ctor ai not emptied", "    empty(&w->AICarList);\n", "", rel=WI)
+_m("ctor collisions not emptied", "    empty(&w->CollisionList);\n", "",
+   rel=WI)
+_m("ctor my boxes kept", "        obb_init(&w->CollisionPredictionMyOBBs[k]);",
+   "        (void)k;", rel=WI)
+_m("ctor other boxes 19",
+   "    for (k = 0; k < WORLD_PREDICTION_OBBS; k++)\n"
+   "        obb_init(&w->CollisionPredictionOtherCarOBBs[k]);",
+   "    for (k = 0; k < WORLD_PREDICTION_OBBS - 1; k++)\n"
+   "        obb_init(&w->CollisionPredictionOtherCarOBBs[k]);", rel=WI)
+_m("ctor dt order",
+   "    drivetarget_init(&w->CollisionPredictionMyDriveTarget);\n"
+   "    drivetarget_init(&w->CollisionPredictionOtherCarDriveTarget);\n",
+   "    drivetarget_init(&w->CollisionPredictionOtherCarDriveTarget);\n"
+   "    drivetarget_init(&w->CollisionPredictionMyDriveTarget);\n", rel=WI)
+_m("ctor potential dt", "    drivetarget_init(&w->PotentialDriveTarget);\n",
+   "", rel=WI)
+_m("ctor world not current", "    pCurrentWorld = w;\n", "", rel=WI)
+_m("ctor clock kept", "    pCurrentWorld = w;\n    ResetWorldTime();\n",
+   "    pCurrentWorld = w;\n", rel=WI)
+_m("ctor seed range", "bRandomI(0x7fffffff, &bDefaultSeed)",
+   "bRandomI(0x7ffffffe, &bDefaultSeed)", rel=WI)
+_m("ctor seed own", "bRandomI(0x7fffffff, &bDefaultSeed)",
+   "bRandomI(0x7fffffff, &w->WorldRandomSeed)", rel=WI)
+_m("ctor count kept", "    w->TotalNumCars = 0;\n", "", rel=WI)
+_m("ctor ai pos kept", "    w->AICarPos = 0;\n", "", rel=WI)
+_m("ctor cop pos kept", "    w->CopCarPos = 0;\n", "", rel=WI)
+_m("ctor traffic pos kept", "    w->TrafficCarPos = 0;\n", "", rel=WI)
+_m("ctor potential id 0", "w->PotentialDriveTargetID = 1;",
+   "w->PotentialDriveTargetID = 0;", rel=WI)
+_m("ctor prediction id 0", "w->CollisionPredictionID = 1;",
+   "w->CollisionPredictionID = 0;", rel=WI)
+_m("ctor scale kept", "    world_reset_time_scale(w);\n", "", rel=WI)
+_m("ctor waste kept", "    w->PreviousTimeToWaste = 0.0f;\n", "", rel=WI)
+_m("ctor players kept",
+   "    memset(w->PlayerPositions, 0, sizeof w->PlayerPositions);\n", "",
+   rel=WI)
+_m("ctor players half",
+   "memset(w->PlayerPositions, 0, sizeof w->PlayerPositions);",
+   "memset(w->PlayerPositions, 0, sizeof w->PlayerPositions[0]);", rel=WI)
+_m("ctor dats kept", "    memset(w->PlayerDATs, 0, sizeof w->PlayerDATs);\n",
+   "", rel=WI)
+_m("ctor heli kept", "    w->Helicopter = NULL;\n", "", rel=WI)
+_m("ctor tele size", "bMalloc(TRAFFICTELEPORTER_SIZE, ",
+   "bMalloc(TRAFFICTELEPORTER_SIZE + 8, ", rel=WI)
+_m("ctor tele name", '"TrafficTeleporter", 0, 16)', '"Teleporter", 0, 16)',
+   rel=WI)
+_m("ctor tele flags", '"TrafficTeleporter", 0, 16)',
+   '"TrafficTeleporter", 1, 16)', rel=WI)
+_m("ctor tele pool", '"TrafficTeleporter", 0, 16)',
+   '"TrafficTeleporter", 0, 0)', rel=WI)
+_m("ctor tele from malloc", "    w->Teleporter = t;",
+   "    w->Teleporter = mem;", rel=WI)
+_m("ctor init order", "    call(gInitClansFn);\n    call(gInitSkidsFn);\n",
+   "    call(gInitSkidsFn);\n    call(gInitClansFn);\n", rel=WI)
+_m("ctor cops dropped", "    call(gInitCopsFn);\n", "", rel=WI)
+_m("ctor smokeables late",
+   "    call(gSpawnSmokeablesFn);\n    call(gInitTerrainEffectEmittersFn);\n",
+   "    call(gInitTerrainEffectEmittersFn);\n    call(gSpawnSmokeablesFn);\n",
+   rel=WI)
+_m("ctor returns null", "    call(gInitTrackGraphFn);\n    return w;",
+   "    call(gInitTrackGraphFn);\n    return NULL;", rel=WI)
+
+# the destructor
+_m("dtor close order",
+   "    call(gCleanupCopsFn);\n    call(gCleanupTrackGraphFn);\n",
+   "    call(gCleanupTrackGraphFn);\n    call(gCleanupCopsFn);\n", rel=WI)
+_m("dtor witnesses kept", "    cbwitness_eliminate_all();\n", "", rel=WI)
+_m("dtor witnesses late",
+   "    cbwitness_eliminate_all();\n    call(gClearSmokeablesFn);\n",
+   "    call(gClearSmokeablesFn);\n    cbwitness_eliminate_all();\n", rel=WI)
+_m("dtor carfx dropped", "    call(gCloseCarEffectsFn);\n", "", rel=WI)
+_m("dtor tele flags", "gTrafficTeleporterDestroyFn(w->Teleporter, 3);",
+   "gTrafficTeleporterDestroyFn(w->Teleporter, 1);", rel=WI)
+_m("dtor tele always", "    if (w->Teleporter != NULL) {",
+   "    if (1) {", rel=WI)
+_m("dtor clock kept", "    ResetWorldTime();\n    pCurrentWorld = NULL;",
+   "    pCurrentWorld = NULL;", rel=WI)
+_m("dtor world kept", "    pCurrentWorld = NULL;\n", "", rel=WI)
+_m("dtor loop count", "WorldLoopCounter = 100000;",
+   "WorldLoopCounter = 99999;", rel=WI)
+_m("dtor dt order",
+   "    drivetarget_destroy(&w->PotentialDriveTarget);\n"
+   "    drivetarget_destroy(&w->CollisionPredictionOtherCarDriveTarget);\n",
+   "    drivetarget_destroy(&w->CollisionPredictionOtherCarDriveTarget);\n"
+   "    drivetarget_destroy(&w->PotentialDriveTarget);\n", rel=WI)
+_m("dtor my dt kept",
+   "    drivetarget_destroy(&w->CollisionPredictionMyDriveTarget);\n", "",
+   rel=WI)
+_m("dtor boxes forward",
+   "    for (k = WORLD_PREDICTION_OBBS - 1; k >= 0; k--)\n"
+   "        obb_destroy(&w->CollisionPredictionOtherCarOBBs[k]);",
+   "    for (k = 0; k < WORLD_PREDICTION_OBBS; k++)\n"
+   "        obb_destroy(&w->CollisionPredictionOtherCarOBBs[k]);", rel=WI)
+_m("dtor boxes mine first",
+   "        obb_destroy(&w->CollisionPredictionOtherCarOBBs[k]);\n"
+   "    for (k = WORLD_PREDICTION_OBBS - 1; k >= 0; k--)\n"
+   "        obb_destroy(&w->CollisionPredictionMyOBBs[k]);",
+   "        obb_destroy(&w->CollisionPredictionMyOBBs[k]);\n"
+   "    for (k = WORLD_PREDICTION_OBBS - 1; k >= 0; k--)\n"
+   "        obb_destroy(&w->CollisionPredictionOtherCarOBBs[k]);", rel=WI)
+_m("dtor boxes 19",
+   "    for (k = WORLD_PREDICTION_OBBS - 1; k >= 0; k--)\n"
+   "        obb_destroy(&w->CollisionPredictionMyOBBs[k]);",
+   "    for (k = WORLD_PREDICTION_OBBS - 1; k > 0; k--)\n"
+   "        obb_destroy(&w->CollisionPredictionMyOBBs[k]);", rel=WI)
+_m("dtor lists order",
+   "    drain_list(&w->CollisionList, destroy_collision);\n"
+   "    drain_list(&w->AICarList, destroy_pnode);\n",
+   "    drain_list(&w->AICarList, destroy_pnode);\n"
+   "    drain_list(&w->CollisionList, destroy_collision);\n", rel=WI)
+_m("dtor cars kept", "    drain_list(&w->CarList, destroy_car);\n", "",
+   rel=WI)
+_m("dtor free always", "    if (flags & 1)\n        bFree(w);",
+   "    if (flags)\n        bFree(w);", rel=WI)
+_m("dtor free bit 1", "    if (flags & 1)\n        bFree(w);",
+   "    if (flags & 2)\n        bFree(w);", rel=WI)
+_m("drain node reset", "        next->prev = prev;\n        destroy(n);",
+   "        next->prev = prev;\n        n->next = n;\n        destroy(n);",
+   rel=WI)
+_m("drain next kept", "        next->prev = prev;\n        destroy(n);",
+   "        destroy(n);", rel=WI)
+_m("drain prev kept", "        prev->next = next;\n", "", rel=WI)
+_m("drain from tail", "while ((n = (WorldList *)head->next) != head)",
+   "while ((n = (WorldList *)head->prev) != head)", rel=WI)
+_m("collision flags", "collision_destroy((Collision *)node, 3);",
+   "collision_destroy((Collision *)node, 1);", rel=WI)
+_m("car flags", "gCarDestroyFn((struct Car *)node, 3);",
+   "gCarDestroyFn((struct Car *)node, 2);", rel=WI)
+
+# the debug display
+_m("dd from zero", "struct Car *c = w->CarTable[w->AICarPos + i];",
+   "struct Car *c = w->CarTable[i];", rel=WI)
+_m("dd to traffic", "for (i = 0; i < w->CopCarPos - w->AICarPos; i++) {",
+   "for (i = 0; i < w->TrafficCarPos - w->AICarPos; i++) {", rel=WI)
+_m("dd <=", "for (i = 0; i < w->CopCarPos - w->AICarPos; i++) {",
+   "for (i = 0; i <= w->CopCarPos - w->AICarPos; i++) {", rel=WI)
+_m("dd cop cached", "for (i = 0; i < w->CopCarPos - w->AICarPos; i++) {",
+   "for (int32_t cop_ = (i = 0, w->CopCarPos); i < cop_ - w->AICarPos; "
+   "i++) {", rel=WI)
+_m("dd ai cached",
+   "for (i = 0; i < w->CopCarPos - w->AICarPos; i++) {\n"
+   "        struct Car *c = w->CarTable[w->AICarPos + i];",
+   "for (int32_t ai_ = (i = 0, w->AICarPos); i < w->CopCarPos - "
+   "w->AICarPos; i++) {\n"
+   "        struct Car *c = w->CarTable[ai_ + i];", rel=WI)
+_m("dd null not skipped", "        if (ctrl == NULL)\n            continue;\n",
+   "", rel=WI)
+_m("dd slot", "vt_slot(ctrl->_vtable, CARCONTROLLER_VT_DEBUG_DISPLAY)",
+   "vt_slot(ctrl->_vtable, CARCONTROLLER_VT_DO_SNAPSHOT)", rel=WI)
+_m("dd this", "((DebugDisplayFn)e->fn)(vt_this(ctrl, e));",
+   "((DebugDisplayFn)e->fn)(ctrl);", rel=WI)
+
+# the recorders
+_m("setobbs order",
+   "        obb_assign(&w->CollisionPredictionMyOBBs[k], &mine[k]);\n"
+   "        obb_assign(&w->CollisionPredictionOtherCarOBBs[k], &other[k]);",
+   "        obb_assign(&w->CollisionPredictionOtherCarOBBs[k], &other[k]);\n"
+   "        obb_assign(&w->CollisionPredictionMyOBBs[k], &mine[k]);", rel=WI)
+_m("setobbs crossed",
+   "obb_assign(&w->CollisionPredictionMyOBBs[k], &mine[k]);",
+   "obb_assign(&w->CollisionPredictionMyOBBs[k], &other[k]);", rel=WI)
+_m("setobbs 19", "    for (k = 0; k < WORLD_PREDICTION_OBBS; k++) {\n"
+   "        obb_assign(",
+   "    for (k = 0; k < WORLD_PREDICTION_OBBS - 1; k++) {\n"
+   "        obb_assign(", rel=WI)
+_m("setobbs first only", "&w->CollisionPredictionOtherCarOBBs[k], &other[k]",
+   "&w->CollisionPredictionOtherCarOBBs[k], &other[0]", rel=WI)
+_m("setdts crossed",
+   "drivetarget_assign(&w->CollisionPredictionMyDriveTarget, mine);",
+   "drivetarget_assign(&w->CollisionPredictionMyDriveTarget, other);",
+   rel=WI)
+_m("setdts order",
+   "    drivetarget_assign(&w->CollisionPredictionMyDriveTarget, mine);\n"
+   "    drivetarget_assign(&w->CollisionPredictionOtherCarDriveTarget, "
+   "other);",
+   "    drivetarget_assign(&w->CollisionPredictionOtherCarDriveTarget, "
+   "other);\n"
+   "    drivetarget_assign(&w->CollisionPredictionMyDriveTarget, mine);",
+   rel=WI)
+_m("recpot target", "drivetarget_assign(&w->PotentialDriveTarget, t);",
+   "drivetarget_assign(&w->CollisionPredictionMyDriveTarget, t);", rel=WI)
+_m("reciter my index", "w->CollisionPredictionMyIndicies[i] = mine_index;",
+   "w->CollisionPredictionMyIndicies[i] = other_index;", rel=WI)
+_m("reciter other index",
+   "w->CollisionPredictionOtherCarIndicies[i] = other_index;",
+   "w->CollisionPredictionOtherCarIndicies[i] = mine_index;", rel=WI)
+_m("reciter max + 1", "w->CollisionPredictionMaxLoopCounter = i;",
+   "w->CollisionPredictionMaxLoopCounter = i + 1;", rel=WI)
+_m("reciter max kept", "    w->CollisionPredictionMaxLoopCounter = i;\n",
+   "", rel=WI)
+_m("reciter my pos", "w->CollisionPredictionMyPositions[i] = *mine;",
+   "w->CollisionPredictionMyPositions[i] = *other;", rel=WI)
+_m("reciter other pos", "w->CollisionPredictionOtherCarPositions[i] = *other;",
+   "w->CollisionPredictionOtherCarPositions[i] = *mine;", rel=WI)
+
+# UpdateAIDebugRendering
+_m("render other not hidden",
+   "        obb_do_not_render(&w->CollisionPredictionOtherCarOBBs[k]);\n", "",
+   rel=WI)
+_m("render hide 19", "    for (k = 0; k < WORLD_PREDICTION_OBBS; k++) {\n"
+   "        obb_do_not_render(",
+   "    for (k = 1; k < WORLD_PREDICTION_OBBS; k++) {\n"
+   "        obb_do_not_render(", rel=WI)
+_m("render <=", "if (w->CollisionPredictionMaxLoopCounter < it)",
+   "if (w->CollisionPredictionMaxLoopCounter <= it)", rel=WI)
+_m("render no max test", "if (w->CollisionPredictionMaxLoopCounter < it)",
+   "if (0)", rel=WI)
+_m("render it not reread",
+   "    it = WhichCollisionPredictionIterationToRender;\n"
+   "    get_vector_on_track(&other,",
+   "    get_vector_on_track(&other,", rel=WI)
+_m("render indices late",
+   "    mi = w->CollisionPredictionMyIndicies[it];\n"
+   "    oi = w->CollisionPredictionOtherCarIndicies[it];\n"
+   "    get_vector_on_track(&mine, &w->CollisionPredictionMyPositions[it]);\n"
+   "    it = WhichCollisionPredictionIterationToRender;\n",
+   "    get_vector_on_track(&mine, &w->CollisionPredictionMyPositions[it]);\n"
+   "    it = WhichCollisionPredictionIterationToRender;\n"
+   "    mi = w->CollisionPredictionMyIndicies[it];\n"
+   "    oi = w->CollisionPredictionOtherCarIndicies[it];\n", rel=WI)
+_m("render my index", "mi = w->CollisionPredictionMyIndicies[it];",
+   "mi = w->CollisionPredictionOtherCarIndicies[it];", rel=WI)
+_m("render other index", "oi = w->CollisionPredictionOtherCarIndicies[it];",
+   "oi = w->CollisionPredictionMyIndicies[it];", rel=WI)
+_m("render my pos",
+   "get_vector_on_track(&mine, &w->CollisionPredictionMyPositions[it]);",
+   "get_vector_on_track(&mine, &w->CollisionPredictionOtherCarPositions[it]);",
+   rel=WI)
+_m("render boxes crossed",
+   "obb_render(&w->CollisionPredictionMyOBBs[mi], &mine);",
+   "obb_render(&w->CollisionPredictionMyOBBs[mi], &other);", rel=WI)
+_m("render other box", "obb_render(&w->CollisionPredictionOtherCarOBBs[oi],",
+   "obb_render(&w->CollisionPredictionOtherCarOBBs[mi],", rel=WI)
+_m("aidebug unpaused", "    if (!TweakerPauseWorld)\n        return;\n", "",
+   rel=WI)
+_m("aidebug > 0", "if (WhichCollisionPredictionIterationToRender >= 0)",
+   "if (WhichCollisionPredictionIterationToRender > 0)", rel=WI)
+_m("aidebug no boxes", "        render_iteration(w);", "        (void)0;",
+   rel=WI)
+_m("aidebug my first",
+   "    if (RenderChosenPotentialDriveTarget) {\n"
+   "        t = &w->PotentialDriveTarget;\n"
+   "    } else if (RenderMyCarDriveTarget) {\n"
+   "        t = &w->CollisionPredictionMyDriveTarget;\n",
+   "    if (RenderMyCarDriveTarget) {\n"
+   "        t = &w->CollisionPredictionMyDriveTarget;\n"
+   "    } else if (RenderChosenPotentialDriveTarget) {\n"
+   "        t = &w->PotentialDriveTarget;\n", rel=WI)
+_m("aidebug my is other", "        t = &w->CollisionPredictionMyDriveTarget;",
+   "        t = &w->CollisionPredictionOtherCarDriveTarget;", rel=WI)
+_m("aidebug other is potential",
+   "        t = &w->CollisionPredictionOtherCarDriveTarget;",
+   "        t = &w->PotentialDriveTarget;", rel=WI)
+_m("aidebug car >= 0", "WhichCarsRegisteredDriveTargetToRender != -1",
+   "WhichCarsRegisteredDriveTargetToRender >= 0", rel=WI)
+_m("aidebug controller", "(DriveTarget *)(void *)c->pCarDriver",
+   "(DriveTarget *)(void *)c->pCarController", rel=WI)
+_m("aidebug no car potential",
+   "(DriveTarget *)(void *)c->pCarDriver : NULL;",
+   "(DriveTarget *)(void *)c->pCarDriver : &w->PotentialDriveTarget;",
+   rel=WI)
+_m("aidebug renderer", "set_target_to_render(&TheDriveTargetRenderer, t);",
+   "set_target_to_render(NULL, t);", rel=WI)
+
+# OBB
+_m("obb init keeps", "    o->WorldObj = NULL;\n    return o;",
+   "    return o;", rel=OB)
+_m("obb init null", "    o->WorldObj = NULL;\n    return o;",
+   "    o->WorldObj = NULL;\n    return NULL;", rel=OB)
+_m("obb dtor clears", "        delete_cube(o->WorldObj);\n}\n\nOBB *obb_assign",
+   "        delete_cube(o->WorldObj);\n    o->WorldObj = NULL;\n}\n\n"
+   "OBB *obb_assign", rel=OB)
+_m("obb dtor keeps",
+   "    if (o->WorldObj != NULL)\n        delete_cube(o->WorldObj);\n}\n\n"
+   "OBB *obb_assign", "}\n\nOBB *obb_assign", rel=OB)
+_m("assign position", "    dst->A0 = src->A0;",
+   "    dst->Position = src->Position;\n    dst->A0 = src->A0;", rel=OB)
+_m("assign A0 from A1", "dst->A0 = src->A0;", "dst->A0 = src->A1;", rel=OB)
+_m("assign A2 kept", "    dst->A2 = src->A2;\n", "", rel=OB)
+_m("assign a0 from a1", "dst->a0 = src->a0;", "dst->a0 = src->a1;", rel=OB)
+_m("assign a2 kept", "    dst->a2 = src->a2;\n", "", rel=OB)
+_m("assign no delete",
+   "    if (dst->WorldObj != NULL)\n        delete_cube(dst->WorldObj);\n", "",
+   rel=OB)
+_m("assign src keeps", "    src->WorldObj = NULL;\n", "", rel=OB)
+_m("assign src first",
+   "    dst->WorldObj = src->WorldObj;\n    src->WorldObj = NULL;",
+   "    src->WorldObj = NULL;\n    dst->WorldObj = src->WorldObj;", rel=OB)
+_m("assign returns src", "    return dst;", "    return src;", rel=OB)
+_m("render scale once", "m.v0 = scaled(&o->A0, o->a0 + o->a0);",
+   "m.v0 = scaled(&o->A0, o->a0);", rel=OB)
+_m("render a1 is a0", "m.v1 = scaled(&o->A1, o->a1 + o->a1);",
+   "m.v1 = scaled(&o->A1, o->a0 + o->a0);", rel=OB)
+_m("render a2 axis", "m.v2 = scaled(&o->A2, o->a2 + o->a2);",
+   "m.v2 = scaled(&o->A1, o->a2 + o->a2);", rel=OB)
+_m("render w unscaled", "    v.w = a->pad * s;", "    v.w = a->pad;", rel=OB)
+_m("render w zero", "    v.w = a->pad * s;", "    v.w = 0.0f;", rel=OB)
+_m("render z is y", "    v.z = a->z * s;", "    v.z = a->y * s;", rel=OB)
+_m("render mul order", "eMulMatrix(&out, &m, &id);",
+   "eMulMatrix(&out, &id, &m);", rel=OB)
+_m("render pos z", "    out.v3.z = pos->z;", "    out.v3.z = pos->y;", rel=OB)
+_m("render pos w", "    out.v3.z = pos->z;",
+   "    out.v3.z = pos->z;\n    out.v3.w = pos->pad;", rel=OB)
+_m("render pos x kept", "    out.v3.x = pos->x;\n", "", rel=OB)
+_m("render hash", "gWorldObjectNewFn(OBB_DEBUG_CUBE_HASH, NULL, 0)",
+   "gWorldObjectNewFn(OBB_DEBUG_CUBE_HASH ^ 1, NULL, 0)", rel=OB)
+_m("render lit", "gWorldObjectNewFn(OBB_DEBUG_CUBE_HASH, NULL, 0)",
+   "gWorldObjectNewFn(OBB_DEBUG_CUBE_HASH, NULL, 1)", rel=OB)
+_m("render always new", "    if (o->WorldObj == NULL) {\n        if (gWorldObjectNewFn",
+   "    if (1) {\n        if (gWorldObjectNewFn", rel=OB)
+_m("render matrix kept", "    o->WorldObj->Matrix = out;\n", "", rel=OB)
+_m("render enabled 2", "    o->WorldObj->Enabled = 1;",
+   "    o->WorldObj->Enabled = 2;", rel=OB)
+_m("hide enables", "        o->WorldObj->Enabled = 0;",
+   "        o->WorldObj->Enabled = 1;", rel=OB)
+_m("hide no test",
+   "    if (o->WorldObj != NULL)\n        o->WorldObj->Enabled = 0;",
+   "    o->WorldObj->Enabled = 0;", rel=OB)
 
 
 EQUIVALENT = {

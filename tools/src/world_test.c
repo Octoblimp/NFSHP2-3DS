@@ -16,6 +16,18 @@
 // is the port's stack. Every function the step calls outside worldstep.c
 // is this file's, and logs.
 //
+// World's constructor, destructor, prediction and debug views
+// (worldinit.c), with obb.c and emath.c, add: ailist, the AI list's head;
+// MY0..MY19 and OT0..OT19 the World's boxes, SM0..SM19 and SO0..SO19 the
+// two arrays a script hands CollisionPredictionSetOBBs; DTM, DTO and DTP
+// the World's drive targets, DTA and DTB two to copy in; WO0..WO127 the
+// debug cubes (a new one is the next from 0, a script's from 64 up);
+// PN0..PN7 the AI list's nodes; CTL0..CTL3 the controllers, on a second
+// recording vtable whose DebugDisplay takes `this` eight bytes in, and
+// DRV0..DRV13 the cars' drivers; MYPOS0..39 and OTPOS0..39 the recorded
+// positions; DTR the drive target renderer; TTMEM the teleporter's
+// memory; and dirty a pointer still holding the 0xA5 fill.
+//
 //     world_test script.txt > out.txt
 
 #include <stddef.h>
@@ -25,16 +37,22 @@
 #include <string.h>
 
 #include "blist.h"
+#include "bmath.h"
+#include "bmem.h"
+#include "bplist.h"
 #include "bticker.h"
 #include "car.h"
+#include "carcontroller.h"
 #include "collision.h"
 #include "collisionbody.h"
+#include "drivetargetrenderer.h"
 #include "joylog.h"
 #include "player.h"
 #include "race.h"
 #include "realtime.h"
 #include "replay.h"
 #include "smokeable.h"
+#include "topology.h"
 #include "trackpath.h"
 #include "vtable.h"
 #include "world.h"
@@ -48,7 +66,11 @@ enum {
     OP_LOOP, OP_BODY, OP_BODYLIST, OP_MOVE, OP_WIT, OP_WITLIST, OP_CREATEQ,
     OP_CONTACT, OP_TESTQ, OP_BREAKQ, OP_COL, OP_COLLIST, OP_COLLIDE,
     OP_STATE, OP_RC, OP_PTRS, OP_STEP, OP_FLUSH, OP_PPOS, OP_DRAIN,
-    OP_SHAKEFLIP,
+    OP_SHAKEFLIP, OP_WFILL, OP_WCTOR, OP_WDTOR, OP_WDUMP, OP_AILIST, OP_OBB,
+    OP_OBBDUMP, OP_OBBASSIGN, OP_OBBRENDER, OP_OBBHIDE, OP_OBBINIT,
+    OP_OBBDTOR, OP_SETOBBS, OP_SETDTS, OP_RECPOT, OP_RECITER, OP_PREDDUMP,
+    OP_CTL, OP_SETTABLE, OP_DDSET, OP_DEBUGDISP, OP_AITWEAK, OP_AIDEBUG,
+    OP_CUBES, OP_CUBE, OP_DSEED, OP_CLOCK, OP_VOTSET,
 };
 
 #define NCAR 14
@@ -59,6 +81,11 @@ enum {
 
 #define FAKE_VT 0x01F00000u
 #define DELTA   8
+
+#define NP       8
+#define NCUBE    128
+#define NCTL     4
+#define FAKE_VT2 0x01F00100u
 
 // collisionbody.c's and trackpath.c's; the harness links neither.
 CollisionBodyNode        CollisionBodyList;
@@ -88,6 +115,21 @@ static uint32_t csum[NCAR];
 static int32_t vfx[NCAR];
 static int32_t expired[NW];
 static int32_t update_v[NC];
+
+// World's constructor and so on.
+static _Alignas(16) OBB sm[WORLD_PREDICTION_OBBS];
+static _Alignas(16) OBB so[WORLD_PREDICTION_OBBS];
+static _Alignas(16) WorldObject cubes[NCUBE];
+static int cube_dead[NCUBE];
+static int next_cube;
+static bPNode pnodes[NP];
+static CarController ctls[NCTL];
+static int32_t drv_obj[NCAR][4];
+static DriveTarget dts[2];
+static _Alignas(16) uint8_t ttmem[TRAFFICTELEPORTER_SIZE];
+static int32_t dd_ai = -1, dd_cop = -1;    // what DebugDisplay moves to
+static int32_t vot_set = -1;               // and GetVectorOnTrack
+DriveTargetRenderer TheDriveTargetRenderer;
 
 // The queues. Each is a ring the script fills and the stubs empty.
 #define QN 8192
@@ -128,6 +170,9 @@ static void drain(void)
     placeq.head = placeq.tail = 0;
     breakq.head = breakq.tail = 0;
     shake_flip = -1;
+    next_cube = 0;
+    dd_ai = dd_cop = -1;
+    vot_set = -1;
 }
 
 static uint32_t next(void)
@@ -197,6 +242,75 @@ static const char *label(const void *p)
         return "HELI";
     if (p == (const void *)(uintptr_t)cb)
         return "CB";
+    if (p == (const void *)&world.AICarList)
+        return "ailist";
+    if (p == (const void *)&world.CollisionPredictionMyDriveTarget)
+        return "DTM";
+    if (p == (const void *)&world.CollisionPredictionOtherCarDriveTarget)
+        return "DTO";
+    if (p == (const void *)&world.PotentialDriveTarget)
+        return "DTP";
+    if (p == (const void *)&dts[0])
+        return "DTA";
+    if (p == (const void *)&dts[1])
+        return "DTB";
+    if (p == (const void *)&TheDriveTargetRenderer)
+        return "DTR";
+    if (p == (const void *)ttmem)
+        return "TTMEM";
+    {
+        uintptr_t fill;
+
+        memset(&fill, 0xA5, sizeof fill);
+        if ((uintptr_t)p == fill)
+            return "dirty";
+    }
+    for (i = 0; i < WORLD_PREDICTION_OBBS; i++) {
+        const char *pre = NULL;
+
+        if (p == (const void *)&world.CollisionPredictionMyOBBs[i])
+            pre = "MY";
+        else if (p == (const void *)&world.CollisionPredictionOtherCarOBBs[i])
+            pre = "OT";
+        else if (p == (const void *)&sm[i])
+            pre = "SM";
+        else if (p == (const void *)&so[i])
+            pre = "SO";
+        if (pre != NULL) {
+            snprintf(b, 32, "%s%d", pre, i);
+            return b;
+        }
+    }
+    for (i = 0; i < WORLD_PREDICTION_ITERATIONS; i++) {
+        if (p == (const void *)&world.CollisionPredictionMyPositions[i]) {
+            snprintf(b, 32, "MYPOS%d", i);
+            return b;
+        }
+        if (p == (const void *)&world.CollisionPredictionOtherCarPositions[i]) {
+            snprintf(b, 32, "OTPOS%d", i);
+            return b;
+        }
+    }
+    for (i = 0; i < NCUBE; i++)
+        if (p == (const void *)&cubes[i]) {
+            snprintf(b, 32, "WO%d", i);
+            return b;
+        }
+    for (i = 0; i < NP; i++)
+        if (p == (const void *)&pnodes[i]) {
+            snprintf(b, 32, "PN%d", i);
+            return b;
+        }
+    for (i = 0; i < NCTL; i++)
+        if (p == (const void *)&ctls[i]) {
+            snprintf(b, 32, "CTL%d", i);
+            return b;
+        }
+    for (i = 0; i < NCAR; i++)
+        if (p == (const void *)drv_obj[i]) {
+            snprintf(b, 32, "DRV%d", i);
+            return b;
+        }
     for (i = 0; i < NCAR; i++) {
         if (p == (const void *)cars[i]) {
             snprintf(b, 32, "CAR%d", i);
@@ -621,6 +735,180 @@ void collision_end(Collision *c)
     kill_node(c);
 }
 
+// ------------------------------------------- the constructor's stubs
+
+#define LOGSEAM(fn, text) \
+    static void fn(void) \
+    { \
+        printf("  " text "\n"); \
+    }
+
+LOGSEAM(seam_init_carfx, "init carfx")
+LOGSEAM(seam_init_clans, "init clans")
+LOGSEAM(seam_init_skids, "init skids")
+LOGSEAM(seam_init_particles, "init particles")
+LOGSEAM(seam_init_munitions, "init munitions")
+LOGSEAM(seam_init_fernflat, "init fernflat")
+LOGSEAM(seam_init_fernshake, "init fernshake")
+LOGSEAM(seam_spawn_smokeables, "spawn smokeables")
+LOGSEAM(seam_init_terrainfx, "init terrainfx")
+LOGSEAM(seam_init_cops, "init cops")
+LOGSEAM(seam_init_trackgraph, "init trackgraph")
+LOGSEAM(seam_close_terrainfx, "close terrainfx")
+LOGSEAM(seam_cleanup_cops, "cleanup cops")
+LOGSEAM(seam_cleanup_trackgraph, "cleanup trackgraph")
+LOGSEAM(seam_clear_smokeables, "clear smokeables")
+LOGSEAM(seam_close_fernshake, "close fernshake")
+LOGSEAM(seam_close_fernflat, "close fernflat")
+LOGSEAM(seam_close_munitions, "close munitions")
+LOGSEAM(seam_close_particles, "close particles")
+LOGSEAM(seam_close_clans, "close clans")
+LOGSEAM(seam_close_skids, "close skids")
+LOGSEAM(seam_close_carfx, "close carfx")
+
+void cbwitness_eliminate_all(void)
+{
+    printf("  eliminate witnesses\n");
+}
+
+void *bMalloc(int size, const char *name, int flags, int pool)
+{
+    printf("  malloc %d %s %d %d -> %s\n", size, name, flags, pool,
+           label(ttmem));
+    return ttmem;
+}
+
+void bFree(void *p)
+{
+    printf("  free %s\n", label(p));
+}
+
+static struct TrafficTeleporter *seam_tele_ctor(void *mem)
+{
+    printf("  teleporter ctor %s -> %s\n", label(mem), label(tele_obj));
+    return (struct TrafficTeleporter *)(void *)tele_obj;
+}
+
+static void seam_tele_dtor(struct TrafficTeleporter *t, int32_t flags)
+{
+    printf("  teleporter dtor %s %d\n", label(t), flags);
+}
+
+// A list's destructor hands each node over unlinked from the list but with
+// its own links as they were: they are printed, then poisoned.
+static void gone(const char *what, void *p, int32_t flags)
+{
+    void **n = p;
+
+    if (flags >= 0)
+        printf("  %s %s %d links %s %s\n", what, label(p), flags,
+               label(n[0]), label(n[1]));
+    else
+        printf("  %s %s links %s %s\n", what, label(p), label(n[0]),
+               label(n[1]));
+    n[0] = NULL;
+    n[1] = NULL;
+}
+
+static void seam_car_destroy(struct Car *c, int32_t flags)
+{
+    gone("destroy car", c, flags);
+}
+
+void collision_destroy(Collision *c, int32_t flags)
+{
+    gone("destroy collision", c, flags);
+}
+
+void bpnode_free(void *p)
+{
+    gone("free pnode", p, -1);
+}
+
+DriveTarget *drivetarget_init(DriveTarget *t)
+{
+    printf("  dt init %s\n", label(t));
+    return t;
+}
+
+void drivetarget_destroy(DriveTarget *t)
+{
+    printf("  dt destroy %s\n", label(t));
+}
+
+DriveTarget *drivetarget_assign(DriveTarget *dst, const DriveTarget *src)
+{
+    printf("  dt assign %s %s\n", label(dst), label(src));
+    return dst;
+}
+
+void drivetargetrenderer_set_target_to_render(DriveTargetRenderer *r,
+                                              DriveTarget *t)
+{
+    printf("  target %s %s\n", label(r), label(t));
+}
+
+// A point on the ground: the two lanes swapped and x negated in the third,
+// so the two calls and the two lanes all show.
+void get_vector_on_track(bVector3 *out, const bVector2 *in)
+{
+    printf("  vot %s %08x %08x\n", label(in), fb(in->x), fb(in->y));
+    out->x = in->y;
+    out->y = in->x;
+    out->z = as_float(fb(in->x) ^ 0x80000000u);
+    if (vot_set != -1) {
+        WhichCollisionPredictionIterationToRender = vot_set;
+        vot_set = -1;
+    }
+}
+
+static void fresh_cube(int k)
+{
+    uint32_t *m = (uint32_t *)(void *)&cubes[k].Matrix;
+    int j;
+
+    cubes[k].Enabled = 7;
+    for (j = 0; j < 16; j++)
+        m[j] = 0x5A5A0000u + (uint32_t)(k << 4) + (uint32_t)j;
+    cube_dead[k] = 0;
+}
+
+static WorldObject *seam_wo_new(uint32_t hash, const bMatrix4 *m,
+                                int32_t light)
+{
+    int k = next_cube++;
+
+    printf("  new cube %s hash %08x matrix %s light %d\n", label(&cubes[k]),
+           hash, label(m), light);
+    fresh_cube(k);
+    return &cubes[k];
+}
+
+static void seam_wo_delete(WorldObject *o)
+{
+    printf("  delete cube %s 3\n", label(o));
+    cube_dead[o - cubes] = 1;
+}
+
+static void debug_display(void *self)
+{
+    const char *p = (const char *)self - DELTA;
+    int i;
+
+    for (i = 0; i < NCTL; i++)
+        if (p == (const char *)&ctls[i]) {
+            printf("  debugdisplay CTL%d\n", i);
+            if (dd_ai >= 0)
+                world.AICarPos = dd_ai;
+            if (dd_cop >= 0)
+                world.CopCarPos = dd_cop;
+            dd_ai = dd_cop = -1;
+            return;
+        }
+    fprintf(stderr, "a debug display on a stranger\n");
+    exit(3);
+}
+
 // ------------------------------------------------------------ the dumps
 
 static void walk(const void *head, const char *name)
@@ -684,6 +972,102 @@ static void postable(void)
                fb(world.CarPositionTable[i].y),
                fb(world.CarPositionTable[i].z),
                fb(world.CarPositionTable[i].pad));
+}
+
+static void vec3(const bVector3 *v)
+{
+    printf(" %08x %08x %08x %08x", fb(v->x), fb(v->y), fb(v->z), fb(v->pad));
+}
+
+static void wdump(void)
+{
+    int k;
+
+    walk(&world.CarList, "cars");
+    walk(&world.AICarList, "ailist");
+    walk(&world.CollisionList, "collisions");
+    printf("  counts n %d ai %d cop %d traffic %d ids %u %u heli %s tele %s\n",
+           world.TotalNumCars, world.AICarPos, world.CopCarPos,
+           world.TrafficCarPos, world.CollisionPredictionID,
+           world.PotentialDriveTargetID, label(world.Helicopter),
+           label(world.Teleporter));
+    state();
+    printf("  globals world %s timer %08x secs %08x time %08x frames %08x"
+           " elapsed %08x frame %08x loop %08x dseed %08x\n",
+           label(pCurrentWorld), (uint32_t)WorldTimer, fb(WorldTimeSeconds),
+           (uint32_t)WorldTime, (uint32_t)WorldTimeFrames,
+           fb(WorldTimeElapsed), fb(WorldTimeElapsedFrame),
+           (uint32_t)WorldLoopCounter, bDefaultSeed);
+    printf("  untouched %s %s %08x %08x\n", label(world.CarTable[0]),
+           label(world.CarTable[WORLD_MAX_CARS - 1]),
+           fb(world.CarPositionTable[0].x),
+           fb(world.CarPositionTable[WORLD_MAX_CARS - 1].pad));
+    printf("  cubes MY");
+    for (k = 0; k < WORLD_PREDICTION_OBBS; k++)
+        printf(" %s", label(world.CollisionPredictionMyOBBs[k].WorldObj));
+    printf(" OT");
+    for (k = 0; k < WORLD_PREDICTION_OBBS; k++)
+        printf(" %s", label(world.CollisionPredictionOtherCarOBBs[k].WorldObj));
+    printf("\n");
+}
+
+static OBB *obb_at(uint32_t which, uint32_t k)
+{
+    switch (which) {
+    case 0:
+        return &world.CollisionPredictionMyOBBs[k];
+    case 1:
+        return &world.CollisionPredictionOtherCarOBBs[k];
+    case 2:
+        return &sm[k];
+    default:
+        return &so[k];
+    }
+}
+
+static void obbline(const OBB *o)
+{
+    printf("  %s", label(o));
+    vec3(&o->Position);
+    vec3(&o->A0);
+    vec3(&o->A1);
+    vec3(&o->A2);
+    printf(" %08x %08x %08x %s\n", fb(o->a0), fb(o->a1), fb(o->a2),
+           label(o->WorldObj));
+}
+
+static void obbdump(uint32_t which)
+{
+    int k;
+
+    for (k = 0; k < WORLD_PREDICTION_OBBS; k++)
+        obbline(obb_at(which, (uint32_t)k));
+}
+
+static void iterline(int k)
+{
+    printf("  it %d %d %d %08x %08x %08x %08x\n", k,
+           world.CollisionPredictionMyIndicies[k],
+           world.CollisionPredictionOtherCarIndicies[k],
+           fb(world.CollisionPredictionMyPositions[k].x),
+           fb(world.CollisionPredictionMyPositions[k].y),
+           fb(world.CollisionPredictionOtherCarPositions[k].x),
+           fb(world.CollisionPredictionOtherCarPositions[k].y));
+}
+
+static void cubedump(int first, int n)
+{
+    int k, j;
+
+    for (k = first; k < first + n; k++) {
+        const uint32_t *m = (const uint32_t *)(const void *)&cubes[k].Matrix;
+
+        printf("  WO%d %s en %d", k, cube_dead[k] ? "dead" : "live",
+               cubes[k].Enabled);
+        for (j = 0; j < 16; j++)
+            printf(" %08x", m[j]);
+        printf("\n");
+    }
 }
 
 static void relink(void *head, void *objs, size_t size, int n)
@@ -1058,6 +1442,249 @@ static void step(uint32_t op)
         world.PlayerDATs[a] = as_float(next());
         printf("ppos %u\n", a);
         break;
+    case OP_WFILL:
+        memset(&world, 0xA5, sizeof world);
+        printf("wfill\n");
+        break;
+    case OP_WCTOR: {
+        World *r;
+
+        printf("wctor\n");
+        r = world_init(&world);
+        printf("  -> %s\n", label(r));
+        wdump();
+        break;
+    }
+    case OP_WDTOR:
+        a = next();
+        printf("wdtor %d\n", (int32_t)a);
+        world_destroy(&world, (int32_t)a);
+        wdump();
+        break;
+    case OP_WDUMP:
+        printf("wdump\n");
+        wdump();
+        break;
+    case OP_AILIST:
+        relink(&world.AICarList, pnodes, sizeof pnodes[0], (int)next());
+        printf("ailist\n");
+        walk(&world.AICarList, "ailist");
+        break;
+    case OP_OBB: {
+        OBB *o;
+        bVector3 *v[4];
+        int j;
+
+        a = next();
+        b = next();
+        o = obb_at(a, b);
+        v[0] = &o->Position;
+        v[1] = &o->A0;
+        v[2] = &o->A1;
+        v[3] = &o->A2;
+        for (j = 0; j < 4; j++) {
+            v[j]->x = as_float(next());
+            v[j]->y = as_float(next());
+            v[j]->z = as_float(next());
+            v[j]->pad = as_float(next());
+        }
+        o->a0 = as_float(next());
+        o->a1 = as_float(next());
+        o->a2 = as_float(next());
+        c = next();
+        o->WorldObj = (int32_t)c >= 0 ? &cubes[c] : NULL;
+        printf("obb %s\n", label(o));
+        break;
+    }
+    case OP_OBBDUMP:
+        a = next();
+        printf("obbdump %u\n", a);
+        obbdump(a);
+        break;
+    case OP_OBBASSIGN: {
+        OBB *dst, *src, *r;
+
+        a = next();
+        b = next();
+        c = next();
+        d = next();
+        dst = obb_at(a, b);
+        src = obb_at(c, d);
+        printf("obbassign %s %s\n", label(dst), label(src));
+        r = obb_assign(dst, src);
+        printf("  -> %s\n", label(r));
+        obbline(dst);
+        obbline(src);
+        break;
+    }
+    case OP_OBBRENDER: {
+        OBB *o;
+        bVector3 p;
+
+        a = next();
+        b = next();
+        o = obb_at(a, b);
+        p.x = as_float(next());
+        p.y = as_float(next());
+        p.z = as_float(next());
+        p.pad = as_float(next());
+        printf("obbrender %s\n", label(o));
+        obb_render(o, &p);
+        obbline(o);
+        break;
+    }
+    case OP_OBBHIDE: {
+        OBB *o;
+
+        a = next();
+        b = next();
+        o = obb_at(a, b);
+        printf("obbhide %s\n", label(o));
+        obb_do_not_render(o);
+        obbline(o);
+        break;
+    }
+    case OP_OBBINIT: {
+        OBB *o, *r;
+
+        a = next();
+        b = next();
+        o = obb_at(a, b);
+        printf("obbinit %s\n", label(o));
+        r = obb_init(o);
+        printf("  -> %s\n", label(r));
+        obbline(o);
+        break;
+    }
+    case OP_OBBDTOR: {
+        OBB *o;
+
+        a = next();
+        b = next();
+        o = obb_at(a, b);
+        printf("obbdtor %s\n", label(o));
+        obb_destroy(o);
+        obbline(o);
+        break;
+    }
+    case OP_SETOBBS:
+        printf("setobbs\n");
+        world_collision_prediction_set_obbs(&world, sm, so);
+        for (i = 0; i < 4; i++)
+            obbdump((uint32_t)i);
+        break;
+    case OP_SETDTS:
+        a = next();
+        b = next();
+        printf("setdts DT%c DT%c\n", 'A' + (int)a, 'A' + (int)b);
+        world_collision_prediction_set_drive_targets(&world, &dts[a], &dts[b]);
+        break;
+    case OP_RECPOT:
+        a = next();
+        printf("recpot DT%c\n", 'A' + (int)a);
+        world_record_potential_drive_target(&world, &dts[a]);
+        break;
+    case OP_RECITER: {
+        bVector2 m2, o2;
+
+        a = next();
+        b = next();
+        c = next();
+        m2.x = as_float(next());
+        m2.y = as_float(next());
+        o2.x = as_float(next());
+        o2.y = as_float(next());
+        printf("reciter %d %d %d\n", (int32_t)a, (int8_t)b, (int8_t)c);
+        world_collision_prediction_record_iteration(&world, (int32_t)a,
+                                                    (int8_t)b, (int8_t)c,
+                                                    &m2, &o2);
+        printf("  max %d\n", world.CollisionPredictionMaxLoopCounter);
+        iterline((int)a);
+        break;
+    }
+    case OP_PREDDUMP:
+        printf("preddump\n");
+        printf("  max %d\n", world.CollisionPredictionMaxLoopCounter);
+        for (i = 0; i < WORLD_PREDICTION_ITERATIONS; i++)
+            iterline(i);
+        break;
+    case OP_CTL:
+        a = next();
+        b = next();
+        c = next();
+        cars[a]->pCarController = (int32_t)b >= 0 ? &ctls[b] : NULL;
+        cars[a]->pCarDriver =
+            (int32_t)c >= 0 ? (CarDriver *)(void *)drv_obj[c] : NULL;
+        printf("ctl CAR%u %d %d\n", a, (int32_t)b, (int32_t)c);
+        break;
+    case OP_SETTABLE:
+        a = next();
+        world.TotalNumCars = (int32_t)a;
+        world.AICarPos = (int32_t)next();
+        world.CopCarPos = (int32_t)next();
+        world.TrafficCarPos = (int32_t)next();
+        for (i = 0; i < (int)a; i++)
+            world.CarTable[i] = cars[next()];
+        printf("settable\n");
+        table();
+        break;
+    case OP_DDSET:
+        dd_ai = (int32_t)next();
+        dd_cop = (int32_t)next();
+        printf("ddset %d %d\n", dd_ai, dd_cop);
+        break;
+    case OP_DEBUGDISP:
+        printf("debugdisplay\n");
+        world_debug_display(&world);
+        break;
+    case OP_AITWEAK: {
+        int32_t *g[5] = {
+            &WhichCollisionPredictionIterationToRender,
+            &WhichCarsRegisteredDriveTargetToRender,
+            &RenderChosenPotentialDriveTarget, &RenderMyCarDriveTarget,
+            &RenderOtherCarDriveTarget,
+        };
+
+        a = next();
+        b = next();
+        *g[a] = (int32_t)b;
+        printf("aitweak %u %d\n", a, (int32_t)b);
+        break;
+    }
+    case OP_AIDEBUG:
+        printf("aidebug\n");
+        world_update_ai_debug_rendering(&world);
+        printf("  it %d\n", WhichCollisionPredictionIterationToRender);
+        break;
+    case OP_CUBES:
+        a = next();
+        b = next();
+        printf("cubes %u %u\n", a, b);
+        cubedump((int)a, (int)b);
+        break;
+    case OP_CUBE:
+        a = next();
+        fresh_cube((int)a);
+        printf("cube WO%u\n", a);
+        break;
+    case OP_DSEED:
+        bDefaultSeed = next();
+        printf("dseed %08x\n", bDefaultSeed);
+        break;
+    case OP_CLOCK:
+        WorldTimer = (int32_t)next();
+        WorldTimeSeconds = as_float(next());
+        WorldTime = (int32_t)next();
+        WorldTimeFrames = (int32_t)next();
+        WorldTimeElapsed = as_float(next());
+        WorldTimeElapsedFrame = as_float(next());
+        WorldLoopCounter = (int32_t)next();
+        printf("clock\n");
+        break;
+    case OP_VOTSET:
+        vot_set = (int32_t)next();
+        printf("votset %d\n", vot_set);
+        break;
     default:
         fprintf(stderr, "op %u\n", op);
         exit(2);
@@ -1073,6 +1700,15 @@ static void install_vtable(void)
     vt_install(FAKE_VT, vt, COLLISIONBODY_VT_ENTRIES);
 }
 
+static void install_vtable2(void)
+{
+    static VtEntry vt[CARCONTROLLER_VT_ENTRIES];
+
+    vt[VT_SLOT(CARCONTROLLER_VT_DEBUG_DISPLAY)].delta = DELTA;
+    vt[VT_SLOT(CARCONTROLLER_VT_DEBUG_DISPLAY)].fn = (VtFn)debug_display;
+    vt_install(FAKE_VT2, vt, CARCONTROLLER_VT_ENTRIES);
+}
+
 int main(int argc, char **argv)
 {
     unsigned int op;
@@ -1083,6 +1719,9 @@ int main(int argc, char **argv)
         return 2;
     }
     install_vtable();
+    install_vtable2();
+    for (i = 0; i < NCTL; i++)
+        ctls[i]._vtable = FAKE_VT2;
     for (i = 0; i < NCAR; i++) {
         cars[i] = calloc(1, sizeof(struct Car));
         cars[i]->MyDriver = &dis[i];
@@ -1090,6 +1729,7 @@ int main(int argc, char **argv)
     for (i = 0; i < NB; i++)
         bodies[i].Dynamic.Body._vtable = FAKE_VT;
     world.CarList.next = world.CarList.prev = &world.CarList;
+    world.AICarList.next = world.AICarList.prev = &world.AICarList;
     world.CollisionList.next = world.CollisionList.prev = &world.CollisionList;
     CollisionBodyList.next = CollisionBodyList.prev =
         (CollisionBody *)(void *)&CollisionBodyList;
@@ -1130,6 +1770,34 @@ int main(int argc, char **argv)
     gRaceCoordinatorPostMessageFn = seam_post;
     gSmokeableBreakFn = seam_break;
     gDeleteFarAwaySmokeableCollisionBodiesFn = seam_farsmoke;
+
+    gInitCarEffectsFn = seam_init_carfx;
+    gInitClansFn = seam_init_clans;
+    gInitSkidsFn = seam_init_skids;
+    gInitParticlesFn = seam_init_particles;
+    gInitMunitionsFn = seam_init_munitions;
+    gInitFernFlattenersFn = seam_init_fernflat;
+    gInitFernShakersFn = seam_init_fernshake;
+    gSpawnSmokeablesFn = seam_spawn_smokeables;
+    gInitTerrainEffectEmittersFn = seam_init_terrainfx;
+    gInitCopsFn = seam_init_cops;
+    gInitTrackGraphFn = seam_init_trackgraph;
+    gCloseTerrainEffectEmittersFn = seam_close_terrainfx;
+    gCleanupCopsFn = seam_cleanup_cops;
+    gCleanupTrackGraphFn = seam_cleanup_trackgraph;
+    gClearSmokeablesFn = seam_clear_smokeables;
+    gCloseFernShakersFn = seam_close_fernshake;
+    gCloseFernFlattenersFn = seam_close_fernflat;
+    gCloseMunitionsFn = seam_close_munitions;
+    gCloseParticlesFn = seam_close_particles;
+    gCloseClansFn = seam_close_clans;
+    gCloseSkidsFn = seam_close_skids;
+    gCloseCarEffectsFn = seam_close_carfx;
+    gTrafficTeleporterCtorFn = seam_tele_ctor;
+    gTrafficTeleporterDestroyFn = seam_tele_dtor;
+    gCarDestroyFn = seam_car_destroy;
+    gWorldObjectNewFn = seam_wo_new;
+    gWorldObjectDeleteFn = seam_wo_delete;
 
     while (fscanf(script, "%x", &op) == 1)
         step((uint32_t)op);

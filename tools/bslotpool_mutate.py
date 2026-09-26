@@ -2,7 +2,8 @@
 """Mutation-test `tools/bslotpool_check.py`.
 
 A cross-check that cannot fail proves nothing. Every entry in MUTANTS below
-is one single-edit change to `3DS Files/source/bslotpool.c`, and the check is
+is one single-edit change to `3DS Files/source/bslotpool.c`, or to
+`bplist.c` when the entry names it, and the check is
 expected to notice: a non-zero `differ` count, or a run that does not finish
 at all, because a mutation that corrupts a free list makes the harness walk a
 bad pointer. Both count. A mutation that changes nothing is either a hole in
@@ -15,11 +16,12 @@ python tools/bslotpool_mutate.py flush-head-only cleanup-prev-advances
 python tools/bslotpool_mutate.py --list
 ```
 
-This edits a tracked source file in place and puts it back in a `finally`,
-so an ordinary failure or a Ctrl-C leaves the tree clean. A hard kill does
-not run that, which is what `.mutate-backup` is for: it holds the original
-while a run is in flight, and the next run refuses to start until the tree
-has been restored from it.
+This edits tracked source files in place and puts each back after its run
+and again in a `finally`, so an ordinary failure or a Ctrl-C leaves the
+tree clean. A hard kill does not run that, which is what `.mutate-backup`
+is for: one beside each source holds the original while a run is in
+flight, and the next run refuses to start until the tree has been restored
+from it.
 
 Why this lives in `tools/` when the bvector and bmath runners did not: those
 were written in a scratchpad and thrown away, and rebuilding this one from
@@ -34,10 +36,12 @@ import sys
 
 NL = chr(10)
 SRC = "3DS Files/source/bslotpool.c"
-BACKUP = SRC + ".mutate-backup"
+BPL = "3DS Files/source/bplist.c"
+FILES = [SRC, BPL]
 CHECK = [sys.executable, "tools/bslotpool_check.py"]
 
-# (name, old, new) -- `old` must occur exactly once.
+# (name, old, new), or (name, old, new, file) for a file other than SRC --
+# `old` must occur exactly once in it.
 MUTANTS = [
     # ---------------------------------------------------------- life cycle
     ("round-slotsize",
@@ -207,6 +211,41 @@ MUTANTS = [
     ("print-skips-flag-newline",
      "        bsp_printf(BSP_NEWLINE);",
      "        (void)0;"),
+
+    # --------------------------------------------------- bPList (bplist.c)
+    ("bpl-init-remakes",
+     "    if (bPNodeSlotPool == NULL)" + NL
+     + "        bPNodeSlotPool = bNewSlotPool(",
+     "    bPNodeSlotPool = bNewSlotPool(", BPL),
+    ("bpl-init-count-plus-one",
+     "bNewSlotPool((int)sizeof(bPNode), n,",
+     "bNewSlotPool((int)sizeof(bPNode), n + 1,", BPL),
+    ("bpl-init-slot-narrow",
+     "bNewSlotPool((int)sizeof(bPNode), n,",
+     "bNewSlotPool((int)sizeof(bNode), n,", BPL),
+    ("bpl-init-name",
+     "\"bPNode SlotPool\", 16);",
+     "\"bPNode Pool\", 16);", BPL),
+    ("bpl-init-mempool",
+     "\"bPNode SlotPool\", 16);",
+     "\"bPNode SlotPool\", 0);", BPL),
+    ("bpl-close-remembers",
+     "        bDeleteSlotPool(bPNodeSlotPool);" + NL
+     + "        bPNodeSlotPool = NULL;",
+     "        bDeleteSlotPool(bPNodeSlotPool);", BPL),
+    ("bpl-close-keeps",
+     "        bDeleteSlotPool(bPNodeSlotPool);" + NL
+     + "        bPNodeSlotPool = NULL;",
+     "        bPNodeSlotPool = NULL;", BPL),
+    ("bpl-malloc-count",
+     "        bplist_init(32);",
+     "        bplist_init(31);", BPL),
+    ("bpl-malloc-fast",
+     "    return (bPNode *)bSlotOMalloc(bPNodeSlotPool);",
+     "    return (bPNode *)bSlotMalloc(bPNodeSlotPool);", BPL),
+    ("bpl-free-kept",
+     "    bSlotFree(bPNodeSlotPool, p);",
+     "    (void)p;", BPL),
 ]
 
 # Changes that cannot be caught, and should not be re-added to MUTANTS by a
@@ -225,31 +264,37 @@ EQUIVALENT = [
 ]
 
 
-def read():
+def file_of(m):
+    return m[3] if len(m) > 3 else SRC
+
+
+def read(path):
     # newline="" keeps the file's own line endings intact on the round trip;
-    # bslotpool.c is LF and must stay that way.
-    with open(SRC, "r", newline="") as fh:
+    # bslotpool.c and bplist.c are LF and must stay that way.
+    with open(path, "r", newline="") as fh:
         return fh.read()
 
 
-def write(text):
-    with open(SRC, "w", newline="") as fh:
+def write(path, text):
+    with open(path, "w", newline="") as fh:
         fh.write(text)
 
 
-def backup_take(original):
+def backup_take(path, original):
     """Park the pristine source where a killed run can be recovered from."""
-    if os.path.exists(BACKUP):
+    backup = path + ".mutate-backup"
+    if os.path.exists(backup):
         sys.exit("%s already exists, which means a previous run was killed "
                  "while the source was mutated. Compare it against %s and "
-                 "restore by hand, then delete it." % (BACKUP, SRC))
-    with open(BACKUP, "w", newline="") as fh:
+                 "restore by hand, then delete it." % (backup, path))
+    with open(backup, "w", newline="") as fh:
         fh.write(original)
 
 
-def backup_drop():
-    if os.path.exists(BACKUP):
-        os.remove(BACKUP)
+def backup_drop(path):
+    backup = path + ".mutate-backup"
+    if os.path.exists(backup):
+        os.remove(backup)
 
 
 def run_check():
@@ -300,13 +345,13 @@ def main():
     only = [a for a in sys.argv[1:] if not a.startswith("-")]
 
     if "--list" in sys.argv[1:]:
-        for name, _, _ in MUTANTS:
-            print(name)
-        for name, _, _ in EQUIVALENT:
-            print("%s   (equivalent, not counted)" % name)
+        for m in MUTANTS:
+            print(m[0])
+        for m in EQUIVALENT:
+            print("%s   (equivalent, not counted)" % m[0])
         return 0
 
-    original = read()
+    original = {path: read(path) for path in FILES}
     unknown = [a for a in only
                if a not in [m[0] for m in MUTANTS]]
     if unknown:
@@ -315,33 +360,43 @@ def main():
     # Both lists are validated, not just the ones about to run: a pattern
     # that has rotted away from the source is the failure this catches, and
     # it is silent if only the selected ones are checked.
-    for name, old, new in MUTANTS + EQUIVALENT:
-        if old not in original:
+    for m in MUTANTS + EQUIVALENT:
+        name, old, text = m[0], m[1], original[file_of(m)]
+        if old not in text:
             sys.exit("pattern for %s does not match the source" % name)
-        if original.count(old) != 1:
+        if text.count(old) != 1:
             sys.exit("pattern for %s matches %d times"
-                     % (name, original.count(old)))
+                     % (name, text.count(old)))
 
     label, caught, warned = run_check()
     print("%-30s %s" % ("(baseline)", label))
     if caught or warned:
         sys.exit("baseline does not pass clean; fix that first")
 
+    for path in FILES:
+        if os.path.exists(path + ".mutate-backup"):
+            backup_take(path, original[path])       # refuses, and says why
     results = []
-    backup_take(original)
+    for path in FILES:
+        backup_take(path, original[path])
     try:
-        for name, old, new in MUTANTS:
+        for m in MUTANTS:
+            name, old, new, path = m[0], m[1], m[2], file_of(m)
             if only and name not in only:
                 continue
-            write(original.replace(old, new))
-            label, caught, warned = run_check()
+            write(path, original[path].replace(old, new))
+            try:
+                label, caught, warned = run_check()
+            finally:
+                write(path, original[path])
             results.append((name, label, caught, warned))
             print("%-30s %-34s %s%s"
                   % (name, label, "caught" if caught else "MISSED",
                      "  (does not compile clean)" if warned else ""))
     finally:
-        write(original)
-        backup_drop()
+        for path in FILES:
+            write(path, original[path])
+            backup_drop(path)
 
     n = len(results)
     got = len([r for r in results if r[2]])

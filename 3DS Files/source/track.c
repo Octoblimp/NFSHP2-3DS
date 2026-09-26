@@ -597,6 +597,26 @@ int topology_has_topology(TopologyCoordinate *tc, const bVector2 *xy)
     return found;
 }
 
+// 0x001c1210. A coordinate of its own, which gathers its 8-unit box round
+// the point, and the probe at z 0: the highest surface below 1, else the
+// highest at all, else 0. `in` is read twice for y, once for the probe and
+// once for out, and out's fourth lane is not written.
+void get_vector_on_track(bVector3 *out, const bVector2 *in)
+{
+    TopologyCoordinate tc;
+    bVector3 p;
+
+    topology_init(&tc);
+    p.x = in->x;
+    out->x = p.x;
+    p.y = in->y;
+    p.z = 0.0f;
+    p.pad = 0.0f;
+    out->y = in->y;
+    out->z = topology_get_elevation(&tc, &p, NULL, NULL, NULL);
+    topology_destroy(&tc);
+}
+
 // 0x0014f830. The first crossing ends the walk; `best` only filters.
 int topology_segment_intersects(TopologyCoordinate *tc, const bVector3 *a,
                                 const bVector3 *b, float r)

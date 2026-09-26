@@ -1,11 +1,18 @@
-# World -- the clock, the car table and the step
+# World -- the clock, the car table, the step and the debug views
 
     0x0014a4e8 .. 0x0014c38c    World.obj
-    0x0014ab08 .. 0x0014bce0    the methods ported here (worldstep.c)
+    0x0014a4e8, 0x0014a748      the constructor and destructor (worldinit.c)
+    0x0014ab08 .. 0x0014bd2c    the clock, the car table, the step (worldstep.c)
+    0x0014bd30 .. 0x0014c030    DebugDisplay, the recorders, the AI views
+                                (worldinit.c)
     0x0014bb60, 0x0014bbb8      GetDistanceToClosestPlayer (world.c)
     0x00238328                  bList::Sort (blist.c)
+    0x002383f8 .. 0x0023849c    the bPNode pool (bplist.c)
+    0x0020a840 .. 0x0020ab48    OBB's methods (obb.c)
+    0x001c1210                  GetVectorOnTrack (track.c)
     gp-22624 (0x00323390)       pCurrentWorld
     gp-22620 (0x00323394)       TweakerPauseWorld
+    gp-22608 .. gp-22592        the AI debug views' five tweakers
 
 World owns everything that moves in a race: the car lists, the collision
 list, the car table and the per-player positions. It also keeps the pause,
@@ -14,18 +21,20 @@ it for the step (GetTimestep) and then takes one (DoTimestep). The step
 thinks every car, moves every body, resolves every contact, and services
 the effects, the events and the race.
 
-The port is `3DS Files/source/worldstep.c`, with the two distance methods
-in `world.c` and the list sort in `blist.c`. `tools/world_check.py`
-cross-checks them against `tools/src/world_test.c`, with the image running
-in mipsemu as the oracle. Still to come are the constructor, the
-destructor, the collision prediction and the debug rendering (task 26's
-next slice), and DoPointerSnapshot, which is the replay's.
+The port is `3DS Files/source/worldstep.c` (the step) and `worldinit.c`
+(the constructor, the destructor and the debug views), with the two
+distance methods in `world.c`, the list sort in `blist.c`, the bPNode pool
+in `bplist.c` and OBB in `obb.c`. `tools/world_check.py` cross-checks them
+against `tools/src/world_test.c`, with the image running in mipsemu as the
+oracle. `bslotpool_check` checks the bPNode pool and `track_check`
+GetVectorOnTrack. Still to come are DoSnapshot (0x0014a910) and
+DoPointerSnapshot (0x0014ad20), which wait on ReplaySnapshot.
 
 ## The record
 
-`World:Tt4039=s5936`. `world.h` names it up to PotentialDriveTargetID, at
-412. The rest is the collision prediction's OBBs, positions, indices and
-drive targets, which come with the constructor.
+`World:Tt4039=s5936`, all of it in `world.h`. RaceCoordinator::InitForRace
+allocates one (`bMalloc(5936, "World", 0, 16)`) and constructs it, and
+CleanupAfterRace destroys it with flags 3. Neither is ported yet.
 
 | Offset | Field | What it holds |
 |-------:|-------|---------------|
@@ -51,6 +60,21 @@ drive targets, which come with the constructor.
 | 404 | Teleporter | TrafficTeleporter* |
 | 408 | CollisionPredictionID | |
 | 412 | PotentialDriveTargetID | |
+| 416 | CollisionPredictionMyOBBs[20] | OBB, this car's swept boxes |
+| 2016 | CollisionPredictionOtherCarOBBs[20] | OBB, the other car's |
+| 3616 | CollisionPredictionMyPositions[40] | bVector2, one per iteration |
+| 3936 | CollisionPredictionOtherCarPositions[40] | bVector2 |
+| 4256 | CollisionPredictionMyIndicies[40] | signed byte: the box to draw |
+| 4296 | CollisionPredictionOtherCarIndicies[40] | signed byte |
+| 4336 | CollisionPredictionMyDriveTarget | DriveTarget |
+| 4864 | CollisionPredictionOtherCarDriveTarget | DriveTarget |
+| 5392 | PotentialDriveTarget | DriveTarget |
+| 5920 | CollisionPredictionMaxLoopCounter | the last iteration recorded |
+
+The fields from 416 on are for the debug views, and nothing in the shipped
+game fills them: the four recorders have no callers. `Indicies` is the
+stab's spelling. The OBBs and DriveTargets hold pointers, so on a 64-bit
+host the tail moves; `world.h` checks its offsets only on the 3DS.
 
 ## The clock
 
@@ -190,6 +214,141 @@ The copy is taken first because a move can re-sort the list.
     ServiceTweakerDamage; ServiceTrackRouteEditor; and Race::Update, if
     there is a race.
 
+## The constructor and the destructor
+
+**The constructor** (0x0014a4e8) works on memory its caller allocated:
+
+1. The three lists are made empty, the forty boxes get no cube, and the
+   three drive targets are constructed, in the record's order.
+2. pCurrentWorld is this World, and ResetWorldTime runs.
+3. WorldRandomSeed is `bRandom(0x7fffffff)` on bDefaultSeed.
+4. TotalNumCars and the three positions are 0, CollisionPredictionID and
+   PotentialDriveTargetID are 1, ResetTimeScale runs (which clears the
+   pause too), PreviousTimeToWaste is 0, and so are both players'
+   positions and DATs. There is no helicopter.
+5. A TrafficTeleporter: `bMalloc(88, "TrafficTeleporter", 0, 16)` and its
+   constructor.
+6. Eleven calls set up the systems a race needs: InitCarEffects,
+   InitClans, InitSkids, InitParticles, InitMunitions,
+   InitFernFlatteners, InitFernShakers, SpawnSmokeables,
+   InitTerrainEffectEmitters, InitCops and InitTrackGraph.
+
+The car table, CarPositionTable and the prediction's records are left as
+they were. Constructing over a live World tears nothing down first.
+
+**The destructor** (0x0014a748):
+
+1. Twelve calls close the systems: CloseTerrainEffectEmitters,
+   CleanupCops, CleanupTrackGraph, CollisionBodyWitness's
+   EliminateAllWitnesses, ClearSmokeables, CloseFernShakers,
+   CloseFernFlatteners, CloseMunitions, CloseParticles, CloseClans,
+   CloseSkids and CloseCarEffects. That is not quite the constructor's
+   order reversed: the terrain effects, the cops and the track graph close
+   in the order they opened, and the clans close before the skids.
+2. The teleporter, if there is one, is destroyed with flags 3.
+3. ResetWorldTime runs, pCurrentWorld is NULL, and WorldLoopCounter is
+   100000, its value in .sdata.
+4. The members go in reverse: the three drive targets (the potential one,
+   the other car's, this car's), then each box's cube (the other car's 19
+   down to 0, then this car's), then the lists. CollisionList's
+   Collisions are destroyed with flags 3, AICarList's bPNodes go back to
+   their pool, and CarList's Cars are destroyed with flags 3. Each list's
+   destructor unlinks its first node and destroys it until the list is
+   empty, and leaves the node's own links as they were.
+5. bFree, if flags has bit 0.
+
+## The collision prediction and the debug views
+
+The AI's collision prediction was meant to leave its working here for the
+debug views: the boxes it swept both cars through, each iteration's
+positions and box indices, and the drive targets it weighed. None of the
+four recorders has a caller in the shipped game:
+
+- **CollisionPredictionSetOBBs** (0x0014bdc8): for k from 0 to 19, this
+  car's box k from `mine[k]`, then the other car's from `other[k]`, each
+  through OBB's operator=, which moves a cube across.
+- **CollisionPredictionSetDriveTargets** (0x0014be38) and
+  **RecordPotentialDriveTarget** (0x0014be78) copy drive targets in
+  through DriveTarget's operator=.
+- **CollisionPredictionRecordIteration** (0x0014be80): iteration i's two
+  box indices, then i as CollisionPredictionMaxLoopCounter (not the larger
+  of i and the last), then its two positions. There is no range check.
+
+MainLoop calls the two views:
+
+- **DebugDisplay** (0x0014bd30) calls DebugDisplay (vtable slot 16) on each
+  AI racer's controller: `CarTable[AICarPos + i]` while
+  `i < CopCarPos - AICarPos`, with both read again after every call. A car
+  with no controller is skipped.
+- **UpdateAIDebugRendering** (0x0014bed0) does nothing unless
+  TweakerPauseWorld is set. If WhichCollisionPredictionIterationToRender
+  is 0 or more, all forty cubes are hidden. Then, unless
+  CollisionPredictionMaxLoopCounter is less than the chosen iteration,
+  that iteration's two boxes are drawn at its two positions, each put on
+  the ground by GetVectorOnTrack. The box indices and this car's position
+  come from one reading of the chosen iteration. The other car's position
+  comes from a second reading, made after the first GetVectorOnTrack.
+  After that, the first of four switches that is on picks the drive
+  target for the DriveTargetRenderer: RenderChosenPotentialDriveTarget
+  the potential one, RenderMyCarDriveTarget this car's,
+  RenderOtherCarDriveTarget the other car's, and
+  WhichCarsRegisteredDriveTargetToRender, when it is not -1, the car with
+  that driver number, whose pCarDriver (Car+44) is handed over as the
+  target. With none on, nothing is handed over. None of the five tweakers
+  ships switched on.
+
+**GetVectorOnTrack** (0x001c1210) puts a point on the ground with a
+TopologyCoordinate of its own and GetElevation at (x, y, 0). The result is
+(x, y, the height), and its fourth lane is not written. `in` is read twice
+for y.
+
+## OBB
+
+`OBB:Tt3937=s80`: a Position, the three axes A0 to A2 (bVector3, all four
+lanes used), the three half-lengths a0 to a2, and WorldObj, a debug cube
+(WorldObject*) or NULL. Its methods are the last seven in DriveTarget.obj:
+
+- **The constructor** (0x0020a8c0) sets WorldObj to NULL. **The
+  destructor** (0x0020a8d0) deletes the cube, if there is one, and leaves
+  the pointer.
+- **operator=** (0x0020a840) copies the axes, all four lanes, and the
+  half-lengths, but not the Position. The destination's cube is deleted if
+  it has one, and the source's moves to the destination, so the source is
+  left without one. A box assigned to itself loses its cube.
+- **Render** (0x0020a9e0) builds a matrix from the three axes, each scaled
+  in all four lanes by twice its half-length, and puts it through
+  eMulMatrix with an identity. The fourth row is the identity's, with x,
+  y and z replaced by the position. The first time, it makes the cube,
+  `new (WorldObjectSlotPool) WorldObject(bStringHash("DEBUG_CUBE"), NULL,
+  false)`, without testing what bOMalloc returned. Every time, it writes
+  the cube's matrix and enables it.
+- **DoNotRender** (0x0020ab28) disables the cube, if there is one.
+  **Print** (0x0020ab40) is empty. **DoSnapshot** (0x0020a928) waits on
+  ReplaySnapshot.
+
+The multiply by the identity is m × I, and I × m is not quite the same:
+every column of I × m picks up the identity's fourth row times zero, a
++0, so an axis that is -0 in one lane and negative in the others keeps
+its -0 only in m × I.
+
+## The bPNode pool
+
+`bPNode:Tt118=s12` is a bNode with a pointer to the object it lists. A
+bPList<T> lists objects that cannot be linked themselves, or that are on
+another list already: World's AICarList holds the AI racers this way while
+CarList holds every car. The nodes come from a slot pool of their own,
+behind the last four functions of bList.obj:
+
+- **bPListInit** (0x002383f8) makes "bPNode SlotPool" in memory pool 16
+  unless there is one already. InitializeEverything asks for 1536 nodes
+  and then 2048, so the second call does nothing.
+- **bPListClose** (0x00238430) deletes the pool and forgets it. Nothing
+  calls it.
+- **bPNode::Malloc** (0x00238458) makes a pool of 32 first if there is
+  none, then takes a node with bOMalloc.
+- **bPNode::Free** (0x00238488) gives it back with bFree. With no pool,
+  the listing reaches a `break`, and the port aborts.
+
 ## The port
 
 Everything the step calls outside World.obj that the port does not have
@@ -199,6 +358,22 @@ seam is skipped, except FinishMovement and PlaceNewCar, which abort.
 Smokeable::Break and DeleteFarAwaySmokeableCollisionBodies are
 `smokeable.h`'s: Break aborts when NULL and is reached, and the delete is
 skipped.
+
+The constructor's and destructor's calls out are seams too. The eleven
+Init calls, and the eleven Close calls that are not EliminateAllWitnesses
+(`collisionbody.c` has that one), are skipped when NULL. The
+TrafficTeleporter's constructor aborts when NULL, because a World has a
+teleporter from its constructor on and AddTrafficCar needs it. The
+teleporter's destructor and Car's abort when there is something to
+destroy and no seam. WorldObject's new and delete are `obb.c`'s seams:
+with no new, Render draws nothing, and a cube to delete with no delete
+aborts. RaceCoordinator is not ported, so nothing constructs a World yet.
+
+The port departs from the listing in one place. UpdateAIDebugRendering
+reads the car's pCarDriver with no NULL test, so a driver number that no
+car has reads the word at 44 in low memory. The only renderer the shipped
+game runs never looks at its target, so the port passes NULL. The
+checker's emulated low memory is zero there, so the two agree.
 
 ## The check
 
@@ -222,5 +397,22 @@ and through the ticker readings either side of exactly 0.3 s of wait, the
 replay's checksum byte through a match and a mismatch in each lane, and
 GetDistanceToClosestPlayer through a player at the origin.
 
-    24 scenarios, 2173 ops, 12963 lines, 0 differ; 85 steps
-    200 mutations, 200 caught, 0 equivalent, 0 unexplained
+The constructor runs with seven values of bDefaultSeed, the edges among
+them, and again over a World that has one. The destructor runs over lists
+of several lengths, boxes with and without cubes, flags with and without
+bit 0, and no teleporter. Each stub that destroys a node logs its links
+and then zeroes them. Boxes are assigned from none, from a cube, both
+ways at once, and to themselves. They are rendered at signed zeros, at
+huge and tiny scales, and with axes that are -0 in one lane and negative
+in the rest, the one shape that tells m × I from I × m. The recorders
+take indices with high bits and positions that are NaN and infinite. A
+controller's DebugDisplay can move AICarPos and CopCarPos from inside the
+call, and GetVectorOnTrack can change the iteration to render, which is
+what shows both are read again.
+
+    32 scenarios, 2742 ops, 15110 lines, 0 differ; 85 steps
+    328 mutations, 328 caught, 0 equivalent, 0 unexplained
+
+Of the constructor slice's 128 mutations, the first pass left one:
+`render mul order`, which swaps eMulMatrix's operands. No box had the
+shape above until the rerun.

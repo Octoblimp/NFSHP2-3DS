@@ -33,7 +33,7 @@ enum {
     OP_GMARK, OP_NMARKN, OP_GMARKN, OP_MARKDUMP, OP_INFO, OP_GLOBALS,
     OP_GRID, OP_NOISE, OP_MATCHNAME, OP_MATCHHASH, OP_TICKSEED, OP_HSET,
     OP_TPCB, OP_COG, OP_WHEEL, OP_CARPOS, OP_FLAT, OP_PUTFLAT, OP_SIB3,
-    OP_CARVEC, OP_CARF, OP_AIR, OP_BEGIN,
+    OP_CARVEC, OP_CARF, OP_AIR, OP_BEGIN, OP_VOT,
     OP_COUNT
 };
 
@@ -548,7 +548,7 @@ static void step(int code)
         [OP_TICKSEED] = 1, [OP_HSET] = 3, [OP_TPCB] = 1,
         [OP_COG] = 4, [OP_WHEEL] = 3, [OP_CARPOS] = 5, [OP_FLAT] = 3,
         [OP_PUTFLAT] = 1, [OP_SIB3] = 4, [OP_CARVEC] = 5, [OP_CARF] = 2,
-        [OP_AIR] = 4, [OP_BEGIN] = 2,
+        [OP_AIR] = 4, [OP_BEGIN] = 2, [OP_VOT] = 2,
     };
     int i;
 
@@ -950,6 +950,14 @@ static void step(int code)
         car_begin_movement(&g_car, bitsf(a[1]));
         tcs[a[0]] = g_car.TheTopologyCoordinate;
         begin_dump();
+        timing_line();
+        break;
+    case OP_VOT:
+        fill(&vecs[a[0]], sizeof vecs[a[0]]);
+        get_vector_on_track(&vecs[a[0]], (const bVector2 *)&vecs[a[1]]);
+        printf("vot v%d v%d -> ", a[0], a[1]);
+        pv(&vecs[a[0]]);
+        printf("\n");
         timing_line();
         break;
     case OP_SIB3:

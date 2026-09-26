@@ -1,7 +1,8 @@
 // Host harness for bware's slot-pool allocator.
 //
-// Builds "3DS Files/source/bslotpool.c" for the host and drives it through
-// scripted sequences of pool operations, printing one line per step:
+// Builds "3DS Files/source/bslotpool.c" for the host, with bplist.c, the
+// bPNode pool on top of it, and drives them through scripted sequences of
+// pool operations, printing one line per step:
 //
 //     scenario <name>
 //     <op> <args> -> <result>
@@ -49,6 +50,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "bplist.h"
 #include "bslotpool.h"
 
 #define ARENA_SIZE    (1u << 18)
@@ -1018,6 +1020,71 @@ static void s_stress(void)
     end_log();
 }
 
+// bPList's node pool (bplist.c), which is one pool behind four functions.
+// The first bPListInit makes it and a second, asking for another count,
+// finds it made. bPListClose deletes it with a node still out and forgets
+// it, and a second close does nothing. With no pool, bPNode::Malloc makes
+// one of 32 first.
+static void pnodes(const char* what)
+{
+    printf("%s: bPNodeSlotPool %s\n", what, A(bPNodeSlotPool));
+    flush_log();
+    dump_pool(bPNodeSlotPool);
+}
+
+static void* pmalloc(const char* tag)
+{
+    void* s = bpnode_malloc();
+
+    printf("bPNode::Malloc -> %s   [%s]\n", A(s), tag);
+    flush_log();
+    return s;
+}
+
+static void pfree(void* s, const char* tag)
+{
+    printf("bPNode::Free(%s)   [%s]\n", A(s), tag);
+    bpnode_free(s);
+    flush_log();
+}
+
+static void s_bplist(void)
+{
+    int   size = (int)sizeof(bPNode);
+    void* s[3];
+
+    pnodes("before");
+    bplist_init(5);
+    pnodes("bPListInit(5)");
+    bplist_init(9);
+    pnodes("bPListInit(9)");
+
+    s[0] = pmalloc("first");
+    s[1] = pmalloc("second");
+    s[2] = pmalloc("third");
+    dump_slot(s[1], size);
+    fill_slot(s[1], size, 0x5a5a5a5au, 0);
+    pfree(s[1], "dirty");
+    s[1] = pmalloc("the dirty one again");
+    dump_slot(s[1], size);
+    pfree(s[0], "back");
+    pfree(s[2], "back");
+    pnodes("two back");
+    counts(bPNodeSlotPool);
+
+    bplist_close();
+    pnodes("bPListClose, one still out");
+    bplist_close();
+    pnodes("bPListClose again");
+
+    s[0] = pmalloc("no pool");
+    pnodes("made by Malloc");
+    pfree(s[0], "back");
+    bplist_close();
+    pnodes("closed");
+    end_log();
+}
+
 // ---------------------------------------------------------------------- main
 
 typedef struct {
@@ -1043,6 +1110,7 @@ static const Scenario SCENARIOS[] = {
     { "oom",         s_oom },
     { "abuse",       s_abuse },
     { "stress",      s_stress },
+    { "bplist",      s_bplist },
 };
 
 #define NSCENARIOS ((int)(sizeof SCENARIOS / sizeof SCENARIOS[0]))

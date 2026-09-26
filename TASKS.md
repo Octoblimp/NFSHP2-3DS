@@ -1801,6 +1801,27 @@ is citro3d and owns the top.
         is capped at `min.s 0.3, max(x, 0)`, and the shake test is made
         again before each car's rumble. No disagreement between the image
         and the port was found. Written up in `docs/formats/world.md`.
+
+        **The eighteenth slice is closed: World's constructor and
+        destructor**, in `worldinit.c`, with the rest of the record in
+        `world.h`. That is the constructor and the destructor,
+        DebugDisplay, the collision prediction's four recorders and
+        UpdateAIDebugRendering, which leaves only DoSnapshot and
+        DoPointerSnapshot of World.obj's methods. OBB's methods came
+        with them, in `obb.c`, with the front of WorldObject in
+        `worldobject.h`. So did the bPNode pool, in `bplist.c`, and
+        GetVectorOnTrack, in `track.c`. The constructor's eleven Init
+        calls and the destructor's eleven Close calls are seams, skipped
+        when NULL. The TrafficTeleporter's constructor and destructor and
+        Car's destructor are seams that abort when they are needed and
+        unset. `world_check` runs the image against the port: 32
+        scenarios, 2,742 ops, 15,110 lines, 0 differ. All 328 of its
+        mutations are caught. `bslotpool_check` has a bPList scenario
+        (47/47 mutations caught), and `track_check` puts 31 points on
+        the ground (273 caught, 5 equivalent). The port departs from
+        the listing in one place: UpdateAIDebugRendering dereferences
+        the car of a driver number that no car has, and the port passes
+        NULL. Written up in `docs/formats/world.md`.
         CONTINUE.md has what is next.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag

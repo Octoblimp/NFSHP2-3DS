@@ -8,10 +8,11 @@
 // behind -- through `pCurrentWorld` at gp-22624, and a Collision joins its
 // CollisionList and asks how far the nearest player is.
 //
-// So this is the record up to PotentialDriveTargetID and no further, straight
-// from the stab (`World:Tt4039=s5936`). The collision prediction's OBBs,
-// positions, indices and drive targets are the rest. It is never allocated
-// by the port until task 26 finishes it; a harness builds one.
+// This is the whole record, straight from the stab (`World:Tt4039=s5936`),
+// the collision prediction's OBBs, positions, indices and drive targets
+// last. RaceCoordinator::InitForRace allocates one (bMalloc(5936, "World",
+// 0, 16)) and constructs it, and CleanupAfterRace destroys it with flags 3;
+// neither is ported, so only a harness builds one yet.
 
 #ifndef WORLD_H
 #define WORLD_H
@@ -20,6 +21,8 @@
 #include <stdint.h>
 
 #include "bvector.h"
+#include "drivetarget.h"
+#include "obb.h"
 
 struct Car;
 struct Chopper;
@@ -37,6 +40,10 @@ typedef struct WorldList {
 
 #define WORLD_MAX_CARS    14
 #define WORLD_MAX_PLAYERS  2
+
+// The collision prediction's boxes per car, and the iterations it records.
+#define WORLD_PREDICTION_OBBS       20
+#define WORLD_PREDICTION_ITERATIONS 40
 
 typedef struct World {
     WorldList CarList;                          //   0  bTList<Car>
@@ -64,7 +71,27 @@ typedef struct World {
     struct TrafficTeleporter *Teleporter;       // 404
     uint32_t  CollisionPredictionID;            // 408
     uint32_t  PotentialDriveTargetID;           // 412
-    // 416 CollisionPredictionMyOBBs onwards: task 26.
+    // The AI's collision prediction, kept for the debug views: the boxes
+    // it swept this car and the other through, each iteration's positions
+    // and box indices, and the drive targets. Nothing in the shipped game
+    // records into them -- the four recorders have no callers -- so only
+    // the constructor, the destructor and UpdateAIDebugRendering touch
+    // them.
+    OBB       CollisionPredictionMyOBBs[WORLD_PREDICTION_OBBS];       //  416
+    OBB       CollisionPredictionOtherCarOBBs[WORLD_PREDICTION_OBBS]; // 2016
+    bVector2  CollisionPredictionMyPositions[WORLD_PREDICTION_ITERATIONS];
+                                                                      // 3616
+    bVector2  CollisionPredictionOtherCarPositions[WORLD_PREDICTION_ITERATIONS];
+                                                                      // 3936
+    int8_t    CollisionPredictionMyIndicies[WORLD_PREDICTION_ITERATIONS];
+                                                                      // 4256
+    int8_t    CollisionPredictionOtherCarIndicies[WORLD_PREDICTION_ITERATIONS];
+                                                                      // 4296
+    DriveTarget CollisionPredictionMyDriveTarget;                     // 4336
+    DriveTarget CollisionPredictionOtherCarDriveTarget;               // 4864
+    DriveTarget PotentialDriveTarget;                                 // 5392
+    int32_t   CollisionPredictionMaxLoopCounter;                      // 5920
+    uint8_t   _pad5924[12];                     // 5924  the quadword round-up
 } World;
 
 #define WORLD_SLACK ((size_t)(sizeof(void *) - 4))
@@ -85,6 +112,24 @@ typedef char world_layout_check[
      && WORLD_AT(TimeScaleCallbackParam, 400, 22)
      && WORLD_AT(Teleporter, 404, 23)
      && WORLD_AT(PotentialDriveTargetID, 412, 24)) ? 1 : -1];
+
+// The tail holds OBBs and DriveTargets, whose own pointers move everything
+// after them on a 64-bit host, so it is checked where it matters: on the
+// 3DS, to the console's offsets and size.
+#if UINTPTR_MAX == 0xffffffffu
+typedef char world_tail_check[
+    (offsetof(World, CollisionPredictionMyOBBs) == 416
+     && offsetof(World, CollisionPredictionOtherCarOBBs) == 2016
+     && offsetof(World, CollisionPredictionMyPositions) == 3616
+     && offsetof(World, CollisionPredictionOtherCarPositions) == 3936
+     && offsetof(World, CollisionPredictionMyIndicies) == 4256
+     && offsetof(World, CollisionPredictionOtherCarIndicies) == 4296
+     && offsetof(World, CollisionPredictionMyDriveTarget) == 4336
+     && offsetof(World, CollisionPredictionOtherCarDriveTarget) == 4864
+     && offsetof(World, PotentialDriveTarget) == 5392
+     && offsetof(World, CollisionPredictionMaxLoopCounter) == 5920
+     && sizeof(World) == 5936) ? 1 : -1];
+#endif
 
 // gp-22624, 0x00323390. NULL until task 26 builds a World.
 extern World *pCurrentWorld;
@@ -246,6 +291,112 @@ extern void (*gRaceCoordinatorPostMessageFn)(struct RaceCoordinator *rc,
 
 // RCMessage 11, from the .mdebug enum.
 #define RC_SKIP_REPLAY 11
+
+// ------------------------------------------------ the constructor and so on
+//
+// worldinit.c: the constructor and the destructor, the collision
+// prediction's recorders, and the two debug views MainLoop calls.
+// docs/formats/world.md has the decode.
+
+// 0x0014a4e8, on memory the caller allocated. The lists empty, the boxes
+// without cubes, the drive targets constructed, the clock reset, this
+// World current, a seed from bDefaultSeed, the counts 0 and the two IDs 1,
+// the time scale reset, the players' positions and DATs 0, no helicopter,
+// a new TrafficTeleporter, and then the eleven Init calls. The car table,
+// the positions table and the prediction's records are left as they were.
+World *world_init(World *w);
+
+// 0x0014a748. The twelve Close calls (CollisionBodyWitness's
+// EliminateAllWitnesses fourth), the teleporter destroyed, the clock
+// reset, no World current and WorldLoopCounter 100000. Then the members in
+// reverse: the drive targets, each box's cube (Other's 19 to 0, then My's),
+// every Collision, every bPNode on AICarList and every Car, each unlinked
+// and then destroyed with flags 3. bFree last, if flags has bit 0.
+void world_destroy(World *w, int32_t flags);
+
+// 0x0014bd30. Each AI racer's controller's DebugDisplay (slot 16), from
+// AICarPos up to CopCarPos, with the two read again after each call.
+void world_debug_display(World *w);
+
+// 0x0014bdc8. Box k of each car's twenty from mine[k] and other[k], through
+// OBB's operator=, which moves a cube across.
+void world_collision_prediction_set_obbs(World *w, OBB *mine, OBB *other);
+
+// 0x0014be38 and 0x0014be78. The drive targets copied in, through
+// DriveTarget's operator=.
+void world_collision_prediction_set_drive_targets(World *w,
+                                                  const DriveTarget *mine,
+                                                  const DriveTarget *other);
+void world_record_potential_drive_target(World *w, const DriveTarget *t);
+
+// 0x0014be80. Iteration i's box indices and positions, and i as the
+// highest. No range check.
+void world_collision_prediction_record_iteration(World *w, int32_t i,
+                                                 int8_t mine_index,
+                                                 int8_t other_index,
+                                                 const bVector2 *mine,
+                                                 const bVector2 *other);
+
+// 0x0014bed0. With TweakerPauseWorld set: every box's cube hidden, and the
+// two boxes of the chosen iteration drawn at its positions on the ground,
+// if one is chosen and recorded; then one drive target handed to the
+// renderer -- the potential one, mine, the other car's, or a car's by its
+// driver number, the first of the four switches that is on.
+void world_update_ai_debug_rendering(World *w);
+
+// The tweakers UpdateAIDebugRendering reads. None ships switched on.
+extern int32_t WhichCollisionPredictionIterationToRender; // gp-22608, -1
+extern int32_t WhichCarsRegisteredDriveTargetToRender;    // gp-22604, -1
+extern int32_t RenderChosenPotentialDriveTarget;          // gp-22600, 0
+extern int32_t RenderMyCarDriveTarget;                    // gp-22596, 0
+extern int32_t RenderOtherCarDriveTarget;                 // gp-22592, 0
+
+// The constructor's calls into systems the port does not have, in the
+// order it makes them. Each sets up a system's pools and lists, and a NULL
+// one is skipped: the World goes on without that system, as the step does
+// with its seams.
+extern void (*gInitCarEffectsFn)(void);             // 0x0011dbf8
+extern void (*gInitClansFn)(void);                  // 0x001a1090
+extern void (*gInitSkidsFn)(void);                  // 0x001a0c40
+extern void (*gInitParticlesFn)(void);              // 0x001a47a0
+extern void (*gInitMunitionsFn)(void);              // 0x001b4660
+extern void (*gInitFernFlattenersFn)(void);         // 0x001cf328
+extern void (*gInitFernShakersFn)(void);            // 0x001cf9c0
+extern void (*gSpawnSmokeablesFn)(void);            // 0x0020bea8
+extern void (*gInitTerrainEffectEmittersFn)(void);  // 0x0020e448
+extern void (*gInitCopsFn)(void);                   // 0x00213930
+extern void (*gInitTrackGraphFn)(void);             // 0x00237c58
+
+// The destructor's, likewise; EliminateAllWitnesses, between
+// CleanupTrackGraph and ClearSmokeables, is collisionbody.c's.
+extern void (*gCloseTerrainEffectEmittersFn)(void); // 0x0020e488
+extern void (*gCleanupCopsFn)(void);                // 0x00213978
+extern void (*gCleanupTrackGraphFn)(void);          // 0x00237c88
+extern void (*gClearSmokeablesFn)(void);            // 0x0020bfe8
+extern void (*gCloseFernShakersFn)(void);           // 0x001cfac8
+extern void (*gCloseFernFlattenersFn)(void);        // 0x001cf330
+extern void (*gCloseMunitionsFn)(void);             // 0x001b46a8
+extern void (*gCloseParticlesFn)(void);             // 0x001a4838
+extern void (*gCloseClansFn)(void);                 // 0x001a1118
+extern void (*gCloseSkidsFn)(void);                 // 0x001a0cf8
+extern void (*gCloseCarEffectsFn)(void);            // 0x0011dcb8
+
+// `new TrafficTeleporter`: the constructor (0x0020e610) on the
+// TRAFFICTELEPORTER_SIZE bytes World has just bMalloc'd, returning it; and
+// its destructor (0x0020e678) with flags 3. A World has a teleporter from
+// its constructor on, and AddTrafficCar needs it, so a NULL constructor
+// aborts. A teleporter can only have come from the constructor seam, so
+// one to destroy with no destructor seam aborts too.
+extern struct TrafficTeleporter *(*gTrafficTeleporterCtorFn)(void *mem);
+extern void (*gTrafficTeleporterDestroyFn)(struct TrafficTeleporter *t,
+                                           int32_t flags);
+
+// TrafficTeleporter's mdebug size, which becomes sizeof when it is ported.
+#define TRAFFICTELEPORTER_SIZE 88
+
+// Car's destructor (0x0012f660), which the destructor calls with flags 3
+// on every car left on CarList. A car to destroy with no seam aborts.
+extern void (*gCarDestroyFn)(struct Car *c, int32_t flags);
 
 // WorldLoopCounter, gp-20200, 0x00323d08: the world loop's step count,
 // 100000 in .sdata (0x000186a0), 0 after ResetWorldTime, and bumped by

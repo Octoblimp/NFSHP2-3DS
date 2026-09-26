@@ -6758,3 +6758,116 @@ tail (the prediction's OBBs, positions, indices and drive targets, to
 5936), the collision prediction's recorders, DebugDisplay and
 UpdateAIDebugRendering. OBB's methods and GetVectorOnTrack come with them.
 Then `Car::FinishMovement`.
+
+## Session 30, continued (2026-09-26) -- Task 27's eighteenth slice: World's constructor and destructor
+
+The seventeenth slice went in as `2a1661c`. The eighteenth is the rest of
+`World.obj` but DoSnapshot and DoPointerSnapshot, ported in
+`worldinit.c`:
+
+- the constructor (`0x0014a4e8`) and the destructor (`0x0014a748`);
+- DebugDisplay (`0x0014bd30`);
+- the collision prediction's four recorders, SetOBBs, SetDriveTargets,
+  RecordPotentialDriveTarget and RecordIteration, none of which has a
+  caller in the shipped game;
+- UpdateAIDebugRendering (`0x0014bed0`).
+
+The record's tail is in `world.h` now: the prediction's forty OBBs, eighty
+positions, eighty indices and three DriveTargets, to 5936. The decode is
+`docs/formats/world.md`.
+
+```
+world_check          32 scenarios, 2742 ops, 15110 lines, 0 differ; 85 steps
+                     328 mutations: 328 caught, 0 equivalent, 0 unexplained
+bslotpool_check      18 scenarios, 1025 lines, 0 differ; 47/47 mutations caught
+track_check          16212 ops, 11821 lines, 0 differ; 273 caught, 5 equivalent
+```
+
+### What came with it
+
+- **`obb.c`**: OBB's constructor, destructor, operator=, Render,
+  DoNotRender and Print, the last methods in DriveTarget.obj. DoSnapshot
+  waits on ReplaySnapshot. **`worldobject.h`** names WorldObject up to its
+  Matrix, and has its new and delete as seams, which is all Render needs.
+- **`bplist.c`**: bPListInit, bPListClose, bPNode::Malloc and
+  bPNode::Free, the pool the destructor gives AICarList's nodes back to.
+  It is apart from `blist.c` so that world_test can stub the pool.
+  `bslotpool_check` runs it on the real allocator.
+- **GetVectorOnTrack** (`0x001c1210`), in `track.c`, which puts the
+  prediction's positions on the ground. `track_check` runs 31 points
+  through it, the bridge and the edges of the world among them.
+- **Twenty-five seams**, in `world.h`: the eleven Init calls, eleven of
+  the twelve Close calls (EliminateAllWitnesses is `collisionbody.c`'s),
+  the TrafficTeleporter's constructor and destructor, and Car's
+  destructor. The Init and Close calls are skipped when NULL. The other
+  three abort, the constructor always and the destructors when there is
+  something to destroy.
+
+### What the listing says
+
+- **The destructor closes in nearly the constructor's order reversed.**
+  The terrain effects, the cops and the track graph close in the order
+  they opened, and the clans before the skids. EliminateAllWitnesses
+  comes fourth.
+- **The members go in reverse**, the drive targets first, then the other
+  car's boxes 19 to 0, then this car's, then CollisionList, AICarList and
+  CarList. Each list's destructor unlinks a node and destroys it without
+  touching the node's own links. WorldLoopCounter goes back to 100000.
+- **The constructor leaves the car table, CarPositionTable and the
+  prediction's records alone.**
+- **OBB's operator= moves the cube.** It copies all four lanes of each
+  axis and not the Position, deletes the destination's cube and takes the
+  source's, so a box assigned to itself loses its cube.
+- **Render never tests what bOMalloc returned**, and calls bStringHash
+  ("DEBUG_CUBE") every time it makes a cube.
+- **DebugDisplay reads AICarPos and CopCarPos again after each call.**
+- **UpdateAIDebugRendering reads the chosen iteration twice**: once for
+  the box indices and this car's position, and again after the first
+  GetVectorOnTrack, for the other car's. The test is `max < it`, so the
+  last recorded iteration is drawn.
+- **A driver number that no car has is dereferenced.** The listing reads
+  pCarDriver at 44 through a NULL car. The port passes NULL instead.
+
+### How the checker runs it
+
+The model runs the image's World.obj, OBB's methods, eIdentity and
+eMulMatrix. Everything else is a logging stub on both sides:
+
+- the Init and Close calls, bMalloc and bFree;
+- the teleporter's constructor and destructor;
+- Car's and Collision's destructors and bPNode::Free, which log the
+  node's links and then zero them;
+- DriveTarget's constructor, destructor and operator=;
+- the DriveTargetRenderer;
+- WorldObject's new and delete, which hand out cubes from a table.
+
+A controller's DebugDisplay can move AICarPos and CopCarPos, and
+GetVectorOnTrack, which swaps its two lanes so both calls show, can change
+the iteration to render. That is what shows both are read again.
+
+### The mutation pass
+
+128 new mutations, on top of the timestep's 200. The first pass caught
+127 and left 1, a hole:
+
+- **`render mul order`**: `eMulMatrix(&out, &id, &m)` for
+  `eMulMatrix(&out, &m, &id)`. The two differ only in signed zeros and
+  NaNs. Each column of `I × m` adds the identity's fourth row times zero,
+  a +0, so only an axis that is -0 in one lane and negative in the rest
+  keeps its -0, and only in `m × I`. One box like that is in the script
+  now.
+
+The rerun: 328 mutations, 328 caught, 0 equivalent, 0 unexplained.
+`bslotpool_mutate.py` takes an optional file per mutant now, and its ten
+bPList mutants are all caught (47/47). GetVectorOnTrack's seven, in
+`track_check`, are all caught. The CIA builds with no warnings from the
+port's sources (only the devkitARM `crtn.o` one), at 316,352 bytes: the
+linker drops the new code, since nothing on the boot path reaches it.
+
+### Next: Car::FinishMovement
+
+`Car::FinishMovement` (`0x00130480`, 2008 bytes), which DoTimestep calls
+for every car and which aborts while it is unset. `car.md` has its
+outline. Then the track's rendering and streaming, and
+RaceCoordinator::InitForRace (`0x001473c0`), which is what will build a
+World outside a harness.

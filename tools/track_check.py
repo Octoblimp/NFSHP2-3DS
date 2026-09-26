@@ -178,6 +178,7 @@ SYM = dict(
     sib3="SetInterestBBox__18TopologyCoordinatePC8bVector3fT1",
     air="AverageAir__3CarRfT1",
     begin="BeginMovement__3Carf",
+    vot="GetVectorOnTrack__FP8bVector3RC8bVector2",
 )
 
 # ---- the ops -----------------------------------------------------------------
@@ -192,7 +193,7 @@ SYM = dict(
  OP_GMARK, OP_NMARKN, OP_GMARKN, OP_MARKDUMP, OP_INFO, OP_GLOBALS,
  OP_GRID, OP_NOISE, OP_MATCHNAME, OP_MATCHHASH, OP_TICKSEED,
  OP_HSET, OP_TPCB, OP_COG, OP_WHEEL, OP_CARPOS, OP_FLAT, OP_PUTFLAT,
- OP_SIB3, OP_CARVEC, OP_CARF, OP_AIR, OP_BEGIN) = range(64)
+ OP_SIB3, OP_CARVEC, OP_CARF, OP_AIR, OP_BEGIN, OP_VOT) = range(65)
 
 ARGS = {OP_TAG: 1, OP_CLEAR: 2, OP_CHUNKW: 3, OP_FILE: 5, OP_LOADER: 1,
         OP_UNLOADER: 1, OP_TTLOADER: 1, OP_TTUNLOADER: 1, OP_MEM: 3,
@@ -208,8 +209,8 @@ ARGS = {OP_TAG: 1, OP_CLEAR: 2, OP_CHUNKW: 3, OP_FILE: 5, OP_LOADER: 1,
         OP_MATCHNAME: 1, OP_MATCHHASH: 1, OP_TICKSEED: 1, OP_HSET: 3,
         OP_TPCB: 1, OP_COG: 4, OP_WHEEL: 3, OP_CARPOS: 5, OP_FLAT: 3,
         OP_PUTFLAT: 1, OP_SIB3: 4, OP_CARVEC: 5, OP_CARF: 2, OP_AIR: 4,
-        OP_BEGIN: 2}
-assert len(ARGS) == 64
+        OP_BEGIN: 2, OP_VOT: 2}
+assert len(ARGS) == 65
 
 # CARVEC's vectors: the body matrix's rows, Velocity, AngularVelocity, the
 # four wheel matrices' rows, vOldVel, vOldAngVel and Position.
@@ -957,6 +958,19 @@ def scenario_world(sc, rnd):
         sc.vec(5, x, y, 1234.0)
         sc.op(OP_HASTOPO, 1, 5)
     sc.op(OP_TCDUMP, 1)
+
+    sc.tag("world: vector on track")
+    # The input's z and w are noise GetVectorOnTrack must not read; the
+    # bridge (from z 0, below it) and the off-world points too.
+    for x, y in ((1.0, 1.0), (27.0, 27.0), (26.0, 25.0), (29.0, 28.0),
+                 (48.0, 40.0), (12.0, 12.0), (63.0, 63.0), (70.0, 70.0),
+                 (-2.0, -2.0), (97.3, 0.7), (3022.0, -3516.0)):
+        sc.vec(6, x, y, 555.0, -7.0)
+        sc.op(OP_VOT, 7, 6)
+    for k in range(20):
+        sc.vec(6, rnd.uniform(-4.0, 68.0), rnd.uniform(-4.0, 68.0),
+               rnd.uniform(-50.0, 50.0), 3.0)
+        sc.op(OP_VOT, 7, 6)
 
     sc.tag("world: segments")
     sc.vec(2, 24.0, 20.0)
@@ -2283,6 +2297,11 @@ class Model(object):
                     " ".join("%d" % self.i32(CAR + 868 + 4 * k)
                              for k in range(4))))
             self.timing_line()
+        elif code == OP_VOT:
+            self.fill(self.vec(a[0]), 16)
+            call(fn["vot"], self.vec(a[0]), self.vec(a[1]))
+            emit("vot v%d v%d -> %s" % (a[0], a[1], self.pv(self.vec(a[0]))))
+            self.timing_line()
         elif code == OP_SIB3:
             emit("sib3 tc%d v%d r %08x vel %s"
                  % (a[0], a[1], u[2], "null" if a[3] < 0
@@ -3176,6 +3195,21 @@ MUTATIONS = [
     ("sib3-vel", TRC,
      "                               (const bVector2 *)vel);\n}",
      "                               NULL);\n}"),
+
+    # ---- GetVectorOnTrack
+    ("vot-x-from-y", TRC, "    p.x = in->x;\n", "    p.x = in->y;\n"),
+    ("vot-out-x-kept", TRC, "    out->x = p.x;\n", ""),
+    ("vot-out-y-kept", TRC, "    out->y = in->y;\n", ""),
+    ("vot-probe-z-1", TRC, "    p.z = 0.0f;\n", "    p.z = 1.0f;\n"),
+    ("vot-probe-z-from-in", TRC, "    p.z = 0.0f;\n",
+     "    p.z = ((const float *)in)[2];\n"),
+    ("vot-no-z", TRC,
+     "    out->z = topology_get_elevation(&tc, &p, NULL, NULL, NULL);",
+     "    (void)topology_get_elevation(&tc, &p, NULL, NULL, NULL);"),
+    ("vot-writes-w", TRC,
+     "    out->z = topology_get_elevation(&tc, &p, NULL, NULL, NULL);",
+     "    out->z = topology_get_elevation(&tc, &p, NULL, NULL, NULL);\n"
+     "    out->pad = 0.0f;"),
 ]
 
 EQUIVALENT = {

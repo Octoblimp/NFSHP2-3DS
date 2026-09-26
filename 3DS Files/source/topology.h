@@ -299,6 +299,11 @@ float topology_get_elevation(TopologyCoordinate *tc, const bVector3 *pt,
                              int32_t *terrain, bVector3 *normal,
                              int32_t *found);
 
+// 0x001c1210, GetVectorOnTrack: (x, y) and the height of the ground there,
+// probed from z 0 through a coordinate of its own. The AI debug views and
+// the spike strip use it.
+void get_vector_on_track(bVector3 *out, const bVector2 *in);
+
 // 0x0014f7e8. Is there any surface under (x, y)?
 int topology_has_topology(TopologyCoordinate *tc, const bVector2 *xy);
 

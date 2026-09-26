@@ -6,9 +6,10 @@ blocks carved out of one bMalloc, a free list threaded through word 0 of every
 free slot, an expansion chain when a pool runs dry, and a manager that keeps
 every pool on a list so the whole lot can be printed. This file is that
 allocator written again, in Python, from the disassembly at 0x0023f508 rather
-than from the C. `tools/src/bslotpool_test.c` drives the port through seventeen
+than from the C. `tools/src/bslotpool_test.c` drives the port through eighteen
 scripted sequences and prints a transcript; this prints the same transcript
-from the model, and the diff is the test.
+from the model, and the diff is the test. The eighteenth is `bplist.c`, the
+bPNode pool on top (bList.obj's last four functions, 0x002383f8..0x0023849c).
 
 Why write it twice, when the C is a transcription of the same listing:
 
@@ -89,6 +90,7 @@ NL = chr(10)
 SOURCES = [
     "tools/src/bslotpool_test.c",
     "3DS Files/source/bslotpool.c",
+    "3DS Files/source/bplist.c",
 ]
 
 # --------------------------------------------------------------------- shapes
@@ -1251,6 +1253,91 @@ def s_stress():
     end_log()
 
 
+# ------------------------------------------------------------------- bPList
+
+BPNODE_SIZE = 3 * PTR   # bNode's two links and the object: 12 on the EE
+BPL = [0]               # bPNodeSlotPool, gp-15772
+
+
+def bplist_init(n):
+    """bPListInit, 0x002383f8: a pool only if there is none."""
+    if not BPL[0]:                                      # 0x00238400
+        BPL[0] = b_new_slot_pool(BPNODE_SIZE, n, "bPNode SlotPool", 16)
+
+
+def bplist_close():
+    """bPListClose, 0x00238430."""
+    if BPL[0]:                                          # 0x00238438
+        b_delete_slot_pool(BPL[0])
+        BPL[0] = 0                                      # 0x00238448
+
+
+def bpnode_malloc():
+    """bPNode::Malloc, 0x00238458: a pool of 32 first, if there is none."""
+    if not BPL[0]:                                      # 0x00238460
+        bplist_init(32)
+    return slot_omalloc(BPL[0])
+
+
+def bpnode_free(s):
+    """bPNode::Free, 0x00238488. With no pool the listing reaches a
+    `break`; the scenario never frees into none."""
+    slot_free(BPL[0], s)
+
+
+def pnodes(what):
+    emit("%s: bPNodeSlotPool %s" % (what, A(BPL[0])))
+    flush_log()
+    dump_pool(BPL[0])
+
+
+def pmalloc(tag):
+    s = bpnode_malloc()
+    emit("bPNode::Malloc -> %s   [%s]" % (A(s), tag))
+    flush_log()
+    return s
+
+
+def pfree(s, tag):
+    emit("bPNode::Free(%s)   [%s]" % (A(s), tag))
+    bpnode_free(s)
+    flush_log()
+
+
+def s_bplist():
+    s = [0, 0, 0]
+    pnodes("before")
+    bplist_init(5)
+    pnodes("bPListInit(5)")
+    bplist_init(9)
+    pnodes("bPListInit(9)")
+
+    s[0] = pmalloc("first")
+    s[1] = pmalloc("second")
+    s[2] = pmalloc("third")
+    dump_slot(s[1], BPNODE_SIZE)
+    fill_slot(s[1], BPNODE_SIZE, 0x5a5a5a5a, 0)
+    pfree(s[1], "dirty")
+    s[1] = pmalloc("the dirty one again")
+    dump_slot(s[1], BPNODE_SIZE)
+    pfree(s[0], "back")
+    pfree(s[2], "back")
+    pnodes("two back")
+    counts(BPL[0])
+
+    bplist_close()
+    pnodes("bPListClose, one still out")
+    bplist_close()
+    pnodes("bPListClose again")
+
+    s[0] = pmalloc("no pool")
+    pnodes("made by Malloc")
+    pfree(s[0], "back")
+    bplist_close()
+    pnodes("closed")
+    end_log()
+
+
 SCENARIOS = [
     ("basic", s_basic),
     ("queries", s_queries),
@@ -1269,6 +1356,7 @@ SCENARIOS = [
     ("oom", s_oom),
     ("abuse", s_abuse),
     ("stress", s_stress),
+    ("bplist", s_bplist),
 ]
 
 
