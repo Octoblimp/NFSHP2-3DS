@@ -1,6 +1,7 @@
 #include "uirender.h"
 
 #ifdef __3DS__
+#include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,7 +49,12 @@ static uint8_t* read_file(const char* path, size_t* outLen)
     long len = ftell(f);
     fseek(f, 0, SEEK_SET);
     if (len <= 0) { fclose(f); return NULL; }
-    uint8_t* buf = (uint8_t*)malloc((size_t)len);
+    // To a 128-byte boundary, as the disc reads a bundle: the track viewer
+    // hands GLOBALB's and INGAMEB's texture packs to slot 2 in place, and
+    // LoaderTexturePack finds a pack's pixels by rounding an address up to
+    // 128, which comes out where texpack.c's file offsets say only if the
+    // file starts on one.
+    uint8_t* buf = (uint8_t*)memalign(128, (size_t)len);
     if (!buf || fread(buf, 1, (size_t)len, f) != (size_t)len) {
         free(buf);
         fclose(f);

@@ -18,17 +18,21 @@
 #include "eviewmatrix.h"
 #include "gamedata.h"
 #include "scenery.h"
+#include "texpack.h"
+#include "texturepack.h"
+#include "trackflow.h"
 #include "trackroute.h"
 
 #define TRACK_BUNDLE "TRACKS/TRACKB12.BUN"
 
-// Where the track's solids find their textures, in the order they are
-// asked: TEX12LOCATION.BIN has 350 of the 415 hashes, INGAMEB.BUN 12 and
-// TEX12TRACK.BIN 4, and 49 are in no pack on the disc.
-static const char* const kPacks[TRACKVIEW_NUM_PACKS] = {
-    "TRACKS/TEX12LOCATION.BIN",
+// The track's texture files, in the order LoadingTrackSpecificPart4
+// (TEX%dTRACK.BIN, then TEX%dLOCATION.BIN) has them loaded, after the track
+// bundle. Of the 415 names the solids' tables hold, TEX12LOCATION.BIN has
+// 350, INGAMEB.BUN 12 and TEX12TRACK.BIN 4, and 49 are in no pack on the
+// disc and are given the default.
+static const char* const kTexFiles[TRACKVIEW_NUM_TEXFILES] = {
     "TRACKS/TEX12TRACK.BIN",
-    "GLOBAL/INGAMEB.BUN",
+    "TRACKS/TEX12LOCATION.BIN",
 };
 
 #define PAD_DEAD     24             // circle pad noise floor
@@ -57,19 +61,6 @@ static const char* const kPacks[TRACKVIEW_NUM_PACKS] = {
 #define VIEW_FLIP_Y  (-1.0f)
 #define VIEW_FLIP_Z  (-1.0f)
 
-// TextureInfo's TilableUV, 0x4c into the record. CreateTextureContext
-// (0x0010a160) makes the GS's CLAMP register from it: WMS is 1, clamped,
-// unless bit 0 is set, and WMT the same from bit 1.
-#define TEXINFO_TILABLE_UV 76
-
-// And what decides where and how a strip draws: see trackview_draw and
-// georender.h's GeoBlend.
-#define TEXINFO_RENDERING_ORDER 41
-#define TEXINFO_ALPHA_SORTING   77
-#define TEXINFO_SEMITRANSPARENT 79
-#define TEXINFO_WRITE_Z         80
-#define TEXINFO_ALPHA_BITS      118
-
 // GPUCMD_Add drops a command that does not fit rather than failing, and
 // the frame's end still needs room to close the list, so a draw is left
 // out once less than this is free -- 32 KB, a few dozen draws' worth.
@@ -97,7 +88,8 @@ static void to_c3d(const bMatrix4* m, C3D_Mtx* out)
     }
 }
 
-static uint8_t* read_bundle(const char* path, size_t* outLen, bool* outLinear)
+static uint8_t* read_bundle(const char* path, size_t* outLen, bool* outLinear,
+                            bool preferLinear)
 {
     FILE*    f = fopen(path, "rb");
     long     len;
@@ -120,14 +112,17 @@ static uint8_t* read_bundle(const char* path, size_t* outLen, bool* outLinear)
     // to a 128-byte boundary, so the buffer is aligned the same way and
     // every offset in the file keeps its residue in memory.
     //
-    // The linear heap first: the frontend's three bundles hold 17.6 MB of
-    // the 28 MB malloc heap resident, and 9.1 MB more does not fit in what
-    // is left.
-    *outLinear = true;
-    buf = (uint8_t*)linearMemAlign((size_t)len, 128);
+    // The track bundle takes the linear heap first: the frontend's three
+    // bundles hold 17.6 MB of the 28 MB malloc heap resident, and 9.1 MB
+    // more does not fit in what is left. The texture files are smaller and
+    // take the malloc heap first, to leave the linear heap to the uploads.
+    *outLinear = preferLinear;
+    buf = preferLinear ? (uint8_t*)linearMemAlign((size_t)len, 128)
+                       : (uint8_t*)memalign(128, (size_t)len);
     if (!buf) {
-        *outLinear = false;
-        buf = (uint8_t*)memalign(128, (size_t)len);
+        *outLinear = !preferLinear;
+        buf = preferLinear ? (uint8_t*)memalign(128, (size_t)len)
+                           : (uint8_t*)linearMemAlign((size_t)len, 128);
     }
     if (!buf) {
         fclose(f);
@@ -179,12 +174,12 @@ static int find_solid(const TrackView* v, const void* solid)
 
 // ------------------------------------------------------------- the textures
 
-static TrackTex* find_texture(TrackView* v, uint32_t hash)
+static TrackTex* find_texture(TrackView* v, const TextureInfo* info)
 {
     int i;
 
     for (i = 0; i < v->numTextures; i++) {
-        if (v->texture[i].hash == hash) {
+        if (v->texture[i].info == info) {
             return &v->texture[i];
         }
     }
@@ -201,14 +196,16 @@ static uint32_t pow2_at_least(uint32_t n)
     return p;
 }
 
-static GeoPass texture_pass(const uint8_t* rec)
+// What decides where and how a strip draws: see trackview_draw and
+// georender.h's GeoBlend.
+static GeoPass texture_pass(const TextureInfo* info)
 {
     GeoPass p;
 
     p.blend        = GEO_BLEND_NONE;
-    p.noDepthWrite = rec[TEXINFO_WRITE_Z] == 0;
-    if (rec[TEXINFO_SEMITRANSPARENT]) {
-        switch (rec[TEXINFO_ALPHA_BITS]) {
+    p.noDepthWrite = info->bWriteZ == 0;
+    if (info->IsAnySemitransparencyFlag) {
+        switch (info->AlphaBits) {
         case 0x48: p.blend = GEO_BLEND_ADD;      break;
         case 0x42: p.blend = GEO_BLEND_SUBTRACT; break;
         case 0x0a: p.blend = GEO_BLEND_NONE;     break;
@@ -218,14 +215,76 @@ static GeoPass texture_pass(const uint8_t* rec)
     return p;
 }
 
-static TrackTex* load_texture(TrackView* v, uint32_t hash)
+// A TextureInfo's pixels where the loader or a flipbook left them, at
+// ImageData and PaletteData, in the shape texpack.c decodes: the record
+// for the geometry, and a data range from the lower of the two. The
+// record's placements are offsets into its pack's blob, and not used.
+static bool texture_source(const TextureInfo* info, TexPack* tp, TexInfo* e)
 {
-    TrackTex*   t = find_texture(v, hash);
-    TexSrcEntry e;
-    TexSource*  src = NULL;
-    uint32_t    w = 0, h = 0;
-    int         level, p;
-    uint8_t     tilable;
+    const uint8_t* image   = info->ImageData;
+    const uint8_t* palette = info->PaletteData;
+    const uint8_t* lo;
+    const uint8_t* hi;
+
+    memset(tp, 0, sizeof *tp);
+    tp->info     = (const uint8_t*)info;
+    tp->infoSize = TEXPACK_RECORD_SIZE;
+    tp->count    = 1;
+    if (!image || !texpack_get(tp, 0, e)) {
+        return false;
+    }
+    lo = image;
+    hi = image + e->pixelBytes;
+    if (e->bpp != 32) {
+        if (!palette) {
+            return false;
+        }
+        lo = palette < lo ? palette : lo;
+        hi = palette + e->clutBytes > hi ? palette + e->clutBytes : hi;
+    }
+    tp->data     = lo;
+    tp->dataSize = (uint32_t)(hi - lo);
+    e->pixelOff  = (uint32_t)(image - lo);
+    e->clutOff   = e->bpp != 32 ? (uint32_t)(palette - lo) : 0;
+    return true;
+}
+
+// The pixels `t`'s TextureInfo points at now, at `t->level`, into `out`.
+static bool upload_texture(const TrackTex* t, C3D_Tex* out)
+{
+    TexPack  tp;
+    TexInfo  e;
+    uint32_t w, h;
+    uint8_t  tilable = t->info->TilableUV;
+
+    if (!texture_source(t->info, &tp, &e)
+        || !texpack_level(&e, t->level, &w, &h, NULL, NULL)
+        || !texpack_upload(&tp, &e, t->level, out)) {
+        return false;
+    }
+
+    // Road and verge textures repeat thousands of times along a strip --
+    // ST reaches 2,299 in TRACKB12 -- so the wrap is the texture's own and
+    // not texpack_upload's clamp. CreateTextureContext (0x0010a160) makes
+    // the GS's CLAMP register from TilableUV: WMS is 1, clamped, unless bit
+    // 0 is set, and WMT the same from bit 1. A padded axis cannot repeat,
+    // and keeps the clamp; one tilable texture in the track's packs is
+    // padded.
+    C3D_TexSetWrap(out,
+                   ((tilable & 1) && w == out->width) ? GPU_REPEAT
+                                                      : GPU_CLAMP_TO_EDGE,
+                   ((tilable & 2) && h == out->height) ? GPU_REPEAT
+                                                       : GPU_CLAMP_TO_EDGE);
+    return true;
+}
+
+static TrackTex* load_texture(TrackView* v, const TextureInfo* info)
+{
+    TrackTex* t = find_texture(v, info);
+    TexPack   tp;
+    TexInfo   e;
+    uint32_t  w = 0, h = 0;
+    int       level;
 
     if (t) {
         return t;
@@ -235,35 +294,21 @@ static TrackTex* load_texture(TrackView* v, uint32_t hash)
     }
     t = &v->texture[v->numTextures++];
     memset(t, 0, sizeof *t);
-    t->hash       = hash;
+    t->info       = info;
     t->uvScale[0] = 1.0f;
     t->uvScale[1] = 1.0f;
-
-    for (p = 0; p < TRACKVIEW_NUM_PACKS && !src; p++) {
-        if (v->hasPack[p] && texsrc_find(&v->pack[p], hash, &e)) {
-            src = &v->pack[p];
-        }
-    }
-    if (!src) {
+    if (!texture_source(info, &tp, &e)) {
         v->missingTextures++;
         return t;
     }
 
-    // AddTexturesSorted (0x00107ee8) has eight lists and indexes them with
-    // the order unchecked. The disc's orders are all 0 to 7; the port
-    // clamps anything past.
-    t->pass   = texture_pass(e.info.record);
-    t->order  = e.info.record[TEXINFO_RENDERING_ORDER] < 8
-                    ? e.info.record[TEXINFO_RENDERING_ORDER] : 7;
-    t->sorted = e.info.record[TEXINFO_ALPHA_SORTING] != 0;
-
     // The largest level that leaves the reserve behind. The whole track at
     // level 0 is 28.9 MB as RGBA8, which a New 3DS has room for and an Old
     // one, with the bundle resident beside it, does not.
-    for (level = 0; level < (int)e.info.levels; level++) {
+    for (level = 0; level < (int)e.levels; level++) {
         uint32_t bytes;
 
-        if (!texpack_level(&e.info, level, &w, &h, NULL, NULL)) {
+        if (!texpack_level(&e, level, &w, &h, NULL, NULL)) {
             continue;
         }
         bytes = pow2_at_least(w) * pow2_at_least(h) * 4u;
@@ -271,35 +316,71 @@ static TrackTex* load_texture(TrackView* v, uint32_t hash)
             break;
         }
     }
-    if (level >= (int)e.info.levels
-        || !texsrc_upload(src, &e, level, &t->tex)) {
+    if (level >= (int)e.levels) {
         v->missingTextures++;
         return t;
     }
-    t->valid = true;
     t->level = (uint8_t)level;
+    if (!upload_texture(t, &t->own)) {
+        v->missingTextures++;
+        return t;
+    }
+    t->tex        = t->own;
+    t->ownImage   = t->image   = info->ImageData;
+    t->ownPalette = t->palette = info->PaletteData;
+    t->valid      = true;
     if (level > 0) {
         v->reducedTextures++;
     }
 
     // The image is in the top-left of a power-of-two allocation; see
     // georender.h. A level's image is the level's own size.
-    t->uvScale[0] = (float)w / (float)t->tex.width;
-    t->uvScale[1] = (float)h / (float)t->tex.height;
+    t->uvScale[0] = (float)w / (float)t->own.width;
+    t->uvScale[1] = (float)h / (float)t->own.height;
 
-    // Road and verge textures repeat thousands of times along a strip --
-    // ST reaches 2,299 in TRACKB12 -- so the wrap is the texture's own and
-    // not texpack_upload's clamp. A padded axis cannot repeat, and keeps
-    // the clamp; one tilable texture in the track's packs is padded.
-    tilable = e.info.record[TEXINFO_TILABLE_UV];
-    C3D_TexSetWrap(&t->tex,
-                   ((tilable & 1) && w == t->tex.width) ? GPU_REPEAT
-                                                        : GPU_CLAMP_TO_EDGE,
-                   ((tilable & 2) && h == t->tex.height) ? GPU_REPEAT
-                                                         : GPU_CLAMP_TO_EDGE);
+    // AddTexturesSorted (0x00107ee8) has eight lists and indexes them with
+    // the order unchecked. The disc's orders are all 0 to 7; the port
+    // clamps anything past.
+    t->pass   = texture_pass(info);
+    t->order  = info->RenderingOrder < 8 ? info->RenderingOrder : 7;
+    t->sorted = info->ApplyAlphaSorting != 0;
     return t;
 }
 
+// The names in the solids' tables that no pack has, every solid's and not
+// only the baked ones': eFixUpTables asked for each with use_default, and
+// GetTextureInfo gave it the default texture, or NULL with no GLOBALB.
+static void count_defaulted(TrackView* v)
+{
+    int i, k, j;
+
+    for (i = 0; i < v->numSolids; i++) {
+        const GeoSolid* s = &v->solid[i];
+
+        for (k = 0; k < s->numTextures; k++) {
+            const uint8_t*     entry = s->textureTable + (size_t)k * 8;
+            uint32_t           hash  = bchunk_u32(entry);
+            const TextureInfo* info  =
+                (const TextureInfo*)(uintptr_t)bchunk_u32(entry + 4);
+
+            if (info && info->NameHash == hash) {
+                continue;
+            }
+            for (j = 0; j < v->defaultedHashes; j++) {
+                if (v->defaulted[j] == hash) {
+                    break;
+                }
+            }
+            if (j == v->defaultedHashes
+                && v->defaultedHashes < TRACKVIEW_MAX_TEXTURES) {
+                v->defaulted[v->defaultedHashes++] = hash;
+            }
+        }
+    }
+}
+
+// Each of a solid's textures is the TextureInfo eFixUpTables put in its
+// table beside the name.
 static void resolve_textures(TrackView* v, int index)
 {
     const GeoSolid* s = &v->solid[index];
@@ -319,8 +400,9 @@ static void resolve_textures(TrackView* v, int index)
         return;
     }
     for (k = 0; k < s->numTextures; k++) {
-        uint32_t  hash = bchunk_u32(s->textureTable + (size_t)k * 8);
-        TrackTex* t    = load_texture(v, hash);
+        const TextureInfo* info = (const TextureInfo*)(uintptr_t)bchunk_u32(
+            s->textureTable + (size_t)k * 8 + 4);
+        TrackTex*          t    = info ? load_texture(v, info) : NULL;
 
         r->tex[k]             = t;
         r->slot[k].uvScale[0] = 1.0f;
@@ -331,6 +413,56 @@ static void resolve_textures(TrackView* v, int index)
             r->slot[k].uvScale[1] = t->uvScale[1];
             r->slot[k].pass       = t->pass;
         }
+    }
+}
+
+// UpdateTextureAnimations moves each flipbook's records to other frames'
+// pixels. A texture showing pixels it has not shown before uploads them,
+// once, at its own level, and the slots draw whatever it shows now. One
+// that will not upload keeps what it showed.
+static void follow_flipbooks(TrackView* v)
+{
+    int i, k;
+
+    for (i = 0; i < v->numTextures; i++) {
+        TrackTex*      t = &v->texture[i];
+        const uint8_t* image;
+        const uint8_t* palette;
+        TrackFrame*    f = NULL;
+
+        if (!t->valid) {
+            continue;
+        }
+        image   = t->info->ImageData;
+        palette = t->info->PaletteData;
+        if (image == t->image && palette == t->palette) {
+            continue;
+        }
+        t->image   = image;
+        t->palette = palette;
+        if (image == t->ownImage && palette == t->ownPalette) {
+            t->tex = t->own;
+            continue;
+        }
+        for (k = 0; k < v->numFrames && !f; k++) {
+            if (v->frame[k].owner == t && v->frame[k].image == image
+                && v->frame[k].palette == palette) {
+                f = &v->frame[k];
+            }
+        }
+        if (!f) {
+            if (v->numFrames >= TRACKVIEW_MAX_FRAMES
+                || !upload_texture(t, &v->frame[v->numFrames].tex)) {
+                v->frameFails++;
+                continue;
+            }
+            f          = &v->frame[v->numFrames++];
+            f->owner   = t;
+            f->image   = image;
+            f->palette = palette;
+            v->frameUploads++;
+        }
+        t->tex = f->tex;
     }
 }
 
@@ -513,15 +645,12 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
 
 bool trackview_init(TrackView* v)
 {
-    char path[GAMEDATA_MAX_PATH];
-    int  i;
+    int i;
 
     memset(v, 0, sizeof *v);
     v->speed = 30.0f;
-    for (i = 0; i < TRACKVIEW_NUM_PACKS; i++) {
-        if (gamedata_path(kPacks[i], path, sizeof path)) {
-            v->hasPack[i] = texsrc_open(&v->pack[i], path);
-        }
+    for (i = 0; i < TRACKVIEW_NUM_TEXFILES; i++) {
+        v->hasTexFile[i] = gamedata_exists(kTexFiles[i]);
     }
     v->hasBundle = gamedata_exists(TRACK_BUNDLE);
     if (!v->hasBundle) {
@@ -530,6 +659,149 @@ bool trackview_init(TrackView* v)
     }
     snprintf(v->note, sizeof v->note, "not loaded");
     return true;
+}
+
+bool trackview_share_bundle(TrackView* v, uint8_t* data, size_t len)
+{
+    if (!data || v->numShared >= TRACKVIEW_MAX_SHARED) {
+        return false;
+    }
+    v->shared[v->numShared]    = data;
+    v->sharedLen[v->numShared] = len;
+    v->numShared++;
+    return true;
+}
+
+// How far whole top-level chunks run from `data`. LoadChunks stops only on
+// reaching the end it is given exactly, so it is given this.
+static size_t whole_chunks(const uint8_t* data, size_t len)
+{
+    const uint8_t* c   = data;
+    const uint8_t* end = data + len;
+
+    while (c + 8 <= end) {
+        uint32_t size = bchunk_u32(c + 4);
+
+        if (size > (uint32_t)(end - c) - 8u) {
+            break;
+        }
+        c += 8 + size;
+    }
+    return (size_t)(c - data);
+}
+
+// The packs in the bundles the UI already holds, GLOBALB.BUN and
+// INGAMEB.BUN: the boot and LOADING_TRACK_COMMON's, loaded before anything
+// of the track's. Slot 2's loader is offered every top-level chunk and
+// takes the packs and flipbooks; the rest of those bundles is the UI's.
+static void load_shared_packs(TrackView* v)
+{
+    int i;
+
+    for (i = 0; i < v->numShared; i++) {
+        uint8_t* c   = v->shared[i];
+        uint8_t* end = c + whole_chunks(c, v->sharedLen[i]);
+
+        for (; c < end; c += 8 + bchunk_u32(c + 4)) {
+            if (v->numSharedChunks < TRACKVIEW_MAX_SHARED_CHUNKS
+                && loader_texture_pack(c)) {
+                v->sharedChunk[v->numSharedChunks++] = c;
+            }
+        }
+    }
+}
+
+// The track's texture files, after its bundle: each is a ResourceFile,
+// loaded whole through LoadChunks and followed by PostLoadFixup, which
+// BeginGameFlowLoadingTrackSpecific's eDisableFixUpTables keeps from
+// fixing the tables up until the End of loading does.
+static void load_texture_files(TrackView* v)
+{
+    char   path[GAMEDATA_MAX_PATH];
+    bNode* n;
+    int    i;
+
+    for (i = 0; i < TRACKVIEW_NUM_TEXFILES; i++) {
+        if (!v->hasTexFile[i]
+            || !gamedata_path(kTexFiles[i], path, sizeof path)) {
+            continue;
+        }
+        v->texData[i] = read_bundle(path, &v->texLen[i], &v->texLinear[i],
+                                    false);
+        if (!v->texData[i]) {
+            continue;
+        }
+        v->texChunkLen[i] = whole_chunks(v->texData[i], v->texLen[i]);
+        load_chunks(v->texData[i], (int32_t)v->texChunkLen[i]);
+        post_load_fixup();
+    }
+    for (n = TexturePackList.next; n != &TexturePackList; n = n->next) {
+        v->numPacks++;
+    }
+    for (n = TextureAnimPackList.next; n != &TextureAnimPackList;
+         n = n->next) {
+        v->numAnims += ((TextureAnimPack*)(void*)n)->NumTextureAnims;
+    }
+}
+
+// BeginGameFlowUnloadingTrackSpecific's FindResourceFile(3) and
+// UnloadResourceFile, over the viewer's three files. FindResourceFile walks
+// ResourceFileList from its tail, so the newest goes first: TEX12LOCATION,
+// TEX12TRACK, the bundle. ~ResourceFile (0x0018fa50) is UnloadChunks, the
+// bFree, then PostLoadFixup.
+static TrackView* s_unloading;
+
+static void* find_track_file(int type)
+{
+    TrackView* v = s_unloading;
+    int        i;
+
+    (void)type;
+    for (i = TRACKVIEW_NUM_TEXFILES - 1; i >= 0; i--) {
+        if (v->texData[i]) {
+            return &v->texData[i];
+        }
+    }
+    return v->data ? (void*)&v->data : NULL;
+}
+
+static void unload_track_file(void* file)
+{
+    TrackView* v = s_unloading;
+
+    if (file == (void*)&v->data) {
+        unload_chunks(v->data, (int32_t)v->chunkLen);
+        if (v->dataLinear) {
+            linearFree(v->data);
+        } else {
+            free(v->data);
+        }
+        v->data = NULL;
+        v->len  = 0;
+    } else {
+        int i = (int)((uint8_t**)file - v->texData);
+
+        unload_chunks(v->texData[i], (int32_t)v->texChunkLen[i]);
+        if (v->texLinear[i]) {
+            linearFree(v->texData[i]);
+        } else {
+            free(v->texData[i]);
+        }
+        v->texData[i] = NULL;
+    }
+    post_load_fixup();
+}
+
+// The shared bundles' packs, which the game keeps for the next race; the
+// viewer takes them out again, in the reverse order.
+static void unload_shared_packs(TrackView* v)
+{
+    int i;
+
+    for (i = v->numSharedChunks - 1; i >= 0; i--) {
+        unloader_texture_pack(v->sharedChunk[i]);
+    }
+    v->numSharedChunks = 0;
 }
 
 // The bundle's top level as LoadChunks will walk it, loading nothing: how
@@ -680,7 +952,7 @@ bool trackview_load(TrackView* v)
         snprintf(v->note, sizeof v->note, "path too long");
         return false;
     }
-    v->data = read_bundle(path, &v->len, &v->dataLinear);
+    v->data = read_bundle(path, &v->len, &v->dataLinear, true);
     if (!v->data) {
         snprintf(v->note, sizeof v->note, "cannot read %s", TRACK_BUNDLE);
         return false;
@@ -710,9 +982,14 @@ bool trackview_load(TrackView* v)
         }
     }
 
-    // ResourceFile's load: the whole bundle through the LoaderTable, then
-    // PostLoadFixup. The models find their solids by name as LoaderScenery
-    // makes them, and the bundle has its solid lists first. The seams are
+    // The game's order. The shared bundles' packs are in first; then
+    // BeginGameFlowLoadingTrackSpecific sets eDisableFixUpTables and loads
+    // the bundle -- a ResourceFile: the whole of it through the
+    // LoaderTable, then PostLoadFixup -- and LoadingTrackSpecificPart4 the
+    // two texture files the same way; and the End of loading clears it and
+    // runs eFixUpTables once over everything, before starting the track's
+    // systems. The models find their solids by name as LoaderScenery makes
+    // them, and the bundle has its solid lists first. The seams are
     // eInitEngine's to set; they are set here too so that the viewer does
     // not depend on the order main() does things in.
     if (!gEModelInitFn) {
@@ -721,13 +998,21 @@ bool trackview_load(TrackView* v)
     if (!gEModelDestroyFn) {
         gEModelDestroyFn = emodel_delete;
     }
+    if (!gGetTextureInfoFn) {
+        gGetTextureInfoFn = texturepack_get_texture_info;
+    }
+    load_shared_packs(v);
+    eDisableFixUpTables = 1;
     gEModelRenderFn = render_model;
     v->chunkLen = count_chunks(v);
     load_chunks(v->data, (int32_t)v->chunkLen);
     post_load_fixup();
+    load_texture_files(v);
+    EndGameFlowLoadingTrackSpecific();
     for (n = SolidList.next; n != &SolidList; n = n->next) {
         v->linkedSolids++;
     }
+    count_defaulted(v);
 
     for (n = ModelList.next; n != &ModelList; n = n->next) {
         eModel* m = (eModel*)(void*)n;
@@ -766,9 +1051,17 @@ void trackview_free(TrackView* v)
 {
     int i;
 
+    // The Begin of unloading closes what the End started and hands the
+    // track's files back through the two seams. Nothing is chunk-loaded
+    // unless the load got as far as `loaded`.
     if (v->loaded) {
-        unload_chunks(v->data, (int32_t)v->chunkLen);
-        post_load_fixup();
+        s_unloading           = v;
+        gFindResourceFileFn   = find_track_file;
+        gUnloadResourceFileFn = unload_track_file;
+        BeginGameFlowUnloadingTrackSpecific();
+        gFindResourceFileFn   = NULL;
+        gUnloadResourceFileFn = NULL;
+        s_unloading           = NULL;
         v->linkedSolids = 0;
         if (gEModelRenderFn == render_model) {
             gEModelRenderFn = NULL;
@@ -782,19 +1075,18 @@ void trackview_free(TrackView* v)
             free(v->info[i].centre);
         }
     }
+    unload_shared_packs(v);
     if (v->texture) {
         for (i = 0; i < v->numTextures; i++) {
             if (v->texture[i].valid) {
-                C3D_TexDelete(&v->texture[i].tex);
+                C3D_TexDelete(&v->texture[i].own);
             }
         }
     }
-    drop_bundle(v);
-    for (i = 0; i < TRACKVIEW_NUM_PACKS; i++) {
-        if (v->hasPack[i]) {
-            texsrc_close(&v->pack[i]);
-        }
+    for (i = 0; i < v->numFrames; i++) {
+        C3D_TexDelete(&v->frame[i].tex);
     }
+    drop_bundle(v);
     memset(v, 0, sizeof *v);
 }
 
@@ -933,7 +1225,7 @@ void trackview_draw(TrackView* v)
     eSwapFrameMallocBuffers();
     MaybeChangeViewMode();
     eview_calculate_view_matrices(view, 0.0f, 0.0f, 0.0f);
-    scenery_cull_setup_views(&v->cull, 1);
+    scenery_cull_setup_views(&v->cull, InGameFlag);
     scenery_do_culling(&v->cull);
     v->drawInfos = 0;
     for (i = 0; i < v->cull.NumCullInfos; i++) {
@@ -971,6 +1263,11 @@ void trackview_draw(TrackView* v)
     scenery_stuff_scenery(&v->cull, view);
     draw_deferred(v);
     s_draw = NULL;
+
+    // eDisplayFrame's end (0x00113cd4), once the frame is on its way: the
+    // flipbooks' next frames, for the next frame to draw.
+    UpdateTextureAnimations();
+    follow_flipbooks(v);
 
     // citro2d draws the bottom screen next and sets only what it needs:
     // the alpha test is put back off and the blend back to its own.

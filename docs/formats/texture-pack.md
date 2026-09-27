@@ -14,7 +14,7 @@ writes one PNG per texture; stdlib only, no PIL).
 
 | type         | size       | contents |
 |--------------|-----------:|----------|
-| `0x30300002` | 20         | pack header: a NUL-padded ASCII name (`HUD`, `CARTEXTURES`, `TRACK`), then a version word |
+| `0x30300002` | 20         | `TexturePackHeader`: a 16-byte NUL-padded name (`HUD`, `CARTEXTURES`, `TRACK`), then `pTexturePack` -- 0 on disc, where the loader leaves the pack |
 | `0x30300003` | n * 164    | the `TextureInfo` table, one record per texture |
 | `0x30300004` | large      | all CLUTs and all pixel data, back to back |
 
@@ -630,3 +630,147 @@ python tools/texture_convert.py out/TRACKS/TEX12LOCATION.BIN --anims
 names. A normal conversion run also drops an `anims.csv` beside the PNGs --
 one row per frame in play order, with the PNG filename -- so a sequence can be
 rebuilt without re-reading the chunk.
+
+---
+
+## The port -- slot 2 and TexturePack.obj's runtime
+
+    LoaderTexturePack, UnloaderTexturePack   0x00100830 .. 0x00100a60
+    TexturePack.obj's in-memory half         0x001a1650 .. 0x001a1f00
+    the two lists' teardowns                 0x001a2d00 .. 0x001a2f08
+
+`3DS Files/source/texturepack.{c,h}` is slot 2 of both chunk tables (see
+[loader-table](loader-table.md)) and everything a loaded pack is asked
+afterwards. It is cross-checked by `tools/texturepack_check.py` against
+`tools/src/texturepack_test.c`.
+
+### The loader
+
+`loader_texture_pack` takes the two container types and returns 0 for
+any other. It does not read a child's type. It walks the three children
+by their sizes.
+
+**A `0xb0300001` pack.**
+
+1. The loader bMallocs a 132-byte `TexturePack` and constructs it with
+   the header's name. The constructor stores the name, its hash and the
+   debugger's handle, and puts the pack at the tail of `TexturePackList`.
+2. The pack's address goes into the header's `pTexturePack`. This is the
+   word that is 0 on the disc.
+3. `AttachTextureTable` gives each record its pack and its image parent.
+   It clears the record's pixels, palette, active textures and VRAM
+   addresses.
+4. `AssignTextureData` points `ImageData` and `PaletteData` into the blob.
+   Their base is the payload rounded up to 128, and the range assigned is
+   the rest of the blob.
+
+`ImagePlacement` and `PalettePlacement` are left as offsets. So a reader
+of the raw record, like `texpack.c`, still works on a loaded pack.
+
+**A `0xb0300100` flipbook pack.** It is made only when its header's
+`Version` is 1; otherwise the header's pointer is set to NULL. The
+constructor gives each flipbook its run of the entry table, in turn.
+Then `InitAnims` looks up each frame's texture and records the pixels and
+palette that texture has now. A flipbook with a frame that nobody has is
+not valid.
+
+The unloader destroys what the header points at, with flags 3. It does
+not clear the pointer.
+
+**The rounding needs the bundle in memory at 128.** The packer sized each
+blob's `0x11` filler for the address the file will have. A bundle read
+into a buffer that is not 128-aligned rounds to a different base, and
+every texture comes out shifted. `uirender.c` reads its bundles with
+`memalign(128, ...)` for this reason. `trackview.c` reads the texture
+files the same way, and it takes GLOBALB and INGAMEB from the UI.
+
+### GetTextureInfo -- 0x001a19b0
+
+This is what every other object asks for a texture by. `eFixUpTables`
+reaches it through esolid's `gGetTextureInfoFn`.
+
+1. **The packs.** Each pack on `TexturePackList` is asked in turn for the
+   first *loaded* record of that name. A record is loaded when it has
+   pixels, and a palette if it needs one. The pack that has the name moves
+   to the list's head, so the list is kept in the order the packs were
+   last hit. The record's `UsedFlag` is set.
+2. **The render targets.** If no pack has it, `eGetRenderTargetTextureInfo`
+   is tried. It is a seam.
+3. **The default.** With `use_default`, the call is repeated for
+   `0x19006835`, which is GLOBALB's default texture. If even that is
+   missing, the call ends at `bBreak`, and the port counts these in
+   `texturepack_breaks`.
+
+### UpdateTextureAnimations -- 0x001a17e8
+
+Once a frame, at the end of `eDisplayFrame` (`0x00113cd4`), after the
+render queue and before the frame buffers swap. Each valid flipbook
+works out its frame from its clock: the real clock for `TimeBase` 1,
+the world's otherwise. `TweakFPS`, when it is not 0, replaces every
+flipbook's own rate. On a new frame, each frame's texture is given the
+pixels and palette of the frame that many steps on.
+
+Nothing is re-bound. A solid that points at any frame's record animates.
+A valid flipbook of no frames is a divide by zero on the console, and the
+port leaves that flipbook alone.
+
+### Not ported
+
+The streaming half is not ported. It is `LoadTextureTableFromFile` and
+the LoadedTextureData calls (`0x001a1f00` .. `0x001a28c0`),
+StreamingTexturePack and QueuedFile, and LoadGlobalChunks and
+LoadHudTextures use it. The destructor still waits out a streaming load
+and frees the LoadedTextureData list, through the `ServiceQueuedFiles`
+seam. Both are empty for a pack a bundle holds.
+
+### On this disc, loaded
+
+The viewer loads the four packs a race on TRACKB12 has: GLOBALB, INGAMEB,
+TEX12TRACK and TEX12LOCATION. They hold 88, 117, 22 and 396 records, and
+8 flipbooks between them. The 1,135 solid tables name 415 distinct
+textures. The first pack that has a name is where GetTextureInfo finds
+it:
+
+| First found in | Names |
+|---|---:|
+| GLOBALB | 0 |
+| INGAMEB | 12 |
+| TEX12LOCATION | 350 |
+| TEX12TRACK | 4 |
+| no pack (the default) | 49 |
+
+This is the same on Azahar, which counts 49 names given the default and
+no `bBreak`. The 46 flipbook frames past each first are all uploaded as
+the flipbooks turn.
+
+### Checking it
+
+```bash
+python tools/texturepack_check.py
+python tools/texturepack_check.py --mutate
+```
+
+The model runs both loaders and every runtime function from the image,
+with bStrCpy, bStringHash, bSPrintf and bAddCodeineInventory. The
+scenarios include:
+
+- every texture file on the disc, loaded in the game's order, with each
+  of its textures and a few misses looked up, its flipbooks run, and all
+  of it unloaded;
+- built packs for:
+  - the guards and the name;
+  - the table's size and the blob's rounding;
+  - the placements' ranges and image parents;
+  - duplicate names and garbage in the runtime fields;
+  - the lookups' order, the default and the render targets;
+- the destructor's flags, its streaming load and its LoadedTextureData;
+- built flipbooks for:
+  - every version, and missing frames;
+  - the two clocks and TweakFPS;
+  - large frame counts.
+
+Results: 5,452 ops, 11,201 lines, 0 differ. Of the 97 mutations, 95 are
+caught and 2 are equivalent. The first equivalent one hashes the name as
+given rather than its copy, which is the same string for every name the
+loader is given. The second writes `1.0f / 60.0f` exactly, which is the
+image's constant to the bit.

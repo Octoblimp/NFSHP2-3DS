@@ -91,7 +91,7 @@ and 52 top-level types, and "TB12" is TRACKB12.
 |---:|---|---|---:|---:|---|
 | 0 | Null | `00000000` padding | 421 | 285 | `loader_null` |
 | 1 | TrackGeometry | `34130`..`34133` topology tree, `34146` markers, `34200` track info, `34201` track table | 1 each | 6 | `track.c` |
-| 2 | TexturePack | `b0300001`, `b0300100` | 10, 10 | 0 | -- |
+| 2 | TexturePack | `b0300001`, `b0300100` | 10, 10 | 0 | `texturepack.c` |
 | 3 | FontInfo | `15010`, `30200` | 11, 0 | 0 | -- |
 | 4 | SolidList | `80034000` | 110 | 65 | `esolid.c` |
 | 5 | LightList | `80034015`, `80034019`, `3401c`, `3401e` | 1, 1, 0, 1 | 2 | -- |
@@ -246,6 +246,8 @@ returns a pointer returns NULL.
   `gElGetLightMaterialFn` (the light lists), `gFixStripSTsFn` and
   `gCalcAutoKFn` (the renderer's), and `gReconnectAllAnimationsFn` (the
   animation loader).
+- **`texturepack.h`:** `gERenderTargetTextureInfoFn` and
+  `gServiceQueuedFilesFn`; see [texture-pack](texture-pack.md).
 - **`bchunkload.h`:** `gUnportedLoaderFn`, and PostLoadFixup's
   `gELightUpdateTexturesFn`, `gAfxUpdateTexturesFn`,
   `gFlailerPostLoadFixupFn` and `gEmptyFernFlattenersFn`.

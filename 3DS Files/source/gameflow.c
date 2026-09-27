@@ -269,7 +269,7 @@ int bgf_move_back_screen(BGameFlow* gf, int n)
 void bgf_change_state(BGameFlow* gf, int desired, int pending)
 {
     gf->desired = desired;
-    gf->pending = pending;   // written, never read by ServiceGameFlow
+    gf->pending = pending;   // never read by ServiceGameFlow; see trackflow.c
     trace(gf, "want %s", bgf_state_name(gf, desired));
 }
 

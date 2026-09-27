@@ -7384,3 +7384,145 @@ Azahar: the same counts as before, and the track draws as before.
   which the viewer opens itself for now.
 - The `InitTree` call in `EndGameFlowLoadingTrackSpecific` (0x0016461c), so
   that the topology the table now loads is built.
+
+## Session 30, continued (2026-09-27) -- Task 27's twenty-fifth slice: the texture packs and the track flow
+
+The twenty-fourth slice went in as `8fdcdeb`. The twenty-fifth closes
+roadmap step 2. It has three parts:
+- TexturePack.obj's loader in slot 2, with the object's in-memory half,
+  in `texturepack.c`;
+- the viewer using the packs through it;
+- the two game-flow steps that bracket a race's track, in `trackflow.c`.
+  The End calls InitTree.
+
+The write-ups are `docs/formats/texture-pack.md` (a new section at the
+end) and `docs/formats/track-flow.md`.
+
+```
+texturepack_check   5452 ops, 11201 lines, 0 differ
+                    97 mutations: 95 caught, 2 equivalent, 0 unexplained
+trackflow_check     16 scenarios, 694 lines, 0 differ
+                    74 mutations: 73 caught, 1 equivalent (port-only), 0 unexplained
+trackview: 1135 solids linked, 2495 models, 8 without a solid, 915 baked,
+           125498 tris, 342 textures (0 missing, 0 reduced), 35984 KB linear free
+trackview: 4 texture packs, 8 flipbooks, 49 names given the default, 0 breaks
+trackflow: loaded, InGameFlag 1, eDisableFixUpTables 0, reverse 0
+track flipbook frames 46 uploaded, 0 failed
+trackview: freed, InGameFlag 0, eDisableFixUpTables 1, 0 solids, 0 models,
+           0 texture packs left
+```
+
+### The texture packs
+
+A loaded pack's records point into its blob. `ImageData` and `PaletteData`
+become pointers, and the placements stay as offsets, so `texpack.c` still
+reads a loaded pack. The blob's base is its payload rounded up to 128.
+The packer's `0x11` filler was sized for the file's address, so a bundle
+must sit at 128 in memory. `uirender.c` now reads with `memalign(128)`.
+
+The `0x30300002` header's second word is not a version. It is
+`pTexturePack`, 0 on the disc, and the loader writes the pack there.
+
+GetTextureInfo asks each pack for the first *loaded* record of a name.
+The pack that answers moves to the head of the list. Then it tries the
+render targets, which are a seam. Then, with `use_default`, it tries
+`0x19006835`, GLOBALB's default. The disc's numbers:
+- the 1,135 solid tables name 415 distinct textures;
+- 12 are first found in INGAMEB, 350 in TEX12LOCATION and 4 in
+  TEX12TRACK;
+- 49 are in no pack and take the default.
+
+Azahar's count agrees.
+
+UpdateTextureAnimations runs at the end of eDisplayFrame (`0x00113cd4`).
+It rotates each flipbook's pixel and palette pointers among its frames'
+records. The viewer re-uploads when a record's pointers move, and keeps
+each frame's upload. There are 46 frames past the first on this track,
+and all 46 uploaded.
+
+### The track flow
+
+EndGameFlowLoadingTrackSpecific (`0x001645e8`) is the one place the fix-up
+runs. BeginGameFlowLoadingTrackSpecific sets `eDisableFixUpTables`, so
+every PostLoadFixup after it does nothing to the tables. The End clears
+the flag and runs eFixUpTables over everything. Only then do TRACKB12's
+solids find the textures in TEX12LOCATION, which loads after the bundle.
+
+The rest of the End starts these, in this order:
+- the collision pools;
+- InitTree;
+- InitPhysics;
+- the visible zones' `MARKER_BOUNDARY` model;
+- the paths;
+- the routes;
+- a new RaceCoordinator.
+
+Two stores sit in delay slots, and the checker pins both:
+- `ReverseTrackDirection` is stored before InitTrackRoutes. It is
+  `TrackDirection == 1`, and `forward` is `!= 1`.
+- `WeHaveCheckedIfJR2ServerExists` is cleared before InitAIPlans.
+
+The image's InitPhysics has no argument. It reads
+`TheRaceParameters.NumDriverInfo` (`0x00312814`) itself, which the port
+now has in `race.c`.
+
+BeginGameFlowUnloadingTrackSpecific (`0x001646e0`) closes the same
+systems in nearly the reverse order. Then
+`while ((f = FindResourceFile(3))) UnloadResourceFile(f)` hands back the
+track's files. FindResourceFile walks the list from its tail, so the
+newest file goes first. Last, it calls
+`ChangeGameFlow(PendingGameFlowState ? pending : 8, 0)`. That is the one
+reader of `PendingGameFlowState`, and `gameflow.h` and `boot-flow.md` no
+longer call it write-only. `BGameFlow` holds SkipFE and the pending state,
+so the Begin reaches them through `gTrackFlowGameFlow`. When that is
+NULL, as in the viewer, the three flow steps are skipped.
+
+Every callee the port lacks is a seam in `trackflow.h`:
+- the sky, the sun and the rain;
+- the smokeables;
+- the markers and the debug topology;
+- the route editor, the world objects, the animated driver and the AI
+  plans;
+- the RaceCoordinator's new and delete;
+- the HUD pack's unload, the resource files, the sound regions, the demo
+  replay, the languages;
+- bIsAsyncDone and bCountFreeMemory.
+
+Steps 3 on fill them in.
+
+### The checker
+
+`trackflow_check` runs both functions from the image, with every callee
+stubbed. Each stub prints its arguments and six globals read at the
+moment of the call, so a store that moves across a call shows.
+
+The first mutation pass caught 73 of 74. The survivor drops the
+`gUnloadResourceFileFn != NULL` half of the resource-file loop's guard.
+The image has no seams to test that against, so it is listed as
+port-only: Find with no Unload would spin in the image too.
+
+### The viewer
+
+`trackview_load` now runs in the game's order:
+1. the shared packs;
+2. `eDisableFixUpTables = 1`;
+3. TRACKB12;
+4. TEX12TRACK;
+5. TEX12LOCATION, each followed by `post_load_fixup`;
+6. the End.
+
+`trackview_free` runs the Begin, with Find and Unload seams over its
+three files, newest first. Each is unloaded as `~ResourceFile`
+(`0x0018fa50`) does it: UnloadChunks, the free, PostLoadFixup.
+
+There is one more model than before, InitVisibleZones' `MARKER_BOUNDARY`.
+It has no solid here because its solid is in INGAMEB, and the viewer
+hands only INGAMEB's texture chunks to the table.
+
+The cull is now told `InGameFlag` rather than a constant 1.
+
+### Next: step 3, the sky, the sun and the weather
+
+SkyLoader, SunTrackLoader and rain_Load are already the End's seams, and
+their unloaders are the Begin's. StuffSky's draw is what the viewer's sky
+domes are standing in for.

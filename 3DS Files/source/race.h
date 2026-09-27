@@ -73,6 +73,12 @@ extern eTrackDirection RaceParametersTrackDirection;
 // before reading anything else when it is 0.
 extern int32_t RaceParametersBoost;
 
+// TheRaceParameters.NumDriverInfo, 0x00312814 (RaceParameters+756). The
+// race's driver count; InitWithDefaults starts it at 0. InitPhysics reads
+// it in the image (`lw s0,10260(v0)`); the port's takes it as an argument,
+// and EndGameFlowLoadingTrackSpecific passes this.
+extern int32_t RaceParametersNumDriverInfo;
+
 // ------------------------------------------------------------- RacingCar
 
 struct Car;

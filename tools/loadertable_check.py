@@ -43,10 +43,10 @@ returns nonzero, or gets as far as calling anything, takes the chunk. The
 harness calls the port's loader on a bare chunk -- except where the image
 takes the type in a slot whose object is ported, whose loader would load
 it: there it prints `take` from CLAIMS below, and CLAIMS is what the model
-checks. The unloaders in those slots, but Scenery's, are called, on a chunk
-of size 0 and a payload of 0xa5s that a loader would fault on. An unported
-slot must also hand the chunk it takes to gUnportedLoaderFn, once, with its
-slot and table.
+checks. The unloaders in those slots, but Scenery's and TexturePack's, are
+called, on a chunk of size 0 and a payload of 0xa5s that a loader would
+fault on. An unported slot must also hand the chunk it takes to
+gUnportedLoaderFn, once, with its slot and table.
 
 Scenarios: the claims; the walks over a probe table, both ways, over
 ranges, with a chunk nobody takes and the walk after it, with two takers
@@ -90,7 +90,8 @@ SOURCES = [HARNESS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "bvector.c", "race.c", "track.c", "terraintype.c", "cartrack.c",
     "carstate.c", "terraintypetab.c", "bslotpool.c", "bticker.c", "p32.c",
     "bchunk.c", "trackpath.c", "quickspline.c", "bmem.c", "trackroute.c",
-    "polyhedra.c", "vclip.c", "espresso.c", "difficultyinfo.c")]
+    "polyhedra.c", "vclip.c", "espresso.c", "difficultyinfo.c",
+    "texturepack.c")]
 
 HARNESS_TIMEOUT = 600
 EXTRACTED = ROOT / "extracted"
@@ -180,7 +181,7 @@ CLAIMS = {
     30: [0x00039100, 0x00039101, 0x00039102],
 }
 TAKER = {t: k for k, ts in CLAIMS.items() for t in ts}
-PORTED = {0, 1, 4, 9, 11, 18, 19, 26}
+PORTED = {0, 1, 2, 4, 9, 11, 18, 19, 26}
 
 # ---- the ops -----------------------------------------------------------------
 
@@ -490,9 +491,10 @@ def scenario_matrix(sc, files):
                 elif slot == 4:
                     mode = 2
                 elif slot in PORTED:
-                    # Scenery's unloader unlinks what its loader linked, so
-                    # it is not called on a chunk that was never loaded.
-                    mode = 3 if table and slot != 11 else 1
+                    # Scenery's unloader unlinks what its loader linked,
+                    # and TexturePack's destroys the pack its header names,
+                    # so neither is called on a chunk that was never loaded.
+                    mode = 3 if table and slot not in (2, 11) else 1
                 sc.op(OP_MATRIX, table, slot, t, mode)
 
 

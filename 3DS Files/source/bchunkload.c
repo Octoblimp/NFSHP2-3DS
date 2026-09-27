@@ -9,6 +9,7 @@
 #include "esolid.h"
 #include "polyhedra.h"
 #include "scenery.h"
+#include "texturepack.h"
 #include "track.h"
 #include "trackpath.h"
 #include "trackroute.h"
@@ -111,8 +112,6 @@ static int take(const uint32_t *types, size_t n, int slot, int unload,
                     slot, 1, c);                                          \
     }
 
-UNPORTED(LoaderTexturePack, UnloaderTexturePack, 2,
-         0xb0300001u, 0xb0300100u)
 UNPORTED(LoaderFontInfo, UnloaderFontInfo, 3, 0x00015010u, 0x00030200u)
 UNPORTED(LoaderLightList, UnloaderLightList, 5,
          0x80034015u, 0x80034019u, 0x0003401cu, 0x0003401eu)
@@ -147,7 +146,7 @@ UNPORTED(LoaderDemoModeReplay, UnloaderDemoModeReplay, 30,
 BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     loader_null,                    //  0
     LoaderTrackGeometry,            //  1
-    LoaderTexturePack,              //  2
+    loader_texture_pack,            //  2
     LoaderFontInfo,                 //  3
     loader_solid_list,              //  4
     LoaderLightList,                //  5
@@ -181,7 +180,7 @@ BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
 BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
     loader_null,                    //  0
     UnloaderTrackGeometry,          //  1
-    UnloaderTexturePack,            //  2
+    unloader_texture_pack,          //  2
     UnloaderFontInfo,               //  3
     unloader_solid_list,            //  4
     UnloaderLightList,              //  5

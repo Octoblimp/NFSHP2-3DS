@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-27), after task 27's twenty-fourth slice, the
-LoaderTable. `HANDOFF.md` is the running narrative; this file is the short
+continuation (2026-09-27), after task 27's twenty-fifth slice, the
+texture packs and the track flow. `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -17,10 +17,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Fifty-three cross-checkers pass, plus the table generators:
+Fifty-five cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -77,6 +77,8 @@ scenery_check       3450 ops,    16724 lines, 0 differ  (77 caught, 2 equivalent
 scenerycull_check   7273 ops,    46687 lines, 0 differ  (147 caught, 1 equivalent)
 eview_check         2103 ops,    15454 lines, 0 differ  (152 caught, 1 equivalent)
 loadertable_check  27856 ops,    41730 lines, 0 differ  (100 caught, 2 equivalent)
+texturepack_check   5452 ops,    11201 lines, 0 differ  (95 caught, 2 equivalent)
+trackflow_check       16 scenarios,  694 lines, 0 differ  (73 caught, 1 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -463,15 +465,55 @@ and so replaced every boot.
      their animation, or for UnInit on a model with a solid. Written up in
      `docs/formats/loader-table.md`.
 
-     **Next is the rest of step 2.** Two things are left:
-     - TexturePack.obj's loader in slot 2, so that GetTextureInfo is the
-       game's. Then the viewer can stop opening the three packs itself.
-     - The `InitTree` call in `EndGameFlowLoadingTrackSpecific`
-       (`0x0016461c`), so that the topology the table now loads is built.
+   - **The twenty-fifth slice closes step 2.** It has three parts.
+     - **TexturePack.obj** is ported in `texturepack.c`. Its loader and
+       unloader are slot 2. Its in-memory half has the constructor and
+       destructor, AttachTextureTable, Assign and UnAssignTextureData, the
+       three lookups, GetTextureInfo and GetNthTextureInfo, the flipbook
+       pack, InitAnims, UpdateTextureAnimations and GetTextureAnim.
+     - **The track flow** is ported in `trackflow.c`:
+       EndGameFlowLoadingTrackSpecific (`0x001645e8`) and
+       BeginGameFlowUnloadingTrackSpecific (`0x001646e0`). The End clears
+       `eDisableFixUpTables` and runs the one eFixUpTables. Then it calls
+       the collision pools, InitTree, InitPhysics, the visible zones, the
+       paths and the routes. Every callee the port lacks is a seam.
+     - **The viewer** loads in the game's order: the shared packs;
+       `eDisableFixUpTables` set; TRACKB12, TEX12TRACK and TEX12LOCATION;
+       then the End. It unloads through the Begin, whose
+       FindResourceFile loop hands the three files back newest first.
+
+     Seen on Azahar:
+     - The track draws textured by the game's own GetTextureInfo, and 49
+       names get the default, as the disc predicts.
+     - All 46 flipbook frames upload, and none fails.
+     - `InGameFlag` is 1 after the load and 0 after the free, and the
+       free leaves no solids, models or packs.
+
+     `texturepack_check`: 5,452 ops, 11,201 lines, 0 differ; 95 of 97
+     mutations caught, 2 equivalent. `trackflow_check`: 16 scenarios, 694
+     lines, 0 differ; 73 of 74 caught, 1 port-only. Written up in
+     `docs/formats/texture-pack.md` and `docs/formats/track-flow.md`.
+
+     **Next is step 3: the sky, the sun and the weather.** SkyLoader
+     (`0x0011ce18`), SunTrackLoader (`0x00123de0`) and rain_Load
+     (`0x00128bf8`) are already seams in the End, and their unloaders
+     are seams in the Begin. StuffSky's draw replaces the viewer's
+     stand-in sky domes.
 
      "The road to a playable demo", below, has everything after it.
 
    Things to know before the next slice:
+   - **A bundle with texture packs must sit at 128 in memory.**
+     LoaderTexturePack rounds the blob's address up to 128, and the
+     packer sized each blob's filler for the file's own address. A buffer
+     from plain malloc shifts every texture. Read bundles with
+     `memalign(128, ...)`, as `uirender.c` and `trackview.c` do.
+   - **Nothing fixes the tables up between the Begin and the End of
+     loading.** `eDisableFixUpTables` is 1 from
+     BeginGameFlowLoadingTrackSpecific until the End clears it. A solid
+     loaded in between has its texture table as the loader left it
+     until then. The Begin of unloading sets the flag again, and it
+     stays set after the viewer's free.
    - **`eMathInit` must run before anything draws.** It is the only
      thing that fills `eMathIdentityMatrix`, which StuffScenery hands to
      every object drawn in place: the road and the terrain. Left zero,
@@ -1033,7 +1075,7 @@ it will move as each class shows what it reaches.
 | Step | What | Slices |
 |---|---|---|
 | 1 | ~~The track on the screen: the viewer mode, eModel over `georender`, a free camera~~ done, task 27's twenty-third slice | 1 |
-| 2 | The LoaderTable: every chunk type in TRACKB12, with the solids, the texture packs, the topology and the routes live. The table, the walks and the solid list are done (task 27's twenty-fourth slice); the texture packs and InitTree are left | 1-2 |
+| 2 | ~~The LoaderTable: every chunk type in TRACKB12, with the solids, the texture packs, the topology and the routes live~~ done, task 27's twenty-fourth and twenty-fifth slices | 2 |
 | 3 | The sky, the sun and the weather's draw | 1 |
 | 4 | Car's constructor and destructor, and CarRenderInfo, so that a car draws on the track | 3-4 |
 | 5 | Player and the chase cameras (CM_DRIVE and the rest of `cammover.c`'s set) | 2 |

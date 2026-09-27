@@ -24,9 +24,12 @@
 #include "emodel.h"
 #include "esolid.h"
 
-// eview.c is not linked.
+// eview.c is not linked, nor is realtime.c, whose clocks only
+// texturepack.c's flipbooks read.
 bNode SolidList;
 bNode ModelList;
+int32_t RealTimeFrames;
+int32_t WorldTimeFrames;
 
 enum {
     OP_TAG, OP_BUF, OP_LEAF, OP_BULK, OP_OPEN, OP_CLOSE, OP_BUFEND,

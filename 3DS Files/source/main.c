@@ -55,6 +55,8 @@
 #include "collisionbody.h"
 #include "emath.h"
 #include "emodel.h"
+#include "esolid.h"
+#include "eview.h"
 #include "gamedata.h"
 #include "fesound.h"
 #include "gameflow.h"
@@ -76,6 +78,7 @@
 #include "terraintype.h"
 #include "topology.h"
 #include "track.h"
+#include "trackflow.h"
 #include "trackview.h"
 #include "uirender.h"
 #include "wheel.h"
@@ -876,15 +879,15 @@ static void initPlatformPerf(void)
     APT_SetAppCpuTimeLimit(80);
 }
 
-static bool addBundle(UIRenderer* ui, const char* rel)
+static UIBundle* addBundle(UIRenderer* ui, const char* rel)
 {
     char path[GAMEDATA_MAX_PATH];
-    if (!gamedata_path(rel, path, sizeof(path))) return false;
+    if (!gamedata_path(rel, path, sizeof(path))) return NULL;
     if (!uirender_add_bundle(ui, path)) {
         logPrintf("  missing %s\n", rel);
-        return false;
+        return NULL;
     }
-    return true;
+    return &ui->bundles[ui->numBundles - 1];
 }
 
 static const char* messageName(BScreenMessage msg)
@@ -1311,8 +1314,8 @@ int main(int argc, char** argv)
     static UIRenderer ui;
     uirender_init(&ui, 400.0f, 240.0f);
     addBundle(&ui, BUNDLE_FRONTEND);
-    addBundle(&ui, BUNDLE_GLOBAL);
-    addBundle(&ui, BUNDLE_INGAME);
+    UIBundle* globalBundle = addBundle(&ui, BUNDLE_GLOBAL);
+    UIBundle* ingameBundle = addBundle(&ui, BUNDLE_INGAME);
 
     // The blurb moves to the bottom screen, so the top screen stops drawing
     // it -- and stops drawing the bar tAnimatedBlurb wipes it out with,
@@ -1430,13 +1433,20 @@ int main(int argc, char** argv)
                   g_geo.hasCarPack ? "open" : "missing",
                   g_geo.hasGlobalPack ? "open" : "missing");
     }
-    if (!trackview_init(&g_track)) {
+    // The track's textures are partly GLOBALB's and INGAMEB's, which the
+    // UI already holds; the viewer loads their packs from these copies.
+    bool trackOk = trackview_init(&g_track);
+    if (globalBundle)
+        trackview_share_bundle(&g_track, globalBundle->data, globalBundle->len);
+    if (ingameBundle)
+        trackview_share_bundle(&g_track, ingameBundle->data, ingameBundle->len);
+    if (!trackOk) {
         logPrintf("trackview: %s\n", g_track.note);
     } else {
-        logPrintf("trackview: packs %s %s %s\n",
-                  g_track.hasPack[0] ? "open" : "missing",
-                  g_track.hasPack[1] ? "open" : "missing",
-                  g_track.hasPack[2] ? "open" : "missing");
+        logPrintf("trackview: %d bundles shared, texture files %s %s\n",
+                  g_track.numShared,
+                  g_track.hasTexFile[0] ? "there" : "missing",
+                  g_track.hasTexFile[1] ? "there" : "missing");
     }
 
     // The bottom screen prints the controls itself now, so these are for
@@ -1555,6 +1565,17 @@ int main(int argc, char** argv)
                           g_track.bakedTris, g_track.numTextures,
                           g_track.missingTextures, g_track.reducedTextures,
                           (unsigned)(linearSpaceFree() / 1024u));
+                logPrintf("trackview: %d texture packs, %d flipbooks, %d "
+                          "names given the default, %d breaks, files in "
+                          "%s %s\n",
+                          g_track.numPacks, g_track.numAnims,
+                          g_track.defaultedHashes, (int)texturepack_breaks,
+                          g_track.texLinear[0] ? "linear" : "heap",
+                          g_track.texLinear[1] ? "linear" : "heap");
+                logPrintf("trackflow: loaded, InGameFlag %d, "
+                          "eDisableFixUpTables %d, reverse %d\n",
+                          (int)InGameFlag, (int)eDisableFixUpTables,
+                          (int)TheTrackPathManager.ReverseTrackDirection);
             } else {
                 logPrintf("mode %d\n", mode);
             }
@@ -1735,6 +1756,8 @@ int main(int argc, char** argv)
                    g_track.cmdPeakWords, g_track.cmdSkipped,
                    g_track.frameMallocFails, g_track.numDeferred,
                    g_track.deferredSorted, g_track.deferredDropped);
+            devLog(8, "track flipbook frames %d uploaded, %d failed",
+                   g_track.frameUploads, g_track.frameFails);
 
             C2D_TargetClear(g_bot, BOT_BACK);
             C2D_SceneBegin(g_bot);
@@ -1945,6 +1968,21 @@ int main(int argc, char** argv)
     if (vHasMenu) bmenu_unactivate(&vMenu);
     geoview_free(&g_geo);
     trackview_free(&g_track);
+    {
+        // What BeginGameFlowUnloadingTrackSpecific leaves: every list the
+        // track filled empty again but the shared bundles' own.
+        int solids = 0, models = 0, packs = 0;
+        bNode* n;
+
+        for (n = SolidList.next; n != &SolidList; n = n->next) solids++;
+        for (n = ModelList.next; n != &ModelList; n = n->next) models++;
+        for (n = TexturePackList.next; n != &TexturePackList; n = n->next)
+            packs++;
+        logLine("trackview: freed, InGameFlag %d, eDisableFixUpTables %d, "
+                "%d solids, %d models, %d texture packs left",
+                (int)InGameFlag, (int)eDisableFixUpTables, solids, models,
+                packs);
+    }
     bsnd_hw_close(&gSnd);
     georender_exit();
     uirender_free(&ui);

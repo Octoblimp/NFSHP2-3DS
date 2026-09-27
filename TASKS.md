@@ -1905,6 +1905,34 @@ is citro3d and owns the top.
         102 mutations, 100 are caught and 2 are equivalent. Written up in
         `docs/formats/loader-table.md`. Left of step 2: TexturePack.obj's
         loader in slot 2, and the `InitTree` call.
+
+        **The twenty-fifth slice is closed: the rest of roadmap step 2.**
+        TexturePack.obj is ported in `texturepack.c`: its loader and
+        unloader are slot 2, and its in-memory half has GetTextureInfo,
+        the flipbooks and UpdateTextureAnimations. The two track-flow
+        steps are ported in `trackflow.c`: EndGameFlowLoadingTrackSpecific
+        and BeginGameFlowUnloadingTrackSpecific. The End calls InitTree,
+        InitPhysics, the collision pools, the visible zones and the paths
+        and routes.
+
+        The viewer loads in the game's order now:
+        1. GLOBALB's and INGAMEB's packs;
+        2. `eDisableFixUpTables` set;
+        3. TRACKB12;
+        4. TEX12TRACK;
+        5. TEX12LOCATION;
+        6. the End, which runs the one eFixUpTables.
+
+        It unloads through the Begin. Seen on Azahar: the track draws
+        textured by the game's own lookups, and 49 names get the default,
+        as the disc predicts. All 46 flipbook frames upload. After the
+        free, no solids, models or packs are left.
+
+        `texturepack_check`: 5,452 ops, 11,201 lines, 0 differ; of its 97
+        mutations, 95 are caught and 2 are equivalent. `trackflow_check`:
+        16 scenarios, 694 lines, 0 differ; of its 74 mutations, 73 are
+        caught and 1 is port-only. Written up in
+        `docs/formats/texture-pack.md` and `docs/formats/track-flow.md`.
         CONTINUE.md has what is next, and how far it is to a playable
         demo.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher

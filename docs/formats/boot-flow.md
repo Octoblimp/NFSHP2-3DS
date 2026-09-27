@@ -110,7 +110,7 @@ Three `int`s in `.sdata` drive it:
 |--------|---------|---------|
 | `CurrentGameFlowState` | `0x0032362c` | where the machine is |
 | `DesiredGameFlowState` | `0x00323630` | where `ChangeGameFlow` asked it to go |
-| `PendingGameFlowState` | `0x00323634` | written, never read by `ServiceGameFlow` |
+| `PendingGameFlowState` | `0x00323634` | written, never read by `ServiceGameFlow`; `BeginGameFlowUnloadingTrackSpecific` reads it ([track-flow.md](track-flow.md)) |
 
 ### `ServiceGameFlow` (`0x001636f8`)
 

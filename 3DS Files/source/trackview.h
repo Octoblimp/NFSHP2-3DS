@@ -9,7 +9,7 @@
 #include "geometry.h"
 #include "georender.h"
 #include "scenerycull.h"
-#include "texsrc.h"
+#include "texturepack.h"
 
 // The track viewer: TRACKB12.BUN's scenery on the top screen, through the
 // port of the game's own cull, from a camera flown with the circle pad.
@@ -22,21 +22,38 @@
 // lists go to LoaderSolidList, its 122 sections and 23 visible zones to
 // LoaderScenery -- where eModel::Init connects each kind's models to the
 // solids by name -- and its routes, path, topology and collision volumes
-// to theirs, and then PostLoadFixup runs. Nothing calls InitTree yet, so
-// the topology is loaded and not built. Every frame runs eDisplayFrame's
-// order on view 1 --
-// the view's matrices, the cull infos, DoCulling, StuffScenery -- with
-// eModel::Render being this file's draw over georender.
+// to theirs, and then PostLoadFixup runs. Every frame runs eDisplayFrame's
+// order on view 1 -- the view's matrices, the cull infos, DoCulling,
+// StuffScenery -- with eModel::Render being this file's draw over
+// georender.
+//
+// The loads go in the game's order. GLOBALB.BUN's and INGAMEB.BUN's
+// texture packs, which main() already holds for the UI and shares here, go
+// through slot 2 first, as the boot and LOADING_TRACK_COMMON leave them.
+// Then, as BeginGameFlowLoadingTrackSpecific does, eDisableFixUpTables is
+// set and the bundle loads, and TEX12TRACK.BIN and TEX12LOCATION.BIN after
+// it, each read whole; and EndGameFlowLoadingTrackSpecific (trackflow.c)
+// clears it, runs eFixUpTables once, and starts the track's systems --
+// the collision pools, InitTree, InitPhysics, the visible zones' boundary
+// model, the track paths and routes. eFixUpTables finds each solid's
+// textures by GetTextureInfo, the default one for a name no pack has, and
+// a solid's texture is the TextureInfo its table points at: the viewer
+// uploads the pixels its ImageData and PaletteData point at, and uploads
+// again when UpdateTextureAnimations moves them to a flipbook's next frame.
+// trackview_free runs BeginGameFlowUnloadingTrackSpecific, which closes
+// all of it and hands the three files back newest first.
 //
 // What stands in for the game, and should not be read as the game:
 //
-//   * TexturePack.obj. TRACKB12 has no textures of its own. They are in
-//     TEX12LOCATION.BIN, TEX12TRACK.BIN and INGAMEB.BUN, whose packs the
-//     game loads through slot 2, and slot 2's loader is not ported. So
-//     GetTextureInfo finds no texture and eFixUpTables leaves every
-//     texture pointer NULL. The viewer opens the three packs and looks the
-//     solids' texture hashes up in them itself. The light lists are not
-//     ported either, and the light-material pointers stay NULL too.
+//   * The GS's texture memory. The engine sends a texture's pixels to VRAM
+//     each frame it draws; the port uploads each TextureInfo once, and each
+//     flipbook frame once, as RGBA8, and keeps them. The light lists are
+//     not ported, and the light-material pointers stay NULL.
+//   * GLOBALB's other chunks. The game loads the whole bundle at boot; the
+//     viewer hands only its two texture chunks to slot 2, and INGAMEB's the
+//     same, because the UI reads the rest of both as they are on the disc.
+//     So InitVisibleZones' MARKER_BOUNDARY, whose solid is INGAMEB's,
+//     has none here.
 //   * SetScreenBuffers. Only the three things the matrices read are set:
 //     MainDraw0Context's scissor (ScreenWidth by ScreenHeight) and player
 //     1's aspect ratios, which are the image's NTSC pair.
@@ -64,25 +81,44 @@
 
 #define TRACKVIEW_MAX_SOLIDS   1280     // TRACKB12 has 1,135
 #define TRACKVIEW_MAX_TEXTURES 512      // its solids name 415 hashes
-#define TRACKVIEW_NUM_PACKS    3
+#define TRACKVIEW_NUM_TEXFILES 2        // TEX12LOCATION.BIN, TEX12TRACK.BIN
+#define TRACKVIEW_MAX_SHARED   2        // GLOBALB.BUN, INGAMEB.BUN
+#define TRACKVIEW_MAX_SHARED_CHUNKS 8   // their packs and flipbooks: 4
+#define TRACKVIEW_MAX_FRAMES   64       // flipbook frames past the first: 46
 #define TRACKVIEW_ROUTE        1        // the racing route the stops are on
 #define TRACKVIEW_STOPS        24       // how many stops round it
 #define TRACKVIEW_MAX_DEFERRED 1024     // batches held back for the alpha pass
 
+// One TextureInfo a solid's table points at. `tex` is what the solids'
+// slots draw with, a copy of `own` or of one of the flipbook frames'.
 typedef struct {
-    uint32_t hash;
+    const TextureInfo* info;
     C3D_Tex  tex;
+    C3D_Tex  own;               // the pixels it had when it was first used
+    const uint8_t* ownImage;    // and where they were,
+    const uint8_t* ownPalette;
+    const uint8_t* image;       // and where the ones in `tex` are
+    const uint8_t* palette;
     bool     valid;
     uint8_t  level;             // the mip level uploaded, 0 when there was room
     float    uvScale[2];
 
-    // From its TextureInfo, zero for a texture no pack holds.
+    // From its TextureInfo, zero for a texture that did not upload.
     GeoPass  pass;
     uint8_t  order;             // RenderingOrder, 0 to 7
     bool     sorted;            // ApplyAlphaSorting
     uint32_t stamp;             // the frame that last used it,
     uint16_t firstUse;          // and where in that frame it was first used
 } TrackTex;
+
+// A flipbook frame's pixels, uploaded for `owner` the first time it
+// showed them.
+typedef struct {
+    const void*    owner;       // the TrackTex
+    const uint8_t* image;
+    const uint8_t* palette;
+    C3D_Tex        tex;
+} TrackFrame;
 
 // The port's render data for one eSolid, beside GeoSolid storage[i].
 typedef struct {
@@ -108,9 +144,23 @@ typedef struct {
 } TrackDeferred;
 
 typedef struct {
-    TexSource pack[TRACKVIEW_NUM_PACKS];
-    bool      hasPack[TRACKVIEW_NUM_PACKS];
     bool      hasBundle;
+    bool      hasTexFile[TRACKVIEW_NUM_TEXFILES];
+
+    // --- the texture packs: the bundles main() shares, which stay its, and
+    // the chunks of theirs slot 2 loaded, and the texture files, read whole
+    // and resident while their records point into them.
+    uint8_t* shared[TRACKVIEW_MAX_SHARED];
+    size_t   sharedLen[TRACKVIEW_MAX_SHARED];
+    int      numShared;
+    uint8_t* sharedChunk[TRACKVIEW_MAX_SHARED_CHUNKS];
+    int      numSharedChunks;
+    uint8_t* texData[TRACKVIEW_NUM_TEXFILES];
+    size_t   texLen[TRACKVIEW_NUM_TEXFILES];
+    size_t   texChunkLen[TRACKVIEW_NUM_TEXFILES];
+    bool     texLinear[TRACKVIEW_NUM_TEXFILES];
+    int      numPacks;          // on TexturePackList once all are loaded
+    int      numAnims;          // flipbooks, across TextureAnimPackList
 
     // --- the bundle, resident for as long as the scenery points into it.
     uint8_t*     data;
@@ -124,6 +174,8 @@ typedef struct {
     int          linkedSolids;
     TrackTex*    texture;
     int          numTextures;
+    TrackFrame   frame[TRACKVIEW_MAX_FRAMES];
+    int          numFrames;
 
     // --- what the scenery loader made. The zones are counted from their
     // chunk rather than from VisibleZoneList, which FindVisibleZone
@@ -166,23 +218,36 @@ typedef struct {
     int  bakedSolids;
     int  bakedTris;
     int  skippedStrips;
-    int  missingTextures;
+    int  missingTextures;       // no TextureInfo, or one that would not upload
     int  reducedTextures;       // uploaded below level 0 for want of room
+    int  defaultedHashes;       // table names GetTextureInfo gave the default
+    uint32_t defaulted[TRACKVIEW_MAX_TEXTURES];
+    int  frameUploads;          // flipbook frames uploaded so far
+    int  frameFails;            // and the ones that would not
     int  loadMs;
     char note[64];
 } TrackView;
 
-// Opens the texture packs and notes whether TRACKS\TRACKB12.BUN is there.
+// Notes whether TRACKS\TRACKB12.BUN and the texture files are there.
 // Nothing is read yet.
 bool trackview_init(TrackView* v);
 
-// Reads the bundle, loads it through the LoaderTable, bakes every solid a
-// model names and uploads its textures, and puts the camera at the start
-// of route 1. False leaves the viewer empty but usable, with `note` saying
-// why. A second call does nothing.
+// A bundle main() holds resident, 128-aligned, whose texture packs the
+// track needs: GLOBALB.BUN, which has the default texture, then
+// INGAMEB.BUN, in the order the game loads them. After trackview_init;
+// the bundle must outlive trackview_free. False when there is no room.
+bool trackview_share_bundle(TrackView* v, uint8_t* data, size_t len);
+
+// Loads the shared packs, the bundle and the two texture files through
+// the LoaderTable, runs the End of loading, bakes every solid a model names
+// and uploads its textures, and puts the camera at the start of route 1.
+// False leaves the viewer empty but usable, with `note` saying why. A
+// second call does nothing.
 bool trackview_load(TrackView* v);
 
-// Unloads the bundle through the UnloaderTable and frees it all.
+// Runs the Begin of unloading, which unloads the track's three files
+// through the UnloaderTable newest first; then the shared packs, and frees
+// it all.
 void trackview_free(TrackView* v);
 
 // One frame of the fly camera, into Player1Camera. `kDown` and `kHeld` are
@@ -191,5 +256,6 @@ void trackview_input(TrackView* v, uint32_t kDown, uint32_t kHeld, int cpx,
                      int cpy, float dt);
 
 // The frame: view 1's matrices, the cull, and StuffScenery into the bound
-// render target, which must have a depth buffer.
+// render target, which must have a depth buffer; then, as eDisplayFrame
+// ends, the flipbooks' next frames.
 void trackview_draw(TrackView* v);

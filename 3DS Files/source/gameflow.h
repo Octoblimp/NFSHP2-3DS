@@ -202,7 +202,9 @@ struct BGameFlow {
 
     int current;      // CurrentGameFlowState, 0x0032362c
     int desired;      // DesiredGameFlowState, 0x00323630
-    int pending;      // PendingGameFlowState, 0x00323634 -- written, never read
+    // PendingGameFlowState, 0x00323634. ServiceGameFlow never reads it;
+    // BeginGameFlowUnloadingTrackSpecific does (trackflow.c).
+    int pending;
 
     BScreenStack         stack;
     const BScreenConfig* screen;   // FlailerScreenList::pCurrent, +412
@@ -262,7 +264,8 @@ void bgf_init(BGameFlow* gf,
               const BGameFlowHooks* hooks);
 
 // ChangeGameFlow (0x001636e8): two stores, no validation, no transition
-// table. `pending` is recorded and never read, exactly as in the original.
+// table. `pending` is recorded; ServiceGameFlow never reads it, and only
+// BeginGameFlowUnloadingTrackSpecific does.
 void bgf_change_state(BGameFlow* gf, int desired, int pending);
 
 // ServiceGameFlow (0x001636f8). Loops until the desired state stops moving,
