@@ -133,3 +133,12 @@ if (Test-Path $cia) {
 } else {
     throw "make cia reported success but $cia is missing"
 }
+
+# A relocation the 3DSX loader refuses links cleanly and fails only when
+# Azahar starts the program, with nothing in the app's own log; see
+# tools/check_3dsx.py. It is checked here so the build says so first.
+$threedsx = Join-Path $projectDir "NFSHP2-3DS.3dsx"
+& python (Join-Path $PSScriptRoot "check_3dsx.py") $threedsx
+if ($LASTEXITCODE -ne 0) {
+    throw "check_3dsx: $threedsx would not load"
+}

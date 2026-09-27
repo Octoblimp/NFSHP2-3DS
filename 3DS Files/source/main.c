@@ -53,6 +53,8 @@
 #include "carstate.h"
 #include "collision.h"
 #include "collisionbody.h"
+#include "emath.h"
+#include "emodel.h"
 #include "gamedata.h"
 #include "fesound.h"
 #include "gameflow.h"
@@ -74,6 +76,7 @@
 #include "terraintype.h"
 #include "topology.h"
 #include "track.h"
+#include "trackview.h"
 #include "uirender.h"
 #include "wheel.h"
 #include "world.h"
@@ -238,6 +241,10 @@ static BScreens g_uiScreens;
 // carries a mesh and a texture table per solid and is about 100 KB; main's
 // stack is not the place for it.
 static GeoView g_geo;
+
+// The track viewer's, for the same reason: the cull info alone is 2 KB, and
+// the texture packs' indexes ride along.
+static TrackView g_track;
 
 // ------------------------------------------------------- the run log
 //
@@ -1197,6 +1204,24 @@ int main(int argc, char** argv)
     // task 26 brings Player, and only a player's car reaches them.
     gCarFinishMovementFn = car_finish_movement;
 
+    // InitializeEverything runs eMathInit (0x0011b9a0) just before
+    // eInitEngine, and nothing else fills eMathIdentityMatrix: StuffScenery
+    // hands it to every object drawn where it stands -- the road and the
+    // terrain -- and left zero, it folds each of them to a point.
+    eMathInit();
+
+    // eInitEngine's share (0x00102a48) that the scenery needs: the model
+    // pool eInitSlotPools makes, eModel::Init and its deleting destructor,
+    // which LoaderScenery and UnloaderScenery call for every kind's models
+    // -- emodel.c since task 27's twenty-third slice -- and eInitViews,
+    // which gives views 0 to 3 their ids, targets and cameras. The frame
+    // memory is the track viewer's to ask for: 5 MB the frontend never
+    // touches.
+    emodel_init_slot_pool();
+    gEModelInitFn    = emodel_init;
+    gEModelDestroyFn = emodel_delete;
+    eInitViews();
+
     // The two calls Suspension makes into Wheel go through pointers, left
     // NULL until something says Wheel is linked -- which, in the game,
     // it always is.
@@ -1252,7 +1277,10 @@ int main(int argc, char** argv)
         logPrintf("Sound: ndsp unavailable, running silent\n");
     }
 
-    C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
+    // Four times citro3d's default. A track frame is a draw per object the
+    // cull keeps, each with its own matrices, and the default's 256 KB is
+    // about 500 of them; GPUCMD_Add drops what does not fit without a word.
+    C3D_Init(C3D_DEFAULT_CMDBUF_SIZE * 4);
     C2D_Init(C2D_DEFAULT_MAX_OBJECTS);
     C2D_Prepare();
     C3D_RenderTarget* top = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8,
@@ -1402,20 +1430,28 @@ int main(int argc, char** argv)
                   g_geo.hasCarPack ? "open" : "missing",
                   g_geo.hasGlobalPack ? "open" : "missing");
     }
+    if (!trackview_init(&g_track)) {
+        logPrintf("trackview: %s\n", g_track.note);
+    } else {
+        logPrintf("trackview: packs %s %s %s\n",
+                  g_track.hasPack[0] ? "open" : "missing",
+                  g_track.hasPack[1] ? "open" : "missing",
+                  g_track.hasPack[2] ? "open" : "missing");
+    }
 
     // The bottom screen prints the controls itself now, so these are for
     // the log -- and for the console, in the half second before the first
     // frame paints over it.
     logPrintf("D-pad: menu  A: select  START: start  B: back\n");
-    logPrintf("SELECT: screen viewer, then geometry\n");
+    logPrintf("SELECT: screen viewer, geometry, then track\n");
     logPrintf("In the viewer, B: scrolling-texture demo\n");
     // The marker tools/run_azahar_test.ps1 greps for: past this line the
     // bundles are resident, the flow is running and frames are being drawn.
     logLine("entering main loop");
 
     // SELECT cycles these rather than toggling one flag, because there are
-    // now three things to look at and the flow is the one to come back to.
-    enum { MODE_FLOW = 0, MODE_SCREENS, MODE_GEO, MODE_COUNT };
+    // now four things to look at and the flow is the one to come back to.
+    enum { MODE_FLOW = 0, MODE_SCREENS, MODE_GEO, MODE_TRACK, MODE_COUNT };
     int      mode    = MODE_FLOW;
     uint32_t vIndex  = 0;
     uint32_t vShown  = 0xffffffffu;
@@ -1497,6 +1533,11 @@ int main(int argc, char** argv)
                 && g_geo.numSolids == 0) {
                 geoview_load(&g_geo, 0);
             }
+            // The track is 9.1 MB and several seconds of texture uploads,
+            // so the same: the first visit reads it, and it stays.
+            if (mode == MODE_TRACK && g_track.hasBundle && !g_track.loaded) {
+                trackview_load(&g_track);
+            }
             // The mode is logged because tools/run_azahar_geo.ps1 has no
             // other way to know a SELECT landed. Sleeping for "long enough"
             // after the boot marker is not the same thing: a faster boot
@@ -1504,6 +1545,16 @@ int main(int argc, char** argv)
             // this captured the title screen and called it a car.
             if (mode == MODE_GEO) {
                 logPrintf("geoview: entered, %s\n", g_geo.note);
+            } else if (mode == MODE_TRACK) {
+                logPrintf("trackview: entered, %s\n", g_track.note);
+                logPrintf("trackview: %d solids linked, %d models, %d "
+                          "without a solid, %d baked, %d tris, %d textures "
+                          "(%d missing, %d reduced), %u KB linear free\n",
+                          g_track.linkedSolids, g_track.numModels,
+                          g_track.modelsWithoutSolid, g_track.bakedSolids,
+                          g_track.bakedTris, g_track.numTextures,
+                          g_track.missingTextures, g_track.reducedTextures,
+                          (unsigned)(linearSpaceFree() / 1024u));
             } else {
                 logPrintf("mode %d\n", mode);
             }
@@ -1641,6 +1692,60 @@ int main(int argc, char** argv)
                          "Car, solid and camera numbers go to the debug "
                          "log on the SD card.", 1.0f,
                          "L/R car   D-pad solid, zoom   A all   X tex");
+            C3D_FrameEnd(0);
+            continue;
+        }
+
+        if (mode == MODE_TRACK) {
+            circlePosition pad;
+            // The fog colour TRACKB12's sky would be, near enough, until
+            // step 3 brings the sky itself.
+            const u32 sky = C2D_Color32(0x8c, 0xa8, 0xc8, 0xFF);
+
+            if (kDown & KEY_START) break;
+            hidCircleRead(&pad);
+            trackview_input(&g_track, kDown, hidKeysHeld(), pad.dx, pad.dy,
+                            BOOT_DT);
+
+            C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+            C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
+                                  __builtin_bswap32(sky), 0);
+            C3D_FrameDrawOn(top);
+            trackview_draw(&g_track);
+            C2D_Prepare();
+            C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
+
+            devLog(0, "track %s", g_track.note);
+            devLog(1, "track at %.1f %.1f %.1f yaw %.2f pitch %.2f "
+                   "speed %.1f stop %d/%d",
+                   g_track.pos[0], g_track.pos[1], g_track.pos[2],
+                   g_track.yaw, g_track.pitch, g_track.speed,
+                   g_track.stop + 1, g_track.numStops);
+            devLog(2, "track drew %d of %d (%d in place), %d tris, cull "
+                   "zone %d",
+                   g_track.drawn, g_track.drawInfos, g_track.drawnInPlace,
+                   g_track.drawnTris, (int)CurrentZoneNumber);
+            if (g_track.listFrame) {
+                logLine("track drew: %s", g_track.drawList);
+                g_track.listFrame = false;
+            }
+            devLog(3, "track gpu peak %d words, %d skipped, frame "
+                   "memory failed %d, held back %d (%d sorted, %d "
+                   "dropped)",
+                   g_track.cmdPeakWords, g_track.cmdSkipped,
+                   g_track.frameMallocFails, g_track.numDeferred,
+                   g_track.deferredSorted, g_track.deferredDropped);
+
+            C2D_TargetClear(g_bot, BOT_BACK);
+            C2D_SceneBegin(g_bot);
+            drawBotPanel(&ui, "TRACK VIEWER",
+                         g_track.loaded
+                             ? "The scenery the game's own cull picks, "
+                               "prelit, in the engine's draw order. "
+                               "Numbers go to the debug log."
+                             : g_track.note,
+                         1.0f,
+                         "Pad fly  ABXY look  L/R down, up  D-pad speed, stop");
             C3D_FrameEnd(0);
             continue;
         }
@@ -1839,6 +1944,7 @@ int main(int argc, char** argv)
     bgf_change_to_screen(&g_flow, NULL, 0);
     if (vHasMenu) bmenu_unactivate(&vMenu);
     geoview_free(&g_geo);
+    trackview_free(&g_track);
     bsnd_hw_close(&gSnd);
     georender_exit();
     uirender_free(&ui);

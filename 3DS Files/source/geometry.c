@@ -283,6 +283,7 @@ static int index_solid(GeoSolid* s, const uint8_t* payload, size_t size)
             if (rc != GEO_OK) {
                 return rc;
             }
+            s->header  = p;
             haveHeader = 1;
             break;
         case TYPE_STRIP_TABLE:

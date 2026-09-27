@@ -1877,6 +1877,20 @@ is citro3d and owns the top.
         negated the eye where the disc subtracts it from zero, which gave
         the default eye -0 in x and y. That is fixed. Written up in
         `docs/formats/eview.md`.
+
+        **The twenty-third slice is closed: the track on the screen**,
+        roadmap step 1, in `trackview.c`, `emodel.c` and `main.c`'s track
+        mode. TRACKB12's 1,135 solids are linked in place, its 122
+        sections and 23 zones load, eModel::Init connects 2,487 of 2,494
+        models, and the ported cull's picks draw through `georender` in
+        the engine's order: opaque first, then the attach loops'
+        RenderingOrder buckets and the alpha sort, with the GS's blend
+        equations and alpha test. Seen on Azahar at seven stops of
+        route 1. It needed `eMathInit`, which fills the identity matrix
+        the road is drawn with; a 4x command buffer; and
+        `tools/check_3dsx.py`, after `bFixATan1`'s INT32_MIN path linked
+        a relocation Azahar refuses. Written up in
+        `docs/formats/track-render.md`.
         CONTINUE.md has what is next, and how far it is to a playable
         demo.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher

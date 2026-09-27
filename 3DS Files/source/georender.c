@@ -289,16 +289,11 @@ void georender_set_light(float x, float y, float z,
     s_ambient     = ambient;
 }
 
-void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
-                    int numTextures)
+// The program, the vertex buffer and the uniforms, which every batch of a
+// mesh shares.
+static void bind_mesh(const GeoMesh* mesh)
 {
     C3D_BufInfo* buf;
-    C3D_TexEnv*  env;
-    int          i;
-
-    if (!s_ready || !mesh->vbo || mesh->numVerts <= 0) {
-        return;
-    }
 
     C3D_BindProgram(&s_program);
     C3D_SetAttrInfo(&s_attr);
@@ -315,6 +310,51 @@ void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
                   s_lightClr[0], s_lightClr[1], s_lightClr[2], 1.0f);
     C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uAmbient,
                   s_ambient, s_ambient, s_ambient, 1.0f);
+}
+
+// One batch: its texture, or the vertex colour alone, and the draw.
+static void draw_batch(const GeoBatch* b, const GeoTexture* gt)
+{
+    C3D_TexEnv* env = C3D_GetTexEnv(0);
+
+    C3D_TexEnvInit(env);
+    if (gt) {
+        C3D_TexBind(0, gt->tex);
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale,
+                      gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
+        C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
+        C3D_TexEnvFunc(env, C3D_Both, GPU_MODULATE);
+    } else {
+        // No texture: the vertex colour alone, which is what the 25
+        // sentinel strips and any unresolved hash fall back to.
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale,
+                      1.0f, 1.0f, 0.0f, 1.0f);
+        C3D_TexEnvSrc(env, C3D_Both, GPU_PRIMARY_COLOR, 0, 0);
+        C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
+    }
+    C3D_DrawArrays(GPU_TRIANGLES, b->first, b->count);
+}
+
+static const GeoTexture* batch_texture(const GeoBatch* b,
+                                       const GeoTexture* textures,
+                                       int numTextures)
+{
+    if (b->texture >= 0 && b->texture < numTextures && textures
+        && textures[b->texture].tex) {
+        return &textures[b->texture];
+    }
+    return NULL;
+}
+
+void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
+                    int numTextures)
+{
+    int i;
+
+    if (!s_ready || !mesh->vbo || mesh->numVerts <= 0) {
+        return;
+    }
+    bind_mesh(mesh);
 
     // The VU did backface culling in software and nothing in the data forces
     // a consistent winding, so culling anything here would drop real
@@ -325,34 +365,72 @@ void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
     C3D_DepthTest(true, GPU_GREATER, GPU_WRITE_ALL);
 
     for (i = 0; i < mesh->numBatches; i++) {
-        const GeoBatch*   b  = &mesh->batch[i];
-        const GeoTexture* gt = NULL;
+        const GeoBatch* b = &mesh->batch[i];
 
-        if (b->count <= 0) {
+        if (b->count > 0) {
+            draw_batch(b, batch_texture(b, textures, numTextures));
+        }
+    }
+}
+
+// The GS's ALPHA_1 equations as the PICA's blend unit writes them. The
+// PICA's reverse subtract is the destination less the source.
+static void set_pass(GeoPass pass)
+{
+    switch (pass.blend) {
+    case GEO_BLEND_ALPHA:
+        C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA,
+                       GPU_ONE_MINUS_SRC_ALPHA, GPU_SRC_ALPHA,
+                       GPU_ONE_MINUS_SRC_ALPHA);
+        break;
+    case GEO_BLEND_ADD:
+        C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA, GPU_ONE,
+                       GPU_SRC_ALPHA, GPU_ONE);
+        break;
+    case GEO_BLEND_SUBTRACT:
+        C3D_AlphaBlend(GPU_BLEND_REVERSE_SUBTRACT, GPU_BLEND_REVERSE_SUBTRACT,
+                       GPU_SRC_ALPHA, GPU_ONE, GPU_SRC_ALPHA, GPU_ONE);
+        break;
+    default:
+        C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_ONE, GPU_ZERO,
+                       GPU_ONE, GPU_ZERO);
+        break;
+    }
+    C3D_DepthTest(true, GPU_GEQUAL,
+                  pass.noDepthWrite ? GPU_WRITE_COLOR : GPU_WRITE_ALL);
+}
+
+void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
+                         int numTextures, uint32_t mask)
+{
+    static const GeoPass opaque;
+    GeoPass              last = opaque;
+    bool                 set  = false;
+    int                  i;
+
+    if (!s_ready || !mesh->vbo || mesh->numVerts <= 0 || mask == 0) {
+        return;
+    }
+    bind_mesh(mesh);
+    C3D_CullFace(GPU_CULL_NONE);
+    C3D_AlphaTest(true, GPU_GREATER, 0x60);
+
+    for (i = 0; i < mesh->numBatches && i < 32; i++) {
+        const GeoBatch*   b = &mesh->batch[i];
+        const GeoTexture* gt;
+        GeoPass           pass;
+
+        if (!(mask & (1u << i)) || b->count <= 0) {
             continue;
         }
-        if (b->texture >= 0 && b->texture < numTextures && textures
-            && textures[b->texture].tex) {
-            gt = &textures[b->texture];
+        gt   = batch_texture(b, textures, numTextures);
+        pass = gt ? gt->pass : opaque;
+        if (!set || pass.blend != last.blend
+            || pass.noDepthWrite != last.noDepthWrite) {
+            set_pass(pass);
+            last = pass;
+            set  = true;
         }
-
-        env = C3D_GetTexEnv(0);
-        C3D_TexEnvInit(env);
-        if (gt) {
-            C3D_TexBind(0, gt->tex);
-            C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale,
-                          gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
-            C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
-            C3D_TexEnvFunc(env, C3D_Both, GPU_MODULATE);
-        } else {
-            // No texture: the vertex colour alone, which is what the 25
-            // sentinel strips and any unresolved hash fall back to.
-            C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale,
-                          1.0f, 1.0f, 0.0f, 1.0f);
-            C3D_TexEnvSrc(env, C3D_Both, GPU_PRIMARY_COLOR, 0, 0);
-            C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
-        }
-
-        C3D_DrawArrays(GPU_TRIANGLES, b->first, b->count);
+        draw_batch(b, gt);
     }
 }

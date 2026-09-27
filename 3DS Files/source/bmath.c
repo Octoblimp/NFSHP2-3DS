@@ -381,6 +381,15 @@ void bFixSinCos(int32_t *s, int32_t *c, uint16_t bam)
 // There is a visible seam where the tables hand over to the ramp -- at
 // t = 0x001fffff the table says 16058 and the ramp says 16093, a fifth of a
 // degree. It is in the shipped code.
+//
+// One input is the port's own. INT32_MIN negates to itself, so the image's
+// signed `slti` sends it to the low table with an index of -0x100000 and
+// reads 2 MB before it. Nothing in the game passes it -- bFixATan2 does only
+// for y = INT32_MIN, x = 0 -- but at -O3 gcc folds that path's address into
+// a constant, and a negative absolute address is a relocation the 3DSX
+// loader refuses: Azahar would not start the build that first linked
+// bFixATan2. Compared unsigned, the magnitude saturates, as -0x7fffffff's
+// does; every other input compares the same either way.
 int32_t bFixATan1(int32_t t)
 {
     int neg = 0;
@@ -391,8 +400,8 @@ int32_t bFixATan1(int32_t t)
         t = neg32(t);
     }
 
-    if (t > 0x001fffff) {
-        if (t > 0x00ffffff) {
+    if ((uint32_t)t > 0x001fffffu) {
+        if ((uint32_t)t > 0x00ffffffu) {
             lo = 16383;
             hi = 16383;
             frac = 0;

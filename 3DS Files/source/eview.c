@@ -18,6 +18,9 @@ int32_t RenderingViewMode;
 int32_t TweakerViewMode;
 int32_t EnvironmentMappingEnable = 1;
 
+bNode SolidList;
+bNode ModelList;
+
 static eView *pCurrentView;
 
 Camera FlailerCamera;
@@ -89,6 +92,12 @@ void eview_static_init(void)
 {
     int i;
 
+    // The list heads come first, each linked to itself; the other three are
+    // the texture manager's.
+    SolidList.prev = &SolidList;
+    ModelList.prev = &ModelList;
+    SolidList.next = &SolidList;
+    ModelList.next = &ModelList;
     camera_init(&FlailerCamera);
     camera_init(&Player1Camera);
     camera_init(&Player2Camera);

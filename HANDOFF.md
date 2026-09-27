@@ -7215,3 +7215,82 @@ and draws what the cull picks through `georender`, with a free camera on
 view 1. The scenery is 932 solids, 122,937 triangles and 330 textures,
 and it fits the Old 3DS's linear heap as it is. CONTINUE.md has the count
 of what is left to a playable demo.
+
+## Session 30, continued (2026-09-26) -- Task 27's twenty-third slice: the track on the screen
+
+The twenty-second slice went in as `53416ed`. The twenty-third is roadmap
+step 1: TRACKB12.BUN's scenery through the ported loader and cull, drawn
+on the top screen through `georender` from a free camera. The code is
+`trackview.c`, `emodel.c` (eModel.obj's list half) and `main.c`'s
+`MODE_TRACK`. The write-up is `docs/formats/track-render.md`.
+
+```
+trackview: entered, 122 sections, 23 zones, 6160 ms
+trackview: 1135 solids linked, 2494 models, 7 without a solid, 915 baked,
+           125498 tris, 342 textures (0 missing, 0 reduced), 36268 KB linear free
+track drew 380 of 380 (11 in place), 27838 tris, cull zone 42      (stop 2)
+track gpu peak 139068 words, 0 skipped, frame memory failed 0,
+           held back 67 (12 sorted, 0 dropped)
+```
+
+### What it took
+
+- **The build would not start.** Azahar said "Failed to load ROM (Error
+  1)" and nothing else, once the viewer first linked `bFixATan2`. The
+  3DSX loader refuses an absolute relocation whose word has a top-four
+  bit set. gcc had folded `bFixATan1`'s INT32_MIN path, a table index of
+  -0x100000, into a negative constant. `bmath.c` compares unsigned there
+  now; only INT32_MIN changes, and nothing in the game passes it.
+  `tools/check_3dsx.py` walks the relocations as the loader does, and
+  `build_cia.ps1` runs it after every build.
+- **Draws went missing past about 500 objects.** `GPUCMD_Add` drops what
+  does not fit the command buffer without a word. `C3D_Init` gets 4x the
+  default now, and `trackview.c` stops 8,192 words short of the end and
+  counts the draws it skipped. The count is 0 at every stop, and the peak
+  is 139,068 of 262,144 words.
+- **The road and the terrain were missing.** They are drawn in place, with
+  `eMathIdentityMatrix`, and nothing had filled it. InitializeEverything
+  calls `eMathInit` (0x0011b9a0) just before eInitEngine, and `main.c`
+  does the same now. Zero, it folded each of them to a point.
+- **Stop 2's road was hidden behind a light beam.** The beam's texture is
+  semitransparent and does not write depth. The port had drawn every
+  batch opaque, in cull order, writing depth.
+
+### The engine's draw order
+
+`RenderStrips` (0x0010c8a0) puts each strip on its texture's list, or on
+the frame's alpha list when the texture has `ApplyAlphaSorting`, keyed by
+its box centre's view z. At the frame's end, `AttachSolidPolys`
+(0x0010a7f0) draws the texture lists by `RenderingOrder` bucket, in first
+use order. Then `AttachAlphaPolys` (0x0010a4c0) draws the alpha list, by
+order and then farthest first. The GS's blend is `ALPHA_1`, which is
+TextureInfo's `AlphaBits`. The disc uses four equations: alpha, add,
+subtract (the skids) and replace. The test is the main target's TEST_1
+from `UpdateGifTags`: depth GEQUAL, and alpha GREATER than 0x30.
+
+A survey of the three packs:
+- every semitransparent texture has `bWriteZ` 0 and an order of 1 to 7;
+- every opaque texture has order 0 and writes depth;
+- five order-0 decals are alpha-sorted all the same.
+
+`georender_draw_mask` takes a per-texture `GeoPass`. `trackview.c` draws
+the opaque order-0 batches at once and holds the rest back, then sorts
+them into the attach loops' order after StuffScenery. All seven stops now
+show the road, the start line, the signs and the dappled shadows.
+
+### Where it departs
+
+- The alpha sort is per batch (a texture's strips in one solid), not per
+  strip.
+- `pStackedActiveTexture`, which moves textures that share an image
+  parent next to each other, is not modelled.
+- The shadows' second matrix pack is not modelled.
+- There are no light materials; the scenery is prelit anyway.
+- Section 99's SKYDOME and SKYDOME_ENVMAP draw in the main view until
+  StuffSky (step 3).
+
+### Next: the LoaderTable
+
+Step 2 makes every chunk type in TRACKB12 live through the real
+LoaderTable: the solid list with its pointers fixed up, the texture packs,
+the topology and the routes. After that, step 3 is the sky.

@@ -55,6 +55,27 @@ typedef struct {
 
 #define GEO_MAX_BATCHES 32
 
+// How a strip's colour meets the frame's. The GS blends with its ALPHA_1
+// register, which CreateTextureContext (0x00109f48) takes whole from
+// TextureInfo's AlphaBits, and it blends at all only when the strip goes
+// out with alpha blending on -- which the solid and alpha attach loops
+// (0x0010a7f0, 0x0010a4c0) turn on for a texture whose
+// IsAnySemitransparencyFlag is set. The disc's textures use four
+// equations, out of (A - B) * C + D with A, B and D from {Cs, Cd, 0}:
+typedef enum {
+    GEO_BLEND_NONE,             // not semitransparent, or AlphaBits 0x0a: Cs
+    GEO_BLEND_ALPHA,            // 0x44, (Cs - Cd) * As + Cd
+    GEO_BLEND_ADD,              // 0x48, Cs * As + Cd: bulbs, the sun
+    GEO_BLEND_SUBTRACT,         // 0x42, Cd - Cs * As: the skid marks
+} GeoBlend;
+
+// A texture's fragment state, for georender_draw_mask. Zero is an opaque
+// strip that writes depth, which is what a texture no pack holds gets.
+typedef struct {
+    uint8_t blend;              // GeoBlend
+    bool    noDepthWrite;       // TextureInfo's bWriteZ clear
+} GeoPass;
+
 // One entry of a solid's texture table, resolved. `uvScale` is the image's
 // size over the allocation's, because texpack_upload() pads to a power of
 // two and puts the image in the top-left -- so a 512x320 skin in a 512x512
@@ -63,6 +84,7 @@ typedef struct {
 typedef struct {
     C3D_Tex* tex;               // NULL when the hash resolved to nothing
     float    uvScale[2];
+    GeoPass  pass;              // georender_draw_mask's; georender_draw's is fixed
 } GeoTexture;
 
 typedef struct {
@@ -113,5 +135,14 @@ void georender_set_light(float x, float y, float z,
 // skipped.
 void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
                     int numTextures);
+
+// The batches whose bit is set in `mask`, bit i for batch i, each with its
+// texture's pass rather than georender_draw's one state, and with the test
+// the PS2's main render target gives every strip: TEST_1 as UpdateGifTags
+// (0x00104ec0) builds it, depth GEQUAL, and alpha GREATER than 0x30 of the
+// GS's 0x80 -- 0x60 here, where the packs' alpha is doubled on the way in.
+// A batch with no texture draws opaque.
+void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
+                         int numTextures, uint32_t mask);
 
 #endif

@@ -1,0 +1,1025 @@
+#include "trackview.h"
+
+#include <malloc.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <3ds.h>
+
+#include "bchunk.h"
+#include "eframe.h"
+#include "emath.h"
+#include "emodel.h"
+#include "eview.h"
+#include "eviewmatrix.h"
+#include "gamedata.h"
+#include "scenery.h"
+#include "trackroute.h"
+
+#define TRACK_BUNDLE "TRACKS/TRACKB12.BUN"
+
+// Where the track's solids find their textures, in the order they are
+// asked: TEX12LOCATION.BIN has 350 of the 415 hashes, INGAMEB.BUN 12 and
+// TEX12TRACK.BIN 4, and 49 are in no pack on the disc.
+static const char* const kPacks[TRACKVIEW_NUM_PACKS] = {
+    "TRACKS/TEX12LOCATION.BIN",
+    "TRACKS/TEX12TRACK.BIN",
+    "GLOBAL/INGAMEB.BUN",
+};
+
+#define PAD_DEAD     24             // circle pad noise floor
+#define PAD_FULL     156.0f
+#define LOOK_SPEED   1.6f           // radians a second on a held button
+#define PITCH_LIMIT  1.5f
+#define SPEED_MIN    1.875f
+#define SPEED_MAX    480.0f
+#define EYE_HEIGHT   2.5f           // above the road, a chase camera's height
+
+// Linear heap a texture upload has to leave behind: the command buffers,
+// the render targets' own allocations and the UI's later uploads come out
+// of the same heap, and a level-0 upload that takes the last of it is
+// worse than a level-1 one that does not.
+#define TEX_RESERVE  (6u * 1024u * 1024u)
+
+// The fields of view the camera is given. 9102 is aBaselineFovZ, 50
+// degrees, which is the one the near plane is scaled against, so the near
+// plane comes out as the camera's own.
+#define TRACK_FOV    9102
+#define TRACK_NEAR   0.5f           // CameraMover's defaults
+#define TRACK_FAR    5000.0f
+
+// The engine's view space is +y down and +z forward, citro3d's +y up and
+// -z forward. See geoview.c, where this was found the hard way.
+#define VIEW_FLIP_Y  (-1.0f)
+#define VIEW_FLIP_Z  (-1.0f)
+
+// TextureInfo's TilableUV, 0x4c into the record. CreateTextureContext
+// (0x0010a160) makes the GS's CLAMP register from it: WMS is 1, clamped,
+// unless bit 0 is set, and WMT the same from bit 1.
+#define TEXINFO_TILABLE_UV 76
+
+// And what decides where and how a strip draws: see trackview_draw and
+// georender.h's GeoBlend.
+#define TEXINFO_RENDERING_ORDER 41
+#define TEXINFO_ALPHA_SORTING   77
+#define TEXINFO_SEMITRANSPARENT 79
+#define TEXINFO_WRITE_Z         80
+#define TEXINFO_ALPHA_BITS      118
+
+// GPUCMD_Add drops a command that does not fit rather than failing, and
+// the frame's end still needs room to close the list, so a draw is left
+// out once less than this is free -- 32 KB, a few dozen draws' worth.
+#define CMDBUF_GUARD_WORDS 8192u
+
+static TrackView*      s_draw;      // the viewer StuffScenery draws for
+static C3D_Mtx         s_proj;
+static const bMatrix4* s_worldView;
+
+// ------------------------------------------------------------------ helpers
+
+static void to_c3d(const bMatrix4* m, C3D_Mtx* out)
+{
+    const float* row = &m->v0.x;
+    int          i, c;
+
+    // Transposed, because bMatrix4 multiplies a row vector on its left and
+    // C3D_Mtx a column vector on its right, with rows 1 and 2 negated for
+    // the change of view space, and C3D_FVec's lanes stored w, z, y, x.
+    for (i = 0; i < 4; i++) {
+        float sign = (i == 1) ? VIEW_FLIP_Y : (i == 2) ? VIEW_FLIP_Z : 1.0f;
+        for (c = 0; c < 4; c++) {
+            out->r[i].c[3 - c] = sign * row[c * 4 + i];
+        }
+    }
+}
+
+static uint8_t* read_bundle(const char* path, size_t* outLen, bool* outLinear)
+{
+    FILE*    f = fopen(path, "rb");
+    long     len;
+    uint8_t* buf;
+    size_t   got = 0;
+
+    if (!f) {
+        return NULL;
+    }
+    fseek(f, 0, SEEK_END);
+    len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (len <= 0) {
+        fclose(f);
+        return NULL;
+    }
+
+    // A bundle's chunks load at their own 16-byte residue -- a payload is
+    // found by rounding up from its header -- and the disc reads a bundle
+    // to a 128-byte boundary, so the buffer is aligned the same way and
+    // every offset in the file keeps its residue in memory.
+    //
+    // The linear heap first: the frontend's three bundles hold 17.6 MB of
+    // the 28 MB malloc heap resident, and 9.1 MB more does not fit in what
+    // is left.
+    *outLinear = true;
+    buf = (uint8_t*)linearMemAlign((size_t)len, 128);
+    if (!buf) {
+        *outLinear = false;
+        buf = (uint8_t*)memalign(128, (size_t)len);
+    }
+    if (!buf) {
+        fclose(f);
+        return NULL;
+    }
+    while (got < (size_t)len) {
+        size_t n = fread(buf + got, 1, (size_t)len - got, f);
+
+        if (n == 0) {
+            break;
+        }
+        got += n;
+    }
+    fclose(f);
+    if (got != (size_t)len) {
+        if (*outLinear) {
+            linearFree(buf);
+        } else {
+            free(buf);
+        }
+        return NULL;
+    }
+    *outLen = (size_t)len;
+    return buf;
+}
+
+// geo_open walks the bundle in file order, so the solids come out sorted
+// by where their headers are and a model's Solid can be found by bisection.
+static int find_solid(const TrackView* v, const void* solid)
+{
+    uintptr_t key = (uintptr_t)solid;
+    int       lo = 0, hi = v->numSolids - 1;
+
+    while (lo <= hi) {
+        int       mid = (lo + hi) / 2;
+        uintptr_t h   = (uintptr_t)v->solid[mid].header;
+
+        if (h == key) {
+            return mid;
+        }
+        if (h < key) {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return -1;
+}
+
+// ------------------------------------------------------------- the textures
+
+static TrackTex* find_texture(TrackView* v, uint32_t hash)
+{
+    int i;
+
+    for (i = 0; i < v->numTextures; i++) {
+        if (v->texture[i].hash == hash) {
+            return &v->texture[i];
+        }
+    }
+    return NULL;
+}
+
+static uint32_t pow2_at_least(uint32_t n)
+{
+    uint32_t p = 8;
+
+    while (p < n) {
+        p <<= 1;
+    }
+    return p;
+}
+
+static GeoPass texture_pass(const uint8_t* rec)
+{
+    GeoPass p;
+
+    p.blend        = GEO_BLEND_NONE;
+    p.noDepthWrite = rec[TEXINFO_WRITE_Z] == 0;
+    if (rec[TEXINFO_SEMITRANSPARENT]) {
+        switch (rec[TEXINFO_ALPHA_BITS]) {
+        case 0x48: p.blend = GEO_BLEND_ADD;      break;
+        case 0x42: p.blend = GEO_BLEND_SUBTRACT; break;
+        case 0x0a: p.blend = GEO_BLEND_NONE;     break;
+        default:   p.blend = GEO_BLEND_ALPHA;    break;
+        }
+    }
+    return p;
+}
+
+static TrackTex* load_texture(TrackView* v, uint32_t hash)
+{
+    TrackTex*   t = find_texture(v, hash);
+    TexSrcEntry e;
+    TexSource*  src = NULL;
+    uint32_t    w = 0, h = 0;
+    int         level, p;
+    uint8_t     tilable;
+
+    if (t) {
+        return t;
+    }
+    if (v->numTextures >= TRACKVIEW_MAX_TEXTURES) {
+        return NULL;
+    }
+    t = &v->texture[v->numTextures++];
+    memset(t, 0, sizeof *t);
+    t->hash       = hash;
+    t->uvScale[0] = 1.0f;
+    t->uvScale[1] = 1.0f;
+
+    for (p = 0; p < TRACKVIEW_NUM_PACKS && !src; p++) {
+        if (v->hasPack[p] && texsrc_find(&v->pack[p], hash, &e)) {
+            src = &v->pack[p];
+        }
+    }
+    if (!src) {
+        v->missingTextures++;
+        return t;
+    }
+
+    // AddTexturesSorted (0x00107ee8) has eight lists and indexes them with
+    // the order unchecked. The disc's orders are all 0 to 7; the port
+    // clamps anything past.
+    t->pass   = texture_pass(e.info.record);
+    t->order  = e.info.record[TEXINFO_RENDERING_ORDER] < 8
+                    ? e.info.record[TEXINFO_RENDERING_ORDER] : 7;
+    t->sorted = e.info.record[TEXINFO_ALPHA_SORTING] != 0;
+
+    // The largest level that leaves the reserve behind. The whole track at
+    // level 0 is 28.9 MB as RGBA8, which a New 3DS has room for and an Old
+    // one, with the bundle resident beside it, does not.
+    for (level = 0; level < (int)e.info.levels; level++) {
+        uint32_t bytes;
+
+        if (!texpack_level(&e.info, level, &w, &h, NULL, NULL)) {
+            continue;
+        }
+        bytes = pow2_at_least(w) * pow2_at_least(h) * 4u;
+        if (linearSpaceFree() >= bytes + TEX_RESERVE) {
+            break;
+        }
+    }
+    if (level >= (int)e.info.levels
+        || !texsrc_upload(src, &e, level, &t->tex)) {
+        v->missingTextures++;
+        return t;
+    }
+    t->valid = true;
+    t->level = (uint8_t)level;
+    if (level > 0) {
+        v->reducedTextures++;
+    }
+
+    // The image is in the top-left of a power-of-two allocation; see
+    // georender.h. A level's image is the level's own size.
+    t->uvScale[0] = (float)w / (float)t->tex.width;
+    t->uvScale[1] = (float)h / (float)t->tex.height;
+
+    // Road and verge textures repeat thousands of times along a strip --
+    // ST reaches 2,299 in TRACKB12 -- so the wrap is the texture's own and
+    // not texpack_upload's clamp. A padded axis cannot repeat, and keeps
+    // the clamp; one tilable texture in the track's packs is padded.
+    tilable = e.info.record[TEXINFO_TILABLE_UV];
+    C3D_TexSetWrap(&t->tex,
+                   ((tilable & 1) && w == t->tex.width) ? GPU_REPEAT
+                                                        : GPU_CLAMP_TO_EDGE,
+                   ((tilable & 2) && h == t->tex.height) ? GPU_REPEAT
+                                                         : GPU_CLAMP_TO_EDGE);
+    return t;
+}
+
+static void resolve_textures(TrackView* v, int index)
+{
+    const GeoSolid* s = &v->solid[index];
+    TrackSolid*     r = &v->info[index];
+    int             k;
+
+    if (s->numTextures <= 0) {
+        return;
+    }
+    r->slot = (GeoTexture*)calloc((size_t)s->numTextures, sizeof *r->slot);
+    r->tex  = (TrackTex**)calloc((size_t)s->numTextures, sizeof *r->tex);
+    if (!r->slot || !r->tex) {
+        free(r->slot);
+        free(r->tex);
+        r->slot = NULL;
+        r->tex  = NULL;
+        return;
+    }
+    for (k = 0; k < s->numTextures; k++) {
+        uint32_t  hash = bchunk_u32(s->textureTable + (size_t)k * 8);
+        TrackTex* t    = load_texture(v, hash);
+
+        r->tex[k]             = t;
+        r->slot[k].uvScale[0] = 1.0f;
+        r->slot[k].uvScale[1] = 1.0f;
+        if (t && t->valid) {
+            r->slot[k].tex        = &t->tex;
+            r->slot[k].uvScale[0] = t->uvScale[0];
+            r->slot[k].uvScale[1] = t->uvScale[1];
+            r->slot[k].pass       = t->pass;
+        }
+    }
+}
+
+// The centre of each batch's box, which is what the alpha pass sorts on.
+// GetAABBZDepth (0x0010b888) takes a strip's; a batch is every strip of one
+// texture, so this is the box round all of them.
+static void batch_centres(TrackSolid* r)
+{
+    int b, k, c;
+
+    r->centre = calloc((size_t)(r->mesh.numBatches > 0 ? r->mesh.numBatches : 1),
+                       sizeof *r->centre);
+    if (!r->centre) {
+        return;
+    }
+    for (b = 0; b < r->mesh.numBatches; b++) {
+        const GeoBatch* gb = &r->mesh.batch[b];
+        float           mn[3] = { 1e30f, 1e30f, 1e30f };
+        float           mx[3] = { -1e30f, -1e30f, -1e30f };
+
+        if (gb->count <= 0) {
+            continue;
+        }
+        for (k = gb->first; k < gb->first + gb->count; k++) {
+            for (c = 0; c < 3; c++) {
+                float p = r->mesh.vbo[k].pos[c];
+
+                mn[c] = p < mn[c] ? p : mn[c];
+                mx[c] = p > mx[c] ? p : mx[c];
+            }
+        }
+        for (c = 0; c < 3; c++) {
+            r->centre[b][c] = 0.5f * (mn[c] + mx[c]);
+        }
+    }
+}
+
+static void bake_solid(TrackView* v, int index)
+{
+    TrackSolid* r = &v->info[index];
+
+    if (r->baked || r->failed) {
+        return;
+    }
+    if (!georender_bake(&v->solid[index], &r->mesh)) {
+        r->failed = true;
+        return;
+    }
+    r->baked = true;
+    v->bakedSolids++;
+    v->bakedTris     += r->mesh.numTris;
+    v->skippedStrips += r->mesh.skippedStrips;
+    resolve_textures(v, index);
+    batch_centres(r);
+}
+
+// ------------------------------------------------------------ eModel::Render
+
+// eActiveTexture's place in the frame: AddTexturesSorted (0x00107ee8) keeps
+// the textures of one RenderingOrder in the order the frame first used them,
+// except that one sharing an earlier one's pImageParent goes straight after
+// it (pStackedActiveTexture). The port does not stack them.
+static void note_use(TrackView* v, TrackTex* t)
+{
+    if (t->stamp != v->frameStamp) {
+        t->stamp    = v->frameStamp;
+        t->firstUse = v->texUses++;
+    }
+}
+
+static void defer(TrackView* v, int solid, int batch, const bMatrix4* lv,
+                  const C3D_Mtx* mv, const TrackTex* t)
+{
+    static const float none[3];
+    TrackDeferred*     d;
+    const float*       c;
+
+    if (v->numDeferred >= TRACKVIEW_MAX_DEFERRED) {
+        v->deferredDropped++;
+        return;
+    }
+    d = &v->deferred[v->numDeferred];
+    c = v->info[solid].centre ? v->info[solid].centre[batch] : none;
+    d->modelView = *mv;
+    // GetAABBZDepth: the centre through the local and view matrices, and
+    // its z. A bMatrix4 multiplies the row vector on its left.
+    d->depth  = c[0] * lv->v0.z + c[1] * lv->v1.z + c[2] * lv->v2.z + lv->v3.z;
+    d->solid  = (uint16_t)solid;
+    d->batch  = (uint8_t)batch;
+    d->order  = t->order;
+    d->sorted = t->sorted;
+    d->texUse = t->firstUse;
+    d->seq    = (uint16_t)v->numDeferred++;
+    if (t->sorted) {
+        v->deferredSorted++;
+    }
+}
+
+// eModel::Render (0x0010c7c8) returns at once for a model with no solid,
+// then sets up the rigid and vertex animation and the strips' visibility
+// and has RenderStrips (0x0010c8a0) put each strip on a list: the frame's
+// alpha list when its texture has ApplyAlphaSorting, its texture's own
+// otherwise. The port draws a solid as georender baked it, in the matrix
+// the cull gave -- local to world, then the view's -- and draws at once
+// only what the attach loops would draw first anyway: the order-0 textures
+// that are not sorted. The rest wait for trackview_draw.
+static void render_model(eModel* m, bMatrix4* matrix, void* light,
+                         uint32_t flags)
+{
+    TrackView*  v = s_draw;
+    TrackSolid* r;
+    bMatrix4    localView;
+    C3D_Mtx     mv;
+    uint32_t    now = 0;
+    int         i, b, numTextures;
+
+    (void)light;
+    (void)flags;
+    if (!v || m->Solid == NULL) {
+        return;
+    }
+    i = find_solid(v, m->Solid);
+    if (i < 0) {
+        return;
+    }
+    r = &v->info[i];
+    if (!r->baked) {
+        bake_solid(v, i);
+        if (!r->baked) {
+            return;
+        }
+    }
+    if (gpuCmdBufSize - gpuCmdBufOffset < CMDBUF_GUARD_WORDS) {
+        v->cmdSkipped++;
+        return;
+    }
+    eMulMatrix(&localView, matrix, s_worldView);
+    to_c3d(&localView, &mv);
+    numTextures = r->slot ? v->solid[i].numTextures : 0;
+    for (b = 0; b < r->mesh.numBatches && b < 32; b++) {
+        int       k = r->mesh.batch[b].texture;
+        TrackTex* t = (r->tex && k >= 0 && k < numTextures) ? r->tex[k] : NULL;
+
+        if (r->mesh.batch[b].count <= 0) {
+            continue;
+        }
+        if (t) {
+            note_use(v, t);
+        }
+        if (!t || (t->order == 0 && !t->sorted)) {
+            now |= 1u << b;
+        } else {
+            defer(v, i, b, &localView, &mv, t);
+        }
+    }
+    if (now) {
+        georender_set_camera(&s_proj, &mv);
+        georender_draw_mask(&r->mesh, r->slot, numTextures, now);
+    }
+    v->drawn++;
+    v->drawnTris += r->mesh.numTris;
+    if (matrix == &eMathIdentityMatrix) {
+        v->drawnInPlace++;
+    }
+
+    // The frame after a jump says what it drew, by name, for the log: '*'
+    // marks an object drawn where it stands.
+    if (v->listFrame) {
+        size_t len = strlen(v->drawList);
+
+        if (len + 32 < sizeof v->drawList) {
+            snprintf(v->drawList + len, sizeof v->drawList - len, "%s%.24s%s",
+                     len ? " " : "", ((const eSolid*)m->Solid)->Name,
+                     matrix == &eMathIdentityMatrix ? "*" : "");
+        }
+    }
+}
+
+// ------------------------------------------------------------------ loading
+
+bool trackview_init(TrackView* v)
+{
+    char path[GAMEDATA_MAX_PATH];
+    int  i;
+
+    memset(v, 0, sizeof *v);
+    v->speed = 30.0f;
+    for (i = 0; i < TRACKVIEW_NUM_PACKS; i++) {
+        if (gamedata_path(kPacks[i], path, sizeof path)) {
+            v->hasPack[i] = texsrc_open(&v->pack[i], path);
+        }
+    }
+    v->hasBundle = gamedata_exists(TRACK_BUNDLE);
+    if (!v->hasBundle) {
+        snprintf(v->note, sizeof v->note, "no %s", TRACK_BUNDLE);
+        return false;
+    }
+    snprintf(v->note, sizeof v->note, "not loaded");
+    return true;
+}
+
+static void link_solids(TrackView* v)
+{
+    int i;
+
+    for (i = 0; i < v->numSolids; i++) {
+        eSolid* s = (eSolid*)(uintptr_t)v->solid[i].header;
+        bNode*  last;
+
+        if (!s || ((uintptr_t)s & 3u)) {
+            continue;
+        }
+        last          = SolidList.prev;
+        last->next    = &s->Node;
+        SolidList.prev = &s->Node;
+        s->Node.next  = &SolidList;
+        s->Node.prev  = last;
+        v->linkedSolids++;
+    }
+}
+
+static void unlink_solids(TrackView* v)
+{
+    int i;
+
+    for (i = 0; i < v->numSolids; i++) {
+        eSolid* s = (eSolid*)(uintptr_t)v->solid[i].header;
+
+        if (!s || ((uintptr_t)s & 3u)) {
+            continue;
+        }
+        s->Node.prev->next = s->Node.next;
+        s->Node.next->prev = s->Node.prev;
+    }
+    v->linkedSolids = 0;
+}
+
+// The bundle's top level, one chunk at a time, as the LoaderTable walks
+// it: the scenery's containers and zones to LoaderScenery, the routes and
+// signposts to TrackRoute.obj's loader -- the viewer's camera stands on
+// route 1 -- and everything else left for step 2. Unloading is the same
+// walk with the unloaders.
+static void each_chunk(TrackView* v, bool load)
+{
+    uint8_t* c   = v->data;
+    uint8_t* end = v->data + v->len;
+
+    while (c + 8 <= end) {
+        uint32_t type = bchunk_u32(c);
+        uint32_t size = bchunk_u32(c + 4);
+
+        if (size > (uint32_t)(end - c) - 8u) {
+            break;
+        }
+        if (type == SCENERY_CONTAINER_ID) {
+            if ((load ? scenery_loader(c) : scenery_unloader(c)) && load) {
+                v->numSections++;
+            }
+        } else if (type == VISIBLE_ZONE_ID) {
+            if ((load ? scenery_loader(c) : scenery_unloader(c)) && load) {
+                v->numZones += (int)(size / sizeof(VisibleZone));
+                v->zoneChunk = c;
+            }
+        } else if (type == CHUNK_TRACK_ROUTES
+                   || type == CHUNK_TRACK_SIGNPOSTS) {
+            if (load) {
+                track_routes_loader(c);
+            } else {
+                track_routes_unloader(c);
+            }
+        }
+        c += 8 + size;
+    }
+}
+
+static void set_camera(TrackView* v, float dt)
+{
+    bVector3 eye, target, up;
+    bMatrix4 m;
+    float    cp = cosf(v->pitch);
+
+    eye.x    = v->pos[0];
+    eye.y    = v->pos[1];
+    eye.z    = v->pos[2];
+    eye.pad  = 0.0f;
+    target.x = eye.x + cp * cosf(v->yaw);
+    target.y = eye.y + cp * sinf(v->yaw);
+    target.z = eye.z + sinf(v->pitch);
+    target.pad = 0.0f;
+    up.x = 0.0f;
+    up.y = 0.0f;
+    up.z = 1.0f;
+    up.pad = 0.0f;
+    eCreateLookAtMatrix(&m, &eye, &target, &up);
+    camera_set_matrix(&Player1Camera, &m, dt);
+}
+
+// A stop is a point on racing route 1, a twenty-fourth of the way round
+// apart: on the road, at its elevation plus an eye, looking along it.
+// Zone centres were the first try and are not on the road -- the object
+// nearest one is as often a tree's reflection under a lake as the ground,
+// and four of the first five stops came out under the water.
+static void jump_to_stop(TrackView* v, int stop)
+{
+    TrackRoute*      r = trmgr_get_route(&TheTrackRouteManager, TRACKVIEW_ROUTE);
+    TrackRoutePoint* p;
+    int              i;
+
+    if (!r || r->NumPoints <= 0 || v->numStops <= 0) {
+        return;
+    }
+    stop = ((stop % v->numStops) + v->numStops) % v->numStops;
+    i    = (int)((int64_t)stop * r->NumPoints / v->numStops);
+    p    = troute_get_point(r, i);
+    v->stop   = stop;
+    v->pos[0] = p->Position.x;
+    v->pos[1] = p->Position.y;
+    v->pos[2] = p->Elevation + EYE_HEIGHT;
+    v->yaw    = atan2f(p->Direction.y, p->Direction.x);
+    v->pitch  = -0.08f;
+    v->listPending = true;
+}
+
+// SetScreenBuffers' share (0x00105b78): the frame's scissor on
+// MainDraw0Context, and player 1's aspect ratios -- the image's NTSC pair,
+// VIDEO_MODE 1. MaybeChangeViewMode cuts player 1's scissor from the frame's
+// and makes view 1 active; with nothing on any mover list the mode is 0,
+// which draws player 1 alone, as 1 does.
+static void setup_view(void)
+{
+    eRenderTarget* rt = eGetRenderTarget(1);
+
+    MainDraw0Context->ScissorW = ScreenWidth;
+    MainDraw0Context->ScissorH = ScreenHeight;
+    rt->AspectRatioX   = 1.0f;
+    rt->AspectRatioY   = 1.08f;
+    rt->AspectRatio2DX = 0.8f;
+    rt->AspectRatio2DY = 0.94f;
+    MaybeChangeViewMode();
+}
+
+// Back to what trackview_init left: the tables and the bundle freed.
+static void drop_bundle(TrackView* v)
+{
+    free(v->solid);
+    free(v->info);
+    free(v->texture);
+    v->solid     = NULL;
+    v->info      = NULL;
+    v->texture   = NULL;
+    v->numSolids = 0;
+    if (v->data && v->dataLinear) {
+        linearFree(v->data);
+    } else {
+        free(v->data);
+    }
+    v->data = NULL;
+    v->len  = 0;
+}
+
+bool trackview_load(TrackView* v)
+{
+    char     path[GAMEDATA_MAX_PATH];
+    uint64_t t0 = osGetTime();
+    bNode*   n;
+    int      rc, i;
+
+    if (v->loaded || !v->hasBundle) {
+        return v->loaded;
+    }
+
+    // eInitEngine's shares that nothing else has needed yet: the model
+    // pool, and the frame memory the view matrices and the cull's object
+    // matrices come out of. eframe_malloc does not know a buffer that
+    // failed from one that was never made, so a failed one is freed again,
+    // which leaves every frame allocation returning NULL.
+    emodel_init_slot_pool();
+    if (!FrameMemoryBuffer[0]) {
+        eAllocateFrameMallocBuffers(EFRAME_INIT_SIZE);
+        if (!FrameMemoryBuffer[0] || !FrameMemoryBuffer[1]) {
+            eFreeFrameMallocBuffers();
+            snprintf(v->note, sizeof v->note, "no frame memory");
+            return false;
+        }
+    }
+    if (!eModelSlotPool) {
+        snprintf(v->note, sizeof v->note, "no eModelSlotPool");
+        return false;
+    }
+
+    if (!gamedata_path(TRACK_BUNDLE, path, sizeof path)) {
+        snprintf(v->note, sizeof v->note, "path too long");
+        return false;
+    }
+    v->data = read_bundle(path, &v->len, &v->dataLinear);
+    if (!v->data) {
+        snprintf(v->note, sizeof v->note, "cannot read %s", TRACK_BUNDLE);
+        return false;
+    }
+
+    v->solid   = (GeoSolid*)calloc(TRACKVIEW_MAX_SOLIDS, sizeof *v->solid);
+    v->info    = (TrackSolid*)calloc(TRACKVIEW_MAX_SOLIDS, sizeof *v->info);
+    v->texture = (TrackTex*)calloc(TRACKVIEW_MAX_TEXTURES, sizeof *v->texture);
+    if (!v->solid || !v->info || !v->texture) {
+        snprintf(v->note, sizeof v->note, "out of memory for the tables");
+        drop_bundle(v);
+        return false;
+    }
+
+    rc = geo_open(v->data, v->len, &v->list, v->solid, TRACKVIEW_MAX_SOLIDS);
+    if (rc != GEO_OK) {
+        snprintf(v->note, sizeof v->note, "geo_open: %s", geo_error(rc));
+        drop_bundle(v);
+        return false;
+    }
+    v->numSolids = v->list.numSolids;
+    for (i = 1; i < v->numSolids; i++) {
+        if ((uintptr_t)v->solid[i].header <= (uintptr_t)v->solid[i - 1].header) {
+            snprintf(v->note, sizeof v->note, "solids out of order at %d", i);
+            drop_bundle(v);
+            return false;
+        }
+    }
+
+    // LoaderSolidList's link, then LoaderScenery's: the models find their
+    // solids by name as they are made, so the solids go first, as the
+    // bundle has them. The seams are eInitEngine's to set; they are set
+    // here too so that the viewer does not depend on the order main() does
+    // things in.
+    if (!gEModelInitFn) {
+        gEModelInitFn = emodel_init;
+    }
+    if (!gEModelDestroyFn) {
+        gEModelDestroyFn = emodel_delete;
+    }
+    link_solids(v);
+    gEModelRenderFn = render_model;
+    each_chunk(v, true);
+
+    for (n = ModelList.next; n != &ModelList; n = n->next) {
+        eModel* m = (eModel*)(void*)n;
+
+        v->numModels++;
+        if (m->Solid == NULL) {
+            v->modelsWithoutSolid++;
+            continue;
+        }
+        i = find_solid(v, m->Solid);
+        if (i >= 0) {
+            bake_solid(v, i);
+        }
+    }
+
+    camera_set_field_of_view(&Player1Camera, TRACK_FOV);
+    camera_set_near_z(&Player1Camera, TRACK_NEAR);
+    camera_set_far_z(&Player1Camera, TRACK_FAR);
+    setup_view();
+    {
+        TrackRoute* r = trmgr_get_route(&TheTrackRouteManager, TRACKVIEW_ROUTE);
+
+        v->numStops = (r && r->NumPoints > 0) ? TRACKVIEW_STOPS : 0;
+    }
+    jump_to_stop(v, 0);
+    set_camera(v, 1.0f / 60.0f);
+
+    v->loaded = true;
+    v->loadMs = (int)(osGetTime() - t0);
+    snprintf(v->note, sizeof v->note, "%d sections, %d zones, %d ms",
+             v->numSections, v->numZones, v->loadMs);
+    return true;
+}
+
+void trackview_free(TrackView* v)
+{
+    int i;
+
+    if (v->loaded) {
+        each_chunk(v, false);
+        unlink_solids(v);
+        if (gEModelRenderFn == render_model) {
+            gEModelRenderFn = NULL;
+        }
+    }
+    if (v->info) {
+        for (i = 0; i < v->numSolids; i++) {
+            georender_free(&v->info[i].mesh);
+            free(v->info[i].slot);
+            free(v->info[i].tex);
+            free(v->info[i].centre);
+        }
+    }
+    if (v->texture) {
+        for (i = 0; i < v->numTextures; i++) {
+            if (v->texture[i].valid) {
+                C3D_TexDelete(&v->texture[i].tex);
+            }
+        }
+    }
+    drop_bundle(v);
+    for (i = 0; i < TRACKVIEW_NUM_PACKS; i++) {
+        if (v->hasPack[i]) {
+            texsrc_close(&v->pack[i]);
+        }
+    }
+    memset(v, 0, sizeof *v);
+}
+
+// -------------------------------------------------------------------- input
+
+static float pad_axis(int raw)
+{
+    if (raw > PAD_DEAD || raw < -PAD_DEAD) {
+        float f = (float)raw / PAD_FULL;
+
+        return f > 1.0f ? 1.0f : f < -1.0f ? -1.0f : f;
+    }
+    return 0.0f;
+}
+
+void trackview_input(TrackView* v, uint32_t kDown, uint32_t kHeld, int cpx,
+                     int cpy, float dt)
+{
+    float fx, fy, cp, fwd[3], right[3], step;
+    int   i;
+
+    if (!v->loaded) {
+        return;
+    }
+
+    if (kDown & KEY_DUP) {
+        v->speed = v->speed * 2.0f > SPEED_MAX ? SPEED_MAX : v->speed * 2.0f;
+    }
+    if (kDown & KEY_DDOWN) {
+        v->speed = v->speed * 0.5f < SPEED_MIN ? SPEED_MIN : v->speed * 0.5f;
+    }
+    if (kDown & KEY_DRIGHT) {
+        jump_to_stop(v, v->stop + 1);
+    }
+    if (kDown & KEY_DLEFT) {
+        jump_to_stop(v, v->stop - 1);
+    }
+
+    // The face buttons are the right stick the handheld does not have.
+    if (kHeld & KEY_Y) v->yaw += LOOK_SPEED * dt;
+    if (kHeld & KEY_A) v->yaw -= LOOK_SPEED * dt;
+    if (kHeld & KEY_X) v->pitch += LOOK_SPEED * dt;
+    if (kHeld & KEY_B) v->pitch -= LOOK_SPEED * dt;
+    if (v->pitch > PITCH_LIMIT) v->pitch = PITCH_LIMIT;
+    if (v->pitch < -PITCH_LIMIT) v->pitch = -PITCH_LIMIT;
+
+    cp       = cosf(v->pitch);
+    fwd[0]   = cp * cosf(v->yaw);
+    fwd[1]   = cp * sinf(v->yaw);
+    fwd[2]   = sinf(v->pitch);
+    // Looking down +x in a right-handed world with z up, the right is -y:
+    // that is where eCreateLookAtMatrix puts view +x.
+    right[0] = sinf(v->yaw);
+    right[1] = -cosf(v->yaw);
+    right[2] = 0.0f;
+
+    fx   = pad_axis(cpx);
+    fy   = pad_axis(cpy);
+    step = v->speed * dt;
+    for (i = 0; i < 3; i++) {
+        v->pos[i] += (fwd[i] * fy + right[i] * fx) * step;
+    }
+    if (kHeld & KEY_R) v->pos[2] += step;
+    if (kHeld & KEY_L) v->pos[2] -= step;
+
+    set_camera(v, dt);
+}
+
+// --------------------------------------------------------------------- draw
+
+// The two attach loops' order. AttachSolidPolys (0x0010a7f0) goes first
+// and draws every texture's own list, the textures in RenderingOrder and,
+// within one, in the order the frame met them; AttachAlphaPolys
+// (0x0010a4c0) then draws the alpha list as SortAlphaKeys leaves it --
+// RenderingOrder up and, within one, the farthest first, ties the last
+// added first, since the list is built back to front from a stable radix
+// sort. A texture's own list keeps its strips in the order they came.
+static int compare_deferred(const void* pa, const void* pb)
+{
+    const TrackDeferred* a = (const TrackDeferred*)pa;
+    const TrackDeferred* b = (const TrackDeferred*)pb;
+
+    if (a->sorted != b->sorted) {
+        return a->sorted ? 1 : -1;
+    }
+    if (a->order != b->order) {
+        return a->order < b->order ? -1 : 1;
+    }
+    if (!a->sorted) {
+        if (a->texUse != b->texUse) {
+            return a->texUse < b->texUse ? -1 : 1;
+        }
+        return a->seq < b->seq ? -1 : a->seq > b->seq;
+    }
+    if (a->depth != b->depth) {
+        return a->depth > b->depth ? -1 : 1;
+    }
+    return a->seq > b->seq ? -1 : a->seq < b->seq;
+}
+
+static void draw_deferred(TrackView* v)
+{
+    int i;
+
+    qsort(v->deferred, (size_t)v->numDeferred, sizeof v->deferred[0],
+          compare_deferred);
+    for (i = 0; i < v->numDeferred; i++) {
+        const TrackDeferred* d = &v->deferred[i];
+        TrackSolid*          r = &v->info[d->solid];
+
+        if (gpuCmdBufSize - gpuCmdBufOffset < CMDBUF_GUARD_WORDS) {
+            v->cmdSkipped++;
+            continue;
+        }
+        georender_set_camera(&s_proj, &d->modelView);
+        georender_draw_mask(&r->mesh, r->slot,
+                            r->slot ? v->solid[d->solid].numTextures : 0,
+                            1u << d->batch);
+    }
+}
+
+void trackview_draw(TrackView* v)
+{
+    eView* view = eGetView(EVIEW_ID_PLAYER1);
+    float  tanx, fovy;
+    int    i;
+
+    if (!v->loaded || !FrameMemoryBuffer[0]) {
+        return;
+    }
+
+    // eDisplayFrame's order, for the one view there is: new frame memory,
+    // the view mode, the view's matrices, a cull info per view, the cull,
+    // and StuffScenery. The matrices the cull hands Render live in the
+    // frame memory, and the draw is done with them before the next swap.
+    eSwapFrameMallocBuffers();
+    MaybeChangeViewMode();
+    eview_calculate_view_matrices(view, 0.0f, 0.0f, 0.0f);
+    scenery_cull_setup_views(&v->cull, 1);
+    scenery_do_culling(&v->cull);
+    v->drawInfos = 0;
+    for (i = 0; i < v->cull.NumCullInfos; i++) {
+        v->drawInfos += (int)(v->cull.SceneryCullInfos[i].pCurrentDrawInfo
+                              - v->cull.SceneryCullInfos[i].pFirstDrawInfo);
+    }
+
+    // The top screen's width is the cull's: the cull's half-width at unit
+    // depth is half the scissor over H, and the height follows from 5:3.
+    tanx = (float)view->pRenderTarget0->ScissorW * 0.5f / view->H;
+    fovy = 2.0f * atanf(tanx * 240.0f / 400.0f);
+    Mtx_PerspTilt(&s_proj, fovy, 400.0f / 240.0f, view->NearZ, view->FarZ,
+                  false);
+    // Prelit: the vertex colour and nothing else.
+    georender_set_light(0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+
+    s_draw        = v;
+    s_worldView   = view->WorldViewMatrix;
+    v->drawn        = 0;
+    v->drawnTris    = 0;
+    v->drawnInPlace = 0;
+    v->cmdSkipped   = 0;
+    v->listFrame    = v->listPending;
+    v->listPending  = false;
+    if (v->listFrame) {
+        v->drawList[0] = 0;
+    }
+    v->numDeferred     = 0;
+    v->deferredSorted  = 0;
+    v->deferredDropped = 0;
+    v->texUses         = 0;
+    if (++v->frameStamp == 0) {
+        v->frameStamp = 1;
+    }
+    scenery_stuff_scenery(&v->cull, view);
+    draw_deferred(v);
+    s_draw = NULL;
+
+    // citro2d draws the bottom screen next and sets only what it needs:
+    // the alpha test is put back off and the blend back to its own.
+    C3D_AlphaTest(false, GPU_ALWAYS, 0);
+    C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA,
+                   GPU_ONE_MINUS_SRC_ALPHA, GPU_SRC_ALPHA,
+                   GPU_ONE_MINUS_SRC_ALPHA);
+    if ((int)gpuCmdBufOffset > v->cmdPeakWords) {
+        v->cmdPeakWords = (int)gpuCmdBufOffset;
+    }
+    if (FrameMallocFailed) {
+        v->frameMallocFails++;
+    }
+}

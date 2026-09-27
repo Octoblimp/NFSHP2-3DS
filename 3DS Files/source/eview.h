@@ -172,6 +172,15 @@ int32_t eGetCurrentViewMode(void);      // 0x00107238
 // culls the six environment-map views. 1 in the image's .sdata.
 extern int32_t EnvironmentMappingEnable;
 
+// Two of the five list heads the static constructor empties first, beside
+// InactiveActiveTextureList, SolidTextureList and AlphaTextureList, which
+// are the texture manager's and not ported. SolidList (0x00322780,
+// gp-25712) holds every eSolid loaded, by the bNode at its start, and is
+// what eFindSolid walks; ModelList (0x00322788, gp-25704) every eModel that
+// eModel::Init was given a name. emodel.h has both users.
+extern bNode SolidList;
+extern bNode ModelList;
+
 // The current view, gp-25436: eGetCurrentView (0x00107208),
 // eSetCurrentView (0x00107210) and eGetCurrentCamera (0x00107218), which is
 // the view's camera or NULL with no view.

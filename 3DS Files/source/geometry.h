@@ -110,6 +110,10 @@ typedef struct {
     const uint8_t* stripEntries;        // 0x00034004 payload, past the filler
     const uint8_t* packet;              // 0x00034005 payload, past the filler
     size_t         packetSize;
+    // The 0x00034003 payload itself, past the filler: the 192-byte eSolid
+    // as it sits in the file, which is what LoaderSolidList links onto
+    // SolidList in place and what an eModel's Solid points at.
+    const uint8_t* header;
 } GeoSolid;
 
 typedef struct {

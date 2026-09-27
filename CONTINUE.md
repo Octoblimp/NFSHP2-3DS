@@ -1,7 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-26), after task 27's twenty-second slice. `HANDOFF.md` is the running narrative; this file is the short
+continuation (2026-09-26), after task 27's twenty-third slice, the track
+on the screen. `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -407,16 +408,47 @@ and so replaced every boot.
      0, 1), and the port negated it instead, so the default eye was -0 in
      x and y. That is fixed, and `camera_check` has a mutation for it (46
      caught, 7 equivalent). Written up in `docs/formats/eview.md`.
-   - **Next is the track on the screen.** A track viewer mode in `main.c`
-     will:
-     - load TRACKB12.BUN;
-     - hand its 122 scenery sections and its zones to `scenery_loader`;
-     - draw what the ported cull picks, with eModel::Init and Render done
-       over `georender`.
+   - **The twenty-third slice is the track on the screen**, roadmap step
+     1, in `trackview.c`, `emodel.c` and `main.c`'s `MODE_TRACK` (SELECT
+     past the geometry viewer). It:
+     - reads TRACKB12.BUN whole and links its 1,135 eSolids onto
+       `SolidList` in place;
+     - hands the 122 sections and 23 zones to `scenery_loader`, with
+       eModel::Init and its destructor in `emodel.c` (2,494 models, 7
+       without a solid);
+     - bakes the 915 named solids (125,498 triangles, 342 textures, none
+       missing) and runs eDisplayFrame's order on view 1 every frame;
+     - draws what the ported cull picks through `georender`, in the
+       engine's order: opaque order-0 textures at once, everything else
+       after StuffScenery, by the attach loops' RenderingOrder, first use
+       and alpha-sort rules, with the GS's blend equations and TEST_1
+       (depth GEQUAL, alpha GREATER 0x30).
 
-     "The road to a playable demo", below, has everything after it.
+     A free camera flies it, and the D-pad steps along 24 stops of route
+     1. `tools/run_azahar_track.ps1` shoots stops 1 to 7 in Azahar, and
+     all seven show the road, the trees, the signs and the shadows.
+     Written up in `docs/formats/track-render.md`, which lists where the
+     port departs: the sort is per batch, not per strip; there is no
+     `pStackedActiveTexture`, no shadow matrix pack, no light materials;
+     and the sky domes draw in the main view until step 3.
+
+     **Next is step 2, the LoaderTable.** "The road to a playable demo",
+     below, has everything after it.
 
    Things to know before the next slice:
+   - **`eMathInit` must run before anything draws.** It is the only
+     thing that fills `eMathIdentityMatrix`, which StuffScenery hands to
+     every object drawn in place: the road and the terrain. Left zero,
+     they fold to a point. `main.c` calls it where InitializeEverything
+     does, just before eInitEngine's share.
+   - **Azahar refuses a .3dsx with a bad relocation and says only "Error
+     1".** `tools/check_3dsx.py` runs after every build now and names the
+     word. The first one was gcc folding `table + negative constant` in
+     `bFixATan1` for INT32_MIN; `bmath.c` compares unsigned there now.
+   - **The GPU command buffer is 4x citro3d's default**, and it has to
+     be: stop 2 uses 139,068 of its 262,144 words. `GPUCMD_Add` drops
+     what does not fit silently, so `trackview.c` stops 8,192 words short
+     and counts the draws it skipped.
    - **A subtraction from zero is not a negation.** VU0 makes a negative
      with `vsub` from vf00, and 0 - (+0) is +0 where -(+0) is -0. The
      camera's eye was wrong this way from the camera's port until
@@ -947,7 +979,7 @@ it will move as each class shows what it reaches.
 
 | Step | What | Slices |
 |---|---|---|
-| 1 | The track on the screen: the viewer mode, eModel over `georender`, a free camera | 1 |
+| 1 | ~~The track on the screen: the viewer mode, eModel over `georender`, a free camera~~ done, task 27's twenty-third slice | 1 |
 | 2 | The LoaderTable: every chunk type in TRACKB12, with the solids, the texture packs, the topology and the routes live | 1-2 |
 | 3 | The sky, the sun and the weather's draw | 1 |
 | 4 | Car's constructor and destructor, and CarRenderInfo, so that a car draws on the track | 3-4 |
