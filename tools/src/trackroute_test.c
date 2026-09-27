@@ -21,6 +21,7 @@
 //     transcript's contract, and the model reproduces it.
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "bchunk.h"
@@ -97,20 +98,32 @@ static void plists(TrackRouteManager *m)
     plist("traffic", m->Traffic, m->NumTraffic);
 }
 
+// A disc sign's Distance is whatever the tools left there until
+// SetDistances fills it, and on retail TRACKB21 two are NaNs. A NaN prints
+// `-nan` here and `nan` in Python, so it is spelled once, by hand.
+static const char *g9(char *buf, float x)
+{
+    if (x != x) return "nan";
+    sprintf(buf, "%.9g", x);
+    return buf;
+}
+
 static void psigns(const char *tag)
 {
     uint32_t i;
+    char     d[32];
     printf("signposts %s n %lu\n", tag, (unsigned long)NumSignposts);
     for (i = 0; i < NumSignposts; i++) {
         const Signpost *s = &SignpostArray[i];
         printf("  %2lu route %u point %u sign %u back %d nostake %d"
-               " hairpin %d cloak %d dist %.9g\n",
+               " hairpin %d cloak %d dist %s hint %ld\n",
                (unsigned long)i, (unsigned)s->NewRoute, (unsigned)s->NewPoint,
                (unsigned)(s->Flags & SIGNPOST_SIGN_MASK),
                (s->Flags & SIGNPOST_BACKWARDS) != 0,
                (s->Flags & SIGNPOST_NO_STAKEOUT) != 0,
                (s->Flags & SIGNPOST_HAIRPIN) != 0,
-               (s->Flags & SIGNPOST_CLOAKED) != 0, s->Distance);
+               (s->Flags & SIGNPOST_CLOAKED) != 0, g9(d, s->Distance),
+               (long)s->AIHint);
     }
 }
 
@@ -684,13 +697,15 @@ static void scenario_load(void)
     bchunk_put_u32(gChunk, CHUNK_TRACK_ROUTES);
 
     // The signpost chunk. There is no count field anywhere in it: the
-    // loader divides the size by eight and that is the count.
+    // loader divides the size by retail's twelve and that is the count.
+    // Eight bytes over three signs, so a shift would not do.
     {
-        uint8_t sc[8 + 3 * 8];
-        int     k, rc;
+        uint32_t sc32[(8 + 3 * 12 + 8) / 4];
+        uint8_t *sc = (uint8_t *)sc32;
+        int      k, rc;
         bchunk_put_u32(sc, CHUNK_TRACK_SIGNPOSTS);
-        bchunk_put_u32(sc + 4, 3 * 8);
-        for (k = 0; k < 3 * 8; k++) sc[8 + k] = (uint8_t)(k * 11 + 1);
+        bchunk_put_u32(sc + 4, 3 * 12 + 8);
+        for (k = 0; k < 3 * 12 + 8; k++) sc[8 + k] = (uint8_t)(k * 11 + 1);
         rc = track_routes_loader(sc);
         printf("  sign chunk load %d n %lu present %d\n", rc,
                (unsigned long)NumSignposts, signposts_present());
@@ -801,10 +816,12 @@ static void scenario_signs(void)
     NumSignposts  = 8;
     for (i = 0; i < 8; i++) {
         static const uint8_t route[8] = { 1, 2, 2, 1, 1, 50, 50, 51 };
+        static const int32_t hint[8]  = { 0, 1, 2, 0, 2, 1, -1, 7 };
         gSigns[i].NewRoute = route[i];
         gSigns[i].NewPoint = (uint16_t)(1 + i / 2);
         gSigns[i].Flags    = (uint8_t)((i & 7) | ((i & 1) << 3));
         gSigns[i].Distance = 0.0f;
+        gSigns[i].AIHint   = hint[i];
     }
     for (i = 0; i < 8; i++) {
         TrackRoutePoint *p = signpost_get_new_route_point(&gSigns[i]);
@@ -859,8 +876,8 @@ static void scenario_init(void)
         TrackRoute *r = TheTrackRouteManager.pTrackRoutes[i];
         int         j;
         if (!r) continue;
-        printf("  route %d span %.9g %.9g\n", (int)r->RouteNumber,
-               r->fStartDistance, r->fEndDistance);
+        printf("  route %d flags %08lx span %.9g %.9g\n", (int)r->RouteNumber,
+               (unsigned long)r->Flags, r->fStartDistance, r->fEndDistance);
         for (j = 0; j < r->NumPoints; j++)
             printf("    p%d sign %lu\n", j,
                    (unsigned long)trpoint_sign_number(
@@ -882,8 +899,113 @@ static void scenario_init(void)
     gTrackPathDistanceFn = 0;
 }
 
-int main(void)
+// ------------------------------------------------------------ retail's disc
+
+static void proute_summary(const TrackRoute *r)
 {
+    int j;
+
+    printf("  route %d type %d pts %d flags %08lx span %.9g %.9g\n",
+           (int)r->RouteNumber, (int)r->Type, r->NumPoints,
+           (unsigned long)r->Flags, r->fStartDistance, r->fEndDistance);
+    printf("    signed");
+    for (j = 0; j < r->NumPoints; j++) {
+        uint32_t s = trpoint_sign_number(&r->TrackRoutePointTable[j]);
+        if (s != TRP_SIGN_MASK) printf(" %d/%lu", j, (unsigned long)s);
+    }
+    printf("\n");
+}
+
+static void proutes(void)
+{
+    int i;
+    for (i = 0; i < TRACK_ROUTE_MAX_ROUTES; i++)
+        if (TheTrackRouteManager.pTrackRoutes[i])
+            proute_summary(TheTrackRouteManager.pTrackRoutes[i]);
+}
+
+// A retail track's own routes and signs, in place in the bundle as the game
+// has them: the 12-byte stride, the divide and the DontTake pass on data
+// nobody built for the test.
+static int scenario_disc(const char *path)
+{
+    const char    *name = strrchr(path, '/');
+    const char    *bs   = strrchr(path, '\\');
+    FILE          *fh;
+    long           len;
+    uint8_t       *data;
+    const uint8_t *rp, *sp;
+    uint8_t       *ro, *so;
+    uint32_t       rsize = 0, ssize = 0;
+    char           stem[64];
+    size_t         k;
+
+    if (bs && (!name || bs > name)) name = bs;
+    name = name ? name + 1 : path;
+    for (k = 0; name[k] && name[k] != '.' && k + 1 < sizeof stem; k++)
+        stem[k] = name[k];
+    stem[k] = 0;
+
+    fh = fopen(path, "rb");
+    if (!fh) {
+        perror(path);
+        return 1;
+    }
+    fseek(fh, 0, SEEK_END);
+    len = ftell(fh);
+    fseek(fh, 0, SEEK_SET);
+    data = (uint8_t *)malloc((size_t)len);
+    if (!data || fread(data, 1, (size_t)len, fh) != (size_t)len) {
+        fclose(fh);
+        return 1;
+    }
+    fclose(fh);
+
+    printf("scenario disc %s\n", stem);
+    rp = bchunk_find_deep(data, 0, (size_t)len, CHUNK_TRACK_ROUTES, &rsize);
+    sp = bchunk_find_deep(data, 0, (size_t)len, CHUNK_TRACK_SIGNPOSTS, &ssize);
+    if (!rp || !sp) return 1;
+    ro = data + (rp - data) - 8;
+    so = data + (sp - data) - 8;
+    printf("  routes %lu bytes signs %lu bytes\n", (unsigned long)rsize,
+           (unsigned long)ssize);
+
+    trmgr_init(&TheTrackRouteManager);
+    {
+        int a = track_routes_loader(ro);
+        int b = track_routes_loader(so);
+        printf("  load routes %d signs %d n %lu\n", a, b,
+               (unsigned long)NumSignposts);
+    }
+    plists(&TheTrackRouteManager);
+    proutes();
+    psigns("loaded");
+
+    TheTrackPathManager.TrackLength = 20000.0f;
+    gTrackPathDistanceFn = test_distance;
+    init_track_routes(1);
+    psigns("fwd");
+    proutes();
+    init_track_routes(0);
+    psigns("rev");
+    proutes();
+    gTrackPathDistanceFn = 0;
+
+    {
+        int a = track_routes_unloader(so);
+        int b = track_routes_unloader(ro);
+        printf("  unload signs %d routes %d n %lu present %d\n", a, b,
+               (unsigned long)NumSignposts, signposts_present());
+    }
+    plists(&TheTrackRouteManager);
+    free(data);
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    int a;
+
     // The manager is deliberately not in this list: it is the one structure
     // here that is never overlaid on chunk bytes, so it is allowed to be as
     // wide as the host's pointers.
@@ -902,5 +1024,7 @@ int main(void)
     scenario_sort();
     scenario_signs();
     scenario_init();
+    for (a = 1; a < argc; a++)
+        if (scenario_disc(argv[a])) return 1;
     return 0;
 }

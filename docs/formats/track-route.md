@@ -9,8 +9,8 @@ lateral offsets and speeds that the AI and the traffic follow.
     TrackRoute.obj    0x001b6f60 .. 0x001b9428     9.9 KB
 
 The port is `3DS Files/source/trackroute.c` and `trackroute.h`, cross-checked
-by `tools/trackroute_check.py` (671 transcript lines, 53 mutations, one of
-them equivalent and argued for in that file). It sits on `bvector.c`
+by `tools/trackroute_check.py` (1353 transcript lines, 58 mutations, one of them equivalent and argued for in that file). The port follows retail
+(`SLES_507.31`) where retail changed the object: see "Retail", below. It sits on `bvector.c`
 (`docs/formats/bmath.md`), on `bchunk.c` (`docs/formats/bchunk.md`), and on
 `trackpath.c` (`docs/formats/track-path.md`) for the distance round the lap.
 
@@ -97,15 +97,18 @@ eight-byte `bChunk` header (`docs/formats/bchunk.md`).
 | type | what |
 |------|------|
 | `0x00034121` | `TrackRoutes` -- the routes, as truncated memory images |
-| `0x00034122` | `Signposts` -- a flat array of 8-byte records |
+| `0x00034122` | `Signposts` -- a flat array of 12-byte records (8 in the demo) |
 
 Neither chunk has a count field. The signpost count is the payload size
-divided by eight; the route count is however many records the walk finds
-before it runs off the end.
+divided by twelve, a `divu` in retail where the demo shifted by three. The
+route count is however many records the walk finds before it runs off the
+end.
 
-In `extracted/TRACKS/TRACKB12.BUN`: the routes chunk is at `0x7af66c`,
-302008 bytes, 17 routes; the signposts chunk is at `0x7f922c`, 448 bytes,
-56 signposts.
+In retail `TRACKB12.BUN` (`extracted-retail/`): the routes chunk is at
+`0x797780`, 302008 bytes, 17 routes. The signposts chunk is at `0x7e1340`,
+672 bytes, 56 signposts. The demo's `extracted/TRACKS/TRACKB12.BUN` has the
+same routes at `0x7af66c` and the same 56 signs in 448 bytes at
+`0x7f922c`.
 
 ### TrackRoutes: memory images with the tail cut off
 
@@ -131,7 +134,8 @@ bundle, which is why `Unloader` unlinks them and does not free them.
     16      4      NumPoints
     20      4      MaxPoints            -- equals NumPoints on disc
     24      4      Flags                -- bit 0 MemoryImageLoaded,
-                                           bit 1 Reversed
+                                           bit 1 Reversed,
+                                           bit 2 DontTakeTarget (retail)
     28      4      CurrentlyTuningDrivingLine
     32      4      fStartDistance       -- recomputed at init
     36      4      fEndDistance         -- recomputed at init
@@ -219,19 +223,34 @@ offsets zero and a flat speed.
 
 ### Signposts
 
-    Signpost, 8 bytes
+    Signpost, 12 bytes in retail, 8 in the demo
 
     offset  size   field
     0       1      NewRoute     -- route number, < 50 means racing
     1       1      Flags
     2       2      NewPoint     -- index into that route's point table
     4       4      Distance     -- uninitialised on disc
+    8       4      AIHint       -- retail only: 0, 1 or 2
 
     Flags: bits 0-2 Sign, bit 3 Backwards, bit 4 NoStakeout,
            bit 5 Hairpin, bit 6 Cloaked
 
 A signpost marks a junction: standing at `NewPoint` on `NewRoute`, the road
-branches, and `Sign` says which of the eight signboards to show.
+branches, and `Sign` says what the AI makes of it. The .mdebug declares
+Signpost's predicates in this order: IsFaster, IsSlower, AlwaysTake, IsStop,
+IsEquivalent, IsDontTake. Those are Sign 0 to 5, and retail's
+`AICarController::SignPostDecision` bears out the three it tests alone.
+It takes 2 at once, takes 4 on a coin flip, and never takes 5.
+
+    Sign   0 Faster  1 Slower  2 AlwaysTake  3 Stop  4 Equivalent  5 DontTake
+
+`AIHint` is retail's. Across all 30 retail tracks it is 0 (1,628 signs),
+1 (264) or 2 (128). Only 2 is tested, in SignPostDecision: a car that takes
+such a sign keeps its index (controller +684). `ExecuteCurrentAction` then
+holds it to the far point's driving-line speed until `DoStickyDecisions`
+drops the sign behind it. What 0 and 1 mean is not read anywhere. The AI's
+retail pass will name the field properly; `trackroute.h` calls 2
+`SIGNPOST_AIHINT_HOLD_LINE_SPEED`.
 
 `Distance` is **not** meaningful on disc -- track 12's values range from
 `1.4e-45` to `5.6e+14` and are plainly whatever the editor's heap held.
@@ -267,13 +286,17 @@ Called once the track-specific bundles are in, from
 1. If the race runs backwards, reverse every route (slots 50-69 get
    `ReverseTrafficRoute`, which only mirrors distances; everything else below
    70 gets the full `ReverseRoute`) and reverse every sign.
-2. `SetFirstAndLastPoints` on every registered route.
-3. `SetDistances` on every sign.
-4. Sort the signs by distance with `HeapSort`, then rewrite every point's
+2. Retail only: every DontTake sign (`(word & 0x700) == 0x500`) sets
+   `DontTakeTarget` on its `NewRoute`. The store goes through
+   `GetNewRoute`'s result unchecked. The port skips a sign whose route is
+   not loaded, which no retail track has.
+3. `SetFirstAndLastPoints` on every registered route.
+4. `SetDistances` on every sign.
+5. Sort the signs by distance with `HeapSort`, then rewrite every point's
    `SignNumber` through the resulting permutation so the indices still point
    at the right signs.
 
-Step 4 is why `GetSignpostIndex` can be a linear scan that stops at the first
+Step 5 is why `GetSignpostIndex` can be a linear scan that stops at the first
 sign whose distance is not below the query: after the sort the array is in
 track order.
 
@@ -325,6 +348,33 @@ compare so that the model reproduces it bit for bit. That keeps TrackRoute's
 own arithmetic checkable without a spline under it. `trackpath_check.py`
 checks the real measurement.
 
+## Retail
+
+The retail image changed eight of the object's functions (`docs/retail.md`,
+the audit). Four only step through the signs by retail's 12:
+`GetSignpost` (retail `0x1c14f8`), `ReverseSigns` (`0x1c1060`),
+`SetDistances` (`0x1c1138`) and `GetSignpostIndex` (`0x1c11d8`). The others:
+
+- `TrackRoutesLoader` (`0x1c2f18`) divides the signpost payload by 12.
+- `TrackRoute::TrackRoute` (`0x1c1710`) clears `DontTakeTarget` with the
+  other two flags. Its register use around the bounding box changed, and
+  the arguments did not.
+- `InitTrackRoutes` (`0x1c3250`) gains step 2 above, and its sort gathers
+  12-byte signs.
+- `HeapSort` (`0x1c2ff8`) differs only in the line number it passes to
+  `bMalloc`: 1156, the demo's 1148.
+
+`TrackRoute` itself is unchanged: `TrackRouteManager::Loader` (retail
+`0x1c2900`) still steps by 115752 less the missing points, and the audit
+has it `same`.
+
+Nothing in retail reads `DontTakeTarget`: no load of route +24 is followed
+by a test of bit 2 anywhere in the image. The port sets and clears it
+anyway, because retail does.
+
+Retail's signpost globals are `SignpostArray` at gp-18376 (`0x331128`) and
+`NumSignposts` at gp-18372 (`0x33112c`), with gp `0x3358f0`.
+
 ## Checking it
 
     python tools/trackroute_check.py
@@ -332,8 +382,14 @@ checks the real measurement.
 
 The harness is `tools/src/trackroute_test.c` and the model is
 `tools/trackroute_check.py`, written from the disassembly rather than from
-the C. Ten scenarios, 671 lines, every float printed as `%.9g` so a one-ulp
-disagreement is a changed line.
+the C. Eleven scenarios, 1353 lines, every float printed as `%.9g` so a
+one-ulp disagreement is a changed line. The model is retail's where retail
+changed the object. The last scenario loads retail `TRACKB12`'s and
+`TRACKB21`'s own routes and signs from `extracted-retail/`. It runs the
+loader, both inits and the unloader over them: 56 and 78 signs, and on
+`TRACKB21` its one DontTake sign marking route 17. A disc sign's `Distance`
+before `SetDistances` can be a NaN (two on `TRACKB21`), so the transcript
+spells NaN as `nan` on both sides.
 
 The model represents every record as a byte image with accessors at the
 offsets the listing's loads and stores use, for the same reason the port has

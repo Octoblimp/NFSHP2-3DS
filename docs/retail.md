@@ -145,6 +145,10 @@ demo's. Two checkers have it so far:
 - `loadertable_check.py`: the claims, and the walks through LoadChunks,
   are retail's.
 
+`trackroute_check.py` is a hand-written model rather than an image run,
+so its retail pass rewrote the model to retail's disassembly and added a
+scenario over retail `TRACKB12`'s and `TRACKB21`'s own routes and signs.
+
 ## The data
 
 406 directory entries to the demo's 223. The retail disc lays three files
@@ -210,3 +214,11 @@ What the port has taken on so far:
   SunTrackLoader (0.85).
 - **DifficultyInfo** (`0x34b00`) grew from 744 bytes to 992: retail's
   LoaderDifficultyInfo copies 992. Not yet taken on.
+- **Signpost** is 12 bytes, the demo's 8. Retail added an int32 `AIHint`
+  at 8, which is 0, 1 or 2 across the 30 tracks. Only 2 is read, by the
+  AI's SignPostDecision and ExecuteCurrentAction: hold the far point's
+  driving-line speed. The loader divides the chunk by 12. Retail's
+  InitTrackRoutes also marks each DontTake sign's `NewRoute` with Flags
+  bit 2, which the constructor clears and nothing reads. HeapSort differs
+  only in its bMalloc line number, 1156 for 1148. `TrackRoute` itself is
+  unchanged. See `formats/track-route.md`, "Retail".

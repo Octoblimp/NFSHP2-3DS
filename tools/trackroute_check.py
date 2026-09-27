@@ -18,6 +18,13 @@ is imported from bvector_check, itself a model of bVector.obj written from
 the ELF, so the chain of custody for every number here runs back to an
 address rather than to another port.
 
+Where retail changed the object, the model is retail's (task 36). The
+Signpost is 12 bytes, with an AI hint word at 8. The loader divides by 12.
+The constructor clears a third flag, DontTakeTarget, which InitTrackRoutes
+sets on the route of every DontTake sign. Every other function is the
+same in both images. The last scenario loads retail TRACKB12's and
+TRACKB21's own routes and signs, from extracted-retail/.
+
 Everything is float32. The EE has no double.
 
     python tools/trackroute_check.py
@@ -55,6 +62,14 @@ SOURCES = [
     "3DS Files/source/bchunk.c",
 ]
 
+# The retail tracks the disc scenario loads: TRACKB12, the demo's location,
+# and TRACKB21, which has a DontTake sign.
+DISC_TRACKS = ["TRACKB12", "TRACKB21"]
+
+
+def disc_path(name):
+    return ROOT / "extracted-retail" / "TRACKS" / (name + ".BUN")
+
 
 def g9(x):
     return "%.9g" % x
@@ -86,6 +101,7 @@ DLI_IS_FAKE = 0x02
 
 TROUTE_MEMORY_IMAGE_LOADED = 0x01
 TROUTE_REVERSED = 0x02
+TROUTE_DONT_TAKE_TARGET = 0x04
 TRACK_ROUTE_RACING = 0
 TRACK_ROUTE_TRAFFIC = 1
 MAX_POINTS = 1024
@@ -103,13 +119,14 @@ SIGNPOST_BACKWARDS = 0x08
 SIGNPOST_NO_STAKEOUT = 0x10
 SIGNPOST_HAIRPIN = 0x20
 SIGNPOST_CLOAKED = 0x40
+SIGN_DONT_TAKE = 5
 
 CHUNK_TRACK_ROUTES = 0x00034121
 CHUNK_TRACK_SIGNPOSTS = 0x00034122
 
 SZ_POINT = 112
 SZ_INFO = 48
-SZ_SIGN = 8
+SZ_SIGN = 12
 SZ_ROUTE = 115752
 OFF_INFOS = 40
 OFF_BBOX = 1048
@@ -240,12 +257,13 @@ class LineInfo(Rec):
 
 
 class Sign(Rec):
-    """Signpost, 8 bytes."""
+    """Signpost, 12 bytes in retail: the demo's eight and an AI hint."""
     __slots__ = ()
     NewRoute = _u8(0)
     Flags = _u8(1)
     NewPoint = _u16(2)
     Distance = _fprop(4)
+    AIHint = _i32(8)
 
 
 class Route(Rec):
@@ -454,7 +472,7 @@ def troute_get_point_number(r, p):
 
 
 def troute_init(r, number):
-    """0x001b7660."""
+    """0x001b7660, retail 0x001c1710: it clears DontTakeTarget too."""
     for i in range(MAX_POINTS):
         trpoint_init(r.point(i))
     r.RouteNumber = number
@@ -465,7 +483,8 @@ def troute_init(r, number):
         r.Type = TRACK_ROUTE_TRAFFIC
     else:
         r.Type = TRACK_ROUTE_RACING
-    r.Flags = r.Flags & ~(TROUTE_MEMORY_IMAGE_LOADED | TROUTE_REVERSED)
+    r.Flags = r.Flags & ~(TROUTE_MEMORY_IMAGE_LOADED | TROUTE_REVERSED |
+                          TROUTE_DONT_TAKE_TARGET)
     r.MaxPoints = MAX_POINTS
     r.NumPoints = 0
     r.CurrentlyTuningDrivingLine = 0
@@ -821,7 +840,7 @@ def signpost_is_racing_route(s):
 
 
 def signpost_reverse_signs():
-    """0x001b6fc8."""
+    """0x001b6fc8, retail 0x001c1060, by retail's stride."""
     for i in range(S.NumSignposts):
         s = sign(i)
         if not signpost_is_racing_route(s):
@@ -833,7 +852,7 @@ def signpost_reverse_signs():
 
 
 def signpost_set_distances():
-    """0x001b7090. Two hops, not one: the sign's own target point is read
+    """0x001b7090, retail 0x001c1138. Two hops, not one: the sign's own target point is read
     only for *its* signpost, and the distance comes from that second sign's
     target point. On track 12 the signs are paired, so a pair shares one."""
     coord = Coord()
@@ -853,7 +872,7 @@ def signpost_set_distances():
 
 
 def signpost_get_index(d):
-    """0x001b7120."""
+    """0x001b7120, retail 0x001c11d8."""
     for i in range(S.NumSignposts):
         if not sign(i).Distance < d:
             return i
@@ -920,7 +939,7 @@ def compare_signposts(a, b):
 # ---------------------------------------------------------------- chunk hooks
 
 def track_routes_loader(chunk, off=0):
-    """0x001b8e60."""
+    """0x001b8e60, retail 0x001c2f18: the count is a divu by 12."""
     kind = struct.unpack_from("<I", chunk, off)[0]
     if kind == CHUNK_TRACK_ROUTES:
         trmgr_loader(chunk, off)
@@ -928,7 +947,7 @@ def track_routes_loader(chunk, off=0):
     if kind == CHUNK_TRACK_SIGNPOSTS:
         S.SignBuf = chunk
         S.SignBase = off + 8
-        S.NumSignposts = struct.unpack_from("<I", chunk, off + 4)[0] >> 3
+        S.NumSignposts = struct.unpack_from("<I", chunk, off + 4)[0] // SZ_SIGN
         return 1
     return 0
 
@@ -948,10 +967,19 @@ def track_routes_unloader(chunk, off=0):
 
 
 def init_track_routes(forward):
-    """0x001b9188."""
+    """0x001b9188, retail 0x001c3250. Retail's pass after the reversal marks
+    the NewRoute of every DontTake sign (`(word & 0x700) == 0x500`)."""
     if not forward:
         trmgr_reverse_routes()
         signpost_reverse_signs()
+
+    for i in range(S.NumSignposts):
+        s = sign(i)
+        if (s.Flags & SIGNPOST_SIGN_MASK) != SIGN_DONT_TAKE:
+            continue
+        r = signpost_get_new_route(s)
+        if r is not None:
+            r.Flags = r.Flags | TROUTE_DONT_TAKE_TARGET
 
     for n in range(MAX_ROUTES):
         r = S.pTrackRoutes[n]
@@ -1051,12 +1079,13 @@ def psigns(o, tag):
     for i in range(S.NumSignposts):
         s = sign(i)
         o("  %2d route %d point %d sign %d back %d nostake %d hairpin %d"
-          " cloak %d dist %s"
+          " cloak %d dist %s hint %d"
           % (i, s.NewRoute, s.NewPoint, s.Flags & SIGNPOST_SIGN_MASK,
              1 if s.Flags & SIGNPOST_BACKWARDS else 0,
              1 if s.Flags & SIGNPOST_NO_STAKEOUT else 0,
              1 if s.Flags & SIGNPOST_HAIRPIN else 0,
-             1 if s.Flags & SIGNPOST_CLOAKED else 0, g9(s.Distance)))
+             1 if s.Flags & SIGNPOST_CLOAKED else 0, g9(s.Distance),
+             s.AIHint))
 
 
 # ----------------------------------------------------------------- the harness
@@ -1457,10 +1486,12 @@ def s_load(o, g):
     struct.pack_into("<I", g.chunk, 0, CHUNK_TRACK_ROUTES)
 
     # The signpost chunk: no count field anywhere, just the size divided.
-    sc = bytearray(8 + 3 * SZ_SIGN)
+    # Eight bytes over three signs, so the count is the quotient, not the
+    # demo's shift.
+    sc = bytearray(8 + 3 * SZ_SIGN + 8)
     struct.pack_into("<I", sc, 0, CHUNK_TRACK_SIGNPOSTS)
-    struct.pack_into("<I", sc, 4, 3 * SZ_SIGN)
-    for k in range(3 * SZ_SIGN):
+    struct.pack_into("<I", sc, 4, 3 * SZ_SIGN + 8)
+    for k in range(3 * SZ_SIGN + 8):
         sc[8 + k] = (k * 11 + 1) & 0xff
     rc = track_routes_loader(sc)
     o("  sign chunk load %d n %d present %d"
@@ -1514,12 +1545,14 @@ def s_signs(o, g):
     S.SignBase = 0
     S.NumSignposts = 8
     route = (1, 2, 2, 1, 1, 50, 50, 51)
+    hint = (0, 1, 2, 0, 2, 1, -1, 7)
     for i in range(8):
         s = sign(i)
         s.NewRoute = route[i]
         s.NewPoint = 1 + i // 2
         s.Flags = (i & 7) | ((i & 1) << 3)
         s.Distance = f32(0.0)
+        s.AIHint = hint[i]
     for i in range(8):
         p = signpost_get_new_route_point(sign(i))
         if p is None:
@@ -1567,8 +1600,9 @@ def s_init(o, g):
         r = S.pTrackRoutes[i]
         if r is None:
             continue
-        o("  route %d span %s %s"
-          % (r.RouteNumber, g9(r.fStartDistance), g9(r.fEndDistance)))
+        o("  route %d flags %08x span %s %s"
+          % (r.RouteNumber, r.Flags, g9(r.fStartDistance),
+             g9(r.fEndDistance)))
         for j in range(r.NumPoints):
             o("    p%d sign %d" % (j, r.point(j).sign_number()))
 
@@ -1587,11 +1621,83 @@ def s_init(o, g):
     S.DistanceFn = None
 
 
+def find_chunk(data, want, off=0, end=None):
+    """The first chunk of `want`, depth first through the containers, as
+    bchunk_find_deep walks it. Returns the header's offset."""
+    end = len(data) if end is None else end
+    while off + 8 <= end:
+        kind, size = struct.unpack_from("<II", data, off)
+        if kind == 0 and size == 0:
+            off += 8
+            continue
+        if size > end - off - 8:
+            return None
+        if kind == want:
+            return off
+        if kind & 0x80000000:
+            hit = find_chunk(data, want, off + 8, off + 8 + size)
+            if hit is not None:
+                return hit
+        off += 8 + size
+    return None
+
+
+def proute_summary(o, r):
+    o("  route %d type %d pts %d flags %08x span %s %s"
+      % (r.RouteNumber, r.Type, r.NumPoints, r.Flags, g9(r.fStartDistance),
+         g9(r.fEndDistance)))
+    signed = [(j, r.point(j).sign_number()) for j in range(r.NumPoints)
+              if r.point(j).sign_number() != TRP_SIGN_MASK]
+    o("    signed" + "".join(" %d/%d" % e for e in signed))
+
+
+def proutes(o):
+    for i in range(MAX_ROUTES):
+        r = S.pTrackRoutes[i]
+        if r is not None:
+            proute_summary(o, r)
+
+
+def s_disc(o, g):
+    """Retail's own routes and signs: the 12-byte stride, the divide and the
+    DontTake pass on data nobody built for the test."""
+    for name in DISC_TRACKS:
+        data = bytearray(disc_path(name).read_bytes())
+        o("scenario disc %s" % name)
+        ro = find_chunk(data, CHUNK_TRACK_ROUTES)
+        so = find_chunk(data, CHUNK_TRACK_SIGNPOSTS)
+        o("  routes %d bytes signs %d bytes"
+          % (struct.unpack_from("<I", data, ro + 4)[0],
+             struct.unpack_from("<I", data, so + 4)[0]))
+        trmgr_init()
+        o("  load routes %d signs %d n %d"
+          % (track_routes_loader(data, ro), track_routes_loader(data, so),
+             S.NumSignposts))
+        plists(o)
+        proutes(o)
+        psigns(o, "loaded")
+
+        S.TrackLength = f32(20000.0)
+        S.DistanceFn = test_distance
+        init_track_routes(1)
+        psigns(o, "fwd")
+        proutes(o)
+        init_track_routes(0)
+        psigns(o, "rev")
+        proutes(o)
+        S.DistanceFn = None
+
+        o("  unload signs %d routes %d n %d present %d"
+          % (track_routes_unloader(data, so), track_routes_unloader(data, ro),
+             S.NumSignposts, signposts_present()))
+        plists(o)
+
+
 SCENARIOS = [
     ("point", s_point), ("build", s_build),
     ("driving lines", s_driving_lines), ("reverse", s_reverse),
     ("find", s_find), ("span", s_span), ("load", s_load), ("sort", s_sort),
-    ("signs", s_signs), ("init", s_init),
+    ("signs", s_signs), ("init", s_init), ("disc", s_disc),
 ]
 
 
@@ -1628,7 +1734,9 @@ def run_c(exe):
         path = Path(tmp) / "out.txt"
         with open(path, "w", newline=NL) as fh:
             try:
-                rc = subprocess.run([str(exe)], stdout=fh,
+                rc = subprocess.run([str(exe)] +
+                                    [str(disc_path(n)) for n in DISC_TRACKS],
+                                    stdout=fh,
                                     stderr=subprocess.DEVNULL,
                                     timeout=HARNESS_TIMEOUT).returncode
             except subprocess.TimeoutExpired:
@@ -1728,7 +1836,8 @@ MUTATIONS = [
      "                   : (routeNumber < 70 ? TRACK_ROUTE_TRAFFIC",
      "                   : (routeNumber < 60 ? TRACK_ROUTE_TRAFFIC"),
     ("init-flags-wiped", TR,
-     "    r->Flags      &= ~(TROUTE_MEMORY_IMAGE_LOADED | TROUTE_REVERSED);",
+     "    r->Flags      &= ~(TROUTE_MEMORY_IMAGE_LOADED | TROUTE_REVERSED |\n"
+     "                       TROUTE_DONT_TAKE_TARGET);",
      "    r->Flags       = 0;"),
     ("addpoint-max-off-by-one", TR,
      "    if (r->NumPoints >= r->MaxPoints) return 0;",
@@ -1823,8 +1932,25 @@ MUTATIONS = [
      "        if (!(SignpostArray[i].Distance < d)) return (int)i;",
      "        if (SignpostArray[i].Distance < d) return (int)i;"),
     ("signpost-chunk-shift", TR,
-     "        NumSignposts  = bchunk_u32(chunk + 4) >> 3;",
+     "        NumSignposts  = bchunk_u32(chunk + 4) / (uint32_t)sizeof(Signpost);",
      "        NumSignposts  = bchunk_u32(chunk + 4) >> 2;"),
+    # Retail's (task 36).
+    ("signpost-chunk-demo-shift", TR,
+     "        NumSignposts  = bchunk_u32(chunk + 4) / (uint32_t)sizeof(Signpost);",
+     "        NumSignposts  = bchunk_u32(chunk + 4) >> 3;"),
+    ("init-gather-demo-stride", TR,
+     "        memcpy(SignpostArray, sorted, NumSignposts * sizeof *sorted);",
+     "        memcpy(SignpostArray, sorted, NumSignposts * 8);"),
+    ("ctor-keeps-dont-take", TR,
+     "    r->Flags      &= ~(TROUTE_MEMORY_IMAGE_LOADED | TROUTE_REVERSED |\n"
+     "                       TROUTE_DONT_TAKE_TARGET);",
+     "    r->Flags      &= ~(TROUTE_MEMORY_IMAGE_LOADED | TROUTE_REVERSED);"),
+    ("init-no-dont-take", TR,
+     "        if (r) r->Flags |= TROUTE_DONT_TAKE_TARGET;",
+     "        (void)r;"),
+    ("init-dont-take-sign", TR,
+     "        if ((s->Flags & SIGNPOST_SIGN_MASK) != SIGN_DONT_TAKE) continue;",
+     "        if ((s->Flags & SIGNPOST_SIGN_MASK) != SIGN_EQUIVALENT) continue;"),
     ("heapsort-tie-order", TR,
      "                cmp(ra + (j - 1) * size, ra + j * size) < 0.0f)",
      "                cmp(ra + (j - 1) * size, ra + j * size) <= 0.0f)"),

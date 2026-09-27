@@ -79,7 +79,7 @@ void trpoint_set_width(TrackRoutePoint *p, float left, float right)
     p->LeftWidth  = left;
 }
 
-// 0x001b7448.
+// 0x001b7448, retail 0x001c14f8, which steps by retail's 12.
 Signpost *trpoint_get_signpost(const TrackRoutePoint *p)
 {
     return &SignpostArray[p->Bits & TRP_SIGN_MASK];
@@ -166,7 +166,7 @@ float trpoint_get_driving_line_speed(const TrackRoutePoint *p, int line)
 
 // ------------------------------------------------------------------ routes
 
-// 0x001b7660.
+// 0x001b7660, retail 0x001c1710, which clears DontTakeTarget as well.
 void troute_init(TrackRoute *r, int routeNumber)
 {
     int i;
@@ -179,7 +179,8 @@ void troute_init(TrackRoute *r, int routeNumber)
     r->Type        = routeNumber < 50 ? TRACK_ROUTE_RACING
                    : (routeNumber < 70 ? TRACK_ROUTE_TRAFFIC
                                        : TRACK_ROUTE_RACING);
-    r->Flags      &= ~(TROUTE_MEMORY_IMAGE_LOADED | TROUTE_REVERSED);
+    r->Flags      &= ~(TROUTE_MEMORY_IMAGE_LOADED | TROUTE_REVERSED |
+                       TROUTE_DONT_TAKE_TARGET);
     r->MaxPoints   = TRACK_ROUTE_MAX_POINTS;
     r->NumPoints   = 0;
     r->CurrentlyTuningDrivingLine = 0;
@@ -644,7 +645,7 @@ int signpost_is_racing_route(const Signpost *s)
     return s->NewRoute < 50;
 }
 
-// 0x001b6fc8.
+// 0x001b6fc8, retail 0x001c1060, which steps by retail's 12.
 void signpost_reverse_signs(void)
 {
     uint32_t i;
@@ -660,7 +661,8 @@ void signpost_reverse_signs(void)
     }
 }
 
-// 0x001b7090. Two hops, not one: the sign's own target point is used only to
+// 0x001b7090, retail 0x001c1138, which steps by retail's 12. Two hops,
+// not one: the sign's own target point is used only to
 // read *its* signpost, and the distance comes from that second sign's target
 // point. On track 12 the signs are paired -- sign i's point names sign i^1,
 // the same junction seen from the other direction -- so the pair share a
@@ -690,7 +692,7 @@ void signpost_set_distances(void)
     }
 }
 
-// 0x001b7120.
+// 0x001b7120, retail 0x001c11d8, which steps by retail's 12.
 int signpost_get_index(float d)
 {
     uint32_t i;
@@ -788,7 +790,8 @@ static float compare_signposts(const void *a, const void *b)
 
 // ------------------------------------------------------------- chunk hooks
 
-// 0x001b8e60.
+// 0x001b8e60, retail 0x001c2f18. The count is the payload over retail's
+// 12, a divu, where the demo shifted by 3.
 int track_routes_loader(const uint8_t *chunk)
 {
     uint32_t type = bchunk_u32(chunk);
@@ -799,7 +802,7 @@ int track_routes_loader(const uint8_t *chunk)
     }
     if (type == CHUNK_TRACK_SIGNPOSTS) {
         SignpostArray = (Signpost *)(uintptr_t)(chunk + 8);
-        NumSignposts  = bchunk_u32(chunk + 4) >> 3;
+        NumSignposts  = bchunk_u32(chunk + 4) / (uint32_t)sizeof(Signpost);
         return 1;
     }
     return 0;
@@ -822,7 +825,9 @@ int track_routes_unloader(const uint8_t *chunk)
     return 0;
 }
 
-// 0x001b9188.
+// 0x001b9188, retail 0x001c3250. Retail adds one pass after the
+// reversal: the NewRoute of every DontTake sign is marked. The stride of
+// the sort's gather is retail's 12.
 void init_track_routes(int forward)
 {
     // Indexed by a point's old SignNumber, which is a byte. The original
@@ -836,6 +841,17 @@ void init_track_routes(int forward)
     if (!forward) {
         trmgr_reverse_routes(&TheTrackRouteManager);
         signpost_reverse_signs();
+    }
+
+    // Retail stores through GetNewRoute's result unchecked. A sign whose
+    // route is not loaded would write near address 0 there; the port skips
+    // it. No retail track has one.
+    for (i = 0; i < NumSignposts; ++i) {
+        const Signpost *s = &SignpostArray[i];
+        TrackRoute     *r;
+        if ((s->Flags & SIGNPOST_SIGN_MASK) != SIGN_DONT_TAKE) continue;
+        r = signpost_get_new_route(s);
+        if (r) r->Flags |= TROUTE_DONT_TAKE_TARGET;
     }
 
     for (n = 0; n < TRACK_ROUTE_MAX_ROUTES; ++n) {

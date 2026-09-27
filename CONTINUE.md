@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-27), after task 36's second slice: the retail
-model, and the first two checkers on it. `HANDOFF.md` is the running narrative; this file is the short
+continuation (2026-09-27), after task 36's third slice: TrackRoute's
+retail pass, the 12-byte Signpost. `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -66,7 +66,7 @@ sndbank_check      30 banks,       908 lines, 0 differ   (20000 mutations, 0 dis
 bsnd_check         12 scenarios,  5157 lines, 0 differ   (25/25 mutations caught)
 emath_check         9 scenarios,  2416 lines, 0 differ   (39/39 mutations caught)
 camera_check        7 scenarios,  1201 lines, 0 differ   (46 caught, 7 equivalent)
-trackroute_check   10 scenarios,   671 lines, 0 differ   (52 caught, 1 equivalent)
+trackroute_check   11 scenarios,  1353 lines, 0 differ   (57 caught, 1 equivalent)
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
 engine_check        8 scenarios,   414 lines, 0 differ   (56 caught, 2 equivalent)
 cartypeinfo_check   4 scenarios,   177 lines, 0 differ   (40/40 mutations caught)
@@ -190,12 +190,26 @@ and so replaced every boot.
      as its `.BUN`. The port ships the tracks already expanded and never
      decompresses one on the 3DS.
 
+   **Task 36's third slice is closed: TrackRoute's retail pass.**
+   - Retail's Signpost is 12 bytes, with an int32 `AIHint` at 8 (0, 1 or
+     2; only 2 is read, by the AI). The loader divides by 12, and every
+     walk over the signs steps by 12.
+   - Retail's InitTrackRoutes marks each DontTake sign's `NewRoute` with
+     Flags bit 2, `TROUTE_DONT_TAKE_TARGET`. The constructor clears it,
+     and nothing in retail reads it. Sign 5 is DontTake, by the .mdebug's
+     predicate order and SignPostDecision.
+   - `trackroute_check` is a hand-written model, rewritten to retail's
+     disassembly. A new scenario runs the loader, both inits and the
+     unloader over retail TRACKB12's and TRACKB21's own routes and signs.
+   - The AI's use of `AIHint` goes with the step-10 retail pass of
+     `airoute.c` and the controller.
+
    **Next is the rest of step 4: the retail disc's data in the track
    viewer.**
    - The loaders the audit has as changed:
-     - LoaderTrackRoutes (0.67): retail's Signpost is 12 bytes, with an
-       int32 at +8.
-     - LoaderTexturePack (0.85).
+     - LoaderTexturePack (0.85): the header is 84 bytes, a 64-byte
+       filename between the name and the pointer. TexturePack is 148
+       bytes, and GetTextureInfo takes a third argument.
      - LoaderDifficultyInfo: the record is 992 bytes, the demo's 744.
      - UnloaderTrackGeometry (0.98), UnloaderSolidList (0.99) and
        eFixUpTables (0.82).

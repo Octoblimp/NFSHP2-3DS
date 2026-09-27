@@ -8009,3 +8009,51 @@ What else the reads showed:
 The rest of step 4: the changed loaders (TrackRoutes and its 12-byte
 Signpost, TexturePack, DifficultyInfo, the solid list's unloader and
 eFixUpTables), then retail TRACKB12 on Azahar, then a second location.
+
+## Session 30, continued (2026-09-27) -- Task 36's third slice: TrackRoute's retail pass
+
+The user: never stop, and get the port to 100%.
+
+- **Signpost is 12 bytes.** Retail's GetSignpost, ReverseSigns,
+  SetDistances and GetSignpostIndex step by 12, the loader divides the
+  chunk by 12 (a `divu` where the demo shifted by three), and
+  InitTrackRoutes' sort gathers 12-byte signs. The new int32 at 8 is
+  `AIHint`. A survey of all 30 retail tracks has 1,628 signs at 0, 264 at
+  1 and 128 at 2. Only 2 is tested: SignPostDecision keeps such a sign's
+  index at controller +684, and ExecuteCurrentAction holds the car to the
+  far point's driving-line speed until DoStickyDecisions drops the sign.
+- **The Sign values** come from the .mdebug's predicate order (IsFaster,
+  IsSlower, AlwaysTake, IsStop, IsEquivalent, IsDontTake), borne out by
+  SignPostDecision: 2 is taken at once, 4 on a coin flip, 5 never.
+- **DontTakeTarget.** Retail's InitTrackRoutes sets Flags bit 2 on each
+  DontTake sign's `NewRoute`, and the constructor clears it. A scan for a
+  load of route +24 then a test of bit 2 finds no reader in the image.
+  The port sets and clears it anyway. The store goes through GetNewRoute
+  unchecked; the port skips a sign whose route is not loaded, which no
+  retail track has.
+- **HeapSort** differs only in bMalloc's line argument, 1156 for 1148:
+  not an element size. `TrackRoute` is still 115752 bytes.
+- **trackroute_check** is a hand-written model, rewritten to retail. Its
+  new scenario loads retail TRACKB12's and TRACKB21's own routes and signs
+  from `extracted-retail/` and runs the loader, both inits and the
+  unloader. TRACKB21's one DontTake sign marks route 17 (flags 1, 5 after
+  the forward init, 7 after the reverse). A disc sign's Distance before
+  SetDistances can be a NaN, so both sides spell it `nan`.
+- airoute_test and realcontroller_test copy eight bytes per sign into
+  their own arrays, which still works; the whole chain passes.
+
+```
+trackroute_check   11 scenarios, 1353 lines, 0 differ
+                   58 mutations: 57 caught, 1 equivalent
+```
+
+### Next
+
+LoaderTexturePack's retail pass. The 0x30300002 header is 84 bytes,
+Name[16], a Filename[64] and the pointer at 80. TexturePack is 148
+bytes: a 64-byte Filename and every field after it 16 on. The
+constructor takes the filename. AttachTextureTable no longer asks
+GetTextureInfo for each record. GetTextureInfo takes a third argument
+that looks in unloaded records too, and two new functions rename a
+texture and swap two textures' names (ServiceGameFlow swaps the French
+loading screen and logo).

@@ -48,8 +48,10 @@
 // Sorted by distance around the track at init time, and referenced by index
 // from every point that has one. 0xff in a point's SignNumber means none.
 //
-// Eight bytes, read on the disc as a byte, a halfword and a word over the
-// same four bytes; spelled out here so the bit numbers are visible.
+// Twelve bytes in retail, the demo's eight and a word. The first four are
+// read as a byte, a halfword and a word over the same bytes, spelled out
+// here so the bit numbers are visible. Retail's loader divides the chunk
+// by 12 and every reader steps by 12 (task 36).
 typedef struct Signpost {
     uint8_t  NewRoute;  // 0   the route this sign sends you down
     uint8_t  Flags;     // 1   bits 0-2 Sign, 3 Backwards, 4 NoStakeout,
@@ -57,6 +59,11 @@ typedef struct Signpost {
     uint16_t NewPoint;  // 2   index into that route's point table
     float    Distance;  // 4   distance around the track, filled by
                         //     signpost_set_distances
+    int32_t  AIHint;    // 8   retail's. 0, 1 or 2 on every retail track.
+                        //     Only 2 is tested, by AICarController::
+                        //     SignPostDecision: a car that takes such a sign
+                        //     keeps its index and holds to the far point's
+                        //     driving-line speed (ExecuteCurrentAction)
 } Signpost;
 
 #define SIGNPOST_SIGN_MASK    0x07u
@@ -65,8 +72,22 @@ typedef struct Signpost {
 #define SIGNPOST_HAIRPIN      0x20u
 #define SIGNPOST_CLOAKED      0x40u
 
-// `SignpostArray` / `NumSignposts` at 0x003241d0 / 0x003241d4. The array is
-// the 0x00034122 chunk's payload, in place.
+// The values of Sign, in the order the .mdebug declares Signpost's
+// predicates: IsFaster, IsSlower, AlwaysTake, IsStop, IsEquivalent,
+// IsDontTake. Retail's SignPostDecision bears out the three it tests
+// alone: 2 is taken at once, 4 on a coin flip, and 5 never.
+#define SIGN_FASTER       0u
+#define SIGN_SLOWER       1u
+#define SIGN_ALWAYS_TAKE  2u
+#define SIGN_STOP         3u
+#define SIGN_EQUIVALENT   4u
+#define SIGN_DONT_TAKE    5u
+
+#define SIGNPOST_AIHINT_HOLD_LINE_SPEED 2
+
+// `SignpostArray` / `NumSignposts` at 0x003241d0 / 0x003241d4 (retail
+// 0x00331128 / 0x0033112c). The array is the 0x00034122 chunk's payload,
+// in place.
 extern Signpost *SignpostArray;
 extern uint32_t  NumSignposts;
 
@@ -144,7 +165,8 @@ typedef struct TrackRoute {
     int32_t  Type;                 // 12  TrackRouteType
     int32_t  NumPoints;            // 16
     int32_t  MaxPoints;            // 20  == NumPoints on a loaded route
-    uint32_t Flags;                // 24  bit0 MemoryImageLoaded, bit1 Reversed
+    uint32_t Flags;                // 24  bit0 MemoryImageLoaded, bit1 Reversed,
+                                   //     bit2 retail's DontTakeTarget
     int32_t  CurrentlyTuningDrivingLine; // 28
     float    fStartDistance;       // 32  filled by SetFirstAndLast
     float    fEndDistance;         // 36
@@ -156,6 +178,10 @@ typedef struct TrackRoute {
 
 #define TROUTE_MEMORY_IMAGE_LOADED 0x01u
 #define TROUTE_REVERSED            0x02u
+// Retail's InitTrackRoutes sets it on the NewRoute of every DontTake sign,
+// and the constructor clears it with the other two. Nothing in retail reads
+// it; the port keeps it because retail does.
+#define TROUTE_DONT_TAKE_TARGET    0x04u
 
 #define TRACK_ROUTE_MAX_ROUTES 100
 
@@ -183,7 +209,7 @@ extern TrackRouteManager TheTrackRouteManager;
 // rather than fail visibly.
 typedef char trackroute_size_check[
     (sizeof(TrackRoutePoint) == 112 && sizeof(DrivingLineInfo) == 48 &&
-     sizeof(Signpost) == 8 && sizeof(TrackRoute) == 115752) ? 1 : -1];
+     sizeof(Signpost) == 12 && sizeof(TrackRoute) == 115752) ? 1 : -1];
 
 // -------------------------------------------------------- FindClosestPoint
 

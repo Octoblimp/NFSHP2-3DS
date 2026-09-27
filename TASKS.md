@@ -2129,6 +2129,13 @@ phases.
         writes a track's `.LZC` out as its expanded `.BUN`, which is how
         the port ships the tracks.
 
+        **The third slice is closed: TrackRoute's retail pass.** Retail's
+        Signpost is 12 bytes, with an `AIHint` int32 at 8. The loader
+        divides by 12, and InitTrackRoutes marks each DontTake sign's
+        route with Flags bit 2. `trackroute_check`'s model follows
+        retail, with a scenario over retail TRACKB12's and TRACKB21's
+        routes and signs.
+
         The rest is CONTINUE.md's "The road to the full game": the rest
         of the retail data in the viewer (step 4), the retail pass over
         what is ported (step 10), the full frontend (step 16), the saves
