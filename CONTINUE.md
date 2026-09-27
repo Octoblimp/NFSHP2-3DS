@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-27), after task 36's fourth slice: the texture
-pack's retail pass, the 84-byte header. `HANDOFF.md` is the running narrative; this file is the short
+continuation (2026-09-27), after task 36's fifth slice: the difficulty
+table's retail pass, 992 bytes. `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -46,10 +46,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Fifty-nine cross-checkers pass, plus the table generators:
+Sixty cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -86,7 +86,8 @@ physcomp_check      8 scenarios,   239 lines, 0 differ   (46 caught, 1 equivalen
 sinit_check        15 calls,        0 problems           (6/6 mutations caught)
 physicscar_check  106 scenarios, 102908 lines, 0 differ (257 caught, 6 equivalent)
 mellowmover_check  39 scenarios, 56080 lines, 0 differ  (341 caught, 5 equivalent)
-carmode_check      74 transitions, 19 resets, 36396 lines, 0 differ (491 caught, 14 equivalent)
+carmode_check      74 transitions, 19 resets, 36366 lines, 0 differ (484 caught, 14 equivalent)
+difficulty_check     42 ops,       374 lines, 0 differ  (24/24 mutations caught; 68 image facts, 11 readers)
 joystick_check     64240 ops,    75891 lines, 0 differ  (250 caught, 3 equivalent)
 joyhid_check       every key and stick reaches its event
 realtime_check     20 scenarios, 1044 ops, 3470 lines, 0 differ (91 caught, 2 equivalent)
@@ -218,12 +219,32 @@ and so replaced every boot.
    - `sky_check` gained a mutation for the third argument of the sky's
      own lookup.
 
+   **Task 36's fifth slice is closed: the difficulty table's retail
+   pass.**
+   - `DifficultyInfo` is retail's 992 bytes. The demo's two static
+     position-ratio tables moved into it at 240 and 304, and
+     `SkillLevelDistribution` gained a second set, `[0]` with cops and
+     `[1]` with none. Everything else is 128 or 248 bytes on.
+   - Retail's ELF has no stab, so the layout is held to its readers:
+     `difficulty_check` decodes 68 instructions in eleven functions and
+     scans retail for every address formed in the table. It runs the
+     loader and unloader on the retail image over retail GLOBALB's chunk
+     and eight more. `docs/formats/difficulty-info.md` has it all.
+   - `carmode_check` dumps only the catchup's knees, which both discs
+     share, and its loader mutations moved to `difficulty_check`.
+   - Two of `carmode_check`'s mutations had drifted onto
+     `carcollisionbody_init` since b702739 and survived unseen. They are
+     anchored to the set-up now, and caught.
+
    **Next is the rest of step 4: the retail disc's data in the track
    viewer.**
    - The loaders the audit has as changed:
-     - LoaderDifficultyInfo: the record is 992 bytes, the demo's 744.
-     - UnloaderTrackGeometry (0.98), UnloaderSolidList (0.99) and
-       eFixUpTables (0.82).
+     - UnloaderTrackGeometry (0.98) and UnloaderSolidList (0.99), which
+       differ only in an address and a `div` that became `divu`.
+     - eFixUpTables (0.82): a ninth fixed texture and a palette ramp
+       for it, with ReconnectSolid (0.52), FixTextureTable and
+       ReconnectTextureTable. Retail's ReconnectSolid gives a solid with
+       flag 0x20 a random start: TRACKB61..66's waving flags.
    - LoaderSun's glare record goes with the sun's retail pass: StuffSun,
      StuffSunGlare and SunTrackLoader.
    - Then deploy `extracted-retail/` to Azahar's

@@ -1216,8 +1216,9 @@ pieces came with it:
 - `race.h` has the whole `RacingCar`, 192 bytes and thirty-seven Timers,
   and `Race::GetRacingCar` (`0x00146ad8`), which is `c->pRacingCar`.
 - `player.c` has `Player::NumPlayers` and `pPlayersByNumber`.
-- `difficultyinfo.{c,h}` has the 744-byte `DifficultyInfo` and its chunk
-  loader and unloader, chunk `0x00034b00`.
+- `difficultyinfo.{c,h}` has retail's 992-byte `DifficultyInfo` and its
+  chunk loader and unloader, chunk `0x00034b00`. The demo's is 744 bytes;
+  `formats/difficulty-info.md` has both.
 
 ### `Move`
 
@@ -1295,9 +1296,14 @@ reached unset.
 ### The check
 
 `carmode_check` runs the step after the resets, on the same world.
-- **The difficulty table is GLOBALB.BUN's own.** It is read from offset
-  761472. The unloader is asked about it and about a copy with a wrong
-  id, and the loader is given the bad one first, which copies nothing.
+- **The difficulty table is GLOBALB.BUN's own.** The image loads the
+  demo's 744-byte chunk, read from offset 761472, and the harness loads
+  retail's 992. The catchup reads only `TwoPlayerCatchup`, whose four
+  knees are the same on both discs, so only they are dumped. The unloader
+  is asked about the chunk and about a copy with a wrong id, and the
+  loader is given the bad one first, which copies nothing. The loader's
+  and unloader's own checks, on the retail image, are
+  `difficulty_check`'s (`formats/difficulty-info.md`).
 - **Seventy steps**, the first one before the table is loaded. They
   cover:
   - the dispatch under the three real movers and the four stand-ins,

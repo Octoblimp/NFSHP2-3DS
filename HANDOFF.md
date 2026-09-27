@@ -8114,3 +8114,68 @@ The rest of step 4. LoaderDifficultyInfo copies 992 bytes, the demo's
 the sun's retail pass (the glare record LoaderSun fills at 0x002ef4c0,
 StuffSun, StuffSunGlare, SunTrackLoader). Then retail TRACKB12 in the
 viewer on Azahar, then TRACKB21.
+
+## Session 30, continued (2026-09-27) -- Task 36's fifth slice: the difficulty table's retail pass
+
+The user: never stop, and get the port to 100%.
+
+- **The record is 992 bytes.** Retail's LoaderDifficultyInfo copies 992
+  where the demo's copied 744, and nothing else in it changed. The
+  chunk's size is still not read, so the demo's chunk handed to retail's
+  loader takes the 248 bytes after it.
+- **The position ratios moved in.** The demo's DecideBoostFactor read two
+  statics, `fPositionRatioOverOne` (`0x00307fe0`) and
+  `fPositionRatioUnderOne` (`0x00308020`): eight rows of a two-knee Table
+  over skill, one per race position. Retail's reads the same shape from
+  the table at 240 and 304. The values are retuned.
+- **A second set of skill distributions.** Retail's SetupCarsForRace
+  indexes `SkillLevelDistribution[nMaxCops < 1][strength]`. In GLOBALB the
+  sets differ in one value, strength 2 at skill 7: 0.5 with cops and 0.8
+  without.
+- **The layout comes from the readers.** Retail is stripped, so there is
+  no stab to lay the record out from. Eleven functions form an address in
+  the table. `difficulty_check` decodes 68 instructions in them, each at
+  its address and inside its function, and evaluates each one's number
+  over the model's layout and the port's `offsetof`s. A scan of retail's
+  code for every address formed in the table's 992 bytes must find those
+  eleven and no more. ExecuteCurrentAction is retail's alone; the demo has
+  the other ten.
+- **difficulty_check** is new. It runs retail's loader and unloader out
+  of the retail image over retail GLOBALB's chunk, five with a wrong id,
+  one of distinct bytes, the demo's 744-byte chunk and one whose size
+  says 0, each followed by 256 bytes of a pattern. The table is filled
+  with a pattern between loads, and both sides print it field by field.
+- **carmode_check** loads retail's chunk in its harness while the demo
+  image loads the demo's, so it now dumps only `TwoPlayerCatchup`, the
+  one field the catchup reads, whose four knees both discs share. The
+  seven loader mutations moved to `difficulty_check`.
+- **Two carmode mutations had drifted.** `ccb-setup-keeps-system` and
+  `-keeps-body` replaced the first `d->pSystem = NULL;` in
+  `carcollisionbody.c`, which since b702739 has been
+  `carcollisionbody_init`'s, not the set-up's. carmode's harness never
+  calls the constructor, so both survived, and the tally hid it because
+  it had been summed from `--only` runs. They are anchored to the
+  set-up's test now, and both are caught. An audit of every checker lists
+  37 mutations whose pattern matches more than once. carmode's other
+  three are caught and mean the first match. The other 34 are in twelve
+  checkers, and whether each still hits the line its name means is not
+  yet checked.
+
+```
+difficulty_check   42 ops, 374 lines, 0 differ; 68 facts, 11 readers, 0 wrong
+                   24 mutations: 24 caught
+carmode_check      74 transitions, 19 resets, 36366 lines, 0 differ
+                   498 mutations: 484 caught, 14 equivalent
+```
+
+### Next
+
+The solid list's retail pass. UnloaderTrackGeometry and
+UnloaderSolidList differ only in an address and a `div` that became
+`divu` over a count that is never negative. eFixUpTables looks up a
+ninth texture, `0xb9ab56e4`, whose name is on no disc, and then calls a
+new function at `0x00103260` that fills that texture's palette with a
+sine ramp. Retail's ReconnectSolid ORs `bRandom(256)` into the start
+time of a solid with flag 0x20, which the 90 frames of TRACKB61..66's
+waving flag carry. GetTextureInfo's new third argument is 0 at every
+call in this unit.

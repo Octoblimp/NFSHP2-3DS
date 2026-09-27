@@ -1360,18 +1360,18 @@ static void move_setup(void)
     printf("tracklength=%08x\n", bf(TheTrackPathManager.TrackLength));
 }
 
+// Only the catchup's knees: the harness loads retail's chunk, the image the
+// demo's, and the knees are the same in both. difficulty_check has the rest.
 static void diff_dump(void)
 {
-    const uint32_t *w = (const uint32_t *)(const void *)&TheDifficultyInfo;
-    int n = (int)(sizeof TheDifficultyInfo / 4);
-    int i, j;
+    const uint32_t *w =
+        (const uint32_t *)(const void *)TheDifficultyInfo.TwoPlayerCatchup;
+    int j;
 
-    for (i = 0; i < n; i += 12) {
-        printf("diff %d =", i);
-        for (j = i; j < n && j < i + 12; j++)
-            printf(" %08x", (unsigned)w[j]);
-        printf("\n");
-    }
+    printf("diff knees =");
+    for (j = 0; j < 8; j++)
+        printf(" %08x", (unsigned)w[j]);
+    printf("\n");
 }
 
 static void move_case(int i, const CmMove *m)

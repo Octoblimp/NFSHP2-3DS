@@ -218,7 +218,10 @@ What the port has taken on so far:
   the sun's retail pass, with StuffSun (0.49), StuffSunGlare (0.66) and
   SunTrackLoader (0.85).
 - **DifficultyInfo** (`0x34b00`) grew from 744 bytes to 992: retail's
-  LoaderDifficultyInfo copies 992. Not yet taken on.
+  LoaderDifficultyInfo copies 992. The demo's static position-ratio tables
+  moved into it at 240, and SkillLevelDistribution gained a second set
+  for races with no cops. The port's table is retail's, and each offset is
+  held to retail's eleven readers. See `formats/difficulty-info.md`.
 - **Signpost** is 12 bytes, the demo's 8. Retail added an int32 `AIHint`
   at 8, which is 0, 1 or 2 across the 30 tracks. Only 2 is read, by the
   AI's SignPostDecision and ExecuteCurrentAction: hold the far point's

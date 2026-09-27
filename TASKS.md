@@ -2144,6 +2144,14 @@ phases.
         image over twelve retail texture files: 131 of 132 mutations
         caught, 1 equivalent.
 
+        **The fifth slice is closed: the difficulty table's retail
+        pass.** `DifficultyInfo` is 992 bytes: the demo's position-ratio
+        statics moved into it, and the skill distributions gained a set
+        for races with no cops. `difficulty_check` is new: it runs the
+        loader on the retail image and holds the layout to 68
+        instructions in retail's eleven readers. All 24 mutations are
+        caught.
+
         The rest is CONTINUE.md's "The road to the full game": the rest
         of the retail data in the viewer (step 4), the retail pass over
         what is ported (step 10), the full frontend (step 16), the saves

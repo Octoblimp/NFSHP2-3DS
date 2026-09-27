@@ -104,6 +104,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import difficulty_check as dcc
 import hostbuild
 import mellowmover_check as mmc
 import physicscar_check as pcc
@@ -498,6 +499,12 @@ RC_SIZE, RC_LAPS = 192, 20
 ADRV_SIZE = 112                    # AnimatedDriver, only ever a label
 BUN = ROOT / "extracted" / "GLOBAL" / "GLOBALB.BUN"
 DIFF_AT = 761472                   # chunk 0x34b00 in it
+# The port's table is retail's 992 bytes, and the harness loads retail's
+# chunk; the image loads the demo's 744. The catchup reads only
+# TwoPlayerCatchup, whose four knees are the same in both, so only they
+# are dumped. difficulty_check runs the loaders and holds the rest of the
+# table to the retail image.
+DIFF_KNEES = 700                   # TwoPlayerCatchup, the demo's
 MOVE_DT = 0.03125
 MOVE_RET0 = 0.5                    # the stand-ins' first answer, then +0.25
 BOOST_MARK = 0.8125                # BoostFactor before each step
@@ -1170,7 +1177,7 @@ def generate(cti):
     w("#define CM_BOOST_MARK 0x%08xu" % fb(BOOST_MARK))
     w("#define CM_ADRV_SIZE %d" % ADRV_SIZE)
     w("#define CM_NO_PLAYER %d" % NO_PLAYER)
-    d = diff_chunk()
+    d = dcc.disc_chunk(dcc.RETAIL_BUN, dcc.SIZE)
     w("static const uint8_t cm_diff[%d] = {" % len(d))
     for i in range(0, len(d), 24):
         w("    " + ", ".join("%d" % x for x in d[i:i + 24]) + ",")
@@ -2212,9 +2219,8 @@ class Model(mmc.Model):
         self.say("tracklength=%08x" % self.w(TP_MGR))
 
     def diff_dump(self):
-        ws = [self.w(DIFF + 4 * i) for i in range(DIFF_SIZE // 4)]
-        for i in range(0, len(ws), 12):
-            self.say("diff %d = %s" % (i, hexw(ws[i:i + 12])))
+        ws = [self.w(DIFF + DIFF_KNEES + 4 * i) for i in range(8)]
+        self.say("diff knees = %s" % hexw(ws))
 
     def move_case(self, i, m):
         (ctl, move, gear, disp, adrv, reset, bt, bd, pen, player, boost,
@@ -2966,8 +2972,15 @@ MUTATIONS = [
      "#define NULLCONTROLLER_VTABLE    0x00292358u"),
 
     # ---- CarCollisionBody
-    ("ccb-setup-keeps-system", CBC, "    d->pSystem = NULL;" + NL, ""),
-    ("ccb-setup-keeps-body", CBC, "    d->pBody = NULL;" + NL, ""),
+    # carcollisionbody_init clears both too, and comes first in the file,
+    # so the set-up's are named by the test after them.
+    ("ccb-setup-keeps-system", CBC,
+     "    d->pSystem = NULL;" + NL + "    d->pBody = NULL;" + NL
+     + "    if (d->PhysicsMode == 0)",
+     "    d->pBody = NULL;" + NL + "    if (d->PhysicsMode == 0)"),
+    ("ccb-setup-keeps-body", CBC,
+     "    d->pBody = NULL;" + NL + "    if (d->PhysicsMode == 0)",
+     "    if (d->PhysicsMode == 0)"),
     ("ccb-setup-mode-ignored", CBC,
      "    if (d->PhysicsMode == 0)" + NL + "        return;" + NL, ""),
     ("ccb-setup-mode-positive", CBC, "    if (d->PhysicsMode == 0)",
@@ -3408,20 +3421,8 @@ MUTATIONS = [
     ("up-no-pos", CVC, "    gEspSetObjectPositionFn(obj, pos);",
      "    gEspSetObjectPositionFn(obj, NULL);"),
 
-    # ---- the step: the difficulty table and Timer
-    ("dl-no-id-test", DIC,
-     "    if (chunk_id(chunk) != DIFFICULTYINFO_CHUNK)" + NL + "        return 0;"
-     + NL, ""),
-    ("dl-id", DIH, "#define DIFFICULTYINFO_CHUNK 0x00034b00u",
-     "#define DIFFICULTYINFO_CHUNK 0x00034b01u"),
-    ("dl-answers-0", DIC, "    return 1;", "    return 0;"),
-    ("dl-header-4", DIC, "chunk + 8,", "chunk + 4,"),
-    ("dl-short", DIC, "sizeof TheDifficultyInfo);",
-     "sizeof TheDifficultyInfo - 4);"),
-    ("ul-inverted", DIC, "    return chunk_id(chunk) == DIFFICULTYINFO_CHUNK;",
-     "    return chunk_id(chunk) != DIFFICULTYINFO_CHUNK;"),
-    ("ul-always", DIC, "    return chunk_id(chunk) == DIFFICULTYINFO_CHUNK;",
-     "    return 1;"),
+    # ---- the step: Timer. The difficulty table's loader and unloader
+    # are difficulty_check's, on the retail image.
     ("tm-scale", TMC, "seconds * 4000.0f", "seconds * 4096.0f"),
     ("tm-plain-cast", TMC, "(uint32_t)ee_trunc_w(seconds * 4000.0f)",
      "(uint32_t)(seconds * 4000.0f)"),
