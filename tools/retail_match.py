@@ -156,6 +156,19 @@ class Image(object):
         return None
 
 
+def branch_target(w, k):
+    """The word a conditional branch at word k goes to, or None. Not the
+    linking ones, which are calls."""
+    op = w >> 26
+    rt = (w >> 16) & 31
+    if op in (4, 5, 6, 7, 20, 21, 22, 23) or \
+            (op == 1 and rt in (0, 1, 2, 3)) or \
+            (op in (16, 17, 18) and (w >> 21) & 31 == 8):
+        off = w & 0xffff
+        return k + 1 + (off - 0x10000 if off & 0x8000 else off)
+    return None
+
+
 def mask_stream(words):
     out = []
     hi = [False] * 32
@@ -828,20 +841,36 @@ class Match(object):
         return changed
 
     def _split(self, s, e):
-        """Units within [s, e), cut again at every return."""
+        """Units within [s, e), cut again at every return that no branch
+        crosses. A function with two exits has a return in its middle, and
+        the branch that skips it lands past it: retail's LoaderHeliSheet,
+        whose not-taken tail after its first return is its own."""
         r = self.retail
         cuts = {s, e}
         j = bisect.bisect_right(self.starts, s)
         while j < len(self.starts) and self.starts[j] < e:
             cuts.add(self.starts[j])
             j += 1
+        # crossed[n - s] > 0: some branch in [s, e) spans word n, going
+        # forward past it or onto it, or back from it or past it
+        crossed = [0] * (e - s + 2)
+        for k in range(s, e):
+            t = branch_target(r.text[k], k)
+            if t is None or not s <= t < e:
+                continue
+            lo, hi = (k, t) if t > k else (t, k)
+            crossed[lo + 1 - s] += 1
+            crossed[hi + 1 - s] -= 1
+        for n in range(1, len(crossed)):
+            crossed[n] += crossed[n - 1]
         k = s
         while k < e:
             if r.text[k] == 0x03e00008 and k + 2 <= e:
                 n = k + 2
                 while n < e and r.text[n] == 0:
                     n += 1
-                cuts.add(n)
+                if not crossed[n - s]:
+                    cuts.add(n)
                 k = n
                 continue
             k += 1

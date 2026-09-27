@@ -39,9 +39,17 @@ TrackPositionMarker *track_get_position_marker_named(const char *name, int i);
 
 // ------------------------------------------------------------ TrackInfo
 
-// 160 bytes, the .mdebug's TrackInfo. Chunk 0x34201 (GLOBALB) is the table
-// of every track, 0x34200 the loaded one's own copy. No pointers, so both
-// are read in place.
+// 164 bytes, retail's TrackInfo. Chunk 0x34201 (GLOBALB) is the table of
+// every track, 0x34200 the loaded one's own copy. No pointers, so both are
+// read in place, and the layout is the disc's: retail's GetTrackInfo
+// (0x00153420) and LoaderTrackGeometry (0x00153608) step by 164, where
+// the demo's (and the .mdebug's) record is 160.
+//
+// Retail put SignpostGracePeriod in before SoundRegion. Its one reader is
+// retail's AICarController::SignPostDecision (0x00191efc): -1 keeps the
+// demo's test, Race::GracePeriodIsActive, and anything else is a race
+// time the AI must be past before it takes a 0x400 signpost. Retail's
+// thirty tracks have -1 but for T23, T26, T42 and T45, which have 0.
 typedef struct TrackInfo {
     char     Name[32];                           //   0
     char     Location[32];                       //  32
@@ -66,11 +74,12 @@ typedef struct TrackInfo {
     float    MaxElevation;                       // 116
     int32_t  Difficulty;                         // 120
     int32_t  OverrideStartingRouteForAI;         // 124
-    char     SoundRegion[32];                    // 128
-} TrackInfo;                                     // 160
+    int32_t  SignpostGracePeriod;                // 128  retail's
+    char     SoundRegion[32];                    // 132
+} TrackInfo;                                     // 164
 
 typedef char trackinfo_layout_check[
-    (sizeof(TrackInfo) == 160 && sizeof(TrackPositionMarker) == 24) ? 1 : -1];
+    (sizeof(TrackInfo) == 164 && sizeof(TrackPositionMarker) == 24) ? 1 : -1];
 
 // 0x00323428 / 0x0032342c / 0x00323430 / 0x00323434.
 extern TrackInfo *CurrentTrackInfo;

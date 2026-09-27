@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Cross-check 3DS Files/source/bchunkload.c, esolid.c and emodel.c -- the
-table of 31 chunk loaders with the two walks that hand a file's chunks to
+table of 30 chunk loaders with the two walks that hand a file's chunks to
 them, LoaderSolidList and its unloader, eFixUpTables, and eModel.obj's
 list half -- against the image itself, run in mipsemu.
 
@@ -12,6 +12,19 @@ FixLightMaterialTable, eFixUpTables, eFindSolid, and eModel's Init, UnInit,
 ReconnectSolid, ReconnectTextureTable, ApplyReplacementTextureTable,
 ReconnectAllModels and deleting destructor all run as shipped. The harness
 runs the same op script on the port and prints the same lines.
+
+**Two images.** The port's tables are retail's: 30 slots, the demo's 31
+without PhysPredict (the demo's slot 20), and HeliSheet taking the
+container 0x80034800 where the demo's took 0x34800. Retail's LoadChunks
+and UnloadChunks differ from the demo's only in that table and count. So
+what shows the table -- the walks through LoadChunks over probes, TRACKB12's
+walk as the image claims it, and the claims -- runs on the retail image
+(retail_model.RetailEmu) over the retail disc (extracted-retail), and
+everything else on the demo image over the demo's disc, as before:
+TraverseChunks and its twin are retail's as they are, and the solid,
+model, sun and weather scenarios load through the tables every chunk of
+which a ported slot takes, where no slot number shows. The one harness
+answers both scripts.
 
 **The seams.** What the port leaves to a function pointer the model stubs
 at the same call, and both sides log it: GetTextureInfo (`gti`, which hands
@@ -36,8 +49,8 @@ labelled frames, rigid animation, light materials and list header -- with
 an offset in disc bytes, or as bN.cK for buffer N's K-th top-level chunk.
 A disc list keeps its file offset mod 16, so every pad is the file's.
 
-**The claims.** Every type on the disc, the guards' other constants, and
-their neighbours, through each of the 62 slots. The model runs each image
+**The claims.** Every type on the retail disc, the guards' other
+constants, and their neighbours, through each of the 60 slots. The model runs each image
 loader with every other function stubbed to stop it: a loader that
 returns nonzero, or gets as far as calling anything, takes the chunk. The
 harness calls the port's loader on a bare chunk -- except where the image
@@ -48,16 +61,17 @@ called, on a chunk of size 0 and a payload of 0xa5s that a loader would
 fault on. An unported slot must also hand the chunk it takes to
 gUnportedLoaderFn, once, with its slot and table.
 
-Scenarios: the claims; the walks over a probe table, both ways, over
-ranges, with a chunk nobody takes and the walk after it, with two takers
-and with short tables; LoadChunks and UnloadChunks through the tables with
-probes in them, and over TRACKB12's 497 top-level chunks claimed as the
-image claims them; every solid list on the disc through the real tables,
+Scenarios, demo: the walks over a probe table, both ways, over ranges,
+with a chunk nobody takes and the walk after it, with two takers and with
+short tables; every solid list on the disc through the real tables,
 loaded, fixed up and unloaded, with models on TRACKB12's names; slot 14's
 and slot 29's chunks through the tables at each misalignment; built
 lists for vertex animation (with more than 64 frames), duplicate names,
 external rigid animations, labelled frames, every pad and odd sizes;
-eFixUpTables under all 16 flag settings; and eModel's calls.
+eFixUpTables under all 16 flag settings; and eModel's calls. Retail: the
+claims; LoadChunks and UnloadChunks through the tables with probes in
+them, and over retail TRACKB12's top-level chunks claimed as the image
+claims them.
 
     python tools/loadertable_check.py
     python tools/loadertable_check.py --mutate [--only a,b]
@@ -75,7 +89,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import physicscar_check as pcc
-from mipsemu import Emu, M32, s32
+import retail_model
+from mipsemu import M32, s32
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -97,6 +112,8 @@ SOURCES = [HARNESS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
 HARNESS_TIMEOUT = 600
 EXTRACTED = ROOT / "extracted"
 TRACKB12 = EXTRACTED / "TRACKS" / "TRACKB12.BUN"
+RETAIL_EXTRACTED = ROOT / "extracted-retail"
+RETAIL_TRACKB12 = RETAIL_EXTRACTED / "TRACKS" / "TRACKB12.BUN"
 
 # ================================================================ the image
 
@@ -193,6 +210,27 @@ CLAIMS = {
 }
 TAKER = {t: k for k, ts in CLAIMS.items() for t in ts}
 PORTED = {0, 1, 2, 4, 9, 11, 14, 18, 19, 26, 29}
+
+# Retail's: the demo's without PhysPredict, slot 20, and HeliSheet (23) a
+# container. The rest of the guards are the demo's.
+RNSLOTS = 30
+RCLAIMS = {k - (k > 20): ts for k, ts in CLAIMS.items() if k != 20}
+RCLAIMS[23] = [0x80034800]
+RTAKER = {t: k for k, ts in RCLAIMS.items() for t in ts}
+RPORTED = {k - (k > 20) for k in PORTED}
+
+
+class Tables(object):
+    """One image's LoaderTable: its size, what each slot takes, and which
+    slots the port has ported."""
+
+    def __init__(self, nslots, claims, taker, ported):
+        self.nslots, self.claims = nslots, claims
+        self.taker, self.ported = taker, ported
+
+
+DEMO_TABLES = Tables(NSLOTS, CLAIMS, TAKER, PORTED)
+RETAIL_TABLES = Tables(RNSLOTS, RCLAIMS, RTAKER, RPORTED)
 
 # ---- the ops -----------------------------------------------------------------
 
@@ -421,18 +459,18 @@ def solid_list(b, name, solids):
 # ================================================================ the disc
 
 
-def disc_files():
+def disc_files(root=EXTRACTED):
     """Every extracted bundle, sorted, as (relative name, bytes)."""
     out = []
-    if not EXTRACTED.is_dir():
+    if not root.is_dir():
         return out
-    for dp, dn, fn in sorted(os.walk(EXTRACTED)):
+    for dp, dn, fn in sorted(os.walk(root)):
         dn.sort()
         for f in sorted(fn):
             if not f.upper().endswith((".BIN", ".BUN")) or "unknown" in dp:
                 continue
             p = Path(dp) / f
-            out.append((p.relative_to(EXTRACTED).as_posix(), p.read_bytes()))
+            out.append((p.relative_to(root).as_posix(), p.read_bytes()))
     return out
 
 
@@ -481,8 +519,8 @@ def near(types):
     return sorted(out)
 
 
-def universe(files):
-    ts = set(TAKER)
+def universe(files, tables):
+    ts = set(tables.taker)
     for _, d in files:
         for t, _, _ in top_chunks(d):
             ts.add(t)
@@ -491,17 +529,17 @@ def universe(files):
     return near(sorted(ts))
 
 
-def scenario_matrix(sc, files):
+def scenario_matrix(sc, files, tables):
     sc.tag("claims")
     for table in (0, 1):
-        for t in universe(files):
-            for slot in range(NSLOTS):
+        for t in universe(files, tables):
+            for slot in range(tables.nslots):
                 mode = 0
-                if TAKER.get(t) != slot or slot == 0:
+                if tables.taker.get(t) != slot or slot == 0:
                     pass
                 elif slot == 4:
                     mode = 2
-                elif slot in PORTED:
+                elif slot in tables.ported:
                     # Scenery's unloader unlinks what its loader linked,
                     # and TexturePack's destroys the pack its header names,
                     # so neither is called on a chunk that was never loaded.
@@ -582,12 +620,17 @@ def scenario_walks(sc):
     for num in (1, 2, 3, 7):
         walks(sc, n, num=num)
 
+
+def scenario_load_walk(sc, tables):
+    """LoadChunks and UnloadChunks, whose table and count are the image's,
+    with the probes in the tables."""
+    A, B, C, E = 0x1000, 0x1001, 0x1002, 0x1004
     sc.tag("walk: through LoadChunks")
     sc.op(OP_SWAP, 1)
     sc.op(OP_CLAIMS)
     claim(sc, 0, 0)
     claim(sc, 4, A)
-    claim(sc, 30, B)
+    claim(sc, tables.nslots - 1, B)
     claim(sc, 12, C)
     ts = [A, 0, B, C, E, A, B, 0]
     probe_buf(sc, ts, mis=4)
@@ -597,13 +640,13 @@ def scenario_walks(sc):
     sc.op(OP_SWAP, 0)
 
 
-def scenario_trackb12_walk(sc):
-    if not TRACKB12.is_file():
-        return
-    d = TRACKB12.read_bytes()
+def scenario_trackb12_walk(sc, path, tables):
+    if not path.is_file():
+        return False
+    d = path.read_bytes()
     sc.tag("TRACKB12: the walks, claimed as the image claims")
     sc.op(OP_CLAIMS)
-    for t, k in sorted(TAKER.items()):
+    for t, k in sorted(tables.taker.items()):
         claim(sc, k, t)
     sc.op(OP_SWAP, 1)
     b = Buf(sc, 0)
@@ -613,6 +656,7 @@ def scenario_trackb12_walk(sc):
     sc.op(OP_LOAD, 0, 0)
     sc.op(OP_LOAD, 1, 0)
     sc.op(OP_SWAP, 0)
+    return True
 
 
 def scenario_disc_lists(sc, files):
@@ -1045,8 +1089,17 @@ def script(files=None):
     scenario_sun(sc, files)
     scenario_weather(sc)
     scenario_frames(sc)
-    scenario_trackb12_walk(sc)
-    scenario_matrix(sc, files)
+    return sc
+
+
+def retail_script(files=None):
+    """What runs on the retail image: what shows the table."""
+    if files is None:
+        files = disc_files(RETAIL_EXTRACTED)
+    sc = Script()
+    scenario_load_walk(sc, RETAIL_TABLES)
+    sc.b12 = scenario_trackb12_walk(sc, RETAIL_TRACKB12, RETAIL_TABLES)
+    scenario_matrix(sc, files, RETAIL_TABLES)
     return sc
 
 
@@ -1058,13 +1111,18 @@ class Past(Exception):
 
 
 class Model(object):
-    def __init__(self, sc, files):
+    def __init__(self, sc, files, retail=False):
         self.sc = sc
         self.files = files
         self.out = []
-        e = self.e = Emu(ieee=True)
+        self.retail = retail
+        self.tables = RETAIL_TABLES if retail else DEMO_TABLES
+        e = self.e = retail_model.emu(retail, ieee=True)
         e.stub_bware()
-        e.call(WEATHER_CTOR, limit=1000)
+        self.LOADERS, self.UNLOADERS = e.data(LOADERS), e.data(UNLOADERS)
+        # The retail script dumps nothing, so needs no weather lists.
+        if not retail:
+            e.call(WEATHER_CTOR, limit=1000)
         self.fn = {k: e.addr_of(v) for k, v in SYM.items()}
         self.recs = []          # sorted (start, size, kind, idx)
         self.rec_starts = []
@@ -1085,8 +1143,9 @@ class Model(object):
         self.saved = None
         self.m = None
         for head in (SOLIDLIST, MODELLIST):
-            e.put32(head, head)
-            e.put32(head + 4, head)
+            if not retail:
+                e.put32(head, head)
+                e.put32(head + 4, head)
         self.probe_table = e.alloc(4 * NSLOTS, 16)
         for k in range(NSLOTS):
             e.put32(self.probe_table + 4 * k, PROBE_BASE + 8 * k)
@@ -1285,7 +1344,7 @@ class Model(object):
     def matrix_emu(self):
         if self.m is not None:
             return self.m
-        m = Emu(ieee=True)
+        m = retail_model.emu(self.retail, ieee=True)
         allow = {m.addr_of(s) for s in ALLOW}
 
         def stop(em):
@@ -1295,6 +1354,18 @@ class Model(object):
         for name, (a, size) in m.elf.syms.items():
             if size > 0 and 0x00100000 <= a < 0x0028e0d0 and a not in allow:
                 base[a] = stop
+        if self.retail:
+            # Retail has no symbols of its own, and not every function a
+            # twin: every call the code makes stops too.
+            for s in m.elf.secs:
+                if not s["flags"] & 4:
+                    continue
+                for pc in range(s["addr"], s["addr"] + s["size"], 4):
+                    w = m.u32(pc)
+                    if w >> 26 == 3:
+                        a = ((pc + 4) & 0xf0000000) | ((w & 0x3ffffff) << 2)
+                        if a not in allow:
+                            base[a] = stop
         m.stubs = base
         self.m = m
         self.samples = {}
@@ -1306,7 +1377,7 @@ class Model(object):
 
     def matrix(self, table, slot, t, mode):
         m = self.matrix_emu()
-        fn = m.u32((UNLOADERS if table else LOADERS) + 4 * slot)
+        fn = m.u32((self.UNLOADERS if table else self.LOADERS) + 4 * slot)
         if mode == 2:
             data = (struct.pack("<IIII", SOLID_LIST, 60, SOLID_HEADER, 52)
                     + header_rec("matrix"))
@@ -1327,7 +1398,7 @@ class Model(object):
             # Language's unloader loop, and TrackGeometry's unloader
             # writes through a pointer the chunk has not had fixed. That is
             # a take where CLAIMS has one, and a fault anywhere else.
-            r = "take" if TAKER.get(t) == slot else "fault"
+            r = "take" if self.tables.taker.get(t) == slot else "fault"
         finally:
             if saved is not None:
                 m.stubs[fn] = saved
@@ -1493,18 +1564,17 @@ class Model(object):
             elif code == OP_CLAIM:
                 self.claims[(a[0], a[1] & M32)] = a[2]
             elif code == OP_SWAP:
+                ns, lt, ut = self.tables.nslots, self.LOADERS, self.UNLOADERS
                 if a[0]:
-                    self.saved = [e.u32(LOADERS + 4 * k)
-                                  for k in range(NSLOTS)] + \
-                                 [e.u32(UNLOADERS + 4 * k)
-                                  for k in range(NSLOTS)]
-                    for k in range(NSLOTS):
-                        e.put32(LOADERS + 4 * k, PROBE_BASE + 8 * k)
-                        e.put32(UNLOADERS + 4 * k, PROBE_BASE + 8 * k)
+                    self.saved = [e.u32(lt + 4 * k) for k in range(ns)] + \
+                                 [e.u32(ut + 4 * k) for k in range(ns)]
+                    for k in range(ns):
+                        e.put32(lt + 4 * k, PROBE_BASE + 8 * k)
+                        e.put32(ut + 4 * k, PROBE_BASE + 8 * k)
                 else:
-                    for k in range(NSLOTS):
-                        e.put32(LOADERS + 4 * k, self.saved[k])
-                        e.put32(UNLOADERS + 4 * k, self.saved[NSLOTS + k])
+                    for k in range(ns):
+                        e.put32(lt + 4 * k, self.saved[k])
+                        e.put32(ut + 4 * k, self.saved[ns + k])
             elif code == OP_TRAVERSE:
                 dir_, first, last, num = a
                 self.call("backwards" if dir_ else "traverse",
@@ -1585,8 +1655,10 @@ class Model(object):
         return self.out
 
 
-def model(sc, files=None):
-    return Model(sc, files if files is not None else disc_files()).run()
+def model(sc, files=None, retail=False):
+    if files is None:
+        files = disc_files(RETAIL_EXTRACTED if retail else EXTRACTED)
+    return Model(sc, files, retail).run()
 
 
 # ================================================================ the build
@@ -1669,8 +1741,19 @@ MUTATIONS = [
      "    if (chunks == NULL || size == 0)\n        return;\n"
      "    traverse_chunks(",
      "    if (chunks == NULL)\n        return;\n    traverse_chunks("),
-    ("load-30", BCL, "LoaderTable, BCHUNK_NUM_LOADERS);",
+    ("load-short", BCL, "LoaderTable, BCHUNK_NUM_LOADERS);",
      "LoaderTable, BCHUNK_NUM_LOADERS - 1);"),
+    ("load-demo-count", BCH, "#define BCHUNK_NUM_LOADERS 30",
+     "#define BCHUNK_NUM_LOADERS 31"),
+    ("helisheet-demo-type", BCL,
+     "UNPORTED(LoaderHeliSheet, UnloaderHeliSheet, 23, 0x80034800u)",
+     "UNPORTED(LoaderHeliSheet, UnloaderHeliSheet, 23, 0x00034800u)"),
+    ("helisheet-slot", BCL,
+     "UNPORTED(LoaderHeliSheet, UnloaderHeliSheet, 23,",
+     "UNPORTED(LoaderHeliSheet, UnloaderHeliSheet, 24,"),
+    ("nis-demo-slot", BCL,
+     "UNPORTED(LoaderNisInfo, UnloaderNisInfo, 20,",
+     "UNPORTED(LoaderNisInfo, UnloaderNisInfo, 21,"),
     ("unload-loaders", BCL,
      "traverse_chunks_backwards(chunks, chunks + size, UnloaderTable,",
      "traverse_chunks_backwards(chunks, chunks + size, LoaderTable,"),
@@ -1934,6 +2017,9 @@ def mutate_pass(only=None):
     files = disc_files()
     sc = script(files)
     base = model(sc, files)
+    rfiles = disc_files(RETAIL_EXTRACTED)
+    rsc = retail_script(rfiles)
+    rbase = model(rsc, rfiles, retail=True)
     caught = 0
     survived = []
     missing = []
@@ -1947,11 +2033,16 @@ def mutate_pass(only=None):
     opsdir = tempfile.TemporaryDirectory()
     ops = Path(opsdir.name) / "ops.bin"
     ops.write_bytes(sc.encode())
+    rops = Path(opsdir.name) / "rops.bin"
+    rops.write_bytes(rsc.encode())
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
         out = Path(tmp) / "base.txt"
         run_harness(exe, ops, out)
-        if diff(base, out.read_text().splitlines(), quiet=True):
+        rout = Path(tmp) / "rbase.txt"
+        run_harness(exe, rops, rout)
+        if (diff(base, out.read_text().splitlines(), quiet=True)
+                or diff(rbase, rout.read_text().splitlines(), quiet=True)):
             print("base already differs -- fix that before mutating")
             return 1
 
@@ -1985,6 +2076,9 @@ def mutate_pass(only=None):
                     continue
                 out = Path(tmp) / "m.txt"
                 rc = run_harness(exe, ops, out)
+                rout = Path(tmp) / "rm.txt"
+                if rc == 0:
+                    rc = run_harness(exe, rops, rout)
                 if rc == pcc.HARNESS_HUNG:
                     print("  %-44s hung the harness (caught)" % name)
                     caught += 1
@@ -1994,6 +2088,7 @@ def mutate_pass(only=None):
                     caught += 1
                     continue
                 n = diff(base, out.read_text().splitlines(), quiet=True)
+                n += diff(rbase, rout.read_text().splitlines(), quiet=True)
                 if n:
                     print("  %-44s caught, %d lines" % (name, n))
                     caught += 1
@@ -2046,6 +2141,9 @@ def main():
     files = disc_files()
     sc = script(files)
     lines = model(sc, files)
+    rfiles = disc_files(RETAIL_EXTRACTED)
+    rsc = retail_script(rfiles)
+    rlines = model(rsc, rfiles, retail=True)
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
         ops = Path(tmp) / "ops.bin"
@@ -2053,16 +2151,29 @@ def main():
         out = Path(tmp) / "harness.txt"
         rc = run_harness(exe, ops, out)
         harness = out.read_text().splitlines()
+        rops = Path(tmp) / "rops.bin"
+        rops.write_bytes(rsc.encode())
+        rout = Path(tmp) / "rharness.txt"
+        rc = rc or run_harness(exe, rops, rout)
+        rharness = rout.read_text().splitlines()
 
     if args.dump:
         d = Path(args.dump)
         d.parent.mkdir(parents=True, exist_ok=True)
         d.with_suffix(".model").write_text(NL.join(lines) + NL)
         d.with_suffix(".harness").write_text(NL.join(harness) + NL)
+        d.with_suffix(".rmodel").write_text(NL.join(rlines) + NL)
+        d.with_suffix(".rharness").write_text(NL.join(rharness) + NL)
 
+    if not rsc.b12:
+        print("retail TRACKB12 not in extracted-retail -- its walk skipped")
     n = diff(lines, harness)
-    print("%d ops, %d lines, %d differ" % (len(sc.ops), len(harness), n))
-    sys.exit(1 if (n or rc) else 0)
+    print("demo image: %d ops, %d lines, %d differ"
+          % (len(sc.ops), len(harness), n))
+    rn = diff(rlines, rharness)
+    print("retail image: %d ops, %d lines, %d differ"
+          % (len(rsc.ops), len(rharness), rn))
+    sys.exit(1 if (n or rn or rc) else 0)
 
 
 if __name__ == "__main__":

@@ -1016,7 +1016,7 @@ void topotree_remove(TopologyTree *t, TrackPolygon **table, int n)
 
 // ------------------------------------------------------------ TrackInfo
 
-// 0x00150478.
+// 0x00150478, retail 0x00153420, which steps by retail's 164.
 TrackInfo *track_get_info(int i)
 {
     TrackInfo *p;
@@ -1071,8 +1071,9 @@ float track_get_road_noise(const bVector2 *p, int32_t terrain)
 
 // ------------------------------------------------------------ the loader
 
-// 0x00150660. Track 54's entry in the global table is cleared on load --
-// whatever it was, the game is not to offer it.
+// 0x00150660, retail 0x00153608: the table's count and the clear are by
+// retail's 164-byte record. Track 54's entry in the global table is
+// cleared on load -- whatever it was, the game is not to offer it.
 int track_loader_geometry(uint8_t *chunk)
 {
     uint32_t type = bchunk_u32(chunk);
@@ -1087,7 +1088,7 @@ int track_loader_geometry(uint8_t *chunk)
         TrackInfo *hidden;
 
         TrackInfoTable = (TrackInfo *)(chunk + 8);
-        HighestTrackNumber = (int32_t)(size / 160u);
+        HighestTrackNumber = (int32_t)(size / (uint32_t)sizeof(TrackInfo));
         hidden = track_get_info(54);
         if (hidden != NULL)
             memset(hidden, 0, sizeof(TrackInfo));

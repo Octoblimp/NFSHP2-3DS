@@ -7,6 +7,14 @@ This file says what differs and how the tools bridge it.
 
 ## The ELF
 
+`SLES_507.31` is the retail game's program, the counterpart of the demo's
+`NFSHP2.ELF`. The disc's `SYSTEM.CNF` boots it (`BOOT2 =
+cdrom0:\SLES_507.31;1`, `VMODE = PAL`), and the name is the product code,
+SLES-50731, the PAL release. The 3DS build never ships or reads it: the
+game runs on its own C and the extracted data. The tools on the PC read it
+as the reference for the full game's code: the matcher, the audit, and the
+checkers' retail model (`tools/retail_model.py`).
+
 The retail ELF is stripped: no `.symtab`, no `.mdebug`. Its `.text` is
 431,681 words to the demo's 402,445. gp is `0x003358f0` (demo
 `0x00328bf0`).
@@ -28,8 +36,8 @@ neighbours. The demo side is `.symtab` plus the 1,336 procedures only
 inline destructors and `operator delete`, and the statics.
 
 ```
-demo bodies 9669: same 6980, changed 2353, unplaced 336
-retail .text covered: 391458 of 431681 words (90.7%)
+demo bodies 9669: same 6980, changed 2352, unplaced 337
+retail .text covered: 391435 of 431681 words (90.7%)
 retail code with no demo twin: 1063 pieces, 142,372 bytes
 ```
 
@@ -46,6 +54,11 @@ Two known limits:
   ends in a call to something that never returns can run on into the next.
 - Where retail wrapped a function (EndPullover(int) is now `move a1,a0 ;
   j body ; lw a0,gp`), the placement is the wrapper, 4 words.
+
+Gap alignment cuts retail's code at every return that no branch crosses.
+A function with two exits has a return in the middle, and the branch that
+skips it lands past it. Cutting there anyway once put UnloaderHeliSheet
+on the three words after LoaderHeliSheet's first return.
 
 ### What the port cites
 
@@ -90,6 +103,48 @@ CarSelector     reordered: LoadedCar 312 -> 80
 This is what lets retail code be read in the demo's field names, and it is
 the map a checker will need to lay a scenario out for the retail image.
 
+## The retail model
+
+`tools/retail_model.py` puts the retail image in mipsemu under the demo's
+names. `retail_model.emu(True)` is a `RetailEmu`. `addr_of`, `call` and
+`stub` take demo names and resolve them to retail addresses through the
+matcher's map. Three calls take a demo address or offset:
+
+- `e.code(a)` gives the retail twin of a demo function address.
+- `e.data(a)` gives where retail keeps a demo datum. It uses the data map
+  first. Then the object that holds it, moved as a whole. Then a single
+  vote that nothing contradicts.
+- `e.field(cls, off)` gives retail's offset for a demo field.
+
+The plain `Emu` answers the same three calls with what it is given. So a
+checker written with them runs either image. The matcher's result is
+cached in `out/retail_map.json` and rebuilt when either ELF or a matching
+tool changes: 8,026 names, 4,210 data addresses (2,982 more on one vote),
+and 400 classes' fields.
+
+### Two images, one harness
+
+The port follows retail's behaviour. It keeps the demo's names, and the
+demo's struct layouts wherever the PS2's layout does not reach the 3DS. A
+record read in place from the disc takes retail's layout, because the port
+reads retail's discs. TrackInfo is one.
+
+A checker whose object retail changed runs two scripts through the same
+harness:
+
+- scenarios over the functions the port follows as retail has them run on
+  the retail image, over `extracted-retail/`;
+- the rest run on the demo image, over `extracted/`, as before.
+
+Both transcripts must match the port's. A demo scenario over code retail
+changed would fail, so the split is also the list of what is still the
+demo's. Two checkers have it so far:
+
+- `track_check.py`: the track info is retail's; the topology is still the
+  demo's.
+- `loadertable_check.py`: the claims, and the walks through LoadChunks,
+  are retail's.
+
 ## The data
 
 406 directory entries to the demo's 223. The retail disc lays three files
@@ -106,7 +161,12 @@ record.
 - **Cars**: 95 entries under `CARS\`.
 
 `tools/zdir_extract.py --retail --only GLOB` extracts into
-`extracted-retail/`, which is ignored. The disc is 3 GB and the tree is
+`extracted-retail/`, which is ignored. With `--decompress`, a track's
+`TRACKB<nn>.LZC` is written out expanded as its `TRACKB<nn>.BUN`. The game
+always loads `TRACKS\TRACKB%d.LZC` and names it `.BUN` once expanded
+(BeginGameFlowLoadingTrackSpecific, retail 0x001690a0). The port ships the
+tracks already expanded: a 9 MB track never needs its 5 MB compressed copy
+beside it on a tight heap, and loading is faster. The disc is 3 GB and the tree is
 under OneDrive, so take what a check needs:
 
 ```bash
@@ -114,7 +174,7 @@ python tools/zdir_extract.py --retail --decompress --only 'GLOBAL\*' --only 'FRO
 ```
 
 `extracted/` stays the demo's, because the checkers run the demo image
-against it.
+against it. They run the retail image against `extracted-retail/`.
 
 ### The formats, TRACKB12 and the bundles
 
@@ -133,3 +193,20 @@ Counts are retail's first, then the demo's.
 
 A loader that the retail image changed will show in the audit, as
 `Loader...` rows.
+
+What the port has taken on so far:
+
+- **TrackInfo** is 164 bytes, the demo's 160. Retail put an int32
+  `SignpostGracePeriod` at 128 before `SoundRegion`, now at 132. See
+  `formats/topology.md`.
+- **The LoaderTable** has 30 slots, the demo's 31 less PhysPredict (slot
+  20). Retail has no `0x34700` chunk. HeliSheet's guard takes the container
+  `0x80034800`. See `formats/loader-table.md`.
+- **The sun chunk** `0x34202` is 256 bytes in retail's TRACKB12, 244 in
+  the demo's. The record is the same 244 bytes, behind 12 bytes of
+  alignment that the loader skips. Retail's LoaderSun also fills a fixed
+  244-byte glare record at 0x002ef4c0 for StuffSunGlare. That belongs to
+  the sun's retail pass, with StuffSun (0.49), StuffSunGlare (0.66) and
+  SunTrackLoader (0.85).
+- **DifficultyInfo** (`0x34b00`) grew from 744 bytes to 992: retail's
+  LoaderDifficultyInfo copies 992. Not yet taken on.

@@ -22,6 +22,13 @@ docs/zdir_names_retail.txt, into extracted-retail/. The retail disc is
 3 GB and the tree sits under OneDrive, so --only (a glob on the recovered
 name, any number of them) takes what a check needs rather than all of it.
 The manifest always lists every entry; out_file is empty for one not taken.
+
+--decompress writes a track's expansion as its .BUN, not as .LZC.raw.
+BeginGameFlowLoadingTrackSpecific (demo 0x001644e0, retail 0x001690a0)
+always loads TRACKS\TRACKB%d.LZC and renames it TRACKB%d.BUN, so the
+expansion under the .BUN name is what the game holds and what the port
+loads. Most retail tracks have no .BUN on the disc. The eight that do have
+a leftover one the game never reads, and it is not written.
 """
 import argparse
 import fnmatch
@@ -35,6 +42,13 @@ from lzdecompress import decompress  # noqa: E402
 SECTOR = 2048
 RECORD_SIZE = 12
 DEFAULT_NAMES = Path(__file__).resolve().parent.parent / "docs" / "zdir_names.txt"
+TRACK_LZC = "TRACKS" + chr(92) + "TRACKB*.LZC"
+TRACK_BUN = "TRACKS" + chr(92) + "TRACKB*.BUN"
+
+
+def hot_chunked(name):
+    """True for a track bundle the game loads as .LZC under the .BUN name."""
+    return fnmatch.fnmatchcase((name or "").upper(), TRACK_LZC)
 
 
 def read_entries(zdir_path):
@@ -97,6 +111,15 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = out_dir / "manifest.csv"
 
+    # The leftover track .BUNs whose .LZC is on the disc: with --decompress
+    # the .LZC's expansion takes the name.
+    lzcs = {n.upper()[:-4] for n in names.values() if hot_chunked(n)}
+
+    def superseded(name):
+        up = (name or "").upper()
+        return (a.decompress and fnmatch.fnmatchcase(up, TRACK_BUN)
+                and up[:-4] in lzcs)
+
     written = skipped = expanded = 0
     with open(a.zzdata, "rb") as zz, \
             open(manifest_path, "w", encoding="utf-8", newline="\n") as manifest:
@@ -111,8 +134,8 @@ def main():
                 skipped += 1
                 continue
             name = names.get(e["index"])
-            if only and not any(fnmatch.fnmatchcase((name or "?").upper(), g)
-                                for g in only):
+            if superseded(name) or (only and not any(
+                    fnmatch.fnmatchcase((name or "?").upper(), g) for g in only)):
                 manifest.write("%d,%08x,%d,%d,%d,%s,\n"
                                % (e["index"], e["hash"], e["fad"], e["size"],
                                   e["offset"], name or ""))
@@ -130,8 +153,12 @@ def main():
             written += 1
 
             if a.decompress and blob[:4] == b"COMP":
+                if hot_chunked(name):
+                    raw = dest.with_suffix(".BUN")
+                else:
+                    raw = dest.with_suffix(dest.suffix + ".raw")
                 try:
-                    dest.with_suffix(dest.suffix + ".raw").write_bytes(decompress(blob))
+                    raw.write_bytes(decompress(blob))
                     expanded += 1
                 except ValueError as exc:
                     print("WARNING: entry %d: %s" % (e["index"], exc), file=sys.stderr)

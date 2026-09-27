@@ -717,7 +717,10 @@ PROBE(15) PROBE(16) PROBE(17) PROBE(18) PROBE(19) PROBE(20) PROBE(21)
 PROBE(22) PROBE(23) PROBE(24) PROBE(25) PROBE(26) PROBE(27) PROBE(28)
 PROBE(29) PROBE(30)
 
-static BChunkLoader probes[BCHUNK_NUM_LOADERS] = {
+// One more than the tables have: the demo's 31, for the walks over probes.
+#define NPROBES 31
+
+static BChunkLoader probes[NPROBES] = {
     probe0, probe1, probe2, probe3, probe4, probe5, probe6, probe7,
     probe8, probe9, probe10, probe11, probe12, probe13, probe14, probe15,
     probe16, probe17, probe18, probe19, probe20, probe21, probe22,
@@ -729,11 +732,11 @@ static BChunkLoader saved_load[BCHUNK_NUM_LOADERS];
 static BChunkLoader saved_unload[BCHUNK_NUM_LOADERS];
 
 // The slots whose object is not ported, which hand what they take to
-// gUnportedLoaderFn.
+// gUnportedLoaderFn. Retail's numbering.
 static int unported_slot(int k)
 {
-    return !(k == 0 || k == 1 || k == 4 || k == 9 || k == 11 || k == 14
-             || k == 18 || k == 19 || k == 26 || k == 29);
+    return !(k == 0 || k == 1 || k == 2 || k == 4 || k == 9 || k == 11
+             || k == 14 || k == 18 || k == 19 || k == 25 || k == 28);
 }
 
 // --------------------------------------------------------------- dumps
@@ -1101,8 +1104,8 @@ int main(int argc, char **argv)
             if (next()) {
                 memcpy(saved_load, LoaderTable, sizeof saved_load);
                 memcpy(saved_unload, UnloaderTable, sizeof saved_unload);
-                memcpy(LoaderTable, probes, sizeof probes);
-                memcpy(UnloaderTable, probes, sizeof probes);
+                memcpy(LoaderTable, probes, sizeof LoaderTable);
+                memcpy(UnloaderTable, probes, sizeof UnloaderTable);
             } else {
                 memcpy(LoaderTable, saved_load, sizeof saved_load);
                 memcpy(UnloaderTable, saved_unload, sizeof saved_unload);

@@ -2117,8 +2117,19 @@ phases.
         the retail directory's 406 entries, and `zdir_extract.py --retail
         --only` takes pieces of the disc into `extracted-retail/`.
 
-        The rest is CONTINUE.md's "The road to the full game": the retail
-        data in the viewer (step 4), the retail model for the checkers
-        (step 5), the retail pass over what is ported (step 10), the
-        full frontend (step 16), the saves (step 17) and every track and
-        car (step 18).
+        **The second slice is closed: the retail model.**
+        `tools/retail_model.py` runs `SLES_507.31` in mipsemu under the
+        demo's names, with `e.code`, `e.data` and `e.field` for demo
+        addresses and offsets. `track_check` and `loadertable_check` run
+        two scripts through one harness: what the port follows as retail
+        has it on the retail image and data, the rest on the demo's.
+        TrackInfo is retail's 164 bytes (`SignpostGracePeriod` at 128).
+        The LoaderTable is retail's 30 slots, with no PhysPredict and
+        HeliSheet taking `0x80034800`. `zdir_extract.py --decompress`
+        writes a track's `.LZC` out as its expanded `.BUN`, which is how
+        the port ships the tracks.
+
+        The rest is CONTINUE.md's "The road to the full game": the rest
+        of the retail data in the viewer (step 4), the retail pass over
+        what is ported (step 10), the full frontend (step 16), the saves
+        (step 17) and every track and car (step 18).

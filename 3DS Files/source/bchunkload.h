@@ -1,8 +1,10 @@
 // bchunkload -- the loading half of the object at 0x0018f6c8 ..
 // 0x0018f918, whose other half is ResourceFile: the walk that hands each
 // chunk at a file's top level to the loader that takes it, the walk back
-// that hands them to the unloaders, and the two tables of 31 loaders
-// they walk.
+// that hands them to the unloaders, and the two tables of 30 loaders
+// they walk: retail's, which dropped the demo's PhysPredict. Retail's
+// ResourceFile is at 0x001990d0 .. 0x00199320, and differs from the
+// demo's only in LoadChunks' and UnloadChunks' table and count.
 //
 // A loader looks at a chunk's type and returns 0 for one it does not
 // take. TraverseChunks tries the table from the slot that took the last
@@ -25,9 +27,10 @@
 
 typedef int (*BChunkLoader)(uint8_t *chunk);
 
-#define BCHUNK_NUM_LOADERS 31
+#define BCHUNK_NUM_LOADERS 30
 
-// 0x003081d0 and 0x00308250.
+// 0x003081d0 and 0x00308250, the demo's 31 slots; retail's are at
+// 0x00310280 and 0x003102f8.
 extern BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS];
 extern BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS];
 

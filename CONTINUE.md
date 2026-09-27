@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-27), after the retail disc arrived and task 36's
-first slice, the tools that carry the demo's names over to it. `HANDOFF.md` is the running narrative; this file is the short
+continuation (2026-09-27), after task 36's second slice: the retail
+model, and the first two checkers on it. `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -24,9 +24,17 @@ its symbols. `docs/retail.md` has what differs. The short of it:
 - Retail's data keeps the demo's chunk formats, with a few changes, and
   most tracks are only on the disc as `.LZC`.
 
-**The port keeps the demo's struct layouts and the demo-image checkers.**
-Where retail changed only offsets, nothing is owed. Where retail changed
-the code, the port follows retail, read through `retail_layout`'s map.
+**The port follows retail's behaviour and keeps the demo's names.**
+Where retail changed only offsets, nothing is owed: the port keeps the
+demo's struct layouts wherever the PS2's layout does not reach the 3DS.
+A record read in place from the disc takes retail's layout, because the
+port reads retail's discs: TrackInfo is 164 bytes now. Where retail
+changed the code, the port follows retail, read through `retail_layout`'s
+map. A checker whose object retail changed runs two scripts through its
+one harness. The scenarios over what the port follows as retail has it
+run on `tools/retail_model.py`'s image over `extracted-retail/`. The rest
+run on the demo image, as before (`docs/retail.md`, "Two images, one
+harness"). `track_check` and `loadertable_check` do this so far.
 
 **Phases 0-3 are closed.** Cars draw on the top screen out of
 `CARS\*\GEOMETRY.BIN` (task 21), the frontend makes the disc's own menu
@@ -88,7 +96,7 @@ trackpath_check     4771 ops,     4707 lines, 0 differ  (185 caught, 3 equivalen
 average_check        482 ops,      843 lines, 0 differ  (64/64 mutations caught)
 airoute_check      14738 ops,     7224 lines, 0 differ  (86 caught, 5 equivalent)
 realcontroller_check 14096 ops,  25318 lines, 0 differ  (129 caught, 11 equivalent)
-track_check        16212 ops,    11821 lines, 0 differ  (273 caught, 5 equivalent)
+track_check        16503 ops,    11968 lines, 0 differ  (274 caught, 5 equivalent)
 vclip_check        11890 ops,    22389 lines, 0 differ  (280 caught, 1 equivalent)
 polyhedra_check    15907 ops,    64560 lines, 0 differ  (172 caught, 12 equivalent)
 collisionbody_check 1572 ops,    35426 lines, 0 differ  (622 caught, 24 equivalent)
@@ -97,7 +105,7 @@ world_check         2742 ops,    15110 lines, 0 differ  (330/330 mutations caugh
 scenery_check       3450 ops,    16724 lines, 0 differ  (77 caught, 2 equivalent)
 scenerycull_check   7273 ops,    46687 lines, 0 differ  (147 caught, 1 equivalent)
 eview_check         2103 ops,    15454 lines, 0 differ  (152 caught, 1 equivalent)
-loadertable_check  27933 ops,    42243 lines, 0 differ  (103 caught, 2 equivalent)
+loadertable_check  27084 ops,    37894 lines, 0 differ  (107 caught, 2 equivalent)
 texturepack_check   5452 ops,    11201 lines, 0 differ  (95 caught, 2 equivalent)
 trackflow_check       16 scenarios,  706 lines, 0 differ  (76 caught, 1 equivalent)
 sky_check             45 scenarios, 1159 lines, 0 differ  (76 caught, 2 equivalent)
@@ -164,17 +172,39 @@ and so replaced every boot.
      retail disc into `extracted-retail/` (ignored). Do not extract all
      3 GB: the tree is under OneDrive, and C: has about 20 GB free.
 
-   **Next is step 4 of the road: the retail disc's data in the track
+   **Task 36's second slice is closed: the retail model (step 5), and
+   the first of step 4.**
+   - `tools/retail_model.py` runs `SLES_507.31` in mipsemu under the
+     demo's names. `e.code`, `e.data` and `e.field` map a demo address,
+     datum or field to retail's. The plain `Emu` answers them with what
+     it is given, so one checker runs either image.
+   - `track_check` runs the track info on the retail image over retail
+     GLOBALB and TRACKB12. TrackInfo is retail's 164 bytes, with
+     `SignpostGracePeriod` at 128.
+   - The LoaderTable is retail's 30 slots. PhysPredict is gone, and
+     HeliSheet takes `0x80034800`. `loadertable_check` runs the claims
+     and the walks through LoadChunks on the retail image.
+   - `retail_match` no longer cuts a function at a return that a branch
+     crosses. That had put UnloaderHeliSheet inside LoaderHeliSheet.
+   - `zdir_extract.py --decompress` writes a track's `.LZC` out expanded
+     as its `.BUN`. The port ships the tracks already expanded and never
+     decompresses one on the 3DS.
+
+   **Next is the rest of step 4: the retail disc's data in the track
    viewer.**
-   - Load `TRACKS/TRACKB12.LZC` where there is no `.BUN`. `lzc.c`
-     decompresses.
-   - Handle the retail chunk set. HeliSheet is a container,
-     `0x80034800` with `0x34801` and `0x34802`, and `0x36001`/`0x36002`
-     are gone. GLOBALB has no SolidList.
-   - Check the LoaderTable's loaders against the audit. Every
-     `Loader...` row that is `changed` needs its retail reading.
+   - The loaders the audit has as changed:
+     - LoaderTrackRoutes (0.67): retail's Signpost is 12 bytes, with an
+       int32 at +8.
+     - LoaderTexturePack (0.85).
+     - LoaderDifficultyInfo: the record is 992 bytes, the demo's 744.
+     - UnloaderTrackGeometry (0.98), UnloaderSolidList (0.99) and
+       eFixUpTables (0.82).
+   - LoaderSun's glare record goes with the sun's retail pass: StuffSun,
+     StuffSunGlare and SunTrackLoader.
+   - Then deploy `extracted-retail/` to Azahar's
+     `sdmc:/3ds/NFSHP2-3DS/data` and walk the viewer on retail TRACKB12.
    - Then a second location, `TRACKB21` or `TRACKB31`, to show the loaders
-     are not TRACKB12's alone.
+     are not TRACKB12's alone. The viewer's `kTexFiles` are TRACKB12's.
 
    "The road to the full game", below, has everything after it.
 2. **Task 27's first slice is closed: `Track.obj` and `TerrainType.obj`**,
@@ -1269,8 +1299,8 @@ each class shows what it reaches.
 | 1 | ~~The track on the screen: the viewer mode, eModel over `georender`, a free camera~~ done, task 27's twenty-third slice | 1 |
 | 2 | ~~The LoaderTable: every chunk type in TRACKB12, with the solids, the texture packs, the topology and the routes live~~ done, task 27's twenty-fourth and twenty-fifth slices | 2 |
 | 3 | ~~The sky, the sun and the weather's draw~~ done, task 27's twenty-sixth to twenty-ninth slices. The shipped image has no rain or storm to draw | 2-3 |
-| 4 | The retail disc's data in the track viewer: `.LZC` where there is no `.BUN`, the retail chunk set, the changed loaders, and a second location | 1 |
-| 5 | The retail model: mipsemu on `SLES_507.31` by retail_match's names, with a scenario relaid by retail_layout's map, so that a checker can run the retail function on what it built for the demo's | 1 |
+| 4 | The retail disc's data in the track viewer: the tracks shipped expanded, the retail chunk set, the changed loaders, and a second location. The LoaderTable and TrackInfo are done, task 36's second slice | 1 |
+| 5 | ~~The retail model: mipsemu on `SLES_507.31` by retail_match's names, so that a checker can run the retail function~~ done, task 36's second slice: `tools/retail_model.py`, in `track_check` and `loadertable_check` | 1 |
 | 6 | Car's constructor and destructor, and CarRenderInfo, from retail where retail changed them (all of them did), so that a car draws on the track | 3-4 |
 | 7 | Player and the chase cameras (CM_DRIVE and the rest of `cammover.c`'s set) | 2 |
 | 8 | RaceCoordinator's InitForRace, InitCars, InitPlayers and Race::Init, and the game flow from the frontend into a race and back | 2-3 |

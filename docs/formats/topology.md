@@ -18,8 +18,9 @@ terrain number indexes.
 The port is `3DS Files/source/track.c` and `topology.h`/`track.h` for
 `Track.obj`, and `terraintype.c`/`terraintype.h` with the generated
 `terraintypetab.c` for `TerrainType.obj`. `tools/track_check.py` runs the
-image itself in mipsemu as the oracle: 14753 ops, 11231 transcript lines, 0
-differ. Its mutation pass has 209 mutations, 206 caught and 3 argued
+image itself in mipsemu as the oracle: 15050 ops and 11620 transcript
+lines on the demo image and 1453 ops and 348 lines on the retail one, 0
+differ. Its mutation pass has 279 mutations, 274 caught and 5 argued
 equivalent. It also checks the first of Car's methods to call in here,
 which are in `cartrack.c` and written up in `car.md`. `tools/gen_terrain_table.py` writes the table out of the ELF, and
 `--check` confirms it is current.
@@ -82,8 +83,8 @@ why.
 
 | type | record | TRACKB12 | what |
 |------|--------|----------|------|
-| `0x00034200` | `TrackInfo`, 160 | 1 | the loaded track's own entry |
-| `0x00034201` | `TrackInfo`, 160 | (GLOBALB) 63 | every track |
+| `0x00034200` | `TrackInfo`, 164 (demo 160) | 1 | the loaded track's own entry |
+| `0x00034201` | `TrackInfo`, 164 (demo 160) | (GLOBALB) 66 (demo 63) | every track |
 | `0x00034146` | `TrackPositionMarker`, 24 | 20 | named points |
 | `0x00034130` | `TopologyTreeNode`, 8 | 386 | the quadtree |
 | `0x00034131` | `TopologyTreeSquare`, 12 | 646 | its leaves |
@@ -316,18 +317,28 @@ markers, named by hashing the ELF's strings:
 
 ## Track info
 
-`TrackInfo` is 160 bytes with no pointers. It holds:
+`TrackInfo` is retail's 164 bytes, with no pointers. The demo's is 160.
+Retail's `GetTrackInfo` (0x00153420) and `LoaderTrackGeometry`
+(0x00153608) step by 164, and the port reads retail's discs. It holds:
 - the name and location;
 - `IsValid`, `TrackNumber`, `SameAsTrackNumber` and `Point2Point`;
 - the time of day, the language IDs, the length, and the cop and super-cop
   names;
-- the map calibration, the elevation range, the difficulty and the sound
-  region.
+- the map calibration, the elevation range, the difficulty;
+- retail's `SignpostGracePeriod` at 128, which the demo does not have;
+- the sound region, at 132 (the demo's 128).
 
-GLOBALB's `0x34201` has 63 entries, and 21 are named: 11-16, 21-23, 31-36,
-41-43 and 61-63. The overcast and sunset variants point `SameAsTrackNumber`
-at their base track (14 to 11, 34 to 31, and so on). TRACKB12's `0x34200`
-is "National Forest T12", number 12.
+`SignpostGracePeriod`'s one reader is retail's
+`AICarController::SignPostDecision` (0x00191efc). At -1 it keeps the demo's
+test, `Race::GracePeriodIsActive`. Anything else is a race time the AI must
+be past before it takes a `0x400` signpost. Every retail track has -1 but
+T23, T26, T42 and T45, which have 0.
+
+Retail GLOBALB's `0x34201` has 66 entries, and 30 are named: 11-16, 21-26,
+31-36, 41-46 and 61-66, the five locations' three tracks and their three
+variants. The variants point `SameAsTrackNumber` at their base track (14 to
+11, 34 to 31, and so on). TRACKB12's `0x34200` is "National Forest T12",
+number 12. The demo's had 63 entries, 21 of them named.
 
 `GetTrackInfo(i)` counts from 1 and returns NULL out of range or for an
 entry with no name. **On load, the loader clears entry 54**, whatever it
@@ -386,11 +397,20 @@ host the nine pointers widen and take two alignment pads, and
 The harness is `tools/src/track_test.c`. The model is the image: every
 `Track.obj` function except the exit-time teardown runs as shipped, with
 bWare's slot pool, `bVector` and `bStringHash` under it. Every float
-crosses as its bits. The seven scenarios are:
+crosses as its bits.
+
+There are two images. The track info is retail's, so its scenarios run on
+the retail image (`tools/retail_model.py`) over retail data. Everything
+else runs on the demo image, whose topology the port still is. Retail
+rewrote `GetElevation` and `SetInterestBBox` and dropped the topology's
+timing: that is the topology's own retail pass. The same harness answers
+both scripts. The scenarios are:
 
 - **the pure functions:** `GetSquareCorner`, the noise grid and its
   bilinear noise for every terrain, and both `MatchTerrainType`s;
-- **the track info tables** and their loader, including entry 54's clear;
+- **the track info tables** and their loader, including entry 54's clear,
+  on the retail image, with retail GLOBALB's and TRACKB12's own info
+  chunks;
 - **the markers**;
 - **a synthetic world**, run through every TopologyTree, TrackPolygon and
   TopologyCoordinate entry point. It has floors, quads, triangles with a
@@ -411,8 +431,9 @@ crosses as its bits. The seven scenarios are:
 After the run, the checker requires that no division in `Track.obj` took
 the EE's divide-by-zero path.
 
-The mutation pass takes about half an hour. Three mutants are argued
-equivalent in `EQUIVALENT`:
+The mutation pass takes about half an hour. Five mutants are argued
+equivalent in `EQUIVALENT`. The two `air-` ones are Car's and are in
+`car.md`. The other three are these:
 
 - **`flush-resume`.** After a delete, the flush resumes from the head
   instead of from the node before. Every node up to that one was already

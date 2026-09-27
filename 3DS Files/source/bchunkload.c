@@ -129,20 +129,22 @@ UNPORTED(LoaderCameras, UnloaderCameras, 13,
 UNPORTED(LoaderCops, UnloaderCops, 15, 0x80034500u)
 UNPORTED(LoaderCarInfo, UnloaderCarInfo, 16, 0x00034600u, 0x00034601u)
 UNPORTED(LoaderBodyDamage, UnloaderBodyDamage, 17, 0x00034030u)
-UNPORTED(LoaderPhysPredict, UnloaderPhysPredict, 20, 0x00034700u)
-UNPORTED(LoaderNisInfo, UnloaderNisInfo, 21, 0x00037010u)
-UNPORTED(LoaderSoundScape, UnloaderSoundScape, 22, 0x80038000u)
-UNPORTED(LoaderCharacterInfo, UnloaderCharacterInfo, 23,
+UNPORTED(LoaderNisInfo, UnloaderNisInfo, 20, 0x00037010u)
+UNPORTED(LoaderSoundScape, UnloaderSoundScape, 21, 0x80038000u)
+UNPORTED(LoaderCharacterInfo, UnloaderCharacterInfo, 22,
          0x00034300u, 0x00034301u)
-UNPORTED(LoaderHeliSheet, UnloaderHeliSheet, 24, 0x00034800u)
-UNPORTED(LoaderEventTree, UnloaderEventTree, 25, 0x80034a00u)
-UNPORTED(LoaderLanguage, UnloaderLanguage, 27, 0x00039000u)
-UNPORTED(LoaderSmokeables, UnloaderSmokeables, 28, 0x00034026u, 0x00034027u)
-UNPORTED(LoaderDemoModeReplay, UnloaderDemoModeReplay, 30,
+// Retail made the sheet a container, 0x80034800 of 0x34801 and 0x34802.
+UNPORTED(LoaderHeliSheet, UnloaderHeliSheet, 23, 0x80034800u)
+UNPORTED(LoaderEventTree, UnloaderEventTree, 24, 0x80034a00u)
+UNPORTED(LoaderLanguage, UnloaderLanguage, 26, 0x00039000u)
+UNPORTED(LoaderSmokeables, UnloaderSmokeables, 27, 0x00034026u, 0x00034027u)
+UNPORTED(LoaderDemoModeReplay, UnloaderDemoModeReplay, 29,
          0x00039100u, 0x00039101u, 0x00039102u)
 
 // --------------------------------------------------------------- tables
 
+// Retail's order, which is the demo's without PhysPredict, the demo's slot
+// 20: retail has no 0x34700 chunk and no loader for one.
 BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     loader_null,                    //  0
     LoaderTrackGeometry,            //  1
@@ -164,17 +166,16 @@ BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     LoaderBodyDamage,               // 17
     LoaderTrackRoutes,              // 18
     loader_track_path,              // 19
-    LoaderPhysPredict,              // 20
-    LoaderNisInfo,                  // 21
-    LoaderSoundScape,               // 22
-    LoaderCharacterInfo,            // 23
-    LoaderHeliSheet,                // 24
-    LoaderEventTree,                // 25
-    loader_difficulty_info,         // 26
-    LoaderLanguage,                 // 27
-    LoaderSmokeables,               // 28
-    loader_weather_man,             // 29
-    LoaderDemoModeReplay,           // 30
+    LoaderNisInfo,                  // 20
+    LoaderSoundScape,               // 21
+    LoaderCharacterInfo,            // 22
+    LoaderHeliSheet,                // 23
+    LoaderEventTree,                // 24
+    loader_difficulty_info,         // 25
+    LoaderLanguage,                 // 26
+    LoaderSmokeables,               // 27
+    loader_weather_man,             // 28
+    LoaderDemoModeReplay,           // 29
 };
 
 BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
@@ -198,17 +199,16 @@ BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
     UnloaderBodyDamage,             // 17
     UnloaderTrackRoutes,            // 18
     UnloaderTrackPath,              // 19
-    UnloaderPhysPredict,            // 20
-    UnloaderNisInfo,                // 21
-    UnloaderSoundScape,             // 22
-    UnloaderCharacterInfo,          // 23
-    UnloaderHeliSheet,              // 24
-    UnloaderEventTree,              // 25
-    UnloaderDifficultyInfo,         // 26
-    UnloaderLanguage,               // 27
-    UnloaderSmokeables,             // 28
-    unloader_weather_man,           // 29
-    UnloaderDemoModeReplay,         // 30
+    UnloaderNisInfo,                // 20
+    UnloaderSoundScape,             // 21
+    UnloaderCharacterInfo,          // 22
+    UnloaderHeliSheet,              // 23
+    UnloaderEventTree,              // 24
+    UnloaderDifficultyInfo,         // 25
+    UnloaderLanguage,               // 26
+    UnloaderSmokeables,             // 27
+    unloader_weather_man,           // 28
+    UnloaderDemoModeReplay,         // 29
 };
 
 // ---------------------------------------------------------------- walks

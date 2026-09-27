@@ -7942,3 +7942,70 @@ new road).
 
 - The retail data in the track viewer: `.LZC` when there is no `.BUN`,
   the retail chunk set, the changed loaders, then a second location.
+
+## Session 30, continued (2026-09-27) -- Task 36's second slice: the retail model
+
+Two questions from the user first. Tracks: the port ships them already
+expanded, `.BUN` from `.LZC`, not decompressed on the 3DS. The heap is
+tight, and a 5 MB compressed copy beside its 9 MB expansion is the worst
+moment. Loading is faster too. The frame: the port stays demo-based.
+Behaviour follows retail. Names, struct layouts and the checkers' demo
+reference stay the demo's. The exception is a record read in place from
+the disc, which must take retail's layout. `SLES_507.31` is the retail
+program that the disc's `SYSTEM.CNF` boots. The 3DS never uses it, and the
+tools need it as the reference. `docs/retail.md` says so.
+
+- **tools/retail_model.py**:
+  - `RetailEmu` is mipsemu on the retail ELF with the demo's names at
+    retail addresses. Its data map adds single unanimous votes as a
+    fallback, which is how LoadChunks alone names LoaderTable.
+  - `e.code`, `e.data` and `e.field` map demo addresses and offsets. The
+    plain `Emu` answers them with what it is given.
+  - The map is cached in `out/retail_map.json`: 8,026 names, 4,210 data
+    addresses plus 2,982 on one vote, and 400 classes' fields.
+- **TrackInfo is 164 bytes.** Retail's GetTrackInfo and
+  LoaderTrackGeometry step by 164. The new int32 at 128 is
+  `SignpostGracePeriod`, read only by retail's
+  `AICarController::SignPostDecision`. -1 keeps the demo's grace test; 0
+  (T23, T26, T42, T45) is a race time. `track.h` takes it and
+  `track_check` runs the info scenarios on the retail image over retail
+  GLOBALB (66 entries, 30 tracks) and TRACKB12. Retail GetElevation no
+  longer calls bGetTicker, so the retail model prints the zero timing the
+  port holds; no retail scenario calls it.
+- **The LoaderTable is retail's 30 slots**, which were dumped from
+  0x00310280 and 0x003102f8. They are the demo's without PhysPredict
+  (slot 20), and HeliSheet's guard takes `0x80034800`. A census of every
+  retail loader and unloader over the retail disc's types matched that
+  and nothing else. `loadertable_check` runs the claims (60 slots over
+  the retail disc's types), the walks through LoadChunks and retail
+  TRACKB12's 279-chunk walk on the retail image. The other scenarios
+  stay on the demo's, because TraverseChunks is unchanged and their
+  chunks all go to ported slots.
+- **retail_match** no longer cuts a gap at a return that a branch
+  crosses. It had put UnloaderHeliSheet on the three words after
+  LoaderHeliSheet's first return, and the matrix's stop on it made
+  slot 23 take everything. Ten placements moved. GetStateSize went from
+  a jump-table case to its real switch. The audit is unchanged.
+- **zdir_extract.py --decompress** writes a `TRACKB*.LZC` out expanded as
+  its `.BUN`, and skips a stale disc `.BUN` when it does.
+
+```
+track_check        demo 15050 ops 11620 lines, retail 1453 ops 348 lines, 0 differ
+                   279 mutations: 274 caught, 5 equivalent
+loadertable_check  demo 11536 ops 17046 lines, retail 15548 ops 20848 lines, 0 differ
+                   109 mutations: 107 caught, 2 equivalent
+```
+
+What else the reads showed:
+- The sun chunk's record is still 244 bytes. Retail's TRACKB12 pads it
+  by 12, which is why the chunk is 256. Retail's LoaderSun then fills a
+  fixed glare record at 0x002ef4c0 that StuffSunGlare reads. That goes
+  with the sun's retail pass.
+- LoaderDifficultyInfo copies 992 bytes, the demo's 744.
+- LoadChunks and UnloadChunks differ only in table and count.
+
+### Next
+
+The rest of step 4: the changed loaders (TrackRoutes and its 12-byte
+Signpost, TexturePack, DifficultyInfo, the solid list's unloader and
+eFixUpTables), then retail TRACKB12 on Azahar, then a second location.

@@ -3,6 +3,8 @@
     ResourceFile's load half        0x0018f6c8 .. 0x0018f918     592 bytes
     LoaderTable                     0x003081d0                   31 slots
     UnloaderTable                   0x00308250                   31 slots
+    retail's LoaderTable            0x00310280                   30 slots
+    retail's UnloaderTable          0x003102f8                   30 slots
     LoaderSolidList, its unloader   0x00102ff0 .. 0x00103514   1,312 bytes
     eFixUpTables, FixStripEntryTable 0x00103790 .. 0x00103918    392 bytes
     FixTextureTable                 0x0010aa90                  108 bytes
@@ -39,7 +41,8 @@ mipsemu, with the seams below stubbed at the same calls. The track viewer
 `LoadChunks(c, size)` (0x0018f878) is
 `TraverseChunks(c, c + size, LoaderTable, 31)`. `UnloadChunks` (0x0018f8a0)
 is `TraverseChunksBackwards(c, c + size, UnloaderTable, 31)`. Both do
-nothing for a NULL file or a size of 0.
+nothing for a NULL file or a size of 0. Retail's (0x00199280, 0x001992a8)
+pass its tables and 30, and the port does the same.
 
 A loader looks at the chunk's type. It returns 0 for a type it does not
 take, and nonzero for one it does.
@@ -50,9 +53,10 @@ count. It tries the chunk at the current slot:
 - If that slot takes it, the walk moves to the next chunk and the miss
   count goes back to 0. The slot does *not* go back to 0: the next chunk
   is tried from the slot that took this one.
-- If that slot does not take it, the slot moves on one, wrapping at 31, and
-  the miss count goes up.
-- When the miss count passes 31, nobody has taken the chunk. The walk calls
+- If that slot does not take it, the slot moves on one, wrapping at the
+  table's size (the demo's 31, retail's 30), and the miss count goes up.
+- When the miss count passes the table's size, nobody has taken the
+  chunk. The walk calls
   `bBreak` (the debugger's breakpoint; the console carries on) and skips the
   chunk.
 
@@ -65,9 +69,9 @@ depends on which slot the walk has reached. The port keeps this.
 
 **TraverseChunksBackwards** (0x0018f790) finds the last chunk before `end`
 by walking from the start every time. It tries that chunk from slot 0 to
-30 and stops at the first taker, calling `bBreak` if there is none. Then
-the chunk becomes the new `end`. There is no quirk here: every chunk gets
-all 31 tries.
+the last and stops at the first taker, calling `bBreak` if there is none.
+Then the chunk becomes the new `end`. There is no quirk here: every chunk
+gets a try at every slot.
 
 On the disc every type has exactly one taker, in both tables, so neither
 walk ever reaches `bBreak`.
@@ -83,45 +87,54 @@ ResourceFile calls it after every load and every unload.
 The image's slot names are `LoaderX__FP6bChunk` and `UnloaderX__FP6bChunk`.
 Slot 0 is `LoaderNull` in both tables.
 
+The port's tables are retail's: the demo's 31 without PhysPredict, the
+demo's slot 20. Retail has no `0x34700` chunk and no loader for one. From
+slot 20 on, retail's slot is the demo's less one. Retail rewrote two
+loaders: Sun's (slot 14; its chunk is the demo's) and HeliSheet's, which
+takes the container `0x80034800` (of `0x34801` and `0x34802`) where the
+demo's took `0x34800`. Retail's LoadChunks and UnloadChunks differ from
+the demo's only in the table and its count.
+
 The types in the "Takes" column are the guards' constants: every type the
-disc has, plus the guards' other constants. The counts cover 73 bundles
-and 52 top-level types, and "TB12" is TRACKB12.
+disc has, plus the guards' other constants. The counts cover the demo
+disc's 73 bundles and 52 top-level types. "TB12" is the demo's TRACKB12
+and "R-TB12" retail's, whose 279 top-level chunks all have a taker.
 
-| Slot | Name | Takes | Disc | TB12 | Port |
-|---:|---|---|---:|---:|---|
-| 0 | Null | `00000000` padding | 421 | 285 | `loader_null` |
-| 1 | TrackGeometry | `34130`..`34133` topology tree, `34146` markers, `34200` track info, `34201` track table | 1 each | 6 | `track.c` |
-| 2 | TexturePack | `b0300001`, `b0300100` | 10, 10 | 0 | `texturepack.c` |
-| 3 | FontInfo | `15010`, `30200` | 11, 0 | 0 | -- |
-| 4 | SolidList | `80034000` | 110 | 65 | `esolid.c` |
-| 5 | LightList | `80034015`, `80034019`, `3401c`, `3401e` | 1, 1, 0, 1 | 2 | -- |
-| 6 | AcidFX | `80035000`, `80035010`, `35020`, `35021` | 0, 0, 2, 2 | 2 | -- |
-| 7 | EventManager | `80036000` | 1 | 1 | -- |
-| 8 | PositionMarkers | `34013` | 27 | 0 | -- |
-| 9 | CollisionVolumes | `80034020` | 16 | 1 | `polyhedra.c` |
-| 10 | FlailerChunk | `80010200` | 3 | 0 | -- |
-| 11 | Scenery | `80034100` sections, `34106` zones | 122, 1 | 123 | `scenery.c` |
-| 12 | Animations | `80034008` | 20 | 0 | -- |
-| 13 | Cameras | `80034405`, `80034410`, `80034415`, `80034420`, `80034425`, `34492` | 1, 1, 1, 0, 1, 1 | 2 | -- |
-| 14 | Sun | `34202` | 1 | 1 | `sun.c` |
-| 15 | Cops | `80034500` | 1 | 1 | -- |
-| 16 | CarInfo | `34600`, `34601` | 1, 1 | 0 | -- |
-| 17 | BodyDamage | `34030` | 52 | 0 | -- |
-| 18 | TrackRoutes | `34121` routes, `34122` signposts | 1, 1 | 2 | `trackroute.c` |
-| 19 | TrackPath | `80034147` | 1 | 1 | `trackpath.c` |
-| 20 | PhysPredict | `34700` | 1 | 0 | -- |
-| 21 | NisInfo | `37010` | 1 | 0 | -- |
-| 22 | SoundScape | `80038000` | 1 | 1 | -- |
-| 23 | CharacterInfo | `34300`, `34301` | 1, 1 | 0 | -- |
-| 24 | HeliSheet | `34800` | 1 | 1 | -- |
-| 25 | EventTree | `80034a00` | 4 | 0 | -- |
-| 26 | DifficultyInfo | `34b00` | 1 | 0 | `difficultyinfo.c` |
-| 27 | Language | `39000` | 8 | 0 | -- |
-| 28 | Smokeables | `34026`, `34027` | 16, 1 | 2 | -- |
-| 29 | WeatherMan | `34250` | 1 | 1 | `weatherman.c` |
-| 30 | DemoModeReplay | `39100`, `39101`, `39102` | 5, 24, 5 | 0 | -- |
+| Slot | Demo | Name | Takes | Disc | TB12 | R-TB12 | Port |
+|---:|---:|---|---|---:|---:|---:|---|
+| 0 | 0 | Null | `00000000` padding | 421 | 285 | 122 | `loader_null` |
+| 1 | 1 | TrackGeometry | `34130`..`34133` topology tree, `34146` markers, `34200` track info, `34201` track table | 1 each | 6 | 6 | `track.c` |
+| 2 | 2 | TexturePack | `b0300001`, `b0300100` | 10, 10 | 0 | 0 | `texturepack.c` |
+| 3 | 3 | FontInfo | `15010`, `30200` | 11, 0 | 0 | 0 | -- |
+| 4 | 4 | SolidList | `80034000` | 110 | 65 | 10 | `esolid.c` |
+| 5 | 5 | LightList | `80034015`, `80034019`, `3401c`, `3401e` | 1, 1, 0, 1 | 2 | 2 | -- |
+| 6 | 6 | AcidFX | `80035000`, `80035010`, `35020`, `35021` | 0, 0, 2, 2 | 2 | 2 | -- |
+| 7 | 7 | EventManager | `80036000` | 1 | 1 | 1 | -- |
+| 8 | 8 | PositionMarkers | `34013` | 27 | 0 | 0 | -- |
+| 9 | 9 | CollisionVolumes | `80034020` | 16 | 1 | 1 | `polyhedra.c` |
+| 10 | 10 | FlailerChunk | `80010200` | 3 | 0 | 0 | -- |
+| 11 | 11 | Scenery | `80034100` sections, `34106` zones | 122, 1 | 123 | 123 | `scenery.c` |
+| 12 | 12 | Animations | `80034008` | 20 | 0 | 0 | -- |
+| 13 | 13 | Cameras | `80034405`, `80034410`, `80034415`, `80034420`, `80034425`, `34492` | 1, 1, 1, 0, 1, 1 | 2 | 2 | -- |
+| 14 | 14 | Sun | `34202` | 1 | 1 | 1 | `sun.c` |
+| 15 | 15 | Cops | `80034500` | 1 | 1 | 1 | -- |
+| 16 | 16 | CarInfo | `34600`, `34601` | 1, 1 | 0 | 0 | -- |
+| 17 | 17 | BodyDamage | `34030` | 52 | 0 | 0 | -- |
+| 18 | 18 | TrackRoutes | `34121` routes, `34122` signposts | 1, 1 | 2 | 2 | `trackroute.c` |
+| 19 | 19 | TrackPath | `80034147` | 1 | 1 | 1 | `trackpath.c` |
+| -- | 20 | PhysPredict | `34700` | 1 | 0 | -- | gone in retail |
+| 20 | 21 | NisInfo | `37010` | 1 | 0 | 0 | -- |
+| 21 | 22 | SoundScape | `80038000` | 1 | 1 | 1 | -- |
+| 22 | 23 | CharacterInfo | `34300`, `34301` | 1, 1 | 0 | 0 | -- |
+| 23 | 24 | HeliSheet | retail `80034800`; the demo's `34800` | 1 | 1 | 1 | -- |
+| 24 | 25 | EventTree | `80034a00` | 4 | 0 | 0 | -- |
+| 25 | 26 | DifficultyInfo | `34b00` | 1 | 0 | 0 | `difficultyinfo.c` |
+| 26 | 27 | Language | `39000` | 8 | 0 | 0 | -- |
+| 27 | 28 | Smokeables | `34026`, `34027` | 16, 1 | 2 | 2 | -- |
+| 28 | 29 | WeatherMan | `34250` | 1 | 1 | 1 | `weatherman.c` |
+| 29 | 30 | DemoModeReplay | `39100`, `39101`, `39102` | 5, 24, 5 | 0 | 0 | -- |
 
-TRACKB12 has 497 top-level chunks, and every one has a taker.
+The demo's TRACKB12 has 497 top-level chunks and retail's 279, and every one has a taker.
 
 In the port, a slot marked "--" is only its guard. It takes the same types
 as the image's slot and hands the chunk to `gUnportedLoaderFn(slot, unload,
@@ -275,8 +288,16 @@ returns a pointer returns NULL.
     python tools/loadertable_check.py
     python tools/loadertable_check.py --mutate [--only a,b]
 
-The check runs 27,897 ops and prints 41,988 lines, with 0 differ. Of the
-102 mutations, 100 are caught and 2 are equivalent by construction:
+There are two images. What shows the table runs on the retail image
+(`tools/retail_model.py`) over the retail disc: the claims, and the walks
+through LoadChunks. The rest runs on the demo image over the demo's disc.
+TraverseChunks is retail's as it is, and those scenarios load through the
+tables only chunks a ported slot takes, so no slot number shows. The same
+harness answers both.
+
+The check runs 11,536 ops and prints 17,046 lines on the demo image, and
+15,548 ops and 20,848 lines on the retail one, with 0 differ. Of the 109
+mutations, 107 are caught and 2 are equivalent by construction:
 
 - `load-size0`: `LoadChunks`' size test only ever saves a walk of nothing.
 - `unload-count-kept`: an animator's count is not read again once the
@@ -284,12 +305,12 @@ The check runs 27,897 ops and prints 41,988 lines, with 0 differ. Of the
 
 The scenarios cover:
 
-- **The claims.** Every disc type, every guard constant and their
-  neighbours, through all 62 slots.
+- **The claims.** Every type on the retail disc, every guard constant
+  and their neighbours, through all 60 of retail's slots.
 - **The walks.** Both walks over probe tables: the unclaimed-chunk quirk,
   two takers, short tables, and both directions.
 - **The tables.** LoadChunks and UnloadChunks through the real tables,
-  including over TRACKB12's 497 chunks.
+  including over retail TRACKB12's 279 chunks.
 - **The disc.** Every solid list on the disc is loaded, fixed up and
   unloaded, with models on TRACKB12's names.
 - **Built lists.** Vertex animation, duplicate names, external rigid

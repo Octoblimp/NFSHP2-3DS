@@ -42,13 +42,22 @@ bGetTickerDifference. Both sides draw ticks from the same LCG, and the
 model runs the image's bGetTickerDifference rather than stub_bware's zero,
 so TopologyTiming is compared too, differences past 2**31 included.
 
+**Two images.** Track.obj's loader half follows retail: TrackInfo is
+retail's 164-byte record, which retail's GetTrackInfo and
+LoaderTrackGeometry step by, where the demo's is 160. So the info
+scenarios run on the retail image (retail_model.RetailEmu) against retail
+data, and everything else on the demo image, whose topology code the
+port still is -- retail rewrote GetElevation and SetInterestBBox and
+dropped TopologyTiming, which is the topology's own retail pass. The one
+harness answers both scripts. Retail has no TopologyTiming, so its model
+prints the zeros the port holds; no retail scenario calls GetElevation.
+
 **What is not run.** bBreak (FlushUnusedTrackPolygons with every slot
 held) is fatal on both sides -- the next AssignTrackPolygon builds into a
 NULL slot -- so the model stops the run if a scenario reaches it.
 
-Scenarios: the pure functions (GetSquareCorner, the road-noise grid and
-its bilinear noise for every terrain, both MatchTerrainTypes); the track
-info tables and their loader, entry 54's clear included; markers, loaded,
+Scenarios, demo: the pure functions (GetSquareCorner, the road-noise grid
+and its bilinear noise for every terrain, both MatchTerrainTypes); markers, loaded,
 counted, fetched, appended and unlinked; a synthetic world -- floors,
 quads, triangles whose fourth vertex is not their third, a bridge over a
 floor, walls, a ceiling, INFINITELY_HIGH and Z_TIMES_FOUR polygons, a
@@ -57,6 +66,9 @@ through every TopologyTree, TrackPolygon and TopologyCoordinate entry
 point; a malformed tree for GetSquare's nearest-with-nothing path; and
 TRACKB12 itself, driven along its squares until the pool has flushed
 several times over, then filled on purpose for the 101-at-a-time cap.
+Retail: the track info tables and their loader, entry 54's clear
+included, and retail's own TRACKB12 and GLOBALB info chunks, all thirty
+tracks and every SignpostGracePeriod.
 
     python tools/track_check.py
     python tools/track_check.py --mutate [--only a,b]
@@ -75,8 +87,9 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import physicscar_check as pcc
+import retail_model
 from bhash import bhash
-from mipsemu import Emu, M32, s32
+from mipsemu import M32, MipsError, s32
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -104,6 +117,9 @@ HARNESS_TIMEOUT = 300
 
 TRACKB12 = ROOT / "extracted" / "TRACKS" / "TRACKB12.BUN"
 GLOBALB = ROOT / "extracted" / "GLOBAL" / "GLOBALB.BUN"
+RETAIL_TRACKB12 = ROOT / "extracted-retail" / "TRACKS" / "TRACKB12.BUN"
+RETAIL_GLOBALB = ROOT / "extracted-retail" / "GLOBAL" / "GLOBALB.BUN"
+INFO = 164                          # retail's TrackInfo; the demo's is 160
 
 # ================================================================ the image
 
@@ -592,7 +608,7 @@ def scenario_pure(sc, rnd):
 
 
 def info_record(name, number, loc="", valid=1):
-    b = bytearray(160)
+    b = bytearray(INFO)
     nb = name.encode("latin-1")[:31]
     b[0:len(nb)] = nb
     lb = loc.encode("latin-1")[:31]
@@ -601,7 +617,9 @@ def info_record(name, number, loc="", valid=1):
     struct.pack_into("<bbbbhh", b, 64, valid, number, (number + 64) & 0x7f, 0,
                      3, 7)
     struct.pack_into("<f", b, 80, 1234.5 + number)
-    b[128:131] = b"RGN"
+    # SignpostGracePeriod, then SoundRegion after it.
+    struct.pack_into("<i", b, 128, -1 if number % 3 else 7 * number)
+    b[132:135] = b"RGN"
     return bytes(b)
 
 
@@ -617,12 +635,12 @@ def scenario_info(sc):
         name = "" if n in (7, 33) else "Track %d" % n
         recs.append(info_record(name, n, "Loc %d" % n))
     sc.chunk(0, 0, chunk_bytes(0x34201, b"".join(recs), extra=b"\x01" * 100))
-    sc.op(OP_MEM, 0, 8 + 160 * 53, 40)
+    sc.op(OP_MEM, 0, 8 + INFO * 53, 41)
     sc.op(OP_LOADER, 0)
     sc.op(OP_GLOBALS)
-    sc.op(OP_MEM, 0, 8 + 160 * 53, 40)
-    sc.op(OP_MEM, 0, 8 + 160 * 52, 4)
-    sc.op(OP_MEM, 0, 8 + 160 * 54, 4)
+    sc.op(OP_MEM, 0, 8 + INFO * 53, 41)
+    sc.op(OP_MEM, 0, 8 + INFO * 52, 4)
+    sc.op(OP_MEM, 0, 8 + INFO * 54, 4)
     for i in list(range(-2, 64)) + [0x7fffffff, -0x80000000]:
         sc.op(OP_INFO, i)
 
@@ -654,7 +672,7 @@ def scenario_info(sc):
     recs = [info_record("F%d" % n, n) for n in range(1, 55)]
     sc.chunk(4, 0, chunk_bytes(0x34201, b"".join(recs)))
     sc.op(OP_LOADER, 4)
-    sc.op(OP_MEM, 0 + 4, 8 + 160 * 53, 40)
+    sc.op(OP_MEM, 0 + 4, 8 + INFO * 53, 41)
     sc.op(OP_INFO, 54)
     sc.op(OP_INFO, 53)
     sc.op(OP_UNLOADER, 4)
@@ -1521,8 +1539,7 @@ def scenario_air(sc, rnd):
 # ---- TRACKB12 ------------------------------------------------------------------
 
 B12_CHUNKS = [(0x7f93f4, 0x34130), (0x7fa010, 0x34131), (0x7fbe68, 0x34132),
-              (0x8769f0, 0x34133), (0x7a7e80, 0x34146), (0x884580, 0x34200)]
-G_INFO = (0x0a2680, 0x34201)
+              (0x8769f0, 0x34133), (0x7a7e80, 0x34146)]
 
 
 def b12_polygons():
@@ -1601,29 +1618,21 @@ def b12_route(n):
 
 
 def scenario_trackb12(sc, rnd):
-    if not TRACKB12.exists() or not GLOBALB.exists():
+    if not TRACKB12.exists():
         return False
-    tb, gb = sc.s(str(TRACKB12)), sc.s(str(GLOBALB))
+    tb = sc.s(str(TRACKB12))
     d = TRACKB12.read_bytes()
-    g = GLOBALB.read_bytes()
 
     sc.tag("trackb12: load")
     for k, (off, t) in enumerate(B12_CHUNKS):
         assert struct.unpack_from("<I", d, off)[0] == t
         size = struct.unpack_from("<I", d, off + 4)[0]
         sc.op(OP_FILE, k, off % 16, tb, off, size + 8)
-    off, t = G_INFO
-    assert struct.unpack_from("<I", g, off)[0] == t
-    size = struct.unpack_from("<I", g, off + 4)[0]
-    sc.op(OP_FILE, 6, off % 16, gb, off, size + 8)
-    for k in (6, 5, 4, 0, 1, 2, 3):
+    for k in (4, 0, 1, 2, 3):
         sc.op(OP_LOADER, k)
     sc.op(OP_TREEDUMP, 0)
     sc.op(OP_GLOBALS)
     sc.op(OP_MARKDUMP)
-    for i in range(0, 66):
-        sc.op(OP_INFO, i)
-    sc.op(OP_MEM, 6, 8 + 160 * 53, 40)
     for h in (0x8f90f7bf, 0x8e55c895, 0xe5fae1cf, 0xe5fae1d0, 0xeec70374,
               0x6a56b90a):
         sc.op(OP_NMARK, h)
@@ -1743,11 +1752,57 @@ def scenario_trackb12(sc, rnd):
     return True
 
 
+def top_chunk(data, want):
+    """The file offset of the first top-level chunk of type `want`."""
+    off = 0
+    while off + 8 <= len(data):
+        t, n = struct.unpack_from("<II", data, off)
+        if t == want:
+            return off
+        off += 8 + n
+    raise KeyError("no chunk %08x" % want)
+
+
+def scenario_retail_trackb12(sc):
+    """Retail's own info chunks, where the disc's misalignments put them."""
+    if not RETAIL_TRACKB12.exists() or not RETAIL_GLOBALB.exists():
+        return False
+    sc.tag("retail trackb12: info")
+    for k, (path, t) in enumerate(((RETAIL_GLOBALB, 0x34201),
+                                   (RETAIL_TRACKB12, 0x34200))):
+        with open(path, "rb") as f:
+            data = f.read()
+        off = top_chunk(data, t)
+        size = struct.unpack_from("<I", data, off + 4)[0]
+        sc.op(OP_FILE, k, off % 16, sc.s(str(path)), off, size + 8)
+    sc.op(OP_LOADER, 0)
+    sc.op(OP_LOADER, 1)
+    sc.op(OP_GLOBALS)
+    for i in range(-1, 72):
+        sc.op(OP_INFO, i)
+    for i in range(66):
+        sc.op(OP_MEM, 0, 8 + INFO * i + 64, 1)
+        sc.op(OP_MEM, 0, 8 + INFO * i + 128, 1)
+    sc.op(OP_MEM, 0, 8 + INFO * 53, 41)
+    sc.op(OP_MEM, 1, 8, 41)
+    sc.op(OP_UNLOADER, 1)
+    sc.op(OP_UNLOADER, 0)
+    sc.op(OP_GLOBALS)
+    return True
+
+
+def retail_script():
+    """What runs on the retail image: the loader half retail changed."""
+    sc = Script()
+    scenario_info(sc)
+    sc.b12 = scenario_retail_trackb12(sc)
+    return sc
+
+
 def script():
     rnd = random.Random(0x7ac12)
     sc = Script()
     scenario_pure(sc, rnd)
-    scenario_info(sc)
     scenario_markers(sc)
     scenario_world(sc, rnd)
     scenario_bad_tree(sc, rnd)
@@ -1760,12 +1815,26 @@ def script():
 
 
 class Model(object):
-    def __init__(self, sc):
+    def __init__(self, sc, retail=False):
         self.sc = sc
         self.out = []
-        e = self.e = Emu(ieee=True, eediv=True)
+        e = self.e = retail_model.emu(retail, ieee=True, eediv=True)
         e.stub_bware()
-        self.fn = {k: e.addr_of(v) for k, v in SYM.items()}
+        # Retail has no twin for BuildTrackPolygons; no retail scenario
+        # builds.
+        self.fn = {}
+        for k, v in SYM.items():
+            try:
+                self.fn[k] = e.addr_of(v)
+            except MipsError:
+                assert retail, v
+        (self.TREE, self.POOLVAR, self.MARKERS, self.CUR, self.TABLE,
+         self.HIGHEST, self.LOADED) = (e.data(a) for a in (
+             TREE, POOLVAR, MARKERS, CUR, TABLE, HIGHEST, LOADED))
+        # Retail's GetElevation no longer times itself: no TopologyTiming.
+        self.TIMING = self.TIDX = None
+        if not retail:
+            self.TIMING, self.TIDX = TIMING, TIDX
         self.mis = [0] * NCHUNK
         self.held = [0] * NH        # how many of each handle's table are set
         self.tick = 0
@@ -1830,7 +1899,7 @@ class Model(object):
         return TC_BASE + TC_STRIDE * i
 
     def pool(self):
-        return self.e.u32(POOLVAR)
+        return self.e.u32(self.POOLVAR)
 
     def slot(self, s):
         p = self.pool()
@@ -1842,11 +1911,11 @@ class Model(object):
         a &= M32
         if a == 0:
             return "null"
-        if a == MARKERS:
+        if a == self.MARKERS:
             return "markers"
-        if a == TREE:
+        if a == self.TREE:
             return "tree"
-        if a == TREE + 32:
+        if a == self.TREE + 32:
             return "tplist"
         p = self.pool()
         if p and p + 48 <= a < p + 48 + NSLOTS * SLOT:
@@ -1880,7 +1949,7 @@ class Model(object):
 
     def tree_dump(self, lst):
         e, L = self.e, self.label
-        t = TREE
+        t = self.TREE
         self.emit("tree nodes %s %d squares %s %d polys %s %d idx %s %d "
                   "list %s %s"
                   % (L(e.u32(t)), self.i32(t + 4), L(e.u32(t + 8)),
@@ -1945,19 +2014,19 @@ class Model(object):
 
     def mark_dump(self):
         e, L = self.e, self.label
-        self.emit("markers next %s prev %s" % (L(e.u32(MARKERS)),
-                                               L(e.u32(MARKERS + 4))))
-        n = e.u32(MARKERS)
+        self.emit("markers next %s prev %s" % (L(e.u32(self.MARKERS)),
+                                               L(e.u32(self.MARKERS + 4))))
+        n = e.u32(self.MARKERS)
         k = 0
-        while n != MARKERS and k < MAX_WALK:
+        while n != self.MARKERS and k < MAX_WALK:
             self.emit("  mk %s hash %08x param %d pos %08x %08x"
                       % (L(n), e.u32(n + 8), self.i32(n + 12),
                          e.u32(n + 16), e.u32(n + 20)))
             n = e.u32(n)
             k += 1
         back = []
-        n = e.u32(MARKERS + 4)
-        while n != MARKERS and len(back) < MAX_WALK:
+        n = e.u32(self.MARKERS + 4)
+        while n != self.MARKERS and len(back) < MAX_WALK:
             back.append(n)
             n = e.u32(n + 4)
         self.labels("  back", back)
@@ -1966,11 +2035,12 @@ class Model(object):
         e, L = self.e, self.label
         self.emit("globals cur %s table %s highest %d loaded %d pool %s "
                   "tidx %d"
-                  % (L(e.u32(CUR)), L(e.u32(TABLE)), self.i32(HIGHEST),
-                     self.i32(LOADED), "pool" if self.pool() else "null",
-                     e.u32(TIDX)))
-        self.emit("  timing" + "".join(" %08x" % e.u32(TIMING + 4 * k)
-                                       for k in range(10)))
+                  % (L(e.u32(self.CUR)), L(e.u32(self.TABLE)), self.i32(self.HIGHEST),
+                     self.i32(self.LOADED), "pool" if self.pool() else "null",
+                     e.u32(self.TIDX) if self.TIDX else 0))
+        self.emit("  timing" + "".join(
+            " %08x" % (e.u32(self.TIMING + 4 * k) if self.TIMING else 0)
+            for k in range(10)))
 
     def pv(self, a):
         e = self.e
@@ -1982,8 +2052,8 @@ class Model(object):
                                   for k in range(16)))
 
     def timing_line(self):
-        idx = self.e.u32(TIDX)
-        self.emit("  timing %d %08x" % (idx, self.e.u32(TIMING + 4 * ((idx + 9)
+        idx = self.e.u32(self.TIDX)
+        self.emit("  timing %d %08x" % (idx, self.e.u32(self.TIMING + 4 * ((idx + 9)
                                                                     % 10))))
 
     def fill(self, a, n):
@@ -2045,10 +2115,10 @@ class Model(object):
             emit("unloader c%d -> %d" % (a[0], call(fn["unloader"],
                                                     self.chunk(a[0]))))
         elif code == OP_TTLOADER:
-            emit("ttloader c%d -> %d" % (a[0], call(fn["ttloader"], TREE,
+            emit("ttloader c%d -> %d" % (a[0], call(fn["ttloader"], self.TREE,
                                                     self.chunk(a[0]))))
         elif code == OP_TTUNLOADER:
-            emit("ttunloader c%d -> %d" % (a[0], call(fn["ttunloader"], TREE,
+            emit("ttunloader c%d -> %d" % (a[0], call(fn["ttunloader"], self.TREE,
                                                       self.chunk(a[0]))))
         elif code == OP_MEM:
             p = self.chunk(a[0]) + a[1]
@@ -2056,13 +2126,13 @@ class Model(object):
                  + "".join(" %08x" % e.u32(p + 4 * i) for i in range(a[2])))
         elif code == OP_TREEINIT:
             emit("treeinit")
-            call(fn["treeinit"], TREE)
+            call(fn["treeinit"], self.TREE)
         elif code == OP_INITTREE:
             emit("inittree")
-            call(fn["inittree"], TREE)
+            call(fn["inittree"], self.TREE)
         elif code == OP_CLOSETREE:
             emit("closetree")
-            call(fn["closetree"], TREE)
+            call(fn["closetree"], self.TREE)
         elif code == OP_TREEDUMP:
             self.tree_dump(a[0])
         elif code == OP_POOL:
@@ -2132,8 +2202,8 @@ class Model(object):
             emit("elev tc%d v%d -> %08x terr %08x norm %s found %08x"
                  % (a[0], a[1], e.fpr[0], e.u32(TERR), self.pv(NORM),
                     e.u32(FOUND)))
-            idx = e.u32(TIDX)
-            emit("  timing %d %08x" % (idx, e.u32(TIMING + 4 * ((idx + 9)
+            idx = e.u32(self.TIDX)
+            emit("  timing %d %08x" % (idx, e.u32(self.TIMING + 4 * ((idx + 9)
                                                                 % 10))))
         elif code == OP_HASTOPO:
             emit("hastopo tc%d v%d -> %d"
@@ -2155,16 +2225,16 @@ class Model(object):
                                   self.pv(self.vec(a[4]))))
         elif code == OP_CORNER:
             e.fpr[12] = u[0]
-            call(fn["corner"], TREE)
+            call(fn["corner"], self.TREE)
             emit("corner %08x -> %08x" % (u[0], e.fpr[0]))
         elif code == OP_SQUARE:
             e.fpr[12] = u[0]
             e.fpr[13] = u[1]
-            r = call(fn["square"], TREE, a[2])
+            r = call(fn["square"], self.TREE, a[2])
             emit("square %08x %08x near %d -> %s" % (u[0], u[1], a[2], L(r)))
         elif code == OP_GIP:
             sq = 0 if a[0] < 0 else self.chunk(a[0]) + a[1]
-            n = call(fn["gip"], TREE, GIPOUT, a[4], sq, self.vec(a[2]),
+            n = call(fn["gip"], self.TREE, GIPOUT, a[4], sq, self.vec(a[2]),
                      self.vec(a[3]))
             emit("gip %s v%d v%d max %d -> %d" % (L(sq), a[2], a[3], a[4], n))
             outs = [e.u32(GIPOUT + 4 * i) for i in range(n)]
@@ -2174,7 +2244,7 @@ class Model(object):
                     e.mem[p] = 0
         elif code == OP_BUILD:
             out = OUTS + 0x200 * a[0]
-            n = call(fn["build"], TREE, out, a[3], self.vec(a[1]),
+            n = call(fn["build"], self.TREE, out, a[3], self.vec(a[1]),
                      self.vec(a[2]))
             self.held[a[0]] = n
             emit("build h%d v%d v%d max %d -> %d" % (a[0], a[1], a[2], a[3],
@@ -2184,20 +2254,20 @@ class Model(object):
             n = self.held[a[0]]
             n = n if a[1] < 0 or a[1] > n else a[1]
             emit("remove h%d %d" % (a[0], n))
-            call(fn["remove"], TREE, OUTS + 0x200 * a[0], n)
+            call(fn["remove"], self.TREE, OUTS + 0x200 * a[0], n)
         elif code == OP_ASSIGN:
             p = self.chunk(a[2]) + a[3]
-            r = call(fn["assign"], TREE, p)
+            r = call(fn["assign"], self.TREE, p)
             e.put32(OUTS + 0x200 * a[0] + 4 * a[1], r)
             self.held[a[0]] = max(self.held[a[0]], a[1] + 1)
             emit("assign h%d[%d] %s -> %s" % (a[0], a[1], L(p), L(r)))
         elif code == OP_UNASSIGN:
             tp = e.u32(OUTS + 0x200 * a[0] + 4 * a[1])
             emit("unassign h%d[%d] %s" % (a[0], a[1], L(tp)))
-            call(fn["unassign"], TREE, tp)
+            call(fn["unassign"], self.TREE, tp)
         elif code == OP_FLUSH:
             emit("flush")
-            call(fn["flush"], TREE)
+            call(fn["flush"], self.TREE)
         elif code == OP_NMARK:
             emit("nmark %08x -> %d" % (u[0], call(fn["nmark"], u[0])))
         elif code == OP_GMARK:
@@ -2232,7 +2302,7 @@ class Model(object):
             e.put32(OUTS + 0x200 * a[0] + 4 * a[1], self.slot(a[2]))
             self.held[a[0]] = max(self.held[a[0]], a[1] + 1)
         elif code == OP_TPCB:
-            e.put32(self.slot(a[0]) + 16, TREE)
+            e.put32(self.slot(a[0]) + 16, self.TREE)
         elif code == OP_COG:
             for k in range(4):
                 e.put32(CTI + 272 + 4 * k, u[k])
@@ -2313,12 +2383,23 @@ class Model(object):
             raise ValueError("op %d" % code)
 
 
-def model(sc):
-    m = Model(sc)
+def text_ranges(e):
+    """Track.obj's and TerrainType.obj's code in the image `e` runs."""
+    if not e.retail:
+        return [TRACK_TEXT, TERRAIN_TEXT]
+    out = []
+    for da, _dsz, ra, rsz, _k in e.map.by_demo.values():
+        if any(lo <= da < hi for lo, hi in (TRACK_TEXT, TERRAIN_TEXT)):
+            out.append((ra, ra + rsz))
+    return out
+
+
+def model(sc, retail=False):
+    m = Model(sc, retail)
     out = m.run()
+    ranges = text_ranges(m.e)
     divs = sorted(pc for pc in m.e.eediv_pcs
-                  if TRACK_TEXT[0] <= pc < TRACK_TEXT[1]
-                  or TERRAIN_TEXT[0] <= pc < TERRAIN_TEXT[1])
+                  if any(lo <= pc < hi for lo, hi in ranges))
     return out, divs
 
 
@@ -2859,8 +2940,11 @@ MUTATIONS = [
      "memset(hidden, 0, sizeof(TrackInfo));",
      "memset(hidden, 0, 32);"),
     ("loader-highest", TRC,
-     "HighestTrackNumber = (int32_t)(size / 160u);",
-     "HighestTrackNumber = (int32_t)(size / 160u) - 1;"),
+     "HighestTrackNumber = (int32_t)(size / (uint32_t)sizeof(TrackInfo));",
+     "HighestTrackNumber = (int32_t)(size / (uint32_t)sizeof(TrackInfo)) - 1;"),
+    ("loader-demo-stride", TRC,
+     "HighestTrackNumber = (int32_t)(size / (uint32_t)sizeof(TrackInfo));",
+     "HighestTrackNumber = (int32_t)(size / 160u);"),
     ("loader-markers-round", TRC,
      "int32_t n = (int32_t)(size / 24u);",
      "int32_t n = (int32_t)((size + 23) / 24u);"),
@@ -3240,6 +3324,8 @@ for _name in EQUIVALENT:
 def mutate_pass(only=None):
     sc = script()
     base, _ = model(sc)
+    rsc = retail_script()
+    rbase, _ = model(rsc, retail=True)
     caught = 0
     survived = []
     missing = []
@@ -3253,11 +3339,16 @@ def mutate_pass(only=None):
     opsdir = tempfile.TemporaryDirectory()
     ops = Path(opsdir.name) / "ops.bin"
     ops.write_bytes(sc.encode())
+    rops = Path(opsdir.name) / "rops.bin"
+    rops.write_bytes(rsc.encode())
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
         out = Path(tmp) / "base.txt"
         run_harness(exe, ops, out)
-        if diff(base, out.read_text().splitlines(), quiet=True):
+        rout = Path(tmp) / "rbase.txt"
+        run_harness(exe, rops, rout)
+        if (diff(base, out.read_text().splitlines(), quiet=True)
+                or diff(rbase, rout.read_text().splitlines(), quiet=True)):
             print("base already differs -- fix that before mutating")
             return 1
 
@@ -3291,6 +3382,9 @@ def mutate_pass(only=None):
                     continue
                 out = Path(tmp) / "m.txt"
                 rc = run_harness(exe, ops, out)
+                rout = Path(tmp) / "rm.txt"
+                if rc == 0:
+                    rc = run_harness(exe, rops, rout)
                 if rc == pcc.HARNESS_HUNG:
                     print("  %-44s hung the harness (caught)" % name)
                     caught += 1
@@ -3300,6 +3394,7 @@ def mutate_pass(only=None):
                     caught += 1
                     continue
                 n = diff(base, out.read_text().splitlines(), quiet=True)
+                n += diff(rbase, rout.read_text().splitlines(), quiet=True)
                 if n:
                     print("  %-44s caught, %d lines" % (name, n))
                     caught += 1
@@ -3353,6 +3448,8 @@ def main():
 
     sc = script()
     lines, divs = model(sc)
+    rsc = retail_script()
+    rlines, rdivs = model(rsc, retail=True)
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
         ops = Path(tmp) / "ops.bin"
@@ -3360,14 +3457,22 @@ def main():
         out = Path(tmp) / "harness.txt"
         rc = run_harness(exe, ops, out)
         harness = out.read_text().splitlines()
+        rops = Path(tmp) / "rops.bin"
+        rops.write_bytes(rsc.encode())
+        rout = Path(tmp) / "rharness.txt"
+        rc = rc or run_harness(exe, rops, rout)
+        rharness = rout.read_text().splitlines()
 
     if args.dump:
         d = Path(args.dump)
         d.parent.mkdir(parents=True, exist_ok=True)
         d.with_suffix(".model").write_text(NL.join(lines) + NL)
         d.with_suffix(".harness").write_text(NL.join(harness) + NL)
+        d.with_suffix(".rmodel").write_text(NL.join(rlines) + NL)
+        d.with_suffix(".rharness").write_text(NL.join(rharness) + NL)
 
     bad = 0
+    divs = divs + rdivs
     if divs:
         print("the image divided by zero at %s -- track.c needs ee_div there"
               % " ".join("0x%08x" % pc for pc in divs))
@@ -3379,10 +3484,17 @@ def main():
         if zero or flat:
             bad += 1
     else:
-        print("TRACKB12 or GLOBALB not extracted -- their scenarios skipped")
+        print("TRACKB12 not extracted -- its scenarios skipped")
+    if not rsc.b12:
+        print("retail TRACKB12 or GLOBALB not in extracted-retail -- "
+              "their scenarios skipped")
     n = diff(lines, harness)
-    print("%d ops, %d lines, %d differ" % (len(sc.ops), len(harness), n))
-    sys.exit(1 if (n or rc or bad) else 0)
+    print("demo image: %d ops, %d lines, %d differ"
+          % (len(sc.ops), len(harness), n))
+    rn = diff(rlines, rharness)
+    print("retail image: %d ops, %d lines, %d differ"
+          % (len(rsc.ops), len(rharness), rn))
+    sys.exit(1 if (n or rn or rc or bad) else 0)
 
 
 if __name__ == "__main__":
