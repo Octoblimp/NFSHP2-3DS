@@ -77,10 +77,12 @@ void emodel_init(eModel *m, uint32_t name_hash);
 // is cleared; one without is left alone.
 void emodel_uninit(eModel *m);
 
-// eModel::ReconnectSolid, 0x0010b2c0. The solid is looked up again by
-// name. Only when it has changed is it stored, and then the animation
-// start time is cleared, and set to 0xc000 when the new solid has a rigid
-// animation whose byte at +2 is 0.
+// eModel::ReconnectSolid, retail 0x0010c5e8 (the demo's 0x0010b2c0). The
+// solid is looked up again by name. Only when it has changed is it
+// stored, and then the animation start time is cleared, and set to 0xc000
+// when the new solid has a rigid animation whose byte at +2 is 0. Retail
+// then ORs bRandom(256) from bDefaultSeed into it when the solid has flag
+// 0x20, the waving flag's.
 void emodel_reconnect_solid(eModel *m);
 
 // eReplacementTextureTable, 28 bytes: one texture a model draws in place

@@ -123,6 +123,15 @@ class RetailMap(object):
         for name, da, dsz, ra, rsz, kind in raw["funcs"]:
             self.funcs[name] = (da, dsz, ra, rsz, kind)
             self.by_demo.setdefault(da, (da, dsz, ra, rsz, kind))
+        # A name at more than one demo address (the copies of an inline
+        # function that each object kept) takes the twin of the copy the
+        # demo's own symbol names, so a stub by name covers the same calls
+        # on both images. eModel's deleting destructor calls the copy of
+        # __dl__6eModelPv at 0x00114978, not the one at 0x00227e20.
+        for name, (a, _sz) in self.demo.syms.items():
+            f = self.funcs.get(name)
+            if f is not None and f[0] != a and a in self.by_demo:
+                self.funcs[name] = self.by_demo[a]
         self.demo_starts = sorted(self.by_demo)
         self.datamap = {da: ra for da, ra in raw["data"]}
         self.weak = {da: ra for da, ra in raw["weak"]}

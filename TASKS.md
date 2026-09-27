@@ -2152,6 +2152,13 @@ phases.
         instructions in retail's eleven readers. All 24 mutations are
         caught.
 
+        **The sixth slice is closed: the solid list's retail pass.**
+        eFixUpTables looks up a ninth texture and fills its palette with a
+        falloff ramp (retail's `0x00103260`), and ReconnectSolid gives a
+        solid with flag 0x20 a random start. `loadertable_check` runs the
+        solid list, the fix-ups and eModel on the retail image, over
+        retail's disc: 137 of 139 mutations caught, 2 equivalent.
+
         The rest is CONTINUE.md's "The road to the full game": the rest
         of the retail data in the viewer (step 4), the retail pass over
         what is ported (step 10), the full frontend (step 16), the saves

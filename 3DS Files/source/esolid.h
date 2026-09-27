@@ -18,10 +18,13 @@
 //   0x34012  its eRigidAnimation, 16-aligned;
 //   0x34011  that animation's labelled frames.
 // The loader compares every child's type and leaves any other alone. The
-// disc's 110 lists hold 1,465 solids, each in a 0x80034002 container with
-// the eSolid first; 332 have light materials, 19 a rigid animation and
-// 13 an animation tree. None has labelled frames, and none is vertex
-// animated.
+// demo disc's 110 lists hold 1,465 solids, each in a 0x80034002 container
+// with the eSolid first; 332 have light materials, 19 a rigid animation
+// and 13 an animation tree. None has labelled frames, and none is vertex
+// animated. The retail bundles' 352 lists hold 28,504, also each with the
+// eSolid first; 1,782 have light materials, 105 a rigid animation and 13
+// an animation tree. None has labelled frames, and 90 are vertex
+// animated: the waving flag's 15 frames on each of TRACKB61..66.
 //
 // Where it depends on what is not ported, it goes through a seam:
 // GetTextureInfo (TexturePack.obj), elGetLightMaterial (the light lists),
@@ -131,8 +134,12 @@ extern int32_t eDirtySolids;
 extern int32_t eDirtyTextures;
 extern int32_t eDirtyAnimations;
 
-// The eight textures eFixUpTables looks up again every time,
-// 0x003227a8 .. 0x003227c4.
+// The nine textures eFixUpTables looks up again every time, retail's
+// gp-25144 .. gp-25112 (the demo's eight at 0x003227a8 .. 0x003227c4).
+// pTextureInfoFalloffRamp is retail's alone, between SpecularFalloff and
+// CarSelectEnvMap. The name is the port's: the hash, 0xb9ab56e4, is of a
+// name no file on either disc holds, and the texture is made at run time,
+// as SHADOWMAP1's is. The renderer reads it after SpecularFalloff.
 extern void *pTextureInfoRVMInfo;
 extern void *pTextureInfoRVMMask;
 extern void *pTextureInfoSolidGrey;
@@ -140,17 +147,21 @@ extern void *pTextureInfoFilterGrey;
 extern void *pTextureInfoShadowMap1;
 extern void *pTextureInfoRadialBlur;
 extern void *pTextureInfoSpecularFalloff;
+extern void *pTextureInfoFalloffRamp;
 extern void *pTextureInfoCarSelectEnvMap;
 
 // The seams.
-extern void *(*gGetTextureInfoFn)(uint32_t name_hash, int use_default);
+extern void *(*gGetTextureInfoFn)(uint32_t name_hash, int use_default,
+                                  int include_unloaded);
 extern void *(*gElGetLightMaterialFn)(uint32_t name_hash);
 extern void (*gFixStripSTsFn)(eSolid *solid);
 extern void (*gCalcAutoKFn)(eSolid *solid);
 extern void (*gReconnectAllAnimationsFn)(void);
 
-// GetTextureInfo(unsigned int, int), 0x001a19b0, through its seam.
-void *get_texture_info(uint32_t name_hash, int use_default);
+// GetTextureInfo(unsigned int, int, int), retail 0x001abf48, through its
+// seam. Every call in this unit and eModel's passes 0 for the third.
+void *get_texture_info(uint32_t name_hash, int use_default,
+                       int include_unloaded);
 
 // eInitSlotPools' third pool (0x00108a8c). Nothing happens when it is
 // already made.
@@ -181,11 +192,26 @@ void esolid_fix_light_material_table(eSolid *s);
 int loader_solid_list(uint8_t *chunk);
 int unloader_solid_list(uint8_t *chunk);
 
-// eFixUpTables, 0x00103790. Nothing while eDisableFixUpTables is set.
-// With solids or textures dirty: with textures dirty, every solid's
-// texture table, STs and mip K again; then every model's solid and
-// replacement textures, the animations, and the eight fixed textures,
-// and all three flags clear. With only animations dirty, the animations.
+// eFixUpTables, retail 0x00103e68 (the demo's 0x00103790). Nothing while
+// eDisableFixUpTables is set. With solids or textures dirty: with textures
+// dirty, every solid's texture table, STs and mip K again; then every
+// model's solid and replacement textures, the animations, the nine fixed
+// textures and efix_falloff_ramp, and all three flags clear. With only
+// animations dirty, the animations. The demo's looked up eight textures
+// and made no ramp.
 void efix_up_tables(void);
+
+// Retail's 0x00103260, which only eFixUpTables calls; the name is the
+// port's. Nothing without pTextureInfoFalloffRamp or its PaletteData.
+// Otherwise each of its PaletteSize / 4 entries (the size shifted
+// arithmetically) is a grey whose four bytes are all v, where for entry i
+// of n
+//     s = max(bSin(i / n * 1.57075 + 1.5707965), 0.01)
+//     v = (int)(p(s) * 128) & 0xff
+// and p is an inlined fast power, the bits of s read as an integer and
+// back, to the power 1.0: s with its low six bits rounded. So the ramp
+// runs from 128 down to 1. A loop of Width empty passes comes first and
+// does nothing.
+void efix_falloff_ramp(void);
 
 #endif

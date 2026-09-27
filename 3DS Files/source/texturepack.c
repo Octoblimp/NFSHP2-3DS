@@ -362,9 +362,10 @@ TextureInfo *GetTextureInfo(uint32_t hash, int use_default,
     return NULL;
 }
 
-void *texturepack_get_texture_info(uint32_t hash, int use_default)
+void *texturepack_get_texture_info(uint32_t hash, int use_default,
+                                   int include_unloaded)
 {
-    return GetTextureInfo(hash, use_default, 0);
+    return GetTextureInfo(hash, use_default, include_unloaded);
 }
 
 TextureInfo *GetNthTextureInfo(int32_t n)

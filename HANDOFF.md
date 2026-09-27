@@ -8179,3 +8179,66 @@ sine ramp. Retail's ReconnectSolid ORs `bRandom(256)` into the start
 time of a solid with flag 0x20, which the 90 frames of TRACKB61..66's
 waving flag carry. GetTextureInfo's new third argument is 0 at every
 call in this unit.
+
+## Session 30, continued (2026-09-27) -- Task 36's sixth slice: the solid list's retail pass
+
+The user: never stop, and get the port to 100%.
+
+- **Nine fixed textures.** Retail's eFixUpTables looks up
+  `0xb9ab56e4` between SpecularFalloff and CarSelectEnvMap. No file on
+  either disc names it: the texture is made at run time, as SHADOWMAP1's
+  is. The port calls it `pTextureInfoFalloffRamp`. Retail's nine sit at
+  gp-25144 .. -25112; most have no twin by the data map, so the checker
+  gives them by retail's gp.
+- **The ramp.** After the lookups, eFixUpTables calls `0x00103260`
+  (`efix_falloff_ramp`). With a texture and a palette, each of
+  `PaletteSize >> 2` entries becomes a grey
+  `(int)(p(max(bSin(i/n * 1.57075 + 1.5707965), 0.01)) * 128) & 0xff`,
+  where p is an inlined fast power to 1.0 (s with its low six bits
+  rounded). It falls from 128 to 1. A loop of `Width` empty passes comes
+  first.
+- **The random start.** Retail's ReconnectSolid, after setting 0xc000,
+  ORs in `bRandom(256)` from `bDefaultSeed` (`0x0025a488`, the one-argument
+  bRandom) when the solid's flag 0x20 is set. The demo's eSolidFlags end
+  at 0x10. On retail's disc 0x20 is only on `XF_FLAG_1_00`, the waving
+  flag's 15 frames on each of TRACKB61..66; its first frame has the rigid
+  animation, trigger 0.
+- **GetTextureInfo's third argument** is 0 at every call in esolid and
+  emodel. The seam is three-argument now, and the harness logs it.
+- **The unloaders.** UnloaderSolidList's `div` became `divu` over a loop
+  index whose quotient is never used, and UnloaderTrackGeometry changed
+  only an address. Nothing to port.
+- **loadertable_check** moved the vertex, layout, fix-up, model, disc and
+  frame scenarios to the retail image. The demo image keeps the walks
+  over probes, the sun and the weather. New scenarios: the random start
+  (nine seeds, solids with and without the flag, rigid animation and
+  trigger), the ramp (fourteen textures), and a list of a header alone:
+  retail's disc has none, and only such a list shows where the unloader's
+  walk starts. The disc scenario takes retail's files but the tracks,
+  plus TRACKB12 and TRACKB61. Those overflow the model's 32 MB, so
+  `OP_MARK` / `OP_RELEASE` give each file's heap back after it. The dump
+  prints `bDefaultSeed` and all nine texture pointers; the demo image,
+  which has no ramp, prints null in its slot.
+- **A retail_model fix.** eModel's deleting destructor calls the copy of
+  `__dl__6eModelPv` at demo `0x00114978`, which the demo's symbol names.
+  The map kept the other copy, at `0x00227e20`, for the name, so on
+  retail the free stub never ran and the pool count drifted. 134 names
+  have more than one demo address and the map had not picked the
+  symbol's. `RetailMap` now takes the twin of the demo symbol's copy, so a
+  stub by name covers the same calls on both images.
+- **Two survivors, fixed.** `efix-ramp-filled-first` added a call instead
+  of moving it, and a second fill is idempotent; it moves the call now.
+  `unload-header-as-container` was caught on the demo by TRACKB12's 55
+  header-only lists; the new header-alone scenario catches it.
+
+```
+loadertable_check  demo 219 ops 1722 lines, retail 37334 ops 49070 lines, 0 differ
+                   139 mutations: 137 caught, 2 equivalent
+```
+
+### Next
+
+The sun's retail pass: LoaderSun's glare record at `0x002ef4c0`,
+StuffSun (0.49), StuffSunGlare (0.66) and SunTrackLoader (0.85). Then
+deploy `extracted-retail/` to Azahar and walk the viewer on retail
+TRACKB12, then TRACKB21 or TRACKB31.

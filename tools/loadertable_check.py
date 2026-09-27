@@ -16,23 +16,39 @@ runs the same op script on the port and prints the same lines.
 **Two images.** The port's tables are retail's: 30 slots, the demo's 31
 without PhysPredict (the demo's slot 20), and HeliSheet taking the
 container 0x80034800 where the demo's took 0x34800. Retail's LoadChunks
-and UnloadChunks differ from the demo's only in that table and count. So
-what shows the table -- the walks through LoadChunks over probes, TRACKB12's
-walk as the image claims it, and the claims -- runs on the retail image
-(retail_model.RetailEmu) over the retail disc (extracted-retail), and
-everything else on the demo image over the demo's disc, as before:
-TraverseChunks and its twin are retail's as they are, and the solid,
-model, sun and weather scenarios load through the tables every chunk of
-which a ported slot takes, where no slot number shows. The one harness
-answers both scripts.
+and UnloadChunks differ from the demo's only in that table and count.
+Retail's eFixUpTables looks up a ninth texture and fills its palette, and
+its ReconnectSolid gives a solid with flag 0x20 a random start. So what
+shows the table -- the walks through LoadChunks over probes, TRACKB12's
+walk as the image claims it, and the claims -- and everything over the
+solid list, eFixUpTables and eModel run on the retail image
+(retail_model.RetailEmu) over the retail disc (extracted-retail). The
+walks over probe tables, the sun and the weather run on the demo image
+over the demo's disc, as before: TraverseChunks and its twin are retail's
+as they are, and the sun and weather scenarios load through the tables
+chunks a ported slot takes, where no slot number shows. The sun's loader
+is still the demo's. The one harness answers both scripts.
 
 **The seams.** What the port leaves to a function pointer the model stubs
-at the same call, and both sides log it: GetTextureInfo (`gti`, which hands
-out ti#0, ti#1, ... or NULL by a rule on the hash), elGetLightMaterial
-(`glm`, lm#0, ...), FixStripSTs, CalcAutoK, ReconnectAllAnimations,
-eLightUpdateTextures, afxUpdateTextures, FlailerPostLoadFixup and
-EmptyFernFlatteners. bBreak is counted. The debugger channel
-(bFunkCallASync, bRemoveCodeineInventory) is a no-op.
+at the same call, and both sides log it: GetTextureInfo (`gti`, with its
+three arguments, which hands out ti#0, ti#1, ... or NULL by a rule on the
+hash, and for the falloff ramp's hash 0xb9ab56e4 the last texture OP_RAMP
+made, tx0, tx1, ..., or NULL), elGetLightMaterial (`glm`, lm#0, ...),
+FixStripSTs, CalcAutoK, ReconnectAllAnimations, eLightUpdateTextures,
+afxUpdateTextures, FlailerPostLoadFixup and EmptyFernFlatteners. bBreak is
+counted. The debugger channel (bFunkCallASync, bRemoveCodeineInventory) is
+a no-op. bRandom runs as shipped, on bDefaultSeed, which OP_SEED sets and
+every dump prints.
+
+**The ramp.** OP_RAMP makes a texture as the image lays one out, Width at
+36, PaletteSize at 60 and PaletteData at 148, with a palette of
+PaletteSize >> 2 words of 0xcd and two guard words, or with none.
+OP_RAMPDUMP prints the palette and the guards.
+
+**The heap.** The retail disc's files add up to more than the model's
+32 MB, so OP_MARK and OP_RELEASE give each disc file's heap back once it
+is unloaded, and forget the labels of what lay there. The harness keeps
+every buffer, and a buffer keeps its number on both sides.
 
 **The pools.** The model's bOMalloc hands out a fresh 272-byte animator
 filled with 0xcd and its two `__dl__`s count what goes back; the harness
@@ -63,15 +79,18 @@ gUnportedLoaderFn, once, with its slot and table.
 
 Scenarios, demo: the walks over a probe table, both ways, over ranges,
 with a chunk nobody takes and the walk after it, with two takers and with
-short tables; every solid list on the disc through the real tables,
-loaded, fixed up and unloaded, with models on TRACKB12's names; slot 14's
-and slot 29's chunks through the tables at each misalignment; built
-lists for vertex animation (with more than 64 frames), duplicate names,
-external rigid animations, labelled frames, every pad and odd sizes;
-eFixUpTables under all 16 flag settings; and eModel's calls. Retail: the
-claims; LoadChunks and UnloadChunks through the tables with probes in
-them, and over retail TRACKB12's top-level chunks claimed as the image
-claims them.
+short tables; and slot 14's and slot 29's chunks through the tables at
+each misalignment. Retail: the claims; LoadChunks and UnloadChunks
+through the tables with probes in them, and over retail TRACKB12's
+top-level chunks claimed as the image claims them; built lists for
+vertex animation (with more than 64 frames), duplicate names, external
+rigid animations, labelled frames, every pad and odd sizes; eFixUpTables
+under all 16 flag settings; eModel's calls; the random start, on solids
+with and without flag 0x20, a rigid animation and its trigger, over nine
+seeds; the ramp at fourteen sizes, widths and palettes; and every solid
+list of the retail disc's files but the tracks, and of TRACKB12's and
+TRACKB61's, loaded, fixed up and unloaded, with models on each track's
+names and three on the waving flag's.
 
     python tools/loadertable_check.py
     python tools/loadertable_check.py --mutate [--only a,b]
@@ -123,10 +142,21 @@ NSLOTS = 31
 SOLIDLIST = GP - 25712
 MODELLIST = GP - 25704
 FLAGS = [GP - 25520, GP - 25516, GP - 25512, GP - 25508]
+# The fixed textures eFixUpTables looks up: the demo's eight, and retail's
+# nine, whose eighth, the falloff ramp, is new. Most of retail's have no
+# twin by the data map, so they are given by retail's gp.
 TI_PTRS = [GP - 25672 + 4 * i for i in range(8)]
-# Slot 14's state: SunInfo and SunPosition.
+RGP = retail_model.RETAIL_GP
+RTI_PTRS = [RGP - 25144 + 4 * i for i in range(9)]
+RAMP_SLOT = 7
+RAMP_HASH = 0xb9ab56e4
+# bDefaultSeed, which retail's ReconnectSolid draws a start time from.
+SEED = 0x00324f90
+# Slot 14's state: SunInfo and SunPosition. SunPosition has no retail twin
+# by the data map; UnloaderSun clears it at retail's 0x002e03c0.
 SUN_INFO = GP - 24144
 SUN_POS = 0x002dfdf0
+RSUN_POS = 0x002e03c0
 SUN_CHUNK = 0x00034202
 # Slot 29's state: WeatherRegionLists and WeatherRegionInactiveList, which
 # the static constructor links to themselves.
@@ -238,14 +268,16 @@ RETAIL_TABLES = Tables(RNSLOTS, RCLAIMS, RTAKER, RPORTED)
  OP_CLAIMS, OP_CLAIM, OP_SWAP, OP_TRAVERSE, OP_LOAD, OP_CALL, OP_FIXUP,
  OP_SET, OP_DUMP, OP_MNEW, OP_MINIT, OP_MUNINIT, OP_MDELETE, OP_MRECON,
  OP_MRTT, OP_MAPPLY, OP_MALL, OP_MPOKE, OP_MDUMP, OP_REPL, OP_RENT,
- OP_FIND, OP_MATRIX) = range(30)
+ OP_FIND, OP_MATRIX, OP_RAMP, OP_RAMPDUMP, OP_SEED, OP_MARK,
+ OP_RELEASE) = range(35)
 
 ARGS = {OP_TAG: 1, OP_BUF: 1, OP_BULK: 2, OP_OPEN: 1, OP_CLOSE: 0,
         OP_BUFEND: 0, OP_CLAIMS: 0, OP_CLAIM: 3, OP_SWAP: 1,
         OP_TRAVERSE: 4, OP_LOAD: 2, OP_CALL: 2, OP_FIXUP: 1, OP_SET: 2,
         OP_DUMP: 0, OP_MNEW: 1, OP_MINIT: 2, OP_MUNINIT: 1, OP_MDELETE: 2,
         OP_MRECON: 1, OP_MRTT: 1, OP_MAPPLY: 1, OP_MALL: 0, OP_MPOKE: 3,
-        OP_MDUMP: 1, OP_REPL: 2, OP_RENT: 8, OP_FIND: 1, OP_MATRIX: 4}
+        OP_MDUMP: 1, OP_REPL: 2, OP_RENT: 8, OP_FIND: 1, OP_MATRIX: 4,
+        OP_RAMP: 3, OP_RAMPDUMP: 1, OP_SEED: 1, OP_MARK: 0, OP_RELEASE: 0}
 
 K_S, K_SE, K_SD, K_TT, K_TR, K_LF, K_RA, K_LM, K_HD = range(9)
 KIND = ["s", "se", "sd", "tt", "tr", "lf", "ra", "lm", "hd"]
@@ -649,39 +681,80 @@ def scenario_trackb12_walk(sc, path, tables):
     for t, k in sorted(tables.taker.items()):
         claim(sc, k, t)
     sc.op(OP_SWAP, 1)
+    sc.op(OP_MARK)
     b = Buf(sc, 0)
     for t, pos, s in top_chunks(d):
         b.bulk(t, s)
     b.end()
     sc.op(OP_LOAD, 0, 0)
     sc.op(OP_LOAD, 1, 0)
+    sc.op(OP_RELEASE)
     sc.op(OP_SWAP, 0)
     return True
 
 
-def scenario_disc_lists(sc, files):
-    names = {}
+def disc_solids(d, lists):
+    """Each solid in the lists: (its name, its flags)."""
+    out = []
+    for pos, s in lists:
+        c, end = pos + 8, pos + 8 + s
+        while c < end:
+            t, n = struct.unpack_from("<II", d, c)
+            if t == SOLID_CONTAINER:
+                g = c + 8
+                gt, gs = struct.unpack_from("<II", d, g)
+                if gt == 0x00034003:
+                    off = g + 8 + pad16(g + 8)
+                    out.append(struct.unpack_from("<I", d, off + 8)[0:1]
+                               + struct.unpack_from("<H", d, off + 48))
+            c += 8 + n
+    return out
+
+
+def disc_model_names(rel, d, lists):
+    """The names the models go on for a track: the first solid of each of
+    its full lists (most of a demo track's lists are a header alone), one
+    missing, the first again, and three on each name with flag 0x20, so
+    that retail's ReconnectSolid draws their start times."""
+    if rel not in ("TRACKS/TRACKB12.BUN", "TRACKS/TRACKB61.BUN"):
+        return None
+    hs = []
+    full = [(pos, s) for pos, s in lists if s > 60]
+    for pos, s in full:
+        c = pos + 8
+        c += 8 + struct.unpack_from("<I", d, c + 4)[0]
+        g = c + 8
+        off = g + 8 + pad16(g + 8)
+        hs.append(struct.unpack_from("<I", d, off + 8)[0])
+    hs += [0x12345678, hs[0]]
+    for h in sorted({h for h, fl in disc_solids(d, lists) if fl & 0x20}):
+        hs += [h, h, h]
+    return hs
+
+
+def retail_disc_subset(files):
+    """Every file but the tracks, and of the tracks TRACKB12 and TRACKB61,
+    whose waving flag has flag 0x20. All 30 tracks would be too long."""
+    keep = ("TRACKS/TRACKB12.BUN", "TRACKS/TRACKB61.BUN")
+    return [(rel, d) for rel, d in files
+            if not rel.startswith("TRACKS/") or rel in keep]
+
+
+def scenario_disc_lists(sc, files, seed=None):
     for rel, d in files:
         lists = [(pos, s) for t, pos, s in top_chunks(d) if t == SOLID_LIST]
         if not lists:
             continue
         sc.tag("disc: " + rel)
-        if rel == "TRACKS/TRACKB12.BUN":
-            # Models on some of the track's names, one missing, one twice.
-            # Most of the track's lists are a header alone.
-            hs = []
-            full = [(pos, s) for pos, s in lists if s > 60]
-            for pos, s in full:
-                c = pos + 8
-                c += 8 + struct.unpack_from("<I", d, c + 4)[0]
-                g = c + 8
-                off = g + 8 + pad16(g + 8)
-                hs.append(struct.unpack_from("<I", d, off + 8)[0])
-            hs += [0x12345678, hs[0]]
-            for i, h in enumerate(hs):
-                sc.op(OP_MNEW, 100 + i)
-                sc.op(OP_MINIT, 100 + i, h)
-            names["b12"] = len(hs)
+        # The retail disc's files add up to more than the model's heap,
+        # so each one's is given back once it is unloaded.
+        sc.op(OP_MARK)
+        hs = disc_model_names(rel, d, lists)
+        if seed is not None:
+            sc.op(OP_SEED, seed)
+        for i, h in enumerate(hs or []):
+            sc.op(OP_MNEW, 100 + i)
+            sc.op(OP_MINIT, 100 + i, h)
         b = Buf(sc, lists[0][0] % 16)
         for pos, s in lists:
             emit_disc_list(b, d, pos, s)
@@ -692,10 +765,11 @@ def scenario_disc_lists(sc, files):
         sc.op(OP_LOAD, 1, 0)
         sc.op(OP_FIXUP, 1)
         sc.op(OP_DUMP)
-        if rel == "TRACKS/TRACKB12.BUN":
-            for i in range(names["b12"]):
+        if hs:
+            for i in range(len(hs)):
                 sc.op(OP_MDELETE, 100 + i, 3)
             sc.op(OP_DUMP)
+        sc.op(OP_RELEASE)
 
 
 def scenario_sun(sc, files):
@@ -889,6 +963,19 @@ def scenario_layout(sc):
     sc.op(OP_CALL, 1, 0)
     sc.op(OP_DUMP)
 
+    # The unloader sets eDirtySolids for each chunk after the header, so
+    # only a list that is a header alone shows where its walk starts. The
+    # demo's TRACKB12 had 55 of them; retail's disc has none.
+    sc.tag("layout: a header alone")
+    b = Buf(sc, 4)
+    solid_list(b, "alone.bin", [])
+    b.end()
+    sc.op(OP_FIXUP, 0)
+    sc.op(OP_CALL, 0, 0)
+    sc.op(OP_DUMP)
+    sc.op(OP_CALL, 1, 0)
+    sc.op(OP_DUMP)
+
 
 def scenario_fixup(sc):
     b = Buf(sc, 0)
@@ -938,6 +1025,119 @@ def scenario_fixup(sc):
     sc.op(OP_DUMP)
     for i in range(3):
         sc.op(OP_MDELETE, 10 + i, 1)
+    sc.op(OP_DUMP)
+
+
+def scenario_random(sc):
+    """Retail's ReconnectSolid: a model on a solid with flag 0x20 and a
+    rigid animation that is not triggerable starts at 0xc000 ORed with
+    bRandom(256) from bDefaultSeed. The seed is set, and each model has
+    its solid taken away and reconnects, so every one draws again."""
+    R = 0x9000
+    b = Buf(sc, 0)
+    solid_list(b, "random.bin", [
+        Solid(R, 0x20, tex=[0x900], rigid=(R, 0)),
+        Solid(R + 1, 0x20, tex=[0x901], rigid=(R + 1, 1)),
+        Solid(R + 2, 0x20, tex=[0x902]),
+        Solid(R + 3, 0x30, tex=[0x903], rigid=(R + 3, 0)),
+        Solid(R + 3, 0x30, tex=[0x904]),
+        Solid(R + 3, 0x30, tex=[0x905]),
+        Solid(R + 4, 0x00, tex=[0x906], rigid=(R + 4, 0)),
+        Solid(R + 5, 0xffdf, tex=[0x907], rigid=(R + 5, 0)),
+        Solid(R + 6, 0x0020 | 0xff00, tex=[0x908], rigid=(R + 6, 0)),
+        Solid(R + 7, 0x20, tex=[0x909], rigid=(R + 7, 0x80)),
+        Solid(R + 8, 0x10, tex=[0x90a], rigid=(R + 8, 0)),
+        Solid(R + 8, 0x30, tex=[0x90b]),
+    ])
+    b.end()
+    names = [R, R, R, R + 1, R + 2, R + 3, R + 3, R + 4, R + 5, R + 6,
+             R + 7, R + 8, 0x9999]
+    ms = [40 + i for i in range(len(names))]
+    sc.tag("random start: models on the solids")
+    sc.op(OP_SEED, 0x12345678)
+    sc.op(OP_CALL, 0, 0)
+    for m, h in zip(ms, names):
+        sc.op(OP_MNEW, m)
+        sc.op(OP_MINIT, m, h)
+    sc.op(OP_DUMP)
+    sc.tag("random start: reconnect keeps it")
+    for m in ms:
+        sc.op(OP_MRECON, m)
+    sc.op(OP_MPOKE, ms[0], 5, 0x1234)
+    sc.op(OP_MRECON, ms[0])
+    sc.op(OP_MDUMP, ms[0])
+    for seed in (0, 1, 0xffffffff, 0x1d872b41, 0x80000000, 0x7fffffff,
+                 0xdeadbeef, 0x000000ff, 0x00000100):
+        sc.tag("random start: seed %08x" % seed)
+        sc.op(OP_SEED, seed)
+        for m in ms:
+            sc.op(OP_MPOKE, m, 5, 0x0f0f)
+            sc.op(OP_MPOKE, m, 1, -1)
+            sc.op(OP_MRECON, m)
+        sc.op(OP_DUMP)
+    sc.tag("random start: through eFixUpTables")
+    sc.op(OP_SEED, 0x0badf00d)
+    for m in ms[::2]:
+        sc.op(OP_MPOKE, m, 1, -1)
+    sc.op(OP_SET, 1, 1)
+    sc.op(OP_FIXUP, 0)
+    sc.op(OP_DUMP)
+    sc.tag("random start: the solids go")
+    sc.op(OP_CALL, 1, 0)
+    sc.op(OP_FIXUP, 0)
+    sc.op(OP_DUMP)
+    for m in ms:
+        sc.op(OP_MDELETE, m, 3)
+    sc.op(OP_DUMP)
+
+
+def scenario_ramp(sc):
+    """Retail's eFixUpTables fills the falloff ramp's palette after it
+    looks the ninth texture up. The lookup hands out OP_RAMP's last
+    texture, tx0, tx1, ..., and the dump prints its palette with the two
+    guard words after it."""
+    sc.tag("ramp: no texture")
+    sc.op(OP_SET, 0, 0)
+    sc.op(OP_SET, 1, 1)
+    sc.op(OP_FIXUP, 0)
+    sc.op(OP_DUMP)
+    k = 0
+    for mode, size, width in ((1, 64, 0), (1, 1024, 1), (1, 6, -1),
+                              (1, 4, 5000), (1, 3, 2), (1, 0, 0),
+                              (1, -4, 3), (2, 64, 0), (1, 8, 0x7fff),
+                              (1, 7, -32768), (1, 1028, 0), (1, 4096, 0),
+                              (1, 20, 0x8001), (2, 0, 1)):
+        sc.tag("ramp: mode %d size %d width %d" % (mode, size, width))
+        sc.op(OP_RAMP, mode, size, width)
+        sc.op(OP_SET, 1, 1)
+        sc.op(OP_FIXUP, 0)
+        sc.op(OP_RAMPDUMP, k)
+        sc.op(OP_DUMP)
+        k += 1
+    # A new texture, and eFixUpTables with nothing dirty, then disabled:
+    # the ramp stays as it was, and the lookup still has the last.
+    sc.tag("ramp: nothing dirty")
+    sc.op(OP_RAMP, 1, 32, 0)
+    sc.op(OP_SET, 1, 0)
+    sc.op(OP_FIXUP, 0)
+    sc.op(OP_RAMPDUMP, k)
+    sc.op(OP_SET, 0, 1)
+    sc.op(OP_SET, 1, 1)
+    sc.op(OP_FIXUP, 0)
+    sc.op(OP_RAMPDUMP, k)
+    sc.op(OP_DUMP)
+    sc.op(OP_SET, 0, 0)
+    sc.op(OP_SET, 3, 1)
+    sc.op(OP_FIXUP, 0)
+    sc.op(OP_RAMPDUMP, k)
+    sc.op(OP_SET, 2, 1)
+    sc.op(OP_FIXUP, 0)
+    sc.op(OP_RAMPDUMP, k)
+    sc.op(OP_DUMP)
+    sc.tag("ramp: taken away")
+    sc.op(OP_RAMP, 0, 0, 0)
+    sc.op(OP_SET, 1, 1)
+    sc.op(OP_FIXUP, 0)
     sc.op(OP_DUMP)
 
 
@@ -1081,24 +1281,34 @@ def script(files=None):
         sc.op(OP_SET, var, 0)
     sc.op(OP_DUMP)
     scenario_walks(sc)
-    scenario_vertex(sc)
-    scenario_layout(sc)
-    scenario_fixup(sc)
-    scenario_models(sc)
-    scenario_disc_lists(sc, files)
     scenario_sun(sc, files)
     scenario_weather(sc)
-    scenario_frames(sc)
     return sc
 
 
 def retail_script(files=None):
-    """What runs on the retail image: what shows the table."""
+    """What runs on the retail image: what shows the table, and the solid
+    list, eFixUpTables and eModel, which retail changed."""
     if files is None:
         files = disc_files(RETAIL_EXTRACTED)
     sc = Script()
+    sc.tag("start")
+    for var in range(4):
+        sc.op(OP_SET, var, 0)
+    sc.op(OP_DUMP)
     scenario_load_walk(sc, RETAIL_TABLES)
     sc.b12 = scenario_trackb12_walk(sc, RETAIL_TRACKB12, RETAIL_TABLES)
+    scenario_vertex(sc)
+    scenario_layout(sc)
+    scenario_fixup(sc)
+    scenario_models(sc)
+    scenario_random(sc)
+    scenario_ramp(sc)
+    scenario_disc_lists(sc, retail_disc_subset(files), seed=0x5eed5eed)
+    # Last but the claims: it leaves its list loaded.
+    scenario_frames(sc)
+    # The claims run on an image of their own, and the harness's loaders
+    # change what they are handed, so nothing dumps after them.
     scenario_matrix(sc, files, RETAIL_TABLES)
     return sc
 
@@ -1120,9 +1330,16 @@ class Model(object):
         e = self.e = retail_model.emu(retail, ieee=True)
         e.stub_bware()
         self.LOADERS, self.UNLOADERS = e.data(LOADERS), e.data(UNLOADERS)
-        # The retail script dumps nothing, so needs no weather lists.
-        if not retail:
-            e.call(WEATHER_CTOR, limit=1000)
+        self.SOLIDLIST, self.MODELLIST = e.data(SOLIDLIST), e.data(MODELLIST)
+        self.FLAGS = [e.data(a) for a in FLAGS]
+        self.SUN_INFO = e.data(SUN_INFO)
+        self.SUN_POS = RSUN_POS if retail else SUN_POS
+        self.SEED = e.data(SEED)
+        self.WEATHER_LISTS = [e.data(a) for a in WEATHER_LISTS]
+        # The demo has no ramp, which prints as null.
+        self.TI_PTRS = RTI_PTRS if retail else (
+            TI_PTRS[:RAMP_SLOT] + [None] + TI_PTRS[RAMP_SLOT:])
+        e.call(e.code(WEATHER_CTOR), limit=1000)
         self.fn = {k: e.addr_of(v) for k, v in SYM.items()}
         self.recs = []          # sorted (start, size, kind, idx)
         self.rec_starts = []
@@ -1142,10 +1359,11 @@ class Model(object):
         self.claims = {}
         self.saved = None
         self.m = None
-        for head in (SOLIDLIST, MODELLIST):
-            if not retail:
-                e.put32(head, head)
-                e.put32(head + 4, head)
+        self.ramps = []         # (texture, palette, count)
+        self.ramp_now = 0
+        for head in (self.SOLIDLIST, self.MODELLIST):
+            e.put32(head, head)
+            e.put32(head + 4, head)
         self.probe_table = e.alloc(4 * NSLOTS, 16)
         for k in range(NSLOTS):
             e.put32(self.probe_table + 4 * k, PROBE_BASE + 8 * k)
@@ -1178,12 +1396,12 @@ class Model(object):
         for i in range(len(self.bufs) - 1, -1, -1):
             if a == self.bufs[i][0] + self.bufs[i][1]:
                 return "b%d.end" % i
-        if a == SOLIDLIST:
+        if a == self.SOLIDLIST:
             return "SL"
-        if a == MODELLIST:
+        if a == self.MODELLIST:
             return "ML"
-        if a in WEATHER_LISTS:
-            return WEATHER_NAMES[WEATHER_LISTS.index(a)]
+        if a in self.WEATHER_LISTS:
+            return WEATHER_NAMES[self.WEATHER_LISTS.index(a)]
         for i in sorted(self.models, reverse=True):
             if a == self.models[i]:
                 return "m%d" % i
@@ -1191,6 +1409,9 @@ class Model(object):
             p, n = self.repl[i]
             if p <= a < p + 28 * n:
                 return "r%d" % i if a == p else "r%d+%d" % (i, a - p)
+        for i in range(len(self.ramps) - 1, -1, -1):
+            if a == self.ramps[i][0]:
+                return "tx%d" % i
         if TI_BASE <= a < TI_BASE + NTI:
             return "ti#%d" % (a - TI_BASE)
         if LM_BASE <= a < LM_BASE + NLM:
@@ -1217,13 +1438,15 @@ class Model(object):
             return e.reg[4 + i] & M32
 
         def gti(em):
-            h, use = arg(0), s32(arg(1))
-            if h == 0 or h % 7 == 3 or (not use and h % 3 == 0):
+            h, use, unl = arg(0), s32(arg(1)), s32(arg(2))
+            if h == RAMP_HASH:
+                r = self.ramp_now
+            elif h == 0 or h % 7 == 3 or (not use and h % 3 == 0):
                 r = 0
             else:
                 r = TI_BASE + self.nti
                 self.nti += 1
-            self.emit("  gti %08x %d %s" % (h, use, self.label(r)))
+            self.emit("  gti %08x %d %d %s" % (h, use, unl, self.label(r)))
             return r
 
         def glm(em):
@@ -1404,6 +1627,45 @@ class Model(object):
                 m.stubs[fn] = saved
         self.emit("  m %d %d %08x %s" % (table, slot, t, r))
 
+    def release(self, mark):
+        """The heap back to `mark`, and every label of what lay past it
+        forgotten, so nothing new is named for what was there. A buffer
+        keeps its number, as the harness's do."""
+        e = self.e
+        keep = [i for i, r in enumerate(self.recs) if r[0] < mark]
+        self.recs = [self.recs[i] for i in keep]
+        self.rec_starts = [self.rec_starts[i] for i in keep]
+        keep = [i for i, r in enumerate(self.tops) if r[0] < mark]
+        self.tops = [self.tops[i] for i in keep]
+        self.top_starts = [self.top_starts[i] for i in keep]
+        self.bufs = [b if b[0] < mark else (0, 0, b[2]) for b in self.bufs]
+        self.models = {i: p for i, p in self.models.items() if p < mark}
+        self.repl = {i: r for i, r in self.repl.items() if r[0] < mark}
+        self.vas = {p for p in self.vas if p < mark}
+        e._heap = mark
+
+    # ---- the ramp --------------------------------------------------------
+
+    def ramp(self, mode, size, width):
+        """A TextureInfo as the image lays it out, for the lookup to hand
+        out: Width at 36, PaletteSize at 60, PaletteData at 148."""
+        e = self.e
+        if mode == 0:
+            self.ramp_now = 0
+            return
+        t = e.alloc(164, 16)
+        e.mem[t:t + 164] = bytes(164)
+        struct.pack_into("<H", e.mem, t + 36, width & 0xffff)
+        struct.pack_into("<i", e.mem, t + 60, size)
+        n = max(size >> 2, 0)
+        pal = 0
+        if mode == 1:
+            pal = e.alloc(4 * (n + 2), 16)
+            e.mem[pal:pal + 4 * (n + 2)] = b"\xcd" * (4 * (n + 2))
+            e.put32(t + 148, pal)
+        self.ramps.append((t, pal, n))
+        self.ramp_now = t
+
     # ---- the dumps -------------------------------------------------------
 
     def is_rec(self, a, kind):
@@ -1507,16 +1769,19 @@ class Model(object):
 
     def dump(self):
         e, L = self.e, self.label
-        self.emit("  flags dis %d solids %d tex %d anim %d"
-                  % tuple(s32(e.u32(a)) for a in FLAGS))
-        self.emit("  ti " + " ".join(L(e.u32(a)) for a in TI_PTRS))
+        self.emit("  flags dis %d solids %d tex %d anim %d seed %08x"
+                  % (tuple(s32(e.u32(a)) for a in self.FLAGS)
+                     + (e.u32(self.SEED),)))
+        self.emit("  ti " + " ".join(L(e.u32(a) if a else 0)
+                                     for a in self.TI_PTRS))
         self.emit("  sun %s pos %08x %08x %08x"
-                  % ((L(e.u32(SUN_INFO)),)
-                     + tuple(e.u32(SUN_POS + 4 * k) for k in range(3))))
+                  % ((L(e.u32(self.SUN_INFO)),)
+                     + tuple(e.u32(self.SUN_POS + 4 * k) for k in range(3))))
         self.emit("  weather " + " ".join(
-            "%s/%s" % (L(e.u32(h)), L(e.u32(h + 4))) for h in WEATHER_LISTS))
+            "%s/%s" % (L(e.u32(h)), L(e.u32(h + 4)))
+            for h in self.WEATHER_LISTS))
         seen = []
-        for s in self.walk_list(SOLIDLIST, "solids"):
+        for s in self.walk_list(self.SOLIDLIST, "solids"):
             self.dump_solid(s)
             va = e.u32(s + 44)
             if va in self.vas and va not in seen and len(seen) < 64:
@@ -1526,7 +1791,7 @@ class Model(object):
                           % (L(va), s32(e.u32(va + 8)), n,
                              "".join(" " + L(e.u32(va + 16 + 4 * i))
                                      for i in range(min(n, 64)))))
-        for m in self.walk_list(MODELLIST, "models"):
+        for m in self.walk_list(self.MODELLIST, "models"):
             self.dump_model(m)
         self.emit("  pools va %d model %d" % (self.va_count, self.model_count))
 
@@ -1599,7 +1864,7 @@ class Model(object):
             elif code == OP_FIXUP:
                 self.call(("efix", "fixup", "hot")[a[0]])
             elif code == OP_SET:
-                e.put32(FLAGS[a[0]], a[1])
+                e.put32(self.FLAGS[a[0]], a[1])
             elif code == OP_DUMP:
                 self.dump()
             elif code == OP_MNEW:
@@ -1650,6 +1915,21 @@ class Model(object):
                 self.emit("  find %08x %s" % (a[0] & M32, self.label(r)))
             elif code == OP_MATRIX:
                 self.matrix(a[0], a[1], a[2] & M32, a[3])
+            elif code == OP_RAMP:
+                self.ramp(*a)
+            elif code == OP_RAMPDUMP:
+                t, pal, n = self.ramps[a[0]]
+                if not pal:
+                    self.emit("  %s pal none" % self.label(t))
+                else:
+                    self.emit("  %s pal%s" % (self.label(t), "".join(
+                        " %08x" % e.u32(pal + 4 * k) for k in range(n + 2))))
+            elif code == OP_SEED:
+                e.put32(self.SEED, a[0])
+            elif code == OP_MARK:
+                self.mark = e._heap
+            elif code == OP_RELEASE:
+                self.release(self.mark)
             else:
                 raise ValueError("op %d" % code)
         return self.out
@@ -1848,8 +2128,8 @@ MUTATIONS = [
      "        eDirtySolids = 1;\n        last = SolidList.prev;",
      "        last = SolidList.prev;"),
     ("tt-no-default", ESC,
-     "t->pTextureInfo = get_texture_info(t->NameHash, 1);",
-     "t->pTextureInfo = get_texture_info(t->NameHash, 0);"),
+     "t->pTextureInfo = get_texture_info(t->NameHash, 1, 0);",
+     "t->pTextureInfo = get_texture_info(t->NameHash, 0, 0);"),
     ("lm-not-looked-up", ESC,
      "e->LightMaterial = get_light_material(e->NameHash);",
      "e->LightMaterial = NULL;"),
@@ -1893,13 +2173,73 @@ MUTATIONS = [
      "        emodel_reconnect_all_models();\n"
      "        if (gReconnectAllAnimationsFn != NULL)",
      "        if (gReconnectAllAnimationsFn != NULL)"),
-    ("efix-mask-default", ESC, "get_texture_info(0xcf29d0dfu, 0);",
-     "get_texture_info(0xcf29d0dfu, 1);"),
+    ("efix-mask-default", ESC, "get_texture_info(0xcf29d0dfu, 0, 0);",
+     "get_texture_info(0xcf29d0dfu, 1, 0);"),
     ("efix-blur-shadow", ESC,
-     "pTextureInfoShadowMap1 = get_texture_info(0xbad886d4u, 0);\n"
-     "        pTextureInfoRadialBlur = get_texture_info(0xab9a6e21u, 0);",
-     "pTextureInfoShadowMap1 = get_texture_info(0xab9a6e21u, 0);\n"
-     "        pTextureInfoRadialBlur = get_texture_info(0xbad886d4u, 0);"),
+     "pTextureInfoShadowMap1 = get_texture_info(0xbad886d4u, 0, 0);\n"
+     "        pTextureInfoRadialBlur = get_texture_info(0xab9a6e21u, 0, 0);",
+     "pTextureInfoShadowMap1 = get_texture_info(0xab9a6e21u, 0, 0);\n"
+     "        pTextureInfoRadialBlur = get_texture_info(0xbad886d4u, 0, 0);"),
+    ("efix-grey-unloaded", ESC, "get_texture_info(0x32283a11u, 0, 0);",
+     "get_texture_info(0x32283a11u, 0, 1);"),
+    ("gti-third-dropped", ESC,
+     "return gGetTextureInfoFn(name_hash, use_default, include_unloaded);",
+     "return gGetTextureInfoFn(name_hash, use_default, 1);"),
+    ("tt-unloaded", ESC,
+     "t->pTextureInfo = get_texture_info(t->NameHash, 1, 0);",
+     "t->pTextureInfo = get_texture_info(t->NameHash, 1, 1);"),
+    # ---- esolid.c: the ninth texture and its ramp
+    ("efix-ramp-hash", ESC, "get_texture_info(0xb9ab56e4u, 0, 0);",
+     "get_texture_info(0xb9ab56e5u, 0, 0);"),
+    ("efix-ramp-default", ESC, "get_texture_info(0xb9ab56e4u, 0, 0);",
+     "get_texture_info(0xb9ab56e4u, 1, 0);"),
+    ("efix-ramp-last", ESC,
+     "        pTextureInfoFalloffRamp = get_texture_info(0xb9ab56e4u, 0, 0);\n"
+     "        pTextureInfoCarSelectEnvMap = get_texture_info(0x4ecc769cu, 0, 0);",
+     "        pTextureInfoCarSelectEnvMap = get_texture_info(0x4ecc769cu, 0, 0);\n"
+     "        pTextureInfoFalloffRamp = get_texture_info(0xb9ab56e4u, 0, 0);"),
+    ("efix-ramp-gone", ESC,
+     "        pTextureInfoFalloffRamp = get_texture_info(0xb9ab56e4u, 0, 0);\n",
+     ""),
+    ("efix-ramp-not-filled", ESC, "        efix_falloff_ramp();\n", ""),
+    ("efix-ramp-filled-first", ESC, [
+        ("        efix_falloff_ramp();\n", "", 1),
+        ("        emodel_reconnect_all_models();\n"
+         "        if (gReconnectAllAnimationsFn != NULL)\n"
+         "            gReconnectAllAnimationsFn();\n"
+         "        pTextureInfoRVMInfo",
+         "        efix_falloff_ramp();\n"
+         "        emodel_reconnect_all_models();\n"
+         "        if (gReconnectAllAnimationsFn != NULL)\n"
+         "            gReconnectAllAnimationsFn();\n"
+         "        pTextureInfoRVMInfo", 1)]),
+    ("ramp-no-texture-test", ESC,
+     "    if (t == NULL)\n        return;\n    // A loop", "    // A loop"),
+    ("ramp-no-palette-test", ESC, "if (pal == NULL || n <= 0)",
+     "if (n <= 0)"),
+    ("ramp-count-logical", ESC, "n = t->PaletteSize >> 2;",
+     "n = (int32_t)((uint32_t)t->PaletteSize >> 2);"),
+    ("ramp-count-bytes", ESC, "n = t->PaletteSize >> 2;",
+     "n = t->PaletteSize >> 3;"),
+    ("ramp-over-n-less-1", ESC, "(float)i / (float)n * 1.57075f",
+     "(float)i / (float)(n - 1) * 1.57075f"),
+    ("ramp-span", ESC, "* 1.57075f + 1.5707965f;", "* 1.5708f + 1.5707965f;"),
+    ("ramp-phase", ESC, "* 1.57075f + 1.5707965f;", "* 1.57075f + 1.5f;"),
+    ("ramp-floor", ESC, "if (s < 0.01f)\n            s = 0.01f;",
+     "if (s < 0.02f)\n            s = 0.02f;"),
+    ("ramp-no-floor", ESC, "if (s < 0.01f)\n            s = 0.01f;", ""),
+    ("ramp-no-power", ESC, "        memcpy(&r, &w, sizeof r);\n",
+     "        r = s;\n        (void)w;\n"),
+    ("ramp-128", ESC, "ee_trunc_w(r * 128.0f) & 0xff;",
+     "ee_trunc_w(r * 127.0f) & 0xff;"),
+    ("ramp-rounds", ESC, "ee_trunc_w(r * 128.0f) & 0xff;",
+     "ee_trunc_w(r * 128.0f + 0.5f) & 0xff;"),
+    ("ramp-mask", ESC, "ee_trunc_w(r * 128.0f) & 0xff;",
+     "ee_trunc_w(r * 128.0f) & 0x7f;"),
+    ("ramp-no-alpha", ESC, "pal[i] = (uint32_t)v << 24 | (uint32_t)v",
+     "pal[i] = (uint32_t)v"),
+    ("ramp-one-short", ESC, "    for (i = 0; i < n; i++) {\n        float x",
+     "    for (i = 1; i < n; i++) {\n        float x"),
     ("efix-anim-kept", ESC,
      "        eDirtyTextures = 0;\n        eDirtyAnimations = 0;\n",
      "        eDirtyTextures = 0;\n"),
@@ -1922,8 +2262,22 @@ MUTATIONS = [
     ("recon-trigger-byte", EMC, "solid->pRigidAnimation[2] != 0",
      "solid->pRigidAnimation[3] != 0"),
     ("recon-start", EMC, "(int16_t)0xc000;", "(int16_t)0x8000;"),
-    ("rtt-no-default", EMC, "get_texture_info(r->NewNameHash, 1);",
-     "get_texture_info(r->NewNameHash, 0);"),
+    ("recon-random-flag", EMC, "#define SOLID_RANDOM_START  0x0020u",
+     "#define SOLID_RANDOM_START  0x0010u"),
+    ("recon-random-gone", EMC,
+     "    if (!(solid->Flags & SOLID_RANDOM_START))\n        return;",
+     "    return;"),
+    ("recon-random-always", EMC,
+     "    if (!(solid->Flags & SOLID_RANDOM_START))\n        return;", ""),
+    ("recon-random-stored", EMC,
+     "        (uint16_t)m->RigidAnimationStartTime\n        | ",
+     "        "),
+    ("recon-random-range", EMC, "bRandomI(256, &bDefaultSeed)",
+     "bRandomI(255, &bDefaultSeed)"),
+    ("rtt-no-default", EMC, "get_texture_info(r->NewNameHash, 1, 0);",
+     "get_texture_info(r->NewNameHash, 0, 0);"),
+    ("rtt-unloaded", EMC, "get_texture_info(r->NewNameHash, 1, 0);",
+     "get_texture_info(r->NewNameHash, 1, 1);"),
     ("rtt-slot-kept", EMC, "        *slot = -1;\n", ""),
     ("rtt-last-match", EMC,
      "                *slot = (int8_t)k;\n                break;",

@@ -303,9 +303,10 @@ int SwapTextureInfoNames(uint32_t a, uint32_t b);
 // this build.
 void MaybePrintUnusedTextures(void);
 
-// GetTextureInfo in the shape of esolid.h's seam, gGetTextureInfoFn:
-// loaded records only, as every retail seam caller asks.
-void *texturepack_get_texture_info(uint32_t hash, int use_default);
+// GetTextureInfo in the shape of esolid.h's seam, gGetTextureInfoFn. Every
+// retail caller through the seam asks for loaded records only.
+void *texturepack_get_texture_info(uint32_t hash, int use_default,
+                                   int include_unloaded);
 
 // TextureAnimPack::TextureAnimPack(TextureAnim *, TextureAnimEntry *,
 // int, int), 0x001a1650 (retail 0x001abbe8): each flipbook's frames, in

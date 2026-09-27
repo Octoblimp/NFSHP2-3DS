@@ -142,8 +142,9 @@ demo's. Two checkers have it so far:
 
 - `track_check.py`: the track info is retail's; the topology is still the
   demo's.
-- `loadertable_check.py`: the claims, and the walks through LoadChunks,
-  are retail's.
+- `loadertable_check.py`: the claims, the walks through LoadChunks, the
+  solid list, eFixUpTables and eModel are retail's; the walks over probe
+  tables, the sun and the weather are still the demo's.
 
 `trackroute_check.py` is a hand-written model rather than an image run,
 so its retail pass rewrote the model to retail's disassembly and added a
@@ -238,3 +239,11 @@ What the port has taken on so far:
   adds a rename (`0x001ac4d8`) and a swap of two names (`0x001ac548`),
   which ServiceGameFlow uses to put DYNTEX's French loading screen and
   logo in for the English ones. See `formats/texture-pack.md`, "Retail".
+- **The solid list** loads as the demo's did. UnloaderSolidList and
+  UnloaderTrackGeometry differ only in an address and in a `divu` whose
+  result is never used. Retail's eFixUpTables looks up a ninth texture,
+  `0xb9ab56e4`, whose name no file holds, and fills its palette with a
+  falloff ramp at `0x00103260`: 128 down to 1 over a quarter turn of sine.
+  Retail's ReconnectSolid ORs `bRandom(256)` into the start time of a
+  model whose solid has flag `0x20`, which only the 90 frames of
+  TRACKB61..66's waving flag carry. See `formats/loader-table.md`.

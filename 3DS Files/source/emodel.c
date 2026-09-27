@@ -4,8 +4,15 @@
 
 #include <stddef.h>
 
+#include "bmath.h"
 #include "bslotpool.h"
 #include "esolid.h"
+
+// eSolid's Flags bit 0x20, retail's alone and named by the port: the
+// eSolidFlags enum ends at 0x10 in the demo's stab. Retail's discs set it
+// only with ESOLID_VERTEX_ANIMATION, on the 90 frames of TRACKB61..66's
+// waving flag, and ReconnectSolid is its one reader.
+#define SOLID_RANDOM_START  0x0020u
 
 void *eFindSolid(uint32_t name_hash)
 {
@@ -38,6 +45,13 @@ void emodel_reconnect_solid(eModel *m)
     if ((int8_t)solid->pRigidAnimation[2] != 0)
         return;
     m->RigidAnimationStartTime = (int16_t)0xc000;
+    // Retail's: a solid so flagged starts at one of 256 times, drawn from
+    // the default seed, so that its copies do not move as one.
+    if (!(solid->Flags & SOLID_RANDOM_START))
+        return;
+    m->RigidAnimationStartTime = (int16_t)(
+        (uint16_t)m->RigidAnimationStartTime
+        | (uint16_t)bRandomI(256, &bDefaultSeed));
 }
 
 void emodel_reconnect_texture_table(eModel *m)
@@ -52,7 +66,7 @@ void emodel_reconnect_texture_table(eModel *m)
         eSolid *s;
         int k;
 
-        r->pTextureInfo = get_texture_info(r->NewNameHash, 1);
+        r->pTextureInfo = get_texture_info(r->NewNameHash, 1, 0);
         *slot = -1;
         s = (eSolid *)m->Solid;
         if (s == NULL)

@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-27), after task 36's fifth slice: the difficulty
-table's retail pass, 992 bytes. `HANDOFF.md` is the running narrative; this file is the short
+continuation (2026-09-27), after task 36's sixth slice: the solid list's
+retail pass, the ramp and the random start. `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -106,7 +106,7 @@ world_check         2742 ops,    15110 lines, 0 differ  (330/330 mutations caugh
 scenery_check       3450 ops,    16724 lines, 0 differ  (77 caught, 2 equivalent)
 scenerycull_check   7273 ops,    46687 lines, 0 differ  (147 caught, 1 equivalent)
 eview_check         2103 ops,    15454 lines, 0 differ  (152 caught, 1 equivalent)
-loadertable_check  27084 ops,    37894 lines, 0 differ  (107 caught, 2 equivalent)
+loadertable_check  37553 ops,    50792 lines, 0 differ  (137 caught, 2 equivalent)
 texturepack_check   6698 ops,    11464 lines, 0 differ  (131 caught, 1 equivalent)
 trackflow_check       16 scenarios,  706 lines, 0 differ  (76 caught, 1 equivalent)
 sky_check             45 scenarios, 1159 lines, 0 differ  (77 caught, 2 equivalent)
@@ -236,15 +236,28 @@ and so replaced every boot.
      `carcollisionbody_init` since b702739 and survived unseen. They are
      anchored to the set-up now, and caught.
 
+   **Task 36's sixth slice is closed: the solid list's retail pass.**
+   - eFixUpTables looks up nine textures. The eighth,
+     `pTextureInfoFalloffRamp` (`0xb9ab56e4`, a name on no disc), is
+     made at run time. `efix_falloff_ramp` is retail's `0x00103260`,
+     which fills its palette with greys from 128 down to 1.
+   - ReconnectSolid ORs `bRandom(256)` from `bDefaultSeed` into the
+     start time when the solid has flag `0x20` (`SOLID_RANDOM_START`),
+     which only TRACKB61..66's waving flag carries.
+   - Every `get_texture_info` passes GetTextureInfo's third argument, 0.
+   - UnloaderSolidList and UnloaderTrackGeometry differ only in an
+     address and an unused `divu`: nothing to port.
+   - `loadertable_check` runs the solid, fix-up and model scenarios on
+     the retail image, and adds the random start, the ramp, a list of a
+     header alone, and retail's disc (all but the tracks, plus TRACKB12
+     and TRACKB61). Each disc file's heap is given back after it.
+   - `retail_model` gave a name at two demo addresses (a COMDAT copy)
+     the map's pick, not the demo symbol's copy, so a stub by name could
+     miss on retail what it caught on the demo. 134 names were so. It
+     takes the demo symbol's copy now.
+
    **Next is the rest of step 4: the retail disc's data in the track
    viewer.**
-   - The loaders the audit has as changed:
-     - UnloaderTrackGeometry (0.98) and UnloaderSolidList (0.99), which
-       differ only in an address and a `div` that became `divu`.
-     - eFixUpTables (0.82): a ninth fixed texture and a palette ramp
-       for it, with ReconnectSolid (0.52), FixTextureTable and
-       ReconnectTextureTable. Retail's ReconnectSolid gives a solid with
-       flag 0x20 a random start: TRACKB61..66's waving flags.
    - LoaderSun's glare record goes with the sun's retail pass: StuffSun,
      StuffSunGlare and SunTrackLoader.
    - Then deploy `extracted-retail/` to Azahar's

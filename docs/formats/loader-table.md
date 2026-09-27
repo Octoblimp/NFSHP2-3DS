@@ -7,6 +7,9 @@
     retail's UnloaderTable          0x003102f8                   30 slots
     LoaderSolidList, its unloader   0x00102ff0 .. 0x00103514   1,312 bytes
     eFixUpTables, FixStripEntryTable 0x00103790 .. 0x00103918    392 bytes
+    retail's eFixUpTables           0x00103e68
+    retail's falloff ramp           0x00103260 .. 0x001033bc     348 bytes
+    retail's ReconnectSolid         0x0010c5e8 .. 0x0010c680     152 bytes
     FixTextureTable                 0x0010aa90                  108 bytes
     FixLightMaterialTable           0x0010b130                   84 bytes
     eFindSolid, eModel's list half  0x0010b1f8 .. 0x0010b444,   888 bytes
@@ -19,8 +22,8 @@ are eModel's `AttachReplacementTextureTable` and `RenameTexture`.
 A bundle is read whole and loaded in place. `LoadChunks` walks its top
 level and gives each chunk to the loader that takes it. Unloading walks
 back through a second table. `PostLoadFixup` then settles what the loaders
-left dirty: the solids' texture tables, the models' solids, and the eight
-textures the renderer keeps pointers to.
+left dirty: the solids' texture tables, the models' solids, and the nine
+textures the renderer keeps pointers to (the demo's eight).
 
 The port is in three files:
 
@@ -172,7 +175,7 @@ fill.
 For each solid, the loader then does four things in order:
 
 1. **Tables.** `FixTextureTable` sets each entry's pointer to
-   `GetTextureInfo(name, 1)`, and `FixLightMaterialTable` sets each entry's
+   `GetTextureInfo(name, 1, 0)`, and `FixLightMaterialTable` sets each entry's
    pointer to `elGetLightMaterial(name)`.
 2. **External rigid animation.** If `ExternalRigidAnimationNameHash` is
    nonzero and a solid of that name is already loaded, the solid takes that
@@ -222,10 +225,35 @@ nonzero value counts as set.
      `FixTextureTable`, `FixStripSTs` and `CalcAutoK`.
   2. `ReconnectAllModels`.
   3. `ReconnectAllAnimations`.
-  4. `GetTextureInfo(hash, 0)` for the eight textures the renderer keeps
+  4. `GetTextureInfo(hash, 0, 0)` for the nine textures the renderer keeps
      (`pTextureInfoRVMInfo` .. `pTextureInfoCarSelectEnvMap`).
+  5. The falloff ramp, below.
 - Otherwise, if only `eDirtyAnimations` is set, it calls
   `ReconnectAllAnimations` and clears that flag.
+
+The demo looked up eight textures, at gp-25672 .. -25644, and made no
+ramp. Retail's nine are at gp-25144 .. -25112. The eighth,
+`pTextureInfoFalloffRamp`, is new. It sits between SpecularFalloff and
+CarSelectEnvMap, and its hash, `0xb9ab56e4`, is not one any file on
+either disc names: the texture is made at run time, as SHADOWMAP1's is.
+The name is the port's.
+
+### The falloff ramp -- retail's 0x00103260
+
+Only eFixUpTables calls it. It does nothing without the texture or its
+`PaletteData` (148). Otherwise, with n = `PaletteSize` (60) >> 2, shifted
+arithmetically, each entry i of n becomes a grey whose four bytes are all
+v:
+
+    s = max(bSin(i / n * 1.57075 + 1.5707965), 0.01)
+    v = (int)(p(s) * 128) & 0xff
+
+p is an inlined fast power: the bits of s read as an integer, times the
+power, plus (1 - power) times the bits of 1.0, and back. At the power of
+1.0 that is s with its low six bits rounded off. So the ramp falls from
+128 to 1 over a quarter turn of sine. With 256 entries or more, the last
+ones reach the 0.01 floor. A loop of `Width` (36, read signed) empty
+passes comes first and does nothing.
 
 ## eModel's list half
 
@@ -240,8 +268,13 @@ An eModel is a name and a pointer to the solid of that name.
   zeroes the start time. That store is in a branch delay slot, so it
   happens for a NULL solid too. The start time becomes `0xc000` when the
   solid has a rigid animation whose byte at +2, `TriggerableFlag`, is 0.
+  In retail, a solid with flag `0x20` then ORs in `bRandom(256)` from
+  `bDefaultSeed` (through retail's `0x0025a488`), so that its copies do
+  not move as one. The demo's eSolidFlags end at `0x10`. Retail's disc
+  sets `0x20` only with vertex animation, on the 90 frames of
+  TRACKB61..66's waving flag, and ReconnectSolid is its one reader.
 - **`ReconnectTextureTable`** gets each replacement's `GetTextureInfo(new,
-  1)`. It finds the old name's index in the solid's texture table (or -1)
+  1, 0)`. It finds the old name's index in the solid's texture table (or -1)
   and stores it under the model's instance index, then applies the table.
 - **`ReconnectAllModels`** does, for every model: ReconnectSolid,
   ReconnectTextureTable, and `FixStripSTs` if the model has a solid.
@@ -278,6 +311,13 @@ returns a pointer returns NULL.
   is followed by a padding chunk at the top level.
 - **Padding.** 285 of TRACKB12's 497 top-level chunks are type 0. Twenty-five
   are an all-zero header, and the rest have a size from 4 to 280.
+- **Retail.** The extracted retail bundles hold 352 lists in 80 files,
+  with 28,504 solids, and none is a header alone. Every container has its
+  eSolid first. 1,782 solids have light materials, 105 a rigid animation
+  and 13 an animation tree, and 1,074 name an external rigid animation.
+  None has labelled frames. 90 are vertex animated, all with flag `0x20`:
+  the waving flag, `XF_FLAG_1_00`, 15 frames on each of TRACKB61..66,
+  whose first frame has the rigid animation.
 - **In place.** On the handheld an eSolid is 192 bytes, as on the disc,
   and the bundle is loaded where it lies. The checker's host has 8-byte
   pointers, so its harness rebuilds each record with the host's struct
@@ -288,16 +328,24 @@ returns a pointer returns NULL.
     python tools/loadertable_check.py
     python tools/loadertable_check.py --mutate [--only a,b]
 
-There are two images. What shows the table runs on the retail image
-(`tools/retail_model.py`) over the retail disc: the claims, and the walks
-through LoadChunks. The rest runs on the demo image over the demo's disc.
-TraverseChunks is retail's as it is, and those scenarios load through the
-tables only chunks a ported slot takes, so no slot number shows. The same
-harness answers both.
+There are two images. On the retail image (`tools/retail_model.py`),
+over the retail disc, run what shows the table -- the claims, and the
+walks through LoadChunks -- and everything over the solid list,
+eFixUpTables and eModel, which retail changed. On the demo image, over
+the demo's disc, run the walks over probe tables, the sun and the
+weather. TraverseChunks is retail's as it is, and the sun and weather
+scenarios load through the tables only chunks a ported slot takes, so no
+slot number shows. The sun's loader is still the demo's. The same harness
+answers both.
 
-The check runs 11,536 ops and prints 17,046 lines on the demo image, and
-15,548 ops and 20,848 lines on the retail one, with 0 differ. Of the 109
-mutations, 107 are caught and 2 are equivalent by construction:
+The retail disc's files add up to more than the model's 32 MB heap, so
+each disc file's heap is given back once it is unloaded (`OP_MARK`,
+`OP_RELEASE`). The disc scenario takes every file but the tracks, and of
+the tracks TRACKB12 and TRACKB61, whose waving flag has flag `0x20`.
+
+The check runs 219 ops and prints 1,722 lines on the demo image, and
+37,334 ops and 49,070 lines on the retail one, with 0 differ. Of the 139
+mutations, 137 are caught and 2 are equivalent by construction:
 
 - `load-size0`: `LoadChunks`' size test only ever saves a walk of nothing.
 - `unload-count-kept`: an animator's count is not read again once the
@@ -311,11 +359,23 @@ The scenarios cover:
   two takers, short tables, and both directions.
 - **The tables.** LoadChunks and UnloadChunks through the real tables,
   including over retail TRACKB12's 279 chunks.
-- **The disc.** Every solid list on the disc is loaded, fixed up and
-  unloaded, with models on TRACKB12's names.
+- **The disc.** Every solid list in the retail disc's files but the
+  tracks', and in TRACKB12's and TRACKB61's, is loaded, fixed up and
+  unloaded, with models on each track's names and three on the waving
+  flag's, whose start times are drawn.
 - **Built lists.** Vertex animation, duplicate names, external rigid
-  animations, labelled frames, every pad and odd sizes.
+  animations, labelled frames, every pad, odd sizes, and a list that is
+  a header alone.
 - **eFixUpTables** under all 16 flag settings, and eModel's calls.
+- **The random start.** Solids with and without flag `0x20`, with and
+  without a rigid animation, triggerable or not, and as vertex-animation
+  frames, each reconnected under nine seeds and through eFixUpTables.
+  `bDefaultSeed` is in every dump.
+- **The falloff ramp.** Fourteen textures: palettes of 0 to 1,024
+  entries, sizes that are not a multiple of four or are negative, no
+  palette, and widths from -32,768 to 32,767. Each palette is printed
+  with two guard words. Then a texture while nothing is dirty and while
+  fix-ups are disabled, and none.
 - **The sun.** TRACKB12's own sun chunk is loaded and unloaded through both
   tables at each misalignment, then at version 1. Each dump shows SunInfo
   and SunPosition.

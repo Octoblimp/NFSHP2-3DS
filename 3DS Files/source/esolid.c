@@ -3,8 +3,12 @@
 #include "esolid.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "bchunk.h"
+#include "bmath.h"
+#include "eefpu.h"
+#include "texturepack.h"
 
 #define SOLID_LIST_ID       0x80034000u
 #define SOLID_ID            0x00034003u
@@ -34,19 +38,22 @@ void *pTextureInfoFilterGrey;
 void *pTextureInfoShadowMap1;
 void *pTextureInfoRadialBlur;
 void *pTextureInfoSpecularFalloff;
+void *pTextureInfoFalloffRamp;
 void *pTextureInfoCarSelectEnvMap;
 
-void *(*gGetTextureInfoFn)(uint32_t name_hash, int use_default);
+void *(*gGetTextureInfoFn)(uint32_t name_hash, int use_default,
+                           int include_unloaded);
 void *(*gElGetLightMaterialFn)(uint32_t name_hash);
 void (*gFixStripSTsFn)(eSolid *solid);
 void (*gCalcAutoKFn)(eSolid *solid);
 void (*gReconnectAllAnimationsFn)(void);
 
-void *get_texture_info(uint32_t name_hash, int use_default)
+void *get_texture_info(uint32_t name_hash, int use_default,
+                       int include_unloaded)
 {
     if (gGetTextureInfoFn == NULL)
         return NULL;
-    return gGetTextureInfoFn(name_hash, use_default);
+    return gGetTextureInfoFn(name_hash, use_default, include_unloaded);
 }
 
 static void *get_light_material(uint32_t name_hash)
@@ -101,7 +108,7 @@ void esolid_fix_texture_table(eSolid *s)
     for (i = 0; i < s->NumTextureTableEntries; i++) {
         eTextureTable *t = (eTextureTable *)s->pTextureTable + i;
 
-        t->pTextureInfo = get_texture_info(t->NameHash, 1);
+        t->pTextureInfo = get_texture_info(t->NameHash, 1, 0);
     }
 }
 
@@ -286,14 +293,16 @@ void efix_up_tables(void)
         emodel_reconnect_all_models();
         if (gReconnectAllAnimationsFn != NULL)
             gReconnectAllAnimationsFn();
-        pTextureInfoRVMInfo = get_texture_info(0x0000dbd4u, 0);
-        pTextureInfoRVMMask = get_texture_info(0xcf29d0dfu, 0);
-        pTextureInfoSolidGrey = get_texture_info(0x32283a11u, 0);
-        pTextureInfoFilterGrey = get_texture_info(0x02c8711cu, 0);
-        pTextureInfoShadowMap1 = get_texture_info(0xbad886d4u, 0);
-        pTextureInfoRadialBlur = get_texture_info(0xab9a6e21u, 0);
-        pTextureInfoSpecularFalloff = get_texture_info(0x0184d1f8u, 0);
-        pTextureInfoCarSelectEnvMap = get_texture_info(0x4ecc769cu, 0);
+        pTextureInfoRVMInfo = get_texture_info(0x0000dbd4u, 0, 0);
+        pTextureInfoRVMMask = get_texture_info(0xcf29d0dfu, 0, 0);
+        pTextureInfoSolidGrey = get_texture_info(0x32283a11u, 0, 0);
+        pTextureInfoFilterGrey = get_texture_info(0x02c8711cu, 0, 0);
+        pTextureInfoShadowMap1 = get_texture_info(0xbad886d4u, 0, 0);
+        pTextureInfoRadialBlur = get_texture_info(0xab9a6e21u, 0, 0);
+        pTextureInfoSpecularFalloff = get_texture_info(0x0184d1f8u, 0, 0);
+        pTextureInfoFalloffRamp = get_texture_info(0xb9ab56e4u, 0, 0);
+        pTextureInfoCarSelectEnvMap = get_texture_info(0x4ecc769cu, 0, 0);
+        efix_falloff_ramp();
         eDirtySolids = 0;
         eDirtyTextures = 0;
         eDirtyAnimations = 0;
@@ -303,5 +312,41 @@ void efix_up_tables(void)
         if (gReconnectAllAnimationsFn != NULL)
             gReconnectAllAnimationsFn();
         eDirtyAnimations = 0;
+    }
+}
+
+void efix_falloff_ramp(void)
+{
+    TextureInfo *t = (TextureInfo *)pTextureInfoFalloffRamp;
+    uint32_t *pal;
+    int32_t n, i;
+
+    if (t == NULL)
+        return;
+    // A loop of (int16_t)Width passes of four nops comes here, and does
+    // nothing.
+    pal = (uint32_t *)(void *)t->PaletteData;
+    n = t->PaletteSize >> 2;
+    if (pal == NULL || n <= 0)
+        return;
+    for (i = 0; i < n; i++) {
+        float x = (float)i / (float)n * 1.57075f + 1.5707965f;
+        float s = bSinF(x);
+        float f, r;
+        uint32_t bits;
+        int32_t w, v;
+
+        if (s < 0.01f)
+            s = 0.01f;
+        // pow(s, 1.0f), inlined: the bits of s as an integer, times the
+        // power, plus (1 - power) times the bits of 1.0f, and back.
+        memcpy(&bits, &s, sizeof bits);
+        f = (float)(int32_t)bits * 1.0f
+            + ((float)(int32_t)0x3f800000 - 1.0f * 1065353216.0f);
+        w = ee_trunc_w(f);
+        memcpy(&r, &w, sizeof r);
+        v = ee_trunc_w(r * 128.0f) & 0xff;
+        pal[i] = (uint32_t)v << 24 | (uint32_t)v
+                 | ((uint32_t)v << 8 | (uint32_t)v << 16);
     }
 }

@@ -20,10 +20,12 @@
 
 #include "bchunk.h"
 #include "bchunkload.h"
+#include "bmath.h"
 #include "bslotpool.h"
 #include "emodel.h"
 #include "esolid.h"
 #include "sun.h"
+#include "texturepack.h"
 #include "weatherman.h"
 
 // eview.c is not linked, whose eFrameCounter weatherman.c's query reads,
@@ -41,7 +43,7 @@ enum {
     OP_CLAIMS, OP_CLAIM, OP_SWAP, OP_TRAVERSE, OP_LOAD, OP_CALL, OP_FIXUP,
     OP_SET, OP_DUMP, OP_MNEW, OP_MINIT, OP_MUNINIT, OP_MDELETE, OP_MRECON,
     OP_MRTT, OP_MAPPLY, OP_MALL, OP_MPOKE, OP_MDUMP, OP_REPL, OP_RENT,
-    OP_FIND, OP_MATRIX
+    OP_FIND, OP_MATRIX, OP_RAMP, OP_RAMPDUMP, OP_SEED, OP_MARK, OP_RELEASE
 };
 
 enum { K_S, K_SE, K_SD, K_TT, K_TR, K_LF, K_RA, K_LM, K_HD, NKIND };
@@ -58,6 +60,10 @@ static const char *const KIND[NKIND] = {
 #define MAX_WALK    40000
 #define NTI         (1 << 20)
 #define NLM         (1 << 18)
+#define MAX_RAMPS   64
+
+// The falloff ramp's texture, which eFixUpTables looks up by this hash.
+#define RAMP_HASH   0xb9ab56e4u
 
 // ------------------------------------------------------------ the script
 
@@ -456,6 +462,14 @@ static int nrepl_entries[MAX_REPL];
 static char ti_arr[NTI], lm_arr[NLM];
 static int  nti, nlm;
 
+// OP_RAMP's textures, tx0, tx1, ...; the lookup hands out the last, and
+// each one's palette, with its count and the two guard words after it.
+static TextureInfo *ramps[MAX_RAMPS];
+static uint32_t    *ramp_pal[MAX_RAMPS];
+static int32_t      ramp_n[MAX_RAMPS];
+static int          nramps;
+static TextureInfo *ramp_now;
+
 // eVertexAnimatorSlotPool's blocks, from the allocator hook.
 static struct { uint8_t *p; size_t n; } va_blocks[64];
 static int nva_blocks;
@@ -556,6 +570,12 @@ static void label(char *b, size_t n, const void *a)
             return;
         }
     }
+    for (i = nramps - 1; i >= 0; i--) {
+        if (a == (const void *)ramps[i]) {
+            snprintf(b, n, "tx%d", i);
+            return;
+        }
+    }
     if (p >= (const uint8_t *)ti_arr && p < (const uint8_t *)ti_arr + NTI) {
         snprintf(b, n, "ti#%d", (int)(p - (const uint8_t *)ti_arr));
         return;
@@ -591,18 +611,21 @@ static int ti_null(uint32_t hash, int use_default)
     return hash == 0 || hash % 7u == 3u || (!use_default && hash % 3u == 0u);
 }
 
-static void *ti_seam(uint32_t hash, int use_default)
+static void *ti_seam(uint32_t hash, int use_default, int include_unloaded)
 {
     void *r = NULL;
 
-    if (!ti_null(hash, use_default)) {
+    if (hash == RAMP_HASH) {
+        r = ramp_now;
+    } else if (!ti_null(hash, use_default)) {
         if (nti >= NTI) {
             fprintf(stderr, "ti full\n");
             exit(3);
         }
         r = &ti_arr[nti++];
     }
-    printf("  gti %08x %d %s\n", (unsigned)hash, use_default, L(r));
+    printf("  gti %08x %d %d %s\n", (unsigned)hash, use_default,
+           include_unloaded, L(r));
     return r;
 }
 
@@ -884,13 +907,14 @@ static void dump(void)
     uint32_t    pos[3];
     int nseen = 0, count, i, j;
 
-    printf("  flags dis %d solids %d tex %d anim %d\n",
+    printf("  flags dis %d solids %d tex %d anim %d seed %08x\n",
            (int)eDisableFixUpTables, (int)eDirtySolids, (int)eDirtyTextures,
-           (int)eDirtyAnimations);
-    printf("  ti %s %s %s %s %s %s %s %s\n", L(pTextureInfoRVMInfo),
+           (int)eDirtyAnimations, (unsigned)bDefaultSeed);
+    printf("  ti %s %s %s %s %s %s %s", L(pTextureInfoRVMInfo),
            L(pTextureInfoRVMMask), L(pTextureInfoSolidGrey),
            L(pTextureInfoFilterGrey), L(pTextureInfoShadowMap1),
-           L(pTextureInfoRadialBlur), L(pTextureInfoSpecularFalloff),
+           L(pTextureInfoRadialBlur), L(pTextureInfoSpecularFalloff));
+    printf(" %s %s\n", L(pTextureInfoFalloffRamp),
            L(pTextureInfoCarSelectEnvMap));
     memcpy(pos, &SunPosition, sizeof pos);
     printf("  sun %s pos %08x %08x %08x\n", L(SunInfo), (unsigned)pos[0],
@@ -1261,6 +1285,52 @@ int main(int argc, char **argv)
             matrix(table, slot, (uint32_t)type, mode);
             break;
         }
+        case OP_RAMP: {
+            // Mode 0 takes the texture away; 1 is one with a palette of
+            // PaletteSize >> 2 words, filled with 0xcd, and two guards
+            // after it; 2 is one with no palette.
+            int32_t mode = next(), psize = next(), width = next(), k;
+            TextureInfo *t;
+
+            if (mode == 0) {
+                ramp_now = NULL;
+                break;
+            }
+            t = calloc(1, sizeof(TextureInfo));
+            t->Width = (uint16_t)width;
+            t->PaletteSize = psize;
+            ramp_n[nramps] = psize >> 2 > 0 ? psize >> 2 : 0;
+            if (mode == 1) {
+                k = ramp_n[nramps] + 2;
+                ramp_pal[nramps] = malloc(4 * (size_t)k);
+                memset(ramp_pal[nramps], 0xcd, 4 * (size_t)k);
+                t->PaletteData = (uint8_t *)ramp_pal[nramps];
+            }
+            ramps[nramps++] = t;
+            ramp_now = t;
+            break;
+        }
+        case OP_RAMPDUMP: {
+            int32_t i = next(), k;
+
+            printf("  %s pal", L(ramps[i]));
+            if (ramp_pal[i] == NULL) {
+                printf(" none\n");
+                break;
+            }
+            for (k = 0; k < ramp_n[i] + 2; k++)
+                printf(" %08x", (unsigned)ramp_pal[i][k]);
+            printf("\n");
+            break;
+        }
+        case OP_SEED:
+            bDefaultSeed = (uint32_t)next();
+            break;
+        case OP_MARK:
+        case OP_RELEASE:
+            // The model's heap, given back after a disc file; this host
+            // keeps every buffer, so no address is handed out twice.
+            break;
         default:
             fprintf(stderr, "op %d\n", (int)op);
             return 2;
