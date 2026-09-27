@@ -7732,3 +7732,83 @@ Seen on Azahar:
 
 - WeatherMan (slot 29) and the fog palettes.
 - The RainSystem behind rain_Load.
+
+## Session 30, continued (2026-09-27) -- Task 27's twenty-eighth slice: the weather and the fog
+
+The twenty-seventh slice went in as `3d773ed`. The twenty-eighth ports:
+- all of WeatherMan.obj, in `weatherman.c`: the lists, slot 29's loader
+  and unloader, the add, remove and state calls, WeatherManQuery, and
+  eView::GetWeatherQuery with its cache;
+- the fog half of EcstasyE.obj, in `efog.c`: FogModeInfos, fpow,
+  RemapLinearIntoClut8, GetFogPalette, CreateFogPalette,
+  eAttachDepthIntoAlpha and eAttachFog, with the fog sprite as the seam
+  `gEFogAttachFn`;
+- `eFrameCounter`, in `eview.c`, which the end of the track's draw
+  counts, as eDisplayFrame's end does;
+- the 3DS side, in `trackview.c` and `georender.c`.
+
+The write-up is `docs/formats/weather-fog.md`.
+
+```
+weather_check       75 scenarios, 4368 lines, 0 differ
+                    89 mutations: 85 caught, 4 equivalent, 0 unexplained
+loadertable_check   27933 ops, 42243 lines, 0 differ
+                    105 mutations: 103 caught, 2 equivalent, 0 unexplained
+```
+
+The checker runs the whole of WeatherMan.obj, GetWeatherQuery and the
+fog functions as shipped. It stubs eGetView, eGetRenderTarget, bMemSet,
+AttachImageDataPacket and eDmaChain::Add. For eAttachFog's packet, the
+Add stub prints the view, the palette and the packet's ALPHA_1, and the
+harness's seam prints the same from the FogModeInfo it is handed. The
+PICA's side, `efog_depth_alpha`, `efog_colour` and `efog_keep`, is
+checked against the spec, written out over the image's own depth
+palettes.
+
+What the image showed:
+- The static constructor links the five lists to themselves, and
+  WeatherRainList .. WeatherWindList point at the four. Nothing reads
+  those four.
+- WeatherAddRegion leaves a region of a type past 3, or below 0, holding
+  the chunk's bytes, and the unloader writes through them. The port
+  links it to itself. That is the slice's one change.
+- The query's d^2 is `(dx^2 + dy^2) + dz^2`, and its sum `(s0 + s1) + s2`.
+  Mutations of both orders survived until a scenario found points where
+  they round apart; the port's are the image's.
+- For rain, snow and wind, a hit's intensity is weighted by HitScale
+  alone, not also by its own scale as the fog's is.
+- GetWeatherQuery indexes CachedWeatherQueries by the view's ID
+  unchecked, and eAttachFog indexes FogModeInfos by the mode unchecked.
+- eAttachDepthIntoAlpha needs DepthIntoAlphaBuffer as well as
+  EnableDepthIntoAlpha, and both attaches return 0 when their DMA runs
+  out. The port checks only the flag.
+- The alpha the Z becomes is `min(Z >> 6, 0xfc) | ((Z >> 6) & 3)`, and
+  the palette's entry for it is at the CSM1 swizzle of that alpha.
+
+The 3DS side:
+- `C3D_DepthMap(false, -1 / near, 0)` for the track's draw makes the
+  depth buffer a W-buffer. The depth tests are as they were, and the
+  fog's lookup is by the view's own depth. It goes back to
+  `C3D_DepthMap(true, -1, 0)` after the track, with the fog off.
+- The lookup's entry for depth u takes the GS's Z,
+  `zmin + (zmax - zmin) * near * u / (far - u * (far - near))`, then
+  `efog_keep` for it.
+- `georender_set_fog` binds the lookup, and the ADD and SUBTRACT blends
+  get a fog colour of 0.
+- The sky and the sun get a lookup constant at Z = 0.
+
+Seen on Azahar:
+- `weather: 0 rain, 20 fog, 0 snow, 0 wind regions, 0 off; DrawFog 1,
+  modes 0 0, FogPower 4.60, depth into alpha 1`.
+- `fog on, mode 0, 82a0a0 x0.100 from 246.0, root FOG<MAIN> + 0; keep at
+  250..4000 1.000 1.000 1.000 0.977 0.906, sky 0.906; 1 view, 0 unfit`.
+- The first frame's query comes back empty, because the view's counter
+  and eFrameCounter are both 0. The next frame's has the fog.
+- The render is intact, and the sun's depth readback still gives its
+  lines.
+
+`check_3dsx`: relocations OK. The chain's 58 checkers pass, 0 differ.
+
+### Next: the rest of step 3
+
+- The RainSystem behind rain_Load (`0x00128bf8`) and rain_Unload.

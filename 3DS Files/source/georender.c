@@ -18,6 +18,13 @@ static C3D_AttrInfo    s_attr;
 static bool            s_ready;
 static bool            s_zwrite = true;
 
+// The fog georender_set_fog last gave, the blend set_blend last set, and
+// the colour last handed to the PICA for the two.
+static C3D_FogLut*     s_fogLut;
+static uint32_t        s_fogColour;
+static uint8_t         s_blend = GEO_BLEND_NONE;
+static uint32_t        s_fogApplied;
+
 static int s_uProjection = -1;
 static int s_uModelView  = -1;
 static int s_uLightVec   = -1;
@@ -391,10 +398,47 @@ void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
     }
 }
 
+// The PICA's fog comes before its blend, where the PS2's came after the
+// frame was done. For a blend over the frame the two are the same. A blend
+// that adds to the frame, or takes from it, would add or take the fog's
+// colour again, so those two take black: what they add then fades by the
+// fog's fraction, as it does on the PS2 with the frame under it.
+static void apply_fog_colour(void)
+{
+    uint32_t c;
+
+    if (s_fogLut == NULL) {
+        return;
+    }
+    c = s_blend == GEO_BLEND_ADD || s_blend == GEO_BLEND_SUBTRACT
+            ? 0u : s_fogColour;
+    if (c != s_fogApplied) {
+        C3D_FogColor(c);
+        s_fogApplied = c;
+    }
+}
+
+void georender_set_fog(C3D_FogLut* lut, uint32_t colour)
+{
+    s_fogLut    = lut;
+    s_fogColour = colour & 0xffffffu;
+    if (lut == NULL) {
+        C3D_FogGasMode(GPU_NO_FOG, GPU_PLAIN_DENSITY, false);
+        C3D_FogLutBind(NULL);
+        return;
+    }
+    C3D_FogGasMode(GPU_FOG, GPU_PLAIN_DENSITY, false);
+    C3D_FogLutBind(lut);
+    s_fogApplied = ~0u;
+    apply_fog_colour();
+}
+
 // The GS's ALPHA_1 equations as the PICA's blend unit writes them. The
 // PICA's reverse subtract is the destination less the source.
 static void set_blend(uint8_t blend)
 {
+    s_blend = blend;
+    apply_fog_colour();
     switch (blend) {
     case GEO_BLEND_ALPHA:
         C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA,

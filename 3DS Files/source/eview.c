@@ -42,6 +42,8 @@ float   ZMax = 2.2490234375f;           // 0x400ff000
 float   ZMin1 = 2.0000152587890625f;    // 0x40000040
 float   ZMax1 = 2.2499961853027344f;    // 0x400ffff0
 
+uint32_t eFrameCounter;
+
 void (*gEWaitUntilRenderingDoneFn)(void);
 
 // ------------------------------------------------------------ the lookups

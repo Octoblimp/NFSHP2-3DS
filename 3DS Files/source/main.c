@@ -80,6 +80,8 @@
 #include "track.h"
 #include "sky.h"
 #include "sun.h"
+#include "efog.h"
+#include "weatherman.h"
 #include "trackflow.h"
 #include "trackview.h"
 #include "uirender.h"
@@ -1011,6 +1013,19 @@ static UIWrapStyle botStyle(UIRenderer* ui, uint32_t color, float px,
 // lines that alternate do not each count as a change of the other.
 #define DEV_SLOTS 12
 
+// The regions on one of WeatherMan's lists.
+static int weatherRegions(const bNode* head)
+{
+    const bNode* n = head->next;
+    int          count = 0;
+
+    while (n != head && count < 100000) {
+        count++;
+        n = n->next;
+    }
+    return count;
+}
+
 static void devLog(int slot, const char* fmt, ...)
 {
     static char last[DEV_SLOTS][192];
@@ -1588,6 +1603,16 @@ int main(int argc, char** argv)
                           SunInfo ? "chunk version 2" : "none",
                           (double)SunPosition.x, (double)SunPosition.y,
                           (double)SunPosition.z);
+                logPrintf("weather: %d rain, %d fog, %d snow, %d wind "
+                          "regions, %d off; DrawFog %d, modes %d %d, "
+                          "FogPower %.2f, depth into alpha %d\n",
+                          weatherRegions(&WeatherRegionLists[WEATHER_RAIN]),
+                          weatherRegions(&WeatherRegionLists[WEATHER_FOG]),
+                          weatherRegions(&WeatherRegionLists[WEATHER_SNOW]),
+                          weatherRegions(&WeatherRegionLists[WEATHER_WIND]),
+                          weatherRegions(&WeatherRegionInactiveList),
+                          (int)DrawFog, (int)FogMode1, (int)FogMode2,
+                          (double)FogPower, (int)EnableDepthIntoAlpha);
                 for (int i = 0; i < NUM_SUN_TEXTURES; i++) {
                     const TextureInfo *t = SunTextures[i];
 
@@ -1775,6 +1800,8 @@ int main(int argc, char** argv)
                    (int)CurrentZoneNumber);
             if (g_track.listFrame) {
                 logLine("track drew: %s", g_track.drawList);
+                logLine("track frame %lu, eFrameCounter's",
+                        (unsigned long)g_track.fogFrame);
                 g_track.listFrame = false;
             }
             devLog(3, "track gpu peak %d words, %d skipped, frame "
@@ -1791,6 +1818,18 @@ int main(int argc, char** argv)
                    (double)g_track.sunAt[0], (double)g_track.sunAt[1],
                    g_track.sunAlpha, g_track.sunRectX, g_track.sunRectY,
                    g_track.sunRects, g_track.sunSky);
+            devLog(10, "fog %s, mode %d, %06lx x%.3f from %.1f, root %.20s "
+                   "+ %d; keep at 250..4000 %.3f %.3f %.3f %.3f %.3f, sky "
+                   "%.3f; %d view, %d unfit",
+                   g_track.fogOn ? "on" : "off", g_track.fogMode,
+                   (unsigned long)g_track.fogColour,
+                   (double)g_track.fogAmount, (double)g_track.fogStart,
+                   g_track.fogRegion ? g_track.fogRegion : "none",
+                   g_track.fogHits, (double)g_track.fogKeep[0],
+                   (double)g_track.fogKeep[1], (double)g_track.fogKeep[2],
+                   (double)g_track.fogKeep[3], (double)g_track.fogKeep[4],
+                   (double)g_track.fogSkyKeep, g_track.fogViews,
+                   g_track.fogUnfit);
 
             C2D_TargetClear(g_bot, BOT_BACK);
             C2D_SceneBegin(g_bot);

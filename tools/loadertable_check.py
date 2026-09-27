@@ -53,7 +53,8 @@ ranges, with a chunk nobody takes and the walk after it, with two takers
 and with short tables; LoadChunks and UnloadChunks through the tables with
 probes in them, and over TRACKB12's 497 top-level chunks claimed as the
 image claims them; every solid list on the disc through the real tables,
-loaded, fixed up and unloaded, with models on TRACKB12's names; built
+loaded, fixed up and unloaded, with models on TRACKB12's names; slot 14's
+and slot 29's chunks through the tables at each misalignment; built
 lists for vertex animation (with more than 64 frames), duplicate names,
 external rigid animations, labelled frames, every pad and odd sizes;
 eFixUpTables under all 16 flag settings; and eModel's calls.
@@ -91,7 +92,7 @@ SOURCES = [HARNESS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "carstate.c", "terraintypetab.c", "bslotpool.c", "bticker.c", "p32.c",
     "bchunk.c", "trackpath.c", "quickspline.c", "bmem.c", "trackroute.c",
     "polyhedra.c", "vclip.c", "espresso.c", "difficultyinfo.c",
-    "texturepack.c", "sun.c")]
+    "texturepack.c", "sun.c", "weatherman.c")]
 
 HARNESS_TIMEOUT = 600
 EXTRACTED = ROOT / "extracted"
@@ -110,6 +111,12 @@ TI_PTRS = [GP - 25672 + 4 * i for i in range(8)]
 SUN_INFO = GP - 24144
 SUN_POS = 0x002dfdf0
 SUN_CHUNK = 0x00034202
+# Slot 29's state: WeatherRegionLists and WeatherRegionInactiveList, which
+# the static constructor links to themselves.
+WEATHER_CHUNK = 0x00034250
+WEATHER_LISTS = [0x00308fe0 + 8 * i for i in range(4)] + [0x00323df8]
+WEATHER_NAMES = ["W0", "W1", "W2", "W3", "Wi"]
+WEATHER_CTOR = 0x0019ebd8
 VA_POOL = GP - 25720
 
 PROBE_BASE = 0x0F000000             # stub addresses, never fetched
@@ -185,7 +192,7 @@ CLAIMS = {
     30: [0x00039100, 0x00039101, 0x00039102],
 }
 TAKER = {t: k for k, ts in CLAIMS.items() for t in ts}
-PORTED = {0, 1, 2, 4, 9, 11, 14, 18, 19, 26}
+PORTED = {0, 1, 2, 4, 9, 11, 14, 18, 19, 26, 29}
 
 # ---- the ops -----------------------------------------------------------------
 
@@ -684,6 +691,31 @@ def scenario_sun(sc, files):
     sc.op(OP_DUMP)
 
 
+def scenario_weather(sc):
+    """Slot 29 through both tables, at each misalignment: a pack of one fog
+    region, then one of another version, whose regions are not read. The
+    host's WeatherRegion is 136 bytes, with its Type at 88, so the one
+    region has its type at both offsets, and the pack ends with it. The
+    dump shows the lists' heads, so a loader that links nothing, or an
+    unloader that links again, shows."""
+    for mis in (0, 4, 8, 12):
+        sc.tag("weather: through the tables, misaligned %d" % mis)
+        rec = bytearray(16 + 136)
+        struct.pack_into("<ii", rec, 8, 2, 1)
+        struct.pack_into("<i", rec, 16 + 80, 1)
+        struct.pack_into("<i", rec, 16 + 88, 1)
+        other = bytearray(16)
+        struct.pack_into("<ii", other, 8, 1, 3)
+        b = Buf(sc, mis)
+        b.padded(WEATHER_CHUNK, rec)
+        b.padded(WEATHER_CHUNK, other)
+        b.end()
+        sc.op(OP_LOAD, 0, 0)
+        sc.op(OP_DUMP)
+        sc.op(OP_LOAD, 1, 0)
+        sc.op(OP_DUMP)
+
+
 X, Y, Z, W, Q, V = 0xaaaa0001, 0xbbbb0002, 0xcccc0003, 0xdddd0004, \
     0xeeee0005, 0xffff0006
 
@@ -1011,6 +1043,7 @@ def script(files=None):
     scenario_models(sc)
     scenario_disc_lists(sc, files)
     scenario_sun(sc, files)
+    scenario_weather(sc)
     scenario_frames(sc)
     scenario_trackb12_walk(sc)
     scenario_matrix(sc, files)
@@ -1031,6 +1064,7 @@ class Model(object):
         self.out = []
         e = self.e = Emu(ieee=True)
         e.stub_bware()
+        e.call(WEATHER_CTOR, limit=1000)
         self.fn = {k: e.addr_of(v) for k, v in SYM.items()}
         self.recs = []          # sorted (start, size, kind, idx)
         self.rec_starts = []
@@ -1089,6 +1123,8 @@ class Model(object):
             return "SL"
         if a == MODELLIST:
             return "ML"
+        if a in WEATHER_LISTS:
+            return WEATHER_NAMES[WEATHER_LISTS.index(a)]
         for i in sorted(self.models, reverse=True):
             if a == self.models[i]:
                 return "m%d" % i
@@ -1406,6 +1442,8 @@ class Model(object):
         self.emit("  sun %s pos %08x %08x %08x"
                   % ((L(e.u32(SUN_INFO)),)
                      + tuple(e.u32(SUN_POS + 4 * k) for k in range(3))))
+        self.emit("  weather " + " ".join(
+            "%s/%s" % (L(e.u32(h)), L(e.u32(h + 4))) for h in WEATHER_LISTS))
         seen = []
         for s in self.walk_list(SOLIDLIST, "solids"):
             self.dump_solid(s)
@@ -1587,6 +1625,13 @@ MUTATIONS = [
     ("unported-unload-flag", BCL, "slot, 1, c);", "slot, 0, c);"),
     ("slot-6-is-7", BCL, "    LoaderAcidFX,", "    LoaderEventManager,"),
     ("unloader-14-loads", BCL, "    unloader_sun,", "    loader_sun,"),
+    ("unloader-29-loads", BCL, "    unloader_weather_man,",
+     "    loader_weather_man,"),
+    ("loader-29-unloads", BCL, "    loader_weather_man,",
+     "    unloader_weather_man,"),
+    ("weather-type", "3DS Files/source/weatherman.h",
+     "#define WEATHER_CHUNK_ID      0x00034250u",
+     "#define WEATHER_CHUNK_ID      0x00034251u"),
     ("sun-type", "3DS Files/source/sun.h",
      "#define SUN_CHUNK_ID      0x00034202u",
      "#define SUN_CHUNK_ID      0x00034203u"),

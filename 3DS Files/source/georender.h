@@ -150,6 +150,12 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
 // off for the sky. It starts on.
 void georender_set_zwrite(bool on);
 
+// The fog the draws after it take: the PICA's, by `lut` and in `colour`
+// (red in the low byte), or none for a NULL `lut`. The blends that add to
+// the frame or take from it fog to black instead; see set_blend. The LUT
+// is uploaded when it is bound, so one that changes is bound again.
+void georender_set_fog(C3D_FogLut* lut, uint32_t colour);
+
 // ------------------------------------------------------- the screen quads
 
 // How many screen quads a frame can draw. The sun and its glare are 12.

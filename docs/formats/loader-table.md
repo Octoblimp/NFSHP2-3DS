@@ -118,7 +118,7 @@ and 52 top-level types, and "TB12" is TRACKB12.
 | 26 | DifficultyInfo | `34b00` | 1 | 0 | `difficultyinfo.c` |
 | 27 | Language | `39000` | 8 | 0 | -- |
 | 28 | Smokeables | `34026`, `34027` | 16, 1 | 2 | -- |
-| 29 | WeatherMan | `34250` | 1 | 1 | -- |
+| 29 | WeatherMan | `34250` | 1 | 1 | `weatherman.c` |
 | 30 | DemoModeReplay | `39100`, `39101`, `39102` | 5, 24, 5 | 0 | -- |
 
 TRACKB12 has 497 top-level chunks, and every one has a taker.

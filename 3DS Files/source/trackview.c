@@ -10,6 +10,7 @@
 
 #include "bchunk.h"
 #include "bchunkload.h"
+#include "efog.h"
 #include "eframe.h"
 #include "emath.h"
 #include "emodel.h"
@@ -26,6 +27,7 @@
 #include "texturepack.h"
 #include "trackflow.h"
 #include "trackroute.h"
+#include "weatherman.h"
 
 #define TRACK_BUNDLE "TRACKS/TRACKB12.BUN"
 
@@ -85,6 +87,16 @@ typedef struct {
 static eRenderTarget* s_quadTarget;     // the view StuffSun draws for
 static SunRect        s_sunRects[NUM_SUN_ZBUFFERS];
 static int            s_numSunRects;
+
+// The fog: the PICA's lookups for the view's palette, by depth, one for
+// the scenery and one for the sky and the sun; the colour; and the planes
+// the last frame's depth was between. See fog_attach.
+static C3D_FogLut s_fogLut;
+static C3D_FogLut s_skyFogLut;
+static bool       s_fogOn;
+static uint32_t   s_fogColour;
+static float      s_depthNear = TRACK_NEAR;
+static float      s_depthFar  = TRACK_FAR;
 
 static void render_epoly(ePoly* p, TextureInfo* info, int flags);
 static void transfer_zbuffer_rect(uint8_t* dst, int x, int y, int w, int h);
@@ -1401,23 +1413,126 @@ static uint32_t tiled_index(int x, int y)
     return ((by >> 3) * (240u / 8u) + (bx >> 3)) * 64u + m;
 }
 
-// The GS's Z for a depth the PICA wrote. The two are the same hyperbola in
-// the view's depth, the PICA's 0 at the far plane to 1 at the near and the
-// GS's from ZMin to ZMax -- floats in [2, 4), whose mantissas are the Z,
-// 16 and 0x0ff000. FetchZBuffer reads the buffer back as PSMZ16S, and past
-// 0xffff is taken as 0xffff here; all StuffSun asks is whether it is under
-// 64. What the clear left, and the sky did not write, is 0.
-static uint16_t gs_z(uint32_t d24)
+// The GS's Z for a depth u the PICA wrote. The PICA's is the W-buffer's,
+// the view's depth d as (far - d) / (far - near): 1 at the near plane, 0
+// at the far. The GS's is the hyperbola between the same two, near / d
+// taken to that 1 and 0, from ZMin to ZMax -- floats in [2, 4), whose
+// mantissas are the Z, 16 and 0x0ff000.
+static float gs_z_of(float u)
 {
     const float zmin = (ZMin - 2.0f) * 4194304.0f;
     const float zmax = (ZMax - 2.0f) * 4194304.0f;
-    float       z;
+    float       d    = s_depthFar - u * (s_depthFar - s_depthNear);
+    float       t    = d > 0.0f ? s_depthNear * u / d : 1.0f;
 
+    return zmin + (zmax - zmin) * t;
+}
+
+// FetchZBuffer reads the buffer back as PSMZ16S, and past 0xffff is taken
+// as 0xffff; all StuffSun asks is whether it is under 64. What the clear
+// left, and the sky did not write, is 0.
+static uint16_t gs_z16(float z)
+{
+    return z >= 65535.0f ? 0xffffu : (uint16_t)z;
+}
+
+static uint16_t gs_z(uint32_t d24)
+{
     if (d24 == 0) {
         return 0;
     }
-    z = zmin + (zmax - zmin) * ((float)d24 / 16777215.0f);
-    return z >= 65535.0f ? 0xffffu : (uint16_t)z;
+    return gs_z16(gs_z_of((float)d24 / 16777215.0f));
+}
+
+// ------------------------------------------------------------------ the fog
+
+// A lookup of the PICA's fog: entry j for the depth j / 128, and its step
+// to the next. The fraction is efog_keep's for the GS's Z there, or for a
+// Z of 0 for the sky's -- the dome leaves the Z as the clear did, and the
+// sun draws where the dome shows.
+static void fog_lut(C3D_FogLut* lut, const uint32_t* palette,
+                    const FogModeInfo* mode, bool sky)
+{
+    float keep[129];
+    float data[256];
+    int   j;
+
+    for (j = 0; j <= 128; j++) {
+        uint16_t z = sky ? 0 : gs_z16(gs_z_of((float)j / 128.0f));
+
+        keep[j] = efog_keep(palette, mode, z);
+    }
+    for (j = 0; j < 128; j++) {
+        data[j]       = keep[j];
+        data[128 + j] = keep[j + 1] - keep[j];
+    }
+    FogLut_FromArray(lut, data);
+}
+
+// eAttachFog's seam, where the image builds the fog's sprite: the one
+// view's palette as the PICA's fog. A palette the PICA's fog cannot be
+// is left off, and counted.
+static void fog_attach(eView* view, const uint32_t* palette,
+                       const FogModeInfo* mode)
+{
+    static const float at[TRACKVIEW_FOG_SAMPLES] = {
+        250.0f, 500.0f, 1000.0f, 2000.0f, 4000.0f
+    };
+    TrackView* v = s_draw;
+    uint32_t   colour;
+    int        k;
+
+    if (view->ID != EVIEW_ID_PLAYER1 || v == NULL) {
+        return;
+    }
+    v->fogViews++;
+    if (!efog_colour(palette, mode, &colour)) {
+        v->fogUnfit++;
+        return;
+    }
+    fog_lut(&s_fogLut, palette, mode, false);
+    fog_lut(&s_skyFogLut, palette, mode, true);
+    s_fogColour = colour;
+    s_fogOn     = true;
+    for (k = 0; k < TRACKVIEW_FOG_SAMPLES; k++) {
+        float u = (s_depthFar - at[k]) / (s_depthFar - s_depthNear);
+
+        v->fogKeep[k] = efog_keep(palette, mode, gs_z16(gs_z_of(u)));
+    }
+    v->fogSkyKeep = efog_keep(palette, mode, 0);
+}
+
+// eDisplayFrame's fog (0x00113420), which the PS2 lays over the frame once
+// it is drawn; see efog.h. Its palette depends on nothing drawn, so here
+// it is made first, and the PICA's fog lays it on as each thing is drawn.
+static void fog_frame(TrackView* v, eView* view)
+{
+    const WeatherQuery* q = &CachedWeatherQueries[view->ID];
+    int                 k;
+
+    s_fogOn     = false;
+    s_fogColour = 0;
+    v->fogViews = 0;
+    v->fogUnfit = 0;
+    for (k = 0; k < TRACKVIEW_FOG_SAMPLES; k++) {
+        v->fogKeep[k] = 1.0f;
+    }
+    v->fogSkyKeep = 1.0f;
+    s_depthNear   = view->NearZ;
+    s_depthFar    = view->FarZ;
+    gEFogAttachFn = fog_attach;
+    if (InGameFlag && eattach_depth_into_alpha()) {
+        eattach_fog();
+    }
+    v->fogOn     = s_fogOn;
+    v->fogMode   = efog_view_mode(view);
+    v->fogColour = s_fogColour;
+    v->fogAmount = q->Fog;
+    v->fogStart  = q->FogStart;
+    v->fogRegion = q->RegionR;
+    v->fogHits   = (q->Region0 != NULL) + (q->Region1 != NULL)
+                 + (q->Region2 != NULL);
+    v->fogFrame  = eFrameCounter;
 }
 
 // The probe: the colour and depth words at 15 screen points, five across
@@ -1547,9 +1662,17 @@ void trackview_draw(TrackView* v)
     if (++v->frameStamp == 0) {
         v->frameStamp = 1;
     }
+    // The fog, and the W-buffer, whose depth the PICA's fog looks up: the
+    // view's own, from 1 at the near plane to 0 at the far, where the
+    // Z-buffer's was near / d to the same two. So the depth tests are
+    // the ones they were.
+    fog_frame(v, view);
+    C3D_DepthMap(false, -1.0f / view->NearZ, 0.0f);
+
     // eDisplayFrame's sky (0x00112a38 .. 0x00112b0c): the Z writes off,
     // StuffSky for the view, and what it put on the lists attached and
     // drawn before any of the scenery. Then the Z writes back on.
+    georender_set_fog(s_fogOn ? &s_skyFogLut : NULL, s_fogColour);
     georender_set_zwrite(false);
     StuffSky(view);
     draw_deferred(v);
@@ -1557,6 +1680,7 @@ void trackview_draw(TrackView* v)
     v->skyDrawn    = v->drawn;
     v->numDeferred = 0;
 
+    georender_set_fog(s_fogOn ? &s_fogLut : NULL, s_fogColour);
     scenery_stuff_scenery(&v->cull, view);
     draw_deferred(v);
 
@@ -1565,6 +1689,7 @@ void trackview_draw(TrackView* v)
     v->sunQuads       = 0;
     v->sunQuadsFailed = 0;
     georender_quads_rewind();
+    georender_set_fog(s_fogOn ? &s_skyFogLut : NULL, s_fogColour);
     s_quadTarget = view->pRenderTarget0;
     StuffSun(view);
     s_quadTarget = NULL;
@@ -1579,7 +1704,10 @@ void trackview_draw(TrackView* v)
     follow_flipbooks(v);
 
     // citro2d draws the bottom screen next and sets only what it needs:
-    // the alpha test is put back off and the blend back to its own.
+    // the alpha test is put back off and the blend back to its own, the
+    // fog off and the depth map back to the Z-buffer's.
+    georender_set_fog(NULL, 0);
+    C3D_DepthMap(true, -1.0f, 0.0f);
     C3D_AlphaTest(false, GPU_ALWAYS, 0);
     C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA,
                    GPU_ONE_MINUS_SRC_ALPHA, GPU_SRC_ALPHA,
@@ -1590,4 +1718,6 @@ void trackview_draw(TrackView* v)
     if (FrameMallocFailed) {
         v->frameMallocFails++;
     }
+    // eDisplayFrame's very end (0x00113d2c): the frame is counted.
+    eFrameCounter++;
 }

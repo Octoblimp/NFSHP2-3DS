@@ -90,6 +90,7 @@
 #define TRACKVIEW_ROUTE        1        // the racing route the stops are on
 #define TRACKVIEW_STOPS        24       // how many stops round it
 #define TRACKVIEW_MAX_DEFERRED 1024     // batches held back for the alpha pass
+#define TRACKVIEW_FOG_SAMPLES  5        // depths the fog's fraction is logged at
 
 // One TextureInfo a solid's table points at. `tex` is what the solids'
 // slots draw with, a copy of `own` or of one of the flipbook frames'.
@@ -226,6 +227,20 @@ typedef struct {
     int   sunSky;               // of their pixels, the ones under 64
     bool  probePending;         // the next read-back logs the probe
     char  probe[512];           // what it found, for main() to log; "" if not
+
+    // --- the fog: eAttachFog's palette for the view, as the PICA's fog.
+    int         fogViews;       // views eAttachFog made a palette for
+    int         fogUnfit;       // of them, ones the PICA's fog cannot be
+    bool        fogOn;          // the frame drew with the fog
+    int         fogMode;        // FogMode1
+    uint32_t    fogColour;      // the fog's colour, red in the low byte
+    float       fogAmount;      // the view's query: its Fog,
+    float       fogStart;       // its FogStart,
+    const char* fogRegion;      // its root region, or NULL,
+    int         fogHits;        // and how many that fade it holds
+    uint32_t    fogFrame;       // eFrameCounter as the frame drew
+    float       fogKeep[TRACKVIEW_FOG_SAMPLES]; // of the colour, at depths
+    float       fogSkyKeep;     // and the sky's
 
     // --- counters for the bring-up overlay.
     bool loaded;

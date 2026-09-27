@@ -1971,6 +1971,25 @@ is citro3d and owns the top.
         115 mutations, 114 are caught and 1 is equivalent. Written up in
         `docs/formats/sun-draw.md`. Left of step 3: WeatherMan and the
         fog, and the RainSystem.
+
+        **The twenty-eighth slice is closed: the weather and the fog.**
+        WeatherMan.obj is ported whole in `weatherman.c`: the weather
+        lists, LoaderWeatherMan and its unloader in slot 29, and
+        WeatherManQuery, with eView::GetWeatherQuery's cache by
+        `eFrameCounter`. The fog half of EcstasyE.obj is in `efog.c`:
+        CreateFogPalette's four modes, fpow, the CSM1 remap, and
+        eAttachDepthIntoAlpha and eAttachFog, whose fog sprite is a seam.
+
+        On the 3DS, `trackview.c` makes the palette before the frame and
+        lays it on with the PICA's fog, over a W-buffer. Each depth's
+        fraction is what the GS's ALPHA_1 would leave for the alpha the
+        image's depth palettes give that depth's Z.
+
+        Seen on Azahar: TRACKB12's 20 fog regions load, and FOG<MAIN>
+        leaves 90.6% of the frame at 4000 and in the sky.
+        `weather_check`: 75 scenarios, 4,368 lines, 0 differ; of its 89
+        mutations, 85 are caught and 4 are equivalent. Written up in
+        `docs/formats/weather-fog.md`. Left of step 3: the RainSystem.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag
 

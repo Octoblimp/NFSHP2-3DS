@@ -14,6 +14,7 @@
 #include "track.h"
 #include "trackpath.h"
 #include "trackroute.h"
+#include "weatherman.h"
 
 int32_t bchunk_breaks;
 
@@ -137,7 +138,6 @@ UNPORTED(LoaderHeliSheet, UnloaderHeliSheet, 24, 0x00034800u)
 UNPORTED(LoaderEventTree, UnloaderEventTree, 25, 0x80034a00u)
 UNPORTED(LoaderLanguage, UnloaderLanguage, 27, 0x00039000u)
 UNPORTED(LoaderSmokeables, UnloaderSmokeables, 28, 0x00034026u, 0x00034027u)
-UNPORTED(LoaderWeatherMan, UnloaderWeatherMan, 29, 0x00034250u)
 UNPORTED(LoaderDemoModeReplay, UnloaderDemoModeReplay, 30,
          0x00039100u, 0x00039101u, 0x00039102u)
 
@@ -173,7 +173,7 @@ BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     loader_difficulty_info,         // 26
     LoaderLanguage,                 // 27
     LoaderSmokeables,               // 28
-    LoaderWeatherMan,               // 29
+    loader_weather_man,             // 29
     LoaderDemoModeReplay,           // 30
 };
 
@@ -207,7 +207,7 @@ BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
     UnloaderDifficultyInfo,         // 26
     UnloaderLanguage,               // 27
     UnloaderSmokeables,             // 28
-    UnloaderWeatherMan,             // 29
+    unloader_weather_man,           // 29
     UnloaderDemoModeReplay,         // 30
 };
 

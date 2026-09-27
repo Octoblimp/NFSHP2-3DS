@@ -214,6 +214,11 @@ extern float   ZMax;                    // 0x00322934  0x400ff000
 extern float   ZMin1;                   // 0x00322938  0x40000040
 extern float   ZMax1;                   // 0x0032293c  0x400ffff0
 
+// eFrameCounter, 0x00322740 (gp-25776): the frames eDisplayFrame has
+// finished. It counts one at its very end, and so does the port's
+// trackview_draw. eView::GetWeatherQuery queries once per count.
+extern uint32_t eFrameCounter;
+
 // ------------------------------------------------------------- the views
 
 // eView::eView (0x00106650): all 128 bytes zeroed, the mover list empty and

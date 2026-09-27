@@ -24,15 +24,17 @@
 #include "emodel.h"
 #include "esolid.h"
 #include "sun.h"
+#include "weatherman.h"
 
-// eview.c is not linked, nor is realtime.c, whose clocks only
-// texturepack.c's flipbooks read, nor eviewmatrix.c, whose SunPosition
-// sun.c's loader writes.
+// eview.c is not linked, whose eFrameCounter weatherman.c's query reads,
+// nor is realtime.c, whose clocks only texturepack.c's flipbooks read, nor
+// eviewmatrix.c, whose SunPosition sun.c's loader writes.
 bNode SolidList;
 bNode ModelList;
 int32_t RealTimeFrames;
 int32_t WorldTimeFrames;
 bVector3 SunPosition;
+uint32_t eFrameCounter;
 
 enum {
     OP_TAG, OP_BUF, OP_LEAF, OP_BULK, OP_OPEN, OP_CLOSE, OP_BUFEND,
@@ -523,6 +525,16 @@ static void label(char *b, size_t n, const void *a)
         snprintf(b, n, "ML");
         return;
     }
+    for (i = 0; i < WEATHER_NUM_TYPES; i++) {
+        if (a == &WeatherRegionLists[i]) {
+            snprintf(b, n, "W%d", i);
+            return;
+        }
+    }
+    if (a == &WeatherRegionInactiveList) {
+        snprintf(b, n, "Wi");
+        return;
+    }
     for (i = MAX_MODELS - 1; i >= 0; i--) {
         if (models[i] != NULL && a == models[i]) {
             snprintf(b, n, "m%d", i);
@@ -721,7 +733,7 @@ static BChunkLoader saved_unload[BCHUNK_NUM_LOADERS];
 static int unported_slot(int k)
 {
     return !(k == 0 || k == 1 || k == 4 || k == 9 || k == 11 || k == 14
-             || k == 18 || k == 19 || k == 26);
+             || k == 18 || k == 19 || k == 26 || k == 29);
 }
 
 // --------------------------------------------------------------- dumps
@@ -880,6 +892,14 @@ static void dump(void)
     memcpy(pos, &SunPosition, sizeof pos);
     printf("  sun %s pos %08x %08x %08x\n", L(SunInfo), (unsigned)pos[0],
            (unsigned)pos[1], (unsigned)pos[2]);
+    printf("  weather");
+    for (i = 0; i < WEATHER_NUM_TYPES + 1; i++) {
+        const bNode *w = i < WEATHER_NUM_TYPES ? &WeatherRegionLists[i]
+                                               : &WeatherRegionInactiveList;
+
+        printf(" %s/%s", L(w->next), L(w->prev));
+    }
+    printf("\n");
     count = walk_list(&SolidList, "solids");
     for (i = 0; i < count; i++) {
         const eSolid *s = (const eSolid *)(void *)walk[i];
