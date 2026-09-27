@@ -27,6 +27,12 @@ static int s_uUvScale    = -1;
 
 static C3D_Mtx s_projection;
 static C3D_Mtx s_modelView;
+
+// The screen quads' ring, and the top screen's pixels as clip space.
+static GeoRenderVertex* s_quads;
+static int              s_numQuads;
+static C3D_Mtx          s_screen;
+static C3D_Mtx          s_identity;
 static float   s_lightVec[3] = { 0.0f, 0.0f, 1.0f };
 static float   s_lightClr[3] = { 1.0f, 1.0f, 1.0f };
 static float   s_ambient      = 0.35f;
@@ -68,6 +74,14 @@ bool georender_init(void)
 
     Mtx_Identity(&s_projection);
     Mtx_Identity(&s_modelView);
+    Mtx_Identity(&s_identity);
+
+    // citro2d's own mapping for the top screen: x right to 400 and y down
+    // to 240, at a depth in the middle of the clip volume.
+    Mtx_OrthoTilt(&s_screen, 0.0f, 400.0f, 240.0f, 0.0f, 1.0f, -1.0f, true);
+    s_quads = (GeoRenderVertex*)linearAlloc(GEO_QUAD_RING * 4u
+                                            * sizeof(GeoRenderVertex));
+    s_numQuads = 0;
 
     s_ready = true;
     return true;
@@ -78,6 +92,8 @@ void georender_exit(void)
     if (!s_ready) {
         return;
     }
+    linearFree(s_quads);
+    s_quads = NULL;
     shaderProgramFree(&s_program);
     DVLB_Free(s_dvlb);
     s_dvlb  = NULL;
@@ -377,9 +393,9 @@ void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
 
 // The GS's ALPHA_1 equations as the PICA's blend unit writes them. The
 // PICA's reverse subtract is the destination less the source.
-static void set_pass(GeoPass pass)
+static void set_blend(uint8_t blend)
 {
-    switch (pass.blend) {
+    switch (blend) {
     case GEO_BLEND_ALPHA:
         C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA,
                        GPU_ONE_MINUS_SRC_ALPHA, GPU_SRC_ALPHA,
@@ -398,6 +414,11 @@ static void set_pass(GeoPass pass)
                        GPU_ONE, GPU_ZERO);
         break;
     }
+}
+
+static void set_pass(GeoPass pass)
+{
+    set_blend(pass.blend);
     C3D_DepthTest(true, GPU_GEQUAL,
                   pass.noDepthWrite || !s_zwrite ? GPU_WRITE_COLOR
                                                  : GPU_WRITE_ALL);
@@ -441,4 +462,64 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
 void georender_set_zwrite(bool on)
 {
     s_zwrite = on;
+}
+
+// ------------------------------------------------------- the screen quads
+
+void georender_quads_rewind(void)
+{
+    s_numQuads = 0;
+}
+
+bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
+                         uint8_t blend)
+{
+    GeoRenderVertex* dst;
+    C3D_BufInfo*     buf;
+    C3D_TexEnv*      env;
+
+    if (!s_ready || !s_quads || s_numQuads >= GEO_QUAD_RING || !gt
+        || !gt->tex) {
+        return false;
+    }
+    dst = &s_quads[s_numQuads * 4];
+    memcpy(dst, v, 4u * sizeof *dst);
+    GSPGPU_FlushDataCache(dst, 4u * sizeof *dst);
+
+    C3D_BindProgram(&s_program);
+    C3D_SetAttrInfo(&s_attr);
+    buf = C3D_GetBufInfo();
+    BufInfo_Init(buf);
+    BufInfo_Add(buf, s_quads, sizeof(GeoRenderVertex), 4, 0x3210);
+
+    // The vertex colour and nothing else: no light, and an ambient of one.
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uProjection, &s_screen);
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uModelView,  &s_identity);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightVec, 0.0f, 0.0f, 1.0f, 0.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightClr, 0.0f, 0.0f, 0.0f, 1.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uAmbient,  1.0f, 1.0f, 1.0f, 1.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale,
+                  gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
+
+    // The GS's modulate is Ct * Cv >> 7, so a vertex colour of 0x80 is 1.0
+    // and 0xff nearly 2. The shader hands the colour over 255, so the
+    // combiner doubles it; the alpha the same, over the packs' alpha, which
+    // texpack_upload has doubled already.
+    C3D_TexBind(0, gt->tex);
+    env = C3D_GetTexEnv(0);
+    C3D_TexEnvInit(env);
+    C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
+    C3D_TexEnvFunc(env, C3D_Both, GPU_MODULATE);
+    C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_2);
+
+    C3D_CullFace(GPU_CULL_NONE);
+    C3D_AlphaTest(true, GPU_GREATER, 0x60);
+    set_blend(blend);
+    C3D_DepthTest(true, GPU_ALWAYS, GPU_WRITE_COLOR);
+    C3D_DrawArrays(GPU_TRIANGLE_STRIP, s_numQuads * 4, 4);
+    s_numQuads++;
+
+    // What draws next sets its own combiner, but not always its scale.
+    C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_1);
+    return true;
 }

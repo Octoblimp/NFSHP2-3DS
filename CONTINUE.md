@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-27), after task 27's twenty-sixth slice, the
-sky dome and the sun's data. `HANDOFF.md` is the running narrative; this file is the short
+continuation (2026-09-27), after task 27's twenty-seventh slice, the
+sun's draw. `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -17,10 +17,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Fifty-six cross-checkers pass, plus the table generators:
+Fifty-seven cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -80,6 +80,7 @@ loadertable_check  27897 ops,    41988 lines, 0 differ  (100 caught, 2 equivalen
 texturepack_check   5452 ops,    11201 lines, 0 differ  (95 caught, 2 equivalent)
 trackflow_check       16 scenarios,  702 lines, 0 differ  (73 caught, 1 equivalent)
 sky_check             45 scenarios, 1159 lines, 0 differ  (76 caught, 2 equivalent)
+sun_check             91 scenarios, 2680 lines, 0 differ  (114 caught, 1 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -537,16 +538,46 @@ and so replaced every boot.
        and 41,988 lines, 0 differ; of its 102 mutations, 100 are caught
        and 2 are equivalent.
 
+   - **The twenty-seventh slice is the sun's draw.**
+     - **StuffSun and StuffSunGlare** are ported in `sundraw.c`. That
+       includes the glare's globals, PhaseTimes and the 15 SunZBuffers.
+     - **ePoly** and its constructor are in `epoly.c`, and ePoly::Render
+       is a seam.
+     - **The 3DS side** is in `trackview.c` and `georender.c`.
+       - `render_epoly` maps the quad's pixels onto the top screen. It
+         draws with the poly's blend, the main target's alpha test and no
+         depth test. No depth test is needed: the poly's z of 65535 passes
+         GEQUAL against any 16-bit Z.
+       - `transfer_zbuffer_rect` queues the rect.
+       - main() calls `trackview_read_depth` after the next
+         C3D_FrameBegin, before the clear. It reads the D24S8 buffer and
+         turns each depth into the GS's Z, 16 + (0x0ff000 - 16) t, with
+         t the same on both.
+     - **A probe** logs 15 screen points' colour and depth words at each
+       stop. Scored against seven stops' screenshots, the tiled mapping
+       comes out at 531, and its flips at 3,643 to 5,931.
+
+     Seen on Azahar:
+     - At every stop the sun is just above the frame. Its rect is off the
+       target, so its layers draw at alpha 0.
+     - The new `track-sun` shot goes back to stop 1 and looks up. The
+       whole rect is sky, and the layers draw at 128, 64, 89 and 40.
+     - The halo has a hard edge, and the fourth layer never shows. The
+       PS2's alpha test does both of these too, because the textures'
+       alpha stops at 0x7f.
+
+     `sun_check`: 91 scenarios, 2,680 lines, 0 differ; of its 115
+     mutations, 114 are caught and 1 is equivalent. Written up in
+     `docs/formats/sun-draw.md`.
+
      **Next is the rest of step 3.**
-     - The sun's draw: StuffSun (`0x00123ec0`, 1,540 bytes) and
-       StuffSunGlare (`0x001244c8`, 1,556 bytes). They read the PS2's Z
-       buffer back through the 15 SunZBuffers to see how much of the sun
-       shows. The 3DS needs its own way to do that, such as an occlusion
-       estimate from the scenery or a small depth readback.
      - WeatherMan, slot 29 (`0x34250`): LoaderWeatherMan (`0x0019dff8`)
        and WeatherManQuery (`0x0019e290`), and the fog it drives
        (CreateFogPalette, `0x00119678`).
      - The RainSystem, behind rain_Load (`0x00128bf8`).
+     - Nothing sets bStartGlare until the munitions are ported.
+       Munition::ExplodeWarhead (`0x001b4798`) sets it for a
+       MunitionsType of 1.
 
      "The road to a playable demo", below, has everything after it.
 
@@ -1124,7 +1155,7 @@ it will move as each class shows what it reaches.
 |---|---|---|
 | 1 | ~~The track on the screen: the viewer mode, eModel over `georender`, a free camera~~ done, task 27's twenty-third slice | 1 |
 | 2 | ~~The LoaderTable: every chunk type in TRACKB12, with the solids, the texture packs, the topology and the routes live~~ done, task 27's twenty-fourth and twenty-fifth slices | 2 |
-| 3 | The sky, the sun and the weather's draw. The dome and the sun's data are done (task 27's twenty-sixth slice); the sun's draw, the weather and the rain are left | 2-3 |
+| 3 | The sky, the sun and the weather's draw. The dome, the sun's data and the sun's draw are done (task 27's twenty-sixth and twenty-seventh slices); the weather and the rain are left | 2-3 |
 | 4 | Car's constructor and destructor, and CarRenderInfo, so that a car draws on the track | 3-4 |
 | 5 | Player and the chase cameras (CM_DRIVE and the rest of `cammover.c`'s set) | 2 |
 | 6 | RaceCoordinator's InitForRace, InitCars, InitPlayers and Race::Init, and the game flow from the frontend into a race and back | 2-3 |

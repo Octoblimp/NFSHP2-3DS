@@ -240,6 +240,19 @@ for ($i = 1; $i -le $Stops; $i++) {
     Shot ("track-stop{0}" -f ($i + 1))
 }
 
+# Back to the first stop and a look up, at TRACKB12's sun: it is in the
+# frame's width there, 42 pixels above its top. X is Z on the keyboard.
+if (Alive) {
+    for ($i = 1; $i -le $Stops; $i++) {
+        [Hp2Track]::PressKey($hwnd, $VK_F)
+        Start-Sleep -Milliseconds 150
+    }
+    Start-Sleep -Milliseconds 800
+    Hold $VK_Z 260
+    Start-Sleep -Milliseconds 600
+    Shot "track-sun"
+}
+
 if (Alive) {
     [Hp2Track]::PressKey($hwnd, $VK_M)          # START leaves the main loop
     Start-Sleep -Milliseconds 2000

@@ -1748,6 +1748,13 @@ int main(int argc, char** argv)
                             BOOT_DT);
 
             C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+            // The last frame is drawn now, and its depth is still there:
+            // the sun's Z rects, before the clear takes it.
+            trackview_read_depth(&g_track, top);
+            if (g_track.probe[0]) {
+                logLine("sun %s", g_track.probe);
+                g_track.probe[0] = '\0';
+            }
             C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
                                   __builtin_bswap32(sky), 0);
             C3D_FrameDrawOn(top);
@@ -1778,6 +1785,12 @@ int main(int argc, char** argv)
                    g_track.deferredSorted, g_track.deferredDropped);
             devLog(8, "track flipbook frames %d uploaded, %d failed",
                    g_track.frameUploads, g_track.frameFails);
+            devLog(9, "sun %d quads (%d failed), last at %.0f %.0f alpha "
+                   "%d; Z rect at %d %d, %d read back, %d of it sky",
+                   g_track.sunQuads, g_track.sunQuadsFailed,
+                   (double)g_track.sunAt[0], (double)g_track.sunAt[1],
+                   g_track.sunAlpha, g_track.sunRectX, g_track.sunRectY,
+                   g_track.sunRects, g_track.sunSky);
 
             C2D_TargetClear(g_bot, BOT_BACK);
             C2D_SceneBegin(g_bot);

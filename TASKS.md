@@ -1953,6 +1953,24 @@ is citro3d and owns the top.
         mutations, 76 are caught and 2 are equivalent. Written up in
         `docs/formats/sky-sun.md`. Left of step 3: StuffSun and
         StuffSunGlare, WeatherMan and the fog, and the RainSystem.
+
+        **The twenty-seventh slice is closed: the sun's draw.**
+        StuffSun and StuffSunGlare are ported in `sundraw.c`, with the
+        glare's globals and the 15 SunZBuffers. ePoly and its
+        constructor are in `epoly.c`, and ePoly::Render is a seam.
+
+        On the 3DS, `trackview.c`'s `render_epoly` draws each quad
+        through `georender_draw_quad`. It uses the poly's blend, the main
+        target's alpha test, and no depth test. `trackview_read_depth`
+        fills the SunZBuffers from the last frame's depth buffer, before
+        the clear, as the GS's 16-bit Z.
+
+        Seen on Azahar: the sun draws at alpha 0 where it is above the
+        frame. In the new `track-sun` shot, it draws faded by a full
+        count. `sun_check`: 91 scenarios, 2,680 lines, 0 differ; of its
+        115 mutations, 114 are caught and 1 is equivalent. Written up in
+        `docs/formats/sun-draw.md`. Left of step 3: WeatherMan and the
+        fog, and the RainSystem.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag
 

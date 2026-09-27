@@ -150,4 +150,21 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
 // off for the sky. It starts on.
 void georender_set_zwrite(bool on);
 
+// ------------------------------------------------------- the screen quads
+
+// How many screen quads a frame can draw. The sun and its glare are 12.
+#define GEO_QUAD_RING 64
+
+// One quad in the top screen's pixels, x right to 400 and y down to 240,
+// drawn as a strip in the order given -- ePoly::Render's, for
+// trackview.c's render_epoly. The texture modulates the vertex colour on
+// the GS's scale, where 0x80 is 1.0; `blend` is a GeoBlend; the alpha test
+// is the main target's, and there is no depth test. The vertices go into
+// a ring on the linear heap, which georender_quads_rewind starts again
+// once the GPU is done with the last frame. False when the ring is full
+// or there is no texture.
+bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
+                         uint8_t blend);
+void georender_quads_rewind(void);
+
 #endif

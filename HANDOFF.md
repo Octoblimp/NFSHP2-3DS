@@ -7661,3 +7661,74 @@ frames.
   needs its own way to measure it.
 - WeatherMan (slot 29) and the fog palettes.
 - The RainSystem behind rain_Load.
+
+## Session 30, continued (2026-09-27) -- Task 27's twenty-seventh slice: the sun's draw
+
+The twenty-sixth slice went in as `8afa8c6`, with its loadertable fix as
+`884cb6c`. The twenty-seventh ports the draw half of Sun.obj:
+- StuffSun, StuffSunGlare, the glare's globals and the 15 SunZBuffers,
+  in `sundraw.c`;
+- ePoly and its constructor, in `epoly.c`, with ePoly::Render as a seam;
+- the 3DS side of the seams, in `trackview.c` and `georender.c`.
+
+The write-up is `docs/formats/sun-draw.md`.
+
+```
+sun_check           91 scenarios, 2680 lines, 0 differ
+                    115 mutations: 114 caught, 1 equivalent, 0 unexplained
+```
+
+The checker runs StuffSun, StuffSunGlare and the constructor as shipped.
+It stubs eRotTransPers, eMulVector, bSin, bCos, ePoly::Render and
+eTransferZBufferRect, and the harness links sundraw.c, epoly.c and
+sun.c with the same stubs. The one equivalent mutation, `rect_end_x_le`,
+gives 32 - 0 = 32 either way.
+
+What the image showed:
+- ePoly::Render's packet writes ALPHA_1 for a SunPoly and nothing else,
+  so no TEST_1 and no ZBUF. The main target's alpha test (GREATER 0x30)
+  and Z test (GEQUAL) apply.
+- The Z buffer is PSMZ16S. FetchZBuffer's BITBLTBUF is 0x3a080000, and
+  eTransferZBufferRect queues its rect with PSM 58.
+- ZMin and ZMax are floats whose mantissas are the Z, 16 and 0x0ff000.
+  Z is linear in the same t as citro3d's depth.
+- The poly's z is 65535, which passes GEQUAL against any 16-bit Z. So no
+  scenery hides the sun, and only the count fades it.
+- Munition::ExplodeWarhead (`0x001b4798`) sets bStartGlare for a
+  MunitionsType of 1.
+- The port changes one thing: StuffSunGlare returns with no SunInfo,
+  where the image reads 28 bytes past NULL.
+
+The 3DS side:
+- `render_epoly` does what Render does, then maps the target's pixels
+  onto the top screen: `x3 = 200 + (x - W/2) * 400 / W / AspX`, and y the
+  same with AspY about 120.
+- `georender_draw_quad` draws a strip from a 64-quad ring on the linear
+  heap. It goes through the scenery's shader with an ortho projection and
+  no light. The combiner's scale is 2, because the GS's 0x80 is 1.0. The
+  alpha test is GREATER 0x60, and there is no depth test.
+- `trackview_read_depth` runs at the next C3D_FrameBegin, before the
+  clear. It reads each PS2 pixel's centre out of the D24S8 buffer:
+  screen `(x, y)` is at buffer `(239 - y, x)`, in 8 by 8 Morton tiles.
+- A probe logs 15 points' colour and depth words for the first frame at
+  each stop. Against seven stops' screenshots the mapping scores 531. The
+  x flip scores 3,643, the y flip 5,082, and both 5,931.
+
+Seen on Azahar:
+- At every stop the sun is above the frame, 42 pixels above it at stop 1.
+  So the rect is off the target, the count is 0, and all four layers draw
+  at alpha 0.
+- `run_azahar_track.ps1` now ends with a `track-sun` shot, which goes
+  back to stop 1 and looks up. The whole rect is sky, 1,024 of 1,024, and
+  the layers draw at 128, 64, 89 and 40.
+- Layer 1, the halo, passes the alpha test only where its texture's alpha
+  is over 0x60, so it has a hard edge. Layer 3 never passes, because
+  0x7f * 40 >> 7 is 39. The PS2 does the same, since no sun texture's
+  alpha is past 0x7f, and so the doubled upload clamps nothing.
+
+`check_3dsx`: relocations OK. The chain's 57 checkers pass, 0 differ.
+
+### Next: the rest of step 3
+
+- WeatherMan (slot 29) and the fog palettes.
+- The RainSystem behind rain_Load.

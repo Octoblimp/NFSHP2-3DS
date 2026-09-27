@@ -13,6 +13,7 @@
 #include "eframe.h"
 #include "emath.h"
 #include "emodel.h"
+#include "epoly.h"
 #include "esolid.h"
 #include "eview.h"
 #include "eviewmatrix.h"
@@ -20,6 +21,7 @@
 #include "scenery.h"
 #include "sky.h"
 #include "sun.h"
+#include "sundraw.h"
 #include "texpack.h"
 #include "texturepack.h"
 #include "trackflow.h"
@@ -71,6 +73,21 @@ static const char* const kTexFiles[TRACKVIEW_NUM_TEXFILES] = {
 static TrackView*      s_draw;      // the viewer StuffScenery draws for
 static C3D_Mtx         s_proj;
 static const bMatrix4* s_worldView;
+
+// A Z rect StuffSun asked for, and the target it is in the pixels of.
+typedef struct {
+    uint16_t* dst;
+    int       x, y, w, h;
+    int       targetW, targetH;
+    float     aspX, aspY;
+} SunRect;
+
+static eRenderTarget* s_quadTarget;     // the view StuffSun draws for
+static SunRect        s_sunRects[NUM_SUN_ZBUFFERS];
+static int            s_numSunRects;
+
+static void render_epoly(ePoly* p, TextureInfo* info, int flags);
+static void transfer_zbuffer_rect(uint8_t* dst, int x, int y, int w, int h);
 
 // ------------------------------------------------------------------ helpers
 
@@ -1006,6 +1023,8 @@ bool trackview_load(TrackView* v)
     load_shared_packs(v);
     eDisableFixUpTables = 1;
     gEModelRenderFn = render_model;
+    gEPolyRenderFn  = render_epoly;
+    gETransferZBufferRectFn = transfer_zbuffer_rect;
     v->chunkLen = count_chunks(v);
     load_chunks(v->data, (int32_t)v->chunkLen);
     post_load_fixup();
@@ -1068,6 +1087,13 @@ void trackview_free(TrackView* v)
         if (gEModelRenderFn == render_model) {
             gEModelRenderFn = NULL;
         }
+        if (gEPolyRenderFn == render_epoly) {
+            gEPolyRenderFn = NULL;
+        }
+        if (gETransferZBufferRectFn == transfer_zbuffer_rect) {
+            gETransferZBufferRectFn = NULL;
+        }
+        s_numSunRects = 0;
     }
     if (v->info) {
         for (i = 0; i < v->numSolids; i++) {
@@ -1210,6 +1236,265 @@ static void draw_deferred(TrackView* v)
     }
 }
 
+// ---------------------------------------------------------------- the sun
+
+// The GS's screen is 4096 pixels across with the target in the middle.
+#define GS_CENTRE 2048.0f
+
+// A target pixel's place on the top screen: the view's projection, which
+// has the cull's width across 400 pixels and square pixels. The PS2's y is
+// AspectRatioY times its x, so both come off here.
+static void target_to_screen(float x, float y, int targetW, int targetH,
+                             float aspX, float aspY, float* sx, float* sy)
+{
+    float k = 400.0f / (float)targetW;
+
+    *sx = 200.0f + (x - (float)(targetW >> 1)) * k / aspX;
+    *sy = 120.0f + (y - (float)(targetH >> 1)) * k / aspY;
+}
+
+// A SunPoly's own ALPHA_1, where any other poly takes its texture's. C is
+// As in every one StuffSun makes.
+static uint8_t poly_blend(const ePoly* p)
+{
+    if (p->AlphaA == EPOLY_ALPHA_CS && p->AlphaD == EPOLY_ALPHA_CD) {
+        if (p->AlphaB == EPOLY_ALPHA_CD) {
+            return GEO_BLEND_ALPHA;
+        }
+        if (p->AlphaB == EPOLY_ALPHA_ZERO) {
+            return GEO_BLEND_ADD;
+        }
+    }
+    if (p->AlphaA == EPOLY_ALPHA_ZERO && p->AlphaB == EPOLY_ALPHA_CS
+        && p->AlphaD == EPOLY_ALPHA_CD) {
+        return GEO_BLEND_SUBTRACT;
+    }
+    return GEO_BLEND_NONE;
+}
+
+// ePoly::Render (0x0010e580), for the quads StuffSun and StuffSunGlare
+// make; epoly.h has what it does. The PS2 puts the packet on its
+// texture's list, or on the alpha sort by V0's z, and draws it with the
+// rest; the sun's textures are order 7, the last list, so here it is
+// drawn at once, after the scenery. The poly's z is 65535, which GEQUAL
+// passes against anything in a 16-bit Z buffer, so it has no depth test.
+static void render_epoly(ePoly* p, TextureInfo* info, int flags)
+{
+    static const uint8_t kStrip[4] = { 0, 1, 3, 2 };
+    eRenderTarget*       rt = s_quadTarget;
+    TrackView*           v  = s_draw;
+    TrackTex*            t;
+    GeoTexture           gt;
+    GeoRenderVertex      q[4];
+    float                halfW, off, mx = 0.0f, my = 0.0f;
+    uint8_t              blend;
+    int                  i;
+
+    // `flags` keeps the packet in the poly's frame memory, for a poly
+    // drawn again unchanged; nothing here needs it.
+    (void)flags;
+    if (info == NULL || v == NULL || rt == NULL) {
+        return;
+    }
+    if (p->SunPoly) {
+        p->ApplyAspectRatio = 0;
+    }
+    t = load_texture(v, info);
+    if (t == NULL || !t->valid) {
+        v->sunQuadsFailed++;
+        return;
+    }
+    if (gpuCmdBufSize - gpuCmdBufOffset < CMDBUF_GUARD_WORDS) {
+        v->cmdSkipped++;
+        return;
+    }
+    gt.tex        = &t->tex;
+    gt.uvScale[0] = t->uvScale[0];
+    gt.uvScale[1] = t->uvScale[1];
+    gt.pass       = t->pass;
+
+    halfW = (float)(rt->ScissorW >> 1);
+    off   = GS_CENTRE - halfW;
+    memset(q, 0, sizeof q);
+    for (i = 0; i < 4; i++) {
+        const int n = kStrip[i];
+        float     x = p->Vertices[n].x;
+        float     y = p->Vertices[n].y;
+        float     w = p->UVs[n][2] != 0.0f ? p->UVs[n][2] : 1.0f;
+
+        if (p->ApplyAspectRatio) {
+            x *= rt->AspectRatio2DX;
+            y *= rt->AspectRatio2DY;
+        } else if (halfW < x) {
+            x += -0.5f;
+        }
+        // XYZ2 is 12.4 fixed point on the GS's screen, and Render drops
+        // the fraction.
+        x = floorf(x + off) - off;
+        y = floorf(y + (GS_CENTRE - (float)(rt->ScissorH >> 1)))
+          - (GS_CENTRE - (float)(rt->ScissorH >> 1));
+        mx += x * 0.25f;
+        my += y * 0.25f;
+        target_to_screen(x, y, rt->ScissorW, rt->ScissorH, rt->AspectRatioX,
+                         rt->AspectRatioY, &q[i].pos[0], &q[i].pos[1]);
+        q[i].st[0] = p->UVs[n][0] / w;
+        q[i].st[1] = p->UVs[n][1] / w;
+        memcpy(q[i].colour, p->Colours[n], 4);
+    }
+
+    // Render turns the blend on for a semitransparent texture alone.
+    if (!info->IsAnySemitransparencyFlag) {
+        blend = GEO_BLEND_NONE;
+    } else if (p->SunPoly) {
+        blend = poly_blend(p);
+    } else {
+        blend = t->pass.blend;
+    }
+    if (!georender_draw_quad(q, &gt, blend)) {
+        v->sunQuadsFailed++;
+        return;
+    }
+    v->sunQuads++;
+    v->sunAt[0] = mx;
+    v->sunAt[1] = my;
+    v->sunAlpha = p->Colours[0][3];
+}
+
+// eTransferZBufferRect (0x00110610): the PS2 puts the rect on a queue that
+// runs once the frame is drawn, and so here, where trackview_read_depth
+// reads it at the next frame's start.
+static void transfer_zbuffer_rect(uint8_t* dst, int x, int y, int w, int h)
+{
+    eRenderTarget* rt = s_quadTarget;
+    SunRect*       r;
+
+    if (rt == NULL || s_numSunRects >= NUM_SUN_ZBUFFERS || w <= 0 || h <= 0
+        || w * h > SUN_ZBUFFER_SIZE * SUN_ZBUFFER_SIZE) {
+        return;
+    }
+    r = &s_sunRects[s_numSunRects++];
+    r->dst     = (uint16_t*)(void*)dst;
+    r->x       = x;
+    r->y       = y;
+    r->w       = w;
+    r->h       = h;
+    r->targetW = rt->ScissorW;
+    r->targetH = rt->ScissorH;
+    r->aspX    = rt->AspectRatioX;
+    r->aspY    = rt->AspectRatioY;
+    if (s_draw) {
+        s_draw->sunRectX = x;
+        s_draw->sunRectY = y;
+    }
+}
+
+// A top-screen pixel's word in the 240 by 400 buffers citro3d renders to:
+// the screen on its side, its x down the buffer and its y across from the
+// right, in 8 by 8 tiles in rows of 30, and each tile in Morton order.
+static uint32_t tiled_index(int x, int y)
+{
+    uint32_t bx = (uint32_t)(239 - y);
+    uint32_t by = (uint32_t)x;
+    uint32_t m  = (bx & 1u) | ((by & 1u) << 1) | ((bx & 2u) << 1)
+                | ((by & 2u) << 2) | ((bx & 4u) << 2) | ((by & 4u) << 3);
+
+    return ((by >> 3) * (240u / 8u) + (bx >> 3)) * 64u + m;
+}
+
+// The GS's Z for a depth the PICA wrote. The two are the same hyperbola in
+// the view's depth, the PICA's 0 at the far plane to 1 at the near and the
+// GS's from ZMin to ZMax -- floats in [2, 4), whose mantissas are the Z,
+// 16 and 0x0ff000. FetchZBuffer reads the buffer back as PSMZ16S, and past
+// 0xffff is taken as 0xffff here; all StuffSun asks is whether it is under
+// 64. What the clear left, and the sky did not write, is 0.
+static uint16_t gs_z(uint32_t d24)
+{
+    const float zmin = (ZMin - 2.0f) * 4194304.0f;
+    const float zmax = (ZMax - 2.0f) * 4194304.0f;
+    float       z;
+
+    if (d24 == 0) {
+        return 0;
+    }
+    z = zmin + (zmax - zmin) * ((float)d24 / 16777215.0f);
+    return z >= 65535.0f ? 0xffffu : (uint16_t)z;
+}
+
+// The probe: the colour and depth words at 15 screen points, five across
+// and three down, for a check of tiled_index against a screenshot.
+static void probe(TrackView* v, const C3D_RenderTarget* target)
+{
+    const uint32_t* colour = (const uint32_t*)target->frameBuf.colorBuf;
+    const uint32_t* depth  = (const uint32_t*)target->frameBuf.depthBuf;
+    size_t          at     = 0;
+    int             i;
+
+    at += (size_t)snprintf(v->probe, sizeof v->probe, "probe");
+    for (i = 0; i < 15 && at < sizeof v->probe; i++) {
+        int      x = 40 + (i % 5) * 80;
+        int      y = 30 + (i / 5) * 90;
+        uint32_t n = tiled_index(x, y);
+
+        at += (size_t)snprintf(v->probe + at, sizeof v->probe - at,
+                               " %d,%d %08lx/%08lx", x, y,
+                               (unsigned long)(colour ? colour[n] : 0),
+                               (unsigned long)(depth ? depth[n] : 0));
+    }
+}
+
+void trackview_read_depth(TrackView* v, C3D_RenderTarget* target)
+{
+    const uint32_t* depth;
+    int             r, i, j;
+
+    v->sunRects = 0;
+    v->sunSky   = 0;
+    if (target == NULL || target->frameBuf.depthBuf == NULL
+        || target->frameBuf.width != 240 || target->frameBuf.height != 400) {
+        s_numSunRects = 0;
+        return;
+    }
+    if (v->probePending) {
+        v->probePending = false;
+        probe(v, target);
+    }
+    depth = (const uint32_t*)target->frameBuf.depthBuf;
+    for (r = 0; r < s_numSunRects; r++) {
+        const SunRect* q = &s_sunRects[r];
+
+        for (j = 0; j < q->h; j++) {
+            for (i = 0; i < q->w; i++) {
+                int      px = q->x + i;
+                int      py = q->y + j;
+                uint16_t z  = 0xffffu;
+
+                // The GS's rect wraps at 2048, into what is not the
+                // frame's; StuffSun counts none of it.
+                if (px >= 0 && py >= 0 && px < q->targetW
+                    && py < q->targetH) {
+                    float sx, sy;
+                    int   ix, iy;
+
+                    target_to_screen((float)px + 0.5f, (float)py + 0.5f,
+                                     q->targetW, q->targetH, q->aspX,
+                                     q->aspY, &sx, &sy);
+                    ix = (int)floorf(sx);
+                    iy = (int)floorf(sy);
+                    ix = ix < 0 ? 0 : ix > 399 ? 399 : ix;
+                    iy = iy < 0 ? 0 : iy > 239 ? 239 : iy;
+                    z  = gs_z(depth[tiled_index(ix, iy)] & 0xffffffu);
+                    if (z < 64) {
+                        v->sunSky++;
+                    }
+                }
+                q->dst[j * q->w + i] = z;
+            }
+        }
+        v->sunRects++;
+    }
+    s_numSunRects = 0;
+}
+
 void trackview_draw(TrackView* v)
 {
     eView* view = eGetView(EVIEW_ID_PLAYER1);
@@ -1274,6 +1559,18 @@ void trackview_draw(TrackView* v)
 
     scenery_stuff_scenery(&v->cull, view);
     draw_deferred(v);
+
+    // Then StuffSun (0x00112ecc), after DrawNisObjects, which has nothing
+    // to draw here. Its quads draw at once; see render_epoly.
+    v->sunQuads       = 0;
+    v->sunQuadsFailed = 0;
+    georender_quads_rewind();
+    s_quadTarget = view->pRenderTarget0;
+    StuffSun(view);
+    s_quadTarget = NULL;
+    if (v->listFrame) {
+        v->probePending = true;
+    }
     s_draw = NULL;
 
     // eDisplayFrame's end (0x00113cd4), once the frame is on its way: the

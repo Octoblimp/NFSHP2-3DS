@@ -8,9 +8,10 @@ This is task 27's twenty-sixth slice. It covers two things:
   the track's sun chunk, which is slot 14 of the LoaderTable, and the five
   textures the sun is drawn with.
 
-The draw half of Sun.obj is not ported yet. That is `StuffSun`
-(0x00123ec0, 1,540 bytes), `StuffSunGlare` (0x001244c8, 1,556 bytes) and
-the 15 `SunZBuffer`s they read back.
+The draw half of Sun.obj is the twenty-seventh slice, and
+`docs/formats/sun-draw.md` has it. That is `StuffSun` (0x00123ec0,
+1,540 bytes), `StuffSunGlare` (0x001244c8, 1,556 bytes) and the 15
+`SunZBuffer`s they read back.
 
 The port is in `3DS Files/source/`:
 

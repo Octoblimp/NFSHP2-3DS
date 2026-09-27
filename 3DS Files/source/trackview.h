@@ -216,6 +216,17 @@ typedef struct {
     char drawList[2048];
     int  cmdPeakWords;          // the most of the GPU list a frame has used
 
+    // --- the sun: what StuffSun drew and asked for, the frame just drawn.
+    int   sunQuads;             // quads ePoly::Render drew
+    int   sunQuadsFailed;       // and the ones it could not
+    float sunAt[2];             // the last quad's middle, the target's pixels
+    int   sunAlpha;             // and its alpha, of the GS's 0x80
+    int   sunRectX, sunRectY;   // the last Z rect asked for
+    int   sunRects;             // rects trackview_read_depth read back
+    int   sunSky;               // of their pixels, the ones under 64
+    bool  probePending;         // the next read-back logs the probe
+    char  probe[512];           // what it found, for main() to log; "" if not
+
     // --- counters for the bring-up overlay.
     bool loaded;
     int  bakedSolids;
@@ -259,6 +270,12 @@ void trackview_input(TrackView* v, uint32_t kDown, uint32_t kHeld, int cpx,
                      int cpy, float dt);
 
 // The frame: view 1's matrices, the cull, and StuffScenery into the bound
-// render target, which must have a depth buffer; then, as eDisplayFrame
-// ends, the flipbooks' next frames.
+// render target, which must have a depth buffer; then StuffSun; then, as
+// eDisplayFrame ends, the flipbooks' next frames.
 void trackview_draw(TrackView* v);
+
+// The Z rects StuffSun asked for in the frame before, out of `target`'s
+// depth buffer and into their SunZBuffers, the way the PS2's transfer
+// queue fills them once the frame is drawn. Call it between
+// C3D_FrameBegin, which waits for the GPU, and the target's clear.
+void trackview_read_depth(TrackView* v, C3D_RenderTarget* target);
