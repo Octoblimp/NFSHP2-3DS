@@ -486,7 +486,7 @@ static void seam_gamestate(void)
     printf("  gamestate\n");
 }
 
-static void seam_rain(float dt)
+void rain_TimeStep(float dt)
 {
     printf("  rain %08x\n", fb(dt));
 }
@@ -1762,7 +1762,6 @@ int main(int argc, char **argv)
     gWorldEffectsDoTimeStepFn = seam_fxstep;
     gEmProcessAllEventsFn = seam_emevents;
     gUpdatePlayersGameStateFn = seam_gamestate;
-    gRainTimeStepFn = seam_rain;
     gServiceFernFlattenersFn = seam_ferns;
     gServiceTweakerDamageFn = seam_tweakdamage;
     gServiceTrackRouteEditorFn = seam_routeeditor;

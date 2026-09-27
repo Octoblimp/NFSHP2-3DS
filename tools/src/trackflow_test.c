@@ -94,6 +94,8 @@ void init_contact(void) { say("InitContact"); }
 void topotree_init_tree(TopologyTree *t) { say("InitTree %s", label(t)); }
 void InitPhysics(int32_t n) { say("InitPhysics %d", (int)n); }
 void SkyLoader(void) { say("SkyLoader"); }
+void rain_Load(void) { say("rain_Load"); }
+void rain_Unload(void) { say("rain_Unload"); }
 void SunTrackLoader(void) { say("SunTrackLoader"); }
 void SunTrackUnloader(void) { say("SunTrackUnloader"); }
 void SkyUnloader(void) { say("SkyUnloader"); }
@@ -120,7 +122,6 @@ void bgf_change_state(BGameFlow *gf, int desired, int pending)
 
 #define SEAM(fn, name) static void fn(void) { say(name); }
 SEAM(s_smokeables, "InitSmokeables")
-SEAM(s_rain, "rain_Load")
 SEAM(s_debugtopo, "InitDebugTopology")
 SEAM(s_markers, "InitTrackMarkers")
 SEAM(s_routeeditor, "InitTrackRouteEditor")
@@ -134,7 +135,6 @@ SEAM(s_closeworldobjects, "CloseWorldObjects")
 SEAM(s_closerouteeditor, "CloseTrackRouteEditor")
 SEAM(s_closemarkers, "CloseTrackMarkers")
 SEAM(s_closedebugtopo, "CloseDebugTopology")
-SEAM(s_rainunload, "rain_Unload")
 SEAM(s_closesmokeables, "CloseSmokeables")
 SEAM(s_soundregions, "UnLoadSoundRegions")
 SEAM(s_demoreplay, "DemoModeReplayUnload")
@@ -194,7 +194,6 @@ static int s_countfree(int pool)
 static void set_seams(int on)
 {
     gInitSmokeablesFn = on ? s_smokeables : NULL;
-    gRainLoadFn = on ? s_rain : NULL;
     gInitDebugTopologyFn = on ? s_debugtopo : NULL;
     gInitTrackMarkersFn = on ? s_markers : NULL;
     gInitTrackRouteEditorFn = on ? s_routeeditor : NULL;
@@ -212,7 +211,6 @@ static void set_seams(int on)
     gCloseTrackRouteEditorFn = on ? s_closerouteeditor : NULL;
     gCloseTrackMarkersFn = on ? s_closemarkers : NULL;
     gCloseDebugTopologyFn = on ? s_closedebugtopo : NULL;
-    gRainUnloadFn = on ? s_rainunload : NULL;
     gCloseSmokeablesFn = on ? s_closesmokeables : NULL;
     gFindResourceFileFn = on ? s_find : NULL;
     gUnloadResourceFileFn = on ? s_unloadrf : NULL;

@@ -1990,6 +1990,20 @@ is citro3d and owns the top.
         `weather_check`: 75 scenarios, 4,368 lines, 0 differ; of its 89
         mutations, 85 are caught and 4 are equivalent. Written up in
         `docs/formats/weather-fog.md`. Left of step 3: the RainSystem.
+
+        **The twenty-ninth slice is closed: the rain, and with it step
+        3.** The shipped image draws no rain, snow or storm. Its four
+        rain entry points are `jr ra ; nop`, and are ported as such in
+        `rain.c`, called directly where the seams were. The RainSystem,
+        the RainSplashes and the storm have no live caller. Nor does
+        SoundScape::UpdateWeather, so the fog is the weather query's one
+        live reader.
+
+        `rain_check` proves this from the image: every reference to that
+        code and data in the loaded sections, 30 of them, is expected.
+        It runs the entry points against `rain.c`: 31 calls, 0 differ, 5
+        of 5 mutations caught. Written up in `docs/formats/rain.md`.
+        Next is step 4, a car on the track.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag
 

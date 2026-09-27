@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-27), after task 27's twenty-eighth slice, the
-weather and the fog. `HANDOFF.md` is the running narrative; this file is the short
+continuation (2026-09-27), after task 27's twenty-ninth slice, the
+rain, which closes step 3. `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -17,10 +17,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Fifty-eight cross-checkers pass, plus the table generators:
+Fifty-nine cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -72,16 +72,17 @@ vclip_check        11890 ops,    22389 lines, 0 differ  (280 caught, 1 equivalen
 polyhedra_check    15907 ops,    64560 lines, 0 differ  (172 caught, 12 equivalent)
 collisionbody_check 1572 ops,    35426 lines, 0 differ  (622 caught, 24 equivalent)
 collision_check     3587 ops,     6859 lines, 0 differ  (121 caught, 10 equivalent)
-world_check         2742 ops,    15110 lines, 0 differ  (328/328 mutations caught)
+world_check         2742 ops,    15110 lines, 0 differ  (330/330 mutations caught)
 scenery_check       3450 ops,    16724 lines, 0 differ  (77 caught, 2 equivalent)
 scenerycull_check   7273 ops,    46687 lines, 0 differ  (147 caught, 1 equivalent)
 eview_check         2103 ops,    15454 lines, 0 differ  (152 caught, 1 equivalent)
 loadertable_check  27933 ops,    42243 lines, 0 differ  (103 caught, 2 equivalent)
 texturepack_check   5452 ops,    11201 lines, 0 differ  (95 caught, 2 equivalent)
-trackflow_check       16 scenarios,  702 lines, 0 differ  (73 caught, 1 equivalent)
+trackflow_check       16 scenarios,  706 lines, 0 differ  (76 caught, 1 equivalent)
 sky_check             45 scenarios, 1159 lines, 0 differ  (76 caught, 2 equivalent)
 sun_check             91 scenarios, 2680 lines, 0 differ  (114 caught, 1 equivalent)
 weather_check         75 scenarios, 4368 lines, 0 differ  (85 caught, 4 equivalent)
+rain_check            31 calls,       31 lines, 0 differ  (5/5 mutations caught; 41 image facts)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -608,10 +609,35 @@ and so replaced every boot.
      treats slot 29 as ported: 42,243 lines, 0 differ, and 103 of its
      105 mutations caught. Written up in `docs/formats/weather-fog.md`.
 
-     **Next is the rest of step 3: the RainSystem**, behind rain_Load
-     (`0x00128bf8`) and rain_Unload, which are still the End's and the
-     Begin's seams. WeatherManQuery's rain list is what drives it, and
-     TRACKB12 has no rain regions.
+   - **The twenty-ninth slice is the rain, and it closes step 3.** The
+     shipped image draws no rain, snow or storm.
+     - rain_Load, rain_Unload, rain_TimeStep and rain_Render are each
+       `jr ra ; nop`. They are ported as such in `rain.c`, and the End,
+       the Begin and World::DoTimestep call them directly. The seams
+       `gRainLoadFn`, `gRainUnloadFn` and `gRainTimeStepFn` are gone.
+     - Nothing reaches the rest of Rain.obj: RainSystem's constructor,
+       Update, Render, SplashLoop and TweakSplashes, and the RainSplashes
+       under them.
+     - The storm in EcstasyE.obj is dead too. UpdateStorm and
+       RenderAllStorms have no caller, SetStormType is empty, and
+       GetStormType returns 0.
+     - SoundScape::UpdateWeather has no caller either. So
+       CreateFogPalette is the weather query's one live reader, and the
+       rain, snow and wind regions load and do nothing.
+
+     `rain_check` scans every loaded section for references to all of
+     it. It finds 30, and each is in its expected table. It also runs the
+     four entry points in mipsemu against `rain.c`: 31 calls, 0 differ,
+     5 of 5 mutations caught. `trackflow_check` and `world_check` stub
+     the rain calls by name now, and gain mutations that drop and move
+     them. Written up in `docs/formats/rain.md`.
+
+     **Next is step 4: a car on the track.** Car's constructor
+     (`__3CarP10DriverInfoP8bVector3Us`, `0x0012f240`, 1052 bytes) and
+     destructor, Car::InitRenderInfo (`0x0011dce8`) and CloseRenderInfo,
+     and CarRenderInfo: its constructor (`0x0011e8b0`, 4020 bytes),
+     destructor (`0x0011f868`) and Render (`0x00120b08`, 7972 bytes).
+     Put one car at the start and draw it in the track viewer.
      - Nothing sets bStartGlare until the munitions are ported.
        Munition::ExplodeWarhead (`0x001b4798`) sets it for a
        MunitionsType of 1.
@@ -1192,7 +1218,7 @@ it will move as each class shows what it reaches.
 |---|---|---|
 | 1 | ~~The track on the screen: the viewer mode, eModel over `georender`, a free camera~~ done, task 27's twenty-third slice | 1 |
 | 2 | ~~The LoaderTable: every chunk type in TRACKB12, with the solids, the texture packs, the topology and the routes live~~ done, task 27's twenty-fourth and twenty-fifth slices | 2 |
-| 3 | The sky, the sun and the weather's draw. The dome, the sun's data, the sun's draw and the weather's fog are done (task 27's twenty-sixth to twenty-eighth slices); the rain is left | 2-3 |
+| 3 | ~~The sky, the sun and the weather's draw~~ done, task 27's twenty-sixth to twenty-ninth slices. The shipped image has no rain or storm to draw | 2-3 |
 | 4 | Car's constructor and destructor, and CarRenderInfo, so that a car draws on the track | 3-4 |
 | 5 | Player and the chase cameras (CM_DRIVE and the rest of `cammover.c`'s set) | 2 |
 | 6 | RaceCoordinator's InitForRace, InitCars, InitPlayers and Race::Init, and the game flow from the frontend into a race and back | 2-3 |

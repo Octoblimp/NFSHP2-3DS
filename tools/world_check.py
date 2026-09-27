@@ -2593,7 +2593,13 @@ _m("step terrain d 0", "car_trigger_car_terrain_effects(car, d);",
    "car_trigger_car_terrain_effects(car, 0.0f);")
 _m("step no engine", "        car_fake_engine_task(w->CarTable[i]);\n", "        (void)0;\n")
 _m("step no sort", "    blist_sort((bNode *)(void *)&w->CarList, car_list_in_order);\n", "")
-_m("step rain dt 0", "gRainTimeStepFn(dt);", "gRainTimeStepFn(0.0f);")
+_m("step rain dt 0", "rain_TimeStep(dt);", "rain_TimeStep(0.0f);")
+_m("step no rain", "    rain_TimeStep(dt);\n", "")
+_m("step rain before gamestate",
+   "    if (gUpdatePlayersGameStateFn != NULL)\n"
+   "        gUpdatePlayersGameStateFn();\n    rain_TimeStep(dt);\n",
+   "    rain_TimeStep(dt);\n    if (gUpdatePlayersGameStateFn != NULL)\n"
+   "        gUpdatePlayersGameStateFn();\n")
 _m("step race null", "if (pCurrentRace != NULL && gRaceUpdateFn", "if (gRaceUpdateFn")
 _m("step gamestate before events",
    "    if (gEmProcessAllEventsFn != NULL)\n        gEmProcessAllEventsFn();\n"

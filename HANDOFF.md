@@ -7812,3 +7812,67 @@ Seen on Azahar:
 ### Next: the rest of step 3
 
 - The RainSystem behind rain_Load (`0x00128bf8`) and rain_Unload.
+
+## Session 30, continued (2026-09-27) -- Task 27's twenty-ninth slice: the rain
+
+The twenty-eighth slice went in as `ae0ac05`, after the chain's 62 steps
+all passed. The twenty-ninth closes step 3. There was less to port than
+the roadmap assumed: **the shipped image draws no rain, snow or storm.**
+
+- rain_Load (`0x00128bf8`), rain_Unload, rain_TimeStep and rain_Render
+  are each `jr ra ; nop`. `rain.c` has them as that. The End and the
+  Begin of the track flow, and World::DoTimestep, call them directly,
+  and the three seams are gone.
+- RainSystem's constructor, destructor, Update, Render, SplashLoop and
+  TweakSplashes have no caller and no address taken. The four
+  RainSplash methods are reached only from SplashLoop.
+- The storm, in EcstasyE.obj, is dead too:
+  - UpdateStorm and RenderAllStorms have no caller.
+  - SetStormType is empty, GetStormType returns 0, and
+    GetStormTypeString always gives "None". PauseDebugMenu is their
+    only caller.
+  - Nothing reads DrawStorm, SnowStorm or WaterSpray.
+- SoundScape::UpdateWeather has no caller: SoundScape::Update runs the
+  reverb and the ambients only. So CreateFogPalette is the weather
+  query's one live reader.
+
+The write-up is `docs/formats/rain.md`.
+
+```
+rain_check          31 calls, 31 lines, 0 differ
+                    41 image facts, 30 references, 0 wrong
+                    5 mutations: 5 caught
+trackflow_check     16 scenarios, 706 lines, 0 differ
+                    76 caught, 1 equivalent
+world_check         2742 ops, 15110 lines, 0 differ
+                    330/330 mutations caught
+```
+
+How the checks work:
+- **rain_check's scan** covers the ALLOC sections. A reference is:
+  - a jal or j;
+  - a lui with an addiu, load or store off the same register, in the
+    same function, before the register is written again;
+  - a gp-relative access;
+  - a data word.
+
+  ori does not count. The lui/ori pairs that land in StormInfo's 98,592
+  bytes are GS register constants, 0x2c0400 and the like. Three data
+  words fall in StormInfo's range too: two in LumaQuant and one in
+  ascii_special. Both are value tables, and the expected list says so.
+- **The call-site checkers.** trackflow_check's rain_Load and
+  rain_Unload are named stubs now, not seams, so its null-seam
+  scenarios print them. That is where the four new lines come from.
+  - trackflow_check's new mutations drop rain_Load, turn it into
+    rain_Unload, and drop rain_Unload.
+  - world_check's new mutations drop rain_TimeStep, and move it ahead of
+    UpdatePlayersGameState.
+
+`check_3dsx`: relocations OK. The chain's 59 checkers pass, 0 differ.
+
+### Next: step 4, a car on the track
+
+- Car's constructor (`0x0012f240`) and destructor.
+- Car::InitRenderInfo (`0x0011dce8`) and CloseRenderInfo.
+- CarRenderInfo's constructor (`0x0011e8b0`), destructor and Render
+  (`0x00120b08`).

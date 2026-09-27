@@ -17,6 +17,7 @@
 #include "joylog.h"
 #include "player.h"
 #include "race.h"
+#include "rain.h"
 #include "realtime.h"
 #include "replay.h"
 #include "smokeable.h"
@@ -36,7 +37,6 @@ void (*gWorldEffectsTweakerCheckFn)(void);
 void (*gWorldEffectsDoTimeStepFn)(float dt);
 void (*gEmProcessAllEventsFn)(void);
 void (*gUpdatePlayersGameStateFn)(void);
-void (*gRainTimeStepFn)(float dt);
 void (*gServiceFernFlattenersFn)(void);
 void (*gServiceTweakerDamageFn)(void);
 void (*gServiceTrackRouteEditorFn)(void);
@@ -606,8 +606,7 @@ void world_do_timestep(World *w, float dt)
     blist_sort((bNode *)(void *)&w->CarList, car_list_in_order);
     if (gUpdatePlayersGameStateFn != NULL)
         gUpdatePlayersGameStateFn();
-    if (gRainTimeStepFn != NULL)
-        gRainTimeStepFn(dt);
+    rain_TimeStep(dt);
     if (gServiceFernFlattenersFn != NULL)
         gServiceFernFlattenersFn();
     if (gServiceTweakerDamageFn != NULL)

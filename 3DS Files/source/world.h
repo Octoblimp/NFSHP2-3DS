@@ -277,7 +277,6 @@ extern void (*gWorldEffectsTweakerCheckFn)(void);           // 0x00125fe8
 extern void (*gWorldEffectsDoTimeStepFn)(float dt);         // 0x00127250
 extern void (*gEmProcessAllEventsFn)(void);                 // 0x001b0700
 extern void (*gUpdatePlayersGameStateFn)(void);             // 0x0017aa00
-extern void (*gRainTimeStepFn)(float dt);                   // 0x00128c08
 extern void (*gServiceFernFlattenersFn)(void);              // 0x001cf428
 extern void (*gServiceTweakerDamageFn)(void);               // 0x001ab6e8
 extern void (*gServiceTrackRouteEditorFn)(void);            // 0x001bbcd8

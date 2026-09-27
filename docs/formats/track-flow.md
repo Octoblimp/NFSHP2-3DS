@@ -52,7 +52,7 @@ In order. A call marked *seam* goes through a function pointer in
 | 5 | `TheTopologyTree.InitTree()` | `TrackPolygonSlotPool`, 1,024 slots |
 | 6 | InitSmokeables | seam |
 | 7 | `InitPhysics()` | the ten physics pools; see below for its count |
-| 8 | `SkyLoader()`, rain_Load, `SunTrackLoader()`, InitDebugTopology, InitTrackMarkers | Sky and Sun are `sky.c`'s and `sun.c`'s; the rest are seams |
+| 8 | `SkyLoader()`, `rain_Load()`, `SunTrackLoader()`, InitDebugTopology, InitTrackMarkers | Sky, rain and Sun are `sky.c`'s, `rain.c`'s and `sun.c`'s; rain_Load is empty (`rain.md`); the rest are seams |
 | 9 | `InitVisibleZones()` | the `MARKER_BOUNDARY` model |
 | 10 | `InitTrackPaths()` | |
 | 11 | `TheTrackPathManager.ReverseTrackDirection = (TrackDirection == 1)` | in InitTrackRoutes' delay slot, so before it |
@@ -96,7 +96,7 @@ first one. The port does the same thing.
 | 6 | `pHudTexturePack->UnloadAllTexturesFromFile()` | seam; no NULL check in the image |
 | 7 | CloseAIPlans, CloseAnimatedDriver, CloseWorldObjects, CloseTrackRouteEditor | seams |
 | 8 | `CloseTrackRoutes()`, `CloseVisibleZones()` | |
-| 9 | CloseTrackMarkers, CloseDebugTopology, `SunTrackUnloader()`, `SkyUnloader()`, rain_Unload | Sun and Sky are ported; the rest are seams |
+| 9 | CloseTrackMarkers, CloseDebugTopology, `SunTrackUnloader()`, `SkyUnloader()`, `rain_Unload()` | Sun, Sky and rain are ported, and rain_Unload is empty; the rest are seams |
 | 10 | `ClosePhysics()`, then CloseSmokeables (seam) | |
 | 11 | `TheTopologyTree.CloseTree()`, `CloseTrackPaths()`, `CloseContact()`, `CloseCollisionBody()`, `CloseCollision()` | |
 | 12 | `while ((f = FindResourceFile(3))) UnloadResourceFile(f)` | two seams; see below |

@@ -38,7 +38,9 @@
 //
 // Not here: the static destructor, which runs at exit and hands each
 // region to operator delete; SoundScape::UpdateWeather and UpdateStorm,
-// the query's other callers, which are the sound's and the rain's.
+// the query's other callers, which are the sound's and the storm's.
+// Neither is called in the image (rain.h), so CreateFogPalette is the
+// query's one live reader.
 //
 // Cross-check: tools/weather_check.py. Write-up: docs/formats/weather-fog.md.
 
