@@ -1,11 +1,32 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-27), after task 27's twenty-ninth slice, the
-rain, which closes step 3. `HANDOFF.md` is the running narrative; this file is the short
+continuation (2026-09-27), after the retail disc arrived and task 36's
+first slice, the tools that carry the demo's names over to it. `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
+
+**The target is the full game now, not the demo.** On 2026-09-27 the user
+put the PAL retail disc in `PS2 Files/Full Game/` (`SLES_507.31`, stripped)
+and asked for the full game: every track and car, the whole frontend, and
+saving. Everything so far was ported from the demo disc's ELF, which keeps
+its symbols. `docs/retail.md` has what differs. The short of it:
+- The demo ELF already has most of the full game's code: the memory card
+  flow, the save game, the autosave and the event tree. What made it a
+  demo was its data and `TheDemoDiscManager`.
+- `tools/retail_match.py` names 9,333 of the demo's 9,669 procedures in
+  retail. `--audit` checks the 1,617 the port cites. 1,148 are the same,
+  139 differ only in field offsets, 301 changed and 29 are unmatched. Of
+  those cited from a `.c`, 130 changed. The list is `docs/retail_audit.txt`.
+- `tools/retail_layout.py` maps each class's demo field offsets to
+  retail's (`docs/retail_layout.txt`). 91 classes moved fields.
+- Retail's data keeps the demo's chunk formats, with a few changes, and
+  most tracks are only on the disc as `.LZC`.
+
+**The port keeps the demo's struct layouts and the demo-image checkers.**
+Where retail changed only offsets, nothing is owed. Where retail changed
+the code, the port follows retail, read through `retail_layout`'s map.
 
 **Phases 0-3 are closed.** Cars draw on the top screen out of
 `CARS\*\GEOMETRY.BIN` (task 21), the frontend makes the disc's own menu
@@ -115,7 +136,7 @@ three of them are uncatchable because the disc's velocity record is
 structurally zero. See `docs/formats/camera.md`. `trackroute_check.py
 --mutate` reads the same way and takes about four minutes.
 
-Open tasks: **6** (26-31). All four the user asked for mid-session are
+Open tasks: **7** (26-31 and 36, the full game). All four the user asked for mid-session are
 done and looked at on Azahar: 32 (stretch the frontend to the 3DS's 5:3 top
 screen), 33 (the ten unregistered screen names), 34 (the menu description on
 the bottom screen, wrapped) and 35 (no console sharing that screen).
@@ -126,7 +147,37 @@ and so replaced every boot.
 
 ## Next, in order
 
-1. **Task 27's first slice is closed: `Track.obj` and `TerrainType.obj`**,
+1. **Task 36's first slice is closed: the demo's names carried over to
+   the retail ELF.** `docs/retail.md` has it all.
+   - `tools/mdebug.py` reads the demo's ECOFF procedure table: 9,669
+     procedures, 1,336 of them missing from `.symtab`. They are each
+     unit's copies of inline destructors and `operator delete`, and the
+     statics.
+   - `tools/retail_match.py` pairs demo functions with retail's. Its
+     `--audit` and `--diff` are how to use it while porting.
+   - `tools/retail_layout.py` votes demo field offset -> retail offset
+     from loads and stores off `this` in matched methods.
+   - `tools/zdir_names.py --retail` names 369 of the retail directory's
+     406 entries into `docs/zdir_names_retail.txt`. It now names every
+     entry that shares a hash, because retail lays three files down twice.
+   - `tools/zdir_extract.py --retail --only GLOB` extracts pieces of the
+     retail disc into `extracted-retail/` (ignored). Do not extract all
+     3 GB: the tree is under OneDrive, and C: has about 20 GB free.
+
+   **Next is step 4 of the road: the retail disc's data in the track
+   viewer.**
+   - Load `TRACKS/TRACKB12.LZC` where there is no `.BUN`. `lzc.c`
+     decompresses.
+   - Handle the retail chunk set. HeliSheet is a container,
+     `0x80034800` with `0x34801` and `0x34802`, and `0x36001`/`0x36002`
+     are gone. GLOBALB has no SolidList.
+   - Check the LoaderTable's loaders against the audit. Every
+     `Loader...` row that is `changed` needs its retail reading.
+   - Then a second location, `TRACKB21` or `TRACKB31`, to show the loaders
+     are not TRACKB12's alone.
+
+   "The road to the full game", below, has everything after it.
+2. **Task 27's first slice is closed: `Track.obj` and `TerrainType.obj`**,
    the track's collision surface. It is written up in
    `docs/formats/topology.md`.
    - `track.c`, `topology.h` and `track.h` carry the TopologyTree, the
@@ -632,17 +683,14 @@ and so replaced every boot.
      the rain calls by name now, and gain mutations that drop and move
      them. Written up in `docs/formats/rain.md`.
 
-     **Next is step 4: a car on the track.** Car's constructor
-     (`__3CarP10DriverInfoP8bVector3Us`, `0x0012f240`, 1052 bytes) and
-     destructor, Car::InitRenderInfo (`0x0011dce8`) and CloseRenderInfo,
-     and CarRenderInfo: its constructor (`0x0011e8b0`, 4020 bytes),
-     destructor (`0x0011f868`) and Render (`0x00120b08`, 7972 bytes).
-     Put one car at the start and draw it in the track viewer.
      - Nothing sets bStartGlare until the munitions are ported.
        Munition::ExplodeWarhead (`0x001b4798`) sets it for a
        MunitionsType of 1.
 
-     "The road to a playable demo", below, has everything after it.
+   - **Then the retail disc came, and task 36 opened (item 1).** The
+     car on the track moves to step 6 of "The road to the full game".
+
+   "The road to the full game", below, has the steps.
 
    Things to know before the next slice:
    - **A bundle with texture packs must sit at 128 in memory.**
@@ -829,7 +877,7 @@ and so replaced every boot.
      the boot path calls them yet, so the linker drops them and the size
      did not move.
 
-2. **Task 26's second slice is closed: `TrackedController` and
+3. **Task 26's second slice is closed: `TrackedController` and
    `RealController`**, which is what builds a RealDriver, with
    `DriveTargetRenderer`'s flag-off path. `gRealControllerCtorFn` is set at
    boot and `REALCONTROLLER_SIZE` is `sizeof`. See
@@ -1175,17 +1223,17 @@ and so replaced every boot.
    two ordinary `jal`s.
 
    The HUD split is settled, below.
-3. Then in order: 26 race/cop AI, 27 track render/stream/collision,
+4. Then in order: 36 the full game (the road below), 26 race/cop AI, 27 track render/stream/collision,
    28 New3DS perf, 29 save/options/sound mix, 30 split-screen scope,
    31 final CIA + Old3DS/New3DS pass.
-4. **`QuickSpline.obj` is ported** (Session 29, continued), which pays
+5. **`QuickSpline.obj` is ported** (Session 29, continued), which pays
    task 24's debt. `TrackPathCoordinate::UpdatePosition` now measures
    through the spline, so `SetFirstAndLastPoints`, `Signpost::SetDistances`
    and `TestSignpostConsistency` run for real. `gTrackPathDistanceFn` is
    now only `trackroute_check`'s closed form, and it is `NULL` on
    hardware. `cammover.c` still leaves out the CM_TRACK_CAR and
    CM_TRACK_FLY movers, which needed the spline too.
-5. Whenever a screen class gets ported, take its row in `kScreens[]` off
+6. Whenever a screen class gets ported, take its row in `kScreens[]` off
    `bgf_plain_screen_callback`. Ten of the eighteen are on it -- they draw
    and answer the D-pad and nothing else -- and
    `python tools/screen_registry.py --check-port` lists them, along with
@@ -1206,35 +1254,42 @@ top-screen HUD and splitting it later. `uirender.c` (citro2d) is the home
 for the bottom-screen widgets; `georender.c` (citro3d) owns the top. Also
 at the head of Phase 4 in `TASKS.md`.
 
-## The road to a playable demo
+## The road to the full game
 
-"Playable" means the demo's own loop: pick a car and a mode in the
-frontend, race TRACKB12 against the AI with the cops on, see the result,
-and go back to the menus. The count below is in slices of the size the
-last ten were, which is one or two sessions each. It is an estimate, and
-it will move as each class shows what it reaches.
+The user supplied the retail disc on 2026-09-27, so the target is the
+full game. "Playable" means its loop: start or load a career, pick a car
+and an event in the frontend, race any of the thirty tracks against the
+AI with the cops on, see the result, have it saved to the SD card, and go
+back to the menus. The count below is in slices of the size the last ten
+were, one or two sessions each. It is an estimate, and it will move as
+each class shows what it reaches.
 
 | Step | What | Slices |
 |---|---|---|
 | 1 | ~~The track on the screen: the viewer mode, eModel over `georender`, a free camera~~ done, task 27's twenty-third slice | 1 |
 | 2 | ~~The LoaderTable: every chunk type in TRACKB12, with the solids, the texture packs, the topology and the routes live~~ done, task 27's twenty-fourth and twenty-fifth slices | 2 |
 | 3 | ~~The sky, the sun and the weather's draw~~ done, task 27's twenty-sixth to twenty-ninth slices. The shipped image has no rain or storm to draw | 2-3 |
-| 4 | Car's constructor and destructor, and CarRenderInfo, so that a car draws on the track | 3-4 |
-| 5 | Player and the chase cameras (CM_DRIVE and the rest of `cammover.c`'s set) | 2 |
-| 6 | RaceCoordinator's InitForRace, InitCars, InitPlayers and Race::Init, and the game flow from the frontend into a race and back | 2-3 |
-| 7 | **One car driving the track.** Steps 1-6 are this milestone: about 10-13 slices | |
-| 8 | The rest of task 26: the racer and traffic AI, the six classes behind Car's constructor seams | 4-6 |
-| 9 | The cops and the pursuit: CopManager, the cop drivers, roadblocks and spikes | 4-6 |
-| 10 | The two-screen HUD, to the split decided below | 1-2 |
-| 11 | The car and world sounds and the speech | 2-3 |
-| 12 | **A whole race with the AI and the cops.** Steps 8-11 add about 11-17 slices | |
-| 13 | Save data and the options screens (task 29) | 1-2 |
-| 14 | Old 3DS performance: 16-bit or ETC1 textures, fewer draw calls, and the New 3DS's second core (task 28) | 2-3 |
-| 15 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
+| 4 | The retail disc's data in the track viewer: `.LZC` where there is no `.BUN`, the retail chunk set, the changed loaders, and a second location | 1 |
+| 5 | The retail model: mipsemu on `SLES_507.31` by retail_match's names, with a scenario relaid by retail_layout's map, so that a checker can run the retail function on what it built for the demo's | 1 |
+| 6 | Car's constructor and destructor, and CarRenderInfo, from retail where retail changed them (all of them did), so that a car draws on the track | 3-4 |
+| 7 | Player and the chase cameras (CM_DRIVE and the rest of `cammover.c`'s set) | 2 |
+| 8 | RaceCoordinator's InitForRace, InitCars, InitPlayers and Race::Init, and the game flow from the frontend into a race and back | 2-3 |
+| 9 | **One car driving the track.** Steps 4-8 are this milestone: about 9-11 slices | |
+| 10 | The retail pass over what is already ported: the 130 changed functions cited from a `.c` in `docs/retail_audit.txt`, module by module, each checker gaining a retail model run where it can | 4-6 |
+| 11 | The rest of task 26: the racer and traffic AI, the six classes behind Car's constructor seams | 4-6 |
+| 12 | The cops and the pursuit: CopManager, the cop drivers, roadblocks and spikes | 4-6 |
+| 13 | The two-screen HUD, to the split decided below | 1-2 |
+| 14 | The car and world sounds and the speech | 2-3 |
+| 15 | **A whole race with the AI and the cops.** Steps 10-14 add about 15-23 slices | |
+| 16 | The full frontend from retail: the 44 screens still plain or unregistered (`screen_registry.py --check-port`), the event tree (the career), the tourneys and the car selector | 6-10 |
+| 17 | Save data on the SD card in the memory card's place: Phils Load Save, the autosave, the boot autoload and the options (task 29) | 2-3 |
+| 18 | Every track and car: the thirty tracks and the whole car list load and race | 1-2 |
+| 19 | Old 3DS performance: 16-bit or ETC1 textures, fewer draw calls, and the New 3DS's second core (task 28) | 2-3 |
+| 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
-That is about 26-37 slices to a demo that is ready to publish. The replay
-(`ReplaySnapshot` and every `DoSnapshot`) is not in the count. The demo
-can ship without its auto-replay, and it is its own slice if it goes in.
+That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
+and every `DoSnapshot`) is not in the count. It is its own slice when it
+goes in.
 
 ## What not to trust
 

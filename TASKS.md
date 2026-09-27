@@ -2003,13 +2003,19 @@ is citro3d and owns the top.
         code and data in the loaded sections, 30 of them, is expected.
         It runs the entry points against `rain.c`: 31 calls, 0 differ, 5
         of 5 mutations caught. Written up in `docs/formats/rain.md`.
-        Next is step 4, a car on the track.
+        Step 4, a car on the track, is step 6 of CONTINUE.md's road now:
+        task 36 goes first.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag
 
 ## Phase 5 -- Polish
 
 29. [ ] Save data, options menus, final sound mix pass
+        **For the full game (task 36):** the saves go to the SD card in
+        the memory card's place, with retail's save game layout and
+        screens: Phils Load Save, the Autosaver, the BootAutoLoader and
+        the options. The demo ELF has all of it; check each against
+        `docs/retail_audit.txt` before porting it.
         **Inherited from task 25:** the sound half of Car's constructor,
         and `BaseCarSound::TriggerTireBlowOut` and `TriggerSplash` behind
         `gBaseCarSoundTriggerTireBlowOutFn` and
@@ -2095,3 +2101,24 @@ phases.
         the two viewer modes get the same panel with their controls on it.
         The only console the port still creates is on the *top* screen, in
         the three paths that are about to exit.
+36. [ ] **The full game, from the retail disc.** The user put the PAL
+        retail disc in `PS2 Files/Full Game/` on 2026-09-27 and asked for
+        the full game rather than the demo: every track and car, the whole
+        frontend and saving. `docs/retail.md` has what differs.
+
+        **The first slice is closed: the names carried over.**
+        `tools/mdebug.py` reads the demo's procedure table, and
+        `tools/retail_match.py` names 9,333 of its 9,669 procedures in
+        the stripped retail ELF. `--audit` writes `docs/retail_audit.txt`:
+        of the 1,617 functions the port cites, 1,148 are the same, 139
+        differ only in offsets, 301 changed and 29 are unmatched.
+        `tools/retail_layout.py` maps 91 classes' moved fields into
+        `docs/retail_layout.txt`. `zdir_names.py --retail` names 369 of
+        the retail directory's 406 entries, and `zdir_extract.py --retail
+        --only` takes pieces of the disc into `extracted-retail/`.
+
+        The rest is CONTINUE.md's "The road to the full game": the retail
+        data in the viewer (step 4), the retail model for the checkers
+        (step 5), the retail pass over what is ported (step 10), the
+        full frontend (step 16), the saves (step 17) and every track and
+        car (step 18).

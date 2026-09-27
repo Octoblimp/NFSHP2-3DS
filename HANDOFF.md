@@ -7876,3 +7876,69 @@ How the checks work:
 - Car::InitRenderInfo (`0x0011dce8`) and CloseRenderInfo.
 - CarRenderInfo's constructor (`0x0011e8b0`), destructor and Render
   (`0x00120b08`).
+
+## Session 30, continued (2026-09-27) -- The retail disc: task 36's first slice
+
+The twenty-ninth slice went in as `7ab56d6` after the chain's 63 steps
+passed and the CIA built clean (`check_3dsx`: relocations OK).
+
+The user then put the PAL retail disc in `PS2 Files/Full Game/` and asked
+for the full game, not the demo. `SLES_507.31` is stripped. So the first
+work was to carry the demo's names over. Written up in `docs/retail.md`.
+
+- **tools/mdebug.py** reads the ECOFF tables in the demo's `.mdebug`.
+  There are 9,669 procedures to `.symtab`'s 8,333 functions. The 1,336
+  extra are each unit's own copies of inline destructors and
+  `operator delete`, and the statics. Without them a demo body in the
+  matcher ran on through them: InitFrontend is `jr ra ; nop` but got
+  1,132 bytes.
+- **tools/retail_match.py** (the last session's, finished):
+  - It uses those procedures.
+  - A changed placement's extent now ends at the first unit start that
+    follows a return or that another placement holds. Before, a stray code
+    address inside a function cut it short: PidError::Reset got 4 words.
+  - `--audit` checks every demo address the port cites. A `layout` kind
+    separates offset-only changes from real ones, using a mask that also
+    clears load and store displacements, stack offsets and member addius.
+- **tools/retail_layout.py**: per class, demo offset -> retail offset,
+  voted from loads and stores off `this` in aligned methods. `this` is a0
+  and its moves, and a call's clobber applies after its delay slot.
+- **zdir_names.py** gains `--known` (another disc's names), `--also-elf`
+  and `--retail`. It names every entry of a shared hash: the retail
+  disc lays HUDTEX.BIN, CARS\TEXTURES.BIN and one more down twice.
+- **zdir_extract.py** gains `--only` and `--retail`, into the ignored
+  `extracted-retail/`.
+
+```
+retail_match   demo bodies 9669: same 6980, changed 2353, unplaced 336
+               retail .text covered 90.7%; 142,372 bytes with no demo twin
+audit          1617 cited: 1148 same, 139 layout, 301 changed, 29 unplaced
+               from a .c: 464 same, 73 layout, 130 changed, 13 unplaced
+retail_layout  91 classes moved
+zdir_names     demo 206/223 (unchanged), retail 369/406
+```
+
+What retail changed, from the audit's first reads:
+- Field offsets, widely. For example, Car grows by 184 bytes ahead of
+  its blink fields, and every Flailer UI chunk gains 24 bytes at the front.
+- Real code. For example, SetBoost now scales the boost it hands the
+  engine by a gp constant when a flag at car+2124 and a byte behind
+  car+52 are both set. GetHorizontalGroundForceInCarFrame is only an
+  inlined matrix multiply.
+- Everything step 4 was to port: Car's constructor (1052 -> 1176
+  bytes), CarRenderInfo's constructor (4020 -> 4700) and Render (7972 ->
+  9844).
+- The data. TRACKB12's HeliSheet is a container with two children, two
+  0x3600x chunks are gone, GLOBALB has no SolidList, and FRONTB has one
+  more solid and two fewer event trees. Most tracks are only on the disc
+  as `.LZC`.
+
+The decision: the port keeps the demo's layouts and its demo-image
+checkers. It follows retail's code where retail changed it, read through
+`retail_layout`'s map, and checked by a retail model run (step 5 of the
+new road).
+
+### Next: step 4 of "The road to the full game"
+
+- The retail data in the track viewer: `.LZC` when there is no `.BUN`,
+  the retail chunk set, the changed loaders, then a second location.

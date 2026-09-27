@@ -17,6 +17,9 @@ exact hash match -- nothing here is a guess):
 5. `siblings`  -- once a name is known, its known-extension twins are tried
                   (`X.BIN` -> `X.LZC`, `X.MSB` -> `X.MSH`, `X.BIN` -> `X.CAM`),
                   which is what pairs every compressed file with its raw one.
+6. `known`     -- the names another disc's directory already gave up
+                  (`--known docs/zdir_names.txt`), for the retail disc, whose
+                  stripped ELF has far fewer strings than the demo's.
 
 `KNOWN` below holds the handful that none of the above reach and that were
 instead brute-forced with `bhash.crack()` -- the sound banks, whose stems
@@ -28,6 +31,7 @@ hash-checked here.
 Usage:
     python tools/zdir_names.py                      # writes docs/zdir_names.txt
     python tools/zdir_names.py --elf ... --zdir ...
+    python tools/zdir_names.py --retail             # docs/zdir_names_retail.txt
 """
 import argparse
 import csv
@@ -162,30 +166,47 @@ def siblings(name):
                 return
 
 
-def resolve(zdir, elf, zzdata, ps2_dir):
+def candidates_from_names_file(path):
+    """The names column of a zdir_names.txt."""
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        if line.startswith("#"):
+            continue
+        parts = line.split(None, 5)
+        if len(parts) == 6 and parts[5] != "?":
+            yield parts[5]
+
+
+def resolve(zdir, elf, zzdata, ps2_dir, known=(), more_elfs=()):
     entries = read_zdir(zdir)
-    by_hash = {e["hash"]: e for e in entries}
+    # the retail disc lays a few files down twice, one hash at two places
+    by_hash = {}
+    for e in entries:
+        by_hash.setdefault(e["hash"], []).append(e)
     names = {}
 
     def offer(cand, source):
-        h = bhash(cand)
-        e = by_hash.get(h)
-        if e is not None and e["index"] not in names:
-            names[e["index"]] = (cand, source)
-            return True
-        return False
+        hit = False
+        for e in by_hash.get(bhash(cand), ()):
+            if e["index"] not in names:
+                names[e["index"]] = (cand, source)
+                hit = True
+        return hit
 
-    strs = elf_strings(elf)
-    for c in candidates_from_literals(strs):
-        offer(c, "literal")
-    for c in candidates_from_templates(strs):
-        offer(c, "template")
+    for path in (elf,) + tuple(more_elfs):
+        strs = elf_strings(path)
+        for c in candidates_from_literals(strs):
+            offer(c, "literal")
+        for c in candidates_from_templates(strs):
+            offer(c, "template")
     for c in candidates_from_disc(ps2_dir):
         offer(c, "ondisc")
     for c in KNOWN:
         offer(c, "cracked")
     for c in candidates_from_blobs(entries, zzdata):
         offer(c, "embedded")
+    for path in known:
+        for c in candidates_from_names_file(path):
+            offer(c, "known")
     # sibling sweep, repeated until it stops finding anything new
     while True:
         before = len(names)
@@ -204,9 +225,25 @@ def main():
     ap.add_argument("--elf", default="PS2 Files/NFSHP2.ELF")
     ap.add_argument("--ps2-dir", default="PS2 Files")
     ap.add_argument("--out", default="docs/zdir_names.txt")
+    ap.add_argument("--known", action="append", default=[],
+                    help="a zdir_names.txt whose names to try as well")
+    ap.add_argument("--also-elf", action="append", default=[],
+                    help="another ELF whose strings to try")
+    ap.add_argument("--retail", action="store_true",
+                    help="the retail disc in 'PS2 Files/Full Game', helped "
+                         "by the demo's ELF and names")
     a = ap.parse_args()
+    if a.retail:
+        g = "PS2 Files/Full Game"
+        a.zdir, a.zzdata, a.ps2_dir = g + "/ZDIR.BIN", g + "/ZZDATA.BIN", g
+        a.elf = g + "/SLES_507.31"
+        a.also_elf.append("PS2 Files/NFSHP2.ELF")
+        a.known.append("docs/zdir_names.txt")
+        if a.out == "docs/zdir_names.txt":
+            a.out = "docs/zdir_names_retail.txt"
 
-    entries, names = resolve(a.zdir, a.elf, a.zzdata, a.ps2_dir)
+    entries, names = resolve(a.zdir, a.elf, a.zzdata, a.ps2_dir,
+                             a.known, a.also_elf)
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", encoding="utf-8", newline="\n") as f:

@@ -15,8 +15,16 @@ original directory tree. Entries whose name is still unrecovered fall back to
 Usage:
     python tools/zdir_extract.py "PS2 Files/ZDIR.BIN" "PS2 Files/ZZDATA.BIN" out/
     python tools/zdir_extract.py ... out/ --decompress   # also expand .LZC
+    python tools/zdir_extract.py --retail --only "TRACKS\*B12*" --decompress
+
+--retail reads the retail disc in `PS2 Files/Full Game/` with
+docs/zdir_names_retail.txt, into extracted-retail/. The retail disc is
+3 GB and the tree sits under OneDrive, so --only (a glob on the recovered
+name, any number of them) takes what a check needs rather than all of it.
+The manifest always lists every entry; out_file is empty for one not taken.
 """
 import argparse
+import fnmatch
 import struct
 import sys
 from pathlib import Path
@@ -59,13 +67,28 @@ def read_names(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("zdir")
-    ap.add_argument("zzdata")
-    ap.add_argument("out_dir")
+    ap.add_argument("zdir", nargs="?")
+    ap.add_argument("zzdata", nargs="?")
+    ap.add_argument("out_dir", nargs="?")
     ap.add_argument("--names", default=str(DEFAULT_NAMES))
     ap.add_argument("--decompress", action="store_true",
                     help="also write the expanded payload of every COMP/.LZC entry")
+    ap.add_argument("--only", action="append", default=[],
+                    help="extract only names matching this glob")
+    ap.add_argument("--retail", action="store_true",
+                    help="the retail disc, into extracted-retail/")
     a = ap.parse_args()
+    if a.retail:
+        root = Path(__file__).resolve().parent.parent
+        game = root / "PS2 Files" / "Full Game"
+        a.zdir = a.zdir or str(game / "ZDIR.BIN")
+        a.zzdata = a.zzdata or str(game / "ZZDATA.BIN")
+        a.out_dir = a.out_dir or str(root / "extracted-retail")
+        if a.names == str(DEFAULT_NAMES):
+            a.names = str(root / "docs" / "zdir_names_retail.txt")
+    if not (a.zdir and a.zzdata and a.out_dir):
+        ap.error("zdir, zzdata and out_dir are needed without --retail")
+    only = [g.upper().replace("/", chr(92)) for g in a.only]
 
     entries = read_entries(a.zdir)
     names = read_names(a.names)
@@ -87,10 +110,16 @@ def main():
                       file=sys.stderr)
                 skipped += 1
                 continue
+            name = names.get(e["index"])
+            if only and not any(fnmatch.fnmatchcase((name or "?").upper(), g)
+                                for g in only):
+                manifest.write("%d,%08x,%d,%d,%d,%s,\n"
+                               % (e["index"], e["hash"], e["fad"], e["size"],
+                                  e["offset"], name or ""))
+                continue
             zz.seek(e["offset"])
             blob = zz.read(e["size"])
 
-            name = names.get(e["index"])
             if name:
                 rel = Path(name.replace(chr(92), "/"))
             else:

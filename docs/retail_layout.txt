@@ -1,0 +1,313 @@
+# demo field offset -> retail, by tools/retail_layout.py
+# a row is printed where the shift changes; votes/total, then the demo field
+== AIActionAccidentRecovery  demo size 608  4 fields seen, 2 moved
+       0 ->     0     +0    2/2   
+     592 ->   608    +16    2/2   MyCreationTime
+== AIActionAvoidCars  demo size 624  9 fields seen, 4 moved
+       0 ->     0     +0    2/2   
+     592 ->   608    +16    2/2   CarToAvoid
+== AIActionAvoidRoadBlock  demo size 608  2 fields seen, 1 moved
+      16 ->    16     +0    2/2   
+     592 ->   608    +16    2/2   RoadBlockToAvoid
+== AIActionDraft  demo size 592  3 fields seen, 1 moved
+      16 ->    16     +0    2/2   
+     572 ->   576     +4    2/2   
+== AIActionGetUnstuck  demo size 608  7 fields seen, 3 moved
+       0 ->     0     +0   10/10  
+     592 ->   608    +16    4/4   MyCreationTime
+== AIActionIJustGotHit  demo size 608  6 fields seen, 4 moved
+       0 ->     0     +0    3/3   
+     572 ->   576     +4    3/3   
+     592 ->   608    +16    5/5   CarIHit
+== AIActionJustDrive  demo size 608  2 fields seen, 1 moved
+      16 ->    16     +0    2/2   
+     592 ->   608    +16    3/3   LastDecisionReevaluationTime
+== AIActionPass  demo size 608  4 fields seen, 2 moved
+       0 ->     0     +0    5/5   
+     592 ->   608    +16    5/5   CarToPass
+== AIActionPullOver  demo size 608  4 fields seen, 3 moved
+     564 ->   564     +0    2/4   
+     592 ->   608    +16    2/2   MyCreationTime
+== AICarController  demo size 704  31 fields seen, 2 moved
+       0 ->     0     +0   49/49  
+     676 ->   692    +16    4/4   pDeltaLineSpeed
+== AIDriver  demo size 720  12 fields seen, 4 moved
+       0 ->     0     +0    3/3   
+     704 ->   720    +16    4/4   CarToPurposefullyNotAvoid
+== AIEngineSound  demo size 256  6 fields seen, 3 moved
+      28 ->    28     +0    2/2   
+     216 ->   224     +8    2/2   EnginePitchBase
+     252 ->   252     +0    2/2   CurrGear
+== Autosaver  demo size 60  2 fields seen, 1 moved
+       0 ->     0     +0    2/2   CompletionCallback
+      56 ->    60     +4    4/4   eAUTOSAVER_IDLE
+== Average  demo size 24  2 fields seen, 2 moved
+      12 ->     4     -8    2/2   fTotal
+== BasePlayerCarSound  demo size 280  10 fields seen, 1 moved
+       8 ->     8     +0    2/2   
+     276 ->   284     +8    3/3   PlayerAzimuth
+== BeACopChallengeSetup  demo size 688  5 fields seen, 2 moved
+       0 ->     0     +0    8/8   ScreenHash
+      16 ->    20     +4    2/2   
+     684 ->   684     +0    2/2   mExitScreenAnimation
+== BootAutoLoader  demo size 84  1 fields seen, 1 moved
+      80 ->    84     +4    7/7   WRAPPER_LOADING
+== Camera  demo size 448  12 fields seen, 2 moved
+       0 ->     0     +0    2/2   CurrentKey
+     432 ->   436     +4    2/2   ElapsedTime
+== CameraLoader  demo size 2528  7 fields seen, 2 moved
+       0 ->     0     +0    3/3   NumHighlightCameras
+    2484 ->  2556    +72    3/3   NumCameraShakes
+== Car  demo size 2016  48 fields seen, 27 moved
+       8 ->     8     +0    2/2   CarIndex
+     960 ->   964     +4    2/2   
+    1088 ->  1104    +16    6/6   DispGear
+    1152 ->  1184    +32    3/3   OldSpeed
+    1892 ->  2068   +176    2/3   WantToBlinkHeadlights
+    1920 ->  2100   +180    2/3   HeadlightsState
+    1960 ->  2144   +184    7/7   BlinkTimer
+== CarRenderInfo  demo size 1856  12 fields seen, 10 moved
+       0 ->     0     +0    7/7   pCar
+     740 ->   756    +16    3/3   
+    1348 ->  1376    +28    2/2   DamageableSkinReplacementTextureTable
+    1852 ->  2336   +484    2/2   pAlphaInfo
+== CarSelector  demo size 880  24 fields seen, 17 moved
+       0 ->     0     +0   10/11  VisibleCars
+      44 ->    68    +24    4/4   CAR_FADED_ALPHA
+     312 ->    80   -232    5/6   LoadedCar
+     452 ->   228   -224    3/3   CarRotationZ
+     860 ->   644   -216    6/6   NumNebulaEmitters
+== CarState  demo size 1024  18 fields seen, 12 moved
+       0 ->     0     +0    3/3   pCarInfo
+     876 ->   880     +4    3/3   TractionUsage
+     944 ->   960    +16    2/2   RelCoordMatrix
+== ChallengeScreen  demo size 688  5 fields seen, 2 moved
+       0 ->     0     +0    4/4   Data
+      16 ->    20     +4    7/7   ScreenHash
+     684 ->   684     +0    3/3   mExitScreenAnimation
+== Chopper  demo size 752  28 fields seen, 25 moved
+       0 ->     0     +0    5/5   pChopperSound
+     580 ->   724   +144   15/15  CurrentCar
+     704 ->   912   +208    8/9   Speed
+== CollisionBodyWitness  demo size 112  5 fields seen, 1 moved
+       0 ->     0     +0    2/2   
+     104 ->   108     +4   11/11  pCollision
+== CopMover  demo size 112  20 fields seen, 6 moved
+       4 ->     4     +0    2/2   
+      64 ->    80    +16    2/2   v3DesiredVelocity
+== CopsOffModeSelect  demo size 628  3 fields seen, 2 moved
+       0 ->     0     +0    7/7   ScreenHash
+     620 ->   624     +4    5/5   mExitScreenAnimation
+== CopsOnModeSelect  demo size 628  3 fields seen, 2 moved
+       0 ->     0     +0    7/7   ScreenHash
+     620 ->   624     +4    5/5   mExitScreenAnimation
+== DCTImage  demo size 600  19 fields seen, 4 moved
+       0 ->     0     +0    5/5   pData
+      64 ->    68     +4   11/11  XSize
+== DemoModeReplay  demo size 60  10 fields seen, 5 moved
+       0 ->     0     +0    2/2   ActiveFlag
+      20 ->    24     +4    2/4   pCurrentRecordingSnapshot
+== DemoPoly  demo size 192  4 fields seen, 1 moved
+     160 ->   160     +0    3/3   RenderMe
+     184 ->   200    +16    2/2   pRenderedTextureInfo
+== DriveCameraMover  demo size 864  24 fields seen, 7 moved
+      24 ->    24     +0    3/3   
+     740 ->   884   +144    3/3   DisableLag
+== DriverInfo  demo size 20  3 fields seen, 3 moved
+       1 ->     2     +1    2/2   CharacterNumber
+       8 ->    12     +4    2/2   CurrentRideInfo
+== DroppedSpikes  demo size 1024  3 fields seen, 1 moved
+      80 ->    80     +0    3/3   
+    1008 ->  1152   +144    3/3   DeploySpikes
+== EventInfo  demo size 180  6 fields seen, 3 moved
+       0 ->     0     +0    7/7   pTree
+      59 ->    60     +1    2/2   nTracks
+      64 ->    66     +2    2/2   nObjective
+== EventKoState  demo size 8  4 fields seen, 3 moved
+       0 ->     0     +0    2/2   nRank0
+       4 ->     8     +4    2/2   nCarNumber
+== FlailerBitmapChunk  demo size 120  10 fields seen, 10 moved
+      19 ->    43    +24    5/5   
+== FlailerObjectChunk  demo size 56  9 fields seen, 9 moved
+      16 ->    40    +24   13/13  ObjectType
+== FlailerScreenList  demo size 484  13 fields seen, 9 moved
+     384 ->   384     +0    3/3   
+     448 ->   452     +4    5/5   pHelpMenu
+== FlailerTextChunk  demo size 80  12 fields seen, 12 moved
+      18 ->    42    +24    3/3   
+== GifController  demo size 64  3 fields seen, 3 moved
+      20 ->  4120  +4100    2/2   DataDest
+== JoystickPreConfig  demo size 216  3 fields seen, 2 moved
+     100 ->   100     +0    6/6   ScreenHash
+     112 ->   120     +8    2/2   InitialVibrationSetting1
+== LanguageOptionsScreen  demo size 84  1 fields seen, 1 moved
+       8 ->    12     +4    2/2   
+== LapKnockoutSetup  demo size 352  7 fields seen, 7 moved
+     316 ->   760   +444    2/2   
+== MoviePlayer  demo size 1080  22 fields seen, 14 moved
+       0 ->     0     +0    2/2   fCurTime
+     120 ->   124     +4    9/9   pSample
+    1040 ->  1056    +16    5/6   pTextureInfoY
+== Munition  demo size 1008  3 fields seen, 1 moved
+      80 ->    80     +0    3/3   
+     992 ->  1136   +144    2/2   BackupDone
+== NISOverlayManager  demo size 40  10 fields seen, 4 moved
+       0 ->     0     +0    3/3   LastDateTimeUpdate
+      24 ->    28     +4    2/2   sx
+== NameEntry  demo size 324  1 fields seen, 1 moved
+       0 ->     4     +4    2/2   ScreenHash
+== NewMainMenu  demo size 624  2 fields seen, 1 moved
+       0 ->     0     +0    5/5   ScreenHash
+     472 ->   476     +4    2/2   LastJoyEventTimer
+== NisManager  demo size 320  25 fields seen, 12 moved
+       0 ->     0     +0    3/3   
+      64 ->    68     +4    6/6   Playing
+     116 ->   112     -4    4/4   
+     128 ->   128     +0    6/6   
+== OpponentTireSound  demo size 408  3 fields seen, 3 moved
+      32 ->   412   +380    2/2   pCar
+     396 ->   792   +396    2/2   PrevSkid
+== PauseAudioOpts  demo size 192  8 fields seen, 8 moved
+       0 ->    96    +96    6/6   
+== PauseDisplayOpts  demo size 12  2 fields seen, 2 moved
+       0 ->    96    +96   12/12  
+== PauseOptions  demo size 48  8 fields seen, 8 moved
+       0 ->    96    +96    9/9   
+      12 ->   104    +92    2/2   VibrationTextChunk
+      40 ->   136    +96    8/8   MyPlayer
+== PhysicsCar  demo size 116  25 fields seen, 2 moved
+       0 ->     0     +0   18/18  
+     108 ->   112     +4    3/3   FrictionBoost
+== PidError  demo size 56  2 fields seen, 2 moved
+      48 ->    32    -16    4/4   fCurrentError
+== Player  demo size 2480  113 fields seen, 108 moved
+       0 ->     0     +0    5/5   NisFinishedCallback
+      20 ->    24     +4   15/15  ViewID
+      68 ->    80    +12    4/4   TimeFinishedRacing
+     176 ->   196    +20    8/8   PlayerInputMode
+     188 ->   212    +24    5/5   pRVMCameraMover
+    1344 ->  1408    +64    7/7   RadarTimer
+    1536 ->  1588    +52    2/3   
+    1548 ->  1612    +64    3/3   
+    2264 ->  2472   +208    2/2   mAutoReplayTimeMarker
+    2332 ->  2544   +212    2/2   bCollisionDetected
+    2396 ->  2624   +228    8/9   bSegmentCollisionDetected
+    2448 ->  2668   +220    4/4   bRadarOffset
+== PlayerEngineSound  demo size 6904  20 fields seen, 17 moved
+      28 ->    28     +0    2/2   
+     412 ->   428    +16    4/4   GearShiftVolumeScale
+    6900 ->  7172   +272    3/3   CurrAudioMode
+== PlayerTireSound  demo size 2632  10 fields seen, 9 moved
+      28 ->    28     +0    2/2   
+      32 ->   412   +380   13/13  pCar
+      72 ->   448   +376    3/3   PrevShouldMakeRoadNoise
+     468 ->   860   +392    3/3   FoundLeavesSample
+== PreviewComet  demo size 44  5 fields seen, 1 moved
+       0 ->     0     +0    2/2   pLookSpline
+      16 ->    20     +4    2/2   pCometTexture
+== PsychoDriver  demo size 608  7 fields seen, 5 moved
+       0 ->     0     +0    2/2   ul128
+     568 ->   564     -4    3/3   SteerToPoint
+     596 ->   604     +8    4/4   pBodyError
+== RaceEvent  demo size 376  3 fields seen, 2 moved
+       4 ->     4     +0    9/9   pState
+      86 ->   106    +20    8/8   nType
+== RaceParameters  demo size 768  3 fields seen, 2 moved
+       0 ->     0     +0    2/2   TrackNumber
+     752 ->   772    +20    5/5   pDriverInfoTable
+== ReplayManager  demo size 12468  42 fields seen, 35 moved
+       0 ->     0     +0    9/10  ReplayingFlag
+      12 ->    16     +4    3/4   PausedFlag
+     156 ->   156     +0    6/6   NextHighlightNumber
+    8364 -> 16560  +8196    7/7   NumSpecialEvents
+== ReplayScreen  demo size 248  4 fields seen, 3 moved
+      20 ->    20     +0    3/3   PlayerNumber
+     236 ->   572   +336    4/4   pDriveCameraMover
+== ReplaySnapshot  demo size 36180  11 fields seen, 11 moved
+      56 ->    60     +4    3/3   TakingSnapshotFlag
+== Rocket  demo size 1024  5 fields seen, 3 moved
+      80 ->    80     +0    4/4   
+     992 ->  1136   +144    2/2   
+== SingleRaceSetup  demo size 356  7 fields seen, 7 moved
+     316 ->   760   +444    2/2   
+== SirenSound3d  demo size 592  7 fields seen, 5 moved
+       0 ->     0     +0    3/3   
+     572 ->   596    +24   10/10  CurrentSiren
+== SkidSet  demo size 256  5 fields seen, 2 moved
+      16 ->    16     +0    2/2   LastNormal
+      36 ->    44     +8    2/2   pClan
+     240 ->   240     +0    4/4   NumSkidSegments
+== Smokeable  demo size 992  16 fields seen, 5 moved
+       8 ->     8     +0    3/3   
+     292 ->   296     +4    6/6   pSmokeableSpawner
+     896 ->  1040   +144    2/2   
+== Sound3dSample  demo size 256  8 fields seen, 3 moved
+       0 ->     0     +0    2/2   
+     220 ->   228     +8    2/2   Envelope
+     240 ->   256    +16    3/3   Position
+== TerrainOneShot  demo size 196  4 fields seen, 1 moved
+       0 ->     0     +0    3/3   bFoundSample
+     192 ->   200     +8    2/2   Side
+== TexturePack  demo size 132  11 fields seen, 9 moved
+       0 ->     0     +0    3/3   
+      92 ->   108    +16    2/2   InventoryHandle
+== TopologyCoordinate  demo size 560  1 fields seen, 1 moved
+     544 ->   672   +128    7/8   TotalNumTrackPolygons
+== TopologyTree  demo size 40  8 fields seen, 1 moved
+       0 ->     0     +0    4/4   pNodeTable
+      32 ->    36     +4    4/4   TrackPolygonList
+== TrackKnockoutSetup  demo size 356  7 fields seen, 7 moved
+     316 ->   760   +444    2/2   
+== TrafficDriver  demo size 720  9 fields seen, 2 moved
+       0 ->     0     +0    5/5   
+     704 ->   532   -172   27/27  CurrentAction
+     708 ->   720    +12    4/4   PickLowNumberedRoutes
+== UserNameOptionsScreen  demo size 92  3 fields seen, 2 moved
+       0 ->     0     +0    7/7   mScreenHash
+      44 ->    52     +8    2/2   
+      84 ->   100    +16    2/2   P1GenderTextChunk
+== VisibleCar  demo size 28  2 fields seen, 1 moved
+       8 ->     8     +0    3/3   pCarStatus
+      16 ->    20     +4    8/9   SkinIndex
+== bSample  demo size 180  22 fields seen, 22 moved
+       4 ->    28    +24    4/4   m_fScaleVolume
+       8 ->    24    +16    7/7   m_fCurrentVolume
+      12 ->    32    +20    6/6   m_fFadeTargetVolume
+     100 ->    12    -88   44/44  m_pVoice
+     104 ->   120    +16    2/2   m_VolumeBeforeMuting
+     120 ->    16   -104    5/5   m_Offset
+     128 ->   136     +8    3/3   m_Type
+== bSampleStream  demo size 180  1 fields seen, 1 moved
+     176 ->   184     +8    4/4   
+== cPlayerSettings  demo size 40  3 fields seen, 1 moved
+       5 ->     6     +1    2/2   SplitTimeType
+       8 ->     8     +0    3/3   CameraSpring
+== eView  demo size 128  5 fields seen, 1 moved
+       8 ->     8     +0    3/3   H
+     100 ->   104     +4    2/2   WeatherQueryCounter
+== tAICop  demo size 76  19 fields seen, 12 moved
+       0 ->     0     +0   12/12  
+      32 ->    36     +4    5/5   pMySpeedTrap
+      44 ->    56    +12   12/12  MyDLOffset
+      52 ->    72    +20    3/4   fFlankSide
+== tCarModelViewer  demo size 24  1 fields seen, 1 moved
+      20 ->    24     +4    6/6   pfeCar
+== tCopManager  demo size 10472  19 fields seen, 19 moved
+       0 ->     4     +4   15/16  nNumAICops
+      48 ->    80    +32   10/10  SpikeStripList
+   10456 ->     0  -10456    2/2   nBeACopNumRoadBlocks
+   10460 -> 10492    +32    5/5   nBeACopNumChopperAttacks
+== tEventLeaf  demo size 96  12 fields seen, 3 moved
+       8 ->     8     +0    2/2   nIndex
+      16 ->    20     +4    6/6   pInfo
+      48 ->    48     +0    8/8   Center
+== tEventTreeView  demo size 1456  14 fields seen, 5 moved
+       0 ->     0     +0    3/3   pTree
+     116 ->   120     +4    5/5   AnimateZoom
+     312 ->   116   -196   13/13  ViewState
+     912 ->   912     +0    2/2   IdleOnLeafTimer
+== tPursuit  demo size 1216  21 fields seen, 21 moved
+       8 ->  1476  +1468    6/6   nNumCops
+      20 ->    16     -4   35/36  pChasedCar
+    1104 ->  1484   +380    4/4   PursuitState
+    1196 ->  1580   +384   13/13  ChopperState

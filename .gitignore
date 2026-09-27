@@ -37,3 +37,6 @@ Thumbs.db
 # does the same for every *_check.py --mutate as <name>.<pid>.mutate-backup.
 # Never committed.
 *.mutate-backup
+
+# The retail disc, extracted a few files at a time by zdir_extract.py --retail
+extracted-retail/
