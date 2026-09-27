@@ -275,7 +275,7 @@ returns a pointer returns NULL.
     python tools/loadertable_check.py
     python tools/loadertable_check.py --mutate [--only a,b]
 
-The check runs 27,856 ops and prints 41,730 lines, with 0 differ. Of the
+The check runs 27,897 ops and prints 41,988 lines, with 0 differ. Of the
 102 mutations, 100 are caught and 2 are equivalent by construction:
 
 - `load-size0`: `LoadChunks`' size test only ever saves a walk of nothing.
@@ -295,3 +295,6 @@ The scenarios cover:
 - **Built lists.** Vertex animation, duplicate names, external rigid
   animations, labelled frames, every pad and odd sizes.
 - **eFixUpTables** under all 16 flag settings, and eModel's calls.
+- **The sun.** TRACKB12's own sun chunk is loaded and unloaded through both
+  tables at each misalignment, then at version 1. Each dump shows SunInfo
+  and SunPosition.

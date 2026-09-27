@@ -76,7 +76,7 @@ world_check         2742 ops,    15110 lines, 0 differ  (328/328 mutations caugh
 scenery_check       3450 ops,    16724 lines, 0 differ  (77 caught, 2 equivalent)
 scenerycull_check   7273 ops,    46687 lines, 0 differ  (147 caught, 1 equivalent)
 eview_check         2103 ops,    15454 lines, 0 differ  (152 caught, 1 equivalent)
-loadertable_check  27856 ops,    41730 lines, 0 differ  (100 caught, 2 equivalent)
+loadertable_check  27897 ops,    41988 lines, 0 differ  (100 caught, 2 equivalent)
 texturepack_check   5452 ops,    11201 lines, 0 differ  (95 caught, 2 equivalent)
 trackflow_check       16 scenarios,  702 lines, 0 differ  (73 caught, 1 equivalent)
 sky_check             45 scenarios, 1159 lines, 0 differ  (76 caught, 2 equivalent)
@@ -526,15 +526,16 @@ and so replaced every boot.
      and `loadertable_check` treats slot 14 as ported; 0 differ in each.
      Written up in `docs/formats/sky-sun.md`.
 
-     **Open from this slice: `loadertable_check`'s `unloader-14-loads`
-     survives.** That mutation puts `loader_sun` in the unloader table.
-     The checker's dump shows neither SunInfo nor SunPosition, so the
-     wrong call cannot show. The fix is to add both to the dump, on the
-     image's side (gp-24144 and `0x002dfdf0`) and the harness's. The
-     other 101 mutations were caught or equivalent before this slice.
-     Two more fixes came out of the chain: `sinit_run` now calls
-     `sky_static_init` ([6], `0x0011cfb8`), and `loadertable_test.c`
-     defines SunPosition, which sun.c writes and eviewmatrix.c owns.
+     Three fixes followed the slice:
+     - `sinit_run` now calls `sky_static_init` ([6], `0x0011cfb8`).
+     - `loadertable_test.c` defines SunPosition, which sun.c writes and
+       eviewmatrix.c owns.
+     - `loadertable_check`'s dump now shows SunInfo and SunPosition. A new
+       scenario takes TRACKB12's sun chunk through both tables at each
+       misalignment, then at version 1. That catches `unloader-14-loads`,
+       which the first commit left open. The checker is now 27,897 ops
+       and 41,988 lines, 0 differ; of its 102 mutations, 100 are caught
+       and 2 are equivalent.
 
      **Next is the rest of step 3.**
      - The sun's draw: StuffSun (`0x00123ec0`, 1,540 bytes) and

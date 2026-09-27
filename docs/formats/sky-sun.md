@@ -200,9 +200,10 @@ The checkers the slice changed:
 - `trackflow_check` now calls SkyLoader, SunTrackLoader, SunTrackUnloader
   and SkyUnloader directly, not through seams. It has 702 lines, and 0
   differ.
-- `loadertable_check` treats slot 14 as ported. It has 41,730 lines, and 0
-  differ. Its `unloader-14-loads` mutation still survives, because the
-  dump does not show SunInfo or SunPosition. That is open.
+- `loadertable_check` treats slot 14 as ported. Its dump now shows
+  SunInfo and SunPosition. A scenario loads and unloads TRACKB12's own
+  sun chunk through both tables at each misalignment. It has 41,988
+  lines, and 0 differ.
 
 ## On the 3DS
 

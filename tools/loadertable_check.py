@@ -106,6 +106,10 @@ SOLIDLIST = GP - 25712
 MODELLIST = GP - 25704
 FLAGS = [GP - 25520, GP - 25516, GP - 25512, GP - 25508]
 TI_PTRS = [GP - 25672 + 4 * i for i in range(8)]
+# Slot 14's state: SunInfo and SunPosition.
+SUN_INFO = GP - 24144
+SUN_POS = 0x002dfdf0
+SUN_CHUNK = 0x00034202
 VA_POOL = GP - 25720
 
 PROBE_BASE = 0x0F000000             # stub addresses, never fetched
@@ -643,6 +647,43 @@ def scenario_disc_lists(sc, files):
             sc.op(OP_DUMP)
 
 
+def scenario_sun(sc, files):
+    """Slot 14 through both tables: TRACKB12's own SunChunkInfoE behind the
+    filler its place needs, at each misalignment; the disc's payload as it
+    is, whose filler is wrong away from the disc's place; and the record at
+    version 1. The dump shows SunInfo and SunPosition, so an unloader that
+    loads again leaves them set."""
+    d = dict(files).get("TRACKS/TRACKB12.BUN")
+    if d is None:
+        return
+    suns = [(pos, s) for t, pos, s in top_chunks(d) if t == SUN_CHUNK]
+    if not suns:
+        return
+    pos, size = suns[0]
+    data = d[pos + 8:pos + 8 + size]
+    k = pad16(pos + 8)
+    rec = data[k:k + 244]
+    bad = struct.pack("<I", 1) + rec[4:]
+    for mis in (0, 4, 8, 12):
+        sc.tag("sun: through the tables, misaligned %d" % mis)
+        b = Buf(sc, mis)
+        b.padded(SUN_CHUNK, rec)
+        b.end()
+        sc.op(OP_LOAD, 0, 0)
+        sc.op(OP_DUMP)
+        sc.op(OP_LOAD, 1, 0)
+        sc.op(OP_DUMP)
+    sc.tag("sun: the disc's payload, then version 1")
+    b = Buf(sc, (pos + 4) % 16)
+    b.leaf(SUN_CHUNK, data)
+    b.padded(SUN_CHUNK, bad)
+    b.end()
+    sc.op(OP_LOAD, 0, 0)
+    sc.op(OP_DUMP)
+    sc.op(OP_LOAD, 1, 0)
+    sc.op(OP_DUMP)
+
+
 X, Y, Z, W, Q, V = 0xaaaa0001, 0xbbbb0002, 0xcccc0003, 0xdddd0004, \
     0xeeee0005, 0xffff0006
 
@@ -969,6 +1010,7 @@ def script(files=None):
     scenario_fixup(sc)
     scenario_models(sc)
     scenario_disc_lists(sc, files)
+    scenario_sun(sc, files)
     scenario_frames(sc)
     scenario_trackb12_walk(sc)
     scenario_matrix(sc, files)
@@ -1361,6 +1403,9 @@ class Model(object):
         self.emit("  flags dis %d solids %d tex %d anim %d"
                   % tuple(s32(e.u32(a)) for a in FLAGS))
         self.emit("  ti " + " ".join(L(e.u32(a)) for a in TI_PTRS))
+        self.emit("  sun %s pos %08x %08x %08x"
+                  % ((L(e.u32(SUN_INFO)),)
+                     + tuple(e.u32(SUN_POS + 4 * k) for k in range(3))))
         seen = []
         for s in self.walk_list(SOLIDLIST, "solids"):
             self.dump_solid(s)

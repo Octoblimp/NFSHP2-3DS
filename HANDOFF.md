@@ -7615,14 +7615,27 @@ The draw log counts the dome apart from the scenery ("1 sky"), and the
 dome is the first thing on the draw list. The shots that look along the
 canyon show the mountains and the clouds behind the rock and the trees.
 
-### Open
+### After the commit
 
-`loadertable_check`'s `unloader-14-loads` mutation survives. It puts
-`loader_sun` in the unloader table, and the checker's dump shows
-neither SunInfo nor SunPosition. The fix is to add both to the dump on
-each side. The chain turned up two more things, and both are fixed:
+The chain turned up two things, and both are fixed:
 - `sinit_run` did not call `sky_static_init`. It now does, at entry [6];
 - `loadertable_test.c` had no SunPosition.
+
+One mutation survived: `loadertable_check`'s `unloader-14-loads`, which
+puts `loader_sun` in the unloader table. The checker's dump showed
+neither SunInfo nor SunPosition, and its one ported-unloader call gives
+the unloader a payload of 0xa5s, whose version is not 2. So a loader in
+the unloader's place ends in the same state. Now:
+- both dumps print SunInfo and SunPosition;
+- a new scenario loads TRACKB12's own SunChunkInfoE through the
+  LoaderTable at each misalignment, then unloads it through the
+  UnloaderTable, with a dump after each;
+- the disc's payload as it is, and the record at version 1, follow.
+
+`loadertable_check`: 27,897 ops, 41,988 lines, 0 differ. Of its 102
+mutations, 100 are caught, 2 are equivalent, and 0 are unexplained.
+The first commit's run and Azahar were repeated with the start-up fix.
+The log is unchanged, and the track draws as before.
 
 ### Next: the rest of step 3
 

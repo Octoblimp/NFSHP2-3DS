@@ -23,6 +23,7 @@
 #include "bslotpool.h"
 #include "emodel.h"
 #include "esolid.h"
+#include "sun.h"
 
 // eview.c is not linked, nor is realtime.c, whose clocks only
 // texturepack.c's flipbooks read, nor eviewmatrix.c, whose SunPosition
@@ -865,6 +866,7 @@ static int walk_list(bNode *head, const char *name)
 static void dump(void)
 {
     const void *seen[64];
+    uint32_t    pos[3];
     int nseen = 0, count, i, j;
 
     printf("  flags dis %d solids %d tex %d anim %d\n",
@@ -875,6 +877,9 @@ static void dump(void)
            L(pTextureInfoFilterGrey), L(pTextureInfoShadowMap1),
            L(pTextureInfoRadialBlur), L(pTextureInfoSpecularFalloff),
            L(pTextureInfoCarSelectEnvMap));
+    memcpy(pos, &SunPosition, sizeof pos);
+    printf("  sun %s pos %08x %08x %08x\n", L(SunInfo), (unsigned)pos[0],
+           (unsigned)pos[1], (unsigned)pos[2]);
     count = walk_list(&SolidList, "solids");
     for (i = 0; i < count; i++) {
         const eSolid *s = (const eSolid *)(void *)walk[i];
