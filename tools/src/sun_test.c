@@ -97,8 +97,13 @@ static const char *label(const void *p)
 
 // ------------------------------------------------------- the callees
 
-TextureInfo *GetTextureInfo(uint32_t h, int use_default)
+TextureInfo *GetTextureInfo(uint32_t h, int use_default,
+                            int include_unloaded)
 {
+    // Retail's third argument. The demo image the model runs has none, so
+    // only a port that passes anything but 0 prints it.
+    if (include_unloaded != 0)
+        printf("  GetTextureInfo include_unloaded %d\n", include_unloaded);
     printf("  GetTextureInfo %08x %d\n", (unsigned)h, use_default);
     return NULL;
 }

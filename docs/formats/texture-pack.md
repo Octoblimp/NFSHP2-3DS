@@ -14,7 +14,7 @@ writes one PNG per texture; stdlib only, no PIL).
 
 | type         | size       | contents |
 |--------------|-----------:|----------|
-| `0x30300002` | 20         | `TexturePackHeader`: a 16-byte NUL-padded name (`HUD`, `CARTEXTURES`, `TRACK`), then `pTexturePack` -- 0 on disc, where the loader leaves the pack |
+| `0x30300002` | 84         | `TexturePackHeader`: a 16-byte NUL-padded name (`HUD`, `CARTEXTURES`, `TRACK`), a 64-byte NUL-padded file name (`Global\HudTextures.tpk`), then `pTexturePack` -- 0 on disc, where the loader leaves the pack. The demo's is 20 bytes, with no file name |
 | `0x30300003` | n * 164    | the `TextureInfo` table, one record per texture |
 | `0x30300004` | large      | all CLUTs and all pixel data, back to back |
 
@@ -639,6 +639,10 @@ rebuilt without re-reading the chunk.
     TexturePack.obj's in-memory half         0x001a1650 .. 0x001a1f00
     the two lists' teardowns                 0x001a2d00 .. 0x001a2f08
 
+The addresses in this part are the demo's, NFSHP2.ELF, whose names the
+port keeps. Retail's are in [Retail](#retail) below; the port follows
+retail.
+
 `3DS Files/source/texturepack.{c,h}` is slot 2 of both chunk tables (see
 [loader-table](loader-table.md)) and everything a loaded pack is asked
 afterwards. It is cross-checked by `tools/texturepack_check.py` against
@@ -652,14 +656,17 @@ by their sizes.
 
 **A `0xb0300001` pack.**
 
-1. The loader bMallocs a 132-byte `TexturePack` and constructs it with
-   the header's name. The constructor stores the name, its hash and the
-   debugger's handle, and puts the pack at the tail of `TexturePackList`.
+1. The loader bMallocs a 148-byte `TexturePack` (the demo's is 132) and
+   constructs it with the header's name and file name. The constructor
+   stores both, the name's hash and the debugger's handle, and puts the
+   pack at the tail of `TexturePackList`.
 2. The pack's address goes into the header's `pTexturePack`. This is the
    word that is 0 on the disc.
 3. `AttachTextureTable` gives each record its pack and its image parent.
    It clears the record's pixels, palette, active textures and VRAM
-   addresses.
+   addresses. The demo's also asked `GetTextureInfo` for each record and
+   dropped the answer, which moved the pack that had it to the list's
+   head; retail's does not ask.
 4. `AssignTextureData` points `ImageData` and `PaletteData` into the blob.
    Their base is the payload rounded up to 128, and the range assigned is
    the rest of the blob.
@@ -691,15 +698,16 @@ reaches it through esolid's `gGetTextureInfoFn`.
 
 1. **The packs.** Each pack on `TexturePackList` is asked in turn for the
    first *loaded* record of that name. A record is loaded when it has
-   pixels, and a palette if it needs one. The pack that has the name moves
-   to the list's head, so the list is kept in the order the packs were
-   last hit. The record's `UsedFlag` is set.
+   pixels, and a palette if it needs one. Retail's takes a third argument:
+   when it is not 0, the first record of that name, loaded or not. The
+   pack that has the name moves to the list's head, so the list is kept
+   in the order the packs were last hit. The record's `UsedFlag` is set.
 2. **The render targets.** If no pack has it, `eGetRenderTargetTextureInfo`
    is tried. It is a seam.
 3. **The default.** With `use_default`, the call is repeated for
-   `0x19006835`, which is GLOBALB's default texture. If even that is
-   missing, the call ends at `bBreak`, and the port counts these in
-   `texturepack_breaks`.
+   `0x19006835`, which is GLOBALB's default texture, among the loaded
+   records whatever the third argument. If even that is missing, the call
+   ends at `bBreak`, and the port counts these in `texturepack_breaks`.
 
 ### UpdateTextureAnimations -- 0x001a17e8
 
@@ -743,6 +751,102 @@ This is the same on Azahar, which counts 49 names given the default and
 no `bBreak`. The 46 flipbook frames past each first are all uploaded as
 the flipbooks turn.
 
+### Retail
+
+Task 36 moved the port onto the retail image, SLES_507.31. Its
+TexturePack.obj is the demo's with the file name filled in, one lookup
+taken out and two functions put in.
+
+| | demo | retail |
+|---|---|---|
+| LoaderTexturePack, UnloaderTexturePack | `0x00100830`, `0x001009e0` | `0x00100820`, `0x001009d0` |
+| TexturePack's constructor, destructor | `0x001a1ae8`, `0x001a1b98` | `0x001ac0a8`, `0x001ac178` |
+| AttachTextureTable, AssignTextureData, UnAssignTextureData | `0x001a1c40`, `0x001a1cd8`, `0x001a1d80` | `0x001ac220`, `0x001ac2b0`, `0x001ac358` |
+| GetLoadedTexture, GetTexture, GetNthTexture | `0x001a1e18`, `0x001a1e90`, `0x001a1ed8` | `0x001ac3f0`, `0x001ac468`, `0x001ac4b0` |
+| GetTextureInfo, GetNthTextureInfo | `0x001a19b0`, `0x001a1a90` | `0x001abf48`, `0x001ac050` |
+| the rename, the swap | -- | `0x001ac4d8`, `0x001ac548` |
+| TextureAnimPack's constructor, destructor, InitAnims | `0x001a1650`, `0x001a16c8`, `0x001a16e0` | `0x001abbe8`, `0x001abc60`, `0x001abc78` |
+| UpdateTextureAnimations, GetTextureAnim | `0x001a17e8`, `0x001a1950` | `0x001abd80`, `0x001abee8` |
+| `TexturePackList`, `TextureAnimPackList`, `TweakFPS` | gp-19800, gp-19792, gp-19784 | `0x00330e28`, `0x00330e30`, `0x00330e38` |
+
+**The header and the pack.** The header is 84 bytes: `Name[16]`,
+`Filename[64]`, `pTexturePack` at 80. Every one of the 22 packs on the
+retail disc has it, each name and file name has its NUL, and each pointer
+is 0. The pack is 148 bytes. The demo's had a 48-byte `Filename` that
+its constructor never wrote; retail's is 64 bytes, so every field after
+it is 16 bytes on:
+
+| offset | field |
+|---:|---|
+| 0 | `bTNode` |
+| 8 | `Name[32]` |
+| 40 | `Filename[64]` |
+| 104 | `NameHash` |
+| 108 | `InventoryHandle` |
+| 112 | `pTextureInfo` |
+| 116 | `NumTextures` |
+| 120 | `pTextureInfoNeedsToBeFreed` |
+| 124 | `TextureDataFilePos` |
+| 128 | `LoadedTextureDataList` |
+| 136 | `CurrentLoadingTextureData` |
+| 140 | `NumNotYetLoadedTextureDatas` |
+| 144 | `MemoryPool` |
+
+**The constructor's copies run on.** They are two `bStrCpy`s, which copy
+to the NUL: the name into `Name`, then `Filename[0]` is set to 0 and the
+file name copied into `Filename`. Nothing bounds either. A name of 32
+characters or more runs on into `Filename`, and the file name's copy
+writes over it. `NameHash` is `bStringHash(Name)`, and it too reads on
+into `Filename` when `Name` has no NUL. The same happens in the header,
+which the loader hands over: the name, the file name, the pointer and the
+table's type, `0x30300003`, lie end to end, and the type's second byte is
+0. So no name the loader gives is longer than 85 characters, nor a file
+name longer than 69. Neither copy reaches `LoadedTextureDataList`, the
+one field set before them, and all they write past `Filename` is set
+again after. The port copies into a buffer the size of the run and
+stores it back, so its host struct, with its 8-byte pointers, ends the
+same. The debugger's handle is the hash of `TexturePack,` and `Name`, as
+far as it reads on.
+
+The file name may be NULL, and is for the packs LoadGlobalChunks and
+SelectTrackSlideshow make, the streaming half's. Then `Filename` is only
+emptied: `Filename[0]` is set to 0 all the same, since the store sits in
+the delay slot of the test. A name of 33 characters or more keeps its
+tail after that NUL.
+
+**GetTextureInfo's third argument.** See step 1 above. Every call retail
+kept asks for loaded records only, which is what the port's
+`texturepack_get_texture_info` seam does too. The two new functions ask
+for either.
+
+**The rename and the swap.** The stripped ELF leaves both unnamed. The
+port calls them `RenameTextureInfo` and `SwapTextureInfoNames`.
+
+- The rename finds a record by hash, loaded or not. It then `bMemCpy`s 24
+  bytes of the new name over `DebugName` and hashes it again. The 24
+  bytes are copied whether or not there is a NUL among them. A name with
+  no NUL in its 24 bytes hashes on into the old `NameHash`, and on to
+  `Width`'s low byte.
+- The swap looks both textures up before it tests either. So a miss on
+  the first still moves the second's pack to the list's head. It then
+  swaps the two names by way of a copy on the stack, and hashes each
+  after its copy. Swapped with itself, a texture keeps its name. But a
+  name with no NUL is hashed twice, the second time on through the
+  first hash.
+
+**What calls them.** ServiceGameFlow toggles the language at
+`0x001681b0`.
+
+1. It asks DYNTEX's pack for `LOADING` and unloads its pixels.
+2. It swaps `LOADING` (`0xab0e817d`) with `LOADING_FR` (`0xbf5109d4`).
+3. It loads the pack's pixels again and waits for the load.
+4. It swaps `NFS_LOGO_ALPHA` (`0xc9f75a5b`) with `NFS_LOGO_ALPHA_FR`
+   (`0xcc249df2`).
+5. It flips its flag.
+
+The next lookup of the English name finds the French texture. That call
+site is still to be ported, as part of the frontend.
+
 ### Checking it
 
 ```bash
@@ -750,27 +854,43 @@ python tools/texturepack_check.py
 python tools/texturepack_check.py --mutate
 ```
 
-The model runs both loaders and every runtime function from the image,
-with bStrCpy, bStringHash, bSPrintf and bAddCodeineInventory. The
-scenarios include:
+The model is the retail image, run through `retail_model.RetailEmu`. It
+runs both loaders, every runtime function, and the rename and the swap,
+with bStrCpy, bStringHash, bMemCpy, bSPrintf and bAddCodeineInventory.
+The scenarios include:
 
-- every texture file on the disc, loaded in the game's order, with each
-  of its textures and a few misses looked up, its flipbooks run, and all
-  of it unloaded;
+- the twelve texture files of the retail disc: the ten a race on
+  TRACKB12 loads, in the game's order, then TRACKB21's two. They hold 12
+  packs, 2,362 records and 12 flipbooks. For each file:
+  - each of its textures, some of them unloaded too, and a few misses,
+    are looked up;
+  - ServiceGameFlow's two swaps are made, and made again to swap back;
+  - its flipbooks run, and all of it is unloaded;
 - built packs for:
-  - the guards and the name;
+  - the guards;
+  - the name and the file name, and how each runs on into the next;
+  - packs constructed with no file name, as the streaming half's are;
   - the table's size and the blob's rounding;
   - the placements' ranges and image parents;
   - duplicate names and garbage in the runtime fields;
-  - the lookups' order, the default and the render targets;
+  - the lookups' order, loaded and unloaded records, the default and the
+    render targets;
+  - renames and swaps: across packs, of a texture with itself, of names
+    with no NUL, and of misses;
 - the destructor's flags, its streaming load and its LoadedTextureData;
 - built flipbooks for:
   - every version, and missing frames;
   - the two clocks and TweakFPS;
   - large frame counts.
 
-Results: 5,452 ops, 11,201 lines, 0 differ. Of the 97 mutations, 95 are
-caught and 2 are equivalent. The first equivalent one hashes the name as
-given rather than its copy, which is the same string for every name the
-loader is given. The second writes `1.0f / 60.0f` exactly, which is the
-image's constant to the bit.
+A pack's name and file name and a record's name print all their bytes,
+past the NUL, so what the copies leave after it is checked too. The
+header on the host is 88 bytes to the disc's 84, since its pointer is 8
+bytes there. A name running on through all four of the pointer's bytes
+would read differently on the two, and no scenario's does.
+
+Results: 6,698 ops, 11,464 lines, 0 differ. Of the 132 mutations, 131
+are caught and 1 is equivalent: it writes `1.0f / 60.0f` exactly, which
+is the image's constant to the bit. The demo's second equivalent one,
+which hashed the name as given rather than its copy, is caught now: a
+name that runs on into the file name hashes differently from its copy.

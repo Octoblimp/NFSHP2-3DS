@@ -10,7 +10,10 @@
 // each one is rebuilt here with the host's struct. A pack's blob payload
 // is put at the disc's address mod 128, which is what the loader rounds,
 // by the bytes the table's size has past its last record: the loader only
-// divides that size by the record's, so they are free.
+// divides that size by the record's, so they are free. The header is the
+// host's too, 88 bytes to the disc's 84: its pointer is 8 bytes here, and
+// its high half 0, so a name that runs on through the pointer reads the
+// half the disc does not have. No scenario's does.
 
 #include <stddef.h>
 #include <stdint.h>
@@ -31,7 +34,8 @@ enum {
     OP_TAG, OP_NAME, OP_REC, OP_PACK, OP_ANIM, OP_ENTRY, OP_APACK, OP_RAW,
     OP_LOAD, OP_GTI, OP_GNTI, OP_GLT, OP_ASSIGN, OP_UNASSIGN, OP_ATTACH,
     OP_DESTRUCT, OP_POKE, OP_LTD, OP_RTSET, OP_UPDATE, OP_GTA, OP_DUMP,
-    OP_RECS, OP_ANIMS, OP_HDRS, OP_RPOKE
+    OP_RECS, OP_ANIMS, OP_HDRS, OP_RPOKE, OP_RENAME, OP_SWAP, OP_NAMES,
+    OP_CONSTRUCT
 };
 
 #define PACK_ID     0xb0300001u
@@ -265,7 +269,7 @@ typedef struct {
 
 static Chunk    chunks[MAX_CHUNKS];
 static int      nchunks;
-static uint8_t  pname[16];
+static uint8_t  pname[80];      // the header's name, then its file name
 static uint8_t  precs[MAX_RECS][164];
 static int      nprecs;
 static uint8_t  panims[MAX_RECS][52];
@@ -294,23 +298,28 @@ static void build_pack(int32_t mis, uint32_t ptr, int32_t extra,
 {
     Chunk *k = &chunks[nchunks];
     char   nm[16];
+    // The chunk's start to its blob's payload, less the table: 116 bytes
+    // on the disc, whose header is 84, and 32 more than the host's header
+    // here.
+    size_t   pre = 32 + sizeof(TexturePackHeader);
     uint32_t tdisc = 164u * (uint32_t)nprecs + (uint32_t)extra;
-    uint32_t target = ((uint32_t)mis + 52u + tdisc) & 127u;
+    uint32_t target = ((uint32_t)mis + 116u + tdisc) & 127u;
     size_t   hsz = sizeof(TextureInfo);
-    uint32_t r = (target - 56u - (uint32_t)(nprecs * hsz)) & 127u;
+    uint32_t r = (target - (uint32_t)pre - (uint32_t)(nprecs * hsz)) & 127u;
     uint32_t xh = (r == 0 && extra > 0) ? 128u : r;
     uint32_t htsize = (uint32_t)(nprecs * hsz) + xh;
-    size_t   total = 56 + htsize + blob;
+    size_t   total = pre + htsize + blob;
     uint8_t *c = raw_alloc(PRE + total + POST) + PRE;
     TexturePackHeader *h = (TexturePackHeader *)(void *)(c + 16);
-    uint8_t *tb = c + 40, *db;
+    uint8_t *tb = c + 16 + sizeof(TexturePackHeader), *db;
     int i;
 
     wr32(c, PACK_ID);
     wr32(c + 4, (uint32_t)total - 8);
     wr32(c + 8, 0x30300002u);
     wr32(c + 12, (uint32_t)sizeof(TexturePackHeader));
-    memcpy(h->Name, pname, 16);
+    memcpy(h->Name, pname, sizeof h->Name);
+    memcpy(h->Filename, pname + sizeof h->Name, sizeof h->Filename);
     h->pTexturePack = ptr_of(ptr);
     wr32(tb, 0x30300003u);
     wr32(tb + 4, htsize);
@@ -424,16 +433,14 @@ static void build_raw(uint32_t type, int32_t size)
 
 // ------------------------------------------------------------- the dumps
 
-static void hexname(char *b, const char *s, int n)
+// All n bytes, past any NUL: what the copies left after it shows too.
+static void hexbytes(char *b, const void *s, int n)
 {
     int i;
 
-    for (i = 0; i < n && s[i] != 0; i++)
-        sprintf(b + 2 * i, "%02x", (unsigned char)s[i]);
-    if (i == 0)
-        strcpy(b, "-");
-    else
-        b[2 * i] = 0;
+    for (i = 0; i < n; i++)
+        sprintf(b + 2 * i, "%02x", ((const unsigned char *)s)[i]);
+    b[2 * n] = 0;
 }
 
 static void dump(void)
@@ -450,13 +457,15 @@ static void dump(void)
          n != &TexturePackList && count < 10000; n = n->next, count++) {
         TexturePack *p = (TexturePack *)(void *)n;
         bNode *m;
-        char   name[80];
+        char   name[2 * sizeof p->Name + 1];
+        char   file[2 * sizeof p->Filename + 1];
         int    any = 0, c2;
 
-        hexname(name, p->Name, 32);
-        printf("  pack %s prev %s name %s hash %08x inv %08x info %s "
-               "num %d free %d pos %d cur %s nyl %d pool %d ltd",
-               label(p), label(p->Node.prev), name, p->NameHash,
+        hexbytes(name, p->Name, (int)sizeof p->Name);
+        hexbytes(file, p->Filename, (int)sizeof p->Filename);
+        printf("  pack %s prev %s name %s file %s hash %08x inv %08x "
+               "info %s num %d free %d pos %d cur %s nyl %d pool %d ltd",
+               label(p), label(p->Node.prev), name, file, p->NameHash,
                (uint32_t)p->InventoryHandle, label(p->pTextureInfo),
                p->NumTextures, p->pTextureInfoNeedsToBeFreed,
                p->TextureDataFilePos, label(p->CurrentLoadingTextureData),
@@ -549,6 +558,24 @@ static void dump_hdrs(void)
     }
 }
 
+// Each record's name and hash, all 24 bytes of the name; k < 0 for the
+// render targets'.
+static void dump_names(int k)
+{
+    TextureInfo *t = k < 0 ? rt_infos : chunks[k].t;
+    int          n = k < 0 ? nrt : chunks[k].n;
+    char         b[2 * sizeof t->DebugName + 1];
+    int          i;
+
+    for (i = 0; i < n; i++) {
+        hexbytes(b, t[i].DebugName, (int)sizeof t[i].DebugName);
+        if (k < 0)
+            printf("  rt.%d %08x %s\n", i, t[i].NameHash, b);
+        else
+            printf("  n%d.%d %08x %s\n", k, i, t[i].NameHash, b);
+    }
+}
+
 // ------------------------------------------------------------- the run
 
 static int nltds, nbufs;
@@ -613,7 +640,7 @@ int main(int argc, char **argv)
             printf("[%s]\n", tags[next()]);
             break;
         case OP_NAME:
-            for (i = 0; i < 4; i++)
+            for (i = 0; i < 20; i++)
                 wr32(pname + 4 * i, (uint32_t)next());
             break;
         case OP_REC:
@@ -666,10 +693,10 @@ int main(int argc, char **argv)
         }
         case OP_GTI: {
             uint32_t h = (uint32_t)next();
-            int32_t d = next();
-            TextureInfo *r = GetTextureInfo(h, d);
+            int32_t d = next(), u = next();
+            TextureInfo *r = GetTextureInfo(h, d, u);
 
-            printf("  gti %08x %d %s\n", h, d, label(r));
+            printf("  gti %08x %d %d %s\n", h, d, u, label(r));
             break;
         }
         case OP_GNTI: {
@@ -797,6 +824,37 @@ int main(int argc, char **argv)
                 chunks[c].t[idx].ImageSize = v;
             else
                 chunks[c].t[idx].PaletteSize = v;
+            break;
+        }
+        case OP_RENAME: {
+            uint32_t h = (uint32_t)next();
+            uint8_t  nm[24];
+
+            for (i = 0; i < 6; i++)
+                wr32(nm + 4 * i, (uint32_t)next());
+            printf("  rename %08x ret %d\n", h,
+                   RenameTextureInfo(h, (const char *)nm));
+            break;
+        }
+        case OP_SWAP: {
+            uint32_t a = (uint32_t)next(), b = (uint32_t)next();
+
+            printf("  swap %08x %08x ret %d\n", a, b,
+                   SwapTextureInfoNames(a, b));
+            break;
+        }
+        case OP_NAMES:
+            dump_names(next());
+            break;
+        case OP_CONSTRUCT: {
+            uint8_t      nm[64];
+            TexturePack *p;
+
+            for (i = 0; i < 16; i++)
+                wr32(nm + 4 * i, (uint32_t)next());
+            p = h_malloc((int)sizeof(TexturePack), "TexturePack", 0, 16);
+            texturepack_construct(p, (const char *)nm, NULL);
+            printf("  construct %s\n", label(p));
             break;
         }
         default:

@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-27), after task 36's third slice: TrackRoute's
-retail pass, the 12-byte Signpost. `HANDOFF.md` is the running narrative; this file is the short
+continuation (2026-09-27), after task 36's fourth slice: the texture
+pack's retail pass, the 84-byte header. `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -106,9 +106,9 @@ scenery_check       3450 ops,    16724 lines, 0 differ  (77 caught, 2 equivalent
 scenerycull_check   7273 ops,    46687 lines, 0 differ  (147 caught, 1 equivalent)
 eview_check         2103 ops,    15454 lines, 0 differ  (152 caught, 1 equivalent)
 loadertable_check  27084 ops,    37894 lines, 0 differ  (107 caught, 2 equivalent)
-texturepack_check   5452 ops,    11201 lines, 0 differ  (95 caught, 2 equivalent)
+texturepack_check   6698 ops,    11464 lines, 0 differ  (131 caught, 1 equivalent)
 trackflow_check       16 scenarios,  706 lines, 0 differ  (76 caught, 1 equivalent)
-sky_check             45 scenarios, 1159 lines, 0 differ  (76 caught, 2 equivalent)
+sky_check             45 scenarios, 1159 lines, 0 differ  (77 caught, 2 equivalent)
 sun_check             91 scenarios, 2680 lines, 0 differ  (114 caught, 1 equivalent)
 weather_check         75 scenarios, 4368 lines, 0 differ  (85 caught, 4 equivalent)
 rain_check            31 calls,       31 lines, 0 differ  (5/5 mutations caught; 41 image facts)
@@ -204,12 +204,23 @@ and so replaced every boot.
    - The AI's use of `AIHint` goes with the step-10 retail pass of
      `airoute.c` and the controller.
 
+   **Task 36's fourth slice is closed: the texture pack's retail pass.**
+   - The header is 84 bytes, with a 64-byte file name between the name
+     and the pointer. `TexturePack` is 148 bytes, with the file name at
+     40. The constructor takes it, or NULL for the streaming half's packs.
+   - GetTextureInfo's third argument looks among unloaded records too.
+     AttachTextureTable no longer looks each record up.
+   - `RenameTextureInfo` (`0x001ac4d8`) and `SwapTextureInfoNames`
+     (`0x001ac548`) are ported. ServiceGameFlow's French swap, their one
+     caller, goes with the frontend (step 16).
+   - `texturepack_check` runs wholly on the retail image, over twelve
+     retail texture files: a TRACKB12 race's ten and TRACKB21's two.
+   - `sky_check` gained a mutation for the third argument of the sky's
+     own lookup.
+
    **Next is the rest of step 4: the retail disc's data in the track
    viewer.**
    - The loaders the audit has as changed:
-     - LoaderTexturePack (0.85): the header is 84 bytes, a 64-byte
-       filename between the name and the pointer. TexturePack is 148
-       bytes, and GetTextureInfo takes a third argument.
      - LoaderDifficultyInfo: the record is 992 bytes, the demo's 744.
      - UnloaderTrackGeometry (0.98), UnloaderSolidList (0.99) and
        eFixUpTables (0.82).

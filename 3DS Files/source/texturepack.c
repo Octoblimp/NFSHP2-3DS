@@ -3,6 +3,7 @@
 #include "texturepack.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "bchunk.h"
 #include "bmem.h"
@@ -86,7 +87,7 @@ int loader_texture_pack(uint8_t *chunk)
         TexturePack *p = (TexturePack *)bMalloc((int)sizeof(TexturePack),
                                                 "TexturePack", 0, 16);
 
-        p = texturepack_construct(p, h->Name);
+        p = texturepack_construct(p, h->Name, h->Filename);
         h->pTexturePack = p;
         texturepack_attach_texture_table(
             p, (TextureInfo *)(void *)(table + 8), num);
@@ -144,20 +145,41 @@ int unloader_texture_pack(uint8_t *chunk)
 
 // ----------------------------------------------------------- TexturePack
 
-TexturePack *texturepack_construct(TexturePack *p, const char *name)
+TexturePack *texturepack_construct(TexturePack *p, const char *name,
+                                   const char *filename)
 {
+    // Name and Filename, which lie end to end, and the 32 bytes after
+    // them: what the two copies below write, as the console's memory has it.
+    char run[128];
     char buf[1024];
     int i;
 
     p->LoadedTextureDataList.next = &p->LoadedTextureDataList;
     p->LoadedTextureDataList.prev = &p->LoadedTextureDataList;
-    // bStrCpy copies to the NUL. A header's name is 16 bytes, then the
-    // pack's pointer, then the table's type, 0x30300003, whose second
-    // byte is 0: no name the loader is given runs past 21 characters.
-    for (i = 0; name[i] != 0 && i < (int)sizeof p->Name - 1; i++)
-        p->Name[i] = name[i];
-    p->Name[i] = 0;
-    p->NameHash = bchunk_hash(p->Name);
+    // bStrCpy copies to the NUL: the name into Name and on into Filename,
+    // then Filename is emptied and the file name copied over it, on into
+    // the fields after it. The loader gives the header's name and file
+    // name, which lie end to end too, then the pack's pointer, then the
+    // table's type, 0x30300003, whose second byte is 0. So no name the
+    // loader gives runs past 85 characters, nor a file name past 69: both
+    // copies stop short of LoadedTextureDataList, the one field set before
+    // them, and all they write past Filename is set again below. Name's
+    // hash reads on into Filename when Name has no NUL.
+    memcpy(run, p->Name, sizeof p->Name + sizeof p->Filename);
+    for (i = 0; name[i] != 0 && i < (int)sizeof run - 1; i++)
+        run[i] = name[i];
+    run[i] = 0;
+    run[sizeof p->Name] = 0;
+    if (filename != NULL) {
+        char *f = run + sizeof p->Name;
+
+        for (i = 0; filename[i] != 0 && f + i < run + sizeof run - 1; i++)
+            f[i] = filename[i];
+        f[i] = 0;
+    }
+    memcpy(p->Name, run, sizeof p->Name);
+    memcpy(p->Filename, run + sizeof p->Name, sizeof p->Filename);
+    p->NameHash = bchunk_hash(run);
     p->pTextureInfo = NULL;
     p->NumTextures = 0;
     p->pTextureInfoNeedsToBeFreed = 0;
@@ -167,7 +189,8 @@ TexturePack *texturepack_construct(TexturePack *p, const char *name)
     p->MemoryPool = 64;
     link_tail(&TexturePackList, &p->Node);
     // bAddCodeineInventory(0, name, ...) tells the debugger's channel, which
-    // the port does not have, and returns the name's hash.
+    // the port does not have, and returns the name's hash. Name is read as
+    // the console reads it, on through Filename to a NUL.
     snprintf(buf, sizeof buf, "TexturePack,%s", p->Name);
     p->InventoryHandle = (int32_t)bchunk_hash(buf);
     return p;
@@ -213,10 +236,10 @@ void texturepack_attach_texture_table(TexturePack *p, TextureInfo *table,
 
     p->pTextureInfo = table;
     p->NumTextures = num;
+    // The demo asked GetTextureInfo for each record here and dropped the
+    // answer, which moved the pack that had it to the list's head; retail
+    // does not ask.
     for (n = num; n > 0; n--, t++) {
-        // The image asks and drops the answer. The asking moves the pack
-        // that has it to the head of the list, and marks it used.
-        (void)GetTextureInfo(t->NameHash, 0);
         if (t->ImageParentHash != 0)
             t->pImageParent = texturepack_get_texture(p, t->ImageParentHash);
         else
@@ -303,13 +326,17 @@ TextureInfo *texturepack_get_nth_texture(TexturePack *p, int32_t n)
 
 // ------------------------------------------------------- the lookups
 
-TextureInfo *GetTextureInfo(uint32_t hash, int use_default)
+TextureInfo *GetTextureInfo(uint32_t hash, int use_default,
+                            int include_unloaded)
 {
     bNode *n;
     TextureInfo *t;
 
     for (n = TexturePackList.next; n != &TexturePackList; n = n->next) {
-        t = texturepack_get_loaded_texture((TexturePack *)(void *)n, hash);
+        TexturePack *p = (TexturePack *)(void *)n;
+
+        t = include_unloaded ? texturepack_get_texture(p, hash)
+                             : texturepack_get_loaded_texture(p, hash);
         if (t != NULL) {
             // The pack that had it goes to the head, so it is asked first
             // next time.
@@ -328,7 +355,7 @@ TextureInfo *GetTextureInfo(uint32_t hash, int use_default)
         return t;
     if (!use_default)
         return NULL;
-    t = GetTextureInfo(DEFAULT_TEXTURE_HASH, 0);
+    t = GetTextureInfo(DEFAULT_TEXTURE_HASH, 0, 0);
     if (t != NULL)
         return t;
     texturepack_breaks++;
@@ -337,7 +364,7 @@ TextureInfo *GetTextureInfo(uint32_t hash, int use_default)
 
 void *texturepack_get_texture_info(uint32_t hash, int use_default)
 {
-    return GetTextureInfo(hash, use_default);
+    return GetTextureInfo(hash, use_default, 0);
 }
 
 TextureInfo *GetNthTextureInfo(int32_t n)
@@ -357,6 +384,38 @@ TextureInfo *GetNthTextureInfo(int32_t n)
 
 void MaybePrintUnusedTextures(void)
 {
+}
+
+// ------------------------------------------------------------- the names
+
+int RenameTextureInfo(uint32_t hash, const char *name)
+{
+    TextureInfo *t = GetTextureInfo(hash, 0, 1);
+
+    if (t == NULL)
+        return 0;
+    // A bMemCpy of 24 bytes: `name` must have that many to read, NUL or
+    // not. A name with no NUL in them hashes on into NameHash.
+    memcpy(t->DebugName, name, sizeof t->DebugName);
+    t->NameHash = bchunk_hash(t->DebugName);
+    return 1;
+}
+
+int SwapTextureInfoNames(uint32_t a, uint32_t b)
+{
+    TextureInfo *x = GetTextureInfo(a, 0, 1);
+    TextureInfo *y = GetTextureInfo(b, 0, 1);
+    char name[sizeof x->DebugName];
+
+    if (x == NULL || y == NULL)
+        return 0;
+    memcpy(name, x->DebugName, sizeof name);
+    // The two can be one texture.
+    memmove(x->DebugName, y->DebugName, sizeof name);
+    x->NameHash = bchunk_hash(x->DebugName);
+    memcpy(y->DebugName, name, sizeof name);
+    y->NameHash = bchunk_hash(y->DebugName);
+    return 1;
 }
 
 // ------------------------------------------------------ TextureAnimPack
@@ -400,7 +459,7 @@ void textureanimpack_init_anims(TextureAnimPack *p)
 
         for (k = 0; k < a->NumFrames; k++) {
             TextureAnimEntry *e = &a->TextureAnimTable[k];
-            TextureInfo *t = GetTextureInfo(e->NameHash, 0);
+            TextureInfo *t = GetTextureInfo(e->NameHash, 0, 0);
 
             if (t != NULL) {
                 e->pTextureInfo = t;

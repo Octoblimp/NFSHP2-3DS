@@ -697,8 +697,12 @@ MUTATIONS = [
      "    if ((bchunk_u32(chunk) & 0xffff) != (SUN_CHUNK_ID & 0xffff)) {\n        return 0;\n    }\n    // The chunk's"),
     # The sun's textures.
     ("tex_no_default", SUC,
-     "        SunTextures[i] = GetTextureInfo(kSunTextureHashes[i], 1);",
-     "        SunTextures[i] = GetTextureInfo(kSunTextureHashes[i], 0);"),
+     "        SunTextures[i] = GetTextureInfo(kSunTextureHashes[i], 1, 0);",
+     "        SunTextures[i] = GetTextureInfo(kSunTextureHashes[i], 0, 0);"),
+    # Retail's third argument (task 36): loaded textures only.
+    ("tex_include_unloaded", SUC,
+     "        SunTextures[i] = GetTextureInfo(kSunTextureHashes[i], 1, 0);",
+     "        SunTextures[i] = GetTextureInfo(kSunTextureHashes[i], 1, 1);"),
     ("tex_four", SUC,
      "    for (i = 0; i < NUM_SUN_TEXTURES; i++) {\n        SunTextures[i] = GetTextureInfo",
      "    for (i = 0; i < NUM_SUN_TEXTURES - 1; i++) {\n        SunTextures[i] = GetTextureInfo"),

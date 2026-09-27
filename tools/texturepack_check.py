@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Cross-check 3DS Files/source/texturepack.c -- LoaderTexturePack and
 UnloaderTexturePack, slot 2 of the chunk tables, and TexturePack.obj's
-in-memory half -- against the image itself, run in mipsemu.
+in-memory half -- against the retail image, SLES_507.31, run in mipsemu
+(retail_model.RetailEmu).
 
 The model is the image: the two loaders, TexturePack's constructor and
 destructor, AttachTextureTable, AssignTextureData, UnAssignTextureData,
 GetLoadedTexture, GetTexture, GetNthTexture, GetTextureInfo,
-GetNthTextureInfo, TextureAnimPack's constructor, destructor and InitAnims,
+GetNthTextureInfo, the two functions the stripped ELF leaves unnamed that
+rename a texture and swap two textures' names (0x001ac4d8 and 0x001ac548),
+TextureAnimPack's constructor, destructor and InitAnims,
 UpdateTextureAnimations and GetTextureAnim all run as shipped, with
-bStrCpy, bStringHash, bSPrintf and bAddCodeineInventory. The harness runs
-the same op script on the port and prints the same lines.
+bStrCpy, bStringHash, bMemCpy, bSPrintf and bAddCodeineInventory. The
+harness runs the same op script on the port and prints the same lines.
 
 **The seams.** eGetRenderTargetTextureInfo (`rt`, which hands out rt.0,
 rt.1, ... for the hashes the script names) and ServiceQueuedFiles (`sqf`,
@@ -30,16 +33,22 @@ the disc's address mod 128: that is what the loader rounds. A pointer prints
 as what it points at: t<k>.<i> for record i of chunk k's table, d<k>+<off>
 for chunk k's blob, from its payload, A<k>.<i> and E<k>.<i> for a flipbook
 and a frame, h<k> for a header, a<k> for a block, TPL and TAPL for the two
-lists; x<hex> for anything else.
+lists; x<hex> for anything else. A pack's name and file name, and a
+record's, print as all their bytes, past any NUL.
 
-Scenarios: every texture file on the disc, loaded in the game's order, each
-of its textures and a few misses looked up, its flipbooks run, and all of it
-unloaded; built packs for the guards, the name, the table's size, the
-blob's rounding, the placements' ranges, image parents, duplicate names,
-garbage in the runtime fields, the lookups' order, the default and the
-render targets; the destructor's flags, its streaming load and its
-LoadedTextureData; and built flipbooks for every version, missing frames,
-the two clocks, TweakFPS and big frame counts.
+Scenarios: every texture file of the retail disc a race on TRACKB12 loads,
+in the game's order, and TRACKB21's two, each of its textures and a few
+misses looked up, the two swaps ServiceGameFlow makes to put the French
+loading screen and logo in place, and back, its flipbooks run, and all of
+it unloaded; built packs for the guards, the name and the file name and
+how each runs on into the next, packs constructed with no file name as the
+streaming half's are, the table's size, the blob's rounding, the
+placements' ranges, image parents, duplicate names, garbage in the runtime
+fields, the lookups' order, loaded and unloaded textures, the default and
+the render targets; renames and swaps, across packs, of a texture with
+itself, of names with no NUL and of misses; the destructor's flags, its
+streaming load and its LoadedTextureData; and built flipbooks for every
+version, missing frames, the two clocks, TweakFPS and big frame counts.
 
     python tools/texturepack_check.py
     python tools/texturepack_check.py --mutate [--only a,b]
@@ -57,7 +66,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import physicscar_check as pcc
-from mipsemu import Emu, M32, s32
+import retail_model
+from mipsemu import M32, s32
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -67,18 +77,26 @@ TPC = "3DS Files/source/texturepack.c"
 SOURCES = [HARNESS, TPC, "3DS Files/source/bmem.c"]
 
 HARNESS_TIMEOUT = 600
-EXTRACTED = ROOT / "extracted"
+EXTRACTED = ROOT / "extracted-retail"
 
 # The files, in the order the game has them loaded by a race on TRACKB12:
-# the boot's, the race's, the track's; then the rest.
+# the boot's, the race's, the track's; then the rest, and TRACKB21's two.
 DISC_FILES = ["GLOBAL/GLOBALB.BUN", "GLOBAL/INGAMEB.BUN",
               "TRACKS/TEX12LOCATION.BIN", "TRACKS/TEX12TRACK.BIN",
               "GLOBAL/HUDTEX.BIN", "GLOBAL/DRIVTEX.BIN", "GLOBAL/DYNTEX.BIN",
               "CARS/TEXTURES.BIN", "FRONTEND/FRONTB.BUN",
-              "FRONTEND/TSELECT.BIN"]
+              "FRONTEND/TSELECT.BIN", "TRACKS/TEX21LOCATION.BIN",
+              "TRACKS/TEX21TRACK.BIN"]
+
+# ServiceGameFlow's language toggle, 0x001681b0, swaps these two pairs'
+# names: LOADING and LOADING_FR in DYNTEX.BIN, NFS_LOGO_ALPHA and
+# NFS_LOGO_ALPHA_FR in GLOBALB.BUN.
+GAMEFLOW_SWAPS = ((0xab0e817d, 0xbf5109d4), (0xc9f75a5b, 0xcc249df2))
+GAMEFLOW_FILES = ("GLOBAL/GLOBALB.BUN", "GLOBAL/DYNTEX.BIN")
 
 # ================================================================ the image
 
+# The demo's addresses, which e.data turns into retail's.
 GP = 0x00328bf0
 TPL, TAPL = GP - 19800, GP - 19792
 TWEAK_FPS = GP - 19784
@@ -88,7 +106,12 @@ DIRTY_TEXTURES = GP - 25512
 PRE, POST = 1024, 4096 + 256        # the slack around each chunk
 SLACK = 4096                        # a blob's label runs this far past it
 MARGIN = 2                          # records a table's label runs before it
-LTD_OFF = 112
+
+# Retail's TexturePack, 148 bytes, and its header, 84: the name, the file
+# name, and where the loader leaves the pack.
+P_NAME, P_FILE, P_HASH, P_INV, P_INFO, P_NUM = 8, 40, 104, 108, 112, 116
+P_FREE, P_POS, P_LTD, P_CUR, P_NYL, P_POOL = 120, 124, 128, 136, 140, 144
+HDR_SIZE, HDR_PTR = 84, 80
 
 PACK_ID, ANIM_ID = 0xb0300001, 0xb0300100
 DEFAULT = 0x19006835
@@ -108,6 +131,11 @@ SYM = dict(
     attach="AttachTextureTable__11TexturePackP11TextureInfoi",
     destruct="_$_11TexturePack",
     maybe="MaybePrintUnusedTextures__Fv",
+    # Unnamed in the stripped ELF, and not in the demo's.
+    rename=0x001ac4d8,
+    swap=0x001ac548,
+    # Retail's (const char *, const char *); the demo's took one name.
+    construct=0x001ac0a8,
 )
 
 # ---- the ops -----------------------------------------------------------------
@@ -115,14 +143,16 @@ SYM = dict(
 (OP_TAG, OP_NAME, OP_REC, OP_PACK, OP_ANIM, OP_ENTRY, OP_APACK, OP_RAW,
  OP_LOAD, OP_GTI, OP_GNTI, OP_GLT, OP_ASSIGN, OP_UNASSIGN, OP_ATTACH,
  OP_DESTRUCT, OP_POKE, OP_LTD, OP_RTSET, OP_UPDATE, OP_GTA, OP_DUMP,
- OP_RECS, OP_ANIMS, OP_HDRS, OP_RPOKE) = range(26)
+ OP_RECS, OP_ANIMS, OP_HDRS, OP_RPOKE, OP_RENAME, OP_SWAP,
+ OP_NAMES, OP_CONSTRUCT) = range(30)
 
-ARGS = {OP_TAG: 1, OP_NAME: 4, OP_REC: 41, OP_PACK: 4, OP_ANIM: 13,
-        OP_ENTRY: 4, OP_APACK: 6, OP_RAW: 2, OP_LOAD: 2, OP_GTI: 2,
+ARGS = {OP_TAG: 1, OP_NAME: 20, OP_REC: 41, OP_PACK: 4, OP_ANIM: 13,
+        OP_ENTRY: 4, OP_APACK: 6, OP_RAW: 2, OP_LOAD: 2, OP_GTI: 3,
         OP_GNTI: 1, OP_GLT: 3, OP_ASSIGN: 5, OP_UNASSIGN: 3, OP_ATTACH: 3,
         OP_DESTRUCT: 2, OP_POKE: 3, OP_LTD: 2, OP_RTSET: 1, OP_UPDATE: 3,
         OP_GTA: 1, OP_DUMP: 0, OP_RECS: 1, OP_ANIMS: 1, OP_HDRS: 0,
-        OP_RPOKE: 4}
+        OP_RPOKE: 4, OP_RENAME: 7, OP_SWAP: 2, OP_NAMES: 1,
+        OP_CONSTRUCT: 16}
 
 
 class Script(object):
@@ -130,10 +160,15 @@ class Script(object):
         self.ops = []
         self.tags = []
         self.nchunks = 0
+        self.makes = []         # per chunk: whether loading it bMallocs
+        self.allocs = 0         # the blocks both sides have handed out
 
     def op(self, code, *args):
         assert len(args) == ARGS[code], (code, args)
         self.ops.append((code,) + tuple(int(a) for a in args))
+        if ((code == OP_LOAD and not args[1] and self.makes[args[0]])
+                or code == OP_CONSTRUCT):
+            self.allocs += 1
 
     def tag(self, s):
         self.tags.append(s)
@@ -146,17 +181,20 @@ class Script(object):
 
     # ---- chunks ----------------------------------------------------------
 
-    def pack(self, name, recs, blob, mis=0, ptr=0, extra=0):
-        """A 0xb0300001 chunk. `name` is the header's 16 bytes, `recs` the
-        disc records, `blob` the blob's size; the chunk starts `mis` past a
-        128-byte boundary."""
+    def pack(self, name, recs, blob, mis=0, ptr=0, extra=0, filename=b""):
+        """A 0xb0300001 chunk. `name` and `filename` are the header's 16 and
+        64 bytes, `recs` the disc records, `blob` the blob's size; the chunk
+        starts `mis` past a 128-byte boundary."""
         nm = bytes(name)[:16]
-        self.words(OP_NAME, nm + bytes(16 - len(nm)), 4)
+        fn = bytes(filename)[:64]
+        self.words(OP_NAME, nm + bytes(16 - len(nm)) + fn
+                   + bytes(64 - len(fn)), 20)
         for r in recs:
             self.words(OP_REC, r, 41)
         self.op(OP_PACK, mis, ptr, extra, blob)
         k = self.nchunks
         self.nchunks += 1
+        self.makes.append(True)
         return k
 
     def anim_pack(self, anims, entries, version=1, ptr=0, pad=(0, 0),
@@ -168,13 +206,27 @@ class Script(object):
         self.op(OP_APACK, version, ptr, pad[0], pad[1], aextra, eextra)
         k = self.nchunks
         self.nchunks += 1
+        self.makes.append(version == 1)
         return k
 
     def raw(self, type_, size):
         self.op(OP_RAW, type_, size)
         k = self.nchunks
         self.nchunks += 1
+        self.makes.append(False)
         return k
+
+    def construct(self, name):
+        """A pack made as LoadGlobalChunks and SelectTrackSlideshow make
+        theirs: bMalloc'd, and given a name and no file name."""
+        nm = bytes(name)[:63]
+        self.words(OP_CONSTRUCT, nm + bytes(64 - len(nm)), 16)
+
+    def rename(self, hash_, name):
+        """The rename, given 24 bytes of `name`, NUL or not."""
+        nm = bytes(name)[:24]
+        self.words(OP_RENAME, struct.pack("<I", hash_ & M32) + nm
+                   + bytes(24 - len(nm)), 7)
 
     def encode(self):
         out = [len(self.tags)]
@@ -194,8 +246,13 @@ class Script(object):
 
 
 def bhash(s):
+    return hash_bytes(s.encode("latin-1"))
+
+
+def hash_bytes(b):
+    """bStringHash of the bytes, to the first NUL."""
     h = 0xffffffff
-    for c in s.encode("latin-1"):
+    for c in b.split(b"\0")[0]:
         h = (h * 33 + c) & M32
     return h
 
@@ -260,10 +317,12 @@ def disc_chunks(sc, rel):
     for (o, t, s) in kids(b, 0, len(b)):
         if t == PACK_ID:
             h, tb, db = kids(b, o + 8, o + 8 + s)
+            assert h[2] == HDR_SIZE, (rel, h)
             recs = [b[tb[0] + 8 + 164 * i:tb[0] + 8 + 164 * (i + 1)]
                     for i in range(tb[2] // 164)]
             k = sc.pack(b[h[0] + 8:h[0] + 24], recs, db[2], mis=o % 128,
-                        ptr=u32(b, h[0] + 24), extra=tb[2] % 164)
+                        ptr=u32(b, h[0] + 8 + HDR_PTR), extra=tb[2] % 164,
+                        filename=b[h[0] + 24:h[0] + 8 + HDR_PTR])
         elif t == ANIM_ID:
             h, ab, eb = kids(b, o + 8, o + 8 + s)
             anims = [b[ab[0] + 8 + 52 * i:ab[0] + 8 + 52 * (i + 1)]
@@ -358,7 +417,7 @@ def scenario_basic(sc):
     for name in ("ROAD", "SHARED", "ROAD", "OTHER", "NOPAL", "NOIMG",
                  "EDGE_LAST", "EDGE_PAST", "NEG", "PAL_PAST", "SHARED",
                  "ROAD_B", "SELFPARENT", "NOPE"):
-        sc.op(OP_GTI, bhash(name), 0)
+        sc.op(OP_GTI, bhash(name), 0, 0)
         sc.op(OP_DUMP)
     for n in range(-2, 18):
         sc.op(OP_GNTI, n)
@@ -389,16 +448,37 @@ def scenario_rounding(sc):
 
 
 def scenario_names(sc):
+    """The name and the file name. A header's name that fills its 16 bytes
+    runs on into its file name, and a file name that fills its 64 on into
+    the pack's pointer, 0 until the loader sets it; the pack's copies, into
+    its 32 and 64, run on in turn."""
     sc.tag("names")
     ks = []
-    for nm in (b"", b"A", b"FIFTEEN_CHARS_X", b"SIXTEEN_CHARS_XY",
-               b"\xe9\xff\x80LATIN"):
-        k = sc.pack(nm, [info_rec("N" + str(len(nm)), img=0, isize=4)], 64)
+    x16 = b"SIXTEEN_CHARS_XY"
+    for nm, fn in ((b"", b""), (b"A", b""), (b"FIFTEEN_CHARS_X", b"F.BIN"),
+                   (x16, b""), (x16, b"Tracks\\Tex12Track.tpk"),
+                   (x16, b"S" * 15), (x16, b"S" * 16), (x16, b"L" * 40),
+                   (x16, b"M" * 63), (x16, b"M" * 64), (b"SHORT", b"N" * 63),
+                   (b"SHORT", b"N" * 64), (b"", b"FILEONLY.BIN"),
+                   (b"\xe9\xff\x80LATIN", b"\xe9LATIN.BIN")):
+        k = sc.pack(nm, [info_rec("N%d_%d" % (len(nm), len(fn)), img=0,
+                                  isize=4)], 64, filename=fn)
         sc.op(OP_LOAD, k, 0)
         ks.append(k)
     sc.op(OP_DUMP)
     for k in ks:
         sc.op(OP_LOAD, k, 1)
+    sc.op(OP_DUMP)
+    # No file name, as the packs LoadGlobalChunks makes have: the file
+    # name is only emptied, and a name of 33 or more keeps its tail there.
+    names = (b"", b"STREAMING", x16 + b"S" * 15, x16 + b"S" * 16,
+             x16 + b"S" * 17, x16 + b"L" * 40, x16 + b"M" * 47)
+    first = sc.allocs
+    for nm in names:
+        sc.construct(nm)
+    sc.op(OP_DUMP)
+    for i in range(len(names)):
+        sc.op(OP_DESTRUCT, first + i, 3)
     sc.op(OP_DUMP)
 
 
@@ -430,8 +510,9 @@ def scenario_tables(sc):
 
 
 def scenario_garbage(sc):
-    """Records whose runtime words are not 0 on the way in: the lookup in
-    AttachTextureTable finds a later record of the same pack by them."""
+    """Records whose runtime words are not 0 on the way in. The demo's
+    AttachTextureTable looked each up, and found a later record of the same
+    pack by them; retail's does not look."""
     sc.tag("garbage")
     recs = [info_rec("G0", img=0, isize=4, garbage=0xdead0010),
             info_rec("G1", img=8, isize=4, garbage=0xdead0020),
@@ -451,7 +532,7 @@ def scenario_garbage(sc):
     sc.op(OP_HDRS)
     sc.op(OP_DUMP)
     for name in ("G0", "G1", "G2", "G3", "G2"):
-        sc.op(OP_GTI, bhash(name), 0)
+        sc.op(OP_GTI, bhash(name), 0, 0)
     sc.op(OP_DUMP)
     sc.op(OP_LOAD, k, 1)
     sc.op(OP_LOAD, k2, 1)
@@ -459,29 +540,138 @@ def scenario_garbage(sc):
     sc.op(OP_RECS, k)
 
 
+def scenario_unloaded(sc):
+    """GetTextureInfo's third argument, retail's: a texture with no pixels,
+    or with its pixels and not its palette, is found only when that asks
+    for it. The default is looked for among the loaded ones either way."""
+    sc.tag("unloaded")
+    recs = [info_rec("LOADED", img=0, isize=16),
+            info_rec("NOIMG", img=0, isize=0),
+            info_rec("PALMISS", img=16, isize=16, pal=5000, psize=16),
+            info_rec("FAR", img=5000, isize=16),
+            info_rec("X", hash_=DEFAULT, img=0, isize=0),
+            info_rec("DUP", img=6000, isize=16),
+            info_rec("DUP", img=32, isize=16),
+            info_rec("NONUL", img=48, isize=16)]
+    k = sc.pack(b"UNLOADED", recs, 256)
+    k2 = sc.pack(b"UNLOADED2", [info_rec("DUP", img=9000, isize=16),
+                                info_rec("NOIMG2", img=0, isize=0),
+                                info_rec("LOADED2", img=0, isize=16)], 64)
+    sc.op(OP_LOAD, k2, 0)
+    sc.op(OP_LOAD, k, 0)
+    sc.op(OP_DUMP)
+    for name, d, u in (("DUP", 0, 0), ("DUP", 0, 1), ("NOIMG2", 0, 1),
+                       ("DUP", 0, 1), ("NOIMG", 0, 0), ("NOIMG", 1, 0),
+                       ("NOIMG", 1, 1), ("PALMISS", 0, 0), ("PALMISS", 0, 1),
+                       ("FAR", 0, 1), ("FAR", 0, 2), ("FAR", 0, -1),
+                       ("LOADED", 0, 1), ("LOADED2", 1, 1), ("NOPE", 1, 1),
+                       ("NOPE", 0, 1)):
+        sc.op(OP_GTI, bhash(name), d, u)
+        sc.op(OP_DUMP)
+    sc.op(OP_GTI, DEFAULT, 0, 1)
+    sc.op(OP_GTI, DEFAULT, 1, 0)
+    sc.op(OP_GTI, DEFAULT, 1, 1)
+    sc.op(OP_RECS, k)
+    sc.op(OP_RECS, k2)
+    sc.op(OP_DUMP)
+    return k, k2
+
+
+def scenario_renames(sc, k, k2):
+    """The rename and the swap, on the unloaded scenario's packs: both look
+    their textures up loaded or not, the swap both before it tests either,
+    and both hash the name they leave, which reads on into NameHash when
+    its 24 bytes have no NUL."""
+    sc.tag("renames")
+    nonul = b"ABCDEFGHIJKLMNOPQRSTUVWX"
+    # The rename's hash of it: on through the old hash, to Width's 64.
+    h1 = hash_bytes(nonul + struct.pack("<I", bhash("NONUL")) + b"\x40\0")
+    sc.op(OP_NAMES, k)
+    sc.op(OP_NAMES, k2)
+    sc.rename(bhash("NOIMG"), b"RENAMED")
+    sc.op(OP_NAMES, k)
+    sc.rename(0x55555555, b"MISS")
+    sc.rename(bhash("NONUL"), nonul)
+    sc.op(OP_NAMES, k)
+    sc.op(OP_GTI, h1, 0, 0)
+    sc.rename(bhash("RENAMED"), b"NOIMG\0garbage")
+    sc.op(OP_GTI, bhash("RENAMED"), 0, 1)
+    sc.op(OP_GTI, bhash("NOIMG"), 0, 1)
+    sc.rename(bhash("DUP"), b"DUP_FIRST")
+    sc.op(OP_NAMES, k)
+    sc.op(OP_NAMES, k2)
+    sc.op(OP_DUMP)
+    # Across packs: the two lookups' order is the list's after.
+    sc.op(OP_SWAP, bhash("LOADED"), bhash("LOADED2"))
+    sc.op(OP_DUMP)
+    sc.op(OP_NAMES, k)
+    sc.op(OP_NAMES, k2)
+    sc.op(OP_SWAP, bhash("LOADED"), bhash("LOADED2"))
+    sc.op(OP_DUMP)
+    # A texture with itself; with no NUL, it is hashed twice, the second
+    # time on through the first's hash.
+    sc.op(OP_SWAP, bhash("LOADED2"), bhash("LOADED2"))
+    sc.op(OP_SWAP, h1, h1)
+    sc.op(OP_NAMES, k)
+    h2 = hash_bytes(nonul + struct.pack("<I", h1) + b"\x40\0")
+    h3 = hash_bytes(nonul + struct.pack("<I", h2) + b"\x40\0")
+    # The name with no NUL for one with: all 24 bytes go each way.
+    sc.op(OP_SWAP, h3, bhash("LOADED"))
+    sc.op(OP_NAMES, k)
+    # Misses: the other's lookup still runs, and moves its pack.
+    sc.op(OP_SWAP, bhash("LOADED"), 0x66666666)
+    sc.op(OP_DUMP)
+    sc.op(OP_SWAP, 0x66666666, bhash("LOADED2"))
+    sc.op(OP_DUMP)
+    sc.op(OP_SWAP, 0x66666666, 0x77777777)
+    sc.op(OP_SWAP, bhash("NOIMG2"), bhash("FAR"))
+    sc.op(OP_SWAP, bhash("DUP"), bhash("DUP_FIRST"))
+    sc.op(OP_NAMES, k)
+    sc.op(OP_NAMES, k2)
+    sc.op(OP_RECS, k)
+    sc.op(OP_RECS, k2)
+    sc.op(OP_DUMP)
+    sc.op(OP_LOAD, k, 1)
+    sc.op(OP_LOAD, k2, 1)
+    sc.op(OP_DUMP)
+
+
 def scenario_default(sc):
-    """Misses: the render targets, then the default, then bBreak."""
+    """Misses: the render targets, then the default, then bBreak; and the
+    render targets renamed and swapped."""
     sc.tag("default")
-    sc.op(OP_GTI, 0x11111111, 0)
-    sc.op(OP_GTI, 0x11111111, 1)
-    sc.op(OP_GTI, DEFAULT, 0)
-    sc.op(OP_GTI, DEFAULT, 1)
+    sc.op(OP_GTI, 0x11111111, 0, 0)
+    sc.op(OP_GTI, 0x11111111, 1, 0)
+    sc.op(OP_GTI, DEFAULT, 0, 0)
+    sc.op(OP_GTI, DEFAULT, 1, 0)
+    sc.op(OP_GTI, 0x11111111, 1, 1)
     sc.op(OP_DUMP)
     sc.op(OP_RTSET, 0x22222222)
     sc.op(OP_RTSET, DEFAULT)
-    sc.op(OP_GTI, 0x22222222, 1)
-    sc.op(OP_GTI, 0x22222222, 0)
-    sc.op(OP_GTI, 0x11111111, 1)
-    sc.op(OP_GTI, 0x11111111, 0)
+    sc.op(OP_GTI, 0x22222222, 1, 0)
+    sc.op(OP_GTI, 0x22222222, 0, 0)
+    sc.op(OP_GTI, 0x22222222, 0, 1)
+    sc.op(OP_GTI, 0x11111111, 1, 0)
+    sc.op(OP_GTI, 0x11111111, 0, 0)
+    sc.op(OP_GTI, 0x11111111, 1, 1)
+    sc.rename(0x22222222, b"RTNAME")
+    sc.op(OP_NAMES, -1)
+    sc.op(OP_SWAP, 0x22222222, DEFAULT)
+    sc.op(OP_NAMES, -1)
+    sc.op(OP_SWAP, 0x11111111, DEFAULT)
     k = sc.pack(b"DEFAULTS", [info_rec("X", hash_=DEFAULT, img=0, isize=4),
                               info_rec("RT", hash_=0x22222222, img=4,
                                        isize=4)], 64)
     sc.op(OP_LOAD, k, 0)
-    sc.op(OP_GTI, 0x11111111, 1)
-    sc.op(OP_GTI, 0x22222222, 1)
-    sc.op(OP_GTI, 0x33333333, 2)
-    sc.op(OP_GTI, 0, 1)
+    sc.op(OP_GTI, 0x11111111, 1, 0)
+    sc.op(OP_GTI, 0x22222222, 1, 0)
+    sc.op(OP_GTI, 0x33333333, 2, 0)
+    sc.op(OP_GTI, 0, 1, 0)
+    sc.op(OP_GTI, 0x11111111, 1, 1)
     sc.op(OP_DUMP)
+    sc.op(OP_SWAP, 0x22222222, DEFAULT)
+    sc.op(OP_NAMES, k)
+    sc.op(OP_NAMES, -1)
     sc.op(OP_LOAD, k, 1)
     sc.op(OP_DUMP)
 
@@ -558,23 +748,23 @@ def scenario_destruct(sc, a, b):
     sc.op(OP_DESTRUCT, 1, 2)
     sc.op(OP_DUMP)
     sc.op(OP_RECS, b)
-    sc.op(OP_GTI, bhash("SHARED"), 0)
-    sc.op(OP_GTI, bhash("OTHER"), 0)
+    sc.op(OP_GTI, bhash("SHARED"), 0, 0)
+    sc.op(OP_GTI, bhash("OTHER"), 0, 0)
     sc.op(OP_POKE, 0, 1, 1)
     sc.op(OP_LOAD, a, 1)
     sc.op(OP_DUMP)
     sc.op(OP_RECS, a)
-    sc.op(OP_GTI, bhash("ROAD"), 0)
+    sc.op(OP_GTI, bhash("ROAD"), 0, 0)
     sc.op(OP_GNTI, 0)
     # Loaded twice: the header keeps the second pack.
     sc.op(OP_LOAD, a, 0)
     sc.op(OP_LOAD, a, 0)
     sc.op(OP_HDRS)
     sc.op(OP_DUMP)
-    sc.op(OP_GTI, bhash("ROAD"), 0)
+    sc.op(OP_GTI, bhash("ROAD"), 0, 0)
     sc.op(OP_LOAD, a, 1)
     sc.op(OP_DUMP)
-    sc.op(OP_GTI, bhash("ROAD"), 0)
+    sc.op(OP_GTI, bhash("ROAD"), 0, 0)
     sc.op(OP_GNTI, 12)
     sc.op(OP_RECS, a)
 
@@ -672,6 +862,7 @@ def scenario_disc(sc):
     kinds = []
     hashes = []
     anims = []
+    swapped = []
     for rel in DISC_FILES:
         sc.tag("disc " + rel)
         for k, t in disc_chunks(sc, rel):
@@ -680,6 +871,8 @@ def scenario_disc(sc):
             kinds.append((k, t))
             if t == PACK_ID:
                 sc.op(OP_RECS, k)
+                if rel in GAMEFLOW_FILES:
+                    swapped.append(k)
             elif t == ANIM_ID:
                 sc.op(OP_ANIMS, k)
         hashes += disc_hashes(rel)
@@ -687,14 +880,29 @@ def scenario_disc(sc):
         sc.op(OP_DUMP)
     sc.tag("disc lookups")
     for h in hashes:
-        sc.op(OP_GTI, h, 0)
+        sc.op(OP_GTI, h, 0, 0)
+    for h in hashes[::7]:
+        sc.op(OP_GTI, h, 0, 1)
     for h in (0x12345678, 0, 0xffffffff):
-        sc.op(OP_GTI, h, 1)
+        sc.op(OP_GTI, h, 1, 0)
+        sc.op(OP_GTI, h, 1, 1)
     for n in (0, 1, 500, 1000, len(hashes) - 1, len(hashes)):
         sc.op(OP_GNTI, n)
     sc.op(OP_DUMP)
     for h in anims + [0x12345678]:
         sc.op(OP_GTA, h)
+    # The French and back, as the language toggle in ServiceGameFlow has it.
+    sc.tag("disc swaps")
+    for _ in range(2):
+        for a, b in GAMEFLOW_SWAPS:
+            sc.op(OP_SWAP, a, b)
+        for k in swapped:
+            sc.op(OP_NAMES, k)
+        for pair in GAMEFLOW_SWAPS:
+            for h in pair:
+                sc.op(OP_GTI, h, 0, 0)
+                sc.op(OP_GTI, h, 0, 1)
+        sc.op(OP_DUMP)
     sc.tag("disc flipbooks")
     anim_chunks = [k for k, t in kinds if t == ANIM_ID]
     for world, real in ((1, 1), (2, 3), (5, 8), (13, 21), (600, 601),
@@ -722,6 +930,8 @@ def script():
     scenario_names(sc)
     scenario_tables(sc)
     scenario_garbage(sc)
+    k, k2 = scenario_unloaded(sc)
+    scenario_renames(sc, k, k2)
     scenario_default(sc)
     scenario_flipbooks(sc)
     scenario_disc(sc)
@@ -731,7 +941,7 @@ def script():
 # ================================================================ the model
 
 
-class BigEmu(Emu):
+class BigEmu(retail_model.RetailEmu):
     RAM = 128 << 20
 
 
@@ -741,9 +951,14 @@ class Model(object):
         self.out = []
         e = self.e = BigEmu(ieee=True)
         self.fn = {k: e.addr_of(v) for k, v in SYM.items()}
-        for head in (TPL, TAPL):
+        (self.tpl, self.tapl, self.tweak_fps, self.world_frames,
+         self.real_frames, self.dirty) = (e.data(a) for a in (
+             TPL, TAPL, TWEAK_FPS, WORLD_FRAMES, REAL_FRAMES,
+             DIRTY_TEXTURES))
+        for head in (self.tpl, self.tapl):
             e.put32(head, head)
             e.put32(head + 4, head)
+        self.name_buf = e.alloc(64, 16)
         self.regions = []       # sorted by lo: (lo, base, size, name,
         self.starts = []        #   stride, end_ok, alloc)
         self.chunks = []        # per chunk: dict
@@ -777,9 +992,9 @@ class Model(object):
         a &= M32
         if a == 0:
             return "null"
-        if a == TPL:
+        if a == self.tpl:
             return "TPL"
-        if a == TAPL:
+        if a == self.tapl:
             return "TAPL"
         i = bisect.bisect_right(self.starts, a) - 1
         back = 0
@@ -794,7 +1009,7 @@ class Model(object):
                     return "%s.%d+%d" % (name, idx, rem)
                 if off == 0:
                     return name
-                if alloc and off == LTD_OFF:
+                if alloc and off == P_LTD:
                     return name + ".ltd"
                 return "%s+%d" % (name, off)
             i -= 1
@@ -817,14 +1032,7 @@ class Model(object):
             return e.reg[4 + i] & M32
 
         def malloc(em):
-            size, name = s32(arg(0)), self.cstr(arg(1))
-            p = e.alloc(size + 16, 16)
-            e.mem[p:p + size] = b"\xcd" * size
-            k = len(self.allocs)
-            self.allocs.append(p)
-            self.add_region(p, size, "a%d" % k, alloc=True)
-            self.emit("  malloc %s a%d" % (name, k))
-            return p
+            return self.block(s32(arg(0)), self.cstr(arg(1)))
 
         def free(em):
             self.emit("  free %s" % self.label(arg(0)))
@@ -845,7 +1053,7 @@ class Model(object):
             self.service[1] = n - 1
             self.emit("  sqf %d" % (n - 1))
             if n - 1 <= 0 and p is not None:
-                e.put32(p + 120, 0)
+                e.put32(p + P_CUR, 0)
             return 0
 
         e.stub("bMalloc__FiPCcii", malloc)
@@ -855,6 +1063,17 @@ class Model(object):
         e.stub("ServiceQueuedFiles__Fv", sqf)
         e.stub("bFunkCallASync__FPCcUcPCvl", lambda em: 0)
         e.stub("bRemoveCodeineInventory__Fi", lambda em: 0)
+
+    def block(self, size, name):
+        """bMalloc's: a fresh block filled with 0xcd."""
+        e = self.e
+        p = e.alloc(size + 16, 16)
+        e.mem[p:p + size] = b"\xcd" * size
+        k = len(self.allocs)
+        self.allocs.append(p)
+        self.add_region(p, size, "a%d" % k, alloc=True)
+        self.emit("  malloc %s a%d" % (name, k))
+        return p
 
     def call(self, name, *args):
         # The EE keeps a 32-bit value sign-extended in its register.
@@ -872,17 +1091,17 @@ class Model(object):
         k = len(self.chunks)
         recs = self.recs
         tsize = 164 * len(recs) + extra
-        total = 8 + 28 + 8 + tsize + 8 + blob
+        total = 8 + 8 + HDR_SIZE + 8 + tsize + 8 + blob
         c = self.place(total, mis)
         e.write(c, struct.pack("<II", PACK_ID, total - 8))
-        e.write(c + 8, struct.pack("<II", 0x30300002, 20) + self.name
+        e.write(c + 8, struct.pack("<II", 0x30300002, HDR_SIZE) + self.name
                 + struct.pack("<I", ptr))
-        t = c + 36
+        t = c + 16 + HDR_SIZE
         e.write(t, struct.pack("<II", 0x30300003, tsize))
         e.write(t + 8, b"".join(recs) + b"\x77" * extra)
         d = t + 8 + tsize
         e.write(d, struct.pack("<II", 0x30300004, blob))
-        self.add_region(c + 16, 20, "h%d" % k)
+        self.add_region(c + 16, HDR_SIZE, "h%d" % k)
         self.add_region(t + 8, 164 * len(recs), "t%d" % k, 164, True,
                         MARGIN * 164)
         self.add_region(d + 8, blob + SLACK, "d%d" % k, 0, True)
@@ -933,32 +1152,35 @@ class Model(object):
 
     def dump(self):
         e, L = self.e, self.label
-        packs = self.walk(TPL)
+        packs = self.walk(self.tpl)
         self.emit("  packs%s tail %s" % ("".join(" " + L(p) for p in packs),
-                                           L(e.u32(TPL + 4))))
+                                           L(e.u32(self.tpl + 4))))
         for p in packs:
-            ltd = self.walk(p + LTD_OFF)
-            self.emit("  pack %s prev %s name %s hash %08x inv %08x info %s "
-                      "num %d free %d pos %d cur %s nyl %d pool %d ltd %s"
+            ltd = self.walk(p + P_LTD)
+            self.emit("  pack %s prev %s name %s file %s hash %08x inv %08x "
+                      "info %s num %d free %d pos %d cur %s nyl %d pool %d "
+                      "ltd %s"
                       % (L(p), L(e.u32(p + 4)),
-                         self.cstr(p + 8, 32).encode("latin-1").hex() or "-",
-                         e.u32(p + 88), e.u32(p + 92), L(e.u32(p + 96)),
-                         s32(e.u32(p + 100)), s32(e.u32(p + 104)),
-                         s32(e.u32(p + 108)), L(e.u32(p + 120)),
-                         s32(e.u32(p + 124)), s32(e.u32(p + 128)),
+                         bytes(e.mem[p + P_NAME:p + P_FILE]).hex(),
+                         bytes(e.mem[p + P_FILE:p + P_HASH]).hex(),
+                         e.u32(p + P_HASH), e.u32(p + P_INV),
+                         L(e.u32(p + P_INFO)), s32(e.u32(p + P_NUM)),
+                         s32(e.u32(p + P_FREE)), s32(e.u32(p + P_POS)),
+                         L(e.u32(p + P_CUR)), s32(e.u32(p + P_NYL)),
+                         s32(e.u32(p + P_POOL)),
                          " ".join(L(n) for n in ltd) or "-"))
-        aps = self.walk(TAPL)
+        aps = self.walk(self.tapl)
         self.emit("  apacks%s tail %s" % ("".join(" " + L(p) for p in aps),
-                                            L(e.u32(TAPL + 4))))
+                                            L(e.u32(self.tapl + 4))))
         for p in aps:
             self.emit("  apack %s prev %s anims %s ents %s na %d ne %d"
                       % (L(p), L(e.u32(p + 4)), L(e.u32(p + 8)),
                          L(e.u32(p + 12)), s32(e.u32(p + 16)),
                          s32(e.u32(p + 20))))
         # Cleared, so the next dump shows whether anything set it again.
-        self.emit("  dirty %d breaks %d" % (s32(e.u32(DIRTY_TEXTURES)),
+        self.emit("  dirty %d breaks %d" % (s32(e.u32(self.dirty)),
                                              self.breaks))
-        e.put32(DIRTY_TEXTURES, 0)
+        e.put32(self.dirty, 0)
 
     def dump_recs(self, k):
         e, L = self.e, self.label
@@ -993,12 +1215,25 @@ class Model(object):
         e, L = self.e, self.label
         for k, c in enumerate(self.chunks):
             if c["kind"] == "pack":
-                self.emit("  h%d %s" % (k, L(e.u32(c["p"] + 32))))
+                self.emit("  h%d %s" % (k, L(e.u32(c["p"] + 16 + HDR_PTR))))
             elif c["kind"] == "anim":
                 self.emit("  h%d v%d %s %08x %08x"
                           % (k, s32(e.u32(c["p"] + 16)),
                              L(e.u32(c["p"] + 20)), e.u32(c["p"] + 24),
                              e.u32(c["p"] + 28)))
+
+    def dump_names(self, k):
+        e = self.e
+        if k < 0:
+            recs = [("rt.%d" % i, self.rt_infos + 164 * i)
+                    for i in range(len(self.rts))]
+        else:
+            c = self.chunks[k]
+            recs = [("n%d.%d" % (k, i), c["t"] + 164 * i)
+                    for i in range(c["n"])]
+        for name, r in recs:
+            self.emit("  %s %08x %s" % (name, e.u32(r + 32),
+                                        bytes(e.mem[r + 8:r + 32]).hex()))
 
     # ---- the run ---------------------------------------------------------
 
@@ -1009,7 +1244,7 @@ class Model(object):
             if code == OP_TAG:
                 self.emit("[%s]" % sc.tags[a[0]])
             elif code == OP_NAME:
-                self.name = struct.pack("<4I", *[w & M32 for w in a])
+                self.name = struct.pack("<20I", *[w & M32 for w in a])
             elif code == OP_REC:
                 self.recs.append(struct.pack("<41I", *[w & M32 for w in a]))
             elif code == OP_PACK:
@@ -1029,9 +1264,9 @@ class Model(object):
                 self.emit("  %s c%d ret %d" % ("unload" if a[1] else "load",
                                                a[0], r))
             elif code == OP_GTI:
-                r = self.call("gti", a[0] & M32, a[1])
-                self.emit("  gti %08x %d %s" % (a[0] & M32, a[1],
-                                                self.label(r)))
+                r = self.call("gti", a[0] & M32, a[1], a[2])
+                self.emit("  gti %08x %d %d %s" % (a[0] & M32, a[1], a[2],
+                                                   self.label(r)))
             elif code == OP_GNTI:
                 r = self.call("gnti", a[0])
                 self.emit("  gnti %d %s" % (a[0], self.label(r)))
@@ -1054,13 +1289,13 @@ class Model(object):
                 self.service[0] = p
                 self.call("destruct", p, a[1])
                 self.emit("  destruct a%d %d info %s"
-                          % (a[0], a[1], self.label(e.u32(p + 96))))
+                          % (a[0], a[1], self.label(e.u32(p + P_INFO))))
             elif code == OP_POKE:
                 p = self.allocs[a[0]]
                 if a[1] == 0:
-                    e.put32(p + 104, a[2])
+                    e.put32(p + P_FREE, a[2])
                 else:
-                    e.put32(p + 120, 0x1234 if a[2] else 0)
+                    e.put32(p + P_CUR, 0x1234 if a[2] else 0)
                     self.service = [p, a[2]]
             elif code == OP_LTD:
                 p = self.allocs[a[0]]
@@ -1074,7 +1309,7 @@ class Model(object):
                     self.add_region(b, 16, "B%d" % len(self.bufs))
                     self.bufs.append(b)
                     e.put32(n + 24, b)
-                head = p + LTD_OFF
+                head = p + P_LTD
                 last = e.u32(head + 4)
                 e.put32(last, n)
                 e.put32(head + 4, n)
@@ -1083,9 +1318,9 @@ class Model(object):
             elif code == OP_RTSET:
                 self.rts.append(a[0] & M32)
             elif code == OP_UPDATE:
-                e.put32(WORLD_FRAMES, a[0])
-                e.put32(REAL_FRAMES, a[1])
-                e.put32(TWEAK_FPS, a[2])
+                e.put32(self.world_frames, a[0])
+                e.put32(self.real_frames, a[1])
+                e.put32(self.tweak_fps, a[2])
                 self.call("update")
                 self.emit("  update %d %d %d" % tuple(a))
             elif code == OP_GTA:
@@ -1102,6 +1337,23 @@ class Model(object):
                 e.put32(r + (56 if a[2] == 0 else 60), a[3])
             elif code == OP_HDRS:
                 self.dump_hdrs()
+            elif code == OP_RENAME:
+                e.write(self.name_buf,
+                        struct.pack("<6I", *[w & M32 for w in a[1:]]))
+                r = self.call("rename", a[0] & M32, self.name_buf)
+                self.emit("  rename %08x ret %d" % (a[0] & M32, s32(r)))
+            elif code == OP_SWAP:
+                r = self.call("swap", a[0] & M32, a[1] & M32)
+                self.emit("  swap %08x %08x ret %d" % (a[0] & M32, a[1] & M32,
+                                                       s32(r)))
+            elif code == OP_NAMES:
+                self.dump_names(a[0])
+            elif code == OP_CONSTRUCT:
+                e.write(self.name_buf,
+                        struct.pack("<16I", *[w & M32 for w in a]))
+                p = self.block(148, "TexturePack")
+                self.call("construct", p, self.name_buf, 0)
+                self.emit("  construct %s" % self.label(p))
             else:
                 raise ValueError("op %d" % code)
         self.call("maybe")
@@ -1154,6 +1406,12 @@ MUTATIONS = [
      "(int32_t)(bchunk_u32(table + 4)\n                                / (uint32_t)sizeof(TextureInfo))",
      "(int32_t)((bchunk_u32(table + 4) + (uint32_t)sizeof(TextureInfo) - 1)\n                                / (uint32_t)sizeof(TextureInfo))"),
     ("load_no_header_ptr", TPC, "        h->pTexturePack = p;\n", ""),
+    ("load_no_filename", TPC,
+     "texturepack_construct(p, h->Name, h->Filename);",
+     "texturepack_construct(p, h->Name, NULL);"),
+    ("load_filename_empty", TPC,
+     "texturepack_construct(p, h->Name, h->Filename);",
+     'texturepack_construct(p, h->Name, "");'),
     ("load_assign_pos1", TPC,
      "texturepack_assign_texture_data(p, data, 0, size);",
      "texturepack_assign_texture_data(p, data, 1, size);"),
@@ -1183,16 +1441,40 @@ MUTATIONS = [
      "            texturepack_destruct(h->pTexturePack, 3);\n",
      "            texturepack_destruct(h->pTexturePack, 3);\n        h->pTexturePack = NULL;\n"),
     # The constructor and destructor.
-    ("ctor_name_15", TPC, "i < (int)sizeof p->Name - 1; i++)",
-     "i < 15; i++)"),
+    ("ctor_name_15", TPC,
+     "    for (i = 0; name[i] != 0 && i < (int)sizeof run - 1; i++)",
+     "    for (i = 0; name[i] != 0 && i < 15; i++)"),
+    # The demo's: a copy of at most 31 characters.
+    ("ctor_name_31", TPC,
+     "    for (i = 0; name[i] != 0 && i < (int)sizeof run - 1; i++)",
+     "    for (i = 0; name[i] != 0 && i < (int)sizeof p->Name - 1; i++)"),
+    ("ctor_filename_63", TPC,
+     "        for (i = 0; filename[i] != 0 && f + i < run + sizeof run - 1; i++)",
+     "        for (i = 0; filename[i] != 0 && i < (int)sizeof p->Filename - 1; i++)"),
+    ("ctor_filename_not_emptied", TPC, "    run[sizeof p->Name] = 0;\n", ""),
+    ("ctor_filename_no_nul", TPC,
+     "            f[i] = filename[i];\n        f[i] = 0;\n",
+     "            f[i] = filename[i];\n"),
+    ("ctor_filename_skipped", TPC, "    if (filename != NULL) {",
+     "    if (0) {"),
+    ("ctor_filename_not_stored", TPC,
+     "    memcpy(p->Filename, run + sizeof p->Name, sizeof p->Filename);\n",
+     ""),
+    ("ctor_name_zeroed", TPC,
+     "    memcpy(run, p->Name, sizeof p->Name + sizeof p->Filename);",
+     "    memset(run, 0, sizeof run);"),
+    ("ctor_inv_of_given", TPC, '"TexturePack,%s", p->Name);',
+     '"TexturePack,%s", name);'),
     ("ctor_pool_0", TPC, "    p->MemoryPool = 64;", "    p->MemoryPool = 0;"),
     ("ctor_no_nyl", TPC, "    p->NumNotYetLoadedTextureDatas = 0;\n", ""),
     ("ctor_link_head", TPC,
      "    link_tail(&TexturePackList, &p->Node);",
      "    p->Node.next = TexturePackList.next;\n    p->Node.prev = &TexturePackList;\n    TexturePackList.next->prev = &p->Node;\n    TexturePackList.next = &p->Node;"),
     ("ctor_inv_format", TPC, '"TexturePack,%s"', '"TexturePack%s"'),
-    ("ctor_hash_of_given", TPC, "    p->NameHash = bchunk_hash(p->Name);",
+    ("ctor_hash_of_given", TPC, "    p->NameHash = bchunk_hash(run);",
      "    p->NameHash = bchunk_hash(name);"),
+    ("ctor_hash_of_filename", TPC, "    p->NameHash = bchunk_hash(run);",
+     "    p->NameHash = bchunk_hash(run + sizeof p->Name);"),
     ("dtor_no_wait", TPC,
      "    while (p->CurrentLoadingTextureData != NULL\n           && gServiceQueuedFilesFn != NULL)\n        gServiceQueuedFilesFn();\n",
      ""),
@@ -1216,16 +1498,16 @@ MUTATIONS = [
      "    if (flags & 2)\n        bFree(p);\n}\n\nvoid texturepack_attach"),
     ("dtor_no_unlink", TPC,
      "    list_unlink(&p->Node);\n    // bRemoveCodeineInventory", "    // bRemoveCodeineInventory"),
-    # AttachTextureTable.
-    ("attach_no_lookup", TPC, "        (void)GetTextureInfo(t->NameHash, 0);\n",
-     ""),
-    ("attach_lookup_default", TPC, "(void)GetTextureInfo(t->NameHash, 0);",
-     "(void)GetTextureInfo(t->NameHash, 1);"),
+    # AttachTextureTable. The demo's asked for each record, and dropped the
+    # answer.
+    ("attach_demo_lookup", TPC,
+     "    for (n = num; n > 0; n--, t++) {\n        if (t->ImageParentHash != 0)",
+     "    for (n = num; n > 0; n--, t++) {\n        (void)GetTextureInfo(t->NameHash, 0, 0);\n        if (t->ImageParentHash != 0)"),
     ("attach_self_null", TPC, "            t->pImageParent = t;",
      "            t->pImageParent = NULL;"),
     ("attach_parent_global", TPC,
      "t->pImageParent = texturepack_get_texture(p, t->ImageParentHash);",
-     "t->pImageParent = GetTextureInfo(t->ImageParentHash, 0);"),
+     "t->pImageParent = GetTextureInfo(t->ImageParentHash, 0, 1);"),
     ("attach_keep_image", TPC, "        t->ImageData = NULL;\n", ""),
     ("attach_keep_palette", TPC, "        t->PaletteData = NULL;\n", ""),
     ("attach_keep_active", TPC, "        t->pActiveTexture = NULL;\n", ""),
@@ -1236,8 +1518,8 @@ MUTATIONS = [
     ("attach_no_dirty", TPC, "    }\n    eDirtyTextures = 1;\n}\n\nvoid texturepack_assign",
      "    }\n}\n\nvoid texturepack_assign"),
     ("attach_num_after", TPC,
-     "    p->pTextureInfo = table;\n    p->NumTextures = num;\n    for (n = num; n > 0; n--, t++) {",
-     "    p->pTextureInfo = table;\n    p->NumTextures = 0;\n    for (n = num; n > 0; n--, t++) {"),
+     "    p->pTextureInfo = table;\n    p->NumTextures = num;\n",
+     "    p->pTextureInfo = table;\n    p->NumTextures = 0;\n"),
     # AssignTextureData and UnAssignTextureData.
     ("assign_gt_pos", TPC,
      "        if (t->ImageSize != 0 && t->ImagePlacement >= pos\n            && t->ImagePlacement < end)\n            t->ImageData = data",
@@ -1311,8 +1593,27 @@ MUTATIONS = [
      "    t = gERenderTargetTextureInfoFn != NULL\n        ? gERenderTargetTextureInfoFn(hash) : NULL;",
      "    t = NULL;"),
     ("gti_rt_after_default", TPC,
-     "    if (t != NULL)\n        return t;\n    if (!use_default)\n        return NULL;\n    t = GetTextureInfo(DEFAULT_TEXTURE_HASH, 0);",
-     "    if (t != NULL && !use_default)\n        return t;\n    if (!use_default)\n        return NULL;\n    t = GetTextureInfo(DEFAULT_TEXTURE_HASH, 0);"),
+     "    if (t != NULL)\n        return t;\n    if (!use_default)\n        return NULL;\n    t = GetTextureInfo(DEFAULT_TEXTURE_HASH, 0, 0);",
+     "    if (t != NULL && !use_default)\n        return t;\n    if (!use_default)\n        return NULL;\n    t = GetTextureInfo(DEFAULT_TEXTURE_HASH, 0, 0);"),
+    # Retail's third argument.
+    ("gti_unloaded_inverted", TPC,
+     "        t = include_unloaded ? texturepack_get_texture(p, hash)\n                             : texturepack_get_loaded_texture(p, hash);",
+     "        t = include_unloaded ? texturepack_get_loaded_texture(p, hash)\n                             : texturepack_get_texture(p, hash);"),
+    ("gti_unloaded_never", TPC,
+     "        t = include_unloaded ? texturepack_get_texture(p, hash)\n                             : texturepack_get_loaded_texture(p, hash);",
+     "        t = texturepack_get_loaded_texture(p, hash);"),
+    ("gti_unloaded_always", TPC,
+     "        t = include_unloaded ? texturepack_get_texture(p, hash)\n                             : texturepack_get_loaded_texture(p, hash);",
+     "        t = texturepack_get_texture(p, hash);"),
+    ("gti_unloaded_is_1", TPC,
+     "        t = include_unloaded ? texturepack_get_texture(p, hash)",
+     "        t = include_unloaded == 1 ? texturepack_get_texture(p, hash)"),
+    ("gti_default_passes_unloaded", TPC,
+     "    t = GetTextureInfo(DEFAULT_TEXTURE_HASH, 0, 0);",
+     "    t = GetTextureInfo(DEFAULT_TEXTURE_HASH, 0, include_unloaded);"),
+    ("gti_default_unloaded", TPC,
+     "    t = GetTextureInfo(DEFAULT_TEXTURE_HASH, 0, 0);",
+     "    t = GetTextureInfo(DEFAULT_TEXTURE_HASH, 0, 1);"),
     ("gti_ignore_default", TPC, "    if (!use_default)\n        return NULL;\n",
      ""),
     ("gti_default_hash", TPC, "#define DEFAULT_TEXTURE_HASH    0x19006835u",
@@ -1339,8 +1640,11 @@ MUTATIONS = [
      "                valid = 0;\n                e->pTextureInfo = NULL;\n                e->OriginalImageData = NULL;\n                e->OriginalPaletteData = NULL;",
      "                valid = 0;"),
     ("init_default", TPC,
-     "            TextureInfo *t = GetTextureInfo(e->NameHash, 0);",
-     "            TextureInfo *t = GetTextureInfo(e->NameHash, 1);"),
+     "            TextureInfo *t = GetTextureInfo(e->NameHash, 0, 0);",
+     "            TextureInfo *t = GetTextureInfo(e->NameHash, 1, 0);"),
+    ("init_unloaded", TPC,
+     "            TextureInfo *t = GetTextureInfo(e->NameHash, 0, 0);",
+     "            TextureInfo *t = GetTextureInfo(e->NameHash, 0, 1);"),
     ("init_pal_from_image", TPC,
      "                e->OriginalPaletteData = t->PaletteData;",
      "                e->OriginalPaletteData = t->ImageData;"),
@@ -1384,13 +1688,62 @@ MUTATIONS = [
     ("gta_first_pack_only", TPC,
      "                return &p->TextureAnimTable[i];\n        }\n    }\n    return NULL;",
      "                return &p->TextureAnimTable[i];\n        }\n        break;\n    }\n    return NULL;"),
+    # The rename and the swap, retail's.
+    ("rename_loaded_only", TPC,
+     "    TextureInfo *t = GetTextureInfo(hash, 0, 1);",
+     "    TextureInfo *t = GetTextureInfo(hash, 0, 0);"),
+    ("rename_default", TPC,
+     "    TextureInfo *t = GetTextureInfo(hash, 0, 1);",
+     "    TextureInfo *t = GetTextureInfo(hash, 1, 1);"),
+    ("rename_23", TPC,
+     "    memcpy(t->DebugName, name, sizeof t->DebugName);",
+     "    memcpy(t->DebugName, name, sizeof t->DebugName - 1);"),
+    ("rename_strcpy", TPC,
+     "    memcpy(t->DebugName, name, sizeof t->DebugName);",
+     "    strncpy(t->DebugName, name, sizeof t->DebugName);"),
+    ("rename_no_rehash", TPC,
+     "    memcpy(t->DebugName, name, sizeof t->DebugName);\n    t->NameHash = bchunk_hash(t->DebugName);\n",
+     "    memcpy(t->DebugName, name, sizeof t->DebugName);\n"),
+    ("rename_hash_given", TPC,
+     "    t->NameHash = bchunk_hash(t->DebugName);\n    return 1;",
+     "    t->NameHash = bchunk_hash(name);\n    return 1;"),
+    ("rename_ret_0", TPC,
+     "    t->NameHash = bchunk_hash(t->DebugName);\n    return 1;",
+     "    t->NameHash = bchunk_hash(t->DebugName);\n    return 0;"),
+    ("swap_x_loaded_only", TPC,
+     "    TextureInfo *x = GetTextureInfo(a, 0, 1);",
+     "    TextureInfo *x = GetTextureInfo(a, 0, 0);"),
+    ("swap_y_loaded_only", TPC,
+     "    TextureInfo *y = GetTextureInfo(b, 0, 1);",
+     "    TextureInfo *y = GetTextureInfo(b, 0, 0);"),
+    ("swap_lookups_reversed", TPC,
+     "    TextureInfo *x = GetTextureInfo(a, 0, 1);\n    TextureInfo *y = GetTextureInfo(b, 0, 1);",
+     "    TextureInfo *y = GetTextureInfo(b, 0, 1);\n    TextureInfo *x = GetTextureInfo(a, 0, 1);"),
+    ("swap_x_first", TPC,
+     "    TextureInfo *y = GetTextureInfo(b, 0, 1);\n    char name[sizeof x->DebugName];",
+     "    TextureInfo *y = x != NULL ? GetTextureInfo(b, 0, 1) : NULL;\n    char name[sizeof x->DebugName];"),
+    ("swap_x_test_only", TPC, "    if (x == NULL || y == NULL)\n        return 0;\n    memcpy(name,",
+     "    if (x == NULL)\n        return 0;\n    memcpy(name,"),
+    ("swap_x_overwritten_first", TPC,
+     "    memcpy(name, x->DebugName, sizeof name);\n    // The two can be one texture.\n    memmove(x->DebugName, y->DebugName, sizeof name);",
+     "    memmove(x->DebugName, y->DebugName, sizeof name);\n    memcpy(name, x->DebugName, sizeof name);"),
+    ("swap_23", TPC,
+     "    memmove(x->DebugName, y->DebugName, sizeof name);",
+     "    memmove(x->DebugName, y->DebugName, sizeof name - 1);"),
+    ("swap_no_rehash_x", TPC,
+     "    x->NameHash = bchunk_hash(x->DebugName);\n", ""),
+    ("swap_no_rehash_y", TPC,
+     "    y->NameHash = bchunk_hash(y->DebugName);\n", ""),
+    ("swap_y_hash_of_x", TPC,
+     "    y->NameHash = bchunk_hash(y->DebugName);\n    return 1;",
+     "    y->NameHash = bchunk_hash(x->DebugName);\n    return 1;"),
+    ("swap_ret_0", TPC,
+     "    y->NameHash = bchunk_hash(y->DebugName);\n    return 1;",
+     "    y->NameHash = bchunk_hash(y->DebugName);\n    return 0;"),
 ]
 
 # Mutations that survive because they change nothing the image can tell.
 EQUIVALENT = {
-    # The hash of the name as given, not of the copy: the same string, for
-    # no name the loader is given runs past the copy's 31 characters.
-    "ctor_hash_of_given",
     # 1.0f / 60.0f is 0x3c888889, the image's constant, to the bit.
     "upd_spf_exact",
 }

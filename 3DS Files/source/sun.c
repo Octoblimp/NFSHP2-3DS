@@ -60,7 +60,7 @@ void SunTrackLoader(void)
     int i;
 
     for (i = 0; i < NUM_SUN_TEXTURES; i++) {
-        SunTextures[i] = GetTextureInfo(kSunTextureHashes[i], 1);
+        SunTextures[i] = GetTextureInfo(kSunTextureHashes[i], 1, 0);
     }
     // The image does not check them. A name that no pack has is given the
     // default, and it is the default that gets order 7. Only with no

@@ -149,6 +149,11 @@ demo's. Two checkers have it so far:
 so its retail pass rewrote the model to retail's disassembly and added a
 scenario over retail `TRACKB12`'s and `TRACKB21`'s own routes and signs.
 
+`texturepack_check.py` moved wholly onto the retail image, since retail
+changed the constructor, the lookup and the header the loader reads.
+Its disc scenario runs the twelve texture files of retail's TRACKB12 and
+TRACKB21 races.
+
 ## The data
 
 406 directory entries to the demo's 223. The retail disc lays three files
@@ -222,3 +227,11 @@ What the port has taken on so far:
   bit 2, which the constructor clears and nothing reads. HeapSort differs
   only in its bMalloc line number, 1156 for 1148. `TrackRoute` itself is
   unchanged. See `formats/track-route.md`, "Retail".
+- **TexturePackHeader** is 84 bytes, the demo's 20: a 64-byte file name
+  (`Global\HudTextures.tpk`) sits between the name and the pointer.
+  `TexturePack` is 148 bytes, the demo's 132, and keeps the file name at
+  40. GetTextureInfo takes a third argument, which looks among unloaded
+  records too. AttachTextureTable no longer looks each record up. Retail
+  adds a rename (`0x001ac4d8`) and a swap of two names (`0x001ac548`),
+  which ServiceGameFlow uses to put DYNTEX's French loading screen and
+  logo in for the English ones. See `formats/texture-pack.md`, "Retail".

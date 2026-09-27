@@ -2136,6 +2136,14 @@ phases.
         retail, with a scenario over retail TRACKB12's and TRACKB21's
         routes and signs.
 
+        **The fourth slice is closed: the texture pack's retail pass.**
+        The header is 84 bytes, with a 64-byte file name, and the pack
+        148. GetTextureInfo takes a third argument, AttachTextureTable no
+        longer looks each record up, and retail's rename and swap of
+        texture names are ported. `texturepack_check` runs on the retail
+        image over twelve retail texture files: 131 of 132 mutations
+        caught, 1 equivalent.
+
         The rest is CONTINUE.md's "The road to the full game": the rest
         of the retail data in the viewer (step 4), the retail pass over
         what is ported (step 10), the full frontend (step 16), the saves

@@ -3,8 +3,16 @@
 // the loader that feeds it, LoaderTexturePack and UnloaderTexturePack
 // (0x00100830 .. 0x00100a60), slot 2 of both chunk tables.
 //
+// The port follows retail (SLES_507.31), which changed the object: the
+// header carries the pack's file name and TexturePack keeps it, every
+// field past the name 16 bytes on; AttachTextureTable no longer looks each
+// record up; GetTextureInfo takes a third argument, to look in records
+// whose pixels are not loaded; and two new functions rename a texture and
+// swap two textures' names. Each function below gives both addresses.
+// docs/formats/texture-pack.md, "Retail", has the reading.
+//
 // A 0xb0300001 chunk is a texture pack: a 0x30300002 TexturePackHeader
-// (its name, and where the loader leaves the pack), the 0x30300003
+// (its name and file name, and where the loader leaves the pack), the 0x30300003
 // table of TextureInfo records, and the 0x30300004 blob of pixels and
 // palettes, whose offsets count from its payload rounded up to 128. The
 // loader makes a TexturePack, attaches the table and points each
@@ -114,29 +122,34 @@ typedef struct LoadedTextureData {
     int32_t   CallbackParam;                //  40
 } LoadedTextureData;                        //  44
 
-// TexturePack, 132 bytes. Filename is the streaming half's; the
-// constructor leaves it as the heap had it.
+// TexturePack, 148 bytes in retail, the demo's 132. Retail's Filename is
+// 64 bytes, the demo's 48, and the constructor fills it from the header;
+// the demo's left it as the heap had it. Every field after it is 16 bytes
+// on from the demo's.
 typedef struct TexturePack {
     bNode        Node;                          //   0
     char         Name[32];                      //   8
-    char         Filename[48];                  //  40
-    uint32_t     NameHash;                      //  88
-    int32_t      InventoryHandle;               //  92
-    TextureInfo *pTextureInfo;                  //  96
-    int32_t      NumTextures;                   // 100
-    int32_t      pTextureInfoNeedsToBeFreed;    // 104
-    int32_t      TextureDataFilePos;            // 108
-    bNode        LoadedTextureDataList;         // 112
-    LoadedTextureData *CurrentLoadingTextureData;  // 120
-    int32_t      NumNotYetLoadedTextureDatas;   // 124
-    int32_t      MemoryPool;                    // 128
-} TexturePack;                                  // 132
+    char         Filename[64];                  //  40
+    uint32_t     NameHash;                      // 104
+    int32_t      InventoryHandle;               // 108
+    TextureInfo *pTextureInfo;                  // 112
+    int32_t      NumTextures;                   // 116
+    int32_t      pTextureInfoNeedsToBeFreed;    // 120
+    int32_t      TextureDataFilePos;            // 124
+    bNode        LoadedTextureDataList;         // 128
+    LoadedTextureData *CurrentLoadingTextureData;  // 136
+    int32_t      NumNotYetLoadedTextureDatas;   // 140
+    int32_t      MemoryPool;                    // 144
+} TexturePack;                                  // 148
 
-// TexturePackHeader, 20 bytes: the 0x30300002 payload.
+// TexturePackHeader, 84 bytes in retail: the 0x30300002 payload. Retail
+// put the pack's file name, "Global\FrontEndTextures.tpk" and the like,
+// between the name and the pointer; the demo's header is 20 bytes.
 typedef struct TexturePackHeader {
     char         Name[16];                  //   0
-    TexturePack *pTexturePack;              //  16
-} TexturePackHeader;                        //  20
+    char         Filename[64];              //  16
+    TexturePack *pTexturePack;              //  80
+} TexturePackHeader;                        //  84
 
 // TextureAnimEntry, 16 bytes: one frame, and the pixels and palette its
 // texture had when the flipbook was made.
@@ -187,11 +200,14 @@ typedef char texturepack_layout_check[
      && offsetof(TextureInfo, ScrollSpeedS) == 124
      && offsetof(TextureInfo, pTexturePack) == 136
      && offsetof(TextureInfo, PaletteVramAddress) == 160
-     && sizeof(LoadedTextureData) == 44 && sizeof(TexturePack) == 132
-     && offsetof(TexturePack, NameHash) == 88
-     && offsetof(TexturePack, LoadedTextureDataList) == 112
-     && offsetof(TexturePack, MemoryPool) == 128
-     && sizeof(TexturePackHeader) == 20 && sizeof(TextureAnimEntry) == 16
+     && sizeof(LoadedTextureData) == 44 && sizeof(TexturePack) == 148
+     && offsetof(TexturePack, Filename) == 40
+     && offsetof(TexturePack, NameHash) == 104
+     && offsetof(TexturePack, LoadedTextureDataList) == 128
+     && offsetof(TexturePack, MemoryPool) == 144
+     && sizeof(TexturePackHeader) == 84
+     && offsetof(TexturePackHeader, pTexturePack) == 80
+     && sizeof(TextureAnimEntry) == 16
      && sizeof(TextureAnim) == 52
      && offsetof(TextureAnim, TextureAnimTable) == 40
      && sizeof(TextureAnimPack) == 24
@@ -199,100 +215,126 @@ typedef char texturepack_layout_check[
 #endif
 
 // TexturePackList and TextureAnimPackList, 0x00323e98 and 0x00323ea0
-// (gp-19800 and gp-19792). Each starts empty, pointing at itself.
+// (gp-19800 and gp-19792; retail 0x00330e28 and 0x00330e30). Each starts
+// empty, pointing at itself.
 extern bNode TexturePackList;
 extern bNode TextureAnimPackList;
 
-// TweakFPS, 0x00323ea8 (gp-19784): a frame rate for every flipbook in
-// place of its own, when not 0.
+// TweakFPS, 0x00323ea8 (gp-19784; retail 0x00330e38): a frame rate for
+// every flipbook in place of its own, when not 0.
 extern int32_t TweakFPS;
 
-// How many times GetTextureInfo has reached bBreak (0x00238888): a
-// texture that is nowhere, not even the default.
+// How many times GetTextureInfo has reached bBreak (0x00238888, retail
+// 0x00250ab0): a texture that is nowhere, not even the default.
 extern int32_t texturepack_breaks;
 
 // The seams.
 extern TextureInfo *(*gERenderTargetTextureInfoFn)(uint32_t name_hash);
 extern void (*gServiceQueuedFilesFn)(void);
 
-// LoaderTexturePack(bChunk *), 0x00100830, and UnloaderTexturePack,
-// 0x001009e0. Each takes a 0xb0300001 or 0xb0300100 chunk and returns 1,
-// and returns 0 for any other.
+// LoaderTexturePack(bChunk *), 0x00100830 (retail 0x00100820), and
+// UnloaderTexturePack, 0x001009e0 (retail 0x001009d0). Each takes a
+// 0xb0300001 or 0xb0300100 chunk and returns 1, and returns 0 for any
+// other.
 int loader_texture_pack(uint8_t *chunk);
 int unloader_texture_pack(uint8_t *chunk);
 
-// TexturePack::TexturePack(const char *), 0x001a1ae8: the name, its
-// hash, the debugger's handle, and the pack at the list's tail.
-TexturePack *texturepack_construct(TexturePack *p, const char *name);
+// TexturePack::TexturePack, 0x001a1ae8, retail's (const char *, const
+// char *) at 0x001ac0a8: the name, the file name when there is one, the
+// name's hash, the debugger's handle, and the pack at the list's tail.
+TexturePack *texturepack_construct(TexturePack *p, const char *name,
+                                   const char *filename);
 
-// TexturePack::~TexturePack, 0x001a1b98: off the list, and its
-// LoadedTextureData freed; with bit 0 of `flags`, the pack too. Its
-// records keep what they point at.
+// TexturePack::~TexturePack, 0x001a1b98 (retail 0x001ac178): off the
+// list, and its LoadedTextureData freed; with bit 0 of `flags`, the pack
+// too. Its records keep what they point at.
 void texturepack_destruct(TexturePack *p, int32_t flags);
 
-// AttachTextureTable(TextureInfo *, int), 0x001a1c40: the pack's
-// records, each with its pack and its image parent, and its pixels,
-// palette, active textures and VRAM addresses cleared.
+// AttachTextureTable(TextureInfo *, int), 0x001a1c40 (retail 0x001ac220):
+// the pack's records, each with its pack and its image parent, and its
+// pixels, palette, active textures and VRAM addresses cleared.
 void texturepack_attach_texture_table(TexturePack *p, TextureInfo *table,
                                       int32_t num);
 
-// AssignTextureData(char *, int, int), 0x001a1cd8, and
-// UnAssignTextureData(int, int), 0x001a1d80: the pixels and palette of
-// every record that has them and whose placement is in [pos, pos+size),
-// pointed into `data` (which holds that range), or cleared.
+// AssignTextureData(char *, int, int), 0x001a1cd8 (retail 0x001ac2b0), and
+// UnAssignTextureData(int, int), 0x001a1d80 (retail 0x001ac358): the
+// pixels and palette of every record that has them and whose placement is
+// in [pos, pos+size), pointed into `data` (which holds that range), or
+// cleared.
 void texturepack_assign_texture_data(TexturePack *p, uint8_t *data,
                                      int32_t pos, int32_t size);
 void texturepack_unassign_texture_data(TexturePack *p, int32_t pos,
                                        int32_t size);
 
-// GetLoadedTexture(unsigned int), 0x001a1e18: the first record of that
-// name with its pixels, and its palette if it has one. GetTexture,
-// 0x001a1e90: the first of that name. GetNthTexture(int), 0x001a1ed8.
+// GetLoadedTexture(unsigned int), 0x001a1e18 (retail 0x001ac3f0): the
+// first record of that name with its pixels, and its palette if it has
+// one. GetTexture, 0x001a1e90 (retail 0x001ac468): the first of that name.
+// GetNthTexture(int), 0x001a1ed8 (retail 0x001ac4b0).
 TextureInfo *texturepack_get_loaded_texture(TexturePack *p, uint32_t hash);
 TextureInfo *texturepack_get_texture(TexturePack *p, uint32_t hash);
 TextureInfo *texturepack_get_nth_texture(TexturePack *p, int32_t n);
 
-// GetTextureInfo(unsigned int, int), 0x001a19b0. A pack that has the
-// texture goes to the list's head, and the record's UsedFlag is set.
-// With no texture and no default, bBreak.
-TextureInfo *GetTextureInfo(uint32_t hash, int use_default);
+// GetTextureInfo, 0x001a19b0, retail's (unsigned int, int, int) at
+// 0x001abf48. Each pack is asked for a loaded record of that name, or with
+// `include_unloaded` for any record of it. A pack that has the texture
+// goes to the list's head, and the record's UsedFlag is set. Then the
+// render targets; then, with `use_default`, the default texture, looked
+// for loaded. With no texture and no default, bBreak. Every retail caller
+// but the two below passes 0 for `include_unloaded`.
+TextureInfo *GetTextureInfo(uint32_t hash, int use_default,
+                            int include_unloaded);
 
-// GetNthTextureInfo(int), 0x001a1a90: counting through every pack's
-// records.
+// GetNthTextureInfo(int), 0x001a1a90 (retail 0x001ac050): counting
+// through every pack's records.
 TextureInfo *GetNthTextureInfo(int32_t n);
 
-// MaybePrintUnusedTextures, 0x001a1ae0: nothing, in this build.
+// Retail's alone, and unnamed in the stripped ELF; the names are the
+// port's. RenameTextureInfo(unsigned int, const char *), 0x001ac4d8: the
+// texture of that name, loaded or not, takes the 24 bytes at `name` as its
+// DebugName and their hash as its NameHash. Nothing in retail calls it.
+// SwapTextureInfoNames(unsigned int, unsigned int), 0x001ac548: two
+// textures trade their DebugNames and rehash them, which is how retail's
+// ServiceGameFlow puts the French loading screen and logo in place of the
+// English ones. Each returns 0 when a texture is not found, and 1.
+int RenameTextureInfo(uint32_t hash, const char *name);
+int SwapTextureInfoNames(uint32_t a, uint32_t b);
+
+// MaybePrintUnusedTextures, 0x001a1ae0 (retail 0x001ac0a0): nothing, in
+// this build.
 void MaybePrintUnusedTextures(void);
 
-// GetTextureInfo in the shape of esolid.h's seam, gGetTextureInfoFn.
+// GetTextureInfo in the shape of esolid.h's seam, gGetTextureInfoFn:
+// loaded records only, as every retail seam caller asks.
 void *texturepack_get_texture_info(uint32_t hash, int use_default);
 
 // TextureAnimPack::TextureAnimPack(TextureAnim *, TextureAnimEntry *,
-// int, int), 0x001a1650: each flipbook's frames, in turn, from the
-// entries, and the pack at the list's tail.
+// int, int), 0x001a1650 (retail 0x001abbe8): each flipbook's frames, in
+// turn, from the entries, and the pack at the list's tail.
 TextureAnimPack *textureanimpack_construct(TextureAnimPack *p,
                                            TextureAnim *anims,
                                            TextureAnimEntry *entries,
                                            int32_t num_anims,
                                            int32_t num_entries);
 
-// ~TextureAnimPack, 0x001a16c8: off the list; with bit 0 of `flags`,
-// freed. Its textures keep the frame they were on.
+// ~TextureAnimPack, 0x001a16c8 (retail 0x001abc60): off the list; with
+// bit 0 of `flags`, freed. Its textures keep the frame they were on.
 void textureanimpack_destruct(TextureAnimPack *p, int32_t flags);
 
-// InitAnims, 0x001a16e0: every frame's texture and the pixels and palette
-// it has now. A flipbook with a frame nobody has is not valid.
+// InitAnims, 0x001a16e0 (retail 0x001abc78): every frame's loaded texture
+// and the pixels and palette it has now. A flipbook with a frame nobody
+// has is not valid.
 void textureanimpack_init_anims(TextureAnimPack *p);
 
-// UpdateTextureAnimations, 0x001a17e8, once a frame from eDisplayFrame:
+// UpdateTextureAnimations, 0x001a17e8 (retail 0x001abd80), once a frame
+// from eDisplayFrame:
 // each valid flipbook's frame from its clock, and on a new frame, each
 // frame's texture given the pixels and palette of the frame that many on.
 // A valid flipbook of no frames is a divide by zero on the console; the
 // port leaves it alone.
 void UpdateTextureAnimations(void);
 
-// GetTextureAnim(unsigned int), 0x001a1950: the first flipbook of that
-// name.
+// GetTextureAnim(unsigned int), 0x001a1950 (retail 0x001abee8): the first
+// flipbook of that name.
 TextureAnim *GetTextureAnim(uint32_t hash);
 
 #endif

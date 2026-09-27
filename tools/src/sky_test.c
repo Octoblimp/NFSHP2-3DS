@@ -147,11 +147,16 @@ static void render(eModel *m, bMatrix4 *matrix, void *light, uint32_t flags)
            (unsigned)flags);
 }
 
-TextureInfo *GetTextureInfo(uint32_t h, int use_default)
+TextureInfo *GetTextureInfo(uint32_t h, int use_default,
+                            int include_unloaded)
 {
     TextureInfo *r = NULL;
     int          i;
 
+    // Retail's third argument. The demo image the model runs has none, so
+    // only a port that passes anything but 0 prints it.
+    if (include_unloaded != 0)
+        printf("  GetTextureInfo include_unloaded %d\n", include_unloaded);
     for (i = 0; i < NUM_SUN_TEXTURES; i++)
         if (h == kSunTextureHashes[i] && (found_mask >> i & 1))
             r = &tex[i];

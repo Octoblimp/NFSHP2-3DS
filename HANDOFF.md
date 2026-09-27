@@ -8057,3 +8057,60 @@ GetTextureInfo for each record. GetTextureInfo takes a third argument
 that looks in unloaded records too, and two new functions rename a
 texture and swap two textures' names (ServiceGameFlow swaps the French
 loading screen and logo).
+
+## Session 30, continued (2026-09-27) -- Task 36's fourth slice: the texture pack's retail pass
+
+The user: never stop, and get the port to 100%.
+
+- **The header** is 84 bytes: `Name[16]`, `Filename[64]`, the pointer at
+  80. All 22 packs on the retail disc have it, each file name of the form
+  `Global\GlobalTextures.tpk`.
+- **The pack** is 148 bytes. `Name[32]` is at 8, `Filename[64]` at 40.
+  The demo's `Filename` was 48 bytes and never written, so every field
+  after it sits 16 on from the demo's.
+- **The constructor** takes the name and the file name. Both are copied
+  with bStrCpy, which does not bound them, so a long name runs on into
+  `Filename` and the file name writes over it. `Filename[0]` is cleared
+  in the delay slot of the NULL test, so a NULL file name empties it.
+  LoadGlobalChunks and SelectTrackSlideshow pass NULL. The port copies
+  into a buffer the size of the run and stores it back.
+- **GetTextureInfo(hash, use_default, include_unloaded).** A nonzero
+  third argument asks each pack's GetTexture, not GetLoadedTexture. The
+  default's call is always `(0x19006835, 0, 0)`. Every call the port
+  already had passes 0.
+- **AttachTextureTable** no longer asks GetTextureInfo for each record,
+  so attaching no longer reorders the pack list.
+- **The rename** (`0x001ac4d8`, the port's `RenameTextureInfo`) finds a
+  record, loaded or not, `bMemCpy`s 24 bytes over `DebugName` and hashes
+  it again. **The swap** (`0x001ac548`, `SwapTextureInfoNames`) looks up
+  both before testing either, swaps the names by way of the stack and
+  hashes each. ServiceGameFlow's language toggle at `0x001681b0` swaps
+  `LOADING` with `LOADING_FR` and `NFS_LOGO_ALPHA` with
+  `NFS_LOGO_ALPHA_FR` in DYNTEX, reloading the pack's pixels between.
+- **texturepack_check** runs on the retail image through a
+  `RetailEmu` with 128 MB of RAM. The disc scenario runs twelve files:
+  the ten a TRACKB12 race loads and TRACKB21's two, 2,362 records and 12
+  flipbooks. It makes ServiceGameFlow's two swaps and swaps them back.
+  Built scenarios cover unloaded records, renames and swaps, names and
+  file names that run on, and packs constructed with no file name. The
+  dump prints every byte of the names, past the NUL. The host's header is
+  88 bytes, its pointer 8, and the harness says so.
+- The demo's equivalent mutation that hashed the name as given is caught
+  on retail: a name that runs into the file name hashes differently from
+  its copy. `ctor_filename_not_emptied` needed the NULL-file-name
+  constructions to be caught.
+- `sky_check` has a new mutation, `tex_include_unloaded`, for the sky's
+  lookup passing 0.
+
+```
+texturepack_check   6698 ops, 11464 lines, 0 differ
+                    132 mutations: 131 caught, 1 equivalent
+```
+
+### Next
+
+The rest of step 4. LoaderDifficultyInfo copies 992 bytes, the demo's
+744. Then UnloaderTrackGeometry, UnloaderSolidList and eFixUpTables, and
+the sun's retail pass (the glare record LoaderSun fills at 0x002ef4c0,
+StuffSun, StuffSunGlare, SunTrackLoader). Then retail TRACKB12 in the
+viewer on Azahar, then TRACKB21.
