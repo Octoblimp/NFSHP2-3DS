@@ -1848,6 +1848,18 @@ is citro3d and owns the top.
         scenarios, 3,450 ops, 16,724 lines, 0 differ. Of its 79
         mutations, 77 are caught and 2 are equivalent. Written up in
         `docs/formats/scenery.md`.
+
+        **The twenty-first slice is closed: the scenery cull**, in
+        `scenerycull.c`, `eframe.c` and `eview.c`: ClassifyAABB and
+        IsBoundingBoxVisible, the tree and brute-force culls,
+        DrawAScenery, the sections a view draws, DoCulling,
+        StuffScenery, SetupSceneryCullInfo and eDisplayFrame's loop over
+        the views, Ecstasy.obj's frame malloc and the table of eViews.
+        eModel::Render is a seam that aborts when unset.
+        `scenerycull_check` runs it over made-up sections and all of
+        TRACKB12's: 9 scenarios, 7,273 ops, 46,687 lines, 0 differ. Of
+        its 148 mutations, 147 are caught and 1 is equivalent. Written
+        up in `docs/formats/scenerycull.md`.
         CONTINUE.md has what is next.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag

@@ -16,10 +16,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Fifty cross-checkers pass, plus the table generators:
+Fifty-one cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -73,6 +73,7 @@ collisionbody_check 1572 ops,    35426 lines, 0 differ  (622 caught, 24 equivale
 collision_check     3587 ops,     6859 lines, 0 differ  (121 caught, 10 equivalent)
 world_check         2742 ops,    15110 lines, 0 differ  (328/328 mutations caught)
 scenery_check       3450 ops,    16724 lines, 0 differ  (77 caught, 2 equivalent)
+scenerycull_check   7273 ops,    46687 lines, 0 differ  (147 caught, 1 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -369,12 +370,31 @@ and so replaced every boot.
      FindIndexTo's 64 as a bound on the count. No disagreement between
      the image and the port was found. Written up in
      `docs/formats/scenery.md`.
-   - **The twenty-first slice is the scenery cull**, being written:
-     ClassifyAABB (`0x0010b940`, VU0's `vclipw`, which `mipsemu` now
-     models with the clip register), the tree and brute-force culls,
+   - **The twenty-first slice is the scenery cull**, in `scenerycull.c`,
+     `eframe.c` and `eview.c`: ClassifyAABB (`0x0010b940`, VU0's
+     `vclipw`, which `mipsemu` now models with the clip register),
+     IsBoundingBoxVisible, IsVisible, the tree and brute-force culls,
      DrawAScenery, WhatSectionsShouldWeDraw, CullView, BatchCullViews,
-     DoCulling, StuffScenery, SetupSceneryCullInfo and Ecstasy.obj's frame
-     malloc. `eview.h` has the 128-byte eView.
+     DoCulling, StuffScenery, SetupSceneryCullInfo, eDisplayFrame's loop
+     over the views, Ecstasy.obj's frame malloc and the table of ten
+     eViews: 17 functions, 4,608 bytes. eModel::Render is the seam
+     `gEModelRenderFn`, which aborts when unset. `scenerycull_check` runs
+     the image over made-up sections and over all of TRACKB12's, from
+     every zone and twelve random points: 9 scenarios, 7,273 ops, 46,687
+     lines, 0 differ. Of its 148 mutations, 147 are caught and 1 is
+     equivalent. Six reassociations survived the first pass and each now
+     has a case, found by search, where the other order rounds across a
+     plane, the 2 or a far clip. No disagreement between the image and
+     the port was found. Written up in `docs/formats/scenerycull.md`.
+   - **The twenty-second slice is eView.obj's matrices**:
+     `eView::CalculateViewMatricies` (`0x00106700`), `CreateViewMatricies`
+     (`0x0010d268`), `CalculateLocalToClip` and `CalculateLocalToScreenClip`,
+     `BiasMatrixForZSorting`, the three `GetPixelSize`s,
+     `GetScreenPosition`, the camera movers' attach and detach, and
+     `eUpdateViewMode`. They make the WorldView and WorldScreenClip
+     matrices the cull reads, and H. After it, a track viewer mode in
+     `main.c` puts TRACKB12 on the screen through the ported loader and
+     cull, with eModel::Init and Render done over `georender`.
 
    Things to know before the next slice:
    - **Nothing calls it on hardware yet.** The port has no `LoaderTable`,

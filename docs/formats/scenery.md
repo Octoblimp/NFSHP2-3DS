@@ -12,12 +12,13 @@ the data half:
 - the facade matrix;
 - the statics.
 
-The cull is the next slice: `IsVisible`, the brute-force and tree culls,
-`WhatSectionsShouldWeDraw`, `CullView`, `BatchCullViews`, `DoCulling`,
-`DrawAScenery`, `StuffScenery` and eDisplayFrame's `SetupSceneryCullInfo`
-at 0x0010e370. The debug views come with it: `UpdateCaffeine`,
-`RenderBoundary`, `ScrollText` and `HandleTweakingVisibleZones`.
-`RenderVisibleZones` is `jr ra` in the image.
+The cull is the next slice, and `scenerycull.md` covers it: `IsVisible`,
+the brute-force and tree culls, `WhatSectionsShouldWeDraw`, `CullView`,
+`BatchCullViews`, `DoCulling`, `DrawAScenery`, `StuffScenery` and
+eDisplayFrame's `SetupSceneryCullInfo` at 0x0010e370. The debug views,
+`UpdateCaffeine`, `RenderBoundary`, `ScrollText` and
+`HandleTweakingVisibleZones`, are left out: nothing on a retail disc
+reaches them. `RenderVisibleZones` is `jr ra` in the image.
 
 Ported to `3DS Files/source/scenery.{c,h}`. Cross-checked by
 `tools/scenery_check.py` against `tools/src/scenery_test.c`.

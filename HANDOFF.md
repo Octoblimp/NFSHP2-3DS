@@ -7058,3 +7058,75 @@ matrix and `vclipw.xyz` on each, read back through the clip register.
 `mipsemu` now models `vclipw`, `ctc2` and `cfc2` on vi18. Then the tree
 cull, DrawAScenery, the section lists, DoCulling, StuffScenery and
 eDisplayFrame's SetupSceneryCullInfo, with Ecstasy.obj's frame malloc.
+
+## Session 30, continued (2026-09-26) -- Task 27's twenty-first slice: the scenery cull
+
+The twentieth slice went in as `b73b760`. The twenty-first is the second
+half of `Scenery.obj` (0x0014d460 .. 0x0014e59c): which of the loaded
+scenery each view draws this frame, and in what matrix. With it come
+ClassifyAABB and IsBoundingBoxVisible (0x0010b940, 0x0010bb10),
+SetupSceneryCullInfo (0x0010e370), eDisplayFrame's loop over the views
+(0x00112d18 .. 0x00112df0), Ecstasy.obj's frame malloc and the table of
+ten eViews. That is 17 functions and 4,608 bytes, in `scenerycull.c`,
+`eframe.c` and `eview.c`. The decode is in `docs/formats/scenerycull.md`.
+
+```
+scenerycull_check   9 scenarios, 7273 ops, 46687 lines, 0 differ
+                    11623 draws, 7205 renders
+                    148 mutations: 147 caught, 1 equivalent, 0 unexplained
+```
+
+### What the listing says
+
+- **ClassifyAABB reads each face's four corners separately** out of the
+  clip register. Both faces must be clear for a 2, and a 0 needs one flag
+  on all eight corners. A corner exactly on a plane is inside, and a NaN
+  is inside.
+- **DrawAScenery takes any class but 1 as given**, 0, 3 and 5 included.
+  Only a 1 classifies the object's own box.
+- **A NULL LOD is skipped, not taken as the end** of the LODs.
+- **The frame malloc is inline in DrawAScenery**, `pos + 64 < end`
+  unsigned, and does not count `FrameMallocAllocNum`. A full draw table
+  drops the object after its matrix has been taken.
+- **Neither tree cull checks for a missing tree**, and a child count past
+  five reads on into the next node. The stack is 64 deep with no test.
+- **WhatSectionsShouldWeDraw** draws every section below 100 with no
+  zone. With a zone, it draws the loaded nineties first, then the zone's
+  list in its own order, duplicates and all. Only view 1 sets
+  `CurrentZoneNumber`.
+- **The environment-map test on the view ID is unsigned** (`sltiu`), so
+  an ID of −1 or 0x80000004 is not one.
+- **The facade's position z goes nowhere**: DrawAScenery writes the
+  position over the matrix's last row straight after.
+
+### The checker
+
+The model runs eDisplayFrame's loop in place, from 0x00112d18 to a stub at
+the DoCulling call, with the grand info at s7. eModel::Render, bMalloc
+and bFree are stubbed and print their calls. VU0's `sqc2` drops an
+address's low four bits, so every frame-malloc position the script sets is
+16-aligned. The model leaves a 64-byte gap after each buffer, so that a
+block past the end is named as past it, and not as the next buffer.
+
+### The mutation pass
+
+148 mutations: 147 caught, 1 equivalent. Seven of the catches crash or
+hang the harness, so the timeout is 60 s. The equivalent one is the
+facade's z given the object's y.
+
+Six survived the first pass, and all six were float reassociations: the
+minimum's four-term sum, the far corner's two edges, the dot product,
+the distance, `r * (H / f1)`, and `r <= f1`. Each is exact on most
+inputs. A search in float32 found one case for each where the other order
+rounds across a plane, the 2 or a far clip. The image's order holds in
+every one, and the port had it right.
+
+### Next: eView.obj's matrices
+
+The cull reads WorldViewMatrix, WorldScreenClipMatrix and H from a view.
+`eView::CalculateViewMatricies` (0x00106700) and `CreateViewMatricies`
+(0x0010d268) make them. Both come next, with CalculateLocalToClip,
+CalculateLocalToScreenClip, BiasMatrixForZSorting, the three
+GetPixelSizes, GetScreenPosition, the camera movers' attach and detach,
+and eUpdateViewMode. Then a track viewer puts TRACKB12 on the screen
+through the ported loader and cull.
