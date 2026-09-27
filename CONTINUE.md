@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-26), after task 27's twenty-third slice, the track
-on the screen. `HANDOFF.md` is the running narrative; this file is the short
+continuation (2026-09-27), after task 27's twenty-fourth slice, the
+LoaderTable. `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -17,10 +17,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Fifty-two cross-checkers pass, plus the table generators:
+Fifty-three cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -76,6 +76,7 @@ world_check         2742 ops,    15110 lines, 0 differ  (328/328 mutations caugh
 scenery_check       3450 ops,    16724 lines, 0 differ  (77 caught, 2 equivalent)
 scenerycull_check   7273 ops,    46687 lines, 0 differ  (147 caught, 1 equivalent)
 eview_check         2103 ops,    15454 lines, 0 differ  (152 caught, 1 equivalent)
+loadertable_check  27856 ops,    41730 lines, 0 differ  (100 caught, 2 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -432,8 +433,43 @@ and so replaced every boot.
      `pStackedActiveTexture`, no shadow matrix pack, no light materials;
      and the sky domes draw in the main view until step 3.
 
-     **Next is step 2, the LoaderTable.** "The road to a playable demo",
-     below, has everything after it.
+   - **The twenty-fourth slice is the LoaderTable**, the first half of
+     roadmap step 2, in `bchunkload.c`, `esolid.c` and `emodel.c`. It
+     covers:
+     - ResourceFile's load half (`0x0018f6c8` .. `0x0018f918`):
+       LoaderNull, both walks, LoadChunks and UnloadChunks, PostLoadFixup
+       and HotChunksPostLoadFixup;
+     - the two tables of 31 slots. Slot 0 is LoaderNull, and the seven
+       slots whose object is ported call it. Every other slot is its guard
+       alone, handing what it takes to `gUnportedLoaderFn`;
+     - LoaderSolidList and its unloader, FixStripEntryTable,
+       FixTextureTable, FixLightMaterialTable and eFixUpTables, with the
+       eVertexAnimator pool;
+     - the rest of eModel.obj's list half: UnInit, ReconnectSolid,
+       ReconnectTextureTable, ApplyReplacementTextureTable,
+       ReconnectAllModels and the deleting destructor.
+
+     `trackview.c` loads TRACKB12 through `load_chunks` and
+     `post_load_fixup` now, and unloads it through `unload_chunks`. It no
+     longer links the solids itself. Seen on Azahar: 1,135 solids linked
+     by LoaderSolidList, 2,494 models, 342 textures, 0 missing, and the
+     track draws as before. `loadertable_check` runs the image against
+     the port: 27,856 ops, 41,730 lines, 0 differ, over every solid list
+     on the disc and all 497 of TRACKB12's top-level chunks. Of its 102
+     mutations, 100 are caught and 2 are equivalent. The first pass left
+     five, and all five were holes in the script: the ported unloaders
+     were never called on a bare chunk, and there was no case for a tree
+     whose pad changes its count of nodes, for labelled frames apart from
+     their animation, or for UnInit on a model with a solid. Written up in
+     `docs/formats/loader-table.md`.
+
+     **Next is the rest of step 2.** Two things are left:
+     - TexturePack.obj's loader in slot 2, so that GetTextureInfo is the
+       game's. Then the viewer can stop opening the three packs itself.
+     - The `InitTree` call in `EndGameFlowLoadingTrackSpecific`
+       (`0x0016461c`), so that the topology the table now loads is built.
+
+     "The road to a playable demo", below, has everything after it.
 
    Things to know before the next slice:
    - **`eMathInit` must run before anything draws.** It is the only
@@ -461,11 +497,28 @@ and so replaced every boot.
      about 68 MB. The scenery's 932 solids are 122,937 triangles, which is
      10.3 MB as `georender`'s triangle lists. Their 330 textures are
      27.3 MB as RGBA8, and 11 more are in no pack.
-   - **Nothing calls it on hardware yet.** The port has no `LoaderTable`,
-     so only the checker reaches `track_loader_geometry`. The `InitTree`
-     call in `EndGameFlowLoadingTrackSpecific` (`0x0016461c`) is not wired
-     either. Those two are what will make the surface live. Car.obj's
-     `SetInterestBBox(bVector3)` wrapper (`0x00134f28`) is ported now.
+   - **The track's surface is loaded on hardware, but not built.** The
+     track viewer's `load_chunks` reaches `track_loader_geometry` and
+     TopologyTree::Loader now, with the collision volumes and the track
+     path. The `InitTree` call in `EndGameFlowLoadingTrackSpecific`
+     (`0x0016461c`) is still not wired, and it is the one thing left
+     before the surface is live. Car.obj's `SetInterestBBox(bVector3)`
+     wrapper (`0x00134f28`) is ported.
+   - **A slot is taken by its guard even when its object is not ported.**
+     `bchunkload.c`'s unported slots claim the image's types and hand the
+     chunk to `gUnportedLoaderFn`, which is NULL. So TRACKB12's lights,
+     effects, event manager, cameras, sun, cops, soundscape, helicopter,
+     smokeables and weather (14 chunks, 10 slots) load as nothing, with no
+     `bBreak`. Porting one means calling its loader from the guard, as
+     the seven ported slots do.
+   - **LoaderSolidList fixes up the file in place.** It moves each strip's
+     `Data` by the packet's address and writes the texture and
+     light-material pointers into the bundle. The unloader does not move
+     the strips back, so a second load of the same buffer moves them
+     twice, unloaded in between or not. The game reads a bundle afresh
+     for each load, and the port has to as well. The viewer never reads
+     the strips' `Data`, and `geo_open` parses the bundle before
+     `load_chunks` runs.
    - **`chunk_loader_table.py` misses five of LoaderTrackGeometry's seven
      types**: `0x34146`, and `0x34130`..`0x34133`, which go through the
      tail call into TopologyTree::Loader. `bchunk.md` explains the two
@@ -980,7 +1033,7 @@ it will move as each class shows what it reaches.
 | Step | What | Slices |
 |---|---|---|
 | 1 | ~~The track on the screen: the viewer mode, eModel over `georender`, a free camera~~ done, task 27's twenty-third slice | 1 |
-| 2 | The LoaderTable: every chunk type in TRACKB12, with the solids, the texture packs, the topology and the routes live | 1-2 |
+| 2 | The LoaderTable: every chunk type in TRACKB12, with the solids, the texture packs, the topology and the routes live. The table, the walks and the solid list are done (task 27's twenty-fourth slice); the texture packs and InitTree are left | 1-2 |
 | 3 | The sky, the sun and the weather's draw | 1 |
 | 4 | Car's constructor and destructor, and CarRenderInfo, so that a car draws on the track | 3-4 |
 | 5 | Player and the chase cameras (CM_DRIVE and the rest of `cammover.c`'s set) | 2 |
@@ -1061,10 +1114,12 @@ Ordered roughly by how much time it costs to rediscover.
 * **A `bChunk` header of all zeroes is padding, not a terminator.**
   `bchunk_dump.py` stopped at the first one and so reported 8 chunks in
   TRACKB12.BUN's 9 MB, having given up at the alignment run at `0x7048`
-  after five top-level chunks. The real counts are 472 top-level (25
-  zero-pad headers among them) and 7076 recursively. `bchunk.c` had always
-  skipped them, so the C and the tool disagreed silently. Fixed this session
-  -- but the lesson is that the dumper is not the authority, the loader is.
+  after five top-level chunks. The real counts are 497 top-level and 7,101
+  recursively. The dumper still leaves out the 25 all-zero headers, so it
+  counts 472 and 7,076. `bchunk.c` had always skipped them, so the C and the
+  tool disagreed silently. Fixed this session -- but the lesson is that the
+  dumper is not the authority, the loader is. LoadChunks walks all 497, and
+  LoaderNull takes the 285 of type 0, the 25 zero headers among them.
 * **The task list can be wrong about what a format even is.** Task 24 asked
   for an "`espEmptyLayer` spline/track-layer format". No such format exists:
   Espresso is bware's live editor RPC protocol and Caffeine is the PC end of

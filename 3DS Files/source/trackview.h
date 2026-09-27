@@ -17,19 +17,26 @@
 // This is roadmap step 1, and it is the first mode that draws anything the
 // game decides to draw. The geometry viewer shows a car because the viewer
 // picked it; here the ported Scenery.obj picks. The bundle is read whole
-// and the scenery works on it in place, as LoaderScenery does: its 122
-// sections and 23 visible zones go to scenery_loader, eModel::Init (now
-// emodel.c) connects each kind's models to the solids by name, and every
-// frame runs eDisplayFrame's order on view 1 -- the view's matrices, the
-// cull infos, DoCulling, StuffScenery -- with eModel::Render being this
-// file's draw over georender.
+// and loaded in place, as ResourceFile's load does it: LoadChunks hands
+// every top-level chunk to the LoaderTable (bchunkload.c), so its 65 solid
+// lists go to LoaderSolidList, its 122 sections and 23 visible zones to
+// LoaderScenery -- where eModel::Init connects each kind's models to the
+// solids by name -- and its routes, path, topology and collision volumes
+// to theirs, and then PostLoadFixup runs. Nothing calls InitTree yet, so
+// the topology is loaded and not built. Every frame runs eDisplayFrame's
+// order on view 1 --
+// the view's matrices, the cull infos, DoCulling, StuffScenery -- with
+// eModel::Render being this file's draw over georender.
 //
 // What stands in for the game, and should not be read as the game:
 //
-//   * LoaderSolidList. The bundle's 1,135 eSolids are linked onto
-//     SolidList in place, which is the part of it eFindSolid needs, and
-//     nothing else is fixed up: the strip, texture and light-material
-//     pointers stay the file's zeros. The LoaderTable (step 2) ports it.
+//   * TexturePack.obj. TRACKB12 has no textures of its own. They are in
+//     TEX12LOCATION.BIN, TEX12TRACK.BIN and INGAMEB.BUN, whose packs the
+//     game loads through slot 2, and slot 2's loader is not ported. So
+//     GetTextureInfo finds no texture and eFixUpTables leaves every
+//     texture pointer NULL. The viewer opens the three packs and looks the
+//     solids' texture hashes up in them itself. The light lists are not
+//     ported either, and the light-material pointers stay NULL too.
 //   * SetScreenBuffers. Only the three things the matrices read are set:
 //     MainDraw0Context's scissor (ScreenWidth by ScreenHeight) and player
 //     1's aspect ratios, which are the image's NTSC pair.
@@ -108,6 +115,7 @@ typedef struct {
     // --- the bundle, resident for as long as the scenery points into it.
     uint8_t*     data;
     size_t       len;
+    size_t       chunkLen;      // what whole top-level chunks cover of len
     bool         dataLinear;    // from linearMemAlign, not memalign
     GeoSolidList list;
     GeoSolid*    solid;         // sorted by header address, as geo_open walks
@@ -168,13 +176,13 @@ typedef struct {
 // Nothing is read yet.
 bool trackview_init(TrackView* v);
 
-// Reads the bundle, links its solids, runs the scenery and route loaders
-// over it, bakes every solid a model names and uploads its textures, and
-// puts the camera at the start of route 1. False leaves the viewer empty
-// but usable, with `note` saying why. A second call does nothing.
+// Reads the bundle, loads it through the LoaderTable, bakes every solid a
+// model names and uploads its textures, and puts the camera at the start
+// of route 1. False leaves the viewer empty but usable, with `note` saying
+// why. A second call does nothing.
 bool trackview_load(TrackView* v);
 
-// Unloads the scenery, takes the solids off SolidList and frees it all.
+// Unloads the bundle through the UnloaderTable and frees it all.
 void trackview_free(TrackView* v);
 
 // One frame of the fly camera, into Player1Camera. `kDown` and `kHeld` are

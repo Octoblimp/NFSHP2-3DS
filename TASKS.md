@@ -1891,6 +1891,20 @@ is citro3d and owns the top.
         `tools/check_3dsx.py`, after `bFixATan1`'s INT32_MIN path linked
         a relocation Azahar refuses. Written up in
         `docs/formats/track-render.md`.
+
+        **The twenty-fourth slice is closed: the LoaderTable**, the first
+        half of roadmap step 2, in `bchunkload.c`, `esolid.c` and
+        `emodel.c`. That is ResourceFile's load half (both walks,
+        LoadChunks, UnloadChunks and PostLoadFixup), the two tables of 31
+        slots, LoaderSolidList and its unloader, eSolid's table fix-ups,
+        eFixUpTables, and the rest of eModel.obj's list half. The slots
+        whose object is not ported are guards that hand the chunk to
+        `gUnportedLoaderFn`. The track viewer loads TRACKB12 through
+        `load_chunks` now; seen on Azahar. `loadertable_check` runs the
+        image against the port: 27,856 ops, 41,730 lines, 0 differ. Of its
+        102 mutations, 100 are caught and 2 are equivalent. Written up in
+        `docs/formats/loader-table.md`. Left of step 2: TexturePack.obj's
+        loader in slot 2, and the `InitTree` call.
         CONTINUE.md has what is next, and how far it is to a playable
         demo.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher

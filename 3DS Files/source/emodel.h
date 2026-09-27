@@ -26,8 +26,8 @@
 
 // eSolid, 192 bytes (.mdebug type#3247), as it sits in the bundle. The
 // list half reads NameHash and pRigidAnimation, whose byte at +2 is 0 for
-// an animation that starts running; LoaderSolidList fills the pointers,
-// and everything else is the renderer's.
+// an animation that starts running; LoaderSolidList (esolid.c) fills the
+// pointers, and everything else is the renderer's.
 typedef struct eSolid {
     bNode     Node;                         //   0  on SolidList
     uint32_t  NameHash;                     //   8
@@ -82,6 +82,38 @@ void emodel_uninit(eModel *m);
 // start time is cleared, and set to 0xc000 when the new solid has a rigid
 // animation whose byte at +2 is 0.
 void emodel_reconnect_solid(eModel *m);
+
+// eReplacementTextureTable, 28 bytes: one texture a model draws in place
+// of one of its solid's. ReplaceIndex has a slot for each of 16 instances
+// of the model, by its ReplacementTextureInstanceIndex: the index in the
+// solid's texture table of the one it replaces, or -1.
+typedef struct eReplacementTextureTable {
+    uint32_t  OldNameHash;                  //  0
+    uint32_t  NewNameHash;                  //  4
+    void     *pTextureInfo;                 //  8
+    int8_t    ReplaceIndex[16];             // 12
+} eReplacementTextureTable;                 // 28
+
+#if UINTPTR_MAX == 0xFFFFFFFFu
+typedef char emodel_replacement_check[
+    (sizeof(eReplacementTextureTable) == 28
+     && offsetof(eReplacementTextureTable, ReplaceIndex) == 12) ? 1 : -1];
+#endif
+
+// eModel::ReconnectTextureTable, 0x0010b330. Each replacement's texture
+// is looked up again, with the default for a miss, and its slot for this
+// instance is the first entry of the solid's table with the old name, or
+// -1. Then ApplyReplacementTextureTable.
+void emodel_reconnect_texture_table(eModel *m);
+
+// eModel::ApplyReplacementTextureTable, 0x0010b528: each replacement
+// whose slot for this instance is not -1 is written into that entry of
+// the solid's table.
+void emodel_apply_replacement_texture_table(eModel *m);
+
+// ReconnectAllModels, 0x0010b7b0: every model on ModelList gets its solid
+// and its replacements again, and its solid's STs fixed.
+void emodel_reconnect_all_models(void);
 
 // eModel's deleting destructor, _$_6eModel (0x00114918): UnInit, bNode's
 // destructor (which does nothing without bit 0), then with bit 0 of

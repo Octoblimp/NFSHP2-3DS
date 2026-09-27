@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include "bslotpool.h"
+#include "esolid.h"
 
 void *eFindSolid(uint32_t name_hash)
 {
@@ -37,6 +38,67 @@ void emodel_reconnect_solid(eModel *m)
     if ((int8_t)solid->pRigidAnimation[2] != 0)
         return;
     m->RigidAnimationStartTime = (int16_t)0xc000;
+}
+
+void emodel_reconnect_texture_table(eModel *m)
+{
+    int i;
+
+    for (i = 0; i < (int8_t)m->NumReplacementTextures; i++) {
+        eReplacementTextureTable *r =
+            (eReplacementTextureTable *)m->pReplacementTextureTable + i;
+        int8_t *slot =
+            &r->ReplaceIndex[(int8_t)m->ReplacementTextureInstanceIndex];
+        eSolid *s;
+        int k;
+
+        r->pTextureInfo = get_texture_info(r->NewNameHash, 1);
+        *slot = -1;
+        s = (eSolid *)m->Solid;
+        if (s == NULL)
+            continue;
+        for (k = 0; k < s->NumTextureTableEntries; k++) {
+            if (((eTextureTable *)s->pTextureTable)[k].NameHash
+                == r->OldNameHash) {
+                *slot = (int8_t)k;
+                break;
+            }
+        }
+    }
+    emodel_apply_replacement_texture_table(m);
+}
+
+void emodel_apply_replacement_texture_table(eModel *m)
+{
+    eSolid *s = (eSolid *)m->Solid;
+    eTextureTable *table;
+    eReplacementTextureTable *r;
+    int i;
+
+    if (s == NULL)
+        return;
+    table = (eTextureTable *)s->pTextureTable;
+    r = (eReplacementTextureTable *)m->pReplacementTextureTable;
+    for (i = 0; i < (int8_t)m->NumReplacementTextures; i++) {
+        int k = r[i].ReplaceIndex[(int8_t)m->ReplacementTextureInstanceIndex];
+
+        if (k >= 0)
+            table[k].pTextureInfo = r[i].pTextureInfo;
+    }
+}
+
+void emodel_reconnect_all_models(void)
+{
+    bNode *n;
+
+    for (n = ModelList.next; n != &ModelList; n = n->next) {
+        eModel *m = (eModel *)(void *)n;
+
+        emodel_reconnect_solid(m);
+        emodel_reconnect_texture_table(m);
+        if (m->Solid != NULL && gFixStripSTsFn != NULL)
+            gFixStripSTsFn((eSolid *)m->Solid);
+    }
 }
 
 void emodel_init(eModel *m, uint32_t name_hash)

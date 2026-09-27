@@ -7294,3 +7294,93 @@ show the road, the start line, the signs and the dappled shadows.
 Step 2 makes every chunk type in TRACKB12 live through the real
 LoaderTable: the solid list with its pointers fixed up, the texture packs,
 the topology and the routes. After that, step 3 is the sky.
+
+## Session 30, continued (2026-09-27) -- Task 27's twenty-fourth slice: the LoaderTable
+
+The twenty-third slice went in as `f5b361c`. The twenty-fourth is the
+first half of roadmap step 2: the table ResourceFile hands a bundle to,
+and the one loader behind it that the viewer had been standing in for,
+LoaderSolidList. The code is `bchunkload.c` (the walks, the two tables and
+PostLoadFixup), `esolid.c` (LoaderSolidList, its unloader, eSolid's three
+table fix-ups and eFixUpTables) and the rest of eModel.obj's list half in
+`emodel.c`. The write-up is `docs/formats/loader-table.md`.
+
+```
+loadertable_check  27856 ops, 41730 lines, 0 differ
+                   102 mutations: 100 caught, 2 equivalent, 0 unexplained
+trackview: 1135 solids linked, 2494 models, 7 without a solid, 915 baked,
+           125498 tris, 342 textures (0 missing, 0 reduced), 36256 KB linear free
+```
+
+### What the table does
+
+TraverseChunks tries each chunk from the slot that took the last one, not
+from slot 0. After a chunk nobody takes, its miss count is never reset,
+so every later chunk gets one try at the walk's current slot until one is
+taken. A stray type can therefore cost the chunks behind it. The disc
+never hits this: every one of its 52 top-level types has exactly one
+taker in each table. The port keeps the walk as it is, and the checker
+drives it over probe tables to show both sides agree.
+
+The unported slots are guards. Each takes the image's types and hands the
+chunk to `gUnportedLoaderFn`. That keeps the walk's slot sequence the
+image's, which matters because of the quirk above. TRACKB12 sends 14
+chunks to 10 such slots: the lights, the effects, the event manager, the
+cameras, the sun, the cops, the soundscape, the helicopter, the smokeables
+and the weather.
+
+### LoaderSolidList
+
+The loader fixes the file up where it lies: strip data by the packet's
+address, the texture table through GetTextureInfo, the light materials
+through elGetLightMaterial, then the external rigid animation, the vertex
+animation or duplicate-name flags, and the link onto SolidList. The
+unloader looks at a container's first child only. Three cases in the image
+go wrong (an animated solid named like an earlier plain one, unloading a
+list that was never loaded, more than 64 frames), and none of them is on
+the disc. The doc lists them.
+
+On the disc, 110 lists in 44 files hold 1,465 solids. Every container has
+its eSolid first. No solid is vertex animated and none has labelled
+frames, so the checker builds lists for those. TRACKB12 has 65 lists, but
+only 10 hold solids. The other 55 are a 60-byte header followed by a
+padding chunk.
+
+### The checker
+
+`loadertable_check` runs the image's walks, tables, LoaderSolidList,
+unloader, eFixUpTables and eModel methods in mipsemu against the port.
+The host has 8-byte pointers, so the harness rebuilds each solid
+container with the host's struct and pad, and prints offsets in disc
+bytes. The claims scenario puts every disc type, every guard constant
+and their neighbours through all 62 slots. In the model, a loader that
+gets past its guard far enough to call anything counts as a take.
+
+The first mutation pass caught 95 of 102, with 2 equivalent. The five
+survivors were all holes in the script:
+- the ported slots' unloaders were never called on a bare chunk (now the
+  claims scenario calls them, all but Scenery's, whose unloader unlinks
+  what its loader linked);
+- no tree's pad was big enough to change its count of 96-byte nodes;
+- the labelled frames always came straight after their animation;
+- UnInit never ran on a model that still had a solid.
+
+Each has a case now, and the second pass is 100 caught, 2 equivalent.
+
+### The viewer
+
+`trackview.c` stopped linking the solids itself. It counts the scenery for
+its note, then calls `load_chunks` and `post_load_fixup`, and on the way
+out `unload_chunks` and `post_load_fixup`. So the track path, the
+topology tree and the collision volumes now load on the handheld through
+their own ported loaders, as well as the scenery and the routes. Seen on
+Azahar: the same counts as before, and the track draws as before.
+
+### Next: the rest of step 2
+
+- TexturePack.obj's loader in slot 2, so that GetTextureInfo is the game's
+  and eFixUpTables fills the texture tables. TRACKB12 has no textures of
+  its own; they are in TEX12LOCATION.BIN, TEX12TRACK.BIN and INGAMEB.BUN,
+  which the viewer opens itself for now.
+- The `InitTree` call in `EndGameFlowLoadingTrackSpecific` (0x0016461c), so
+  that the topology the table now loads is built.

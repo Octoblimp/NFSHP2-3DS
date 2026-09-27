@@ -9,9 +9,11 @@
 #include <3ds.h>
 
 #include "bchunk.h"
+#include "bchunkload.h"
 #include "eframe.h"
 #include "emath.h"
 #include "emodel.h"
+#include "esolid.h"
 #include "eview.h"
 #include "eviewmatrix.h"
 #include "gamedata.h"
@@ -530,48 +532,12 @@ bool trackview_init(TrackView* v)
     return true;
 }
 
-static void link_solids(TrackView* v)
-{
-    int i;
-
-    for (i = 0; i < v->numSolids; i++) {
-        eSolid* s = (eSolid*)(uintptr_t)v->solid[i].header;
-        bNode*  last;
-
-        if (!s || ((uintptr_t)s & 3u)) {
-            continue;
-        }
-        last          = SolidList.prev;
-        last->next    = &s->Node;
-        SolidList.prev = &s->Node;
-        s->Node.next  = &SolidList;
-        s->Node.prev  = last;
-        v->linkedSolids++;
-    }
-}
-
-static void unlink_solids(TrackView* v)
-{
-    int i;
-
-    for (i = 0; i < v->numSolids; i++) {
-        eSolid* s = (eSolid*)(uintptr_t)v->solid[i].header;
-
-        if (!s || ((uintptr_t)s & 3u)) {
-            continue;
-        }
-        s->Node.prev->next = s->Node.next;
-        s->Node.next->prev = s->Node.prev;
-    }
-    v->linkedSolids = 0;
-}
-
-// The bundle's top level, one chunk at a time, as the LoaderTable walks
-// it: the scenery's containers and zones to LoaderScenery, the routes and
-// signposts to TrackRoute.obj's loader -- the viewer's camera stands on
-// route 1 -- and everything else left for step 2. Unloading is the same
-// walk with the unloaders.
-static void each_chunk(TrackView* v, bool load)
+// The bundle's top level as LoadChunks will walk it, loading nothing: how
+// far whole chunks run, and the scenery's sections and zones for the note.
+// The walk stops only on reaching its end exactly, so a file cut short in
+// a chunk would take it past the buffer; it is given what the chunks
+// cover, which on a whole file is all of it.
+static size_t count_chunks(TrackView* v)
 {
     uint8_t* c   = v->data;
     uint8_t* end = v->data + v->len;
@@ -584,24 +550,14 @@ static void each_chunk(TrackView* v, bool load)
             break;
         }
         if (type == SCENERY_CONTAINER_ID) {
-            if ((load ? scenery_loader(c) : scenery_unloader(c)) && load) {
-                v->numSections++;
-            }
+            v->numSections++;
         } else if (type == VISIBLE_ZONE_ID) {
-            if ((load ? scenery_loader(c) : scenery_unloader(c)) && load) {
-                v->numZones += (int)(size / sizeof(VisibleZone));
-                v->zoneChunk = c;
-            }
-        } else if (type == CHUNK_TRACK_ROUTES
-                   || type == CHUNK_TRACK_SIGNPOSTS) {
-            if (load) {
-                track_routes_loader(c);
-            } else {
-                track_routes_unloader(c);
-            }
+            v->numZones += (int)(size / sizeof(VisibleZone));
+            v->zoneChunk = c;
         }
         c += 8 + size;
     }
+    return (size_t)(c - v->data);
 }
 
 static void set_camera(TrackView* v, float dt)
@@ -706,6 +662,7 @@ bool trackview_load(TrackView* v)
     // failed from one that was never made, so a failed one is freed again,
     // which leaves every frame allocation returning NULL.
     emodel_init_slot_pool();
+    esolid_init_slot_pool();
     if (!FrameMemoryBuffer[0]) {
         eAllocateFrameMallocBuffers(EFRAME_INIT_SIZE);
         if (!FrameMemoryBuffer[0] || !FrameMemoryBuffer[1]) {
@@ -753,20 +710,24 @@ bool trackview_load(TrackView* v)
         }
     }
 
-    // LoaderSolidList's link, then LoaderScenery's: the models find their
-    // solids by name as they are made, so the solids go first, as the
-    // bundle has them. The seams are eInitEngine's to set; they are set
-    // here too so that the viewer does not depend on the order main() does
-    // things in.
+    // ResourceFile's load: the whole bundle through the LoaderTable, then
+    // PostLoadFixup. The models find their solids by name as LoaderScenery
+    // makes them, and the bundle has its solid lists first. The seams are
+    // eInitEngine's to set; they are set here too so that the viewer does
+    // not depend on the order main() does things in.
     if (!gEModelInitFn) {
         gEModelInitFn = emodel_init;
     }
     if (!gEModelDestroyFn) {
         gEModelDestroyFn = emodel_delete;
     }
-    link_solids(v);
     gEModelRenderFn = render_model;
-    each_chunk(v, true);
+    v->chunkLen = count_chunks(v);
+    load_chunks(v->data, (int32_t)v->chunkLen);
+    post_load_fixup();
+    for (n = SolidList.next; n != &SolidList; n = n->next) {
+        v->linkedSolids++;
+    }
 
     for (n = ModelList.next; n != &ModelList; n = n->next) {
         eModel* m = (eModel*)(void*)n;
@@ -806,8 +767,9 @@ void trackview_free(TrackView* v)
     int i;
 
     if (v->loaded) {
-        each_chunk(v, false);
-        unlink_solids(v);
+        unload_chunks(v->data, (int32_t)v->chunkLen);
+        post_load_fixup();
+        v->linkedSolids = 0;
         if (gEModelRenderFn == render_model) {
             gEModelRenderFn = NULL;
         }
