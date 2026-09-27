@@ -39,9 +39,11 @@ const char *camera_mover_type_name(CameraMoverType t)
 // ------------------------------------------------------------- the base
 
 // 0x001544f0.
-void camera_mover_init(CameraMover *m, int viewID, Camera *cam,
-                       CameraMoverType type)
+void camera_mover_init(CameraMover *m, int viewID, CameraMoverType type)
 {
+    eView *v;
+    Camera *cam;
+
     m->Type = type;
     m->ViewID = viewID;
     m->Enabled = 0;
@@ -49,19 +51,22 @@ void camera_mover_init(CameraMover *m, int viewID, Camera *cam,
     m->Update = 0;
 
     if (viewID == -1) {
+        m->pView = 0;
         m->pCamera = 0;
         m->CarNotToRender = 0;
         m->RenderDash = 0;
         return;
     }
 
-    // eGetView(viewID)->Camera on the disc. The far plane is set here and
-    // the near plane down in Enable, which is an odd place for it but is
-    // where the disc puts it.
-    m->pCamera = cam;
+    // The far plane is set here and the near plane down in Enable, which is
+    // an odd place for it but is where the disc puts it.
+    v = eGetView(viewID);
+    cam = v->pCamera;
+    m->pView = v;
     cam->CurrentKey.FarZ = 5000.0f;
     m->CarNotToRender = cam->CarNotToRender;
     m->RenderDash = cam->RenderDash;
+    m->pCamera = cam;
     camera_mover_enable(m);
 }
 
@@ -76,7 +81,7 @@ void camera_mover_enable(CameraMover *m)
         m->pCamera->CarNotToRender = m->CarNotToRender;
         m->pCamera->RenderDash = m->RenderDash;
     }
-    // eView::AttachCameraMover goes here; there is no eView yet.
+    eview_attach_camera_mover(m->pView, &m->Node);
     m->pCamera->CurrentKey.NearZ = 0.5f;
 }
 
@@ -94,7 +99,7 @@ void camera_mover_disable(CameraMover *m)
     m->Enabled = 0;
     m->CarNotToRender = m->pCamera->CarNotToRender;
     m->RenderDash = m->pCamera->RenderDash;
-    // eView::UnattachCameraMover goes here; there is no eView yet.
+    eview_unattach_camera_mover(m->pView, &m->Node);
 }
 
 // -------------------------------------------------------- CM_ORBIT_CAR
@@ -102,10 +107,10 @@ void camera_mover_disable(CameraMover *m)
 static void orbit_update_thunk(CameraMover *m);
 
 // 0x00154728.
-void orbit_init(OrbitCarCameraMover *o, int viewID, Camera *cam,
-                CamCarView *car, int joyPort)
+void orbit_init(OrbitCarCameraMover *o, int viewID, CamCarView *car,
+                int joyPort)
 {
-    camera_mover_init(&o->base, viewID, cam, CM_ORBIT_CAR);
+    camera_mover_init(&o->base, viewID, CM_ORBIT_CAR);
     o->base.Update = orbit_update_thunk;
 
     o->Radius = 5.0f;

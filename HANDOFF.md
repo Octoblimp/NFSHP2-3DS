@@ -7130,3 +7130,88 @@ CalculateLocalToScreenClip, BiasMatrixForZSorting, the three
 GetPixelSizes, GetScreenPosition, the camera movers' attach and detach,
 and eUpdateViewMode. Then a track viewer puts TRACKB12 on the screen
 through the ported loader and cull.
+
+## Session 30, continued (2026-09-26) -- Task 27's twenty-second slice: eView.obj
+
+The twenty-first slice went in as `7004d9f`. The twenty-second is
+`eView.obj` (0x00106650 .. 0x001075a8), with the words beside it in
+`EcstasyE.obj` that it needs:
+- CalculateH (0x00103ce0);
+- eGetRenderTarget and SetupMatrixPacks;
+- CreateViewMatricies (0x0010d268);
+- the static constructor's cameras and views.
+
+The code is in `eview.c` and `eviewmatrix.c`. The decode is in
+`docs/formats/eview.md`.
+
+```
+eview_check         12 scenarios, 2103 ops, 15454 lines, 0 differ
+                    153 mutations: 152 caught, 1 equivalent, 0 unexplained
+camera_check        7 scenarios, 1201 lines, 0 differ
+                    53 mutations: 46 caught, 7 equivalent, 0 unexplained
+sinit_check         15 calls, 0 problems
+```
+
+### What the listing says
+
+- **CreateViewMatricies makes five matrices.** They are view to screen,
+  view to clip, clip to screen twice (once for each pair of depth
+  limits), and view to a clip volume the size of the scissor. The last is
+  `WorldScreenClip`, which the cull reads.
+- **The near plane moves with the field of view** for players 1 and 2
+  only, and not when the view's first mover drives or is the bumper
+  camera. The test is `ID - 1 < 2`, unsigned.
+- **The frame malloc's test is exclusive** (`pos + n < end`), and a
+  failure leaves `pos` where it was. So a failed block can leave room for
+  the matrix packs after it. The checker runs the memory out at each of
+  the five allocations.
+- **MaybeChangeViewMode cuts the targets on every call**, whether or not
+  the mode changed. It waits for the GS only when the mode did change.
+  The stores go in the listing's order, and that order shows when two
+  targets are the same one.
+- **GetPixelSize(point, r) calls bGetTicker** and throws the answer away.
+  The port leaves the call out.
+- **The box's pixel size falls back to H, not 2H**, and its test is
+  `r < dist - r` where the other two test `r / 2 < d`.
+
+### The checker
+
+The static constructor runs in place from its first word to the texture
+downloader, with a stub at the downloader's call. The two seams are stubs
+that print their calls. The frame memory is 2 KB, filled with a pattern
+before each use, so that whatever a call leaves alone shows up. The
+harness's name buffer is 32 slots. A view's dump names twelve pointers in
+one `printf`, and 8 slots wrapped. The frame array is 64 bytes over, so
+that its end is not the next array's start.
+
+### The camera's eye
+
+The eye is `vsub` from vf00, which is (0, 0, 0, 1). The port negated it
+instead, which is the same for everything but a zero. So the default
+camera's eye was -0 in x and y, where the disc has +0. `eview_check`
+printed the eye's bits and found it. `camera.c` subtracts from zero now,
+and `camera_check`'s model does the same. Its new mutation
+`position-plain-negate` puts the negation back and is caught.
+
+### The mutation pass
+
+Two mutants survived the first pass:
+- **`spos-w` is equivalent.** It gives GetScreenPosition's vector the
+  point's own fourth word for w, and `eRotTransPers` forces w to 1.
+- **`pix-mul-order` was caught once the script had the right case.** It
+  swaps `r * H / d` for `r * (H / d)`, and the pixel count only differs
+  when one order lands exactly on a whole number. A search in float32
+  found two such pairs at H = 256, one each way, and both are in the
+  script now.
+
+`sinit.c` had given eview's constructor index [1]. It is [2], because the
+list's first function is 0x00102340, and `sinit_check` caught it.
+
+### Next: the track on the screen
+
+The loader, the cull and the view are all ported. A track viewer mode
+comes next. It loads TRACKB12.BUN, hands the scenery to `scenery_loader`,
+and draws what the cull picks through `georender`, with a free camera on
+view 1. The scenery is 932 solids, 122,937 triangles and 330 textures,
+and it fits the Old 3DS's linear heap as it is. CONTINUE.md has the count
+of what is left to a playable demo.

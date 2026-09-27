@@ -23,9 +23,11 @@
 
 #include <stdint.h>
 
+#include "blist.h"
 #include "bmatrix.h"
 #include "bvector.h"
 #include "camera.h"
+#include "eview.h"
 
 // GetCameraMoverTypeName, 0x00154380. The numbering is the disc's.
 typedef enum CameraMoverType {
@@ -73,20 +75,20 @@ typedef struct CamCarView {
 // fields and replaces the vtable with one function pointer, because Update is
 // the only virtual anything here calls.
 //
-// One divergence, and it is structural: the original's constructor takes a
-// view id, calls eGetView(id) and takes the Camera out of the view at
-// offset 56. There is no eView in the port yet -- it is the renderer, and it
-// is task 27 -- so the constructor takes the Camera directly. ViewID is kept
-// and stored because the movers print it and because task 27 will want it.
+// The constructor takes a view id, as the disc's does, and the Camera is the
+// view's: eGetView(id)->pCamera. A mover is a bTNode, so enabling it puts it
+// on the head of its view's list by its Node, which is what the view mode and
+// the projection read.
 typedef struct CameraMover CameraMover;
 
 // The offsets are the disc's, from the .mdebug record for CameraMover
-// (44 bytes). Offset 20 is `pView`, the eView the mover drew into, and it is
-// the one field with nowhere to go here; 40 is the vtable this replaces.
+// (44 bytes); 40 is the vtable this replaces.
 struct CameraMover {
+    bNode           Node;           // 0   on pView's CameraMoverList
     CameraMoverType Type;           // 8
     int             ViewID;         // 12
     int             Enabled;        // 16
+    eView          *pView;          // 20
     Camera         *pCamera;        // 24
     void           *pPlayer;        // 28
     void           *CarNotToRender; // 32
@@ -95,17 +97,18 @@ struct CameraMover {
 };
 
 // 0x001544f0. A ViewID of -1 leaves the mover detached and disabled; any
-// other value attaches it and enables it, which is what sets the camera's
-// far plane to 5000 and its near plane to 0.5.
-void camera_mover_init(CameraMover *m, int viewID, Camera *cam,
-                       CameraMoverType type);
+// other value takes the view and its camera, sets the camera's far plane to
+// 5000, and enables the mover, which sets the near plane to 0.5. The view
+// must have its camera by then: eInitViews gives views 0 to 3 theirs.
+void camera_mover_init(CameraMover *m, int viewID, CameraMoverType type);
 
 // 0x001545e0 / 0x00154658. Neither is a no-op while CameraStopUpdating is
 // set, and they do not treat it the same way. Enable skips the two render
 // flags it would push at the camera but still forces the near plane to 0.5;
 // Disable does not test the flag at all, and pulls both render flags back
 // off the camera on its way out. Both early-out when the flag is already
-// where they would put it.
+// where they would put it. Enable attaches the mover to its view and
+// Disable unattaches it, each after the flags.
 void camera_mover_enable(CameraMover *m);
 void camera_mover_disable(CameraMover *m);
 
@@ -170,8 +173,8 @@ extern bVector3 OrbitBoomOffset;
 #include "realtime.h"
 
 // 0x00154728. `car` may be null, in which case the mover orbits the origin.
-void orbit_init(OrbitCarCameraMover *o, int viewID, Camera *cam,
-                CamCarView *car, int joyPort);
+void orbit_init(OrbitCarCameraMover *o, int viewID, CamCarView *car,
+                int joyPort);
 
 // 0x00154b78. Runs one frame: approach the desired rotation speeds, advance
 // and clamp the angles, build the boom matrix, and hand it to the camera.

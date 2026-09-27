@@ -4,15 +4,15 @@
 // and the _GLOBAL_$I$ it stands for. sinit_check reads those comments, so
 // their shape is fixed.
 //
-// None of the fourteen reads anything another one writes -- thirteen fill
-// Tables, Graphs, list heads, hashes and constants, and the fourteenth
-// builds the slot-pool manager -- so the order is kept because it is the
-// image's, not because a different one would be observed. The manager comes
-// last for that reason too: it is entry 103, long after the physics tables.
-// The joystick's, [23], is named for EventNodeSlotPool but never touches
-// it: InitJoystick makes that pool at boot, once the manager is up; Track's,
-// [22], leaves TrackPolygonSlotPool for InitTree in the same way, and
-// CollisionBody's, [67], its three pools for InitCollisionBody.
+// None of the fifteen reads anything another one writes -- fourteen fill
+// Tables, Graphs, cameras, list heads, hashes and constants, and the
+// fifteenth builds the slot-pool manager -- so the order is kept because it
+// is the image's, not because a different one would be observed. The manager
+// comes last for that reason too: it is entry 103, long after the physics
+// tables. The joystick's, [23], is named for EventNodeSlotPool but never
+// touches it: InitJoystick makes that pool at boot, once the manager is up;
+// Track's, [22], leaves TrackPolygonSlotPool for InitTree in the same way,
+// and CollisionBody's, [67], its three pools for InitCollisionBody.
 
 #include "sinit.h"
 
@@ -21,6 +21,7 @@
 #include "car.h"
 #include "collisionbody.h"
 #include "drivetarget.h"
+#include "eview.h"
 #include "joyevent.h"
 #include "mellowmover.h"
 #include "physicscar.h"
@@ -33,6 +34,7 @@
 
 void sinit_run(void)
 {
+    eview_static_init();        // [2]   0x00114098 _GLOBAL_$I$FloatingVBlankTimeMin
     car_static_init();          // [14]  0x001347c0 _GLOBAL_$I$fDraftFalloff
     physicscar_static_init();   // [15]  0x00137438 _GLOBAL_$I$RigidBodySlotPool
     realdriver_static_init();   // [17]  0x0013aa88 _GLOBAL_$I$PowerSlideYawCoef

@@ -109,10 +109,13 @@ void camera_set_matrix(Camera *c, const bMatrix4 *m, float elapsed)
     row3.y = cur->Matrix.v3.y;
     row3.z = cur->Matrix.v3.z;
     row3.pad = cur->Matrix.v3.w;
+    //
+    // It is a subtraction from zero, not a negation: a lane that comes out
+    // +0 stays +0, where -x would make it -0.
     eMulVector3(&cur->Position, &t, &row3);
-    cur->Position.x = -cur->Position.x;
-    cur->Position.y = -cur->Position.y;
-    cur->Position.z = -cur->Position.z;
+    cur->Position.x = 0.0f - cur->Position.x;
+    cur->Position.y = 0.0f - cur->Position.y;
+    cur->Position.z = 0.0f - cur->Position.z;
     cur->Position.pad = 1.0f - cur->Position.pad;
 
     // Direction is the normalised third column, which the transpose has

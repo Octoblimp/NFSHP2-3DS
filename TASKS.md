@@ -1860,7 +1860,25 @@ is citro3d and owns the top.
         TRACKB12's: 9 scenarios, 7,273 ops, 46,687 lines, 0 differ. Of
         its 148 mutations, 147 are caught and 1 is equivalent. Written
         up in `docs/formats/scenerycull.md`.
-        CONTINUE.md has what is next.
+
+        **The twenty-second slice is closed: `eView.obj`**, in `eview.c`
+        and `eviewmatrix.c`. It covers:
+        - CalculateViewMatricies, CreateViewMatricies, CalculateH and
+          SetupMatrixPacks, which make the matrices and H that the cull
+          reads;
+        - the local-to-clip products, the Z-sort bias, the pixel sizes,
+          the screen position and the light context;
+        - the movers' attach and detach and the view modes;
+        - the static constructor's cameras and views.
+
+        `eview_check` runs the image against the port: 12 scenarios,
+        2,103 ops, 15,454 lines, 0 differ. Of its 153 mutations, 152 are
+        caught and 1 is equivalent. The check found that `camera.c`
+        negated the eye where the disc subtracts it from zero, which gave
+        the default eye -0 in x and y. That is fixed. Written up in
+        `docs/formats/eview.md`.
+        CONTINUE.md has what is next, and how far it is to a playable
+        demo.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag
 

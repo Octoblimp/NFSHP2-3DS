@@ -74,6 +74,7 @@ SOURCES = [
     "3DS Files/source/scenerycull.c",
     "3DS Files/source/eframe.c",
     "3DS Files/source/eview.c",
+    "3DS Files/source/camera.c",
     "3DS Files/source/scenery.c",
     "3DS Files/source/emath.c",
     "3DS Files/source/bmath.c",

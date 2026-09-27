@@ -318,10 +318,19 @@ static void frame_camera(GeoView* v)
 
 // The mover holds pointers into the GeoView, so it is rebuilt whenever the
 // struct is cleared or a new car is framed rather than being set up once.
+//
+// The mover goes on view 0's list and takes its camera from it. The viewer
+// is that view's only user, and the struct the last mover lived in may have
+// been cleared since, so the list is started over rather than unlinked from.
 static void reset_camera(GeoView* v)
 {
+    eView* view = eGetView(EVIEW_ID_FRONTEND);
+
     camera_init(&v->cam);
-    orbit_init(&v->orbit, 0, &v->cam, &v->carView, 0);
+    view->CameraMoverList.next = &view->CameraMoverList;
+    view->CameraMoverList.prev = &view->CameraMoverList;
+    view->pCamera = &v->cam;
+    orbit_init(&v->orbit, EVIEW_ID_FRONTEND, &v->carView, 0);
     // The near plane the mover sets is 0.5 and its far plane 5000, which are
     // the disc's and are wrong for a 4.5-metre car seen from 6 metres only
     // in that they waste depth range. Left alone: they are what the camera

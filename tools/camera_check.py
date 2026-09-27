@@ -42,6 +42,7 @@ SOURCES = [
     "tools/src/camera_test.c",
     "3DS Files/source/camera.c",
     "3DS Files/source/cammover.c",
+    "3DS Files/source/eview.c",
     "3DS Files/source/emath.c",
     "3DS Files/source/bmatrix.c",
     "3DS Files/source/bvector.c",
@@ -230,8 +231,11 @@ def set_camera_matrix(c, m, elapsed):
     t = etranspose(cur.matrix)
     t[3] = t[7] = t[11] = 0.0
 
+    # vf00 minus the product, lane by lane: a +0 lane stays +0 (the image
+    # says so, through tools/eview_check.py's static constructor).
     p = emul_vector3(t, cur.matrix[12:15])
-    cur.pos = [f32(-p[0]), f32(-p[1]), f32(-p[2]), f32(1.0 - p[3])]
+    cur.pos = [f32(0.0 - p[0]), f32(0.0 - p[1]), f32(0.0 - p[2]),
+               f32(1.0 - p[3])]
 
     d = f32(t[8] * t[8])
     d = f32(d + f32(t[9] * t[9]))
@@ -260,34 +264,52 @@ def set_camera_matrix(c, m, elapsed):
 # ------------------------------------------------------------- the movers
 
 
+# The views, as far as a mover reaches them: each one's Camera ([56]) and
+# its list of movers, head first. eView::AttachCameraMover (0x00106b18)
+# links a mover in at the head and UnattachCameraMover (0x00106b38) unlinks
+# it from wherever it is. use_view starts a view over with a camera, which
+# is what the harness does before each constructor.
+VIEW_CAM = {}
+VIEW_MOVERS = {}
+
+
+def use_view(viewid, cam):
+    VIEW_CAM[viewid] = cam
+    VIEW_MOVERS[viewid] = []
+
+
 class Mover(object):
-    """CameraMover, 44 bytes. pView at 20 has nowhere to go here."""
+    """CameraMover, 44 bytes. The vtable at [40] is left out."""
 
     def __init__(self):
         self.type = 0
         self.viewid = 0
         self.enabled = 0
+        self.view = None
         self.cam = None
         self.carnot = False
         self.dash = 0
 
 
-def mover_init(m, viewid, cam, type_):
-    """0x001544f0. A ViewID of -1 leaves it detached and disabled; anything
-    else goes through eGetView, takes the view's Camera, forces the far plane
-    and enables. [20] pView and the vtable at [40] are left out."""
+def mover_init(m, viewid, type_):
+    """0x001544f0. A ViewID of -1 leaves it detached and disabled, [20] pView
+    and [24] pCamera both 0; anything else is v = eGetView(id) into [20],
+    v's Camera ([56]) into [24], the far plane forced, and Enable."""
     m.type = type_
     m.viewid = viewid
     m.enabled = 0
     if viewid == -1:
+        m.view = None
         m.cam = None
         m.carnot = False
         m.dash = 0
         return
-    m.cam = cam
+    cam = VIEW_CAM[viewid]
+    m.view = viewid
     cam.cur.farz = MOVER_FAR_Z
     m.carnot = cam.carnot
     m.dash = cam.dash
+    m.cam = cam
     mover_enable(m)
 
 
@@ -300,6 +322,7 @@ def mover_enable(m):
     if not STOP_UPDATING[0]:
         m.cam.carnot = m.carnot
         m.cam.dash = m.dash
+    VIEW_MOVERS[m.view].insert(0, m)        # AttachCameraMover([20], m)
     m.cam.cur.nearz = ENABLE_NEAR_Z
 
 
@@ -313,6 +336,7 @@ def mover_disable(m):
     m.enabled = 0
     m.carnot = m.cam.carnot
     m.dash = m.cam.dash
+    VIEW_MOVERS[m.view].remove(m)           # UnattachCameraMover([20], m)
 
 
 class Orbit(object):
@@ -324,13 +348,13 @@ class Orbit(object):
         self.base = Mover()
 
 
-def orbit_init(o, viewid, cam, car, joyport):
+def orbit_init(o, viewid, car, joyport):
     """0x00154728.
 
         f2 = 5.0   f0 = 1000.0   f3 = 1.0   f1 = [gp-31452] = 0.4
         a3 = 0xf230   v1 = 26000   a0 = 0xc738   a1 = 0xf8f4   a2 = 24
     """
-    mover_init(o.base, viewid, cam, CM_ORBIT_CAR)
+    mover_init(o.base, viewid, CM_ORBIT_CAR)
 
     o.radius = 5.0
     o.angleh = 26000
@@ -644,27 +668,36 @@ def s_orbitinit(o):
     c = Camera()
     camera_init(c)
     orb = Orbit()
-    orbit_init(orb, 0, c, car, 2)
+    use_view(0, c)
+    orbit_init(orb, 0, car, 2)
     o.orbit(orb)
     o.cam(c)
     o("  type %s" % mover_type_name(orb.base.type))
     o.v3("target", orbit_target(orb))
 
     b = Mover()
-    mover_init(b, -1, c, CM_DRIVE)
-    o("  detached type %s view %d enabled %d camera %d"
+    mover_init(b, -1, CM_DRIVE)
+    o("  detached type %s view %d enabled %d camera %d pview %d"
       % (mover_type_name(b.type), b.viewid, b.enabled,
-         1 if b.cam is not None else 0))
+         1 if b.cam is not None else 0, 1 if b.view is not None else 0))
 
     camera_init(c)
     d = Orbit()
-    orbit_init(d, 3, c, None, 0)
+    use_view(3, c)
+    orbit_init(d, 3, None, 0)
     o("  carless")
     o.orbit(d)
     o.v3("target", orbit_target(d))
+    o("  carless listed %d first %d" % listed(d.base))
 
     for i in range(-1, 19):
         o("  name %2d %s" % (i, mover_type_name(i)))
+
+
+def listed(m):
+    """How many movers m's view holds, and whether m is the first."""
+    ms = VIEW_MOVERS[m.viewid]
+    return len(ms), 1 if ms and ms[0] is m else 0
 
 
 def s_enable(o):
@@ -672,16 +705,18 @@ def s_enable(o):
 
     def pmover(tag, m, c):
         o("  %s en %d movercar %d moverdash %d camcar %d camdash %d"
-          " near %s far %s"
-          % (tag, m.enabled, 1 if m.carnot else 0, m.dash,
-             1 if c.carnot else 0, c.dash, g9(c.cur.nearz), g9(c.cur.farz)))
+          " near %s far %s listed %d first %d"
+          % ((tag, m.enabled, 1 if m.carnot else 0, m.dash,
+              1 if c.carnot else 0, c.dash, g9(c.cur.nearz), g9(c.cur.farz))
+             + listed(m)))
 
     c = Camera()
     camera_init(c)
     c.carnot = True
     c.dash = 7
     m = Mover()
-    mover_init(m, 0, c, CM_STILL)
+    use_view(0, c)
+    mover_init(m, 0, CM_STILL)
     pmover("constructed", m, c)
 
     c.carnot = False
@@ -719,7 +754,8 @@ def s_enable(o):
     camera_init(c)
     c.carnot = True
     c.dash = 5
-    orbit_init(orb, 0, c, None, 0)
+    use_view(0, c)
+    orbit_init(orb, 0, None, 0)
     o("  orbit ctor camcar %d camdash %d fov %u handlers %d"
       % (1 if c.carnot else 0, c.dash, c.cur.fov, orb.handlers_added))
 
@@ -727,7 +763,8 @@ def s_enable(o):
     c.carnot = True
     c.dash = 5
     STOP_UPDATING[0] = 1
-    orbit_init(orb, 0, c, None, 0)
+    use_view(0, c)
+    orbit_init(orb, 0, None, 0)
     o("  orbit ctor frozen camcar %d camdash %d fov %u"
       % (1 if c.carnot else 0, c.dash, c.cur.fov))
     STOP_UPDATING[0] = 0
@@ -742,7 +779,8 @@ def s_orbitspin(o):
     c = Camera()
     camera_init(c)
     orb = Orbit()
-    orbit_init(orb, 0, c, car, 0)
+    use_view(0, c)
+    orbit_init(orb, 0, car, 0)
 
     for i in range(24):
         if i == 0:
@@ -778,7 +816,8 @@ def s_orbitlimits(o):
     c = Camera()
     camera_init(c)
     orb = Orbit()
-    orbit_init(orb, 0, c, car, 0)
+    use_view(0, c)
+    orbit_init(orb, 0, car, 0)
     orb.max_radius = 12.0
     orb.min_radius = 2.0
     for i in range(40):
@@ -794,7 +833,8 @@ def s_orbitlimits(o):
     o("  held r %s dr %s" % (g9(orb.radius), g9(orb.desired_radius)))
 
     camera_init(c)
-    orbit_init(orb, 0, c, car, 0)
+    use_view(0, c)
+    orbit_init(orb, 0, car, 0)
     orb.dvspeed = 400
     orb.vspeed = 400
     for i in range(20):
@@ -807,7 +847,8 @@ def s_orbitlimits(o):
         o("  down %d v %u" % (i, orb.anglev))
 
     camera_init(c)
-    orbit_init(orb, 0, c, car, 0)
+    use_view(0, c)
+    orbit_init(orb, 0, car, 0)
     orb.min_anglev = 0
     orb.max_anglev = 65535
     orb.approach_v = 1
@@ -860,7 +901,8 @@ def s_tweakables(o):
     c = Camera()
     camera_init(c)
     orb = Orbit()
-    orbit_init(orb, 0, c, car, 0)
+    use_view(0, c)
+    orbit_init(orb, 0, car, 0)
     orb.dhspeed = 500
     orb.desired_radius = 3.0
     USE_TWEAKABLES[0] = 1
@@ -890,7 +932,8 @@ def s_tweakables(o):
     STOP_UPDATING[0] = 0
 
     camera_init(c)
-    orbit_init(orb, 0, c, None, 0)
+    use_view(0, c)
+    orbit_init(orb, 0, None, 0)
     for i in range(3):
         orbit_update(orb, f32(1.0 / 60.0))
         o("  carless %d" % i)
@@ -898,7 +941,8 @@ def s_tweakables(o):
 
     BOOM[0], BOOM[1], BOOM[2] = 1.0, 2.0, 3.0
     camera_init(c)
-    orbit_init(orb, 0, c, car, 0)
+    use_view(0, c)
+    orbit_init(orb, 0, car, 0)
     orbit_update(orb, f32(1.0 / 60.0))
     o("  offset")
     o.key("cur", c.cur)
@@ -971,8 +1015,11 @@ MUTATIONS = [
     ("transpose-column-kept", CAM,
      "    t.v2.w = 0.0f;", "    t.v2.w = t.v2.w;"),
     ("position-not-negated", CAM,
-     "    cur->Position.x = -cur->Position.x;",
+     "    cur->Position.x = 0.0f - cur->Position.x;",
      "    cur->Position.x = cur->Position.x;"),
+    ("position-plain-negate", CAM,
+     "    cur->Position.y = 0.0f - cur->Position.y;",
+     "    cur->Position.y = -cur->Position.y;"),
     ("position-pad-plain-negate", CAM,
      "    cur->Position.pad = 1.0f - cur->Position.pad;",
      "    cur->Position.pad = -cur->Position.pad;"),
@@ -1093,6 +1140,16 @@ MUTATIONS = [
     ("enable-near-behind-freeze", MOV,
      "    m->pCamera->CurrentKey.NearZ = 0.5f;",
      "    if (!CameraStopUpdating) m->pCamera->CurrentKey.NearZ = 0.5f;"),
+    ("enable-no-attach", MOV,
+     "    eview_attach_camera_mover(m->pView, &m->Node);", "    (void)0;"),
+    ("disable-no-unattach", MOV,
+     "    eview_unattach_camera_mover(m->pView, &m->Node);", "    (void)0;"),
+    ("mover-view-zero", MOV,
+     "    v = eGetView(viewID);", "    v = eGetView(0);"),
+    ("mover-pview-zero", MOV,
+     "    m->pView = v;", "    m->pView = eGetView(0);"),
+    ("detached-pview-kept", MOV,
+     "        m->pView = 0;", "        (void)0;"),
     ("mover-far-plane", MOV,
      "    cam->CurrentKey.FarZ = 5000.0f;",
      "    cam->CurrentKey.FarZ = 1000.0f;"),

@@ -1,6 +1,7 @@
 // eview -- eView, Ecstasy's record of one view of the world (128 bytes,
-// .mdebug type#2524), and the table of ten the renderer keeps at
-// 0x002ab230 (eGetView, 0x001071f0, is `&table[id]`).
+// .mdebug type#2524), the table of ten the renderer keeps at 0x002ab230
+// (eGetView, 0x001071f0, is `&table[id]`), and the render targets the views
+// draw into (RenderTargets, 0x002c9a20, 22 of 1168 bytes).
 //
 // A view is a camera, the matrices the renderer made from it this frame, and
 // the render targets it draws into. The cull reads the camera, H, the ID,
@@ -11,9 +12,11 @@
 // environment maps. eDisplayFrame culls the scenery for 1..3 and, when
 // EnvironmentMappingEnable is set, for 4..9.
 //
-// The matrices are the renderer's and are made per frame in frame memory,
-// so the record holds pointers to them. On the handheld the port's renderer
-// fills them; see scenerycull.h for what the cull needs from them.
+// This file is eView.obj's list half (0x00106650 .. 0x001075a8, less the
+// matrices) and the words beside it in EcstasyE.obj: the view modes, the
+// render target table, the four cameras and the static constructor's share
+// of them. eviewmatrix.h has the matrices. Written up with addresses in
+// docs/formats/eview.md; checked by tools/eview_check.py.
 
 #ifndef EVIEW_H
 #define EVIEW_H
@@ -27,19 +30,66 @@
 #include "camera.h"
 
 #define EVIEW_NUM_VIEWS 10       // TextureDownloader follows at 0x002ab730
+#define EVIEW_NUM_RENDER_TARGETS 22
 
-// The view ids that matter to the cull.
-#define EVIEW_ID_FRONTEND   0
+// The view ids, from eGetViewIDName's strings.
+#define EVIEW_ID_NONE       (-1)
+#define EVIEW_ID_FRONTEND   0    // EVIEW_FLAILER
 #define EVIEW_ID_PLAYER1    1
-#define EVIEW_ID_ENVMAP_LO  4
+#define EVIEW_ID_PLAYER2    2
+#define EVIEW_ID_PLAYER1_RVM 3
+#define EVIEW_ID_ENVMAP_LO  4    // ENVMAP0F, R, B, L, U, D
 #define EVIEW_ID_ENVMAP_HI  9
 
-// eRenderTarget, 1168 bytes on the disc (.mdebug type#3199). Only its head
-// is named: the cull reads Active.
+// eRenderTargetMatrixPack, 192 bytes (.mdebug type#4358): what the VU1
+// microcode is handed per target.
+typedef struct eRenderTargetMatrixPack {
+    bMatrix4 WorldView;          //   0
+    bMatrix4 WorldClip;          //  64
+    bMatrix4 VUClipScreen;       // 128
+} eRenderTargetMatrixPack;
+
+// eRenderTarget, 1168 bytes (.mdebug type#3199). Every field is named; the
+// two blocks of GS packets are kept as bytes so the offsets stay the disc's.
 typedef struct eRenderTarget {
-    int32_t     ID;                     //   0
-    const char *Name;                   //   4
-    uint32_t    Active;                 //   8
+    int32_t     ID;                     //    0
+    const char *Name;                   //    4
+    uint32_t    Active;                 //    8
+    int32_t     RelativeToFrameBuffer;  //   12
+    int32_t     CenterRelativeToFrame;  //   16
+    int32_t     ScissorX;               //   20
+    int32_t     ScissorY;               //   24
+    int32_t     ScissorW;               //   28
+    int32_t     ScissorH;               //   32
+    int32_t     FrameMode;              //   36
+    int32_t     FrameAddress;           //   40
+    int32_t     FrameWriteMask;         //   44
+    int32_t     FrameWidth;             //   48
+    int32_t     FrameHeight;            //   52
+    int32_t     ZBufferMode;            //   56
+    int32_t     ZBufferAddress;         //   60
+    int32_t     ZBufferMask;            //   64
+    int32_t     ZTest;                  //   68
+    int32_t     AlphaTest;              //   72
+    int32_t     FBA;                    //   76
+    int32_t     IgnoreAlphaTextures;    //   80
+    float       AspectRatioX;           //   84
+    float       AspectRatioY;           //   88
+    float       AspectRatio2DX;         //   92
+    float       AspectRatio2DY;         //   96
+    float       FovBias;                //  100
+    uint32_t    BackgroundColour;       //  104
+    int32_t     ClearBackground;        //  108
+    uint8_t     ClearZBuffer[128];      //  112 GS packets
+    uint8_t     DrawContexts[896];      //  240 GS packets
+    eRenderTargetMatrixPack *MatrixPack0;   // 1136
+    eRenderTargetMatrixPack *MatrixPack1;   // 1140
+    bMatrix4   *WorldClip;              // 1144
+    bMatrix4   *WorldView;              // 1148
+    bMatrix4   *ClipScreen;             // 1152
+    bMatrix4   *VUClipScreen;           // 1156
+    bMatrix4   *VUClipScreen1;          // 1160
+    uint32_t    pad;                    // 1164
 } eRenderTarget;
 
 typedef struct eView {
@@ -58,7 +108,7 @@ typedef struct eView {
     eRenderTarget *pRenderTarget0;      //  48
     eRenderTarget *pRenderTarget1;      //  52
     Camera   *pCamera;                  //  56
-    bNode     CameraMoverList;          //  60
+    bNode     CameraMoverList;          //  60  CameraMovers, by their Node
     bMatrix4 *WorldViewMatrix;          //  68
     bMatrix4 *WorldClipMatrix;          //  72
     bMatrix4 *WorldScreenMatrix;        //  76
@@ -82,17 +132,41 @@ typedef char eview_layout_check[
      && offsetof(eView, WorldViewMatrix) == 68
      && offsetof(eView, WorldScreenClipMatrix) == 80
      && offsetof(eView, WorldLightContext) == 108
-     && offsetof(eView, BlackAndWhiteMode) == 112) ? 1 : -1];
+     && offsetof(eView, BlackAndWhiteMode) == 112
+     && sizeof(eRenderTarget) == 1168
+     && offsetof(eRenderTarget, AspectRatioX) == 84
+     && offsetof(eRenderTarget, DrawContexts) == 240
+     && offsetof(eRenderTarget, MatrixPack0) == 1136
+     && offsetof(eRenderTarget, VUClipScreen1) == 1160) ? 1 : -1];
 #endif
+
+// ------------------------------------------------------------ the globals
 
 // The table, 0x002ab230, and eGetView.
 extern eView eViews[EVIEW_NUM_VIEWS];
 eView *eGetView(int32_t id);
 
-// CurrentViewMode, 0x00322898 (gp-25432), and eGetCurrentViewMode
-// (0x00107238). Modes 3 and 4 are the split screens.
+// RenderTargets, 0x002c9a20, zero in the image: SetScreenBuffers fills it.
+// eGetRenderTarget (0x00104d00) is `&RenderTargets[id]`.
+extern eRenderTarget RenderTargets[EVIEW_NUM_RENDER_TARGETS];
+eRenderTarget *eGetRenderTarget(int32_t id);
+
+// MainDraw0Context, 0x00322860 (gp-25488): the render target the frame is
+// drawn into, which is where MaybeChangeViewMode takes the screen's size
+// from. The image starts it at RenderTargets[16]; the display modes move it
+// among 15, 16, 18, 19 and 20.
+extern eRenderTarget *MainDraw0Context;
+
+// The view modes, EcstasyE.obj's .sdata, all 0 in the image.
+// CurrentViewMode (0x00322898, gp-25432) is what the movers ask for,
+// RenderingViewMode (0x0032289c) what the render targets were last cut for,
+// TweakerViewMode (0x003228a0) a debug override that wins when non-zero.
+// Mode 0 and 1 are one player, 2 adds the rear-view mirror, 3 is two
+// players one above the other and 4 side by side.
 extern int32_t CurrentViewMode;
-int32_t eGetCurrentViewMode(void);
+extern int32_t RenderingViewMode;
+extern int32_t TweakerViewMode;
+int32_t eGetCurrentViewMode(void);      // 0x00107238
 
 // EnvironmentMappingEnable, 0x00323758 (gp-21656): whether eDisplayFrame
 // culls the six environment-map views. 1 in the image's .sdata.
@@ -104,5 +178,72 @@ extern int32_t EnvironmentMappingEnable;
 eView  *eGetCurrentView(void);
 void    eSetCurrentView(eView *v);
 Camera *eGetCurrentCamera(void);
+
+// The four cameras eInitViews hands out, 448 bytes apart from 0x002a9a50.
+extern Camera FlailerCamera;            // 0x002a9a50, view 0
+extern Camera Player1Camera;            // 0x002a9c10, view 1
+extern Camera Player2Camera;            // 0x002a9dd0, view 2
+extern Camera Player1RVMCamera;         // 0x002a9f90, view 3
+
+// 0x00325300 and 0x00325302, .sbss: the fields of view the projection is
+// measured against. The static constructor sets them to 16384 (90
+// degrees) and 9102 (50, which the compiler folded from 50 * 65536 / 360).
+extern uint16_t aBaselineFovMip;
+extern uint16_t aBaselineFovZ;
+
+// The screen, EcstasyE.obj's .sdata. The projections are in the GS's
+// coordinates: a 4096-pixel square with the screen in its middle, centred
+// on 2048, and a depth range just above 2.
+extern int32_t ScreenWidth;             // 0x003227c8  512
+extern int32_t ScreenHeight;            // 0x003227cc  448
+extern float   ClipVolumeScaleX;        // 0x00322920  0.5
+extern float   ClipVolumeScaleY;        // 0x00322924  0.5
+extern float   CenterX;                 // 0x00322928  2048
+extern float   CenterY;                 // 0x0032292c  2048
+extern float   ZMin;                    // 0x00322930  0x40000010
+extern float   ZMax;                    // 0x00322934  0x400ff000
+extern float   ZMin1;                   // 0x00322938  0x40000040
+extern float   ZMax1;                   // 0x0032293c  0x400ffff0
+
+// ------------------------------------------------------------- the views
+
+// eView::eView (0x00106650): all 128 bytes zeroed, the mover list empty and
+// FovBias 1. ~eView (0x001066a8) is not ported: it runs from the global
+// destructors at exit, which the handheld does not reach.
+void eview_construct(eView *v);
+
+// The static constructor's share (0x00114098): the four cameras, the two
+// baseline fields of view, and the ten views. The port calls it once at
+// start-up where the disc's crt0 calls it.
+void eview_static_init(void);
+
+// eInitViews (0x001070f8): the ids, render targets and cameras of views 0
+// to 3. Only view 0 is made active here; 4..9 are left alone.
+void eInitViews(void);
+
+// eGetViewIDName (0x00107010). -1 is "EVIEW_NONE"; an id past 9
+// "EVIEW_UNKNOWN(?)".
+const char *eGetViewIDName(int32_t id);
+
+// eView::AttachCameraMover (0x00106b18) and UnattachCameraMover
+// (0x00106b38). The mover goes on the head of the list; either way the
+// mode is worked out again. `mover` is a CameraMover, by its Node.
+void eview_attach_camera_mover(eView *v, bNode *mover);
+void eview_unattach_camera_mover(eView *v, bNode *mover);
+
+// eUpdateViewMode (0x00107240): 3 when players 1 and 2 both have movers,
+// else 2 when player 1 and the mirror have, else 1 for player 1 alone,
+// else 0.
+void eUpdateViewMode(void);
+
+// MaybeChangeViewMode (0x00107310): once the mode to draw differs from the
+// one the targets were cut for, waits for the GS and cuts players 1 and
+// 2's targets and the mirror's out of MainDraw0Context's scissor, and sets
+// which of them are active.
+void MaybeChangeViewMode(void);
+
+// eWaitUntilRenderingDone (0x00110770), the seam: the GS and the DMA
+// drained. The renderer sets it; NULL does nothing.
+extern void (*gEWaitUntilRenderingDoneFn)(void);
 
 #endif

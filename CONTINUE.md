@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-26). `HANDOFF.md` is the running narrative; this file is the short
+continuation (2026-09-26), after task 27's twenty-second slice. `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -16,10 +16,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Fifty-one cross-checkers pass, plus the table generators:
+Fifty-two cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -35,7 +35,7 @@ bui_check          FRONTB.BUN    1395 lines, 0 differ
 sndbank_check      30 banks,       908 lines, 0 differ   (20000 mutations, 0 disagree)
 bsnd_check         12 scenarios,  5157 lines, 0 differ   (25/25 mutations caught)
 emath_check         9 scenarios,  2416 lines, 0 differ   (39/39 mutations caught)
-camera_check        7 scenarios,  1200 lines, 0 differ   (40 caught, 7 equivalent)
+camera_check        7 scenarios,  1201 lines, 0 differ   (46 caught, 7 equivalent)
 trackroute_check   10 scenarios,   671 lines, 0 differ   (52 caught, 1 equivalent)
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
 engine_check        8 scenarios,   414 lines, 0 differ   (56 caught, 2 equivalent)
@@ -53,7 +53,7 @@ car_check          58 scenarios,  4238 lines, 0 differ   (238 caught, 16 equival
 physicssystem_check 12 scenarios,  739 lines, 0 differ   (61 caught, 1 equivalent)
 aerodynamics_check  7 scenarios,   107 lines, 0 differ   (74/74 mutations caught)
 physcomp_check      8 scenarios,   239 lines, 0 differ   (46 caught, 1 equivalent)
-sinit_check        14 calls,        0 problems           (6/6 mutations caught)
+sinit_check        15 calls,        0 problems           (6/6 mutations caught)
 physicscar_check  106 scenarios, 102908 lines, 0 differ (257 caught, 6 equivalent)
 mellowmover_check  39 scenarios, 56080 lines, 0 differ  (341 caught, 5 equivalent)
 carmode_check      74 transitions, 19 resets, 36396 lines, 0 differ (491 caught, 14 equivalent)
@@ -74,6 +74,7 @@ collision_check     3587 ops,     6859 lines, 0 differ  (121 caught, 10 equivale
 world_check         2742 ops,    15110 lines, 0 differ  (328/328 mutations caught)
 scenery_check       3450 ops,    16724 lines, 0 differ  (77 caught, 2 equivalent)
 scenerycull_check   7273 ops,    46687 lines, 0 differ  (147 caught, 1 equivalent)
+eview_check         2103 ops,    15454 lines, 0 differ  (152 caught, 1 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -386,17 +387,48 @@ and so replaced every boot.
      has a case, found by search, where the other order rounds across a
      plane, the 2 or a far clip. No disagreement between the image and
      the port was found. Written up in `docs/formats/scenerycull.md`.
-   - **The twenty-second slice is eView.obj's matrices**:
-     `eView::CalculateViewMatricies` (`0x00106700`), `CreateViewMatricies`
-     (`0x0010d268`), `CalculateLocalToClip` and `CalculateLocalToScreenClip`,
-     `BiasMatrixForZSorting`, the three `GetPixelSize`s,
-     `GetScreenPosition`, the camera movers' attach and detach, and
-     `eUpdateViewMode`. They make the WorldView and WorldScreenClip
-     matrices the cull reads, and H. After it, a track viewer mode in
-     `main.c` puts TRACKB12 on the screen through the ported loader and
-     cull, with eModel::Init and Render done over `georender`.
+   - **The twenty-second slice is `eView.obj`**, in `eview.c` and
+     `eviewmatrix.c`. It covers:
+     - `CalculateViewMatricies` (`0x00106700`), `CreateViewMatricies`
+       (`0x0010d268`), `CalculateH` and `SetupMatrixPacks`;
+     - the two local-to-clip products and `BiasMatrixForZSorting`;
+     - the three `GetPixelSize`s, `GetScreenPosition`, `GetScreenWidth`
+       and `GetScreenHeight`, and `SetupWorldLightContext`;
+     - the view names and lookups, the camera movers' attach and detach,
+       `eUpdateViewMode` and `MaybeChangeViewMode`;
+     - the static constructor's four cameras and ten views, which are
+       `__CTOR_LIST__[2]` in `sinit_run`.
+
+     `eWaitUntilRenderingDone` and `elSetupLightContext` are seams that do
+     nothing when NULL. `eview_check` runs the image against the port: 12
+     scenarios, 2,103 ops, 15,454 lines, 0 differ. Of its 153 mutations,
+     152 are caught and 1 is equivalent. The check found one bug outside
+     the slice, in `camera.c`. The eye is a subtraction from VU0's (0, 0,
+     0, 1), and the port negated it instead, so the default eye was -0 in
+     x and y. That is fixed, and `camera_check` has a mutation for it (46
+     caught, 7 equivalent). Written up in `docs/formats/eview.md`.
+   - **Next is the track on the screen.** A track viewer mode in `main.c`
+     will:
+     - load TRACKB12.BUN;
+     - hand its 122 scenery sections and its zones to `scenery_loader`;
+     - draw what the ported cull picks, with eModel::Init and Render done
+       over `georender`.
+
+     "The road to a playable demo", below, has everything after it.
 
    Things to know before the next slice:
+   - **A subtraction from zero is not a negation.** VU0 makes a negative
+     with `vsub` from vf00, and 0 - (+0) is +0 where -(+0) is -0. The
+     camera's eye was wrong this way from the camera's port until
+     `eview_check` printed its bits. Where the listing subtracts from vf00, the port
+     writes `0.0f - x`.
+   - **`sinit.c`'s bracketed index is 1-based past the count word.** The
+     list's first function is [1], and `sinit_check` reads every index, so
+     an index that is off by one fails there.
+   - **The track fits the Old 3DS's linear heap.** `heapcfg.c` gives it
+     about 68 MB. The scenery's 932 solids are 122,937 triangles, which is
+     10.3 MB as `georender`'s triangle lists. Their 330 textures are
+     27.3 MB as RGBA8, and 11 more are in no pack.
    - **Nothing calls it on hardware yet.** The port has no `LoaderTable`,
      so only the checker reaches `track_loader_geometry`. The `InitTree`
      call in `EndGameFlowLoadingTrackSpecific` (`0x0016461c`) is not wired
@@ -904,6 +936,36 @@ road. Build tasks 25-27's HUD to that from the start rather than making a
 top-screen HUD and splitting it later. `uirender.c` (citro2d) is the home
 for the bottom-screen widgets; `georender.c` (citro3d) owns the top. Also
 at the head of Phase 4 in `TASKS.md`.
+
+## The road to a playable demo
+
+"Playable" means the demo's own loop: pick a car and a mode in the
+frontend, race TRACKB12 against the AI with the cops on, see the result,
+and go back to the menus. The count below is in slices of the size the
+last ten were, which is one or two sessions each. It is an estimate, and
+it will move as each class shows what it reaches.
+
+| Step | What | Slices |
+|---|---|---|
+| 1 | The track on the screen: the viewer mode, eModel over `georender`, a free camera | 1 |
+| 2 | The LoaderTable: every chunk type in TRACKB12, with the solids, the texture packs, the topology and the routes live | 1-2 |
+| 3 | The sky, the sun and the weather's draw | 1 |
+| 4 | Car's constructor and destructor, and CarRenderInfo, so that a car draws on the track | 3-4 |
+| 5 | Player and the chase cameras (CM_DRIVE and the rest of `cammover.c`'s set) | 2 |
+| 6 | RaceCoordinator's InitForRace, InitCars, InitPlayers and Race::Init, and the game flow from the frontend into a race and back | 2-3 |
+| 7 | **One car driving the track.** Steps 1-6 are this milestone: about 10-13 slices | |
+| 8 | The rest of task 26: the racer and traffic AI, the six classes behind Car's constructor seams | 4-6 |
+| 9 | The cops and the pursuit: CopManager, the cop drivers, roadblocks and spikes | 4-6 |
+| 10 | The two-screen HUD, to the split decided below | 1-2 |
+| 11 | The car and world sounds and the speech | 2-3 |
+| 12 | **A whole race with the AI and the cops.** Steps 8-11 add about 11-17 slices | |
+| 13 | Save data and the options screens (task 29) | 1-2 |
+| 14 | Old 3DS performance: 16-bit or ETC1 textures, fewer draw calls, and the New 3DS's second core (task 28) | 2-3 |
+| 15 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
+
+That is about 26-37 slices to a demo that is ready to publish. The replay
+(`ReplaySnapshot` and every `DoSnapshot`) is not in the count. The demo
+can ship without its auto-replay, and it is its own slice if it goes in.
 
 ## What not to trust
 

@@ -15,12 +15,38 @@
 #include "camera.h"
 #include "cammover.h"
 #include "emath.h"
+#include "eview.h"
 
 // The clock object's frame step, which the orbit mover's Update thunk reads.
 // Defined here rather than linked from realtime.c, which would bring the
 // joylog in behind it, and a sixtieth as the mover's own file used to have
 // it.
 float RealTimeElapsed = 1.0f / 60.0f;
+
+// A mover takes its camera from its view, as on the disc. The view is
+// started over each time: the movers it held last are gone with the frames
+// they lived in.
+static void use_view(int id, Camera *c)
+{
+    eview_construct(eGetView(id));
+    eGetView(id)->pCamera = c;
+}
+
+// How many movers the view's list holds, and whether m is the first.
+static int listed(const CameraMover *m)
+{
+    const bNode *head = &eGetView(m->ViewID)->CameraMoverList, *n;
+    int k = 0;
+
+    for (n = head->next; n != head; n = n->next)
+        k++;
+    return k;
+}
+
+static int listed_first(const CameraMover *m)
+{
+    return eGetView(m->ViewID)->CameraMoverList.next == &m->Node;
+}
 
 // ------------------------------------------------------------------- output
 
@@ -251,7 +277,8 @@ static void scenario_orbit_init(void)
     rcar(&car, 1000, 2000, 30.0f);
 
     camera_init(&c);
-    orbit_init(&o, 0, &c, &car, 2);
+    use_view(0, &c);
+    orbit_init(&o, 0, &car, 2);
     porbit(&o);
     pcam(&c);
     printf("  type %s\n", camera_mover_type_name(o.base.Type));
@@ -263,16 +290,20 @@ static void scenario_orbit_init(void)
         OrbitCarCameraMover d;
         CameraMover b;
 
-        camera_mover_init(&b, -1, &c, CM_DRIVE);
-        printf("  detached type %s view %d enabled %d camera %d\n",
+        memset(&b, 0x5a, sizeof b);
+        camera_mover_init(&b, -1, CM_DRIVE);
+        printf("  detached type %s view %d enabled %d camera %d pview %d\n",
                camera_mover_type_name(b.Type), b.ViewID, b.Enabled,
-               b.pCamera != 0);
+               b.pCamera != 0, b.pView != 0);
 
         camera_init(&c);
-        orbit_init(&d, 3, &c, 0, 0);
+        use_view(3, &c);
+        orbit_init(&d, 3, 0, 0);
         printf("  carless\n");
         porbit(&d);
         pv3("target", orbit_get_target(&d));
+        printf("  carless listed %d first %d\n", listed(&d.base),
+               listed_first(&d.base));
     }
 
     // Every name in the enum, plus the two out-of-range answers.
@@ -293,10 +324,10 @@ static void scenario_orbit_init(void)
 static void pmover(const char *tag, const CameraMover *m, const Camera *c)
 {
     printf("  %s en %d movercar %d moverdash %d camcar %d camdash %d"
-           " near %.9g far %.9g\n",
+           " near %.9g far %.9g listed %d first %d\n",
            tag, m->Enabled, m->CarNotToRender != 0, m->RenderDash,
            c->CarNotToRender != 0, c->RenderDash, c->CurrentKey.NearZ,
-           c->CurrentKey.FarZ);
+           c->CurrentKey.FarZ, listed(m), listed_first(m));
 }
 
 static void scenario_enable(void)
@@ -313,7 +344,8 @@ static void scenario_enable(void)
     camera_init(&c);
     c.CarNotToRender = &dash1;
     c.RenderDash = 7;
-    camera_mover_init(&m, 0, &c, CM_STILL);
+    use_view(0, &c);
+    camera_mover_init(&m, 0, CM_STILL);
     pmover("constructed", &m, &c);
 
     c.CarNotToRender = 0;
@@ -362,7 +394,8 @@ static void scenario_enable(void)
         camera_init(&c);
         c.CarNotToRender = &dash1;
         c.RenderDash = 5;
-        orbit_init(&o, 0, &c, 0, 0);
+        use_view(0, &c);
+        orbit_init(&o, 0, 0, 0);
         printf("  orbit ctor camcar %d camdash %d fov %u handlers %d\n",
                c.CarNotToRender != 0, c.RenderDash,
                (unsigned)c.CurrentKey.FieldOfView, o.HandlersAdded);
@@ -371,7 +404,8 @@ static void scenario_enable(void)
         c.CarNotToRender = &dash1;
         c.RenderDash = 5;
         CameraStopUpdating = 1;
-        orbit_init(&o, 0, &c, 0, 0);
+        use_view(0, &c);
+        orbit_init(&o, 0, 0, 0);
         printf("  orbit ctor frozen camcar %d camdash %d fov %u\n",
                c.CarNotToRender != 0, c.RenderDash,
                (unsigned)c.CurrentKey.FieldOfView);
@@ -390,7 +424,8 @@ static void scenario_orbit_spin(void)
     rseed(0x1eaf00du);
     rcar(&car, 0, 0, 10.0f);
     camera_init(&c);
-    orbit_init(&o, 0, &c, &car, 0);
+    use_view(0, &c);
+    orbit_init(&o, 0, &car, 0);
 
     // Spin left for a while, then right, then stop: the acceleration limiter
     // has to ramp both ways and settle exactly on the desired speed.
@@ -432,7 +467,8 @@ static void scenario_orbit_limits(void)
     // Zoom out until MaxRadius bites, then in until MinRadius does. The
     // multiplier compounds, so this is a geometric walk in both directions.
     camera_init(&c);
-    orbit_init(&o, 0, &c, &car, 0);
+    use_view(0, &c);
+    orbit_init(&o, 0, &car, 0);
     orbit_set_max_radius(&o, 12.0f);
     orbit_set_min_radius(&o, 2.0f);
     for (i = 0; i < 40; i++) {
@@ -452,7 +488,8 @@ static void scenario_orbit_limits(void)
 
     // The elevation clamp, walked past both ends.
     camera_init(&c);
-    orbit_init(&o, 0, &c, &car, 0);
+    use_view(0, &c);
+    orbit_init(&o, 0, &car, 0);
     orbit_set_desired_v_rotation_speed(&o, 400);
     orbit_set_v_rotation_speed(&o, 400);
     for (i = 0; i < 20; i++) {
@@ -470,7 +507,8 @@ static void scenario_orbit_limits(void)
     // enough to snap. MinAngleV/MaxAngleV are widened so the clamp does not
     // hide what the walk is doing.
     camera_init(&c);
-    orbit_init(&o, 0, &c, &car, 0);
+    use_view(0, &c);
+    orbit_init(&o, 0, &car, 0);
     orbit_set_min_angle_v(&o, 0);
     orbit_set_max_angle_v(&o, 65535);
     orbit_set_approach_angle_v(&o, 1);
@@ -541,7 +579,8 @@ static void scenario_tweakables(void)
     // With UseTweakables on, the live angles still advance but the matrix is
     // built from the three Tweak* ones instead.
     camera_init(&c);
-    orbit_init(&o, 0, &c, &car, 0);
+    use_view(0, &c);
+    orbit_init(&o, 0, &car, 0);
     orbit_set_desired_h_rotation_speed(&o, 500);
     // Off the default 5.0, or the boom length is TweakRadius either way and
     // the switch proves nothing about the radius.
@@ -583,7 +622,8 @@ static void scenario_tweakables(void)
 
     // And the carless path, which is the only reader of OrbitTargetHeight.
     camera_init(&c);
-    orbit_init(&o, 0, &c, 0, 0);
+    use_view(0, &c);
+    orbit_init(&o, 0, 0, 0);
     for (i = 0; i < 3; i++) {
         orbit_update(&o, 1.0f / 60.0f);
         printf("  carless %d\n", i);
@@ -596,7 +636,8 @@ static void scenario_tweakables(void)
     OrbitBoomOffset.y = 2.0f;
     OrbitBoomOffset.z = 3.0f;
     camera_init(&c);
-    orbit_init(&o, 0, &c, &car, 0);
+    use_view(0, &c);
+    orbit_init(&o, 0, &car, 0);
     orbit_update(&o, 1.0f / 60.0f);
     printf("  offset\n");
     pkey("cur", &c.CurrentKey);

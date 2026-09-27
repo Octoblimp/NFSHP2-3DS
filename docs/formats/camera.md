@@ -99,7 +99,11 @@ out a hundred units short of where its translation row asks.
 constant `(0,0,0,1)`.** So the fourth lane is `1 - w`, not `-w`. `bVector3` is
 a padded sixteen-byte quadword and the pad participates: it is stored,
 differenced against the previous frame's pad and divided by `elapsed` like
-everything else. The port carries all four lanes for that reason.
+everything else. The port carries all four lanes for that reason. It is a
+subtraction, too, not a sign flip: a lane that comes out `+0` stays `+0`,
+where `-x` would make it `-0`. The default eye's x and y are `+0` on the
+disc; `tools/eview_check.py` caught the port printing `-0` there, through
+the static constructor, and the port now writes `0.0f - x`.
 
 **A zero `elapsed` divides by zero.** The velocity record fills with
 infinities and the next frame overwrites them. That is the disc's behaviour
@@ -150,9 +154,15 @@ It is overwritten on the first real frame. The port keeps it.
 ## The base mover
 
 44 bytes, vtable at offset 40, and `Update` is the only virtual anything
-calls. `pView` at offset 20 is the one field the port has nowhere to put --
-there is no `eView` until task 27 -- so the constructor takes a `Camera *`
-where the disc takes a view id and calls `eGetView(id)`.
+calls. The first 8 bytes are the mover's link on its view's list. The
+constructor (`0x1544f0`) takes a view id. With -1 it leaves the mover
+detached and disabled, with `pView` (20) and `pCamera` (24) both 0.
+Otherwise it takes `v = eGetView(id)`, stores it in `pView`, takes
+`v->pCamera`, forces that camera's far plane to 5000, copies the camera's
+two render flags, stores the camera in `pCamera` and enables. `Enable`
+links the mover onto the head of `pView`'s list (`AttachCameraMover`), and
+`Disable` unlinks it (`UnattachCameraMover`). Both of those work the view
+mode out again; see `eview.md`.
 
 `Enable` and `Disable` are not symmetric, in three ways:
 
@@ -273,9 +283,6 @@ geometry viewer's pad is wired the same way for that reason.
 
 Each of these is in the source as a comment at the point it happens.
 
-* **No `eView`.** The mover constructor takes a `Camera *` instead of a view
-  id; `ViewID` is still stored. `AttachCameraMover` / `UnattachCameraMover`
-  have no body to call.
 * **No joystick event bus**, so `AddJoyHandlers` registers nothing and
   `HandlersAdded` stays 0 -- which is the honest answer to "have the handlers
   been added". The table above is what the 3DS input layer calls directly.
