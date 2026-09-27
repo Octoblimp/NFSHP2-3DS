@@ -7526,3 +7526,125 @@ The cull is now told `InGameFlag` rather than a constant 1.
 SkyLoader, SunTrackLoader and rain_Load are already the End's seams, and
 their unloaders are the Begin's. StuffSky's draw is what the viewer's sky
 domes are standing in for.
+
+## Session 30, continued (2026-09-27) -- Task 27's twenty-sixth slice: the sky dome and the sun's data
+
+The twenty-fifth slice went in as `efbe0b1`. The twenty-sixth starts
+roadmap step 3. It covers:
+- all of Sky.obj, in `sky.c`;
+- the data half of Sun.obj, in `sun.c`: LoaderSun in slot 14, and the
+  five SUN textures.
+
+The End and the Begin call both objects' loaders and unloaders directly
+now. The viewer draws the dome the way eDisplayFrame does. The write-up
+is `docs/formats/sky-sun.md`.
+
+```
+sky_check           45 scenarios, 1159 lines, 0 differ
+                    78 mutations: 76 caught, 2 equivalent, 0 unexplained
+trackflow_check     16 scenarios, 702 lines, 0 differ
+loadertable_check   27856 ops, 41730 lines, 0 differ
+sky: SKYDOME drawn by StuffSky, the envmap views' its own; sun chunk
+     version 2 at -16384 800 6000
+sun texture 0..4: SUNCENTER, SUNHALO, SUNMAJORRAYS, SUNMINORRAYS, SUNRING,
+     order 7 each
+track drew 437 of 438 (11 in place, 1 sky), 28841 tris
+trackview: freed, InGameFlag 0, eDisableFixUpTables 1, 0 solids, 0 models,
+           0 texture packs left
+```
+
+### The dome
+
+A track's sky is a scenery object called SKYDOME, and usually a second
+one, SKYDOME_ENVMAP, for the environment-map views. SkyInitModel finds
+the object, Inits one of Sky.obj's two models with its name, and builds a
+matrix from its placement: the nine int16s times 2^-14, over the
+position. Then it UnInits the kind's three LOD models. That is how the
+dome leaves the scenery: the cull finds no solid for the kind and skips
+it. With no envmap object, SkyLoader gives the envmap model SKYDOME's
+name and a copy of its matrix.
+
+StuffSky renders the sky model for views 1 to 3 and the envmap model for
+every other view. The test is one unsigned compare, so view 0 goes to the
+envmap too.
+
+### The frame
+
+eDisplayFrame turns the Z writes off, calls StuffSky for views 1 to 9,
+attaches what it listed, and turns the Z writes on again, all before the
+scenery's cull. `georender_set_zwrite` is the port's eSetZWriteState.
+While it is off, every pass draws with `GPU_WRITE_COLOR`, whatever the
+pass's own depth write. `trackview_draw` calls it around StuffSky and a
+flush of the deferred list, so the dome is drawn, and finished, before
+the first scenery object.
+
+### The sun's data
+
+LoaderSun keeps a pointer to the chunk's 244-byte SunChunkInfoE, which
+sits at the chunk's data rounded up to 16. It copies the position to
+SunPosition. The pointer is stored before the version check. A version
+other than 2 clears it and zeroes the position, and the loader still
+returns 1. SunPosition is eviewmatrix.c's, since the light context looks
+from it, so sun.c only declares it.
+
+SunTrackLoader looks up the five SUN names with the default allowed, and
+gives each order 7. The image never checks for NULL, so a missing name
+gives the default order 7. With no default either, the image stores
+through NULL. The port skips a NULL pointer.
+
+### The checker
+
+`sky_check` runs all nine functions from the image, with every callee
+stubbed. After each step it dumps both models, both matrices bit for
+bit, DrawSky, the six LOD models, SunInfo, SunPosition, SunTextures and
+six rendering orders.
+
+The first mutation pass left five mutations. Three were holes in the
+script:
+- a mutation that moved the Init was placed where no state showed it. It
+  now moves the Init to the end of SkyInitModel;
+- DrawSky's starting value was never printed;
+- the loader's type test was only tried one bit off in the low byte. It
+  now also sees the container bit and the high half.
+
+The other two are equivalent, and the checker says why for each.
+
+### The viewer
+
+The draw log counts the dome apart from the scenery ("1 sky"), and the
+dome is the first thing on the draw list. The shots that look along the
+canyon show the mountains and the clouds behind the rock and the trees.
+
+### Open
+
+`loadertable_check`'s `unloader-14-loads` mutation survives. It puts
+`loader_sun` in the unloader table, and the checker's dump shows
+neither SunInfo nor SunPosition. The fix is to add both to the dump on
+each side. The chain turned up two more things, and both are fixed:
+- `sinit_run` did not call `sky_static_init`. It now does, at entry [6];
+- `loadertable_test.c` had no SunPosition.
+
+### Next: the rest of step 3
+
+Notes on StuffSun, from reading it:
+- It runs only for view 1, with a SunInfo.
+- It projects the sun with eRotTransPers, and returns when the sun is
+  behind the view or off the render target by more than the largest
+  CENTER layer.
+- It counts the pixels of the last frame's 32 by 32 SunZBuffer whose Z
+  is under 64, over 1,024. Each layer's alpha is scaled by that count.
+- It fills one ePoly per layer: a quad turned by Angle plus
+  SweepAngleAmount times the sun's place across the screen, with
+  AlphaB 1 for BLEND and 2 for ADD, and SunPoly set. Then it calls
+  ePoly::Render.
+- Last, it calls eTransferZBufferRect for the next frame's count.
+
+The check can stub ePoly::Render and dump the ePoly at each call. The 3DS
+side needs a 2D ePoly draw, and a depth readback from VRAM between
+frames.
+
+- StuffSun and StuffSunGlare. They measure how much of the sun shows by
+  reading the PS2's Z buffer back through 15 SunZBuffers, so the 3DS
+  needs its own way to measure it.
+- WeatherMan (slot 29) and the fog palettes.
+- The RainSystem behind rain_Load.

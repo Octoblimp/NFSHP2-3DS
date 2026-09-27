@@ -52,7 +52,7 @@ In order. A call marked *seam* goes through a function pointer in
 | 5 | `TheTopologyTree.InitTree()` | `TrackPolygonSlotPool`, 1,024 slots |
 | 6 | InitSmokeables | seam |
 | 7 | `InitPhysics()` | the ten physics pools; see below for its count |
-| 8 | SkyLoader, rain_Load, SunTrackLoader, InitDebugTopology, InitTrackMarkers | seams |
+| 8 | `SkyLoader()`, rain_Load, `SunTrackLoader()`, InitDebugTopology, InitTrackMarkers | Sky and Sun are `sky.c`'s and `sun.c`'s; the rest are seams |
 | 9 | `InitVisibleZones()` | the `MARKER_BOUNDARY` model |
 | 10 | `InitTrackPaths()` | |
 | 11 | `TheTrackPathManager.ReverseTrackDirection = (TrackDirection == 1)` | in InitTrackRoutes' delay slot, so before it |
@@ -96,7 +96,7 @@ first one. The port does the same thing.
 | 6 | `pHudTexturePack->UnloadAllTexturesFromFile()` | seam; no NULL check in the image |
 | 7 | CloseAIPlans, CloseAnimatedDriver, CloseWorldObjects, CloseTrackRouteEditor | seams |
 | 8 | `CloseTrackRoutes()`, `CloseVisibleZones()` | |
-| 9 | CloseTrackMarkers, CloseDebugTopology, SunTrackUnloader, SkyUnloader, rain_Unload | seams |
+| 9 | CloseTrackMarkers, CloseDebugTopology, `SunTrackUnloader()`, `SkyUnloader()`, rain_Unload | Sun and Sky are ported; the rest are seams |
 | 10 | `ClosePhysics()`, then CloseSmokeables (seam) | |
 | 11 | `TheTopologyTree.CloseTree()`, `CloseTrackPaths()`, `CloseContact()`, `CloseCollisionBody()`, `CloseCollision()` | |
 | 12 | `while ((f = FindResourceFile(3))) UnloadResourceFile(f)` | two seams; see below |
@@ -196,6 +196,6 @@ There are 16 scenarios. They cover:
 - End then Begin, each alone, each twice, Begin then End, and EBEB;
 - two scenarios with every seam NULL.
 
-Results: 694 lines, 0 differ. Of the 74 mutations, 73 are caught. The
+Results: 702 lines, 0 differ. Of the 74 mutations, 73 are caught. The
 other one is port-only: it drops the Unload half of the resource-file
 loop's guard, and the image has no seams to test that against.

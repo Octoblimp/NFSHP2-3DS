@@ -9,6 +9,7 @@
 #include "esolid.h"
 #include "polyhedra.h"
 #include "scenery.h"
+#include "sun.h"
 #include "texturepack.h"
 #include "track.h"
 #include "trackpath.h"
@@ -124,7 +125,6 @@ UNPORTED(LoaderAnimations, UnloaderAnimations, 12, 0x80034008u)
 UNPORTED(LoaderCameras, UnloaderCameras, 13,
          0x80034405u, 0x80034410u, 0x80034415u, 0x80034420u, 0x80034425u,
          0x00034492u)
-UNPORTED(LoaderSun, UnloaderSun, 14, 0x00034202u)
 UNPORTED(LoaderCops, UnloaderCops, 15, 0x80034500u)
 UNPORTED(LoaderCarInfo, UnloaderCarInfo, 16, 0x00034600u, 0x00034601u)
 UNPORTED(LoaderBodyDamage, UnloaderBodyDamage, 17, 0x00034030u)
@@ -158,7 +158,7 @@ BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     LoaderScenery,                  // 11
     LoaderAnimations,               // 12
     LoaderCameras,                  // 13
-    LoaderSun,                      // 14
+    loader_sun,                     // 14
     LoaderCops,                     // 15
     LoaderCarInfo,                  // 16
     LoaderBodyDamage,               // 17
@@ -192,7 +192,7 @@ BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
     UnloaderScenery,                // 11
     UnloaderAnimations,             // 12
     UnloaderCameras,                // 13
-    UnloaderSun,                    // 14
+    unloader_sun,                   // 14
     UnloaderCops,                   // 15
     UnloaderCarInfo,                // 16
     UnloaderBodyDamage,             // 17

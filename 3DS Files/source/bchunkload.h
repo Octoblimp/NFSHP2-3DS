@@ -13,7 +13,7 @@
 // tables, and every loader returns nonzero for every chunk of its types.
 //
 // The slots whose object is ported call it: TrackGeometry (with the
-// topology tree), TexturePack, SolidList, CollisionVolumes, Scenery,
+// topology tree), TexturePack, SolidList, CollisionVolumes, Scenery, Sun,
 // TrackRoutes, TrackPath and DifficultyInfo. Every other slot is its guard alone: it
 // takes the types the image's takes and hands the chunk to
 // gUnportedLoaderFn. docs/formats/loader-table.md has the table.

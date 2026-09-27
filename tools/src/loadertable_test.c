@@ -25,11 +25,13 @@
 #include "esolid.h"
 
 // eview.c is not linked, nor is realtime.c, whose clocks only
-// texturepack.c's flipbooks read.
+// texturepack.c's flipbooks read, nor eviewmatrix.c, whose SunPosition
+// sun.c's loader writes.
 bNode SolidList;
 bNode ModelList;
 int32_t RealTimeFrames;
 int32_t WorldTimeFrames;
+bVector3 SunPosition;
 
 enum {
     OP_TAG, OP_BUF, OP_LEAF, OP_BULK, OP_OPEN, OP_CLOSE, OP_BUFEND,
@@ -717,8 +719,8 @@ static BChunkLoader saved_unload[BCHUNK_NUM_LOADERS];
 // gUnportedLoaderFn.
 static int unported_slot(int k)
 {
-    return !(k == 0 || k == 1 || k == 4 || k == 9 || k == 11 || k == 18
-             || k == 19 || k == 26);
+    return !(k == 0 || k == 1 || k == 4 || k == 9 || k == 11 || k == 14
+             || k == 18 || k == 19 || k == 26);
 }
 
 // --------------------------------------------------------------- dumps

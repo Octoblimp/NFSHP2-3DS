@@ -43,9 +43,7 @@ extern BGameFlow *gTrackFlowGameFlow;
 
 // The End of loading, in call order.
 extern void (*gInitSmokeablesFn)(void);            // 0x0020bb50
-extern void (*gSkyLoaderFn)(void);                 // 0x0011ce18
 extern void (*gRainLoadFn)(void);                  // 0x00128bf8
-extern void (*gSunTrackLoaderFn)(void);            // 0x00123de0
 extern void (*gInitDebugTopologyFn)(void);         // 0x001f18f0
 extern void (*gInitTrackMarkersFn)(void);          // 0x001b4338
 extern void (*gInitTrackRouteEditorFn)(void);      // 0x001bbc78
@@ -68,8 +66,6 @@ extern void (*gCloseWorldObjectsFn)(void);         // 0x001c37a8
 extern void (*gCloseTrackRouteEditorFn)(void);     // 0x001bbcb0
 extern void (*gCloseTrackMarkersFn)(void);         // 0x001b43a0
 extern void (*gCloseDebugTopologyFn)(void);        // 0x001f18f8
-extern void (*gSunTrackUnloaderFn)(void);          // 0x00123ea0
-extern void (*gSkyUnloaderFn)(void);               // 0x0011ced8
 extern void (*gRainUnloadFn)(void);                // 0x00128c00
 extern void (*gCloseSmokeablesFn)(void);           // 0x0020bb58
 // FindResourceFile (0x0018fe88) and UnloadResourceFile (0x0018fd20).

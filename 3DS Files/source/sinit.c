@@ -4,9 +4,9 @@
 // and the _GLOBAL_$I$ it stands for. sinit_check reads those comments, so
 // their shape is fixed.
 //
-// None of the fifteen reads anything another one writes -- fourteen fill
+// None of the sixteen reads anything another one writes -- fifteen fill
 // Tables, Graphs, cameras, list heads, hashes and constants, and the
-// fifteenth builds the slot-pool manager -- so the order is kept because it
+// sixteenth builds the slot-pool manager -- so the order is kept because it
 // is the image's, not because a different one would be observed. The manager
 // comes last for that reason too: it is entry 103, long after the physics
 // tables. The joystick's, [23], is named for EventNodeSlotPool but never
@@ -28,6 +28,7 @@
 #include "realdriver.h"
 #include "rigidbody.h"
 #include "scenery.h"
+#include "sky.h"
 #include "terraintype.h"
 #include "track.h"
 #include "wheel.h"
@@ -35,6 +36,7 @@
 void sinit_run(void)
 {
     eview_static_init();        // [2]   0x00114098 _GLOBAL_$I$FloatingVBlankTimeMin
+    sky_static_init();          // [6]   0x0011cfb8 _GLOBAL_$I$SkydomeModel
     car_static_init();          // [14]  0x001347c0 _GLOBAL_$I$fDraftFalloff
     physicscar_static_init();   // [15]  0x00137438 _GLOBAL_$I$RigidBodySlotPool
     realdriver_static_init();   // [17]  0x0013aa88 _GLOBAL_$I$PowerSlideYawCoef

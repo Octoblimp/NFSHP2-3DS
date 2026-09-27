@@ -91,7 +91,7 @@ SOURCES = [HARNESS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "carstate.c", "terraintypetab.c", "bslotpool.c", "bticker.c", "p32.c",
     "bchunk.c", "trackpath.c", "quickspline.c", "bmem.c", "trackroute.c",
     "polyhedra.c", "vclip.c", "espresso.c", "difficultyinfo.c",
-    "texturepack.c")]
+    "texturepack.c", "sun.c")]
 
 HARNESS_TIMEOUT = 600
 EXTRACTED = ROOT / "extracted"
@@ -181,7 +181,7 @@ CLAIMS = {
     30: [0x00039100, 0x00039101, 0x00039102],
 }
 TAKER = {t: k for k, ts in CLAIMS.items() for t in ts}
-PORTED = {0, 1, 2, 4, 9, 11, 18, 19, 26}
+PORTED = {0, 1, 2, 4, 9, 11, 14, 18, 19, 26}
 
 # ---- the ops -----------------------------------------------------------------
 
@@ -1541,9 +1541,10 @@ MUTATIONS = [
      "for (i = 1; i < n; i++) {"),
     ("unported-unload-flag", BCL, "slot, 1, c);", "slot, 0, c);"),
     ("slot-6-is-7", BCL, "    LoaderAcidFX,", "    LoaderEventManager,"),
-    ("unloader-14-loads", BCL, "    UnloaderSun,", "    LoaderSun,"),
-    ("sun-type", BCL, "UNPORTED(LoaderSun, UnloaderSun, 14, 0x00034202u)",
-     "UNPORTED(LoaderSun, UnloaderSun, 14, 0x00034203u)"),
+    ("unloader-14-loads", BCL, "    unloader_sun,", "    loader_sun,"),
+    ("sun-type", "3DS Files/source/sun.h",
+     "#define SUN_CHUNK_ID      0x00034202u",
+     "#define SUN_CHUNK_ID      0x00034203u"),
     ("cops-slot", BCL, "UNPORTED(LoaderCops, UnloaderCops, 15,",
      "UNPORTED(LoaderCops, UnloaderCops, 16,"),
     ("slot-19-unloader-is-loader", BCL, "    UnloaderTrackPath,",

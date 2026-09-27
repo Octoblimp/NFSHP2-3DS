@@ -24,8 +24,8 @@
 // solids by name -- and its routes, path, topology and collision volumes
 // to theirs, and then PostLoadFixup runs. Every frame runs eDisplayFrame's
 // order on view 1 -- the view's matrices, the cull infos, DoCulling,
-// StuffScenery -- with eModel::Render being this file's draw over
-// georender.
+// StuffSky with the Z writes off, StuffScenery -- with eModel::Render
+// being this file's draw over georender.
 //
 // The loads go in the game's order. GLOBALB.BUN's and INGAMEB.BUN's
 // texture packs, which main() already holds for the UI and shares here, go
@@ -34,8 +34,10 @@
 // set and the bundle loads, and TEX12TRACK.BIN and TEX12LOCATION.BIN after
 // it, each read whole; and EndGameFlowLoadingTrackSpecific (trackflow.c)
 // clears it, runs eFixUpTables once, and starts the track's systems --
-// the collision pools, InitTree, InitPhysics, the visible zones' boundary
-// model, the track paths and routes. eFixUpTables finds each solid's
+// the collision pools, InitTree, InitPhysics, SkyLoader (sky.c, which takes
+// SKYDOME out of the scenery and draws it itself), SunTrackLoader, the
+// visible zones' boundary model, the track paths and routes. The sun's
+// chunk goes to slot 14 (sun.c) with the rest. eFixUpTables finds each solid's
 // textures by GetTextureInfo, the default one for a name no pack has, and
 // a solid's texture is the TextureInfo its table points at: the viewer
 // uploads the pixels its ImageData and PaletteData point at, and uploads
@@ -201,6 +203,7 @@ typedef struct {
     int  drawInfos;
     int  frameMallocFails;
     int  drawnInPlace;          // of `drawn`, objects with no matrix of their own
+    int  skyDrawn;              // of `drawn`, StuffSky's: the dome, or none
     int  deferredSorted;        // of numDeferred, the ApplyAlphaSorting ones
     int  deferredDropped;       // past TRACKVIEW_MAX_DEFERRED, not drawn
     int  numDeferred;

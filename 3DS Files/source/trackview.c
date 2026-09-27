@@ -18,6 +18,8 @@
 #include "eviewmatrix.h"
 #include "gamedata.h"
 #include "scenery.h"
+#include "sky.h"
+#include "sun.h"
 #include "texpack.h"
 #include "texturepack.h"
 #include "trackflow.h"
@@ -1260,6 +1262,16 @@ void trackview_draw(TrackView* v)
     if (++v->frameStamp == 0) {
         v->frameStamp = 1;
     }
+    // eDisplayFrame's sky (0x00112a38 .. 0x00112b0c): the Z writes off,
+    // StuffSky for the view, and what it put on the lists attached and
+    // drawn before any of the scenery. Then the Z writes back on.
+    georender_set_zwrite(false);
+    StuffSky(view);
+    draw_deferred(v);
+    georender_set_zwrite(true);
+    v->skyDrawn    = v->drawn;
+    v->numDeferred = 0;
+
     scenery_stuff_scenery(&v->cull, view);
     draw_deferred(v);
     s_draw = NULL;

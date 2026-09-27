@@ -35,7 +35,7 @@ extern eRenderTargetMatrixPack DefaultMatrixPack;
 
 // hack_man_matrix (0x002d6170) and SunPosition (0x002dfdf0), zero in the
 // image: the light context's second matrix and the eye of its look-at.
-// The sun sets SunPosition.
+// LoaderSun (sun.c) sets SunPosition.
 extern bMatrix4 hack_man_matrix;
 extern bVector3 SunPosition;
 

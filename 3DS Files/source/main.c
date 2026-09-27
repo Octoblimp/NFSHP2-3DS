@@ -78,6 +78,8 @@
 #include "terraintype.h"
 #include "topology.h"
 #include "track.h"
+#include "sky.h"
+#include "sun.h"
 #include "trackflow.h"
 #include "trackview.h"
 #include "uirender.h"
@@ -1576,6 +1578,23 @@ int main(int argc, char** argv)
                           "eDisableFixUpTables %d, reverse %d\n",
                           (int)InGameFlag, (int)eDisableFixUpTables,
                           (int)TheTrackPathManager.ReverseTrackDirection);
+                logPrintf("sky: SKYDOME %s, the envmap views' %s; sun %s "
+                          "at %.0f %.0f %.0f\n",
+                          SkydomeModel.Solid ? "drawn by StuffSky" : "none",
+                          SkydomeEnvmapModel.NameHash
+                                  == SKY_HASH_SKYDOME_ENVMAP ? "its own"
+                          : SkydomeEnvmapModel.NameHash == SKY_HASH_SKYDOME
+                                  ? "SKYDOME" : "none",
+                          SunInfo ? "chunk version 2" : "none",
+                          (double)SunPosition.x, (double)SunPosition.y,
+                          (double)SunPosition.z);
+                for (int i = 0; i < NUM_SUN_TEXTURES; i++) {
+                    const TextureInfo *t = SunTextures[i];
+
+                    logPrintf("sun texture %d: %.24s, order %d\n", i,
+                              t ? t->DebugName : "none",
+                              t ? t->RenderingOrder : -1);
+                }
             } else {
                 logPrintf("mode %d\n", mode);
             }
@@ -1719,8 +1738,8 @@ int main(int argc, char** argv)
 
         if (mode == MODE_TRACK) {
             circlePosition pad;
-            // The fog colour TRACKB12's sky would be, near enough, until
-            // step 3 brings the sky itself.
+            // The fog colour TRACKB12's sky would be, near enough, where
+            // the dome StuffSky draws does not reach.
             const u32 sky = C2D_Color32(0x8c, 0xa8, 0xc8, 0xFF);
 
             if (kDown & KEY_START) break;
@@ -1742,10 +1761,11 @@ int main(int argc, char** argv)
                    g_track.pos[0], g_track.pos[1], g_track.pos[2],
                    g_track.yaw, g_track.pitch, g_track.speed,
                    g_track.stop + 1, g_track.numStops);
-            devLog(2, "track drew %d of %d (%d in place), %d tris, cull "
-                   "zone %d",
+            devLog(2, "track drew %d of %d (%d in place, %d sky), %d "
+                   "tris, cull zone %d",
                    g_track.drawn, g_track.drawInfos, g_track.drawnInPlace,
-                   g_track.drawnTris, (int)CurrentZoneNumber);
+                   g_track.skyDrawn, g_track.drawnTris,
+                   (int)CurrentZoneNumber);
             if (g_track.listFrame) {
                 logLine("track drew: %s", g_track.drawList);
                 g_track.listFrame = false;

@@ -93,6 +93,10 @@ void init_collision_body(void) { say("InitCollisionBody"); }
 void init_contact(void) { say("InitContact"); }
 void topotree_init_tree(TopologyTree *t) { say("InitTree %s", label(t)); }
 void InitPhysics(int32_t n) { say("InitPhysics %d", (int)n); }
+void SkyLoader(void) { say("SkyLoader"); }
+void SunTrackLoader(void) { say("SunTrackLoader"); }
+void SunTrackUnloader(void) { say("SunTrackUnloader"); }
+void SkyUnloader(void) { say("SkyUnloader"); }
 void scenery_init_visible_zones(void) { say("InitVisibleZones"); }
 void init_track_paths(void) { say("InitTrackPaths"); }
 void init_track_routes(int forward) { say("InitTrackRoutes %d", forward); }
@@ -116,9 +120,7 @@ void bgf_change_state(BGameFlow *gf, int desired, int pending)
 
 #define SEAM(fn, name) static void fn(void) { say(name); }
 SEAM(s_smokeables, "InitSmokeables")
-SEAM(s_sky, "SkyLoader")
 SEAM(s_rain, "rain_Load")
-SEAM(s_sun, "SunTrackLoader")
 SEAM(s_debugtopo, "InitDebugTopology")
 SEAM(s_markers, "InitTrackMarkers")
 SEAM(s_routeeditor, "InitTrackRouteEditor")
@@ -132,8 +134,6 @@ SEAM(s_closeworldobjects, "CloseWorldObjects")
 SEAM(s_closerouteeditor, "CloseTrackRouteEditor")
 SEAM(s_closemarkers, "CloseTrackMarkers")
 SEAM(s_closedebugtopo, "CloseDebugTopology")
-SEAM(s_sununload, "SunTrackUnloader")
-SEAM(s_skyunload, "SkyUnloader")
 SEAM(s_rainunload, "rain_Unload")
 SEAM(s_closesmokeables, "CloseSmokeables")
 SEAM(s_soundregions, "UnLoadSoundRegions")
@@ -194,9 +194,7 @@ static int s_countfree(int pool)
 static void set_seams(int on)
 {
     gInitSmokeablesFn = on ? s_smokeables : NULL;
-    gSkyLoaderFn = on ? s_sky : NULL;
     gRainLoadFn = on ? s_rain : NULL;
-    gSunTrackLoaderFn = on ? s_sun : NULL;
     gInitDebugTopologyFn = on ? s_debugtopo : NULL;
     gInitTrackMarkersFn = on ? s_markers : NULL;
     gInitTrackRouteEditorFn = on ? s_routeeditor : NULL;
@@ -214,8 +212,6 @@ static void set_seams(int on)
     gCloseTrackRouteEditorFn = on ? s_closerouteeditor : NULL;
     gCloseTrackMarkersFn = on ? s_closemarkers : NULL;
     gCloseDebugTopologyFn = on ? s_closedebugtopo : NULL;
-    gSunTrackUnloaderFn = on ? s_sununload : NULL;
-    gSkyUnloaderFn = on ? s_skyunload : NULL;
     gRainUnloadFn = on ? s_rainunload : NULL;
     gCloseSmokeablesFn = on ? s_closesmokeables : NULL;
     gFindResourceFileFn = on ? s_find : NULL;

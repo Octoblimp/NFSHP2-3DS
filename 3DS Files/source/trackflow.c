@@ -12,6 +12,8 @@
 #include "eview.h"
 #include "physcomp.h"
 #include "scenery.h"
+#include "sky.h"
+#include "sun.h"
 #include "topology.h"
 #include "trackpath.h"
 #include "trackroute.h"
@@ -22,9 +24,7 @@ int32_t      WeHaveCheckedIfJR2ServerExists;    // 0x003234e4
 BGameFlow   *gTrackFlowGameFlow;
 
 void (*gInitSmokeablesFn)(void);
-void (*gSkyLoaderFn)(void);
 void (*gRainLoadFn)(void);
-void (*gSunTrackLoaderFn)(void);
 void (*gInitDebugTopologyFn)(void);
 void (*gInitTrackMarkersFn)(void);
 void (*gInitTrackRouteEditorFn)(void);
@@ -42,8 +42,6 @@ void (*gCloseWorldObjectsFn)(void);
 void (*gCloseTrackRouteEditorFn)(void);
 void (*gCloseTrackMarkersFn)(void);
 void (*gCloseDebugTopologyFn)(void);
-void (*gSunTrackUnloaderFn)(void);
-void (*gSkyUnloaderFn)(void);
 void (*gRainUnloadFn)(void);
 void (*gCloseSmokeablesFn)(void);
 void *(*gFindResourceFileFn)(int type);
@@ -78,9 +76,9 @@ void EndGameFlowLoadingTrackSpecific(void)
     topotree_init_tree(&TheTopologyTree);
     CALL(gInitSmokeablesFn);
     InitPhysics(RaceParametersNumDriverInfo);
-    CALL(gSkyLoaderFn);
+    SkyLoader();
     CALL(gRainLoadFn);
-    CALL(gSunTrackLoaderFn);
+    SunTrackLoader();
     CALL(gInitDebugTopologyFn);
     CALL(gInitTrackMarkersFn);
     scenery_init_visible_zones();
@@ -129,8 +127,8 @@ void BeginGameFlowUnloadingTrackSpecific(void)
     scenery_close_visible_zones();
     CALL(gCloseTrackMarkersFn);
     CALL(gCloseDebugTopologyFn);
-    CALL(gSunTrackUnloaderFn);
-    CALL(gSkyUnloaderFn);
+    SunTrackUnloader();
+    SkyUnloader();
     CALL(gRainUnloadFn);
     ClosePhysics();
     CALL(gCloseSmokeablesFn);

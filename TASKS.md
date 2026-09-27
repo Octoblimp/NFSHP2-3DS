@@ -1935,6 +1935,24 @@ is citro3d and owns the top.
         `docs/formats/texture-pack.md` and `docs/formats/track-flow.md`.
         CONTINUE.md has what is next, and how far it is to a playable
         demo.
+
+        **The twenty-sixth slice is closed: the sky dome and the sun's
+        data**, the first part of roadmap step 3. Sky.obj is ported whole
+        in `sky.c`. SkyLoader takes SKYDOME and SKYDOME_ENVMAP out of the
+        scenery and into two models of its own. StuffSky draws them first
+        in each view, with the Z writes off, as eDisplayFrame does. The
+        data half of Sun.obj is ported in `sun.c`: LoaderSun and
+        UnloaderSun in slot 14, and SunTrackLoader and SunTrackUnloader,
+        which find the five SUN textures and give them order 7. The End
+        and the Begin call all four directly now.
+
+        Seen on Azahar: SKYDOME is drawn by StuffSky, the sun chunk is
+        version 2 at (-16384, 800, 6000), and all five sun textures are
+        found. The mountains and the clouds show behind the canyon.
+        `sky_check`: 45 scenarios, 1,159 lines, 0 differ; of its 78
+        mutations, 76 are caught and 2 are equivalent. Written up in
+        `docs/formats/sky-sun.md`. Left of step 3: StuffSun and
+        StuffSunGlare, WeatherMan and the fog, and the RainSystem.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag
 

@@ -145,4 +145,9 @@ void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
 void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
                          int numTextures, uint32_t mask);
 
+// eSetZWriteState(int), 0x001029c0: with it off, nothing drawn writes the
+// depth buffer, whatever its texture's pass says. eDisplayFrame turns it
+// off for the sky. It starts on.
+void georender_set_zwrite(bool on);
+
 #endif

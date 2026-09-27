@@ -16,6 +16,7 @@ static DVLB_s*         s_dvlb;
 static shaderProgram_s s_program;
 static C3D_AttrInfo    s_attr;
 static bool            s_ready;
+static bool            s_zwrite = true;
 
 static int s_uProjection = -1;
 static int s_uModelView  = -1;
@@ -362,7 +363,8 @@ void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
     // restart rule in geometry.c sees to that -- but not between the two
     // sides of a car body, which are mirrored. Draw both faces.
     C3D_CullFace(GPU_CULL_NONE);
-    C3D_DepthTest(true, GPU_GREATER, GPU_WRITE_ALL);
+    C3D_DepthTest(true, GPU_GREATER,
+                  s_zwrite ? GPU_WRITE_ALL : GPU_WRITE_COLOR);
 
     for (i = 0; i < mesh->numBatches; i++) {
         const GeoBatch* b = &mesh->batch[i];
@@ -397,7 +399,8 @@ static void set_pass(GeoPass pass)
         break;
     }
     C3D_DepthTest(true, GPU_GEQUAL,
-                  pass.noDepthWrite ? GPU_WRITE_COLOR : GPU_WRITE_ALL);
+                  pass.noDepthWrite || !s_zwrite ? GPU_WRITE_COLOR
+                                                 : GPU_WRITE_ALL);
 }
 
 void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
@@ -433,4 +436,9 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
         }
         draw_batch(b, gt);
     }
+}
+
+void georender_set_zwrite(bool on)
+{
+    s_zwrite = on;
 }
