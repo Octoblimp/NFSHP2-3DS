@@ -1,56 +1,87 @@
-# `MOVIES\*.AVI` -- the MV3 video codec
+# `MOVIES\INTRO\*.AVI` -- the MV3 video codec and the movies' sound
 
 The movies on this disc are **not** VP6 and **not** EA's `SCHl`/`MVhd`
 streaming format, which is what `source/vp6/` (inherited from NFSU2-3DS)
 handles. They are ordinary RIFF/AVI files whose video fourcc is `MV30` --
-EA's own MV3 codec -- and the decoder for it ships inside `NFSHP2.ELF`.
+EA's own MV3 codec, whose decoder ships inside the ELF -- with a sound
+stream that the header calls 8-bit mono PCM and that is really the SPU's
+ADPCM, in stereo.
 
-There is exactly one movie on the disc: `MOVIES\INTRO\EALOGO_EN.AVI`,
-955,904 bytes, 512x256 at 30 fps, 90 frames, plus a three-second mono
-soundtrack. The `_EN` suffix is the only localisation; no other language
-variants were shipped.
+The port plays them natively: `3DS Files/source/mv3.c` decodes MV3,
+`avimovie.c` streams the AVI off the card, decodes the sound and paces both,
+and `tools/mv3_check.py` holds the decoder to the retail image's own, run in
+`mipsemu`. Retail addresses (SLES_507.31) throughout, with the demo's where
+they matter.
 
-Reader: `tools/video_extract.py` (`--list` for the stream and frame tables;
-stdlib only, but it needs `tools/mipsemu.py` and the ELF to decode pixels).
+## The movies
 
-## How this one was cracked
+Retail has twelve, all in `MOVIES\INTRO`, all 512x256:
 
-Unlike every other format in this directory, the tool does not reimplement
-the format -- it **runs the shipped decoder**. MV3 is ~5,000 instructions of
-fixed-point IDCT, MMI-vectorised in places, where a hand transcription is a
-guess until something checks it. `tools/mipsemu.py` loads the ELF into a flat
-memory image and calls `MV3Codec::DecompressFrameShared()` directly, so the
-frames that come out are the PS2's own output rather than an approximation.
+| movie | frames | fps | time | sound bytes | pairs | quality |
+|-------|-------:|----:|-----:|------------:|------:|--------:|
+| `EALOGO_EN` / `_FR` / `_GE` / `_IT` / `_SP` / `_SW` | 180 | 30 | 6.0 s | 327,680 | 5 | 93, -4 |
+| `NFSINTRO_EN` | 2,425 | 30.0003 | 80.8 s | 4,128,768 | 63 | 95, -2 |
+| `NFSINTRO_FR` | 2,471 | 30.0003 | 82.4 s | 4,128,682 | 62.999 | 95, -2 |
+| `BBGLOGO_EN` | 392 | 30 | 13.1 s | 720,896 | 11 | 90, -4 |
+| `REWARD_EN` / `_FR` | 1,131 | 29.97 | 37.7 s | 1,900,544 | 29 | 95, -2 |
+| `MAKEOF_EN` | 14,537 | 29.97 | 8 min 5 s | 24,443,721 | 372.982 | 93, 0 |
 
-It costs about 5 million emulated instructions (~16 s) per frame. For one
-90-frame movie that is fine.
+"Pairs" is the sound's length in 0x10000-byte left/right pairs (see "The
+sound"). "Quality" is the first frame's two header bytes.
+`python tools/mv3_check.py --survey` prints the table.
 
-The format notes below are still a real disassembly of the decoder, and are
-enough to write a native decoder from -- they are what a Phase 3 C port would
-be built on. Where something has not been pinned down, it says so.
+**Every frame of every movie is intra.** The layout word in each frame's
+header is 0, so no frame needs the one before it and motion compensation
+never runs. That is what lets the player read past frames it is late for
+(see "The player"). The demo disc's `EALOGO_EN.AVI` -- 90 frames, one
+keyframe and 89 deltas -- is the only MV3 file with inter frames, and the
+port does not play the demo's data.
 
-### Where the code is
+The title screen plays `EALOGO_<language>` and then `NFSINTRO_EN`, or
+`NFSINTRO_FR` in French (`TitleMoviesToPlay`, `docs/formats/boot-flow.md`).
+The others are not in that table.
 
-| symbol | addr | what |
-|--------|-----:|------|
-| `__8MV3Codec` | `0x002231a8` | constructor; chains to `Codec::Codec()` |
-| `__5Codec` | `0x0021c9c8` | builds `ClampTable` and `Bits5to8`, once, under `BaseRefCount` |
-| `_GLOBAL_$I$_5Codec$Clamp` | `0x0021cce0` | static initialiser: `OffsetClamp = Clamp + 128` |
-| `BeginDecompress__8MV3CodecP10BitmapInfoT1` | `0x002233d0` | validates the headers, `DCTImage::Init()`s the planes |
-| `DecompressFrameShared__8MV3CodecUiP16BitmapInfoHeaderPUcT2T3` | `0x002234c8` | the per-frame entry point |
-| `ToImage__8DCTImagePUcici` | `0x0021f6d8` | the whole decode loop, 4,624 bytes |
-| `Decompress__7HuffmanPsUi` | `0x00221928` | the entropy layer |
-| `BuildDecodeTab__7Huffman` | `0x002217a8` | builds the 9-bit decode LUT from `PrefixTab` |
-| `InitIDCTTables__8DCTImagecc` | `0x0021f2b8` | quality -> the four dequant tables |
-| `IDCT__8DCTImagePsT1PUci` | `0x0021d918` | the full 8x8 inverse transform |
-| `CopyPreviousFrameBlock__8DCTImagellPUcT3T3l` | `0x002210e0` | motion compensation |
-| `ToImage32__8DCTImagePUci` | `0x00220ac0` | YUV -> RGBA |
-| `SwapPrevBuffer__8DCTImage` | `0x00220d50` | this frame becomes the next frame's reference |
+## Where the code is
 
-Addresses are as printed by `tools/mipsdis.py`.
+| symbol | retail | demo | what |
+|--------|-------:|-----:|------|
+| `Codec::Codec` | `0x00231e10` | `0x0021c9c8` | fills the 768-byte clamp table, once |
+| `_GLOBAL_$I$_5Codec$Clamp` | `0x00232128` | `0x0021cce0` | `OffsetClamp = Clamp + 128` |
+| `DCTImage::IDCT` | `0x00232d60` | `0x0021d918` | the full 8x8 transform |
+| `DCTImage::IDCT1` / `IDCT4` | `0x00233950` / `0x002339a8` | `0x0021e508` / `0x0021e560` | DC only, the 2x2 |
+| `DCTImage::DCTImage` | `0x002343d8` | `0x0021ef90` | inverts the scan |
+| `DCTImage::Init` | `0x00234560` | | sizes the planes and `pDCTData` |
+| `DCTImage::InitIDCTTables` | `0x00234718` | `0x0021f2b8` | two quality bytes -> four dequant tables |
+| `DCTImage::IDCTImageData` | `0x00234838` | `0x0021f3d8` | the scan, then the IDCT the mode word picks |
+| `DCTImage::IDCTZero` | `0x00234a68` | `0x0021f608` | a block with no coefficients |
+| `DCTImage::ToImage` | `0x00234b38` | `0x0021f6d8` | the decode loop |
+| `DCTImage::ToImage32` | `0x002363a8` | `0x00220ac0` | YUV -> RGBA |
+| `DCTTable::ConvertQualityToScale` | `0x00236df8` | | IJG's quality curve |
+| `GenerateLuma` / `GenerateChroma` | `0x00236e48` / `0x00236e98` | | one table at a quality, via `ScaleTable` (`0x00236d90`) |
+| `Huffman::GetBits` | `0x00237228` | `0x00221728` | refill, then take |
+| `Huffman::BuildDecodeTab` | `0x002372a8` | `0x002217a8` | the 9-bit decode table |
+| `Huffman::Decompress` | `0x00237428` | `0x00221928` | the entropy layer |
+| `GETBITS` | `0x00237660` | | take, without the refill |
+| `MV3Codec::MV3Codec` | `0x00238e28` | `0x002231a8` | |
+| `MV3Codec::BeginDecompress` | `0x00239050` | `0x002233d0` | checks the headers, `Init`s the planes |
+| `MV3Codec::DecompressFrameShared` | `0x00239148` | `0x002234c8` | one frame |
+| `MoviePlayer::Update` | `0x002380a8` | `0x002224f8` | makes the sound's `bSample`, stores its rate |
+| `SOUND_HzToSPU` | `0x0026d258` | `0x002528b8` | every rate bSnd hands the SPU |
 
-Struct layouts (`MV3Codec` 648 bytes, `DCTImage` 600, `Huffman` 24) come from
-the recovered `.mdebug` type info -- see `docs/mdebug_structs.txt`.
+| data | retail | what |
+|------|-------:|------|
+| `aanscales` | `0x002bda88` | the IJG AAN factors, 14 bits |
+| `DCTBlockAdvance` | `0x002bdb08` | a block type's coefficient count: 0, 1, 4, 64 |
+| `LumaQuant` / `ChromaQuant` | `0x002bdb30` / `0x002bdbb0` | the base dequant tables |
+| `PrefixTab` | `0x002bdc48` | 12 x `length << 16 \| code` |
+| `Clamp - 256` | `0x0031c6a0` | 256 zeros, the identity, 256 x 255 |
+| the scan | `0x0031c9a0` | each natural position's index in the stream |
+| the inverse scan | `0x00334a68` | built by `DCTImage`'s constructor |
+| `DecodeTab` | `0x00334be8` | built by `BuildDecodeTab` |
+| the IDCT mode word | `gp - 15420` (`0x00331cb4`) | 2 on retail: the scalar IDCT |
+
+Struct layouts (`MV3Codec` 648 bytes, `DCTImage` 600, `Huffman` 24) come
+from the `.mdebug` type info (`docs/mdebug_structs.txt`).
 
 ## The container
 
@@ -60,336 +91,278 @@ Plain RIFF/AVI, nothing EA-specific:
 RIFF 'AVI '
   LIST hdrl
     avih
-    LIST strl     strh  fccType 'vids', fccHandler 'MV30'
-                  strf  BITMAPINFOHEADER, 512x256, 24bpp, biCompression 'MV30'
-    LIST strl     strh  fccType 'auds'
-                  strf  WAVEFORMATEX, 0x0001 (PCM), 1ch, 65470 Hz, 8-bit
+    LIST strl     strh  'vids' 'mv30', scale/rate 1/30 or 33333/1000000 or 33367/1000000
+                  strf  BITMAPINFOHEADER, 512x256, biCompression 'MV30'
+    LIST strl     strh  'auds'
+                  strf  WAVEFORMATEX: format 1, 1 channel, 8 bits,
+                        nSamplesPerSec = nAvgBytesPerSec = bytes / duration
   LIST movi
-    00db          keyframe   -- one, the first
-    00dc          delta      -- 89 of them
-    01wb          196,608 bytes of unsigned 8-bit PCM, in a single chunk
+    00db ... 01wb ... 00db ...     interleaved
   idx1
 ```
 
-196,608 / 65,470 = 3.003 s, and 90 frames at 30 fps = 3.000 s, so the audio is
-one unsplit blob covering the whole movie rather than being interleaved. The
-sample rate is a genuine 65,470 Hz and not a typo for 65,536 or 22,050.
+Every video chunk is `00db`, a keyframe. The sound comes in chunks of up to
+the strh's suggested buffer size (191,145 bytes on `EALOGO_EN`, 194,092 on
+`NFSINTRO_EN`), and the cuts fall anywhere, even in the middle of an SPU
+frame. The strf's numbers are none of them true: the "rate" is just the
+sound's byte count over the movie's length (327,680 / 6 s = 54,613 on
+`EALOGO`), and nothing reads it. `MoviePlayer`'s `ExtractVideoHeader` reads
+the audio strh and never the strf.
 
-`db`/`dc` is the standard AVI "compressed DIB, keyframe / delta" distinction
-and it agrees with the codec: the keyframe is the only frame whose header
-selects the intra-only layout.
+`avimovie.c` reads the header and walks `movi` chunk by chunk, into
+`LIST rec ` and over `JUNK`.
 
 ## The frame header
 
-Each `00db`/`00dc` payload starts with four bytes, read by
-`DecompressFrameShared`:
+Each video chunk starts with four bytes, read by `DecompressFrameShared`:
 
 | offset | type | meaning |
 |-------:|------|---------|
-| 0 | `s8` | intra quality, on the IJG 1..100 scale. 90 in this movie |
-| 1 | `s8` | signed delta added to it for inter blocks. -4 in this movie |
-| 2 | `u16` **big-endian** | layout selector. 0 on the keyframe, `0x0100` on every delta |
-| 4 | | `pCompData` -- everything else |
+| 0 | `s8` | intra quality, IJG's 1..100 scale |
+| 1 | `s8` | added to it for the inter tables |
+| 2 | `u16` big-endian | the layout: 0 is intra, anything else has motion |
+| 4 | | `pCompData` |
 
-The two quality bytes are passed straight to `InitIDCTTables`, which builds
-*four* dequant tables per frame: luma and chroma, each at the intra quality
-and at `quality + delta`.
+Both quality bytes are signed. `InitIDCTTables` builds four tables a frame:
+luma and chroma, at `quality` and at `quality + delta`. An intra frame only
+uses the first luma and chroma pair.
 
-Those bytes then become a flags word for `DCTImage::ToImage()`:
+`ToImage` takes a flags word:
 
 | bit | set when | effect |
 |----:|----------|--------|
-| 0 | the **output** `BITMAPINFOHEADER`'s `biHeight` is negative | `ToImage32` walks the destination backwards, one row at a time |
-| 1 | the header `u16` at +2 is zero | select the simple (intra) `pCompData` layout |
-| 2 | `MV3Codec::ConvertImageToRGBA` (field +644) is non-zero | convert to RGBA instead of leaving YUV |
+| 0 | the output `biHeight` is negative | `ToImage32` writes the rows bottom to top |
+| 1 | the layout word is 0 | the intra `pCompData` layout |
+| 2 | `ConvertImageToRGBA` (+644) is set | convert to RGBA |
 
-Bit 0 is worth spelling out because it is the one that bites. The codec's
-planes hold the picture the way the encoder fed it in, which for a
-positive-`biHeight` DIB is bottom-up. Clearing bit 0 copies them out in that
-order, so a naive read of the buffer comes out upside down. Asking for a
-**negative** `biHeight` sets bit 0, `ToImage32` reverses the row order, and
-the result is a normal top-down image. `tools/video_extract.py` therefore
-passes `biHeight = -height` in the output header.
+The planes hold the picture bottom row first, the way a positive-height DIB
+is stored, so bit 0 is what turns it top-down. `mv3_to_rgba(m, dst, 1)` is
+that; `mv3_to_tiled_rgba8` always writes top-down.
 
-## `pCompData`
-
-Two layouts, chosen by flags bit 1.
-
-**Simple (intra, the keyframe).** Flags bit 1 set:
+## `pCompData`, intra
 
 ```
-+0   s16   size of the DCT-type array, in bytes  (little-endian, via GetI16)
-+2   u8[]  the DCT-type array               -> DCTImage::pDCTType
-+2+n ...   the Huffman bitstream
++0     s16  size of the block-type array, in bytes
++2     u8[] the block types
++2+n   the bitstream
 ```
 
-**With motion (inter, every delta).** Flags bit 1 clear:
+The block types are two bits a block, four a byte, low pair first. Blocks
+run macroblock by macroblock in raster order, and each 16x16 macroblock is
+six blocks: four luma in raster order within it, then U, then V, 4:2:0.
+Raster order is the planes', which run bottom row first. At 512x256 that is 32 x 16 x 6 = 3,072 blocks, or 768
+bytes. The type indexes `DCTBlockAdvance`:
 
-```
-+0   s16   size of the DCT-type array, in bytes
-+2   s16   size of the motion-vector stream, in *shorts*
-+4   u8[]  (NumVects + 3) / 4 bytes, memcpy'd to DCTImage::pTransp
-+m   u8[]  the DCT-type array               -> pDCTType,  m = 4 + (NumVects+3)/4
-+m+n ...   the Huffman bitstream
-```
+| type | coefficients | block |
+|-----:|-------------:|-------|
+| 0 | 0 | `IDCTZero`: mid grey, 0x80 |
+| 1 | 1 | `IDCT1`: the DC alone |
+| 2 | 4 | `IDCT4`: the top-left 2x2 |
+| 3 | 64 | `IDCTImageData`: unscan, then the full IDCT |
 
-In the motion layout the decoder first calls `Huffman::Decompress(pVects,
-2 * size)` to unpack the motion vectors, then proceeds as in the simple case.
-
-`pTransp` is a pair of packed bit-planes, two bits per macroblock:
-
-* bit `(i & 3)` -- copy this macroblock from the previous frame
-* bit `4 + (i & 3)` -- no residual follows; the copy is the final result
-
-## The DCT-type array
-
-One frame-wide array, **two bits per block**, four blocks packed per byte,
-low pair first. The blocks run in raster order: for each macroblock, four
-8x8 luma blocks then one U then one V (4:2:0, so a 16x16 macroblock is six
-blocks). The two bits index `DCTBlockAdvance` at `0x002a0498`:
-
-| type | `DCTBlockAdvance` | meaning |
-|-----:|------------------:|---------|
-| 0 | 0 | no coefficients -- `IDCTZero`, or a straight copy on an inter block |
-| 1 | 1 | DC only -- `IDCT1` / `IDCTAdd1` |
-| 2 | 4 | the top-left 2x2 -- `IDCT4` / `IDCTAdd4` |
-| 3 | 64 | the full block -- `IDCT` / `IDCTAdd` |
-
-The value is both the dispatch selector and the number of coefficients to
-consume from the decoded stream, which is why the array sizes work out: at
-512x256 there are 32x16 macroblocks x 6 blocks = 3,072 blocks, 2 bits each,
-= **768 bytes**, exactly the `s16` in the header.
-
-Intra blocks use `DLTab[0]` / `DCTab[0]`; inter blocks use `DLTab[1]` /
-`DCTab[1]`, the tables built at `quality + delta`.
+The motion layout (a vector count, `pTransp`'s copy and no-residual bits,
+`CopyPreviousFrameBlock`, the `IDCTAdd*` family, `SwapPrevBuffer`) is in
+the demo's code and is not ported. `mv3_decode` refuses such a frame with
+`MV3_ERR_INTER` rather than guess.
 
 ## Per macroblock row
 
-`ToImage` loops over `(YSize + 15) / 16` rows. For each:
+`ToImage` loops over the rows of macroblocks. For each one:
 
-1. `Huffman::GetBits(16)` -- how many `s16` coefficients this row holds.
-2. In the motion layout only, `Huffman::GetBits(8)` -- how many macroblocks
-   this row covers. In the simple layout it is always `(XSize + 15) / 16`.
-3. `Huffman::Decompress(pDCTData, count)` -- unpack the whole row's
-   coefficients in one go.
-4. Walk the row's blocks, reading each one's 2-bit type, adding the running
-   DC predictor to the block's first coefficient, and dispatching to the
-   matching IDCT.
+1. `GetBits(16)`: how many `s16` coefficients the row holds.
+2. `Decompress` that many into `pDCTData`.
+3. The DC predictors, one each for Y, U and V, start at 0. Walking the
+   row's blocks, each block that has coefficients adds its channel's
+   predictor to its first and makes that the new predictor.
+4. The blocks, dispatched on their types.
 
-Three DC predictors -- Y, U and V -- are zeroed at the start of every
-macroblock row, so a decoder can resync at row granularity but not within a
-row.
+`Init` sizes `pDCTData` at a row of full blocks, `mbw * 384`. A count past
+that is refused (`MV3_ERR_ROW`).
 
 ## The entropy layer (`Huffman`)
 
-Despite the class name this is not a Huffman coder in the canonical sense; it
-is a fixed prefix code with an escape into a magnitude-class ladder.
+A fixed prefix code, not a Huffman code: twelve magnitude classes, with an
+escape for the long ones.
 
-The bit reader is a 32-bit MSB-aligned accumulator (`Huffman::accum`, with
-`accumCount` as the live bit count). It refills a byte at a time while fewer
-than 25 bits are live.
+The reader is a 32-bit MSB-first accumulator. `GetBits` refills a byte at a
+time while fewer than 25 bits are live, then takes. `GETBITS` takes without
+the refill. Both shift the way MIPS does, by the low five bits of the
+count, so taking 0 bits returns the whole accumulator rather than 0.
+Past the end of the frame the port refills with zeros, where the PS2 reads
+whatever memory follows.
 
-`BuildDecodeTab` expands `PrefixTab` (12 entries at `0x002a05d8`, each
-`length << 16 | code`) into a 512-entry table indexed by the top **9** bits
-of the accumulator, two bytes per entry:
+`PrefixTab` gives each class `k` (0..11) a prefix: `00 01 100 101 110 1110
+11110 111110 1111110 11111110 111111110 111111111`. After the prefix come
+`k` bits. The top one is the sign, 0 for positive; the rest are the low bits
+of a magnitude whose top bit, `1 << (k - 1)`, is implied. Class 0 has no
+bits and means a run of zeros.
 
-```
-byte 0   number of bits this symbol consumes
-byte 1   the signed coefficient, or one of two markers
-```
+`BuildDecodeTab` spreads that into 512 entries, indexed by the
+accumulator's top 9 bits, of `{ bits, value }`:
 
-The twelve prefix codes are `00 01 100 101 110 1110 11110 111110 1111110
-11111110 111111110 111111111` -- unary escape with a two-bit base.
+* **A value neither 0 nor -128**: emit it, consume `bits`.
+* **0**: a run of zeros. Consume the 2-bit prefix and a flag. A set flag
+  reads 6 bits of `run - 9`, a clear one 3 bits of `run - 1`. The run is
+  written whole even when it passes the count, by up to 72, so `pDCTData`
+  needs that slack past the row.
+* **-128**: an escape, for a class whose prefix and bits do not fit in 9.
+  `bits` holds `kk = k - 1`. Consume class `kk + 1`'s prefix, then one sign
+  bit (1 is negative), then `kk` bits of magnitude under an implied
+  `1 << kk`.
 
-Decoding one symbol, from the 9-bit lookup:
-
-* **byte 1 is neither 0 nor -128** -- the common case. Emit it as the
-  coefficient and consume `byte 0` bits. One table hit, no branches.
-* **byte 1 == 0** -- a run of zeros. Consume the 2-bit prefix, then one flag
-  bit: set means a 6-bit field giving `run + 9`, clear means a 3-bit field
-  giving `run + 1`. Emit `run` zero coefficients.
-* **byte 1 == -128** -- escape. `byte 0` is a magnitude class `k`. Consume
-  `PrefixTab[k + 1]`'s bit length, read `k` more bits, and form
-  `(1 << k) + bits`, conditionally negated.
-
-The exact condition on that final negation is the one piece of the entropy
-layer not re-derived instruction by instruction; `tools/mipsemu.py` executes
-it rather than modelling it. Everything else above is read straight off
-`Decompress__7HuffmanPsUi` at `0x00221928`.
-
-`Decompress` writes `s16` and stops on a count, not on a marker, so the
-caller always knows the length up front -- which is what the `GetBits(16)`
-in step 1 is for.
+The demo's notes left the escape's sign open. It is the bit straight after
+the prefix, and the checker's random streams take it both ways.
 
 ## Quantisation and the IDCT
 
-`InitIDCTTables(quality, delta)` builds four 64-entry `s16` tables inside
-`DCTImage`:
+`GenerateLuma` and `GenerateChroma` scale the base tables by IJG's curve:
+`scale = q < 50 ? 5000 / q : 200 - 2q`, with q clamped to 1..100 first, and
+each entry is `(base * scale + 50) / 100`, clamped to 1..32767. Then
+`InitIDCTTables` prescales every entry by `aanscales` as
+`(entry * aan + 2048) >> 12`.
 
-| table | offset in `DCTImage` | built from | at quality |
-|-------|---------------------:|------------|------------|
-| `DLTab[0]` | 88 | `LumaQuant` (`0x002a04c0`) | `quality` |
-| `DLTab[1]` | 216 | `LumaQuant` | `quality + delta` |
-| `DCTab[0]` | 344 | `ChromaQuant` (`0x002a0540`) | `quality` |
-| `DCTab[1]` | 472 | `ChromaQuant` | `quality + delta` |
+The transform is IJG's "ifast" AAN IDCT, not a Chen-Wang one. Its
+constants are 8-bit fractions: 362 (1.414), 473 (1.848), 277 (1.082) and
+-669 (-2.613). `IDCTImageData` first scatters the stream through the
+inverse scan into natural order, then picks a transform by the mode word at
+`gp - 15420`. On retail that word is 2, the scalar `IDCT` at `0x00232d60`.
+Columns go first, each coefficient dequantised as it is read. Rows go
+second, each output shifted down 5 bits into `OffsetClamp`. The arithmetic
+is the PS2's: 32-bit wrapping products and sums and arithmetic shifts, so
+`mv3.c` works in `uint32_t` and shifts through `SRA`.
 
-`ChromaQuant` is the JPEG Annex K chrominance table verbatim; `LumaQuant` is
-a lightly tweaked Annex K luminance table. `DCTTable::ConvertQualityToScale`
-is IJG's quality-to-scale curve.
+`IDCT1` fills the block with `OffsetClamp[(dc * q) >> 5]`. `IDCT4` is the
+same pair of passes with only the top-left 2x2 live. When a column's second
+coefficient, or a row's, is 0, it copies instead of transforming.
 
-Each table is then prescaled in place by `aanscales` (`0x002a0418`, the IJG
-AAN scale factors) as `(q * aan + 2048) >> 12`, folding the transform's
-row/column scaling into the dequant step. The transform itself is a
-Chen-Wang style integer IDCT (`IDCTRowReference` / `IDCTColReference` are the
-readable versions; `IDCT` is the MMI-vectorised one actually called).
-
-Output samples are clamped by indexing `Codec::OffsetClamp`, which points
-into a 768-byte table: 256 zeros, then the identity 0..255, then 256 copies
-of 255. `Codec::Clamp` points at the identity run and is statically
-initialised in `.data`; `OffsetClamp = Clamp + 128` is set **only** by the
-static initialiser `_GLOBAL_$I$_5Codec$Clamp`, and the table's contents are
-filled **only** by `Codec::Codec()`. Anything driving this code outside a
-normal boot has to arrange for both, which is why `tools/mipsemu.py` grew a
-`run_ctors()`.
-
-## Motion compensation
-
-For an inter macroblock whose `pTransp` copy bit is set,
-`CopyPreviousFrameBlock` fetches a 16x16 luma block and the matching 8x8
-chroma blocks from the previous frame's planes at the macroblock's motion
-vector. If the "no residual" bit is also set the copy is the whole answer;
-otherwise the `IDCTAdd*` family adds the dequantised residual on top.
-
-After the frame is complete, `SwapPrevBuffer` exchanges `pData`/`pY`/`pU`/
-`pV` with `pPrevData`/`pPrevY`/`pPrevU`/`pPrevV`, so decoding is stateful:
-**a delta frame can only be decoded after every frame before it.**
-`tools/video_extract.py`'s `--frames N` can therefore only trim from the end.
+`OffsetClamp` points 128 bytes into the identity run of a 768-byte table,
+and the PS2 indexes it without a bound. Retail's own data never reaches
+past it (the checker counts), and the port saturates if it ever does
+(`mv3_clamp_misses`).
 
 ## YUV -> RGBA
 
-With flags bit 2 set, `ToImage32` does the colour conversion itself. It is
-BT.601 at full range, in 8.8 fixed point, two pixels at a time (4:2:0, so one
-chroma pair feeds two luma samples):
+`ToImage32` is BT.601 at full range in 8.8 fixed point, one chroma pair to
+a 2x2 of luma:
 
 ```
-cr = V - 128
-cb = U - 128
-r  = Clamp[ Y + (359 * cr) / 256 ]
-g  = Clamp[ Y - ( 88 * cb + 183 * cr) / 256 ]
-b  = Clamp[ Y + (454 * cb) / 256 ]
-a  = 255
+cr = V - 128, cb = U - 128
+r = Clamp[Y + 359 * cr / 256]
+g = Clamp[Y + (-88 * cb - 183 * cr) / 256]
+b = Clamp[Y + 454 * cb / 256]
+a = 255
 ```
 
-The divisions are arithmetic shifts with a +255 bias on negative values, i.e.
-truncation toward zero, not rounding. 359/256 = 1.402 and 454/256 = 1.773 are
-the usual BT.601 coefficients.
+The divisions round toward zero (a +255 bias below zero, then a shift).
+`mv3_to_tiled_rgba8` writes the same pixels straight into the PICA200's
+RGBA8 texels, in 8x8 Morton tiles and top row first, so a frame goes into
+the texture without a swizzle pass. A 2x2 quad is four consecutive texels in
+Morton order, and it shares one chroma sample.
 
-Bytes land in the destination as **R, G, B, A** -- so the buffer is
-RGBA8888 and can go straight into a PNG.
+## The sound
 
-`ToImage32_5P` and `ToImageYUYV` are the alternative output paths (5-bit
-packed and YUY2); neither is used here.
-
-## Verified
-
-* `tools/video_extract.py --list` reproduces the AVI's own stream and frame
-  tables, and the per-frame quality bytes are constant (90, -4) across all 90
-  frames.
-* All 90 frames decode, in one 26-minute run costing 4.6M-5.5M emulated
-  instructions each. The keyframe is a pixel-accurate EA GAMES wordmark; the
-  deltas animate the ring sweep around it and bring up the
-  `EAGAMES.COM` tagline, with `CopyPreviousFrameBlock` and the `IDCTAdd*`
-  family carrying the motion and `IDCTZero` dropping from 930 calls on frame
-  0 to single digits after, exactly as the intra/inter split predicts. The
-  last frame is clean, so nothing drifts across 89 chained deltas.
-* The audio chunk is plain PCM and is written out unconverted -- AVI and WAV
-  agree on unsigned 8-bit and on signed little-endian 16-bit, so there is
-  nothing to translate.
-
-## What the 3DS port does instead: bake it
-
-Nothing on the handheld decodes MV3. Porting ~5,000 instructions of
-MMI-vectorised IDCT, motion compensation and a prefix-coded entropy layer to
-ARM11 to replay three seconds of EA logo is the wrong trade, so the port
-decodes the movie once, on a desktop, and ships the result:
+The sound stream is PS2 SPU ADPCM: 16-byte frames of 28 samples, the codec
+the sound banks use (`docs/formats/sound-bank.md`). Byte 0 is
+`predictor << 4 | shift` and byte 1 the flags. The nibbles run low first,
+and each sample is
 
 ```
-python tools/video_extract.py extracted/MOVIES/INTRO/EALOGO_EN.AVI out/
-python tools/movie_bake.py out/EALOGO_EN <data>/MOVIES/INTRO/EALOGO_EN.M3V
+s = (sext16(nibble << 12) >> shift) + ((f0 * s1 + f1 * s2 + 32) >> 6)
 ```
 
-`tools/video_extract.py` runs the PS2's own decoder under `tools/mipsemu.py`,
-so the 90 PNGs are the console's output rather than an approximation of it,
-and `tools/movie_bake.py` turns them into one file the 3DS streams with no
-per-pixel work. `3DS Files/source/movie.c` plays it;
-`3DS Files/source/main.c` points the title screen's movie plane at it through
-`uirender_override_texture`.
+clamped to 16 bits, with the filters `{0, 0}, {60, 0}, {115, -52}, {98, -55},
+{122, -60}`. A predictor above 4 is taken as 0. The movies carry no loop or
+end flags.
 
-### `.M3V`, the baked format
+It is in stereo, in pairs of blocks: 0x8000 bytes (2,048 frames) of the
+left channel, then 0x8000 of the right. Each channel's history runs on from
+its own previous block. Every retail movie but two is a whole number of
+pairs. `MAKEOF` and `NFSINTRO_FR` end with part of one, and their tails are
+silent.
 
-Two ideas, both exploiting the same fact -- this is a logo on a black field:
+None of that is in the EE's code: the IOP fed the SPU, and the layout is
+worked out from the data. The rate is the EE's. `MoviePlayer::Update`
+makes the stream's `bSample` and stores `0xaa66`, 43,622, over its rate
+(`ori` at `0x002381b0`). The jukebox's caller writes the same field with
+the JBC header's 32,000, so it is a rate in Hz. Every rate bSnd gives the
+SPU goes through `SOUND_HzToSPU`, `(hz << 12) / 48000`, which makes pitch
+3,722: 43,617 Hz, for every movie, whatever the strf says.
 
-* **Already in the GPU's layout.** RGB565 in 8x8 Morton tiles, exactly what
-  `texpack_upload` builds by hand for every other texture, so a decoded frame
-  goes into `C3D_Tex::data` without a swizzling pass.
-* **Tile skipping plus RLE16.** A delta frame carries a bitmap of which tiles
-  changed and data for those only; the data is runs of `u16` control words,
-  bit 15 set for "repeat the next pixel n times", clear for "n literals
-  follow". Runs cross tile boundaries, so a black band spanning eight tiles
-  costs one control word rather than eight.
+`avisound_*` in `avimovie.c` holds the stream's bytes until a whole pair is
+in, because the chunks cut it anywhere, and then decodes it a frame of each
+channel at a time into interleaved stereo PCM. A partial pair never plays.
+On the 3DS the PCM goes to ndsp channel 23, the one `bsnd` leaves free
+(`BSND_HW_VOICES`), at `avisound_rate_hz()`: 43,617 Hz, through bsnd's
+own round trip. It plays from a ring of six waves of 7,168 samples each,
+about a second queued.
 
-Everything is little-endian:
+## The player
 
-```
-0x00  char[4]  "M3V1"
-0x04  u16      width, u16 height, u16 frames, u16 fps
-0x0c  u16      format (0 = RGB565 / 3DS Morton tiles)
-0x0e  u16      bytes per tile (128)
-0x10  u32      largest frame payload, so the player sizes one buffer
-0x14  u32      frame table offset
-0x18  u32      audio offset, u32 audio length, u32 sample rate
-0x24  u16      channels, u16 bits per sample
-0x28  u32[2]   reserved, zero
-0x30           frame table: frames x { u32 offset, u32 length }
-               frame payloads
-               audio: raw PCM exactly as the AVI stored it
+`AviMovie` reads the file a chunk at a time. `avimovie_advance(m, target)`
+reads on until frame `target` has been read, hands every sound chunk on the
+way to the sound, and decodes `target` alone of the video chunks it passes.
+Since every frame is intra, a player that has fallen behind skips straight
+to the frame that is due and stays in time with the sound.
 
-frame payload:  u8 kind (0 = full, 1 = delta)
-                if delta: u8[(tiles + 7) / 8] changed-tile bitmap, LSB first
-                RLE16 over the changed tiles' pixels, in tile order
-```
+The clock is the console's tick from the moment the movie opened, and the
+frame due at `t` seconds is `floor(t * rate / scale)`. A movie is over when
+`movi` is used up and the clock has passed `frames * scale / rate`. On
+Azahar at 100% the intro decodes 366 of the first 591 frames and reads past
+the rest; the EA logo decodes 154 of its 180.
 
-Frame 0 is the only full frame, so an `.M3V` plays forwards from the start
-and does not seek -- the same constraint MV3 itself has, and all
-`TitleScreen` ever asks for.
+The title screen draws the texture through its movie planes, and the port
+stretches it across the whole top screen (`docs/formats/boot-flow.md`).
 
-On `EALOGO_EN.AVI` that is **1.50 MB**, audio included: 6.7% of the 22.5 MB
-the same 90 frames would cost as raw RGB565, with 10.0% of tiles touched on
-average. Frames 65-90, where only the `EAGAMES.COM` tagline blinks, cost
-about 320 bytes each.
+## Checked
 
-The audio -- 196,608 bytes of unsigned 8-bit mono at 65,470 Hz -- is carried
-through unconverted and is not played yet; sound is Phase 3.
+`python tools/mv3_check.py` holds `mv3.c` to the retail image, run in
+`mipsemu`, and `avimovie.c` to the checker's own reading of RIFF and the
+sound:
 
-### Checked
+- `BuildDecodeTab`'s 512 entries, and `InitIDCTTables` at every kind of
+  quality pair: both halves of IJG's curve, 1 and 100 and past them, and
+  bytes with the sign bit set.
+- `GetBits` at every width across refills, and `Decompress` over random
+  streams that reach every class, the escape's sign both ways, both run
+  lengths, and runs that write past the count.
+- Every IDCT on random blocks at real tables, with DCs that clamp at both
+  ends, and `ToImage32` on random planes in both row orders.
+- Whole frames of retail's movies through `DecompressFrameShared`: each
+  boot movie's first, a middle and its last, and one of each other kind.
+  They are compared as CRCs of the RGBA and of the port's tiled texture
+  read back into rows, with the port's clamp misses at 0.
+- Every retail movie's header and chunk list, and the pacing over a
+  schedule of clock times (which frames are decoded, which read past, which
+  sound chunks are handed on), on three movies and a synthetic AVI with
+  what retail's files leave out.
+- The sound against `audio_convert.py`'s SPU decoder, the one
+  `sndbank_check` holds the banks to: two boot movies' whole streams as the
+  player reads them, and random streams over every predictor and shift,
+  clamping both ways, with a partial pair at the end. They are pushed in
+  sizes from a byte to three pairs and pulled from none to a whole block.
+  The rate is read out of the image: `Update`'s immediate and
+  `HzToSPU`'s arithmetic.
 
-`tools/movie_check.py` builds `3DS Files/source/movie.c` for the host, runs
-it over a baked file, decodes the same file again with an independent Python
-reader, and diffs a CRC32 of the whole tile-order surface after every frame,
-plus the header, where `m3v_drive()` lands after stepping at 60 fps, and the
-`.AVI` -> `.M3V` path rewriting. On `EALOGO_EN.M3V`: **102 lines, 0 differ**.
+It runs in about two minutes. `--mutate` breaks `mv3.c`, `avimovie.c` and
+`avimovie.h` one way at a time (the tables, the reader, the escape, each
+IDCT, the colour, the container, the pacing, the sound's decoder, layout,
+stream and rate). Of 94, 92 are caught, and it takes about eleven minutes. Two of
+the 92 hang the harness, which counts: `pace-done` and `pace-first` leave a
+movie that never ends. The other two are equivalent by construction: they
+turn off the 4-point IDCT's shortcuts for a zero coefficient, and the long
+way computes the same values.
 
-And looked at: `--png` untiles the decoded surface back to PNGs. Frame 44 is
-the EA GAMES wordmark inside its ring; frame 88 has the `EAGAMES.COM` line
-and the `EA GAMES is an Electronic Arts Brand` strapline under it, which is
-what `docs/formats/mv3-video.md` predicted from the decoder and what the PS2
-shows.
+The mutants are written into the real sources and restored afterwards, so
+nothing may be built while `--mutate` runs. One ARM build did, took
+`pace-done` with it, and hung the EA logo on its last frame on Azahar.
 
 ## Still open
 
-* No native C decoder, and there will not be one: the port pre-decodes, as
-  above. Anything that needs MV3 decoded on the handheld -- a movie added
-  after the fact, or an attract-mode clip streamed rather than shipped --
-  would have to write one, and these notes are what it would be built on.
-* The sign condition on the entropy escape path (see above).
-* `ToImage32_5P` and `ToImageYUYV` are unread; nothing on this disc uses them.
+- The motion layout. No retail movie uses it, so it is not ported.
+- The IOP's side of the sound: whether its streaming module did anything
+  to the rate before the SPU. The EE's 43,617 Hz is what the port plays.
+  It is not settled from the data whether the content was mastered at
+  44.1 kHz. If it was, retail's sound ran 1.1% slow and ended up 0.9 s
+  behind the intro's picture, and the port does the same.
+- Decode speed on hardware. The numbers above are Azahar's emulated Old 3DS.
+- `ToImage32_5P` and `ToImageYUYV` are unread; nothing uses them.

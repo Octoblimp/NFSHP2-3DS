@@ -1,0 +1,180 @@
+#pragma once
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+
+#include "mv3.h"
+
+// Streams the disc's movies, `MOVIES\INTRO\*.AVI`, straight off the card:
+// plain RIFF/AVI with an MV30 video stream (mv3.c) and a sound stream, the
+// two interleaved in the `movi` list chunk by chunk. The sound's strf says
+// 8-bit mono PCM and it is not: it is the SPU's ADPCM, in stereo -- see
+// AviSound below. `docs/formats/mv3-video.md` has the container and the
+// sound.
+//
+// Retail's boot movies are 512x256 at 30 fps and every frame is a keyframe,
+// so a frame decodes without the ones before it. The player leans on that:
+// when the clock has run ahead it reads past the frames it is late for and
+// decodes only the one that is due, so the picture keeps time with the
+// sound on a slow console instead of drifting behind it.
+//
+// The container and the pacing are free of <3ds.h> and are tested on the
+// host (tools/src/mv3_test.c, tools/mv3_check.py). The texture and the ndsp
+// channel are the block at the end.
+
+#define AVI_TAG(a, b, c, d) \
+    ((uint32_t)(a) | (uint32_t)(b) << 8 | (uint32_t)(c) << 16 | (uint32_t)(d) << 24)
+
+typedef struct {
+    uint32_t width, height;          // strf's BITMAPINFOHEADER; height's sign
+    int32_t  bmpHeight;              //   kept in bmpHeight
+    uint32_t videoCodec;             // biCompression, 'MV30'
+    uint32_t scale, rate;            // the video strh: rate / scale a second
+    uint32_t frames;                 // the video strh's length
+    uint16_t audioFormat;            // WAVEFORMATEX as the file has it, which
+    uint16_t audioChannels, audioBits;   //   is not what the stream holds:
+    uint32_t audioRate;              //   the player reads none of the four
+    int      videoStream, audioStream;   // -1 when absent
+    uint32_t moviStart, moviEnd;     // the movi list's payload, as offsets
+} AviInfo;
+
+typedef struct {
+    uint32_t tag;                    // as the file spells it, '00db' etc.
+    uint32_t offset;                 // the payload's file offset
+    uint32_t size;
+} AviChunk;
+
+// Reads the RIFF header, hdrl and the start of movi. False on anything that
+// is not an AVI with one video stream.
+bool avi_parse(FILE* f, AviInfo* out);
+
+// The chunk at *pos inside movi, then *pos past it. A `LIST rec ` is walked
+// into and JUNK is skipped. False at the end of movi or on a bad chunk.
+bool avi_next_chunk(FILE* f, const AviInfo* info, uint32_t* pos, AviChunk* out);
+
+// Which stream a chunk belongs to, from its first two characters, or -1.
+int avi_chunk_stream(uint32_t tag);
+
+typedef void (*AviAudioFn)(void* user, FILE* f, const AviChunk* c);
+
+typedef struct {
+    FILE*      file;
+    AviInfo    info;
+    Mv3Codec   codec;
+    uint32_t   pos;                  // the next chunk header
+    uint32_t   nextFrame;            // the next video chunk's frame number
+    int32_t    shown;                // the frame in the planes, -1 before any
+    uint32_t   decoded;              // how many frames were decoded
+    uint32_t   skipped;              // and how many read past unseen
+    bool       ended;                // movi is used up
+    int        error;                // mv3_decode's, once a frame fails
+    uint8_t*   frameBuf;
+    uint32_t   frameCap;
+    AviAudioFn audio;                // each audio chunk as it is reached
+    void*      audioUser;
+} AviMovie;
+
+// Opens `path` and sizes the codec. Nothing is decoded yet.
+bool avimovie_open(AviMovie* m, const char* path);
+void avimovie_close(AviMovie* m);
+
+// The frame due at `seconds` into the movie: floor(seconds * rate / scale).
+uint32_t avimovie_frame_at(const AviMovie* m, double seconds);
+double   avimovie_duration(const AviMovie* m);
+
+// Reads on until frame `target` has been read, handing every audio chunk on
+// the way to `audio`, and decodes `target` alone of the frames it passes.
+// True when the planes changed. A frame that fails to decode ends the
+// movie, with the codec's error in `error`.
+bool avimovie_advance(AviMovie* m, uint32_t target);
+
+// Past the last frame, or stopped by a bad one.
+bool avimovie_done(const AviMovie* m);
+
+// -- the sound ---------------------------------------------------------------
+//
+// Retail's movie sound is PS2 SPU ADPCM -- 16-byte frames of 28 samples, the
+// same codec as the sound banks (docs/formats/sound-bank.md) -- in stereo:
+// the stream is pairs of blocks, 0x8000 bytes of the left channel and then
+// 0x8000 of the right, and each channel's history runs on from its previous
+// block. The AVI's chunks cut the stream anywhere, even mid-frame, so bytes
+// are held until a whole pair is in and only then decoded.
+//
+// None of that is in the EE's code -- the IOP fed the SPU -- and it is
+// worked out from the data; the rate is the EE's. MoviePlayer::Update
+// (0x002380a8) makes the stream's bSample and stores 0xaa66 over its rate
+// (0x002381b0), and every rate bSnd hands the SPU goes through
+// SOUND_HzToSPU (0x0026d258), so the SPU played the movies at pitch 3722:
+// 43617 Hz, for every movie, whatever the strf says.
+
+#define AVISOUND_BLOCK   0x8000              // one channel's run of the stream
+#define AVISOUND_PAIR    (2 * AVISOUND_BLOCK)
+#define AVISOUND_FRAMES  (AVISOUND_BLOCK / 16)   // SPU frames a block: 2048
+#define AVISOUND_SAMPLES 28                  // samples an SPU frame
+#define AVISOUND_RATE    0xaa66              // Hz, before the SPU's rounding
+
+typedef struct {
+    uint8_t* buf;                // stream bytes in and not yet played out;
+    uint32_t len, cap;           //   buf[0] starts a pair
+    uint32_t frame;              // the pair's next frame, 0..AVISOUND_FRAMES
+    int32_t  hist[2][2];         // each channel's last sample and the one before
+    uint32_t pushed;             // bytes in since the start
+} AviSound;
+
+// Appends `n` bytes of the stream, or a sound chunk read from `f`. False
+// when it could not: out of memory, or a short read.
+bool avisound_push(AviSound* s, const void* p, uint32_t n);
+bool avisound_read(AviSound* s, FILE* f, const AviChunk* c);
+
+// Frames of each channel that can be decoded now: the rest of every whole
+// pair held. A partial pair at the end of a stream never plays.
+uint32_t avisound_ready(const AviSound* s);
+
+// Decodes up to `frames` frames of each channel into `out`, left and right
+// interleaved (out[2i] left, out[2i+1] right), and returns how many samples
+// a channel that made: 28 a frame.
+uint32_t avisound_pull(AviSound* s, int16_t* out, uint32_t frames);
+
+void avisound_free(AviSound* s);
+
+// The rate the SPU played at: AVISOUND_RATE through bsnd's round trip.
+uint32_t avisound_rate_hz(void);
+
+#ifdef __3DS__
+#include <3ds.h>
+#include <citro3d.h>
+
+// ndsp's channels 0..22 are bsnd's; the movie's sound is the last one.
+#define AVIMOVIE_CHANNEL 23
+// The sound goes to ndsp as stereo PCM16, decoded a wave at a time into a
+// ring of AVIMOVIE_WAVES buffers that the DSP plays in order: about a
+// second queued, so a slow pass of the loop never lets it run dry, in
+// 172 KB of linear memory.
+#define AVIMOVIE_WAVES       6
+#define AVIMOVIE_WAVE_FRAMES 256     // SPU frames a wave: 7168 samples
+
+typedef struct {
+    ndspWaveBuf wave;
+    int16_t*    pcm;                 // AVIMOVIE_WAVE_FRAMES * 28 * 2 samples
+} AviWave;
+
+typedef struct {
+    AviMovie movie;
+    AviSound snd;
+    C3D_Tex  tex;
+    u64      startTick;
+    bool     sound;
+    AviWave  waves[AVIMOVIE_WAVES];  // a ring, played in order
+    uint32_t waveHead, waveCount;
+    uint32_t audioSamples;           // queued since the start, a channel
+} AviPlayer;
+
+// Opens `path` into a fresh RGBA8 texture the size of the movie, shows frame
+// 0 and starts its sound; the clock starts here.
+bool aviplayer_open(AviPlayer* p, const char* path);
+void aviplayer_close(AviPlayer* p);
+
+// Brings the texture up to the clock. True once the movie is over.
+bool aviplayer_drive(AviPlayer* p);
+#endif

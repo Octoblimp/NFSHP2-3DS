@@ -529,15 +529,16 @@ void bgf_begin_unloading_frontend(BGameFlow* gf)
 
 // ------------------------------------------------------- TitleMoviesToPlay
 
-// 0x002f3770. Eight language rows of two. Only EALOGO_EN.AVI is actually on
-// the disc -- NFSINTRO_EN.AVI is in none of the 3,321 names in ZDIR.BIN, so
-// on this build the sequence is one movie long. The port keeps the whole
-// table because the flow reads its length, and skips what it cannot open.
+// Retail 0x002fb750 (the demo's 0x002f3770). Eight language rows of two:
+// the EA logo in the row's language, then the letterboxed NFS intro, which
+// only French has a version of. Every one of them is on the retail disc;
+// the demo pressed EALOGO_EN.AVI alone and had NFSINTRO_EN.AVI for French
+// too. A file the port cannot open is skipped rather than waited on.
 static const BTitleMovie kTitleMovies[8][2] = {
     { { "MOVIES\\INTRO\\EALOGO_EN.AVI", 0 },
       { "MOVIES\\INTRO\\NFSINTRO_EN.AVI", 1 } },
     { { "MOVIES\\INTRO\\EALOGO_FR.AVI", 0 },
-      { "MOVIES\\INTRO\\NFSINTRO_EN.AVI", 1 } },
+      { "MOVIES\\INTRO\\NFSINTRO_FR.AVI", 1 } },
     { { "MOVIES\\INTRO\\EALOGO_GE.AVI", 0 },
       { "MOVIES\\INTRO\\NFSINTRO_EN.AVI", 1 } },
     { { "MOVIES\\INTRO\\EALOGO_IT.AVI", 0 },
@@ -580,7 +581,7 @@ static int titleOpenMovie(BGameFlow* gf, int index)
         t->playing = 1;
         trace(gf, "movie open %s", d->name);
     } else {
-        // NFSINTRO_EN.AVI is not on the disc. The original would sit on a
+        // A movie missing from the card. The original would sit on a
         // MoviePlayer that never finishes; the port treats a file it cannot
         // open as a movie that has already ended, so the sequence advances.
         trace(gf, "movie missing %s", d->name);

@@ -163,10 +163,11 @@ function Shot([string]$tag) {
 }
 
 # --- the script the run follows -------------------------------------------
-# BootAutoload pops on its first tick, the title screen opens EALOGO_EN.M3V,
-# the movie runs three seconds, PRESS START comes up, START goes to the main
-# menu, and from there the run walks the two screens the main menu leads to
-# that the port has: Cops On Mode Select and Options.
+# BootAutoload pops on its first tick, the title screen plays EALOGO_EN.AVI
+# (six seconds) and then NFSINTRO_EN.AVI (81), START skips the intro to the
+# main menu -- or, with no intro on the card, PRESS START comes up and START
+# goes there -- and from there the run walks the two screens the main menu
+# leads to that the port has: Cops On Mode Select and Options.
 
 Write-Host "Waiting for the main loop..."
 $booted = Wait-ForLog "entering main loop" 60
@@ -180,11 +181,22 @@ if ($booted) {
     Start-Sleep -Seconds 2
     Shot "movie-late"
 
-    # The title screen only shows PRESS START once every entry in
-    # TitleMoviesToPlay has been stepped through.
-    [void](Wait-ForLog "flow title idle" 20)
-    Start-Sleep -Milliseconds 800
-    Shot "title"
+    # The EA logo cannot be skipped; the NFS intro can, by the same select
+    # that leaves PRESS START.
+    $gotIntro = Wait-ForLog "^movie open MOVIES/INTRO/NFSINTRO" 15
+    Write-Host ("  intro opened: {0}" -f $gotIntro)
+    if ($gotIntro) {
+        Start-Sleep -Seconds 3
+        Shot "intro-early"
+        Start-Sleep -Seconds 6
+        Shot "intro-late"
+    } else {
+        # The title screen only shows PRESS START once every entry in
+        # TitleMoviesToPlay has been stepped through.
+        [void](Wait-ForLog "flow title idle" 20)
+        Start-Sleep -Milliseconds 800
+        Shot "title"
+    }
 
     [Hp2Cap]::PressKey($hwnd, $VK_M)          # START
     if (Wait-ForLog "flow enter New Main Menu" 10) {

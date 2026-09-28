@@ -702,7 +702,7 @@ bool bsnd_hw_init(BsndDriver* d)
 {
     char path[GAMEDATA_MAX_PATH];
 
-    bsnd_init(d, &kNdspSink, BSND_MAX_VOICES);
+    bsnd_init(d, &kNdspSink, BSND_HW_VOICES);
     d->alloc = hw_alloc;
     d->release = hw_free;
 

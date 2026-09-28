@@ -893,20 +893,48 @@ sequencer. `main.c` holds the concrete stage table, the way
 identical script through a second implementation in Python and diffs the
 transcript, the way `tools/bmenu_check.py` does for the menus.
 
-The title movie plays. MV3 is not decoded on the handheld -- see
-`docs/formats/mv3-video.md` -- so `tools/movie_bake.py` turns the disc's one
-movie into `MOVIES/INTRO/EALOGO_EN.M3V` beside the rest of the data, and
-`hookMovieOpen` points the title screen's movie plane at it by overriding the
-plane's own texture hash. `TitleScreen`'s `pMoviePlane` is fixed to the 4:3
-plane at construction, so `main.c` reads that object's `textureHash` rather
-than assuming `SPLASH_SCREEN`.
+The title movies play, straight off the card: `avimovie.c` streams the
+disc's `.AVI` and `mv3.c` decodes its MV3 frames (`docs/formats/mv3-video.md`),
+and `hookMovieOpen` points the title screen's movie plane at the texture by
+overriding the plane's own texture hash. `TitleScreen`'s `pMoviePlane` is
+fixed to the 4:3 plane at construction, so `main.c` reads that object's
+`textureHash` rather than assuming `SPLASH_SCREEN`.
 
-Two deliberate differences, both because the data is not there:
+START goes to the screen's menu, as `FlailerMenu`'s `JoyHandler` takes it:
+`main.c` hands `BJOY_START` to `bmenu_joy`, which sends
+`SCREEN_START_BUTTON` and then, since the title screen does not consume it,
+`MENUITEM_SELECT` to the current item. It used to send
+`SCREEN_START_BUTTON` straight to the flow. That is only the first half, so
+START could neither skip the intro nor leave PRESS START; only A could. A
+screen with no menu still gets `SCREEN_START_BUTTON` alone.
 
-* **`MOVIES\INTRO\NFSINTRO_EN.AVI` does not exist**, and neither do the other
-  six entries of `TitleMoviesToPlay`, so `GAMESTAGE_TITLE` skips a movie it
-  cannot open instead of hanging on it. The original would have hung; it never
-  had to. The same path covers a movie that exists but has not been baked.
+Retail's `TitleMoviesToPlay` is at `0x002fb750`. It differs from the demo's
+in one entry: French plays `NFSINTRO_FR.AVI` second, where the demo had
+`NFSINTRO_EN.AVI` in every row. `bootflow_check` holds its table to the
+image.
+
+Three deliberate differences. The first two are there because the data may
+be missing:
+
+* **A movie missing from the card is skipped.** `GAMESTAGE_TITLE` treats a
+  movie it cannot open as one that has ended instead of hanging on it. The
+  original would have hung; with the whole disc it never had to.
 * **`BootAutoload` has no memory card to wait for.** The port keeps the screen
   and the "tick until the job finishes, then pop" shape, and finishes the job
   immediately.
+* **The movies fill the top screen, which the user asked for.** Retail puts
+  them in the two planes, laid out for a TV. The 4:3 plane is at (-10, 0),
+  640x481, pushed 10 px left for overscan. The letterboxed plane is at
+  (-1, 65), 640x304, so it shows the intro at 2.1:1. Drawn in those planes,
+  the EA logo left a gap down the right of the 3DS screen, and the intro
+  came out 400x152. `hookMovieOpen` now passes `fill` to
+  `uirender_override_texture`, and any plane drawing the movie covers the
+  whole target instead of its own rectangle:
+  - The EA logo is stretched from 4:3 to 5:3, as every menu is.
+  - The intro is wider than the screen. It loses a 32nd of its width each
+    side, about what a TV's overscan hid, and the rest is stretched.
+    Keeping its shape outright would crop a tenth each side, and the EA
+    TRAX song credit is burned into the frame 23 texels from the left
+    edge, in both the English and the French intro.
+  Both planes stay visible exactly when retail's are, and the flow never
+  knows.

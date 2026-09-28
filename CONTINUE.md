@@ -1,9 +1,9 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-27), after task 36's eighth slice: retail's data on
-the card, in the track viewer and the frontend, and its sound banks
-transcoded without loss. `HANDOFF.md` is the running narrative; this file is the short
+continuation (2026-09-27), after task 36's ninth slice: the boot movies,
+retail's own AVIs decoded natively off the card and played with their
+sound. `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -47,10 +47,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Sixty cross-checkers pass, plus the table generators:
+Sixty-one cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -114,6 +114,7 @@ sky_check             46 scenarios, 1311 lines, 0 differ  (93 caught, 2 equivale
 sun_check            115 scenarios, 3427 lines, 0 differ  (154/154 mutations caught)
 weather_check         75 scenarios, 4368 lines, 0 differ  (85 caught, 4 equivalent)
 rain_check            31 calls,       31 lines, 0 differ  (5/5 mutations caught; 41 image facts)
+mv3_check            606 scenarios, 48861 lines, 0 differ  (92 caught, 2 equivalent; 8 frames)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -304,20 +305,40 @@ and so replaced every boot.
      and all 398 retail and 469 demo channels come back sample-exact.
      The user heard the frontend's sounds on Azahar.
 
-   **Next are the boot movies.** The title screen asks for
-   `MOVIES\INTRO\EALOGO_EN.AVI` and `NFSINTRO_EN.AVI`, and the port
-   has only the demo's baked `.M3V` path. Retail's are 512x256 MV30 at
-   30 fps, every frame a keyframe, with 8-bit mono PCM interleaved:
-   EALOGO 180 frames, BBGLOGO 392, NFSINTRO 2,425. Emulating the decoder
-   costs about 8 s a frame, so the intro cannot be baked in any
-   reasonable time and would not fit if it were. The port wants a
-   native MV3 decoder that streams the AVI from the card:
-   - Transcribe DCTImage/Huffman/MV3Codec from retail's code
-     (`docs/formats/mv3-video.md` has the demo's; retail changed only
-     layouts and ToImage's register use), and hold it bit-exact to
-     `tools/video_extract.py`'s emulated frames on a checker.
-   - Play it on the 3DS through the title screen's two movie planes,
-     with the PCM through ndsp.
+   **Task 36's ninth slice is closed: the boot movies.** The title
+   screen plays retail's `EALOGO_EN.AVI` and then `NFSINTRO_EN.AVI`
+   (`NFSINTRO_FR.AVI` in French) straight off the card, with their
+   sound, and START skips the intro. The user watched and heard both on
+   Azahar. `docs/formats/mv3-video.md`.
+   - `mv3.c` is a native MV3 decoder from retail's DCTImage, Huffman and
+     MV3Codec. It decodes intra frames only, and every frame of all 12
+     retail movies is one. `mv3_check` holds it bit-exact to the retail
+     image in mipsemu.
+   - `avimovie.c` streams the AVI's `movi` list off the card. It paces
+     frames by the console's tick and skips any frame that is late.
+     Azahar at 100% decodes 154 of the EA logo's 180 frames.
+   - The sound is not the 8-bit mono the `strf` claims. It is SPU ADPCM
+     stereo at 43,617 Hz, decoded chunk by chunk into ndsp. `bSnd`
+     leaves the movie a channel (`BSND_HW_VOICES` 23).
+   - Retail's `TitleMoviesToPlay` (`0x002fb750`) is in `gameflow.c`. The
+     demo's `.M3V` path is gone: `movie.c`, `movie_bake.py` and
+     `movie_check.py`.
+   - The movies fill the top screen, as the user asked. The EA logo is
+     stretched from 4:3. The intro loses at most a 32nd of its width
+     each side, so the EA TRAX credit stays in frame
+     (`docs/formats/boot-flow.md`).
+   - START goes through the menu, as FlailerMenu's `JoyHandler` takes
+     it, so it skips the intro and leaves PRESS START. `main.c` used to
+     send the screen `SCREEN_START_BUTTON` alone.
+   - Two things cost time, and neither was the port. First, Azahar was
+     unthrottled (`frame_limit=0`, "Speed: 1792%"), which made the
+     movies run fast. Second, `--mutate` writes its mutants into the
+     real sources. An ARM build made while it ran took `pace-done` and
+     hung the EA logo on its last frame. Build only after a mutation
+     pass finishes.
+
+   **Next is step 6 of the road:** Car's constructor and destructor, and
+   CarRenderInfo, from retail, so that a car draws on the track.
 
    "The road to the full game", below, has everything after it.
 2. **Task 27's first slice is closed: `Track.obj` and `TerrainType.obj`**,

@@ -8363,3 +8363,77 @@ opened a movie": the port plays only the demo's baked `.M3V`, and
 retail's intro is 2,425 frames of 512x256 MV30, too many to bake by
 emulation. A native MV3 decoder, held bit-exact to the emulated one, then
 played through the title's movie planes with its PCM.
+
+## Session 30, continued (2026-09-27) -- Task 36's ninth slice: the boot movies
+
+The title screen plays retail's own movies off the card. The EA logo
+comes first, then the intro (the French one in French), with their
+sound. The user watched and heard both on Azahar. START skips the
+intro. `docs/formats/mv3-video.md` has the codec, the container, the
+sound and the player.
+
+- **A native MV3 decoder.** `mv3.c` holds these, from retail's code:
+  - `BuildDecodeTab`, `InitIDCTTables`, `GetBits` and `Decompress`;
+  - the IJG ifast AAN IDCTs, with their shortcuts for zero coefficients;
+  - `ToImage32` and `DecompressFrameShared`.
+  It covers intra frames only. All 12 retail movies are 512x256 intra,
+  so the motion layout is not ported (`MV3_ERR_INTER`). Emulating the
+  decoder cost 8 s a frame, so it could never be baked.
+- **The AVI streamer.** `avimovie.c` reads `movi` a chunk at a time.
+  - Every sound chunk it passes goes to the sound.
+  - It decodes only the frame that is due, at `floor(t * rate / scale)`
+    of the console's tick, and skips any late frame.
+  - A movie is over when its last frame is shown and the clock has
+    passed `frames * scale / rate`.
+  Azahar at 100% decodes 154 of EALOGO's 180 frames and 366 of the
+  intro's first 591.
+- **The sound.** The `strf` says format 1, 8-bit mono, at a rate that is
+  only bytes over duration. The data is really SPU ADPCM, stereo, in
+  16-byte frames paired left and right, and a chunk can cut a pair
+  anywhere. The rate is the EE's: `Update`'s immediate through
+  `HzToSPU`, 43,617 Hz. `avisound` decodes it into ndsp wave buffers.
+  `bSnd` keeps 23 hardware voices, and the movie takes the 24th channel.
+  The first cut was static because it read the PCM the header claims.
+- **Retail's table.** `TitleMoviesToPlay` is at `0x002fb750`. French
+  plays `NFSINTRO_FR.AVI` second. `bootflow_check` holds the table to the
+  image and runs a French scenario.
+- **The demo's path is gone.** That removes `movie.c`/`.h`,
+  `tools/movie_bake.py`, `movie_check.py` and `src/movie_test.c`. The
+  card holds retail's files alone.
+- **The movies fill the top screen, as the user asked.**
+  `uirender_override_texture` takes a `fill` flag, and `draw_bitmap`
+  draws a filled override across the whole target:
+  - A 4:3 plane is stretched, as every menu is.
+  - The letterboxed intro plane (640x304) is wider than the screen. It is
+    cropped at the sides by at most a 32nd each and the rest is
+    stretched. Keeping its shape outright cut the EA TRAX song credit,
+    which is burned in 23 texels from the left, and the user caught it.
+  `boot-flow.md` lists this among the port's deliberate differences.
+- **START.** `main.c` sent `SCREEN_START_BUTTON` straight to the flow.
+  The title screen swallows it, so START never skipped anything, and
+  the test ended PARTIAL. FlailerMenu's `JoyHandler` sends it to the
+  screen and then, unconsumed, to the item as `MENUITEM_SELECT`. With a
+  menu up, `main.c` now hands `BJOY_START` to `bmenu_joy`.
+  `run_azahar_test.ps1` passes: the EA logo, then the intro, then START
+  on frame 130 to the main menu.
+- **Two false alarms.**
+  - The movies and their sound ran "way too fast". Azahar had
+    `frame_limit=0`, and its status bar read "Speed: 1792%". With the
+    user's say-so it is back at 100.
+  - A later build stuck on the EA logo's last frame. `mv3_check
+    --mutate` was running, and the build compiled avimovie.c holding the
+    `pace-done` mutant, whose movie never ends. The harness restored the
+    file afterwards. Never build while a mutation pass runs.
+- **Checked.** `mv3_check`: 606 scenarios and 8 whole frames, 48,861
+  lines, 0 differ. Of 94 mutations, 92 are caught; two of those hang the
+  harness. The 2 that survive turn off the 4-point IDCT's zero shortcuts,
+  so they are equivalent. The chain: 65 of 65 pass.
+
+### Next
+
+Step 6 of CONTINUE's road: Car's constructor and destructor, and
+CarRenderInfo, from retail where it changed them, so that a car draws on
+the track. Still open from this slice (`mv3-video.md`):
+- The motion layout.
+- Whether the IOP touched the sound's rate.
+- Decode speed on hardware.

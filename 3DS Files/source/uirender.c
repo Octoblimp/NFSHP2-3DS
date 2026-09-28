@@ -311,13 +311,14 @@ void uirender_set_time(UIRenderer* r, float seconds)
 }
 
 void uirender_override_texture(UIRenderer* r, uint32_t hash, C3D_Tex* tex,
-                               uint16_t w, uint16_t h)
+                               uint16_t w, uint16_t h, bool fill)
 {
     int idx = find_texture(r, hash);
     if (idx < 0) return;
-    r->textures[idx].override  = tex;
-    r->textures[idx].overrideW = w;
-    r->textures[idx].overrideH = h;
+    r->textures[idx].override     = tex;
+    r->textures[idx].overrideW    = w;
+    r->textures[idx].overrideH    = h;
+    r->textures[idx].overrideFill = tex && fill;
 }
 
 static void draw_bitmap(UIRenderer* r, const BUIObject* o, const UIView* v)
@@ -348,6 +349,38 @@ static void draw_bitmap(UIRenderer* r, const BUIObject* o, const UIView* v)
         if (o->uv[i * 2 + 1] < v0) v0 = o->uv[i * 2 + 1];
         if (o->uv[i * 2 + 1] > v1) v1 = o->uv[i * 2 + 1];
     }
+
+    float dx = v->originX + o->x * v->scaleX;
+    float dy = v->originY + o->y * v->scaleY;
+    float dw = w * v->scaleX;
+    float dh = h * v->scaleY;
+    // A filling override covers the whole target. An object wider than the
+    // target loses some of its sides on the way -- the 640x480 space is
+    // square pixels on a 4:3 TV, so w / h is the shape the PS2 showed -- but
+    // no more than a 32nd of its width each side, about what a TV's
+    // overscan hid, and the rest is stretched. Keeping the shape outright
+    // would cost the letterboxed intro (640x304, 2.1:1) a tenth of its
+    // width each side, and its EA TRAX credit is burned into the frame 23
+    // texels from the left edge. An object no wider than the target is
+    // stretched across it, the way every 4:3 screen is (UIView), which is
+    // the EA logo on the 4:3 plane.
+    if (t->override && t->overrideFill) {
+        float shape  = w / h;
+        float target = r->targetW / r->targetH;
+        if (shape > target) {
+            float keep = target / shape;
+            if (keep < 15.0f / 16.0f) keep = 15.0f / 16.0f;
+            float mid  = 0.5f * (u0 + u1);
+            float half = 0.5f * (u1 - u0) * keep;
+            u0 = mid - half;
+            u1 = mid + half;
+        }
+        dx = v->originX;
+        dy = v->originY;
+        dw = r->targetW;
+        dh = r->targetH;
+    }
+
     // The UV rect is in image pixels, but the allocation is padded up to a
     // power of two (texpack_upload), so it is the padded size that turns
     // pixels into UVs.
@@ -387,10 +420,10 @@ static void draw_bitmap(UIRenderer* r, const BUIObject* o, const UIView* v)
     C2D_Image img = { tex, &st };
     C2D_DrawParams p;
     memset(&p, 0, sizeof(p));
-    p.pos.x = v->originX + o->x * v->scaleX;
-    p.pos.y = v->originY + o->y * v->scaleY;
-    p.pos.w = w * v->scaleX;
-    p.pos.h = h * v->scaleY;
+    p.pos.x = dx;
+    p.pos.y = dy;
+    p.pos.w = dw;
+    p.pos.h = dh;
     if (o->animation == BUI_ROTATE_CENTER && o->rotation) {
         p.center.x = p.pos.w * 0.5f;
         p.center.y = p.pos.h * 0.5f;

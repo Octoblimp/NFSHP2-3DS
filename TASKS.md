@@ -2180,8 +2180,18 @@ phases.
         every sample of both discs comes back exact, where the old
         re-encode's worst was 22.6 dB.
 
-        The rest is CONTINUE.md's "The road to the full game": the boot
-        movies next (a native MV3 decoder, since retail's intro is 2,425
-        frames), then the retail pass over what is ported (step 10), the
-        full frontend (step 16), the saves (step 17) and every track and
-        car (step 18).
+        **The ninth slice is closed: the boot movies.** The title
+        screen plays retail's EA logo and intro off the card with their
+        sound, and START skips the intro. `mv3.c` is a native MV3 decoder
+        from retail's code, bit-exact to the image on `mv3_check` (92 of
+        94 mutations caught, 2 equivalent). `avimovie.c` streams the AVI
+        and paces it by the console's tick. The sound is SPU ADPCM stereo
+        at 43,617 Hz, whatever its header says. French plays
+        `NFSINTRO_FR`, from retail's table. The demo's baked `.M3V` path
+        is gone. The movies fill the top screen, as the user asked, with
+        the EA TRAX credit kept in frame.
+
+        The rest is CONTINUE.md's "The road to the full game": Car from
+        retail (step 6), then the retail pass over what is ported (step
+        10), the full frontend (step 16), the saves (step 17) and every
+        track and car (step 18).

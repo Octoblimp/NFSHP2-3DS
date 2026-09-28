@@ -239,6 +239,8 @@ static const Scenario kScenarios[] = {
     // anti-piracy panels and their 7-second timers actually run. One second
     // a frame, because 14 seconds at 1/60 is 840 frames of nothing.
     { "legal", 1, 0, 0, 1, 0, 0, 0, 1, 40, 1.0f, {{5, "mumbo"}} },
+    // French: the second movie is retail's own French intro.
+    { "french", 1, 1, 0, 1, 0, 0, 0, 0, 30, SIXTIETH, {{0,0}} },
 };
 #define NUM_SCENARIOS ((int)(sizeof(kScenarios) / sizeof(kScenarios[0])))
 

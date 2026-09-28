@@ -89,10 +89,12 @@ def f32(x):
     return struct.unpack("<f", struct.pack("<f", x))[0]
 
 
-# TitleMoviesToPlay, 0x002f3770: eight language rows of two.
+# TitleMoviesToPlay, retail 0x002fb750: eight language rows of two, held to
+# the image by retail_title_movies().
+TITLE_MOVIES_AT = 0x002fb750
 TITLE_MOVIES = [
     [(EALOGO_EN, 0), (NFSINTRO_EN, 1)],
-    [("MOVIES\\INTRO\\EALOGO_FR.AVI", 0), (NFSINTRO_EN, 1)],
+    [("MOVIES\\INTRO\\EALOGO_FR.AVI", 0), ("MOVIES\\INTRO\\NFSINTRO_FR.AVI", 1)],
     [("MOVIES\\INTRO\\EALOGO_GE.AVI", 0), (NFSINTRO_EN, 1)],
     [("MOVIES\\INTRO\\EALOGO_IT.AVI", 0), (NFSINTRO_EN, 1)],
     [("MOVIES\\INTRO\\EALOGO_SP.AVI", 0), (NFSINTRO_EN, 1)],
@@ -688,7 +690,27 @@ SCENARIOS = [
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
          haveIntroMovie=0, forceLegal=1, frames=40, dt=1.0,
          input=[(5, "mumbo")]),
+    dict(name="french", videoMode=1, currLanguage=1, skipMovies=0,
+         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         haveIntroMovie=0, frames=30, dt=SIXTIETH, input=[]),
 ]
+
+
+def retail_title_movies():
+    """TITLE_MOVIES against the table in SLES_507.31: the differences."""
+    import retail_model
+    e = retail_model.RetailEmu()
+    bad = []
+    for lang in range(8):
+        for i in range(2):
+            a = TITLE_MOVIES_AT + 8 * (lang * 2 + i)
+            p = e.u32(a)
+            name = e.read(p, 64).split(b"\0")[0].decode() if p else None
+            got = (name, e.u32(a + 4))
+            if got != TITLE_MOVIES[lang][i]:
+                bad.append("TitleMoviesToPlay[%d][%d] is %r in retail, %r here"
+                           % (lang, i, got, TITLE_MOVIES[lang][i]))
+    return bad
 
 
 def run_scenario(sc):
@@ -724,6 +746,12 @@ def main():
                     help="one scenario name; repeatable (default: all)")
     ap.add_argument("--dump", help="write both transcripts next to this path")
     args = ap.parse_args()
+
+    bad = retail_title_movies()
+    for line in bad:
+        print(line)
+    if bad:
+        return 1
 
     names = args.scenario or [s["name"] for s in SCENARIOS]
     chosen = [s for s in SCENARIOS if s["name"] in names]

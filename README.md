@@ -34,23 +34,21 @@ Produces `3DS Files/NFSHP2-3DS.3dsx` and `.cia`.
 
 ## Preparing the data
 
-The `.cia`/`.3dsx` ships engine-only -- the extracted disc is 273 MB, so the
-game reads it off the SD card. Extract the archive, then bake the intro movie:
+The `.cia`/`.3dsx` ships engine-only, and the game reads the retail disc's
+own files off the SD card. Extract them from the disc's archive (a piece at
+a time with `--only`: the whole disc is 3 GB), then pack the sound banks
+into the 3DS's DSPADPCM:
 
 ```powershell
-python tools/zdir_extract.py "PS2 Files/ZDIR.BIN" "PS2 Files/ZZDATA.BIN" extracted/ --decompress
-python tools/video_extract.py extracted/MOVIES/INTRO/EALOGO_EN.AVI out/
-python tools/movie_bake.py out/EALOGO_EN extracted/MOVIES/INTRO/EALOGO_EN.M3V
+python tools/zdir_extract.py --retail --decompress --only "GLOBAL\*"
+python tools/audio_pack.py extracted-retail/SOUND extracted-retail/SOUND
 ```
 
-`video_extract.py` decodes MV3 by running the PS2's own decoder under an
-emulator, which costs about five seconds a frame -- 90 frames, so give it
-seven minutes. It only has to happen once.
-
-Copy `extracted/` to the SD card as `sdmc:/3ds/NFSHP2-3DS/data` or
-`sdmc:/NFSHP2`, or point `nfshp2_config.txt` at wherever you put it. Only
-`GLOBAL/`, `FRONTEND/`, `LANGUAGES/` and `MOVIES/INTRO/EALOGO_EN.M3V` are
-needed to reach the main menu -- about 22 MB.
+Copy `extracted-retail/` to the SD card as `sdmc:/NFSHP2` or
+`sdmc:/3ds/NFSHP2-3DS/data`, or point `nfshp2_config.txt` at wherever you
+put it. The movies play straight from the disc's `.AVI`: the title screen
+wants `MOVIES/INTRO/EALOGO_EN.AVI` and `NFSINTRO_EN.AVI` (73 MB between
+them), and skips any it cannot find.
 
 ## Status
 

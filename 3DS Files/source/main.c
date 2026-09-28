@@ -18,12 +18,11 @@
 // PS2 textures, fonts and translated strings, and source/bmenu.c makes the
 // MENUITEM_n objects navigable.
 //
-// The title movie plays too. MV3 is not decoded on the handheld -- see
-// source/movie.c for why not -- so tools/movie_bake.py turns the disc's one
-// movie into MOVIES/INTRO/EALOGO_EN.M3V next to the rest of the data, and
-// hookMovieOpen() points the title screen's movie plane at it. A movie with
-// no baked file answers "not there", which is exactly the path the flow
-// already takes for NFSINTRO_EN.AVI, a file that was never pressed.
+// The title movies play too, straight off the card: source/avimovie.c
+// streams the disc's own MOVIES/INTRO/*.AVI and source/mv3.c decodes their
+// MV3 video, and hookMovieOpen() points the title screen's movie plane at
+// the texture they land in. A movie that is not on the card answers "not
+// there", and the flow moves on to the next.
 //
 // Controls. SELECT cycles three modes: the boot flow, the screen viewer and
 // the geometry viewer.
@@ -66,7 +65,7 @@
 #include "joyevent.h"
 #include "joyhid.h"
 #include "joypad.h"
-#include "movie.h"
+#include "avimovie.h"
 #include "mellowmover.h"
 #include "physcomp.h"
 #include "physicscar.h"
@@ -232,8 +231,7 @@ typedef struct {
     // The title movie. movieTexHash is the plane's own textureHash rather
     // than a constant: MoviePlayer blits into whatever texture pMoviePlane
     // carries, and on this disc that is SPLASH_SCREEN.
-    M3VMovie    movie;
-    C3D_Tex     movieTex;
+    AviPlayer   movie;
     bool        moviePlaying;
     uint32_t    movieTexHash;
 
@@ -432,53 +430,70 @@ static uint32_t moviePlaneTexture(Boot* b)
 static void hookMovieClose(void* user)
 {
     Boot* b = (Boot*)user;
+    const AviMovie* m = &b->movie.movie;
     if (!b->moviePlaying) return;
-    logLine("movie close after %lu/%u frames",
-            (unsigned long)b->movie.nextFrame, b->movie.info.frames);
-    uirender_override_texture(b->ui, b->movieTexHash, NULL, 0, 0);
-    m3v_tex_close(&b->movie, &b->movieTex);
+    // Read is every frame the clock passed; decoded is the ones it drew.
+    logLine("movie close after %lu/%u frames, %lu decoded, %lu skipped, "
+            "sound %lu bytes in, %lu samples queued, error %d",
+            (unsigned long)m->nextFrame, (unsigned)m->info.frames,
+            (unsigned long)m->decoded, (unsigned long)m->skipped,
+            (unsigned long)b->movie.snd.pushed,
+            (unsigned long)b->movie.audioSamples, m->error);
+    uirender_override_texture(b->ui, b->movieTexHash, NULL, 0, 0, false);
+    aviplayer_close(&b->movie);
     b->moviePlaying = false;
 }
 
-// The port plays the baked .M3V, not the .AVI -- MOVIES\INTRO\EALOGO_EN.AVI
-// becomes MOVIES/INTRO/EALOGO_EN.M3V inside the data directory. A movie with
-// no baked file answers 0, and gameflow.c treats that as a movie that has
-// already finished rather than sitting on a MoviePlayer that never ends.
+// The flow names the disc's files, MOVIES\INTRO\EALOGO_EN.AVI; the card has
+// the same tree under the data directory. A movie that is not there answers
+// 0, and gameflow.c treats that as a movie that has already finished rather
+// than sitting on a MoviePlayer that never ends.
 static int hookMovieOpen(void* user, const char* path)
 {
-    Boot* b = (Boot*)user;
-    char  rel[GAMEDATA_MAX_PATH], full[GAMEDATA_MAX_PATH];
+    Boot*           b = (Boot*)user;
+    const AviInfo*  in = &b->movie.movie.info;
+    char            rel[GAMEDATA_MAX_PATH], full[GAMEDATA_MAX_PATH];
+    size_t          i;
 
     hookMovieClose(user);
-    if (!m3v_baked_path(path, rel, sizeof(rel))
-        || !gamedata_path(rel, full, sizeof(full))
-        || !m3v_tex_open(&b->movie, &b->movieTex, full)) {
+    for (i = 0; path[i] && i + 1 < sizeof(rel); i++)
+        rel[i] = path[i] == '\\' ? '/' : path[i];
+    rel[i] = '\0';
+    if (path[i] || !gamedata_path(rel, full, sizeof(full))
+        || !aviplayer_open(&b->movie, full)) {
         b->missingMovies++;
-        bootNote("movie not baked");
+        bootNote("movie missing");
         logLine("movie missing %s", path);
         return 0;
     }
 
+    // Filled across the top screen rather than drawn in the plane: the EA
+    // logo stretched from 4:3 like every menu, the letterboxed intro trimmed
+    // a little at the sides and stretched (uirender.c, draw_bitmap).
     b->movieTexHash = moviePlaneTexture(b);
-    uirender_override_texture(b->ui, b->movieTexHash, &b->movieTex,
-                              b->movie.info.width, b->movie.info.height);
+    uirender_override_texture(b->ui, b->movieTexHash, &b->movie.tex,
+                              in->width, in->height, true);
     b->moviePlaying = true;
     // gameflow.c already traces the full path; the status line just says it
     // is running, and bootNote's buffer is smaller than a path anyway.
     bootNote("movie playing");
-    logLine("movie open %s %ux%u %u frames @ %u fps -> texture %08lx",
-            rel, b->movie.info.width, b->movie.info.height,
-            b->movie.info.frames, b->movie.info.fps,
+    logLine("movie open %s %lux%lu %lu frames @ %.3f fps, sound %s at %lu Hz "
+            "-> texture %08lx", rel, (unsigned long)in->width,
+            (unsigned long)in->height, (unsigned long)in->frames,
+            (double)in->rate / (double)in->scale,
+            b->movie.sound ? "on" : "off", (unsigned long)avisound_rate_hz(),
             (unsigned long)b->movieTexHash);
     return 1;
 }
 
-// DriveMovie (0x0016a060) returns 1 when the movie is finished.
+// DriveMovie (0x0016a060) returns 1 when the movie is finished. The movie
+// keeps its own clock, the console's tick, so the picture stays with the
+// sound however long a pass of the loop takes.
 static int hookMovieDrive(void* user)
 {
     Boot* b = (Boot*)user;
     if (!b->moviePlaying) return 1;
-    return m3v_tex_drive(&b->movie, &b->movieTex, BOOT_DT) ? 1 : 0;
+    return aviplayer_drive(&b->movie) ? 1 : 0;
 }
 
 // The bundles are already resident by the time the flow starts, so loading
@@ -1642,8 +1657,17 @@ int main(int argc, char** argv)
 
         if (mode == MODE_FLOW) {
             // ---- the boot flow
+            // START goes through the menu, as FlailerMenu's JoyHandler takes
+            // it: the screen has it as SCREEN_START_BUTTON first, and unless
+            // the screen consumes it, the current item has it as a select.
+            // That second half is how START leaves PRESS START and skips
+            // the NFS intro; the title screen only swallows the click.
             if (kDown & KEY_START) {
-                bgf_screen_event(&g_flow, BMSG_SCREEN_START_BUTTON, 0);
+                if (g_boot.hasMenu) {
+                    bmenu_joy(&g_boot.menu, 0, BJOY_START, true);
+                } else {
+                    bgf_screen_event(&g_flow, BMSG_SCREEN_START_BUTTON, 0);
+                }
                 redraw = 1;
             }
             if (kDown & KEY_B) {

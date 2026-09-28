@@ -47,8 +47,8 @@ Usage:
     python tools/audio_pack.py extracted-retail/SOUND/COMMON.MSH out/ --report
 
 The output goes next to the .MSH/.MSB it was built from, inside the data
-directory gamedata.c resolves -- the same arrangement movie_bake.py uses for
-.M3V. Nothing on the disc is overwritten; .SBK is a new extension.
+directory gamedata.c resolves. Nothing on the disc is overwritten; .SBK is
+a new extension.
 """
 import argparse
 import array

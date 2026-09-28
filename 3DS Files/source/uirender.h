@@ -48,6 +48,7 @@ typedef struct {
     // own rather than into the bundle's.
     C3D_Tex* override;
     uint16_t overrideW, overrideH;
+    bool     overrideFill;   // drawn across the whole target; see draw_bitmap
 
     // The TextureInfo scroll fields, kept so draw_bitmap() does not have to
     // reopen the pack every frame. See texpack_scroll().
@@ -127,9 +128,13 @@ void uirender_set_time(UIRenderer* r, float seconds);
 
 // Draws `tex` wherever `hash` would be drawn, at `w` x `h`. Passing NULL for
 // `tex` puts the bundle's own texture back. This is how a movie reaches the
-// screen -- see movie.c and MOVIE_PLANE_43 in gameflow.h.
+// screen -- see avimovie.h and MOVIE_PLANE_43 in gameflow.h.
+//
+// With `fill`, an object drawing it covers the whole render target instead
+// of its own rectangle: the port's own departure, so the movies fill the
+// top screen rather than sit in the planes the PS2's TV layout put them in.
 void uirender_override_texture(UIRenderer* r, uint32_t hash, C3D_Tex* tex,
-                               uint16_t w, uint16_t h);
+                               uint16_t w, uint16_t h, bool fill);
 
 // Draws one screen: layers 0..28 in order, objects in file order within a
 // layer, which is what FlailerRenderManager's LayerRenderInfoTable does.
