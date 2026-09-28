@@ -40,7 +40,9 @@
 #include <citro3d.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "bmenu.h"
 #include "bsnd.h"
@@ -612,11 +614,165 @@ static void hookSwapLogoArt(void* user, int french)
     logLine("logo art %s (not ported)", french ? "french" : "english");
 }
 
-// BootAutoLoader's memory card. There is none, so the job is already done --
-// the screen keeps its shape (tick until the job finishes, then pop itself)
-// and simply pops on its first tick.
-static void hookSaveStart(void* user) { (void)user; }
-static int  hookSavePoll(void* user)  { (void)user; return 1; }
+// ------------------------------------------------------- the memory card
+//
+// cDBFileSys, on the SD card (memcard.h): the one card, always there and
+// formatted, with its files in sdmc:/NFSHP2/SAVES -- made the first time
+// one is saved, so a card that has never saved has no folder and no file.
+// Every job finishes on the first Service after it starts, as memcard.c's
+// blank card's do; the loader's own two-second waits are what the player
+// sees.
+
+#define SAVES_DIR "sdmc:/NFSHP2/SAVES"
+
+typedef struct {
+    BMemcardFileSys base;
+    int             pending;    // the job, or BMC_FS_IDLE
+    BMemcardDone    done;
+    void*           param;
+    char            name[32];   // SetFileData's
+    void*           data;
+    int             size;
+} SdCard;
+
+static int sdPath(const SdCard* c, char* out, size_t cap)
+{
+    return snprintf(out, cap, SAVES_DIR "/%s", c->name) < (int)cap;
+}
+
+// The whole file, or nothing: a short one is a failed load, as a card that
+// came out mid-read would be.
+static int sdLoad(SdCard* c)
+{
+    char  path[96];
+    FILE* f;
+    long  got;
+    if (!sdPath(c, path, sizeof(path))) return BMC_ERROR;
+    f = fopen(path, "rb");
+    if (!f) return BMC_FILE_NOT_FOUND;
+    got = c->data && c->size > 0 ? (long)fread(c->data, 1, (size_t)c->size, f)
+                                 : 0;
+    fclose(f);
+    if (got != c->size) {
+        logLine("memcard: %s is %ld bytes, not %d", path, got, c->size);
+        return BMC_ERROR;
+    }
+    logLine("memcard: loaded %s", path);
+    return BMC_OK;
+}
+
+static int sdSave(SdCard* c)
+{
+    char  path[96];
+    FILE* f;
+    long  put;
+    if (!sdPath(c, path, sizeof(path)) || !c->data || c->size <= 0)
+        return BMC_ERROR;
+    mkdir("sdmc:/NFSHP2", 0777);
+    mkdir(SAVES_DIR, 0777);
+    f = fopen(path, "wb");
+    if (!f) return BMC_ERROR;
+    put = (long)fwrite(c->data, 1, (size_t)c->size, f);
+    if (fclose(f) != 0 || put != c->size) {
+        logLine("memcard: could not write %s", path);
+        return BMC_ERROR;
+    }
+    logLine("memcard: saved %s", path);
+    return BMC_OK;
+}
+
+static void sdDestroy(BMemcardFileSys* fs) { free(fs); }
+
+static void sdService(BMemcardFileSys* fs, int port, int slot)
+{
+    SdCard*      c = (SdCard*)fs;
+    BMemcardDone done;
+    struct stat  st;
+    char         path[96];
+    (void)port;
+    (void)slot;
+    if (c->pending == BMC_FS_IDLE) return;
+    switch (c->pending) {
+        case BMC_FS_LOAD:
+            fs->lastError = sdLoad(c);
+            break;
+        case BMC_FS_SAVE:
+            fs->lastError = sdSave(c);
+            break;
+        case BMC_FS_CHECK_EXISTENCE:
+            fs->lastError = sdPath(c, path, sizeof(path))
+                                    && stat(path, &st) == 0
+                                ? BMC_OK
+                                : BMC_FILE_NOT_FOUND;
+            break;
+        default:            // VERIFY, and the rest the boot never asks for
+            fs->lastError = BMC_OK;
+            break;
+    }
+    c->pending = BMC_FS_IDLE;
+    done       = c->done;
+    c->done    = NULL;
+    if (done) done(c->param);
+}
+
+static void sdSetFileData(BMemcardFileSys* fs, const char* name, void* data,
+                          int size)
+{
+    SdCard* c = (SdCard*)fs;
+    snprintf(c->name, sizeof(c->name), "%s", name ? name : "");
+    c->data = data;
+    c->size = size;
+}
+
+// CalculateFreeSpaceRequired (0x0012d1a0), as the blank card has it.
+static int sdCalcFree(BMemcardFileSys* fs, int size)
+{
+    (void)fs;
+    return (size + 1023) / 1024 + 5;
+}
+
+// The SD card's free space in KB, or an empty 8 MB card's if the archive
+// will not say.
+static int sdFreeSpace(BMemcardFileSys* fs)
+{
+    FS_ArchiveResource res;
+    uint64_t           kb;
+    (void)fs;
+    if (R_FAILED(FSUSER_GetSdmcArchiveResource(&res))) return 8192;
+    kb = (uint64_t)res.freeClusters * res.clusterSize / 1024u;
+    return kb > 0x7fffffffu ? 0x7fffffff : (int)kb;
+}
+
+static int sdSetState(BMemcardFileSys* fs, int state, BMemcardDone done,
+                      void* param)
+{
+    SdCard* c = (SdCard*)fs;
+    if (c->pending != BMC_FS_IDLE || state <= BMC_FS_IDLE
+        || state >= BMC_FS_WAITING)
+        return 0;
+    c->pending = state;
+    c->done    = done;
+    c->param   = param;
+    return 1;
+}
+
+static const BMemcardFileSysVtbl kSdCard = {
+    sdDestroy, sdService, sdSetFileData, sdCalcFree, sdFreeSpace, sdSetState,
+};
+
+static BMemcardFileSys* hookNewFileSys(void* user)
+{
+    SdCard* c = (SdCard*)calloc(1, sizeof(*c));
+    (void)user;
+    if (!c) return NULL;
+    c->base.vt        = &kSdCard;
+    c->base.lastError = BMC_OK;
+    return &c->base;
+}
+
+// Fred (0x002fc050), what the card loads over. Nothing reads it yet: the
+// frontend database is still the port's defaults (memcard.h).
+static uint8_t g_fred[BMC_SAVE_SIZE];
 
 static void hookTrace(void* user, const char* line)
 {
@@ -951,6 +1107,53 @@ static void hookAnimGetScale(void* user, uint32_t screen, uint32_t object,
     if (idx < 0 || !bui_object(ui, (uint32_t)idx, &o)) return;
     *sx = o.scaleX;
     *sy = o.scaleY;
+}
+
+// The four reads tPopupMenu makes (banim.h). A handle is bui.c's object
+// index, which is what bui_next_in_group walks on.
+static int32_t hookAnimNextInGroup(void* user, uint32_t screen, uint32_t group,
+                                   int type, int32_t after, uint32_t* hash)
+{
+    Boot*      b  = (Boot*)user;
+    BUI*       ui = NULL;
+    BUIScreen* s  = animScreen(b, screen, &ui);
+    BUIObject  o;
+    int32_t    idx;
+    *hash = 0;
+    if (!s || !ui) return -1;
+    idx = bui_next_in_group(ui, s, group, type, after);
+    if (idx < 0 || !bui_object(ui, (uint32_t)idx, &o)) return -1;
+    *hash = o.nameHash;
+    return idx;
+}
+
+static int hookAnimTextMaxChars(void* user, uint32_t screen, uint32_t object)
+{
+    BUI*      ui;
+    BUIObject o;
+    int32_t   idx = animFind((Boot*)user, screen, object, BUI_TYPE_TEXT, &ui);
+    if (idx < 0 || !bui_object(ui, (uint32_t)idx, &o)) return 0;
+    return (int)o.maxChars;
+}
+
+static float hookAnimTextScaledHeight(void* user, uint32_t screen,
+                                      uint32_t object)
+{
+    Boot*   b  = (Boot*)user;
+    BUI*    ui = NULL;
+    float   w = 0.0f, h = 0.0f;
+    int32_t idx = animFind(b, screen, object, BUI_TYPE_TEXT, &ui);
+    if (idx >= 0) uirender_text_extent(b->ui, ui, (uint32_t)idx, &w, &h);
+    return h;
+}
+
+static uint32_t hookAnimGetColor(void* user, uint32_t screen, uint32_t object)
+{
+    BUI*      ui;
+    BUIObject o;
+    int32_t   idx = animFind((Boot*)user, screen, object, BUI_TYPE_NONE, &ui);
+    if (idx < 0 || !bui_object(ui, (uint32_t)idx, &o)) return 0;
+    return o.color;
 }
 
 // GetTranslatedString (0x0020b0e0). The caller copies out of this before
@@ -1565,12 +1768,15 @@ int main(int argc, char** argv)
     hooks.unloadSpeech     = hookUnloadSpeech;
     hooks.swapLogoArt      = hookSwapLogoArt;
     hooks.displayFrame     = hookDisplayFrame;
-    hooks.saveStart        = hookSaveStart;
-    hooks.savePoll         = hookSavePoll;
+    hooks.newFileSys       = hookNewFileSys;
     hooks.trace            = hookTrace;
+    // TheDemoModeReplay has no replays to offer (no hook answers "none"),
+    // and StartDemoMode's race is not ported: ConsiderStartDemoMode runs
+    // and only traces.
 
     bgf_init(&g_flow, kGameFlowStages, BGF_NUM_STATES,
              kScreens, NUM_SCREENS, kBootStages, NUM_BOOT_STAGES, &hooks);
+    g_flow.fred = g_fred;
     bgf_load_global_chunks(&g_flow);
     logLine("global chunks loaded, LOADING drawn");
 
@@ -1654,6 +1860,10 @@ int main(int argc, char** argv)
     animHooks.setColor         = hookAnimSetColor;
     animHooks.getScale         = hookAnimGetScale;
     animHooks.translate        = hookAnimTranslate;
+    animHooks.nextInGroup      = hookAnimNextInGroup;
+    animHooks.textMaxChars     = hookAnimTextMaxChars;
+    animHooks.textScaledHeight = hookAnimTextScaledHeight;
+    animHooks.getColor         = hookAnimGetColor;
     bscr_set_anim_hooks(&g_uiScreens, &animHooks);
     // The title's bloom runs on the same kit, as tHighlightAnimation is one
     // class for every screen in the original.
@@ -1805,12 +2015,32 @@ int main(int argc, char** argv)
 
         if (mode == MODE_FLOW) {
             // ---- the boot flow
+            // FlailerScreenList::JoyHandler: a popup that is up has each
+            // event before the screen and its menu, and takes every one --
+            // the memory card's messages ignore SELECT and BACK, but the
+            // title underneath does not get them either.
+            u32 flowDown = kDown;
+            if (bpopup_any_active(&g_flow)) {
+                static const struct { u32 key; BJoyEvent ev; } kPopupBinds[] = {
+                    { KEY_START, BJOY_START },
+                    { KEY_B,     BJOY_MENU_BACK },
+                };
+                for (int i = 0; i < NUM_BINDS; i++)
+                    if ((kDown & kBinds[i].key)
+                        && bpopup_joy(&g_flow, 0, kBinds[i].ev, 1))
+                        flowDown &= ~kBinds[i].key;
+                for (int i = 0; i < 2; i++)
+                    if ((kDown & kPopupBinds[i].key)
+                        && bpopup_joy(&g_flow, 0, kPopupBinds[i].ev, 1))
+                        flowDown &= ~kPopupBinds[i].key;
+                if (flowDown != kDown) redraw = 1;
+            }
             // START goes through the menu, as FlailerMenu's JoyHandler takes
             // it: the screen has it as SCREEN_START_BUTTON first, and unless
             // the screen consumes it, the current item has it as a select.
             // That second half is how START leaves PRESS START and skips
             // the NFS intro; the title screen only swallows the click.
-            if (kDown & KEY_START) {
+            if (flowDown & KEY_START) {
                 if (g_boot.hasMenu) {
                     bmenu_joy(&g_boot.menu, 0, BJOY_START, true);
                 } else {
@@ -1820,7 +2050,7 @@ int main(int argc, char** argv)
             }
             // FlailerScreenList::JoyHandler's BACK: the screen hears
             // SCREEN_BACK_BUTTON first and may veto the pop.
-            if (kDown & KEY_B) {
+            if (flowDown & KEY_B) {
                 bgf_back_button(&g_flow, 0);
                 redraw = 1;
             }
@@ -1834,7 +2064,7 @@ int main(int argc, char** argv)
 
             if (g_boot.hasMenu) {
                 for (int i = 0; i < NUM_BINDS; i++) {
-                    if (!(kDown & kBinds[i].key)) continue;
+                    if (!(flowDown & kBinds[i].key)) continue;
                     bmenu_joy(&g_boot.menu, 0, kBinds[i].ev, true);
                     redraw = 1;
                 }

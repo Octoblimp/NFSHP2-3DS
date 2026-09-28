@@ -98,6 +98,22 @@ typedef struct BAnimHooks {
     void (*getScale)(void* user, uint32_t screen, uint32_t object,
                      float* sx, float* sy);
 
+    // The four reads tPopupMenu needs (bpopup.c); addresses are retail's.
+    // `nextInGroup` is FindFlailerObjectByGroup (0x00143dd8) walked:
+    // `after` is -1 to start, or what the last call returned, and the answer
+    // is a handle on the next object of `type` whose GroupHash is `group`,
+    // in the screen's file order, or -1. `*hash` gets that object's name.
+    int32_t (*nextInGroup)(void* user, uint32_t screen, uint32_t group,
+                           int type, int32_t after, uint32_t* hash);
+    // FlailerTextChunk's MaxChars (+84) and GetScaledHeight (0x00140cd8):
+    // ScaleY times the font's height, the height truncated to an int
+    // first. 0 for a missing object or font.
+    int   (*textMaxChars)(void* user, uint32_t screen, uint32_t object);
+    float (*textScaledHeight)(void* user, uint32_t screen, uint32_t object);
+    // FlailerObjectChunk's Color (+92), what FlailerMenuItem saves. 0 for a
+    // missing object.
+    uint32_t (*getColor)(void* user, uint32_t screen, uint32_t object);
+
     // GetTranslatedString (0x0020b0e0), for the blurb's NewText(int).
     const char* (*translate)(void* user, int languageID);
 

@@ -8647,3 +8647,86 @@ then the unchanged title. `docs/formats/boot-flow.md`, "Retail's
 The frontend's third slice: `BootAutoload` and `ConsiderStartDemoMode`
 in full. After that, the main menu's background movie, from TASKS.md's
 "The retail frontend".
+
+## Session 30, continued (2026-09-28) -- The frontend's third slice: BootAutoload and ConsiderStartDemoMode in full
+
+The boot now checks for a save and loads it, as retail's does. The
+card is the SD card. `docs/formats/boot-flow.md`, "The memory card" and
+"Retail's `ConsiderStartDemoMode`", has the decompilation.
+
+- **`memcard.{c,h}`: retail's `BootAutoLoader` and everything under it.**
+  - **`MemcardLoader::HandleEvent`** (`0x00246c00`) is the state
+    machine: check for the card, check for the file, read it, show the
+    status, and leave. Its two tables are `0x002bee80` and
+    `0x002beec0`, plus `0x002beea0` for the second look.
+  - **Its two "leave with a message" orders are kept.** One is quiet
+    and the other clicks.
+  - **`MemcardTester`**: the unbounded pump, and the three jobs `Verify`,
+    `Load` and `CheckForSavegameFile`.
+  - **`MemcardPrompter`**: the two builders, and the table of which
+    strings take the kilobytes.
+  - **`SavegameData`**: `settings.db`, 0x114e0 bytes, with the word-sum
+    checksum.
+  - **`OverwriteFred`**: the copy, +904 cleared, and the boot's language
+    kept.
+- **`bpopup.{c,h}`: `tPopupMenu` and the screen list's two popups.**
+  Summon, Dismiss, Tick and HandleJoy, `FlailerMenuItem`'s retail
+  recolour, and `RenderTextIntoGroup`'s word wrap with its late cut and
+  its `@`.
+- **`ConsiderStartDemoMode` is retail's** (`0x0016ed50`): signed, the
+  demo disc's attract mode, and `TheDemoModeReplay`'s loading and loaded
+  flags.
+- **The SD card.** On 2026-09-28 the user asked for every save under
+  `/NFSHP2/SAVES`.
+  - `main.c`'s `SdCard` is a `cDBFileSys` over
+    `sdmc:/NFSHP2/SAVES/settings.db`, and makes the folders on demand.
+  - Its free space comes from `FSUSER_GetSdmcArchiveResource`.
+  - `g_flow.fred` is a buffer in `main.c`. Nothing reads it yet.
+- **A popup takes the pad first.** In `MODE_FLOW`, the D-pad, A, START
+  and B go to `bpopup_joy` while a popup is up, and the menus see only
+  what is left.
+- **The animation kit** gained the four answers the word wrap asks for.
+- **The checker runs retail's code.** `bootflow_check`'s `RetailAutoload`
+  runs `BootAutoLoader::Callback` and everything under it on the image,
+  over a scripted card. The card's `Service` is a hook in front of four
+  instructions, so that it can call back into retail code.
+  - Both harnesses share a table of cards.
+  - Twenty-six new scenarios, 46 in all.
+  - `RetailAutoload.run` now restores the emulator's stubs. Its
+    `MoveBackScreen` stub had been swallowing the language screen's.
+  - The yes/no inputs were a frame early: a question put up in frame N's
+    tick takes input from frame N+1. Fixing that killed a group of
+    survivors.
+  - The popup screen's first two lines have `MaxChars` 29 and 30 in the
+    checker. At the file's 40, no message broke where "less two" matters.
+  - **`mc-status-three-seconds` needed `manualhalf`**, a manual row at
+    half-second frames. At one-second frames, 12000 x 0.00025f is
+    3.0000002, so the two-second and three-second waits end together.
+  - **`mc-check-ignores-job` needed the `slow` card**, whose jobs take six
+    Services, so the Verify outlasts the wait.
+  - 147 mutations: 144 caught and 3 equivalent. `mc-loadfailed-quiet` is
+    equivalent because `READING_FILE` silences dismissals as
+    `READY_TO_LEAVE` does. `mc-autoload-plays-on` is equivalent because
+    no movie is open when `BootAutoload` starts.
+- **Checked.**
+  - `bootflow_check`: 46 scenarios, 24,267 lines, 0 differ.
+  - `bscreens_check`: 17 scenarios, 1,277 lines, 0 differ.
+  - The whole chain, the ARM build, and Azahar.
+  - `run_azahar_test.ps1` shoots the popup checking and then answering.
+    It shows "Checking" and then the no-save message, in real translated
+    strings, on the top screen, before the language screen. A save
+    put on the card by hand was loaded, then removed. The card holds
+    retail's files only.
+- **Owed.**
+  - Message 24, `ANY_BUTTON_PRESSED`.
+  - `OverwriteFred`'s six calls.
+  - `MemcardSaver`.
+  - The internals of `StartDemoMode` and `DemoModeReplay`.
+  - Retail's recolour for `bmenu.c`'s menus.
+  - The popup's title strip runs off the right edge, as authored.
+
+### Next
+
+The frontend's fourth slice: the main menu's background movie. That is
+MV3's inter frames, and `StartMovie`, `UpdateMovie` and `StopMovie` on
+`PANELMOVIE`.

@@ -39,6 +39,8 @@ import banim_check as ba                            # noqa: E402
 SOURCES = ["tools/src/bscreens_test.c",
            "3DS Files/source/bscreens.c",
            "3DS Files/source/gameflow.c",
+           "3DS Files/source/bpopup.c",
+           "3DS Files/source/memcard.c",
            "3DS Files/source/banim.c",
            "3DS Files/source/bmath.c",
            "3DS Files/source/bmathtab.c"]

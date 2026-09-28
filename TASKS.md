@@ -2228,7 +2228,21 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
   - [ ] The French `LOADING` and `NFS_LOGO_ALPHA` art on the host
         (`hookSwapLogoArt` only logs).
   - [ ] `Language Options`' `tSlideOnScreen` (`0x001ee918`).
-- [ ] **`BootAutoload` and `ConsiderStartDemoMode` in full.**
+- [x] **`BootAutoload` and `ConsiderStartDemoMode` in full.** Retail's
+      `BootAutoLoader` and the classes under it (`memcard.c`) check and
+      load `settings.db` from `sdmc:/NFSHP2/SAVES`. The popups they speak
+      through (`bpopup.c`), with `RenderTextIntoGroup`'s word wrap, draw
+      on Azahar. Retail's `ConsiderStartDemoMode` knows the demo disc's
+      attract mode and the replay. `bootflow_check` runs all of it on the
+      retail image: 46 scenarios and 147 mutations, of which 144 are
+      caught and 3 are equivalent.
+  - [ ] `ANY_BUTTON_PRESSED` (message 24) from `JoyHandler`.
+  - [ ] `OverwriteFred`'s six calls into the frontend. Nothing reads the
+        loaded `Fred` yet.
+  - [ ] `MemcardSaver`, and the Options screen's manual load.
+  - [ ] `StartDemoMode` and `DemoModeReplay`'s internals.
+  - [ ] `bmenu.c`'s menus recolour the demo's way; retail's
+        `FlailerMenuItem` recolour is only the popups'.
 - [ ] **The main menu's background movie.**
   - MV3's inter frames.
   - `StartMovie`, `UpdateMovie` and `StopMovie` (`0x0016ce30`,

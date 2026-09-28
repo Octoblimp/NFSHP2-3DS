@@ -1,15 +1,16 @@
 // Host harness for the 3DS boot flow.
 //
-// Builds "3DS Files/source/gameflow.c" for the host and runs a fixed set of
-// boot scenarios against a simulated world -- a loader that finishes at the
-// end of the frame that asked, a movie that runs five frames, a memory card
-// that answers on the second poll -- printing every observable step:
+// Builds "3DS Files/source/gameflow.c" -- with bpopup.c and memcard.c under
+// it -- for the host and runs a fixed set of boot scenarios against a
+// simulated world -- a loader that finishes at the end of the frame that
+// asked, a movie that runs five frames, a scripted memory card, the popup
+// screen's text objects -- printing every observable step:
 //
 //     scenario <name>
 //     frame <n> <realTime> <realTimer>
 //     <whatever the flow traced: state, begin, end, change, enter, leave,
 //      msg, stack, vis, movie, tex, sound, load, language, speech, gray,
-//      autoload, demo mode>
+//      popup, color, text, pos, fs, fred, replay, demo mode>
 //     final <state> <screen> <stackDepth>
 //
 // tools/bootflow_check.py prints the same from retail's own code, run on
@@ -30,8 +31,47 @@
 #define MOVIE_FRAMES   5
 #define LOADER_FRAMES  1
 #define TEXTURE_POLLS  2
-#define SAVE_POLLS     2
+#define REPLAY_FRAMES  3
 #define MAX_PENDING    4
+#define MAX_INPUTS     8
+
+// The memory card, scripted. Every job finishes on its `busy`-th Service,
+// leaving lastError at the job's answer; the constructor's pump takes
+// `pump` Services to settle at `settle`. Same rules as the fake cDBFileSys
+// in tools/bootflow_check.py.
+typedef struct {
+    const char* name;
+    int pump;      // Services until the constructor's pump settles
+    int settle;    // lastError it settles at (never 2: the pump would spin)
+    int verify;    // lastError a VERIFY leaves
+    int check;     // ... the first CHECK_EXISTENCE
+    int check2;    // ... every later one, -1 for the same as the first
+    int load;      // ... a LOAD
+    int goodSum;   // the file's checksum holds
+    int freeKB;    // GetFreeSpace
+    int busy;      // Services a job takes
+    int refuse;    // SetState takes no job
+} Card;
+
+static const Card kCards[] = {
+    // name          pump set  ver chk chk2 load sum  free busy ref
+    { "blank",        1,  0,   0,  5,  -1,  0,   1, 8192,  1,  0 },
+    { "good",         1,  0,   0,  0,  -1,  0,   1, 8192,  1,  0 },
+    { "badsum",       1,  0,   0,  0,  -1,  0,   0, 8192,  1,  0 },
+    { "loaderr",      1,  0,   0,  0,  -1,  3,   1, 8192,  1,  0 },
+    { "nocard",       1,  3,   3,  3,  -1,  3,   1,    0,  1,  0 },
+    { "unformatted",  1,  1,   1,  1,  -1,  1,   1,    0,  1,  0 },
+    { "newcard",      1,  0,   2,  5,  -1,  0,   1, 8192,  1,  0 },
+    { "full",         1,  0,   0,  5,  -1,  0,   1,   10,  1,  0 },
+    { "tight",        1,  0,   0,  5,  -1,  0,   1,   75,  1,  0 },
+    { "checkerr",     1,  0,   0,  3,  -1,  0,   1, 8192,  1,  0 },
+    { "busy",         3,  0,   0,  5,  -1,  0,   1, 8192,  3,  0 },
+    { "slow",         1,  0,   0,  5,  -1,  0,   1, 8192,  6,  0 },
+    { "refuse",       1,  0,   0,  5,  -1,  0,   1, 8192,  1,  1 },
+    { "gone",         1,  0,   0,  0,   5,  0,   1, 8192,  1,  0 },
+    { "swapped",      1,  0,   0,  0,   2,  0,   1, 8192,  1,  0 },
+    { "pulled",       1,  0,   0,  0,   3,  0,   1, 8192,  1,  0 },
+};
 
 typedef struct {
     const char* name;
@@ -45,8 +85,12 @@ typedef struct {
     int forceLegal;       // turn the dead MumboJumbo panels back on
     int frames;
     float dt;
-    // up to six scripted inputs: frame number and what to do
-    struct { int frame; const char* what; } input[6];
+    // up to eight scripted inputs: frame number and what to do
+    struct { int frame; const char* what; } input[MAX_INPUTS];
+    const char* card;     // a kCards row; NULL is "blank"
+    int manual;           // the loader in MANUAL mode
+    int replays;          // demo replays ConsiderLaunching will start
+    int attractMode;      // DemoDiscManager::IsAttractMode
 } Scenario;
 
 // A load in flight: what to print when it lands, and its callback.
@@ -55,18 +99,73 @@ typedef struct {
     BGameFlowDone done;
 } Pending;
 
+typedef struct World World;
+
+// The scripted cDBFileSys.
 typedef struct {
+    BMemcardFileSys base;
+    World*          w;
+    int             pumpLeft;
+    int             job;
+    int             left;
+    int             checks;
+    BMemcardDone    done;
+    void*           param;
+    uint8_t*        data;
+    int             size;
+} WCard;
+
+// The popup screen's text objects, in the file's order (FRONTB.BUN's
+// 0x0ce3f7ce). The bitmaps are left out: nothing the popup does asks. The
+// first two lines' MaxChars are 29 and 30, not the file's 40: at 40 no line
+// of the scenarios' messages breaks where RenderTextIntoGroup's "MaxChars
+// less two" matters, and every line would answer the same.
+typedef struct {
+    uint32_t hash;
+    uint32_t group;
+    float    y;
+    float    sy;
+    int      maxChars;
+    uint32_t color;
+} WObj;
+
+#define FONT_HEIGHT 43.0f   // a2d444f6's
+
+static const WObj kPopupObjs[] = {
+    { 0xe0105664u, 0x457755c9u, 324.0f, 0.75f, 16, 0x80505050u },
+    { 0xe0105663u, 0x457755c9u, 324.0f, 0.75f, 16, 0x80505050u },
+    { 0x0783bebfu, 0x5d6dd123u,  98.0f, 0.6f,  29, 0x80505050u },
+    { 0x0783bec0u, 0x5d6dd123u, 123.0f, 0.6f,  30, 0x80505050u },
+    { 0x0783bec1u, 0x5d6dd123u, 148.0f, 0.6f,  40, 0x80505050u },
+    { 0x0783bec2u, 0x5d6dd123u, 173.0f, 0.6f,  40, 0x80505050u },
+    { 0x0783bec3u, 0x5d6dd123u, 198.0f, 0.6f,  40, 0x80505050u },
+    { 0x0783bec4u, 0x5d6dd123u, 223.0f, 0.6f,  40, 0x80505050u },
+    { 0x0783bec5u, 0x5d6dd123u, 248.0f, 0.6f,  40, 0x80505050u },
+    { 0x0783bec6u, 0x5d6dd123u, 273.0f, 0.6f,  40, 0x80505050u },
+    { 0x0783bec7u, 0x5d6dd123u, 298.0f, 0.6f,  40, 0x80505050u },
+    { 0x85eda094u, 0x457755c9u,  41.0f, 0.85f, 19, 0x80646464u },
+    { 0xab671c9au, 0x457755c9u, 602.0f, 0.75f, 21, 0x80808080u },
+};
+#define NUM_POPUP_OBJS ((int)(sizeof(kPopupObjs) / sizeof(kPopupObjs[0])))
+
+struct World {
     const Scenario* sc;
+    const Card*     card;
     BGameFlow*      gf;
     int             movieOpen;
     int             movieLeft;
     int             texPolls;
-    int             savePolls;
     int             loaderDue;    // nothing lands before this frame count
     uint32_t        activeItem;   // the highlighted item, for GetActiveMenuItem
     Pending         pending[MAX_PENDING];
     int             numPending;
-} World;
+    WCard           fs;
+    int             fsOpen;
+    WObj            objs[NUM_POPUP_OBJS];
+    int             replaysLeft;
+    uint32_t        replayDue;
+    char            text[192];
+};
 
 static void wTrace(void* user, const char* line)
 {
@@ -160,14 +259,6 @@ static int wTextureReady(void* user, uint32_t tex)
 
 static void wUnloadTexture(void* user, uint32_t tex) { (void)user; (void)tex; }
 
-static void wSaveStart(void* user) { ((World*)user)->savePolls = 0; }
-
-static int wSavePoll(void* user)
-{
-    World* w = (World*)user;
-    return ++w->savePolls >= SAVE_POLLS;
-}
-
 // A new menu starts on its first item.
 static void wOpenScreen(void* user, const BScreenConfig* cfg)
 {
@@ -207,6 +298,259 @@ static void wSetGroupVisible(void* u, uint32_t s, uint32_t g, int v)
 { (void)u; (void)s; (void)g; (void)v; }
 static void wChangeTexture(void* u, uint32_t s, uint32_t o, uint32_t t)
 { (void)u; (void)s; (void)o; (void)t; }
+
+// ------------------------------------------------------------- the card
+
+// The save file a LOAD hands back: Fred's size in word 0, a pattern, a
+// language (Italian) at +372 and a nonzero +904 for OverwriteFred to
+// replace, and the checksum -- one off when the card says it is bad.
+static void wWriteSave(const WCard* c)
+{
+    uint32_t sum = 0;
+    uint8_t* d   = c->data;
+    if (!d || c->size < BMC_SAVE_SIZE) return;
+    for (int i = 0; i < BMC_CHECKSUM_OFFSET / 4; i++) {
+        uint32_t v = i == 0 ? (uint32_t)BMC_SAVE_SIZE : (uint32_t)i * 2654435761u;
+        if (i == BMC_FRED_LANGUAGE / 4) v = 3;
+        if (i == BMC_FRED_CLEARED / 4) v = 7;
+        memcpy(d + 4 * i, &v, 4);
+        sum += v;
+    }
+    if (!c->w->card->goodSum) sum += 1;
+    memcpy(d + BMC_CHECKSUM_OFFSET, &sum, 4);
+}
+
+static void cDestroy(BMemcardFileSys* fs)
+{
+    WCard* c = (WCard*)fs;
+    printf("fs delete\n");
+    c->w->fsOpen = 0;
+}
+
+static void cService(BMemcardFileSys* fs, int port, int slot)
+{
+    WCard*       c    = (WCard*)fs;
+    const Card*  card = c->w->card;
+    BMemcardDone done;
+    printf("fs service %d %d\n", port, slot);
+    if (!c->job) {
+        if (c->pumpLeft > 0) {
+            c->pumpLeft--;
+            fs->lastError = c->pumpLeft > 0 ? BMC_IN_PROGRESS : card->settle;
+        }
+        return;
+    }
+    if (--c->left > 0) return;
+    switch (c->job) {
+        case BMC_FS_VERIFY: fs->lastError = card->verify; break;
+        case BMC_FS_CHECK_EXISTENCE:
+            fs->lastError = c->checks > 0 && card->check2 >= 0 ? card->check2
+                                                               : card->check;
+            c->checks++;
+            break;
+        case BMC_FS_LOAD:
+            fs->lastError = card->load;
+            if (card->load == BMC_OK) wWriteSave(c);
+            break;
+        default: fs->lastError = BMC_OK; break;
+    }
+    c->job = 0;
+    printf("fs done %d\n", fs->lastError);
+    done    = c->done;
+    c->done = NULL;
+    if (done) done(c->param);
+}
+
+static void cSetFileData(BMemcardFileSys* fs, const char* name, void* data,
+                         int size)
+{
+    WCard* c = (WCard*)fs;
+    printf("fs file %s %d\n", name ? name : "(null)", size);
+    c->data = (uint8_t*)data;
+    c->size = size;
+}
+
+static int cCalcFree(BMemcardFileSys* fs, int size)
+{
+    (void)fs;
+    printf("fs calc %d\n", size);
+    return (size + 1023) / 1024 + 5;
+}
+
+static int cFreeSpace(BMemcardFileSys* fs)
+{
+    WCard* c = (WCard*)fs;
+    printf("fs free %d\n", c->w->card->freeKB);
+    return c->w->card->freeKB;
+}
+
+static int cSetState(BMemcardFileSys* fs, int state, BMemcardDone done,
+                     void* param)
+{
+    WCard* c = (WCard*)fs;
+    printf("fs state %d\n", state);
+    if (c->w->card->refuse || c->job) return 0;
+    c->job        = state;
+    c->left       = c->w->card->busy;
+    c->done       = done;
+    c->param      = param;
+    fs->lastError = BMC_IN_PROGRESS;
+    return 1;
+}
+
+static const BMemcardFileSysVtbl kCardVtbl = {
+    cDestroy, cService, cSetFileData, cCalcFree, cFreeSpace, cSetState,
+};
+
+static BMemcardFileSys* wNewFileSys(void* user)
+{
+    World* w = (World*)user;
+    printf("fs new\n");
+    memset(&w->fs, 0, sizeof(w->fs));
+    w->fs.base.vt        = &kCardVtbl;
+    w->fs.base.lastError = BMC_ERROR;
+    w->fs.w              = w;
+    w->fs.pumpLeft       = w->card->pump;
+    w->fsOpen            = 1;
+    return &w->fs.base;
+}
+
+// ----------------------------------------------------------- the replay
+
+// TheDemoModeReplay: ConsiderLaunching starts one loading while the
+// scenario has any left, and it lands REPLAY_FRAMES frames later.
+static int wReplayConsider(void* user)
+{
+    World* w = (World*)user;
+    if (w->replaysLeft <= 0) return 0;
+    w->replaysLeft--;
+    w->gf->replayLoading = 1;
+    w->replayDue         = w->gf->frameCounter + REPLAY_FRAMES;
+    return 1;
+}
+
+static void wReplayLaunch(void* user)
+{
+    ((World*)user)->gf->replayLoaded = 0;
+}
+
+static void wServiceReplay(World* w)
+{
+    if (!w->gf->replayLoading || w->gf->frameCounter < w->replayDue) return;
+    w->gf->replayLoading = 0;
+    w->gf->replayLoaded  = 1;
+    printf("replay loaded\n");
+}
+
+// ------------------------------------------------- the popup screen's world
+
+static int wFind(World* w, uint32_t screen, uint32_t obj)
+{
+    if (screen != BPOPUP_SCREEN_MEMCARD) return -1;
+    for (int i = 0; i < NUM_POPUP_OBJS; i++)
+        if (w->objs[i].hash == obj) return i;
+    return -1;
+}
+
+static int aObjectExists(void* u, uint32_t screen, uint32_t obj, int type)
+{
+    return wFind((World*)u, screen, obj) >= 0
+           && (type == BANIM_TYPE_ANY || type == BANIM_TYPE_TEXT);
+}
+
+static int32_t aNextInGroup(void* u, uint32_t screen, uint32_t group,
+                            int type, int32_t after, uint32_t* hash)
+{
+    World* w = (World*)u;
+    if (screen != BPOPUP_SCREEN_MEMCARD
+        || (type != BANIM_TYPE_ANY && type != BANIM_TYPE_TEXT))
+        return -1;
+    for (int i = after + 1; i < NUM_POPUP_OBJS; i++) {
+        if (w->objs[i].group != group) continue;
+        *hash = w->objs[i].hash;
+        return i;
+    }
+    return -1;
+}
+
+static int aMaxChars(void* u, uint32_t screen, uint32_t obj)
+{
+    World* w = (World*)u;
+    int    i = wFind(w, screen, obj);
+    return i < 0 ? 0 : w->objs[i].maxChars;
+}
+
+// GetScaledHeight (0x00140cd8): ScaleY times the font's height, the height
+// truncated to an int first.
+static float aScaledHeight(void* u, uint32_t screen, uint32_t obj)
+{
+    World* w = (World*)u;
+    int    i = wFind(w, screen, obj);
+    return i < 0 ? 0.0f : w->objs[i].sy * (float)(int)FONT_HEIGHT;
+}
+
+static uint32_t aGetColor(void* u, uint32_t screen, uint32_t obj)
+{
+    World* w = (World*)u;
+    int    i = wFind(w, screen, obj);
+    return i < 0 ? 0 : w->objs[i].color;
+}
+
+static void aSetColor(void* u, uint32_t screen, uint32_t obj, uint32_t color)
+{
+    World* w = (World*)u;
+    int    i = wFind(w, screen, obj);
+    if (i >= 0) w->objs[i].color = color;
+}
+
+static void aGetTopLeft(void* u, uint32_t screen, uint32_t obj, float* x,
+                        float* y)
+{
+    World* w = (World*)u;
+    int    i = wFind(w, screen, obj);
+    *x = 0.0f;
+    *y = i < 0 ? 0.0f : w->objs[i].y;
+}
+
+static void aSetTopLeft(void* u, uint32_t screen, uint32_t obj, float x,
+                        float y)
+{
+    World* w = (World*)u;
+    int    i = wFind(w, screen, obj);
+    (void)x;
+    if (i >= 0) w->objs[i].y = y;
+}
+
+// Stand-in strings, the same in bootflow_check.py: long enough to wrap, a
+// forced break and a blank line, and the arguments each prompt passes.
+static const char* aTranslate(void* u, int id)
+{
+    World* w = (World*)u;
+    if (id == 0x24de3 || id == 0x24df3)
+        snprintf(w->text, sizeof(w->text),
+                 "<string %d> slot %%d needs %%d KB free, more than the"
+                 " card has left.@Try again?", id);
+    else
+        snprintf(w->text, sizeof(w->text),
+                 "<string %d> in slot %%d: a message long enough that it"
+                 " has to wrap onto another line.@ @And one more.", id);
+    return w->text;
+}
+
+static void setupAnimHooks(BAnimHooks* h, World* w)
+{
+    memset(h, 0, sizeof(*h));
+    h->user             = w;
+    h->objectExists     = aObjectExists;
+    h->nextInGroup      = aNextInGroup;
+    h->textMaxChars     = aMaxChars;
+    h->textScaledHeight = aScaledHeight;
+    h->getColor         = aGetColor;
+    h->setColor         = aSetColor;
+    h->getTopLeft       = aGetTopLeft;
+    h->setTopLeft       = aSetTopLeft;
+    h->translate        = aTranslate;
+}
 
 // ---------------------------------------------------------- the two tables
 
@@ -256,24 +600,38 @@ static const BGameFlowStateInfo kGameFlowStates[BGF_NUM_STATES] = {
 
 #define SIXTIETH (1.0f / 60.0f)
 
+// Every boot but the demo disc's and the relaunch starts on BootAutoload,
+// which takes two seconds checking the blank card and four more saying so.
+// The scenarios that were written before it ran add these many frames, so
+// that their frame numbers still count from where they did. It activates in
+// frame 2 and used to move back in frame 3; at 1/60 it now takes 122 frames
+// checking, 1 looking for the file and 243 saying there is none, and moves
+// back in frame 368. At a second a frame, in frame 11.
+#define BOOT60 365
+#define BOOT1  8
+
 // `currLanguage` is what the language is once LoadGlobalChunks has set
 // English: 0 leaves it, another language is set through SetCurrLanguage,
 // and -1 is written straight over it -- a state the disc never reaches,
 // kept for the predicate's first test and the screen's -1 paths.
+// The rows before the card's leave its four fields out: blank, BOOT, no
+// replay, no attract mode.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 static const Scenario kScenarios[] = {
     // An NTSC console: no language screen.
-    { "ntsc", 1, 0, 0, 1, 0, 0, 0, 0, 40, SIXTIETH, {{0,0}} },
+    { "ntsc", 1, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 40, SIXTIETH, {{0,0}} },
     // The shipped boot, PAL: BootAutoload, then Language Options Pre FE,
     // which waits for a choice.
-    { "pal", 0, 0, 0, 1, 0, 0, 0, 0, 40, SIXTIETH, {{0,0}} },
+    { "pal", 0, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 40, SIXTIETH, {{0,0}} },
     // No language at all: the first test in the predicate fires whatever
     // the video mode is. BACK there is vetoed and does nothing else, since
     // there is nothing to keep; Spanish is then chosen and the screen moves
     // back to the title, whose movies are Spanish.
-    { "nolang", 1, -1, 0, 1, 0, 0, 0, 0, 40, SIXTIETH,
-      {{10, "back"}, {14, "item5"}} },
+    { "nolang", 1, -1, 0, 1, 0, 0, 0, 0, BOOT60 + 40, SIXTIETH,
+      {{BOOT60 + 10, "back"}, {BOOT60 + 14, "item5"}} },
     // SkipMovies: the title screen starts at rest, with no movie.
-    { "skipmovies", 1, 0, 1, 1, 0, 0, 0, 0, 30, SIXTIETH, {{0,0}} },
+    { "skipmovies", 1, 0, 1, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH, {{0,0}} },
     // A second visit to the frontend with a demo waiting: straight to the
     // main menu, stack reset -- so BACK there pops to nothing and stays.
     { "relaunch", 1, 0, 0, 2, 2, 0, 0, 0, 20, SIXTIETH, {{10, "back"}} },
@@ -284,17 +642,19 @@ static const Scenario kScenarios[] = {
     // or the slideshow would never get past its first panel.
     { "demodisc", 1, 0, 0, 1, 0, 1, 0, 0, 700, SIXTIETH, {{0, "slow600"}} },
     // At rest on the title for over thirty seconds at one second a frame:
-    // PRESS START comes up after four, attract mode after thirty.
-    { "attract", 1, 0, 1, 1, 0, 0, 0, 0, 40, 1.0f, {{0,0}} },
-    // The title comes to rest at frame 9, and PRESS START is up 243 frames
-    // later -- the first multiple of 66 ticks over 16000. Select at 14 is
-    // too early and does nothing; select at 270 goes to the main menu;
-    // select again there does nothing; BACK returns to the title screen,
-    // which plays its movies again, and BACK again is vetoed by the title
-    // screen's own SCREEN_BACK_BUTTON handler.
-    { "select", 1, 0, 0, 1, 0, 0, 0, 0, 300, SIXTIETH,
-      {{14, "select"}, {270, "select"}, {282, "select"}, {288, "back"},
-       {292, "back"}} },
+    // PRESS START comes up after four, attract mode after thirty. There is
+    // no replay to show, so the race starts at once.
+    { "attract", 1, 0, 1, 1, 0, 0, 0, 0, BOOT1 + 40, 1.0f, {{0,0}} },
+    // The title comes to rest 9 frames after the autoload, and PRESS
+    // START is up 243 frames later -- the first multiple of 66 ticks over
+    // 16000. Select at 14 is too early and does nothing; select at 270 goes
+    // to the main menu; select again there does nothing; BACK returns to
+    // the title screen, which plays its movies again, and BACK again is
+    // vetoed by the title screen's own SCREEN_BACK_BUTTON handler.
+    { "select", 1, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 300, SIXTIETH,
+      {{BOOT60 + 14, "select"}, {BOOT60 + 270, "select"},
+       {BOOT60 + 282, "select"}, {BOOT60 + 288, "back"},
+       {BOOT60 + 292, "back"}} },
     // With the NFS intro present. Movie 0 runs over frames 3-7 and movie 1
     // over 8-12, so select at 5 lands inside the EA logo and is ignored --
     // movieIndex is still 0 -- and select at 10 lands inside the NFS intro
@@ -302,89 +662,234 @@ static const Scenario kScenarios[] = {
     // at 20 is before PRESS START and does nothing; select at 262 is after
     // it and goes to the main menu.
     // START at 21, which the title swallows without a sound.
-    { "skipintro", 1, 0, 0, 1, 0, 0, 1, 0, 300, SIXTIETH,
-      {{5, "select"}, {10, "select"}, {20, "select"}, {21, "start"},
-       {262, "select"}} },
+    { "skipintro", 1, 0, 0, 1, 0, 0, 1, 0, BOOT60 + 300, SIXTIETH,
+      {{BOOT60 + 5, "select"}, {BOOT60 + 10, "select"},
+       {BOOT60 + 20, "select"}, {BOOT60 + 21, "start"},
+       {BOOT60 + 262, "select"}} },
     // The intro stopped at frame 10, then left alone at one second a frame:
     // attract mode comes thirty seconds after the skip, not after the
     // screen's arrival, because the skip restarts the Timer at +16.
-    { "skipidle", 1, 0, 0, 1, 0, 0, 1, 0, 50, 1.0f, {{10, "select"}} },
+    { "skipidle", 1, 0, 0, 1, 0, 0, 1, 0, BOOT1 + 50, 1.0f,
+      {{BOOT1 + 10, "select"}} },
     // The same with the movies left to finish: thirty seconds from the
     // moment the title comes to rest, which restarts the Timer too.
-    { "restidle", 1, 0, 0, 1, 0, 0, 0, 0, 50, 1.0f, {{0,0}} },
+    { "restidle", 1, 0, 0, 1, 0, 0, 0, 0, BOOT1 + 50, 1.0f, {{0,0}} },
     // The three main-menu items, each of which asks for a screen the port
     // has not registered: the flow is left with no current screen, and BACK
     // pops New Main Menu back. Hot Pursuit and World Racing differ only in
     // CopsOn, which "final" prints.
-    { "mainmenu", 1, 0, 1, 1, 0, 0, 0, 0, 40, SIXTIETH,
-      {{4, "select"}, {8, "item3"}, {12, "back"}, {16, "item1"}} },
+    { "mainmenu", 1, 0, 1, 1, 0, 0, 0, 0, BOOT60 + 40, SIXTIETH,
+      {{BOOT60 + 4, "select"}, {BOOT60 + 8, "item3"}, {BOOT60 + 12, "back"},
+       {BOOT60 + 16, "item1"}} },
     // Force the legal screen, which the retail predicate never allows.
-    { "mumbo", 1, 0, 0, 1, 0, 0, 0, 0, 30, SIXTIETH, {{12, "mumbo"}} },
+    { "mumbo", 1, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH,
+      {{BOOT60 + 12, "mumbo"}} },
     // The same with the two dead predicates turned on, so the legal and
     // anti-piracy panels and their 7-second timers actually run. One second
     // a frame, because 14 seconds at 1/60 is 840 frames of nothing.
-    { "legal", 1, 0, 0, 1, 0, 0, 0, 1, 40, 1.0f, {{5, "mumbo"}} },
+    { "legal", 1, 0, 0, 1, 0, 0, 0, 1, BOOT1 + 40, 1.0f,
+      {{BOOT1 + 5, "mumbo"}} },
     // French from the start: the second movie is retail's own French
     // intro, and the LOADING art is the French one.
-    { "french", 1, 1, 0, 1, 0, 0, 0, 0, 30, SIXTIETH, {{0,0}} },
+    { "french", 1, 1, 0, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH, {{0,0}} },
     // PAL, French chosen on the language screen: the table, the speech and
     // the LOADING art all change, the frontend takes its defaults, and the
     // screen moves back to the title -- whose EA logo is EALOGO_FR.
-    { "palselect", 0, 0, 0, 1, 0, 0, 0, 0, 30, SIXTIETH, {{8, "item2"}} },
+    { "palselect", 0, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH,
+      {{BOOT60 + 8, "item2"}} },
     // PAL, BACK on the language screen with Italian highlighted: BACK
     // chooses the highlighted language, as SELECT would.
-    { "palback", 0, 0, 0, 1, 0, 0, 0, 0, 30, SIXTIETH,
-      {{7, "hl4"}, {8, "back"}} },
+    { "palback", 0, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH,
+      {{BOOT60 + 7, "hl4"}, {BOOT60 + 8, "back"}} },
     // PAL, Load All Languages. Hidden on this disc, and selected anyway:
     // the flag is set and the screen moves back with English kept.
-    { "palall", 0, 0, 0, 1, 0, 0, 0, 0, 30, SIXTIETH, {{8, "item7"}} },
+    { "palall", 0, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH,
+      {{BOOT60 + 8, "item7"}} },
     // PAL, English chosen when English is in: SetLanguage returns at once,
     // and the frontend still takes its defaults.
-    { "palsame", 0, 0, 0, 1, 0, 0, 0, 0, 30, SIXTIETH, {{8, "item1"}} },
+    { "palsame", 0, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH,
+      {{BOOT60 + 8, "item1"}} },
     // PAL, French from the start and English chosen: the French LOADING art
     // is swapped back.
-    { "palrevert", 0, 1, 0, 1, 0, 0, 0, 0, 30, SIXTIETH, {{8, "item1"}} },
+    { "palrevert", 0, 1, 0, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH,
+      {{BOOT60 + 8, "item1"}} },
+
+    // ------------------------------------------------ BootAutoload's card
+    //
+    // NTSC with the movies skipped, at a second a frame: the autoload and
+    // the title coming to rest behind it. The loader is BOOT unless the
+    // row says MANUAL. Inputs go to the popup first, as the pad's do.
+
+    // A save on the card, loaded: Fred takes it, with the boot's language
+    // (French) kept over the file's (Italian).
+    { .name = "good", .videoMode = 1, .currLanguage = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 20, .dt = 1.0f, .card = "good" },
+    // A checksum that does not hold, and a load the card fails: "Load
+    // failed", the old message's dismissal clicking through, and on.
+    { .name = "badsum", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 20, .dt = 1.0f, .card = "badsum" },
+    { .name = "loaderr", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 20, .dt = 1.0f, .card = "loaderr" },
+    // No card, an unformatted one and a new one. SELECT on a message with
+    // no buttons does nothing.
+    { .name = "nocard", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 16, .dt = 1.0f, .card = "nocard",
+      .input = {{4, "select"}} },
+    { .name = "unformatted", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 16, .dt = 1.0f,
+      .card = "unformatted" },
+    { .name = "newcard", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 16, .dt = 1.0f, .card = "newcard" },
+    // A card with no room to save later: the boot asks. No first, which
+    // leaves; up, down and BACK do nothing to a horizontal popup that
+    // cannot be cancelled.
+    { .name = "fullno", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 16, .dt = 1.0f, .card = "full",
+      .input = {{7, "up"}, {7, "down"}, {7, "back"}, {8, "select"}} },
+    // Yes, to look again, which asks again; then left twice, which wraps
+    // round to No, and START, which chooses as SELECT does.
+    { .name = "fullyes", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 24, .dt = 1.0f, .card = "full",
+      .input = {{7, "left"}, {8, "select"}, {13, "left"}, {13, "left"}, {14, "start"}} },
+    // Exactly the 75 KB a save takes: room enough, so no question.
+    { .name = "tight", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 16, .dt = 1.0f, .card = "tight" },
+    // The card cannot be read for the file: the boot asks, with the size.
+    { .name = "checkerr", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 16, .dt = 1.0f, .card = "checkerr",
+      .input = {{7, "right"}, {8, "select"}} },
+    // A card slow to answer: the pump, and jobs that take three services.
+    { .name = "busy", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 20, .dt = 1.0f, .card = "busy" },
+    // Jobs that take six Services: the Verify outlasts the two seconds of
+    // "Checking", which wait for it.
+    { .name = "slow", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 24, .dt = 1.0f, .card = "slow" },
+    // A card that takes no job: Verify comes straight back, and the check
+    // for the file ends the load there and then.
+    { .name = "refuse", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 12, .dt = 1.0f, .card = "refuse" },
+    // At 1/60, where the timers' last frames are: the load's two seconds
+    // and the message's four.
+    { .name = "goodslow", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 400, .dt = SIXTIETH, .card = "good" },
+
+    // MANUAL, the Options screen's load. The file is there: overwrite the
+    // settings? No leaves; Yes checks again and loads.
+    { .name = "manualno", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 14, .dt = 1.0f, .card = "good",
+      .manual = 1, .input = {{7, "select"}} },
+    { .name = "manualyes", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 24, .dt = 1.0f, .card = "good",
+      .manual = 1, .input = {{7, "left"}, {8, "select"}} },
+    // Yes at half-second frames: a whole second's worth of 0.00025 rounds
+    // up (12000 of them come to 3.0000002), so at one-second frames a
+    // two-second wait and a three-second one end on the same tick.
+    { .name = "manualhalf", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 40, .dt = 0.5f, .card = "good",
+      .manual = 1, .input = {{9, "left"}, {10, "select"}} },
+    // Yes, and the second look finds the file gone, the card swapped or
+    // the card pulled.
+    { .name = "manualgone", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 20, .dt = 1.0f, .card = "gone",
+      .manual = 1, .input = {{7, "left"}, {8, "select"}} },
+    { .name = "manualswap", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 20, .dt = 1.0f, .card = "swapped",
+      .manual = 1, .input = {{7, "left"}, {8, "select"}} },
+    { .name = "manualpull", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 20, .dt = 1.0f, .card = "pulled",
+      .manual = 1, .input = {{7, "left"}, {8, "select"}, {12, "select"}} },
+    // A bad file loaded by hand asks to try again; no card asks to retry,
+    // and Yes starts the whole sequence over.
+    { .name = "manualbad", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 24, .dt = 1.0f, .card = "badsum",
+      .manual = 1, .input = {{7, "left"}, {8, "select"}, {16, "select"}} },
+    { .name = "manualnocard", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 20, .dt = 1.0f, .card = "nocard",
+      .manual = 1, .input = {{6, "left"}, {7, "select"}, {11, "select"}} },
+    // The file is not there: a manual load says so and leaves.
+    { .name = "manualnone", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 14, .dt = 1.0f, .manual = 1 },
+
+    // ------------------------------------------- ConsiderStartDemoMode
+    //
+    // A replay to show: attract mode starts it loading and waits, then
+    // plays it and starts the race behind it.
+    { .name = "replay", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = BOOT1 + 44, .dt = 1.0f,
+      .replays = 1 },
+    // The demo disc in attract mode goes at once, idle or not.
+    { .name = "demoattract", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .demoDiscActive = 1, .frames = 16, .dt = 1.0f,
+      .attractMode = 1 },
+    // Attract mode off the demo disc is not asked about: the title idles.
+    { .name = "attractnodisc", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 16, .dt = 1.0f, .attractMode = 1 },
 };
+#pragma GCC diagnostic pop
 #define NUM_SCENARIOS ((int)(sizeof(kScenarios) / sizeof(kScenarios[0])))
+
+static const Card* findCard(const char* name)
+{
+    if (!name) name = "blank";
+    for (size_t i = 0; i < sizeof(kCards) / sizeof(kCards[0]); i++)
+        if (!strcmp(kCards[i].name, name)) return &kCards[i];
+    fprintf(stderr, "unknown card: %s\n", name);
+    exit(2);
+}
+
+// FlailerScreenList::JoyHandler's first stop: a popup that is up takes the
+// pad's event before the screen hears of it.
+static int popupJoy(BGameFlow* gf, int ev)
+{
+    return bpopup_joy(gf, 0, ev, 1);
+}
+
+static uint8_t sFred[BMC_SAVE_SIZE];
 
 static void runScenario(const Scenario* sc)
 {
     BGameFlow      gf;
     BGameFlowHooks hooks;
+    BAnimHooks     animHooks;
     World          w;
     BAnim          anim;
 
     printf("scenario %s\n", sc->name);
 
     memset(&w, 0, sizeof(w));
-    w.sc        = sc;
-    w.gf        = &gf;
-    w.loaderDue = LOADER_FRAMES;
+    w.sc          = sc;
+    w.card        = findCard(sc->card);
+    w.gf          = &gf;
+    w.loaderDue   = LOADER_FRAMES;
+    w.replaysLeft = sc->replays;
+    memcpy(w.objs, kPopupObjs, sizeof(w.objs));
 
     memset(&hooks, 0, sizeof(hooks));
-    hooks.user             = &w;
-    hooks.trace            = wTrace;
-    hooks.setScreenVisible = wSetScreenVisible;
-    hooks.setObjectVisible = wSetObjectVisible;
-    hooks.setGroupVisible  = wSetGroupVisible;
-    hooks.changeTexture    = wChangeTexture;
-    hooks.openScreen       = wOpenScreen;
-    hooks.enterScreen      = wEnterScreen;
-    hooks.leaveScreen      = wLeaveScreen;
-    hooks.activeMenuItem   = wActiveMenuItem;
-    hooks.movieOpen        = wMovieOpen;
-    hooks.movieDrive       = wMovieDrive;
-    hooks.movieClose       = wMovieClose;
-    hooks.loadResource     = wLoadResource;
-    hooks.loadSoundRegions = wLoadSoundRegions;
-    hooks.loadTexture      = wLoadTexture;
-    hooks.textureReady     = wTextureReady;
-    hooks.unloadTexture    = wUnloadTexture;
-    hooks.saveStart        = wSaveStart;
-    hooks.savePoll         = wSavePoll;
-    hooks.sound            = wSound;
-    hooks.jukebox          = wJukebox;
-    hooks.startDemoMode    = wStartDemoMode;
+    hooks.user                    = &w;
+    hooks.trace                   = wTrace;
+    hooks.setScreenVisible        = wSetScreenVisible;
+    hooks.setObjectVisible        = wSetObjectVisible;
+    hooks.setGroupVisible         = wSetGroupVisible;
+    hooks.changeTexture           = wChangeTexture;
+    hooks.openScreen              = wOpenScreen;
+    hooks.enterScreen             = wEnterScreen;
+    hooks.leaveScreen             = wLeaveScreen;
+    hooks.activeMenuItem          = wActiveMenuItem;
+    hooks.movieOpen               = wMovieOpen;
+    hooks.movieDrive              = wMovieDrive;
+    hooks.movieClose              = wMovieClose;
+    hooks.loadResource            = wLoadResource;
+    hooks.loadSoundRegions        = wLoadSoundRegions;
+    hooks.loadTexture             = wLoadTexture;
+    hooks.textureReady            = wTextureReady;
+    hooks.unloadTexture           = wUnloadTexture;
+    hooks.newFileSys              = wNewFileSys;
+    hooks.sound                   = wSound;
+    hooks.jukebox                 = wJukebox;
+    hooks.startDemoMode           = wStartDemoMode;
+    hooks.replayConsiderLaunching = wReplayConsider;
+    hooks.replayLaunch            = wReplayLaunch;
 
     bgf_init(&gf, kGameFlowStates, BGF_NUM_STATES,
              kScreens, (int)(sizeof(kScreens) / sizeof(kScreens[0])),
@@ -396,11 +901,17 @@ static void runScenario(const Scenario* sc)
     gf.frontendLaunchType = sc->frontendLaunchType;
     gf.demoModeStatus     = sc->demoModeStatus;
     gf.demoDiscActive     = sc->demoDiscActive;
+    gf.demoAttractMode    = sc->attractMode;
     gf.forceLegalScreens  = sc->forceLegal;
+    gf.autoloadManual     = sc->manual;
+    memset(sFred, 0, sizeof(sFred));
+    gf.fred = sFred;
 
-    // The title's bloom, on an animation kit with no world: nothing on the
-    // screen to find, so it only keeps its timers.
-    banim_init(&anim, NULL);
+    // The animation kit: the title's bloom, which finds nothing on its
+    // screen and only keeps its timers, and the popup's screen, which is
+    // the world above.
+    setupAnimHooks(&animHooks, &w);
+    banim_init(&anim, &animHooks);
     gf.anim = &anim;
 
     // InitializeEverything's LoadGlobalChunks, then the scenario's language.
@@ -418,20 +929,31 @@ static void runScenario(const Scenario* sc)
     bgf_change_state(&gf, BGF_LOADING_FRONTEND, BGF_NONE);
 
     for (int f = 0; f < sc->frames; f++) {
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < MAX_INPUTS; i++) {
             const char* what = sc->input[i].what;
             if (!what || sc->input[i].frame != f) continue;
             if (!strcmp(what, "select")) {
                 printf("input select\n");
-                bgf_screen_event(&gf, BMSG_MENUITEM_SELECT, 0);
+                if (!popupJoy(&gf, BJOY_MENU_SELECT))
+                    bgf_screen_event(&gf, BMSG_MENUITEM_SELECT, 0);
             } else if (!strcmp(what, "start")) {
                 // START with no menu, as main.c sends it.
                 printf("input start\n");
-                bgf_screen_event(&gf, BMSG_SCREEN_START_BUTTON, 0);
+                if (!popupJoy(&gf, BJOY_START))
+                    bgf_screen_event(&gf, BMSG_SCREEN_START_BUTTON, 0);
             } else if (!strcmp(what, "back")) {
                 // The pad's BACK, from port 0.
                 printf("input back\n");
-                bgf_back_button(&gf, 0);
+                if (!popupJoy(&gf, BJOY_MENU_BACK)) bgf_back_button(&gf, 0);
+            } else if (!strcmp(what, "left") || !strcmp(what, "right")
+                       || !strcmp(what, "up") || !strcmp(what, "down")) {
+                // The d-pad, which only a popup hears here.
+                int ev = what[0] == 'l' ? BJOY_SCROLL_LEFT
+                       : what[0] == 'r' ? BJOY_SCROLL_RIGHT
+                       : what[0] == 'u' ? BJOY_SCROLL_UP
+                                        : BJOY_SCROLL_DOWN;
+                printf("input %s\n", what);
+                popupJoy(&gf, ev);
             } else if (!strncmp(what, "item", 4)) {
                 // A menu item selected by hash, the way FlailerMenu sends
                 // it: "item<n>" is MENUITEM_n.
@@ -455,6 +977,7 @@ static void runScenario(const Scenario* sc)
         }
         bgf_frame(&gf, sc->dt);
         wServiceLoads(&w);
+        wServiceReplay(&w);
         printf("frame %d %u %u\n", f, (unsigned)gf.realTime,
                (unsigned)gf.realTimer);
     }
@@ -463,6 +986,8 @@ static void runScenario(const Scenario* sc)
            bgf_state_name(&gf, gf.current),
            gf.screen ? gf.screen->name : "-", gf.stack.index, gf.copsOn,
            gf.currLanguage);
+    // Whatever is still open, as the next boot would find it.
+    if (gf.autoloadActive) memcard_boot_autoloader_destroy(&gf.autoload);
 }
 
 int main(int argc, char** argv)

@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-28), after the frontend's second slice: the
-boot's loading and language screens. `HANDOFF.md` is the running
+continuation (2026-09-28), after the frontend's third slice:
+`BootAutoload` and `ConsiderStartDemoMode` in full. `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -58,7 +58,7 @@ bvector_check      27 scenarios,  5721 lines, 0 differ   (23/23 mutations caught
 bmath_check        19 scenarios,  6424 lines, 0 differ   (9/9 mutations caught)
 banim_check        23 scenarios,  2219 lines, 0 differ
 bscreens_check     17 scenarios,  1277 lines, 0 differ
-bootflow_check     20 scenarios,  6195 lines, 0 differ   (56 caught, 1 equivalent)
+bootflow_check     46 scenarios, 24267 lines, 0 differ   (144 caught, 3 equivalent)
 bslotpool_check    18 scenarios,  1025 lines, 0 differ   (47/47 mutations caught)
 geometry_check     30 files,     42047 lines, 0 differ   (53/53 mutations caught)
 texsrc_check       6 packs, 2 levels, 2958 textures, 0 differ
@@ -427,16 +427,42 @@ and so replaced every boot.
      (`hookSwapLogoArt` only logs), and `Language Options`'
      `tSlideOnScreen` (`0x001ee918`).
 
-   **Next is the frontend's third slice: `BootAutoload` and
-   `ConsiderStartDemoMode`.**
-   - `BootAutoload` in full. The port's pops on its first tick, with no
-     card to wait for.
-   - `ConsiderStartDemoMode` in full. Retail's (`0x0016ed50`) is the
-     demo's, and it knows attract mode and compares signed. The port's
-     `bgf_consider_start_demo_mode` is still a sketch of it.
+   **The frontend's third slice is closed: `BootAutoload` and
+   `ConsiderStartDemoMode` in full.** `docs/formats/boot-flow.md`, "The
+   memory card" and "Retail's `ConsiderStartDemoMode`".
+   - `memcard.c` holds retail's `BootAutoLoader` and everything under it:
+     `MemcardLoader`'s state machine (`0x00246c00`), `MemcardTester`,
+     `MemcardPrompter`, `SavegameData` and `OverwriteFred`.
+   - `bpopup.c` holds `tPopupMenu` and the screen list's two popups, with
+     `RenderTextIntoGroup`'s word wrap.
+   - The card is the SD card. The user asked on 2026-09-28 for every save
+     under `sdmc:/NFSHP2/SAVES`. `settings.db` goes there, and the folder
+     is made on demand (`main.c`'s `SdCard`).
+   - Azahar shows "Checking" and then "no save file" on the popup, in
+     real translated strings, before the language screen. A save put
+     there by hand was loaded, and was then removed from the card.
+   - A popup takes the pad before the menus do (`main.c`, `MODE_FLOW`).
+   - `ConsiderStartDemoMode` is retail's: signed, and it knows the demo
+     disc's attract mode and `TheDemoModeReplay`.
+   - `bootflow_check` runs it all on the retail image: 46 scenarios, with
+     a scripted card table in both harnesses. `RetailAutoload` restores
+     the emulator's stubs after each run. Before that fix, its
+     `MoveBackScreen` stub swallowed the language screen's.
+   - `--mutate`: 147 mutations, 144 caught, 3 equivalent.
+     - `manualhalf` runs at half-second frames. At one-second frames,
+       0.00025f rounds a whole second up, and a two-second wait and a
+       three-second one end together.
+     - The `slow` card's Verify outlasts the "Checking" wait.
+   - Owed: message 24 (`ANY_BUTTON_PRESSED`), `OverwriteFred`'s six calls
+     (nothing reads `Fred` yet), `MemcardSaver`, and the internals of
+     `StartDemoMode` and `DemoModeReplay`. The popup's title strip runs
+     off the right edge, as the popup screen is authored.
 
-   After that, the rest of the photos, in TASKS.md's "The retail
-   frontend".
+   **Next is the frontend's fourth slice: the main menu's background
+   movie.** MV3's inter frames, and `StartMovie`, `UpdateMovie` and
+   `StopMovie` (`0x0016ce30`, `0x0016d028` and `0x0016d0a0`) on
+   `PANELMOVIE`. After that, the rest of the photos, in TASKS.md's "The
+   retail frontend".
 
    When step 6 resumes: `Car::InitRenderInfo` (`0x0011dc80`) and
    CarRenderInfo's constructor (`0x0011e860`, 4700 bytes; retail's

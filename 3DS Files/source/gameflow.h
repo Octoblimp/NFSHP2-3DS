@@ -4,6 +4,8 @@
 
 #include "banim.h"
 #include "bmenu.h"
+#include "bpopup.h"
+#include "memcard.h"
 
 // The boot flow: main() to the main menu.
 //
@@ -103,7 +105,7 @@ typedef void (*BScreenCallback)(BGameFlow* gf, BScreenMessage msg,
 // bhash("Title Screen") is in no bundle on the disc. FlailerScreenConfig is
 // the only thing in the game that joins the two namespaces, so the port has
 // to carry the same join.
-typedef struct {
+typedef struct BScreenConfig {
     const char*     name;
     uint32_t        hash;
     BScreenCallback callback;
@@ -194,14 +196,24 @@ typedef struct {
     int  (*textureReady)(void* user, uint32_t texture);
     void (*unloadTexture)(void* user, uint32_t texture);
 
-    // BootAutoLoader's memory card, which the 3DS does not have. `poll`
-    // returns 1 when the save job has finished.
-    void (*saveStart)(void* user);
-    int  (*savePoll)(void* user);
+    // cDBFileSys's constructor, which MemcardTester's calls (memcard.h):
+    // the card's file system, or NULL for none. With no hook, or a NULL
+    // answer, the card is memcard.c's blank one -- there, formatted, empty.
+    BMemcardFileSys* (*newFileSys)(void* user);
 
     void (*sound)(void* user, int soundEvent);   // MakeFrontendSound
     void (*jukebox)(void* user, int start);      // sound::jukebox::Start/Stop
-    void (*startDemoMode)(void* user);           // attract mode
+    // StartDemoMode (0x0016ecd8): the attract race. Its StopMovie, the
+    // track it takes in turn, and Fred's demo race are the host's.
+    void (*startDemoMode)(void* user);
+    // TheDemoModeReplay (0x002f0960), a replay to show in attract mode.
+    // ConsiderLaunching (0x0013f120) picks one and starts it loading,
+    // returning 1, or returns 0 when the disc has none -- which is what no
+    // hook answers. Launch (0x0013f1c0) plays the one that has loaded.
+    // While one loads, the host keeps replayLoading (+4) and then
+    // replayLoaded (+8) set in the flow.
+    int  (*replayConsiderLaunching)(void* user);
+    void (*replayLaunch)(void* user);
 
     // Transcript. Every observable step calls this, which is what
     // tools/bootflow_check.py diffs.
@@ -248,12 +260,6 @@ typedef struct {
     int      state;
     uint32_t timer;
 } BMumboJumboScreen;
-
-// BootAutoLoader (0x00231370): 1 loading, 2 saving, 0 done.
-typedef struct {
-    int state;
-    int port;
-} BBootAutoLoader;
 
 // LanguageOptionsScreenBase (0x001f1a78), 16 bytes: +12 is the vtable.
 // `active` stands for pInstance (gp-16972) being set.
@@ -331,9 +337,27 @@ struct BGameFlow {
     // so that there is one RealTimer. NULL runs the title without it.
     BAnim*            anim;
 
+    // FlailerScreenList's two popups (+392, +396), bpopup.h.
+    BPopup            popups[BPOPUP_COUNT];
+
+    // Fred (0x002fc050), the frontend's database, as the image the memory
+    // card loads over: BMC_SAVE_SIZE bytes, the host's. NULL loads nothing.
+    uint8_t*          fred;
+
+    // TheDemoModeReplay's +4 and +8: a replay is loading, one has loaded.
+    int               replayLoading;
+    int               replayLoaded;
+
     BTitleScreen      title;
     BMumboJumboScreen mumbo;
+    // BootAutoLoader::pInstance (gp-15084): `autoloadActive` is it being
+    // set, which happens only once the constructor has returned.
     BBootAutoLoader   autoload;
+    int               autoloadActive;
+    // Port-only, like forceLegalScreens: the boot's loader in MANUAL mode,
+    // the Options screen's, so its prompts can be driven before that screen
+    // is ported.
+    int               autoloadManual;
     BLanguageScreen   language;
 };
 
@@ -460,8 +484,10 @@ int bgf_should_see_legal_mumbo_jumbo(const BGameFlow* gf);   // 0x0016f938
 int bgf_should_see_language_select(const BGameFlow* gf);     // 0x0016f8c8
 int bgf_should_see_autoload(const BGameFlow* gf);            // 0x0016f8a0
 
-// ConsiderStartDemoMode (0x0016ed50): half a minute idle on PRESS START.
-void bgf_consider_start_demo_mode(BGameFlow* gf, uint32_t since);
+// ConsiderStartDemoMode (0x0016ed50): half a minute idle since `*timer`,
+// or the demo disc in attract mode, starts the attract race -- through a
+// replay, if one loads.
+void bgf_consider_start_demo_mode(BGameFlow* gf, const uint32_t* timer);
 
 // ------------------------------------------- the ten game flow state hooks
 

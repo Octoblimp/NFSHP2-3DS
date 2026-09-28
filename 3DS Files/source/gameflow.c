@@ -364,6 +364,9 @@ void bgf_frame(BGameFlow* gf, float dt)
         data.itemHash = gf->screen->hash;
         bgf_send(gf, BMSG_SCREEN_TICK, &data);
     }
+    // FlailerScreenList::Tick (0x0016cca8) ticks both popups after the
+    // screen, up or not.
+    bpopup_tick(gf);
     bgf_service(gf);
 }
 
@@ -406,6 +409,9 @@ void bgf_init(BGameFlow* gf,
     gf->legalScreenTimeout   = 7.0f;
     gf->antiPiracyTimeout    = 7.0f;
     gf->beginDemoModeTimeout = 30.0f;
+
+    // FlailerScreenList's constructor makes its two popups.
+    bpopup_init(gf);
 }
 
 // ---------------------------------------------------------- the predicates
@@ -484,10 +490,29 @@ void bgf_unlaunch_frontend_menus(BGameFlow* gf, int raceInProgress)
     trace(gf, "unlaunch %d", gf->frontendLaunchType);
 }
 
-void bgf_consider_start_demo_mode(BGameFlow* gf, uint32_t since)
+void bgf_consider_start_demo_mode(BGameFlow* gf, const uint32_t* timer)
 {
-    float idle = (float)(gf->realTimer - since) * (1.0f / 4000.0f);
-    if (idle <= gf->beginDemoModeTimeout) return;
+    // BeginDemoModeTimeout (0x0032feb4) against the Timer's age, signed.
+    int go = gf->beginDemoModeTimeout
+             < (float)(int32_t)(gf->realTimer - *timer) * 0.00025f;
+    // DemoDiscManager::IsAttractMode, asked only of the demo disc.
+    if (gf->demoDiscActive && gf->demoAttractMode) go = 1;
+    if (!go) return;
+
+    // TheDemoModeReplay (0x002f0960): while one loads, wait for it; once
+    // it has loaded, play it and start the race behind it; with none, try
+    // to launch one, and start the race only if there is none to launch.
+    if (gf->replayLoading) return;
+    if (gf->replayLoaded) {
+        trace(gf, "replay launch");
+        HOOK_VOID0(gf, replayLaunch);
+    } else {
+        int launching = gf->hooks.replayConsiderLaunching
+                            ? gf->hooks.replayConsiderLaunching(gf->hooks.user)
+                            : 0;
+        trace(gf, "replay consider %d", launching);
+        if (launching) return;
+    }
     trace(gf, "demo mode");
     HOOK_VOID0(gf, startDemoMode);
 }
@@ -879,7 +904,7 @@ static void titleTick(BGameFlow* gf)
         if (gf->demoDiscActive && !gf->demoAttractMode)
             trace(gf, "demo disc game");
         else
-            bgf_consider_start_demo_mode(gf, t->timer);
+            bgf_consider_start_demo_mode(gf, &t->timer);
         titleBloomAnimate(gf);
     }
 
@@ -1076,37 +1101,25 @@ void bgf_mumbo_jumbo_callback(BGameFlow* gf, BScreenMessage msg,
 void bgf_boot_autoload_callback(BGameFlow* gf, BScreenMessage msg,
                                 BScreenCallbackData* data)
 {
+    // 0x00247ab0. pInstance is set only once the constructor returns, so
+    // the popup its constructor summons announces itself to nobody. The
+    // constructor is handed ItemHash, not Port (memcard.h).
     switch (msg) {
         case BMSG_SCREEN_ACTIVATE:
-            memset(&gf->autoload, 0, sizeof(gf->autoload));
-            gf->autoload.port  = data ? data->port : 0;
-            gf->autoload.state = 1;             // loading
-            // The constructor calls FlailerScreenList::StopMovie first.
-            HOOK_VOID0(gf, movieClose);
-            HOOK_VOID0(gf, saveStart);
-            trace(gf, "autoload start");
-            break;
-
-        case BMSG_SCREEN_TICK:
-            // The original polls the memory card from HandleEvent and only
-            // tests state here. There are no memcard events on the 3DS, so
-            // the poll moves into the tick; the shape -- tick until an
-            // asynchronous job finishes, then pop yourself -- is the same.
-            if (gf->autoload.state == 1 || gf->autoload.state == 2) {
-                if (!gf->hooks.savePoll
-                    || gf->hooks.savePoll(gf->hooks.user)) {
-                    gf->autoload.state = 0;
-                    trace(gf, "autoload done");
-                }
-            }
-            if (gf->autoload.state == 0) bgf_move_back_screen(gf, 1);
+            memcard_boot_autoloader_init(&gf->autoload, gf,
+                                         data ? data->itemHash : 0,
+                                         gf->autoloadManual);
+            gf->autoloadActive = 1;
             break;
 
         case BMSG_SCREEN_UNACTIVATE:
-            memset(&gf->autoload, 0, sizeof(gf->autoload));
+            if (gf->autoloadActive) memcard_boot_autoloader_destroy(&gf->autoload);
+            gf->autoloadActive = 0;
             break;
 
         default:
+            if (gf->autoloadActive)
+                memcard_boot_autoloader_event(&gf->autoload, msg, data);
             break;
     }
 }

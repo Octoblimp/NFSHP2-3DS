@@ -53,6 +53,18 @@ typedef enum {
     BMSG_SCREEN_BACK_BUTTON = 17,
     BMSG_SCREEN_TICK = 18,
     BMSG_SCREEN_RENDER = 19,
+    // tPopupMenu's, sent to the screen that summoned the popup (bpopup.h):
+    // it came up, it went away (Param is the button's), and the highlight
+    // moved. NEXT is the step BACK a button and PREV the step forward --
+    // HandleJoy (0x0016bac0) sends 22 as it decrements, and the names are
+    // the type info's.
+    BMSG_POPUP_ACTIVE = 20,
+    BMSG_POPUP_DISMISS = 21,
+    BMSG_POPUP_NEXT = 22,
+    BMSG_POPUP_PREV = 23,
+    // FlailerScreenList::JoyHandler's, for every pad event no popup took.
+    // Nothing sends it yet.
+    BMSG_ANY_BUTTON_PRESSED = 24,
 } BScreenMessage;
 
 // JoyEvent, same source. These are the sixteen in MenuJoyEvents

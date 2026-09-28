@@ -20,7 +20,10 @@ SLES_507.31 by tools/mipsemu.py, with the calls out of the screen stubbed onto
 this flow and its world. See RetailTitle. The same goes for the loading --
 LoadGlobalChunks, the LOADING_FRONTEND state's Begin, Loop and End, the two
 load callbacks and the LanguageManager under them (RetailLoading) -- and for
-the language screen, LanguageOptionsScreenBase (RetailLanguage).
+the language screen, LanguageOptionsScreenBase (RetailLanguage), for
+BootAutoload -- BootAutoLoader, the memory card classes under it and the two
+popups they speak through (RetailAutoload) -- and for ConsiderStartDemoMode,
+which runs under the title's stubs.
 
 Usage:
     python tools/bootflow_check.py                  # all scenarios
@@ -45,6 +48,8 @@ import hostbuild                                    # noqa: E402
 
 SOURCES = ["tools/src/gameflow_test.c",
            "3DS Files/source/gameflow.c",
+           "3DS Files/source/bpopup.c",
+           "3DS Files/source/memcard.c",
            "3DS Files/source/banim.c",
            "3DS Files/source/bmath.c",
            "3DS Files/source/bmathtab.c"]
@@ -103,7 +108,7 @@ TEX_LEGAL, TEX_ANTIPIRACY = 0xa7ebc389, 0x38258033
 STACK_DEPTH, NAME_LEN = 12, 32
 
 # The world the harness simulates, same constants as tools/src/gameflow_test.c
-MOVIE_FRAMES, LOADER_FRAMES, TEXTURE_POLLS, SAVE_POLLS = 5, 1, 2, 2
+MOVIE_FRAMES, LOADER_FRAMES, TEXTURE_POLLS, REPLAY_FRAMES = 5, 1, 2, 3
 MAX_PENDING = 4
 
 EALOGO_EN = "MOVIES\\INTRO\\EALOGO_EN.AVI"
@@ -167,23 +172,26 @@ class Flow(object):
         self.antipiracy_timeout = 7.0
         self.begin_demo_timeout = 30.0
 
-        # MumboJumboScreen / BootAutoLoader instance state; TitleScreen's
-        # lives in the emulated image
+        # MumboJumboScreen's instance state; the other screens' lives in the
+        # emulated image
         self.title = RetailTitle(self)
         self.loading = RetailLoading(self)
         self.language = RetailLanguage(self)
         self.m_state = 0
         self.m_timer = 0
-        self.a_state = 0
 
         # the simulated world
         self.movie_playing = 0
         self.movie_left = 0
         self.tex_polls = 0
-        self.save_polls = 0
         self.pending = []                 # loads in flight: (what, callback)
         self.loader_due = LOADER_FRAMES   # nothing lands before this frame
         self.active_item = ITEM_MENUITEM_1
+        self.replays_left = sc.get("replays", 0)
+        self.replay_due = 0
+
+        # FlailerScreenList's constructor, which makes the two popups
+        self.autoload = RetailAutoload(self)
 
     # CurrLanguage is the LanguageManager's +0, in the image, where retail's
     # code reads and writes it.
@@ -257,6 +265,26 @@ class Flow(object):
         for what, done in run:
             self.say("loaded %s" % what)
             self.loading.run(done)
+
+    # TheDemoModeReplay (0x002f0960), +4 loading and +8 loaded: one starts
+    # loading when ConsiderLaunching is asked while the scenario has any
+    # left, and lands REPLAY_FRAMES frames later. Same as wServiceReplay.
+    def replay_consider(self):
+        e = retail_emu()
+        if self.replays_left <= 0:
+            return 0
+        self.replays_left -= 1
+        e.put32(DEMO_REPLAY + 4, 1)
+        self.replay_due = self.frame_counter + REPLAY_FRAMES
+        return 1
+
+    def service_replay(self):
+        e = retail_emu()
+        if not e.u32(DEMO_REPLAY + 4) or self.frame_counter < self.replay_due:
+            return
+        e.put32(DEMO_REPLAY + 4, 0)
+        e.put32(DEMO_REPLAY + 8, 1)
+        self.say("replay loaded")
 
     # -- Flailer visibility ----------------------------------------------
     def screen_visible(self, screen, visible):
@@ -432,6 +460,9 @@ class Flow(object):
         if self.screen:
             self.send(SCREEN_TICK, {"itemHash": self.screen[1], "port": 0,
                                     "param": 0, "noise": 0})
+        # FlailerScreenList::Tick (0x0016cca8) ticks both popups after the
+        # screen, up or not.
+        self.autoload.tick_popups()
         self.service()
 
     def begin_unloading_frontend(self):
@@ -477,14 +508,6 @@ class Flow(object):
             pass
         self.change_to_screen(name, 0)
 
-    def consider_start_demo_mode(self, since):
-        idle = f32(f32((self.real_timer - since) & 0xffffffff)
-                   * f32(1.0 / 4000.0))
-        if idle <= self.begin_demo_timeout:
-            return
-        self.say("demo mode")
-        self.say("attract")
-
     # -- the boot screens ---------------------------------------------------
     def main_menu(self, msg, data):
         """NewMainMenu::HandleEvent, 0x00203768 -- SELECT and nothing else."""
@@ -507,7 +530,7 @@ class Flow(object):
         elif kind == "mumbo":
             self.mumbo(msg, data)
         elif kind == "autoload":
-            self.autoload(msg, data)
+            self.autoload.callback(msg, data)
         elif kind == "language":
             self.language.callback(msg, data)
 
@@ -572,26 +595,6 @@ class Flow(object):
                 self.say("tex unload %08x" % TEX_ANTIPIRACY)
                 self.move_back_screen(1)
 
-    def autoload(self, msg, data):
-        if msg == SCREEN_ACTIVATE:
-            self.a_state = 1
-            self.save_polls = 0
-            self.movie_close()
-            self.say("autoload start")
-            return
-        if msg == SCREEN_UNACTIVATE:
-            self.a_state = 0
-            return
-        if msg != SCREEN_TICK:
-            return
-        if self.a_state in (1, 2):
-            self.save_polls += 1
-            if self.save_polls >= SAVE_POLLS:
-                self.a_state = 0
-                self.say("autoload done")
-        if self.a_state == 0:
-            self.move_back_screen(1)
-
 
 # ------------------------------------------------------ retail's TitleScreen
 
@@ -633,7 +636,9 @@ class RetailTitle(object):
     the port's trace line for it. What is left running is the screen's own
     code -- the constructor, HandleTick, HandleEvent, the PRESS START delay
     (0x0016f4f8), GetTitleMovieDescription and its tables, GetNumTitleMovies
-    and bStringHash -- which is exactly the part the port rewrote.
+    and bStringHash -- which is exactly the part the port rewrote, and
+    ConsiderStartDemoMode (0x0016ed50) under HandleTick. Its replay is the
+    flow's world; StartDemoMode is still the port's "attract".
 
     Two of the trace lines are the port's and not calls: "title idle" when a
     tick takes mode from 2 to 1, and "title skip" when an event does. And the
@@ -715,6 +720,19 @@ class RetailTitle(object):
         def bloom_animate(_e):             # tHighlightAnimation::Animate
             once("animate", 1, "bloom animate")
 
+        def replay_consider(_e):
+            launching = f.replay_consider()
+            f.say("replay consider %d" % launching)
+            return launching
+
+        def replay_launch(_e):
+            f.say("replay launch")
+            e.put32(DEMO_REPLAY + 8, 0)
+
+        def start_demo_mode(_e):
+            f.say("demo mode")
+            f.say("attract")
+
         stubs = {
             0x002577c0: new,
             0x00114e98: lambda _e: None,             # operator delete
@@ -734,12 +752,13 @@ class RetailTitle(object):
             0x00237fc8: close,
             0x0016ee18: drive,
             0x001aeab0: lambda _e: f.say("jukebox %d" % arg(0)),
-            0x0012eaf0: lambda _e: f.sc.get("demoAttractMode", 0),
+            0x0012eaf0: lambda _e: f.sc.get("attractMode", 0),
             0x00184de0: lambda _e: f.say("demo disc game"),
-            # ConsiderStartDemoMode(&timer), the flow's -- it is not this
-            # screen's, and is shared with the rest of the frontend.
-            0x0016ed50: lambda _e: f.consider_start_demo_mode(
-                e.u32(arg(0))),
+            # TheDemoModeReplay's ConsiderLaunching and Launch, and
+            # StartDemoMode, under ConsiderStartDemoMode.
+            0x0013f120: replay_consider,
+            0x0013f1c0: replay_launch,
+            0x0016ecd8: start_demo_mode,
         }
         for addr, fn in stubs.items():
             e.stub(addr, fn)
@@ -1022,23 +1041,577 @@ class RetailLanguage(object):
             d()
 
 
+# ------------------------------------------------------ retail's BootAutoload
+
+AUTOLOAD_CALLBACK = 0x00247ab0          # BootAutoLoader::Callback
+AUTOLOAD_INST = RETAIL_GP - 15084       # its pInstance
+LOADER_CTOR = 0x00246bd8                # MemcardLoader(this, hash, mode)
+REAL_ELAPSED = RETAIL_GP - 19596        # RealTimeElapsed, a float
+FRED = 0x002fc050                       # TheFrontendDatabase
+DEMO_REPLAY = 0x002f0960                # TheDemoModeReplay: +4 loading, +8 loaded
+POPUP_CTOR, POPUP_SUMMON = 0x0016b478, 0x0016b660
+POPUP_DISMISS, POPUP_TICK, POPUP_JOY = 0x0016b9c0, 0x0016ba50, 0x0016bac0
+POPUP_SIZE = 512
+
+SAVE_SIZE, CHECKSUM_OFFSET = 0x114e0, 0x114dc
+FRED_LANGUAGE, FRED_CLEARED = 372, 904
+
+# PadEvent, as the pad hands them to FlailerScreenList::JoyHandler.
+JOY_UP, JOY_DOWN, JOY_LEFT, JOY_RIGHT = 3, 4, 5, 6
+JOY_START, JOY_MENU_SELECT, JOY_MENU_BACK = 7, 9, 11
+
+POPUP_SCREEN = 0x0ce3f7ce               # the memory card's popup, FRONTB.BUN
+FONT_HEIGHT = 43.0                      # a2d444f6's
+# Its text objects in the file's order: name, GroupHash, TopLeftY, ScaleY,
+# MaxChars, Color. Same rows as kPopupObjs in tools/src/gameflow_test.c,
+# the first two lines' MaxChars shortened as it says.
+POPUP_OBJS = [
+    (0xe0105664, 0x457755c9, 324.0, 0.75, 16, 0x80505050),
+    (0xe0105663, 0x457755c9, 324.0, 0.75, 16, 0x80505050),
+    (0x0783bebf, 0x5d6dd123, 98.0, 0.6, 29, 0x80505050),
+    (0x0783bec0, 0x5d6dd123, 123.0, 0.6, 30, 0x80505050),
+    (0x0783bec1, 0x5d6dd123, 148.0, 0.6, 40, 0x80505050),
+    (0x0783bec2, 0x5d6dd123, 173.0, 0.6, 40, 0x80505050),
+    (0x0783bec3, 0x5d6dd123, 198.0, 0.6, 40, 0x80505050),
+    (0x0783bec4, 0x5d6dd123, 223.0, 0.6, 40, 0x80505050),
+    (0x0783bec5, 0x5d6dd123, 248.0, 0.6, 40, 0x80505050),
+    (0x0783bec6, 0x5d6dd123, 273.0, 0.6, 40, 0x80505050),
+    (0x0783bec7, 0x5d6dd123, 298.0, 0.6, 40, 0x80505050),
+    (0x85eda094, 0x457755c9, 41.0, 0.85, 19, 0x80646464),
+    (0xab671c9a, 0x457755c9, 602.0, 0.75, 21, 0x80808080),
+]
+
+# The memory card, scripted: the Services the constructor's pump takes and
+# the lastError it settles at, then what each job leaves -- VERIFY, the
+# first CHECK_EXISTENCE and every later one (-1 the same), LOAD -- whether
+# the file's checksum holds, the free KB, the Services a job takes and
+# whether SetState takes one at all. Same rows as kCards in the C harness.
+CARD_FIELDS = ("pump", "settle", "verify", "check", "check2", "load",
+               "goodSum", "freeKB", "busy", "refuse")
+CARDS = {
+    "blank":       (1, 0, 0, 5, -1, 0, 1, 8192, 1, 0),
+    "good":        (1, 0, 0, 0, -1, 0, 1, 8192, 1, 0),
+    "badsum":      (1, 0, 0, 0, -1, 0, 0, 8192, 1, 0),
+    "loaderr":     (1, 0, 0, 0, -1, 3, 1, 8192, 1, 0),
+    "nocard":      (1, 3, 3, 3, -1, 3, 1, 0, 1, 0),
+    "unformatted": (1, 1, 1, 1, -1, 1, 1, 0, 1, 0),
+    "newcard":     (1, 0, 2, 5, -1, 0, 1, 8192, 1, 0),
+    "full":        (1, 0, 0, 5, -1, 0, 1, 10, 1, 0),
+    "tight":       (1, 0, 0, 5, -1, 0, 1, 75, 1, 0),
+    "checkerr":    (1, 0, 0, 3, -1, 0, 1, 8192, 1, 0),
+    "busy":        (3, 0, 0, 5, -1, 0, 1, 8192, 3, 0),
+    "slow":        (1, 0, 0, 5, -1, 0, 1, 8192, 6, 0),
+    "refuse":      (1, 0, 0, 5, -1, 0, 1, 8192, 1, 1),
+    "gone":        (1, 0, 0, 0, 5, 0, 1, 8192, 1, 0),
+    "swapped":     (1, 0, 0, 0, 2, 0, 1, 8192, 1, 0),
+    "pulled":      (1, 0, 0, 0, 3, 0, 1, 8192, 1, 0),
+}
+
+FS_LOAD, FS_CHECK, FS_VERIFY = 2, 3, 7
+FS_IN_PROGRESS, FS_ERROR = 15, 16
+FS_LAST_ERROR, FS_VTABLE = 292, 376     # cDBFilesBase's mLastError, vtable
+
+
+def save_image(good):
+    """The save file a LOAD hands back, as wWriteSave writes it."""
+    words = []
+    for i in range(CHECKSUM_OFFSET // 4):
+        v = SAVE_SIZE if i == 0 else (i * 2654435761) & 0xffffffff
+        if i == FRED_LANGUAGE // 4:
+            v = 3
+        if i == FRED_CLEARED // 4:
+            v = 7
+        words.append(v)
+    words.append((sum(words) + (0 if good else 1)) & 0xffffffff)
+    return struct.pack("<%dI" % len(words), *words)
+
+
+SAVES = {}
+
+
+def translated(i):
+    """GetTranslatedString's stand-ins, the same as aTranslate's."""
+    if i in (0x24de3, 0x24df3):
+        return ("<string %d> slot %%d needs %%d KB free, more than the card"
+                " has left.@Try again?" % i)
+    return ("<string %d> in slot %%d: a message long enough that it has to"
+            " wrap onto another line.@ @And one more." % i)
+
+
+def mips_words(*ws):
+    return struct.pack("<%dI" % len(ws), *ws)
+
+
+class RetailAutoload(object):
+    """BootAutoload, retail's, on the emulated image, with its two popups.
+
+    BootAutoLoader::Callback (0x00247ab0) and everything under it run as they
+    are: the constructor and destructor, HandleEvent, MemcardLoader's state
+    machine, MemcardTester, MemcardPrompter and its two builders,
+    SavegameData, CalculateChecksum and OverwriteFred. So does tPopupMenu --
+    its constructor, Summon, Dismiss, Tick, HandleJoy, FlailerMenuItem's
+    recolouring -- and RenderTextIntoGroup's word wrap with WriteTextIntoChunk
+    and GetScaledHeight under it. FlailerScreenList's JoyHandler and Tick are
+    only the loop over the two popups, and are here.
+
+    Stubbed: the Flailer calls (onto the popup screen's objects, which are
+    faked chunks with the file's fields), GetTranslatedString (the stand-ins
+    above), the allocators, the highlight animation, bSin, the movie,
+    MoveBackScreen (deferred to the flow), OverwriteFred's six calls into
+    the rest of the frontend, and cDBFileSys -- which is the scripted card:
+    an object with its vtable at +376 whose six methods are Python. Service
+    has to call the job's callback, back into retail code, which a stub
+    cannot, so its entry is a hook in front of four instructions that jump
+    to whatever the hook left in t9.
+
+    Two things are the port's and set here. MANUAL is reached by handing the
+    loader's constructor MANUAL, as memcard.c's `manual` does. And the two
+    prompt builders leave CancelParam, DismissParam and PopupID as stack
+    garbage, which DismissPopup's trace line prints: they are zeroed before
+    SummonPopup, as the port zeroes them.
+    """
+
+    def __init__(self, flow):
+        self.flow = flow
+        e = self.e = retail_emu()
+        if not getattr(e, "al_list", 0):
+            e.al_list = e.alloc(512)
+            e.al_node = e.alloc(64)
+            e.al_config = e.alloc(64)
+            e.al_name = e.alloc(64)
+            e.al_data = e.alloc(16)
+            e.al_font = e.alloc(1152)
+            e.al_text = [e.alloc(256), e.alloc(256)]
+            e.al_chunks = [e.alloc(128) for _ in POPUP_OBJS]
+            # The card's vtable: an 8-byte entry a slot, a halfword delta
+            # (0) and the method. Each method is a stub address in al_code,
+            # except Service's, which is real code behind a hook.
+            e.al_vtbl = e.alloc(256)
+            e.al_code = e.alloc(256)
+            e.al_svc = e.al_code + 128
+            e.write(e.al_svc, mips_words(
+                0x13200003,     # beq  t9,zero,+3
+                0x00000000,     # nop
+                0x03200008,     # jr   t9
+                0x00000000,     # nop
+                0x03e00008,     # jr   ra
+                0x00000000))    # nop
+            for slot, fn in ((8, 0), (16, None), (40, 8), (64, 16),
+                             (168, 24), (176, 32)):
+                e.put32(e.al_vtbl + slot, 0)
+                e.put32(e.al_vtbl + slot + 4,
+                        e.al_svc if fn is None else e.al_code + fn)
+        self.card = dict(zip(CARD_FIELDS,
+                             CARDS[flow.sc.get("card") or "blank"]))
+        self.fs = None
+        self.deferred = None
+        self.parent = [None, None]      # the name each popup reports to
+        self.animated = [1, 1]          # "popup %d animate" said since Summon
+        # Each boot starts with no loader, no replay and the objects as the
+        # file has them.
+        e.put32(AUTOLOAD_INST, 0)
+        e.put32(DEMO_REPLAY + 4, 0)
+        e.put32(DEMO_REPLAY + 8, 0)
+        for chunk, row in zip(e.al_chunks, POPUP_OBJS):
+            e.write(chunk, bytes(128))
+            e.put32(chunk + 12, row[1])
+            e.write(chunk + 52, struct.pack("<f", row[2]))
+            e.write(chunk + 60, struct.pack("<f", row[3]))
+            e.put32(chunk + 84, row[4])
+            e.put32(chunk + 92, row[5])
+        e.write(e.al_font + 1056, struct.pack("<f", FONT_HEIGHT))
+        # FlailerScreenList's constructor makes both popups.
+        self.popups = [e.alloc(POPUP_SIZE), e.alloc(POPUP_SIZE)]
+        for p in self.popups:
+            e.write(p, bytes(POPUP_SIZE))
+            self.run(POPUP_CTOR, p)
+
+    # -- the popup screen's objects -------------------------------------------
+    def obj_index(self, screen, obj):
+        if screen != POPUP_SCREEN:
+            return -1
+        for i, row in enumerate(POPUP_OBJS):
+            if row[0] == obj:
+                return i
+        return -1
+
+    def chunk_obj(self, chunk):
+        return POPUP_OBJS[self.e.al_chunks.index(chunk)][0]
+
+    def popup_index(self, p):
+        return self.popups.index(p)
+
+    # -- the card ---------------------------------------------------------------
+    def fs_error(self, v=None):
+        e = self.e
+        if v is not None:
+            e.put32(self.fs["obj"] + FS_LAST_ERROR, v)
+        return s32(e.u32(self.fs["obj"] + FS_LAST_ERROR))
+
+    def service(self, e):
+        """cDBFileSys::Service: the hook in front of the trampoline."""
+        fs, card, f = self.fs, self.card, self.flow
+        f.say("fs service %d %d" % (s32(e.reg[5]), s32(e.reg[6])))
+        e.reg[25] = 0
+        if not fs["job"]:
+            if fs["pump"] > 0:
+                fs["pump"] -= 1
+                self.fs_error(FS_IN_PROGRESS if fs["pump"] > 0
+                              else card["settle"])
+            return
+        fs["left"] -= 1
+        if fs["left"] > 0:
+            return
+        job = fs["job"]
+        if job == FS_VERIFY:
+            err = card["verify"]
+        elif job == FS_CHECK:
+            err = (card["check2"] if fs["checks"] > 0 and card["check2"] >= 0
+                   else card["check"])
+            fs["checks"] += 1
+        elif job == FS_LOAD:
+            err = card["load"]
+            if err == 0 and fs["data"] and fs["size"] >= SAVE_SIZE:
+                good = card["goodSum"]
+                if good not in SAVES:
+                    SAVES[good] = save_image(good)
+                e.write(fs["data"], SAVES[good])
+        else:
+            err = 0
+        self.fs_error(err)
+        fs["job"] = 0
+        f.say("fs done %d" % err)
+        done, fs["done"] = fs["done"], 0
+        if done:
+            e.reg[25] = done
+            e.reg[4] = fs["param"]
+
+    def stubs(self):
+        e, f = self.e, self.flow
+
+        def arg(i):
+            return e.reg[4 + i] & 0xffffffff
+
+        def chunk_of(screen, obj, kind):
+            i = self.obj_index(screen, obj)
+            return e.al_chunks[i] if i >= 0 and kind in (0, 1) else 0
+
+        # -- cDBFileSys ----------------------------------------------------
+        def fs_new(_e):                    # the constructor, 0x0012dee0
+            f.say("fs new")
+            obj = arg(0)
+            e.put32(obj + FS_VTABLE, e.al_vtbl)
+            self.fs = dict(obj=obj, pump=self.card["pump"], job=0, left=0,
+                           checks=0, done=0, param=0, data=0, size=0)
+            self.fs_error(FS_ERROR)
+            return obj
+
+        def fs_delete(_e):
+            f.say("fs delete")
+
+        def fs_file(_e):
+            name = _cstr(e, arg(1))
+            f.say("fs file %s %d" % (name if name is not None else "(null)",
+                                     s32(arg(3))))
+            self.fs["data"], self.fs["size"] = arg(2), s32(arg(3))
+
+        def fs_calc(_e):
+            size = s32(arg(1))
+            f.say("fs calc %d" % size)
+            return (size + 1023) // 1024 + 5
+
+        def fs_free(_e):
+            f.say("fs free %d" % self.card["freeKB"])
+            return self.card["freeKB"]
+
+        def fs_state(_e):
+            f.say("fs state %d" % s32(arg(1)))
+            if self.card["refuse"] or self.fs["job"]:
+                return 0
+            self.fs.update(job=s32(arg(1)), left=self.card["busy"],
+                           done=arg(2), param=arg(3))
+            self.fs_error(FS_IN_PROGRESS)
+            return 1
+
+        # -- the Flailer ------------------------------------------------------
+        def screen_visibility(_e):         # SetFlailerScreenVisibility
+            # FlailerScreenVisibility: VISIBLE is 0, INVISIBLE is 1
+            f.screen_visible(arg(0), 1 if arg(1) == 0 else 0)
+
+        def set_color(_e):                 # FlailerSetTextColor
+            screen, obj, color = arg(0), arg(1), arg(2)
+            f.say("color %08x %08x %08x" % (screen, obj, color))
+            c = chunk_of(screen, obj, 1)
+            if c:
+                e.put32(c + 92, color)
+
+        def printf(_e):                    # FlailerPrintf: only ever ""
+            f.say("text %08x %08x %s" % (arg(0), arg(1), _cstr(e, arg(2))))
+
+        def set_language_id(_e):
+            f.say("language id %08x %08x %d" % (arg(0), arg(1), s32(arg(2))))
+
+        def set_top_left_y(_e):            # FlailerSetTopLeftY(screen, obj, int)
+            screen, obj, y = arg(0), arg(1), s32(arg(2))
+            f.say("pos y %08x %08x %d" % (screen, obj, y))
+            c = chunk_of(screen, obj, 0)
+            if c:
+                e.write(c + 52, struct.pack("<f", float(y)))
+
+        def by_group(_e):                  # FindFlailerObjectByGroup
+            screen, group, kind, after = arg(0), arg(1), s32(arg(2)), arg(3)
+            if screen != POPUP_SCREEN or kind not in (0, 1):
+                return 0
+            start = e.al_chunks.index(after) + 1 if after else 0
+            for i in range(start, len(POPUP_OBJS)):
+                if POPUP_OBJS[i][1] == group:
+                    return e.al_chunks[i]
+            return 0
+
+        def set_visibility(_e):            # FlailerObjectChunk::SetVisibility
+            f.object_visible(POPUP_SCREEN, self.chunk_obj(arg(0)), s32(arg(1)))
+
+        def set_string(_e):                # FlailerTextChunk::SetString
+            f.say("text %08x %08x %s" % (POPUP_SCREEN, self.chunk_obj(arg(0)),
+                                         _cstr(e, arg(1))))
+
+        def translate(_e):                 # GetTranslatedString
+            buf = e.al_text[0]
+            e.al_text.reverse()
+            e.write(buf, translated(s32(arg(0))).encode() + b"\0")
+            return buf
+
+        # -- the highlight -----------------------------------------------------
+        def bloom_item(_e):                # tHighlightAnimation::SetCurrentMenuItem
+            p = arg(0) - 108
+            f.say("popup %d bloom %08x %08x"
+                  % (self.popup_index(p), e.u32(arg(0)), arg(1)))
+
+        def bloom_animate(_e):             # tHighlightAnimation::Animate
+            i = self.popup_index(arg(0) - 108)
+            if not self.animated[i]:
+                f.say("popup %d animate" % i)
+            self.animated[i] = 1
+
+        # -- the rest ------------------------------------------------------------
+        def memset(_e):
+            a, v, n = arg(0), arg(1) & 0xff, s32(arg(2))
+            e.write(a, bytes([v]) * n)
+            return a
+
+        def memcpy(_e):
+            d, s_, n = arg(0), arg(1), s32(arg(2))
+            e.write(d, e.read(s_, n))
+            return d
+
+        def strlen(_e):
+            return len(e.read(arg(0), 4096).split(b"\0")[0])
+
+        def move_back(_e):                 # MoveBackScreen(n)
+            n = s32(arg(0))
+            self.deferred = lambda: f.move_back_screen(n)
+
+        def fred_loaded(_e):               # OverwriteFred's tail, Commit
+            f.say("fred loaded %08x %08x %u %d"
+                  % (e.u32(FRED), e.u32(FRED + CHECKSUM_OFFSET),
+                     e.u32(FRED + FRED_CLEARED),
+                     s32(e.u32(FRED + FRED_LANGUAGE))))
+
+        def nothing(_e):
+            return None
+
+        stubs = {
+            0x0012dee0: fs_new,
+            e.al_code + 0: fs_delete,
+            e.al_code + 8: fs_file,
+            e.al_code + 16: fs_calc,
+            e.al_code + 24: fs_free,
+            e.al_code + 32: fs_state,
+            0x002577c0: lambda _e: e.alloc(max(s32(arg(0)), 16)),  # new
+            0x00114e98: nothing,                     # delete
+            0x00257c80: lambda _e: e.alloc(128),     # bOMalloc, the items
+            0x001836a0: lambda _e: arg(0),           # FrontendDatabase()
+            0x00187ba8: nothing,                     # ~FrontendDatabase
+            0x0016d0a0: lambda _e: f.movie_close(),  # StopMovie
+            0x00170320: move_back,
+            0x001fe988: nothing,                     # OverwriteFred's calls
+            0x001ef120: nothing,
+            0x00154308: nothing,
+            0x00155000: nothing,
+            0x001f4b10: fred_loaded,
+            0x0021e560: translate,
+            0x0014cbf8: screen_visibility,
+            0x0016e038: lambda _e: f.sound(s32(arg(0))),   # MakeFrontendSound
+            0x00143f88: set_color,
+            0x00143d50: lambda _e: chunk_of(arg(0), arg(1), s32(arg(2))),
+            0x00143dd8: by_group,
+            0x00140728: set_visibility,
+            0x00140e20: set_string,
+            0x0013fe18: lambda _e: e.al_font,        # FindFont
+            0x00144458: set_top_left_y,
+            0x00143e70: printf,
+            0x001449a8: set_language_id,
+            0x00248870: lambda _e: arg(0),           # tHighlightAnimation()
+            0x002488d0: bloom_item,
+            0x00248970: bloom_animate,
+            0x0025a5e0: nothing,                     # bSin, thrown away
+            0x00250340: memset,                      # bMemSet
+            0x00296ec4: memset,
+            0x00250288: memcpy,                      # bMemCpy
+            0x00253520: strlen,                      # bStrLen
+        }
+        for addr, fn in stubs.items():
+            e.stub(addr, fn)
+
+        def summon(_e):                    # Summon's entry
+            i = self.popup_index(arg(0))
+            node = e.u32(arg(1) + 8)
+            config = e.u32(node + 16) if node else 0
+            self.parent[i] = _cstr(e, e.u32(config + 8)) if config else None
+            self.animated[i] = 0
+            f.say("popup %d summon" % i)
+
+        def dismiss(_e):                   # Dismiss's entry
+            f.say("popup %d dismiss %d %d" % (self.popup_index(arg(0)),
+                                              s32(arg(1)), s32(arg(2))))
+
+        def to_parent(reg):                # the jalr to the parent's callback
+            def hook(_e):
+                name = self.parent[self.popup_index(e.reg[reg] & 0xffffffff)]
+                f.say("msg %s %d" % (name or "?", s32(arg(0))))
+            return hook
+
+        def unset_garbage(_e):             # at the builders' SummonPopup
+            for off in (44, 48, 64):
+                e.put32(arg(1) + off, 0)
+
+        def hidden(_e):                    # RenderTextIntoGroup's raw store
+            f.object_visible(POPUP_SCREEN, self.chunk_obj(e.reg[3] & 0xffffffff),
+                             0)
+
+        def manual(_e):                    # MemcardLoader(this, hash, mode)
+            if f.sc.get("manual"):
+                e.reg[6] = 0
+
+        hooks = {
+            e.al_svc: self.service,
+            POPUP_SUMMON: summon,
+            POPUP_DISMISS: dismiss,
+            0x0016b7c8: to_parent(17),     # Summon's, s1 the popup
+            0x0016ba24: to_parent(16),     # Dismiss's, s0
+            0x0016bc70: to_parent(17),     # HandleJoy's, s1
+            0x00245f44: unset_garbage,     # DisplayMessage
+            0x002460bc: unset_garbage,     # DisplayYesNoMessage
+            0x00144dd8: hidden,
+            LOADER_CTOR: manual,
+        }
+        for addr, fn in hooks.items():
+            e.hook(addr, fn)
+
+    def unhook(self):
+        for addr in (self.e.al_svc, POPUP_SUMMON, POPUP_DISMISS, 0x0016b7c8,
+                     0x0016ba24, 0x0016bc70, 0x00245f44, 0x002460bc,
+                     0x00144dd8, LOADER_CTOR):
+            self.e.hooks.pop(addr, None)
+
+    def run(self, addr, *args):
+        e, f = self.e, self.flow
+        # The stubs are this class's only while it runs: the language screen
+        # calls MoveBackScreen, the new and delete it stubs are its own, and so
+        # on.
+        saved = dict(e.stubs)
+        self.stubs()
+        e.put32(REAL_TIMER, f.real_timer)
+        e.write(REAL_ELAPSED, struct.pack("<f", f.real_elapsed))
+        e.put32(DEMO_DISC, f.demo_disc)
+        # TheFlailerScreenList, as far as this code reads it: the popups and
+        # pCurrent, whose config names the screen and holds its callback.
+        name = (f.screen[0] if f.screen else "").encode() + b"\0"
+        e.write(e.al_name, name)
+        e.put32(e.al_config + 8, e.al_name)
+        e.put32(e.al_config + 12, AUTOLOAD_CALLBACK
+                if f.screen and f.screen[2] == "autoload" else 0)
+        e.put32(e.al_node + 16, e.al_config)
+        e.put32(e.al_list + 392, self.popups[0])
+        e.put32(e.al_list + 396, self.popups[1])
+        e.put32(e.al_list + 412, e.al_node if f.screen else 0)
+        e.put32(SCREEN_LIST, e.al_list)
+        self.deferred = None
+        try:
+            r = e.call(addr, *args, limit=2000000)
+        finally:
+            self.unhook()
+            e.stubs.clear()
+            e.stubs.update(saved)
+        if self.deferred:
+            d, self.deferred = self.deferred, None
+            d()
+        return r
+
+    def callback(self, msg, data):
+        e = self.e
+        # ScreenCallbackData: ItemHash, Port, Param, Noise.
+        d = e.al_data
+        e.put32(d + 0, data["itemHash"])
+        e.put32(d + 4, data["port"])
+        e.put32(d + 8, data["param"])
+        e.put32(d + 12, data["noise"])
+        self.run(AUTOLOAD_CALLBACK, msg, d)
+        data["param"] = s32(e.u32(d + 8))
+        data["noise"] = e.u32(d + 12)
+
+    # FlailerScreenList::Tick's share (0x0016cca8): both popups, up or not.
+    def tick_popups(self):
+        for p in self.popups:
+            self.run(POPUP_TICK, p)
+
+    # JoyHandler's share (0x0016cab0): every popup that is up and listening
+    # to the port hears the event, and then the screen does not.
+    def joy(self, port, ev, pressed=1):
+        e = self.e
+        taken = 0
+        for p in self.popups:
+            if not e.u32(p):
+                continue
+            jp = s32(e.u32(p + 60))
+            if jp != port and jp != -1:
+                continue
+            self.run(POPUP_JOY, p, port, ev, pressed)
+            taken = 1
+        return taken
+
+
 SIXTIETH = 1.0 / 60.0
+
+# BootAutoload takes 365 frames at 1/60 and 8 at a second a frame on a blank
+# card; the rows written before it ran add them. See BOOT60 in the C harness.
+BOOT60, BOOT1 = 365, 8
+
+
+def card_row(name, frames, dt=1.0, **kw):
+    """A row for the card and replay scenarios: NTSC, movies skipped."""
+    row = dict(name=name, videoMode=1, currLanguage=0, skipMovies=1,
+               frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+               haveIntroMovie=0, frames=frames, dt=dt, input=[])
+    row.update(kw)
+    return row
+
 
 # Same rows as kScenarios[] in tools/src/gameflow_test.c.
 SCENARIOS = [
     dict(name="ntsc", videoMode=1, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=40, dt=SIXTIETH, input=[]),
+         haveIntroMovie=0, frames=BOOT60 + 40, dt=SIXTIETH, input=[]),
     dict(name="pal", videoMode=0, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=40, dt=SIXTIETH, input=[]),
+         haveIntroMovie=0, frames=BOOT60 + 40, dt=SIXTIETH, input=[]),
     dict(name="nolang", videoMode=1, currLanguage=-1, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=40, dt=SIXTIETH,
-         input=[(10, "back"), (14, "item5")]),
+         haveIntroMovie=0, frames=BOOT60 + 40, dt=SIXTIETH,
+         input=[(BOOT60 + 10, "back"), (BOOT60 + 14, "item5")]),
     dict(name="skipmovies", videoMode=1, currLanguage=0, skipMovies=1,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=30, dt=SIXTIETH, input=[]),
+         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[]),
     dict(name="relaunch", videoMode=1, currLanguage=0, skipMovies=0,
          frontendLaunchType=2, demoModeStatus=2, demoDiscActive=0,
          haveIntroMovie=0, frames=20, dt=SIXTIETH, input=[(10, "back")]),
@@ -1048,55 +1621,95 @@ SCENARIOS = [
          input=[(0, "slow600")]),
     dict(name="attract", videoMode=1, currLanguage=0, skipMovies=1,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=40, dt=1.0, input=[]),
+         haveIntroMovie=0, frames=BOOT1 + 40, dt=1.0, input=[]),
     dict(name="select", videoMode=1, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=300, dt=SIXTIETH,
-         input=[(14, "select"), (270, "select"), (282, "select"),
-                (288, "back"), (292, "back")]),
+         haveIntroMovie=0, frames=BOOT60 + 300, dt=SIXTIETH,
+         input=[(BOOT60 + 14, "select"), (BOOT60 + 270, "select"), (BOOT60 + 282, "select"),
+                (BOOT60 + 288, "back"), (BOOT60 + 292, "back")]),
     dict(name="skipintro", videoMode=1, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=1, frames=300, dt=SIXTIETH,
-         input=[(5, "select"), (10, "select"), (20, "select"),
-                (21, "start"), (262, "select")]),
+         haveIntroMovie=1, frames=BOOT60 + 300, dt=SIXTIETH,
+         input=[(BOOT60 + 5, "select"), (BOOT60 + 10, "select"), (BOOT60 + 20, "select"),
+                (BOOT60 + 21, "start"), (BOOT60 + 262, "select")]),
     dict(name="skipidle", videoMode=1, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=1, frames=50, dt=1.0, input=[(10, "select")]),
+         haveIntroMovie=1, frames=BOOT1 + 50, dt=1.0, input=[(BOOT1 + 10, "select")]),
     dict(name="restidle", videoMode=1, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=50, dt=1.0, input=[]),
+         haveIntroMovie=0, frames=BOOT1 + 50, dt=1.0, input=[]),
     dict(name="mainmenu", videoMode=1, currLanguage=0, skipMovies=1,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=40, dt=SIXTIETH,
-         input=[(4, "select"), (8, "item3"), (12, "back"), (16, "item1")]),
+         haveIntroMovie=0, frames=BOOT60 + 40, dt=SIXTIETH,
+         input=[(BOOT60 + 4, "select"), (BOOT60 + 8, "item3"), (BOOT60 + 12, "back"), (BOOT60 + 16, "item1")]),
     dict(name="mumbo", videoMode=1, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=30, dt=SIXTIETH, input=[(12, "mumbo")]),
+         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 12, "mumbo")]),
     # The same with the two dead predicates turned on, so the legal and
     # anti-piracy panels and their 7-second timers actually run.
     dict(name="legal", videoMode=1, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, forceLegal=1, frames=40, dt=1.0,
-         input=[(5, "mumbo")]),
+         haveIntroMovie=0, forceLegal=1, frames=BOOT1 + 40, dt=1.0,
+         input=[(BOOT1 + 5, "mumbo")]),
     dict(name="french", videoMode=1, currLanguage=1, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=30, dt=SIXTIETH, input=[]),
+         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[]),
     dict(name="palselect", videoMode=0, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=30, dt=SIXTIETH, input=[(8, "item2")]),
+         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 8, "item2")]),
     dict(name="palback", videoMode=0, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=30, dt=SIXTIETH,
-         input=[(7, "hl4"), (8, "back")]),
+         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH,
+         input=[(BOOT60 + 7, "hl4"), (BOOT60 + 8, "back")]),
     dict(name="palall", videoMode=0, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=30, dt=SIXTIETH, input=[(8, "item7")]),
+         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 8, "item7")]),
     dict(name="palsame", videoMode=0, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=30, dt=SIXTIETH, input=[(8, "item1")]),
+         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 8, "item1")]),
     dict(name="palrevert", videoMode=0, currLanguage=1, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=30, dt=SIXTIETH, input=[(8, "item1")]),
+         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 8, "item1")]),
+
+    # BootAutoload's card, NTSC with the movies skipped, at a second a frame
+    # unless the row says otherwise. See kScenarios[] for each.
+    card_row("good", 20, currLanguage=1, card="good"),
+    card_row("badsum", 20, card="badsum"),
+    card_row("loaderr", 20, card="loaderr"),
+    card_row("nocard", 16, card="nocard", input=[(4, "select")]),
+    card_row("unformatted", 16, card="unformatted"),
+    card_row("newcard", 16, card="newcard"),
+    card_row("fullno", 16, card="full",
+             input=[(7, "up"), (7, "down"), (7, "back"), (8, "select")]),
+    card_row("fullyes", 24, card="full",
+             input=[(7, "left"), (8, "select"), (13, "left"), (13, "left"), (14, "start")]),
+    card_row("tight", 16, card="tight"),
+    card_row("checkerr", 16, card="checkerr",
+             input=[(7, "right"), (8, "select")]),
+    card_row("busy", 20, card="busy"),
+    card_row("slow", 24, card="slow"),
+    card_row("refuse", 12, card="refuse"),
+    card_row("goodslow", 400, dt=SIXTIETH, card="good"),
+    card_row("manualno", 14, card="good", manual=1, input=[(7, "select")]),
+    card_row("manualyes", 24, card="good", manual=1,
+             input=[(7, "left"), (8, "select")]),
+    card_row("manualhalf", 40, dt=0.5, card="good", manual=1,
+             input=[(9, "left"), (10, "select")]),
+    card_row("manualgone", 20, card="gone", manual=1,
+             input=[(7, "left"), (8, "select")]),
+    card_row("manualswap", 20, card="swapped", manual=1,
+             input=[(7, "left"), (8, "select")]),
+    card_row("manualpull", 20, card="pulled", manual=1,
+             input=[(7, "left"), (8, "select"), (12, "select")]),
+    card_row("manualbad", 24, card="badsum", manual=1,
+             input=[(7, "left"), (8, "select"), (16, "select")]),
+    card_row("manualnocard", 20, card="nocard", manual=1,
+             input=[(6, "left"), (7, "select"), (11, "select")]),
+    card_row("manualnone", 14, manual=1),
+    # ConsiderStartDemoMode: a replay to show, and the demo disc's attract.
+    card_row("replay", BOOT1 + 44, replays=1),
+    card_row("demoattract", 16, demoDiscActive=1, attractMode=1),
+    card_row("attractnodisc", 16, attractMode=1),
 ]
 
 
@@ -1135,12 +1748,19 @@ def run_scenario(sc):
             if at != frame:
                 continue
             out.append("input %s" % what)
+            # The pad's events go to a popup that is up before the screen.
             if what == "select":
-                f.screen_event(MENUITEM_SELECT, 0)
+                if not f.autoload.joy(0, JOY_MENU_SELECT):
+                    f.screen_event(MENUITEM_SELECT, 0)
             elif what == "start":
-                f.screen_event(SCREEN_START_BUTTON, 0)
+                if not f.autoload.joy(0, JOY_START):
+                    f.screen_event(SCREEN_START_BUTTON, 0)
             elif what == "back":
-                f.back_button(0)
+                if not f.autoload.joy(0, JOY_MENU_BACK):
+                    f.back_button(0)
+            elif what in ("left", "right", "up", "down"):
+                f.autoload.joy(0, {"left": JOY_LEFT, "right": JOY_RIGHT,
+                                   "up": JOY_UP, "down": JOY_DOWN}[what])
             elif what.startswith("item"):
                 n = ord(what[4]) - ord("1")
                 f.menu_item_event(MENUITEM_SELECT, ITEM_MENUITEM_1 + n, 0)
@@ -1153,11 +1773,17 @@ def run_scenario(sc):
                 f.change_to_screen("Legal MumboJumbo", 0)
         f.frame(sc["dt"])
         f.service_loads()
+        f.service_replay()
         out.append("frame %d %u %u" % (frame, f.real_time, f.real_timer))
     out.append("final %s %s %d cops %d language %d"
                % (STATE_NAMES[f.current],
                   f.screen[0] if f.screen else "-", f.index, f.cops_on,
                   f.curr_language))
+    # Whatever is still open, as the next boot would find it.
+    if f.screen and f.screen[2] == "autoload":
+        f.autoload.callback(SCREEN_UNACTIVATE, {"itemHash": f.screen[1],
+                                                "port": 0, "param": 0,
+                                                "noise": 0})
     return out
 
 
@@ -1280,7 +1906,7 @@ MUTATIONS = [
      "        titleBloomAnimate(gf);" + NL + "    }",
      "    }"),
     ("tick-no-demo-mode", GF,
-     "            bgf_consider_start_demo_mode(gf, t->timer);",
+     "            bgf_consider_start_demo_mode(gf, &t->timer);",
      "            (void)0;"),
     # HandleEvent, 0x0016eef8.
     ("event-back-allowed", GF,
@@ -1421,11 +2047,324 @@ MUTATIONS += [
      + "            HOOK_VOID(gf, openScreen, n);"),
 ]
 
+MC = "3DS Files/source/memcard.c"
+BP = "3DS Files/source/bpopup.c"
+CHECK_WAIT = "    if (t->active || !waited(l->gf, l->timer, 2.0f)) return;" + NL
+CHECK_ERR = "    err = t->fs ? t->fs->lastError : BMC_NO_CARD;" + NL
+MUTATIONS += [
+    # BootAutoLoader's loader: the timers, 0x00247320 and on.
+    ("mc-check-three-seconds", MC,
+     CHECK_WAIT + CHECK_ERR + "    if (err == BMC_NOT_FORMATTED) {",
+     CHECK_WAIT.replace("2.0f", "3.0f") + CHECK_ERR
+     + "    if (err == BMC_NOT_FORMATTED) {"),
+    ("mc-read-three-seconds", MC,
+     CHECK_WAIT + CHECK_ERR + "    if (err == BMC_OK && savegameVerify(",
+     CHECK_WAIT.replace("2.0f", "3.0f") + CHECK_ERR
+     + "    if (err == BMC_OK && savegameVerify("),
+    ("mc-status-three-seconds", MC,
+     CHECK_WAIT + CHECK_ERR + "    switch ((unsigned)err",
+     CHECK_WAIT.replace("2.0f", "3.0f") + CHECK_ERR
+     + "    switch ((unsigned)err"),
+    ("mc-check-ignores-job", MC,
+     CHECK_WAIT + CHECK_ERR + "    if (err == BMC_NOT_FORMATTED) {",
+     "    if (!waited(l->gf, l->timer, 2.0f)) return;" + NL + CHECK_ERR
+     + "    if (err == BMC_NOT_FORMATTED) {"),
+    ("mc-leave-three-seconds", MC,
+     "if (waited(l->gf, l->timer, 4.0f)) l->state = BMC_LOADER_DONE;",
+     "if (waited(l->gf, l->timer, 3.0f)) l->state = BMC_LOADER_DONE;"),
+    ("mc-waited-scale", MC,
+     "(gf->realTimer - start) * 0.00025f", "(gf->realTimer - start) * 0.0005f"),
+    # MemcardTester, 0x002457c0 and on.
+    ("mc-tester-no-pump", MC,
+     "    while (t->fs->lastError == BMC_ERROR",
+     "    while (0 && t->fs->lastError == BMC_ERROR"),
+    ("mc-pump-past-busy", MC,
+     "    while (t->fs->lastError == BMC_ERROR || t->fs->lastError == BMC_IN_PROGRESS",
+     "    while (t->fs->lastError == BMC_ERROR"),
+    ("mc-tick-no-service", MC,
+     "        if (l->tester->active) testerEvent(l->tester, BMSG_SCREEN_TICK);",
+     "        (void)0;"),
+    ("mc-service-while-idle", MC,
+     "        if (l->tester->active) testerEvent(l->tester, BMSG_SCREEN_TICK);",
+     "        testerEvent(l->tester, BMSG_SCREEN_TICK);"),
+    ("mc-refused-stays-active", MC,
+     "    if (!t->fs->vt->setState(t->fs, state, testerDone, t)) t->active = 0;",
+     "    (void)t->fs->vt->setState(t->fs, state, testerDone, t);"),
+    ("mc-verify-inverted", MC,
+     "    return memcard_checksum(s->local) == get32(",
+     "    return memcard_checksum(s->local) != get32("),
+    ("mc-checksum-short", MC,
+     "    for (int i = 0; i < BMC_CHECKSUM_OFFSET / 4; i++)",
+     "    for (int i = 1; i < BMC_CHECKSUM_OFFSET / 4; i++)"),
+    ("mc-fred-keeps-cleared", MC,
+     "    put32(fred + BMC_FRED_CLEARED, 0);", "    (void)0;"),
+    ("mc-fred-file-language", MC,
+     "    put32(fred + BMC_FRED_LANGUAGE, (uint32_t)gf->currLanguage);",
+     "    (void)0;"),
+    # MemcardPrompter, 0x00245e30 and 0x00245f60.
+    ("mc-slot-from-zero", MC,
+     "    args[0] = slot + 1;" + NL + "    args[1] = slot + 1;",
+     "    args[0] = slot;" + NL + "    args[1] = slot;"),
+    ("mc-yesno-no-kb", MC,
+     "    nargs   = (id == MSG_NO_SPACE || id == MSG_NO_CARD_KB) ? 2",
+     "    nargs   = (id == MSG_NO_SPACE || id == MSG_NO_CARD_KB) ? 1"),
+    ("mc-no-dismiss-first", MC,
+     "    bpopup_dismiss(gf, 0);" + NL + "    // Every id gets the slot",
+     "    // Every id gets the slot"),
+    ("mc-message-selectable", MC,
+     "    cfg.flags          = BPOPUP_HORIZONTAL | BPOPUP_NO_SELECT;",
+     "    cfg.flags          = BPOPUP_HORIZONTAL;"),
+    ("mc-message-untitled", MC,
+     "    cfg.title          = PROMPT_TITLE;" + NL
+     + "    bpopup_summon(gf, &cfg);" + NL + "}" + NL + NL
+     + "// DisplayYesNoMessage",
+     "    cfg.title          = 0;" + NL
+     + "    bpopup_summon(gf, &cfg);" + NL + "}" + NL + NL
+     + "// DisplayYesNoMessage"),
+    ("mc-yesno-vertical", MC,
+     "    cfg.flags          = BPOPUP_HORIZONTAL | BPOPUP_BUTTONS_BELOW;",
+     "    cfg.flags          = BPOPUP_BUTTONS_BELOW;"),
+    ("mc-yesno-buttons-inline", MC,
+     "    cfg.flags          = BPOPUP_HORIZONTAL | BPOPUP_BUTTONS_BELOW;",
+     "    cfg.flags          = BPOPUP_HORIZONTAL;"),
+    ("mc-yesno-starts-yes", MC,
+     "    cfg.buttonParam[2] = 0;" + NL + "    cfg.startButton    = 1;",
+     "    cfg.buttonParam[2] = 0;" + NL + "    cfg.startButton    = 0;"),
+    ("mc-yesno-params-swapped", MC,
+     "    cfg.buttonParam[0] = yesParam;" + NL
+     + "    cfg.buttonParam[1] = noParam;",
+     "    cfg.buttonParam[0] = noParam;" + NL
+     + "    cfg.buttonParam[1] = yesParam;"),
+    ("mc-yesno-labels-swapped", MC,
+     "    cfg.button[0]      = PROMPT_YES;" + NL
+     + "    cfg.button[1]      = PROMPT_NO;",
+     "    cfg.button[0]      = PROMPT_NO;" + NL
+     + "    cfg.button[1]      = PROMPT_YES;"),
+    # The loader's states, 0x002bee80.
+    ("mc-check-new-card-refused", MC,
+     "    } else if (err == BMC_OK || err == BMC_NEW_CARD) {",
+     "    } else if (err == BMC_OK) {"),
+    ("mc-refused-check-goes-on", MC,
+     "        if (!testerCheckForSavegameFile(t)) l->state = BMC_LOADER_DONE;",
+     "        (void)testerCheckForSavegameFile(t);"),
+    ("mc-boot-asks-overwrite", MC,
+     "        if (l->loadMode == BMC_LOAD_BOOT)" + NL
+     + "            loaderStartRead(l);",
+     "        if (0)" + NL + "            loaderStartRead(l);"),
+    ("mc-manual-reads-at-once", MC,
+     "        if (l->loadMode == BMC_LOAD_BOOT)" + NL
+     + "            loaderStartRead(l);",
+     "        if (1)" + NL + "            loaderStartRead(l);"),
+    ("mc-no-space-unchecked", MC,
+     "            if (freeKB < need) {", "            if (0) {"),
+    ("mc-no-space-at-exact", MC,
+     "            if (freeKB < need) {", "            if (freeKB <= need) {"),
+    ("mc-no-space-shows-free", MC,
+     "                loaderAsk(l, MSG_NO_SPACE, 0, 1, need,",
+     "                loaderAsk(l, MSG_NO_SPACE, 0, 1, freeKB,"),
+    ("mc-checkerr-no-kb", MC,
+     "        int need = fs ? fs->vt->calcFreeSpaceRequired(fs, BMC_SAVE_SIZE) : 0;",
+     "        int need = 0;"),
+    ("mc-unformatted-noisy", MC,
+     "        l->endState = 1;" + NL
+     + "        loaderLeaveQuietly(l, MSG_UNFORMATTED);" + NL
+     + "    } else if (err == BMC_OK",
+     "        l->endState = 1;" + NL
+     + "        loaderLeave(l, MSG_UNFORMATTED);" + NL
+     + "    } else if (err == BMC_OK"),
+    ("mc-nofile-noisy", MC,
+     "        l->endState = 2;" + NL
+     + "        loaderLeaveQuietly(l, MSG_NO_FILE);" + NL
+     + "    } else if (l->loadMode",
+     "        l->endState = 2;" + NL
+     + "        loaderLeave(l, MSG_NO_FILE);" + NL
+     + "    } else if (l->loadMode"),
+    ("mc-nocard-quiet", MC,
+     "        loaderLeave(l, MSG_NO_CARD);",
+     "        loaderLeaveQuietly(l, MSG_NO_CARD);"),
+    ("mc-loadfailed-quiet", MC,
+     "        loaderLeave(l, MSG_LOAD_FAILED);",
+     "        loaderLeaveQuietly(l, MSG_LOAD_FAILED);"),
+    ("mc-newcard-quiet", MC,
+     "            loaderLeave(l, MSG_NEW_CARD);",
+     "            loaderLeaveQuietly(l, MSG_NEW_CARD);"),
+    ("mc-retry-gives-up", MC,
+     "                if (data->param == 0)" + NL
+     + "                    loaderStartLoadSequence(l);",
+     "                if (data->param == 0)" + NL
+     + "                    l->state = BMC_LOADER_DONE;"),
+    ("mc-retry-no-stays", MC,
+     "                else if (data->param == 1)" + NL
+     + "                    l->state = BMC_LOADER_DONE;",
+     "                else if (data->param == 1)" + NL
+     + "                    (void)0;"),
+    ("mc-overwrite-no-stays", MC,
+     "                } else if (data->param == 3) {" + NL
+     + "                    l->state = BMC_LOADER_DONE;",
+     "                } else if (data->param == 3) {" + NL
+     + "                    (void)0;"),
+    ("mc-overwrite-no-check", MC,
+     "                    testerCheckForSavegameFile(l->tester);",
+     "                    (void)0;"),
+    ("mc-dismiss-clicks", MC,
+     "                data->noise = 0;" + NL + "                break;" + NL
+     + "            case BMC_LOADER_PROMPT_RETRY:",
+     "                break;" + NL + "            case BMC_LOADER_PROMPT_RETRY:"),
+    ("mc-done-leaves-popup", MC,
+     "            prompterClear(l->prompter);" + NL + "            return 1;",
+     "            return 1;"),
+    # BootAutoLoader itself, 0x00247ab0 and 0x00247978.
+    ("mc-autoload-plays-on", MC,
+     "    if (gf->hooks.movieClose) gf->hooks.movieClose(gf->hooks.user);" + NL
+     + "    b->state = 1;",
+     "    b->state = 1;"),
+    ("mc-autoload-stays", MC,
+     "    if (msg == BMSG_SCREEN_TICK && b->state == 0) bgf_move_back_screen(gf, 1);",
+     "    (void)gf;"),
+    ("mc-autoload-back-two", MC,
+     "b->state == 0) bgf_move_back_screen(gf, 1);",
+     "b->state == 0) bgf_move_back_screen(gf, 2);"),
+    ("mc-autoload-leaks", GF,
+     "            if (gf->autoloadActive) memcard_boot_autoloader_destroy(&gf->autoload);",
+     "            (void)0;"),
+    ("mc-autoload-always-boot", GF,
+     "                                         gf->autoloadManual);",
+     "                                         0);"),
+    # tPopupMenu: Summon 0x0016b660, Dismiss 0x0016b9c0, HandleJoy 0x0016bac0.
+    ("popup-clear-order", BP,
+     "    itemClearState(gf, &p->items[2], BMENU_HIGHLIGHTED);" + NL
+     + "    itemClearState(gf, &p->items[1], BMENU_HIGHLIGHTED);" + NL
+     + "    itemClearState(gf, &p->items[0], BMENU_HIGHLIGHTED);",
+     "    itemClearState(gf, &p->items[0], BMENU_HIGHLIGHTED);" + NL
+     + "    itemClearState(gf, &p->items[1], BMENU_HIGHLIGHTED);" + NL
+     + "    itemClearState(gf, &p->items[2], BMENU_HIGHLIGHTED);"),
+    ("popup-screen-hidden", BP,
+     "    screenVisible(gf, p->cfg.screen, 1);", "    (void)0;"),
+    ("popup-no-active-msg", BP,
+     "    popupSend(gf, p, BMSG_POPUP_ACTIVE, &data);", "    (void)0;"),
+    ("popup-start-first", BP,
+     "    p->current = (uint32_t)p->cfg.startButton;", "    p->current = 0u;"),
+    ("popup-no-reset-saved", BP,
+     "        itemResetSaved(gf, it);" + NL
+     + "        itemClearState(gf, it, BMENU_HIGHLIGHTED);",
+     "        itemClearState(gf, it, BMENU_HIGHLIGHTED);"),
+    ("popup-no-highlight", BP,
+     "    highlightCurrent(gf, p);" + NL + NL + "    y = bpopup_render",
+     NL + "    y = bpopup_render"),
+    ("popup-buttons-not-moved", BP,
+     "    if (p->cfg.flags & BPOPUP_BUTTONS_BELOW)", "    if (0)"),
+    ("popup-gap-nine", BP, "        + 10;", "        + 9;"),
+    ("popup-labels-first", BP,
+     "p->cfg.numButtons == 0 ? 0 : p->cfg.button[i]",
+     "p->cfg.numButtons == 0 ? 0 : p->cfg.button[0]"),
+    ("popup-untitled", BP,
+     "    setLanguageID(gf, p->cfg.screen, BPOPUP_OBJ_TITLE, p->cfg.title);",
+     "    setLanguageID(gf, p->cfg.screen, BPOPUP_OBJ_TITLE, 0);"),
+    ("popup-bloom-first", BP,
+     "    popupBloomItem(gf, p, currentItem(p)->hash);" + NL
+     + "    p->tracedAnimate = 0;",
+     "    popupBloomItem(gf, p, BPOPUP_OBJ_BUTTON1);" + NL
+     + "    p->tracedAnimate = 0;"),
+    ("popup-dismiss-keeps-screen", BP,
+     "    if (!(p->cfg.flags & BPOPUP_KEEP_VISIBLE))" + NL
+     + "        screenVisible(gf, p->cfg.screen, 0);",
+     "    (void)0;"),
+    ("popup-dismiss-silent", BP,
+     "    data.noise = BSND_MENU_SELECT;", "    data.noise = BSND_NONE;"),
+    ("popup-updown-horizontal", BP,
+     "            case BJOY_SCROLL_UP:    ev = 0;                break;" + NL
+     + "            case BJOY_SCROLL_DOWN:  ev = 0;                break;" + NL,
+     ""),
+    ("popup-left-is-down", BP,
+     "            case BJOY_SCROLL_LEFT:  ev = BJOY_SCROLL_UP;   break;",
+     "            case BJOY_SCROLL_LEFT:  ev = BJOY_SCROLL_DOWN; break;"),
+    ("popup-right-is-up", BP,
+     "            case BJOY_SCROLL_RIGHT: ev = BJOY_SCROLL_DOWN; break;",
+     "            case BJOY_SCROLL_RIGHT: ev = BJOY_SCROLL_UP;   break;"),
+    ("popup-up-no-wrap", BP,
+     "            if ((int32_t)p->current < 0) p->current = n - 1;",
+     "            if ((int32_t)p->current < 0) p->current = 0;"),
+    ("popup-down-no-wrap", BP,
+     "            if (!((int32_t)p->current < (int32_t)n)) p->current = 0;",
+     "            if (!((int32_t)p->current < (int32_t)n)) p->current = n - 1;"),
+    ("popup-up-silent", BP,
+     "popupMoved(gf, p, port, BMSG_POPUP_NEXT, BSND_MENU_LEFT);",
+     "popupMoved(gf, p, port, BMSG_POPUP_NEXT, BSND_NONE);"),
+    ("popup-down-says-next", BP,
+     "popupMoved(gf, p, port, BMSG_POPUP_PREV, BSND_MENU_RIGHT);",
+     "popupMoved(gf, p, port, BMSG_POPUP_NEXT, BSND_MENU_RIGHT);"),
+    ("popup-select-first-param", BP,
+     "                uint32_t i = p->current % n;", "                uint32_t i = 0;"),
+    ("popup-select-ignores-noselect", BP,
+     "            if (!(p->cfg.flags & BPOPUP_NO_SELECT))", "            if (1)"),
+    ("popup-back-dismisses", BP,
+     "        case BJOY_MENU_BACK:" + NL
+     + "            if (p->cfg.flags & BPOPUP_CANCELABLE)",
+     "        case BJOY_MENU_BACK:" + NL + "            if (1)"),
+    ("popup-start-ignored", BP,
+     "        case BJOY_START:" + NL + "        case BJOY_MENU_SELECT:",
+     "        case BJOY_MENU_SELECT:"),
+    ("popup-joy-passes-on", BP, "        taken = 1;", "        taken = 0;"),
+    ("popup-highlight-colour", BP,
+     "#define ITEM_COLOR_HIGHLIGHT 0x80004080u",
+     "#define ITEM_COLOR_HIGHLIGHT 0x00004080u"),
+    ("popup-saved-colour-lost", BP,
+     "        case 1u:  c = it->savedColor;          break;",
+     "        case 1u:  c = ITEM_COLOR_GRAYED;       break;"),
+    # RenderTextIntoGroup, 0x00144b58.
+    ("rt-wrap-late", BP,
+     "} else if (n < maxc - 2 && (n++, *p != '@')) {",
+     "} else if (n < maxc - 1 && (n++, *p != '@')) {"),
+    ("rt-at-not-break", BP,
+     "            if (rtIsSpace(*p) || *p == '@') {",
+     "            if (rtIsSpace(*p)) {"),
+    ("rt-at-not-forced", BP, "(n++, *p != '@')", "(n++, 1)"),
+    ("rt-break-kept", BP,
+     "                p = lastBreak + 1;", "                p = lastBreak;"),
+    ("rt-max-chars-first", BP,
+     "                maxc = rtMaxChars(gf, screen, chunks[cur]);",
+     "                (void)0;"),
+    ("rt-hides-none", BP,
+     "    for (i = next; i < count; i++) setVisible(gf, screen, chunks[i], 0);",
+     "    (void)0;"),
+    ("rt-bottom-of-last", BP,
+     "    last = (next < RT_MAX_CHUNKS && chunks[next]) ? chunks[next]",
+     "    last = 0 ? chunks[next]"),
+    ("rt-height-dropped", BP,
+     "        height = a->hooks.textScaledHeight(a->hooks.user, screen, last);",
+     "        height = 0.0f;"),
+    # ConsiderStartDemoMode, 0x0016ed50.
+    ("demo-attract-anywhere", GF,
+     "    if (gf->demoDiscActive && gf->demoAttractMode) go = 1;",
+     "    if (gf->demoAttractMode) go = 1;"),
+    ("demo-attract-ignored", GF,
+     "    if (gf->demoDiscActive && gf->demoAttractMode) go = 1;",
+     "    (void)0;"),
+    ("demo-no-wait-loading", GF,
+     "    if (gf->replayLoading) return;", "    (void)0;"),
+    ("demo-never-plays", GF,
+     "    if (gf->replayLoaded) {", "    if (0) {"),
+    ("demo-replay-no-race", GF,
+     "        HOOK_VOID0(gf, replayLaunch);" + NL + "    } else {",
+     "        HOOK_VOID0(gf, replayLaunch);" + NL + "        return;" + NL
+     + "    } else {"),
+    ("demo-launching-races", GF,
+     "        if (launching) return;", "        (void)launching;"),
+]
+
+
 # Mutations that survive because they change nothing the transcript can tell.
 # back-names-screen: nothing the boot reaches reads ItemHash on BACK -- the
 # title and the language screen do not -- so it is kept as retail's memset
 # and not as a behaviour.
-EQUIVALENT = {"back-names-screen"}
+# mc-loadfailed-quiet: the message before LOAD_FAILED is "Loading", taken
+# down in READING_FILE, which the loader silences as it does READY_TO_LEAVE
+# -- so its two orders sound the same there, and the port keeps retail's.
+# mc-autoload-plays-on: nothing the boot reaches has a movie open when
+# BootAutoload starts; the panel movie StopMovie is for is the Options
+# screen's, whose manual load is not ported.
+EQUIVALENT = {"back-names-screen", "mc-loadfailed-quiet",
+              "mc-autoload-plays-on"}
 
 
 def mutate_pass(only=None):

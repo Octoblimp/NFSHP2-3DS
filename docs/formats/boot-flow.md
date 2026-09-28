@@ -951,9 +951,197 @@ struct BootAutoLoader {
 while `State == 2`; either returning 1 clears `State`, and the next
 `SCREEN_TICK` with `State == 0` calls `MoveBackScreen(1)`.
 
-On the 3DS there is no memory card, so this collapses to "look for the save
-file, then move on" -- but the *shape* (a screen that ticks until an
-asynchronous job finishes and then pops itself) is the one the port needs.
+That is the demo's. Retail's is the whole load, below.
+
+## The memory card
+
+Retail's `BootAutoload` screen is `BootAutoLoader::Callback` (`0x00247ab0`):
+a `BootAutoLoader` built on `SCREEN_ACTIVATE`, every event handed to it, and
+deleted on `SCREEN_UNACTIVATE`. The constructor calls `StopMovie` and
+`StartLoadSequence`, as the demo's does. What is under it is five classes,
+all in `memcard.c`, each rule there naming its address.
+
+### `MemcardTester` (`0x002457c0`)
+
+The constructor makes the card's file system, a `cDBFileSys`, and services
+it until `mLastError` (+292) is no longer 16 (error), 15 (in progress) or 2
+(new card). The loop has no bound in the original, and none in the port.
+`HandleEvent` (`0x00245900`) services the card once a tick, and the loader
+only sends it the tick while the tester is `Active`.
+
+There are three jobs:
+
+| Job | Address | `SetState` | What it does |
+|---|---|---|---|
+| `Verify` | `0x00245c40` | 7 | is there a card, and is it formatted |
+| `Load` | `0x00245ba0` | 2 | `settings.db` into the cleared local copy |
+| `CheckForSavegameFile` | `0x00245ca8` | 3 | is `settings.db` there |
+
+Each sets `Active`, and the job's callback clears it. A card that refuses
+the job (`SetState` returning 0) clears it at once. `GetPort` and `GetSlot`
+(`0x00245600`, `0x00245608`) are 0 for every device.
+
+### `SavegameData` and `OverwriteFred`
+
+The save is `settings.db` (`0x002bebe0`), 0x114e0 bytes. Its last word, at
+0x114dc, is the sum of every word before it (`VerifyChecksumAfterLoad`,
+`0x00245780`). `SetupForLoad` (`0x00245700`) zeroes the local copy before
+every read.
+
+`OverwriteFred` (`0x00245d30`) copies the loaded file over `Fred`, clears
++904 (the word after `DemoModeStatus`), and puts back the language the boot
+just chose at +372, so the file's language never wins. Then it makes six
+calls that carry the loaded settings into the frontend, and the port owes
+all six:
+
+* `0x001fe988` twice, on Fred+392 and Fred+648 (256 bytes each), into
+  gp-16700 and gp-16696;
+* `0x001ef120(Fred+148)`;
+* `0x00154308` and `0x00155000` for each pad, with Fred+376[pad];
+* `0x001f4b10(Fred+324)`.
+
+### `MemcardPrompter`
+
+The prompter has two builders onto the popup screen (`0x0ce3f7ce`), both
+titled 150004, "Memory Card (PS2)":
+
+* **`DisplayMessage`** (`0x00245e30`) shows a message with no buttons.
+  Its flags are horizontal and "select does nothing", so SELECT cannot take
+  it down.
+* **`DisplayYesNoMessage`** (`0x00245f60`) shows Yes and No, left to right,
+  starting on No. BACK does nothing to it.
+
+Every string gets the slot, counting from 1. The table at `0x002bed90` says
+which strings take more:
+
+* 151011 and 151027 take the kilobytes a save needs as well;
+* 151028 takes nothing.
+
+Both builders leave `CancelParam`, `DismissParam` and `PopupID` as stack
+garbage. No state that reads a dismissal's `Param` ever sees one of those,
+and the port zeroes them.
+
+### `MemcardLoader::HandleEvent` (`0x00246c00`)
+
+The state machine, `State - 1` through the table at `0x002bee80`:
+
+| State | On a tick |
+|---|---|
+| 1 `CHECK_FOR_CARD` | After two seconds of "Checking" (151013) and with the Verify done, it acts on the result. Not formatted leaves with 151101. OK or a new card goes on to look for the file. Anything else is no card: 151025 on the boot, and the retry question 151006 on a manual load. |
+| 2 `CHECK_IF_CARD_OK` | Once the check is done. The file is there: the boot reads it, and a manual load asks 151022 (overwrite the settings in use?) first. It is not: the boot checks the free space, and asks 151011 if a save would not fit, before it leaves with 151003. Any other error: the boot asks 151027, a manual load 151006. |
+| 3 `READING_FILE` | After two seconds of "Loading" (151001) and with the read done. If the checksum holds, it shows "Loaded" (151002) and runs `OverwriteFred`. Otherwise the boot says 151024 and a manual load asks 151018. |
+| 6 `SHOW_STATUS` | A manual Yes checks for the file again. After two seconds it acts on the second look, through the table at `0x002beea0`: OK reads the file, not formatted leaves with 151101, a new card with 151014, no file with 151003. Anything else is treated as no card. |
+| 7 `READY_TO_LEAVE` | After four seconds it becomes `DONE`. |
+| 8 `DONE` | The popup comes down and `HandleEvent` returns 1. |
+
+`POPUP_DISMISS` is `State - 3` through `0x002beec0`:
+
+* **The two questions.** Yes on a retry (param 0) starts the sequence
+  over, and No (1) is `DONE`. Yes on the overwrite question (2) shows
+  "Checking" and goes to `SHOW_STATUS`, and No (3) is `DONE`.
+* **States 3, 7 and 8.** These clear `Noise`, so the message taken down to
+  put the next one up makes no click.
+
+This is why the original has two orders for "leave with a message":
+
+* **Quiet**: set the state, then put the message up. Taking the old message
+  down is silent.
+* **Loud**: put the message up, then set the state. The old message's
+  dismissal clicks.
+
+The port keeps each where the original has it.
+
+The timers are `(float)(int)(RealTimer - start) * 0.00025f`, compared
+strictly against the literal (`2.0f`, and `4.0f` for `READY_TO_LEAVE`).
+0.00025f is a hair over 1/4000, so a whole number of seconds comes out a
+little over itself. At one-second frames, 12000 ticks is 3.0000002, and a
+two-second wait and a three-second one end on the same frame. The checker's
+`manualhalf` row runs at half-second frames, where they do not.
+
+The free-space test is `GetFreeSpace < CalculateFreeSpaceRequired`, strict.
+The requirement is the file rounded up to kilobytes, plus five for the
+directory: `(0x114e0 + 1023) / 1024 + 5`, which is 75. A card with exactly
+75 KB free is not asked about (`tight`).
+
+On a blank card at 1/60 s, the boot spends:
+
+* 122 frames on "Checking";
+* 1 frame looking for the file;
+* 243 frames on "no save file" (151003).
+
+It moves back in frame 368. The checker's rows written before the card add
+`BOOT60` (365) frames at 1/60, and `BOOT1` (8) at a second a frame, so their
+frame numbers still count from where they did.
+
+### `tPopupMenu` and the screen list's popups
+
+`FlailerScreenList` holds two popups, at +392 and +396.
+
+* **`Tick`** (`0x0016cca8`) ticks both, active or not.
+* **`JoyHandler`** (`0x0016cab0`) hands an event to every active popup
+  whose `JoyPort` is the event's port or -1. If any popup took it, that is
+  the end of the event. Otherwise:
+  * the current screen gets message 24, `ANY_BUTTON_PRESSED`, whether or
+    not the button is down. **The port owes this.**
+  * BACK then moves to the previous screen, and anything else goes to the
+    screen's own `JoyHandler`.
+
+`tPopupMenu`'s methods (`bpopup.c`):
+
+* **The constructor** (`0x0016b478`) builds the bloom, clears the config
+  and makes three `FlailerMenuItem`s on `BUTTON1..3`.
+* **`Summon`** (`0x0016b660`):
+  1. un-highlights the three buttons, last first, and shows the screen;
+  2. sends `POPUP_ACTIVE` (20) to the parent's callback, which it reads
+     from the config;
+  3. starts on `StartButton` and highlights it;
+  4. word-wraps the message into the `MESSAGE` group;
+  5. puts the buttons ten pixels under the last line, if the flags say
+     buttons go below;
+  6. sets the buttons' and the title's language IDs.
+* **`Dismiss`** (`0x0016b9c0`) hides the screen, unless the config keeps it
+  up, and sends `POPUP_DISMISS` (21) with the button's param and a select
+  click the parent may silence.
+* **`HandleJoy`** (`0x0016bac0`) takes every event.
+  * A horizontal popup's left and right are its up and down, and its own
+    up and down do nothing.
+  * Up and down wrap round and send `POPUP_NEXT` (22) or `POPUP_PREV` (23).
+  * SELECT or START dismisses with the current button's param, unless the
+    flags say select does nothing.
+  * BACK dismisses only a cancelable popup.
+* **`Tick`** (`0x0016ba50`) advances a phase by `9 * RealElapsed`, wraps it
+  at 6.283185, and passes it to `bSin`. The answer is thrown away, so the port
+  keeps the phase and skips the sine.
+
+`FlailerMenuItem`'s recolour, retail's, is the popup buttons' (`0x00169bd0`,
+`0x00169cb0`). `State & 3` picks the colour:
+
+* the saved colour when enabled;
+* the highlight, `0x004080`, when enabled and highlighted;
+* gray, `0x181818`, otherwise.
+
+`bmenu.c`'s menus still recolour the demo's way.
+
+### `RenderTextIntoGroup` (`0x00144b38`)
+
+This is the popup's word wrap. It takes the group's text objects in file
+order, and cuts each line at the last space, tab or `@`. Two details
+matter:
+
+* **It cuts late.** The cut happens only once the line has reached
+  `MaxChars - 2`, so a word longer than a line runs on past `MaxChars`.
+* **An `@` always cuts.** The next line starts after the break, and the
+  loop's own step skips that character unexamined. So `@ @` is a blank
+  line.
+
+Each line is copied into a zeroed 256-byte buffer, and the chunk is made
+visible and set (`WriteTextIntoChunk`, `0x00144ae8`). Lines past the text
+are hidden. The answer is the bottom of the first unused line: its
+`TopLeftY` plus `GetScaledHeight`, truncated.
+
+In the checker, the popup screen's first two message lines have `MaxChars`
+29 and 30 rather than the file's 40. At 40, none of the scenarios' messages
+breaks where the "less two" matters.
 
 ## Clocks
 
@@ -996,6 +1184,31 @@ if (idle > BeginDemoModeTimeout || TheDemoDiscManager.bActive_and_attract) {
 `BeginDemoModeTimeout` (`0x00322f78`) is **30.0f** and `DemoModeTimeout`
 (`0x00322f7c`) is **120.0f** -- half a minute idle on "PRESS START" starts the
 attract demo, which runs for two minutes.
+
+### Retail's `ConsiderStartDemoMode` (`0x0016ed50`)
+
+The same shape. The differences:
+
+* `BeginDemoModeTimeout` is at `0x0032feb4`, still 30.0f.
+* The idle time is compared signed.
+* The demo-disc test is `bActive && IsAttractMode()` (`0x0012eaf0`). The
+  attract flag is asked only of the demo disc, so on the retail disc the
+  flag alone never starts it (`attractnodisc`).
+
+`TheDemoModeReplay` is at `0x002f0960`, with +4 set while a replay loads and
++8 once it has loaded:
+
+* **Loading**: wait.
+* **Loaded**: `Launch` (`0x0013f1c0`), then `StartDemoMode` (`0x0016ecd8`).
+* **Neither**: `ConsiderLaunching` (`0x0013f120`). `StartDemoMode` runs only
+  if it found nothing to launch, so a replay found now plays when it has
+  loaded.
+
+`bootflow_check` runs this on the image under the title's `HandleTick`. The
+replay is the harness's world: a `replays` count of replays to find, each
+landing three frames after it is asked for. `StartDemoMode` and
+`DemoModeReplay`'s own internals are owed; the port traces "demo mode" and
+goes to attract.
 
 ## Demo disc
 
@@ -1229,10 +1442,36 @@ The boot is retail's, in retail's order:
    `eDisplayFrame` does: `LOADING_TRACK` on the top screen and a blank
    bottom screen. The `FRONTEND` and `INGAME` bundles decode after it, the
    slow part of the boot, so LOADING stays up while they do.
-2. **The language screen.** `BootAutoload` pops on its first tick and
-   `Language Options Pre FE` comes up. A picks a language, and so does B on
-   a highlighted language.
-3. **The movies**, then the title.
+2. **`BootAutoload`**, retail's (see [The memory card](#the-memory-card)).
+   It shows "Checking" for two seconds on the popup. With a save it then
+   shows "Loading" and "Loaded"; without one, "no save file". Then it moves
+   back.
+3. **The language screen.** `Language Options Pre FE` comes up. A picks a
+   language, and so does B on a highlighted language.
+4. **The movies**, then the title.
+
+The memory card is the SD card. `main.c`'s `hookNewFileSys` hands the
+tester an `SdCard`, a `cDBFileSys` whose jobs finish on the next Service:
+
+* `LOAD` reads `sdmc:/NFSHP2/SAVES/settings.db` whole, or answers error.
+* `SAVE` writes it, making `sdmc:/NFSHP2` and `SAVES` first.
+* `CHECK_EXISTENCE` is a `stat`.
+* Every other job is OK.
+
+`GetFreeSpace` is the SD card's free clusters in kilobytes, from
+`FSUSER_GetSdmcArchiveResource`, or 8192 if that fails. `CalculateFreeSpace`
+is retail's `(size + 1023) / 1024 + 5`. The flow's `fred` is a
+`BMC_SAVE_SIZE` buffer in `main.c`, which nothing reads yet.
+
+While a popup is up, `main.c` gives it the pad before the menus see it:
+
+* the D-pad and A through `kBinds`;
+* START as `BJOY_START`;
+* B as `BJOY_MENU_BACK`.
+
+The keys the popup took are then cleared. The animation kit gained the
+four answers `RenderTextIntoGroup` asks for: the next text object in a
+group, `MaxChars`, the scaled height and the colour.
 
 `gameflow.c` runs the loads through a queue in `main.c` (`hookLoadResource`,
 `hookLoadSoundRegions`). A load lands at the end of the frame it is asked
@@ -1248,9 +1487,33 @@ load callbacks and the language screen's `Callback` on the image, as it
 does the title. Its world queues the loads and lands them a frame later,
 and a `slow<n>` input holds them back until frame `n`, long enough for the
 demo slideshow to run through. It fakes the screen list at `gp-21324` so
-that `strcmp` sees the name the screen was entered under. `--mutate` now
-breaks `gameflow.c` 57 ways. `back-names-screen` is equivalent by
-construction, because no screen's callback reads `ItemHash` on BACK.
+that `strcmp` sees the name the screen was entered under.
+
+`BootAutoload` runs on the image too: `BootAutoLoader::Callback` and
+everything under it, the popup and its word wrap. The card is scripted,
+with a table of cards in both harnesses: `good`, `badsum`, `nocard`,
+`full`, `tight`, `busy`, `slow`, `gone`, `swapped`, `pulled` and so on.
+Each gives its jobs' answers, the free space, and how many Services a job
+takes. `Service` must call back into retail code, so on the image it is a
+hook in front of four instructions that jump to what the hook leaves in
+`t9`.
+
+The class's stubs are its own only while it runs, and are put back after,
+because the language screen calls `MoveBackScreen` for real.
+
+One input rule matters for these rows. An input at frame N is handled before
+frame N's tick, so a question put up in frame N's tick answers only from
+frame N+1.
+
+`--mutate` now breaks `gameflow.c`, `bpopup.c` and `memcard.c` 147 ways.
+Three survivors are equivalent by construction:
+
+* **`back-names-screen`**: no screen's callback reads `ItemHash` on BACK.
+* **`mc-loadfailed-quiet`**: the message before `LOAD_FAILED` is
+  "Loading". It comes down in `READING_FILE`, which silences dismissals as
+  `READY_TO_LEAVE` does, so both orders sound the same.
+* **`mc-autoload-plays-on`**: nothing the boot reaches has a movie open
+  when `BootAutoload` starts.
 
 Not yet on the host:
 
@@ -1260,6 +1523,17 @@ Not yet on the host:
   `NFS_LOGO_ALPHA_FR` are not swapped in.
 * **`Language Options`**, the Options menu's copy, gets the class without
   its `tSlideOnScreen` (`0x001ee918`).
+* **`ANY_BUTTON_PRESSED`** (message 24), which `JoyHandler` sends the
+  current screen when no popup takes a button.
+* **`OverwriteFred`'s six calls** into the frontend. The loaded `Fred` is
+  copied, and nothing reads it yet.
+* **`MemcardSaver`**, the other half of `BootAutoLoader`, and the Options
+  screen's manual load, which is reached only in the checker.
+* **`StartDemoMode` and `DemoModeReplay`'s internals.** The port traces
+  them and goes to attract.
+
+The popup's title strip runs off the right of the top screen. The popup
+screen is authored that way for a 640-wide TV, and it is left as it is.
 
 `bootflow_check` does not write the title again. It runs retail's
 `TitleScreen::Callback` itself on `SLES_507.31` under `tools/mipsemu.py`,
@@ -1284,9 +1558,11 @@ be missing:
 * **A movie missing from the card is skipped.** `GAMESTAGE_TITLE` treats a
   movie it cannot open as one that has ended instead of hanging on it. The
   original would have hung; with the whole disc it never had to.
-* **`BootAutoload` has no memory card to wait for.** The port keeps the screen
-  and the "tick until the job finishes, then pop" shape, and finishes the job
-  immediately.
+* **The memory card is a folder.** `settings.db` lives in
+  `sdmc:/NFSHP2/SAVES`, which the user chose for every save. There is no
+  card to pull or swap, so the SD card is always there and formatted, and
+  "no card" and "new card" never come up. The strings still say "Memory
+  Card (PS2)".
 * **The movies fill the top screen, which the user asked for.** Retail puts
   them in the two planes, laid out for a TV. The 4:3 plane is at (-10, 0),
   640x481, pushed 10 px left for overscan. The letterboxed plane is at

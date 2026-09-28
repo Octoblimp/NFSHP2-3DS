@@ -163,7 +163,7 @@ function Shot([string]$tag) {
 }
 
 # --- the script the run follows -------------------------------------------
-# BootAutoload pops on its first tick, the title screen plays EALOGO_EN.AVI
+# BootAutoload checks the card for six seconds, the title screen plays EALOGO_EN.AVI
 # (six seconds) and then NFSINTRO_EN.AVI (81). START stops the intro and the
 # title comes to rest -- retail's TitleScreen stays where it is -- and PRESS
 # START comes up four seconds later; START then goes to the main menu. With
@@ -183,6 +183,18 @@ $booted = Wait-ForLog "entering main loop" 60
 Write-Host ("  main loop: {0}" -f $booted)
 
 if ($booted) {
+    # BootAutoload first: two seconds of "Checking for Memory Card", then
+    # what it found -- on a card with no sdmc:/NFSHP2/SAVES/settings.db, that
+    # there are no saved settings -- for four more, then back.
+    $gotAuto = Wait-ForLog "flow enter BootAutoload" 20
+    Write-Host ("  BootAutoload: {0}" -f $gotAuto)
+    if ($gotAuto) {
+        Start-Sleep -Milliseconds 1000
+        Shot "autoload-checking"
+        Start-Sleep -Milliseconds 2500
+        Shot "autoload-result"
+    }
+
     $gotLang = Wait-ForLog "flow enter Language Options Pre FE" 20
     Write-Host ("  language screen: {0}" -f $gotLang)
     if ($gotLang) {
