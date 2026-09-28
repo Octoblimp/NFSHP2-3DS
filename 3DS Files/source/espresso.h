@@ -21,6 +21,17 @@
 // call, and every create call is behind a debug switch that is zero on the
 // disc -- so the seams are here for completeness, and nothing reaches them.
 //
+// One call is reached on every run, and is the exception:
+//
+//   espSetAttributeInt(unsigned int, const char *, int)
+//                                                 0x00243e68, retail
+//                                                 0x0025c5a8
+//
+// Car's constructor names each car's number to the editor with it, for
+// object 0 and whatever the switches say. The client queues the message for
+// a channel a disc never opens, so the call does nothing a player can see.
+// Its seam is skipped when NULL, where the others abort.
+//
 // espSetObjectPosition's seam is the one car.h declares as
 // gEspSetObjectPositionFn (Car was its first caller); the declaration below
 // is the same type, and espresso.c holds the definition.
@@ -43,11 +54,14 @@ typedef void  (*EspDeleteObjectFn)(void *obj);
 typedef void  (*EspCreateUserMeshFn)(void *obj, int32_t faces);
 typedef void  (*EspSetUserMeshFaceFn)(void *obj, int32_t face,
                                       FloatVector *verts);
+typedef void  (*EspSetAttributeIntFn)(uint32_t obj, const char *name,
+                                      int32_t value);
 
 extern EspCreateObjectFn    gEspCreateObjectFn;
 extern EspDeleteObjectFn    gEspDeleteObjectFn;
 extern EspCreateUserMeshFn  gEspCreateUserMeshFn;
 extern EspSetUserMeshFaceFn gEspSetUserMeshFaceFn;
+extern EspSetAttributeIntFn gEspSetAttributeIntFn;
 extern void (*gEspSetObjectPositionFn)(void *obj, bVector3 *pos);
 
 // The calls, each aborting if its seam is unset.
@@ -56,5 +70,8 @@ void  esp_delete_object(void *obj);
 void  esp_create_user_mesh(void *obj, int32_t faces);
 void  esp_set_user_mesh_face(void *obj, int32_t face, FloatVector *verts);
 void  esp_set_object_position(void *obj, bVector3 *pos);
+
+// The exception: nothing when the seam is unset.
+void  esp_set_attribute_int(uint32_t obj, const char *name, int32_t value);
 
 #endif

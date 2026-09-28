@@ -9,6 +9,7 @@ EspCreateObjectFn    gEspCreateObjectFn;
 EspDeleteObjectFn    gEspDeleteObjectFn;
 EspCreateUserMeshFn  gEspCreateUserMeshFn;
 EspSetUserMeshFaceFn gEspSetUserMeshFaceFn;
+EspSetAttributeIntFn gEspSetAttributeIntFn;
 void (*gEspSetObjectPositionFn)(void *obj, bVector3 *pos);
 
 static void unported(const char *what)
@@ -50,4 +51,10 @@ void esp_set_object_position(void *obj, bVector3 *pos)
     if (gEspSetObjectPositionFn == NULL)
         unported("espSetObjectPosition");
     gEspSetObjectPositionFn(obj, pos);
+}
+
+void esp_set_attribute_int(uint32_t obj, const char *name, int32_t value)
+{
+    if (gEspSetAttributeIntFn != NULL)
+        gEspSetAttributeIntFn(obj, name, value);
 }

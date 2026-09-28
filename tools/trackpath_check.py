@@ -41,6 +41,14 @@ direction from call to call.
 table `points`, its chunk buffer `chunk`, the QuickSpline basis matrices
 `basis`; a pointer inside one prints as name+offset.
 
+**Two images.** The script runs on the demo's image and again on
+retail's (retail_model.RetailEmu), where TrackPath.obj is the same but for
+three functions retail added: FindClosestPoint weighted by the distance
+round the track (0x00207d48), and TrackPathCoordinate::ResetPosition moved
+in from Car.obj (0x00208838) with an overload that seeds the search with
+the weighted one (0x00208848). The retail run adds their scenarios; the
+demo's ResetPosition (0x00134f18, in Car.obj) runs in both.
+
 Scenarios: the three comparisons over their boundaries; an empty manager;
 a looping path, an open one and a pair joined by neighbour links, loaded,
 measured along and across, reversed, jumped more than 128 units, and
@@ -66,7 +74,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import physicscar_check as pcc
-from mipsemu import Emu, M32, s32
+import retail_model
+from mipsemu import M32, MipsError, s32
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -131,20 +140,25 @@ SYM = dict(
     g_unloader="UnloaderTrackPath__FP6bChunk",
     g_load="LoadTrackPaths__FP14TrackPathPointiP9TrackPathi",
     g_unload="UnloadTrackPaths__Fv",
+    creset="ResetPosition__19TrackPathCoordinatePC8bVector2",
 )
+# Retail's own, which have no demo twin; retail's ResetPosition(pos) is
+# the same code as the demo's, moved from Car.obj into TrackPath.obj.
+RETAIL_FN = dict(fcpd=0x00207d48, creset=0x00208838, cresetd=0x00208848)
 
 # ---- the ops -----------------------------------------------------------------
 
 (OP_TAG, OP_PATH, OP_POINT, OP_CHUNK, OP_LOAD, OP_SETUP, OP_CLOSE,
  OP_UNLOAD, OP_CTOR, OP_DTOR, OP_LOADER, OP_UNLOADER, OP_MPOKE, OP_DUMP,
  OP_FCP, OP_FCAP, OP_CINIT, OP_CINITAT, OP_UPDATE, OP_ALONG, OP_CPOKE,
- OP_CDUMP, OP_CMP) = range(23)
+ OP_CDUMP, OP_CMP, OP_FCPD, OP_CRESET, OP_CRESETD) = range(26)
 
 ARGS = {OP_TAG: 1, OP_PATH: 11, OP_POINT: 6, OP_CHUNK: 2, OP_LOAD: 3,
         OP_SETUP: 1, OP_CLOSE: 1, OP_UNLOAD: 1, OP_CTOR: 0, OP_DTOR: 0,
         OP_LOADER: 1, OP_UNLOADER: 1, OP_MPOKE: 2, OP_DUMP: 1, OP_FCP: 2,
         OP_FCAP: 3, OP_CINIT: 1, OP_CINITAT: 3, OP_UPDATE: 4, OP_ALONG: 5,
-        OP_CPOKE: 3, OP_CDUMP: 1, OP_CMP: 3}
+        OP_CPOKE: 3, OP_CDUMP: 1, OP_CMP: 3, OP_FCPD: 3, OP_CRESET: 3,
+        OP_CRESETD: 4}
 
 M_LEN, M_REV, M_NPATHS, M_PATHS, M_NPOINTS, M_POINTS = range(6)
 MFIELD = [(0, "f"), (4, "i"), (8, "i"), (12, "paths"), (16, "i"),
@@ -236,6 +250,13 @@ class Script(object):
 
     def along(self, slot, a, side, path=0, via=0):
         self.op(OP_ALONG, slot, float(a), float(side), path, via)
+        self.op(OP_CDUMP, slot)
+
+    def reset(self, slot, x, y, dist=None):
+        if dist is None:
+            self.op(OP_CRESET, slot, float(x), float(y))
+        else:
+            self.op(OP_CRESETD, slot, float(x), float(y), dist)
         self.op(OP_CDUMP, slot)
 
 
@@ -891,6 +912,118 @@ def scenario_trackb12(sc, rnd):
     sc.op(OP_DUMP, 0)
 
 
+def scenario_reset(sc, rnd):
+    """ResetPosition(pos): the point dropped, then a fresh search."""
+    t = Track()
+    t.add_path(circle(10, 80.0), 1)
+    sc.tag("reset")
+    sc.tables(t)
+    sc.op(OP_LOAD, len(t.points), len(t.paths), 0)
+    sc.op(OP_SETUP, 0)
+    sc.op(OP_CINIT, 0)
+    sc.update(0, 80.0, 1.0)
+    for k in range(12):
+        a = 2 * math.pi * (5 * k % 12) / 12
+        garbage(sc, 0)
+        # A stale point the reset has to drop.
+        sc.cpoke(0, C_PT, (3 * k) % 10)
+        sc.reset(0, 83.0 * math.cos(a), 78.0 * math.sin(a))
+    sc.op(OP_CLOSE, 0)
+    sc.op(OP_UNLOAD, 0)
+    sc.op(OP_CINIT, 1)
+    garbage(sc, 1)
+    sc.reset(1, 3.0, 4.0)
+
+
+def scenario_near(sc, rnd):
+    """Retail's weighted search and ResetPosition(pos, dist): a loop and an
+    open road whose distances overlap the loop's, reversed, ties, NaN and
+    distances past either end."""
+    t = Track()
+    t.add_path(circle(12, 100.0), 1)
+    t.add_path(road(8), 0, begin_dist=30.0, ratio=0.5)
+    sc.tag("near: load")
+    sc.tables(t)
+    sc.op(OP_LOAD, len(t.points), len(t.paths), 0)
+    sc.op(OP_SETUP, 0)
+    sc.op(OP_DUMP, 0)
+    dists = [0.0, 25.0, 52.3, 150.0, 313.0, 600.0, 626.0, -20.0, -700.0,
+             1e4, -0.0, float("nan"), float("inf")]
+
+    sc.tag("near: searches")
+    for k in range(10):
+        a = 2 * math.pi * k / 10
+        x, y = 95.0 * math.cos(a), 95.0 * math.sin(a)
+        for d in dists:
+            sc.op(OP_FCPD, x, y, d)
+    for x, y in ((0.0, 0.0), (120.0, 20.0), (40.0, 10.0), (-300.0, 400.0)):
+        for d in dists:
+            sc.op(OP_FCPD, x, y, d)
+
+    sc.tag("near: reversed")
+    sc.mpoke(M_REV, 1)
+    for k in range(6):
+        a = 2 * math.pi * k / 6
+        for d in (0.0, 150.0, 313.0, 500.0, -40.0):
+            sc.op(OP_FCPD, 97.0 * math.cos(a), 97.0 * math.sin(a), d)
+    # Halfway between two points, where only the distance term decides:
+    # at the second's distance the forward search takes the second, and
+    # the reversed one, measuring from the other end, the first.
+    chord = 2 * 100.0 * math.sin(math.pi / 12)
+    for i in (0, 3, 7, 10):
+        (x0, y0), (x1, y1) = t.pos[i], t.pos[i + 1]
+        for d in (chord * (i + 1), chord * i, 621.0 - chord * i):
+            for rev in (1, 0):
+                sc.mpoke(M_REV, rev)
+                sc.op(OP_FCPD, (x0 + x1) / 2, (y0 + y1) / 2, d)
+    sc.mpoke(M_REV, 0)
+
+    sc.tag("near: resets")
+    sc.op(OP_CINIT, 0)
+    for k in range(16):
+        a = 2 * math.pi * (7 * k % 16) / 16
+        garbage(sc, 0)
+        sc.cpoke(0, C_PT, (5 * k) % len(t.points))
+        sc.reset(0, 101.0 * math.cos(a), 99.0 * math.sin(a),
+                 dists[k % len(dists)])
+    sc.mpoke(M_REV, 1)
+    for d in (10.0, 400.0):
+        garbage(sc, 0)
+        sc.reset(0, -100.0, 3.0, d)
+    sc.mpoke(M_REV, 0)
+    sc.tag("near: the road")
+    for d in (30.0, 60.0, 120.0, 300.0):
+        garbage(sc, 0)
+        sc.reset(0, 80.0 + rnd.uniform(-5.0, 5.0), rnd.uniform(-5.0, 5.0), d)
+    sc.op(OP_CLOSE, 0)
+    sc.op(OP_UNLOAD, 0)
+
+    # Integer points and distances, and a length of 100 so that nothing
+    # wraps, so that equal scores are equal to the bit. At (20, 0) and 20
+    # the first path's points 0 and 1 score 10 + 5 each; at (40, 0) and 60
+    # its 1 and 2 and the second path's 1 all score 15.
+    t = Track()
+    t.add_path([(10.0, 0.0), (30.0, 0.0), (50.0, 0.0)], 0, end_dist=100.0,
+               dists=[0.0, 40.0, 80.0])
+    t.add_path([(20.0, -15.0), (40.0, 15.0)], 0, dists=[30.0, 60.0])
+    sc.tag("near: ties")
+    sc.tables(t)
+    sc.op(OP_LOAD, len(t.points), len(t.paths), 0)
+    sc.op(OP_SETUP, 0)
+    for x, y in ((20.0, 0.0), (40.0, 0.0), (20.0, -5.0), (30.0, 0.0),
+                 (30.0, 15.0)):
+        for d in (20.0, 30.0, 40.0, 60.0, 0.0, 100.0):
+            sc.op(OP_FCPD, x, y, d)
+    sc.op(OP_CLOSE, 0)
+    sc.op(OP_UNLOAD, 0)
+
+    sc.tag("near: empty")
+    sc.op(OP_FCPD, 1.0, 2.0, 3.0)
+    sc.op(OP_CINIT, 1)
+    garbage(sc, 1)
+    sc.reset(1, 5.0, 6.0, 7.0)
+
+
 def script():
     rnd = random.Random(0x7ac4)
     sc = Script()
@@ -908,6 +1041,14 @@ def script():
     scenario_zero_length(sc)
     scenario_loader(sc, rnd)
     scenario_trackb12(sc, rnd)
+    scenario_reset(sc, rnd)
+    return sc
+
+
+def retail_script():
+    """The same, on retail, with retail's three new functions after it."""
+    sc = script()
+    scenario_near(sc, random.Random(0x7ac5))
     return sc
 
 
@@ -915,12 +1056,20 @@ def script():
 
 
 class Model(object):
-    def __init__(self, sc):
+    def __init__(self, sc, retail=False):
         self.sc = sc
         self.out = []
-        e = self.e = Emu(ieee=True, eediv=True)
+        e = self.e = retail_model.emu(retail, ieee=True, eediv=True)
         e.stub_bware()
-        self.fn = {k: e.addr_of(v) for k, v in SYM.items()}
+        self.fn = {}
+        for k, v in SYM.items():
+            try:
+                self.fn[k] = e.addr_of(v)
+            except MipsError:
+                assert retail, v
+        if retail:
+            self.fn.update(RETAIL_FN)
+        self.MGR, self.BASIS = e.data(MGR), e.data(BASIS)
         self.heap = []                  # (addr, span, label)
         self.stale = bytes(8)
         self.stubs()
@@ -935,7 +1084,7 @@ class Model(object):
         regions = [(PATHS, NPATHS * 40, "paths"),
                    (POINTS, NPOINTS * 20, "points"),
                    (CHUNK, CHUNK_W * 4, "chunk"),
-                   (BASIS, 192, "basis")]
+                   (self.BASIS, 192, "basis")]
         regions += self.heap
         for base, size, name in regions:
             if base <= a < base + size:
@@ -986,8 +1135,8 @@ class Model(object):
                 raise AssertionError("scenario walks a point with neither "
                                      "neighbour")
 
-        e.hook(0x001f5a68, next_null)
-        e.hook(0x001f5ab8, prev_null)
+        e.hook(e.code(0x001f5a68), next_null)
+        e.hook(e.code(0x001f5ab8), prev_null)
 
     # ---- the prints ------------------------------------------------------
 
@@ -1020,13 +1169,13 @@ class Model(object):
 
     def dump(self, splines):
         e, sb, sh = self.e, self.sb, self.sh
-        paths = e.u32(MGR + 12)
-        npaths = s32(e.u32(MGR + 8))
+        paths = e.u32(self.MGR + 12)
+        npaths = s32(e.u32(self.MGR + 8))
         self.emit("mgr len %08x rev %d npaths %d paths %s npoints %d "
                   "points %s"
-                  % (e.u32(MGR), s32(e.u32(MGR + 4)), npaths,
-                     self.label(paths), s32(e.u32(MGR + 16)),
-                     self.label(e.u32(MGR + 20))))
+                  % (e.u32(self.MGR), s32(e.u32(self.MGR + 4)), npaths,
+                     self.label(paths), s32(e.u32(self.MGR + 16)),
+                     self.label(e.u32(self.MGR + 20))))
         if paths == 0:
             return
         for i in range(min(npaths, NPATHS)):
@@ -1052,7 +1201,7 @@ class Model(object):
                      e.u32(c + 36)))
 
     def mpoint(self, idx):
-        return (self.e.u32(MGR + 20) + 20 * idx) & M32
+        return (self.e.u32(self.MGR + 20) + 20 * idx) & M32
 
     def put_pos(self, x, y):
         self.e.put32(POS, x)
@@ -1074,6 +1223,7 @@ class Model(object):
 
     def step(self, o):
         sc, e, emit, fn = self.sc, self.e, self.emit, self.fn
+        MGR = self.MGR
         if True:
             code, a = o[0], o[1:]
             if code == OP_TAG:
@@ -1176,6 +1326,25 @@ class Model(object):
                 e.put32(COORD + 40 * slot + CFIELD[k], v)
             elif code == OP_CDUMP:
                 self.cdump(a[0])
+            elif code == OP_FCPD:
+                x, y, d = a
+                self.put_pos(x, y)
+                e.fpr[12] = d & M32
+                r = e.call(fn["fcpd"], MGR, POS)
+                emit("fcpd %08x %08x %08x -> %s"
+                     % (x & M32, y & M32, d & M32, self.label(r)))
+            elif code == OP_CRESET:
+                slot, x, y = a
+                emit("reset c%d %08x %08x" % (slot, x & M32, y & M32))
+                self.put_pos(x, y)
+                e.call(fn["creset"], COORD + 40 * slot, POS)
+            elif code == OP_CRESETD:
+                slot, x, y, d = a
+                emit("reset c%d %08x %08x near %08x"
+                     % (slot, x & M32, y & M32, d & M32))
+                self.put_pos(x, y)
+                e.fpr[12] = d & M32
+                e.call(fn["cresetd"], COORD + 40 * slot, POS)
             elif code == OP_CMP:
                 kind, x, y = a
                 e.fpr[12] = x & M32
@@ -1187,8 +1356,8 @@ class Model(object):
                 raise ValueError("op %d" % code)
 
 
-def model(sc):
-    return Model(sc).run()
+def model(sc, retail=False):
+    return Model(sc, retail).run()
 
 
 # ================================================================ the build
@@ -1217,6 +1386,17 @@ def run_harness(exe, ops_path, out_path):
 diff = pcc.diff
 
 # ============================================================ the mutations
+
+# The weighted search's loop head, its distance term and its test, which
+# FindClosestPoint's own lines would otherwise match first.
+LOOP = ("        dist = m->TrackLength - dist;\n"
+        "    for (i = 0; i < m->NumPaths; i++) {\n"
+        "        const TrackPath *path = &m->pPaths[i];\n\n"
+        "        for (j = path->BeginPointNumber; j < path->EndPointNumber; "
+        "j++) {")
+TERM = ("            d += fabsf(trackpath_compare_distances(m, p->Distance, "
+        "dist)\n                       * 0.25f);\n")
+TEST = TERM + "            if (best == NULL || d < bestd) {"
 
 MUTATIONS = [
     # -- the spline table ---------------------------------------------------
@@ -1379,6 +1559,49 @@ MUTATIONS = [
     ("fcp-first", TPC,
      "if (best == NULL || d < bestd) {\n                bestd = d;",
      "if (d < bestd) {\n                bestd = d;"),
+    # -- retail's FindClosestPoint(pos, dist) -------------------------------
+    ("fcpd-rev", TPC,
+     "    if (m->ReverseTrackDirection)\n"
+     "        dist = m->TrackLength - dist;\n",
+     ""),
+    ("fcpd-rev-sign", TPC,
+     "        dist = m->TrackLength - dist;\n    for",
+     "        dist = dist - m->TrackLength;\n    for"),
+    ("fcpd-paths", TPC, LOOP, LOOP.replace("i < m->NumPaths;",
+                                          "i < m->NumPaths - 1;")),
+    ("fcpd-begin", TPC, LOOP, LOOP.replace("j = path->BeginPointNumber;",
+                                          "j = path->BeginPointNumber + 1;")),
+    ("fcpd-end", TPC, LOOP, LOOP.replace("j < path->EndPointNumber;",
+                                        "j < path->EndPointNumber - 1;")),
+    ("fcpd-term", TPC, TERM, ""),
+    ("fcpd-quarter", TPC, "                       * 0.25f);",
+     "                       * 0.5f);"),
+    ("fcpd-abs", TPC,
+     "d += fabsf(trackpath_compare_distances(m, p->Distance, dist)",
+     "d += (trackpath_compare_distances(m, p->Distance, dist)"),
+    ("fcpd-y", TPC, TERM,
+     TERM.replace("p->Distance, dist", "p->Distance, p->Position.y")),
+    ("fcpd-tie", TPC, TEST, TEST.replace("d < bestd", "d <= bestd")),
+    ("fcpd-first", TPC, TEST, TEST.replace("best == NULL || ", "")),
+    # -- ResetPosition, and retail's ResetPosition(pos, dist) ---------------
+    ("reset-null", TPC,
+     "    c->pTrackPoint = NULL;\n"
+     "    trackpath_coord_update_position(c, pos);\n}",
+     "    trackpath_coord_update_position(c, pos);\n}"),
+    ("rnear-null", TPC,
+     "    c->pTrackPoint = NULL;\n    p = trackpath_find_closest_point_near",
+     "    p = trackpath_find_closest_point_near"),
+    ("rnear-seed", TPC,
+     "    if (p != NULL)\n"
+     "        trackpath_coord_update_position(c, &p->Position);\n",
+     ""),
+    ("rnear-plain", TPC,
+     "p = trackpath_find_closest_point_near(&TheTrackPathManager, pos, dist);",
+     "p = trackpath_find_closest_point(&TheTrackPathManager, pos);"),
+    ("rnear-pos", TPC,
+     "        trackpath_coord_update_position(c, &p->Position);\n"
+     "    trackpath_coord_update_position(c, pos);",
+     "        trackpath_coord_update_position(c, &p->Position);"),
     # -- FindClosestAdjacentPointOnSamePath ---------------------------------
     ("fcap-path", TPC,
      "const TrackPath *path = &m->pPaths[pt->PathNumber];\n"
@@ -1491,8 +1714,8 @@ MUTATIONS = [
      "if (m->ReverseTrackDirection == 0) {"),
     ("upd-rev-dirx", TPC, "        dir.x = -dir.x;\n", ""),
     ("upd-rev-diry", TPC, "        dir.y = -dir.y;\n", ""),
-    ("upd-rev-dist", TPC, "dist = m->TrackLength - dist;",
-     "dist = dist - m->TrackLength;"),
+    ("upd-rev-dist", TPC, "        dist = m->TrackLength - dist;\n    }",
+     "        dist = dist - m->TrackLength;\n    }"),
     ("upd-store-param", TPC, "    c->SplineParam = param;\n", ""),
     ("upd-store-pos", TPC,
      "    c->Position = *pos;\n    c->PathDirection = dir;",
@@ -1709,6 +1932,8 @@ for _name in EQUIVALENT:
 def mutate_pass(only=None):
     sc = script()
     base = model(sc)
+    rsc = retail_script()
+    rbase = model(rsc, retail=True)
     caught = 0
     survived = []
     missing = []
@@ -1722,11 +1947,16 @@ def mutate_pass(only=None):
     opsdir = tempfile.TemporaryDirectory()
     ops = Path(opsdir.name) / "ops.bin"
     ops.write_bytes(sc.encode())
+    rops = Path(opsdir.name) / "rops.bin"
+    rops.write_bytes(rsc.encode())
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
         out = Path(tmp) / "base.txt"
         run_harness(exe, ops, out)
-        if diff(base, out.read_text().splitlines(), quiet=True):
+        rout = Path(tmp) / "rbase.txt"
+        run_harness(exe, rops, rout)
+        if (diff(base, out.read_text().splitlines(), quiet=True)
+                or diff(rbase, rout.read_text().splitlines(), quiet=True)):
             print("base already differs -- fix that before mutating")
             return 1
 
@@ -1760,6 +1990,9 @@ def mutate_pass(only=None):
                     continue
                 out = Path(tmp) / "m.txt"
                 rc = run_harness(exe, ops, out)
+                rout = Path(tmp) / "rm.txt"
+                if rc == 0:
+                    rc = run_harness(exe, rops, rout)
                 if rc == pcc.HARNESS_HUNG:
                     print("  %-44s hung the harness (caught)" % name)
                     caught += 1
@@ -1768,7 +2001,9 @@ def mutate_pass(only=None):
                     print("  %-44s crashed the harness (caught)" % name)
                     caught += 1
                     continue
-                n = diff(base, out.read_text().splitlines(), quiet=True)
+                n = (diff(base, out.read_text().splitlines(), quiet=True)
+                     + diff(rbase, rout.read_text().splitlines(),
+                            quiet=True))
                 if n:
                     print("  %-44s caught, %d lines" % (name, n))
                     caught += 1
@@ -1822,6 +2057,8 @@ def main():
 
     sc = script()
     lines = model(sc)
+    rsc = retail_script()
+    rlines = model(rsc, retail=True)
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
         ops = Path(tmp) / "ops.bin"
@@ -1829,16 +2066,27 @@ def main():
         out = Path(tmp) / "harness.txt"
         rc = run_harness(exe, ops, out)
         harness = out.read_text().splitlines()
+        rops = Path(tmp) / "rops.bin"
+        rops.write_bytes(rsc.encode())
+        rout = Path(tmp) / "rharness.txt"
+        rc = rc or run_harness(exe, rops, rout)
+        rharness = rout.read_text().splitlines()
 
     if args.dump:
         d = Path(args.dump)
         d.parent.mkdir(parents=True, exist_ok=True)
         d.with_suffix(".model").write_text(NL.join(lines) + NL)
         d.with_suffix(".harness").write_text(NL.join(harness) + NL)
+        d.with_suffix(".rmodel").write_text(NL.join(rlines) + NL)
+        d.with_suffix(".rharness").write_text(NL.join(rharness) + NL)
 
     n = diff(lines, harness)
-    print("%d ops, %d lines, %d differ" % (len(sc.ops), len(harness), n))
-    sys.exit(1 if (n or rc) else 0)
+    print("demo image: %d ops, %d lines, %d differ"
+          % (len(sc.ops), len(harness), n))
+    rn = diff(rlines, rharness)
+    print("retail image: %d ops, %d lines, %d differ"
+          % (len(rsc.ops), len(rharness), rn))
+    sys.exit(1 if (n or rn or rc) else 0)
 
 
 if __name__ == "__main__":

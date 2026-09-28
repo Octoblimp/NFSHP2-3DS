@@ -19,7 +19,7 @@ enum {
     OP_TAG, OP_PATH, OP_POINT, OP_CHUNK, OP_LOAD, OP_SETUP, OP_CLOSE,
     OP_UNLOAD, OP_CTOR, OP_DTOR, OP_LOADER, OP_UNLOADER, OP_MPOKE, OP_DUMP,
     OP_FCP, OP_FCAP, OP_CINIT, OP_CINITAT, OP_UPDATE, OP_ALONG, OP_CPOKE,
-    OP_CDUMP, OP_CMP
+    OP_CDUMP, OP_CMP, OP_FCPD, OP_CRESET, OP_CRESETD
 };
 
 enum { M_LEN, M_REV, M_NPATHS, M_PATHS, M_NPOINTS, M_POINTS };
@@ -534,6 +534,38 @@ int main(int argc, char **argv)
         case OP_CDUMP:
             cdump(next());
             break;
+        case OP_FCPD: {
+            int32_t x = next(), y = next(), d = next();
+            bVector2 p;
+            char b[48];
+            p.x = bitsf(x);
+            p.y = bitsf(y);
+            label(b, sizeof b,
+                  trackpath_find_closest_point_near(&TheTrackPathManager, &p,
+                                                    bitsf(d)));
+            printf("fcpd %08x %08x %08x -> %s\n", (unsigned)x, (unsigned)y,
+                   (unsigned)d, b);
+            break;
+        }
+        case OP_CRESET: {
+            int32_t slot = next(), x = next(), y = next();
+            bVector2 p;
+            p.x = bitsf(x);
+            p.y = bitsf(y);
+            printf("reset c%d %08x %08x\n", slot, (unsigned)x, (unsigned)y);
+            trackpath_coord_reset_position(&coords[slot], &p);
+            break;
+        }
+        case OP_CRESETD: {
+            int32_t slot = next(), x = next(), y = next(), d = next();
+            bVector2 p;
+            p.x = bitsf(x);
+            p.y = bitsf(y);
+            printf("reset c%d %08x %08x near %08x\n", slot, (unsigned)x,
+                   (unsigned)y, (unsigned)d);
+            trackpath_coord_reset_position_near(&coords[slot], &p, bitsf(d));
+            break;
+        }
         case OP_CMP: {
             int32_t kind = next(), a = next(), b = next();
             float r;

@@ -360,7 +360,8 @@ def model():
 
     emit("[layout]")
     emit("  %-28s %d" % ("slack", SLACK))
-    emit("  %-28s %d" % ("sizeof Car", at(2016, 154)))
+    # 2048: the demo's 2016 and, after it, retail's four new fields (car.h).
+    emit("  %-28s %d" % ("sizeof Car", at(2048, 154)))
     emit("  %-28s %d" % ("sizeof CarNode", 2 * PTR))
     emit("  %-28s %d" % ("sizeof CarState", at(1024, 2)))
     emit("  %-28s %d" % ("sizeof TopologyCoordinate", at(560, 128)))
@@ -405,7 +406,11 @@ def model():
             ("off pCaffeineObj", 1992, 152),
             ("off LeaveCarTrails", 2000, 154),
             ("off ForceBuzzTime", 2004, 154),
-            ("off fAngleToCamera", 2008, 154)):
+            ("off fAngleToCamera", 2008, 154),
+            ("off vOldPos", 2016, 154),
+            ("off SecondOnDuration", 2032, 154),
+            ("off JustResetFrames", 2036, 154),
+            ("off InDeepWaterRegistered", 2040, 154)):
         emit("  %-28s %d" % (name, at(ps2, k)))
 
     emit("  %-28s %d" % ("off ORP GeometryPosition", 64))

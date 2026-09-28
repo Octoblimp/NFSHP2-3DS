@@ -111,13 +111,14 @@ extern CarControllerCtorFn gCopDriverCtorFn;       // 0x00197d48
 
 // ------------------------------------------------------ the null controller
 
-// The NullController and its NullDriver, as Car's constructor
-// (0x0012f400 .. 0x0012f490) and SetControlMode's eNO_CONTROL arm both
-// build them inline, store for store: bMalloc(12, "NullController"), the
-// CarController constructor, NullController's vptr; bMalloc(560,
-// "NullDriver"), the CarDriver constructor, NullDriver's vptr; the driver
-// into the controller. Car's constructor also stores both into the car;
-// the arm leaves that to its tail.
+// The NullController and its NullDriver, as Car's constructor (the
+// demo's 0x0012f400 .. 0x0012f490, retail's 0x00130c44 .. 0x00130cf4) and
+// SetControlMode's eNO_CONTROL arm both build them inline, store for
+// store: bMalloc(12, "NullController"), the CarController constructor,
+// NullController's vptr; bMalloc(560, "NullDriver"), the CarDriver
+// constructor, NullDriver's vptr; the driver into the controller. Car's
+// constructor also stores both into the car; the arm leaves that to its
+// tail. It is defined in carcontroller.c, with NullController's methods.
 NullController *car_new_null_controller(Car *c);
 
 #endif

@@ -19,6 +19,12 @@
 // ReplaySnapshot, and PlotToCaffeine, a debug plot into Caffeine that
 // nothing calls.
 //
+// Retail's TrackPath.obj has three functions the demo's lacks, and the
+// rest are the same. FindClosestPoint gains an overload that weighs the
+// distance round the track (0x00207d48), and ResetPosition moves in from
+// Car.obj (0x00208838) with an overload that seeds the search with it
+// (0x00208848). Car's constructor and ResetToRoutePoint call the second.
+//
 // `gTrackPathDistanceFn` is a test seam that is not on the disc.
 // tools/trackroute_check.py sets it to a closed form so that TrackRoute's
 // arithmetic can be checked without a track. It is NULL on the handheld.
@@ -150,6 +156,14 @@ int trackpath_unloader(TrackPathManager *m, const uint8_t *chunk);
 TrackPathPoint *trackpath_find_closest_point(TrackPathManager *m,
                                              const bVector2 *pos);
 
+// 0x00207d48, retail only. The same search, with each point scored by its
+// 2D distance plus a quarter of how far its Distance is from `dist` the
+// short way round (CompareDistances, made positive). On a reversed track
+// `dist` is taken from the other end, TrackLength - dist.
+TrackPathPoint *trackpath_find_closest_point_near(TrackPathManager *m,
+                                                  const bVector2 *pos,
+                                                  float dist);
+
 // 0x001f54a8. The nearest of `pt` and its neighbours along its own path,
 // wrapping round a looping path's ends. `pt` wins a tie.
 TrackPathPoint *trackpath_find_closest_adjacent_point(TrackPathManager *m,
@@ -202,9 +216,18 @@ void trackpath_coord_update_position(TrackPathCoordinate *c,
 // 0x00134f18, twelve bytes that Car.obj emitted: pTrackPoint is zeroed in
 // the delay slot of a tail jump to UpdatePosition, so the search starts
 // afresh. FinishMovement, Chopper's ClearVariables and PlaceChopperInWorld,
-// and TrafficTeleporter::PlaceNewCar call it.
+// and TrafficTeleporter::PlaceNewCar call it. Retail has the same sixteen
+// bytes in TrackPath.obj (0x00208838), and Car's constructor calls it too.
 void trackpath_coord_reset_position(TrackPathCoordinate *c,
                                     const bVector2 *pos);
+
+// 0x00208848, retail only. pTrackPoint zeroed; then, when the weighted
+// search finds a point near `pos` and `dist`, UpdatePosition at that
+// point first, so that the search from `pos` starts there; then
+// UpdatePosition at `pos`. Car's constructor and ResetToRoutePoint call
+// it.
+void trackpath_coord_reset_position_near(TrackPathCoordinate *c,
+                                         const bVector2 *pos, float dist);
 
 // 0x001f5df8. TheTrackPathManager's UpdatePosition(along, side, 0).
 void trackpath_coord_update_position_along(TrackPathCoordinate *c,

@@ -235,6 +235,42 @@ TrackPathPoint *trackpath_find_closest_point(TrackPathManager *m,
     return best;
 }
 
+// 0x00207d48, retail only.
+TrackPathPoint *trackpath_find_closest_point_near(TrackPathManager *m,
+                                                  const bVector2 *pos,
+                                                  float dist)
+{
+    TrackPathPoint *best = NULL;
+    float           bestd = 0.0f;
+    int             i, j;
+
+    // `sub.s $f21,$f0,$f21`: TrackLength - dist, not dist - TrackLength.
+    if (m->ReverseTrackDirection)
+        dist = m->TrackLength - dist;
+    for (i = 0; i < m->NumPaths; i++) {
+        const TrackPath *path = &m->pPaths[i];
+
+        for (j = path->BeginPointNumber; j < path->EndPointNumber; j++) {
+            TrackPathPoint *p;
+            float           d;
+
+            // As in FindClosestPoint: the image reads a negative index's
+            // NULL point at address 0, and no bundle has one.
+            if (j < 0)
+                continue;
+            p = &m->pPoints[j];
+            d = dist2(p->Position.x - pos->x, p->Position.y - pos->y);
+            d += fabsf(trackpath_compare_distances(m, p->Distance, dist)
+                       * 0.25f);
+            if (best == NULL || d < bestd) {
+                bestd = d;
+                best = p;
+            }
+        }
+    }
+    return best;
+}
+
 // 0x001f54a8.
 TrackPathPoint *trackpath_find_closest_adjacent_point(TrackPathManager *m,
                                                       const bVector2 *pos,
@@ -556,11 +592,24 @@ void trackpath_coord_update_position(TrackPathCoordinate *c,
     trackpath_manager_update_position(&TheTrackPathManager, c, pos);
 }
 
-// 0x00134f18, in Car.obj.
+// 0x00134f18, in Car.obj; retail's is 0x00208838, in TrackPath.obj.
 void trackpath_coord_reset_position(TrackPathCoordinate *c,
                                     const bVector2 *pos)
 {
     c->pTrackPoint = NULL;
+    trackpath_coord_update_position(c, pos);
+}
+
+// 0x00208848, retail only.
+void trackpath_coord_reset_position_near(TrackPathCoordinate *c,
+                                         const bVector2 *pos, float dist)
+{
+    TrackPathPoint *p;
+
+    c->pTrackPoint = NULL;
+    p = trackpath_find_closest_point_near(&TheTrackPathManager, pos, dist);
+    if (p != NULL)
+        trackpath_coord_update_position(c, &p->Position);
     trackpath_coord_update_position(c, pos);
 }
 

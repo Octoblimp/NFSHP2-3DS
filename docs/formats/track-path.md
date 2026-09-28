@@ -282,6 +282,34 @@ sets it to a closed form so that TrackRoute's arithmetic can be checked
 without a spline under it. It is NULL on the handheld, and
 `trackpath_check.py` leaves it NULL.
 
+## Retail's three
+
+Retail's TrackPath.obj is the demo's plus three functions. The rest
+match. Car's constructor ([car](car.md)) calls the second and the third,
+and ResetToRoutePoint the third.
+
+**FindClosestPoint(pos, dist)** (0x00207d48) is FindClosestPoint with a
+different score. Each point scores its 2D distance plus a quarter of
+`|CompareDistances(point.Distance, dist)|`, that is, how far round the
+lap the point is from `dist`, the short way. On a reversed track `dist`
+is first measured from the other end, as `TrackLength - dist`
+(`sub.s $f21,$f0,$f21`), not `dist - TrackLength`. The first of equals
+wins, as before. The distance term matters where the track crosses
+itself or runs beside itself: of two legs equally near, it picks the one
+at the right distance round the lap.
+
+**ResetPosition(pos)** (0x00208838) is the demo's twelve bytes from
+Car.obj, moved into TrackPath.obj. It drops the point, then calls
+UpdatePosition.
+
+**ResetPosition(pos, dist)** (0x00208848) drops the point and runs the
+weighted search. If the search finds a point, it first updates the
+coordinate at that point's own Position, so the coordinate holds that
+point. Then it updates at `pos`. The second update starts from the seeded
+point only if `pos` is within 128 of it, per step 1 of UpdatePosition.
+Farther away, it searches afresh and the seed does nothing. With no
+points, it is the plain reset.
+
 ## What is not ported
 
 - `DoSnapshot`, both of them (0x001f5330, 0x001f5d40). They wait on
@@ -315,3 +343,28 @@ The scenarios cover:
 - the loader over built chunks, including ones whose sizes do not divide
   evenly;
 - TRACKB12's own chunk, when `extracted/` has it.
+
+The script runs twice: on the demo's image, and on retail's
+(`retail_model.RetailEmu`), whose TrackPath.obj is paired with the demo's
+by `retail_match`. The retail run adds scenarios for retail's three:
+- the weighted search at points round a loop and beside an open road
+  whose distances overlap the loop's;
+- distances at 0, `-0`, past either end, NaN and infinity;
+- the reversed track, including points halfway between two others, where
+  only the distance term decides and the reversal flips the answer;
+- integer ties, equal to the bit;
+- both resets from a stale point.
+
+The demo's ResetPosition (0x00134f18, in Car.obj) runs in both.
+
+```
+demo image:   4946 ops, 4746 lines, 0 differ
+retail image: 5557 ops, 5095 lines, 0 differ
+```
+
+The mutation pass edits `trackpath.c` and `trackpath.h` in place, so
+nothing that includes either may be built while it runs:
+
+```
+trackpath_check --mutate  204 mutations, 201 caught, 3 equivalent, 0 unexplained
+```

@@ -166,6 +166,12 @@ typedef struct CarTypeInfo {
     int32_t         Pad1;                                // 1372
 } CarTypeInfo;
 
+// 12CarUsageType, UsageType's values, named as the stabs name them. Car's
+// constructor picks the sound by them and gives a traffic car no CarDamage.
+#define CAR_USAGE_TYPE_RACING  0
+#define CAR_USAGE_TYPE_COP     1
+#define CAR_USAGE_TYPE_TRAFFIC 2
+
 // One pointer, and it is the last field but one, so the widening is a
 // single term -- unlike Engine, this one does fit the CARSTATE_SLACK
 // shape. pCarSpecs also forces the whole struct to 8-byte alignment on a

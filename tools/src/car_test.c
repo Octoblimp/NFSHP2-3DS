@@ -118,6 +118,11 @@ static void scenario_layout(void)
     pi("off LeaveCarTrails", (int)offsetof(Car, LeaveCarTrails));
     pi("off ForceBuzzTime", (int)offsetof(Car, ForceBuzzTime));
     pi("off fAngleToCamera", (int)offsetof(Car, fAngleToCamera));
+    pi("off vOldPos", (int)offsetof(Car, vOldPos));
+    pi("off SecondOnDuration",
+       (int)offsetof(Car, HeadlightsAndHornSecondOnDuration));
+    pi("off JustResetFrames", (int)offsetof(Car, JustResetFrames));
+    pi("off InDeepWaterRegistered", (int)offsetof(Car, InDeepWaterRegistered));
 
     pi("off ORP GeometryPosition",
        (int)offsetof(OverrideRenderingPosition, GeometryPosition));

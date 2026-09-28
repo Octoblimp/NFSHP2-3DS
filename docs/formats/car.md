@@ -1865,6 +1865,254 @@ carmode_check --only (the 88)  88 mutations, 82 caught, 6 equivalent, 0 unexplai
 carmode_check --only (the 8)   8 mutations, 0 caught, 8 equivalent, 0 unexplained
 ```
 
+## What is in the twelfth code slice
+
+Car's constructor and destructor, ported from retail's listing rather
+than the demo's. This is road step 6 of task 36. They live in
+`carinit.c`:
+- `Car::Car(DriverInfo *, bVector3 *pos, unsigned short angle, float
+  dist)`, retail `0x00130a48`, 1176 bytes (the demo's `0x0012f240` is
+  1052);
+- `Car::~Car`, retail `0x00130ee0` (the demo's `0x0012f660`);
+- `CloseRenderInfo`, retail `0x0011e280`, which the destructor calls;
+- `CarReflectEventHandler`, retail `0x00130a28`, which the constructor
+  registers. It hands an event with a car to that car's `EventHandler`.
+
+That makes Car 66 of 80 methods. The file is separate because the
+constructor builds the null controller, driver and mover, and the
+collision body. `car.c` links into checkers that carry none of them.
+`car_new_null_controller` moved from `carmodes.c` into
+`carcontroller.c`, so that a harness of the constructor can link it
+without the modes. `SetControlMode` and `SetMovementMode` inline the
+same code.
+
+### Retail's Car
+
+Retail's Car is 2200 bytes; the demo's is 2016. The port keeps the
+demo's layout, so every demo checker still runs. Retail's four new
+fields go after it, at 2016..2047, which makes the port's record 2048
+bytes:
+
+| Field | Port | Retail |
+|-------|------|--------|
+| `vOldPos` | 2016 | 1136 |
+| `HeadlightsAndHornSecondOnDuration` | 2032 | 2088 |
+| `JustResetFrames` | 2036 | 2140 |
+| `InDeepWaterRegistered` | 2040 | 2196 |
+
+Every other field is at the demo's offset plus a shift that depends on
+where the field sits:
+
+| Demo offsets | Fields | Shift |
+|--------------|--------|-------|
+| below 1088 | the header and `State` | 0 |
+| 1088..1107 | `DispGear` to `fDamageBoostOverride` | +16 |
+| 1120..1839 | `vOldVel` to the TopologyCoordinate | +32 |
+| 1840..1908 | the TrackPathCoordinate to `HeadlightsAndHornOnDuration` | +176 |
+| 1912..1959 | `HeadlightsAndHornOffDuration` to `ResetMe` | +180 |
+| 1960 on | `BlinkTimer` to the end | +184 |
+
+Within `State`, retail's `CurrentGear` is at `+904`, not the port's
+`+900`. `car_check` holds the port's side of all this.
+
+### What retail changed
+
+The constructor differs from the demo's in five ways:
+- **It takes a distance along the track.** Below zero (`c.lt.s`), the
+  TrackPathCoordinate is reset at the start, as in the demo. Otherwise
+  it is reset with the weighted search ([track-path](track-path.md)), so
+  a car placed where the track crosses itself lands on the right leg.
+  `-0` and a NaN are not below zero, so they take the weighted search.
+- **It zeroes the new fields**, and one the demo left alone:
+  `fBlownTireControllerRumbleTimer`. The second horn duration goes to
+  -1 with the other two.
+- **It saves the start as `vOldPos`** as well as `State.Position`.
+- **CarDamage finds its breakable parts** in the car's model once the
+  render info is made. This is a nameless function at `0x001b5598`. For
+  each of fifteen items it looks the part up by name and keeps its
+  index, in the 16 bytes CarDamage grew by (212 to 228).
+- **`ForceBuzzTime` is rounded.** The value is `WorldTimer * 1/4000 *
+  4000`, in single precision, plus 0.5, then `cvt.w.s`. The demo had no
+  0.5.
+
+### The order
+
+Each callee sees the car as the stores before it left it, so the order
+matters:
+
+```
+CarState(State, topology, CarTypeInfos[ride.Type])
+override: Blinking 0, Visible ~0, Override 0
+TopologyCoordinate(), TrackPathCoordinate()
+the start: StartTime, the rumble timer, BlinkTimer, ForceBuzzTime 0;
+    vOldPos, vOldVel, vOldAngVel = (0, 0, 0, w)
+pos:  start = *pos, vOldPos = *pos
+dist < 0 ? ResetPosition(start) : ResetPosition(start, dist)
+State.Position = start, State.Angle = angle
+tyres 0, FrictionBoost 1, draft and overrides 0, MyDriver, pRideInfo,
+    CarIndex 0, DriverNumber, no player, no racing car,
+    pCarTypeInfo = CarTypeInfos[ride.Type], read again
+pBaseCarSound = SoundEnabled ? the sound : NULL
+the null controller and driver; the null mover; pAnimatedDriver NULL
+pCarDamage = traffic ? NULL : CarDamage(bMalloc(228, "CarDamage", 0, 16))
+no control, no movement; the collision body; the trails and Caffeine 0
+espSetAttributeInt(0, "CarNumber", DriverNumber)
+PutFlatOnTrack
+CurrentGear 2, DispGear 1, OldSpeed 0, pRenderInfo NULL
+InitRenderInfo(pRideInfo)
+pCarDamage, read again:  its parts
+rendering on, ResetMe 0, JustResetFrames 0,
+    LastInTroughPosition = State.Position's x and y
+emAddHandler(CarReflectEventHandler, 0x10000)
+wipers, siren, lights, signals 0; StartTime = WorldTimer;
+    the three durations -1
+StopBlinking
+on the track map, AirTimeSwitch 0, not poofed, BlinkDuration 2,
+    ForceBuzzTime, skids 0, bumps 0, nitro 0, deep water 0
+```
+
+What the listing says:
+- **The start is a quadword on the stack.** x, y and z are zeroed. w is
+  whatever the stack held, and it goes into `vOldVel.w` and
+  `vOldAngVel.w`. With no `pos` it also goes into `vOldPos.w` and
+  `State.Position.w`. The port zeroes it. Nothing reads those lanes as
+  a value.
+- **`DriverNumber` is sign-extended** from the driver's `s8`
+  (`lbu; sll 24; sra 24`).
+- **The sound picks by number, then by usage.** Drivers 0 and 1 are the
+  players and get `CreatePlayerCarSound`. Otherwise a cop gets
+  `CreateAICopCarSound`, and a racing or traffic car
+  `CreateAICarSound`. A usage outside the three gets nothing.
+  `SoundEnabled` is tested for zero, so -1 counts as on.
+- **The null mover is built inline**, as `SetMovementMode`'s
+  `eNO_MOVEMENT` arm does: `bOMalloc` from `NullMoverSlotPool`, then
+  `pState` and the vptr.
+- **`pCarDamage` and `State.Position` are read after InitRenderInfo**,
+  which is a Car method and could have changed them. The parts lookup
+  follows `pCarDamage` as InitRenderInfo left it, and so does the trough.
+- **`CopLights` is stored as a word** (`sw zero,2056`) and read as one,
+  so the three bytes after the demo's byte are zeroed too.
+- **It returns `this`.**
+
+The destructor:
+
+```
+controller, mover, collision body:  their virtual destructors, with 3
+pCarDamage:  ~CarDamage(3), then pCarDamage = NULL
+CloseRenderInfo:  ~CarRenderInfo(3) if there is one, pRenderInfo = NULL
+pCaffeineObj:  espDeleteObject
+pBaseCarSound:  its virtual destructor (vptr at 28), with 3
+emRemoveHandler(CarReflectEventHandler)
+~TrackPathCoordinate(2), ~TopologyCoordinate(2)
+flags & 1:  __builtin_delete
+```
+
+Each virtual call loads the vptr (at 8 in a controller, 4 in a mover,
+80 in the collision body), then the slot's delta at `+8` and function at
+`+12`. It calls with `this + delta`. The TrackPathCoordinate's
+destructor has nothing to do but a free on bit 0, which 2 does not set.
+The tail is `j` to the bNode destructor, which frees on bit 0.
+
+### The seams
+
+Everything the constructor and destructor reach that is not ported yet
+is a seam:
+
+```
+sound::CreatePlayerCarSound(Car *)   0x0018eb28  skipped
+sound::CreateAICarSound(Car *)       0x0018eb70  skipped
+sound::CreateAICopCarSound(Car *)    0x0018ebb8  skipped
+BaseCarSound's destructor            vptr 28     aborts
+CarDamage::CarDamage(Car *)          0x001b54b0  skipped
+CarDamage, the parts                 0x001b5598  aborts
+CarDamage::~CarDamage                0x001b5538  aborts
+Car::InitRenderInfo(RideInfo *)      0x0011dc80  skipped
+CarRenderInfo::~CarRenderInfo        0x0011fac0  aborts
+emAddHandler(fn, mask)               0x001ba2d0  skipped
+emRemoveHandler(fn)                  0x001ba3a8  skipped
+espSetAttributeInt(obj, name, v)     0x0025c5a8  skipped
+```
+
+A seam that only makes the car sound or draw is skipped when unset, and
+the car is built without that part. A seam that can only be reached with
+something another seam made aborts when unset. The event handlers are
+skipped because what they reflect to, `Car::EventHandler`, is empty.
+`SoundEnabled` (retail gp-23056) is in `carinit.c` until the sound layer
+is ported. `CarUsageType`'s three values are in `cartypeinfo.h`, named
+as the stabs name them.
+
+### The check
+
+`tools/carinit_check.py` runs retail's four functions in RetailEmu, with
+CarController's constructor and TrackPathCoordinate's destructor as
+shipped. Every other callee is stubbed. Each stub prints its name and its
+arguments, then the car: every field the two write, and the holes between
+them, in retail's order at retail's offsets. The harness links `carinit.c`
+with the real `carcontroller.c`, `cardriver.c`, `espresso.c` and
+`vtable.c`, stubs the rest the same way, and prints the same lines. Every
+address the model uses is checked against its demo twin through
+`retail_match`'s map.
+
+The car and every buffer a stub hands out start as `0xa5`s, so a store
+the image does not make shows up as a field the port changed. Three
+stubs move the car, the same way on both sides:
+- CarState's constructor fills `Position`;
+- PutFlatOnTrack moves the car and sets four fields the constructor must
+  then overwrite;
+- InitRenderInfo, per scenario, sets the render info, clears or changes
+  the damage, or moves the car.
+
+CarDamage's and CarCollisionBody's constructors can return another
+address than their memory, and the car must keep the one returned.
+
+The 247 scenarios:
+- every driver number the sound tells apart, and every usage, with
+  `SoundEnabled` on, off, -1 and 2;
+- car types from -2 to 5, each with its own usage;
+- a position and none, with NaN and `-0` lanes;
+- the distance below zero, `-0`, denormals either sign, NaN either sign
+  and both infinities;
+- angles with bits above the sixteen that `andi` keeps;
+- `WorldTimer` across its range, including 24 values where the 0.5
+  changes the answer;
+- the returned CarDamage and body, and InitRenderInfo's four effects;
+- the destructor with each pointer present and absent, this-deltas, and
+  flags with and without bit 0;
+- the event reflected to a car and to none.
+
+```
+carinit_check  247 scenarios, 9637 lines, 0 differ
+```
+
+No disagreement between the image and the port was found.
+
+### What the mutation pass said
+
+There are 169 mutations:
+- every store's value in the constructor;
+- the sound's conditions;
+- `<` against `<=`, the sign and NaN on the distance;
+- each read that follows a call: `CurrentGear` after PutFlatOnTrack,
+  and the trough and `pCarDamage` after InitRenderInfo;
+- the traffic test, the sizes, names, pools and flags of each
+  allocation;
+- the event mask and handler;
+- ForceBuzzTime without the 0.5, unscaled, in double precision and cast
+  without the EE's saturation;
+- in the destructor, each call dropped or reordered, and each flags
+  value, the NULL stores and bit 0;
+- the null controller's strings and vtables, and `esp_set_attribute_int`.
+
+The pass caught 168. Two of those crash the harness, which counts as
+caught: `ctor_no_mover` and `ncc_no_driver_link` leave a pointer the
+harness then follows. The one that survived is equivalent by
+construction. `ctor_start_w` changes the start's w, which reaches only
+the lanes both sides print as `*`.
+
+```
+carinit_check --mutate  169 mutations, 168 caught, 1 equivalent, 0 unexplained
+```
+
 ## What is not ported yet
 
 The measure that matters for planning is whether a method makes a direct
@@ -1879,7 +2127,7 @@ is force feedback — six `PortSetForceConditionData`, six
 `PortSetForcePeriodicData`, `PortPlayShake`. It drives the wheel
 peripheral's motors, not the physics.
 
-Of the **forty-six that do**, thirty are ported: `CalculateDraftFactor(Car *)`,
+Of the **forty-six that do**, thirty-three are ported: `CalculateDraftFactor(Car *)`,
 whose calls are Graph and Table; `WorldToCar`, whose one is
 `CarState::WorldToCar`; the third slice's seven; `SetControlMode` and
 `SetMovementMode`, whose outside calls are the movers' and controllers'
@@ -1899,27 +2147,28 @@ sound; and the tenth slice's one, whose are GetElevation, `bMulMatrix`,
 `BaseCarSound::TriggerSplash`; and the eleventh slice's one, whose are the
 track path's `UpdatePosition` and `ResetPosition`, `HasTopology`,
 `CarState::GetYaw`, four Player methods, `CollisionBody::GetCollision`,
-Collision's four questions and the replay. The AnimatedDriver, the editor
-link, the ninth slice's four classes that are not ported, the splash and
-the Player's four are seams.
+Collision's four questions and the replay; and the twelfth slice's three,
+the constructor, the destructor and CloseRenderInfo, whose are the
+state, the coordinates, the null objects, the collision body, the sound,
+CarDamage, the render info, the event manager and Espresso. The
+AnimatedDriver, the editor link, the ninth slice's four classes that are
+not ported, the splash, the Player's four and the twelfth slice's sound,
+damage, render and event calls are seams.
 
-Seventeen are left, and every one reaches a class that is not ported:
-- the constructor and destructor (`0x0012f240`, `0x0012f660`);
+Fourteen are left, and every one reaches a class that is not ported:
 - `TriggerEvents` (`0x00131a58`): the event manager, the ferns,
   `Player::TriggerVisibleDrivingLine`;
 - `AssignAnimatedDriver` and `UnAssignAnimatedDriver`;
 - `DamageAbove` and `DamageCap`: `ePoly`, `Player::IsNisPlaying` and the
   cop manager;
-- the render group: `InitRenderInfo`, `CloseRenderInfo`,
-  `TriggerEffect` and `SwitchSkin`;
+- the render group: `InitRenderInfo`, `TriggerEffect` and `SwitchSkin`;
 - force feedback and rumble: `DoWheelForces`, `CalcForceParameters`,
   `StartForceImpact`, `MaybeRumble` and `MaybeCameraShake`;
 - `DoSnapshot`, which waits on `ReplaySnapshot`.
 
-They belong to tasks 26, 27 and 29. The constructor is the nearest: it
-builds the null controller, driver and mover the fourth slice ported
-(`car_new_null_controller` is the first two), but among the sound and
-render objects that are task 29's.
+They belong to tasks 26, 27 and 29. `InitRenderInfo` is the nearest.
+It is the constructor's one seam that decides whether a car can be
+seen, and task 36's road ports it, with `CarRenderInfo`, next.
 
 The debt the third slice carried is paid: `wheel_install_seams()` runs
 once at boot in `main.c`, before anything can build the `PhysicsCar`

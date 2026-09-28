@@ -18,7 +18,8 @@
 // The layout below is the .mdebug one (`Car (size=2016)`), and every offset
 // in it was re-derived from a load or a store in the listing before it was
 // written down. See docs/formats/car.md for which instruction confirmed
-// which field.
+// which field. Retail's four new fields follow it, from 2016, which makes
+// the port's record 2048 bytes (see the record's end).
 //
 // Two things to know before reading the code:
 //
@@ -280,7 +281,28 @@ struct Car {
     int32_t           ForceBuzzTime;            // 2004
     float             fAngleToCamera;           // 2008
     uint32_t          _pad2012;                 // 2012 quadword round-up
-};                                              // 2016
+
+    // Retail's four new fields, which retail put among the ones above
+    // (its Car is 2200 bytes). They go at the end here so that every
+    // demo offset above still holds and the demo image's checkers still
+    // run. Retail's offsets are in the comments. The names are the port's,
+    // since retail has no symbols.
+    //
+    //   vOldPos: the position BeginMovement saves beside vOldVel and
+    //   vOldAngVel, and FinishMovement reads.
+    //   HeadlightsAndHornSecondOnDuration: the second flash or honk of a
+    //   pair. The demo reused the first's duration for it.
+    //   JustResetFrames: 2 after a ResetToRoutePoint that asks for it,
+    //   counted down by Drive. tPursuit::IsChasedCarStoppable reads it.
+    //   InDeepWaterRegistered: set once TriggerCarTerrainEffects has
+    //   registered "InDeepWater" with the replay, and cleared when the car
+    //   leaves deep water.
+    bVector3          vOldPos;                  // 2016 retail 1136
+    float             HeadlightsAndHornSecondOnDuration; // 2032 retail 2088
+    int32_t           JustResetFrames;          // 2036 retail 2140
+    int32_t           InDeepWaterRegistered;    // 2040 retail 2196
+    uint32_t          _pad2044;                 // 2044 quadword round-up
+};                                              // 2048
 
 // ---------------------------------------------------------------- the asserts
 //
@@ -372,6 +394,11 @@ typedef char car_layout_check[
      && CAR_AT(_hole1946, 1946, 150)
      && CAR_AT(_hole1989, 1989, 151)
      && CAR_AT(_pad2012, 2012, 154)
+     && CAR_AT(vOldPos, 2016, 154)
+     && CAR_AT(HeadlightsAndHornSecondOnDuration, 2032, 154)
+     && CAR_AT(JustResetFrames, 2036, 154)
+     && CAR_AT(InDeepWaterRegistered, 2040, 154)
+     && CAR_AT(_pad2044, 2044, 154)
 
      // The holes are asserted by size as well as by offset, and that
      // is not redundant. On this 64-bit host CarState is eight-byte
@@ -388,7 +415,7 @@ typedef char car_layout_check[
      && sizeof(((Car *)0)->_hole1946) == 2
      && sizeof(((Car *)0)->_hole1989) == 3
 
-     && sizeof(Car) == (size_t)2016 + 154 * CAR_SLACK
+     && sizeof(Car) == (size_t)2048 + 154 * CAR_SLACK
      && sizeof(CarState) == 1024 + CARSTATE_SLACK
      && sizeof(TopologyCoordinate) == TOPOLOGY_SIZEOF
      && sizeof(CarNode) == 2 * sizeof(void *)

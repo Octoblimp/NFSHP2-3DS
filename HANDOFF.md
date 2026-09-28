@@ -8437,3 +8437,75 @@ the track. Still open from this slice (`mv3-video.md`):
 - The motion layout.
 - Whether the IOP touched the sound's rate.
 - Decode speed on hardware.
+
+## Session 30, continued (2026-09-27) -- Task 36's tenth slice: Car's constructor and destructor
+
+The first slice of road step 6. Car's constructor and destructor are
+ported from retail's listing (`0x00130a48`, `0x00130ee0`), not the
+demo's, onto the demo's layout of Car. `docs/formats/car.md`'s twelfth
+code slice has the order, the seams and the field map.
+
+- **Retail's Car.** It is 2200 bytes; the demo's is 2016. Retail adds
+  four fields:
+  - `vOldPos`;
+  - a second horn duration;
+  - `JustResetFrames`;
+  - `InDeepWaterRegistered`.
+  They go at the end of the port's record (2016..2047), so every demo
+  offset, and every demo checker, still holds. Every other field moves
+  by one of five shifts, from 0 to +184, and `car.md` tabulates them.
+  `car_check` holds the port's side.
+- **What retail changed in the constructor.**
+  - It takes a distance along the track. At zero or above, the
+    TrackPathCoordinate is reset with a search that also weighs each
+    point's distance round the lap. So a car placed where the track
+    crosses itself lands on the right leg.
+  - It zeroes the new fields and the rumble timer.
+  - It saves the start as `vOldPos`.
+  - It has CarDamage look up its breakable parts once the render info
+    exists.
+  - It rounds `ForceBuzzTime`.
+- **The track path.** `trackpath.c` gains retail's weighted
+  `FindClosestPoint` (`0x00207d48`) and `ResetPosition(pos, dist)`
+  (`0x00208848`). `trackpath_check` now also runs on retail's image,
+  with scenarios for the two.
+- **Moves.** `car_new_null_controller` moved from `carmodes.c` to
+  `carcontroller.c`, so that the constructor's harness links without
+  the modes. `espSetAttributeInt` is a seam in `espresso.c`.
+  `CarUsageType`'s values are in `cartypeinfo.h`.
+- **Seams.**
+  - Skipped when unset: the three sound creators, CarDamage's
+    constructor, InitRenderInfo, and the event manager's add and
+    remove.
+  - Abort when unset: the destructors of the sound, the damage and the
+    render info, and the part lookup. Each can only be reached through
+    something one of the skipped seams made.
+  - `SoundEnabled` is in `carinit.c` until the sound layer comes.
+  - Nothing calls the constructor yet. Step 8's InitCars will.
+- **Checked.** `carinit_check` runs retail's four functions in
+  RetailEmu, with CarController's constructor and the TrackPath
+  destructor run as shipped and every other callee stubbed. After every
+  call it prints the whole car at retail's offsets. So a store the port
+  makes early, late, twice, or not at all shows up, and so does a read
+  made before a call that could change it. The scenarios cover:
+  - every driver number and usage;
+  - positions with NaN and `-0` lanes;
+  - distances either side of zero, NaN and infinity;
+  - the timer where the rounding decides;
+  - the returned damage and body;
+  - InitRenderInfo's four effects;
+  - the destructor over each pointer, delta and flag.
+  Results:
+  - `carinit_check`: 247 scenarios, 9,637 lines, 0 differ. It caught
+    168 of 169 mutations. The one left changes only a stack lane that
+    both sides mask.
+  - `trackpath_check`: demo 4,746 lines, retail 5,095, 0 differ;
+    201 caught, 3 equivalent.
+  - The chain: 66 of 66 pass.
+
+### Next
+
+Step 6's second slice: `Car::InitRenderInfo` (`0x0011dc80`) and
+CarRenderInfo's constructor (`0x0011e860`). The record is 2352 bytes in
+retail, up from the demo's 1856. After those, `Render` (`0x00120ef8`),
+so that a car draws on the track.

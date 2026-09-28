@@ -101,26 +101,6 @@ static CarController *new_controller(CarControllerCtorFn ctor, int size,
     return ctor(mem, car);
 }
 
-// ------------------------------------------------------ the null controller
-
-NullController *car_new_null_controller(Car *c)
-{
-    NullController *ctrl;
-    NullDriver *drv;
-
-    ctrl = (NullController *)bMalloc((int)sizeof(NullController),
-                                     "NullController", 0, CAR_MEMORY_POOL);
-    carcontroller_init(&ctrl->Base, c);
-    ctrl->Base._vtable = NULLCONTROLLER_VTABLE;
-
-    drv = (NullDriver *)bMalloc((int)sizeof(NullDriver), "NullDriver", 0,
-                                CAR_MEMORY_POOL);
-    cardriver_init(&drv->Base);
-    ctrl->Base.Driver = &drv->Base;
-    drv->Base._vtable = NULLDRIVER_VTABLE;
-    return ctrl;
-}
-
 // --------------------------------------------------------- the four methods
 
 typedef void (*DtorFn)(void *self, int32_t flags);

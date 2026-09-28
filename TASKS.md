@@ -2191,7 +2191,18 @@ phases.
         is gone. The movies fill the top screen, as the user asked, with
         the EA TRAX credit kept in frame.
 
-        The rest is CONTINUE.md's "The road to the full game": Car from
-        retail (step 6), then the retail pass over what is ported (step
-        10), the full frontend (step 16), the saves (step 17) and every
-        track and car (step 18).
+        **The tenth slice is closed: Car's constructor and
+        destructor, from retail.** `carinit.c` has `Car::Car`
+        (`0x00130a48`), `~Car`, `CloseRenderInfo` and
+        `CarReflectEventHandler`, on the demo's layout. Retail's four new
+        fields go at the end of `car.h`. Retail's weighted
+        `FindClosestPoint` and its `ResetPosition` are in `trackpath.c`.
+        The sound, CarDamage, the render info and the event manager are
+        seams. `carinit_check` runs the retail image: 247 scenarios, 0
+        differ, 168 of 169 mutations caught, 1 equivalent.
+
+        The rest is CONTINUE.md's "The road to the full game": the rest
+        of step 6 (InitRenderInfo and CarRenderInfo, so that a car
+        draws), then the retail pass over what is ported (step 10), the
+        full frontend (step 16), the saves (step 17) and every track and
+        car (step 18).
