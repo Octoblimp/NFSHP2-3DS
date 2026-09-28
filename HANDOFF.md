@@ -8509,3 +8509,65 @@ Step 6's second slice: `Car::InitRenderInfo` (`0x0011dc80`) and
 CarRenderInfo's constructor (`0x0011e860`). The record is 2352 bytes in
 retail, up from the demo's 1856. After those, `Render` (`0x00120ef8`),
 so that a car draws on the track.
+
+## Session 30, continued (2026-09-28) -- The frontend's first slice: retail's title screen
+
+The user sent seven PCSX2 photos of the retail PAL frontend and asked for
+the port's frontend to match them. TASKS.md's "The retail frontend" lists
+them. Step 6's second slice waits on `wip/carrenderinfo` in the
+meantime. First comes the title screen, which is now retail's. The user
+confirmed on Azahar that both the title and the skip are right.
+`docs/formats/boot-flow.md`, "Retail's `TitleScreen`", has it.
+
+- **What retail changed.** The PAL disc rewrote `TitleScreen`
+  (`0x0016eef8` to `0x0016f558`). The object grew from 20 bytes to 56.
+  - A select during the intro stops the movie, and the screen stays on
+    the title. The demo went to `New Main Menu`, and the port followed
+    the demo, which is what the user caught.
+  - A second `Timer` at `+20` starts on the first tick at rest.
+    `PRESS START` shows, and the select that leaves is taken, only once
+    that timer is four seconds old (`0x0016f4f8`).
+  - Every tick sets the `TITLE_IMAGE` group (the logo, the bar, the
+    copyright line) visible exactly when no movie plays.
+  - A `tHighlightAnimation` blooms `PRESS START`.
+- **The frozen frame.** The first cut kept the intro's last frame in
+  the plane, reasoning that `MoviePlayer::Close` never touches the
+  plane's texture. On Azahar, the frame covered the logo and only the
+  copyright showed. `RenderFlailerBitmap` (`0x00143078`) is the answer.
+  It draws a `SPLASH_SCREEN` or `PANELMOVIE` bitmap only as the movie,
+  from `TheMoviePlayer`'s five texture slots, and not at all once
+  `Close` has emptied them. So retail's still-visible plane draws
+  nothing, and the title shows through. The frame retention is gone:
+  - `uirender.c` skips those two textures unless an override stands in;
+  - `hookMovieClose` drops the override;
+  - `flailer_render.py` skips them too. The "the title renders black"
+    finding was that renderer's alone.
+- **The checker runs retail.** `bootflow_check` no longer writes the
+  title again in Python. It runs `TitleScreen::Callback` (`0x0016f440`)
+  on `SLES_507.31` in `mipsemu`, with the screen's calls stubbed onto
+  its flow. It has a `--mutate` pass now, with 25 mutants over the gate,
+  the skip, the constructor, the tick and the events. The first run
+  left four alive, and each one showed a blind spot in the world:
+  - Events started silent, so a swallowed click was invisible. They now
+    start with their JoyHandler's Noise. The same `joyNoise` is in
+    `gameflow.c`, and it changes nothing on the console, where the
+    title's selects already come through `bmenu`.
+  - Closing a movie was not traced.
+  - No scenario sent START.
+  - Nothing idled long enough for the Timer's restart to reach attract
+    mode. `skipidle` and `restidle` do, at a second a frame.
+  All 25 are caught now.
+- **Checked.**
+  - `bootflow_check`: 15 scenarios, 5,420 lines, 0 differ; 25 of 25
+    mutations caught.
+  - The chain: 66 of 66 pass.
+  - `run_azahar_test.ps1` stops the intro, and fails if the skip
+    reaches the main menu. At rest it shoots the title and presses a
+    START that is too early. Once PRESS START shows, it shoots again and
+    presses START for the main menu.
+
+### Next
+
+The frontend's second slice: the boot's retail pass. It covers PAL,
+`LanguageOptionsScreenBase`, the loading screen, `BootAutoload` and
+`ConsiderStartDemoMode`. CONTINUE.md has the addresses.

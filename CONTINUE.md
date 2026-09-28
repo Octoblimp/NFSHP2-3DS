@@ -1,10 +1,9 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-27), after task 36's tenth slice: Car's
-constructor and destructor, ported from retail's listing onto the demo's
-layout. `HANDOFF.md` is the running narrative; this file is the short
-list of what to do next and what not to trust.
+continuation (2026-09-28), after the frontend's first slice: retail's
+title screen. `HANDOFF.md` is the running narrative; this file is the
+short list of what to do next and what not to trust.
 
 ## State
 
@@ -58,7 +57,7 @@ bvector_check      27 scenarios,  5721 lines, 0 differ   (23/23 mutations caught
 bmath_check        19 scenarios,  6424 lines, 0 differ   (9/9 mutations caught)
 banim_check        23 scenarios,  2219 lines, 0 differ
 bscreens_check     17 scenarios,  1246 lines, 0 differ
-bootflow_check     12 scenarios,  3659 lines, 0 differ
+bootflow_check     15 scenarios,  5420 lines, 0 differ   (25/25 mutations caught)
 bslotpool_check    18 scenarios,  1025 lines, 0 differ   (47/47 mutations caught)
 geometry_check     30 files,     42047 lines, 0 differ   (53/53 mutations caught)
 texsrc_check       6 packs, 2 levels, 2958 textures, 0 differ
@@ -367,12 +366,55 @@ and so replaced every boot.
      callees stubbed. It dumps the whole car at retail's offsets after
      every call, so every store is checked, and so is its order.
 
-   **Next is step 6's second slice:** `Car::InitRenderInfo`
-   (`0x0011dc80`) and CarRenderInfo's constructor (`0x0011e860`, 4700
-   bytes; retail's record is 2352 bytes, the demo's 1856), then
-   `Render` (`0x00120ef8`, 9844 bytes), so that a car draws.
-   `python tools/retail_match.py --diff InitRenderInfo__3CarP8RideInfo`
-   shows what retail changed.
+   **The frontend's first slice is closed: retail's title screen.**
+   On 2026-09-28 the user sent seven PCSX2 photos of the retail PAL
+   frontend and asked for the port's to match them. The port works down
+   that list now, ahead of step 6's second slice. The title screen runs
+   retail's `TitleScreen` now, not the demo's. The user confirmed it on
+   Azahar. After a skipped intro, the screen comes to rest on the logo.
+   The logo sits alone for four seconds. Then PRESS START blooms under
+   it, with the copyright line.
+   - A select during the NFS intro stops the intro and stays on the
+     title. The demo went to the main menu, and so did the port.
+   - `PRESS START` and the select that leaves both wait four seconds
+     from the first tick at rest (`0x0016f4f8`). The `TITLE_IMAGE`
+     group shows at rest, and a `tHighlightAnimation` blooms PRESS
+     START.
+   - `RenderFlailerBitmap` draws a `SPLASH_SCREEN` or `PANELMOVIE`
+     bitmap only as the open movie. With no movie open, it draws
+     nothing. `uirender.c` and `flailer_render.py` now do the same.
+     Before this, a skipped intro left its frozen last frame over the
+     logo.
+   - `bootflow_check` runs retail's `TitleScreen::Callback` itself, in
+     mipsemu. It has a `--mutate` pass, which catches 25 of 25.
+   - Events start with the Noise their JoyHandler gives them
+     (`joyNoise` in `gameflow.c`), so a swallowed click shows.
+   - `docs/formats/boot-flow.md`, "Retail's `TitleScreen`".
+   - Step 6's second slice is on the branch `wip/carrenderinfo`
+     (`616bb08`). Its checker is unfinished. It waits for the frontend.
+
+   **Next is the frontend's second slice: the boot's retail pass.**
+   - The video mode is PAL, so `Language Options Pre FE` shows.
+     Retail's `LaunchFrontendMenus` (`0x0016f950`) is the demo's, so
+     `kBootStages` keeps its push order.
+   - Retail's `LanguageOptionsScreenBase` (`0x001f1a78`, `0x001f1b08`
+     and `0x001f1dd8`, plus the new helpers `0x001f1c3c` and
+     `0x001f1d48`).
+   - The boot's loading screen: the first photo's logo over a bar that
+     reads LOADING..., probably `LOADING_TRACK`.
+   - `BootAutoload`.
+   - `ConsiderStartDemoMode` in full. Retail's (`0x0016ed50`) is the
+     demo's, and it knows attract mode and compares signed. The port's
+     `bgf_consider_start_demo_mode` is still a sketch of it.
+
+   After that, the rest of the photos, in TASKS.md's "The retail
+   frontend".
+
+   When step 6 resumes: `Car::InitRenderInfo` (`0x0011dc80`) and
+   CarRenderInfo's constructor (`0x0011e860`, 4700 bytes; retail's
+   record is 2352 bytes, the demo's 1856), then `Render` (`0x00120ef8`,
+   9844 bytes), so that a car draws. `python tools/retail_match.py
+   --diff InitRenderInfo__3CarP8RideInfo` shows what retail changed.
 
    "The road to the full game", below, has everything after it.
 2. **Task 27's first slice is closed: `Track.obj` and `TerrainType.obj`**,

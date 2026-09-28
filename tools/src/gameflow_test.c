@@ -42,13 +42,14 @@ typedef struct {
     int forceLegal;       // turn the dead MumboJumbo panels back on
     int frames;
     float dt;
-    // up to four scripted inputs: frame number and what to do
-    struct { int frame; const char* what; } input[4];
+    // up to six scripted inputs: frame number and what to do
+    struct { int frame; const char* what; } input[6];
 } Scenario;
 
 typedef struct {
     const Scenario* sc;
     BGameFlow*      gf;
+    int             movieOpen;
     int             movieLeft;
     int             texPolls;
     int             savePolls;
@@ -70,6 +71,7 @@ static int wMovieOpen(void* user, const char* path)
                   || (w->sc->haveIntroMovie
                       && strcmp(path, "MOVIES\\INTRO\\NFSINTRO_EN.AVI") == 0);
     if (!present) return 0;
+    w->movieOpen = 1;
     w->movieLeft = MOVIE_FRAMES;
     return 1;
 }
@@ -81,7 +83,15 @@ static int wMovieDrive(void* user)
     return w->movieLeft == 0;
 }
 
-static void wMovieClose(void* user) { ((World*)user)->movieLeft = 0; }
+// Closing a movie that is open is traced; closing nothing is not, since
+// retail's destructor closes whether or not anything is playing.
+static void wMovieClose(void* user)
+{
+    World* w = (World*)user;
+    if (w->movieOpen) printf("movie close\n");
+    w->movieOpen = 0;
+    w->movieLeft = 0;
+}
 
 static void wLoadResource(void* user, const char* path)
 {
@@ -147,6 +157,8 @@ static void wSetScreenVisible(void* u, uint32_t s, int v)
 { (void)u; (void)s; (void)v; }
 static void wSetObjectVisible(void* u, uint32_t s, uint32_t o, int v)
 { (void)u; (void)s; (void)o; (void)v; }
+static void wSetGroupVisible(void* u, uint32_t s, uint32_t g, int v)
+{ (void)u; (void)s; (void)g; (void)v; }
 static void wChangeTexture(void* u, uint32_t s, uint32_t o, uint32_t t)
 { (void)u; (void)s; (void)o; (void)t; }
 
@@ -206,7 +218,7 @@ static const Scenario kScenarios[] = {
     // No language chosen yet: the first test in the predicate fires whatever
     // the video mode is.
     { "nolang", 1, -1, 0, 1, 0, 0, 0, 0, 40, SIXTIETH, {{0,0}} },
-    // SkipMovies: the title screen starts idle on PRESS START.
+    // SkipMovies: the title screen starts at rest, with no movie.
     { "skipmovies", 1, 0, 1, 1, 0, 0, 0, 0, 30, SIXTIETH, {{0,0}} },
     // A second visit to the frontend with a demo waiting: straight to the
     // main menu, stack reset -- so BACK there pops to nothing and stays.
@@ -214,19 +226,35 @@ static const Scenario kScenarios[] = {
     // The demo disc: one title movie, the three-panel loading slideshow,
     // and no attract mode. Dead on this disc; here for the branch.
     { "demodisc", 1, 0, 0, 1, 0, 1, 0, 0, 700, SIXTIETH, {{0,0}} },
-    // Idle on PRESS START for over thirty seconds at one second a frame.
+    // At rest on the title for over thirty seconds at one second a frame:
+    // PRESS START comes up after four, attract mode after thirty.
     { "attract", 1, 0, 1, 1, 0, 0, 0, 0, 40, 1.0f, {{0,0}} },
-    // Select once the title screen is idle goes to the main menu; select
-    // again there does nothing; BACK returns to the title screen, and BACK
-    // again is vetoed by the title screen's own SCREEN_BACK_BUTTON handler.
-    { "select", 1, 0, 0, 1, 0, 0, 0, 0, 40, SIXTIETH,
-      {{14, "select"}, {26, "select"}, {32, "back"}, {36, "back"}} },
+    // The title comes to rest at frame 9, and PRESS START is up 243 frames
+    // later -- the first multiple of 66 ticks over 16000. Select at 14 is
+    // too early and does nothing; select at 270 goes to the main menu;
+    // select again there does nothing; BACK returns to the title screen,
+    // which plays its movies again, and BACK again is vetoed by the title
+    // screen's own SCREEN_BACK_BUTTON handler.
+    { "select", 1, 0, 0, 1, 0, 0, 0, 0, 300, SIXTIETH,
+      {{14, "select"}, {270, "select"}, {282, "select"}, {288, "back"},
+       {292, "back"}} },
     // With the NFS intro present. Movie 0 runs over frames 3-7 and movie 1
     // over 8-12, so select at 5 lands inside the EA logo and is ignored --
     // movieIndex is still 0 -- and select at 10 lands inside the NFS intro
-    // and skips straight to the main menu.
-    { "skipintro", 1, 0, 0, 1, 0, 0, 1, 0, 40, SIXTIETH,
-      {{5, "select"}, {10, "select"}, {0, 0}} },
+    // and stops it: the title comes to rest, still on Title Screen. Select
+    // at 20 is before PRESS START and does nothing; select at 262 is after
+    // it and goes to the main menu.
+    // START at 21, which the title swallows without a sound.
+    { "skipintro", 1, 0, 0, 1, 0, 0, 1, 0, 300, SIXTIETH,
+      {{5, "select"}, {10, "select"}, {20, "select"}, {21, "start"},
+       {262, "select"}} },
+    // The intro stopped at frame 10, then left alone at one second a frame:
+    // attract mode comes thirty seconds after the skip, not after the
+    // screen's arrival, because the skip restarts the Timer at +16.
+    { "skipidle", 1, 0, 0, 1, 0, 0, 1, 0, 50, 1.0f, {{10, "select"}} },
+    // The same with the movies left to finish: thirty seconds from the
+    // moment the title comes to rest, which restarts the Timer too.
+    { "restidle", 1, 0, 0, 1, 0, 0, 0, 0, 50, 1.0f, {{0,0}} },
     // The three main-menu items, each of which asks for a screen the port
     // has not registered: the flow is left with no current screen, and BACK
     // pops New Main Menu back. Hot Pursuit and World Racing differ only in
@@ -249,6 +277,7 @@ static void runScenario(const Scenario* sc)
     BGameFlow      gf;
     BGameFlowHooks hooks;
     World          w;
+    BAnim          anim;
 
     printf("scenario %s\n", sc->name);
 
@@ -261,6 +290,7 @@ static void runScenario(const Scenario* sc)
     hooks.trace            = wTrace;
     hooks.setScreenVisible = wSetScreenVisible;
     hooks.setObjectVisible = wSetObjectVisible;
+    hooks.setGroupVisible  = wSetGroupVisible;
     hooks.changeTexture    = wChangeTexture;
     hooks.enterScreen      = wEnterScreen;
     hooks.leaveScreen      = wLeaveScreen;
@@ -292,16 +322,25 @@ static void runScenario(const Scenario* sc)
     gf.demoDiscActive     = sc->demoDiscActive;
     gf.forceLegalScreens  = sc->forceLegal;
 
+    // The title's bloom, on an animation kit with no world: nothing on the
+    // screen to find, so it only keeps its timers.
+    banim_init(&anim, NULL);
+    gf.anim = &anim;
+
     // main (0x0012da88): ask for LOADING_FRONTEND, then hand over to
     // MainLoop. SkipFE would call StartSkipFEGame instead; it ships as 0.
     bgf_change_state(&gf, BGF_LOADING_FRONTEND, BGF_NONE);
 
     for (int f = 0; f < sc->frames; f++) {
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 6; i++) {
             if (!sc->input[i].what || sc->input[i].frame != f) continue;
             if (!strcmp(sc->input[i].what, "select")) {
                 printf("input select\n");
                 bgf_screen_event(&gf, BMSG_MENUITEM_SELECT, 0);
+            } else if (!strcmp(sc->input[i].what, "start")) {
+                // START with no menu, as main.c sends it.
+                printf("input start\n");
+                bgf_screen_event(&gf, BMSG_SCREEN_START_BUTTON, 0);
             } else if (!strcmp(sc->input[i].what, "back")) {
                 printf("input back\n");
                 bgf_move_back_screen(&gf, 1);

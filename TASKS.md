@@ -2206,3 +2206,41 @@ phases.
         draws), then the retail pass over what is ported (step 10), the
         full frontend (step 16), the saves (step 17) and every track and
         car (step 18).
+
+### The retail frontend
+
+Asked for on 2026-09-28. The user sent seven PCSX2 photos of the retail
+PAL frontend and asked for the port's frontend to match them. It comes
+ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
+
+- [x] **Retail's title screen.** A select stops the intro and the title
+      comes to rest. After four seconds, PRESS START blooms with the
+      copyright line. Movie planes draw nothing without a movie.
+      `bootflow_check` runs retail's own `TitleScreen` and catches 25 of
+      25 mutations.
+- [ ] **The boot's retail pass.**
+  - PAL, so the language screen shows.
+  - Retail's `LanguageOptionsScreenBase`.
+  - The loading screen with the logo over LOADING....
+  - `BootAutoload`.
+  - `ConsiderStartDemoMode` in full.
+- [ ] **The main menu's background movie.**
+  - MV3's inter frames.
+  - `StartMovie`, `UpdateMovie` and `StopMovie` (`0x0016ce30`,
+    `0x0016d028` and `0x0016d0a0`), on `PANELMOVIE`.
+- [ ] **The highlight's echo.** A large faded red copy of the current
+      item's label, now and then.
+- [ ] **Hide "Unlocked Easter Egg"** on the main menu.
+- [ ] **The jukebox and its EA TRAX box.**
+  - The music.
+  - The song and the artist, bottom left, over the Help button while
+    it is up.
+- [ ] **The Setup screen.** Catch-up, traffic and damage, with arrows on
+      the current row and the movie behind.
+- [ ] **Car select.**
+  - The car on a lit turntable.
+  - The make's logo and the badge.
+  - The row of car icons.
+  - "Cars Unlocked" and "NFS Points".
+- [ ] **The briefing.** "You're The Cop", with its button list over the
+      track's picture.

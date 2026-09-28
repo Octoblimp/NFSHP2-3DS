@@ -600,6 +600,112 @@ at all: `FlailerScreen`'s handler passes START to the screen as
 writes `Noise`, not `Param`), so it reaches the item and comes back as
 `MENUITEM_SELECT`. See [flailer-menu.md](flailer-menu.md).
 
+### Retail's `TitleScreen` (SLES_507.31)
+
+Everything above is the demo's. The PAL retail disc rewrote the screen, and
+the rewrite is what the port runs. The retail functions are:
+
+| function | address |
+|----------|---------|
+| `Callback` | `0x0016f440` |
+| constructor | `0x0016f000` |
+| destructor | `0x0016f190` |
+| `HandleTick` | `0x0016f1f0` |
+| `HandleEvent` | `0x0016eef8` (jump table at `0x002b2f10`) |
+| the one new helper | `0x0016f4f8` |
+
+The object is 56 bytes: the demo's 20, then a second `Timer` at `+20`, then
+a `tHighlightAnimation` at `+24`.
+
+**Retail's object chunks carry their names**, a `char[24]` the demo's lack.
+So the screen's objects can be read by name, and there are more of them:
+
+| object | layer | what |
+|--------|-------|------|
+| `TITLE_FULLSCREEN` `3acf2d73`, `TITLE_LETTERBOX` `bfaebf79` | 0 | the two movie planes, `SPLASH_SCREEN` |
+| `LOADING`, `TOP_BORDER` | 24 | the logo at (0, 81) and the bar at (0, 280) |
+| `COPYRIGHT_TEXT` `807d4c5c` | 0 | authored invisible |
+| `PRESS_START_1` `b070dbc9`, `ANIMATING_MENUITEM` `ab671c9a` | 13 | the words, and the object the bloom draws |
+| `MENUITEM_1` | | off-screen, there for the menu |
+
+`LOADING`, `TOP_BORDER` and `COPYRIGHT_TEXT` form the group `TITLE_IMAGE`
+(`bStringHash`, `0xb73c8d23`, hashed at run time from `0x002b2f58`).
+
+The constructor:
+
+1. Builds the bloom, `tHighlightAnimation(TITLE, ANIMATING_MENUITEM,
+   gp-16136)`. That colour is `0x00000080`, the one every frontend screen
+   blooms in.
+2. Hides the 4:3 plane, `COPYRIGHT_TEXT` and the letterboxed plane.
+3. With `SkipMovies` set: `Mode = 1` and the jukebox starts. Otherwise
+   `Mode = 2`, movie 0 opens and its plane shows.
+4. Sets `Timer = RealTimer` and points the bloom at `PRESS_START_1`.
+
+`HandleTick` still steps the movies as the demo's did, with one change. When
+the last movie ends it no longer shows `PRESS START`: it only sets
+`Mode = 1` and `Timer` and starts the jukebox. Then, on **every tick,
+whatever the mode**:
+
+```c
+FlailerSetGroupVisibility(TITLE, TITLE_IMAGE, Mode != 2);     /* 0x001454e8 */
+if (Mode != 2 && !TimerSet(+20)) +20 = RealTimer;             /* first tick at rest */
+FlailerSetVisibility(TITLE, PRESS_START_1, PressStartReady()); /* 0x0016f4f8 */
+if (Mode == 1) { ConsiderStartDemoMode(Timer); bloom.Animate(); }
+```
+
+`PressStartReady` (`0x0016f4f8`) is `(float)(int)(RealTimer - +20) *
+0.00025f > 4.0f`, with the factor at `gp-30496`. So `PRESS START` appears
+four seconds after the title first comes to rest, and the logo sits alone
+until then. A `Timer` counts as unset at 0 and at `0x7fffffff`.
+`FlailerSetGroupVisibility` does a `FindFlailerObjectByGroup` (`0x00143dd8`)
+whose result it throws away, then stores byte `+41` (`Visibility`) on each
+object in the group.
+
+`HandleEvent` keeps the demo's swallowing of `PAD_*`, `SQUARE` and
+`SCREEN_START_BUTTON`, and its veto of `SCREEN_BACK_BUTTON`. The select is
+new:
+
+```c
+if (Mode == 1) {
+    if (!PressStartReady() || TheDemoDiscManager.bActive) { data->Noise = 0; return; }
+    Timer = RealTimer;
+    ChangeToScreen("New Main Menu", 1);              /* Noise left: the click plays */
+} else if (Mode == 2) {
+    if (MovieIndex == 0) { data->Noise = 0; return; } /* the EA logo */
+    MoviePlayer::Close(&TheMoviePlayer);
+    Mode = 1; Timer = RealTimer;
+    bloom.ForceStart();
+}
+```
+
+**A select during the intro stops the movie. It does not leave the title.**
+The screen comes to rest where it is, and `PRESS START` follows four
+seconds later, as if the movie had ended. Nothing hides the movie plane. It
+stays visible until the screen is built again, and the title still shows,
+because of the renderer rule described next. The demo went straight to
+`New Main Menu`, and the port did too until this was read.
+
+### Movie planes draw nothing without a movie
+
+`RenderFlailerBitmap` (`0x00143078`) never draws `SPLASH_SCREEN`
+(`0xf9117c29`) or `PANELMOVIE` (`0xc3f0caef`) as a picture. A bitmap
+carrying either is drawn as the movie. That is five passes over the
+player's `MOVIE_<w>_<h>_Y`, `_UA`, `_VA`, `_US` and `_VS` textures.
+`MoviePlayer::InitFile` (`0x00237ad8`) looks those up with `GetTextureInfo`
+(`0x001abf48`) and calls `BuildYUV2ABGRPalettes` (`0x00238520`).
+`Update` (`0x002380a8`) points their `+144` `ImageData` at each decoded
+frame. The five passes run only if `TheMoviePlayer` (`0x00300000-19704`)
+has all five slots (`+1056` to `+1072`) and its frame-ready flag (`+1088`)
+non-zero. Otherwise the bitmap is **not drawn at all**.
+
+`MoviePlayer::Close` (`0x00237fc8`) zeroes those slots. So a movie plane
+left visible after its movie stops shows whatever is behind it. That is how
+a skipped intro uncovers the title.
+
+`gp-22348` would send the two textures down the ordinary path instead.
+`Update` copies `gp-22348 == 0` into `+1048`. On the disc it is 1, and
+nothing writes it.
+
 ## `MumboJumboScreen` (`0x0016a8b0`)
 
 The legal and anti-piracy panels. Dead on this build -- both
@@ -860,9 +966,15 @@ pair -- `LOADING` (512x184, scaled to 640x196) is the Need for Speed logo and
 `TOP_BORDER` (512x24) is the bar the words sit on. Rendered in that state the
 screen is the retail title screen, logo and flashing `PRESS START` included.
 
-For the port this means the title screen must hide both planes whenever a
-movie is not driving, or it shows a black screen. `bgf_title` already does,
-because it is a transcription of `HandleTick`; it is worth knowing why.
+The black is only `flailer_render.py`'s, which used to draw `SPLASH_SCREEN`
+as the picture it holds. The game never does. With no movie open, a movie
+plane draws nothing (see
+[Movie planes draw nothing without a movie](#movie-planes-draw-nothing-without-a-movie)).
+So the retail title shows through a plane that is still visible, and
+retail's skip relies on that. `flailer_render.py` and `uirender.c` now both
+skip `SPLASH_SCREEN` and `PANELMOVIE` bitmaps unless a movie stands in for
+them. Rendered that way, the authored screen shows the layer-24 logo and
+bar.
 
 ### `Legal MumboJumbo` shipped as a placeholder
 
@@ -907,6 +1019,31 @@ START goes to the screen's menu, as `FlailerMenu`'s `JoyHandler` takes it:
 `SCREEN_START_BUTTON` straight to the flow. That is only the first half, so
 START could neither skip the intro nor leave PRESS START; only A could. A
 screen with no menu still gets `SCREEN_START_BUTTON` alone.
+
+The title screen is retail's (see
+[Retail's `TitleScreen`](#retails-titlescreen-sles_50731)):
+
+* a select during the intro stops it and the title comes to rest;
+* `PRESS START`, and the select that leaves, wait four seconds;
+* `TITLE_IMAGE` shows at rest;
+* `PRESS START` blooms.
+
+`hookMovieClose` drops the texture override as it closes the movie.
+`uirender.c` draws a `SPLASH_SCREEN` or `PANELMOVIE` bitmap only while an
+override stands in for it, which is `RenderFlailerBitmap`'s rule. Before
+that rule, a skipped intro left the frozen last frame over the logo.
+
+`bootflow_check` does not write the title again. It runs retail's
+`TitleScreen::Callback` itself on `SLES_507.31` under `tools/mipsemu.py`,
+with the calls out of the screen stubbed onto its flow. Its `--mutate` pass
+breaks `gameflow.c`'s title 25 ways and checks that the diff notices each
+one. For the harness to see them, it needed:
+
+* events that start with the `Noise` their `JoyHandler` gives them;
+* a world that traces a movie being closed;
+* a `start` input;
+* two idle scenarios at a second a frame, `skipidle` and `restidle`, where
+  attract mode counts from the skip or from coming to rest.
 
 Retail's `TitleMoviesToPlay` is at `0x002fb750`. It differs from the demo's
 in one entry: French plays `NFSINTRO_FR.AVI` second, where the demo had

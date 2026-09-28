@@ -44,6 +44,14 @@ static void objectVisible(BGameFlow* gf, uint32_t screen, uint32_t object,
     HOOK_VOID(gf, setObjectVisible, screen, object, visible);
 }
 
+static void groupVisible(BGameFlow* gf, uint32_t screen, uint32_t group,
+                         int visible)
+{
+    trace(gf, "vis group %08x %08x %d", (unsigned)screen, (unsigned)group,
+          visible);
+    HOOK_VOID(gf, setGroupVisible, screen, group, visible);
+}
+
 static void changeTexture(BGameFlow* gf, uint32_t screen, uint32_t object,
                           uint32_t texture)
 {
@@ -143,12 +151,28 @@ int bgf_send(BGameFlow* gf, BScreenMessage msg, BScreenCallbackData* data)
     return 1;
 }
 
+// The Noise an event starts with, before the callback can change it: what
+// the JoyHandler that raises it seeds -- FlailerMenuItem's gives a select
+// FE_SOUND_MENU_SELECT (demo 0x001651d8), FlailerMenu's gives the two
+// scrolls theirs (demo 0x00165820), and the rest start silent. bmenu.c
+// seeds the same. A callback that wants quiet writes 0, as the title does.
+static int joyNoise(BScreenMessage msg)
+{
+    switch (msg) {
+        case BMSG_MENUITEM_SELECT:   return BSND_MENU_SELECT;
+        case BMSG_MENUITEM_PAD_UP:   return BSND_MENU_UP;
+        case BMSG_MENUITEM_PAD_DOWN: return BSND_MENU_DOWN;
+        default:                     return BSND_NONE;
+    }
+}
+
 int bgf_screen_event(BGameFlow* gf, BScreenMessage msg, int port)
 {
     BScreenCallbackData data;
     memset(&data, 0, sizeof(data));
     data.port  = port;
     data.param = 1;
+    data.noise = joyNoise(msg);
     if (gf->screen) data.itemHash = gf->screen->hash;
     if (!bgf_send(gf, msg, &data)) return 0;
     makeSound(gf, data.noise);
@@ -162,6 +186,7 @@ int bgf_menu_item_event(BGameFlow* gf, BScreenMessage msg, uint32_t itemHash,
     memset(&data, 0, sizeof(data));
     data.port     = port;
     data.param    = 1;
+    data.noise    = joyNoise(msg);
     data.itemHash = itemHash;
     if (!bgf_send(gf, msg, &data)) return 0;
     makeSound(gf, data.noise);
@@ -567,6 +592,65 @@ const BTitleMovie* bgf_title_movie(const BGameFlow* gf, int i)
 }
 
 // ------------------------------------------------------------- TitleScreen
+//
+// Retail's (0x0016eef8 to 0x0016f558), which is not the demo's. The demo
+// left for New Main Menu on a SELECT during the NFS intro and put PRESS START
+// up the moment the movies ended. Retail instead:
+//
+//   - takes a SELECT during the intro as "stop the movie": the screen comes
+//     to rest on the title and stays there -- it does not change screen;
+//   - at rest shows the TITLE_IMAGE group (the logo, the bar, the copyright
+//     line) and starts a Timer at +20 on the first tick at rest;
+//   - shows PRESS START, and takes the SELECT that leaves for New Main Menu,
+//     only once that Timer is four seconds old;
+//   - blooms PRESS START with a tHighlightAnimation while at rest.
+
+// The bloom takes the kit's clock from the flow's, the way bscreens.c's
+// clock() does, so that there is one RealTimer.
+static BAnim* titleAnim(BGameFlow* gf)
+{
+    if (gf->anim)
+        banim_set_clock(gf->anim, (int32_t)gf->realTimer, gf->realElapsed);
+    return gf->anim;
+}
+
+// tHighlightAnimation(TITLE, ANIMATING_MENUITEM, BloomTargetColor), the
+// constructor's first act. gp-16136 is 0x00000080, the colour the other
+// frontend screens bloom in too.
+static void titleBloomInit(BGameFlow* gf)
+{
+    BAnim* a = titleAnim(gf);
+    trace(gf, "bloom init %08x %08x %08x", (unsigned)BGF_SCREEN_TITLE,
+          (unsigned)BGF_OBJ_ANIMATING_ITEM, (unsigned)BANIM_BLOOM_COLOR);
+    if (a)
+        banim_highlight_init(a, &gf->title.highlight, BGF_SCREEN_TITLE,
+                             BGF_OBJ_ANIMATING_ITEM,
+                             (int32_t)BANIM_BLOOM_COLOR);
+}
+
+static void titleBloomSetItem(BGameFlow* gf, uint32_t item)
+{
+    BAnim* a = titleAnim(gf);
+    trace(gf, "bloom item %08x", (unsigned)item);
+    if (a) banim_highlight_set_item(a, &gf->title.highlight, item);
+}
+
+static void titleBloomStart(BGameFlow* gf)
+{
+    BAnim* a = titleAnim(gf);
+    trace(gf, "bloom start");
+    gf->title.tracedAnimate = 0;
+    if (a) banim_highlight_force_start(a, &gf->title.highlight);
+}
+
+// Every tick at rest. Traced once each time the bloom is (re)started.
+static void titleBloomAnimate(BGameFlow* gf)
+{
+    BAnim* a = titleAnim(gf);
+    if (!gf->title.tracedAnimate) trace(gf, "bloom animate");
+    gf->title.tracedAnimate = 1;
+    if (a) banim_highlight_animate(a, &gf->title.highlight);
+}
 
 static int titleOpenMovie(BGameFlow* gf, int index)
 {
@@ -593,7 +677,9 @@ static int titleOpenMovie(BGameFlow* gf, int index)
     return t->playing;
 }
 
-// DriveMovie (0x0016a060) returns 1 when the movie is finished.
+// DriveMovie (0x0016ee18) returns 1 when the movie is finished. Retail's
+// also records the answer for a replay (0x00183358 / 0x00183498, four bits
+// on channel 6), which nothing here plays back.
 static int titleDriveMovie(BGameFlow* gf)
 {
     if (!gf->title.playing) return 1;
@@ -601,74 +687,123 @@ static int titleDriveMovie(BGameFlow* gf)
     return gf->hooks.movieDrive(gf->hooks.user);
 }
 
+static void titleCloseMovie(BGameFlow* gf)
+{
+    if (!gf->title.playing) return;
+    HOOK_VOID0(gf, movieClose);
+    gf->title.playing = 0;
+}
+
+// The Timer at +20 counts as unset at 0 and at 0x7fffffff.
+static int titlePressStartSet(const BTitleScreen* t)
+{
+    return t->pressStart != 0 && t->pressStart != 0x7fffffffu;
+}
+
+// 0x0016f4f8, the one new function: four seconds at rest. The difference
+// is converted signed (cvt.s.w) and scaled by gp-30496, 0.00025f.
+static int titlePressStartReady(const BGameFlow* gf)
+{
+    const BTitleScreen* t = &gf->title;
+    if (!titlePressStartSet(t)) return 0;
+    return (float)(int32_t)(gf->realTimer - t->pressStart) * 0.00025f > 4.0f;
+}
+
+// The constructor, 0x0016f000.
 static void titleActivate(BGameFlow* gf, BScreenCallbackData* data)
 {
     BTitleScreen* t = &gf->title;
 
-    memset(t, 0, sizeof(*t));
-    t->port       = data ? data->port : 0;
+    memset(t, 0, sizeof(*t));          // +16 and +20 are zeroed first
+    t->tracedRest  = -1;
+    t->tracedReady = -1;
+    titleBloomInit(gf);
+    t->port = data ? data->port : 0;
+    objectVisible(gf, BGF_SCREEN_TITLE, BGF_OBJ_MOVIE_PLANE_43, 0);
+    objectVisible(gf, BGF_SCREEN_TITLE, BGF_OBJ_COPYRIGHT, 0);
+    objectVisible(gf, BGF_SCREEN_TITLE, BGF_OBJ_MOVIE_PLANE_LB, 0);
     t->movieIndex = 0;
 
     if (gf->skipMovies) {
-        t->mode  = 1;
-        t->timer = gf->realTimer;
+        t->mode = 1;
         HOOK_VOID(gf, jukebox, 1);
-        return;
+    } else {
+        t->mode = 2;
+        // pMoviePlane is fixed to the 4:3 plane here and never re-fetched,
+        // even when a letterboxed movie makes the other plane visible.
+        // Faithfully reproduced: only the 4:3 plane's texture is written.
+        titleOpenMovie(gf, 0);
+        objectVisible(gf, BGF_SCREEN_TITLE, BGF_OBJ_COPYRIGHT, 0);
     }
-    t->mode = 2;
-    // pMoviePlane is fixed to the 4:3 plane at construction and never
-    // re-fetched, even when a letterboxed movie makes the other plane
-    // visible. Faithfully reproduced: only the 4:3 plane is ever blitted.
-    titleOpenMovie(gf, 0);
-    objectVisible(gf, BGF_SCREEN_TITLE, BGF_OBJ_PRESS_START, 0);
+    t->timer = gf->realTimer;
+    titleBloomSetItem(gf, BGF_OBJ_PRESS_START);
 }
 
+// The destructor, 0x0016f190: MoviePlayer::Close, then the bloom's own.
 static void titleUnactivate(BGameFlow* gf)
 {
-    if (gf->title.playing) {
-        HOOK_VOID0(gf, movieClose);
-        gf->title.playing = 0;
-    }
+    titleCloseMovie(gf);
     memset(&gf->title, 0, sizeof(gf->title));
 }
 
-// HandleTick, 0x0016a360.
+// HandleTick, 0x0016f1f0.
 static void titleTick(BGameFlow* gf)
 {
     BTitleScreen* t = &gf->title;
+    int           cameToRest = 0;
+    int           rest, ready;
 
     if (t->mode == 2) {
-        if (titleDriveMovie(gf) != 1) return;
-        t->movieIndex++;
-        if (gf->demoDiscActive)
-            screenVisible(gf, BGF_SCREEN_TITLE, 0);
+        if (titleDriveMovie(gf) == 1) {
+            t->movieIndex++;
+            if (gf->demoDiscActive) screenVisible(gf, BGF_SCREEN_TITLE, 0);
+            titleCloseMovie(gf);
+            objectVisible(gf, BGF_SCREEN_TITLE, BGF_OBJ_MOVIE_PLANE_43, 0);
+            objectVisible(gf, BGF_SCREEN_TITLE, BGF_OBJ_MOVIE_PLANE_LB, 0);
+            if (t->movieIndex == bgf_num_title_movies(gf)) {
+                t->mode    = 1;
+                t->timer   = gf->realTimer;
+                cameToRest = 1;
+                if (!gf->demoDiscActive) HOOK_VOID(gf, jukebox, 1);
+            } else {
+                titleOpenMovie(gf, t->movieIndex);
+            }
+        }
+    } else if (t->mode == 1) {
+        // The demo disc outside attract mode starts its own game instead
+        // (StartDemoDiscGame, 0x00184de0). Dead on retail.
+        if (gf->demoDiscActive && !gf->demoAttractMode)
+            trace(gf, "demo disc game");
         else
-            objectVisible(gf, BGF_SCREEN_TITLE, BGF_OBJ_PRESS_START, 1);
-        if (t->playing) {
-            HOOK_VOID0(gf, movieClose);
-            t->playing = 0;
-        }
-        objectVisible(gf, BGF_SCREEN_TITLE, BGF_OBJ_MOVIE_PLANE_43, 0);
-        objectVisible(gf, BGF_SCREEN_TITLE, BGF_OBJ_MOVIE_PLANE_LB, 0);
-
-        if (t->movieIndex == bgf_num_title_movies(gf)) {
-            t->timer = gf->realTimer;
-            t->mode  = 1;
-            // The screen is now at rest with PRESS START up, waiting either
-            // for the button or for the attract-mode timeout. Traced because
-            // it is the one moment a test can point at and say the title
-            // sequence finished.
-            trace(gf, "title idle");
-            if (!gf->demoDiscActive) HOOK_VOID(gf, jukebox, 1);
-            return;
-        }
-        titleOpenMovie(gf, t->movieIndex);
-        return;
+            bgf_consider_start_demo_mode(gf, t->timer);
+        titleBloomAnimate(gf);
     }
-    if (t->mode == 1) bgf_consider_start_demo_mode(gf, t->timer);
+
+    // Every tick, whatever the mode. The hooks run every time, as the
+    // original's calls do; only the trace waits for a change.
+    rest = t->mode != 2;
+    if (rest != t->tracedRest)
+        groupVisible(gf, BGF_SCREEN_TITLE, BGF_GROUP_TITLE_IMAGE, rest);
+    else
+        HOOK_VOID(gf, setGroupVisible, BGF_SCREEN_TITLE,
+                  BGF_GROUP_TITLE_IMAGE, rest);
+    t->tracedRest = rest;
+    if (rest && !titlePressStartSet(t)) t->pressStart = gf->realTimer;
+    ready = titlePressStartReady(gf);
+    if (ready != t->tracedReady)
+        objectVisible(gf, BGF_SCREEN_TITLE, BGF_OBJ_PRESS_START, ready);
+    else
+        HOOK_VOID(gf, setObjectVisible, BGF_SCREEN_TITLE,
+                  BGF_OBJ_PRESS_START, ready);
+    t->tracedReady = ready;
+
+    // The screen has come to rest with the sequence over. Traced because it
+    // is the one moment a test can point at and say the movies finished.
+    if (cameToRest) trace(gf, "title idle");
 }
 
-// HandleEvent, 0x0016a148 -- a 17-entry jump table on message - 1.
+// HandleEvent, 0x0016eef8 -- a 17-entry jump table at 0x002b2f10 on
+// message - 1.
 static void titleEvent(BGameFlow* gf, BScreenMessage msg,
                        BScreenCallbackData* data)
 {
@@ -676,16 +811,35 @@ static void titleEvent(BGameFlow* gf, BScreenMessage msg,
 
     switch (msg) {
         case BMSG_MENUITEM_SELECT:
-            // The EA logo cannot be skipped and the NFS intro can: during
-            // movie 0 movieIndex is still 0 and this test fails.
-            if (t->mode == 1 || (t->mode == 2 && t->movieIndex != 0)) {
-                if (gf->demoDiscActive) {
+            if (t->mode == 1) {
+                // PRESS START is not up yet: nothing, and no click.
+                if (!titlePressStartReady(gf) || gf->demoDiscActive) {
                     data->noise = 0;
-                    return;
+                    break;
                 }
+                t->timer = gf->realTimer;
+                // Noise is left alone, so the select sound plays.
                 bgf_change_to_screen(gf, "New Main Menu", 1);
+            } else if (t->mode == 2) {
+                // The EA logo cannot be skipped and the NFS intro can:
+                // during movie 0 movieIndex is still 0.
+                if (t->movieIndex == 0) {
+                    data->noise = 0;
+                    break;
+                }
+                // Skipping is stopping. The movie planes are left as they
+                // are -- nothing hides them until the screen is built again
+                // -- but a movie plane with no movie open draws nothing
+                // (uirender.c, after RenderFlailerBitmap), so the title
+                // shows through.
+                titleCloseMovie(gf);
+                t->mode  = 1;
+                t->timer = gf->realTimer;
+                titleBloomStart(gf);
+                trace(gf, "title skip");
+            } else {
+                data->noise = 0;
             }
-            data->noise = 0;
             break;
 
         case BMSG_MENUITEM_PAD_LEFT:

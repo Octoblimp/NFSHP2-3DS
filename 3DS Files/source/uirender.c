@@ -321,12 +321,28 @@ void uirender_override_texture(UIRenderer* r, uint32_t hash, C3D_Tex* tex,
     r->textures[idx].overrideFill = tex && fill;
 }
 
+// The two movie targets. RenderFlailerBitmap (0x00143078) never draws either
+// as a picture: a bitmap carrying one is drawn as the movie -- five passes
+// over MoviePlayer's MOVIE_<w>_<h>_Y / _UA / _VA / _US / _VS textures -- and
+// when the player has no movie open, or no frame decoded yet, it is not drawn
+// at all. On the disc both are blank buffers, SPLASH_SCREEN opaque black.
+// So a movie plane left visible after its movie stops shows what is behind
+// it: which is how retail's title screen appears when the intro is skipped,
+// since the skip closes the movie without hiding the plane. (gp-22348 would
+// send them down the ordinary path instead; it is 1 on the disc and nothing
+// writes it.)
+#define UIR_TEX_SPLASH_SCREEN 0xf9117c29u   // the title's two movie planes
+#define UIR_TEX_PANELMOVIE    0xc3f0caefu   // the menus' background movie
+
 static void draw_bitmap(UIRenderer* r, const BUIObject* o, const UIView* v)
 {
     int idx = find_texture(r, o->textureHash);
     if (idx < 0) return;
     UITexture* t = &r->textures[idx];
     if (!t->override && !t->valid) return;
+    if (!t->override && (o->textureHash == UIR_TEX_SPLASH_SCREEN
+                         || o->textureHash == UIR_TEX_PANELMOVIE))
+        return;
 
     // An override stands in for the bundle's texture at its own size, so a
     // movie plane scales by the movie's dimensions rather than the blank

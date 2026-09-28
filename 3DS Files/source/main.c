@@ -410,6 +410,24 @@ static void hookSetObjectVisible(void* user, uint32_t screen, uint32_t object,
                            visible ? BUI_VISIBLE : BUI_INVISIBLE);
 }
 
+// FlailerSetGroupVisibility (0x001454e8): the Visibility byte of every object
+// on the screen whose GroupHash is `group`, stored directly. The original
+// looks the first one up once and throws the answer away before its loop;
+// that is a wasted search and nothing else.
+static void hookSetGroupVisible(void* user, uint32_t screen, uint32_t group,
+                                int visible)
+{
+    Boot*      b  = (Boot*)user;
+    BUI*       ui = NULL;
+    BUIScreen* s  = uirender_find_screen(b->ui, screen, &ui);
+    int32_t    idx;
+    if (!s || !ui) return;
+    for (idx = bui_next_in_group(ui, s, group, BUI_TYPE_NONE, -1); idx >= 0;
+         idx = bui_next_in_group(ui, s, group, BUI_TYPE_NONE, idx))
+        bui_set_object_visible(ui, (uint32_t)idx,
+                               visible ? BUI_VISIBLE : BUI_INVISIBLE);
+}
+
 // TitleScreen's pMoviePlane (0x0016a1d0) is fixed to the 4:3 plane at
 // construction and never re-fetched, so the texture a movie lands in is that
 // object's textureHash -- SPLASH_SCREEN on this disc, 512x256 of opaque black
@@ -427,6 +445,11 @@ static uint32_t moviePlaneTexture(Boot* b)
     return o.textureHash;
 }
 
+// MoviePlayer::Close (0x00237fc8) empties the player's five texture slots,
+// and RenderFlailerBitmap (0x00143078) draws a SPLASH_SCREEN plane only from
+// those slots -- so a closed movie's plane draws nothing, whether or not it
+// is still visible. Dropping the override is the same thing here: uirender.c
+// draws a movie texture only while something stands in for it.
 static void hookMovieClose(void* user)
 {
     Boot* b = (Boot*)user;
@@ -1457,6 +1480,7 @@ int main(int argc, char** argv)
     hooks.user             = &g_boot;
     hooks.setScreenVisible = hookSetScreenVisible;
     hooks.setObjectVisible = hookSetObjectVisible;
+    hooks.setGroupVisible  = hookSetGroupVisible;
     hooks.enterScreen      = hookEnterScreen;
     hooks.leaveScreen      = hookLeaveScreen;
     hooks.movieOpen        = hookMovieOpen;
@@ -1510,6 +1534,9 @@ int main(int argc, char** argv)
     animHooks.getScale         = hookAnimGetScale;
     animHooks.translate        = hookAnimTranslate;
     bscr_set_anim_hooks(&g_uiScreens, &animHooks);
+    // The title's bloom runs on the same kit, as tHighlightAnimation is one
+    // class for every screen in the original.
+    g_flow.anim = &g_uiScreens.anim;
 
     // main (0x0012da88): SkipFE ships as 0, so LoadLanguageInfo and then
     // ChangeGameFlow(LOADING_FRONTEND). MainLoop takes it from there.

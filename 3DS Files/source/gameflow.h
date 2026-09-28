@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "banim.h"
 #include "bmenu.h"
 
 // The boot flow: main() to the main menu.
@@ -56,10 +57,19 @@ typedef enum {
 #define BGF_SCREEN_SLIDE2         0xa7227ae8u  // demo-disc slideshow, 3-6s
 #define BGF_SCREEN_DISCLAIMER     0x8254cc20u  // demo-disc slideshow, 6-9s
 
-#define BGF_OBJ_MOVIE_PLANE_43    0x3acf2d73u  // 4:3 movie plane
-#define BGF_OBJ_MOVIE_PLANE_LB    0xbfaebf79u  // letterboxed movie plane
+// Retail's object chunks carry their own names (a char[24] the demo's do
+// not have), which is where these come from.
+#define BGF_OBJ_MOVIE_PLANE_43    0x3acf2d73u  // TITLE_FULLSCREEN, 4:3 plane
+#define BGF_OBJ_MOVIE_PLANE_LB    0xbfaebf79u  // TITLE_LETTERBOX
 #define BGF_OBJ_PRESS_START       0xb070dbc9u  // PRESS_START_1
+#define BGF_OBJ_COPYRIGHT         0x807d4c5cu  // COPYRIGHT_TEXT, in TITLE_IMAGE
+#define BGF_OBJ_ANIMATING_ITEM    0xab671c9au  // ANIMATING_MENUITEM, the bloom
 #define BGF_OBJ_MUMBO_PLANE       0xdd479599u  // the legal/anti-piracy plane
+
+// bStringHash("TITLE_IMAGE"), hashed at run time from 0x002b2f58. The group
+// is the logo, the bar under it and COPYRIGHT_TEXT -- everything the title
+// shows once no movie is playing.
+#define BGF_GROUP_TITLE_IMAGE     0xb73c8d23u
 
 #define BGF_TEX_LEGAL             0xa7ebc389u  // both out of GLOBAL\DYNTEX.BIN
 #define BGF_TEX_ANTIPIRACY        0x38258033u
@@ -117,6 +127,10 @@ typedef struct {
     void (*setScreenVisible)(void* user, uint32_t screen, int visible);
     void (*setObjectVisible)(void* user, uint32_t screen, uint32_t object,
                              int visible);
+    // FlailerSetGroupVisibility (0x001454e8): every object on `screen`
+    // whose GroupHash is `group`. Object polarity, so again a bool here.
+    void (*setGroupVisible)(void* user, uint32_t screen, uint32_t group,
+                            int visible);
     void (*changeTexture)(void* user, uint32_t screen, uint32_t object,
                           uint32_t texture);
 
@@ -167,14 +181,29 @@ typedef struct {
     int  index;
 } BScreenStack;
 
-// TitleScreen (0x0016a1d0), 20 bytes. `playing` is the port's own: the
-// original assumes MoviePlayer::InitFile always succeeds.
+// TitleScreen, retail's (0x0016f000): 56 bytes, the demo's 20 plus the
+// PRESS START delay at +20 and a tHighlightAnimation at +24. `playing` is
+// the port's own: the original assumes MoviePlayer::InitFile always
+// succeeds.
 typedef struct {
-    int      port;
-    int      movieIndex;
-    int      mode;        // 1 = idle on PRESS START, 2 = playing a movie
-    uint32_t timer;       // RealTimer at the last mode change
-    int      playing;     // a movie file is actually open
+    int            port;        // +4
+    int            movieIndex;  // +8
+    int            mode;        // +12: 1 = at rest on the title, 2 = a movie
+    uint32_t       timer;       // +16: RealTimer at the last mode change
+    // +20, a Timer: RealTimer when the title first came to rest. 0 or
+    // 0x7fffffff is unset. PRESS START appears, and SELECT is taken, only
+    // four seconds after it -- the "loading" pause the logo sits through.
+    uint32_t       pressStart;
+    BHighlightAnim highlight;   // +24: the bloom on PRESS START
+    int            playing;     // a movie file is actually open
+    // The port's trace, not the screen's state. HandleTick sets the
+    // TITLE_IMAGE group and PRESS START on every tick and the bloom animates
+    // on every tick at rest; the trace says so only when the answer changes,
+    // or a minute on the title would be ten thousand lines of the same three.
+    // -1 is "nothing traced yet".
+    int            tracedRest;
+    int            tracedReady;
+    int            tracedAnimate;
 } BTitleScreen;
 
 // MumboJumboScreen (0x0016a8b0): state in +12, one plane whose texture is
@@ -232,6 +261,9 @@ struct BGameFlow {
     int videoMode;            // VIDEO_MODE: MODE_PAL = 0, MODE_NTSC = 1
     int currLanguage;         // TheLanguageManager.CurrLanguage, -1 = unset
     int demoDiscActive;       // TheDemoDiscManager.bActive, always 0
+    // DemoDiscManager::IsAttractMode (0x0012eaf0). Only read when the demo
+    // disc is active, so dead on retail like the rest of the demo branch.
+    int demoAttractMode;
     int needToSetLanguage;
     int copsOn;               // 0x002f3fdc -- which of the two Mode Selects
 
@@ -246,6 +278,10 @@ struct BGameFlow {
     float legalScreenTimeout;    // 0x00323710, 7.0f
     float antiPiracyTimeout;     // 0x00323714, 7.0f
     float beginDemoModeTimeout;  // 0x00322f78, 30.0f
+
+    // The animation kit the title screen's bloom runs on -- bscreens.c's,
+    // so that there is one RealTimer. NULL runs the title without it.
+    BAnim*            anim;
 
     BTitleScreen      title;
     BMumboJumboScreen mumbo;
@@ -367,8 +403,9 @@ void bgf_begin_unloading_frontend(BGameFlow* gf);     // 0x00163cc8
 
 // ---------------------------------------------------- the boot screens
 
+// Retail's TitleScreen::Callback, 0x0016f440 (the demo's is 0x0016a590).
 void bgf_title_screen_callback(BGameFlow* gf, BScreenMessage msg,
-                               BScreenCallbackData* data);    // 0x0016a590
+                               BScreenCallbackData* data);
 void bgf_mumbo_jumbo_callback(BGameFlow* gf, BScreenMessage msg,
                               BScreenCallbackData* data);     // 0x0016a8b0
 void bgf_boot_autoload_callback(BGameFlow* gf, BScreenMessage msg,

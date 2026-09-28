@@ -61,6 +61,10 @@ LAYER_ORDER = (
 )
 assert sorted(LAYER_ORDER) == list(range(29))
 
+# bStringHash("SPLASH_SCREEN") and bStringHash("PANELMOVIE"): the textures
+# RenderFlailerBitmap draws from MoviePlayer rather than from their pixels.
+MOVIE_TEXTURES = (0xf9117c29, 0xc3f0caef)
+
 FIXED_WIDTH_SET = "1234567890:- "
 
 FMT_RIGHT, FMT_LEFT, FMT_CENTER = 0x01, 0x02, 0x04
@@ -231,6 +235,11 @@ def render_screen(bundles, screen, lang, fix_scale=False, alpha=1.0):
             if o["z"] != layer or o["visible"] != 1:
                 continue
             if o["kind"] == "bitmap":
+                # SPLASH_SCREEN and PANELMOVIE are drawn only as a running
+                # movie (RenderFlailerBitmap, 0x00143078), and there is none
+                # here -- so their planes draw nothing, not the blank buffer.
+                if o["texture_hash"] in MOVIE_TEXTURES:
+                    continue
                 img = find_texture(o["texture_hash"])
                 if not img:
                     missing["texture"] += 1

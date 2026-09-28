@@ -164,10 +164,12 @@ function Shot([string]$tag) {
 
 # --- the script the run follows -------------------------------------------
 # BootAutoload pops on its first tick, the title screen plays EALOGO_EN.AVI
-# (six seconds) and then NFSINTRO_EN.AVI (81), START skips the intro to the
-# main menu -- or, with no intro on the card, PRESS START comes up and START
-# goes there -- and from there the run walks the two screens the main menu
-# leads to that the port has: Cops On Mode Select and Options.
+# (six seconds) and then NFSINTRO_EN.AVI (81). START stops the intro and the
+# title comes to rest -- retail's TitleScreen stays where it is -- and PRESS
+# START comes up four seconds later; START then goes to the main menu. With
+# no intro on the card the title comes to rest by itself and the same four
+# seconds follow. From the main menu the run walks the two screens it leads
+# to that the port has: Cops On Mode Select and Options.
 
 Write-Host "Waiting for the main loop..."
 $booted = Wait-ForLog "entering main loop" 60
@@ -190,13 +192,30 @@ if ($booted) {
         Shot "intro-early"
         Start-Sleep -Seconds 6
         Shot "intro-late"
+        [Hp2Cap]::PressKey($hwnd, $VK_M)      # START: stop the intro
+        $rested = Wait-ForLog "flow title skip" 10
+        Write-Host ("  intro skipped, still on the title: {0}" -f $rested)
+        if (Wait-ForLog "flow enter New Main Menu" 1) {
+            Write-Host "  FAIL: the skip left the title screen"
+        }
     } else {
-        # The title screen only shows PRESS START once every entry in
-        # TitleMoviesToPlay has been stepped through.
-        [void](Wait-ForLog "flow title idle" 20)
-        Start-Sleep -Milliseconds 800
-        Shot "title"
+        $rested = Wait-ForLog "flow title idle" 20
+        Write-Host ("  title at rest: {0}" -f $rested)
     }
+
+    # At rest: the logo, the bar, the copyright line, and no PRESS START yet.
+    # A START now is too early and does nothing.
+    Start-Sleep -Milliseconds 1500
+    Shot "title-rest"
+    [Hp2Cap]::PressKey($hwnd, $VK_M)
+    Start-Sleep -Milliseconds 600
+    if (Wait-ForLog "flow enter New Main Menu" 1) {
+        Write-Host "  FAIL: START was taken before PRESS START"
+    }
+    # 0x0016f4f8: four seconds from the first tick at rest.
+    [void](Wait-ForLog "flow vis object b5761d00 b070dbc9 1" 10)
+    Start-Sleep -Milliseconds 900
+    Shot "title"
 
     [Hp2Cap]::PressKey($hwnd, $VK_M)          # START
     if (Wait-ForLog "flow enter New Main Menu" 10) {
