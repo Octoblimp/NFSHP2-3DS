@@ -1,5 +1,7 @@
 # Boots NFSHP2-3DS.3dsx in Azahar, walks into the track viewer, and
-# captures the top screen from several places along TRACKB12.
+# captures the top screen from several places along TRACKB12; then, with
+# -Switches, goes on to the next tracks on the card with ZR, each unloaded
+# as the game unloads a track and the next loaded in its place.
 #
 # The third of the run scripts, beside run_azahar_test.ps1 (the boot flow)
 # and run_azahar_geo.ps1 (one car at a time), and built the same way; the
@@ -14,9 +16,11 @@
 # Usage:
 #   powershell -File tools/run_azahar_track.ps1
 #   powershell -File tools/run_azahar_track.ps1 -Stops 10
+#   powershell -File tools/run_azahar_track.ps1 -Switches 5
 
 param(
     [int]$Stops = 6,              # route stops to jump through after the first
+    [int]$Switches = 0,           # tracks to go on to with ZR, afterwards
     [int]$RunSeconds = 300,       # hard ceiling on the whole run
     [string]$AzaharExe = "C:\Program Files\Azahar\azahar.exe",
     [string]$Target3dsx = "",
@@ -124,12 +128,13 @@ public class Hp2Track {
 
 # Azahar's default keyboard profile; see run_azahar_geo.ps1 for the X/Y
 # trap. A is 'A', B 'S', X 'Z', Y 'X', START 'M', SELECT 'N', L 'Q', R 'W',
-# the D-pad T/G/F/H and the circle pad the arrow keys.
+# the D-pad T/G/F/H, the circle pad the arrow keys, ZL '1' and ZR '2'.
 $VK_A = 65; $VK_S = 83; $VK_Z = 90; $VK_X = 88
 $VK_M = 77; $VK_N = 78
 $VK_T = 84; $VK_G = 71; $VK_F = 70; $VK_H = 72
 $VK_Q = 81; $VK_W = 87
 $VK_LEFT = 37; $VK_UP = 38; $VK_RIGHT = 39; $VK_DOWN = 40
+$VK_2 = 50
 
 $debugLog = Join-Path $env:APPDATA "Azahar\sdmc\nfshp2_debug.txt"
 Remove-Item $debugLog -ErrorAction SilentlyContinue
@@ -180,6 +185,12 @@ function Shot([string]$tag) {
     }
     $script:last = $path
     Write-Host ("  [{0,5:N1}s] {1}{2}" -f (Elapsed), $path, $note)
+}
+
+# How many lines of the log match, for a line each switch writes again.
+function Count-Log([string]$pattern) {
+    if (-not (Test-Path $debugLog)) { return 0 }
+    return @(Select-String -Path $debugLog -Pattern $pattern -ErrorAction SilentlyContinue).Count
 }
 
 function Hold([int]$vk, [int]$ms) {
@@ -253,6 +264,29 @@ if (Alive) {
     Shot "track-sun"
 }
 
+# The next tracks on the card. Each ZR runs the Begin of unloading over the
+# one held and loads the next, and the main loop waits while it does, so the
+# press is confirmed by its line in the log before the shots.
+for ($k = 1; $k -le $Switches; $k++) {
+    if (-not (Alive)) { break }
+    [Hp2Track]::PressKey($hwnd, $VK_2)
+    $end = (Get-Date).AddSeconds(150)
+    while ((Get-Date) -lt $end -and (Alive) -and (Count-Log "trackview: switched to") -lt $k) {
+        Start-Sleep -Milliseconds 300
+    }
+    $line = @(Select-String -Path $debugLog -Pattern "trackview: switched to" -ErrorAction SilentlyContinue)
+    if ($line.Count -lt $k) { Write-Host "  switch $k never landed"; break }
+    $name = ($line[$k - 1].Line -replace '.*switched to (TRACKB[0-9]+).*', '$1')
+    Write-Host ("  {0}: {1:N1}s" -f $name, (Elapsed))
+    Start-Sleep -Milliseconds 1500
+    Shot ("{0}-stop1" -f $name)
+    for ($i = 1; $i -le 2; $i++) {
+        [Hp2Track]::PressKey($hwnd, $VK_H)
+        Start-Sleep -Milliseconds 1200
+        Shot ("{0}-stop{1}" -f $name, ($i + 1))
+    }
+}
+
 if (Alive) {
     [Hp2Track]::PressKey($hwnd, $VK_M)          # START leaves the main loop
     Start-Sleep -Milliseconds 2000
@@ -270,6 +304,6 @@ Write-Host "Shots in $OutDir"
 if (Test-Path $debugLog) {
     Write-Host "--- nfshp2_debug.txt (track lines) ---"
     Select-String -Path $debugLog -Pattern "trackview|^.*track |left main loop|abort|assert" |
-        Select-Object -Last 60 |
+        Select-Object -Last (60 + 12 * $Switches) |
         ForEach-Object { Write-Host ("  " + $_.Line) }
 }

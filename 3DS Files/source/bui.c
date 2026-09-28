@@ -5,6 +5,24 @@
 
 #include "bchunk.h"
 
+// Retail's FlailerObjectChunk carries the object's own name, a char[24], at
+// +16, and every field the demo has from +16 on sits 24 bytes later: a
+// bitmap is 144 bytes rather than 120, a text object 100 + MaxChars rather
+// than 76. NameHash and GroupHash, at +8 and +12, come before it and don't
+// move. The demo's +16 is ObjectType (1..5) and +17 Visible (0..3); retail
+// has the first two characters of a name there, and every name on the disc
+// starts with a letter. So the layout is told apart per object, and the
+// same reader takes either game's bundles -- the checkers still run on the
+// demo's. See docs/formats/flailer-ui.md.
+static uint32_t object_shift(const uint8_t* p, uint32_t size)
+{
+    if (size < 56) return 0;          // too short for either; rejected later
+    if (p[16] >= BUI_TYPE_TEXT && p[16] <= BUI_TYPE_SCREEN &&
+        p[17] <= BUI_XBOX_ONLY)
+        return 0;
+    return BUI_NAME_LEN;
+}
+
 // LoaderFlailerChunk (0x0013d890) walks the top level looking for exactly two
 // chunk types and, inside a screen container, special-cases the screen
 // definition and treats *every other chunk* as an object -- it never looks at
@@ -29,6 +47,8 @@ static void walk_screen(BUI* ui, const uint8_t* payload, uint32_t size,
         if (ui->objects) {
             ui->objects[*objCursor].payload = it.payload;
             ui->objects[*objCursor].size    = it.size;
+            ui->objects[*objCursor].shift   = object_shift(it.payload,
+                                                           it.size);
         }
         (*objCursor)++;
         if (screen) screen->count++;
@@ -103,16 +123,33 @@ BUIScreen* bui_find_screen(BUI* ui, uint32_t nameHash)
     return NULL;
 }
 
+// Object `index` from ObjectType on, shifted so that the offsets used below
+// are the demo's whichever layout the chunk is in, or NULL if it has fewer
+// than `need` bytes at those offsets. *room, if asked for, is how many it
+// has. NameHash and GroupHash are read from the unshifted payload.
+static const uint8_t* fields(const BUI* ui, uint32_t index, uint32_t need,
+                             uint32_t* room)
+{
+    const BUIObjectRef* r;
+    if (index >= ui->numObjects) return NULL;
+    r = &ui->objects[index];
+    if (r->size - r->shift < need) return NULL;
+    if (room) *room = r->size - r->shift;
+    return r->payload + r->shift;
+}
+
 bool bui_object(const BUI* ui, uint32_t index, BUIObject* out)
 {
-    if (index >= ui->numObjects) return false;
-    const uint8_t* p    = ui->objects[index].payload;
-    uint32_t       size = ui->objects[index].size;
-    if (size < 56) return false;
+    uint32_t       size = 0;
+    const uint8_t* p    = fields(ui, index, 56, &size);
+    if (!p) return false;
+    const uint8_t* base = ui->objects[index].payload;
 
     memset(out, 0, sizeof(*out));
-    out->nameHash     = bchunk_u32(p + 8);
-    out->groupHash    = bchunk_u32(p + 12);
+    out->nameHash     = bchunk_u32(base + 8);
+    out->groupHash    = bchunk_u32(base + 12);
+    if (ui->objects[index].shift)
+        memcpy(out->name, base + 16, BUI_NAME_LEN);   // name[24] stays 0
     out->type         = (int8_t)p[16];
     out->visible      = (int8_t)p[17];
     out->z            = (int8_t)p[18];
@@ -157,9 +194,9 @@ int32_t bui_find_object(const BUI* ui, const BUIScreen* screen,
     if (!screen) return -1;
     for (uint32_t i = 0; i < screen->count; i++) {
         uint32_t       idx = screen->first + i;
-        const uint8_t* p   = ui->objects[idx].payload;
-        if (ui->objects[idx].size < 56) continue;
-        if (bchunk_u32(p + 8) != nameHash) continue;
+        const uint8_t* p   = fields(ui, idx, 56, NULL);
+        if (!p) continue;
+        if (bchunk_u32(ui->objects[idx].payload + 8) != nameHash) continue;
         // FindFlailerObject compares Type only when the argument is non-zero.
         if (type != BUI_TYPE_NONE && (int8_t)p[16] != (int8_t)type) continue;
         return (int32_t)idx;
@@ -167,9 +204,6 @@ int32_t bui_find_object(const BUI* ui, const BUIScreen* screen,
     return -1;
 }
 
-// The chunk payloads are pointers into the caller's buffer. Writing through
-// them is exactly what the engine does -- see bui.h -- so the const here is
-// about the reading API, not about the storage.
 // FindFlailerObjectByGroup (0x00141a50). The original takes the object to
 // resume after and returns the next one, which is how the group walks are
 // written; here that is an index, and -1 starts at the head. Same wildcard
@@ -180,25 +214,28 @@ int32_t bui_next_in_group(const BUI* ui, const BUIScreen* screen,
     if (!screen) return -1;
     for (uint32_t i = 0; i < screen->count; i++) {
         uint32_t       idx = screen->first + i;
-        const uint8_t* p   = ui->objects[idx].payload;
         if ((int32_t)idx <= after) continue;
-        if (ui->objects[idx].size < 56) continue;
-        if (bchunk_u32(p + 12) != groupHash) continue;
+        const uint8_t* p   = fields(ui, idx, 56, NULL);
+        if (!p) continue;
+        if (bchunk_u32(ui->objects[idx].payload + 12) != groupHash) continue;
         if (type != BUI_TYPE_NONE && (int8_t)p[16] != (int8_t)type) continue;
         return (int32_t)idx;
     }
     return -1;
 }
 
-static uint8_t* writable(BUI* ui, uint32_t index, uint32_t need)
+// The chunk payloads are pointers into the caller's buffer. Writing through
+// them is exactly what the engine does -- see bui.h -- so the const here is
+// about the reading API, not about the storage.
+static uint8_t* writable(BUI* ui, uint32_t index, uint32_t need,
+                         uint32_t* room)
 {
-    if (index >= ui->numObjects || ui->objects[index].size < need) return NULL;
-    return (uint8_t*)ui->objects[index].payload;
+    return (uint8_t*)fields(ui, index, need, room);
 }
 
 bool bui_set_text_color(BUI* ui, uint32_t index, uint32_t rgb)
 {
-    uint8_t* p = writable(ui, index, 76);
+    uint8_t* p = writable(ui, index, 76, NULL);
     if (!p || (int8_t)p[16] != BUI_TYPE_TEXT) return false;
     uint32_t cur = bchunk_u32(p + 68);
     uint32_t val = (cur & 0xff000000u) | (rgb & 0x00ffffffu);
@@ -210,7 +247,7 @@ bool bui_set_text_color(BUI* ui, uint32_t index, uint32_t rgb)
 
 bool bui_set_text_language(BUI* ui, uint32_t index, uint32_t languageID)
 {
-    uint8_t* p = writable(ui, index, 76);
+    uint8_t* p = writable(ui, index, 76, NULL);
     if (!p || (int8_t)p[16] != BUI_TYPE_TEXT) return false;
     if (bchunk_u32(p + 72) == languageID) return true;
     bchunk_put_u32(p + 72, languageID);
@@ -220,7 +257,7 @@ bool bui_set_text_language(BUI* ui, uint32_t index, uint32_t languageID)
 
 bool bui_set_object_pos(BUI* ui, uint32_t index, float x, float y)
 {
-    uint8_t* p = writable(ui, index, 56);
+    uint8_t* p = writable(ui, index, 56, NULL);
     if (!p) return false;
     bchunk_put_f32(p + 24, x);
     bchunk_put_f32(p + 28, y);
@@ -230,7 +267,7 @@ bool bui_set_object_pos(BUI* ui, uint32_t index, float x, float y)
 
 bool bui_set_object_visible(BUI* ui, uint32_t index, int visibility)
 {
-    uint8_t* p = writable(ui, index, 56);
+    uint8_t* p = writable(ui, index, 56, NULL);
     if (!p) return false;
     p[17] = (uint8_t)(int8_t)visibility;
     p[19] = 7;
@@ -243,15 +280,16 @@ bool bui_set_object_visible(BUI* ui, uint32_t index, int visibility)
 // between the two object types is which of the five words is meant. A text
 // object ignores `corner`, as FlailerObjectChunk::GetAlpha (0x0013e098)
 // does by passing 0. Returns -1 for an object that has no colour at all.
+// (Those are the demo's offsets; retail's are 24 further on, like the rest.)
 int bui_get_object_alpha(const BUI* ui, uint32_t index, int corner)
 {
-    const uint8_t* p;
-    if (index >= ui->numObjects) return -1;
-    p = ui->objects[index].payload;
+    uint32_t       room = 0;
+    const uint8_t* p    = fields(ui, index, 56, &room);
+    if (!p) return -1;
     if ((int8_t)p[16] == BUI_TYPE_TEXT)
-        return ui->objects[index].size >= 76 ? p[71] : -1;
+        return room >= 76 ? p[71] : -1;
     if ((int8_t)p[16] == BUI_TYPE_BITMAP) {
-        if (ui->objects[index].size < 120) return -1;
+        if (room < 120) return -1;
         if (corner < 0 || corner > 3) corner = 0;
         return p[67 + 4 * corner];
     }
@@ -266,15 +304,14 @@ int bui_get_object_alpha(const BUI* ui, uint32_t index, int corner)
 // the 7 SetColor uses -- 6 is "colours changed", 7 is "and the string".
 bool bui_set_object_alpha(BUI* ui, uint32_t index, int corner, int alpha)
 {
-    uint8_t* p;
-    uint32_t a = (uint32_t)(alpha & 0xff) << 24;
-
-    if (index >= ui->numObjects) return false;
-    p = (uint8_t*)ui->objects[index].payload;
+    uint32_t room = 0;
+    uint8_t* p    = writable(ui, index, 56, &room);
+    uint32_t a    = (uint32_t)(alpha & 0xff) << 24;
+    if (!p) return false;
 
     if ((int8_t)p[16] == BUI_TYPE_TEXT) {
         uint32_t cur, val;
-        if (ui->objects[index].size < 76) return false;
+        if (room < 76) return false;
         cur = bchunk_u32(p + 68);
         val = (cur & 0x00ffffffu) | a;
         if (val == cur) return true;
@@ -284,7 +321,7 @@ bool bui_set_object_alpha(BUI* ui, uint32_t index, int corner, int alpha)
     }
     if ((int8_t)p[16] == BUI_TYPE_BITMAP) {
         int i, first, last;
-        if (ui->objects[index].size < 120) return false;
+        if (room < 120) return false;
         p[19] = 6;
         first = corner < 0 ? 0 : corner;
         last  = corner < 0 ? 3 : corner;
@@ -312,7 +349,7 @@ bool bui_set_object_alpha(BUI* ui, uint32_t index, int corner, int alpha)
 // texture on screen at all. Same caveat about a writable buffer.
 bool bui_set_bitmap_texture(BUI* ui, uint32_t index, uint32_t textureHash)
 {
-    uint8_t* p = writable(ui, index, 120);
+    uint8_t* p = writable(ui, index, 120, NULL);
     if (!p || (int8_t)p[16] != BUI_TYPE_BITMAP) return false;
     if (bchunk_u32(p + 56) == textureHash) return true;   // as the original
     bchunk_put_u32(p + 56, textureHash);
@@ -325,7 +362,7 @@ bool bui_set_bitmap_texture(BUI* ui, uint32_t index, uint32_t textureHash)
 // Same caveat about a writable buffer.
 bool bui_set_object_scale(BUI* ui, uint32_t index, float sx, float sy)
 {
-    uint8_t* p = writable(ui, index, 56);
+    uint8_t* p = writable(ui, index, 56, NULL);
     if (!p) return false;
     bchunk_put_f32(p + 32, sx);
     bchunk_put_f32(p + 36, sy);
@@ -336,15 +373,15 @@ bool bui_set_object_scale(BUI* ui, uint32_t index, float sx, float sy)
 // FlailerPrintf (0x00141ae8) with a bare "%s": replaces a text object's
 // inline string. On PS2 String is a heap block of MaxChars+1 and the
 // formatter writes straight into it; here the characters live inside the
-// chunk, so the room is whatever the chunk has after the 76-byte header --
-// which is MaxChars rounded up to 4, never less. Truncates rather than
-// overrun, and reports how much it kept.
+// chunk, so the room is whatever the chunk has after the 76-byte header
+// (100 on retail) -- which is MaxChars rounded up to 4, never less.
+// Truncates rather than overrun, and reports how much it kept.
 uint32_t bui_set_text_string(BUI* ui, uint32_t index, const char* s)
 {
-    uint8_t* p = writable(ui, index, 76);
-    uint32_t room, n = 0;
+    uint32_t size = 0, room, n = 0;
+    uint8_t* p    = writable(ui, index, 76, &size);
     if (!p || (int8_t)p[16] != BUI_TYPE_TEXT) return 0;
-    room = ui->objects[index].size - 76;
+    room = size - 76;
     if (room == 0) return 0;
     if (!s) s = "";
     while (n + 1 < room && s[n]) { p[76 + n] = (uint8_t)s[n]; n++; }

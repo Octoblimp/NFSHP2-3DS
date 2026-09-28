@@ -6,7 +6,10 @@
 //     project <hash> <numScreens> <numObjects>
 //     screen <hash> <resX> <resY> <numObjects> <parsedCount>
 //     obj <type> <visible> <z> <nameHash> <groupHash> <x> <y> <sx> <sy>
-//         <rot> <anim> <renderOnPoly> <clipToPoly> [type-specific]
+//         <rot> <anim> <renderOnPoly> <clipToPoly> <name> [type-specific]
+//
+// <name> is retail's inline object name in hex, or "-" on the demo's
+// layout, which has none.
 //
 // tools/bui_check.py prints the same from tools/flailer_dump.py and diffs
 // it, which is what pins the object walk: the loader identifies objects by
@@ -67,6 +70,9 @@ int main(int argc, char** argv)
                    o.groupHash, (double)o.x, (double)o.y, (double)o.scaleX,
                    (double)o.scaleY, (int)o.rotation, (int)o.animation,
                    o.renderOnPoly, o.clipToPoly);
+            putchar(' ');
+            if (o.name[0]) print_string(o.name, BUI_NAME_LEN);
+            else putchar('-');
             if (o.type == BUI_TYPE_BITMAP) {
                 printf(" tex %08x %08x %08x %08x %08x", o.textureHash,
                        o.colors[0], o.colors[1], o.colors[2], o.colors[3]);

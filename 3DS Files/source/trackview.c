@@ -30,16 +30,21 @@
 #include "trackroute.h"
 #include "weatherman.h"
 
-#define TRACK_BUNDLE "TRACKS/TRACKB12.BUN"
+// The track's files, named from its number as the game names them from
+// RaceParameters.TrackNumber (retail 0x0031a898, the demo's 0x00312520).
+// BeginGameFlowLoadingTrackSpecific (retail 0x001690a0) loads
+// TRACKS\TRACKB%d.LZC and names it .BUN once expanded; the port ships it
+// expanded.
+#define TRACK_BUNDLE_FORMAT "TRACKS/TRACKB%d.BUN"
 
-// The track's texture files, in the order LoadingTrackSpecificPart4
-// (TEX%dTRACK.BIN, then TEX%dLOCATION.BIN) has them loaded, after the track
-// bundle. Of the 415 names the solids' tables hold, TEX12LOCATION.BIN has
-// 350, INGAMEB.BUN 12 and TEX12TRACK.BIN 4, and 49 are in no pack on the
-// disc and are given the default.
-static const char* const kTexFiles[TRACKVIEW_NUM_TEXFILES] = {
-    "TRACKS/TEX12TRACK.BIN",
-    "TRACKS/TEX12LOCATION.BIN",
+// The texture files, in the order LoadingTrackSpecificPart4 (retail
+// 0x00168f98) has them loaded, after the track bundle. Of the 415 names
+// the demo TRACKB12's solids' tables hold, TEX12LOCATION.BIN has 350,
+// INGAMEB.BUN 12 and TEX12TRACK.BIN 4, and 49 are in no pack on the disc
+// and are given the default.
+static const char* const kTexFormats[TRACKVIEW_NUM_TEXFILES] = {
+    "TRACKS/TEX%dTRACK.BIN",
+    "TRACKS/TEX%dLOCATION.BIN",
 };
 
 #define PAD_DEAD     24             // circle pad noise floor
@@ -677,22 +682,77 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
 
 // ------------------------------------------------------------------ loading
 
-bool trackview_init(TrackView* v)
+bool trackview_init(TrackView* v, int track)
 {
     int i;
 
     memset(v, 0, sizeof *v);
     v->speed = 30.0f;
+    v->track = track;
+    snprintf(v->bundleName, sizeof v->bundleName, TRACK_BUNDLE_FORMAT, track);
     for (i = 0; i < TRACKVIEW_NUM_TEXFILES; i++) {
-        v->hasTexFile[i] = gamedata_exists(kTexFiles[i]);
+        snprintf(v->texName[i], sizeof v->texName[i], kTexFormats[i], track);
+        v->hasTexFile[i] = gamedata_exists(v->texName[i]);
     }
-    v->hasBundle = gamedata_exists(TRACK_BUNDLE);
+    v->hasBundle = gamedata_exists(v->bundleName);
     if (!v->hasBundle) {
-        snprintf(v->note, sizeof v->note, "no %s", TRACK_BUNDLE);
+        snprintf(v->note, sizeof v->note, "no %s", v->bundleName);
         return false;
     }
     snprintf(v->note, sizeof v->note, "not loaded");
     return true;
+}
+
+// The disc's tracks are TRACKB11 to TRACKB66: a location, then which of
+// its six. Retail's has locations 1 to 4 and 6; the demo's TRACKB12 alone.
+#define TRACK_FIRST 11
+#define TRACK_LAST  66
+
+int trackview_next_track(int track, int step)
+{
+    char name[TRACKVIEW_NAME_MAX];
+    int  n = track;
+    int  i;
+
+    for (i = 0; i <= TRACK_LAST - TRACK_FIRST; i++) {
+        n += step;
+        if (n > TRACK_LAST) {
+            n = TRACK_FIRST;
+        } else if (n < TRACK_FIRST) {
+            n = TRACK_LAST;
+        }
+        if (n % 10 < 1 || n % 10 > 6) {
+            continue;
+        }
+        if (n == track) {
+            break;
+        }
+        snprintf(name, sizeof name, TRACK_BUNDLE_FORMAT, n);
+        if (gamedata_exists(name)) {
+            return n;
+        }
+    }
+    return track;
+}
+
+bool trackview_switch(TrackView* v, int track)
+{
+    uint8_t* shared[TRACKVIEW_MAX_SHARED];
+    size_t   sharedLen[TRACKVIEW_MAX_SHARED];
+    int      numShared = v->numShared;
+    bool     ok;
+    int      i;
+
+    for (i = 0; i < numShared; i++) {
+        shared[i]    = v->shared[i];
+        sharedLen[i] = v->sharedLen[i];
+    }
+    trackview_free(v);
+    ok = trackview_init(v, track);
+    for (i = 0; i < numShared; i++) {
+        trackview_share_bundle(v, shared[i], sharedLen[i]);
+    }
+    return ok && trackview_load(v);
 }
 
 bool trackview_share_bundle(TrackView* v, uint8_t* data, size_t len)
@@ -757,7 +817,7 @@ static void load_texture_files(TrackView* v)
 
     for (i = 0; i < TRACKVIEW_NUM_TEXFILES; i++) {
         if (!v->hasTexFile[i]
-            || !gamedata_path(kTexFiles[i], path, sizeof path)) {
+            || !gamedata_path(v->texName[i], path, sizeof path)) {
             continue;
         }
         v->texData[i] = read_bundle(path, &v->texLen[i], &v->texLinear[i],
@@ -780,8 +840,8 @@ static void load_texture_files(TrackView* v)
 
 // BeginGameFlowUnloadingTrackSpecific's FindResourceFile(3) and
 // UnloadResourceFile, over the viewer's three files. FindResourceFile walks
-// ResourceFileList from its tail, so the newest goes first: TEX12LOCATION,
-// TEX12TRACK, the bundle. ~ResourceFile (0x0018fa50) is UnloadChunks, the
+// ResourceFileList from its tail, so the newest goes first: TEX<n>LOCATION,
+// TEX<n>TRACK, the bundle. ~ResourceFile (0x0018fa50) is UnloadChunks, the
 // bFree, then PostLoadFixup.
 static TrackView* s_unloading;
 
@@ -985,13 +1045,13 @@ bool trackview_load(TrackView* v)
         return false;
     }
 
-    if (!gamedata_path(TRACK_BUNDLE, path, sizeof path)) {
+    if (!gamedata_path(v->bundleName, path, sizeof path)) {
         snprintf(v->note, sizeof v->note, "path too long");
         return false;
     }
     v->data = read_bundle(path, &v->len, &v->dataLinear, true);
     if (!v->data) {
-        snprintf(v->note, sizeof v->note, "cannot read %s", TRACK_BUNDLE);
+        snprintf(v->note, sizeof v->note, "cannot read %s", v->bundleName);
         return false;
     }
 

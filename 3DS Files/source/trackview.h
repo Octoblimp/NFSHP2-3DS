@@ -11,8 +11,11 @@
 #include "scenerycull.h"
 #include "texturepack.h"
 
-// The track viewer: TRACKB12.BUN's scenery on the top screen, through the
-// port of the game's own cull, from a camera flown with the circle pad.
+// The track viewer: a track's scenery on the top screen, through the port
+// of the game's own cull, from a camera flown with the circle pad. The
+// track is a number, as RaceParameters.TrackNumber is the game's, and
+// every file of the track's is named from it: TRACKB12.BUN, the one the
+// demo has, first, and then any of the retail disc's 30 on the card.
 //
 // This is roadmap step 1, and it is the first mode that draws anything the
 // game decides to draw. The geometry viewer shows a car because the viewer
@@ -31,8 +34,8 @@
 // texture packs, which main() already holds for the UI and shares here, go
 // through slot 2 first, as the boot and LOADING_TRACK_COMMON leave them.
 // Then, as BeginGameFlowLoadingTrackSpecific does, eDisableFixUpTables is
-// set and the bundle loads, and TEX12TRACK.BIN and TEX12LOCATION.BIN after
-// it, each read whole; and EndGameFlowLoadingTrackSpecific (trackflow.c)
+// set and the bundle loads, and TEX<n>TRACK.BIN and TEX<n>LOCATION.BIN
+// after it, each read whole; and EndGameFlowLoadingTrackSpecific (trackflow.c)
 // clears it, runs eFixUpTables once, and starts the track's systems --
 // the collision pools, InitTree, InitPhysics, SkyLoader (sky.c, which takes
 // SKYDOME out of the scenery and draws it itself), SunTrackLoader, the
@@ -81,9 +84,11 @@
 // the cull's: the 3DS screen is wider than 8:7, so its height is inside the
 // cull's rather than past it, and nothing the cull drops can be on screen.
 
-#define TRACKVIEW_MAX_SOLIDS   1280     // TRACKB12 has 1,135
+#define TRACKVIEW_TRACK        12       // the first track the viewer loads
+#define TRACKVIEW_NAME_MAX     32       // "TRACKS/TEX66LOCATION.BIN" and its 0
+#define TRACKVIEW_MAX_SOLIDS   1536     // retail's TRACKB61 and B64 have 1,345
 #define TRACKVIEW_MAX_TEXTURES 512      // its solids name 415 hashes
-#define TRACKVIEW_NUM_TEXFILES 2        // TEX12LOCATION.BIN, TEX12TRACK.BIN
+#define TRACKVIEW_NUM_TEXFILES 2        // TEX<n>TRACK.BIN, TEX<n>LOCATION.BIN
 #define TRACKVIEW_MAX_SHARED   2        // GLOBALB.BUN, INGAMEB.BUN
 #define TRACKVIEW_MAX_SHARED_CHUNKS 8   // their packs and flipbooks: 4
 #define TRACKVIEW_MAX_FRAMES   64       // flipbook frames past the first: 46
@@ -147,6 +152,10 @@ typedef struct {
 } TrackDeferred;
 
 typedef struct {
+    // --- the track, and its files' names on the card.
+    int       track;
+    char      bundleName[TRACKVIEW_NAME_MAX];
+    char      texName[TRACKVIEW_NUM_TEXFILES][TRACKVIEW_NAME_MAX];
     bool      hasBundle;
     bool      hasTexFile[TRACKVIEW_NUM_TEXFILES];
 
@@ -257,9 +266,20 @@ typedef struct {
     char note[64];
 } TrackView;
 
-// Notes whether TRACKS\TRACKB12.BUN and the texture files are there.
-// Nothing is read yet.
-bool trackview_init(TrackView* v);
+// Names track `track`'s files, TRACKS\TRACKB<track>.BUN and its two
+// texture files, and notes whether they are there. Nothing is read yet.
+bool trackview_init(TrackView* v, int track);
+
+// The next track past `track` whose bundle is on the card, `step` 1 for
+// the one after and -1 for the one before, wrapping; `track` when there is
+// no other. The numbers tried are the disc's: a location 1 to 6, then a
+// track 1 to 6.
+int trackview_next_track(int track, int step);
+
+// Unloads the track the viewer holds, as trackview_free does, and loads
+// `track` in its place, keeping the bundles shared with it. The result is
+// trackview_load's.
+bool trackview_switch(TrackView* v, int track);
 
 // A bundle main() holds resident, 128-aligned, whose texture packs the
 // track needs: GLOBALB.BUN, which has the default texture, then

@@ -7,8 +7,13 @@ that is not 0x00010203 is an object, identified afterwards by ObjectType --
 whereas flailer_dump.py keys off the chunk id. The two agree only while the
 chunk id and ObjectType agree, so this diff is also the check on that claim.
 
+Both games' layouts go through it: retail's objects carry a 24-byte name
+that shifts the rest, and each reader detects that per object, so run it on
+extracted-retail/ as well as extracted/.
+
 Usage:
     python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN
+    python tools/bui_check.py extracted-retail/*/*.BUN
     python tools/bui_check.py extracted/GLOBAL/*.BUN extracted/FRONTEND/*.BUN
 """
 import argparse
@@ -51,6 +56,8 @@ def py_lines(path):
                        num(o["top_left_y"]), num(o["scale_x"]),
                        num(o["scale_y"]), o["rotation"], o["anim_mode"],
                        o["render_on_poly"], o["clip_to_poly"]))
+            name = o["name"].encode("latin-1", "replace").hex()
+            line += " " + (name or "-")
             if o["kind"] == "bitmap":
                 line += " tex %08x " % o["texture_hash"]
                 line += " ".join("%08x" % c for c in o["gourad"])

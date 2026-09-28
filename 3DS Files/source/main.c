@@ -104,6 +104,11 @@ static const u32 kDisplayTransferFlags =
 #define BUNDLE_FRONTEND "FRONTEND/FRONTB.BUN"
 #define BUNDLE_GLOBAL   "GLOBAL/GLOBALB.BUN"
 #define BUNDLE_INGAME   "GLOBAL/INGAMEB.BUN"
+// One of the three texture packs the game loads at boot (docs/formats/
+// zdir-archive.md). Retail keeps the title screen's Need for Speed logo,
+// LOADING, only here; the demo had a second copy in GLOBALB.BUN, so the port
+// never needed this file until it ran on retail data.
+#define BUNDLE_DYNTEX   "GLOBAL/DYNTEX.BIN"
 
 static const char* const kLanguages[] = {
     "LANGUAGES/FE_ENGLISH.BIN", "LANGUAGES/FE_FRENCH.BIN",
@@ -1026,6 +1031,61 @@ static int weatherRegions(const bNode* head)
     return count;
 }
 
+// What the viewer holds, for the log: tools/run_azahar_track.ps1 waits for
+// the first line, and the rest are what a walk is read against. `event` is
+// "entered" as SELECT enters the mode, "switched to" after ZL or ZR.
+static void logTrackView(const char* event)
+{
+    logPrintf("trackview: %s TRACKB%d, %s\n", event, g_track.track,
+              g_track.note);
+    logPrintf("trackview: %d solids linked, %d models, %d "
+              "without a solid, %d baked, %d tris, %d textures "
+              "(%d missing, %d reduced), %u KB linear free\n",
+              g_track.linkedSolids, g_track.numModels,
+              g_track.modelsWithoutSolid, g_track.bakedSolids,
+              g_track.bakedTris, g_track.numTextures,
+              g_track.missingTextures, g_track.reducedTextures,
+              (unsigned)(linearSpaceFree() / 1024u));
+    logPrintf("trackview: %d texture packs, %d flipbooks, %d "
+              "names given the default, %d breaks, files in "
+              "%s %s\n",
+              g_track.numPacks, g_track.numAnims,
+              g_track.defaultedHashes, (int)texturepack_breaks,
+              g_track.texLinear[0] ? "linear" : "heap",
+              g_track.texLinear[1] ? "linear" : "heap");
+    logPrintf("trackflow: loaded, InGameFlag %d, "
+              "eDisableFixUpTables %d, reverse %d\n",
+              (int)InGameFlag, (int)eDisableFixUpTables,
+              (int)TheTrackPathManager.ReverseTrackDirection);
+    logPrintf("sky: SKYDOME %s, the envmap views' %s; sun %s "
+              "at %.0f %.0f %.0f\n",
+              SkydomeModel.Solid ? "drawn by StuffSky" : "none",
+              SkydomeEnvmapModel.NameHash
+                      == SKY_HASH_SKYDOME_ENVMAP ? "its own"
+              : SkydomeEnvmapModel.NameHash == SKY_HASH_SKYDOME
+                      ? "SKYDOME" : "none",
+              SunInfo ? "chunk version 2" : "none",
+              (double)SunPosition.x, (double)SunPosition.y,
+              (double)SunPosition.z);
+    logPrintf("weather: %d rain, %d fog, %d snow, %d wind "
+              "regions, %d off; DrawFog %d, modes %d %d, "
+              "FogPower %.2f, depth into alpha %d\n",
+              weatherRegions(&WeatherRegionLists[WEATHER_RAIN]),
+              weatherRegions(&WeatherRegionLists[WEATHER_FOG]),
+              weatherRegions(&WeatherRegionLists[WEATHER_SNOW]),
+              weatherRegions(&WeatherRegionLists[WEATHER_WIND]),
+              weatherRegions(&WeatherRegionInactiveList),
+              (int)DrawFog, (int)FogMode1, (int)FogMode2,
+              (double)FogPower, (int)EnableDepthIntoAlpha);
+    for (int i = 0; i < NUM_SUN_TEXTURES; i++) {
+        const TextureInfo *t = SunTextures[i];
+
+        logPrintf("sun texture %d: %.24s, order %d\n", i,
+                  t ? t->DebugName : "none",
+                  t ? t->RenderingOrder : -1);
+    }
+}
+
 static void devLog(int slot, const char* fmt, ...)
 {
     static char last[DEV_SLOTS][192];
@@ -1333,6 +1393,7 @@ int main(int argc, char** argv)
     addBundle(&ui, BUNDLE_FRONTEND);
     UIBundle* globalBundle = addBundle(&ui, BUNDLE_GLOBAL);
     UIBundle* ingameBundle = addBundle(&ui, BUNDLE_INGAME);
+    addBundle(&ui, BUNDLE_DYNTEX);
 
     // The blurb moves to the bottom screen, so the top screen stops drawing
     // it -- and stops drawing the bar tAnimatedBlurb wipes it out with,
@@ -1452,7 +1513,7 @@ int main(int argc, char** argv)
     }
     // The track's textures are partly GLOBALB's and INGAMEB's, which the
     // UI already holds; the viewer loads their packs from these copies.
-    bool trackOk = trackview_init(&g_track);
+    bool trackOk = trackview_init(&g_track, TRACKVIEW_TRACK);
     if (globalBundle)
         trackview_share_bundle(&g_track, globalBundle->data, globalBundle->len);
     if (ingameBundle)
@@ -1573,53 +1634,7 @@ int main(int argc, char** argv)
             if (mode == MODE_GEO) {
                 logPrintf("geoview: entered, %s\n", g_geo.note);
             } else if (mode == MODE_TRACK) {
-                logPrintf("trackview: entered, %s\n", g_track.note);
-                logPrintf("trackview: %d solids linked, %d models, %d "
-                          "without a solid, %d baked, %d tris, %d textures "
-                          "(%d missing, %d reduced), %u KB linear free\n",
-                          g_track.linkedSolids, g_track.numModels,
-                          g_track.modelsWithoutSolid, g_track.bakedSolids,
-                          g_track.bakedTris, g_track.numTextures,
-                          g_track.missingTextures, g_track.reducedTextures,
-                          (unsigned)(linearSpaceFree() / 1024u));
-                logPrintf("trackview: %d texture packs, %d flipbooks, %d "
-                          "names given the default, %d breaks, files in "
-                          "%s %s\n",
-                          g_track.numPacks, g_track.numAnims,
-                          g_track.defaultedHashes, (int)texturepack_breaks,
-                          g_track.texLinear[0] ? "linear" : "heap",
-                          g_track.texLinear[1] ? "linear" : "heap");
-                logPrintf("trackflow: loaded, InGameFlag %d, "
-                          "eDisableFixUpTables %d, reverse %d\n",
-                          (int)InGameFlag, (int)eDisableFixUpTables,
-                          (int)TheTrackPathManager.ReverseTrackDirection);
-                logPrintf("sky: SKYDOME %s, the envmap views' %s; sun %s "
-                          "at %.0f %.0f %.0f\n",
-                          SkydomeModel.Solid ? "drawn by StuffSky" : "none",
-                          SkydomeEnvmapModel.NameHash
-                                  == SKY_HASH_SKYDOME_ENVMAP ? "its own"
-                          : SkydomeEnvmapModel.NameHash == SKY_HASH_SKYDOME
-                                  ? "SKYDOME" : "none",
-                          SunInfo ? "chunk version 2" : "none",
-                          (double)SunPosition.x, (double)SunPosition.y,
-                          (double)SunPosition.z);
-                logPrintf("weather: %d rain, %d fog, %d snow, %d wind "
-                          "regions, %d off; DrawFog %d, modes %d %d, "
-                          "FogPower %.2f, depth into alpha %d\n",
-                          weatherRegions(&WeatherRegionLists[WEATHER_RAIN]),
-                          weatherRegions(&WeatherRegionLists[WEATHER_FOG]),
-                          weatherRegions(&WeatherRegionLists[WEATHER_SNOW]),
-                          weatherRegions(&WeatherRegionLists[WEATHER_WIND]),
-                          weatherRegions(&WeatherRegionInactiveList),
-                          (int)DrawFog, (int)FogMode1, (int)FogMode2,
-                          (double)FogPower, (int)EnableDepthIntoAlpha);
-                for (int i = 0; i < NUM_SUN_TEXTURES; i++) {
-                    const TextureInfo *t = SunTextures[i];
-
-                    logPrintf("sun texture %d: %.24s, order %d\n", i,
-                              t ? t->DebugName : "none",
-                              t ? t->RenderingOrder : -1);
-                }
+                logTrackView("entered");
             } else {
                 logPrintf("mode %d\n", mode);
             }
@@ -1768,6 +1783,18 @@ int main(int argc, char** argv)
             const u32 sky = C2D_Color32(0x8c, 0xa8, 0xc8, 0xFF);
 
             if (kDown & KEY_START) break;
+            // ZL and ZR: the track before or after it on the card. The
+            // Begin of unloading closes this one, as the game does between
+            // races, and the other loads in its place while the loop waits.
+            if (kDown & (KEY_ZL | KEY_ZR)) {
+                int next = trackview_next_track(g_track.track,
+                                                (kDown & KEY_ZR) ? 1 : -1);
+
+                if (next != g_track.track) {
+                    trackview_switch(&g_track, next);
+                    logTrackView("switched to");
+                }
+            }
             hidCircleRead(&pad);
             trackview_input(&g_track, kDown, hidKeysHeld(), pad.dx, pad.dy,
                             BOOT_DT);
@@ -1833,14 +1860,19 @@ int main(int argc, char** argv)
 
             C2D_TargetClear(g_bot, BOT_BACK);
             C2D_SceneBegin(g_bot);
-            drawBotPanel(&ui, "TRACK VIEWER",
+            char title[32];
+
+            snprintf(title, sizeof title, "TRACK VIEWER  TRACKB%d",
+                     g_track.track);
+            drawBotPanel(&ui, title,
                          g_track.loaded
                              ? "The scenery the game's own cull picks, "
                                "prelit, in the engine's draw order. "
                                "Numbers go to the debug log."
                              : g_track.note,
                          1.0f,
-                         "Pad fly  ABXY look  L/R down, up  D-pad speed, stop");
+                         "Pad fly  ABXY look  L/R down, up  D-pad speed, "
+                         "stop  ZL/ZR track");
             C3D_FrameEnd(0);
             continue;
         }

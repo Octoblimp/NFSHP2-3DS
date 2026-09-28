@@ -1,8 +1,9 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-27), after task 36's seventh slice: the sun's
-retail pass, the 24-bit Z and the glare's own layers. `HANDOFF.md` is the running narrative; this file is the short
+continuation (2026-09-27), after task 36's eighth slice: retail's data on
+the card, in the track viewer and the frontend, and its sound banks
+transcoded without loss. `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -127,11 +128,17 @@ Two mutation runners are kept rather than thrown away:
 `python tools/bslotpool_mutate.py` (~20 minutes) and
 `python tools/geometry_mutate.py` (~2 minutes; `--full` for all 30 files).
 
-Both sound checkers want a directory of `.SBK`. Build it first:
+Both sound checkers want a directory of `.SBK`. Build it first. The
+chain's is the demo's; the card's is retail's:
 
 ```bash
 python tools/audio_pack.py extracted/SOUND out/SOUND
+python tools/audio_pack.py extracted-retail/SOUND out/SOUND-retail --report
+python tools/sndbank_check.py out/SOUND-retail --audio --sound extracted-retail/SOUND
 ```
+
+The transcode is exact (`docs/formats/sound-bank.md`, "The transcode is
+exact"), and `--audio` fails on any sample that differs.
 
 The emulator's copy lives at `%APPDATA%\Azahar\sdmc\NFSHP2\SOUND` -- that is
 the data root `gamedata.c` resolves to on this machine, and the
@@ -278,12 +285,39 @@ and so replaced every boot.
      takes retail TRACKB12's own chunk, and `loadertable_check` runs its
      sun scenario on retail too.
 
-   **Next is the rest of step 4: the retail disc's data in the track
-   viewer.**
-   - Deploy `extracted-retail/` to Azahar's
-     `sdmc:/3ds/NFSHP2-3DS/data` and walk the viewer on retail TRACKB12.
-   - Then a second location, `TRACKB21` or `TRACKB31`, to show the loaders
-     are not TRACKB12's alone. The viewer's `kTexFiles` are TRACKB12's.
+   **Task 36's eighth slice is closed: retail's data on the card (step
+   4).** The card's data folder is `sdmc:/NFSHP2` and holds retail's
+   files alone, all 30 tracks expanded.
+   - The viewer takes a track number and names `TRACKB<n>.BUN`,
+     `TEX<n>TRACK.BIN` and `TEX<n>LOCATION.BIN` from it. ZL/ZR unload
+     one and load the next on the card; `run_azahar_track.ps1 -Switches
+     5` walks TRACKB12, 21, 31, 41, 61 and 11, and they all draw.
+     `TRACKVIEW_MAX_SOLIDS` is 1,536 for TRACKB61 and B64's 1,345.
+   - Retail's Flailer objects carry a `char Name[24]` at +16 that shifts
+     everything after it. `bui.c` and `flailer_dump.py` tell the layouts
+     apart per object, and `bui_check` gives 0 differ on all six bundles
+     of both discs. `docs/formats/flailer-ui.md`, "Retail".
+   - The title screen's logo, `LOADING`, is only in `GLOBAL\DYNTEX.BIN`
+     on retail. The port loads that pack at boot, as the game does.
+   - The sound banks are retail's 25. `audio_pack.py` no longer decodes
+     and re-encodes: it rewrites each SPU frame as two DSPADPCM frames,
+     and all 398 retail and 469 demo channels come back sample-exact.
+     The user heard the frontend's sounds on Azahar.
+
+   **Next are the boot movies.** The title screen asks for
+   `MOVIES\INTRO\EALOGO_EN.AVI` and `NFSINTRO_EN.AVI`, and the port
+   has only the demo's baked `.M3V` path. Retail's are 512x256 MV30 at
+   30 fps, every frame a keyframe, with 8-bit mono PCM interleaved:
+   EALOGO 180 frames, BBGLOGO 392, NFSINTRO 2,425. Emulating the decoder
+   costs about 8 s a frame, so the intro cannot be baked in any
+   reasonable time and would not fit if it were. The port wants a
+   native MV3 decoder that streams the AVI from the card:
+   - Transcribe DCTImage/Huffman/MV3Codec from retail's code
+     (`docs/formats/mv3-video.md` has the demo's; retail changed only
+     layouts and ToImage's register use), and hold it bit-exact to
+     `tools/video_extract.py`'s emulated frames on a checker.
+   - Play it on the 3DS through the title screen's two movie planes,
+     with the PCM through ndsp.
 
    "The road to the full game", below, has everything after it.
 2. **Task 27's first slice is closed: `Track.obj` and `TerrainType.obj`**,
@@ -1378,7 +1412,7 @@ each class shows what it reaches.
 | 1 | ~~The track on the screen: the viewer mode, eModel over `georender`, a free camera~~ done, task 27's twenty-third slice | 1 |
 | 2 | ~~The LoaderTable: every chunk type in TRACKB12, with the solids, the texture packs, the topology and the routes live~~ done, task 27's twenty-fourth and twenty-fifth slices | 2 |
 | 3 | ~~The sky, the sun and the weather's draw~~ done, task 27's twenty-sixth to twenty-ninth slices. The shipped image has no rain or storm to draw | 2-3 |
-| 4 | The retail disc's data in the track viewer: the tracks shipped expanded, the retail chunk set, the changed loaders, and a second location. The LoaderTable and TrackInfo are done, task 36's second slice | 1 |
+| 4 | ~~The retail disc's data in the track viewer: the tracks shipped expanded, the retail chunk set, the changed loaders, and a second location~~ done, task 36's second to eighth slices | 1 |
 | 5 | ~~The retail model: mipsemu on `SLES_507.31` by retail_match's names, so that a checker can run the retail function~~ done, task 36's second slice: `tools/retail_model.py`, in `track_check` and `loadertable_check` | 1 |
 | 6 | Car's constructor and destructor, and CarRenderInfo, from retail where retail changed them (all of them did), so that a car draws on the track | 3-4 |
 | 7 | Player and the chase cameras (CM_DRIVE and the rest of `cammover.c`'s set) | 2 |

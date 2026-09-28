@@ -22,8 +22,14 @@
 #define BUI_CHUNK_PROJECT   0x00010213u   // FlailerProjectChunk, 20 bytes
 #define BUI_CHUNK_SCREEN    0x80010201u   // container, one per screen
 #define BUI_CHUNK_SCREENDEF 0x00010203u   // FlailerScreenChunk, 40 bytes
-#define BUI_CHUNK_BITMAP    0x00010210u   // FlailerBitmapChunk, 120 bytes
-#define BUI_CHUNK_TEXT      0x00010212u   // FlailerTextChunk, 76 + MaxChars
+#define BUI_CHUNK_BITMAP    0x00010210u   // FlailerBitmapChunk, 144 bytes
+#define BUI_CHUNK_TEXT      0x00010212u   // FlailerTextChunk, 100 + MaxChars
+
+// Retail's objects carry their own name, a char[24] at +16, which the demo's
+// don't; everything the demo has from +16 on sits this much later, so the
+// demo's bitmap is 120 bytes and its text 76 + MaxChars. bui.c reads either
+// and tells them apart per object.
+#define BUI_NAME_LEN 24
 
 // The empty string's bStringHash, used as "unset" throughout the format.
 #define BUI_HASH_NONE 0xffffffffu
@@ -84,6 +90,7 @@ typedef enum {
 typedef struct {
     uint32_t nameHash;
     uint32_t groupHash;      // FlailerSetGroupVisibility's key
+    char     name[BUI_NAME_LEN + 1];   // retail only; "" on the demo's
     int8_t   type;           // BUIObjectType -- what the renderer switches on
     int8_t   visible;        // BUIVisibility
     int8_t   z;              // render layer, 0..28
@@ -123,6 +130,7 @@ typedef struct {
 typedef struct {
     const uint8_t* payload;
     uint32_t       size;
+    uint32_t       shift;    // BUI_NAME_LEN on retail's layout, 0 the demo's
 } BUIObjectRef;
 
 typedef struct {

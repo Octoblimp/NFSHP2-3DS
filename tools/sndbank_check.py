@@ -10,8 +10,9 @@ r"""Check the port's .SBK reader, three ways.
    only proves they agree -- it says nothing about whether audio_pack.py put
    the right audio in. So --audio decodes the DSPADPCM back to PCM16 in
    Python and compares it against the SPU ADPCM decoded straight out of the
-   .MSB, and reports the SNR. That is the only step here that reaches back
-   past the pack to the disc.
+   .MSB. audio_pack.py transcodes frame by frame, so every sample has to
+   come back as the disc has it; one that does not is a failure. That is
+   the only step here that reaches back past the pack to the disc.
 
 3. Against corruption. --mutate flips bytes in the header and the records and
    checks the C reader rejects the bank or clamps, rather than handing back a
@@ -19,7 +20,7 @@ r"""Check the port's .SBK reader, three ways.
 
 Usage:
     python tools/sndbank_check.py <dir-of-SBK>
-    python tools/sndbank_check.py <dir-of-SBK> --audio --sound extracted/SOUND
+    python tools/sndbank_check.py <dir-of-SBK> --audio --sound extracted-retail/SOUND
     python tools/sndbank_check.py <dir-of-SBK> --mutate
 """
 import argparse
@@ -179,21 +180,16 @@ def dsp_decode(data, coefs, samples):
     return out[:samples]
 
 
-def snr(ref, got):
-    n = min(len(ref), len(got))
-    se = sig = 0.0
-    for i in range(n):
-        d = float(ref[i]) - float(got[i])
-        se += d * d
-        sig += float(ref[i]) * float(ref[i])
-    if sig == 0.0:
-        return 99.0 if se == 0.0 else -99.0
-    return 10.0 * math.log10(sig / se) if se > 0.0 else 99.0
+def worst_diff(ref, got):
+    """The largest |difference| over the two, or None when they are the
+    same length and every sample agrees."""
+    d = max((abs(a - b) for a, b in zip(ref, got)), default=0)
+    return None if d == 0 and len(ref) == len(got) else d
 
 
 def check_audio(sbk_dir, sound_dir, limit):
     """Decode each .SBK patch back and compare it to the disc's own audio."""
-    worst = (999.0, "")
+    worst = (0, "")
     n = bad = 0
     for msh in sorted(Path(sound_dir).glob("*.MSH")):
         sbk = Path(sbk_dir) / (msh.stem + ".SBK")
@@ -228,12 +224,14 @@ def check_audio(sbk_dir, sound_dir, limit):
                     ref = ref[LEAD_IN:]
                 got = dsp_decode(buf[dataOff + off + c * per: dataOff + off + (c + 1) * per],
                                  coefs[c * 16:(c + 1) * 16], samples)
-                s = snr(ref[:samples], got)
+                d = worst_diff(ref[:samples], got)
                 n += 1
-                if s < worst[0]:
-                    worst = (s, "%s/%s ch%d" % (msh.stem, members[0]["name"], c))
-                if s < 15.0:
-                    print("  %s/%s ch%d: only %.1f dB" % (msh.stem, members[0]["name"], c, s))
+                if d is not None:
+                    where = "%s/%s ch%d" % (msh.stem, members[0]["name"], c)
+                    if d >= worst[0]:
+                        worst = (d, where)
+                    print("  %s: %d of %d samples back, off by up to %d"
+                          % (where, len(got), samples, d))
                     bad += 1
     return worst, n, bad
 
@@ -282,7 +280,7 @@ def main():
     ap.add_argument("sbk_dir", help="a directory of .SBK files")
     ap.add_argument("--audio", action="store_true",
                     help="decode the DSPADPCM back and compare it to the disc")
-    ap.add_argument("--sound", default="extracted/SOUND",
+    ap.add_argument("--sound", default="extracted-retail/SOUND",
                     help="where the disc's .MSH/.MSB live (for --audio)")
     ap.add_argument("--limit", type=int, default=0,
                     help="stop --audio after this many channels")
@@ -323,8 +321,9 @@ def main():
 
     if a.audio:
         worst, n, bad = check_audio(a.sbk_dir, a.sound, a.limit)
-        print("%d channels decoded back, worst SNR %.2f dB (%s), %d bad"
-              % (n, worst[0], worst[1], bad))
+        print("%d channels decoded back, %d sample-exact, %d differ%s"
+              % (n, n - bad, bad,
+                 " (worst %s, by %d)" % (worst[1], worst[0]) if bad else ""))
         rc |= 1 if bad else 0
     return rc
 

@@ -7,8 +7,8 @@ Every screen in the game, frontend and in-game HUD alike, is a tree of these:
       0x00010213  FlailerProjectChunk       20 bytes
       0x80010201  (screen)                  container, one per screen
         0x00010203  FlailerScreenChunk        40 bytes
-        0x00010210  FlailerBitmapChunk        120 bytes
-        0x00010212  FlailerTextChunk          76 + MaxChars bytes
+        0x00010210  FlailerBitmapChunk        120 bytes (retail 144)
+        0x00010212  FlailerTextChunk          76 + MaxChars bytes (retail 100)
 
 The payload of each leaf is the engine class verbatim -- the chunk sizes are
 literally `sizeof()` as recorded in the `.mdebug` type info
@@ -114,16 +114,32 @@ def cstr(buf):
     return buf.split(b"\0")[0].decode("latin-1")
 
 
+# Retail's FlailerObjectChunk carries the object's own name, a char[24], at
+# +16, and every field the demo has from +16 on sits 24 bytes later. The
+# demo's +16 is ObjectType (1..5) and +17 Visible (0..3); retail has a name's
+# first two letters there. Offsets below are the demo's, plus `shift`.
+NAME_LEN = 24
+
+
+def layout_shift(data, off):
+    """0 for the demo's object layout, NAME_LEN for retail's."""
+    if 1 <= data[off + 16] <= 5 and data[off + 17] <= 3:
+        return 0
+    return NAME_LEN
+
+
 def read_object(data, off, size):
     """The FlailerObjectChunk part, shared by bitmaps and text."""
     o = {}
+    sh = o["shift"] = layout_shift(data, off)
+    o["name"] = cstr(data[off + 16:off + 16 + NAME_LEN]) if sh else ""
     o["name_hash"], o["group_hash"] = struct.unpack_from("<2I", data, off + 8)
     o["object_type"], o["visible"], o["z"], o["dirty"] = \
-        struct.unpack_from("<4B", data, off + 16)
+        struct.unpack_from("<4B", data, off + sh + 16)
     o["top_left_x"], o["top_left_y"], o["scale_x"], o["scale_y"] = \
-        struct.unpack_from("<4f", data, off + 24)
+        struct.unpack_from("<4f", data, off + sh + 24)
     o["rotation"], o["anim_mode"], o["render_on_poly"], o["clip_to_poly"] = \
-        struct.unpack_from("<4I", data, off + 40)
+        struct.unpack_from("<4I", data, off + sh + 40)
     del size
     return o
 
@@ -131,6 +147,7 @@ def read_object(data, off, size):
 def read_bitmap(data, off, size):
     o = read_object(data, off, size)
     o["kind"] = "bitmap"
+    off += o["shift"]
     o["texture_hash"] = struct.unpack_from("<I", data, off + 56)[0]
     o["gourad"] = [struct.unpack_from("<I", data, off + 64 + 4 * i)[0] for i in range(4)]
     o["state_flags"] = data[off + 80]
@@ -141,9 +158,10 @@ def read_bitmap(data, off, size):
 def read_text(data, off, size):
     o = read_object(data, off, size)
     o["kind"] = "text"
+    sh = o["shift"]
     o["font_hash"], o["max_chars"], o["format_options"], o["color"], o["language_id"] = \
-        struct.unpack_from("<5I", data, off + 56)
-    o["string"] = cstr(data[off + 76:off + size])
+        struct.unpack_from("<5I", data, off + sh + 56)
+    o["string"] = cstr(data[off + sh + 76:off + size])
     return o
 
 

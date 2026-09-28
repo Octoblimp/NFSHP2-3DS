@@ -8309,3 +8309,57 @@ loadertable_check  demo 178 ops 1617 lines, retail 37375 ops 49175 lines, 0 diff
 Deploy `extracted-retail/` to Azahar and walk the viewer on retail
 TRACKB12, then TRACKB21 or TRACKB31. The eView retail pass is after:
 the 176-byte eRenderTarget, 0x00105ac0 and the Z table at `0x002c9e20`.
+
+## Session 30, continued (2026-09-27) -- Task 36's eighth slice: retail's data on the card
+
+The user's rule from here on: the card holds one folder of retail files
+and nothing of the demo's. The port reads `sdmc:/NFSHP2`.
+
+- **The viewer takes any track.** `trackview_init(v, track)` names the
+  bundle and both texture files from the number, as the game does from
+  `RaceParameters.TrackNumber`. `trackview_next_track` walks 11..66,
+  skipping a sixth digit past 6 and any bundle not on the card, and
+  `trackview_switch` frees the one held, as the Begin of unloading does,
+  and loads the next with the shared bundles kept. ZL and ZR drive it,
+  and `logTrackView` writes the same lines on a switch as on entry.
+  `run_azahar_track.ps1 -Switches N` presses ZR, waits for the log's
+  "switched to" and takes three shots. TRACKB12, 21, 31, 41, 61 and 11
+  all draw, with 0 missing textures. TRACKB61 and B64 have 1,345 solids,
+  so `TRACKVIEW_MAX_SOLIDS` is 1,536.
+- **Retail's Flailer objects.** A `char Name[24]` sits at +16, and every
+  field from `ObjectType` on is 24 bytes later: a bitmap is 144 bytes and
+  a text object `100 + MaxChars`. Retail's code agrees: AddFlailerStrip
+  (`0x00145d38`) reads Z at 42, the text GetAlpha (`0x00140f08`) at 95,
+  the bitmap one (`0x001413e8`) at 91, and SetColor (`0x00140ca0`) the
+  colour at 92 with `DirtyFlag` at 43. The demo's +16 is `ObjectType`
+  (1..5) and a retail name starts with a letter, so `bui.c` and
+  `flailer_dump.py` pick the layout per object. `TITLE_LETTERBOX` and
+  `TITLE_FULLSCREEN` are the two movie planes the demo only named by hash.
+  `bui_check` diffs names too: 0 lines differ over both discs' three
+  bundles.
+- **DYNTEX.** The title's logo, `LOADING` (`0xab0e817d`, 512x184), is in
+  the demo's GLOBALB.BUN but only in retail's `GLOBAL\DYNTEX.BIN`, one of
+  the three packs the game loads at boot. `main.c` adds it to the UI's
+  bundles. The user saw the logo come back.
+- **Retail's sound, and no loss.** The card had no `SOUND`, so the port
+  found 0 patches. Retail's `.MSH`/`.MSB` are the demo's format, 25 banks.
+  And `audio_pack.py` no longer goes through PCM16 and `dspenc`: SPU
+  ADPCM and DSPADPCM are one recurrence at different fixed points, so each
+  16-byte SPU frame becomes two 8-byte DSP frames headed `pred << 4 |
+  (12 - shift)`, nibbles swapped, with the SPU's coefficients times 32 in
+  every patch. Both discs keep to predictors 0..4 and shifts 0..12, and
+  every looping lead-in decodes to silence, so the zero history the port
+  starts from is the SPU's. All 398 retail and 469 demo channels come back
+  sample-exact; the old banks were 22.6 dB at worst and fail the new
+  check on every channel. `sndbank_check --audio` asks for exactness now.
+  The log reads `Sound: 29 patches in 24 voices`, and the user heard
+  them.
+- **The chain:** 64 of 64 pass, unchanged.
+
+### Next
+
+The boot movies. `run_azahar_test.ps1` fails on "title screen never
+opened a movie": the port plays only the demo's baked `.M3V`, and
+retail's intro is 2,425 frames of 512x256 MV30, too many to bake by
+emulation. A native MV3 decoder, held bit-exact to the emulated one, then
+played through the title's movie planes with its PCM.

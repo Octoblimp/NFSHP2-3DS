@@ -116,17 +116,53 @@ Output goes to `<outdir>/<bank name>/`, one 16-bit PCM WAV per patch, plus
 points for the port to consume. `--raw` also dumps each patch as untouched
 SPU ADPCM. All 30 banks convert in about 14 seconds, producing 439 WAVs.
 
-For the 3DS the WAVs feed `tools/bin/dspenc.exe` to become DSPADPCM, which is
-what the 3DS DSP wants. `tools/audio_pack.py` does that end to end; the
-result is the `.SBK` below.
+The WAVs are for listening. The 3DS gets the `.SBK` below, which
+`tools/audio_pack.py` builds from the `.MSB` directly, without going through
+PCM.
 
 ## The port's `.SBK`
 
 The 3DS DSP reads Nintendo DSPADPCM and nothing else, so the disc's SPU ADPCM
 has to be transcoded before it can be played. Both formats are 4 bits a
-sample, so this costs no space: 6.6 MB of `.MSB` becomes 6.51 MB of `.SBK`,
-where decoding to PCM16 instead would have cost 23 MB and the ARM11 cycles to
-mix it. One `.SBK` per `.MSH`/`.MSB` pair, 30 of them, 439 patches.
+sample, so this costs no space: retail's 5.7 MB of `.MSB` becomes 5.60 MB of
+`.SBK` (the demo's 6.6 MB, 6.51 MB), where decoding to PCM16 instead would
+have cost four times that and the ARM11 cycles to mix it. One `.SBK` per
+`.MSH`/`.MSB` pair: 25 on retail with 369 patches, 30 on the demo with 439.
+Retail's banks are the demo's format unchanged; the card carries retail's.
+
+### The transcode is exact
+
+SPU ADPCM and DSPADPCM are the same codec. Each predicts a sample from the
+two before it with a coefficient pair from a table, and adds a 4-bit delta
+scaled by a per-frame amount:
+
+```
+SPU:  s = (d << 12 >> shift) + ((c0 * h1 + c1 * h2 + 32) >> 6)
+DSP:  s = (d * 2^scale * 2048 + k0 * h1 + k1 * h2 + 1024) >> 11
+```
+
+With `k = c * 32` and `scale = 12 - shift` these are the same integers: the
+delta term is a whole multiple of 2048, so it passes the DSP's shift
+untouched, and what is left is the SPU's own rounding, `+32 >> 6` written as
+`+1024 >> 11`. Both clamp to 16 bits after the sum. So `audio_pack.py`
+rewrites each 16-byte SPU frame of 28 samples as two 8-byte DSP frames of
+14, without decoding anything:
+
+* each DSP frame's header is `predictor << 4 | (12 - shift)`;
+* the fourteen data bytes are split seven and seven, with each byte's
+  nibbles swapped, since the SPU plays the low nibble first and the DSP the
+  high;
+* every patch carries the same coefficient table, the SPU's five pairs
+  times 32 and three pairs of zeros.
+
+DSPADPCM can say predictors 0..7 and scales 0..15, so an SPU shift above 12
+has no equivalent. Neither disc has one (shifts 0..12 and predictors 0..4
+throughout, 423,190 frames on the demo and 364,425 on retail), and the pack
+stops rather than guess if it meets one.
+
+Until 2026-09-27 the pack decoded to PCM16 and re-encoded with
+`tools/bin/dspenc.exe`. That was lossy: typical 30-37 dB, worst 22.59 dB on
+the demo and 23.39 dB on retail. `dspenc` is no longer used.
 
 Built by `tools/audio_pack.py`, read by `3DS Files/source/sndbank.c`, and the
 two are held together by `tools/sndbank_check.py`.
@@ -173,17 +209,20 @@ the right channel of the record before them and repeat its name, so they
 become one two-channel patch under one name -- which is what the engine's own
 `bSnd_GetPatchChannels()` returns 2 for.
 
-**Looping patches lose their 28-sample lead-in.** All 334 of the disc's
-looping patches loop from sample 28 to their end, without exception, because
-the SPU convention is a silent first frame with the loop-start flag on the
-second. Dropping those 28 samples makes the whole buffer the loop body, which
-is the only shape ndsp can loop without queueing a second `waveBuf`. There is
-no patch on the disc that loops from anywhere else, so nothing is lost.
+**Looping patches lose their 28-sample lead-in.** All of the discs'
+looping channels (336 on the demo, 269 on retail) loop from sample 28 to
+their end, without exception, because the SPU convention is a silent first
+frame (flags 0) with the loop-start flag on the second (flags 6). Dropping
+that frame makes the whole buffer the loop body, which is the only shape
+ndsp can loop without queueing a second `waveBuf`. No patch on either disc
+loops from anywhere else, so nothing is lost.
 
-`dspenc` pads its last block out with silence, which would put a gap in the
-middle of a loop, so `audio_pack.py` sizes the block to hold the whole patch.
-In practice that padding is zero samples wide anyway: every patch is a whole
-number of 28-sample SPU frames and 14 divides 28.
+The lead-in decodes to silence in every one of them, so the SPU's history
+is zero when the loop body starts, and the port starts each DSP channel from
+a zero history too (`hw_start` in `bsnd.c`). The transcode's exactness holds
+across the cut; `audio_pack.py` checks the two samples and stops if either
+is not zero. On a loop the DSP carries its history on from the loop's end,
+as the SPU does.
 
 ### What the checkers actually prove
 
@@ -191,8 +230,10 @@ number of 28-sample SPU frames and 14 divides 28.
 the pack to the disc:
 
 ```bash
+python tools/audio_pack.py extracted-retail/SOUND out/SOUND-retail --report
+python tools/sndbank_check.py out/SOUND-retail --audio --sound extracted-retail/SOUND
 python tools/audio_pack.py extracted/SOUND out/SOUND
-python tools/sndbank_check.py out/SOUND --audio --mutate 20000
+python tools/sndbank_check.py out/SOUND --audio --sound extracted/SOUND --mutate 20000
 ```
 
 1. **Reader against reader.** `sndbank.c` and the checker's own Python reader
@@ -202,12 +243,10 @@ python tools/sndbank_check.py out/SOUND --audio --mutate 20000
 2. **Pack against disc.** Two readers agreeing about one file says nothing
    about whether the right audio went into it, so `--audio` decodes the
    DSPADPCM back to PCM16 in Python -- a decoder written from the DSP's own
-   recurrence, not from `dspenc.c` -- and compares it with the SPU ADPCM
-   decoded straight out of the `.MSB`. 469 channels, worst SNR **22.59 dB**
-   (`FRONTEND/MenuCarColour`), typical 30-37 dB, nothing under 15. That the
-   figure matches `dspenc --verify` to the hundredth of a dB is the useful
-   part: two encoders' worth of independent arithmetic land on the same
-   number.
+   recurrence -- and compares it with the SPU ADPCM decoded straight out of
+   the `.MSB` by `audio_convert.py`. Every sample has to agree, and one that
+   does not fails the check: 398 channels on retail and 469 on the demo, all
+   sample-exact. The old lossy banks fail it on all 469, off by up to 6,077.
 3. **Reader against corruption.** `--mutate` flips bits in the header and the
    record table and checks both readers agree on what is still readable. A
    `.SBK` comes off an SD card, and a record that quietly points past the blob

@@ -2167,7 +2167,21 @@ phases.
         RealTimer's ticks. `sun_check` (154 of 154 mutations caught) and
         `sky_check` (93 of 95, 2 equivalent) run on the retail image.
 
-        The rest is CONTINUE.md's "The road to the full game": the rest
-        of the retail data in the viewer (step 4), the retail pass over
-        what is ported (step 10), the full frontend (step 16), the saves
-        (step 17) and every track and car (step 18).
+        **The eighth slice is closed: retail's data on the card, in the
+        viewer and the frontend (step 4).** The card holds retail's files
+        alone. The track viewer takes a track number and names its files
+        from it, and ZL/ZR unload one track and load the next: TRACKB12,
+        21, 31, 41, 61 and 11 were walked on Azahar. Retail's Flailer
+        objects carry a 24-byte name at +16, and `bui.c` and
+        `flailer_dump.py` read either layout per object. The title
+        screen's logo is in `GLOBAL\DYNTEX.BIN` on retail, which the port
+        now loads. The sound banks are retail's, and `audio_pack.py`
+        transcodes SPU ADPCM to DSPADPCM frame by frame with no loss:
+        every sample of both discs comes back exact, where the old
+        re-encode's worst was 22.6 dB.
+
+        The rest is CONTINUE.md's "The road to the full game": the boot
+        movies next (a native MV3 decoder, since retail's intro is 2,425
+        frames), then the retail pass over what is ported (step 10), the
+        full frontend (step 16), the saves (step 17) and every track and
+        car (step 18).

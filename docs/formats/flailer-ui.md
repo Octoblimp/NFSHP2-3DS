@@ -456,6 +456,54 @@ rest, and most object names, exist only inside the authoring tool, so they
 are reachable only by brute-forcing the hash -- `bhash.crack()` does that,
 and the uppercase-plus-underscore alphabet these names use makes it cheap.
 
+## Retail
+
+Retail's objects carry their own name. `FlailerObjectChunk` gains a
+`char Name[24]` at +16, between `GroupHash` and `ObjectType`, and every field
+the tables above give from +16 on sits 24 bytes later: `ObjectType` at +40,
+`Z` at +42, the position at +48, `TextureHash` at +80, a text object's
+`GouradColor` at +92 and its string at +100. A bitmap is 144 bytes and a text
+object `100 + MaxChars`. `NameHash` and `GroupHash` stay at +8 and +12, and
+the project and screen chunks (20 and 40 bytes) are unchanged.
+
+The code agrees, not just the data. Retail's AddFlailerStrip (`0x00145d38`)
+reads `Z` with `lb v0,42(v0)`, the demo's with `lb v0,18(v0)`; the text
+GetAlpha (`0x00140f08`) is `lbu v0,95(a0)` for the demo's 71; the bitmap one
+(`0x001413e8`) `lbu v0,91(a0)` for 67; and SetColor (`0x00140ca0`) reads and
+writes the colour at 92 and stamps `DirtyFlag` at 43. LoaderFlailerChunk
+itself is byte-identical, since it never reads past `NameHash`.
+
+The names are the authoring tool's, NUL-padded, cut at 23 characters
+(`GLOBAL_ANIMATING_MENUIT`), and plain enough to read:
+`TITLE_LETTERBOX` and `TITLE_FULLSCREEN` are the two movie planes this
+document otherwise knows only as `bfaebf79` and `3acf2d73`, and
+`COPYRIGHT_TEXT` is a line the demo's title screen does not have.
+
+| file | project hash | screens | bitmaps | text |
+|------|-------------:|--------:|--------:|-----:|
+| `FRONTEND\FRONTB.BUN` | `255842fd` | 41 | 1,015 | 534 |
+| `GLOBAL\INGAMEB.BUN`  | `eca3270e` | 35 | 560 | 585 |
+| `GLOBAL\GLOBALB.BUN`  | `e3448a8e` | 10 |  26 |  64 |
+
+Every object is one layout or the other, never a mix, and the two can be
+told apart per object: the demo's +16 is `ObjectType` (1..5) and +17
+`Visible` (0..3), where retail has a name's first two letters, and every
+name on the disc starts with a letter. `3DS Files/source/bui.c` and
+`tools/flailer_dump.py` both check that and shift by 24, so the port reads
+retail's bundles while the checkers still run on the demo's.
+`tools/bui_check.py` diffs the two readers on either, names included: 0
+lines differ on all six bundles.
+
+Font chunks (`0x00015010`) change size between the two games only because
+the fonts have more glyphs and kerning pairs. The chunk addresses both
+tables by offset, and `tools/bfont_check.py` reads retail's with no change.
+
+One texture moved. The title screen's Need for Speed logo, `LOADING`
+(`0xab0e817d`, 512x184), is in `GLOBALB.BUN`'s pack on the demo but only in
+`GLOBAL\DYNTEX.BIN` on retail, one of the three packs the game loads at
+boot. The port adds that file to the renderer's bundles; without it the
+title screen showed `PRESS START` on its bar and nothing above it.
+
 ## The engine side
 
 | symbol | address | role |
