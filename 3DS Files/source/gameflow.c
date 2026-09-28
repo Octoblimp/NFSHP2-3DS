@@ -225,19 +225,20 @@ int bgf_change_to_screen(BGameFlow* gf, const char* name, int pushCurrent)
             gf->screen = n;
             screenVisible(gf, n->hash, 1);
             trace(gf, "enter %s %08x", n->name, (unsigned)n->hash);
+            // FlailerScreen::Activate (0x0016a858) in its order: build the
+            // FlailerMenu, send SCREEN_ACTIVATE, then set the current item
+            // and activate the menu. The menu exists before the screen's
+            // constructor runs, which is what lets the constructor gray an
+            // item of it -- the language screen hides MENUITEM_7, Options
+            // hides its Languages item on NTSC. The opening
+            // MENUITEM_HIGHLIGHT is after, so it reaches a screen object that
+            // exists: sent first, the brackets and the blurb stay where the
+            // bundle authored them until the player moves. leaveScreen is
+            // after SCREEN_UNACTIVATE for the same reason.
+            HOOK_VOID(gf, openScreen, n);
             memset(&data, 0, sizeof(data));
             data.itemHash = n->hash;
             bgf_send(gf, BMSG_SCREEN_ACTIVATE, &data);
-            // After the message, not before. There is no enterScreen in the
-            // original -- it is the port's name for "build the menu" -- and
-            // in the original the menu is built by the screen's own
-            // constructor, which runs on SCREEN_ACTIVATE. A port that builds
-            // it first delivers the menu's opening MENUITEM_HIGHLIGHT to a
-            // screen object that does not exist yet, and the screen loses
-            // the one highlight it never asked for and always gets: the
-            // brackets and the blurb stay where the bundle authored them
-            // until the player moves. leaveScreen is already after
-            // SCREEN_UNACTIVATE for the same reason.
             HOOK_VOID(gf, enterScreen, n);
         }
     }
@@ -250,11 +251,11 @@ int bgf_move_to_previous_screen(BGameFlow* gf, int n, int sendBackButton,
     BScreenCallbackData data;
     char                name[BGF_NAME_LEN];
 
+    // Memset, so ItemHash is 0: BACK names no item.
     memset(&data, 0, sizeof(data));
     data.port  = port;
     data.param = 1;
     data.noise = BSND_MENU_CANCEL;
-    if (gf->screen) data.itemHash = gf->screen->hash;
 
     if (sendBackButton) {
         bgf_send(gf, BMSG_SCREEN_BACK_BUTTON, &data);
@@ -286,7 +287,12 @@ int bgf_move_to_previous_screen(BGameFlow* gf, int n, int sendBackButton,
 
 int bgf_move_back_screen(BGameFlow* gf, int n)
 {
-    return bgf_move_to_previous_screen(gf, n, 1, 0);
+    return bgf_move_to_previous_screen(gf, n, 0, -1);
+}
+
+int bgf_back_button(BGameFlow* gf, int port)
+{
+    return bgf_move_to_previous_screen(gf, 1, 1, port);
 }
 
 // ---------------------------------------------------------------- the flow
@@ -388,11 +394,13 @@ void bgf_init(BGameFlow* gf,
     // VIDEO_MODE { MODE_PAL = 0, MODE_NTSC = 1 }, and note which way round
     // that makes ShouldSeeLanguageSelectScreen: NTSC skips the language
     // screen, PAL shows it. InitDisplaySystem (0x00100750) picks it with
-    // bFileExists("PAL.TAG") -- and PAL.TAG is a zero-size ZDIR entry, so
-    // which one the retail disc is cannot be settled from the ELF. NTSC is
-    // the default here because only the English movie is on the disc.
-    gf->videoMode            = 1;
-    gf->currLanguage         = 0;
+    // bFileExists("PAL.TAG"), and the retail disc, SLES_507.31, has PAL.TAG
+    // in its ZDIR (entry 405, bf0a6606): it is a PAL disc, and it asks for a
+    // language on every boot, as it does on PCSX2.
+    gf->videoMode            = 0;
+    // LanguageManager's constructor (0x0021dfa8). LoadGlobalChunks sets
+    // English before the flow starts; see bgf_load_global_chunks.
+    gf->currLanguage         = -1;
     gf->demoDiscActive       = 0;
     gf->demoModeStatus       = 0;
     gf->legalScreenTimeout   = 7.0f;
@@ -484,53 +492,147 @@ void bgf_consider_start_demo_mode(BGameFlow* gf, uint32_t since)
     HOOK_VOID0(gf, startDemoMode);
 }
 
+// ------------------------------------------------------- LanguageManager
+
+// LoadLocalizedSpeechFiles' two callers, 0x0021e250 and 0x0021e280. +20
+// says the speech is in, and is written before the call.
+static void loadCurrentSpeech(BGameFlow* gf)
+{
+    if (gf->currLanguage == -1 || gf->speechLoaded) return;
+    gf->speechLoaded = 1;
+    trace(gf, "speech %d", gf->currLanguage);
+    HOOK_VOID(gf, loadSpeech, gf->currLanguage);
+}
+
+static void unloadSpeech(BGameFlow* gf)
+{
+    if (!gf->speechLoaded) return;
+    gf->speechLoaded = 0;
+    trace(gf, "speech unload");
+    HOOK_VOID0(gf, unloadSpeech);
+}
+
+void bgf_set_curr_language(BGameFlow* gf, int language)
+{
+    int old = gf->currLanguage;
+
+    if (language == old) return;
+    // The outgoing table's chunks go first (UnloadChunks, 0x001992a8).
+    if (old != -1) trace(gf, "language unload %d", old);
+    gf->currLanguage = language;
+    if (language != -1) {
+        // FE_<language>.BIN into the buffer LoadGlobalChunks sized for the
+        // longest of them, then LoadChunks.
+        trace(gf, "language %d", language);
+        HOOK_VOID(gf, setLanguage, language);
+    }
+
+    // The tail, 0x0021e1e0. Speech that is in is swapped for the new
+    // language's; speech that is not stays out -- FRONTB's load callback is
+    // what first brings it in.
+    if (gf->speechLoaded) {
+        unloadSpeech(gf);
+        loadCurrentSpeech(gf);
+    }
+    // 0x001681b0: the LOADING logo and NFS_LOGO_ALPHA have French art, and
+    // gp-21404 says which is in. Retail unloads the LOADING texture, remaps
+    // it, reloads it and waits for the pack; the host does all of that.
+    if ((language == 1) != (gf->logoFrench != 0)) {
+        gf->logoFrench ^= 1;
+        trace(gf, "logo art %d", gf->logoFrench);
+        HOOK_VOID(gf, swapLogoArt, gf->logoFrench);
+    }
+    // FlailerUpdateLanguageText (0x00141648) re-reads every text object's
+    // string. The port's renderer looks each one up as it draws.
+}
+
 // --------------------------------------------------- GAMEFLOW_STATE hooks
+
+// LoadResourceFile, traced. A host with no loader has loaded everything
+// already, so the callback runs at once.
+static void loadResource(BGameFlow* gf, const char* path, BGameFlowDone done)
+{
+    trace(gf, "load %s", path);
+    if (gf->hooks.loadResource)
+        gf->hooks.loadResource(gf->hooks.user, path, done);
+    else if (done)
+        done(gf);
+}
+
+// 0x00168658, LoadSoundRegionsFrontEnd's callback: the frontend is in.
+static void frontendSoundsLoaded(BGameFlow* gf)
+{
+    bgf_change_state(gf, BGF_IN_FRONTEND, BGF_NONE);
+}
+
+// 0x00168668, FRONTB's: the speech, then the frontend's sound regions.
+static void frontendLoaded(BGameFlow* gf)
+{
+    loadCurrentSpeech(gf);
+    trace(gf, "load sound regions");
+    if (gf->hooks.loadSoundRegions)
+        gf->hooks.loadSoundRegions(gf->hooks.user, frontendSoundsLoaded);
+    else
+        frontendSoundsLoaded(gf);
+}
+
+void bgf_load_global_chunks(BGameFlow* gf)
+{
+    bgf_set_curr_language(gf, 0);   // l_ENGLISH, through 0x00100808
+
+    // The demo disc starts its slideshow here; retail puts LOADING_TRACK
+    // up. The copyright line is FRONTB's, on TITLE_IMAGE, and FRONTB is not
+    // loaded yet, so the second call finds nothing: retail makes it anyway.
+    if (gf->demoDiscActive) {
+        screenVisible(gf, BGF_SCREEN_FIRSTLEGAL, 1);
+    } else {
+        screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 1);
+        objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 1);
+    }
+    // One frame, outside MainLoop. Nothing draws again until MainLoop runs,
+    // so this is the picture that stays up while the frontend loads.
+    trace(gf, "display frame");
+    HOOK_VOID0(gf, displayFrame);
+}
 
 void bgf_begin_loading_frontend(BGameFlow* gf)
 {
-    gf->beginScreenFadeTime = 0;
+    // The demo zeroed this. Retail times the slideshow from here instead.
+    gf->beginScreenFadeTime = gf->realTime;
+
+    // RaceParameters::InitWithDefaults and a bCountFreeMemory whose answer
+    // is kept for a debug print: nothing the flow reads.
 
     // FRONTA.BUN is the loading bundle that was meant to stay resident while
     // FRONTB streams in. It is a zero-byte file on this disc, and so are
     // GLOBALA.BUN and INGAMEA.BUN -- the split was never used.
-    HOOK_VOID(gf, loadResource, "FRONTEND\\FRONTA.BUN");
-
-    if (gf->currLanguage == -1) gf->needToSetLanguage = 1;
-    HOOK_VOID(gf, setLanguage, gf->currLanguage < 0 ? 0 : gf->currLanguage);
+    loadResource(gf, "FRONTEND\\FRONTA.BUN", NULL);
 
     // The hot-chunking trick: load FRONTB.LZC, then tell the resource system
-    // it is called FRONTB.BUN. Only the .LZC is really on the disc.
-    HOOK_VOID(gf, loadResource, "FRONTEND\\FRONTB.BUN");
+    // it is called FRONTB.BUN. Only the .LZC is really on the disc. Its
+    // callback is what moves the flow on; the demo's language handling here
+    // is gone, because LoadGlobalChunks has already set one.
+    loadResource(gf, "FRONTEND\\FRONTB.LZC", frontendLoaded);
+    trace(gf, "hot chunk %s", "FRONTEND\\FRONTB.BUN");
 }
 
 void bgf_loop_loading_frontend(BGameFlow* gf)
 {
-    uint32_t elapsed = gf->realTime - gf->beginScreenFadeTime;
+    // Signed, as the original's slti is.
+    int32_t elapsed = (int32_t)(gf->realTime - gf->beginScreenFadeTime);
 
     // The demo disc's three-panel slideshow, three seconds each: 181, 361
     // and 541 are RealTime ticks at 60Hz. Dead on retail, because
-    // TheDemoDiscManager.bActive is 0 and nothing ever sets it.
-    if (gf->demoDiscActive && elapsed < 541) {
-        if (elapsed >= 361) {
-            screenVisible(gf, BGF_SCREEN_SLIDE2, 0);
-            screenVisible(gf, BGF_SCREEN_DISCLAIMER, 1);
-        } else if (elapsed >= 181) {
-            screenVisible(gf, BGF_SCREEN_FIRSTLEGAL, 0);
-            screenVisible(gf, BGF_SCREEN_SLIDE2, 1);
-        }
-        return;
+    // TheDemoDiscManager.bActive is 0 and nothing ever sets it. That is all
+    // the Loop does now: leaving the state is the load callbacks' job.
+    if (!gf->demoDiscActive || elapsed >= 541) return;
+    if (elapsed >= 361) {
+        screenVisible(gf, BGF_SCREEN_SLIDE2, 0);
+        screenVisible(gf, BGF_SCREEN_DISCLAIMER, 1);
+    } else if (elapsed >= 181) {
+        screenVisible(gf, BGF_SCREEN_FIRSTLEGAL, 0);
+        screenVisible(gf, BGF_SCREEN_SLIDE2, 1);
     }
-
-    // The original tests IsResourceLoadingComplete() and then
-    // IsSoundRegionLoadingComplete(); the port has one loader, so one hook
-    // answers for both.
-    if (gf->hooks.resourcesReady && !gf->hooks.resourcesReady(gf->hooks.user))
-        return;
-    if (gf->needToSetLanguage) {
-        HOOK_VOID(gf, setLanguage, -1);
-        gf->needToSetLanguage = 0;
-    }
-    bgf_change_state(gf, BGF_IN_FRONTEND, BGF_NONE);
 }
 
 void bgf_end_loading_frontend(BGameFlow* gf)
@@ -539,10 +641,12 @@ void bgf_end_loading_frontend(BGameFlow* gf)
     // and InitMoviePlayer run here in the original. On the 3DS the renderer
     // and the bundles are already up by the time the flow starts, so the
     // only part of this that has an effect is the visibility and the launch.
-    screenVisible(gf,
-                  gf->demoDiscActive ? BGF_SCREEN_DISCLAIMER
-                                     : BGF_SCREEN_LOADING_TRACK,
-                  0);
+    if (gf->demoDiscActive) {
+        screenVisible(gf, BGF_SCREEN_DISCLAIMER, 0);
+    } else {
+        screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 0);
+        objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);
+    }
     bgf_launch_frontend_menus(gf);
 }
 
@@ -1015,6 +1119,131 @@ void bgf_plain_screen_callback(BGameFlow* gf, BScreenMessage msg,
     (void)gf;
     (void)data;
     (void)msg;
+}
+
+// ------------------------------------------------ LanguageOptionsScreenBase
+
+static void grayMenuItem(BGameFlow* gf, uint32_t screen, uint32_t item,
+                         int mode)
+{
+    trace(gf, "gray %08x %08x %d", (unsigned)screen, (unsigned)item, mode);
+    HOOK_VOID(gf, grayMenuItem, screen, item, mode);
+}
+
+static uint32_t activeMenuItem(BGameFlow* gf)
+{
+    if (!gf->hooks.activeMenuItem) return 0;
+    return gf->hooks.activeMenuItem(gf->hooks.user);
+}
+
+// MENUITEM_1..6 are the languages 0..5 in order: the original adds
+// 0xad1fc60d, -MENUITEM_1, and takes anything under 6 unsigned.
+static int languageOfItem(uint32_t item, int* language)
+{
+    uint32_t i = item - BGF_ITEM_MENUITEM_1;
+    if (i >= 6u) return 0;
+    *language = (int)i;
+    return 1;
+}
+
+// The constructor, 0x001f1a78.
+static void languageCtor(BGameFlow* gf, uint32_t flailer, int fromOptions)
+{
+    BLanguageScreen* l = &gf->language;
+    l->active      = 1;
+    l->flailer     = flailer;
+    l->fromOptions = fromOptions;
+    l->selected    = gf->currLanguage == -1 ? 0 : gf->currLanguage;
+    // 0x0016fdb0 is `return 0`, so Load All Languages is always hidden.
+    grayMenuItem(gf, flailer, BGF_ITEM_MENUITEM_7, 2);
+}
+
+// Both of HandleScreenCallback's ways out once a language is picked:
+// SetCurrLanguage, the frontend database's defaults when this is the boot's
+// screen (FrontendDatabase::InitWithDefaults, 0x00183830, on 0x002fc050),
+// and MoveBackScreen. `backOnUnset` is the one difference between them:
+// SELECT returns when CurrLanguage is still -1, BACK moves back anyway.
+static void languageChosen(BGameFlow* gf, int backOnUnset)
+{
+    BLanguageScreen* l = &gf->language;
+    bgf_set_curr_language(gf, l->selected);
+    if (gf->currLanguage == -1) {
+        if (backOnUnset) bgf_move_back_screen(gf, 1);
+        return;
+    }
+    if (!l->fromOptions) trace(gf, "frontend defaults");
+    bgf_move_back_screen(gf, 1);
+}
+
+// HandleScreenCallback, 0x001f1b08: a 19-entry jump table at 0x002b9e30 on
+// message - 1, of which SELECT, BACK and TICK do anything -- and TICK is a
+// virtual that does nothing for this class.
+static void languageEvent(BGameFlow* gf, BScreenMessage msg,
+                          BScreenCallbackData* data)
+{
+    BLanguageScreen* l = &gf->language;
+    uint32_t         item;
+
+    switch (msg) {
+        case BMSG_MENUITEM_SELECT:          // 0x001f1c3c
+            item = data->itemHash;
+            languageOfItem(item, &l->selected);
+            if (item < BGF_ITEM_MENUITEM_1) return;
+            if (item > BGF_ITEM_MENUITEM_6) {
+                if (item != BGF_ITEM_MENUITEM_7) return;
+                gf->loadAllLanguages = 1;
+                trace(gf, "load all languages");
+                bgf_move_back_screen(gf, 1);
+                return;
+            }
+            languageChosen(gf, 0);
+            break;
+
+        case BMSG_SCREEN_BACK_BUTTON:       // 0x001f1b44
+            // The list's own pop is always vetoed; the screen pops itself.
+            data->param = 0;
+            if (gf->currLanguage == -1) return;
+            item = activeMenuItem(gf);
+            languageOfItem(item, &l->selected);
+            // Signed compares, so no menu (item 0) moves back as it is.
+            if ((int32_t)item > (int32_t)BGF_ITEM_MENUITEM_6
+                || (int32_t)item < (int32_t)BGF_ITEM_MENUITEM_1) {
+                bgf_move_back_screen(gf, 1);
+                return;
+            }
+            languageChosen(gf, 1);
+            break;
+
+        default:
+            break;
+    }
+}
+
+// Callback, 0x001f1dd8. The class is picked by the name the screen was
+// entered under: strcmp on pCurrent's config name, as the original does.
+void bgf_language_screen_callback(BGameFlow* gf, BScreenMessage msg,
+                                  BScreenCallbackData* data)
+{
+    const char* name = gf->screen ? gf->screen->name : "";
+
+    switch (msg) {
+        case BMSG_SCREEN_ACTIVATE:
+            if (strcmp(name, "Language Options Pre FE") == 0)
+                languageCtor(gf, data->itemHash, 0);
+            else if (strcmp(name, "Language Options") == 0)
+                // LanguageOptionsScreen (0x001f1d70) is this plus a
+                // tSlideOnScreen, which the port does not have yet.
+                languageCtor(gf, data->itemHash, 1);
+            break;
+        case BMSG_SCREEN_UNACTIVATE:
+            memset(&gf->language, 0, sizeof(gf->language));
+            break;
+        default:
+            // The original calls through pInstance unchecked; nothing sends
+            // this screen an event with no instance.
+            if (gf->language.active) languageEvent(gf, msg, data);
+            break;
+    }
 }
 
 // ------------------------------------------------------------ NewMainMenu

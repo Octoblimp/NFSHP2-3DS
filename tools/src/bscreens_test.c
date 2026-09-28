@@ -35,6 +35,13 @@ static void wTrace(void* user, const char* line)
     printf("%s\n", line);
 }
 
+// The menu is built before SCREEN_ACTIVATE and activated after it.
+static void wOpenScreen(void* user, const BScreenConfig* cfg)
+{
+    (void)user;
+    printf("ui open %08x\n", (unsigned)cfg->hash);
+}
+
 static void wEnterScreen(void* user, const BScreenConfig* cfg)
 {
     (void)user;
@@ -407,7 +414,8 @@ static void doInput(BGameFlow* gf, const char* what)
 {
     printf("input %s\n", what);
     if (!strcmp(what, "back")) {
-        bgf_move_back_screen(gf, 1);
+        // The pad's BACK, which the screen hears first.
+        bgf_back_button(gf, 0);
     } else if (!strcmp(what, "up")) {
         bgf_menu_item_event(gf, BMSG_MENUITEM_PAD_UP,
                             BSCR_ITEM_MENUITEM(1), 0);
@@ -446,6 +454,7 @@ static void runScenario(const Scenario* sc)
 
     memset(&hooks, 0, sizeof(hooks));
     hooks.trace            = wTrace;
+    hooks.openScreen       = wOpenScreen;
     hooks.enterScreen      = wEnterScreen;
     hooks.leaveScreen      = wLeaveScreen;
     hooks.setScreenVisible = wSetScreenVisible;

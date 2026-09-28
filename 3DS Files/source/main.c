@@ -128,7 +128,7 @@ static const BScreenConfig kScreens[] = {
     { "BootAutoload",            BGF_SCREEN_BOOT_AUTOLOAD,
       bgf_boot_autoload_callback },
     { "Language Options Pre FE", BGF_SCREEN_LANGUAGE,
-      bgf_plain_screen_callback },
+      bgf_language_screen_callback },
     { "Title Screen",            BGF_SCREEN_TITLE,
       bgf_title_screen_callback },
     { "New Main Menu",           BGF_SCREEN_NEW_MAIN_MENU,
@@ -182,9 +182,11 @@ static const BScreenConfig kScreens[] = {
     { "Credits",                 0xfd8a3b6du,   // CreditsScreen
       bgf_plain_screen_callback },
     // Same Flailer screen as "Language Options Pre FE" above, entered under
-    // a second name from the Options menu. The ELF registers both.
-    { "Language Options",        0x632b068eu,   // LanguageOptionsScreenBase
-      bgf_plain_screen_callback },
+    // a second name from the Options menu. The ELF registers both, to one
+    // Callback that picks the class by name; this one's slide-on is still
+    // to be ported.
+    { "Language Options",        0x632b068eu,   // LanguageOptionsScreen
+      bgf_language_screen_callback },
 };
 #define NUM_SCREENS ((int)(sizeof(kScreens) / sizeof(kScreens[0])))
 
@@ -218,6 +220,8 @@ static const BGameFlowStateInfo kGameFlowStages[BGF_NUM_STATES] = {
 
 // ----------------------------------------------------------- the 3DS side
 
+#define BOOT_MAX_LOADS 4
+
 typedef struct {
     UIRenderer* ui;
 
@@ -237,6 +241,11 @@ typedef struct {
 
     char        note[64];      // last thing worth putting on the status line
     int         missingMovies;
+
+    // Loads the flow has asked for and not yet been told about; see
+    // hookLoadResource.
+    struct { const char* what; BGameFlowDone done; } pending[BOOT_MAX_LOADS];
+    int         numPending;
 } Boot;
 
 // One pass of the flow per frame, and the display is vsynced, so this is the
@@ -246,6 +255,11 @@ typedef struct {
 static Boot g_boot;
 static BGameFlow g_flow;
 static BScreens g_uiScreens;
+
+// The top screen's render target. A global because the flow draws a frame of
+// its own before the main loop is reached: LoadGlobalChunks' eDisplayFrame,
+// which puts LOADING up while the frontend loads.
+static C3D_RenderTarget* g_top;
 
 // The geometry viewer's state. Static rather than automatic because it
 // carries a mesh and a texture table per solid and is about 100 KB; main's
@@ -361,7 +375,11 @@ static void viewerCallback(BMenu* m, BScreenMessage msg,
 // when a screen comes back.
 static BsndDriver gSnd;
 
-static void hookEnterScreen(void* user, const BScreenConfig* cfg)
+// FlailerScreen::Activate (0x0016a858) builds the screen's FlailerMenu
+// before its Callback hears SCREEN_ACTIVATE, and activates it after: the
+// Callback can gray items the menu already has -- the language screen hides
+// Load All Languages in its constructor -- and the highlight then skips them.
+static void hookOpenScreen(void* user, const BScreenConfig* cfg)
 {
     Boot* b = (Boot*)user;
     b->project    = NULL;
@@ -372,9 +390,15 @@ static void hookEnterScreen(void* user, const BScreenConfig* cfg)
         && bmenu_open(&b->menu, b->project, b->screen, menuCallback, NULL)
         && b->menu.numItems > 0) {
         b->menu.sound = fesound_play;      // MakeFrontendSound
-        bmenu_activate(&b->menu, 0);
         b->hasMenu = true;
     }
+}
+
+static void hookEnterScreen(void* user, const BScreenConfig* cfg)
+{
+    Boot* b = (Boot*)user;
+    (void)cfg;
+    if (b->hasMenu) bmenu_activate(&b->menu, 0);
 }
 
 static void hookLeaveScreen(void* user, const BScreenConfig* cfg)
@@ -519,15 +543,47 @@ static int hookMovieDrive(void* user)
     return aviplayer_drive(&b->movie) ? 1 : 0;
 }
 
-// The bundles are already resident by the time the flow starts, so loading
-// is instantaneous. The names still go through so the trace is honest about
-// what the original would have asked for.
-static void hookLoadResource(void* user, const char* path)
+// LoadResourceFile. The bundles are read synchronously -- the frontend's
+// straight after LoadGlobalChunks' frame, in main() -- so a load has always
+// landed by the time the flow asks. What stays asynchronous is the callback:
+// the original's runs from ServiceResourceLoading at the end of the frame
+// that finished it, after eDisplayFrame, and a callback that asks for more
+// hears back a frame later. bootServiceLoads is that, after C3D_FrameEnd.
+static void bootQueue(Boot* b, const char* what, BGameFlowDone done)
 {
-    (void)user; (void)path;
+    if (!done) return;
+    if (b->numPending >= BOOT_MAX_LOADS) {
+        logLine("load queue full, %s dropped", what);
+        return;
+    }
+    b->pending[b->numPending].what = what;
+    b->pending[b->numPending].done = done;
+    b->numPending++;
 }
 
-static int hookResourcesReady(void* user) { (void)user; return 1; }
+static void hookLoadResource(void* user, const char* path, BGameFlowDone done)
+{
+    bootQueue((Boot*)user, path, done);
+}
+
+// LoadSoundRegions. fesound_init loaded the frontend's banks at boot.
+static void hookLoadSoundRegions(void* user, BGameFlowDone done)
+{
+    bootQueue((Boot*)user, "sound regions", done);
+}
+
+// The callbacks due this frame. Ones they queue wait for the next.
+static void bootServiceLoads(Boot* b)
+{
+    int n = b->numPending;
+    struct { const char* what; BGameFlowDone done; } run[BOOT_MAX_LOADS];
+    memcpy(run, b->pending, sizeof(run[0]) * (size_t)n);
+    b->numPending = 0;
+    for (int i = 0; i < n; i++) {
+        logLine("loaded %s", run[i].what);
+        run[i].done(&g_flow);
+    }
+}
 
 static void hookSetLanguage(void* user, int language)
 {
@@ -536,6 +592,24 @@ static void hookSetLanguage(void* user, int language)
     if (language < 0 || language >= NUM_LANGUAGES) return;
     if (!gamedata_path(kLanguages[language], path, sizeof(path))) return;
     uirender_set_language(b->ui, path);
+}
+
+// The speech bank is the in-game commentary's, and there is no in-game yet;
+// the flow keeps the loaded flag, so these only say so.
+static void hookLoadSpeech(void* user, int language)
+{
+    (void)user;
+    logLine("speech bank %d (not ported)", language);
+}
+
+static void hookUnloadSpeech(void* user) { (void)user; }
+
+// The French LOADING art, LOADING_FR and NFS_LOGO_ALPHA_FR in place of the
+// English pair. Not in any bundle the port reads yet.
+static void hookSwapLogoArt(void* user, int french)
+{
+    (void)user;
+    logLine("logo art %s (not ported)", french ? "french" : "english");
 }
 
 // BootAutoLoader's memory card. There is none, so the job is already done --
@@ -577,6 +651,23 @@ static void hookGrayMenuItem(void* user, uint32_t screen, uint32_t item,
         logLine("gray item=%08lx mode=%d", (unsigned long)item, (int)mode);
         return;
     }
+}
+
+// The flow's GrayMenuItem, for the language screen: the same call.
+static void hookFlowGrayMenuItem(void* user, uint32_t screen, uint32_t item,
+                                 int mode)
+{
+    hookGrayMenuItem(user, screen, item, (BScrGrayMode)mode);
+}
+
+// GetActiveMenuItem (0x0016d3f0): the highlighted item's hash, 0 with no menu.
+static uint32_t hookActiveMenuItem(void* user)
+{
+    Boot*            b = (Boot*)user;
+    const BMenuItem* mi;
+    if (!b->hasMenu) return 0;
+    mi = bmenu_current(&b->menu);
+    return mi ? mi->itemHash : 0;
 }
 
 // tAnimatedBlurb::NewText (0x00232ef0). The blurb is one text object per
@@ -1254,6 +1345,19 @@ static void drawBotPanel(UIRenderer* ui, const char* title, const char* body,
 // Wheel and MellowMover ask for the ground through a seam shaped for the
 // four arguments they pass. GetElevation's fifth, the `bool *`, is NULL at
 // every one of their call sites (`move t0,zero`), so it is NULL here too.
+// LoadGlobalChunks' eDisplayFrame (0x00112858): one frame, drawn before the
+// frontend is loaded, so the LOADING screen is up while it loads.
+static void hookDisplayFrame(void* user)
+{
+    Boot* b = (Boot*)user;
+    C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+    C2D_TargetClear(g_top, C2D_Color32(0, 0, 0, 0xFF));
+    C2D_SceneBegin(g_top);
+    uirender_draw_visible(b->ui, 1.0f);
+    C2D_TargetClear(g_bot, BOT_BACK);
+    C3D_FrameEnd(0);
+}
+
 static float topologyElevation(void* tc, const bVector3* pos,
                                int32_t* terrain, bVector3* normal)
 {
@@ -1403,6 +1507,7 @@ int main(int argc, char** argv)
     C2D_Prepare();
     C3D_RenderTarget* top = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8,
                                                    GPU_RB_DEPTH24_STENCIL8);
+    g_top = top;
     if (!top) {
         fatalConsole();
         printf("\nno render target.\n");
@@ -1426,12 +1531,53 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // InitializeEverything's LoadGlobalChunks (0x001682d0) first: GLOBALB
+    // and the texture packs, English, and one frame with LOADING up, all
+    // before the frontend is read -- LOADING is the first thing on screen.
+    // LOADING_TRACK is GLOBALB's, and its NFS logo is DYNTEX's.
     static UIRenderer ui;
     uirender_init(&ui, 400.0f, 240.0f);
-    addBundle(&ui, BUNDLE_FRONTEND);
     UIBundle* globalBundle = addBundle(&ui, BUNDLE_GLOBAL);
-    UIBundle* ingameBundle = addBundle(&ui, BUNDLE_INGAME);
     addBundle(&ui, BUNDLE_DYNTEX);
+
+    memset(&g_boot, 0, sizeof(g_boot));
+    g_boot.ui = &ui;
+    bootNote("booting");
+
+    BGameFlowHooks hooks;
+    memset(&hooks, 0, sizeof(hooks));
+    hooks.user             = &g_boot;
+    hooks.setScreenVisible = hookSetScreenVisible;
+    hooks.setObjectVisible = hookSetObjectVisible;
+    hooks.setGroupVisible  = hookSetGroupVisible;
+    hooks.openScreen       = hookOpenScreen;
+    hooks.enterScreen      = hookEnterScreen;
+    hooks.leaveScreen      = hookLeaveScreen;
+    hooks.grayMenuItem     = hookFlowGrayMenuItem;
+    hooks.activeMenuItem   = hookActiveMenuItem;
+    hooks.movieOpen        = hookMovieOpen;
+    hooks.movieDrive       = hookMovieDrive;
+    hooks.movieClose       = hookMovieClose;
+    hooks.loadResource     = hookLoadResource;
+    hooks.loadSoundRegions = hookLoadSoundRegions;
+    hooks.setLanguage      = hookSetLanguage;
+    hooks.loadSpeech       = hookLoadSpeech;
+    hooks.unloadSpeech     = hookUnloadSpeech;
+    hooks.swapLogoArt      = hookSwapLogoArt;
+    hooks.displayFrame     = hookDisplayFrame;
+    hooks.saveStart        = hookSaveStart;
+    hooks.savePoll         = hookSavePoll;
+    hooks.trace            = hookTrace;
+
+    bgf_init(&g_flow, kGameFlowStages, BGF_NUM_STATES,
+             kScreens, NUM_SCREENS, kBootStages, NUM_BOOT_STAGES, &hooks);
+    bgf_load_global_chunks(&g_flow);
+    logLine("global chunks loaded, LOADING drawn");
+
+    // What BeginGameFlowLoadingFrontend asks for, FRONTB, read here rather
+    // than behind the loader; and INGAMEB, which the track viewer shares.
+    addBundle(&ui, BUNDLE_FRONTEND);
+    UIBundle* ingameBundle = addBundle(&ui, BUNDLE_INGAME);
 
     // The blurb moves to the bottom screen, so the top screen stops drawing
     // it -- and stops drawing the bar tAnimatedBlurb wipes it out with,
@@ -1470,31 +1616,6 @@ int main(int argc, char** argv)
         gfxExit();
         return 1;
     }
-
-    memset(&g_boot, 0, sizeof(g_boot));
-    g_boot.ui = &ui;
-    bootNote("booting");
-
-    BGameFlowHooks hooks;
-    memset(&hooks, 0, sizeof(hooks));
-    hooks.user             = &g_boot;
-    hooks.setScreenVisible = hookSetScreenVisible;
-    hooks.setObjectVisible = hookSetObjectVisible;
-    hooks.setGroupVisible  = hookSetGroupVisible;
-    hooks.enterScreen      = hookEnterScreen;
-    hooks.leaveScreen      = hookLeaveScreen;
-    hooks.movieOpen        = hookMovieOpen;
-    hooks.movieDrive       = hookMovieDrive;
-    hooks.movieClose       = hookMovieClose;
-    hooks.loadResource     = hookLoadResource;
-    hooks.resourcesReady   = hookResourcesReady;
-    hooks.setLanguage      = hookSetLanguage;
-    hooks.saveStart        = hookSaveStart;
-    hooks.savePoll         = hookSavePoll;
-    hooks.trace            = hookTrace;
-
-    bgf_init(&g_flow, kGameFlowStages, BGF_NUM_STATES,
-             kScreens, NUM_SCREENS, kBootStages, NUM_BOOT_STAGES, &hooks);
 
     // After bgf_init: bscr_init copies the flow's VIDEO_MODE, which is what
     // decides whether the Options screen has a Languages item at all.
@@ -1697,8 +1818,10 @@ int main(int argc, char** argv)
                 }
                 redraw = 1;
             }
+            // FlailerScreenList::JoyHandler's BACK: the screen hears
+            // SCREEN_BACK_BUTTON first and may veto the pop.
             if (kDown & KEY_B) {
-                bgf_move_back_screen(&g_flow, 1);
+                bgf_back_button(&g_flow, 0);
                 redraw = 1;
             }
             // JOY_EVENT_MAIN_MENU_SELECT_TRANSMISSION. The Mode Selects
@@ -1749,8 +1872,7 @@ int main(int argc, char** argv)
             C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
             C2D_TargetClear(top, clear);
             C2D_SceneBegin(top);
-            if (g_boot.screen && g_boot.project)
-                uirender_draw_screen(&ui, g_boot.project, g_boot.screen, 1.0f);
+            uirender_draw_visible(&ui, 1.0f);
             C2D_TargetClear(g_bot, BOT_BACK);
             C2D_SceneBegin(g_bot);
             {
@@ -1769,6 +1891,8 @@ int main(int argc, char** argv)
                              "A select   B back   START go   SELECT viewer");
             }
             C3D_FrameEnd(0);
+            // MainLoop's ServiceResourceLoading, after eDisplayFrame.
+            bootServiceLoads(&g_boot);
             continue;
         }
 

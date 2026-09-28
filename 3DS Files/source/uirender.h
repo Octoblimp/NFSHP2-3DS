@@ -142,6 +142,12 @@ void uirender_override_texture(UIRenderer* r, uint32_t hash, C3D_Tex* tex,
 void uirender_draw_screen(UIRenderer* r, BUI* ui, const BUIScreen* screen,
                           float alpha);
 
+// Draws every screen whose `visible` is set, as eDisplayFrame does: all of
+// them share the one layer table, so each layer is drawn across every screen
+// before the next. This is how LOADING_TRACK shows under the language screen
+// while the frontend loads, and how the flow's screens reach the display.
+void uirender_draw_visible(UIRenderer* r, float alpha);
+
 // The scaled width and height of a text object, as FlailerTextChunk's own
 // GetScaledWidth/GetScaledHeight compute them -- the pair ScaleAboutCenter
 // needs. False if the object is not text; true with both zero if its font

@@ -1,24 +1,26 @@
 // Host harness for the 3DS boot flow.
 //
 // Builds "3DS Files/source/gameflow.c" for the host and runs a fixed set of
-// boot scenarios against a simulated world -- a loader that finishes after
-// three frames, a movie that runs five, a memory card that answers on the
-// second poll -- printing every observable step:
+// boot scenarios against a simulated world -- a loader that finishes at the
+// end of the frame that asked, a movie that runs five frames, a memory card
+// that answers on the second poll -- printing every observable step:
 //
 //     scenario <name>
 //     frame <n> <realTime> <realTimer>
 //     <whatever the flow traced: state, begin, end, change, enter, leave,
-//      msg, stack, vis, movie, tex, sound, autoload, demo mode>
+//      msg, stack, vis, movie, tex, sound, load, language, speech, gray,
+//      autoload, demo mode>
 //     final <state> <screen> <stackDepth>
 //
-// tools/bootflow_check.py prints the same from an independent Python model
-// of the same disassembly and diffs the two, the way bmenu_check.py does for
-// the menus. Nothing here reads a bundle: the boot flow is behaviour, and
-// the point of the diff is to catch a misread of the behaviour.
+// tools/bootflow_check.py prints the same from retail's own code, run on
+// SLES_507.31 in mipsemu where it can be, and diffs the two. Nothing here
+// reads a bundle: the boot flow is behaviour, and the point of the diff is
+// to catch a misread of the behaviour.
 //
 // Usage: gameflow_test [scenario]...      (no argument runs them all)
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "gameflow.h"
@@ -26,9 +28,10 @@
 // ------------------------------------------------------------- the world
 
 #define MOVIE_FRAMES   5
-#define LOADER_FRAMES  3
+#define LOADER_FRAMES  1
 #define TEXTURE_POLLS  2
 #define SAVE_POLLS     2
+#define MAX_PENDING    4
 
 typedef struct {
     const char* name;
@@ -46,6 +49,12 @@ typedef struct {
     struct { int frame; const char* what; } input[6];
 } Scenario;
 
+// A load in flight: what to print when it lands, and its callback.
+typedef struct {
+    const char*   label;
+    BGameFlowDone done;
+} Pending;
+
 typedef struct {
     const Scenario* sc;
     BGameFlow*      gf;
@@ -53,6 +62,10 @@ typedef struct {
     int             movieLeft;
     int             texPolls;
     int             savePolls;
+    int             loaderDue;    // nothing lands before this frame count
+    uint32_t        activeItem;   // the highlighted item, for GetActiveMenuItem
+    Pending         pending[MAX_PENDING];
+    int             numPending;
 } World;
 
 static void wTrace(void* user, const char* line)
@@ -93,22 +106,43 @@ static void wMovieClose(void* user)
     w->movieLeft = 0;
 }
 
-static void wLoadResource(void* user, const char* path)
+static void wQueue(World* w, const char* label, BGameFlowDone done)
 {
-    (void)user;
-    printf("load %s\n", path);
+    if (!done) return;
+    if (w->numPending >= MAX_PENDING) {
+        printf("loader full %s\n", label);
+        return;
+    }
+    w->pending[w->numPending].label = label;
+    w->pending[w->numPending].done  = done;
+    w->numPending++;
 }
 
-static int wResourcesReady(void* user)
+static void wLoadResource(void* user, const char* path, BGameFlowDone done)
 {
-    World* w = (World*)user;
-    return (int)w->gf->frameCounter >= LOADER_FRAMES;
+    wQueue((World*)user, path, done);
 }
 
-static void wSetLanguage(void* user, int language)
+static void wLoadSoundRegions(void* user, BGameFlowDone done)
 {
-    (void)user;
-    printf("language %d\n", language);
+    wQueue((World*)user, "sound regions", done);
+}
+
+// ServiceResourceLoading, at the frame's end: MainLoop calls it after
+// eDisplayFrame (0x0012f60c). A load asked for during a frame has landed by
+// the end of it and its callback runs then; a load that callback asks for
+// lands at the next frame's end.
+static void wServiceLoads(World* w)
+{
+    Pending run[MAX_PENDING];
+    int     n = w->numPending;
+    if ((int)w->gf->frameCounter < w->loaderDue) return;
+    memcpy(run, w->pending, sizeof(run[0]) * (size_t)n);
+    w->numPending = 0;
+    for (int i = 0; i < n; i++) {
+        printf("loaded %s\n", run[i].label);
+        run[i].done(w->gf);
+    }
 }
 
 static void wLoadTexture(void* user, uint32_t tex)
@@ -134,6 +168,13 @@ static int wSavePoll(void* user)
     return ++w->savePolls >= SAVE_POLLS;
 }
 
+// A new menu starts on its first item.
+static void wOpenScreen(void* user, const BScreenConfig* cfg)
+{
+    ((World*)user)->activeItem = BGF_ITEM_MENUITEM_1;
+    printf("ui open %08x\n", (unsigned)cfg->hash);
+}
+
 static void wEnterScreen(void* user, const BScreenConfig* cfg)
 {
     (void)user;
@@ -144,6 +185,11 @@ static void wLeaveScreen(void* user, const BScreenConfig* cfg)
 {
     (void)user;
     printf("ui leave %08x\n", (unsigned)cfg->hash);
+}
+
+static uint32_t wActiveMenuItem(void* user)
+{
+    return ((World*)user)->activeItem;
 }
 
 static void wSound(void* user, int ev) { (void)user; (void)ev; }
@@ -171,7 +217,7 @@ static const BScreenConfig kScreens[] = {
     { "BootAutoload",            BGF_SCREEN_BOOT_AUTOLOAD,
       bgf_boot_autoload_callback },
     { "Language Options Pre FE", BGF_SCREEN_LANGUAGE,
-      bgf_plain_screen_callback },
+      bgf_language_screen_callback },
     { "Title Screen",            BGF_SCREEN_TITLE,
       bgf_title_screen_callback },
     { "New Main Menu",           BGF_SCREEN_NEW_MAIN_MENU,
@@ -210,22 +256,33 @@ static const BGameFlowStateInfo kGameFlowStates[BGF_NUM_STATES] = {
 
 #define SIXTIETH (1.0f / 60.0f)
 
+// `currLanguage` is what the language is once LoadGlobalChunks has set
+// English: 0 leaves it, another language is set through SetCurrLanguage,
+// and -1 is written straight over it -- a state the disc never reaches,
+// kept for the predicate's first test and the screen's -1 paths.
 static const Scenario kScenarios[] = {
-    // The shipped boot, on an NTSC console: no language screen.
+    // An NTSC console: no language screen.
     { "ntsc", 1, 0, 0, 1, 0, 0, 0, 0, 40, SIXTIETH, {{0,0}} },
-    // The same on PAL, which adds Language Options Pre FE.
+    // The shipped boot, PAL: BootAutoload, then Language Options Pre FE,
+    // which waits for a choice.
     { "pal", 0, 0, 0, 1, 0, 0, 0, 0, 40, SIXTIETH, {{0,0}} },
-    // No language chosen yet: the first test in the predicate fires whatever
-    // the video mode is.
-    { "nolang", 1, -1, 0, 1, 0, 0, 0, 0, 40, SIXTIETH, {{0,0}} },
+    // No language at all: the first test in the predicate fires whatever
+    // the video mode is. BACK there is vetoed and does nothing else, since
+    // there is nothing to keep; Spanish is then chosen and the screen moves
+    // back to the title, whose movies are Spanish.
+    { "nolang", 1, -1, 0, 1, 0, 0, 0, 0, 40, SIXTIETH,
+      {{10, "back"}, {14, "item5"}} },
     // SkipMovies: the title screen starts at rest, with no movie.
     { "skipmovies", 1, 0, 1, 1, 0, 0, 0, 0, 30, SIXTIETH, {{0,0}} },
     // A second visit to the frontend with a demo waiting: straight to the
     // main menu, stack reset -- so BACK there pops to nothing and stays.
     { "relaunch", 1, 0, 0, 2, 2, 0, 0, 0, 20, SIXTIETH, {{10, "back"}} },
     // The demo disc: one title movie, the three-panel loading slideshow,
-    // and no attract mode. Dead on this disc; here for the branch.
-    { "demodisc", 1, 0, 0, 1, 0, 1, 0, 0, 700, SIXTIETH, {{0,0}} },
+    // and no attract mode. Dead on this disc; here for the branch. The
+    // slideshow does not hold the load up -- FRONTB's callback moves the
+    // flow on whenever it lands -- so the loader is slow here, ten seconds,
+    // or the slideshow would never get past its first panel.
+    { "demodisc", 1, 0, 0, 1, 0, 1, 0, 0, 700, SIXTIETH, {{0, "slow600"}} },
     // At rest on the title for over thirty seconds at one second a frame:
     // PRESS START comes up after four, attract mode after thirty.
     { "attract", 1, 0, 1, 1, 0, 0, 0, 0, 40, 1.0f, {{0,0}} },
@@ -267,8 +324,26 @@ static const Scenario kScenarios[] = {
     // anti-piracy panels and their 7-second timers actually run. One second
     // a frame, because 14 seconds at 1/60 is 840 frames of nothing.
     { "legal", 1, 0, 0, 1, 0, 0, 0, 1, 40, 1.0f, {{5, "mumbo"}} },
-    // French: the second movie is retail's own French intro.
+    // French from the start: the second movie is retail's own French
+    // intro, and the LOADING art is the French one.
     { "french", 1, 1, 0, 1, 0, 0, 0, 0, 30, SIXTIETH, {{0,0}} },
+    // PAL, French chosen on the language screen: the table, the speech and
+    // the LOADING art all change, the frontend takes its defaults, and the
+    // screen moves back to the title -- whose EA logo is EALOGO_FR.
+    { "palselect", 0, 0, 0, 1, 0, 0, 0, 0, 30, SIXTIETH, {{8, "item2"}} },
+    // PAL, BACK on the language screen with Italian highlighted: BACK
+    // chooses the highlighted language, as SELECT would.
+    { "palback", 0, 0, 0, 1, 0, 0, 0, 0, 30, SIXTIETH,
+      {{7, "hl4"}, {8, "back"}} },
+    // PAL, Load All Languages. Hidden on this disc, and selected anyway:
+    // the flag is set and the screen moves back with English kept.
+    { "palall", 0, 0, 0, 1, 0, 0, 0, 0, 30, SIXTIETH, {{8, "item7"}} },
+    // PAL, English chosen when English is in: SetLanguage returns at once,
+    // and the frontend still takes its defaults.
+    { "palsame", 0, 0, 0, 1, 0, 0, 0, 0, 30, SIXTIETH, {{8, "item1"}} },
+    // PAL, French from the start and English chosen: the French LOADING art
+    // is swapped back.
+    { "palrevert", 0, 1, 0, 1, 0, 0, 0, 0, 30, SIXTIETH, {{8, "item1"}} },
 };
 #define NUM_SCENARIOS ((int)(sizeof(kScenarios) / sizeof(kScenarios[0])))
 
@@ -282,8 +357,9 @@ static void runScenario(const Scenario* sc)
     printf("scenario %s\n", sc->name);
 
     memset(&w, 0, sizeof(w));
-    w.sc = sc;
-    w.gf = &gf;
+    w.sc        = sc;
+    w.gf        = &gf;
+    w.loaderDue = LOADER_FRAMES;
 
     memset(&hooks, 0, sizeof(hooks));
     hooks.user             = &w;
@@ -292,14 +368,15 @@ static void runScenario(const Scenario* sc)
     hooks.setObjectVisible = wSetObjectVisible;
     hooks.setGroupVisible  = wSetGroupVisible;
     hooks.changeTexture    = wChangeTexture;
+    hooks.openScreen       = wOpenScreen;
     hooks.enterScreen      = wEnterScreen;
     hooks.leaveScreen      = wLeaveScreen;
+    hooks.activeMenuItem   = wActiveMenuItem;
     hooks.movieOpen        = wMovieOpen;
     hooks.movieDrive       = wMovieDrive;
     hooks.movieClose       = wMovieClose;
     hooks.loadResource     = wLoadResource;
-    hooks.resourcesReady   = wResourcesReady;
-    hooks.setLanguage      = wSetLanguage;
+    hooks.loadSoundRegions = wLoadSoundRegions;
     hooks.loadTexture      = wLoadTexture;
     hooks.textureReady     = wTextureReady;
     hooks.unloadTexture    = wUnloadTexture;
@@ -315,7 +392,6 @@ static void runScenario(const Scenario* sc)
              &hooks);
 
     gf.videoMode          = sc->videoMode;
-    gf.currLanguage       = sc->currLanguage;
     gf.skipMovies         = sc->skipMovies;
     gf.frontendLaunchType = sc->frontendLaunchType;
     gf.demoModeStatus     = sc->demoModeStatus;
@@ -327,43 +403,66 @@ static void runScenario(const Scenario* sc)
     banim_init(&anim, NULL);
     gf.anim = &anim;
 
+    // InitializeEverything's LoadGlobalChunks, then the scenario's language.
+    bgf_load_global_chunks(&gf);
+    if (sc->currLanguage == -1) {
+        printf("input no language\n");
+        gf.currLanguage = -1;
+    } else if (sc->currLanguage != 0) {
+        printf("input language %d\n", sc->currLanguage);
+        bgf_set_curr_language(&gf, sc->currLanguage);
+    }
+
     // main (0x0012da88): ask for LOADING_FRONTEND, then hand over to
     // MainLoop. SkipFE would call StartSkipFEGame instead; it ships as 0.
     bgf_change_state(&gf, BGF_LOADING_FRONTEND, BGF_NONE);
 
     for (int f = 0; f < sc->frames; f++) {
         for (int i = 0; i < 6; i++) {
-            if (!sc->input[i].what || sc->input[i].frame != f) continue;
-            if (!strcmp(sc->input[i].what, "select")) {
+            const char* what = sc->input[i].what;
+            if (!what || sc->input[i].frame != f) continue;
+            if (!strcmp(what, "select")) {
                 printf("input select\n");
                 bgf_screen_event(&gf, BMSG_MENUITEM_SELECT, 0);
-            } else if (!strcmp(sc->input[i].what, "start")) {
+            } else if (!strcmp(what, "start")) {
                 // START with no menu, as main.c sends it.
                 printf("input start\n");
                 bgf_screen_event(&gf, BMSG_SCREEN_START_BUTTON, 0);
-            } else if (!strcmp(sc->input[i].what, "back")) {
+            } else if (!strcmp(what, "back")) {
+                // The pad's BACK, from port 0.
                 printf("input back\n");
-                bgf_move_back_screen(&gf, 1);
-            } else if (!strncmp(sc->input[i].what, "item", 4)) {
+                bgf_back_button(&gf, 0);
+            } else if (!strncmp(what, "item", 4)) {
                 // A menu item selected by hash, the way FlailerMenu sends
-                // it. "item1".."item3" are NEW_MAIN_MENU's three.
-                unsigned n = (unsigned)(sc->input[i].what[4] - '1');
-                printf("input %s\n", sc->input[i].what);
+                // it: "item<n>" is MENUITEM_n.
+                unsigned n = (unsigned)(what[4] - '1');
+                printf("input %s\n", what);
                 bgf_menu_item_event(&gf, BMSG_MENUITEM_SELECT,
                                     BGF_ITEM_MENUITEM_1 + n, 0);
-            } else if (!strcmp(sc->input[i].what, "mumbo")) {
+            } else if (!strncmp(what, "hl", 2)) {
+                // The highlight moved to MENUITEM_n.
+                printf("input %s\n", what);
+                w.activeItem = BGF_ITEM_MENUITEM_1 + (unsigned)(what[2] - '1');
+            } else if (!strncmp(what, "slow", 4)) {
+                // A slow loader: nothing lands before frame n.
+                printf("input %s\n", what);
+                w.loaderDue = atoi(what + 4);
+            } else if (!strcmp(what, "mumbo")) {
                 printf("input mumbo\n");
                 bgf_push_screen(&gf, "New Main Menu");
                 bgf_change_to_screen(&gf, "Legal MumboJumbo", 0);
             }
         }
         bgf_frame(&gf, sc->dt);
+        wServiceLoads(&w);
         printf("frame %d %u %u\n", f, (unsigned)gf.realTime,
                (unsigned)gf.realTimer);
     }
 
-    printf("final %s %s %d cops %d\n", bgf_state_name(&gf, gf.current),
-           gf.screen ? gf.screen->name : "-", gf.stack.index, gf.copsOn);
+    printf("final %s %s %d cops %d language %d\n",
+           bgf_state_name(&gf, gf.current),
+           gf.screen ? gf.screen->name : "-", gf.stack.index, gf.copsOn,
+           gf.currLanguage);
 }
 
 int main(int argc, char** argv)

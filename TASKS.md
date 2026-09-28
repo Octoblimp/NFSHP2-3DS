@@ -2218,12 +2218,17 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
       copyright line. Movie planes draw nothing without a movie.
       `bootflow_check` runs retail's own `TitleScreen` and catches 25 of
       25 mutations.
-- [ ] **The boot's retail pass.**
-  - PAL, so the language screen shows.
-  - Retail's `LanguageOptionsScreenBase`.
-  - The loading screen with the logo over LOADING....
-  - `BootAutoload`.
-  - `ConsiderStartDemoMode` in full.
+- [x] **The boot's loading and language screens.** LOADING first, from
+      retail's `LoadGlobalChunks`, then `Language Options Pre FE` (PAL),
+      then the movies. Retail's `LOADING_FRONTEND` moves on by its load
+      callbacks. Retail's `LanguageOptionsScreenBase` serves both
+      language screens. `bootflow_check` runs them on the retail image
+      and catches 56 of 57 mutations. The remaining one is equivalent.
+  - [ ] The speech banks (`hookLoadSpeech` only logs).
+  - [ ] The French `LOADING` and `NFS_LOGO_ALPHA` art on the host
+        (`hookSwapLogoArt` only logs).
+  - [ ] `Language Options`' `tSlideOnScreen` (`0x001ee918`).
+- [ ] **`BootAutoload` and `ConsiderStartDemoMode` in full.**
 - [ ] **The main menu's background movie.**
   - MV3's inter frames.
   - `StartMovie`, `UpdateMovie` and `StopMovie` (`0x0016ce30`,

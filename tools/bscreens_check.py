@@ -665,7 +665,7 @@ UNKNOWN_ITEM = 0xdeadbeef
 def do_input(f, what):
     f.say("input %s" % what)
     if what == "back":
-        f.move_back_screen(1)
+        f.back_button(0)
     elif what == "up":
         f.menu_item_event(bf.MENUITEM_PAD_UP, item(1), 0)
     elif what == "down":

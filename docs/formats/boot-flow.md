@@ -35,6 +35,17 @@ GAMEFLOW_STATE_LOADING_FRONTEND
          InitSelectCarScreen, InitMoviePlayer, hide LOADING_TRACK,
          LaunchFrontendMenus()
 
+Retail (SLES_507.31), which the port runs:
+
+InitializeEverything()
+  ... LoadGlobalChunks()                  <- English, LOADING_TRACK, one frame
+LOADING_FRONTEND
+  Begin: BeginScreenFadeTime = RealTime; FRONTA.BUN, FRONTB.LZC
+  FRONTB's callback: LoadCurrentSpeech, then the sound regions
+  their callback   : ChangeGameFlow(GAMEFLOW_STATE_IN_FRONTEND)
+  Loop : the demo slideshow only
+  End  : hide LOADING_TRACK and its copyright line, LaunchFrontendMenus()
+
 LaunchFrontendMenus()
   push "Title Screen"            if ShouldSeeTitleSequence()
   push "Legal MumboJumbo"        if ShouldSeeLegalMumboJumbo()
@@ -49,7 +60,10 @@ LaunchFrontendMenus()
 So the on-disc boot order is **BootAutoload -> Language Options -> Legal
 MumboJumbo -> Title Screen (EA logo, NFS intro, PRESS START) -> New Main
 Menu**, with three of those five skipped in the shipped US PS2 build (see
-[The predicates](#the-predicates)).
+[The predicates](#the-predicates)). On the PAL retail disc the player sees
+LOADING first, before `MainLoop` runs, then the language screen, then the
+title's movies. See
+[Retail's `LOADING_FRONTEND`](#retails-loading_frontend-sles_50731).
 
 ## `main` (`0x0012da88`)
 
@@ -237,6 +251,180 @@ LaunchFrontendMenus();
 `LOADING_TRACK` is in `GLOBALB.BUN` and is the screen with `GLOBAL_LOADING_STRING`
 ("LOADING...") on it. It is *hidden* here, which means something made it
 visible earlier -- `BeginGameFlowLoadingTrackCommon` and friends do.
+
+### Retail's `LOADING_FRONTEND` (SLES_507.31)
+
+Everything above is the demo's. The PAL retail disc moved the language out
+of this state and drives it with load callbacks instead of a polling
+`Loop`. The port runs retail's.
+
+| function | address |
+|----------|---------|
+| `main` | `0x0012f000` |
+| `InitializeEverything` | `0x0012ee98` |
+| `LoadGlobalChunks` | `0x001682d0` |
+| Begin | `0x00168698` |
+| Loop | `0x00168718` |
+| End | `0x001687a8` |
+| FRONTB's load callback | `0x00168668` |
+| the sound regions' callback | `0x00168658` |
+| `ChangeGameFlow` | `0x001680d8` |
+
+Retail's `main` has no `LoadLanguageInfo`. It is `InitializeEverything`,
+then `ChangeGameFlow(LOADING_FRONTEND, NONE)` unless `SkipFE` is set, then
+`MainLoop` on the scratchpad. `InitializeEverything` calls
+`LoadGlobalChunks` near its end (`0x0012efa4`):
+
+```c
+LoadResourceFile("GLOBAL\\GLOBALA.BUN", 0, 6, NULL, 0);        /* 0x00199640 */
+rf = LoadResourceFile("GLOBAL\\GLOBALB.LZC", 0, 9, NULL, 0);
+ChangeFilenameForHotChunking(rf, "GLOBAL\\GLOBALB.BUN");        /* 0x00199720 */
+while (!IsResourceLoadingComplete())                            /* 0x00199818 */
+    ServiceResourceLoading();                                   /* 0x00199788 */
+... size the language buffer (0x0021dfe8), build pDynamicTexturePack ...
+SetCurrLanguage(&TheLanguageManager, l_ENGLISH);   /* 0x00100808 -> 0x00100818 */
+... load LOADING (0xab0e817d), or the demo's FIRSTLEGAL, and wait ...
+if (TheDemoDiscManager.bActive)
+    SetFlailerScreenVisibility(FIRSTLEGAL, VISIBLE);              /* 0x0014cbf8 */
+else {
+    SetFlailerScreenVisibility(LOADING_TRACK, VISIBLE);           /* 0xd0131dd1 */
+    FlailerSetVisibility(LOADING_TRACK, COPYRIGHT_TEXT, VISIBLE); /* 0x00144968, 0x807d4c5c */
+}
+eDisplayFrame();                                   /* 0x00112858 */
+```
+
+**This is the first thing retail shows.** `LOADING_TRACK` is the logo over
+the bar reading `LOADING...`. `eDisplayFrame` draws it once, outside
+`MainLoop`, and nothing draws again until `MainLoop` runs. So that frame
+stays up while the frontend loads. The copyright line is FRONTB's, on
+`TITLE_IMAGE`, and FRONTB is not in yet: the second call finds nothing, and
+retail makes it anyway.
+
+Begin (`0x00168698`):
+
+```c
+BeginScreenFadeTime = RealTime;                    /* gp-21400 = gp-19604 */
+LoadResourceFile("FRONTEND\\FRONTA.BUN", ..., NULL);             /* 0x00199640 */
+rf = LoadResourceFile("FRONTEND\\FRONTB.LZC", ..., 0x00168668);
+ChangeFilenameForHotChunking(rf, "FRONTEND\\FRONTB.BUN");        /* 0x00199720 */
+```
+
+The demo's `NeedToSetLanguage` and `LoadLanguage` are gone, because
+`LoadGlobalChunks` has already set a language. `BeginScreenFadeTime` is now
+set here, so the demo slideshow's clock starts at Begin.
+
+The two callbacks move the flow on, one after the other:
+
+```c
+void FrontBLoaded(void)          /* 0x00168668 */
+{
+    LoadCurrentSpeech(&TheLanguageManager);        /* 0x0021e250 */
+    LoadSoundRegionsFrontEnd(0x00168658, 0);       /* 0x001ae9a0 */
+}
+void FrontEndSoundsLoaded(void)  /* 0x00168658 */
+{
+    ChangeGameFlow(GAMEFLOW_STATE_IN_FRONTEND, GAMEFLOW_STATE_NONE);
+}
+```
+
+Loop (`0x00168718`) is only the demo's slideshow now, on signed compares
+(`slti`) against 541, 361 and 181. It returns at once when
+`TheDemoDiscManager.bActive` is 0, which it always is on retail.
+
+End (`0x001687a8`) hides `DISCLAIMER` on the demo disc. On retail it hides
+`LOADING_TRACK` and object 0, `COPYRIGHT_TEXT`, then jumps
+(`j`, not `jal`) to `LaunchFrontendMenus` (`0x0016f950`).
+
+#### `LanguageManager` (`0x0031c1c8`)
+
+`CurrLanguage` is at `+0`, and `+20` says the speech is loaded.
+`SetLanguage` (`0x0021e0d0`) returns early when the language does not
+change. Otherwise:
+
+1. It unloads the outgoing `FE_<language>.BIN` chunks (`UnloadChunks`,
+   `0x001992a8`).
+2. It loads the new ones into the buffer `LoadGlobalChunks` sized for the
+   longest table.
+3. The tail (`0x0021e1e0`) swaps the speech if `+20` is set: unload, then
+   `LoadCurrentSpeech`. Speech that was not loaded stays unloaded. FRONTB's
+   callback is what first loads it.
+4. `0x001681b0` swaps the logo art. `LOADING` and `NFS_LOGO_ALPHA` have
+   French versions, `LOADING_FR` and `NFS_LOGO_ALPHA_FR`, remapped through
+   `0x001ac548`. `gp-21404` says which set is loaded, and it flips only when
+   French is entered or left.
+5. `FlailerUpdateLanguageText` (`0x00141648`) re-reads every text object's
+   string.
+
+#### The language screen
+
+`Language Options Pre FE` (the boot's) and `Language Options` (from the
+Options menu) share one `Callback`, `0x001f1dd8`, called with `(msg, data)`.
+It tells them apart by `strcmp` (`0x002535f8`) on the name the screen was
+entered under: `0x002b9eb8` and `0x002b9b98`. On `SCREEN_ACTIVATE` it
+`bMalloc`s (`0x00257690`) the class and runs the constructor (`0x001f1a78`).
+The instance is kept at `gp-16972`. On `SCREEN_UNACTIVATE` it frees the
+instance. Every other message goes to `HandleScreenCallback` (`0x001f1b08`),
+a 19-entry jump table on `msg - 1` at `0x002b9e30`. Only `MENUITEM_SELECT`,
+`SCREEN_BACK_BUTTON` and `TICK` have cases, and `TICK` is a virtual that
+does nothing in this class.
+
+`ScreenCallbackData` is `ItemHash` at `+0`, `Port` at `+4`, `Param` at
+`+8` and `Noise` at `+12`.
+
+The constructor keeps the flailer and whether it came from the Options
+menu. It sets `selected` to `CurrLanguage`, or 0 when that is -1. It grays
+`MENUITEM_7`, "Load All Languages", in mode 2 (`GrayMenuItem`,
+`0x0016d2a8`), because `0x0016fdb0` is `return 0`. `MENUITEM_1` to
+`MENUITEM_6` are English, French, German, Italian, Spanish and Swedish in
+order. The code adds `-MENUITEM_1` and takes anything under 6, unsigned.
+
+```c
+case MENUITEM_SELECT:
+    LanguageOfItem(data->ItemHash, &selected);
+    if (item < MENUITEM_1) return;
+    if (item > MENUITEM_6) {
+        if (item != MENUITEM_7) return;
+        LoadAllLanguages = 1;                      /* gp-16016 */
+        MoveBackScreen(1);
+        return;
+    }
+    Chosen(0);
+    break;
+case SCREEN_BACK_BUTTON:
+    data->Param = 0;                               /* the list's pop, vetoed */
+    if (CurrLanguage == -1) return;
+    item = GetActiveMenuItem();                    /* 0x0016d3f0 */
+    LanguageOfItem(item, &selected);
+    if ((int)item > (int)MENUITEM_6 || (int)item < (int)MENUITEM_1) {
+        MoveBackScreen(1);
+        return;
+    }
+    Chosen(1);
+    break;
+
+void Chosen(int backOnUnset)
+{
+    SetCurrLanguage(&TheLanguageManager, selected);
+    if (CurrLanguage == -1) { if (backOnUnset) MoveBackScreen(1); return; }
+    if (!fromOptions) FrontendDatabase::InitWithDefaults(0x002fc050); /* 0x00183830 */
+    MoveBackScreen(1);
+}
+```
+
+**BACK takes the highlighted language.** A BACK on Italian's highlight
+leaves in Italian, as a SELECT would. Only an unset language vetoes it.
+The signed compares mean that with no menu (item 0), BACK moves back as it
+is.
+
+`MoveBackScreen` (`0x00170320`) is `lw a0,-21324(gp); j 0x0016c670`, which
+is `MoveToPreviousScreen(n, 0, -1)`: no button event, no port. The pad's
+BACK is `MoveToPreviousScreen(1, 1, port)`. `MoveToPreviousScreen` memsets
+the event data before it sends anything, so its `ItemHash` is 0: BACK
+names no item.
+
+`FlailerScreen::Activate` builds the menu, then sends `SCREEN_ACTIVATE`,
+then activates the menu. The constructor's `GrayMenuItem` therefore lands on
+a menu that exists but is not yet live.
 
 ## The screen stack
 
@@ -1000,7 +1188,8 @@ gates it behind a `forceLegalScreens` flag that is off by default.
 `3DS Files/source/gameflow.c` is the reimplementation: the same table-driven
 `Begin`/`End`/`Loop` machine, the same 12-deep 32-byte screen stack, the same
 `LaunchFrontendMenus` push order and predicates, and the same title-movie
-sequencer. `main.c` holds the concrete stage table, the way
+sequencer, and retail's `LOADING_FRONTEND` and language screen.
+`main.c` holds the concrete stage table, the way
 `kVideoStages[]` does in NFSU2-3DS. `tools/bootflow_check.py` runs an
 identical script through a second implementation in Python and diffs the
 transcript, the way `tools/bmenu_check.py` does for the menus.
@@ -1032,6 +1221,45 @@ The title screen is retail's (see
 `uirender.c` draws a `SPLASH_SCREEN` or `PANELMOVIE` bitmap only while an
 override stands in for it, which is `RenderFlailerBitmap`'s rule. Before
 that rule, a skipped intro left the frozen last frame over the logo.
+
+The boot is retail's, in retail's order:
+
+1. **LOADING.** `main.c` adds the `GLOBAL` and `DYNTEX` bundles, then calls
+   `bgf_load_global_chunks`. `hookDisplayFrame` draws that one frame, as
+   `eDisplayFrame` does: `LOADING_TRACK` on the top screen and a blank
+   bottom screen. The `FRONTEND` and `INGAME` bundles decode after it, the
+   slow part of the boot, so LOADING stays up while they do.
+2. **The language screen.** `BootAutoload` pops on its first tick and
+   `Language Options Pre FE` comes up. A picks a language, and so does B on
+   a highlighted language.
+3. **The movies**, then the title.
+
+`gameflow.c` runs the loads through a queue in `main.c` (`hookLoadResource`,
+`hookLoadSoundRegions`). A load lands at the end of the frame it is asked
+in, and its callback moves the flow on, as retail's do. The bundles are
+already in memory by then, so nothing waits on the card.
+`uirender_draw_visible` draws every visible screen, one layer at a time
+across all of them, which is what `eDisplayFrame`'s single layer table
+does. The port used to draw only the current screen, and `LOADING_TRACK` is
+never current: it is only made visible.
+
+`bootflow_check` runs retail's `LoadGlobalChunks`, Begin, Loop, End, both
+load callbacks and the language screen's `Callback` on the image, as it
+does the title. Its world queues the loads and lands them a frame later,
+and a `slow<n>` input holds them back until frame `n`, long enough for the
+demo slideshow to run through. It fakes the screen list at `gp-21324` so
+that `strcmp` sees the name the screen was entered under. `--mutate` now
+breaks `gameflow.c` 57 ways. `back-names-screen` is equivalent by
+construction, because no screen's callback reads `ItemHash` on BACK.
+
+Not yet on the host:
+
+* **Speech.** `hookLoadSpeech` and `hookUnloadSpeech` only log, since the
+  speech banks are not ported.
+* **The French logo art.** `hookSwapLogoArt` only logs. `LOADING_FR` and
+  `NFS_LOGO_ALPHA_FR` are not swapped in.
+* **`Language Options`**, the Options menu's copy, gets the class without
+  its `tSlideOnScreen` (`0x001ee918`).
 
 `bootflow_check` does not write the title again. It runs retail's
 `TitleScreen::Callback` itself on `SLES_507.31` under `tools/mipsemu.py`,

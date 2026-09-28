@@ -11,11 +11,13 @@
 // its entry point to "New Main Menu", decompiled in docs/formats/boot-flow.md
 // with an address for every rule here.
 //
-//  * GameFlowStateInfoTable (0x002f2eb0) and ServiceGameFlow (0x001636f8):
-//    ten states, each with an optional Begin/End/Loop, serviced in a loop
-//    until the desired state stops moving.
-//  * LaunchFrontendMenus (0x0016aa40) and FlailerScreenList: a LIFO of
+//  * GameFlowStateInfoTable and ServiceGameFlow (0x001680e8): ten states,
+//    each with an optional Begin/End/Loop, serviced in a loop until the
+//    desired state stops moving.
+//  * LaunchFrontendMenus (0x0016f950) and FlailerScreenList: a LIFO of
 //    screen names that the boot fills backwards and immediately pops.
+//
+// Addresses are retail's, SLES_507.31, unless they say the demo's.
 //
 // There is no BootFlowManager class in the game -- that is what task 14 went
 // looking for and did not find. The sequence is a table plus a stack.
@@ -76,6 +78,10 @@ typedef enum {
 
 typedef struct BGameFlow BGameFlow;
 
+// A load's completion callback: LoadResourceFile's and
+// LoadSoundRegionsFrontEnd's, run by the host once the load is done.
+typedef void (*BGameFlowDone)(BGameFlow* gf);
+
 // GameFlowStateInfo (0x002f2eb0), 16 bytes in the original and the same four
 // fields here. A NULL function is a state that does nothing, which is how
 // IN_FRONTEND and RACING rest.
@@ -134,13 +140,25 @@ typedef struct {
     void (*changeTexture)(void* user, uint32_t screen, uint32_t object,
                           uint32_t texture);
 
-    // The UI layer: a screen became current, or stopped being current. This
-    // is where a port builds its BMenu and starts drawing. Both fire after
-    // the matching message, not before: the screen is live for the whole of
-    // enterScreen..leaveScreen, so the menu's opening highlight lands on a
-    // screen that exists. See bgf_change_to_screen.
+    // The UI layer, in the three steps of FlailerScreen::Activate
+    // (0x0016a858). `openScreen` comes BEFORE SCREEN_ACTIVATE: Activate
+    // builds the screen's FlailerMenu first, so a constructor can gray an
+    // item of it (LanguageOptionsScreenBase does). `enterScreen` comes
+    // after: that is where the menu takes its current item and sends the
+    // opening highlight, to a screen object that exists by then.
+    // `leaveScreen` fires after SCREEN_UNACTIVATE. See bgf_change_to_screen.
+    void (*openScreen)(void* user, const BScreenConfig* cfg);
     void (*enterScreen)(void* user, const BScreenConfig* cfg);
     void (*leaveScreen)(void* user, const BScreenConfig* cfg);
+
+    // GrayMenuItem (0x0016d2a8): item `item` of the menu on the Flailer
+    // screen `screen`. Mode 1 enables it and shows it, 0 disables it (drawn
+    // grayed) and 2 disables it and hides it. BScrGrayMode's values.
+    void (*grayMenuItem)(void* user, uint32_t screen, uint32_t item,
+                         int mode);
+    // GetActiveMenuItem (0x0016d3f0): the hash of the current screen's
+    // highlighted item, or 0 with no menu.
+    uint32_t (*activeMenuItem)(void* user);
 
     // MoviePlayer. `open` returns 0 if the file is not there, which on this
     // disc is the normal case for the second title movie -- see gameflow.c.
@@ -149,10 +167,27 @@ typedef struct {
     int  (*movieDrive)(void* user);
     void (*movieClose)(void* user);
 
-    // LoadResourceFile / IsResourceLoadingComplete, and the language.
-    void (*loadResource)(void* user, const char* path);
-    int  (*resourcesReady)(void* user);
+    // LoadResourceFile (0x00199640). `done`, when not NULL, is the file's
+    // completion callback: the host calls it, with the flow, once the file
+    // is resident -- ServiceResourceLoading runs the callbacks, after the
+    // frame's eDisplayFrame (MainLoop, 0x0012f60c). Retail loads the
+    // frontend this way: the state moves on from FRONTB's callback, not
+    // from a poll.
+    void (*loadResource)(void* user, const char* path, BGameFlowDone done);
+    // LoadSoundRegionsFrontEnd (0x001ae9a0), with its completion callback.
+    void (*loadSoundRegions)(void* user, BGameFlowDone done);
+    // LanguageManager::SetLanguage's file load: FE_<language>.BIN.
     void (*setLanguage)(void* user, int language);
+    // LoadLocalizedSpeechFiles (0x001ae4d8) and its Un- (0x001ae5e8).
+    void (*loadSpeech)(void* user, int language);
+    void (*unloadSpeech)(void* user);
+    // 0x001681b0: the dynamic pack's LOADING and NFS_LOGO_ALPHA textures
+    // take their French art (LOADING_FR, NFS_LOGO_ALPHA_FR) when `french`
+    // is 1, and their own again when it is 0.
+    void (*swapLogoArt)(void* user, int french);
+    // eDisplayFrame (0x00112858), called once outside MainLoop: by
+    // LoadGlobalChunks, so the LOADING screen is up while the rest loads.
+    void (*displayFrame)(void* user);
 
     // pDynamicTexturePack, for the legal and anti-piracy panels.
     void (*loadTexture)(void* user, uint32_t texture);
@@ -220,6 +255,15 @@ typedef struct {
     int port;
 } BBootAutoLoader;
 
+// LanguageOptionsScreenBase (0x001f1a78), 16 bytes: +12 is the vtable.
+// `active` stands for pInstance (gp-16972) being set.
+typedef struct {
+    int      active;
+    int      selected;      // +0: SelectedLanguage
+    uint32_t flailer;       // +4: the Flailer screen, ACTIVATE's ItemHash
+    int      fromOptions;   // +8: 0 before the frontend, 1 from Options
+} BLanguageScreen;
+
 struct BGameFlow {
     const BGameFlowStateInfo* states;
     int                       numStates;
@@ -259,12 +303,16 @@ struct BGameFlow {
     int skipFE;               // 0x00322f04, 0
     int skipMovies;           // 0x00322fbc, 0
     int videoMode;            // VIDEO_MODE: MODE_PAL = 0, MODE_NTSC = 1
-    int currLanguage;         // TheLanguageManager.CurrLanguage, -1 = unset
+    // TheLanguageManager (0x0031c1c8): +0 CurrLanguage, -1 until
+    // LoadGlobalChunks sets English, and +20, the speech files are loaded.
+    int currLanguage;
+    int speechLoaded;
     int demoDiscActive;       // TheDemoDiscManager.bActive, always 0
     // DemoDiscManager::IsAttractMode (0x0012eaf0). Only read when the demo
     // disc is active, so dead on retail like the rest of the demo branch.
     int demoAttractMode;
-    int needToSetLanguage;
+    int logoFrench;           // gp-21404: the LOADING art is LOADING_FR
+    int loadAllLanguages;     // gp-16016, MENUITEM_7 of the language screen
     int copsOn;               // 0x002f3fdc -- which of the two Mode Selects
 
     // Port-only. MumboJumboScreen::ShouldSeeLegalScreen (0x0016a648) and
@@ -286,6 +334,7 @@ struct BGameFlow {
     BTitleScreen      title;
     BMumboJumboScreen mumbo;
     BBootAutoLoader   autoload;
+    BLanguageScreen   language;
 };
 
 // ---------------------------------------------------------------- lifecycle
@@ -299,17 +348,30 @@ void bgf_init(BGameFlow* gf,
               const BBootStage* bootStages, int numBootStages,
               const BGameFlowHooks* hooks);
 
-// ChangeGameFlow (0x001636e8): two stores, no validation, no transition
+// ChangeGameFlow (0x001680d8): two stores, no validation, no transition
 // table. `pending` is recorded; ServiceGameFlow never reads it, and only
 // BeginGameFlowUnloadingTrackSpecific does.
 void bgf_change_state(BGameFlow* gf, int desired, int pending);
 
-// ServiceGameFlow (0x001636f8). Loops until the desired state stops moving,
+// LoadGlobalChunks (0x001682d0), the flow's part: from SetCurrLanguage(
+// ENGLISH) to its one eDisplayFrame, which puts LOADING_TRACK up -- the
+// first thing the game shows. InitializeEverything calls it before main
+// asks for LOADING_FRONTEND, so the port calls it before bgf_change_state.
+// The files it loads around that (GLOBALB, the three texture packs) are the
+// host's to load: the LOADING art is in GLOBALB.BUN and DYNTEX.BIN.
+void bgf_load_global_chunks(BGameFlow* gf);
+
+// LanguageManager::SetCurrLanguage (0x00100818 -> 0x0021e0d0), with its
+// tail (0x0021e1e0): the FE_<language>.BIN table, the speech files, and the
+// French LOADING art (0x001681b0). The same language again does nothing.
+void bgf_set_curr_language(BGameFlow* gf, int language);
+
+// ServiceGameFlow (0x001680e8). Loops until the desired state stops moving,
 // so a Begin or Loop that redirects is serviced in the same call and costs
 // no frame. The OLD state's End runs before the NEW state's Begin.
 void bgf_service(BGameFlow* gf);
 
-// AdvanceRealTime (0x00199410): both clocks and the frame counter.
+// AdvanceRealTime (0x001a3500): both clocks and the frame counter.
 void bgf_advance_time(BGameFlow* gf, float dt);
 
 // One pass of MainLoop: advance the clocks, service, tick the current
@@ -321,10 +383,10 @@ const char* bgf_state_name(const BGameFlow* gf, int state);
 
 // ------------------------------------------------------------- screen list
 
-// FlailerScreenList::FindScreen (0x00167c58): a linear walk by name.
+// FlailerScreenList::FindScreen (0x0016c8c8): a linear walk by name.
 const BScreenConfig* bgf_find_screen(const BGameFlow* gf, const char* name);
 
-// ChangeToScreen (0x00167850). Hides and unactivates the current screen,
+// ChangeToScreen (0x0016c4c0). Hides and unactivates the current screen,
 // optionally pushing its name so BACK returns to it, then activates `name`.
 //
 // A name that is NULL, empty or unregistered leaves the flow with NO current
@@ -334,7 +396,7 @@ const BScreenConfig* bgf_find_screen(const BGameFlow* gf, const char* name);
 // Returns 1 if a screen is current afterwards.
 int bgf_change_to_screen(BGameFlow* gf, const char* name, int pushCurrent);
 
-// MoveToPreviousScreen (0x00167a00). With `sendBackButton`, the current
+// MoveToPreviousScreen (0x0016c670). With `sendBackButton`, the current
 // screen gets SCREEN_BACK_BUTTON first and can veto by clearing `param` or
 // silence the click by clearing `noise`; the sound is read back AFTER the
 // callback, which is how the title screen swallows it. Then `n` names are
@@ -342,8 +404,15 @@ int bgf_change_to_screen(BGameFlow* gf, const char* name, int pushCurrent);
 int bgf_move_to_previous_screen(BGameFlow* gf, int n, int sendBackButton,
                                 int port);
 
-// MoveBackScreen (0x0016b220): MoveToPreviousScreen(n, 1, port 0).
+// MoveBackScreen (0x00170320): MoveToPreviousScreen(n, 0, port -1). No
+// SCREEN_BACK_BUTTON: this is how a screen leaves on its own -- BootAutoload
+// when its job is done, the language screen once a language is chosen.
 int bgf_move_back_screen(BGameFlow* gf, int n);
+
+// The pad's BACK, FlailerScreenList::JoyHandler (0x0016cab0):
+// MoveToPreviousScreen(1, 1, port). The screen hears SCREEN_BACK_BUTTON
+// first and can veto the pop.
+int bgf_back_button(BGameFlow* gf, int port);
 
 // Sends a message to the current screen's callback. Returns 0 if there is
 // no current screen or it has no callback.
@@ -362,44 +431,44 @@ int bgf_menu_item_event(BGameFlow* gf, BScreenMessage msg, uint32_t itemHash,
 
 // ------------------------------------------------------------ screen stack
 
-void        bgf_push_screen(BGameFlow* gf, const char* name);  // 0x00166780
-const char* bgf_pop_screen(BGameFlow* gf);                     // 0x001667a0
-void        bgf_reset_stack(BGameFlow* gf);                    // 0x001667c8
-void        bgf_pop_screens(BGameFlow* gf, int n);             // 0x00167af8
+void        bgf_push_screen(BGameFlow* gf, const char* name);  // 0x0016b418
+const char* bgf_pop_screen(BGameFlow* gf);                     // 0x0016b438
+void        bgf_reset_stack(BGameFlow* gf);                    // 0x0016b460
+void        bgf_pop_screens(BGameFlow* gf, int n);             // 0x0016c768
 
-// PopUntil (0x00167b48): pops while the top is neither empty nor `name`,
+// PopUntil (0x0016c7b8): pops while the top is neither empty nor `name`,
 // leaving `name` itself on the stack.
 void bgf_pop_until(BGameFlow* gf, const char* name);
 
-// GetCurrentScreenNameFromStack (0x00167bf0): the top, or "" when empty.
+// GetCurrentScreenNameFromStack (0x0016c860): the top, or "" when empty.
 const char* bgf_stack_top(const BGameFlow* gf);
 
 // ------------------------------------------------------------- boot flow
 
-// LaunchFrontendMenus (0x0016aa40): push every stage whose predicate passes,
+// LaunchFrontendMenus (0x0016f950): push every stage whose predicate passes,
 // then enter the top of the stack -- which is the last one pushed.
 void bgf_launch_frontend_menus(BGameFlow* gf);
 
-// UnlaunchFrontendMenus (0x0016ab70), the mirror run when a race starts.
+// UnlaunchFrontendMenus (0x0016fa80), the mirror run when a race starts.
 // Sets frontendLaunchType so a second visit skips the boot sequence.
 void bgf_unlaunch_frontend_menus(BGameFlow* gf, int raceInProgress);
 
 // The four predicates, all in Frontend.obj and all reading
-// frontendLaunchType (0x00323724, ships as 1).
-int bgf_should_see_title_sequence(const BGameFlow* gf);      // 0x0016aa30
-int bgf_should_see_legal_mumbo_jumbo(const BGameFlow* gf);   // 0x0016aa28
-int bgf_should_see_language_select(const BGameFlow* gf);     // 0x0016a9b8
-int bgf_should_see_autoload(const BGameFlow* gf);            // 0x0016a990
+// frontendLaunchType, which ships as 1.
+int bgf_should_see_title_sequence(const BGameFlow* gf);      // 0x0016f940
+int bgf_should_see_legal_mumbo_jumbo(const BGameFlow* gf);   // 0x0016f938
+int bgf_should_see_language_select(const BGameFlow* gf);     // 0x0016f8c8
+int bgf_should_see_autoload(const BGameFlow* gf);            // 0x0016f8a0
 
-// ConsiderStartDemoMode (0x00169f98): half a minute idle on PRESS START.
+// ConsiderStartDemoMode (0x0016ed50): half a minute idle on PRESS START.
 void bgf_consider_start_demo_mode(BGameFlow* gf, uint32_t since);
 
 // ------------------------------------------- the ten game flow state hooks
 
-void bgf_begin_loading_frontend(BGameFlow* gf);       // 0x00163ad8
-void bgf_loop_loading_frontend(BGameFlow* gf);        // 0x00163b78
-void bgf_end_loading_frontend(BGameFlow* gf);         // 0x00163c58
-void bgf_begin_unloading_frontend(BGameFlow* gf);     // 0x00163cc8
+void bgf_begin_loading_frontend(BGameFlow* gf);       // 0x00168698
+void bgf_loop_loading_frontend(BGameFlow* gf);        // 0x00168718
+void bgf_end_loading_frontend(BGameFlow* gf);         // 0x001687a8
+void bgf_begin_unloading_frontend(BGameFlow* gf);     // 0x00168830
 
 // ---------------------------------------------------- the boot screens
 
@@ -407,22 +476,35 @@ void bgf_begin_unloading_frontend(BGameFlow* gf);     // 0x00163cc8
 void bgf_title_screen_callback(BGameFlow* gf, BScreenMessage msg,
                                BScreenCallbackData* data);
 void bgf_mumbo_jumbo_callback(BGameFlow* gf, BScreenMessage msg,
-                              BScreenCallbackData* data);     // 0x0016a8b0
+                              BScreenCallbackData* data);     // 0x0016f810
 void bgf_boot_autoload_callback(BGameFlow* gf, BScreenMessage msg,
-                                BScreenCallbackData* data);   // 0x00231488
+                                BScreenCallbackData* data);   // demo 0x00231488
+
+// LanguageOptionsScreenBase::Callback (0x001f1dd8), for "Language Options
+// Pre FE": the six languages on MENUITEM_1..6, and MENUITEM_7, Load All
+// Languages, hidden. A language chosen, by SELECT or by BACK on its item,
+// is set and the screen moves back. "Language Options", the same screen
+// entered from Options, is LanguageOptionsScreen (0x001f1d70), which adds a
+// slide-on animation; the port gives it the base class until that is
+// ported.
+void bgf_language_screen_callback(BGameFlow* gf, BScreenMessage msg,
+                                  BScreenCallbackData* data);
 
 // bStringHash of the three items NEW_MAIN_MENU defines, which are the three
 // constants NewMainMenu::HandleEvent compares against.
 #define BGF_ITEM_MENUITEM_1  0x52e039f3u   // "Hot Pursuit"
 #define BGF_ITEM_MENUITEM_2  0x52e039f4u   // "World Racing"
 #define BGF_ITEM_MENUITEM_3  0x52e039f5u   // "Options"
+// The language screen's: MENUITEM_1..6 are the six languages in
+// e_Languages order, MENUITEM_7 is Load All Languages.
+#define BGF_ITEM_MENUITEM_6  0x52e039f8u
+#define BGF_ITEM_MENUITEM_7  0x52e039f9u
 
 void bgf_new_main_menu_callback(BGameFlow* gf, BScreenMessage msg,
                                 BScreenCallbackData* data);   // 0x00203a48
 
 // A screen the flow can name but that has no behaviour of its own yet:
-// activates, draws, and leaves on BACK. "Language Options Pre FE" uses it
-// until its own class is ported.
+// activates, draws, and leaves on BACK.
 void bgf_plain_screen_callback(BGameFlow* gf, BScreenMessage msg,
                                BScreenCallbackData* data);
 
@@ -432,5 +514,5 @@ typedef struct {
     int         letterboxed;   // picks the plane: 0 is 4:3, 1 is letterboxed
 } BTitleMovie;
 
-int                bgf_num_title_movies(const BGameFlow* gf);   // 0x0016a130
-const BTitleMovie* bgf_title_movie(const BGameFlow* gf, int i);  // 0x0016a0e0
+int                bgf_num_title_movies(const BGameFlow* gf);   // 0x0016eee0
+const BTitleMovie* bgf_title_movie(const BGameFlow* gf, int i);  // 0x0016ee90

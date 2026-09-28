@@ -859,10 +859,9 @@ bool uirender_object_bounds(UIRenderer* r, const BUI* ui, uint32_t index,
     return true;
 }
 
-void uirender_draw_screen(UIRenderer* r, BUI* ui, const BUIScreen* screen,
+static UIView screen_view(const UIRenderer* r, const BUIScreen* screen,
                           float alpha)
 {
-    if (!ui || !screen) return;
     float resX = screen->resX ? (float)screen->resX : 640.0f;
     float resY = screen->resY ? (float)screen->resY : 480.0f;
 
@@ -876,25 +875,58 @@ void uirender_draw_screen(UIRenderer* r, BUI* ui, const BUIScreen* screen,
     v.originX = 0.0f;
     v.originY = 0.0f;
     v.alpha   = alpha;
+    return v;
+}
+
+// One screen's share of one layer, in file order.
+static void draw_layer(UIRenderer* r, BUI* ui, const BUIScreen* screen,
+                       int layer, const UIView* v)
+{
+    for (uint32_t i = 0; i < screen->count; i++) {
+        BUIObject o;
+        if (!bui_object(ui, screen->first + i, &o)) continue;
+        if (o.z != layer) continue;
+        if (o.visible != BUI_VISIBLE) continue;
+        // Drawn on the bottom screen instead; see uirender_hide_object.
+        if (object_hidden(r, o.nameHash)) continue;
+        if (o.type == BUI_TYPE_BITMAP)    draw_bitmap(r, &o, v);
+        else if (o.type == BUI_TYPE_TEXT) draw_text(r, &o, v);
+    }
+}
+
+// Z is a layer index, and eDisplayFrame walks the layers in the fixed, mostly
+// descending order spelled out at BUI_LAYER_ORDER. Within one layer the file
+// order is the draw order, because AddFlailerStrip appends to the tail of
+// LayerRenderInfoTable[Z].
+static const uint8_t kLayerOrder[BUI_NUM_LAYERS] = BUI_LAYER_ORDER;
+
+void uirender_draw_screen(UIRenderer* r, BUI* ui, const BUIScreen* screen,
+                          float alpha)
+{
+    if (!ui || !screen) return;
+    UIView v = screen_view(r, screen, alpha);
 
     C2D_SetTintMode(C2D_TintMult);
+    for (int pass = 0; pass < BUI_NUM_LAYERS; pass++)
+        draw_layer(r, ui, screen, kLayerOrder[pass], &v);
+}
 
-    // Z is a layer index, and eDisplayFrame walks the layers in the fixed,
-    // mostly descending order spelled out at BUI_LAYER_ORDER. Within one
-    // layer the file order is the draw order, because AddFlailerStrip
-    // appends to the tail of LayerRenderInfoTable[Z].
-    static const uint8_t kOrder[BUI_NUM_LAYERS] = BUI_LAYER_ORDER;
+// The layer table is one for the whole frame, and every visible screen adds
+// its strips to it: a layer is drawn for all of them before the next layer
+// starts, screens in the order the bundles were added.
+void uirender_draw_visible(UIRenderer* r, float alpha)
+{
+    C2D_SetTintMode(C2D_TintMult);
     for (int pass = 0; pass < BUI_NUM_LAYERS; pass++) {
-        const int layer = kOrder[pass];
-        for (uint32_t i = 0; i < screen->count; i++) {
-            BUIObject o;
-            if (!bui_object(ui, screen->first + i, &o)) continue;
-            if (o.z != layer) continue;
-            if (o.visible != BUI_VISIBLE) continue;
-            // Drawn on the bottom screen instead; see uirender_hide_object.
-            if (object_hidden(r, o.nameHash)) continue;
-            if (o.type == BUI_TYPE_BITMAP)    draw_bitmap(r, &o, &v);
-            else if (o.type == BUI_TYPE_TEXT) draw_text(r, &o, &v);
+        for (int b = 0; b < r->numBundles; b++) {
+            if (!r->bundles[b].hasUI) continue;
+            BUI* ui = &r->bundles[b].ui;
+            for (uint32_t s = 0; s < ui->numScreens; s++) {
+                const BUIScreen* screen = &ui->screens[s];
+                if (!screen->visible) continue;
+                UIView v = screen_view(r, screen, alpha);
+                draw_layer(r, ui, screen, kLayerOrder[pass], &v);
+            }
         }
     }
 }

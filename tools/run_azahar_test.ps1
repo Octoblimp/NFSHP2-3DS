@@ -171,11 +171,29 @@ function Shot([string]$tag) {
 # seconds follow. From the main menu the run walks the two screens it leads
 # to that the port has: Cops On Mode Select and Options.
 
+# LoadGlobalChunks puts LOADING up before anything else, and it stays up
+# while the frontend bundles decode. Then the Pre FE language screen; A
+# takes its first item, English, and the boot goes on to the movies.
+$loading = Wait-ForLog "global chunks loaded" 60
+Write-Host ("  LOADING drawn: {0}" -f $loading)
+if ($loading) { Start-Sleep -Milliseconds 800; Shot "loading" }
+
 Write-Host "Waiting for the main loop..."
 $booted = Wait-ForLog "entering main loop" 60
 Write-Host ("  main loop: {0}" -f $booted)
 
 if ($booted) {
+    $gotLang = Wait-ForLog "flow enter Language Options Pre FE" 20
+    Write-Host ("  language screen: {0}" -f $gotLang)
+    if ($gotLang) {
+        Start-Sleep -Milliseconds 1500
+        Shot "language"
+        if (Wait-ForLog "^movie open " 1) {
+            Write-Host "  FAIL: a movie opened before a language was chosen"
+        }
+        [Hp2Cap]::PressKey($hwnd, $VK_A)      # A, English
+    }
+
     $gotMovie = Wait-ForLog "^movie open " 20
     Write-Host ("  movie opened: {0}" -f $gotMovie)
     Start-Sleep -Milliseconds 1200
@@ -313,6 +331,7 @@ $crashSigs = @("PANIC", "segfault", "Unhandled exception", "svcBreak")
 $crash = $az | Where-Object { $l = $_; $crashSigs | Where-Object { $l -match $_ } }
 
 $reached   = $dbg | Where-Object { $_ -match "entering main loop" }
+$atLang    = $dbg | Where-Object { $_ -match "flow enter Language Options Pre FE" }
 $movieOpen = $dbg | Where-Object { $_ -match "^movie open " }
 $movieDone = $dbg | Where-Object { $_ -match "^movie close after (\d+)/" }
 $atMenu    = $dbg | Where-Object { $_ -match "flow enter New Main Menu" }
@@ -325,6 +344,7 @@ $leftLoop  = $dbg | Where-Object { $_ -match "^left main loop" }
 $verdict = "UNKNOWN"
 if (-not $reached)      { $verdict = "FAIL (never reached the main loop)" }
 elseif ($crash)         { $verdict = "FAIL (crash: $($crash[0]))" }
+elseif (-not $atLang)   { $verdict = "FAIL (the language screen never came up)" }
 elseif (-not $movieOpen){ $verdict = "FAIL (title screen never opened a movie)" }
 elseif (-not $atMenu)   { $verdict = "PARTIAL (movie played, never reached the main menu)" }
 elseif (-not $atModes)  { $verdict = "PARTIAL (reached the main menu, but not Cops On Mode Select)" }

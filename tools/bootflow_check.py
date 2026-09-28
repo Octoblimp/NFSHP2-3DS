@@ -17,7 +17,10 @@ or which of the two visibility enums is which, and disagreeing.
 The title screen is not written again at all: it is retail's own
 TitleScreen::Callback (0x0016f440) and everything under it, run on
 SLES_507.31 by tools/mipsemu.py, with the calls out of the screen stubbed onto
-this flow and its world. See RetailTitle.
+this flow and its world. See RetailTitle. The same goes for the loading --
+LoadGlobalChunks, the LOADING_FRONTEND state's Begin, Loop and End, the two
+load callbacks and the LanguageManager under them (RetailLoading) -- and for
+the language screen, LanguageOptionsScreenBase (RetailLanguage).
 
 Usage:
     python tools/bootflow_check.py                  # all scenarios
@@ -25,8 +28,9 @@ Usage:
     python tools/bootflow_check.py --dump out.txt   # keep both transcripts
     python tools/bootflow_check.py --mutate [--only a,b]
 
---mutate breaks gameflow.c's title screen one way at a time and checks the
-diff notices. The Python side is retail's code, so it is never mutated.
+--mutate breaks gameflow.c's title screen, loading and language screen one
+way at a time and checks the diff notices. The Python side is retail's code,
+so it is never mutated.
 """
 import argparse
 import difflib
@@ -83,6 +87,8 @@ NEW_MAIN_MENU = 0xae0f8aa1
 ITEM_MENUITEM_1 = 0x52e039f3    # "Hot Pursuit"
 ITEM_MENUITEM_2 = 0x52e039f4    # "World Racing"
 ITEM_MENUITEM_3 = 0x52e039f5    # "Options"
+ITEM_MENUITEM_6 = 0x52e039f8    # the language screen's last language
+ITEM_MENUITEM_7 = 0x52e039f9    # ... and its Load All Languages
 LANGUAGE = 0x632b068e
 BOOT_AUTOLOAD = 0xfa2ac5c6
 MUMBO_JUMBO = 0xdd4197c9
@@ -97,7 +103,8 @@ TEX_LEGAL, TEX_ANTIPIRACY = 0xa7ebc389, 0x38258033
 STACK_DEPTH, NAME_LEN = 12, 32
 
 # The world the harness simulates, same constants as tools/src/gameflow_test.c
-MOVIE_FRAMES, LOADER_FRAMES, TEXTURE_POLLS, SAVE_POLLS = 5, 3, 2, 2
+MOVIE_FRAMES, LOADER_FRAMES, TEXTURE_POLLS, SAVE_POLLS = 5, 1, 2, 2
+MAX_PENDING = 4
 
 EALOGO_EN = "MOVIES\\INTRO\\EALOGO_EN.AVI"
 NFSINTRO_EN = "MOVIES\\INTRO\\NFSINTRO_EN.AVI"
@@ -106,6 +113,11 @@ NFSINTRO_EN = "MOVIES\\INTRO\\NFSINTRO_EN.AVI"
 def f32(x):
     """C `float` arithmetic. The clock truncates, so the rounding matters."""
     return struct.unpack("<f", struct.pack("<f", x))[0]
+
+
+def s32(v):
+    v &= 0xffffffff
+    return v - (1 << 32) if v & 0x80000000 else v
 
 
 # TitleMoviesToPlay, retail 0x002fb750: eight language rows of two, held to
@@ -148,10 +160,8 @@ class Flow(object):
         self.skip_movies = sc["skipMovies"]
         self.cops_on = 0
         self.video_mode = sc["videoMode"]
-        self.curr_language = sc["currLanguage"]
         self.demo_disc = sc["demoDiscActive"]
         self.force_legal = sc.get("forceLegal", 0)
-        self.need_to_set_language = 0
 
         self.legal_timeout = 7.0
         self.antipiracy_timeout = 7.0
@@ -160,6 +170,8 @@ class Flow(object):
         # MumboJumboScreen / BootAutoLoader instance state; TitleScreen's
         # lives in the emulated image
         self.title = RetailTitle(self)
+        self.loading = RetailLoading(self)
+        self.language = RetailLanguage(self)
         self.m_state = 0
         self.m_timer = 0
         self.a_state = 0
@@ -169,6 +181,19 @@ class Flow(object):
         self.movie_left = 0
         self.tex_polls = 0
         self.save_polls = 0
+        self.pending = []                 # loads in flight: (what, callback)
+        self.loader_due = LOADER_FRAMES   # nothing lands before this frame
+        self.active_item = ITEM_MENUITEM_1
+
+    # CurrLanguage is the LanguageManager's +0, in the image, where retail's
+    # code reads and writes it.
+    @property
+    def curr_language(self):
+        return s32(retail_emu().u32(LANGUAGE_MANAGER))
+
+    @curr_language.setter
+    def curr_language(self, v):
+        retail_emu().put32(LANGUAGE_MANAGER, v)
 
     # -- transcript ------------------------------------------------------
     def say(self, line):
@@ -179,7 +204,7 @@ class Flow(object):
     # literal, the hash is bStringHash of the authored name.
     SCREENS = [
         ("BootAutoload", BOOT_AUTOLOAD, "autoload"),
-        ("Language Options Pre FE", LANGUAGE, "plain"),
+        ("Language Options Pre FE", LANGUAGE, "language"),
         ("Title Screen", TITLE, "title"),
         ("New Main Menu", NEW_MAIN_MENU, "mainmenu"),
         ("Legal MumboJumbo", MUMBO_JUMBO, "mumbo"),
@@ -214,8 +239,24 @@ class Flow(object):
         self.movie_playing = 0
         self.movie_left = 0
 
-    def resources_ready(self):
-        return self.frame_counter >= LOADER_FRAMES
+    # The loader: a load asked for in a frame lands at its end, after the
+    # flow's pass, and its callback runs then. One its callback asks for
+    # lands a frame later. Same rules as wServiceLoads in the C harness.
+    def queue_load(self, what, done):
+        if not done:
+            return
+        if len(self.pending) >= MAX_PENDING:
+            self.say("loader full %s" % what)
+            return
+        self.pending.append((what, done))
+
+    def service_loads(self):
+        if self.frame_counter < self.loader_due:
+            return
+        run, self.pending = self.pending, []
+        for what, done in run:
+            self.say("loaded %s" % what)
+            self.loading.run(done)
 
     # -- Flailer visibility ----------------------------------------------
     def screen_visible(self, screen, visible):
@@ -297,18 +338,20 @@ class Flow(object):
                 self.screen = found
                 self.screen_visible(found[1], 1)
                 self.say("enter %s %08x" % (found[0], found[1]))
+                # FlailerScreen::Activate (0x0016a858): the FlailerMenu is
+                # built before SCREEN_ACTIVATE, on its first item, and
+                # activated after it.
+                self.say("ui open %08x" % found[1])
+                self.active_item = ITEM_MENUITEM_1
                 self.send(SCREEN_ACTIVATE, {"itemHash": found[1], "port": 0,
                                             "param": 0, "noise": 0})
-                # After the message. The UI layer builds the screen's menu,
-                # and in the original that is the screen constructor, which
-                # runs on SCREEN_ACTIVATE -- so the menu cannot exist before
-                # the screen does. Matches HOOK_VOID(enterScreen) in
-                # gameflow.c, which sits after the same send.
                 self.say("ui enter %08x" % found[1])
         return 1 if self.screen else 0
 
+    # MoveToPreviousScreen (0x0016c670). The block is memset, so ItemHash
+    # is 0.
     def move_to_previous_screen(self, n, send_back, port):
-        data = {"itemHash": self.screen[1] if self.screen else 0,
+        data = {"itemHash": 0,
                 "port": port, "param": 1, "noise": FE_SOUND_MENU_CANCEL}
         if send_back:
             self.send(SCREEN_BACK_BUTTON, data)
@@ -329,8 +372,13 @@ class Flow(object):
         self.change_to_screen(name, 0)
         return 1
 
+    # MoveBackScreen (0x00170320): no SCREEN_BACK_BUTTON, port -1.
     def move_back_screen(self, n):
-        return self.move_to_previous_screen(n, 1, 0)
+        return self.move_to_previous_screen(n, 0, -1)
+
+    # FlailerScreenList::JoyHandler's BACK (0x0016cab0).
+    def back_button(self, port):
+        return self.move_to_previous_screen(1, 1, port)
 
     # -- the flow ----------------------------------------------------------
     def change_state(self, desired, _pending=NONE):
@@ -340,8 +388,7 @@ class Flow(object):
     # Ten states; only LOADING_FRONTEND and UNLOADING_FRONTEND do anything.
     def state_fns(self, state):
         if state == LOADING_FRONTEND:
-            return (self.begin_loading_frontend, self.end_loading_frontend,
-                    self.loop_loading_frontend)
+            return (self.loading.begin, self.loading.end, self.loading.loop)
         if state == UNLOADING_FRONTEND:
             return (self.begin_unloading_frontend, None, None)
         return (None, None, None)
@@ -386,37 +433,6 @@ class Flow(object):
             self.send(SCREEN_TICK, {"itemHash": self.screen[1], "port": 0,
                                     "param": 0, "noise": 0})
         self.service()
-
-    # -- GAMEFLOW_STATE_LOADING_FRONTEND -----------------------------------
-    def begin_loading_frontend(self):
-        self.begin_screen_fade_time = 0
-        self.say("load FRONTEND\\FRONTA.BUN")
-        if self.curr_language == -1:
-            self.need_to_set_language = 1
-        self.say("language %d" % (self.curr_language
-                                  if self.curr_language >= 0 else 0))
-        self.say("load FRONTEND\\FRONTB.BUN")
-
-    def loop_loading_frontend(self):
-        elapsed = (self.real_time - self.begin_screen_fade_time) & 0xffffffff
-        if self.demo_disc and elapsed < 541:
-            if elapsed >= 361:
-                self.screen_visible(SLIDE2, 0)
-                self.screen_visible(DISCLAIMER, 1)
-            elif elapsed >= 181:
-                self.screen_visible(FIRSTLEGAL, 0)
-                self.screen_visible(SLIDE2, 1)
-            return
-        if not self.resources_ready():
-            return
-        if self.need_to_set_language:
-            self.say("language %d" % -1)
-            self.need_to_set_language = 0
-        self.change_state(IN_FRONTEND)
-
-    def end_loading_frontend(self):
-        self.screen_visible(DISCLAIMER if self.demo_disc else LOADING_TRACK, 0)
-        self.launch_frontend_menus()
 
     def begin_unloading_frontend(self):
         self.change_to_screen(None, 0)
@@ -492,6 +508,8 @@ class Flow(object):
             self.mumbo(msg, data)
         elif kind == "autoload":
             self.autoload(msg, data)
+        elif kind == "language":
+            self.language.callback(msg, data)
 
     # MumboJumboScreen (0x0016a8b0). Both ShouldSee* are `return 0` on the
     # disc, so without the port's forceLegalScreens switch state 0 pops
@@ -582,7 +600,16 @@ REAL_TIMER = RETAIL_GP - 19608          # RealTimer, 1/4000 s
 SKIP_MOVIES = RETAIL_GP - 23036
 THE_TITLE = RETAIL_GP - 21156           # the one TitleScreen instance
 DEMO_DISC = 0x002effe0                  # DemoDiscManager, +0 is IsActive
-CURR_LANGUAGE = 0x0031c1c8
+LANGUAGE_MANAGER = 0x0031c1c8           # TheLanguageManager
+CURR_LANGUAGE = LANGUAGE_MANAGER        # its +0
+REAL_TIME = RETAIL_GP - 19604           # RealTime, 1/60 s
+BEGIN_FADE = RETAIL_GP - 21400          # BeginScreenFadeTime
+LOGO_FRENCH = RETAIL_GP - 21404         # the LOADING art is the French pair
+DYNTEX_PACK = RETAIL_GP - 21432         # pDynamicTexturePack
+LOAD_ALL_LANGUAGES = RETAIL_GP - 16016
+LANGUAGE_INST = RETAIL_GP - 16972       # the language screen's instance
+SCREEN_LIST = RETAIL_GP - 21324         # TheFlailerScreenList
+LOADING_TEX = 0xab0e817d                # bStringHash("LOADING")
 
 TITLE_CALLBACK = 0x0016f440
 
@@ -724,12 +751,16 @@ class RetailTitle(object):
         e.put32(REAL_TIMER, f.real_timer)
         e.put32(SKIP_MOVIES, f.skip_movies)
         e.put32(DEMO_DISC, f.demo_disc)
+        # Clamped for the screen's table lookup, and put back after: the
+        # LanguageManager is the flow's.
+        saved = e.u32(CURR_LANGUAGE)
         e.put32(CURR_LANGUAGE, lang)
         if msg == SCREEN_ACTIVATE:
             self.memo = {}
+        # ScreenCallbackData: ItemHash, Port, Param, Noise.
         d = e.title_data
-        e.put32(d + 0, data["port"])
-        e.put32(d + 4, data["itemHash"])
+        e.put32(d + 0, data["itemHash"])
+        e.put32(d + 4, data["port"])
         e.put32(d + 8, data["param"])
         e.put32(d + 12, data["noise"])
         inst = e.u32(THE_TITLE)
@@ -737,6 +768,7 @@ class RetailTitle(object):
 
         self.pending = None
         e.call(TITLE_CALLBACK, msg, d, limit=200000)
+        e.put32(CURR_LANGUAGE, saved)
 
         data["param"] = struct.unpack("<i", e.read(d + 8, 4))[0]
         data["noise"] = e.u32(d + 12)
@@ -751,6 +783,245 @@ class RetailTitle(object):
             f.change_to_screen(*self.pending)
 
 
+# --------------------------------------------- retail's loading and language
+
+LOAD_GLOBAL_CHUNKS = 0x001682d0
+BEGIN_LOADING_FRONTEND = 0x00168698
+LOOP_LOADING_FRONTEND = 0x00168718
+END_LOADING_FRONTEND = 0x001687a8
+SET_CURR_LANGUAGE = 0x00100818          # TheLanguageManager.SetLanguage
+LANGUAGE_CALLBACK = 0x001f1dd8          # LanguageOptionsScreenBase::Callback
+
+
+def _cstr(e, a):
+    return e.read(a, 64).split(b"\0")[0].decode() if a else None
+
+
+class RetailLoading(object):
+    """The frontend's loading, retail's, on the emulated image.
+
+    LoadGlobalChunks (0x001682d0), BeginGameFlowLoadingFrontend (0x00168698),
+    its Loop and End, the two callbacks the loads land in (0x00168668, then
+    0x00168658), and under them the LanguageManager -- SetLanguage, its tail,
+    Load/UnloadCurrentSpeech and the LOADING art swap (0x001681b0) -- all run
+    as they are. What is stubbed is the loader, the file system, the texture
+    packs, the sound and the Flailer calls, onto this flow and its world.
+
+    The loader keeps the C harness's rules: LoadResourceFile queues its
+    callback, and the flow's frame runs the queue at the frame's end. GLOBAL
+    loads are the port's bundles at boot, and say nothing, as gameflow.c
+    does not trace them either.
+    """
+
+    def __init__(self, flow):
+        self.flow = flow
+        e = self.e = retail_emu()
+        # LanguageManager's constructor, 0x0021dfa8, and the globals the
+        # loading code keeps: each scenario is a fresh boot.
+        e.put32(LANGUAGE_MANAGER, 0xffffffff)
+        for off in (4, 8, 12, 16, 20):
+            e.put32(LANGUAGE_MANAGER + off, 0)
+        for a in (LOGO_FRENCH, BEGIN_FADE, DYNTEX_PACK, LOAD_ALL_LANGUAGES,
+                  LANGUAGE_INST):
+            e.put32(a, 0)
+        self.deferred = None
+
+    def stubs(self):
+        e, f = self.e, self.flow
+
+        def arg(i):
+            return e.reg[4 + i] & 0xffffffff
+
+        def load_resource(_e):             # LoadResourceFile, 0x00199640
+            path = _cstr(e, arg(0))
+            if not path.startswith("GLOBAL\\"):
+                f.say("load %s" % path)
+            f.queue_load(path, arg(3))
+            return e.alloc(16)
+
+        def hot_chunk(_e):                 # the hot chunk's name, 0x00199720
+            name = _cstr(e, arg(1))
+            if not name.startswith("GLOBAL\\"):
+                f.say("hot chunk %s" % name)
+
+        def size_language_buffer(_e):      # 0x0021dfe8: +8 size, +16 buffer
+            e.put32(arg(0) + 8, 0x10000)
+            e.put32(arg(0) + 16, e.alloc(64))
+
+        def lm_language():
+            return s32(e.u32(LANGUAGE_MANAGER))
+
+        def remap(_e):                     # 0x001ac548, the art swap
+            # Two remaps a swap; the first is LOADING's, and the flag it
+            # toggles afterwards is what it is changing to.
+            if arg(0) == LOADING_TEX:
+                f.say("logo art %d" % (e.u32(LOGO_FRENCH) ^ 1))
+
+        def screen_visibility(_e):         # SetFlailerScreenVisibility
+            # FlailerScreenVisibility: VISIBLE is 0, INVISIBLE is 1
+            f.screen_visible(arg(0), 1 if arg(1) == 0 else 0)
+
+        def sound_regions(_e):             # LoadSoundRegions, 0x001ae9a0
+            f.say("load sound regions")
+            f.queue_load("sound regions", arg(0))
+
+        def launch(_e):                    # LaunchFrontendMenus, tail-called
+            self.deferred = f.launch_frontend_menus
+
+        def nothing(_e):
+            return None
+
+        stubs = {
+            0x00199640: load_resource,
+            0x00199720: hot_chunk,
+            0x00199788: nothing,                     # ServiceResourceLoading
+            0x00199818: lambda _e: 1,                # nothing left to load
+            0x0021dfe8: size_language_buffer,
+            0x002577c0: lambda _e: e.alloc(max(arg(0), 16)),   # new
+            0x001ac0a8: lambda _e: arg(0),           # TexturePack()
+            0x001ac608: nothing,                     # its file
+            0x001ac3f0: lambda _e: 0,                # GetLoadedTexture
+            0x001acc98: nothing,                     # LoadTexturesFromFile
+            0x001acd90: nothing,                     # UnloadTextures
+            0x001ac548: remap,
+            0x00194a00: nothing,                     # the speech banks' stop
+            0x001992a8: lambda _e: f.say(            # UnloadChunks
+                "language unload %d" % lm_language()),
+            0x002544c0: lambda _e: 1,                # bOpen
+            0x00254550: lambda _e: 16,               # bFileSize
+            0x002547f0: nothing,                     # bRead
+            0x002544e8: nothing,                     # bClose
+            0x00199280: lambda _e: f.say(            # LoadChunks
+                "language %d" % lm_language()),
+            0x001ae4d8: lambda _e: f.say("speech %d" % s32(arg(0))),
+            0x001ae5e8: lambda _e: f.say("speech unload"),
+            0x00141648: nothing,                     # FlailerUpdateLanguageText
+            0x0014cbf8: screen_visibility,
+            0x00144968: lambda _e: f.object_visible(arg(0), arg(1), arg(2)),
+            0x00112858: lambda _e: f.say("display frame"),   # eDisplayFrame
+            0x001ed5c8: nothing,
+            0x00257988: lambda _e: e.alloc(16),
+            0x00103e68: nothing,                     # End's five Inits
+            0x0011db90: nothing,
+            0x0016df60: nothing,
+            0x00194fa8: nothing,
+            0x00237688: nothing,
+            0x0016f950: launch,
+            0x001680d8: lambda _e: f.change_state(s32(arg(0))),  # ChangeGameFlow
+            0x001ae9a0: sound_regions,
+        }
+        for addr, fn in stubs.items():
+            e.stub(addr, fn)
+
+    def run(self, addr, *args):
+        e, f = self.e, self.flow
+        self.stubs()
+        e.put32(REAL_TIME, f.real_time)
+        e.put32(DEMO_DISC, f.demo_disc)
+        self.deferred = None
+        e.call(addr, *args, limit=200000)
+        if self.deferred:
+            d, self.deferred = self.deferred, None
+            d()
+
+    def load_global_chunks(self):
+        self.run(LOAD_GLOBAL_CHUNKS)
+
+    def set_curr_language(self, language):
+        self.run(SET_CURR_LANGUAGE, LANGUAGE_MANAGER, language)
+
+    def begin(self):
+        self.run(BEGIN_LOADING_FRONTEND)
+
+    def loop(self):
+        self.run(LOOP_LOADING_FRONTEND)
+
+    def end(self):
+        self.run(END_LOADING_FRONTEND)
+
+
+class RetailLanguage(object):
+    """LanguageOptionsScreenBase, retail's, on the emulated image.
+
+    Callback (0x001f1dd8), the constructor (0x001f1a78), HandleScreenCallback
+    (0x001f1b08) and the destructor, with SetCurrLanguage running through
+    RetailLoading's stubs. Stubbed: bMalloc, GrayMenuItem, GetActiveMenuItem
+    (the highlight the scenario moved), FrontendDatabase::InitWithDefaults and
+    MoveToPreviousScreen, which is deferred to the flow once the call is back
+    -- MoveBackScreen (0x00170320) runs, so its arguments are retail's.
+
+    The screen list is faked only as far as Callback reads it: pCurrent's
+    config's name, the string it tells the two classes apart by.
+    """
+
+    def __init__(self, flow):
+        self.flow = flow
+        e = self.e = retail_emu()
+        if not getattr(e, "lang_list", 0):
+            e.lang_list = e.alloc(512)
+            e.lang_node = e.alloc(64)
+            e.lang_config = e.alloc(64)
+            e.lang_name = e.alloc(64)
+            e.lang_data = e.alloc(16)
+        self.deferred = None
+
+    def stubs(self):
+        e, f = self.e, self.flow
+
+        def arg(i):
+            return e.reg[4 + i] & 0xffffffff
+
+        def gray(_e):                      # GrayMenuItem(name, item, screen, mode)
+            f.say("gray %08x %08x %d" % (arg(2), arg(1), s32(arg(3))))
+
+        def back(_e):                      # MoveToPreviousScreen(list, n, send, port)
+            n, send, port = s32(arg(1)), s32(arg(2)), s32(arg(3))
+            self.deferred = lambda: f.move_to_previous_screen(n, send, port)
+            return 1
+
+        stubs = {
+            0x00257690: lambda _e: e.alloc(max(arg(0), 16)),   # bMalloc
+            0x0016d2a8: gray,
+            0x0016d3f0: lambda _e: f.active_item,    # GetActiveMenuItem
+            0x00183830: lambda _e: f.say("frontend defaults"),
+            0x0016c670: back,
+            0x00114e98: lambda _e: None,             # operator delete
+        }
+        for addr, fn in stubs.items():
+            e.stub(addr, fn)
+
+    def callback(self, msg, data):
+        e, f = self.e, self.flow
+        f.loading.stubs()
+        self.stubs()
+        e.put32(REAL_TIME, f.real_time)
+        name = (f.screen[0] if f.screen else "").encode() + b"\0"
+        e.write(e.lang_name, name)
+        e.put32(e.lang_config + 8, e.lang_name)
+        e.put32(e.lang_node + 16, e.lang_config)
+        e.put32(e.lang_list + 412, e.lang_node)
+        e.put32(SCREEN_LIST, e.lang_list)
+
+        # ScreenCallbackData: ItemHash, Port, Param, Noise.
+        d = e.lang_data
+        e.put32(d + 0, data["itemHash"])
+        e.put32(d + 4, data["port"])
+        e.put32(d + 8, data["param"])
+        e.put32(d + 12, data["noise"])
+        all_before = e.u32(LOAD_ALL_LANGUAGES)
+
+        self.deferred = None
+        e.call(LANGUAGE_CALLBACK, msg, d, limit=200000)
+
+        data["param"] = s32(e.u32(d + 8))
+        data["noise"] = e.u32(d + 12)
+        if not all_before and e.u32(LOAD_ALL_LANGUAGES):
+            f.say("load all languages")
+        if self.deferred:
+            d, self.deferred = self.deferred, None
+            d()
+
+
 SIXTIETH = 1.0 / 60.0
 
 # Same rows as kScenarios[] in tools/src/gameflow_test.c.
@@ -763,7 +1034,8 @@ SCENARIOS = [
          haveIntroMovie=0, frames=40, dt=SIXTIETH, input=[]),
     dict(name="nolang", videoMode=1, currLanguage=-1, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=40, dt=SIXTIETH, input=[]),
+         haveIntroMovie=0, frames=40, dt=SIXTIETH,
+         input=[(10, "back"), (14, "item5")]),
     dict(name="skipmovies", videoMode=1, currLanguage=0, skipMovies=1,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
          haveIntroMovie=0, frames=30, dt=SIXTIETH, input=[]),
@@ -772,7 +1044,8 @@ SCENARIOS = [
          haveIntroMovie=0, frames=20, dt=SIXTIETH, input=[(10, "back")]),
     dict(name="demodisc", videoMode=1, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=1,
-         haveIntroMovie=0, frames=700, dt=SIXTIETH, input=[]),
+         haveIntroMovie=0, frames=700, dt=SIXTIETH,
+         input=[(0, "slow600")]),
     dict(name="attract", videoMode=1, currLanguage=0, skipMovies=1,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
          haveIntroMovie=0, frames=40, dt=1.0, input=[]),
@@ -808,6 +1081,22 @@ SCENARIOS = [
     dict(name="french", videoMode=1, currLanguage=1, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
          haveIntroMovie=0, frames=30, dt=SIXTIETH, input=[]),
+    dict(name="palselect", videoMode=0, currLanguage=0, skipMovies=0,
+         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         haveIntroMovie=0, frames=30, dt=SIXTIETH, input=[(8, "item2")]),
+    dict(name="palback", videoMode=0, currLanguage=0, skipMovies=0,
+         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         haveIntroMovie=0, frames=30, dt=SIXTIETH,
+         input=[(7, "hl4"), (8, "back")]),
+    dict(name="palall", videoMode=0, currLanguage=0, skipMovies=0,
+         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         haveIntroMovie=0, frames=30, dt=SIXTIETH, input=[(8, "item7")]),
+    dict(name="palsame", videoMode=0, currLanguage=0, skipMovies=0,
+         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         haveIntroMovie=0, frames=30, dt=SIXTIETH, input=[(8, "item1")]),
+    dict(name="palrevert", videoMode=0, currLanguage=1, skipMovies=0,
+         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         haveIntroMovie=0, frames=30, dt=SIXTIETH, input=[(8, "item1")]),
 ]
 
 
@@ -831,6 +1120,15 @@ def retail_title_movies():
 def run_scenario(sc):
     out = ["scenario %s" % sc["name"]]
     f = Flow(sc, out)
+    # InitializeEverything's LoadGlobalChunks, then the scenario's language:
+    # -1 written over the LanguageManager, anything else set through it.
+    f.loading.load_global_chunks()
+    if sc["currLanguage"] == -1:
+        out.append("input no language")
+        f.curr_language = -1
+    elif sc["currLanguage"] != 0:
+        out.append("input language %d" % sc["currLanguage"])
+        f.loading.set_curr_language(sc["currLanguage"])
     f.change_state(LOADING_FRONTEND)
     for frame in range(sc["frames"]):
         for at, what in sc["input"]:
@@ -842,18 +1140,24 @@ def run_scenario(sc):
             elif what == "start":
                 f.screen_event(SCREEN_START_BUTTON, 0)
             elif what == "back":
-                f.move_back_screen(1)
+                f.back_button(0)
             elif what.startswith("item"):
                 n = ord(what[4]) - ord("1")
                 f.menu_item_event(MENUITEM_SELECT, ITEM_MENUITEM_1 + n, 0)
+            elif what.startswith("hl"):
+                f.active_item = ITEM_MENUITEM_1 + ord(what[2]) - ord("1")
+            elif what.startswith("slow"):
+                f.loader_due = int(what[4:])
             elif what == "mumbo":
                 f.push("New Main Menu")
                 f.change_to_screen("Legal MumboJumbo", 0)
         f.frame(sc["dt"])
+        f.service_loads()
         out.append("frame %d %u %u" % (frame, f.real_time, f.real_timer))
-    out.append("final %s %s %d cops %d"
+    out.append("final %s %s %d cops %d language %d"
                % (STATE_NAMES[f.current],
-                  f.screen[0] if f.screen else "-", f.index, f.cops_on))
+                  f.screen[0] if f.screen else "-", f.index, f.cops_on,
+                  f.curr_language))
     return out
 
 
@@ -989,8 +1293,139 @@ MUTATIONS = [
      + "            data->noise = 1;   // swallow the UI click"),
 ]
 
+MUTATIONS += [
+    # LoadGlobalChunks, 0x001682d0.
+    ("lgc-no-english", GF,
+     "    bgf_set_curr_language(gf, 0);   // l_ENGLISH, through 0x00100808",
+     "    (void)0;"),
+    ("lgc-loading-hidden", GF,
+     "        screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 1);",
+     "        screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 0);"),
+    ("lgc-no-copyright", GF,
+     "        objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 1);",
+     "        (void)0;"),
+    ("lgc-demo-disclaimer-first", GF,
+     "        screenVisible(gf, BGF_SCREEN_FIRSTLEGAL, 1);",
+     "        screenVisible(gf, BGF_SCREEN_DISCLAIMER, 1);"),
+    # BeginGameFlowLoadingFrontend, 0x00168698, and its callbacks.
+    ("begin-fade-zero", GF,
+     "    gf->beginScreenFadeTime = gf->realTime;",
+     "    gf->beginScreenFadeTime = 0;"),
+    ("begin-no-callback", GF,
+     "    loadResource(gf, \"FRONTEND\\\\FRONTB.LZC\", frontendLoaded);",
+     "    loadResource(gf, \"FRONTEND\\\\FRONTB.LZC\", NULL);"),
+    ("begin-callback-on-fronta", GF,
+     "    loadResource(gf, \"FRONTEND\\\\FRONTA.BUN\", NULL);",
+     "    loadResource(gf, \"FRONTEND\\\\FRONTA.BUN\", frontendLoaded);"),
+    ("loaded-no-speech", GF,
+     "    loadCurrentSpeech(gf);" + NL
+     + "    trace(gf, \"load sound regions\");",
+     "    trace(gf, \"load sound regions\");"),
+    ("loaded-sounds-at-once", GF,
+     "    if (gf->hooks.loadSoundRegions)" + NL
+     + "        gf->hooks.loadSoundRegions(gf->hooks.user, frontendSoundsLoaded);",
+     "    if (0)" + NL
+     + "        gf->hooks.loadSoundRegions(gf->hooks.user, frontendSoundsLoaded);"),
+    ("sounds-wrong-state", GF,
+     "    bgf_change_state(gf, BGF_IN_FRONTEND, BGF_NONE);",
+     "    bgf_change_state(gf, BGF_UNLOADING_FRONTEND, BGF_NONE);"),
+    # The Loop's slideshow, 0x00168718.
+    ("loop-541", GF,
+     "if (!gf->demoDiscActive || elapsed >= 541) return;",
+     "if (!gf->demoDiscActive || elapsed >= 540) return;"),
+    ("loop-361", GF,
+     "    if (elapsed >= 361) {", "    if (elapsed >= 362) {"),
+    ("loop-181", GF,
+     "    } else if (elapsed >= 181) {", "    } else if (elapsed >= 180) {"),
+    ("loop-slide2-kept", GF,
+     "        screenVisible(gf, BGF_SCREEN_SLIDE2, 0);" + NL
+     + "        screenVisible(gf, BGF_SCREEN_DISCLAIMER, 1);",
+     "        screenVisible(gf, BGF_SCREEN_DISCLAIMER, 1);"),
+    # End, 0x001687a8.
+    ("end-copyright-left", GF,
+     "        objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);",
+     "        (void)0;"),
+    ("end-loading-left", GF,
+     "        screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 0);" + NL
+     + "        objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);",
+     "        objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);"),
+    # The LanguageManager: SetLanguage 0x0021e0d0 and its tail 0x0021e1e0.
+    ("lang-same-reloads", GF,
+     "    if (language == old) return;" + NL
+     + "    // The outgoing table's chunks go first",
+     "    // The outgoing table's chunks go first"),
+    ("lang-no-unload", GF,
+     "    if (old != -1) trace(gf, \"language unload %d\", old);",
+     "    (void)0;"),
+    ("lang-speech-kept", GF,
+     "    if (gf->speechLoaded) {" + NL
+     + "        unloadSpeech(gf);" + NL
+     + "        loadCurrentSpeech(gf);" + NL
+     + "    }",
+     "    (void)0;"),
+    ("lang-logo-one-way", GF,
+     "    if ((language == 1) != (gf->logoFrench != 0)) {",
+     "    if (language == 1 && !gf->logoFrench) {"),
+    ("speech-while-unset", GF,
+     "    if (gf->currLanguage == -1 || gf->speechLoaded) return;",
+     "    if (gf->speechLoaded) return;"),
+    # LanguageOptionsScreenBase, 0x001f1a78 and 0x001f1b08.
+    ("ctor-load-all-shown", GF,
+     "    grayMenuItem(gf, flailer, BGF_ITEM_MENUITEM_7, 2);",
+     "    (void)0;"),
+    ("select-load-all-ignored", GF,
+     "                if (item != BGF_ITEM_MENUITEM_7) return;" + NL
+     + "                gf->loadAllLanguages = 1;",
+     "                return;" + NL
+     + "                gf->loadAllLanguages = 1;"),
+    ("select-no-defaults", GF,
+     "    if (!l->fromOptions) trace(gf, \"frontend defaults\");",
+     "    (void)0;"),
+    ("select-stays", GF,
+     "    if (!l->fromOptions) trace(gf, \"frontend defaults\");" + NL
+     + "    bgf_move_back_screen(gf, 1);",
+     "    if (!l->fromOptions) trace(gf, \"frontend defaults\");"),
+    ("back-not-vetoed", GF,
+     "            data->param = 0;" + NL
+     + "            if (gf->currLanguage == -1) return;",
+     "            if (gf->currLanguage == -1) return;"),
+    ("back-while-unset", GF,
+     "            data->param = 0;" + NL
+     + "            if (gf->currLanguage == -1) return;",
+     "            data->param = 0;"),
+    ("back-ignores-highlight", GF,
+     "            item = activeMenuItem(gf);",
+     "            item = data->itemHash;"),
+    # MoveBackScreen and the pad's BACK.
+    ("move-back-sends-button", GF,
+     "return bgf_move_to_previous_screen(gf, n, 0, -1);",
+     "return bgf_move_to_previous_screen(gf, n, 1, 0);"),
+    ("back-button-silent", GF,
+     "return bgf_move_to_previous_screen(gf, 1, 1, port);",
+     "return bgf_move_to_previous_screen(gf, 1, 0, port);"),
+    ("back-names-screen", GF,
+     "    data.noise = BSND_MENU_CANCEL;" + NL + NL
+     + "    if (sendBackButton) {",
+     "    data.noise = BSND_MENU_CANCEL;" + NL
+     + "    if (gf->screen) data.itemHash = gf->screen->hash;" + NL + NL
+     + "    if (sendBackButton) {"),
+    # FlailerScreen::Activate's order.
+    ("menu-after-activate", GF,
+     "            HOOK_VOID(gf, openScreen, n);" + NL
+     + "            memset(&data, 0, sizeof(data));" + NL
+     + "            data.itemHash = n->hash;" + NL
+     + "            bgf_send(gf, BMSG_SCREEN_ACTIVATE, &data);",
+     "            memset(&data, 0, sizeof(data));" + NL
+     + "            data.itemHash = n->hash;" + NL
+     + "            bgf_send(gf, BMSG_SCREEN_ACTIVATE, &data);" + NL
+     + "            HOOK_VOID(gf, openScreen, n);"),
+]
+
 # Mutations that survive because they change nothing the transcript can tell.
-EQUIVALENT = set()
+# back-names-screen: nothing the boot reaches reads ItemHash on BACK -- the
+# title and the language screen do not -- so it is kept as retail's memset
+# and not as a behaviour.
+EQUIVALENT = {"back-names-screen"}
 
 
 def mutate_pass(only=None):

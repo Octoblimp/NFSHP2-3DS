@@ -1,8 +1,9 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-28), after the frontend's first slice: retail's
-title screen. `HANDOFF.md` is the running narrative; this file is the
+continuation (2026-09-28), after the frontend's second slice: the
+boot's loading and language screens. `HANDOFF.md` is the running
+narrative; this file is the
 short list of what to do next and what not to trust.
 
 ## State
@@ -56,8 +57,8 @@ python tools/bvector_check.py && python tools/bmath_check.py && python tools/ban
 bvector_check      27 scenarios,  5721 lines, 0 differ   (23/23 mutations caught)
 bmath_check        19 scenarios,  6424 lines, 0 differ   (9/9 mutations caught)
 banim_check        23 scenarios,  2219 lines, 0 differ
-bscreens_check     17 scenarios,  1246 lines, 0 differ
-bootflow_check     15 scenarios,  5420 lines, 0 differ   (25/25 mutations caught)
+bscreens_check     17 scenarios,  1277 lines, 0 differ
+bootflow_check     20 scenarios,  6195 lines, 0 differ   (56 caught, 1 equivalent)
 bslotpool_check    18 scenarios,  1025 lines, 0 differ   (47/47 mutations caught)
 geometry_check     30 files,     42047 lines, 0 differ   (53/53 mutations caught)
 texsrc_check       6 packs, 2 levels, 2958 textures, 0 differ
@@ -393,16 +394,43 @@ and so replaced every boot.
    - Step 6's second slice is on the branch `wip/carrenderinfo`
      (`616bb08`). Its checker is unfinished. It waits for the frontend.
 
-   **Next is the frontend's second slice: the boot's retail pass.**
-   - The video mode is PAL, so `Language Options Pre FE` shows.
-     Retail's `LaunchFrontendMenus` (`0x0016f950`) is the demo's, so
-     `kBootStages` keeps its push order.
-   - Retail's `LanguageOptionsScreenBase` (`0x001f1a78`, `0x001f1b08`
-     and `0x001f1dd8`, plus the new helpers `0x001f1c3c` and
-     `0x001f1d48`).
-   - The boot's loading screen: the first photo's logo over a bar that
-     reads LOADING..., probably `LOADING_TRACK`.
-   - `BootAutoload`.
+   **The frontend's second slice is closed: the boot's loading and
+   language screens.** The user corrected the order on 2026-09-28:
+   LOADING is the first thing shown, then the language screen, then the
+   movies, then the title. The title stays as it is. Azahar shows that
+   order now. `docs/formats/boot-flow.md`, "Retail's
+   `LOADING_FRONTEND`".
+   - Retail's `LoadGlobalChunks` (`0x001682d0`), at the end of
+     `InitializeEverything`, sets English, shows `LOADING_TRACK` and
+     draws one frame outside `MainLoop`. `main.c` calls
+     `bgf_load_global_chunks` before the `FRONTEND` bundle decodes, so
+     LOADING stays up while it does.
+   - Retail's Begin, Loop and End (`0x00168698`, `0x00168718`,
+     `0x001687a8`). FRONTB's load callback (`0x00168668`) and the sound
+     regions' (`0x00168658`) move the flow on. The Loop is only the demo
+     slideshow. `main.c` has a small load queue for the callbacks.
+   - `LanguageManager::SetLanguage` (`0x0021e0d0`) and its tail: speech
+     swapped only if loaded, and the French logo art (`0x001681b0`).
+   - `LanguageOptionsScreenBase` (`0x001f1a78`, `0x001f1b08`,
+     `0x001f1dd8`), for both language screens. BACK takes the
+     highlighted language. `MoveBackScreen` is `(n, 0, -1)` and the
+     pad's BACK is `(1, 1, port)`. `MoveToPreviousScreen` sends
+     `ItemHash` 0.
+   - `uirender_draw_visible` draws every visible screen by layer, as
+     `eDisplayFrame` does. The menu is built before `SCREEN_ACTIVATE`
+     and activated after it (`hookOpenScreen`), as
+     `FlailerScreen::Activate` does.
+   - `bootflow_check` runs all of it on the retail image. There are five
+     new scenarios and 57 mutations: 56 are caught, and
+     `back-names-screen` is equivalent.
+   - Owed: the speech banks, the French logo art on the host
+     (`hookSwapLogoArt` only logs), and `Language Options`'
+     `tSlideOnScreen` (`0x001ee918`).
+
+   **Next is the frontend's third slice: `BootAutoload` and
+   `ConsiderStartDemoMode`.**
+   - `BootAutoload` in full. The port's pops on its first tick, with no
+     card to wait for.
    - `ConsiderStartDemoMode` in full. Retail's (`0x0016ed50`) is the
      demo's, and it knows attract mode and compares signed. The port's
      `bgf_consider_start_demo_mode` is still a sketch of it.

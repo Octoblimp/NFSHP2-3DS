@@ -8571,3 +8571,79 @@ confirmed on Azahar that both the title and the skip are right.
 The frontend's second slice: the boot's retail pass. It covers PAL,
 `LanguageOptionsScreenBase`, the loading screen, `BootAutoload` and
 `ConsiderStartDemoMode`. CONTINUE.md has the addresses.
+
+## Session 30, continued (2026-09-28) -- The frontend's second slice: the boot's loading and language screens
+
+The user set the order: "The PCSX2 photo showing loading is the FIRST
+THING SHOWN, then language, THEN boot screen, then on title you have
+blank, and then press start, so do not change title". Azahar now shows
+LOADING, then `Language Options Pre FE`, then the EA logo and the intro,
+then the unchanged title. `docs/formats/boot-flow.md`, "Retail's
+`LOADING_FRONTEND`", has the details.
+
+- **LOADING comes before the flow.** Retail's `main` (`0x0012f000`) has
+  no `LoadLanguageInfo`. `InitializeEverything` (`0x0012ee98`) ends by
+  calling `LoadGlobalChunks` (`0x001682d0`), which:
+  - loads GLOBALA and GLOBALB, and waits for them;
+  - sets English;
+  - loads the `LOADING` texture;
+  - shows `LOADING_TRACK` and its copyright object;
+  - calls `eDisplayFrame` once.
+
+  That frame stays up until `MainLoop` draws. `main.c` does the same
+  before the `FRONTEND` bundle decodes. `uirender_draw_visible` draws
+  every visible screen by layer, because `LOADING_TRACK` is shown by
+  visibility and never becomes the current screen.
+- **The loading state runs on callbacks.** Begin sets
+  `BeginScreenFadeTime = RealTime` and loads FRONTA and FRONTB.LZC.
+  FRONTB's callback (`0x00168668`) loads the speech and then the sound
+  regions. Their callback (`0x00168658`) changes the flow to
+  `IN_FRONTEND`. The Loop only runs the demo slideshow. End hides
+  `LOADING_TRACK` and the copyright line, then jumps to
+  `LaunchFrontendMenus`. `main.c` gained a four-deep load queue, so
+  that the callbacks land a frame later, as a loader's do.
+- **The language screen is retail's.** `LanguageOptionsScreenBase`
+  serves both names. The name is checked with `strcmp` on the current
+  screen's config name.
+  - The constructor grays Load All Languages.
+  - SELECT on a language sets it. On the boot's screen it also applies
+    the frontend defaults, then moves back.
+  - BACK takes the highlighted language, unless none is set yet.
+  - Load All Languages sets `gp-16016`.
+- **Three corrections to the flow on the way.**
+  - `MoveBackScreen` is `MoveToPreviousScreen(n, 0, -1)`. The pad's
+    BACK is `(1, 1, port)`. KEY_B now calls `bgf_back_button`.
+  - `MoveToPreviousScreen` memsets its data, so BACK names no item.
+    The port used to pass the screen's hash.
+  - The menu is built before `SCREEN_ACTIVATE` and activated after it,
+    as `FlailerScreen::Activate` does. `hookEnterScreen` was split into
+    `hookOpenScreen` and `hookEnterScreen`.
+- **The checker runs retail.** `bootflow_check`'s `RetailLoading` and
+  `RetailLanguage` run the image's code under `mipsemu`. The screen list
+  at `gp-21324` is faked so that `strcmp` sees the entered name. The
+  Python models of the demo's loading state are gone.
+  - Five new scenarios: `palselect`, `palback`, `palall`, `palsame`
+    and `palrevert`.
+  - `demodisc` holds its loads back with `slow600`, so the slideshow
+    runs through.
+  - 32 new mutations, 57 in all. 56 are caught. `back-names-screen`
+    survives, and is equivalent because nothing reads `ItemHash` on
+    BACK.
+  - One mutant first failed to compile, because its pattern stopped
+    mid-comment. It is fixed and caught.
+- **Checked.**
+  - `bootflow_check`: 20 scenarios, 6,195 lines, 0 differ.
+  - `bscreens_check`: 17 scenarios, 1,277 lines, 0 differ.
+  - The chain: 66 of 66 pass.
+  - The ARM build.
+  - `run_azahar_test.ps1` now shoots LOADING and the language screen,
+    presses A for English, and fails if a movie opens first. Verdict:
+    PASS. The log reads, in order: global chunks loaded, FRONTB loaded,
+    the sound regions, `BootAutoload`, the language screen, frontend
+    defaults, the title, and the EA logo.
+
+### Next
+
+The frontend's third slice: `BootAutoload` and `ConsiderStartDemoMode`
+in full. After that, the main menu's background movie, from TASKS.md's
+"The retail frontend".
