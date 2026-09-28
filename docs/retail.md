@@ -143,8 +143,8 @@ demo's. Two checkers have it so far:
 - `track_check.py`: the track info is retail's; the topology is still the
   demo's.
 - `loadertable_check.py`: the claims, the walks through LoadChunks, the
-  solid list, eFixUpTables and eModel are retail's; the walks over probe
-  tables, the sun and the weather are still the demo's.
+  solid list, eFixUpTables, eModel and the sun are retail's; the walks
+  over probe tables and the weather are still the demo's.
 
 `trackroute_check.py` is a hand-written model rather than an image run,
 so its retail pass rewrote the model to retail's disassembly and added a
@@ -154,6 +154,10 @@ scenario over retail `TRACKB12`'s and `TRACKB21`'s own routes and signs.
 changed the constructor, the lookup and the header the loader reads.
 Its disc scenario runs the twelve texture files of retail's TRACKB12 and
 TRACKB21 races.
+
+`sun_check.py` and `sky_check.py` moved wholly onto the retail image too.
+Retail changed the sun's draw and its loader, and Sky.obj beside them is
+the demo's, moved. The sky check adds retail TRACKB12's own sun chunk.
 
 ## The data
 
@@ -212,12 +216,17 @@ What the port has taken on so far:
 - **The LoaderTable** has 30 slots, the demo's 31 less PhysPredict (slot
   20). Retail has no `0x34700` chunk. HeliSheet's guard takes the container
   `0x80034800`. See `formats/loader-table.md`.
-- **The sun chunk** `0x34202` is 256 bytes in retail's TRACKB12, 244 in
-  the demo's. The record is the same 244 bytes, behind 12 bytes of
-  alignment that the loader skips. Retail's LoaderSun also fills a fixed
-  244-byte glare record at 0x002ef4c0 for StuffSunGlare. That belongs to
-  the sun's retail pass, with StuffSun (0.49), StuffSunGlare (0.66) and
-  SunTrackLoader (0.85).
+- **The sun chunk** `0x34202` is 256 bytes in each of retail's 30
+  tracks, 244 in the demo's TRACKB12. The record is the same 244 bytes,
+  behind 12 bytes of alignment that the loader skips. Retail's LoaderSun
+  also fills a fixed 244-byte glare record at 0x002ef4c0, which
+  StuffSunGlare draws in place of the track's layers, timed in
+  RealTimer's ticks. Retail's Z buffer is 24 bits, and its rects come
+  back as 32-bit words: StuffSun counts a Z under 2, draws its first
+  layer at z 1, over the sky alone, and the rest at the render target's
+  `MaxZ`, and moves its rect onto the target. eTransferZBufferRect does
+  nothing outside a race. See `formats/sun-draw.md` and
+  `formats/sky-sun.md`, "Retail".
 - **DifficultyInfo** (`0x34b00`) grew from 744 bytes to 992: retail's
   LoaderDifficultyInfo copies 992. The demo's static position-ratio tables
   moved into it at 240, and SkillLevelDistribution gained a second set

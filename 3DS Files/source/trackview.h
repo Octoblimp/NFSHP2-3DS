@@ -224,7 +224,7 @@ typedef struct {
     int   sunAlpha;             // and its alpha, of the GS's 0x80
     int   sunRectX, sunRectY;   // the last Z rect asked for
     int   sunRects;             // rects trackview_read_depth read back
-    int   sunSky;               // of their pixels, the ones under 64
+    int   sunSky;               // of their pixels, the ones under 2
     bool  probePending;         // the next read-back logs the probe
     char  probe[512];           // what it found, for main() to log; "" if not
 

@@ -10,6 +10,7 @@
 
 #include "bchunk.h"
 #include "bchunkload.h"
+#include "eefpu.h"
 #include "efog.h"
 #include "eframe.h"
 #include "emath.h"
@@ -78,7 +79,7 @@ static const bMatrix4* s_worldView;
 
 // A Z rect StuffSun asked for, and the target it is in the pixels of.
 typedef struct {
-    uint16_t* dst;
+    uint32_t* dst;
     int       x, y, w, h;
     int       targetW, targetH;
     float     aspX, aspY;
@@ -97,9 +98,11 @@ static bool       s_fogOn;
 static uint32_t   s_fogColour;
 static float      s_depthNear = TRACK_NEAR;
 static float      s_depthFar  = TRACK_FAR;
+static float      s_depthScale;     // the W-buffer's, while the frame draws
 
 static void render_epoly(ePoly* p, TextureInfo* info, int flags);
 static void transfer_zbuffer_rect(uint8_t* dst, int x, int y, int w, int h);
+static float depth_of_gs_z(float g);
 
 // ------------------------------------------------------------------ helpers
 
@@ -926,6 +929,9 @@ static void setup_view(void)
     rt->AspectRatioY   = 1.08f;
     rt->AspectRatio2DX = 0.8f;
     rt->AspectRatio2DY = 0.94f;
+    // The PICA's depth buffer is 24 bits, as PSMZ24's is, so the sun draws
+    // at a MaxZ of 16777215.
+    rt->ZBufferMode    = GS_PSMZ24;
     MaybeChangeViewMode();
 }
 
@@ -1284,12 +1290,15 @@ static uint8_t poly_blend(const ePoly* p)
     return GEO_BLEND_NONE;
 }
 
-// ePoly::Render (0x0010e580), for the quads StuffSun and StuffSunGlare
-// make; epoly.h has what it does. The PS2 puts the packet on its
-// texture's list, or on the alpha sort by V0's z, and draws it with the
-// rest; the sun's textures are order 7, the last list, so here it is
-// drawn at once, after the scenery. The poly's z is 65535, which GEQUAL
-// passes against anything in a 16-bit Z buffer, so it has no depth test.
+// ePoly::Render (retail 0x0010fa68), for the quads StuffSun and
+// StuffSunGlare make; epoly.h has what it does. The PS2 puts the packet on
+// its texture's list, or on the alpha sort by V0's z, and draws it with
+// the rest; the sun's textures are order 7, the last list, so here it is
+// drawn at once, after the scenery. Each vertex's GS Z is its z, which the
+// GS tests GEQUAL. The sun's and the glare's four are always one: MaxZ,
+// past any Z the scenery writes, which draws with no depth test; or the
+// sun's first layer's 1, which here draws at the PICA's depth for it, the
+// clear's 0, and so only over the sky.
 static void render_epoly(ePoly* p, TextureInfo* info, int flags)
 {
     static const uint8_t kStrip[4] = { 0, 1, 3, 2 };
@@ -1298,8 +1307,9 @@ static void render_epoly(ePoly* p, TextureInfo* info, int flags)
     TrackTex*            t;
     GeoTexture           gt;
     GeoRenderVertex      q[4];
-    float                halfW, off, mx = 0.0f, my = 0.0f;
+    float                halfW, off, depth, mx = 0.0f, my = 0.0f;
     uint8_t              blend;
+    bool                 drawn;
     int                  i;
 
     // `flags` keeps the packet in the poly's frame memory, for a poly
@@ -1362,7 +1372,17 @@ static void render_epoly(ePoly* p, TextureInfo* info, int flags)
     } else {
         blend = t->pass.blend;
     }
-    if (!georender_draw_quad(q, &gt, blend)) {
+    // The W-buffer's map gives every fragment of a screen quad the one
+    // depth; a scale of 0 and the offset put it where the Z says.
+    depth = depth_of_gs_z((float)ee_trunc_w(p->Vertices[0].z));
+    if (depth >= 0.0f) {
+        C3D_DepthMap(false, 0.0f, depth);
+    }
+    drawn = georender_draw_quad(q, &gt, blend, depth >= 0.0f);
+    if (depth >= 0.0f) {
+        C3D_DepthMap(false, s_depthScale, 0.0f);
+    }
+    if (!drawn) {
         v->sunQuadsFailed++;
         return;
     }
@@ -1385,7 +1405,7 @@ static void transfer_zbuffer_rect(uint8_t* dst, int x, int y, int w, int h)
         return;
     }
     r = &s_sunRects[s_numSunRects++];
-    r->dst     = (uint16_t*)(void*)dst;
+    r->dst     = (uint32_t*)(void*)dst;
     r->x       = x;
     r->y       = y;
     r->w       = w;
@@ -1428,20 +1448,45 @@ static float gs_z_of(float u)
     return zmin + (zmax - zmin) * t;
 }
 
-// FetchZBuffer reads the buffer back as PSMZ16S, and past 0xffff is taken
-// as 0xffff; all StuffSun asks is whether it is under 64. What the clear
-// left, and the sky did not write, is 0.
+// The fog's palette is looked up by the Z as a PSMZ16S read gives it,
+// where past 0xffff is taken as 0xffff.
 static uint16_t gs_z16(float z)
 {
     return z >= 65535.0f ? 0xffffu : (uint16_t)z;
 }
 
-static uint16_t gs_z(uint32_t d24)
+// And the sun's rects by the Z as retail's transfer gives it, 32 bits a
+// pixel of which StuffSun takes the low 24; all it asks is whether they
+// are under 2. What the clear left, and the sky did not write, is 0.
+static uint32_t gs_z24(float z)
+{
+    return z >= 16777215.0f ? 0xffffffu : (uint32_t)z;
+}
+
+static uint32_t gs_z(uint32_t d24)
 {
     if (d24 == 0) {
         return 0;
     }
-    return gs_z16(gs_z_of((float)d24 / 16777215.0f));
+    return gs_z24(gs_z_of((float)d24 / 16777215.0f));
+}
+
+// gs_z_of backwards: the PICA's depth whose GS Z is g, or -1 for a Z at
+// or past the nearest the scenery reaches, which passes against anything.
+// A Z under the farthest is the depth 0, which only the clear has.
+static float depth_of_gs_z(float g)
+{
+    const float zmin = (ZMin - 2.0f) * 4194304.0f;
+    const float zmax = (ZMax - 2.0f) * 4194304.0f;
+    float       t    = (g - zmin) / (zmax - zmin);
+
+    if (!(t < 1.0f)) {
+        return -1.0f;
+    }
+    if (t <= 0.0f) {
+        return 0.0f;
+    }
+    return t * s_depthFar / (s_depthNear + t * (s_depthFar - s_depthNear));
 }
 
 // ------------------------------------------------------------------ the fog
@@ -1581,10 +1626,10 @@ void trackview_read_depth(TrackView* v, C3D_RenderTarget* target)
             for (i = 0; i < q->w; i++) {
                 int      px = q->x + i;
                 int      py = q->y + j;
-                uint16_t z  = 0xffffu;
+                uint32_t z  = 0xffffffu;
 
-                // The GS's rect wraps at 2048, into what is not the
-                // frame's; StuffSun counts none of it.
+                // StuffSun keeps the rect on the target; a target under
+                // 33 across does not, and none of what is off it counts.
                 if (px >= 0 && py >= 0 && px < q->targetW
                     && py < q->targetH) {
                     float sx, sy;
@@ -1598,7 +1643,7 @@ void trackview_read_depth(TrackView* v, C3D_RenderTarget* target)
                     ix = ix < 0 ? 0 : ix > 399 ? 399 : ix;
                     iy = iy < 0 ? 0 : iy > 239 ? 239 : iy;
                     z  = gs_z(depth[tiled_index(ix, iy)] & 0xffffffu);
-                    if (z < 64) {
+                    if (z < 2) {
                         v->sunSky++;
                     }
                 }
@@ -1626,6 +1671,7 @@ void trackview_draw(TrackView* v)
     // frame memory, and the draw is done with them before the next swap.
     eSwapFrameMallocBuffers();
     MaybeChangeViewMode();
+    eview_set_max_z(view->pRenderTarget0);
     eview_calculate_view_matrices(view, 0.0f, 0.0f, 0.0f);
     scenery_cull_setup_views(&v->cull, InGameFlag);
     scenery_do_culling(&v->cull);
@@ -1667,7 +1713,8 @@ void trackview_draw(TrackView* v)
     // Z-buffer's was near / d to the same two. So the depth tests are
     // the ones they were.
     fog_frame(v, view);
-    C3D_DepthMap(false, -1.0f / view->NearZ, 0.0f);
+    s_depthScale = -1.0f / view->NearZ;
+    C3D_DepthMap(false, s_depthScale, 0.0f);
 
     // eDisplayFrame's sky (0x00112a38 .. 0x00112b0c): the Z writes off,
     // StuffSky for the view, and what it put on the lists attached and

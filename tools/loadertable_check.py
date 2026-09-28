@@ -22,12 +22,12 @@ its ReconnectSolid gives a solid with flag 0x20 a random start. So what
 shows the table -- the walks through LoadChunks over probes, TRACKB12's
 walk as the image claims it, and the claims -- and everything over the
 solid list, eFixUpTables and eModel run on the retail image
-(retail_model.RetailEmu) over the retail disc (extracted-retail). The
-walks over probe tables, the sun and the weather run on the demo image
-over the demo's disc, as before: TraverseChunks and its twin are retail's
-as they are, and the sun and weather scenarios load through the tables
-chunks a ported slot takes, where no slot number shows. The sun's loader
-is still the demo's. The one harness answers both scripts.
+(retail_model.RetailEmu) over the retail disc (extracted-retail), and so
+does the sun, whose loader retail changed. The walks over probe tables
+and the weather run on the demo image over the demo's disc, as before:
+TraverseChunks and its twin are retail's as they are, and the weather
+scenarios load through the tables chunks a ported slot takes, where no
+slot number shows. The one harness answers both scripts.
 
 **The seams.** What the port leaves to a function pointer the model stubs
 at the same call, and both sides log it: GetTextureInfo (`gti`, with its
@@ -79,10 +79,11 @@ gUnportedLoaderFn, once, with its slot and table.
 
 Scenarios, demo: the walks over a probe table, both ways, over ranges,
 with a chunk nobody takes and the walk after it, with two takers and with
-short tables; and slot 14's and slot 29's chunks through the tables at
-each misalignment. Retail: the claims; LoadChunks and UnloadChunks
-through the tables with probes in them, and over retail TRACKB12's
-top-level chunks claimed as the image claims them; built lists for
+short tables; and slot 29's chunks through the tables at each
+misalignment. Retail: the claims; LoadChunks and UnloadChunks through the
+tables with probes in them, and over retail TRACKB12's top-level chunks
+claimed as the image claims them; slot 14's sun, TRACKB12's own, through
+the tables at each misalignment; built lists for
 vertex animation (with more than 64 frames), duplicate names, external
 rigid animations, labelled frames, every pad and odd sizes; eFixUpTables
 under all 16 flag settings; eModel's calls; the random start, on solids
@@ -1281,7 +1282,6 @@ def script(files=None):
         sc.op(OP_SET, var, 0)
     sc.op(OP_DUMP)
     scenario_walks(sc)
-    scenario_sun(sc, files)
     scenario_weather(sc)
     return sc
 
@@ -1298,6 +1298,7 @@ def retail_script(files=None):
     sc.op(OP_DUMP)
     scenario_load_walk(sc, RETAIL_TABLES)
     sc.b12 = scenario_trackb12_walk(sc, RETAIL_TRACKB12, RETAIL_TABLES)
+    scenario_sun(sc, files)
     scenario_vertex(sc)
     scenario_layout(sc)
     scenario_fixup(sc)

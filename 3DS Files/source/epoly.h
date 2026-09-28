@@ -1,16 +1,21 @@
 // epoly -- ePoly (.mdebug type#2948), the engine's one screen-space quad,
-// and its constructor, __5ePoly (0x0010e480).
+// and its constructor, __5ePoly (retail 0x0010f968, the demo's 0x0010e480).
 //
 // A poly is four vertices in the render target's pixels, their UVs and
 // colours, and the GS's ALPHA_1 equation, (A - B) * C >> 7 + D, with each
 // of A, B and D one of Cs, Cd and 0, and C one of As, Ad and FIX. The sun
 // and its glare build one on the stack and draw each layer through it.
 //
-// ePoly::Render (0x0010e580) turns a poly into a GS packet for the
-// texture's list, or for the alpha sort. It is the seam here, and the 3DS
-// side's is in trackview.c. What it does, so that the seam's owner can do
-// the same:
+// ePoly::Render (retail 0x0010fa68, the demo's 0x0010e580) turns a poly
+// into a GS packet for the texture's list, or for the alpha sort. It is the
+// seam here, and the 3DS side's is in trackview.c. What it does, so that
+// the seam's owner can do the same:
 // - It draws nothing for a NULL texture.
+// - Each vertex's GS Z is its z, truncated to an integer. The list's test
+//   is GEQUAL, so a z of the render target's MaxZ draws over anything, and
+//   one of 1 only where the Z is still the clear's 0: the sky. (A Flailer
+//   poly's z is an index into a table of Zs instead, which the sun never
+//   sets.)
 // - A SunPoly carries its own ALPHA_1, from AlphaA..AlphaD and AlphaFix.
 //   Render also clears the poly's ApplyAspectRatio, so every later Render
 //   of the same poly skips the aspect ratio, sun or not.
@@ -22,8 +27,9 @@
 //   ApplyAlphaSorting is set. Otherwise it goes on the texture's list.
 // - It draws a strip in the order V0, V1, V3, V2.
 //
-// The destructor (0x001149f0) runs bTNode's, then bNode's, and neither
-// does anything to a poly on the stack. The port has no call for it.
+// The destructor (retail 0x00114db8, the demo's 0x001149f0) runs
+// bTNode's, then bNode's, and neither does anything to a poly on the
+// stack. The port has no call for it.
 //
 // Cross-check: tools/sun_check.py. Write-up: docs/formats/sun-draw.md.
 
@@ -69,8 +75,9 @@ enum {
     EPOLY_ALPHA_ZERO = 2
 };
 
-// The z every vertex starts at, gp-32684.
-#define EPOLY_DEFAULT_Z 65535.0f
+// The z every vertex starts at. Retail's constructor stores 0; the demo's
+// loaded 65535 from gp-32684. The sun and its glare set every z they draw.
+#define EPOLY_DEFAULT_Z 0.0f
 
 // __5ePoly. The vertices are a 64-pixel square at the top left, at
 // EPOLY_DEFAULT_Z and w = 0. The UVs are the whole texture with q = 1, the

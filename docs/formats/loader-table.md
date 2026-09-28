@@ -331,12 +331,12 @@ returns a pointer returns NULL.
 There are two images. On the retail image (`tools/retail_model.py`),
 over the retail disc, run what shows the table -- the claims, and the
 walks through LoadChunks -- and everything over the solid list,
-eFixUpTables and eModel, which retail changed. On the demo image, over
-the demo's disc, run the walks over probe tables, the sun and the
-weather. TraverseChunks is retail's as it is, and the sun and weather
-scenarios load through the tables only chunks a ported slot takes, so no
-slot number shows. The sun's loader is still the demo's. The same harness
-answers both.
+eFixUpTables, eModel and the sun, which retail changed. The sun scenario
+takes retail TRACKB12's own chunk. On the demo image, over the demo's
+disc, run the walks over probe tables and the weather. TraverseChunks is
+retail's as it is, and the weather scenarios load through the tables
+only chunks a ported slot takes, so no slot number shows. The same
+harness answers both.
 
 The retail disc's files add up to more than the model's 32 MB heap, so
 each disc file's heap is given back once it is unloaded (`OP_MARK`,

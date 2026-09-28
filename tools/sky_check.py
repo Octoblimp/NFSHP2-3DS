@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Cross-check 3DS Files/source/sky.c (Sky.obj) and sun.c (Sun.obj's data
-half) against the image itself, run in mipsemu.
+half) against the retail image itself, run in mipsemu.
 
 The model is the image: SkyInitModel, SkyLoader, SkyUnloader, StuffSky,
 Sky.obj's static constructor and destructor, LoaderSun, UnloaderSun,
-SunTrackLoader and SunTrackUnloader run as shipped, with every callee
-stubbed. Each stub prints its name and its arguments, and the few that the
-state depends on do the same small thing on both sides:
+SunTrackLoader and SunTrackUnloader run as shipped, with every callee but
+memset stubbed. Each stub prints its name and its arguments, and the few
+that the state depends on do the same small thing on both sides:
 
     FindSceneryInstance / FindSceneryInfo   the scenario's SKYDOME and
                                             SKYDOME_ENVMAP, when present
@@ -20,16 +20,22 @@ state depends on do the same small thing on both sides:
 The harness links sky.c and sun.c with the same stubs and prints the same
 lines. After each step both dump the two models' names and solids, both
 matrices bit for bit, DrawSky, the six LOD models the two kinds hold,
-SunInfo (as an offset into the chunk), SunPosition, SunTextures, and the
-rendering order of the six textures.
+SunInfo (as an offset into the chunk), SunPosition, SunTextures, the
+rendering order of the six textures, and SunGlareInfo, which each scenario
+starts as 0x5a bytes.
+
+Retail's image is stripped, so its addresses here are read off its code;
+each one retail_model's map pairs with the demo's is checked against it.
+Sky.obj is the demo's, moved. LoaderSun fills SunGlareInfo too.
 
 Scenarios: either dome, both, or neither; each kind's LOD models in every
 mask; rotations at the int16 ends and positions of every kind of float;
 the loader, the unloader and SkyInitModel on its own, in orders the game
 does not use; StuffSky for every view ID with DrawSky on and off, and with
 the render seam NULL (the model's Render is silent then); the sun chunk at
-each misalignment, every version, and the wrong type; the sun's names
-found, missing with the default, and missing with none.
+each misalignment, every version, and the wrong type, and retail
+TRACKB12's own as the disc has it; the sun's names found, missing with the
+default, and missing with none.
 
     python tools/sky_check.py
     python tools/sky_check.py --mutate [--only a,b]
@@ -46,7 +52,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import physicscar_check as pcc
-from mipsemu import Emu, M32, s32
+import retail_model
+from mipsemu import M32, s32
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -62,26 +69,54 @@ HARNESS_TIMEOUT = 60
 
 # ================================================================ the image
 
-GP = 0x00328bf0
-SKY_MODEL = 0x002dc600
-SKY_M = 0x002dc620
-ENV_MODEL = 0x002dc660
-ENV_M = 0x002dc680
-DRAW_SKY = GP - 24520
-SUN_INFO = GP - 24144
-SUN_POS = 0x002dfdf0
-SUN_TEX = 0x002e76f0
+# Retail's, read off its code.
+GP = 0x003358f0
+SKY_MODEL = 0x002dc410
+SKY_M = 0x002dc430
+ENV_MODEL = 0x002dc470
+ENV_M = 0x002dc490
+DRAW_SKY = GP - 24044
+SUN_INFO = GP - 23584
+SUN_POS = 0x002e03c0
+SUN_TEX = 0x002ef5b8
+GLARE_INFO = 0x002ef4c0              # SunGlareInfo
 
-SKY_INIT_MODEL = 0x0011cc70
-SKY_LOADER = 0x0011ce18
-SKY_UNLOADER = 0x0011ced8
-STUFF_SKY = 0x0011cf18
-SKY_DTOR = 0x0011cf88
-SKY_CTOR = 0x0011cfb8
-LOADER_SUN = 0x00123d30
-UNLOADER_SUN = 0x00123da8
-SUN_TRACK_LOADER = 0x00123de0
-SUN_TRACK_UNLOADER = 0x00123ea0
+SKY_INIT_MODEL = 0x0011c450
+SKY_LOADER = 0x0011c5f8
+SKY_UNLOADER = 0x0011c6b8
+STUFF_SKY = 0x0011c6f8
+SKY_DTOR = 0x0011c768
+SKY_CTOR = 0x0011c798
+LOADER_SUN = 0x00124f30
+UNLOADER_SUN = 0x00125188
+SUN_TRACK_LOADER = 0x001251c0
+SUN_TRACK_UNLOADER = 0x00125290
+
+FIND_INSTANCE = 0x0014f130
+FIND_INFO = 0x0014f0d0
+EMODEL_INIT = 0x0010c558
+EMODEL_UNINIT = 0x0010c5b0
+EIDENTITY = 0x0011b1b0
+EMODEL_RENDER = 0x0010dc80
+EMODEL_DELETE = 0x00114cf0
+GET_TEXTURE_INFO = 0x001abf48
+
+# The ones the map pairs, and the demo's twins. LoaderSun has none.
+DEMO_CODE = {
+    SKY_INIT_MODEL: 0x0011cc70, SKY_LOADER: 0x0011ce18,
+    SKY_UNLOADER: 0x0011ced8, STUFF_SKY: 0x0011cf18, SKY_DTOR: 0x0011cf88,
+    SKY_CTOR: 0x0011cfb8, UNLOADER_SUN: 0x00123da8,
+    SUN_TRACK_LOADER: 0x00123de0, SUN_TRACK_UNLOADER: 0x00123ea0,
+    FIND_INSTANCE: 0x0014c800, FIND_INFO: 0x0014c7a0,
+    EMODEL_INIT: 0x0010b230, EMODEL_UNINIT: 0x0010b288,
+    EIDENTITY: 0x0011ba18, EMODEL_RENDER: 0x0010c7c8,
+    EMODEL_DELETE: 0x00114918, GET_TEXTURE_INFO: 0x001a19b0,
+}
+DEMO_DATA = {
+    SKY_MODEL: 0x002dc600, SKY_M: 0x002dc620, ENV_MODEL: 0x002dc660,
+    ENV_M: 0x002dc680, DRAW_SKY: 0x00322c28, SUN_INFO: 0x00322da0,
+    SUN_TEX: 0x002e76f0,
+}
 
 SKYDOME = 0xbe43edbb
 SKYDOME_ENVMAP = 0x72923c81
@@ -163,12 +198,28 @@ def sun_chunk(version, mis, pos=(-16384.0, 800.0, 6000.0), cid=SUN_CHUNK,
     return struct.pack("<II", cid, len(body)) + body
 
 
+RETAIL_B12 = ROOT / "extracted-retail" / "TRACKS" / "TRACKB12.BUN"
+
+
+def disc_chunk(path=RETAIL_B12):
+    """The track's one 0x34202 chunk as the disc has it, and how far past
+    16 it sits."""
+    b = path.read_bytes()
+    found = [i for i in range(0, len(b) - 8, 4)
+             if struct.unpack_from("<I", b, i)[0] == SUN_CHUNK
+             and struct.unpack_from("<I", b, i + 4)[0] == 256]
+    assert len(found) == 1, (path, found)
+    i = found[0]
+    return b[i:i + 8 + 256], i % 16
+
+
 def script():
     S, O = Scenario, Obj
     ident = (16384, 0, 0, 0, 16384, 0, 0, 0, 16384)
     odd = (-32768, 32767, 1, -1, 12345, -16384, 8192, -7, 2)
     turned = (0, 0, -16384, 0, 16384, 0, 16384, 0, 0)
     nan = 0x7fc00001
+    b12, b12_mis = disc_chunk()
     sc = [
         # The game's order: both domes, the End then the Begin.
         S("LRU", sky=O(pos=(10.5, -200.0, 3e5)), env=O(rot=turned,
@@ -213,6 +264,8 @@ def script():
         S("S", chunk=sun_chunk(2, 4, cid=0x80034202), mis=4),
         S("Ss", chunk=sun_chunk(2, 8, cid=0x00044202), mis=8),
         S("SSs", chunk=sun_chunk(1, 12), mis=12),
+        # Retail TRACKB12's own, and its textures.
+        S("STtsXS", chunk=b12, mis=b12_mis),
         # The sun's textures: all found, some, none with the default.
         S("Tt"),
         S("Tt", found=0x15, order=0),
@@ -226,7 +279,7 @@ def script():
     return sc
 
 
-class BigEmu(Emu):
+class BigEmu(retail_model.RetailEmu):
     RAM = 128 << 20
 
 
@@ -236,14 +289,18 @@ class Model(object):
         self.e = BigEmu(ieee=True)
         self.sc = None
         e = self.e
-        e.stub(0x0014c800, self.find_instance)
-        e.stub(0x0014c7a0, self.find_info)
-        e.stub(0x0010b230, self.init)
-        e.stub(0x0010b288, self.uninit)
-        e.stub(0x0011ba18, self.identity)
-        e.stub(0x0010c7c8, self.render)
-        e.stub(0x00114918, self.delete)
-        e.stub(0x001a19b0, self.get_texture_info)
+        for r, d in DEMO_CODE.items():
+            assert e.map.by_demo[d][2] == r, (hex(d), hex(r))
+        for r, d in DEMO_DATA.items():
+            assert e.data(d) == r, (hex(d), hex(r))
+        e.stub(FIND_INSTANCE, self.find_instance)
+        e.stub(FIND_INFO, self.find_info)
+        e.stub(EMODEL_INIT, self.init)
+        e.stub(EMODEL_UNINIT, self.uninit)
+        e.stub(EIDENTITY, self.identity)
+        e.stub(EMODEL_RENDER, self.render)
+        e.stub(EMODEL_DELETE, self.delete)
+        e.stub(GET_TEXTURE_INFO, self.get_texture_info)
 
     def emit(self, s):
         self.out.append(s)
@@ -324,6 +381,9 @@ class Model(object):
                 r = TEX + 256 * i
         if r == 0 and use_default and self.sc.default:
             r = TEX + 256 * 5
+        if self.arg(2) != 0:
+            self.emit("  GetTextureInfo include_unloaded %d"
+                      % s32(self.arg(2)))
         self.emit("  GetTextureInfo %08x %d -> %s" % (h, use_default,
                                                       self.label(r)))
         return r
@@ -348,6 +408,8 @@ class Model(object):
             e.u32(SUN_POS + 8),
             " ".join(self.label(e.u32(SUN_TEX + 4 * i)) for i in range(5)),
             " ".join(str(e.u8(TEX + 256 * i + 41)) for i in range(6))))
+        self.emit("  glare %s" % bytes(e.mem[GLARE_INFO:GLARE_INFO
+                                             + 244]).hex())
 
     def reset(self, sc):
         e = self.e
@@ -368,6 +430,7 @@ class Model(object):
         e.put32(SUN_POS + 8, fbits(3.0))
         for i in range(5):
             e.put32(SUN_TEX + 4 * i, 0)
+        e.write(GLARE_INFO, bytes([0x5a]) * 244)
         for i in range(6):
             e.mem[TEX + 256 * i + 41] = sc.order & 0xff
         for k in (0, 1):
@@ -726,6 +789,50 @@ MUTATIONS = [
      "    for (i = 1; i < NUM_SUN_TEXTURES; i++) {\n        SunTextures[i] = NULL;"),
     ("tex_unload_keeps", SUC,
      "        SunTextures[i] = NULL;\n", ""),
+    # SunGlareInfo: LoaderSun fills it afresh for any version, and the
+    # unloader leaves it be.
+    ("glare_fill_none", SUC,
+     "    fill_glare_info();\n    return 1;", "    return 1;"),
+    ("glare_fill_good_only", SUC,
+     "        SunPosition.z = info->PositionZ;\n    }\n    fill_glare_info();",
+     "        SunPosition.z = info->PositionZ;\n        fill_glare_info();\n    }"),
+    ("glare_fill_before_type", SUC,
+     "    SunChunkInfoE *info;\n\n    if (bchunk_u32(chunk) != SUN_CHUNK_ID) {",
+     "    SunChunkInfoE *info;\n\n    fill_glare_info();\n    if (bchunk_u32(chunk) != SUN_CHUNK_ID) {"),
+    ("glare_unloader_clears", SUC,
+     "    }\n    forget_sun();\n    return 1;",
+     "    }\n    forget_sun();\n    memset(&SunGlareInfo, 0, sizeof SunGlareInfo);\n    return 1;"),
+    ("glare_fill_no_memset", SUC,
+     "    memset(g, 0, sizeof *g);\n", ""),
+    ("glare_fill_version_0", SUC,
+     "    g->Version = SUN_INFO_VERSION;", "    g->Version = 0;"),
+    ("glare_fill_position", SUC,
+     "    g->Version = SUN_INFO_VERSION;",
+     "    g->Version = SUN_INFO_VERSION;\n    g->PositionX = 1.0f;"),
+    ("glare_fill_blend", SUC,
+     "    l->AlphaType        = SUNALPHA_ADD;", "    l->AlphaType        = SUNALPHA_BLEND;"),
+    ("glare_fill_alpha_255", SUC,
+     "    l->Colour[3]        = 128;", "    l->Colour[3]        = 255;"),
+    ("glare_fill_halo", SUC,
+     "    glare_layer(&g->SunLayers[1], SUNTEX_CENTER,",
+     "    glare_layer(&g->SunLayers[1], SUNTEX_HALO,"),
+    ("glare_fill_track_colour", SUC,
+     "                130, 159, 122, 0, 0.0f);", "                130, 110, 25, 0, 0.0f);"),
+    ("glare_fill_track_intensity", SUC,
+     "    glare_layer(&g->SunLayers[3], SUNTEX_MAJORRAYS, 0.3f,",
+     "    glare_layer(&g->SunLayers[3], SUNTEX_MAJORRAYS, 0.32f,"),
+    ("glare_fill_offsets_swapped", SUC,
+     "    glare_layer(&g->SunLayers[2], SUNTEX_MAJORRAYS, 0.7f, 800.0f, -9.0f,\n                28.0f,",
+     "    glare_layer(&g->SunLayers[2], SUNTEX_MAJORRAYS, 0.7f, 800.0f, 28.0f,\n                -9.0f,"),
+    ("glare_fill_no_angle", SUC,
+     "                9.0f, 166, 119, 72, 16384, 0.2f);",
+     "                9.0f, 166, 119, 72, 0, 0.2f);"),
+    ("glare_fill_no_sweep", SUC,
+     "                28.0f, 159, 122, 75, 0, 0.2f);",
+     "                28.0f, 159, 122, 75, 0, 0.0f);"),
+    ("glare_fill_three", SUC,
+     "    glare_layer(&g->SunLayers[3], SUNTEX_MAJORRAYS, 0.3f, 800.0f, 28.0f,\n                9.0f, 166, 119, 72, 16384, 0.2f);\n",
+     ""),
 ]
 
 # Mutations that survive because they change nothing the image can tell.

@@ -1,5 +1,6 @@
 // Harness for tools/sun_check.py: runs the checker's scenarios on
-// sundraw.c and epoly.c and prints what the model prints for the image.
+// sundraw.c and epoly.c and prints what the model prints for the retail
+// image.
 // Every callee is a stub here, and each logs its name and its arguments;
 // after each step the glare's globals and the SunZBuffers' rects are
 // dumped. See the checker's docstring.
@@ -21,11 +22,14 @@
 #include "texturepack.h"
 
 bVector3 SunPosition;
+int32_t  RealTimer;
+// Set to something RealTimer is not, so a draw that reads the demo's clock
+// shows.
 int32_t  WorldTimer;
 
 // ------------------------------------------------------------ the world
 
-static SunChunkInfoE  info_rec;
+static SunChunkInfoE  info_rec, glare_rec;
 static TextureInfo    tex[NUM_SUN_TEXTURES];
 static eView          view;
 static eRenderTarget  rt;
@@ -79,6 +83,8 @@ static const char *label(const void *p)
         return "ws";
     if (p == &info_rec)
         return "info";
+    if (p == &SunGlareInfo)
+        return "glare";
     for (i = 0; i < NUM_SUN_TEXTURES; i++) {
         if (p == &tex[i]) {
             snprintf(b, 32, "t%d", i);
@@ -100,8 +106,8 @@ static const char *label(const void *p)
 TextureInfo *GetTextureInfo(uint32_t h, int use_default,
                             int include_unloaded)
 {
-    // Retail's third argument. The demo image the model runs has none, so
-    // only a port that passes anything but 0 prints it.
+    // Retail's third argument, which the draw's calls leave 0, so only a
+    // port that passes anything else prints it.
     if (include_unloaded != 0)
         printf("  GetTextureInfo include_unloaded %d\n", include_unloaded);
     printf("  GetTextureInfo %08x %d\n", (unsigned)h, use_default);
@@ -232,8 +238,8 @@ static void dump(void)
            "phase %d timer %d info %s\n",
            (unsigned)bits(SunPosX), (unsigned)bits(SunPosY),
            (unsigned)bits(GlareDist), (int)bStartGlare, (int)bResetGlare,
-           (unsigned)bits(GlareStartTime), (int)iGlarePhase,
-           (int)WorldTimer, label(SunInfo));
+           (unsigned)GlareStartTime.PackedTime, (int)iGlarePhase,
+           (int)RealTimer, label(SunInfo));
     printf("  zb");
     for (b = 0; b < NUM_SUN_ZBUFFERS; b++) {
         const SunZBuffer *z = &SunZBuffers[b];
@@ -244,8 +250,11 @@ static void dump(void)
     printf("\n");
 }
 
-static const uint16_t kPat[10] = { 0, 63, 64, 65, 1, 0xffff, 32, 100,
-                                   0x8000, 63 };
+// Z words: the low 24 bits under 2 and not, with the high 8 set and not.
+static const uint32_t kPat[13] = {
+    0, 1, 2, 3, 0x01000000u, 0xff000001u, 0x80000005u, 0x00ffffffu, 64,
+    0xffffffffu, 0x01000002u, 0x00010001u, 0x00800000u
+};
 
 static void fill(int s)
 {
@@ -254,7 +263,7 @@ static void fill(int s)
     for (b = 0; b < NUM_SUN_ZBUFFERS; b++) {
         for (i = 0; i < SUN_ZBUFFER_SIZE * SUN_ZBUFFER_SIZE; i++) {
             SunZBuffers[b].Buffer[i] =
-                kPat[(i * 7 + b * 3 + s * 5 + (i >> 5)) % 10];
+                kPat[(i * 7 + b * 3 + s * 5 + (i >> 5)) % 13];
         }
     }
 }
@@ -264,6 +273,7 @@ static void reset(void)
     int i;
 
     SunInfo = has_info ? &info_rec : NULL;
+    SunGlareInfo = glare_rec;
     for (i = 0; i < NUM_SUN_TEXTURES; i++) {
         SunTextures[i] = (texmask >> i & 1) ? &tex[i] : NULL;
     }
@@ -272,7 +282,7 @@ static void reset(void)
     GlareDist      = flt((uint32_t)glare[2]);
     bStartGlare    = glare[3];
     bResetGlare    = glare[4];
-    GlareStartTime = flt((uint32_t)glare[5]);
+    GlareStartTime.PackedTime = (uint32_t)glare[5];
     iGlarePhase    = glare[6];
     for (i = 0; i < 4; i++) {
         PhaseTimes[i] = flt(ptimes[i]);
@@ -299,7 +309,8 @@ static void run(int n, const char *ops)
         switch (*o) {
         case 'S':
         case 'G':
-            WorldTimer = timers[t % ntimers];
+            RealTimer  = timers[t % ntimers];
+            WorldTimer = (int32_t)((uint32_t)RealTimer * 3u + 7u);
             t++;
             if (*o == 'S') {
                 StuffSun(&view);
@@ -377,13 +388,16 @@ int main(int argc, char **argv)
         char *s = line + 2;
 
         switch (line[0]) {
-        case 'I': {
+        case 'I':
+        case 'J': {
             char    *h;
-            uint8_t *r = (uint8_t *)&info_rec;
+            uint8_t *r = (uint8_t *)(line[0] == 'I' ? &info_rec : &glare_rec);
 
-            has_info = dec(&s);
-            texmask  = dec(&s);
-            h        = next_tok(&s);
+            if (line[0] == 'I') {
+                has_info = dec(&s);
+                texmask  = dec(&s);
+            }
+            h = next_tok(&s);
             for (i = 0; i < (int)sizeof info_rec; i++) {
                 char two[3] = { h[2 * i], h[2 * i + 1], 0 };
 
@@ -398,6 +412,7 @@ int main(int argc, char **argv)
             rt.ID       = dec(&s);
             rt.ScissorW = dec(&s);
             rt.ScissorH = dec(&s);
+            rt.MaxZ     = flt(hex(&s));
             for (i = 0; i < 8; i++) {
                 c[i] = hex(&s);
             }

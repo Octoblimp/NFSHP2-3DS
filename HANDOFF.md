@@ -8242,3 +8242,70 @@ The sun's retail pass: LoaderSun's glare record at `0x002ef4c0`,
 StuffSun (0.49), StuffSunGlare (0.66) and SunTrackLoader (0.85). Then
 deploy `extracted-retail/` to Azahar and walk the viewer on retail
 TRACKB12, then TRACKB21 or TRACKB31.
+
+## Session 30, continued (2026-09-27) -- Task 36's seventh slice: the sun's retail pass
+
+The user: never stop, and get the port to 100%.
+
+- **A 24-bit Z.** Retail's FetchZBuffer (`0x00110d20`) reads the Z as
+  PSMZ24 from block 8192 (BITBLTBUF `0x31082000`); the demo's read
+  PSMZ16S from block 0. Retail's eTransferZBufferRect (`0x00111c58`)
+  queues its rect as PSMZ32, `w * h / 4` quadwords, and returns unless
+  `InGameFlag` (gp-21424) is set. So a SunZBuffer is 32 by 32 words,
+  4,112 bytes at `0x002e03d0`, and StuffSun counts `(word & 0xffffff) <
+  2`. The scenery writes at least ZMin's 16, so only the clear counts.
+- **MaxZ.** Retail's eRenderTarget is 176 bytes. At +116 it keeps
+  `MaxZ`, which `0x00105ac0` sets every frame: 16777215 (gp-32736) for
+  `ZBufferMode` PSMZ24 (0x31), 65535 (gp-32732) otherwise. The port cuts
+  `MaxZ` out of the demo's packet bytes at 116, and `eview_set_max_z`
+  does that part of 0x00105ac0.
+- **A z per layer.** ePoly::Render (`0x0010fa68`) writes each vertex's z,
+  truncated, as the GS Z. (A Flailer's z indexes a float table at
+  `0x002c9e70` instead: entries 20..24 as they are, others `MaxZ` less
+  the entry.) Retail's constructor (`0x0010f968`) sets z to 0.
+  StuffSun sets z 1 on the layer 0 quad, which GEQUAL passes only over
+  the clear, so scenery hides the sun's disc pixel by pixel, and `MaxZ`
+  on the others. StuffSunGlare sets `MaxZ` once for all its layers.
+- **The rect.** Retail moves the 32 by 32 rect onto the target: under 0
+  it takes `EndX = x0 + 32` and x0 = 0; past `ScissorW - 33` it takes
+  `StartX = x0 + 1 - (ScissorW - 32)` and x0 = `ScissorW - 33`. The demo
+  clipped the counted part and read where the rect fell.
+- **The glare.** LoaderSun (`0x00124f30`, which the map could not pair)
+  now memsets and fills `SunGlareInfo` (`0x002ef4c0`) for any sun chunk,
+  whatever its version: TRACKB12's four layers, but layer 1's colour is
+  130, 159, 122 and layer 3's intensity 0.3. UnloaderSun leaves it.
+  StuffSunGlare draws it, not the track's, so no NULL read is left. Its
+  clock is RealTimer (gp-19608) in a `Timer`, 0 and 0x7fffffff unset:
+  `el = (int32)(RealTimer - start) * 0.00025`.
+- **The disc.** All 30 retail tracks have a 256-byte sun chunk (12 bytes
+  of 0x11, then the record), version 2. TRACKB14..16 and TRACKB24..26
+  have no layers; TRACKB31..36 have their own (a HALO among them); the
+  rest have TRACKB12's. `docs/formats/sky-sun.md` has the positions.
+- **On the 3DS.** `render_epoly` runs the Z back to a PICA depth
+  (`depth_of_gs_z`). `MaxZ` is past the nearest the scenery reaches and
+  draws with no test. Layer 0's 1 is under ZMin, the depth 0, and draws
+  GEQUAL with a depth map of scale 0 and that offset, so only over the
+  clear. `georender_draw_quad` takes the test as an argument. The
+  readback is 32-bit, `gs_z24`, with 0 for the clear. The viewer's
+  target is PSMZ24.
+- **The checkers.** `sun_check` runs on the retail image: MaxZ in the
+  target, RealTimer and a WorldTimer set to what it is not, the glare's
+  record in the dump, Z words with the high byte set, rects at each
+  edge, targets under 33, and the Timer's two sentinels. Two survivors:
+  `count_transposed`, caught once partial rects with big intensities
+  came in, and `layer_z_once`, equivalent by construction and replaced
+  by `layer_z_first_drawn`. `sky_check` runs on retail, adds
+  retail TRACKB12's own chunk, and dumps the glare's
+  record. `loadertable_check`'s sun scenario runs on retail.
+
+```
+sun_check           115 scenarios, 3427 lines, 0 differ   154/154 mutations caught
+sky_check            46 scenarios, 1311 lines, 0 differ   93 caught, 2 equivalent
+loadertable_check  demo 178 ops 1617 lines, retail 37375 ops 49175 lines, 0 differ
+```
+
+### Next
+
+Deploy `extracted-retail/` to Azahar and walk the viewer on retail
+TRACKB12, then TRACKB21 or TRACKB31. The eView retail pass is after:
+the 176-byte eRenderTarget, 0x00105ac0 and the Z table at `0x002c9e20`.

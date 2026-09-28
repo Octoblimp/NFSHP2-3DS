@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-27), after task 36's sixth slice: the solid list's
-retail pass, the ramp and the random start. `HANDOFF.md` is the running narrative; this file is the short
+continuation (2026-09-27), after task 36's seventh slice: the sun's
+retail pass, the 24-bit Z and the glare's own layers. `HANDOFF.md` is the running narrative; this file is the short
 list of what to do next and what not to trust.
 
 ## State
@@ -109,8 +109,8 @@ eview_check         2103 ops,    15454 lines, 0 differ  (152 caught, 1 equivalen
 loadertable_check  37553 ops,    50792 lines, 0 differ  (137 caught, 2 equivalent)
 texturepack_check   6698 ops,    11464 lines, 0 differ  (131 caught, 1 equivalent)
 trackflow_check       16 scenarios,  706 lines, 0 differ  (76 caught, 1 equivalent)
-sky_check             45 scenarios, 1159 lines, 0 differ  (77 caught, 2 equivalent)
-sun_check             91 scenarios, 2680 lines, 0 differ  (114 caught, 1 equivalent)
+sky_check             46 scenarios, 1311 lines, 0 differ  (93 caught, 2 equivalent)
+sun_check            115 scenarios, 3427 lines, 0 differ  (154/154 mutations caught)
 weather_check         75 scenarios, 4368 lines, 0 differ  (85 caught, 4 equivalent)
 rain_check            31 calls,       31 lines, 0 differ  (5/5 mutations caught; 41 image facts)
 gen_bmath_tables --check           bmathtab.c is up to date
@@ -256,11 +256,31 @@ and so replaced every boot.
      miss on retail what it caught on the demo. 134 names were so. It
      takes the demo symbol's copy now.
 
+   **Task 36's seventh slice is closed: the sun's retail pass.**
+   - Retail's Z buffer is PSMZ24, and eTransferZBufferRect reads it as
+     32-bit words: a SunZBuffer is 4,112 bytes, and StuffSun counts a
+     word's low 24 bits under 2. The transfer does nothing without
+     `InGameFlag`.
+   - StuffSun draws layer 0 at z 1, which GEQUAL passes only over the
+     clear, and the rest at the render target's `MaxZ` (retail's +116,
+     set by 0x00105ac0: 16777215 for PSMZ24). The glare draws at `MaxZ`.
+     ePoly's constructor puts z at 0. `eview_set_max_z` is that part of
+     0x00105ac0, and the viewer's target is PSMZ24.
+   - The rect is moved onto the target, and StartX..EndX is the sun's
+     part of it.
+   - StuffSunGlare draws `SunGlareInfo` (0x002ef4c0), which LoaderSun
+     fills with four fixed layers for any sun chunk, and times itself in
+     RealTimer's ticks in a `Timer` (0 and 0x7fffffff unset).
+   - On the 3DS, `render_epoly` turns the quad's Z back into a depth:
+     `MaxZ` draws with no test, and layer 0 at depth 0, GEQUAL, over the
+     sky alone. The readback is 32-bit.
+   - `sun_check` and `sky_check` run on the retail image; `sky_check`
+     takes retail TRACKB12's own chunk, and `loadertable_check` runs its
+     sun scenario on retail too.
+
    **Next is the rest of step 4: the retail disc's data in the track
    viewer.**
-   - LoaderSun's glare record goes with the sun's retail pass: StuffSun,
-     StuffSunGlare and SunTrackLoader.
-   - Then deploy `extracted-retail/` to Azahar's
+   - Deploy `extracted-retail/` to Azahar's
      `sdmc:/3ds/NFSHP2-3DS/data` and walk the viewer on retail TRACKB12.
    - Then a second location, `TRACKB21` or `TRACKB31`, to show the loaders
      are not TRACKB12's alone. The viewer's `kTexFiles` are TRACKB12's.

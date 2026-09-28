@@ -165,12 +165,14 @@ void georender_set_fog(C3D_FogLut* lut, uint32_t colour);
 // drawn as a strip in the order given -- ePoly::Render's, for
 // trackview.c's render_epoly. The texture modulates the vertex colour on
 // the GS's scale, where 0x80 is 1.0; `blend` is a GeoBlend; the alpha test
-// is the main target's, and there is no depth test. The vertices go into
-// a ring on the linear heap, which georender_quads_rewind starts again
-// once the GPU is done with the last frame. False when the ring is full
-// or there is no texture.
+// is the main target's. With `depthTest` the quad draws where its depth,
+// which the caller's depth map gives, is GEQUAL to the buffer's; without,
+// everywhere. It never writes the depth. The vertices go into a ring on
+// the linear heap, which georender_quads_rewind starts again once the GPU
+// is done with the last frame. False when the ring is full or there is no
+// texture.
 bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
-                         uint8_t blend);
+                         uint8_t blend, bool depthTest);
 void georender_quads_rewind(void);
 
 #endif

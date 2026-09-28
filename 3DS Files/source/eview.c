@@ -303,3 +303,10 @@ void MaybeChangeViewMode(void)
         break;
     }
 }
+
+// --------------------------------------------------- retail's packet build
+
+void eview_set_max_z(eRenderTarget *rt)
+{
+    rt->MaxZ = rt->ZBufferMode == GS_PSMZ24 ? 16777215.0f : 65535.0f;
+}

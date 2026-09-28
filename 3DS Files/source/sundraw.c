@@ -9,35 +9,46 @@
 #include "epoly.h"
 #include "realtime.h"
 
-SunZBuffer SunZBuffers[NUM_SUN_ZBUFFERS];   // 0x002dfe00
+SunZBuffer SunZBuffers[NUM_SUN_ZBUFFERS];   // 0x002e03d0
 
-float   SunPosX;                            // gp-24140
-float   SunPosY;                            // gp-24136
-float   GlareDist = 1.0f;                   // gp-24132
-int32_t bStartGlare;                        // gp-24128
-int32_t bResetGlare;                        // gp-24124
-float   GlareStartTime;                     // gp-24120
-int32_t iGlarePhase;                        // gp-24116
+float   SunPosX;                            // gp-23580
+float   SunPosY;                            // gp-23576
+float   GlareDist = 1.0f;                   // gp-23572
+int32_t bStartGlare;                        // gp-23568
+int32_t bResetGlare;                        // gp-23564
+Timer   GlareStartTime;                     // gp-23560
+int32_t iGlarePhase;                        // gp-23556
 
-float PhaseTimes[NUM_GLARE_PHASES] = {      // 0x00290e50
+float PhaseTimes[NUM_GLARE_PHASES] = {      // 0x002ad128
     0.05f, 0.2f, 0.65f, 5.0f
 };
 
 void (*gETransferZBufferRectFn)(uint8_t *dst, int x, int y, int w, int h);
 
-// WorldTimer's ticks in seconds, gp-32212 and gp-32208: one for the start
-// and one for now.
+// RealTimer's ticks in seconds, gp-32140 and gp-32136: one for the start
+// and one for how long it has run.
 #define GLARE_START_SECONDS 0.00025f
 #define GLARE_NOW_SECONDS   0.00025f
 
-// gp-32204: the glare's largest size, over the layers'.
+// gp-32132: the glare's largest size, over the layers'.
 #define GLARE_SIZE 1.9f
 
 // The screen is 4096 pixels across, with the render target at the middle.
 #define SCREEN_OFFSET 2048.0f
 
-// A pixel counts as open sky with a Z under this.
-#define SKY_Z 64
+// A pixel counts as open sky with a Z, the word's low 24 bits, under this.
+#define SKY_Z 2u
+#define Z_MASK 0x00ffffffu
+
+// The z of StuffSun's first layer, which the GS's GEQUAL passes only over
+// a Z of 0 or 1: the sky.
+#define SKY_ONLY_Z 1.0f
+
+// Timer's two values that mean it is not set, as Car's blink has them.
+static int timer_is_set(const Timer *t)
+{
+    return t->PackedTime != 0 && t->PackedTime != 0x7fffffffu;
+}
 
 // The sun's position as the render target's pixels in *sx and *sy, or
 // SunPosX and SunPosY when either is not 0. 0 when it is behind the view.
@@ -101,6 +112,14 @@ static void begin_poly(ePoly *p)
     p->UVs[3][1]    = 1.0f;
 }
 
+static void set_z(ePoly *p, float z)
+{
+    p->Vertices[0].z = z;
+    p->Vertices[1].z = z;
+    p->Vertices[2].z = z;
+    p->Vertices[3].z = z;
+}
+
 // One layer's quad, and its Render. `half` is half the quad across,
 // `intensity` its strength, and `fade` what a positive intensity is scaled
 // by. `span` is the target's width plus `m`.
@@ -159,43 +178,39 @@ static void draw_layer(ePoly *p, const SunLayer *l, TextureInfo *tex,
 
 void StuffSunGlare(eView *view)
 {
-    SunChunkInfoE *info  = SunInfo;
-    float          size  = 0.0f;
-    float          alpha = 1.0f;
-    float          start, now, el, halfW, halfH, w, h, sx, sy, m;
-    int32_t        phase;
-    eRenderTarget *rt;
-    Camera        *cam;
-    bVector4       pos;
-    ePoly          poly;
-    int            i;
+    const SunChunkInfoE *info  = &SunGlareInfo;
+    float                size  = 0.0f;
+    float                alpha = 1.0f;
+    float                el, halfW, halfH, w, h, sx, sy, m, maxz;
+    int32_t              now, phase;
+    eRenderTarget       *rt;
+    Camera              *cam;
+    bVector4             pos;
+    ePoly                poly;
+    int                  i;
 
     if (bResetGlare) {
-        GlareStartTime = 0.0f;
-        bStartGlare    = 0;
-        bResetGlare    = 0;
+        GlareStartTime.PackedTime = 0;
+        bStartGlare               = 0;
+        bResetGlare               = 0;
     }
-    start = GlareStartTime;
-    if (bStartGlare) {
-        float t = (float)WorldTimer * GLARE_START_SECONDS;
-
-        if (0.0f < t && start == 0.0f) {
-            start          = t;
-            bStartGlare    = 0;
-            GlareStartTime = t;
-            iGlarePhase    = 0;
-        }
+    if (bStartGlare && 0.0f < (float)RealTimer * GLARE_START_SECONDS
+        && !timer_is_set(&GlareStartTime)) {
+        bStartGlare               = 0;
+        GlareStartTime.PackedTime = (uint32_t)RealTimer;
+        iGlarePhase               = 0;
     }
-    if (start == 0.0f) {
+    if (!timer_is_set(&GlareStartTime)) {
         return;
     }
 
-    now   = (float)WorldTimer * GLARE_NOW_SECONDS;
+    now   = RealTimer;
     phase = iGlarePhase;
-    el    = now - start;
+    el    = (float)(int32_t)((uint32_t)now - GlareStartTime.PackedTime)
+          * GLARE_NOW_SECONDS;
     if (PhaseTimes[phase] < el) {
         el -= PhaseTimes[phase];
-        GlareStartTime = now;
+        GlareStartTime.PackedTime = (uint32_t)now;
         phase = (int32_t)((uint32_t)phase + 1u) % NUM_GLARE_PHASES;
         iGlarePhase = phase;
     }
@@ -213,9 +228,9 @@ void StuffSunGlare(eView *view)
         alpha = 1.0f - el / PhaseTimes[2];
         break;
     case 3:
-        alpha          = 0.0f;
-        GlareStartTime = 0.0f;
-        size           = 0.0f;
+        alpha                     = 0.0f;
+        GlareStartTime.PackedTime = 0;
+        size                      = 0.0f;
         break;
     default:
         break;
@@ -223,6 +238,7 @@ void StuffSunGlare(eView *view)
 
     rt    = view->pRenderTarget0;
     cam   = view->pCamera;
+    maxz  = rt->MaxZ;
     w     = (float)rt->ScissorW;
     h     = (float)rt->ScissorH;
     halfW = (float)(rt->ScissorW >> 1);
@@ -238,17 +254,13 @@ void StuffSunGlare(eView *view)
     if (!project(view, &pos, halfW, halfH, &sx, &sy)) {
         return;
     }
-    // The image reads the layers at SunInfo unchecked, so it reads 28 on
-    // with no sun chunk. The port stops.
-    if (info == NULL) {
-        return;
-    }
     m = largest_center(info);
     if (!on_target(sx, sy, m, w, h)) {
         return;
     }
 
     begin_poly(&poly);
+    set_z(&poly, maxz);
     for (i = 0; i < SUN_NUM_LAYERS; i++) {
         const SunLayer *l   = &info->SunLayers[i];
         TextureInfo    *tex = SunTextures[l->Texture];
@@ -268,8 +280,8 @@ void StuffSun(eView *view)
     SunZBuffer    *zb;
     bVector4       pos;
     ePoly          poly;
-    float          halfW, halfH, w, h, sx, sy, m, count;
-    int32_t        sw, sh, x0, y0, x, y;
+    float          halfW, halfH, w, h, sx, sy, m, count, maxz;
+    int32_t        sw, sh, x0, y0, x, y, startX, endX, startY, endY;
     int            i;
 
     StuffSunGlare(view);
@@ -282,6 +294,7 @@ void StuffSun(eView *view)
     pos.z = info->PositionZ;
     pos.w = 1.0f;
     rt    = view->pRenderTarget0;
+    maxz  = rt->MaxZ;
     sw    = rt->ScissorW;
     sh    = rt->ScissorH;
     halfW = (float)(sw >> 1);
@@ -301,7 +314,7 @@ void StuffSun(eView *view)
     count = 0.0f;
     for (y = zb->StartY; y < zb->EndY; y++) {
         for (x = zb->StartX; x < zb->EndX; x++) {
-            if (zb->Buffer[y * SUN_ZBUFFER_SIZE + x] < SKY_Z) {
+            if ((zb->Buffer[y * SUN_ZBUFFER_SIZE + x] & Z_MASK) < SKY_Z) {
                 count += 1.0f;
             }
         }
@@ -316,25 +329,41 @@ void StuffSun(eView *view)
         if (tex == NULL || l->IntensityScale == 0.0f) {
             continue;
         }
+        set_z(&poly, i == 0 ? SKY_ONLY_Z : maxz);
         draw_layer(&poly, l, tex, sx, sy, m, w + m, l->Size * 0.5f,
                    l->IntensityScale, count);
     }
 
-    // This frame's rect, for the next.
-    y0 = ee_trunc_w(sy - 16.0f);
-    x0 = ee_trunc_w(sx - 16.0f);
+    // This frame's rect, for the next: 32 by 32 around the sun, moved onto
+    // the target at 0 and at 33 short of its size.
+    x0     = ee_trunc_w(sx - 16.0f);
+    y0     = ee_trunc_w(sy - 16.0f);
+    startX = 0;
+    startY = 0;
+    endX   = SUN_ZBUFFER_SIZE;
+    endY   = SUN_ZBUFFER_SIZE;
+    if (x0 < 0) {
+        endX = (int32_t)((uint32_t)x0 + SUN_ZBUFFER_SIZE);
+        x0   = 0;
+    }
+    if ((int32_t)((uint32_t)sw - 33u) < x0) {
+        startX = (int32_t)((uint32_t)x0 + 1u - ((uint32_t)sw - 32u));
+        x0     = (int32_t)((uint32_t)sw - 33u);
+    }
+    if (y0 < 0) {
+        endY = (int32_t)((uint32_t)y0 + SUN_ZBUFFER_SIZE);
+        y0   = 0;
+    }
+    if ((int32_t)((uint32_t)sh - 33u) < y0) {
+        startY = (int32_t)((uint32_t)y0 + 1u - ((uint32_t)sh - 32u));
+        y0     = (int32_t)((uint32_t)sh - 33u);
+    }
+    zb->EndX   = endX;
+    zb->StartY = startY;
+    zb->StartX = startX;
+    zb->EndY   = endY;
     if (gETransferZBufferRectFn != NULL) {
         gETransferZBufferRectFn((uint8_t *)zb, x0, y0, SUN_ZBUFFER_SIZE,
                                 SUN_ZBUFFER_SIZE);
     }
-    x = (int32_t)((uint32_t)x0 + SUN_ZBUFFER_SIZE);
-    y = (int32_t)((uint32_t)y0 + SUN_ZBUFFER_SIZE);
-    zb->EndY   = sh < y ? (int32_t)(SUN_ZBUFFER_SIZE - ((uint32_t)y
-                                                       - (uint32_t)sh))
-                        : SUN_ZBUFFER_SIZE;
-    zb->StartX = x0 < 0 ? (int32_t)(0u - (uint32_t)x0) : 0;
-    zb->EndX   = sw < x ? (int32_t)(SUN_ZBUFFER_SIZE - ((uint32_t)x
-                                                       - (uint32_t)sw))
-                        : SUN_ZBUFFER_SIZE;
-    zb->StartY = y0 < 0 ? (int32_t)(0u - (uint32_t)y0) : 0;
 }

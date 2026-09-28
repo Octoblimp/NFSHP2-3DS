@@ -1,7 +1,8 @@
 // Harness for tools/sky_check.py: runs the checker's scenarios on sky.c and
-// sun.c and prints what the model prints for the image. Every callee is a
-// stub here, and each logs its name and its arguments; after each step the
-// state both objects keep is dumped. See the checker's docstring.
+// sun.c and prints what the model prints for the retail image. Every
+// callee is a stub here, and each logs its name and its arguments; after
+// each step the state both objects keep is dumped. See the checker's
+// docstring.
 //
 //     sky_test scenarios.txt > out.txt
 
@@ -153,8 +154,7 @@ TextureInfo *GetTextureInfo(uint32_t h, int use_default,
     TextureInfo *r = NULL;
     int          i;
 
-    // Retail's third argument. The demo image the model runs has none, so
-    // only a port that passes anything but 0 prints it.
+    // Retail's third argument: both sides print it when it is not 0.
     if (include_unloaded != 0)
         printf("  GetTextureInfo include_unloaded %d\n", include_unloaded);
     for (i = 0; i < NUM_SUN_TEXTURES; i++)
@@ -219,6 +219,10 @@ static void dump(void)
     for (i = 0; i < 6; i++)
         printf(" %d", tex[i].RenderingOrder);
     printf("\n");
+    printf("  glare ");
+    for (i = 0; i < (int)sizeof SunGlareInfo; i++)
+        printf("%02x", ((const uint8_t *)&SunGlareInfo)[i]);
+    printf("\n");
 }
 
 static void reset(int draw)
@@ -244,6 +248,7 @@ static void reset(int draw)
     SunPosition.z = 3.0f;
     for (i = 0; i < NUM_SUN_TEXTURES; i++)
         SunTextures[i] = NULL;
+    memset(&SunGlareInfo, 0x5a, sizeof SunGlareInfo);
 }
 
 // ----------------------------------------------------------------- driver

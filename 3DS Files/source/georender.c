@@ -516,7 +516,7 @@ void georender_quads_rewind(void)
 }
 
 bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
-                         uint8_t blend)
+                         uint8_t blend, bool depthTest)
 {
     GeoRenderVertex* dst;
     C3D_BufInfo*     buf;
@@ -559,7 +559,7 @@ bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
     C3D_CullFace(GPU_CULL_NONE);
     C3D_AlphaTest(true, GPU_GREATER, 0x60);
     set_blend(blend);
-    C3D_DepthTest(true, GPU_ALWAYS, GPU_WRITE_COLOR);
+    C3D_DepthTest(true, depthTest ? GPU_GEQUAL : GPU_ALWAYS, GPU_WRITE_COLOR);
     C3D_DrawArrays(GPU_TRIANGLE_STRIP, s_numQuads * 4, 4);
     s_numQuads++;
 

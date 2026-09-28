@@ -2,10 +2,13 @@
 
 #include "sun.h"
 
+#include <string.h>
+
 #include "bchunk.h"
 
-SunChunkInfoE *SunInfo;                     // 0x00322da0
-TextureInfo   *SunTextures[NUM_SUN_TEXTURES];   // 0x002e76f0
+SunChunkInfoE *SunInfo;                     // gp-23584
+SunChunkInfoE  SunGlareInfo;                // 0x002ef4c0
+TextureInfo   *SunTextures[NUM_SUN_TEXTURES];   // 0x002ef5b8
 
 const uint32_t kSunTextureHashes[NUM_SUN_TEXTURES] = {
     0x47beb4b6u,    // SUNCENTER
@@ -26,6 +29,43 @@ static void forget_sun(void)
     SunPosition.y = 0.0f;
 }
 
+static void glare_layer(SunLayer *l, int32_t texture, float intensity,
+                        float size, float ox, float oy, uint8_t r, uint8_t g,
+                        uint8_t b, int32_t angle, float sweep)
+{
+    l->Texture          = texture;
+    l->AlphaType        = SUNALPHA_ADD;
+    l->IntensityScale   = intensity;
+    l->Size             = size;
+    l->OffsetX          = ox;
+    l->OffsetY          = oy;
+    l->Colour[0]        = r;
+    l->Colour[1]        = g;
+    l->Colour[2]        = b;
+    l->Colour[3]        = 128;
+    l->Angle            = angle;
+    l->SweepAngleAmount = sweep;
+}
+
+// The image clears the record with memset and then stores the fields one
+// by one; the two empty layers stay as the memset left them. Its 0.7, 0.3
+// and 0.2 are gp-32148, gp-32144 and gp-32152.
+static void fill_glare_info(void)
+{
+    SunChunkInfoE *g = &SunGlareInfo;
+
+    memset(g, 0, sizeof *g);
+    g->Version = SUN_INFO_VERSION;
+    glare_layer(&g->SunLayers[0], SUNTEX_CENTER, 1.0f, 60.0f, 0.0f, 0.0f,
+                255, 200, 100, 0, 0.0f);
+    glare_layer(&g->SunLayers[1], SUNTEX_CENTER, 0.5f, 320.0f, 0.0f, 0.0f,
+                130, 159, 122, 0, 0.0f);
+    glare_layer(&g->SunLayers[2], SUNTEX_MAJORRAYS, 0.7f, 800.0f, -9.0f,
+                28.0f, 159, 122, 75, 0, 0.2f);
+    glare_layer(&g->SunLayers[3], SUNTEX_MAJORRAYS, 0.3f, 800.0f, 28.0f,
+                9.0f, 166, 119, 72, 16384, 0.2f);
+}
+
 int loader_sun(uint8_t *chunk)
 {
     SunChunkInfoE *info;
@@ -43,6 +83,7 @@ int loader_sun(uint8_t *chunk)
         SunPosition.y = info->PositionY;
         SunPosition.z = info->PositionZ;
     }
+    fill_glare_info();
     return 1;
 }
 

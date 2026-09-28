@@ -2159,6 +2159,14 @@ phases.
         solid list, the fix-ups and eModel on the retail image, over
         retail's disc: 137 of 139 mutations caught, 2 equivalent.
 
+        **The seventh slice is closed: the sun's retail pass.** Retail's
+        Z buffer is 24 bits: StuffSun counts a Z under 2 in 32-bit rects
+        that it moves onto the target, draws its first layer at z 1 over
+        the sky alone and the rest at the render target's `MaxZ`. The
+        glare draws a fixed record that LoaderSun fills, timed in
+        RealTimer's ticks. `sun_check` (154 of 154 mutations caught) and
+        `sky_check` (93 of 95, 2 equivalent) run on the retail image.
+
         The rest is CONTINUE.md's "The road to the full game": the rest
         of the retail data in the viewer (step 4), the retail pass over
         what is ported (step 10), the full frontend (step 16), the saves

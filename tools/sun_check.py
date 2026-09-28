@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cross-check 3DS Files/source/sundraw.c (StuffSun and StuffSunGlare, the
-draw half of Sun.obj) and epoly.c (ePoly's constructor) against the image
-itself, run in mipsemu.
+draw half of Sun.obj) and epoly.c (ePoly's constructor) against the retail
+image itself, run in mipsemu.
 
 The model is the image: StuffSun and StuffSunGlare run as shipped, and so
 do ePoly's constructor and destructor. Every other callee is stubbed. Each
@@ -16,7 +16,12 @@ the same small thing on both sides:
 
 The harness links sundraw.c, epoly.c and sun.c with the same stubs, and
 prints the same lines. After each step both dump the glare's globals,
-WorldTimer, and the rect of each of the 15 SunZBuffers.
+RealTimer, and the rect of each of the 15 SunZBuffers. Each step also sets
+WorldTimer, the demo's clock, to what RealTimer is not; neither draw may
+read it.
+
+Retail's image is stripped, so its addresses here are read off its code;
+each one retail_model's map pairs with the demo's is checked against it.
 
 Scenarios cover:
 - TRACKB12's own sun, and layers of every kind: BLEND and ADD, a NULL
@@ -24,9 +29,12 @@ Scenarios cover:
 - view IDs other than 1, and no sun chunk;
 - the sun behind the view, at -0 and NaN, and off each edge and on it;
 - SunPosX and SunPosY, alone, together, -0 and NaN;
-- the count over each shape of rect, and the rect clipped at each edge;
+- the count over each shape of rect and each kind of Z word, and the rect
+  moved onto the target at each edge, on targets under 33 across too;
+- the render target's MaxZ as each Z buffer mode has it, -0 and NaN;
 - the glare from its start through each phase and around again, the
-  reset, time running back, and GlareDist.
+  reset, time running back and wrapping, a start time of 0x7fffffff,
+  GlareDist, and SunGlareInfo's layers against the track's.
 
     python tools/sun_check.py
     python tools/sun_check.py --mutate [--only a,b]
@@ -43,7 +51,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import physicscar_check as pcc
-from mipsemu import Emu, M32, s32
+import retail_model
+from mipsemu import M32, s32
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -60,29 +69,46 @@ HARNESS_TIMEOUT = 60
 
 # ================================================================ the image
 
-GP = 0x00328bf0
-SUN_INFO = GP - 24144
-SUN_POSX = GP - 24140
-SUN_POSY = GP - 24136
-GLARE_DIST = GP - 24132
-START_GLARE = GP - 24128
-RESET_GLARE = GP - 24124
-GLARE_START = GP - 24120
-GLARE_PHASE = GP - 24116
-WORLD_TIMER = GP - 20224
-PHASE_TIMES = 0x00290e50
-SUN_ZB = 0x002dfe00
-ZB_SIZE = 2064
-SUN_TEX = 0x002e76f0
+# Retail's, read off its code.
+GP = 0x003358f0
+SUN_INFO = GP - 23584
+SUN_POSX = GP - 23580
+SUN_POSY = GP - 23576
+GLARE_DIST = GP - 23572
+START_GLARE = GP - 23568
+RESET_GLARE = GP - 23564
+GLARE_START = GP - 23560
+GLARE_PHASE = GP - 23556
+REAL_TIMER = GP - 19608
+WORLD_TIMER = GP - 19576
+PHASE_TIMES = 0x002ad128
+SUN_ZB = 0x002e03d0
+ZB_SIZE = 4112
+ZB_RECT = 4096                       # StartX, EndX, StartY, EndY
+SUN_TEX = 0x002ef5b8
+GLARE_INFO = 0x002ef4c0              # SunGlareInfo
 
-STUFF_SUN = 0x00123ec0
-STUFF_GLARE = 0x001244c8
-ROT_TRANS_PERS = 0x0011bb98
-MUL_VECTOR = 0x0011bb28
-BSIN = 0x00241df8
-BCOS = 0x00241ec8
-RENDER = 0x0010e580
-TRANSFER = 0x00110610
+STUFF_SUN = 0x001252b0
+STUFF_GLARE = 0x00125918
+ROT_TRANS_PERS = 0x0011b350
+MUL_VECTOR = 0x0011b2c0
+BSIN = 0x0025a540
+BCOS = 0x0025a610
+RENDER = 0x0010fa68
+TRANSFER = 0x00111c58
+EPOLY_CTOR = 0x0010f968
+
+# The ones the map pairs, and the demo's twins.
+DEMO_CODE = {
+    STUFF_SUN: 0x00123ec0, STUFF_GLARE: 0x001244c8,
+    ROT_TRANS_PERS: 0x0011bb98, MUL_VECTOR: 0x0011bb28, BSIN: 0x00241df8,
+    BCOS: 0x00241ec8, RENDER: 0x0010e580, TRANSFER: 0x00110610,
+    EPOLY_CTOR: 0x0010e480,
+}
+DEMO_DATA = {
+    SUN_INFO: 0x00322da0, SUN_POSX: 0x00322da4, SUN_TEX: 0x002e76f0,
+    REAL_TIMER: 0x00323cd0, WORLD_TIMER: 0x00323cf0,
+}
 
 TEX = 0x01001000                     # t0..t4, 256 apart
 VIEW = 0x01002000
@@ -92,7 +118,6 @@ WV = 0x01002400
 WS = 0x01002440
 INFO = 0x01003000
 POLY = 0x01004000
-EPOLY_CTOR = 0x0010e480
 
 NAN = 0x7fc00001
 
@@ -130,6 +155,17 @@ MIXED_LAYERS = [
     (0, 1, 0.01, 12.0, 0.0, 1.0, (10, 20, 30, 40), 100, 0.0),
 ]
 
+# SunGlareInfo as retail's LoaderSun fills it: TRACKB12's four but for the
+# second's colour and the fourth's intensity.
+GLARE_LAYERS = [
+    (0, 1, 1.0, 60.0, 0.0, 0.0, (255, 200, 100, 128), 0, 0.0),
+    (0, 1, 0.5, 320.0, 0.0, 0.0, (130, 159, 122, 128), 0, 0.0),
+    (2, 1, 0.7, 800.0, -9.0, 28.0, (159, 122, 75, 128), 0, 0.2),
+    (2, 1, 0.3, 800.0, 28.0, 9.0, (166, 119, 72, 128), 16384, 0.2),
+    (0, 0, 0.0, 0.0, 0.0, 0.0, (0, 0, 0, 0), 0, 0.0),
+    (0, 0, 0.0, 0.0, 0.0, 0.0, (0, 0, 0, 0), 0, 0.0),
+]
+
 
 def record(layers, pos=(-16384.0, 800.0, 6000.0), version=2):
     rec = struct.pack("<i", version)
@@ -152,23 +188,29 @@ def at(px, py, ez=10.0, w=640, h=448):
 
 
 class Scenario(object):
-    def __init__(self, ops, layers=None, info=1, texmask=0x1f, view_id=1,
-                 rt_id=1, w=640, h=448, cam_pos=(10.0, 20.0, 30.0),
-                 cam_dir=(0.0, 0.6, 0.8), posx=0.0, posy=0.0, dist=1.0,
-                 start=0, reset=0, gtime=0.0, phase=0,
-                 ptimes=(0.05, 0.2, 0.65, 5.0), zb=(0, 32, 0, 32), seed=0,
-                 proj=None, timers=(4000,)):
+    """`gtime` is GlareStartTime, RealTimer's ticks; `glayers` are
+    SunGlareInfo's layers, and `layers` the track's."""
+
+    def __init__(self, ops, layers=None, glayers=None, info=1, texmask=0x1f,
+                 view_id=1, rt_id=1, w=640, h=448, maxz=16777215.0,
+                 cam_pos=(10.0, 20.0, 30.0), cam_dir=(0.0, 0.6, 0.8),
+                 posx=0.0, posy=0.0, dist=1.0, start=0, reset=0, gtime=0,
+                 phase=0, ptimes=(0.05, 0.2, 0.65, 5.0), zb=(0, 32, 0, 32),
+                 seed=0, proj=None, timers=(4000,)):
         self.ops = ops
         self.rec = record(layers if layers is not None else B12_LAYERS)
+        self.grec = record(glayers if glayers is not None else GLARE_LAYERS,
+                           pos=(0.0, 0.0, 0.0))
         self.info = info
         self.texmask = texmask
         self.view_id = view_id
         self.rt_id = rt_id
         self.w, self.h = w, h
+        self.maxz = fbits(maxz)
         self.cam = [fbits(v) for v in cam_pos] + [0x0badf00d] \
             + [fbits(v) for v in cam_dir] + [0x0badf00e]
         self.glare = [fbits(posx), fbits(posy), fbits(dist), start, reset,
-                      fbits(gtime), phase]
+                      gtime & M32, phase]
         self.ptimes = [fbits(v) for v in ptimes]
         self.zb = list(zb)
         self.seed = seed
@@ -179,8 +221,9 @@ class Scenario(object):
     def lines(self):
         out = []
         out.append("I %d %d %s" % (self.info, self.texmask, self.rec.hex()))
-        out.append("V %d %d %d %d %s" % (
-            self.view_id, self.rt_id, self.w, self.h,
+        out.append("J %s" % self.grec.hex())
+        out.append("V %d %d %d %d %x %s" % (
+            self.view_id, self.rt_id, self.w, self.h, self.maxz,
             " ".join("%x" % c for c in self.cam)))
         out.append("G %s %s" % (" ".join("%x" % (g & M32)
                                          for g in self.glare),
@@ -194,7 +237,9 @@ class Scenario(object):
         return out
 
 
-PAT = (0, 63, 64, 65, 1, 0xffff, 32, 100, 0x8000, 63)
+# Z words: the low 24 bits under 2 and not, with the high 8 set and not.
+PAT = (0, 1, 2, 3, 0x01000000, 0xff000001, 0x80000005, 0x00ffffff, 64,
+       0xffffffff, 0x01000002, 0x00010001, 0x00800000)
 
 
 def zvalue(b, k, seed):
@@ -219,6 +264,15 @@ def script():
         S("S", layers=m, w=641, h=449, proj=[at(320, 224, w=641, h=449)]),
         S("S", layers=m, w=-7, h=-9, proj=[(fbits(2048.0), fbits(2048.0),
                                             fbits(1.0))]),
+        # MaxZ as a 16-bit Z buffer has it, -0, NaN, and under the first
+        # layer's 1.
+        S("S", maxz=65535.0), S("S", layers=m, maxz=0x80000000),
+        S("S", maxz=NAN), S("S", layers=m, maxz=0.5),
+        # The first layer not drawn, for its texture and for its intensity:
+        # the next is at MaxZ all the same.
+        S("S", texmask=0x1e),
+        S("S", layers=[(0, 1, 0.0, 30.0, 0, 0, (1, 2, 3, 4), 0, 0.0)]
+          + m[1:]),
         # Other views, and no sun chunk.
         S("S", view_id=0), S("S", view_id=2), S("S", view_id=-1),
         S("S", view_id=257),
@@ -261,13 +315,30 @@ def script():
         S("S", zb=(31, 32, 31, 32), seed=2), S("S", zb=(20, 10, 0, 32)),
         S("S", zb=(0, 32, 16, 8)), S("SzSzS", zb=(1, 31, 1, 31), seed=4),
         S("S", zb=(0, 32, 0, 32), seed=7, layers=m),
-        # The rect clipped at each edge, and wholly off.
+        S("SzSzSzS", zb=(0, 32, 0, 32), seed=9, rt_id=12),
+        # Part of the rect, where each pixel shows in the alpha.
+        S("SzS", zb=(3, 29, 1, 17), seed=2,
+          layers=[(i % 5, i & 1, 1000.0 + 77.0 * i, 10.0, 0, 0,
+                   (5, 6, 7, 8), 0, 0.0) for i in range(6)]),
+        S("S", zb=(0, 7, 5, 32), seed=8, rt_id=3,
+          layers=[(0, 0, 999.0, 10.0, 0, 0, (5, 6, 7, 8), 0, 0.0)] * 6),
+        # The rect moved onto the target at each edge, and from wholly off.
         S("SS", proj=[at(3.75, 224), at(-15.5, 224)]),
         S("SS", proj=[at(630, 224), at(655.9, 224)]),
         S("SS", proj=[at(320, 8), at(320, -300)]),
         S("SS", proj=[at(320, 440), at(320, 700)]),
         S("SS", proj=[at(-100, -100), at(740, 548)]),
         S("SSS", proj=[at(16, 16), at(15.99, 15.99), at(624, 432)]),
+        # Each edge exactly: on it, and 1 past, at 0 and at 33 short of the
+        # size.
+        S("SSSSS", proj=[at(16, 16), at(15, 15), at(623, 431), at(624, 432),
+                         at(15.99, 431.5)]),
+        # Targets the rect cannot fit on, and one it just does.
+        S("SS", w=20, h=40, proj=[at(10, 10, w=20, h=40),
+                                  at(30, 45, w=20, h=40)]),
+        S("SS", w=32, h=32, proj=[at(16, 16, w=32, h=32),
+                                  at(0, 31, w=32, h=32)]),
+        S("S", w=33, h=33, proj=[at(16.5, 16.5, w=33, h=33)]),
         # The largest CENTER is the last layer.
         S("S", layers=[(1, 0, 1.0, 10.0, 0, 0, (1, 1, 1, 1), 0, 0.5)] * 5
           + [(0, 1, 1.0, 100.0, 0, 0, (2, 2, 2, 2), 0, 0.5)],
@@ -303,52 +374,71 @@ def script():
         S("bGGGGGGGGG", timers=(0, -4, 4, 100, 200, 800, 1500, 2000, 4700,
                                  25000)),
         S("bGGGGGG", timers=(40, 60, 80, 400, 1000, 2600, 3000)),
-        S("GGGG", gtime=1.0, phase=1, timers=(4000, 4200, 4900, 5000)),
-        S("GGG", gtime=1.0, phase=2, timers=(4100, 5000, 6700)),
-        S("GGG", gtime=1.0, phase=3, timers=(4100, 30000, 30100)),
-        S("GGG", gtime=2.0, phase=0, timers=(8000, 8100, 8200)),
+        S("GGGG", gtime=4000, phase=1, timers=(4000, 4200, 4900, 5000)),
+        S("GGG", gtime=4000, phase=2, timers=(4100, 5000, 6700)),
+        S("GGG", gtime=4000, phase=3, timers=(4100, 30000, 30100)),
+        S("GGG", gtime=8000, phase=0, timers=(8000, 8100, 8200)),
         # The phase ends exactly, and time runs back.
-        S("GG", gtime=1.0, phase=0, ptimes=(0.5, 0.25, 0.75, 1.0),
+        S("GG", gtime=4000, phase=0, ptimes=(0.5, 0.25, 0.75, 1.0),
           timers=(6000, 6001)),
-        S("GG", gtime=0.5, phase=0, ptimes=(0.5, 0.25, 0.75, 1.0),
+        S("GG", gtime=2000, phase=0, ptimes=(0.5, 0.25, 0.75, 1.0),
           timers=(4000, 4001)),
-        S("GG", gtime=1.5, phase=1, ptimes=(0.5, 0.5, 0.75, 1.0),
+        S("GG", gtime=6000, phase=1, ptimes=(0.5, 0.5, 0.75, 1.0),
           timers=(8000, 8001)),
         # Phase 3 runs past its time, and wraps to 0.
-        S("GG", gtime=1.0, phase=3, timers=(30000, 30100)),
+        S("GG", gtime=4000, phase=3, timers=(30000, 30100)),
         # A start over a phase left from before.
         S("bGGG", phase=2, timers=(40, 100, 300)),
-        S("GG", gtime=1.0, phase=0, timers=(3000, 3999)),
-        S("GG", gtime=1.0, phase=2, timers=(3000, 2000)),
+        S("GG", gtime=4000, phase=0, timers=(3000, 3999)),
+        S("GG", gtime=4000, phase=2, timers=(3000, 2000)),
+        # A start time of 0x7fffffff is none, as 0 is: nothing draws, and a
+        # start takes. One short of it is a time.
+        S("GG", gtime=0x7fffffff, phase=1, timers=(4100, 4200)),
+        S("bG", gtime=0x7fffffff, phase=2, timers=(100,)),
+        S("bGG", gtime=0x7ffffffe, phase=1, timers=(100, 0x7fffffff)),
+        # A start at a RealTimer of 0x7fffffff stores the none it is; one at
+        # a RealTimer not past 0 waits.
+        S("bGG", timers=(0x7fffffff, 100)),
+        S("bGGG", timers=(-100, 0, 100)),
+        # The time since the start is signed, and wraps.
+        S("GG", gtime=-400, phase=0, timers=(400, 2000)),
+        S("GG", gtime=0x80000010, phase=1, timers=(0x7ffffff0, 16)),
         # The reset, before a start and after.
         S("bGrGbG", timers=(100, 200, 300)),
         S("rbG", timers=(100,)),
-        S("G", reset=1, gtime=5.0, phase=1, start=1, timers=(500,)),
-        S("bG", start=1, gtime=3.0, timers=(900,)),
+        S("G", reset=1, gtime=20000, phase=1, start=1, timers=(500,)),
+        S("bG", start=1, gtime=12000, timers=(900,)),
         # GlareDist and the camera, and the glare off each edge.
-        S("G", gtime=1.0, phase=1, dist=250.0, cam_pos=(-1.5, 2.5, 1e6),
+        S("G", gtime=4000, phase=1, dist=250.0, cam_pos=(-1.5, 2.5, 1e6),
           cam_dir=(0.25, -0.5, 0.75), timers=(4400,)),
-        S("G", gtime=1.0, phase=1, dist=-0.0, timers=(4400,)),
-        S("GG", gtime=1.0, phase=1, proj=[at(-300, 10), at(-400, 10)],
+        S("G", gtime=4000, phase=1, dist=-0.0, timers=(4400,)),
+        S("GG", gtime=4000, phase=1, proj=[at(-300, 10), at(-400, 10)],
           timers=(4100,)),
-        S("GG", gtime=1.0, phase=1, proj=[at(10, 767), at(10, 769)],
+        S("GG", gtime=4000, phase=1, proj=[at(10, 767), at(10, 769)],
           timers=(4100,)),
-        S("G", gtime=1.0, phase=1, proj=[at(10, 10, -2.0)],
+        S("G", gtime=4000, phase=1, proj=[at(10, 10, -2.0)],
           timers=(4100,)),
-        S("G", gtime=1.0, phase=1, posx=7.0, posy=-7.0, timers=(4100,)),
-        S("G", gtime=1.0, phase=1, layers=m, texmask=0x0d, timers=(4100,)),
-        S("GG", gtime=1.0, phase=0, layers=m, ptimes=(1.0, 1.0, 1.0, 1.0),
+        S("G", gtime=4000, phase=1, posx=7.0, posy=-7.0, timers=(4100,)),
+        # SunGlareInfo's layers, not the track's, and MaxZ.
+        S("G", gtime=4000, phase=1, glayers=m, texmask=0x0d, timers=(4100,)),
+        S("GG", gtime=4000, phase=0, glayers=m, ptimes=(1.0, 1.0, 1.0, 1.0),
           timers=(4400, 7000)),
-        # The glare with no sun chunk, behind the view: both stop first.
-        S("G", info=0, gtime=1.0, phase=1, proj=[at(10, 10, -1.0)],
+        S("G", gtime=4000, phase=1, layers=m, proj=[at(-100, 10)],
+          timers=(4100,)),
+        S("G", gtime=4000, phase=1, maxz=65535.0, timers=(4100,)),
+        S("G", gtime=4000, phase=2, maxz=NAN, glayers=m, timers=(4100,)),
+        # The glare with no sun chunk draws all the same, but not behind the
+        # view.
+        S("G", info=0, gtime=4000, phase=1, timers=(4100,)),
+        S("G", info=0, gtime=4000, phase=1, proj=[at(10, 10, -1.0)],
           timers=(4100,)),
         # StuffSun with the glare on, both drawing, and for another view.
         S("bSSSS", layers=m, timers=(4000, 4100, 4300, 5000)),
         S("bSS", view_id=3, timers=(4000, 4100)),
         S("bS", info=0, proj=[at(10, 10, -1.0)], timers=(4000,)),
-        # The whole of it, twice.
         # ePoly's constructor on its own.
         S("c"),
+        # The whole of it.
         S("SzbSSrSzS", layers=m, proj=[at(200, 100), at(0, 0),
                                        at(-35, 470), at(630, 5)],
           timers=(1000, 1100, 1300, 1400, 1500), seed=6, zb=(2, 30, 4, 28)),
@@ -359,10 +449,14 @@ def script():
 class Model(object):
     def __init__(self):
         self.out = []
-        self.e = Emu(ieee=True)
+        self.e = retail_model.RetailEmu(ieee=True)
         self.sc = None
         self.k = 0
         e = self.e
+        for r, d in DEMO_CODE.items():
+            assert e.map.by_demo[d][2] == r, (hex(d), hex(r))
+        for r, d in DEMO_DATA.items():
+            assert e.data(d) == r, (hex(d), hex(r))
         e.stub(ROT_TRANS_PERS, self.rot_trans_pers)
         e.stub(MUL_VECTOR, self.mul_vector)
         e.stub(BSIN, self.bsin)
@@ -379,7 +473,7 @@ class Model(object):
     def label(self, a):
         a &= M32
         names = {0: "null", VIEW: "view", RT: "rt", CAM: "cam", WV: "wv",
-                 WS: "ws", INFO: "info"}
+                 WS: "ws", INFO: "info", GLARE_INFO: "glare"}
         if a in names:
             return names[a]
         for i in range(5):
@@ -444,6 +538,9 @@ class Model(object):
 
     # ---- the state ---------------------------------------------------------
 
+    def rect(self, b, j):
+        return SUN_ZB + ZB_SIZE * b + ZB_RECT + 4 * j
+
     def dump(self):
         e = self.e
         self.emit("  = pos %08x %08x dist %08x start %d reset %d time %08x "
@@ -451,18 +548,17 @@ class Model(object):
                       e.u32(SUN_POSX), e.u32(SUN_POSY), e.u32(GLARE_DIST),
                       s32(e.u32(START_GLARE)), s32(e.u32(RESET_GLARE)),
                       e.u32(GLARE_START), s32(e.u32(GLARE_PHASE)),
-                      s32(e.u32(WORLD_TIMER)), self.label(e.u32(SUN_INFO))))
+                      s32(e.u32(REAL_TIMER)), self.label(e.u32(SUN_INFO))))
         self.emit("  zb " + " ".join(
-            "%d,%d,%d,%d" % tuple(s32(e.u32(SUN_ZB + ZB_SIZE * b + 2048 + 4 * j))
+            "%d,%d,%d,%d" % tuple(s32(e.u32(self.rect(b, j)))
                                   for j in range(4))
             for b in range(15)))
 
     def fill(self, seed):
-        buf = bytearray()
         for b in range(15):
-            buf = bytearray(struct.pack("<1024H", *(zvalue(b, k, seed)
-                                                    for k in range(1024))))
-            self.e.write(SUN_ZB + ZB_SIZE * b, bytes(buf))
+            buf = struct.pack("<1024I", *(zvalue(b, k, seed)
+                                          for k in range(1024)))
+            self.e.write(SUN_ZB + ZB_SIZE * b, buf)
 
     def ctor(self):
         """ePoly's constructor over 0xa5s, and the poly as it leaves it."""
@@ -480,6 +576,7 @@ class Model(object):
         e = self.e
         e.write(INFO, sc.rec)
         e.put32(SUN_INFO, INFO if sc.info else 0)
+        e.write(GLARE_INFO, sc.grec)
         for i in range(5):
             e.put32(SUN_TEX + 4 * i, TEX + 256 * i if sc.texmask >> i & 1
                     else 0)
@@ -492,17 +589,18 @@ class Model(object):
         self.fill(self.seed)
         for b in range(15):
             for j in range(4):
-                e.put32(SUN_ZB + ZB_SIZE * b + 2048 + 4 * j, sc.zb[j])
+                e.put32(self.rect(b, j), sc.zb[j])
         e.write(VIEW, bytes(128))
         e.put32(VIEW, sc.view_id)
         e.put32(VIEW + 48, RT)
         e.put32(VIEW + 56, CAM)
         e.put32(VIEW + 68, WV)
         e.put32(VIEW + 76, WS)
-        e.write(RT, bytes(64))
+        e.write(RT, bytes(128))
         e.put32(RT, sc.rt_id)
         e.put32(RT + 28, sc.w)
         e.put32(RT + 32, sc.h)
+        e.put32(RT + 116, sc.maxz)
         e.write(CAM, bytes(144))
         for i, c in enumerate(sc.cam):
             e.put32(CAM + 64 + 4 * i, c)
@@ -525,7 +623,8 @@ class Model(object):
                 if o in "SG":
                     t = sc.timers[self.t % len(sc.timers)]
                     self.t += 1
-                    e.put32(WORLD_TIMER, t)
+                    e.put32(REAL_TIMER, t & M32)
+                    e.put32(WORLD_TIMER, (t * 3 + 7) & M32)
                     e.call(STUFF_SUN if o == "S" else STUFF_GLARE, VIEW,
                            limit=200000)
                 elif o == "b":
@@ -578,8 +677,8 @@ diff = pcc.diff
 
 MUTATIONS = [
     # ePoly's constructor.
-    ("ctor_z_0", EPH,
-     "#define EPOLY_DEFAULT_Z 65535.0f", "#define EPOLY_DEFAULT_Z 0.0f"),
+    ("ctor_z_65535", EPH,
+     "#define EPOLY_DEFAULT_Z 0.0f", "#define EPOLY_DEFAULT_Z 65535.0f"),
     ("ctor_w_1", EPC,
      "        p->Vertices[i].w = 0.0f;", "        p->Vertices[i].w = 1.0f;"),
     ("ctor_v1_x", EPC,
@@ -658,16 +757,27 @@ MUTATIONS = [
      "    if (sy < -m || h + m < sy) {", "    if (sy < 0.0f || h + m < sy) {"),
     ("edge_bottom_w", SDC,
      "    if (sy < -m || h + m < sy) {", "    if (sy < -m || w + m < sy) {"),
-    # The count.
-    ("count_le_64", SDC,
-     "            if (zb->Buffer[y * SUN_ZBUFFER_SIZE + x] < SKY_Z) {",
-     "            if (zb->Buffer[y * SUN_ZBUFFER_SIZE + x] <= SKY_Z) {"),
+    # The count: a Z word's low 24 bits under 2.
+    ("count_le_2", SDC,
+     "            if ((zb->Buffer[y * SUN_ZBUFFER_SIZE + x] & Z_MASK) < SKY_Z) {",
+     "            if ((zb->Buffer[y * SUN_ZBUFFER_SIZE + x] & Z_MASK) <= SKY_Z) {"),
+    ("count_under_64", SDC,
+     "#define SKY_Z 2u", "#define SKY_Z 64u"),
+    ("count_under_1", SDC,
+     "#define SKY_Z 2u", "#define SKY_Z 1u"),
+    ("count_unmasked", SDC,
+     "            if ((zb->Buffer[y * SUN_ZBUFFER_SIZE + x] & Z_MASK) < SKY_Z) {",
+     "            if (zb->Buffer[y * SUN_ZBUFFER_SIZE + x] < SKY_Z) {"),
+    ("count_mask_16", SDC,
+     "#define Z_MASK 0x00ffffffu", "#define Z_MASK 0x0000ffffu"),
+    ("count_mask_31", SDC,
+     "#define Z_MASK 0x00ffffffu", "#define Z_MASK 0x7fffffffu"),
     ("count_signed", SDC,
-     "            if (zb->Buffer[y * SUN_ZBUFFER_SIZE + x] < SKY_Z) {",
-     "            if ((int16_t)zb->Buffer[y * SUN_ZBUFFER_SIZE + x] < SKY_Z) {"),
+     "            if ((zb->Buffer[y * SUN_ZBUFFER_SIZE + x] & Z_MASK) < SKY_Z) {",
+     "            if ((int32_t)zb->Buffer[y * SUN_ZBUFFER_SIZE + x] < (int32_t)SKY_Z) {"),
     ("count_transposed", SDC,
-     "            if (zb->Buffer[y * SUN_ZBUFFER_SIZE + x] < SKY_Z) {",
-     "            if (zb->Buffer[x * SUN_ZBUFFER_SIZE + y] < SKY_Z) {"),
+     "            if ((zb->Buffer[y * SUN_ZBUFFER_SIZE + x] & Z_MASK) < SKY_Z) {",
+     "            if ((zb->Buffer[x * SUN_ZBUFFER_SIZE + y] & Z_MASK) < SKY_Z) {"),
     ("count_y_from_0", SDC,
      "    for (y = zb->StartY; y < zb->EndY; y++) {",
      "    for (y = 0; y < zb->EndY; y++) {"),
@@ -761,13 +871,40 @@ MUTATIONS = [
     ("layer_five", SDC,
      "    begin_poly(&poly);\n    for (i = 0; i < SUN_NUM_LAYERS; i++) {\n        const SunLayer *l   = &info->SunLayers[i];\n        TextureInfo    *tex = SunTextures[l->Texture];\n\n        if (tex == NULL || l->IntensityScale",
      "    begin_poly(&poly);\n    for (i = 0; i < SUN_NUM_LAYERS - 1; i++) {\n        const SunLayer *l   = &info->SunLayers[i];\n        TextureInfo    *tex = SunTextures[l->Texture];\n\n        if (tex == NULL || l->IntensityScale"),
+    # The layers' z: the first's 1, over the sky alone, and the rest's
+    # MaxZ.
+    ("layer_z_all_max", SDC,
+     "        set_z(&poly, i == 0 ? SKY_ONLY_Z : maxz);",
+     "        set_z(&poly, maxz);"),
+    ("layer_z_all_sky", SDC,
+     "        set_z(&poly, i == 0 ? SKY_ONLY_Z : maxz);",
+     "        set_z(&poly, SKY_ONLY_Z);"),
+    ("layer_z_swapped", SDC,
+     "        set_z(&poly, i == 0 ? SKY_ONLY_Z : maxz);",
+     "        set_z(&poly, i == 0 ? maxz : SKY_ONLY_Z);"),
+    ("layer_z_two_sky", SDC,
+     "        set_z(&poly, i == 0 ? SKY_ONLY_Z : maxz);",
+     "        set_z(&poly, i < 2 ? SKY_ONLY_Z : maxz);"),
+    ("layer_z_sky_2", SDC,
+     "#define SKY_ONLY_Z 1.0f", "#define SKY_ONLY_Z 2.0f"),
+    ("layer_z_unset", SDC,
+     "        set_z(&poly, i == 0 ? SKY_ONLY_Z : maxz);\n", ""),
+    ("layer_z_first_drawn", SDC,
+     "        set_z(&poly, i == 0 ? SKY_ONLY_Z : maxz);",
+     "        set_z(&poly, poly.Vertices[0].z == 0.0f ? SKY_ONLY_Z : maxz);"),
+    ("maxz_65535", SDC,
+     "    maxz  = rt->MaxZ;\n    sw    = rt->ScissorW;",
+     "    maxz  = 65535.0f;\n    sw    = rt->ScissorW;"),
+    ("maxz_24_bits", SDC,
+     "    maxz  = rt->MaxZ;\n    sw    = rt->ScissorW;",
+     "    maxz  = 16777215.0f;\n    sw    = rt->ScissorW;"),
     ("poly_enabled_0", SDC,
      "    p->AlphaEnabled = 1;", "    p->AlphaEnabled = 0;"),
     ("poly_fix_128", SDC,
      "    p->AlphaFix     = 64;", "    p->AlphaFix     = 128;"),
     ("poly_uv_flipped", SDC,
      "    p->UVs[3][1]    = 1.0f;", "    p->UVs[3][1]    = 0.0f;"),
-    # The rect for the next frame.
+    # The rect for the next frame, moved onto the target.
     ("rect_no_transfer", SDC,
      "        gETransferZBufferRectFn((uint8_t *)zb, x0, y0, SUN_ZBUFFER_SIZE,\n"
      "                                SUN_ZBUFFER_SIZE);\n", ""),
@@ -775,25 +912,62 @@ MUTATIONS = [
      "        gETransferZBufferRectFn((uint8_t *)zb, x0, y0, SUN_ZBUFFER_SIZE,",
      "        gETransferZBufferRectFn((uint8_t *)zb, y0, x0, SUN_ZBUFFER_SIZE,"),
     ("rect_centre_15", SDC,
-     "    x0 = ee_trunc_w(sx - 16.0f);", "    x0 = ee_trunc_w(sx - 15.0f);"),
+     "    x0     = ee_trunc_w(sx - 16.0f);", "    x0     = ee_trunc_w(sx - 15.0f);"),
     ("rect_rounded", SDC,
-     "    y0 = ee_trunc_w(sy - 16.0f);", "    y0 = ee_trunc_w(sy - 15.5f);"),
-    ("rect_start_x_kept_0", SDC,
-     "    zb->StartX = x0 < 0 ? (int32_t)(0u - (uint32_t)x0) : 0;",
-     "    zb->StartX = 0;"),
+     "    y0     = ee_trunc_w(sy - 16.0f);", "    y0     = ee_trunc_w(sy - 15.5f);"),
+    ("rect_left_kept", SDC,
+     "    if (x0 < 0) {\n        endX = (int32_t)((uint32_t)x0 + SUN_ZBUFFER_SIZE);\n        x0   = 0;\n    }\n",
+     ""),
+    ("rect_left_end_32", SDC,
+     "        endX = (int32_t)((uint32_t)x0 + SUN_ZBUFFER_SIZE);",
+     "        endX = SUN_ZBUFFER_SIZE;"),
+    ("rect_left_start", SDC,
+     "        endX = (int32_t)((uint32_t)x0 + SUN_ZBUFFER_SIZE);",
+     "        startX = (int32_t)(0u - (uint32_t)x0);"),
+    ("rect_left_x0_kept", SDC,
+     "        x0   = 0;\n    }\n    if ((int32_t)((uint32_t)sw", "    }\n    if ((int32_t)((uint32_t)sw"),
+    ("rect_right_32", SDC,
+     "    if ((int32_t)((uint32_t)sw - 33u) < x0) {",
+     "    if ((int32_t)((uint32_t)sw - 32u) < x0) {"),
+    ("rect_right_unsigned", SDC,
+     "    if ((int32_t)((uint32_t)sw - 33u) < x0) {",
+     "    if ((uint32_t)sw - 33u < (uint32_t)x0) {"),
+    ("rect_right_start_0", SDC,
+     "        startX = (int32_t)((uint32_t)x0 + 1u - ((uint32_t)sw - 32u));",
+     "        startX = 0;"),
+    ("rect_right_start_no_1", SDC,
+     "        startX = (int32_t)((uint32_t)x0 + 1u - ((uint32_t)sw - 32u));",
+     "        startX = (int32_t)((uint32_t)x0 - ((uint32_t)sw - 32u));"),
+    ("rect_right_end", SDC,
+     "        startX = (int32_t)((uint32_t)x0 + 1u - ((uint32_t)sw - 32u));",
+     "        endX   = (int32_t)(SUN_ZBUFFER_SIZE - ((uint32_t)x0 + 1u - ((uint32_t)sw - 32u)));"),
+    ("rect_right_x0_kept", SDC,
+     "        x0     = (int32_t)((uint32_t)sw - 33u);\n    }\n", "    }\n"),
+    ("rect_right_x0_32", SDC,
+     "        x0     = (int32_t)((uint32_t)sw - 33u);",
+     "        x0     = (int32_t)((uint32_t)sw - 32u);"),
+    ("rect_top_kept", SDC,
+     "    if (y0 < 0) {\n        endY = (int32_t)((uint32_t)y0 + SUN_ZBUFFER_SIZE);\n        y0   = 0;\n    }\n",
+     ""),
+    ("rect_top_end_32", SDC,
+     "        endY = (int32_t)((uint32_t)y0 + SUN_ZBUFFER_SIZE);",
+     "        endY = SUN_ZBUFFER_SIZE;"),
+    ("rect_y_uses_w", SDC,
+     "    if ((int32_t)((uint32_t)sh - 33u) < y0) {",
+     "    if ((int32_t)((uint32_t)sw - 33u) < y0) {"),
+    ("rect_bottom_start_0", SDC,
+     "        startY = (int32_t)((uint32_t)y0 + 1u - ((uint32_t)sh - 32u));",
+     "        startY = 0;"),
+    ("rect_bottom_y0_kept", SDC,
+     "        y0     = (int32_t)((uint32_t)sh - 33u);\n", ""),
     ("rect_start_y_x", SDC,
-     "    zb->StartY = y0 < 0 ? (int32_t)(0u - (uint32_t)y0) : 0;",
-     "    zb->StartY = x0 < 0 ? (int32_t)(0u - (uint32_t)x0) : 0;"),
-    ("rect_end_x_le", SDC,
-     "    zb->EndX   = sw < x ?", "    zb->EndX   = sw <= x ?"),
-    ("rect_end_y_w", SDC,
-     "    zb->EndY   = sh < y ? (int32_t)(SUN_ZBUFFER_SIZE - ((uint32_t)y\n"
-     "                                                       - (uint32_t)sh))",
-     "    zb->EndY   = sw < y ? (int32_t)(SUN_ZBUFFER_SIZE - ((uint32_t)y\n"
-     "                                                       - (uint32_t)sw))"),
-    ("rect_end_x_32", SDC,
-     "                        : SUN_ZBUFFER_SIZE;\n    zb->StartY",
-     "                        : SUN_ZBUFFER_SIZE - 1;\n    zb->StartY"),
+     "    zb->StartY = startY;", "    zb->StartY = startX;"),
+    ("rect_end_x_y", SDC,
+     "    zb->EndX   = endX;", "    zb->EndX   = endY;"),
+    ("rect_end_y_x", SDC,
+     "    zb->EndY   = endY;", "    zb->EndY   = endX;"),
+    ("rect_start_x_unstored", SDC,
+     "    zb->StartX = startX;\n", ""),
     # The views.
     ("stuff_any_view", SDC,
      "    if (info == NULL || view->ID != EVIEW_ID_PLAYER1) {",
@@ -806,38 +980,63 @@ MUTATIONS = [
      "    StuffSunGlare(view);"),
     ("stuff_no_glare", SDC,
      "    StuffSunGlare(view);\n    info = SunInfo;", "    info = SunInfo;"),
+    # The glare's layers, and its clock.
+    ("glare_track_layers", SDC,
+     "    const SunChunkInfoE *info  = &SunGlareInfo;",
+     "    const SunChunkInfoE *info  = SunInfo;"),
+    ("glare_unset_zero_only", SDC,
+     "    return t->PackedTime != 0 && t->PackedTime != 0x7fffffffu;",
+     "    return t->PackedTime != 0;"),
+    ("glare_unset_max_only", SDC,
+     "    return t->PackedTime != 0 && t->PackedTime != 0x7fffffffu;",
+     "    return t->PackedTime != 0x7fffffffu;"),
+    ("glare_start_world_timer", SDC,
+     "        GlareStartTime.PackedTime = (uint32_t)RealTimer;",
+     "        GlareStartTime.PackedTime = (uint32_t)WorldTimer;"),
+    ("glare_start_test_world_timer", SDC,
+     "    if (bStartGlare && 0.0f < (float)RealTimer * GLARE_START_SECONDS",
+     "    if (bStartGlare && 0.0f < (float)WorldTimer * GLARE_START_SECONDS"),
+    ("glare_now_world_timer", SDC,
+     "    now   = RealTimer;", "    now   = WorldTimer;"),
+    ("glare_elapsed_unsigned", SDC,
+     "    el    = (float)(int32_t)((uint32_t)now - GlareStartTime.PackedTime)",
+     "    el    = (float)((uint32_t)now - GlareStartTime.PackedTime)"),
     # The glare.
     ("glare_reset_keeps_start", SDC,
-     "        GlareStartTime = 0.0f;\n        bStartGlare    = 0;\n        bResetGlare    = 0;",
-     "        GlareStartTime = 0.0f;\n        bResetGlare    = 0;"),
+     "        GlareStartTime.PackedTime = 0;\n        bStartGlare               = 0;\n        bResetGlare               = 0;",
+     "        GlareStartTime.PackedTime = 0;\n        bResetGlare               = 0;"),
     ("glare_reset_kept", SDC,
-     "        bStartGlare    = 0;\n        bResetGlare    = 0;\n    }",
-     "        bStartGlare    = 0;\n    }"),
+     "        bStartGlare               = 0;\n        bResetGlare               = 0;\n    }",
+     "        bStartGlare               = 0;\n    }"),
     ("glare_reset_keeps_time", SDC,
-     "    if (bResetGlare) {\n        GlareStartTime = 0.0f;\n",
+     "    if (bResetGlare) {\n        GlareStartTime.PackedTime = 0;\n",
      "    if (bResetGlare) {\n"),
     ("glare_start_at_0", SDC,
-     "        if (0.0f < t && start == 0.0f) {", "        if (0.0f <= t && start == 0.0f) {"),
+     "    if (bStartGlare && 0.0f < (float)RealTimer * GLARE_START_SECONDS",
+     "    if (bStartGlare && 0.0f <= (float)RealTimer * GLARE_START_SECONDS"),
     ("glare_start_restarts", SDC,
-     "        if (0.0f < t && start == 0.0f) {", "        if (0.0f < t) {"),
+     "    if (bStartGlare && 0.0f < (float)RealTimer * GLARE_START_SECONDS\n"
+     "        && !timer_is_set(&GlareStartTime)) {",
+     "    if (bStartGlare && 0.0f < (float)RealTimer * GLARE_START_SECONDS) {"),
     ("glare_start_keeps_flag", SDC,
-     "            start          = t;\n            bStartGlare    = 0;\n",
-     "            start          = t;\n"),
+     "        bStartGlare               = 0;\n        GlareStartTime.PackedTime = (uint32_t)RealTimer;",
+     "        GlareStartTime.PackedTime = (uint32_t)RealTimer;"),
     ("glare_start_keeps_phase", SDC,
-     "            GlareStartTime = t;\n            iGlarePhase    = 0;\n",
-     "            GlareStartTime = t;\n"),
-    ("glare_start_ms", SDC,
-     "#define GLARE_START_SECONDS 0.00025f", "#define GLARE_START_SECONDS 0.001f"),
+     "        GlareStartTime.PackedTime = (uint32_t)RealTimer;\n        iGlarePhase               = 0;\n",
+     "        GlareStartTime.PackedTime = (uint32_t)RealTimer;\n"),
+    ("glare_start_negative", SDC,
+     "#define GLARE_START_SECONDS 0.00025f", "#define GLARE_START_SECONDS -0.00025f"),
     ("glare_now_ms", SDC,
      "#define GLARE_NOW_SECONDS   0.00025f", "#define GLARE_NOW_SECONDS   0.001f"),
     ("glare_off_runs", SDC,
-     "    if (start == 0.0f) {\n        return;\n    }\n", ""),
+     "    if (!timer_is_set(&GlareStartTime)) {\n        return;\n    }\n", ""),
     ("glare_advance_le", SDC,
      "    if (PhaseTimes[phase] < el) {", "    if (PhaseTimes[phase] <= el) {"),
     ("glare_advance_keeps_el", SDC,
      "        el -= PhaseTimes[phase];\n", ""),
     ("glare_advance_keeps_time", SDC,
-     "        GlareStartTime = now;\n        phase = ", "        phase = "),
+     "        GlareStartTime.PackedTime = (uint32_t)now;\n        phase = ",
+     "        phase = "),
     ("glare_advance_no_wrap", SDC,
      "        phase = (int32_t)((uint32_t)phase + 1u) % NUM_GLARE_PHASES;",
      "        phase = (int32_t)((uint32_t)phase + 1u);"),
@@ -852,8 +1051,8 @@ MUTATIONS = [
      "        size  = 1.0f;\n        alpha = 1.0f - el / PhaseTimes[2];",
      "        size  = 1.0f - el / PhaseTimes[2];\n        alpha = 1.0f;"),
     ("glare_end_keeps_time", SDC,
-     "        alpha          = 0.0f;\n        GlareStartTime = 0.0f;\n",
-     "        alpha          = 0.0f;\n"),
+     "        alpha                     = 0.0f;\n        GlareStartTime.PackedTime = 0;\n",
+     "        alpha                     = 0.0f;\n"),
     ("glare_size_2", SDC,
      "#define GLARE_SIZE 1.9f", "#define GLARE_SIZE 2.0f"),
     ("glare_no_dist", SDC,
@@ -877,16 +1076,21 @@ MUTATIONS = [
     ("glare_alpha_unused", SDC,
      "                   size, alpha);", "                   size, 1.0f);"),
     ("glare_edge_h", SDC,
-     "    if (!on_target(sx, sy, m, w, h)) {\n        return;\n    }\n\n    begin_poly(&poly);\n    for (i = 0; i < SUN_NUM_LAYERS; i++) {\n        const SunLayer *l   = &info->SunLayers[i];\n        TextureInfo    *tex = SunTextures[l->Texture];\n\n        if (tex == NULL || size",
-     "    if (!on_target(sx, sy, m, w, w)) {\n        return;\n    }\n\n    begin_poly(&poly);\n    for (i = 0; i < SUN_NUM_LAYERS; i++) {\n        const SunLayer *l   = &info->SunLayers[i];\n        TextureInfo    *tex = SunTextures[l->Texture];\n\n        if (tex == NULL || size"),
+     "    if (!on_target(sx, sy, m, w, h)) {\n        return;\n    }\n\n    begin_poly(&poly);\n    set_z(&poly, maxz);",
+     "    if (!on_target(sx, sy, m, w, w)) {\n        return;\n    }\n\n    begin_poly(&poly);\n    set_z(&poly, maxz);"),
+    # The glare's z: MaxZ, once.
+    ("glare_z_unset", SDC,
+     "    begin_poly(&poly);\n    set_z(&poly, maxz);\n", "    begin_poly(&poly);\n"),
+    ("glare_z_sky", SDC,
+     "    begin_poly(&poly);\n    set_z(&poly, maxz);\n",
+     "    begin_poly(&poly);\n    set_z(&poly, SKY_ONLY_Z);\n"),
+    ("glare_z_65535", SDC,
+     "    maxz  = rt->MaxZ;\n    w     = (float)rt->ScissorW;",
+     "    maxz  = 65535.0f;\n    w     = (float)rt->ScissorW;"),
 ]
 
 # Mutations that survive because they change nothing the image can tell.
-EQUIVALENT = {
-    # A rect that ends at the target's edge exactly is 32 - 0 across either
-    # way.
-    "rect_end_x_le",
-}
+EQUIVALENT = set()
 
 
 def mutate_pass(only=None):

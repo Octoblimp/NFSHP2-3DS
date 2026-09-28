@@ -13,6 +13,9 @@ The draw half of Sun.obj is the twenty-seventh slice, and
 1,540 bytes), `StuffSunGlare` (0x001244c8, 1,556 bytes) and the 15
 `SunZBuffer`s they read back.
 
+The addresses below are the demo's. "Retail", at the end, has retail's
+and what retail changed: LoaderSun also fills the glare's own record.
+
 The port is in `3DS Files/source/`:
 
 - `sky.{c,h}`: Sky.obj;
@@ -94,7 +97,7 @@ list, and turns Z writes back on. Then the scenery follows. In
 A track has one chunk of type `0x34202`. Its data, rounded up to the next
 16 bytes within the chunk, is one `SunChunkInfoE` of 244 bytes:
 
-| Offset | Field | TRACKB12 |
+| Offset | Field | The demo's TRACKB12 |
 |---:|---|---|
 | 0 | `Version` | 2 |
 | 4 | `Position` x, y, z | -16384, 800, 6000 |
@@ -160,8 +163,9 @@ all five names are in `TEX12LOCATION`.
 ## The cross-check
 
 `tools/sky_check.py` runs Sky.obj and the sun's data half as shipped in
-mipsemu, with every callee stubbed. The harness links `sky.c` and `sun.c`
-against the same stubs. After each step, both sides dump the following:
+mipsemu, on the retail image since task 36's seventh slice, with every
+callee but memset stubbed. The harness links `sky.c` and `sun.c` against
+the same stubs. After each step, both sides dump the following:
 
 - both models' names and solids;
 - both matrices, bit for bit;
@@ -170,7 +174,8 @@ against the same stubs. After each step, both sides dump the following:
 - `SunInfo`, as an offset into the chunk;
 - `SunPosition`;
 - `SunTextures`;
-- the rendering order of all six textures.
+- the rendering order of all six textures;
+- `SunGlareInfo`, which each scenario starts as 0x5a bytes.
 
 The scenarios cover:
 
@@ -184,10 +189,14 @@ The scenarios cover:
 - the sun chunk at every misalignment, with versions 0, 1, 2, 3, -1 and
   0x102, and with the wrong type: one bit off in the low byte, the
   container bit set, and one bit off in the high half;
+- retail TRACKB12's own chunk, as the disc has it, and its textures;
 - the sun's names found, missing with a default, and missing with none.
 
-Results: 45 scenarios, 1,159 lines, 0 differ. Of the 78 mutations, 76 are
-caught. The other 2 are equivalent:
+`GetTextureInfo`'s stub prints its third argument when it is not 0.
+
+Results: 46 scenarios, 1,311 lines, 0 differ. Of the 95 mutations, 93 are
+caught; the 16 this pass added are over the glare's record. The other 2
+are equivalent:
 
 - The envmap fallback's matrix copy is a plain store, and `eModel::Init`
   never touches the matrices. So running the copy before the Init looks
@@ -203,8 +212,9 @@ The checkers the slice changed:
   differ.
 - `loadertable_check` treats slot 14 as ported. Its dump now shows
   SunInfo and SunPosition. A scenario loads and unloads TRACKB12's own
-  sun chunk through both tables at each misalignment. It has 41,988
-  lines, and 0 differ.
+  sun chunk through both tables at each misalignment. It had 41,988
+  lines, and 0 differed. Since the retail pass, that scenario runs on the
+  retail image over retail TRACKB12's chunk.
 
 ## On the 3DS
 
@@ -219,3 +229,82 @@ track drew 437 of 438 (11 in place, 1 sky), 28841 tris
 
 The dome is the first thing on the draw list. The screenshots that look
 along the canyon show the mountains and the clouds behind the scenery.
+
+## Retail
+
+Task 36's seventh slice moved both objects onto retail's image. Sky.obj
+is the demo's, moved. Sun.obj's data half is too, but for LoaderSun:
+
+| | Retail | The demo's |
+|---|---|---|
+| `SkyInitModel` | 0x0011c450 | 0x0011cc70 |
+| `SkyLoader` | 0x0011c5f8 | 0x0011ce18 |
+| `SkyUnloader` | 0x0011c6b8 | 0x0011ced8 |
+| `StuffSky` | 0x0011c6f8 | 0x0011cf18 |
+| the destructor | 0x0011c768 | 0x0011cf88 |
+| the constructor | 0x0011c798 | 0x0011cfb8 |
+| `SkydomeModel` | 0x002dc410 | 0x002dc600 |
+| `SkydomeLocalWorld` | 0x002dc430 | 0x002dc620 |
+| `SkydomeEnvmapModel` | 0x002dc470 | 0x002dc660 |
+| `SkydomeEnvmapLocalWorld` | 0x002dc490 | 0x002dc680 |
+| `DrawSky` | gp-24044 | gp-24520 |
+| `LoaderSun` | 0x00124f30 | 0x00123d30 |
+| `UnloaderSun` | 0x00125188 | 0x00123da8 |
+| `SunTrackLoader` | 0x001251c0 | 0x00123de0 |
+| `SunTrackUnloader` | 0x00125290 | 0x00123ea0 |
+| `SunInfo` | gp-23584 | gp-24144 |
+| `SunPosition` | 0x002e03c0 | 0x002dfdf0 |
+| `SunTextures` | 0x002ef5b8 | 0x002e76f0 |
+| `SunGlareInfo` | 0x002ef4c0 | none |
+
+**LoaderSun** does what the demo's did, still storing `SunInfo` in the
+delay slot. Then, for a chunk of the right type and any version, it fills
+`SunGlareInfo`, a 244-byte record of its own that StuffSunGlare draws
+from. It memsets the record, which is the only call it makes, then sets
+version 2, a position of 0, and four ADD layers:
+
+| Layer | Texture | Intensity | Size | Offset | Colour | Angle | Sweep |
+|---|---|---|---|---|---|---|---|
+| 0 | CENTER | 1.0 | 60 | 0, 0 | 255, 200, 100, 128 | 0 | 0 |
+| 1 | CENTER | 0.5 | 320 | 0, 0 | 130, 159, 122, 128 | 0 | 0 |
+| 2 | MAJORRAYS | 0.7 | 800 | -9, 28 | 159, 122, 75, 128 | 0 | 0.2 |
+| 3 | MAJORRAYS | 0.3 | 800 | 28, 9 | 166, 119, 72, 128 | 16384 | 0.2 |
+
+Layers 4 and 5 stay as the memset left them. The 0.7, 0.3 and 0.2 are
+gp-32148, gp-32144 and gp-32152. These are TRACKB12's own four but for
+two numbers: layer 1's colour there is 130, 110, 25, and layer 3's
+intensity is 0.32. UnloaderSun leaves the record be. The map pairs no
+demo function with LoaderSun, which grew by the fill.
+
+**SunTrackLoader** passes `GetTextureInfo` a third argument of 0
+(`texture-pack.md`, "Retail").
+
+**The disc.** Each of retail's 30 tracks has one sun chunk of 256 bytes,
+version 2: 12 bytes of 0x11, then the record. Each casts its shadows from
+the sun's own place. By track:
+
+| Tracks | Position | Layers |
+|---|---|---|
+| TRACKB11..13 | -3900, 650, 1300 | TRACKB12's |
+| TRACKB14..16 | -3900, 650, 1300 | none |
+| TRACKB21..23 | 6000, 5500, 3250 | TRACKB12's |
+| TRACKB24..26 | 6000, 5500, 2000 | none |
+| TRACKB31..33 | -3100, 0, 1400 | their own |
+| TRACKB34..36 | -3100, 0, 800 | their own |
+| TRACKB41..43 | -5800, -1000, 2500 | TRACKB12's |
+| TRACKB44..46 | -5800, -1000, 1500 | TRACKB12's |
+| TRACKB61..63 | -4000, 2600, 2750 | TRACKB12's |
+| TRACKB64..66 | -4000, 2600, 750 | TRACKB12's |
+
+TRACKB12's layers are the demo's TRACKB12's (`sun-draw.md`). TRACKB31..36
+share these:
+
+| Layer | Texture | Intensity | Size | Offset | Colour | Angle | Sweep |
+|---|---|---|---|---|---|---|---|
+| 0 | CENTER | 0.4 | 75 | 0, 0 | 128, 128, 32, 128 | 0 | 0 |
+| 1 | HALO | 0.5 | 550 | 0, 0 | 255, 200, 100, 128 | 0 | 0 |
+| 2 | MAJORRAYS | 1.0 | 600 | -9, 28 | 159, 122, 75, 128 | 0 | 0.2 |
+| 3 | MAJORRAYS | 0.4 | 600 | 28, 9 | 166, 119, 72, 128 | 16384 | 0.2 |
+
+All are ADD. Retail's TRACKB12 chunk is at 0x86752c in the file, 12 past
+a 16, so its record is at the next 16 in the chunk, as the demo's was.

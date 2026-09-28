@@ -51,6 +51,8 @@ typedef struct eRenderTargetMatrixPack {
 
 // eRenderTarget, 1168 bytes (.mdebug type#3199). Every field is named; the
 // two blocks of GS packets are kept as bytes so the offsets stay the disc's.
+// Retail's is 176 bytes and not yet ported. One of its fields is, MaxZ, at
+// retail's offset, 116, where the demo's packets start.
 typedef struct eRenderTarget {
     int32_t     ID;                     //    0
     const char *Name;                   //    4
@@ -80,7 +82,9 @@ typedef struct eRenderTarget {
     float       FovBias;                //  100
     uint32_t    BackgroundColour;       //  104
     int32_t     ClearBackground;        //  108
-    uint8_t     ClearZBuffer[128];      //  112 GS packets
+    uint8_t     ClearZBuffer[4];        //  112 GS packets
+    float       MaxZ;                   //  116 retail's; see eview_set_max_z
+    uint8_t     ClearZBuffer1[120];     //  120 GS packets
     uint8_t     DrawContexts[896];      //  240 GS packets
     eRenderTargetMatrixPack *MatrixPack0;   // 1136
     eRenderTargetMatrixPack *MatrixPack1;   // 1140
@@ -135,6 +139,7 @@ typedef char eview_layout_check[
      && offsetof(eView, BlackAndWhiteMode) == 112
      && sizeof(eRenderTarget) == 1168
      && offsetof(eRenderTarget, AspectRatioX) == 84
+     && offsetof(eRenderTarget, MaxZ) == 116
      && offsetof(eRenderTarget, DrawContexts) == 240
      && offsetof(eRenderTarget, MatrixPack0) == 1136
      && offsetof(eRenderTarget, VUClipScreen1) == 1160) ? 1 : -1];
@@ -148,6 +153,9 @@ eView *eGetView(int32_t id);
 
 // RenderTargets, 0x002c9a20, zero in the image: SetScreenBuffers fills it.
 // eGetRenderTarget (0x00104d00) is `&RenderTargets[id]`.
+//
+// ZBufferMode is a GS PSM: PSMZ24, 0x31, is the one retail tells apart.
+#define GS_PSMZ24 0x31
 extern eRenderTarget RenderTargets[EVIEW_NUM_RENDER_TARGETS];
 eRenderTarget *eGetRenderTarget(int32_t id);
 
@@ -255,6 +263,12 @@ void eUpdateViewMode(void);
 // 2's targets and the mirror's out of MainDraw0Context's scissor, and sets
 // which of them are active.
 void MaybeChangeViewMode(void);
+
+// Retail's 0x00105ac0 builds a render target's GS packets every frame. On
+// the way it sets MaxZ, the largest Z the target's buffer holds: 16777215
+// (gp-32736) for PSMZ24, else 65535 (gp-32732). The sun and its glare draw
+// at it. The packets are the GS's and are not ported; this is the rest.
+void eview_set_max_z(eRenderTarget *rt);
 
 // eWaitUntilRenderingDone (0x00110770), the seam: the GS and the DMA
 // drained. The renderer sets it; NULL does nothing.
