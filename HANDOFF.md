@@ -9284,3 +9284,83 @@ reached every WHITE16X16 strip and mask in the frontend.
 
 The Setup screen, car select, the briefing, then step 6
 (`Car::InitRenderInfo`, `wip/carrenderinfo`).
+
+## Session 31, continued (2026-09-29) -- You're The Cop
+
+Cops On Mode Select's second item opens a real screen now: Players, Skill
+Level and Setup, with the arrows pulsing either side of the value.
+
+### The port
+
+- `bsetup.c` is retail's `BeACopChallengeSetup`: `Callback`
+  (`0x001b6f18`), the constructor and destructor, `HandleEvent`,
+  `OnTick`, `OnHighlight`, `OnScroll`, SELECT, `ResyncChangeables`, and
+  the helpers round them. With it come two classes every setup screen
+  shares: `tfeSineWave` (`0x0024a5c0`) and the arrows (`0x0024a690`), a
+  retail class with no name that the port calls `BArrows`. It is free of
+  `<3ds.h>`: every Flailer call goes through `BSetupHooks`.
+- `DataChallengeScreen` is 20 bytes in retail, 16 in the demo. The fifth
+  word is You're The Cop's skill level.
+- Both the destructor and SELECT write the settings back to Fred, so BACK
+  keeps them.
+- SELECT writes `TheRaceParameters.NumPlayerCars` and `NFSRaceMode`. They
+  are `race.c` globals now, and `InitWithDefaults` starts both at 1.
+- `docs/formats/frontend-setup.md` has the decompilation.
+
+### The check
+
+- `setup_check` runs retail's callback on the image, with the kit, the
+  Flailer, the pads and the Fred calls stubbed at their retail addresses.
+  Its harness links `bsetup.c` with stand-in `banim_*`.
+- The result: 359 ops, 2293 lines, 0 differ; 145 mutations, 142 caught,
+  3 equivalent (`event-any`, `skill-changed`, `sel-range-signed`).
+- **The first pass left 8 unexplained, and 6 were the checker's fault.**
+  - The harness read Fred through `bsetup.h`'s own offsets, so a wrong
+    offset moved both sides. It writes them out now.
+  - A scroll wrapped the count back to 1 before the second pad went, so
+    tick's 2 -> 1 change never ran.
+  - No script BACKed out after a change without a SELECT.
+  - The arrows' wave always runs from 0, so `lo` never mattered. The
+    script now runs a `tfeSineWave` by itself.
+
+### main.c
+
+- `hookSetup*` answer the calls on the object layer:
+  - `FlailerGetBoundingBox` in ints: the top left truncated, plus
+    `GetWidth` and `GetHeight`;
+  - `GetCenterY` from that box;
+  - the int `SetTopLeftY`;
+  - the arrows' alpha, `SetCenterY` and visibility, on bitmaps.
+- `uirender_object_height` is `GetHeightFloat`:
+  - text: `GetScaledHeight`, ScaleY * (float)(int) the font's height;
+  - bitmap: `CalculateHeightFloat`, texture height * ScaleY, not
+    truncated.
+- `IsJoystickPluggedIn` is port 0 only, so the count stays 1 and Players
+  shows no arrows.
+- `SetHelpOverride` and the three car calls are logged, until `tHelpMenu`
+  and car select.
+- "Be The Cop Setup", "Select Car" and "Select Car2P" (player one's
+  screen, `18dc8e52`) are registered as plain screens. All four hashes are
+  in retail's `FRONTB.BUN`.
+- Off Players, retail's `OnTick` resyncs every tick, so `hookGrayMenuItem`
+  now logs only a call that differs from the last one.
+
+### On Azahar
+
+`run_azahar_test.ps1` now walks You're The Cop: down to Skill Level,
+right three times through the wrap, then down to Setup and back.
+
+- It passes.
+- The log has the ACTIVATE, the three RIGHTs, the help lines
+  805000..805003, and "help override off" on BACK.
+- The shots:
+  - the arrows either side of "Advanced";
+  - Beginner again after the wrap, with "Fast opponents" wiping in;
+  - on Setup, no arrows and "Customize the current Race Type."
+  - The chevrons behind Skill Level in one shot are road signs in the
+    FMV.
+
+### Next
+
+The Setup screen (`BeTheCopSetup` on `RaceSetupBaseClass`,
+`tScrollingMenuList`), car select, the briefing, then step 6.

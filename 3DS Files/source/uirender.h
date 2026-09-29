@@ -170,6 +170,12 @@ bool uirender_object_bounds(UIRenderer* r, const BUI* ui, uint32_t index,
 // bitmap's CalculateWidth, (int)(texture width * ScaleX). 0 for anything
 // else, a missing font or a missing texture.
 int32_t uirender_object_width(UIRenderer* r, const BUI* ui, uint32_t index);
+// FlailerObjectChunk::GetHeightFloat (0x00140688): a text object's
+// GetScaledHeight (0x00140cd8), ScaleY * (float)(int)font height, and a
+// bitmap's CalculateHeightFloat (0x00141488), texture height * ScaleY with
+// no truncation. GetHeight (0x001405e0) is this truncated, for both. 0 for
+// anything else, a missing font or a missing texture.
+float uirender_object_height(UIRenderer* r, const BUI* ui, uint32_t index);
 // ---------------------------------------------------------------------------
 // The port's own text
 // ---------------------------------------------------------------------------

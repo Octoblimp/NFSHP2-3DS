@@ -2312,8 +2312,26 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
         Before that, the box's charcoal bars were a faint haze.
   - [ ] The Options' Jukebox screen (the playlist and its volumes).
   - [ ] Real hardware: the stream thread's timing is only seen on Azahar.
+- [x] **You're The Cop.** Cops On's second item. Retail's
+      `BeACopChallengeSetup` (`0x001b6c68`) is `bsetup.c`, with Players,
+      Skill Level and Setup, the arrows class (`0x0024a690`) and
+      `tfeSineWave`. `setup_check` runs retail's on the image: 359 ops,
+      0 differ; 145 mutations, 142 caught, 3 equivalent. On Azahar the
+      arrows pulse either side of the skill, the level wraps, and the
+      lines are retail's (`docs/formats/frontend-setup.md`).
+  - [ ] `tHelpMenu`: `SetHelpOverride` only logs the four lines.
+  - [ ] `mPolice` from Fred+32. The port reads `gf->copsOn`, as
+        `bscreens.c` keeps it; the Mode Selects' state belongs in the Fred
+        image.
+  - [ ] The three car calls in the constructor and SELECT
+        (`MakeChallengeCarsAvailable`, `0x00183ec0`'s preload,
+        `SetupRaceParametersAfterRaceSetup`), with car select.
 - [ ] **The Setup screen.** Catch-up, traffic and damage, with arrows on
-      the current row and the movie behind.
+      the current row and the movie behind. "Be The Cop Setup" is
+      `BeTheCopSetup` (`0x001b9248`) on `RaceSetupBaseClass`
+      (`0x001b8390`), screen `d1eadbca`, with `tScrollingMenuList`. The
+      arrows are `bsetup.c`'s, with `SetClipToPoly`. It is registered, so
+      far as a plain screen.
 - [ ] **Car select.**
   - The car on a lit turntable.
   - The make's logo and the badge.

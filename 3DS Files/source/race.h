@@ -79,6 +79,14 @@ extern int32_t RaceParametersBoost;
 // and EndGameFlowLoadingTrackSpecific passes this.
 extern int32_t RaceParametersNumDriverInfo;
 
+// TheRaceParameters.NumPlayerCars (+48) and .NFSRaceMode (+596), at
+// retail's 0x0031a8c8 and 0x0031aaec (RaceParameters is 0x0031a898 there).
+// The frontend's setup screens write both as they leave -- You're The Cop's
+// select (0x001b74f8) is the first ported -- and the race they start reads
+// them. InitWithDefaults (0x001ed5c8) starts both at 1.
+extern int32_t RaceParametersNumPlayerCars;
+extern int32_t RaceParametersNFSRaceMode;
+
 // ------------------------------------------------------------- RacingCar
 
 struct Car;

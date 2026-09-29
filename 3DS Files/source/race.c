@@ -11,6 +11,8 @@ int32_t RaceParametersMaxCops;          // 0x0031277c
 eTrackDirection RaceParametersTrackDirection; // 0x0031252c
 int32_t RaceParametersBoost;            // 0x00312804
 int32_t RaceParametersNumDriverInfo;    // 0x00312814
+int32_t RaceParametersNumPlayerCars = 1;  // retail 0x0031a8c8
+int32_t RaceParametersNFSRaceMode   = 1;  // retail 0x0031aaec
 RaceCoordinator *pRaceCoordinator;      // 0x00323330
 
 eRaceStage race_get_race_stage(const Race *r)

@@ -927,6 +927,26 @@ int32_t uirender_object_width(UIRenderer* r, const BUI* ui, uint32_t index)
     return 0;
 }
 
+float uirender_object_height(UIRenderer* r, const BUI* ui, uint32_t index)
+{
+    BUIObject o;
+    if (!r || !ui || !bui_object(ui, index, &o)) return 0.0f;
+    if (o.type == BUI_TYPE_TEXT) {
+        float h = 0.0f;
+        uirender_text_extent(r, ui, index, NULL, &h);
+        return h;
+    }
+    if (o.type == BUI_TYPE_BITMAP) {
+        int idx = find_texture(r, o.textureHash);
+        if (idx < 0) return 0.0f;
+        UITexture* t = &r->textures[idx];
+        if (!t->override && !t->valid) return 0.0f;
+        uint16_t th = t->override ? t->overrideH : t->h;
+        return (float)th * o.scaleY;
+    }
+    return 0.0f;
+}
+
 static UIView screen_view(const UIRenderer* r, const BUIScreen* screen,
                           float alpha)
 {

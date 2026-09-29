@@ -48,6 +48,7 @@
 #include "bsnd.h"
 #include "bslotpool.h"
 #include "bscreens.h"
+#include "bsetup.h"
 #include "carcontroller.h"
 #include "cardriver.h"
 #include "carmodes.h"
@@ -75,6 +76,7 @@
 #include "physcomp.h"
 #include "physicscar.h"
 #include "physicssystem.h"
+#include "race.h"
 #include "realcontroller.h"
 #include "realdriver.h"
 #include "realtime.h"
@@ -153,6 +155,10 @@ static const BScreenConfig kScreens[] = {
       bscr_cops_off_callback },
     { "Options",                 BSCR_SCREEN_OPTIONS,
       bscr_options_callback },
+    // Cops On's You're The Cop, bsetup.c; the same module instance rule,
+    // made by bsetup_init().
+    { "ChallengeBeACop",         BSETUP_SCREEN_BEACOP,
+      bsetup_beacop_callback },
 
     // Registered, drawn, and not ported. Every name below is one the port's
     // own code can ChangeToScreen() to -- the two Mode Selects' item tables
@@ -170,8 +176,6 @@ static const BScreenConfig kScreens[] = {
     // checks every row of this table against it and lists what is left.
     { "Challenge",               0x2d62cfe2u,   // ChallengeScreenCallback
       bgf_plain_screen_callback },
-    { "ChallengeBeACop",         0xe55f1297u,   // BeACopChallengeSetup
-      bgf_plain_screen_callback },
     { "View Event Tree",         0x147f8a59u,   // tEventTreeView
       bgf_plain_screen_callback },
     { "Audio Options",           0xe116761cu,   // AudioOptionsScreen
@@ -185,6 +189,16 @@ static const BScreenConfig kScreens[] = {
     { "NameEntry",               0x617a4e0au,   // NameEntry
       bgf_plain_screen_callback },
     { "Credits",                 0xfd8a3b6du,   // CreditsScreen
+      bgf_plain_screen_callback },
+    // Where You're The Cop goes. Be The Cop Setup is one Flailer screen
+    // with Single Race Setup and the other RaceSetupBaseClass screens; the
+    // two-player car select has a screen per pad, and this is player one's
+    // -- the 3DS never gets there, as it never has a second pad.
+    { "Be The Cop Setup",        0xd1eadbcau,   // BeTheCopSetup
+      bgf_plain_screen_callback },
+    { "Select Car",              0xb5074ab4u,   // SelectCarScreen
+      bgf_plain_screen_callback },
+    { "Select Car2P",            0x18dc8e52u,   // SelectCarScreen
       bgf_plain_screen_callback },
     // Same Flailer screen as "Language Options Pre FE" above, entered under
     // a second name from the Options menu. The ELF registers both, to one
@@ -265,6 +279,7 @@ typedef struct {
 static Boot g_boot;
 static BGameFlow g_flow;
 static BScreens g_uiScreens;
+static BSetup   g_setup;
 
 // The top screen's render target. A global because the flow draws a frame of
 // its own before the main loop is reached: LoadGlobalChunks' eDisplayFrame,
@@ -948,7 +963,17 @@ static void hookGrayMenuItem(void* user, uint32_t screen, uint32_t item,
             bui_set_object_visible(b->project, mi->object,
                                    mode == BSCR_GRAY_ENABLE ? BUI_VISIBLE
                                                             : BUI_INVISIBLE);
-        logLine("gray item=%08lx mode=%d", (unsigned long)item, (int)mode);
+        // You're The Cop resyncs every tick off Players, as retail does, so
+        // only a call that differs from the last one is worth a line.
+        {
+            static uint32_t lastItem;
+            static int      lastMode = -1;
+            if (item != lastItem || (int)mode != lastMode)
+                logLine("gray item=%08lx mode=%d", (unsigned long)item,
+                        (int)mode);
+            lastItem = item;
+            lastMode = (int)mode;
+        }
         return;
     }
 }
@@ -1390,6 +1415,145 @@ static void hookScreenMovieStop(void* user)
 {
     (void)user;
     bgf_stop_movie(&g_flow);
+}
+
+// ------------------------------------------------ the race setup screens
+//
+// BSetupHooks, for bsetup.c: the Flailer calls You're The Cop makes under
+// retail's names, on the same object layer as the animation kit's. The
+// arrows find their two bitmaps once, as bitmaps, so the three chunk calls
+// look them up the same way.
+
+static void hookSetupBitmapAlpha(void* user, uint32_t screen, uint32_t object,
+                                 int alpha)
+{
+    BUI*    ui;
+    int32_t idx = animFind((Boot*)user, screen, object, BUI_TYPE_BITMAP, &ui);
+    if (idx >= 0) bui_set_object_alpha(ui, (uint32_t)idx, -1, alpha);
+}
+
+// FlailerObjectChunk::SetCenterY (0x00140930): the top at y less half of
+// GetHeightFloat, X kept.
+static void hookSetupBitmapCenterY(void* user, uint32_t screen,
+                                   uint32_t object, float y)
+{
+    Boot*     b = (Boot*)user;
+    BUI*      ui;
+    BUIObject o;
+    int32_t   idx = animFind(b, screen, object, BUI_TYPE_BITMAP, &ui);
+    if (idx < 0 || !bui_object(ui, (uint32_t)idx, &o)) return;
+    bui_set_object_pos(ui, (uint32_t)idx, o.x,
+                       y - uirender_object_height(b->ui, ui, (uint32_t)idx)
+                               * 0.5f);
+}
+
+static void hookSetupBitmapVisible(void* user, uint32_t screen,
+                                   uint32_t object, int visible)
+{
+    BUI*    ui;
+    int32_t idx = animFind((Boot*)user, screen, object, BUI_TYPE_BITMAP, &ui);
+    if (idx >= 0)
+        bui_set_object_visible(ui, (uint32_t)idx,
+                               visible ? BUI_VISIBLE : BUI_INVISIBLE);
+}
+
+// FlailerGetBoundingBox (0x00144280): the top left cut to ints
+// (FlailerGetTopLeftPosition, 0x001440d8), then GetWidth and GetHeight
+// (0x00140588, 0x001405e0) added. A missing object leaves the box alone.
+static void hookSetupBoundingBox(void* user, uint32_t screen, uint32_t object,
+                                 int32_t box[4])
+{
+    Boot*     b = (Boot*)user;
+    BUI*      ui;
+    BUIObject o;
+    int32_t   idx = animFind(b, screen, object, BUI_TYPE_NONE, &ui);
+    if (idx < 0 || !bui_object(ui, (uint32_t)idx, &o)) return;
+    box[0] = (int32_t)o.x;
+    box[1] = (int32_t)o.y;
+    box[2] = box[0] + uirender_object_width(b->ui, ui, (uint32_t)idx);
+    box[3] = box[1]
+             + (int32_t)uirender_object_height(b->ui, ui, (uint32_t)idx);
+}
+
+// FlailerGetCenterY (0x00144860), through FlailerGetCenter (0x001447e0):
+// the box's top plus half its height, halved toward 0. Retail's box is
+// stack garbage for a missing object; this one is 0.
+static int32_t hookSetupCenterY(void* user, uint32_t screen, uint32_t object)
+{
+    int32_t box[4] = {0, 0, 0, 0};
+    hookSetupBoundingBox(user, screen, object, box);
+    return box[1] + (box[3] - box[1]) / 2;
+}
+
+// FlailerSetTopLeftY (0x00144458), the int one: SetTopLeftY((float)y).
+static void hookSetupTopLeftY(void* user, uint32_t screen, uint32_t object,
+                              int32_t y)
+{
+    BUI*      ui;
+    BUIObject o;
+    int32_t   idx = animFind((Boot*)user, screen, object, BUI_TYPE_NONE, &ui);
+    if (idx < 0 || !bui_object(ui, (uint32_t)idx, &o)) return;
+    bui_set_object_pos(ui, (uint32_t)idx, o.x, (float)y);
+}
+
+static float hookSetupTopLeftX(void* user, uint32_t screen, uint32_t object)
+{
+    float x, y;
+    hookAnimGetTopLeft(user, screen, object, &x, &y);
+    return x;
+}
+
+// IsJoystickPluggedIn (0x001542f0). The 3DS is one player's: port 0 is the
+// console's own buttons, and there is no second pad to plug in.
+static int hookSetupJoystickPluggedIn(void* user, int port)
+{
+    (void)user;
+    return port == 0;
+}
+
+// SetHelpOverride (0x0016d448). The help menu (tHelpMenu) is not ported;
+// the table is logged so the screen's lines can be checked.
+static void hookSetupHelpOverride(void* user, const int32_t* lines)
+{
+    (void)user;
+    if (!lines) {
+        logLine("help override off");
+        return;
+    }
+    logLine("help override %ld %ld %ld %ld", (long)lines[0],
+            lines[0] ? (long)lines[1] : 0L,
+            lines[0] && lines[1] ? (long)lines[2] : 0L,
+            lines[0] && lines[1] && lines[2] ? (long)lines[3] : 0L);
+}
+
+// The three FrontendDatabase calls car select starts with. Car select and
+// the cars' loading are the next slices; until then they are traced.
+static void hookSetupChallengeCars(void* user)
+{
+    (void)user;
+    logLine("fred MakeChallengeCarsAvailable (not ported)");
+}
+
+static void hookSetupPreloadCars(void* user)
+{
+    (void)user;
+    logLine("fred preload the first car (not ported)");
+}
+
+static void hookSetupRaceAfterSetup(void* user)
+{
+    (void)user;
+    logLine("fred SetupRaceParametersAfterRaceSetup (not ported)");
+}
+
+static void hookSetupRaceParameters(void* user, int32_t numPlayerCars,
+                                    int32_t nfsRaceMode)
+{
+    (void)user;
+    RaceParametersNumPlayerCars = numPlayerCars;
+    RaceParametersNFSRaceMode   = nfsRaceMode;
+    logLine("race parameters cars=%ld mode=%ld", (long)numPlayerCars,
+            (long)nfsRaceMode);
 }
 
 // sound::jukebox::Start and Stop (0x001aeab0, 0x001aec90).
@@ -2130,6 +2294,31 @@ int main(int argc, char** argv)
     // The title's bloom runs on the same kit, as tHighlightAnimation is one
     // class for every screen in the original.
     g_flow.anim = &g_uiScreens.anim;
+
+    // The race setup screens, on the same kit and the flow's clock.
+    BSetupHooks setupHooks;
+    memset(&setupHooks, 0, sizeof(setupHooks));
+    setupHooks.user                = &g_boot;
+    setupHooks.findObject          = hookAnimObjectExists;
+    setupHooks.setBitmapAlpha      = hookSetupBitmapAlpha;
+    setupHooks.setBitmapCenterY    = hookSetupBitmapCenterY;
+    setupHooks.setBitmapVisible    = hookSetupBitmapVisible;
+    setupHooks.getCenterY          = hookSetupCenterY;
+    setupHooks.getBoundingBox      = hookSetupBoundingBox;
+    setupHooks.setTopLeftY         = hookSetupTopLeftY;
+    setupHooks.getTopLeftX         = hookSetupTopLeftX;
+    setupHooks.setLanguageID       = hookAnimSetLanguageID;
+    setupHooks.setVisible          = hookAnimSetVisible;
+    setupHooks.grayMenuItem        = hookFlowGrayMenuItem;
+    setupHooks.isJoystickPluggedIn = hookSetupJoystickPluggedIn;
+    setupHooks.startMovie          = hookScreenMovie;
+    setupHooks.setHelpOverride     = hookSetupHelpOverride;
+    setupHooks.makeChallengeCarsAvailable = hookSetupChallengeCars;
+    setupHooks.preloadCars         = hookSetupPreloadCars;
+    setupHooks.setupRaceParametersAfterRaceSetup = hookSetupRaceAfterSetup;
+    setupHooks.setRaceParameters   = hookSetupRaceParameters;
+    setupHooks.trace               = hookTrace;
+    bsetup_init(&g_setup, &g_flow, &setupHooks);
 
     // main (0x0012da88): SkipFE ships as 0, so LoadLanguageInfo and then
     // ChangeGameFlow(LOADING_FRONTEND). MainLoop takes it from there.

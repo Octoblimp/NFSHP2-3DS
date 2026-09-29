@@ -114,7 +114,7 @@ public class Hp2Cap {
 
 [void][Hp2Cap]::SetProcessDPIAware()
 
-$VK_A = 65; $VK_S = 83; $VK_M = 77; $VK_N = 78; $VK_T = 84; $VK_G = 71
+$VK_A = 65; $VK_S = 83; $VK_M = 77; $VK_N = 78; $VK_T = 84; $VK_G = 71; $VK_H = 72
 
 $debugLog  = Join-Path $env:APPDATA "Azahar\sdmc\nfshp2_debug.txt"
 $azaharLog = Join-Path $env:APPDATA "Azahar\log\azahar_log.txt"
@@ -311,16 +311,30 @@ if ($booted) {
             Start-Sleep -Milliseconds 500
             Shot "copson-down2"
 
-            # MENUITEM_2, "You're The Cop", is ChallengeBeACop -- registered
-            # but not ported, so what this checks is that the flow lands on
-            # a screen at all. Unregistered, ChangeToScreen clears pCurrent
-            # and the top screen goes black until BACK.
+            # MENUITEM_2, "You're The Cop", is ChallengeBeACop, bsetup.c.
+            # Down to Skill Level, where the arrows should pulse either side
+            # of the level; right twice, through the wrap; down to Setup,
+            # where they go. Players keeps its arrows off: one pad.
             [Hp2Cap]::PressKey($hwnd, $VK_T)  # D-pad up, back to item 2
             Start-Sleep -Milliseconds 500
             [Hp2Cap]::PressKey($hwnd, $VK_A)  # A, select
             if (Wait-ForLog "flow enter ChallengeBeACop" 10) {
                 Start-Sleep -Milliseconds 1200
                 Shot "beacop"
+                [Hp2Cap]::PressKey($hwnd, $VK_G)  # down, Skill Level
+                Start-Sleep -Milliseconds 700
+                Shot "beacop-skill"
+                [Hp2Cap]::PressKey($hwnd, $VK_H)  # right
+                Start-Sleep -Milliseconds 500
+                Shot "beacop-skill-right"
+                [Hp2Cap]::PressKey($hwnd, $VK_H)  # right, to Expert
+                Start-Sleep -Milliseconds 500
+                [Hp2Cap]::PressKey($hwnd, $VK_H)  # right, wraps to Beginner
+                Start-Sleep -Milliseconds 500
+                Shot "beacop-skill-wrap"
+                [Hp2Cap]::PressKey($hwnd, $VK_G)  # down, Setup
+                Start-Sleep -Milliseconds 700
+                Shot "beacop-setup"
                 [Hp2Cap]::PressKey($hwnd, $VK_S)  # B, back to Mode Select
                 Start-Sleep -Milliseconds 900
             } else {
