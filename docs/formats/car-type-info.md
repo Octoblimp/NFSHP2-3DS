@@ -43,9 +43,11 @@ stronger claim than either alone.
 | 192 | ManufacturerName | char[16] |
 | 208 | HeadlightPosition | bVector3 |
 | 224 | HeadlightFOV | float |
-| 228 | HighPerformance | int32_t |
-| 232 | NumAvailableSkins | int32_t |
-| 236 | CarClass | int32_t |
+| 228 | HighPerformance | int8_t, read with `lb` |
+| 229 | NumAvailableSkins | int8_t, `lb` |
+| 230 | CarClass | int8_t, `lb` |
+| 231 | OpenTop | int8_t, `lb`; the port's name, which Render reads (0x00120ef8) |
+| 232 | Pad232 | int32_t[2], 0 on the disc |
 | 240 | DriverRenderingOffset | bVector3 |
 | 256 | InCarSteeringWheelRenderingOffset | bVector3 |
 | 272 | CenterOfGravity | bVector3 |
@@ -159,6 +161,13 @@ skin id is sign-extended from a byte. The seed is the image's global at
 gp-15456; `bRandom` hands back the *old* seed reduced mod range and moves
 the state afterwards, so a draw taken straight after a reseed is the seed
 itself.
+
+That is the demo's. Retail's GetRandomSkin (0x00188460) is not the port's
+yet, and differs twice. A type of `UsageType` 1 does not draw: it calls
+0x001884d8 with 0, which answers 2, or 1 when the word at 0x0031c1c8 is 0.
+Any other draws with bRandom(int) (0x0025a488), whose seed is the default
+one at gp-14472, not a seed of the car types' own. Porting it is a
+follow-up in CONTINUE.md.
 
 **GetCarTypeInfo** (0x001801c0) is `CarTypeInfoArray[type]` with no bounds
 check.

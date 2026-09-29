@@ -39,7 +39,8 @@ static void scenario_layout(void)
     OFF(CompressedGeometryFilename); OFF(DashGeometryFilename);
     OFF(CompressedDashGeometryFilename); OFF(ManufacturerName);
     OFF(HeadlightPosition); OFF(HeadlightFOV); OFF(HighPerformance);
-    OFF(NumAvailableSkins); OFF(CarClass); OFF(DriverRenderingOffset);
+    OFF(NumAvailableSkins); OFF(CarClass); OFF(OpenTop);
+    OFF(DriverRenderingOffset);
     OFF(InCarSteeringWheelRenderingOffset); OFF(CenterOfGravity);
     OFF(Wheels); OFF(Tires); OFF(Body); OFF(Suspension); OFF(DriveTrain);
     OFF(Engine); OFF(Aero); OFF(Control); OFF(Sound); OFF(Camera);
@@ -120,7 +121,9 @@ static void scenario_layout(void)
     memcpy((unsigned char *)ct + 192, "HONDA", 6);
     poke_f(ct, 208, 1.25f); poke_f(ct, 212, -2.5f); poke_f(ct, 216, 7.5f);
     poke_f(ct, 224, 55.0f);
-    poke_i(ct, 228, 1); poke_i(ct, 232, 7); poke_i(ct, 236, 3);
+    // Four bytes, retail's lb at 228, 229, 230 and 231.
+    ((signed char *)ct)[228] = 1; ((signed char *)ct)[229] = 7;
+    ((signed char *)ct)[230] = 3; ((signed char *)ct)[231] = -2;
     poke_f(ct, 272, 0.125f); poke_f(ct, 276, 0.25f); poke_f(ct, 280, -0.5f);
     poke_f(ct, 288 + 2 * 32 + 12, 0.34f);   // Wheels[2].Radius
     poke_f(ct, 416 + 32 + 8, 4.5f);         // Tires[1].ForceScale
@@ -149,6 +152,7 @@ static void scenario_layout(void)
     printf("read HighPerformance %d\n", ct->HighPerformance);
     printf("read NumAvailableSkins %d\n", ct->NumAvailableSkins);
     printf("read CarClass %d\n", ct->CarClass);
+    printf("read OpenTop %d\n", ct->OpenTop);
     printf("read CenterOfGravity %.9g %.9g %.9g\n",
            ct->CenterOfGravity.x, ct->CenterOfGravity.y,
            ct->CenterOfGravity.z);

@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-09-29), after CarRenderInfo. `HANDOFF.md` is the running
+(2026-09-29), after CarRenderInfo::Render. `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -46,10 +46,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Sixty-six cross-checkers pass, plus the table generators:
+Sixty-nine cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -69,7 +69,7 @@ camera_check        7 scenarios,  1201 lines, 0 differ   (46 caught, 7 equivalen
 trackroute_check   11 scenarios,  1353 lines, 0 differ   (57 caught, 1 equivalent)
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
 engine_check        8 scenarios,   414 lines, 0 differ   (56 caught, 2 equivalent)
-cartypeinfo_check   4 scenarios,   177 lines, 0 differ   (40/40 mutations caught)
+cartypeinfo_check   4 scenarios,   179 lines, 0 differ   (41/41 mutations caught)
 cardriver_check     5 scenarios,   118 lines, 0 differ   (45 caught, 1 equivalent)
 steering_check      5 scenarios,   873 lines, 0 differ   (43 caught, 1 equivalent)
 rigidbody_check    10 scenarios,   935 lines, 0 differ   (76 caught, 2 equivalent)
@@ -119,6 +119,9 @@ jukebox_check        952 ops,       4833 lines, 0 differ  (279 caught, 4 equival
 jbstream_check       real tunes cut at pairs and the end, 0 differ
 songmon_check        321 ops,       1307 lines, 0 differ  (46 caught, 2 equivalent)
 setup_check          359 ops,       2293 lines, 0 differ  (142 caught, 3 equivalent)
+racesetup_check      398 ops,       3420 lines, 0 differ  (82 caught, 4 equivalent)
+carrenderinfo_check  321 scenarios, 105544 lines, 0 differ (161 caught, 2 equivalent)
+carrender_check      740 scenarios, 211648 lines, 0 differ (301 caught, 3 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -658,39 +661,46 @@ and so replaced every boot.
    - `gCarInitRenderInfoFn` is still NULL. Step 8's InitCars sets it
      together with the other carinit seams.
 
-   **Next is `CarRenderInfo::Render`** (`0x00120ef8` to `0x00123568`,
-   about 2460 instructions). The demo's own is at `0x00120b08`, and its
-   stabs name the locals: `python tools/mdebug.py --file ccMFfaaa.ii`.
+   **CarRenderInfo::Render is ported** (HANDOFF.md, Session 31,
+   continued). This is step 6's third slice. `carrender.c` has Render
+   (`0x00120ef8`), UpdateLightStateTextures, CalculateTireBlur and the
+   culler's pass (`0x0011d980`). It also has the hull shadow's sh_Setup,
+   convex_hull, smooth_shadow_corners, ch2d, make_chain, cmpl and cmph.
+   The write-up is `docs/formats/car-render-info.md`, "Render".
+   - `carrender_check`: 740 scenarios, 211648 lines, 0 differ. It runs
+     304 mutations: 301 are caught and 3 are equivalent. Every stub is
+     reached, and all 21 models are drawn.
+   - Retail uses `lq` and `sq` on frame memory, so the scenarios keep the
+     frame position 16-aligned, as the game does. Each stub's v0 is
+     sign-extended; a zero-extended -1 passes retail's `slti`.
+   - The culler's other function, `0x0011d648`, has no callers and is not
+     ported.
+   - Render takes the forced lights as its seventh argument (1, 2, 4 and
+     8 for head, brake, reverse and cop). RenderCars passes 0.
+   - Nothing calls Render in the game yet, so the 3DS link drops it.
 
-   Retail passes a seventh argument in t3, the forced-light bits (1, 2, 4
-   and 8, from gp-23760..-23748). RenderCars (`0x00124060`) calls it with
-   the tyre and brake matrices on its stack, and t2 and t3 both 0.
+   **Next is RenderCars** (`0x00124060`, 580 bytes, changed from the
+   demo's `0x00123468`), which closes step 6. It builds each car's four
+   tyre and four brake matrices on its stack, then calls Render with the
+   flags and the forced lights both 0. The front end's car goes with it:
+   RenderFrontEndCar (`0x00123c90`, 132) and RenderFrontEndCars
+   (`0x00123d28`, 820). After that come steps 7 and 8. Step 8's InitCars
+   sets `gCarInitRenderInfoFn`, and the 3DS build gives Render's seams
+   (the strips, the flares and the driver) their renderers.
 
-   What it does, in order:
-   - Pixel size and LOD. `car_body_lod` comes from the thresholds at
-     `0x002ad0e8`. The in-car view (mode 3) scales the size by
-     gp-32356.
-   - Four matrices from the frame buffer. The world is gp-19388, the end
-     gp-19384, the overflow flag -19372 and the overflow count -19368.
-   - ClassifyAABB against the box, elSetupLightContext, and
-     UpdateLightStateTextures (`0x00120130`).
-   - The flares' intensities from the lights, BrokenLightFlags and the
-     cop lights' patterns (`0x002e01b8`..`0x002e01e8`, gp-23736..-23720),
-     then eRenderLightFlare.
-   - The animated driver, with its LOD from the camera's angle.
-   - The shadow. The in-game one projects the body's box and uses
-     sh_Setup, convex_hull and smooth_shadow_corners (`0x00120d60`,
-     `0x001209f8`, `0x00120c00`). It draws with the e/ex strips, and its
-     alpha comes from the sun. The other is a 4x4 grid over the
-     topology's GetElevation.
-   - The body `Body[lod]`, the mirrors by their damage level
-     (`0x00124d38`), the plates, and the scuffs by GetVisibleTotalDamage.
-   - The tyres, each end's matrices times a Z-rotated identity. The
-     blur's alpha comes from CalculateTireBlur (`0x00120ea8`).
-   - The brakes, and the wipers' rigid animation.
-
-   The culler's two passes are `0x0011d648` and `0x0011d980`. The front
-   end calls Render through RenderFrontEndCar (`0x00123c90`).
+   Follow-ups found on the way:
+   - Retail's GetRandomSkin (`0x00188460`) is not the port's. A UsageType
+     (CarTypeInfo +1336) of 1 calls `0x001884d8(ct, 0)`, which is 2, or 1
+     when the word at `0x0031c1c8` is 0. Any other type takes
+     `AvailableSkins[bRandom(n)]` through `0x0025a488`, on the default
+     seed at gp-14472 (`docs/formats/car-type-info.md`).
+   - Retail's DriverInfo keeps TheDriverType at +8, and the port keeps it
+     at +4. Everything reads it by name, so nothing is owed until a record
+     is read in place.
+   - The Car's CopLights is a word in retail and an `int8_t` in the port.
+   - The hull shadow casts at most 64 points (`HULL_MAX_POINTS`), and
+     retail has no bound. Check that bound against the cars' collision
+     bodies when every car loads (step 18).
 
    "The road to the full game", below, has everything after it.
 2. **Task 27's first slice is closed: `Track.obj` and `TerrainType.obj`**,
@@ -1787,7 +1797,7 @@ each class shows what it reaches.
 | 3 | ~~The sky, the sun and the weather's draw~~ done, task 27's twenty-sixth to twenty-ninth slices. The shipped image has no rain or storm to draw | 2-3 |
 | 4 | ~~The retail disc's data in the track viewer: the tracks shipped expanded, the retail chunk set, the changed loaders, and a second location~~ done, task 36's second to eighth slices | 1 |
 | 5 | ~~The retail model: mipsemu on `SLES_507.31` by retail_match's names, so that a checker can run the retail function~~ done, task 36's second slice: `tools/retail_model.py`, in `track_check` and `loadertable_check` | 1 |
-| 6 | Car's constructor and destructor, and CarRenderInfo, from retail where retail changed them (all of them did), so that a car draws on the track. The constructor and destructor are done, task 36's tenth slice; CarRenderInfo's build is done, the eleventh; Render is next | 3-4 |
+| 6 | Car's constructor and destructor, and CarRenderInfo, from retail where retail changed them (all of them did), so that a car draws on the track. The constructor and destructor are done, task 36's tenth slice; CarRenderInfo's build is done, the eleventh; Render is done, the twelfth; RenderCars and the front end's car are next | 3-4 |
 | 7 | Player and the chase cameras (CM_DRIVE and the rest of `cammover.c`'s set) | 2 |
 | 8 | RaceCoordinator's InitForRace, InitCars, InitPlayers and Race::Init, and the game flow from the frontend into a race and back | 2-3 |
 | 9 | **One car driving the track.** Steps 4-8 are this milestone: about 9-11 slices | |

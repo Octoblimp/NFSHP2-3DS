@@ -24,6 +24,14 @@
 // sized opaque blocks so the offsets after them stay right. Nothing is
 // guessed: every block's size comes from the dump.
 //
+// Retail packs four bytes at 228, where the demo's .mdebug has three
+// words (HighPerformance 228, NumAvailableSkins 232, CarClass 236):
+// HighPerformance, NumAvailableSkins, CarClass and a fourth, set on the
+// open-topped cars (CARRERAGT, BMWZ8, SPIDER, VAUXHALL and their HP
+// twins), then eight bytes that are 0 in every record. Retail reads each
+// with lb: PhysicsCar 228, GetRandomSkin 229, RealDriver::Drive 230,
+// CarRenderInfo::Render 231. OpenTop is the port's name.
+//
 // See docs/formats/car-type-info.md.
 
 #ifndef CARTYPEINFO_H
@@ -137,9 +145,11 @@ typedef struct CarTypeInfo {
     char            ManufacturerName[16];                //  192
     bVector3        HeadlightPosition;                   //  208
     float           HeadlightFOV;                        //  224
-    int32_t         HighPerformance;                     //  228
-    int32_t         NumAvailableSkins;                   //  232
-    int32_t         CarClass;                            //  236
+    int8_t          HighPerformance;                     //  228  lb
+    int8_t          NumAvailableSkins;                   //  229  lb
+    int8_t          CarClass;                            //  230  lb
+    int8_t          OpenTop;                             //  231  lb
+    int32_t         Pad232[2];                           //  232  0 on the disc
     bVector3        DriverRenderingOffset;               //  240
     bVector3        InCarSteeringWheelRenderingOffset;   //  256
     bVector3        CenterOfGravity;                     //  272
@@ -183,7 +193,11 @@ typedef char cartypeinfo_layout_check[
     (offsetof(CarTypeInfo, ManufacturerName)  ==  192
      && offsetof(CarTypeInfo, HeadlightPosition)  == 208
      && offsetof(CarTypeInfo, HeadlightFOV)       == 224
-     && offsetof(CarTypeInfo, NumAvailableSkins)  == 232
+     && offsetof(CarTypeInfo, HighPerformance)    == 228
+     && offsetof(CarTypeInfo, NumAvailableSkins)  == 229
+     && offsetof(CarTypeInfo, CarClass)           == 230
+     && offsetof(CarTypeInfo, OpenTop)            == 231
+     && offsetof(CarTypeInfo, DriverRenderingOffset) == 240
      && offsetof(CarTypeInfo, CenterOfGravity)    == 272
      && offsetof(CarTypeInfo, Wheels)             == 288
      && offsetof(CarTypeInfo, Tires)              == 416

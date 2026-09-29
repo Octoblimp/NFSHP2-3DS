@@ -94,8 +94,9 @@ PS2_OFF = [
     ("HeadlightPosition", 208),
     ("HeadlightFOV", 224),
     ("HighPerformance", 228),
-    ("NumAvailableSkins", 232),
-    ("CarClass", 236),
+    ("NumAvailableSkins", 229),
+    ("CarClass", 230),
+    ("OpenTop", 231),
     ("DriverRenderingOffset", 240),
     ("InCarSteeringWheelRenderingOffset", 256),
     ("CenterOfGravity", 272),
@@ -338,6 +339,7 @@ def s_layout():
     emit("read HighPerformance 1")
     emit("read NumAvailableSkins 7")
     emit("read CarClass 3")
+    emit("read OpenTop -2")
     emit("read CenterOfGravity %s %s %s"
          % (g9(f32(0.125)), g9(f32(0.25)), g9(f32(-0.5))))
     emit("read Wheels2Radius %s" % g9(f32(0.34)))
@@ -501,10 +503,13 @@ MUTATIONS = [
      "    bVector3        HeadlightPosition;                   //  208"
      + NL + "    float           _hpad;"),
     ("off-numskins-and-class", CH,
-     "    int32_t         NumAvailableSkins;                   //  232"
-     + NL + "    int32_t         CarClass;                            //  236",
-     "    int32_t         CarClass;                            //  232"
-     + NL + "    int32_t         NumAvailableSkins;                   //  236"),
+     "    int8_t          NumAvailableSkins;                   //  229  lb"
+     + NL + "    int8_t          CarClass;                            //  230  lb",
+     "    int8_t          CarClass;                            //  230  lb"
+     + NL + "    int8_t          NumAvailableSkins;                   //  229  lb"),
+    ("off-high-performance-word", CH,
+     "    int8_t          HighPerformance;                     //  228  lb",
+     "    int32_t         HighPerformance;                     //  228  lb"),
     ("off-cog-before-incar", CH,
      "    bVector3        InCarSteeringWheelRenderingOffset;   //  256"
      + NL + "    bVector3        CenterOfGravity;                     //  272",

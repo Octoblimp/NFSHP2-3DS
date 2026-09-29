@@ -15,8 +15,8 @@
 //   ~bTList<AcidEmitter>                         0x00124bf0   108
 //   ~bTList<eLightFlare>                         0x00116f20   108
 //
-// Render (0x00120ef8) and the culler's two passes (0x0011d648, 0x0011d980)
-// are the next slice's. Retail's is 2352 bytes to the demo's 1856: it adds
+// Render (0x00120ef8) and the culler's pass (0x0011d980) are carrender.c's,
+// at the end of this header. Retail's is 2352 bytes to the demo's 1856: it adds
 // the body's pivot, a broken-light mask, the part culler and a flag for
 // OverRideAlpha, and the ctor's order is (RideInfo *, Car *) in both.
 //
@@ -43,6 +43,7 @@
 #include "cardamage.h"
 #include "cartypeinfo.h"
 #include "emodel.h"
+#include "eviewmatrix.h"
 #include "scenery.h"
 
 // ------------------------------------------------------------ the lists
@@ -289,5 +290,176 @@ void carrenderinfo_init_part(CarPartCullerPart *culler, int32_t idx,
 // its emitters and TestRenderInfo. This is what gCarInitRenderInfoFn is
 // set to.
 void car_init_render_info(Car *c, RideInfo *ride);
+
+// ============================================================== Render
+//
+// carrender.c: CarRenderInfo::Render and what it calls of Car.obj's own.
+//
+//   CarRenderInfo::Render                         0x00120ef8  9840 bytes
+//   CarRenderInfo::UpdateLightStateTextures       0x00120130   560
+//   CarRenderInfo::CalculateTireBlur(int)         0x00120ea8    76
+//   the part culler's pass                        0x0011d980   528
+//   sh_Setup(bVector3 *)                          0x00120d60   324
+//   convex_hull(bVector3 *, int &, Topo..., f, f) 0x001209f8   512
+//   smooth_shadow_corners(int)                    0x00120c00   352
+//   ch2d(float **, int)                           0x00120980   120
+//   make_chain(float **, int, cmp)                0x00120850   300
+//   cmpl / cmph                                   0x001207a8 / 0x00120828
+//
+// Render draws one car: its light flares, the driver, two shadows (a hull
+// of the collision body cast along the sun, and a 4x4 grid under the box
+// laid on the ground), the body at its level of detail, the mirrors, the
+// plates, the scuffs, the four tyres and their blur, the brakes and the
+// wipers. Retail's order and its frame memory are kept exactly: every
+// matrix and light context it hands on comes from eframe_malloc, taken in
+// the same order and the same sizes, and a failed one skips what it was
+// for. What it is in docs/formats/car-render-info.md.
+//
+// What the renderer draws with goes through seams, each skipped when
+// NULL: eModel::Render (scenerycull.h's gEModelRenderFn), the two strip
+// builders, the light flares and the animated driver. The light context
+// is eviewmatrix.h's gElSetupLightContextFn.
+
+// CarRenderMatrix, 0x002e0270: a tweakable the body's matrix is
+// multiplied by. InitCarEffects (0x0011db90) sets it to eIdentity; the
+// port starts it there.
+extern bMatrix4 CarRenderMatrix;
+
+// Retail's switches, all tweakables nothing in the game changes.
+extern int32_t EnableEnvMap;                // gp-25040, 1
+extern int32_t PrintQueryLightMat;          // gp-23712, 0
+extern int32_t QueryLightMat;               // gp-24224: 1 around the light
+                                            // context when the above is set;
+                                            // nothing reads it
+extern int32_t CarPartCullerNormalise;      // gp-23768, 0: normalise each
+                                            // plane before the test
+extern int32_t ForceHeadlights;             // gp-23760, 0
+extern int32_t ForceBrakelights;            // gp-23756, 0
+extern int32_t ForceReverselights;          // gp-23752, 0
+extern int32_t ForceCoplights;              // gp-23748, 0
+extern int32_t ForceRenderDriver;           // gp-23744, 0: no pixel test
+extern int32_t ForceCarLOD;                 // gp-23696, -1
+extern int32_t ForceTireLOD;                // gp-23692, -1
+
+// FancyCarShadowEdgeMult (gp-23764, 1.1): how far the hull shadow's soft
+// edge reaches past the hull, which Render sets from the sun each time.
+// CarShadowElevationFE (gp-23740, 0.01): the grid's height in the front
+// end.
+extern float FancyCarShadowEdgeMult;
+extern float CarShadowElevationFE;
+
+// The cop lights' patterns, one byte a frame: the headlights' wig-wag by
+// frame & 15 (0x002e01e8); red, blue and white by frame & 7 while the
+// car's CopLights is 2 (gp-23736, -23728, -23720); and otherwise by
+// (frame >> 1) & 15 (0x002e01b8, 0x002e01c8, 0x002e01d8, retail's).
+extern uint8_t CopLightsHeadlights[16];
+extern uint8_t CopLightsRed[8];
+extern uint8_t CopLightsBlue[8];
+extern uint8_t CopLightsWhite[8];
+extern uint8_t CopLightsRedSlow[16];
+extern uint8_t CopLightsBlueSlow[16];
+extern uint8_t CopLightsWhiteSlow[16];
+
+// 0x002ad0e8: the pixel sizes below which each level of detail gives way
+// to the next.
+extern const float CarLodPixelSizes[4];
+
+// The hull shadow's statics: the light's direction and one over its z
+// (sh_Setup's, gp-13420), the ground's normal and the point under the car
+// (Render's), and the three point arrays -- the collision body's points
+// cast onto the ground, their hull, and the hull with its corners cut --
+// with the hull's pointers. Retail does not bound the arrays; the port
+// casts at most HULL_MAX_POINTS points.
+#define HULL_MAX_POINTS 64
+extern float     cs_OneOverZ;
+extern bVector3  cs_lightV;                        // 0x00332920
+extern bVector3  hull_Normal;                      // 0x00332930
+extern bVector3  hull_Origin;                      // 0x00332940
+extern bVector3  hullVertArray3[3 * HULL_MAX_POINTS];  // 0x00332950
+extern bVector3  hullVertArray2[HULL_MAX_POINTS];  // 0x00333550
+extern bVector3  hullVertArray1[HULL_MAX_POINTS];  // 0x00333950
+extern bVector3 *hullVertPointers[HULL_MAX_POINTS + 1];  // 0x00333d50
+
+// ---------------------------------------------------------- the seams
+
+// The strip builders, eBeginStrip (0x00110488), eAddVertex (0x001107d0),
+// eAddColour (0x001107e0), eAddUV (0x001107f8) and eEndStrip
+// (0x00110608), and the ex set (0x00110848, 0x001109f8, 0x00110a40,
+// 0x00110a68, 0x00110878). Begin's nonzero is a strip begun; a NULL Begin
+// is none.
+typedef struct eStripFns {
+    int32_t (*Begin)(void *texture, int32_t num_vertices, bMatrix4 *m);
+    void    (*AddVertex)(const bVector3 *v);
+    void    (*AddColour)(uint32_t colour);
+    void    (*AddUV)(float u, float v);
+    void    (*End)(void);
+} eStripFns;
+extern eStripFns gEStripFns;
+extern eStripFns gExStripFns;
+
+// eRenderLightFlare(eView *, eLightFlare *, bMatrix4 *, float),
+// 0x001164f0.
+extern void (*gERenderLightFlareFn)(eView *view, eLightFlare *flare,
+                                    bMatrix4 *local_world, float intensity);
+
+// AnimatedDriver::Render(bMatrix4 *, eLightContext *, unsigned int, int),
+// 0x001a9a30, and GetLengthOfQueuedAnimations, 0x001a9fb8. NULL draws
+// nothing and has nothing queued.
+extern void (*gAnimatedDriverRenderFn)(AnimatedDriver *d, bMatrix4 *m,
+                                       eLightContext *lc, uint32_t flags,
+                                       int32_t lod);
+extern int32_t (*gAnimatedDriverQueuedFn)(AnimatedDriver *d);
+
+// ---------------------------------------------------------- the methods
+
+// CarRenderInfo::Render(eView *, bVector3 const *, bMatrix4 const *,
+// bMatrix4 *, bMatrix4 *, unsigned int, unsigned int), 0x00120ef8. The
+// car at `position` with `body_matrix`'s rotation; four tyre and four
+// brake matrices in the car's space; flags for every model; and the
+// forced lights, 1 2 4 8 for head, brake, reverse and cop.
+void carrenderinfo_render(CarRenderInfo *ri, eView *view,
+                          const bVector3 *position,
+                          const bMatrix4 *body_matrix,
+                          bMatrix4 *tire_matrices, bMatrix4 *brake_matrices,
+                          uint32_t extra_render_flags,
+                          uint32_t forced_lights);
+
+// 0x00120130: the four lamps' textures -- head and brake, lit or not --
+// swapped in where they are not broken, and the bodies' tables
+// reconnected when one changed.
+void carrenderinfo_update_light_state_textures(CarRenderInfo *ri);
+
+// 0x00120ea8: |wheel's angular velocity| * 0.02 held to [0, 1], 0 with no
+// car.
+float carrenderinfo_calculate_tire_blur(const CarRenderInfo *ri,
+                                        int32_t wheel);
+
+// The part culler's pass, 0x0011d980: for each of the fourteen parts,
+// State[2] is whether `eye` (car space) is on the seen side of its planes
+// -- any of them for a Flag8 of 0, all for 1, always otherwise -- and
+// State[1] or State[0] counts it.
+void carrenderinfo_cull_parts(CarPartCullerPart *culler,
+                              const bVector3 *eye);
+
+// sh_Setup, 0x00120d60: cs_lightV from the sun's shadow position (or
+// (-16384, 0, 7000) with no sun) to `pos`, lowered to 4600 BAMs off
+// straight down when it is steeper, and cs_OneOverZ.
+void car_shadow_setup(const bVector3 *pos);
+
+// convex_hull, 0x001209f8: the hull of *count points into hullVertArray2,
+// each at z and dropped onto the ground plus `lift`; a point the ground
+// is not found under, or that is more than 4 off z or 1.5 off the plane
+// through hull_Origin, is dropped. *count is what is left.
+void car_shadow_convex_hull(bVector3 *pts, int32_t *count,
+                            TopologyCoordinate *tc, float z, float lift);
+
+// smooth_shadow_corners, 0x00120c00: each of hullVertArray2's n corners
+// into three in hullVertArray3, a third of the way along each edge and
+// one between. Returns 3n.
+int32_t car_shadow_smooth_corners(int32_t n);
+
+// ch2d, 0x00120980: Andrew's monotone chain on P[0..n-1], the hull's
+// pointers first in P; P needs room for n + 1. Returns the hull's count.
+int32_t car_shadow_ch2d(bVector3 **P, int32_t n);
 
 #endif

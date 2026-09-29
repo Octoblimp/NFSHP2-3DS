@@ -9503,3 +9503,92 @@ It needs the light flares, the driver, both shadows, the bodies, the
 tyres and blur, the brakes and the wipers. CONTINUE.md has its outline,
 from a first read of the disassembly. After Render come the culler's
 two passes, and then steps 7 and 8.
+
+## Session 31, continued (2026-09-29) -- CarRenderInfo::Render
+
+### The port
+
+`carrender.c` is new. It has retail's:
+- CarRenderInfo::Render (`0x00120ef8`, 9840 bytes);
+- UpdateLightStateTextures and CalculateTireBlur;
+- the part culler's pass (`0x0011d980`);
+- the hull shadow's sh_Setup, convex_hull, smooth_shadow_corners, ch2d,
+  make_chain, cmpl and cmph.
+
+Render draws the flares and the animated driver first. Then come the two
+shadows: the collision body's hull cast along the sun, and a 4x4 grid
+laid on the ground. After them it draws the body at its level of detail,
+the mirrors, the plates and the scuffs, then the tyres and their blur, the
+brakes and the wipers. It takes frame memory in retail's order and at
+retail's sizes, and it skips whatever a failed block was for. Everything
+it hands the renderer goes through a seam, and a NULL seam is skipped.
+`docs/formats/car-render-info.md` has the order and where the port
+differs:
+- the hull casts at most 64 points;
+- the dead GetBoundingBox call is left out;
+- DriverInfo and CopLights have the port's layouts.
+
+The culler's other function, `0x0011d648`, has no callers, so it is not
+ported.
+
+`car-type-info.md` now has bytes 228 to 231 as retail's four `lb` bytes:
+HighPerformance, NumAvailableSkins, CarClass and OpenTop, which Render
+reads. `Pad232` follows them. It also says that retail's GetRandomSkin
+(`0x00188460`) is not the port's. CONTINUE.md has that as a follow-up.
+
+### The check
+
+`tools/carrender_check.py` runs retail's Render in RetailEmu, and
+`tools/src/carrender_test.c` is its host harness. Every call below Render
+that is not ported is a stub on both sides, and each stub prints its
+arguments. After Render, both sides dump:
+- the frame pointer;
+- the culler's parts;
+- the damage and the wipers' state;
+- the three hull arrays.
+
+- The first run differed in 4384 lines, and neither cause was the port:
+  - The frame positions were unaligned. Retail uses `lq` and `sq` on frame
+    memory, which the game always keeps 16-aligned, so the scenarios keep
+    it aligned too.
+  - The stubs zero-extended v0, so a -1 passed retail's `slti`. They
+    sign-extend it now.
+- After those two fixes: 697 scenarios, 197394 lines, 0 differ. Every stub
+  is reached, and all 21 models are drawn.
+- `--mutate` runs 304 mutations. The first pass caught 291, and 13
+  survived.
+- Three of the survivors are equivalent:
+  - `chain_i`: from i = 1, V[1] is swapped with itself.
+  - `hs_seg_len`: the smoothed hull always has 3n points.
+  - `lf_brake_forced`: both values clamp to 1.
+- The other ten are caught now:
+  - the culler's extras are long enough for normalising to matter;
+  - a car square to the axes, in a sun straight along x or y, puts points
+    on a shared x, and three on a line (cmpl's y, make_chain's `<=`);
+  - steep ground whose normal matches its slope reaches the hull's and
+    the grid's 4;
+  - level 2 forced from further in reaches the shadow's fade;
+  - a driver exactly 101 pixels across in mode 3, and a camera 45
+    degrees off behind the car;
+  - the camera inside a longer box, 3 to 4 from the car's middle;
+  - the light context's line prints QueryLightMat, so its set shows.
+- The result: 740 scenarios, 211648 lines, 0 differ; 301 caught and 3
+  equivalent.
+
+`racesetup_check`, `carrenderinfo_check` and `carinit_check` still pass,
+and so do the checkers that read CarTypeInfo's bytes: `cartypeinfo_check`,
+`physicscar_check`, `realdriver_check` and `realcontroller_check`.
+CONTINUE.md's run line was missing `racesetup_check` since the last
+slice. It has that now, with `carrenderinfo_check` and `carrender_check`.
+`cartypeinfo_check` reads OpenTop too, and has a mutation that makes
+HighPerformance a word again. Its `--mutate` catches all 41.
+
+The CIA builds. Nothing calls Render in the game yet, so the link drops
+it, and Azahar was not run.
+
+### Next
+
+Next is RenderCars (`0x00124060`), which builds each car's tyre and brake
+matrices and calls Render. The front end's RenderFrontEndCar and
+RenderFrontEndCars (`0x00123c90`, `0x00123d28`) go with it. They close
+step 6. Then come steps 7 and 8.
