@@ -82,6 +82,8 @@ static uint8_t kClampTab[768];
 static uint8_t kDecode[512 * 2];
 static int     gTablesBuilt;
 
+static void build_texel_tables(void);
+
 void mv3_build_tables(void)
 {
     int k, j, i;
@@ -124,6 +126,7 @@ void mv3_build_tables(void)
             }
         }
     }
+    build_texel_tables();
     gTablesBuilt = 1;
 }
 
@@ -226,8 +229,13 @@ uint32_t mv3_get_bits(Mv3Bits* b, unsigned n)
     return take(b, n);
 }
 
-void mv3_decompress(Mv3Bits* b, int16_t* out, uint32_t count)
+void mv3_decompress(Mv3Bits* bits, int16_t* out, uint32_t count)
 {
+    // The reader in a local, so that it lives in registers: through `bits`
+    // any byte of the table read or coefficient written could be it, and
+    // the compiler would store and reload it around each one.
+    Mv3Bits  st = *bits;
+    Mv3Bits* b = &st;
     int16_t* end = out + count;
 
     while (out < end) {
@@ -251,9 +259,9 @@ void mv3_decompress(Mv3Bits* b, int16_t* out, uint32_t count)
             b->count -= kk;
             *out++ = (int16_t)(sign ? 0u - mag : mag);
         } else if (value != 0) {
-            *out++ = value;
             b->accum <<= e[0] & 31;
             b->count -= e[0];
+            *out++ = value;
         } else {
             // A run of zeros: after the 2-bit prefix, a flag picks a 6-bit
             // run + 9 or a 3-bit run + 1. The run is written whole, so it
@@ -269,6 +277,7 @@ void mv3_decompress(Mv3Bits* b, int16_t* out, uint32_t count)
             out += run;
         }
     }
+    *bits = st;
 }
 
 // -- the IDCTs -------------------------------------------------------------
@@ -298,33 +307,49 @@ void mv3_decompress(Mv3Bits* b, int16_t* out, uint32_t count)
     } while (0)
 
 // Columns first, each coefficient dequantised as it is read. IDCT and
-// IDCTAdd share it.
-static inline void idct_columns(const int16_t* coef, const int16_t* q,
-                                uint32_t* ws)
+// IDCTAdd share it. With x1..x7 at 0 the AAN pass gives x0 in all eight
+// places, wrapping arithmetic and all, so a column whose AC terms are all
+// 0 is copied instead -- retail's scalar IDCT computes it, to the same
+// values. Most columns of the movies' blocks are like that. `zig`, when
+// set, is the scan: the block is read through it, as the unscan into a
+// scratch block would leave it, without the copy.
+static inline void idct_columns(const int16_t* coef, const uint8_t* zig,
+                                const int16_t* q, uint32_t* ws)
 {
+#define AT(k) (zig ? coef[zig[k]] : coef[k])
     int i;
     for (i = 0; i < 8; i++) {
         uint32_t x[8];
         int r;
+        if ((AT(8 + i) | AT(16 + i) | AT(24 + i) | AT(32 + i)
+             | AT(40 + i) | AT(48 + i) | AT(56 + i)) == 0) {
+            uint32_t x0 = (uint32_t)AT(i) * (uint32_t)q[i];
+            for (r = 0; r < 8; r++) ws[r * 8 + i] = x0;
+            continue;
+        }
         for (r = 0; r < 8; r++)
-            x[r] = (uint32_t)coef[r * 8 + i] * (uint32_t)q[r * 8 + i];
+            x[r] = (uint32_t)AT(r * 8 + i) * (uint32_t)q[r * 8 + i];
         AAN_PASS(x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7],
                  ws[i], ws[8 + i], ws[16 + i], ws[24 + i],
                  ws[32 + i], ws[40 + i], ws[48 + i], ws[56 + i]);
     }
+#undef AT
 }
 
-void mv3_idct(const int16_t* coef, const int16_t* q, uint8_t* dst, int stride)
+// Then rows, descaled by 5 bits into OffsetClamp; a row with nothing past
+// its first term is that term throughout, as a column is.
+static inline void idct_rows(const uint32_t* ws, uint8_t* dst, int stride)
 {
-    uint32_t ws[64];
     int i;
-
-    idct_columns(coef, q, ws);
-    // Then rows, descaled by 5 bits into OffsetClamp.
     for (i = 0; i < 8; i++) {
         const uint32_t* w = ws + i * 8;
         uint32_t o[8];
         int c;
+        if ((w[1] | w[2] | w[3] | w[4] | w[5] | w[6] | w[7]) == 0) {
+            memset(dst, offset_clamp(SRA(w[0], 5)), 8);
+            dst += stride;
+            continue;
+        }
         AAN_PASS(w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
                  o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7]);
         for (c = 0; c < 8; c++) dst[c] = offset_clamp(SRA(o[c], 5));
@@ -332,18 +357,20 @@ void mv3_idct(const int16_t* coef, const int16_t* q, uint8_t* dst, int stride)
     }
 }
 
-void mv3_idct_add(const int16_t* coef, const int16_t* q, uint8_t* dst,
-                  int stride)
+// The rows, descaled by 5 bits and added to what is there, via Clamp.
+static inline void idct_add_rows(const uint32_t* ws, uint8_t* dst, int stride)
 {
-    uint32_t ws[64];
     int i;
-
-    idct_columns(coef, q, ws);
-    // The rows, descaled by 5 bits and added to what is there, via Clamp.
     for (i = 0; i < 8; i++) {
         const uint32_t* w = ws + i * 8;
         uint32_t o[8];
         int c;
+        if ((w[1] | w[2] | w[3] | w[4] | w[5] | w[6] | w[7]) == 0) {
+            uint32_t v = SRA(w[0], 5);
+            for (c = 0; c < 8; c++) dst[c] = add_clamp(dst[c], v);
+            dst += stride;
+            continue;
+        }
         AAN_PASS(w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
                  o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7]);
         for (c = 0; c < 8; c++) dst[c] = add_clamp(dst[c], SRA(o[c], 5));
@@ -351,13 +378,29 @@ void mv3_idct_add(const int16_t* coef, const int16_t* q, uint8_t* dst,
     }
 }
 
+void mv3_idct(const int16_t* coef, const int16_t* q, uint8_t* dst, int stride)
+{
+    uint32_t ws[64];
+    idct_columns(coef, NULL, q, ws);
+    idct_rows(ws, dst, stride);
+}
+
+void mv3_idct_add(const int16_t* coef, const int16_t* q, uint8_t* dst,
+                  int stride)
+{
+    uint32_t ws[64];
+    idct_columns(coef, NULL, q, ws);
+    idct_add_rows(ws, dst, stride);
+}
+
+// IDCTImageData unscans into a scratch block as IDCTAddImageData does,
+// then runs IDCT on it.
 void mv3_idct_zigzag(const int16_t* coef, const int16_t* q, uint8_t* dst,
                      int stride)
 {
-    int16_t natural[64];
-    int i;
-    for (i = 0; i < 64; i++) natural[i] = coef[kZig[i]];
-    mv3_idct(natural, q, dst, stride);
+    uint32_t ws[64];
+    idct_columns(coef, kZig, q, ws);
+    idct_rows(ws, dst, stride);
 }
 
 // IDCTAddImageData unscans into a scratch block (0x00334b68) through the
@@ -365,10 +408,9 @@ void mv3_idct_zigzag(const int16_t* coef, const int16_t* q, uint8_t* dst,
 void mv3_idct_add_zigzag(const int16_t* coef, const int16_t* q, uint8_t* dst,
                          int stride)
 {
-    int16_t natural[64];
-    int i;
-    for (i = 0; i < 64; i++) natural[i] = coef[kZig[i]];
-    mv3_idct_add(natural, q, dst, stride);
+    uint32_t ws[64];
+    idct_columns(coef, kZig, q, ws);
+    idct_add_rows(ws, dst, stride);
 }
 
 void mv3_idct1(const int16_t* coef, const int16_t* q, uint8_t* dst, int stride)
@@ -793,42 +835,114 @@ void mv3_to_rgba(const Mv3Codec* m, uint8_t* dst, int flip)
     }
 }
 
-static inline uint32_t texel(int y, Chroma c)
+// Clamp a byte at a time, as ARMv6's UQADD8 and UQSUB8 do: each byte of a
+// and b summed, or differenced, and held to 0..255.
+#if defined(__ARM_FEATURE_SIMD32)
+#include <arm_acle.h>
+static inline uint32_t sat_add8(uint32_t a, uint32_t b) { return __uqadd8(a, b); }
+static inline uint32_t sat_sub8(uint32_t a, uint32_t b) { return __uqsub8(a, b); }
+#else
+static inline uint32_t sat_add8(uint32_t a, uint32_t b)
 {
-    return (uint32_t)CLAMP[y + c.r] << 24 | (uint32_t)CLAMP[y + c.g] << 16
-         | (uint32_t)CLAMP[y + c.b] << 8 | 0xffu;
+    uint32_t r = 0;
+    int i;
+    for (i = 0; i < 32; i += 8) {
+        uint32_t x = (a >> i & 0xff) + (b >> i & 0xff);
+        r |= (x > 255 ? 255 : x) << i;
+    }
+    return r;
+}
+static inline uint32_t sat_sub8(uint32_t a, uint32_t b)
+{
+    uint32_t r = 0;
+    int i;
+    for (i = 0; i < 32; i += 8) {
+        uint32_t x = a >> i & 0xff, y = b >> i & 0xff;
+        r |= (x > y ? x - y : 0) << i;
+    }
+    return r;
+}
+#endif
+
+// A texel's R, G and B are Clamp[y + c.r], [y + c.g] and [y + c.b]. Each c
+// is under 256 either way (359, 454, and 88 + 183, times at most 128, over
+// 256), and y is 0..255, so adding c's part at or above 0 and taking its
+// part below 0 away, a byte at a time and each held to 0..255, is that
+// clamp: one part is 0, and neither can carry y past the other end. The
+// parts are kept as the bytes of a texel, R at the top, alpha at the
+// bottom: `up` to add and `down` to take away.
+typedef struct { uint32_t up, down; } ChromaBytes;
+
+// y in R, G and B; c.r's parts, which only v sets; c.b's, which only u
+// sets, with the alpha's 255 in `up`.
+static uint32_t    kLumaBytes[256];
+static ChromaBytes kRedBytes[256];
+static ChromaBytes kBlueBytes[256];
+
+static inline uint32_t pos_part(int32_t x) { return x > 0 ? (uint32_t)x : 0; }
+
+static void build_texel_tables(void)
+{
+    int i;
+    for (i = 0; i < 256; i++) {
+        Chroma c = chroma((uint8_t)i, (uint8_t)i);
+        kLumaBytes[i]      = (uint32_t)i * 0x01010100u;
+        kRedBytes[i].up    = pos_part(c.r) << 24;
+        kRedBytes[i].down  = pos_part(-c.r) << 24;
+        kBlueBytes[i].up   = pos_part(c.b) << 8 | 0xffu;
+        kBlueBytes[i].down = pos_part(-c.b) << 8;
+    }
 }
 
-// Morton order inside an 8x8 tile, x's bits at 0, 2, 4 and y's at 1, 3, 5.
-static inline uint32_t morton(uint32_t x, uint32_t y)
+// A quad's parts. c.g takes both u and v, so it is worked out here; the
+// compiler drops chroma's c.r and c.b, which the tables have.
+static inline ChromaBytes chroma_bytes(uint8_t u, uint8_t v)
 {
-    return (x & 1) | (y & 1) << 1 | (x & 2) << 1 | (y & 2) << 2
-         | (x & 4) << 2 | (y & 4) << 3;
+    Chroma c = chroma(u, v);
+    ChromaBytes k;
+    k.up   = kRedBytes[v].up | pos_part(c.g) << 16 | kBlueBytes[u].up;
+    k.down = kRedBytes[v].down | pos_part(-c.g) << 16 | kBlueBytes[u].down;
+    return k;
 }
+
+static inline uint32_t texel(uint8_t y, ChromaBytes k)
+{
+    return sat_sub8(sat_add8(kLumaBytes[y], k.up), k.down);
+}
+
+// Inside an 8x8 tile the texels run in Morton order, x's bits at 0, 2 and 4
+// and y's at 1, 3 and 5, so a 2x2 quad is four texels in a row, and where
+// it starts is x's bits 1 and 2 at 2 and 4, plus y's at 3 and 5.
+static const uint8_t kQuadX[4] = { 0, 4, 16, 20 };
+static const uint8_t kQuadY[4] = { 0, 8, 32, 40 };
 
 void mv3_to_tiled_rgba8(const Mv3Codec* m, uint32_t* dst, int texWidth)
 {
-    int w = m->width, h = m->height, cw = w / 2, x, y;
+    int w = m->width, h = m->height, cw = w / 2, x, y, i;
     uint32_t tilesX = (uint32_t)texWidth / 8;
 
     // Image row y (top-down) is plane row h - 1 - y, so the image's quad at
     // rows y, y + 1 is plane rows h - 1 - y and h - 2 - y, sharing chroma
-    // row (h - 2 - y) / 2.
+    // row (h - 2 - y) / 2. A tile's width at a time: the width is a whole
+    // number of macroblocks.
     for (y = 0; y < h; y += 2) {
         const uint8_t* top = m->y + (size_t)w * (h - 1 - y);
         const uint8_t* bot = top - w;
         size_t crow = (size_t)cw * ((h - 2 - y) / 2);
         const uint8_t* pu = m->u + crow;
         const uint8_t* pv = m->v + crow;
-        uint32_t* tileRow = dst + (size_t)(y >> 3) * tilesX * 64;
-        for (x = 0; x < w; x += 2) {
-            Chroma c = chroma(pu[x >> 1], pv[x >> 1]);
-            uint32_t* t = tileRow + (x >> 3) * 64 + morton((uint32_t)x & 7,
-                                                           (uint32_t)y & 7);
-            t[0] = texel(top[x], c);
-            t[1] = texel(top[x + 1], c);
-            t[2] = texel(bot[x], c);
-            t[3] = texel(bot[x + 1], c);
+        uint32_t* tile = dst + (size_t)(y >> 3) * tilesX * 64
+                       + kQuadY[(y >> 1) & 3];
+        for (x = 0; x < w; x += 8, tile += 64) {
+            for (i = 0; i < 4; i++) {
+                int qx = x + 2 * i;
+                ChromaBytes k = chroma_bytes(pu[qx >> 1], pv[qx >> 1]);
+                uint32_t* t = tile + kQuadX[i];
+                t[0] = texel(top[qx], k);
+                t[1] = texel(top[qx + 1], k);
+                t[2] = texel(bot[qx], k);
+                t[3] = texel(bot[qx + 1], k);
+            }
         }
     }
 }

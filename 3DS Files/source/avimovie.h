@@ -23,7 +23,8 @@
 // frames, each drawn over the one before, so none can be read past. Those
 // are paced as retail paces every movie, MoviePlayer::Update's rule: the
 // next frame when it is due, one a call and in order, so a movie that
-// falls behind plays slower -- avimovie_step.
+// falls behind plays slower -- avimovie_step. On the console they are
+// decoded on another core, ahead of the picture (AVIMOVIE_SLOTS).
 //
 // The container and the pacing are free of <3ds.h> and are tested on the
 // host (tools/src/mv3_test.c, tools/mv3_check.py). The texture and the ndsp
@@ -79,6 +80,9 @@ typedef struct {
     uint32_t   frameCap;
     AviAudioFn audio;                // each audio chunk as it is reached
     void*      audioUser;
+    // When set, what reading and decoding the frames cost, in its units.
+    uint64_t (*clock)(void);
+    uint64_t   readClocks, decodeClocks;
 } AviMovie;
 
 // Opens `path` and sizes the codec. Nothing is decoded yet.
@@ -105,6 +109,12 @@ bool avimovie_advance(AviMovie* m, uint32_t target);
 // stream off the card never needs, and 1 while its ring buffer waits on
 // the disc, which it never does either; neither is here.
 int avimovie_step(AviMovie* m, uint32_t target, bool* changed);
+
+// Update's read and decode alone: the next video chunk into the planes,
+// frame nextFrame - 1 after it, with sound chunks on the way to `audio`.
+// 1, or 0 once movi has no video chunk left (`ended`) or the frame failed
+// (`error`). `shown` and `decoded` are left to the caller.
+int avimovie_decode_next(AviMovie* m);
 
 // Past the last frame, or stopped by a bad one.
 bool avimovie_done(const AviMovie* m);
@@ -171,6 +181,17 @@ uint32_t avisound_rate_hz(void);
 #define AVIMOVIE_WAVES       6
 #define AVIMOVIE_WAVE_FRAMES 256     // SPU frames a wave: 7168 samples
 
+// A menu movie's frames are read, decoded and converted on another core,
+// ahead of the picture, each into a texture slot of its own. Retail's
+// Update takes the ring buffer's next frame when one is due, and answers 1
+// without one while the ring buffer waits on the disc; the port's takes
+// the worker's next slot, and answers 1 while the worker is still on it.
+// So the frames stay in order and none is passed over, as before, but a
+// slow frame costs the menus no time. Three slots: the one shown, the one
+// shown before it, which the GPU may still be drawing from until the next
+// call, and the one being filled.
+#define AVIMOVIE_SLOTS 3
+
 typedef struct {
     ndspWaveBuf wave;
     int16_t*    pcm;                 // AVIMOVIE_WAVE_FRAMES * 28 * 2 samples
@@ -179,7 +200,7 @@ typedef struct {
 typedef struct {
     AviMovie movie;
     AviSound snd;
-    C3D_Tex  tex;
+    C3D_Tex  tex;                    // tex.data is the slot shown
     u64      startTick;
     bool     started;                // aviplayer_update has run: the clock is on
     bool     sound;
@@ -187,9 +208,29 @@ typedef struct {
     uint32_t waveHead, waveCount;
     uint32_t audioSamples;           // queued since the start, a channel
     // What the picture costs, in system ticks: reading and decoding, and
-    // converting into the texture, over `calls` drives or updates.
+    // converting into the texture, over `calls` drives or updates. With a
+    // worker, showTicks is its converting and stepTicks the calls' own.
     u64      stepTicks, showTicks;
     uint32_t calls;
+
+    // The worker, for a movie aviplayer_init opened without sound. Under
+    // `lock`: freeSlots, the queue, finished and stop.
+    bool       threaded;
+    int        workerCore;
+    Thread     worker;
+    LightLock  lock;
+    LightEvent wake;                 // a slot came free, or stop
+    void*      slots[AVIMOVIE_SLOTS];     // slots[0] is C3D_TexInit's
+    uint32_t   freeSlots;                 // a bit a slot the worker may fill
+    uint32_t   freeAt[AVIMOVIE_SLOTS];    // a slot replaced: the call it frees
+    int        current;                   // the slot shown, -1 before any
+    uint8_t    queueSlot[AVIMOVIE_SLOTS]; // filled slots, in frame order
+    uint32_t   queueFrame[AVIMOVIE_SLOTS];
+    uint32_t   queueHead, queued;
+    bool       finished;             // the worker is done: ended or failed
+    bool       stop;
+    bool       over;                 // Update has answered 0
+    uint32_t   waits;                // calls with a frame due and none ready
 } AviPlayer;
 
 // Opens `path` into a fresh RGBA8 texture, shows frame 0 and starts its
@@ -204,13 +245,18 @@ void aviplayer_close(AviPlayer* p);
 bool aviplayer_drive(AviPlayer* p);
 
 // MoviePlayer::InitFile (0x00237ad8): opens `path` as aviplayer_open does
-// but decodes nothing and leaves the clock off. The first aviplayer_update
-// starts it and decodes frame 0, as the first Update does.
+// and leaves the clock off. The first aviplayer_update starts it and shows
+// frame 0, as the first Update does. A movie without sound gets its worker
+// here, which starts on frame 0 at once.
 bool aviplayer_init(AviPlayer* p, const char* path);
 
-// MoviePlayer::Update (0x002380a8): avimovie_step against the clock, the
-// texture brought up when a frame was decoded. Update's answer: false once
-// the movie is over, which is when FlailerScreenList::UpdateMovie opens it
-// again.
+// MoviePlayer::Update (0x002380a8): avimovie_step against the clock, or
+// the worker's next frame by the same rule, the texture brought up when a
+// frame was taken. Update's answer: false once the movie is over, which is
+// when FlailerScreenList::UpdateMovie opens it again.
 bool aviplayer_update(AviPlayer* p);
+
+// Stops the worker, if there is one, when its frame in hand is done; the
+// close does this first. The movie's counts hold still after it.
+void aviplayer_halt(AviPlayer* p);
 #endif

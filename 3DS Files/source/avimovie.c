@@ -181,6 +181,7 @@ double avimovie_duration(const AviMovie* m)
 static bool decode_chunk(AviMovie* m, const AviChunk* c)
 {
     int rc;
+    uint64_t t0 = m->clock ? m->clock() : 0, t1;
     if (c->size > m->frameCap) {
         uint8_t* b = (uint8_t*)realloc(m->frameBuf, c->size);
         if (!b) { m->error = MV3_ERR_ALLOC; return false; }
@@ -191,7 +192,12 @@ static bool decode_chunk(AviMovie* m, const AviChunk* c)
         m->error = MV3_ERR_SHORT;
         return false;
     }
+    t1 = m->clock ? m->clock() : 0;
     rc = mv3_decode(&m->codec, m->frameBuf, c->size);
+    if (m->clock) {
+        m->readClocks += t1 - t0;
+        m->decodeClocks += m->clock() - t1;
+    }
     if (rc != MV3_OK) { m->error = rc; return false; }
     return true;
 }
@@ -234,11 +240,20 @@ bool avimovie_advance(AviMovie* m, uint32_t target)
 // whatever came out -- where the port stops the movie.
 int avimovie_step(AviMovie* m, uint32_t target, bool* changed)
 {
-    AviChunk c;
-
     if (changed) *changed = false;
     if (m->error || m->ended) return 0;
     if (m->shown >= 0 && m->decoded >= target) return 1;
+    if (!avimovie_decode_next(m)) return 0;
+    m->shown = (int32_t)(m->nextFrame - 1);
+    m->decoded++;
+    if (changed) *changed = true;
+    return 1;
+}
+
+int avimovie_decode_next(AviMovie* m)
+{
+    AviChunk c;
+
     for (;;) {
         int s;
         if (!avi_next_chunk(m->file, &m->info, &m->pos, &c)) {
@@ -252,9 +267,7 @@ int avimovie_step(AviMovie* m, uint32_t target, bool* changed)
         }
         if (s != m->info.videoStream) continue;
         if (!decode_chunk(m, &c)) return 0;
-        m->shown = (int32_t)m->nextFrame++;
-        m->decoded++;
-        if (changed) *changed = true;
+        m->nextFrame++;
         return 1;
     }
 }
@@ -478,6 +491,7 @@ static bool open_player(AviPlayer* p, const char* path)
     C3D_TexSetWrap(&p->tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     memset(p->tex.data, 0, p->tex.size);
 
+    p->movie.clock = svcGetSystemTick;
     // A movie with no sound, or no memory for it, still plays its picture.
     p->sound = start_sound(p);
     if (!p->sound) free_waves(p);
@@ -496,15 +510,171 @@ bool aviplayer_open(AviPlayer* p, const char* path)
     return true;
 }
 
+// -- the worker ----------------------------------------------------------------
+
+// Frames in order, each into a free slot, until the movie ends or fails or
+// the player stops it.
+static void worker_main(void* arg)
+{
+    AviPlayer* p = (AviPlayer*)arg;
+    AviMovie*  m = &p->movie;
+
+    for (;;) {
+        uint32_t slot;
+        int      ok;
+
+        LightLock_Lock(&p->lock);
+        while (!p->stop && !p->freeSlots) {
+            LightLock_Unlock(&p->lock);
+            LightEvent_Wait(&p->wake);
+            LightLock_Lock(&p->lock);
+        }
+        if (p->stop) {
+            LightLock_Unlock(&p->lock);
+            return;
+        }
+        slot = (uint32_t)__builtin_ctz(p->freeSlots);
+        p->freeSlots &= ~(1u << slot);
+        LightLock_Unlock(&p->lock);
+
+        ok = avimovie_decode_next(m);
+        if (ok) {
+            u64 t0 = svcGetSystemTick();
+            mv3_to_tiled_rgba8(&m->codec, (uint32_t*)p->slots[slot], p->tex.width);
+            GSPGPU_FlushDataCache(p->slots[slot], p->tex.size);
+            p->showTicks += svcGetSystemTick() - t0;
+        }
+
+        LightLock_Lock(&p->lock);
+        if (ok) {
+            uint32_t at = (p->queueHead + p->queued) % AVIMOVIE_SLOTS;
+            p->queueSlot[at] = (uint8_t)slot;
+            p->queueFrame[at] = m->nextFrame - 1;
+            p->queued++;
+        } else {
+            p->freeSlots |= 1u << slot;
+            p->finished = true;
+        }
+        LightLock_Unlock(&p->lock);
+        if (!ok) return;
+    }
+}
+
+// A New 3DS's third core is the app's outright; the second is the system's,
+// of which the app has what APT_SetAppCpuTimeLimit gave it (main.c).
+static bool start_worker(AviPlayer* p)
+{
+    static const int kCores[2] = { 2, 1 };
+    bool  n3ds = false;
+    s32   prio = 0x30;
+    int   i;
+
+    for (i = 1; i < AVIMOVIE_SLOTS; i++) {
+        p->slots[i] = linearMemAlign(p->tex.size, 0x80);
+        if (!p->slots[i]) return false;
+        memset(p->slots[i], 0, p->tex.size);
+        GSPGPU_FlushDataCache(p->slots[i], p->tex.size);
+    }
+    p->slots[0] = p->tex.data;
+    p->freeSlots = (1u << AVIMOVIE_SLOTS) - 1;
+    p->current = -1;
+    LightLock_Init(&p->lock);
+    LightEvent_Init(&p->wake, RESET_ONESHOT);
+    svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
+    if (prio < 0x3f) prio++;
+    APT_CheckNew3DS(&n3ds);
+    for (i = n3ds ? 0 : 1; i < 2 && !p->worker; i++) {
+        p->worker = threadCreate(worker_main, p, 32 << 10, prio, kCores[i], false);
+        p->workerCore = kCores[i];
+    }
+    return p->worker != NULL;
+}
+
+static void free_slots(AviPlayer* p)
+{
+    int i;
+    if (p->slots[0]) p->tex.data = p->slots[0];
+    for (i = 1; i < AVIMOVIE_SLOTS; i++) {
+        if (p->slots[i]) linearFree(p->slots[i]);
+        p->slots[i] = NULL;
+    }
+    p->slots[0] = NULL;
+}
+
+void aviplayer_halt(AviPlayer* p)
+{
+    if (!p->worker) return;
+    LightLock_Lock(&p->lock);
+    p->stop = true;
+    LightLock_Unlock(&p->lock);
+    LightEvent_Signal(&p->wake);
+    threadJoin(p->worker, U64_MAX);
+    threadFree(p->worker);
+    p->worker = NULL;
+}
+
+// Update's rule, avimovie_step's, with the worker's next frame for the
+// decode, and 1 while the worker is still on it.
+static int update_threaded(AviPlayer* p, uint32_t target, bool* changed)
+{
+    AviMovie* m = &p->movie;
+    bool      wake = false;
+    int       r = 1, i;
+
+    *changed = false;
+    LightLock_Lock(&p->lock);
+    for (i = 0; i < AVIMOVIE_SLOTS; i++) {
+        if (p->freeAt[i] && p->calls >= p->freeAt[i]) {
+            p->freeAt[i] = 0;
+            p->freeSlots |= 1u << i;
+            wake = true;
+        }
+    }
+    if (p->over) {
+        r = 0;
+    } else if (m->shown >= 0 && m->decoded >= target) {
+        r = 1;
+    } else if (p->queued) {
+        uint32_t s = p->queueSlot[p->queueHead];
+        m->shown = (int32_t)p->queueFrame[p->queueHead];
+        m->decoded++;
+        p->queueHead = (p->queueHead + 1) % AVIMOVIE_SLOTS;
+        p->queued--;
+        // The flow's pass comes before C3D_FrameBegin, so the GPU may still
+        // be drawing the last frame from the slot this replaces. The frame
+        // begins by waiting for that, and Update comes once a frame, so by
+        // the next call the slot is the worker's.
+        if (p->current >= 0) p->freeAt[p->current] = p->calls + 1;
+        p->current = (int)s;
+        p->tex.data = p->slots[s];
+        *changed = true;
+    } else if (p->finished) {
+        p->over = true;
+        r = 0;
+    } else {
+        p->waits++;
+    }
+    LightLock_Unlock(&p->lock);
+    if (wake) LightEvent_Signal(&p->wake);
+    return r;
+}
+
 bool aviplayer_init(AviPlayer* p, const char* path)
 {
     if (!open_player(p, path)) return false;
     C3D_TexFlush(&p->tex);
+    if (!p->sound) {
+        p->threaded = start_worker(p);
+        if (!p->threaded) free_slots(p);
+    }
     return true;
 }
 
 void aviplayer_close(AviPlayer* p)
 {
+    aviplayer_halt(p);
+    free_slots(p);
+    p->threaded = false;
     stop_sound(p);
     free_waves(p);
     avisound_free(&p->snd);
@@ -545,6 +715,12 @@ bool aviplayer_update(AviPlayer* p)
     }
     t0 = svcGetSystemTick();
     t = (double)(t0 - p->startTick) / SYSCLOCK_ARM11;
+    if (p->threaded) {
+        r = update_threaded(p, avimovie_frame_at(&p->movie, t), &changed);
+        p->stepTicks += svcGetSystemTick() - t0;
+        p->calls++;
+        return r != 0;
+    }
     r = avimovie_step(&p->movie, avimovie_frame_at(&p->movie, t), &changed);
     t1 = svcGetSystemTick();
     p->stepTicks += t1 - t0;

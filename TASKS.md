@@ -2249,8 +2249,10 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
       `0x0016d028` and `0x0016d0a0`) on `PANELMOVIE`, run on the image by
       `bootflow_check`. The main menu's movie loops on Azahar, and
       Cops On's and Options' play.
-  - [ ] **Full speed.** A menu frame costs 31 ms on Azahar's Old 3DS, so
-        the main menu runs at 25 FPS and its movie at 85% speed.
+  - [x] **Full speed.** A worker on another core decodes ahead of the
+        picture, and the decode and the conversion are faster, to the
+        same values. The main menu runs at 59 FPS on Azahar and its movie
+        at 30 fps. Real hardware, and an Old 3DS's core 1, are unmeasured.
   - [ ] `StartDemoMode`'s track, from `BuildDemoTrackList`.
 - [ ] **The highlight's echo.** A large faded red copy of the current
       item's label, now and then.

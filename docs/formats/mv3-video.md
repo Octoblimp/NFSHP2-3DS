@@ -298,6 +298,14 @@ is the PS2's: 32-bit wrapping products and sums and arithmetic shifts, so
 same pair of passes with only the top-left 2x2 live. When a column's second
 coefficient, or a row's, is 0, it copies instead of transforming.
 
+The port takes fewer steps to the same values. It reads the block through
+the scan inside the column pass (`idct_columns`' `zig`) instead of
+scattering it into a scratch block first. The full transform copies too: a
+column whose seven AC terms are 0, or a row whose last seven are, is its
+first term throughout. That is what the AAN pass gives there, wrapping and
+all, and what retail's scalar `IDCT` computes the long way. Most columns of
+the menu movies' blocks are like that.
+
 `OffsetClamp` points 128 bytes into the identity run of a 768-byte table,
 and the PS2 indexes it without a bound. Retail's own data never reaches
 past it (the checker counts), and the port saturates if it ever does
@@ -321,6 +329,14 @@ The divisions round toward zero (a +255 bias below zero, then a shift).
 RGBA8 texels, in 8x8 Morton tiles and top row first, so a frame goes into
 the texture without a swizzle pass. A 2x2 quad is four consecutive texels in
 Morton order, and it shares one chroma sample.
+
+It clamps a texel's three bytes at once. Each chroma term is under 256
+either way, so `Clamp[Y + c]` is Y plus c's part at or above 0, less its
+part below 0, a byte at a time and each held to 0..255: ARMv6's `UQADD8`
+and `UQSUB8`, with a portable version for the host. `c.r` comes from V
+alone and `c.b` from U alone, so their parts are tables of 256. `c.g` takes
+both and is worked out once a quad. The answer is `Clamp`'s for every Y, U
+and V: all 16,777,216 were compared once on the host and once on Azahar.
 
 ## The sound
 
@@ -370,8 +386,9 @@ skips straight to the frame that is due and stays in time with the sound.
 The clock is the console's tick from the moment the movie opened, and the
 frame due at `t` seconds is `floor(t * rate / scale)`. A movie is over when
 `movi` is used up and the clock has passed `frames * scale / rate`. On
-Azahar at 100% the intro decodes 366 of the first 591 frames and reads past
-the rest; the EA logo decodes 154 of its 180.
+Azahar at 100% the EA logo decodes 176 of its 180 frames and reads past the
+rest. The intro decoded 366 of its first 591 before the conversion got
+faster.
 
 The title screen draws the texture through its movie planes, and the port
 stretches it across the whole top screen (`docs/formats/boot-flow.md`).
@@ -405,13 +422,32 @@ so the two can take a frame a frame apart and agree again on the next.
 A menu movie is 256x384 but plays wider than tall: `NEW_MAIN_MENU`'s
 `PANELMOVIE` plane draws it at 499x268 (`docs/formats/boot-flow.md`).
 
-On Azahar at 100% a menu frame costs about 22 ms to read and decode and 9
-to convert into the texture (`movie cost` in the log; the EA logo's intra
-frames are 16 and 12). That is more than a frame at 30 fps, so the player
-is always behind and decodes on every call. The main menu then runs at
-about 25 FPS and its movie with it: 900 frames in 35.5 s, 85% speed. The
-Cops screens, which cost more to draw, run at 20 to 22. Retail's loop ran
-at 50 or 60 Hz, well above the movie's rate, so it never met this.
+On the console the menus' movies are decoded on another core, ahead of the
+picture. `aviplayer_init` starts a worker thread for a movie without sound:
+on core 2 on a New 3DS, else on core 1, of which the app gets 80%
+(`APT_SetAppCpuTimeLimit` in `main.c`). The worker reads, decodes and
+converts each frame into one of three textures' worth of linear memory
+(`AVIMOVIE_SLOTS`), and queues them in order. `aviplayer_update` keeps
+retail's rule. Where the rule decodes the next frame, it takes the next one
+off the queue instead, by pointing the texture at it. When none is ready it
+answers 1 and the last frame stays up, which is what retail's `Update` does
+while its ring buffer waits on the disc. Three slots is the fewest that
+works: the one shown, the one shown before it, which the GPU may still be
+drawing from, and the one being filled. The flow's pass comes before
+`C3D_FrameBegin`, which waits for the last frame's drawing, so by the next
+call a replaced slot is the worker's again. The boot movies keep the old
+path on the main thread. They have sound, and their player reads past the
+frames it is late for.
+
+On Azahar at 100%, which runs as a New 3DS, the worker spends 2.7 ms
+reading a main menu frame, 17 decoding it and 5.4 converting it (`movie
+cost` in the log). That is 25 of the 33 ms a frame has. The main menu runs
+at 59 FPS and its movie at full speed, 900 frames in 30.0 s, and the Cops
+screens at about 60. Options' movie is the dearest, at 29 ms a frame.
+Before the worker and the speedups, all of it was on the main thread at 22
+ms to decode and 9 to convert, and the main menu ran at about 25 FPS with
+its movie at 85% speed. Retail's loop ran at 50 or 60 Hz, well above the
+movie's rate, so it never met this.
 
 ## Checked
 
@@ -461,16 +497,25 @@ sound:
   The rate is read out of the image: `Update`'s immediate and
   `HzToSPU`'s arithmetic.
 
-It runs in about three and a half minutes, most of it retail's decoder on
-the inter sequences. `--mutate` breaks `mv3.c`, `avimovie.c` and
-`avimovie.h` one way at a time (the tables, the reader, the escape, each
-IDCT and its adding twin, the copy, the inter layout, the colour, the
-container, both pacings, the sound's decoder, layout, stream and rate). Of
-171, 168 are caught. Some hang the harness, which counts: `pace-done` and
-`pace-first` leave a movie that never ends. The other three are equivalent
-by construction: they turn off the 4-point IDCT's shortcuts for a zero
-coefficient, in the columns, the rows and `IDCTAdd4`'s rows, and the long
-way computes the same values.
+It runs in about three minutes, most of it retail's decoder on the inter
+sequences. `--mutate` breaks `mv3.c`, `avimovie.c` and `avimovie.h` one way
+at a time. It covers:
+- the tables, the reader and its write-back, and the escape;
+- each IDCT, with its shortcuts, its adding twin and the scan read in the
+  column pass;
+- the copy and the inter layout;
+- the colour, the tiles and the byte-wise clamp;
+- the container, both pacings, and the sound's decoder, layout, stream
+  and rate.
+
+Of 197, 191 are caught. Some hang the harness, which counts: `pace-done`,
+`pace-first` and `avi-frames` leave a movie that never ends. The other six
+are equivalent by construction. They turn off the IDCTs' shortcuts, and the
+long way computes the same values:
+- the 4-point one's, for a zero coefficient, in the columns, the rows and
+  `IDCTAdd4`'s rows;
+- the full one's, for all-zero AC terms, in the columns, the rows and
+  `IDCTAdd`'s rows.
 
 The mutants are written into the real sources and restored afterwards, so
 nothing may be built while `--mutate` runs. One ARM build did, took
@@ -478,16 +523,19 @@ nothing may be built while `--mutate` runs. One ARM build did, took
 
 ## Still open
 
-- Two of `Update`'s answers are not ported: 0 after 20 s without a frame
-  (`RealTimeFrames`, `gp - 19600`), and 1 while its ring buffer waits on
-  the disc. A movie read off the card never needs either.
+- One of `Update`'s answers is not ported: 0 after 20 s without a frame
+  (`RealTimeFrames`, `gp - 19600`). A movie read off the card never needs
+  it. The other wait, 1 while its ring buffer waits on the disc, is the
+  port's answer while the worker has no frame ready.
 - The IOP's side of the sound: whether its streaming module did anything
   to the rate before the SPU. The EE's 43,617 Hz is what the port plays.
   It is not settled from the data whether the content was mastered at
   44.1 kHz. If it was, retail's sound ran 1.1% slow and ended up 0.9 s
   behind the intro's picture, and the port does the same.
-- Decode speed. The numbers above are Azahar's emulated Old 3DS. The menu
-  movies are too slow there to keep 30 fps (see The player). On the host a
-  menu frame's decode is about 35% `Decompress` and 60% IDCTs, over 1,450
-  to 1,550 full 64-coefficient blocks a frame.
+- Speed on real hardware, which is unmeasured. Azahar counts about an
+  instruction a tick and models no cache. On an Old 3DS the worker has 80%
+  of core 1, about 27 ms a frame, and Options' movie needs 29 on Azahar's
+  count, so it will play slower there, as retail's rule does when it falls
+  behind. That belongs to the road's Old 3DS step (task 28). A menu frame
+  has 1,450 to 1,550 full 64-coefficient blocks.
 - `ToImage32_5P` and `ToImageYUYV` are unread; nothing uses them.

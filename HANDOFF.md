@@ -8790,3 +8790,59 @@ movie", has the screen list's three functions.
 The frontend's fifth slice: the menu movie at full speed. The exact
 IDCT shortcuts, a cheaper `refill` and zero run, a faster conversion or
 the GPU's, and the second core if those are not enough.
+
+## Session 30, continued (2026-09-28) -- The frontend's fifth slice: the menu movie at full speed
+
+The main menu's movie plays at 30 fps on Azahar, 900 frames in 30.0 s,
+and the menu runs at 59 FPS. The Cops screens run at about 60. Before,
+the menu ran at 25 FPS and its movie at 85% speed.
+`docs/formats/mv3-video.md`, "The player", has the worker.
+
+- **The worker** (`avimovie.c`).
+  - A movie with no sound gets a thread one priority below the main
+    thread's, on core 2 on a New 3DS or else core 1.
+  - It reads, decodes and converts each frame into one of three slots of
+    linear memory, and queues them in order.
+  - `aviplayer_update` keeps `MoviePlayer::Update`'s rule. Where the rule
+    decodes, it takes the next slot by pointing the texture's data at it.
+    With none ready it answers 1, as retail's does while its ring buffer
+    waits.
+  - A replaced slot is freed on the next call. The flow runs before
+    `C3D_FrameBegin`, which waits for the GPU.
+  - `aviplayer_halt` stops the thread, and `hookMovieClose` calls it
+    first.
+  - `avimovie_decode_next` is the read and decode alone, which
+    `avimovie_step` and the worker share.
+- **Faster, to the same values** (`mv3.c`).
+  - The full IDCT copies a column whose AC terms are all 0, and a row
+    whose last seven are, as the 4-point one does. The AAN pass gives the
+    first term throughout there.
+  - `IDCTImageData`'s and `IDCTAddImageData`'s scan is read inside the
+    column pass, instead of into a scratch block first (`idct_columns`'
+    `zig`).
+  - `mv3_decompress` keeps the reader in a local. GCC then holds it in
+    registers, instead of storing and reloading it around every table
+    read and coefficient write.
+  - The conversion writes a tile's quads in turn, and clamps with `UQADD8`
+    and `UQSUB8`: Y plus the chroma term's part at or above 0, less its
+    part below 0. `c.r` and `c.b` come from 256-entry tables. All
+    16,777,216 combinations of Y, U and V agreed with `Clamp` on the
+    host, and on Azahar with a temporary test.
+- **Costs** for a main menu frame on Azahar: 2.7 ms reading, 17 decoding
+  and 5.4 converting, against 22 and 9 on the main thread before.
+  Options' movie is 29 ms a frame. The EA logo is still on the main thread
+  and now decodes 176 of its 180 frames (154 before).
+- **The checker.** `mv3_check`: 904 scenarios, 0 differ. New mutations
+  cover the shortcuts, the fused scan, the reader's write-back, the tiles
+  and the byte-wise clamp. Of 197 mutations, 191 are caught and 6 are
+  equivalent. The three new equivalent ones turn off the full IDCT's
+  shortcuts.
+- **Not measured: real hardware.** An Old 3DS gives the worker 80% of
+  core 1, about 27 ms a frame, so Options' movie would play a little slow
+  there, as retail's rule does when it falls behind.
+
+### Next
+
+The rest of the retail photos: the Easter egg group (`0x74e404b4`), the
+jukebox's `Start(1)`, the highlight's echo, EA TRAX, then Setup, car
+select and the briefing. Then step 6's second slice, `Car::InitRenderInfo`.

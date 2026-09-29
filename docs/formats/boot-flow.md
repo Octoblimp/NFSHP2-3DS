@@ -1511,7 +1511,10 @@ The menus' movie goes through `hookPanelMovieOpen` and
 the title's, it is drawn in its own plane, at the plane's size, and only
 from its first decoded frame: retail's planes are empty until `Update`
 fills them. A menu movie missing from the card is logged once, though
-`UpdateMovie` tries it every frame.
+`UpdateMovie` tries it every frame. Its frames are decoded on another core,
+ahead of the picture, so the menu keeps its own rate
+(`docs/formats/mv3-video.md`, "The player"). `hookMovieClose` stops that
+worker before it logs the movie's cost and closes it.
 
 The boot is retail's, in retail's order:
 

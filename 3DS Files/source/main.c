@@ -488,21 +488,41 @@ static void hookMovieClose(void* user)
     Boot* b = (Boot*)user;
     const AviMovie* m = &b->movie.movie;
     if (!b->moviePlaying) return;
-    // Read is every frame the clock passed; decoded is the ones it drew.
+    aviplayer_halt(&b->movie);
+    // Read is every frame the clock passed, or the worker got to; decoded
+    // is the ones it drew.
     logLine("movie close after %lu/%u frames, %lu decoded, %lu skipped, "
             "sound %lu bytes in, %lu samples queued, error %d",
             (unsigned long)m->nextFrame, (unsigned)m->info.frames,
             (unsigned long)m->decoded, (unsigned long)m->skipped,
             (unsigned long)b->movie.snd.pushed,
             (unsigned long)b->movie.audioSamples, m->error);
-    if (b->movie.started) {
+    if (b->movie.started && b->movie.threaded) {
+        double secs = (double)(svcGetSystemTick() - b->movie.startTick)
+                      / SYSCLOCK_ARM11;
+        double ms   = 1000.0 / SYSCLOCK_ARM11;
+        unsigned long n = m->nextFrame ? (unsigned long)m->nextFrame : 1;
+        unsigned long c = b->movie.calls ? (unsigned long)b->movie.calls : 1;
+        logLine("movie cost: %lu calls in %.1f s, %.3f ms a call; core %d "
+                "%.2f ms a frame reading, %.2f decoding, %.2f converting; "
+                "%lu waits",
+                (unsigned long)b->movie.calls, secs,
+                (double)b->movie.stepTicks * ms / c, b->movie.workerCore,
+                (double)m->readClocks * ms / n,
+                (double)m->decodeClocks * ms / n,
+                (double)b->movie.showTicks * ms / n,
+                (unsigned long)b->movie.waits);
+    } else if (b->movie.started) {
         double secs = (double)(svcGetSystemTick() - b->movie.startTick)
                       / SYSCLOCK_ARM11;
         double ms   = 1000.0 / SYSCLOCK_ARM11;
         unsigned long n = m->decoded ? (unsigned long)m->decoded : 1;
-        logLine("movie cost: %lu calls in %.1f s, %.2f ms a decode, "
-                "%.2f ms a show", (unsigned long)b->movie.calls, secs,
+        logLine("movie cost: %lu calls in %.1f s, %.2f ms a step (%.2f "
+                "reading, %.2f decoding), %.2f ms a show",
+                (unsigned long)b->movie.calls, secs,
                 (double)b->movie.stepTicks * ms / n,
+                (double)m->readClocks * ms / n,
+                (double)m->decodeClocks * ms / n,
                 (double)b->movie.showTicks * ms / n);
     }
     uirender_override_texture(b->ui, b->movieTexHash, NULL, 0, 0, false);

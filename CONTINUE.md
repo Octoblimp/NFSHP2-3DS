@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-28), after the frontend's fourth slice: the
-menus' movie. `HANDOFF.md` is the running
+continuation (2026-09-28), after the frontend's fifth slice: the
+menu movie at full speed. `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -115,7 +115,7 @@ sky_check             46 scenarios, 1311 lines, 0 differ  (93 caught, 2 equivale
 sun_check            115 scenarios, 3427 lines, 0 differ  (154/154 mutations caught)
 weather_check         75 scenarios, 4368 lines, 0 differ  (85 caught, 4 equivalent)
 rain_check            31 calls,       31 lines, 0 differ  (5/5 mutations caught; 41 image facts)
-mv3_check            904 scenarios, 50435 lines, 0 differ  (168 caught, 3 equivalent; 8 frames)
+mv3_check            904 scenarios, 50435 lines, 0 differ  (191 caught, 6 equivalent; 8 frames)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -481,20 +481,37 @@ and so replaced every boot.
      equivalent. `mainmenu` was retimed; it had never reached the menu.
    - `run_azahar_test.ps1 -MenuLoop` waits on the main menu for the loop,
      and the log has each movie's `movie cost`.
-   - **The menu movies are slow on Azahar.** A frame costs about 22 ms to
-     decode and 9 to convert, so the main menu runs at about 25 FPS and
-     its movie at 85% speed (900 frames in 35.5 s). The Cops screens run
-     at 20 to 22. The title at rest runs at 60.
+   - The menu movies were slow on Azahar then: 22 ms to decode a frame
+     and 9 to convert it. The fifth slice fixed that.
 
-   **Next is the frontend's fifth slice: the menu movie at full speed.**
-   Exact speedups first, each held by `mv3_check`: the IDCT's all-zero-AC
-   column and row shortcuts (the AAN pass gives `x0` everywhere then),
-   `refill` without its bound when four bytes are left, and the zero run
-   without `memset`. Then the conversion: an 8x8 tile at a time, or the
-   GPU doing YUV -> RGB from a luma and a chroma texture, as retail's GS
-   did over its five planes. If that is still not enough, decode on the
-   app's second core. Measure with `movie cost` and Azahar's App FPS.
-   After that, the rest of the photos, in TASKS.md's "The retail
+   **The frontend's fifth slice is closed: the menu movie at full speed.**
+   The main menu runs at 59 FPS on Azahar and its movie at 30 fps, 900
+   frames in 30.0 s. The Cops screens run at about 60.
+   `docs/formats/mv3-video.md`: "The player", "Quantisation and the IDCT"
+   and "YUV -> RGBA".
+   - A worker thread decodes the menus' movies ahead of the picture, on
+     core 2 on a New 3DS or else core 1, into three texture slots
+     (`AVIMOVIE_SLOTS`). `aviplayer_update` keeps retail's rule. Where
+     the rule decodes, it takes the next slot off the queue, and with none
+     ready it answers 1, which is retail's ring-buffer wait.
+     `avimovie_decode_next` is the read and decode both paths share. Movies
+     with sound (the boot's) keep the main-thread path.
+   - Exact speedups, each held by `mv3_check`:
+     - The full IDCT's all-zero-AC column and row shortcuts.
+     - The scan read inside the column pass.
+     - The bit reader in registers.
+     - The conversion a tile at a time, with `UQADD8` and `UQSUB8` in
+       `Clamp`'s place. All 16.7 million Y, U and V were compared on the
+       host and on Azahar.
+   - On Azahar the worker spends 2.7 ms reading a main menu frame, 17
+     decoding it and 5.4 converting it. Options' is the dearest, at 29 ms.
+     An Old 3DS gives the worker 80% of core 1, about 27 ms, so the
+     dearest movie will play a little slow there (road step 19).
+   - `mv3_check`: 904 scenarios, 0 differ. Of 197 mutations, 191 are caught
+     and 6 are equivalent: they turn off the 4-point and full IDCTs'
+     shortcuts.
+
+   **Next is the rest of the photos**, in TASKS.md's "The retail
    frontend": the Easter egg group (`0x74e404b4`, `SetGroupVisibility`
    in `NewMainMenu`'s ctor and dtor), the jukebox's `Start(1)` in the
    ctor, the highlight's echo, EA TRAX, then Setup, car select and the
