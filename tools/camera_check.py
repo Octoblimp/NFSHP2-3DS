@@ -61,7 +61,7 @@ def g9(x):
 # 0x3234f8..0x323510 for the orbit mover's eight tweakables plus the unnamed
 # TweakOrbitFOV, and 0x321110 for the far plane the base constructor writes.
 
-STOP_UPDATING = [0]                 # 0x3234b8 _6Camera$StopUpdating
+STOP_UPDATING = [0]                 # retail's gp-21808 (the demo's 0x3234b8)
 USE_TWEAKABLES = [0]                # 0x3234f8
 TWEAK_RADIUS = [5.0]                # 0x3234fc
 TWEAK_ANGLE_H = [26000]             # 0x323500
@@ -72,7 +72,8 @@ FRONT_END_FOV = [6000]              # 0x32350a
 TARGET_HEIGHT = [f32(0.3)]          # 0x32350c
 TWEAK_ORBIT_FOV = [8000]            # 0x323510
 BOOM = [0.0, 0.0, 0.0, 0.0]         # 0x326f10 OrbitCarTranslation
-MOVER_FAR_Z = 5000.0                # 0x321110, written by the base ctor
+MOVER_FAR_Z = 10000.0               # retail's gp-31292 (the demo's 5000)
+CAMERA_FAR_Z = 10000.0              # retail's gp-31300 (the demo's 5000)
 ENABLE_NEAR_Z = 0.5                 # 0x3f000000, written by Enable
 
 MOVER_NAMES = [
@@ -92,9 +93,10 @@ ZOOM_OUT = f32(1.01)                # 0x321124
 
 
 def mover_type_name(t):
-    """0x00154380: eighteen compares and a fall-through back to CM_NONE."""
+    """Retail's 0x00157578: eighteen compares and a fall-through to
+    "CM_UNKNOWN(?)" at 0x002b1620 (the demo's went back to CM_NONE)."""
     if t < 0 or t >= len(MOVER_NAMES):
-        return MOVER_NAMES[0]
+        return "CM_UNKNOWN(?)"
     return MOVER_NAMES[t]
 
 
@@ -130,7 +132,8 @@ class Params(object):
 
 
 class Camera(object):
-    """448 bytes. cur at 0, prev at 144, vel at 288.
+    """Retail's 464 bytes. cur at 0, prev at 144, vel at 288, then
+    retail's ClearVelocity word at 432 and the rest four further on.
 
     vel.matrix is deliberately absent from the transcript: nothing on the
     disc writes it, so on the PS2 it is whatever the allocation held."""
@@ -139,6 +142,7 @@ class Camera(object):
         self.cur = Params()
         self.prev = Params()
         self.vel = Params()
+        self.clear = 0
         self.elapsed = 0.0
         self.last = 0
         self.carnot = False
@@ -152,10 +156,13 @@ def camera_init(c):
     settles at zero whatever the allocation held.
 
         f5 = -1.0   f4 = 1200.0   f3 = 100.0   f1 = 10.0   f2 = 0.5
-        [432]=1.0 [440]=0 [444]=0 [116]=0 [120]=0 [436]=0x80000000
-        [112]=10.0 [132]=14075 [124]=0.5 [128]=5000.0
+    Retail's 0x00156be0:
+
+        [436]=1.0 [432]=0 [444]=0 [448]=0 [116]=0 [120]=0 [440]=0x80000000
+        [112]=10.0 [132]=14075 [124]=0.5 [128]=gp-31300 (10000.0)
     """
     c.elapsed = 1.0
+    c.clear = 0
     c.carnot = False
     c.dash = 0
     c.last = 0x80000000
@@ -164,7 +171,7 @@ def camera_init(c):
     c.cur.td = 10.0
     c.cur.fov = 14075
     c.cur.nearz = 0.5
-    c.cur.farz = 5000.0
+    c.cur.farz = CAMERA_FAR_Z
 
     m = [0.0] * 16
     m[0] = 1.0
@@ -178,9 +185,11 @@ def camera_init(c):
 
 
 def camera_copy(dst, src):
-    """0x00153b10. LastUpdateTime forced back to 0x80000000, the four scalars
-    moved by hand, then three 144-byte bMemCpy."""
+    """Retail's 0x00156cd0. LastUpdateTime forced back to 0x80000000 and
+    ClearVelocity to 0, the three scalars moved by hand, then three 144-byte
+    bMemCpy."""
     dst.last = 0x80000000
+    dst.clear = 0
     dst.elapsed = src.elapsed
     dst.carnot = src.carnot
     dst.dash = src.dash
@@ -245,6 +254,13 @@ def set_camera_matrix(c, m, elapsed):
     k = f32(1.0 / f32(math.sqrt(d))) if d > 0.0 else float("inf")
     cur.dir = [f32(t[8] * k), f32(t[9] * k), f32(t[10] * k), f32(t[11] * k)]
     cur.tgt = [f32(cur.pos[i] + f32(cur.dir[i] * cur.td)) for i in range(4)]
+
+    # Retail's 0x00156ed8: lw 432 / beq / sw zero,432 / bMemCpy(this+144,
+    # this, 144), after the target and before the differences.
+    if c.clear:
+        c.clear = 0
+        c.prev = c.cur.copy()
+        prev = c.prev
 
     inv = f32(1.0 / c.elapsed) if c.elapsed != 0.0 else float("inf")
 
@@ -566,8 +582,9 @@ class Out(object):
         self.key("cur", c.cur)
         self.key("prev", c.prev)
         self.key("vel", c.vel, False)
-        self("  cam elapsed %s last %08x dash %d car %d"
-             % (g9(c.elapsed), c.last, c.dash, 1 if c.carnot else 0))
+        self("  cam elapsed %s last %08x dash %d car %d clear %d"
+             % (g9(c.elapsed), c.last, c.dash, 1 if c.carnot else 0,
+                c.clear))
 
     def orbit(self, o):
         self("  orb r %s dr %s h %u v %u dv %u hs %d vs %d dhs %d dvs %d"
@@ -591,6 +608,7 @@ def s_ctor(o):
 
     d = Camera()
     c.last = 0x12345678
+    c.clear = 1
     camera_copy(d, c)
     o("  copied")
     o.cam(d)
@@ -649,13 +667,28 @@ def s_setmatrix(o):
     o("  fourth column")
     o.cam(c)
 
+    m = erotate_y(mat_identity(), 7000)
+    m[12] = 50.0
+    m[13] = -20.0
+    m[14] = 5.0
+    c.clear = 1
+    set_camera_matrix(c, m, 0.5)
+    o("  velocity cleared")
+    o.cam(c)
+    m[12] = 60.0
+    set_camera_matrix(c, m, 0.5)
+    o("  after the clear")
+    o.cam(c)
+
     STOP_UPDATING[0] = 1
+    c.clear = 1
     m = mat_identity()
     m[12] = 999.0
     set_camera_matrix(c, m, 1.0)
     o("  frozen")
     o.cam(c)
     STOP_UPDATING[0] = 0
+    c.clear = 0
 
 
 def s_orbitinit(o):
@@ -1009,7 +1042,8 @@ MOV = "3DS Files/source/cammover.c"
 
 MUTATIONS = [
     ("prev-not-copied", CAM,
-     "    c->PreviousKey = c->CurrentKey;", "    (void)prev;"),
+     "    c->PreviousKey = c->CurrentKey;\n    c->ElapsedTime = elapsed;",
+     "    (void)prev;\n    c->ElapsedTime = elapsed;"),
     ("no-freeze-check", CAM,
      "    if (CameraStopUpdating)\n        return;", "    (void)0;"),
     ("transpose-column-kept", CAM,
@@ -1151,13 +1185,31 @@ MUTATIONS = [
     ("detached-pview-kept", MOV,
      "        m->pView = 0;", "        (void)0;"),
     ("mover-far-plane", MOV,
-     "    cam->CurrentKey.FarZ = 5000.0f;",
-     "    cam->CurrentKey.FarZ = 1000.0f;"),
+     "    cam->CurrentKey.FarZ = 10000.0f;",
+     "    cam->CurrentKey.FarZ = 5000.0f;"),
     ("type-name-out-of-range", MOV,
-     "    if ((unsigned)t >= sizeof MOVER_NAMES / sizeof MOVER_NAMES[0])\n"
-     "        return MOVER_NAMES[0];",
-     "    if ((unsigned)t >= sizeof MOVER_NAMES / sizeof MOVER_NAMES[0])\n"
-     "        return MOVER_NAMES[4];"),
+     "        return \"CM_UNKNOWN(?)\";",
+     "        return MOVER_NAMES[0];"),
+    ("camera-far-plane", CAM,
+     "    c->CurrentKey.FarZ = 10000.0f;",
+     "    c->CurrentKey.FarZ = 5000.0f;"),
+    ("clear-velocity-ignored", CAM,
+     "    if (c->ClearVelocity) {", "    if (0) {"),
+    ("clear-velocity-kept", CAM,
+     "        c->ClearVelocity = 0;\n        c->PreviousKey",
+     "        c->PreviousKey"),
+    ("clear-velocity-no-copy", CAM,
+     "        c->PreviousKey = c->CurrentKey;\n    }",
+     "    }"),
+    ("clear-velocity-before-freeze", CAM,
+     "    if (CameraStopUpdating)\n        return;\n",
+     "    if (CameraStopUpdating) {\n        c->ClearVelocity = 0;\n"
+     "        return;\n    }\n"),
+    ("copy-keeps-clear", CAM,
+     "    dst->ClearVelocity = 0;", "    dst->ClearVelocity = src->ClearVelocity;"),
+    # Not "ctor-sets-clear": the constructor's two SetCameraMatrix calls
+    # clear the flag whatever it held, so only a camera built while frozen
+    # shows it. cambase_check builds one, on retail's own constructor.
 ]
 
 

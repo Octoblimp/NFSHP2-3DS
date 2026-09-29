@@ -370,26 +370,32 @@ def _quadrant(q, r):
     return (0 - r) & 0xffff
 
 
+ATAN_FLOOR = f32(1e-4)      # gp-26336 and gp-26332, both 0x38d1b717
+
+
 def bATan(x, y):
-    """0x00242148. atan2(y, x) in BAM -- x first. The magnitude is one bASin
-    of the smaller leg over the hypotenuse, which keeps the argument inside
-    the table's good range."""
+    """Retail's 0x0025a890 (the demo's 0x00242148). atan2(y, x) in BAM -- x
+    first. The magnitude is one bASin of the smaller leg over the
+    hypotenuse, which keeps the argument inside the table's good range.
+
+        0025a8d8  mul.s f0,f12,f12 / mul.s f1,f13,f13 / add.s f0,f1,f0
+        0025a8e8  c.lt.s f2,f0       1e-4 < y*y + x*x, else arg stays 0
+        0025a8f8  c.eq.s f13,f3      and the leg is not 0
+
+    The demo had only the leg test."""
     q = 1 if x < 0.0 else 0
     if y < 0.0:
         q ^= 3
+    d = f32(f32(y * y) + f32(x * x))
     if abs(y) < abs(x):
-        if y == 0.0:
-            arg = 0.0
-        else:
-            h = f32(math.sqrt(f32(f32(y * y) + f32(x * x))))
-            arg = f32(f32(abs(y)) / h)
+        arg = 0.0
+        if ATAN_FLOOR < d and y != 0.0:
+            arg = f32(f32(abs(y)) / f32(math.sqrt(d)))
         r = bASin(arg)
     else:
-        if x == 0.0:
-            arg = 0.0
-        else:
-            h = f32(math.sqrt(f32(f32(y * y) + f32(x * x))))
-            arg = f32(f32(abs(x)) / h)
+        arg = 0.0
+        if ATAN_FLOOR < d and x != 0.0:
+            arg = f32(f32(abs(x)) / f32(math.sqrt(d)))
         r = (16384 - bASin(arg)) & 0xffff
     return _quadrant(q, r)
 
@@ -640,6 +646,21 @@ def s_atan():
         emit("atan %.9g %.9g -> %11d" % (1.0, big, bATan(1.0, big)))
         emit("atan %.9g %.9g -> %11d" % (-big, 1.0, bATan(-big, 1.0)))
         emit("atan %.9g %.9g -> %11d" % (1.0, -big, bATan(1.0, -big)))
+    for ix in range(-3, 4):
+        for iy in range(-3, 4):
+            x = dy(ix, 8)
+            y = dy(iy, 8)
+            emit("atan %.9g %.9g -> %11d" % (x, y, bATan(x, y)))
+    for k in range(5, 12):
+        for j in (1, 3, 7):
+            for sx, sy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
+                x = dy(sx * k, 10)
+                y = dy(sy * j, 10)
+                emit("atan %.9g %.9g -> %11d" % (x, y, bATan(x, y)))
+                emit("atan %.9g %.9g -> %11d" % (y, x, bATan(y, x)))
+    nan = float("nan")
+    emit("atan %.9g %.9g -> %11d" % (nan, 1.0, bATan(nan, 1.0)))
+    emit("atan %.9g %.9g -> %11d" % (1.0, nan, bATan(1.0, nan)))
 
 
 def s_fixatan1():
@@ -744,6 +765,12 @@ def model(names):
 BM = "3DS Files/source/bmath.c"
 
 MUTATIONS = [
+    ("atan-no-floor-y", BM,
+     "        if (1e-4f < d && y != 0.0f)",
+     "        if (y != 0.0f)"),
+    ("atan-no-floor-x", BM,
+     "        if (1e-4f < d && x != 0.0f)",
+     "        if (x != 0.0f)"),
     ("topolar-atan-swapped", BM,
      "    out->a = (uint16_t)bATan(v->x, v->y);",
      "    out->a = (uint16_t)bATan(v->y, v->x);"),

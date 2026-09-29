@@ -52,7 +52,9 @@ typedef struct CameraParams {
     uint8_t  Pad[10];        // 134
 } CameraParams;
 
-// 448 bytes.
+// Retail's is 464 bytes: its four static cameras are 464 apart from
+// 0x002c7d90 (the static constructor at 0x001144fc). The demo's was 448.
+// Retail added the word at 432, which moved the four after it down by 4.
 //
 // Two parts of this are never initialised on the disc and are left that way
 // here, because the port's job is to be the disc: the constructor writes
@@ -66,28 +68,38 @@ typedef struct Camera {
     CameraParams CurrentKey;    // 0
     CameraParams PreviousKey;   // 144
     CameraParams VelocityKey;   // 288, per second
-    float        ElapsedTime;   // 432 seconds since the previous key
-    uint32_t     LastUpdateTime;// 436
-    void        *CarNotToRender;// 440 a Car *, not yet a type here
-    int          RenderDash;    // 444
+    // Retail's, at 432. While it is set, the next SetCameraMatrix copies the
+    // new key over PreviousKey before it differences them, so that frame's
+    // velocity is zero, and clears it. The constructors clear it, and the
+    // only writers of 1 are the destructors of CM_TRACK_CAR (0x001594d4)
+    // and CM_TRACK_FLY (0x00159e2c): the camera they leave jumps, and the
+    // jump is not a speed. Retail has no symbols; the name is the port's.
+    int32_t      ClearVelocity; // 432
+    float        ElapsedTime;   // 436 seconds since the previous key
+    uint32_t     LastUpdateTime;// 440
+    void        *CarNotToRender;// 444 a Car *, not yet a type here
+    int          RenderDash;    // 448
 } Camera;
 
-// `Camera::StopUpdating` at 0x3234b8. Set by the debug camera tools; while it
+// `Camera::StopUpdating`, retail's gp-21808 (the demo's 0x3234b8). Set by the debug camera tools; while it
 // is non-zero every setter in this file and in cammover.c is a no-op, which
 // is how the game freezes a camera and flies around it. Zero on the disc.
 extern int CameraStopUpdating;
 
 // ---------------------------------------------------------------- the object
 
-// 0x00153a20. Fills all three keys with the default placement; see
-// docs/formats/camera.md for the matrix it uses and the 100.0 in it.
+// Retail's 0x00156be0 (the demo's 0x00153a20). Fills all three keys with
+// the default placement; see docs/formats/camera.md for the matrix it uses
+// and the 100.0 in it. The far plane is retail's 10000 (gp-31300); the
+// demo's was 5000.
 void camera_init(Camera *c);
 
-// 0x00153b10. The copy constructor: all three keys, plus the four scalars,
-// and LastUpdateTime forced back to 0x80000000.
+// Retail's 0x00156cd0 (the demo's 0x00153b10). The copy constructor: all
+// three keys, plus the three scalars, LastUpdateTime forced back to
+// 0x80000000 and ClearVelocity to 0.
 void camera_copy(Camera *dst, const Camera *src);
 
-// 0x00153ba0. The one that matters.
+// Retail's 0x00156d68 (the demo's 0x00153ba0). The one that matters.
 //
 //   PreviousKey = CurrentKey
 //   ElapsedTime = elapsed
@@ -95,6 +107,7 @@ void camera_copy(Camera *dst, const Camera *src);
 //   Position  = -(m.row3 * transpose(m), with the translation column cleared)
 //   Direction = normalize(column 2 of m)
 //   Target    = Position + Direction * TargetDistance
+//   if ClearVelocity: ClearVelocity = 0, PreviousKey = CurrentKey
 //   VelocityKey = (CurrentKey - PreviousKey) / elapsed, field by field
 //
 // A zero `elapsed` divides by zero, exactly as the original does: the

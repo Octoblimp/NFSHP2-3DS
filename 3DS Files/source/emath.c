@@ -60,10 +60,19 @@ void eMulVector4(bVector4 *o, const bMatrix4 *m, const bVector4 *v)
     bMulMatrixVec4(o, m, v);
 }
 
-// 0x0011bb68. Copies the vector, forces w to 1, and calls the above.
+// Retail's 0x0011b300 (the demo's 0x0011bb68). Retail loads the quadword at
+// 0x002dc400, which the static constructor sets to (0, 0, 0, 1), and adds
+// the vector's x, y and z into it (vadd.xyz), so w is 1 and each lane is
+// 0 + v: a -0 comes in as +0. The demo copied the vector as it was.
 void eMulVector3(bVector3 *o, const bMatrix4 *m, const bVector3 *v)
 {
-    bMulMatrixVec3(o, m, v);
+    bVector3 in;
+
+    in.x = 0.0f + v->x;
+    in.y = 0.0f + v->y;
+    in.z = 0.0f + v->z;
+    in.pad = 1.0f;
+    bMulMatrixVec3(o, m, &in);
 }
 
 // 0x0011c368.

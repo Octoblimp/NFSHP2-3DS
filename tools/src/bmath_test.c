@@ -25,6 +25,7 @@
 //
 // Usage: bmath_test [scenario]...      (no argument runs them all)
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -334,6 +335,33 @@ static void s_atan(void)
         printf("atan %.9g %.9g -> %11d\n",
                1.0, (double)-big, bATan(1.0f, -big));
     }
+    // Retail's floor: squared lengths either side of 1e-4, then NaN.
+    for (ix = -3; ix <= 3; ix++) {
+        for (iy = -3; iy <= 3; iy++) {
+            float x = dy(ix, 8);
+            float y = dy(iy, 8);
+            printf("atan %.9g %.9g -> %11d\n",
+                   (double)x, (double)y, bATan(x, y));
+        }
+    }
+    for (ix = 5; ix < 12; ix++) {
+        static const int js[3] = {1, 3, 7};
+        static const int sg[4][2] = {{1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
+        int j, s;
+
+        for (j = 0; j < 3; j++) {
+            for (s = 0; s < 4; s++) {
+                float x = dy(sg[s][0] * ix, 10);
+                float y = dy(sg[s][1] * js[j], 10);
+                printf("atan %.9g %.9g -> %11d\n",
+                       (double)x, (double)y, bATan(x, y));
+                printf("atan %.9g %.9g -> %11d\n",
+                       (double)y, (double)x, bATan(y, x));
+            }
+        }
+    }
+    printf("atan %.9g %.9g -> %11d\n", (double)NAN, 1.0, bATan(NAN, 1.0f));
+    printf("atan %.9g %.9g -> %11d\n", 1.0, (double)NAN, bATan(1.0f, NAN));
 }
 
 static void s_fixatan1(void)

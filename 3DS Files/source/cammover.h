@@ -29,7 +29,8 @@
 #include "camera.h"
 #include "eview.h"
 
-// GetCameraMoverTypeName, 0x00154380. The numbering is the disc's.
+// GetCameraMoverTypeName, retail's 0x00157578 (the demo's 0x00154380).
+// The numbering is the disc's.
 typedef enum CameraMoverType {
     CM_NONE = 0,
     CM_DRIVE,
@@ -51,6 +52,8 @@ typedef enum CameraMoverType {
     CM_CUBIC_DAMPER
 } CameraMoverType;
 
+// Any other value, negative too, is retail's "CM_UNKNOWN(?)" (0x002b1620);
+// the demo's fell through to "CM_NONE".
 const char *camera_mover_type_name(CameraMoverType t);
 
 // What the orbit mover reads out of a Car. The original dereferences a
@@ -71,18 +74,20 @@ typedef struct CamCarView {
 
 // ------------------------------------------------------------ the base class
 //
-// 44 bytes on the disc, vtable pointer at offset 40. The port keeps the
-// fields and replaces the vtable with one function pointer, because Update is
-// the only virtual anything here calls.
-//
-// The constructor takes a view id, as the disc's does, and the Camera is the
-// view's: eGetView(id)->pCamera. A mover is a bTNode, so enabling it puts it
-// on the head of its view's list by its Node, which is what the view mode and
-// the projection read.
+// 44 bytes on the disc, vtable pointer at offset 40. The constructor takes a
+// view id, as the disc's does, and the Camera is the view's:
+// eGetView(id)->pCamera. A mover is a bTNode, so enabling it puts it on the
+// head of its view's list by its Node, which is what the view mode and the
+// projection read.
 typedef struct CameraMover CameraMover;
+typedef struct CameraMoverVtbl CameraMoverVtbl;
+
+// DriveCameraMover's records, which the port does not have yet (step 7).
+typedef struct CameraInfo CameraInfo;
+typedef struct POV POV;
 
 // The offsets are the disc's, from the .mdebug record for CameraMover
-// (44 bytes); 40 is the vtable this replaces.
+// (44 bytes), and retail's are the same.
 struct CameraMover {
     bNode           Node;           // 0   on pView's CameraMoverList
     CameraMoverType Type;           // 8
@@ -90,19 +95,58 @@ struct CameraMover {
     int             Enabled;        // 16
     eView          *pView;          // 20
     Camera         *pCamera;        // 24
-    void           *pPlayer;        // 28
+    void           *pPlayer;        // 28  a Player *
     void           *CarNotToRender; // 32
     int             RenderDash;     // 36
-    void          (*Update)(CameraMover *);
+    const CameraMoverVtbl *vtbl;    // 40
 };
 
-// 0x001544f0. A ViewID of -1 leaves the mover detached and disabled; any
-// other value takes the view and its camera, sets the camera's far plane to
-// 5000, and enables the mover, which sets the near plane to 0.5. The view
-// must have its camera by then: eInitViews gives views 0 to 3 theirs.
+// Retail's vtable; CameraMover's is at 0x002b1e50. On the PS2 each entry is
+// eight bytes, a this-delta and the function, after an eight-byte head; the
+// offsets here are the function's. The demo had nine virtuals. Retail put
+// three new ones after GetPOV, made Enable and Disable virtual, and moved
+// GetCarToFollow up into the base. No retail symbols name the three new
+// ones; the names are the port's, from what DriveCameraMover's do (step 7).
+struct CameraMoverVtbl {
+    void  (*Destroy)(CameraMover *m);              // +12  the destructor
+    void  (*Update)(CameraMover *m);               // +20
+    void  (*Render)(CameraMover *m, eView *view);  // +28
+    void  (*AddJoyHandlers)(CameraMover *m);       // +36
+    void  (*RemoveJoyHandlers)(CameraMover *m);    // +44
+    CameraInfo *(*GetCameraInfo)(CameraMover *m);  // +52
+    POV  *(*GetPOV)(CameraMover *m, int index);    // +60
+    int   (*IsExteriorView)(CameraMover *m);       // +68
+    int   (*IsLookingBack)(CameraMover *m);        // +76
+    float (*GetWallGap)(CameraMover *m);           // +84
+    void  (*ResetState)(CameraMover *m);           // +92
+    void  (*Enable)(CameraMover *m);               // +100
+    void  (*Disable)(CameraMover *m);              // +108
+    void *(*GetCarToFollow)(CameraMover *m);       // +116 a Car *
+    const bVector3 *(*GetTarget)(CameraMover *m);  // +124
+};
+
+// The base's, 0x002b1e50. Update, Render, the joystick pair and ResetState
+// do nothing (0x001577c8, 0x001577d0, 0x0015fd40, 0x0015fd38, 0x0015fd10);
+// GetCameraInfo, GetPOV, IsLookingBack and GetCarToFollow return 0
+// (0x0015fd30, 0x0015fd28, 0x0015fd18, 0x0015fcf8); IsExteriorView returns
+// 1 (0x0015fd20); GetWallGap returns 0.7 (0x00157920, gp-31288); GetTarget
+// is the camera's (0x0015fcb0).
+extern const CameraMoverVtbl CameraMoverBaseVtbl;
+
+// Retail's 0x001576e8 (the demo's 0x001544f0). It sets the base vtable. A
+// ViewID of -1 leaves the mover detached and disabled; any other value takes
+// the view and its camera, sets the camera's far plane to 10000 (gp-31292;
+// the demo's was 5000), and enables the mover, which sets the near plane to
+// 0.5. The view must have its camera by then: eInitViews gives views 0 to 3
+// theirs.
 void camera_mover_init(CameraMover *m, int viewID, CameraMoverType type);
 
-// 0x001545e0 / 0x00154658. Neither is a no-op while CameraStopUpdating is
+// Retail's 0x00157780: the base vtable back, then Disable, by name rather
+// than by the vtable. The PS2's delete is the caller's here, as a free.
+void camera_mover_destroy(CameraMover *m);
+
+// Retail's 0x001577d8 / 0x00157850 (the demo's 0x001545e0 / 0x00154658),
+// the same but for the camera's offsets. Neither is a no-op while CameraStopUpdating is
 // set, and they do not treat it the same way. Enable skips the two render
 // flags it would push at the camera but still forces the near plane to 0.5;
 // Disable does not test the flag at all, and pulls both render flags back
@@ -111,6 +155,24 @@ void camera_mover_init(CameraMover *m, int viewID, CameraMoverType type);
 // Disable unattaches it, each after the flags.
 void camera_mover_enable(CameraMover *m);
 void camera_mover_disable(CameraMover *m);
+
+// The base's accessors, 0x0015fca0 .. 0x0015fd08: the camera's position and
+// direction keys, the target by the vtable, and the player.
+const bVector3 *camera_mover_get_position(const CameraMover *m);
+const bVector3 *camera_mover_get_direction(const CameraMover *m);
+void camera_mover_set_player(CameraMover *m, void *player);
+
+// Retail's UpdateCameraMovers, 0x0015ef28. For each of the ten views, the
+// FIRST mover on its list is updated, by its vtable, and the rest wait. The
+// movers read RealTimeElapsed themselves. Two debug tails are left out: the
+// JollyRancher feed, which asks bFunkDoesServerExist once and, while a
+// server answers, sends view 1's camera every 17 ticks (no server answers
+// the shipped game), and CameraMoverAddNearbyDebugTopology on view 1's eye,
+// which is empty in retail (0x00203e18).
+void update_camera_movers(void);
+
+// Retail's RenderCameraMovers, 0x0015eee0: the view's first mover's Render.
+void render_camera_movers(eView *view);
 
 // ---------------------------------------------------------- CM_ORBIT_CAR
 //
@@ -175,6 +237,10 @@ extern bVector3 OrbitBoomOffset;
 // 0x00154728. `car` may be null, in which case the mover orbits the origin.
 void orbit_init(OrbitCarCameraMover *o, int viewID, CamCarView *car,
                 int joyPort);
+
+// 0x00154960. The destructor: the camera's focal distance and depth of
+// field back to 0 unless CameraStopUpdating is set, then the base's.
+void orbit_destroy(OrbitCarCameraMover *o);
 
 // 0x00154b78. Runs one frame: approach the desired rotation speeds, advance
 // and clamp the angles, build the boom matrix, and hand it to the camera.

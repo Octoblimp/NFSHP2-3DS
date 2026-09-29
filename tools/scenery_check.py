@@ -72,6 +72,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import mipsemu as me
+import retail_model
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -118,6 +119,8 @@ POOLVAR = GP - 25728
 TABLE = 0x002f1018
 DIRECTION = 0x0031252c      # TheRaceParameters + 12
 POOL = 0x0bad0f00           # eModelSlotPool, only ever compared
+
+RETAIL_BATAN = 0x0025a890         # retail's bATan, which the port follows
 
 SYM = {
     "load": "LoaderScenery__FP6bChunk",
@@ -903,6 +906,18 @@ class Model(object):
         self.out = []
         e = self.e = me.Emu(ieee=True, eediv=True)
         e.stub_bware()
+        # The port's bATan is retail's (0x0025a890), which leaves the
+        # argument at 0 below a squared length of 1e-4; the demo's has no
+        # such floor. CreateFacadeMatrix is the same on both discs, so the
+        # demo's runs, and the bATan under it runs on retail's image.
+        ret = retail_model.RetailEmu(ieee=True, eediv=True)
+
+        def batan(em):
+            ret.fpr[12] = em.fpr[12]
+            ret.fpr[13] = em.fpr[13]
+            return ret.call(RETAIL_BATAN, limit=100000)
+
+        e.stub("bATan__Fff", batan)
         # eInit's, before any facade: the identity CreateFacadeMatrix turns
         e.call("eMathInit__Fv")
         self.fn = {k: e.addr_of(v) for k, v in SYM.items()}

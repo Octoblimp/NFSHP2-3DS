@@ -758,6 +758,11 @@ class Model(object):
         self.sc = sc
         self.out = []
         e = self.e = me.Emu(ieee=True, eediv=True)
+        # The port's Camera is retail's, whose constructor puts the far
+        # plane at 10000 (gp-31300 there); the demo's loads 5000 from
+        # gp-31464, read only at 0x00153a8c. Everything else about the
+        # camera these views read is the same on both discs.
+        e.put32((e.reg[28] - 31464) & M32, me.f_to_bits(10000.0))
         e.stub_bware()
         e.call("eMathInit__Fv")
         self.movers = e.alloc(48 * NMOVER, 16)

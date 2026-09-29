@@ -26,29 +26,62 @@ static const char *const MOVER_NAMES[] = {
     "CM_CUBIC_DAMPER"
 };
 
-// 0x00154380. The original is a chain of eighteen compares ending in a fall
-// through that returns the CM_NONE string again, so an out-of-range type
-// prints as CM_NONE rather than crashing.
+// Retail's 0x00157578. The original is a chain of eighteen compares, and
+// the fall through is retail's "CM_UNKNOWN(?)"; the demo's returned the
+// CM_NONE string again.
 const char *camera_mover_type_name(CameraMoverType t)
 {
     if ((unsigned)t >= sizeof MOVER_NAMES / sizeof MOVER_NAMES[0])
-        return MOVER_NAMES[0];
+        return "CM_UNKNOWN(?)";
     return MOVER_NAMES[t];
 }
 
 // ------------------------------------------------------------- the base
 
-// 0x001544f0.
+static void base_nothing(CameraMover *m) { (void)m; }
+static void base_render(CameraMover *m, eView *view) { (void)m; (void)view; }
+static CameraInfo *base_get_camera_info(CameraMover *m) { (void)m; return 0; }
+static POV *base_get_pov(CameraMover *m, int index) { (void)m; (void)index; return 0; }
+static int base_is_exterior_view(CameraMover *m) { (void)m; return 1; }
+static int base_is_looking_back(CameraMover *m) { (void)m; return 0; }
+static float base_get_wall_gap(CameraMover *m) { (void)m; return 0.7f; }
+static void *base_get_car_to_follow(CameraMover *m) { (void)m; return 0; }
+
+// 0x0015fcb0.
+static const bVector3 *base_get_target(CameraMover *m)
+{
+    return &m->pCamera->CurrentKey.Target;
+}
+
+const CameraMoverVtbl CameraMoverBaseVtbl = {
+    camera_mover_destroy,
+    base_nothing,               // Update
+    base_render,
+    base_nothing,               // AddJoyHandlers
+    base_nothing,               // RemoveJoyHandlers
+    base_get_camera_info,
+    base_get_pov,
+    base_is_exterior_view,
+    base_is_looking_back,
+    base_get_wall_gap,
+    base_nothing,               // ResetState
+    camera_mover_enable,
+    camera_mover_disable,
+    base_get_car_to_follow,
+    base_get_target,
+};
+
+// Retail's 0x001576e8.
 void camera_mover_init(CameraMover *m, int viewID, CameraMoverType type)
 {
     eView *v;
     Camera *cam;
 
+    m->vtbl = &CameraMoverBaseVtbl;
     m->Type = type;
     m->ViewID = viewID;
     m->Enabled = 0;
     m->pPlayer = 0;
-    m->Update = 0;
 
     if (viewID == -1) {
         m->pView = 0;
@@ -63,14 +96,21 @@ void camera_mover_init(CameraMover *m, int viewID, CameraMoverType type)
     v = eGetView(viewID);
     cam = v->pCamera;
     m->pView = v;
-    cam->CurrentKey.FarZ = 5000.0f;
+    cam->CurrentKey.FarZ = 10000.0f;    /* gp-31292; the demo's was 5000 */
     m->CarNotToRender = cam->CarNotToRender;
     m->RenderDash = cam->RenderDash;
     m->pCamera = cam;
     camera_mover_enable(m);
 }
 
-// 0x001545e0.
+// Retail's 0x00157780. The tail is bTNode's destructor, which only deletes.
+void camera_mover_destroy(CameraMover *m)
+{
+    m->vtbl = &CameraMoverBaseVtbl;
+    camera_mover_disable(m);
+}
+
+// Retail's 0x001577d8.
 void camera_mover_enable(CameraMover *m)
 {
     if (m->Enabled)
@@ -85,7 +125,7 @@ void camera_mover_enable(CameraMover *m)
     m->pCamera->CurrentKey.NearZ = 0.5f;
 }
 
-// 0x00154658. Not symmetric with Enable, in two ways that matter. It returns
+// Retail's 0x00157850. Not symmetric with Enable, in two ways that matter. It returns
 // immediately when the mover is already disabled -- so a mover that never
 // attached, whose pCamera is null, never dereferences it -- and it copies the
 // camera's two render flags back INTO the mover before letting go, so a
@@ -102,16 +142,92 @@ void camera_mover_disable(CameraMover *m)
     eview_unattach_camera_mover(m->pView, &m->Node);
 }
 
+// 0x0015fcd0 and 0x0015fcc0.
+const bVector3 *camera_mover_get_position(const CameraMover *m)
+{
+    return &m->pCamera->CurrentKey.Position;
+}
+
+const bVector3 *camera_mover_get_direction(const CameraMover *m)
+{
+    return &m->pCamera->CurrentKey.Direction;
+}
+
+// 0x0015fca0.
+void camera_mover_set_player(CameraMover *m, void *player)
+{
+    m->pPlayer = player;
+}
+
+// The first mover on a view's list, or NULL, as both loops below test it:
+// the head's next against the head itself.
+static CameraMover *first_mover(eView *v)
+{
+    bNode *n = v->CameraMoverList.next;
+
+    return n != &v->CameraMoverList ? (CameraMover *)n : 0;
+}
+
+// Retail's 0x0015ef28. eGetView has no failure, so the NULL view test the
+// original makes never fires, and is not kept.
+void update_camera_movers(void)
+{
+    int i;
+
+    for (i = 0; i < EVIEW_NUM_VIEWS; i++) {
+        CameraMover *m = first_mover(eGetView(i));
+
+        if (m)
+            m->vtbl->Update(m);
+    }
+}
+
+// Retail's 0x0015eee0.
+void render_camera_movers(eView *view)
+{
+    CameraMover *m = first_mover(view);
+
+    if (m)
+        m->vtbl->Render(m, view);
+}
+
 // -------------------------------------------------------- CM_ORBIT_CAR
+//
+// Still the demo's, which camera_check holds it to. Retail changed its
+// constructors, its Update and its GetTarget; that pass waits for the car
+// selector, the one caller (step 16).
 
 static void orbit_update_thunk(CameraMover *m);
+static void orbit_destroy_thunk(CameraMover *m);
+static void *orbit_get_car_to_follow(CameraMover *m);
+static const bVector3 *orbit_get_target_thunk(CameraMover *m);
+
+// Retail's 0x002b1c50: the base's but for these five and the joystick pair,
+// which the port does not register (see orbit_init).
+static const CameraMoverVtbl OrbitVtbl = {
+    orbit_destroy_thunk,
+    orbit_update_thunk,
+    base_render,
+    base_nothing,               // AddJoyHandlers
+    base_nothing,               // RemoveJoyHandlers
+    base_get_camera_info,
+    base_get_pov,
+    base_is_exterior_view,
+    base_is_looking_back,
+    base_get_wall_gap,
+    base_nothing,               // ResetState
+    camera_mover_enable,
+    camera_mover_disable,
+    orbit_get_car_to_follow,
+    orbit_get_target_thunk,
+};
 
 // 0x00154728.
 void orbit_init(OrbitCarCameraMover *o, int viewID, CamCarView *car,
                 int joyPort)
 {
     camera_mover_init(&o->base, viewID, CM_ORBIT_CAR);
-    o->base.Update = orbit_update_thunk;
+    o->base.vtbl = &OrbitVtbl;
 
     o->Radius = 5.0f;
     o->AngleH = 26000;
@@ -320,6 +436,34 @@ const bVector3 *orbit_get_target(const OrbitCarCameraMover *o)
     if (o->CarToFollow)
         return &o->CarToFollow->Position;
     return &o->base.pCamera->CurrentKey.Target;
+}
+
+static const bVector3 *orbit_get_target_thunk(CameraMover *m)
+{
+    return orbit_get_target((const OrbitCarCameraMover *)m);
+}
+
+// 0x0015c290.
+static void *orbit_get_car_to_follow(CameraMover *m)
+{
+    return ((OrbitCarCameraMover *)m)->CarToFollow;
+}
+
+// 0x00154960. RemoveJoyHandlers first, which has nothing to remove in the
+// port, then the depth of field off the camera, then the base's.
+void orbit_destroy(OrbitCarCameraMover *o)
+{
+    o->base.vtbl = &OrbitVtbl;
+    if (!CameraStopUpdating) {
+        o->base.pCamera->CurrentKey.FocalDistance = 0.0f;
+        o->base.pCamera->CurrentKey.DepthOfField = 0.0f;
+    }
+    camera_mover_destroy(&o->base);
+}
+
+static void orbit_destroy_thunk(CameraMover *m)
+{
+    orbit_destroy((OrbitCarCameraMover *)m);
 }
 
 // ---------------------------------------------------------- the setters

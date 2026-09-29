@@ -322,26 +322,36 @@ int32_t bASin(float x)
     return r & 0xffff;
 }
 
-// 0x00242148. atan2(y, x) in BAM -- x is the FIRST argument. The quadrant
-// falls out of the signs; the magnitude is one bASin of the smaller leg over
-// the hypotenuse, which keeps the argument inside the table's good range.
+// Retail's 0x0025a890 (the demo's 0x00242148). atan2(y, x) in BAM -- x is
+// the FIRST argument. The quadrant falls out of the signs; the magnitude is
+// one bASin of the smaller leg over the hypotenuse, which keeps the argument
+// inside the table's good range.
 int32_t bATan(float x, float y)
 {
     int q = (x < 0.0f) ? 1 : 0;
-    float arg;
+    float arg, d;
     int32_t r;
 
     if (y < 0.0f) {
         q ^= 3;
     }
-    // The two zero guards are not cosmetic. The second one is the only thing
-    // standing between bATan(0, 0) and a 0/0, and a NaN here walks straight
-    // off the end of bASinTable.
+    // Retail added the floor: a squared length of 1e-4 or less (gp-26336 and
+    // gp-26332, both 0x38d1b717) takes the argument as 0, so a vector
+    // shorter than a hundredth reads as lying along its longer leg's axis.
+    // The demo divided whatever it got. The floor also catches a NaN, which
+    // in the demo walked straight off the end of bASinTable, and the zero
+    // guards still stand between a leg of 0 and a 0/0.
     if (fabsf(y) < fabsf(x)) {
-        arg = (y == 0.0f) ? 0.0f : fabsf(y) / sqrtf(y * y + x * x);
+        d = y * y + x * x;
+        arg = 0.0f;
+        if (1e-4f < d && y != 0.0f)
+            arg = fabsf(y) / sqrtf(d);
         r = bASin(arg);
     } else {
-        arg = (x == 0.0f) ? 0.0f : fabsf(x) / sqrtf(y * y + x * x);
+        d = y * y + x * x;
+        arg = 0.0f;
+        if (1e-4f < d && x != 0.0f)
+            arg = fabsf(x) / sqrtf(d);
         r = (16384 - bASin(arg)) & 0xffff;
     }
 

@@ -164,6 +164,27 @@ static void scenario_basics(void)
     pv4("v4", &v4);
     eMulVector4(&v4, &a, &v4);
     pv4("v4*a", &v4);
+
+    eIdentity(&o);
+    o.v3.x = -0.0f;
+    o.v3.y = -0.0f;
+    o.v3.z = -0.0f;
+    v3.x = -0.0f;
+    v3.y = -0.0f;
+    v3.z = -0.0f;
+    v3.pad = 0.0f;
+    eMulVector3(&v3, &o, &v3);
+    pv3("-0*z", &v3);
+
+    o.v0.x = 1.0f;  o.v0.y = -1.0f; o.v0.z = -1.0f; o.v0.w = 0.0f;
+    o.v1.x = -1.0f; o.v1.y = 1.0f;  o.v1.z = -1.0f; o.v1.w = 0.0f;
+    o.v2.x = -1.0f; o.v2.y = -1.0f; o.v2.z = 1.0f;  o.v2.w = 0.0f;
+    v3.x = -0.0f;
+    v3.y = -0.0f;
+    v3.z = -0.0f;
+    v3.pad = 0.0f;
+    eMulVector3(&v3, &o, &v3);
+    pv3("-0*n", &v3);
 }
 
 static void scenario_rotate(void)

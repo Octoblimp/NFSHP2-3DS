@@ -95,9 +95,9 @@ static void pcam(const Camera *c)
     pkey2("cur", &c->CurrentKey, 1);
     pkey2("prev", &c->PreviousKey, 1);
     pkey2("vel", &c->VelocityKey, 0);
-    printf("  cam elapsed %.9g last %08lx dash %d car %d\n",
+    printf("  cam elapsed %.9g last %08lx dash %d car %d clear %d\n",
            c->ElapsedTime, (unsigned long)c->LastUpdateTime, c->RenderDash,
-           c->CarNotToRender != 0);
+           c->CarNotToRender != 0, (int)c->ClearVelocity);
 }
 
 static void porbit(const OrbitCarCameraMover *o)
@@ -176,6 +176,7 @@ static void scenario_ctor(void)
         Camera d;
 
         c.LastUpdateTime = 0x12345678u;
+        c.ClearVelocity = 1;
         camera_copy(&d, &c);
         printf("  copied\n");
         pcam(&d);
@@ -256,14 +257,34 @@ static void scenario_setmatrix(void)
     printf("  fourth column\n");
     pcam(&c);
 
-    // And a frozen camera: every one of these must leave it alone.
+    // Retail's ClearVelocity: the key is taken as the last one as well, so
+    // this frame's velocities are zero and the flag clears; the next frame
+    // differences again.
+    eIdentity(&id);
+    eRotateY(&m, &id, 7000);
+    m.v3.x = 50.0f;
+    m.v3.y = -20.0f;
+    m.v3.z = 5.0f;
+    c.ClearVelocity = 1;
+    camera_set_matrix(&c, &m, 0.5f);
+    printf("  velocity cleared\n");
+    pcam(&c);
+    m.v3.x = 60.0f;
+    camera_set_matrix(&c, &m, 0.5f);
+    printf("  after the clear\n");
+    pcam(&c);
+
+    // And a frozen camera: every one of these must leave it alone, the
+    // ClearVelocity flag included.
     CameraStopUpdating = 1;
+    c.ClearVelocity = 1;
     eIdentity(&m);
     m.v3.x = 999.0f;
     camera_set_matrix(&c, &m, 1.0f);
     printf("  frozen\n");
     pcam(&c);
     CameraStopUpdating = 0;
+    c.ClearVelocity = 0;
 }
 
 static void scenario_orbit_init(void)

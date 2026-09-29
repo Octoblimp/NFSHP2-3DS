@@ -9642,3 +9642,84 @@ calls RenderCars in the game yet, so Azahar was not run.
 
 Step 6 is done. Next is step 7: DriveCameraMover (CM_DRIVE) and Player's
 ChangeCameraMover. CONTINUE.md has the retail addresses.
+
+## Session 31, continued (2026-09-29) -- the camera base (step 7a-1)
+
+Step 7 is cut in four: 7a-1, the foundations; 7a-2, the shake and the
+drive camera's small members; 7b, DriveCameraMover::Update; 7c, Player's
+camera functions. This is 7a-1.
+
+### The port
+
+Two math functions retail changed, which the cameras sit on:
+- bATan (`0x0025a890`): the squared length is worked out first, and below
+  1e-4 (gp-26336 and gp-26332) the argument stays 0. The demo only tested
+  the leg for 0.
+- eMulVector (`0x0011b300`): the vector's x, y and z are added into a
+  (0, 0, 0, 1) at `0x002dc400` (`vadd.xyz`), so w is 1 and a -0 lane comes
+  in as +0. The demo copied the vector as it was.
+
+Camera is retail's 464 bytes. ClearVelocity is new at 432, and the four
+scalars after it moved up by four. While it is set, SetCameraMatrix
+(`0x00156d68`) copies the new key over PreviousKey after the target,
+so that frame's velocity is zero, and clears it. The two constructors
+clear it, and they put the far plane at 10000 (gp-31300 and gp-31292)
+where the demo's put 5000.
+
+CameraMover has retail's vtable (`0x002b1e50`), fifteen slots of it:
+`CameraMoverVtbl` in `cammover.h`, with the base's own defaults. The
+destructor (`0x00157780`) puts the base's vtable back and calls Disable
+directly. The type names end in "CM_UNKNOWN(?)". `update_camera_movers`
+(`0x0015ef28`) calls Update on the first mover of each of the ten views,
+and `render_camera_movers` (`0x0015eee0`) calls Render on one view's. The
+JollyRancher debug feed and the empty CameraMoverAddNearbyDebugTopology
+are not ported. The orbit mover now sits on the vtable. Its retail pass
+(constructors, Update, and a GetTarget that returns the car's
+GeometryPosition) waits for the car selector, step 16.
+
+`docs/formats/camera.md` has a new "Retail" section.
+
+### The check
+
+`tools/cambase_check.py` is new: it runs retail's own camera and mover
+base in RetailEmu, and `tools/src/cambase_test.c` runs the port over the
+same script. It covers:
+- the camera's constructors and SetCameraMatrix, with the clear and a
+  camera built while frozen;
+- the mover's constructor, destructor, Enable and Disable, every base
+  slot, the accessors and the type names;
+- both loops, over retail's own eView table and eUpdateViewMode.
+
+The one stub is bFunkDoesServerExist, which answers 0. A second vtable
+records Update, Render, Enable and Disable. Everything starts from a
+0xa5 fill.
+
+- 1588 ops, 5624 lines, 0 differ. `--mutate` runs 59 mutations, and all
+  59 are caught.
+- RetailEmu runs no static constructors, and the first run showed it:
+  eMulVector's (0, 0, 0, 1) was all zero, so Position's fourth lane came
+  out 1 and the fourth column never reached it. The checker now runs the
+  one at `0x0011bf70`.
+
+The older checkers follow:
+- `camera_check`: 1251 lines, 0 differ; 52 caught, 7 equivalent. It
+  dropped "ctor-sets-clear", which only a camera built while frozen can
+  show; `cambase_check` has one.
+- `bmath_check`: 6643 lines, 11 of 11 caught. It has new atan cases
+  either side of the floor, and NaN.
+- `emath_check`: 2418 lines, 42 of 42 caught. The "-0*n" case tests each
+  lane's +0 alone.
+- `eview_check`'s demo model reads 10000 for the far plane.
+- `scenery_check` failed on its tiny facade case, (0.001, 0.002), which
+  is under retail's floor. CreateFacadeMatrix is the same on both discs,
+  so its demo model still runs the demo's, and the bATan under it now
+  runs on retail's image. 0 differ, and 77 caught and 2 equivalent, as
+  before.
+
+The whole suite passes. The CIA builds. Nothing new runs in the game yet,
+so Azahar was not run.
+
+### Next
+
+7a-2: tEnvelope, tShaker and the camera shake, then DriveCameraMover's
+small members. CONTINUE.md has the list.

@@ -5,7 +5,7 @@
 #include "camera.h"
 #include "emath.h"
 
-// 0x3234b8. Zero on the disc.
+// Retail's gp-21808, 0x003303c0 (the demo's 0x3234b8). Zero on the disc.
 int CameraStopUpdating = 0;
 
 // ---------------------------------------------------------------- the ctor
@@ -29,6 +29,7 @@ void camera_init(Camera *c)
     bMatrix4 m;
 
     c->ElapsedTime = 1.0f;
+    c->ClearVelocity = 0;
     c->CarNotToRender = 0;
     c->RenderDash = 0;
     c->LastUpdateTime = 0x80000000u;
@@ -38,7 +39,7 @@ void camera_init(Camera *c)
     c->CurrentKey.TargetDistance = 10.0f;
     c->CurrentKey.FieldOfView = 14075;
     c->CurrentKey.NearZ = 0.5f;
-    c->CurrentKey.FarZ = 5000.0f;
+    c->CurrentKey.FarZ = 10000.0f;     /* gp-31300; the demo's was 5000 */
 
     memset(&m, 0, sizeof m);
     m.v0.x = 1.0f;
@@ -50,10 +51,11 @@ void camera_init(Camera *c)
     camera_set_matrix(c, &m, 1.0f);
 }
 
-// 0x00153b10.
+// Retail's 0x00156cd0.
 void camera_copy(Camera *dst, const Camera *src)
 {
     dst->LastUpdateTime = 0x80000000u;
+    dst->ClearVelocity = 0;
     dst->ElapsedTime = src->ElapsedTime;
     dst->CarNotToRender = src->CarNotToRender;
     dst->RenderDash = src->RenderDash;
@@ -64,13 +66,15 @@ void camera_copy(Camera *dst, const Camera *src)
 
 // ------------------------------------------------------- the decomposition
 
-// 0x00153ba0.
+// Retail's 0x00156d68.
 //
-// The debug path this leaves out: if the pointer at 0x2f2870 is non-null the
-// matrix is taken from a network debug feed ("JollyRancher") instead of from
-// the argument, with its translation row scaled by 0.01 and its corner forced
-// to 1. That pointer is null unless a debug server answered at boot, so the
-// shipped game always takes the branch below.
+// The debug path this leaves out: if the pointer at 0x002fa860 is non-null
+// and gp-23088 is 0, the matrix is taken from a network debug feed
+// ("JollyRancher") instead of from the argument, with its translation row
+// scaled by 0.01 (gp-31296) and its corner forced to 1, and gp-21804 is set
+// to say so; the other path clears gp-21804 again. That pointer is null
+// unless a debug server answered at boot, so the shipped game always takes
+// the branch below, and gp-21804 stays 0.
 void camera_set_matrix(Camera *c, const bMatrix4 *m, float elapsed)
 {
     bMatrix4 t;
@@ -136,6 +140,13 @@ void camera_set_matrix(Camera *c, const bMatrix4 *m, float elapsed)
     cur->Target.z = cur->Position.z + cur->Direction.z * cur->TargetDistance;
     cur->Target.pad = cur->Position.pad
                     + cur->Direction.pad * cur->TargetDistance;
+
+    // Retail's, 0x00156ed8: a camera told to forget its last key takes this
+    // one as last, so every velocity below comes out zero this once.
+    if (c->ClearVelocity) {
+        c->ClearVelocity = 0;
+        c->PreviousKey = c->CurrentKey;
+    }
 
     // Everything per second. A zero elapsed gives infinities, as on the disc.
     //

@@ -164,8 +164,11 @@ def emul_vector4(m, v):
 
 
 def emul_vector3(m, v):
-    """0x0011bb68. w forced to 1, so the translation row applies."""
-    return emul_vector4(m, [v[0], v[1], v[2], 1.0])
+    """Retail's 0x0011b300 (the demo's 0x0011bb68). w forced to 1, so the
+    translation row applies, and x, y and z added into the +0 lanes of the
+    quadword at 0x002dc400 (vadd.xyz), so a -0 comes in as +0."""
+    return emul_vector4(m, [f32(0.0 + v[0]), f32(0.0 + v[1]),
+                            f32(0.0 + v[2]), 1.0])
 
 
 def etranspose(m):
@@ -542,6 +545,19 @@ def s_basics(o):
     o.v4("v4", v4)
     o.v4("v4*a", emul_vector4(a, v4))
 
+    # Retail's +0 lanes: -0 in, with every product a zero and a -0
+    # translation, comes out +0 where the demo's gave -0.
+    z = mat_identity()
+    z[12] = z[13] = z[14] = -0.0
+    o.v3("-0*z", emul_vector3(z, [-0.0, -0.0, -0.0]))
+    # And each lane alone: with the other two lanes' products -0 (a +0 times
+    # -1), only a lane that kept its -0 turns its output -0.
+    n = [1.0, -1.0, -1.0, 0.0,
+         -1.0, 1.0, -1.0, 0.0,
+         -1.0, -1.0, 1.0, 0.0,
+         -0.0, -0.0, -0.0, 1.0]
+    o.v3("-0*n", emul_vector3(n, [-0.0, -0.0, -0.0]))
+
 
 def s_rotate(o):
     o("scenario rotate")
@@ -722,6 +738,12 @@ def diff(a, b, limit=40):
 # equivalent mutant and belongs nowhere near this list.
 MUTATIONS = [
     ("eMulMatrix order", "bMulMatrix(o, m2, m1);", "bMulMatrix(o, m1, m2);"),
+    ("eMulVector3 x without retail's +0", "    in.x = 0.0f + v->x;",
+     "    in.x = v->x;"),
+    ("eMulVector3 y without retail's +0", "    in.y = 0.0f + v->y;",
+     "    in.y = v->y;"),
+    ("eMulVector3 z without retail's +0", "    in.z = 0.0f + v->z;",
+     "    in.z = v->z;"),
     ("sin 2pi loop to if", "while (E_TWO_PI < x) x = x - E_TWO_PI;",
      "if (E_TWO_PI < x) x = x - E_TWO_PI;"),
     ("sin negative loop to if", "while (x < 0.0f)     x = x + E_TWO_PI;",

@@ -10,8 +10,11 @@ A `CameraMover` is what hands it that matrix, and there are eighteen kinds.
                                                   CM_ORBIT_CAR
 
 The port is `3DS Files/source/camera.c` and `3DS Files/source/cammover.c`,
-cross-checked by `tools/camera_check.py` (1200 transcript lines, 47 mutations,
-seven of them equivalent and argued for below). It sits on `emath.c`
+cross-checked by `tools/camera_check.py` (1251 transcript lines, seven of
+its mutations equivalent and argued for below) and, for what retail
+changed, by `tools/cambase_check.py`, which runs retail's own code (see
+"Retail" below). Most addresses here are the demo's; "Retail" has
+retail's. It sits on `emath.c`
 (`docs/formats/emath.md`), and every matrix convention here is that layer's:
 row-major, translation in row 3, a point is a row on the left, angles are
 BAMs with 65536 to the turn.
@@ -50,7 +53,8 @@ BAMs with 65536 to the turn.
 
 ## The record
 
-`Camera` is 448 bytes: three 144-byte `CameraParams` and four scalars.
+`Camera` is 448 bytes on the demo disc: three 144-byte `CameraParams` and
+four scalars. Retail's is 464, with a fifth scalar; see "Retail".
 
 | offset | field | |
 |--------|-------|--|
@@ -149,16 +153,19 @@ eye is `(0, 0, 1100)`, not the `(0, 0, 1200)` the translation row asks for.
 It is overwritten on the first real frame. The port keeps it.
 
 `FieldOfView` starts at 14075 BAMs (about 77 degrees), `TargetDistance` at
-10, `NearZ` at 0.5, `FarZ` at 5000, and `LastUpdateTime` at `0x80000000`.
+10, `NearZ` at 0.5, `FarZ` at 5000 (10000 on retail), and `LastUpdateTime`
+at `0x80000000`.
 
 ## The base mover
 
-44 bytes, vtable at offset 40, and `Update` is the only virtual anything
-calls. The first 8 bytes are the mover's link on its view's list. The
+44 bytes, vtable at offset 40. On the demo disc `Update` is the only
+virtual anything calls; retail's vtable has fifteen slots (see "Retail").
+The first 8 bytes are the mover's link on its view's list. The
 constructor (`0x1544f0`) takes a view id. With -1 it leaves the mover
 detached and disabled, with `pView` (20) and `pCamera` (24) both 0.
 Otherwise it takes `v = eGetView(id)`, stores it in `pView`, takes
-`v->pCamera`, forces that camera's far plane to 5000, copies the camera's
+`v->pCamera`, forces that camera's far plane to 5000 (10000 on retail),
+copies the camera's
 two render flags, stores the camera in `pCamera` and enables. `Enable`
 links the mover onto the head of `pView`'s list (`AttachCameraMover`), and
 `Disable` unlinks it (`UnattachCameraMover`). Both of those work the view
@@ -279,6 +286,111 @@ Note the signs: "up" asks for a negative vertical speed, so holding up walks
 `AngleV` toward `MaxAngleV`, and `AngleV` rising *lowers* the boom. The
 geometry viewer's pad is wired the same way for that reason.
 
+## Retail
+
+The port follows retail's `Camera` and `CameraMover` base; the orbit mover
+is still the demo's until the car selector needs it (step 16). Retail has
+no symbols, so the names of what is new are the port's. `gp` is
+`0x003358f0` there.
+
+| address | what |
+|---------|------|
+| `0x00156be0` | `Camera::Camera` |
+| `0x00156cd0` | `Camera::Camera(const Camera&)` |
+| `0x00156d68` | `Camera::SetCameraMatrix` |
+| `0x00156ed8` | the `ClearVelocity` test |
+| `0x002fa860` | the JollyRancher feed pointer; null on the disc |
+| gp-21808 | `Camera::StopUpdating` (`0x003303c0`) |
+| gp-31300, gp-31292 | `10000.0`, the far plane of the two constructors |
+| `0x00157578` | `GetCameraMoverTypeName` |
+| `0x001576e8` | `CameraMover::CameraMover` |
+| `0x00157780` | `CameraMover::~CameraMover` |
+| `0x001577d8`, `0x00157850` | `Enable`, `Disable` |
+| `0x002b1e50` | `CameraMover`'s vtable |
+| `0x0015ef28` | `UpdateCameraMovers` |
+| `0x0015eee0` | `RenderCameraMovers` |
+| `0x0011b300` | `eMulVector`, under `Position` |
+| `0x002dc400` | its `(0, 0, 0, 1)`, written by the static constructor at `0x0011bf70` |
+
+**The record is 464 bytes.** `ClearVelocity` is new at 432, and the four
+scalars after it moved up by four: `ElapsedTime` 436, `LastUpdateTime` 440,
+`CarNotToRender` 444, `RenderDash` 448. Both constructors clear it. The
+only writers of 1 are the destructors of `CM_TRACK_CAR` (`0x001594d4`) and
+`CM_TRACK_FLY` (`0x00159e2c`).
+
+**`ClearVelocity`.** After `Target` and before the differences,
+`SetCameraMatrix` tests it. When it is set it is cleared and `CurrentKey` is
+copied over `PreviousKey`, so that frame's velocity is zero. The camera a
+tracking mover leaves behind jumps, and the jump is not a speed. A frozen
+camera (`StopUpdating`) keeps the flag, because the function has already
+returned.
+
+**The far plane is 10000** in both constructors (gp-31300 for the camera,
+gp-31292 for the mover). The demo's was 5000.
+
+**The type names end in `"CM_UNKNOWN(?)"`** (`0x002b1620`) for a type out
+of range. The demo's fell through to `"CM_NONE"`.
+
+**The vtable has fifteen slots**, each eight bytes (a this-delta, then the
+function) after an eight-byte head:
+
+| offset | slot | the base's |
+|--------|------|-----------|
+| +12 | the destructor | `0x00157780` |
+| +20 | `Update` | nothing |
+| +28 | `Render(eView *)` | nothing |
+| +36, +44 | `AddJoyHandlers`, `RemoveJoyHandlers` | nothing |
+| +52 | `GetCameraInfo` | 0 |
+| +60 | `GetPOV(int)` | 0 |
+| +68 | `IsExteriorView` | 1 |
+| +76 | `IsLookingBack` | 0 |
+| +84 | `GetWallGap` | 0.7 (gp-31288) |
+| +92 | `ResetState` | nothing |
+| +100, +108 | `Enable`, `Disable` | the two above |
+| +116 | `GetCarToFollow` | 0 |
+| +124 | `GetTarget` | `&pCamera->CurrentKey.Target` |
+
+The destructor puts the base's vtable back, calls `Disable` directly (not
+through the vtable), and ends in `bTNode`'s destructor, which only frees.
+
+**The two loops take the first mover on each view only.**
+`UpdateCameraMovers` walks the ten views and calls `Update` on the head of
+each list; `RenderCameraMovers(view)` calls `Render` on that view's head.
+The tail of `UpdateCameraMovers` asks once whether a debug server exists
+(`bFunkDoesServerExist`, cached in gp-21764/gp-21768). The shipped game has
+none, so the JollyRancher branch never runs. It then hands view 1's eye to
+`CameraMoverAddNearbyDebugTopology` (`0x00203e18`), which is empty. The port
+keeps neither.
+
+**`eMulVector` adds the vector's x, y and z into a `(0, 0, 0, 1)` kept at
+`0x002dc400`** (`vadd.xyz`). So `w` is 1, and a `-0` lane comes in as `+0`.
+A static constructor writes that quadword. Retail's image in `mipsemu` runs
+no static constructors, so `cambase_check` runs that one (`0x0011bf70`)
+itself. Without it `w` is 0, the fourth column never reaches `Position`,
+and the negate's fourth lane comes out 1.
+
+### Cross-checked on retail's image
+
+`tools/cambase_check.py` runs retail's own code in `mipsemu`: the
+constructors, `SetCameraMatrix`, the mover's constructor and destructor,
+`Enable` and `Disable`, every slot of the base vtable, the accessors, the
+type names and both loops, over retail's own `eView` table. The only stub
+is `bFunkDoesServerExist`, which answers 0. `tools/src/cambase_test.c` runs
+the port over the same script. Cameras and movers start from a `0xa5` fill,
+so a field one side writes and the other leaves shows. A second vtable,
+the base's with `Update`, `Render`, `Enable` and `Disable` replaced by
+recorders, shows which mover each loop reached, and whether a destructor
+went through the vtable.
+
+    python tools/cambase_check.py            # 7 scenarios, 5624 lines, 0 differ
+    python tools/cambase_check.py --mutate   # 59 mutations, 59 caught
+
+`camera_check` keeps its independent model of the same code, updated to
+retail's. It has no mutation that sets `ClearVelocity` in the constructor:
+the constructor's two `SetCameraMatrix` calls clear the flag whatever it
+held, so only a camera built while frozen can show it, and `cambase_check`
+builds one.
+
 ## Divergences from the disc
 
 Each of these is in the source as a comment at the point it happens.
@@ -306,8 +418,8 @@ Each of these is in the source as a comment at the point it happens.
 Python model -- the model written from the listings, not from the C -- through
 seven scenarios and diffs the transcripts line by line.
 
-    python tools/camera_check.py            # 7 scenarios, 1200 lines, 0 differ
-    python tools/camera_check.py --mutate   # 47 mutations, 40 caught,
+    python tools/camera_check.py            # 7 scenarios, 1251 lines, 0 differ
+    python tools/camera_check.py --mutate   # 59 mutations, 52 caught,
                                             # 7 equivalent, 0 unexplained
 
 The scenarios are: the constructor and the copy constructor; a hand-built
