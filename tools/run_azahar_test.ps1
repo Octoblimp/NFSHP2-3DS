@@ -31,7 +31,8 @@ param(
     [string]$AzaharExe = "C:\Program Files\Azahar\azahar.exe",
     [string]$Target3dsx = "",
     [string]$OutDir = "",
-    [switch]$MenuLoop             # stay on the main menu until its movie loops
+    [switch]$MenuLoop,            # stay on the main menu until its movie loops
+    [switch]$Echo                 # a burst of shots at the main menu, for the echo
 )
 
 $ErrorActionPreference = "Stop"
@@ -264,6 +265,13 @@ if ($booted) {
 
     [Hp2Cap]::PressKey($hwnd, $VK_M)          # START
     if (Wait-ForLog "flow enter New Main Menu" 10) {
+        if ($Echo) {
+            # The bloom copies the highlighted label, scales it 1x..2x and
+            # fades it out over half a second, every four seconds from the
+            # highlight. Shots as fast as PrintWindow goes, for five seconds.
+            $burst = Get-Date
+            while (((Get-Date) - $burst).TotalSeconds -lt 5) { Shot "echo" }
+        }
         Start-Sleep -Milliseconds 900
         Shot "mainmenu"
 

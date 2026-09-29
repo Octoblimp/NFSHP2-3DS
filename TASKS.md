@@ -2256,8 +2256,16 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
         same values. The main menu runs at 59 FPS on Azahar and its movie
         at 30 fps. Real hardware, and an Old 3DS's core 1, are unmeasured.
   - [ ] `StartDemoMode`'s track, from `BuildDemoTrackList`.
-- [ ] **The highlight's echo.** A large faded red copy of the current
-      item's label, now and then.
+- [x] **The highlight's echo.** A large faded red copy of the current
+      item's label, now and then. It is the bloom, `tHighlightAnimation`
+      on `ANIMATING_MENUITEM`, which every screen authors off the bottom
+      edge. Retail's `CopyFlailerText` copies the item's position, scale
+      and Z with its text. The port's copied only the text, so no bloom
+      had ever shown. `bui_copy_text` is the whole copy now, and the main
+      menu builds, animates and releases retail's four members.
+      `bootflow_check`: 190 mutations, 187 caught, 3 equivalent. On
+      Azahar a red "Hot Pursuit" grows out of the label and fades, every
+      four seconds.
 - [x] **Hide "Unlocked Easter Egg"** on the main menu. Retail's
       `NewMainMenu` hides the group (`0x74e404b4`) when it is built and
       again when it is torn down, after `TheEasterEggs`' `Start` and
@@ -2278,8 +2286,8 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
       Retail's `OnHighlight` (`0x00216938`) and `HighlightMenuItem`
       (`0x00216880`) now move them to the item's `MI_n_MASK` and set its
       blurb, which shows on the bottom panel.
-  - [ ] `OnHighlight`'s first call, the bloom's `SetCurrentMenuItem`,
-        with the echo below.
+  - [x] `OnHighlight`'s first call, the bloom's `SetCurrentMenuItem`,
+        with the echo.
 - [x] **The demo disc's code is out.** Asked for on 2026-09-28: the port
       is the full game, where `TheDemoDiscManager.bActive` is always 0.
       `demodisc.c`, `EXIT_DEMO_DISC`, the loading slideshow, the

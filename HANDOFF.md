@@ -8982,3 +8982,207 @@ full game, and for the unused VP6 decoder to go with it.
 
 The jukebox, then the echo, EA TRAX, Setup, car select, the briefing
 and step 6.
+
+## Session 30, continued (2026-09-28) -- The echo, uncommitted; jukebox notes
+
+The user stopped the session here, to pick up with the jukebox. Two
+things are in hand: the highlight's echo, written and checked but not
+committed, and what is known of the jukebox so far.
+
+### The echo (uncommitted: `gameflow.c`, `gameflow.h`, `bootflow_check.py`)
+
+- **Retail.** `NewMainMenu`'s constructor (`0x00216460`), in order:
+  - `tAnimatedBlurb` at +4 (`SCROLLING_TEXT` twice, `WHITEOUT_BAR`);
+  - `tHighlightAnimation` at +424 (`ANIMATING_MENUITEM`, gp-16136's
+    colour);
+  - `tSlideInAnimation` at +456, to `FlailerGetTopLeftX(MI_1_MASK)`;
+  - `SelectionSet` at +480, with +476 (the idle Timer) and +632 zeroed;
+  - `MakeChallengeCarsAvailable(Fred)` and
+    `RaceParameters::InitWithDefaults` (`0x0031a898`);
+  - the Timer set to RealTimer, and jukebox `Start(1)`;
+  - IndicatorMode 1 (SelectionSet +144), then `AddItems` over the
+    five-mask table at `0x0031be40`;
+  - StartMovie, TheEasterEggs' Start, the egg group hidden, +628
+    cleared.
+- **The destructor** (`0x00216598`): TheEasterEggs' Stop, the group
+  hidden, then the members in reverse. `SelectionSet`'s and
+  `tHighlightAnimation`'s only free. `tSlideInAnimation`'s is
+  `tSlideAnimation`'s (`0x00248c08`), which puts the groups back.
+  `tAnimatedBlurb`'s releases its two alphas and its group.
+- **OnTick** (`0x00216718`):
+  - the eggs' half: help menu up (`0x001e4170`), or a code entered
+    (TheEasterEggs +4) showing the group with sound 30;
+  - the Timer reset while popup 0 is up;
+  - `ConsiderStartDemoMode` on the Timer;
+  - the three Animates (`0x00249348`, `0x00248970`, `0x00248d20`);
+  - the group down three seconds after it went up.
+- **OnHighlight** (`0x00216938`) first calls
+  `tHighlightAnimation::SetCurrentMenuItem` (`0x002488d0`) with the
+  ItemHash, whatever it is. `HighlightMenuItem` (`0x00216880`) calls
+  `NewText` (`0x002494e8`) and `SelectionSet::SetCurrentItem`
+  (`0x0016e270`).
+- **The port.**
+  - `BNewMainMenu` holds the four members. The constructor is in
+    retail's order, through `menuBlurbInit`, `menuBloomInit`,
+    `menuSlideInInit` and `menuSelAddItems`. Each traces what it is
+    given.
+  - `mainMenuTick` animates the three and takes the Timer reset.
+  - `menuBloomSetItem` is OnHighlight's first call, the echo.
+  - Message 24 resets the Timer.
+  - The jukebox's `Start(1)` is in its place. On the 3DS it is still
+    only a log line.
+  - Still owed: the eggs' half of OnTick (the 78 codes),
+    `ConsiderStartDemoMode` from the main menu (it waits on
+    StartDemoMode's race), and `MakeChallengeCarsAvailable` and
+    `InitWithDefaults` (for car select).
+- **`bootflow_check`.** `RetailMainMenu` says the kit's calls as the port
+  traces them: "blurb init", "bloom init", "slide in" (with
+  `FlailerGetTopLeftX` answering 0.0, as the harness's world does),
+  "sel items", "menu animate" once, "bloom item", "menu kit released"
+  and "jukebox 1". 48 scenarios, 27,890 lines, 0 differ. 20 new
+  mutations (`main-menu-blurb-wrong-bar` to `main-menu-kit-before-eggs`);
+  `main-menu-blurb-first` was reworded for the NewText line. All 37 of
+  the main menu's that ran were caught.
+- **Left to do before committing:**
+  - `main-menu-back-noisy` and `main-menu-back-allowed` are PATTERN NOT
+    FOUND. They expect BACK's `break;` to be followed by `default:`, and
+    the new TICK case now sits between them.
+  - The full `--mutate` pass.
+  - The 3DS build and `run_azahar_test.ps1`.
+  - The docs: `boot-flow.md`, CONTINUE, TASKS.
+
+### The jukebox, so far
+
+The research agent was stopped before it wrote anything down. What is
+known:
+
+- **Callers.** `sound::jukebox::Start(1)` is called when the title comes
+  to rest, in the Mode Selects' constructor and in `NewMainMenu`'s.
+  Stop comes from `UnlaunchFrontendMenus`. All four calls are already
+  in place in the port, through `hooks.jukebox`, and on the 3DS
+  `hookJukebox` (`main.c`) only logs.
+- **`sound::jukebox`** (retail):
+
+  | Function | Address |
+  |---|---|
+  | `Start` | `0x001aeab0` |
+  | the picker it calls | `0x001aea40` |
+  | `IsPlaying` | `0x001aecb0` |
+  | `Stop` | `0x001aec90` |
+  | `GetTrackName`, `Artist`, `Label` | `0x001aee90`, `0x001aeee0`, `0x001aef30` |
+  | `GetCurrentTrack` | `0x001af040` |
+  | `SetSelection` | `0x001af050` |
+
+- **`cJukeboxPlayer`** (retail), the instance at `0x003115d0`:
+
+  | Method | Address |
+  |---|---|
+  | `Update` | `0x0027dff8` |
+  | `Start(Ui)`, `Start(UiUiUi)` | `0x0027d640`, `0x0027d6a8` |
+  | `Advance` | `0x0027da30` |
+  | `Pause` | `0x0027e3e8` |
+  | `IsFading` | `0x001b0200` |
+  | `LoadCartridge(Pcb)` | `0x0027dac8` |
+  | `PickNextTune` | `0x0027eca8` |
+  | `SampleCallback` | `0x0027e1d8` |
+
+  `InitializeSoundDriver` (`0x001ae608`) is the likely caller of
+  `LoadCartridge`; that is a lead, not verified.
+- **Fields** (bytes, from `docs/mdebug_structs.txt`, ~line 18342;
+  8868 bytes in all):
+
+  | Field | Offset | Field | Offset |
+  |---|---|---|---|
+  | cartridge | 0 | `m_nCurCatNum` | 8836 |
+  | `m_SyncEventBuffer` | 584 | `m_nCurTuneNum` | 8840 |
+  | `m_pFile` | 8776 | `m_bOn` | 8844 |
+  | `m_pUserFile` | 8780 | `m_nCategory` | 8848 |
+  | `m_FormHeader` | 8784 | `m_fVolume` | 8852 |
+  | `m_pPlayingSample` | 8816 | `m_bCallbackTriggerPlaySample` | 8856 |
+  | `m_StatePlay` | 8820 | `m_bPauseBeforePlay` | 8860 |
+  | `m_KeepPlaying` | 8824 | `m_nLastCategory` | 8864 |
+  | `m_pSlot` | 8828 | | |
+  | `m_pSyncEventCallback` | 8832 | | |
+
+  `JUKEBOX_STATE`: NOTINUSE 0, LOADING 1, PLAYING 2, PAUSED 3,
+  DONE_PLAYING 4, FADING 5, DONE_FADING 6.
+- **`SOUND\JUKEBOXM.JBC`** (193 MB):
+  - A 32-byte form header: `0x10, 2, 32000` (the rate), 1 (categories),
+    `0x1000` (the index's size), 0, 0, 0.
+  - The index, read at `0x20`: a 64-byte record per category (+0 the
+    tune count, 23; +4 the name, "InGame"), then its tunes. Each tune
+    entry is 96 bytes: +0 file offset, +4 size, +8 sync size, +12 name.
+  - Each tune is a `0x30`-byte VAG header ("VAGp", big-endian size, rate
+    32000, "VAGx", 2 channels), then SPU ADPCM from +`0x30`.
+    `avimovie.c`'s `spu_frame` and `kSpuFilter` decode that format.
+- **Open questions:**
+  - the stereo interleave: the block size per channel, to be checked by
+    decoding tune 0 at 0x800, 0x1000, 0x4000 and so on and looking for
+    continuity;
+  - what the sync data is, and whether any tune has a nonzero sync size;
+  - `PickNextTune`'s random number generator;
+  - the volume getter `0x001ae028`, called with categories 4 and 5;
+  - the stream layer: `0x00280370` (built with 188 bytes, argument 2),
+    `0x00273280` (which sets the callback `0x0027e1d8`) and
+    `0x00280340`, with their buffer sizes, refills and fades;
+  - the globals `sound::jukebox` reads: gp-23056, gp-23048,
+    gp-18916..-18928, gp-21420, gp-19616, `0x00313860`, and the table at
+    `0x002fc0e4`.
+- **Blocker: no free ndsp channel.** ndsp has 24 channels. `bsnd`
+  takes 0..22 (`BSND_HW_VOICES` 23) and the movies take 23
+  (`AVIMOVIE_CHANNEL`). The jukebox needs one of `bsnd`'s voices given
+  up (`BSND_HW_VOICES` 22) or a share of the movie's channel. Retail's
+  menus play the movies and the music at once, so sharing only works if
+  it mixes.
+- **Plan:**
+  - `jukebox.c`: a host-agnostic port of `cJukeboxPlayer`,
+    `cJukeboxCartridge` and `sound::jukebox`, held to retail by a new
+    `jukebox_check.py`;
+  - a 3DS stream host that reads the JBC off the card, decodes it to
+    stereo PCM16 and feeds a wave ring on its own channel, as
+    `avimovie.c`'s `feed()` does;
+  - `hookJukebox` made to play, checked on Azahar.
+
+### Next
+
+Commit the echo (see the list above), then the jukebox, then EA TRAX
+(`tNewSongMonitor`, `0x0016bd30`..`0x0016c214`, the CHYRON screen in
+GLOBALB), Setup, car select, the briefing and step 6.
+
+## Session 30, continued (2026-09-28) -- The echo, committed
+
+The echo went in with one more fix, found on Azahar: no bloom had ever
+shown, on any screen.
+
+- **The stale mutations.** `main-menu-back-noisy` and
+  `main-menu-back-allowed` now anchor on the `case BMSG_SCREEN_TICK:` that
+  follows BACK's `break;`. Both are caught. The full pass: 190 mutations,
+  187 caught, the same 3 equivalent.
+- **Why nothing showed.** A burst of shots on the main menu
+  (`run_azahar_test.ps1 -Echo`, as fast as `PrintWindow` goes for five
+  seconds) caught the slide-in, but never the bloom. Every screen authors
+  `ANIMATING_MENUITEM` off the bottom edge: y 534 on `NEW_MAIN_MENU`, 676
+  on the title, 500 to 600 on the Mode Selects, Options and the popups.
+  - Retail's `CopyFlailerText` (`0x001410a0`; the demo's `0x0013ec18`, with
+    the name's 24-byte shift) is a 64-byte copy from `ObjectType` on:
+    visibility, Z, position, scale, rotation, font, format, colour,
+    LanguageID and the `String` pointer. The `jal`'s delay slot saves
+    `pFlailerStrip`, which is put back after, and `DirtyFlag` is set to 8.
+  - The port's `hookAnimCopyText` copied only the string, so the copy was
+    drawn where it was authored, off screen.
+  - `bui_copy_text` (`bui.c`) is the whole copy. The characters are copied
+    inline, as far as dst has room, since the port has no shared `String`.
+    The hook calls it, and no longer clears dst's LanguageID: the copy
+    carries src's.
+- **Azahar.** PASS. A red "Hot Pursuit" covers the label, grows to twice
+  its size and fades out over half a second, every four seconds. The
+  copy's Z is the item's, 2, and it comes later in the file, so it is
+  drawn over the label. The title's PRESS START blooms now too.
+- **Docs.** `boot-flow.md`, "What the port has" and "The echo"; TASKS and
+  CONTINUE.
+
+### Next
+
+The jukebox (notes above), then EA TRAX (`tNewSongMonitor`,
+`0x0016bd30`..`0x0016c214`, the CHYRON screen in GLOBALB), Setup, car
+select, the briefing and step 6.

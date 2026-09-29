@@ -1094,41 +1094,74 @@ holds that code's name.
 
 `gameflow.c` has:
 
-* the callback, and the constructor as far as the movie, the eggs' `Start`
-  and the hide;
-* the destructor's `Stop` and hide;
+* the callback, and the constructor in retail's order: the four members
+  (`menuBlurbInit`, `menuBloomInit`, `menuSlideInInit`, then the
+  `SelectionSet` with IndicatorMode 1 and `menuSelAddItems` over the five
+  masks), the idle Timer, the jukebox's `Start(1)`, the movie, the eggs'
+  `Start` and the hide;
+* the destructor: `Stop`, the hide, then the members, last built first.
+  `SelectionSet`'s and `tHighlightAnimation`'s only free.
+  `tSlideInAnimation`'s is `tSlideAnimation`'s (`0x00248c08`), which puts
+  its groups back, and `tAnimatedBlurb`'s releases its two alphas and its
+  group;
 * the select and the BACK veto;
-* `OnHighlight`'s `HighlightMenuItem`, through `hooks.moveBrackets` and
-  `hooks.setBlurb`, the pair `bscreens.c` gives the Mode Selects. On the
-  3DS these are `main.c`'s `hookMoveBrackets` and `hookSetBlurb`. The top
-  screen still hides `SCROLLING_TEXT`, and the bottom panel shows the
-  sentence.
+* `OnTick` (`mainMenuTick`): the Timer reset while popup 0 is up, the three
+  Animates (blurb `0x00249348`, bloom `0x00248970`, slide `0x00248d20`),
+  and the group down three seconds after it went up;
+* message 24, which resets the Timer;
+* `OnHighlight`: the bloom's `SetCurrentMenuItem` first, then
+  `HighlightMenuItem` (`hooks.moveBrackets`, the blurb's `NewText`,
+  `hooks.setBlurb` and `SetCurrentItem`). The Mode Selects' hooks move the
+  brackets on the 3DS. The top screen still hides `SCROLLING_TEXT`, and the
+  bottom panel shows the sentence.
 
 Before `OnHighlight`, the brackets stayed where `NEW_MAIN_MENU` authors
 them, around Hot Pursuit. On the Mode Selects they moved, because
 `bscreens.c` ports their highlight, so the menu looked like it lost the
 highlight only after coming back.
 
+### The echo
+
+The echo is the bloom: `tHighlightAnimation` on `ANIMATING_MENUITEM`. Every
+tick of its first half second, `Animate` (`0x00248970`, the demo's
+`0x00232418` but for the Visibility byte's offset) copies the highlighted
+item onto `ANIMATING_MENUITEM` (`CopyFlailerText`), scales the copy about
+its centre from 1x to 2x, fades it from alpha 128 to 0, and colours it
+`0x80`, red. After four seconds (`HighlightTimeout`) it starts again, and
+each highlight restarts it.
+
+`CopyFlailerText` (`0x0013ec18`, retail `0x001410a0`) copies the 64 bytes
+from `ObjectType` on: visibility, Z, position, scale, font, format, colour,
+LanguageID and the `String` pointer. It keeps the two hashes and
+`pFlailerStrip`, which its `jal`'s delay slot saves, and sets
+`DirtyFlag` 8. The port's hook used to copy only the string. Every screen
+authors `ANIMATING_MENUITEM` off the bottom of the screen: at y 534 on the
+main menu and 676 on the title. So none of the port's blooms had ever
+shown. `bui_copy_text` is the whole copy now. On Azahar a red "Hot Pursuit"
+grows out of the label and fades, every four seconds.
+
 `hooks.easterEggs` only logs on the 3DS. The 78 codes are not ported, so
 nothing is handed the pad, and the group can never come back.
 
 Still owed:
 
-* the blurb's animation, the bloom (and `OnHighlight`'s
-  `SetCurrentMenuItem` for it), the slide-in, and the rest of `OnTick`;
-* the jukebox's `Start`;
-* `MakeChallengeCarsAvailable` and `InitWithDefaults`;
-* the 78 codes;
-* message 24;
+* the eggs' half of `OnTick`, and the 78 codes;
+* `MakeChallengeCarsAvailable` and `InitWithDefaults`, which car select and
+  its race read;
+* the jukebox itself: `hooks.jukebox` only logs;
 * attract mode from the main menu. `StartDemoMode` has no race yet, so all
   it could do is stop the menu's movie.
 
 `bootflow_check` runs retail's `Callback`, `HandleEvent` and `OnTick` on the
-image (`RetailMainMenu`). The members, the jukebox, the two `Fred` calls and
-`ConsiderStartDemoMode` are stubbed, silently, as the port owes them.
+image (`RetailMainMenu`). The members are said as the port traces them:
+"blurb init", "bloom init", "slide in" (with `FlailerGetTopLeftX` answering
+0.0, as the harness's world does), "sel items", "menu animate" once,
+"bloom item", "menu kit released" and "jukebox 1". The two `Fred` calls
+and `ConsiderStartDemoMode` are stubbed, silently, as the port owes them.
 `HighlightMenuItem` runs. `FlailerGetBoundingBox` answers one box for every
 mask, and the two brackets' Ys are given relative to it, as the offsets the
-port's hook takes.
+port's hook takes. 48 scenarios, 27,890 lines, 0 differ. Of 190 mutations,
+187 are caught and 3 are equivalent.
 
 ## `MumboJumboScreen` (`0x0016a8b0`)
 

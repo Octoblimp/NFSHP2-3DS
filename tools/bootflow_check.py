@@ -1707,15 +1707,24 @@ class RetailMainMenu(object):
     and ChangeToScreen, tail-called, is deferred to the flow, as the title's
     is.
 
+    The four members are the port's animation kit, which banim_check
+    holds to retail's on its own. Here their calls are said as the port
+    traces them:
+      - the constructors: "blurb init" (the screen and three objects),
+        "bloom init" (the screen, the object and the colour) and "slide in"
+        (the screen, the object FlailerGetTopLeftX measured, and the X it
+        answered, 0.0 as the harness's world does); SelectionSet's is
+        silent, and AddItems is "sel items", with the IndicatorMode the
+        constructor stored and the table's entries;
+      - the destructors, silent but tAnimatedBlurb's, the last, which is
+        "menu kit released";
+      - the three Animates in OnTick, "menu animate" once a constructor;
+      - OnHighlight's first call, the bloom's SetCurrentMenuItem, "bloom
+        item";
+      - jukebox Start(1), "jukebox 1".
     Stubbed silently, because the port owes them:
-      - the four members' constructors and destructors: tAnimatedBlurb,
-        tHighlightAnimation, tSlideInAnimation and SelectionSet, with
-        AddItems and FlailerGetTopLeftX;
-      - their three Animates in OnTick, and OnHighlight's first call, the
-        bloom's SetCurrentMenuItem;
       - FrontendDatabase::MakeChallengeCarsAvailable and
         RaceParameters::InitWithDefaults;
-      - jukebox Start(1);
       - ConsiderStartDemoMode in OnTick. StartDemoMode has no race in the
         port yet, so all it could do there is stop the menu's movie. Without
         this stub, half a minute on the main menu would start attract mode
@@ -1746,6 +1755,7 @@ class RetailMainMenu(object):
         e.write(EASTER_EGGS, bytes(12))
         self.pending = None
         self.hl_mask, self.hl_under = 0, 0.0
+        self.top_left_obj, self.animated = 0, 0
 
     def stubs(self):
         e, f = self.e, self.flow
@@ -1783,23 +1793,54 @@ class RetailMainMenu(object):
             # The blurb is the instance's +4; +0 is the screen.
             f.say("blurb %08x %d" % (e.u32(arg(0) - 4), arg(1)))
 
+        def blurb_ctor(_e):                # tAnimatedBlurb(screen, 3 objects)
+            self.animated = 0
+            f.say("blurb init %08x %08x %08x %08x"
+                  % (arg(1), arg(2), arg(3), arg(4)))
+
+        def top_left_x(_e):                # FlailerGetTopLeftX
+            self.top_left_obj = arg(1)
+            e.set_f(0, 0.0)
+
+        def slide_in(_e):                  # tSlideInAnimation(screen, x)
+            f.say("slide in %08x %08x %.1f"
+                  % (arg(1), self.top_left_obj, e.f(12)))
+
+        def add_items(_e):                 # SelectionSet::AddItems
+            # IndicatorMode is SelectionSet's +144.
+            f.say("sel items %08x mode %d %s"
+                  % (arg(1), s32(e.u32(arg(0) + 144)),
+                     " ".join("%08x" % e.u32(arg(2) + 4 * i)
+                              for i in range(s32(arg(3))))))
+
+        def animate(_e):                   # the three Animates, once
+            if not self.animated:
+                f.say("menu animate")
+            self.animated = 1
+
         silent = (
-            0x002491b0, 0x00249280,        # tAnimatedBlurb, ~
-            0x00248870, 0x002488b0,        # tHighlightAnimation, ~
-            0x00144140,                    # FlailerGetTopLeftX
-            0x00248fd0, 0x001b9ae0,        # tSlideInAnimation, ~
+            0x002488b0,                    # ~tHighlightAnimation
+            0x001b9ae0,                    # ~tSlideInAnimation
             0x0016e120, 0x0016e168,        # SelectionSet, ~
-            0x0016e1f8,                    # SelectionSet::AddItems
             0x00183af8,                    # MakeChallengeCarsAvailable
             0x001ed5c8,                    # RaceParameters::InitWithDefaults
-            0x001aeab0,                    # sound::jukebox::Start
             0x0016ed50,                    # ConsiderStartDemoMode
-            0x00249348, 0x00248970,        # the Animates: blurb, bloom,
-            0x00248d20,                    # slide-in
-            0x002488d0,                    # SetCurrentMenuItem, the bloom's
         )
         stubs = {addr: (lambda _e: None) for addr in silent}
         stubs.update({
+            0x002491b0: blurb_ctor,
+            0x00249280: lambda _e: f.say("menu kit released"),
+            0x00248870: lambda _e: f.say(            # tHighlightAnimation()
+                "bloom init %08x %08x %08x" % (arg(1), arg(2), arg(3))),
+            0x00144140: top_left_x,
+            0x00248fd0: slide_in,
+            0x0016e1f8: add_items,
+            0x001aeab0: lambda _e: f.say("jukebox %d" % arg(0)),
+            0x00249348: animate,           # the Animates: blurb, bloom,
+            0x00248970: animate,           # slide-in
+            0x00248d20: animate,
+            0x002488d0: lambda _e: f.say(            # SetCurrentMenuItem
+                "bloom item %08x" % arg(1)),
             0x002577c0: lambda _e: e.mm_inst,          # operator new
             0x00114e98: lambda _e: None,               # operator delete
             START_MOVIE: lambda _e: f.movie.start(arg(1)),
@@ -2716,18 +2757,18 @@ MUTATIONS += [
      "            data->noise = 0;" + NL
      + "            data->param = 0;" + NL
      + "            break;" + NL
-     + "        default:",
+     + "        case BMSG_SCREEN_TICK:",
      "            data->param = 0;" + NL
      + "            break;" + NL
-     + "        default:"),
+     + "        case BMSG_SCREEN_TICK:"),
     ("main-menu-back-allowed", GF,
      "            data->noise = 0;" + NL
      + "            data->param = 0;" + NL
      + "            break;" + NL
-     + "        default:",
+     + "        case BMSG_SCREEN_TICK:",
      "            data->noise = 0;" + NL
      + "            break;" + NL
-     + "        default:"),
+     + "        case BMSG_SCREEN_TICK:"),
     ("main-menu-cops-on-off", GF,
      "                    gf->copsOn = 1;",
      "                    gf->copsOn = 0;"),
@@ -2768,8 +2809,10 @@ MUTATIONS += [
     ("main-menu-blurb-first", GF,
      "    HOOK_VOID(gf, moveBrackets, BGF_SCREEN_NEW_MAIN_MENU, mask, -3.0f, "
      + "-6.0f);" + NL
+     + "    if (a) banim_blurb_new_text_id(a, &m->blurb, blurb);" + NL
      + "    HOOK_VOID(gf, setBlurb, BGF_SCREEN_NEW_MAIN_MENU, blurb);",
-     "    HOOK_VOID(gf, setBlurb, BGF_SCREEN_NEW_MAIN_MENU, blurb);" + NL
+     "    if (a) banim_blurb_new_text_id(a, &m->blurb, blurb);" + NL
+     + "    HOOK_VOID(gf, setBlurb, BGF_SCREEN_NEW_MAIN_MENU, blurb);" + NL
      + "    HOOK_VOID(gf, moveBrackets, BGF_SCREEN_NEW_MAIN_MENU, mask, -3.0f, "
      + "-6.0f);"),
     ("main-menu-highlight-no-blurb", GF,
@@ -2778,6 +2821,103 @@ MUTATIONS += [
     ("main-menu-highlight-no-select-set", GF,
      "    trace(gf, \"bracket %08x\", (unsigned)mask);" + NL,
      ""),
+    # The constructor's four members, in retail's order, and the jukebox
+    # between SelectionSet's constructor and its items.
+    ("main-menu-blurb-wrong-bar", GF,
+     "BGF_OBJ_SCROLLING_TEXT, BGF_OBJ_WHITEOUT_BAR);",
+     "BGF_OBJ_WHITEOUT_BAR, BGF_OBJ_SCROLLING_TEXT);"),
+    ("main-menu-bloom-wrong-object", GF,
+     "    menuBloomInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_OBJ_ANIMATING_ITEM,",
+     "    menuBloomInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_OBJ_PRESS_START,"),
+    ("main-menu-bloom-wrong-color", GF,
+     "                  BANIM_BLOOM_COLOR);" + NL + "    menuSlideInInit(",
+     "                  0xffffffffu);" + NL + "    menuSlideInInit("),
+    ("main-menu-bloom-before-blurb", GF,
+     "    menuBlurbInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_OBJ_SCROLLING_TEXT,"
+     + NL + "                  BGF_OBJ_SCROLLING_TEXT, BGF_OBJ_WHITEOUT_BAR);"
+     + NL + "    menuBloomInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_OBJ_ANIMATING_ITEM,"
+     + NL + "                  BANIM_BLOOM_COLOR);",
+     "    menuBloomInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_OBJ_ANIMATING_ITEM,"
+     + NL + "                  BANIM_BLOOM_COLOR);"
+     + NL + "    menuBlurbInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_OBJ_SCROLLING_TEXT,"
+     + NL + "                  BGF_OBJ_SCROLLING_TEXT, BGF_OBJ_WHITEOUT_BAR);"),
+    ("main-menu-slide-wrong-mask", GF,
+     "    menuSlideInInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_MI_1_MASK);",
+     "    menuSlideInInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_MI_2_MASK);"),
+    ("main-menu-slide-first", GF,
+     "    menuBlurbInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_OBJ_SCROLLING_TEXT,"
+     + NL + "                  BGF_OBJ_SCROLLING_TEXT, BGF_OBJ_WHITEOUT_BAR);"
+     + NL + "    menuBloomInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_OBJ_ANIMATING_ITEM,"
+     + NL + "                  BANIM_BLOOM_COLOR);"
+     + NL + "    menuSlideInInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_MI_1_MASK);",
+     "    menuSlideInInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_MI_1_MASK);"
+     + NL + "    menuBlurbInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_OBJ_SCROLLING_TEXT,"
+     + NL + "                  BGF_OBJ_SCROLLING_TEXT, BGF_OBJ_WHITEOUT_BAR);"
+     + NL + "    menuBloomInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_OBJ_ANIMATING_ITEM,"
+     + NL + "                  BANIM_BLOOM_COLOR);"),
+    ("main-menu-jukebox-silent", GF,
+     "    HOOK_VOID(gf, jukebox, 1);    // the main menu's", "    (void)0;"),
+    ("main-menu-jukebox-stops", GF,
+     "    HOOK_VOID(gf, jukebox, 1);    // the main menu's",
+     "    HOOK_VOID(gf, jukebox, 0);"),
+    ("main-menu-jukebox-late", GF,
+     "    HOOK_VOID(gf, jukebox, 1);    // the main menu's" + NL
+     + "    // IndicatorMode 1",
+     "    // IndicatorMode 1"),
+    ("main-menu-indicator-mode-0", GF,
+     "    bsel_set_indicator_mode(&m->sel, 1);",
+     "    bsel_set_indicator_mode(&m->sel, 0);"),
+    ("main-menu-indicator-after-items", GF,
+     "    bsel_set_indicator_mode(&m->sel, 1);" + NL
+     + "    menuSelAddItems(gf, BGF_SCREEN_NEW_MAIN_MENU, kMainMenuMasks, 5);",
+     "    menuSelAddItems(gf, BGF_SCREEN_NEW_MAIN_MENU, kMainMenuMasks, 5);"
+     + NL + "    bsel_set_indicator_mode(&m->sel, 1);"),
+    ("main-menu-three-masks", GF,
+     "kMainMenuMasks, 5);", "kMainMenuMasks, 3);"),
+    ("main-menu-masks-short", GF,
+     "    BGF_MI_1_MASK, BGF_MI_2_MASK, BGF_MI_3_MASK, BGF_MI_4_MASK, "
+     + "BGF_MI_5_MASK,",
+     "    BGF_MI_1_MASK, BGF_MI_2_MASK, BGF_MI_3_MASK, 0, 0,"),
+    # OnHighlight's first call, the echo, with every hash; OnTick's three
+    # Animates; the destructor's members, after the eggs.
+    ("main-menu-no-echo", GF,
+     "    menuBloomSetItem(gf, itemHash);" + NL + "    switch (itemHash) {",
+     "    switch (itemHash) {"),
+    ("main-menu-echo-last", GF,
+     "    menuBloomSetItem(gf, itemHash);" + NL + "    switch (itemHash) {"
+     + NL + "        case BGF_ITEM_MENUITEM_1:" + NL
+     + "            mainMenuHighlightItem(gf, BGF_MI_1_MASK, BGF_BLURB_MENUITEM_1);"
+     + NL + "            break;",
+     "    switch (itemHash) {"
+     + NL + "        case BGF_ITEM_MENUITEM_1:" + NL
+     + "            mainMenuHighlightItem(gf, BGF_MI_1_MASK, BGF_BLURB_MENUITEM_1);"
+     + NL + "            menuBloomSetItem(gf, itemHash);"
+     + NL + "            break;"),
+    ("main-menu-echo-known-only", GF,
+     "    menuBloomSetItem(gf, itemHash);" + NL + "    switch (itemHash) {"
+     + NL + "        case BGF_ITEM_MENUITEM_1:" + NL,
+     "    switch (itemHash) {" + NL + "        case BGF_ITEM_MENUITEM_1:" + NL
+     + "            menuBloomSetItem(gf, itemHash);" + NL),
+    ("main-menu-no-tick", GF,
+     "            mainMenuTick(gf);", "            (void)0;"),
+    ("main-menu-dtor-keeps-kit", GF,
+     "    trace(gf, \"menu kit released\");" + NL, ""),
+    ("main-menu-kit-before-eggs", GF,
+     "    HOOK_VOID(gf, easterEggs, 0);" + NL
+     + "    groupVisible(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_GROUP_EASTER_EGG, 0);"
+     + NL + "    if (a) {" + NL
+     + "        banim_slide_release(a, &m->slideIn);" + NL
+     + "        banim_blurb_release(a, &m->blurb);" + NL
+     + "    }" + NL
+     + "    trace(gf, \"menu kit released\");" + NL,
+     "    if (a) {" + NL
+     + "        banim_slide_release(a, &m->slideIn);" + NL
+     + "        banim_blurb_release(a, &m->blurb);" + NL
+     + "    }" + NL
+     + "    trace(gf, \"menu kit released\");" + NL
+     + "    HOOK_VOID(gf, easterEggs, 0);" + NL
+     + "    groupVisible(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_GROUP_EASTER_EGG, 0);"
+     + NL),
 ]
 
 

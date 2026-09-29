@@ -390,6 +390,27 @@ uint32_t bui_set_text_string(BUI* ui, uint32_t index, const char* s)
     return n;
 }
 
+bool bui_copy_text(BUI* ui, uint32_t dst, uint32_t src)
+{
+    uint32_t       droom = 0, sroom = 0, n = 0;
+    uint8_t*       d = writable(ui, dst, 76, &droom);
+    const uint8_t* s = fields(ui, src, 76, &sroom);
+    uint8_t        strip[4];
+
+    if (!d || !s || d == s) return false;
+    memcpy(strip, d + 20, 4);          // the jal's delay slot saves it
+    memmove(d + 16, s + 16, 76 - 16);
+    memcpy(d + 20, strip, 4);
+    d[19] = 8;
+    // The String pointer, the 64th byte's word: here, the characters.
+    while (76 + n + 1 < droom && 76 + n < sroom && s[76 + n]) {
+        d[76 + n] = s[76 + n];
+        n++;
+    }
+    if (76 + n < droom) d[76 + n] = 0;
+    return true;
+}
+
 void bui_color(uint32_t rgba, uint8_t out[4])
 {
     for (int i = 0; i < 4; i++) {

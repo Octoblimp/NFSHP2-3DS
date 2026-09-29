@@ -762,9 +762,9 @@ const BTitleMovie* bgf_title_movie(const BGameFlow* gf, int i)
 //     only once that Timer is four seconds old;
 //   - blooms PRESS START with a tHighlightAnimation while at rest.
 
-// The bloom takes the kit's clock from the flow's, the way bscreens.c's
-// clock() does, so that there is one RealTimer.
-static BAnim* titleAnim(BGameFlow* gf)
+// The title's bloom and the main menu's kit take the kit's clock from the
+// flow's, the way bscreens.c's clock() does, so that there is one RealTimer.
+static BAnim* flowAnim(BGameFlow* gf)
 {
     if (gf->anim)
         banim_set_clock(gf->anim, (int32_t)gf->realTimer, gf->realElapsed);
@@ -776,7 +776,7 @@ static BAnim* titleAnim(BGameFlow* gf)
 // frontend screens bloom in too.
 static void titleBloomInit(BGameFlow* gf)
 {
-    BAnim* a = titleAnim(gf);
+    BAnim* a = flowAnim(gf);
     trace(gf, "bloom init %08x %08x %08x", (unsigned)BGF_SCREEN_TITLE,
           (unsigned)BGF_OBJ_ANIMATING_ITEM, (unsigned)BANIM_BLOOM_COLOR);
     if (a)
@@ -787,14 +787,14 @@ static void titleBloomInit(BGameFlow* gf)
 
 static void titleBloomSetItem(BGameFlow* gf, uint32_t item)
 {
-    BAnim* a = titleAnim(gf);
+    BAnim* a = flowAnim(gf);
     trace(gf, "bloom item %08x", (unsigned)item);
     if (a) banim_highlight_set_item(a, &gf->title.highlight, item);
 }
 
 static void titleBloomStart(BGameFlow* gf)
 {
-    BAnim* a = titleAnim(gf);
+    BAnim* a = flowAnim(gf);
     trace(gf, "bloom start");
     gf->title.tracedAnimate = 0;
     if (a) banim_highlight_force_start(a, &gf->title.highlight);
@@ -803,7 +803,7 @@ static void titleBloomStart(BGameFlow* gf)
 // Every tick at rest. Traced once each time the bloom is (re)started.
 static void titleBloomAnimate(BGameFlow* gf)
 {
-    BAnim* a = titleAnim(gf);
+    BAnim* a = flowAnim(gf);
     if (!gf->title.tracedAnimate) trace(gf, "bloom animate");
     gf->title.tracedAnimate = 1;
     if (a) banim_highlight_animate(a, &gf->title.highlight);
@@ -1291,37 +1291,164 @@ void bgf_language_screen_callback(BGameFlow* gf, BScreenMessage msg,
 // (0x00216638) with pInstance unchecked.
 //
 // The constructor (0x00216460) does, in order:
-//   1. tAnimatedBlurb at +4, tHighlightAnimation (ANIMATING_MENUITEM) at
-//      +424, tSlideInAnimation at +456 and SelectionSet at +480;
+//   1. tAnimatedBlurb at +4 (SCROLLING_TEXT twice, WHITEOUT_BAR), then
+//      tHighlightAnimation at +424 (ANIMATING_MENUITEM, gp-16136's colour),
+//      then tSlideInAnimation at +456 to MI_1_MASK's authored X, then
+//      SelectionSet at +480, with the idle Timer (+476) and +632 zeroed;
 //   2. FrontendDatabase::MakeChallengeCarsAvailable and
 //      RaceParameters::InitWithDefaults;
-//   3. the idle Timer at +476 set to RealTimer, and jukebox Start(1);
-//   4. the SelectionSet's five items;
+//   3. the idle Timer set to RealTimer, and jukebox Start(1);
+//   4. the SelectionSet's IndicatorMode 1 and its five items (0x0031be40);
 //   5. StartMovie (the string at 0x002bc430);
 //   6. TheEasterEggs' Start;
 //   7. the Easter egg group hidden, and +628, "shown", cleared.
-// The port has 5 to 7. The movie outlives the screen -- the destructor
+// The port has all but 2, which car select and the race it launches read,
+// and which come with them. The movie outlives the screen -- the destructor
 // (0x00216598) leaves it -- so the Mode Selects and Options, which start
 // their own, are what replace it.
 //
 // The destructor calls TheEasterEggs' Stop, hides the group again, and
-// destroys the four members in reverse.
+// destroys the four members in reverse. SelectionSet's and
+// tHighlightAnimation's do nothing but free; tSlideInAnimation's is
+// tSlideAnimation's (0x00248c08), which puts its groups back, and
+// tAnimatedBlurb's releases its two alphas and its group.
+static const uint32_t kMainMenuMasks[5] = {
+    BGF_MI_1_MASK, BGF_MI_2_MASK, BGF_MI_3_MASK, BGF_MI_4_MASK, BGF_MI_5_MASK,
+};
+
+// FlailerGetTopLeftX (0x00144140), through the kit's hook.
+static float flowTopLeftX(BGameFlow* gf, uint32_t screen, uint32_t object)
+{
+    float x = 0.0f, y = 0.0f;
+    if (gf->anim && gf->anim->hooks.getTopLeft)
+        gf->anim->hooks.getTopLeft(gf->anim->hooks.user, screen, object, &x,
+                                   &y);
+    return x;
+}
+
+// The four members' constructors, each traced with what it is given.
+static void menuBlurbInit(BGameFlow* gf, uint32_t screen, uint32_t text,
+                          uint32_t fadeout, uint32_t bar)
+{
+    BAnim* a = flowAnim(gf);
+    trace(gf, "blurb init %08x %08x %08x %08x", (unsigned)screen,
+          (unsigned)text, (unsigned)fadeout, (unsigned)bar);
+    if (a) banim_blurb_init(a, &gf->mainMenu.blurb, screen, text, fadeout, bar);
+}
+
+static void menuBloomInit(BGameFlow* gf, uint32_t screen, uint32_t object,
+                          uint32_t color)
+{
+    BAnim* a = flowAnim(gf);
+    trace(gf, "bloom init %08x %08x %08x", (unsigned)screen, (unsigned)object,
+          (unsigned)color);
+    if (a)
+        banim_highlight_init(a, &gf->mainMenu.bloom, screen, object,
+                             (int32_t)color);
+}
+
+// Every group slides to the X `object` was authored at; the stagger is in
+// the durations.
+static void menuSlideInInit(BGameFlow* gf, uint32_t screen, uint32_t object)
+{
+    BAnim* a = flowAnim(gf);
+    float  x = flowTopLeftX(gf, screen, object);
+    trace(gf, "slide in %08x %08x %.1f", (unsigned)screen, (unsigned)object, x);
+    if (a) banim_slide_in_init(a, &gf->mainMenu.slideIn, screen, x);
+}
+
+static void menuSelAddItems(BGameFlow* gf, uint32_t screen,
+                            const uint32_t* masks, int n)
+{
+    BAnim* a = flowAnim(gf);
+    char   line[160];
+    int    len, i;
+
+    len = snprintf(line, sizeof(line), "sel items %08x mode %d",
+                   (unsigned)screen, gf->mainMenu.sel.indicatorMode);
+    for (i = 0; i < n && len < (int)sizeof(line); i++)
+        len += snprintf(line + len, sizeof(line) - (size_t)len, " %08x",
+                        (unsigned)masks[i]);
+    trace(gf, "%s", line);
+    if (a) bsel_add_items(a, &gf->mainMenu.sel, masks, n);
+}
+
 static void mainMenuCtor(BGameFlow* gf)
 {
     BNewMainMenu* m = &gf->mainMenu;
+    BAnim*        a = flowAnim(gf);
 
     memset(m, 0, sizeof(*m));
+    menuBlurbInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_OBJ_SCROLLING_TEXT,
+                  BGF_OBJ_SCROLLING_TEXT, BGF_OBJ_WHITEOUT_BAR);
+    menuBloomInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_OBJ_ANIMATING_ITEM,
+                  BANIM_BLOOM_COLOR);
+    menuSlideInInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_MI_1_MASK);
+    m->timer = 0;
+    if (a) bsel_init(a, &m->sel, BGF_SCREEN_NEW_MAIN_MENU);
+    m->eggTimer = 0;
+    m->timer = gf->realTimer;
+    HOOK_VOID(gf, jukebox, 1);    // the main menu's
+    // IndicatorMode 1, stored before AddItems, as on every screen with one:
+    // the mask over the CURRENT item is the one turned off.
+    bsel_set_indicator_mode(&m->sel, 1);
+    menuSelAddItems(gf, BGF_SCREEN_NEW_MAIN_MENU, kMainMenuMasks, 5);
     bgf_start_movie(gf, "MOVIES\\mainmenu_movie.AVI");
     HOOK_VOID(gf, easterEggs, 1);
     groupVisible(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_GROUP_EASTER_EGG, 0);
+    m->eggShown = 0;
     m->active = 1;
 }
 
 static void mainMenuDtor(BGameFlow* gf)
 {
+    BNewMainMenu* m = &gf->mainMenu;
+    BAnim*        a = flowAnim(gf);
+
     HOOK_VOID(gf, easterEggs, 0);
     groupVisible(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_GROUP_EASTER_EGG, 0);
-    memset(&gf->mainMenu, 0, sizeof(gf->mainMenu));
+    if (a) {
+        banim_slide_release(a, &m->slideIn);
+        banim_blurb_release(a, &m->blurb);
+    }
+    trace(gf, "menu kit released");
+    memset(m, 0, sizeof(*m));
+}
+
+// OnTick (0x00216718). The Easter eggs' half comes first:
+//   - with a help menu up (tHelpMenu::IsActive on the list's +452),
+//     TheEasterEggs' +0 is cleared and the idle Timer reset;
+//   - otherwise +0 is set, and a code just entered (+4) resets the Timer,
+//     plays sound 30, shows the group with the code's LanguageID (+8) on
+//     0xf58c1a4b, and sets +628 and +632; gp-16120 set calls 0x0024f968 on
+//     TheEasterEggs and clears it.
+// Then the idle Timer is reset while popup 0 is up (GetPopupActiveState,
+// 0x0016ce00), ConsiderStartDemoMode runs on it, and the three members
+// animate: the blurb, the bloom, the slide-in. Last, the group comes down
+// three seconds after it went up.
+//
+// Not ported: the eggs' half, which needs the 78 codes (TheEasterEggs never
+// sets +4 without them, so nothing of it is seen), and ConsiderStartDemoMode,
+// which waits for StartDemoMode's race: before it, attract mode from here
+// would only stop the menu's movie.
+static void mainMenuTick(BGameFlow* gf)
+{
+    BNewMainMenu* m = &gf->mainMenu;
+    BAnim*        a = flowAnim(gf);
+
+    if (gf->popups[0].active) m->timer = gf->realTimer;
+    if (!m->tracedAnimate) trace(gf, "menu animate");
+    m->tracedAnimate = 1;
+    if (a) {
+        banim_blurb_animate(a, &m->blurb);
+        banim_highlight_animate(a, &m->bloom);
+        banim_slide_animate(a, &m->slideIn);
+    }
+    if (m->eggShown
+        && 3.0f < (float)(int32_t)(gf->realTimer - m->eggTimer) * 0.00025f) {
+        m->eggShown = 0;
+        groupVisible(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_GROUP_EASTER_EGG, 0);
+    }
 }
 
 // HandleEvent (0x00216638): a 24-entry jump table on message - 1.
@@ -1354,37 +1481,47 @@ static void mainMenuDtor(BGameFlow* gf)
 // main menu is where the frontend begins, and the title is behind it for
 // good.
 //
-// HIGHLIGHT is OnHighlight, below. Not ported yet:
-//   - OnHighlight's first call, the echo's SetCurrentMenuItem;
-//   - OnTick: TheEasterEggs' +0 set while no help menu is up, and cleared
-//     while one is; a code just entered (+4) shows the group for three
-//     seconds, with sound 30 and the code's LanguageID (+8) on 0xf58c1a4b;
-//     the idle Timer reset while a popup is up; ConsiderStartDemoMode on
-//     that Timer; the three animations;
-//   - message 24, which JoyHandler does not send yet. Its one use is the
-//     idle Timer, which only ConsiderStartDemoMode reads.
-// Nothing in OnTick is seen without the codes (TheEasterEggs never sets +4)
-// or without StartDemoMode's race, which the port does not have. Until it
-// does, attract mode from the main menu would only stop the menu's movie.
+// HIGHLIGHT is OnHighlight, below, and TICK is OnTick, above. Message 24,
+// any button pressed, resets the idle Timer, which only
+// ConsiderStartDemoMode reads.
 // HighlightMenuItem (0x00216880), in retail's order: the two brackets to the
-// item's MI_n_MASK, the blurb, and SelectionSet::SetCurrentItem, which the
-// trace stands for. The offsets are retail's two constants: MI_UNDERSCORE
-// goes to the box's bottom plus gp-16112 (-3.0), MI_OVERSCORE to its top
-// minus gp-16116 (6.0). They are bscreens.h's BSCR_UNDER_MODE_SELECT and
-// BSCR_OVER_MODE_SELECT, which is what the Mode Selects use too.
+// item's MI_n_MASK, the blurb's NewText(int), and
+// SelectionSet::SetCurrentItem, which the trace stands for. The offsets are
+// retail's two constants: MI_UNDERSCORE goes to the box's bottom plus
+// gp-16112 (-3.0), MI_OVERSCORE to its top minus gp-16116 (6.0). They are
+// bscreens.h's BSCR_UNDER_MODE_SELECT and BSCR_OVER_MODE_SELECT, which is
+// what the Mode Selects use too.
+//
+// The blurb's wipe runs on the top screen's SCROLLING_TEXT, which the 3DS
+// keeps hidden: the sentence itself goes to the bottom panel, through
+// setBlurb, as on the Mode Selects.
 static void mainMenuHighlightItem(BGameFlow* gf, uint32_t mask, int blurb)
 {
+    BNewMainMenu* m = &gf->mainMenu;
+    BAnim*        a = flowAnim(gf);
+
     HOOK_VOID(gf, moveBrackets, BGF_SCREEN_NEW_MAIN_MENU, mask, -3.0f, -6.0f);
+    if (a) banim_blurb_new_text_id(a, &m->blurb, blurb);
     HOOK_VOID(gf, setBlurb, BGF_SCREEN_NEW_MAIN_MENU, blurb);
+    if (a) bsel_set_current(a, &m->sel, mask);
     trace(gf, "bracket %08x", (unsigned)mask);
 }
 
-// OnHighlight (0x00216938). It first gives the bloom at +424 the item
-// (tHighlightAnimation::SetCurrentMenuItem, 0x002488d0), which the port does
-// not have yet, then picks the item's mask and blurb. Any other hash stops
-// there: the brackets and the blurb stay where they were.
+// OnHighlight (0x00216938). It first gives the bloom at +424 the item, the
+// ScreenCallbackData's ItemHash, whatever it is
+// (tHighlightAnimation::SetCurrentMenuItem, 0x002488d0): the echo. Then it
+// picks the item's mask and blurb. Any other hash stops there: the brackets
+// and the blurb stay where they were.
+static void menuBloomSetItem(BGameFlow* gf, uint32_t item)
+{
+    BAnim* a = flowAnim(gf);
+    trace(gf, "bloom item %08x", (unsigned)item);
+    if (a) banim_highlight_set_item(a, &gf->mainMenu.bloom, item);
+}
+
 static void mainMenuHighlight(BGameFlow* gf, uint32_t itemHash)
 {
+    menuBloomSetItem(gf, itemHash);
     switch (itemHash) {
         case BGF_ITEM_MENUITEM_1:
             mainMenuHighlightItem(gf, BGF_MI_1_MASK, BGF_BLURB_MENUITEM_1);
@@ -1429,6 +1566,12 @@ static void mainMenuEvent(BGameFlow* gf, BScreenMessage msg,
         case BMSG_SCREEN_BACK_BUTTON:
             data->noise = 0;
             data->param = 0;
+            break;
+        case BMSG_SCREEN_TICK:
+            mainMenuTick(gf);
+            break;
+        case BMSG_ANY_BUTTON_PRESSED:
+            gf->mainMenu.timer = gf->realTimer;
             break;
         default:
             break;

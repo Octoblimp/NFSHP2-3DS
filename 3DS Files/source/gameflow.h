@@ -299,11 +299,21 @@ typedef struct {
     int      fromOptions;   // +8: 0 before the frontend, 1 from Options
 } BLanguageScreen;
 
-// NewMainMenu, retail's (0x00216460): 636 bytes, of which the port holds
-// only what it has ported. `active` stands for pInstance (gp-16132) being
-// set, which Callback tests before it deletes.
+// NewMainMenu, retail's (0x00216460): 636 bytes. `active` stands for
+// pInstance (gp-16132) being set, which Callback tests before it deletes;
+// +0, the Flailer screen, is always NEW_MAIN_MENU.
 typedef struct {
-    int active;
+    int            active;
+    BBlurb         blurb;       // +4: tAnimatedBlurb, SCROLLING_TEXT
+    BHighlightAnim bloom;       // +424: tHighlightAnimation, the echo
+    BSlideAnim     slideIn;     // +456: tSlideInAnimation
+    uint32_t       timer;       // +476: the idle Timer
+    BSelSet        sel;         // +480: SelectionSet, the MI_n_MASKs
+    int            eggShown;    // +628: the Easter egg group is up
+    uint32_t       eggTimer;    // +632: RealTimer when it went up
+    // The port's trace: OnTick animates all three members on every tick,
+    // and the trace says so once after the constructor.
+    int            tracedAnimate;
 } BNewMainMenu;
 
 struct BGameFlow {
@@ -576,6 +586,13 @@ void bgf_language_screen_callback(BGameFlow* gf, BScreenMessage msg,
 #define BGF_MI_1_MASK        0x6e34e350u
 #define BGF_MI_2_MASK        0x708a0bf1u
 #define BGF_MI_3_MASK        0x72df3492u
+// The rest of the constructor's table (0x0031be40): five masks, two more
+// than the screen authors.
+#define BGF_MI_4_MASK        0x75345d33u
+#define BGF_MI_5_MASK        0x778985d4u
+// The blurb's two text objects and its wipe (the constructor's hashes).
+#define BGF_OBJ_SCROLLING_TEXT 0x75980cf0u
+#define BGF_OBJ_WHITEOUT_BAR   0x70a404ecu
 #define BGF_BLURB_MENUITEM_1 10016
 #define BGF_BLURB_MENUITEM_2 10015
 #define BGF_BLURB_MENUITEM_3 10009

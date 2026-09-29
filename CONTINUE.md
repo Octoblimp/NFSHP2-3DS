@@ -1,8 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-28), after the frontend's sixth slice: the
-Easter egg group hidden. `HANDOFF.md` is the running
+continuation (2026-09-28), after the highlight's echo. `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -58,7 +57,7 @@ bvector_check      27 scenarios,  5721 lines, 0 differ   (23/23 mutations caught
 bmath_check        19 scenarios,  6424 lines, 0 differ   (9/9 mutations caught)
 banim_check        23 scenarios,  2219 lines, 0 differ
 bscreens_check     17 scenarios,  1277 lines, 0 differ
-bootflow_check     48 scenarios, 27803 lines, 0 differ   (168 caught, 3 equivalent)
+bootflow_check     48 scenarios, 27890 lines, 0 differ   (187 caught, 3 equivalent)
 bslotpool_check    18 scenarios,  1025 lines, 0 differ   (47/47 mutations caught)
 geometry_check     30 files,     42047 lines, 0 differ   (53/53 mutations caught)
 texsrc_check       6 packs, 2 levels, 2958 textures, 0 differ
@@ -574,10 +573,36 @@ and so replaced every boot.
    - The unused VP6 decoder, `source/vp6/`, is deleted too. Every movie
      is MV3 and `mv3.c` decodes it.
 
+   **The highlight's echo is closed.** A red copy of the highlighted
+   label grows out of it and fades, every four seconds, on Azahar.
+   `docs/formats/boot-flow.md`, "The echo".
+   - The echo is the bloom, `tHighlightAnimation` on
+     `ANIMATING_MENUITEM`. Retail's `CopyFlailerText` (`0x001410a0`)
+     copies the whole object but its hashes and strip: position, scale, Z,
+     visibility and text. The port's copied only the text, and every
+     screen authors `ANIMATING_MENUITEM` off the bottom edge (y 534 on the
+     main menu, 676 on the title), so no bloom had ever shown.
+     `bui_copy_text` is the whole copy now.
+   - `NewMainMenu` builds retail's four members in the constructor's
+     order (blurb, bloom, slide-in, SelectionSet), animates them in
+     `OnTick`, and releases them in the destructor. `OnHighlight` calls
+     the bloom's `SetCurrentMenuItem` first. Message 24 resets the idle
+     Timer.
+   - `bootflow_check`: 48 scenarios, 27,890 lines, 0 differ; 190
+     mutations, 187 caught, 3 equivalent.
+   - `run_azahar_test.ps1 -Echo` takes a burst of shots on the main menu.
+
+   **The jukebox's notes are in HANDOFF.md's last section:** its
+   addresses and fields, the JBC format, and the open questions (the
+   stereo interleave, the sync data, the RNG, the stream layer).
+   - Blocker: all 24 ndsp channels are taken, 0..22 by `bsnd` and 23 by
+     the movies.
+
    **Next is the rest of the photos**, in TASKS.md's "The retail
-   frontend": the jukebox (`Start(1)` in `NewMainMenu`'s ctor, retail
-   `0x001aeab0`; `cJukeboxPlayer` over `SOUND\JUKEBOXM.JBC`), the
-   highlight's echo, EA TRAX, then Setup, car select and the briefing.
+   frontend": the jukebox (`Start(1)` is already
+   called from the title, the Mode Selects and `NewMainMenu`, retail
+   `0x001aeab0`; `cJukeboxPlayer` over `SOUND\JUKEBOXM.JBC`), EA TRAX,
+   then Setup, car select and the briefing.
 
    When step 6 resumes: `Car::InitRenderInfo` (`0x0011dc80`) and
    CarRenderInfo's constructor (`0x0011e860`, 4700 bytes; retail's

@@ -1112,38 +1112,24 @@ static void hookAnimPrintText(void* user, uint32_t screen, uint32_t object,
     if (idx >= 0) bui_set_text_string(ui, (uint32_t)idx, str);
 }
 
-// CopyFlailerText (0x0013ec18): src's *drawn* string into dst, which means
-// resolving src's LanguageID first -- the bloom is a copy of a menu label
-// and a menu label is a language row. dst then goes onto its own inline
-// string, or the table would keep winning and the copy never show.
+// CopyFlailerText (0x0013ec18): the whole of src but its names over dst --
+// its position, scale, Z, visibility, LanguageID and string (bui.h). The
+// bloom is a copy of a menu label, so it starts where the label is: on the
+// main menu ANIMATING_MENUITEM is authored off the bottom of the screen, at
+// y 534, and only the copy brings it up.
 static void hookAnimCopyText(void* user, uint32_t screen, uint32_t dst,
                              uint32_t src)
 {
     Boot*      b  = (Boot*)user;
     BUI*       ui = NULL;
     BUIScreen* s  = animScreen(b, screen, &ui);
-    BUIObject  o;
-    char       text[128];
     int32_t    si, di;
-    size_t     n = 0;
 
     if (!s || !ui) return;
     si = bui_find_object(ui, s, src, BUI_TYPE_TEXT);
     di = bui_find_object(ui, s, dst, BUI_TYPE_TEXT);
-    if (si < 0 || di < 0 || !bui_object(ui, (uint32_t)si, &o)) return;
-
-    if (o.languageID && b->ui->hasLang)
-        n = langtab_copy(&b->ui->lang, (int32_t)o.languageID, text,
-                         sizeof(text));
-    if (n == 0) {
-        while (n + 1 < sizeof(text) && n < o.maxChars && o.string[n]) {
-            text[n] = o.string[n];
-            n++;
-        }
-        text[n] = 0;
-    }
-    bui_set_text_language(ui, (uint32_t)di, 0);
-    bui_set_text_string(ui, (uint32_t)di, text);
+    if (si < 0 || di < 0) return;
+    bui_copy_text(ui, (uint32_t)di, (uint32_t)si);
 }
 
 // FlailerTextChunk::ScaleAboutCenter (0x0013eb20). The scale is written

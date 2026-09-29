@@ -219,6 +219,15 @@ bool bui_set_bitmap_texture(BUI* ui, uint32_t index, uint32_t textureHash);
 // language table whenever one is set. See uirender.c's object_text().
 uint32_t bui_set_text_string(BUI* ui, uint32_t index, const char* s);
 
+// CopyFlailerText (0x0013ec18; retail 0x001410a0, the same but for the
+// name's shift): src's 64 bytes from ObjectType on, over dst's -- the
+// visibility, Z, position, scale, font, format, colour, LanguageID and the
+// String pointer, all of it but the two hashes and dst's pFlailerStrip --
+// then DirtyFlag 8. On the PS2 the two then share one string; here each
+// keeps its characters inline, so src's are copied, as far as dst has room.
+// Same caveat about a writable buffer.
+bool bui_copy_text(BUI* ui, uint32_t dst, uint32_t src);
+
 // Splits a PS2 colour word into 0..255 components. The bytes are GS
 // convention -- 0x80 is full intensity, and the 0x81..0xff seen on some
 // corners is the over-bright range -- so this doubles and clamps, exactly as
