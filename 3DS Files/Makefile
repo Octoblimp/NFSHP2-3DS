@@ -27,7 +27,7 @@ include $(DEVKITARM)/3ds_rules
 #---------------------------------------------------------------------------------
 TARGET		:=	NFSHP2-3DS
 BUILD		:=	build
-SOURCES		:=	source source/vp6
+SOURCES		:=	source
 DATA		:=	data
 INCLUDES	:=	include
 # No ROMFS -- the CIA/.3dsx is engine-only and ships with zero game data.

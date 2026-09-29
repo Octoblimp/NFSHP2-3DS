@@ -88,7 +88,8 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         read (`docs/formats/engine-table.md`, `tools/engine_table.py`).
         **Movies are not VP6**: `MOVIES\*.AVI` are RIFF/AVI with fourcc
         `MV30` (EA's MV3 codec, `MV3Codec`+`Huffman` in the ELF), 512x256.
-        The `source/vp6/` decoder copied from NFSU2-3DS does not apply.
+        The `source/vp6/` decoder copied from NFSU2-3DS does not apply,
+        and was deleted on 2026-09-28.
 11. [x] JDLZ: **HP2 does not use it** -- no `jdlz`/`JDLZ` symbol in the ELF or
         `.MAP`. `.LZC` files are a `COMP`-magic LZSS container handled by
         `LZDecompress()` (`LZCompress.obj`, 0x001aa460). Reimplemented in
@@ -175,10 +176,11 @@ Numbered IDs are stable -- don't renumber when inserting new tasks.
         differ within one chain, so `--mips` decodes level by level.
         `TextureBasePointerOffset` is a GS address, not a file offset, and
         disagrees with the file layout on 191 of 265 mipmapped textures.
-        That leaves `3DS Files/source/vp6/` as dead weight the way `jdlz.c`
-        was -- nothing on this disc is VP6 -- but it is left in place for now
-        rather than deleted, in case the Phase 3 intro ends up reusing its
-        player scaffolding around a pre-decoded frame sequence.
+        That left `3DS Files/source/vp6/` as dead weight the way `jdlz.c`
+        was -- nothing on this disc is VP6. It was kept in case the Phase 3
+        intro reused its player scaffolding. The intro plays through
+        `mv3.c` and `avimovie.c` instead, and the directory was deleted on
+        2026-09-28, at the user's request.
         **Correction, and it was a big one**: `ImagePlacement` /
         `PalettePlacement` are relative to the `0x30300004` payload *rounded
         up to 128 bytes*, not to the payload -- `LoaderTexturePack`

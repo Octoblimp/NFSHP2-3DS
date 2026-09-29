@@ -1,11 +1,12 @@
 # `MOVIES\*.AVI` -- the MV3 video codec and the movies' sound
 
 The movies on this disc are **not** VP6 and **not** EA's `SCHl`/`MVhd`
-streaming format, which is what `source/vp6/` (inherited from NFSU2-3DS)
-handles. They are ordinary RIFF/AVI files whose video fourcc is `MV30` --
-EA's own MV3 codec, whose decoder ships inside the ELF -- with a sound
-stream that the header calls 8-bit mono PCM and that is really the SPU's
-ADPCM, in stereo.
+streaming format, which is what NFSU2-3DS's decoder handles. (The port
+carried an unused copy of that decoder in `source/vp6/` until
+2026-09-28.) They are ordinary RIFF/AVI files whose video fourcc is
+`MV30` -- EA's own MV3 codec, whose decoder ships inside the ELF -- with
+a sound stream that the header calls 8-bit mono PCM and that is really
+the SPU's ADPCM, in stereo.
 
 The port plays them natively: `3DS Files/source/mv3.c` decodes MV3,
 `avimovie.c` streams the AVI off the card, decodes the sound and paces both,

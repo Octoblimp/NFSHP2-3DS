@@ -12,7 +12,7 @@
 // A 3DS process has two heaps:
 //   * the "linear" heap -- PHYSICALLY CONTIGUOUS and GPU-visible. This is
 //     what linearAlloc() hands out, so every C3D_Tex (texpack.c, and
-//     vp6_display.c video textures), every VBO (model3d.c) and every ndsp
+//     avimovie.c's video textures), every VBO (model3d.c) and every ndsp
 //     audio buffer (audio.c, main.c) lives here.
 //   * the ordinary malloc heap -- normal CPU memory, backing every malloc()
 //     in the port: whole-file .BUN/.LZC loads, COMP output buffers,

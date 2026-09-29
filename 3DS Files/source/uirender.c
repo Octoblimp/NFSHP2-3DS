@@ -269,8 +269,8 @@ typedef struct {
 
 // A sub-rectangle of a texture, in pixels, with row 0 at the top. v is
 // flipped because citro2d's convention puts the first row in memory at v = 1;
-// vp6/vp6_display.c builds its subtex the same way over the same upload path,
-// and that one is verified on hardware.
+// NFSU2-3DS's VP6 player built its subtex the same way over the same upload
+// path, and that one is verified on hardware.
 static void subtex_from_pixels(Tex3DS_SubTexture* st, float texW, float texH,
                                float x, float y, float w, float h)
 {
