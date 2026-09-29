@@ -58,7 +58,7 @@ bvector_check      27 scenarios,  5721 lines, 0 differ   (23/23 mutations caught
 bmath_check        19 scenarios,  6424 lines, 0 differ   (9/9 mutations caught)
 banim_check        23 scenarios,  2219 lines, 0 differ
 bscreens_check     17 scenarios,  1277 lines, 0 differ
-bootflow_check     50 scenarios, 28920 lines, 0 differ   (166 caught, 3 equivalent)
+bootflow_check     51 scenarios, 30454 lines, 0 differ   (176 caught, 3 equivalent)
 bslotpool_check    18 scenarios,  1025 lines, 0 differ   (47/47 mutations caught)
 geometry_check     30 files,     42047 lines, 0 differ   (53/53 mutations caught)
 texsrc_check       6 packs, 2 levels, 2958 textures, 0 differ
@@ -538,6 +538,22 @@ and so replaced every boot.
    - Owed from the main menu: the 78 codes; attract mode from `OnTick`
      with message 24 (it waits on `StartDemoMode`'s race);
      `MakeChallengeCarsAvailable` and `InitWithDefaults`.
+
+   **The main menu's highlight bars follow the highlight.** The user saw
+   them stay around Hot Pursuit after going into a menu and back. The
+   port's `NewMainMenu` had no `OnHighlight`, so the bars stayed where
+   `NEW_MAIN_MENU` authors them.
+   - Retail's `OnHighlight` (`0x00216938`) and `HighlightMenuItem`
+     (`0x00216880`) are in `gameflow.c` now. Brackets go to the item's
+     `MI_n_MASK` at -3 and -6, blurbs are 10016, 10015 and 10009, and
+     `hooks.moveBrackets` and `hooks.setBlurb` are the Mode Selects'
+     hooks in `main.c`.
+   - The blurb shows on the bottom panel. The top screen's
+     `SCROLLING_TEXT` stays hidden.
+   - `bootflow_check` runs retail's `HighlightMenuItem`
+     (`menuhighlight`). `run_azahar_test.ps1` counts the main menu's own
+     bracket moves.
+   - The bloom's `SetCurrentMenuItem` waits for the echo.
 
    **Next is the rest of the photos**, in TASKS.md's "The retail
    frontend": the jukebox (`Start(1)` in `NewMainMenu`'s ctor, retail

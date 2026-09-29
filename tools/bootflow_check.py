@@ -57,6 +57,7 @@ SOURCES = ["tools/src/gameflow_test.c",
 
 # ScreenMessage
 MENUITEM_SELECT = 1
+MENUITEM_HIGHLIGHT = 4
 MENUITEM_PAD_LEFT, MENUITEM_PAD_RIGHT = 6, 7
 MENUITEM_PAD_UP, MENUITEM_PAD_DOWN = 8, 9
 MENUITEM_SQUARE = 10
@@ -1687,6 +1688,11 @@ MAIN_MENU_CALLBACK = 0x00216a10         # NewMainMenu::Callback
 MAIN_MENU_INST = RETAIL_GP - 16132      # its pInstance
 COPS_ON = FRED + 32                     # Fred.MainMenuOpts.mPolice
 EASTER_EGGS = 0x0031d7e8                # TheEasterEggs, the port's name
+MI_UNDERSCORE = 0x32c91dae              # the bracket under the item
+MI_OVERSCORE = 0xc671680c               # and over it
+# The box FlailerGetBoundingBox answers for every mask: the brackets are
+# said relative to it, as the offsets the port hands its hook.
+HL_TOP, HL_BOTTOM = 100, 140
 
 
 class RetailMainMenu(object):
@@ -1704,7 +1710,8 @@ class RetailMainMenu(object):
       - the four members' constructors and destructors: tAnimatedBlurb,
         tHighlightAnimation, tSlideInAnimation and SelectionSet, with
         AddItems and FlailerGetTopLeftX;
-      - their three Animates in OnTick, and OnHighlight's calls;
+      - their three Animates in OnTick, and OnHighlight's first call, the
+        bloom's SetCurrentMenuItem;
       - FrontendDatabase::MakeChallengeCarsAvailable and
         RaceParameters::InitWithDefaults;
       - jukebox Start(1);
@@ -1716,6 +1723,12 @@ class RetailMainMenu(object):
     OnTick shows the Easter egg group only once TheEasterEggs' +4 is set,
     and nothing sets it here, as nothing hands it the pad. Were it reached,
     its sound and FlailerSetLanguageID would show in the transcript.
+
+    HighlightMenuItem runs. FlailerGetBoundingBox answers the same box for
+    any mask (HL_TOP, HL_BOTTOM), and the two SetTopLeftYs are said as one
+    "brackets" line, each bracket's Y less the edge it was put against --
+    the offsets, as the port's moveBrackets hook takes them. NewText is its
+    "blurb" and SelectionSet::SetCurrentItem its "bracket" trace.
 
     CopsOn is Fred's +32. The flow's is put in before each run and read
     back after, so the flow's is the one "final" prints.
@@ -1731,6 +1744,7 @@ class RetailMainMenu(object):
         e.put32(MAIN_MENU_INST, 0)
         e.write(EASTER_EGGS, bytes(12))
         self.pending = None
+        self.hl_mask, self.hl_under = 0, 0.0
 
     def stubs(self):
         e, f = self.e, self.flow
@@ -1747,6 +1761,27 @@ class RetailMainMenu(object):
         def language_id(_e):               # FlailerSetLanguageID
             f.say("language id %08x %08x %08x" % (arg(0), arg(1), arg(2)))
 
+        def bounding_box(_e):              # FlailerGetBoundingBox
+            # Ints, as HighlightMenuItem converts them with cvt.s.w: left,
+            # top, right and bottom through a2, a3, t0 and t1.
+            self.hl_mask = arg(1)
+            for i, v in ((2, 0), (3, HL_TOP), (4, 0), (5, HL_BOTTOM)):
+                e.put32(arg(i), v)
+
+        def top_left_y(_e):                # FlailerSetTopLeftY
+            y = e.f(12)
+            if arg(1) == MI_UNDERSCORE:
+                self.hl_under = y - HL_BOTTOM
+            elif arg(1) == MI_OVERSCORE:
+                f.say("brackets %08x %08x %.1f %.1f"
+                      % (arg(0), self.hl_mask, self.hl_under, y - HL_TOP))
+            else:
+                f.say("top left y %08x %08x %.1f" % (arg(0), arg(1), y))
+
+        def new_text(_e):                  # tAnimatedBlurb::NewText
+            # The blurb is the instance's +4; +0 is the screen.
+            f.say("blurb %08x %d" % (e.u32(arg(0) - 4), arg(1)))
+
         silent = (
             0x002491b0, 0x00249280,        # tAnimatedBlurb, ~
             0x00248870, 0x002488b0,        # tHighlightAnimation, ~
@@ -1760,8 +1795,7 @@ class RetailMainMenu(object):
             0x0016ed50,                    # ConsiderStartDemoMode
             0x00249348, 0x00248970,        # the Animates: blurb, bloom,
             0x00248d20,                    # slide-in
-            0x002488d0, 0x00144280,        # OnHighlight's
-            0x001b9ae8, 0x002494e8, 0x0016e270,
+            0x002488d0,                    # SetCurrentMenuItem, the bloom's
         )
         stubs = {addr: (lambda _e: None) for addr in silent}
         stubs.update({
@@ -1776,6 +1810,10 @@ class RetailMainMenu(object):
             0x0016e038: lambda _e: f.sound(arg(0)),    # MakeFrontendSound
             0x001449a8: language_id,
             0x0024f968: lambda _e: f.say("eggs 0024f968"),
+            0x00144280: bounding_box,
+            0x001b9ae8: top_left_y,
+            0x002494e8: new_text,
+            0x0016e270: lambda _e: f.say("bracket %08x" % arg(1)),
         })
         for addr, fn in stubs.items():
             e.stub(addr, fn)
@@ -1955,6 +1993,12 @@ SCENARIOS = [
              input=[(BOOT1 + 16, "select"), (BOOT1 + 18, "back")]),
     card_row("attractmovie", BOOT1 + 40, skipMovies=0,
              input=[(BOOT1 + 12, "optionsmovie")]),
+    # The main menu's highlight, before Options and after it.
+    card_row("menuhighlight", BOOT60 + 300, dt=SIXTIETH, skipMovies=0,
+             input=[(BOOT60 + 270, "select"), (BOOT60 + 272, "hi2"),
+                    (BOOT60 + 273, "hi3"), (BOOT60 + 274, "hi9"),
+                    (BOOT60 + 275, "item3"), (BOOT60 + 278, "back"),
+                    (BOOT60 + 280, "hi1"), (BOOT60 + 282, "hi2")]),
 ]
 
 
@@ -2011,6 +2055,10 @@ def run_scenario(sc):
                 f.menu_item_event(MENUITEM_SELECT, ITEM_MENUITEM_1 + n, 0)
             elif what.startswith("hl"):
                 f.active_item = ITEM_MENUITEM_1 + ord(what[2]) - ord("1")
+            elif what.startswith("hi"):
+                n = ord(what[2]) - ord("1")
+                f.active_item = ITEM_MENUITEM_1 + n
+                f.menu_item_event(MENUITEM_HIGHLIGHT, ITEM_MENUITEM_1 + n, 0)
             elif what.startswith("slow"):
                 f.loader_due = int(what[4:])
             elif what == "optionsmovie":
@@ -2712,6 +2760,53 @@ MUTATIONS += [
     ("main-menu-cops-on-off", GF,
      "                    gf->copsOn = 1;",
      "                    gf->copsOn = 0;"),
+    # Its OnHighlight: HighlightMenuItem's brackets, blurb and SelectionSet,
+    # for the three items and nothing else.
+    ("main-menu-highlight-ignored", GF,
+     "            mainMenuHighlight(gf, data->itemHash);",
+     "            (void)0;"),
+    ("main-menu-highlight-wrong-mask", GF,
+     "mainMenuHighlightItem(gf, BGF_MI_2_MASK, BGF_BLURB_MENUITEM_2);",
+     "mainMenuHighlightItem(gf, BGF_MI_1_MASK, BGF_BLURB_MENUITEM_2);"),
+    ("main-menu-highlight-wrong-blurb", GF,
+     "mainMenuHighlightItem(gf, BGF_MI_3_MASK, BGF_BLURB_MENUITEM_3);",
+     "mainMenuHighlightItem(gf, BGF_MI_3_MASK, BGF_BLURB_MENUITEM_1);"),
+    ("main-menu-highlight-falls-through", GF,
+     "BGF_BLURB_MENUITEM_1);" + NL
+     + "            break;" + NL
+     + "        case BGF_ITEM_MENUITEM_2:",
+     "BGF_BLURB_MENUITEM_1);" + NL
+     + "        case BGF_ITEM_MENUITEM_2:"),
+    ("main-menu-highlight-default-moves", GF,
+     "BGF_BLURB_MENUITEM_3);" + NL
+     + "            break;" + NL
+     + "        default:" + NL
+     + "            break;",
+     "BGF_BLURB_MENUITEM_3);" + NL
+     + "            break;" + NL
+     + "        default:" + NL
+     + "            mainMenuHighlightItem(gf, BGF_MI_1_MASK, "
+     + "BGF_BLURB_MENUITEM_1);" + NL
+     + "            break;"),
+    ("main-menu-brackets-swapped", GF,
+     "BGF_SCREEN_NEW_MAIN_MENU, mask, -3.0f, -6.0f);",
+     "BGF_SCREEN_NEW_MAIN_MENU, mask, -6.0f, -3.0f);"),
+    ("main-menu-overscore-added", GF,
+     "BGF_SCREEN_NEW_MAIN_MENU, mask, -3.0f, -6.0f);",
+     "BGF_SCREEN_NEW_MAIN_MENU, mask, -3.0f, 6.0f);"),
+    ("main-menu-blurb-first", GF,
+     "    HOOK_VOID(gf, moveBrackets, BGF_SCREEN_NEW_MAIN_MENU, mask, -3.0f, "
+     + "-6.0f);" + NL
+     + "    HOOK_VOID(gf, setBlurb, BGF_SCREEN_NEW_MAIN_MENU, blurb);",
+     "    HOOK_VOID(gf, setBlurb, BGF_SCREEN_NEW_MAIN_MENU, blurb);" + NL
+     + "    HOOK_VOID(gf, moveBrackets, BGF_SCREEN_NEW_MAIN_MENU, mask, -3.0f, "
+     + "-6.0f);"),
+    ("main-menu-highlight-no-blurb", GF,
+     "    HOOK_VOID(gf, setBlurb, BGF_SCREEN_NEW_MAIN_MENU, blurb);" + NL,
+     ""),
+    ("main-menu-highlight-no-select-set", GF,
+     "    trace(gf, \"bracket %08x\", (unsigned)mask);" + NL,
+     ""),
 ]
 
 

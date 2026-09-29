@@ -1882,6 +1882,8 @@ int main(int argc, char** argv)
     hooks.displayFrame     = hookDisplayFrame;
     hooks.newFileSys       = hookNewFileSys;
     hooks.easterEggs       = hookEasterEggs;
+    hooks.moveBrackets     = hookMoveBrackets;   // NewMainMenu's highlight
+    hooks.setBlurb         = hookSetBlurb;
     hooks.trace            = hookTrace;
     // TheDemoModeReplay has no replays to offer (no hook answers "none"),
     // and StartDemoMode's race is not ported: ConsiderStartDemoMode runs

@@ -387,6 +387,15 @@ $atOptions = $dbg | Where-Object { $_ -match "flow enter Options" }
 $brackets  = $dbg | Where-Object { $_ -match "flow bracket " }
 $blurbs    = $dbg | Where-Object { $_ -match "flow blurb " }
 $leftLoop  = $dbg | Where-Object { $_ -match "^left main loop" }
+# The main menu's own bracket moves, which its OnHighlight makes. The masks
+# are the same hashes on every screen, so they are told apart by which
+# screen the flow last entered ("flow enter <name> <hash>").
+$menuBrackets = @()
+$onScreen = ""
+foreach ($line in $dbg) {
+    if ($line -match "^flow enter (.+) [0-9a-f]{8}$") { $onScreen = $Matches[1] }
+    elseif ($line -match "^flow bracket " -and $onScreen -eq "New Main Menu") { $menuBrackets += $line }
+}
 
 $verdict = "UNKNOWN"
 if (-not $reached)      { $verdict = "FAIL (never reached the main loop)" }
@@ -397,6 +406,7 @@ elseif (-not $atMenu)   { $verdict = "PARTIAL (movie played, never reached the m
 elseif (-not $atModes)  { $verdict = "PARTIAL (reached the main menu, but not Cops On Mode Select)" }
 elseif (-not $atOptions){ $verdict = "PARTIAL (reached Cops On Mode Select, but not Options)" }
 elseif (-not $brackets) { $verdict = "PARTIAL (reached both screens, but nothing ever highlighted)" }
+elseif (-not $menuBrackets) { $verdict = "PARTIAL (the main menu's highlight never moved its brackets)" }
 elseif ($leftLoop)      { $verdict = "PASS (booted, movie played, walked the frontend, exited cleanly)" }
 elseif (-not $survived) { $verdict = "FAIL (walked the frontend, then died without leaving the main loop)" }
 else                    { $verdict = "PASS (booted, movie played, walked the frontend)" }
@@ -417,6 +427,7 @@ $panelOpen = $dbg | Where-Object { $_ -match "^panel movie " }
 Write-Host ("Menu movie: {0} opens" -f $panelOpen.Count)
 $panelOpen | Select-Object -Unique | ForEach-Object { Write-Host ("            {0}" -f $_) }
 Write-Host ("Frontend:   {0} bracket moves, {1} blurb changes" -f $brackets.Count, $blurbs.Count)
+Write-Host ("Main menu:  {0} bracket moves ({1})" -f $menuBrackets.Count, (($menuBrackets | ForEach-Object { ($_ -split " ")[2] } | Select-Object -Unique) -join ", "))
 $eggs    = $dbg | Where-Object { $_ -match "^easter eggs " }
 $eggHide = $dbg | Where-Object { $_ -match "flow vis group ae0f8aa1 74e404b4 " }
 Write-Host ("Main menu:  {0} easter egg start/stops, {1} egg group sets ({2} shown)" -f $eggs.Count, $eggHide.Count, ($eggHide | Where-Object { $_ -match " 1$" }).Count)

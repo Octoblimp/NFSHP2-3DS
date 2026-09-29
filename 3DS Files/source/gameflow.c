@@ -1353,7 +1353,7 @@ static void mainMenuDtor(BGameFlow* gf)
 //
 //   SELECT (1)  0x0021668c  the three-way test below
 //   HIGHLIGHT (4)            OnHighlight (0x00216938): the bloom's item,
-//                            and the blurb through HighlightMenuItem
+//                            then HighlightMenuItem's brackets and blurb
 //   BACK (17)   0x00216664  Param and Noise cleared
 //   TICK (18)                OnTick (0x00216718)
 //   24          0x00216680  the idle Timer set to RealTimer
@@ -1379,8 +1379,8 @@ static void mainMenuDtor(BGameFlow* gf)
 // main menu is where the frontend begins, and the title is behind it for
 // good.
 //
-// Not ported yet:
-//   - OnHighlight (the echo and the blurb);
+// HIGHLIGHT is OnHighlight, below. Not ported yet:
+//   - OnHighlight's first call, the echo's SetCurrentMenuItem;
 //   - OnTick: TheEasterEggs' +0 set while no help menu is up, and cleared
 //     while one is; a code just entered (+4) shows the group for three
 //     seconds, with sound 30 and the code's LanguageID (+8) on 0xf58c1a4b;
@@ -1391,10 +1391,47 @@ static void mainMenuDtor(BGameFlow* gf)
 // Nothing in OnTick is seen without the codes (TheEasterEggs never sets +4)
 // or without StartDemoMode's race, which the port does not have. Until it
 // does, attract mode from the main menu would only stop the menu's movie.
+// HighlightMenuItem (0x00216880), in retail's order: the two brackets to the
+// item's MI_n_MASK, the blurb, and SelectionSet::SetCurrentItem, which the
+// trace stands for. The offsets are retail's two constants: MI_UNDERSCORE
+// goes to the box's bottom plus gp-16112 (-3.0), MI_OVERSCORE to its top
+// minus gp-16116 (6.0). They are bscreens.h's BSCR_UNDER_MODE_SELECT and
+// BSCR_OVER_MODE_SELECT, which is what the Mode Selects use too.
+static void mainMenuHighlightItem(BGameFlow* gf, uint32_t mask, int blurb)
+{
+    HOOK_VOID(gf, moveBrackets, BGF_SCREEN_NEW_MAIN_MENU, mask, -3.0f, -6.0f);
+    HOOK_VOID(gf, setBlurb, BGF_SCREEN_NEW_MAIN_MENU, blurb);
+    trace(gf, "bracket %08x", (unsigned)mask);
+}
+
+// OnHighlight (0x00216938). It first gives the bloom at +424 the item
+// (tHighlightAnimation::SetCurrentMenuItem, 0x002488d0), which the port does
+// not have yet, then picks the item's mask and blurb. Any other hash stops
+// there: the brackets and the blurb stay where they were.
+static void mainMenuHighlight(BGameFlow* gf, uint32_t itemHash)
+{
+    switch (itemHash) {
+        case BGF_ITEM_MENUITEM_1:
+            mainMenuHighlightItem(gf, BGF_MI_1_MASK, BGF_BLURB_MENUITEM_1);
+            break;
+        case BGF_ITEM_MENUITEM_2:
+            mainMenuHighlightItem(gf, BGF_MI_2_MASK, BGF_BLURB_MENUITEM_2);
+            break;
+        case BGF_ITEM_MENUITEM_3:
+            mainMenuHighlightItem(gf, BGF_MI_3_MASK, BGF_BLURB_MENUITEM_3);
+            break;
+        default:
+            break;
+    }
+}
+
 static void mainMenuEvent(BGameFlow* gf, BScreenMessage msg,
                           BScreenCallbackData* data)
 {
     switch (msg) {
+        case BMSG_MENUITEM_HIGHLIGHT:
+            mainMenuHighlight(gf, data->itemHash);
+            break;
         case BMSG_MENUITEM_SELECT:
             switch (data->itemHash) {
                 case BGF_ITEM_MENUITEM_1:

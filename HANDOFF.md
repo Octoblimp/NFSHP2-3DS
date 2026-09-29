@@ -8901,3 +8901,41 @@ The jukebox: `Start(1)` in `NewMainMenu`'s constructor (retail
 `0x001aeab0`), `cJukeboxPlayer` and `SOUND\JUKEBOXM.JBC`. Then the
 highlight's echo, EA TRAX, Setup, car select and the briefing, and step
 6's `Car::InitRenderInfo`.
+
+## Session 30, continued (2026-09-28) -- The main menu's highlight bars
+
+The user reported that the main menu's two white bars stayed around Hot
+Pursuit after going into a menu and back, while the orange highlight
+moved. The Mode Selects' bars moved because `bscreens.c` ports their
+highlight. The main menu's never had: its class had no `OnHighlight`.
+
+- **Retail.** `HandleEvent` sends `MENUITEM_HIGHLIGHT` to `OnHighlight`
+  (`0x00216938`). It points the bloom at the item, then picks the item's
+  mask and blurb, or does nothing for any other hash. `HighlightMenuItem`
+  (`0x00216880`) then:
+  - takes the mask's `FlailerGetBoundingBox`;
+  - moves `MI_UNDERSCORE` to its bottom plus `gp-16112` (-3.0), and
+    `MI_OVERSCORE` to its top minus `gp-16116` (6.0);
+  - calls `NewText` with the blurb;
+  - calls `SelectionSet::SetCurrentItem`.
+  The blurbs are 10016, 10015 and 10009: "Be the cops or beat the cops!",
+  "Take on the world's best sports cars!", "Customize your settings."
+- **`gameflow.c`.** `mainMenuHighlight` and `mainMenuHighlightItem`,
+  through two new hooks, `moveBrackets` and `setBlurb`. On the 3DS they
+  are the Mode Selects' `hookMoveBrackets` and `hookSetBlurb`. The top
+  screen's `SCROLLING_TEXT` stays hidden, and the sentence shows on the
+  bottom panel, as it does on the Mode Selects.
+- **`bootflow_check`.** `RetailMainMenu` runs `HighlightMenuItem` now,
+  with a box stubbed in for `FlailerGetBoundingBox`. The new scenario is
+  `menuhighlight` (the new verb `hi<n>`): two items, an unknown one,
+  Options and back, and two more. 51 scenarios, 30454 lines, 0 differ. 10
+  new mutations: 179, 176 caught and the same 3 equivalent.
+- **`run_azahar_test.ps1`** counts the bracket moves made while the main
+  menu is the current screen, and a walk with none is PARTIAL.
+
+### Next
+
+The jukebox: `Start(1)` in `NewMainMenu`'s constructor (retail
+`0x001aeab0`), `cJukeboxPlayer` and `SOUND\JUKEBOXM.JBC`. Then the echo
+(with `OnHighlight`'s `SetCurrentMenuItem`), EA TRAX, Setup, car select
+and the briefing, and step 6's `Car::InitRenderInfo`.

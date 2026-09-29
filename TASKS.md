@@ -2269,6 +2269,15 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
         It waits on `StartDemoMode`'s race.
   - [ ] `MakeChallengeCarsAvailable` and `RaceParameters::InitWithDefaults`
         in the constructor.
+- [x] **The main menu's highlight bars.** Reported on 2026-09-28: after
+      going into a menu and back, the two white bars stayed around Hot
+      Pursuit while the highlight moved. The port's `NewMainMenu` had no
+      `OnHighlight`, so they never moved on the main menu at all.
+      Retail's `OnHighlight` (`0x00216938`) and `HighlightMenuItem`
+      (`0x00216880`) now move them to the item's `MI_n_MASK` and set its
+      blurb, which shows on the bottom panel.
+  - [ ] `OnHighlight`'s first call, the bloom's `SetCurrentMenuItem`,
+        with the echo below.
 - [ ] **The jukebox and its EA TRAX box.**
   - The music.
   - The song and the artist, bottom left, over the Help button while

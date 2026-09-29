@@ -323,6 +323,18 @@ static void wEasterEggs(void* user, int start)
     (void)user;
     printf("eggs %d\n", start);
 }
+static void wMoveBrackets(void* user, uint32_t screen, uint32_t mask,
+                          float under, float over)
+{
+    (void)user;
+    printf("brackets %08x %08x %.1f %.1f\n", (unsigned)screen,
+           (unsigned)mask, under, over);
+}
+static void wSetBlurb(void* user, uint32_t screen, int blurb)
+{
+    (void)user;
+    printf("blurb %08x %d\n", (unsigned)screen, blurb);
+}
 static void wStartDemoMode(void* user) { (void)user; printf("attract\n"); }
 static void wSetScreenVisible(void* u, uint32_t s, int v)
 { (void)u; (void)s; (void)v; }
@@ -900,6 +912,17 @@ static const Scenario kScenarios[] = {
     { .name = "attractmovie", .videoMode = 1, .frontendLaunchType = 1,
       .frames = BOOT1 + 40, .dt = 1.0f,
       .input = {{BOOT1 + 12, "optionsmovie"}} },
+    // The main menu's highlight: OnHighlight moves the brackets to each
+    // item's mask and sets its blurb, and an item it does not know (hi9,
+    // MENUITEM_9) moves nothing. Then into Options and back, and the
+    // highlight still moves them -- which, before OnHighlight was ported,
+    // it did not: the brackets stayed where NEW_MAIN_MENU authors them.
+    { .name = "menuhighlight", .videoMode = 1, .frontendLaunchType = 1,
+      .frames = BOOT60 + 300, .dt = SIXTIETH,
+      .input = {{BOOT60 + 270, "select"}, {BOOT60 + 272, "hi2"},
+                {BOOT60 + 273, "hi3"}, {BOOT60 + 274, "hi9"},
+                {BOOT60 + 275, "item3"}, {BOOT60 + 278, "back"},
+                {BOOT60 + 280, "hi1"}, {BOOT60 + 282, "hi2"}} },
 };
 #pragma GCC diagnostic pop
 #define NUM_SCENARIOS ((int)(sizeof(kScenarios) / sizeof(kScenarios[0])))
@@ -963,6 +986,8 @@ static void runScenario(const Scenario* sc)
     hooks.sound                   = wSound;
     hooks.jukebox                 = wJukebox;
     hooks.easterEggs              = wEasterEggs;
+    hooks.moveBrackets            = wMoveBrackets;
+    hooks.setBlurb                = wSetBlurb;
     hooks.startDemoMode           = wStartDemoMode;
     hooks.replayConsiderLaunching = wReplayConsider;
     hooks.replayLaunch            = wReplayLaunch;
@@ -1044,6 +1069,14 @@ static void runScenario(const Scenario* sc)
                 // The highlight moved to MENUITEM_n.
                 printf("input %s\n", what);
                 w.activeItem = BGF_ITEM_MENUITEM_1 + (unsigned)(what[2] - '1');
+            } else if (!strncmp(what, "hi", 2)) {
+                // ... and FlailerMenu said so: MENUITEM_HIGHLIGHT for
+                // MENUITEM_n, as bmenu sends it on entry and on a move.
+                unsigned n = (unsigned)(what[2] - '1');
+                printf("input %s\n", what);
+                w.activeItem = BGF_ITEM_MENUITEM_1 + n;
+                bgf_menu_item_event(&gf, BMSG_MENUITEM_HIGHLIGHT,
+                                    BGF_ITEM_MENUITEM_1 + n, 0);
             } else if (!strncmp(what, "slow", 4)) {
                 // A slow loader: nothing lands before frame n.
                 printf("input %s\n", what);

@@ -225,6 +225,14 @@ typedef struct {
     // (0x0024f610) takes them back. NewMainMenu's constructor and
     // destructor are its only callers. `start` is 1 for Start, 0 for Stop.
     void (*easterEggs)(void* user, int start);
+    // NewMainMenu::HighlightMenuItem (0x00216880), the same pair bscreens.h
+    // gives the menus it has classes for. moveBrackets is its
+    // FlailerGetBoundingBox on the item's MI_n_MASK and the two SetTopLeftYs:
+    // MI_UNDERSCORE to the box's bottom plus `under`, MI_OVERSCORE to its
+    // top plus `over`. setBlurb is its tAnimatedBlurb::NewText.
+    void (*moveBrackets)(void* user, uint32_t screen, uint32_t mask,
+                         float under, float over);
+    void (*setBlurb)(void* user, uint32_t screen, int blurbId);
     // StartDemoMode (0x0016ecd8): the attract race. It begins with
     // StopMovie, which the flow runs before the hook; the track it takes in
     // turn and Fred's demo race are the host's.
@@ -572,6 +580,14 @@ void bgf_language_screen_callback(BGameFlow* gf, BScreenMessage msg,
 #define BGF_ITEM_MENUITEM_1  0x52e039f3u   // "Hot Pursuit"
 #define BGF_ITEM_MENUITEM_2  0x52e039f4u   // "World Racing"
 #define BGF_ITEM_MENUITEM_3  0x52e039f5u   // "Options"
+// bStringHash("MI_n_MASK") for the three, and the blurb OnHighlight
+// (0x00216938) gives each: the LanguageIDs of the sentence under the menu.
+#define BGF_MI_1_MASK        0x6e34e350u
+#define BGF_MI_2_MASK        0x708a0bf1u
+#define BGF_MI_3_MASK        0x72df3492u
+#define BGF_BLURB_MENUITEM_1 10016
+#define BGF_BLURB_MENUITEM_2 10015
+#define BGF_BLURB_MENUITEM_3 10009
 // The language screen's: MENUITEM_1..6 are the six languages in
 // e_Languages order, MENUITEM_7 is Load All Languages.
 #define BGF_ITEM_MENUITEM_6  0x52e039f8u

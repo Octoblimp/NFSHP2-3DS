@@ -1043,6 +1043,21 @@ to its bottom plus `gp-16112`, and `0xc671680c` to its top minus
 `gp-16116`. It then gives the blurb new text (`NewText`, `0x002494e8`) and
 tells the `SelectionSet` (`SetCurrentItem`, `0x0016e270`).
 
+`gp-16112` is -3.0 and `gp-16116` is 6.0, so the brackets sit 3 above the
+item's bottom and 6 above its top. These are `bscreens.h`'s
+`BSCR_UNDER_MODE_SELECT` and `BSCR_OVER_MODE_SELECT`, the Mode Selects'
+offsets. The box comes back as four ints, which `HighlightMenuItem`
+converts with `cvt.s.w`. `OnHighlight`'s switch on the item:
+
+| item | mask | blurb |
+|------|------|-------|
+| `MENUITEM_1` (`0x52e039f3`) | `MI_1_MASK` (`0x6e34e350`) | 10016, "Be the cops or beat the cops!" |
+| `MENUITEM_2` (`0x52e039f4`) | `MI_2_MASK` (`0x708a0bf1`) | 10015, "Take on the world's best sports cars!" |
+| `MENUITEM_3` (`0x52e039f5`) | `MI_3_MASK` (`0x72df3492`) | 10009, "Customize your settings." |
+
+For any other hash the bloom has moved, but the brackets and the blurb stay
+where they were.
+
 ### `TheEasterEggs` (`0x0031d7e8`)
 
 Retail named neither the object nor the group. The port calls them
@@ -1072,15 +1087,30 @@ holds that code's name.
 
 ### What the port has
 
-`gameflow.c` has the callback and constructor as far as the movie, the eggs'
-`Start` and the hide, the destructor's `Stop` and hide, the select, and the
-BACK veto. `hooks.easterEggs` only logs on the 3DS. The 78 codes are not
-ported, so nothing is handed the pad, and the group can never come back.
+`gameflow.c` has:
+
+* the callback, and the constructor as far as the movie, the eggs' `Start`
+  and the hide;
+* the destructor's `Stop` and hide;
+* the select and the BACK veto;
+* `OnHighlight`'s `HighlightMenuItem`, through `hooks.moveBrackets` and
+  `hooks.setBlurb`, the pair `bscreens.c` gives the Mode Selects. On the
+  3DS these are `main.c`'s `hookMoveBrackets` and `hookSetBlurb`. The top
+  screen still hides `SCROLLING_TEXT`, and the bottom panel shows the
+  sentence.
+
+Before `OnHighlight`, the brackets stayed where `NEW_MAIN_MENU` authors
+them, around Hot Pursuit. On the Mode Selects they moved, because
+`bscreens.c` ports their highlight, so the menu looked like it lost the
+highlight only after coming back.
+
+`hooks.easterEggs` only logs on the 3DS. The 78 codes are not ported, so
+nothing is handed the pad, and the group can never come back.
 
 Still owed:
 
-* the blurb, the bloom and the slide-in, `OnHighlight` and the rest of
-  `OnTick`;
+* the blurb's animation, the bloom (and `OnHighlight`'s
+  `SetCurrentMenuItem` for it), the slide-in, and the rest of `OnTick`;
 * the jukebox's `Start`;
 * `MakeChallengeCarsAvailable` and `InitWithDefaults`;
 * the 78 codes;
@@ -1091,6 +1121,9 @@ Still owed:
 `bootflow_check` runs retail's `Callback`, `HandleEvent` and `OnTick` on the
 image (`RetailMainMenu`). The members, the jukebox, the two `Fred` calls and
 `ConsiderStartDemoMode` are stubbed, silently, as the port owes them.
+`HighlightMenuItem` runs. `FlailerGetBoundingBox` answers one box for every
+mask, and the two brackets' Ys are given relative to it, as the offsets the
+port's hook takes.
 
 ## `MumboJumboScreen` (`0x0016a8b0`)
 
@@ -1755,12 +1788,15 @@ row. The rows:
 * **`select`** also presses BACK on the title, in the EA logo and at
   rest, which the title vetoes. It used to reach the title's BACK only
   from the main menu.
+* **`menuhighlight`**: the main menu's highlight on World Racing and
+  Options, and on `MENUITEM_9`, which moves nothing. Then into Options
+  and back, and on Hot Pursuit and World Racing again.
 
 `mainmenu` was retimed to select after `PRESS START` shows, 243 frames in;
 before, it never reached the main menu.
 
-`--mutate` now breaks `gameflow.c`, `bpopup.c` and `memcard.c` 159 ways.
-Of those, 156 are caught. Three survivors are equivalent by construction:
+`--mutate` now breaks `gameflow.c`, `bpopup.c` and `memcard.c` 179 ways.
+Of those, 176 are caught. Three survivors are equivalent by construction:
 
 * **`back-names-screen`**: no screen's callback reads `ItemHash` on BACK.
 * **`mc-loadfailed-quiet`**: the message before `LOAD_FAILED` is
