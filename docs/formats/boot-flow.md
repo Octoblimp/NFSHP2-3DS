@@ -940,15 +940,157 @@ The callers:
 for `StartDefaultMovie` (`0x0016d100`), which nothing calls.
 
 The title's movie and the menus' share the player, and nothing keeps them
-apart. BACK from the main menu leaves the gate up on the title screen, so
-`UpdateMovie` drives the title's movie too, as the title's `DriveMovie`
-does. When it ends, `Update` answers 0 and `UpdateMovie` reopens
-`mainmenu_movie` under the title. The port does the same (`menuattract`).
+apart. In the demo, BACK from the main menu left the gate up on the title
+screen, so `UpdateMovie` drove the title's movie too, as the title's
+`DriveMovie` does. When it ended, `Update` answered 0 and `UpdateMovie`
+reopened `mainmenu_movie` under the title. Retail's main menu vetoes BACK
+(below), so on the disc that cannot happen.
 
 The movies are 256x384 and anamorphic. `NEW_MAIN_MENU`'s `PANELMOVIE`
 plane sits at (141, 73) with a scale of 1.95 x 0.698 and its UVs starting
 0.006 down, so it draws them at 499x268. `docs/formats/mv3-video.md` has
 the frames and `Update`'s pacing.
+
+## `NewMainMenu` (retail `0x00216460`)
+
+Hot Pursuit, World Racing and Options. Retail's object is 636 bytes, and
+its one instance is at `gp-16132`.
+
+| function | retail | demo |
+|----------|--------|------|
+| `Callback` | `0x00216a10` | `0x00203a48` |
+| constructor | `0x00216460` | |
+| destructor | `0x00216598` | |
+| `HandleEvent` | `0x00216638` (jump table at `0x002bc480`) | `0x00203768` |
+| `OnTick` | `0x00216718` | |
+| `OnHighlight` | `0x00216938` | |
+| `HighlightMenuItem` | `0x00216880` | |
+
+`Callback` builds the object on `SCREEN_ACTIVATE`: `new(636)`, then the
+constructor with the screen's hash. On `SCREEN_UNACTIVATE` it deletes the
+object if there is one and clears the instance. Every other message goes to
+`HandleEvent` without checking.
+
+The constructor, in order:
+
+1. `tAnimatedBlurb` at `+4` (`0x002491b0`), on text objects `0x75980cf0`
+   (twice) and `0x70a404ec`.
+2. `tHighlightAnimation` at `+424` on `ANIMATING_MENUITEM` (`0xab671c9a`),
+   in `gp-16136`'s `0x80`, the title's bloom colour.
+3. `tSlideInAnimation` at `+456` (`0x00248fd0`), from
+   `FlailerGetTopLeftX(NEW_MAIN_MENU, 0x6e34e350)`.
+4. `+476`, the idle `Timer`, and `+632` zeroed, and a `SelectionSet` at
+   `+480` (`0x0016e120`).
+5. `FrontendDatabase::MakeChallengeCarsAvailable(&Fred)` (`0x00183af8`) and
+   `RaceParameters::InitWithDefaults` (`0x001ed5c8`) on `0x0031a898`.
+6. `+476 = RealTimer`, and the jukebox's `Start(1)` (`0x001aeab0`).
+7. `SelectionSet::AddItems` (`0x0016e1f8`): the five menu items at
+   `0x0031be40`.
+8. `StartMovie("MOVIES\mainmenu_movie.AVI")`.
+9. `TheEasterEggs.Start()` (`0x0024f488`), then
+   `FlailerSetGroupVisibility(NEW_MAIN_MENU, 0x74e404b4, 0)`.
+10. `+628 = 0`.
+
+The destructor runs `TheEasterEggs.Stop()` (`0x0024f610`), hides the same
+group again, and then runs the four members' destructors, last built first.
+
+`HandleEvent`'s table is on `message - 1`, 24 entries:
+
+| message | what |
+|---------|------|
+| `MENUITEM_SELECT` (1) | the demo's three-way test |
+| `MENUITEM_HIGHLIGHT` (4) | `OnHighlight` |
+| `SCREEN_BACK_BUTTON` (17) | `Param = 0` and `Noise = 0` |
+| `SCREEN_TICK` (18) | `OnTick` |
+| `ANY_BUTTON_PRESSED` (24) | `+476 = RealTimer` |
+
+The select is the demo's. `MENUITEM_1` sets `Fred.MainMenuOpts.mPolice`
+(`0x002fc070`, `Fred+32`) to 1 and goes to `"Cops On Mode Select"`.
+`MENUITEM_2` clears it and goes to `"Cops Off Mode Select"`. `MENUITEM_3`
+goes to `"Options"`. All three push `New Main Menu`.
+
+**BACK is retail's.** The demo's table sent it nowhere, so
+`MoveToPreviousScreen` popped the stack back to the title. Retail's clears
+`Param`, so the move goes nowhere, and `Noise`, so it makes no sound. The
+main menu is where the frontend begins.
+
+`OnTick`:
+
+```c
+if (tHelpMenu::IsActive(list+452)) { TheEasterEggs.+0 = 0; Timer = RealTimer; }
+else {
+    TheEasterEggs.+0 = 1;
+    if (TheEasterEggs.+4) {                       /* a code just entered */
+        Timer = RealTimer;
+        MakeFrontendSound(30);
+        FlailerSetGroupVisibility(NEW_MAIN_MENU, 0x74e404b4, 1);
+        FlailerSetLanguageID(NEW_MAIN_MENU, 0xf58c1a4b, TheEasterEggs.+8);
+        TheEasterEggs.+4 = 0; +628 = 1; +632 = RealTimer;
+    }
+}
+if (gp-16120) 0x0024f968();                       /* never set; a no-op */
+if (GetPopupActiveState(list, 0)) Timer = RealTimer;
+ConsiderStartDemoMode(&Timer);
+blurb.Animate(); bloom.Animate(); slide.Animate();
+if (+628 && (RealTimer - +632) * 0.00025f > 3.0f) { +628 = 0; /* hide the group */ }
+```
+
+`OnHighlight` points the bloom at the item (`SetCurrentMenuItem`,
+`0x002488d0`), then calls `HighlightMenuItem`. That takes the item's
+`FlailerGetBoundingBox` (`0x00144280`) and frames it with two objects, both
+moved by `0x001b9ae8`, which sets an object's top-left Y. `0x32c91dae` goes
+to its bottom plus `gp-16112`, and `0xc671680c` to its top minus
+`gp-16116`. It then gives the blurb new text (`NewText`, `0x002494e8`) and
+tells the `SelectionSet` (`SetCurrentItem`, `0x0016e270`).
+
+### `TheEasterEggs` (`0x0031d7e8`)
+
+Retail named neither the object nor the group. The port calls them
+`TheEasterEggs` and `BGF_GROUP_EASTER_EGG`.
+
+The group is two text objects of `NEW_MAIN_MENU`: "Unlocked" (LanguageID
+62001, at (10, 376)) and "Easter Egg" (`0xf58c1a4b`, at (10, 400)). Both are
+authored visible. The constructor's hide is all that keeps them off the
+menu, and a code entered shows them for three seconds, with that code's
+name in place of "Easter Egg".
+
+The object's constructor (`0x0024f420`) puts its vtable at `+60` and a table
+of 78 codes at `+12` (`0x0031d828`, count at `+16`). A code is 56 bytes:
+
+* eight pad events, from 133 to 148;
+* a type (`+32`) and a parameter (`+36`);
+* a group (`+40`);
+* the LanguageID of its name (`+44`, for example `0xf1ba2`);
+* an active flag (`+48`) and one more field (`+52`).
+
+`Start` registers a handler (`0x0024fa88`) with `AddJoyHandler`
+(`0x00154140`) for events 133 to 148. It matches the last eight presses, a
+ring, against the table (`0x0024f748`). `Stop` takes the handler back with
+`RemoveJoyHandler` (`0x001541e8`). `+0` gates it, and `OnTick` keeps it
+clear while a help menu is up. `+4` is set when a code comes in, and `+8`
+holds that code's name.
+
+### What the port has
+
+`gameflow.c` has the callback and constructor as far as the movie, the eggs'
+`Start` and the hide, the destructor's `Stop` and hide, the select, and the
+BACK veto. `hooks.easterEggs` only logs on the 3DS. The 78 codes are not
+ported, so nothing is handed the pad, and the group can never come back.
+
+Still owed:
+
+* the blurb, the bloom and the slide-in, `OnHighlight` and the rest of
+  `OnTick`;
+* the jukebox's `Start`;
+* `MakeChallengeCarsAvailable` and `InitWithDefaults`;
+* the 78 codes;
+* message 24;
+* attract mode from the main menu. `StartDemoMode` has no race yet, so all
+  it could do is stop the menu's movie.
+
+`bootflow_check` runs retail's `Callback`, `HandleEvent` and `OnTick` on the
+image (`RetailMainMenu`). The members, the jukebox, the two `Fred` calls and
+`ConsiderStartDemoMode` are stubbed, silently, as the port owes them.
 
 ## `MumboJumboScreen` (`0x0016a8b0`)
 
@@ -1593,15 +1735,26 @@ world's movie answers 0 on its 90th update, so a loop comes round within a
 row. The rows:
 
 * **`menumovie`**: the main menu's movie opens, loops, and stops when a
-  race's world comes in (`ingame`).
+  race's world comes in (`ingame`). When the flag drops again
+  (`outgame`), nothing reopens it: `StopMovie` took the gate down.
 * **`menuagain`**: into the third item and back. The main menu's
   `StartMovie` on its return names the movie already started, so nothing
   reopens. Then the options movie twice: the first closes the main menu's
   and opens its own, and the second is a no-op.
-* **`menuattract`**: the main menu and BACK to the title with the gate
-  still up. The title's EA logo plays, `UpdateMovie` reopens
-  `mainmenu_movie` under the title when it ends, and after half a minute
-  idle `StartDemoMode` stops it on the way to attract.
+* **`menuidle`**: the main menu, and BACK there, which retail's vetoes
+  without a sound. The movie plays on, loop after loop, for forty seconds.
+  It was `menuattract` while the model was the demo's, whose BACK went to
+  the title and whose attract mode stopped the movie. Retail's `OnTick`
+  would start attract mode at thirty seconds, which the port owes.
+* **`attractmovie`**: `StartDemoMode`'s `StopMovie` with a movie open.
+  With BACK vetoed, the main menu's movie can no longer be left playing
+  under the title. The options movie is opened under the title at rest
+  instead, and attract mode stops it before it starts. Retail reaches this
+  from a screen that plays a movie and calls `ConsiderStartDemoMode`, as
+  the main menu's `OnTick` does.
+* **`select`** also presses BACK on the title, in the EA logo and at
+  rest, which the title vetoes. It used to reach the title's BACK only
+  from the main menu.
 
 `mainmenu` was retimed to select after `PRESS START` shows, 243 frames in;
 before, it never reached the main menu.

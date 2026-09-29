@@ -1310,55 +1310,131 @@ void bgf_language_screen_callback(BGameFlow* gf, BScreenMessage msg,
 
 // ------------------------------------------------------------ NewMainMenu
 
-// HandleEvent, 0x00203768: a 24-entry jump table on message - 1, of which
-// only SELECT, TICK and HIGHLIGHT do anything. SELECT is a three-way test on
-// the item hash, and the two Mode Selects are the same screen either side of
-// a global:
+// Retail's NewMainMenu. Callback (0x00216a10) builds the 636-byte instance on
+// SCREEN_ACTIVATE, from the screen's ItemHash, and deletes it on
+// SCREEN_UNACTIVATE if pInstance is set. Everything else goes to HandleEvent
+// (0x00216638) with pInstance unchecked.
 //
-//   MENUITEM_1 "Hot Pursuit"  -> CopsOn = 1, "Cops On Mode Select"   0x00203800
-//   MENUITEM_2 "World Racing" -> CopsOn = 0, "Cops Off Mode Select"  0x00203818
-//   MENUITEM_3 "Options"      ->             "Options"               0x00203830
-//
-// All three push New Main Menu, so BACK returns here, and all three are in
-// the port's screen registry (kScreens[] in main.c, bscreens.c for the
-// classes). Every screen name the port's own code can reach is registered
-// now; the ten that have no class yet are registered to
-// bgf_plain_screen_callback so they draw. An unregistered name would be
-// worse than a dead one: bgf_change_to_screen traces "unregistered" and
-// leaves the flow with no current screen, which is what ChangeToScreen does
-// too -- it clears pCurrent before it looks the name up -- so the top
-// screen goes black and BACK is the only way out. See TASKS.md 33, and
-// `python tools/screen_registry.py --check-port` for what is left.
-//
-// The constructor (0x00216460) starts the menu's movie at +228, the string
-// at 0x002bc430. The movie outlives the screen -- the destructor
+// The constructor (0x00216460) does, in order:
+//   1. tAnimatedBlurb at +4, tHighlightAnimation (ANIMATING_MENUITEM) at
+//      +424, tSlideInAnimation at +456 and SelectionSet at +480;
+//   2. FrontendDatabase::MakeChallengeCarsAvailable and
+//      RaceParameters::InitWithDefaults;
+//   3. the idle Timer at +476 set to RealTimer, and jukebox Start(1);
+//   4. the SelectionSet's five items;
+//   5. StartMovie (the string at 0x002bc430);
+//   6. TheEasterEggs' Start;
+//   7. the Easter egg group hidden, and +628, "shown", cleared.
+// The port has 5 to 7. The movie outlives the screen -- the destructor
 // (0x00216598) leaves it -- so the Mode Selects and Options, which start
-// their own, are what replace it. The rest of the constructor (the
-// highlight, the jukebox, the Easter egg's group) is not ported yet.
+// their own, are what replace it.
+//
+// The destructor calls TheEasterEggs' Stop, hides the group again, and
+// destroys the four members in reverse.
+static void mainMenuCtor(BGameFlow* gf)
+{
+    BNewMainMenu* m = &gf->mainMenu;
+
+    memset(m, 0, sizeof(*m));
+    bgf_start_movie(gf, "MOVIES\\mainmenu_movie.AVI");
+    HOOK_VOID(gf, easterEggs, 1);
+    groupVisible(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_GROUP_EASTER_EGG, 0);
+    m->active = 1;
+}
+
+static void mainMenuDtor(BGameFlow* gf)
+{
+    HOOK_VOID(gf, easterEggs, 0);
+    groupVisible(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_GROUP_EASTER_EGG, 0);
+    memset(&gf->mainMenu, 0, sizeof(gf->mainMenu));
+}
+
+// HandleEvent (0x00216638): a 24-entry jump table on message - 1.
+//
+//   SELECT (1)  0x0021668c  the three-way test below
+//   HIGHLIGHT (4)            OnHighlight (0x00216938): the bloom's item,
+//                            and the blurb through HighlightMenuItem
+//   BACK (17)   0x00216664  Param and Noise cleared
+//   TICK (18)                OnTick (0x00216718)
+//   24          0x00216680  the idle Timer set to RealTimer
+//
+// SELECT's test is the demo's. The two Mode Selects are the same screen
+// either side of Fred.MainMenuOpts.mPolice (0x002fc070):
+//
+//   MENUITEM_1 "Hot Pursuit"  -> CopsOn = 1, "Cops On Mode Select"
+//   MENUITEM_2 "World Racing" -> CopsOn = 0, "Cops Off Mode Select"
+//   MENUITEM_3 "Options"      ->             "Options"
+//
+// All three push New Main Menu, so BACK from there returns here. Every
+// screen name the port's own code can reach is registered (kScreens[] in
+// main.c, bscreens.c for the classes). The ten with no class yet are
+// registered to bgf_plain_screen_callback so they draw. An unregistered
+// name would be worse than a dead one: bgf_change_to_screen traces
+// "unregistered" and leaves the flow with no current screen, which is what
+// ChangeToScreen does too -- it clears pCurrent before it looks the name
+// up. See TASKS.md 33, and `python tools/screen_registry.py --check-port`.
+//
+// BACK is retail's alone: the demo's table sent it nowhere. With Param 0,
+// MoveToPreviousScreen goes nowhere, and with Noise 0 it makes no sound. The
+// main menu is where the frontend begins, and the title is behind it for
+// good.
+//
+// Not ported yet:
+//   - OnHighlight (the echo and the blurb);
+//   - OnTick: TheEasterEggs' +0 set while no help menu is up, and cleared
+//     while one is; a code just entered (+4) shows the group for three
+//     seconds, with sound 30 and the code's LanguageID (+8) on 0xf58c1a4b;
+//     the idle Timer reset while a popup is up; ConsiderStartDemoMode on
+//     that Timer; the three animations;
+//   - message 24, which JoyHandler does not send yet. Its one use is the
+//     idle Timer, which only ConsiderStartDemoMode reads.
+// Nothing in OnTick is seen without the codes (TheEasterEggs never sets +4)
+// or without StartDemoMode's race, which the port does not have. Until it
+// does, attract mode from the main menu would only stop the menu's movie.
+static void mainMenuEvent(BGameFlow* gf, BScreenMessage msg,
+                          BScreenCallbackData* data)
+{
+    switch (msg) {
+        case BMSG_MENUITEM_SELECT:
+            switch (data->itemHash) {
+                case BGF_ITEM_MENUITEM_1:
+                    gf->copsOn = 1;
+                    bgf_change_to_screen(gf, "Cops On Mode Select", 1);
+                    break;
+                case BGF_ITEM_MENUITEM_2:
+                    gf->copsOn = 0;
+                    bgf_change_to_screen(gf, "Cops Off Mode Select", 1);
+                    break;
+                case BGF_ITEM_MENUITEM_3:
+                    bgf_change_to_screen(gf, "Options", 1);
+                    break;
+                default:
+                    // Every other item hash falls through the test and
+                    // returns, sound and all.
+                    break;
+            }
+            break;
+        case BMSG_SCREEN_BACK_BUTTON:
+            data->noise = 0;
+            data->param = 0;
+            break;
+        default:
+            break;
+    }
+}
+
 void bgf_new_main_menu_callback(BGameFlow* gf, BScreenMessage msg,
                                 BScreenCallbackData* data)
 {
-    if (msg == BMSG_SCREEN_ACTIVATE) {
-        bgf_start_movie(gf, "MOVIES\\mainmenu_movie.AVI");
-        return;
-    }
-    if (msg != BMSG_MENUITEM_SELECT || !data) return;
-
-    switch (data->itemHash) {
-        case BGF_ITEM_MENUITEM_1:
-            gf->copsOn = 1;
-            bgf_change_to_screen(gf, "Cops On Mode Select", 1);
+    switch (msg) {
+        case BMSG_SCREEN_ACTIVATE:
+            mainMenuCtor(gf);
             break;
-        case BGF_ITEM_MENUITEM_2:
-            gf->copsOn = 0;
-            bgf_change_to_screen(gf, "Cops Off Mode Select", 1);
-            break;
-        case BGF_ITEM_MENUITEM_3:
-            bgf_change_to_screen(gf, "Options", 1);
+        case BMSG_SCREEN_UNACTIVATE:
+            if (gf->mainMenu.active) mainMenuDtor(gf);
             break;
         default:
-            // Every other item hash falls off the end of the jump table
-            // entry and returns, sound and all.
+            if (data) mainMenuEvent(gf, msg, data);
             break;
     }
 }

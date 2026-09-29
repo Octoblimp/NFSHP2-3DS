@@ -75,6 +75,13 @@ typedef enum {
 // shows once no movie is playing.
 #define BGF_GROUP_TITLE_IMAGE     0xb73c8d23u
 
+// NEW_MAIN_MENU's Easter egg pair: "Unlocked" (LanguageID 62001) over the
+// egg's name, text object 0xf58c1a4b. Retail named neither the group nor
+// the object: both carry their hash as their name. NewMainMenu hides the
+// group as it is built and as it is torn down, and shows it for three
+// seconds when a code has just been entered (OnTick, 0x00216718).
+#define BGF_GROUP_EASTER_EGG      0x74e404b4u
+
 #define BGF_TEX_LEGAL             0xa7ebc389u  // both out of GLOBAL\DYNTEX.BIN
 #define BGF_TEX_ANTIPIRACY        0x38258033u
 
@@ -212,6 +219,12 @@ typedef struct {
 
     void (*sound)(void* user, int soundEvent);   // MakeFrontendSound
     void (*jukebox)(void* user, int start);      // sound::jukebox::Start/Stop
+    // TheEasterEggs (0x0031d7e8), the port's name: retail's ELF has no
+    // symbols, and the class is not on the demo disc. Start (0x0024f488)
+    // gives it the pad's sixteen button events, 133..148, and Stop
+    // (0x0024f610) takes them back. NewMainMenu's constructor and
+    // destructor are its only callers. `start` is 1 for Start, 0 for Stop.
+    void (*easterEggs)(void* user, int start);
     // StartDemoMode (0x0016ecd8): the attract race. It begins with
     // StopMovie, which the flow runs before the hook; the track it takes in
     // turn and Fred's demo race are the host's.
@@ -279,6 +292,13 @@ typedef struct {
     uint32_t flailer;       // +4: the Flailer screen, ACTIVATE's ItemHash
     int      fromOptions;   // +8: 0 before the frontend, 1 from Options
 } BLanguageScreen;
+
+// NewMainMenu, retail's (0x00216460): 636 bytes, of which the port holds
+// only what it has ported. `active` stands for pInstance (gp-16132) being
+// set, which Callback tests before it deletes.
+typedef struct {
+    int active;
+} BNewMainMenu;
 
 struct BGameFlow {
     const BGameFlowStateInfo* states;
@@ -374,6 +394,7 @@ struct BGameFlow {
     // is ported.
     int               autoloadManual;
     BLanguageScreen   language;
+    BNewMainMenu      mainMenu;
 };
 
 // ---------------------------------------------------------------- lifecycle
@@ -556,8 +577,9 @@ void bgf_language_screen_callback(BGameFlow* gf, BScreenMessage msg,
 #define BGF_ITEM_MENUITEM_6  0x52e039f8u
 #define BGF_ITEM_MENUITEM_7  0x52e039f9u
 
+// NewMainMenu::Callback, retail's (0x00216a10; the demo's is 0x00203a48).
 void bgf_new_main_menu_callback(BGameFlow* gf, BScreenMessage msg,
-                                BScreenCallbackData* data);   // 0x00203a48
+                                BScreenCallbackData* data);
 
 // A screen the flow can name but that has no behaviour of its own yet:
 // activates, draws, and leaves on BACK.

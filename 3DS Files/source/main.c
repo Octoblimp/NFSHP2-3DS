@@ -1288,6 +1288,15 @@ static void hookJukebox(void* user, int start)
     logLine("jukebox %s", start ? "start" : "stop");
 }
 
+// TheEasterEggs' Start and Stop, NewMainMenu's. The 78 codes it listens for
+// are not ported, so the pad is not handed to it: the log says when retail
+// would have.
+static void hookEasterEggs(void* user, int start)
+{
+    (void)user;
+    logLine("easter eggs %s", start ? "start" : "stop");
+}
+
 static void hookDisplayOptionsStart(void* user)
 {
     (void)user;
@@ -1872,6 +1881,7 @@ int main(int argc, char** argv)
     hooks.swapLogoArt      = hookSwapLogoArt;
     hooks.displayFrame     = hookDisplayFrame;
     hooks.newFileSys       = hookNewFileSys;
+    hooks.easterEggs       = hookEasterEggs;
     hooks.trace            = hookTrace;
     // TheDemoModeReplay has no replays to offer (no hook answers "none"),
     // and StartDemoMode's race is not ported: ConsiderStartDemoMode runs

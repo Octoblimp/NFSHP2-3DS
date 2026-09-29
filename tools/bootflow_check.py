@@ -197,6 +197,7 @@ class Flow(object):
         # its movie
         self.autoload = RetailAutoload(self)
         self.movie = RetailMovie(self)
+        self.mainmenu = RetailMainMenu(self)
 
     # CurrLanguage is the LanguageManager's +0, in the image, where retail's
     # code reads and writes it.
@@ -535,28 +536,11 @@ class Flow(object):
         self.change_to_screen(name, 0)
 
     # -- the boot screens ---------------------------------------------------
-    def main_menu(self, msg, data):
-        """NewMainMenu::HandleEvent, 0x00203768 -- SELECT and nothing else --
-        and, of the constructor (0x00216460), StartMovie at +228."""
-        if msg == SCREEN_ACTIVATE:
-            self.movie.start(MAINMENU_MOVIE)
-            return
-        if msg != MENUITEM_SELECT:
-            return
-        if data["itemHash"] == ITEM_MENUITEM_1:
-            self.cops_on = 1
-            self.change_to_screen("Cops On Mode Select", 1)
-        elif data["itemHash"] == ITEM_MENUITEM_2:
-            self.cops_on = 0
-            self.change_to_screen("Cops Off Mode Select", 1)
-        elif data["itemHash"] == ITEM_MENUITEM_3:
-            self.change_to_screen("Options", 1)
-
     def dispatch(self, kind, msg, data):
         if kind == "title":
             self.title.callback(msg, data)
         elif kind == "mainmenu":
-            self.main_menu(msg, data)
+            self.mainmenu.callback(msg, data)
         elif kind == "mumbo":
             self.mumbo(msg, data)
         elif kind == "autoload":
@@ -1696,6 +1680,137 @@ class RetailMovie(object):
         self.run(STOP_MOVIE)
 
 
+
+# ------------------------------------------------------ retail's main menu
+
+MAIN_MENU_CALLBACK = 0x00216a10         # NewMainMenu::Callback
+MAIN_MENU_INST = RETAIL_GP - 16132      # its pInstance
+COPS_ON = FRED + 32                     # Fred.MainMenuOpts.mPolice
+EASTER_EGGS = 0x0031d7e8                # TheEasterEggs, the port's name
+
+
+class RetailMainMenu(object):
+    """NewMainMenu, retail's, on the emulated image.
+
+    Callback (0x00216a10), the constructor (0x00216460), the destructor
+    (0x00216598), HandleEvent (0x00216638) and OnTick (0x00216718) run as
+    they are, and GetPopupActiveState on RetailAutoload's list. StartMovie
+    runs as RetailMovie runs it. TheEasterEggs' Start and Stop are the
+    port's "eggs 1" and "eggs 0", FlailerSetGroupVisibility its "vis group",
+    and ChangeToScreen, tail-called, is deferred to the flow, as the title's
+    is.
+
+    Stubbed silently, because the port owes them:
+      - the four members' constructors and destructors: tAnimatedBlurb,
+        tHighlightAnimation, tSlideInAnimation and SelectionSet, with
+        AddItems and FlailerGetTopLeftX;
+      - their three Animates in OnTick, and OnHighlight's calls;
+      - FrontendDatabase::MakeChallengeCarsAvailable and
+        RaceParameters::InitWithDefaults;
+      - jukebox Start(1);
+      - ConsiderStartDemoMode in OnTick. StartDemoMode has no race in the
+        port yet, so all it could do there is stop the menu's movie. Without
+        this stub, half a minute on the main menu would start attract mode
+        here and not in the port; `menuidle` spends forty seconds there.
+    tHelpMenu::IsActive answers 0: no help menu is ported. The rest of
+    OnTick shows the Easter egg group only once TheEasterEggs' +4 is set,
+    and nothing sets it here, as nothing hands it the pad. Were it reached,
+    its sound and FlailerSetLanguageID would show in the transcript.
+
+    CopsOn is Fred's +32. The flow's is put in before each run and read
+    back after, so the flow's is the one "final" prints.
+    """
+
+    def __init__(self, flow):
+        self.flow = flow
+        e = self.e = retail_emu()
+        if not getattr(e, "mm_inst", 0):
+            e.mm_inst = e.alloc(640)
+            e.mm_data = e.alloc(16)
+        # Each boot starts with no main menu and no egg unlocked.
+        e.put32(MAIN_MENU_INST, 0)
+        e.write(EASTER_EGGS, bytes(12))
+        self.pending = None
+
+    def stubs(self):
+        e, f = self.e, self.flow
+
+        def arg(i):
+            return e.reg[4 + i] & 0xffffffff
+
+        def change_to_screen(_e):          # ChangeToScreen, tail-called
+            self.pending = (_cstr(e, arg(0)), arg(1))
+
+        def set_group(_e):                 # FlailerSetGroupVisibility
+            f.say("vis group %08x %08x %d" % (arg(0), arg(1), arg(2)))
+
+        def language_id(_e):               # FlailerSetLanguageID
+            f.say("language id %08x %08x %08x" % (arg(0), arg(1), arg(2)))
+
+        silent = (
+            0x002491b0, 0x00249280,        # tAnimatedBlurb, ~
+            0x00248870, 0x002488b0,        # tHighlightAnimation, ~
+            0x00144140,                    # FlailerGetTopLeftX
+            0x00248fd0, 0x001b9ae0,        # tSlideInAnimation, ~
+            0x0016e120, 0x0016e168,        # SelectionSet, ~
+            0x0016e1f8,                    # SelectionSet::AddItems
+            0x00183af8,                    # MakeChallengeCarsAvailable
+            0x001ed5c8,                    # RaceParameters::InitWithDefaults
+            0x001aeab0,                    # sound::jukebox::Start
+            0x0016ed50,                    # ConsiderStartDemoMode
+            0x00249348, 0x00248970,        # the Animates: blurb, bloom,
+            0x00248d20,                    # slide-in
+            0x002488d0, 0x00144280,        # OnHighlight's
+            0x001b9ae8, 0x002494e8, 0x0016e270,
+        )
+        stubs = {addr: (lambda _e: None) for addr in silent}
+        stubs.update({
+            0x002577c0: lambda _e: e.mm_inst,          # operator new
+            0x00114e98: lambda _e: None,               # operator delete
+            START_MOVIE: lambda _e: f.movie.start(arg(1)),
+            0x0024f488: lambda _e: f.say("eggs 1"),    # TheEasterEggs.Start
+            0x0024f610: lambda _e: f.say("eggs 0"),    # ... Stop
+            0x001454e8: set_group,
+            0x0014cc78: change_to_screen,
+            0x001e4170: lambda _e: 0,                  # tHelpMenu::IsActive
+            0x0016e038: lambda _e: f.sound(arg(0)),    # MakeFrontendSound
+            0x001449a8: language_id,
+            0x0024f968: lambda _e: f.say("eggs 0024f968"),
+        })
+        for addr, fn in stubs.items():
+            e.stub(addr, fn)
+        # GetPopupActiveState runs, on the list RetailAutoload keeps.
+        e.stubs.pop(0x0016ce00, None)
+
+    def callback(self, msg, data):
+        e, f = self.e, self.flow
+        saved = dict(e.stubs)
+        self.stubs()
+        e.put32(REAL_TIMER, f.real_timer)
+        e.put32(COPS_ON, f.cops_on)
+        e.put32(e.al_list + 392, f.autoload.popups[0])
+        e.put32(e.al_list + 396, f.autoload.popups[1])
+        e.put32(SCREEN_LIST, e.al_list)
+        # ScreenCallbackData: ItemHash, Port, Param, Noise.
+        d = e.mm_data
+        e.put32(d + 0, data["itemHash"])
+        e.put32(d + 4, data["port"])
+        e.put32(d + 8, data["param"])
+        e.put32(d + 12, data["noise"])
+        self.pending = None
+        try:
+            e.call(MAIN_MENU_CALLBACK, msg, d, limit=200000)
+        finally:
+            e.stubs.clear()
+            e.stubs.update(saved)
+        data["param"] = s32(e.u32(d + 8))
+        data["noise"] = e.u32(d + 12)
+        f.cops_on = e.u32(COPS_ON)
+        if self.pending:
+            p, self.pending = self.pending, None
+            f.change_to_screen(*p)
+
+
 SIXTIETH = 1.0 / 60.0
 
 # BootAutoload takes 365 frames at 1/60 and 8 at a second a frame on a blank
@@ -1740,7 +1855,8 @@ SCENARIOS = [
     dict(name="select", videoMode=1, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
          haveIntroMovie=0, frames=BOOT60 + 300, dt=SIXTIETH,
-         input=[(BOOT60 + 14, "select"), (BOOT60 + 270, "select"), (BOOT60 + 282, "select"),
+         input=[(BOOT60 + 14, "select"), (BOOT60 + 20, "back"), (BOOT60 + 260, "back"),
+                (BOOT60 + 270, "select"), (BOOT60 + 282, "select"),
                 (BOOT60 + 288, "back"), (BOOT60 + 292, "back")]),
     dict(name="skipintro", videoMode=1, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
@@ -1829,13 +1945,16 @@ SCENARIOS = [
     # The menus' movie: its loops, the same name again, another in its
     # place, and the title's movie sharing its player.
     card_row("menumovie", BOOT60 + 500, dt=SIXTIETH, skipMovies=0,
-             input=[(BOOT60 + 270, "select"), (BOOT60 + 480, "ingame")]),
+             input=[(BOOT60 + 270, "select"), (BOOT60 + 480, "ingame"),
+                    (BOOT60 + 490, "outgame")]),
     card_row("menuagain", BOOT60 + 400, dt=SIXTIETH, skipMovies=0,
              input=[(BOOT60 + 270, "select"), (BOOT60 + 274, "item3"),
                     (BOOT60 + 278, "back"), (BOOT60 + 290, "optionsmovie"),
                     (BOOT60 + 300, "optionsmovie")]),
-    card_row("menuattract", BOOT1 + 60, skipMovies=0,
+    card_row("menuidle", BOOT1 + 60, skipMovies=0,
              input=[(BOOT1 + 16, "select"), (BOOT1 + 18, "back")]),
+    card_row("attractmovie", BOOT1 + 40, skipMovies=0,
+             input=[(BOOT1 + 12, "optionsmovie")]),
 ]
 
 
@@ -1898,6 +2017,8 @@ def run_scenario(sc):
                 f.movie.start(OPTIONS_MOVIE)
             elif what == "ingame":
                 f.in_game = 1
+            elif what == "outgame":
+                f.in_game = 0
             elif what == "mumbo":
                 f.push("New Main Menu")
                 f.change_to_screen("Legal MumboJumbo", 0)
@@ -2536,16 +2657,68 @@ MUTATIONS += [
      + NL + "    HOOK_VOID0(gf, startDemoMode);",
      "    HOOK_VOID0(gf, startDemoMode);" + NL + "    bgf_stop_movie(gf);"),
     ("movie-main-menu-silent", GF,
-     "        bgf_start_movie(gf, \"MOVIES\\\\mainmenu_movie.AVI\");" + NL
-     + "        return;",
-     "        return;"),
+     "    bgf_start_movie(gf, \"MOVIES\\\\mainmenu_movie.AVI\");" + NL
+     + "    HOOK_VOID(gf, easterEggs, 1);",
+     "    HOOK_VOID(gf, easterEggs, 1);"),
+    # NewMainMenu: TheEasterEggs started, and the "Unlocked Easter Egg"
+    # group hidden, in the constructor; both undone in the destructor.
+    ("main-menu-eggs-never-start", GF,
+     "    HOOK_VOID(gf, easterEggs, 1);",
+     "    (void)0;"),
+    ("main-menu-eggs-never-stop", GF,
+     "    HOOK_VOID(gf, easterEggs, 0);",
+     "    (void)0;"),
+    ("main-menu-egg-group-shown", GF,
+     "    HOOK_VOID(gf, easterEggs, 1);" + NL
+     + "    groupVisible(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_GROUP_EASTER_EGG, 0);",
+     "    HOOK_VOID(gf, easterEggs, 1);" + NL
+     + "    groupVisible(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_GROUP_EASTER_EGG, 1);"),
+    ("main-menu-egg-hidden-before-movie", GF,
+     "    bgf_start_movie(gf, \"MOVIES\\\\mainmenu_movie.AVI\");" + NL
+     + "    HOOK_VOID(gf, easterEggs, 1);" + NL
+     + "    groupVisible(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_GROUP_EASTER_EGG, 0);",
+     "    groupVisible(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_GROUP_EASTER_EGG, 0);"
+     + NL + "    bgf_start_movie(gf, \"MOVIES\\\\mainmenu_movie.AVI\");" + NL
+     + "    HOOK_VOID(gf, easterEggs, 1);"),
+    ("main-menu-dtor-keeps-group", GF,
+     "    HOOK_VOID(gf, easterEggs, 0);" + NL
+     + "    groupVisible(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_GROUP_EASTER_EGG, 0);",
+     "    HOOK_VOID(gf, easterEggs, 0);"),
+    ("main-menu-dtor-hides-first", GF,
+     "    HOOK_VOID(gf, easterEggs, 0);" + NL
+     + "    groupVisible(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_GROUP_EASTER_EGG, 0);",
+     "    groupVisible(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_GROUP_EASTER_EGG, 0);"
+     + NL + "    HOOK_VOID(gf, easterEggs, 0);"),
+    ("main-menu-never-active", GF,
+     "    m->active = 1;",
+     "    (void)m;"),
+    # Its BACK: Param and Noise both cleared -- a veto without a sound.
+    ("main-menu-back-noisy", GF,
+     "            data->noise = 0;" + NL
+     + "            data->param = 0;" + NL
+     + "            break;" + NL
+     + "        default:",
+     "            data->param = 0;" + NL
+     + "            break;" + NL
+     + "        default:"),
+    ("main-menu-back-allowed", GF,
+     "            data->noise = 0;" + NL
+     + "            data->param = 0;" + NL
+     + "            break;" + NL
+     + "        default:",
+     "            data->noise = 0;" + NL
+     + "            break;" + NL
+     + "        default:"),
+    ("main-menu-cops-on-off", GF,
+     "                    gf->copsOn = 1;",
+     "                    gf->copsOn = 0;"),
 ]
 
 
 # Mutations that survive because they change nothing the transcript can tell.
 # back-names-screen: nothing the boot reaches reads ItemHash on BACK -- the
-# title and the language screen do not -- so it is kept as retail's memset
-# and not as a behaviour.
+# title, the language screen and the main menu do not -- so it is kept as
+# retail's memset and not as a behaviour.
 # mc-loadfailed-quiet: the message before LOAD_FAILED is "Loading", taken
 # down in READING_FILE, which the loader silences as it does READY_TO_LEAVE
 # -- so its two orders sound the same there, and the port keeps retail's.

@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-28), after the frontend's fifth slice: the
-menu movie at full speed. `HANDOFF.md` is the running
+continuation (2026-09-28), after the frontend's sixth slice: the
+Easter egg group hidden. `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -58,7 +58,7 @@ bvector_check      27 scenarios,  5721 lines, 0 differ   (23/23 mutations caught
 bmath_check        19 scenarios,  6424 lines, 0 differ   (9/9 mutations caught)
 banim_check        23 scenarios,  2219 lines, 0 differ
 bscreens_check     17 scenarios,  1277 lines, 0 differ
-bootflow_check     49 scenarios, 28734 lines, 0 differ   (156 caught, 3 equivalent)
+bootflow_check     50 scenarios, 28920 lines, 0 differ   (166 caught, 3 equivalent)
 bslotpool_check    18 scenarios,  1025 lines, 0 differ   (47/47 mutations caught)
 geometry_check     30 files,     42047 lines, 0 differ   (53/53 mutations caught)
 texsrc_check       6 packs, 2 levels, 2958 textures, 0 differ
@@ -511,11 +511,38 @@ and so replaced every boot.
      and 6 are equivalent: they turn off the 4-point and full IDCTs'
      shortcuts.
 
+   **The frontend's sixth slice is closed: the Easter egg group
+   hidden.** "Unlocked" and "Easter Egg" no longer show on the main menu,
+   as in the retail photos. `docs/formats/boot-flow.md`, "`NewMainMenu`".
+   - Both are authored visible in retail's `NEW_MAIN_MENU`, in group
+     `0x74e404b4`. Retail's constructor (`0x00216460`) hides the group
+     after `TheEasterEggs.Start()`, and the destructor hides it again after
+     `Stop()`. The port does the same; `hooks.easterEggs` only logs, as
+     the 78 codes are not ported.
+   - Retail's `HandleEvent` vetoes BACK without a sound: `Param` and
+     `Noise` cleared. The demo's went back to the title, and so did the
+     port. BACK on the main menu now does nothing.
+   - So the title's movie and the menus' no longer meet: the fourth
+     slice's "BACK to the title leaves the gate up" cannot happen now.
+   - `bootflow_check` runs retail's `Callback`, `HandleEvent` and
+     `OnTick` on the image (`RetailMainMenu`) in place of the demo's
+     model. The members, the jukebox, the two `Fred` calls and
+     `ConsiderStartDemoMode` are stubbed, as the port owes them.
+     `menuattract` is `menuidle`. `select` presses BACK on the title,
+     `menumovie` drops InGameFlag again (`outgame`), and `attractmovie`
+     stops a movie in attract mode: without them, the veto left the
+     title's BACK and `StopMovie`'s gate unreached. 50 scenarios, 169
+     mutations, 166 caught and 3 equivalent.
+   - Azahar: BACK on the main menu is vetoed, silently. The group is set
+     hidden 6 times in the walk and never shown.
+   - Owed from the main menu: the 78 codes; attract mode from `OnTick`
+     with message 24 (it waits on `StartDemoMode`'s race);
+     `MakeChallengeCarsAvailable` and `InitWithDefaults`.
+
    **Next is the rest of the photos**, in TASKS.md's "The retail
-   frontend": the Easter egg group (`0x74e404b4`, `SetGroupVisibility`
-   in `NewMainMenu`'s ctor and dtor), the jukebox's `Start(1)` in the
-   ctor, the highlight's echo, EA TRAX, then Setup, car select and the
-   briefing.
+   frontend": the jukebox (`Start(1)` in `NewMainMenu`'s ctor, retail
+   `0x001aeab0`; `cJukeboxPlayer` over `SOUND\JUKEBOXM.JBC`), the
+   highlight's echo, EA TRAX, then Setup, car select and the briefing.
 
    When step 6 resumes: `Car::InitRenderInfo` (`0x0011dc80`) and
    CarRenderInfo's constructor (`0x0011e860`, 4700 bytes; retail's

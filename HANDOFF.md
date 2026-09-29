@@ -8846,3 +8846,58 @@ the menu ran at 25 FPS and its movie at 85% speed.
 The rest of the retail photos: the Easter egg group (`0x74e404b4`), the
 jukebox's `Start(1)`, the highlight's echo, EA TRAX, then Setup, car
 select and the briefing. Then step 6's second slice, `Car::InitRenderInfo`.
+
+## Session 30, continued (2026-09-28) -- The frontend's sixth slice: the Easter egg group hidden
+
+"Unlocked" and "Easter Egg" are gone from the main menu, as in the retail
+photos. `docs/formats/boot-flow.md`, "`NewMainMenu`", has retail's class.
+
+- **What retail does.** The pair is group `0x74e404b4` of `NEW_MAIN_MENU`,
+  authored visible: "Unlocked" (LanguageID 62001) at (10, 376) and
+  `0xf58c1a4b` at (10, 400). The constructor (`0x00216460`) starts
+  `TheEasterEggs` (`0x0031d7e8`, the port's name) and hides the group; the
+  destructor stops it and hides the group again. `OnTick` shows it for
+  three seconds, with sound 30 and the code's name, when one of the 78
+  codes comes in.
+- **`gameflow.c`.** `bgf_new_main_menu_callback` is retail's `Callback`
+  (`0x00216a10`): `mainMenuCtor`, `mainMenuDtor` behind the instance flag
+  (`BNewMainMenu.active`), and `mainMenuEvent`. `hooks.easterEggs` is
+  `Start` and `Stop`; on the 3DS it only logs. `BGF_GROUP_EASTER_EGG` is
+  the group.
+- **BACK.** Retail's table sends it to `0x00216664`, which clears `Param`
+  and `Noise`: a silent veto. The demo's did nothing with it, so BACK went
+  to the title. The port now does what retail does.
+- **`bootflow_check`.** `RetailMainMenu` runs retail's `Callback`,
+  `HandleEvent` and `OnTick` on the image, in place of the model's
+  demo-shaped `main_menu`. Stubbed silently: the four members, their
+  Animates, `OnHighlight`'s calls, the jukebox, `MakeChallengeCarsAvailable`,
+  `InitWithDefaults` and `ConsiderStartDemoMode`. `GetPopupActiveState`
+  runs on `RetailAutoload`'s list.
+  - The veto took coverage away, and the scenarios got it back.
+    - `menuattract` had reached the title's BACK, and `StopMovie` with the
+      menus' movie open, by going back from the main menu. It is
+      `menuidle` now.
+    - `select` presses BACK on the title itself.
+    - `menumovie` drops InGameFlag again (`outgame`), so a gate kept up
+      after `StopMovie` would reopen the movie.
+    - `attractmovie` opens the options movie under the title at rest and
+      lets attract mode stop it.
+  - 50 scenarios, 28,920 lines, 0 differ. 10 new mutations: 169, 166
+    caught and 3 equivalent, the same three as before.
+  - A mutation pass compiles `tools/src/gameflow_test.c` for every mutant.
+    An edit to it mid-pass made one pass's catches meaningless, and its
+    output is block-buffered, so its progress looked further behind than
+    it was. The second pass was run with `python -u`.
+- **Azahar.** `run_azahar_test.ps1` presses B on the main menu now and
+  reports the egg lines. PASS: `flow back vetoed` with no sound, the group
+  set hidden 6 times and never shown, 60 FPS.
+- **A backslash went missing** in `"MOVIES\\mainmenu_movie.AVI"` when the
+  section was spliced in through a Bash heredoc. It was caught in the
+  diff before a build.
+
+### Next
+
+The jukebox: `Start(1)` in `NewMainMenu`'s constructor (retail
+`0x001aeab0`), `cJukeboxPlayer` and `SOUND\JUKEBOXM.JBC`. Then the
+highlight's echo, EA TRAX, Setup, car select and the briefing, and step
+6's `Car::InitRenderInfo`.

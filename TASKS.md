@@ -2256,7 +2256,19 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
   - [ ] `StartDemoMode`'s track, from `BuildDemoTrackList`.
 - [ ] **The highlight's echo.** A large faded red copy of the current
       item's label, now and then.
-- [ ] **Hide "Unlocked Easter Egg"** on the main menu.
+- [x] **Hide "Unlocked Easter Egg"** on the main menu. Retail's
+      `NewMainMenu` hides the group (`0x74e404b4`) when it is built and
+      again when it is torn down, after `TheEasterEggs`' `Start` and
+      `Stop`. Its BACK is a silent veto. `bootflow_check` runs retail's
+      `Callback`, `HandleEvent` and `OnTick` on the image
+      (`RetailMainMenu`).
+  - [ ] `TheEasterEggs`' 78 codes (`0x0031d828`), and `OnTick`'s three
+        seconds of "Unlocked" when one is entered.
+  - [ ] Attract mode from the main menu (`OnTick`'s
+        `ConsiderStartDemoMode`), with message 24 resetting its timer.
+        It waits on `StartDemoMode`'s race.
+  - [ ] `MakeChallengeCarsAvailable` and `RaceParameters::InitWithDefaults`
+        in the constructor.
 - [ ] **The jukebox and its EA TRAX box.**
   - The music.
   - The song and the artist, bottom left, over the Help button while

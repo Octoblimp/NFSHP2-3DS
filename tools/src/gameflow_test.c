@@ -318,6 +318,11 @@ static void wJukebox(void* user, int start)
     (void)user;
     printf("jukebox %d\n", start);
 }
+static void wEasterEggs(void* user, int start)
+{
+    (void)user;
+    printf("eggs %d\n", start);
+}
 static void wStartDemoMode(void* user) { (void)user; printf("attract\n"); }
 static void wSetScreenVisible(void* u, uint32_t s, int v)
 { (void)u; (void)s; (void)v; }
@@ -662,7 +667,8 @@ static const Scenario kScenarios[] = {
     // SkipMovies: the title screen starts at rest, with no movie.
     { "skipmovies", 1, 0, 1, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH, {{0,0}} },
     // A second visit to the frontend with a demo waiting: straight to the
-    // main menu, stack reset -- so BACK there pops to nothing and stays.
+    // main menu, stack reset. BACK there is the main menu's, which vetoes it
+    // without a sound.
     { "relaunch", 1, 0, 0, 2, 2, 0, 0, 0, 20, SIXTIETH, {{10, "back"}} },
     // The demo disc: one title movie, the three-panel loading slideshow,
     // and no attract mode. Dead on this disc; here for the branch. The
@@ -676,12 +682,14 @@ static const Scenario kScenarios[] = {
     { "attract", 1, 0, 1, 1, 0, 0, 0, 0, BOOT1 + 40, 1.0f, {{0,0}} },
     // The title comes to rest 9 frames after the autoload, and PRESS
     // START is up 243 frames later -- the first multiple of 66 ticks over
-    // 16000. Select at 14 is too early and does nothing; select at 270 goes
-    // to the main menu; select again there does nothing; BACK returns to
-    // the title screen, which plays its movies again, and BACK again is
-    // vetoed by the title screen's own SCREEN_BACK_BUTTON handler.
+    // 16000. Select at 14 is too early and does nothing; BACK at 20, in the
+    // EA logo, and at 260, at rest, is vetoed by the title; select at 270
+    // goes to the main menu; select again there does nothing; BACK there,
+    // twice, is vetoed by retail's main menu, which clears Param and Noise.
+    // The demo's went back to the title.
     { "select", 1, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 300, SIXTIETH,
-      {{BOOT60 + 14, "select"}, {BOOT60 + 270, "select"},
+      {{BOOT60 + 14, "select"}, {BOOT60 + 20, "back"},
+       {BOOT60 + 260, "back"}, {BOOT60 + 270, "select"},
        {BOOT60 + 282, "select"}, {BOOT60 + 288, "back"},
        {BOOT60 + 292, "back"}} },
     // With the NFS intro present. Movie 0 runs over frames 3-7 and movie 1
@@ -858,10 +866,13 @@ static const Scenario kScenarios[] = {
       .frontendLaunchType = 1, .frames = 16, .dt = 1.0f, .attractMode = 1 },
     // The main menu's movie starts with the screen and plays on, one loop
     // after another -- UpdateMovie opens it again whenever Update answers
-    // 0 -- until InGameFlag stops it.
+    // 0 -- until InGameFlag stops it. StopMovie takes the gate down, so
+    // when the flag drops again UpdateMovie does nothing; kept up, it would
+    // find nothing open and open the movie again.
     { .name = "menumovie", .videoMode = 1, .frontendLaunchType = 1,
       .frames = BOOT60 + 500, .dt = SIXTIETH,
-      .input = {{BOOT60 + 270, "select"}, {BOOT60 + 480, "ingame"}} },
+      .input = {{BOOT60 + 270, "select"}, {BOOT60 + 480, "ingame"},
+                {BOOT60 + 490, "outgame"}} },
     // Back on the main menu with its movie still playing: StartMovie finds
     // the same name and leaves it be. Then another movie in its place, as
     // the Options screen's constructor starts one: the first is stopped and
@@ -872,12 +883,23 @@ static const Scenario kScenarios[] = {
       .input = {{BOOT60 + 270, "select"}, {BOOT60 + 274, "item3"},
                 {BOOT60 + 278, "back"}, {BOOT60 + 290, "optionsmovie"},
                 {BOOT60 + 300, "optionsmovie"}} },
-    // BACK from the main menu while its movie plays: the title's movie
-    // takes the one player, and once it ends UpdateMovie opens the menu's
-    // again under the title. Thirty seconds at rest, StartDemoMode stops it.
-    { .name = "menuattract", .videoMode = 1, .frontendLaunchType = 1,
+    // BACK on the main menu while its movie plays: vetoed, silently, and
+    // the movie plays on, loop after loop, for forty seconds. Retail's
+    // OnTick would start attract mode at thirty; the port owes that until
+    // StartDemoMode has a race, and the checker's run of OnTick stubs
+    // ConsiderStartDemoMode (bootflow_check.py, RetailMainMenu).
+    { .name = "menuidle", .videoMode = 1, .frontendLaunchType = 1,
       .frames = BOOT1 + 60, .dt = 1.0f,
       .input = {{BOOT1 + 16, "select"}, {BOOT1 + 18, "back"}} },
+    // StartDemoMode's StopMovie with a movie open. Retail gets there from
+    // a screen that plays one and calls ConsiderStartDemoMode, as the main
+    // menu's OnTick does; the port has none yet, so the options movie is
+    // opened under the title at rest, which then goes to attract at thirty
+    // seconds and stops it first. The movies are on: with SkipMovies set,
+    // StartMovie opens nothing.
+    { .name = "attractmovie", .videoMode = 1, .frontendLaunchType = 1,
+      .frames = BOOT1 + 40, .dt = 1.0f,
+      .input = {{BOOT1 + 12, "optionsmovie"}} },
 };
 #pragma GCC diagnostic pop
 #define NUM_SCENARIOS ((int)(sizeof(kScenarios) / sizeof(kScenarios[0])))
@@ -940,6 +962,7 @@ static void runScenario(const Scenario* sc)
     hooks.newFileSys              = wNewFileSys;
     hooks.sound                   = wSound;
     hooks.jukebox                 = wJukebox;
+    hooks.easterEggs              = wEasterEggs;
     hooks.startDemoMode           = wStartDemoMode;
     hooks.replayConsiderLaunching = wReplayConsider;
     hooks.replayLaunch            = wReplayLaunch;
@@ -1034,6 +1057,10 @@ static void runScenario(const Scenario* sc)
                 // InGameFlag up, as the race's loading sets it.
                 printf("input ingame\n");
                 w.inGame = 1;
+            } else if (!strcmp(what, "outgame")) {
+                // ... and down again, as the race's end clears it.
+                printf("input outgame\n");
+                w.inGame = 0;
             } else if (!strcmp(what, "mumbo")) {
                 printf("input mumbo\n");
                 bgf_push_screen(&gf, "New Main Menu");

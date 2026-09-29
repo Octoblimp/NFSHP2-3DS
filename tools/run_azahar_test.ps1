@@ -278,6 +278,15 @@ if ($booted) {
             Shot "mainmenu-looped"
         }
 
+        # Retail's main menu vetoes BACK, without a sound: the menu stays up,
+        # the movie plays on, and the "Unlocked Easter Egg" pair its
+        # constructor hid stays hidden.
+        [Hp2Cap]::PressKey($hwnd, $VK_S)      # B
+        $vetoed = Wait-ForLog "flow back vetoed" 5
+        Write-Host ("  main menu BACK vetoed: {0}" -f $vetoed)
+        Start-Sleep -Milliseconds 600
+        Shot "mainmenu-back"
+
         # MENUITEM_1 is Hot Pursuit, which sets mPolice and goes to Cops On
         # Mode Select -- a screen the port now has. Walking it down is the
         # only way to see the two things bscreens.c drives that a log line
@@ -408,5 +417,8 @@ $panelOpen = $dbg | Where-Object { $_ -match "^panel movie " }
 Write-Host ("Menu movie: {0} opens" -f $panelOpen.Count)
 $panelOpen | Select-Object -Unique | ForEach-Object { Write-Host ("            {0}" -f $_) }
 Write-Host ("Frontend:   {0} bracket moves, {1} blurb changes" -f $brackets.Count, $blurbs.Count)
+$eggs    = $dbg | Where-Object { $_ -match "^easter eggs " }
+$eggHide = $dbg | Where-Object { $_ -match "flow vis group ae0f8aa1 74e404b4 " }
+Write-Host ("Main menu:  {0} easter egg start/stops, {1} egg group sets ({2} shown)" -f $eggs.Count, $eggHide.Count, ($eggHide | Where-Object { $_ -match " 1$" }).Count)
 if ($leftLoop)  { Write-Host ("Textures:   {0}" -f ($leftLoop  | Select-Object -Last 1)) }
 Write-Host ("Screenshots: {0} in {1}" -f $step, $OutDir)
