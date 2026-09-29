@@ -227,6 +227,38 @@ bool avimovie_advance(AviMovie* m, uint32_t target)
     return changed;
 }
 
+// Update's test is `decoded < target || !shown` (0x0023833c): +12 counts
+// the frames decoded and +1088 is set by the first. Past that it takes the
+// ring buffer's next frame, and with none left and the file used up
+// answers 0 (0x002383c8). Retail's decode failing is not seen -- it draws
+// whatever came out -- where the port stops the movie.
+int avimovie_step(AviMovie* m, uint32_t target, bool* changed)
+{
+    AviChunk c;
+
+    if (changed) *changed = false;
+    if (m->error || m->ended) return 0;
+    if (m->shown >= 0 && m->decoded >= target) return 1;
+    for (;;) {
+        int s;
+        if (!avi_next_chunk(m->file, &m->info, &m->pos, &c)) {
+            m->ended = true;
+            return 0;
+        }
+        s = avi_chunk_stream(c.tag);
+        if (s == m->info.audioStream) {
+            if (m->audio) m->audio(m->audioUser, m->file, &c);
+            continue;
+        }
+        if (s != m->info.videoStream) continue;
+        if (!decode_chunk(m, &c)) return 0;
+        m->shown = (int32_t)m->nextFrame++;
+        m->decoded++;
+        if (changed) *changed = true;
+        return 1;
+    }
+}
+
 bool avimovie_done(const AviMovie* m)
 {
     if (m->error || m->ended) return true;
@@ -423,12 +455,22 @@ static void free_waves(AviPlayer* p)
     }
 }
 
-bool aviplayer_open(AviPlayer* p, const char* path)
+// The GPU's sides are 8 to 1024 and powers of two.
+static u16 pot(uint32_t n)
+{
+    u16 p = 8;
+    while (p < n && p < 1024) p <<= 1;
+    return p;
+}
+
+// Both opens: the file, a cleared texture and the sound, no frame yet.
+static bool open_player(AviPlayer* p, const char* path)
 {
     memset(p, 0, sizeof(*p));
     if (!avimovie_open(&p->movie, path)) return false;
-    if (!C3D_TexInit(&p->tex, (u16)p->movie.info.width,
-                     (u16)p->movie.info.height, GPU_RGBA8)) {
+    if (p->movie.info.width > 1024 || p->movie.info.height > 1024
+        || !C3D_TexInit(&p->tex, pot(p->movie.info.width),
+                        pot(p->movie.info.height), GPU_RGBA8)) {
         avimovie_close(&p->movie);
         return false;
     }
@@ -441,9 +483,23 @@ bool aviplayer_open(AviPlayer* p, const char* path)
     if (!p->sound) free_waves(p);
     p->movie.audio = queue_audio;
     p->movie.audioUser = p;
+    return true;
+}
+
+bool aviplayer_open(AviPlayer* p, const char* path)
+{
+    if (!open_player(p, path)) return false;
     if (avimovie_advance(&p->movie, 0)) show(p);
     else C3D_TexFlush(&p->tex);
     p->startTick = svcGetSystemTick();
+    p->started = true;
+    return true;
+}
+
+bool aviplayer_init(AviPlayer* p, const char* path)
+{
+    if (!open_player(p, path)) return false;
+    C3D_TexFlush(&p->tex);
     return true;
 }
 
@@ -460,9 +516,44 @@ void aviplayer_close(AviPlayer* p)
 bool aviplayer_drive(AviPlayer* p)
 {
     double t = (double)(svcGetSystemTick() - p->startTick) / SYSCLOCK_ARM11;
-    if (avimovie_advance(&p->movie, avimovie_frame_at(&p->movie, t))) show(p);
+    u64    t0 = svcGetSystemTick(), t1;
+    bool   changed = avimovie_advance(&p->movie, avimovie_frame_at(&p->movie, t));
+    t1 = svcGetSystemTick();
+    p->stepTicks += t1 - t0;
+    if (changed) {
+        show(p);
+        p->showTicks += svcGetSystemTick() - t1;
+    }
+    p->calls++;
     feed(p);
     if (p->movie.error) return true;
     return avimovie_done(&p->movie) && t >= avimovie_duration(&p->movie);
+}
+
+// Update's clock is eVBlankCounter over the TV's rate, less what it read on
+// the first call (0x00238238); this one is the console's tick.
+bool aviplayer_update(AviPlayer* p)
+{
+    double t;
+    bool   changed;
+    int    r;
+    u64    t0, t1;
+
+    if (!p->started) {
+        p->startTick = svcGetSystemTick();
+        p->started = true;
+    }
+    t0 = svcGetSystemTick();
+    t = (double)(t0 - p->startTick) / SYSCLOCK_ARM11;
+    r = avimovie_step(&p->movie, avimovie_frame_at(&p->movie, t), &changed);
+    t1 = svcGetSystemTick();
+    p->stepTicks += t1 - t0;
+    if (changed) {
+        show(p);
+        p->showTicks += svcGetSystemTick() - t1;
+    }
+    p->calls++;
+    feed(p);
+    return r != 0;
 }
 #endif

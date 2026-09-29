@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-r"""Cross-check 3DS Files/source/mv3.c (the MV3 intra decoder) and
-avimovie.c (the AVI streamer) against the retail image's own decoder, run
+r"""Cross-check 3DS Files/source/mv3.c (the MV3 decoder) and avimovie.c (the AVI streamer) against the retail image's own decoder, run
 in mipsemu.
 
 The model is the image: each piece of DCTImage, Huffman and MV3Codec runs
@@ -21,24 +20,46 @@ Scenarios cover:
   IDCTImageData's scan, on random blocks at real dequant tables: sparse
   and dense, a lone DC, a lone column or row, and DCs that clamp at both
   ends;
+- IDCTAdd, IDCTAdd1, IDCTAdd4 and IDCTAddImageData, the same blocks added
+  to what is there: zeros, 0xff and noise, so the sums clamp both ways;
+- CopyPreviousFrameBlock at four sizes and six kinds of vector, from
+  inside the frame to past the allocation's either end, with odd and
+  negative vectors for chroma's rounding;
 - ToImage32 on random planes at small sizes, both row orders, with every
   plane byte from 0 to 255 reached;
 - whole frames of retail's movies through DecompressFrameShared, the boot
   movies' first, middle and last among them, compared as CRCs of the RGBA,
   the port's tiled texture read back into rows, and the port's count of
-  IDCT outputs past the clamp table, which has to be 0.
+  IDCT outputs past the clamp table, which has to be 0;
+- inter sequences decoded in order from a new codec, compared plane by
+  plane as CRCs: four synthetic movies, which this file encodes with the
+  image's own prefix code and scan (every kind of macroblock: coded, copied
+  with a residual, copied without, and frames all of one kind, at four
+  sizes and ten quality pairs, the layout word's either byte set), then two
+  runs of MAINMENU_MOVIE, its first frames and a run across two keyframes.
 
 The PS2 reads `Codec::OffsetClamp` without a bound. For the IDCT scenarios
 the model fills 128 KB of memory below the table with 0 and 615 bytes
 above it with 255, so an out-of-range value reads what the port saturates
 to; the blocks are drawn so that no output reaches past those bytes (index
-999, where IDCTImageData's timer store lands). Whole frames run with the
-image's memory untouched.
+999, where IDCTImageData's timer store lands). The adds index the table at
+the pixel plus the value, which the blocks keep inside the same bytes.
+The copy reads the previous allocation from wherever the vector points;
+the model surrounds it with 64 KB of zeros each side, what the port reads
+past its own. Whole frames and sequences run with the image's memory
+untouched: the encoder keeps every add inside the table and every vector
+inside the allocation.
 
 The AVI half has no retail code to run -- `avimovie.c` is the port's -- so
 it is held to this file's own reading of RIFF: every retail movie's header
-and chunk list, and the player's pacing (which frames it decodes, which it
-reads past, which audio chunks it hands on) over a schedule of clock times.
+and chunk list, and the boot movies' pacing (which frames it decodes, which
+it reads past, which audio chunks it hands on) over a schedule of clock
+times. The menus' pacing, avimovie_step, is the image's: MoviePlayer::Update
+runs as shipped, on a player whose ring buffer is the movie's chunks and
+whose decoder only counts, and the port answers each call as it does --
+over a synthetic inter movie called at 50 Hz and slower, the synthetic AVI
+for its sound chunks, and MAINMENU_MOVIE to its end and past it, with a
+stretch left out so it falls behind and catches up.
 
 The sound has none either: the IOP fed it to the SPU. It is held to
 audio_convert.py's SPU decoder, the one sndbank_check holds the sound banks
@@ -108,6 +129,17 @@ TO_IMAGE32 = 0x002363a8
 MV3_CTOR = 0x00238e28
 BEGIN = 0x00239050
 FRAME = 0x00239148
+# The inter path.
+IDCT_ADD = 0x00233c20
+IDCT_ADD1 = 0x00233fa0
+IDCT_ADD4 = 0x00234090
+IDCT_ADD_DATA = 0x00234aa0
+SWAP_PREV = 0x00236638
+# CopyPreviousFrameBlock. The map leaves it unplaced (the demo's is
+# 0x002210e0), so it is held to ToImage's one call to it instead.
+COPY_PREV = 0x00236950
+COPY_PREV_CALL = 0x00235480
+DCT = 40                         # MV3Codec's DCTImage
 
 DECODE_TAB = 0x00334be8
 CLAMP_TAB = 0x0031c6a0           # Clamp - 256: 768 bytes
@@ -124,6 +156,17 @@ MOVIE_RATE_AT = 0x002381b0
 HZ_TO_SPU = 0x0026d258
 HZ_TO_SPU_BODY = ["sll v0,v1,12", "ori v1,zero,0xbb80", "divu v0,v1"]
 
+# What Update calls on a silent movie. The ring buffer and the decoder are
+# stubbed; fptoui runs.
+READ_DATA = 0x002395d8           # RingBuffer::ReadData
+VIDEO_MODE = 0x001a3390          # GetVideoMode: 0 is PAL, 50 vblanks a second
+GET_FRAME = 0x00239a58           # RingBuffer::GetFrame
+RELEASE_FRAME = 0x00239b48       # RingBuffer::ReleaseFrame
+DECOMPRESS_EX = 0x00239118       # MV3Codec::DecompressFrameEx
+FILE_NAME = 0x002545e8           # bFileGetFilename: the 20 s stall's report
+VBLANKS = GP - 25252             # eVBlankCounter
+MOVIE_PLAYER_SIZE = 1092
+
 # The ones the map pairs, and the demo's twins.
 DEMO_CODE = {
     CODEC_CTOR: 0x0021c9c8, CLAMP_INIT: 0x0021cce0,
@@ -133,11 +176,21 @@ DEMO_CODE = {
     IDCT4: 0x0021e560, IDCT_DATA: 0x0021f3d8, IDCT_ZERO: 0x0021f608,
     TO_IMAGE32: 0x00220ac0, MV3_CTOR: 0x002231a8, BEGIN: 0x002233d0,
     FRAME: 0x002234c8, MOVIE_UPDATE: 0x002224f8, HZ_TO_SPU: 0x002528b8,
+    IDCT_ADD: 0x0021e7d8, IDCT_ADD1: 0x0021eb58, IDCT_ADD4: 0x0021ec48,
+    IDCT_ADD_DATA: 0x0021f640, SWAP_PREV: 0x00220d50,
+    READ_DATA: 0x00223950, VIDEO_MODE: 0x001992a0, GET_FRAME: 0x00223dc0,
+    RELEASE_FRAME: 0x00223eb0, DECOMPRESS_EX: 0x00223498,
+    FILE_NAME: 0x0023c3d0,
 }
 
 GUARD_BELOW = 0x20000
 GUARD_ABOVE = IDCT_TIMER - (CLAMP_TAB + 768)      # up to index 999
 INDEX_MAX = 383 + GUARD_ABOVE
+# The IDCTAdds index Clamp, 128 below OffsetClamp, by the byte already
+# there plus the output: the largest output the guard holds over 255.
+ADD_INDEX_MAX = INDEX_MAX + 128 - 255
+
+COPY_SIZES = [(16, 16), (64, 48), (48, 80), (256, 32)]
 
 
 def check_map():
@@ -151,11 +204,62 @@ def check_map():
         if got != r:
             bad.append("demo %08x maps to %s, not %08x"
                        % (d, "none" if got is None else "%08x" % got, r))
+    elf = mipsdis.Elf(str(retail_model.RETAIL))
+    w = struct.unpack("<I", elf.read(COPY_PREV_CALL, 4))[0]
+    if w != 0x0c000000 | (COPY_PREV >> 2):
+        bad.append("ToImage's %08x is %s, not jal %08x" % (
+            COPY_PREV_CALL, mipsdis.decode(w, COPY_PREV_CALL, elf)[0], COPY_PREV))
     return bad
 
 
 def u32(v):
     return v & 0xffffffff
+
+
+def alloc_layout(w, h):
+    """Init's allocation: Y, U and V each in `area` bytes, the Y plane's
+    size rounded up to 128, then a vector's four bytes per macroblock."""
+    area = (w * h + 127) & ~127
+    return area, 3 * area + (w // 16) * (h // 16) * 4
+
+
+def lcg_bytes(n, seed):
+    """The harness's lcg_fill: a 32-bit LCG's bits 16..23."""
+    out = bytearray(n)
+    s = seed & 0xffffffff
+    for i in range(n):
+        s = (s * 1103515245 + 12345) & 0xffffffff
+        out[i] = (s >> 16) & 255
+    return bytes(out)
+
+
+def tdiv2(v):
+    """C's v / 2, toward zero."""
+    return -((-v) // 2) if v < 0 else v // 2
+
+
+def copy_reads(w, h, x, y, dx, dy):
+    """The offsets into the previous allocation that CopyPreviousFrameBlock
+    reads for macroblock (x, y) at vector (dx, dy), row by row: 16 of 16
+    luma bytes, then 8 of 8 in U and in V."""
+    area, _ = alloc_layout(w, h)
+    cw = w // 2
+    sx, sy = x + dx, y + dy
+    c = tdiv2(sy) * cw + tdiv2(sx)
+    rows = [(sy * w + sx + r * w, 16) for r in range(16)]
+    rows += [(area + c + r * cw, 8) for r in range(8)]
+    rows += [(2 * area + c + r * cw, 8) for r in range(8)]
+    return rows
+
+
+def copy_misses(w, h, x, y, dx, dy):
+    """How many of those bytes fall outside the allocation."""
+    _, size = alloc_layout(w, h)
+    return sum(1 for off, n in copy_reads(w, h, x, y, dx, dy)
+               for i in range(off, off + n) if not 0 <= i < size)
+
+
+COPY_GUARD = 0x10000
 
 
 class Model(object):
@@ -174,6 +278,10 @@ class Model(object):
         e.call(DCTIMAGE_CTOR, self.dct)
         self.huff = e.alloc(64)
         e.call(BUILD_DECODE, self.huff)
+        # The encoder's prefix code and scan, out of the image, before the
+        # guard covers the scan.
+        self.prefix = struct.unpack("<12I", e.read(PREFIX_TAB, 48))
+        self.scan = list(struct.unpack("<64i", e.read(SCAN, 256)))
         # The guard: after the constructors, which read the scan that sits
         # right after the table.
         e.write(CLAMP_TAB - GUARD_BELOW, bytes(GUARD_BELOW))
@@ -185,6 +293,7 @@ class Model(object):
         self.dst = e.alloc(1 << 16)
         self.img = e.alloc(640)
         self.planes = e.alloc(3 << 14)
+        self.copy_cap = 0
 
     def table(self):
         t = self.e.read(DECODE_TAB, 1024)
@@ -239,6 +348,55 @@ class Model(object):
             e.call(IDCT_DATA, self.dct, self.dst, 16, self.cbuf, self.qbuf)
         return ["idct %d %s" % (kind, e.read(self.dst, 128).hex())]
 
+    def idctadd(self, kind, dst, q, c):
+        e = self.e
+        e.write(self.qbuf, struct.pack("<64h", *q))
+        e.write(self.cbuf, struct.pack("<64h", *c))
+        e.write(self.dst, dst)
+        if kind == 1:
+            e.call(IDCT_ADD1, self.dct, self.cbuf, self.qbuf, self.dst, 16)
+        elif kind == 2:
+            e.call(IDCT_ADD4, self.dct, self.cbuf, self.qbuf, self.dst, 16)
+        elif kind == 3:
+            e.call(IDCT_ADD, self.dct, self.cbuf, self.qbuf, self.dst, 16)
+        else:
+            e.call(IDCT_ADD_DATA, self.dct, self.dst, 16, self.cbuf, self.qbuf)
+        return ["idctadd %d %s" % (kind, e.read(self.dst, 128).hex())]
+
+    def copy(self, w, h, seed, x, y, dx, dy):
+        """CopyPreviousFrameBlock on two allocations laid out as Init lays
+        them, the previous one inside COPY_GUARD bytes of zeros each side:
+        what the port reads outside its allocation."""
+        e = self.e
+        area, size = alloc_layout(w, h)
+        cw = w // 2
+        for off, n in copy_reads(w, h, x, y, dx, dy):
+            if off < -COPY_GUARD or off + n > size + COPY_GUARD:
+                raise SystemExit("copy %d %d %d %d %d %d reads past the guard"
+                                 % (w, h, x, y, dx, dy))
+        if size > self.copy_cap:
+            self.copy_cap = size
+            self.copy_prev = e.alloc(size + 2 * COPY_GUARD) + COPY_GUARD
+            self.copy_cur = e.alloc(size)
+            self.copy_img = e.alloc(640)
+        prev, cur, img = self.copy_prev, self.copy_cur, self.copy_img
+        e.write(prev - COPY_GUARD, bytes(COPY_GUARD) + lcg_bytes(size, seed)
+                + bytes(COPY_GUARD))
+        e.write(cur, lcg_bytes(size, seed + 1))
+        e.write(cur + 3 * area, struct.pack("<2h", dx, dy))
+        for off, v in ((4, cur), (8, cur + area), (12, cur + 2 * area),
+                       (28, cur + 3 * area), (44, prev), (48, prev + area),
+                       (52, prev + 2 * area), (68, w), (72, h)):
+            e.put32(img + off, v)
+        py = cur + y * w + x
+        pu = cur + area + (y // 2) * cw + x // 2
+        pv = pu + area
+        e.call(COPY_PREV, img, x, y, py, pu, pv, 0)
+        out = "".join(e.read(py + r * w, 16).hex() for r in range(16))
+        out += " " + "".join(e.read(pu + r * cw, 8).hex() for r in range(8))
+        out += " " + "".join(e.read(pv + r * cw, 8).hex() for r in range(8))
+        return ["copy %s misses %d" % (out, copy_misses(w, h, x, y, dx, dy))]
+
     def yuv(self, w, h, flip, y, u, v):
         e = self.e
         yp, up, vp = self.planes, self.planes + (1 << 14), self.planes + (2 << 14)
@@ -258,13 +416,36 @@ class Model(object):
         return out
 
 
-class FrameModel(object):
-    """DecompressFrameShared on a fresh image, as the game calls it."""
+_FRAME_EMU = None
 
-    def __init__(self, w, h):
-        e = self.e = retail_model.RetailEmu()
+
+def frame_emu():
+    """The emulator every FrameModel shares; each model's objects are new
+    allocations, which the bump heap hands out zeroed, so a codec starts as
+    it would on a fresh image. BeginDecompress calls BuildDecodeTable, 12.7
+    million instructions (15 s) that write only the 1024 bytes at
+    DECODE_TAB, the same bytes every time (the table scenario checks them):
+    built once here, a later call only checks they are still there."""
+    global _FRAME_EMU
+    if _FRAME_EMU is None:
+        e = _FRAME_EMU = retail_model.RetailEmu()
         e.stub_bware()
         e.call(CLAMP_INIT)
+        e.call(BUILD_DECODE, 0)
+        built = e.read(DECODE_TAB, 1024)
+
+        def rebuild(e_):
+            if e_.read(DECODE_TAB, 1024) != built:
+                raise SystemExit("the decode table changed after it was built")
+        e.stub(BUILD_DECODE, rebuild)
+    return _FRAME_EMU
+
+
+class FrameModel(object):
+    """DecompressFrameShared on a new codec, as the game calls it."""
+
+    def __init__(self, w, h, convert=True):
+        e = self.e = frame_emu()
         self.w, self.h = w, h
         self.in_hdr = e.alloc(64)
         self.out_hdr = e.alloc(64)
@@ -275,9 +456,19 @@ class FrameModel(object):
         e.call(MV3_CTOR, self.obj)
         if e.call(BEGIN, self.obj, self.in_hdr, self.out_hdr) != 0:
             raise SystemExit("BeginDecompress rejected %dx%d" % (w, h))
-        e.put32(self.obj + CONVERT_TO_RGBA, 1)
+        # Without the conversion ToImage only decodes, which a sequence
+        # compared plane by plane does not need; it costs most of a frame.
+        e.put32(self.obj + CONVERT_TO_RGBA, 1 if convert else 0)
         self.dst = e.alloc(w * h * 4)
         self.src, self.cap = 0, 0
+
+    def planes(self):
+        """The frame just decoded: ToImage ends with SwapPrevBuffer, so it
+        is pPrevY, pPrevU and pPrevV now (DCTImage +44, +48, +52)."""
+        e, n = self.e, self.w * self.h
+        d = self.obj + DCT
+        return (e.read(e.u32(d + 44), n), e.read(e.u32(d + 48), n // 4),
+                e.read(e.u32(d + 52), n // 4))
 
     def _bih(self, addr, w, h, bits, comp):
         self.e.write(addr, struct.pack("<I2i2H4sI2i2I", 40, w, h, 1, bits,
@@ -460,6 +651,77 @@ def pace_lines(avi, times):
         out.append("t %s %d %d %d %d %d %d %d 0 %d" % (
             ts, frame_at(avi, t), changed, shown, decoded, skipped, nxt,
             ended, done))
+    return out
+
+
+def f32(v):
+    return struct.unpack("<f", struct.pack("<f", v))[0]
+
+
+def step_lines(model, avi, ds):
+    """MoviePlayer::Update, retail's, on a player InitFile has just opened
+    `avi` in, called at each of `ds`: vblanks since the first call, on a
+    PAL TV. The ring buffer is `avi`'s chunks, GetFrame reading on to the
+    next video one, and the decoder only counts; the clock, the test and
+    the end run as shipped. The sound chunks GetFrame passes are listed
+    where the port hands them on -- retail's ring buffer sends its sound
+    elsewhere, and the menus' movies have none."""
+    e = model.e
+    ch = avi.chunks()
+    p = e.alloc(MOVIE_PLAYER_SIZE)
+    frame = e.alloc(64)
+    eof = e.alloc(16)
+    # What InitFile leaves: +8 the rate over the scale, as a double made
+    # single, and +4 one over it; +24, the next Update is the first; +28
+    # the file; the stream read to its end and the buffer empty (+108 and
+    # +64, +68), so GetFrame's 0 is the end; +272 the strh's length.
+    fps = f32(float(avi.rate) / float(avi.scale))
+    e.write(p + 4, struct.pack("<2f", f32(1.0 / fps), fps))
+    e.put32(p + 24, 1)
+    e.put32(p + 28, 1)
+    e.put32(p + 108, eof)
+    e.put32(p + 272, avi.frames)
+    st = {"i": 0, "decoded": 0}
+    out = []
+
+    def get_frame(_e):
+        while st["i"] < len(ch) and ch[st["i"]][1] != avi.vs:
+            _, s, off, n = ch[st["i"]]
+            if s == avi.as_:
+                out.append("a %d %d" % (off, n))
+            st["i"] += 1
+        if st["i"] == len(ch):
+            return 0
+        e.put32(frame + 16, ch[st["i"]][3])
+        e.put32(frame + 32, 1)
+        return frame
+
+    def release(_e):
+        st["i"] += 1
+
+    def decompress(_e):
+        st["decoded"] += 1
+
+    def stall(_e):
+        raise SystemExit("Update reported a stall")
+
+    stubs = ((READ_DATA, lambda _e: None), (VIDEO_MODE, lambda _e: 0),
+             (GET_FRAME, get_frame), (RELEASE_FRAME, release),
+             (DECOMPRESS_EX, decompress), (FILE_NAME, stall))
+    for a, fn in stubs:
+        e.stub(a, fn)
+    try:
+        for d in ds:
+            e.put32(VBLANKS, STEP_V0 + d)
+            before = st["decoded"]
+            r = e.call(MOVIE_UPDATE, p, 1, limit=100000)
+            n = e.u32(p + 12)
+            out.append("s %d %d %d %d %d" % (
+                d, r, int(st["decoded"] != before),
+                n - 1 if e.u32(p + 1088) else -1, n))
+    finally:
+        for a, _ in stubs:
+            e.stubs.pop(a, None)
     return out
 
 
@@ -656,6 +918,44 @@ def scenario_lines(rng):
         cmds.append("idct %d %s %s" % (kind, " ".join(map(str, q)),
                                        " ".join(map(str, c))))
 
+    # The IDCTAdds, onto blocks of black, of white and of noise.
+    for k in range(240):
+        kind = [3, 4, 2, 1][k % 4]
+        while True:
+            q = QTABLES[rng.choice(sorted(QTABLES))]
+            c = block(rng, kind, k)
+            if bound(q, c) < ADD_INDEX_MAX - 128:
+                break
+        fill = k % 6
+        dst = bytes(128) if fill == 0 else b"\xff" * 128 if fill == 1 else \
+            bytes(rng.randrange(256) for _ in range(128))
+        cmds.append("idctadd %d %s %s %s" % (kind, dst.hex(), " ".join(map(str, q)),
+                                             " ".join(map(str, c))))
+
+    # CopyPreviousFrameBlock: at corners, edges and inside; no vector, odd
+    # ones both ways (chroma halves toward zero), far ones into the next
+    # rows and into U, V and the vectors, and some out of the allocation at
+    # either end, which the port reads as 0.
+    for k in range(48):
+        w, h = COPY_SIZES[k % len(COPY_SIZES)]
+        x = rng.choice([0, w - 16, rng.randrange(w // 16) * 16])
+        y = rng.choice([0, h - 16, rng.randrange(h // 16) * 16])
+        r = k % 6
+        if r == 0:
+            dx, dy = 0, 0
+        elif r == 1:
+            dx, dy = rng.choice([-3, -1, 1, 3]), rng.choice([-5, -1, 1, 5])
+        elif r == 2:
+            dx, dy = rng.randint(-w, w), rng.randint(-h, h)
+        elif r == 3:
+            dx, dy = rng.randint(-2 * w, 2 * w), rng.randint(0, 3 * h)
+        elif r == 4:
+            dx, dy = rng.randint(-20, 20), rng.randint(-40, -17) - y
+        else:
+            dx, dy = rng.randint(-20, 20), rng.randint(3 * h, 3 * h + 40) - y
+        cmds.append("copy %d %d %d %d %d %d %d" % (
+            w, h, rng.randrange(1 << 32), x, y, dx, dy))
+
     # ToImage32.
     for k in range(24):
         w, h = rng.choice([(2, 2), (4, 2), (8, 4), (16, 8), (6, 10), (32, 16),
@@ -721,6 +1021,234 @@ def block(rng, kind, k):
         return c
 
 
+# ============================================================ the encoder
+#
+# Retail's decoder takes about ten seconds a 256x384 frame in mipsemu, so
+# most of the inter path is checked on small synthetic movies. This encoder
+# writes the inter layout as DecompressFrameShared and ToImage read it:
+# every kind of macroblock and block, DC predictors that run across copied
+# macroblocks, rows with nothing coded, and vectors that leave their plane.
+# No vector leaves the allocation, where the PS2 reads whatever memory is
+# there, and no IDCT output leaves the clamp table: retail's own movies do
+# neither, and the harness counts both.
+
+PREFIX_TAB = 0x002bdc48          # 12 x length << 16 | code
+SCAN = CLAMP_TAB + 768           # 0x0031c9a0, 64 ints
+
+
+class BitWriter(object):
+    """MSB first, as Huffman reads."""
+
+    def __init__(self):
+        self.parts = []
+
+    def put(self, v, n):
+        if n:
+            self.parts.append(format(v & ((1 << n) - 1), "0%db" % n))
+
+    def data(self):
+        s = "".join(self.parts)
+        s += "0" * (-len(s) % 8)
+        return int(s, 2).to_bytes(len(s) // 8, "big") if s else b""
+
+
+def put_values(bw, prefix, vals, overshoot=0):
+    """Decompress's input for `vals`. A nonzero value is its class's prefix,
+    a sign bit and the magnitude's bits under its implied top one; the
+    escape classes read the same bits. A run of zeros is class 0's prefix, a
+    flag and the length. A run that ends `vals` is written `overshoot`
+    longer, as Decompress writes a run whole."""
+    zl, zc = prefix[0] >> 16, prefix[0] & 0xffff
+    i = 0
+    while i < len(vals):
+        v = vals[i]
+        if v:
+            a = abs(v)
+            k = a.bit_length()
+            if k > 11:
+                raise SystemExit("the encoder has no class for %d" % v)
+            bw.put(prefix[k] & 0xffff, prefix[k] >> 16)
+            bw.put(1 if v < 0 else 0, 1)
+            bw.put(a - (1 << (k - 1)), k - 1)
+            i += 1
+            continue
+        j = i
+        while j < len(vals) and not vals[j] and j - i < 72:
+            j += 1
+        run = j - i
+        if j == len(vals):
+            run = min(72, run + overshoot)
+        bw.put(zc, zl)
+        if run >= 9:
+            bw.put(1, 1)
+            bw.put(run - 9, 6)
+        else:
+            bw.put(0, 1)
+            bw.put(run - 1, 3)
+        i = j
+
+
+def block_bound(t, q, c, scan):
+    """bound() for a block of type t, its coefficients in the stream's
+    order."""
+    if t == 1:
+        s = abs(c[0] * q[0])
+    elif t == 2:
+        s = sum(abs(c[i] * q[j]) for i, j in enumerate((0, 1, 8, 9)))
+    else:
+        s = sum(abs(q[i] * c[scan[i]]) for i in range(64))
+    return (10 * s + 64) >> 5
+
+
+def synth_block(rng, t, q, limit, scan):
+    """Type t's coefficients, DC first, halved until no output can pass
+    `limit`: so the big ones land just inside it, and clamp."""
+    if t == 0:
+        return []
+    if t == 1:
+        c = [rng.randint(-400, 400)]
+    elif t == 2:
+        c = [rng.randint(-400, 400)] + [rng.choice([0, rng.randint(-60, 60)])
+                                        for _ in range(3)]
+    else:
+        c = [0] * 64
+        if rng.random() < 0.2:
+            c = [rng.randint(-2, 2) for _ in range(64)]
+        else:
+            for _ in range(rng.randint(0, 12)):
+                c[rng.randrange(1, rng.choice([4, 12, 64]))] = rng.randint(-80, 80)
+        c[0] = rng.randint(-400, 400)
+    while block_bound(t, q, c, scan) >= limit:
+        c = [int(v / 2) for v in c]
+    return c
+
+
+def synth_vector(rng, w, h, x, y):
+    """A vector for macroblock (x, y) that reads inside the allocation:
+    mostly near, some out of the plane sideways (into the next row), some
+    into U, V and the vectors."""
+    while True:
+        r = rng.random()
+        if r < 0.45:
+            dx, dy = rng.randint(-6, 6), rng.randint(-6, 6)
+        elif r < 0.75:
+            dx, dy = rng.randint(-w, w), rng.randint(-h // 2, h // 2)
+        else:
+            dx, dy = rng.randint(-2 * w, 2 * w), rng.randint(-h, 3 * h)
+        if copy_misses(w, h, x, y, dx, dy) == 0:
+            return [dx, dy]
+
+
+def synth_frame(rng, w, h, kind, q, d, layout, tables, prefix, scan):
+    """One frame. `kind` is "I" for intra; for inter, "P" mixes every kind of
+    macroblock, "S" copies them all with no residual, "C" copies them all
+    with one, and "Q" codes them all."""
+    mbw, mbh = w // 16, h // 16
+    nmb = mbw * mbh
+    intra = kind == "I"
+    pick = {"I": ["intra"], "Q": ["intra"], "S": ["skip"], "C": ["copy"],
+            "P": ["intra", "copy", "copy", "skip"]}[kind]
+    modes = [rng.choice(pick) for _ in range(nmb)]
+    transp = bytearray((nmb + 3) // 4)
+    vects = []
+    for i, mo in enumerate(modes):
+        if mo != "intra":
+            transp[i >> 2] |= 1 << (i & 3)
+            vects += synth_vector(rng, w, h, (i % mbw) * 16, (i // mbw) * 16)
+        # The no-residual bit only counts on a copied macroblock.
+        if mo == "skip" or (mo == "intra" and rng.random() < 0.3):
+            transp[i >> 2] |= 16 << (i & 3)
+    types = []
+    bw = BitWriter()
+    if not intra:
+        put_values(bw, prefix, vects)
+    for row in range(mbh):
+        vals, coded, pred = [], 0, [0, 0, 0]
+        for mo in modes[row * mbw:(row + 1) * mbw]:
+            if mo == "skip":
+                continue
+            coded += 1
+            add = mo == "copy"
+            for n in range(6):
+                ch = 0 if n < 4 else n - 3
+                qt = tables[(1 if add else 0) + (2 if n >= 4 else 0)]
+                t = rng.choice([0, 1, 2, 3, 3])
+                types.append(t)
+                c = synth_block(rng, t, qt, 250 if add else 380, scan)
+                if c:
+                    # the stream holds the DC less its channel's predictor
+                    c[0], pred[ch] = c[0] - pred[ch], c[0]
+                vals += c
+        bw.put(len(vals), 16)
+        if not intra:
+            bw.put(coded, 8)
+        room = mbw * 384 - len(vals)
+        put_values(bw, prefix, vals,
+                   rng.choice([0, 0, 5, 40]) if room >= 72 else 0)
+    tb = bytearray((len(types) + 3) // 4)
+    for i, t in enumerate(types):
+        tb[i >> 2] |= t << ((i & 3) * 2)
+    hdr = bytes([q & 255, d & 255]) + struct.pack(">H", 0 if intra else layout)
+    if intra:
+        comp = struct.pack("<h", len(tb)) + tb
+    else:
+        comp = struct.pack("<hh", len(tb), len(vects) // 2) + transp + tb
+    return hdr + comp + bw.data()
+
+
+# (w, h, frames): each frame's kind, as synth_frame takes it.
+SYNTH_SEQS = [
+    (64, 48, "IPPPPPPIPP"),
+    (16, 16, "IPSCQPPPP"),
+    (128, 32, "IPPPPPSP"),
+    (48, 80, "IPPCPPQP"),
+]
+SYNTH_QUALITY = [(90, -4), (93, -4), (50, 10), (20, 5), (100, -60), (70, -6),
+                 (60, 0), (1, 99), (-5, 0), (127, -128)]
+SYNTH_LAYOUTS = [0x0100, 0x0100, 0x0001, 0xffff, 0x8000]
+
+
+def synth_seqs(model, rng, tmpdir):
+    """The synthetic movies, each written as an AVI: (path, frames)."""
+    out = []
+    for k, (w, h, kinds) in enumerate(SYNTH_SEQS):
+        frames = []
+        for kind in kinds:
+            q, d = rng.choice(SYNTH_QUALITY)
+            tables = [[int(x) for x in ln.split()[4:]]
+                      for ln in model.quant(q, d)]
+            frames.append(synth_frame(rng, w, h, kind, q, d,
+                                      rng.choice(SYNTH_LAYOUTS), tables,
+                                      model.prefix, model.scan))
+        p = Path(tmpdir) / ("seq%d.avi" % k)
+        video_avi(p, w, h, frames)
+        out.append((str(p), len(frames)))
+    return out
+
+
+def seq_lines(path, n, skip=0):
+    """A movie's frames `skip` .. `skip + n - 1` through retail's decoder in
+    order, from a fresh codec: each one's planes as CRCs."""
+    a = Avi(path)
+    vid = [ch for ch in a.chunks() if ch[1] == a.vs][skip:skip + n]
+    fm = FrameModel(a.w, a.h, convert=False)
+    out = []
+    for i, (_, _, off, size) in enumerate(vid):
+        fm.decode(a.read(off, size))
+        y, u, v = fm.planes()
+        out.append("seq %d 0 %08x %08x %08x misses 0 0" % (
+            i, zlib.crc32(y) & 0xffffffff, zlib.crc32(u) & 0xffffffff,
+            zlib.crc32(v) & 0xffffffff))
+    out.append("seq end %d" % len(vid))
+    return out
+
+
+# Retail's own inter frames: MAINMENU's first, and a run from 473 that
+# holds two keyframes, one frame apart.
+REAL_SEQS = [("MAINMENU_MOVIE", 6, 0), ("MAINMENU_MOVIE", 6, 473)]
+MENU_MOVIES = "extracted-retail/MOVIES"
+
+
 def frame_list():
     """(movie, frame number) pairs: each boot movie's first, a middle and its
     last, and one of each other kind."""
@@ -733,6 +1261,19 @@ PACE_TIMES = ["0", "0", "0.01", "0.034", "0.05", "1", "1", "2.5", "2.51",
               "30", "30.2", "79.9", "80.8", "80.84", "81", "100"]
 SYNTH_TIMES = ["0", "0.15", "0.25", "0.45", "1"]
 
+# Update's times, in vblanks from the first call, which is at STEP_V0. None
+# is on a frame's boundary, a multiple of 5 at 30 or 10 fps: retail's
+# single-precision t / duration can land a hair under the integer there,
+# where the port's double lands on it, and the two take the frame a vblank
+# apart.
+STEP_V0 = 1234
+STEP_SEQ = [0, 0, 1, 2, 3, 4, 6, 7, 8, 9, 11, 12, 13, 14, 16, 17, 18, 19,
+            21, 22]
+STEP_SLOW = [0, 8, 16, 23, 31, 39, 46, 47, 48, 49, 51]
+STEP_SYNTH = [0, 1, 2, 3, 4, 6, 7, 8, 9, 11, 12, 13, 14, 16, 17, 18, 19,
+              21, 22, 23, 24, 26, 27]
+STEP_MENU = [0] + [d for d in range(1, 1531) if d % 5 and not 700 < d < 760]
+
 
 def riff(tag, body):
     return tag + struct.pack("<I", len(body)) + body + (b"\0" if len(body) & 1 else b"")
@@ -740,6 +1281,22 @@ def riff(tag, body):
 
 def rlist(kind, *parts):
     return riff(b"LIST", kind + b"".join(parts))
+
+
+def strh(kind, scale, rate, length):
+    return riff(b"strh", kind + bytes(16) + struct.pack(
+        "<4I", scale, rate, 0, length) + bytes(20))
+
+
+def video_avi(path, w, h, frames):
+    """An AVI of one video stream, as the menu movies are: no sound."""
+    bih = struct.pack("<I2i2H4sI2i2I", 40, w, h, 1, 24, b"MV30", w * h * 3,
+                      0, 0, 0, 0)
+    hdrl = rlist(b"hdrl", riff(b"avih", bytes(56)),
+                 rlist(b"strl", strh(b"vids", 1, 30, len(frames)),
+                       riff(b"strf", bih)))
+    movi = b"".join(riff(b"00db", f) for f in frames)
+    Path(path).write_bytes(riff(b"RIFF", b"AVI " + hdrl + rlist(b"movi", movi)))
 
 
 def synth_avi(path):
@@ -750,10 +1307,6 @@ def synth_avi(path):
     four."""
     ea = Avi(str(ROOT / MOVIES / "EALOGO_EN.AVI"))
     vid = [ea.read(o, n) for t, s, o, n in ea.chunks() if s == ea.vs][:4]
-
-    def strh(kind, scale, rate, length):
-        return riff(b"strh", kind + bytes(16) + struct.pack(
-            "<4I", scale, rate, 0, length) + bytes(20))
     bih = struct.pack("<I2i2H4sI2i2I", 40, 512, -256, 1, 24, b"MV30",
                       512 * 256 * 3, 0, 0, 0, 0)
     wav = struct.pack("<HHIIHH", 1, 1, 22050, 22050, 1, 8)
@@ -819,6 +1372,18 @@ def build_all(model_needed=True):
         rgba = fm[key].decode(avis[name].read(off, n))
         crc = zlib.crc32(rgba) & 0xffffffff
         lines.append("frame 0 %08x %08x misses 0" % (crc, crc))
+
+    # The inter path, over whole sequences decoded in order: the synthetic
+    # movies, then retail's own.
+    seqs = synth_seqs(model, random.Random(0x50524556),
+                      Path(synth_path()).parent)
+    for path, n in seqs:
+        cmds.append("seq %s %d" % (path, n))
+        lines += seq_lines(path, n)
+    for name, n, skip in REAL_SEQS:
+        rel = "%s/%s.AVI" % (MENU_MOVIES, name)
+        cmds.append("seq %s %d %d" % (rel, n, skip))
+        lines += seq_lines(str(ROOT / rel), n, skip)
     t2 = time.time()
 
     for p in sorted(Path(ROOT / MOVIES).glob("*.AVI")):
@@ -834,6 +1399,11 @@ def build_all(model_needed=True):
     lines += avi_lines(Avi(sp))
     cmds.append("pace %s %s" % (sp, " ".join(SYNTH_TIMES)))
     lines += pace_lines(Avi(sp), SYNTH_TIMES)
+    menu = "%s/MAINMENU_MOVIE.AVI" % MENU_MOVIES
+    for path, ds in ((seqs[0][0], STEP_SEQ), (seqs[0][0], STEP_SLOW),
+                     (sp, STEP_SYNTH), (menu, STEP_MENU)):
+        cmds.append("step %s %s" % (path, " ".join(map(str, ds))))
+        lines += step_lines(model, Avi(str(ROOT / path)), ds)
 
     cmds.append("rate")
     lines += rate_lines(model)
@@ -863,6 +1433,11 @@ def run_model(model, cmd):
     if k == "idct":
         v = [int(x) for x in w[2:]]
         return model.idct(int(w[1]), v[:64], v[64:])
+    if k == "idctadd":
+        v = [int(x) for x in w[3:]]
+        return model.idctadd(int(w[1]), bytes.fromhex(w[2]), v[:64], v[64:])
+    if k == "copy":
+        return model.copy(*[int(x) for x in w[1:]])
     if k == "yuv":
         return model.yuv(int(w[1]), int(w[2]), int(w[3]), bytes.fromhex(w[4]),
                          bytes.fromhex(w[5]), bytes.fromhex(w[6]))
@@ -870,16 +1445,20 @@ def run_model(model, cmd):
 
 
 def survey():
-    """Every retail movie's frames, and how many are the intra layout."""
+    """Every retail movie's frames, and how many are the intra layout: the
+    boot movies, then the menus'."""
     out = []
-    for p in sorted(Path(ROOT / MOVIES).glob("*.AVI")):
+    paths = (sorted(Path(ROOT / MOVIES).glob("*.AVI"))
+             + sorted(Path(ROOT / MENU_MOVIES).glob("*.AVI")))
+    for p in paths:
         a = Avi(str(p))
         vid = [ch for ch in a.chunks() if ch[1] == a.vs]
         intra = sum(1 for ch in vid if a.read(ch[2] + 2, 2) == b"\0\0")
         snd = sum(n for t, s, o, n in a.chunks() if s == a.as_)
-        out.append("  %-16s %4dx%-4d %5d frames, %5d intra, sound %d bytes, "
-                   "%.3f pairs" % (p.stem, a.w, a.h, len(vid), intra, snd,
-                                   snd / float(PAIR)))
+        out.append("  %-24s %4dx%-4d %5d frames at %.4f fps, %5d intra, "
+                   "sound %d bytes, %.3f pairs"
+                   % (p.stem, a.w, a.h, len(vid), a.rate / float(a.scale),
+                      intra, snd, snd / float(PAIR)))
     return out
 
 
@@ -914,8 +1493,8 @@ MUTATIONS = [
     # the tables
     ("zig-entry", MVC, "0, 1, 5, 6, 14, 15, 27, 28,",
      "0, 1, 5, 6, 14, 15, 28, 27,"),
-    ("zig-inverse", MVC, "natural[i] = coef[kZig[i]];",
-     "natural[kZig[i]] = coef[i];"),
+    ("zig-inverse", MVC, "natural[i] = coef[kZig[i]];\n    mv3_idct(natural",
+     "natural[kZig[i]] = coef[i];\n    mv3_idct(natural"),
     ("advance-64", MVC, "{ 0, 1, 4, 64 }", "{ 0, 1, 4, 63 }"),
     ("luma-quant-entry", MVC, "12, 12, 15, 19, 25, 34, 40, 48,",
      "12, 12, 15, 19, 25, 34, 40, 49,"),
@@ -937,10 +1516,16 @@ MUTATIONS = [
      "value == -128 ? k : bits"),
     ("offset-clamp-bias", MVC, "int32_t i = (int32_t)v + 384;",
      "int32_t i = (int32_t)v + 383;"),
-    ("offset-clamp-low", MVC, "return i < 0 ? 0 : 255;",
-     "return i < 0 ? 1 : 255;"),
-    ("offset-clamp-high", MVC, "return i < 0 ? 0 : 255;",
-     "return i < 0 ? 0 : 254;"),
+    ("offset-clamp-low", MVC,
+     "(int32_t)v + 384;\n    if ((uint32_t)i < 768u) return kClampTab[i];\n"
+     "    mv3_clamp_misses++;\n    return i < 0 ? 0 : 255;",
+     "(int32_t)v + 384;\n    if ((uint32_t)i < 768u) return kClampTab[i];\n"
+     "    mv3_clamp_misses++;\n    return i < 0 ? 1 : 255;"),
+    ("offset-clamp-high", MVC,
+     "(int32_t)v + 384;\n    if ((uint32_t)i < 768u) return kClampTab[i];\n"
+     "    mv3_clamp_misses++;\n    return i < 0 ? 0 : 255;",
+     "(int32_t)v + 384;\n    if ((uint32_t)i < 768u) return kClampTab[i];\n"
+     "    mv3_clamp_misses++;\n    return i < 0 ? 0 : 254;"),
     # the dequant tables
     ("quality-floor", MVC, "if (q < 1) q = 1;", "if (q < 2) q = 2;"),
     ("quality-ceiling", MVC, "if (q > 100) q = 100;", "if (q > 99) q = 99;"),
@@ -1003,7 +1588,8 @@ MUTATIONS = [
      "dst[3] = offset_clamp(SRA(x0 + d4, 5));\n            dst[4] = offset_clamp(SRA(x0 - d4, 5));"),
     ("idct4-col-shortcut", MVC, "if (coef[i + 2] == 0) {",
      "if (coef[i + 2] == 0 && 0) {"),
-    ("idct4-row-shortcut", MVC, "if (x1 == 0) {", "if (x1 == 0 && 0) {"),
+    ("idct4-row-shortcut", MVC, "if (x1 == 0) {\n            memset(",
+     "if (x1 == 0 && 0) {\n            memset("),
     ("idct-zero-grey", MVC, "memset(dst, 0x80, 8);", "memset(dst, 0x7f, 8);"),
     # the frame
     ("frame-quality-bytes", MVC, "mv3_init_idct_tables(m, frame[0], frame[1]);",
@@ -1017,11 +1603,15 @@ MUTATIONS = [
     ("frame-dc-type0", MVC, "if (!kAdvance[t]) continue;",
      "if (!kAdvance[t] && 0) continue;"),
     ("frame-luma-order", MVC,
-     "k = block(k, type_of(types, blk++), ql, py + 8, w);\n                k = block(k, type_of(types, blk++), ql, py + 8 * w, w);",
-     "k = block(k, type_of(types, blk++), ql, py + 8 * w, w);\n                k = block(k, type_of(types, blk++), ql, py + 8, w);"),
+     "k = block(k, type_of(types, tcap, blk++), ql, py + 8, w);\n"
+     "                    k = block(k, type_of(types, tcap, blk++), ql, py + 8 * w, w);",
+     "k = block(k, type_of(types, tcap, blk++), ql, py + 8 * w, w);\n"
+     "                    k = block(k, type_of(types, tcap, blk++), ql, py + 8, w);"),
     ("frame-chroma-order", MVC,
-     "k = block(k, type_of(types, blk++), qc, pu, cw);\n                k = block(k, type_of(types, blk++), qc, pv, cw);",
-     "k = block(k, type_of(types, blk++), qc, pv, cw);\n                k = block(k, type_of(types, blk++), qc, pu, cw);"),
+     "k = block(k, type_of(types, tcap, blk++), qc, pu, cw);\n"
+     "                    k = block(k, type_of(types, tcap, blk++), qc, pv, cw);",
+     "k = block(k, type_of(types, tcap, blk++), qc, pv, cw);\n"
+     "                    k = block(k, type_of(types, tcap, blk++), qc, pu, cw);"),
     ("frame-luma-table", MVC, "const int16_t* ql = m->quant[0];",
      "const int16_t* ql = m->quant[1];"),
     ("frame-chroma-table", MVC, "const int16_t* qc = m->quant[2];",
@@ -1030,6 +1620,88 @@ MUTATIONS = [
     ("frame-chroma-row-step", MVC, "pu += 7 * cw;", "pu += 6 * cw;"),
     ("frame-count-bits", MVC, "uint32_t count = mv3_get_bits(&m->bits, 16);",
      "uint32_t count = mv3_get_bits(&m->bits, 15);"),
+    # the adds
+    ("add-clamp-bias", MVC, "int32_t i = (int32_t)(d + v) + 256;",
+     "int32_t i = (int32_t)(d + v) + 255;"),
+    ("add-clamp-low", MVC,
+     "(int32_t)(d + v) + 256;\n    if ((uint32_t)i < 768u) return kClampTab[i];\n"
+     "    mv3_clamp_misses++;\n    return i < 0 ? 0 : 255;",
+     "(int32_t)(d + v) + 256;\n    if ((uint32_t)i < 768u) return kClampTab[i];\n"
+     "    mv3_clamp_misses++;\n    return i < 0 ? 1 : 255;"),
+    ("add-clamp-high", MVC,
+     "(int32_t)(d + v) + 256;\n    if ((uint32_t)i < 768u) return kClampTab[i];\n"
+     "    mv3_clamp_misses++;\n    return i < 0 ? 0 : 255;",
+     "(int32_t)(d + v) + 256;\n    if ((uint32_t)i < 768u) return kClampTab[i];\n"
+     "    mv3_clamp_misses++;\n    return i < 0 ? 0 : 254;"),
+    ("add-descale", MVC, "dst[c] = add_clamp(dst[c], SRA(o[c], 5));",
+     "dst[c] = add_clamp(dst[c], SRA(o[c], 4));"),
+    ("add-zig-inverse", MVC, "natural[i] = coef[kZig[i]];\n    mv3_idct_add(natural",
+     "natural[kZig[i]] = coef[i];\n    mv3_idct_add(natural"),
+    ("add1-descale", MVC, "uint32_t v = SRA((uint32_t)coef[0] * (uint32_t)q[0], 5);",
+     "uint32_t v = SRA((uint32_t)coef[0] * (uint32_t)q[0], 4);"),
+    ("add4-dc-descale", MVC, "uint32_t v = SRA(x0, 5);", "uint32_t v = SRA(x0, 4);"),
+    ("add4-row-order", MVC,
+     "dst[3] = add_clamp(dst[3], SRA(x0 - d4, 5));\n            dst[4] = add_clamp(dst[4], SRA(x0 + d4, 5));",
+     "dst[3] = add_clamp(dst[3], SRA(x0 + d4, 5));\n            dst[4] = add_clamp(dst[4], SRA(x0 - d4, 5));"),
+    ("add4-row-shortcut", MVC,
+     "        if (x1 == 0) {\n            uint32_t v = SRA(x0, 5);",
+     "        if (x1 == 0 && 0) {\n            uint32_t v = SRA(x0, 5);"),
+    ("add-type0", MVC, "    case 0: break;\n    case 1: mv3_idct1_add",
+     "    case 0: mv3_idct1_add(c, q, dst, stride); break;\n    case 1: mv3_idct1_add"),
+    ("add-type1", MVC, "case 1: mv3_idct1_add(c, q, dst, stride); break;",
+     "case 1: mv3_idct_add_zigzag(c, q, dst, stride); break;"),
+    ("add-type2", MVC, "case 2: mv3_idct4_add(c, q, dst, stride); break;",
+     "case 2: mv3_idct_add_zigzag(c, q, dst, stride); break;"),
+    # the motion copy
+    ("copy-vector-order", MVC,
+     "int sx = x + m->vects[idx * 2], sy = y + m->vects[idx * 2 + 1];",
+     "int sx = x + m->vects[idx * 2 + 1], sy = y + m->vects[idx * 2];"),
+    ("copy-chroma-round-x", MVC, "* cw + sx / 2;", "* cw + (sx >> 1);"),
+    ("copy-chroma-round-y", MVC, "(ptrdiff_t)(sy / 2) * cw", "(ptrdiff_t)(sy >> 1) * cw"),
+    ("copy-from-current", MVC, "memcpy(dst, m->prevPlanes + off, (size_t)n);",
+     "memcpy(dst, m->planes + off, (size_t)n);"),
+    ("copy-v-plane", MVC, "copy_rows(m, 2 * (ptrdiff_t)m->area + c, cw, dv, 8);",
+     "copy_rows(m, (ptrdiff_t)m->area + c, cw, dv, 8);"),
+    ("copy-miss-fill", MVC, "dst[i] = 0;\n                mv3_copy_misses++;",
+     "dst[i] = 1;\n                mv3_copy_misses++;"),
+    ("copy-alloc-size", MVC, "ptrdiff_t size = (ptrdiff_t)m->allocSize;",
+     "ptrdiff_t size = 3 * (ptrdiff_t)m->area;"),
+    # the inter frame
+    ("inter-flag", MVC, "intra = frame[2] == 0 && frame[3] == 0;",
+     "intra = frame[2] == 0;"),
+    ("inter-swap", MVC, "    swap_prev(m);\n    if (!intra) memcpy",
+     "    if (!intra) memcpy"),
+    ("inter-head", MVC, "head = intra ? 2 : 4 + transp;", "head = intra ? 2 : 4;"),
+    ("inter-vects-count", MVC, "m->vects, (uint32_t)vects * 2);",
+     "m->vects, (uint32_t)vects);"),
+    ("inter-coded-bits", MVC, "(uint32_t)m->mbw : mv3_get_bits(&m->bits, 8);",
+     "(uint32_t)m->mbw : mv3_get_bits(&m->bits, 7);"),
+    ("inter-coded-dc", MVC, "for (mb = 0; mb < (int)coded; mb++) {",
+     "for (mb = 0; mb + 1 < (int)coded; mb++) {"),
+    ("transp-copy-bit", MVC, "if (bits & 1) {", "if (bits & 2) {"),
+    ("transp-shift", MVC, "m->transp[mbi >> 2] >> (mbi & 3);",
+     "m->transp[mbi >> 2] >> ((mbi & 3) * 2);"),
+    ("transp-index", MVC, "m->transp[mbi >> 2] >> (mbi & 3);",
+     "m->transp[mbi >> 3] >> (mbi & 3);"),
+    ("transp-residual-bit", MVC, "if (!(bits & 16)) {", "if (!(bits & 32)) {"),
+    ("inter-luma-table", MVC, "const int16_t* ql = m->quant[1];",
+     "const int16_t* ql = m->quant[0];"),
+    ("inter-chroma-table", MVC, "const int16_t* qc = m->quant[3];",
+     "const int16_t* qc = m->quant[2];"),
+    ("inter-vec-residual", MVC,
+     "pv, (int)vec++);\n                    if (!(bits & 16)) {",
+     "pv, (int)vec);\n                    if (!(bits & 16)) {\n                        vec++;"),
+    ("inter-vec-every-mb", MVC, "pv, (int)vec++);", "pv, (int)mbi);"),
+    ("inter-luma-order", MVC,
+     "k = block_add(k, type_of(types, tcap, blk++), ql, py + 8, w);\n"
+     "                        k = block_add(k, type_of(types, tcap, blk++), ql, py + 8 * w, w);",
+     "k = block_add(k, type_of(types, tcap, blk++), ql, py + 8 * w, w);\n"
+     "                        k = block_add(k, type_of(types, tcap, blk++), ql, py + 8, w);"),
+    ("inter-chroma-order", MVC,
+     "k = block_add(k, type_of(types, tcap, blk++), qc, pu, cw);\n"
+     "                        k = block_add(k, type_of(types, tcap, blk++), qc, pv, cw);",
+     "k = block_add(k, type_of(types, tcap, blk++), qc, pv, cw);\n"
+     "                        k = block_add(k, type_of(types, tcap, blk++), qc, pu, cw);"),
     # YUV -> RGB
     ("yuv-div-bias", MVC, "(x > -1 ? x : x + 255) >> 8", "(x > -1 ? x : x + 256) >> 8"),
     ("yuv-div-floor", MVC, "(x > -1 ? x : x + 255) >> 8", "x >> 8"),
@@ -1081,13 +1753,39 @@ MUTATIONS = [
     ("pace-skip", AVC, "if (m->nextFrame < target) {", "if (m->nextFrame + 1 < target) {"),
     ("pace-first", AVC, "(m->shown < 0 || (uint32_t)m->shown < target)",
      "((uint32_t)m->shown < target)"),
-    ("pace-audio", AVC, "if (m->audio) m->audio(m->audioUser, m->file, &c);",
-     "if (m->audio && m->decoded) m->audio(m->audioUser, m->file, &c);"),
+    ("pace-audio", AVC, "if (m->audio) m->audio(m->audioUser, m->file, &c);"
+     "\n            continue;\n        }\n        if (s != m->info.videoStream) continue;"
+     "\n        if (m->nextFrame < target) {",
+     "if (m->audio && m->decoded) m->audio(m->audioUser, m->file, &c);"
+     "\n            continue;\n        }\n        if (s != m->info.videoStream) continue;"
+     "\n        if (m->nextFrame < target) {"),
     ("pace-done", AVC, "&& (uint32_t)m->shown + 1 >= m->info.frames;",
      "&& (uint32_t)m->shown >= m->info.frames;"),
     ("pace-duration", AVC,
      "return (double)m->info.frames * (double)m->info.scale / (double)m->info.rate;",
      "return (double)(m->info.frames - 1) * (double)m->info.scale / (double)m->info.rate;"),
+    # the menus' pacing
+    ("step-due", AVC, "if (m->shown >= 0 && m->decoded >= target) return 1;",
+     "if (m->shown >= 0 && m->decoded > target) return 1;"),
+    ("step-first", AVC, "if (m->shown >= 0 && m->decoded >= target) return 1;",
+     "if (m->decoded >= target) return 1;"),
+    ("step-catch-up", AVC, "if (changed) *changed = true;\n        return 1;",
+     "if (changed) *changed = true;\n        if (m->decoded >= target) return 1;"),
+    ("step-skip", AVC, "if (!decode_chunk(m, &c)) return 0;",
+     "if (m->decoded + 1 < target) { m->nextFrame++; m->decoded++; continue; }"
+     "\n        if (!decode_chunk(m, &c)) return 0;"),
+    ("step-end", AVC, "m->ended = true;\n            return 0;",
+     "m->ended = true;\n            return 1;"),
+    ("step-audio", AVC, "if (m->audio) m->audio(m->audioUser, m->file, &c);"
+     "\n            continue;\n        }\n        if (s != m->info.videoStream) continue;"
+     "\n        if (!decode_chunk", "continue;\n        }"
+     "\n        if (s != m->info.videoStream) continue;\n        if (!decode_chunk"),
+    ("step-changed", AVC, "if (changed) *changed = true;",
+     "if (changed) *changed = m->decoded > 1;"),
+    ("step-count", AVC, "m->decoded++;\n        if (changed)",
+     "if (changed)"),
+    ("step-shown", AVC, "m->shown = (int32_t)m->nextFrame++;\n        m->decoded++;\n        if (changed)",
+     "m->shown = (int32_t)++m->nextFrame;\n        m->decoded++;\n        if (changed)"),
     # the sound: the decoder
     ("snd-filter-1", AVC, "{ 60, 0 }", "{ 61, 0 }"),
     ("snd-filter-2", AVC, "{ 115, -52 }", "{ 115, -51 }"),
@@ -1136,10 +1834,10 @@ MUTATIONS = [
      "return AVISOUND_RATE;"),
 ]
 
-# A shortcut IDCT4 takes when a column's or a row's second input is zero:
-# the general formulas give x0 at all eight then, so each shortcut is the
-# same arithmetic done faster.
-EQUIVALENT = {"idct4-col-shortcut", "idct4-row-shortcut"}
+# A shortcut IDCT4 and IDCTAdd4 take when a column's or a row's second
+# input is zero: the general formulas give x0 at all eight then, so each
+# shortcut is the same arithmetic done faster.
+EQUIVALENT = {"idct4-col-shortcut", "idct4-row-shortcut", "add4-row-shortcut"}
 
 
 def mutate_pass(cmds, base, only=None):

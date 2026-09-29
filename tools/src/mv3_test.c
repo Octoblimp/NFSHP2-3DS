@@ -152,6 +152,127 @@ static void do_idct(char* s)
     printf("\n");
 }
 
+// The IDCTAdds, onto the 8x8 block (stride 16) the command gives.
+static void do_idctadd(char* s)
+{
+    int kind = atoi(tok(&s)), i;
+    int16_t q[64], c[64];
+    uint8_t dst[8 * 16];
+    memset(dst, 0, sizeof(dst));
+    unhex(tok(&s), dst, sizeof(dst));
+    for (i = 0; i < 64; i++) q[i] = (int16_t)atoi(tok(&s));
+    for (i = 0; i < 64; i++) c[i] = (int16_t)atoi(tok(&s));
+    switch (kind) {
+    case 1: mv3_idct1_add(c, q, dst, 16); break;
+    case 2: mv3_idct4_add(c, q, dst, 16); break;
+    case 3: mv3_idct_add(c, q, dst, 16); break;
+    default: mv3_idct_add_zigzag(c, q, dst, 16); break;
+    }
+    printf("idctadd %d ", kind);
+    put_hex(dst, sizeof(dst));
+    printf("\n");
+}
+
+// The checker's fill for a plane allocation: a 32-bit LCG's bits 16..23.
+static void lcg_fill(uint8_t* p, size_t n, uint32_t seed)
+{
+    size_t i;
+    for (i = 0; i < n; i++) {
+        seed = seed * 1103515245u + 12345u;
+        p[i] = (uint8_t)(seed >> 16);
+    }
+}
+
+// One motion copy: the previous frame's allocation filled from `seed`, the
+// current one from seed + 1, vector 0 set, then macroblock (x, y) copied
+// into the current planes where ToImage would put it.
+static void do_copy(char* s)
+{
+    int w = atoi(tok(&s)), h = atoi(tok(&s));
+    uint32_t seed = (uint32_t)strtoul(tok(&s), NULL, 10);
+    int x = atoi(tok(&s)), y = atoi(tok(&s));
+    int dx = atoi(tok(&s)), dy = atoi(tok(&s)), cw = w / 2, r;
+    uint8_t *py, *pu, *pv;
+    Mv3Codec m;
+
+    if (mv3_init(&m, w, h) != MV3_OK) {
+        printf("copy error\n");
+        return;
+    }
+    lcg_fill(m.prevPlanes, m.allocSize, seed);
+    lcg_fill(m.planes, m.allocSize, seed + 1);
+    m.vects[0] = (int16_t)dx;
+    m.vects[1] = (int16_t)dy;
+    py = m.y + (size_t)y * w + x;
+    pu = m.u + (size_t)(y / 2) * cw + x / 2;
+    pv = m.v + (size_t)(y / 2) * cw + x / 2;
+    mv3_copy_misses = 0;
+    mv3_copy_prev(&m, x, y, py, pu, pv, 0);
+    printf("copy ");
+    for (r = 0; r < 16; r++) put_hex(py + (size_t)r * w, 16);
+    printf(" ");
+    for (r = 0; r < 8; r++) put_hex(pu + (size_t)r * cw, 8);
+    printf(" ");
+    for (r = 0; r < 8; r++) put_hex(pv + (size_t)r * cw, 8);
+    printf(" misses %u\n", (unsigned)mv3_copy_misses);
+    mv3_free(&m);
+}
+
+// A movie's `n` frames from frame `skip` (0 if not given), decoded in order
+// by a fresh codec, as an inter movie has to be: each frame's planes as
+// CRCs.
+static void do_seq(char* s)
+{
+    const char* path = tok(&s);
+    int n = atoi(tok(&s)), i = 0;
+    char* k = tok(&s);
+    int skip = k ? atoi(k) : 0;
+    FILE* f = fopen(path, "rb");
+    uint8_t* buf = NULL;
+    uint32_t cap = 0, pos;
+    AviInfo in;
+    AviChunk c;
+    Mv3Codec m;
+
+    if (!f || !avi_parse(f, &in)
+        || mv3_init(&m, (int)in.width, (int)in.height) != MV3_OK) {
+        printf("seq none\n");
+        if (f) fclose(f);
+        return;
+    }
+    pos = in.moviStart;
+    while (i < n && avi_next_chunk(f, &in, &pos, &c)) {
+        size_t ys = (size_t)m.width * m.height, cs = ys / 4;
+        int rc;
+        if (avi_chunk_stream(c.tag) != in.videoStream) continue;
+        if (skip > 0) {
+            skip--;
+            continue;
+        }
+        if (c.size > cap) {
+            cap = c.size;
+            buf = (uint8_t*)realloc(buf, cap);
+        }
+        if (fseek(f, (long)c.offset, SEEK_SET) != 0
+            || fread(buf, 1, c.size, f) != c.size) {
+            printf("seq short\n");
+            break;
+        }
+        mv3_clamp_misses = 0;
+        mv3_copy_misses = 0;
+        rc = mv3_decode(&m, buf, c.size);
+        printf("seq %d %d %08x %08x %08x misses %u %u\n", i, rc,
+               (unsigned)crc32(m.y, ys), (unsigned)crc32(m.u, cs),
+               (unsigned)crc32(m.v, cs), (unsigned)mv3_clamp_misses,
+               (unsigned)mv3_copy_misses);
+        i++;
+    }
+    printf("seq end %d\n", i);
+    mv3_free(&m);
+    free(buf);
+    fclose(f);
+}
+
 static void do_yuv(char* s)
 {
     static uint8_t planes[3][1 << 14];
@@ -308,6 +429,28 @@ static void do_pace(char* s)
     avimovie_close(&m);
 }
 
+// The menus' pacing: avimovie_step at each time, given in vblanks since the
+// first call, at PAL's 50 a second -- the unit retail's clock counts in.
+static void do_step(char* s)
+{
+    const char* path = tok(&s);
+    AviMovie m;
+    char* w;
+    if (!avimovie_open(&m, path)) {
+        printf("step none\n");
+        return;
+    }
+    m.audio = on_audio;
+    while ((w = tok(&s)) != NULL) {
+        uint32_t target = avimovie_frame_at(&m, strtod(w, NULL) / 50.0);
+        bool changed;
+        int r = avimovie_step(&m, target, &changed);
+        printf("s %s %d %d %d %u\n", w, r, (int)changed, (int)m.shown,
+               (unsigned)m.decoded);
+    }
+    avimovie_close(&m);
+}
+
 // The sound: after every push, pull with each of `pulls` in turn for as
 // long as anything is ready, and say what came out. The PCM goes into one
 // running CRC, left and right interleaved, as the host lays int16 out
@@ -453,10 +596,14 @@ int main(int argc, char** argv)
         else if (!strcmp(cmd, "bits")) do_bits(s);
         else if (!strcmp(cmd, "huff")) do_huff(s);
         else if (!strcmp(cmd, "idct")) do_idct(s);
+        else if (!strcmp(cmd, "idctadd")) do_idctadd(s);
+        else if (!strcmp(cmd, "copy")) do_copy(s);
+        else if (!strcmp(cmd, "seq")) do_seq(s);
         else if (!strcmp(cmd, "yuv")) do_yuv(s);
         else if (!strcmp(cmd, "frame")) do_frame(s);
         else if (!strcmp(cmd, "avi")) do_avi(s);
         else if (!strcmp(cmd, "pace")) do_pace(s);
+        else if (!strcmp(cmd, "step")) do_step(s);
         else if (!strcmp(cmd, "snd")) do_snd(s);
         else if (!strcmp(cmd, "movsnd")) do_movsnd(s);
         else if (!strcmp(cmd, "rate")) do_rate();

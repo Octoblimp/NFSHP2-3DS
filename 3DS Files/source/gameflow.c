@@ -193,6 +193,52 @@ int bgf_menu_item_event(BGameFlow* gf, BScreenMessage msg, uint32_t itemHash,
     return 1;
 }
 
+// -- the panel movie ---------------------------------------------------------
+//
+// Retail keeps six texture handles, +460..+480: PANELMOVIE's and the five
+// planes of MOVIE_256_384 that the player's frames land in. They are looked
+// up by name every StartMovie, and PANELMOVIE's is read without a test, so
+// it is always there; +460 is only ever the gate, which is all
+// `panelMovie` is. The name goes through bStrCmp (0x002535f8), a strcmp.
+
+void bgf_start_movie(BGameFlow* gf, const char* name)
+{
+    if (gf->skipMovies) return;
+    if (gf->panelMovie) {
+        if (strcmp(name, gf->panelMovieName) == 0) return;
+        bgf_stop_movie(gf);
+    }
+    gf->panelMovie = 1;
+    HOOK_VOID0(gf, movieClose);
+    gf->panelMovieName = name;
+    // InitFile's answer is not read.
+    if (gf->hooks.panelMovieOpen)
+        gf->hooks.panelMovieOpen(gf->hooks.user, name);
+}
+
+// Update's answer is 0 or 1, and anything but 1 opens the file again
+// (0x0016d074). RealTimeElapsed goes in $f12 and is not read.
+void bgf_update_movie(BGameFlow* gf)
+{
+    if (!gf->panelMovie) return;
+    if (gf->hooks.inGame && gf->hooks.inGame(gf->hooks.user)) {
+        bgf_stop_movie(gf);
+        return;
+    }
+    if (!gf->hooks.panelMovieUpdate
+        || gf->hooks.panelMovieUpdate(gf->hooks.user) == 1)
+        return;
+    if (gf->hooks.panelMovieOpen)
+        gf->hooks.panelMovieOpen(gf->hooks.user, gf->panelMovieName);
+}
+
+void bgf_stop_movie(BGameFlow* gf)
+{
+    if (!gf->panelMovie) return;
+    HOOK_VOID0(gf, movieClose);
+    gf->panelMovie = 0;
+}
+
 int bgf_change_to_screen(BGameFlow* gf, const char* name, int pushCurrent)
 {
     const BScreenConfig* old = gf->screen;
@@ -365,8 +411,9 @@ void bgf_frame(BGameFlow* gf, float dt)
         bgf_send(gf, BMSG_SCREEN_TICK, &data);
     }
     // FlailerScreenList::Tick (0x0016cca8) ticks both popups after the
-    // screen, up or not.
+    // screen, up or not, and then the movie.
     bpopup_tick(gf);
+    bgf_update_movie(gf);
     bgf_service(gf);
 }
 
@@ -488,6 +535,7 @@ void bgf_unlaunch_frontend_menus(BGameFlow* gf, int raceInProgress)
     HOOK_VOID(gf, jukebox, 0);
     gf->frontendLaunchType = raceInProgress ? 2 : 3;
     trace(gf, "unlaunch %d", gf->frontendLaunchType);
+    bgf_stop_movie(gf);                // 0x0016fb74, after the launch type
 }
 
 void bgf_consider_start_demo_mode(BGameFlow* gf, const uint32_t* timer)
@@ -514,6 +562,7 @@ void bgf_consider_start_demo_mode(BGameFlow* gf, const uint32_t* timer)
         if (launching) return;
     }
     trace(gf, "demo mode");
+    bgf_stop_movie(gf);                // StartDemoMode's first call
     HOOK_VOID0(gf, startDemoMode);
 }
 
@@ -1280,9 +1329,19 @@ void bgf_language_screen_callback(BGameFlow* gf, BScreenMessage msg,
 // too -- it clears pCurrent before it looks the name up -- so the top
 // screen goes black and BACK is the only way out. See TASKS.md 33, and
 // `python tools/screen_registry.py --check-port` for what is left.
+//
+// The constructor (0x00216460) starts the menu's movie at +228, the string
+// at 0x002bc430. The movie outlives the screen -- the destructor
+// (0x00216598) leaves it -- so the Mode Selects and Options, which start
+// their own, are what replace it. The rest of the constructor (the
+// highlight, the jukebox, the Easter egg's group) is not ported yet.
 void bgf_new_main_menu_callback(BGameFlow* gf, BScreenMessage msg,
                                 BScreenCallbackData* data)
 {
+    if (msg == BMSG_SCREEN_ACTIVATE) {
+        bgf_start_movie(gf, "MOVIES\\mainmenu_movie.AVI");
+        return;
+    }
     if (msg != BMSG_MENUITEM_SELECT || !data) return;
 
     switch (data->itemHash) {

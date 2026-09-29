@@ -30,7 +30,8 @@ param(
     [int]$RunSeconds = 70,        # hard ceiling on the whole run
     [string]$AzaharExe = "C:\Program Files\Azahar\azahar.exe",
     [string]$Target3dsx = "",
-    [string]$OutDir = ""
+    [string]$OutDir = "",
+    [switch]$MenuLoop             # stay on the main menu until its movie loops
 )
 
 $ErrorActionPreference = "Stop"
@@ -153,6 +154,20 @@ function Wait-ForLog([string]$pattern, [int]$timeoutSec) {
     return $false
 }
 
+# Wait until $pattern has matched $count lines of the app's log.
+function Wait-ForLogCount([string]$pattern, [int]$count, [int]$timeoutSec) {
+    $end = (Get-Date).AddSeconds($timeoutSec)
+    while ((Get-Date) -lt $end) {
+        if (-not (Alive)) { return $false }
+        if (Test-Path $debugLog) {
+            $hits = @(Select-String -Path $debugLog -Pattern $pattern -ErrorAction SilentlyContinue)
+            if ($hits.Count -ge $count) { return $true }
+        }
+        Start-Sleep -Milliseconds 300
+    }
+    return $false
+}
+
 $step = 0
 function Shot([string]$tag) {
     if (-not (Alive)) { return }
@@ -251,6 +266,17 @@ if ($booted) {
     if (Wait-ForLog "flow enter New Main Menu" 10) {
         Start-Sleep -Milliseconds 900
         Shot "mainmenu"
+
+        # MAINMENU_MOVIE loops behind the menu in PANELMOVIE: 900 frames at
+        # 30 fps, and UpdateMovie opens it again when Update says it is over.
+        Start-Sleep -Seconds 3
+        Shot "mainmenu-movie"
+        if ($MenuLoop) {
+            $looped = Wait-ForLogCount "^panel movie open MOVIES/MAINMENU_MOVIE" 2 45
+            Write-Host ("  menu movie looped: {0}" -f $looped)
+            Start-Sleep -Seconds 2
+            Shot "mainmenu-looped"
+        }
 
         # MENUITEM_1 is Hot Pursuit, which sets mPolice and goes to Cops On
         # Mode Select -- a screen the port now has. Walking it down is the
@@ -378,6 +404,9 @@ Write-Host "=== Result ==="
 Write-Host ("Verdict:    {0}" -f $verdict)
 if ($movieOpen) { Write-Host ("Movie:      {0}" -f ($movieOpen | Select-Object -First 1)) } else { Write-Host "Movie:      (none opened)" }
 if ($movieDone) { Write-Host ("Frames:     {0}" -f ($movieDone | Select-Object -First 1)) }
+$panelOpen = $dbg | Where-Object { $_ -match "^panel movie " }
+Write-Host ("Menu movie: {0} opens" -f $panelOpen.Count)
+$panelOpen | Select-Object -Unique | ForEach-Object { Write-Host ("            {0}" -f $_) }
 Write-Host ("Frontend:   {0} bracket moves, {1} blurb changes" -f $brackets.Count, $blurbs.Count)
 if ($leftLoop)  { Write-Host ("Textures:   {0}" -f ($leftLoop  | Select-Object -Last 1)) }
 Write-Host ("Screenshots: {0} in {1}" -f $step, $OutDir)

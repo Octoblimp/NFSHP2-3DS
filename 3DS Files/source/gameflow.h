@@ -168,6 +168,15 @@ typedef struct {
     int  (*movieOpen)(void* user, const char* path);
     int  (*movieDrive)(void* user);
     void (*movieClose)(void* user);
+    // The menus' movie, FlailerScreenList's (bgf_start_movie below), on the
+    // same MoviePlayer, which `movieClose` closes. `panelMovieOpen` is
+    // InitFile (0x00237ad8), into PANELMOVIE; `panelMovieUpdate` is Update
+    // (0x002380a8) in retail's pacing, 0 once the movie is over -- and at
+    // once for a file that would not open. No hook answers 1: playing.
+    int  (*panelMovieOpen)(void* user, const char* path);
+    int  (*panelMovieUpdate)(void* user);
+    // InGameFlag (0x00330540), trackflow.c's: a race's world is in.
+    int  (*inGame)(void* user);
 
     // LoadResourceFile (0x00199640). `done`, when not NULL, is the file's
     // completion callback: the host calls it, with the flow, once the file
@@ -203,8 +212,9 @@ typedef struct {
 
     void (*sound)(void* user, int soundEvent);   // MakeFrontendSound
     void (*jukebox)(void* user, int start);      // sound::jukebox::Start/Stop
-    // StartDemoMode (0x0016ecd8): the attract race. Its StopMovie, the
-    // track it takes in turn, and Fred's demo race are the host's.
+    // StartDemoMode (0x0016ecd8): the attract race. It begins with
+    // StopMovie, which the flow runs before the hook; the track it takes in
+    // turn and Fred's demo race are the host's.
     void (*startDemoMode)(void* user);
     // TheDemoModeReplay (0x002f0960), a replay to show in attract mode.
     // ConsiderLaunching (0x0013f120) picks one and starts it loading,
@@ -287,6 +297,11 @@ struct BGameFlow {
 
     BScreenStack         stack;
     const BScreenConfig* screen;   // FlailerScreenList::pCurrent, +412
+    // FlailerScreenList's panel movie. +460, PANELMOVIE's texture, is found
+    // by StartMovie and forgotten by StopMovie, and is the gate all three
+    // read; +484 is the file StartMovie was given, which StopMovie leaves.
+    int         panelMovie;
+    const char* panelMovieName;
 
     // AdvanceRealTime (0x00199410). `realTime` is 60 Hz ticks and advances
     // by at least 1 every frame; `realTimer` is in 1/4000 s units because
@@ -452,6 +467,21 @@ int bgf_screen_event(BGameFlow* gf, BScreenMessage msg, int port);
 // never match.
 int bgf_menu_item_event(BGameFlow* gf, BScreenMessage msg, uint32_t itemHash,
                         int port);
+
+// The menus' movie, which loops behind them in PANELMOVIE.
+//
+// StartMovie (0x0016ce30): nothing with SkipMovies set, or when `name` is
+// the movie already started; another is stopped first. Then the player is
+// closed, whatever it held, and the file opened. `name` is kept, not
+// copied: every caller passes a literal.
+void bgf_start_movie(BGameFlow* gf, const char* name);
+// UpdateMovie (0x0016d028), from FlailerScreenList::Tick after the popups
+// (bgf_frame). In a race it stops the movie. Otherwise it updates the
+// player, and when that answers the movie is over opens the same file
+// again: the loop, and for a file that is not there, a try every frame.
+void bgf_update_movie(BGameFlow* gf);
+// StopMovie (0x0016d0a0): with a movie started, closes the player.
+void bgf_stop_movie(BGameFlow* gf);
 
 // ------------------------------------------------------------ screen stack
 

@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 30's
-continuation (2026-09-28), after the frontend's third slice:
-`BootAutoload` and `ConsiderStartDemoMode` in full. `HANDOFF.md` is the running
+continuation (2026-09-28), after the frontend's fourth slice: the
+menus' movie. `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -58,7 +58,7 @@ bvector_check      27 scenarios,  5721 lines, 0 differ   (23/23 mutations caught
 bmath_check        19 scenarios,  6424 lines, 0 differ   (9/9 mutations caught)
 banim_check        23 scenarios,  2219 lines, 0 differ
 bscreens_check     17 scenarios,  1277 lines, 0 differ
-bootflow_check     46 scenarios, 24267 lines, 0 differ   (144 caught, 3 equivalent)
+bootflow_check     49 scenarios, 28734 lines, 0 differ   (156 caught, 3 equivalent)
 bslotpool_check    18 scenarios,  1025 lines, 0 differ   (47/47 mutations caught)
 geometry_check     30 files,     42047 lines, 0 differ   (53/53 mutations caught)
 texsrc_check       6 packs, 2 levels, 2958 textures, 0 differ
@@ -115,7 +115,7 @@ sky_check             46 scenarios, 1311 lines, 0 differ  (93 caught, 2 equivale
 sun_check            115 scenarios, 3427 lines, 0 differ  (154/154 mutations caught)
 weather_check         75 scenarios, 4368 lines, 0 differ  (85 caught, 4 equivalent)
 rain_check            31 calls,       31 lines, 0 differ  (5/5 mutations caught; 41 image facts)
-mv3_check            606 scenarios, 48861 lines, 0 differ  (92 caught, 2 equivalent; 8 frames)
+mv3_check            904 scenarios, 50435 lines, 0 differ  (168 caught, 3 equivalent; 8 frames)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -458,11 +458,47 @@ and so replaced every boot.
      `StartDemoMode` and `DemoModeReplay`. The popup's title strip runs
      off the right edge, as the popup screen is authored.
 
-   **Next is the frontend's fourth slice: the main menu's background
-   movie.** MV3's inter frames, and `StartMovie`, `UpdateMovie` and
-   `StopMovie` (`0x0016ce30`, `0x0016d028` and `0x0016d0a0`) on
-   `PANELMOVIE`. After that, the rest of the photos, in TASKS.md's "The
-   retail frontend".
+   **The frontend's fourth slice is closed: the menus' movie.** The main
+   menu's movie loops in its `PANELMOVIE` plane on Azahar; Cops On's and
+   Options' play in theirs. `docs/formats/mv3-video.md` and
+   `docs/formats/boot-flow.md`, "The menus' movie".
+   - `mv3.c` decodes inter frames: `pTransp`'s copy and no-residual bits,
+     the vectors, `CopyPreviousFrameBlock`, the `IDCTAdd` family, and
+     `SwapPrevBuffer`. The menus' five movies are 900 frames each, mostly
+     inter. `mv3_check` holds them bit-exact to the retail image over
+     synthetic inter movies and two runs of `MAINMENU_MOVIE`: 904
+     scenarios, and 171 mutations, 168 caught and 3 equivalent.
+   - `avimovie_step` is `MoviePlayer::Update`'s pacing: the next frame
+     when it is due, one a call, never skipping, since an inter frame
+     cannot be read past. `mv3_check` holds it to retail's `Update`.
+   - `gameflow.c` has retail's `StartMovie`, `UpdateMovie` and
+     `StopMovie`, and `StartDemoMode` and `UnlaunchFrontendMenus` stop the
+     movie. The title's movie and the menus' share the player, as in
+     retail: BACK to the title leaves the gate up, and `UpdateMovie`
+     reopens `mainmenu_movie` under the title when the title's movies end.
+   - `bootflow_check` runs the three on the image (`RetailMovie`), and
+     `StartDemoMode` too: 49 scenarios, 159 mutations, 156 caught and 3
+     equivalent. `mainmenu` was retimed; it had never reached the menu.
+   - `run_azahar_test.ps1 -MenuLoop` waits on the main menu for the loop,
+     and the log has each movie's `movie cost`.
+   - **The menu movies are slow on Azahar.** A frame costs about 22 ms to
+     decode and 9 to convert, so the main menu runs at about 25 FPS and
+     its movie at 85% speed (900 frames in 35.5 s). The Cops screens run
+     at 20 to 22. The title at rest runs at 60.
+
+   **Next is the frontend's fifth slice: the menu movie at full speed.**
+   Exact speedups first, each held by `mv3_check`: the IDCT's all-zero-AC
+   column and row shortcuts (the AAN pass gives `x0` everywhere then),
+   `refill` without its bound when four bytes are left, and the zero run
+   without `memset`. Then the conversion: an 8x8 tile at a time, or the
+   GPU doing YUV -> RGB from a luma and a chroma texture, as retail's GS
+   did over its five planes. If that is still not enough, decode on the
+   app's second core. Measure with `movie cost` and Azahar's App FPS.
+   After that, the rest of the photos, in TASKS.md's "The retail
+   frontend": the Easter egg group (`0x74e404b4`, `SetGroupVisibility`
+   in `NewMainMenu`'s ctor and dtor), the jukebox's `Start(1)` in the
+   ctor, the highlight's echo, EA TRAX, then Setup, car select and the
+   briefing.
 
    When step 6 resumes: `Car::InitRenderInfo` (`0x0011dc80`) and
    CarRenderInfo's constructor (`0x0011e860`, 4700 bytes; retail's

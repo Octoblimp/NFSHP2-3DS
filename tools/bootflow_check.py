@@ -22,8 +22,9 @@ LoadGlobalChunks, the LOADING_FRONTEND state's Begin, Loop and End, the two
 load callbacks and the LanguageManager under them (RetailLoading) -- and for
 the language screen, LanguageOptionsScreenBase (RetailLanguage), for
 BootAutoload -- BootAutoLoader, the memory card classes under it and the two
-popups they speak through (RetailAutoload) -- and for ConsiderStartDemoMode,
-which runs under the title's stubs.
+popups they speak through (RetailAutoload) -- for ConsiderStartDemoMode and
+StartDemoMode, which run under the title's stubs, and for the menus' movie,
+FlailerScreenList's StartMovie, UpdateMovie and StopMovie (RetailMovie).
 
 Usage:
     python tools/bootflow_check.py                  # all scenarios
@@ -110,6 +111,7 @@ STACK_DEPTH, NAME_LEN = 12, 32
 # The world the harness simulates, same constants as tools/src/gameflow_test.c
 MOVIE_FRAMES, LOADER_FRAMES, TEXTURE_POLLS, REPLAY_FRAMES = 5, 1, 2, 3
 MAX_PENDING = 4
+PANEL_FRAMES = 90
 
 EALOGO_EN = "MOVIES\\INTRO\\EALOGO_EN.AVI"
 NFSINTRO_EN = "MOVIES\\INTRO\\NFSINTRO_EN.AVI"
@@ -189,9 +191,12 @@ class Flow(object):
         self.active_item = ITEM_MENUITEM_1
         self.replays_left = sc.get("replays", 0)
         self.replay_due = 0
+        self.in_game = 0                  # InGameFlag
 
-        # FlailerScreenList's constructor, which makes the two popups
+        # FlailerScreenList's constructor, which makes the two popups, and
+        # its movie
         self.autoload = RetailAutoload(self)
+        self.movie = RetailMovie(self)
 
     # CurrLanguage is the LanguageManager's +0, in the image, where retail's
     # code reads and writes it.
@@ -246,6 +251,26 @@ class Flow(object):
             self.say("movie close")
         self.movie_playing = 0
         self.movie_left = 0
+
+    # The menus' movie, TheMoviePlayer as StartMovie and UpdateMovie drive
+    # it -- the same player as the title's. Every movie a menu names is on
+    # the disc, and Update answers 0 on its PANEL_FRAMES-th call, or with
+    # nothing open. Same rules as wPanelOpen and wPanelUpdate.
+    def panel_open(self, path):
+        self.say("panel open %s" % path)
+        self.movie_playing = 1
+        self.movie_left = PANEL_FRAMES
+        return 1
+
+    def panel_update(self):
+        if not self.movie_playing:
+            return 0
+        if self.movie_left > 0:
+            self.movie_left -= 1
+        if self.movie_left > 0:
+            return 1
+        self.say("panel end")
+        return 0
 
     # The loader: a load asked for in a frame lands at its end, after the
     # flow's pass, and its callback runs then. One its callback asks for
@@ -461,8 +486,9 @@ class Flow(object):
             self.send(SCREEN_TICK, {"itemHash": self.screen[1], "port": 0,
                                     "param": 0, "noise": 0})
         # FlailerScreenList::Tick (0x0016cca8) ticks both popups after the
-        # screen, up or not.
+        # screen, up or not, and then the movie.
         self.autoload.tick_popups()
+        self.movie.update()
         self.service()
 
     def begin_unloading_frontend(self):
@@ -510,7 +536,11 @@ class Flow(object):
 
     # -- the boot screens ---------------------------------------------------
     def main_menu(self, msg, data):
-        """NewMainMenu::HandleEvent, 0x00203768 -- SELECT and nothing else."""
+        """NewMainMenu::HandleEvent, 0x00203768 -- SELECT and nothing else --
+        and, of the constructor (0x00216460), StartMovie at +228."""
+        if msg == SCREEN_ACTIVATE:
+            self.movie.start(MAINMENU_MOVIE)
+            return
         if msg != MENUITEM_SELECT:
             return
         if data["itemHash"] == ITEM_MENUITEM_1:
@@ -637,8 +667,10 @@ class RetailTitle(object):
     code -- the constructor, HandleTick, HandleEvent, the PRESS START delay
     (0x0016f4f8), GetTitleMovieDescription and its tables, GetNumTitleMovies
     and bStringHash -- which is exactly the part the port rewrote, and
-    ConsiderStartDemoMode (0x0016ed50) under HandleTick. Its replay is the
-    flow's world; StartDemoMode is still the port's "attract".
+    ConsiderStartDemoMode (0x0016ed50) under HandleTick, and StartDemoMode
+    (0x0016ecd8) under that. Its replay is the flow's world, its StopMovie is
+    RetailMovie's, and FrontendDatabase::StartDemoMode is the port's
+    "attract".
 
     Two of the trace lines are the port's and not calls: "title idle" when a
     tick takes mode from 2 to 1, and "title skip" when an event does. And the
@@ -729,10 +761,6 @@ class RetailTitle(object):
             f.say("replay launch")
             e.put32(DEMO_REPLAY + 8, 0)
 
-        def start_demo_mode(_e):
-            f.say("demo mode")
-            f.say("attract")
-
         stubs = {
             0x002577c0: new,
             0x00114e98: lambda _e: None,             # operator delete
@@ -754,14 +782,21 @@ class RetailTitle(object):
             0x001aeab0: lambda _e: f.say("jukebox %d" % arg(0)),
             0x0012eaf0: lambda _e: f.sc.get("attractMode", 0),
             0x00184de0: lambda _e: f.say("demo disc game"),
-            # TheDemoModeReplay's ConsiderLaunching and Launch, and
-            # StartDemoMode, under ConsiderStartDemoMode.
+            # TheDemoModeReplay's ConsiderLaunching and Launch under
+            # ConsiderStartDemoMode, and StartDemoMode's calls: StopMovie,
+            # run as RetailMovie runs it, BuildDemoTrackList, which leaves
+            # one track to pick, and FrontendDatabase::StartDemoMode, the
+            # port's "attract".
             0x0013f120: replay_consider,
             0x0013f1c0: replay_launch,
-            0x0016ecd8: start_demo_mode,
+            0x0016d0a0: lambda _e: f.movie.stop(),
+            0x0016ec10: lambda _e: e.put32(NUM_DEMO_TRACKS, 1),
+            0x00184d48: lambda _e: f.say("attract"),
         }
         for addr, fn in stubs.items():
             e.stub(addr, fn)
+        # StartDemoMode's entry, the port's trace line
+        e.hook(0x0016ecd8, lambda _e: f.say("demo mode"))
 
     def callback(self, msg, data):
         e, f = self.e, self.flow
@@ -1432,7 +1467,7 @@ class RetailAutoload(object):
             0x00257c80: lambda _e: e.alloc(128),     # bOMalloc, the items
             0x001836a0: lambda _e: arg(0),           # FrontendDatabase()
             0x00187ba8: nothing,                     # ~FrontendDatabase
-            0x0016d0a0: lambda _e: f.movie_close(),  # StopMovie
+            0x0016d0a0: lambda _e: f.movie.stop(),   # StopMovie, retail's
             0x00170320: move_back,
             0x001fe988: nothing,                     # OverwriteFred's calls
             0x001ef120: nothing,
@@ -1581,6 +1616,86 @@ class RetailAutoload(object):
         return taken
 
 
+# ----------------------------------------------------- retail's panel movie
+
+START_MOVIE = 0x0016ce30                # FlailerScreenList::StartMovie
+UPDATE_MOVIE = 0x0016d028               # ... UpdateMovie
+STOP_MOVIE = 0x0016d0a0                 # ... StopMovie
+IN_GAME = RETAIL_GP - 21424             # InGameFlag
+NUM_DEMO_TRACKS = RETAIL_GP - 21168     # NumDemoableTracks
+MAINMENU_MOVIE = 0x002bc430             # "MOVIES\\mainmenu_movie.AVI"
+OPTIONS_MOVIE = 0x002ba010              # "MOVIES\\options_movie_new.AVI"
+
+
+class RetailMovie(object):
+    """FlailerScreenList's movie, retail's, on the emulated image.
+
+    StartMovie, UpdateMovie and StopMovie run as they are, on the list's
+    +460..+484 -- RetailAutoload's list, since there is one. Stubbed:
+    GetTextureInfo, whose six answers are one fake TextureInfo with +144 set,
+    so that +460, the gate, is; and TheMoviePlayer's Close, InitFile and
+    Update, onto the world's panel movie.
+
+    A run keeps every register, so another class's stub can make one in the
+    middle of retail code: BootAutoLoader's constructor and StartDemoMode
+    call StopMovie that way.
+    """
+
+    def __init__(self, flow):
+        self.flow = flow
+        e = self.e = retail_emu()
+        if not getattr(e, "mv_info", 0):
+            e.mv_info = e.alloc(256)
+            e.put32(e.mv_info + 144, 1)
+        # Each boot starts with no movie.
+        e.write(e.al_list + 460, bytes(28))
+
+    def stubs(self):
+        e, f = self.e, self.flow
+
+        def init_file(_e):                 # MoviePlayer::InitFile
+            f.panel_open(_cstr(e, e.reg[5] & 0xffffffff))
+
+        stubs = {
+            0x001abf48: lambda _e: e.mv_info,         # GetTextureInfo
+            0x00237fc8: lambda _e: f.movie_close(),   # MoviePlayer::Close
+            0x00237ad8: init_file,                    # its answer unread
+            0x002380a8: lambda _e: f.panel_update(),  # MoviePlayer::Update
+        }
+        for addr, fn in stubs.items():
+            e.stub(addr, fn)
+        # ... and the three themselves, which the callers' stubs run here
+        for addr in (START_MOVIE, UPDATE_MOVIE, STOP_MOVIE):
+            e.stubs.pop(addr, None)
+
+    def run(self, addr, *args):
+        e, f = self.e, self.flow
+        kept = (list(e.reg), list(e.fpr), e.hi, e.lo, e.hi1, e.lo1, e.sa,
+                e.fcc, e.limit, e.icount)
+        saved = dict(e.stubs)
+        self.stubs()
+        e.put32(SKIP_MOVIES, f.skip_movies)
+        e.put32(IN_GAME, f.in_game)
+        try:
+            e.call(addr, e.al_list, *args, limit=100000)
+        finally:
+            e.stubs.clear()
+            e.stubs.update(saved)
+            e.reg[:] = kept[0]
+            e.fpr[:] = kept[1]
+            (e.hi, e.lo, e.hi1, e.lo1, e.sa, e.fcc, e.limit,
+             e.icount) = kept[2:]
+
+    def start(self, name):
+        self.run(START_MOVIE, name)
+
+    def update(self):
+        self.run(UPDATE_MOVIE)
+
+    def stop(self):
+        self.run(STOP_MOVIE)
+
+
 SIXTIETH = 1.0 / 60.0
 
 # BootAutoload takes 365 frames at 1/60 and 8 at a second a frame on a blank
@@ -1640,8 +1755,9 @@ SCENARIOS = [
          haveIntroMovie=0, frames=BOOT1 + 50, dt=1.0, input=[]),
     dict(name="mainmenu", videoMode=1, currLanguage=0, skipMovies=1,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
-         haveIntroMovie=0, frames=BOOT60 + 40, dt=SIXTIETH,
-         input=[(BOOT60 + 4, "select"), (BOOT60 + 8, "item3"), (BOOT60 + 12, "back"), (BOOT60 + 16, "item1")]),
+         haveIntroMovie=0, frames=BOOT60 + 280, dt=SIXTIETH,
+         input=[(BOOT60 + 250, "select"), (BOOT60 + 254, "item3"),
+                (BOOT60 + 258, "back"), (BOOT60 + 262, "item1")]),
     dict(name="mumbo", videoMode=1, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
          haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 12, "mumbo")]),
@@ -1710,6 +1826,16 @@ SCENARIOS = [
     card_row("replay", BOOT1 + 44, replays=1),
     card_row("demoattract", 16, demoDiscActive=1, attractMode=1),
     card_row("attractnodisc", 16, attractMode=1),
+    # The menus' movie: its loops, the same name again, another in its
+    # place, and the title's movie sharing its player.
+    card_row("menumovie", BOOT60 + 500, dt=SIXTIETH, skipMovies=0,
+             input=[(BOOT60 + 270, "select"), (BOOT60 + 480, "ingame")]),
+    card_row("menuagain", BOOT60 + 400, dt=SIXTIETH, skipMovies=0,
+             input=[(BOOT60 + 270, "select"), (BOOT60 + 274, "item3"),
+                    (BOOT60 + 278, "back"), (BOOT60 + 290, "optionsmovie"),
+                    (BOOT60 + 300, "optionsmovie")]),
+    card_row("menuattract", BOOT1 + 60, skipMovies=0,
+             input=[(BOOT1 + 16, "select"), (BOOT1 + 18, "back")]),
 ]
 
 
@@ -1768,6 +1894,10 @@ def run_scenario(sc):
                 f.active_item = ITEM_MENUITEM_1 + ord(what[2]) - ord("1")
             elif what.startswith("slow"):
                 f.loader_due = int(what[4:])
+            elif what == "optionsmovie":
+                f.movie.start(OPTIONS_MOVIE)
+            elif what == "ingame":
+                f.in_game = 1
             elif what == "mumbo":
                 f.push("New Main Menu")
                 f.change_to_screen("Legal MumboJumbo", 0)
@@ -2215,7 +2345,7 @@ MUTATIONS += [
      "            return 1;"),
     # BootAutoLoader itself, 0x00247ab0 and 0x00247978.
     ("mc-autoload-plays-on", MC,
-     "    if (gf->hooks.movieClose) gf->hooks.movieClose(gf->hooks.user);" + NL
+     "    bgf_stop_movie(gf);                // 0x00247934" + NL
      + "    b->state = 1;",
      "    b->state = 1;"),
     ("mc-autoload-stays", MC,
@@ -2350,6 +2480,65 @@ MUTATIONS += [
      + "    } else {"),
     ("demo-launching-races", GF,
      "        if (launching) return;", "        (void)launching;"),
+    # The menus' movie: FlailerScreenList's StartMovie, UpdateMovie and
+    # StopMovie (0x0016ce30, 0x0016d028, 0x0016d0a0), and their callers.
+    ("movie-skip-ignored", GF,
+     "    if (gf->skipMovies) return;" + NL + "    if (gf->panelMovie) {",
+     "    if (gf->panelMovie) {"),
+    ("movie-same-reopens", GF,
+     "        if (strcmp(name, gf->panelMovieName) == 0) return;",
+     "        (void)0;"),
+    ("movie-loops-first-name", GF,
+     "        gf->hooks.panelMovieOpen(gf->hooks.user, gf->panelMovieName);",
+     "        gf->hooks.panelMovieOpen(gf->hooks.user, "
+     "\"MOVIES\\\\mainmenu_movie.AVI\");"),
+    ("movie-in-game-plays-on", GF,
+     "    if (gf->hooks.inGame && gf->hooks.inGame(gf->hooks.user)) {",
+     "    if (0) {"),
+    ("movie-plays-once", GF,
+     "        || gf->hooks.panelMovieUpdate(gf->hooks.user) == 1)",
+     "        || 1)"),
+    ("movie-reopens-every-frame", GF,
+     "        || gf->hooks.panelMovieUpdate(gf->hooks.user) == 1)",
+     "        || gf->hooks.panelMovieUpdate(gf->hooks.user) == 2)"),
+    ("movie-stop-keeps-gate", GF,
+     "    HOOK_VOID0(gf, movieClose);" + NL + "    gf->panelMovie = 0;",
+     "    HOOK_VOID0(gf, movieClose);"),
+    ("movie-stop-leaves-open", GF,
+     "    HOOK_VOID0(gf, movieClose);" + NL + "    gf->panelMovie = 0;",
+     "    gf->panelMovie = 0;"),
+    ("movie-before-screen", GF,
+     "    bgf_service(gf);" + NL
+     + "    if (gf->screen) {" + NL
+     + "        BScreenCallbackData data;" + NL
+     + "        memset(&data, 0, sizeof(data));" + NL
+     + "        data.itemHash = gf->screen->hash;" + NL
+     + "        bgf_send(gf, BMSG_SCREEN_TICK, &data);" + NL
+     + "    }" + NL
+     + "    // FlailerScreenList::Tick (0x0016cca8) ticks both popups after the"
+     + NL + "    // screen, up or not, and then the movie." + NL
+     + "    bpopup_tick(gf);" + NL
+     + "    bgf_update_movie(gf);",
+     "    bgf_service(gf);" + NL
+     + "    bgf_update_movie(gf);" + NL
+     + "    if (gf->screen) {" + NL
+     + "        BScreenCallbackData data;" + NL
+     + "        memset(&data, 0, sizeof(data));" + NL
+     + "        data.itemHash = gf->screen->hash;" + NL
+     + "        bgf_send(gf, BMSG_SCREEN_TICK, &data);" + NL
+     + "    }" + NL
+     + "    bpopup_tick(gf);"),
+    ("movie-demo-plays-on", GF,
+     "    bgf_stop_movie(gf);                // StartDemoMode's first call"
+     + NL, ""),
+    ("movie-demo-stops-late", GF,
+     "    bgf_stop_movie(gf);                // StartDemoMode's first call"
+     + NL + "    HOOK_VOID0(gf, startDemoMode);",
+     "    HOOK_VOID0(gf, startDemoMode);" + NL + "    bgf_stop_movie(gf);"),
+    ("movie-main-menu-silent", GF,
+     "        bgf_start_movie(gf, \"MOVIES\\\\mainmenu_movie.AVI\");" + NL
+     + "        return;",
+     "        return;"),
 ]
 
 
@@ -2360,9 +2549,10 @@ MUTATIONS += [
 # mc-loadfailed-quiet: the message before LOAD_FAILED is "Loading", taken
 # down in READING_FILE, which the loader silences as it does READY_TO_LEAVE
 # -- so its two orders sound the same there, and the port keeps retail's.
-# mc-autoload-plays-on: nothing the boot reaches has a movie open when
-# BootAutoload starts; the panel movie StopMovie is for is the Options
-# screen's, whose manual load is not ported.
+# mc-autoload-plays-on: BootAutoload is the first screen of the boot, before
+# the main menu starts the first panel movie, so its StopMovie never finds
+# one; the movie it is for is the Options screen's, whose manual load is
+# not ported.
 EQUIVALENT = {"back-names-screen", "mc-loadfailed-quiet",
               "mc-autoload-plays-on"}
 

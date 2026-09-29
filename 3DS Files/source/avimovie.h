@@ -19,6 +19,12 @@
 // decodes only the one that is due, so the picture keeps time with the
 // sound on a slow console instead of drifting behind it.
 //
+// The menus' movies (MOVIES\*.AVI, 256x384, silent) are mostly inter
+// frames, each drawn over the one before, so none can be read past. Those
+// are paced as retail paces every movie, MoviePlayer::Update's rule: the
+// next frame when it is due, one a call and in order, so a movie that
+// falls behind plays slower -- avimovie_step.
+//
 // The container and the pacing are free of <3ds.h> and are tested on the
 // host (tools/src/mv3_test.c, tools/mv3_check.py). The texture and the ndsp
 // channel are the block at the end.
@@ -88,6 +94,17 @@ double   avimovie_duration(const AviMovie* m);
 // True when the planes changed. A frame that fails to decode ends the
 // movie, with the codec's error in `error`.
 bool avimovie_advance(AviMovie* m, uint32_t target);
+
+// MoviePlayer::Update (0x002380a8), as far as the frames go: the next frame
+// is decoded when fewer than `target` have been, or when none has yet, and
+// never more than one a call. Sound chunks on the way go to `audio`, as in
+// avimovie_advance. `changed`, when not NULL, says whether the planes did.
+// Returns Update's answer: 0 once the movie is over -- the frame after the
+// last came due and movi had no video chunk left -- or a frame failed, and
+// 1 until then. Update also answers 0 after 20 s without a frame, which a
+// stream off the card never needs, and 1 while its ring buffer waits on
+// the disc, which it never does either; neither is here.
+int avimovie_step(AviMovie* m, uint32_t target, bool* changed);
 
 // Past the last frame, or stopped by a bad one.
 bool avimovie_done(const AviMovie* m);
@@ -164,17 +181,36 @@ typedef struct {
     AviSound snd;
     C3D_Tex  tex;
     u64      startTick;
+    bool     started;                // aviplayer_update has run: the clock is on
     bool     sound;
     AviWave  waves[AVIMOVIE_WAVES];  // a ring, played in order
     uint32_t waveHead, waveCount;
     uint32_t audioSamples;           // queued since the start, a channel
+    // What the picture costs, in system ticks: reading and decoding, and
+    // converting into the texture, over `calls` drives or updates.
+    u64      stepTicks, showTicks;
+    uint32_t calls;
 } AviPlayer;
 
-// Opens `path` into a fresh RGBA8 texture the size of the movie, shows frame
-// 0 and starts its sound; the clock starts here.
+// Opens `path` into a fresh RGBA8 texture, shows frame 0 and starts its
+// sound; the clock starts here. The texture's sides are the movie's rounded
+// up to powers of two, as the GPU needs, with the picture at its top left:
+// a 256x384 movie is in a 256x512 texture.
 bool aviplayer_open(AviPlayer* p, const char* path);
 void aviplayer_close(AviPlayer* p);
 
-// Brings the texture up to the clock. True once the movie is over.
+// Brings the texture up to the clock, reading past late frames
+// (avimovie_advance). True once the movie is over.
 bool aviplayer_drive(AviPlayer* p);
+
+// MoviePlayer::InitFile (0x00237ad8): opens `path` as aviplayer_open does
+// but decodes nothing and leaves the clock off. The first aviplayer_update
+// starts it and decodes frame 0, as the first Update does.
+bool aviplayer_init(AviPlayer* p, const char* path);
+
+// MoviePlayer::Update (0x002380a8): avimovie_step against the clock, the
+// texture brought up when a frame was decoded. Update's answer: false once
+// the movie is over, which is when FlailerScreenList::UpdateMovie opens it
+// again.
+bool aviplayer_update(AviPlayer* p);
 #endif

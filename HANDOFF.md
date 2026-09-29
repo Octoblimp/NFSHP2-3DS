@@ -8730,3 +8730,63 @@ card is the SD card. `docs/formats/boot-flow.md`, "The memory card" and
 The frontend's fourth slice: the main menu's background movie. That is
 MV3's inter frames, and `StartMovie`, `UpdateMovie` and `StopMovie` on
 `PANELMOVIE`.
+
+## Session 30, continued (2026-09-28) -- The frontend's fourth slice: the menus' movie
+
+The main menu's movie plays behind it in `PANELMOVIE` and loops. Cops
+On's and Options' play behind theirs. `docs/formats/mv3-video.md` has the inter
+layout and `Update`'s pacing; `docs/formats/boot-flow.md`, "The menus'
+movie", has the screen list's three functions.
+
+- **`mv3.c`: inter frames.** A layout word other than 0 has an s16
+  vector count and `pTransp` after the type array's size: a byte per
+  four macroblocks, copy bits low and no-residual bits high. The vectors
+  come first in the bitstream. Each row has an 8-bit count of the
+  macroblocks that carry coefficients, which is what the DC predictors
+  walk. A copied macroblock is `CopyPreviousFrameBlock` at its vector
+  (chroma at half, toward zero), then six residual blocks through the
+  `IDCTAdd` family at the inter tables. The two frames trade places each
+  frame, as `SwapPrevBuffer` does, with the planes and vectors in one
+  allocation so that a vector past its plane reads what retail's does.
+- **`avimovie_step`: `MoviePlayer::Update`'s pacing.** The next frame
+  when fewer than are due have been decoded, one a call, never skipping.
+  `aviplayer_init` and `aviplayer_update` run it off the console's tick.
+  `Update`'s 20 s stall and its ring-buffer wait are not ported.
+- **`gameflow.c`: `StartMovie`, `UpdateMovie` and `StopMovie`**
+  (`0x0016ce30`, `0x0016d028`, `0x0016d0a0`). `UpdateMovie` runs from the
+  frame after the popups, as `FlailerScreenList::Tick` has it, stops the
+  movie in a race, and reopens it when `Update` says it is over.
+  `StartDemoMode` and `UnlaunchFrontendMenus` stop it. The title's movie
+  and the menus' share the player, as retail's do.
+- **`main.c`.** `hookPanelMovieOpen` and `hookPanelMovieUpdate` draw the
+  movie in its plane from its first frame (`movieAttached`). A missing
+  menu movie is logged once. Each movie's close logs its `movie cost`.
+- **The checkers.**
+  - `mv3_check`: synthetic inter movies encoded with the image's own
+    prefix code and scan, and two runs of `MAINMENU_MOVIE`, decoded in
+    order on both sides; the `IDCTAdd` family and the copy on their own;
+    `avimovie_step` against retail's `Update`. 904 scenarios, 0 differ;
+    171 mutations, 168 caught and 3 equivalent (the 4-point shortcuts).
+    `BuildDecodeTab` is built once per run and then only checked.
+  - `bootflow_check`: `RetailMovie` runs the three functions on the
+    image, with the player stubbed onto the world. `RetailTitle` runs
+    `StartDemoMode`. Three new scenarios (`menumovie`, `menuagain`,
+    `menuattract`) and 12 mutations: 49 scenarios, 159 mutations, 156
+    caught and 3 equivalent. `mainmenu` had selected before PRESS START
+    and never reached the menu; it is retimed.
+  - `bscreens_check`: 17 scenarios, 0 differ.
+- **Azahar.** `run_azahar_test.ps1 -MenuLoop` waits on the main menu
+  until its movie opens a second time. It did: 900 of 900 frames, then
+  the reopen. The menu movies on the card are retail's, byte for byte.
+- **Too slow.** A menu frame costs about 22 ms to decode and 9 to
+  convert on Azahar at 100%, more than a frame at 30 fps. So the player
+  decodes on every call, the main menu runs at about 25 FPS, and its
+  movie plays at 85% speed. The Cops screens run at 20 to 22. On the
+  host, the decode is about 35% `Decompress` and 60% IDCTs, over 1,450
+  to 1,550 full blocks a frame.
+
+### Next
+
+The frontend's fifth slice: the menu movie at full speed. The exact
+IDCT shortcuts, a cheaper `refill` and zero run, a faster conversion or
+the GPU's, and the second core if those are not enough.

@@ -358,10 +358,8 @@ static const BModeConfig kCopsOn = {
 };
 
 // The space in "worldracing_ movie.AVI" is not a typo here; it is the
-// filename the shipped code asks for. Neither movie is on the disc -- the
-// MOVIES directory has no hotpursuit_movie.AVI either -- so both Mode
-// Selects open a file that is not there and carry on, the same way the
-// title screen's second movie does.
+// filename the shipped code asks for, and the retail disc's MOVIES has the
+// file under that name.
 static const BModeConfig kCopsOff = {
     "Cops Off Mode Select", BSCR_SCREEN_COPS_OFF_MODE_SELECT,
     "MOVIES\\worldracing_ movie.AVI",

@@ -11,7 +11,9 @@ Only what the asset code needs is implemented: the MIPS III integer set, the
 64-bit loads/stores SN's compiler emits, the EE's second multiplier
 (`mult1`/`mfhi1`/`mflo1`), and the handful of 128-bit MMI ops the IDCT uses
 (`pmulth`, `pcpyld`, `pcpyud`, `pcpyh`, `pmaxw`, `pmfhi`, `pmflo`, `lq`,
-`sq`). Anything else raises, rather than quietly computing the wrong thing.
+`sq`), and `mtsab` with `qfsrv`, which MV3's motion copy reads unaligned
+rows with. Anything else raises, rather than quietly computing the wrong
+thing.
 
 The car simulation needed more, and `Emu(ieee=True)` is how it asks for it:
 the scalar FPU in full (`sqrt.s`, `abs.s`, `neg.s`, the compares and the
@@ -186,6 +188,7 @@ class Emu(object):
         self.reg = [0] * 32
         self.fpr = [0] * 32                         # raw 32-bit bit patterns
         self.hi = self.lo = self.hi1 = self.lo1 = 0
+        self.sa = 0                                 # SA, qfsrv's shift in bits
         self.fcc = False                            # the COP1 condition bit
         # VU0: 32 four-lane registers as bit patterns, vf00 fixed at
         # (0, 0, 0, 1); the accumulator; and Q.
@@ -399,6 +402,9 @@ class Emu(object):
             reg[0] = 0
             return r
         if op == 1:                                   # REGIMM
+            if rt == 0x18:                            # mtsab: a byte shift
+                self.sa = ((reg[rs] ^ imm) & 15) * 8
+                return None
             v = s64(reg[rs])
             take = {0x00: v < 0, 0x01: v >= 0, 0x02: v < 0, 0x03: v >= 0,
                     0x10: v < 0, 0x11: v >= 0}.get(rt)
@@ -963,6 +969,11 @@ class Emu(object):
             reg[rd] = self.hi & M128
         elif fn == 0x09 and sa == 0x09:               # pmflo
             reg[rd] = self.lo & M128
+        elif fn == 0x28 and sa == 0x1b:               # qfsrv
+            # rs:rt as 256 bits, shifted right by SA, the low 128 kept:
+            # with mtsab, 16 bytes from an unaligned address.
+            reg[rd] = ((((reg[rs] & M128) << 128) | (reg[rt] & M128))
+                       >> self.sa) & M128
         elif fn == 0x09 and sa == 0x0e:               # pcpyld
             reg[rd] = ((reg[rs] & M64) << 64) | (reg[rt] & M64)
         elif fn == 0x29 and sa == 0x0e:               # pcpyud

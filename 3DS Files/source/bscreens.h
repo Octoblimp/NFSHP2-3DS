@@ -169,8 +169,9 @@ typedef struct {
     void (*moveBrackets)(void* user, uint32_t screen, uint32_t mask,
                          float under, float over);
 
-    // FlailerScreenList::StartMovie (0x00168148) / StopMovie (0x001683a0).
-    // Neither background movie is on the disc; see bscreens.c.
+    // FlailerScreenList::StartMovie (0x0016ce30) / StopMovie (0x0016d0a0),
+    // which are bgf_start_movie and bgf_stop_movie: the host's hooks call
+    // them on the flow.
     void (*startMovie)(void* user, const char* path);
     void (*stopMovie)(void* user);
 

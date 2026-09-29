@@ -234,12 +234,19 @@ typedef struct {
     BMenu       menu;
     bool        hasMenu;
 
-    // The title movie. movieTexHash is the plane's own textureHash rather
-    // than a constant: MoviePlayer blits into whatever texture pMoviePlane
-    // carries, and on this disc that is SPLASH_SCREEN.
+    // TheMoviePlayer: the title's movies and the menus' take turns in it.
+    // movieTexHash is what the one playing draws into -- the title plane's
+    // own textureHash, which MoviePlayer blits into whatever pMoviePlane
+    // carries (on this disc SPLASH_SCREEN), or PANELMOVIE. movieAttached:
+    // the override for it is in -- the title's at open, the menus' at their
+    // first frame, since a panel draws nothing until Update fills it. The
+    // title's movie can be in the player while the menus' gate is still up
+    // (BACK from the main menu), and UpdateMovie then drives it too.
     AviPlayer   movie;
     bool        moviePlaying;
     uint32_t    movieTexHash;
+    bool        movieAttached;
+    const char* panelMissing;  // the last menu movie not found, logged once
 
     char        note[64];      // last thing worth putting on the status line
     int         missingMovies;
@@ -488,6 +495,16 @@ static void hookMovieClose(void* user)
             (unsigned long)m->decoded, (unsigned long)m->skipped,
             (unsigned long)b->movie.snd.pushed,
             (unsigned long)b->movie.audioSamples, m->error);
+    if (b->movie.started) {
+        double secs = (double)(svcGetSystemTick() - b->movie.startTick)
+                      / SYSCLOCK_ARM11;
+        double ms   = 1000.0 / SYSCLOCK_ARM11;
+        unsigned long n = m->decoded ? (unsigned long)m->decoded : 1;
+        logLine("movie cost: %lu calls in %.1f s, %.2f ms a decode, "
+                "%.2f ms a show", (unsigned long)b->movie.calls, secs,
+                (double)b->movie.stepTicks * ms / n,
+                (double)b->movie.showTicks * ms / n);
+    }
     uirender_override_texture(b->ui, b->movieTexHash, NULL, 0, 0, false);
     aviplayer_close(&b->movie);
     b->moviePlaying = false;
@@ -497,19 +514,23 @@ static void hookMovieClose(void* user)
 // the same tree under the data directory. A movie that is not there answers
 // 0, and gameflow.c treats that as a movie that has already finished rather
 // than sitting on a MoviePlayer that never ends.
+static bool movieFile(const char* path, char* rel, char* full)
+{
+    size_t i;
+    for (i = 0; path[i] && i + 1 < GAMEDATA_MAX_PATH; i++)
+        rel[i] = path[i] == '\\' ? '/' : path[i];
+    rel[i] = '\0';
+    return !path[i] && gamedata_path(rel, full, GAMEDATA_MAX_PATH);
+}
+
 static int hookMovieOpen(void* user, const char* path)
 {
     Boot*           b = (Boot*)user;
     const AviInfo*  in = &b->movie.movie.info;
     char            rel[GAMEDATA_MAX_PATH], full[GAMEDATA_MAX_PATH];
-    size_t          i;
 
     hookMovieClose(user);
-    for (i = 0; path[i] && i + 1 < sizeof(rel); i++)
-        rel[i] = path[i] == '\\' ? '/' : path[i];
-    rel[i] = '\0';
-    if (path[i] || !gamedata_path(rel, full, sizeof(full))
-        || !aviplayer_open(&b->movie, full)) {
+    if (!movieFile(path, rel, full) || !aviplayer_open(&b->movie, full)) {
         b->missingMovies++;
         bootNote("movie missing");
         logLine("movie missing %s", path);
@@ -523,6 +544,7 @@ static int hookMovieOpen(void* user, const char* path)
     uirender_override_texture(b->ui, b->movieTexHash, &b->movie.tex,
                               in->width, in->height, true);
     b->moviePlaying = true;
+    b->movieAttached = true;
     // gameflow.c already traces the full path; the status line just says it
     // is running, and bootNote's buffer is smaller than a path anyway.
     bootNote("movie playing");
@@ -543,6 +565,63 @@ static int hookMovieDrive(void* user)
     Boot* b = (Boot*)user;
     if (!b->moviePlaying) return 1;
     return aviplayer_drive(&b->movie) ? 1 : 0;
+}
+
+// The menus' movie, MOVIES\*.AVI, into PANELMOVIE: InitFile (0x00237ad8)
+// for FlailerScreenList. It is drawn in its plane at its own size, as any
+// bitmap is, and not before its first frame: RenderFlailerBitmap draws a
+// movie texture from the player's planes, empty until Update fills them. A
+// file that is not there is tried again every frame by UpdateMovie, so it
+// is logged and counted the first time only.
+#define PANELMOVIE_TEXTURE 0xc3f0caefu
+
+static int hookPanelMovieOpen(void* user, const char* path)
+{
+    Boot* b = (Boot*)user;
+    char  rel[GAMEDATA_MAX_PATH], full[GAMEDATA_MAX_PATH];
+
+    hookMovieClose(user);
+    if (!movieFile(path, rel, full) || !aviplayer_init(&b->movie, full)) {
+        if (b->panelMissing != path) {
+            b->panelMissing = path;
+            b->missingMovies++;
+            bootNote("movie missing");
+            logLine("panel movie missing %s", path);
+        }
+        return 0;
+    }
+    b->panelMissing = NULL;
+    b->movieTexHash = PANELMOVIE_TEXTURE;
+    b->moviePlaying = true;
+    b->movieAttached = false;
+    logLine("panel movie open %s %lux%lu %lu frames @ %.3f fps", rel,
+            (unsigned long)b->movie.movie.info.width,
+            (unsigned long)b->movie.movie.info.height,
+            (unsigned long)b->movie.movie.info.frames,
+            (double)b->movie.movie.info.rate / (double)b->movie.movie.info.scale);
+    return 1;
+}
+
+// Update (0x002380a8): 0 once the movie is over, or with nothing open.
+static int hookPanelMovieUpdate(void* user)
+{
+    Boot* b = (Boot*)user;
+    bool  more;
+    if (!b->moviePlaying) return 0;
+    more = aviplayer_update(&b->movie);
+    if (!b->movieAttached && b->movie.movie.shown >= 0) {
+        uirender_override_texture(b->ui, b->movieTexHash, &b->movie.tex,
+                                  (uint16_t)b->movie.movie.info.width,
+                                  (uint16_t)b->movie.movie.info.height, false);
+        b->movieAttached = true;
+    }
+    return more ? 1 : 0;
+}
+
+static int hookInGame(void* user)
+{
+    (void)user;
+    return InGameFlag != 0;
 }
 
 // LoadResourceFile. The bundles are read synchronously -- the frontend's
@@ -1169,18 +1248,19 @@ static const char* hookAnimTranslate(void* user, int languageID)
     return text;
 }
 
-// FlailerScreenList::StartMovie. These are the panel movies that loop
-// behind the menu, blitted into the PANELMOVIE texture all three screens
-// share -- and not one of the three files is on the disc, so there is
-// nothing to open. Logged rather than counted: unlike the title movie, a
-// missing one here is the normal case and not a packaging mistake.
+// FlailerScreenList::StartMovie and StopMovie, for the Mode Selects and
+// Options: the flow's, which the main menu calls too.
 static void hookScreenMovie(void* user, const char* path)
 {
     (void)user;
-    logLine("panel movie %s (not on disc)", path);
+    bgf_start_movie(&g_flow, path);
 }
 
-static void hookScreenMovieStop(void* user) { (void)user; }
+static void hookScreenMovieStop(void* user)
+{
+    (void)user;
+    bgf_stop_movie(&g_flow);
+}
 
 static void hookJukebox(void* user, int start)
 {
@@ -1761,6 +1841,9 @@ int main(int argc, char** argv)
     hooks.movieOpen        = hookMovieOpen;
     hooks.movieDrive       = hookMovieDrive;
     hooks.movieClose       = hookMovieClose;
+    hooks.panelMovieOpen   = hookPanelMovieOpen;
+    hooks.panelMovieUpdate = hookPanelMovieUpdate;
+    hooks.inGame           = hookInGame;
     hooks.loadResource     = hookLoadResource;
     hooks.loadSoundRegions = hookLoadSoundRegions;
     hooks.setLanguage      = hookSetLanguage;

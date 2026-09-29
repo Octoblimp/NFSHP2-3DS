@@ -2240,13 +2240,18 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
   - [ ] `OverwriteFred`'s six calls into the frontend. Nothing reads the
         loaded `Fred` yet.
   - [ ] `MemcardSaver`, and the Options screen's manual load.
-  - [ ] `StartDemoMode` and `DemoModeReplay`'s internals.
+  - [ ] `DemoModeReplay`'s internals.
   - [ ] `bmenu.c`'s menus recolour the demo's way; retail's
         `FlailerMenuItem` recolour is only the popups'.
-- [ ] **The main menu's background movie.**
-  - MV3's inter frames.
-  - `StartMovie`, `UpdateMovie` and `StopMovie` (`0x0016ce30`,
-    `0x0016d028` and `0x0016d0a0`), on `PANELMOVIE`.
+- [x] **The main menu's background movie.** MV3's inter frames, bit-exact
+      to retail in `mv3_check`, paced by `MoviePlayer::Update`'s rule.
+      Retail's `StartMovie`, `UpdateMovie` and `StopMovie` (`0x0016ce30`,
+      `0x0016d028` and `0x0016d0a0`) on `PANELMOVIE`, run on the image by
+      `bootflow_check`. The main menu's movie loops on Azahar, and
+      Cops On's and Options' play.
+  - [ ] **Full speed.** A menu frame costs 31 ms on Azahar's Old 3DS, so
+        the main menu runs at 25 FPS and its movie at 85% speed.
+  - [ ] `StartDemoMode`'s track, from `BuildDemoTrackList`.
 - [ ] **The highlight's echo.** A large faded red copy of the current
       item's label, now and then.
 - [ ] **Hide "Unlocked Easter Egg"** on the main menu.

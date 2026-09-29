@@ -11,6 +11,7 @@
 #define SRA(x, n) ((uint32_t)((int32_t)(x) >> (n)))
 
 uint32_t mv3_clamp_misses;
+uint32_t mv3_copy_misses;
 
 // -- the tables -----------------------------------------------------------
 
@@ -136,6 +137,16 @@ const uint8_t* mv3_decode_table(void)
 static inline uint8_t offset_clamp(uint32_t v)
 {
     int32_t i = (int32_t)v + 384;
+    if ((uint32_t)i < 768u) return kClampTab[i];
+    mv3_clamp_misses++;
+    return i < 0 ? 0 : 255;
+}
+
+// Clamp[d + v], which the IDCTAdds write through: d + v + 256 from the
+// table's start.
+static inline uint8_t add_clamp(uint8_t d, uint32_t v)
+{
+    int32_t i = (int32_t)(d + v) + 256;
     if ((uint32_t)i < 768u) return kClampTab[i];
     mv3_clamp_misses++;
     return i < 0 ? 0 : 255;
@@ -286,12 +297,12 @@ void mv3_decompress(Mv3Bits* b, int16_t* out, uint32_t count)
         o4 = e3 + d4; o3 = e3 - d4;                                           \
     } while (0)
 
-void mv3_idct(const int16_t* coef, const int16_t* q, uint8_t* dst, int stride)
+// Columns first, each coefficient dequantised as it is read. IDCT and
+// IDCTAdd share it.
+static inline void idct_columns(const int16_t* coef, const int16_t* q,
+                                uint32_t* ws)
 {
-    uint32_t ws[64];
     int i;
-
-    // Columns first, each coefficient dequantised as it is read.
     for (i = 0; i < 8; i++) {
         uint32_t x[8];
         int r;
@@ -301,6 +312,14 @@ void mv3_idct(const int16_t* coef, const int16_t* q, uint8_t* dst, int stride)
                  ws[i], ws[8 + i], ws[16 + i], ws[24 + i],
                  ws[32 + i], ws[40 + i], ws[48 + i], ws[56 + i]);
     }
+}
+
+void mv3_idct(const int16_t* coef, const int16_t* q, uint8_t* dst, int stride)
+{
+    uint32_t ws[64];
+    int i;
+
+    idct_columns(coef, q, ws);
     // Then rows, descaled by 5 bits into OffsetClamp.
     for (i = 0; i < 8; i++) {
         const uint32_t* w = ws + i * 8;
@@ -309,6 +328,25 @@ void mv3_idct(const int16_t* coef, const int16_t* q, uint8_t* dst, int stride)
         AAN_PASS(w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
                  o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7]);
         for (c = 0; c < 8; c++) dst[c] = offset_clamp(SRA(o[c], 5));
+        dst += stride;
+    }
+}
+
+void mv3_idct_add(const int16_t* coef, const int16_t* q, uint8_t* dst,
+                  int stride)
+{
+    uint32_t ws[64];
+    int i;
+
+    idct_columns(coef, q, ws);
+    // The rows, descaled by 5 bits and added to what is there, via Clamp.
+    for (i = 0; i < 8; i++) {
+        const uint32_t* w = ws + i * 8;
+        uint32_t o[8];
+        int c;
+        AAN_PASS(w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
+                 o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7]);
+        for (c = 0; c < 8; c++) dst[c] = add_clamp(dst[c], SRA(o[c], 5));
         dst += stride;
     }
 }
@@ -322,6 +360,17 @@ void mv3_idct_zigzag(const int16_t* coef, const int16_t* q, uint8_t* dst,
     mv3_idct(natural, q, dst, stride);
 }
 
+// IDCTAddImageData unscans into a scratch block (0x00334b68) through the
+// inverse scan, then jumps to IDCTAdd.
+void mv3_idct_add_zigzag(const int16_t* coef, const int16_t* q, uint8_t* dst,
+                         int stride)
+{
+    int16_t natural[64];
+    int i;
+    for (i = 0; i < 64; i++) natural[i] = coef[kZig[i]];
+    mv3_idct_add(natural, q, dst, stride);
+}
+
 void mv3_idct1(const int16_t* coef, const int16_t* q, uint8_t* dst, int stride)
 {
     uint8_t v = offset_clamp(SRA((uint32_t)coef[0] * (uint32_t)q[0], 5));
@@ -329,12 +378,22 @@ void mv3_idct1(const int16_t* coef, const int16_t* q, uint8_t* dst, int stride)
     for (r = 0; r < 8; r++, dst += stride) memset(dst, v, 8);
 }
 
+void mv3_idct1_add(const int16_t* coef, const int16_t* q, uint8_t* dst,
+                   int stride)
+{
+    uint32_t v = SRA((uint32_t)coef[0] * (uint32_t)q[0], 5);
+    int r, c;
+    for (r = 0; r < 8; r++, dst += stride)
+        for (c = 0; c < 8; c++) dst[c] = add_clamp(dst[c], v);
+}
+
 // Four coefficients, the top-left 2x2 row by row: only columns 0 and 1 of
 // rows 0 and 1 are live, so each pass is the AAN pass with x2..x7 or x1's
-// partners at zero, and a lone DC skips the arithmetic.
-void mv3_idct4(const int16_t* coef, const int16_t* q, uint8_t* dst, int stride)
+// partners at zero, and a lone DC skips the arithmetic. IDCT4 and IDCTAdd4
+// share the columns.
+static inline void idct4_columns(const int16_t* coef, const int16_t* q,
+                                 uint32_t* ws)
 {
-    uint32_t ws[64];
     int i;
 
     for (i = 0; i < 2; i++) {
@@ -358,6 +417,14 @@ void mv3_idct4(const int16_t* coef, const int16_t* q, uint8_t* dst, int stride)
             ws[4 * 8 + i] = x0 + d4;  ws[3 * 8 + i] = x0 - d4;
         }
     }
+}
+
+void mv3_idct4(const int16_t* coef, const int16_t* q, uint8_t* dst, int stride)
+{
+    uint32_t ws[64];
+    int i;
+
+    idct4_columns(coef, q, ws);
     for (i = 0; i < 8; i++, dst += stride) {
         uint32_t x0 = ws[i * 8], x1 = ws[i * 8 + 1];
         if (x1 == 0) {
@@ -381,6 +448,37 @@ void mv3_idct4(const int16_t* coef, const int16_t* q, uint8_t* dst, int stride)
     }
 }
 
+void mv3_idct4_add(const int16_t* coef, const int16_t* q, uint8_t* dst,
+                   int stride)
+{
+    uint32_t ws[64];
+    int i, c;
+
+    idct4_columns(coef, q, ws);
+    for (i = 0; i < 8; i++, dst += stride) {
+        uint32_t x0 = ws[i * 8], x1 = ws[i * 8 + 1];
+        if (x1 == 0) {
+            uint32_t v = SRA(x0, 5);
+            for (c = 0; c < 8; c++) dst[c] = add_clamp(dst[c], v);
+            continue;
+        }
+        {
+            uint32_t z5 = SRA(x1 * 473u, 8);
+            uint32_t d6 = z5 - x1;
+            uint32_t d5 = SRA(x1 * 362u, 8) - d6;
+            uint32_t d4 = SRA(x1 * 277u, 8) - z5 + d5;
+            dst[0] = add_clamp(dst[0], SRA(x0 + x1, 5));
+            dst[1] = add_clamp(dst[1], SRA(x0 + d6, 5));
+            dst[2] = add_clamp(dst[2], SRA(x0 + d5, 5));
+            dst[3] = add_clamp(dst[3], SRA(x0 - d4, 5));
+            dst[4] = add_clamp(dst[4], SRA(x0 + d4, 5));
+            dst[5] = add_clamp(dst[5], SRA(x0 - d5, 5));
+            dst[6] = add_clamp(dst[6], SRA(x0 - d6, 5));
+            dst[7] = add_clamp(dst[7], SRA(x0 - x1, 5));
+        }
+    }
+}
+
 // IDCTZero (0x00234a68): mid grey.
 void mv3_idct_zero(uint8_t* dst, int stride)
 {
@@ -390,9 +488,19 @@ void mv3_idct_zero(uint8_t* dst, int stride)
 
 // -- the frame ---------------------------------------------------------------
 
+// y, u, v and the vectors inside one allocation, as Init lays them out.
+static void point(uint8_t* base, uint32_t area, uint8_t** y, uint8_t** u,
+                  uint8_t** v, int16_t** vects)
+{
+    *y = base;
+    *u = base + area;
+    *v = base + 2 * (size_t)area;
+    *vects = (int16_t*)(base + 3 * (size_t)area);
+}
+
 int mv3_init(Mv3Codec* m, int width, int height)
 {
-    size_t ysize, csize;
+    size_t ysize;
 
     memset(m, 0, sizeof(*m));
     if (width <= 0 || height <= 0 || (width % MV3_MB) || (height % MV3_MB))
@@ -401,30 +509,91 @@ int mv3_init(Mv3Codec* m, int width, int height)
     m->width  = width;
     m->height = height;
     m->mbw    = width / MV3_MB;
+    m->numVects = m->mbw * (height / MV3_MB);
     ysize = (size_t)width * (size_t)height;
-    csize = ysize / 4;
-    m->planes = (uint8_t*)calloc(1, ysize + 2 * csize);
+    m->area = (uint32_t)((ysize + 127) & ~(size_t)127);
+    m->allocSize = 3 * m->area + (uint32_t)m->numVects * 4u;
+    // Both zeroed, as Init's memsets leave them. A zero run can write 72
+    // values past the vectors' count, so each has that much more.
+    m->planes = (uint8_t*)calloc(1, m->allocSize + 72 * 2);
+    m->prevPlanes = (uint8_t*)calloc(1, m->allocSize + 72 * 2);
+    m->transp = (uint8_t*)calloc(1, ((size_t)m->numVects + 3) / 4);
     // Init (0x00234560) sizes pDCTData at a row of full blocks; a zero run
     // can write 72 past the count, so the port adds that.
     m->coefCap = (uint32_t)m->mbw * 384u;
     m->coef = (int16_t*)calloc(m->coefCap + 72, sizeof(int16_t));
-    if (!m->planes || !m->coef) {
+    if (!m->planes || !m->prevPlanes || !m->transp || !m->coef) {
         mv3_free(m);
         return MV3_ERR_ALLOC;
     }
-    m->y = m->planes;
-    m->u = m->y + ysize;
-    m->v = m->u + csize;
+    point(m->planes, m->area, &m->y, &m->u, &m->v, &m->vects);
+    point(m->prevPlanes, m->area, &m->prevY, &m->prevU, &m->prevV,
+          &m->prevVects);
     return MV3_OK;
 }
 
 void mv3_free(Mv3Codec* m)
 {
     free(m->planes);
+    free(m->prevPlanes);
+    free(m->transp);
     free(m->coef);
-    m->planes = NULL;
+    m->planes = m->prevPlanes = m->transp = NULL;
     m->coef = NULL;
     m->y = m->u = m->v = NULL;
+    m->prevY = m->prevU = m->prevV = NULL;
+    m->vects = m->prevVects = NULL;
+}
+
+// SwapPrevBuffer (0x00236638): PtrSwap on pData, pY, pU, pV and pVects with
+// their pPrev twins, so all five trade places together.
+static void swap_prev(Mv3Codec* m)
+{
+    uint8_t* p = m->planes;
+    m->planes = m->prevPlanes;
+    m->prevPlanes = p;
+    point(m->planes, m->area, &m->y, &m->u, &m->v, &m->vects);
+    point(m->prevPlanes, m->area, &m->prevY, &m->prevU, &m->prevV,
+          &m->prevVects);
+}
+
+// `n` rows of `n` bytes, `stride` apart, from the previous frame's
+// allocation at byte `off`. Retail reads a luma row with lq and qfsrv and a
+// chroma one with ldl/ldr: 16 or 8 bytes from wherever they start.
+static void copy_rows(const Mv3Codec* m, ptrdiff_t off, int stride,
+                      uint8_t* dst, int n)
+{
+    ptrdiff_t size = (ptrdiff_t)m->allocSize;
+    int r, i;
+
+    for (r = 0; r < n; r++, off += stride, dst += stride) {
+        if (off >= 0 && off + n <= size) {
+            memcpy(dst, m->prevPlanes + off, (size_t)n);
+            continue;
+        }
+        for (i = 0; i < n; i++) {
+            ptrdiff_t o = off + i;
+            if (o >= 0 && o < size) {
+                dst[i] = m->prevPlanes[o];
+            } else {
+                dst[i] = 0;
+                mv3_copy_misses++;
+            }
+        }
+    }
+}
+
+void mv3_copy_prev(Mv3Codec* m, int x, int y, uint8_t* dy, uint8_t* du,
+                   uint8_t* dv, int idx)
+{
+    int w = m->width, cw = m->width / 2;
+    int sx = x + m->vects[idx * 2], sy = y + m->vects[idx * 2 + 1];
+    // Chroma at half the vector, C's division, toward zero.
+    ptrdiff_t c = (ptrdiff_t)(sy / 2) * cw + sx / 2;
+
+    copy_rows(m, (ptrdiff_t)sy * w + sx, w, dy, 16);
+    copy_rows(m, (ptrdiff_t)m->area + c, cw, du, 8);
+    copy_rows(m, 2 * (ptrdiff_t)m->area + c, cw, dv, 8);
 }
 
 // One block, by its type: ToImage's dispatch to IDCTZero, IDCTImageData1,
@@ -441,8 +610,26 @@ static inline const int16_t* block(const int16_t* c, unsigned type,
     return c + kAdvance[type];
 }
 
-static inline unsigned type_of(const uint8_t* types, uint32_t i)
+// A copied macroblock's residual: nothing for type 0, then
+// IDCTAddImageData1, IDCTAddImageData4 and IDCTAddImageData.
+static inline const int16_t* block_add(const int16_t* c, unsigned type,
+                                       const int16_t* q, uint8_t* dst,
+                                       int stride)
 {
+    switch (type) {
+    case 0: break;
+    case 1: mv3_idct1_add(c, q, dst, stride); break;
+    case 2: mv3_idct4_add(c, q, dst, stride); break;
+    default: mv3_idct_add_zigzag(c, q, dst, stride); break;
+    }
+    return c + kAdvance[type];
+}
+
+// Block type i. In retail's buffer the types run on into the bitstream; a
+// read past the frame's end is 0.
+static inline unsigned type_of(const uint8_t* types, size_t cap, uint32_t i)
+{
+    if ((i >> 2) >= cap) return 0;
     return (types[i >> 2] >> ((i & 3) * 2)) & 3;
 }
 
@@ -451,41 +638,64 @@ int mv3_decode(Mv3Codec* m, const uint8_t* frame, size_t len)
     const uint8_t* comp;
     const uint8_t* types;
     const uint8_t* end = frame + len;
-    int w = m->width, cw = m->width / 2, row, mb, n;
-    uint32_t blk = 0;
-    uint8_t *py = m->y, *pu = m->u, *pv = m->v;
+    int w = m->width, cw = m->width / 2, row, mb, n, intra, vects = 0;
+    uint32_t blk = 0, mbi = 0, vec = 0;
+    size_t head, tcap, transp = ((size_t)m->numVects + 3) / 4;
+    uint8_t *py, *pu, *pv;
     uint32_t typeSize;
 
     if (len < 6) return MV3_ERR_SHORT;
-    // DecompressFrameShared: the two quality bytes, then the layout word,
-    // which is 0 for the intra layout alone (flags bit 1).
-    if (frame[2] != 0 || frame[3] != 0) return MV3_ERR_INTER;
+    // DecompressFrameShared: the two quality bytes, then the layout word.
+    // 0 asks ToImage for the intra layout (flags bit 1); anything else is
+    // the inter one.
+    intra = frame[2] == 0 && frame[3] == 0;
     mv3_init_idct_tables(m, frame[0], frame[1]);
 
-    // pCompData: the s16 size of the block types, the types, the bits.
+    // pCompData: the s16 size of the block types; an inter frame's then has
+    // the s16 count of its motion vectors and pTransp's bytes. Then the
+    // types, then the bits.
     comp = frame + 4;
+    head = intra ? 2 : 4 + transp;
+    if ((size_t)(end - comp) < head) return MV3_ERR_SHORT;
     typeSize = (uint32_t)(int16_t)(comp[0] | comp[1] << 8);
-    types = comp + 2;
-    if ((size_t)(end - types) < typeSize) return MV3_ERR_SHORT;
-    if (typeSize < (uint32_t)(m->mbw * (m->height / MV3_MB) * 6 + 3) / 4)
-        return MV3_ERR_SHORT;
-    mv3_bits_init(&m->bits, types + typeSize, end);
+    types = comp + head;
+    tcap = (size_t)(end - types);
+    if (tcap < typeSize) return MV3_ERR_SHORT;
+    if (intra) {
+        if (typeSize < (uint32_t)(m->numVects * 6 + 3) / 4)
+            return MV3_ERR_SHORT;
+    } else {
+        vects = (int16_t)(comp[2] | comp[3] << 8);
+        if (vects < 0 || vects > m->numVects) return MV3_ERR_VECTS;
+    }
 
+    // What the frame before this left in y, u and v is now the previous
+    // frame, and this one decodes over the one before that.
+    swap_prev(m);
+    if (!intra) memcpy(m->transp, comp + 4, transp);
+    mv3_bits_init(&m->bits, types + typeSize, end);
+    if (!intra) mv3_decompress(&m->bits, m->vects, (uint32_t)vects * 2);
+
+    py = m->y;
+    pu = m->u;
+    pv = m->v;
     for (row = 0; row < m->height; row += MV3_MB) {
         uint32_t count = mv3_get_bits(&m->bits, 16);
+        // An inter row says how many of its macroblocks carry coefficients.
+        uint32_t coded = intra ? (uint32_t)m->mbw : mv3_get_bits(&m->bits, 8);
         int16_t* c;
         int16_t dcY = 0, dcU = 0, dcV = 0;
         uint32_t b;
 
-        if (count > m->coefCap) return MV3_ERR_ROW;
+        if (count > m->coefCap || coded > (uint32_t)m->mbw) return MV3_ERR_ROW;
         mv3_decompress(&m->bits, m->coef, count);
 
         // The DC predictors, one each for Y, U and V, start at 0 each row.
         c = m->coef;
         b = blk;
-        for (mb = 0; mb < m->mbw; mb++) {
+        for (mb = 0; mb < (int)coded; mb++) {
             for (n = 0; n < 6; n++, b++) {
-                unsigned t = type_of(types, b);
+                unsigned t = type_of(types, tcap, b);
                 int16_t* dc = n < 4 ? &dcY : n == 4 ? &dcU : &dcV;
                 if (!kAdvance[t]) continue;
                 c[0] = (int16_t)(c[0] + *dc);
@@ -494,18 +704,34 @@ int mv3_decode(Mv3Codec* m, const uint8_t* frame, size_t len)
             }
         }
 
-        // The blocks: four luma, U, V, macroblock by macroblock.
+        // The macroblocks: four luma, U, V. A copied one's residual, if it
+        // has one, is at the inter tables; a coded one is at the intra ones.
         {
             const int16_t* k = m->coef;
-            const int16_t* ql = m->quant[0];
-            const int16_t* qc = m->quant[2];
-            for (mb = 0; mb < m->mbw; mb++) {
-                k = block(k, type_of(types, blk++), ql, py, w);
-                k = block(k, type_of(types, blk++), ql, py + 8, w);
-                k = block(k, type_of(types, blk++), ql, py + 8 * w, w);
-                k = block(k, type_of(types, blk++), ql, py + 8 * w + 8, w);
-                k = block(k, type_of(types, blk++), qc, pu, cw);
-                k = block(k, type_of(types, blk++), qc, pv, cw);
+            for (mb = 0; mb < m->mbw; mb++, mbi++) {
+                unsigned bits = intra ? 0 : m->transp[mbi >> 2] >> (mbi & 3);
+                if (bits & 1) {
+                    const int16_t* ql = m->quant[1];
+                    const int16_t* qc = m->quant[3];
+                    mv3_copy_prev(m, mb * MV3_MB, row, py, pu, pv, (int)vec++);
+                    if (!(bits & 16)) {
+                        k = block_add(k, type_of(types, tcap, blk++), ql, py, w);
+                        k = block_add(k, type_of(types, tcap, blk++), ql, py + 8, w);
+                        k = block_add(k, type_of(types, tcap, blk++), ql, py + 8 * w, w);
+                        k = block_add(k, type_of(types, tcap, blk++), ql, py + 8 * w + 8, w);
+                        k = block_add(k, type_of(types, tcap, blk++), qc, pu, cw);
+                        k = block_add(k, type_of(types, tcap, blk++), qc, pv, cw);
+                    }
+                } else {
+                    const int16_t* ql = m->quant[0];
+                    const int16_t* qc = m->quant[2];
+                    k = block(k, type_of(types, tcap, blk++), ql, py, w);
+                    k = block(k, type_of(types, tcap, blk++), ql, py + 8, w);
+                    k = block(k, type_of(types, tcap, blk++), ql, py + 8 * w, w);
+                    k = block(k, type_of(types, tcap, blk++), ql, py + 8 * w + 8, w);
+                    k = block(k, type_of(types, tcap, blk++), qc, pu, cw);
+                    k = block(k, type_of(types, tcap, blk++), qc, pv, cw);
+                }
                 py += 16;
                 pu += 8;
                 pv += 8;

@@ -894,6 +894,62 @@ a skipped intro uncovers the title.
 `Update` copies `gp-22348 == 0` into `+1048`. On the disc it is 1, and
 nothing writes it.
 
+### The menus' movie
+
+Behind the menus, in `PANELMOVIE`, a movie loops: the screen list's, on the
+same `TheMoviePlayer` as the title's. Three functions of
+`FlailerScreenList` drive it, and `+460` of the list is their gate.
+
+`StartMovie(name)` (`0x0016ce30`):
+
+1. Nothing while `SkipMovies` (`gp-23036`) is set.
+2. With a movie started, nothing if `name` is the same one (`bStrCmp`,
+   `0x002535f8`, a `strcmp`). Otherwise `StopMovie` first.
+3. Six textures by `bStringHash` and `GetTextureInfo`: `PANELMOVIE`, then
+   `MOVIE_256_384_Y`, `_UA`, `_VA`, `_US` and `_VS`. Each one's `+144` goes
+   into `+460..+480`. `PANELMOVIE`'s is read without a null test, so it is
+   always there, and `+460` is never 0 after this.
+4. `Close` on the player, whatever it held, then `+484 = name` (kept, not
+   copied; every caller passes a literal) and a tail-jump to `InitFile`,
+   whose answer nobody reads.
+
+`UpdateMovie` (`0x0016d028`) runs from `FlailerScreenList::Tick`
+(`0x0016cca8`) after the two popups:
+
+1. Nothing while `+460` is 0.
+2. With `InGameFlag` (`gp-21424`) set, `StopMovie`.
+3. Otherwise `Update` on the player, with `RealTimeElapsed` in `$f12`,
+   which `Update` does not read. Any answer but 1 runs `InitFile(+484)`
+   again. That is the loop, and for a file that is not there, a try every
+   frame.
+
+`StopMovie` (`0x0016d0a0`) closes the player and zeroes `+460..+480` when
+`+460` is set. `+484` is kept.
+
+The callers:
+
+| name | string | called from |
+|------|--------|-------------|
+| `MOVIES\mainmenu_movie.AVI` | `0x002bc430` | `NewMainMenu`'s `SCREEN_ACTIVATE` (`0x00216544`) |
+| `MOVIES\options_movie_new.AVI` | `0x002ba010` | `OptionsScreenBase`'s ctor (`0x001f4da4`), `CreditsScreen` |
+| the mode-select movies | | `CopsOnModeSelect`, `CopsOffModeSelect`, `StartTheRightMovie` |
+
+`StopMovie` is called by `StartDemoMode` first of all, and by
+`UnlaunchFrontendMenus` (`0x0016fb74`) after the launch type.
+`GetDefaultMovieFilename` (`0x0016d0f0`) returns `MOVIES\options_movie.AVI`
+for `StartDefaultMovie` (`0x0016d100`), which nothing calls.
+
+The title's movie and the menus' share the player, and nothing keeps them
+apart. BACK from the main menu leaves the gate up on the title screen, so
+`UpdateMovie` drives the title's movie too, as the title's `DriveMovie`
+does. When it ends, `Update` answers 0 and `UpdateMovie` reopens
+`mainmenu_movie` under the title. The port does the same (`menuattract`).
+
+The movies are 256x384 and anamorphic. `NEW_MAIN_MENU`'s `PANELMOVIE`
+plane sits at (141, 73) with a scale of 1.95 x 0.698 and its UVs starting
+0.006 down, so it draws them at 499x268. `docs/formats/mv3-video.md` has
+the frames and `Update`'s pacing.
+
 ## `MumboJumboScreen` (`0x0016a8b0`)
 
 The legal and anti-piracy panels. Dead on this build -- both
@@ -1206,9 +1262,24 @@ The same shape. The differences:
 
 `bootflow_check` runs this on the image under the title's `HandleTick`. The
 replay is the harness's world: a `replays` count of replays to find, each
-landing three frames after it is asked for. `StartDemoMode` and
-`DemoModeReplay`'s own internals are owed; the port traces "demo mode" and
-goes to attract.
+landing three frames after it is asked for.
+
+`StartDemoMode` (`0x0016ecd8`):
+
+1. `StopMovie` on the screen list (`gp-21324`).
+2. `BuildDemoTrackList` (`0x0016ec10`).
+3. The index is `DemoTrackIndex` (`gp-21160`), which is then stored back
+   7 on.
+4. The track is `0x002fb288[index % NumDemoableTracks]` (`gp-21168`). The
+   table is all zeros in the image and is filled at run time. On the demo
+   disc (`IsActive`, `0x002effe0`) it is 12 instead.
+5. A tail-jump to `FrontendDatabase::StartDemoMode` (`0x00184d48`), with
+   `0x002fc050` in `a0`.
+
+`bootflow_check` runs it on the image too, with `BuildDemoTrackList` giving
+one track and the database's half saying "attract". The port runs
+`StopMovie`, traces "demo mode" and leaves the rest to the host's
+`startDemoMode`. `DemoModeReplay`'s own internals are owed.
 
 ## Demo disc
 
@@ -1435,6 +1506,13 @@ The title screen is retail's (see
 override stands in for it, which is `RenderFlailerBitmap`'s rule. Before
 that rule, a skipped intro left the frozen last frame over the logo.
 
+The menus' movie goes through `hookPanelMovieOpen` and
+`hookPanelMovieUpdate` (`aviplayer_init` and `aviplayer_update`). Unlike
+the title's, it is drawn in its own plane, at the plane's size, and only
+from its first decoded frame: retail's planes are empty until `Update`
+fills them. A menu movie missing from the card is logged once, though
+`UpdateMovie` tries it every frame.
+
 The boot is retail's, in retail's order:
 
 1. **LOADING.** `main.c` adds the `GLOBAL` and `DYNTEX` bundles, then calls
@@ -1505,8 +1583,28 @@ One input rule matters for these rows. An input at frame N is handled before
 frame N's tick, so a question put up in frame N's tick answers only from
 frame N+1.
 
-`--mutate` now breaks `gameflow.c`, `bpopup.c` and `memcard.c` 147 ways.
-Three survivors are equivalent by construction:
+The menus' movie runs on the image as well: `StartMovie`, `UpdateMovie`
+and `StopMovie` as shipped, called from the flow's frame as `Tick` calls
+them, with `InitFile`, `Close` and `Update` stubbed onto the world. The
+world's movie answers 0 on its 90th update, so a loop comes round within a
+row. The rows:
+
+* **`menumovie`**: the main menu's movie opens, loops, and stops when a
+  race's world comes in (`ingame`).
+* **`menuagain`**: into the third item and back. The main menu's
+  `StartMovie` on its return names the movie already started, so nothing
+  reopens. Then the options movie twice: the first closes the main menu's
+  and opens its own, and the second is a no-op.
+* **`menuattract`**: the main menu and BACK to the title with the gate
+  still up. The title's EA logo plays, `UpdateMovie` reopens
+  `mainmenu_movie` under the title when it ends, and after half a minute
+  idle `StartDemoMode` stops it on the way to attract.
+
+`mainmenu` was retimed to select after `PRESS START` shows, 243 frames in;
+before, it never reached the main menu.
+
+`--mutate` now breaks `gameflow.c`, `bpopup.c` and `memcard.c` 159 ways.
+Of those, 156 are caught. Three survivors are equivalent by construction:
 
 * **`back-names-screen`**: no screen's callback reads `ItemHash` on BACK.
 * **`mc-loadfailed-quiet`**: the message before `LOAD_FAILED` is
@@ -1529,8 +1627,8 @@ Not yet on the host:
   copied, and nothing reads it yet.
 * **`MemcardSaver`**, the other half of `BootAutoLoader`, and the Options
   screen's manual load, which is reached only in the checker.
-* **`StartDemoMode` and `DemoModeReplay`'s internals.** The port traces
-  them and goes to attract.
+* **`StartDemoMode`'s track and `DemoModeReplay`'s internals.** The port
+  stops the movie, traces "demo mode" and goes to attract.
 
 The popup's title strip runs off the right of the top screen. The popup
 screen is authored that way for a 640-wide TV, and it is left as it is.

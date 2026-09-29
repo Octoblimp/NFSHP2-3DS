@@ -29,6 +29,7 @@
 // ------------------------------------------------------------- the world
 
 #define MOVIE_FRAMES   5
+#define PANEL_FRAMES   90
 #define LOADER_FRAMES  1
 #define TEXTURE_POLLS  2
 #define REPLAY_FRAMES  3
@@ -164,6 +165,7 @@ struct World {
     WObj            objs[NUM_POPUP_OBJS];
     int             replaysLeft;
     uint32_t        replayDue;
+    int             inGame;       // InGameFlag
     char            text[192];
 };
 
@@ -203,6 +205,33 @@ static void wMovieClose(void* user)
     if (w->movieOpen) printf("movie close\n");
     w->movieOpen = 0;
     w->movieLeft = 0;
+}
+
+// The menus' movie, TheMoviePlayer as StartMovie and UpdateMovie drive it --
+// the same player as the title's. Every movie a menu names is on the disc,
+// and Update answers 0 on its PANEL_FRAMES-th call, or with nothing open.
+static int wPanelOpen(void* user, const char* path)
+{
+    World* w = (World*)user;
+    printf("panel open %s\n", path);
+    w->movieOpen = 1;
+    w->movieLeft = PANEL_FRAMES;
+    return 1;
+}
+
+static int wPanelUpdate(void* user)
+{
+    World* w = (World*)user;
+    if (!w->movieOpen) return 0;
+    if (w->movieLeft > 0) w->movieLeft--;
+    if (w->movieLeft > 0) return 1;
+    printf("panel end\n");
+    return 0;
+}
+
+static int wInGame(void* user)
+{
+    return ((World*)user)->inGame;
 }
 
 static void wQueue(World* w, const char* label, BGameFlowDone done)
@@ -677,10 +706,12 @@ static const Scenario kScenarios[] = {
     // The three main-menu items, each of which asks for a screen the port
     // has not registered: the flow is left with no current screen, and BACK
     // pops New Main Menu back. Hot Pursuit and World Racing differ only in
-    // CopsOn, which "final" prints.
-    { "mainmenu", 1, 0, 1, 1, 0, 0, 0, 0, BOOT60 + 40, SIXTIETH,
-      {{BOOT60 + 4, "select"}, {BOOT60 + 8, "item3"}, {BOOT60 + 12, "back"},
-       {BOOT60 + 16, "item1"}} },
+    // CopsOn, which "final" prints. PRESS START is up 243 frames after the
+    // title comes to rest, as in "select"; with the movies skipped the main
+    // menu starts none of its own.
+    { "mainmenu", 1, 0, 1, 1, 0, 0, 0, 0, BOOT60 + 280, SIXTIETH,
+      {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item3"},
+       {BOOT60 + 258, "back"}, {BOOT60 + 262, "item1"}} },
     // Force the legal screen, which the retail predicate never allows.
     { "mumbo", 1, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH,
       {{BOOT60 + 12, "mumbo"}} },
@@ -825,6 +856,28 @@ static const Scenario kScenarios[] = {
     // Attract mode off the demo disc is not asked about: the title idles.
     { .name = "attractnodisc", .videoMode = 1, .skipMovies = 1,
       .frontendLaunchType = 1, .frames = 16, .dt = 1.0f, .attractMode = 1 },
+    // The main menu's movie starts with the screen and plays on, one loop
+    // after another -- UpdateMovie opens it again whenever Update answers
+    // 0 -- until InGameFlag stops it.
+    { .name = "menumovie", .videoMode = 1, .frontendLaunchType = 1,
+      .frames = BOOT60 + 500, .dt = SIXTIETH,
+      .input = {{BOOT60 + 270, "select"}, {BOOT60 + 480, "ingame"}} },
+    // Back on the main menu with its movie still playing: StartMovie finds
+    // the same name and leaves it be. Then another movie in its place, as
+    // the Options screen's constructor starts one: the first is stopped and
+    // the second opened, and loops under its own name. The same name again
+    // does nothing.
+    { .name = "menuagain", .videoMode = 1, .frontendLaunchType = 1,
+      .frames = BOOT60 + 400, .dt = SIXTIETH,
+      .input = {{BOOT60 + 270, "select"}, {BOOT60 + 274, "item3"},
+                {BOOT60 + 278, "back"}, {BOOT60 + 290, "optionsmovie"},
+                {BOOT60 + 300, "optionsmovie"}} },
+    // BACK from the main menu while its movie plays: the title's movie
+    // takes the one player, and once it ends UpdateMovie opens the menu's
+    // again under the title. Thirty seconds at rest, StartDemoMode stops it.
+    { .name = "menuattract", .videoMode = 1, .frontendLaunchType = 1,
+      .frames = BOOT1 + 60, .dt = 1.0f,
+      .input = {{BOOT1 + 16, "select"}, {BOOT1 + 18, "back"}} },
 };
 #pragma GCC diagnostic pop
 #define NUM_SCENARIOS ((int)(sizeof(kScenarios) / sizeof(kScenarios[0])))
@@ -890,6 +943,9 @@ static void runScenario(const Scenario* sc)
     hooks.startDemoMode           = wStartDemoMode;
     hooks.replayConsiderLaunching = wReplayConsider;
     hooks.replayLaunch            = wReplayLaunch;
+    hooks.panelMovieOpen          = wPanelOpen;
+    hooks.panelMovieUpdate        = wPanelUpdate;
+    hooks.inGame                  = wInGame;
 
     bgf_init(&gf, kGameFlowStates, BGF_NUM_STATES,
              kScreens, (int)(sizeof(kScreens) / sizeof(kScreens[0])),
@@ -969,6 +1025,15 @@ static void runScenario(const Scenario* sc)
                 // A slow loader: nothing lands before frame n.
                 printf("input %s\n", what);
                 w.loaderDue = atoi(what + 4);
+            } else if (!strcmp(what, "optionsmovie")) {
+                // OptionsScreenBase's constructor's StartMovie (0x001f4da4),
+                // the screen itself not being ported.
+                printf("input optionsmovie\n");
+                bgf_start_movie(&gf, "MOVIES\\options_movie_new.AVI");
+            } else if (!strcmp(what, "ingame")) {
+                // InGameFlag up, as the race's loading sets it.
+                printf("input ingame\n");
+                w.inGame = 1;
             } else if (!strcmp(what, "mumbo")) {
                 printf("input mumbo\n");
                 bgf_push_screen(&gf, "New Main Menu");

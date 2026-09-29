@@ -683,8 +683,7 @@ void memcard_boot_autoloader_init(BBootAutoLoader* b, BGameFlow* gf,
     testerInit(&b->tester, gf, screenHash, 0, &b->savegame);
     prompterInit(&b->prompter, gf, screenHash);
     b->screenHash = screenHash;
-    // FlailerScreenList::StopMovie (0x0016d0a0).
-    if (gf->hooks.movieClose) gf->hooks.movieClose(gf->hooks.user);
+    bgf_stop_movie(gf);                // 0x00247934
     b->state = 1;
     loaderStart(&b->loader, &b->tester, &b->prompter);
 }
