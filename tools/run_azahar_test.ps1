@@ -335,6 +335,31 @@ if ($booted) {
                 [Hp2Cap]::PressKey($hwnd, $VK_G)  # down, Setup
                 Start-Sleep -Milliseconds 700
                 Shot "beacop-setup"
+
+                # Setup is Be The Cop Setup, RaceSetupBaseClass in bsetup.c:
+                # Catch-up / Traffic / Damage, the arrows on the current row.
+                # Down to Traffic and right, from Minimum to Low; down to
+                # Damage; B commits them to Fred and comes back.
+                [Hp2Cap]::PressKey($hwnd, $VK_A)  # A, select
+                if (Wait-ForLog "flow enter Be The Cop Setup" 10) {
+                    Start-Sleep -Milliseconds 1200
+                    Shot "btcsetup"
+                    [Hp2Cap]::PressKey($hwnd, $VK_G)  # down, Traffic
+                    Start-Sleep -Milliseconds 700
+                    Shot "btcsetup-traffic"
+                    [Hp2Cap]::PressKey($hwnd, $VK_H)  # right
+                    Start-Sleep -Milliseconds 600
+                    Shot "btcsetup-traffic-right"
+                    [Hp2Cap]::PressKey($hwnd, $VK_G)  # down, Damage
+                    Start-Sleep -Milliseconds 700
+                    Shot "btcsetup-damage"
+                    [Hp2Cap]::PressKey($hwnd, $VK_S)  # B, back to You're The Cop
+                    Start-Sleep -Milliseconds 1200
+                    Shot "btcsetup-back"
+                } else {
+                    Shot "btcsetup-missing"
+                }
+
                 [Hp2Cap]::PressKey($hwnd, $VK_S)  # B, back to Mode Select
                 Start-Sleep -Milliseconds 900
             } else {

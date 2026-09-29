@@ -9364,3 +9364,86 @@ right three times through the wrap, then down to Setup and back.
 
 The Setup screen (`BeTheCopSetup` on `RaceSetupBaseClass`,
 `tScrollingMenuList`), car select, the briefing, then step 6.
+
+## Session 31, continued (2026-09-29) -- Be The Cop Setup
+
+You're The Cop's third item, Setup, opens retail's screen now: Catch-up,
+Traffic and Damage, with the arrows either side of the current row's value
+and the FMV behind, as in the photo.
+
+### The port
+
+- `bsetup.c` gains `RaceSetupBaseClass` (`0x001b8390`): its constructor,
+  `BuildMenu`, destructor, `SetupHighlight` and `HandleMenuEvent`. On it
+  sits `BeTheCopSetup` (`0x001b9248`), whose `Callback` is `0x001b93d8`.
+  With them comes `tScrollingMenuList` (`0x0024a888` on), the scroller
+  every race setup shares. It keeps the rows' Y animations and the up and
+  down arrows, and moves the visible window a row at a time.
+- The rows are retail's `Changeable`s:
+  - Catch-up and Damage flip 0 and 1;
+  - Traffic steps through Minimum, Moderate, Maximum and Off with
+    `ValueChanger`, and wraps.
+- The destructor writes the three values to Fred's `DataBeTheCopSetup`
+  (+64), so BACK keeps them. SELECT goes to "Select Car", or to "Select
+  Car2P" with two cars.
+- The three car calls (`SetupRaceParametersAfterRaceSetup`,
+  `MakeChallengeCarsAvailable`) are logged, as You're The Cop's are.
+- `bsetup_fred_defaults` puts retail's `InitWithDefaults` values in Fred
+  at boot, for `DataChallengeScreen` (1,3,1,1,0) and `DataBeTheCopSetup`
+  (2,0,1,0,1).
+- Retail reads through a null row, an off-table value and an unset stack
+  box in four places. The port guards them, and the doc lists them.
+
+### main.c and bui.c
+
+- Five more `hookSetup*`: `GetTopLeftY`, the int `SetTopLeftY`,
+  `SetClipToPoly`, the alpha on any object, and `GrayMenuItem` by screen
+  name.
+- `bui_set_object_clip` is retail's `ObjectChunk::SetClipToPoly`: the poly
+  at +76, dirty 4, and on text the format's clip bit with dirty 5.
+  `uirender.c` does not clip with it yet. Three rows never reach the clip.
+- "Be The Cop Setup" is registered with `bsetup_btc_callback`.
+
+### The check
+
+- `racesetup_check` runs retail's callback on the image, on
+  `setup_check`'s harness with new ops: `btc`, `fdef`, `rpoke`, `rmsg`,
+  `rdump`, and a Y for each object.
+- The model's chunks carry their hash at +8, since `FindMenuElement`
+  compares it there.
+- The result: 398 ops, 3420 lines, 0 differ; 86 mutations, 82 caught, 4
+  equivalent (`mask-off`, `row-index-default`, `traffic-changed`,
+  `lr-silent-kept`).
+- The first run differed in 72 lines, over two faults:
+  - `BuildMenu`'s first `SetVisibility` is on the row's ChangeText, not
+    its item.
+  - The exit animation's constructor takes two arguments. The third that
+    `setup_check` printed was a leftover register, so both checkers print
+    two now.
+- The first mutation pass's survivors were holes in the script. Each has
+  a case now.
+- Fourteen of `setup_check`'s mutation patterns matched the new code
+  too, so each carries You're The Cop's own neighbour now. Its pass is
+  145 mutations, 142 caught, 3 equivalent, as before.
+
+### On Azahar
+
+`run_azahar_test.ps1` now enters Setup from You're The Cop, goes down to
+Traffic, presses right, goes down to Damage and presses B.
+
+- It passes. The log has `flow enter Be The Cop Setup d1eadbca`, and B
+  returns to ChallengeBeACop.
+- The shots:
+  - Catch-up On / Traffic Minimum / Damage On, with the arrows on
+    Catch-up and "Set the catch-up boost on or off." It matches the
+    photo.
+  - After the RIGHT, Traffic reads Moderate, with the arrows and "Set the
+    density of civilian traffic."
+  - After the B, You're The Cop again.
+
+### Next
+
+The user asked for cars and racing next: "We don't need every single menu
+working". So step 6 resumes: `Car::InitRenderInfo` and CarRenderInfo,
+parked on `wip/carrenderinfo`, then `Render`, then the road to one car
+driving the track.

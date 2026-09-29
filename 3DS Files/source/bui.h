@@ -189,6 +189,11 @@ bool bui_set_text_language(BUI* ui, uint32_t index, uint32_t languageID);
 // Moves an object. Same caveat about a writable buffer.
 bool bui_set_object_pos(BUI* ui, uint32_t index, float x, float y);
 
+// FlailerObjectChunk::SetClipToPoly: ClipToPoly, and FORMAT_CLIP on a text
+// object. uirender.c does not clip yet, so this only records it. Same
+// caveat about a writable buffer.
+bool bui_set_object_clip(BUI* ui, uint32_t index, uint32_t poly);
+
 // FlailerSetVisibility: writes BUIVisibility back into the loaded chunk.
 // Note the polarity -- BUI_INVISIBLE is 0 and BUI_VISIBLE is 1, which is the
 // OPPOSITE of FlailerScreenVisibility on a screen. See gameflow.h.

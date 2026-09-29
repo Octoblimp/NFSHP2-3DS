@@ -18,11 +18,19 @@
 // The arrows class is retail's own (the demo drew its two arrows by hand in
 // every screen) and has no name in the image; the port calls it BArrows.
 //
+// The second slice is You're The Cop's Setup, "Be The Cop Setup": retail's
+// BeTheCopSetup (0x001b9248) on RaceSetupBaseClass (0x001b8390), the base
+// of every race setup, with its scroller:
+//
+//   tScrollingMenuList  0x0024a888 on  the rows' Y animations and the up and
+//                                      down arrows, a window of seven rows
+//
 // Addresses are retail's, SLES_507.31. Written up in
 // docs/formats/frontend-setup.md. Like bscreens.c this is free of <3ds.h>:
 // every Flailer call goes out through BSetupHooks under the name of the
 // function retail calls, and the animation kit is banim.c, so
-// tools/setup_check.py can run retail's code in mipsemu next to this.
+// tools/setup_check.py and tools/racesetup_check.py can run retail's code
+// in mipsemu next to this.
 
 // FlailerScreenConfig's hash for "ChallengeBeACop", and the objects on it.
 #define BSETUP_SCREEN_BEACOP       0xe55f1297u
@@ -59,6 +67,26 @@ void bsetup_challenge_defaults(BChallengeData* d);
 // The 20 bytes at Fred+8, little-endian as the PS2 kept them.
 void bsetup_challenge_load(BChallengeData* d, const uint8_t* fred);
 void bsetup_challenge_save(const BChallengeData* d, uint8_t* fred);
+
+// DataBeTheCopSetup, Fred+64: 20 bytes in retail, 32 in the demo, whose
+// last three words (mZoneCams, mJumpCams, mTrainingCams) are gone. Be The
+// Cop Setup changes the last three of these five.
+#define FRED_BE_THE_COP_SETUP   64
+
+typedef struct BBeTheCopData {
+    int32_t opponentGrid;     // +0   mOpponentGrid
+    int32_t opponentType;     // +4   mOpponentType
+    int32_t catchup;          // +8   mBoost, "Catch-up": 0 off, 1 on
+    int32_t traffic;          // +12  mTraffic, 0..3: minimum .. off
+    int32_t damage;           // +16  mDamage, 0 off, 1 on
+} BBeTheCopData;
+
+// 0x001b93e0, which FrontendDatabase::InitWithDefaults (0x00183830) calls
+// on Fred+64: 2, 0, 1, 0, 1. Catch-up on, traffic minimum, damage on.
+void bsetup_btc_defaults(BBeTheCopData* d);
+// Fred's two setup blocks at their defaults, as InitWithDefaults leaves
+// them before a memory card loads over it: Fred+8 and Fred+64.
+void bsetup_fred_defaults(uint8_t* fred);
 
 // Everything the setup screens do outside the animation kit. Every hook is
 // optional: a missing one does nothing and answers 0.
@@ -102,6 +130,28 @@ typedef struct BSetupHooks {
     // mode, screen). BScrGrayMode's modes: 1 enables, 0 grays, 2 hides.
     void (*grayMenuItem)(void* user, uint32_t screen, uint32_t item,
                          int mode);
+    // GrayMenuItem(char*, int, int, int) (0x0016d2a8): the same, on the
+    // Flailer screen `screen` of the screen list's node called `name`
+    // rather than the current one's.
+    void (*grayMenuItemNamed)(void* user, const char* name, uint32_t screen,
+                              uint32_t item, int mode);
+
+    // FlailerGetTopLeftY (0x00144168), which FlailerObjectChunk::GetTopLeft
+    // (0x00140978) answers the same for an object found; 0 for a missing
+    // one. And FlailerObjectChunk::SetTopLeftY (0x00140a48), the float one,
+    // on an object the scroller found.
+    float (*getTopLeftY)(void* user, uint32_t screen, uint32_t object);
+    void (*setObjectTopLeftY)(void* user, uint32_t screen, uint32_t object,
+                              float y);
+    // FlailerSetClipToPoly (0x00144358) and FlailerObjectChunk::
+    // SetClipToPoly (0x00140a70): ClipToPoly (+76) = `poly`, and on a text
+    // object FORMAT_CLIP too.
+    void (*setClipToPoly)(void* user, uint32_t screen, uint32_t object,
+                          uint32_t poly);
+    // FlailerSetAlpha (0x001448e8): any type. A text object's alpha, or all
+    // four of a bitmap's corners.
+    void (*setAlpha)(void* user, uint32_t screen, uint32_t object,
+                     int alpha);
 
     // IsJoystickPluggedIn (0x001542f0). The 3DS has port 0 and no other.
     int (*isJoystickPluggedIn)(void* user, int port);
@@ -194,10 +244,97 @@ typedef struct BBeACopSetup {
     BArrows        arrows;       // +688
 } BBeACopSetup;
 
+// ------------------------------------------------------ tScrollingMenuList
+
+// A menu longer than its window: every item and value object is an
+// element whose Y eases (tCubic1D, 0.5 s) toward where it should be, and
+// when the highlight leaves the window every element moves by the same
+// amount. The window is MENUITEM_1's Y to MENUITEM_7's, and the two arrows
+// that say there is more show only for 8 items or more, so on Be The Cop
+// Setup's three nothing moves: each tick puts every element back where it
+// was authored.
+//
+// tMenuAnimElement (0x00249c78), 64 bytes: the node, SavedY (+8), YAnim
+// (+12) and the chunk (+60, its name here). The list mallocs one per
+// object; the port keeps them in the list.
+#define BSCROLL_MAX_ELEMENTS 16
+
+typedef struct BMenuAnimElement {
+    uint32_t object;   // +60, Obj
+    float    savedY;   // +8
+    BSpline  yAnim;    // +12
+} BMenuAnimElement;
+
+// 56 bytes in retail.
+typedef struct BScrollList {
+    uint32_t         screen;            // +0
+    BMenuAnimElement elements[BSCROLL_MAX_ELEMENTS];   // +4, Elements
+    int              numElements;
+    float            top, bottom;       // +12, +16, the visible area
+    int32_t          currentMask;       // +20, -1 until the first highlight
+    BSineWave        arrowAnimator;     // +24, (0, 128, 10)
+    uint32_t         upArrow;           // +40
+    uint32_t         downArrow;         // +44
+    uint32_t         clipPoly;          // +48
+    int32_t          numMenuItemsToScroll;   // +52
+} BScrollList;
+
+// ------------------------------------------------------ RaceSetupBaseClass
+
+// ChangeableItem, 44 bytes in retail (40 in the demo; +40 is new): one row
+// of a setup screen. Change and Refresh are pointers to member functions
+// there, called on the screen with (direction, &value) and (value, text).
+typedef struct BRaceSetup BRaceSetup;
+typedef int (*BSetupChangeFn)(BSetup* s, BRaceSetup* r, int32_t dir,
+                              int32_t* value);
+typedef void (*BSetupRefreshFn)(BSetup* s, BRaceSetup* r, int32_t value,
+                                uint32_t text);
+
+typedef struct BChangeable {
+    uint32_t        menuItem;     // +8, MENUITEM_<i+1>, by BuildMenu
+    uint32_t        changeText;   // +12, the value's text object
+    int32_t         languageID;   // +16, the item's label
+    int32_t*        value;        // +20
+    BSetupChangeFn  change;       // +24, answers whether it changed
+    BSetupRefreshFn refresh;      // +32
+    int32_t         blurbID;      // +40, the line under the menu
+} BChangeable;
+
+// Retail's BuildMenu fills eight rows at most: its three tables are eight.
+#define BRACESETUP_MAX_ROWS 8
+
+// The screen hashes, and the objects every setup screen names.
+#define BSETUP_SCREEN_BE_THE_COP_SETUP 0xd1eadbcau
+#define BSETUP_OBJ_UP_ARROW            0xedf2e4eeu
+#define BSETUP_OBJ_DOWN_ARROW          0x20d73d01u
+#define BSETUP_OBJ_CLIP_POLY           0xc67cfb4au
+
+// RaceSetupBaseClass (0x001b8390), 764 bytes in retail, and BeTheCopSetup
+// on it (0x001b9248, 784: the data at +764). Only one is alive at a time
+// -- the class's static pInstance (gp-18780) -- so the port keeps one.
+typedef struct BRaceSetup {
+    int            live;
+    uint32_t       screen;         // +0
+    BChangeable    rows[BRACESETUP_MAX_ROWS];   // +4, Changeables
+    int            numRows;
+    uint32_t       current;        // +12, CurrentMenuItemHash
+    BSelSet        sel;            // +16, mSelectionSet
+    BSlideAnim     slideIn;        // +164, mEnterScreenAnimation
+    BHighlightAnim highlight;      // +184, mHighlightAnimation
+    BHighlightAnim change;         // +216, mSelectionChangeAnimation
+    BExitAnim      exit;           // +248, mExitScreenAnimation (a pointer)
+    int            exitActive;
+    BScrollList    scroller;       // +252, mMenuScroller
+    BArrows        arrows;         // +308
+    BBlurb         blurb;          // +340
+    BBeTheCopData  btc;            // +764, BeTheCopSetup's Data
+} BRaceSetup;
+
 struct BSetup {
     BGameFlow*   gf;
     BSetupHooks  hooks;
     BBeACopSetup beACop;
+    BRaceSetup   race;
 };
 
 // Installs `s` as the module's instance and clears it. `hooks` may be NULL.
@@ -207,3 +344,8 @@ void bsetup_init(BSetup* s, BGameFlow* gf, const BSetupHooks* hooks);
 // BeACopChallengeSetup::Callback (0x001b6f18), for kScreens[].
 void bsetup_beacop_callback(BGameFlow* gf, BScreenMessage msg,
                             BScreenCallbackData* data);
+
+// BeTheCopSetup::Callback (0x001b93d8), BaseCallback (0x001b7b20) with 104:
+// "Be The Cop Setup", for kScreens[].
+void bsetup_btc_callback(BGameFlow* gf, BScreenMessage msg,
+                         BScreenCallbackData* data);

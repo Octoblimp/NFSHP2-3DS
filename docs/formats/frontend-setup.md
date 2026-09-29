@@ -1,20 +1,26 @@
 # The race setup screens
 
 Between a Mode Select and car select sits a setup screen: the few settings
-the chosen mode takes before the cars. This is the first of them,
+the chosen mode takes before the cars. Two are ported. The first is
 "You're The Cop", the screen Cops On Mode Select's second item opens
-([frontend-screens.md](frontend-screens.md#the-short-version)). With it come
-the two small classes every setup screen shares.
+([frontend-screens.md](frontend-screens.md#the-short-version)). The second
+is its Setup item's "Be The Cop Setup", the first of the
+`RaceSetupBaseClass` screens ([below](#be-the-cop-setup)). With them come
+the small classes every setup screen shares.
 
 Everything here is from the retail image, SLES_507.31, disassembled with
 `tools/retaildis.py`; each rule cites its address. The port is
-`3DS Files/source/bsetup.c`, and `tools/setup_check.py` runs it next to
-retail's own code in `mipsemu` (359 ops, 2293 lines, 0 differ; see
-[the check](#the-check)).
+`3DS Files/source/bsetup.c`. `tools/setup_check.py` runs You're The Cop
+next to retail's own code in `mipsemu` (359 ops, 2293 lines, 0 differ; see
+[the check](#the-check)), and `tools/racesetup_check.py` runs Be The Cop
+Setup (398 ops, 3420 lines, 0 differ).
 
 | class | address | what it is |
 |-------|---------|------------|
 | `BeACopChallengeSetup` | `0x001b6c68` .. `0x001b7748` | You're The Cop |
+| `RaceSetupBaseClass` | `0x001b7748` .. `0x001b9248` | every race setup screen's rows |
+| `BeTheCopSetup` | `0x001b9248` .. `0x001b93e0` | Be The Cop Setup's three rows |
+| `tScrollingMenuList` | `0x00249c78` .. `0x0024a888` | a list that slides its items into view |
 | `tfeSineWave` | `0x0024a5c0` .. `0x0024a68c` | a value swinging between two bounds |
 | (the arrows) | `0x0024a690` .. `0x0024a880` | the two bitmaps either side of a value |
 
@@ -285,6 +291,144 @@ The port's is 0.
 `uirender_object_height` is `GetHeightFloat`; main.c's `hookSetup*` are the
 rest.
 
+## Be The Cop Setup
+
+```
+Be The Cop Setup (0xd1eadbca, title "Setup")
+  1 Catch-up   Off / On                          left/right: toggles
+  2 Traffic    Minimum / Moderate / Maximum / Off   left/right: 0..3, wrapping
+  3 Damage     Off / On                          left/right: toggles
+SELECT on any row -> "Select Car" (or "Select Car2P" if Fred.NumPlayerCars is 2)
+```
+
+Its defaults are the photo's: Catch-up On, Traffic Minimum, Damage On. The
+blurbs are 30502 "Set the catch-up boost on or off.", 30503 "Set the density
+of civilian traffic." and 30504 "Set the visual car damage on or off."; the
+labels are 30005, 30006 and 30101, and the values 30008/30009 (Off, On) and
+30018..30020 (Minimum, Moderate, Maximum).
+
+The Flailer screen is the one every race setup shares. It has eight rows,
+`MENUITEM_1..8` at x=153 with their value texts (`0x69a2c757..5e`) at x=494
+and masks `MI_1..8_MASK`. A screen fills as many rows as it has and hides
+the rest.
+
+### Fred's `DataBeTheCopSetup`
+
+Twenty bytes at Fred+64. `FrontendDatabase::InitWithDefaults` (`0x00183830`)
+calls `0x001b93e0` on it, which sets 2, 0, 1, 0, 1:
+
+| offset | field | default |
+|--------|-------|---------|
+| +0 | opponent grid | 2 |
+| +4 | opponent type | 0 |
+| +8 | catch-up | 1 |
+| +12 | traffic | 0 |
+| +16 | damage | 1 |
+
+This screen only shows the last three. The port's Fred image took no
+defaults but the audio options' until now; `bsetup_fred_defaults` writes
+this block and `DataChallengeScreen`, and main.c calls it before the card
+loads.
+
+### `RaceSetupBaseClass`
+
+764 bytes; `BeTheCopSetup` is 784, its data at +764.
+
+| offset | member |
+|--------|--------|
+| +0 | the screen |
+| +4 | `bTList<ChangeableItem>` Changeables |
+| +12 | CurrentMenuItemHash |
+| +16 | SelectionSet (IndicatorMode at +144) |
+| +164 | tSlideInAnimation |
+| +184, +216 | two tHighlightAnimations: the item's (`0xab671c9a`, BloomTargetColor) and the value's (`0x1042eac3`, -1) |
+| +248 | the tExitScreenAnimation, a pointer |
+| +252 | tScrollingMenuList |
+| +308 | the arrows |
+| +340 | tAnimatedBlurb |
+| +760 | vptr (`0x002b6920`; BeTheCopSetup's `0x002b6900`) |
+
+A `ChangeableItem` (44 bytes) is one row: MenuItem +8 and ChangeText +12
+(both 0 until BuildMenu), LanguageID +16, a pointer to its Value +20, two
+pointers to member functions, Change +24 and Refresh +32, and BlurbID +40.
+`Attach` (`0x001b7dd8`) appends one.
+
+- **The constructor** (`0x001b8390`), in order: the SelectionSet; the slide
+  in to MI_1_MASK's X; the two blooms; the scroller, on MENUITEM_1 to
+  MENUITEM_7 with the up and down arrows `0xedf2e4ee`/`0x20d73d01` and the
+  clip poly `0xc67cfb4a`; the arrows (`0xd1cda594`, `0x9345e4a7`); the blurb;
+  the movie; both arrows clipped to the poly. It sets no help override.
+- **BeTheCopSetup's** (`0x001b9248`): the base, Fred's 20 bytes, the three
+  rows, `BuildMenu("Be The Cop Setup")`, then `ResyncChangeables`.
+- **BuildMenu** (`0x001b85b8`): indicator mode 1 and all eight masks. For
+  each row: MenuItem and ChangeText from the tables at `0x00313e38` and
+  `0x00313e78`; the text shown; `GrayMenuItem(name, item, screen, 1)`
+  (`0x0016d2a8`, the one that finds its screen by name); the label; the text
+  shown again. The other items get mode 2 and their texts are hidden. The
+  scroller gets the row count, then the texts, then the items.
+- **The destructor**: BeTheCopSetup's (`0x001b9348`) puts the data back in
+  Fred, then calls `SetupRaceParametersAfterRaceSetup` and
+  `MakeChallengeCarsAvailable`, SELECT or not. The base's (`0x001b84f0`)
+  turns the help override off, then deletes the exit, the blurb and the
+  scroller (which puts every object back where it found it), then the
+  slide in.
+- **Callback** (`0x001b93d8`) is `BaseCallback` (`0x001b7b20`) with 104:
+  ACTIVATE news the screen on `data[0]` into `pInstance` (gp-18780),
+  UNACTIVATE deletes it, and everything else goes to `HandleMenuEvent`
+  without a null check.
+
+### `HandleMenuEvent` (`0x001b7ea8`)
+
+A TICK animates both blooms first. The arrows see every message. A running
+exit takes every message and nothing after it runs. Then the scroller, then
+the message:
+
+- **SELECT**: the exit to car select, the brackets' group (`0x97bf4b25`)
+  leaving with it, the arrows off.
+- **HIGHLIGHT**: the row's blurb; CurrentMenuItemHash; the arrows on the
+  value text by the item's index in the table (0 for one not there); the
+  SelectionSet and the brackets on the *scroller's* mask, not the item's
+  (`SetupHighlight`, `0x001b7d50`, -3.0 under the box and 6.0 over it); the
+  two blooms by index.
+- **LEFT/RIGHT**: the row's Change with -1 or +1. No change is silent (noise
+  0). A change refreshes the text, plays MENU_LEFT or MENU_RIGHT and
+  restarts the value's bloom (`ForceStart`, `0x00248ad0`).
+- **PAD_UP** on MENUITEM_1 and **PAD_DOWN** on the last row are taken
+  (param 1): the menu doesn't wrap.
+- **TICK**: the blurb, and the slide in until `IsFinished`.
+
+Catch-up's and Damage's Change (`0x001b7970`, `0x001b7a78`) set the value
+to `value == 0` and always answer 1. Traffic's (`0x001b79a8`) is
+`ValueChanger(v, dir, 0, 3)`. Each Refresh sets the text's LanguageID from
+its table, unchecked.
+
+### `tScrollingMenuList` (`0x00249de0`)
+
+It keeps a list of `tMenuAnimElement`s (64 bytes each: SavedY +8, a
+`tCubic1D` +12, the chunk +60), one per object added, and slides them all
+together so the current item stays inside the visible area. The area runs
+from the first item's Y to the last's, MENUITEM_1 and MENUITEM_7 here.
+
+- **AddObject** (`0x00249f70`): an object the screen has is clipped to the
+  poly and gets an element, at rest on its Y.
+- **HIGHLIGHT**: `Highlight` places the mask from the item's number, but
+  only while it is -1, so only the first highlight does. MENUITEM_7, 8, 9
+  and two other hashes all map to the seventh. Then `SetCurrentObject`: an
+  item above the area has every element's destination moved by the
+  distance that puts it at the top; one below, at the bottom. Then the up
+  and down arrows are shown if the list has 8 items or more and something
+  is headed out of view.
+- **PAD_UP/PAD_DOWN** move the mask, clamped to 0 and to
+  `min(7, NumMenuItemsToScroll) - 1`.
+- **TICK**: every element seeks its spline by RealTimeElapsed
+  (`SplineSeek`, `0x001daec8`) and moves its object there, then the arrows'
+  pulse steps and both take it as their alpha.
+- **The mask** is `0x0031cfa0`'s seven words, the MI_1..7_MASK hashes that
+  its static initialiser (`0x0024a888`) fills.
+
+The scroller's arrows and the clip poly are invisible on this screen, and
+three rows never scroll.
+
 ## What the port does differently
 
 - `mPolice` is `gf->copsOn`, where bscreens.c keeps it, not Fred+32. Moving
@@ -300,6 +444,21 @@ rest.
 - The skill table is read only for 0..3. Beyond that the port reads 0, where
   retail reads whatever follows the table.
 - `CurrentMenuItem` starts at 0 instead of heap garbage.
+
+Be The Cop Setup:
+
+- `ClipToPoly` is stored, but `uirender.c` does not clip yet.
+- The scroller's elements and the rows live in fixed arrays (16 and 8), not
+  malloc'd lists.
+- Retail reads unchecked in four places, and the port guards each:
+  - a HIGHLIGHT on an item no row has: retail reads BlurbID through a null
+    pointer; the port leaves the blurb alone;
+  - a value off its row's table: the port reads 0;
+  - `SetupHighlight`'s box is uninitialized stack when the mask is missing:
+    the port's is 0;
+  - a message with no instance: the port ignores it.
+- Only one race setup screen is alive at a time, as with retail's
+  `pInstance`, so the port keeps one `BRaceSetup`.
 
 ## The check
 
@@ -341,11 +500,47 @@ and all three are equivalent:
   `0x52e039f4`, are both below 0x80000000, so a signed test holds the same
   two hashes.
 
+`python tools/racesetup_check.py` does the same for Be The Cop Setup, on
+the same harness (its `rmsg`/`rdump` ops). It adds stubs for `ForceStart`,
+`IsFinished`, `SplineSeek` (both sides arrive at once; `banim_check.py`
+checks the real one), and the Flailer's Y, clip, alpha and by-name gray
+calls. `SetTopLeftY` moves the object, so the scroller reads back what it
+wrote. The script covers:
+
+- the defaults and another Fred, cops on and off;
+- every row both ways, through Traffic's wraps, and a row that isn't there;
+- up and down off both ends;
+- rows off the visible area both ways, and the seek ticked;
+- SELECT with 0, 1, 2, 3 and -1 cars, and every message during the exit;
+- BACK after changes, UNACTIVATE twice, and an ACTIVATE over a live screen;
+- no arrows, and a row's item and text missing.
+
+`--mutate` runs 86 mutations over the new code. Four survive, and all
+four are equivalent:
+
+- `mask-off`: the scroller's mask is -1 at `GetCurrentMenuMask` only
+  after a HIGHLIGHT on an item `Highlight`'s switch lacks, and every
+  row's item is in it. That item has no row, and there retail reads
+  `BlurbID` through a null pointer, so no script sends one.
+- `row-index-default`: the default index is read by HIGHLIGHT on an item
+  with no row (the same null read) and by PAD_DOWN, where with three
+  rows 0 and 1 both answer "not the last".
+- `traffic-changed`: Traffic's step is 1 or -1, and `ValueChanger` moves
+  any value by one or wraps it to the other end, so it always changes.
+- `lr-silent-kept`: no row's `Change` answers 0. Catch-up's and Damage's
+  always answer 1, and Traffic's always changes.
+
+The first pass's survivors were holes in the script, and each has a case
+now: Fred's defaults per field, BACK after a damage change, the release's
+`SetTopLeftY` order, the state a zero delta leaves, the highlight on a
+row other than the first, a Catch-up flip over a value that is not 0 or
+1, and the highlight box's item. `rpoke` and the moved objects (`obj`'s
+tenth field) are there for them.
+
 ## What comes next
 
-- **"Be The Cop Setup"** is `BeTheCopSetup` on `RaceSetupBaseClass`
-  (`0x001b8390`, `0x001b9248`). It shares Flailer screen `0xd1eadbca` with
-  Single Race Setup and the other race setups, and is built on
-  `tScrollingMenuList`. The arrows are this same class, with `SetClipToPoly`.
+- **The other race setups** (Single Race, Free Run, Lap KO, Track KO; 100
+  to 103 in `BaseCallback`) are `RaceSetupBaseClass` with other rows. They
+  wait: racing comes first.
 - **"Select Car"** is `SelectCarScreen`. The three car calls above belong to
   it.

@@ -457,8 +457,10 @@ class Model(object):
         e = r[4] & M32
         self.exit = e
         self.e.put32(e + 16, fbits(EXIT_TOTAL))
-        self.emit("  kit exit init %08x %s %d" % (
-            r[5] & M32, self.cstr(r[6] & M32), s32(r[7])))
+        # __20tExitScreenAnimationiPCc: two arguments; a3 is whatever the
+        # bMalloc before it left.
+        self.emit("  kit exit init %08x %s" % (r[5] & M32,
+                                               self.cstr(r[6] & M32)))
         return e
 
     def exit_msg(self, em):
@@ -815,7 +817,9 @@ MUTATIONS = [
      "{30016, 30015, 30017, 0}"),
     ("help-table", S, "{805000, 805001, 805002, 805003, 0}",
      "{805000, 805001, 805002, 0, 0}"),
-    ("help-kept", S, "    HOOK(s, setHelpOverride, NULL);", "    (void)0;"),
+    ("help-kept", S, "    HOOK(s, setHelpOverride, NULL);" + NL
+     + "    banim_slide_release(a, &b->slideIn);",
+     "    (void)0;" + NL + "    banim_slide_release(a, &b->slideIn);"),
 
     # ResyncChangeables.
     ("resync-1-lang", S, "BSETUP_OBJ_PLAYERS_VALUE, 20003);",
@@ -856,15 +860,19 @@ MUTATIONS = [
      + "    banim_blurb_new_text_id"),
 
     # The constructor.
-    ("ctor-bar", S, "BSCR_OBJ_SCROLLING_TEXT, BSCR_OBJ_WHITEOUT_BAR);",
-     "BSCR_OBJ_SCROLLING_TEXT, BSCR_OBJ_SCROLLING_TEXT);"),
-    ("ctor-slide-x", S, "topLeftX(s, screen, BSCR_MI_MASK(1)));",
-     "topLeftX(s, screen, BSCR_MI_MASK(2)));"),
-    ("ctor-hl1-color", S, "0xab671c9au," + NL
+    ("ctor-bar", S, "&b->blurb, screen, BSCR_OBJ_SCROLLING_TEXT," + NL
+     + "                     BSCR_OBJ_SCROLLING_TEXT, BSCR_OBJ_WHITEOUT_BAR);",
+     "&b->blurb, screen, BSCR_OBJ_SCROLLING_TEXT," + NL
+     + "                     BSCR_OBJ_SCROLLING_TEXT, BSCR_OBJ_SCROLLING_TEXT);"),
+    ("ctor-slide-x", S, "&b->slideIn, screen," + NL
+     + "                        topLeftX(s, screen, BSCR_MI_MASK(1)));",
+     "&b->slideIn, screen," + NL
+     + "                        topLeftX(s, screen, BSCR_MI_MASK(2)));"),
+    ("ctor-hl1-color", S, "&b->highlight, screen, 0xab671c9au," + NL
      + "                         (int32_t)BANIM_BLOOM_COLOR);",
-     "0xab671c9au, -1);"),
-    ("ctor-hl2-color", S, "0x1042eac3u, -1);",
-     "0x1042eac3u, (int32_t)BANIM_BLOOM_COLOR);"),
+     "&b->highlight, screen, 0xab671c9au, -1);"),
+    ("ctor-hl2-color", S, "&b->change, screen, 0x1042eac3u, -1);",
+     "&b->change, screen, 0x1042eac3u, (int32_t)BANIM_BLOOM_COLOR);"),
     ("ctor-hl-swap", S, "&b->highlight, screen, 0xab671c9au,",
      "&b->highlight, screen, 0x1042eac3u,"),
     ("ctor-arrows-swap", S, "barrows_init(s, &b->arrows, screen, "
@@ -946,14 +954,20 @@ MUTATIONS = [
      + "        beACopResync(s, b);" + NL + "    }"),
 
     # OnHighlight.
-    ("hl-under", S, "(int32_t)((float)box[3] + -3.0f)",
-     "(int32_t)((float)box[3] + -2.0f)"),
-    ("hl-under-right", S, "(int32_t)((float)box[3] + -3.0f)",
-     "(int32_t)((float)box[2] + -3.0f)"),
-    ("hl-over", S, "(int32_t)((float)box[1] - 6.0f)",
-     "(int32_t)((float)box[1] - 5.0f)"),
-    ("hl-over-left", S, "(int32_t)((float)box[1] - 6.0f)",
-     "(int32_t)((float)box[0] - 6.0f)"),
+    ("hl-under", S, "(int32_t)((float)box[3] + -3.0f));" + NL
+     + "    HOOK(s, setTopLeftY, b->screen,",
+     "(int32_t)((float)box[3] + -2.0f));" + NL
+     + "    HOOK(s, setTopLeftY, b->screen,"),
+    ("hl-under-right", S, "(int32_t)((float)box[3] + -3.0f));" + NL
+     + "    HOOK(s, setTopLeftY, b->screen,",
+     "(int32_t)((float)box[2] + -3.0f));" + NL
+     + "    HOOK(s, setTopLeftY, b->screen,"),
+    ("hl-over", S, "(int32_t)((float)box[1] - 6.0f));" + NL
+     + "    beACopBlurb(",
+     "(int32_t)((float)box[1] - 5.0f));" + NL + "    beACopBlurb("),
+    ("hl-over-left", S, "(int32_t)((float)box[1] - 6.0f));" + NL
+     + "    beACopBlurb(",
+     "(int32_t)((float)box[0] - 6.0f));" + NL + "    beACopBlurb("),
     ("hl-bracket-swap", S, "HOOK(s, setTopLeftY, b->screen, "
      "BSCR_OBJ_MI_UNDERSCORE,", "HOOK(s, setTopLeftY, b->screen, "
      "BSCR_OBJ_MI_OVERSCORE,"),
@@ -977,8 +991,8 @@ MUTATIONS = [
      "banim_highlight_set_item(a, &b->change, BSETUP_OBJ_SKILL_VALUE);"),
 
     # OnScroll.
-    ("scroll-dir", S, "msg == BMSG_MENUITEM_PAD_LEFT ? -1 : 1;",
-     "msg == BMSG_MENUITEM_PAD_LEFT ? 1 : -1;"),
+    ("scroll-dir", S, "int32_t  dir     = msg == BMSG_MENUITEM_PAD_LEFT ? -1 : 1;",
+     "int32_t  dir     = msg == BMSG_MENUITEM_PAD_LEFT ? 1 : -1;"),
     ("scroll-players-dir", S, "b->data.numPlayers + dir);",
      "b->data.numPlayers - dir);"),
     ("scroll-players-obj", S, "        object  = BSETUP_OBJ_PLAYERS_VALUE;",
@@ -1036,13 +1050,29 @@ MUTATIONS = [
     ("ev-tick-not-exiting", S, "    if (msg == BMSG_SCREEN_TICK) "
      "beACopTick(s, b);", "    if (msg == BMSG_SCREEN_TICK && "
      "!b->exitActive) beACopTick(s, b);"),
-    ("ev-exit-falls", S, "            data->noise = noise;" + NL + "        }"
-     + NL + "        return;", "            data->noise = noise;" + NL
-     + "        }"),
-    ("ev-exit-param", S, "            data->param = param;", "            (void)0;"),
-    ("ev-exit-noise", S, "            data->noise = noise;", "            (void)0;"),
-    ("ev-unhighlight", S, "        case BMSG_MENUITEM_HIGHLIGHT:",
-     "        case BMSG_MENUITEM_UNHIGHLIGHT:"),
+    ("ev-exit-falls", S, "&b->exit, (int)msg, &param, &noise);" + NL
+     + "        if (data) {" + NL + "            data->param = param;" + NL
+     + "            data->noise = noise;" + NL + "        }" + NL
+     + "        return;",
+     "&b->exit, (int)msg, &param, &noise);" + NL
+     + "        if (data) {" + NL + "            data->param = param;" + NL
+     + "            data->noise = noise;" + NL + "        }"),
+    ("ev-exit-param", S, "&b->exit, (int)msg, &param, &noise);" + NL
+     + "        if (data) {" + NL + "            data->param = param;",
+     "&b->exit, (int)msg, &param, &noise);" + NL
+     + "        if (data) {" + NL + "            (void)0;"),
+    ("ev-exit-noise", S, "            data->param = param;" + NL
+     + "            data->noise = noise;" + NL + "        }" + NL
+     + "        return;" + NL + "    }" + NL + "    if (!data) return;" + NL
+     + "    switch (msg) {",
+     "            data->param = param;" + NL
+     + "            (void)0;" + NL + "        }" + NL
+     + "        return;" + NL + "    }" + NL + "    if (!data) return;" + NL
+     + "    switch (msg) {"),
+    ("ev-unhighlight", S, "        case BMSG_MENUITEM_HIGHLIGHT:" + NL
+     + "            beACopHighlight(",
+     "        case BMSG_MENUITEM_UNHIGHLIGHT:" + NL
+     + "            beACopHighlight("),
     ("ev-scroll-up", S, "        case BMSG_MENUITEM_PAD_RIGHT:" + NL
      + "            beACopScroll", "        case BMSG_MENUITEM_PAD_RIGHT:"
      + NL + "        case BMSG_MENUITEM_PAD_UP:" + NL + "            beACopScroll"),

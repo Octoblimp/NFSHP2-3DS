@@ -159,6 +159,10 @@ static const BScreenConfig kScreens[] = {
     // made by bsetup_init().
     { "ChallengeBeACop",         BSETUP_SCREEN_BEACOP,
       bsetup_beacop_callback },
+    // Where You're The Cop's Setup goes: BeTheCopSetup, the one
+    // RaceSetupBaseClass screen ported.
+    { "Be The Cop Setup",        BSETUP_SCREEN_BE_THE_COP_SETUP,
+      bsetup_btc_callback },
 
     // Registered, drawn, and not ported. Every name below is one the port's
     // own code can ChangeToScreen() to -- the two Mode Selects' item tables
@@ -190,12 +194,9 @@ static const BScreenConfig kScreens[] = {
       bgf_plain_screen_callback },
     { "Credits",                 0xfd8a3b6du,   // CreditsScreen
       bgf_plain_screen_callback },
-    // Where You're The Cop goes. Be The Cop Setup is one Flailer screen
-    // with Single Race Setup and the other RaceSetupBaseClass screens; the
-    // two-player car select has a screen per pad, and this is player one's
-    // -- the 3DS never gets there, as it never has a second pad.
-    { "Be The Cop Setup",        0xd1eadbcau,   // BeTheCopSetup
-      bgf_plain_screen_callback },
+    // Where You're The Cop and its Setup go. The two-player car select has
+    // a screen per pad, and this is player one's -- the 3DS never gets
+    // there, as it never has a second pad.
     { "Select Car",              0xb5074ab4u,   // SelectCarScreen
       bgf_plain_screen_callback },
     { "Select Car2P",            0x18dc8e52u,   // SelectCarScreen
@@ -1503,6 +1504,54 @@ static float hookSetupTopLeftX(void* user, uint32_t screen, uint32_t object)
     return x;
 }
 
+// FlailerGetTopLeftY (0x00144168): 0 for a missing object.
+static float hookSetupGetTopLeftY(void* user, uint32_t screen,
+                                  uint32_t object)
+{
+    float x, y;
+    hookAnimGetTopLeft(user, screen, object, &x, &y);
+    return y;
+}
+
+// FlailerObjectChunk::SetTopLeftY (0x00140a48), the float one: X kept.
+static void hookSetupObjectTopLeftY(void* user, uint32_t screen,
+                                    uint32_t object, float y)
+{
+    BUI*      ui;
+    BUIObject o;
+    int32_t   idx = animFind((Boot*)user, screen, object, BUI_TYPE_NONE, &ui);
+    if (idx < 0 || !bui_object(ui, (uint32_t)idx, &o)) return;
+    bui_set_object_pos(ui, (uint32_t)idx, o.x, y);
+}
+
+// FlailerSetClipToPoly (0x00144358).
+static void hookSetupClipToPoly(void* user, uint32_t screen, uint32_t object,
+                                uint32_t poly)
+{
+    BUI*    ui;
+    int32_t idx = animFind((Boot*)user, screen, object, BUI_TYPE_NONE, &ui);
+    if (idx >= 0) bui_set_object_clip(ui, (uint32_t)idx, poly);
+}
+
+// FlailerSetAlpha (0x001448e8), through ObjectChunk::SetAlpha (0x001406d8):
+// a text object's alpha, or all four of a bitmap's corners.
+static void hookSetupAlpha(void* user, uint32_t screen, uint32_t object,
+                           int alpha)
+{
+    BUI*    ui;
+    int32_t idx = animFind((Boot*)user, screen, object, BUI_TYPE_NONE, &ui);
+    if (idx >= 0) bui_set_object_alpha(ui, (uint32_t)idx, -1, alpha);
+}
+
+// GrayMenuItem(char*, int, int, int) (0x0016d2a8) finds its screen by name;
+// the setup screens pass their own, which is the one the flow is on.
+static void hookSetupGrayNamed(void* user, const char* name, uint32_t screen,
+                               uint32_t item, int mode)
+{
+    (void)name;
+    hookGrayMenuItem(user, screen, item, (BScrGrayMode)mode);
+}
+
 // IsJoystickPluggedIn (0x001542f0). The 3DS is one player's: port 0 is the
 // console's own buttons, and there is no second pad to plug in.
 static int hookSetupJoystickPluggedIn(void* user, int port)
@@ -2111,6 +2160,9 @@ int main(int argc, char** argv)
     // the card's settings load over.
     jb_audio_init_with_defaults(&g_jukebox, g_fred + FRED_AUDIO_OPTIONS,
                                 g_audioMode);
+    // And its two setup blocks (0x00183830): DataChallengeScreen at +8 and
+    // DataBeTheCopSetup at +64.
+    bsetup_fred_defaults(g_fred);
     logPrintf("Jukebox: %s, %u tunes\n",
               jb_is_cartridge_loaded(&g_jukebox.jukebox) ? "loaded" : "none",
               (unsigned)g_jukebox.jukebox.numTunes);
@@ -2310,6 +2362,11 @@ int main(int argc, char** argv)
     setupHooks.setLanguageID       = hookAnimSetLanguageID;
     setupHooks.setVisible          = hookAnimSetVisible;
     setupHooks.grayMenuItem        = hookFlowGrayMenuItem;
+    setupHooks.grayMenuItemNamed   = hookSetupGrayNamed;
+    setupHooks.getTopLeftY         = hookSetupGetTopLeftY;
+    setupHooks.setObjectTopLeftY   = hookSetupObjectTopLeftY;
+    setupHooks.setClipToPoly       = hookSetupClipToPoly;
+    setupHooks.setAlpha            = hookSetupAlpha;
     setupHooks.isJoystickPluggedIn = hookSetupJoystickPluggedIn;
     setupHooks.startMovie          = hookScreenMovie;
     setupHooks.setHelpOverride     = hookSetupHelpOverride;

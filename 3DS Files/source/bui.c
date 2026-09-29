@@ -265,6 +265,25 @@ bool bui_set_object_pos(BUI* ui, uint32_t index, float x, float y)
     return true;
 }
 
+// SetClipToPoly__18FlailerObjectChunki (retail 0x00140a70): nothing if the
+// poly is already the one, else ClipToPoly and DirtyFlag 4; and a text
+// object's SetFormatOptions(FORMAT_CLIP) (0x00140c68), which ORs the bit
+// in and stamps DirtyFlag 5.
+bool bui_set_object_clip(BUI* ui, uint32_t index, uint32_t poly)
+{
+    uint32_t room = 0;
+    uint8_t* p    = writable(ui, index, 56, &room);
+    if (!p) return false;
+    if (bchunk_u32(p + 52) == poly) return true;
+    p[19] = 4;
+    bchunk_put_u32(p + 52, poly);
+    if ((int8_t)p[16] == BUI_TYPE_TEXT && room >= 68) {
+        bchunk_put_u32(p + 64, bchunk_u32(p + 64) | BUI_FMT_CLIP);
+        p[19] = 5;
+    }
+    return true;
+}
+
 bool bui_set_object_visible(BUI* ui, uint32_t index, int visibility)
 {
     uint8_t* p = writable(ui, index, 56, NULL);

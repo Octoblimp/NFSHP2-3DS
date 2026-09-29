@@ -2326,12 +2326,19 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
   - [ ] The three car calls in the constructor and SELECT
         (`MakeChallengeCarsAvailable`, `0x00183ec0`'s preload,
         `SetupRaceParametersAfterRaceSetup`), with car select.
-- [ ] **The Setup screen.** Catch-up, traffic and damage, with arrows on
+- [x] **The Setup screen.** Catch-up, traffic and damage, with arrows on
       the current row and the movie behind. "Be The Cop Setup" is
       `BeTheCopSetup` (`0x001b9248`) on `RaceSetupBaseClass`
-      (`0x001b8390`), screen `d1eadbca`, with `tScrollingMenuList`. The
-      arrows are `bsetup.c`'s, with `SetClipToPoly`. It is registered, so
-      far as a plain screen.
+      (`0x001b8390`), screen `d1eadbca`, with `tScrollingMenuList`, all in
+      `bsetup.c`. `racesetup_check` runs retail's on the image: 398 ops,
+      0 differ; 86 mutations, 82 caught, 4 equivalent. On Azahar it
+      matches the photo, and RIGHT on Traffic goes to Moderate
+      (`docs/formats/frontend-setup.md`, "Be The Cop Setup").
+  - [ ] `SetClipToPoly`: `uirender.c` keeps the poly and does not clip.
+  - [ ] The other race setups (Single Race, Free Run, Lap KO, Track KO),
+        on the same base with other rows.
+- On 2026-09-29 the user moved the port back to cars and racing: the
+  items below wait unless a race needs them.
 - [ ] **Car select.**
   - The car on a lit turntable.
   - The make's logo and the badge.

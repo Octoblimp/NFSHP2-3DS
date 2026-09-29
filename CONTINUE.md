@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-09-29), after You're The Cop. `HANDOFF.md` is the running
+(2026-09-29), after Be The Cop Setup. `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -614,20 +614,34 @@ and so replaced every boot.
    - main.c's `hookSetup*` answer the Flailer calls. They include
      `GetBoundingBox` in ints and `SetCenterY` on
      `uirender_object_height`, which is `GetHeightFloat`.
-   - "Be The Cop Setup", "Select Car" and "Select Car2P" are registered
-     as plain screens; `screen_registry.py --check-port` lists nothing
-     reachable and unregistered.
+   - "Select Car" and "Select Car2P" are registered as plain screens;
+     `screen_registry.py --check-port` lists nothing reachable and
+     unregistered.
    - Open: `tHelpMenu`, `mPolice` in Fred, and the three car calls.
 
-   **Next is the rest of the photos**, in TASKS.md's "The retail
-   frontend": the Setup screen (`RaceSetupBaseClass` `0x001b8390` and
-   `BeTheCopSetup` `0x001b9248` on `d1eadbca`, with `tScrollingMenuList`;
-   the arrows are `bsetup.c`'s, with `SetClipToPoly`), then car select
-   (`SelectCarScreen`, with `MakeChallengeCarsAvailable` `0x00183af8`,
-   the preload at `0x00194898` and `Fred::InitWithDefaults` `0x00183830`)
-   and the briefing.
+   **Be The Cop Setup is done** (HANDOFF.md, Session 31, continued).
+   `bsetup.c` has `RaceSetupBaseClass` (`0x001b8390`), `BeTheCopSetup`
+   (`0x001b9248`, screen `d1eadbca`) and `tScrollingMenuList`: Catch-up,
+   Traffic and Damage, with the arrows on the current row. BACK or SELECT
+   writes them to Fred's `DataBeTheCopSetup` (+64).
+   - `racesetup_check`: 398 ops, 3420 lines, 0 differ; 86 mutations, 82
+     caught, 4 equivalent. `setup_check` still passes.
+   - `bsetup_fred_defaults` puts retail's `InitWithDefaults` values for
+     the two setup tables in Fred at boot (`main.c`). With no save, that
+     is what the screens show: Catch-up On, Traffic Minimum, Damage On.
+   - `uirender.c` does not clip yet: `bui_set_object_clip` keeps
+     `SetClipToPoly`'s poly and format bit, and nothing draws with them.
+     Three rows never reach the clip, so nothing shows it.
+   - Open: the other four race setups (100..103), on the same base.
 
-   When step 6 resumes: `Car::InitRenderInfo` (`0x0011dc80`) and
+   **Next is cars and racing, not more menus.** On 2026-09-29 the user
+   asked for the port to go back to making cars and racing work once Be
+   The Cop Setup was done: "We don't need every single menu working".
+   Car select (`SelectCarScreen`, `MakeChallengeCarsAvailable`
+   `0x00183af8`, the preload at `0x00194898`, `Fred::InitWithDefaults`
+   `0x00183830`) and the briefing wait, unless a race needs them.
+
+   Step 6 resumes: `Car::InitRenderInfo` (`0x0011dc80`) and
    CarRenderInfo's constructor (`0x0011e860`, 4700 bytes; retail's
    record is 2352 bytes, the demo's 1856), then `Render` (`0x00120ef8`,
    9844 bytes), so that a car draws. `python tools/retail_match.py

@@ -45,6 +45,20 @@ static int joystickPluggedIn(BSetup* s, int port)
                : 0;
 }
 
+static int findObject(BSetup* s, uint32_t screen, uint32_t object, int type)
+{
+    return s->hooks.findObject
+               ? s->hooks.findObject(s->hooks.user, screen, object, type)
+               : 0;
+}
+
+static float topLeftY(BSetup* s, uint32_t screen, uint32_t object)
+{
+    return s->hooks.getTopLeftY
+               ? s->hooks.getTopLeftY(s->hooks.user, screen, object)
+               : 0.0f;
+}
+
 // ------------------------------------------------------------ Fred's bytes
 
 static int32_t get32(const uint8_t* p)
@@ -89,6 +103,50 @@ void bsetup_challenge_save(const BChallengeData* d, uint8_t* fred)
     put32(p + 8, d->raceMode);
     put32(p + 12, d->skillLevel);
     put32(p + 16, d->beACopSkill);
+}
+
+void bsetup_btc_defaults(BBeTheCopData* d)
+{
+    d->opponentGrid = 2;
+    d->opponentType = 0;
+    d->catchup      = 1;
+    d->traffic      = 0;
+    d->damage       = 1;
+}
+
+static void btcLoad(BBeTheCopData* d, const uint8_t* fred)
+{
+    const uint8_t* p = fred + FRED_BE_THE_COP_SETUP;
+    d->opponentGrid = get32(p + 0);
+    d->opponentType = get32(p + 4);
+    d->catchup      = get32(p + 8);
+    d->traffic      = get32(p + 12);
+    d->damage       = get32(p + 16);
+}
+
+static void btcSave(const BBeTheCopData* d, uint8_t* fred)
+{
+    uint8_t* p = fred + FRED_BE_THE_COP_SETUP;
+    put32(p + 0, d->opponentGrid);
+    put32(p + 4, d->opponentType);
+    put32(p + 8, d->catchup);
+    put32(p + 12, d->traffic);
+    put32(p + 16, d->damage);
+}
+
+void bsetup_fred_defaults(uint8_t* fred)
+{
+    BChallengeData c;
+    BBeTheCopData  b;
+    bsetup_challenge_defaults(&c);
+    bsetup_challenge_save(&c, fred);
+    bsetup_btc_defaults(&b);
+    btcSave(&b, fred);
+}
+
+static int32_t fredGet(BSetup* s, uint32_t off)
+{
+    return s->gf->fred ? get32(s->gf->fred + off) : 0;
 }
 
 // Fred.GameType and Fred.NumPlayerCars, which every setup screen writes on
@@ -545,6 +603,604 @@ static void beACopEvent(BSetup* s, BScreenMessage msg,
             beACopScroll(s, b, msg, data);
             break;
         default:
+            break;
+    }
+}
+
+// ------------------------------------------------------ tScrollingMenuList
+
+// 0x0031cfa0, MI_1_MASK .. MI_7_MASK, which the static initialiser at
+// 0x0024a888 hashes. The word before it is 0 and nothing writes it, and
+// CurrentMask is -1 until the first highlight: the port reads 0 for any
+// index off the seven.
+static const uint32_t kScrollMasks[7] = {
+    BSCR_MI_MASK(1), BSCR_MI_MASK(2), BSCR_MI_MASK(3), BSCR_MI_MASK(4),
+    BSCR_MI_MASK(5), BSCR_MI_MASK(6), BSCR_MI_MASK(7),
+};
+
+// tMenuAnimElement's constructor (0x00249c78): the spline at rest on the
+// object's Y. It zeroes Val, both derivatives and ValDesired, then sets
+// ValDesired and SavedY to the Y, flags a seek if the Y is not 0, and
+// clears the state again: whatever the Y, the element starts idle, there.
+// Retail leaves the coefficients and Time as the heap had them; a seek
+// rebuilds both before it reads either.
+static void elementInit(BSetup* s, BScrollList* l, BMenuAnimElement* el,
+                        uint32_t object)
+{
+    memset(el, 0, sizeof(*el));
+    el->object                 = object;
+    el->yAnim.arrivalThreshold = 1.0f;
+    el->yAnim.duration         = 0.5f;
+    el->savedY                 = topLeftY(s, l->screen, object);
+    el->yAnim.valDesired       = el->savedY;
+    el->yAnim.state            = 0;
+    el->yAnim.val              = el->yAnim.valDesired;
+    el->yAnim.dval             = el->yAnim.dvalDesired;
+}
+
+// The constructor (0x00249de0): the arrows' pulse, tfeSineWave(0, 128, 10),
+// the visible area from the first item's Y to the last's (SetVisibleArea,
+// 0x00249f28), and both arrows at the pulse's alpha.
+static void scrollInit(BSetup* s, BScrollList* l, uint32_t screen,
+                       uint32_t first, uint32_t last, uint32_t up,
+                       uint32_t down, uint32_t clip)
+{
+    memset(l, 0, sizeof(*l));
+    l->screen = screen;
+    bsine_init(&l->arrowAnimator, 0.0f, 128.0f, 10.0f);
+    l->top         = topLeftY(s, screen, first);
+    l->bottom      = topLeftY(s, screen, last);
+    l->upArrow     = up;
+    l->downArrow   = down;
+    l->clipPoly    = clip;
+    l->currentMask = -1;
+    HOOK(s, setAlpha, screen, up, bsine_val_int(&l->arrowAnimator));
+    HOOK(s, setAlpha, screen, down, bsine_val_int(&l->arrowAnimator));
+    l->numMenuItemsToScroll = 0;
+}
+
+// AddObject (0x00249f70): an object the screen has is clipped to the poly
+// and appended. The port's list holds 16, BuildMenu's most.
+static void scrollAddObject(BSetup* s, BScrollList* l, uint32_t object)
+{
+    if (!findObject(s, l->screen, object, 0)) return;
+    HOOK(s, setClipToPoly, l->screen, object, l->clipPoly);
+    if (l->numElements == BSCROLL_MAX_ELEMENTS) return;
+    elementInit(s, l, &l->elements[l->numElements++], object);
+}
+
+// AddObjects (0x00249ff8).
+static void scrollAddObjects(BSetup* s, BScrollList* l,
+                             const uint32_t* objects, int n)
+{
+    for (int i = 0; i < n; i++) scrollAddObject(s, l, objects[i]);
+}
+
+// The destructor (0x00249ed0): each element's (0x00249d30) puts its object
+// back at SavedY, in the list's order.
+static void scrollRelease(BSetup* s, BScrollList* l)
+{
+    for (int i = 0; i < l->numElements; i++) {
+        BMenuAnimElement* el = &l->elements[i];
+        HOOK(s, setObjectTopLeftY, l->screen, el->object, el->savedY);
+    }
+    l->numElements = 0;
+}
+
+// FindMenuElement (0x0024a050): the first element on that object.
+static BMenuAnimElement* scrollFind(BScrollList* l, uint32_t object)
+{
+    for (int i = 0; i < l->numElements; i++)
+        if (l->elements[i].object == object) return &l->elements[i];
+    return NULL;
+}
+
+// tMenuAnimElement::ApplyDeltaY (0x00249d70): the destination moves, and
+// the spline seeks if that is not where it is.
+static void elementApplyDeltaY(BMenuAnimElement* el, float d)
+{
+    el->yAnim.valDesired = el->yAnim.valDesired + d;
+    if (el->yAnim.valDesired != el->yAnim.val) el->yAnim.state = 2;
+}
+
+// SetDesiredTopLeftY (0x0024a090): move every element by what puts this
+// object's destination at `y`. Retail reads the element unchecked, so an
+// object on the screen and not in the list is a read of address 20 there;
+// here it moves nothing.
+static void scrollSetDesiredTopLeftY(BSetup* s, BScrollList* l,
+                                     uint32_t object, float y)
+{
+    int               found = findObject(s, l->screen, object, 0);
+    BMenuAnimElement* el    = scrollFind(l, object);
+    float             d;
+
+    if (!found || !el) return;
+    d = y - el->yAnim.valDesired;
+    for (int i = 0; i < l->numElements; i++)
+        elementApplyDeltaY(&l->elements[i], d);
+}
+
+// SetCurrentObject (0x0024a120): an object above the area comes down to
+// its top, one below it up to its bottom.
+static void scrollSetCurrentObject(BSetup* s, BScrollList* l,
+                                   uint32_t object)
+{
+    float y = topLeftY(s, l->screen, object);
+    if (y < l->top) scrollSetDesiredTopLeftY(s, l, object, l->top);
+    else if (l->bottom < y) scrollSetDesiredTopLeftY(s, l, object, l->bottom);
+}
+
+// Tick (0x0024a1a8): each element's (0x00249da0) seeks its spline by
+// RealTimeElapsed, with the limits 0, and puts its object at the value;
+// then the pulse steps and both arrows take it.
+static void scrollTick(BSetup* s, BScrollList* l)
+{
+    for (int i = 0; i < l->numElements; i++) {
+        BMenuAnimElement* el = &l->elements[i];
+        bspline_seek(&el->yAnim, s->gf->realElapsed);
+        HOOK(s, setObjectTopLeftY, l->screen, el->object, el->yAnim.val);
+    }
+    bsine_step(&l->arrowAnimator, s->gf->realElapsed);
+    HOOK(s, setAlpha, l->screen, l->upArrow,
+         bsine_val_int(&l->arrowAnimator));
+    HOOK(s, setAlpha, l->screen, l->downArrow,
+         bsine_val_int(&l->arrowAnimator));
+}
+
+// Highlight (0x0024a248), retail's: only the first highlight places the
+// mask, from the item's number -- MENUITEM_7 and past it, and two hashes
+// more, all at the seventh. After that only the pad moves it.
+static void scrollHighlight(BScrollList* l, uint32_t item)
+{
+    if (l->currentMask != -1) return;
+    switch (item) {
+        case BSCR_ITEM_MENUITEM(1): l->currentMask = 0; break;
+        case BSCR_ITEM_MENUITEM(2): l->currentMask = 1; break;
+        case BSCR_ITEM_MENUITEM(3): l->currentMask = 2; break;
+        case BSCR_ITEM_MENUITEM(4): l->currentMask = 3; break;
+        case BSCR_ITEM_MENUITEM(5): l->currentMask = 4; break;
+        case BSCR_ITEM_MENUITEM(6): l->currentMask = 5; break;
+        case BSCR_ITEM_MENUITEM(7):
+        case BSCR_ITEM_MENUITEM(8):
+        case BSCR_ITEM_MENUITEM(9):
+        case 0xaee77883u:
+        case 0xaee77884u: l->currentMask = 6; break;
+        default: break;
+    }
+}
+
+// GetCurrentMenuMask (0x0024a368).
+static uint32_t scrollCurrentMask(const BScrollList* l)
+{
+    return (uint32_t)l->currentMask < 7 ? kScrollMasks[l->currentMask] : 0;
+}
+
+// MoveMaskDown (0x0024a388) stops at the last of the items to scroll, or
+// the seventh; MoveMaskUp (0x0024a3c0) at the first.
+static void scrollMoveMaskDown(BScrollList* l)
+{
+    int32_t n = l->numMenuItemsToScroll < 7 ? l->numMenuItemsToScroll : 7;
+    l->currentMask = l->currentMask + 1;
+    if (!(l->currentMask < n)) l->currentMask = n - 1;
+}
+
+static void scrollMoveMaskUp(BScrollList* l)
+{
+    l->currentMask = l->currentMask - 1;
+    if (l->currentMask < 0) l->currentMask = 0;
+}
+
+// ShowUpArrow / ShowDownArrow (0x0024a3e0, 0x0024a430): with 8 items or
+// more, whether any element is headed above the area, or below it.
+static int scrollShowUpArrow(const BScrollList* l)
+{
+    if (l->numMenuItemsToScroll < 8) return 0;
+    for (int i = 0; i < l->numElements; i++)
+        if (l->elements[i].yAnim.valDesired < l->top) return 1;
+    return 0;
+}
+
+static int scrollShowDownArrow(const BScrollList* l)
+{
+    if (l->numMenuItemsToScroll < 8) return 0;
+    for (int i = 0; i < l->numElements; i++)
+        if (l->bottom < l->elements[i].yAnim.valDesired) return 1;
+    return 0;
+}
+
+// HandleEvent (0x0024a480): the pad moves the mask, a highlight places it
+// and follows the item, and a tick animates.
+static void scrollEvent(BSetup* s, BScrollList* l, BScreenMessage msg,
+                        const BScreenCallbackData* data)
+{
+    switch (msg) {
+        case BMSG_MENUITEM_PAD_UP: scrollMoveMaskUp(l); break;
+        case BMSG_MENUITEM_PAD_DOWN: scrollMoveMaskDown(l); break;
+        case BMSG_MENUITEM_HIGHLIGHT:
+            scrollHighlight(l, data->itemHash);
+            scrollSetCurrentObject(s, l, data->itemHash);
+            HOOK(s, setVisible, l->screen, l->upArrow, scrollShowUpArrow(l));
+            HOOK(s, setVisible, l->screen, l->downArrow,
+                 scrollShowDownArrow(l));
+            break;
+        case BMSG_SCREEN_TICK: scrollTick(s, l); break;
+        default: break;
+    }
+}
+
+// ------------------------------------------------------ RaceSetupBaseClass
+
+// The three tables BuildMenu reads, eight each: the items (0x00313e38),
+// their masks (0x00313e58) and the value text beside each (0x00313e78).
+static const uint32_t kRowItems[BRACESETUP_MAX_ROWS] = {
+    BSCR_ITEM_MENUITEM(1), BSCR_ITEM_MENUITEM(2), BSCR_ITEM_MENUITEM(3),
+    BSCR_ITEM_MENUITEM(4), BSCR_ITEM_MENUITEM(5), BSCR_ITEM_MENUITEM(6),
+    BSCR_ITEM_MENUITEM(7), BSCR_ITEM_MENUITEM(8),
+};
+static const uint32_t kRowMasks[BRACESETUP_MAX_ROWS] = {
+    BSCR_MI_MASK(1), BSCR_MI_MASK(2), BSCR_MI_MASK(3), BSCR_MI_MASK(4),
+    BSCR_MI_MASK(5), BSCR_MI_MASK(6), BSCR_MI_MASK(7), BSCR_MI_MASK(8),
+};
+static const uint32_t kRowTexts[BRACESETUP_MAX_ROWS] = {
+    0x69a2c757u, 0x69a2c758u, 0x69a2c759u, 0x69a2c75au,
+    0x69a2c75bu, 0x69a2c75cu, 0x69a2c75du, 0x69a2c75eu,
+};
+
+// The two tables the three rows below read, "Off" and "On" (gp-18760, and
+// gp-18744 the same), and Minimum, Moderate, Maximum and Off (0x00313e28).
+// Retail indexes them unchecked; the value is its changer's unless a save
+// says otherwise, and the port reads 0 for anything off the table.
+static const int32_t kOffOn[2]      = {30008, 30009};
+static const int32_t kTraffic[4]    = {30018, 30019, 30020, 30008};
+
+static void refreshFrom(BSetup* s, BRaceSetup* r, const int32_t* table,
+                        int n, int32_t value, uint32_t text)
+{
+    int id = (uint32_t)value < (uint32_t)n ? table[value] : 0;
+    HOOK(s, setLanguageID, r->screen, text, id);
+}
+
+// MaybeChangeCatchup (0x001b7970) and MaybeChangeDamage (0x001b7a78): a
+// toggle whichever way the pad went -- anything not 0 comes back 0 -- and
+// always a change.
+static int maybeChangeCatchup(BSetup* s, BRaceSetup* r, int32_t dir,
+                              int32_t* value)
+{
+    (void)s;
+    (void)r;
+    (void)dir;
+    *value = *value == 0;
+    return 1;
+}
+
+static int maybeChangeDamage(BSetup* s, BRaceSetup* r, int32_t dir,
+                             int32_t* value)
+{
+    (void)s;
+    (void)r;
+    (void)dir;
+    *value = *value == 0;
+    return 1;
+}
+
+// MaybeChangeTraffic (0x001b79a8): 0..3, wrapping.
+static int maybeChangeTraffic(BSetup* s, BRaceSetup* r, int32_t dir,
+                              int32_t* value)
+{
+    int32_t old = *value;
+    (void)s;
+    (void)r;
+    *value = valueChanger(old, dir, 0, 3);
+    return *value != old;
+}
+
+// RefreshCatchup (0x001b7988), RefreshTraffic (0x001b79f0), RefreshDamage
+// (0x001b7a90).
+static void refreshCatchup(BSetup* s, BRaceSetup* r, int32_t value,
+                           uint32_t text)
+{
+    refreshFrom(s, r, kOffOn, 2, value, text);
+}
+
+static void refreshTraffic(BSetup* s, BRaceSetup* r, int32_t value,
+                           uint32_t text)
+{
+    refreshFrom(s, r, kTraffic, 4, value, text);
+}
+
+static void refreshDamage(BSetup* s, BRaceSetup* r, int32_t value,
+                          uint32_t text)
+{
+    refreshFrom(s, r, kOffOn, 2, value, text);
+}
+
+// FindChangeable (0x001b7ab0): the row on that item, or none.
+static BChangeable* findRow(BRaceSetup* r, uint32_t item)
+{
+    for (int i = 0; i < r->numRows; i++)
+        if (r->rows[i].menuItem == item) return &r->rows[i];
+    return NULL;
+}
+
+// GetIndexForMenuItem (0x001b8358): the item's place in the eight, 0 for
+// one that is not there.
+static int rowIndex(uint32_t item)
+{
+    for (int i = 0; i < BRACESETUP_MAX_ROWS; i++)
+        if (kRowItems[i] == item) return i;
+    return 0;
+}
+
+// Attach (0x001b7dd8): a row on the end, not yet on an item. Retail's list
+// has no end; its BuildMenu reads its tables past eight rows, and the port
+// takes eight.
+static void raceSetupAttach(BRaceSetup* r, int32_t languageID,
+                            int32_t blurbID, BSetupChangeFn change,
+                            BSetupRefreshFn refresh, int32_t* value)
+{
+    BChangeable* c;
+    if (r->numRows == BRACESETUP_MAX_ROWS) return;
+    c             = &r->rows[r->numRows++];
+    c->menuItem   = 0;
+    c->changeText = 0;
+    c->languageID = languageID;
+    c->value      = value;
+    c->change     = change;
+    c->refresh    = refresh;
+    c->blurbID    = blurbID;
+}
+
+// ResyncChangeables (0x001b7ca0): every row's value text, from its value.
+static void raceSetupResync(BSetup* s, BRaceSetup* r)
+{
+    for (int i = 0; i < r->numRows; i++) {
+        BChangeable* c = &r->rows[i];
+        c->refresh(s, r, *c->value, c->changeText);
+    }
+}
+
+// BuildMenu (0x001b85b8). The masks all go in, with indicator mode 1. Each
+// row takes the next item and value text: the text shown, the item shown
+// and enabled on the screen called `name` and given the row's label, and
+// the text shown again. The items past the rows are hidden with their
+// text. The scroller gets the rows' texts, then their items.
+static void raceSetupBuildMenu(BSetup* s, BRaceSetup* r, const char* name)
+{
+    BAnim* a = clock(s);
+    int    i;
+
+    bsel_set_indicator_mode(&r->sel, 1);
+    bsel_add_items(a, &r->sel, kRowMasks, BRACESETUP_MAX_ROWS);
+    for (i = 0; i < r->numRows; i++) {
+        BChangeable* c = &r->rows[i];
+        c->menuItem    = kRowItems[i];
+        c->changeText  = kRowTexts[i];
+        HOOK(s, setVisible, r->screen, c->changeText, 1);
+        HOOK(s, grayMenuItemNamed, name, r->screen, c->menuItem, 1);
+        HOOK(s, setLanguageID, r->screen, c->menuItem, c->languageID);
+        HOOK(s, setVisible, r->screen, c->changeText, 1);
+    }
+    for (; i < BRACESETUP_MAX_ROWS; i++) {
+        HOOK(s, grayMenuItemNamed, name, r->screen, kRowItems[i], 2);
+        HOOK(s, setVisible, r->screen, kRowTexts[i], 0);
+    }
+    r->scroller.numMenuItemsToScroll = r->numRows;
+    scrollAddObjects(s, &r->scroller, kRowTexts, r->numRows);
+    scrollAddObjects(s, &r->scroller, kRowItems, r->numRows);
+}
+
+// SetupHighlight (0x001b7d50): the brackets to the mask's box, as
+// OnHighlight puts You're The Cop's round the item's. Retail's box is the
+// stack's until GetBoundingBox finds the mask.
+static void raceSetupHighlightBox(BSetup* s, BRaceSetup* r, uint32_t mask)
+{
+    int32_t box[4] = {0, 0, 0, 0};   // left, top, right, bottom
+
+    if (s->hooks.getBoundingBox)
+        s->hooks.getBoundingBox(s->hooks.user, r->screen, mask, box);
+    HOOK(s, setTopLeftY, r->screen, BSCR_OBJ_MI_UNDERSCORE,
+         (int32_t)((float)box[3] + -3.0f));
+    HOOK(s, setTopLeftY, r->screen, BSCR_OBJ_MI_OVERSCORE,
+         (int32_t)((float)box[1] - 6.0f));
+}
+
+// The constructor (0x001b8390), in its order: the SelectionSet, the slide
+// in to MI_1_MASK's X, the two blooms (the item's in BloomTargetColor, the
+// value's in its own), the scroller on MENUITEM_1 .. MENUITEM_7, the
+// arrows, the blurb, the movie, and both arrows clipped to the poly.
+static void raceSetupCtor(BSetup* s, BRaceSetup* r, uint32_t screen)
+{
+    BAnim* a = clock(s);
+
+    memset(r, 0, sizeof(*r));
+    bsel_init(a, &r->sel, screen);
+    banim_slide_in_init(a, &r->slideIn, screen,
+                        topLeftX(s, screen, BSCR_MI_MASK(1)));
+    banim_highlight_init(a, &r->highlight, screen, 0xab671c9au,
+                         (int32_t)BANIM_BLOOM_COLOR);
+    banim_highlight_init(a, &r->change, screen, 0x1042eac3u, -1);
+    scrollInit(s, &r->scroller, screen, BSCR_ITEM_MENUITEM(1),
+               BSCR_ITEM_MENUITEM(7), BSETUP_OBJ_UP_ARROW,
+               BSETUP_OBJ_DOWN_ARROW, BSETUP_OBJ_CLIP_POLY);
+    barrows_init(s, &r->arrows, screen, BSETUP_OBJ_LEFT_ARROW,
+                 BSETUP_OBJ_RIGHT_ARROW);
+    banim_blurb_init(a, &r->blurb, screen, BSCR_OBJ_SCROLLING_TEXT,
+                     BSCR_OBJ_SCROLLING_TEXT, BSCR_OBJ_WHITEOUT_BAR);
+    r->screen = screen;
+    startTheRightMovie(s);
+    r->exitActive = 0;
+    HOOK(s, setClipToPoly, screen, BSETUP_OBJ_LEFT_ARROW,
+         BSETUP_OBJ_CLIP_POLY);
+    HOOK(s, setClipToPoly, screen, BSETUP_OBJ_RIGHT_ARROW,
+         BSETUP_OBJ_CLIP_POLY);
+    r->current = 0;
+}
+
+// The destructor (0x001b84f0): the help override off, the exit animation
+// if one ran, then the members in reverse. The blooms', the
+// SelectionSet's and the rows' only free.
+static void raceSetupDtor(BSetup* s, BRaceSetup* r)
+{
+    BAnim* a = clock(s);
+
+    HOOK(s, setHelpOverride, NULL);
+    if (r->exitActive) banim_slide_release(a, &r->exit.slide);
+    banim_blurb_release(a, &r->blurb);
+    scrollRelease(s, &r->scroller);
+    banim_slide_release(a, &r->slideIn);
+    memset(r, 0, sizeof(*r));
+}
+
+// HandleMenuEvent (0x001b7ea8). A tick animates both blooms first; the
+// arrows see every message; a running exit takes every message and nothing
+// else does; then the scroller, then the message itself.
+static void raceSetupEvent(BSetup* s, BRaceSetup* r, BScreenMessage msg,
+                           BScreenCallbackData* data)
+{
+    BAnim*       a = clock(s);
+    BChangeable* c;
+    int          idx;
+
+    if (msg == BMSG_SCREEN_TICK) {
+        banim_highlight_animate(a, &r->highlight);
+        banim_highlight_animate(a, &r->change);
+    }
+    barrows_event(s, &r->arrows, msg);
+    if (r->exitActive) {
+        int32_t param = data ? data->param : 0;
+        int32_t noise = data ? data->noise : 0;
+        // A finished exit changes screen, which unactivates this one and
+        // clears `r`. Nothing after this may touch it.
+        banim_exit_message(a, &r->exit, (int)msg, &param, &noise);
+        if (data) {
+            data->param = param;
+            data->noise = noise;
+        }
+        return;
+    }
+    if (!data) return;
+    scrollEvent(s, &r->scroller, msg, data);
+
+    switch (msg) {
+        // SELECT: car select, the two-player screen if Fred says two cars.
+        // The brackets leave with the items, and the arrows go.
+        case BMSG_MENUITEM_SELECT: {
+            const char* target =
+                fredGet(s, FRED_NUM_PLAYER_CARS) == 2 ? "Select Car2P"
+                                                      : "Select Car";
+            banim_exit_init(a, &r->exit, r->screen, target);
+            r->exitActive = 1;
+            banim_slide_add_group(a, &r->exit.slide, BSCR_GROUP_UNDERSCORE,
+                                  BSCR_OBJ_MI_UNDERSCORE,
+                                  topLeftX(s, r->screen,
+                                           BSCR_OBJ_MI_UNDERSCORE),
+                                  BANIM_OFFSCREEN_X,
+                                  r->exit.slide.totalTime);
+            barrows_set(s, &r->arrows, 0);
+            break;
+        }
+        // HIGHLIGHT: the row's line (retail reads the row unchecked), the
+        // arrows on the item's value, the mask and brackets where the
+        // scroller has the mask, and the two blooms.
+        case BMSG_MENUITEM_HIGHLIGHT:
+            c = findRow(r, data->itemHash);
+            if (c) banim_blurb_new_text_id(a, &r->blurb, c->blurbID);
+            r->current = data->itemHash;
+            idx        = rowIndex(data->itemHash);
+            barrows_set(s, &r->arrows, kRowTexts[idx]);
+            bsel_set_current(a, &r->sel, scrollCurrentMask(&r->scroller));
+            raceSetupHighlightBox(s, r, scrollCurrentMask(&r->scroller));
+            banim_highlight_set_item(a, &r->highlight, kRowItems[idx]);
+            banim_highlight_set_item(a, &r->change, kRowTexts[idx]);
+            break;
+        // LEFT and RIGHT: the row changes by one and its text follows, with
+        // the menu's sound and the value's bloom; no change is silent.
+        case BMSG_MENUITEM_PAD_LEFT:
+        case BMSG_MENUITEM_PAD_RIGHT: {
+            int32_t dir = msg == BMSG_MENUITEM_PAD_LEFT ? -1 : 1;
+            c           = findRow(r, data->itemHash);
+            if (!c) break;
+            if (!c->change(s, r, dir, c->value)) {
+                data->noise = 0;
+                break;
+            }
+            c->refresh(s, r, *c->value, c->changeText);
+            data->noise = msg == BMSG_MENUITEM_PAD_LEFT ? BSND_MENU_LEFT
+                                                        : BSND_MENU_RIGHT;
+            banim_highlight_force_start(a, &r->change);
+            break;
+        }
+        // UP on the first row and DOWN on the last are taken: the menu does
+        // not wrap.
+        case BMSG_MENUITEM_PAD_UP:
+            if (data->itemHash == BSCR_ITEM_MENUITEM(1)) data->param = 1;
+            break;
+        case BMSG_MENUITEM_PAD_DOWN:
+            if (!(rowIndex(data->itemHash) < r->numRows - 1)) data->param = 1;
+            break;
+        case BMSG_SCREEN_TICK:
+            banim_blurb_animate(a, &r->blurb);
+            if (!banim_slide_finished(&r->slideIn))
+                banim_slide_animate(a, &r->slideIn);
+            break;
+        default:
+            break;
+    }
+}
+
+// ----------------------------------------------------------- BeTheCopSetup
+
+// The constructor (0x001b9248): the base, Fred's five words, the three
+// rows -- Catch-up, Traffic, Damage -- then the menu and their values.
+static void btcCtor(BSetup* s, uint32_t screen)
+{
+    BRaceSetup* r = &s->race;
+
+    raceSetupCtor(s, r, screen);
+    if (s->gf->fred) btcLoad(&r->btc, s->gf->fred);
+    else bsetup_btc_defaults(&r->btc);
+    raceSetupAttach(r, 30005, 30502, maybeChangeCatchup, refreshCatchup,
+                    &r->btc.catchup);
+    raceSetupAttach(r, 30006, 30503, maybeChangeTraffic, refreshTraffic,
+                    &r->btc.traffic);
+    raceSetupAttach(r, 30101, 30504, maybeChangeDamage, refreshDamage,
+                    &r->btc.damage);
+    raceSetupBuildMenu(s, r, "Be The Cop Setup");
+    raceSetupResync(s, r);
+    r->live = 1;
+}
+
+// The destructor (0x001b9348): Fred gets the five words back, and the race
+// its parameters and the challenge its cars, whether or not SELECT went.
+static void btcDtor(BSetup* s)
+{
+    BRaceSetup* r = &s->race;
+
+    if (s->gf->fred) btcSave(&r->btc, s->gf->fred);
+    HOOK0(s, setupRaceParametersAfterRaceSetup);
+    HOOK0(s, makeChallengeCarsAvailable);
+    raceSetupDtor(s, r);
+}
+
+// BaseCallback (0x001b7b20), which ACTIVATE news the screen on for (104 is
+// BeTheCopSetup), UNACTIVATE deletes, and everything else goes to
+// HandleMenuEvent -- in retail with pInstance unchecked.
+void bsetup_btc_callback(BGameFlow* gf, BScreenMessage msg,
+                         BScreenCallbackData* data)
+{
+    BSetup* s = g_setup;
+
+    if (!s || !gf->anim) return;
+    s->gf = gf;
+    switch (msg) {
+        case BMSG_SCREEN_ACTIVATE:
+            btcCtor(s, data ? data->itemHash : BSETUP_SCREEN_BE_THE_COP_SETUP);
+            break;
+        case BMSG_SCREEN_UNACTIVATE:
+            if (s->race.live) btcDtor(s);
+            break;
+        default:
+            if (s->race.live) raceSetupEvent(s, &s->race, msg, data);
             break;
     }
 }
