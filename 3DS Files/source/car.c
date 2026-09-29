@@ -1030,14 +1030,15 @@ void car_compute_fake_rpm(Car *c)
 // CalculateDraftFactor(Car *), whose calls are Graph and Table;
 // car_world_to_car, whose `j` leaves the class for CarState::WorldToCar;
 // and slice three's seven, whose callees are CarState, bNormalize, Graph,
-// bToPolar and smooth<float>. Twenty-four more are in files of their own,
+// bToPolar and smooth<float>. Twenty-six more are in files of their own,
 // for what they link: carmodes.c, cartrack.c, carreset.c, carmove.c,
-// carrace.c, careffects.c, carfinish.c, and carinit.c, which has the
-// constructor, the destructor and CloseRenderInfo, from retail. Thirteen
-// are left: TriggerEvents, the AnimatedDriver pair, DamageAbove and
-// DamageCap, InitRenderInfo, TriggerEffect, SwitchSkin, the four
-// force-feedback and rumble methods besides DoWheelForces, and
-// DoSnapshot. docs/formats/car.md keeps the tally.
+// carrace.c, careffects.c, carfinish.c; carinit.c, which has the
+// constructor, the destructor and CloseRenderInfo, from retail;
+// carrenderinfo.c, which has InitRenderInfo; and shake.c, which has
+// MaybeCameraShake. Eleven are left: TriggerEvents, the AnimatedDriver
+// pair, DamageAbove and DamageCap, TriggerEffect, SwitchSkin, the three
+// force-feedback and rumble methods besides DoWheelForces and
+// MaybeCameraShake, and DoSnapshot. docs/formats/car.md keeps the tally.
 //
 // The eighty are the whole class. Seventy-four are in Car.obj; the other
 // six were emitted in other objects, car_world_to_car and car_print_above

@@ -2127,7 +2127,7 @@ is force feedback — six `PortSetForceConditionData`, six
 `PortSetForcePeriodicData`, `PortPlayShake`. It drives the wheel
 peripheral's motors, not the physics.
 
-Of the **forty-six that do**, thirty-three are ported: `CalculateDraftFactor(Car *)`,
+Of the **forty-six that do**, thirty-five are ported: `CalculateDraftFactor(Car *)`,
 whose calls are Graph and Table; `WorldToCar`, whose one is
 `CarState::WorldToCar`; the third slice's seven; `SetControlMode` and
 `SetMovementMode`, whose outside calls are the movers' and controllers'
@@ -2150,25 +2150,28 @@ track path's `UpdatePosition` and `ResetPosition`, `HasTopology`,
 Collision's four questions and the replay; and the twelfth slice's three,
 the constructor, the destructor and CloseRenderInfo, whose are the
 state, the coordinates, the null objects, the collision body, the sound,
-CarDamage, the render info, the event manager and Espresso. The
+CarDamage, the render info, the event manager and Espresso; and
+`InitRenderInfo` (`carrenderinfo.c`, [car-render-info](car-render-info.md)),
+whose are bMalloc, CarRenderInfo's constructor and its emitters; and
+`MaybeCameraShake` (`shake.c`, [camera](camera.md), "The camera shake"),
+whose is the shake's own MaybeCameraShake. The
 AnimatedDriver, the editor link, the ninth slice's four classes that are
 not ported, the splash, the Player's four and the twelfth slice's sound,
 damage, render and event calls are seams.
 
-Fourteen are left, and every one reaches a class that is not ported:
+Twelve are left, eleven of the forty-six and `DoWheelForces`, and every
+one reaches a class that is not ported:
 - `TriggerEvents` (`0x00131a58`): the event manager, the ferns,
   `Player::TriggerVisibleDrivingLine`;
 - `AssignAnimatedDriver` and `UnAssignAnimatedDriver`;
 - `DamageAbove` and `DamageCap`: `ePoly`, `Player::IsNisPlaying` and the
   cop manager;
-- the render group: `InitRenderInfo`, `TriggerEffect` and `SwitchSkin`;
+- the render group: `TriggerEffect` and `SwitchSkin`;
 - force feedback and rumble: `DoWheelForces`, `CalcForceParameters`,
-  `StartForceImpact`, `MaybeRumble` and `MaybeCameraShake`;
+  `StartForceImpact` and `MaybeRumble`;
 - `DoSnapshot`, which waits on `ReplaySnapshot`.
 
-They belong to tasks 26, 27 and 29. `InitRenderInfo` is the nearest.
-It is the constructor's one seam that decides whether a car can be
-seen, and task 36's road ports it, with `CarRenderInfo`, next.
+They belong to tasks 26, 27 and 29.
 
 The debt the third slice carried is paid: `wheel_install_seams()` runs
 once at boot in `main.c`, before anything can build the `PhysicsCar`

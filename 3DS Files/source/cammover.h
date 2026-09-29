@@ -82,9 +82,25 @@ typedef struct CamCarView {
 typedef struct CameraMover CameraMover;
 typedef struct CameraMoverVtbl CameraMoverVtbl;
 
-// DriveCameraMover's records, which the port does not have yet (step 7).
+// DriveCameraMover's records. CameraInfo, 272 bytes, is not laid out yet
+// (step 7).
 typedef struct CameraInfo CameraInfo;
-typedef struct POV POV;
+
+// A drive camera's point of view, 32 bytes (.mdebug type#1891), one of
+// CameraInfo's. Type is one of the three below: IsCameraPOVInCar reads it.
+#define POV_BUMPER   0
+#define POV_INCAR    1
+#define POV_OUTSIDE  2
+
+typedef struct POV {
+    int32_t  Type;          //  0  POV_*
+    float    Lag;           //  4
+    float    Height;        //  8
+    float    LatOffset;     // 12
+    uint16_t Angle;         // 16
+    uint16_t MaxAngle;      // 18
+    char     Pad[12];       // 20
+} POV;                      // 32
 
 // The offsets are the disc's, from the .mdebug record for CameraMover
 // (44 bytes), and retail's are the same.

@@ -9723,3 +9723,70 @@ so Azahar was not run.
 
 7a-2: tEnvelope, tShaker and the camera shake, then DriveCameraMover's
 small members. CONTINUE.md has the list.
+
+## Session 31, continued (2026-09-29) -- the camera shake (step 7a-2a)
+
+Step 7a-2 is cut in two: 7a-2a, the camera shake, and 7a-2b,
+DriveCameraMover's small members. This is 7a-2a.
+
+### The port
+
+`shake.c` is new. It ports the camera half of the object after
+`CameraMover.obj` (retail `0x00155948 .. 0x00156b88`); the pad's rumble
+half is not ported.
+- tEnvelope: GetIndex, OutOfRange, both GetSlopes, GetValue and
+  GetIntegral.
+- tShaker: the constructor (out of line in retail), GetAmplitude,
+  StartShaking, Update and the square-wave GetValue.
+- The globals: CameraShakers[2], the amplitude envelope, bShakeTest and
+  vShakeTest, vShakeAccelBias, vShakeRotation and fShakeIntensityCoeffs.
+  Their share of the static initialiser is `sinit.c` [24].
+- The reset (`0x00156480`), UpdateCameraShakers, GetShake,
+  IsShakeActive, ApplyCameraShake, MaybeCameraShake and
+  Car::MaybeCameraShake.
+
+`player.c` has Player::IsCameraPOVInCar (`0x00178808`). `player.h` has
+cPlayerSettings (40 bytes), and pCameraMover and nZoneCurrent at the
+demo's offsets. `cammover.h` has POV (32 bytes) and its three types.
+`main.c` sets `gCarMaybeCameraShakeFn`. No car has a player until step 8,
+so nothing shakes yet.
+
+The first run had 152 lines apart, all in ApplyCameraShake. The image's
+frame puts the rotation matrix at sp+16 and eMulVector's output at sp+64,
+so the shake in the camera's space is written into the matrix's own
+translation row, with w 1. The camera therefore moves by the shake as
+well as tipping. The row turns with each rotation, so the y angle reads
+the shake's x after the turn about x, and the z angle an x and y that
+have both moved. The port now builds the row in the same place.
+
+`docs/formats/camera.md` has a new section, "The camera shake".
+`car.c`'s and `car.md`'s tallies count MaybeCameraShake: thirty-five
+methods are ported, and eleven are left.
+
+### The check
+
+`tools/shake_check.py` is new: it runs retail's code for all of the above
+in RetailEmu, and `tools/src/shake_test.c` runs the port over the same
+script. The movers' GetCameraInfo and GetPOV are the only stubs. The
+Players, movers, POVs, the Car and the World are blobs at retail's
+offsets. RetailEmu runs no static constructors, so the checker runs
+`0x0011bf70` and the shake's `0x00156958` itself.
+
+- 4114 ops, 10604 lines, 0 differ. `--mutate` runs 98 mutations: 95 are
+  caught, 3 are equivalent, and none is unexplained.
+- The first pass left three survivors. Two needed inputs the shipped data
+  never gives. Clamping GetIntegral's b only matters for an envelope out
+  of time order, so the script has one now. vShakeRotation's z is 0, so
+  the script now moves all three lanes and the turn about z is checked.
+- The third is equivalent: GetIntegral's count test. With b clamped to
+  the last point, the time test always ends the loop first.
+- `sinit_check` counts 17 calls.
+
+The whole suite passes. The CIA builds. Nothing new runs in the game yet,
+so Azahar was not run.
+
+### Next
+
+7a-2b: DriveCameraMover's constructor, destructor, ResetState and small
+members, and CameraInfo. CONTINUE.md has the list, and two follow-ups:
+the World constructor's reset, and MainLoop's UpdateCameraShakers.

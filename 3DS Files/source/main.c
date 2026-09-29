@@ -81,6 +81,7 @@
 #include "realdriver.h"
 #include "realtime.h"
 #include "sinit.h"
+#include "shake.h"
 #include "terraintype.h"
 #include "topology.h"
 #include "track.h"
@@ -2071,6 +2072,11 @@ int main(int argc, char** argv)
     // Left NULL, the step aborts. Its four Player calls stay NULL until
     // task 26 brings Player, and only a player's car reaches them.
     gCarFinishMovementFn = car_finish_movement;
+
+    // Car::MaybeCameraShake, which World::DoTimestep asks of each player's
+    // car: shake.c. Only a car with a player shakes, and none has one until
+    // step 8.
+    gCarMaybeCameraShakeFn = car_maybe_camera_shake;
 
     // InitializeEverything runs eMathInit (0x0011b9a0) just before
     // eInitEngine, and nothing else fills eMathIdentityMatrix: StuffScenery

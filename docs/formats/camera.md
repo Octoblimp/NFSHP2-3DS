@@ -8,6 +8,8 @@ A `CameraMover` is what hands it that matrix, and there are eighteen kinds.
     CameraMover.obj   0x00154380 .. 0x0015c4d0    32.3 KB, of which this
                                                   covers the base class and
                                                   CM_ORBIT_CAR
+    the shake         0x00152860 .. 0x001539f4    the camera half; see
+                                                  "The camera shake"
 
 The port is `3DS Files/source/camera.c` and `3DS Files/source/cammover.c`,
 cross-checked by `tools/camera_check.py` (1251 transcript lines, seven of
@@ -390,6 +392,168 @@ retail's. It has no mutation that sets `ClearVelocity` in the constructor:
 the constructor's two `SetCameraMatrix` calls clear the flag whatever it
 held, so only a camera built while frozen can show it, and `cambase_check`
 builds one.
+
+## The camera shake
+
+`shake.c` ports the camera half of the object that follows
+`CameraMover.obj` (retail `0x00155948 .. 0x00156b88`, the demo's
+`0x00152860 .. 0x001539f4`), with `Car::MaybeCameraShake` and
+`Player::IsCameraPOVInCar` (`player.c`). The other half is the pad's
+rumble, which is not ported. The addresses are retail's.
+
+| address | what |
+|---------|------|
+| `0x00155948` | `tEnvelope::GetIndex` |
+| `0x001559a8` | `tEnvelope::OutOfRange` |
+| `0x001559f0`, `0x00155a40` | `GetSlope(int)`, `GetSlope(float)` |
+| `0x00155aa0` | `tEnvelope::GetValue` |
+| `0x00155b28` | `tEnvelope::GetIntegral` |
+| `0x00156b10` | `tShaker::tShaker`, out of line in retail |
+| `0x001562b0` | `tShaker::GetAmplitude` |
+| `0x001562e8` | `tShaker::StartShaking` |
+| `0x00156320` | `tShaker::Update` |
+| `0x00156370` | `tShaker::GetValue` |
+| `0x00156400` | `UpdateCameraShakers` |
+| `0x00156480` | the shakers' reset; the World constructor and `DoSnapshot` call it |
+| `0x00156528`, `0x00156540` | `GetShake`, `IsShakeActive` |
+| `0x00156560` | `ApplyCameraShake` |
+| `0x001566c0` | `MaybeCameraShake` |
+| `0x001346b0` | `Car::MaybeCameraShake` |
+| `0x00178808` | `Player::IsCameraPOVInCar` |
+| `0x00156958` | `_GLOBAL_$I$bShakeTest`, the static initialiser |
+| `0x002fa820` | `CameraShakers[2]`, 32 bytes each |
+| `0x002fa7a0` | `ShakeAmplitudePoints`, five |
+| gp-21848 | `ShakeAmplitudeEnvelope` |
+| gp-21912 | `bShakeTest` |
+| `0x002fa6e0` | `vShakeTest`, (0, 0, 0.3) |
+| `0x00334080` | `vShakeAccelBias`, (0.7, 0.5, 2) |
+| `0x00334090` | `vShakeRotation`, (-1200, 2000, 0) |
+| `0x002b13f0` | `fShakeIntensityCoeffs`: 250, 600, 0.08, 0.16, 0.3, 0.7 |
+
+**An envelope** is a list of (time, value) points in time order, straight
+between them. `GetValue` is 0 outside `[first, last)`: at the last
+point's own time too, whatever its value. `GetIndex` is the last point at
+or before `t`, and 0 before the first; a NaN is before no point, so it
+gives the last. `GetIntegral` swaps its ends into order, clamps them to
+the points, and adds a trapezium for each segment, with both ends read
+through `GetValue`. So the last point's value counts as 0. Its first
+segment ends at the point after `a`'s, so when `a` is at the last point it
+reads one point past the end.
+
+The amplitude envelope runs 1 at 0, 0.7 at 0.1, 0.5 at 0.3, 0.4 at 0.5 and
+0 at 1.
+
+**A shaker** holds a vector, an envelope, a clock that runs from 0 to 1, a
+duration and a frequency. `StartShaking` stores the vector negated (all
+four lanes, `vmulx` by -1), always takes `ShakeAmplitudeEnvelope`, and
+starts the clock at 0. `Update` moves the clock on by `dt / duration` and
+stops the shaker (the envelope pointer NULL) once the clock is out of the
+envelope's range. `GetValue` is a square wave, not a sine: the vector times
+the envelope when `trunc(fTime * fFrequency)` is even, and 0 when it is
+odd. At 17 steps a shake is on for nine of them.
+
+**`MaybeCameraShake(player, accel)`** does nothing while that player's
+camera is in the car. Otherwise it weighs each axis of the acceleration by
+`vShakeAccelBias` and takes the length, `(x*x + y*y) + z*z` as VU0 sums
+it. Below 250 there is no shake. The length is clamped to 600, and its
+place between the two, `f`, sets the amplitude (0.08 to 0.16) and the
+duration (0.3 to 0.7 seconds). Nothing happens if the shaker already
+shakes at least that hard. In the zone after a long jump
+(`Player::nZoneCurrent` 7) the amplitude is 0.8 of that and the duration
+1.2 times it. The shaker then starts along the weighed acceleration,
+scaled to the amplitude, at 17. `World::DoTimestep` asks
+`Car::MaybeCameraShake` of every car before `AICarPos`, unless shakes are
+off. Only a car with a player passes on its `PlayerNumber` and
+`State.Acceleration`.
+
+**`IsCameraPOVInCar`**: the player has a mover, it is `CM_DRIVE`, its
+`GetCameraInfo` is not NULL, it is enabled, and its
+`GetPOV(PlayerSettings.DriveCameraPOVIndex)` is a POV of type `POV_INCAR`
+(1). The index is a signed byte. The mover is read from the player again
+after `GetCameraInfo`.
+
+**`ApplyCameraShake(view, m)`**. Views 1 and 3 (the rear-view mirror) take
+player 1's shake, view 2 player 2's, and any other view none. It is new in
+retail that nothing happens while `pCurrentWorld->fTimeScale` is below 1,
+the jump cam's slow motion. The shake goes into the camera's space through
+`m`, as a direction (`w` 0), and lands in the translation row of an
+identity matrix, with `w` 1. That matrix turns about x by the sum of the
+row's y and z, about y by its x, and about z by the sum of its x and y,
+each scaled by `vShakeRotation`, and `m` becomes `m` times it. So the
+camera moves by the shake as well as tipping. `vShakeRotation.z` is 0, so
+retail never turns about z.
+
+That translation row is the image's stack layout, not an obvious choice:
+the frame holds the matrix at sp+16 and `eMulVector`'s output at sp+64,
+the same sixteen bytes. So the row turns with each rotation, and each angle
+reads it as the rotations before it left it. The turn about x keeps x, so
+the y angle reads the shake's own x. The z angle reads an x and a y that
+have both moved. The port builds the row in the same place. The two
+callers are not ported yet: `DriveCameraMover::Update` (`0x0015df44`) and
+`RearViewMirrorCameraMover::Update` (`0x00159100`). `GetShake` has only
+this caller, and `IsShakeActive` none in the image.
+
+**`UpdateCameraShakers`** runs once a frame in MainLoop, after
+`UpdatePortRumblers` and before `World::DebugDisplay`. A debug switch goes
+first: while `bShakeTest` is set, it is cleared and player 1's shaker
+starts along `vShakeTest` for 0.6 seconds. Then both clocks run by
+`WorldTimeElapsed`.
+
+**Retail against the demo**: the slow-motion test, the Player offsets
+(`pCameraMover` 200, the POV byte 36 and `nZoneCurrent` 88, where the
+demo's are 180, 32 and 76), and the reset and the `tShaker` constructor
+made out of line. Nothing else changed.
+
+**Not ported**: the rumble (`tRumbler`, `PortRumble` and its seven
+envelopes), and the replay's `SnapshotCameraShakers` (`0x001564d0`) and
+`tShaker::DoSnapshot` (`0x00156220`). Two calls wait:
+
+- The World constructor's reset waits for World's retail pass.
+  `world_init` is still the demo's (`world_check` runs the demo's image),
+  and retail's constructor also drops `InitParticles` from its list.
+- MainLoop's `UpdateCameraShakers` waits for step 8.
+
+The stack garbage in one lane is not kept. `bNormalize` writes three lanes
+of `MaybeCameraShake`'s vector and `StartShaking` negates four, so the
+image's fourth lane is whatever the stack held. The port's is 0. Nothing
+reads it back, since `ApplyCameraShake` zeroes it.
+
+### The shake, cross-checked
+
+`tools/shake_check.py` runs all of the above out of retail's image in
+`mipsemu`. That covers the envelope, the shaker, the static initialiser's
+share, the reset, `UpdateCameraShakers`, `GetShake`, `IsShakeActive`,
+`ApplyCameraShake` over the matrix layer, `MaybeCameraShake` with
+`bNormalize`, `Car::MaybeCameraShake` and `IsCameraPOVInCar`.
+`tools/src/shake_test.c` runs the port over the same script.
+
+Only the movers' `GetCameraInfo` and `GetPOV` are stubs: they print their
+arguments and answer what the script set. The Players, movers, POVs, the
+Car and the World are blobs at retail's offsets on the model side and the
+port's structs in the harness. Scratch envelopes and shakers start from a
+`0xa5` fill. Each envelope carries a sentinel point past its end for
+`GetIntegral` to read. The players' shakers print three lanes.
+
+The script reaches two things the shipped data never does:
+
+- **An envelope out of time order**, with a point past the last one's
+  time. Only there does clamping `GetIntegral`'s `b` to the last point
+  change the sum.
+- **`vShakeRotation` moved**, all three lanes, so the turn about z is
+  checked too.
+
+    python tools/shake_check.py            # 7 scenarios, 10604 lines, 0 differ
+    python tools/shake_check.py --mutate   # 98 mutations, 95 caught, 3 equivalent
+
+The three equivalent mutants:
+
+- **Dropping `MaybeCameraShake`'s NULL-player test.** `IsCameraPOVInCar`
+  reads the player first, so no NULL player gets that far, in the image
+  or here.
+- **Dropping the fourth lane's 0.** That lane is never read.
+- **Letting `GetIntegral`'s count run one further.** `b` is clamped to the
+  last point's time, so the segment that reads the last point ends at `b`.
+  The time test then ends the loop before the count can.
 
 ## Divergences from the disc
 
