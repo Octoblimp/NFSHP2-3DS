@@ -2203,9 +2203,21 @@ phases.
         seams. `carinit_check` runs the retail image: 247 scenarios, 0
         differ, 168 of 169 mutations caught, 1 equivalent.
 
+        **The eleventh slice is closed: CarRenderInfo, from retail.**
+        `carrenderinfo.c` has `Car::InitRenderInfo` (`0x0011dc80`), the
+        constructor (`0x0011e860`), the destructor, SwitchSkin,
+        UpdateCarReplacementTextures, CreateCarLightFlares and the
+        culler's InitPart. They sit on `epositionmarker.c` and on
+        GetSkinInfo, GetUsedCarTextureInfo and four eModel methods.
+        `carrenderinfo_check` runs the retail image: 321 scenarios, 0
+        differ, 161 of 163 mutations caught, 2 equivalent.
+        `docs/formats/car-render-info.md`.
+
+        - [ ] `CarRenderInfo::Render` (`0x00120ef8`) and the culler's two
+              passes, so that a car draws. The plan is in CONTINUE.md.
+
         The rest is CONTINUE.md's "The road to the full game": the rest
-        of step 6 (InitRenderInfo and CarRenderInfo, so that a car
-        draws), then the retail pass over what is ported (step 10), the
+        of step 6 (Render, so that a car draws), then the retail pass over what is ported (step 10), the
         full frontend (step 16), the saves (step 17) and every track and
         car (step 18).
 

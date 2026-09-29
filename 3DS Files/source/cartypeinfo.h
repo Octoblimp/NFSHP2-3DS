@@ -267,6 +267,95 @@ extern const CarTypeInfo *CarTypeInfoArray;
 
 const CarTypeInfo *cartypeinfo_get(int32_t carType);
 
+// ------------------------------------------------------------ the skins
+
+// SkinInfo, 64 bytes (.mdebug): one paint job of one car, from the car
+// data's skin table. The render info reads LightMaterialNameHash.
+typedef struct SkinInfo {
+    int32_t   TheCarType;                   //  0  5CarType
+    int32_t   SkinNumber;                   //  4
+    char      PrettyName[32];               //  8
+    int32_t   PaintType;                    // 40
+    uint32_t  LightMaterialNameHash;        // 44
+    uint32_t  ColourSwatchHash;             // 48
+    int32_t   Pad1;                         // 52
+    int32_t   Pad2;                         // 56
+    int32_t   pad3;                         // 60
+} SkinInfo;                                 // 64
+
+// The skin table and its length: the demo's 0x00323934 and 0x00323938,
+// retail's gp-20612 and gp-20608. Set up by the car data loader, which is
+// not ported.
+extern SkinInfo *SkinInfoTable;
+extern int32_t   NumSkinInfo;
+
+// GetSkinInfo(CarType, int, int), retail 0x00188180 (the demo's
+// 0x001801f8): the first entry with that car and that skin number. With
+// none, the table's first entry when `use_default` is set and NULL when
+// it is not -- the first entry even when the table is empty.
+SkinInfo *cartypeinfo_get_skin_info(int32_t car_type, int32_t skin_number,
+                                    int use_default);
+
+// UsedCarTextureInfo, 172 bytes (.mdebug): the name hashes of the
+// textures one car in one skin draws with. The Mapped hashes are the
+// names the car's solids carry; the Replace ones are what the render
+// info's replacement tables swap in for them. TexturesToLoad lists the
+// ones the car needs loaded, NumTexturesToLoad of them.
+typedef struct UsedCarTextureInfo {
+    uint32_t  TexturesToLoad[16];           //   0
+    int32_t   NumTexturesToLoad;            //  64
+    uint32_t  MappedSkinHash;               //  68
+    uint32_t  MappedSkinBHash;              //  72
+    uint32_t  MappedDashSkinHash;           //  76
+    uint32_t  MappedLightHash[5];           //  80
+    uint32_t  MappedTireHash;               // 100
+    uint32_t  MappedTireBlurHash;           // 104
+    uint32_t  MappedLicensePlateHash;       // 108
+    uint32_t  ReplaceSkinHash;              // 112
+    uint32_t  ReplaceSkinBHash;             // 116
+    uint32_t  ReplaceDashSkinHash;          // 120
+    uint32_t  ReplaceHeadlightHash[3];      // 124
+    uint32_t  ReplaceBrakelightHash[3];     // 136
+    uint32_t  ReplaceReverselightHash[3];   // 148
+    uint32_t  ReplaceTireHash;              // 160
+    uint32_t  ReplaceTireBlurHash;          // 164
+    uint32_t  ShadowHash;                   // 168
+} UsedCarTextureInfo;                       // 172
+
+typedef char cartypeinfo_skin_check[
+    (sizeof(SkinInfo) == 64 && offsetof(SkinInfo, LightMaterialNameHash) == 44
+     && sizeof(UsedCarTextureInfo) == 172
+     && offsetof(UsedCarTextureInfo, MappedLightHash) == 80
+     && offsetof(UsedCarTextureInfo, ReplaceSkinHash) == 112
+     && offsetof(UsedCarTextureInfo, ReplaceHeadlightHash) == 124
+     && offsetof(UsedCarTextureInfo, ShadowHash) == 168) ? 1 : -1];
+
+struct RideInfo;
+
+// GetUsedCarTextureInfo(UsedCarTextureInfo *, RideInfo *, int), retail
+// 0x00188790 (the demo's 0x00180768). Every hash is bStringHash of a name
+// made from the car's BaseModelName, save the Replace tire and tire blur,
+// which are made from its CarTypeName:
+//     MappedSkin      %s_SKIN1            MappedSkinB     %s_SKIN1B
+//     ReplaceSkin     %s_SKIN<skin>       ReplaceSkinB    %s_SKIN<skin>B
+//     MappedDashSkin  %s_DASHSKIN1        ReplaceDashSkin %s_DASHSKIN<skin>
+//     MappedLight     %s_HEADLIGHT_LEFT, _RIGHT, %s_BRAKELIGHT_LEFT,
+//                     _RIGHT, %s_REVERSELIGHT
+//     ReplaceHeadlight    %s_HEADLIGHT, _ON, _DAMAGE0, and the same for
+//     ReplaceBrakelight   BRAKELIGHT; ReplaceReverselight is
+//                         %s_REVERSELIGHT, _ON, and REVERSELIGHT again
+//     Shadow          %s_SHADOWFE in the front end, %s_SHADOWIG in game
+//     tire, blur      %s_TIRE, %s_WHEEL_BLUR; LicensePlate %s_LICENSE_PLATE
+// with the skin number read as a signed byte. The dash pair is 0 for a
+// ride without a dash, and ReplaceSkinB is 0 in the front end, where
+// `front_end` is set. The textures to load are, in order: ReplaceSkin,
+// ReplaceSkinB (not in the front end), ReplaceDashSkin (with a dash), the
+// nine Replace lights, Shadow, the Replace tire and blur, and the
+// licence plate -- at most 16.
+void cartypeinfo_get_used_car_texture_info(UsedCarTextureInfo *u,
+                                           const struct RideInfo *ride,
+                                           int front_end);
+
 // CarTypeInfoIterator::Reset (0x001810c8) is `sw zero,8(a0)` and nothing
 // else; the rest of that class is header-inline and was folded into its
 // callers, so there is no layout to recover and one field to zero. Not

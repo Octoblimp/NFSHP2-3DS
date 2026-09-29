@@ -113,6 +113,39 @@ void emodel_reconnect_texture_table(eModel *m);
 // the solid's table.
 void emodel_apply_replacement_texture_table(eModel *m);
 
+// eModel::AttachReplacementTextureTable(eReplacementTextureTable *, int,
+// int), retail 0x0010c798: the table, its length and this model's
+// instance are stored and the table reconnected. With a solid, the table
+// is applied a second time and the solid's STs fixed.
+void emodel_attach_replacement_texture_table(eModel *m,
+                                             eReplacementTextureTable *t,
+                                             int32_t count, int32_t instance);
+
+// eModel::RenameTexture(unsigned int, unsigned int), retail 0x0010c7f0:
+// the first entry of the solid's texture table named `old_hash` is
+// renamed and given GetTextureInfo of the new name, with the default for
+// a miss. 1 when one was, 0 when none was or there is no solid.
+int32_t emodel_rename_texture(eModel *m, uint32_t old_hash,
+                              uint32_t new_hash);
+
+// eSolid::ReplaceLightMaterial(unsigned int, eLightMaterial *), retail
+// 0x0010c4b0: every entry of the light material table named `old_hash`
+// points at `material`.
+void esolid_replace_light_material(eSolid *s, uint32_t old_hash,
+                                   void *material);
+
+// eModel::ReplaceLightMaterial(unsigned int, unsigned int), retail
+// 0x0010cac0, and the eSolid overload it jumps to (0x0010c4e0): with a
+// solid, elGetLightMaterial of the new name -- looked up whether or not an
+// entry has the old one -- into every entry that does.
+void emodel_replace_light_material(eModel *m, uint32_t old_hash,
+                                   uint32_t new_hash);
+
+// eModel::GetBoundingBox(bVector3 *, bVector3 *), retail 0x0010c9a8, and
+// eSolid's (0x0010bd38): with a solid, its box's x, y and z into the two
+// corners, whose fourth words are left alone. Without one, nothing.
+void emodel_get_bounding_box(const eModel *m, bVector3 *mn, bVector3 *mx);
+
 // ReconnectAllModels, 0x0010b7b0: every model on ModelList gets its solid
 // and its replacements again, and its solid's STs fixed.
 void emodel_reconnect_all_models(void);

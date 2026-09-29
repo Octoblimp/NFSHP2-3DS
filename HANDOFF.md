@@ -9447,3 +9447,59 @@ The user asked for cars and racing next: "We don't need every single menu
 working". So step 6 resumes: `Car::InitRenderInfo` and CarRenderInfo,
 parked on `wip/carrenderinfo`, then `Render`, then the road to one car
 driving the track.
+
+## Session 31, continued (2026-09-29) -- CarRenderInfo
+
+### The port
+
+Step 6's second slice was parked on `wip/carrenderinfo` (`616bb08`). It
+is cherry-picked into master now, and its checker is finished.
+
+`carrenderinfo.c` is retail's:
+- `Car::InitRenderInfo`;
+- CarRenderInfo's constructor and destructor;
+- SwitchSkin, UpdateCarReplacementTextures and CreateCarLightFlares;
+- the part culler's InitPart.
+
+It sits on:
+- `epositionmarker.c`;
+- `cartypeinfo.c`'s GetSkinInfo and GetUsedCarTextureInfo;
+- `emodel.c`'s AttachReplacementTextureTable, RenameTexture,
+  ReplaceLightMaterial and GetBoundingBox.
+
+The write-up is `docs/formats/car-render-info.md`. Nothing calls it in
+the game yet: `gCarInitRenderInfoFn` stays NULL until InitCars, in
+step 8.
+
+### The check
+
+`tools/carrenderinfo_check.py` runs retail's functions in RetailEmu, and
+`tools/src/carrenderinfo_test.c` is its new harness. Both print the
+record, the lists, the solids' tables, the textures' rendering orders,
+the model list, the cull table and the seed.
+
+- The first run differed in 318 lines. Retail's static constructor
+  (`0x00124528`) gives the flare-direction table's eighth row an x of
+  0.95 (gp-32156), and the port had 0. The port has 0.95 now.
+- The next ten were the box. bInitializeBoundingBox copies its empty box
+  from `0x0031fda0`, and bmath's static constructor (`0x002598d8`)
+  fills that with FLT_MAX. The model had never run that constructor, so
+  its box started at zero. The model runs it now.
+- The checker's address for the skin table was named `SKINS`, the same as
+  its list of skins, which replaced it. The address is `SKIN_BASE` now.
+- The result: 321 scenarios, 105544 lines, 0 differ.
+- `--mutate` runs 163 mutations: 161 caught and 2 equivalent
+  (`em-attach-apply`, `ep-none`). The first pass left two holes in the
+  script, a body pivot with a y of 0 and an alpha info never overridden.
+  It also had two bad patterns. All four are fixed.
+
+The CIA builds with the new files. Azahar was not run, because nothing
+in the game reaches the code yet.
+
+### Next
+
+Next is `CarRenderInfo::Render` (`0x00120ef8`), about 2460 instructions.
+It needs the light flares, the driver, both shadows, the bodies, the
+tyres and blur, the brakes and the wipers. CONTINUE.md has its outline,
+from a first read of the disassembly. After Render come the culler's
+two passes, and then steps 7 and 8.

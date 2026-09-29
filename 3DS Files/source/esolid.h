@@ -163,6 +163,9 @@ extern void (*gReconnectAllAnimationsFn)(void);
 void *get_texture_info(uint32_t name_hash, int use_default,
                        int include_unloaded);
 
+// elGetLightMaterial(unsigned int), retail 0x00116a30, through its seam.
+void *get_light_material(uint32_t name_hash);
+
 // eInitSlotPools' third pool (0x00108a8c). Nothing happens when it is
 // already made.
 void esolid_init_slot_pool(void);

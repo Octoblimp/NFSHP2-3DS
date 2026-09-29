@@ -101,6 +101,78 @@ void emodel_apply_replacement_texture_table(eModel *m)
     }
 }
 
+void emodel_attach_replacement_texture_table(eModel *m,
+                                             eReplacementTextureTable *t,
+                                             int32_t count, int32_t instance)
+{
+    m->pReplacementTextureTable = t;
+    m->NumReplacementTextures = (uint8_t)count;
+    m->ReplacementTextureInstanceIndex = (uint8_t)instance;
+    emodel_reconnect_texture_table(m);
+    if (m->Solid == NULL)
+        return;
+    // Reconnecting has applied it already; this is the image's second go.
+    emodel_apply_replacement_texture_table(m);
+    if (gFixStripSTsFn != NULL)
+        gFixStripSTsFn((eSolid *)m->Solid);
+}
+
+int32_t emodel_rename_texture(eModel *m, uint32_t old_hash,
+                              uint32_t new_hash)
+{
+    eSolid *s = (eSolid *)m->Solid;
+    eTextureTable *table;
+    int k;
+
+    if (s == NULL)
+        return 0;
+    table = (eTextureTable *)s->pTextureTable;
+    for (k = 0; k < s->NumTextureTableEntries; k++) {
+        if (table[k].NameHash == old_hash) {
+            table[k].NameHash = new_hash;
+            table[k].pTextureInfo = get_texture_info(new_hash, 1, 0);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void esolid_replace_light_material(eSolid *s, uint32_t old_hash,
+                                   void *material)
+{
+    eLightMaterialEntry *e = (eLightMaterialEntry *)s->LightMaterialTable;
+    int n;
+
+    for (n = s->NumLightMaterials; n > 0; n--, e++) {
+        if (e->NameHash == old_hash)
+            e->LightMaterial = material;
+    }
+}
+
+void emodel_replace_light_material(eModel *m, uint32_t old_hash,
+                                   uint32_t new_hash)
+{
+    eSolid *s = (eSolid *)m->Solid;
+
+    if (s == NULL)
+        return;
+    esolid_replace_light_material(s, old_hash, get_light_material(new_hash));
+}
+
+void emodel_get_bounding_box(const eModel *m, bVector3 *mn, bVector3 *mx)
+{
+    const eSolid *s = (const eSolid *)m->Solid;
+
+    if (s == NULL)
+        return;
+    mn->x = s->AABBMin.x;
+    mn->y = s->AABBMin.y;
+    mn->z = s->AABBMin.z;
+    mx->x = s->AABBMax.x;
+    mx->y = s->AABBMax.y;
+    mx->z = s->AABBMax.z;
+}
+
 void emodel_reconnect_all_models(void)
 {
     bNode *n;

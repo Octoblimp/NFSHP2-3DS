@@ -56,7 +56,7 @@ void *get_texture_info(uint32_t name_hash, int use_default,
     return gGetTextureInfoFn(name_hash, use_default, include_unloaded);
 }
 
-static void *get_light_material(uint32_t name_hash)
+void *get_light_material(uint32_t name_hash)
 {
     if (gElGetLightMaterialFn == NULL)
         return NULL;

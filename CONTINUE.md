@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-09-29), after Be The Cop Setup. `HANDOFF.md` is the running
+(2026-09-29), after CarRenderInfo. `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -394,8 +394,8 @@ and so replaced every boot.
    - Events start with the Noise their JoyHandler gives them
      (`joyNoise` in `gameflow.c`), so a swallowed click shows.
    - `docs/formats/boot-flow.md`, "Retail's `TitleScreen`".
-   - Step 6's second slice is on the branch `wip/carrenderinfo`
-     (`616bb08`). Its checker is unfinished. It waits for the frontend.
+   - Step 6's second slice was parked on `wip/carrenderinfo`
+     (`616bb08`). It is in master now, with its checker (below).
 
    **The frontend's second slice is closed: the boot's loading and
    language screens.** The user corrected the order on 2026-09-28:
@@ -641,11 +641,56 @@ and so replaced every boot.
    `0x00183af8`, the preload at `0x00194898`, `Fred::InitWithDefaults`
    `0x00183830`) and the briefing wait, unless a race needs them.
 
-   Step 6 resumes: `Car::InitRenderInfo` (`0x0011dc80`) and
-   CarRenderInfo's constructor (`0x0011e860`, 4700 bytes; retail's
-   record is 2352 bytes, the demo's 1856), then `Render` (`0x00120ef8`,
-   9844 bytes), so that a car draws. `python tools/retail_match.py
-   --diff InitRenderInfo__3CarP8RideInfo` shows what retail changed.
+   **CarRenderInfo is built from retail** (HANDOFF.md, Session 31,
+   continued). This is the second slice of step 6, from `wip/carrenderinfo`.
+   `carrenderinfo.c` has retail's `Car::InitRenderInfo`, the constructor,
+   the destructor, SwitchSkin, UpdateCarReplacementTextures,
+   CreateCarLightFlares and the culler's InitPart. It sits on
+   `epositionmarker.c`, GetSkinInfo and GetUsedCarTextureInfo in
+   `cartypeinfo.c`, and four eModel methods in `emodel.c`. The write-up is
+   `docs/formats/car-render-info.md`.
+   - `carrenderinfo_check`: 321 scenarios, 105544 lines, 0 differ. It runs
+     163 mutations: 161 are caught and 2 are equivalent.
+   - The check's model has to run bmath's static constructor
+     (`0x002598d8`). Without it, bInitializeBoundingBox's empty box is zero.
+   - Retail's box starts each model's box on uninitialised stack. The
+     port starts it empty.
+   - `gCarInitRenderInfoFn` is still NULL. Step 8's InitCars sets it
+     together with the other carinit seams.
+
+   **Next is `CarRenderInfo::Render`** (`0x00120ef8` to `0x00123568`,
+   about 2460 instructions). The demo's own is at `0x00120b08`, and its
+   stabs name the locals: `python tools/mdebug.py --file ccMFfaaa.ii`.
+
+   Retail passes a seventh argument in t3, the forced-light bits (1, 2, 4
+   and 8, from gp-23760..-23748). RenderCars (`0x00124060`) calls it with
+   the tyre and brake matrices on its stack, and t2 and t3 both 0.
+
+   What it does, in order:
+   - Pixel size and LOD. `car_body_lod` comes from the thresholds at
+     `0x002ad0e8`. The in-car view (mode 3) scales the size by
+     gp-32356.
+   - Four matrices from the frame buffer. The world is gp-19388, the end
+     gp-19384, the overflow flag -19372 and the overflow count -19368.
+   - ClassifyAABB against the box, elSetupLightContext, and
+     UpdateLightStateTextures (`0x00120130`).
+   - The flares' intensities from the lights, BrokenLightFlags and the
+     cop lights' patterns (`0x002e01b8`..`0x002e01e8`, gp-23736..-23720),
+     then eRenderLightFlare.
+   - The animated driver, with its LOD from the camera's angle.
+   - The shadow. The in-game one projects the body's box and uses
+     sh_Setup, convex_hull and smooth_shadow_corners (`0x00120d60`,
+     `0x001209f8`, `0x00120c00`). It draws with the e/ex strips, and its
+     alpha comes from the sun. The other is a 4x4 grid over the
+     topology's GetElevation.
+   - The body `Body[lod]`, the mirrors by their damage level
+     (`0x00124d38`), the plates, and the scuffs by GetVisibleTotalDamage.
+   - The tyres, each end's matrices times a Z-rotated identity. The
+     blur's alpha comes from CalculateTireBlur (`0x00120ea8`).
+   - The brakes, and the wipers' rigid animation.
+
+   The culler's two passes are `0x0011d648` and `0x0011d980`. The front
+   end calls Render through RenderFrontEndCar (`0x00123c90`).
 
    "The road to the full game", below, has everything after it.
 2. **Task 27's first slice is closed: `Track.obj` and `TerrainType.obj`**,
@@ -1742,7 +1787,7 @@ each class shows what it reaches.
 | 3 | ~~The sky, the sun and the weather's draw~~ done, task 27's twenty-sixth to twenty-ninth slices. The shipped image has no rain or storm to draw | 2-3 |
 | 4 | ~~The retail disc's data in the track viewer: the tracks shipped expanded, the retail chunk set, the changed loaders, and a second location~~ done, task 36's second to eighth slices | 1 |
 | 5 | ~~The retail model: mipsemu on `SLES_507.31` by retail_match's names, so that a checker can run the retail function~~ done, task 36's second slice: `tools/retail_model.py`, in `track_check` and `loadertable_check` | 1 |
-| 6 | Car's constructor and destructor, and CarRenderInfo, from retail where retail changed them (all of them did), so that a car draws on the track. The constructor and destructor are done, task 36's tenth slice | 3-4 |
+| 6 | Car's constructor and destructor, and CarRenderInfo, from retail where retail changed them (all of them did), so that a car draws on the track. The constructor and destructor are done, task 36's tenth slice; CarRenderInfo's build is done, the eleventh; Render is next | 3-4 |
 | 7 | Player and the chase cameras (CM_DRIVE and the rest of `cammover.c`'s set) | 2 |
 | 8 | RaceCoordinator's InitForRace, InitCars, InitPlayers and Race::Init, and the game flow from the frontend into a race and back | 2-3 |
 | 9 | **One car driving the track.** Steps 4-8 are this milestone: about 9-11 slices | |
