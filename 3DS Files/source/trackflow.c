@@ -7,7 +7,6 @@
 #include "bslotpool.h"
 #include "collision.h"
 #include "collisionbody.h"
-#include "demodisc.h"
 #include "esolid.h"
 #include "eview.h"
 #include "physcomp.h"
@@ -106,7 +105,8 @@ void BeginGameFlowUnloadingTrackSpecific(void)
 
     eDisableFixUpTables = 1;
     InGameFlag = 0;
-    if (!TheDemoDiscManager.bActive && gSetFlailerScreenVisibilityFn != NULL)
+    // Retail skips this on the demo disc (TheDemoDiscManager.bActive).
+    if (gSetFlailerScreenVisibilityFn != NULL)
         gSetFlailerScreenVisibilityFn(BGF_SCREEN_LOADING_TRACK, 0);
     CALL(gEWaitUntilRenderingDoneFn);
 

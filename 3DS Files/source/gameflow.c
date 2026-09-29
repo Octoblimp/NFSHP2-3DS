@@ -451,7 +451,6 @@ void bgf_init(BGameFlow* gf,
     // LanguageManager's constructor (0x0021dfa8). LoadGlobalChunks sets
     // English before the flow starts; see bgf_load_global_chunks.
     gf->currLanguage         = -1;
-    gf->demoDiscActive       = 0;
     gf->demoModeStatus       = 0;
     gf->legalScreenTimeout   = 7.0f;
     gf->antiPiracyTimeout    = 7.0f;
@@ -476,17 +475,18 @@ int bgf_should_see_legal_mumbo_jumbo(const BGameFlow* gf)
     return 0;
 }
 
+// Both of these begin, on the disc, with a return 0 for the demo disc
+// (TheDemoDiscManager.bActive). The port has no demo disc, so they begin
+// after it.
 int bgf_should_see_language_select(const BGameFlow* gf)
 {
     if (gf->frontendLaunchType == 1 && gf->currLanguage == -1) return 1;
-    if (gf->demoDiscActive) return 0;
     if (gf->videoMode != 0) return 0;   // NTSC never asks
     return gf->frontendLaunchType == 1;
 }
 
 int bgf_should_see_autoload(const BGameFlow* gf)
 {
-    if (gf->demoDiscActive) return 0;
     return gf->frontendLaunchType == 1;
 }
 
@@ -541,10 +541,10 @@ void bgf_unlaunch_frontend_menus(BGameFlow* gf, int raceInProgress)
 void bgf_consider_start_demo_mode(BGameFlow* gf, const uint32_t* timer)
 {
     // BeginDemoModeTimeout (0x0032feb4) against the Timer's age, signed.
+    // The disc also goes at once on the demo disc in attract mode
+    // (DemoDiscManager::IsAttractMode); the port has no demo disc.
     int go = gf->beginDemoModeTimeout
              < (float)(int32_t)(gf->realTimer - *timer) * 0.00025f;
-    // DemoDiscManager::IsAttractMode, asked only of the demo disc.
-    if (gf->demoDiscActive && gf->demoAttractMode) go = 1;
     if (!go) return;
 
     // TheDemoModeReplay (0x002f0960): while one loads, wait for it; once
@@ -654,15 +654,11 @@ void bgf_load_global_chunks(BGameFlow* gf)
 {
     bgf_set_curr_language(gf, 0);   // l_ENGLISH, through 0x00100808
 
-    // The demo disc starts its slideshow here; retail puts LOADING_TRACK
-    // up. The copyright line is FRONTB's, on TITLE_IMAGE, and FRONTB is not
-    // loaded yet, so the second call finds nothing: retail makes it anyway.
-    if (gf->demoDiscActive) {
-        screenVisible(gf, BGF_SCREEN_FIRSTLEGAL, 1);
-    } else {
-        screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 1);
-        objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 1);
-    }
+    // LOADING_TRACK up. The copyright line is FRONTB's, on TITLE_IMAGE, and
+    // FRONTB is not loaded yet, so the second call finds nothing: retail
+    // makes it anyway. (The demo disc's slideshow started here instead.)
+    screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 1);
+    objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 1);
     // One frame, outside MainLoop. Nothing draws again until MainLoop runs,
     // so this is the picture that stays up while the frontend loads.
     trace(gf, "display frame");
@@ -671,8 +667,8 @@ void bgf_load_global_chunks(BGameFlow* gf)
 
 void bgf_begin_loading_frontend(BGameFlow* gf)
 {
-    // The demo zeroed this. Retail times the slideshow from here instead.
-    gf->beginScreenFadeTime = gf->realTime;
+    // Retail stores RealTime in BeginScreenFadeTime here, for the demo
+    // disc's slideshow in the Loop, and nothing else reads it.
 
     // RaceParameters::InitWithDefaults and a bCountFreeMemory whose answer
     // is kept for a debug print: nothing the flow reads.
@@ -690,24 +686,9 @@ void bgf_begin_loading_frontend(BGameFlow* gf)
     trace(gf, "hot chunk %s", "FRONTEND\\FRONTB.BUN");
 }
 
-void bgf_loop_loading_frontend(BGameFlow* gf)
-{
-    // Signed, as the original's slti is.
-    int32_t elapsed = (int32_t)(gf->realTime - gf->beginScreenFadeTime);
-
-    // The demo disc's three-panel slideshow, three seconds each: 181, 361
-    // and 541 are RealTime ticks at 60Hz. Dead on retail, because
-    // TheDemoDiscManager.bActive is 0 and nothing ever sets it. That is all
-    // the Loop does now: leaving the state is the load callbacks' job.
-    if (!gf->demoDiscActive || elapsed >= 541) return;
-    if (elapsed >= 361) {
-        screenVisible(gf, BGF_SCREEN_SLIDE2, 0);
-        screenVisible(gf, BGF_SCREEN_DISCLAIMER, 1);
-    } else if (elapsed >= 181) {
-        screenVisible(gf, BGF_SCREEN_FIRSTLEGAL, 0);
-        screenVisible(gf, BGF_SCREEN_SLIDE2, 1);
-    }
-}
+// Retail's LoopGameFlowLoadingFrontend (0x00168718) is the demo disc's
+// three-panel slideshow and nothing else, so the port's state has no Loop:
+// leaving the state is the load callbacks' job.
 
 void bgf_end_loading_frontend(BGameFlow* gf)
 {
@@ -715,12 +696,9 @@ void bgf_end_loading_frontend(BGameFlow* gf)
     // and InitMoviePlayer run here in the original. On the 3DS the renderer
     // and the bundles are already up by the time the flow starts, so the
     // only part of this that has an effect is the visibility and the launch.
-    if (gf->demoDiscActive) {
-        screenVisible(gf, BGF_SCREEN_DISCLAIMER, 0);
-    } else {
-        screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 0);
-        objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);
-    }
+    // (The demo disc hid its slideshow's last panel instead.)
+    screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 0);
+    objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);
     bgf_launch_frontend_menus(gf);
 }
 
@@ -754,11 +732,12 @@ static const BTitleMovie kTitleMovies[8][2] = {
     { { NULL, 0 }, { NULL, 0 } },   // l_ID_NUM
 };
 
-// DemoDiscTitleMoviesToPlay (0x002f37f0) is the same table with the EA logo
-// only, which is why GetNumTitleMovies answers 1 there.
+// GetNumTitleMovies. It answers 1 on the demo disc, whose table
+// (DemoDiscTitleMoviesToPlay, 0x002f37f0) has the EA logo only.
 int bgf_num_title_movies(const BGameFlow* gf)
 {
-    return gf->demoDiscActive ? 1 : 2;
+    (void)gf;
+    return 2;
 }
 
 const BTitleMovie* bgf_title_movie(const BGameFlow* gf, int i)
@@ -934,7 +913,6 @@ static void titleTick(BGameFlow* gf)
     if (t->mode == 2) {
         if (titleDriveMovie(gf) == 1) {
             t->movieIndex++;
-            if (gf->demoDiscActive) screenVisible(gf, BGF_SCREEN_TITLE, 0);
             titleCloseMovie(gf);
             objectVisible(gf, BGF_SCREEN_TITLE, BGF_OBJ_MOVIE_PLANE_43, 0);
             objectVisible(gf, BGF_SCREEN_TITLE, BGF_OBJ_MOVIE_PLANE_LB, 0);
@@ -942,18 +920,15 @@ static void titleTick(BGameFlow* gf)
                 t->mode    = 1;
                 t->timer   = gf->realTimer;
                 cameToRest = 1;
-                if (!gf->demoDiscActive) HOOK_VOID(gf, jukebox, 1);
+                HOOK_VOID(gf, jukebox, 1);
             } else {
                 titleOpenMovie(gf, t->movieIndex);
             }
         }
     } else if (t->mode == 1) {
-        // The demo disc outside attract mode starts its own game instead
-        // (StartDemoDiscGame, 0x00184de0). Dead on retail.
-        if (gf->demoDiscActive && !gf->demoAttractMode)
-            trace(gf, "demo disc game");
-        else
-            bgf_consider_start_demo_mode(gf, &t->timer);
+        // (The demo disc outside attract mode started its own game here,
+        // StartDemoDiscGame, 0x00184de0.)
+        bgf_consider_start_demo_mode(gf, &t->timer);
         titleBloomAnimate(gf);
     }
 
@@ -991,7 +966,7 @@ static void titleEvent(BGameFlow* gf, BScreenMessage msg,
         case BMSG_MENUITEM_SELECT:
             if (t->mode == 1) {
                 // PRESS START is not up yet: nothing, and no click.
-                if (!titlePressStartReady(gf) || gf->demoDiscActive) {
+                if (!titlePressStartReady(gf)) {
                     data->noise = 0;
                     break;
                 }

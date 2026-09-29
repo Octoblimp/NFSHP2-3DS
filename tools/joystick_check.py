@@ -79,7 +79,6 @@ RPC = "3DS Files/source/replay.c"
 JC = "3DS Files/source/joystick.c"
 SOURCES = [HARNESS, JEC, JPC, JLC, RPC,
            "3DS Files/source/p32.c",
-           "3DS Files/source/demodisc.c",
            "3DS Files/source/realtime.c",
            "3DS Files/source/timer.c",
            "3DS Files/source/scannertab.c",
@@ -97,7 +96,6 @@ QUEUE = 0x002f16f0              # TheQueuedJoystickEvents
 SCANTAB = 0x002dc6c0            # ScannerConfigTable, 32 bytes a row
 RING = 0x002de480               # PadRingData[2][32], 84 bytes a read
 CURTYPES = 0x00323448           # CurrentJoystickTypes[2]
-DEMO = 0x002e8120               # TheDemoDiscManager
 G_POOL = GP - 22456             # EventNodeSlotPool
 G_REPLAY = GP - 23008           # pReplayManager
 G_FRAME = GP - 20264            # FrameCounter
@@ -113,7 +111,7 @@ G_PORTSTATE = GP - 24296
 assert G_REPLAY == 0x00323210 and G_REAL == 0x00323cd0
 
 # Joystick, EventNode, QueuedJoystickEvent, ReplayManager: the offsets
-# joyevent.h, replay.h and demodisc.h name.
+# joyevent.h and replay.h name.
 J_CAL, CAL_SZ = 8, 44
 J_PORT, J_CUR, J_PREV, J_DET, J_USER = 184, 188, 192, 196, 200
 N_EVENT, N_CFG, N_HANDLER, N_OBJ, N_PREV, N_FIRST, N_USER = (
@@ -1174,8 +1172,10 @@ class Model(object):
         self.queue()
         self.emit("ring top %d bot %d prep %d"
                   % (s32(e.u32(G_TOP)), s32(e.u32(G_BOT)), s32(e.u32(G_PREP))))
-        self.emit("demo %d types %d %d jl %d %d"
-                  % (s32(e.u32(DEMO + 12)), e.u8(CURTYPES), e.u8(CURTYPES + 1),
+        # Retail also stamps TheDemoDiscManager.LastActivityTime here, which
+        # only the demo disc reads; the port has no demo disc.
+        self.emit("types %d %d jl %d %d"
+                  % (e.u8(CURTYPES), e.u8(CURTYPES + 1),
                      s32(e.u32(G_JL_REPLAYING)), s32(e.u32(G_JL_CAPTURING))))
         if e.u32(G_REPLAY):
             self.emit("rm fnum %d" % s32(e.u32(RM_ADDR + RM_FNUM)))
@@ -1532,13 +1532,6 @@ MUTATIONS = [
     ("gen-fancy-never", JEC, "|| !pReplayManager->FancyReplayInProgress)", "|| 0)"),
     ("gen-ports", JEC, "            for (port = 0; port < JOYSTICK_PORTS; port++) {",
      "            for (port = 0; port < 1; port++) {"),
-    ("gen-activity", JEC, "q) != 0" + NL
-     + "                    && TheDemoDiscManager.LastActivityTime < RealTimer)",
-     "q) != 0)"),
-    ("gen-activity-cmp", JEC, "q) != 0" + NL + "                    && TheDemo",
-     "q) == 0" + NL + "                    && TheDemo"),
-    ("gen-activity-value", JEC, "TheDemoDiscManager.LastActivityTime = RealTimer;",
-     "TheDemoDiscManager.LastActivityTime = FrameCounter;"),
     ("gen-fancy-inc", JEC, "rm->FancyJoyEventTable[rm->FancyJoyEventNumber++]",
      "rm->FancyJoyEventTable[rm->FancyJoyEventNumber]"),
     ("gen-fancy-cmp", JEC, "if (rm->FancyJoyEventNumber < rm->NumFancyJoyEvents)",
@@ -1962,6 +1955,9 @@ EQUIVALENT = {
     # The image's ReadRegularController is a stand-in, and the port's never
     # reads the state: scePad's per-port state machine is not ported.
     "platforminit-state": "nothing reads the port state",
+    # Retail's one reader of GenerateEventsFromScanners' count is the demo
+    # disc's activity stamp in GenerateJoyEvents, which the port leaves out.
+    "gen-count": "no caller reads the count",
 }
 
 

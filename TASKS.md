@@ -2280,6 +2280,12 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
       blurb, which shows on the bottom panel.
   - [ ] `OnHighlight`'s first call, the bloom's `SetCurrentMenuItem`,
         with the echo below.
+- [x] **The demo disc's code is out.** Asked for on 2026-09-28: the port
+      is the full game, where `TheDemoDiscManager.bActive` is always 0.
+      `demodisc.c`, `EXIT_DEMO_DISC`, the loading slideshow, the
+      one-movie title, `StartDemoDiscGame` and the demo timeout are
+      gone. Attract mode stays, and so does event 2 with its row, so no
+      event renumbers. The unused VP6 decoder is deleted too.
 - [ ] **The jukebox and its EA TRAX box.**
   - The music.
   - The song and the artist, bottom left, over the Help button while

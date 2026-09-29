@@ -43,7 +43,8 @@ builds a DualShock 2 buffer and every row works as shipped.
    go and works out each read's controller type, and for each read and
    each port `Joystick::GenerateEventsFromScanners` runs the scanners. A
    port that raised anything stamps `DemoDiscManager.LastActivityTime`
-   (`RegisterActivity`, inline). The frame's queue goes to the joylog.
+   (`RegisterActivity`, inline). Only the demo disc's timeout reads that,
+   so the port leaves the stamp out. The frame's queue goes to the joylog.
 3. With a replay, feeds the fancy replay's next scripted event, then either
    records the queue into the replay or -- when it is playing back and not
    paused -- replaces it with the recorded one.
@@ -292,11 +293,13 @@ and removed from inside a handler, a queue past 256, the replay and the
 joylog in each of their states, and the teardown. The two type predicates are asked about all 256 type
 codes. 64,240 ops, 75,891 lines, no difference.
 
-`--mutate` runs 253 mutants of `joyevent.c`, `joypad.c`, `joylog.c`,
-`joystick.c` and the generated tables against that transcript: 250
-caught, 3 equivalent, none unexplained. The equivalents are
+`--mutate` runs 250 mutants of `joyevent.c`, `joypad.c`, `joylog.c`,
+`joystick.c` and the generated tables against that transcript: 246
+caught, 4 equivalent, none unexplained. The equivalents are
 `choosedz-break` (each type has one row in
 `ValidJoystickConfigurationTable`, so the last match is also the first),
 `find-zero` (`FindScannerConfig` has already tested for configuration 0)
-and `platforminit-state` (nothing reads the port state that scePad's
-state machine would keep).
+`platforminit-state` (nothing reads the port state that scePad's
+state machine would keep) and `gen-count` (retail's one reader of the
+scanners' count is the demo disc's activity stamp, which the port leaves
+out).

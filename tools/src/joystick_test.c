@@ -12,7 +12,6 @@
 #include <string.h>
 
 #include "bslotpool.h"
-#include "demodisc.h"
 #include "joyevent.h"
 #include "joylog.h"
 #include "joypad.h"
@@ -338,8 +337,7 @@ static void after_frame(void)
     queue();
     printf("ring top %d bot %d prep %d\n", JoystickRingBufferTop,
            JoystickRingBufferBottom, JoystickRingBufferPreparedTop);
-    printf("demo %d types %d %d jl %d %d\n",
-           TheDemoDiscManager.LastActivityTime, CurrentJoystickTypes[0],
+    printf("types %d %d jl %d %d\n", CurrentJoystickTypes[0],
            CurrentJoystickTypes[1], Joylog_ReplayingFlag,
            Joylog_CapturingFlag);
     if (pReplayManager != NULL)

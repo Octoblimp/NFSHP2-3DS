@@ -8939,3 +8939,46 @@ The jukebox: `Start(1)` in `NewMainMenu`'s constructor (retail
 `0x001aeab0`), `cJukeboxPlayer` and `SOUND\JUKEBOXM.JBC`. Then the echo
 (with `OnHighlight`'s `SetCurrentMenuItem`), EA TRAX, Setup, car select
 and the briefing, and step 6's `Car::InitRenderInfo`.
+
+## Session 30, continued (2026-09-28) -- The demo disc's code out
+
+The user asked for the demo disc's code to go, since the port is the
+full game, and for the unused VP6 decoder to go with it.
+
+- **The rule.** Retail's `TheDemoDiscManager.bActive` is always 0 on
+  the retail disc, so the port is written as if it were. Every branch
+  on it keeps only its `bActive == 0` side.
+- **Gone.**
+  - `demodisc.c` and `demodisc.h`;
+  - `GAMEFLOW_STATE_EXIT_DEMO_DISC`;
+  - `LOADING_FRONTEND`'s Loop (the demo's slideshow of `FIRSTLEGAL`,
+    `SLIDE2` and `DISCLAIMER`) and `BeginScreenFadeTime`;
+  - the one-movie title and the title's `StartDemoDiscGame`;
+  - `CheckForDemoDiscTimeout`, and `GenerateJoyEvents`' activity stamp.
+- **Kept.**
+  - Attract mode, which is not the demo disc's: `StartDemoMode`,
+    `ConsiderStartDemoMode`, `TheDemoModeReplay` and
+    `Fred.DemoModeStatus`.
+  - `JOY_EVENT_EXIT_DEMO_DISC` (2) and its START+SELECT scanner row.
+    Removing them would renumber every event after them.
+- **Checkers.** `bootflow_check`, `joystick_check` and
+  `trackflow_check` hold `bActive` at 0 on the image, so retail takes
+  the port's branches. The demo scenarios (`demodisc`, `demoattract`,
+  `attractnodisc`) and their mutants are gone.
+  - `bootflow_check`: 48 scenarios, 27,803 lines, 0 differ; 171
+    mutations, 168 caught, 3 equivalent.
+  - `joystick_check`: 75,891 lines, 0 differ; 250 mutations, 246
+    caught, 4 equivalent. `gen-count` is equivalent now: the scanners'
+    count had one reader, the demo disc's stamp.
+  - `trackflow_check`: 709 lines, 0 differ; 74 mutations, 73 caught.
+  - `bscreens_check` and `joyhid_check` pass.
+- **VP6.** `source/vp6/` (37 files) is deleted. Every movie on the
+  retail disc is MV3, which `mv3.c` decodes. The Makefile builds
+  `source` alone.
+- **Azahar.** PASS: the boot, the movies, the frontend walk and a clean
+  exit, as before.
+
+### Next
+
+The jukebox, then the echo, EA TRAX, Setup, car select, the briefing
+and step 6.

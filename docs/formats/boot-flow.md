@@ -114,6 +114,9 @@ struct GameFlowStateInfo {
 | 8 | `GAMEFLOW_STATE_UNLOADING_TRACK_COMMON` | `0x001642a0` | -- | -- |
 | 9 | `GAMEFLOW_STATE_EXIT_DEMO_DISC` | `0x00164878` | `0x00164910` | `0x00164888` |
 
+The port has the first nine. State 9 is only the demo disc's, and the port
+has no demo disc (see [Demo disc](#demo-disc)).
+
 `IN_FRONTEND` and `RACING` are the two resting states and have no functions at
 all: once the flow reaches them it stops doing anything and the screen list
 (or the race coordinator) takes over.
@@ -329,9 +332,11 @@ void FrontEndSoundsLoaded(void)  /* 0x00168658 */
 
 Loop (`0x00168718`) is only the demo's slideshow now, on signed compares
 (`slti`) against 541, 361 and 181. It returns at once when
-`TheDemoDiscManager.bActive` is 0, which it always is on retail.
+`TheDemoDiscManager.bActive` is 0, which it always is on retail. The port
+has no Loop for this state. `bootflow_check` still runs retail's, with
+`bActive` 0, and it does nothing.
 
-End (`0x001687a8`) hides `DISCLAIMER` on the demo disc. On retail it hides
+End (`0x001687a8`) hides `DISCLAIMER` on the demo disc. Off it, it hides
 `LOADING_TRACK` and object 0, `COPYRIGHT_TEXT`, then jumps
 (`j`, not `jal`) to `LaunchFrontendMenus` (`0x0016f950`).
 
@@ -1424,7 +1429,7 @@ The same shape. The differences:
 * The idle time is compared signed.
 * The demo-disc test is `bActive && IsAttractMode()` (`0x0012eaf0`). The
   attract flag is asked only of the demo disc, so on the retail disc the
-  flag alone never starts it (`attractnodisc`).
+  flag alone never starts it. The port leaves the test out.
 
 `TheDemoModeReplay` is at `0x002f0960`, with +4 set while a replay loads and
 +8 once it has loaded:
@@ -1470,6 +1475,30 @@ title screen falls through to `ConsiderStartDemoMode`.
 The ctor's other defaults, for the record: `InactiveTimeout = 60`,
 `TotalTimeout = 600`, `PlayMode = 1`, `MediaType = 10`,
 `nDemoDiscEndReason = -1`.
+
+The port leaves all of this out. It is written as if `bActive` were 0,
+which it always is, so it has none of the following:
+
+* the `EXIT_DEMO_DISC` state;
+* the loading slideshow (`FIRSTLEGAL`, `SLIDE2`, `DISCLAIMER`) or the
+  Loop that runs it;
+* `BeginScreenFadeTime`, which only that Loop reads;
+* the one-movie title;
+* the title's `StartDemoDiscGame`;
+* `CheckForDemoDiscTimeout`;
+* `demodisc.c`, removed on 2026-09-28.
+
+Attract mode is not the demo disc's. It stays: `StartDemoMode`,
+`ConsiderStartDemoMode`, `TheDemoModeReplay` and `Fred.DemoModeStatus`.
+
+Retail's generated event table is also kept whole:
+
+* `JOY_EVENT_EXIT_DEMO_DISC` (2);
+* its START+SELECT scanner row.
+
+Removing them would renumber every event after them. The checkers hold
+`bActive` at 0 on the image, so retail's code there takes the same
+branches as the port.
 
 ## The screen registry
 
@@ -1741,8 +1770,7 @@ never current: it is only made visible.
 `bootflow_check` runs retail's `LoadGlobalChunks`, Begin, Loop, End, both
 load callbacks and the language screen's `Callback` on the image, as it
 does the title. Its world queues the loads and lands them a frame later,
-and a `slow<n>` input holds them back until frame `n`, long enough for the
-demo slideshow to run through. It fakes the screen list at `gp-21324` so
+and a `slow<n>` input holds them back until frame `n`. It fakes the screen list at `gp-21324` so
 that `strcmp` sees the name the screen was entered under.
 
 `BootAutoload` runs on the image too: `BootAutoLoader::Callback` and
@@ -1795,8 +1823,8 @@ row. The rows:
 `mainmenu` was retimed to select after `PRESS START` shows, 243 frames in;
 before, it never reached the main menu.
 
-`--mutate` now breaks `gameflow.c`, `bpopup.c` and `memcard.c` 179 ways.
-Of those, 176 are caught. Three survivors are equivalent by construction:
+`--mutate` now breaks `gameflow.c`, `bpopup.c` and `memcard.c` 171 ways
+(the demo disc's mutants went with its code). Of those, 168 are caught. Three survivors are equivalent by construction:
 
 * **`back-names-screen`**: no screen's callback reads `ItemHash` on BACK.
 * **`mc-loadfailed-quiet`**: the message before `LOAD_FAILED` is

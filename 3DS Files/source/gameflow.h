@@ -13,7 +13,7 @@
 // its entry point to "New Main Menu", decompiled in docs/formats/boot-flow.md
 // with an address for every rule here.
 //
-//  * GameFlowStateInfoTable and ServiceGameFlow (0x001680e8): ten states,
+//  * GameFlowStateInfoTable and ServiceGameFlow (0x001680e8): nine states,
 //    each with an optional Begin/End/Loop, serviced in a loop until the
 //    desired state stops moving.
 //  * LaunchFrontendMenus (0x0016f950) and FlailerScreenList: a LIFO of
@@ -32,8 +32,10 @@
 #define BGF_STACK_DEPTH 12
 #define BGF_NAME_LEN    32
 
-// GameFlowState, verbatim from the .mdebug type info. IN_FRONTEND and RACING
-// are the two resting states and have no functions at all.
+// GameFlowState, verbatim from the .mdebug type info, less its last state,
+// EXIT_DEMO_DISC (9), which only the demo disc's DemoDiscManager::EndDemo
+// enters. IN_FRONTEND and RACING are the two resting states and have no
+// functions at all.
 typedef enum {
     BGF_NONE = 0,
     BGF_LOADING_FRONTEND,
@@ -44,7 +46,6 @@ typedef enum {
     BGF_RACING,
     BGF_UNLOADING_TRACK_SPECIFIC,
     BGF_UNLOADING_TRACK_COMMON,
-    BGF_EXIT_DEMO_DISC,
     BGF_NUM_STATES,
 } BGameFlowState;
 
@@ -57,9 +58,6 @@ typedef enum {
 #define BGF_SCREEN_BOOT_AUTOLOAD  0xfa2ac5c6u  // "BootAutoload"
 #define BGF_SCREEN_MUMBO_JUMBO    0xdd4197c9u  // "Legal MumboJumbo"
 #define BGF_SCREEN_LOADING_TRACK  0xd0131dd1u  // LOADING_TRACK, hidden on exit
-#define BGF_SCREEN_FIRSTLEGAL     0x8139ec90u  // demo-disc slideshow, 0-3s
-#define BGF_SCREEN_SLIDE2         0xa7227ae8u  // demo-disc slideshow, 3-6s
-#define BGF_SCREEN_DISCLAIMER     0x8254cc20u  // demo-disc slideshow, 6-9s
 
 // Retail's object chunks carry their own names (a char[24] the demo's do
 // not have), which is where these come from.
@@ -343,7 +341,6 @@ struct BGameFlow {
     float    realElapsed;
     uint32_t frameCounter;
     float    accum;
-    uint32_t beginScreenFadeTime;
 
     // The gp globals the boot flow reads, at the values the PS2 image ships
     // with. Nothing but UnlaunchFrontendMenus writes frontendLaunchType.
@@ -356,10 +353,6 @@ struct BGameFlow {
     // LoadGlobalChunks sets English, and +20, the speech files are loaded.
     int currLanguage;
     int speechLoaded;
-    int demoDiscActive;       // TheDemoDiscManager.bActive, always 0
-    // DemoDiscManager::IsAttractMode (0x0012eaf0). Only read when the demo
-    // disc is active, so dead on retail like the rest of the demo branch.
-    int demoAttractMode;
     int logoFrench;           // gp-21404: the LOADING art is LOADING_FR
     int loadAllLanguages;     // gp-16016, MENUITEM_7 of the language screen
     int copsOn;               // 0x002f3fdc -- which of the two Mode Selects
@@ -543,15 +536,13 @@ int bgf_should_see_legal_mumbo_jumbo(const BGameFlow* gf);   // 0x0016f938
 int bgf_should_see_language_select(const BGameFlow* gf);     // 0x0016f8c8
 int bgf_should_see_autoload(const BGameFlow* gf);            // 0x0016f8a0
 
-// ConsiderStartDemoMode (0x0016ed50): half a minute idle since `*timer`,
-// or the demo disc in attract mode, starts the attract race -- through a
-// replay, if one loads.
+// ConsiderStartDemoMode (0x0016ed50): half a minute idle since `*timer`
+// starts the attract race -- through a replay, if one loads.
 void bgf_consider_start_demo_mode(BGameFlow* gf, const uint32_t* timer);
 
-// ------------------------------------------- the ten game flow state hooks
+// ------------------------------------------------ the game flow state hooks
 
 void bgf_begin_loading_frontend(BGameFlow* gf);       // 0x00168698
-void bgf_loop_loading_frontend(BGameFlow* gf);        // 0x00168718
 void bgf_end_loading_frontend(BGameFlow* gf);         // 0x001687a8
 void bgf_begin_unloading_frontend(BGameFlow* gf);     // 0x00168830
 

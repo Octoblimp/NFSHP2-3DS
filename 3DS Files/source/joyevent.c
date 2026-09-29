@@ -5,7 +5,6 @@
 #include <string.h>
 
 #include "bslotpool.h"
-#include "demodisc.h"
 #include "joylog.h"
 #include "joypad.h"
 #include "realtime.h"
@@ -294,12 +293,10 @@ void GenerateJoyEvents(void)
                 const uint32_t *data =
                     GetJoystickTypeAndData(port, &type, &data2);
 
-                // DemoDiscManager::RegisterActivity, inline.
-                if (Joystick_GenerateEventsFromScanners(&JoystickArray[port],
-                                                        type, data, data2,
-                                                        q) != 0
-                    && TheDemoDiscManager.LastActivityTime < RealTimer)
-                    TheDemoDiscManager.LastActivityTime = RealTimer;
+                // Retail inlines DemoDiscManager::RegisterActivity on the
+                // answer, a stamp only the demo disc's timeout reads.
+                Joystick_GenerateEventsFromScanners(&JoystickArray[port],
+                                                    type, data, data2, q);
             }
             AdvanceJoystickData();
         }

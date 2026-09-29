@@ -81,7 +81,6 @@ typedef struct {
     int skipMovies;
     int frontendLaunchType;
     int demoModeStatus;
-    int demoDiscActive;
     int haveIntroMovie;   // pretend NFSINTRO_EN.AVI is on the disc
     int forceLegal;       // turn the dead MumboJumbo panels back on
     int frames;
@@ -91,7 +90,6 @@ typedef struct {
     const char* card;     // a kCards row; NULL is "blank"
     int manual;           // the loader in MANUAL mode
     int replays;          // demo replays ConsiderLaunching will start
-    int attractMode;      // DemoDiscManager::IsAttractMode
 } Scenario;
 
 // A load in flight: what to print when it lands, and its callback.
@@ -630,8 +628,7 @@ static const BBootStage kBootStages[] = {
 static const BGameFlowStateInfo kGameFlowStates[BGF_NUM_STATES] = {
     { "NONE",                     NULL, NULL, NULL },
     { "LOADING_FRONTEND",         bgf_begin_loading_frontend,
-                                  bgf_end_loading_frontend,
-                                  bgf_loop_loading_frontend },
+                                  bgf_end_loading_frontend, NULL },
     { "UNLOADING_FRONTEND",       bgf_begin_unloading_frontend, NULL, NULL },
     { "IN_FRONTEND",              NULL, NULL, NULL },
     { "LOADING_TRACK_COMMON",     NULL, NULL, NULL },
@@ -639,14 +636,13 @@ static const BGameFlowStateInfo kGameFlowStates[BGF_NUM_STATES] = {
     { "RACING",                   NULL, NULL, NULL },
     { "UNLOADING_TRACK_SPECIFIC", NULL, NULL, NULL },
     { "UNLOADING_TRACK_COMMON",   NULL, NULL, NULL },
-    { "EXIT_DEMO_DISC",           NULL, NULL, NULL },
 };
 
 // ------------------------------------------------------------- scenarios
 
 #define SIXTIETH (1.0f / 60.0f)
 
-// Every boot but the demo disc's and the relaunch starts on BootAutoload,
+// Every boot but the relaunch starts on BootAutoload,
 // which takes two seconds checking the blank card and four more saying so.
 // The scenarios that were written before it ran add these many frames, so
 // that their frame numbers still count from where they did. It activates in
@@ -666,32 +662,26 @@ static const BGameFlowStateInfo kGameFlowStates[BGF_NUM_STATES] = {
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 static const Scenario kScenarios[] = {
     // An NTSC console: no language screen.
-    { "ntsc", 1, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 40, SIXTIETH, {{0,0}} },
+    { "ntsc", 1, 0, 0, 1, 0, 0, 0, BOOT60 + 40, SIXTIETH, {{0,0}} },
     // The shipped boot, PAL: BootAutoload, then Language Options Pre FE,
     // which waits for a choice.
-    { "pal", 0, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 40, SIXTIETH, {{0,0}} },
+    { "pal", 0, 0, 0, 1, 0, 0, 0, BOOT60 + 40, SIXTIETH, {{0,0}} },
     // No language at all: the first test in the predicate fires whatever
     // the video mode is. BACK there is vetoed and does nothing else, since
     // there is nothing to keep; Spanish is then chosen and the screen moves
     // back to the title, whose movies are Spanish.
-    { "nolang", 1, -1, 0, 1, 0, 0, 0, 0, BOOT60 + 40, SIXTIETH,
+    { "nolang", 1, -1, 0, 1, 0, 0, 0, BOOT60 + 40, SIXTIETH,
       {{BOOT60 + 10, "back"}, {BOOT60 + 14, "item5"}} },
     // SkipMovies: the title screen starts at rest, with no movie.
-    { "skipmovies", 1, 0, 1, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH, {{0,0}} },
+    { "skipmovies", 1, 0, 1, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH, {{0,0}} },
     // A second visit to the frontend with a demo waiting: straight to the
     // main menu, stack reset. BACK there is the main menu's, which vetoes it
     // without a sound.
-    { "relaunch", 1, 0, 0, 2, 2, 0, 0, 0, 20, SIXTIETH, {{10, "back"}} },
-    // The demo disc: one title movie, the three-panel loading slideshow,
-    // and no attract mode. Dead on this disc; here for the branch. The
-    // slideshow does not hold the load up -- FRONTB's callback moves the
-    // flow on whenever it lands -- so the loader is slow here, ten seconds,
-    // or the slideshow would never get past its first panel.
-    { "demodisc", 1, 0, 0, 1, 0, 1, 0, 0, 700, SIXTIETH, {{0, "slow600"}} },
+    { "relaunch", 1, 0, 0, 2, 2, 0, 0, 20, SIXTIETH, {{10, "back"}} },
     // At rest on the title for over thirty seconds at one second a frame:
     // PRESS START comes up after four, attract mode after thirty. There is
     // no replay to show, so the race starts at once.
-    { "attract", 1, 0, 1, 1, 0, 0, 0, 0, BOOT1 + 40, 1.0f, {{0,0}} },
+    { "attract", 1, 0, 1, 1, 0, 0, 0, BOOT1 + 40, 1.0f, {{0,0}} },
     // The title comes to rest 9 frames after the autoload, and PRESS
     // START is up 243 frames later -- the first multiple of 66 ticks over
     // 16000. Select at 14 is too early and does nothing; BACK at 20, in the
@@ -699,7 +689,7 @@ static const Scenario kScenarios[] = {
     // goes to the main menu; select again there does nothing; BACK there,
     // twice, is vetoed by retail's main menu, which clears Param and Noise.
     // The demo's went back to the title.
-    { "select", 1, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 300, SIXTIETH,
+    { "select", 1, 0, 0, 1, 0, 0, 0, BOOT60 + 300, SIXTIETH,
       {{BOOT60 + 14, "select"}, {BOOT60 + 20, "back"},
        {BOOT60 + 260, "back"}, {BOOT60 + 270, "select"},
        {BOOT60 + 282, "select"}, {BOOT60 + 288, "back"},
@@ -711,58 +701,58 @@ static const Scenario kScenarios[] = {
     // at 20 is before PRESS START and does nothing; select at 262 is after
     // it and goes to the main menu.
     // START at 21, which the title swallows without a sound.
-    { "skipintro", 1, 0, 0, 1, 0, 0, 1, 0, BOOT60 + 300, SIXTIETH,
+    { "skipintro", 1, 0, 0, 1, 0, 1, 0, BOOT60 + 300, SIXTIETH,
       {{BOOT60 + 5, "select"}, {BOOT60 + 10, "select"},
        {BOOT60 + 20, "select"}, {BOOT60 + 21, "start"},
        {BOOT60 + 262, "select"}} },
     // The intro stopped at frame 10, then left alone at one second a frame:
     // attract mode comes thirty seconds after the skip, not after the
     // screen's arrival, because the skip restarts the Timer at +16.
-    { "skipidle", 1, 0, 0, 1, 0, 0, 1, 0, BOOT1 + 50, 1.0f,
+    { "skipidle", 1, 0, 0, 1, 0, 1, 0, BOOT1 + 50, 1.0f,
       {{BOOT1 + 10, "select"}} },
     // The same with the movies left to finish: thirty seconds from the
     // moment the title comes to rest, which restarts the Timer too.
-    { "restidle", 1, 0, 0, 1, 0, 0, 0, 0, BOOT1 + 50, 1.0f, {{0,0}} },
+    { "restidle", 1, 0, 0, 1, 0, 0, 0, BOOT1 + 50, 1.0f, {{0,0}} },
     // The three main-menu items, each of which asks for a screen the port
     // has not registered: the flow is left with no current screen, and BACK
     // pops New Main Menu back. Hot Pursuit and World Racing differ only in
     // CopsOn, which "final" prints. PRESS START is up 243 frames after the
     // title comes to rest, as in "select"; with the movies skipped the main
     // menu starts none of its own.
-    { "mainmenu", 1, 0, 1, 1, 0, 0, 0, 0, BOOT60 + 280, SIXTIETH,
+    { "mainmenu", 1, 0, 1, 1, 0, 0, 0, BOOT60 + 280, SIXTIETH,
       {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item3"},
        {BOOT60 + 258, "back"}, {BOOT60 + 262, "item1"}} },
     // Force the legal screen, which the retail predicate never allows.
-    { "mumbo", 1, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH,
+    { "mumbo", 1, 0, 0, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH,
       {{BOOT60 + 12, "mumbo"}} },
     // The same with the two dead predicates turned on, so the legal and
     // anti-piracy panels and their 7-second timers actually run. One second
     // a frame, because 14 seconds at 1/60 is 840 frames of nothing.
-    { "legal", 1, 0, 0, 1, 0, 0, 0, 1, BOOT1 + 40, 1.0f,
+    { "legal", 1, 0, 0, 1, 0, 0, 1, BOOT1 + 40, 1.0f,
       {{BOOT1 + 5, "mumbo"}} },
     // French from the start: the second movie is retail's own French
     // intro, and the LOADING art is the French one.
-    { "french", 1, 1, 0, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH, {{0,0}} },
+    { "french", 1, 1, 0, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH, {{0,0}} },
     // PAL, French chosen on the language screen: the table, the speech and
     // the LOADING art all change, the frontend takes its defaults, and the
     // screen moves back to the title -- whose EA logo is EALOGO_FR.
-    { "palselect", 0, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH,
+    { "palselect", 0, 0, 0, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH,
       {{BOOT60 + 8, "item2"}} },
     // PAL, BACK on the language screen with Italian highlighted: BACK
     // chooses the highlighted language, as SELECT would.
-    { "palback", 0, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH,
+    { "palback", 0, 0, 0, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH,
       {{BOOT60 + 7, "hl4"}, {BOOT60 + 8, "back"}} },
     // PAL, Load All Languages. Hidden on this disc, and selected anyway:
     // the flag is set and the screen moves back with English kept.
-    { "palall", 0, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH,
+    { "palall", 0, 0, 0, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH,
       {{BOOT60 + 8, "item7"}} },
     // PAL, English chosen when English is in: SetLanguage returns at once,
     // and the frontend still takes its defaults.
-    { "palsame", 0, 0, 0, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH,
+    { "palsame", 0, 0, 0, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH,
       {{BOOT60 + 8, "item1"}} },
     // PAL, French from the start and English chosen: the French LOADING art
     // is swapped back.
-    { "palrevert", 0, 1, 0, 1, 0, 0, 0, 0, BOOT60 + 30, SIXTIETH,
+    { "palrevert", 0, 1, 0, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH,
       {{BOOT60 + 8, "item1"}} },
 
     // ------------------------------------------------ BootAutoload's card
@@ -869,13 +859,6 @@ static const Scenario kScenarios[] = {
     { .name = "replay", .videoMode = 1, .skipMovies = 1,
       .frontendLaunchType = 1, .frames = BOOT1 + 44, .dt = 1.0f,
       .replays = 1 },
-    // The demo disc in attract mode goes at once, idle or not.
-    { .name = "demoattract", .videoMode = 1, .skipMovies = 1,
-      .frontendLaunchType = 1, .demoDiscActive = 1, .frames = 16, .dt = 1.0f,
-      .attractMode = 1 },
-    // Attract mode off the demo disc is not asked about: the title idles.
-    { .name = "attractnodisc", .videoMode = 1, .skipMovies = 1,
-      .frontendLaunchType = 1, .frames = 16, .dt = 1.0f, .attractMode = 1 },
     // The main menu's movie starts with the screen and plays on, one loop
     // after another -- UpdateMovie opens it again whenever Update answers
     // 0 -- until InGameFlag stops it. StopMovie takes the gate down, so
@@ -1004,8 +987,6 @@ static void runScenario(const Scenario* sc)
     gf.skipMovies         = sc->skipMovies;
     gf.frontendLaunchType = sc->frontendLaunchType;
     gf.demoModeStatus     = sc->demoModeStatus;
-    gf.demoDiscActive     = sc->demoDiscActive;
-    gf.demoAttractMode    = sc->attractMode;
     gf.forceLegalScreens  = sc->forceLegal;
     gf.autoloadManual     = sc->manual;
     memset(sFred, 0, sizeof(sFred));

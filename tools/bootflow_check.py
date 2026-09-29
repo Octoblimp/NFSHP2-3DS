@@ -75,14 +75,16 @@ JOY_NOISE = {MENUITEM_SELECT: FE_SOUND_MENU_SELECT,
              MENUITEM_PAD_DOWN: FE_SOUND_MENU_DOWN}
 
 # GameFlowState
+# (retail's tenth, EXIT_DEMO_DISC, only the demo disc enters; the port has
+# no demo disc and no such state)
 (NONE, LOADING_FRONTEND, UNLOADING_FRONTEND, IN_FRONTEND,
  LOADING_TRACK_COMMON, LOADING_TRACK_SPECIFIC, RACING,
- UNLOADING_TRACK_SPECIFIC, UNLOADING_TRACK_COMMON, EXIT_DEMO_DISC) = range(10)
+ UNLOADING_TRACK_SPECIFIC, UNLOADING_TRACK_COMMON) = range(9)
 
 STATE_NAMES = [
     "NONE", "LOADING_FRONTEND", "UNLOADING_FRONTEND", "IN_FRONTEND",
     "LOADING_TRACK_COMMON", "LOADING_TRACK_SPECIFIC", "RACING",
-    "UNLOADING_TRACK_SPECIFIC", "UNLOADING_TRACK_COMMON", "EXIT_DEMO_DISC",
+    "UNLOADING_TRACK_SPECIFIC", "UNLOADING_TRACK_COMMON",
 ]
 
 # Screens and objects, by bStringHash of their authored names.
@@ -100,7 +102,6 @@ LANGUAGE = 0x632b068e
 BOOT_AUTOLOAD = 0xfa2ac5c6
 MUMBO_JUMBO = 0xdd4197c9
 LOADING_TRACK = 0xd0131dd1
-FIRSTLEGAL, SLIDE2, DISCLAIMER = 0x8139ec90, 0xa7227ae8, 0x8254cc20
 
 PLANE_43, PLANE_LB, PRESS_START = 0x3acf2d73, 0xbfaebf79, 0xb070dbc9
 TITLE_IMAGE = 0xb73c8d23        # bStringHash("TITLE_IMAGE"), a group
@@ -161,14 +162,12 @@ class Flow(object):
         self.real_elapsed = 0.0
         self.frame_counter = 0
         self.accum = 0.0
-        self.begin_screen_fade_time = 0
 
         self.frontend_launch_type = sc["frontendLaunchType"]
         self.demo_mode_status = sc["demoModeStatus"]
         self.skip_movies = sc["skipMovies"]
         self.cops_on = 0
         self.video_mode = sc["videoMode"]
-        self.demo_disc = sc["demoDiscActive"]
         self.force_legal = sc.get("forceLegal", 0)
 
         self.legal_timeout = 7.0
@@ -440,7 +439,9 @@ class Flow(object):
         self.desired = desired
         self.say("want %s" % STATE_NAMES[desired])
 
-    # Ten states; only LOADING_FRONTEND and UNLOADING_FRONTEND do anything.
+    # Nine states; only LOADING_FRONTEND and UNLOADING_FRONTEND do anything.
+    # LOADING_FRONTEND's Loop is retail's, run with the demo disc off, where
+    # it does nothing: the port has none.
     def state_fns(self, state):
         if state == LOADING_FRONTEND:
             return (self.loading.begin, self.loading.end, self.loading.loop)
@@ -507,15 +508,11 @@ class Flow(object):
     def should_see_language_select(self):
         if self.frontend_launch_type == 1 and self.curr_language == -1:
             return 1
-        if self.demo_disc:
-            return 0
         if self.video_mode != 0:       # MODE_NTSC never asks
             return 0
         return 1 if self.frontend_launch_type == 1 else 0
 
     def should_see_autoload(self):
-        if self.demo_disc:
-            return 0
         return 1 if self.frontend_launch_type == 1 else 0
 
     def launch_frontend_menus(self):
@@ -617,7 +614,9 @@ RETAIL_GP = 0x003358f0
 REAL_TIMER = RETAIL_GP - 19608          # RealTimer, 1/4000 s
 SKIP_MOVIES = RETAIL_GP - 23036
 THE_TITLE = RETAIL_GP - 21156           # the one TitleScreen instance
-DEMO_DISC = 0x002effe0                  # DemoDiscManager, +0 is IsActive
+# DemoDiscManager, +0 is IsActive. Held at 0 on the image: the port has no
+# demo disc, so retail's code runs its other branches.
+DEMO_DISC = 0x002effe0
 LANGUAGE_MANAGER = 0x0031c1c8           # TheLanguageManager
 CURR_LANGUAGE = LANGUAGE_MANAGER        # its +0
 REAL_TIME = RETAIL_GP - 19604           # RealTime, 1/60 s
@@ -765,7 +764,9 @@ class RetailTitle(object):
             0x00237fc8: close,
             0x0016ee18: drive,
             0x001aeab0: lambda _e: f.say("jukebox %d" % arg(0)),
-            0x0012eaf0: lambda _e: f.sc.get("attractMode", 0),
+            # IsAttractMode, off the demo disc 0; StartDemoDiscGame, which
+            # a trace line would give away if it were ever reached.
+            0x0012eaf0: lambda _e: 0,
             0x00184de0: lambda _e: f.say("demo disc game"),
             # TheDemoModeReplay's ConsiderLaunching and Launch under
             # ConsiderStartDemoMode, and StartDemoMode's calls: StopMovie,
@@ -789,7 +790,7 @@ class RetailTitle(object):
         lang = f.curr_language if 0 <= f.curr_language <= 7 else 0
         e.put32(REAL_TIMER, f.real_timer)
         e.put32(SKIP_MOVIES, f.skip_movies)
-        e.put32(DEMO_DISC, f.demo_disc)
+        e.put32(DEMO_DISC, 0)
         # Clamped for the screen's table lookup, and put back after: the
         # LanguageManager is the flow's.
         saved = e.u32(CURR_LANGUAGE)
@@ -956,7 +957,7 @@ class RetailLoading(object):
         e, f = self.e, self.flow
         self.stubs()
         e.put32(REAL_TIME, f.real_time)
-        e.put32(DEMO_DISC, f.demo_disc)
+        e.put32(DEMO_DISC, 0)
         self.deferred = None
         e.call(addr, *args, limit=200000)
         if self.deferred:
@@ -1543,7 +1544,7 @@ class RetailAutoload(object):
         self.stubs()
         e.put32(REAL_TIMER, f.real_timer)
         e.write(REAL_ELAPSED, struct.pack("<f", f.real_elapsed))
-        e.put32(DEMO_DISC, f.demo_disc)
+        e.put32(DEMO_DISC, 0)
         # TheFlailerScreenList, as far as this code reads it: the popups and
         # pCurrent, whose config names the screen and holds its callback.
         name = (f.screen[0] if f.screen else "").encode() + b"\0"
@@ -1859,7 +1860,7 @@ BOOT60, BOOT1 = 365, 8
 def card_row(name, frames, dt=1.0, **kw):
     """A row for the card and replay scenarios: NTSC, movies skipped."""
     row = dict(name=name, videoMode=1, currLanguage=0, skipMovies=1,
-               frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+               frontendLaunchType=1, demoModeStatus=0,
                haveIntroMovie=0, frames=frames, dt=dt, input=[])
     row.update(kw)
     return row
@@ -1868,77 +1869,73 @@ def card_row(name, frames, dt=1.0, **kw):
 # Same rows as kScenarios[] in tools/src/gameflow_test.c.
 SCENARIOS = [
     dict(name="ntsc", videoMode=1, currLanguage=0, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 40, dt=SIXTIETH, input=[]),
     dict(name="pal", videoMode=0, currLanguage=0, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 40, dt=SIXTIETH, input=[]),
     dict(name="nolang", videoMode=1, currLanguage=-1, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 40, dt=SIXTIETH,
          input=[(BOOT60 + 10, "back"), (BOOT60 + 14, "item5")]),
     dict(name="skipmovies", videoMode=1, currLanguage=0, skipMovies=1,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[]),
     dict(name="relaunch", videoMode=1, currLanguage=0, skipMovies=0,
-         frontendLaunchType=2, demoModeStatus=2, demoDiscActive=0,
+         frontendLaunchType=2, demoModeStatus=2,
          haveIntroMovie=0, frames=20, dt=SIXTIETH, input=[(10, "back")]),
-    dict(name="demodisc", videoMode=1, currLanguage=0, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=1,
-         haveIntroMovie=0, frames=700, dt=SIXTIETH,
-         input=[(0, "slow600")]),
     dict(name="attract", videoMode=1, currLanguage=0, skipMovies=1,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT1 + 40, dt=1.0, input=[]),
     dict(name="select", videoMode=1, currLanguage=0, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 300, dt=SIXTIETH,
          input=[(BOOT60 + 14, "select"), (BOOT60 + 20, "back"), (BOOT60 + 260, "back"),
                 (BOOT60 + 270, "select"), (BOOT60 + 282, "select"),
                 (BOOT60 + 288, "back"), (BOOT60 + 292, "back")]),
     dict(name="skipintro", videoMode=1, currLanguage=0, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=1, frames=BOOT60 + 300, dt=SIXTIETH,
          input=[(BOOT60 + 5, "select"), (BOOT60 + 10, "select"), (BOOT60 + 20, "select"),
                 (BOOT60 + 21, "start"), (BOOT60 + 262, "select")]),
     dict(name="skipidle", videoMode=1, currLanguage=0, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=1, frames=BOOT1 + 50, dt=1.0, input=[(BOOT1 + 10, "select")]),
     dict(name="restidle", videoMode=1, currLanguage=0, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT1 + 50, dt=1.0, input=[]),
     dict(name="mainmenu", videoMode=1, currLanguage=0, skipMovies=1,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 280, dt=SIXTIETH,
          input=[(BOOT60 + 250, "select"), (BOOT60 + 254, "item3"),
                 (BOOT60 + 258, "back"), (BOOT60 + 262, "item1")]),
     dict(name="mumbo", videoMode=1, currLanguage=0, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 12, "mumbo")]),
     # The same with the two dead predicates turned on, so the legal and
     # anti-piracy panels and their 7-second timers actually run.
     dict(name="legal", videoMode=1, currLanguage=0, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, forceLegal=1, frames=BOOT1 + 40, dt=1.0,
          input=[(BOOT1 + 5, "mumbo")]),
     dict(name="french", videoMode=1, currLanguage=1, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[]),
     dict(name="palselect", videoMode=0, currLanguage=0, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 8, "item2")]),
     dict(name="palback", videoMode=0, currLanguage=0, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH,
          input=[(BOOT60 + 7, "hl4"), (BOOT60 + 8, "back")]),
     dict(name="palall", videoMode=0, currLanguage=0, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 8, "item7")]),
     dict(name="palsame", videoMode=0, currLanguage=0, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 8, "item1")]),
     dict(name="palrevert", videoMode=0, currLanguage=1, skipMovies=0,
-         frontendLaunchType=1, demoModeStatus=0, demoDiscActive=0,
+         frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 8, "item1")]),
 
     # BootAutoload's card, NTSC with the movies skipped, at a second a frame
@@ -1976,10 +1973,8 @@ SCENARIOS = [
     card_row("manualnocard", 20, card="nocard", manual=1,
              input=[(6, "left"), (7, "select"), (11, "select")]),
     card_row("manualnone", 14, manual=1),
-    # ConsiderStartDemoMode: a replay to show, and the demo disc's attract.
+    # ConsiderStartDemoMode: a replay to show.
     card_row("replay", BOOT1 + 44, replays=1),
-    card_row("demoattract", 16, demoDiscActive=1, attractMode=1),
-    card_row("attractnodisc", 16, attractMode=1),
     # The menus' movie: its loops, the same name again, another in its
     # place, and the title's movie sharing its player.
     card_row("menumovie", BOOT60 + 500, dt=SIXTIETH, skipMovies=0,
@@ -2126,8 +2121,8 @@ MUTATIONS = [
      "    if (rest && !titlePressStartSet(t)) t->pressStart = gf->realTimer;",
      "    if (!titlePressStartSet(t)) t->pressStart = gf->realTimer;"),
     ("gate-not-on-select", GF,
-     "if (!titlePressStartReady(gf) || gf->demoDiscActive) {",
-     "if (gf->demoDiscActive) {"),
+     "if (!titlePressStartReady(gf)) {",
+     "if (0) {"),
     ("gate-early-select-clicks", GF,
      "                    data->noise = 0;" + NL
      + "                    break;" + NL
@@ -2195,7 +2190,7 @@ MUTATIONS = [
      "            if (t->movieIndex == bgf_num_title_movies(gf)) {",
      "            if (t->movieIndex + 1 >= bgf_num_title_movies(gf)) {"),
     ("tick-rest-silent", GF,
-     "                if (!gf->demoDiscActive) HOOK_VOID(gf, jukebox, 1);",
+     "                HOOK_VOID(gf, jukebox, 1);",
      "                (void)0;"),
     ("tick-rest-keeps-timer", GF,
      "                t->mode    = 1;" + NL
@@ -2205,8 +2200,8 @@ MUTATIONS = [
      "        titleBloomAnimate(gf);" + NL + "    }",
      "    }"),
     ("tick-no-demo-mode", GF,
-     "            bgf_consider_start_demo_mode(gf, &t->timer);",
-     "            (void)0;"),
+     "        bgf_consider_start_demo_mode(gf, &t->timer);",
+     "        (void)0;"),
     # HandleEvent, 0x0016eef8.
     ("event-back-allowed", GF,
      "            data->param = 0;   // veto",
@@ -2224,18 +2219,12 @@ MUTATIONS += [
      "    bgf_set_curr_language(gf, 0);   // l_ENGLISH, through 0x00100808",
      "    (void)0;"),
     ("lgc-loading-hidden", GF,
-     "        screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 1);",
-     "        screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 0);"),
+     "    screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 1);",
+     "    screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 0);"),
     ("lgc-no-copyright", GF,
-     "        objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 1);",
-     "        (void)0;"),
-    ("lgc-demo-disclaimer-first", GF,
-     "        screenVisible(gf, BGF_SCREEN_FIRSTLEGAL, 1);",
-     "        screenVisible(gf, BGF_SCREEN_DISCLAIMER, 1);"),
+     "    objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 1);",
+     "    (void)0;"),
     # BeginGameFlowLoadingFrontend, 0x00168698, and its callbacks.
-    ("begin-fade-zero", GF,
-     "    gf->beginScreenFadeTime = gf->realTime;",
-     "    gf->beginScreenFadeTime = 0;"),
     ("begin-no-callback", GF,
      "    loadResource(gf, \"FRONTEND\\\\FRONTB.LZC\", frontendLoaded);",
      "    loadResource(gf, \"FRONTEND\\\\FRONTB.LZC\", NULL);"),
@@ -2254,26 +2243,14 @@ MUTATIONS += [
     ("sounds-wrong-state", GF,
      "    bgf_change_state(gf, BGF_IN_FRONTEND, BGF_NONE);",
      "    bgf_change_state(gf, BGF_UNLOADING_FRONTEND, BGF_NONE);"),
-    # The Loop's slideshow, 0x00168718.
-    ("loop-541", GF,
-     "if (!gf->demoDiscActive || elapsed >= 541) return;",
-     "if (!gf->demoDiscActive || elapsed >= 540) return;"),
-    ("loop-361", GF,
-     "    if (elapsed >= 361) {", "    if (elapsed >= 362) {"),
-    ("loop-181", GF,
-     "    } else if (elapsed >= 181) {", "    } else if (elapsed >= 180) {"),
-    ("loop-slide2-kept", GF,
-     "        screenVisible(gf, BGF_SCREEN_SLIDE2, 0);" + NL
-     + "        screenVisible(gf, BGF_SCREEN_DISCLAIMER, 1);",
-     "        screenVisible(gf, BGF_SCREEN_DISCLAIMER, 1);"),
     # End, 0x001687a8.
     ("end-copyright-left", GF,
-     "        objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);",
-     "        (void)0;"),
+     "    objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);",
+     "    (void)0;"),
     ("end-loading-left", GF,
-     "        screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 0);" + NL
-     + "        objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);",
-     "        objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);"),
+     "    screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 0);" + NL
+     + "    objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);",
+     "    objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);"),
     # The LanguageManager: SetLanguage 0x0021e0d0 and its tail 0x0021e1e0.
     ("lang-same-reloads", GF,
      "    if (language == old) return;" + NL
@@ -2633,12 +2610,6 @@ MUTATIONS += [
      "        height = a->hooks.textScaledHeight(a->hooks.user, screen, last);",
      "        height = 0.0f;"),
     # ConsiderStartDemoMode, 0x0016ed50.
-    ("demo-attract-anywhere", GF,
-     "    if (gf->demoDiscActive && gf->demoAttractMode) go = 1;",
-     "    if (gf->demoAttractMode) go = 1;"),
-    ("demo-attract-ignored", GF,
-     "    if (gf->demoDiscActive && gf->demoAttractMode) go = 1;",
-     "    (void)0;"),
     ("demo-no-wait-loading", GF,
      "    if (gf->replayLoading) return;", "    (void)0;"),
     ("demo-never-plays", GF,

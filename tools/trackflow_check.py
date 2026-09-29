@@ -33,7 +33,7 @@ finds nothing, bIsAsyncDone is done, and the RaceCoordinator is NULL. The
 callees the port calls directly still print.
 
 Scenarios: both track directions and the values either side of backward;
-the driver count; the demo disc on and off; a RaceCoordinator or none; the
+the driver count; a RaceCoordinator or none; the
 HUD pack or none; 0 to 3 resource files; bIsAsyncDone busy 0 to 4 times;
 nothing pending and something; and the steps run End-then-Begin, alone,
 twice, and backwards.
@@ -76,7 +76,9 @@ SKIP_FE = GP - 23788
 REVERSE = 0x0031376c                 # TheTrackPathManager + 4
 TRACK_DIR = 0x0031252c               # TheRaceParameters + 12
 NUM_DRIVERS = 0x00312814             # TheRaceParameters + 756
-DEMO_DISC = 0x002e8120               # TheDemoDiscManager.bActive
+# TheDemoDiscManager.bActive, held at 0: the image skips hiding LOADING_TRACK
+# on the demo disc, and the port has no demo disc.
+DEMO_DISC = 0x002e8120
 TOPO_TREE = 0x002f14c8
 DEMO_REPLAY = 0x002e89b0
 LANGUAGES = 0x00313c90
@@ -146,7 +148,7 @@ CALLEES = [
 
 
 class Scenario(object):
-    FIELDS = ("dir", "ndi", "demo", "rc", "hud", "nfiles", "nbusy",
+    FIELDS = ("dir", "ndi", "rc", "hud", "nfiles", "nbusy",
               "pending", "sfe", "ig", "dft", "rev", "jr2", "null")
 
     def __init__(self, ops, **kw):
@@ -166,9 +168,8 @@ def script():
     sc = [
         # The plain race: forward, nothing pending, the End then the Begin.
         S("EB", dir=0, ndi=8, rc=1, hud=1),
-        # Backward, the demo disc on, files and a busy reader, pending.
-        S("EB", dir=1, ndi=1, demo=1, hud=1, nfiles=2, nbusy=3, pending=5,
-          sfe=1),
+        # Backward, files and a busy reader, pending.
+        S("EB", dir=1, ndi=1, hud=1, nfiles=2, nbusy=3, pending=5, sfe=1),
         # Either side of backward, and the far ends.
         S("E", dir=2, ndi=0, ig=5, dft=3, rev=9, jr2=4),
         S("E", dir=-1, ndi=6, rev=1),
@@ -178,8 +179,8 @@ def script():
         S("B", rc=1, hud=0, nfiles=1, nbusy=1, pending=8, sfe=7, ig=1),
         S("B", rc=0, hud=1, nfiles=3, nbusy=4, pending=-1, sfe=1, ig=1,
           dft=0),
-        S("B", demo=2, pending=1, jr2=3),
-        S("B", demo=-1, rc=1, pending=9),
+        S("B", pending=1, jr2=3),
+        S("B", rc=1, pending=9),
         # Twice, and backwards.
         S("EE", dir=1, ndi=2, rc=1),
         S("BB", rc=1, hud=1, nfiles=2, nbusy=2, pending=3),
@@ -188,7 +189,7 @@ def script():
         # Every seam NULL.
         S("EB", dir=1, ndi=5, rc=1, hud=1, nfiles=2, nbusy=2, pending=6,
           sfe=1, null=1),
-        S("BE", dir=0, ndi=2, rc=1, demo=1, nfiles=1, null=1),
+        S("BE", dir=0, ndi=2, rc=1, nfiles=1, null=1),
     ]
     return sc
 
@@ -298,7 +299,7 @@ class Model(object):
             self.busy = sc.nbusy
             e.put32(TRACK_DIR, sc.dir)
             e.put32(NUM_DRIVERS, sc.ndi)
-            e.put32(DEMO_DISC, sc.demo)
+            e.put32(DEMO_DISC, 0)
             e.put32(RACE_COORD, RC0 if sc.rc else 0)
             e.put32(HUD_PACK, HUD if sc.hud else 0)
             e.put32(PENDING, sc.pending)
@@ -467,21 +468,14 @@ MUTATIONS = [
      "    eDisableFixUpTables = 1;\n    InGameFlag = 0;",
      "    eDisableFixUpTables = 1;\n    CALL(gEWaitUntilRenderingDoneFn);\n"
      "    InGameFlag = 0;"),
-    ("begin_demo_ignored", TFC,
-     "    if (!TheDemoDiscManager.bActive && gSetFlailerScreenVisibilityFn != NULL)",
-     "    if (gSetFlailerScreenVisibilityFn != NULL)"),
-    ("begin_demo_inverted", TFC,
-     "    if (!TheDemoDiscManager.bActive && gSetFlailerScreenVisibilityFn != NULL)",
-     "    if (TheDemoDiscManager.bActive && gSetFlailerScreenVisibilityFn != NULL)"),
-    ("begin_demo_eq1", TFC,
-     "    if (!TheDemoDiscManager.bActive && gSetFlailerScreenVisibilityFn != NULL)",
-     "    if (TheDemoDiscManager.bActive != 1 && gSetFlailerScreenVisibilityFn != NULL)"),
     ("begin_flailer_visible", TFC,
      "        gSetFlailerScreenVisibilityFn(BGF_SCREEN_LOADING_TRACK, 0);",
      "        gSetFlailerScreenVisibilityFn(BGF_SCREEN_LOADING_TRACK, 1);"),
     ("begin_flailer_unguarded", TFC,
-     "    if (!TheDemoDiscManager.bActive && gSetFlailerScreenVisibilityFn != NULL)",
-     "    if (!TheDemoDiscManager.bActive)"),
+     "    if (gSetFlailerScreenVisibilityFn != NULL)" + "\n"
+     + "        gSetFlailerScreenVisibilityFn(BGF_SCREEN_LOADING_TRACK, 0);",
+     "    if (1)" + "\n"
+     + "        gSetFlailerScreenVisibilityFn(BGF_SCREEN_LOADING_TRACK, 0);"),
     ("begin_wait_first", TFC,
      "    eDisableFixUpTables = 1;\n    InGameFlag = 0;",
      "    CALL(gEWaitUntilRenderingDoneFn);\n    eDisableFixUpTables = 1;\n"

@@ -327,7 +327,6 @@ static const BGameFlowStateInfo kStates[BGF_NUM_STATES] = {
     { "RACING",                   NULL, NULL, NULL },
     { "UNLOADING_TRACK_SPECIFIC", NULL, NULL, NULL },
     { "UNLOADING_TRACK_COMMON",   NULL, NULL, NULL },
-    { "EXIT_DEMO_DISC",           NULL, NULL, NULL },
 };
 
 // ------------------------------------------------------------- scenarios

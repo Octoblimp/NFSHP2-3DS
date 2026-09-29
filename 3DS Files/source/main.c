@@ -4,7 +4,7 @@
 // GameFlowStateInfoTable and LaunchFrontendMenus; the three tables that
 // drive it are right here, because they are the part a reader wants to see:
 //
-//   kGameFlowStages[]  the ten game flow states and their Begin/End/Loop
+//   kGameFlowStages[]  the nine game flow states and their Begin/End/Loop
 //   kBootStages[]      LaunchFrontendMenus' push list, with its predicates
 //   kScreens[]         the screen registry: name -> hash -> callback
 //
@@ -208,8 +208,7 @@ static const BBootStage kBootStages[] = {
 static const BGameFlowStateInfo kGameFlowStages[BGF_NUM_STATES] = {
     { "NONE",                     NULL, NULL, NULL },
     { "LOADING_FRONTEND",         bgf_begin_loading_frontend,
-                                  bgf_end_loading_frontend,
-                                  bgf_loop_loading_frontend },
+                                  bgf_end_loading_frontend, NULL },
     { "UNLOADING_FRONTEND",       bgf_begin_unloading_frontend, NULL, NULL },
     { "IN_FRONTEND",              NULL, NULL, NULL },
     { "LOADING_TRACK_COMMON",     NULL, NULL, NULL },
@@ -217,7 +216,6 @@ static const BGameFlowStateInfo kGameFlowStages[BGF_NUM_STATES] = {
     { "RACING",                   NULL, NULL, NULL },
     { "UNLOADING_TRACK_SPECIFIC", NULL, NULL, NULL },
     { "UNLOADING_TRACK_COMMON",   NULL, NULL, NULL },
-    { "EXIT_DEMO_DISC",           NULL, NULL, NULL },
 };
 
 // ----------------------------------------------------------- the 3DS side

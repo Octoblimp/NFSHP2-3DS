@@ -89,7 +89,7 @@ first one. The port does the same thing.
 | # | What | Note |
 |---:|---|---|
 | 1 | `eDisableFixUpTables = 1`, `InGameFlag = 0` | |
-| 2 | `SetFlailerScreenVisibility(LOADING_TRACK, 0)` unless `TheDemoDiscManager.bActive` | seam; `0xd0131dd1` |
+| 2 | `SetFlailerScreenVisibility(LOADING_TRACK, 0)` unless `TheDemoDiscManager.bActive` (never set; the port has no demo disc and always hides it) | seam; `0xd0131dd1` |
 | 3 | eWaitUntilRenderingDone | `gEWaitUntilRenderingDoneFn` |
 | 4 | if `pRaceCoordinator`: `delete pRaceCoordinator` | seam; the deleting dtor, flags 3 |
 | 5 | `pRaceCoordinator = 0` | in the next call's delay slot: after the delete, before the HUD pack |
@@ -189,13 +189,12 @@ There are 16 scenarios. They cover:
 
 - track directions 0, 1, 2, -1 and 0x101;
 - driver counts up to 0x7fffffff;
-- the demo disc at 0, 1, 2 and -1;
 - a RaceCoordinator or none, and the HUD pack or none;
 - 0 to 3 resource files, and 0 to 4 busy polls;
 - a pending state or none;
 - End then Begin, each alone, each twice, Begin then End, and EBEB;
 - two scenarios with every seam NULL.
 
-Results: 702 lines, 0 differ. Of the 74 mutations, 73 are caught. The
+Results: 709 lines, 0 differ. Of the 74 mutations, 73 are caught. The
 other one is port-only: it drops the Unload half of the resource-file
 loop's guard, and the image has no seams to test that against.

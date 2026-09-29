@@ -58,7 +58,7 @@ bvector_check      27 scenarios,  5721 lines, 0 differ   (23/23 mutations caught
 bmath_check        19 scenarios,  6424 lines, 0 differ   (9/9 mutations caught)
 banim_check        23 scenarios,  2219 lines, 0 differ
 bscreens_check     17 scenarios,  1277 lines, 0 differ
-bootflow_check     51 scenarios, 30454 lines, 0 differ   (176 caught, 3 equivalent)
+bootflow_check     48 scenarios, 27803 lines, 0 differ   (168 caught, 3 equivalent)
 bslotpool_check    18 scenarios,  1025 lines, 0 differ   (47/47 mutations caught)
 geometry_check     30 files,     42047 lines, 0 differ   (53/53 mutations caught)
 texsrc_check       6 packs, 2 levels, 2958 textures, 0 differ
@@ -90,7 +90,7 @@ mellowmover_check  39 scenarios, 56080 lines, 0 differ  (341 caught, 5 equivalen
 carmode_check      74 transitions, 19 resets, 36366 lines, 0 differ (484 caught, 14 equivalent)
 carinit_check     247 scenarios,  9637 lines, 0 differ   (168 caught, 1 equivalent; retail's image)
 difficulty_check     42 ops,       374 lines, 0 differ  (24/24 mutations caught; 68 image facts, 11 readers)
-joystick_check     64240 ops,    75891 lines, 0 differ  (250 caught, 3 equivalent)
+joystick_check     64240 ops,    75891 lines, 0 differ  (246 caught, 4 equivalent)
 joyhid_check       every key and stick reaches its event
 realtime_check     20 scenarios, 1044 ops, 3470 lines, 0 differ (91 caught, 2 equivalent)
 realdriver_check  152455 ops,    41163 lines, 0 differ  (118 caught, 4 equivalent)
@@ -110,7 +110,7 @@ scenerycull_check   7273 ops,    46687 lines, 0 differ  (147 caught, 1 equivalen
 eview_check         2103 ops,    15454 lines, 0 differ  (152 caught, 1 equivalent)
 loadertable_check  37553 ops,    50792 lines, 0 differ  (137 caught, 2 equivalent)
 texturepack_check   6698 ops,    11464 lines, 0 differ  (131 caught, 1 equivalent)
-trackflow_check       16 scenarios,  706 lines, 0 differ  (76 caught, 1 equivalent)
+trackflow_check       16 scenarios,  709 lines, 0 differ  (73 caught, 1 equivalent)
 sky_check             46 scenarios, 1311 lines, 0 differ  (93 caught, 2 equivalent)
 sun_check            115 scenarios, 3427 lines, 0 differ  (154/154 mutations caught)
 weather_check         75 scenarios, 4368 lines, 0 differ  (85 caught, 4 equivalent)
@@ -554,6 +554,25 @@ and so replaced every boot.
      (`menuhighlight`). `run_azahar_test.ps1` counts the main menu's own
      bracket moves.
    - The bloom's `SetCurrentMenuItem` waits for the echo.
+
+   **The demo disc's code is out of the port.** The port is the retail
+   game, where `TheDemoDiscManager.bActive` is always 0, so it is
+   written as if it were.
+   - Gone: `demodisc.c`, the `EXIT_DEMO_DISC` state, the loading
+     slideshow and its Loop, `BeginScreenFadeTime`, the one-movie title,
+     the title's `StartDemoDiscGame`, `CheckForDemoDiscTimeout`, and
+     `GenerateJoyEvents`' activity stamp.
+   - Kept: attract mode (`StartDemoMode`, `ConsiderStartDemoMode`,
+     `TheDemoModeReplay`), and retail's event table whole, with
+     `JOY_EVENT_EXIT_DEMO_DISC` (2) and its START+SELECT row, since
+     removing them would renumber every event after them.
+   - The checkers hold `bActive` at 0 on the image. The demo scenarios
+     and mutants are gone: `bootflow_check` 48 scenarios, 171 mutations
+     (168 caught, 3 equivalent); `joystick_check` 250 (246 caught, 4
+     equivalent; `gen-count` is new, as nothing reads the scanners'
+     count now); `trackflow_check` 74 (73 caught, 1 equivalent).
+   - The unused VP6 decoder, `source/vp6/`, is deleted too. Every movie
+     is MV3 and `mv3.c` decodes it.
 
    **Next is the rest of the photos**, in TASKS.md's "The retail
    frontend": the jukebox (`Start(1)` in `NewMainMenu`'s ctor, retail

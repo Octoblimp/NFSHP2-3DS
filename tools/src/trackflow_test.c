@@ -15,7 +15,6 @@
 #include "bslotpool.h"
 #include "collision.h"
 #include "collisionbody.h"
-#include "demodisc.h"
 #include "esolid.h"
 #include "eview.h"
 #include "gameflow.h"
@@ -32,7 +31,6 @@
 int32_t          eDisableFixUpTables;
 TopologyTree     TheTopologyTree;
 TrackPathManager TheTrackPathManager;
-DemoDiscManager  TheDemoDiscManager;
 eTrackDirection  RaceParametersTrackDirection;
 int32_t          RaceParametersNumDriverInfo;
 RaceCoordinator *pRaceCoordinator;
@@ -235,17 +233,16 @@ int main(int argc, char **argv)
     }
     gTrackFlowGameFlow = &flow;
     while (fgets(line, sizeof line, fh)) {
-        int dir, ndi, demo, rc, hud, nf, nb, pend, sfe, ig, dft, rev, jr2;
+        int dir, ndi, rc, hud, nf, nb, pend, sfe, ig, dft, rev, jr2;
         int null;
         char ops[32];
 
-        if (sscanf(line, "S %d %d %d %d %d %d %d %d %d %d %d %d %d %d %31s",
-                   &dir, &ndi, &demo, &rc, &hud, &nf, &nb, &pend, &sfe, &ig,
-                   &dft, &rev, &jr2, &null, ops) != 15)
+        if (sscanf(line, "S %d %d %d %d %d %d %d %d %d %d %d %d %d %31s",
+                   &dir, &ndi, &rc, &hud, &nf, &nb, &pend, &sfe, &ig,
+                   &dft, &rev, &jr2, &null, ops) != 14)
             continue;
         RaceParametersTrackDirection = dir;
         RaceParametersNumDriverInfo = ndi;
-        TheDemoDiscManager.bActive = demo;
         pRaceCoordinator = rc ? (RaceCoordinator *)(void *)rc0_obj : NULL;
         pHudTexturePack = hud ? &hud_obj : NULL;
         nfiles = nf;
