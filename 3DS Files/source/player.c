@@ -4,3 +4,4 @@
 
 int32_t        PlayerNumPlayers;          // 0x003237e0
 struct Player *PlayerPlayersByNumber[2];  // 0x003237d0
+struct Player *PlayerPlayersByIndex[2];   // 0x003237d8

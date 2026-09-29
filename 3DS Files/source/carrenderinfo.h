@@ -462,4 +462,41 @@ int32_t car_shadow_smooth_corners(int32_t n);
 // pointers first in P; P needs room for n + 1. Returns the hull's count.
 int32_t car_shadow_ch2d(bVector3 **P, int32_t n);
 
+// ========================================================== RenderCars
+//
+// rendercars.c: RenderCars and the two Car helpers only it calls, both
+// new in retail.
+//
+//   RenderCars(eView *)                           0x00124060   580 bytes
+//   whether the car blinks in a view              0x00133190   120
+//   the tyres' and the brakes' matrices           0x00135fb8   296
+//
+// eDisplayFrame calls RenderCars for each view before the front end's
+// cars. Retail's differs from the demo's (0x00123468) three ways: the
+// in-car dashboard is gone, the two helpers take the override into
+// account, and a view whose player is in the jump cam draws no damage
+// above the cars.
+
+// Car::DamageAbove(bVector3 *, bVector3 *), 0x00135280, with the camera's
+// eye and direction. It calls DamageCap (0x00135490) and asks the race
+// coordinator, the cop manager and IsBeingPursued, so it goes with the
+// cops (step 12); NULL skips it.
+extern void (*gCarDamageAboveFn)(Car *c, bVector3 *eye, bVector3 *direction);
+
+// 0x00133190: 0 in a view with the override, else Car::IsBlinking or the
+// override's blinking bit for the view.
+int32_t car_is_blinking_in_view(Car *c, int32_t view_id);
+
+// 0x00135fb8: the four tyre and four brake matrices for a view. With the
+// override they are identities placed at the car type's wheels, and
+// otherwise the car's own WheelMatrix and BrakeMatrix.
+void car_get_render_wheel_matrices(Car *c, bMatrix4 *tires,
+                                   bMatrix4 *brakes, int32_t view_id);
+
+// RenderCars(eView *), 0x00124060: every car in pCurrentWorld's CarList
+// but the camera's CarNotToRender, up to 99, that is enabled, not poofed
+// and visible in the view, and not in a blink's off frame. Each is drawn
+// at its override where the view has one, then gets its damage above.
+void render_cars(eView *view);
+
 #endif

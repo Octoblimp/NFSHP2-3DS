@@ -1,7 +1,8 @@
 # CarRenderInfo, what a car draws with
 
 From retail's `Car.obj`. Step 6 of the cars-and-racing work: one is made for
-every car when it is built, and Render (the next slice) draws the car from it.
+every car when it is built. Render draws the car from it, and RenderCars
+calls Render for every car in the world; both have their own sections below.
 
 Ported to `3DS Files/source/carrenderinfo.{c,h}`, with what it needs from
 `epositionmarker.{c,h}`, `cartypeinfo.c` (GetSkinInfo,
@@ -317,3 +318,101 @@ The first pass left ten more survivors, and each one now has a scenario:
   to be inside it at 3 to 4 away. A longer box now is.
 
 With them it runs 740 scenarios over 211648 lines, and 0 differ.
+
+## RenderCars
+
+`rendercars.c` has RenderCars and the two helpers of Car's that only it
+calls:
+
+| Retail | Address | Bytes | Port |
+|---|---|---|---|
+| RenderCars(eView *) | 0x00124060 | 580 | `render_cars` |
+| whether the car blinks in a view | 0x00133190 | 120 | `car_is_blinking_in_view` |
+| the tyres' and the brakes' matrices | 0x00135fb8 | 296 | `car_get_render_wheel_matrices` |
+
+eDisplayFrame calls RenderCars once for each view. After it come the front
+end's cars, RenderFrontEndCars (0x00123d28) twice a view. Only the car
+selector and tCarModelViewer make a FrontEndRenderingCar, so that pair
+waits for the car selector (step 16). In a race the list is empty.
+
+### What RenderCars does
+
+RenderCars does nothing when there is no world. Otherwise it walks the
+world's CarList. It skips the camera's CarNotToRender, a car whose
+RenderingEnabled byte is 0, and every car once 99 have been drawn. For each
+car left:
+
+1. `draw` is IsPoofed's word with its low bit flipped (`xori`), so any
+   value but 1 draws.
+2. If the car blinks in the view, and the world is not paused, `draw`
+   becomes the frame counter's low bit. Paused means `|WorldTimeElapsed|`
+   is 0.001 or less. A car blinks in a view when the override does not hold
+   that view, and either Car::IsBlinking says so or the override's blinking
+   bit for the view is set. A NaN step is not paused.
+3. If the override's visible bit for the view is clear, `draw` is 0. Every
+   bit is taken by the view's ID shifted by its low five bits, as `srav`
+   takes it.
+4. A car that draws counts towards the 99. Its four tyre and four brake
+   matrices are built on the stack. In a view the override holds, they are
+   identities placed at the car type's four wheels, with w = 1. Otherwise
+   they are copies of CarState's WheelMatrix and BrakeMatrix.
+5. Render gets the override's position and body matrix in a view it holds,
+   and CarState's GeometryPosition and BodyMatrix in the others. The flags
+   and the forced lights are both 0.
+6. The view's player is the first of `pPlayersByIndex` whose ViewID the
+   view's ID is. If that player's camera zone is 6 or 7 (the jump cam and
+   just after it), nothing more is drawn for the car. Otherwise DamageAbove
+   gets the camera's eye and direction.
+
+The loop's test reads `pCurrentWorld` again each time, after whatever the
+car's calls did, and so does the port.
+
+Retail's RenderCars is not the demo's (0x00123468). The demo draws the
+in-car dashboard for the camera's own car. It blinks the cars and places
+the wheels without looking at the override, and it draws the damage above
+the cars in every view.
+
+### Where the port differs
+
+- **DamageAbove** (0x00135280) is `gCarDamageAboveFn`, and NULL skips it.
+  It calls DamageCap (0x00135490) and asks the race coordinator, the cop
+  manager and IsBeingPursued, so it is ported with the cops (step 12).
+- **Player** is still a partial layout. RenderCars reads ViewID and
+  nZoneCurrent, which retail keeps at 24 and 88, and the port keeps them at
+  20 and 76, by name.
+
+### The check
+
+`python tools/rendercars_check.py` runs RenderCars on retail's image in
+mipsemu against the port in a host harness. 0x00133190, 0x00135fb8 and
+eIdentity run as shipped. IsPoofed, IsBlinking, Render and DamageAbove are
+stubs on both sides, and each prints its arguments. Render's stub also
+prints all eight matrices, since they are on the stack.
+
+Any of the four stubs can move `pCurrentWorld` onto a later car at its k-th
+call. Nothing in the game does that yet; it shows that both sides read it
+again for each test.
+
+The scenarios cover:
+
+- no world and an empty list;
+- every car flag in eight views, among them 31, 32, 33 and -1. Each flag
+  word has random bits, and the neighbours of the view's bit are set the
+  other way;
+- the blink's timing: the step at 0 and -0, at 0.001 and the floats either
+  side of it, a NaN and both infinities, against six frame counters;
+- the camera's own car, 98 to 128 cars, and cars that don't draw among the
+  first 99;
+- each way of finding the view's player, over seven zones;
+- a NULL render info, and one shared by two cars;
+- 400 random calls.
+
+It ran 1272 scenarios over 20075 lines, and 0 differed on the first run.
+They reach 3684 renders, 974 of them at the override, and 3492 damage
+calls. Six calls hit the cap of 99. The world moves in 27.
+
+`--mutate` runs 89 mutations over `rendercars.c`, and all 89 are caught.
+Two of them crash the harness: `rc_null_world` and `rc_next_prev`. The
+four on the cap are the narrowest, at 16 and 24 lines, and only the cap's
+scenarios catch them: 98, 100, `<` for `<=`, and counting a car before it
+draws.

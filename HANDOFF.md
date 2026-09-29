@@ -9592,3 +9592,53 @@ Next is RenderCars (`0x00124060`), which builds each car's tyre and brake
 matrices and calls Render. The front end's RenderFrontEndCar and
 RenderFrontEndCars (`0x00123c90`, `0x00123d28`) go with it. They close
 step 6. Then come steps 7 and 8.
+
+## Session 31, continued (2026-09-29) -- RenderCars
+
+### The port
+
+`rendercars.c` is new. It has retail's RenderCars (`0x00124060`, 580
+bytes) and the two helpers of Car's that only it calls:
+- `0x00133190`: whether the car blinks in a view;
+- `0x00135fb8`: the four tyre and four brake matrices.
+
+RenderCars walks the world's CarList. It skips the camera's own car, a
+disabled car, a poofed car and a car the view can't see, and it draws at
+most 99. A blinking car shows on odd frames unless the world is paused.
+Where the override holds the view, the car is drawn at the override, and
+its wheels are identities at the car type's wheel positions. Then
+DamageAbove gets the camera's eye and direction, unless the view's player
+is in the jump cam (zones 6 and 7). Retail's differs from the demo's: the
+dashboard is gone, the override now reaches the blink and the wheels, and
+the jump cam skips the damage.
+
+DamageAbove is a seam, `gCarDamageAboveFn`, which stays NULL until the
+cops (step 12). `player.h` now names ViewID, and `player.c` has
+`PlayerPlayersByIndex`. The loop reads `pCurrentWorld` again for every
+test, as retail does. `docs/formats/car-render-info.md` has a new
+"RenderCars" section.
+
+The front end's cars are not in this slice. Only CarSelector and
+tCarModelViewer make a FrontEndRenderingCar, so they wait for the car
+selector (step 16). CONTINUE.md keeps their addresses and layout notes.
+
+### The check
+
+`tools/rendercars_check.py` runs retail's RenderCars in RetailEmu, and
+`tools/src/rendercars_test.c` is its host harness. IsPoofed, IsBlinking,
+Render and DamageAbove are stubs on both sides, and each prints its
+arguments. Render's stub also prints the eight matrices. Any stub can
+move `pCurrentWorld` onto a later car, which tests the reread.
+
+- 1272 scenarios, 20075 lines, 0 differ on the first run. They reach 3684
+  renders (974 at the override), 3492 damage calls, the cap in six calls
+  and the moved world in 27.
+- `--mutate` runs 89 mutations, and all 89 are caught.
+
+The CIA builds, and `rendercars.c` compiles without a warning. Nothing
+calls RenderCars in the game yet, so Azahar was not run.
+
+### Next
+
+Step 6 is done. Next is step 7: DriveCameraMover (CM_DRIVE) and Player's
+ChangeCameraMover. CONTINUE.md has the retail addresses.
