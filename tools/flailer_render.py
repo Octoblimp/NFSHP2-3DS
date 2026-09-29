@@ -130,16 +130,23 @@ class Image(object):
 
 
 def ps2_color(word):
-    """0x80 is full intensity on the GS, so double and clamp, as texpack does."""
-    return tuple(min(255, ((word >> (8 * i)) & 0xFF) * 2) for i in range(4))
+    """The four GS bytes, r, g, b, a low byte first; 0x80 is full intensity.
+
+    They stay raw: draw_sprite multiplies them into the texel over 0x80 and
+    clamps only the product, which is the GS's MODULATE. Doubling and
+    clamping each byte first would cap a colour past 0x80 at the texel, and
+    WHITE16X16 (grey 0x80 at alpha 0x40) is what those colours lift.
+    """
+    return tuple((word >> (8 * i)) & 0xFF for i in range(4))
 
 
 def draw_sprite(canvas, img, sx, sy, sw, sh, dx, dy, dw, dh, tints, alpha):
     """Nearest-neighbour blit of img[sx,sy,sw,sh] into the destination rect.
 
     `tints` is the four corner colours in strip order (top-left, top-right,
-    bottom-right, bottom-left), bilinearly interpolated and multiplied into
-    the texel, which is what the GS does with a gouraud colour.
+    bottom-right, bottom-left), raw GS bytes, bilinearly interpolated and
+    multiplied into the texel over 0x80 -- the GS's MODULATE with a gouraud
+    colour, clamped after the product.
     """
     dw, dh = int(dw), int(dh)
     if dw <= 0 or dh <= 0 or sw <= 0 or sh <= 0:
@@ -158,8 +165,10 @@ def draw_sprite(canvas, img, sx, sy, sw, sh, dx, dy, dw, dh, tints, alpha):
             bot = [bl[k] + (br[k] - bl[k]) * u for k in range(4)]
             t = [top[k] + (bot[k] - top[k]) * v for k in range(4)]
             canvas.blend(int(dx) + i, int(dy) + j,
-                         r * t[0] // 255, g * t[1] // 255, b * t[2] // 255,
-                         int(a * t[3] / 255 * alpha))
+                         min(255, int(r * t[0] / 128)),
+                         min(255, int(g * t[1] / 128)),
+                         min(255, int(b * t[2] / 128)),
+                         min(255, int(a * t[3] / 128 * alpha)))
 
 
 # -- bundle contents ---------------------------------------------------------

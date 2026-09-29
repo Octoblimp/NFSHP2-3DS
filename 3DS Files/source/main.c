@@ -67,6 +67,9 @@
 #include "joyevent.h"
 #include "joyhid.h"
 #include "joypad.h"
+#include "jbstream.h"
+#include "jukebox.h"
+#include "songmon.h"
 #include "avimovie.h"
 #include "mellowmover.h"
 #include "physcomp.h"
@@ -382,6 +385,40 @@ static void viewerCallback(BMenu* m, BScreenMessage msg,
 // when a screen comes back.
 static BsndDriver gSnd;
 
+// Fred (0x002fc050), what the card loads over. The frontend database is
+// still the port's defaults (memcard.h), bar the audio options at +148,
+// which the jukebox and the volumes read.
+static uint8_t g_fred[BMC_SAVE_SIZE];
+#define FRED_AUDIO_OPTIONS 148
+
+// sound::jukebox (0x003115d0), the EA TRAX player, and what it asks of the
+// game. The flow's CurrentGameFlowState is its gp-21420; the VBlank count
+// is FrameCounter, one a frame; nothing pauses the flow or sets cops yet.
+static JBSound g_jukebox;
+static int     g_audioMode = 1;     // gp-18892, stereo
+
+static int      jbState(void* c) { (void)c; return g_flow.current; }
+static int      jbMaxCops(void* c) { (void)c; return 0; }
+static uint32_t jbVBlank(void* c) { (void)c; return (uint32_t)FrameCounter; }
+static int      jbPaused(void* c) { (void)c; return 0; }
+
+static const JBWorld kJukeboxWorld = {
+    NULL, jbState, jbMaxCops, jbVBlank, jbPaused,
+};
+
+static void jukeboxAssert(int line)
+{
+    logLine("jukebox: retail asserts at line %d", line);
+}
+
+// No ndsp: bSound::GetStatus() is not 1, and that is all LoadCartridge
+// asks before it gives up.
+static int jbSoundDown(void* c) { (void)c; return 0; }
+static const JBHost kNoJukeboxHost = {
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, jbSoundDown, NULL,
+};
+
 // FlailerScreen::Activate (0x0016a858) builds the screen's FlailerMenu
 // before its Callback hears SCREEN_ACTIVATE, and activates it after: the
 // Callback can gray items the menu already has -- the language screen hides
@@ -665,9 +702,13 @@ static void hookLoadResource(void* user, const char* path, BGameFlowDone done)
     bootQueue((Boot*)user, path, done);
 }
 
-// LoadSoundRegions. fesound_init loaded the frontend's banks at boot.
+// LoadSoundRegions. fesound_init loaded the frontend's banks at boot;
+// LoadSoundRegionsFrontEnd (0x001ae9a0) starts with the jukebox's list, the
+// menu's.
 static void hookLoadSoundRegions(void* user, BGameFlowDone done)
 {
+    jb_music_set_selection(&g_jukebox, g_fred + FRED_AUDIO_OPTIONS,
+                           JB_CAT_MENU_MUSIC);
     bootQueue((Boot*)user, "sound regions", done);
 }
 
@@ -867,9 +908,15 @@ static BMemcardFileSys* hookNewFileSys(void* user)
     return &c->base;
 }
 
-// Fred (0x002fc050), what the card loads over. Nothing reads it yet: the
-// frontend database is still the port's defaults (memcard.h).
-static uint8_t g_fred[BMC_SAVE_SIZE];
+// OverwriteFred's calls after the copy: the audio options' ApplySettings
+// (0x001ef120) so far.
+static void hookFredLoaded(void* user, uint8_t* fred)
+{
+    (void)user;
+    int mode = jb_audio_apply(&g_jukebox, fred + FRED_AUDIO_OPTIONS);
+    g_audioMode = mode;             // sound::SetAudioMode
+    logLine("audio options loaded: mode %d", mode);
+}
 
 static void hookTrace(void* user, const char* line)
 {
@@ -1192,6 +1239,85 @@ static void hookAnimGetScale(void* user, uint32_t screen, uint32_t object,
     *sy = o.scaleY;
 }
 
+// ------------------------------------------------------------- EA TRAX
+
+// FlailerScreenList's tNewSongMonitor (songmon.h), and what it asks: the
+// jukebox, RealTimer, and GLOBALB's CHYRON screen.
+static BSongMonitor g_songMonitor;
+
+static int smIsPlaying(void* user)
+{
+    (void)user;
+    return jb_music_is_playing(&g_jukebox);
+}
+
+static uint32_t smCurrentTrack(void* user)
+{
+    (void)user;
+    return jb_current_track(&g_jukebox);
+}
+
+static const char* smTrack(void* user, int field)
+{
+    (void)user;
+    return jb_track_string(&g_jukebox, -1, -1, field);
+}
+
+static uint32_t smRealTimer(void* user)
+{
+    (void)user;
+    return g_flow.realTimer;
+}
+
+static int32_t smWidth(void* user, uint32_t screen, uint32_t object)
+{
+    BUI*    ui;
+    int32_t idx = animFind((Boot*)user, screen, object, BUI_TYPE_NONE, &ui);
+    if (idx < 0) return 0;
+    return uirender_object_width(((Boot*)user)->ui, ui, (uint32_t)idx);
+}
+
+// FlailerGetScale (0x001444e8): the pair left alone for no such object.
+static void smGetScale(void* user, uint32_t screen, uint32_t object,
+                       float* sx, float* sy)
+{
+    BUI*      ui;
+    BUIObject o;
+    int32_t   idx = animFind((Boot*)user, screen, object, BUI_TYPE_NONE, &ui);
+    if (idx < 0 || !bui_object(ui, (uint32_t)idx, &o)) return;
+    *sx = o.scaleX;
+    *sy = o.scaleY;
+}
+
+static void smSetScaleX(void* user, uint32_t screen, uint32_t object,
+                        float sx)
+{
+    BUI*      ui;
+    BUIObject o;
+    int32_t   idx = animFind((Boot*)user, screen, object, BUI_TYPE_NONE, &ui);
+    if (idx < 0 || !bui_object(ui, (uint32_t)idx, &o)) return;
+    bui_set_object_scale(ui, (uint32_t)idx, sx, o.scaleY);
+}
+
+static const BSongMonitorHooks kSongMonitorHooks = {
+    &g_boot, smIsPlaying, smCurrentTrack, smTrack, smRealTimer,
+    hookSetScreenVisible, hookAnimPrintText, smWidth, smGetScale,
+    smSetScaleX,
+};
+
+static void hookSongMonitor(void* user)
+{
+    (void)user;
+    int printed = g_songMonitor.printed;
+    bsm_update(&g_songMonitor);
+    if (!printed && g_songMonitor.printed) {
+        const char* artist = smTrack(NULL, JB_TRACK_ARTIST);
+        const char* name   = smTrack(NULL, JB_TRACK_NAME);
+        logLine("ea trax: %s / %s", artist ? artist : "(null)",
+                name ? name : "(null)");
+    }
+}
+
 // The four reads tPopupMenu makes (banim.h). A handle is bui.c's object
 // index, which is what bui_next_in_group walks on.
 static int32_t hookAnimNextInGroup(void* user, uint32_t screen, uint32_t group,
@@ -1266,10 +1392,21 @@ static void hookScreenMovieStop(void* user)
     bgf_stop_movie(&g_flow);
 }
 
+// sound::jukebox::Start and Stop (0x001aeab0, 0x001aec90).
 static void hookJukebox(void* user, int start)
 {
     (void)user;
-    logLine("jukebox %s", start ? "start" : "stop");
+    if (start) {
+        jb_music_start(&g_jukebox, g_fred + FRED_AUDIO_OPTIONS, 1);
+    } else {
+        jb_music_stop(&g_jukebox);
+    }
+    logLine("jukebox %s: %s", start ? "start" : "stop",
+            jb_is_cartridge_loaded(&g_jukebox.jukebox)
+                ? jb_tune_name(&g_jukebox.jukebox,
+                               g_jukebox.jukebox.curCatNum,
+                               g_jukebox.jukebox.curTuneNum)
+                : "no cartridge");
 }
 
 // TheEasterEggs' Start and Stop, NewMainMenu's. The 78 codes it listens for
@@ -1787,13 +1924,32 @@ int main(int argc, char** argv)
 
     // ndsp and the menu banks. Silence is a survivable failure -- a card with
     // no SOUND directory still runs the frontend -- so nothing below checks.
-    if (bsnd_hw_init(&gSnd)) {
+    bool soundUp = bsnd_hw_init(&gSnd);
+    if (soundUp) {
         fesound_init(&gSnd);
         logPrintf("Sound: %u patches in %u voices\n",
                   (unsigned)gSnd.patchCount, gSnd.voices);
     } else {
         logPrintf("Sound: ndsp unavailable, running silent\n");
     }
+    // InitializeSoundDriver's jukebox half (0x001ae608): the EA TRAX
+    // cartridge off the disc, then each category's shipped volume. With no
+    // ndsp the jukebox is still made, with no host: GetStatus is not 1, so
+    // LoadCartridge does nothing and every Start finds no cartridge.
+    jb_sound_init(&g_jukebox,
+                  soundUp ? jbstream_host(g_jukebox.categoryVolume,
+                                          jukeboxAssert)
+                          : &kNoJukeboxHost,
+                  &kJukeboxWorld);
+    jb_load_cartridge(&g_jukebox.jukebox, "SOUND\\JukeboxM.JBC", false);
+    jb_default_category_volumes(&g_jukebox);
+    // FrontendDatabase::InitWithDefaults' audio options (0x001ef1c8), what
+    // the card's settings load over.
+    jb_audio_init_with_defaults(&g_jukebox, g_fred + FRED_AUDIO_OPTIONS,
+                                g_audioMode);
+    logPrintf("Jukebox: %s, %u tunes\n",
+              jb_is_cartridge_loaded(&g_jukebox.jukebox) ? "loaded" : "none",
+              (unsigned)g_jukebox.jukebox.numTunes);
 
     // Four times citro3d's default. A track frame is a draw per object the
     // cull keeps, each with its own matrices, and the default's 256 KB is
@@ -1865,6 +2021,11 @@ int main(int argc, char** argv)
     hooks.swapLogoArt      = hookSwapLogoArt;
     hooks.displayFrame     = hookDisplayFrame;
     hooks.newFileSys       = hookNewFileSys;
+    hooks.fredLoaded       = hookFredLoaded;
+    // The title screen's Start once its movies are done, NewMainMenu's
+    // constructor's, and UnlaunchFrontendMenus' Stop.
+    hooks.jukebox          = hookJukebox;
+    hooks.songMonitor      = hookSongMonitor;
     hooks.easterEggs       = hookEasterEggs;
     hooks.moveBrackets     = hookMoveBrackets;   // NewMainMenu's highlight
     hooks.setBlurb         = hookSetBlurb;
@@ -1875,6 +2036,8 @@ int main(int argc, char** argv)
 
     bgf_init(&g_flow, kGameFlowStages, BGF_NUM_STATES,
              kScreens, NUM_SCREENS, kBootStages, NUM_BOOT_STAGES, &hooks);
+    // FlailerScreenList's constructor makes its song monitor (0x0016c25c).
+    bsm_init(&g_songMonitor, &kSongMonitorHooks);
     g_flow.fred = g_fred;
     bgf_load_global_chunks(&g_flow);
     logLine("global chunks loaded, LOADING drawn");
@@ -2048,6 +2211,11 @@ int main(int argc, char** argv)
         // bSound::updateCompletedVoices' slot in the frame. Without it the
         // allocator hands out 24 channels and then never another.
         bsnd_update(&gSnd);
+        // sound::Update's jukebox (0x001af4c0): its Update and a delayed
+        // start, then bSound::Update's -- the sample's callbacks. Its 8 ms
+        // gate always passes at 60 frames a second.
+        jb_music_update(&g_jukebox, g_fred + FRED_AUDIO_OPTIONS, BOOT_DT);
+        if (soundUp) jbstream_poll(&g_jukebox.jukebox);
 
         uiTimer += (uint32_t)(int)(BOOT_DT * 4000.0f);
         uirender_set_time(&ui, (float)uiTimer * 0.00025f);
@@ -2591,6 +2759,16 @@ int main(int argc, char** argv)
                 (int)InGameFlag, (int)eDisableFixUpTables, solids, models,
                 packs);
     }
+    if (soundUp) {
+        JBStreamStats js;
+        jbstream_stats(&js);
+        logLine("jukebox stream: %u pairs read, %u samples queued, "
+                "%u played, volume %.3f",
+                (unsigned)js.pairsRead, (unsigned)js.samplesQueued,
+                (unsigned)js.samplesPlayed, (double)js.mix);
+    }
+    jb_music_stop(&g_jukebox);
+    jb_close(&g_jukebox.jukebox);
     bsnd_hw_close(&gSnd);
     georender_exit();
     uirender_free(&ui);

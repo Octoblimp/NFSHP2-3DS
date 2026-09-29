@@ -9186,3 +9186,101 @@ shown, on any screen.
 The jukebox (notes above), then EA TRAX (`tNewSongMonitor`,
 `0x0016bd30`..`0x0016c214`, the CHYRON screen in GLOBALB), Setup, car
 select, the briefing and step 6.
+
+## Session 31 (2026-09-29) -- The jukebox, EA TRAX, and the GS's MODULATE
+
+The main menu has its music and its EA TRAX box now, as the retail photo
+shows. Getting the box to look like the photo found a colour bug that
+reached every WHITE16X16 strip and mask in the frontend.
+
+### The jukebox
+
+- `jukebox.c` is retail's `cJukeboxPlayer`, `cJukeboxCartridge` and
+  `sound::jukebox`. It is free of `<3ds.h>`; the sample is a `JBHost`.
+  `jukebox_check`: 952 ops, 4833 lines, 0 differ. Of 283 mutations,
+  279 are caught and 4 are equivalent.
+- `jbstream.c` is the 3DS host. It streams `SOUND\JukeboxM.JBC` off the
+  card, decodes a pair at a time on a worker thread into eight 128-frame
+  waves on ndsp channel 22, and posts the events back for `jbstream_poll`
+  to deliver in retail's order. `bsnd` gave up its last voice for it
+  (`BSND_HW_VOICES` 22), and the movies keep 23. `jbstream_check` holds
+  the decoder to `audio_convert.py`'s on real tunes, cut at the pair
+  boundaries and the end: 0 differ. `jbstream_stats` counts
+  the pairs read and the samples queued and played, and the shutdown
+  line logs them.
+- The format, the defaults and the port are in `docs/formats/jukebox.md`.
+- **The user: "Still no audio starting after you get to main menu", then
+  "The tune only starts once you go to like the audio settings".**
+  Gameflow's own `hooks.jukebox` was never set; only the Mode Selects'
+  `scrHooks.jukebox` was. So the title's `Start` and `NewMainMenu`'s did
+  nothing, and the first `Start` to play came from a Mode Select. `main.c`
+  sets it now. On Azahar the tune starts on entering the main menu:
+  "jukebox start: Hot Action Cop-Fever for the Flava--Rock-4", about 46
+  s of samples played in a run, mix 0.450.
+- `run_azahar_test.ps1` reports the load line, each `jukebox start:` and
+  the last `jukebox stream:` line.
+
+### The EA TRAX box
+
+- **The user: "Now I hear it but no EA Trax thing popped up on the
+  bottom left".** The port had no `tNewSongMonitor`.
+- `songmon.c` is retail's (`0x0016bd30`..`0x0016c214`). The layout and
+  `Update`, step by step, are in `jukebox.md`, "The EA TRAX box". It shows
+  GLOBALB's CHYRON screen for five seconds from each tune's start, prints
+  the label, artist and "title", and stretches `CHYRON_BG_1..5` to the
+  widest line plus 20.
+  - `bgf_frame` ticks it after the movie, through `hooks.songMonitor`, as
+    `FlailerScreenList::Tick` (+0x7c) does.
+  - `uirender_object_width` is `FlailerObjectChunk::GetWidth`: a text
+    object's summed advances times ScaleX, with no kerning and no fixed
+    cell, or a bitmap's (int)(texture width * ScaleX).
+  - `songmon_check`: 321 ops, 1307 lines, 0 differ. Of 48 mutations, 46
+    are caught and 2 are equivalent (`t-unsigned`, `scale-preset`).
+- On Azahar: "ea trax: Hot Action Cop / Fever for the Flava". The box
+  shows "Fever for the Flava", Hot Action Cop and EA GAMES TRAX over the
+  Help button, and the strips come out 184 wide (the PS2 photo's are about
+  183).
+
+### The GS's MODULATE
+
+- **The user's side by side (3DS, then PS2).** The PS2 has solid charcoal
+  bars behind the lines, with lighter rules between them. The 3DS showed
+  the text over the grid.
+- The strips were drawn: a shown-minus-hidden difference of two frames
+  lifted the dark space and dimmed the grid lines inside the box. It was
+  the colour arithmetic.
+  - `WHITE16X16` is grey 0x80 at alpha 0x40 on the disc, not white.
+  - The strips' colour is black at alpha 0xc8, over-bright on purpose.
+    The GS multiplies texel by vertex over 0x80 and clamps the product:
+    0x40 * 0xc8 >> 7 = 0x64, 78%.
+  - `tint_color` doubled and clamped each byte first, and citro2d's
+    `C2D_TintMult` caps the tint at 1.0, so it came out 50%. White on
+    WHITE16X16 (`ffffffb4`) came out grey 0x80 rather than 0xff.
+- `uirender.c` passes the raw GS byte as the tint now. `draw_image` sets
+  texenv 0's scale to `GPU_TEVSCALE_2` after each screen-path draw. citro2d
+  rebuilds texenv 0 only inside a draw, on a mode change, and flushes
+  first. Switching the scale flushes, and `end_gs_scale` puts it back after
+  `uirender_draw_screen` and `uirender_draw_visible`, so the port's own
+  wrapped text and everything else drawn after the UI keep 1x. Values up
+  to 0x80 give what they gave before, to 1/255.
+- `flailer_render.py` does the same multiply. Its CHYRON over a grid is
+  the photo's box.
+- On Azahar the box has its charcoal bars and rules, and the grid is gone
+  behind them. The main menu's unselected rows are darker too:
+  `MI_n_MASK` is `000000aa` on WHITE16X16, 66% rather than 50%, which is
+  the photo again. The title, Cops On, You're The Cop and Options look as
+  they did.
+- Not traced: `RenderSingleFlailerBitmap`'s GS registers. This is the
+  standard `TFX=MODULATE` arithmetic, and the photo agrees with it.
+  `flailer-ui.md`, "Colour: the GS's MODULATE".
+
+### Still unlike the photo
+
+- The TM between GAMES and TRAX, a half-scale text object, is a dot at
+  400x240.
+- The blurb is on the bottom screen, by design (`SCROLLING_TEXT` hidden).
+
+### Next
+
+The Setup screen, car select, the briefing, then step 6
+(`Car::InitRenderInfo`, `wip/carrenderinfo`).

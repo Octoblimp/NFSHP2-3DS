@@ -283,16 +283,55 @@ static void subtex_from_pixels(Tex3DS_SubTexture* st, float texW, float texH,
 }
 
 // PS2 colours are GS scale (0x80 is full intensity, 0x81..0xff is the
-// over-bright range), stored r,g,b,a low byte first. C2D_TintMult multiplies
-// the tint by the texel, which is what the GS does with a gouraud colour.
+// over-bright range), stored r,g,b,a low byte first. Every Flailer quad goes
+// through the GS's MODULATE: texel times vertex colour over 0x80, alpha
+// included, clamped only after the product. C2D_TintMult caps the tint at 1.0
+// before it multiplies, so a colour past 0x80 could never lift a texel the
+// way the GS does -- and WHITE16X16, under most of the frontend's strips and
+// masks, is grey 0x80 at alpha 0x40 on the disc, which is exactly what the
+// over-bright colours are there to lift: CHYRON_BG_2..5's alpha 0xc8 is 78%
+// on the GS and came out 50%. So the tint is the raw GS byte, and draw_image()
+// has texenv 0 double the product, which the combiner then clamps.
 static uint32_t tint_color(uint32_t rgba, float alpha)
 {
-    uint8_t c[4];
-    bui_color(rgba, c);
-    float a = (float)c[3] * alpha;
+    float a = (float)((rgba >> 24) & 0xff) * alpha;
     if (a > 255.0f) a = 255.0f;
     if (a < 0.0f)   a = 0.0f;
-    return C2D_Color32(c[0], c[1], c[2], (uint8_t)a);
+    return C2D_Color32(rgba & 0xff, (rgba >> 8) & 0xff, (rgba >> 16) & 0xff,
+                       (uint8_t)a);
+}
+
+// Whether the quads citro2d has queued want texenv 0 doubled.
+static bool s_gsScale;
+
+static void set_tev_scale(bool gs)
+{
+    C3D_TexEnvScale(C3D_GetTexEnv(0), C3D_Both,
+                    gs ? GPU_TEVSCALE_2 : GPU_TEVSCALE_1);
+}
+
+// C2D_DrawImage with a GS colour (`gs`) or a plain C2D one. citro2d rebuilds
+// texenv 0 only inside a draw, when the mode changes, and flushes what it had
+// queued first, so the scale goes on after the draw; switching the scale
+// flushes too, or the quads already queued would take the new one.
+static void draw_image(C2D_Image img, const C2D_DrawParams* p,
+                       const C2D_ImageTint* tint, bool gs)
+{
+    if (gs != s_gsScale) {
+        C2D_Flush();
+        s_gsScale = gs;
+    }
+    C2D_DrawImage(img, p, tint);
+    set_tev_scale(gs);
+}
+
+// Puts texenv 0 back as citro2d built it, for whatever draws after the UI.
+static void end_gs_scale(void)
+{
+    if (!s_gsScale) return;
+    C2D_Flush();
+    set_tev_scale(false);
+    s_gsScale = false;
 }
 
 static void fill_tint(C2D_ImageTint* tint, const uint32_t rgba[4], float alpha)
@@ -447,7 +486,7 @@ static void draw_bitmap(UIRenderer* r, const BUIObject* o, const UIView* v)
         p.pos.y += p.center.y;
         p.angle = (float)o->rotation * 3.14159265f / 180.0f;
     }
-    C2D_DrawImage(img, &p, &tint);
+    draw_image(img, &p, &tint, true);
 }
 
 // The string a text object actually draws. LanguageID wins over the inline
@@ -487,11 +526,11 @@ static float measure(UIFont* f, const char* s, size_t len, float scaleX,
 }
 
 // `color` is a finished C2D colour, the view alpha already in it: the
-// screen path passes tint_color(o->color, v->alpha) and the port's own
-// wrapped text passes a plain colour of its own.
+// screen path passes tint_color(o->color, v->alpha) with `gs` set, and the
+// port's own wrapped text passes a plain colour of its own without.
 static void draw_glyph(UIRenderer* r, UIFont* f, const BGlyph* g, float x,
                        float y, float w, float h, uint32_t color,
-                       const UIView* v)
+                       const UIView* v, bool gs)
 {
     UITexture* t = font_sheet(r, f);
     if (!t || w <= 0.0f || h <= 0.0f) return;
@@ -510,7 +549,7 @@ static void draw_glyph(UIRenderer* r, UIFont* f, const BGlyph* g, float x,
     p.pos.y = v->originY + y * v->scaleY;
     p.pos.w = w * v->scaleX;
     p.pos.h = h * v->scaleY;
-    C2D_DrawImage(img, &p, &tint);
+    draw_image(img, &p, &tint, gs);
 }
 
 static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
@@ -555,7 +594,7 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
                                   &hg)) {
                 draw_glyph(r, hf, &hg, penX, o->y + hg.offset * o->scaleY,
                            hg.width * o->scaleX, hg.height * o->scaleY,
-                           tint_color(o->color, v->alpha), v);
+                           tint_color(o->color, v->alpha), v, true);
                 penX += hg.advance * o->scaleX;
             }
             prev = -1;
@@ -573,7 +612,7 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
             float inset = (f->fixedCell - g.advance) * 0.5f;
             draw_glyph(r, f, &g, penX + inset, o->y + g.offset * o->scaleY,
                        g.width * o->scaleX, g.height * o->scaleY,
-                       tint_color(o->color, v->alpha), v);
+                       tint_color(o->color, v->alpha), v, true);
             penX += f->fixedCell * o->scaleX;
             prev = -1;
             continue;
@@ -589,7 +628,7 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
         // reproduced here rather than quietly corrected.
         draw_glyph(r, f, &g, penX, o->y + g.offset * o->scaleY,
                    g.width * o->scaleX * o->scaleX, g.height * o->scaleY,
-                   tint_color(o->color, v->alpha), v);
+                   tint_color(o->color, v->alpha), v, true);
         penX += g.advance * o->scaleX;
         prev = ch;
     }
@@ -744,7 +783,8 @@ static float wrap_run(UIRenderer* r, const char* text, size_t len,
                 if (KERNING_ENABLED && prev >= 0 && gf == f)
                     penX += bfont_kerning(&f->font, prev, ch) * scale;
                 draw_glyph(r, gf, &g, penX, top + g.offset * scale,
-                           g.width * scale, g.height * scale, color, &v);
+                           g.width * scale, g.height * scale, color, &v,
+                           false);
                 penX += g.advance * scale;
                 prev = (gf == f) ? (int)ch : -1;
             }
@@ -859,6 +899,34 @@ bool uirender_object_bounds(UIRenderer* r, const BUI* ui, uint32_t index,
     return true;
 }
 
+int32_t uirender_object_width(UIRenderer* r, const BUI* ui, uint32_t index)
+{
+    BUIObject o;
+    if (!r || !ui || !bui_object(ui, index, &o)) return 0;
+    if (o.type == BUI_TYPE_TEXT) {
+        UIFont* f = find_font(r, o.fontHash);
+        if (!f) return 0;
+        size_t      len = 0;
+        const char* s   = object_text(r, &o, &len);
+        float       sum = 0.0f;
+        for (size_t i = 0; s && i < len; i++) {
+            BGlyph g;
+            if (bfont_glyph(&f->font, (unsigned char)s[i], &g))
+                sum += g.advance;
+        }
+        return (int32_t)(o.scaleX * sum);
+    }
+    if (o.type == BUI_TYPE_BITMAP) {
+        int idx = find_texture(r, o.textureHash);
+        if (idx < 0) return 0;
+        UITexture* t = &r->textures[idx];
+        if (!t->override && !t->valid) return 0;
+        uint16_t tw = t->override ? t->overrideW : t->w;
+        return (int32_t)((float)tw * o.scaleX);
+    }
+    return 0;
+}
+
 static UIView screen_view(const UIRenderer* r, const BUIScreen* screen,
                           float alpha)
 {
@@ -909,6 +977,7 @@ void uirender_draw_screen(UIRenderer* r, BUI* ui, const BUIScreen* screen,
     C2D_SetTintMode(C2D_TintMult);
     for (int pass = 0; pass < BUI_NUM_LAYERS; pass++)
         draw_layer(r, ui, screen, kLayerOrder[pass], &v);
+    end_gs_scale();
 }
 
 // The layer table is one for the whole frame, and every visible screen adds
@@ -929,5 +998,6 @@ void uirender_draw_visible(UIRenderer* r, float alpha)
             }
         }
     }
+    end_gs_scale();
 }
 #endif  // __3DS__

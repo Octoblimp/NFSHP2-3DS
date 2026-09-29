@@ -439,5 +439,11 @@ Write-Host ("Main menu:  {0} bracket moves ({1})" -f $menuBrackets.Count, (($men
 $eggs    = $dbg | Where-Object { $_ -match "^easter eggs " }
 $eggHide = $dbg | Where-Object { $_ -match "flow vis group ae0f8aa1 74e404b4 " }
 Write-Host ("Main menu:  {0} easter egg start/stops, {1} egg group sets ({2} shown)" -f $eggs.Count, $eggHide.Count, ($eggHide | Where-Object { $_ -match " 1$" }).Count)
+$jbLoad   = $dbg | Where-Object { $_ -match "^Jukebox: " }
+$jbStart  = $dbg | Where-Object { $_ -match "^jukebox start: " }
+$jbStream = $dbg | Where-Object { $_ -match "^jukebox stream: " }
+if ($jbLoad)   { Write-Host ("Jukebox:    {0}" -f ($jbLoad | Select-Object -First 1)) }
+$jbStart | Select-Object -Unique | ForEach-Object { Write-Host ("            {0}" -f $_) }
+if ($jbStream) { Write-Host ("            {0}" -f ($jbStream | Select-Object -Last 1)) }
 if ($leftLoop)  { Write-Host ("Textures:   {0}" -f ($leftLoop  | Select-Object -Last 1)) }
 Write-Host ("Screenshots: {0} in {1}" -f $step, $OutDir)

@@ -1,7 +1,7 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 30's
-continuation (2026-09-28), after the highlight's echo. `HANDOFF.md` is the running
+Where the next session picks up. Updated in Session 31
+(2026-09-29), after the jukebox, EA TRAX and the GS's MODULATE. `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -46,10 +46,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Sixty-two cross-checkers pass, plus the table generators:
+Sixty-five cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -115,6 +115,9 @@ sun_check            115 scenarios, 3427 lines, 0 differ  (154/154 mutations cau
 weather_check         75 scenarios, 4368 lines, 0 differ  (85 caught, 4 equivalent)
 rain_check            31 calls,       31 lines, 0 differ  (5/5 mutations caught; 41 image facts)
 mv3_check            904 scenarios, 50435 lines, 0 differ  (191 caught, 6 equivalent; 8 frames)
+jukebox_check        952 ops,       4833 lines, 0 differ  (279 caught, 4 equivalent)
+jbstream_check       real tunes cut at pairs and the end, 0 differ
+songmon_check        321 ops,       1307 lines, 0 differ  (46 caught, 2 equivalent)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -592,17 +595,20 @@ and so replaced every boot.
      mutations, 187 caught, 3 equivalent.
    - `run_azahar_test.ps1 -Echo` takes a burst of shots on the main menu.
 
-   **The jukebox's notes are in HANDOFF.md's last section:** its
-   addresses and fields, the JBC format, and the open questions (the
-   stereo interleave, the sync data, the RNG, the stream layer).
-   - Blocker: all 24 ndsp channels are taken, 0..22 by `bsnd` and 23 by
-     the movies.
+   **The jukebox, EA TRAX and the GS's MODULATE are done** (HANDOFF.md,
+   Session 31). `jukebox.c` is retail's player, `jbstream.c` streams the
+   JBC to ndsp channel 22 (`bsnd` has 0..21), and `songmon.c` is
+   `tNewSongMonitor`. `uirender.c` draws every Flailer quad with the GS's
+   texel × vertex / 0x80, so `WHITE16X16`'s strips and masks have the
+   photo's strength (flailer-ui.md, "Colour: the GS's MODULATE").
+   - Open: the Options' Jukebox screen, and the stream on real hardware.
 
    **Next is the rest of the photos**, in TASKS.md's "The retail
-   frontend": the jukebox (`Start(1)` is already
-   called from the title, the Mode Selects and `NewMainMenu`, retail
-   `0x001aeab0`; `cJukeboxPlayer` over `SOUND\JUKEBOXM.JBC`), EA TRAX,
-   then Setup, car select and the briefing.
+   frontend": You're The Cop (`BeACopChallengeSetup`, `0x001b6c68`,
+   screen `e55f1297`), then its Setup (`RaceSetupBaseClass` `0x001b8390`
+   and `BeTheCopSetup` `0x001b9248` on `d1eadbca`, with
+   `tScrollingMenuList` and the arrows class at `0x0024a690`), then car
+   select and the briefing.
 
    When step 6 resumes: `Car::InitRenderInfo` (`0x0011dc80`) and
    CarRenderInfo's constructor (`0x0011e860`, 4700 bytes; retail's

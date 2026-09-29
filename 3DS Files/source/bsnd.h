@@ -27,9 +27,10 @@
 // four at once. BSND_PS2_VOICES exists so the checker can run the allocator
 // at the original width as well as this one.
 #define BSND_MAX_VOICES    24
-// What bsnd_hw_init hands the allocator: ndsp's last channel is the boot
-// movies' sound (AVIMOVIE_CHANNEL in avimovie.h).
-#define BSND_HW_VOICES     23
+// What bsnd_hw_init hands the allocator: ndsp's last two channels are the
+// EA TRAX stream (JBS_CHANNEL in jbstream.h) and the boot movies' sound
+// (AVIMOVIE_CHANNEL in avimovie.h).
+#define BSND_HW_VOICES     22
 #define BSND_PS2_VOICES    48
 #define BSND_MAX_BANKS     8
 

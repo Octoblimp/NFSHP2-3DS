@@ -214,9 +214,15 @@ typedef struct {
     // the card's file system, or NULL for none. With no hook, or a NULL
     // answer, the card is memcard.c's blank one -- there, formatted, empty.
     BMemcardFileSys* (*newFileSys)(void* user);
+    // OverwriteFred's calls after the copy (memcard.c), which take the
+    // loaded settings into the rest of the game: Fred whole, as loaded.
+    void (*fredLoaded)(void* user, uint8_t* fred);
 
     void (*sound)(void* user, int soundEvent);   // MakeFrontendSound
     void (*jukebox)(void* user, int start);      // sound::jukebox::Start/Stop
+    // tNewSongMonitor::Update (songmon.h), the EA TRAX box, which
+    // FlailerScreenList::Tick runs after the menus' movie.
+    void (*songMonitor)(void* user);
     // TheEasterEggs (0x0031d7e8), the port's name: retail's ELF has no
     // symbols, and the class is not on the demo disc. Start (0x0024f488)
     // gives it the pad's sixteen button events, 133..148, and Stop

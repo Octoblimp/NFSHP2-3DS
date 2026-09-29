@@ -263,6 +263,8 @@ static int testerCheckForSavegameFile(BMemcardTester* t)
 // into the frontend: 0x001fe988 twice (Fred+392 and Fred+648, 256 bytes
 // each, into gp-16700 and gp-16696), 0x001ef120(Fred+148), 0x00154308 and
 // 0x00155000 for each pad with Fred+376[pad], and 0x001f4b10(Fred+324).
+// Those are the host's, through fredLoaded: the audio options' (jukebox.h)
+// is the one it has so far.
 static void testerOverwriteFred(BMemcardTester* t)
 {
     BGameFlow* gf   = t->gf;
@@ -278,6 +280,7 @@ static void testerOverwriteFred(BMemcardTester* t)
           (unsigned)get32(fred + BMC_CHECKSUM_OFFSET),
           (unsigned)get32(fred + BMC_FRED_CLEARED),
           (int)get32(fred + BMC_FRED_LANGUAGE));
+    if (gf->hooks.fredLoaded) gf->hooks.fredLoaded(gf->hooks.user, fred);
 }
 
 // -------------------------------------------------------- MemcardPrompter

@@ -309,6 +309,33 @@ The UVs only pick which part of the sheet is sampled. Every UV rect on disc
 is axis-aligned, so the four corners collapse to a min/max box, but
 `GouradColors` really is per-corner and the engine interpolates it.
 
+### Colour: the GS's MODULATE
+
+A quad's colour is the GS's `MODULATE`: texel times vertex colour over
+`0x80`, per channel and alpha included, clamped only after the product. So
+a colour byte past `0x80` brightens a texel that is not already full, and
+the frontend depends on that. `WHITE16X16`, which is under most of its
+strips and masks, is grey `0x80` at alpha `0x40` on the disc, not white.
+The colours on it are over-bright on purpose:
+
+| object             | colour     | on `WHITE16X16`        | capped at `0x80` first |
+|--------------------|------------|------------------------|------------------------|
+| `CHYRON_BG_2..5`   | `000000c8` | black, 78% (`0x64`)    | black, 50%             |
+| `MI_n_MASK`, left  | `000000aa` | black, 66%             | black, 50%             |
+| the white bars     | `ffffffb4` | white `0xff`, 70%      | grey `0x80`, 50%       |
+
+The right-hand column is what you get by doubling each byte and clamping
+before multiplying, which is how the port first did it (citro2d's
+`C2D_TintMult` caps the tint at 1.0). In that version the EA TRAX box's
+strips were a faint haze, and the grid showed through where the PS2 photo
+has solid charcoal bars. `uirender.c` now passes the raw byte as the tint
+and has texenv 0 double the product (`GPU_TEVSCALE_2`, which the combiner
+clamps), only for the screen path. `flailer_render.py` does the same
+multiply in Python.
+
+Not traced: the GS register setup in `RenderSingleFlailerBitmap`. This is
+the standard `TFX=MODULATE` arithmetic, and the retail photo matches it.
+
 ### Glyph metrics, including the shipped bug
 
 `RenderCharacter` (`0x0013f698`) multiplies the glyph's width by `ScaleX`

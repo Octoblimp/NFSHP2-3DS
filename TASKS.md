@@ -2294,10 +2294,24 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
       one-movie title, `StartDemoDiscGame` and the demo timeout are
       gone. Attract mode stays, and so does event 2 with its row, so no
       event renumbers. The unused VP6 decoder is deleted too.
-- [ ] **The jukebox and its EA TRAX box.**
-  - The music.
-  - The song and the artist, bottom left, over the Help button while
-    it is up.
+- [x] **The jukebox and its EA TRAX box.** "Fever for the Flava" plays
+      from the main menu on, as it does on the PS2
+      (`docs/formats/jukebox.md`).
+  - [x] The music. `jukebox.c` is retail's `cJukeboxPlayer`,
+        `cJukeboxCartridge` and `sound::jukebox`, checked by
+        `jukebox_check`. `jbstream.c` streams `SOUND\JukeboxM.JBC` off the
+        card onto ndsp channel 22, and bsnd gave up that voice. It started
+        late at first, only on the Mode Selects, because gameflow's own
+        `hooks.jukebox` was never set.
+  - [x] The EA TRAX box. It is retail's `tNewSongMonitor`
+        (`songmon.c`, `songmon_check`). For five seconds after a tune
+        starts, it shows the title, artist and EA GAMES TRAX bottom left,
+        over the Help button.
+  - [x] Its strips, and every WHITE16X16 strip and mask with them, drawn
+        with the GS's MODULATE (`docs/formats/flailer-ui.md`, "Colour").
+        Before that, the box's charcoal bars were a faint haze.
+  - [ ] The Options' Jukebox screen (the playlist and its volumes).
+  - [ ] Real hardware: the stream thread's timing is only seen on Azahar.
 - [ ] **The Setup screen.** Catch-up, traffic and damage, with arrows on
       the current row and the movie behind.
 - [ ] **Car select.**

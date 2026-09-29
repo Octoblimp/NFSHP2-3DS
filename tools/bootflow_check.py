@@ -489,7 +489,8 @@ class Flow(object):
             self.send(SCREEN_TICK, {"itemHash": self.screen[1], "port": 0,
                                     "param": 0, "noise": 0})
         # FlailerScreenList::Tick (0x0016cca8) ticks both popups after the
-        # screen, up or not, and then the movie.
+        # screen, up or not, and then the movie. The song monitor after it
+        # is songmon_check.py's; the harness has no hook for it.
         self.autoload.tick_popups()
         self.movie.update()
         self.service()
@@ -2697,7 +2698,7 @@ MUTATIONS += [
      + "        bgf_send(gf, BMSG_SCREEN_TICK, &data);" + NL
      + "    }" + NL
      + "    // FlailerScreenList::Tick (0x0016cca8) ticks both popups after the"
-     + NL + "    // screen, up or not, and then the movie." + NL
+     + NL + "    // screen, up or not, then the movie and the song monitor." + NL
      + "    bpopup_tick(gf);" + NL
      + "    bgf_update_movie(gf);",
      "    bgf_service(gf);" + NL

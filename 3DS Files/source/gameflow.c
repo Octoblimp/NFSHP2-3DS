@@ -411,9 +411,10 @@ void bgf_frame(BGameFlow* gf, float dt)
         bgf_send(gf, BMSG_SCREEN_TICK, &data);
     }
     // FlailerScreenList::Tick (0x0016cca8) ticks both popups after the
-    // screen, up or not, and then the movie.
+    // screen, up or not, then the movie and the song monitor.
     bpopup_tick(gf);
     bgf_update_movie(gf);
+    HOOK_VOID0(gf, songMonitor);
     bgf_service(gf);
 }
 

@@ -163,6 +163,13 @@ bool uirender_text_extent(UIRenderer* r, const BUI* ui, uint32_t index,
 // the two highlight brackets around the current menu item.
 bool uirender_object_bounds(UIRenderer* r, const BUI* ui, uint32_t index,
                             float box[4]);
+
+// FlailerObjectChunk::GetWidth (0x00140588), what FlailerGetWidth answers:
+// a text object's GetScaledWidth (0x00140d30) truncated -- its glyphs'
+// advances summed, no kerning and no fixed-width cell, times ScaleX -- and a
+// bitmap's CalculateWidth, (int)(texture width * ScaleX). 0 for anything
+// else, a missing font or a missing texture.
+int32_t uirender_object_width(UIRenderer* r, const BUI* ui, uint32_t index);
 // ---------------------------------------------------------------------------
 // The port's own text
 // ---------------------------------------------------------------------------
