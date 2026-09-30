@@ -269,7 +269,7 @@ static void dump_car(void)
     w(o->BlinkingViewBits);
     w(o->_pad92);
     printf(" |");
-    w(word_of((uint8_t)c->CopLights, c->_hole1881));
+    w(word_of((uint8_t)c->CopLights, c->_hole2025));
     w((uint32_t)c->SignalLightState);
     w((uint32_t)c->NitroEffectFlag);
     w((uint32_t)c->WantToBlinkHeadlights);
@@ -288,8 +288,8 @@ static void dump_car(void)
     printf(" |");
     p(c->pCarDamage);
     t[0] = c->NumBlownTires;
-    t[1] = c->_hole1946[0];
-    t[2] = c->_hole1946[1];
+    t[1] = c->_hole2090[0];
+    t[2] = c->_hole2090[1];
     w(word_of(c->BlownTireBits, t));
     f(c->fBlownTireControllerRumbleTimer);
     p(c->pBaseCarSound);
@@ -302,7 +302,7 @@ static void dump_car(void)
     w((uint32_t)c->bPoofed);
     w((uint32_t)c->bVisibleOnTrackMap);
     w(bytes4(c->NumTimesSkidding));
-    w(word_of(c->RoadBumpBits, c->_hole1989));
+    w(word_of(c->RoadBumpBits, c->_hole2133));
     p(c->pCaffeineObj);
     p(c->pLastCarTrailObj);
     w((uint32_t)c->LeaveCarTrails);

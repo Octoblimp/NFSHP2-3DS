@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-09-29), after RenderCars. `HANDOFF.md` is the running
+(2026-09-29), after the topology's retail pass. `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -101,7 +101,7 @@ trackpath_check     4946 ops,     4746 lines, 0 differ; retail 5557 ops, 5095 li
 average_check        482 ops,      843 lines, 0 differ  (64/64 mutations caught)
 airoute_check      14738 ops,     7224 lines, 0 differ  (86 caught, 5 equivalent)
 realcontroller_check 14096 ops,  25318 lines, 0 differ  (129 caught, 11 equivalent)
-track_check        16503 ops,    11968 lines, 0 differ  (274 caught, 5 equivalent)
+track_check        18033 ops,    11379 lines, 0 differ  (308 caught, 6 equivalent; retail's image but road noise)
 vclip_check        11890 ops,    22389 lines, 0 differ  (280 caught, 1 equivalent)
 polyhedra_check    15907 ops,    64560 lines, 0 differ  (172 caught, 12 equivalent)
 collisionbody_check 1572 ops,    35426 lines, 0 differ  (622 caught, 24 equivalent)
@@ -773,6 +773,31 @@ and so replaced every boot.
      lines, 0 differ. Of 149 mutations, 146 are caught and 3 are
      equivalent.
 
+   **The topology's retail pass is done** (HANDOFF.md, Session 31,
+   continued: the topology's retail pass). `docs/formats/topology.md` has
+   the write-up.
+   - `track.c` is retail's `Track.obj` (`0x001513c8 .. 0x00153984`), except
+     road noise. GetRoadNoise reads the 144-byte retail `TerrainTypeInfo`,
+     so it waits for TerrainType's retail pass.
+   - TopologyCoordinate is retail's 704 bytes: 160 polygons, the last
+     polygon at 688 and three unused words at 692. TopologyTree is 44
+     bytes, with an unused word at 32. Car's TC is at 1280 in the port, so
+     everything after it moved on by 144. `car.h` is 2192 bytes.
+   - GetElevation tries the last polygon first, at any height. That
+     polygon is set by a hit strictly inside, and forgotten by
+     SetInterestBBox's rebuild and by ClearInterestBBox.
+   - SetInterestBBox's look-ahead is 0.15, times 0.75 per try, over five
+     tries, and the fifth uses 0. A box fits when its diagonal is under
+     28.8. NumUpsideDown now counts what pass 3 placed.
+   - BuildTrackPolygons walks every square under the box, and only while
+     the box is inside (-32768, 32767). The timing is gone.
+   - `track_check` runs everything but road noise and MatchTerrainType on
+     the retail image, over retail TRACKB12: 16779 ops and 10306 lines, 0
+     differ. The demo image runs 1254 ops and 1073 lines. Of 314
+     mutations, 308 are caught and 6 are equivalent. The retail model has
+     to run bmatrix's static initialiser (`0x0025afa8`), or retail's
+     `bMulMatrix(bVector3)` loses the translation.
+
    **Next is 7b**: DriveCameraMover::Update (`0x0015c880`, 6056 bytes),
    with GetLookbackCar (`0x0015c680`; AnimatedDriver's
    HandleLookingBackwards calls it too) and the two wall helpers.
@@ -792,12 +817,45 @@ and so replaced every boot.
      CalculateLookbackAngle, the yaw and pitch corrections, SetPOVIndex,
      GetCarSpaceBoundingBox, and the TopologyCoordinate's SetInterestBBox,
      GetElevation and GetRoadNoise.
-   - The mover's TopologyCoordinate is retail's 704 bytes in the image and
-     the demo's 560 in the port. The topology's own retail pass is still
-     owed (`tools/track_check.py`'s docstring: retail rewrote GetElevation
-     and SetInterestBBox and dropped TopologyTiming), and Update calls
-     both. So either do that pass first or stub those calls in 7b's
-     checker, as `drivecam_check` stubs the constructor and destructor.
+   - The mover's TopologyCoordinate is retail's 704 bytes in both the
+     image and the port now, and SetInterestBBox, GetElevation and
+     ConstrainToTopology are retail's. GetRoadNoise is still the demo's.
+     Either do TerrainType's retail pass first (`0x001d4428`, the table
+     at `0x00318c00`, 33 x 144, and GetRoadNoise `0x00153498`), or stub
+     GetRoadNoise in 7b's checker, as `drivecam_check` stubs the
+     constructor and destructor.
+   - What that pass owes, as far as it was read:
+     - Retail's record has one new float at 20, and everything from
+       RoadNoiseGridSpacingInverse on is 4 bytes later. GetRoadNoise
+       (`0x00153498`) is the demo's code with offsets 24 and 28 and
+       stride 144.
+     - The new float is 1.4 on the loose surfaces (dirt, grass, sand,
+       snow, mulch, their shoulders) and 1 elsewhere. Its one reader
+       seen so far is MaybeMakeSkids (`0x001a568c`), which multiplies
+       it into `WheelInfo.Width`, so call it SkidWidthMultiplier.
+     - Retail changed the data too: the emitter groups' speeds and
+       names on the loose surfaces, BOARDWALK's and COBBLESTONE's
+       road noise, and METAL_GRATE's road sound. The friction and
+       collision fields are the demo's. So the table must be generated
+       from the retail ELF, and checkers that dump the changed fields
+       against the demo image will need their own retail pass.
+     - Twenty places form the table's address (`lui 0x0032` then
+       `-29696`). Among them are TriggerCarTerrainEffects, CalcForceParameters,
+       PhysicsCar::Move, Wheel's GetDerivative, GuessGroundForce,
+       FinalizeGroundForce and MaybeMakeSkids, InitSkids, DebugTopology,
+       both tire sounds, Collision's AddImpulse and GetTerrainType,
+       GetBoomDistToWall, and 7b's wall helper at `0x00157a00`. The wall
+       helper reads only ShouldCameraGoThroughIt, at 13, which did not
+       move.
+     - `careffects.c`'s TriggerCarTerrainEffects (retail `0x00133920`)
+       reads the emitter speeds and names retail changed, and
+       `carmode_check` runs it on the demo image. So it needs a retail
+       pass as well. Retail added code at its end: an "InDeepWater" or
+       "InShallowWater" replay event (RegisterInterestingEvent,
+       `0x0013e270`), once per soaking through InDeepWaterRegistered,
+       when VelocityMagnitude is over 30. There is also a second damage check through the
+       retail-only `0x00124d38`, with 14 and a result of 3. The
+       listing is `retail_match.py --diff TriggerCarTerrainEffects__3Carf`.
    - `out/dcm_update_retail.txt` and `out/dcm_update_demo.txt` are the
      listings.
 

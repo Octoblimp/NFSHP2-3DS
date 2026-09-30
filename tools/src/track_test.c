@@ -2,7 +2,7 @@
 // port -- track.c, terraintype.c and cartrack.c -- and prints what the model prints for
 // the image. The ops, their arguments and every line's format are the
 // checker's; this file only carries them out. See the checker's docstring
-// for the labels, the pool arena and the ticks.
+// for the labels and the pool arena.
 //
 //     track_test ops.bin > out.txt
 
@@ -14,7 +14,6 @@
 
 #include "bchunk.h"
 #include "bslotpool.h"
-#include "bticker.h"
 #include "bvector.h"
 #include "car.h"
 #include "p32.h"
@@ -31,9 +30,9 @@ enum {
     OP_HASTOPO, OP_TCSEG, OP_CONSTRAIN, OP_CORNER, OP_SQUARE, OP_GIP,
     OP_BUILD, OP_REMOVE, OP_ASSIGN, OP_UNASSIGN, OP_FLUSH, OP_NMARK,
     OP_GMARK, OP_NMARKN, OP_GMARKN, OP_MARKDUMP, OP_INFO, OP_GLOBALS,
-    OP_GRID, OP_NOISE, OP_MATCHNAME, OP_MATCHHASH, OP_TICKSEED, OP_HSET,
-    OP_TPCB, OP_COG, OP_WHEEL, OP_CARPOS, OP_FLAT, OP_PUTFLAT, OP_SIB3,
-    OP_CARVEC, OP_CARF, OP_AIR, OP_BEGIN, OP_VOT,
+    OP_GRID, OP_NOISE, OP_MATCHNAME, OP_MATCHHASH, OP_HSET, OP_TPCB,
+    OP_COG, OP_WHEEL, OP_CARPOS, OP_FLAT, OP_PUTFLAT, OP_SIB3, OP_CARVEC,
+    OP_CARF, OP_AIR, OP_BEGIN, OP_VOT, OP_TREEPOKE,
     OP_COUNT
 };
 
@@ -56,8 +55,8 @@ static TopologyTreePolygon *gipout[TOPOLOGY_MAX_POLYGONS];
 
 // The car FindFlatOnTrackPosition, PutFlatOnTrack, AverageAir and
 // BeginMovement are handed, and its type. Beyond pCarTypeInfo, State and
-// TheTopologyCoordinate, BeginMovement writes the two old velocities and
-// LastInTroughPosition.
+// TheTopologyCoordinate, BeginMovement writes the old position, the two
+// old velocities and LastInTroughPosition.
 static Car           g_car;
 static CarTypeInfo   g_cti;
 static bMatrix4      g_mat;
@@ -96,16 +95,6 @@ static void printf_hook(const char *text)
 {
     (void)text;
     printf("  printf\n");
-}
-
-// ------------------------------------------------------------ the ticks
-
-static uint32_t tick_state;
-
-static uint32_t tick(void)
-{
-    tick_state = tick_state * 1664525u + 1013904223u;
-    return tick_state;
 }
 
 // ------------------------------------------------------------ the labels
@@ -271,11 +260,11 @@ static void tree_dump(int list)
     TrackListNode *nd;
     int i;
 
-    printf("tree nodes %s %d squares %s %d polys %s %d idx %s %d "
+    printf("tree nodes %s %d squares %s %d polys %s %d idx %s %d u32 %d "
            "list %s %s\n",
            L(t->pNodeTable), t->NumNodes, L(t->pSquareTable), t->NumSquares,
            L(t->pPolygonTable), t->NumPolygons, L(t->pPolygonIndexTable),
-           t->NumPolygonIndicies, L(p32_ptr(head->pNext)),
+           t->NumPolygonIndicies, t->Unused32, L(p32_ptr(head->pNext)),
            L(p32_ptr(head->pPrev)));
     if (!list)
         return;
@@ -343,7 +332,7 @@ static void tc_dump(int i)
     int n = tc->TotalNumTrackPolygons;
 
     printf("tc%d ib %08x %08x %08x %08x cb %08x %08x %08x %08x total %d "
-           "num %d vert %d ud %d\n",
+           "num %d vert %d ud %d last %s u %08x %08x %08x\n",
            i, (unsigned)fbits(tc->InterestBBoxMin.x),
            (unsigned)fbits(tc->InterestBBoxMin.y),
            (unsigned)fbits(tc->InterestBBoxMax.x),
@@ -352,7 +341,9 @@ static void tc_dump(int i)
            (unsigned)fbits(tc->CachedBBoxMin.y),
            (unsigned)fbits(tc->CachedBBoxMax.x),
            (unsigned)fbits(tc->CachedBBoxMax.y), n, tc->NumTrackPolygons,
-           tc->NumVerticalTrackPolygons, tc->NumUpsideDownTrackPolygons);
+           tc->NumVerticalTrackPolygons, tc->NumUpsideDownTrackPolygons,
+           L(tc->pLastTrackPolygon), (unsigned)tc->Unused692[0],
+           (unsigned)tc->Unused692[1], (unsigned)tc->Unused692[2]);
     if (n < 0)
         n = 0;
     if (n > TOPOLOGY_MAX_POLYGONS)
@@ -389,16 +380,11 @@ static void mark_dump(void)
 
 static void globals_dump(void)
 {
-    int i;
-
-    printf("globals cur %s table %s highest %d loaded %d pool %s tidx %u\n",
+    printf("globals cur %s table %s highest %d loaded %d pool %s "
+           "unused %d %d\n",
            L(CurrentTrackInfo), L(TrackInfoTable), HighestTrackNumber,
            LoadedTrackNumber, TrackPolygonSlotPool ? "pool" : "null",
-           (unsigned)TopologyTimingIndex);
-    printf("  timing");
-    for (i = 0; i < 10; i++)
-        printf(" %08x", (unsigned)fbits(TopologyTiming[i]));
-    printf("\n");
+           TopologyTreeUnused[0], TopologyTreeUnused[1]);
 }
 
 static void pv(const bVector3 *v)
@@ -418,15 +404,9 @@ static void mat_dump(const bMatrix4 *m)
     printf("\n");
 }
 
-static void timing_line(void)
-{
-    printf("  timing %u %08x\n", (unsigned)TopologyTimingIndex,
-           (unsigned)fbits(TopologyTiming[(TopologyTimingIndex + 9u) % 10u]));
-}
-
 // CARVEC's vectors, by the model's number: the body matrix's rows, the
 // velocity, the angular velocity, the four wheel matrices' sixteen rows,
-// the two old velocities and Position.
+// the two old velocities, Position and the old position.
 static float *car_vec(int k)
 {
     if (k < 4)
@@ -442,7 +422,9 @@ static float *car_vec(int k)
         return &g_car.vOldVel.x;
     if (k == 23)
         return &g_car.vOldAngVel.x;
-    return &g_car.State.Position.x;
+    if (k == 24)
+        return &g_car.State.Position.x;
+    return &g_car.vOldPos.x;
 }
 
 // CARF's words.
@@ -467,7 +449,9 @@ static void begin_dump(void)
     int32_t t[4];
     int i;
 
-    printf("  old ");
+    printf("  old pos ");
+    pv(&g_car.vOldPos);
+    printf(" vel ");
     pv(&g_car.vOldVel);
     printf(" ang ");
     pv(&g_car.vOldAngVel);
@@ -521,6 +505,8 @@ static void set_tcfield(TopologyCoordinate *tc, int field, int32_t v)
     case 9: tc->NumTrackPolygons = v; break;
     case 10: tc->NumVerticalTrackPolygons = v; break;
     case 11: tc->NumUpsideDownTrackPolygons = v; break;
+    case 12: tc->pLastTrackPolygon = slot_tp(v); break;
+    case 13: case 14: case 15: tc->Unused692[field - 13] = v; break;
     default:
         fprintf(stderr, "tcpoke %d\n", field);
         exit(2);
@@ -545,10 +531,10 @@ static void step(int code)
         [OP_NMARK] = 1, [OP_GMARK] = 2, [OP_NMARKN] = 1, [OP_GMARKN] = 2,
         [OP_MARKDUMP] = 0, [OP_INFO] = 1, [OP_GLOBALS] = 0, [OP_GRID] = 2,
         [OP_NOISE] = 2, [OP_MATCHNAME] = 1, [OP_MATCHHASH] = 1,
-        [OP_TICKSEED] = 1, [OP_HSET] = 3, [OP_TPCB] = 1,
+        [OP_HSET] = 3, [OP_TPCB] = 1,
         [OP_COG] = 4, [OP_WHEEL] = 3, [OP_CARPOS] = 5, [OP_FLAT] = 3,
         [OP_PUTFLAT] = 1, [OP_SIB3] = 4, [OP_CARVEC] = 5, [OP_CARF] = 2,
-        [OP_AIR] = 4, [OP_BEGIN] = 2, [OP_VOT] = 2,
+        [OP_AIR] = 4, [OP_BEGIN] = 2, [OP_VOT] = 2, [OP_TREEPOKE] = 2,
     };
     int i;
 
@@ -721,9 +707,6 @@ static void step(int code)
                (unsigned)fbits(r), (unsigned)terr);
         pv(&nrm);
         printf(" found %08x\n", (unsigned)found);
-        printf("  timing %u %08x\n", (unsigned)TopologyTimingIndex,
-               (unsigned)fbits(TopologyTiming[(TopologyTimingIndex + 9u)
-                                              % 10u]));
         break;
     }
     case OP_HASTOPO:
@@ -858,9 +841,6 @@ static void step(int code)
         printf("matchhash %08x -> %d\n", (unsigned)a[0],
                terrain_match_hash((uint32_t)a[0]));
         break;
-    case OP_TICKSEED:
-        tick_state = (uint32_t)a[0];
-        break;
     case OP_HSET:
         outs[a[0]][a[1]] = slot_tp(a[2]);
         if (held[a[0]] < a[1] + 1)
@@ -899,7 +879,6 @@ static void step(int code)
         pv(&vecs[a[1]]);
         printf("\n");
         mat_dump(&g_mat);
-        timing_line();
         break;
     case OP_PUTFLAT:
         // tc a[0] is lent to the car for the call and handed back: nothing
@@ -917,7 +896,6 @@ static void step(int code)
         pv(&g_car.State.GeometryPosition);
         printf(" angle %u\n", (unsigned)g_car.State.Angle);
         mat_dump(&g_car.State.BodyMatrix);
-        timing_line();
         break;
     case OP_CARVEC: {
         float *f = car_vec(a[0]);
@@ -941,7 +919,6 @@ static void step(int code)
         tcs[a[0]] = g_car.TheTopologyCoordinate;
         printf("  -> %08x time %08x height %08x\n", (unsigned)fbits(r),
                (unsigned)fbits(t), (unsigned)fbits(a[3] ? t : h));
-        timing_line();
         break;
     }
     case OP_BEGIN:
@@ -950,7 +927,6 @@ static void step(int code)
         car_begin_movement(&g_car, bitsf(a[1]));
         tcs[a[0]] = g_car.TheTopologyCoordinate;
         begin_dump();
-        timing_line();
         break;
     case OP_VOT:
         fill(&vecs[a[0]], sizeof vecs[a[0]]);
@@ -958,13 +934,19 @@ static void step(int code)
         printf("vot v%d v%d -> ", a[0], a[1]);
         pv(&vecs[a[0]]);
         printf("\n");
-        timing_line();
         break;
     case OP_SIB3:
         printf("sib3 tc%d v%d r %08x vel %s\n", a[0], a[1], (unsigned)a[2],
                a[3] < 0 ? "null" : L(&vecs[a[3]]));
         topology_set_interest_bbox3(&tcs[a[0]], &vecs[a[1]], bitsf(a[2]),
                                     a[3] < 0 ? NULL : &vecs[a[3]]);
+        break;
+    case OP_TREEPOKE:
+        // The three words only a constructor or InitTree writes.
+        if (a[0] == 0)
+            TheTopologyTree.Unused32 = a[1];
+        else
+            TopologyTreeUnused[a[0] - 1] = a[1];
         break;
     }
 }
@@ -1008,7 +990,6 @@ int main(int argc, char **argv)
     bSlotPoolManagerInit();
     bSetSlotPoolAllocator(arena_alloc, arena_release);
     bSetSlotPoolPrintf(printf_hook);
-    bSetTickerSource(tick);
     track_static_init();
     terraintype_static_init();
     g_car.pCarTypeInfo = &g_cti;

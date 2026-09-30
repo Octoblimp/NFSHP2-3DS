@@ -9882,3 +9882,106 @@ DistanceToLineSegment and IntersectLineSegments have no caller in retail's
 image. Retail's Update calls two new unnamed functions instead, `0x00157930`
 and `0x00157b60`, and a third, `0x00157c60`, is the bumper camera's.
 CONTINUE.md has the details.
+
+## Session 31, continued (2026-09-29) -- the topology's retail pass
+
+7b's Update calls SetInterestBBox, GetElevation and ConstrainToTopology on
+the mover's own TopologyCoordinate, and retail had changed all three. So
+the topology's retail pass came first. `track.c` is now retail's
+`Track.obj` (`0x001513c8 .. 0x00153984`), except road noise.
+
+### The port
+
+- **TopologyCoordinate is retail's 704 bytes** (`topology.h`). The table
+  holds 160 polygons, not 128. The four counts are at 672, the last
+  polygon at 688, and three words at 692 that only the constructor
+  writes. On a 64-bit host the 161 pointers widen, and `topology.h`
+  counts the slack.
+- **TopologyTree is 44 bytes.** A word at 32 is written only by the
+  constructor, and the list head moved to 36. InitTree also zeroes
+  `TopologyTreeUnused[2]` (`0x00330318`), which nothing in `Track.obj`
+  reads.
+- **Car's TC is 704 bytes at 1280** (retail's is at 1312). Everything
+  after it moved on by 144: TrackPathCoordinate is at 1984, vOldPos at
+  2160, and `car.h` is 2192 bytes. `car_check`'s layout table follows.
+- **GetElevation tries the last polygon first.** When the point is
+  strictly inside it, its plane is the answer at any height, with no look
+  at the interest box. A slow-path hit strictly inside, not
+  INFINITELY_HIGH, becomes the last polygon. A miss keeps it.
+  SetInterestBBox's rebuild and ClearInterestBBox forget it. The terrain
+  is read as a signed byte. The inside test's edges are 0-1, 1-2 and 3-0,
+  plus 2-3 for a quad, and its `max.s` keeps m when a cross is NaN, so a
+  NaN point is inside anything.
+- **SetInterestBBox**:
+  - the look-ahead starts at 0.15 and is multiplied by 0.75 per try;
+  - there are five tries, and the fifth uses 0;
+  - a box fits when its diagonal is under 28.8;
+  - the build's cap is 160;
+  - NumUpsideDown is what pass 3 placed. The demo's was total less
+    vertical.
+- **BuildTrackPolygons (`0x001531f8`) was rewritten**: every square under
+  the box, y outer, x inner, from the square corner at or below the
+  minimum, stepping 32 while at or below the maximum. It walks only when
+  the box is strictly inside (-32768, 32767) on both axes.
+- **The timing is gone**, with TopologyTiming and its index.
+- BeginMovement keeps retail's vOldPos (`0x00131cc8`). AverageAir
+  (`0x00135b30`), FindFlatOnTrackPosition (`0x001326d8`) and
+  PutFlatOnTrack (`0x00132910`) are the demo's code at retail's offsets.
+- Retail's `Track.obj` ends with a thunk at `0x00153970`, `j 0x00151d30`,
+  that nothing calls. It is not ported.
+
+### The check
+
+`track_check` now runs everything except road noise and the two
+MatchTerrainTypes on the retail image, over retail TRACKB12 (15098
+polygons, 0 degenerate). Those three read the demo's 140-byte
+TerrainTypeInfo, so they stay on the demo image until TerrainType's
+retail pass.
+
+- Retail: 16779 ops, 10306 lines, 0 differ. Demo: 1254 ops, 1073 lines, 0
+  differ. The mutation pass has 314 mutations, 308 caught and 6
+  equivalent.
+- `track_test.c` gained OP_TREEPOKE, for the three unused words. It lost
+  the ticker and the timing lines. TCPOKE reaches the last polygon and
+  the unused words.
+- The synthetic world grew:
+  - a terrain-200 floor;
+  - 170 dense slivers, to fill a coordinate's 160;
+  - a floor in each of the row and the column that only a box ending on
+    a square's edge reaches;
+  - builds out to the bounds either side;
+  - a section on the last polygon, and each standalone polygon poked in
+    as the last one.
+- **One model fix.** The first retail run of AverageAir had 114 lines
+  differ. The start point had no translation: retail's
+  `bMulMatrix(bVector3)` adds the vector to the constant at `0x00320a60`
+  for its w of 1, and that constant is (0, 0, 0, 1) only after bmatrix's
+  static initialiser (`0x0025afa8`) runs. The model runs it now. The port
+  was right.
+- The first mutation pass left three survivors:
+  - `sib-diagonal-le`: no box had a diagonal of exactly 28.8. The
+    existing 192 case is two ulps over. From x = 0 with no radius the
+    box is `fl(v * 0.15f)` long, and v = 191.99998474121094 gives 28.8f
+    exactly. Three such cases catch it now.
+  - `elev-hi`: the first pass's ceiling of 1 above the probe. It only
+    shows when a surface between 0.5 and 1 up is listed before a lower
+    one, and the probe is not on the last polygon. The far square's two
+    floors now go into a table of their own, in both orders, and the
+    last polygon is cleared before each probe.
+  - `inside-early-out` is equivalent. `track_max` never lowers m or makes
+    it a NaN, so the next check returns a positive value too, and every
+    caller tests only the sign.
+- `docs/formats/topology.md` is rewritten for retail, with both images'
+  addresses. `docs/formats/car.md` notes the seventh slice on the retail
+  image.
+
+The whole suite passes, all 77 commands. The CIA builds and
+`check_3dsx` finds its relocations OK. Nothing new runs in the game
+yet, so Azahar was not run.
+
+### Next
+
+7b: DriveCameraMover::Update (`0x0015c880`), with GetLookbackCar and the
+two wall helpers. Update also calls GetRoadNoise, which is still the
+demo's. Either do TerrainType's retail pass first (the table at
+`0x00318c00`, 33 x 144), or stub GetRoadNoise in 7b's checker.

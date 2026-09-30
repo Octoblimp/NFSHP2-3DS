@@ -81,7 +81,7 @@ touches.
 | 64 | `State` — embedded `CarState`, 1024 bytes | every `State` access |
 | 1160 | `RenderingEnabled` (int8) | `lb v0,1160(a0)` in both gates |
 | 1184 | `TheOverrideRenderingPosition`, 96 bytes | the front end's selector |
-| 1280 | `TheTopologyCoordinate`, 560 bytes | `PutFlatOnTrack` |
+| 1280 | `TheTopologyCoordinate`, 560 bytes (retail's 704 at 1312) | `PutFlatOnTrack` |
 | 1840 | `TheTrackPathCoordinate`, 40 bytes | `GetRoutePoint` |
 | 1892 | `WantToBlinkHeadlights` | `sw` in `HonkAndOrBlinkHeadlights` |
 | 1896 | `WantToHonkHorn` | `sw` at `0x00132560` |
@@ -112,11 +112,13 @@ host they do not grow by the same amount:
 
 - `CarState` by two pointers,
 - `TrackPathCoordinate` by four,
-- `TopologyCoordinate` by a hundred and twenty-eight.
+- `TopologyCoordinate` by a hundred and sixty-one, and a word of
+  alignment.
 
 That last one is why `topology.h` states `TopologyCoordinate`'s layout
-rather than reserving 560 opaque bytes. `TrackPolygonTable` is 128
-*pointers*; on the host that array alone adds 512 bytes. A blob would have
+rather than reserving 704 opaque bytes. `TrackPolygonTable` is 160
+*pointers*, and retail put the last polygon found after it; on the host
+the array alone adds 640 bytes. A blob would have
 made Car's size assert agree with the wrong number on the host and the
 right one only on ARM — the failure `wheel.h`'s `_pad2` already cost this
 port once.
@@ -1109,8 +1111,9 @@ return i == 1 ? sum : sum / i - 1
 
 ### `BeginMovement`
 
-- **The old velocities are kept only for `0 < dt`**, `vOldVel` and
-  `vOldAngVel` whole. `-0` does not count.
+- **The old position and velocities are kept only for `0 < dt`**,
+  `vOldPos`, `vOldVel` and `vOldAngVel` whole. `-0` does not count.
+  Retail added `vOldPos`; the demo kept the velocities alone.
 - **The interest box is `3 + speed / 20` round `Position`, led by
   `Velocity`.** Here `speed` is the velocity's own length, `x x + y y`
   and then `+ z z` on VU0, not `VelocityMagnitude`.
@@ -1199,6 +1202,32 @@ added, and nothing moved:
 ```
 track_check --only (the first 209)  209 mutations, 206 caught, 3 equivalent, 0 unexplained
 ```
+
+### On the retail image
+
+Since the topology's retail pass, both run on the retail image, at
+retail's Car offsets.
+- **`AverageAir`** is `0x00135b30`, 740 bytes. It is the demo's with
+  retail's offsets.
+- **`BeginMovement`** is `0x00131cc8`, 224 bytes. The extra eight bytes
+  are the `vOldPos` copy.
+
+The fifth slice's two run there too. `FindFlatOnTrackPosition`
+(`0x001326d8`) and `PutFlatOnTrack` (`0x00132910`) are the demo's code,
+and the `SetInterestBBox(bVector3)` jump is `0x00136e00`. The seventh
+slice's scenario is unchanged.
+
+The model had to run one static initialiser first. Retail's
+`bMulMatrix(bVector3)` gets its w of 1 by adding the vector to the
+constant at `0x00320a60`. That constant is (0, 0, 0, 1) only once
+bmatrix's initialiser (`0x0025afa8`) has run. Without it, the start point
+had no translation, and 114 lines differed until the model called it.
+
+The `air-share-ulp` note above describes the demo's build, which gathers
+only the squares under a box's four corners. Retail's build walks every
+square under the box (see [topology](topology.md)), so a wide box no
+longer misses the slope. The throw is still set after `BeginMovement`,
+which keeps that car's box small.
 
 ## What is in the eighth code slice
 
@@ -1889,19 +1918,21 @@ same code.
 ### Retail's Car
 
 Retail's Car is 2200 bytes; the demo's is 2016. The port keeps the
-demo's layout, so every demo checker still runs. Retail's four new
-fields go after it, at 2016..2047, which makes the port's record 2048
-bytes:
+demo's layout, so every demo checker still runs, with one exception:
+its `TopologyCoordinate` is retail's 704 bytes, since `track.c` is
+retail's, so every field after it is 144 bytes past its demo offset.
+Retail's four new fields go after the record, at 2160..2191, which
+makes the port's record 2192 bytes:
 
 | Field | Port | Retail |
 |-------|------|--------|
-| `vOldPos` | 2016 | 1136 |
-| `HeadlightsAndHornSecondOnDuration` | 2032 | 2088 |
-| `JustResetFrames` | 2036 | 2140 |
-| `InDeepWaterRegistered` | 2040 | 2196 |
+| `vOldPos` | 2160 | 1136 |
+| `HeadlightsAndHornSecondOnDuration` | 2176 | 2088 |
+| `JustResetFrames` | 2180 | 2140 |
+| `InDeepWaterRegistered` | 2184 | 2196 |
 
-Every other field is at the demo's offset plus a shift that depends on
-where the field sits:
+Every other retail field is at the demo's offset plus a shift that
+depends on where the field sits:
 
 | Demo offsets | Fields | Shift |
 |--------------|--------|-------|

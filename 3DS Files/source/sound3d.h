@@ -5,7 +5,7 @@
 // engine, horn and siren, the 3D effects -- and it is task 29's.
 //
 // Car reaches it once: UpdateSound calls `Update` on the BaseCarSound at
-// Car+1952, and BaseCarSound's first base is Sound3d at offset 0
+// the demo's Car+1952, and BaseCarSound's first base is Sound3d at offset 0
 // (`BaseCarSound:Tt824=s80!1,020,3181`), so the vptr Car reads at +28 of
 // the BaseCarSound is this record's. BaseCarSound itself stays opaque until
 // task 29 brings it.

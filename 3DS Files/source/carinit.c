@@ -199,7 +199,7 @@ Car *car_construct(Car *c, DriverInfo *driver, const bVector3 *pos,
     // `sw zero,2056`: retail stores CopLights as a word, and reads it as
     // one, so the three bytes after the demo's byte go too.
     c->CopLights = 0;                                   // 2056
-    memset(c->_hole1881, 0, sizeof c->_hole1881);
+    memset(c->_hole2025, 0, sizeof c->_hole2025);
     c->HeadlightsState = 0;                             // 2100
     c->ForceHeadlightsOn = 0;                           // 2096
     c->WantToBlinkHeadlights = 0;                       // 2068

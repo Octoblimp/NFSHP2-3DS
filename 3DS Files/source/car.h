@@ -18,8 +18,11 @@
 // The layout below is the .mdebug one (`Car (size=2016)`), and every offset
 // in it was re-derived from a load or a store in the listing before it was
 // written down. See docs/formats/car.md for which instruction confirmed
-// which field. Retail's four new fields follow it, from 2016, which makes
-// the port's record 2048 bytes (see the record's end).
+// which field. Two things are retail's: TheTopologyCoordinate is retail's
+// 704 bytes, not the demo's 560, so every field after it is 144 bytes on
+// from its demo offset; and retail's four new fields follow the record,
+// from 2160, which makes the port's record 2192 bytes (see the record's
+// end).
 //
 // Two things to know before reading the code:
 //
@@ -31,7 +34,7 @@
 //
 //   * Three embedded records are wider on a 64-bit host than on the console,
 //     and they do not widen by the same amount: CarState by two pointers,
-//     TopologyCoordinate by a hundred and twenty-eight. The asserts at the
+//     TopologyCoordinate by a hundred and sixty-two. The asserts at the
 //     bottom carry each field's own count. On ARM every slack term is zero
 //     and the offsets are the console's exactly.
 
@@ -171,7 +174,7 @@ typedef int32_t MovementMode;
 #define COP_MOVEMENT       ((MovementMode)5)
 #define BELT_MOVEMENT      ((MovementMode)6)
 
-// 20SignalLightStateEnum, at Car+1884.
+// 20SignalLightStateEnum, at Car+2028 (the demo's 1884).
 typedef int32_t SignalLightStateEnum;
 
 #define SIGNAL_LIGHT_ALL_OFF  ((SignalLightStateEnum)0)
@@ -179,8 +182,9 @@ typedef int32_t SignalLightStateEnum;
 #define SIGNAL_LIGHT_RIGHT_ON ((SignalLightStateEnum)2)
 #define SIGNAL_LIGHT_ALL_ON   ((SignalLightStateEnum)3)
 
-// 9SirenMode, at Car+1924. The three middle names are the image's own: the
-// .mdebug really does spell them SIREN_MODE_01, _02 and _03.
+// 9SirenMode, at Car+2068 (the demo's 1924). The three middle names are
+// the image's own: the .mdebug really does spell them SIREN_MODE_01, _02
+// and _03.
 typedef int32_t SirenMode;
 
 #define SIREN_MODE_NONE   ((SirenMode)0)
@@ -242,50 +246,51 @@ struct Car {
 
     OverrideRenderingPosition TheOverrideRenderingPosition; // 1184
     TopologyCoordinate        TheTopologyCoordinate;        // 1280
-    TrackPathCoordinate       TheTrackPathCoordinate;       // 1840
+    TrackPathCoordinate       TheTrackPathCoordinate;       // 1984
 
-    int8_t            CopLights;                // 1880
-    uint8_t           _hole1881[3];             // 1881
-    SignalLightStateEnum SignalLightState;      // 1884
-    int32_t           NitroEffectFlag;          // 1888
-    int32_t           WantToBlinkHeadlights;    // 1892
-    int32_t           WantToHonkHorn;           // 1896
-    int32_t           WantTwoHonksAndOrBlinks;  // 1900
-    int32_t           HeadlightsAndHornStartTime;   // 1904
-    float             HeadlightsAndHornOnDuration;  // 1908
-    float             HeadlightsAndHornOffDuration; // 1912
-    int32_t           ForceHeadlightsOn;        // 1916
-    int32_t           HeadlightsState;          // 1920
-    SirenMode         TheSirenMode;             // 1924
-    uint32_t          WiperOnTime;              // 1928
-    uint32_t          WiperOffTime;             // 1932
-    int32_t           WiperState;               // 1936
-    CarDamage        *pCarDamage;               // 1940
-    uint8_t           BlownTireBits;            // 1944
-    uint8_t           NumBlownTires;            // 1945
-    uint8_t           _hole1946[2];             // 1946
-    float             fBlownTireControllerRumbleTimer; // 1948
-    BaseCarSound     *pBaseCarSound;            // 1952
-    int32_t           ResetMe;                  // 1956
-    int32_t           BlinkTimer;               // 1960
-    float             BlinkDuration;            // 1964
-    bVector2          LastInTroughPosition;     // 1968
-    int32_t           bPoofed;                  // 1976
-    int32_t           bVisibleOnTrackMap;       // 1980
-    uint8_t           NumTimesSkidding[4];      // 1984, a count a wheel
-    uint8_t           RoadBumpBits;             // 1988
-    uint8_t           _hole1989[3];             // 1989
-    void             *pCaffeineObj;             // 1992
-    void             *pLastCarTrailObj;         // 1996
-    int32_t           LeaveCarTrails;           // 2000
-    int32_t           ForceBuzzTime;            // 2004
-    float             fAngleToCamera;           // 2008
-    uint32_t          _pad2012;                 // 2012 quadword round-up
+    int8_t            CopLights;                // 2024
+    uint8_t           _hole2025[3];             // 2025
+    SignalLightStateEnum SignalLightState;      // 2028
+    int32_t           NitroEffectFlag;          // 2032
+    int32_t           WantToBlinkHeadlights;    // 2036
+    int32_t           WantToHonkHorn;           // 2040
+    int32_t           WantTwoHonksAndOrBlinks;  // 2044
+    int32_t           HeadlightsAndHornStartTime;   // 2048
+    float             HeadlightsAndHornOnDuration;  // 2052
+    float             HeadlightsAndHornOffDuration; // 2056
+    int32_t           ForceHeadlightsOn;        // 2060
+    int32_t           HeadlightsState;          // 2064
+    SirenMode         TheSirenMode;             // 2068
+    uint32_t          WiperOnTime;              // 2072
+    uint32_t          WiperOffTime;             // 2076
+    int32_t           WiperState;               // 2080
+    CarDamage        *pCarDamage;               // 2084
+    uint8_t           BlownTireBits;            // 2088
+    uint8_t           NumBlownTires;            // 2089
+    uint8_t           _hole2090[2];             // 2090
+    float             fBlownTireControllerRumbleTimer; // 2092
+    BaseCarSound     *pBaseCarSound;            // 2096
+    int32_t           ResetMe;                  // 2100
+    int32_t           BlinkTimer;               // 2104
+    float             BlinkDuration;            // 2108
+    bVector2          LastInTroughPosition;     // 2112
+    int32_t           bPoofed;                  // 2120
+    int32_t           bVisibleOnTrackMap;       // 2124
+    uint8_t           NumTimesSkidding[4];      // 2128, a count a wheel
+    uint8_t           RoadBumpBits;             // 2132
+    uint8_t           _hole2133[3];             // 2133
+    void             *pCaffeineObj;             // 2136
+    void             *pLastCarTrailObj;         // 2140
+    int32_t           LeaveCarTrails;           // 2144
+    int32_t           ForceBuzzTime;            // 2148
+    float             fAngleToCamera;           // 2152
+    uint32_t          _pad2156;                 // 2156 quadword round-up
 
     // Retail's four new fields, which retail put among the ones above
     // (its Car is 2200 bytes). They go at the end here so that every
-    // demo offset above still holds and the demo image's checkers still
-    // run. Retail's offsets are in the comments. The names are the port's,
+    // demo offset above still holds, but for the 144 bytes retail's
+    // TopologyCoordinate adds, and the demo image's checkers still run.
+    // Retail's offsets are in the comments. The names are the port's,
     // since retail has no symbols.
     //
     //   vOldPos: the position BeginMovement saves beside vOldVel and
@@ -297,19 +302,20 @@ struct Car {
     //   InDeepWaterRegistered: set once TriggerCarTerrainEffects has
     //   registered "InDeepWater" with the replay, and cleared when the car
     //   leaves deep water.
-    bVector3          vOldPos;                  // 2016 retail 1136
-    float             HeadlightsAndHornSecondOnDuration; // 2032 retail 2088
-    int32_t           JustResetFrames;          // 2036 retail 2140
-    int32_t           InDeepWaterRegistered;    // 2040 retail 2196
-    uint32_t          _pad2044;                 // 2044 quadword round-up
-};                                              // 2048
+    bVector3          vOldPos;                  // 2160 retail 1136
+    float             HeadlightsAndHornSecondOnDuration; // 2176 retail 2088
+    int32_t           JustResetFrames;          // 2180 retail 2140
+    int32_t           InDeepWaterRegistered;    // 2184 retail 2196
+    uint32_t          _pad2188;                 // 2188 quadword round-up
+};                                              // 2192
 
 // ---------------------------------------------------------------- the asserts
 //
 // Each field's slack term is the number of four-byte-to-pointer widenings
 // that happen at or before it, and they do not run uniformly: fourteen
 // pointers and one alignment gap before State, then CarState's own two,
-// then TopologyCoordinate's hundred and twenty-eight, then five more.
+// then TopologyCoordinate's hundred and sixty-two (161 pointers and the
+// round-up after the last), then five more.
 //
 // The gap is worth naming. `CarIndex` and `DriverNumber` leave `pCarTypeInfo`
 // at 12, which a 64-bit host must round up to 16 -- four bytes the console
@@ -353,52 +359,52 @@ typedef char car_layout_check[
      && CAR_AT(pAnimatedDriver, 1172, 15)
      && CAR_AT(TheOverrideRenderingPosition, 1184, 16)
      && CAR_AT(TheTopologyCoordinate, 1280, 16)
-     && CAR_AT(TheTrackPathCoordinate, 1840, 144)
-     && CAR_AT(CopLights, 1880, 148)
-     && CAR_AT(SignalLightState, 1884, 148)
-     && CAR_AT(NitroEffectFlag, 1888, 148)
-     && CAR_AT(WantToBlinkHeadlights, 1892, 148)
-     && CAR_AT(WantToHonkHorn, 1896, 148)
-     && CAR_AT(WantTwoHonksAndOrBlinks, 1900, 148)
-     && CAR_AT(HeadlightsAndHornStartTime, 1904, 148)
-     && CAR_AT(HeadlightsAndHornOnDuration, 1908, 148)
-     && CAR_AT(HeadlightsAndHornOffDuration, 1912, 148)
-     && CAR_AT(ForceHeadlightsOn, 1916, 148)
-     && CAR_AT(HeadlightsState, 1920, 148)
-     && CAR_AT(TheSirenMode, 1924, 148)
-     && CAR_AT(WiperOnTime, 1928, 148)
-     && CAR_AT(WiperOffTime, 1932, 148)
-     && CAR_AT(WiperState, 1936, 148)
-     && CAR_AT(pCarDamage, 1940, 149)
-     && CAR_AT(BlownTireBits, 1944, 150)
-     && CAR_AT(NumBlownTires, 1945, 150)
-     && CAR_AT(fBlownTireControllerRumbleTimer, 1948, 150)
-     && CAR_AT(pBaseCarSound, 1952, 150)
-     && CAR_AT(ResetMe, 1956, 151)
-     && CAR_AT(BlinkTimer, 1960, 151)
-     && CAR_AT(BlinkDuration, 1964, 151)
-     && CAR_AT(LastInTroughPosition, 1968, 151)
-     && CAR_AT(bPoofed, 1976, 151)
-     && CAR_AT(bVisibleOnTrackMap, 1980, 151)
-     && CAR_AT(NumTimesSkidding, 1984, 151)
-     && CAR_AT(RoadBumpBits, 1988, 151)
-     && CAR_AT(pCaffeineObj, 1992, 152)
-     && CAR_AT(pLastCarTrailObj, 1996, 153)
-     && CAR_AT(LeaveCarTrails, 2000, 154)
-     && CAR_AT(ForceBuzzTime, 2004, 154)
-     && CAR_AT(fAngleToCamera, 2008, 154)
+     && CAR_AT(TheTrackPathCoordinate, 1984, 178)
+     && CAR_AT(CopLights, 2024, 182)
+     && CAR_AT(SignalLightState, 2028, 182)
+     && CAR_AT(NitroEffectFlag, 2032, 182)
+     && CAR_AT(WantToBlinkHeadlights, 2036, 182)
+     && CAR_AT(WantToHonkHorn, 2040, 182)
+     && CAR_AT(WantTwoHonksAndOrBlinks, 2044, 182)
+     && CAR_AT(HeadlightsAndHornStartTime, 2048, 182)
+     && CAR_AT(HeadlightsAndHornOnDuration, 2052, 182)
+     && CAR_AT(HeadlightsAndHornOffDuration, 2056, 182)
+     && CAR_AT(ForceHeadlightsOn, 2060, 182)
+     && CAR_AT(HeadlightsState, 2064, 182)
+     && CAR_AT(TheSirenMode, 2068, 182)
+     && CAR_AT(WiperOnTime, 2072, 182)
+     && CAR_AT(WiperOffTime, 2076, 182)
+     && CAR_AT(WiperState, 2080, 182)
+     && CAR_AT(pCarDamage, 2084, 183)
+     && CAR_AT(BlownTireBits, 2088, 184)
+     && CAR_AT(NumBlownTires, 2089, 184)
+     && CAR_AT(fBlownTireControllerRumbleTimer, 2092, 184)
+     && CAR_AT(pBaseCarSound, 2096, 184)
+     && CAR_AT(ResetMe, 2100, 185)
+     && CAR_AT(BlinkTimer, 2104, 185)
+     && CAR_AT(BlinkDuration, 2108, 185)
+     && CAR_AT(LastInTroughPosition, 2112, 185)
+     && CAR_AT(bPoofed, 2120, 185)
+     && CAR_AT(bVisibleOnTrackMap, 2124, 185)
+     && CAR_AT(NumTimesSkidding, 2128, 185)
+     && CAR_AT(RoadBumpBits, 2132, 185)
+     && CAR_AT(pCaffeineObj, 2136, 186)
+     && CAR_AT(pLastCarTrailObj, 2140, 187)
+     && CAR_AT(LeaveCarTrails, 2144, 188)
+     && CAR_AT(ForceBuzzTime, 2148, 188)
+     && CAR_AT(fAngleToCamera, 2152, 188)
      && CAR_AT(_hole1108, 1108, 14)
      && CAR_AT(_hole1161, 1161, 14)
      && CAR_AT(_hole1176, 1176, 16)
-     && CAR_AT(_hole1881, 1881, 148)
-     && CAR_AT(_hole1946, 1946, 150)
-     && CAR_AT(_hole1989, 1989, 151)
-     && CAR_AT(_pad2012, 2012, 154)
-     && CAR_AT(vOldPos, 2016, 154)
-     && CAR_AT(HeadlightsAndHornSecondOnDuration, 2032, 154)
-     && CAR_AT(JustResetFrames, 2036, 154)
-     && CAR_AT(InDeepWaterRegistered, 2040, 154)
-     && CAR_AT(_pad2044, 2044, 154)
+     && CAR_AT(_hole2025, 2025, 182)
+     && CAR_AT(_hole2090, 2090, 184)
+     && CAR_AT(_hole2133, 2133, 185)
+     && CAR_AT(_pad2156, 2156, 188)
+     && CAR_AT(vOldPos, 2160, 188)
+     && CAR_AT(HeadlightsAndHornSecondOnDuration, 2176, 188)
+     && CAR_AT(JustResetFrames, 2180, 188)
+     && CAR_AT(InDeepWaterRegistered, 2184, 188)
+     && CAR_AT(_pad2188, 2188, 188)
 
      // The holes are asserted by size as well as by offset, and that
      // is not redundant. On this 64-bit host CarState is eight-byte
@@ -411,11 +417,11 @@ typedef char car_layout_check[
      && sizeof(((Car *)0)->_hole1108) == 12
      && sizeof(((Car *)0)->_hole1161) == 3
      && sizeof(((Car *)0)->_hole1176) == 8
-     && sizeof(((Car *)0)->_hole1881) == 3
-     && sizeof(((Car *)0)->_hole1946) == 2
-     && sizeof(((Car *)0)->_hole1989) == 3
+     && sizeof(((Car *)0)->_hole2025) == 3
+     && sizeof(((Car *)0)->_hole2090) == 2
+     && sizeof(((Car *)0)->_hole2133) == 3
 
-     && sizeof(Car) == (size_t)2048 + 154 * CAR_SLACK
+     && sizeof(Car) == (size_t)2192 + 188 * CAR_SLACK
      && sizeof(CarState) == 1024 + CARSTATE_SLACK
      && sizeof(TopologyCoordinate) == TOPOLOGY_SIZEOF
      && sizeof(CarNode) == 2 * sizeof(void *)

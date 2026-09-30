@@ -1,6 +1,10 @@
-// track -- Track.obj, 0x0014e7d0 .. 0x001509d4. See topology.h and track.h.
+// track -- retail's Track.obj, 0x001513c8 .. 0x00153984 (the demo's
+// 0x0014e7d0 .. 0x001509d4). See topology.h and track.h.
 //
-// Every function here is the listing's, in the listing's order. Where the
+// Every function here is retail's listing's, in the listing's order, but
+// for road noise, which is still the demo's until TerrainTypeInfo is
+// retail's. The listing ends with a SetInterestBBox thunk at 0x00153970
+// that nothing calls, which is not ported. Where the
 // EE moves four lanes the port moves four too if a caller can read the
 // fourth, and three if nothing can; each place says which.
 //
@@ -8,7 +12,7 @@
 // two it does not -- the normal's reciprocal square root in the
 // constructor and GetElevation's divide by the normal's z -- are only zero
 // for a polygon whose vertices are collinear or, for the second, a floor
-// that stands on its edge. TRACKB12 has neither (all 15708 polygons,
+// that stands on its edge. TRACKB12 has neither (all 15098 polygons,
 // tools/track_check.py counts them), and the EE's quotient for a zero
 // divisor is FLT_MAX where ARM's is infinity, so a track that did would
 // need ee_div here and would show it in that count first.
@@ -21,7 +25,6 @@
 
 #include "bchunk.h"
 #include "bslotpool.h"
-#include "bticker.h"
 #include "bvector.h"
 #include "eefpu.h"
 #include "p32.h"
@@ -30,8 +33,7 @@
 
 TopologyTree  TheTopologyTree;
 BSlotPool    *TrackPolygonSlotPool;
-float         TopologyTiming[10];
-uint32_t      TopologyTimingIndex;
+int32_t       TopologyTreeUnused[2];
 
 TrackListNode TrackPositionMarkerList;
 TrackInfo    *CurrentTrackInfo;
@@ -47,12 +49,21 @@ const float RoadNoiseTable[16] = {
 // 0x37800000, the Q16 scale every fixed-point coordinate is read through.
 #define TRACK_Q16 (1.0f / 65536.0f)
 
-// gp-31496: HasTopology's probe height, 99999.1 as a float.
+// gp-31340: HasTopology's probe height, 99999.1 as a float.
 #define TRACK_PROBE_Z 99999.1015625f
 
-// gp-31492 and gp-31488: the "nothing yet" distance both segment walks
+// gp-31336 and gp-31328: the "nothing yet" distance both segment walks
 // start from.
 #define TRACK_FAR 999999.0f
+
+// gp-31344 and gp-31348: SetInterestBBox's first look-ahead, in seconds of
+// velocity, and the diagonal the cached box must stay under.
+#define TRACK_AHEAD_SCALE    0.15f
+#define TRACK_CACHE_DIAGONAL 28.8f
+
+// gp-31324: BuildTrackPolygons gathers nothing for a box that reaches this
+// far out, or -32768, where the grid's Q16 corner would overflow.
+#define TRACK_BUILD_LIMIT 32767.0f
 
 // ---------------------------------------------------------------- helpers
 
@@ -119,7 +130,7 @@ static void append_node(TrackListNode *head, TrackListNode *n)
 
 // ------------------------------------------------------------ the markers
 
-// 0x0014e7d0.
+// 0x001513c8.
 int track_get_num_position_markers(uint32_t hash)
 {
     TrackListNode *head = &TrackPositionMarkerList;
@@ -133,7 +144,7 @@ int track_get_num_position_markers(uint32_t hash)
     return count;
 }
 
-// 0x0014e810.
+// 0x00151408.
 TrackPositionMarker *track_get_position_marker(uint32_t hash, int i)
 {
     TrackListNode *head = &TrackPositionMarkerList;
@@ -150,13 +161,13 @@ TrackPositionMarker *track_get_position_marker(uint32_t hash, int i)
     return NULL;
 }
 
-// 0x0014e858.
+// 0x00151450.
 int track_get_num_position_markers_named(const char *name)
 {
     return track_get_num_position_markers(bchunk_hash(name));
 }
 
-// 0x0014e880.
+// 0x00151478.
 TrackPositionMarker *track_get_position_marker_named(const char *name, int i)
 {
     return track_get_position_marker(bchunk_hash(name), i);
@@ -164,7 +175,7 @@ TrackPositionMarker *track_get_position_marker_named(const char *name, int i)
 
 // ---------------------------------------------------------- TrackPolygon
 
-// 0x0014e8b0.
+// 0x001514a8.
 TrackPolygon *trackpolygon_init(TrackPolygon *tp, TopologyTreePolygon *p)
 {
     unsigned m;
@@ -183,8 +194,9 @@ TrackPolygon *trackpolygon_init(TrackPolygon *tp, TopologyTreePolygon *p)
     tp->BBoxMax.x = xy_of(p->VerticesX[(m >> 4) & 3]);
     tp->BBoxMax.y = xy_of(p->VerticesY[m >> 6]);
 
-    // All four, triangle or not: GetElevation walks four edges whatever
-    // NumVertices says, so the fourth vertex of a triangle is data.
+    // All four, triangle or not: GetElevation's third edge runs from the
+    // fourth vertex back to the first whatever NumVertices says, so the
+    // fourth vertex of a triangle is data.
     for (i = 0; i < 4; i++) {
         tp->Vertices[i].x = xy_of(p->VerticesX[i]);
         tp->Vertices[i].y = xy_of(p->VerticesY[i]);
@@ -222,8 +234,8 @@ TrackPolygon *trackpolygon_init(TrackPolygon *tp, TopologyTreePolygon *p)
     return tp;
 }
 
-// 0x0014eb78. ~bTNode is ~bNode with its delete bit clear, which is
-// nothing; the slot goes back through __dl, 0x001509c8.
+// 0x00151770. ~bTNode is ~bNode with its delete bit clear, which is
+// nothing; the slot goes back through __dl, 0x00153978.
 void trackpolygon_destroy(TrackPolygon *tp, int flags)
 {
     if (tp->pPolygon != NULL)
@@ -232,7 +244,7 @@ void trackpolygon_destroy(TrackPolygon *tp, int flags)
         bSlotFree(TrackPolygonSlotPool, tp);
 }
 
-// 0x0014ebe0. The edges out of `pt`, crossed in order round the polygon;
+// 0x001517d8. The edges out of `pt`, crossed in order round the polygon;
 // inside when every cross points the normal's way. Three lanes: the
 // crosses are masked xyz and the dots read xyz.
 int trackpolygon_point_in_shaft(const TrackPolygon *tp, const bVector3 *pt,
@@ -266,7 +278,7 @@ int trackpolygon_point_in_shaft(const TrackPolygon *tp, const bVector3 *pt,
     return 1;
 }
 
-// 0x0014ed98. Four lanes for the crossing, since `out` gets all sixteen
+// 0x00151990. Four lanes for the crossing, since `out` gets all sixteen
 // bytes; the fourth is the ends' pads interpolated.
 int trackpolygon_segment_intersects(const TrackPolygon *tp, const bVector3 *a,
                                     const bVector3 *b, bVector3 *out)
@@ -299,7 +311,7 @@ int trackpolygon_segment_intersects(const TrackPolygon *tp, const bVector3 *a,
     return 1;
 }
 
-// 0x0014ee90.
+// 0x00151a88.
 int trackpolygon_test_segment(const TrackPolygon *tp, float *best,
                               const bVector3 *a, const bVector3 *b,
                               const bVector3 *bmin, const bVector3 *bmax,
@@ -333,7 +345,51 @@ int trackpolygon_test_segment(const TrackPolygon *tp, float *best,
 
 // ---------------------------------------------------- TopologyCoordinate
 
-// 0x0014f030. The counts first, because ClearInterestBBox releases
+// GetElevation's edge test, inlined twice in the listing: the largest of
+// -1 and each edge's cross, stopping at the first that is positive. Below
+// 0 is strictly inside, 0 is on an edge. The edges are 0-1, 1-2 and 3-0,
+// and 2-3 only for a quad, so a triangle's is closed by its fourth vertex.
+static float track_edge(const bVector3 *vi, const bVector3 *vj, float px,
+                        float py)
+{
+    return (vj->y - vi->y) * (px - vi->x) - (vj->x - vi->x) * (py - vi->y);
+}
+
+// max.s m,m,c: c only when m is less, so an edge that is not a number
+// leaves m as it was.
+static float track_max(float m, float c)
+{
+    return m < c ? c : m;
+}
+
+static float track_polygon_inside(const TrackPolygon *tp, float px, float py)
+{
+    const bVector3 *v = tp->Vertices;
+    float m = -1.0f;
+
+    m = track_max(m, track_edge(&v[0], &v[1], px, py));
+    if (0.0f < m)
+        return m;
+    m = track_max(m, track_edge(&v[1], &v[2], px, py));
+    if (0.0f < m)
+        return m;
+    m = track_max(m, track_edge(&v[3], &v[0], px, py));
+    if (0.0f < m)
+        return m;
+    if ((int8_t)tp->NumVertices == 4)
+        m = track_max(m, track_edge(&v[2], &v[3], px, py));
+    return m;
+}
+
+// The plane's height over (x, y).
+static float track_polygon_height(const TrackPolygon *tp, float px, float py)
+{
+    return (tp->PlaneDistance - (tp->Normal.x * px + tp->Normal.y * py))
+           / tp->Normal.z;
+}
+
+
+// 0x00151c28. The counts first, because ClearInterestBBox releases
 // TotalNumTrackPolygons entries of a table nothing has filled.
 void topology_init(TopologyCoordinate *tc)
 {
@@ -341,45 +397,51 @@ void topology_init(TopologyCoordinate *tc)
     tc->NumTrackPolygons = 0;
     tc->NumVerticalTrackPolygons = 0;
     tc->NumUpsideDownTrackPolygons = 0;
+    tc->Unused692[0] = 0;
+    tc->Unused692[1] = 0;
+    tc->Unused692[2] = 0;
     topology_clear_interest_bbox(tc);
 }
 
-// 0x0014f068.
+// 0x00151c70.
 void topology_destroy(TopologyCoordinate *tc)
 {
     topotree_remove(&TheTopologyTree, tc->TrackPolygonTable,
                     tc->TotalNumTrackPolygons);
 }
 
-// 0x0014f0c8.
+// 0x00151cd0.
 void topology_clear_interest_bbox(TopologyCoordinate *tc)
 {
     bInitializeBoundingBox2(&tc->InterestBBoxMin, &tc->InterestBBoxMax);
     bInitializeBoundingBox2(&tc->CachedBBoxMin, &tc->CachedBBoxMax);
     topotree_remove(&TheTopologyTree, tc->TrackPolygonTable,
                     tc->TotalNumTrackPolygons);
-    tc->NumUpsideDownTrackPolygons = 0;
+    tc->pLastTrackPolygon = NULL;
     tc->TotalNumTrackPolygons = 0;
     tc->NumTrackPolygons = 0;
     tc->NumVerticalTrackPolygons = 0;
+    tc->NumUpsideDownTrackPolygons = 0;
 }
 
-// 0x0014f120.
+// 0x00151d30.
+//
+// The cache is the interest box grown by half a unit, and with `vel` grown
+// again round where the point will be `s` seconds on. Five tries shrink s
+// by a quarter each until the box's diagonal is under 28.8, and the fifth
+// uses s = 0, which is the box with no look-ahead; if even that is too big
+// it stands.
 //
 // The table is filled in three passes over what the build returned:
 // neither-vertical-nor-upside-down, then vertical, then upside-down, the
-// last two only when the one before left something out. The third count
-// is stored as (everything placed) - (vertical), which is the upside-down
-// count only when there are no floors -- with the usual all-floor build it
-// comes out as the total. The image does that and so does the port;
-// nothing in Track.obj reads the count back.
+// last two only when the one before left something out. Nothing on
+// TRACKB12 is both vertical and upside-down, which would list it twice.
 void topology_set_interest_bbox(TopologyCoordinate *tc, const bVector2 *pos,
                                 float r, const bVector2 *vel)
 {
     TrackPolygon *local[TOPOLOGY_MAX_POLYGONS];
     TrackPolygon **table = tc->TrackPolygonTable;
-    float scale = 0.5f;
-    int n, k, vertical, i;
+    int n, k, floors, vertical, i;
 
     bInitializeBoundingBox2(&tc->InterestBBoxMin, &tc->InterestBBoxMax);
     bExpandBoundingBox2R(&tc->InterestBBoxMin, &tc->InterestBBoxMax, pos, r);
@@ -387,30 +449,39 @@ void topology_set_interest_bbox(TopologyCoordinate *tc, const bVector2 *pos,
                               &tc->InterestBBoxMin, &tc->InterestBBoxMax))
         return;
 
-    r = r + 0.5f;
     topotree_remove(&TheTopologyTree, table, tc->TotalNumTrackPolygons);
     tc->TotalNumTrackPolygons = 0;
     tc->NumTrackPolygons = 0;
     tc->NumVerticalTrackPolygons = 0;
     tc->NumUpsideDownTrackPolygons = 0;
+    tc->pLastTrackPolygon = NULL;
 
-    for (i = 0; i < 10; i++) {
-        float dx, dy;
-
+    if (vel == NULL) {
         bInitializeBoundingBox2(&tc->CachedBBoxMin, &tc->CachedBBoxMax);
-        bExpandBoundingBox2R(&tc->CachedBBoxMin, &tc->CachedBBoxMax, pos, r);
-        if (vel != NULL) {
-            bVector2 ahead;
+        bExpandBoundingBox2R(&tc->CachedBBoxMin, &tc->CachedBBoxMax, pos,
+                             r + 0.5f);
+    } else {
+        float s = TRACK_AHEAD_SCALE;
 
-            bScaleAdd2(&ahead, pos, vel, scale);
+        r = r + 0.5f;
+        for (i = 0; i < 5; i++) {
+            bVector2 ahead;
+            float dx, dy;
+
+            bInitializeBoundingBox2(&tc->CachedBBoxMin, &tc->CachedBBoxMax);
+            bExpandBoundingBox2R(&tc->CachedBBoxMin, &tc->CachedBBoxMax, pos,
+                                 r);
+            bScaleAdd2(&ahead, pos, vel, s);
             bExpandBoundingBox2R(&tc->CachedBBoxMin, &tc->CachedBBoxMax,
                                  &ahead, r);
+            dx = tc->CachedBBoxMin.x - tc->CachedBBoxMax.x;
+            dy = tc->CachedBBoxMin.y - tc->CachedBBoxMax.y;
+            if (sqrtf(dx * dx + dy * dy) < TRACK_CACHE_DIAGONAL)
+                break;
+            s = s * 0.75f;
+            if (i == 3)
+                s = 0.0f;
         }
-        dx = tc->CachedBBoxMin.x - tc->CachedBBoxMax.x;
-        dy = tc->CachedBBoxMin.y - tc->CachedBBoxMax.y;
-        if (sqrtf(dx * dx + dy * dy) < 32.0f)
-            break;
-        scale = scale * 0.5f;
     }
 
     n = topotree_build(&TheTopologyTree, local, TOPOLOGY_MAX_POLYGONS,
@@ -425,17 +496,15 @@ void topology_set_interest_bbox(TopologyCoordinate *tc, const bVector2 *pos,
         table[k++] = local[i];
     }
     tc->NumTrackPolygons = k;
+    floors = k;
 
-    vertical = 0;
     if (k != n) {
-        int base = k;
-
         for (i = 0; i < n; i++) {
             if (local[i]->Flags & TRACKPOLY_VERTICAL)
                 table[k++] = local[i];
         }
-        vertical = k - base;
     }
+    vertical = k - floors;
     tc->NumVerticalTrackPolygons = vertical;
 
     if (k != n) {
@@ -445,10 +514,10 @@ void topology_set_interest_bbox(TopologyCoordinate *tc, const bVector2 *pos,
         }
     }
     tc->TotalNumTrackPolygons = n;
-    tc->NumUpsideDownTrackPolygons = k - vertical;
+    tc->NumUpsideDownTrackPolygons = k - vertical - floors;
 }
 
-// 0x00134f28, emitted in Car.obj: the bVector3 overload is `j 0x0014f120`,
+// 0x00136e00, emitted in Car.obj: the bVector3 overload is `j 0x00151d30`,
 // the same four registers, so x and y are read out of each vector and the
 // rest of it is not.
 void topology_set_interest_bbox3(TopologyCoordinate *tc, const bVector3 *pos,
@@ -458,15 +527,19 @@ void topology_set_interest_bbox3(TopologyCoordinate *tc, const bVector3 *pos,
                                (const bVector2 *)vel);
 }
 
-// 0x0014f418.
+// 0x00152070.
 //
-// Two passes over the floors: the first for a surface below pt.z + 1, the
-// second, if that found none, for one at any height. A polygon counts when
-// (x, y) is in its box and on the inner side of all four edges -- four
-// whatever NumVertices says, skipping any of zero length -- and its plane
-// is above everything accepted so far. One strictly inside, and not
-// flagged INFINITELY_HIGH, ends the pass at once; one on an edge, or
-// flagged, is remembered and raises the floor for the rest of the pass.
+// The last polygon first: when the call before found (x, y) strictly
+// inside a polygon, and (x, y) still is, that polygon's plane is the
+// answer at once -- at any height, with no look at the interest box.
+//
+// Otherwise two passes over the floors: the first for a surface below
+// pt.z + 1, the second, if that found none, for one at any height. A
+// polygon counts when (x, y) is in its box and on the inner side of its
+// edges, and its plane is above everything accepted so far. One strictly
+// inside, and not flagged INFINITELY_HIGH, ends the pass at once and
+// becomes the last polygon; one on an edge, or flagged, is remembered and
+// raises the floor for the rest of the pass.
 //
 // A hit at index 5 or later moves to the front of the table, so a car that
 // stays on one polygon finds it first next time.
@@ -474,14 +547,29 @@ float topology_get_elevation(TopologyCoordinate *tc, const bVector3 *pt,
                              int32_t *terrain, bVector3 *normal,
                              int32_t *found)
 {
-    uint32_t start = bGetTicker();
     TrackPolygon **table = tc->TrackPolygonTable;
+    const TrackPolygon *last = tc->pLastTrackPolygon;
     bVector2 xy;
-    float hi, result = 0.0f;
+    float hi, result;
     int num, pass, hit = -1;
 
     if (found != NULL)
         *found = 1;
+
+    if (last != NULL
+        && track_polygon_inside(last, pt->x, pt->y) < 0.0f) {
+        result = track_polygon_height(last, pt->x, pt->y);
+        if (terrain != NULL)
+            *terrain = (int8_t)last->TheTerrainType;
+        if (normal != NULL) {
+            normal->x = last->Normal.x;
+            normal->y = last->Normal.y;
+            normal->z = last->Normal.z;
+            normal->pad = last->PlaneDistance;
+        }
+        return result;
+    }
+
     xy.x = pt->x;
     xy.y = pt->y;
     if (!bBoundingBoxIsInside2(&tc->InterestBBoxMin, &tc->InterestBBoxMax,
@@ -490,51 +578,35 @@ float topology_get_elevation(TopologyCoordinate *tc, const bVector3 *pt,
 
     hi = pt->z + 1.0f;
     num = tc->NumTrackPolygons;
+    result = pt->z;
     for (pass = 0; pass < 2 && hit < 0; pass++) {
         float lo = -BVECTOR_FLT_MAX;
         int cand = -1;
         int i;
 
         for (i = 0; i < num; i++) {
-            const TrackPolygon *tp = table[i];
+            TrackPolygon *tp = table[i];
             float px = pt->x, py = pt->y;
             float m, elev;
-            int e;
 
             if (!(tp->BBoxMin.x <= px) || !(px <= tp->BBoxMax.x))
                 continue;
             if (!(tp->BBoxMin.y <= py) || !(py <= tp->BBoxMax.y))
                 continue;
 
-            m = -1.0f;
-            for (e = 0; e < 4; e++) {
-                const bVector3 *ve = &tp->Vertices[e];
-                const bVector3 *vj = &tp->Vertices[(e + 1) % 4];
-                float cross;
-
-                if (ve->x == vj->x && ve->y == vj->y)
-                    continue;
-                cross = (vj->y - ve->y) * (px - ve->x)
-                      - (vj->x - ve->x) * (py - ve->y);
-                if (0.0f < cross) {
-                    m = cross;
-                    break;
-                }
-                if (m < cross)
-                    m = cross;
-            }
+            m = track_polygon_inside(tp, px, py);
             if (!(m <= 0.0f))
                 continue;
 
-            elev = (tp->PlaneDistance
-                    - (tp->Normal.x * px + tp->Normal.y * py)) / tp->Normal.z;
+            elev = track_polygon_height(tp, px, py);
             if (!(lo < elev) || !(elev < hi))
                 continue;
+            lo = elev;
             if ((tp->Flags & TRACKPOLY_INFINITELY_HIGH) || !(m < 0.0f)) {
-                lo = elev;
                 cand = i;
                 continue;
             }
+            tc->pLastTrackPolygon = tp;
             hit = i;
             result = elev;
             break;
@@ -547,7 +619,6 @@ float topology_get_elevation(TopologyCoordinate *tc, const bVector3 *pt,
     }
 
     if (hit < 0) {
-        result = pt->z;
         if (found != NULL)
             *found = 0;
         if (terrain != NULL)
@@ -576,14 +647,10 @@ float topology_get_elevation(TopologyCoordinate *tc, const bVector3 *pt,
             normal->pad = tp->PlaneDistance;
         }
     }
-
-    TopologyTiming[TopologyTimingIndex % 10u] =
-        bGetTickerDifference(start, bGetTicker()) * 1000.0f;
-    TopologyTimingIndex++;
     return result;
 }
 
-// 0x0014f7e8.
+// 0x00152558.
 int topology_has_topology(TopologyCoordinate *tc, const bVector2 *xy)
 {
     bVector3 p;
@@ -597,7 +664,7 @@ int topology_has_topology(TopologyCoordinate *tc, const bVector2 *xy)
     return found;
 }
 
-// 0x001c1210. A coordinate of its own, which gathers its 8-unit box round
+// 0x001cb350. A coordinate of its own, which gathers its 8-unit box round
 // the point, and the probe at z 0: the highest surface below 1, else the
 // highest at all, else 0. `in` is read twice for y, once for the probe and
 // once for out, and out's fourth lane is not written.
@@ -617,7 +684,7 @@ void get_vector_on_track(bVector3 *out, const bVector2 *in)
     topology_destroy(&tc);
 }
 
-// 0x0014f830. The first crossing ends the walk; `best` only filters.
+// 0x001525a0. The first crossing ends the walk; `best` only filters.
 int topology_segment_intersects(TopologyCoordinate *tc, const bVector3 *a,
                                 const bVector3 *b, float r)
 {
@@ -635,7 +702,7 @@ int topology_segment_intersects(TopologyCoordinate *tc, const bVector3 *a,
     return 0;
 }
 
-// 0x0014f920. The whole table is walked and the nearest crossing kept.
+// 0x001528b0. The whole table is walked and the nearest crossing kept.
 //
 // `d` and the new `to` are four lanes: the moves are vadd.xyzw and
 // vsub.xyzw and `to` is stored whole, while bNormalize writes only xyz. So
@@ -709,7 +776,7 @@ int topology_constrain(TopologyCoordinate *tc, int type, int twoSided,
 
 // ---------------------------------------------------------- TopologyTree
 
-// 0x0014fb80.
+// 0x00152b10.
 void topotree_init(TopologyTree *t)
 {
     t->TrackPolygonList.pNext = p32_of(&t->TrackPolygonList);
@@ -722,9 +789,10 @@ void topotree_init(TopologyTree *t)
     t->NumPolygons = 0;
     t->pPolygonIndexTable = NULL;
     t->NumPolygonIndicies = 0;
+    t->Unused32 = 0;
 }
 
-// 0x0014fbb8. Sized by the port's record, so a host slot is wider than
+// 0x00152b48. Sized by the port's record, so a host slot is wider than
 // the image's 128 bytes and a slot number means the same thing on both.
 void topotree_init_tree(TopologyTree *t)
 {
@@ -733,9 +801,11 @@ void topotree_init_tree(TopologyTree *t)
                                         "TrackPolygonSlotPool", 16);
     bClearSlotPoolFlag(TrackPolygonSlotPool, BSP_OVERFLOW_IF_FULL);
     bClearSlotPoolFlag(TrackPolygonSlotPool, BSP_ZERO_ALLOCATED_MEMORY);
+    TopologyTreeUnused[0] = 0;
+    TopologyTreeUnused[1] = 0;
 }
 
-// 0x0014fc00.
+// 0x00152b98.
 void topotree_close_tree(TopologyTree *t)
 {
     TrackListNode *head = &t->TrackPolygonList;
@@ -751,7 +821,7 @@ void topotree_close_tree(TopologyTree *t)
     TrackPolygonSlotPool = NULL;
 }
 
-// 0x0014fc78. The node and square chunks' records start at the first
+// 0x00152c10. The node and square chunks' records start at the first
 // 16-byte boundary past the header, so their counts are what is left of
 // the chunk after that pad.
 int topotree_loader(TopologyTree *t, uint8_t *chunk)
@@ -790,7 +860,7 @@ int topotree_loader(TopologyTree *t, uint8_t *chunk)
     return 0;
 }
 
-// 0x0014fd98.
+// 0x00152d30.
 int topotree_unloader(TopologyTree *t, const uint8_t *chunk)
 {
     uint32_t type = bchunk_u32(chunk);
@@ -818,7 +888,7 @@ int topotree_unloader(TopologyTree *t, const uint8_t *chunk)
     return 0;
 }
 
-// 0x0014fe18. The mask is -(int)2097152.0f, 32 in Q16.
+// 0x00152db0. The mask is -(int)2097152.0f, 32 in Q16.
 float topotree_get_square_corner(float f)
 {
     int32_t q = ee_trunc_w(f * 65536.0f) & -2097152;
@@ -826,7 +896,7 @@ float topotree_get_square_corner(float f)
     return (float)q * TRACK_Q16;
 }
 
-// 0x0014fe70. Ten levels, halving from 32768: level 1's children are
+// 0x00152e08. Ten levels, halving from 32768: level 1's children are
 // squares. The "nearest" substitute is scored by the distance from (x, y)
 // to the quadrant corner just chosen, which is the same for all four
 // children, so it is the first non-empty one -- or -1, which the image
@@ -883,7 +953,7 @@ TopologyTreeSquare *topotree_get_square(const TopologyTree *t, float x,
     }
 }
 
-// 0x0014ffa0. The polygon's box from its MaxMinBits, touching counted.
+// 0x00152f38. The polygon's box from its MaxMinBits, touching counted.
 int topotree_get_intersecting_polygons(const TopologyTree *t,
                                        TopologyTreePolygon **out, int max,
                                        const TopologyTreeSquare *sq,
@@ -919,8 +989,8 @@ int topotree_get_intersecting_polygons(const TopologyTree *t,
     return count;
 }
 
-// 0x00150110. Oldest first. A flush that finds nothing to free calls
-// bBreak (0x00238888, `break`), the debugger's stop: with every slot held,
+// 0x001530a8. Oldest first. A flush that finds nothing to free calls
+// bBreak (0x00250ab0, `break`), the debugger's stop: with every slot held,
 // the pool cannot supply the slot AssignTrackPolygon is about to take.
 // There is no debugger on the handheld; the port carries on to the same
 // NULL the image would reach had the break returned.
@@ -947,7 +1017,7 @@ void topotree_flush_unused(TopologyTree *t)
     }
 }
 
-// 0x001501b0.
+// 0x00153148.
 TrackPolygon *topotree_assign(TopologyTree *t, TopologyTreePolygon *p)
 {
     TrackPolygon *tp;
@@ -966,37 +1036,39 @@ TrackPolygon *topotree_assign(TopologyTree *t, TopologyTreePolygon *p)
     return tp;
 }
 
-// 0x00150250.
+// 0x001531e8.
 void topotree_unassign(TopologyTree *t, TrackPolygon *tp)
 {
     (void)t;
     tp->ReferenceCount = (uint8_t)(tp->ReferenceCount - 1);
 }
 
-// 0x00150260. The four corners' squares, each gathered once: a corner
-// whose square an earlier corner already had is skipped.
+// 0x001531f8. Every square of the grid the box touches, a row at a time
+// from the bottom left; GetIntersectingPolygons marks what it lists, so a
+// polygon that spans squares is listed once. A box reaching out to
+// -32768 or 32767 either way gathers nothing.
 int topotree_build(TopologyTree *t, TrackPolygon **out, int max,
                    const bVector2 *bmin, const bVector2 *bmax)
 {
     TopologyTreePolygon *stack[TOPOLOGY_MAX_POLYGONS];
-    TopologyTreeSquare *s0, *s1, *s2, *s3;
-    int n, i;
+    int n = 0, i;
 
-    s0 = topotree_get_square(t, bmin->x, bmin->y, 0);
-    s1 = topotree_get_square(t, bmax->x, bmin->y, 0);
-    s2 = topotree_get_square(t, bmin->x, bmax->y, 0);
-    s3 = topotree_get_square(t, bmax->x, bmax->y, 0);
+    if (-32768.0f < bmin->x && bmax->x < TRACK_BUILD_LIMIT
+        && -32768.0f < bmin->y && bmax->y < TRACK_BUILD_LIMIT) {
+        float x, y;
 
-    n = topotree_get_intersecting_polygons(t, stack, max, s0, bmin, bmax);
-    if (s1 != s0)
-        n += topotree_get_intersecting_polygons(t, stack + n, max - n, s1,
-                                                bmin, bmax);
-    if (s2 != s1 && s2 != s0)
-        n += topotree_get_intersecting_polygons(t, stack + n, max - n, s2,
-                                                bmin, bmax);
-    if (s3 != s2 && s3 != s1 && s3 != s0)
-        n += topotree_get_intersecting_polygons(t, stack + n, max - n, s3,
-                                                bmin, bmax);
+        for (y = topotree_get_square_corner(bmin->y); y <= bmax->y;
+             y = y + 32.0f) {
+            for (x = topotree_get_square_corner(bmin->x); x <= bmax->x;
+                 x = x + 32.0f) {
+                TopologyTreeSquare *sq = topotree_get_square(t, x, y, 0);
+
+                if (sq != NULL)
+                    n += topotree_get_intersecting_polygons(
+                        t, stack + n, max - n, sq, bmin, bmax);
+            }
+        }
+    }
 
     for (i = 0; i < n; i++) {
         stack[i]->UsedByNeighbourFlag = 0;
@@ -1005,7 +1077,7 @@ int topotree_build(TopologyTree *t, TrackPolygon **out, int max,
     return n;
 }
 
-// 0x00150420.
+// 0x001533c8.
 void topotree_remove(TopologyTree *t, TrackPolygon **table, int n)
 {
     int i;
@@ -1016,7 +1088,7 @@ void topotree_remove(TopologyTree *t, TrackPolygon **table, int n)
 
 // ------------------------------------------------------------ TrackInfo
 
-// 0x00150478, retail 0x00153420, which steps by retail's 164.
+// 0x00153420 (the demo's 0x00150478), which steps by retail's 164.
 TrackInfo *track_get_info(int i)
 {
     TrackInfo *p;
@@ -1029,7 +1101,7 @@ TrackInfo *track_get_info(int i)
 
 // ------------------------------------------------------------ road noise
 
-// 0x001504b0. The products wrap, as mult's low word does.
+// 0x00153458. The products wrap, as mult's low word does.
 float track_get_road_noise_grid_value(int x, int y)
 {
     uint32_t a = (uint32_t)x * (uint32_t)y * 11u;
@@ -1038,8 +1110,10 @@ float track_get_road_noise_grid_value(int x, int y)
     return RoadNoiseTable[(a + b) & 15u];
 }
 
-// 0x001504f0. floor() spelled as cvt.w.s and a correction, the corners
-// weighted in the listing's order and summed left to right.
+// The demo's 0x001504f0. floor() spelled as cvt.w.s and a correction, the
+// corners weighted in the listing's order and summed left to right.
+// Retail's (0x00153498) is the same code over its 144-byte TerrainTypeInfo,
+// which the terrain's own retail pass brings.
 float track_get_road_noise(const bVector2 *p, int32_t terrain)
 {
     const TerrainTypeInfo *info = &TerrainTypeInfoTable[terrain];
@@ -1071,7 +1145,7 @@ float track_get_road_noise(const bVector2 *p, int32_t terrain)
 
 // ------------------------------------------------------------ the loader
 
-// 0x00150660, retail 0x00153608: the table's count and the clear are by
+// 0x00153608 (the demo's 0x00150660): the table's count and the clear are by
 // retail's 164-byte record. Track 54's entry in the global table is
 // cleared on load -- whatever it was, the game is not to offer it.
 int track_loader_geometry(uint8_t *chunk)
@@ -1109,7 +1183,7 @@ int track_loader_geometry(uint8_t *chunk)
     return topotree_loader(&TheTopologyTree, chunk) != 0;
 }
 
-// 0x00150770.
+// 0x00153718.
 int track_unloader_geometry(const uint8_t *chunk)
 {
     uint32_t type = bchunk_u32(chunk);
@@ -1140,7 +1214,7 @@ int track_unloader_geometry(const uint8_t *chunk)
     return topotree_unloader(&TheTopologyTree, chunk) != 0;
 }
 
-// 0x00150938.
+// 0x001538e0.
 void track_static_init(void)
 {
     TrackPositionMarkerList.pPrev = p32_of(&TrackPositionMarkerList);

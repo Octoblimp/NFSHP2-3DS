@@ -23,28 +23,29 @@
 #include "rigidbody.h"
 #include "topology.h"
 
-// gp-32036, 0x46230eac: 65536 / 6.28 in float, the BAMs in a radian with
-// 6.28 standing in for two pi. It is 0.05% more than 65536 / (2 pi), so a
-// slope comes out a little steeper than it is. Kept.
+// gp-31948 (the demo's gp-32036), 0x46230eac: 65536 / 6.28 in float, the
+// BAMs in a radian with 6.28 standing in for two pi. It is 0.05% more than
+// 65536 / (2 pi), so a slope comes out a little steeper than it is. Kept.
 #define CAR_BAMS_PER_RADIAN 10435.66796875f
 
-// AverageAir's two pool constants: gp-31916, 0x3e99999a, the share of the
-// two downforces that counts against the fall, and gp-31912, 0x3eaaaaab,
+// AverageAir's two pool constants: gp-31820, 0x3e99999a, the share of the
+// two downforces that counts against the fall, and gp-31816, 0x3eaaaaab,
 // the samples per unit of speed times time. The quarter that averages the
 // four wheels and the 1 taken off the mean are literals.
 #define CAR_AIR_DOWNFORCE_SHARE 0.300000012f
 #define CAR_AIR_SAMPLE_RATE     0.333333343f
 
-// BeginMovement's interest box: gp-32072, 0x3d4ccccd, times the speed,
+// BeginMovement's interest box: gp-31992, 0x3d4ccccd, times the speed,
 // plus a literal 3.
 #define CAR_INTEREST_PER_SPEED  0.0500000007f
 #define CAR_INTEREST_BASE       3.0f
 
-// 0x00130c58. Samples the ground at pos and a unit step either side of it
-// along x and along y, puts pos.z at the centre height plus Wheels[3]'s
-// radius, less its z, plus the centre of gravity's z, and makes m the
-// rotation that yaws by `angle` and tilts to the two slopes. Only pos.z is
-// written, and m is overwritten entirely.
+// Retail's 0x001326d8 (the demo's 0x00130c58), the same code. Samples the
+// ground at pos and a unit step either side of it along x and along y,
+// puts pos.z at the centre height plus Wheels[3]'s radius, less its z,
+// plus the centre of gravity's z, and makes m the rotation that yaws by
+// `angle` and tilts to the two slopes. Only pos.z is written, and m is
+// overwritten entirely.
 //
 // GetElevation is asked for the terrain only, into a local nobody reads.
 // The probe's fourth lane is left as the stack had it; GetElevation reads
@@ -95,11 +96,12 @@ void car_find_flat_on_track_position(Car *c, bMatrix4 *m, bVector3 *pos,
     eRotateY(m, &local, roll);
 }
 
-// 0x00130e90. FindFlatOnTrackPosition on the car's own body matrix,
-// position, heading and topology, then GeometryPosition = Position less
-// the centre of gravity -- in body space, not rotated into the world the
-// way CarState::CalculateGeometryPosition does it. The subtract is
-// `vsub.xyzw`, so the fourth lane is Position's less CenterOfGravity's.
+// Retail's 0x00132910 (the demo's 0x00130e90). FindFlatOnTrackPosition on
+// the car's own body matrix, position, heading and topology, then
+// GeometryPosition = Position less the centre of gravity -- in body space,
+// not rotated into the world the way CarState::CalculateGeometryPosition
+// does it. The subtract is `vsub.xyzw`, so the fourth lane is Position's
+// less CenterOfGravity's.
 void car_put_flat_on_track(Car *c)
 {
     CarState *st = &c->State;
@@ -113,8 +115,9 @@ void car_put_flat_on_track(Car *c)
     st->GeometryPosition.pad = st->Position.pad - cog->pad;
 }
 
-// 0x00133e48. How far off the ground the car will be, on average, over the
-// next `*time` seconds of free flight; FinishMovement is its one caller.
+// Retail's 0x00135b30 (the demo's 0x00133e48). How far off the ground the
+// car will be, on average, over the next `*time` seconds of free flight;
+// FinishMovement is its one caller.
 //
 // The starting point is the mean of the four wheels' lowest points: each
 // is (0, 0, -radius) put through a wheel matrix and then through the body
@@ -213,12 +216,13 @@ float car_average_air(Car *c, float *time, float *height)
     return sum / (float)i - 1.0f;
 }
 
-// 0x001303a8. The start of a step. With time to move, the velocities are
-// kept as the old ones. The interest box is put round Position, 3 plus a
-// twentieth of the speed, and led by the velocity. A car over the
-// topology with two wheels or more down keeps its x and y as the last
-// place it was in the trough. Then the state's own BeginTimestep, a tail
-// call.
+// Retail's 0x00131cc8 (the demo's 0x001303a8). The start of a step. With
+// time to move, the position and the velocities are kept as the old ones
+// -- the demo's kept only the velocities. The interest box is put round
+// Position, 3 plus a twentieth of the speed, and led by the velocity. A
+// car over the topology with two wheels or more down keeps its x and y as
+// the last place it was in the trough. Then the state's own BeginTimestep,
+// a tail call.
 //
 // The speed is the velocity's length taken afresh, as VU0 does it:
 // x x + y y, then + z z. `nWheelsTouchingGround` is compared signed.
@@ -229,6 +233,7 @@ void car_begin_movement(Car *c, float dt)
     float speed;
 
     if (0.0f < dt) {
+        c->vOldPos = st->Position;
         c->vOldVel = st->Velocity;
         c->vOldAngVel = st->AngularVelocity;
     }

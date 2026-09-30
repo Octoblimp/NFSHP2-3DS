@@ -946,7 +946,7 @@ MUTATIONS = [
     ("ctor_siren", CIC, "c->TheSirenMode = 0;", "c->TheSirenMode = 1;"),
     ("ctor_cop_lights", CIC, "c->CopLights = 0;", "c->CopLights = 1;"),
     ("ctor_cop_lights_byte", CIC,
-     "    memset(c->_hole1881, 0, sizeof c->_hole1881);\n", ""),
+     "    memset(c->_hole2025, 0, sizeof c->_hole2025);\n", ""),
     ("ctor_headlights_state", CIC, "c->HeadlightsState = 0;",
      "c->HeadlightsState = 1;"),
     ("ctor_force_headlights", CIC, "c->ForceHeadlightsOn = 0;",

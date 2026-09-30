@@ -9,13 +9,25 @@ bStringHash beneath it, and TerrainType.obj's two lookups beside it. The
 harness runs the same op script on the port and prints the same lines.
 Every float goes both ways as its bits.
 
+**Two images.** track.c is retail's Track.obj, road noise excepted:
+retail's TopologyCoordinate is 704 bytes, with room for 160 polygons, the
+last polygon GetElevation found strictly inside and three words only the
+constructor writes; SetInterestBBox tries five look-aheads, GetElevation
+tries the last polygon first and no longer times itself, and
+BuildTrackPolygons walks every square under its box. So nearly everything
+runs on the retail image (retail_model.RetailEmu), against retail's own
+TRACKB12. Road noise and MatchTerrainType read TerrainTypeInfo, which is
+144 bytes in retail and still the demo's in terraintype.c, so those two
+run on the demo image until the terrain's own retail pass. The one
+harness answers both scripts.
+
 **The floats.** `Emu(ieee=True, eediv=True)`. track.c divides plainly --
 the normal's reciprocal square root in the TrackPolygon constructor and
 GetElevation's divide by the normal's z are the two a bad polygon could
 zero -- so the checker holds the image to that: after the run no division
 in Track.obj may have taken the EE's divide-by-zero path, and every one of
-TRACKB12's 15708 polygons is counted for a non-zero normal and, unless it
-is a wall, a non-zero normal z.
+retail TRACKB12's 15098 polygons is counted for a non-zero normal and,
+unless it is a wall, a non-zero normal z.
 
 **The pool.** InitTree makes a 1024-slot pool of TrackPolygons. In the
 model bMalloc hands every pool the same fixed block, zeroed; the harness's
@@ -34,41 +46,34 @@ as p32 handles are followed, never printed.
 
 **The chunks.** Up to eight, each in its own 1 MB window at a chosen
 misalignment mod 16 -- the node and square loaders pad to the next 16-byte
-boundary, so the misalignment decides their counts. TRACKB12's and
+boundary, so the misalignment decides their counts. Retail TRACKB12's and
 GLOBALB's own chunks load at their file offsets' misalignments.
 
-**The ticks.** GetElevation times itself through bGetTicker and
-bGetTickerDifference. Both sides draw ticks from the same LCG, and the
-model runs the image's bGetTickerDifference rather than stub_bware's zero,
-so TopologyTiming is compared too, differences past 2**31 included.
-
-**Two images.** Track.obj's loader half follows retail: TrackInfo is
-retail's 164-byte record, which retail's GetTrackInfo and
-LoaderTrackGeometry step by, where the demo's is 160. So the info
-scenarios run on the retail image (retail_model.RetailEmu) against retail
-data, and everything else on the demo image, whose topology code the
-port still is -- retail rewrote GetElevation and SetInterestBBox and
-dropped TopologyTiming, which is the topology's own retail pass. The one
-harness answers both scripts. Retail has no TopologyTiming, so its model
-prints the zeros the port holds; no retail scenario calls GetElevation.
+**The car.** The model's Car is retail's: TheTopologyCoordinate at 1312,
+vOldPos, vOldVel and vOldAngVel at 1136, 1152 and 1168,
+VelocityMagnitude at 964, nWheelsTouchingGround at 956 and
+LastInTroughPosition at 2152; the harness's is the port's, by name. A
+coordinate is lent to the car for a call and copied back.
 
 **What is not run.** bBreak (FlushUnusedTrackPolygons with every slot
 held) is fatal on both sides -- the next AssignTrackPolygon builds into a
 NULL slot -- so the model stops the run if a scenario reaches it.
 
-Scenarios, demo: the pure functions (GetSquareCorner, the road-noise grid
-and its bilinear noise for every terrain, both MatchTerrainTypes); markers, loaded,
-counted, fetched, appended and unlinked; a synthetic world -- floors,
+Scenarios, retail: GetSquareCorner and the road-noise grid; markers,
+loaded, counted, fetched, appended and unlinked; the track info tables and
+their loader, entry 54's clear included; a synthetic world -- floors,
 quads, triangles whose fourth vertex is not their third, a bridge over a
 floor, walls, a ceiling, INFINITELY_HIGH and Z_TIMES_FOUR polygons, a
-square past 128 polygons, a lone far square for the nearest search --
-through every TopologyTree, TrackPolygon and TopologyCoordinate entry
-point; a malformed tree for GetSquare's nearest-with-nothing path; and
-TRACKB12 itself, driven along its squares until the pool has flushed
-several times over, then filled on purpose for the 101-at-a-time cap.
-Retail: the track info tables and their loader, entry 54's clear
-included, and retail's own TRACKB12 and GLOBALB info chunks, all thirty
-tracks and every SignpostGracePeriod.
+square past 160 polygons, a lone far square for the nearest search, and
+boxes out to the build's bounds -- through every TopologyTree,
+TrackPolygon and TopologyCoordinate entry point; a malformed tree for
+GetSquare's nearest-with-nothing path; Car's FindFlatOnTrackPosition,
+PutFlatOnTrack, AverageAir and BeginMovement; retail TRACKB12 itself,
+driven along its squares until the pool has flushed several times over,
+then filled on purpose for the 101-at-a-time cap; and retail's own
+TRACKB12 and GLOBALB info chunks, all thirty tracks and every
+SignpostGracePeriod. Demo: the bilinear road noise for every terrain,
+under retail TRACKB12's route as well, and both MatchTerrainTypes.
 
     python tools/track_check.py
     python tools/track_check.py --mutate [--only a,b]
@@ -106,7 +111,6 @@ SOURCES = [HARNESS, TRC, TTC, CTC,
            "3DS Files/source/bmatrix.c",
            "3DS Files/source/terraintypetab.c",
            "3DS Files/source/bslotpool.c",
-           "3DS Files/source/bticker.c",
            "3DS Files/source/bvector.c",
            "3DS Files/source/bmath.c",
            "3DS Files/source/bmathtab.c",
@@ -115,29 +119,42 @@ SOURCES = [HARNESS, TRC, TTC, CTC,
 
 HARNESS_TIMEOUT = 300
 
-TRACKB12 = ROOT / "extracted" / "TRACKS" / "TRACKB12.BUN"
-GLOBALB = ROOT / "extracted" / "GLOBAL" / "GLOBALB.BUN"
 RETAIL_TRACKB12 = ROOT / "extracted-retail" / "TRACKS" / "TRACKB12.BUN"
 RETAIL_GLOBALB = ROOT / "extracted-retail" / "GLOBAL" / "GLOBALB.BUN"
 INFO = 164                          # retail's TrackInfo; the demo's is 160
 
 # ================================================================ the image
 
+# The demo's addresses, which RetailEmu.data maps to retail's.
 TREE = 0x002f14c8                   # TheTopologyTree
 POOLVAR = 0x00323424                # TrackPolygonSlotPool
-TIMING = 0x002f1530                 # TopologyTiming[10]
-TIDX = 0x00323418                   # TopologyTimingIndex
 MARKERS = 0x00323410                # TrackPositionMarkerList
 CUR, TABLE, HIGHEST, LOADED = 0x00323428, 0x0032342c, 0x00323430, 0x00323434
 TRACK_TEXT = (0x0014e7d0, 0x001509d4)
 TERRAIN_TEXT = (0x001ca078, 0x001ca16c)
+# Retail's own: BuildTrackPolygons, whose demo twin is not placed, and the
+# two words InitTree zeroes, gp-21976 and gp-21972.
+RETAIL_BUILD = (0x001531f8, 0x001533c8)
+TREE_UNUSED = 0x00330318
+# bmatrix.o's static initialiser, which puts (0, 0, 0, 1) at 0x00320a60:
+# retail's bMulMatrix(bVector3) adds the vector's x, y and z to it, so the
+# w of 1 that applies the translation row is that constant's.
+BMATRIX_CTOR = 0x0025afa8
+
+# Retail's TopologyCoordinate: the four counts, the last polygon, the three
+# words only the constructor writes.
+TC_SIZE, TC_COUNTS, TC_LAST, TC_UNUSED, MAXP = 704, 672, 688, 692, 160
 
 NCHUNK, CH_BASE, CH_SPAN = 8, 0x01000000, 0x100000
 NTC, TC_BASE, TC_STRIDE = 4, 0x01900000, 0x400
 NVEC, VEC_BASE = 16, 0x01910000
-NH, OUTS = 16, 0x01920000           # NH * 0x200
+NH, OUTS, OUT_STRIDE = 16, 0x01920000, 0x400
 GIPOUT = 0x01928000
-CAR, CTI, FLATM = 0x01930000, 0x01930800, 0x01931000   # a Car, its type
+CAR, CTI, FLATM = 0x01930000, 0x01931000, 0x01931800   # a Car, its type
+# Retail's Car: the coordinate, the old position and velocities, the
+# speed, the wheels down and the trough.
+C_TC, C_OLDPOS, C_OLDVEL, C_OLDANG = 1312, 1136, 1152, 1168
+C_SPEED, C_WHEELS, C_TROUGH = 964, 956, 2152
 SCR = 0x01929000                    # the out-parameters a call is handed
 AIRT = SCR + 0x200                  # AverageAir's time, then its height
 TERR, NORM, FOUND, DIST, BEST, OUTV = (SCR, SCR + 16, SCR + 32, SCR + 48,
@@ -207,9 +224,9 @@ SYM = dict(
  OP_HASTOPO, OP_TCSEG, OP_CONSTRAIN, OP_CORNER, OP_SQUARE, OP_GIP,
  OP_BUILD, OP_REMOVE, OP_ASSIGN, OP_UNASSIGN, OP_FLUSH, OP_NMARK,
  OP_GMARK, OP_NMARKN, OP_GMARKN, OP_MARKDUMP, OP_INFO, OP_GLOBALS,
- OP_GRID, OP_NOISE, OP_MATCHNAME, OP_MATCHHASH, OP_TICKSEED,
- OP_HSET, OP_TPCB, OP_COG, OP_WHEEL, OP_CARPOS, OP_FLAT, OP_PUTFLAT,
- OP_SIB3, OP_CARVEC, OP_CARF, OP_AIR, OP_BEGIN, OP_VOT) = range(65)
+ OP_GRID, OP_NOISE, OP_MATCHNAME, OP_MATCHHASH, OP_HSET, OP_TPCB,
+ OP_COG, OP_WHEEL, OP_CARPOS, OP_FLAT, OP_PUTFLAT, OP_SIB3, OP_CARVEC,
+ OP_CARF, OP_AIR, OP_BEGIN, OP_VOT, OP_TREEPOKE) = range(65)
 
 ARGS = {OP_TAG: 1, OP_CLEAR: 2, OP_CHUNKW: 3, OP_FILE: 5, OP_LOADER: 1,
         OP_UNLOADER: 1, OP_TTLOADER: 1, OP_TTUNLOADER: 1, OP_MEM: 3,
@@ -222,14 +239,14 @@ ARGS = {OP_TAG: 1, OP_CLEAR: 2, OP_CHUNKW: 3, OP_FILE: 5, OP_LOADER: 1,
         OP_BUILD: 4, OP_REMOVE: 2, OP_ASSIGN: 4, OP_UNASSIGN: 2,
         OP_FLUSH: 0, OP_NMARK: 1, OP_GMARK: 2, OP_NMARKN: 1, OP_GMARKN: 2,
         OP_MARKDUMP: 0, OP_INFO: 1, OP_GLOBALS: 0, OP_GRID: 2, OP_NOISE: 2,
-        OP_MATCHNAME: 1, OP_MATCHHASH: 1, OP_TICKSEED: 1, OP_HSET: 3,
-        OP_TPCB: 1, OP_COG: 4, OP_WHEEL: 3, OP_CARPOS: 5, OP_FLAT: 3,
-        OP_PUTFLAT: 1, OP_SIB3: 4, OP_CARVEC: 5, OP_CARF: 2, OP_AIR: 4,
-        OP_BEGIN: 2, OP_VOT: 2}
+        OP_MATCHNAME: 1, OP_MATCHHASH: 1, OP_HSET: 3, OP_TPCB: 1,
+        OP_COG: 4, OP_WHEEL: 3, OP_CARPOS: 5, OP_FLAT: 3, OP_PUTFLAT: 1,
+        OP_SIB3: 4, OP_CARVEC: 5, OP_CARF: 2, OP_AIR: 4, OP_BEGIN: 2,
+        OP_VOT: 2, OP_TREEPOKE: 2}
 assert len(ARGS) == 65
 
 # CARVEC's vectors: the body matrix's rows, Velocity, AngularVelocity, the
-# four wheel matrices' rows, vOldVel, vOldAngVel and Position.
+# four wheel matrices' rows, vOldVel, vOldAngVel, Position and vOldPos.
 def car_vec(k):
     if k < 4:
         return CAR + 144 + 16 * k
@@ -237,7 +254,7 @@ def car_vec(k):
         return (CAR + 112, CAR + 208)[k - 4]
     if k < 22:
         return CAR + 240 + 16 * (k - 6)
-    return (CAR + 1120, CAR + 1136, CAR + 96)[k - 22]
+    return CAR + (C_OLDVEL, C_OLDANG, 96, C_OLDPOS)[k - 22]
 
 
 # CARF's words: VelocityMagnitude, nWheelsTouchingGround,
@@ -245,14 +262,14 @@ def car_vec(k):
 # CrossedWheelTerrains.
 def car_word(k):
     if k < 4:
-        return (CAR + 960, CAR + 952, CAR + 1968, CAR + 1972)[k]
+        return CAR + (C_SPEED, C_WHEELS, C_TROUGH, C_TROUGH + 4)[k]
     if k < 9:
         return (CTI + 480, CTI + 752, CTI + 756, CTI + 760, CTI + 764)[k - 4]
     return CAR + 868 + 4 * (k - 9)
 
 
-(CV_VEL, CV_ANG, CV_WHEEL, CV_OLDVEL, CV_OLDANG, CV_POS) = (4, 5, 6, 22, 23,
-                                                            24)
+(CV_VEL, CV_ANG, CV_WHEEL, CV_OLDVEL, CV_OLDANG, CV_POS,
+ CV_OLDPOS) = (4, 5, 6, 22, 23, 24, 25)
 (CF_SPEED, CF_WHEELS, CF_TROUGH, CF_MASS, CF_AERO, CF_CROSSED) = (0, 1, 2, 4,
                                                                   5, 9)
 
@@ -445,18 +462,22 @@ def floor_z(x, y):
 
 
 def world_one():
-    """Floors over [0, 64)^2, a bridge, walls, a ceiling, the odd flags, a
-    square past 128 polygons at [96, 128) x [0, 32), and a lone square far
-    off at cell (606, 402), a flat floor under its sloped one -- x and y
-    are eighths in an int16, so the world ends at +-4096."""
+    """Floors over [0, 64)^2, one of them terrain 200, which GetElevation
+    sign-extends; a bridge, walls, a ceiling, the odd flags, a square past
+    160 polygons at [96, 128) x [0, 32), a floor in each of the squares
+    past x 64 and y 64 that a box ending at 64 reaches, and a lone square
+    far off at cell (606, 402), a flat floor under its sloped one -- x and
+    y are eighths in an int16, so the world ends at +-4096."""
     w = World()
     names = {}
-    terr = [1, 2, 6, 9, 3, 15, 12, 0]
+    terr = [1, 2, 6, 9, 3, 15, 12, 0, 200]
     for i in range(8):
         for j in range(8):
             x0, y0 = 8.0 * i, 8.0 * j
             x1, y1 = x0 + 8.0, y0 + 8.0
             t = terr[(i + 2 * j) % len(terr)]
+            if t == 200 and "t200" not in names:
+                names["t200"] = len(w.polys)
             zs = [floor_z(x0, y0), floor_z(x1, y0), floor_z(x1, y1),
                   floor_z(x0, y1)]
             if (i, j) == (3, 3):
@@ -512,12 +533,19 @@ def world_one():
     names["ceiling"] = w.poly([(8.0, 8.0), (8.0, 24.0), (24.0, 24.0),
                                (24.0, 8.0)], [16.0, 16.0, 16.5, 16.5],
                               0x18, 14, zbase=14)
-    # The dense square: 140 slivers in [96, 128) x [0, 32).
-    for k in range(140):
-        x0 = 96.0 + (k % 28) * 1.125
-        y0 = (k // 28) * 6.25
+    # The dense square: 170 slivers in [96, 128) x [0, 32), ten more than a
+    # table holds, each a little over the next.
+    for k in range(170):
+        x0 = 96.0 + (k % 34) * 0.875
+        y0 = (k // 34) * 6.25
         w.poly([(x0, y0), (x0 + 1.0, y0), (x0 + 0.5, y0 + 6.0)],
                [5.0, 5.0 + k / 64.0, 5.5], 0, 2)
+    # Past the corner a box can end on: only the square at y 64 lists the
+    # first, only the one at x 64 the second.
+    names["north"] = w.poly([(0.0, 64.0), (8.0, 64.0), (8.0, 72.0),
+                             (0.0, 72.0)], [12.0, 12.5, 12.5, 12.0], 0x10, 3)
+    names["east"] = w.poly([(64.0, 40.0), (72.0, 40.0), (72.0, 48.0),
+                            (64.0, 48.0)], [14.0, 14.0, 14.5, 14.5], 0x10, 6)
     # The lone far square.
     fx, fy = 3008.0, -3520.0
     names["far"] = w.poly([(fx + 4, fy + 4), (fx + 28, fy + 4),
@@ -557,6 +585,10 @@ def scenario_pure(sc, rnd):
     for _ in range(40):
         sc.op(OP_GRID, rnd.randint(-5000, 5000), rnd.randint(-5000, 5000))
 
+
+def scenario_noise(sc, rnd):
+    """Road noise and the terrain names, which read the demo's
+    TerrainTypeInfo: the demo image's."""
     sc.tag("noise")
     pts = [(0.0, 0.0), (0.5, 0.25), (-0.5, -0.25), (3.0, 7.0), (-3.0, -7.0),
            (12.75, -8.125), (1000.3, 2000.7), (-4096.1, 55.9),
@@ -771,6 +803,10 @@ def scenario_world(sc, rnd):
     for i in (0, 1, npolys - 1):
         sc.op(OP_MEM, POLYS, w.poly_off(i), 2)
     sc.op(OP_POOL)
+    # The two words InitTree zeroes, set for it to clear.
+    sc.op(OP_TREEPOKE, 1, 0x1111)
+    sc.op(OP_TREEPOKE, 2, -7)
+    sc.op(OP_GLOBALS)
     sc.op(OP_INITTREE)
     sc.op(OP_POOL)
     sc.op(OP_GLOBALS)
@@ -799,20 +835,20 @@ def scenario_world(sc, rnd):
         for bi, (mn, mx) in enumerate(boxes):
             sc.vec(0, *mn)
             sc.vec(1, *mx)
-            for mxn in ((128, 3) if bi % 3 == 0 else (128,)):
+            for mxn in ((MAXP, 128, 3) if bi % 3 == 0 else (MAXP,)):
                 sc.op(OP_GIP, SQS, sq_off[c], 0, 1, mxn, 0)
     sc.vec(0, -1e9, -1e9)
     sc.vec(1, 1e9, 1e9)
-    sc.op(OP_GIP, -1, 0, 0, 1, 128, 0)
+    sc.op(OP_GIP, -1, 0, 0, 1, MAXP, 0)
     sc.op(OP_GIP, SQS, sq_off[cells[0]], 0, 1, 0, 0)
     # Kept marks: the second square skips what the first listed.
     sc.vec(0, 0.0, 0.0)
     sc.vec(1, 64.0, 64.0)
     c0 = World.cell(1.0, 1.0)
     c1 = World.cell(33.0, 1.0)
-    sc.op(OP_GIP, SQS, sq_off[c0], 0, 1, 128, 1)
-    sc.op(OP_GIP, SQS, sq_off[c1], 0, 1, 128, 1)
-    sc.op(OP_GIP, SQS, sq_off[c0], 0, 1, 128, 1)
+    sc.op(OP_GIP, SQS, sq_off[c0], 0, 1, MAXP, 1)
+    sc.op(OP_GIP, SQS, sq_off[c1], 0, 1, MAXP, 1)
+    sc.op(OP_GIP, SQS, sq_off[c0], 0, 1, MAXP, 1)
     for i in range(npolys):
         sc.op(OP_CHUNKW, POLYS, w.poly_off(i),
               struct.unpack_from("<I", w.polys[i], 0)[0])
@@ -820,7 +856,7 @@ def scenario_world(sc, rnd):
     sc.tag("world: standalone polygons")
     solo = [0, 1, 2, names["zero-edge"], names["inf-quad"], names["x4-quad"],
             names["odd-fourth"], names["bridge"], names["ceiling"],
-            names["wall-tri"], names["far"], names["far-low"]]
+            names["wall-tri"], names["far"], names["far-low"], names["t200"]]
     for s, p in enumerate(solo):
         slot = 1000 + s
         # A collision body left in the slot, for the constructor to clear.
@@ -831,6 +867,11 @@ def scenario_world(sc, rnd):
     shaft_probe(sc, rnd, [1000 + s for s in range(len(solo))])
     far_probe(sc, 1000 + solo.index(names["far"]),
               1000 + solo.index(names["far-low"]))
+    hi_probe(sc, 1000 + solo.index(names["far"]),
+             1000 + solo.index(names["far-low"]))
+    # Not the wall: its normal has no z to divide by.
+    last_probe(sc, rnd, w, [(1000 + s, p) for s, p in enumerate(solo)
+                            if p != names["wall-tri"]])
     sc.op(OP_TPDESTROY, 1000, 0)
     sc.op(OP_MEM, POLYS, w.poly_off(solo[0]), 2)
     sc.op(OP_POOL)
@@ -875,24 +916,56 @@ def scenario_world(sc, rnd):
 
     sc.tag("world: build")
     for h, ((x0, y0), (x1, y1), mx) in enumerate([
-            ((1.0, 1.0), (2.0, 2.0), 128), ((30.0, 30.0), (34.0, 34.0), 128),
-            ((0.0, 0.0), (63.0, 63.0), 128), ((0.0, 0.0), (63.0, 63.0), 20),
-            ((96.5, 1.0), (100.0, 20.0), 128), ((90.0, -5.0), (130.0, 40.0),
-                                                 128),
-            ((-100.0, -100.0), (-90.0, -90.0), 128),
-            ((-5.0, -5.0), (5.0, 5.0), 128),
-            ((3012.0, -3516.0), (3022.0, -3506.0), 128),
-            ((20.0, 20.0), (10.0, 10.0), 128)]):
+            ((1.0, 1.0), (2.0, 2.0), MAXP), ((30.0, 30.0), (34.0, 34.0), 128),
+            ((0.0, 0.0), (63.0, 63.0), MAXP), ((0.0, 0.0), (63.0, 63.0), 20),
+            ((96.5, 1.0), (100.0, 20.0), MAXP),
+            ((90.0, -5.0), (130.0, 40.0), MAXP),
+            ((-100.0, -100.0), (-90.0, -90.0), MAXP),
+            ((-5.0, -5.0), (5.0, 5.0), MAXP),
+            ((3012.0, -3516.0), (3022.0, -3506.0), MAXP),
+            ((20.0, 20.0), (10.0, 10.0), MAXP)]):
         sc.vec(0, x0, y0)
         sc.vec(1, x1, y1)
         sc.op(OP_BUILD, h, 0, 1, mx)
     sc.op(OP_TREEDUMP, 1)
     sc.op(OP_POOL)
-    for h, n in ((0, 1), (1, 3), (2, 50), (4, 128)):
+    for h, n in ((0, 1), (1, 3), (2, 50), (4, MAXP)):
         sc.op(OP_REMOVE, h, n)
     sc.op(OP_TREEDUMP, 1)
     sc.op(OP_FLUSH)
     sc.op(OP_TREEDUMP, 1)
+    sc.op(OP_POOL)
+    # Every square under the box, a row at a time: a row of four, a block
+    # of eight, the whole world with the dense square in it, the row and
+    # the column only a box that ends on a square's corner reaches, and
+    # boxes out to the bounds -- one that reaches -32768 or 32767 gathers
+    # nothing, one just inside walks a thousand squares to the world.
+    nan = float("nan")
+    for (x0, y0), (x1, y1), mx in [
+            ((10.0, 10.0), (100.0, 20.0), MAXP),
+            ((0.0, 0.0), (100.0, 40.0), 128),
+            ((-10.0, -10.0), (140.0, 70.0), MAXP),
+            ((0.0, 0.0), (10.0, 64.0), MAXP),
+            ((0.0, 0.0), (10.0, 63.875), MAXP),
+            ((0.0, 40.0), (64.0, 44.0), MAXP),
+            ((0.0, 40.0), (63.875, 44.0), MAXP),
+            ((-32768.0, 0.0), (10.0, 10.0), MAXP),
+            ((-32767.99, 0.0), (10.0, 10.0), MAXP),
+            ((0.0, 0.0), (32767.0, 10.0), MAXP),
+            ((0.0, 0.0), (32766.998, 10.0), MAXP),
+            ((0.0, -32768.0), (10.0, 10.0), MAXP),
+            ((0.0, -32767.99), (10.0, 10.0), MAXP),
+            ((0.0, 0.0), (10.0, 32767.0), MAXP),
+            ((0.0, 0.0), (10.0, 32766.998), MAXP),
+            ((nan, 0.0), (10.0, 10.0), MAXP),
+            ((0.0, 0.0), (10.0, nan), MAXP),
+            ((-1e9, -1e9), (1e9, 1e9), MAXP)]:
+        sc.vec(0, x0, y0)
+        sc.vec(1, x1, y1)
+        sc.op(OP_BUILD, 10, 0, 1, mx)
+        sc.op(OP_REMOVE, 10, -1)
+    sc.op(OP_TREEDUMP, 1)
+    sc.op(OP_FLUSH)
     sc.op(OP_POOL)
     for h in range(10):
         sc.op(OP_HSET, 15, h, h)
@@ -908,6 +981,10 @@ def scenario_world(sc, rnd):
         sc.vec(2, x, y)
         sc.op(OP_SIB, 0, 2, 3.0, -1)
         sc.op(OP_TCDUMP, 0)
+    # The dense square and round it: the build stops at the table's 160.
+    sc.vec(2, 112.0, 16.0)
+    sc.op(OP_SIB, 0, 2, 16.0, -1)
+    sc.op(OP_TCDUMP, 0)
     # Floors and the wall that is vertical and upside down, with the
     # ceiling beside it left out (the build's box is y >= 49.5): the second
     # pass places the wall and fills the count, so the third does not run.
@@ -918,18 +995,38 @@ def scenario_world(sc, rnd):
     sc.op(OP_SIB, 0, 2, 3.0, -1)
     sc.op(OP_SIB, 0, 2, 2.0, -1)
     sc.op(OP_TCDUMP, 0)
+    # The look-ahead's five tries: a box that fits at the first, the
+    # second, the third, the fourth and the fifth with none left; one that
+    # never fits; one either side of 28.8 at the first; and a velocity
+    # that is not a number.
     for r, (vx, vy) in ((1.0, (10.0, 0.0)), (1.0, (100.0, 50.0)),
+                        (0.5, (-200.0, 0.0)), (1.0, (300.0, 0.0)),
+                        (2.0, (150.0, 150.0)), (1.0, (0.0, -350.0)),
+                        (1.0, (1000.0, 0.0)), (12.0, (1000.0, 0.0)),
                         (12.0, (0.0, 0.0)), (11.0, (3.0, 4.0)),
-                        (0.5, (-1000.0, 2000.0)), (0.0, (0.0, 0.0))):
+                        (0.5, (-1000.0, 2000.0)), (0.0, (0.0, 0.0)),
+                        (-0.5, (191.0, 0.0)), (-0.5, (192.0, 0.0)),
+                        (1.0, (float("nan"), 0.0))):
         sc.vec(3, vx, vy)
         sc.vec(2, 24.0, 28.0)
         sc.op(OP_TCCLEAR, 0)
         sc.op(OP_SIB, 0, 2, r, 3)
         sc.op(OP_TCDUMP, 0)
+    # A diagonal of exactly 28.8 at the first try does not fit. From 0 with
+    # no radius the box is fl(v * 0.15f) long, and that is 28.8f for the
+    # float just under 192: along x either way, and along y.
+    v = 191.99998474121094
+    for (px, py), (vx, vy) in (((0.0, 28.0), (v, 0.0)),
+                               ((0.0, 28.0), (-v, 0.0)),
+                               ((24.0, 0.0), (0.0, v))):
+        sc.vec(3, vx, vy)
+        sc.vec(2, px, py)
+        sc.op(OP_TCCLEAR, 0)
+        sc.op(OP_SIB, 0, 2, -0.5, 3)
+        sc.op(OP_TCDUMP, 0)
     sc.op(OP_TREEDUMP, 1)
 
     sc.tag("world: elevation")
-    sc.op(OP_TICKSEED, 0xfff00000)
     sc.op(OP_TCCLEAR, 0)
     for k in range(60):
         x = rnd.uniform(0.25, 63.75)
@@ -976,6 +1073,41 @@ def scenario_world(sc, rnd):
         sc.vec(5, x, y, 1234.0)
         sc.op(OP_HASTOPO, 1, 5)
     sc.op(OP_TCDUMP, 1)
+
+    sc.tag("world: the last polygon")
+    # GetElevation keeps the polygon it last found (x, y) strictly inside,
+    # and tries it first: at any height, with no look at the interest box.
+    # The bridge from above and then below; on its edge and off it; a
+    # floor, then under it; a hole under the bridge. A box the cache holds
+    # keeps it, a clear or a build forgets it.
+    sc.op(OP_TCCLEAR, 0)
+    sc.vec(2, 30.0, 30.0)
+    sc.op(OP_SIB, 0, 2, 12.0, -1)
+    sc.op(OP_TCDUMP, 0)
+    for x, y, z in ((30.0, 30.0, 30.0), (30.0, 30.0, 0.0),
+                    (20.0, 30.0, -50.0), (16.0, 30.0, 12.0),
+                    (17.0, 25.0, 40.0), (37.0, 21.0, 40.0),
+                    (37.5, 21.5, -99.0), (38.0, 16.0, 11.0),
+                    (26.0, 31.0, 5.0), (26.0, 31.0, 30.0)):
+        sc.vec(4, x, y, z)
+        sc.elev(0, 4)
+        sc.op(OP_TCDUMP, 0)
+    # A point that is not a number is inside anything: max.s keeps the -1.
+    sc.vec(5, float("nan"), 30.0, 1234.0)
+    sc.op(OP_HASTOPO, 0, 5)
+    sc.vec(5, 20.0, 30.0, 1234.0)
+    sc.op(OP_HASTOPO, 0, 5)
+    sc.op(OP_SIB, 0, 2, 3.0, -1)
+    sc.op(OP_TCDUMP, 0)
+    sc.vec(4, 20.0, 30.0, 0.0)
+    sc.elev(0, 4)
+    sc.op(OP_TCCLEAR, 0)
+    sc.op(OP_TCDUMP, 0)
+    sc.elev(0, 4)
+    sc.op(OP_TCDUMP, 0)
+    sc.vec(2, 50.0, 50.0)
+    sc.op(OP_SIB, 0, 2, 3.0, -1)
+    sc.op(OP_TCDUMP, 0)
 
     sc.tag("world: vector on track")
     # The input's z and w are noise GetVectorOnTrack must not read; the
@@ -1047,6 +1179,14 @@ def scenario_world(sc, rnd):
     sc.op(OP_POOL)
 
     sc.tag("world: poked table")
+    # The three words only the constructor writes: kept by a clear and a
+    # build, zeroed by the constructor.
+    for f, v in ((13, 0x13), (14, -2), (15, 0x7fffffff)):
+        sc.op(OP_TCPOKE, 1, f, v)
+    sc.op(OP_TCCLEAR, 1)
+    sc.vec(2, 5.0, 5.0)
+    sc.op(OP_SIB, 1, 2, 1.0, -1)
+    sc.op(OP_TCDUMP, 1)
     sc.op(OP_TCINIT, 1)
     for f, v in enumerate((-1e6, -1e6, 1e6, 1e6, -1e6, -1e6, 1e6, 1e6)):
         sc.op(OP_TCPOKE, 1, f, fb(v))
@@ -1069,6 +1209,7 @@ def scenario_world(sc, rnd):
         sc.elev(1, 4)
     sc.op(OP_TCPOKE, 1, 8, 0)
     sc.op(OP_TCPOKE, 1, 9, 0)
+    sc.op(OP_TCPOKE, 1, 12, -1)
 
     sc.tag("world: release")
     sc.op(OP_TCDESTROY, 0)
@@ -1093,7 +1234,10 @@ def scenario_world(sc, rnd):
     for k in (NODES, SQS, POLYS, IDX):
         sc.op(OP_TTLOADER, k)
     sc.op(OP_TREEDUMP, 0)
-    # The constructor over a loaded tree: every table and count cleared.
+    # The constructor over a loaded tree: every table and count cleared,
+    # and the word after them.
+    sc.op(OP_TREEPOKE, 0, 0x5a5a)
+    sc.op(OP_TREEDUMP, 0)
     sc.op(OP_TREEINIT)
     sc.op(OP_TREEDUMP, 1)
     for k in (NODES, SQS, POLYS, IDX):
@@ -1191,6 +1335,62 @@ def far_probe(sc, high, low):
     sc.op(OP_TCDUMP, 3)
 
 
+def hi_probe(sc, high, low):
+    """The first pass's ceiling, 1 above the probe, on coordinate 3 with
+    the far square's two floors alone in its table. The sloped one is at
+    100 + (y + 3516) / 24, the flat one at 0 under it. From 0.75 below the
+    sloped one, the first pass takes it when it is listed first; from 0.25
+    below, 0.5 below or 1 below, the ceiling's edges. Listed second, the
+    flat one is always found first. The last polygon is forgotten before
+    each probe, since every hit here becomes it."""
+    sc.tag("world: the first pass's ceiling")
+    for f, v in enumerate((-1e6, -1e6, 1e6, 1e6, -1e6, -1e6, 1e6, 1e6)):
+        sc.op(OP_TCPOKE, 3, f, fb(v))
+    sc.op(OP_TCPOKE, 3, 8, 2)
+    sc.op(OP_TCPOKE, 3, 9, 2)
+    for order in ((high, low), (low, high)):
+        for i, slot in enumerate(order):
+            sc.op(OP_TCSET, 3, i, slot)
+        sc.op(OP_TCDUMP, 3)
+        for x, y in ((3024.0, -3504.0), (3020.0, -3510.0), (3030.0, -3498.0)):
+            z = 100.0 + (y + 3516.0) / 24.0
+            for below in (0.75, 0.6, 0.9, 0.25, 0.5, 1.0, 1.5):
+                sc.op(OP_TCPOKE, 3, 12, -1)
+                sc.vec(4, x, y, z - below)
+                sc.elev(3, 4)
+        sc.op(OP_TCDUMP, 3)
+    sc.op(OP_TCPOKE, 3, 12, -1)
+    for f in (8, 9):
+        sc.op(OP_TCPOKE, 3, f, 0)
+
+
+def last_probe(sc, rnd, w, slots):
+    """GetElevation's first look, at the last polygon, poked into
+    coordinate 3 with an empty table: each standalone polygon in turn, at
+    its corners, its edges' midpoints, its centre, round and outside its
+    box. A point in the polygon takes its plane; one outside finds nothing
+    and leaves the last polygon as it was."""
+    sc.tag("world: the last polygon, poked")
+    for f, v in enumerate((-1e6, -1e6, 1e6, 1e6, -1e6, -1e6, 1e6, 1e6)):
+        sc.op(OP_TCPOKE, 3, f, fb(v))
+    for f in (8, 9, 10, 11):
+        sc.op(OP_TCPOKE, 3, f, 0)
+    for slot, p in slots:
+        x0, y0, x1, y1 = w.meta[p][1]
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        pts = [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (cx, y0), (x1, cy),
+               (cx, y1), (x0, cy), (cx, cy), (x1 + 0.5, cy), (cx, y0 - 0.5)]
+        for _ in range(12):
+            pts.append((rnd.uniform(x0 - 1.0, x1 + 1.0),
+                        rnd.uniform(y0 - 1.0, y1 + 1.0)))
+        sc.op(OP_TCPOKE, 3, 12, slot)
+        for x, y in pts:
+            sc.vec(4, x, y, rnd.choice((50.0, -50.0, 0.0)))
+            sc.elev(3, 4)
+        sc.op(OP_TCDUMP, 3)
+    sc.op(OP_TCPOKE, 3, 12, -1)
+
+
 def scenario_bad_tree(sc, rnd):
     """A root with nothing under one quadrant and a node with no children
     at all: GetSquare's nearest search picks -1 there and walks on from
@@ -1282,7 +1482,6 @@ def scenario_flat(sc, rnd):
         sc.op(OP_LOADER, k)
     sc.op(OP_INITTREE)
     sc.op(OP_TCINIT, 2)
-    sc.op(OP_TICKSEED, 0x51ed270b)
     # Wheels[3] is the one read; the other three are there to differ.
     sc.op(OP_COG, 0.25, -0.5, 0.375, 1.5)
     for i, (z, r) in enumerate(((-0.125, 0.3), (-0.25, 0.3125),
@@ -1385,6 +1584,7 @@ def air_car(sc, pos, vel, speed=None, yaw=0.5, pitch=0.0, wheels=4):
 
 def begin(sc, dt):
     """BeginMovement with the fields it writes set to values it would not."""
+    sc.op(OP_CARVEC, CV_OLDPOS, 101.0, 102.0, 103.0, 104.0)
     sc.op(OP_CARVEC, CV_OLDVEL, 111.0, 112.0, 113.0, 114.0)
     sc.op(OP_CARVEC, CV_OLDANG, 121.0, 122.0, 123.0, 124.0)
     sc.op(OP_CARF, CF_TROUGH, 131.5)
@@ -1421,8 +1621,9 @@ def scenario_air(sc, rnd):
             sc.op(OP_CARVEC, CV_WHEEL + 4 * w + r, *[f32(v) for v in row])
 
     sc.tag("air: begin")
-    # The old velocities are kept only with time to move; the trough only
-    # over the topology and with two wheels down, compared signed.
+    # The old position and velocities are kept only with time to move;
+    # the trough only over the topology and with two wheels down, compared
+    # signed.
     air_car(sc, (16.0, 16.0, flat_z(16.0, 16.0) + 0.5), (3.0, -4.0, 0.5))
     for dt in (1 / 30.0, 0.0, -0.0, -0.01, 1e-30):
         begin(sc, dt)
@@ -1499,9 +1700,11 @@ def scenario_air(sc, rnd):
 
     sc.tag("air: under the ground, and up the whole way")
     # A level car at yaw 0.5 starts from wheel 0's corner, 0.571 below its
-    # position on average over the four radii. BeginMovement's box is three
-    # dimensional, so a car further under the ground than the box is wide
-    # finds nothing and gets its own z: these are under and inside it.
+    # position on average over the four radii. Off the last polygon
+    # GetElevation looks below pt.z + 1 first and then anywhere, so a car
+    # under the ground finds it on the first pass only within 1: these
+    # are under and inside it. On the last polygon the plane is the
+    # answer at any height.
     rs = (0.3, 0.3125, 0.34375, 0.328125)
     drop = 0.25 + sum(rs) / 4
     cy, sy = math.cos(0.5), math.sin(0.5)
@@ -1522,8 +1725,8 @@ def scenario_air(sc, rnd):
     # 9.8: thrown up at `down` times the window, it comes back at the end
     # of it, and near there the fall and the throw cancel, so an ulp of
     # the downforce is ten ulps of the height. The throw comes after
-    # BeginMovement: the box would be 15000 wide, and the tree gathers
-    # only the squares under its four corners, none of them the slope's.
+    # BeginMovement: its box would be some 1500 wide even with no
+    # look-ahead left, and the build would walk two thousand squares.
     sc.op(OP_CARF, CF_MASS, 2.0 ** -13)
     for speed, time in ((3.0, 10.0), (5.0, 6.0)):
         down = speed * ((1.75 + 2.25) * 0.3) * 2 ** 13 + 9.8
@@ -1538,19 +1741,23 @@ def scenario_air(sc, rnd):
 
 # ---- TRACKB12 ------------------------------------------------------------------
 
-B12_CHUNKS = [(0x7f93f4, 0x34130), (0x7fa010, 0x34131), (0x7fbe68, 0x34132),
-              (0x8769f0, 0x34133), (0x7a7e80, 0x34146)]
+B12_NODES, B12_SQUARES, B12_POLYS, B12_INDEX, B12_MARKERS = (
+    0x7e15e8, 0x7e2200, 0x7e4058, 0x859fa0, 0x790980)
+B12_CHUNKS = [(B12_NODES, 0x34130), (B12_SQUARES, 0x34131),
+              (B12_POLYS, 0x34132), (B12_INDEX, 0x34133),
+              (B12_MARKERS, 0x34146)]
 
 
 def b12_polygons():
-    d = TRACKB12.read_bytes()
-    t, s = struct.unpack_from("<II", d, 0x7fbe68)
+    d = RETAIL_TRACKB12.read_bytes()
+    t, s = struct.unpack_from("<II", d, B12_POLYS)
     assert t == 0x34132
-    return d, 0x7fbe68 + 8, s // 32
+    return d, B12_POLYS + 8, s // 32
 
 
 def b12_floor_points(rnd, n):
-    """`n` points of TRACKB12's floors, (x, y, z) at a polygon's centroid."""
+    """`n` points of retail TRACKB12's floors, (x, y, z) at a polygon's
+    centroid."""
     d, body, count = b12_polygons()
     out = []
     while len(out) < n:
@@ -1599,12 +1806,13 @@ def degenerate_count():
 
 
 def b12_route(n):
-    """`n` square centres of TRACKB12 in a nearest-neighbour chain from the
-    start grid."""
-    d = TRACKB12.read_bytes()
-    t, s = struct.unpack_from("<II", d, 0x7fa010)
-    al = (0x7fa010 + 23) & ~15
-    cnt = (s - (al - 0x7fa018)) // 12
+    """`n` square centres of retail TRACKB12 in a nearest-neighbour chain
+    from the start grid."""
+    d = RETAIL_TRACKB12.read_bytes()
+    t, s = struct.unpack_from("<II", d, B12_SQUARES)
+    assert t == 0x34131
+    al = (B12_SQUARES + 23) & ~15
+    cnt = (s - (al - (B12_SQUARES + 8))) // 12
     cs = [struct.unpack_from("<ff", d, al + 12 * i) for i in range(1, cnt)]
     route = []
     x, y = 45.5, 779.3
@@ -1618,10 +1826,10 @@ def b12_route(n):
 
 
 def scenario_trackb12(sc, rnd):
-    if not TRACKB12.exists():
+    if not RETAIL_TRACKB12.exists():
         return False
-    tb = sc.s(str(TRACKB12))
-    d = TRACKB12.read_bytes()
+    tb = sc.s(str(RETAIL_TRACKB12))
+    d = RETAIL_TRACKB12.read_bytes()
 
     sc.tag("trackb12: load")
     for k, (off, t) in enumerate(B12_CHUNKS):
@@ -1649,7 +1857,6 @@ def scenario_trackb12(sc, rnd):
             sc.op(OP_SQUARE, x + dx + 40.0, y + dy - 70.0, 1)
 
     sc.tag("trackb12: drive")
-    sc.op(OP_TICKSEED, 0x9e3779b9)
     sc.op(OP_TCINIT, 0)
     sc.op(OP_TCINIT, 1)
     for step, (x, y) in enumerate(route):
@@ -1702,12 +1909,6 @@ def scenario_trackb12(sc, rnd):
             sc.op(OP_PUTFLAT, 1)
     sc.op(OP_TCDUMP, 1)
 
-    sc.tag("trackb12: road noise under the route")
-    for x, y in route[:40]:
-        sc.vec(7, x + 0.37, y - 0.61)
-        for t in (1, 2, 6, 9):
-            sc.op(OP_NOISE, 7, t)
-
     sc.tag("trackb12: fill the pool")
     sc.op(OP_TCDESTROY, 0)
     sc.op(OP_TCDESTROY, 1)
@@ -1752,6 +1953,19 @@ def scenario_trackb12(sc, rnd):
     return True
 
 
+def scenario_b12_noise(sc):
+    """Road noise under retail TRACKB12's route, from its coordinates
+    alone."""
+    if not RETAIL_TRACKB12.exists():
+        return False
+    sc.tag("trackb12: road noise under the route")
+    for x, y in b12_route(40):
+        sc.vec(7, x + 0.37, y - 0.61)
+        for t in (1, 2, 6, 9):
+            sc.op(OP_NOISE, 7, t)
+    return True
+
+
 def top_chunk(data, want):
     """The file offset of the first top-level chunk of type `want`."""
     off = 0
@@ -1792,22 +2006,27 @@ def scenario_retail_trackb12(sc):
 
 
 def retail_script():
-    """What runs on the retail image: the loader half retail changed."""
-    sc = Script()
-    scenario_info(sc)
-    sc.b12 = scenario_retail_trackb12(sc)
-    return sc
-
-
-def script():
+    """What runs on the retail image: all of Track.obj but road noise, and
+    the car's four methods over it."""
     rnd = random.Random(0x7ac12)
     sc = Script()
     scenario_pure(sc, rnd)
     scenario_markers(sc)
+    scenario_info(sc)
     scenario_world(sc, rnd)
     scenario_bad_tree(sc, rnd)
     scenario_flat(sc, rnd)
     sc.b12 = scenario_trackb12(sc, rnd)
+    sc.b12info = scenario_retail_trackb12(sc)
+    return sc
+
+
+def script():
+    """What runs on the demo image: road noise and the terrain names."""
+    rnd = random.Random(0x7ac12)
+    sc = Script()
+    scenario_noise(sc, rnd)
+    sc.b12 = scenario_b12_noise(sc)
     return sc
 
 
@@ -1820,30 +2039,29 @@ class Model(object):
         self.out = []
         e = self.e = retail_model.emu(retail, ieee=True, eediv=True)
         e.stub_bware()
-        # Retail has no twin for BuildTrackPolygons; no retail scenario
-        # builds.
+        # Retail's BuildTrackPolygons has no demo twin to be placed by.
         self.fn = {}
         for k, v in SYM.items():
             try:
                 self.fn[k] = e.addr_of(v)
             except MipsError:
                 assert retail, v
+        if retail:
+            self.fn["build"] = RETAIL_BUILD[0]
         (self.TREE, self.POOLVAR, self.MARKERS, self.CUR, self.TABLE,
          self.HIGHEST, self.LOADED) = (e.data(a) for a in (
              TREE, POOLVAR, MARKERS, CUR, TABLE, HIGHEST, LOADED))
-        # Retail's GetElevation no longer times itself: no TopologyTiming.
-        self.TIMING = self.TIDX = None
-        if not retail:
-            self.TIMING, self.TIDX = TIMING, TIDX
+        self.retail = retail
         self.mis = [0] * NCHUNK
         self.held = [0] * NH        # how many of each handle's table are set
-        self.tick = 0
         self.files = {}
         self.stubs()
         for pat in (r"bNewSlotPool__FiiPCci$", r"TrackPositionMarkerList$",
                     r"TerrainTypeInfoTable$"):
             done = e.run_ctors(pat)
             assert len(done) == 1, (pat, done)
+        if retail:
+            e.call(BMATRIX_CTOR, limit=1000)
         e.put32(CAR + 12, CTI)
 
     def emit(self, s):
@@ -1876,16 +2094,10 @@ class Model(object):
             raise AssertionError("scenario reaches bBreak: a flush with "
                                  "every slot held")
 
-        def ticker(em):
-            self.tick = (self.tick * 1664525 + 1013904223) & M32
-            return s32(self.tick)
-
         e.stub("bMalloc__FiPCcii", malloc)
         e.stub("bFree__FPv", free)
         e.stub("bPrintf__FPCce", printf)
         e.stub("bBreak__Fv", brk)
-        e.stub("bGetTicker__Fv", ticker)
-        del e.stubs[e.addr_of("bGetTickerDifference__FUiUi")]
 
     # ---- addresses and labels -------------------------------------------
 
@@ -1915,7 +2127,7 @@ class Model(object):
             return "markers"
         if a == self.TREE:
             return "tree"
-        if a == self.TREE + 32:
+        if a == self.TREE + 36:
             return "tplist"
         p = self.pool()
         if p and p + 48 <= a < p + 48 + NSLOTS * SLOT:
@@ -1927,7 +2139,7 @@ class Model(object):
             if base <= a < base + CH_SPAN:
                 return "c%d%+d" % (k, a - self.chunk(k))
         for k in range(NTC):
-            if self.tc(k) <= a < self.tc(k) + 560:
+            if self.tc(k) <= a < self.tc(k) + TC_SIZE:
                 return "tc%d" % k if a == self.tc(k) else "tc%d+?" % k
         for k in range(NVEC):
             if a == self.vec(k):
@@ -1951,14 +2163,14 @@ class Model(object):
         e, L = self.e, self.label
         t = self.TREE
         self.emit("tree nodes %s %d squares %s %d polys %s %d idx %s %d "
-                  "list %s %s"
+                  "u32 %d list %s %s"
                   % (L(e.u32(t)), self.i32(t + 4), L(e.u32(t + 8)),
                      self.i32(t + 12), L(e.u32(t + 16)), self.i32(t + 20),
-                     L(e.u32(t + 24)), self.i32(t + 28), L(e.u32(t + 32)),
-                     L(e.u32(t + 36))))
+                     L(e.u32(t + 24)), self.i32(t + 28), self.i32(t + 32),
+                     L(e.u32(t + 36)), L(e.u32(t + 40))))
         if not lst:
             return
-        head = t + 32
+        head = t + 36
         fwd = []
         n = e.u32(head)
         while n != head and len(fwd) < MAX_WALK:
@@ -2003,13 +2215,17 @@ class Model(object):
 
     def tc_dump(self, i):
         e, c = self.e, self.tc(i)
-        n = self.i32(c + 544)
+        n = self.i32(c + TC_COUNTS)
         self.emit("tc%d ib %08x %08x %08x %08x cb %08x %08x %08x %08x "
-                  "total %d num %d vert %d ud %d"
+                  "total %d num %d vert %d ud %d last %s u %08x %08x %08x"
                   % ((i,) + tuple(e.u32(c + 4 * k) for k in range(8))
-                     + (n, self.i32(c + 548), self.i32(c + 552),
-                        self.i32(c + 556))))
-        n = max(0, min(n, 128))
+                     + (n, self.i32(c + TC_COUNTS + 4),
+                        self.i32(c + TC_COUNTS + 8),
+                        self.i32(c + TC_COUNTS + 12),
+                        self.label(e.u32(c + TC_LAST)))
+                     + tuple(e.u32(c + TC_UNUSED + 4 * k)
+                             for k in range(3))))
+        n = max(0, min(n, MAXP))
         self.labels("  t", [e.u32(c + 32 + 4 * k) for k in range(n)])
 
     def mark_dump(self):
@@ -2033,14 +2249,13 @@ class Model(object):
 
     def globals_dump(self):
         e, L = self.e, self.label
+        assert self.retail
         self.emit("globals cur %s table %s highest %d loaded %d pool %s "
-                  "tidx %d"
-                  % (L(e.u32(self.CUR)), L(e.u32(self.TABLE)), self.i32(self.HIGHEST),
-                     self.i32(self.LOADED), "pool" if self.pool() else "null",
-                     e.u32(self.TIDX) if self.TIDX else 0))
-        self.emit("  timing" + "".join(
-            " %08x" % (e.u32(self.TIMING + 4 * k) if self.TIMING else 0)
-            for k in range(10)))
+                  "unused %d %d"
+                  % (L(e.u32(self.CUR)), L(e.u32(self.TABLE)),
+                     self.i32(self.HIGHEST), self.i32(self.LOADED),
+                     "pool" if self.pool() else "null",
+                     self.i32(TREE_UNUSED), self.i32(TREE_UNUSED + 4)))
 
     def pv(self, a):
         e = self.e
@@ -2050,11 +2265,6 @@ class Model(object):
     def mat_dump(self, a):
         self.emit("  m" + "".join(" %08x" % self.e.u32(a + 4 * k)
                                   for k in range(16)))
-
-    def timing_line(self):
-        idx = self.e.u32(self.TIDX)
-        self.emit("  timing %d %08x" % (idx, self.e.u32(self.TIMING + 4 * ((idx + 9)
-                                                                    % 10))))
 
     def fill(self, a, n):
         for k in range(0, n, 4):
@@ -2179,9 +2389,16 @@ class Model(object):
         elif code == OP_TCDUMP:
             self.tc_dump(a[0])
         elif code == OP_TCPOKE:
-            assert 0 <= a[1] < 12
-            off = 4 * a[1] if a[1] < 8 else 544 + 4 * (a[1] - 8)
-            e.put32(self.tc(a[0]) + off, u[2])
+            f, c = a[1], self.tc(a[0])
+            assert 0 <= f < 16
+            if f == 12:
+                e.put32(c + TC_LAST, self.slot(a[2]))
+            elif f < 8:
+                e.put32(c + 4 * f, u[2])
+            elif f < 12:
+                e.put32(c + TC_COUNTS + 4 * (f - 8), u[2])
+            else:
+                e.put32(c + TC_UNUSED + 4 * (f - 13), u[2])
         elif code == OP_TCSET:
             e.put32(self.tc(a[0]) + 32 + 4 * a[1], self.slot(a[2]))
         elif code == OP_SIB:
@@ -2202,9 +2419,6 @@ class Model(object):
             emit("elev tc%d v%d -> %08x terr %08x norm %s found %08x"
                  % (a[0], a[1], e.fpr[0], e.u32(TERR), self.pv(NORM),
                     e.u32(FOUND)))
-            idx = e.u32(self.TIDX)
-            emit("  timing %d %08x" % (idx, e.u32(self.TIMING + 4 * ((idx + 9)
-                                                                % 10))))
         elif code == OP_HASTOPO:
             emit("hastopo tc%d v%d -> %d"
                  % (a[0], a[1], call(fn["hastopo"], self.tc(a[0]),
@@ -2243,7 +2457,7 @@ class Model(object):
                 for p in outs:
                     e.mem[p] = 0
         elif code == OP_BUILD:
-            out = OUTS + 0x200 * a[0]
+            out = OUTS + OUT_STRIDE * a[0]
             n = call(fn["build"], self.TREE, out, a[3], self.vec(a[1]),
                      self.vec(a[2]))
             self.held[a[0]] = n
@@ -2254,15 +2468,15 @@ class Model(object):
             n = self.held[a[0]]
             n = n if a[1] < 0 or a[1] > n else a[1]
             emit("remove h%d %d" % (a[0], n))
-            call(fn["remove"], self.TREE, OUTS + 0x200 * a[0], n)
+            call(fn["remove"], self.TREE, OUTS + OUT_STRIDE * a[0], n)
         elif code == OP_ASSIGN:
             p = self.chunk(a[2]) + a[3]
             r = call(fn["assign"], self.TREE, p)
-            e.put32(OUTS + 0x200 * a[0] + 4 * a[1], r)
+            e.put32(OUTS + OUT_STRIDE * a[0] + 4 * a[1], r)
             self.held[a[0]] = max(self.held[a[0]], a[1] + 1)
             emit("assign h%d[%d] %s -> %s" % (a[0], a[1], L(p), L(r)))
         elif code == OP_UNASSIGN:
-            tp = e.u32(OUTS + 0x200 * a[0] + 4 * a[1])
+            tp = e.u32(OUTS + OUT_STRIDE * a[0] + 4 * a[1])
             emit("unassign h%d[%d] %s" % (a[0], a[1], L(tp)))
             call(fn["unassign"], self.TREE, tp)
         elif code == OP_FLUSH:
@@ -2296,10 +2510,8 @@ class Model(object):
             emit("matchname s%d -> %d" % (a[0], call(fn["matchname"], p)))
         elif code == OP_MATCHHASH:
             emit("matchhash %08x -> %d" % (u[0], call(fn["matchhash"], u[0])))
-        elif code == OP_TICKSEED:
-            self.tick = u[0]
         elif code == OP_HSET:
-            e.put32(OUTS + 0x200 * a[0] + 4 * a[1], self.slot(a[2]))
+            e.put32(OUTS + OUT_STRIDE * a[0] + 4 * a[1], self.slot(a[2]))
             self.held[a[0]] = max(self.held[a[0]], a[1] + 1)
         elif code == OP_TPCB:
             e.put32(self.slot(a[0]) + 16, self.TREE)
@@ -2321,19 +2533,17 @@ class Model(object):
             call(fn["flat"], CAR, FLATM, self.vec(a[1]), u[2], self.tc(a[0]))
             emit("  pos " + self.pv(self.vec(a[1])))
             self.mat_dump(FLATM)
-            self.timing_line()
         elif code == OP_PUTFLAT:
             emit("putflat tc%d" % a[0])
             self.fill(CAR + 144, 64)
             self.fill(CAR + 80, 16)
             tc = self.tc(a[0])
-            e.mem[CAR + 1280:CAR + 1840] = e.mem[tc:tc + 560]
+            e.mem[CAR + C_TC:CAR + C_TC + TC_SIZE] = e.mem[tc:tc + TC_SIZE]
             call(fn["putflat"], CAR)
-            e.mem[tc:tc + 560] = e.mem[CAR + 1280:CAR + 1840]
+            e.mem[tc:tc + TC_SIZE] = e.mem[CAR + C_TC:CAR + C_TC + TC_SIZE]
             emit("  pos %s geom %s angle %d"
                  % (self.pv(CAR + 96), self.pv(CAR + 80), e.u16(CAR + 932)))
             self.mat_dump(CAR + 144)
-            self.timing_line()
         elif code == OP_CARVEC:
             for k in range(4):
                 e.put32(car_vec(a[0]) + 4 * k, u[1 + k])
@@ -2346,32 +2556,34 @@ class Model(object):
             e.put32(AIRT + 4, u[2])
             e.put32(AIRT, u[1])
             tc = self.tc(a[0])
-            e.mem[CAR + 1280:CAR + 1840] = e.mem[tc:tc + 560]
+            e.mem[CAR + C_TC:CAR + C_TC + TC_SIZE] = e.mem[tc:tc + TC_SIZE]
             call(fn["air"], CAR, AIRT, h)
             r = e.fpr[0] & M32
-            e.mem[tc:tc + 560] = e.mem[CAR + 1280:CAR + 1840]
+            e.mem[tc:tc + TC_SIZE] = e.mem[CAR + C_TC:CAR + C_TC + TC_SIZE]
             emit("  -> %08x time %08x height %08x"
                  % (r, e.u32(AIRT), e.u32(h)))
-            self.timing_line()
         elif code == OP_BEGIN:
             emit("begin tc%d dt %08x" % (a[0], u[1]))
             tc = self.tc(a[0])
-            e.mem[CAR + 1280:CAR + 1840] = e.mem[tc:tc + 560]
+            e.mem[CAR + C_TC:CAR + C_TC + TC_SIZE] = e.mem[tc:tc + TC_SIZE]
             e.fpr[12] = u[1]
             call(fn["begin"], CAR)
-            e.mem[tc:tc + 560] = e.mem[CAR + 1280:CAR + 1840]
-            emit("  old %s ang %s" % (self.pv(CAR + 1120),
-                                      self.pv(CAR + 1136)))
+            e.mem[tc:tc + TC_SIZE] = e.mem[CAR + C_TC:CAR + C_TC + TC_SIZE]
+            emit("  old pos %s vel %s ang %s"
+                 % (self.pv(CAR + C_OLDPOS), self.pv(CAR + C_OLDVEL),
+                    self.pv(CAR + C_OLDANG)))
             emit("  trough %08x %08x crossed %s"
-                 % (e.u32(CAR + 1968), e.u32(CAR + 1972),
+                 % (e.u32(CAR + C_TROUGH), e.u32(CAR + C_TROUGH + 4),
                     " ".join("%d" % self.i32(CAR + 868 + 4 * k)
                              for k in range(4))))
-            self.timing_line()
         elif code == OP_VOT:
             self.fill(self.vec(a[0]), 16)
             call(fn["vot"], self.vec(a[0]), self.vec(a[1]))
             emit("vot v%d v%d -> %s" % (a[0], a[1], self.pv(self.vec(a[0]))))
-            self.timing_line()
+        elif code == OP_TREEPOKE:
+            assert 0 <= a[0] < 3
+            e.put32(self.TREE + 32 if a[0] == 0
+                    else TREE_UNUSED + 4 * (a[0] - 1), u[1])
         elif code == OP_SIB3:
             emit("sib3 tc%d v%d r %08x vel %s"
                  % (a[0], a[1], u[2], "null" if a[3] < 0
@@ -2387,7 +2599,7 @@ def text_ranges(e):
     """Track.obj's and TerrainType.obj's code in the image `e` runs."""
     if not e.retail:
         return [TRACK_TEXT, TERRAIN_TEXT]
-    out = []
+    out = [RETAIL_BUILD]
     for da, _dsz, ra, rsz, _k in e.map.by_demo.values():
         if any(lo <= da < hi for lo, hi in (TRACK_TEXT, TERRAIN_TEXT)):
             out.append((ra, ra + rsz))
@@ -2572,16 +2784,20 @@ MUTATIONS = [
      "{\n    tc->TotalNumTrackPolygons = 0;\n    tc->NumTrackPolygons = 0;\n"
      "    tc->NumVerticalTrackPolygons = 0;\n"
      "    tc->NumUpsideDownTrackPolygons = 0;\n"
-     "    topology_clear_interest_bbox(tc);",
-     "{\n    topology_clear_interest_bbox(tc);"),
+     "    tc->Unused692[0] = 0;",
+     "{\n    tc->Unused692[0] = 0;"),
+    ("tcinit-unused", TRC, "    tc->Unused692[1] = 0;\n", ""),
     ("tcdestroy-num", TRC,
      "    topotree_remove(&TheTopologyTree, tc->TrackPolygonTable,\n"
      "                    tc->TotalNumTrackPolygons);\n}",
      "    topotree_remove(&TheTopologyTree, tc->TrackPolygonTable,\n"
      "                    tc->NumTrackPolygons);\n}"),
     ("tcclear-num", TRC,
-     "tc->TotalNumTrackPolygons);\n    tc->NumUpsideDownTrackPolygons = 0;",
-     "tc->NumTrackPolygons);\n    tc->NumUpsideDownTrackPolygons = 0;"),
+     "tc->TotalNumTrackPolygons);\n    tc->pLastTrackPolygon = NULL;",
+     "tc->NumTrackPolygons);\n    tc->pLastTrackPolygon = NULL;"),
+    ("tcclear-last", TRC,
+     "    tc->pLastTrackPolygon = NULL;\n    tc->TotalNumTrackPolygons = 0;",
+     "    tc->TotalNumTrackPolygons = 0;"),
     ("tcclear-cache", TRC,
      "    bInitializeBoundingBox2(&tc->CachedBBoxMin, &tc->CachedBBoxMax);\n"
      "    topotree_remove",
@@ -2589,21 +2805,46 @@ MUTATIONS = [
     ("sib-contains", TRC,
      "&tc->InterestBBoxMin, &tc->InterestBBoxMax))\n        return;\n",
      "&tc->InterestBBoxMin, &tc->InterestBBoxMax))\n        ;\n"),
+    ("sib-last", TRC,
+     "    tc->pLastTrackPolygon = NULL;\n\n    if (vel == NULL) {",
+     "\n    if (vel == NULL) {"),
     ("sib-rpad", TRC,
-     "    r = r + 0.5f;",
-     "    r = r + 0.25f;"),
+     "        r = r + 0.5f;",
+     "        r = r + 0.25f;"),
+    ("sib-rpad-null", TRC,
+     "                             r + 0.5f);",
+     "                             r + 0.25f);"),
+    ("sib-first-scale", TRC,
+     "#define TRACK_AHEAD_SCALE    0.15f",
+     "#define TRACK_AHEAD_SCALE    0.2f"),
     ("sib-scale", TRC,
-     "        scale = scale * 0.5f;",
-     "        scale = scale * 0.25f;"),
-    ("sib-32", TRC,
-     "if (sqrtf(dx * dx + dy * dy) < 32.0f)",
-     "if (sqrtf(dx * dx + dy * dy) < 16.0f)"),
+     "            s = s * 0.75f;",
+     "            s = s * 0.5f;"),
+    ("sib-diagonal", TRC,
+     "#define TRACK_CACHE_DIAGONAL 28.8f",
+     "#define TRACK_CACHE_DIAGONAL 28.9f"),
+    ("sib-diagonal-le", TRC,
+     "if (sqrtf(dx * dx + dy * dy) < TRACK_CACHE_DIAGONAL)",
+     "if (sqrtf(dx * dx + dy * dy) <= TRACK_CACHE_DIAGONAL)"),
     ("sib-tries", TRC,
-     "    for (i = 0; i < 10; i++) {\n        float dx, dy;",
-     "    for (i = 0; i < 3; i++) {\n        float dx, dy;"),
+     "        for (i = 0; i < 5; i++) {",
+     "        for (i = 0; i < 4; i++) {"),
+    ("sib-zero-try", TRC,
+     "            if (i == 3)",
+     "            if (i == 2)"),
+    ("sib-no-zero", TRC,
+     "            if (i == 3)\n                s = 0.0f;\n",
+     ""),
+    ("sib-reinit", TRC,
+     "            bInitializeBoundingBox2(&tc->CachedBBoxMin, &tc->CachedBBoxMax);\n"
+     "            bExpandBoundingBox2R",
+     "            bExpandBoundingBox2R"),
     ("sib-vel-scale", TRC,
-     "bScaleAdd2(&ahead, pos, vel, scale);",
+     "bScaleAdd2(&ahead, pos, vel, s);",
      "bScaleAdd2(&ahead, pos, vel, 1.0f);"),
+    ("sib-build-max", TRC,
+     "    n = topotree_build(&TheTopologyTree, local, TOPOLOGY_MAX_POLYGONS,",
+     "    n = topotree_build(&TheTopologyTree, local, TOPOLOGY_MAX_POLYGONS - 1,"),
     ("sib-pass1-ud", TRC,
      "        if (local[i]->Flags & TRACKPOLY_UPSIDE_DOWN)\n            continue;\n",
      ""),
@@ -2618,18 +2859,47 @@ MUTATIONS = [
      "    if (1) {\n        for (i = 0; i < n; i++) {\n"
      "            if (local[i]->Flags & TRACKPOLY_UPSIDE_DOWN)"),
     ("sib-ud-count", TRC,
-     "tc->NumUpsideDownTrackPolygons = k - vertical;",
-     "tc->NumUpsideDownTrackPolygons = k - vertical - tc->NumTrackPolygons;"),
+     "tc->NumUpsideDownTrackPolygons = k - vertical - floors;",
+     "tc->NumUpsideDownTrackPolygons = k - vertical;"),
     ("sib-total", TRC,
      "    tc->TotalNumTrackPolygons = n;\n    tc->NumUpsideDown",
      "    tc->TotalNumTrackPolygons = k;\n    tc->NumUpsideDown"),
     ("sib-vertical-count", TRC,
-     "        vertical = k - base;",
-     "        vertical = k;"),
+     "    vertical = k - floors;",
+     "    vertical = k;"),
+    ("sib-floors-count", TRC,
+     "    floors = k;\n",
+     "    floors = n;\n"),
 
     ("elev-found-init", TRC,
      "    if (found != NULL)\n        *found = 1;\n",
      ""),
+    ("elev-last-skip", TRC,
+     "    if (last != NULL\n"
+     "        && track_polygon_inside(last, pt->x, pt->y) < 0.0f) {",
+     "    if (0) {"),
+    ("elev-last-le", TRC,
+     "        && track_polygon_inside(last, pt->x, pt->y) < 0.0f) {",
+     "        && track_polygon_inside(last, pt->x, pt->y) <= 0.0f) {"),
+    ("elev-last-terrain", TRC,
+     "            *terrain = (int8_t)last->TheTerrainType;",
+     "            *terrain = last->TheTerrainType;"),
+    ("elev-last-pad", TRC,
+     "            normal->pad = last->PlaneDistance;",
+     "            normal->pad = 0.0f;"),
+    ("elev-last-normal", TRC,
+     "            normal->z = last->Normal.z;",
+     "            normal->z = last->Normal.y;"),
+    ("elev-last-not-kept", TRC,
+     "            tc->pLastTrackPolygon = tp;\n",
+     ""),
+    ("elev-last-cand", TRC,
+     "                cand = i;\n                continue;",
+     "                tc->pLastTrackPolygon = tp;\n"
+     "                cand = i;\n                continue;"),
+    ("elev-num-total", TRC,
+     "    num = tc->NumTrackPolygons;",
+     "    num = tc->TotalNumTrackPolygons;"),
     ("elev-inside-border", TRC,
      "&xy, 0.0f))\n        topology_set_interest_bbox",
      "&xy, 1.0f))\n        topology_set_interest_bbox"),
@@ -2648,21 +2918,28 @@ MUTATIONS = [
     ("elev-bbmaxy", TRC,
      "!(py <= tp->BBoxMax.y))",
      "!(py < tp->BBoxMax.y))"),
-    ("elev-three-edges", TRC,
-     "&tp->Vertices[(e + 1) % 4];",
-     "&tp->Vertices[(e + 1) % 3];"),
-    ("elev-zero-edge", TRC,
-     "                if (ve->x == vj->x && ve->y == vj->y)\n"
-     "                    continue;\n",
-     ""),
-    ("elev-cross-sign", TRC,
-     "cross = (vj->y - ve->y) * (px - ve->x)\n"
-     "                      - (vj->x - ve->x) * (py - ve->y);",
-     "cross = (vj->x - ve->x) * (py - ve->y)\n"
-     "                      - (vj->y - ve->y) * (px - ve->x);"),
-    ("elev-m-init", TRC,
-     "            m = -1.0f;",
-     "            m = 0.0f;"),
+    ("inside-third-edge", TRC,
+     "    m = track_max(m, track_edge(&v[3], &v[0], px, py));",
+     "    m = track_max(m, track_edge(&v[2], &v[0], px, py));"),
+    ("inside-quad-edge", TRC,
+     "    if ((int8_t)tp->NumVertices == 4)\n        m = track_max",
+     "    if (1)\n        m = track_max"),
+    ("inside-early-out", TRC,
+     "    m = track_max(m, track_edge(&v[0], &v[1], px, py));\n"
+     "    if (0.0f < m)\n        return m;\n",
+     "    m = track_max(m, track_edge(&v[0], &v[1], px, py));\n"),
+    ("inside-cross-sign", TRC,
+     "    return (vj->y - vi->y) * (px - vi->x) - (vj->x - vi->x) * (py - vi->y);",
+     "    return (vj->x - vi->x) * (py - vi->y) - (vj->y - vi->y) * (px - vi->x);"),
+    ("inside-m-init", TRC,
+     "    float m = -1.0f;",
+     "    float m = 0.0f;"),
+    ("max-nan-edge", TRC,
+     "    return m < c ? c : m;",
+     "    return m > c ? m : c;"),
+    ("height-order", TRC,
+     "    return (tp->PlaneDistance - (tp->Normal.x * px + tp->Normal.y * py))",
+     "    return (tp->PlaneDistance - tp->Normal.x * px - tp->Normal.y * py)"),
     ("elev-m-strict", TRC,
      "            if (!(m <= 0.0f))\n                continue;",
      "            if (!(m < 0.0f))\n                continue;"),
@@ -2679,20 +2956,27 @@ MUTATIONS = [
      "if ((tp->Flags & TRACKPOLY_INFINITELY_HIGH) || !(m < 0.0f)) {",
      "if (tp->Flags & TRACKPOLY_INFINITELY_HIGH) {"),
     ("elev-lo-kept", TRC,
-     "                lo = elev;\n                cand = i;",
-     "                cand = i;"),
+     "            lo = elev;\n            if ((tp->Flags",
+     "            if ((tp->Flags"),
     ("elev-second-hi", TRC,
      "        hi = BVECTOR_FLT_MAX;",
      "        hi = hi + 100.0f;"),
     ("elev-miss-z", TRC,
-     "        result = pt->z;\n        if (found != NULL)",
-     "        result = 0.0f;\n        if (found != NULL)"),
+     "    result = pt->z;\n",
+     "    result = 0.0f;\n"),
     ("elev-miss-terrain", TRC,
      "            *terrain = 1;",
      "            *terrain = 0;"),
     ("elev-miss-normal", TRC,
      "            normal->z = -1.0f;",
      "            normal->z = 1.0f;"),
+    ("elev-miss-pad", TRC,
+     "            normal->z = -1.0f;\n            normal->y = 0.0f;",
+     "            normal->z = -1.0f;\n            normal->y = 0.0f;\n"
+     "            normal->pad = 0.0f;"),
+    ("elev-hit-terrain-sign", TRC,
+     "            *terrain = (int8_t)tp->TheTerrainType;",
+     "            *terrain = tp->TheTerrainType;"),
     ("elev-reorder-6", TRC,
      "        if (hit >= 5) {",
      "        if (hit >= 6) {"),
@@ -2703,18 +2987,6 @@ MUTATIONS = [
     ("elev-normal-pad", TRC,
      "            normal->pad = tp->PlaneDistance;",
      "            normal->pad = 0.0f;"),
-    ("elev-timing-scale", TRC,
-     "bGetTickerDifference(start, bGetTicker()) * 1000.0f;",
-     "bGetTickerDifference(start, bGetTicker()) * 100.0f;"),
-    ("elev-timing-slot", TRC,
-     "TopologyTiming[TopologyTimingIndex % 10u] =",
-     "TopologyTiming[(TopologyTimingIndex + 1) % 10u] ="),
-    ("elev-timing-order", TRC,
-     "bGetTickerDifference(start, bGetTicker())",
-     "bGetTickerDifference(bGetTicker(), start)"),
-    ("elev-timing-index", TRC,
-     "    TopologyTimingIndex++;\n",
-     ""),
 
     ("hastopo-z", TRC,
      "    p.z = TRACK_PROBE_Z;",
@@ -2782,6 +3054,8 @@ MUTATIONS = [
     ("treeinit-polys", TRC,
      "    t->NumPolygons = 0;\n    t->pPolygonIndexTable = NULL;",
      "    t->pPolygonIndexTable = NULL;"),
+    ("treeinit-unused", TRC, "    t->Unused32 = 0;\n", ""),
+    ("inittree-unused", TRC, "    TopologyTreeUnused[1] = 0;\n", ""),
     ("inittree-overflow", TRC,
      "    bClearSlotPoolFlag(TrackPolygonSlotPool, BSP_OVERFLOW_IF_FULL);\n",
      ""),
@@ -2880,15 +3154,44 @@ MUTATIONS = [
     ("unassign-zero", TRC,
      "tp->ReferenceCount = (uint8_t)(tp->ReferenceCount - 1);",
      "tp->ReferenceCount = 0;"),
-    ("build-s1", TRC,
-     "s1 = topotree_get_square(t, bmax->x, bmin->y, 0);",
-     "s1 = topotree_get_square(t, bmin->x, bmax->y, 0);"),
     ("build-keep-flag", TRC,
      "        stack[i]->UsedByNeighbourFlag = 0;\n",
      ""),
     ("build-max", TRC,
-     "        n += topotree_get_intersecting_polygons(t, stack + n, max - n, s1,",
-     "        n += topotree_get_intersecting_polygons(t, stack + n, max, s1,"),
+     "t, stack + n, max - n, sq, bmin, bmax);",
+     "t, stack + n, max, sq, bmin, bmax);"),
+    ("build-bound-min", TRC,
+     "    if (-32768.0f < bmin->x && bmax->x < TRACK_BUILD_LIMIT",
+     "    if (-32768.0f <= bmin->x && bmax->x < TRACK_BUILD_LIMIT"),
+    ("build-bound-max", TRC,
+     "    if (-32768.0f < bmin->x && bmax->x < TRACK_BUILD_LIMIT",
+     "    if (-32768.0f < bmin->x && bmax->x <= TRACK_BUILD_LIMIT"),
+    ("build-bound-min-y", TRC,
+     "        && -32768.0f < bmin->y && bmax->y < TRACK_BUILD_LIMIT) {",
+     "        && -32768.0f <= bmin->y && bmax->y < TRACK_BUILD_LIMIT) {"),
+    ("build-bound-max-y", TRC,
+     "        && -32768.0f < bmin->y && bmax->y < TRACK_BUILD_LIMIT) {",
+     "        && -32768.0f < bmin->y && bmax->y <= TRACK_BUILD_LIMIT) {"),
+    ("build-limit", TRC,
+     "#define TRACK_BUILD_LIMIT 32767.0f",
+     "#define TRACK_BUILD_LIMIT 32768.0f"),
+    ("build-no-bounds-y", TRC,
+     "\n        && -32768.0f < bmin->y && bmax->y < TRACK_BUILD_LIMIT) {",
+     ") {"),
+    ("build-x-step", TRC,
+     "                 x = x + 32.0f) {",
+     "                 x = x + 64.0f) {"),
+    ("build-y-lt", TRC, "y <= bmax->y;", "y < bmax->y;"),
+    ("build-x-lt", TRC, "x <= bmax->x;", "x < bmax->x;"),
+    ("build-y-corner", TRC,
+     "(y = topotree_get_square_corner(bmin->y);",
+     "(y = bmin->y;"),
+    ("build-x-corner", TRC,
+     "(x = topotree_get_square_corner(bmin->x);",
+     "(x = bmin->x;"),
+    ("build-square-xy", TRC,
+     "topotree_get_square(t, x, y, 0);",
+     "topotree_get_square(t, y, x, 0);"),
     ("remove-first", TRC,
      "        topotree_unassign(t, table[i]);",
      "        topotree_unassign(t, table[0]);"),
@@ -3181,6 +3484,10 @@ MUTATIONS = [
      "    if (i == 1)\n        return sum;\n", ""),
     ("bm-dt-ge", CTC, "    if (0.0f < dt) {", "    if (0.0f <= dt) {"),
     ("bm-dt-any", CTC, "    if (0.0f < dt) {", "    if (dt != 1.0f) {"),
+    ("bm-no-old-pos", CTC, "        c->vOldPos = st->Position;\n", ""),
+    ("bm-old-pos-vel", CTC,
+     "        c->vOldPos = st->Position;",
+     "        c->vOldPos = st->Velocity;"),
     ("bm-no-old-vel", CTC, "        c->vOldVel = st->Velocity;\n", ""),
     ("bm-no-old-ang", CTC, "        c->vOldAngVel = st->AngularVelocity;\n",
      ""),
@@ -3315,6 +3622,11 @@ EQUIVALENT = {
     "air-sample-no-normal":
         "the normal goes to a local AverageAir never reads, and "
         "GetElevation's only use of the pointer is the store into it",
+    "inside-early-out":
+        "track_max never lowers m and never makes it a NaN, so once the "
+        "first edge has made m positive, the check after the second edge "
+        "returns a value that is positive too; every caller tests only "
+        "its sign",
 }
 
 for _name in EQUIVALENT:
@@ -3477,17 +3789,18 @@ def main():
         print("the image divided by zero at %s -- track.c needs ee_div there"
               % " ".join("0x%08x" % pc for pc in divs))
         bad += 1
-    if sc.b12:
+    if rsc.b12:
         n, zero, flat = degenerate_count()
-        print("TRACKB12: %d polygons, %d with no normal, %d floors or "
-              "ceilings with a zero normal z" % (n, zero, flat))
+        print("retail TRACKB12: %d polygons, %d with no normal, %d floors "
+              "or ceilings with a zero normal z" % (n, zero, flat))
         if zero or flat:
             bad += 1
     else:
-        print("TRACKB12 not extracted -- its scenarios skipped")
-    if not rsc.b12:
+        print("retail TRACKB12 not in extracted-retail -- its scenarios "
+              "skipped")
+    if not rsc.b12info:
         print("retail TRACKB12 or GLOBALB not in extracted-retail -- "
-              "their scenarios skipped")
+              "the info chunks skipped")
     n = diff(lines, harness)
     print("demo image: %d ops, %d lines, %d differ"
           % (len(sc.ops), len(harness), n))

@@ -4,9 +4,10 @@
 // TrackPath is not the route system. A TrackRoute is a list of points a car
 // can drive; a TrackPath is how far around the lap a position is. Everything
 // that asks "who is ahead", "which lap", "how far to the finish" asks it:
-// Car keeps a TrackPathCoordinate at 1840, Signpost::SetDistances,
-// TrackRoute::SetFirstAndLast and TrackRoutePoint::GetDistanceAway measure
-// with one, and CompareDistances has seventeen callers.
+// Car keeps a TrackPathCoordinate (at 1840 in the demo's record),
+// Signpost::SetDistances, TrackRoute::SetFirstAndLast and
+// TrackRoutePoint::GetDistanceAway measure with one, and CompareDistances
+// has seventeen callers.
 //
 // The data is a graph of points, each on a numbered path. Each path is a
 // run of consecutive points with a distance at each end, and

@@ -360,11 +360,12 @@ def model():
 
     emit("[layout]")
     emit("  %-28s %d" % ("slack", SLACK))
-    # 2048: the demo's 2016 and, after it, retail's four new fields (car.h).
-    emit("  %-28s %d" % ("sizeof Car", at(2048, 154)))
+    # 2192: the demo's 2016 with retail's 704-byte TopologyCoordinate for
+    # the demo's 560, and after it retail's four new fields (car.h).
+    emit("  %-28s %d" % ("sizeof Car", at(2192, 188)))
     emit("  %-28s %d" % ("sizeof CarNode", 2 * PTR))
     emit("  %-28s %d" % ("sizeof CarState", at(1024, 2)))
-    emit("  %-28s %d" % ("sizeof TopologyCoordinate", at(560, 128)))
+    emit("  %-28s %d" % ("sizeof TopologyCoordinate", at(704, 162)))
     emit("  %-28s %d" % ("sizeof TrackPathCoordinate", at(40, 4)))
     emit("  %-28s %d" % ("sizeof OverrideRenderingPos", 96))
     emit("  %-28s %d" % ("sizeof DriverInfo", at(20, 1)))
@@ -383,34 +384,34 @@ def model():
             ("off pRenderInfo", 1168, 14),
             ("off TheOverrideRendering", 1184, 16),
             ("off TheTopologyCoordinate", 1280, 16),
-            ("off TheTrackPathCoordinate", 1840, 144),
-            ("off CopLights", 1880, 148),
-            ("off SignalLightState", 1884, 148),
-            ("off HeadlightsAndHornStart", 1904, 148),
-            ("off TheSirenMode", 1924, 148),
-            ("off WiperOnTime", 1928, 148),
-            ("off WiperOffTime", 1932, 148),
-            ("off WiperState", 1936, 148),
-            ("off pCarDamage", 1940, 149),
-            ("off BlownTireBits", 1944, 150),
-            ("off NumBlownTires", 1945, 150),
-            ("off pBaseCarSound", 1952, 150),
-            ("off ResetMe", 1956, 151),
-            ("off BlinkTimer", 1960, 151),
-            ("off BlinkDuration", 1964, 151),
-            ("off LastInTroughPosition", 1968, 151),
-            ("off bPoofed", 1976, 151),
-            ("off bVisibleOnTrackMap", 1980, 151),
-            ("off NumTimesSkidding", 1984, 151),
-            ("off RoadBumpBits", 1988, 151),
-            ("off pCaffeineObj", 1992, 152),
-            ("off LeaveCarTrails", 2000, 154),
-            ("off ForceBuzzTime", 2004, 154),
-            ("off fAngleToCamera", 2008, 154),
-            ("off vOldPos", 2016, 154),
-            ("off SecondOnDuration", 2032, 154),
-            ("off JustResetFrames", 2036, 154),
-            ("off InDeepWaterRegistered", 2040, 154)):
+            ("off TheTrackPathCoordinate", 1984, 178),
+            ("off CopLights", 2024, 182),
+            ("off SignalLightState", 2028, 182),
+            ("off HeadlightsAndHornStart", 2048, 182),
+            ("off TheSirenMode", 2068, 182),
+            ("off WiperOnTime", 2072, 182),
+            ("off WiperOffTime", 2076, 182),
+            ("off WiperState", 2080, 182),
+            ("off pCarDamage", 2084, 183),
+            ("off BlownTireBits", 2088, 184),
+            ("off NumBlownTires", 2089, 184),
+            ("off pBaseCarSound", 2096, 184),
+            ("off ResetMe", 2100, 185),
+            ("off BlinkTimer", 2104, 185),
+            ("off BlinkDuration", 2108, 185),
+            ("off LastInTroughPosition", 2112, 185),
+            ("off bPoofed", 2120, 185),
+            ("off bVisibleOnTrackMap", 2124, 185),
+            ("off NumTimesSkidding", 2128, 185),
+            ("off RoadBumpBits", 2132, 185),
+            ("off pCaffeineObj", 2136, 186),
+            ("off LeaveCarTrails", 2144, 188),
+            ("off ForceBuzzTime", 2148, 188),
+            ("off fAngleToCamera", 2152, 188),
+            ("off vOldPos", 2160, 188),
+            ("off SecondOnDuration", 2176, 188),
+            ("off JustResetFrames", 2180, 188),
+            ("off InDeepWaterRegistered", 2184, 188)):
         emit("  %-28s %d" % (name, at(ps2, k)))
 
     emit("  %-28s %d" % ("off ORP GeometryPosition", 64))
@@ -1727,11 +1728,11 @@ MUTATIONS = [
      "    int8_t            RenderingEnabled;         // 1160",
      "    int32_t           RenderingEnabled;         // 1160"),
     ("car-blowntire-is-int32", CH,
-     "    uint8_t           BlownTireBits;            // 1944",
-     "    uint32_t          BlownTireBits;            // 1944"),
+     "    uint8_t           BlownTireBits;            // 2088",
+     "    uint32_t          BlownTireBits;            // 2088"),
     ("car-lastintrough-is-v3", CH,
-     "    bVector2          LastInTroughPosition;     // 1968",
-     "    bVector3          LastInTroughPosition;     // 1968"),
+     "    bVector2          LastInTroughPosition;     // 2112",
+     "    bVector3          LastInTroughPosition;     // 2112"),
     ("car-node-one-link", CH,
      "    struct CarNode *prev;  // 4",
      "    /* removed */"),
@@ -1743,12 +1744,12 @@ MUTATIONS = [
      "    DriverType     TheDriverType;       // 4",
      "    uint32_t       _gap;                // 4" + NL +
      "    DriverType     TheDriverType;       // 8"),
-    ("topology-table-127", TH,
-     "#define TOPOLOGY_MAX_POLYGONS 128",
-     "#define TOPOLOGY_MAX_POLYGONS 127"),
+    ("topology-table-159", TH,
+     "#define TOPOLOGY_MAX_POLYGONS 160",
+     "#define TOPOLOGY_MAX_POLYGONS 159"),
     ("topology-bbox-is-v3", TH,
-     "    bVector2      InterestBBoxMin;                       // 0",
-     "    bVector3      InterestBBoxMin;                       // 0"),
+     "    bVector2      InterestBBoxMin;                          //   0",
+     "    bVector3      InterestBBoxMin;                          //   0"),
 
     # -- the enums ----------------------------------------------------------
     ("enum-traffic-is-2", CH,

@@ -1,5 +1,6 @@
 // topology -- the track's collision surface: TopologyTree, TrackPolygon and
-// TopologyCoordinate, Track.obj 0x0014e8b0 .. 0x001509d4.
+// TopologyCoordinate, retail's Track.obj 0x001514a8 .. 0x0015397c (the
+// demo's 0x001514a8 .. 0x001509d4).
 //
 // The surface ships as four chunks inside the track bundle: a quadtree of
 // nodes, the squares at its leaves, the polygons, and a table of polygon
@@ -12,8 +13,11 @@
 // under a box around it, sorted into the ones it can stand on, the vertical
 // ones and the upside-down ones, re-gathered whenever it leaves the box.
 //
-// Everything is spelled as the .mdebug has it (`TopologyTree (size=40)`,
-// `TrackPolygon (size=128)`, `TopologyCoordinate (size=560)`), and the
+// Everything is spelled as the demo's .mdebug has it (`TopologyTree
+// (size=40)`, `TrackPolygon (size=128)`, `TopologyCoordinate (size=560)`),
+// and the layouts are retail's, which has no .mdebug: TrackPolygon is the
+// same, TopologyTree is 44 bytes and TopologyCoordinate is 704. The few
+// fields retail added are named by the port. The
 // three records that hold pointers carry layout asserts: each is exact on
 // the handheld, and on a 64-bit host every offset past a widened pointer
 // moves by a counted number of slack units, the way wheel.h's records do.
@@ -152,8 +156,10 @@ typedef char trackpolygon_layout_check[
 
 // ---------------------------------------------------------- TopologyTree
 
-// 40 bytes on the handheld: four chunk pointers, their counts, and the list
-// of every TrackPolygon built so far, oldest first.
+// 44 bytes on the handheld: four chunk pointers, their counts, and the list
+// of every TrackPolygon built so far, oldest first. Retail put a word in
+// front of the list (the demo's was at 32); the constructor (`0x00152b10`)
+// zeroes it and nothing in the image reads or writes it again.
 typedef struct TopologyTree {
     TopologyTreeNode    *pNodeTable;            //  0
     int32_t              NumNodes;              //  4
@@ -163,8 +169,9 @@ typedef struct TopologyTree {
     int32_t              NumPolygons;           // 20
     uint16_t            *pPolygonIndexTable;    // 24
     int32_t              NumPolygonIndicies;    // 28
-    TrackListNode        TrackPolygonList;      // 32
-} TopologyTree;                                 // 40
+    int32_t              Unused32;              // 32
+    TrackListNode        TrackPolygonList;      // 36
+} TopologyTree;                                 // 44
 
 #ifndef TOPOLOGY_NO_ASSERT
 typedef char topologytree_layout_check[
@@ -175,35 +182,46 @@ typedef char topologytree_layout_check[
      && offsetof(TopologyTree, NumPolygons) == 20 + 5 * TOPOLOGY_SLACK
      && offsetof(TopologyTree, pPolygonIndexTable) == 24 + 6 * TOPOLOGY_SLACK
      && offsetof(TopologyTree, NumPolygonIndicies) == 28 + 7 * TOPOLOGY_SLACK
-     && offsetof(TopologyTree, TrackPolygonList) == 32 + 7 * TOPOLOGY_SLACK
-     && sizeof(TopologyTree) == 40 + 8 * TOPOLOGY_SLACK) ? 1 : -1];
+     && offsetof(TopologyTree, Unused32) == 32 + 7 * TOPOLOGY_SLACK
+     && offsetof(TopologyTree, TrackPolygonList) == 36 + 7 * TOPOLOGY_SLACK
+     && sizeof(TopologyTree) == 44 + 7 * TOPOLOGY_SLACK) ? 1 : -1];
 #endif
 
 // ---------------------------------------------------- TopologyCoordinate
 
-#define TOPOLOGY_MAX_POLYGONS 128
+// The demo's table held 128.
+#define TOPOLOGY_MAX_POLYGONS 160
 
-// 560 bytes on the handheld. Car embeds one at 1280 (car.h). The table is
-// partitioned: [0, Num) are the polygons GetElevation searches, then the
-// vertical ones, then the upside-down ones, Total in all -- except that
-// NumUpsideDownTrackPolygons is not what its name says; see
-// topology_set_interest_bbox.
+// 704 bytes on the handheld (the demo's was 560). Car embeds one (car.h).
+// The table is partitioned: [0, Num) are the polygons GetElevation
+// searches, then the vertical ones, then the upside-down ones, Total in
+// all.
+//
+// pLastTrackPolygon is new in retail: the polygon GetElevation last found
+// the point strictly inside, which the next call tries first. Clearing the
+// box and gathering a new cache both empty it. The three words after it
+// are new too; the constructor zeroes them and nothing in the image reads
+// or writes them again.
 typedef struct TopologyCoordinate {
-    bVector2      InterestBBoxMin;                       // 0
-    bVector2      InterestBBoxMax;                       // 8
-    bVector2      CachedBBoxMin;                         // 16
-    bVector2      CachedBBoxMax;                         // 24
-    TrackPolygon *TrackPolygonTable[TOPOLOGY_MAX_POLYGONS]; // 32
-    int32_t       TotalNumTrackPolygons;                 // 544
-    int32_t       NumTrackPolygons;                      // 548
-    int32_t       NumVerticalTrackPolygons;              // 552
-    int32_t       NumUpsideDownTrackPolygons;            // 556
-} TopologyCoordinate;                                    // 560
+    bVector2      InterestBBoxMin;                          //   0
+    bVector2      InterestBBoxMax;                          //   8
+    bVector2      CachedBBoxMin;                            //  16
+    bVector2      CachedBBoxMax;                            //  24
+    TrackPolygon *TrackPolygonTable[TOPOLOGY_MAX_POLYGONS]; //  32
+    int32_t       TotalNumTrackPolygons;                    // 672
+    int32_t       NumTrackPolygons;                         // 676
+    int32_t       NumVerticalTrackPolygons;                 // 680
+    int32_t       NumUpsideDownTrackPolygons;               // 684
+    TrackPolygon *pLastTrackPolygon;                        // 688
+    int32_t       Unused692[3];                             // 692
+} TopologyCoordinate;                                       // 704
 
-// On a 64-bit host the 128 pointers widen and nothing else does, so every
-// offset past the table shifts by exactly 128 slack units and the size
-// follows.
-#define TOPOLOGY_SIZEOF ((size_t)(560 + TOPOLOGY_MAX_POLYGONS * TOPOLOGY_SLACK))
+// On a 64-bit host the 160 pointers of the table widen, then
+// pLastTrackPolygon, and the size rounds up to the pointer.
+#define TOPOLOGY_TC_SLACK(n) ((size_t)(n) * TOPOLOGY_SLACK)
+#define TOPOLOGY_SIZEOF                                                     \
+    ((size_t)((704 + TOPOLOGY_TC_SLACK(TOPOLOGY_MAX_POLYGONS + 1)           \
+               + sizeof(void *) - 1) / sizeof(void *) * sizeof(void *)))
 
 #ifndef TOPOLOGY_NO_ASSERT
 typedef char topology_layout_check[
@@ -213,53 +231,58 @@ typedef char topology_layout_check[
      && offsetof(TopologyCoordinate, CachedBBoxMax)   == 24
      && offsetof(TopologyCoordinate, TrackPolygonTable) == 32
      && offsetof(TopologyCoordinate, TotalNumTrackPolygons)
-        == 544 + TOPOLOGY_MAX_POLYGONS * TOPOLOGY_SLACK
+        == 672 + TOPOLOGY_TC_SLACK(TOPOLOGY_MAX_POLYGONS)
      && offsetof(TopologyCoordinate, NumTrackPolygons)
-        == 548 + TOPOLOGY_MAX_POLYGONS * TOPOLOGY_SLACK
+        == 676 + TOPOLOGY_TC_SLACK(TOPOLOGY_MAX_POLYGONS)
      && offsetof(TopologyCoordinate, NumVerticalTrackPolygons)
-        == 552 + TOPOLOGY_MAX_POLYGONS * TOPOLOGY_SLACK
+        == 680 + TOPOLOGY_TC_SLACK(TOPOLOGY_MAX_POLYGONS)
      && offsetof(TopologyCoordinate, NumUpsideDownTrackPolygons)
-        == 556 + TOPOLOGY_MAX_POLYGONS * TOPOLOGY_SLACK
+        == 684 + TOPOLOGY_TC_SLACK(TOPOLOGY_MAX_POLYGONS)
+     && offsetof(TopologyCoordinate, pLastTrackPolygon)
+        == 688 + TOPOLOGY_TC_SLACK(TOPOLOGY_MAX_POLYGONS)
+     && offsetof(TopologyCoordinate, Unused692)
+        == 692 + TOPOLOGY_TC_SLACK(TOPOLOGY_MAX_POLYGONS + 1)
      && sizeof(TopologyCoordinate) == TOPOLOGY_SIZEOF) ? 1 : -1];
 #endif
 
 // ------------------------------------------------------------ the globals
 
-// 0x002f14c8. The one tree; every TopologyCoordinate method reaches it by
-// address rather than through a member.
+// 0x002f9498 (the demo's 0x002f14c8). The one tree; every
+// TopologyCoordinate method reaches it by address rather than through a
+// member.
 extern TopologyTree TheTopologyTree;
 
-// 0x00323424. Made by topotree_init_tree, NULL until then and after
-// topotree_close_tree.
+// gp-21956, 0x0033032c. Made by topotree_init_tree, NULL until then and
+// after topotree_close_tree.
 extern BSlotPool *TrackPolygonSlotPool;
 
-// 0x002f1530 and 0x00323418. GetElevation's own profile: the milliseconds
-// each call took, in a ring of ten, and the running count that indexes it.
-extern float    TopologyTiming[10];
-extern uint32_t TopologyTimingIndex;
+// gp-21976 and gp-21972, 0x00330318 and 0x0033031c: two words retail's
+// InitTree zeroes and nothing else in the image touches. The demo's
+// GetElevation timed itself into TopologyTiming, which retail dropped.
+extern int32_t TopologyTreeUnused[2];
 
 // ---------------------------------------------------------- TrackPolygon
 
-// 0x0014e8b0. Builds `tp` from `p` and writes tp's slot number back into
+// 0x001514a8. Builds `tp` from `p` and writes tp's slot number back into
 // p->TrackPolygonNumber. The node words are left alone -- the caller links
 // it -- and so is the collision body past being zeroed.
 TrackPolygon *trackpolygon_init(TrackPolygon *tp, TopologyTreePolygon *p);
 
-// 0x0014eb78. Marks the TopologyTreePolygon unbuilt again (number -1) and,
+// 0x00151770. Marks the TopologyTreePolygon unbuilt again (number -1) and,
 // with bit 0 of `flags`, frees the slot. Does not unlink.
 void trackpolygon_destroy(TrackPolygon *tp, int flags);
 
-// 0x0014ebe0. Is `pt` inside the prism the polygon's edges sweep along its
+// 0x001517d8. Is `pt` inside the prism the polygon's edges sweep along its
 // normal? With `dist`, also writes the signed distance from the plane.
 int trackpolygon_point_in_shaft(const TrackPolygon *tp, const bVector3 *pt,
                                 float *dist);
 
-// 0x0014ed98. Does segment a-b cross the polygon? Writes the crossing to
+// 0x00151990. Does segment a-b cross the polygon? Writes the crossing to
 // `out` (all four lanes) when it does and `out` is not NULL.
 int trackpolygon_segment_intersects(const TrackPolygon *tp, const bVector3 *a,
                                     const bVector3 *b, bVector3 *out);
 
-// 0x0014ee90. The segment test with a bounding-box reject in front and a
+// 0x00151a88. The segment test with a bounding-box reject in front and a
 // nearest-so-far behind: 1, and *best lowered, only for a crossing nearer a
 // than *best -- and, unless `twoSided`, only for a move against the normal,
 // which is one from the side the polygon faces.
@@ -270,49 +293,51 @@ int trackpolygon_test_segment(const TrackPolygon *tp, float *best,
 
 // ---------------------------------------------------- TopologyCoordinate
 
-// 0x0014f030 / 0x0014f068. The destructor releases the table; it has no
+// 0x00151c28 / 0x00151c70. The destructor releases the table; it has no
 // delete flag here because nothing heap-allocates one.
 void topology_init(TopologyCoordinate *tc);
 void topology_destroy(TopologyCoordinate *tc);
 
-// 0x0014f0c8. Empties both boxes and the table.
+// 0x00151cd0. Empties both boxes, the table and the last polygon.
 void topology_clear_interest_bbox(TopologyCoordinate *tc);
 
-// 0x0014f120. Makes the interest box `pos` +/- `r`, and when that is not
+// 0x00151d30. Makes the interest box `pos` +/- `r`, and when that is not
 // inside the cached box, gathers a new cache: `pos` +/- (r + 0.5), grown
-// towards `pos + vel * s` for the largest s in 0.5, 0.25, ... (ten tries)
-// that keeps the box's diagonal under 32. `vel` may be NULL.
+// towards `pos + vel * s` for the first s in 0.15, 0.1125, 0.084375,
+// 0.06328125 that keeps the box's diagonal under 28.8, and s = 0 if none
+// does. `vel` may be NULL, and then the box is not grown.
 void topology_set_interest_bbox(TopologyCoordinate *tc, const bVector2 *pos,
                                 float r, const bVector2 *vel);
 
-// 0x00134f28. The bVector3 overload, which Car, the cameras and the movers
+// 0x00136e00. The bVector3 overload, which Car, the cameras and the movers
 // call: the same box, from pos's and vel's x and y.
 void topology_set_interest_bbox3(TopologyCoordinate *tc, const bVector3 *pos,
                                  float r, const bVector3 *vel);
 
-// 0x0014f418. The height of the ground under `pt`: the highest surface
-// below pt.z + 1, else the highest at all, else pt.z itself. `terrain`,
-// `normal` and `found` may each be NULL. The normal is four lanes, the
-// plane distance in the fourth; with no surface it is (0, 0, -1) and the
-// fourth lane is not written.
+// 0x00152070. The height of the ground under `pt`: the plane of the last
+// polygon found when (x, y) is still strictly inside it, whatever the
+// height; else the highest surface below pt.z + 1, else the highest at
+// all, else pt.z itself. `terrain`, `normal` and `found` may each be NULL.
+// The normal is four lanes, the plane distance in the fourth; with no
+// surface it is (0, 0, -1) and the fourth lane is not written.
 float topology_get_elevation(TopologyCoordinate *tc, const bVector3 *pt,
                              int32_t *terrain, bVector3 *normal,
                              int32_t *found);
 
-// 0x001c1210, GetVectorOnTrack: (x, y) and the height of the ground there,
+// 0x001cb350, GetVectorOnTrack: (x, y) and the height of the ground there,
 // probed from z 0 through a coordinate of its own. The AI debug views and
 // the spike strip use it.
 void get_vector_on_track(bVector3 *out, const bVector2 *in);
 
-// 0x0014f7e8. Is there any surface under (x, y)?
+// 0x00152558. Is there any surface under (x, y)?
 int topology_has_topology(TopologyCoordinate *tc, const bVector2 *xy);
 
-// 0x0014f830. Does segment a-b cross any cached polygon, from the side it
+// 0x001525a0. Does segment a-b cross any cached polygon, from the side it
 // faces?
 int topology_segment_intersects(TopologyCoordinate *tc, const bVector3 *a,
                                 const bVector3 *b, float r);
 
-// 0x0014f920. eConstraintType. BY_ROTATION turns the move: short of a wall
+// 0x001528b0. eConstraintType. BY_ROTATION turns the move: short of a wall
 // it keeps the length to `dist` before the crossing and lifts the end by
 // `lift`, scaled by how much of the move was cut; over a floor or under a
 // ceiling it puts the end `dist` off the plane. BY_SCALE shortens the move
@@ -331,30 +356,31 @@ int topology_constrain(TopologyCoordinate *tc, int type, int twoSided,
 
 // ---------------------------------------------------------- TopologyTree
 
-// 0x0014fb80. Empties the tree: no chunks, the list pointing at itself.
+// 0x00152b10. Empties the tree: no chunks, the list pointing at itself.
 void topotree_init(TopologyTree *t);
 
-// 0x0014fbb8 / 0x0014fc00. The pool: made with neither overflow nor
-// zeroing, and closed by destroying every TrackPolygon still listed.
+// 0x00152b48 / 0x00152b98. The pool: made with neither overflow nor
+// zeroing, and closed by destroying every TrackPolygon still listed. The
+// first also zeroes TopologyTreeUnused.
 void topotree_init_tree(TopologyTree *t);
 void topotree_close_tree(TopologyTree *t);
 
-// 0x0014fc78 / 0x0014fd98. One of the four chunks, header and all. 1 when
+// 0x00152c10 / 0x00152d30. One of the four chunks, header and all. 1 when
 // it was one of them. The loader writes -1 into every polygon's
 // TrackPolygonNumber.
 int topotree_loader(TopologyTree *t, uint8_t *chunk);
 int topotree_unloader(TopologyTree *t, const uint8_t *chunk);
 
-// 0x0014fe18. Rounds down to the 32-unit grid, through Q16.
+// 0x00152db0. Rounds down to the 32-unit grid, through Q16.
 float topotree_get_square_corner(float f);
 
-// 0x0014fe70. The leaf under (x, y), walking ten levels down from a
+// 0x00152e08. The leaf under (x, y), walking ten levels down from a
 // 32768-unit root at -16384. With `nearest`, an empty child is replaced by
 // the node's first non-empty one; without, it ends the walk with NULL.
 TopologyTreeSquare *topotree_get_square(const TopologyTree *t, float x,
                                         float y, int nearest);
 
-// 0x0014ffa0. Appends to `out`, up to `max`, the square's polygons whose
+// 0x00152f38. Appends to `out`, up to `max`, the square's polygons whose
 // boxes touch [bmin, bmax] and that no earlier square listed, marking each.
 int topotree_get_intersecting_polygons(const TopologyTree *t,
                                        TopologyTreePolygon **out, int max,
@@ -362,21 +388,23 @@ int topotree_get_intersecting_polygons(const TopologyTree *t,
                                        const bVector2 *bmin,
                                        const bVector2 *bmax);
 
-// 0x00150110. Destroys up to 101 TrackPolygons nobody holds.
+// 0x001530a8. Destroys up to 101 TrackPolygons nobody holds.
 void topotree_flush_unused(TopologyTree *t);
 
-// 0x001501b0 / 0x00150250. Take and release a reference, building the
+// 0x00153148 / 0x001531e8. Take and release a reference, building the
 // TrackPolygon on first use.
 TrackPolygon *topotree_assign(TopologyTree *t, TopologyTreePolygon *p);
 void topotree_unassign(TopologyTree *t, TrackPolygon *tp);
 
-// 0x00150260. Fills `out` with a referenced TrackPolygon for every polygon
-// under [bmin, bmax], from the up to four squares its corners fall in.
-// `max` is at most 128. Returns the count.
+// 0x001531f8. Fills `out` with a referenced TrackPolygon for every polygon
+// under [bmin, bmax], from every square of the 32-unit grid the box
+// touches, row by row -- and none at all unless the box is inside
+// (-32768, 32767) both ways. `max` is at most TOPOLOGY_MAX_POLYGONS.
+// Returns the count.
 int topotree_build(TopologyTree *t, TrackPolygon **out, int max,
                    const bVector2 *bmin, const bVector2 *bmax);
 
-// 0x00150420. Releases `n` references.
+// 0x001533c8. Releases `n` references.
 void topotree_remove(TopologyTree *t, TrackPolygon **table, int n);
 
 #endif // TOPOLOGY_H
