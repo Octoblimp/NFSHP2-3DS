@@ -5,9 +5,10 @@
 #include <citro3d.h>
 
 #include "camera.h"
-#include "cammover.h"
+#include "car.h"
 #include "geometry.h"
 #include "georender.h"
+#include "orbitcam.h"
 #include "texsrc.h"
 
 // The geometry bring-up viewer: one car out of CARS\*\GEOMETRY.BIN on the
@@ -84,14 +85,15 @@ typedef struct {
 
     // --- the camera. Not the viewer's own any more: this is the engine's
     // Camera (task 23) driven by a real CM_ORBIT_CAR CameraMover, orbiting
-    // a CamCarView parked at the current solid's AABB centre. So what is on
-    // screen is the shipped boom arm -- its acceleration limiter, its
-    // elevation clamp, its 8000-BAM field of view -- and not an
-    // approximation of it. The AABB still decides where the car is and how
-    // long the boom starts out.
+    // a stand-in Car parked at the current solid's AABB centre. So what is
+    // on screen is the shipped boom arm -- its acceleration limiter, its
+    // 8000-BAM field of view -- and not an approximation of it. Retail's
+    // mover has no elevation clamp, so the viewer keeps AngleV in range
+    // itself. The AABB still decides where the car is and how long the boom
+    // starts out.
     Camera              cam;
     OrbitCarCameraMover orbit;
-    CamCarView          carView;
+    Car                 standIn;
     float               centre[3];
     float               radius;
     float               dist;

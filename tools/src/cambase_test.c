@@ -21,10 +21,6 @@
 #include "emath.h"
 #include "eview.h"
 
-// The clock object's frame step. Only the orbit mover's thunk reads it, and
-// nothing here builds one.
-float RealTimeElapsed = 1.0f / 60.0f;
-
 #define NCAM 12
 #define NMOV 10
 

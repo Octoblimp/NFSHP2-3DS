@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-09-29), after the drive camera's Update (7b). `HANDOFF.md` is the running
+(2026-09-30), after the orbit mover's retail pass (7c). `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -47,10 +47,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Seventy-four cross-checkers pass, plus the table generators:
+Seventy-five cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -66,8 +66,9 @@ bui_check          FRONTB.BUN    1395 lines, 0 differ
 sndbank_check      30 banks,       908 lines, 0 differ   (20000 mutations, 0 disagree)
 bsnd_check         12 scenarios,  5157 lines, 0 differ   (25/25 mutations caught)
 emath_check         9 scenarios,  2418 lines, 0 differ   (42/42 mutations caught)
-camera_check        7 scenarios,  1251 lines, 0 differ   (52 caught, 7 equivalent)
-cambase_check       1588 ops,     5624 lines, 0 differ   (59/59 mutations caught; retail's image)
+camera_check        4 scenarios,   556 lines, 0 differ   (32 caught, 3 equivalent)
+cambase_check       1588 ops,     5624 lines, 0 differ   (61/61 mutations caught; retail's image)
+orbit_check         3416 ops,    28635 lines, 0 differ   (119 caught, 5 equivalent; retail's image)
 shake_check         4114 ops,    10604 lines, 0 differ   (95 caught, 3 equivalent; retail's image)
 drivecam_check     45598 ops,   105702 lines, 0 differ   (474 caught, 19 equivalent; retail's image)
 trackroute_check   11 scenarios,  1353 lines, 0 differ   (57 caught, 1 equivalent)
@@ -160,10 +161,9 @@ the data root `gamedata.c` resolves to on this machine, and the
 takes about ten minutes; `sndbank_check.py --mutate 20000` takes a couple of
 hours.
 
-`camera_check.py --mutate` reports "7 equivalent, 0 unexplained" rather than
-"7 survived": the seven are named in the script with an argument each, and
-three of them are uncatchable because the disc's velocity record is
-structurally zero. See `docs/formats/camera.md`. `trackroute_check.py
+`camera_check.py --mutate` reports "3 equivalent, 0 unexplained" rather than
+"3 survived": the three are named in the script with an argument each. They
+are uncatchable because the disc's velocity record is structurally zero. See `docs/formats/camera.md`. `trackroute_check.py
 --mutate` reads the same way and takes about four minutes.
 
 Open tasks: **7** (26-31 and 36, the full game). All four the user asked for mid-session are
@@ -723,8 +723,8 @@ and so replaced every boot.
    - CameraMover has retail's fifteen-slot vtable (`CameraMoverVtbl`),
      the destructor, "CM_UNKNOWN(?)", and UpdateCameraMovers and
      RenderCameraMovers (`update_camera_movers`, `render_camera_movers`).
-     The orbit mover sits on the vtable and is otherwise still the
-     demo's: its retail pass is step 16's.
+     The orbit mover sat on the vtable and was otherwise still the
+     demo's until 7c.
    - `cambase_check` runs retail's own code for all of it in RetailEmu:
      1588 ops, 5624 lines, 0 differ, and 59 of 59 mutations caught. It
      runs the static constructor at `0x0011bf70` itself, since RetailEmu
@@ -859,44 +859,35 @@ and so replaced every boot.
      BumperCameraMover::Update's wall code, calls the same two helpers
      and waits for the bumper camera.
 
-   **Next is 7c**: the orbit mover's retail pass. ChangeCameraMover (7d,
-   below) builds an OrbitCarCameraMover for most types, from a `Car *`.
-   `cammover.c`'s is still the demo's, which follows a CamCarView. The
-   listings are `out/orbit_ctor_retail.txt`, `orbit_update_retail.txt`,
-   `orbit_addjoy_retail.txt` and `orbit_joy_retail.txt` (out/ is ignored;
-   `retaildis.py` makes them again).
-   - The constructor (`0x00157e48`) is the demo's but for the offsets.
-     It ends with AddJoyHandlers. The destructor (`0x00158080`) calls
-     RemoveJoyHandlers first. Retail never writes TM (112).
-   - GetTarget (`0x001580e0`) returns the car's GeometryPosition (+80),
-     where the demo's returned Position. GetCarToFollow is `0x0015fb18`.
-   - Update (`0x00158298`, 1068 bytes) differs from the demo's three
-     ways:
-     - It returns at once while IsGameFlowPaused (`0x001680b8`):
-       pRaceCoordinator (gp-22216; the demo's gp-22720) is set and in
-       RCSTATE_PAUSE.
-     - FollowChopper follows `pCurrentWorld->Helicopter` (gp-22120, +24)
-       while its Plan (+728) is below 3 or is 4. That is ChopperPlan's
-       PURSUIT, HEAD_TO_STAKEOUT, AT_STAKEOUT and BOMBING_RUN. It reads
-       the CurrentPos (+832) and the matrix at +848 with its translation
-       cleared, and adds no boom offset. The demo's "mode word at
-       Player+584" was its Chopper's Plan: the demo's TopologyCoordinate
-       was 560 bytes and retail's is 704.
-     - The AngleV clamp to MinAngleV and MaxAngleV is gone.
-   - AddJoyHandlers (`0x00158100`) and RemoveJoyHandlers (`0x001581f8`)
-     register JoyHandler (`0x001586c8`) for events 46-54 on JoyPort and
-     set or clear HandlersAdded. The port's AddJoyHandler and
-     RemoveJoyHandler are in joyevent.c. JoyHandler's table is at
-     `0x002b1630`. NEXT_CAR and PREV_CAR step through Car+0 and +4 and
-     skip the World, whose CarList is the list's head.
-   - The statics are at gp-21720 .. gp-21696, with the demo's values.
-     OrbitBoomOffset is at `0x00334190`.
-   - geoview follows a CamCarView. It needs a Car, and a clamp of its
-     own on AngleV.
-   - camera_check.py models the demo's orbit mover. Its orbit scenarios
-     retire, and a RetailEmu checker like cambase_check takes over.
+   **7c, the orbit mover's retail pass, is done** (HANDOFF.md, Session
+   31, continued: the orbit mover's retail pass). `docs/formats/camera.md`,
+   "Retail's orbit mover", has the write-up.
+   - The mover moved out of `cammover.c` into `orbitcam.c` and
+     `orbitcam.h`, as `drivecam.c` holds CM_DRIVE. It follows a Car:
+     GetTarget (`0x001580e0`) is the car's GeometryPosition, and
+     GetCarToFollow is `0x0015fb18`. CamCarView is gone.
+   - The constructor (`0x00157e48`) ends with AddJoyHandlers, and the
+     destructor (`0x00158080`) calls RemoveJoyHandlers first. Both go
+     through `joyevent.c`, for events 46-54 on JoyPort. Neither checks for
+     a camera. TM is never written.
+   - Update (`0x00158298`) returns while IsGameFlowPaused (`0x001680b8`,
+     `is_game_flow_paused` in `race.c`). It follows World's Helicopter
+     while its Plan is below 3 (unsigned) or is 4, with no boom offset.
+     The AngleV clamp is gone.
+   - `chopper.h` lays out Chopper's head: Plan at 728, CurrentPos at 832,
+     Matrix at 848, counted from TOPOLOGY_SIZEOF. Nothing builds a chopper
+     until task 26, so Helicopter is NULL.
+   - The geometry viewer follows a stand-in Car and clamps AngleV itself.
+     It destroys its mover before building the next one, and in
+     geoview_free: each constructor takes nine of EventNodeSlotPool's 96
+     nodes, and the pool does not overflow.
+   - `orbit_check` runs retail's code in RetailEmu: 9 scenarios, 3416
+     ops, 28635 lines, 0 differ. Of 124 mutations, 119 are caught and 5
+     are equivalent. `camera_check` keeps only the Camera and base-mover
+     scenarios: 4 scenarios, 32 of 35 caught, 3 equivalent. Its two view
+     mutations moved to `cambase_check`, which catches 61 of 61.
 
-   **Then 7d**: Player::ChangeCameraMover (`0x00176ae8`, 2372 bytes)
+   **Next is 7d**: Player::ChangeCameraMover (`0x00176ae8`, 2372 bytes)
    and the Player camera functions around it. `out/player_ccm_retail.txt`
    is the listing (`python tools/retaildis.py ChangeCameraMover__6Playerib`).
    - It builds the mover for a view. The candidates are DriveCameraMover
@@ -989,7 +980,10 @@ and so replaced every boot.
      builds nothing until its class is ported, and say so in the source.
    - Check Player's retail layout (`docs/retail_layout.txt`) before
      reading `pCameraMover` and the settings in place.
-   - The orbit path builds 7c's retail orbit mover.
+   - The orbit path builds 7c's mover: bMalloc 208, then `orbit_init`
+     (`orbitcam.h`) with the view, the car and JOY port 1. Delete
+     movers through their vtable's destructor, so the orbit's joystick
+     handlers come off (see the geometry viewer, above).
 
    Step 7 as a whole: Player and the chase cameras. The core is
    DriveCameraMover (CM_DRIVE). Its constructor is `0x0015c258` (420

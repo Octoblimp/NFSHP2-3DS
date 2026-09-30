@@ -7,19 +7,22 @@ A `CameraMover` is what hands it that matrix, and there are eighteen kinds.
     Camera.obj        0x00153a20 .. 0x00154380     2.4 KB
     CameraMover.obj   0x00154380 .. 0x0015c4d0    32.3 KB, of which this
                                                   covers the base class,
-                                                  CM_ORBIT_CAR and CM_DRIVE
-                                                  but its Update; see "The
-                                                  drive camera"
+                                                  CM_ORBIT_CAR and CM_DRIVE;
+                                                  see "Retail's orbit mover"
+                                                  and "The drive camera"
     the shake         0x00152860 .. 0x001539f4    the camera half; see
                                                   "The camera shake"
 
 The port is `3DS Files/source/camera.c` and `3DS Files/source/cammover.c`,
-cross-checked by `tools/camera_check.py` (1251 transcript lines, seven of
+cross-checked by `tools/camera_check.py` (an independent model, three of
 its mutations equivalent and argued for below) and, for what retail
 changed, by `tools/cambase_check.py`, which runs retail's own code (see
 "Retail" below). `drivecam.c` has the drive camera, cross-checked by
-`tools/drivecam_check.py` on retail's image. Most addresses here are the
-demo's; "Retail", the shake and the drive camera have retail's. It sits on
+`tools/drivecam_check.py` on retail's image, and `orbitcam.c` the orbit
+camera, cross-checked by `tools/orbit_check.py` on retail's image (see
+"Retail's orbit mover"). Most addresses here are the demo's; "Retail",
+the orbit mover's retail pass, the shake and the drive camera have
+retail's. It sits on
 `emath.c`
 (`docs/formats/emath.md`), and every matrix convention here is that layer's:
 row-major, translation in row 3, a point is a row on the left, angles are
@@ -44,7 +47,7 @@ BAMs with 65536 to the turn.
 | `0x1549e0` | `AddJoyHandlers`, nine of them |
 | `0x154ac0` | where `HandlersAdded` becomes 1 |
 | `0x154b78` | `OrbitCarCameraMover::Update` |
-| `0x154bb0` | the `FollowChopper` branch, to `0x154c94`; not ported |
+| `0x154bb0` | the `FollowChopper` branch, to `0x154c94` |
 | `0x154d0c` | the `vadd.xyzw` that adds the boom offset |
 | `0x154ff0` | `OrbitCarCameraMover::JoyHandler` |
 | `0x2950e0` | its nine-entry jump table |
@@ -198,6 +201,11 @@ and elevation `AngleV`, in the car's own space, and the two angles drift
 toward their desired values at a bounded acceleration. It is what the car
 select screen and the replay orbit use.
 
+This section is the demo's mover, with the demo's addresses. The port
+follows retail's now (`orbitcam.c`); "Retail's orbit mover", under
+"Retail" below, has what changed. In short: `Update` makes the pause test
+itself, follows the chopper, and no longer clamps `AngleV`.
+
 What the constructor ships:
 
 | field | value | |
@@ -205,7 +213,7 @@ What the constructor ships:
 | `Radius`, `DesiredRadius` | 5.0 | |
 | `MinRadius`, `MaxRadius` | 1.0, 1000.0 | |
 | `AngleH` | 26000 | 143 degrees |
-| `AngleV`, `DesiredAngleV` | `0xf230` = 61992 | 340.5 degrees |
+| `AngleV`, `DesiredAngleV` | `0xf230` = 62000 | 340.6 degrees |
 | `MinAngleV`, `MaxAngleV` | `0xc738` = 51000, `0xf8f4` = 63732 | 280 .. 350 degrees |
 | `RadiusMultiplier` | 1.0 | |
 | `MaxRadiusVel` | 0.4 | stored, never read |
@@ -214,8 +222,8 @@ What the constructor ships:
 
 `Update` at `0x154b78`, in order:
 
-1. `IsGameFlowPaused()` -- returns immediately if so. The port leaves this
-   test to the caller, because `gameflow.c` owns the answer.
+1. `IsGameFlowPaused()` -- returns immediately if so. The demo's port left
+   this test to the caller; the retail port makes it.
 2. `T(-GeometryPosition)`, with `LookHeight` (0.0) off z, then multiplied by
    the transpose of the car's `BodyMatrix`. With no car: identity with
    `-TargetHeight` (0.3) in z. Two tweakables for the same idea, and the car
@@ -237,6 +245,7 @@ What the constructor ships:
    of 100 approaching 65000 walks down through zero. `ApproachAngleV` is 0
    on the disc.
 8. Clamp `AngleV` to `[MinAngleV, MaxAngleV]` -- max first, then min.
+   Retail has no such step.
 9. `AngleH += HRotationSpeed`.
 10. `eRotateZ(angleH)`, `eRotateY(angleV)`, `eTranslate(radius, 0, 0)`.
 11. `eRotateX(16384)` then `eRotateY(0xc000)`: the change of basis from the
@@ -252,8 +261,8 @@ Three things in that list are worth pulling out.
 orbit therefore spins faster on a machine that draws more frames. That is the
 disc's behaviour on a fixed console; whether the 3DS should keep it is task
 28's question, and the zoom has the same shape -- 1% a frame compounds about
-fourfold in a second at 139 FPS, which is what the emulator runs this build
-at.
+fourfold in a second at 139 FPS, which is what the emulator ran this build at
+while its frame limit was off, and 1.8-fold at 60.
 
 **`TweakOrbitFOV` is not behind `UseTweakables`.** It lands on the camera
 every single frame, so the constructor's `InGameFOV` of 13020 (about 71
@@ -294,10 +303,9 @@ geometry viewer's pad is wired the same way for that reason.
 
 ## Retail
 
-The port follows retail's `Camera` and `CameraMover` base; the orbit mover
-is still the demo's until the car selector needs it (step 16). Retail has
-no symbols, so the names of what is new are the port's. `gp` is
-`0x003358f0` there.
+The port follows retail's `Camera`, its `CameraMover` base and its orbit
+mover. Retail has no symbols, so the names of what is new are the port's.
+`gp` is `0x003358f0` there.
 
 | address | what |
 |---------|------|
@@ -389,13 +397,102 @@ recorders, shows which mover each loop reached, and whether a destructor
 went through the vtable.
 
     python tools/cambase_check.py            # 7 scenarios, 5624 lines, 0 differ
-    python tools/cambase_check.py --mutate   # 59 mutations, 59 caught
+    python tools/cambase_check.py --mutate   # 61 mutations, 61 caught
 
 `camera_check` keeps its independent model of the same code, updated to
-retail's. It has no mutation that sets `ClearVelocity` in the constructor:
-the constructor's two `SetCameraMatrix` calls clear the flag whatever it
-held, so only a camera built while frozen can show it, and `cambase_check`
-builds one.
+retail's. What it adds is the camera's six setters, which are inline in
+the image and have no address to run. It has no mutation that sets
+`ClearVelocity` in the constructor: the constructor's two
+`SetCameraMatrix` calls clear the flag whatever it held, so only a camera
+built while frozen can show it, and `cambase_check` builds one. Its model
+of the demo's orbit mover is retired; `orbit_check` runs retail's.
+
+### Retail's orbit mover
+
+`orbitcam.c` is retail's `OrbitCarCameraMover`, which the demo section
+above describes as the demo had it. The record is still 208 bytes.
+
+| address | what |
+|---------|------|
+| `0x00157e48` | `OrbitCarCameraMover::OrbitCarCameraMover(ViewID, Car *, port)` |
+| `0x00158080` | the destructor |
+| `0x001580e0` | `GetTarget` |
+| `0x0015fb18` | `GetCarToFollow` |
+| `0x00158100`, `0x001581f8` | `AddJoyHandlers`, `RemoveJoyHandlers` |
+| `0x00158298` | `Update` |
+| `0x001586c8` | `JoyHandler`; its jump table is `0x002b1630` |
+| `0x002b1c50` | the vtable |
+| `0x00154140`, `0x001541e8` | `AddJoyHandler`, `RemoveJoyHandler`, the joystick layer's |
+| `0x001680b8` | `IsGameFlowPaused` (`race.c`) |
+| gp-21720 .. gp-21696 | the nine statics: `UseTweakables`, `TweakRadius`, `TweakAngleH`, `TweakAngleV`, `LookHeight`, `InGameFOV`, `FrontEndFOV`, `TargetHeight`, `TweakOrbitFOV` |
+| `0x00334190` | the boom-offset quadword |
+| gp-31272 | `0.4`, `MaxRadiusVel` |
+| gp-31260, gp-31256 | `0.99` and `1.01`, the zoom multipliers |
+| gp-19596 | `RealTimeElapsed`, which the vtable's `Update` passes on |
+
+What changed from the demo:
+
+- **It follows a `Car`.** `GetTarget` is the car's `GeometryPosition`, or
+  the camera's `Target` with no car. `GetCarToFollow` hands back the car.
+  The next and previous car keys walk the car's own links at 0 and 4.
+- **`Update` makes the pause test itself**, through `IsGameFlowPaused`,
+  which reads the race coordinator's state. With no coordinator nothing is
+  paused.
+- **`FollowChopper` is live.** When it is set and the world has a
+  `Helicopter` whose `Plan` is below 3 (compared unsigned) or exactly 4,
+  the chopper is followed instead of the car. Its `CurrentPos` is the
+  point, and its `Matrix` is the body with row 3's x, y and z zeroed but
+  its w kept. The chopper path adds **no** boom offset; the car path adds
+  it with `vadd.xyzw`, all four lanes. Any other plan, or no helicopter,
+  falls back to the car. Event 54 toggles the flag.
+- **No `AngleV` clamp.** `AngleV += VRotationSpeed` and the approach walk
+  are all there is, so the angle wraps. The constructor still sets
+  `MinAngleV` and `MaxAngleV`, but `Update` never reads them. The geometry
+  viewer clamps for itself (see "On the emulator").
+- **The joystick handlers are real.** `AddJoyHandlers` registers
+  `JoyHandler` for events 46 to 54 on `JoyPort`, then sets
+  `HandlersAdded`. `RemoveJoyHandlers` takes them off and clears it. Each
+  returns at once if the flag already says so. The constructor clears the
+  flag and adds them; the destructor removes them.
+- **The constructor and destructor write the camera** unless
+  `StopUpdating`. The constructor writes `CarNotToRender` = NULL,
+  `RenderDash` = 0 and `FieldOfView = InGameFOV`; the destructor writes
+  `FocalDistance` = `DepthOfField` = 0. Neither checks for a camera, so
+  a detached mover (`ViewID` -1) is only safe to build or destroy while
+  frozen. The port keeps that, and the checker does exactly that.
+- **`TM` is never written.** The port leaves it alone too, and the checker
+  shows the fill pattern on both sides.
+
+The rest is the demo's, and it is confirmed on retail:
+- the zoom's exact compare against 1.0
+- the speed approach: a step, then a `movz` on a compare of the gap
+  against the acceleration, both signed
+- the `ApproachAngleV` walk on unsigned halfwords, snapping under 81 and
+  stepping by 80
+- the tweakables applied only at the rotations
+- `TweakOrbitFOV`, `TargetDistance = FocalDistance = Radius` and a depth of
+  field of 8.0 written every frame
+
+`tools/orbit_check.py` runs retail's own code in `mipsemu`:
+- the constructor, the destructor and `Update`, through retail's vtable
+  where the game goes through it
+- `GetTarget`, `GetCarToFollow` and the joystick handler, with retail's
+  `CameraMover` base, `SetCameraMatrix` and `IsGameFlowPaused` under them
+
+`tools/src/orbit_test.c` runs the port over the same script.
+`AddJoyHandler` and `RemoveJoyHandler` are stubbed on both sides to print
+their arguments. The script lays out the world, its cars and a chopper in
+memory. The scenarios are:
+- construction and every vtable slot
+- every event from 40 to 60 at five values, in and out of `FEMode`
+- the chopper against every plan
+- the pause across coordinator states
+- the clamps and approaches at their edges
+- the tweakables
+- three random walks of 200, 800 and 1500 frames
+
+    python tools/orbit_check.py            # 9 scenarios, 3416 ops, 28635 lines, 0 differ
+    python tools/orbit_check.py --mutate   # 124 mutations, 119 caught, 5 equivalent
 
 ## The camera shake
 
@@ -1040,54 +1137,51 @@ The nineteen equivalent mutants:
 
 Each of these is in the source as a comment at the point it happens.
 
-* **No joystick event bus**, so `AddJoyHandlers` registers nothing and
-  `HandlersAdded` stays 0 -- which is the honest answer to "have the handlers
-  been added". The table above is what the 3DS input layer calls directly.
-* **`FollowChopper` is not ported.** `0x154bb0..0x154c94` swaps the followed
-  car for the police chopper and gates on a mode word at `Player+584`. There
-  is no `Chopper` until task 26, so the port always takes the car path.
-* **`TM` is cleared by the port's constructor**, where the disc leaves it as
-  whatever was in the allocation. Nothing reads it; clearing it makes the
-  state printable.
 * **The "JollyRancher" debug feed** at the top of `SetCameraMatrix` is not
   ported: if the pointer at `0x2f2870` is non-null the matrix comes from a
   network debug server with its translation row scaled by 0.01. It is null
   unless a debug server answered at boot.
-* **`IsGameFlowPaused` and `RealTimeElapsed`** are the caller's business in
-  the port: `orbit_update` takes `elapsed` as an argument so the checker can
-  drive it.
+* **`orbit_update` takes `elapsed` as an argument.** The image's `Update`
+  reads `RealTimeElapsed` itself. The vtable's `Update` passes it, so the
+  game sees the image's behaviour, and the geometry viewer and the
+  checker hand in their own.
+
+The demo port's other four are gone with the retail pass. The joystick
+handlers are registered through the port's `AddJoyHandler`, `FollowChopper`
+follows `World`'s `Helicopter`, `TM` is left as the allocation had it, and
+`Update` makes its own `IsGameFlowPaused` test. Nothing builds a chopper
+yet (task 26), so `Helicopter` is NULL and the car path is the one taken.
 
 ## Cross-check
 
 `tools/camera_check.py` drives `tools/src/camera_test.c` and an independent
 Python model -- the model written from the listings, not from the C -- through
-seven scenarios and diffs the transcripts line by line.
+four scenarios and diffs the transcripts line by line.
 
-    python tools/camera_check.py            # 7 scenarios, 1251 lines, 0 differ
-    python tools/camera_check.py --mutate   # 59 mutations, 52 caught,
-                                            # 7 equivalent, 0 unexplained
+    python tools/camera_check.py            # 4 scenarios, 556 lines, 0 differ
+    python tools/camera_check.py --mutate   # 35 mutations, 32 caught,
+                                            # 3 equivalent, 0 unexplained
 
-The scenarios are: the constructor and the copy constructor; a hand-built
-matrix with a known decomposition; a rotating car through the boom; the zoom
-multiplier held and released; the angle clamps, including an inverted
-`MinAngleV`/`MaxAngleV` window; the acceleration limiter at gaps of
-`accel - 1`, `accel` and `accel + 1`; and enable/disable, which covers
-constructed, disabled, disabled twice, re-enabled, enabled twice, and both
-under `StopUpdating`.
+The scenarios are: the constructor and the copy constructor; ten frames of
+`SetCameraMatrix` over turning, moving matrices, then the scalars moved, the
+field of view wrapped both ways, the fourth column, a velocity clear and a
+frozen camera; the type names over -1 .. 18 and a detached mover; and
+enable/disable, which covers constructed, disabled, disabled twice,
+re-enabled, enabled twice, and both under `StopUpdating`.
 
-Seven mutations survive and each one has an argument for why it must:
+Its orbit scenarios went with the retail pass (`orbit_check` runs retail's
+mover), and so did four of the seven equivalent mutations, which were the
+orbit's. Two mutations that only a mover on a view other than 0 could catch
+went to `cambase_check`. Three survive, and each has an argument for why
+it must:
 
 | mutation | why it cannot be caught |
 |----------|------------------------|
-| `fov-delta-signed`, `fov-velocity-rounds`, `fov-delta-reversed` | the six scalar velocities are structurally zero; see above. All 44 velocity records measure `fov 0`. |
-| `approach-inclusive` (`<` to `<=`) | at a gap of exactly `accel` the step lands exactly on `want`, so both arms agree. The scenario walks `accel-1`, `accel`, `accel+1`. |
-| `approach-threshold-80` (`< 81` to `< 80`) | the same argument one layer up: `1000 + 80 == 1080` whether it is snapped to or stepped onto. |
-| `radius-clamped-before-copy` | `Radius` is a copy of `DesiredRadius` put through the same two compares in the same order, so clamping either one first gives the same pair. |
-| `target-distance-desired` | and for the same reason the two are equal by the time `Update` reads them. The zoom transcript prints both every frame and they never disagree. |
+| `fov-delta-signed`, `fov-velocity-rounds`, `fov-delta-reversed` | the six scalar velocities are structurally zero; see above. Every velocity record measures `fov 0`. |
 
 An equivalent mutant left in a mutation list is a test that can never pass, so
 the list names them explicitly and the runner reports "0 unexplained" rather
-than "7 survived".
+than "3 survived".
 
 ## On the emulator
 
@@ -1119,9 +1213,23 @@ forward) turned into citro3d's by negating rows 1 and 2:
 
     powershell -File tools/run_azahar_geo.ps1 -Cars 2 -Solids 3
 
-The zoom hold in that script is deliberately short. Azahar runs this build at
-about 139 FPS, and 1% a frame is a factor of four in a second -- the eye ends
-up inside the car. That is the mover being per-frame, not the harness being
+Since 7c the mover is retail's, following a stand-in `Car` whose
+GeometryPosition, Position and BodyMatrix the viewer sets. Retail's
+`Update` has no `AngleV` clamp (see "Retail's orbit mover"). So
+`cam-elev-clamped` now shows the viewer's own clamp: after each `Update`
+it holds `AngleV` to the mover's `MinAngleV` and `MaxAngleV` and stops the
+vertical speed there. The viewer also destroys its mover before it builds
+the next one, and in `geoview_free`. Each constructor takes nine of
+EventNodeSlotPool's 96 nodes for its joystick handlers, and the pool does
+not overflow, so about ten car changes would otherwise leave
+`bSlotOMalloc` returning NULL. A run with `-Cars 14` (13 rebuilds) on
+2026-09-30 drew all fourteen cars at 60 FPS with 0 textures missing. Its
+`cam-elev-clamped` is the top-down view, not flipped over, and its zoom
+creep measured 0.007/255.
+
+The zoom hold in that script is deliberately short. Azahar ran this build at
+about 139 FPS while its frame limit was off, and 1% a frame is a factor of
+four in a second there (1.8 at 60 FPS) -- the eye ends up inside the car. That is the mover being per-frame, not the harness being
 wrong, and it is the clearest demonstration of the frame-rate coupling that
 task 28 has to decide about.
 

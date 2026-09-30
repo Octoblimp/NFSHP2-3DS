@@ -698,6 +698,8 @@ MUTATIONS = [
       "    cam->CurrentKey.FarZ = 5000.0f;"),
     M("mctor_no_vtbl", MOVC, "    m->vtbl = &CameraMoverBaseVtbl;\n    m->Type",
       "    m->Type"),
+    M("mctor_view_zero", MOVC, "    v = eGetView(viewID);", "    v = eGetView(0);"),
+    M("mctor_pview_zero", MOVC, "    m->pView = v;", "    m->pView = eGetView(0);"),
     M("mctor_player", MOVC, "    m->pPlayer = 0;\n", ""),
     M("mctor_enabled", MOVC, "    m->Enabled = 0;\n    m->pPlayer", "    m->pPlayer"),
     M("mctor_detached_cam", MOVC, "        m->pCamera = 0;\n", ""),

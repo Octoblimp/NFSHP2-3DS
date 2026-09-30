@@ -35,3 +35,9 @@ int32_t racecoordinator_is_replay_demo_mode(const RaceCoordinator *rc)
 {
     return racecoordinator_get_current_state(rc) == RCSTATE_REPLAY_DEMO_MODE;
 }
+
+int32_t is_game_flow_paused(void)
+{
+    return pRaceCoordinator != NULL
+        && racecoordinator_get_current_state(pRaceCoordinator) == RCSTATE_PAUSE;
+}

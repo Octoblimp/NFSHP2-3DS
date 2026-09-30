@@ -10238,3 +10238,128 @@ Retail's GetTarget (`0x001580e0`) returns the car's GeometryPosition
 flow is paused, and follows `pCurrentWorld->Helicopter`. Then 7d:
 ChangeCameraMover and CycleDriveCameraPOVIndex (`0x001786d0`), with the
 drive and orbit paths ported and the other seven movers as seams.
+
+## Session 31, continued (2026-09-30) -- the orbit mover's retail pass (step 7c)
+
+This is 7c: OrbitCarCameraMover as retail has it. Player::ChangeCameraMover
+(7d) builds one for most view types, from a `Car *`.
+
+### The port
+
+The orbit mover moved out of `cammover.c` into `orbitcam.c` and
+`orbitcam.h`, as `drivecam.c` holds CM_DRIVE. So the base's checkers,
+cambase_check and camera_check, no longer need World, the joystick layer
+and the race coordinator just to compile `cammover.c`.
+- **The constructor** (`0x00157e48`) is the demo's but for the offsets and
+  the car. It ends with AddJoyHandlers. **The destructor** (`0x00158080`)
+  calls RemoveJoyHandlers first. Neither checks for a camera, so a
+  detached mover is only safe while CameraStopUpdating is set. Retail
+  never writes TM (112), and the port no longer clears it.
+- **GetTarget** (`0x001580e0`) is the car's GeometryPosition (+80), or
+  the camera's Target with no car. **GetCarToFollow** is `0x0015fb18`.
+- **Update** (`0x00158298`) differs from the demo's three ways:
+  - It returns at once while IsGameFlowPaused (`0x001680b8`). That is
+    `is_game_flow_paused` in `race.c`: pRaceCoordinator is set and in
+    RCSTATE_PAUSE.
+  - FollowChopper follows `pCurrentWorld->Helicopter` while its Plan is
+    below 3 (compared unsigned) or is 4. It reads the CurrentPos (+832)
+    and the matrix at +848 with its translation cleared, and adds no boom
+    offset.
+  - The AngleV clamp is gone. MinAngleV and MaxAngleV are stored and
+    never read.
+- **AddJoyHandlers** (`0x00158100`) and **RemoveJoyHandlers**
+  (`0x001581f8`) register JoyHandler for events 46-54 on JoyPort, through
+  `joyevent.c`'s AddJoyHandler and RemoveJoyHandler, and set or clear
+  HandlersAdded.
+- **JoyHandler** (`0x001586c8`) is the demo's nine-way jump. NEXT_CAR and
+  PREV_CAR step through the car's links at 0 and 4 and skip the World,
+  whose CarList is the list's head.
+- The vtable is retail's `0x002b1c50`. It shares five of the base's
+  slots, which `cammover.h` now exports as `camera_mover_get_camera_info`,
+  `_get_pov`, `_is_exterior_view`, `_is_looking_back` and
+  `_get_wall_gap`.
+
+`chopper.h` lays out the head of the police helicopter, as far as the
+orbit mover reads it: Plan at 728, CurrentPos at 832 and the Matrix at
+848. It is task 26's class. Its layout check counts from
+TOPOLOGY_SIZEOF, since the TopologyCoordinate's table widens on a 64-bit
+host, and asserts 728 only where pointers are 4 bytes. Nothing builds a
+chopper yet, so Helicopter stays NULL and the car path is the one taken.
+
+`cammover.h` has lost CamCarView, the demo port's stand-in for a car.
+`drivecam.h`'s comment now says ChangeCameraMover is 7d.
+
+**The geometry viewer** follows a stand-in `Car` now, with its
+GeometryPosition, Position and BodyMatrix set. It clamps AngleV itself
+after each Update, to the mover's MinAngleV and MaxAngleV, and stops the
+vertical speed there so the ramp starts again from rest. It also
+destroys its mover before building the next one, and in geoview_free.
+Retail's constructor takes nine nodes from the 96 in EventNodeSlotPool,
+which does not overflow, so about ten car changes would otherwise have
+run the pool dry. The retail scanner table maps no button to events
+46-54, so the handlers never fire on the 3DS.
+
+### The checks
+
+`orbit_check.py` runs retail's own code in RetailEmu: the constructor, the
+destructor and Update through retail's vtable, GetTarget, GetCarToFollow
+and JoyHandler. Under them run retail's CameraMover base, SetCameraMatrix,
+the matrix layer and IsGameFlowPaused, over retail's eView table.
+`tools/src/orbit_test.c` runs the port over the same script. Both sides
+stub AddJoyHandler and RemoveJoyHandler to print their arguments. The
+script lays out the World, six cars, a Chopper and a race coordinator in
+memory, and every camera and mover starts from a `0xa5` fill.
+
+The scenarios:
+- construction and every vtable slot
+- every event from 40 to 60 at five values, in and out of FEMode, with
+  the car list walked both ways past its head
+- the chopper against every plan
+- the pause across coordinator states
+- the clamps and approaches at their edges
+- the tweakables
+- three random walks of 200, 800 and 1500 frames
+
+9 scenarios, 3416 ops, 28635 lines, 0 differ. Of 124 mutations, 119 are
+caught and 5 are equivalent:
+- the destructor's own vtable store, which nothing reads before the
+  base's
+- multiplying by exactly 1.0f
+- the speed approach at a gap of exactly the acceleration, and the
+  AngleV walk at a gap of exactly 80, which land on the target either way
+- TargetDistance from DesiredRadius, which equals Radius by then
+
+The first pass left four unexplained:
+- The two zoom mutations changed the constant's last hex digit by one,
+  which rounds back to the same float. They step one ULP now.
+- The constructor's clears of CarNotToRender and RenderDash were only
+  ever seen on a camera already holding zero. A new `N` op writes the
+  camera's two words first, and a new `P` op prints the camera after the
+  constructor.
+
+`camera_check.py` loses its model of the demo's orbit mover. It keeps the
+Camera and base-mover scenarios: 4 scenarios, 556 lines, 0 differ. Of 35
+mutations, 32 are caught and 3 are equivalent. Its first pass left two
+unexplained, `mover-view-zero` and `mover-pview-zero`: only a mover on a
+view other than 0 shows them, and its only such movers were the orbit's.
+They moved to `cambase_check` as `mctor_view_zero` and
+`mctor_pview_zero`, and both are caught there, 61 of 61.
+`cambase_test.c` loses a clock definition only the orbit needed.
+
+`docs/formats/camera.md` has "Retail's orbit mover", under "Retail". Its
+"Divergences from the disc" and "Cross-check" sections no longer describe
+the demo port.
+
+The whole chain in CONTINUE.md, orbit_check included, passes: 79
+commands, 0 failed, 1021 s. On Azahar (Speed 100%, 60 FPS),
+`run_azahar_geo.ps1 -Cars 14` rebuilds the mover 13 times and draws all
+fourteen cars, with 0 textures missing. `cam-elev-clamped` is the
+top-down view, held by the viewer's clamp, and the zoom creep measures
+0.007/255. camera.md's "On the emulator" says so.
+
+### Next
+
+7d: Player::ChangeCameraMover (`0x00176ae8`, 2372 bytes) and
+CycleDriveCameraPOVIndex (`0x001786d0`), with the drive and orbit paths
+ported and the other seven movers as named seams. CONTINUE.md, step 7d,
+has what is read so far.

@@ -302,13 +302,14 @@ static void frame_camera(GeoView* v)
     // Park the stand-in car on the AABB centre and give the mover a boom
     // range to work in. MinRadius/MaxRadius are the mover's own clamp, so
     // the zoom stops where the viewer says rather than where the disc's
-    // 1.0 .. 1000.0 defaults would.
-    v->carView.GeometryPosition.x = v->centre[0];
-    v->carView.GeometryPosition.y = v->centre[1];
-    v->carView.GeometryPosition.z = v->centre[2];
-    v->carView.GeometryPosition.pad = 0.0f;
-    v->carView.Position = v->carView.GeometryPosition;
-    eIdentity(&v->carView.BodyMatrix);
+    // 1.0 .. 1000.0 defaults would. The mover reads the car's
+    // GeometryPosition and BodyMatrix and nothing else.
+    v->standIn.State.GeometryPosition.x = v->centre[0];
+    v->standIn.State.GeometryPosition.y = v->centre[1];
+    v->standIn.State.GeometryPosition.z = v->centre[2];
+    v->standIn.State.GeometryPosition.pad = 0.0f;
+    v->standIn.State.Position = v->standIn.State.GeometryPosition;
+    eIdentity(&v->standIn.State.BodyMatrix);
 
     orbit_set_min_radius(&v->orbit, v->radius * 0.6f);
     orbit_set_max_radius(&v->orbit, v->radius * 40.0f);
@@ -319,6 +320,19 @@ static void frame_camera(GeoView* v)
 // The mover holds pointers into the GeoView, so it is rebuilt whenever the
 // struct is cleared or a new car is framed rather than being set up once.
 //
+// Retail's constructor ends with AddJoyHandlers, nine event nodes out of the
+// 96 in EventNodeSlotPool, which does not overflow. So the old mover is
+// destroyed before the new one is built, and by geoview_free: about ten car
+// changes would otherwise run the pool dry. A zeroed GeoView has no vtable,
+// which is how a mover that was never built is told apart.
+static void destroy_camera(GeoView* v)
+{
+    if (v->orbit.base.vtbl != NULL) {
+        orbit_destroy(&v->orbit);
+        v->orbit.base.vtbl = NULL;
+    }
+}
+
 // The mover goes on view 0's list and takes its camera from it. The viewer
 // is that view's only user, and the struct the last mover lived in may have
 // been cleared since, so the list is started over rather than unlinked from.
@@ -326,12 +340,13 @@ static void reset_camera(GeoView* v)
 {
     eView* view = eGetView(EVIEW_ID_FRONTEND);
 
+    destroy_camera(v);
     camera_init(&v->cam);
     view->CameraMoverList.next = &view->CameraMoverList;
     view->CameraMoverList.prev = &view->CameraMoverList;
     view->pCamera = &v->cam;
-    orbit_init(&v->orbit, EVIEW_ID_FRONTEND, &v->carView, 0);
-    // The near plane the mover sets is 0.5 and its far plane 5000, which are
+    orbit_init(&v->orbit, EVIEW_ID_FRONTEND, &v->standIn, 0);
+    // The near plane the mover sets is 0.5 and its far plane 10000, which are
     // the disc's and are wrong for a 4.5-metre car seen from 6 metres only
     // in that they waste depth range. Left alone: they are what the camera
     // ships with, and the depth buffer has 24 bits to spend.
@@ -394,6 +409,7 @@ bool geoview_load(GeoView* v, int index)
 
 void geoview_free(GeoView* v)
 {
+    destroy_camera(v);
     unload(v);
     if (v->hasCarPack) {
         texsrc_close(&v->carPack);
@@ -489,9 +505,23 @@ void geoview_input(GeoView* v, uint32_t kDown, uint32_t kHeld, int cpx,
         orbit_set_desired_v_rotation_speed(&v->orbit, 0);
     }
 
-    // One frame of the real mover. IsGameFlowPaused is the caller's test on
-    // the disc and there is nothing to pause here.
+    // One frame of the real mover. Its IsGameFlowPaused test finds no race
+    // coordinator here, so it always runs.
     orbit_update(&v->orbit, dt);
+
+    // The demo's mover clamped AngleV to MinAngleV .. MaxAngleV after the
+    // step; retail's dropped the clamp and leaves the range to whoever sets
+    // the speeds. So the viewer clamps, after the fact, and stops the
+    // vertical speed so the ramp starts again from rest: the frame that hits
+    // the stop overshoots it by one step, and each held frame after that by
+    // MaxRotationAccel, 24 BAMs.
+    if (v->orbit.AngleV > v->orbit.MaxAngleV) {
+        v->orbit.AngleV = v->orbit.MaxAngleV;
+        v->orbit.VRotationSpeed = 0;
+    } else if (v->orbit.AngleV < v->orbit.MinAngleV) {
+        v->orbit.AngleV = v->orbit.MinAngleV;
+        v->orbit.VRotationSpeed = 0;
+    }
 }
 
 // --------------------------------------------------------------------- draw

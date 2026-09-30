@@ -7,7 +7,7 @@
 // corrections, CalculateLookbackAngle and the accessors. The demo's
 // GetBoomDistToWall and its two line-segment helpers are still in the image
 // with no caller. Nothing builds a drive camera before
-// Player::ChangeCameraMover (7c).
+// Player::ChangeCameraMover (7d).
 //
 // Retail against the demo:
 // - The TopologyCoordinate the mover carries is retail's 704 bytes, not the

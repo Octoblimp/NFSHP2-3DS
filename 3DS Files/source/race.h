@@ -179,4 +179,10 @@ RCState racecoordinator_get_current_state(const RaceCoordinator *rc);
 // The only one of the Is* tests the image keeps out of line.
 int32_t racecoordinator_is_replay_demo_mode(const RaceCoordinator *rc);
 
+// IsGameFlowPaused, 0x001680b8 in GameFlow.obj (the demo's 0x001636c8,
+// the same code): pRaceCoordinator is set and in RCSTATE_PAUSE. It lives
+// here because it reads nothing else, and gameflow.c's boot flow does not
+// need the race.
+int32_t is_game_flow_paused(void);
+
 #endif
