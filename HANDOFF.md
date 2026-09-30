@@ -10363,3 +10363,98 @@ top-down view, held by the viewer's clamp, and the zoom creep measures
 CycleDriveCameraPOVIndex (`0x001786d0`), with the drive and orbit paths
 ported and the other seven movers as named seams. CONTINUE.md, step 7d,
 has what is read so far.
+
+## Session 31, continued (2026-09-30) -- Player's camera functions (step 7d)
+
+This is 7d, and it closes step 7: Player::ChangeCameraMover and the five
+small camera functions around it, as retail has them.
+
+### The port
+
+`playercam.c` and `playercam.h` are new. They sit apart from `player.c`
+because they build movers, and `player.c` goes into harnesses that have
+no use for `drivecam.c` and `orbitcam.c`.
+- **ChangeCameraMover** (`0x00176ae8`, 2372 bytes) first deletes the demo
+  and countdown coordinators and the NIS coordinator, and clears each
+  pointer. Only then does it return if the mover is already of that type.
+  The car is MyCar, or the first link of World's CarList, unchecked. With
+  `keep`, the old mover is disabled and saved, and the one saved before
+  it moves to the second slot. Without `keep` it is deleted through its
+  virtual destructor. The switch is unsigned: 4-12 and anything past 17
+  build the orbit.
+- **The drive camera** is bMalloc(1008) and the constructor with the POV
+  byte, 300.9 for the look-back speed, CameraSpring, 0 and 1. Its
+  DesiredLookBackParam follows bLookBack, and the POV byte goes through
+  the cycle. **The orbit** is bMalloc(208), then `orbit_init` with JOY
+  port 1.
+- **The other movers are seams**, each a function pointer that stays NULL
+  until its class is ported: the debug world, the track route editor, the
+  zone freeze, the zone preview, the cubic damper, and one for both zone
+  jumpers. With a mover's seam NULL, nothing is allocated and the player
+  has no camera. The coordinators, the NIS manager's three calls, the
+  driving line's two and PreviewRoute's destructor are seams too.
+- **CycleDriveCameraPOVIndex** (`0x001786d0`) takes the index mod 4, as
+  C's remainder, and tries up to four POVs from there. A POV counts if
+  SkipFE is set, the ride has a dash, or it is the bumper or the outside
+  view. If none counts, the index is 0. It reads the car unchecked, as
+  retail does.
+- **RestoreCameraMover**, **RemoveCameraMovers**, **EnableCameraMovers**
+  and **DisableCameraMovers** (`0x00176948`, `0x00177430`, `0x001774a8`,
+  `0x00177558`) are retail's. The one difference is restoring with
+  nothing saved: retail calls Enable through NULL, and the port does
+  nothing.
+
+`player.h` gains pSavedCameraMover2, retail's +208, at the port's 2480,
+past the demo's layout. SkipFE is `gPlayerCamSkipFE`, which `main.c`
+points at the flow's skipFE. NULL reads as 0.
+
+Nothing calls these yet. Step 8 brings the callers.
+
+### The checks
+
+`playercam_check.py` runs retail's six functions in RetailEmu, and
+`tools/src/playercam_test.c` runs `playercam.c`, over one op script. The
+emulator's memory holds:
+- the Player, four cars and their rides, World, and every coordinator,
+  at retail's offsets
+- two pools of movers, one for the new ones and one for those an op
+  plants
+- fake vtables, and stubs for bMalloc, the constructors, SetPOVIndex and
+  the seams, each printing what it was handed
+
+The zone jumpers' two slots in the jump table point at small thunks.
+They call the seam's stub and return through the switch's tail.
+
+The scenarios:
+- every type, with and without keep, from the car and from World's list
+- keep chains and restores
+- the POV cycle over 14 POV layouts, indexes -9..9, SkipFE and the dash
+- the coordinators' 16 masks
+- three random walks of 300, 800 and 1500 ops
+
+7 scenarios, 5277 ops, 162056 lines, 0 differ on the first full run.
+The harness's pools had to grow to 1024 and 256 first, for the walks.
+
+All 109 mutations are caught, and none are equivalent. Three crash the
+harness on a NULL car: reading the car only from World, reading World's
+list the other way, and ignoring SkipFE. On the first pass, the
+mutations that removed a statement left the next one as the `if`'s body,
+and three did not compile. Each now leaves an empty statement, and the
+second pass compiled all 109.
+
+`docs/formats/camera.md` has "The player's cameras", before "Divergences
+from the disc".
+
+The whole chain in CONTINUE.md, playercam_check included, passes: 80
+commands, 0 failed, 960 s. `build_cia.ps1` builds the CIA. Nothing in
+the game calls the new functions yet, so there is nothing new to see on
+Azahar.
+
+### Next
+
+Step 8, first slice 8a: the Player constructor (`0x001751d8`, 2580 bytes),
+Player::InitForRace (`0x00181920`) and Player::CleanupAfterRace
+(`0x00181970`), which calls RemoveCameraMovers. Then RaceCoordinator's
+InitForRace, InitCars and InitPlayers, the Race constructor and
+Race::Init, and the flow into a race. CONTINUE.md, step 8, has the
+call lists.

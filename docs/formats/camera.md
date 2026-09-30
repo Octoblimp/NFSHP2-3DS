@@ -1133,6 +1133,236 @@ The nineteen equivalent mutants:
 - **Dropping the pitch's first 16-bit mask.** The correction takes
   `(uint16_t)s`, and `s` is masked again after it.
 
+## The player's cameras
+
+`Player` owns the camera movers. It builds them, retires them, and keeps
+up to two in reserve for the zone cameras that come back to the chase
+view. The port's versions are in `playercam.c`, apart from `player.c`,
+because they build movers. `player.c` goes into harnesses that have no use
+for `drivecam.c` and `orbitcam.c`.
+
+| function | retail | bytes |
+|----------|--------|-------|
+| `ChangeCameraMover(CameraMoverType, bool keep)` | `0x00176ae8` | 2372 |
+| `CycleDriveCameraPOVIndex(int)` | `0x001786d0` | |
+| `RestoreCameraMover()` | `0x00176948` | |
+| `RemoveCameraMovers()` | `0x00177430` | |
+| `EnableCameraMovers()` | `0x001774a8` | |
+| `DisableCameraMovers()` | `0x00177558` | |
+
+The port keeps the demo's `Player` layout, because Car's catchup, the
+camera shake and the HUD read it. Retail's fields sit further in, and
+retail has a second saved mover the demo lacks. It goes at the end of the
+port's struct:
+
+| field | retail | port |
+|-------|--------|------|
+| `MyCar` | 4 | 4 |
+| `ViewID` | 24 | 20 |
+| `PlayerSettings` | 32 | 28 |
+| `PlayerSettings.DriveCameraPOVIndex` (byte) | 36 | 32 |
+| `PlayerSettings.CameraSpring` | 40 | 36 |
+| `pRoute` (the zone preview's) | 136 | 124 |
+| `pCameraMover` | 200 | 180 |
+| `pSavedCameraMover` | 204 | 184 |
+| `pSavedCameraMover2` | 208 | 2480 |
+| `pRVMCameraMover` | 212 | 188 |
+| `pDemoCameraCoordinator` | 216 | 192 |
+| `pCountdownCameraCoordinator` | 220 | 196 |
+| `pNisCameraCoordinator` | 224 | 200 |
+| `pVisibleDrivingLine` | 228 | 204 |
+| `pNisManager` | 244 | 220 |
+| `bLookBack` | 764 | 740 |
+
+### `ChangeCameraMover`
+
+In order:
+
+1. **The coordinators are deleted first.** The demo and countdown
+   coordinators go through their virtual destructor (vtable at +24, slot
+   12, flag 3). The NIS coordinator goes through
+   `NisManager::DeleteCameraCoordinator` (`0x001b2b90`) on `pNisManager`.
+   Each pointer is cleared. This happens even when the call does nothing
+   else.
+2. **Same type, nothing more.** If `pCameraMover` is already of `type`,
+   return.
+3. **The car** is `MyCar`, or when that is NULL `pCurrentWorld`'s
+   `CarList.next`. The list's first link is not checked. An empty list's
+   first link is `World` itself, which the new mover would take as its
+   car.
+4. **The old mover is retired.** With `keep`, `pSavedCameraMover` moves to
+   `pSavedCameraMover2`, the old mover becomes `pSavedCameraMover`, and it
+   is disabled. Without `keep` it is deleted through its virtual
+   destructor. `pCameraMover` is cleared either way.
+5. **The new mover** is built by type, through the jump table at
+   `0x002b3b30`. The switch is unsigned: anything above 17, negatives
+   included, lands on the orbit.
+6. **Whatever was built gets the player** in `pPlayer` (mover +28).
+
+| type | mover | bMalloc | constructor's arguments |
+|------|-------|---------|-------------------------|
+| 0 | none | | |
+| 1 | `DriveCameraMover(Player)` | 1008 | view, car, the POV byte, 300.9 (gp-30468), `CameraSpring`, 0, 1 |
+| 2 | `DebugWorldCameraMover` | 76 | view, the car's position 4 up, `{0, 0, 1}`, port 1 |
+| 3 | `TrackRouteEditorCameraMover` | 44 | view, port 1 |
+| 4-12 | `OrbitCarCameraMover` | 208 | view, car, port 1 |
+| 13 | `ZoneFreezeCameraMover` | 872 | view, car, `pSavedCameraMover` |
+| 14 | `ZonePreviewCameraMover` | 1104 | view, `pRoute`, the car's position |
+| 15, 16 | `TrackCarCameraMover`, the zone jumpers | 1136 | view, car, the `CameraDataItems` at player +1652, a cleared 560-byte shake, 0 for 15 and 1 for 16 |
+| 17 | `CubicCameraMover` | 160 | view, car |
+| 18 and up | `OrbitCarCameraMover` | 208 | view, car, port 1 |
+
+The drive camera needs three more steps. `DesiredLookBackParam` (+124)
+becomes 1 if `bLookBack` is set, else 0. Then the POV byte goes through
+`CycleDriveCameraPOVIndex`, which sets the camera's POV, and the byte is
+set to the answer.
+
+The zone freeze is built after step 4. With `keep`, the mover it gets is
+the one just saved, and it hands back to that mover when the freeze ends.
+The zone preview takes the player's `pRoute`. Once the preview is built,
+the route is deleted (`PreviewRoute`'s destructor, flag 3) if there is
+one, and `pRoute` is cleared.
+
+The zone jumpers are two paths, 15 at `0x00176ddc` and 16 at
+`0x00177200`:
+
+- Type 15 builds a `TrackPathCoordinate` from the route at player +1764
+  (`PreviewRoutePoint::GetPosition`), and stores the camera's point at
+  player +1696.
+- Type 16 builds no path. It reuses that point, raised to at least the
+  car's height. Two of the data's fields are set from the car's word at
+  +2032.
+
+Both lift the point to the ground under it (`TopologyCoordinate`), fill
+the `CameraDataItems` at player +1652, and build the
+`TrackCarCameraMover`. The port has none of `PreviewRoute`,
+`CameraDataItems` or `TrackCarCameraMover` yet.
+
+### The POV cycle
+
+`CycleDriveCameraPOVIndex(index)` starts with `index % 4`, as C's
+remainder, so -5 is -1. With no mover, a mover that is not the drive
+camera, or a drive camera with no `CameraInfo` (vtable +52), that comes
+straight back. Otherwise it tries up to four indexes, stepping
+`(index + 1) % 4`. An index counts if `GetPOV` (vtable +60) gives a POV
+and one of these holds:
+
+- `SkipFE` (gp-23220) is set,
+- the car's ride has a dash (`pRideInfo->HasDash`, ride +6), or
+- the POV's type is `POV_BUMPER` (0) or `POV_OUTSIDE` (2).
+
+If none counts, the index is 0. That goes to `SetPOVIndex` (`0x0015c520`)
+and is returned. The car is read unchecked, so only a player with a car
+ever has a drive camera. The dash test is what keeps a car without a
+cockpit off the in-car views.
+
+### The rest
+
+- **`RestoreCameraMover`** deletes the current mover, pops
+  `pSavedCameraMover` into its place and `pSavedCameraMover2` into that,
+  and clears the second. If the restored mover is the drive camera, its
+  `DesiredLookBackParam` follows `bLookBack` again. Then it is enabled.
+- **`RemoveCameraMovers`** is `ChangeCameraMover(CM_NONE, false)`, then
+  deletes both saved movers.
+- **`EnableCameraMovers` and `DisableCameraMovers`** walk the same six:
+  - the player's mover, and the mirror's, through vtable +100 or +108
+  - the demo and the countdown coordinators (`0x00199b90`, `0x00199b48`)
+  - the NIS coordinator, through `NisManager`'s enable and disable
+    (`0x001b2c20`, `0x001b2bd0`)
+  - the driving line, a tail call to `VisibleDrivingLine`'s enable or
+    disable (`0x00183208`, `0x00183200`)
+
+  Each is skipped when NULL.
+
+### The seams
+
+The port builds the drive camera and the orbit camera. Every other mover
+is a seam: a function pointer, NULL until that class is ported, and
+`playercam.c` says so at each one. With the seam NULL nothing is
+allocated, so the player is left with no camera, as type 0 leaves it.
+These are the seams:
+
+- `gDebugWorldCameraMoverFn`, `gTrackRouteEditorCameraMoverFn`,
+  `gZoneFreezeCameraMoverFn`, `gZonePreviewCameraMoverFn` and
+  `gCubicCameraMoverFn`, each handed the bMalloc block
+- `gPreviewRouteDeleteFn`
+- `gPlayerJumpCamMoverFn`, which covers both zone jumpers
+- the coordinators' delete, enable and disable
+- the NIS manager's three
+- the driving line's two
+
+`SkipFE` is `gPlayerCamSkipFE`, which `main.c` points at the flow's
+`skipFE`. NULL reads as 0, the value the disc ships.
+
+Nothing calls these yet. Step 8 brings the callers:
+`Player::CleanupAfterRace` (which calls `RemoveCameraMovers`),
+`BeginCountdownCameras`, `UpdateNonGameState`, and the camera zones.
+
+### Divergences
+
+- **Restoring with nothing saved.** Retail calls `Enable` through a NULL
+  mover and would fault. The port does nothing. Retail's two callers,
+  `RequestZone` and `ClearZone`, restore when a zone camera is up.
+- **The debug-world direction's pad lane** is 0. Retail leaves the lane as
+  the stack had it, and the mover never reads it.
+- **The two zone jumpers are one seam** with a `second` flag. Retail has
+  two paths, and both build the same mover.
+- **Every seam and the `SkipFE` pointer are NULL-guarded.** That is the
+  port's; retail's calls are direct.
+
+The drive and orbit sizes come from `sizeof`. Both match retail: 1008 and
+208.
+
+### Cross-checked on retail's image
+
+`tools/playercam_check.py` runs retail's six functions in `mipsemu` and
+`tools/src/playercam_test.c` over `playercam.c`, the same op script to
+both, and diffs the transcripts.
+
+On the emulator's side, the Player, four cars, their rides, World and
+every coordinator are laid out at retail's offsets. Two pools hold the
+movers, one for the new ones and one for those an op plants. Fake
+vtables and stubs stand in for the rest:
+
+- `bMalloc`, and each mover's constructor, destructor, `CameraInfo`,
+  `GetPOV`, `Enable` and `Disable`
+- `SetPOVIndex`
+- the coordinators, the NIS manager, the driving line and the route's
+  destructor
+
+The zone jumpers are two small thunks planted in the jump table's slots 15
+and 16. They call the seam's stub with the second flag and return
+through the tail at `0x001773ec`, as the port's seam does. Every stub
+prints what it was handed. After each op, both sides print the player and
+every live mover: its type, its player and, for a drive camera, its look
+back.
+
+The scenarios:
+
+- **Every type** (0-18, 25, -1 and `0x80000000`), with and without keep,
+  from the player's car and from World's list, and an empty World.
+- **The saves**: keep chains two deep, the zone freeze taking the mover
+  just kept, restores down to nothing, and the look back on a restored
+  drive camera.
+- **The POV cycle** over 14 layouts of POVs and types, with SkipFE and
+  the dash both ways, indexes -9..9, the current mover's type changed
+  under it, no mover, and the default POVs over stored POV bytes.
+- **The coordinators**: the 16 masks of the demo, countdown and NIS
+  coordinators and the driving line, through `ChangeCameraMover`'s
+  deletes, `Enable` and `Disable`, with and without the mirror's mover.
+- **Three random walks** of 300, 800 and 1500 ops over everything.
+
+The walks keep two rules. A player without a car has SkipFE set, since
+the cycle reads the car. Nothing asks for the debug world with no car
+and an empty list.
+
+    python tools/playercam_check.py            # 7 scenarios, 5277 ops, 162056 lines, 0 differ
+    python tools/playercam_check.py --mutate   # 109 mutations, 109 caught, 0 equivalent
+
+Three mutants are caught by crashing the harness: reading the car only
+from World, reading World's list the other way, and ignoring SkipFE. Each
+reads a NULL car the scenarios keep away from.
+
 ## Divergences from the disc
 
 Each of these is in the source as a comment at the point it happens.

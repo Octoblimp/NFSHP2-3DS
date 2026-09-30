@@ -76,6 +76,7 @@
 #include "physcomp.h"
 #include "physicscar.h"
 #include "physicssystem.h"
+#include "playercam.h"
 #include "race.h"
 #include "realcontroller.h"
 #include "realdriver.h"
@@ -2261,6 +2262,8 @@ int main(int argc, char** argv)
     // FlailerScreenList's constructor makes its song monitor (0x0016c25c).
     bsm_init(&g_songMonitor, &kSongMonitorHooks);
     g_flow.fred = g_fred;
+    // Player's POV cycle reads SkipFE (gp-23220), which the flow holds.
+    gPlayerCamSkipFE = &g_flow.skipFE;
     bgf_load_global_chunks(&g_flow);
     logLine("global chunks loaded, LOADING drawn");
 

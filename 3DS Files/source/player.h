@@ -8,19 +8,25 @@
 // Car::FinishMovement reads nZoneCurrent, the camera zone the player is
 // in, and keeps the jump cam's highest point in EyeVerts[2].z. RenderCars
 // finds a view's player by ViewID and reads its zone. The camera shake asks
-// IsCameraPOVInCar, which reads pCameraMover and the settings' POV. This
-// names the words up to PlayerSettings, then those four over holes. The
-// struct is left open at the end like replay.h's: nothing in the port
-// allocates a Player yet, and a partial layout would invite something to.
+// IsCameraPOVInCar, which reads pCameraMover and the settings' POV. The
+// camera functions in playercam.c read the movers, the coordinators, the
+// NIS manager, pRoute, pVisibleDrivingLine and bLookBack. This names the
+// words up to PlayerSettings, then those over holes, to the demo's 2480
+// bytes. Player's constructor is task 26's.
 //
 // The holes are the same size on every target. Between 80 and 1600 the
-// stab has dozens of pointers (the camera movers, the NIS manager, pRoute,
-// the flailers, ...), so a full layout on a 64-bit host would put
-// bWrongWay and EyeVerts further along than this does. Nothing on the host
-// but a checker's harness builds a Player, and it builds this one.
-// Retail keeps ViewID at 24, nZoneCurrent at 88 and pCameraMover at 200;
-// the port keeps the demo's offsets, as it does for every struct nothing
-// reads in place.
+// stab has dozens more pointers (the flailers, ...), so a full layout on a
+// 64-bit host would put bWrongWay and EyeVerts further along than this
+// does. Nothing on the host but a checker's harness builds a Player, and
+// it builds this one. Retail keeps ViewID at 24, nZoneCurrent at 88 and
+// pCameraMover at 200; the port keeps the demo's offsets, as it does for
+// every struct nothing reads in place.
+//
+// Retail has one camera word the demo lacks, at 208: a second saved
+// mover. ChangeCameraMover with `keep` moves pSavedCameraMover into it
+// before saving the old mover, and RestoreCameraMover moves it back. It
+// goes at the end here, as car.h's new fields do, so every demo offset
+// above still holds.
 
 #ifndef PLAYER_H
 #define PLAYER_H
@@ -34,6 +40,12 @@
 
 struct Car;
 struct CameraMover;
+struct CountdownCameraCoordinator;
+struct DemoCameraCoordinator;
+struct NisCameraCoordinator;
+struct NisManager;
+struct PreviewRoute;
+struct VisibleDrivingLine;
 
 // cPlayerSettings, 40 bytes (.mdebug type#3426): what the player chose in
 // the frontend. The seven one-byte fields are type 2, `char`, which the
@@ -74,31 +86,59 @@ struct Player {
     cPlayerSettings PlayerSettings;              //   28
     uint8_t       _hole68[8];                    //   68  TimeFinishedRacing, FinishAnimationLength
     int32_t       nZoneCurrent;                  //   76  the camera zone, 0 for none
-    uint8_t       _hole80[100];                  //   80  nZonePrevious .. PlayerInputMode
+    uint8_t       _hole80[44];                   //   80  nZonePrevious .. tAutoZoneTimers
+    struct PreviewRoute *pRoute;                 //  124  the zone preview's route
+    uint8_t       _hole128[52];                  //  128  pZoneSample .. PlayerInputMode
     struct CameraMover *pCameraMover;            //  180  the player's camera, or NULL
-    uint8_t       _hole184[552];                 //  184  pSavedCameraMover .. ArrestCameraNumbers
+    struct CameraMover *pSavedCameraMover;       //  184  the last one kept
+    struct CameraMover *pRVMCameraMover;         //  188  the rear-view mirror's
+    struct DemoCameraCoordinator *pDemoCameraCoordinator;           //  192
+    struct CountdownCameraCoordinator *pCountdownCameraCoordinator; //  196
+    struct NisCameraCoordinator *pNisCameraCoordinator;             //  200
+    struct VisibleDrivingLine *pVisibleDrivingLine; // 204
+    uint8_t       _hole208[12];                  //  208  ArrestNisIndex .. NisFinishedCallbackParam
+    struct NisManager *pNisManager;              //  220
+    uint8_t       _hole224[512];                 //  224  TicketNisNumbers .. ArrestCameraNumbers
     int32_t       bWrongWay;                     //  736
-    uint8_t       _hole740[860];                 //  740  bLookBack .. myCD
+    int32_t       bLookBack;                     //  740  a drive camera starts looking back
+    uint8_t       _hole744[856];                 //  744  CurrentHudFeatures .. myCD
     bVector3      EyeVerts[3];                   // 1600  the jump cam's
-    // ... to 2480.
+    uint8_t       _hole1648[832];                // 1648  BankVerts .. the end
+
+    // Retail's (at 208); see above.
+    struct CameraMover *pSavedCameraMover2;      // 2480  the one kept before that
 };
 
 // Two pointers lead, so a 64-bit host moves everything after them by
-// eight bytes, and pCameraMover then waits four more for its alignment.
-// The multiples of the slack carry that.
+// eight bytes. Each pointer after that adds four more, and pRoute,
+// pCameraMover and pNisManager wait four more for their alignment. The
+// multiples of the slack carry that.
 #define PLAYER_SLACK ((size_t)(sizeof(void *) - 4))
+#define PLAYER_AT(f, n, k) \
+    (offsetof(struct Player, f) == (size_t)(n) + (k) * PLAYER_SLACK)
 
 typedef char player_layout_check[
-    (offsetof(struct Player, JoyPort) == 8 + 2 * PLAYER_SLACK
-     && offsetof(struct Player, PlayerNumber) == 16 + 2 * PLAYER_SLACK
-     && offsetof(struct Player, ViewID) == 20 + 2 * PLAYER_SLACK
-     && offsetof(struct Player, PlayerSettings) == 28 + 2 * PLAYER_SLACK
-     && offsetof(struct Player, PlayerSettings.DriveCameraPOVIndex)
-            == 32 + 2 * PLAYER_SLACK
-     && offsetof(struct Player, nZoneCurrent) == 76 + 2 * PLAYER_SLACK
-     && offsetof(struct Player, pCameraMover) == 180 + 3 * PLAYER_SLACK
-     && offsetof(struct Player, bWrongWay) == 736 + 4 * PLAYER_SLACK
-     && offsetof(struct Player, EyeVerts) == 1600 + 4 * PLAYER_SLACK)
+    (PLAYER_AT(JoyPort, 8, 2)
+     && PLAYER_AT(PlayerNumber, 16, 2)
+     && PLAYER_AT(ViewID, 20, 2)
+     && PLAYER_AT(PlayerSettings, 28, 2)
+     && PLAYER_AT(PlayerSettings.DriveCameraPOVIndex, 32, 2)
+     && PLAYER_AT(PlayerSettings.CameraSpring, 36, 2)
+     && PLAYER_AT(nZoneCurrent, 76, 2)
+     && PLAYER_AT(pRoute, 124, 3)
+     && PLAYER_AT(pCameraMover, 180, 5)
+     && PLAYER_AT(pSavedCameraMover, 184, 6)
+     && PLAYER_AT(pRVMCameraMover, 188, 7)
+     && PLAYER_AT(pDemoCameraCoordinator, 192, 8)
+     && PLAYER_AT(pCountdownCameraCoordinator, 196, 9)
+     && PLAYER_AT(pNisCameraCoordinator, 200, 10)
+     && PLAYER_AT(pVisibleDrivingLine, 204, 11)
+     && PLAYER_AT(pNisManager, 220, 13)
+     && PLAYER_AT(bWrongWay, 736, 14)
+     && PLAYER_AT(bLookBack, 740, 14)
+     && PLAYER_AT(EyeVerts, 1600, 14)
+     && PLAYER_AT(pSavedCameraMover2, 2480, 14)
+     && sizeof(struct Player) == (size_t)2484 + 15 * PLAYER_SLACK)
     ? 1 : -1];
 
 // Player::IsCameraPOVInCar, retail's 0x00178808 (the demo's 0x00172108;

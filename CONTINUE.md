@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-09-30), after the orbit mover's retail pass (7c). `HANDOFF.md` is the running
+(2026-09-30), after Player's camera functions (7d), which close step 7. `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -47,10 +47,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Seventy-five cross-checkers pass, plus the table generators:
+Seventy-six cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -71,6 +71,7 @@ cambase_check       1588 ops,     5624 lines, 0 differ   (61/61 mutations caught
 orbit_check         3416 ops,    28635 lines, 0 differ   (119 caught, 5 equivalent; retail's image)
 shake_check         4114 ops,    10604 lines, 0 differ   (95 caught, 3 equivalent; retail's image)
 drivecam_check     45598 ops,   105702 lines, 0 differ   (474 caught, 19 equivalent; retail's image)
+playercam_check     5277 ops,   162056 lines, 0 differ   (109/109 mutations caught; retail's image)
 trackroute_check   11 scenarios,  1353 lines, 0 differ   (57 caught, 1 equivalent)
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
 engine_check        8 scenarios,   414 lines, 0 differ   (56 caught, 2 equivalent)
@@ -887,112 +888,171 @@ and so replaced every boot.
      scenarios: 4 scenarios, 32 of 35 caught, 3 equivalent. Its two view
      mutations moved to `cambase_check`, which catches 61 of 61.
 
-   **Next is 7d**: Player::ChangeCameraMover (`0x00176ae8`, 2372 bytes)
-   and the Player camera functions around it. `out/player_ccm_retail.txt`
-   is the listing (`python tools/retaildis.py ChangeCameraMover__6Playerib`).
-   - It builds the mover for a view. The candidates are DriveCameraMover
-     (`0x0015c258`), OrbitCarCameraMover (`0x00157e48`),
-     TrackCarCameraMover (`0x00159130`, twice), CubicCameraMover
-     (`0x0015e7b0`), ZoneFreezeCameraMover (`0x00160298`),
-     ZonePreviewCameraMover (`0x00161f98`, with a PreviewRoute and
-     TrackPathCoordinate), DebugWorldCameraMover (`0x0015b268`) and
-     TrackRouteEditorCameraMover (`0x0015c010`). It also calls
-     NisManager::DeleteNisCameraCoordinator and
-     CycleDriveCameraPOVIndex (`0x001786d0`).
-   - Read so far:
-     - It is `(Player *, int type, bool keep)`. It first deletes the
-       movers at Player+216 and +220 (virtual destructor, 3) and the NIS
-       coordinator at +224 through the NisManager at +244. If
-       pCameraMover (+200) is already that type, it returns.
-     - With `keep`, the old mover is disabled (vtable +108) and moves to
-       +204 (pSavedCameraMover), and the one there moves to +208. Without
-       `keep`, the old one is deleted (+12, flag 3).
-     - The car is Player+4, or the first car in gp-22120's list.
-     - The jump table (`0x002b3b30`, 18 words), by type:
-       - 0: none
-       - 1: Drive
-       - 2: DebugWorld
-       - 3: TrackRouteEditor
-       - 13: ZoneFreeze
-       - 14: ZonePreview
-       - 15 and 16: TrackCar, the two zone jumpers, with 1136 bytes of
-         CameraDataItems built from the PreviewRoute at +1764
-       - 17: Cubic
-       - 4-12, and anything past 17: the default, OrbitCar (208 bytes,
-         `(view, car, JOY port 1)`)
-     - Drive is bMalloc(1008, "DriveCameraMover(Player)"), then the
-       constructor with:
-       - the view, Player+24
-       - the car
-       - the POV index, `lb` Player+36
-       - LookbackSpeed gp-30468 = 300.9, a snap
-       - DisableLag, Player+40 (the settings' CameraSpring)
-       - lookBack 0
-       - perfectFocus 1
-     - Then the mover's +124 (DesiredLookBackParam) is 1.0 if Player+764
-       (bLookBack, the demo's 740) is set, and 0 otherwise. After that,
-       Player+36 = CycleDriveCameraPOVIndex(this, Player+36).
-     - `docs/retail_layout.txt` moves Player's fields in bands:
-       - +4 from ViewID (demo 20)
-       - +12 from TimeFinishedRacing (68)
-       - +20 from PlayerInputMode (176), so pCameraMover is 200 and
-         pSavedCameraMover 204
-       - +24 from pRVMCameraMover (188, now 212)
+   **7d, Player's camera functions, is done** (HANDOFF.md, Session 31,
+   continued: Player's camera functions). It closes step 7.
+   `docs/formats/camera.md`, "The player's cameras", has the write-up.
+   - `playercam.c` and `playercam.h` have ChangeCameraMover
+     (`0x00176ae8`), CycleDriveCameraPOVIndex (`0x001786d0`),
+     RestoreCameraMover (`0x00176948`), RemoveCameraMovers (`0x00177430`),
+     EnableCameraMovers (`0x001774a8`) and DisableCameraMovers
+     (`0x00177558`). They sit apart from `player.c` because they build
+     movers, and `player.c`'s harnesses have no use for `drivecam.c` and
+     `orbitcam.c`.
+   - The drive camera and the orbit camera are built. The debug world,
+     the track route editor, the zone freeze, the zone preview, the cubic
+     damper and the two zone jumpers are seams, NULL until their classes
+     are ported. So are the coordinators, the NIS manager's three calls,
+     the driving line's two and PreviewRoute's destructor. With a mover's
+     seam NULL, nothing is allocated and the player has no camera.
+   - The coordinators are deleted before the same-type test, as retail
+     does. Movers are deleted through their virtual destructor, so the
+     orbit's joystick handlers come off.
+   - `player.h` gains pSavedCameraMover2 (retail +208) at the port's
+     2480, past the demo's layout. SkipFE is `gPlayerCamSkipFE`, which
+     `main.c` points at the flow's skipFE.
+   - Restoring with nothing saved does nothing. Retail calls Enable
+     through NULL there. Its two callers, RequestZone and ClearZone,
+     restore when a zone camera is up.
+   - `playercam_check` runs retail's six functions in RetailEmu: 7
+     scenarios, 5277 ops, 162056 lines, 0 differ. All 109 mutations are
+     caught. Three of them crash the harness on a NULL car, and that
+     counts as caught.
+   - Nothing calls these yet.
 
-       Retail's +208 looks like a word the demo lacks. The demo's names,
-       from `out/player_stab.txt` (type#2091) moved by those bands:
-       - 136 pRoute, the zone preview's PreviewRoute
-       - 216 pDemoCameraCoordinator
-       - 220 pCountdownCameraCoordinator
-       - 224 pNisCameraCoordinator
-       - 244 pNisManager
-       - 764 bLookBack
-       - 1652 myCD, the zone jumpers' CameraDataItems
-       - 1664 EyeVerts
-       - 1712 BankVerts
-       - 1760 FOVtable
-       - 1764 pJumpCamRoute
-     - At the end, a new mover's +28 (its player) is set to this.
-     - Its retail callers (`retaildis.py --callers 0x00176ae8`):
-       - Player's PlayNextNis, ServiceNis (twice), BeginDemoCameras,
-         BeginCountdownCameras and RemoveCameraMovers
-       - RequestZone (four times)
-       - ChangeDebugCameraJoyHandler (twice)
-       - UpdateNonGameState (twice)
-       - RaceCoordinator's RCStatePostRaceCallback
+   **Next is step 8, and its first slice is 8a**: the Player constructor
+   (`0x001751d8`, 2580 bytes), Player::InitForRace (`0x00181920`) and
+   Player::CleanupAfterRace (`0x00181970`). Nothing builds a Player yet,
+   so nothing calls playercam. RaceCoordinator::InitForRace builds both
+   players (`0x001499f0`, `0x00149a34`).
+   - The constructor is `(JoystickPort port, int number)`. It:
+     - adds itself to pPlayersByIndex (gp-20928, counted at gp-20920)
+       and pPlayersByNumber (gp-20936)
+     - copies retail's 48-byte settings from `0x0031ab24 + 48 * number`
+     - stores the port, GetJoystickType's answer and the number
+     - sets ViewID (24) and RearViewMirrorViewID (28) from
+       TheRaceParameters' NumPlayerCars (`0x0031a898 + 48`). With one
+       player car, the view is 1 and the mirror 3. With two, the views are
+       1 and 2 by number, and there is no mirror (0).
+     - clears the camera words 200-228
+     - builds the TopologyCoordinate at 1768 and the NISOverlayManager at
+       2560 (`0x00182350`), then calls `0x001829a8` (new in retail) on
+       the overlay with NisOverlayHash (776)
+     - bMallocs a NisManager (320 bytes, `0x001b0fe0`, named by
+       bSPrintf) into 244, and an Average of 10 (`0x0018fbf0`) into 160
+     - bMallocs 164 bytes into 1652 (the zone jumpers' CameraDataItems)
+       and 512 bytes into 1760
+     - takes GetInGameSample's answer into 1404
+     - finds four flailer objects for the HUD (FindFlailerObject
+       `0x00143d50`, GetTopLeft `0x00140978`) into 2700-2728
 
-       UpdateNonGameState and the countdown are the likely way a race
-       first gets its drive camera.
-     - CycleDriveCameraPOVIndex (308 bytes, `out/player_cycle_retail.txt`;
-       out/ is ignored, so regenerate it with `retaildis.py
-       CycleDriveCameraPOVIndex__6Playeri`):
-       - It takes the index mod 4, as C's signed remainder.
-       - Unless pCameraMover is CM_DRIVE with a CameraInfo, it returns
-         that index.
-       - Otherwise it tries up to four indices from there, stepping mod 4.
-         It skips a NULL POV. It also skips POV_INCAR when the car's
-         `pRideInfo->HasDash` is 0 and SkipFE is clear (gp-23220; the
-         demo's gp-23788).
-       - If none fits, the index is 0.
-       - Then it calls SetPOVIndex and returns the index.
-   - Cars and racing come first. Port the drive and orbit paths and
-     CycleDriveCameraPOVIndex. Leave each other mover as a named seam that
-     builds nothing until its class is ported, and say so in the source.
-   - Check Player's retail layout (`docs/retail_layout.txt`) before
-     reading `pCameraMover` and the settings in place.
-   - The orbit path builds 7c's mover: bMalloc 208, then `orbit_init`
-     (`orbitcam.h`) with the view, the car and JOY port 1. Delete
-     movers through their vtable's destructor, so the orbit's joystick
-     handlers come off (see the geometry viewer, above).
+     Retail's Player ends near 2740 bytes.
+   - Player::InitForRace(Car *) is 80 bytes:
+     - The car's player (+24) becomes this, and MyCar the car.
+     - The settings' byte at 34 goes to the car's +988.
+     - When the car's word at +32 is 1, SetManualTransmission
+       (`0x0013b390`) goes to the car's driver (+44) with the settings'
+       byte at 35.
+     - Then it tail-calls PredetermineNisNumbers (`0x001819e0`). That
+       runs CreateRandomNisArray (`0x00181a28`) for NIS types 1 and 2,
+       and sets 236 and 232 to -1.
+   - Player::CleanupAfterRace (112 bytes, from
+     RaceCoordinator::CleanupPlayers) undoes it, in order:
+     - AutoPilotOff (`0x001788b0`), which is an empty `jr ra` in
+       retail, and RadialBlurOff (`0x0010f1b0`, `gRadialBlurOffFn`)
+     - RemoveCameraMovers, which is ported
+     - NisManager::Stop (`0x001b1388`) while the manager's +68 is set
+     - `0x00182948` on the overlay at +2560. retail_match names it
+       MovePursuitMeter at a score of 0.12, but it is the overlay's. It
+       shows the overlay's flailer screen, and puts back the scale and
+       top that `0x001829a8` read with FlailerGetScale and
+       FlailerGetTopLeftY. It is HUD, a seam.
+     - SetInputMode(0) (`0x001776b0`)
+     - clearing MyCar and the car's player
+
+     These callees are ported already:
+     - SetManualTransmission, as `realdriver_set_manual_transmission`
+     - Average's constructor, as `average_init`
+     - TopologyCoordinate's, as `topology_init`, from the topology's
+       retail pass
+     - GetJoystickType
+
+     retail_match marks two of them changed, and both are still the
+     demo's:
+     - SetManualTransmission (0.93) differs only in Car's CurrentGear
+       offset, which the port reads by name.
+     - Average (0.76) has a new layout. Its first three fields are bytes
+       at 0, 1 and 2, and the buffer pointer is at 12, not 20. Diff its
+       other methods (`retail_match.py --diff`) before a Player keeps
+       one.
+   - SetInputMode (`0x001776b0`, 1240 bytes) moves Player's joystick
+     handlers from the mode in PlayerInputMode (196) to the new one, with
+     RemoveJoyHandler, AddJoyHandler and IsJoyHandlerAdded. It also makes
+     vtable calls on the movers at 200, 204 and 208. The player's buttons
+     reach the game through it, so step 8 needs it. It can be a seam in
+     8a.
+   - Give Player retail's layout in this pass, as Camera,
+     TopologyCoordinate and TrackInfo got theirs. Assert the offsets
+     where pointers are 4 bytes, as `chopper.h` does. The constructor
+     writes most of the struct, so the demo's layout would need a map
+     from retail's offsets for every field. pSavedCameraMover2 then moves
+     to 208, and camera.md's offset table becomes one column.
+     - `docs/retail_layout.txt` has the bands from the demo's offsets,
+       and `out/player_stab.txt` the demo's names.
+     - Retail's cPlayerSettings is 48 bytes. The save game will read it
+       in place (step 17), so it takes retail's layout too.
+       ResetToDefaults (`0x001edf90`) makes Rumble 1 and Lookback 1,
+       PreferredHudFeatures 853, and the two new words 1. The POV byte is
+       1, or with SkipFE the byte at gp-23172.
+     - Retail's word at 20 is new. When there are two players, the
+       constructor points each one's 20 at the other.
+     - The bands are rough, so map each field from a method that uses
+       it. Around 160-196 they are wrong: AICarController::GlueOn
+       (`0x00190f38`) counts at 192, so nGlueCount is there. The
+       constructor clears five bits of a 64-bit word at 184, which looks
+       like DrivingControls (32 bits in the demo). Past 1296 and past
+       2600, retail adds words the demo lacks. Eight of the demo's bytes
+       between 2396 and 2448 are gone, perhaps bLiveSplitOffset and
+       fInitialLiveSplitY.
+   - Leave the HUD's flailers, the NIS managers and the samples as
+     seams, as 7d left the other movers.
+   - After 8a comes RaceCoordinator's side. InitForRace (`0x00149988`,
+     512 bytes) calls, in order:
+     - GetDriverInfoByDriverNumber
+     - bMalloc and the Player constructor, for each of two players
+     - GetTrackInfo
+     - the ReplayManager constructor (`0x0013d448`)
+     - the Race constructor (`0x001475e8`, 244 bytes)
+     - the World constructor (`0x0014cd28`)
+     - InitCars (`0x0014a2c8`, 808 bytes)
+     - InitPlayers (`0x00149cb8`, 188 bytes)
+     - DisableRenderEggs, then FindResourceFile
+     - Race::Init (`0x00147960`)
+     - SetupGhostCars
+     - SetAIDriverModesFromPlayers (`0x001cd240`)
+     - the collision sound's Reset (`0x001e51c8`)
+     - the speech manager's getInstance and FlushQueue
+
+     InitPlayers calls Player::InitForRace for each player. The car is
+     World::GetCarByNumber(PlayerNumber) (`0x0014d508`), skipped when
+     NULL, unless TheRaceParameters' word at +24 is set. Then it is
+     World's car array (+44) at World+32 plus PlayerNumber. InitCars sets
+     `gCarInitRenderInfoFn` and the other carinit seams.
+   - Then the flow into a race:
+     - the main loop's UpdateCameraMovers and UpdateCameraShakers
+     - BeginCountdownCameras (`0x001768e0`) and UpdateNonGameState
+       (`0x00180e60`). These are the likely first callers of
+       ChangeCameraMover(CM_DRIVE).
+     - SetRearViewMirrorCameraMover (`0x001767a8`)
+     - eDisplayFrame and RenderCars
 
    Step 7 as a whole: Player and the chase cameras. The core is
    DriveCameraMover (CM_DRIVE). Its constructor is `0x0015c258` (420
    bytes), ResetState `0x0015c470`, and Update `0x0015c880` (6056 bytes;
    the demo's is 5380). The demo's wall code is dead in retail, and
    Update calls two new helpers in its place (see 7b above). All of it is
-   ported. Player's ChangeCameraMover
-   (`0x00176ae8`, 2372) picks the mover for each view. After step 7,
-   step 8's InitCars sets `gCarInitRenderInfoFn`. The 3DS build gives
+   ported, and so is Player's ChangeCameraMover (`0x00176ae8`, 2372),
+   which picks the mover for each view (7d). Step 8's InitCars sets
+   `gCarInitRenderInfoFn`. The 3DS build gives
    Render's seams (the strips, the flares and the driver) their
    renderers, and the game flow calls RenderCars.
 
@@ -2113,7 +2173,7 @@ each class shows what it reaches.
 | 4 | ~~The retail disc's data in the track viewer: the tracks shipped expanded, the retail chunk set, the changed loaders, and a second location~~ done, task 36's second to eighth slices | 1 |
 | 5 | ~~The retail model: mipsemu on `SLES_507.31` by retail_match's names, so that a checker can run the retail function~~ done, task 36's second slice: `tools/retail_model.py`, in `track_check` and `loadertable_check` | 1 |
 | 6 | ~~Car's constructor and destructor, and CarRenderInfo, from retail where retail changed them (all of them did), so that a car draws on the track~~ done. The constructor and destructor are done, task 36's tenth slice; CarRenderInfo's build is done, the eleventh; Render is done, the twelfth; RenderCars is done, the thirteenth. The front end's cars wait for the car selector (step 16) | 3-4 |
-| 7 | Player and the chase cameras (CM_DRIVE and the rest of `cammover.c`'s set) | 2 |
+| 7 | ~~Player and the chase cameras (CM_DRIVE and the rest of `cammover.c`'s set)~~ done, slices 7a-1 to 7d: the camera base, the shake, the drive camera, the orbit's retail pass and Player's camera functions. The other movers are seams until their classes are ported | 2 |
 | 8 | RaceCoordinator's InitForRace, InitCars, InitPlayers and Race::Init, and the game flow from the frontend into a race and back | 2-3 |
 | 9 | **One car driving the track.** Steps 4-8 are this milestone: about 9-11 slices | |
 | 10 | The retail pass over what is already ported: the 130 changed functions cited from a `.c` in `docs/retail_audit.txt`, module by module, each checker gaining a retail model run where it can | 4-6 |
