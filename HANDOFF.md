@@ -10077,3 +10077,164 @@ GetRoadNoise is retail's now, so 7b's checker can run it. `replay.h` is
 still the demo's layout (retail puts ReplaySnapshotList at 112 and
 TotalInterestingValue at 332), and owes a retail pass before anything
 reads it in place.
+
+## Session 31, continued (2026-09-29) -- the drive camera's Update (step 7b)
+
+This is 7b: DriveCameraMover::Update (`0x0015c880`, 6056 bytes) and the
+helpers only it calls. DriveCameraMover is all ported now.
+
+### The port
+
+`drivecam.c`:
+- **Update**, the vtable's slot 20, in the image's order. It picks the car
+  (CameraFollowDefaultCar and CameraFollowThisCarInstead can swap it), steps
+  the look back at LookbackSpeed, or 4/3 a second for a cop turning to its
+  chased car, and gets the POV, falling back to index 0. Then:
+  - the acceleration lag, from twenty samples of the car-space forward
+    acceleration, 60 a second
+  - the tweakables, which stand in for the POV
+  - the base: the heading outside, the body inside
+  - a cop's look back, iLookBackParam and iLookBackHeight
+  - the boom's yaw and pitch, trailing by the corrections, with road noise
+  - a counted look back's swing
+  - outside, the eye's interest box, screen offset, wall push, lift out of
+    the car and look-at offset; inside, the eye held 0.7 over the ground
+  - the camera's words, the shake and SetCameraMatrix
+- **GetLookbackCar** (`0x0015c680`): the chased car for a cop, and
+  `isCop`, or the car of the cop chasing this one.
+- **The wall push** (`0x00157930`, `camera_wall_offset`): ConstrainToTopology,
+  then up to three averaged pushes out of every polygon the camera may not
+  go through whose shaft holds the eye within the gap (GetWallGap for a
+  polygon flagged 2, 0.7 otherwise). Four VU0 lanes, as the image adds
+  them.
+- **The look-at offset** (`0x00157b60`, `camera_look_at_offset`): two
+  look-at matrices, the second to the target moved by the offset times
+  its depth.
+- The Drive* and Cam* tuning words, at retail's values (checked against
+  the image's words).
+
+`copmanager.h` is retail's cut: tCop's pMyPursuit (0) and pMyCar (4),
+tPursuit's pChasedCar at 16 (the demo's 20), `pCopManager` at gp-15620
+(`0x00331bec`), and seams for GetCopByCar (`0x00224f70`) and GetCopByChase
+(`0x00224fc8`). Nothing sets them until the cop manager is ported, and
+Update asks only while `pCopManager` is set.
+
+Two fixes to 7a-2b's work:
+- **LastCarSpeed is State.ForwardSpeed**, retail's word at car +960, in
+  the constructor and ResetState. 7a-2b called it VelocityMagnitude, and
+  the HANDOFF entry above says so. Update's walking-pace and lag tests
+  read the same word as the forward speed. The checker writes a car's
+  ForwardSpeed at 960 and its VelocityMagnitude apart, and
+  `ctor_speed_vel` and `reset_speed_vel` are caught.
+- **The heading's constant is `0.21276592f`** (`0x3e59df4f`, 1/4.7). The
+  first `0.212766f` was six units off in the last place, and no
+  transcript showed it: a pass over every float literal in the update
+  section, against the words the image loads, found it.
+
+### The checks
+
+`drivecam_check.py` runs Update, GetLookbackCar and both helpers in
+RetailEmu, over retail's base, Camera, SetCameraMatrix, eMath, bASin, bATan,
+bCos and bNormalize. Both sides stub, printing their arguments:
+- the TopologyCoordinate's constructor, destructor, SetInterestBBox,
+  GetElevation and ConstrainToTopology
+- PointInShaft
+- GetCarByDriverNumber, bRefreshTweaker, GetCopByCar and GetCopByChase
+- CarState::GetYaw, GetRoadNoise, GetCarSpaceBoundingBox and
+  ApplyCameraShake
+
+`drivecam_test.c` has the stubs and the new ops.
+
+Six new scenarios drive four simulated cars frame by frame
+(`docs/formats/camera.md`, "The drive camera, cross-checked"). The first
+five put a mover on each car: the edges, the chase, the look back, the
+cops and the tuning. A `gcov -b` build of the harness over the script
+showed what they missed, and each gap has a scenario now:
+- The cop's look back never came round: a random `H 0` or `u 0 -1` early
+  on cleared the cop manager or the pursuit, and slip skewed the heading.
+  The cops scenario now pins the chased car at nine bearings in turn,
+  holding the manager, the pursuit, the POV and no player each time. The
+  car has no slip, and no scribbles land on the mover while it settles.
+  That reaches both step speeds, both clamps, both wraps and the wrap to
+  65536.
+- The lag held with DisableLag and DriverMode 1, and with
+  CamBackAdjustQuicker lowered to 0.2 so the quick return runs.
+- StopUpdating held over twelve frames of the tuning scenario. No Update
+  scenario had set it.
+
+Left unrun:
+- GetLookbackCar's no-cop-manager and NULL-seam answers, which Update
+  never reaches.
+- Retail's own dead branch: the "in the air" factor is ±1, then tested
+  against 0.
+- Combinations the code rules out: a NaN DesiredLookBackParam, and a
+  look-back car while the look back counts.
+
+Every line ran, but the first mutation pass over 493 mutants left 23
+unexplained. Eleven were equivalent (below). The other twelve were
+changes no scenario could see:
+- The lag's last-place changes (dividing by CamSpeedAdjust instead of
+  multiplying by its reciprocal, and grouping the product another way)
+  round away hundreds of metres from the origin.
+- The lag's pull never lined up while the tuning scenario held the
+  tweakables on.
+- No run had only the twentieth sample holding the lag back, braked
+  through walking pace with the lag held, or went past CamSpeedAdjust.
+- The nose never pointed straight up. bASin gives 16384 only there, the
+  one pitch at which `p <= 32767` and `p <= 16383` differ.
+- CameraFollowThisCarInstead was never exactly 0 with driver 0 missing.
+- StopUpdating never held while the camera's focus was still 0.
+- A cop's look back was never wanted half way, and never pointed at a
+  chased car 40-50 m off.
+
+The sixth scenario, the corners, runs each of those in fixed spells
+behind one camera on a car driven slowly near the origin. Its first cut
+had two faults, and three mutants still survived:
+- It built the mover looking back. A round of 1 takes the lag out of the
+  POV's boom, and LookBackAngle sends the pitch down its first branch.
+- It left CamLagMultiplier at 1, where either grouping of the lag's
+  product is exact. It is 1.37 now.
+
+14 scenarios, 45598 ops, 105702 lines, 0 differ. Of 493 mutations, 474
+are caught and 19 are equivalent. The full pass ran before the corners
+scenario existed. The other thirteen scenarios are unchanged, so its
+catches still hold. `--only` over those twelve, `wall_continue` and
+every equivalent catches the thirteen and none of the nineteen.
+
+The first pass also caught `wall_continue`, which the list had as
+equivalent. A pass that finds no wall does leave the probe where it was,
+but the stubbed PointInShaft prints each call, so the extra passes show.
+It is off the list.
+
+The nineteen equivalents:
+- Ten are the dead boom. After the eye, Update translates the boom once
+  more by (lagx, lat, -height) and turns it by
+  `angle + raise * (maxAngle - angle)`. Outside, nothing reads it, since
+  the matrix is the look-at from the eye. Inside, `o` is never worked out,
+  `raise` is 0 and `lagx` is `lag`. The image works it all out anyway.
+  So `raise`, `wall.z`'s lift, `o` and its three folds, `lagx` there,
+  and `maxAngle` from either source (that turn is its only reader)
+  cannot show. The port keeps the dead code, in the image's order.
+- The push's fourth lane: summing into it, and clearing it on the way
+  out. The eye's pad reaches only the look-at, which never reads it.
+- Also carried over: the signed bASin (two), the destructor's vtable,
+  GetLookbackCar's cop-manager test, the braking spring's `ok`,
+  `!canLB` on the cop's turn, and the pitch's first mask.
+
+Two older mutations, `ext_incar` and `ext_pov0`, matched text that Update
+now repeats. Their patterns carry more context now.
+
+The whole suite passes, all 78 commands. The CIA builds and `check_3dsx`
+finds its relocations OK. Nothing builds a drive camera in the game until
+7d, so Azahar was not run.
+
+### Next
+
+7c: the orbit mover's retail pass. Player::ChangeCameraMover
+(`0x00176ae8`, 2372 bytes) builds an OrbitCarCameraMover for most types,
+from a `Car *`. The port's is still the demo's and follows a CamCarView.
+Retail's GetTarget (`0x001580e0`) returns the car's GeometryPosition
+(+80), not Position. Its Update (`0x00158298`) returns while the game
+flow is paused, and follows `pCurrentWorld->Helicopter`. Then 7d:
+ChangeCameraMover and CycleDriveCameraPOVIndex (`0x001786d0`), with the
+drive and orbit paths ported and the other seven movers as seams.

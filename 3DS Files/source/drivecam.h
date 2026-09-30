@@ -1,11 +1,10 @@
 // drivecam -- DriveCameraMover (CM_DRIVE), the chase camera a player drives
 // behind: CameraMover.obj's biggest class. The addresses are retail's.
 //
-// This is step 7a-2b: the constructor, the destructor, ResetState, the
-// virtuals but Update, the corrections, CalculateLookbackAngle and the
-// accessors. Update (0x0015c880), GetLookbackCar and the two retail-only
-// wall helpers Update calls (0x00157930, 0x00157b60) are 7b's, and until
-// then the vtable's Update is the base's, which does nothing. The demo's
+// This is step 7b: the whole class -- the constructor, the destructor,
+// ResetState, the virtuals with Update (0x0015c880), GetLookbackCar, the
+// two retail-only wall helpers Update calls (0x00157930, 0x00157b60), the
+// corrections, CalculateLookbackAngle and the accessors. The demo's
 // GetBoomDistToWall and its two line-segment helpers are still in the image
 // with no caller. Nothing builds a drive camera before
 // Player::ChangeCameraMover (7c).
@@ -14,8 +13,10 @@
 // - The TopologyCoordinate the mover carries is retail's 704 bytes, not the
 //   demo's 560, so every field after it is 144 further on (DisableLag 884,
 //   PerfectFocus 992).
-// - The constructor and ResetState take LastCarSpeed from the car's
-//   State.VelocityMagnitude, where the demo's took ForwardSpeed.
+// - Update keeps the eye off the walls with a push out of every polygon
+//   within the wall gap (0x00157930) and turns the look-at to hold the car
+//   where the boom would have put it on screen (0x00157b60); the demo's
+//   shortened the boom to the nearest wall.
 // - GetTarget is the car's GeometryPosition, where the demo's was its
 //   Position.
 // - The fallback CameraInfo is CarTypeInfoArray[0]'s, read inline; the demo
@@ -41,9 +42,7 @@
 struct Car;
 
 // The fields and their names are the demo's .mdebug record (type#2542, 864
-// bytes); the offsets in the comments are retail's. The port's own offsets
-// differ from TheTopologyCoordinate on, since its TopologyCoordinate is
-// still the demo's; nothing reads a drive camera in place.
+// bytes); the offsets are retail's, and the port's are the same.
 typedef struct DriveCameraMover {
     CameraMover  base;                      //    0
     bMatrix4     TM;                        //   48
@@ -79,6 +78,34 @@ typedef struct DriveCameraMover {
 // Retail's vtable, 0x002b1dd0.
 extern const CameraMoverVtbl DriveCameraMoverVtbl;
 
+// The tuning Update reads, retail's gp words with their values. The Drive*
+// set stands in for the POV when DriveUseTweakables is set; the Cam* set
+// shapes the acceleration lag. CamGlobalMultiplier is set to 1 on every
+// Update.
+extern int32_t  DriveUseTweakables;         // gp-21760, 0
+extern float    DriveLag;                   // gp-21756, 7.3
+extern float    DriveHeight;                // gp-21752, 2.3
+extern float    DriveLatOffset;             // gp-21748, 0
+extern uint16_t DriveAngle;                 // gp-21744, 0
+extern uint16_t DriveMaxAngle;              // gp-21742, 2000
+extern float    CamGlobalMultiplier;        // gp-21636, 1
+extern float    CamAdjustment;              // gp-21632, 0.03
+extern float    CamBackAdjust;              // gp-21628, 0.012
+extern float    CamHoldTimeout;             // gp-21624, 2
+extern float    CamYawAdjuster;             // gp-21608, 6
+extern float    CamAccelScaleRatio;         // gp-21604, 0.6
+extern float    CamDecelScaleRatio;         // gp-21600, 0.045
+extern float    CamRangeCheckA;             // gp-21596, 0.7
+extern float    CamRangeCheckD;             // gp-21592, -0.3
+extern float    CamLagMultiplier;           // gp-21588, 1
+extern float    CamSpeedAdjust;             // gp-21580, 500
+extern float    CamHeightMultiplierD;       // gp-21564, 0.2
+extern float    CamAccelCap;                // gp-21560, 6
+extern float    CamDecelCap;                // gp-21556, -1
+extern float    CamDisableAdjust;           // gp-21552, 0.4
+extern float    CamBackAdjustQuicker;       // gp-21548, 3
+extern float    RoadNoiseAmplitude;         // gp-21536, 250
+
 // 0x0015c258. The base's constructor for `viewID` and CM_DRIVE, then the
 // state off `car`, which must not be NULL. `lookBack` starts the camera
 // looking back. The CameraInfo is the car type's, or CarTypeInfoArray[0]'s
@@ -99,6 +126,37 @@ void drive_cam_reset_state(CameraMover *m);
 
 // 0x0015c520.
 void drive_cam_set_pov_index(DriveCameraMover *d, int index);
+
+// 0x0015c880, the vtable's Update: the camera one frame on. The car is
+// CarToFollow, or CameraFollowThisCarInstead's while CameraFollowDefaultCar
+// is 0. The boom hangs off the car's heading outside and its body inside,
+// trails its yaw and pitch by the corrections, lengthens with the
+// acceleration lag, swings round for a look back, and outside is kept off
+// the walls and out of the car; then the shake and camera_set_matrix.
+void drive_cam_update(CameraMover *m);
+
+// 0x0015c680. The car a cop's look back turns to: a cop's chased car, and
+// *isCop set, or the cop chasing a car. NULL, with *isCop 0, when there is
+// no cop manager or no cop either way.
+struct Car *get_lookback_car(struct Car *car, int32_t *isCop);
+
+// 0x00157930. How far to move `eye` off the walls, into `out` (its fourth
+// lane 0). First ConstrainToTopology from `from` to the eye (0.01, lift 1);
+// then up to three times, every polygon in tc's table that the camera may
+// not go through and whose shaft holds the pushed eye within the gap --
+// the mover's GetWallGap for a polygon flagged 2, 0.7 for the rest --
+// pushes it out along its normal by what is left of the gap, averaged over
+// those polygons. The fourth lanes carry the planes' distances along.
+void camera_wall_offset(CameraMover *m, TopologyCoordinate *tc,
+                        const bVector3 *from, const bVector3 *eye,
+                        bVector3 *out);
+
+// 0x00157b60. The look-at matrix from `eye` to `target`, with the target
+// moved by `off` times its depth in the look-at's own frame (-x by off.x,
+// -y by off.y), up (0, 0, 1). The image passes the mover first and never
+// reads it.
+void camera_look_at_offset(bMatrix4 *out, const bVector3 *eye,
+                           const bVector3 *target, const bVector2 *off);
 
 // 0x0015c528. The split-screen set in view mode 3 and the full-screen one
 // otherwise; NULL when `index` is not below the set's count. The compare is

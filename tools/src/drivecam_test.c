@@ -1,11 +1,16 @@
-// Host harness for 3DS Files/source/drivecam.c, DriveCameraMover's small
-// members. Runs the op script tools/drivecam_check.py writes and prints the
-// transcript it diffs against the retail image, run in mipsemu over the
-// same script.
+// Host harness for 3DS Files/source/drivecam.c, DriveCameraMover. Runs the
+// op script tools/drivecam_check.py writes and prints the transcript it
+// diffs against the retail image, run in mipsemu over the same script.
 //
 // The mover carries a TopologyCoordinate, whose constructor and destructor
 // are track.c's; the harness does not link that and has its own, which print
 // what they were given. The model stubs retail's two the same way.
+//
+// Update's callees outside the camera and the maths are stubs here and in
+// the model alike: the car lookup by driver number, the cop manager's two,
+// GetYaw, road noise, the topology's SetInterestBBox, GetElevation and
+// ConstrainToTopology, PointInShaft, the car's bounding box and the camera
+// shake. Each prints what it was given and answers from the script.
 //
 // Every camera, mover, car, car type and player is filled with 0xa5 at the
 // start of each scenario (a mover again before it is built), so a field the
@@ -23,14 +28,24 @@
 #include "cammover.h"
 #include "car.h"
 #include "cartypeinfo.h"
+#include "copmanager.h"
 #include "drivecam.h"
+#include "drivetarget.h"
 #include "eview.h"
 #include "player.h"
+#include "realtime.h"
+#include "shake.h"
 #include "topology.h"
+#include "track.h"
+#include "world.h"
 
-// realtime.c's and cartypeinfo.c's, which the harness does not link.
-float RealTimeElapsed = 1.0f / 60.0f;
+// realtime.c's, cartypeinfo.c's and drivetarget.c's, which the harness does
+// not link. reset() puts each back to retail's value.
+float RealTimeElapsed;
+float WorldTimeElapsed;
 const CarTypeInfo *CarTypeInfoArray;
+int32_t CameraFollowDefaultCar;
+int32_t CameraFollowThisCarInstead;
 
 #define NCAM 4
 #define NDRV 4
@@ -38,11 +53,32 @@ const CarTypeInfo *CarTypeInfoArray;
 #define NCTI 3
 #define NPL 2
 
+#define NPOLY 24
+#define NCOP 3
+#define NPUR 2
+#define NDRIVER 12
+
 static Camera cams[NCAM];
 static DriveCameraMover drvs[NDRV];
 static Car cars[NCAR];
 static CarTypeInfo ctis[NCTI];
 static struct Player players[NPL];
+static TrackPolygon polys[NPOLY];
+static tCop cops[NCOP];
+static tPursuit pursuits[NPUR];
+static char copmgr;                     // stands in for tCopManager
+
+// What the stubs answer.
+static int      poly_inside[NPOLY];
+static int      cand[NPOLY], ncand;
+static int      bydriver[NDRIVER];      // driver number -> car, or -1
+static int      copbycar[NCAR], copbychase[NCAR];
+static float    yaws[NCAR];
+static float    noise_value, elev_value;
+static bVector3 constrain_delta;
+static int      constrain_ret;
+static bVector3 box_min[NCAR], box_max[NCAR];
+static bVector3 shake_delta;
 
 static const char *nm(const void *p)
 {
@@ -90,6 +126,38 @@ static const char *nm(const void *p)
             return b;
         }
     }
+    for (i = 0; i < NCAR; i++) {
+        if (p == &cars[i].State) {
+            sprintf(b, "car%d.state", i);
+            return b;
+        }
+    }
+    for (i = 0; i < NDRV; i++) {
+        if (p == &drvs[i].TheTopologyCoordinate) {
+            sprintf(b, "d%d.tc", i);
+            return b;
+        }
+    }
+    for (i = 0; i < NPOLY; i++) {
+        if (p == &polys[i]) {
+            sprintf(b, "poly%d", i);
+            return b;
+        }
+    }
+    for (i = 0; i < NCOP; i++) {
+        if (p == &cops[i]) {
+            sprintf(b, "cop%d", i);
+            return b;
+        }
+    }
+    for (i = 0; i < NPUR; i++) {
+        if (p == &pursuits[i]) {
+            sprintf(b, "pur%d", i);
+            return b;
+        }
+    }
+    if (p == &copmgr)
+        return "copmgr";
     for (i = 0; i < NCTI; i++) {
         const char *t = (const char *)&ctis[i];
 
@@ -168,6 +236,160 @@ void topology_destroy(TopologyCoordinate *tc)
     printf("  topo destroy d%d\n", drv_index(d));
 }
 
+static int car_index(const Car *c)
+{
+    return c == NULL ? -1 : (int)(c - cars);
+}
+
+static const char *v4(const bVector3 *v)
+{
+    static char buf[8][40];
+    static int slot;
+    char *b = buf[slot++ & 7];
+
+    sprintf(b, "%s %s %s %s", fx(v->x), fx(v->y), fx(v->z), fx(v->pad));
+    return b;
+}
+
+static void pmatrix(const char *tag, const bMatrix4 *m)
+{
+    const float *f = &m->v0.x;
+    int i;
+
+    printf("%s", tag);
+    for (i = 0; i < 16; i++)
+        printf(" %s", fx(f[i]));
+    printf("\n");
+}
+
+// ------------------------------------------------ Update's stubs
+
+struct Car *world_get_car_by_driver_number(int32_t n)
+{
+    Car *c = n >= 0 && n < NDRIVER && bydriver[n] >= 0
+        ? &cars[bydriver[n]] : NULL;
+
+    printf("  bydriver %d -> %s\n", (int)n, nm(c));
+    return c;
+}
+
+static tCop *cop_by_car(tCopManager *m, struct Car *c)
+{
+    int k = copbycar[car_index(c)];
+    tCop *r = k < 0 ? NULL : &cops[k];
+
+    printf("  copbycar %s %s -> %s\n", nm(m), nm(c), nm(r));
+    return r;
+}
+
+static tCop *cop_by_chase(tCopManager *m, struct Car *c)
+{
+    int k = copbychase[car_index(c)];
+    tCop *r = k < 0 ? NULL : &cops[k];
+
+    printf("  copbychase %s %s -> %s\n", nm(m), nm(c), nm(r));
+    return r;
+}
+
+float carstate_get_yaw(CarState *st)
+{
+    int c = (int)((const Car *)((const char *)st - offsetof(Car, State))
+                  - cars);
+
+    printf("  getyaw %s -> %s\n", nm(st), fx(yaws[c]));
+    return yaws[c];
+}
+
+float track_get_road_noise(const bVector2 *p, int32_t terrain)
+{
+    printf("  noise %s %s %d -> %s\n", fx(p->x), fx(p->y), (int)terrain,
+           fx(noise_value));
+    return noise_value;
+}
+
+void topology_set_interest_bbox3(TopologyCoordinate *tc, const bVector3 *pos,
+                                 float r, const bVector3 *vel)
+{
+    int i;
+
+    printf("  bbox %s pos %s r %s vel %s\n", nm(tc), v4(pos), fx(r),
+           v4(vel));
+    for (i = 0; i < ncand; i++)
+        tc->TrackPolygonTable[i] = &polys[cand[i]];
+    tc->TotalNumTrackPolygons = ncand;
+}
+
+float topology_get_elevation(TopologyCoordinate *tc, const bVector3 *pt,
+                             int32_t *terrain, bVector3 *normal,
+                             int32_t *found)
+{
+    printf("  elev %s pt %s args %d%d%d -> %s\n", nm(tc), v4(pt),
+           terrain != NULL, normal != NULL, found != NULL, fx(elev_value));
+    return elev_value;
+}
+
+int topology_constrain(TopologyCoordinate *tc, int type, int twoSided,
+                       const bVector3 *from, bVector3 *to, float dist,
+                       float lift)
+{
+    printf("  constrain %s type %d two %d from %s to %s dist %s lift %s\n",
+           nm(tc), type, twoSided, v4(from), v4(to), fx(dist), fx(lift));
+    to->x = to->x + constrain_delta.x;
+    to->y = to->y + constrain_delta.y;
+    to->z = to->z + constrain_delta.z;
+    return constrain_ret;
+}
+
+// The plane's distance, as the model works it out: ((nx px + ny py) + nz pz)
+// + D, each step a float.
+int trackpolygon_point_in_shaft(const TrackPolygon *tp, const bVector3 *pt,
+                                float *dist)
+{
+    int k = (int)(tp - polys);
+    float d = tp->Normal.x * pt->x;
+
+    d = d + tp->Normal.y * pt->y;
+    d = d + tp->Normal.z * pt->z;
+    d = d + tp->PlaneDistance;
+    *dist = d;
+    printf("  shaft %s at %s %s %s -> %d %s\n", nm(tp), fx(pt->x), fx(pt->y),
+           fx(pt->z), poly_inside[k], fx(d));
+    return poly_inside[k];
+}
+
+void car_get_car_space_bounding_box(Car *c, bVector3 *min, bVector3 *max)
+{
+    int k = car_index(c);
+
+    printf("  box %s\n", nm(c));
+    *min = box_min[k];
+    *max = box_max[k];
+}
+
+void apply_camera_shake(int32_t view, bMatrix4 *m)
+{
+    printf("  shake view %d\n", (int)view);
+    pmatrix("   ", m);
+    m->v3.x = m->v3.x + shake_delta.x;
+    m->v3.y = m->v3.y + shake_delta.y;
+    m->v3.z = m->v3.z + shake_delta.z;
+}
+
+// Every word of the camera before CarNotToRender, then it and RenderDash by
+// name.
+static void pcam(const Camera *c)
+{
+    uint32_t w[111];
+    int i;
+
+    memcpy(w, c, sizeof w);
+    printf("    camera %s", nm(c));
+    for (i = 0; i < 111; i++)
+        printf(" %08lx", (unsigned long)w[i]);
+    printf(" carnot %s dash %08lx\n", nm(c->CarNotToRender),
+           u32(c->RenderDash));
+}
+
 static void pdrv(int j)
 {
     const DriveCameraMover *d = &drvs[j];
@@ -206,9 +428,8 @@ static void pdrv(int j)
         printf(" %s", fx(d->CamLastAccel[i]));
     printf("\n");
     if (c)
-        printf("    cam %s carnot %08lx dash %08lx fd %s dof %s near %s"
-               " far %s\n", nm(c),
-               (unsigned long)(uint32_t)(uintptr_t)c->CarNotToRender,
+        printf("    cam %s carnot %s dash %08lx fd %s dof %s near %s"
+               " far %s\n", nm(c), nm(c->CarNotToRender),
                u32(c->RenderDash), fx(c->CurrentKey.FocalDistance),
                fx(c->CurrentKey.DepthOfField), fx(c->CurrentKey.NearZ),
                fx(c->CurrentKey.FarZ));
@@ -260,6 +481,76 @@ static void query(int j)
            drive_cam_look_back_full(d));
 }
 
+// The tuning Update reads, by the checker's names, with retail's values.
+static const struct {
+    const char *name;
+    void *at;
+    int kind;                           // 0 float, 1 int32, 2 uint16
+    uint32_t value;
+} tuning[] = {
+    { "DriveUseTweakables", &DriveUseTweakables, 1, 0 },
+    { "DriveLag", &DriveLag, 0, 0x40e9999a },
+    { "DriveHeight", &DriveHeight, 0, 0x40133333 },
+    { "DriveLatOffset", &DriveLatOffset, 0, 0 },
+    { "DriveAngle", &DriveAngle, 2, 0 },
+    { "DriveMaxAngle", &DriveMaxAngle, 2, 2000 },
+    { "CamGlobalMultiplier", &CamGlobalMultiplier, 0, 0x3f800000 },
+    { "CamAdjustment", &CamAdjustment, 0, 0x3cf5c28f },
+    { "CamBackAdjust", &CamBackAdjust, 0, 0x3c449ba6 },
+    { "CamHoldTimeout", &CamHoldTimeout, 0, 0x40000000 },
+    { "CamYawAdjuster", &CamYawAdjuster, 0, 0x40c00000 },
+    { "CamAccelScaleRatio", &CamAccelScaleRatio, 0, 0x3f19999a },
+    { "CamDecelScaleRatio", &CamDecelScaleRatio, 0, 0x3d3851ec },
+    { "CamRangeCheckA", &CamRangeCheckA, 0, 0x3f333333 },
+    { "CamRangeCheckD", &CamRangeCheckD, 0, 0xbe99999a },
+    { "CamLagMultiplier", &CamLagMultiplier, 0, 0x3f800000 },
+    { "CamSpeedAdjust", &CamSpeedAdjust, 0, 0x43fa0000 },
+    { "CamHeightMultiplierD", &CamHeightMultiplierD, 0, 0x3e4ccccd },
+    { "CamAccelCap", &CamAccelCap, 0, 0x40c00000 },
+    { "CamDecelCap", &CamDecelCap, 0, 0xbf800000 },
+    { "CamDisableAdjust", &CamDisableAdjust, 0, 0x3ecccccd },
+    { "CamBackAdjustQuicker", &CamBackAdjustQuicker, 0, 0x40400000 },
+    { "RoadNoiseAmplitude", &RoadNoiseAmplitude, 0, 0x437a0000 },
+    { "CameraFollowDefaultCar", &CameraFollowDefaultCar, 1, 1 },
+    { "CameraFollowThisCarInstead", &CameraFollowThisCarInstead, 1,
+      0xffffffffu },
+    { "WorldTimeElapsed", &WorldTimeElapsed, 0, 0x3c888889 },
+    { "RealTimeElapsed", &RealTimeElapsed, 0, 0x3c888889 },
+};
+
+static void set_tuning(int i, uint32_t v)
+{
+    if (tuning[i].kind == 2) {
+        uint16_t h = (uint16_t)v;
+
+        memcpy(tuning[i].at, &h, 2);
+    } else {
+        memcpy(tuning[i].at, &v, 4);
+    }
+}
+
+static void tuning_defaults(void)
+{
+    size_t i;
+
+    for (i = 0; i < sizeof tuning / sizeof tuning[0]; i++)
+        set_tuning((int)i, tuning[i].value);
+}
+
+static void tune(const char *name, uint32_t v)
+{
+    size_t i;
+
+    for (i = 0; i < sizeof tuning / sizeof tuning[0]; i++) {
+        if (!strcmp(tuning[i].name, name)) {
+            set_tuning((int)i, v);
+            return;
+        }
+    }
+    fprintf(stderr, "bad tuning %s\n", name);
+    exit(2);
+}
+
 static void reset(void)
 {
     int i;
@@ -277,6 +568,31 @@ static void reset(void)
     CameraStopUpdating = 0;
     CurrentViewMode = 0;
     CarTypeInfoArray = &ctis[0];
+
+    memset(polys, 0xa5, sizeof polys);
+    memset(cops, 0xa5, sizeof cops);
+    memset(pursuits, 0xa5, sizeof pursuits);
+    for (i = 0; i < NPOLY; i++)
+        poly_inside[i] = 0;
+    ncand = 0;
+    for (i = 0; i < NDRIVER; i++)
+        bydriver[i] = -1;
+    for (i = 0; i < NCAR; i++) {
+        copbycar[i] = -1;
+        copbychase[i] = -1;
+        yaws[i] = 0.0f;
+        memset(&box_min[i], 0, sizeof box_min[i]);
+        memset(&box_max[i], 0, sizeof box_max[i]);
+    }
+    noise_value = 0.0f;
+    elev_value = 0.0f;
+    memset(&constrain_delta, 0, sizeof constrain_delta);
+    constrain_ret = 0;
+    memset(&shake_delta, 0, sizeof shake_delta);
+    pCopManager = NULL;
+    gCopManagerGetCopByCarFn = cop_by_car;
+    gCopManagerGetCopByChaseFn = cop_by_chase;
+    tuning_defaults();
 }
 
 static char *tok(void)
@@ -433,7 +749,7 @@ int main(int argc, char **argv)
             car->pCarTypeInfo = &ctis[itok()];
             car->State.Angle = (uint16_t)xtok();
             car->State.BodyMatrix.v0.z = ftok();
-            car->State.VelocityMagnitude = ftok();
+            car->State.ForwardSpeed = ftok();
             vec(&car->State.GeometryPosition);
             vec(&car->State.Position);
         } else if (!strcmp(t, "I")) {
@@ -522,6 +838,92 @@ int main(int argc, char **argv)
             m.v1.x = ftok(); m.v1.y = ftok(); m.v1.z = ftok(); m.v1.w = ftok();
             printf("  k %04x\n", (unsigned)calculate_lookback_angle(
                        &cars[f], &cars[to], &m));
+        } else if (!strcmp(t, "E")) {
+            Car *car = &cars[itok()];
+            float *m = &car->State.BodyMatrix.v0.x;
+            int i;
+
+            vec(&car->State.Velocity);
+            vec(&car->State.Acceleration);
+            for (i = 0; i < 16; i++)
+                m[i] = ftok();
+            car->State.nWheelsTouchingGround = (int32_t)xtok();
+            car->State.DriverMode = (int32_t)xtok();
+        } else if (!strcmp(t, "z")) {
+            int k = itok();
+
+            ctis[k].Body.Zdim = ftok();
+        } else if (!strcmp(t, "T")) {
+            const char *name = tok();
+
+            tune(name, xtok());
+        } else if (!strcmp(t, "g")) {
+            int n = itok();
+
+            bydriver[n] = itok();
+        } else if (!strcmp(t, "H")) {
+            pCopManager = itok() ? (tCopManager *)(void *)&copmgr : NULL;
+        } else if (!strcmp(t, "o")) {
+            int k = itok(), pur = itok(), car = itok();
+
+            cops[k].pMyPursuit = pur < 0 ? NULL : &pursuits[pur];
+            cops[k].pMyCar = car < 0 ? NULL : &cars[car];
+        } else if (!strcmp(t, "u")) {
+            int k = itok(), car = itok();
+
+            pursuits[k].pChasedCar = car < 0 ? NULL : &cars[car];
+        } else if (!strcmp(t, "O")) {
+            int c = itok();
+
+            copbycar[c] = itok();
+            copbychase[c] = itok();
+        } else if (!strcmp(t, "a")) {
+            int c = itok();
+
+            yaws[c] = ftok();
+        } else if (!strcmp(t, "n")) {
+            noise_value = ftok();
+        } else if (!strcmp(t, "e")) {
+            elev_value = ftok();
+        } else if (!strcmp(t, "p")) {
+            TrackPolygon *tp = &polys[itok()];
+
+            tp->Flags = (uint8_t)xtok();
+            tp->TheTerrainType = (uint8_t)xtok();
+            tp->Normal.x = ftok();
+            tp->Normal.y = ftok();
+            tp->Normal.z = ftok();
+            tp->PlaneDistance = ftok();
+            poly_inside[tp - polys] = (int)xtok();
+        } else if (!strcmp(t, "l")) {
+            int i;
+
+            ncand = itok();
+            for (i = 0; i < ncand; i++)
+                cand[i] = itok();
+        } else if (!strcmp(t, "t")) {
+            constrain_delta.x = ftok();
+            constrain_delta.y = ftok();
+            constrain_delta.z = ftok();
+            constrain_ret = (int)xtok();
+        } else if (!strcmp(t, "b")) {
+            int c = itok();
+
+            vec(&box_min[c]);
+            vec(&box_max[c]);
+        } else if (!strcmp(t, "s")) {
+            shake_delta.x = ftok();
+            shake_delta.y = ftok();
+            shake_delta.z = ftok();
+        } else if (!strcmp(t, "U")) {
+            int j = itok();
+
+            drvs[j].base.vtbl->Update(&drvs[j].base);
+            pdrv(j);
+            if (drvs[j].base.pCamera)
+                pcam(drvs[j].base.pCamera);
+            printf("  g follow %ld cgm %s\n", (long)CameraFollowThisCarInstead,
+                   fx(CamGlobalMultiplier));
         } else {
             fprintf(stderr, "bad op %s\n", t);
             return 2;

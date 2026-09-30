@@ -562,11 +562,11 @@ The three equivalent mutants:
 ## The drive camera
 
 `CM_DRIVE`, `DriveCameraMover`, is the chase camera a player drives behind,
-and `CameraMover.obj`'s biggest class. `drivecam.c` has every member but
-`Update` (`0x0015c880`, 6056 bytes) and the helpers only `Update` calls,
-which are step 7b's. The vtable's `Update` stays the base's until then, and
-it does nothing. `camerainfo.h` lays out the car type's `CameraInfo` and its
-`POV`s. The addresses are retail's.
+and `CameraMover.obj`'s biggest class. `drivecam.c` has all of it. Step 7a
+ported the members around `Update`, and step 7b ported `Update`
+(`0x0015c880`, 6056 bytes) with the helpers only it calls. `camerainfo.h`
+lays out the car type's `CameraInfo` and its `POV`s. The addresses are
+retail's.
 
 | address | what |
 |---------|------|
@@ -583,8 +583,9 @@ it does nothing. `camerainfo.h` lays out the car type's `CameraInfo` and its
 | `0x0015c158`, `0x0015c1d0`, `0x0015c218` | `GetCorrectionYaw`, `GetCorrectionPitch`, `GetInCarCorrectionAngle` |
 | `0x0015c5a8` | `CalculateLookbackAngle(Car *, Car *, const bMatrix4 *)` |
 | `0x0015fbf8` .. `0x0015fc9c` | the inline accessors' out-of-line copies |
-| `0x0015c680` | `GetLookbackCar`, 7b's |
-| `0x00157930`, `0x00157b60` | the wall helpers `Update` calls, new in retail and unnamed; 7b's |
+| `0x0015c880` | `Update` (+20), 6056 bytes |
+| `0x0015c680` | `GetLookbackCar` |
+| `0x00157930`, `0x00157b60` | the wall push and the look-at offset `Update` calls, new in retail and unnamed; the port's `camera_wall_offset` and `camera_look_at_offset` |
 | `0x00157c60` | new and unnamed: `BumperCameraMover::Update` calls it, and it calls both wall helpers |
 | `0x0015c708` | `GetAccelLag`: nothing calls it or points at it |
 | `0x0015e028` | `GetBoomDistToWall`, and `DistanceToLineSegment` and `IntersectLineSegments` after it: the same, dead in retail |
@@ -594,8 +595,8 @@ it does nothing. `camerainfo.h` lays out the car type's `CameraInfo` and its
 `.mdebug` record (864 bytes), and everything from `TheTopologyCoordinate` on
 is 144 bytes further on, because retail's `TopologyCoordinate` is 704 bytes
 to the demo's 560. So `DisableLag` is at 884 and `PerfectFocus` at 992. The
-port's own offsets still differ from there on, since its
-`TopologyCoordinate` is the demo's. Nothing reads a drive camera in place.
+port's `TopologyCoordinate` is retail's now, so its offsets are the same.
+Nothing reads a drive camera in place.
 
 **The constructor** is `(viewID, car, povIndex, lookbackSpeed, disableLag,
 lookBack, perfectFocus)`. It runs the base's for `viewID` and `CM_DRIVE`,
@@ -604,8 +605,10 @@ yaw (`State.Angle`) and pitch (`bASin` of `BodyMatrix.v0.z`, masked to 16
 bits). It builds the `TopologyCoordinate`, stores the three arguments,
 clears the acceleration lag, its twenty samples and its timers, and sets
 `CamAdjustMultiplier` and `TouchingGroundFactor` to 1. `lookBack` sets
-`DesiredLookBackParam` to 1 or 0. `LastCarSpeed` is
-`State.VelocityMagnitude`. Unless `Camera::StopUpdating` is set, it clears
+`DesiredLookBackParam` to 1 or 0. `LastCarSpeed` is `State.ForwardSpeed`,
+retail's word at car +960. Step 7a named that word `VelocityMagnitude`.
+`Update`'s speed tests read the same word, and they only make sense as the
+forward speed. Unless `Camera::StopUpdating` is set, it clears
 the camera's `CarNotToRender` and `RenderDash`. A detached mover (view -1)
 has no camera, so it can be built only while that flag is set. The
 `CameraInfo` is the car
@@ -673,10 +676,9 @@ read `DesiredLookBackParam`, where the virtual `IsLookingBack` reads
 1 or 0.
 
 **Retail against the demo**: the three new virtuals, the record's larger
-`TopologyCoordinate`, `LastCarSpeed` from `VelocityMagnitude` where the
-demo read `ForwardSpeed`, `GetTarget` from `GeometryPosition` where the demo
-used `Position`, and the fallback `CameraInfo` read inline where the demo
-called `GetCarTypeInfo(0)`.
+`TopologyCoordinate`, `GetTarget` from `GeometryPosition` where the demo
+used `Position`, the fallback `CameraInfo` read inline where the demo
+called `GetCarTypeInfo(0)`, and `Update`'s walls (below).
 
 **The walls moved.** The demo's `Update` calls `EnforceMinGapToWalls`
 (the demo's `0x0015a5d8`), with `GetBoomDistToWall`,
@@ -689,28 +691,240 @@ the bumper camera's: `BumperCameraMover::Update` calls it, it calls the
 same two, and its 1008-byte frame has room for a `TopologyCoordinate` of
 its own.
 
-**Waiting**: `Update`, `GetLookbackCar` and the two wall helpers are 7b's.
-`Player::ChangeCameraMover`, which builds the mover for each view, is 7c's.
-Until 7c nothing builds a drive camera.
+**Waiting**: `Player::ChangeCameraMover`, which builds the mover for each
+view, is 7c's. Until 7c nothing builds a drive camera.
+
+### `Update`
+
+One frame of the chase camera, in the image's order. `dt` is
+`WorldTimeElapsed`. The matrix goes to `SetCameraMatrix` with
+`RealTimeElapsed`.
+
+**The car and the look back's rate.** A look back *counts* when the mover
+has a player whose `Lookback` is 0, as for the three new virtuals. The car
+is `CarToFollow`, unless `CameraFollowDefaultCar` is 0. Then it is the car
+whose driver number is `CameraFollowThisCarInstead`, and that number counts
+down past each number with no car. At -1 it falls back to `CarToFollow`.
+The image calls `bRefreshTweaker` after each step down, to redraw the debug
+menu those words live in. The look back comes round at `LookbackSpeed` a
+second. The exception is when there is a cop manager, `DesiredLookBackParam`
+is exactly 1 and the look back does not count. Then `GetLookbackCar` names
+a car to look back at, and a cop turns at 4/3 a second (`1.3333334`).
+Otherwise `iLookBackParam` and `iLookBackHeight` are cleared.
+`LookBackParam` steps toward `DesiredLookBackParam` by `rate * dt` and
+stops on it.
+
+**`GetLookbackCar(car, &isCop)`** asks the cop manager for the cop driving
+`car`. If there is one, it returns the car that cop's pursuit chases and
+sets `isCop`. A cop with no pursuit gives NULL. If no cop drives `car`, it
+asks for the cop chasing `car` and returns that cop's car. With no cop
+manager it returns NULL.
+
+**The POV** is `GetPOV(POVIndex)` through the vtable. If there is none, it
+calls `SetPOVIndex(0)` and asks again. With `DriveUseTweakables` set, the
+`Drive*` words stand in for the POV's lag, angle, maximum angle, height and
+lateral offset. An outside POV's lag adds the acceleration lag below, in
+full with the tweakables, or scaled by `1 - round` without them, where
+`round = 1 - (cos(LookBackParam * 0x8000) + 1) / 2` eases 0 to 1. A negative
+acceleration lag also lowers an outside POV by `lag * CamHeightMultiplierD`.
+
+**The acceleration lag.** `CamGlobalMultiplier` is set to 1 at the top of
+every call, so every `* gm` in it multiplies by 1.
+
+- The sample is the car's `Acceleration` in car space (by the body's
+  transpose), forward part `a.x`. It is `a.x * 0.045`
+  (`CamDecelScaleRatio`) when that is below `CamRangeCheckD`, with sign -1.
+  It is `a.x * 0.6` (`CamAccelScaleRatio`) when that is above
+  `CamRangeCheckA`, with sign 1. Otherwise it is 0, with sign 0.
+- Samples go in 60 times a second: `dt * 60` plus the kept fraction, whole
+  frames only. Each frame shifts the twenty `CamLastAccel` along and puts
+  the new one first.
+- **Sign 1**, while `CamCurrentAccel` is not above 0. The lag fires when
+  the ten newest samples all reach `CamRangeCheckA` and the ten before
+  them all stay at or below it: a step up. Sign -1 is the mirror, with
+  `CamRangeCheckD` and `CamCurrentAccel` not below 0. **Sign 0**: any of
+  samples 1 to 9 strictly inside the two thresholds clears `CamLagAdjust`.
+- When it fires, `CamLagAdjust` is the ten samples' mean times
+  `max(0, 1 - |yaw| * CamYawAdjuster)`, with `CarState::GetYaw`'s yaw,
+  held between `CamDecelCap` and `CamAccelCap`. The hold timer clears.
+  With `DisableLag` set and `ForwardSpeed` above 5, the lag is scaled by
+  `CamDisableAdjust`, and by 0.75 more for `DriverMode` 1, and
+  `CamAdjustMultiplier` becomes `CamDisableAdjust`. Otherwise
+  `CamAdjustMultiplier` is 1.
+- **`CamCurrentAccel` chases it**, per 60th (`f = dt * 60`):
+  - When `CamLagAdjust` is 0, it goes back toward 0 by
+    `CamBackAdjust * f * multiplier`, twice that while above
+    `CamBackAdjustQuicker`.
+  - When positive, it steps up `CamAdjustment * multiplier * f`, times
+    0.3 within 0.4 of the lag, 0.6 within 1, and 1 past that.
+  - When negative, under 5 mph (`ForwardSpeed * 2.237`) the lag clears.
+    Otherwise it steps down by the full step.
+  - A `CamCurrentAccel` already past the lag *holds*. The hold timer runs,
+    and past `CamHoldTimeout`, or with the sample's sign 0, the lag clears.
+- The boom grows by `CamCurrentAccel * CamLagMultiplier`, fading to
+  nothing at `CamSpeedAdjust` mph (500). With `DisableLag` it adds 0.
+
+**The base** takes the world to the car's `GeometryPosition`. Inside, it
+turns by the body's transpose, then by `LookBackAngle` unless the look back
+counts. With a look-back car, `LookBackAngle` is
+`CalculateLookbackAngle(car, lbCar)` first. Outside, it turns by the
+heading only. The heading is the nose, swung toward the way the car moves
+as it passes 8.32 m/s, and all the way by 13 m/s (`w = (|v| - 8.32) *
+0.21276592`, clamped to 0..1). A velocity behind the nose is mirrored
+forward first. `bNormalize2To` makes a zero velocity (1, 0), so a car at
+rest swings toward +x by the nose's own length.
+
+**A cop's look back** (outside, with a look-back car):
+
+- `want` is the heading less the bearing to that car. Within 45 degrees of
+  straight back it is 0, and the rise over the roof is `0.75 * add`, else
+  `add`. `add` is 0.4, or 0 in view mode 3, and the target height is
+  `Body.Zdim - height` plus that rise.
+- `iLookBackParam` goes the short way round. It moves 60000 BAM a second
+  times the rate while more than 10000 off, or while the car is past 50 m
+  and `want` is not 0. Otherwise it moves 20000. It stops on `want` and is
+  masked to 16 bits.
+- `iLookBackHeight` steps toward the target height at the rate, and
+  `LookBackAngle` is `iLookBackParam`.
+- Coming round from just short of 45 degrees to a far car straight back
+  wraps `want` to 65536, whose low half is 0, so that step is the slow one.
+
+**The boom, outside.**
+
+- **Yaw.** `TouchingGroundFactor` moves by 0.24316 a frame, down with
+  fewer than three wheels on the ground and up otherwise, held to 0..1. The
+  yaw is the heading's turn since last frame plus `LastBoomYaw`, then that
+  plus `GetCorrectionYaw` of itself times the factor times `dt`.
+- **Pitch.** It starts from the body's pitch `p`. While `LookBackAngle`
+  is 0, `p` is eased first. In the air (factor 0) a nose-up pitch loses a
+  ninth, and a nose-down one loses a third of the way to level. On the
+  ground each gains the same. Then `s = LastBoomPitch - p`, and
+  `s = LastBoomPitch + GetCorrectionPitch(s) * dt * 25`.
+- **Road noise.** `RoadNoiseAmplitude` (250) times
+  `GetRoadNoise(Position.xy, dirt)` adds to the pitch.
+- `LookBackAngle` then turns the boom unless the look back counts.
+- **Inside**, the four boom words are seeded from the car instead.
+- **A dead branch.** The image keeps its "in the air" factor as ±1 and
+  then tests it against 0. That branch never runs, and the port keeps it.
+
+**A counted look back** swings the boom round behind by `LookBackParam`
+`p`, where `t = 1 - p`:
+
+- The height goes to `t * height - 3p`, or `- p` in view mode 3.
+- The lag goes to `t * lag + 18p`, or `16p` in view mode 3.
+- The pitch goes down by `t * angle + 5200p`, or `3540p` in view mode 3.
+
+**The eye, outside.**
+
+- With a look-back car, the height adds `iLookBackHeight` and the lag is
+  2.24.
+- The eye is the inverse of the base times the boom times
+  `(lag, lat, -height)`.
+- The topology's interest box is centred midway between the eye and the
+  car. Its radius is half their distance plus 1, and it is given the car's
+  velocity.
+- The car's position in eye space, `pc`, gives the screen offset
+  `-clamp(1 / pc.x, ±1000) * (pc.y, pc.z)`.
+- The wall push (below) moves the eye.
+- Without a look-back car, an eye inside the car's reach (the larger of
+  the car-space box's `|min.x|` and `max.x`, plus 0.7) is lifted onto that
+  sphere, and `raise` is the old height over the new.
+- The push is taken back into boom space and folded into the height, the
+  lateral offset and the lag.
+
+**The matrix.** The boom translates by `(lag, lat, -height)` and pitches
+down by `angle + raise * (maxAngle - angle)`. Outside, the matrix is the
+look-at offset (below) from the eye to the car's `Position`. Inside, the
+eye stays 0.7 over `GetElevation`. A lifted eye's matrix is the inverse of
+the lifted one, and an unlifted eye's is the base times the boom. Then it
+turns by `eRotateX` 16384 and `eRotateY` `0xc000`, the camera's axes.
+
+Outside, nothing reads that translate and turn, since they come after the
+eye. The image still works out the push folded back into boom space,
+`raise`, and the turn, and then drops them. The port does the same. Inside,
+there is no push and `raise` is 0, so `maxAngle` never counts, whether it
+comes from the POV or from `DriveMaxAngle`.
+
+**The camera's words.**
+
+- Unless `StopUpdating` is set:
+  - `RenderDash` is cleared.
+  - Inside, `CarNotToRender` is the car, and the dash is drawn for
+    `POV_INCAR` without a full look back.
+  - Outside, `CarNotToRender` is NULL.
+  - The field of view is 16384 in-car and on the bumper, and 13020
+    outside.
+- `NearZ` is 0.4 in-car and 0.5 otherwise, even while stopped.
+- Then the shake.
+- `TargetDistance` is the camera's current position's distance to the car,
+  from before this frame's matrix is set.
+- Unless `PerfectFocus` is set, the focal distance is 15 and the depth of
+  field 65.
+- Then `SetCameraMatrix`. A counted look back leaves `LookBackAngle` 0.
+- The image works out the bumper's `|ForwardSpeed|` and drops it.
+
+**The wall push** (`0x00157930`, `camera_wall_offset`):
+
+- It starts with `ConstrainToTopology` from the car's position to the eye
+  (two-sided, 0.01, lift 1).
+- Then, up to three times, it looks at every polygon in the interest table
+  whose terrain the camera may not go through (all but terrains 16, 28,
+  29, 30 and 32). A polygon counts when its shaft holds the pushed eye
+  within the gap: `GetWallGap` for a polygon flagged 2, 0.7 for the rest.
+  Each such polygon pushes along its normal by what is left of the gap,
+  and the pushes are averaged.
+- A pass that finds none ends it.
+- Every sum is a four-lane VU0 add. The fourth lanes carry the planes'
+  distances along, and nothing reads them. The result's fourth lane is 0,
+  and `Update` multiplies it through the boom's matrix.
+
+**The look-at offset** (`0x00157b60`, `camera_look_at_offset`) builds the
+look-at from the eye to the target, up (0, 0, 1), and moves the target in
+that frame by the offset times its depth. Then it builds the look-at again
+to the moved target. The image passes the mover and never reads it.
+
+**Every float constant** in these three functions was checked bit for bit
+against the words the image loads. The heading's `1 / 4.7` is `0.21276592`
+(`0x3e59df4f`). The `0.212766` first written here is six units off in the
+last place, and no transcript showed it. The tuning words' initial values are
+retail's.
 
 ### The drive camera, cross-checked
 
-`tools/drivecam_check.py` runs retail's code in `mipsemu`: the constructor,
-the destructor through the vtable, `ResetState`, `SetPOVIndex`, every
-vtable slot but `Update` and `Render`, the three corrections,
-`CalculateLookbackAngle` and the out-of-line accessors. They run over the
-base, the `Camera` constructor, `bASin`, `bATan` and retail's own `eView`
-table. `tools/src/drivecam_test.c` runs the port over the same script.
+`tools/drivecam_check.py` runs retail's code in `mipsemu`:
 
-Only `TopologyCoordinate`'s constructor and destructor are stubs. They print
-which mover called them, and what they would write is left to their own
-checker. Every camera, mover, car, car type and player starts from a `0xa5`
-fill, so what a call leaves alone shows.
+- the constructor, the destructor through the vtable, and `ResetState`
+- `SetPOVIndex` and every vtable slot but `Render`, `Update` included
+- the three corrections, `CalculateLookbackAngle` and the out-of-line
+  accessors
+- `GetLookbackCar` and the two wall helpers
 
-The script is built to reach three things:
+They run over the base, the `Camera` constructor, `SetCameraMatrix`, the
+`eMath` matrices, `bASin`, `bATan`, `bCos`, `bNormalize` and retail's own
+`eView` table. `tools/src/drivecam_test.c` runs the port over the same
+script.
+
+What `Update` reaches outside the class is stubbed on both sides, and each
+stub prints its arguments:
+
+- `TopologyCoordinate`'s constructor and destructor
+- `GetCarByDriverNumber`, `bRefreshTweaker`, the cop manager's
+  `GetCopByCar` and `GetCopByChase`, and `CarState::GetYaw`
+- `GetRoadNoise`
+- `SetInterestBBox`, which fills the interest table from a scenario's list
+- `GetElevation`, `ConstrainToTopology` and `PointInShaft`, whose distance
+  is the plane's, summed in the image's order
+- `GetCarSpaceBoundingBox` and `ApplyCameraShake`
+
+What they return is the scenario's. Each of those functions has its own
+checker. Every camera, mover, car, car type, player, polygon, cop and
+pursuit starts from a `0xa5` fill, so what a call leaves alone shows.
+
+The members around `Update` have eight scenarios, built to reach three
+things:
 
 - **The look back.** The players' `Lookback` words take 0, 1, 2 and -1, and
-  23 of the 393 queries count a look back.
+  some of the queries count one.
 - **`CalculateLookbackAngle`'s thresholds.** Inputs exactly on ±0.7071 and on
   a 0 side. A search also builds directions within 1e-6 of the threshold,
   where adding the squares in another order, the dots in another order, or
@@ -718,19 +932,109 @@ The script is built to reach three things:
   four inputs for each of the three.
 - **`ResetState` against Update's state.** Before most resets the walk
   scribbles distinct words over every field only `Update` writes, standing
-  in for the frames 7b will run. Without that, those fields are still the
+  in for frames of `Update`. Without that, those fields are still the
   constructor's 0s and 1s, and dropping any of their resets changes nothing.
 
-    python tools/drivecam_check.py            # 8 scenarios, 2941 ops, 7406 lines, 0 differ
-    python tools/drivecam_check.py --mutate   # 149 mutations, 146 caught, 3 equivalent
+`Update` has six more. Each drives four cars frame by frame, simulated in
+calm, pulling, braking and airborne spells. Every car has a mover except
+in the last scenario, which has one. Before each frame's `Update` it sets
+the stubs' answers: the polygons and their planes near the eye, the
+elevation, the constrain's nudge, the car-space box and the shake.
 
-The three equivalent mutants:
+- **The edges.** A boom of no length on a car whose `GeometryPosition` is
+  its `Position` (the screen offset's 1/0), and a short boom inside the
+  car's reach. Speeds of 0, 250, 30 and -4, and a grid of speeds and
+  pitches across the heading's 8.32 and 13 m/s. The lag held past its
+  timeout at a tenth of a second a frame, with the lag disabled and not,
+  and with `CamBackAdjustQuicker` low enough to reach.
+- **The chase.** Four cameras on four views, with the POV and the view mode
+  moving under them, and POV indices past the end, so `GetPOV` comes back
+  NULL.
+- **The look back.** Movers whose player counts the look back, the wish to
+  look back flipping, in split screen and full.
+- **The cops.** One car is a cop chasing another. The chased car is pinned
+  at one bearing after another, near and past 50 m, so `iLookBackParam`
+  comes round both ways, fast and slow, stops on its target, and wraps,
+  including the wrap to 65536. The boom is lowered partway so the rise over
+  the roof goes up as well as down. Random scribbles of the mover's words
+  are held off while it settles.
+- **The tuning.** `DriveUseTweakables` and `CameraFollowDefaultCar` held
+  over stretches, `CameraFollowThisCarInstead` counting down past missing
+  drivers, `StopUpdating` held over twelve frames, and every `Cam*` word
+  and both elapsed times changed at random.
+- **The corners.** One outside camera, not looking back, on a car driven
+  slowly near the origin through fixed spells. A look back would get in
+  the way twice: its round of 1 takes the lag out of the POV's boom, and
+  its `LookBackAngle` takes the pitch off the nose. Near the origin, a
+  last-place change in the lag survives into the eye: dividing by
+  `CamSpeedAdjust` instead of multiplying by its reciprocal, or grouping
+  the product another way. Hundreds of metres out, it rounds away.
+  `CamLagMultiplier` is 1.37, because at its default of 1 either grouping
+  is exact. In turn, it holds:
+  - `StopUpdating` over the first frames, while the camera's focus is
+    still 0
+  - the lag's pull and brake with `DriveUseTweakables` 1 and `DriveLag` 0,
+    then 7 and 5, then the POV's words
+  - one sample of pull, nine calm and then the pull, so that only the
+    twentieth sample holds the lag back
+  - the lag disabled
+  - `CamSpeedAdjust` under the car's speed
+  - two brakes through walking pace with the lag held
+  - the nose straight up, where `bASin` gives 16384, on the ground and in
+    the air
+  - `CameraFollowThisCarInstead` at 0 with no car for driver 0
+  - a cop's look back wanted half way, then at a chased car 45 m off at
+    50 degrees either side, between the step speeds' distances
 
-- **Not setting the vtable in the destructor.** The base's destructor, run
-  next, sets its own, and nothing reads it in between.
-- **Dropping the 16-bit mask on the pitch, in the constructor and in
-  `ResetState`.** The image masks `bASin`'s result (`andi 0xffff`), and the
-  cast mirrors that, but the port's `bASin` already returns `r & 0xffff`.
+  The random scenarios never lined up any of these. Each line they
+  reach had already run. The first mutation pass found the twelve
+  changes the other scenarios could not see.
+
+Under `gcov -b` over this script, every line and branch of `Update`, the
+wall push, the look-at offset and `GetLookbackCar` runs, except for three
+groups:
+
+- `GetLookbackCar`'s answer with no cop manager, which `Update` never asks
+  for.
+- The retail dead branch above.
+- Branches the code rules out: a NaN `DesiredLookBackParam`, and a
+  look-back car while the look back counts.
+
+    python tools/drivecam_check.py            # 14 scenarios, 45598 ops, 105702 lines, 0 differ
+    python tools/drivecam_check.py --mutate   # 493 mutations, 474 caught, 19 equivalent
+
+The nineteen equivalent mutants:
+
+- **The dead boom, ten of them.** After the eye comes one more translate
+  by `(lagx, lat, -height)` and one more turn by
+  `angle + raise * (maxAngle - angle)`. Outside, nothing reads that
+  boom, since the matrix is the look-at from the eye. Inside, the push
+  folded back into boom space (`o`) is never worked out, `raise` is 0
+  and `lagx` is `lag`. So nothing that only feeds them shows:
+  - how `raise` is worked out
+  - the lift added to `wall.z`
+  - `o`'s matrix, and each of its three folds
+  - `lag` for `lagx`
+  - `maxAngle` for `maxAngle - angle`
+  - `maxAngle` from the POV's `Angle`, or from the POV in place of
+    `DriveMaxAngle`, since that turn is the only reader
+- **The push's fourth lane, twice**: summing no plane distance into it,
+  and not clearing it on the way out. `PointInShaft` reads each probe's x,
+  y and z only. The push is stored with pad 0. Without that store, the
+  lane would reach only the eye's pad, which the look-at never reads, and
+  `o`.
+- **Treating `bASin`'s result as signed**, in the constructor and in
+  `ResetState`. The port's `bASin` already returns 0..`0xffff`.
+- **Dropping the destructor's vtable store.** The base's destructor, next,
+  stores its own.
+- **Dropping `GetLookbackCar`'s cop-manager test.** `Update` calls it only
+  when `pCopManager` is set.
+- **Setting the braking spring's `ok` to 1 instead of -1.** It is only
+  ever tested against 0.
+- **Dropping `!canLB` from the cop's turn to the chased car.** `lbCar` is
+  NULL whenever the look back counts.
+- **Dropping the pitch's first 16-bit mask.** The correction takes
+  `(uint16_t)s`, and `s` is masked again after it.
 
 ## Divergences from the disc
 

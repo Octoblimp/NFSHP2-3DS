@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-09-29), after TerrainType's retail pass. `HANDOFF.md` is the running
+(2026-09-29), after the drive camera's Update (7b). `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -69,7 +69,7 @@ emath_check         9 scenarios,  2418 lines, 0 differ   (42/42 mutations caught
 camera_check        7 scenarios,  1251 lines, 0 differ   (52 caught, 7 equivalent)
 cambase_check       1588 ops,     5624 lines, 0 differ   (59/59 mutations caught; retail's image)
 shake_check         4114 ops,    10604 lines, 0 differ   (95 caught, 3 equivalent; retail's image)
-drivecam_check      2941 ops,     7406 lines, 0 differ   (146 caught, 3 equivalent; retail's image)
+drivecam_check     45598 ops,   105702 lines, 0 differ   (474 caught, 19 equivalent; retail's image)
 trackroute_check   11 scenarios,  1353 lines, 0 differ   (57 caught, 1 equivalent)
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
 engine_check        8 scenarios,   414 lines, 0 differ   (56 caught, 2 equivalent)
@@ -710,10 +710,10 @@ and so replaced every boot.
      OverRideAlpha `0x0011e858`; RenderFrontEndCar is `0x00123c90`.
 
    **Step 7's first slice, 7a-1, is done** (HANDOFF.md, Session 31,
-   continued: the camera base). Step 7 is cut in four: 7a-1, the
+   continued: the camera base). Step 7 is cut in five: 7a-1, the
    foundations; 7a-2, the shake (7a-2a) and the drive camera's small
-   members (7a-2b); 7b, DriveCameraMover::Update; 7c, Player's camera
-   functions.
+   members (7a-2b); 7b, DriveCameraMover::Update; 7c, the orbit mover's
+   retail pass; 7d, Player's camera functions.
    `docs/formats/camera.md`, "Retail", has the write-up.
    - Retail's bATan (`0x0025a890`) returns 0 below a squared length of
      1e-4 (gp-26336), and eMulVector (`0x0011b300`) takes a -0 lane in as
@@ -764,7 +764,7 @@ and so replaced every boot.
      CalculateLookbackAngle and the accessors. `camerainfo.h` lays out
      CameraInfo (272 bytes) and POV, and CarTypeInfo carries it at 960.
    - The vtable's Update is the base's, which does nothing, until 7b.
-     Nothing builds a drive camera until 7c.
+     Nothing builds a drive camera until 7d.
    - `player.h`'s word at 12 is retail's int Lookback, where the demo's
      was the float LookbackSpeed. The three new virtuals count a look back
      only while it is 0.
@@ -826,39 +826,177 @@ and so replaced every boot.
      ReplayManager in place yet, so it owes a retail pass before that
      happens.
 
-   **Next is 7b**: DriveCameraMover::Update (`0x0015c880`, 6056 bytes),
-   with GetLookbackCar (`0x0015c680`; AnimatedDriver's
-   HandleLookingBackwards calls it too) and the two wall helpers.
-   - The walls moved. The demo's Update calls EnforceMinGapToWalls, which
-     retail does not have. Retail's calls two unnamed retail-only
-     functions, `0x00157930` and `0x00157b60`, which follow
-     CameraMover::ComputeBankedUpVector. GetBoomDistToWall
-     (`0x0015e028`), DistanceToLineSegment and IntersectLineSegments are
-     still in the image, with no caller and nothing pointing at them, so
-     they are not owed. A third new function, `0x00157c60`, is
-     BumperCameraMover::Update's and calls the same two.
-     `out/dcm_walls_retail.txt` lists all three. The first (560 bytes)
-     calls TopologyCoordinate::ConstrainToTopology (`0x001528b0`),
-     TrackPolygon::PointInShaft (`0x001517d8`) and the mover's GetWallGap
-     (+84). The second (256 bytes) builds two look-at matrices.
-   - Update also calls ApplyCameraShake (from `0x0015df44`),
-     CalculateLookbackAngle, the yaw and pitch corrections, SetPOVIndex,
-     GetCarSpaceBoundingBox, and the TopologyCoordinate's SetInterestBBox,
-     GetElevation and GetRoadNoise.
-   - The mover's TopologyCoordinate is retail's 704 bytes in both the
-     image and the port now, and SetInterestBBox, GetElevation,
-     ConstrainToTopology and GetRoadNoise (`0x00153498`) are retail's. So
-     7b's checker can run them all.
-   - The first wall helper reads the terrain table (from `0x00157a00`),
-     but only ShouldCameraGoThroughIt at 13, which retail did not move.
-   - `out/dcm_update_retail.txt` and `out/dcm_update_demo.txt` are the
-     listings.
+   **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
+   continued: the drive camera's Update). `docs/formats/camera.md`,
+   "`Update`", has the write-up.
+   - `drivecam.c` has Update (`0x0015c880`), GetLookbackCar
+     (`0x0015c680`), the wall push (`0x00157930`, `camera_wall_offset`)
+     and the look-at offset (`0x00157b60`, `camera_look_at_offset`), with
+     the Drive* and Cam* tuning words at retail's values. The vtable's
+     Update is drive_cam_update now.
+   - `copmanager.h` has tCop (pMyPursuit 0, pMyCar 4) and tPursuit's
+     pChasedCar at retail's 16 (the demo's 20), `pCopManager` at retail's
+     gp-15620, and seams for GetCopByCar (`0x00224f70`) and GetCopByChase
+     (`0x00224fc8`). Nothing sets the seams until the cop manager is
+     ported.
+   - The constructor and ResetState take LastCarSpeed from
+     State.ForwardSpeed (retail car +960). 7a-2b called that word
+     VelocityMagnitude.
+   - Every float constant is checked against the words the image loads.
+     The heading's 1/4.7 is `0.21276592f` (`0x3e59df4f`). The first
+     `0.212766f` was six units off, and no transcript showed it.
+   - `drivecam_check` runs all of it in RetailEmu: 14 scenarios, 45598
+     ops, 105702 lines, 0 differ. Of 493 mutations, 474 are caught and 19
+     are equivalent. Ten of those are the boom's last translate and turn,
+     which the image works out after the eye and never reads outside. The
+     corners scenario catches the twelve that line coverage missed.
+     Every line and branch of
+     Update runs under `gcov -b`, except the no-cop-manager answer Update
+     never asks for, retail's own dead branch (`air` is ±1 and is tested
+     against 0) and combinations the code rules out.
+   - The demo's GetBoomDistToWall (`0x0015e028`) and its two line-segment
+     helpers are dead in retail and not owed. `0x00157c60`,
+     BumperCameraMover::Update's wall code, calls the same two helpers
+     and waits for the bumper camera.
+
+   **Next is 7c**: the orbit mover's retail pass. ChangeCameraMover (7d,
+   below) builds an OrbitCarCameraMover for most types, from a `Car *`.
+   `cammover.c`'s is still the demo's, which follows a CamCarView. The
+   listings are `out/orbit_ctor_retail.txt`, `orbit_update_retail.txt`,
+   `orbit_addjoy_retail.txt` and `orbit_joy_retail.txt` (out/ is ignored;
+   `retaildis.py` makes them again).
+   - The constructor (`0x00157e48`) is the demo's but for the offsets.
+     It ends with AddJoyHandlers. The destructor (`0x00158080`) calls
+     RemoveJoyHandlers first. Retail never writes TM (112).
+   - GetTarget (`0x001580e0`) returns the car's GeometryPosition (+80),
+     where the demo's returned Position. GetCarToFollow is `0x0015fb18`.
+   - Update (`0x00158298`, 1068 bytes) differs from the demo's three
+     ways:
+     - It returns at once while IsGameFlowPaused (`0x001680b8`):
+       pRaceCoordinator (gp-22216; the demo's gp-22720) is set and in
+       RCSTATE_PAUSE.
+     - FollowChopper follows `pCurrentWorld->Helicopter` (gp-22120, +24)
+       while its Plan (+728) is below 3 or is 4. That is ChopperPlan's
+       PURSUIT, HEAD_TO_STAKEOUT, AT_STAKEOUT and BOMBING_RUN. It reads
+       the CurrentPos (+832) and the matrix at +848 with its translation
+       cleared, and adds no boom offset. The demo's "mode word at
+       Player+584" was its Chopper's Plan: the demo's TopologyCoordinate
+       was 560 bytes and retail's is 704.
+     - The AngleV clamp to MinAngleV and MaxAngleV is gone.
+   - AddJoyHandlers (`0x00158100`) and RemoveJoyHandlers (`0x001581f8`)
+     register JoyHandler (`0x001586c8`) for events 46-54 on JoyPort and
+     set or clear HandlersAdded. The port's AddJoyHandler and
+     RemoveJoyHandler are in joyevent.c. JoyHandler's table is at
+     `0x002b1630`. NEXT_CAR and PREV_CAR step through Car+0 and +4 and
+     skip the World, whose CarList is the list's head.
+   - The statics are at gp-21720 .. gp-21696, with the demo's values.
+     OrbitBoomOffset is at `0x00334190`.
+   - geoview follows a CamCarView. It needs a Car, and a clamp of its
+     own on AngleV.
+   - camera_check.py models the demo's orbit mover. Its orbit scenarios
+     retire, and a RetailEmu checker like cambase_check takes over.
+
+   **Then 7d**: Player::ChangeCameraMover (`0x00176ae8`, 2372 bytes)
+   and the Player camera functions around it. `out/player_ccm_retail.txt`
+   is the listing (`python tools/retaildis.py ChangeCameraMover__6Playerib`).
+   - It builds the mover for a view. The candidates are DriveCameraMover
+     (`0x0015c258`), OrbitCarCameraMover (`0x00157e48`),
+     TrackCarCameraMover (`0x00159130`, twice), CubicCameraMover
+     (`0x0015e7b0`), ZoneFreezeCameraMover (`0x00160298`),
+     ZonePreviewCameraMover (`0x00161f98`, with a PreviewRoute and
+     TrackPathCoordinate), DebugWorldCameraMover (`0x0015b268`) and
+     TrackRouteEditorCameraMover (`0x0015c010`). It also calls
+     NisManager::DeleteNisCameraCoordinator and
+     CycleDriveCameraPOVIndex (`0x001786d0`).
+   - Read so far:
+     - It is `(Player *, int type, bool keep)`. It first deletes the
+       movers at Player+216 and +220 (virtual destructor, 3) and the NIS
+       coordinator at +224 through the NisManager at +244. If
+       pCameraMover (+200) is already that type, it returns.
+     - With `keep`, the old mover is disabled (vtable +108) and moves to
+       +204 (pSavedCameraMover), and the one there moves to +208. Without
+       `keep`, the old one is deleted (+12, flag 3).
+     - The car is Player+4, or the first car in gp-22120's list.
+     - The jump table (`0x002b3b30`, 18 words), by type:
+       - 0: none
+       - 1: Drive
+       - 2: DebugWorld
+       - 3: TrackRouteEditor
+       - 13: ZoneFreeze
+       - 14: ZonePreview
+       - 15 and 16: TrackCar, the two zone jumpers, with 1136 bytes of
+         CameraDataItems built from the PreviewRoute at +1764
+       - 17: Cubic
+       - 4-12, and anything past 17: the default, OrbitCar (208 bytes,
+         `(view, car, JOY port 1)`)
+     - Drive is bMalloc(1008, "DriveCameraMover(Player)"), then the
+       constructor with:
+       - the view, Player+24
+       - the car
+       - the POV index, `lb` Player+36
+       - LookbackSpeed gp-30468 = 300.9, a snap
+       - DisableLag, Player+40 (the settings' CameraSpring)
+       - lookBack 0
+       - perfectFocus 1
+     - Then the mover's +124 (DesiredLookBackParam) is 1.0 if Player+764
+       (bLookBack, the demo's 740) is set, and 0 otherwise. After that,
+       Player+36 = CycleDriveCameraPOVIndex(this, Player+36).
+     - `docs/retail_layout.txt` moves Player's fields in bands:
+       - +4 from ViewID (demo 20)
+       - +12 from TimeFinishedRacing (68)
+       - +20 from PlayerInputMode (176), so pCameraMover is 200 and
+         pSavedCameraMover 204
+       - +24 from pRVMCameraMover (188, now 212)
+
+       Retail's +208 looks like a word the demo lacks. The demo's names,
+       from `out/player_stab.txt` (type#2091) moved by those bands:
+       - 136 pRoute, the zone preview's PreviewRoute
+       - 216 pDemoCameraCoordinator
+       - 220 pCountdownCameraCoordinator
+       - 224 pNisCameraCoordinator
+       - 244 pNisManager
+       - 764 bLookBack
+       - 1652 myCD, the zone jumpers' CameraDataItems
+       - 1664 EyeVerts
+       - 1712 BankVerts
+       - 1760 FOVtable
+       - 1764 pJumpCamRoute
+     - At the end, a new mover's +28 (its player) is set to this.
+     - Its retail callers (`retaildis.py --callers 0x00176ae8`):
+       - Player's PlayNextNis, ServiceNis (twice), BeginDemoCameras,
+         BeginCountdownCameras and RemoveCameraMovers
+       - RequestZone (four times)
+       - ChangeDebugCameraJoyHandler (twice)
+       - UpdateNonGameState (twice)
+       - RaceCoordinator's RCStatePostRaceCallback
+
+       UpdateNonGameState and the countdown are the likely way a race
+       first gets its drive camera.
+     - CycleDriveCameraPOVIndex (308 bytes, `out/player_cycle_retail.txt`;
+       out/ is ignored, so regenerate it with `retaildis.py
+       CycleDriveCameraPOVIndex__6Playeri`):
+       - It takes the index mod 4, as C's signed remainder.
+       - Unless pCameraMover is CM_DRIVE with a CameraInfo, it returns
+         that index.
+       - Otherwise it tries up to four indices from there, stepping mod 4.
+         It skips a NULL POV. It also skips POV_INCAR when the car's
+         `pRideInfo->HasDash` is 0 and SkipFE is clear (gp-23220; the
+         demo's gp-23788).
+       - If none fits, the index is 0.
+       - Then it calls SetPOVIndex and returns the index.
+   - Cars and racing come first. Port the drive and orbit paths and
+     CycleDriveCameraPOVIndex. Leave each other mover as a named seam that
+     builds nothing until its class is ported, and say so in the source.
+   - Check Player's retail layout (`docs/retail_layout.txt`) before
+     reading `pCameraMover` and the settings in place.
+   - The orbit path builds 7c's retail orbit mover.
 
    Step 7 as a whole: Player and the chase cameras. The core is
    DriveCameraMover (CM_DRIVE). Its constructor is `0x0015c258` (420
    bytes), ResetState `0x0015c470`, and Update `0x0015c880` (6056 bytes;
    the demo's is 5380). The demo's wall code is dead in retail, and
-   Update calls two new helpers in its place (see 7b above). Player's ChangeCameraMover
+   Update calls two new helpers in its place (see 7b above). All of it is
+   ported. Player's ChangeCameraMover
    (`0x00176ae8`, 2372) picks the mover for each view. After step 7,
    step 8's InitCars sets `gCarInitRenderInfoFn`. The 3DS build gives
    Render's seams (the strips, the flares and the driver) their
