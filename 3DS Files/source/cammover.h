@@ -5,11 +5,11 @@
 // GetCameraMoverTypeName at 0x154380) and one base class with a virtual
 // Update that each of them overrides.
 //
-// This file ports the base and CM_ORBIT_CAR. The rest are deliberately left:
-// CM_DRIVE, CM_BUMPER and CM_REAR_VIEW_MIRROR need Car and its wheels
-// (task 25), CM_TRACK_CAR and CM_TRACK_FLY need a route that can answer
-// "how far around the lap is this" -- TrackRoute is ported now, but that
-// answer waits on QuickSpline.obj, which task 27 owes it -- the
+// This file ports the base and CM_ORBIT_CAR; drivecam.c ports CM_DRIVE. The
+// rest are deliberately left: CM_BUMPER and CM_REAR_VIEW_MIRROR need Car and
+// its wheels (task 25), CM_TRACK_CAR and CM_TRACK_FLY need a route that can
+// answer "how far around the lap is this" -- TrackRoute is ported now, but
+// that answer waits on QuickSpline.obj, which task 27 owes it -- the
 // CM_ZONE_* ones need the streaming world (task 27), and CM_DEBUG_WORLD,
 // CM_MAX and CM_TRACK_ROUTE_EDITOR are development tools that were left in
 // the build. CM_ORBIT_CAR comes first because it is the one the car select
@@ -27,6 +27,7 @@
 #include "bmatrix.h"
 #include "bvector.h"
 #include "camera.h"
+#include "camerainfo.h"
 #include "eview.h"
 
 // GetCameraMoverTypeName, retail's 0x00157578 (the demo's 0x00154380).
@@ -82,26 +83,6 @@ typedef struct CamCarView {
 typedef struct CameraMover CameraMover;
 typedef struct CameraMoverVtbl CameraMoverVtbl;
 
-// DriveCameraMover's records. CameraInfo, 272 bytes, is not laid out yet
-// (step 7).
-typedef struct CameraInfo CameraInfo;
-
-// A drive camera's point of view, 32 bytes (.mdebug type#1891), one of
-// CameraInfo's. Type is one of the three below: IsCameraPOVInCar reads it.
-#define POV_BUMPER   0
-#define POV_INCAR    1
-#define POV_OUTSIDE  2
-
-typedef struct POV {
-    int32_t  Type;          //  0  POV_*
-    float    Lag;           //  4
-    float    Height;        //  8
-    float    LatOffset;     // 12
-    uint16_t Angle;         // 16
-    uint16_t MaxAngle;      // 18
-    char     Pad[12];       // 20
-} POV;                      // 32
-
 // The offsets are the disc's, from the .mdebug record for CameraMover
 // (44 bytes), and retail's are the same.
 struct CameraMover {
@@ -129,8 +110,8 @@ struct CameraMoverVtbl {
     void  (*Render)(CameraMover *m, eView *view);  // +28
     void  (*AddJoyHandlers)(CameraMover *m);       // +36
     void  (*RemoveJoyHandlers)(CameraMover *m);    // +44
-    CameraInfo *(*GetCameraInfo)(CameraMover *m);  // +52
-    POV  *(*GetPOV)(CameraMover *m, int index);    // +60
+    const CameraInfo *(*GetCameraInfo)(CameraMover *m); // +52
+    const POV *(*GetPOV)(CameraMover *m, int index); // +60
     int   (*IsExteriorView)(CameraMover *m);       // +68
     int   (*IsLookingBack)(CameraMover *m);        // +76
     float (*GetWallGap)(CameraMover *m);           // +84
@@ -148,6 +129,11 @@ struct CameraMoverVtbl {
 // 1 (0x0015fd20); GetWallGap returns 0.7 (0x00157920, gp-31288); GetTarget
 // is the camera's (0x0015fcb0).
 extern const CameraMoverVtbl CameraMoverBaseVtbl;
+
+// The base's do-nothing Update (the joystick pair and ResetState are the
+// same) and Render, which the other movers' vtables share.
+void camera_mover_nothing(CameraMover *m);
+void camera_mover_render(CameraMover *m, eView *view);
 
 // Retail's 0x001576e8 (the demo's 0x001544f0). It sets the base vtable. A
 // ViewID of -1 leaves the mover detached and disabled; any other value takes

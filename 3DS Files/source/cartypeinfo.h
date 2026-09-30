@@ -42,6 +42,7 @@
 
 #include "bvector.h"
 #include "bmatrix.h"
+#include "camerainfo.h"
 #include "engine.h"
 #include "langtab.h"
 #include "rigidbody.h"
@@ -162,7 +163,7 @@ typedef struct CarTypeInfo {
     AeroInfo        Aero;                                //  752
     ControlInfo     Control;                             //  768
     uint8_t         Sound[144];                          //  816  task 29
-    uint8_t         Camera[272];                         //  960  task 27
+    CameraInfo      Camera;                              //  960
     uint8_t         HudInfo[80];                         // 1232  task 21
     uint8_t         LocationProb[20];                    // 1312
     int32_t         Type;                                // 1332

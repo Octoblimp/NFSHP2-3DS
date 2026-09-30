@@ -532,8 +532,8 @@ MUTATIONS = [
      "    uint8_t         Sound[160];                          //  816  task 29"
      + NL + "    uint8_t         _sndpad[0];"),
     ("off-camera-block", CH,
-     "    uint8_t         Camera[272];                         //  960  task 27",
-     "    uint8_t         Camera[256];                         //  960  task 27"
+     "    CameraInfo      Camera;                              //  960",
+     "    uint8_t         Camera[256];                         //  960"
      + NL + "    uint8_t         _campad[16];"),
     ("off-hudinfo-block", CH,
      "    uint8_t         HudInfo[80];                         // 1232  task 21",

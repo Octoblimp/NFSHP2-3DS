@@ -38,10 +38,10 @@ const char *camera_mover_type_name(CameraMoverType t)
 
 // ------------------------------------------------------------- the base
 
-static void base_nothing(CameraMover *m) { (void)m; }
-static void base_render(CameraMover *m, eView *view) { (void)m; (void)view; }
-static CameraInfo *base_get_camera_info(CameraMover *m) { (void)m; return 0; }
-static POV *base_get_pov(CameraMover *m, int index) { (void)m; (void)index; return 0; }
+void camera_mover_nothing(CameraMover *m) { (void)m; }
+void camera_mover_render(CameraMover *m, eView *view) { (void)m; (void)view; }
+static const CameraInfo *base_get_camera_info(CameraMover *m) { (void)m; return 0; }
+static const POV *base_get_pov(CameraMover *m, int index) { (void)m; (void)index; return 0; }
 static int base_is_exterior_view(CameraMover *m) { (void)m; return 1; }
 static int base_is_looking_back(CameraMover *m) { (void)m; return 0; }
 static float base_get_wall_gap(CameraMover *m) { (void)m; return 0.7f; }
@@ -55,16 +55,16 @@ static const bVector3 *base_get_target(CameraMover *m)
 
 const CameraMoverVtbl CameraMoverBaseVtbl = {
     camera_mover_destroy,
-    base_nothing,               // Update
-    base_render,
-    base_nothing,               // AddJoyHandlers
-    base_nothing,               // RemoveJoyHandlers
+    camera_mover_nothing,       // Update
+    camera_mover_render,
+    camera_mover_nothing,       // AddJoyHandlers
+    camera_mover_nothing,       // RemoveJoyHandlers
     base_get_camera_info,
     base_get_pov,
     base_is_exterior_view,
     base_is_looking_back,
     base_get_wall_gap,
-    base_nothing,               // ResetState
+    camera_mover_nothing,       // ResetState
     camera_mover_enable,
     camera_mover_disable,
     base_get_car_to_follow,
@@ -207,15 +207,15 @@ static const bVector3 *orbit_get_target_thunk(CameraMover *m);
 static const CameraMoverVtbl OrbitVtbl = {
     orbit_destroy_thunk,
     orbit_update_thunk,
-    base_render,
-    base_nothing,               // AddJoyHandlers
-    base_nothing,               // RemoveJoyHandlers
+    camera_mover_render,
+    camera_mover_nothing,       // AddJoyHandlers
+    camera_mover_nothing,       // RemoveJoyHandlers
     base_get_camera_info,
     base_get_pov,
     base_is_exterior_view,
     base_is_looking_back,
     base_get_wall_gap,
-    base_nothing,               // ResetState
+    camera_mover_nothing,       // ResetState
     camera_mover_enable,
     camera_mover_disable,
     orbit_get_car_to_follow,

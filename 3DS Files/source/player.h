@@ -39,6 +39,13 @@ struct CameraMover;
 // the frontend. The seven one-byte fields are type 2, `char`, which the
 // image loads with `lb`; type#31 is a 32-bit bit set and type#1884 twelve
 // bytes, the name.
+//
+// Retail's word at 12 is an int, where the demo's was the float
+// LookbackSpeed: ResetToDefaults (0x001edf90) makes it 1 and ToggleLookback
+// (0x001ee2d8) turns 0 and 1 into each other and leaves anything else. The
+// drive camera counts a look back only while it is 0. Retail's record is
+// 48 bytes, with two more words it defaults to 1; the port keeps the
+// demo's 40.
 typedef struct cPlayerSettings {
     int8_t   PlayersHudState;                    //    0
     int8_t   Rumble;                             //    1
@@ -49,7 +56,7 @@ typedef struct cPlayerSettings {
     int8_t   PreferredGender;                    //    6
     uint8_t  _pad7;                              //    7
     int32_t  CameraSpring;                       //    8
-    float    LookbackSpeed;                      //   12
+    int32_t  Lookback;                           //   12  retail's; see above
     uint32_t PreferredHudFeatures;               //   16
     char     PlayerName[12];                     //   20
     Timer    BestTotalTimeRecord;                //   32

@@ -46,10 +46,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Seventy-two cross-checkers pass, plus the table generators:
+Seventy-three cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/shake_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -68,6 +68,7 @@ emath_check         9 scenarios,  2418 lines, 0 differ   (42/42 mutations caught
 camera_check        7 scenarios,  1251 lines, 0 differ   (52 caught, 7 equivalent)
 cambase_check       1588 ops,     5624 lines, 0 differ   (59/59 mutations caught; retail's image)
 shake_check         4114 ops,    10604 lines, 0 differ   (95 caught, 3 equivalent; retail's image)
+drivecam_check      2941 ops,     7406 lines, 0 differ   (146 caught, 3 equivalent; retail's image)
 trackroute_check   11 scenarios,  1353 lines, 0 differ   (57 caught, 1 equivalent)
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
 engine_check        8 scenarios,   414 lines, 0 differ   (56 caught, 2 equivalent)
@@ -751,20 +752,60 @@ and so replaced every boot.
    - `shake_check` runs retail's code in RetailEmu: 4114 ops, 10604 lines,
      0 differ. Of 98 mutations, 95 are caught and 3 are equivalent.
 
-   **Next is 7a-2b**: DriveCameraMover's constructor (`0x0015c258`),
-   destructor, ResetState, GetPOV, SetPOVIndex, GetTarget, the
-   corrections, CalculateLookbackAngle, GetLookbackCar, GetAccelLag, the
-   three new virtuals (+68, +76, +84), the accessors, and CameraInfo (272
-   bytes, which `cammover.h` does not lay out yet). `out/dcm_*.txt` are
-   the listings.
+   **7a-2b, the drive camera's small members, is done** (HANDOFF.md,
+   Session 31, continued: the drive camera's small members).
+   `docs/formats/camera.md`, "The drive camera", has the write-up.
+   - `drivecam.c` has DriveCameraMover's vtable (`0x002b1dd0`), the
+     constructor, the destructor, ResetState, SetPOVIndex, GetPOV,
+     GetTarget, GetCameraInfo, GetCarToFollow, the three new virtuals
+     (IsExteriorView, IsLookingBack, GetWallGap), the three corrections,
+     CalculateLookbackAngle and the accessors. `camerainfo.h` lays out
+     CameraInfo (272 bytes) and POV, and CarTypeInfo carries it at 960.
+   - The vtable's Update is the base's, which does nothing, until 7b.
+     Nothing builds a drive camera until 7c.
+   - `player.h`'s word at 12 is retail's int Lookback, where the demo's
+     was the float LookbackSpeed. The three new virtuals count a look back
+     only while it is 0.
+   - GetAccelLag (`0x0015c708`) has no caller, and nothing points at it,
+     so it is not ported. The in-car correction has no caller either, but
+     it is small and is ported.
+   - `drivecam_check` runs retail's code in RetailEmu: 2941 ops, 7406
+     lines, 0 differ. Of 149 mutations, 146 are caught and 3 are
+     equivalent.
+
+   **Next is 7b**: DriveCameraMover::Update (`0x0015c880`, 6056 bytes),
+   with GetLookbackCar (`0x0015c680`; AnimatedDriver's
+   HandleLookingBackwards calls it too) and the two wall helpers.
+   - The walls moved. The demo's Update calls EnforceMinGapToWalls, which
+     retail does not have. Retail's calls two unnamed retail-only
+     functions, `0x00157930` and `0x00157b60`, which follow
+     CameraMover::ComputeBankedUpVector. GetBoomDistToWall
+     (`0x0015e028`), DistanceToLineSegment and IntersectLineSegments are
+     still in the image, with no caller and nothing pointing at them, so
+     they are not owed. A third new function, `0x00157c60`, is
+     BumperCameraMover::Update's and calls the same two.
+     `out/dcm_walls_retail.txt` lists all three. The first (560 bytes)
+     calls TopologyCoordinate::ConstrainToTopology (`0x001528b0`),
+     TrackPolygon::PointInShaft (`0x001517d8`) and the mover's GetWallGap
+     (+84). The second (256 bytes) builds two look-at matrices.
+   - Update also calls ApplyCameraShake (from `0x0015df44`),
+     CalculateLookbackAngle, the yaw and pitch corrections, SetPOVIndex,
+     GetCarSpaceBoundingBox, and the TopologyCoordinate's SetInterestBBox,
+     GetElevation and GetRoadNoise.
+   - The mover's TopologyCoordinate is retail's 704 bytes in the image and
+     the demo's 560 in the port. The topology's own retail pass is still
+     owed (`tools/track_check.py`'s docstring: retail rewrote GetElevation
+     and SetInterestBBox and dropped TopologyTiming), and Update calls
+     both. So either do that pass first or stub those calls in 7b's
+     checker, as `drivecam_check` stubs the constructor and destructor.
+   - `out/dcm_update_retail.txt` and `out/dcm_update_demo.txt` are the
+     listings.
 
    Step 7 as a whole: Player and the chase cameras. The core is
    DriveCameraMover (CM_DRIVE). Its constructor is `0x0015c258` (420
    bytes), ResetState `0x0015c470`, and Update `0x0015c880` (6056 bytes;
-   the demo's is 5380). GetBoomDistToWall (`0x0015e028`) changed, and
-   DistanceToLineSegment and IntersectLineSegments did not. The demo's
-   EnforceMinGapToWalls has no match in `out/retail_map.json`; find where
-   it went first (Update may have it inlined). Player's ChangeCameraMover
+   the demo's is 5380). The demo's wall code is dead in retail, and
+   Update calls two new helpers in its place (see 7b above). Player's ChangeCameraMover
    (`0x00176ae8`, 2372) picks the mover for each view. After step 7,
    step 8's InitCars sets `gCarInitRenderInfoFn`. The 3DS build gives
    Render's seams (the strips, the flares and the driver) their

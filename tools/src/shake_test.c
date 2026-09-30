@@ -43,7 +43,7 @@ static POV povs[NPOV];
 static Car car;
 static int info_answer[2];
 static int pov_answer[2];
-static int camera_info_dummy;
+static CameraInfo camera_info_dummy;
 
 static uint32_t bits(float f)
 {
@@ -100,15 +100,15 @@ static int mov_index(const CameraMover *m)
     return m == &movs[0] ? 0 : m == &movs[1] ? 1 : -1;
 }
 
-static CameraInfo *rec_info(CameraMover *m)
+static const CameraInfo *rec_info(CameraMover *m)
 {
     int k = mov_index(m);
 
     printf("  info m%d\n", k);
-    return info_answer[k] ? (CameraInfo *)(void *)&camera_info_dummy : NULL;
+    return info_answer[k] ? &camera_info_dummy : NULL;
 }
 
-static POV *rec_pov(CameraMover *m, int index)
+static const POV *rec_pov(CameraMover *m, int index)
 {
     int k = mov_index(m);
 

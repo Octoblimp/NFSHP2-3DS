@@ -233,8 +233,8 @@ static void query(int j, int attached)
 {
     CameraMover *m = &movs[j];
     const CameraMoverVtbl *vt = m->vtbl;
-    CameraInfo *info = vt->GetCameraInfo(m);
-    POV *pov0 = vt->GetPOV(m, 0), *pov3 = 0;
+    const CameraInfo *info = vt->GetCameraInfo(m);
+    const POV *pov0 = vt->GetPOV(m, 0), *pov3 = 0;
     int ext = vt->IsExteriorView(m);
     int lb = vt->IsLookingBack(m);
     float gap = vt->GetWallGap(m);

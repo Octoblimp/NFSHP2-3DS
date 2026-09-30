@@ -738,15 +738,15 @@ MUTATIONS = [
       "    return &m->pCamera->CurrentKey.Position;"),
     M("base_slots_swapped", MOVC,
       "    base_is_exterior_view,\n    base_is_looking_back,\n    base_get_wall_gap,\n"
-      "    base_nothing,               // ResetState\n    camera_mover_enable,\n"
+      "    camera_mover_nothing,       // ResetState\n    camera_mover_enable,\n"
       "    camera_mover_disable,\n    base_get_car_to_follow,",
       "    base_is_looking_back,\n    base_is_exterior_view,\n    base_get_wall_gap,\n"
-      "    base_nothing,               // ResetState\n    camera_mover_enable,\n"
+      "    camera_mover_nothing,       // ResetState\n    camera_mover_enable,\n"
       "    camera_mover_disable,\n    base_get_car_to_follow,"),
     M("base_enable_slot", MOVC,
-      "    base_nothing,               // ResetState\n    camera_mover_enable,\n"
+      "    camera_mover_nothing,       // ResetState\n    camera_mover_enable,\n"
       "    camera_mover_disable,\n    base_get_car_to_follow,\n    base_get_target,",
-      "    base_nothing,               // ResetState\n    camera_mover_disable,\n"
+      "    camera_mover_nothing,       // ResetState\n    camera_mover_disable,\n"
       "    camera_mover_disable,\n    base_get_car_to_follow,\n    base_get_target,"),
     M("get_position_dir", MOVC,
       "    return &m->pCamera->CurrentKey.Position;\n}\n\nconst bVector3 *camera_mover_get_direction",

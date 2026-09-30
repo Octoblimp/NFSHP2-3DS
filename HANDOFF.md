@@ -9790,3 +9790,95 @@ so Azahar was not run.
 7a-2b: DriveCameraMover's constructor, destructor, ResetState and small
 members, and CameraInfo. CONTINUE.md has the list, and two follow-ups:
 the World constructor's reset, and MainLoop's UpdateCameraShakers.
+
+## Session 31, continued (2026-09-29) -- the drive camera's small members (step 7a-2b)
+
+This is 7a-2b: everything of DriveCameraMover (CM_DRIVE) but Update and
+the helpers only Update calls.
+
+### The port
+
+`drivecam.c` and `drivecam.h` are new, and `camerainfo.h` with them.
+- The record, 1008 bytes in retail. Its fields are the demo's .mdebug
+  record's, and everything from TheTopologyCoordinate on is 144 bytes
+  further on than the demo's, because retail's TopologyCoordinate is 704
+  bytes to the demo's 560. DisableLag is at 884 and PerfectFocus at 992.
+- The vtable (`0x002b1dd0`). Update, Render, the joystick pair, Enable and
+  Disable are the base's until 7b.
+- The constructor (`0x0015c258`), the destructor (`0x0015c400`),
+  ResetState (`0x0015c470`), SetPOVIndex, GetPOV, GetTarget, GetCameraInfo
+  and GetCarToFollow.
+- The three virtuals new in retail: IsExteriorView (+68), IsLookingBack
+  (+76) and GetWallGap (+84). Each counts a look back only while the
+  mover's player has a Lookback of 0.
+- The three corrections (yaw, pitch, in-car), CalculateLookbackAngle
+  (`0x0015c5a8`), and the inline accessors' out-of-line copies
+  (`0x0015fbf8 .. 0x0015fc9c`).
+
+`camerainfo.h` lays out CameraInfo (272 bytes: two counts, then four
+full-screen and four split-screen POVs) and moves POV there from
+`cammover.h`. CarTypeInfo carries a CameraInfo at 960 now, not 272 bytes.
+`cammover.h`'s GetCameraInfo and GetPOV return const pointers, and the
+base's do-nothing Update and Render are public as `camera_mover_nothing`
+and `camera_mover_render`, for the other movers' vtables to share.
+
+`player.h`'s cPlayerSettings word at 12 is retail's int Lookback, where the
+demo's was the float LookbackSpeed. ResetToDefaults (`0x001edf90`) sets it
+to 1, and ToggleLookback (`0x001ee2d8`) swaps 0 and 1.
+
+Retail against the demo: the three new virtuals, the larger
+TopologyCoordinate, LastCarSpeed from State.VelocityMagnitude (the demo's
+read ForwardSpeed), GetTarget from GeometryPosition (the demo's used
+Position), and the fallback CameraInfo read inline from
+CarTypeInfoArray[0] (the demo's called GetCarTypeInfo(0)).
+
+A scan of the image found no caller of GetAccelLag (`0x0015c708`) and
+nothing pointing at it, so it is not ported. The in-car correction has no
+caller either, but it is ported. The constructor's four callers are
+Player::ChangeCameraMover, DemoCameraCoordinator::Update, the
+NisCameraCoordinator constructor and ReplayScreen::ChangeCameraMover.
+
+`docs/formats/camera.md` has a new section, "The drive camera".
+
+### The check
+
+`tools/drivecam_check.py` is new. It runs retail's code for all of the
+above in RetailEmu, over the base, the Camera constructor, bASin, bATan and
+retail's eView table. `tools/src/drivecam_test.c` runs the port over the
+same script. Only TopologyCoordinate's constructor and destructor are
+stubs, since the port's is still the demo's.
+
+- 8 scenarios, 2941 ops, 7406 lines, 0 differ. `--mutate` runs 149
+  mutations: 146 are caught, 3 are equivalent, and none is unexplained.
+- Writing the checker turned up one bug in the draft: the non-virtual
+  IsLookingBack (`0x0015fc70`) reads DesiredLookBackParam, and the draft
+  read LookBackParam. It is `drive_cam_look_back_full` now.
+- The first mutation pass left 14 survivors. Twelve were ResetState's
+  stores to fields only Update writes: nothing in this slice moves them,
+  so they were still the constructor's 0s and 1s. The walk now scribbles
+  distinct words over all 36 of them before most resets, standing in for
+  Update, and all twelve are caught. A new mutant that zeroes
+  AmountToUseYawCorrection in ResetState, which retail leaves alone, is
+  caught too.
+- The other two are equivalent: the constructor's and ResetState's
+  16-bit mask on bASin's pitch. The image masks it (`andi 0xffff`), but
+  the port's bASin already returns `r & 0xffff`. The third equivalent
+  mutant is the destructor's vtable store, which the base's destructor
+  makes again next.
+- CalculateLookbackAngle's inputs include a searched set within 1e-6 of
+  0.7071, where another order of the sums or the dots, or a divide in
+  place of the reciprocal, crosses the threshold: four for each.
+
+The whole suite passes. The CIA builds. Nothing new runs in the game yet,
+so Azahar was not run.
+
+### Next
+
+7b: DriveCameraMover::Update (`0x0015c880`, 6056 bytes), with
+GetLookbackCar and the two wall helpers. A scan at the end of this slice
+found that the demo's wall code is dead in retail. The demo's Update calls
+EnforceMinGapToWalls, which retail does not have, and GetBoomDistToWall,
+DistanceToLineSegment and IntersectLineSegments have no caller in retail's
+image. Retail's Update calls two new unnamed functions instead, `0x00157930`
+and `0x00157b60`, and a third, `0x00157c60`, is the bumper camera's.
+CONTINUE.md has the details.
