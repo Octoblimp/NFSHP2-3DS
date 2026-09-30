@@ -1013,6 +1013,120 @@ and so replaced every boot.
        2600, retail adds words the demo lacks. Eight of the demo's bytes
        between 2396 and 2448 are gone, perhaps bLiveSplitOffset and
        fInitialLiveSplitY.
+   - **Found in the first 8a session (2026-09-30), before any code.**
+     No code is written yet and player.h is as 7d left it. Regenerate the
+     listings with `python tools/retaildis.py --addr 0x001751d8 --count
+     645` (retail) and the demo's ctor at `0x0016ee50` (2104 bytes).
+     - The map below comes from lining up the two constructors. It
+       replaces the bands where they differ:
+       - +12 for demo 68-164: TimeFinishedRacing 80, FinishAnimationLength
+         84, nZoneCurrent 88, nZonePrevious 92, nZoneCredits 96,
+         tAutoZoneTimers 104, pRoute 136, pZoneSample 140,
+         bZoneMuffleSound 144, fZoneMuffleVolume 148, 152, fFreezeZone
+         DelayTimer 156, pAverageSpeedRatio 160, tAverageSpeedTimer 164,
+         fMaxSpeedRatio 168, LastTimeCarInTrouble 172,
+         TimeToDisplayResetPrompt 176.
+       - 152 (the demo's bIgnoreNextPovChange) is a Timer in retail. The
+         ctor zeroes it with the Timers, RacingJoyHandler reads and writes
+         it, and ChangeCameraMover zeroes it.
+       - New in retail: 180, zeroed, which FillInRaceOverMessages reads;
+         and 184, a Timer, which RequestZone, ClearZoneSound and the
+         destructor read.
+       - DrivingControls 188, nGlueCount 192, PlayerInputMode 196, and
+         the camera words 200-228 with pSavedCameraMover2 at 208.
+       - +24 for demo 208-1316: ArrestNisIndex 232, TicketNisIndex 236,
+         NisFinishedCallbackParam 240, pNisManager 244, the four NIS
+         arrays at 248, 376, 504 and 632, bWrongWay 760, bLookBack 764,
+         CurrentHudFeatures 768, HudScreenHash 772, NisOverlayHash 776,
+         and the flailers from 780.
+       - +64 from demo 1340: pRadarBeep 1404, RadarTimer 1408,
+         strEventTitle 1412, strEventScore 1444, strPrevScore 1476 ...
+         pHudAnimations 1540, bCheckTopSpeed 1640, SpeedFactor 1644, myCD
+         1652, EyeVerts 1664, BankVerts 1712, FOVtable 1760, pJumpCamRoute
+         1764, Topology 1768 (704 bytes).
+       - +208 for the auto-replay words, 2472-2480. 2540 is new: the ctor
+         sets it to 1 and UpdateScoring clears it.
+       - bCollisionDetected 2544, bSmokeableHit 2548, BestLapRecordData
+         2552, BestTotalRecordData 2556, mFlailerNIS 2560 (56 bytes in
+         retail, not 40), lastCar 2600. 2616 is new.
+       - LastCrossingTime 2620, bSegmentCollisionDetected 2624,
+         baPlaceReached 2628, bShownMusicTitle 2660, CurrentJukeboxIndex
+         2664, and bRadarOffset 2668 .. HasHeardRaceOverSpeech 2692.
+       - New from 2696 to the end:
+         - the four flailers at 2700-2712, and their tops at 2716-2728
+         - a Timer at 2732, which the ctor sets to 0x7fffffff and
+           StartScoreAnimation writes
+         - 2736, which UpdateHud reads and writes
+     - The constructor, in order:
+       1. The Timers are zeroed in declaration order: 64, 68, 104-132,
+          152, 164, 172, 176, 184 and 1408. Then topology_init(1768),
+          NISOverlayManager's ctor (2560), 2620 = 0 and 2732 = 0.
+       2. It registers itself and copies the settings. Word 20 is zeroed.
+          When NumPlayers is 2 after the increment, byIndex[0]'s and
+          byIndex[1]'s word 20 point at each other.
+       3. It sets 8 (port), 12 (GetJoystickType) and 16 (number). It
+          zeroes 196, 80, 84, 2552, 2556, 88, 92, 140, 144, 148 and 156,
+          and zeroes the 8 zone timers with the credit bytes at 96+i.
+       4. It sets the views and zeroes 136, 200-228 and 768-776. Then the
+          hashes, only when TheRaceParameters' +24 and +28 are both 0:
+          - With 2 player cars, number 0 gets 772 = 0xa8eb7af0 and 776 =
+            0xd4d25ee7, and number 1 gets 0x6283be92 and 0xc17316c9. Any
+            other number gets nothing.
+          - Otherwise 772 = 0xf1f1f8e5 and 776 = 0x3ea89b7c.
+          - After either case, RP+628 nonzero makes 776 = 0x3ea89b7c.
+          Then `0x001829a8(overlay, 776)`.
+       5. It zeroes 4 and the flailer words, but not 984, 1068 or 1512.
+          It calls `bSPrintf(name, "Player%d", 1 - number)` and
+          bMalloc(320, "NisManager", 0, 16), then NisManager(mem, name,
+          number) into 244. It sets 232 = -1, 0 = 0, 240 = 0 and
+          236 = -1, zeroes the four 32-word arrays, and zeroes 192.
+       6. It calls bMalloc(16, "..\indep\src\player.cpp", 520, 16) and
+          Average(10) into 160, then zeroes 164, 168, 1540[20], 1620,
+          2544 and 180. It bMallocs 164 bytes (line 531) into 1652 and
+          512 bytes (line 532) into 1760, and zeroes 1764, 760, 764, 2480
+          and 2476. It calls bSPrintf(1444, "0") and bSPrintf(1476, "0")
+          and zeroes 2548. It zeroes 1176[12], 1224[10], 1264[5],
+          1284[4], 1112[7], 2628[8], 1372[3] and 1384[3].
+       7. It calls GetInGameSample("RadarBeep") into 1404. It zeroes
+          1408, 1624, 1104, 1108, 1628, 2616, 2624, 2660, 1368, 2668-2680
+          and 2688-2696. It sets 1644 = the float at gp-20916, 2620 =
+          (int)((float)RealTimer * f(gp-30476) * 4000 + 0.5) and
+          2664 = -1. It clears bits 0-4 of 188, through a 64-bit ld/sd at
+          184, and sets 2540 = 1640 = 1.
+       8. FindFlailerObject(0x49c15518, h, 2) for 0x464ba8ea -> 2704,
+          0xd911beac -> 2700, 0xf7f1cfb3 -> 2708 and 0xf88dd0b1 -> 2712.
+          Then GetTopLeft(chunk, &x, &y), which does not test NULL, sets
+          2720 = y(2704), 2716 = y(2700), 2724 = y(2708) - [2716] and
+          2728 = y(2712) - [2720].
+       9. It sets 2732 = 0x7fffffff and 2736 = 0.
+     - NISOverlayManager's ctor (220 bytes) zeroes 4, 8, 28 and 32 and
+       sets 36 = 40 = 1.0. It makes two bMalloc(48, "NISCubicAnimation",
+       0, 16), into 12 and 16. Each gets 0-12 zeroed, 36 = 40 = 1.0, and
+       shorts 44 = 0 and 46 = 1. `0x001829a8` stores the hash at +4. It
+       calls FlailerGetScale(hash, 0x76494c5b) twice, for 44 (x) and 48
+       (y), and FlailerGetTopLeftY for 52. All of it is HUD, so all of it
+       is seams.
+     - TheRaceParameters keeps the demo's offsets through 596: AIDemoMode
+       24, ReplayDemoMode 28, NumPlayerCars 48, NFSRaceMode 596 and
+       nMaxCops 604. DoSnapshot (`0x001ed6f8`) snapshots eleven ints at
+       604-644 where the demo has ten, then CopStrength at 648. The
+       settings follow at 652 (0x0031ab24), 48 bytes each. So one int is
+       new between 604 and 644.
+       - Still open: whether +628, the ctor's overlay test, is BeACop or
+         BeACopResetTimerAfterArrest. `retaildis.py --refs 0x0031ab0c`
+         (and 0x0031ab08) answers it, but each run takes minutes, so run
+         it in the background.
+       - The port keeps RaceParameters as loose globals in race.h. Add
+         AIDemoMode, ReplayDemoMode and PlayerSettings[2] there.
+     - The checker's plan:
+       - Link only player.c into the harness. The harness defines logging
+         stubs for topology_init, average_init, GetJoystickType, bMalloc,
+         realdriver_set_manual_transmission and
+         player_remove_camera_movers.
+       - The model stubs retail's versions of those at their addresses,
+         and its bSPrintf stub formats in Python.
+       - The port uses snprintf into the 32-byte buffers.
+       - With the flailer seams NULL, x and y read 0.
    - Leave the HUD's flailers, the NIS managers and the samples as
      seams, as 7d left the other movers.
    - After 8a comes RaceCoordinator's side. InitForRace (`0x00149988`,
