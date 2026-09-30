@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-09-29), after the topology's retail pass. `HANDOFF.md` is the running
+(2026-09-29), after TerrainType's retail pass. `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -34,7 +34,8 @@ map. A checker whose object retail changed runs two scripts through its
 one harness. The scenarios over what the port follows as retail has it
 run on `tools/retail_model.py`'s image over `extracted-retail/`. The rest
 run on the demo image, as before (`docs/retail.md`, "Two images, one
-harness"). `track_check` and `loadertable_check` do this so far.
+harness"). `loadertable_check` and `trackpath_check` do this so far.
+`track_check` runs wholly on the retail image now.
 
 **Phases 0-3 are closed.** Cars draw on the top screen out of
 `CARS\*\GEOMETRY.BIN` (task 21), the frontend makes the disc's own menu
@@ -46,10 +47,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Seventy-three cross-checkers pass, plus the table generators:
+Seventy-four cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -77,7 +78,7 @@ cardriver_check     5 scenarios,   118 lines, 0 differ   (45 caught, 1 equivalen
 steering_check      5 scenarios,   873 lines, 0 differ   (43 caught, 1 equivalent)
 rigidbody_check    10 scenarios,   935 lines, 0 differ   (76 caught, 2 equivalent)
 suspension_check   10 scenarios,  1108 lines, 0 differ   (66 caught, 2 equivalent)
-wheel_check        19 scenarios, 10695 lines, 0 differ   (145 caught, 10 equivalent)
+wheel_check        19 scenarios, 10696 lines, 0 differ   (145 caught, 10 equivalent)
 drivetrain_check   18 scenarios,   498 lines, 0 differ   (173 caught, 3 equivalent)
 drivetarget_check  22 scenarios,   897 lines, 0 differ   (243 caught, 19 equivalent)
 drivetarget_image_check 22 scenarios, 897 lines, 160 masked, 0 differ (243 caught, 19 equivalent)
@@ -89,7 +90,8 @@ physcomp_check      8 scenarios,   239 lines, 0 differ   (46 caught, 1 equivalen
 sinit_check        17 calls,        0 problems           (6/6 mutations caught)
 physicscar_check  106 scenarios, 102908 lines, 0 differ (257 caught, 6 equivalent)
 mellowmover_check  39 scenarios, 56080 lines, 0 differ  (341 caught, 5 equivalent)
-carmode_check      74 transitions, 19 resets, 36366 lines, 0 differ (484 caught, 14 equivalent)
+carmode_check      74 transitions, 19 resets, 36093 lines, 0 differ (380 caught, 11 equivalent)
+careffects_check    110 ops,       519 lines, 0 differ   (133 caught, 3 equivalent; retail's image)
 carinit_check     247 scenarios,  9637 lines, 0 differ   (168 caught, 1 equivalent; retail's image)
 difficulty_check     42 ops,       374 lines, 0 differ  (24/24 mutations caught; 68 image facts, 11 readers)
 joystick_check     64240 ops,    75891 lines, 0 differ  (246 caught, 4 equivalent)
@@ -101,7 +103,7 @@ trackpath_check     4946 ops,     4746 lines, 0 differ; retail 5557 ops, 5095 li
 average_check        482 ops,      843 lines, 0 differ  (64/64 mutations caught)
 airoute_check      14738 ops,     7224 lines, 0 differ  (86 caught, 5 equivalent)
 realcontroller_check 14096 ops,  25318 lines, 0 differ  (129 caught, 11 equivalent)
-track_check        18033 ops,    11379 lines, 0 differ  (308 caught, 6 equivalent; retail's image but road noise)
+track_check        18033 ops,    11379 lines, 0 differ  (308 caught, 6 equivalent; retail's image)
 vclip_check        11890 ops,    22389 lines, 0 differ  (280 caught, 1 equivalent)
 polyhedra_check    15907 ops,    64560 lines, 0 differ  (172 caught, 12 equivalent)
 collisionbody_check 1572 ops,    35426 lines, 0 differ  (622 caught, 24 equivalent)
@@ -776,9 +778,8 @@ and so replaced every boot.
    **The topology's retail pass is done** (HANDOFF.md, Session 31,
    continued: the topology's retail pass). `docs/formats/topology.md` has
    the write-up.
-   - `track.c` is retail's `Track.obj` (`0x001513c8 .. 0x00153984`), except
-     road noise. GetRoadNoise reads the 144-byte retail `TerrainTypeInfo`,
-     so it waits for TerrainType's retail pass.
+   - `track.c` is retail's `Track.obj` (`0x001513c8 .. 0x00153984`). Road
+     noise followed with TerrainType's retail pass, below.
    - TopologyCoordinate is retail's 704 bytes: 160 polygons, the last
      polygon at 688 and three unused words at 692. TopologyTree is 44
      bytes, with an unused word at 32. Car's TC is at 1280 in the port, so
@@ -791,12 +792,39 @@ and so replaced every boot.
      28.8. NumUpsideDown now counts what pass 3 placed.
    - BuildTrackPolygons walks every square under the box, and only while
      the box is inside (-32768, 32767). The timing is gone.
-   - `track_check` runs everything but road noise and MatchTerrainType on
-     the retail image, over retail TRACKB12: 16779 ops and 10306 lines, 0
-     differ. The demo image runs 1254 ops and 1073 lines. Of 314
-     mutations, 308 are caught and 6 are equivalent. The retail model has
-     to run bmatrix's static initialiser (`0x0025afa8`), or retail's
+   - `track_check` ran everything but road noise and MatchTerrainType on
+     the retail image, over retail TRACKB12. The retail model has to run
+     bmatrix's static initialiser (`0x0025afa8`), or retail's
      `bMulMatrix(bVector3)` loses the translation.
+
+   **TerrainType's retail pass is done** (HANDOFF.md, Session 31,
+   continued: TerrainType's retail pass). `docs/formats/topology.md` and
+   `docs/formats/car.md`'s tenth slice have the write-up.
+   - TerrainTypeInfo is retail's 144 bytes. SkidWidthMultiplier is new at
+     20 (MaybeMakeSkids, `0x001a568c`, multiplies it into
+     `WheelInfo.Width`), and everything after it is 4 bytes later. On a
+     64-bit host the record is 184 bytes.
+   - `gen_terrain_table.py` writes the table (`0x00318c00`, 33 x 144) out
+     of `SLES_507.31`. Retail changed the loose surfaces' emitter groups,
+     ROAD's skid smoke window, BOARDWALK's and COBBLESTONE's road noise
+     and METAL_GRATE's road sound.
+   - GetRoadNoise reads offsets 24 and 28, so `track.c` is all of
+     retail's `Track.obj`. `track_check` runs wholly on the retail image:
+     18033 ops, 11379 lines, 0 differ (308 caught, 6 equivalent).
+   - TriggerCarTerrainEffects (`careffects.c`) is retail's `0x00133920`.
+     Inside the splash, a player's car on every fourth world step above
+     30 m/s registers "InDeepWater" (10, once, through
+     InDeepWaterRegistered) or "InShallowWater" (1.25) with the replay.
+     The engine smokes above 0.9 of visible damage. Short of that, the
+     radiator steams when item 14's level is 3 (`0x00124d38`) and the
+     damage is above 0.65.
+   - `careffects_check` runs it in RetailEmu: 110 ops, 519 lines, 0
+     differ, 133 of 136 mutations caught and 3 equivalent.
+     `carmode_check` no longer runs slice ten.
+   - `replay.h` is still the demo's layout (retail's ReplaySnapshotList
+     is at 112 and TotalInterestingValue at 332). Nothing reads a
+     ReplayManager in place yet, so it owes a retail pass before that
+     happens.
 
    **Next is 7b**: DriveCameraMover::Update (`0x0015c880`, 6056 bytes),
    with GetLookbackCar (`0x0015c680`; AnimatedDriver's
@@ -818,44 +846,11 @@ and so replaced every boot.
      GetCarSpaceBoundingBox, and the TopologyCoordinate's SetInterestBBox,
      GetElevation and GetRoadNoise.
    - The mover's TopologyCoordinate is retail's 704 bytes in both the
-     image and the port now, and SetInterestBBox, GetElevation and
-     ConstrainToTopology are retail's. GetRoadNoise is still the demo's.
-     Either do TerrainType's retail pass first (`0x001d4428`, the table
-     at `0x00318c00`, 33 x 144, and GetRoadNoise `0x00153498`), or stub
-     GetRoadNoise in 7b's checker, as `drivecam_check` stubs the
-     constructor and destructor.
-   - What that pass owes, as far as it was read:
-     - Retail's record has one new float at 20, and everything from
-       RoadNoiseGridSpacingInverse on is 4 bytes later. GetRoadNoise
-       (`0x00153498`) is the demo's code with offsets 24 and 28 and
-       stride 144.
-     - The new float is 1.4 on the loose surfaces (dirt, grass, sand,
-       snow, mulch, their shoulders) and 1 elsewhere. Its one reader
-       seen so far is MaybeMakeSkids (`0x001a568c`), which multiplies
-       it into `WheelInfo.Width`, so call it SkidWidthMultiplier.
-     - Retail changed the data too: the emitter groups' speeds and
-       names on the loose surfaces, BOARDWALK's and COBBLESTONE's
-       road noise, and METAL_GRATE's road sound. The friction and
-       collision fields are the demo's. So the table must be generated
-       from the retail ELF, and checkers that dump the changed fields
-       against the demo image will need their own retail pass.
-     - Twenty places form the table's address (`lui 0x0032` then
-       `-29696`). Among them are TriggerCarTerrainEffects, CalcForceParameters,
-       PhysicsCar::Move, Wheel's GetDerivative, GuessGroundForce,
-       FinalizeGroundForce and MaybeMakeSkids, InitSkids, DebugTopology,
-       both tire sounds, Collision's AddImpulse and GetTerrainType,
-       GetBoomDistToWall, and 7b's wall helper at `0x00157a00`. The wall
-       helper reads only ShouldCameraGoThroughIt, at 13, which did not
-       move.
-     - `careffects.c`'s TriggerCarTerrainEffects (retail `0x00133920`)
-       reads the emitter speeds and names retail changed, and
-       `carmode_check` runs it on the demo image. So it needs a retail
-       pass as well. Retail added code at its end: an "InDeepWater" or
-       "InShallowWater" replay event (RegisterInterestingEvent,
-       `0x0013e270`), once per soaking through InDeepWaterRegistered,
-       when VelocityMagnitude is over 30. There is also a second damage check through the
-       retail-only `0x00124d38`, with 14 and a result of 3. The
-       listing is `retail_match.py --diff TriggerCarTerrainEffects__3Carf`.
+     image and the port now, and SetInterestBBox, GetElevation,
+     ConstrainToTopology and GetRoadNoise (`0x00153498`) are retail's. So
+     7b's checker can run them all.
+   - The first wall helper reads the terrain table (from `0x00157a00`),
+     but only ShouldCameraGoThroughIt at 13, which retail did not move.
    - `out/dcm_update_retail.txt` and `out/dcm_update_demo.txt` are the
      listings.
 

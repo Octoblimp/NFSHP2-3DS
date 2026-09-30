@@ -96,11 +96,16 @@ that checker's build — `sizeof Wheel 440` against 432, `woff Damage 392`
 against 384 — which is the whole argument for keeping the older checkers in
 the suite and re-running them when a new object joins the link.
 
-`TerrainTypeInfo` is 140 bytes with two `char *` in it, and the second lands
-four bytes past an eight-byte boundary, so its slack climbs 1, 2, 3 rather
-than 1, 1, 2: one term for `Name` widening, one for the pad in front of
-`SkidTextureName`, one for `SkidTextureName` widening. 152 bytes on a
-64-bit host.
+`TerrainTypeInfo` is 140 bytes in the demo with two `char *` in it, and the
+second lands four bytes past an eight-byte boundary, so its slack climbs
+1, 2, 3 rather than 1, 1, 2: one term for `Name` widening, one for the pad
+in front of `SkidTextureName`, one for `SkidTextureName` widening. Retail's
+is 144 bytes, with `SkidWidthMultiplier` at 20 and everything after it four
+bytes on ([topology](topology.md)), and `terraintype.h` is retail's now. On
+a 64-bit host the slack is then 3 from `SkidWidthMultiplier` on, plus one
+for each emitter group's pointer up to 10, and the whole is 184 bytes.
+`wheel_check`'s layout dump carries retail's offsets. Retail's table is
+33 records of 144 at `0x00318c00`, so an index into it scales by 144.
 
 ## The tuning set
 
@@ -597,7 +602,9 @@ already decided that.
 `MakeSkid` and `MakeNoSkid` on the `SkidMaker` — and belongs to task 27 with
 the rest of the skid trails. Until then `wheel_maybe_make_skids` passes the
 wheel and the time step to the `gWheelMaybeMakeSkidsFn` seam, which is NULL
-in the game and makes no skids. `MaybeMakeSmoke` (0x0019b2c8) and
+in the game and makes no skids. Retail's (`0x001a568c`) multiplies the
+terrain's `SkidWidthMultiplier` into `WheelInfo.Width`, so port that one.
+`MaybeMakeSmoke` (0x0019b2c8) and
 `MaybeMakeTireSpew` (0x0019b548) are each a bare `jr ra` in the shipped
 image: whatever particle work they used to do was compiled out, and the
 port is two empty functions with a note saying so rather than two TODOs.

@@ -369,9 +369,6 @@ static uint32_t scripted_tick(void)
     return g_tick;
 }
 
-// Slice ten's terrain under the car, when it names one.
-static int32_t g_ground = -1;
-
 // physicscar_test.c's plane, normal, terrain and noise.
 static float fake_elevation(void *topology, const bVector3 *pos,
                             int32_t *terrainOut, bVector3 *normalOut)
@@ -389,8 +386,6 @@ static float fake_elevation(void *topology, const bVector3 *pos,
     }
     if (terrainOut != NULL)
         *terrainOut = ((int32_t)(pos->x * 0.5f)) & 3;
-    if (terrainOut != NULL && g_ground >= 0)
-        *terrainOut = g_ground;
     return el;
 }
 
@@ -1462,12 +1457,6 @@ static void fake_effect(Car *c, CarEffect fx, float scale, int32_t where,
     printf("\n");
 }
 
-static void fake_splash(BaseCarSound *snd, int32_t right, int32_t level)
-{
-    printf("splash snd=%s right=%d level=%d\n", label(snd), (int)right,
-           (int)level);
-}
-
 static void fake_snd_blow(BaseCarSound *snd)
 {
     printf("sound blowout %s\n", label(snd));
@@ -1585,94 +1574,6 @@ static void s_race(void)
                label(g_car->pCarMover));
     }
     car_set_movement_mode(g_car, eNO_MOVEMENT);
-}
-
-// ------------------------------------------------------------ slice ten
-
-static char      g_fxplayer[CM_FX_PLAYER_SIZE];
-static CarDamage g_cdmg;
-
-static void s_terrain(void)
-{
-    Car *c = g_car;
-    CarState *cs = &c->State;
-    TerrainTypeInfo *t4 = &TerrainTypeInfoTable[4];
-    float min0 = t4->DriveOverMinSpeed, max0 = t4->DriveOverMaxSpeed;
-    Player *player0 = c->pPlayer;
-    int n, i, k;
-
-    printf("== terrain setup\n");
-    reg_add("fxplayer", g_fxplayer, sizeof g_fxplayer, NULL);
-    reg_add("cdmg", &g_cdmg, sizeof g_cdmg, NULL);
-    cs->Position.x = fb(cm_fx_pos[0]);
-    cs->Position.y = fb(cm_fx_pos[1]);
-    cs->Position.z = fb(cm_fx_pos[2]);
-    cs->Position.pad = fb(cm_fx_pos[3]);
-    cs->Velocity.x = fb(cm_fx_vel[0]);
-    cs->Velocity.y = fb(cm_fx_vel[1]);
-    cs->Velocity.z = fb(cm_fx_vel[2]);
-    cs->Velocity.pad = fb(cm_fx_vel[3]);
-    for (i = 0; i < 4; i++)
-        for (k = 0; k < 16; k++)
-            ((float *)(void *)&cs->WheelMatrix[i])[k] = fb(cm_fx_matrix[i][k]);
-    for (n = 0; n < CM_N(cm_fx); n++) {
-        const CmFx *x = &cm_fx[n];
-
-        printf("== fx %d\n", n);
-        if ((int32_t)c->TheMovementMode != x->move)
-            car_set_movement_mode(c, (MovementMode)x->move);
-        if (x->move == 1)
-            ((PhysicsCar *)(void *)c->pCarMover)->pEngine->NitroFlag =
-                x->engine;
-        cs->VelocityMagnitude = fb(x->vmag);
-        for (i = 0; i < 4; i++) {
-            cs->WheelTouchingGround[i] = (int8_t)x->touch[i];
-            cs->WheelTerrain[i] = (TerrainType)x->terr[i];
-            cs->WheelSlip[i].x = fb(x->slip[i][0]);
-            cs->WheelSlip[i].y = fb(x->slip[i][1]);
-            cs->WheelBottomOutMagnitude[i] = fb(x->bo[i]);
-            c->NumTimesSkidding[i] = (uint8_t)x->nts[i];
-        }
-        if (!x->dmg) {
-            c->pCarDamage = NULL;
-            RaceParametersDamageEnabled = 0;
-        } else {
-            g_cdmg.BreakableCarItemDamageAmounts = (uint32_t)x->items;
-            g_cdmg.TheBodyDamage.CompressedTotalDamage = (uint16_t)x->total;
-            RaceParametersDamageEnabled = x->enabled;
-            c->pCarDamage = &g_cdmg;
-        }
-        c->pPlayer = x->player ? (Player *)(void *)g_fxplayer : NULL;
-        c->NitroEffectFlag = x->nitro;
-        c->BlownTireBits = (uint8_t)x->bits;
-        c->NumBlownTires = (uint8_t)x->num;
-        c->pBaseCarSound = x->snd ? (BaseCarSound *)(void *)g_snd : NULL;
-        c->WiperState = x->wstate;
-        c->WiperOnTime = (uint32_t)x->won;
-        c->WiperOffTime = (uint32_t)x->woff;
-        WorldTimeFrames = x->now;
-        if (x->patch) {
-            t4->DriveOverMinSpeed = fb(x->pmin);
-            t4->DriveOverMaxSpeed = fb(x->pmax);
-        }
-        g_ground = x->ground;
-        car_trigger_car_terrain_effects(c, fb(x->dist));
-        g_ground = -1;
-        t4->DriveOverMinSpeed = min0;
-        t4->DriveOverMaxSpeed = max0;
-        printf("fx nts=%d %d %d %d wipers=%d %d %d\n",
-               (int)c->NumTimesSkidding[0], (int)c->NumTimesSkidding[1],
-               (int)c->NumTimesSkidding[2], (int)c->NumTimesSkidding[3],
-               (int)(int32_t)c->WiperOnTime, (int)(int32_t)c->WiperOffTime,
-               (int)c->WiperState);
-    }
-    c->pPlayer = player0;
-    c->pCarDamage = NULL;
-    RaceParametersDamageEnabled = 0;
-    c->pBaseCarSound = NULL;
-    c->NitroEffectFlag = 0;
-    set_blown(0, 0);
-    car_set_movement_mode(c, eNO_MOVEMENT);
 }
 
 // ------------------------------------------------------------ slice eleven
@@ -1908,7 +1809,6 @@ int main(void)
     gEspSetObjectPositionFn = fake_esp;
     gCarTriggerEffectFn = fake_effect;
     gBaseCarSoundTriggerTireBlowOutFn = fake_snd_blow;
-    gBaseCarSoundTriggerSplashFn = fake_splash;
     gCopManagerIsBeingPursuedFn = fake_pursued;
     gAICarControllerGetCurrentDrivingLineSpeedFn = fake_line_speed;
     gDeliveryMoverSetDestinationFn = fake_setdest;
@@ -1955,7 +1855,6 @@ int main(void)
     s_reset();
     s_move();
     s_race();
-    s_terrain();
     s_finish();
     return 0;
 }

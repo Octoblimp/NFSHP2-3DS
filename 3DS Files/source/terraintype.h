@@ -1,12 +1,14 @@
-// terraintype -- TerrainType.obj (0x001ca078 .. 0x001ca178) and its table.
+// terraintype -- retail's TerrainType.obj (0x001d4428 .. 0x001d4520; the
+// demo's 0x001ca078 .. 0x001ca170) and its table.
 //
 // Every track polygon carries a terrain number (topology.h's
 // TopologyTreePolygon.Type), and every consumer of that number -- Wheel's
-// friction, Track's road noise, the particle and sound systems -- reads it
-// back through TerrainTypeInfoTable, one 140-byte record per terrain. The
-// table is data (0x00310a90, 33 entries) and terraintypetab.c carries it
-// verbatim, written by tools/gen_terrain_table.py; the object's code is two
-// lookups and the static initialiser that hashes the names.
+// friction and skids, Track's road noise, the particle and sound systems --
+// reads it back through TerrainTypeInfoTable, one 144-byte record per
+// terrain (the demo's were 140). The table is data (0x00318c00, 33 entries)
+// and terraintypetab.c carries it verbatim, written out of retail's ELF by
+// tools/gen_terrain_table.py; the object's code is two lookups and the
+// static initialiser that hashes the names, the demo's but for the stride.
 //
 // Written up in docs/formats/topology.md.
 
@@ -55,7 +57,10 @@ enum {
     NUM_TERRAIN_TYPES = 33
 };
 
-// 140 bytes, `.mdebug` type#1584. The seven emitter groups are names --
+// Retail's 144 bytes: the demo's `.mdebug` type#1584 with a float at 20,
+// SkidWidthMultiplier, that MaybeMakeSkids (0x001a568c) multiplies into
+// WheelInfo.Width. The name is the port's; retail has no stabs. It is 1.4
+// on the loose surfaces and 1 elsewhere. The seven emitter groups are names --
 // `*2`, char pointers, in the stabs, and every one in the table points at
 // a string, the empty string where a terrain has none -- that the
 // particle system looks up when it needs them.
@@ -68,51 +73,52 @@ typedef struct TerrainTypeInfo {
     uint8_t     ShouldCameraGoThroughIt;     //  13
     uint8_t     _pad0[2];                    //  14
     const char *SkidTextureName;             //  16
-    float       RoadNoiseGridSpacingInverse; //  20
-    float       RoadNoiseScale;              //  24
-    float       StaticFrictionMultiplier;    //  28
-    float       DynamicFrictionMultiplier;   //  32
-    float       RollingFrictionMultiplier;   //  36
-    float       CollisionPriority;           //  40
-    float       ForceMagnitude;              //  44
-    float       ForceFrequency;              //  48
-    uint32_t    DebugTopologyColour;         //  52
-    const char *DriveOverEmitterGroup;       //  56
-    float       DriveOverMinSpeed;           //  60
-    float       DriveOverMaxSpeed;           //  64
-    const char *DriveOver2EmitterGroup;      //  68
-    float       DriveOver2MinSpeed;          //  72
-    float       DriveOver2MaxSpeed;          //  76
-    const char *SkidSmokeEmitterGroup;       //  80
-    float       SkidSmokeMinSpeed;           //  84
-    float       SkidSmokeMaxSpeed;           //  88
-    const char *TireSpewEmitterGroup;        //  92
-    float       TireSpewMinSpeed;            //  96
-    float       TireSpewMaxSpeed;            // 100
-    const char *BottomOutEmitterGroup;       // 104
-    float       BottomOutMinImpact;          // 108
-    float       BottomOutMaxImpact;          // 112
-    const char *CollisionImpactEmitterGroup; // 116
-    float       CollisionImpactMinForce;     // 120
-    float       CollisionImpactMaxForce;     // 124
-    const char *CollisionScrapeEmitterGroup; // 128
-    float       CollisionScrapeMinSpeed;     // 132
-    float       CollisionScrapeMaxSpeed;     // 136
-} TerrainTypeInfo;                           // 140
+    float       SkidWidthMultiplier;         //  20
+    float       RoadNoiseGridSpacingInverse; //  24
+    float       RoadNoiseScale;              //  28
+    float       StaticFrictionMultiplier;    //  32
+    float       DynamicFrictionMultiplier;   //  36
+    float       RollingFrictionMultiplier;   //  40
+    float       CollisionPriority;           //  44
+    float       ForceMagnitude;              //  48
+    float       ForceFrequency;              //  52
+    uint32_t    DebugTopologyColour;         //  56
+    const char *DriveOverEmitterGroup;       //  60
+    float       DriveOverMinSpeed;           //  64
+    float       DriveOverMaxSpeed;           //  68
+    const char *DriveOver2EmitterGroup;      //  72
+    float       DriveOver2MinSpeed;          //  76
+    float       DriveOver2MaxSpeed;          //  80
+    const char *SkidSmokeEmitterGroup;       //  84
+    float       SkidSmokeMinSpeed;           //  88
+    float       SkidSmokeMaxSpeed;           //  92
+    const char *TireSpewEmitterGroup;        //  96
+    float       TireSpewMinSpeed;            // 100
+    float       TireSpewMaxSpeed;            // 104
+    const char *BottomOutEmitterGroup;       // 108
+    float       BottomOutMinImpact;          // 112
+    float       BottomOutMaxImpact;          // 116
+    const char *CollisionImpactEmitterGroup; // 120
+    float       CollisionImpactMinForce;     // 124
+    float       CollisionImpactMaxForce;     // 128
+    const char *CollisionScrapeEmitterGroup; // 132
+    float       CollisionScrapeMinSpeed;     // 136
+    float       CollisionScrapeMaxSpeed;     // 140
+} TerrainTypeInfo;                           // 144
 
-// Nine pointers on a 64-bit host where the PS2 had one word each, and two
-// of them land four bytes past an eight-byte boundary and take an
-// alignment pad on the way past: SkidTextureName after the two bytes at
-// 12, and DriveOverEmitterGroup after DebugTopologyColour. So the slack
-// count is 1 at NameHash; 2 at SkidTextureName (its pad); 3 from
-// RoadNoiseGridSpacingInverse (its widening); 4 at DriveOverEmitterGroup
-// (the second pad); and one more past each emitter group after that --
-// 5 through 11. The last float ends exactly on a pointer boundary.
+// Nine pointers on a 64-bit host where the PS2 had one word each. Only one
+// of them lands four bytes past an eight-byte boundary and takes an
+// alignment pad on the way past: SkidTextureName, after the two bytes at
+// 12. (The demo's DriveOverEmitterGroup took a second, but retail's float
+// at 20 puts it on the boundary.) So the slack count is 1 at NameHash; 2 at
+// SkidTextureName (its pad); 3 from SkidWidthMultiplier (its widening);
+// and one more past each emitter group after that -- 4 through 10. The last
+// float ends exactly on a pointer boundary.
 #define TERRAININFO_SLACK ((size_t)(sizeof(void *) - 4))
 
-// 140 bytes on the handheld; 184 on a 64-bit host.
+// 144 bytes on the handheld; 184 on a 64-bit host.
 #define TERRAININFO_SIZEOF                                                  \
-    ((size_t)((140 + 11 * TERRAININFO_SLACK + sizeof(void *) - 1)           \
+    ((size_t)((144 + 10 * TERRAININFO_SLACK + sizeof(void *) - 1)           \
               / sizeof(void *) * sizeof(void *)))
 
 #ifndef TERRAINTYPE_NO_ASSERT
@@ -125,52 +131,56 @@ typedef char terraininfo_layout_check[
             == 13 + 1 * TERRAININFO_SLACK
      && offsetof(TerrainTypeInfo, SkidTextureName)
             == 16 + 2 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, RoadNoiseGridSpacingInverse)
+     && offsetof(TerrainTypeInfo, SkidWidthMultiplier)
             == 20 + 3 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, RoadNoiseScale)
+     && offsetof(TerrainTypeInfo, RoadNoiseGridSpacingInverse)
             == 24 + 3 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, StaticFrictionMultiplier)
+     && offsetof(TerrainTypeInfo, RoadNoiseScale)
             == 28 + 3 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, DynamicFrictionMultiplier)
+     && offsetof(TerrainTypeInfo, StaticFrictionMultiplier)
             == 32 + 3 * TERRAININFO_SLACK
-     && offsetof(TerrainTypeInfo, RollingFrictionMultiplier)
+     && offsetof(TerrainTypeInfo, DynamicFrictionMultiplier)
             == 36 + 3 * TERRAININFO_SLACK
+     && offsetof(TerrainTypeInfo, RollingFrictionMultiplier)
+            == 40 + 3 * TERRAININFO_SLACK
      && offsetof(TerrainTypeInfo, DebugTopologyColour)
-            == 52 + 3 * TERRAININFO_SLACK
+            == 56 + 3 * TERRAININFO_SLACK
      && offsetof(TerrainTypeInfo, DriveOverEmitterGroup)
-            == 56 + 4 * TERRAININFO_SLACK
+            == 60 + 3 * TERRAININFO_SLACK
      && offsetof(TerrainTypeInfo, DriveOverMinSpeed)
-            == 60 + 5 * TERRAININFO_SLACK
+            == 64 + 4 * TERRAININFO_SLACK
      && offsetof(TerrainTypeInfo, DriveOver2EmitterGroup)
-            == 68 + 5 * TERRAININFO_SLACK
+            == 72 + 4 * TERRAININFO_SLACK
      && offsetof(TerrainTypeInfo, SkidSmokeEmitterGroup)
-            == 80 + 6 * TERRAININFO_SLACK
+            == 84 + 5 * TERRAININFO_SLACK
      && offsetof(TerrainTypeInfo, TireSpewEmitterGroup)
-            == 92 + 7 * TERRAININFO_SLACK
+            == 96 + 6 * TERRAININFO_SLACK
      && offsetof(TerrainTypeInfo, BottomOutEmitterGroup)
-            == 104 + 8 * TERRAININFO_SLACK
+            == 108 + 7 * TERRAININFO_SLACK
      && offsetof(TerrainTypeInfo, CollisionImpactEmitterGroup)
-            == 116 + 9 * TERRAININFO_SLACK
+            == 120 + 8 * TERRAININFO_SLACK
      && offsetof(TerrainTypeInfo, CollisionScrapeEmitterGroup)
-            == 128 + 10 * TERRAININFO_SLACK
+            == 132 + 9 * TERRAININFO_SLACK
      && offsetof(TerrainTypeInfo, CollisionScrapeMaxSpeed)
-            == 136 + 11 * TERRAININFO_SLACK
+            == 140 + 10 * TERRAININFO_SLACK
      && sizeof(TerrainTypeInfo) == TERRAININFO_SIZEOF) ? 1 : -1];
 #endif
 
-// 0x00310a90. Writable: the static init fills in the hashes.
+// 0x00318c00 (the demo's 0x00310a90). Writable: the static init fills in
+// the hashes.
 extern TerrainTypeInfo TerrainTypeInfoTable[NUM_TERRAIN_TYPES];
 
-// 0x001ca078. The terrain whose name matches, ignoring case; 0 (NONE) for
-// NULL or no match.
+// 0x001d4428 (the demo's 0x001ca078). The terrain whose name matches,
+// ignoring case; 0 (NONE) for NULL or no match.
 int32_t terrain_match_name(const char *name);
 
-// 0x001ca0e8. The terrain whose NameHash matches; 0 for no match -- which
-// is every name before terraintype_static_init has run.
+// 0x001d4498 (the demo's 0x001ca0e8). The terrain whose NameHash matches;
+// 0 for no match -- which is every name before terraintype_static_init has
+// run.
 int32_t terrain_match_hash(uint32_t hash);
 
-// 0x001ca120, _GLOBAL_$I$TerrainTypeInfoTable [66]: NameHash =
-// bStringHash(Name) for all 33.
+// 0x001d44d0 (the demo's 0x001ca120), _GLOBAL_$I$TerrainTypeInfoTable
+// [66]: NameHash = bStringHash(Name) for all 33.
 void terraintype_static_init(void);
 
 #endif // TERRAINTYPE_H

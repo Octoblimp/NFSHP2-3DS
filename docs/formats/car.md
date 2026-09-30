@@ -47,8 +47,9 @@ methods in `replay.c`, checked by `tools/carmode_check.py`. The eighth is
 `Race::GetRacingCar` in `race.c`, checked by `carmode_check` too. The
 ninth is `carrace.c`, with `DynamicCollisionBody::GetDistanceAndSpeed` in
 `carcollisionbody.c`, checked by `carmode_check` as well. The tenth is
-`careffects.c` and the eleventh `carfinish.c`, and `carmode_check` checks
-both.
+`careffects.c`, which is retail's and checked against the retail image by
+`tools/careffects_check.py`. The eleventh is `carfinish.c`, checked by
+`carmode_check`.
 
 ## Car has no vtable
 
@@ -1529,15 +1530,24 @@ carmode_check --only (the 43)  43 mutations, 43 caught, 0 equivalent, 0 unexplai
 ## What is in the tenth code slice
 
 One method, in `careffects.c`:
-- `TriggerCarTerrainEffects` (`0x00131db8`, 1872 bytes).
+- `TriggerCarTerrainEffects` (retail `0x00133920`, 2064 bytes; the demo's
+  `0x00131db8`, 1872 bytes).
 
 That makes Car 62 of 80 methods. It has a file of its own for
 `carrace.c`'s reason: it reads the terrain table and the topology and asks
 the body damage, and `car.c` links into checkers that carry none of them.
-Its one caller is `World::DoTimestep` (`0x0014b914`), which is not ported.
-That passes the distance to the closest player, and calls only under 150
-when `ShouldVisualEffectsBeGenerated` agrees. So from there the skid
-smoke's own test against 150 always passes.
+Its one caller is `World::DoTimestep` (the demo's `0x0014b914`). That
+passes the distance to the closest player, and calls only under 150 when
+`ShouldVisualEffectsBeGenerated` agrees. So from there the skid smoke's
+own test against 150 always passes.
+
+The port is retail's. It differs from the demo's in two places, besides
+the Car's offsets and the terrain table's 144-byte records (see
+[topology](topology.md)). A player's car splashing through water at speed
+tells the replay, which the demo's did not. And the damage is asked the
+other way round: the engine smokes first, at more damage than before, and
+only a car that does not smoke steams, when its radiator is broken
+outright and the damage is high enough.
 
 ### A finding first: `NumTimesSkidding` is four bytes
 
@@ -1553,7 +1563,8 @@ differ.
 ```
 for each wheel on the ground, in order, where = 0x50000 + i * 0x10000:
     ti = the wheel's terrain
-    puddle, deep water, mud puddle (4, 5, 20): the wheel's bit in wet
+    puddle, deep water, mud puddle (4, 5, 20): the wheel's bit in wet,
+        and deep if it is deep water
     mag = |slip|
     distance < 150 and skid min < mag:
         n = NumTimesSkidding[i] + 1, at most 255, stored
@@ -1576,9 +1587,15 @@ three or four wheels down:
     above 0: BOTTOM_OUT(s, terrain)
 distance < 60, wet > 0, 10 < VelocityMagnitude:
     TurnWipersOnForDuration(now + 60, now + 180)
-    pBaseCarSound: TriggerSplash((wet & 6) != 0, deep water ? 3 : 1)
-pCarDamage: radiator bits set: DAM_RADIATOR
-            0.8 < visible total damage: DAM_ENGINE
+    pBaseCarSound: TriggerSplash((wet & 6) != 0, deep ? 3 : 1)
+    a player, (WorldLoopCounter + 3) & 3 == 0, 30 < VelocityMagnitude:
+        not deep: RegisterInterestingEvent(1.25, "InShallowWater")
+        deep, InDeepWaterRegistered 0:
+            RegisterInterestingEvent(10, "InDeepWater")
+            InDeepWaterRegistered = 1
+not deep: InDeepWaterRegistered = 0
+pCarDamage: 0.9 < visible total damage: DAM_ENGINE
+            else radiator level 3 and 0.65 < visible damage: DAM_RADIATOR
 NitroEffectFlag, or a player's physics car's engine on nitro: NITRO
 NumBlownTires: each blown tire on the ground:
     DRIVE_ON_FLAT_TIRE(clamp((mph - 4.470272541) * 0.04474), where)
@@ -1588,6 +1605,8 @@ What the listing says:
 - **The count is kept whether or not the terrain smokes.** A wheel over
   the minimum counts its frame even with no smoke group, and any other
   wheel on the ground is cleared. A wheel in the air keeps its count.
+  WOOD_WALL's skid window is 20 to 20, but it has no group, so its divide
+  by zero is never reached.
 - **The first frame shows nothing.** The ladder's `n < 2` gives 0, so
   smoke starts on a wheel's second frame of skidding.
 - **Tire spew reads the slip's x, not its length**, and only for the rear
@@ -1604,44 +1623,66 @@ What the listing says:
   (`c.lt.s` false) that is the second.
 - **`wet` is tested signed** (`blez`). "Right" is wheel 1 or 2 wet, the
   mask 6.
-- **The radiator is breakable item 14**, bits 28 and 29 of the word. Any
-  damage at all and it steams.
+- **The replay's water events are retail's.** They come only inside the
+  splash, for a car with a player, on every fourth world step, counted
+  `addiu 3`, `andi 3` on the word, and above 30 m/s -- the 10 of the
+  splash's own speed test is the very register the deep event's value is
+  passed in. Deep water is an event once, until no wheel down is in deep
+  water; the flag is cleared then, splash or not. Shallow water is an
+  event every time.
+- **The damage is asked the other way round in retail.** The engine
+  smokes above 0.9 of visible damage (the demo's was 0.8). Short of that,
+  the radiator steams only when its level -- breakable item 14, bits 28
+  and 29, read through the retail-only `0x00124d38`, which takes the word
+  and the item and ignores `this` -- is 3, broken outright, and the
+  visible damage is above 0.65. The demo's steamed at any radiator damage
+  at all, and smoked as well. With damage off in the race, the visible
+  damage is 0 and neither goes off.
 - **Both blown-tire bytes are read signed** (`lb`). The flat tire's scale
   has no test above 0, so a tire under 2 m/s is passed on at 0.
 - **The terrain table is indexed with `madd`**: the table's address goes
   into `lo` by `mtlo`, and the R5900's three-operand multiply-add leaves
-  `base + terrain * stride` in the register. The model had never met it,
-  or `pminw`. `mipsemu.py` has both now.
+  `base + terrain * stride` in the register.
 - **The where.** The two wheel effects name the wheel and add the terrain.
   The ground's three name the terrain alone. The damage and nitro
   effects name 0.
 
-### The seam
+### The seams
 
 One call goes to a class the port does not have yet:
 
 ```
-BaseCarSound::TriggerSplash  0x00185038  task 29  skipped
+BaseCarSound::TriggerSplash  0x0018d488 (demo 0x00185038)  task 29  skipped
 ```
 
 It is only heard, so an unset one is skipped, as `TriggerTireBlowOut`'s
 is. `car.h` gives its 24 bytes as a comment. `TriggerEffect` is the
-ninth slice's seam again.
+ninth slice's seam again. `RegisterInterestingEvent` is `replay.c`'s. The
+image calls it on `pReplayManager` with no test; the port tests for NULL,
+for `carreset.c`'s reason, since nothing makes a ReplayManager yet.
+`replay.h` is still the demo's layout.
 
 ### The check
 
-`carmode_check` runs one more scenario after the ninth slice's. Both
-sides place the car, set its velocity, and give each wheel its own matrix.
-Then fifty-four cases set the wheels and the ground, the distance, the
-speed, the damage, the player, the nitro, the blown tires, the sound, the
-wipers and the frame clock. The ground is set only around the call, so
-the physics car's own setup reads the checker's plane as before. The
-effect logs its point's four lanes when it has one, and the splash logs
-its two arguments. The cases:
+`tools/careffects_check.py` runs retail's `TriggerCarTerrainEffects` as
+shipped in mipsemu, with the retail terrain table, and under it retail's
+`TurnWipersOnForDuration`, `bMulMatrix`, the item level and
+`GetVisibleTotalDamage`. The harness, `tools/src/careffects_test.c`, runs
+the port over the same script. Both sides stub four calls, each of which
+prints its arguments: `TriggerEffect` (with the four lanes of any point
+it is given), `TriggerSplash`, `RegisterInterestingEvent` and
+`GetElevation`, which answers the terrain the case names. The Car and
+what it points at are blobs at retail's offsets in the model and the
+port's structs in the harness. Both sides place the car, set its
+velocity and give each wheel its own matrix. Then each case sets every
+field the method reads and prints the skid counts, the wipers and
+`InDeepWaterRegistered`, which carries from case to case unless the case
+sets it. The cases:
 - no wheel down, and too far for smoke;
-- the count ladder at each of its edges, 254 and 255 among them;
-- a length exactly at the minimum, no smoke group, and dirt's narrower
-  window;
+- the count ladder at each of its edges, 254 and 255 among them, past
+  the road's window and inside it;
+- a length exactly at the minimum, no smoke group, dirt's narrower
+  window, and WOOD_WALL's 20 to 20;
 - tire spew on the rear two, at 40 and under, with a slip under the
   minimum and a terrain with no group;
 - two wheels down, and a touch byte of `0x80`;
@@ -1649,24 +1690,31 @@ its two arguments. The cases:
   10 m/s, a wet wheel in the air, the wipers running, and a window open;
 - terrain 4's drive-over window moved, three ways: to tie the second's
   minimum, to lie above it, and to lie above the speed;
-- bottom-out on the road, in a puddle, and on no terrain, and three
-  wheels down with the fourth's bottom-out counted;
+- bottom-out on the road, in a puddle, on a pothole and on no terrain,
+  and three wheels down with the fourth's bottom-out counted;
 - snow, whose drive-over window has no group;
-- the radiator's bits and the visible damage's edge;
 - the nitro flag, and the engine's flag under PHYSICS with a player and
-  without, and a player under no movement;
+  without, and a player under no movement and under another;
 - the blown tires: bits with a count of 0, a blown tire in the air, a car
   slow enough for a scale of 0, a fast one, and bytes of `0x80` and
-  `0xf8`.
+  `0xf8`;
+- the water events: deep water registered once and then held, off-step
+  counters, exactly 30 m/s and the next float up, shallow water every
+  time, a player's splash under 30, no player, no splash with the flag
+  held while deep and cleared when not, a deep wheel in the air, deep
+  and shallow together, no sound, and counters of -3, 0x7ffffffd, -1,
+  0, 0x7ffffffe and -7;
+- the damage on either side of 0.9 and of 0.65, the radiator at levels
+  1, 2 and 3, damage off, item 13's and item 15's bits, and no damage.
 
 ```
-carmode_check  74 transitions, 19 resets, 35875 lines, 103 masked, 0 differ
+careffects_check  3 scenarios, 110 ops, 519 lines, 0 differ
 ```
 
 ### What the mutation pass said
 
-There are 107 mutations for the slice. On the first pass, 104 were
-caught and 3 survived, and all three are equivalent by construction:
+There are 136 mutations. 133 are caught and 3 survive, and all three
+are equivalent by construction:
 - `fx-spew-pad-ignored`: `bMulMatrixVec3` forces the vector's w to 1, as
   the image's `bMulMatrix` does, so the pad the port writes is never
   read.
@@ -1679,7 +1727,7 @@ caught and 3 survived, and all three are equivalent by construction:
 crashes on the first case without damage. That counts as caught.
 
 ```
-carmode_check --only (the 107)  107 mutations, 104 caught, 3 equivalent, 0 unexplained
+careffects_check --mutate  136 mutations, 133 caught, 3 equivalent, 0 unexplained
 ```
 
 ## What is in the eleventh code slice

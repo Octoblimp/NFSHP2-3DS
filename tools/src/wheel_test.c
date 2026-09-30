@@ -406,6 +406,7 @@ static void scenario_layout(void)
     OFF(TerrainTypeInfo, NameHash);
     OFF(TerrainTypeInfo, Type);
     OFF(TerrainTypeInfo, SkidTextureName);
+    OFF(TerrainTypeInfo, SkidWidthMultiplier);
     OFF(TerrainTypeInfo, RoadNoiseGridSpacingInverse);
     OFF(TerrainTypeInfo, RoadNoiseScale);
     OFF(TerrainTypeInfo, StaticFrictionMultiplier);

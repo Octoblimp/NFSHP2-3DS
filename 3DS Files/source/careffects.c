@@ -1,17 +1,25 @@
 // careffects -- Car.obj, slice ten: the smoke, spray and dust a car
-// throws up from the ground under it.
+// throws up from the ground under it. Retail's.
 //
-//   Car::TriggerCarTerrainEffects   0x00131db8   1872 bytes
+//   Car::TriggerCarTerrainEffects   0x00133920   2064 bytes
+//                                   (the demo's 0x00131db8, 1872 bytes)
 //
 // One method, and a file of its own for carrace.c's reason: it reads the
 // terrain table and the topology and asks the body damage, and car.c
 // links into checkers that carry none of them. Its one caller is
-// World::DoTimestep (0x0014b914), which is not ported. That passes the
-// distance to the closest player, and calls only when the distance is
-// under 150 and Car::ShouldVisualEffectsBeGenerated agrees -- so from
-// there the skid smoke's own test against 150 always passes.
+// World::DoTimestep (the demo's 0x0014b914), which is not ported. That
+// passes the distance to the closest player, and calls only when the
+// distance is under 150 and Car::ShouldVisualEffectsBeGenerated agrees --
+// so from there the skid smoke's own test against 150 always passes.
 //
-// Prototype and seam: car.h. Cross-check: tools/carmode_check.py.
+// Retail's differs from the demo's in two places, besides its offsets and
+// its 144-byte terrain records. A player's car splashing through water at
+// speed tells the replay, which the demo's did not. And the damage is
+// asked the other way round: the engine smokes first, at more damage than
+// before, and only a car that does not smoke steams, when its radiator is
+// broken outright and the damage is high enough.
+//
+// Prototype and seam: car.h. Cross-check: tools/careffects_check.py.
 // Write-up: docs/formats/car.md.
 
 #include <math.h>
@@ -28,19 +36,25 @@
 #include "topology.h"
 
 // WorldTimeFrames, the frame clock TurnWipersOnForDuration counts in; car.c
-// has the note.
+// has the note. WorldLoopCounter, which the replay's events count in.
 #include "realtime.h"
+#include "replay.h"
 
 CarBaseCarSoundSplashFn gBaseCarSoundTriggerSplashFn;
 
-// m/s to mph. gp-32012 and gp-32004 are the same word twice, 0x400f2b02.
+// m/s to mph. gp-31924 and gp-31912 are the same word twice, 0x400f2b02.
 #define CAR_MPH_PER_MPS         2.237f
-// A flat tire's effect grows from nothing at 4.470272541 mph (gp-32000,
-// 0x408f0c79) by 0.04474 a mph (gp-31996, 0x3d37414a).
+// A flat tire's effect grows from nothing at 4.470272541 mph (gp-31908,
+// 0x408f0c79) by 0.04474 a mph (gp-31904, 0x3d37414a).
 #define CAR_FLAT_TIRE_MIN_MPH   4.470272541f
 #define CAR_FLAT_TIRE_PER_MPH   0.04474f
-// The engine smokes above this much visible damage: gp-32008, 0x3f4ccccd.
-#define CAR_ENGINE_SMOKE_DAMAGE 0.8f
+// The engine smokes above this much visible damage: gp-31920, 0x3f666666.
+// The demo's was 0.8. A radiator broken outright steams above the second:
+// gp-31916, 0x3f266666.
+#define CAR_ENGINE_SMOKE_DAMAGE    0.9f
+#define CAR_RADIATOR_STEAM_DAMAGE  0.65f
+// The radiator's level when it is broken outright.
+#define CAR_RADIATOR_BROKEN        3
 
 // The rest are immediates, `lui`. How near the closest player the car must
 // be for each effect, and how fast it must go to splash, in m/s:
@@ -53,6 +67,13 @@ CarBaseCarSoundSplashFn gBaseCarSoundTriggerSplashFn;
 // register the range test compared against.
 #define CAR_SPLASH_WIPERS_ON     60
 #define CAR_SPLASH_WIPERS_OFF   180
+// A player's splash above this speed, in m/s, is a replay event on every
+// fourth world step: deep water's is worth 10, once until the car is out
+// of it, and a shallow one's 1.25 each time. The 10 is the very register
+// the splash's speed test compared against.
+#define CAR_WATER_EVENT_SPEED    30.0f
+#define CAR_DEEP_WATER_INTEREST  10.0f
+#define CAR_SHALLOW_WATER_INTEREST 1.25f
 
 // A wheel's effects name it in the effect's int as TriggerTireBlowOut
 // does: 0x50000 for wheel 0, and 0x10000 more for each wheel after.
@@ -60,10 +81,11 @@ CarBaseCarSoundSplashFn gBaseCarSoundTriggerSplashFn;
 #define CAR_WHEEL_WHERE_STEP    0x10000
 
 // `max.s` against 0, and then `min.s` against 1. Written as compares they
-// agree with the R5900 on every value that reaches them: no terrain's
-// minimum equals its maximum, so no divide below is by zero and there is
-// no NaN. A -0 is not in play either, since only a scale above 0 is
-// passed on.
+// agree with the R5900 on every value that reaches them: no terrain with a
+// group has its minimum equal to its maximum, so no divide below is by
+// zero and there is no NaN. (WOOD_WALL's skid smoke is 20 to 20, but it
+// has no group, and the divide comes after the group's test.) A -0 is not
+// in play either, since only a scale above 0 is passed on.
 static float max0(float x)
 {
     return (x < 0.0f) ? 0.0f : x;
@@ -91,7 +113,24 @@ static void effect(Car *c, CarEffect fx, float scale, int32_t where,
         gCarTriggerEffectFn(c, fx, scale, where, pos);
 }
 
-// 0x00131db8. `distance` is from the car to the closest player.
+// 0x00124d38 on the car's damage: item i's level, the two bits at 2i.
+// Retail-only; the damage word is passed in, and `this` is not read.
+static uint32_t item_level(const CarDamage *d, uint32_t amounts, int32_t item)
+{
+    (void)d;
+    return (amounts >> (2 * item)) & 3;
+}
+
+// The image calls RegisterInterestingEvent on pReplayManager without a
+// test. The port tests it for carreset.c's reason: there is no
+// ReplayManager yet.
+static void interesting(float value, const char *what)
+{
+    if (pReplayManager != NULL)
+        ReplayManager_RegisterInterestingEvent(pReplayManager, value, what);
+}
+
+// 0x00133920. `distance` is from the car to the closest player.
 //
 // For each wheel on the ground, in wheel order:
 //   * skid smoke, from the length of the wheel's slip. The wheel's
@@ -112,8 +151,8 @@ static void effect(Car *c, CarEffect fx, float scale, int32_t where,
 // from the four wheels' bottom-out magnitudes summed -- whether or not
 // the terrain has a group for it.
 //
-// Then the splash, the damage, the nitro and the flat tires, which read
-// the car and not the terrain.
+// Then the splash and the replay's water events, the damage, the nitro
+// and the flat tires, which read the car and not the terrain.
 void car_trigger_car_terrain_effects(Car *c, float distance)
 {
     CarState *st = &c->State;
@@ -228,6 +267,11 @@ void car_trigger_car_terrain_effects(Car *c, float distance)
     // A wet wheel near a player at speed: the wipers, and the sound's
     // splash -- on the right if wheel 1 or 2 is wet, and 3 rather than 1
     // if any wheel is in deep water. `wet` is tested signed, `blez`.
+    //
+    // Then, for a player's car, on every fourth world step and faster
+    // still, the replay hears of it: "InDeepWater" once, until no wheel
+    // down is in deep water, and "InShallowWater" every time. The step is
+    // counted `addiu 3`, `andi 3`, in a word, so unsigned here.
     if (distance < CAR_SPLASH_RANGE && wet > 0
         && CAR_SPLASH_MIN_SPEED < st->VelocityMagnitude) {
         car_turn_wipers_on_for_duration(c,
@@ -236,19 +280,33 @@ void car_trigger_car_terrain_effects(Car *c, float distance)
         if (c->pBaseCarSound != NULL && gBaseCarSoundTriggerSplashFn != NULL)
             gBaseCarSoundTriggerSplashFn(c->pBaseCarSound, (wet & 6) != 0,
                                          deep ? 3 : 1);
+        if (c->pPlayer != NULL && (((uint32_t)WorldLoopCounter + 3u) & 3u) == 0
+            && CAR_WATER_EVENT_SPEED < st->VelocityMagnitude) {
+            if (!deep) {
+                interesting(CAR_SHALLOW_WATER_INTEREST, "InShallowWater");
+            } else if (c->InDeepWaterRegistered == 0) {
+                interesting(CAR_DEEP_WATER_INTEREST, "InDeepWater");
+                c->InDeepWaterRegistered = 1;
+            }
+        }
     }
+    if (!deep)
+        c->InDeepWaterRegistered = 0;
 
-    // The radiator is breakable item 14, and its two bits of damage are
-    // the top but two of the word. Any at all and it steams.
+    // Smoke from the engine above one level of visible damage. Short of
+    // it, steam from a radiator broken outright -- breakable item 14, the
+    // top but two bits of the word -- above a lower one.
     if (c->pCarDamage != NULL) {
         CarDamage *d = c->pCarDamage;
 
-        if (((d->BreakableCarItemDamageAmounts
-              >> (2 * BREAKABLE_CAR_ITEM_RADIATOR)) & 3) > 0)
-            effect(c, CARFX_DAM_RADIATOR, 1.0f, 0, NULL);
         if (CAR_ENGINE_SMOKE_DAMAGE
             < bodydamage_get_visible_total_damage(&d->TheBodyDamage))
             effect(c, CARFX_DAM_ENGINE, 1.0f, 0, NULL);
+        else if (item_level(d, d->BreakableCarItemDamageAmounts,
+                            BREAKABLE_CAR_ITEM_RADIATOR) == CAR_RADIATOR_BROKEN
+                 && CAR_RADIATOR_STEAM_DAMAGE
+                    < bodydamage_get_visible_total_damage(&d->TheBodyDamage))
+            effect(c, CARFX_DAM_RADIATOR, 1.0f, 0, NULL);
     }
 
     // The nitro flag, or a player's physics car whose engine is on nitro.

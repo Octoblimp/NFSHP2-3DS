@@ -9,17 +9,15 @@ bStringHash beneath it, and TerrainType.obj's two lookups beside it. The
 harness runs the same op script on the port and prints the same lines.
 Every float goes both ways as its bits.
 
-**Two images.** track.c is retail's Track.obj, road noise excepted:
-retail's TopologyCoordinate is 704 bytes, with room for 160 polygons, the
-last polygon GetElevation found strictly inside and three words only the
-constructor writes; SetInterestBBox tries five look-aheads, GetElevation
-tries the last polygon first and no longer times itself, and
-BuildTrackPolygons walks every square under its box. So nearly everything
-runs on the retail image (retail_model.RetailEmu), against retail's own
-TRACKB12. Road noise and MatchTerrainType read TerrainTypeInfo, which is
-144 bytes in retail and still the demo's in terraintype.c, so those two
-run on the demo image until the terrain's own retail pass. The one
-harness answers both scripts.
+**The retail image.** track.c is retail's Track.obj and terraintype.c
+retail's TerrainType.obj: retail's TopologyCoordinate is 704 bytes, with
+room for 160 polygons, the last polygon GetElevation found strictly inside
+and three words only the constructor writes; SetInterestBBox tries five
+look-aheads, GetElevation tries the last polygon first and no longer times
+itself, and BuildTrackPolygons walks every square under its box; road
+noise and MatchTerrainType read retail's 144-byte TerrainTypeInfo, whose
+table terraintypetab.c is generated from. So everything runs on the
+retail image (retail_model.RetailEmu), against retail's own TRACKB12.
 
 **The floats.** `Emu(ieee=True, eediv=True)`. track.c divides plainly --
 the normal's reciprocal square root in the TrackPolygon constructor and
@@ -72,7 +70,7 @@ PutFlatOnTrack, AverageAir and BeginMovement; retail TRACKB12 itself,
 driven along its squares until the pool has flushed several times over,
 then filled on purpose for the 101-at-a-time cap; and retail's own
 TRACKB12 and GLOBALB info chunks, all thirty tracks and every
-SignpostGracePeriod. Demo: the bilinear road noise for every terrain,
+SignpostGracePeriod; and the bilinear road noise for every terrain,
 under retail TRACKB12's route as well, and both MatchTerrainTypes.
 
     python tools/track_check.py
@@ -587,8 +585,7 @@ def scenario_pure(sc, rnd):
 
 
 def scenario_noise(sc, rnd):
-    """Road noise and the terrain names, which read the demo's
-    TerrainTypeInfo: the demo image's."""
+    """Road noise and the terrain names, which read TerrainTypeInfo."""
     sc.tag("noise")
     pts = [(0.0, 0.0), (0.5, 0.25), (-0.5, -0.25), (3.0, 7.0), (-3.0, -7.0),
            (12.75, -8.125), (1000.3, 2000.7), (-4096.1, 55.9),
@@ -2006,27 +2003,21 @@ def scenario_retail_trackb12(sc):
 
 
 def retail_script():
-    """What runs on the retail image: all of Track.obj but road noise, and
-    the car's four methods over it."""
+    """All of Track.obj and TerrainType.obj, and the car's four methods
+    over the track."""
     rnd = random.Random(0x7ac12)
     sc = Script()
     scenario_pure(sc, rnd)
+    # Its own draws, so the rest keep the ones they had with it apart.
+    scenario_noise(sc, random.Random(0x7ac12))
     scenario_markers(sc)
     scenario_info(sc)
     scenario_world(sc, rnd)
     scenario_bad_tree(sc, rnd)
     scenario_flat(sc, rnd)
     sc.b12 = scenario_trackb12(sc, rnd)
+    scenario_b12_noise(sc)
     sc.b12info = scenario_retail_trackb12(sc)
-    return sc
-
-
-def script():
-    """What runs on the demo image: road noise and the terrain names."""
-    rnd = random.Random(0x7ac12)
-    sc = Script()
-    scenario_noise(sc, rnd)
-    sc.b12 = scenario_b12_noise(sc)
     return sc
 
 
@@ -3634,8 +3625,6 @@ for _name in EQUIVALENT:
 
 
 def mutate_pass(only=None):
-    sc = script()
-    base, _ = model(sc)
     rsc = retail_script()
     rbase, _ = model(rsc, retail=True)
     caught = 0
@@ -3649,18 +3638,13 @@ def mutate_pass(only=None):
             sys.exit("no such mutation: " + " ".join(unknown))
 
     opsdir = tempfile.TemporaryDirectory()
-    ops = Path(opsdir.name) / "ops.bin"
-    ops.write_bytes(sc.encode())
     rops = Path(opsdir.name) / "rops.bin"
     rops.write_bytes(rsc.encode())
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
-        out = Path(tmp) / "base.txt"
-        run_harness(exe, ops, out)
         rout = Path(tmp) / "rbase.txt"
         run_harness(exe, rops, rout)
-        if (diff(base, out.read_text().splitlines(), quiet=True)
-                or diff(rbase, rout.read_text().splitlines(), quiet=True)):
+        if diff(rbase, rout.read_text().splitlines(), quiet=True):
             print("base already differs -- fix that before mutating")
             return 1
 
@@ -3692,11 +3676,8 @@ def mutate_pass(only=None):
                     print("  %-44s did not compile (caught)" % name)
                     caught += 1
                     continue
-                out = Path(tmp) / "m.txt"
-                rc = run_harness(exe, ops, out)
                 rout = Path(tmp) / "rm.txt"
-                if rc == 0:
-                    rc = run_harness(exe, rops, rout)
+                rc = run_harness(exe, rops, rout)
                 if rc == pcc.HARNESS_HUNG:
                     print("  %-44s hung the harness (caught)" % name)
                     caught += 1
@@ -3705,8 +3686,7 @@ def mutate_pass(only=None):
                     print("  %-44s crashed the harness (caught)" % name)
                     caught += 1
                     continue
-                n = diff(base, out.read_text().splitlines(), quiet=True)
-                n += diff(rbase, rout.read_text().splitlines(), quiet=True)
+                n = diff(rbase, rout.read_text().splitlines(), quiet=True)
                 if n:
                     print("  %-44s caught, %d lines" % (name, n))
                     caught += 1
@@ -3758,33 +3738,23 @@ def main():
     if args.mutate:
         sys.exit(mutate_pass(args.only.split(",") if args.only else None))
 
-    sc = script()
-    lines, divs = model(sc)
     rsc = retail_script()
-    rlines, rdivs = model(rsc, retail=True)
+    rlines, divs = model(rsc, retail=True)
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
-        ops = Path(tmp) / "ops.bin"
-        ops.write_bytes(sc.encode())
-        out = Path(tmp) / "harness.txt"
-        rc = run_harness(exe, ops, out)
-        harness = out.read_text().splitlines()
         rops = Path(tmp) / "rops.bin"
         rops.write_bytes(rsc.encode())
         rout = Path(tmp) / "rharness.txt"
-        rc = rc or run_harness(exe, rops, rout)
+        rc = run_harness(exe, rops, rout)
         rharness = rout.read_text().splitlines()
 
     if args.dump:
         d = Path(args.dump)
         d.parent.mkdir(parents=True, exist_ok=True)
-        d.with_suffix(".model").write_text(NL.join(lines) + NL)
-        d.with_suffix(".harness").write_text(NL.join(harness) + NL)
         d.with_suffix(".rmodel").write_text(NL.join(rlines) + NL)
         d.with_suffix(".rharness").write_text(NL.join(rharness) + NL)
 
     bad = 0
-    divs = divs + rdivs
     if divs:
         print("the image divided by zero at %s -- track.c needs ee_div there"
               % " ".join("0x%08x" % pc for pc in divs))
@@ -3801,13 +3771,10 @@ def main():
     if not rsc.b12info:
         print("retail TRACKB12 or GLOBALB not in extracted-retail -- "
               "the info chunks skipped")
-    n = diff(lines, harness)
-    print("demo image: %d ops, %d lines, %d differ"
-          % (len(sc.ops), len(harness), n))
     rn = diff(rlines, rharness)
     print("retail image: %d ops, %d lines, %d differ"
           % (len(rsc.ops), len(rharness), rn))
-    sys.exit(1 if (n or rn or rc or bad) else 0)
+    sys.exit(1 if (rn or rc or bad) else 0)
 
 
 if __name__ == "__main__":

@@ -13,18 +13,19 @@ terrain number indexes.
 
     Track.obj          retail 0x001513c8 .. 0x00153984    9.4 KB
                        (demo 0x0014e7d0 .. 0x001509d4, 8.5 KB)
-    TerrainType.obj    demo 0x001ca078 .. 0x001ca178      256 B, and its table
-                       TerrainTypeInfoTable 0x00310a90, 33 x 140 bytes
-                       (retail 0x001d4428, its table 0x00318c00, 33 x 144)
+    TerrainType.obj    retail 0x001d4428 .. 0x001d4520    248 B, and its table
+                       TerrainTypeInfoTable 0x00318c00, 33 x 144 bytes
+                       (demo 0x001ca078 .. 0x001ca170, its table
+                       0x00310a90, 33 x 140)
 
 The port is `3DS Files/source/track.c` and `topology.h`/`track.h` for
 `Track.obj`, and `terraintype.c`/`terraintype.h` with the generated
-`terraintypetab.c` for `TerrainType.obj`. `track.c` is retail's but for
-road noise, which reads `TerrainTypeInfo` and so stays the demo's until
-the terrain table has its own retail pass. `tools/track_check.py` runs the
-image itself in mipsemu as the oracle: 16779 ops and 10306 transcript
-lines on the retail image and 1254 ops and 1073 lines on the demo one, 0
-differ. Its mutation pass has 314 mutations, 308 caught and 6 argued
+`terraintypetab.c` for `TerrainType.obj`. Both are retail's: `track.c`
+is retail's `Track.obj`, and `TerrainType.obj`'s code is the demo's but
+for the table's stride and address, with the table generated from the
+retail ELF. `tools/track_check.py` runs the retail image itself in
+mipsemu as the oracle: 18033 ops and 11374 transcript lines, 0 differ.
+Its mutation pass has MUTN mutations, MUTC caught and MUTE argued
 equivalent. It also checks the first of Car's methods to
 call in here, which are in `cartrack.c` and written up in `car.md`.
 `tools/gen_terrain_table.py` writes the table out of the ELF, and
@@ -60,13 +61,13 @@ call in here, which are in `cartrack.c` and written up in `car.md`.
 | `0x001531f8` | `0x00150260` | `BuildTrackPolygons`, rewritten |
 | `0x001533c8` | `0x00150420` | `RemoveTrackPolygons` |
 | `0x00153420` | `0x00150478` | `GetTrackInfo` |
-| `0x00153458` / `0x00153498` | `0x001504b0` / `0x001504f0` | `GetRoadNoiseGridValue` / `GetRoadNoise` (the port's is the demo's) |
+| `0x00153458` / `0x00153498` | `0x001504b0` / `0x001504f0` | `GetRoadNoiseGridValue` / `GetRoadNoise` |
 | `0x00153608` / `0x00153718` | `0x00150660` / `0x00150770` | `LoaderTrackGeometry` / `UnloaderTrackGeometry` |
 | `0x001538b0` | `0x00150908` | `_GLOBAL_$D$TrackPositionMarkerList` -- not ported, below |
 | `0x001538e0` | `0x00150938` | `_GLOBAL_$I$TrackPositionMarkerList` |
 | `0x00153978` | `0x001509c8` | `TrackPolygon::__dl`, the slot free |
 | `0x001cb350` | `0x001c1210` | `GetVectorOnTrack` |
-| `0x001d4428` / `0x001d4498` | `0x001ca078` / `0x001ca0e8` | `MatchTerrainType` (name / hash; the port's is the demo's) |
+| `0x001d4428` / `0x001d4498` | `0x001ca078` / `0x001ca0e8` | `MatchTerrainType` (name / hash) |
 | `0x001d44d0` | `0x001ca120` | `_GLOBAL_$I$TerrainTypeInfoTable` |
 
 Retail's `Track.obj` also has eight bytes at `0x00153970`, `j 0x00151d30`
@@ -404,16 +405,20 @@ arithmetic. The values lie in [-0.5, 0.5], and one of them is 0.
 `RoadNoiseGridSpacingInverse` and floors it. The floor is spelled as
 `cvt.w.s` plus a correction when the truncation went the wrong way. The
 four corners are weighted in the listing's order and summed left to right,
-and the result is scaled by `RoadNoiseScale`. Most terrains space the grid
-at 1. SIDEWALK uses 1.1 and COBBLESTONE 3. NONE, ROAD and everything from
-ROAD_AUTUMN on have a scale of 0. This is the demo's. Retail's steps
-through its 144-byte `TerrainTypeInfo`.
+and the result is scaled by `RoadNoiseScale`. The code is the demo's,
+reading the two fields at 24 and 28 of retail's 144-byte record (20 and
+24 in the demo's). Most terrains space the grid at 1. SIDEWALK uses 1.1,
+COBBLESTONE 3 and BOARDWALK 10; retail changed the last two, from the
+demo's 3 and 1, scales 0.045 and 0.04, to 3 and 10 at 0.048 and 0.042.
+NONE, ROAD and everything from ROAD_AUTUMN on have a scale of 0.
 
 ## TerrainType
 
-`TerrainTypeInfoTable` is data. Each of the demo's 140-byte records holds:
+`TerrainTypeInfoTable` is data. Each of retail's 144-byte records holds:
 - the name and its hash;
 - the type, two booleans and a skid texture;
+- a skid width multiplier, at 20, which the demo's 140-byte record does
+  not have, so everything after it is 4 bytes later in retail;
 - the road-noise grid and scale;
 - three friction multipliers, a collision priority, a force, a debug colour;
 - seven emitter groups, each with a pair of speed or force bounds.
@@ -423,9 +428,23 @@ in with `bStringHash`. `MatchTerrainType(hash)` therefore finds nothing
 before boot has run it. `MatchTerrainType(name)` compares ignoring case with
 the engine's `bStrICmp`, which folds only a-z, and returns NONE for NULL or
 no match. The port keeps its own static copy of that compare. On a 64-bit
-host the nine pointers widen and take two alignment pads, and
-`terraintype.h` counts the slack. Retail's records are 144 bytes, and
-their retail pass is still to come.
+host the nine pointers widen and take one alignment pad, and
+`terraintype.h` counts the slack. The demo's `DriveOverEmitterGroup` took
+a second pad, but retail's new float puts it on the boundary.
+
+The new float is 1.4 on the loose surfaces -- dirt, grass, sand, snow,
+mulch and their shoulders -- and 1 elsewhere. Retail has no stabs, so the
+name `SkidWidthMultiplier` is the port's: its one reader is
+MaybeMakeSkids (`0x001a568c`), which multiplies it into
+`WheelInfo.Width`. Retail changed the data as well as the layout. The
+emitter groups' speeds and names on the loose surfaces are new (ROAD's
+skid smoke is 5 to 40 where the demo's was 5 to 200, and DIRT's drive-over
+moved to its second group, at 35 to 100 mph where the demo's first was 50
+to 200), and so are BOARDWALK's and COBBLESTONE's road
+noise and METAL_GRATE's road sound. The friction and collision fields are
+the demo's. `gen_terrain_table.py` reads the retail ELF, checking the
+static initialiser's instructions first, so the table is retail's
+throughout.
 
 ## What is not ported
 
@@ -452,12 +471,8 @@ The harness is `tools/src/track_test.c`. The model is the image: every
 bWare's slot pool, `bVector` and `bStringHash` under it. Every float
 crosses as its bits.
 
-There are two images. Nearly everything runs on the retail image
-(`tools/retail_model.py`), over retail data. Road noise and the two
-`MatchTerrainType`s read the demo's `TerrainTypeInfo`, so they run on the
-demo image until the terrain table's retail pass. The same harness
-answers both scripts. On the retail image the model also runs bmatrix's
-static initialiser (`0x0025afa8`), which puts (0, 0, 0, 1) at
+Everything runs on the retail image (`tools/retail_model.py`), over
+retail data. The model also runs bmatrix's static initialiser (`0x0025afa8`), which puts (0, 0, 0, 1) at
 `0x00320a60`. Retail's `bMulMatrix(bVector3)` adds the vector to it to
 get the w of 1 that applies the translation row, so without it
 `AverageAir` samples the ground round the origin. The scenarios are:
@@ -488,7 +503,7 @@ get the w of 1 that applies the translation row, so without it
   the pool has flushed several times, then filled on purpose to hit the
   101-at-a-time cap. Last, ninety cars are set down 1.5 above the
   centroids of random floor polygons;
-- **on the demo image,** the bilinear noise for every terrain, under
+- **the terrain table:** the bilinear noise for every terrain, under
   retail TRACKB12's route as well, and both `MatchTerrainType`s.
 
 After the run, the checker requires that no division in `Track.obj` took

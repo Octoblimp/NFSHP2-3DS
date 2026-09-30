@@ -9985,3 +9985,95 @@ yet, so Azahar was not run.
 two wall helpers. Update also calls GetRoadNoise, which is still the
 demo's. Either do TerrainType's retail pass first (the table at
 `0x00318c00`, 33 x 144), or stub GetRoadNoise in 7b's checker.
+
+## Session 31, continued (2026-09-29) -- TerrainType's retail pass
+
+7b's Update calls GetRoadNoise, which reads the terrain table, and retail
+had changed the table. So TerrainType's retail pass came before 7b.
+`terraintype.c` is retail's `TerrainType.obj` (`0x001d4428 ..
+0x001d4520`), `terraintypetab.c` is generated from retail's ELF, and
+`careffects.c`'s TriggerCarTerrainEffects is retail's.
+
+### The port
+
+- **TerrainTypeInfo is retail's 144 bytes** (`terraintype.h`). A float
+  at 20 is new, and everything from RoadNoiseGridSpacingInverse on is 4
+  bytes later. MaybeMakeSkids (`0x001a568c`) multiplies it into
+  `WheelInfo.Width`, so the port calls it SkidWidthMultiplier. It is 1.4
+  on the loose surfaces and 1 elsewhere. On a 64-bit host only
+  SkidTextureName takes an alignment pad now, and the record is 184
+  bytes.
+- **The table is retail's** (`0x00318c00`, 33 x 144).
+  `gen_terrain_table.py` reads `SLES_507.31` and holds the table's
+  address and size to the static initialiser's three instructions.
+  Retail changed the data as well as the layout:
+  - ROAD's skid smoke window is 5 to 40 (the demo's 5 to 200);
+  - the loose surfaces' emitter groups have new names and speeds: DIRT's
+    drive-over moved to the second group, 35 to 100 (the demo's was the
+    first, 50 to 200);
+  - BOARDWALK's road noise is 10 at 0.042 and COBBLESTONE's 3 at 0.048
+    (the demo's 1 at 0.04 and 3 at 0.045);
+  - METAL_GRATE's ShouldTireMakeRoadSound is 1 (the demo's 0).
+  The friction and collision fields are the demo's.
+- The code is the demo's but for the stride and the address. GetRoadNoise
+  (`0x00153498`) reads offsets 24 and 28, so `track.c` is now all of
+  retail's `Track.obj`.
+- **TriggerCarTerrainEffects is retail's** (`0x00133920`, 2064 bytes;
+  the demo's `0x00131db8`, 1872). Two changes besides the offsets:
+  - Inside the splash, a car with a player, on every fourth world step
+    (`(WorldLoopCounter + 3) & 3`), above 30 m/s, tells the replay:
+    "InDeepWater" at 10 once, through InDeepWaterRegistered, and
+    "InShallowWater" at 1.25 every time. The flag is cleared whenever no
+    wheel down is in deep water, splash or not.
+  - The engine smokes above 0.9 of visible damage (the demo's 0.8). Short
+    of that, the radiator steams only when breakable item 14's level is
+    3, through the retail-only `0x00124d38`, and the visible damage is
+    above 0.65. The demo's steamed at any radiator damage and smoked too.
+  - TriggerSplash is retail's `0x0018d488`. RegisterInterestingEvent
+    (`0x0013e270`) is `replay.c`'s, and the port tests `pReplayManager`
+    for NULL, which the image does not.
+
+### The checks
+
+- **`careffects_check.py` is new** and runs retail's
+  TriggerCarTerrainEffects in RetailEmu, with retail's table and, under
+  it, retail's TurnWipersOnForDuration, bMulMatrix, item level and
+  GetVisibleTotalDamage. `careffects_test.c` is the harness. Both sides
+  stub TriggerEffect, TriggerSplash, RegisterInterestingEvent and
+  GetElevation. 3 scenarios, 110 ops, 519 lines, 0 differ. Of 136
+  mutations, 133 are caught and 3 are equivalent.
+- **`carmode_check` lost slice ten**: its terrain scenario, stubs,
+  constants and mutations, and `carmode_test.c`'s side of them. 74
+  transitions, 19 resets, 36093 lines, 103 masked, 0 differ. Of
+  391 mutations, 380 are caught and 11 are equivalent. Nine of them, the
+  null controller's, still looked for `car_new_null_controller` in
+  `carmode.c`, which it left in ffedc28; they point at `carcontroller.c`
+  now and are caught (the full pass tallied 371 of the other 382).
+- **`track_check` is wholly retail's.** Road noise and both
+  MatchTerrainTypes moved to the retail script, and the demo image's run
+  is gone. 18033 ops, 11379 lines, 0 differ. Of
+  314 mutations, 308 are caught and 6 are equivalent. The full pass
+  first left `elev-num-total` alive: road noise joining the retail
+  script had shifted the world scenarios' random draws, and lost the one
+  that put a point over a polygon past the floors. Road noise draws from
+  its own stream now, and `--only elev-num-total` catches it. The pass
+  also still ran the demo script it no longer builds, and stopped on
+  `ops`; that run is gone.
+- `wheel_check`'s layout dump carries retail's offsets and
+  SkidWidthMultiplier: 19 scenarios, 10696 lines, 0 differ.
+- `docs/formats/topology.md` has the table's retail pass,
+  `docs/formats/car.md` the tenth slice's, and `docs/formats/car-wheel.md`
+  the record's new slack.
+
+The whole suite passes, all 78 commands. The CIA builds and `check_3dsx`
+finds its relocations OK. Nothing new runs in the game yet, so Azahar was
+not run.
+
+### Next
+
+7b: DriveCameraMover::Update (`0x0015c880`), with GetLookbackCar
+(`0x0015c680`) and the two wall helpers (`0x00157930`, `0x00157b60`).
+GetRoadNoise is retail's now, so 7b's checker can run it. `replay.h` is
+still the demo's layout (retail puts ReplaySnapshotList at 112 and
+TotalInterestingValue at 332), and owes a retail pass before anything
+reads it in place.

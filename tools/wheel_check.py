@@ -1175,24 +1175,26 @@ WHEEL_OFFSETS = [
     ("Wheel.TheSkidMaker", 384, 6),
 ]
 
-# Nine pointers over a 140-byte record -- the name, the skid texture and
-# the seven emitter-group names -- and two of them land four bytes past an
-# eight-byte boundary and take a pad of their own on the way past: the
-# slack count climbs 1, 2, 3 to the skid texture, then 4 at the first
-# emitter group and one more past each of the other six, to 11.
+# Nine pointers over retail's 144-byte record -- the name, the skid texture
+# and the seven emitter-group names -- and only the skid texture lands four
+# bytes past an eight-byte boundary and takes a pad of its own on the way
+# past: the slack count climbs 1, 2 to the skid texture, 3 from the skid
+# width multiplier at 20, and one more past each emitter group, to 10.
+# (The demo's 140 bytes put its first emitter group off the boundary too.)
 TERRAIN_OFFSETS = [
     ("TerrainTypeInfo.Name", 0, 0),
     ("TerrainTypeInfo.NameHash", 4, 1),
     ("TerrainTypeInfo.Type", 8, 1),
     ("TerrainTypeInfo.SkidTextureName", 16, 2),
-    ("TerrainTypeInfo.RoadNoiseGridSpacingInverse", 20, 3),
-    ("TerrainTypeInfo.RoadNoiseScale", 24, 3),
-    ("TerrainTypeInfo.StaticFrictionMultiplier", 28, 3),
-    ("TerrainTypeInfo.DynamicFrictionMultiplier", 32, 3),
-    ("TerrainTypeInfo.RollingFrictionMultiplier", 36, 3),
-    ("TerrainTypeInfo.DriveOverEmitterGroup", 56, 4),
-    ("TerrainTypeInfo.CollisionScrapeEmitterGroup", 128, 10),
-    ("TerrainTypeInfo.CollisionScrapeMaxSpeed", 136, 11),
+    ("TerrainTypeInfo.SkidWidthMultiplier", 20, 3),
+    ("TerrainTypeInfo.RoadNoiseGridSpacingInverse", 24, 3),
+    ("TerrainTypeInfo.RoadNoiseScale", 28, 3),
+    ("TerrainTypeInfo.StaticFrictionMultiplier", 32, 3),
+    ("TerrainTypeInfo.DynamicFrictionMultiplier", 36, 3),
+    ("TerrainTypeInfo.RollingFrictionMultiplier", 40, 3),
+    ("TerrainTypeInfo.DriveOverEmitterGroup", 60, 3),
+    ("TerrainTypeInfo.CollisionScrapeEmitterGroup", 132, 9),
+    ("TerrainTypeInfo.CollisionScrapeMaxSpeed", 140, 10),
 ]
 
 
@@ -1213,7 +1215,7 @@ def s_layout():
     emit("sizeof WheelInfo 32")
     emit("sizeof TireInfo 32")
     emit("sizeof ControlInfo 48")
-    tsize = (140 + 11 * SLACK + PTR - 1) // PTR * PTR
+    tsize = (144 + 10 * SLACK + PTR - 1) // PTR * PTR
     emit("sizeof TerrainTypeInfo %d" % tsize)
     emit("sizeof terraininfo expected %d" % tsize)
 

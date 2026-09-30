@@ -138,13 +138,19 @@ harness:
 
 Both transcripts must match the port's. A demo scenario over code retail
 changed would fail, so the split is also the list of what is still the
-demo's. Two checkers have it so far:
+demo's. `loadertable_check.py` has it: the claims, the walks through
+LoadChunks, the solid list, eFixUpTables, eModel and the sun are retail's;
+the walks over probe tables and the weather are still the demo's.
+`trackpath_check.py` runs one script on both images, since retail's
+`TrackPath.obj` is the demo's but for three functions it added, and the
+retail run adds their scenarios.
 
-- `track_check.py`: the track info is retail's; the topology is still the
-  demo's.
-- `loadertable_check.py`: the claims, the walks through LoadChunks, the
-  solid list, eFixUpTables, eModel and the sun are retail's; the walks
-  over probe tables and the weather are still the demo's.
+`track_check.py` had it too, until the topology's and TerrainType's
+retail passes moved it wholly onto the retail image: the track info,
+`Track.obj`, road noise and both MatchTerrainTypes, over retail
+`TRACKB12`. `careffects_check.py` runs retail's TriggerCarTerrainEffects
+on the retail image alone. It took that method out of `carmode_check.py`,
+which runs the demo image.
 
 `trackroute_check.py` is a hand-written model rather than an image run,
 so its retail pass rewrote the model to retail's disassembly and added a

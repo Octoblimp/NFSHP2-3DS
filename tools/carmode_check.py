@@ -20,8 +20,6 @@ against the image itself, run in mipsemu.
     3DS Files/source/carrace.c           Car's slice nine: GetDistanceAndSpeed,
                                          the blown tires, PleaseResetMeLater,
                                          GetDrivingLineSpeed, DeliverMeFromEvil.
-    3DS Files/source/careffects.c        Car::TriggerCarTerrainEffects, over
-                                         the real TerrainTypeInfoTable.
 
 The oracle and the machinery are mellowmover_check's and physicscar_check's,
 imported: the header parse and the check against mdebug, the generated dump
@@ -82,14 +80,8 @@ bVector3 leave to the stack, which the port writes as 0 -- and that token
 becomes `*`, which matches whatever the port printed. Any other
 difference stops the check.
 
-**The terrain's effects** come after everything else. Both sides read the
-real terrain table -- the image's own, and the port's terraintypetab.c --
-and the ground under the car is whatever terrain the case names, through
-the same elevation stand-in. TriggerEffect and BaseCarSound::TriggerSplash
-log, the effect with the four lanes of any point it is given; the wipers,
-the body damage and bMulMatrix are the real ones. One case moves terrain
-4's drive-over window above its second one's, for the branch no terrain
-on the disc takes.
+Slice ten, Car::TriggerCarTerrainEffects, is retail's now, and
+careffects_check.py checks it against the retail image.
 
     python tools/carmode_check.py
     python tools/carmode_check.py --mutate
@@ -128,12 +120,11 @@ DIH = "3DS Files/source/difficultyinfo.h"
 TMC = "3DS Files/source/timer.c"
 RCC = "3DS Files/source/race.c"
 CRR = "3DS Files/source/carrace.c"
-CFX = "3DS Files/source/careffects.c"
 CFM = "3DS Files/source/carfinish.c"
 
 SOURCES_PORT = [CMC, CCC, CBC, CDC, CRC, RPC, CVC,
                 "3DS Files/source/espresso.c",
-                DIC, "3DS Files/source/player.c", TMC, CRR, CFX,
+                DIC, "3DS Files/source/player.c", TMC, CRR,
                 "3DS Files/source/terraintypetab.c",
                 "3DS Files/source/copmanager.c",
                 "3DS Files/source/cartrack.c",
@@ -339,8 +330,6 @@ SYM = {
     "pursued": "IsBeingPursued__11tCopManagerP3Car",
     "ai-line": "GetCurrentDrivingLineSpeed__15AICarController",
     "setdest": "SetDestination__13DeliveryMoverP8bVector2Usff",
-    "terrfx": "TriggerCarTerrainEffects__3Carf",
-    "splash": "TriggerSplash__12BaseCarSoundii",
     "finish": "FinishMovement__3Carf",
     "hastopo": "HasTopology__18TopologyCoordinatePC8bVector2",
     "clearzone": "ClearZone__6Playerb",
@@ -666,146 +655,6 @@ DELIVER = [
     (1, 0x12345, -4.0, 0.25),
     (3, 0xffff, 0.0, 1e6),
     (2, 0x8000, 99.0, -1.0),
-]
-
-# ---- slice ten: the terrain's effects
-
-G_FRAMES = GP - 20212              # WorldTimeFrames, 0x00323cfc
-G_DAMAGE = 0x00312560              # TheRaceParameters.DamageEnabled
-TT_TABLE, TT_STRIDE = pcc.TERRAIN_TABLE, pcc.TT_STRIDE
-TT_DO_MIN, TT_DO_MAX = 60, 64      # TerrainTypeInfo.DriveOver{Min,Max}Speed
-CD_SIZE = 212                      # CarDamage
-CD_ITEMS = 204                     # its BreakableCarItemDamageAmounts
-CD_TOTAL = 8 + 40                  # TheBodyDamage.CompressedTotalDamage
-PC_ENGINE, EN_NITRO = 64, 80       # PhysicsCar.pEngine, Engine.NitroFlag
-FX_PLAYER_SIZE = 20                # Player, only ever tested for NULL
-FX_FRAMES = 5000                   # WorldTimeFrames, unless a case says
-FX_POS = (12.0, -7.0, 1.5, 0.25)   # the state's Position
-FX_VEL = (3.0, -4.5, 0.75, 0.5)    # and Velocity, all four lanes
-FX_WIPERS0 = (0, 0, 0)             # WiperState, WiperOnTime, WiperOffTime
-
-
-def fx_matrix(i):
-    """Wheel i's matrix: sixteen eighths, none of them in step, and a w
-    column that is not (0, 0, 0, 1), so the spew point's fourth lane has
-    something to carry."""
-    return [0.125 * ((r * 5 + c * 3 + i * 7) % 13) - 0.75
-            for r in range(4) for c in range(4)]
-
-
-def fx(dist=100.0, vmag=20.0, touch=(1, 1, 1, 1), terr=(1, 1, 1, 1),
-       slip=((0.0, 0.0),) * 4, nts=(0, 0, 0, 0), ground=1, bo=(0.0,) * 4,
-       dmg=None, player=False, nitro=0, move=0, engine=0, blown=(0, 0),
-       snd=True, wipers=FX_WIPERS0, patch=None, now=FX_FRAMES):
-    """A case. `dmg` is None for no CarDamage, else (items word, total
-    damage halfword, DamageEnabled). `engine` is the physics car's
-    NitroFlag, set only under move 1. `patch` is terrain 4's drive-over
-    (min, max) for the case, put back after."""
-    return dict(dist=dist, vmag=vmag, touch=touch, terr=terr, slip=slip,
-                nts=nts, ground=ground, bo=bo, dmg=dmg, player=player,
-                nitro=nitro, move=move, engine=engine, blown=blown,
-                snd=snd, wipers=wipers, patch=patch, now=now)
-
-
-# Terrain 1 ROAD: skid 5..200, spew 2..200, drive-over 20..100 mph,
-# bottom-out 1..2. 2 DIRT: skid 2..30, spew 1.5..10, drive-over 50..200.
-# 4 PUDDLE: drive-over 3..30, the second 35..180, bottom-out 0.6..3 with
-# no group. 5 DEEP_WATER: 3..30 and 35..80. 0 NONE: no groups at all,
-# bottom-out 50..100. 8 SNOW: no groups. 31 POTHOLE: skid 5..200, spew
-# 2..200. A wheel's slip is (x, y); the smoke reads its length, the spew
-# its x.
-FX = [
-    # No wheel down: nothing, and the skid counts are left as they were.
-    fx(touch=(0, 0, 0, 0), terr=(1, 2, 3, 4), nts=(5, 6, 7, 8),
-       slip=((30.0, 40.0),) * 4, dist=30.0),
-    # Too far for smoke: every count cleared. The ground still runs.
-    fx(dist=150.0, slip=((50.0, 1.0),) * 4, nts=(9, 9, 9, 9)),
-    # The count ladder, a length of 50 on the road.
-    fx(slip=((30.0, 40.0),) * 4, nts=(0, 1, 18, 19)),
-    fx(slip=((30.0, -40.0),) * 4, nts=(58, 59, 118, 119)),
-    fx(slip=((-300.0, 0.0), (0.0, 300.0), (30.0, 40.0), (1.0, 7.0)),
-       nts=(254, 255, 200, 0)),
-    # A length exactly at the minimum clears; no smoke group counts but
-    # shows nothing; dirt's window is narrower.
-    fx(terr=(1, 0, 8, 2), slip=((5.0, 0.0), (60.0, 0.0), (25.0, 0.0),
-                                (0.0, -10.0)), nts=(7, 3, 4, 30)),
-    fx(terr=(31, 31, 31, 31), slip=((3.0, 4.0), (4.0, 3.0), (-3.0, -4.0),
-                                    (0.0, 5.000001)), nts=(40, 40, 40, 40)),
-    # Tire spew: the rear two only, under 40, at the turned slip.
-    fx(dist=20.0, terr=(2, 2, 2, 2), ground=2, vmag=30.0,
-       slip=((8.0, 0.5), (8.0, -0.5), (4.0, 1.25), (20.0, -2.0))),
-    fx(dist=39.5, terr=(1, 1, 31, 1), ground=1, vmag=7.5,
-       slip=((100.0, 0.0), (0.0, 0.0), (150.0, -20.0), (2.5, 0.25)),
-       nts=(2, 2, 2, 2)),
-    fx(dist=40.0, slip=((0.0, 0.0), (0.0, 0.0), (100.0, 0.0), (100.0, 0.0))),
-    fx(dist=10.0, terr=(1, 1, 0, 8), slip=((0.0, 0.0),) * 2 + ((50.0, 0.0),) * 2),
-    fx(dist=10.0, slip=((0.0, 0.0), (0.0, 0.0), (-50.0, 0.0), (2.0, 9.0))),
-    # Two wheels down: no ground.
-    fx(dist=10.0, touch=(1, 1, 0, 0), slip=((10.0, 0.0),) * 4, nts=(3,) * 4,
-       bo=(2.0,) * 4),
-    # A byte of 0x80 is a wheel down.
-    fx(dist=10.0, touch=(0x80, 0, 0x80, 0x80), terr=(2, 2, 2, 2), ground=2,
-       vmag=40.0, slip=((3.0, 0.0), (3.0, 0.0), (3.0, 0.0), (3.0, 0.0)),
-       nts=(2, 2, 2, 2)),
-    # The splash. Wheel 0 in a puddle: left, 1.
-    fx(dist=50.0, vmag=12.0, terr=(4, 1, 1, 1), ground=4),
-    # Wheel 1 in deep water: right, 3. The second drive-over alone.
-    fx(dist=50.0, vmag=30.0, terr=(1, 5, 1, 1), ground=5),
-    # A mud puddle and a puddle behind: right, 1. Both drive-overs, the
-    # first cut back.
-    fx(dist=59.0, vmag=44.7, terr=(1, 1, 20, 4), ground=4),
-    # Wheel 3 in deep water: left, 3, and no sound to tell.
-    fx(dist=50.0, vmag=15.0, terr=(1, 1, 1, 5), snd=False),
-    # At 60, and at 10 m/s: no splash.
-    fx(dist=60.0, vmag=20.0, terr=(4, 4, 4, 4), ground=4),
-    fx(dist=50.0, vmag=10.0, terr=(4, 4, 4, 4), ground=4),
-    # A wet wheel up is not wet; near names are not wet either.
-    fx(dist=50.0, touch=(0, 1, 1, 1), terr=(4, 1, 1, 1)),
-    fx(dist=50.0, terr=(3, 6, 19, 21), ground=3),
-    # The wipers already running, or a window already open.
-    fx(dist=50.0, terr=(5, 1, 1, 1), wipers=(1, 0, 0)),
-    fx(dist=50.0, terr=(1, 1, 4, 1), wipers=(0, FX_FRAMES + 100,
-                                              FX_FRAMES + 300)),
-    fx(dist=50.0, terr=(1, 4, 1, 1), wipers=(0, FX_FRAMES - 500,
-                                              FX_FRAMES - 100), now=77),
-    # The drive-over pair with the first window moved: its minimum equal
-    # to the second's, and then above it, so the second gives way.
-    fx(vmag=25.37, ground=4, patch=(35.0, 59.0)),
-    fx(vmag=44.7, ground=4, patch=(50.0, 90.0)),
-    fx(vmag=25.37, ground=4, patch=(34.0, 59.0)),
-    # Bottom-out: the road's; a puddle's, which has no group; no terrain's.
-    fx(bo=(0.1, 0.7, 0.3, 0.45)),
-    fx(ground=4, bo=(1.0, 1.0, 1.0, 1.0), vmag=0.5),
-    fx(ground=0, bo=(20.0, 20.0, 20.0, 5.0)),
-    # Three down is enough, and the fourth wheel's bottom-out still counts.
-    fx(touch=(1, 1, 1, 0), bo=(0.25, 0.25, 0.25, 0.625), vmag=12.0),
-    fx(ground=2, vmag=100.0),
-    fx(ground=1, vmag=5.0),
-    # Snow's drive-over window with no group; and the second drive-over
-    # alone, the first's window moved above the speed.
-    fx(ground=8),
-    fx(ground=4, vmag=30.0, patch=(100.0, 200.0)),
-    # The damage: the radiator's two bits, and the visible total.
-    fx(dmg=(1 << 28, 0, 1)),
-    fx(dmg=(0xcfffffff, 3277, 1)),
-    fx(dmg=(3 << 28, 3276, 1)),
-    fx(dmg=(2 << 28, 4096, 0)),
-    fx(dmg=(0, 65535, 1)),
-    # The nitro: the flag, and a player's physics car on nitro.
-    fx(nitro=1),
-    fx(player=True),
-    fx(move=1, player=True, engine=1),
-    fx(move=1, player=True, engine=0),
-    fx(move=1, player=False, engine=1),
-    fx(move=1, player=True, engine=1, nitro=1),
-    fx(move=1, player=True, engine=7, nitro=0),
-    # The flat tires.
-    fx(blown=(0x05, 0)),
-    fx(blown=(0x05, 2), touch=(1, 1, 0, 1), vmag=5.0),
-    fx(blown=(0x0f, 4), vmag=1.0),
-    fx(blown=(0x0f, 4), vmag=40.0),
-    fx(blown=(0x80, 0x80), vmag=9.0),
-    fx(blown=(0xf8, 1), vmag=9.0),
 ]
 
 # ---- slice eleven: FinishMovement
@@ -1205,6 +1054,9 @@ def generate(cti):
 
     def i32s(vals):
         return ", ".join("(int32_t)0x%08xu" % (v & M32) for v in vals)
+
+    def f32s(vals):
+        return pcc.c_u32_list([fb(v) for v in vals])
     w("static const int32_t cm_fix[] = {%s};" % i32s(FIX))
     w("typedef struct CmBlow { int32_t bits, tires, num, snd; } CmBlow;")
     w("static const CmBlow cm_blow[] = {")
@@ -1224,36 +1076,6 @@ def generate(cti):
     for frm, angle, speed, t in DELIVER:
         w("    { %d, 0x%08xu, 0x%08xu, 0x%08xu }," % (frm, angle & M32,
                                                      fb(speed), fb(t)))
-    w("};")
-    w("")
-    w("#define CM_FX_PLAYER_SIZE %d" % FX_PLAYER_SIZE)
-
-    def f32s(vals):
-        return pcc.c_u32_list([fb(v) for v in vals])
-    w("static const uint32_t cm_fx_pos[4] = {%s};" % f32s(FX_POS))
-    w("static const uint32_t cm_fx_vel[4] = {%s};" % f32s(FX_VEL))
-    w("static const uint32_t cm_fx_matrix[4][16] = {%s};" % ", ".join(
-        "{%s}" % f32s(fx_matrix(i)) for i in range(4)))
-    w("typedef struct CmFx { uint32_t dist, vmag; int32_t touch[4], "
-      "terr[4]; uint32_t slip[4][2]; int32_t nts[4], ground; "
-      "uint32_t bo[4]; int32_t dmg, items, total, enabled, player, nitro, "
-      "move, engine, bits, num, snd, wstate, won, woff, patch; "
-      "uint32_t pmin, pmax; int32_t now; } CmFx;")
-    w("static const CmFx cm_fx[] = {")
-    for c in FX:
-        dmg = c["dmg"] or (0, 0, 0)
-        pm = c["patch"] or (0.0, 0.0)
-        flags = ((int(c["dmg"] is not None),) + tuple(dmg)
-                 + (int(c["player"]), c["nitro"], c["move"], c["engine"])
-                 + tuple(c["blown"]) + (int(c["snd"]),) + tuple(c["wipers"])
-                 + (int(c["patch"] is not None),))
-        w("    { 0x%08xu, 0x%08xu, {%s}, {%s}, {%s}, {%s}, %d, {%s}, %s, "
-          "0x%08xu, 0x%08xu, %s }," % (
-              fb(c["dist"]), fb(c["vmag"]), i32s(c["touch"]),
-              i32s(c["terr"]),
-              ", ".join("{%s}" % f32s(s) for s in c["slip"]),
-              i32s(c["nts"]), c["ground"], f32s(c["bo"]), i32s(flags),
-              fb(pm[0]), fb(pm[1]), i32s((c["now"],))))
     w("};")
     w("")
     w("#define CM_FM_PL_SIZE %d" % FM_PL_SIZE)
@@ -1332,8 +1154,6 @@ class Model(mmc.Model):
         self.dist = self.snd = self.copmgr = self.dpos = 0
         self.pursued = 0
         self.nline = 0
-        self.ground = None         # slice ten's terrain under the car
-        self.fxplayer = self.cdmg = 0
         self.fm_topo = []          # slice eleven's scripted answers
         self.fm_jc = self.fm_rz = 0
         e.stub("bMalloc__FiPCcii", self.on_malloc)
@@ -1349,7 +1169,6 @@ class Model(mmc.Model):
                       ("pursued", self.on_pursued),
                       ("ai-line", self.on_line_speed),
                       ("setdest", self.on_setdest),
-                      ("splash", self.on_splash),
                       ("hastopo", self.on_has_topology),
                       ("clearzone", self.on_clear_zone),
                       ("requestzone", self.on_request_zone),
@@ -1414,16 +1233,13 @@ class Model(mmc.Model):
     def elevation(self, em):
         # physicscar_check's plane, which always writes a normal; the
         # flat-on-track probe asks for none, so what it writes at 0 is put
-        # back. Slice ten names the terrain itself.
-        tout = em.reg[6] & M32
+        # back.
         if em.reg[7] & M32:
             mmc.Model.elevation(self, em)
         else:
             low = bytes(self.e.mem[0:16])
             mmc.Model.elevation(self, em)
             self.e.mem[0:16] = low
-        if self.ground is not None and tout:
-            self.put(tout, self.ground & M32)
 
     def on_clear_bbox(self, em):
         self.say("clearbbox tc=%s" % self.label(em.reg[4] & M32))
@@ -1450,10 +1266,6 @@ class Model(mmc.Model):
         self.say("effect car=%s fx=%d scale=%08x where=%08x pos=%s%s" % (
             self.label(em.reg[4] & M32), s32(em.reg[5]),
             em.fpr[12] & M32, em.reg[6] & M32, self.label(pos), at))
-
-    def on_splash(self, em):
-        self.say("splash snd=%s right=%d level=%d" % (
-            self.label(em.reg[4] & M32), s32(em.reg[5]), s32(em.reg[6])))
 
     def on_snd_blow(self, em):
         self.say("sound blowout %s" % self.label(em.reg[4] & M32))
@@ -2368,86 +2180,6 @@ class Model(mmc.Model):
                 self.label(self.cur_mover())))
         self.set_move(0)
 
-    # ---- slice ten
-
-    def s_terrain(self):
-        c = self.car
-        e = self.e
-        cs = c + CAR["State"]
-
-        def at(field, k=0):
-            return cs + OFF("CarState", field) + k
-        self.say("== terrain setup")
-        self.fxplayer = self.zalloc(FX_PLAYER_SIZE)
-        self.register("fxplayer", self.fxplayer, FX_PLAYER_SIZE)
-        self.cdmg = self.zalloc(CD_SIZE)
-        self.register("cdmg", self.cdmg, CD_SIZE)
-        player0 = self.w(c + CAR["pPlayer"])
-        for k in range(4):
-            self.put(at("Position", 4 * k), fb(FX_POS[k]))
-            self.put(at("Velocity", 4 * k), fb(FX_VEL[k]))
-        for i in range(4):
-            for k, v in enumerate(fx_matrix(i)):
-                self.put(at("WheelMatrix", 64 * i + 4 * k), fb(v))
-        do4 = TT_TABLE + 4 * TT_STRIDE
-        window0 = (self.w(do4 + TT_DO_MIN), self.w(do4 + TT_DO_MAX))
-        nts = c + CAR["NumTimesSkidding"]
-        for n, x in enumerate(FX):
-            self.say("== fx %d" % n)
-            if s32(self.w(c + CAR["TheMovementMode"])) != x["move"]:
-                self.set_move(x["move"])
-            if x["move"] == 1:
-                eng = self.w(self.cur_mover() + PC_ENGINE)
-                self.put(eng + EN_NITRO, x["engine"] & M32)
-            self.put(at("VelocityMagnitude"), fb(x["vmag"]))
-            for i in range(4):
-                e.mem[at("WheelTouchingGround", i)] = x["touch"][i] & 0xff
-                self.put(at("WheelTerrain", 4 * i), x["terr"][i] & M32)
-                self.put(at("WheelSlip", 8 * i), fb(x["slip"][i][0]))
-                self.put(at("WheelSlip", 8 * i + 4), fb(x["slip"][i][1]))
-                self.put(at("WheelBottomOutMagnitude", 4 * i), fb(x["bo"][i]))
-                e.mem[nts + i] = x["nts"][i]
-            if x["dmg"] is None:
-                self.put(c + CAR["pCarDamage"], 0)
-                self.put(G_DAMAGE, 0)
-            else:
-                items, total, en = x["dmg"]
-                self.put(self.cdmg + CD_ITEMS, items & M32)
-                e.mem[self.cdmg + CD_TOTAL:self.cdmg + CD_TOTAL + 2] = \
-                    struct.pack("<H", total)
-                self.put(G_DAMAGE, en)
-                self.put(c + CAR["pCarDamage"], self.cdmg)
-            self.put(c + CAR["pPlayer"], self.fxplayer if x["player"] else 0)
-            self.put(c + CAR["NitroEffectFlag"], x["nitro"])
-            e.mem[c + CAR["BlownTireBits"]] = x["blown"][0]
-            e.mem[c + CAR["NumBlownTires"]] = x["blown"][1]
-            self.put(c + CAR["pBaseCarSound"], self.snd if x["snd"] else 0)
-            ws, won, woff = x["wipers"]
-            self.put(c + CAR["WiperState"], ws)
-            self.put(c + CAR["WiperOnTime"], won & M32)
-            self.put(c + CAR["WiperOffTime"], woff & M32)
-            self.put(G_FRAMES, x["now"] & M32)
-            if x["patch"]:
-                self.put(do4 + TT_DO_MIN, fb(x["patch"][0]))
-                self.put(do4 + TT_DO_MAX, fb(x["patch"][1]))
-            self.ground = x["ground"]
-            self.fcall(SYM["terrfx"], c, floats=[x["dist"]])
-            self.ground = None
-            self.put(do4 + TT_DO_MIN, window0[0])
-            self.put(do4 + TT_DO_MAX, window0[1])
-            self.say("fx nts=%s wipers=%d %d %d" % (
-                " ".join("%d" % e.mem[nts + i] for i in range(4)),
-                s32(self.w(c + CAR["WiperOnTime"])),
-                s32(self.w(c + CAR["WiperOffTime"])),
-                s32(self.w(c + CAR["WiperState"]))))
-        self.put(c + CAR["pPlayer"], player0)
-        self.put(c + CAR["pCarDamage"], 0)
-        self.put(G_DAMAGE, 0)
-        self.put(c + CAR["pBaseCarSound"], 0)
-        self.put(c + CAR["NitroEffectFlag"], 0)
-        self.set_blown(0, 0)
-        self.set_move(0)
-
     def s_finish(self):
         c = self.car
         e = self.e
@@ -2595,7 +2327,6 @@ class Model(mmc.Model):
         self.s_reset()
         self.s_move()
         self.s_race()
-        self.s_terrain()
         self.s_finish()
         return self.out
 
@@ -2776,23 +2507,23 @@ MUTATIONS = [
      "#define CAR_MEMORY_POOL 0"),
 
     # ---- the null controller and its driver
-    ("nc-size", CMC,
+    ("nc-size", CCC,
      "    ctrl = (NullController *)bMalloc((int)sizeof(NullController),",
      "    ctrl = (NullController *)bMalloc((int)sizeof(NullController) + 4,"),
-    ("nc-name", CMC, '"NullController", 0, CAR_MEMORY_POOL);',
+    ("nc-name", CCC, '"NullController", 0, CAR_MEMORY_POOL);',
      '"NullControl", 0, CAR_MEMORY_POOL);'),
-    ("nc-no-base-ctor", CMC, "    carcontroller_init(&ctrl->Base, c);" + NL,
+    ("nc-no-base-ctor", CCC, "    carcontroller_init(&ctrl->Base, c);" + NL,
      ""),
-    ("nc-no-vptr", CMC,
+    ("nc-no-vptr", CCC,
      "    ctrl->Base._vtable = NULLCONTROLLER_VTABLE;" + NL, ""),
-    ("nd-size", CMC, 'bMalloc((int)sizeof(NullDriver), "NullDriver", 0,',
+    ("nd-size", CCC, 'bMalloc((int)sizeof(NullDriver), "NullDriver", 0,',
      'bMalloc((int)sizeof(NullDriver) + 4, "NullDriver", 0,'),
-    ("nd-no-base-ctor", CMC, "    cardriver_init(&drv->Base);" + NL, ""),
-    ("nd-vptr-before-ctor", CMC, moved(
+    ("nd-no-base-ctor", CCC, "    cardriver_init(&drv->Base);" + NL, ""),
+    ("nd-vptr-before-ctor", CCC, moved(
         "    drv->Base._vtable = NULLDRIVER_VTABLE;",
         "    cardriver_init(&drv->Base);", False)),
-    ("nc-no-driver", CMC, "    ctrl->Base.Driver = &drv->Base;" + NL, ""),
-    ("nd-no-vptr", CMC, "    drv->Base._vtable = NULLDRIVER_VTABLE;" + NL, ""),
+    ("nc-no-driver", CCC, "    ctrl->Base.Driver = &drv->Base;" + NL, ""),
+    ("nd-no-vptr", CCC, "    drv->Base._vtable = NULLDRIVER_VTABLE;" + NL, ""),
 
     # ---- SetMovementMode
     ("move-no-old-dtor", CMC,
@@ -3524,251 +3255,6 @@ MUTATIONS = [
      "pos, 0, speed, time);"),
     ("dme-pos-null", CRR, "(c->pCarMover, pos, angle,",
      "(c->pCarMover, NULL, angle,"),
-    # ---- slice ten: careffects.c
-    ("fx-mph", CFX, "CAR_MPH_PER_MPS         2.237f",
-     "CAR_MPH_PER_MPS         2.236f"),
-    ("fx-flat-min", CFX, "CAR_FLAT_TIRE_MIN_MPH   4.470272541f",
-     "CAR_FLAT_TIRE_MIN_MPH   4.5f"),
-    ("fx-flat-slope", CFX, "CAR_FLAT_TIRE_PER_MPH   0.04474f",
-     "CAR_FLAT_TIRE_PER_MPH   0.045f"),
-    ("fx-smoke-damage", CFX, "CAR_ENGINE_SMOKE_DAMAGE 0.8f",
-     "CAR_ENGINE_SMOKE_DAMAGE 0.75f"),
-    ("fx-skid-range", CFX, "CAR_SKID_SMOKE_RANGE    150.0f",
-     "CAR_SKID_SMOKE_RANGE    160.0f"),
-    ("fx-spew-range", CFX, "CAR_TIRE_SPEW_RANGE      40.0f",
-     "CAR_TIRE_SPEW_RANGE      45.0f"),
-    ("fx-splash-range", CFX, "CAR_SPLASH_RANGE         60.0f",
-     "CAR_SPLASH_RANGE         65.0f"),
-    ("fx-splash-speed", CFX, "CAR_SPLASH_MIN_SPEED     10.0f",
-     "CAR_SPLASH_MIN_SPEED      9.0f"),
-    ("fx-wipers-on", CFX, "CAR_SPLASH_WIPERS_ON     60",
-     "CAR_SPLASH_WIPERS_ON     61"),
-    ("fx-wipers-off", CFX, "CAR_SPLASH_WIPERS_OFF   180",
-     "CAR_SPLASH_WIPERS_OFF   300"),
-    ("fx-where0", CFX, "CAR_WHEEL_WHERE0        0x50000",
-     "CAR_WHEEL_WHERE0        0x40000"),
-    ("fx-where-step", CFX, "CAR_WHEEL_WHERE_STEP    0x10000",
-     "CAR_WHEEL_WHERE_STEP    0x20000"),
-    ("fx-clamp-no-cap", CFX, "    return (x < 1.0f) ? x : 1.0f;",
-     "    return x;"),
-    ("fx-clamp-no-floor", CFX, "    return (x < 0.0f) ? 0.0f : x;",
-     "    return x;"),
-    ("fx-group-null-only", CFX,
-     "    return name != NULL && name[0] != '\\0';",
-     "    return name != NULL;"),
-    # -- the wheels
-    ("fx-three-wheels", CFX,
-     "for (i = 0; i < 4; i++, where += CAR_WHEEL_WHERE_STEP)",
-     "for (i = 0; i < 3; i++, where += CAR_WHEEL_WHERE_STEP)"),
-    ("fx-wheel-up-counts", CFX,
-     "        if (st->WheelTouchingGround[i] == 0)" + NL
-     + "            continue;" + NL + "        down++;",
-     "        down++;"),
-    ("fx-no-count", CFX, "        down++;" + NL, ""),
-    ("fx-ground-two", CFX, "    if (down >= 3) {", "    if (down >= 2) {"),
-    ("fx-ground-four", CFX, "    if (down >= 3) {", "    if (down >= 4) {"),
-    ("fx-wet-no-puddle", CFX,
-     "if (terrain == TERRAIN_TYPE_PUDDLE || terrain == TERRAIN_TYPE_DEEP_WATER",
-     "if (terrain == TERRAIN_TYPE_DEEP_WATER"),
-    ("fx-wet-no-deep", CFX,
-     "terrain == TERRAIN_TYPE_PUDDLE || terrain == TERRAIN_TYPE_DEEP_WATER",
-     "terrain == TERRAIN_TYPE_PUDDLE"),
-    ("fx-wet-no-mud", CFX, NL + "            || terrain == TERRAIN_TYPE_MUD_PUDDLE)",
-     ")"),
-    ("fx-wet-one-bit", CFX, "            wet |= 1 << i;", "            wet |= 1;"),
-    ("fx-deep-puddle", CFX, "deep |= terrain == TERRAIN_TYPE_DEEP_WATER;",
-     "deep |= terrain == TERRAIN_TYPE_PUDDLE;"),
-    ("fx-mag-x-only", CFX,
-     "sqrtf(slip->x * slip->x + slip->y * slip->y)",
-     "sqrtf(slip->x * slip->x)"),
-    ("fx-mag-squared", CFX,
-     "sqrtf(slip->x * slip->x + slip->y * slip->y)",
-     "(slip->x * slip->x + slip->y * slip->y)"),
-    # -- the smoke
-    ("fx-skid-range-le", CFX, "if (distance < CAR_SKID_SMOKE_RANGE",
-     "if (distance <= CAR_SKID_SMOKE_RANGE"),
-    ("fx-skid-min-le", CFX, "&& ti->SkidSmokeMinSpeed < mag)",
-     "&& ti->SkidSmokeMinSpeed <= mag)"),
-    ("fx-skid-kept", CFX, "        } else {" + NL
-     + "            c->NumTimesSkidding[i] = 0;" + NL, "        } else {" + NL),
-    ("fx-skid-step-2", CFX, "c->NumTimesSkidding[i] + 1;",
-     "c->NumTimesSkidding[i] + 2;"),
-    ("fx-skid-signed", CFX, "int32_t n = c->NumTimesSkidding[i] + 1;",
-     "int32_t n = (int8_t)c->NumTimesSkidding[i] + 1;"),
-    ("fx-skid-cap-256", CFX, "            if (n > 255)",
-     "            if (n > 256)"),
-    ("fx-skid-unstored", CFX,
-     "            c->NumTimesSkidding[i] = (uint8_t)n;" + NL, ""),
-    ("fx-skid-any-group", CFX,
-     "            if (has_group(ti->SkidSmokeEmitterGroup)) {",
-     "            {"),
-    ("fx-skid-from-max", CFX, "s = (mag - ti->SkidSmokeMinSpeed)",
-     "s = (mag - ti->SkidSmokeMaxSpeed)"),
-    ("fx-skid-span", CFX,
-     "/ (ti->SkidSmokeMaxSpeed - ti->SkidSmokeMinSpeed);",
-     "/ ti->SkidSmokeMaxSpeed;"),
-    ("fx-skid-first-shows", CFX, "                if (n < 2)",
-     "                if (n < 1)"),
-    ("fx-skid-20-le", CFX, "                else if (n < 20)",
-     "                else if (n <= 20)"),
-    ("fx-skid-60-le", CFX, "                else if (n < 60)",
-     "                else if (n <= 60)"),
-    ("fx-skid-120-le", CFX, "                else if (n < 120)",
-     "                else if (n <= 120)"),
-    ("fx-skid-quarter", CFX, "s = s * 0.25f;", "s = s * 0.3f;"),
-    ("fx-skid-half", CFX, "s = s * 0.5f;", "s = s * 0.6f;"),
-    ("fx-skid-three-quarters", CFX, "s = s * 0.75f;", "s = s * 0.7f;"),
-    ("fx-skid-zero-shows", CFX, "                if (0.0f < s)" + NL
-     + "                    effect(c, CARFX_SKID_SMOKE",
-     "                effect(c, CARFX_SKID_SMOKE"),
-    ("fx-skid-code", CFX, "effect(c, CARFX_SKID_SMOKE, s,",
-     "effect(c, CARFX_TIRE_SPEW, s,"),
-    ("fx-skid-where", CFX, "CARFX_SKID_SMOKE, s, where + terrain, NULL);",
-     "CARFX_SKID_SMOKE, s, where, NULL);"),
-    # -- the spew
-    ("fx-spew-range-le", CFX, "if (!(distance < CAR_TIRE_SPEW_RANGE)",
-     "if (!(distance <= CAR_TIRE_SPEW_RANGE)"),
-    ("fx-spew-from-1", CFX, "|| i < 2", "|| i < 1"),
-    ("fx-spew-from-3", CFX, "|| i < 2", "|| i < 3"),
-    ("fx-spew-by-mag", CFX, "!(ti->TireSpewMinSpeed < slip->x)",
-     "!(ti->TireSpewMinSpeed < mag)"),
-    ("fx-spew-min-le", CFX, "!(ti->TireSpewMinSpeed < slip->x)",
-     "!(ti->TireSpewMinSpeed <= slip->x)"),
-    ("fx-spew-any-group", CFX, NL
-     + "            || !has_group(ti->TireSpewEmitterGroup))", ")"),
-    ("fx-spew-span", CFX,
-     "/ (ti->TireSpewMaxSpeed - ti->TireSpewMinSpeed));",
-     "/ (ti->TireSpewMaxSpeed));"),
-    ("fx-spew-y-dropped", CFX, "            v.y = slip->y;",
-     "            v.y = 0.0f;"),
-    ("fx-spew-z-one", CFX, "            v.z = 0.0f;", "            v.z = 1.0f;"),
-    ("fx-spew-pad-ignored", CFX, "            v.pad = 0.0f;",
-     "            v.pad = 5.0f;"),
-    ("fx-spew-wheel-0", CFX, "&st->WheelMatrix[i]", "&st->WheelMatrix[0]"),
-    ("fx-spew-no-z", CFX, "            p.z = p.z + st->Velocity.z;" + NL, ""),
-    ("fx-spew-no-pad", CFX,
-     "            p.pad = p.pad + st->Velocity.pad;" + NL, ""),
-    ("fx-spew-no-point", CFX, "where + terrain, &p);",
-     "where + terrain, NULL);"),
-    # -- the ground
-    ("fx-ground-geometry", CFX, "&c->TheTopologyCoordinate, &st->Position,",
-     "&c->TheTopologyCoordinate, &st->GeometryPosition,"),
-    ("fx-ground-wheel-terrain", CFX,
-     "        ti = &TerrainTypeInfoTable[terrain];" + NL
-     + "        if (ti->DriveOverEmitterGroup",
-     "        if (ti->DriveOverEmitterGroup"),
-    ("fx-ground-road", CFX,
-     "        ti = &TerrainTypeInfoTable[terrain];" + NL
-     + "        if (ti->DriveOverEmitterGroup",
-     "        ti = &TerrainTypeInfoTable[1];" + NL
-     + "        if (ti->DriveOverEmitterGroup"),
-    ("fx-do-any-group", CFX, "        if (ti->DriveOverEmitterGroup[0] != '\\0')",
-     "        if (1)"),
-    ("fx-do2-any-group", CFX,
-     "        if (ti->DriveOver2EmitterGroup[0] != '\\0')", "        if (1)"),
-    ("fx-do-from-max", CFX, "clamp01((mph - ti->DriveOverMinSpeed)",
-     "clamp01((mph - ti->DriveOverMaxSpeed)"),
-    ("fx-do2-first-window", CFX, "clamp01((mph - ti->DriveOver2MinSpeed)",
-     "clamp01((mph - ti->DriveOverMinSpeed)"),
-    ("fx-do-any-first", CFX, "        if (0.0f < drive + drive2) {",
-     "        if (0.0f < drive) {"),
-    ("fx-do-over-half", CFX, "float over = (drive + drive2) - 1.0f;",
-     "float over = (drive + drive2) - 0.5f;"),
-    ("fx-do-cut-once", CFX, "drive = max0(drive - (over + over));",
-     "drive = max0(drive - over);"),
-    ("fx-do2-cut-once", CFX, "drive2 = max0(drive2 - (over + over));",
-     "drive2 = max0(drive2 - over);"),
-    ("fx-do-order-le", CFX,
-     "if (ti->DriveOverMinSpeed < ti->DriveOver2MinSpeed)",
-     "if (ti->DriveOverMinSpeed <= ti->DriveOver2MinSpeed)"),
-    ("fx-do-order-inverted", CFX,
-     "if (ti->DriveOverMinSpeed < ti->DriveOver2MinSpeed)",
-     "if (ti->DriveOver2MinSpeed < ti->DriveOverMinSpeed)"),
-    ("fx-do-zero-shows", CFX, "            if (0.0f < drive)" + NL
-     + "                effect(c, CARFX_DRIVE_OVER,",
-     "                effect(c, CARFX_DRIVE_OVER,"),
-    ("fx-do2-zero-shows", CFX, "            if (0.0f < drive2)" + NL
-     + "                effect(c, CARFX_DRIVE_OVER2,",
-     "                effect(c, CARFX_DRIVE_OVER2,"),
-    ("fx-do-code", CFX, "effect(c, CARFX_DRIVE_OVER, drive,",
-     "effect(c, CARFX_DRIVE_OVER2, drive,"),
-    ("fx-do-where", CFX, "CARFX_DRIVE_OVER, drive, terrain, NULL);",
-     "CARFX_DRIVE_OVER, drive, 0, NULL);"),
-    ("fx-bo-three", CFX, "        for (i = 0; i < 4; i++)" + NL
-     + "            sum = sum", "        for (i = 0; i < 3; i++)" + NL
-     + "            sum = sum"),
-    ("fx-bo-from-max", CFX, "clamp01((sum - ti->BottomOutMinImpact)",
-     "clamp01((sum - ti->BottomOutMaxImpact)"),
-    ("fx-bo-needs-group", CFX, "        if (0.0f < s)" + NL
-     + "            effect(c, CARFX_BOTTOM_OUT",
-     "        if (0.0f < s && has_group(ti->BottomOutEmitterGroup))" + NL
-     + "            effect(c, CARFX_BOTTOM_OUT"),
-    ("fx-bo-zero-shows", CFX, "        if (0.0f < s)" + NL
-     + "            effect(c, CARFX_BOTTOM_OUT",
-     "            effect(c, CARFX_BOTTOM_OUT"),
-    # -- the splash
-    ("fx-splash-range-le", CFX, "if (distance < CAR_SPLASH_RANGE",
-     "if (distance <= CAR_SPLASH_RANGE"),
-    ("fx-splash-two-wet", CFX, "&& wet > 0", "&& wet > 1"),
-    ("fx-splash-speed-le", CFX,
-     "&& CAR_SPLASH_MIN_SPEED < st->VelocityMagnitude",
-     "&& CAR_SPLASH_MIN_SPEED <= st->VelocityMagnitude"),
-    ("fx-wipers-swapped", CFX,
-     "WorldTimeFrames + CAR_SPLASH_WIPERS_ON," + NL
-     + "                                        WorldTimeFrames + "
-     "CAR_SPLASH_WIPERS_OFF);",
-     "WorldTimeFrames + CAR_SPLASH_WIPERS_OFF," + NL
-     + "                                        WorldTimeFrames + "
-     "CAR_SPLASH_WIPERS_ON);"),
-    ("fx-wipers-now", CFX, "WorldTimeFrames + CAR_SPLASH_WIPERS_ON,",
-     "CAR_SPLASH_WIPERS_ON,"),
-    ("fx-splash-no-sound-test", CFX,
-     "if (c->pBaseCarSound != NULL && gBaseCarSoundTriggerSplashFn != NULL)",
-     "if (gBaseCarSoundTriggerSplashFn != NULL)"),
-    ("fx-splash-left-front", CFX, "(wet & 6) != 0", "(wet & 3) != 0"),
-    ("fx-splash-wheel-1", CFX, "(wet & 6) != 0", "(wet & 2) != 0"),
-    ("fx-splash-levels", CFX, "deep ? 3 : 1", "deep ? 1 : 3"),
-    # -- the damage, the nitro, the flat tires
-    ("fx-radiator-one-bit", CFX,
-     ">> (2 * BREAKABLE_CAR_ITEM_RADIATOR)) & 3) > 0)",
-     ">> (2 * BREAKABLE_CAR_ITEM_RADIATOR)) & 1) > 0)"),
-    ("fx-radiator-item-13", CFX, ">> (2 * BREAKABLE_CAR_ITEM_RADIATOR))",
-     ">> (2 * 13))"),
-    ("fx-damage-code", CFX, "effect(c, CARFX_DAM_RADIATOR,",
-     "effect(c, CARFX_DAM_ENGINE,"),
-    ("fx-damage-no-test", CFX, "    if (c->pCarDamage != NULL) {",
-     "    {"),
-    ("fx-nitro-any-player", CFX,
-     "        if (c->pPlayer != NULL && c->TheMovementMode == PHYSICS_MOVEMENT)",
-     "        if (c->TheMovementMode == PHYSICS_MOVEMENT)"),
-    ("fx-nitro-is-one", CFX, "->pEngine->NitroFlag" + NL
-     + "                     != 0;", "->pEngine->NitroFlag" + NL
-     + "                     == 1;"),
-    ("fx-nitro-flag-only", CFX,
-     "if (c->NitroEffectFlag != 0 || engine != 0)",
-     "if (c->NitroEffectFlag != 0)"),
-    ("fx-nitro-engine-only", CFX,
-     "if (c->NitroEffectFlag != 0 || engine != 0)", "if (engine != 0)"),
-    ("fx-flat-by-bits", CFX, "    if ((int8_t)c->NumBlownTires != 0) {",
-     "    if (c->BlownTireBits != 0) {"),
-    ("fx-flat-three", CFX, "        for (i = 0; i < 4; i++) {" + NL
-     + "            if (st->WheelTouchingGround[i] == 0)",
-     "        for (i = 0; i < 3; i++) {" + NL
-     + "            if (st->WheelTouchingGround[i] == 0)"),
-    ("fx-flat-up-counts", CFX, "        for (i = 0; i < 4; i++) {" + NL
-     + "            if (st->WheelTouchingGround[i] == 0)" + NL
-     + "                continue;" + NL, "        for (i = 0; i < 4; i++) {"
-     + NL),
-    ("fx-flat-any-tire", CFX,
-     "            if ((((int8_t)c->BlownTireBits >> i) & 1) == 0)" + NL
-     + "                continue;" + NL, ""),
-    ("fx-flat-code", CFX, "effect(c, CARFX_DRIVE_ON_FLAT_TIRE,",
-     "effect(c, CARFX_BLOWN_TIRE,"),
-    ("fx-flat-unclamped", CFX, "clamp01((st->VelocityMagnitude",
-     "((st->VelocityMagnitude"),
-    ("fx-flat-no-floor", CFX, NL + "                            - CAR_FLAT_TIRE_MIN_MPH)", ")"),
-    ("fx-flat-where", CFX, "CAR_WHEEL_WHERE0 + i * CAR_WHEEL_WHERE_STEP, NULL);",
-     "CAR_WHEEL_WHERE0, NULL);"),
     # ---- slice eleven: FinishMovement
     # -- the accelerations, the odometer
     ("fm-dt-le", CFM, "    if (0.0f < dt) {", "    if (0.0f <= dt) {"),
@@ -4009,20 +3495,6 @@ EQUIVALENT = {
         "Angle, Position, ForwardSpeed, the body matrix, Velocity and "
         "the wheels' angular velocities change. The second build writes "
         "the same bytes over the first.",
-    # -- the terrain's effects -------------------------------------------
-    "fx-spew-pad-ignored":
-        "bMulMatrixVec3 forces the vector's w to 1 before the multiply, as "
-        "the image's bMulMatrix does through the stack, so the pad the "
-        "port writes -- and the word the image leaves unwritten -- is "
-        "never read.",
-    "fx-spew-by-mag":
-        "The spew's scale is (slip.x - min) / (max - min), at most 0 when "
-        "slip.x is at most the minimum, and only a scale above 0 goes off. "
-        "The slip's length is never below its x, so the gate only differs "
-        "where the scale is already 0.",
-    "fx-spew-min-le":
-        "At slip.x equal to the minimum the scale is exactly 0, and only a "
-        "scale above 0 goes off, so the gate's < and <= agree.",
     # -- FinishMovement ---------------------------------------------------
     "fm-air-yaw-le":
         "GetYaw is 0 below a ForwardSpeed of 5, and otherwise a BAM "
