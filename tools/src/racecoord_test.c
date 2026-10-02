@@ -63,6 +63,7 @@ int (*gBCountFreeMemoryFn)(int pool);
 void (*gUnloadResourceFileFn)(void *file);
 const int *gPlayerCamSkipFE;
 void (*gCameraCoordinatorDeleteFn)(void *coord);
+RCStateCallbackFn gRCStateCallbacks[NUM_RCSTATES]; // rcstates.c's
 
 static _Alignas(16) unsigned char arena[NOBJ][OBJ_BYTES];
 static int nobj;

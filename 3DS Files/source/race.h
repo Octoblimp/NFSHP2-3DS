@@ -143,6 +143,26 @@ typedef enum RaceTypes {
 // InitWithDefaults starts it at RACE_TYPE_NONE.
 extern int32_t RaceParametersRaceType;
 
+// tGlobalDisplaySettings (type#1393), eight bytes: what the player picked
+// for the HUD, which RCStateNoneCallback copies from the frontend's on
+// RESTART_RACE and NEXT_RACE.
+typedef struct tGlobalDisplaySettings {
+    int8_t RearViewMirror;
+    int8_t Units;
+    int8_t OnePlayerTrackMapMode;
+    int8_t TwoPlayerTrackMapMode;
+    int8_t BeTheCopTrackMapMode;
+    int8_t LeaderboardMode;
+    int8_t Scoring;
+    int8_t pad;
+} tGlobalDisplaySettings;
+
+typedef char global_display_settings_size_check[
+    sizeof(tGlobalDisplaySettings) == 8 ? 1 : -1];
+
+// TheRaceParameters.GlobalDisplaySettings (+748), retail's 0x0031ab84.
+extern tGlobalDisplaySettings RaceParametersGlobalDisplaySettings;
+
 // ------------------------------------------------------------- RacingCar
 
 struct Car;

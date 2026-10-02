@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-01), after RaceCoordinator's lifetime (8e). `HANDOFF.md` is the running
+(2026-10-02), after the race coordinator's states up to the finish (8f). `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -47,10 +47,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Eighty-one cross-checkers pass, plus the table generators:
+Eighty-two cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -77,6 +77,7 @@ raceinit_check      3280 ops,    13317 lines, 0 differ   (123/123 mutations caug
 racecore_check      6097 ops,    18698 lines, 0 differ   (158 caught, 3 equivalent; retail's image)
 racerun_check      21656 ops,    40973 lines, 0 differ   (169 caught, 2 equivalent; retail's image)
 racecoord_check     7038 ops,    26129 lines, 0 differ   (135 caught, 1 equivalent; retail's image)
+rcstates_check     17258 ops,    40165 lines, 0 differ   (143 caught, 5 equivalent; retail's image)
 trackroute_check   11 scenarios,  1353 lines, 0 differ   (57 caught, 1 equivalent)
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
 engine_check        8 scenarios,   414 lines, 0 differ   (56 caught, 2 equivalent)
@@ -1097,41 +1098,71 @@ and so replaced every boot.
      racecoordinator_destroy takes `int32_t`, which is `long` on
      devkitARM. The wiring needs a cast or a wrapper.
 
-   **Next is 8f: the state callbacks a race runs through.** Each one
-   answers RCMessages through a jump table on (msg - 1). In
-   RaceCoordinator.obj (`out/retail_syms.txt` has every size):
-   - RCStateNoneCallback (`0x0014a668`, 396 bytes). Its table is at
-     `0x002af8d0`, for msgs 1..10. RESTART_RACE is CleanupAfterRace,
-     InitForRace and sound::Mute(0). NEXT_RACE is
-     FrontendDatabase::SetupNextRace when the parameter is set, then
-     `0x001842a8` and ChangeGameFlow(7, 5). QUIT_RACE checks the demo
-     disc (port it as bActive 0: ChangeGameFlow(7, 0)).
-   - RCStateRaceInProgressCallback (`0x0014ae80`, 648; table
-     `0x002af9e0`, msgs 1..13). TICK displays the countdown number from
-     Race::GetCountdownNumberToDisplay (`0x001480c0`). At stage 4 it
-     marks the replay's beginning of time and calls
-     jukebox::DelayedStart(6.0). It checks the finish
-     (AreAllPlayersFinishedRacing, GetMostRecentlyFinishedPlayer,
-     TheRaceHasFinished). With two players, one who has finished gets
-     BeginDemoCameras on the other's car. ACTIVATE deletes the prerace
-     camera coordinator. UNACTIVATE displays countdown number 0. SKIP
-     finishes the race once every player has. REQUEST_PAUSE keeps the
-     port and the state, then goes to 6. REQUEST_AUTO_REPLAY goes to 5.
-     NEXT_RACE goes to 0 and sends NEXT_RACE on.
-   - DisplayCountdownNumber (`0x0014b260`, 376) and TheRaceHasFinished
-     (`0x0014bce0`, 248)
-   - RCStateCameraFlybyCallback (`0x0014abe0`, 276) and
-     RCStatePreRaceCallback (`0x0014acf8`, 392)
-   - RaceCoordinatorJoystickHandler (`0x0014a7f8`, 32), RequestPause
-     (`0x001832a8`) and RequestUnPause (`0x00174e00`), which post
-     messages
-   - then RCStatePauseCallback (`0x0014b3d8`, 400) and
-     RCStatePostRaceCallback (`0x0014bdd8`, 796). The replay states
-     (instant `0x0014b568`, auto `0x0014b848`) and the two demo states
-     (`0x0014a8c0`, `0x0014aa38`) come after.
-   Split it as the reads show. Then wire the coordinator in and flow
-   into a race: the main loop's UpdateCameraMovers, BeginCountdownCameras,
-   eDisplayFrame and RenderCars (below).
+   **8f, the states up to the finish, is done** (HANDOFF.md, Session
+   31, continued: the race coordinator's states up to the finish (step
+   8f)). `docs/formats/race-coordinator.md` has the write-up.
+   - `rcstates.c` and `rcstates.h` have RCStateNoneCallback
+     (`0x0014a668`), RCStateCameraFlybyCallback (`0x0014abe0`),
+     RCStatePreRaceCallback (`0x0014acf8`), RCStateRaceInProgressCallback
+     (`0x0014ae80`), DisplayCountdownNumber (`0x0014b260`) with
+     Animate321GoElement (`0x0014b108`), TheRaceHasFinished
+     (`0x0014bce0`), the joystick handler (`0x0014a7f8`), RequestPause
+     (`0x001832a8`), RequestUnPause (`0x00174e00`), Resume/
+     SuspendDemoCameras (`0x0014a818`, `0x0014a878`) and the frontend's
+     record-times loop (`0x001842a8`). `rcstates.c` defines
+     gRCStateCallbacks with these four; the other six are NULL.
+   - `racefinish.c` and `racefinish.h` have Race's
+     GetCountdownNumberToDisplay (`0x001480c0`), GetCountdownProgress
+     (`0x00148188`), SimulateRaceFinish (`0x00148f68`),
+     NotifyTheRaceIsOver (`0x00148ff8`), AreAllPlayersFinishedRacing
+     (`0x001490b0`) and GetMostRecentlyFinishedPlayer (`0x001490f8`).
+     FinishCar (`0x001485f0`) and RaceEvent::RecordResults are seams.
+   - `race.h` gains tGlobalDisplaySettings and
+     TheRaceParameters.GlobalDisplaySettings (+748).
+   - The port reads a NULL flyby or prerace camera as finished, skips
+     the replay's marks without a ReplayManager, and does not finish a
+     race with no players. Retail reads all of these unchecked. The
+     demo-disc branches are dropped.
+   - `rcstates_check` runs retail's code in RetailEmu: 402 scenarios,
+     17258 ops, 40165 lines, 0 differ. Of 148 mutations, 143 are caught
+     and 5 are equivalent.
+   - **Not wired yet:** as for 8e. Every seam is NULL in the game.
+
+   **Next is 8g: the pause and the post-race.** RCStatePauseCallback
+   (`0x0014b3d8`, 400 bytes) and RCStatePostRaceCallback (`0x0014bdd8`,
+   796), with TellPlayersToPause (`0x00181c88`), TellPlayersToUnPause
+   (`0x00181ce8`), Player::BeginPause (`0x00181bd0`, ClearHudAnimations)
+   and Player::EndPause (`0x00181bd8`). The decode:
+   - Pause: ACTIVATE is World::BeginPause (empty), TellPlayersToPause,
+     PauseMenu::EnterPause(ThePauseMenu, PausedJoystickPort),
+     ChangeToScreen("Pause Menu", 1) and sound::Mute(1). UNACTIVATE is
+     ChangeToScreen(NULL, 0), ExitPause, TellPlayersToUnPause and
+     World::EndPause (empty). REQUEST_UNPAUSE: 1 unmutes and goes back
+     to BeforePauseRCState, 4 goes to INSTANT_REPLAY, 3 is
+     TheRaceWasQuit then NONE and QUIT_RACE sent, 2 is NONE and
+     RESTART_RACE sent.
+   - PostRace (jump table `0x002afb50`, msgs 1..13): ACTIVATE puts each
+     player's mover to CM_NONE, unmutes, flushes the speech, mutes the
+     replay if its new word at +12 is set, BeginRaceHighlights,
+     EndGameScreens::ResumeScreens, then picks the best-placed player
+     (TransientStats::GetDriver `0x00187080`, FinishPosition) into
+     RaceCoordinator+140 and makes a DemoCameraCoordinator on
+     World.CarTable[that] (line 2361). UNACTIVATE suspends the screens,
+     deletes the demo camera, zeroes +140 and calls `0x001543f0` (the
+     TypeChangedHandler reinstall). TICK begins the next highlight once
+     WorldLoopCounter (gp-19552) reaches the ReplayManager's +160.
+     SKIP_REPLAY does it at once. START_REPLAY goes to INSTANT_REPLAY;
+     RESTART/NEXT/QUIT go to NONE and send the message on.
+   `rcpost.c`/`rcpost.h` hold a first draft of both, written from that
+   decode and not yet checked. Extend rcstates_check with them: states 6
+   and 7 become real, and the fake callbacks stay on 4, 5, 8 and 9.
+   RaceCoordinator+140 becomes PostRacePlayerNumber.
+
+   After 8g: the replay states (instant `0x0014b568`, auto
+   `0x0014b848`) and the demo states (`0x0014a8c0`, `0x0014aa38`), then
+   wire the coordinator in and flow into a race: the main loop's
+   UpdateCameraMovers, BeginCountdownCameras, eDisplayFrame and
+   RenderCars (below).
 
    - The InitForRace decode is in `docs/formats/race-coordinator.md` now.
    - InitPlayers, retail's DriverInfo, InitCars, AddRacingCar and

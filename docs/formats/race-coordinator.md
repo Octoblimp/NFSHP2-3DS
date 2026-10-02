@@ -7,8 +7,10 @@ through `InitForRace`, and its destructor takes it all down again through
 ten states, and each one is a callback that answers messages. The messages
 go through a queue, and `ChangeState` is three of them in a row.
 
-This step (8e) ports the lifetime and the queue. The ten callbacks are the
-next slices; until then they are a table of seams.
+Step 8e ported the lifetime and the queue. Step 8f ports the first four
+states, `NONE` through `RACE_IN_PROGRESS`, with the countdown and the
+finish (see "The states up to the finish", below). The other six states
+are later slices, and their table entries stay NULL until then.
 
 The port is `3DS Files/source/racecoord.c`/`racecoord.h`. Everything there
 is retail's. `race.c` adds `TheRaceParameters.NumAICars`.
@@ -260,10 +262,272 @@ This walks `0 .. NumDriverInfo` through `GetDriverInfo` and returns the
 first record whose `UniqueDriverNumber` (signed byte 1) matches. It
 returns NULL if none does. The count is re-read each pass.
 
+## The states up to the finish (8f)
+
+`3DS Files/source/rcstates.c`/`rcstates.h` port the first four states,
+the countdown, the finish and the small methods around them.
+`racefinish.c`/`racefinish.h` port the six `Race` methods those states
+ask. `rcstates.c` defines the state table with the four at their
+`RCState`s. The other six entries stay NULL until their slices.
+
+| retail | what |
+|--------|------|
+| `0x0014a668` | `RCStateNoneCallback`, 396 bytes |
+| `0x0014a7f8` | `RaceCoordinatorJoystickHandler`, 32 bytes |
+| `0x0014a818` | `ResumeDemoCameras()`, 92 bytes |
+| `0x0014a878` | `SuspendDemoCameras()`, 68 bytes |
+| `0x0014abe0` | `RCStateCameraFlybyCallback`, 276 bytes |
+| `0x0014acf8` | `RCStatePreRaceCallback`, 392 bytes |
+| `0x0014ae80` | `RCStateRaceInProgressCallback`, 648 bytes |
+| `0x0014b108` | `Animate321GoElement`, 344 bytes |
+| `0x0014b260` | `DisplayCountdownNumber(int)`, 376 bytes |
+| `0x0014bce0` | `TheRaceHasFinished()`, 248 bytes |
+| `0x00174e00` | `RequestUnPause(UnPauseReasonType)`, 12 bytes |
+| `0x001832a8` | `RequestPause(int)`, 12 bytes |
+| `0x001842a8` | FrontendDatabase's record-times loop, no symbol, 112 bytes |
+| `0x001480c0` | `Race::GetCountdownNumberToDisplay()`, 200 bytes |
+| `0x00148188` | `Race::GetCountdownProgress()`, 140 bytes |
+| `0x00148f68` | `Race::SimulateRaceFinish()`, 144 bytes |
+| `0x00148ff8` | `Race::NotifyTheRaceIsOver()`, 128 bytes |
+| `0x001490b0` | `Race::AreAllPlayersFinishedRacing()`, 72 bytes |
+| `0x001490f8` | `Race::GetMostRecentlyFinishedPlayer()`, 92 bytes |
+| gp-19564 | `WorldTimeFrames` |
+| gp-19028 | the jukebox's delayed-start timer |
+| gp-31436, gp-31428 | 0.9, a count in seconds |
+| gp-31432, -31424, -31420 | 1/60, a frame in seconds |
+| gp-31376 | 0.8, the GO's sample limit |
+| gp-31384 | 9e9 (`0x50061c46`), the music's "never" |
+| `0x002fc050` | `TheFrontendDatabase`; its display settings are at +332 |
+| `0x0031a898`+748 | `TheRaceParameters.GlobalDisplaySettings`, 8 bytes |
+| `0x0031b600` | `TheRaceEvent` |
+
+The `Race` words read here are `RaceStage` +0, `StartGoTimeFrames` +4,
+`StartCountdownTimeFrames` +8, `NumRacingCars` +24 and `pRacingCars`
++1572. A `RacingCar`'s `RacePosition` is the signed byte at +10 and its
+`FinishReason` the signed half at +18. A `Player`'s `MyCar` is at +4,
+`TimeFinishedRacing` at +80 and `FinishAnimationLength` at +84. A `Car`'s
+`pAnimatedDriver` is retail's +1204.
+
+Every callback answers 1 for a message it takes and 0 otherwise.
+
+### `RCSTATE_NONE`
+
+It takes `ACTIVATE`, `UNACTIVATE` and `TICK`, and does nothing with them.
+
+- `RESTART_RACE`: `CleanupAfterRace`, `InitForRace`, `sound::Mute(false)`,
+  the record times, the display settings copied, and the jukebox's
+  delayed-start timer set to 9e9. The music then waits for the next
+  race's start.
+- `NEXT_RACE`: `SetupNextRace` if the parameter is nonzero, then the
+  record times and the display settings, then
+  `ChangeGameFlow(UNLOADING_TRACK_SPECIFIC, LOADING_TRACK_SPECIFIC)`.
+- `QUIT_RACE`: `ChangeGameFlow(UNLOADING_TRACK_SPECIFIC, NONE)`. Retail
+  asks `DemoDiscManager` first, and an active demo disc ends its attract
+  mode instead. It is never active on the retail disc, so the port drops
+  the branch.
+
+The record times are `SetRecordTimesToBeat(i)` for each player car, with
+`NumPlayerCars` re-read every pass. The display settings are the eight
+bytes at the frontend database's +332, copied with `ldl/ldr` into
+`TheRaceParameters.GlobalDisplaySettings`.
+
+### `RCSTATE_CAMERA_FLYBY`
+
+- `ACTIVATE`: if there is no flyby camera,
+  `new FlyByCameraCoordinator(1)` on `bMalloc(40,
+  "..\indep\src\racecoordinator.cpp", 1289, 16)`. Then
+  `EnableStartRaceScreens`.
+- `UNACTIVATE`: `DisableStartRaceScreens`.
+- `TICK`: once `FlyByCameraCoordinator::IsFinished`,
+  `SetRaceStage(PRERACE)` and `ChangeState(PRERACE)`. Retail tests
+  `BeACop` here and does the same on both branches.
+- `SKIP`: the same, without the wait.
+- `REQUEST_PAUSE`: `PausedJoystickPort` = the parameter,
+  `BeforePauseRCState` = the current state, `ChangeState(PAUSE)`.
+
+### `RCSTATE_PRERACE`
+
+- `ACTIVATE`: if there is no prerace camera,
+  `new PreRaceCameraCoordinator(1)` on `bMalloc(188, ..., 1378, 16)`.
+  Then the flyby camera, if there is one, is deleted through its virtual
+  destructor (flags 3) and cleared.
+- `UNACTIVATE`: `AnimatedDriver::CancelAllAnimations` on the driver of
+  each car on the World's `CarList` that has one. `pCurrentWorld` is
+  re-read after each call. Then `"GLOBAL\PRERACEANIM.LZC"` is unloaded if
+  it is loaded.
+- `TICK`: only on the `PRERACE` stage. Once the prerace camera's word at
+  +184 is nonzero, `SetRaceStage(COUNTDOWN)` and
+  `ChangeState(RACE_IN_PROGRESS)`.
+- `SKIP`: the same, without the stage test or the wait.
+- `REQUEST_PAUSE`: as the flyby.
+
+### `RCSTATE_RACE_IN_PROGRESS`
+
+- `ACTIVATE`: the prerace camera, if there is one, is deleted (flags 3)
+  and cleared.
+- `UNACTIVATE`: `DisplayCountdownNumber(0)`.
+- `TICK`, in order:
+  1. `DisplayCountdownNumber(GetCountdownNumberToDisplay())`.
+  2. If the replay's `BeginningOfTime` (the `Timer` at the
+     ReplayManager's +92) is 0 or unset (`0x7fffffff`), and the stage is
+     `RACING`: `MarkTheBeginningOfTime`, and the jukebox's
+     `DelayedStart(6.0)`. A `bCountFreeMemory(16)` between the two is
+     unused.
+  3. If every player has finished, the most recently finished player is
+     found. Once that player's `TimeFinishedRacing +
+     FinishAnimationLength` is below `WorldTimeFrames` (signed),
+     `TheRaceHasFinished`.
+  4. With two or more players, each player who has finished and whose
+     finish has been shown watches a car. If not every player has
+     finished, it is the car of the first other player who has not:
+     `Player::BeginDemoCameras(p, q->MyCar)`. `NumPlayers` is re-read
+     after each `AreAllPlayersFinishedRacing` and each `BeginDemoCameras`.
+- `SKIP`: `TheRaceHasFinished` if every player has finished.
+- `REQUEST_PAUSE`: as the flyby.
+- `REQUEST_AUTO_REPLAY`: `ChangeState(AUTO_REPLAY)`.
+- `NEXT_RACE`: `ChangeState(NONE)`, then `SendMessage(NEXT_RACE, param)`.
+  The send queues behind the message running now, so `NONE` answers it.
+- `TAKE_AUTOSNAPSHOT` is taken and does nothing.
+
+### The countdown
+
+`GetCountdownNumberToDisplay`, where a count is 0.9 s (1.0 s for the cop)
+and a frame is 1/60 s:
+
+- With `StartGoTimeFrames` set: 4 (the GO) while `WorldTimeFrames -
+  StartGoTimeFrames` is 60 or less, then 0.
+- With `StartCountdownTimeFrames` set: 3, 2 and 1 for each count after
+  it, then 4.
+- With neither: 0.
+
+The frame differences are `subu`, so they wrap. They are converted to
+float signed, then multiplied by the frame (`mul.s`, not a division).
+
+`GetCountdownProgress` is the time over four counts. After
+`StartGoTimeFrames` it starts at three counts. Before either start time
+is set it is 0.
+
+`DisplayCountdownNumber(n)`:
+
+1. If `n` is 4 and the progress is below 0.8, the in-game sample
+   `"CountDownHigh"` is played at (1.0, 0.0, 0.0), unless it is playing
+   already.
+2. If the progress is above 1.0, or `n` is 0 or 4, the countdown screen
+   (`0x936ace42`) is made visible, and that is all.
+3. Otherwise the screen is hidden, and `Animate321GoElement` runs for the
+   3 (`0x93667af3`) over 0 to 0.25, the 2 (`0x93667af2`) over 0.25 to 0.5
+   and the 1 (`0x93667af1`) over 0.5 to 0.75.
+
+`Animate321GoElement(start, end, progress, screen, object)`:
+
+- Until `progress` is past `start`, the object is hidden.
+- From then, `t` is the share of the window gone, or 1 past its end.
+  `t` is then multiplied by 6 and held at 1, so the animation takes the
+  window's first sixth.
+- If the object was not visible (its byte at +41 is 0), the
+  `"CountDownLow"` sample plays.
+- The object is made visible, with alpha `(int)(t * 128)` (`cvt.w.s`,
+  towards zero) and scale `t * -3 + 4`, shrinking from four times its
+  size to its own.
+
+### The finish
+
+`TheRaceHasFinished`:
+
+1. `MarkTheEndOfTime` on the ReplayManager.
+2. `CheckForAbortion`.
+3. `SimulateRaceFinish`.
+4. `NotifyTheRaceIsOver`.
+5. The frontend's `TheRaceIsOver(race)`.
+6. What comes next: `NEXT_RACE` (1) if `IsThereAnotherRace`, else `NONE`
+   (0) if `IsMultiTrack`, else `RESTART` (2).
+7. `new EndGameScreens(next)` on `bMalloc(72, "EndGameScreens", 0, 16)`,
+   kept in `pEndGameScreens`.
+8. `ChangeState(POSTRACE)`.
+
+Retail's active demo disc ends the race between steps 6 and 7 instead
+(`SetEndReason`, `ChangeState(NONE)`, `SendMessage(QUIT_RACE)`). The port
+drops that branch.
+
+`SimulateRaceFinish` calls `FinishCar(i, 0, false, NORMAL_COMPLETION)` on
+each racing car whose `FinishReason` is still 0, then
+`SortRacingCarsByLeadership`. `NumRacingCars` is re-read only after a car
+is finished. `NotifyTheRaceIsOver` calls `TheRaceEvent.RecordResults`
+for each racing car with its signed `RacePosition`, re-reading the count
+every pass.
+
+`AreAllPlayersFinishedRacing` is whether every player has a nonzero
+`TimeFinishedRacing`. With no players, it answers yes.
+`GetMostRecentlyFinishedPlayer` answers the player with the largest
+`TimeFinishedRacing` above 0, compared signed. A tie keeps the earlier
+player, and with no such player it answers NULL.
+
+### The small methods
+
+- The joystick handler posts `SKIP` to `pRaceCoordinator` on
+  `JOY_EVENT_SKIP_DEMO_MODE` (22).
+- `RequestPause(port)` posts `REQUEST_PAUSE` with the port, and
+  `RequestUnPause(reason)` posts `REQUEST_UNPAUSE` with the reason.
+- `ResumeDemoCameras` makes `new DemoCameraCoordinator(1, car)` on
+  `bMalloc(52, ..., 1082, 16)` for the first player's car, if there is no
+  demo camera.
+- `SuspendDemoCameras` deletes the demo camera (flags 3) and clears it.
+
+### Where the port reads differently
+
+Retail reads these unchecked. The port guards each one, so a race without
+the object still goes on:
+
+- A NULL flyby camera, or a NULL prerace camera, counts as finished.
+- With no ReplayManager, the `TICK` neither marks the beginning of time
+  nor starts the music, and `TheRaceHasFinished` marks no end of time.
+- With no players, all have finished but none is the latest, so the
+  `TICK` does not finish the race. Retail reads the NULL player's times
+  there.
+
+The demo-disc branches are dropped, as above. So are the
+`bCountFreeMemory` calls whose answers nothing reads.
+
+The other callees are seams in `rcstates.h` and `racefinish.h`, each
+listed with its retail address. A NULL seam does nothing.
+
+### The cross-check
+
+`tools/rcstates_check.py` runs these in the retail image, on top of the
+8e queue they use. The harness takes `racecoord.c` through a wrapper the
+checker generates, which renames `InitForRace` and `CleanupAfterRace` out
+of the way so the harness's stubs can stand in for them.
+
+Scenario families:
+
+- **countdown**: the number and the progress over the clock, both start
+  times, the cop's count, the samples and the three numbers' objects.
+- **finish**: `TheRaceHasFinished` and its `Race` halves, over the racing
+  cars, `FinishCar` taking cars off the count, and what comes next.
+- **tick**: the race's `TICK` over the beginning of time, the stage, the
+  players' finishes and the two-player hand-over.
+- **flow**: the four states run on the queue from `NONE` or the flyby to
+  the finish, with reactions from the six fake states.
+- **direct**: each of the four callbacks called once with every message,
+  and -1, 15 and 100.
+- **small**: the joystick handler, the pause requests and the demo
+  camera.
+- **edges**: each count's boundary frame for both counts, the GO's 60
+  frames, the GO's sample either side of 0.8, the finish animation's
+  last frame, and every pair of answers for what comes next.
+
+402 scenarios, 17258 ops, 40165 transcript lines, 0 differ. Of 148
+mutations, 143 are caught and 5 are equivalent. The equivalent ones are
+the two-player hand-over's guards, which at most two players cannot tell
+apart, and the countdown's clamp at the end of a window, which the clamp
+at 1 repeats. The first pass left two holes, which new scenarios close:
+a flyby `TICK` with no camera, and `RecordResults` taking a car off the
+count.
+
 ## Seams
 
-The callbacks and most of what `InitForRace` and the cleanups call are
-seams, NULL until their slices land. `racecoord.h` lists each one with its
+The six states still to come and most of what `InitForRace` and the
+cleanups call are seams, NULL until their slices land. `racecoord.h` lists each one with its
 retail address. A NULL seam does nothing, and allocates nothing for the
 object it would have built. With `gReplayManagerCtorFn` NULL,
 `pReplayManager` stays NULL, which everything reads as not replaying.

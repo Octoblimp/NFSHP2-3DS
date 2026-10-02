@@ -35,7 +35,6 @@ static const char kPreRaceAnim[] = "GLOBAL\\PRERACEANIM.LZC";
 BSlotPool *RCQueuedMessageSlotPool;     // retail gp-22192, 0x00330240
 struct PauseMenu *ThePauseMenu;         // retail gp-21064, 0x003306a8
 
-RCStateCallbackFn gRCStateCallbacks[NUM_RCSTATES];
 void *(*gFindResourceFileByNameFn)(const char *name);
 struct PauseMenu *(*gPauseMenuCtorFn)(void *mem);
 void (*gPauseMenuDestroyFn)(struct PauseMenu *m, int32_t flags);

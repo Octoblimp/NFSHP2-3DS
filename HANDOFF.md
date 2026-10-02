@@ -10934,3 +10934,63 @@ RCStateNoneCallback (`0x0014a668`), RCStateRaceInProgressCallback
 (`0x0014ae80`), DisplayCountdownNumber and TheRaceHasFinished, then the
 flyby and the prerace. CONTINUE.md, step 8, has the jump tables. Then
 wire the coordinator in and flow into a race.
+
+## Session 31, continued (2026-10-02) -- the race coordinator's states up to the finish (step 8f)
+
+The user asked to keep going through the port without stopping. 8e was
+committed as 1df517f. This slice ports the first four of the ten
+RaceCoordinator states and what they call, from retail.
+
+### The port
+
+`rcstates.c`/`rcstates.h` have RCStateNoneCallback, the flyby, the
+prerace and the race in progress, with DisplayCountdownNumber,
+Animate321GoElement, TheRaceHasFinished, the joystick handler,
+RequestPause, RequestUnPause, Resume/SuspendDemoCameras and the
+frontend's unnamed record-times loop. `rcstates.c` defines
+gRCStateCallbacks now, with the four at their RCStates. The other six
+stay NULL.
+
+`racefinish.c`/`racefinish.h` have the six Race methods the states ask:
+the countdown's number and progress, SimulateRaceFinish,
+NotifyTheRaceIsOver, AreAllPlayersFinishedRacing and
+GetMostRecentlyFinishedPlayer. FinishCar and RaceEvent::RecordResults are
+seams.
+
+`race.h` gains tGlobalDisplaySettings and TheRaceParameters'
+GlobalDisplaySettings (+748), which RESTART_RACE and NEXT_RACE copy from
+the frontend database's +332.
+
+Retail reads the flyby and prerace cameras, the ReplayManager and the
+most recently finished player without a test. The port reads a missing
+camera as finished, skips the replay's marks with no ReplayManager, and
+does not finish a race with no players. The demo-disc branches (QUIT_RACE
+and TheRaceHasFinished) are dropped, as for every port of retail.
+
+### The checks
+
+`rcstates_check.py` runs the twelve RaceCoordinator functions, the
+record-times loop and the six Race methods as shipped, on top of the 8e
+queue. `tools/src/rcstates_test.c` runs the port over the same script. It
+takes `racecoord.c` through a wrapper the checker generates, because
+hostbuild's object cache keys on a source's own bytes and not on a `.c`
+it includes. The wrapper renames InitForRace and CleanupAfterRace so
+both sides can stub them. States 4 to 9 are fake callbacks with script
+reactions, as in 8e.
+
+402 scenarios, 17258 ops, 40165 lines, 0 differ. Of 148 mutations, 143 are
+caught and 5 are equivalent: four guards in the two-player hand-over,
+which at most two players cannot tell apart, and the countdown's clamp at
+the end of a window. The first pass left a flyby TICK with no camera and
+RecordResults taking a car off the count untested. New edge scenarios and
+an `rdrop` answer close both.
+
+`docs/formats/race-coordinator.md` gains the 8f section. CONTINUE.md
+marks 8f done and makes 8g, the pause and the post-race, next. It also
+gives their decode. `rcpost.c`/`rcpost.h` hold an unchecked first draft
+of 8g and are not committed with 8f.
+
+### Next
+
+8g: check `rcpost.c` against retail by extending rcstates_check, then the
+replays and the demos, then wire the coordinator in.
