@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Cross-check 3DS Files/source/rcstates.c and racefinish.c, the race
-coordinator's states up to the finish, against the retail image itself,
-run in mipsemu.
+"""Cross-check 3DS Files/source/rcstates.c, racefinish.c and rcpost.c, the
+race coordinator's states from the start to the post-race, against the
+retail image itself, run in mipsemu.
 
 The model is the image. These run as shipped:
 - RaceCoordinator's RCStateNoneCallback (0x0014a668),
@@ -12,6 +12,11 @@ The model is the image. These run as shipped:
   (0x0014a7f8), RequestPause (0x001832a8), RequestUnPause (0x00174e00),
   ResumeDemoCameras (0x0014a818) and SuspendDemoCameras (0x0014a878)
 - FrontendDatabase's record-times loop (0x001842a8)
+- RCStatePauseCallback (0x0014b3d8) and RCStatePostRaceCallback
+  (0x0014bdd8), with TellPlayersToPause (0x00181c88),
+  TellPlayersToUnPause (0x00181ce8), Player::BeginPause (0x00181bd0),
+  Player::EndPause (0x00181bd8), GetJoystickType (0x00154308) and the
+  empty World::BeginPause and EndPause
 - Race's GetCountdownNumberToDisplay (0x001480c0), GetCountdownProgress
   (0x00148188), SimulateRaceFinish (0x00148f68), NotifyTheRaceIsOver
   (0x00148ff8), AreAllPlayersFinishedRacing (0x001490b0) and
@@ -20,7 +25,7 @@ The model is the image. These run as shipped:
   ExecuteQueuedMessages, which the states run on
 
 The harness (tools/src/rcstates_test.c) runs the port over the same script,
-and the two transcripts are diffed. It takes racecoord.c's queue through
+with joystick.c for GetJoystickType, and the two transcripts are diffed. It takes racecoord.c's queue through
 a wrapper generated here, so that InitForRace and CleanupAfterRace can be
 the harness's stubs, as they are the model's.
 
@@ -31,17 +36,23 @@ and UnloadResourceFile, the ReplayManager's marks, the jukebox's
 DelayedStart, BeginDemoCameras, the samples, the Flailer calls, the
 frontend database's calls, ChangeGameFlow, sound::Mute, EndGameScreens'
 constructor, Race::FinishCar, SortRacingCarsByLeadership, SetRaceStage,
-RaceEvent::RecordResults, CleanupAfterRace and InitForRace. The camera
-coordinators have a fake vtable whose virtual destructor prints. States 4
-to 9 point at fake callbacks that print the message and the queue; a
-script reaction makes one answer a message once.
+RaceEvent::RecordResults, CleanupAfterRace and InitForRace; and for the
+pause and the post-race, the pause menu, ChangeToScreen, the frontend's
+quit and restart, ChangeCameraMover, the speech queue, the replay's
+highlights and MuteReplay, the end-game screens' resume and suspend,
+TransientStats::GetDriver, ClearHudAnimations and the type-changed
+handlers' reinstall. The camera coordinators have a fake vtable whose
+virtual destructor prints. States 4, 5, 8 and 9 point at fake callbacks
+that print the message and the queue; a script reaction makes one answer
+a message once.
 
 Two NULLs the port reads differently from retail are given the port's
 answer in the model's low memory: a NULL prerace camera's +184 reads 1
 (finished), and a NULL player's TimeFinishedRacing 0x7fffffff (never
 shown). FlyByCameraCoordinator::IsFinished on NULL answers 1 and prints
 nothing. pCurrentRace, pCurrentWorld and pReplayManager are always set:
-retail reads all three unchecked.
+retail reads all three unchecked. The players' ports are 0 and 1:
+GetJoystickType indexes its table unchecked.
 
     python tools/rcstates_check.py
     python tools/rcstates_check.py --mutate [--only a,b]
@@ -68,9 +79,11 @@ NL = chr(10)
 HARNESS = "tools/src/rcstates_test.c"
 RCS = "3DS Files/source/rcstates.c"
 RFC = "3DS Files/source/racefinish.c"
+RPC = "3DS Files/source/rcpost.c"
+JOYC = "3DS Files/source/joystick.c"
 RSH = "3DS Files/source/rcstates.h"
 RCE = "3DS Files/source/race.c"
-SOURCES = [HARNESS, RCS, RFC, RCE]
+SOURCES = [HARNESS, RCS, RFC, RPC, RCE, JOYC]
 
 # racecoord.c with InitForRace and CleanupAfterRace renamed out of the
 # way, built fresh each time: hostbuild keys a source's object on its own
@@ -94,7 +107,11 @@ CB_NONE = 0x0014a668
 CB_FLY = 0x0014abe0
 CB_PRE = 0x0014acf8
 CB_RIP = 0x0014ae80
-CBS = (CB_NONE, CB_FLY, CB_PRE, CB_RIP)
+CB_PAUSE = 0x0014b3d8
+CB_POST = 0x0014bdd8
+# The states that run as shipped, by RCState; the rest are fakes.
+CBS = {0: CB_NONE, 1: CB_FLY, 2: CB_PRE, 3: CB_RIP, 6: CB_PAUSE,
+       7: CB_POST}
 DISPLAY = 0x0014b260
 FINISHED = 0x0014bce0
 JOY = 0x0014a7f8
@@ -155,6 +172,22 @@ SET_STAGE = 0x00147ef0
 RECORD = 0x00201598
 CLEANUP = 0x00149b88
 INIT_FOR_RACE = 0x00149988
+CLEAR_HUD = 0x0017c7c8
+ENTER_PAUSE = 0x00170638
+EXIT_PAUSE = 0x00170720
+TO_SCREEN = 0x0014cc78
+RACE_QUIT = 0x00187800
+RACE_RESTARTED = 0x00187880
+CHANGE_MOVER = 0x00176ae8
+SPEECH_INSTANCE = 0x00209ef0
+SPEECH_FLUSH = 0x0020a230
+MUTE_REPLAY = 0x001af940
+HIGHLIGHTS = 0x0013e308
+NEXT_HIGHLIGHT = 0x0013e318
+EG_RESUME = 0x001dcf38
+EG_SUSPEND = 0x001dcfe8
+GET_DRIVER = 0x00187080
+TYPE_HANDLERS = 0x001543f0
 # The demo disc's, never reached with DemoDiscManager inactive.
 DEMO_SET_END = 0x0012eb00
 DEMO_ATTRACT = 0x0012eaf0
@@ -168,6 +201,9 @@ G_BY_INDEX = GP - 20928
 G_NUM = GP - 20920
 G_WTF = GP - 19564
 G_JBTIMER = GP - 19028
+G_MENU = GP - 21064
+G_WLC = GP - 19552
+G_JOYTYPES = GP - 21920
 
 RP = 0x0031a898
 RP_NPLAYCARS = RP + 48
@@ -176,12 +212,14 @@ RP_DISPLAY = RP + 748
 FED = 0x002fc050
 FED_DISPLAY = FED + 332
 RACE_EVENT = 0x0031b600
+TTS = 0x002fc3dc
 DEMO_DISC = 0x002effe0
 
 # RaceCoordinator
 RC_STATE = 0
 RC_LIST = 4
 RC_EXEC = 12
+RC_PN = 140
 RC_BYTES = 144
 # Race
 R_STAGE = 0
@@ -194,10 +232,18 @@ RCAR_POS = 10
 RCAR_REASON = 18
 # Player
 P_CAR = 4
+P_PORT = 8
+P_JOYTYPE = 12
+P_NUMBER = 16
 P_TIME = 80
 P_ANIM = 84
 # Car
 C_DRIVER = 1204
+# World
+W_CARTABLE = 44
+# ReplayManager: retail's new word, and EndCurrentHighlightTime.
+RM_MUTE = 12
+RM_HLEND = 160
 # The prerace camera's finished word, and a Flailer object's visibility.
 PRE_FINISHED = 184
 OBJ_VIS = 41
@@ -205,7 +251,7 @@ OBJ_VIS = 41
 COUNT_SCREEN = 0x936ace42
 COUNT_OBJS = (0x93667af3, 0x93667af2, 0x93667af1)
 
-NOBJ = 32
+NOBJ = 64
 OBJ_BYTES = 0x400
 APOOL = 0x01000000
 MISC = APOOL + NOBJ * OBJ_BYTES
@@ -222,6 +268,10 @@ SAMPLE = MISC + 0x2600
 FLOBJ = MISC + 0x2700
 FILE0 = MISC + 0x2800
 POOL = MISC + 0x2900
+MENU = MISC + 0x2a00
+SPEECH = MISC + 0x2b00
+TSE = MISC + 0x2c00
+NTSE = 4
 PLAYERS = MISC + 0x3000
 WORLD = MISC + 0x3400
 DRIVERS = MISC + 0x3800
@@ -236,6 +286,7 @@ NCAR = 6
 
 PATTERN = 0xa5
 NUM_RCSTATES = 10
+FAKES = (4, 5, 8, 9)
 # The model's and the harness's jukebox timer before anything stores it.
 JB_START = 0x3f99999a
 
@@ -311,7 +362,7 @@ class Gen(object):
         if self.nreact >= 28:
             return
         self.nreact += 1
-        state = rnd.randrange(4, NUM_RCSTATES)
+        state = rnd.choice(FAKES)
         msg = r_msg(rnd)
         kind = rnd.choice("SSPPCE")
         if kind == "C":
@@ -353,6 +404,32 @@ class Gen(object):
         for k in range(NCAR):
             self.emit("AD %d %d" % (k, rnd.choice((0, 1, 1))))
 
+    def pause_toys(self):
+        """The players' ports, joystick types and numbers, the stats'
+        finish positions, the joystick types, the pause menu and the
+        replay's words."""
+        rnd = self.rnd
+        nums = [0, 1]
+        if rnd.random() < 0.3:
+            rnd.shuffle(nums)
+        if rnd.random() < 0.2:
+            nums = [rnd.randrange(NTSE), rnd.randrange(NTSE)]
+        for i in range(2):
+            self.emit("PJ %d %d %d %d" % (i, rnd.choice((0, 1, i, i)),
+                                         rnd.choice((0, 3, 21)), nums[i]))
+        for k in range(NTSE):
+            self.emit("TS %d %d %d" % (k, rnd.choice((1, 2, 3, 7, 8, 0, -1)),
+                                       rnd.choice((0, 1, 1, 1))))
+        self.emit("S jt0 %d" % rnd.choice((0, 7, 21)))
+        self.emit("S jt1 %d" % rnd.choice((0, 7, 35)))
+        if rnd.random() < 0.3:
+            self.emit("S menu 0")
+        self.emit("S rmmute %d" % rnd.choice((0, 0, 1, -1)))
+        self.emit("S wlc %d" % rnd.choice((0, 99, 100, 101, 100000)))
+        self.emit("S hlend %d" % rnd.choice((0, 100, 100, 0x7fffffff, -5)))
+        if rnd.random() < 0.3:
+            self.emit("S pn %d" % rnd.choice((1, 3)))
+
     def countdown(self):
         rnd = self.rnd
         self.emit("S beacop %d" % rnd.choice((0, 0, 1)))
@@ -388,6 +465,7 @@ class Gen(object):
         self.world()
         self.countdown()
         self.toys()
+        self.pause_toys()
 
 
 def s_countdown(rnd, n):
@@ -504,7 +582,7 @@ def s_flow(rnd, n):
             elif k < 0.6:
                 g.emit("E")
             elif k < 0.75:
-                g.emit("T %d" % rnd.choice((0, 1, 2, 3, 3)))
+                g.emit("T %d" % rnd.choice((0, 1, 2, 3, 3, 6, 7)))
             elif k < 0.85:
                 g.emit("M 3 0")
             else:
@@ -514,11 +592,97 @@ def s_flow(rnd, n):
     return out
 
 
+def s_pause(rnd, n):
+    """PAUSE: in from the three states that pause, the menu and the
+    players told, and out on every unpause reason."""
+    out = []
+    for _ in range(n):
+        g = Gen(rnd)
+        g.setup()
+        g.emit("S fly %d" % rnd.choice((0, 1)))
+        for _ in range(rnd.randrange(0, 3)):
+            g.reaction()
+        g.emit("S state %d" % rnd.choice((1, 2, 3, 3)))
+        g.emit(rnd.choice(("RP %d" % rnd.choice((0, 1, -1)), "T 6",
+                           "M 5 %d" % rnd.choice((0, 1)))))
+        g.emit("E")
+        for _ in range(rnd.randrange(2, 8)):
+            k = rnd.random()
+            if k < 0.1:
+                g.pause_toys()
+            elif k < 0.15:
+                g.players()
+            elif k < 0.2:
+                g.reaction()
+            k = rnd.random()
+            if k < 0.35:
+                g.emit("RU %d" % rnd.choice((0, 1, 1, 2, 3, 4, 5, -1)))
+                g.emit("E")
+            elif k < 0.55:
+                g.emit("M 6 %d" % rnd.choice((0, 1, 2, 3, 4, 5)))
+            elif k < 0.65:
+                g.emit("RP %d" % rnd.choice((0, 1)))
+                g.emit("E")
+            elif k < 0.75:
+                g.emit("T 6")
+            elif k < 0.85:
+                m = r_msg(rnd)
+                g.emit("M %d %d" % (m, msg_param(rnd, m)))
+            else:
+                g.emit("M 3 0")
+        g.emit("E")
+        out.append(g.ops)
+    return out
+
+
+def s_post(rnd, n):
+    """POSTRACE: in from the finish or a change, the follow camera's
+    player picked, the highlights over the loop counter, and out on every
+    message it takes."""
+    out = []
+    for _ in range(n):
+        g = Gen(rnd)
+        g.setup()
+        g.emit("S eg %d" % rnd.choice((0, 1, 1)))
+        g.emit("S demo %d" % rnd.choice((0, 0, 1)))
+        for _ in range(rnd.randrange(0, 3)):
+            g.reaction()
+        g.emit("S state %d" % rnd.choice((3, 3, 0)))
+        g.emit(rnd.choice(("RF", "T 7", "T 7")))
+        for _ in range(rnd.randrange(2, 9)):
+            k = rnd.random()
+            if k < 0.12:
+                g.pause_toys()
+            elif k < 0.2:
+                g.emit("S wlc %d" % rnd.choice((0, 100, 101, 200)))
+            elif k < 0.25:
+                g.emit("S hlend %d" % rnd.choice((100, 150, 0x7fffffff)))
+            elif k < 0.3:
+                g.players()
+            elif k < 0.33:
+                g.reaction()
+            k = rnd.random()
+            if k < 0.3:
+                g.emit("M 3 0")
+            elif k < 0.75:
+                m = rnd.choice((1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 11, 12, 13,
+                                14, 0))
+                g.emit("M %d %d" % (m, msg_param(rnd, m)))
+            elif k < 0.85:
+                g.emit("T 7")
+            else:
+                g.emit("C 7 %d %d" % (rnd.choice((1, 2, 3, 11)),
+                                      rnd.choice((0, 1))))
+        g.emit("E")
+        out.append(g.ops)
+    return out
+
+
 def s_direct(rnd):
-    """Each of the four callbacks called once with every message, from a
+    """Each of the six callbacks called once with every message, from a
     fresh scenario each time, for what it answers."""
     out = []
-    for state in range(4):
+    for state in sorted(CBS):
         for msg in list(range(N_MSGS)) + [-1, 15, 100]:
             g = Gen(rnd)
             g.setup()
@@ -606,10 +770,35 @@ def s_edges(rnd):
     for pfin in (0, 1):
         out.append(base + ["S state 2", "S pre 0", "S pfin %d" % pfin,
                            "S stage 2", "C 2 3 0", "E"])
+    # The follow camera's player: every pair of finish positions, ties,
+    # and a missing element.
+    for a, b in ((1, 2), (2, 1), (3, 3), (8, 8), (7, 8), (8, 7), (9, 8),
+                 (0, -1)):
+        for present in ((1, 1), (1, 0), (0, 1), (0, 0)):
+            out.append(base + ["S np 2", "PJ 0 0 0 0", "PJ 1 1 0 1",
+                               "TS 0 %d %d" % (a, present[0]),
+                               "TS 1 %d %d" % (b, present[1]),
+                               "S state 3", "T 7"])
+    # The highlight's end either side of the loop counter.
+    for wlc in (99, 100, 101):
+        out.append(base + ["S state 7", "S hlend 100", "S wlc %d" % wlc,
+                           "S demo 1", "M 3 0", "C 7 3 0"])
+    # Every unpause reason, from each state that pauses.
+    for state in (1, 2, 3):
+        for reason in range(6):
+            out.append(base + ["S state %d" % state, "S fly 1", "RP 1",
+                               "E", "RU %d" % reason, "E"])
+    # The pause's answer to each reason, called directly: the queue throws
+    # the answer away, so a reason it does not know shows only here.
+    for reason in (0, 1, 2, 3, 4, 5, -1, 100):
+        out.append(base + ["S state 1", "S fly 1", "RP 1", "E",
+                           "C 6 6 %d" % reason, "E"])
     # A message answered by a message, answered by a change of state.
-    out.append(base + ["S state 3", "R 7 1 S 9 1", "R 0 1 P 3 0",
-                       "S np 1", "PL 0 100 0 0", "S wtf 200", "C 3 3 0",
+    out.append(base + ["S state 3", "R 4 1 P 3 0", "S np 1",
+                       "PL 0 100 0 0", "S wtf 200", "C 3 3 0", "M 12 0",
                        "E"])
+    out.append(base + ["S state 3", "S np 1", "PL 0 100 0 0",
+                       "S wtf 200", "C 3 3 0", "M 9 1", "E"])
     return out
 
 
@@ -622,6 +811,8 @@ def script():
     sc += s_flow(rnd, 90)
     sc += s_direct(rnd)
     sc += s_small(rnd, 25)
+    sc += s_pause(rnd, 50)
+    sc += s_post(rnd, 50)
     sc += s_edges(rnd)
     return sc
 
@@ -676,15 +867,31 @@ class Model(object):
                       (SET_STAGE, self.s_stage), (RECORD, self.s_record),
                       (CLEANUP, self.s_named("cleanup")),
                       (INIT_FOR_RACE, self.s_init),
+                      (CLEAR_HUD, self.s_named("hudclear")),
+                      (ENTER_PAUSE, self.s_enter_pause),
+                      (EXIT_PAUSE, self.s_named("exitpause")),
+                      (TO_SCREEN, self.s_to_screen),
+                      (RACE_QUIT, self.s_fed("quit")),
+                      (RACE_RESTARTED, self.s_fed("restarted")),
+                      (CHANGE_MOVER, self.s_mover),
+                      (SPEECH_INSTANCE, lambda _e: SPEECH),
+                      (SPEECH_FLUSH, self.s_flush),
+                      (MUTE_REPLAY, self.s_mute_replay),
+                      (HIGHLIGHTS, self.s_named("highlights")),
+                      (NEXT_HIGHLIGHT, self.s_named("nexthighlight")),
+                      (EG_RESUME, self.s_named("resume")),
+                      (EG_SUSPEND, self.s_named("suspend")),
+                      (GET_DRIVER, self.s_get_driver),
+                      (TYPE_HANDLERS, self.s_type_handlers),
                       (DEMO_SET_END, self.s_never),
                       (DEMO_ATTRACT, self.s_never)):
             e.stub(a, fn)
         # The state table: ten pointers to members, this-delta 0, index -1.
-        # The first four are this slice's and run; the rest are fakes.
+        # The ported states run; the rest are fakes.
         for s in range(NUM_RCSTATES):
             d, idx = struct.unpack_from("<hh", e.mem, STATE_TABLE + 8 * s)
             assert d == 0 and idx == -1
-            if s < 4:
+            if s in CBS:
                 assert e.u32(STATE_TABLE + 8 * s + 4) == CBS[s]
             else:
                 e.put32(STATE_TABLE + 8 * s + 4, self.fake(self.cb(s)))
@@ -703,7 +910,10 @@ class Model(object):
 
         self.names = {0: "null", RCBUF: "rc", FLY: "fly", PRE: "pre",
                       DEMO: "demo", EG: "eg", REPLAY: "rm", SAMPLE: "smp",
-                      FILE0: "f0", POOL: "pool", RACE: "race", WORLD: "w"}
+                      FILE0: "f0", POOL: "pool", RACE: "race", WORLD: "w",
+                      MENU: "menu", SPEECH: "speech"}
+        for k in range(NTSE):
+            self.names[TSE + 16 * k] = "ts%d" % k
         for i in range(NOBJ):
             self.names[obj_at(i)] = "a%d" % i
         for i in range(NSLOT):
@@ -789,6 +999,39 @@ class Model(object):
             self.emit("  %s -> %d%s" % (what, v, self.fed_this()))
             return v
         return f
+
+    def s_enter_pause(self, e):
+        self.emit("  enterpause %s %d" % (self.name(self.arg(0)),
+                                          s32(self.arg(1))))
+
+    def s_to_screen(self, e):
+        a = self.arg(0)
+        self.emit("  toscreen %s %d" % (self.cstr(a) if a else "null",
+                                        s32(self.arg(1))))
+
+    def s_mover(self, e):
+        self.emit("  mover %s %d %d" % (self.name(self.arg(0)),
+                                        s32(self.arg(1)), s32(self.arg(2))))
+
+    def s_flush(self, e):
+        self.emit("  flush%s" % ("" if self.arg(0) == SPEECH
+                                 else " bad-this"))
+
+    def s_mute_replay(self, e):
+        self.emit("  mutereplay %d" % s32(self.arg(0)))
+
+    def s_get_driver(self, e):
+        num = s32(self.arg(1))
+        d = TSE + 16 * num if self.ts.get(num) else 0
+        self.emit("  getdriver %d -> %s%s"
+                  % (num, self.name(d),
+                     "" if self.arg(0) == TTS else " bad-this"))
+        return d
+
+    def s_type_handlers(self, e):
+        self.emit("  typehandlers demo=%s pn=%d"
+                  % (self.name(self.w(RCBUF + 28)),
+                     s32(self.w(RCBUF + RC_PN))))
 
     def s_malloc(self, e):
         name = self.cstr(self.arg(1))
@@ -1041,7 +1284,7 @@ class Model(object):
         e.put32(RCBUF + RC_EXEC, 0)
         for off in (16, 20, 24):
             e.put32(RCBUF + off, 0)
-        for off in (28, 32, 36, 40):
+        for off in (28, 32, 36, 40, RC_PN):
             e.put32(RCBUF + off, 0)
         for o in (FLY, PRE, DEMO, EG):
             e.write(o, bytes(256))
@@ -1058,16 +1301,28 @@ class Model(object):
             e.put32(player_at(i) + P_CAR, 0)
             e.put32(player_at(i) + P_TIME, 0)
             e.put32(player_at(i) + P_ANIM, 0)
+            e.put32(player_at(i) + P_PORT, i)
+            e.put32(player_at(i) + P_JOYTYPE, 0)
+            e.put32(player_at(i) + P_NUMBER, i)
             e.put32(G_BY_INDEX + 4 * i, player_at(i))
         e.put32(G_NUM, 0)
         self.fill(WORLD, 0x100)
         e.put32(WORLD, WORLD)
         e.put32(WORLD + 4, WORLD)
         for k in range(NCAR):
+            e.put32(WORLD + W_CARTABLE + 4 * k, car_at(k))
+        for k in range(NCAR):
             self.fill(car_at(k), CAR_STRIDE)
             e.put32(car_at(k) + C_DRIVER, 0)
         self.fill(REPLAY, 0x100)
         e.put32(REPLAY + 92, 0)
+        e.put32(REPLAY + RM_MUTE, 0)
+        e.put32(REPLAY + RM_HLEND, 0)
+        self.fill(TSE, 16 * NTSE)
+        self.ts = {}
+        e.put32(G_WLC, 0)
+        e.put32(G_MENU, MENU)
+        e.write(G_JOYTYPES, bytes(2))
         for k in range(3):
             self.fill(flobj_at(k), 64)
             e.mem[flobj_at(k) + OBJ_VIS] = 0
@@ -1095,7 +1350,9 @@ class Model(object):
                 "beacop": RP_BEACOP, "nplaycars": RP_NPLAYCARS,
                 "wtf": G_WTF, "stage": RACE + R_STAGE, "go": RACE + R_GO,
                 "cdt": RACE + R_COUNTDOWN, "nrc": RACE + R_NRC,
-                "np": G_NUM, "begun": REPLAY + 92}
+                "np": G_NUM, "begun": REPLAY + 92,
+                "rmmute": REPLAY + RM_MUTE, "hlend": REPLAY + RM_HLEND,
+                "wlc": G_WLC, "pn": RCBUF + RC_PN}
         if f in regs:
             e.put32(regs[f], v & M32)
         elif f in self.t:
@@ -1104,6 +1361,10 @@ class Model(object):
                 pre = self.w(RCBUF + 36)
                 if pre:
                     e.put32(pre + PRE_FINISHED, v)
+        elif f in ("jt0", "jt1"):
+            e.mem[G_JOYTYPES + int(f[2])] = v & 0xff
+        elif f == "menu":
+            e.put32(G_MENU, MENU if v else 0)
         elif f in ("vis3", "vis2", "vis1"):
             e.mem[flobj_at(3 - int(f[3])) + OBJ_VIS] = v & 0xff
         elif f in ("fly", "pre", "demo", "eg"):
@@ -1121,13 +1382,13 @@ class Model(object):
         w, nm, e = self.w, self.name, self.e
         rc = RCBUF
         self.emit("  rc st=%d ex=%d cd=%d port=%d bp=%d demo=%s fly=%s "
-                  "pre=%s eg=%s q%s"
+                  "pre=%s eg=%s pn=%d q%s"
                   % (s32(w(rc)), s32(w(rc + 12)), s32(w(rc + 16)),
                      s32(w(rc + 20)), s32(w(rc + 24)), nm(w(rc + 28)),
                      nm(w(rc + 32)), nm(w(rc + 36)), nm(w(rc + 40)),
-                     self.queue(rc)))
+                     s32(w(rc + RC_PN)), self.queue(rc)))
         self.emit("  g stage=%d go=%d cdt=%d nrc=%d np=%d wtf=%d jbt=%s "
-                  "begun=%d ds=%s vis=%d,%d,%d"
+                  "begun=%d ds=%s vis=%d,%d,%d jt=%d,%d"
                   % (s32(w(RACE + R_STAGE)), s32(w(RACE + R_GO)),
                      s32(w(RACE + R_COUNTDOWN)), s32(w(RACE + R_NRC)),
                      s32(w(G_NUM)), s32(w(G_WTF)), fx(w(G_JBTIMER)),
@@ -1135,7 +1396,9 @@ class Model(object):
                      e.read(RP_DISPLAY, 8).hex(),
                      e.mem[flobj_at(0) + OBJ_VIS],
                      e.mem[flobj_at(1) + OBJ_VIS],
-                     e.mem[flobj_at(2) + OBJ_VIS]))
+                     e.mem[flobj_at(2) + OBJ_VIS],
+                     s32(w(player_at(0) + P_JOYTYPE)),
+                     s32(w(player_at(1) + P_JOYTYPE))))
         self.emit("  rcars" + "".join(
             " %d/%d" % (struct.unpack_from("<h", e.mem,
                                            rcar_at(k) + RCAR_REASON)[0],
@@ -1182,6 +1445,17 @@ class Model(object):
                 e.put32(car, WORLD)
                 e.put32(tail, car)
                 e.put32(WORLD + 4, car)
+            return
+        if c == "PJ":
+            p = player_at(n[0])
+            e.put32(p + P_PORT, n[1])
+            e.put32(p + P_JOYTYPE, n[2])
+            e.put32(p + P_NUMBER, n[3])
+            return
+        if c == "TS":
+            e.put32(TSE + 16 * n[0], n[1])
+            e.put32(TSE + 16 * n[0] + 4, n[0])
+            self.ts[n[0]] = n[2]
             return
         if c == "AD":
             e.put32(car_at(n[0]) + C_DRIVER, driver_at(n[0]) if n[1] else 0)
@@ -1788,6 +2062,290 @@ MUTATIONS = [
       "        if (t != 0 && (best == 0 || t < best)) {\n"),
     M("recent: latest not kept", RFC,
       "            latest = p;\n", ""),
+    # 8g: the table.
+    M("table: pause and post-race swapped", RCS,
+      "    [RCSTATE_PAUSE]            = rc_state_pause_callback,\n"
+      "    [RCSTATE_POSTRACE]         = rc_state_post_race_callback,\n",
+      "    [RCSTATE_PAUSE]            = rc_state_post_race_callback,\n"
+      "    [RCSTATE_POSTRACE]         = rc_state_pause_callback,\n"),
+
+    # 8g: the Player calls.
+    M("beginpause: no hud cleared", RPC,
+      "        gPlayerClearHudAnimationsFn(p);\n", "        (void)p;\n"),
+    M("endpause: type not read", RPC,
+      "    p->JoyType = GetJoystickType(p->JoyPort);\n",
+      "    p->JoyType = 0;\n"),
+    M("endpause: port 0", RPC,
+      "GetJoystickType(p->JoyPort)", "GetJoystickType(0)"),
+    M("tell: pause only the first", RPC,
+      "    for (i = 0; i < PlayerNumPlayers; i++)\n"
+      "        player_begin_pause(",
+      "    for (i = 0; i < 1 && i < PlayerNumPlayers; i++)\n"
+      "        player_begin_pause("),
+    M("tell: unpause one too few", RPC,
+      "    for (i = 0; i < PlayerNumPlayers; i++)\n"
+      "        player_end_pause(",
+      "    for (i = 0; i < PlayerNumPlayers - 1; i++)\n"
+      "        player_end_pause("),
+
+    # 8g: the way out.
+    M("leave: message not sent", RPC,
+      "    racecoordinator_send_message(rc, msg, param);\n", ""),
+    M("leave: sent before the change", RPC,
+      "    racecoordinator_change_state(rc, RCSTATE_NONE);\n"
+      "    racecoordinator_send_message(rc, msg, param);\n",
+      "    racecoordinator_send_message(rc, msg, param);\n"
+      "    racecoordinator_change_state(rc, RCSTATE_NONE);\n"),
+    M("leave: posted", RPC,
+      "    racecoordinator_send_message(rc, msg, param);\n",
+      "    racecoordinator_post_message(rc, msg, param);\n"),
+
+    # 8g: the pause.
+    M("pause: no players told", RPC,
+      "        tell_players_to_pause();\n", ""),
+    M("pause: menu without the port", RPC,
+      "gPauseMenuEnterPauseFn(ThePauseMenu, rc->PausedJoystickPort);",
+      "gPauseMenuEnterPauseFn(ThePauseMenu, 0);"),
+    M("pause: screen not pushed", RPC,
+      "change_to_screen(RC_PAUSE_MENU_SCREEN, 1);",
+      "change_to_screen(RC_PAUSE_MENU_SCREEN, 0);"),
+    M("pause: not muted", RPC,
+      "        mute(1);\n        return 1;\n    case RC_UNACTIVATE:\n",
+      "        return 1;\n    case RC_UNACTIVATE:\n"),
+    M("pause: menu before the players", RPC,
+      "        tell_players_to_pause();\n"
+      "        if (gPauseMenuEnterPauseFn != NULL)\n"
+      "            gPauseMenuEnterPauseFn(ThePauseMenu, rc->PausedJoystickPort);\n",
+      "        if (gPauseMenuEnterPauseFn != NULL)\n"
+      "            gPauseMenuEnterPauseFn(ThePauseMenu, rc->PausedJoystickPort);\n"
+      "        tell_players_to_pause();\n"),
+    M("pause: screen kept", RPC,
+      "        change_to_screen(NULL, 0);\n", ""),
+    M("pause: menu not exited", RPC,
+      "            gPauseMenuExitPauseFn(ThePauseMenu);\n",
+      "            (void)0;\n"),
+    M("pause: players not untold", RPC,
+      "        tell_players_to_unpause();\n", ""),
+    M("pause: tick refused", RPC,
+      "    case RC_TICK:\n        return 1;\n    case RC_REQUEST_UNPAUSE:\n",
+      "    case RC_TICK:\n        return 0;\n    case RC_REQUEST_UNPAUSE:\n"),
+    M("pause: resume stays muted", RPC,
+      "            mute(0);\n"
+      "            racecoordinator_change_state(rc, rc->BeforePauseRCState);\n",
+      "            racecoordinator_change_state(rc, rc->BeforePauseRCState);\n"),
+    M("pause: resume to none", RPC,
+      "racecoordinator_change_state(rc, rc->BeforePauseRCState);",
+      "racecoordinator_change_state(rc, RCSTATE_NONE);"),
+    M("pause: replay to the auto replay", RPC,
+      "        case UNPAUSE_REASON_INSTANT_REPLAY:\n"
+      "            racecoordinator_change_state(rc, RCSTATE_INSTANT_REPLAY);\n",
+      "        case UNPAUSE_REASON_INSTANT_REPLAY:\n"
+      "            racecoordinator_change_state(rc, RCSTATE_AUTO_REPLAY);\n"),
+    M("pause: quit untold", RPC,
+      "            if (gFEDTheRaceWasQuitFn != NULL)\n"
+      "                gFEDTheRaceWasQuitFn();\n", ""),
+    M("pause: quit sends restart", RPC,
+      "            leave_for_none(rc, RC_QUIT_RACE, 0);\n            break;\n",
+      "            leave_for_none(rc, RC_RESTART_RACE, 0);\n            break;\n"),
+    M("pause: restart sends quit", RPC,
+      "            leave_for_none(rc, RC_RESTART_RACE, 0);\n            break;\n",
+      "            leave_for_none(rc, RC_QUIT_RACE, 0);\n            break;\n"),
+    M("pause: restart told as quit", RPC,
+      "        case UNPAUSE_REASON_RESTART_RACE:\n",
+      "        case UNPAUSE_REASON_RESTART_RACE:\n"
+      "            if (gFEDTheRaceWasQuitFn != NULL)\n"
+      "                gFEDTheRaceWasQuitFn();\n"),
+    M("pause: unknown reason refused", RPC,
+      "        default:\n            break;\n        }\n        return 1;\n",
+      "        default:\n            return 0;\n        }\n        return 1;\n"),
+    M("pause: others taken", RPC,
+      "        return 1;\n    default:\n        return 0;\n    }\n}\n\n"
+      "// --------------------------------------------------------- RCSTATE_POSTRACE",
+      "        return 1;\n    default:\n        return 1;\n    }\n}\n\n"
+      "// --------------------------------------------------------- RCSTATE_POSTRACE"),
+
+    # 8g: the post-race's ACTIVATE.
+    M("post: movers not changed", RPC,
+      "        player_change_camera_mover(PlayerPlayersByIndex[i], CM_NONE, 0);\n",
+      "        (void)0;\n"),
+    M("post: mover kept", RPC,
+      "PlayerPlayersByIndex[i], CM_NONE, 0);",
+      "PlayerPlayersByIndex[i], CM_NONE, 1);"),
+    M("post: mover to drive", RPC,
+      "PlayerPlayersByIndex[i], CM_NONE, 0);",
+      "PlayerPlayersByIndex[i], (CameraMoverType)1, 0);"),
+    M("post: stays muted", RPC,
+      "    mute(0);\n    if (gSpeechFlushQueueFn != NULL)\n",
+      "    if (gSpeechFlushQueueFn != NULL)\n"),
+    M("post: speech kept", RPC,
+      "    if (gSpeechFlushQueueFn != NULL)\n        gSpeechFlushQueueFn();\n",
+      ""),
+    M("post: replay mute read backwards", RPC,
+      "        && gReplayMuteHighlightsFn(rm))\n",
+      "        && !gReplayMuteHighlightsFn(rm))\n"),
+    M("post: replay unmuted", RPC,
+      "        && gReplayMuteHighlightsFn(rm))\n        mute_replay(1);\n",
+      "        && gReplayMuteHighlightsFn(rm))\n        mute_replay(0);\n"),
+    M("post: no highlights", RPC,
+      "        gReplayBeginRaceHighlightsFn(pReplayManager);\n",
+      "        (void)0;\n"),
+    M("post: screens not resumed", RPC,
+      "gEndGameScreensResumeFn(rc->pEndGameScreens);",
+      "gEndGameScreensResumeFn(NULL);"),
+    M("post: number not cleared", RPC,
+      "    rc->PostRacePlayerNumber = 0;\n    best = RC_NO_POSITION;\n",
+      "    best = RC_NO_POSITION;\n"),
+    M("post: one player searches", RPC,
+      "    if (PlayerNumPlayers >= 2) {\n", "    if (PlayerNumPlayers >= 1) {\n"),
+    M("post: three players needed", RPC,
+      "    if (PlayerNumPlayers >= 2) {\n", "    if (PlayerNumPlayers >= 3) {\n"),
+    M("post: ties take the last", RPC,
+      "d->FinishPosition < best", "d->FinishPosition <= best"),
+    M("post: worst wins", RPC,
+      "d->FinishPosition < best", "d->FinishPosition > best"),
+    M("post: from 7", RPC,
+      "#define RC_NO_POSITION 8\n", "#define RC_NO_POSITION 7\n"),
+    M("post: from 9", RPC,
+      "#define RC_NO_POSITION 8\n", "#define RC_NO_POSITION 9\n"),
+    M("post: best not kept", RPC,
+      "                best = d->FinishPosition;\n", ""),
+    M("post: index for number", RPC,
+      "                rc->PostRacePlayerNumber = p->PlayerNumber;\n",
+      "                rc->PostRacePlayerNumber = i;\n"),
+    M("post: driver by index", RPC,
+      "gTransientStatsGetDriverFn(p->PlayerNumber)",
+      "gTransientStatsGetDriverFn(i)"),
+    M("post: first player only", RPC,
+      "        for (i = 0; i < PlayerNumPlayers; i++) {\n"
+      "            struct Player *p = PlayerPlayersByIndex[i];\n",
+      "        for (i = 0; i < 1; i++) {\n"
+      "            struct Player *p = PlayerPlayersByIndex[i];\n"),
+    M("post: no camera", RPC,
+      "    post_race_demo_camera(rc, RC_POST_ACTIVATE_LINE);\n}\n", "}\n"),
+    M("post: old camera deleted first", RPC,
+      "    post_race_demo_camera(rc, RC_POST_ACTIVATE_LINE);\n}\n",
+      "    delete_demo_camera(rc);\n"
+      "    post_race_demo_camera(rc, RC_POST_ACTIVATE_LINE);\n}\n"),
+    M("post: activate's line", RPC,
+      "#define RC_POST_ACTIVATE_LINE     2361\n",
+      "#define RC_POST_ACTIVATE_LINE     2360\n"),
+
+    # 8g: the demo camera.
+    M("camera: on car 0", RPC,
+      "w->CarTable[rc->PostRacePlayerNumber]", "w->CarTable[0]"),
+    M("camera: kind 0", RPC,
+      "        mem, 1, w != NULL", "        mem, 0, w != NULL"),
+    M("camera: pool 0", RPC, "#define RC_POOL 16\n", "#define RC_POOL 0\n"),
+    M("camera: not kept", RPC,
+      "    rc->pDemoCameraCoordinator = gDemoCameraCoordinatorCtorFn(\n",
+      "    (void)gDemoCameraCoordinatorCtorFn(\n"),
+    M("camera: NULL deleted", RPC,
+      "    if (rc->pDemoCameraCoordinator != NULL)\n"
+      "        delete_camera(rc->pDemoCameraCoordinator);\n",
+      "    delete_camera(rc->pDemoCameraCoordinator);\n"),
+
+    # 8g: the post-race's UNACTIVATE.
+    M("post: screens not suspended", RPC,
+      "gEndGameScreensSuspendFn(rc->pEndGameScreens);",
+      "gEndGameScreensSuspendFn(NULL);"),
+    M("post: camera not deleted", RPC,
+      "        delete_demo_camera(rc);\n        rc->PostRacePlayerNumber = 0;\n",
+      "        rc->PostRacePlayerNumber = 0;\n"),
+    M("post: number kept", RPC,
+      "        rc->PostRacePlayerNumber = 0;\n"
+      "        rc->pDemoCameraCoordinator = NULL;\n",
+      "        rc->pDemoCameraCoordinator = NULL;\n"),
+    M("post: camera pointer kept", RPC,
+      "        rc->PostRacePlayerNumber = 0;\n"
+      "        rc->pDemoCameraCoordinator = NULL;\n",
+      "        rc->PostRacePlayerNumber = 0;\n"),
+    M("post: handlers before the clears", RPC,
+      "        rc->PostRacePlayerNumber = 0;\n"
+      "        rc->pDemoCameraCoordinator = NULL;\n"
+      "        if (gRestoreTypeChangedHandlersFn != NULL)\n"
+      "            gRestoreTypeChangedHandlersFn();\n",
+      "        if (gRestoreTypeChangedHandlersFn != NULL)\n"
+      "            gRestoreTypeChangedHandlersFn();\n"
+      "        rc->PostRacePlayerNumber = 0;\n"
+      "        rc->pDemoCameraCoordinator = NULL;\n"),
+    M("post: handlers not restored", RPC,
+      "            gRestoreTypeChangedHandlersFn();\n", "            (void)0;\n"),
+
+    # 8g: the post-race's TICK and SKIP_REPLAY.
+    M("tick: at the end, not past it", RPC,
+      "|| WorldLoopCounter < gReplayEndCurrentHighlightTimeFn(rm))",
+      "|| WorldLoopCounter <= gReplayEndCurrentHighlightTimeFn(rm))"),
+    M("tick: never", RPC,
+      "|| WorldLoopCounter < gReplayEndCurrentHighlightTimeFn(rm))",
+      "|| 1)"),
+    M("tick: unsigned", RPC,
+      "|| WorldLoopCounter < gReplayEndCurrentHighlightTimeFn(rm))",
+      "|| (uint32_t)WorldLoopCounter\n"
+      "                   < (uint32_t)gReplayEndCurrentHighlightTimeFn(rm))"),
+    M("tick: refused", RPC,
+      "            return 1;\n        begin_next_race_highlight(rm);\n",
+      "            return 0;\n        begin_next_race_highlight(rm);\n"),
+    M("tick: no next highlight", RPC,
+      "        begin_next_race_highlight(rm);\n"
+      "        delete_demo_camera(rc);\n",
+      "        delete_demo_camera(rc);\n"),
+    M("tick: old camera kept", RPC,
+      "        delete_demo_camera(rc);\n"
+      "        post_race_demo_camera(rc, RC_POST_TICK_LINE);\n",
+      "        post_race_demo_camera(rc, RC_POST_TICK_LINE);\n"),
+    M("tick: no new camera", RPC,
+      "        post_race_demo_camera(rc, RC_POST_TICK_LINE);\n", ""),
+    M("tick: its line", RPC,
+      "#define RC_POST_TICK_LINE         2396\n",
+      "#define RC_POST_TICK_LINE         2397\n"),
+    M("skip: replay sound kept", RPC,
+      "    case RC_SKIP_REPLAY:\n        mute_replay(1);\n",
+      "    case RC_SKIP_REPLAY:\n"),
+    M("skip: unmutes", RPC,
+      "    case RC_SKIP_REPLAY:\n        mute_replay(1);\n",
+      "    case RC_SKIP_REPLAY:\n        mute_replay(0);\n"),
+    M("skip: no next highlight", RPC,
+      "        begin_next_race_highlight(pReplayManager);\n", ""),
+    M("skip: old camera kept", RPC,
+      "        delete_demo_camera(rc);\n"
+      "        post_race_demo_camera(rc, RC_POST_SKIP_REPLAY_LINE);\n",
+      "        post_race_demo_camera(rc, RC_POST_SKIP_REPLAY_LINE);\n"),
+    M("skip: the tick's line", RPC,
+      "        post_race_demo_camera(rc, RC_POST_SKIP_REPLAY_LINE);\n",
+      "        post_race_demo_camera(rc, RC_POST_TICK_LINE);\n"),
+
+    # 8g: the post-race's other messages.
+    M("post: start replay to the auto replay", RPC,
+      "    case RC_START_REPLAY:\n"
+      "        racecoordinator_change_state(rc, RCSTATE_INSTANT_REPLAY);\n",
+      "    case RC_START_REPLAY:\n"
+      "        racecoordinator_change_state(rc, RCSTATE_AUTO_REPLAY);\n"),
+    M("post: restart untold", RPC,
+      "        if (gFEDTheRaceWasRestartedFn != NULL)\n"
+      "            gFEDTheRaceWasRestartedFn();\n", ""),
+    M("post: restart sends next", RPC,
+      "        leave_for_none(rc, RC_RESTART_RACE, 0);\n        return 1;\n",
+      "        leave_for_none(rc, RC_NEXT_RACE, 0);\n        return 1;\n"),
+    M("post: next without its parameter", RPC,
+      "leave_for_none(rc, RC_NEXT_RACE, param);",
+      "leave_for_none(rc, RC_NEXT_RACE, 0);"),
+    M("post: quit sends restart", RPC,
+      "        leave_for_none(rc, RC_QUIT_RACE, 0);\n        return 1;\n",
+      "        leave_for_none(rc, RC_RESTART_RACE, 0);\n        return 1;\n"),
+    M("post: quit told", RPC,
+      "    case RC_QUIT_RACE:\n        leave_for_none(rc, RC_QUIT_RACE, 0);\n",
+      "    case RC_QUIT_RACE:\n"
+      "        if (gFEDTheRaceWasQuitFn != NULL)\n"
+      "            gFEDTheRaceWasQuitFn();\n"
+      "        leave_for_none(rc, RC_QUIT_RACE, 0);\n"),
+    M("post: autosnapshot refused", RPC,
+      "    case RC_TAKE_AUTOSNAPSHOT:\n        return 1;\n",
+      "    case RC_TAKE_AUTOSNAPSHOT:\n        return 0;\n"),
+    M("post: others taken", RPC,
+      "    case RC_TAKE_AUTOSNAPSHOT:\n        return 1;\n"
+      "    default:\n        return 0;\n",
+      "    case RC_TAKE_AUTOSNAPSHOT:\n        return 1;\n"
+      "    default:\n        return 1;\n"),
 ]
 
 # Mutants that cannot change what either side computes, each with why.

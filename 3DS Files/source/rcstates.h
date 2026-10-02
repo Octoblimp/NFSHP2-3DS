@@ -15,9 +15,10 @@
 //   RaceCoordinator::RequestPause                   0x001832a8   12 bytes
 //   FrontendDatabase's record times, no symbol      0x001842a8  112 bytes
 //
-// Step 8f. The other six states (the two replays, the pause, the post-race
-// and the two demos) are later slices'; their entries in gRCStateCallbacks
-// stay NULL until then. docs/formats/race-coordinator.md has the decode.
+// Step 8f. Step 8g's rcpost.c has the pause and the post-race. The two
+// replays and the two demos are later slices'; their entries in
+// gRCStateCallbacks stay NULL until then. docs/formats/race-coordinator.md
+// has the decode.
 
 #ifndef RCSTATES_H
 #define RCSTATES_H
@@ -99,8 +100,8 @@ int32_t rc_state_prerace_callback(RaceCoordinator *rc, RCMessage msg,
 int32_t rc_state_race_in_progress_callback(RaceCoordinator *rc,
                                            RCMessage msg, int32_t param);
 
-// rcstates.c defines racecoord.h's gRCStateCallbacks with the four above at
-// their RCStates; the other six stay NULL for now.
+// rcstates.c defines racecoord.h's gRCStateCallbacks with the four above
+// and rcpost.h's two at their RCStates; the other four stay NULL for now.
 
 // --------------------------------------------------------- the methods
 

@@ -496,7 +496,7 @@ static int32_t callback(int state, RaceCoordinator *rc, RCMessage msg,
            (int)rc->BeforePauseRCState, (int)rc->DisplayingCountdownNumber,
            (int)rc->PausedJoystickPort, nm(rc->pDemoCameraCoordinator),
            nm(rc->mpCameraMover), nm(rc->mpEyeVerts),
-           (int)rc->PostRaceWord140, queue_str(rc));
+           (int)rc->PostRacePlayerNumber, queue_str(rc));
     respond(state, rc, msg);
     return 1;
 }
@@ -537,7 +537,7 @@ static void dump(void)
                "w140=%d\n",
                nm(rc->mpEyeVerts), nm(rc->mpBankVerts), nm(rc->mpFOVtable),
                nm(rc->mpHighlightCar), nm(rc->mpHighlightCar2),
-               (int)rc->mViewID, nm(rc->mpRoute), (int)rc->PostRaceWord140);
+               (int)rc->mViewID, nm(rc->mpRoute), (int)rc->PostRacePlayerNumber);
         printf("  q%s\n", queue_str(rc));
     }
     printf("  g rc=%s race=%s world=%s rm=%s pm=%s pool=%s np=%d idx=%s,%s "

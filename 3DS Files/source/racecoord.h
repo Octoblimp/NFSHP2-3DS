@@ -94,7 +94,7 @@ struct RaceCoordinator {
     struct Car *mpHighlightCar2;                  // 128
     int32_t   mViewID;                            // 132
     void     *mpRoute;                            // 136
-    int32_t   PostRaceWord140;                    // 140  retail's
+    int32_t   PostRacePlayerNumber;               // 140  retail's
 };                                                // 144
 
 #if !defined(RACECOORD_NO_ASSERT) && UINTPTR_MAX == 0xffffffffu
@@ -109,7 +109,7 @@ typedef char racecoord_layout_check[
      && offsetof(struct RaceCoordinator, mStartPosition) == 96
      && offsetof(struct RaceCoordinator, mpEyeVerts) == 112
      && offsetof(struct RaceCoordinator, mpRoute) == 136
-     && offsetof(struct RaceCoordinator, PostRaceWord140) == 140
+     && offsetof(struct RaceCoordinator, PostRacePlayerNumber) == 140
      && sizeof(struct RaceCoordinator) == 144
      && sizeof(RCQueuedMessage) == 16) ? 1 : -1];
 #endif

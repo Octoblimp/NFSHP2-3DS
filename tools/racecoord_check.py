@@ -209,8 +209,8 @@ def arm_layout_check():
         "#include <stddef.h>",
         "#include \"racecoord.h\"",
         "_Static_assert(sizeof(struct RaceCoordinator) == 144, \"size\");",
-        "_Static_assert(offsetof(struct RaceCoordinator, PostRaceWord140)"
-        " == 140, \"w140\");",
+        "_Static_assert(offsetof(struct RaceCoordinator,"
+        " PostRacePlayerNumber) == 140, \"w140\");",
         "_Static_assert(sizeof(RCQueuedMessage) == 16, \"msg\");",
     ]
     with tempfile.TemporaryDirectory() as tmp:
@@ -1330,7 +1330,8 @@ MUTATIONS = [
     M("ctor: route not cleared", RCC, "    rc->mpRoute = NULL;\n", ""),
     M("ctor: bank verts not cleared", RCC, "    rc->mpBankVerts = NULL;\n", ""),
     M("ctor: eye verts not cleared", RCC, "    rc->mpEyeVerts = NULL;\n", ""),
-    M("ctor: word 140 not cleared", RCC, "    rc->PostRaceWord140 = 0;\n", ""),
+    M("ctor: word 140 not cleared", RCC,
+      "    rc->PostRacePlayerNumber = 0;\n", ""),
 
     # The destructor.
     M("dtor: always changes state", RCC,

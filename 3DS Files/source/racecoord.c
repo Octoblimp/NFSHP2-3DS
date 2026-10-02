@@ -174,7 +174,7 @@ RaceCoordinator *racecoordinator_construct(RaceCoordinator *rc)
     rc->mpRoute = NULL;
     rc->mpBankVerts = NULL;
     rc->mpEyeVerts = NULL;
-    rc->PostRaceWord140 = 0;
+    rc->PostRacePlayerNumber = 0;
     return rc;
 }
 

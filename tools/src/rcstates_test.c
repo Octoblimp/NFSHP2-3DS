@@ -1,19 +1,19 @@
-// Host harness for 3DS Files/source/rcstates.c and racefinish.c: the race
-// coordinator's NONE, CAMERA_FLYBY, PRERACE and RACE_IN_PROGRESS states,
-// the countdown, the finish, the small methods, and the Race's countdown
-// and finish questions. Runs the op script tools/rcstates_check.py writes
+// Host harness for 3DS Files/source/rcstates.c, racefinish.c and rcpost.c:
+// the race coordinator's NONE, CAMERA_FLYBY, PRERACE, RACE_IN_PROGRESS,
+// PAUSE and POSTRACE states, the countdown, the finish, the small methods,
+// and the Race's countdown and finish questions. Runs the op script tools/rcstates_check.py writes
 // and prints the transcript it diffs against the retail image, run in
 // mipsemu over the same script.
 //
-// rcstates.c and racefinish.c are the port sources under test, with
-// race.c under them and racecoord.c's queue, which the checker links
+// rcstates.c, racefinish.c and rcpost.c are the port sources under test,
+// with race.c and joystick.c under them and racecoord.c's queue, which the checker links
 // through a wrapper that renames InitForRace and CleanupAfterRace so the
 // two below can stand in for them. The harness owns everything else, and
 // each piece prints in the model's words: bMalloc over a numbered arena,
-// the message slot pool, SetRaceStage, SortRacingCarsByLeadership, and
-// every seam.
+// the message slot pool, SetRaceStage, SortRacingCarsByLeadership,
+// Player::ChangeCameraMover, and every seam.
 //
-// States 4 to 9 are fake callbacks that print the message, the state and
+// States 4, 5, 8 and 9 are fake callbacks that print the message, the state and
 // the queue, and each script reaction answers one message once with a
 // message of its own.
 #include <stdint.h>
@@ -34,6 +34,7 @@
 #include "racefinish.h"
 #include "raceinit.h"
 #include "racerun.h"
+#include "rcpost.h"
 #include "rcstates.h"
 #include "realtime.h"
 #include "replay.h"
@@ -41,7 +42,7 @@
 #include "trackflow.h"
 #include "world.h"
 
-#define NOBJ 32                 // a0 .. a31
+#define NOBJ 64                 // a0 .. a63
 #define OBJ_BYTES 1024
 #define NSLOT 64                // m0 .. m63
 #define NRC 8                   // r0 .. r7
@@ -51,6 +52,7 @@
 #define PRE_FINISHED 184        // the prerace camera's finished word
 #define OBJ_VIS 41              // a Flailer object's visibility byte
 #define JB_START 0x3f99999au
+#define NTSE 4                  // ts0 .. ts3
 
 typedef char nrc_fits[(NRC <= RACE_MAX_RACING_CARS) ? 1 : -1];
 
@@ -61,6 +63,7 @@ int32_t PlayerNumPlayers;
 struct Player *PlayerPlayersByNumber[2];
 struct Player *PlayerPlayersByIndex[2];
 int32_t WorldTimeFrames;
+int32_t WorldLoopCounter;
 int (*gBCountFreeMemoryFn)(int pool);
 void (*gUnloadResourceFileFn)(void *file);
 const int *gPlayerCamSkipFE;
@@ -84,7 +87,9 @@ static World worldObj;
 static Car cars[NCAR];
 static ReplayManager rmObj;
 static _Alignas(16) unsigned char fly[256], pre[256], demo[256], eg[256],
-    file0[32], sample[32], ads[NCAR][16], flobj[3][64];
+    file0[32], sample[32], ads[NCAR][16], flobj[3][64], menu[64];
+static TransientStatsElement tse[NTSE];
+static int tsPresent[NTSE];
 static const uint32_t countObjs[3] = {RC_COUNTDOWN_3, RC_COUNTDOWN_2,
                                       RC_COUNTDOWN_1};
 
@@ -94,7 +99,7 @@ static int32_t begun;
 
 // The script's answers.
 static int tFlyFin, tPFin, tPrerace, tPlaying, tNoSample, tNoObj,
-    tAnother, tMulti, tFcDrop, tRDrop, tInitState;
+    tAnother, tMulti, tFcDrop, tRDrop, tInitState, tRmMute, tHlEnd;
 
 static struct {
     int state, msg;
@@ -147,6 +152,8 @@ static const char *nm(const void *p)
         return "race";
     if (p == &worldObj)
         return "w";
+    if (p == menu)
+        return "menu";
     if ((i = index_in(p, arena, OBJ_BYTES, NOBJ)) >= 0)
         sprintf(b, "a%d", i);
     else if ((i = index_in(p, slots, sizeof slots[0], NSLOT)) >= 0)
@@ -161,6 +168,8 @@ static const char *nm(const void *p)
         sprintf(b, "p%d", i);
     else if ((i = index_in(p, flobj, sizeof flobj[0], 3)) >= 0)
         sprintf(b, "o%d", 3 - i);
+    else if ((i = index_in(p, tse, sizeof tse[0], NTSE)) >= 0)
+        sprintf(b, "ts%d", i);
     else
         return "s";
     return b;
@@ -375,6 +384,12 @@ void race_sort_racing_cars_by_leadership(Race *r)
 void racecoordinator_cleanup_after_race(RaceCoordinator *rc)
 {
     printf("  cleanup %s\n", nm(rc));
+}
+
+void player_change_camera_mover(struct Player *p, CameraMoverType type,
+                                int keep)
+{
+    printf("  mover %s %d %d\n", nm(p), (int)type, keep);
 }
 
 void racecoordinator_init_for_race(RaceCoordinator *rc)
@@ -614,6 +629,82 @@ static void s_record(Race *r, struct RacingCar *rc, int32_t position)
     }
 }
 
+static void s_hud_clear(struct Player *p)
+{
+    printf("  hudclear %s\n", nm(p));
+}
+
+static void s_enter_pause(struct PauseMenu *m, JoystickPort port)
+{
+    printf("  enterpause %s %d\n", nm(m), (int)port);
+}
+
+static void s_exit_pause(struct PauseMenu *m)
+{
+    printf("  exitpause %s\n", nm(m));
+}
+
+static void s_to_screen(const char *name, int32_t push)
+{
+    printf("  toscreen %s %d\n", name != NULL ? name : "null", (int)push);
+}
+
+static void s_quit(void)                { printf("  quit\n"); }
+static void s_restarted(void)           { printf("  restarted\n"); }
+static void s_flush(void)               { printf("  flush\n"); }
+
+static void s_mute_replay(int32_t on)
+{
+    printf("  mutereplay %d\n", (int)on);
+}
+
+static void s_highlights(struct ReplayManager *rm)
+{
+    printf("  highlights %s\n", nm(rm));
+}
+
+static void s_next_highlight(struct ReplayManager *rm)
+{
+    printf("  nexthighlight %s\n", nm(rm));
+}
+
+static int32_t s_mute_highlights(const struct ReplayManager *rm)
+{
+    (void)rm;
+    return tRmMute;
+}
+
+static int32_t s_highlight_end(const struct ReplayManager *rm)
+{
+    (void)rm;
+    return tHlEnd;
+}
+
+static void s_resume(struct EndGameScreens *s)
+{
+    printf("  resume %s\n", nm(s));
+}
+
+static void s_suspend(struct EndGameScreens *s)
+{
+    printf("  suspend %s\n", nm(s));
+}
+
+static const TransientStatsElement *s_get_driver(int32_t num)
+{
+    const TransientStatsElement *d =
+        num >= 0 && num < NTSE && tsPresent[num] ? &tse[num] : NULL;
+
+    printf("  getdriver %d -> %s\n", (int)num, nm(d));
+    return d;
+}
+
+static void s_type_handlers(void)
+{
+    printf("  typehandlers demo=%s pn=%d\n",
+           nm(rcbuf.pDemoCameraCoordinator), (int)rcbuf.PostRacePlayerNumber);
+}
+
 // ------------------------------------------------------- the callbacks
 
 static void respond(int state, RaceCoordinator *rc, RCMessage msg)
@@ -657,7 +748,7 @@ static int32_t callback(int state, RaceCoordinator *rc, RCMessage msg,
     {                                                                      \
         return callback(n, rc, m, p);                                      \
     }
-CB(4) CB(5) CB(6) CB(7) CB(8) CB(9)
+CB(4) CB(5) CB(8) CB(9)
 
 // -------------------------------------------------------------- the dump
 
@@ -670,13 +761,13 @@ static void dump(void)
     int i;
 
     printf("  rc st=%d ex=%d cd=%d port=%d bp=%d demo=%s fly=%s pre=%s "
-           "eg=%s q%s\n",
+           "eg=%s pn=%d q%s\n",
            (int)rc->CurrentRCState, (int)rc->RCExecutingMessage,
            (int)rc->DisplayingCountdownNumber, (int)rc->PausedJoystickPort,
            (int)rc->BeforePauseRCState, nm(rc->pDemoCameraCoordinator),
            nm(rc->pFlyByCameraCoordinator),
            nm(rc->pPreRaceCameraCoordinator), nm(rc->pEndGameScreens),
-           queue_str(rc));
+           (int)rc->PostRacePlayerNumber, queue_str(rc));
     memcpy(&jb, &jbTimer, 4);
     printf("  g stage=%d go=%d cdt=%d nrc=%d np=%d wtf=%d jbt=%s begun=%d "
            "ds=",
@@ -686,8 +777,9 @@ static void dump(void)
            (int)WorldTimeFrames, fx(jbTimer), (int)begun);
     for (i = 0; i < 8; i++)
         printf("%02x", ds[i]);
-    printf(" vis=%d,%d,%d\n", flobj[0][OBJ_VIS], flobj[1][OBJ_VIS],
-           flobj[2][OBJ_VIS]);
+    printf(" vis=%d,%d,%d jt=%d,%d\n", flobj[0][OBJ_VIS], flobj[1][OBJ_VIS],
+           flobj[2][OBJ_VIS], (int)players[0].JoyType,
+           (int)players[1].JoyType);
     printf("  rcars");
     for (i = 0; i < NRC; i++)
         printf(" %d/%d", (int)rcars[i].FinishReason,
@@ -716,6 +808,7 @@ static void reset(void)
     rcbuf.pFlyByCameraCoordinator = NULL;
     rcbuf.pPreRaceCameraCoordinator = NULL;
     rcbuf.pEndGameScreens = NULL;
+    rcbuf.PostRacePlayerNumber = 0;
     memset(fly, 0, sizeof fly);
     memset(pre, 0, sizeof pre);
     memset(demo, 0, sizeof demo);
@@ -738,6 +831,9 @@ static void reset(void)
         players[i].MyCar = NULL;
         players[i].TimeFinishedRacing = 0;
         players[i].FinishAnimationLength = 0;
+        players[i].JoyPort = i;
+        players[i].JoyType = 0;
+        players[i].PlayerNumber = i;
         PlayerPlayersByIndex[i] = &players[i];
         PlayerPlayersByNumber[i] = NULL;
     }
@@ -747,6 +843,13 @@ static void reset(void)
     memset(cars, PATTERN, sizeof cars);
     for (i = 0; i < NCAR; i++)
         cars[i].pAnimatedDriver = NULL;
+    for (i = 0; i < NCAR; i++)
+        worldObj.CarTable[i] = &cars[i];
+    memset(tse, PATTERN, sizeof tse);
+    memset(tsPresent, 0, sizeof tsPresent);
+    WorldLoopCounter = 0;
+    ThePauseMenu = (struct PauseMenu *)(void *)menu;
+    memset(CurrentJoystickTypes, 0, sizeof CurrentJoystickTypes);
     begun = 0;
     memset(flobj, PATTERN, sizeof flobj);
     for (i = 0; i < 3; i++)
@@ -774,6 +877,8 @@ static void reset(void)
     tFcDrop = 0;
     tRDrop = 0;
     tInitState = -1;
+    tRmMute = 0;
+    tHlEnd = 0;
     nreact = 0;
 }
 
@@ -805,6 +910,20 @@ static void set_global(const char *f, int v)
         PlayerNumPlayers = v;
     else if (!strcmp(f, "begun"))
         begun = v;
+    else if (!strcmp(f, "rmmute"))
+        tRmMute = v;
+    else if (!strcmp(f, "hlend"))
+        tHlEnd = v;
+    else if (!strcmp(f, "wlc"))
+        WorldLoopCounter = v;
+    else if (!strcmp(f, "pn"))
+        rcbuf.PostRacePlayerNumber = v;
+    else if (!strcmp(f, "jt0"))
+        CurrentJoystickTypes[0] = (uint8_t)v;
+    else if (!strcmp(f, "jt1"))
+        CurrentJoystickTypes[1] = (uint8_t)v;
+    else if (!strcmp(f, "menu"))
+        ThePauseMenu = v ? (struct PauseMenu *)(void *)menu : NULL;
     else if (!strcmp(f, "flyfin"))
         tFlyFin = v;
     else if (!strcmp(f, "pfin")) {
@@ -929,6 +1048,18 @@ static void op(char *line)
         }
         return;
     }
+    if (!strcmp(c, "PJ")) {
+        players[n[0]].JoyPort = n[1];
+        players[n[0]].JoyType = n[2];
+        players[n[0]].PlayerNumber = n[3];
+        return;
+    }
+    if (!strcmp(c, "TS")) {
+        tse[n[0]].FinishPosition = n[1];
+        tse[n[0]].UniqueDriverNumber = n[0];
+        tsPresent[n[0]] = n[2];
+        return;
+    }
     if (!strcmp(c, "AD")) {
         cars[n[0]].pAnimatedDriver =
             n[1] ? (struct AnimatedDriver *)(void *)ads[n[0]] : NULL;
@@ -952,9 +1083,13 @@ static void op(char *line)
     } else if (!strcmp(c, "T")) {
         racecoordinator_change_state(rc, n[0]);
     } else if (!strcmp(c, "C")) {
-        static const RCStateCallbackFn real[4] = {
-            rc_state_none_callback, rc_state_camera_flyby_callback,
-            rc_state_prerace_callback, rc_state_race_in_progress_callback};
+        static const RCStateCallbackFn real[NUM_RCSTATES] = {
+            [RCSTATE_NONE] = rc_state_none_callback,
+            [RCSTATE_CAMERA_FLYBY] = rc_state_camera_flyby_callback,
+            [RCSTATE_PRERACE] = rc_state_prerace_callback,
+            [RCSTATE_RACE_IN_PROGRESS] = rc_state_race_in_progress_callback,
+            [RCSTATE_PAUSE] = rc_state_pause_callback,
+            [RCSTATE_POSTRACE] = rc_state_post_race_callback};
 
         printf("  ret %d\n", (int)real[n[0]](rc, n[1], n[2]));
     } else if (!strcmp(c, "DN")) {
@@ -1041,10 +1176,24 @@ int main(int argc, char **argv)
     gCameraCoordinatorDeleteFn = s_ccdel;
     gRaceFinishCarFn = s_finish_car;
     gRaceEventRecordResultsFn = s_record;
+    gPlayerClearHudAnimationsFn = s_hud_clear;
+    gPauseMenuEnterPauseFn = s_enter_pause;
+    gPauseMenuExitPauseFn = s_exit_pause;
+    gChangeToScreenFn = s_to_screen;
+    gFEDTheRaceWasQuitFn = s_quit;
+    gFEDTheRaceWasRestartedFn = s_restarted;
+    gSpeechFlushQueueFn = s_flush;
+    gSoundMuteReplayFn = s_mute_replay;
+    gReplayBeginRaceHighlightsFn = s_highlights;
+    gReplayBeginNextRaceHighlightFn = s_next_highlight;
+    gReplayMuteHighlightsFn = s_mute_highlights;
+    gReplayEndCurrentHighlightTimeFn = s_highlight_end;
+    gEndGameScreensResumeFn = s_resume;
+    gEndGameScreensSuspendFn = s_suspend;
+    gTransientStatsGetDriverFn = s_get_driver;
+    gRestoreTypeChangedHandlersFn = s_type_handlers;
     gRCStateCallbacks[4] = cb4;
     gRCStateCallbacks[5] = cb5;
-    gRCStateCallbacks[6] = cb6;
-    gRCStateCallbacks[7] = cb7;
     gRCStateCallbacks[8] = cb8;
     gRCStateCallbacks[9] = cb9;
 

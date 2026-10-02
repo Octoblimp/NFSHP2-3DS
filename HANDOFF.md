@@ -10994,3 +10994,56 @@ of 8g and are not committed with 8f.
 
 8g: check `rcpost.c` against retail by extending rcstates_check, then the
 replays and the demos, then wire the coordinator in.
+
+## Session 31, continued (2026-10-02) -- the race coordinator's pause and post-race (step 8g)
+
+8f was committed. This slice ports two more of the ten RaceCoordinator
+states, PAUSE and POSTRACE, from retail. Midway the user asked how far
+the port is, and how close a car on a track is. The answer was about
+30-48 slices to the full game, and about 3-4 to a first drive on
+Azahar, with the replay and demo states put off so that the wiring comes
+first.
+
+### The port
+
+`rcpost.c`/`rcpost.h` have the pause, the post-race, Player::BeginPause
+and EndPause, and TellPlayersToPause and TellPlayersToUnPause.
+`rcstates.c`'s table has them at 6 and 7. RaceCoordinator+140, retail's
+new word, is `PostRacePlayerNumber` now, in `racecoord.h`, `racecoord.c`,
+`racecoord_check` and its harness.
+
+The pause's ACTIVATE tells the players, enters the pause menu with the
+port that asked, shows "Pause Menu" and mutes. Its unpause reasons
+resume, go to the instant replay, quit or restart. The post-race puts
+every camera mover to CM_NONE, flushes the speech, starts the
+highlights and the end-game screens, and follows the best-placed
+player's car with a demo camera. Each highlight's end in
+WorldLoopCounter, or SKIP_REPLAY, makes a new camera.
+
+The replay's two words are seams, because the port's ReplayManager is
+not retail's layout. Retail reads the ReplayManager unchecked, and the
+port's TICK does nothing without one. The demo disc's end reason on
+QUIT_RACE is dropped.
+
+### The checks
+
+`rcstates_check` runs the two callbacks, the four Player calls,
+GetJoystickType and the two empty World methods as shipped. States 4,
+5, 8 and 9 stay fake, and the reactions answer only on them. The
+harness gains joystick.c and stubs for the pause menu, ChangeToScreen,
+the frontend's quit and restart, ChangeCameraMover, the speech, the
+replay, the end-game screens, GetDriver, ClearHudAnimations and the
+type-changed handlers' reinstall. The arena is 64 objects now, since
+every highlight makes a camera.
+
+600 scenarios, 29584 ops, 64046 lines, 0 differ. Of 230 mutations, 225 are caught
+and 5 are equivalent.
+
+### Next
+
+Wiring the coordinator in, the plan for 8h, needs a Car, and Car's
+constructor reads `CarTypeInfoArray`, which is NULL: LoaderCarInfo is
+not ported. So 8h is the car data loader (LoaderCarInfo and the
+acceleration tables), 8i is CarLoader (each car's geometry and skin),
+and 8j wires the coordinator in for one car on a track on Azahar.
+CONTINUE.md has the lists.

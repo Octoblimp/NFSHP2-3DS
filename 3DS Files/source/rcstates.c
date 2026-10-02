@@ -13,6 +13,7 @@
 #include "playerinit.h"
 #include "racefinish.h"
 #include "racerun.h"
+#include "rcpost.h"
 #include "realtime.h"
 #include "replay.h"
 #include "trackflow.h"
@@ -44,6 +45,8 @@ RCStateCallbackFn gRCStateCallbacks[NUM_RCSTATES] = {
     [RCSTATE_CAMERA_FLYBY]     = rc_state_camera_flyby_callback,
     [RCSTATE_PRERACE]          = rc_state_prerace_callback,
     [RCSTATE_RACE_IN_PROGRESS] = rc_state_race_in_progress_callback,
+    [RCSTATE_PAUSE]            = rc_state_pause_callback,
+    [RCSTATE_POSTRACE]         = rc_state_post_race_callback,
 };
 
 void (*gSoundMuteFn)(int32_t on);

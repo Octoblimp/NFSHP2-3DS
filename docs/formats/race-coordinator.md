@@ -7,10 +7,12 @@ through `InitForRace`, and its destructor takes it all down again through
 ten states, and each one is a callback that answers messages. The messages
 go through a queue, and `ChangeState` is three of them in a row.
 
-Step 8e ported the lifetime and the queue. Step 8f ports the first four
+Step 8e ported the lifetime and the queue. Step 8f ported the first four
 states, `NONE` through `RACE_IN_PROGRESS`, with the countdown and the
-finish (see "The states up to the finish", below). The other six states
-are later slices, and their table entries stay NULL until then.
+finish (see "The states up to the finish", below). Step 8g ports `PAUSE`
+and `POSTRACE` (see "The pause and the post-race"). The two replays and
+the two demos are later slices, and their table entries stay NULL until
+then.
 
 The port is `3DS Files/source/racecoord.c`/`racecoord.h`. Everything there
 is retail's. `race.c` adds `TheRaceParameters.NumAICars`.
@@ -69,8 +71,8 @@ The `TheRaceParameters` words read here:
 `retail_layout` finds every field of the demo's type#1044 at the demo's
 offset. Retail adds one word, at 140, in the demo's tail padding. The
 constructor zeroes it, and only `RCStatePostRaceCallback` (`0x0014bdd8`)
-touches it otherwise. The port calls it `PostRaceWord140` until that
-callback is ported.
+touches it otherwise. It is `PostRacePlayerNumber`, the player whose car
+the post-race follows (see "The pause and the post-race").
 
 | offset | field |
 |--------|-------|
@@ -524,9 +526,128 @@ at 1 repeats. The first pass left two holes, which new scenarios close:
 a flyby `TICK` with no camera, and `RecordResults` taking a car off the
 count.
 
+## The pause and the post-race (8g)
+
+`3DS Files/source/rcpost.c`/`rcpost.h` port `PAUSE` and `POSTRACE`, and
+the four small Player calls the pause makes. `rcstates.c`'s state table
+has the two at their `RCState`s now. The two replays and the two demos
+are the last four entries, NULL until their slices.
+
+| retail | what |
+|--------|------|
+| `0x0014b3d8` | `RCStatePauseCallback`, 400 bytes |
+| `0x0014bdd8` | `RCStatePostRaceCallback`, 796 bytes; jump table `0x002afb50`, messages 1 to 13 |
+| `0x00181bd0` | `Player::BeginPause()`, a tail call to `ClearHudAnimations` (`0x0017c7c8`) |
+| `0x00181bd8` | `Player::EndPause()`, 44 bytes |
+| `0x00181c88` | `TellPlayersToPause()`, 92 bytes |
+| `0x00181ce8` | `TellPlayersToUnPause()`, 92 bytes |
+| `0x00154308` | `GetJoystickType(JoystickPort)`, `lbu` of gp-21920 plus the port |
+| `0x0014d668`, `0x0014d670` | `World::BeginPause()` and `EndPause()`, both empty |
+| `0x001543f0` | no symbol: for ports 0 and 1, `RemoveJoyHandler` and `AddJoyHandler` of `JOY_EVENT_TYPE_CHANGED` with `TypeChangedHandler` (`0x001542a8`) |
+| gp-21064 | `ThePauseMenu` |
+| gp-19552 | `WorldLoopCounter` |
+| gp-21920 | `CurrentJoystickTypes`, a byte per port |
+| `0x002afa38` | `"Pause Menu"` |
+| `0x002fc3dc` | `TheTransientStats` |
+
+`RaceCoordinator`+140 is `PostRacePlayerNumber` now: the player whose car
+the post-race's demo camera follows. The constructor, the post-race's
+`ACTIVATE` and its `UNACTIVATE` are the only writers.
+
+The `Player` words are `JoyPort` +8, `JoyType` +12 and `PlayerNumber`
++16. The `ReplayManager` words are retail's new word at +12, which mutes
+the replay's sound for the highlights, and `EndCurrentHighlightTime`
++160, a `WorldLoopCounter`. `World::CarTable` is at +44. Retail's
+`TransientStatsElement` is 100 bytes, with `FinishPosition` at +0.
+
+### `RCSTATE_PAUSE`
+
+- `ACTIVATE`: `World::BeginPause`, `TellPlayersToPause`,
+  `PauseMenu::EnterPause(ThePauseMenu, PausedJoystickPort)`,
+  `ChangeToScreen("Pause Menu", 1)` and `sound::Mute(1)`.
+- `UNACTIVATE`: `ChangeToScreen(NULL, 0)`, `PauseMenu::ExitPause`,
+  `TellPlayersToUnPause`, then `World::EndPause` when there is a World.
+- `TICK` is taken.
+- `REQUEST_UNPAUSE`, on its `UnPauseReasonType`:
+  - `RESUME_RACE` (1) unmutes and goes back to `BeforePauseRCState`.
+  - `INSTANT_REPLAY` (4) goes to `INSTANT_REPLAY`.
+  - `QUIT_RACE` (3) is `TheRaceWasQuit` on the frontend database, then
+    `NONE` and `QUIT_RACE` sent. An active demo disc would record its end
+    reason (5) between the two; the port drops it.
+  - `RESTART_RACE` (2) goes to `NONE` and sends `RESTART_RACE`.
+  - Any other reason is taken and does nothing.
+- Anything else answers 0.
+
+### `RCSTATE_POSTRACE`
+
+- `ACTIVATE`:
+  1. Each player's camera mover goes to `CM_NONE`, without keeping the
+     old one. The loop re-reads `NumPlayers` each pass.
+  2. `sound::Mute(0)`, and the speech manager's queue flushed.
+  3. `sound::MuteReplay(1)` if the `ReplayManager`'s +12 is set, then
+     `BeginRaceHighlights` and the end-game screens' `ResumeScreens`.
+  4. `PostRacePlayerNumber` is 0. With two players or more, each player's
+     `TransientStats::GetDriver(PlayerNumber)` is asked, and a driver
+     whose `FinishPosition` is below the best so far (8 to start) makes
+     that player's number the one. Ties keep the first.
+  5. A 52-byte `DemoCameraCoordinator(1, World.CarTable[number])`, from
+     line 2361. Retail does not delete a camera it already has.
+- `UNACTIVATE`: the end-game screens' `SuspendScreens`, the demo camera
+  deleted, `PostRacePlayerNumber` and the camera pointer zeroed, then
+  `0x001543f0`.
+- `TICK`: once `WorldLoopCounter` reaches the `ReplayManager`'s +160,
+  `BeginNextRaceHighlight` and a new demo camera (line 2396) in place of
+  the old. Before that it is taken and does nothing.
+- `SKIP_REPLAY` (11): `MuteReplay(1)`, `BeginNextRaceHighlight` and a new
+  demo camera (line 2418).
+- `START_REPLAY` (12) goes to `INSTANT_REPLAY`.
+- `RESTART_RACE` (8) is `TheRaceWasRestarted`, then `NONE` and
+  `RESTART_RACE` sent. `NEXT_RACE` (9) goes to `NONE` and sends
+  `NEXT_RACE` with its parameter. `QUIT_RACE` (10) goes to `NONE` and
+  sends `QUIT_RACE`.
+- `TAKE_AUTOSNAPSHOT` (13) is taken. Messages 4 to 7, 14 and above, and 0
+  and below answer 0.
+
+### The Player calls
+
+`TellPlayersToPause` and `TellPlayersToUnPause` call `BeginPause` and
+`EndPause` on each of `pPlayersByIndex`, re-reading `NumPlayers` each
+pass. `BeginPause` is `ClearHudAnimations`. `EndPause` stores
+`GetJoystickType(JoyPort)` in `JoyType`, so a pad changed during the
+pause is picked up when it ends. The port's `GetJoystickType` is
+`joystick.c`'s.
+
+### Where the port reads differently
+
+- Retail reads the `ReplayManager` in the post-race's `ACTIVATE`, `TICK`
+  and `SKIP_REPLAY` without a test. The port's `TICK` does nothing with no
+  `ReplayManager`, and `ACTIVATE` does not mute the replay's sound.
+- The replay's two words are seams (`gReplayMuteHighlightsFn`,
+  `gReplayEndCurrentHighlightTimeFn`), as the 8f marks are, because the
+  port's `ReplayManager` is not retail's layout. With the second NULL, the
+  `TICK` never begins the next highlight.
+- With no `DemoCameraCoordinator` constructor, the camera pointer is
+  NULL and nothing is allocated. With no World, the camera follows no car.
+- The demo disc's end reason on `QUIT_RACE` is dropped.
+
+### The cross-check
+
+`rcstates_check` runs both callbacks, the four Player calls,
+`GetJoystickType` and the two empty World methods as shipped, alongside
+8f's. States 4, 5, 8 and 9 stay fake. New stubs print the pause menu's
+`EnterPause` and `ExitPause`, `ChangeToScreen`, the frontend's quit and
+restart, `ChangeCameraMover`, the speech queue, the replay's highlights
+and `MuteReplay`, the end-game screens, `GetDriver`, `ClearHudAnimations`
+and `0x001543f0`. `GetDriver` answers from four 16-byte elements, any of
+which can be missing. The dump gains `PostRacePlayerNumber` and both
+players' `JoyType`.
+
+600 scenarios, 29584 ops, 64046 transcript lines, 0 differ. Of 230 mutations, 225
+are caught and 5 are equivalent.
+
 ## Seams
 
-The six states still to come and most of what `InitForRace` and the
+The four states still to come and most of what `InitForRace` and the
 cleanups call are seams, NULL until their slices land. `racecoord.h` lists each one with its
 retail address. A NULL seam does nothing, and allocates nothing for the
 object it would have built. With `gReplayManagerCtorFn` NULL,

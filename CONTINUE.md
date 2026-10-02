@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-02), after the race coordinator's states up to the finish (8f). `HANDOFF.md` is the running
+(2026-10-02), after the race coordinator's pause and post-race (8g). `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -77,7 +77,7 @@ raceinit_check      3280 ops,    13317 lines, 0 differ   (123/123 mutations caug
 racecore_check      6097 ops,    18698 lines, 0 differ   (158 caught, 3 equivalent; retail's image)
 racerun_check      21656 ops,    40973 lines, 0 differ   (169 caught, 2 equivalent; retail's image)
 racecoord_check     7038 ops,    26129 lines, 0 differ   (135 caught, 1 equivalent; retail's image)
-rcstates_check     17258 ops,    40165 lines, 0 differ   (143 caught, 5 equivalent; retail's image)
+rcstates_check    29584 ops,    64046 lines, 0 differ   (225 caught, 5 equivalent; retail's image)
 trackroute_check   11 scenarios,  1353 lines, 0 differ   (57 caught, 1 equivalent)
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
 engine_check        8 scenarios,   414 lines, 0 differ   (56 caught, 2 equivalent)
@@ -1128,41 +1128,67 @@ and so replaced every boot.
      and 5 are equivalent.
    - **Not wired yet:** as for 8e. Every seam is NULL in the game.
 
-   **Next is 8g: the pause and the post-race.** RCStatePauseCallback
-   (`0x0014b3d8`, 400 bytes) and RCStatePostRaceCallback (`0x0014bdd8`,
-   796), with TellPlayersToPause (`0x00181c88`), TellPlayersToUnPause
-   (`0x00181ce8`), Player::BeginPause (`0x00181bd0`, ClearHudAnimations)
-   and Player::EndPause (`0x00181bd8`). The decode:
-   - Pause: ACTIVATE is World::BeginPause (empty), TellPlayersToPause,
-     PauseMenu::EnterPause(ThePauseMenu, PausedJoystickPort),
-     ChangeToScreen("Pause Menu", 1) and sound::Mute(1). UNACTIVATE is
-     ChangeToScreen(NULL, 0), ExitPause, TellPlayersToUnPause and
-     World::EndPause (empty). REQUEST_UNPAUSE: 1 unmutes and goes back
-     to BeforePauseRCState, 4 goes to INSTANT_REPLAY, 3 is
-     TheRaceWasQuit then NONE and QUIT_RACE sent, 2 is NONE and
-     RESTART_RACE sent.
-   - PostRace (jump table `0x002afb50`, msgs 1..13): ACTIVATE puts each
-     player's mover to CM_NONE, unmutes, flushes the speech, mutes the
-     replay if its new word at +12 is set, BeginRaceHighlights,
-     EndGameScreens::ResumeScreens, then picks the best-placed player
-     (TransientStats::GetDriver `0x00187080`, FinishPosition) into
-     RaceCoordinator+140 and makes a DemoCameraCoordinator on
-     World.CarTable[that] (line 2361). UNACTIVATE suspends the screens,
-     deletes the demo camera, zeroes +140 and calls `0x001543f0` (the
-     TypeChangedHandler reinstall). TICK begins the next highlight once
-     WorldLoopCounter (gp-19552) reaches the ReplayManager's +160.
-     SKIP_REPLAY does it at once. START_REPLAY goes to INSTANT_REPLAY;
-     RESTART/NEXT/QUIT go to NONE and send the message on.
-   `rcpost.c`/`rcpost.h` hold a first draft of both, written from that
-   decode and not yet checked. Extend rcstates_check with them: states 6
-   and 7 become real, and the fake callbacks stay on 4, 5, 8 and 9.
-   RaceCoordinator+140 becomes PostRacePlayerNumber.
+   **8g, the pause and the post-race, is done** (HANDOFF.md, Session
+   31, continued: the race coordinator's pause and post-race (step 8g)).
+   `docs/formats/race-coordinator.md` has the write-up.
+   - `rcpost.c` and `rcpost.h` have RCStatePauseCallback (`0x0014b3d8`),
+     RCStatePostRaceCallback (`0x0014bdd8`), Player::BeginPause
+     (`0x00181bd0`) and EndPause (`0x00181bd8`), and TellPlayersToPause
+     and TellPlayersToUnPause (`0x00181c88`, `0x00181ce8`).
+     gRCStateCallbacks has six states now; the two replays and the two
+     demos stay NULL.
+   - RaceCoordinator+140 is `PostRacePlayerNumber`: the best-placed
+     player, whose car the post-race's demo camera follows.
+   - The replay's two words (+12, the highlights' mute, and +160,
+     EndCurrentHighlightTime) are seams, as 8f's marks are. The port's
+     post-race TICK does nothing with no ReplayManager.
+   - `rcstates_check` runs both, with GetJoystickType and the empty
+     World::BeginPause/EndPause, in RetailEmu: 600 scenarios, 29584 ops,
+     64046 lines, 0 differ. Of 230 mutations, 225 are caught and 5 are
+     equivalent.
+   - **Not wired yet:** as for 8e. Every seam is NULL in the game.
 
-   After 8g: the replay states (instant `0x0014b568`, auto
-   `0x0014b848`) and the demo states (`0x0014a8c0`, `0x0014aa38`), then
-   wire the coordinator in and flow into a race: the main loop's
-   UpdateCameraMovers, BeginCountdownCameras, eDisplayFrame and
-   RenderCars (below).
+   The replay states (instant `0x0014b568`, auto `0x0014b848`) and the
+   demo states (`0x0014a8c0`, `0x0014aa38`) wait: a race runs without
+   them, and the replays need ReplaySnapshot, which is not in the count.
+   Their table entries are NULL: ChangeState enters such a state, and no
+   callback runs for its messages.
+
+   **Next is 8h: the car data loader.** Wiring the coordinator in showed
+   that no Car can be built in the game yet: Car's constructor reads
+   `CarTypeInfoArray[Type]` (gp-20616), and the array is NULL because
+   LoaderCarInfo is one of `bchunkload.c`'s UNPORTED slots (16). The
+   chunk is in `GLOBAL\GLOBALB.BUN` at 0x86b80, 88072 bytes: 64 records
+   of 1376 from the first 16-byte boundary past the header. 8h ports:
+   - LoaderCarInfo (`0x00187f98`, 400 bytes): 0x34600 sets the array and
+     makes each of the 64 types' acceleration tables; 0x34601 sets the
+     skin table (gp-20612) and its count, the size over 64 (gp-20608).
+     The demo-disc block (`0x002effe0`) is left out, as everywhere.
+   - UnloaderCarInfo (`0x00188128`), GetAccelerationTable
+     (`0x00188dd8`: 0x0030db70 plus type * 148) and MakeAccelerationTable
+     (`0x00188df0`, 728 bytes, over the ported Table and
+     CalculateShiftPoints).
+   - the global bundle's two chunks offered to it at boot, as retail's
+     LoadResourceFile of GLOBALB does.
+
+   **Then 8i: CarLoader** (`0x001b0260` .. `0x001b0e18`: Load,
+   BeginLoading, LoadingDoneCallback, IsLoaded, Unload, FindLoadedCar and
+   the rest), which reads each car's `GeometryFilename` (CarTypeInfo+64)
+   and skin so that `eModel::Init` finds the car's solids.
+
+   **Then 8j: wire the coordinator in and flow into a race**, for one
+   car on a track on Azahar (step 9):
+   - the RaceCoordinator built in `main.c` (`gNewRaceCoordinatorFn`) and
+     its seams set where the port has the class;
+   - a way into a race: the frontend's start, or a debug path straight
+     to InitForRace on a track and car;
+   - the main loop's UpdateCameraMovers and UpdateCameraShakers, and the
+     coordinator's TICK;
+   - BeginCountdownCameras (`0x001768e0`) and UpdateNonGameState
+     (`0x00180e60`), the likely first callers of
+     ChangeCameraMover(CM_DRIVE); SetRearViewMirrorCameraMover
+     (`0x001767a8`);
+   - eDisplayFrame and RenderCars.
 
    - The InitForRace decode is in `docs/formats/race-coordinator.md` now.
    - InitPlayers, retail's DriverInfo, InitCars, AddRacingCar and
