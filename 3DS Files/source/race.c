@@ -4,7 +4,7 @@
 
 #include "car.h"
 
-Race   *pCurrentRace;                   // 0x003232f8
+Race   *pCurrentRace;                   // retail 0x003301f0
 int32_t RaceParametersDamageEnabled;    // 0x00312560
 int32_t RaceParametersBeACop;           // retail 0x0031ab0c
 int32_t RaceParametersMaxCops;          // 0x0031277c
@@ -17,6 +17,8 @@ int32_t RaceParametersNumPlayerCars = 1;  // retail 0x0031a8c8
 int32_t RaceParametersNFSRaceMode   = 1;  // retail 0x0031aaec
 int32_t RaceParametersAIDemoMode;       // retail 0x0031a8b0
 int32_t RaceParametersReplayDemoMode;   // retail 0x0031a8b4
+int32_t RaceParametersPoint2Point;      // retail 0x0031a8c0
+int32_t RaceParametersNumLapsInRace = 2;  // retail 0x0031a8c4
 RaceCoordinator *pRaceCoordinator;      // 0x00323330
 
 DriverInfo *race_parameters_get_driver_info(int32_t i)

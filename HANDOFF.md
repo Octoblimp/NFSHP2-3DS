@@ -10650,3 +10650,91 @@ nothing new to see on Azahar.
 SetupGhostCars (`0x001485e0`). CONTINUE.md, step 8, has what the
 constructor and Init do. Then 8d (RaceCoordinator::InitForRace,
 ChangeState and GetDriverInfoByDriverNumber) and the flow into a race.
+
+## Session 31, continued (2026-10-01) -- Race's construction (step 8c)
+
+This is 8c, the third slice of step 8. It ports the Race a race runs on:
+its constructor and destructor, the lap boundaries, and the table of how
+long a lap takes. Race.obj was more than one slice, so step 8 is now 8c
+(the construction), 8d (Race::Init and the lap counting) and 8e
+(RaceCoordinator::InitForRace).
+
+### The port
+
+`race.h` now declares retail's whole 1716-byte Race, field for field. The
+offsets and the size are asserted where pointers are 4 bytes.
+pCurrentRace's comment gives retail's address, gp-22272 (`0x003301f0`).
+`race.c` adds TheRaceParameters' Point2Point (+40) and NumLapsInRace
+(+44, 2 by default).
+
+`racecore.c` and `racecore.h` are new:
+- Race::Race (`0x001475e8`) and Race::~Race (`0x001476e0`)
+- FigureOutBoundaries (`0x00147b20`) and AddBoundaryPosition
+  (`0x001479f8`)
+- GetLapNumberExact (`0x00147d58`)
+- SetupGhostCars (`0x001485e0`), which is empty in retail
+- RacingCar's constructor (`0x001493b8`) and UnInit (`jr ra`)
+- TimeAroundTrackTable's constructor (`0x001467a0`), GetTimeTableEntry,
+  GetTimeAroundTrack and destructor
+
+The constructor sets pCurrentRace and the lap count, which is 1 on a
+point-to-point race that has laps. It zeroes what it owns, sets
+BestLapTime to 0x7fffffff, and finds the boundaries. The boundaries are
+the start line, three splits and, point to point, a finish line, each
+from its track marker or else a fixed distance past the start. Split 3
+has no fixed distance and so needs a marker. A backward track adds the
+splits in the other order.
+
+The destructor destroys the replaying ghost car's WorldObject only inside
+the test of its data. That destructor is the one seam,
+gWorldObjectDeleteFn. Nothing in retail makes a ghost car, so the seam
+can stay NULL.
+
+The boundaries are read and written through the Race's bytes, as the
+image does. A finish number of -1 then reads the four bytes before the
+array as a float, as retail does.
+
+The TimeAroundTrackTable walks each racing route's driving line for the
+car's class. Each segment gives the part of a lap it covers over the
+time the line's speed takes, and that rate goes into the first 1/256 of
+the lap it starts in. Entries without a rate take the one before's, and
+the times add up from the line. `docs/formats/race.md` has every step.
+
+### The checks
+
+`racecore_check.py` runs everything above as shipped in RetailEmu, with
+retail's TrackPathCoordinate constructors and destructor,
+ComparePercentDistances, GetPosition and bScaleAdd under it.
+`tools/src/racecore_test.c` runs `racecore.c` with `race.c`,
+`trackroute.c`, `trackpath.c` and `bmem.c` over the same script. Only
+UpdatePosition, the marker lookup, delete and the WorldObject destructor
+are stubbed. UpdatePosition answers from a hash of the position, either
+anywhere in 2^-7 .. 2^9 or in [0, 1) as a real track's would be. The
+Race and the table are filled with 0xa5 before each build, so a field
+left alone shows. Before the run, the checker compiles `racecore.h` with
+devkitARM and asserts Race's and the table's layout.
+
+9 scenarios, 6097 ops, 18698 lines, 0 differ, from the first run on. The
+first run's routes rarely had a valid line for the class, so most tables
+were the default. The generator now favours valid lines and longer
+routes, and 16 of 36 tables carry real rates, 3737 entries. Of 161
+mutations, 158 are caught. One of them, a constructor that leaves
+pCurrentRace NULL, crashes the harness, since the table's lap lookups
+go through pCurrentRace. The 3
+equivalent ones are stores written again before they can be read.
+
+`docs/formats/race.md` is new. CONTINUE.md marks 8c done and makes 8d
+next, with RacingCar::Init and UpdateLapCounts read from the listing.
+
+The whole chain in CONTINUE.md, racecore_check included, passes: 83 commands, 0 failed, in 1007 s.
+`build_cia.ps1` builds the CIA, and check_3dsx passes. Nothing in the
+game builds a Race yet, so there is nothing new to see on Azahar.
+
+### Next
+
+8d: Race::Init (`0x00147960`), AddRacingCars and AddRacingCar,
+RacingCar::Init, UpdateLapCounts and CheckBoundaryCrossing,
+SortRacingCarsByLeadership, SetRaceStage and FakeStartlineCrossing, and
+Timer::Round. CONTINUE.md, step 8, has what Init, RacingCar::Init and
+UpdateLapCounts do. Then 8e (RaceCoordinator::InitForRace, ChangeState
+and GetDriverInfoByDriverNumber) and the flow into a race.

@@ -1,15 +1,14 @@
-// race -- the corner of Race.obj and RaceParameters that ported code reads
-// before either is ported.
+// race -- Race, RacingCar and the corner of RaceParameters that ported code
+// reads.
 //
-// Race is 1716 bytes (.mdebug type#1645) and RaceParameters 768
-// (type#3457); both are task 26's. PhysicsCar::Move reads one word of
+// Race is 1716 bytes (.mdebug type#1645, the same in the demo and retail)
+// and RaceParameters 768 (type#3457). PhysicsCar::Move reads one word of
 // each -- the race's stage through pCurrentRace, and DamageEnabled through
 // BodyDamage::GetVisibleTotalDamage -- RealDriver reads BeACop, the AI's
 // route search reads TrackDirection, Car's catchup reads Boost and
-// PleaseResetMeLater BeACop and nMaxCops, so this declares those six, the
-// two enums, RacingCar, and nothing else. Race
-// stays incomplete: nothing in the port allocates one yet, and a partial
-// layout would invite something to.
+// PleaseResetMeLater BeACop and nMaxCops. RaceParameters is declared a
+// field at a time, as each is needed. Race's methods are racecore.c's;
+// this file keeps the two accessors everything else uses.
 //
 // RaceCoordinator (144 bytes, type#4165) is task 26's as well: the state
 // machine above the race, from the flyby to the replays and the demos.
@@ -22,6 +21,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "bvector.h"
 #include "timer.h"
 
 // eRaceStage, from the .mdebug enum (the same in every unit that has it).
@@ -34,8 +34,10 @@ typedef int32_t eRaceStage;
 
 typedef struct Race Race;
 
-// gp-22776, 0x003232f8. Move dereferences it without a NULL test, twice
-// per sub-step, so a car must not be moved before a race exists.
+// Retail's gp-22272 (0x003301f0; the demo's 0x003232f8). Race's constructor
+// sets it and the destructor clears it. Move dereferences it without a
+// NULL test, twice per sub-step, so a car must not be moved before a race
+// exists.
 extern Race *pCurrentRace;
 
 // Race::GetRaceStage, inlined at every call site as `lw v0,0(v1)`:
@@ -113,6 +115,14 @@ extern int32_t RaceParametersNFSRaceMode;
 extern int32_t RaceParametersAIDemoMode;
 extern int32_t RaceParametersReplayDemoMode;
 
+// TheRaceParameters.Point2Point (+40) and .NumLapsInRace (+44), retail's
+// 0x0031a8c0 and 0x0031a8c4. Race's constructor takes its lap count from
+// the second, and makes it 1 when both are set; FigureOutBoundaries adds
+// a finish line apart from the start only on a point-to-point race.
+// InitWithDefaults starts them at 0 and 2.
+extern int32_t RaceParametersPoint2Point;
+extern int32_t RaceParametersNumLapsInRace;
+
 // ------------------------------------------------------------- RacingCar
 
 struct Car;
@@ -172,9 +182,72 @@ typedef char racingcar_layout_check[
                 / sizeof(void *)) * sizeof(void *))
     ? 1 : -1];
 
-// 0x00146ad8, eight bytes: `jr ra; lw v0,28(a1)`. The race is not read,
-// so this needs no Race layout; the car's own pointer is the answer.
+// 0x00146ad8, eight bytes: `jr ra; lw v0,28(a1)`. The race is not read;
+// the car's own pointer is the answer.
 struct RacingCar *race_get_racing_car(Race *r, struct Car *c);
+
+// ------------------------------------------------------------------ Race
+
+struct GhostCarData;
+struct WorldObject;
+struct TimeAroundTrackTable;
+
+#define RACE_MAX_RACING_CARS 8
+#define RACE_MAX_BOUNDARIES  5
+
+// 1716 bytes, type#1645. StartGoTimeFrames and StartCountdownTimeFrames
+// are type 30, `long`. The boundaries are where a lap is timed from: the
+// start line, up to three splits and, on a point-to-point race, a finish
+// line of its own, each as a percentage of the way around the track
+// (FigureOutBoundaries). The two ghost car pairs are never set in retail,
+// whose SetupGhostCars is empty; the destructor still frees them.
+struct Race {
+    eRaceStage        RaceStage;                        //    0
+    int32_t           StartGoTimeFrames;                //    4
+    int32_t           StartCountdownTimeFrames;         //    8
+    Timer             StartTime;                        //   12
+    Timer             RaceTime;                         //   16
+    Timer             BestLapTime;                      //   20
+    int32_t           NumRacingCars;                    //   24
+    int32_t           NumRacingCarsFinished;            //   28
+    int32_t           DetectedOneCarRemaining;          //   32  bool
+    struct RacingCar  RacingCarTable[RACE_MAX_RACING_CARS]; //   36
+    struct RacingCar *pRacingCars[RACE_MAX_RACING_CARS];    // 1572
+    int32_t           NumLapsInRace;                    // 1604
+    int32_t           ForceRaceFinishPosition;          // 1608
+    int32_t           ForceRaceFinishPlayerNum;         // 1612
+    int16_t           NumBoundaries;                    // 1616
+    int8_t            StartLineBoundaryNumber;          // 1618
+    int8_t            FinishLineBoundaryNumber;         // 1619
+    float             BoundaryDistances[RACE_MAX_BOUNDARIES]; // 1620
+    bVector2          StartLinePosition;                // 1640
+    bVector2          FinishLinePosition;               // 1648
+    struct GhostCarData *pReplayingGhostCarData;        // 1656
+    struct WorldObject  *pReplayingGhostCarWorldObject; // 1660
+    struct Car          *pCapturingGhostCar;            // 1664
+    struct GhostCarData *pCapturingGhostCarData;        // 1668
+    char              GhostCarDataFilename[40];         // 1672
+    struct TimeAroundTrackTable *pTimeAroundTrackTable; // 1712
+};                                                      // 1716
+
+// The image's offsets hold on a 32-bit target. A 64-bit host widens every
+// pointer and RacingCar with them, and nothing reads a Race as bytes.
+#if UINTPTR_MAX == 0xFFFFFFFFu
+typedef char race_layout_check[
+    (offsetof(struct Race, RacingCarTable) == 36
+     && offsetof(struct Race, pRacingCars) == 1572
+     && offsetof(struct Race, NumLapsInRace) == 1604
+     && offsetof(struct Race, NumBoundaries) == 1616
+     && offsetof(struct Race, StartLineBoundaryNumber) == 1618
+     && offsetof(struct Race, FinishLineBoundaryNumber) == 1619
+     && offsetof(struct Race, BoundaryDistances) == 1620
+     && offsetof(struct Race, StartLinePosition) == 1640
+     && offsetof(struct Race, FinishLinePosition) == 1648
+     && offsetof(struct Race, pReplayingGhostCarData) == 1656
+     && offsetof(struct Race, GhostCarDataFilename) == 1672
+     && offsetof(struct Race, pTimeAroundTrackTable) == 1712
+     && sizeof(struct Race) == 1716) ? 1 : -1];
+#endif
 
 // ------------------------------------------------------- RaceCoordinator
 
