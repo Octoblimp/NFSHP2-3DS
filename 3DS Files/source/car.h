@@ -115,17 +115,30 @@ typedef int32_t DriverType;
 
 typedef struct CharacterInfo CharacterInfo;
 
-// 10DriverInfo, 20 bytes. Car holds one by pointer and reads DriverType out
-// of it; the rest belongs to the front end.
+// 10DriverInfo, the demo's 20 bytes and retail's 24. Car holds one by
+// pointer and reads DriverType out of it; the rest belongs to the front end.
+//
+// Retail put a byte in front of the record, so its fields are one byte on
+// up to StartingPosition (4) and four bytes on from TheDriverType (8). The
+// port keeps the demo's offsets, which the demo checkers read, and puts
+// retail's byte at the end, as car.h does Car's new fields.
+//
+// EliminatedRank is that byte: 0 for a driver still in the event, else the
+// rank a knockout round put the driver out at. Retail's DriverInfo
+// constructor (0x00188610) zeroes it, and only RaceParameters' new
+// 0x001edbc8 sets it, from EventKoState::GetRank as SetupCarsForRace builds
+// the next round. RaceCoordinator::InitForRace and InitCars skip a driver
+// whose rank is above 0.
 typedef struct DriverInfo {
-    int8_t         UniqueDriverNumber;  // 0
-    int8_t         CharacterNumber;     // 1
-    int8_t         SkillLevel;          // 2
-    int8_t         StartingPosition;    // 3
-    DriverType     TheDriverType;       // 4
-    RideInfo       CurrentRideInfo;     // 8
-    CharacterInfo *pCharacterInfo;      // 16
-} DriverInfo;                           // 20
+    int8_t         UniqueDriverNumber;  // 0   retail 1
+    int8_t         CharacterNumber;     // 1   retail 2
+    int8_t         SkillLevel;          // 2   retail 3
+    int8_t         StartingPosition;    // 3   retail 4
+    DriverType     TheDriverType;       // 4   retail 8
+    RideInfo       CurrentRideInfo;     // 8   retail 12
+    CharacterInfo *pCharacterInfo;      // 16  retail 20
+    int8_t         EliminatedRank;      // 20  retail 0
+} DriverInfo;                           // 24
 
 // 25OverrideRenderingPosition, 96 bytes, embedded in Car at 1184. A place
 // to put the car for the camera that is not where the simulation has it --
@@ -425,7 +438,7 @@ typedef char car_layout_check[
      && sizeof(CarState) == 1024 + CARSTATE_SLACK
      && sizeof(TopologyCoordinate) == TOPOLOGY_SIZEOF
      && sizeof(CarNode) == 2 * sizeof(void *)
-     && sizeof(DriverInfo) == 20 + CAR_SLACK
+     && sizeof(DriverInfo) == 24 + 2 * CAR_SLACK
      && sizeof(RideInfo) == 8) ? 1 : -1];
 #endif
 

@@ -47,10 +47,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Seventy-seven cross-checkers pass, plus the table generators:
+Seventy-eight cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -73,6 +73,7 @@ shake_check         4114 ops,    10604 lines, 0 differ   (95 caught, 3 equivalen
 drivecam_check     45598 ops,   105702 lines, 0 differ   (474 caught, 19 equivalent; retail's image)
 playercam_check     5277 ops,   162056 lines, 0 differ   (109/109 mutations caught; retail's image)
 player_check        3659 ops,   501513 lines, 0 differ   (287/287 mutations caught; retail's image)
+raceinit_check      3280 ops,    13317 lines, 0 differ   (123/123 mutations caught; retail's image)
 trackroute_check   11 scenarios,  1353 lines, 0 differ   (57 caught, 1 equivalent)
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
 engine_check        8 scenarios,   414 lines, 0 differ   (56 caught, 2 equivalent)
@@ -375,8 +376,8 @@ and so replaced every boot.
      unset. `CarUsageType`'s values are in `cartypeinfo.h`.
    - The sound, CarDamage, the render info and the event manager are
      seams. Those that only add a part are skipped when unset. Those that
-     can only be reached through a part abort. Nothing calls the
-     constructor yet: step 8's InitCars will.
+     can only be reached through a part abort. Step 8b's AddRacingCar
+     calls the constructor.
    - `carinit_check` runs the retail image in RetailEmu, with the
      callees stubbed. It dumps the whole car at retail's offsets after
      every call, so every store is checked, and so is its order.
@@ -666,8 +667,9 @@ and so replaced every boot.
      (`0x002598d8`). Without it, bInitializeBoundingBox's empty box is zero.
    - Retail's box starts each model's box on uninitialised stack. The
      port starts it empty.
-   - `gCarInitRenderInfoFn` is still NULL. Step 8's InitCars sets it
-     together with the other carinit seams.
+   - `main.c` sets `gCarInitRenderInfoFn` and `gCarRenderInfoDestroyFn`
+     since step 8b. The sound, CarDamage and the event manager's seams
+     stay NULL.
 
    **CarRenderInfo::Render is ported** (HANDOFF.md, Session 31,
    continued). This is step 6's third slice. `carrender.c` has Render
@@ -963,14 +965,43 @@ and so replaced every boot.
      of them by crashing the harness. Before the run, it compiles
      player.h with devkitARM and asserts all 158 Player fields and 14
      overlay fields at retail's offsets.
-   - Nothing builds a Player yet. 8b's InitForRace does.
+   - Nothing builds a Player yet. 8d's InitForRace does.
 
-   **Next is 8b: InitCars and InitPlayers**, with AddRacingCar and
-   CalculateRacerPositions under them. After that:
-   - 8c: Race's constructor (`0x001475e8`, 244 bytes), Race::Init
-     (`0x00147960`) and SetupGhostCars (`0x001485e0`)
-   - 8d: RaceCoordinator::InitForRace itself and ChangeState
-     (`0x00149520`)
+   **8b, InitCars and InitPlayers, is done** (HANDOFF.md, Session 31,
+   continued: InitCars and InitPlayers (step 8b)).
+   `docs/formats/raceinit.md` has the write-up.
+   - `raceinit.c` and `raceinit.h` have InitCars (`0x0014a2c8`),
+     InitPlayers (`0x00149cb8`), AddRacingCar (`0x00149f10`) and
+     CalculateRacerPositions (`0x0014a020`). `race.c` has the driver
+     array and GetDriverInfo (`0x001edb28`).
+   - DriverInfo is 24 bytes, as retail's is. It gains retail's rank
+     byte, EliminatedRank, at the end. Above 0, InitCars skips the
+     driver.
+   - These are seams: AddCopCarToRace (`0x00227d78`), Chopper's
+     constructor (`0x001e7a90`) and the egg table. With the cop seam
+     NULL, each cop driver still counts towards the helicopter and the
+     Be A Cop call.
+   - The heights are not what the first 8b notes said. One
+     TopologyCoordinate serves every slot, and each probe starts from
+     the height of the slot before, 0 for the first.
+   - The port differs from retail in three places, none of them seen:
+     - With no override, the AI racers' start route is zeroed. Retail
+       leaves it unset.
+     - The slots' fourth lanes are zeroed.
+     - An override that names a NULL route gives a NULL point, not 1064.
+   - `main.c` sets gCarInitRenderInfoFn and gCarRenderInfoDestroyFn, and
+     makes the two render-info slot pools.
+   - `raceinit_check` runs retail's code in RetailEmu: 32 scenarios,
+     3280 ops, 13317 lines, 0 differ. All 123 mutations are caught,
+     five of them by crashing the harness. Before the run, it compiles
+     raceinit.h with devkitARM and asserts DriverInfo's layout.
+   - Nothing calls InitCars yet. 8d's InitForRace does.
+
+   **Next is 8c: Race's constructor** (`0x001475e8`, 244 bytes),
+   Race::Init (`0x00147960`) and SetupGhostCars (`0x001485e0`). After
+   that:
+   - 8d: RaceCoordinator::InitForRace itself, ChangeState
+     (`0x00149520`) and GetDriverInfoByDriverNumber (`0x001edb40`)
    - then the flow into a race
 
    All of the following was read with `retaildis.py` on 2026-10-01.
@@ -1003,86 +1034,8 @@ and so replaced every boot.
         (`0x001cd240`), collision_sound::Reset (`0x001e51c8`) and the
         speech manager's FlushQueue. Then gp-22216 = this, and a tail
         call to ChangeState(state).
-   - **InitPlayers** (`0x00149cb8`, 188 bytes). For each player by
-     index:
-     - With AIDemoMode, the car is World's CarTable[AICarPos +
-       PlayerNumber], unchecked.
-     - Otherwise it is World::GetCarByNumber (`0x0014d508`,
-       `world_get_car_by_number`), skipped when NULL.
-
-     Then Player::InitForRace on that car. pCurrentWorld is gp-22120 in
-     retail; world.h's gp-22624 is the demo's.
-   - **Retail's DriverInfo is 24 bytes.** GetDriverInfo (`0x001edb28`)
-     indexes the array at RaceParameters+772 by 24, with the count at
-     +776 (race.h's NumDriverInfo comment has the demo's +756). Its
-     fields:
-     - byte 1 is the number GetDriverInfoByDriverNumber matches
-     - byte 4 is StartingPosition
-     - word 8 is TheDriverType
-     - byte 0 is new: above 0, InitForRace and InitCars both skip the
-       driver
-
-     The port's DriverInfo is still the demo's 20 bytes. Name byte 0 from
-     whoever writes it (the frontend's race setup) before a record is
-     read in place.
-   - **InitCars** (`0x0014a2c8`, 808 bytes), in order:
-     1. CalculateRacerPositions(8, locs) (`0x0014a020`) into eight
-        16-byte RacerStartLocations on the stack.
-     2. **The racers.** For each position 1-8, it takes the first driver
-        whose byte 0 is 0 or below and whose StartingPosition is that
-        position. With TheDriverType 1 (player) or 2 (AI racer), it calls
-        AddRacingCar(info, &locs[position - 1], type). Any other type
-        adds nothing, and so does a position no driver has.
-     3. BuildCarTable (`world_build_car_table`).
-     4. **The AI racers' routes.** It looks up GetTrackInfo(word
-        0)->word 124. If that is 0 or above, a two-word
-        NearestRoutePointInfo is built from the table at `0x00314438`
-        (+16 + 4n), and its second word is the first plus 1064. Then, for
-        each car from CarTable[AICarPos] up to CopCarPos, it takes the
-        controller at car +40:
-        - If the first car's info isn't IsValid (`0x001cd408`), it makes
-          three vtable calls on the controller: the slot at +76 with no
-          argument, and the slots at +52 and +60 with argument 1, which
-          give the info's two words.
-        - Otherwise it calls the slot at +44 with the two words.
-     5. **Traffic and cops**, over every driver:
-        - TheDriverType 3 goes to AddTrafficCar
-          (`world_add_traffic_car`).
-        - Types 4 and 5 go to AddCopCarToRace(info, 0) (`0x00227d78`),
-          counted.
-
-        Then BuildCarTable again.
-     6. **The helicopter** is built with bMalloc(976) and Chopper
-        (`0x001e7a90`) into World.Helicopter when there were cops, or
-        when the word at +328 of `*(0x0031d7f4)` is set.
-     7. With cops and BeACop, it calls AddCopCarToRace(NULL, 1).
-
-     The port's InitCars should also set `gCarInitRenderInfoFn` and
-     carinit's other seams.
-   - **AddRacingCar** (`0x00149f10`) runs in this order:
-     1. Builds a TrackPathCoordinate on the location (`0x002086f0`).
-     2. Takes the heading from bATan of its words 24 and 28, as an
-        unsigned short.
-     3. Builds Car(bMalloc(2208), info, location, heading) and calls
-        SetControlMode(type).
-     4. Calls SetMovementMode: with the word at gp-22960 for an AI
-        racer (type 2), and 1 otherwise.
-     5. Appends the car to World's CarList.
-     6. An AI racer also goes into AICarList through a bPNode
-        (`0x00250680`, `Malloc`), with the car at +8.
-     7. Destroys the TrackPathCoordinate.
-   - **CalculateRacerPositions(n, locs)** works in three steps:
-     1. **The markers.** It hashes one of two marker names, at
-        `0x002af898` for TrackDirection 0 (RaceParameters+12) and at
-        `0x002af8b0` otherwise. With at least n of those markers, the
-        location of each i is the marker whose word 12 is i, x and y from
-        its +16 and +20. One i with no marker spoils the lot.
-     2. **The fallback**, without the markers. A TrackPathCoordinate
-        (`0x002086b8`) steps along the path with UpdatePosition(d, 0) for
-        d = 10, 20 .. 100. Then location i is the coordinate after
-        UpdatePosition(100 + 17 * (i / 2), 3 for even i or -3 for odd).
-     3. **The heights.** Each z is GetElevation through a fresh
-        TopologyCoordinate, started from 0.
+   - InitPlayers, retail's DriverInfo, InitCars, AddRacingCar and
+     CalculateRacerPositions are in `docs/formats/raceinit.md` now.
    - **For 8c**, Race's constructor (`0x001475e8`) works in this order:
      1. It zeroes the Timers at 12, 16 and 20, and constructs eight
         RacingCars (`0x001493b8`) at 36 + 192i.
@@ -1113,8 +1066,8 @@ and so replaced every boot.
    the demo's is 5380). The demo's wall code is dead in retail, and
    Update calls two new helpers in its place (see 7b above). All of it is
    ported, and so is Player's ChangeCameraMover (`0x00176ae8`, 2372),
-   which picks the mover for each view (7d). Step 8's InitCars sets
-   `gCarInitRenderInfoFn`. The 3DS build gives
+   which picks the mover for each view (7d). `main.c` sets
+   `gCarInitRenderInfoFn` since 8b. The 3DS build gives
    Render's seams (the strips, the flares and the driver) their
    renderers, and the game flow calls RenderCars.
 
@@ -1125,8 +1078,17 @@ and so replaced every boot.
      `AvailableSkins[bRandom(n)]` through `0x0025a488`, on the default
      seed at gp-14472 (`docs/formats/car-type-info.md`).
    - Retail's DriverInfo keeps TheDriverType at +8, and the port keeps it
-     at +4. Everything reads it by name, so nothing is owed until a record
-     is read in place.
+     at +4. Since 8b the port's record is 24 bytes, as retail's is, but
+     retail's rank byte 0 is the port's byte 20, and the next three bytes
+     are one lower (`docs/formats/raceinit.md`). Everything reads them by
+     name, so nothing is owed until a record is read in place.
+   - Retail's Car::GetRoute and GetRoutePoint (`0x001332a8`,
+     `0x001332d8`) take no argument. The controller slots they call take
+     a bool, and it gets whatever the caller left in a1. The port's
+     `car_get_route` passes none. AICarController's versions read it:
+     with it set and the driving location clear, they run FindWhereIAm
+     first. When task 26 ports AICarController, check what each caller
+     of `car_get_route` leaves in a1.
    - The Car's CopLights is a word in retail and an `int8_t` in the port.
    - The hull shadow casts at most 64 points (`HULL_MAX_POINTS`), and
      retail has no bound. Check that bound against the cars' collision

@@ -75,11 +75,26 @@ extern eTrackDirection RaceParametersTrackDirection;
 // before reading anything else when it is 0.
 extern int32_t RaceParametersBoost;
 
-// TheRaceParameters.NumDriverInfo, 0x00312814 (RaceParameters+756). The
-// race's driver count; InitWithDefaults starts it at 0. InitPhysics reads
-// it in the image (`lw s0,10260(v0)`); the port's takes it as an argument,
-// and EndGameFlowLoadingTrackSpecific passes this.
+// TheRaceParameters.NumDriverInfo, retail's 0x0031aba0 (RaceParameters+776;
+// the demo's +756 at 0x00312814). The race's driver count; InitWithDefaults
+// starts it at 0. InitPhysics reads it in the image (`lw s0,10260(v0)`);
+// the port's takes it as an argument, and EndGameFlowLoadingTrackSpecific
+// passes this.
 extern int32_t RaceParametersNumDriverInfo;
+
+// TheRaceParameters.TrackNumber, retail's 0x0031a898 (RaceParameters+0):
+// the track the race is on, as GetTrackInfo numbers them. InitCars looks
+// up its TrackInfo.
+extern int32_t RaceParametersTrackNumber;
+
+// TheRaceParameters' DriverInfos, retail's 0x0031ab9c (RaceParameters+772):
+// the race's drivers, NumDriverInfo of them, 24 bytes apart in retail.
+// AddDriverInfo (0x001eda40) fills it as the frontend sets the race up;
+// nothing in the port does yet, so it is NULL and the count 0.
+extern struct DriverInfo *RaceParametersDriverInfo;
+
+// RaceParameters::GetDriverInfo(int), 0x001edb28: driver `i`, unchecked.
+struct DriverInfo *race_parameters_get_driver_info(int32_t i);
 
 // TheRaceParameters.NumPlayerCars (+48) and .NFSRaceMode (+596), at
 // retail's 0x0031a8c8 and 0x0031aaec (RaceParameters is 0x0031a898 there).

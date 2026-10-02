@@ -10562,3 +10562,91 @@ AddRacingCar (`0x00149f10`) and CalculateRacerPositions (`0x0014a020`).
 CONTINUE.md, step 8, has what each does. Then 8c (Race's constructor,
 Race::Init and SetupGhostCars) and 8d (RaceCoordinator::InitForRace and
 ChangeState).
+
+## Session 31, continued (2026-10-01) -- InitCars and InitPlayers (step 8b)
+
+This is 8b, the second slice of step 8. It ports the code that puts a
+race's cars on the grid and hands each Player its car.
+
+### The port
+
+`raceinit.c` and `raceinit.h` are new:
+- RaceCoordinator::InitCars (`0x0014a2c8`, 808 bytes)
+- RaceCoordinator::InitPlayers (`0x00149cb8`, 188 bytes)
+- AddRacingCar (`0x00149f10`, 272 bytes)
+- CalculateRacerPositions (`0x0014a020`, 680 bytes)
+
+CalculateRacerPositions takes the grid from the track's starting markers
+when every slot has one. Otherwise it steps the grid out along the track
+path: pairs 17 apart from 100 on, 3 to either side. The heights come from
+one TopologyCoordinate for every slot, and each probe starts from the
+height of the slot before. The 8b notes in CONTINUE.md had a fresh
+coordinate per slot, started from 0. The transcript showed otherwise, and
+the notes are corrected.
+
+AddRacingCar builds the car facing along the path, as far around it as
+the path says, and sets its control mode. An AI racer starts in
+nDefaultMovementMode (gp-22960, 4) and anything else in PHYSICS_MOVEMENT.
+The car goes on the end of CarList, and an AI racer on AICarList too.
+
+InitCars puts the first driver still in the event at each of the eight
+positions and builds the car table. It gives the AI racers their first
+route: the track's override, or else where the first AI racer finds
+itself. Then come the traffic, the cops, the helicopter and the Be A Cop
+call. AddCopCarToRace, Chopper's constructor and the egg table are seams.
+With the cop seam NULL, each cop driver still counts towards the
+helicopter and the Be A Cop call. InitPlayers hands each Player its car
+by number, or from the car table under AIDemoMode.
+
+DriverInfo is 24 bytes now, as retail's is. Retail put a rank byte in
+front of the record; the port keeps the demo's offsets and puts it at 20,
+as EliminatedRank. `race.c` and `race.h` gain TrackNumber, the driver
+array and GetDriverInfo (`0x001edb28`). `car_check` expects the new size.
+
+`main.c` sets gCarInitRenderInfoFn and gCarRenderInfoDestroyFn, and makes
+the two render-info slot pools, so a car InitCars builds gets its render
+info.
+
+The port differs from retail in three places, none of them seen, each
+written up in raceinit.md:
+- With no override, the AI racers' start route is zeroed. Retail leaves
+  it unset, and IsValid reads the stack.
+- The slots' fourth lanes are zeroed.
+- An override that names a NULL route gives a NULL point. Retail's is
+  1064.
+
+### The checks
+
+`raceinit_check.py` runs retail's four functions in RetailEmu, and
+`tools/src/raceinit_test.c` runs `raceinit.c`, `race.c`, `airoute.c` and
+`vtable.c`, over one op script. Every callee is a stub on both sides. Each
+answer is a hash of the call's arguments, so a wrong argument shows in
+what follows. After each call the harness prints World's two lists, its
+car table and helicopter, and the nine slots. The controller's fake
+vtable gives SetCurrentRoute and GetCurrentRoutePoint a this-delta of 4,
+so a call that skips the adjustment shows. Before the run, the checker
+compiles `raceinit.h` with devkitARM and asserts DriverInfo's layout.
+
+32 scenarios, 3280 ops, 13317 lines, 0 differ on the first full run. All
+123 mutations are caught, and none are equivalent. Five crash the
+harness: AddRacingCar with a NULL position, and each of the four list
+links left out, which leave a list the harness cannot walk.
+
+Retail's Car::GetRoute and GetRoutePoint take no argument, but the
+controller slots they call take a bool, which gets the caller's a1.
+CONTINUE.md has it as a follow-up for task 26's AICarController.
+
+`docs/formats/raceinit.md` is new. CONTINUE.md marks 8b done and makes 8c
+next.
+
+The whole chain in CONTINUE.md, raceinit_check included, passes: 82
+commands, 0 failed, 984 s. `build_cia.ps1` builds the CIA, and
+check_3dsx passes. Nothing in the game calls InitCars yet, so there is
+nothing new to see on Azahar.
+
+### Next
+
+8c: Race's constructor (`0x001475e8`), Race::Init (`0x00147960`) and
+SetupGhostCars (`0x001485e0`). CONTINUE.md, step 8, has what the
+constructor and Init do. Then 8d (RaceCoordinator::InitForRace,
+ChangeState and GetDriverInfoByDriverNumber) and the flow into a race.

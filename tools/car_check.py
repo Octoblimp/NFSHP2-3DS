@@ -368,7 +368,8 @@ def model():
     emit("  %-28s %d" % ("sizeof TopologyCoordinate", at(704, 162)))
     emit("  %-28s %d" % ("sizeof TrackPathCoordinate", at(40, 4)))
     emit("  %-28s %d" % ("sizeof OverrideRenderingPos", 96))
-    emit("  %-28s %d" % ("sizeof DriverInfo", at(20, 1)))
+    # 24: the demo's 20 and retail's EliminatedRank after it (car.h).
+    emit("  %-28s %d" % ("sizeof DriverInfo", at(24, 2)))
     emit("  %-28s %d" % ("sizeof RideInfo", 8))
 
     for name, ps2, k in (
@@ -1741,7 +1742,7 @@ MUTATIONS = [
      "    uint32_t _gap;              // 64" + NL +
      "    bVector3 GeometryPosition;  // 68"),
     ("driverinfo-type-at-8", CH,
-     "    DriverType     TheDriverType;       // 4",
+     "    DriverType     TheDriverType;       // 4   retail 8",
      "    uint32_t       _gap;                // 4" + NL +
      "    DriverType     TheDriverType;       // 8"),
     ("topology-table-159", TH,

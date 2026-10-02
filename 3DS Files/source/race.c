@@ -10,12 +10,19 @@ int32_t RaceParametersBeACop;           // retail 0x0031ab0c
 int32_t RaceParametersMaxCops;          // 0x0031277c
 eTrackDirection RaceParametersTrackDirection; // 0x0031252c
 int32_t RaceParametersBoost;            // 0x00312804
-int32_t RaceParametersNumDriverInfo;    // 0x00312814
+int32_t RaceParametersNumDriverInfo;    // retail 0x0031aba0
+int32_t RaceParametersTrackNumber;      // retail 0x0031a898
+DriverInfo *RaceParametersDriverInfo;   // retail 0x0031ab9c
 int32_t RaceParametersNumPlayerCars = 1;  // retail 0x0031a8c8
 int32_t RaceParametersNFSRaceMode   = 1;  // retail 0x0031aaec
 int32_t RaceParametersAIDemoMode;       // retail 0x0031a8b0
 int32_t RaceParametersReplayDemoMode;   // retail 0x0031a8b4
 RaceCoordinator *pRaceCoordinator;      // 0x00323330
+
+DriverInfo *race_parameters_get_driver_info(int32_t i)
+{
+    return &RaceParametersDriverInfo[i];
+}
 
 eRaceStage race_get_race_stage(const Race *r)
 {

@@ -51,7 +51,9 @@
 #include "bsetup.h"
 #include "carcontroller.h"
 #include "cardriver.h"
+#include "carinit.h"
 #include "carmodes.h"
+#include "carrenderinfo.h"
 #include "carstate.h"
 #include "collision.h"
 #include "collisionbody.h"
@@ -2099,6 +2101,16 @@ int main(int argc, char** argv)
     gEModelInitFn    = emodel_init;
     gEModelDestroyFn = emodel_delete;
     eInitViews();
+
+    // Car's constructor builds the car's render info through
+    // Car::InitRenderInfo, and its destructor deletes it -- carrenderinfo.c
+    // since step 6, reached from step 8b's InitCars. The emitter positions
+    // and the flares come out of two pools: retail makes the first in
+    // InitCarEffects and the second in eInitSlotPools, and the port makes
+    // both here.
+    carrenderinfo_init_slot_pools();
+    gCarInitRenderInfoFn    = car_init_render_info;
+    gCarRenderInfoDestroyFn = carrenderinfo_delete;
 
     // The two calls Suspension makes into Wheel go through pointers, left
     // NULL until something says Wheel is linked -- which, in the game,
