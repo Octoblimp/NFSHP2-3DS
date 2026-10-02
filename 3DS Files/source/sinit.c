@@ -4,9 +4,9 @@
 // and the _GLOBAL_$I$ it stands for. sinit_check reads those comments, so
 // their shape is fixed.
 //
-// None of the nineteen reads anything another one writes -- eighteen fill
+// None of the twenty-one reads anything another one writes -- twenty fill
 // Tables, Graphs, cameras, list heads, hashes, shakers and constants, and
-// the nineteenth builds the slot-pool manager -- so the order is kept
+// the last builds the slot-pool manager -- so the order is kept
 // because it is the image's, not because a different one would be
 // observed. The manager comes last for that reason too: it is entry 103,
 // long after the physics tables. The joystick's, [23], is named for EventNodeSlotPool but never
@@ -27,7 +27,9 @@
 #include "joyevent.h"
 #include "mellowmover.h"
 #include "physicscar.h"
+#include "queuedfile.h"
 #include "realdriver.h"
+#include "resource.h"
 #include "rigidbody.h"
 #include "scenery.h"
 #include "shake.h"
@@ -48,8 +50,10 @@ void sinit_run(void)
     joyevent_static_init();     // [23]  0x00152588 _GLOBAL_$I$EventNodeSlotPool
     shake_static_init();        // [24]  0x001537b8 _GLOBAL_$I$bShakeTest
     carinfo_static_init();      // [35]  0x00181060 _GLOBAL_$I$FindCarLanguageInfo__F7CarType
+    resource_static_init();     // [39]  0x00190040 _GLOBAL_$I$LoaderNull__FP6bChunk
     rigidbody_static_init();    // [41]  0x00193d20 _GLOBAL_$I$__9RigidBodyP13RigidBodyInfo
     wheel_static_init();        // [44]  0x0019b558 _GLOBAL_$I$SliderPositionsX
+    queuedfile_static_init();   // [52]  0x001a3520 _GLOBAL_$I$QueuedFileSlotPool
     aerodynamics_static_init(); // [54]  0x001a4de8 _GLOBAL_$I$FrontDownforceLocation
     carloader_static_init();    // [56]  0x001a76a8 _GLOBAL_$I$TheCarLoader
     terraintype_static_init();  // [66]  0x001ca120 _GLOBAL_$I$TerrainTypeInfoTable

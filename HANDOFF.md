@@ -11246,3 +11246,121 @@ passes.
 race goes through it. Then 8k, the track-loading game flow states, and
 8l, the coordinator and the race. CONTINUE.md has what the disassembly
 showed of each.
+
+## Session 31, continued (2026-10-02) -- the resource system (step 8j)
+
+The previous context ended with the port files written and none of them
+built. This one wrote the checker and the harness, brought them to 0
+differ, ran the mutations, wired `main.c` and committed.
+
+### The port
+
+`docs/formats/resource-file.md` has the decode. Three pairs of files:
+
+- `resource.c` and `resource.h` are retail's ResourceFile, `0x00199320`
+  to `0x00199a6c`, the same code as the demo's.
+- `queuedfile.c` and `queuedfile.h` are retail's QueuedFile,
+  `0x001ad6d8` to `0x001add40`, also the demo's.
+- `bfile.c` and `bfile.h` are port-only: bWare's seven file calls over
+  stdio and the SD card's extracted tree.
+
+**LoadResourceFile** counts the load, makes a 216-byte ResourceFile and
+puts it at the end of the list. The constructor sizes the file, allocates
+a buffer and queues one read of all of it, at priority 5 in one block of
+up to 32 MB. A missing or empty file gets no buffer and no read.
+
+**ServiceResourceLoading** services the queue, then takes the first file
+not yet loaded. Once its read is in, it expands a `COMP` file into a new
+buffer, runs LoadChunks, frees the buffer under FREE_AFTER_LOADING and
+runs PostLoadFixup. Then the count drops and the callback runs. One file
+per call, in the order they were asked for.
+
+**ServiceQueuedFiles** reads one block at a time. Between blocks the file
+waits and the list is sorted by priority again. A missing or short file
+fails, and its callback runs with 1. AbortQueuedFile drops a waiting file
+at once and flags a reading one, which then goes with no callback.
+
+What the port changes:
+
+- `bfile.c` reads at once and runs the callback at the next
+  bServiceFileSystem, so none runs before bReadAsync returns.
+- `lzc.c` stands in for LZDecompress. It checks its bounds and writes the
+  same bytes for a whole block. `lzc.h` builds on the host now.
+- Names are cut at the field (79 and 47 characters), where the image's
+  bStrCpy runs over. The disc's are far shorter.
+- bRemoveCodeineInventory is left out. Only the debugger's channel heard
+  it.
+- `bmem.c`'s bMalloc keeps the pool word's alignment through memalign:
+  0x40 is 128 bytes, 0x20 64, 0x10 32. ResourceFile asks for 0x40, as
+  LoadChunks needs.
+
+Wiring:
+
+- `main.c` runs `init_queued_files` where InitializeEverything's
+  InitQueuedFiles does (after LoadConfig, before eMathInit).
+- The car loader's three resource seams, trackflow's
+  `gFindResourceFileFn`, racecoord's `gFindResourceFileByNameFn` and the
+  texture packs' `gServiceQueuedFilesFn` are the real functions now.
+- ServiceResourceLoading runs after each frontend frame, before the
+  frontend's own bundle callbacks.
+- `trackview_free` used to set the two track seams to NULL after
+  borrowing them. It now puts back what was there.
+- `sinit.c` runs both static constructors: [39] and [52].
+
+The frontend's bundles still come through `main.c`'s addBundle. Nothing
+loads through ResourceFile in the game until 8k.
+
+### The checks
+
+`resource_check` runs all of ResourceFile and QueuedFile as shipped, in
+RetailEmu, together with LZDecompress, bList::Sort, bStrCpy, bStrNCpy and
+bStrCmp. It stubs:
+
+- the file system, over named byte strings, with a set read latency (K);
+- a heap of 128-aligned blocks filled with 0xcd, and the slot pool;
+- LoadChunks and UnloadChunks, which print their bytes' CRC-32;
+- PostLoadFixup, the renderer wait and Joylog;
+- four callbacks: one loads another file and one queues another read,
+  from inside the service.
+
+The files include the disc's own `GLOBAL\PRERACEANIM.LZC` and
+`CARS\PARCELVAN\GEOMETRY.LZC`. The ten scenarios cover:
+
+- boot;
+- raw bundles under every flag;
+- compressed, stored, empty and fake `COMP` files;
+- missing, emptied, vanished and shortened files;
+- the load order, duplicates and chained loads;
+- blocks, priorities, the aborts and the handle wrap;
+- blocks past the end and an abort after a failed open;
+- Joylog replay;
+- hot-chunk entries, the six-argument load, the renames and the static
+  destructors;
+- unloads that wait.
+
+The first runs differed in three places. All three were checker bugs:
+
+- a size stub handed back -1 as 0xffffffff, which `bgez` read as
+  positive;
+- the model passed 32-bit arguments zero-extended, so chunk id 0x80034008
+  never matched. They are sign-extended now, as the EE holds them;
+- the harness took the `BQ` op for a `B` scenario line.
+
+Ten scenarios, 429 ops and 3250 lines give 0 differ. The mutation pass
+breaks the port in 155 ways and catches 153. The two it cannot see are
+equivalent: `lif_guard_done` (only ServiceResourceLoading calls the
+function, for a file not yet loaded) and `dtor_hnum` (the destructor
+frees the record straight after). The first pass missed `srl_zero`
+because the read latency hid it, and a `K 1` scenario catches it now.
+
+The other checkers that link `bmem.c` pass unchanged, all 17 at 0 differ. `sinit_check`
+has 21 calls. On Azahar it boots, plays the movie, walks the frontend and exits
+cleanly, as before.
+
+### Next
+
+8k, the track-loading game flow states. BeginGameFlowLoadingTrackCommon
+(`0x00168db8`) loads `GLOBAL\INGAMEA.BUN` (0 bytes on the disc, so it
+loads as nothing), services until IsResourceLoadingComplete, then loads
+`GLOBAL\INGAMEB.LZC` with flags 9 and Part1 as the callback, and renames
+it `GLOBAL\INGAMEB.BUN`. CONTINUE.md has Part1, Part2 and the rest.

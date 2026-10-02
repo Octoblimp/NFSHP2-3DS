@@ -11,6 +11,13 @@
 // (two bFunkCallASync calls, 0x0023f0fc and 0x0023f118) and then calls
 // bMalloc(size, pool), which is bWare's MemoryPool banks. The 3DS has one
 // heap, so the port's is malloc's and the name and pool reach only a hook.
+// What the pool word says about the block itself is kept: bMalloc(int,
+// int) (0x0023ef98; retail's 0x00257690 differs only in its out-of-memory
+// message) aligns it to 128 bytes for 0x40, else 64 for 0x20, else 32 for
+// 0x10, else 4. Its low three bits pick the bank and 8 its top, which the
+// port has no use for.
+// ResourceFile's 0x40 is what LoadChunks needs: a bundle's chunks keep
+// their file offsets' 16-byte residues in memory.
 //
 // Neither clears the block. A field a constructor does not write holds
 // whatever the heap had there, on the console and here.

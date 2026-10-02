@@ -1154,12 +1154,17 @@ void trackview_free(TrackView* v)
     // track's files back through the two seams. Nothing is chunk-loaded
     // unless the load got as far as `loaded`.
     if (v->loaded) {
+        void* (*find)(int)     = gFindResourceFileFn;
+        void  (*unload)(void*) = gUnloadResourceFileFn;
+
         s_unloading           = v;
         gFindResourceFileFn   = find_track_file;
         gUnloadResourceFileFn = unload_track_file;
         BeginGameFlowUnloadingTrackSpecific();
-        gFindResourceFileFn   = NULL;
-        gUnloadResourceFileFn = NULL;
+        // Back to the resource system's (main.c), which the car loader
+        // and the race coordinator unload through too.
+        gFindResourceFileFn   = find;
+        gUnloadResourceFileFn = unload;
         s_unloading           = NULL;
         v->linkedSolids = 0;
         if (gEModelRenderFn == render_model) {

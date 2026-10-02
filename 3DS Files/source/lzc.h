@@ -1,5 +1,16 @@
 #pragma once
+#ifdef __3DS__
 #include <3ds.h>
+#else
+// The host build, which runs it under tools/resource_check.py: <3ds.h>'s
+// three integer names and nothing else.
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+typedef uint8_t  u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+#endif
 
 // Runtime decoder for bWare's "COMP" compression -- the .LZC container used
 // throughout ZZDATA.BIN. C port of tools/lzdecompress.py, which is itself a

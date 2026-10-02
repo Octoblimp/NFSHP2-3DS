@@ -1223,57 +1223,58 @@ and so replaced every boot.
      114 mutations, 107 are caught and 7 are equivalent.
    - InitCarInfo (`0x00188d08`) is still unported.
 
-   **Next is 8j: the resource system**, retail `0x00199320` ..
-   `0x00199a60`, all the same as the demo's (`0x0018f918` ..). It covers
-   ResourceFile's constructor, AllocateMemory, the destructor,
-   LoadResourceIfFileTransferFinished, FileTransferCallback and GetSize;
-   the two LoadResourceFile; ChangeFilenameForHotChunking;
-   UnloadResourceFile; ServiceResourceLoading; IsResourceLoadingComplete;
-   the two FindResourceFile; and GetResourceFileSize. Every load into a
-   race goes through it, and the CarLoader's and trackflow's seams are
-   its functions. From a first read of the disassembly:
-   - **LoadResourceFile** (`0x00199640`) counts the loads in flight
-     (gp-19944). It bMallocs a 216-byte ResourceFile, constructs it and
-     adds it to the tail of the list at gp-19952.
-   - **The constructor** (`0x00199320`) sets these fields:
+   **8j, the resource system, is done** (HANDOFF.md, Session 31,
+   continued: the resource system (step 8j)).
+   `docs/formats/resource-file.md` has the write-up.
+   - `resource.c` and `resource.h` are retail's ResourceFile, `0x00199320`
+     .. `0x00199a6c`: the constructor, AllocateMemory, the destructor,
+     LoadResourceIfFileTransferFinished, FileTransferCallback, GetSize,
+     both LoadResourceFile, both ChangeFilenameForHotChunking,
+     UnloadResourceFile, ServiceResourceLoading,
+     IsResourceLoadingComplete, both FindResourceFile, GetResourceFileSize
+     and the list's static constructor and destructor.
+   - `queuedfile.c` and `queuedfile.h` are retail's QueuedFile,
+     `0x001ad6d8` .. `0x001add40`: the constructor, BeginRead,
+     ServiceQueuedFiles, FindQueuedFile, Init/CloseQueuedFiles,
+     AddQueuedFile, ChangeQueuedFileParams, AbortQueuedFile,
+     ReadDoneCallback, SortByPriority and the static pair.
+   - `bfile.c` and `bfile.h` are port-only: bOpen, bClose, both
+     bFileSize, bSeek, bReadAsync and bServiceFileSystem over stdio and
+     the SD card. A read lands at once and its callback waits for the next
+     bServiceFileSystem, so none runs before bReadAsync returns.
+   - `bmem.c`'s bMalloc now keeps the pool word's alignment (0x40 is 128
+     bytes, 0x20 64, 0x10 32), through memalign. ResourceFile's buffers
+     are 0x40, as LoadChunks needs.
+   - `lzc.h` builds on the host now (`<3ds.h>` only under `__3DS__`).
+   - Retail's behaviour worth knowing for 8k:
+     - one file loads per ServiceResourceLoading, in request order, and
+       the callback runs after the count drops;
+     - a missing or empty file loads as nothing (`LoadChunks(NULL, 0)`)
+       on the next service; a read that fails loads the heap's leftovers;
+     - UnloadResourceFile services until the file is loaded, which loads
+       every older file first;
+     - GLOBAL\INGAMEA.BUN is 0 bytes on the disc, so 8k's first load is
+       one of those.
+   - Wired in `main.c`:
+     - `init_queued_files` runs where InitializeEverything's
+       InitQueuedFiles does, after LoadConfig and before eMathInit;
+     - the car loader's LoadResourceFile, ServiceResourceLoading and
+       UnloadResourceFile seams, trackflow's `gFindResourceFileFn`,
+       racecoord's `gFindResourceFileByNameFn` and the texture packs'
+       `gServiceQueuedFilesFn` are the real ones;
+     - ServiceResourceLoading runs after each frontend frame, before the
+       frontend's own bundle callbacks;
+     - `trackview_free` puts the two track seams back as it found them,
+       instead of NULLing them.
+   - `sinit.c` runs both static constructors: [39] and [52].
+   - `resource_check`: 10 scenarios, 429 ops, 3250 lines, 0 differ;
+     155 mutations, 153 caught, 2 equivalent (`lif_guard_done`,
+     `dtor_hnum`). The 17 other checkers that link `bmem.c` pass,
+     `sinit_check` has 21 calls, and Azahar passes.
+   - The frontend's bundles (FRONTB, INGAMEB, GLOBALB) are still read by
+     `main.c`'s addBundle, not through ResourceFile.
 
-     | offset | field |
-     |---:|---|
-     | +8 | type |
-     | +12 | flags |
-     | +16 | name |
-     | +176 | reads in flight |
-     | +180 | loaded |
-     | +184 | callback |
-     | +188 | callback parameter |
-     | +192 | buffer |
-     | +196 | size, from bFileSize; 0 when there is no file |
-
-     When there is a size, it calls AllocateMemory and queues the read:
-     AddQueuedFile (`0x001ada60`) with FileTransferCallback
-     (`0x001995d0`), then ChangeQueuedFileParams(id, 5, 0x02000000).
-   - **ServiceResourceLoading** (`0x00199788`):
-     1. it runs ServiceQueuedFiles (`0x001ad850`);
-     2. it takes the first file in the list that isn't loaded and runs
-        LoadResourceIfFileTransferFinished (`0x001994f0`) on it;
-     3. if that loaded the file, it decrements the count of loads in
-        flight and calls the file's callback with its parameter.
-
-     That is at most one file per call.
-   - **LoadResourceIfFileTransferFinished** waits for the read (+176 is
-     0). Then, in order:
-     1. with flag 8 and a `COMP` header, it decompresses into a new
-        buffer (LZDecompress `0x001b41c8`) and frees the old one;
-     2. it runs LoadChunks;
-     3. with flag 4, it frees the buffer;
-     4. it runs PostLoadFixup and marks the file loaded.
-   - The port already has LoadChunks, PostLoadFixup (`bchunkload.c`) and
-     the LZ decompressor (`lzc.c`). The queued-file layer (AddQueuedFile,
-     ServiceQueuedFiles; texturepack.h already has
-     `gServiceQueuedFilesFn`) is the 3DS's file reads. The simplest
-     version reads synchronously when the file is queued.
-
-   **Then 8k: the track-loading game flow states.** All of them are NULL
+   **Next is 8k: the track-loading game flow states.** All of them are NULL
    in `main.c`'s `kGameFlowStages` today.
    - **BeginGameFlowLoadingTrackCommon** (`0x00168db8`):
      1. bCountFreeMemory;

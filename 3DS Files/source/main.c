@@ -83,13 +83,17 @@
 #include "physicssystem.h"
 #include "playercam.h"
 #include "playerinit.h"
+#include "queuedfile.h"
 #include "race.h"
+#include "racecoord.h"
 #include "realcontroller.h"
 #include "realdriver.h"
 #include "realtime.h"
+#include "resource.h"
 #include "sinit.h"
 #include "shake.h"
 #include "terraintype.h"
+#include "texturepack.h"
 #include "topology.h"
 #include "track.h"
 #include "sky.h"
@@ -1684,6 +1688,36 @@ static UIBundle* addBundle(UIRenderer* ui, const char* rel)
     return &ui->bundles[ui->numBundles - 1];
 }
 
+// The resource system (resource.h) behind the seams that reach it: the car
+// loader's LoadResourceFile, ServiceResourceLoading and UnloadResourceFile,
+// and the two FindResourceFile, the track flow's and the race
+// coordinator's.
+static void* resLoadFile(const char* name, int type, int flags,
+                         CarLoaderDoneFn done, intptr_t param)
+{
+    return load_resource_file(name, type, flags, done, param);
+}
+
+static void resService(void)
+{
+    (void)service_resource_loading();
+}
+
+static void resUnloadFile(void* file)
+{
+    unload_resource_file((ResourceFile*)file);
+}
+
+static void* resFindByType(int type)
+{
+    return find_resource_file_by_type(type);
+}
+
+static void* resFindByName(const char* name)
+{
+    return find_resource_file(name);
+}
+
 // LoadGlobalChunks' LoadResourceFile hands every top-level chunk of GLOBALB
 // to LoadChunks, slot 16 among them: LoaderCarInfo (carinfo.c), which
 // points CarTypeInfoArray and SkinInfoTable into the bundle and makes the
@@ -2114,6 +2148,12 @@ int main(int argc, char** argv)
     // step 8.
     gCarMaybeCameraShakeFn = car_maybe_camera_shake;
 
+    // InitializeEverything's InitQueuedFiles (0x001a32b8; retail's
+    // 0x001ada10), after LoadConfig and before eMathInit: the pool of the
+    // reads ResourceFile and the texture packs queue (queuedfile.h).
+    init_queued_files();
+    gServiceQueuedFilesFn = service_queued_files;
+
     // InitializeEverything runs eMathInit (0x0011b9a0) just before
     // eInitEngine, and nothing else fills eMathIdentityMatrix: StuffScenery
     // hands it to every object drawn where it stands -- the road and the
@@ -2319,10 +2359,14 @@ int main(int argc, char** argv)
     addBundle(&ui, BUNDLE_FRONTEND);
     UIBundle* ingameBundle = addBundle(&ui, BUNDLE_INGAME);
     // InitializeEverything's InitCarLoader (0x001b0260), after the
-    // frontend: the pool the car and skin entries come from. Nothing loads
-    // through TheCarLoader yet -- its seams are unset until the resource
-    // system is ported.
+    // frontend: the pool the car and skin entries come from. Its loads go
+    // through the resource system; nothing asks it for a car yet.
     init_car_loader();
+    gCarLoadResourceFileFn    = resLoadFile;
+    gServiceResourceLoadingFn = resService;
+    gUnloadResourceFileFn     = resUnloadFile;
+    gFindResourceFileFn       = resFindByType;
+    gFindResourceFileByNameFn = resFindByName;
     logPrintf("car loader: pool %s\n", LoadedCarSlotPool ? "up" : "missing");
 
     // The blurb moves to the bottom screen, so the top screen stops drawing
@@ -2696,7 +2740,9 @@ int main(int argc, char** argv)
                              "A select   B back   START go   SELECT viewer");
             }
             C3D_FrameEnd(0);
-            // MainLoop's ServiceResourceLoading, after eDisplayFrame.
+            // MainLoop's ServiceResourceLoading, after eDisplayFrame: the
+            // resource system's, then the frontend's bundles (bootQueue).
+            (void)service_resource_loading();
             bootServiceLoads(&g_boot);
             continue;
         }
