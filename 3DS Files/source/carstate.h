@@ -102,6 +102,15 @@ typedef int32_t Gear;
 // boundary for the quadword loads, and twelve at 1012 to round the record
 // up. Neither is ever read, and both are named here so that the harness can
 // show they stay unwritten.
+//
+// Retail added one float, which the port keeps in the first four of those
+// twelve so that every demo offset above still holds: DistanceMoved. In
+// retail it is at +876, after Odometer, and moves every field from
+// TractionUsage to BurnOutAllow on by four (car.md). The constructor
+// zeroes it after Odometer (0x001c022c) and ResetCar leaves it alone.
+// Retail's FinishMovement adds to it how far Position moved since vOldPos,
+// and RacingCar::UpdateLapCounts divides it by the race time for the
+// AverageSpeed. The name is the port's; retail has no symbols.
 typedef struct CarState {
     CarTypeInfoPrefix  *pCarInfo;                  // 0
     TopologyCoordinate *pTopologyCoordinate;       // 4
@@ -153,7 +162,8 @@ typedef struct CarState {
 
     bMatrix4  RelCoordMatrix;                      // 944
     int32_t   MatrixValid;                         // 1008
-    uint8_t   _tail[12];                           // 1012
+    float     DistanceMoved;                       // 1012 retail +876
+    uint8_t   _tail[8];                            // 1016
 } CarState;
 
 // The record is passed between systems and snapshotted whole, so its size is
@@ -203,13 +213,15 @@ typedef char carstate_size_check[
      && CARSTATE_AT(BurnOutState, 928)        && CARSTATE_AT(BurnOutTime, 932)
      && CARSTATE_AT(BurnOutTraction, 936)     && CARSTATE_AT(BurnOutAllow, 940)
      && CARSTATE_AT(RelCoordMatrix, 944)      && CARSTATE_AT(MatrixValid, 1008)
+     && CARSTATE_AT(DistanceMoved, 1012)      && CARSTATE_AT(_tail, 1016)
      ) ? 1 : -1];
 #endif
 
 // --------------------------------------------------------------- the calls
 
-// 0x001b6170. Stores the two pointers, clears Position, GeometryPosition,
-// Odometer and DriverMode, then calls ResetCar for everything else.
+// 0x001b6170 (retail 0x001c01a8). Stores the two pointers, clears
+// Position, GeometryPosition, Odometer, retail's DistanceMoved and
+// DriverMode, then calls ResetCar for everything else.
 void carstate_init(CarState *s, TopologyCoordinate *topo,
                    CarTypeInfoPrefix *info);
 

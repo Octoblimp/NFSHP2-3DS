@@ -197,6 +197,11 @@ UNNAMED = {("PhysicsCar", "Mover"), ("PhysicsCar", "Vehicle"),
            ("TwoWheelAckermanSteering", "base")}
 LINKS = {"pNext", "pPrev"}
 
+# Fields retail added that the demo image does not have, kept where the
+# demo has padding. Neither checked against mdebug nor dumped: the demo
+# code these checkers run never writes them.
+RETAIL_ONLY = {("CarState", "DistanceMoved")}
+
 FIELD_RE = re.compile(
     r"^\s*(?:const\s+)?(?:struct\s+)?(\w+)\s*(\*?)\s*(?:const\s+)?(\w+)\s*"
     r"(?:\[(\w+)\])?\s*;\s*//\s*(\d+)")
@@ -269,6 +274,8 @@ def parse(name):
         if dim is not None:
             d = int(dim) if dim.isdigit() else dim
         fields.append(Field(fname, ctype, bool(star), d, int(off)))
+        if (name, fname) in RETAIL_ONLY:
+            fields[-1].kind = "skip"
     size, rec = mdebug_record(name)
     for a, b in zip(fields, fields[1:] + [None]):
         a.size = (b.off if b else size) - a.off

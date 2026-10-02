@@ -123,6 +123,21 @@ extern int32_t RaceParametersReplayDemoMode;
 extern int32_t RaceParametersPoint2Point;
 extern int32_t RaceParametersNumLapsInRace;
 
+// RaceTypes, type#1000.
+typedef enum RaceTypes {
+    RACE_TYPE_NONE          = 0,
+    RACE_TYPE_SINGLE_RACE   = 1,
+    RACE_TYPE_TIME_TRIAL    = 2,
+    RACE_TYPE_LAP_KNOCKOUT  = 3,
+    RACE_TYPE_RACE_KNOCKOUT = 4,
+    RACE_TYPE_TOURNAMENT    = 5,
+} RaceTypes;
+
+// TheRaceParameters.RaceType (+32), retail's 0x0031a8b8. While a replay
+// plays, UpdateLapCounts times only a time trial's finish line.
+// InitWithDefaults starts it at RACE_TYPE_NONE.
+extern int32_t RaceParametersRaceType;
+
 // ------------------------------------------------------------- RacingCar
 
 struct Car;

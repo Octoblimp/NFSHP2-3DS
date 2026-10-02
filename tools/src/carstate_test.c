@@ -54,7 +54,10 @@ static void fill_pattern(CarState *s)
     g_dirt = 0;
 
     for (i = 0; i < 8; i++)  s->_hole8[i] = (uint8_t)(0xA0 + i);
-    for (i = 0; i < 12; i++) s->_tail[i]  = (uint8_t)(0xD0 + i);
+    // DistanceMoved and the tail after it, as the twelve bytes they were.
+    for (i = 0; i < 4; i++)
+        ((uint8_t *)&s->DistanceMoved)[i] = (uint8_t)(0xD0 + i);
+    for (i = 0; i < 8; i++)  s->_tail[i]  = (uint8_t)(0xD4 + i);
 
     s->pCarInfo            = 0;
     s->pTopologyCoordinate = 0;
@@ -217,7 +220,9 @@ static void pstate(const char *tag, const CarState *s)
     pmat("relcoord", &s->RelCoordMatrix);
     printf("  matrixvalid %ld\n", (long)s->MatrixValid);
     printf("  tail      ");
-    for (i = 0; i < 12; i++) printf(" %02x", (unsigned)s->_tail[i]);
+    for (i = 0; i < 4; i++)
+        printf(" %02x", (unsigned)((const uint8_t *)&s->DistanceMoved)[i]);
+    for (i = 0; i < 8; i++)  printf(" %02x", (unsigned)s->_tail[i]);
     printf("\n");
 }
 

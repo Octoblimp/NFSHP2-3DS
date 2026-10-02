@@ -19,6 +19,7 @@ int32_t RaceParametersAIDemoMode;       // retail 0x0031a8b0
 int32_t RaceParametersReplayDemoMode;   // retail 0x0031a8b4
 int32_t RaceParametersPoint2Point;      // retail 0x0031a8c0
 int32_t RaceParametersNumLapsInRace = 2;  // retail 0x0031a8c4
+int32_t RaceParametersRaceType;         // retail 0x0031a8b8
 RaceCoordinator *pRaceCoordinator;      // 0x00323330
 
 DriverInfo *race_parameters_get_driver_info(int32_t i)

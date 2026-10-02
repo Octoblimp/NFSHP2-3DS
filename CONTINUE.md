@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-09-30), after Player's camera functions (7d), which close step 7. `HANDOFF.md` is the running
+(2026-10-01), after Race::Init and the lap counting (8d). `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -47,10 +47,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Seventy-eight cross-checkers pass, plus the table generators:
+Eighty cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -75,6 +75,7 @@ playercam_check     5277 ops,   162056 lines, 0 differ   (109/109 mutations caug
 player_check        3659 ops,   501513 lines, 0 differ   (287/287 mutations caught; retail's image)
 raceinit_check      3280 ops,    13317 lines, 0 differ   (123/123 mutations caught; retail's image)
 racecore_check      6097 ops,    18698 lines, 0 differ   (158 caught, 3 equivalent; retail's image)
+racerun_check      21656 ops,    40973 lines, 0 differ   (169 caught, 2 equivalent; retail's image)
 trackroute_check   11 scenarios,  1353 lines, 0 differ   (57 caught, 1 equivalent)
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
 engine_check        8 scenarios,   414 lines, 0 differ   (56 caught, 2 equivalent)
@@ -966,7 +967,7 @@ and so replaced every boot.
      of them by crashing the harness. Before the run, it compiles
      player.h with devkitARM and asserts all 158 Player fields and 14
      overlay fields at retail's offsets.
-   - Nothing builds a Player yet. 8d's InitForRace does.
+   - Nothing builds a Player yet. 8e's InitForRace does.
 
    **8b, InitCars and InitPlayers, is done** (HANDOFF.md, Session 31,
    continued: InitCars and InitPlayers (step 8b)).
@@ -996,7 +997,7 @@ and so replaced every boot.
      3280 ops, 13317 lines, 0 differ. All 123 mutations are caught,
      five of them by crashing the harness. Before the run, it compiles
      raceinit.h with devkitARM and asserts DriverInfo's layout.
-   - Nothing calls InitCars yet. 8d's InitForRace does.
+   - Nothing calls InitCars yet. 8e's InitForRace does.
 
    **8c, Race's construction, is done** (HANDOFF.md, Session 31,
    continued: Race's construction (step 8c)). `docs/formats/race.md` has
@@ -1027,23 +1028,41 @@ and so replaced every boot.
      the table's layout.
    - Nothing builds a Race yet. 8e's InitForRace does.
 
-   **Next is 8d: Race::Init and the lap counting under it.** These are
-   all in Race.obj (`out/retail_syms.txt` has every size):
-   - Race::Init(stage) (`0x00147960`, 148 bytes)
-   - AddRacingCars (`0x00147dc0`) and AddRacingCar (`0x00147e88`)
-   - RacingCar::Init (`0x00146bb0`, 212)
-   - UpdateLapCounts (`0x00146fd0`, 1064) and CheckBoundaryCrossing
-     (`0x00146e58`, 372)
-   - SortRacingCarsByLeadership (`0x00148218`)
-   - SetRaceStage (`0x00147ef0`, 464) and FakeStartlineCrossing
-     (`0x00146e08`, 76)
-   - Timer::Round (`0x001a3e28`, 80): `*t = (int)(RoundSeconds(t, f) *
-     4000 + 0.5)`, and RoundSeconds (`0x001a3d70`) under it
+   **8d, Race::Init and the lap counting, is done** (HANDOFF.md,
+   Session 31, continued: Race::Init and the lap counting (step 8d)).
+   `docs/formats/race.md` has the write-up.
+   - `racerun.c` and `racerun.h` have Race::Init (`0x00147960`),
+     AddRacingCars (`0x00147dc0`), AddRacingCar (`0x00147e88`),
+     SetRaceStage (`0x00147ef0`), SortRacingCarsByLeadership
+     (`0x00148218`), RacingCar::Init (`0x00146bb0`), UpdateLapCounts
+     (`0x00146fd0`), CheckBoundaryCrossing (`0x00146e58`),
+     FakeStartlineCrossing (`0x00146e08`) and GetPlayer (`0x001475b8`).
+     `timer.c` has Timer::Round (`0x001a3e28`) and RoundSeconds
+     (`0x001a3d70`).
+   - `race.h` has the RaceTypes enum (type#1000) and TheRaceParameters'
+     RaceType (+32, `0x0031a8b8`). Only a time trial's finish line is
+     timed while a replay plays.
+   - The one seam is FrontendDatabase::TheRaceIsLeaving (`0x00187570`),
+     gRaceIsLeavingFn, which SetRaceStage calls on the way to racing.
+     With it NULL nothing is told.
+   - `carstate.h` gains retail's DistanceMoved (State+876 in retail).
+     The port keeps it in the record's spare tail, at 1012, so that every
+     demo offset holds. The constructor zeroes it, as retail's does, and
+     UpdateLapCounts divides it by the race time for AverageSpeed.
+     **Still owed:** retail's FinishMovement (`0x00131da8`) adds to it
+     how far Position moved since vOldPos. The port's FinishMovement is
+     the demo's and does not, so AverageSpeed reads 0 in the game until
+     FinishMovement has its retail pass.
+   - `racerun_check` runs retail's code in RetailEmu: 14 scenarios,
+     21656 ops, 40973 lines, 0 differ. Of 171 mutations, 169 are
+     caught and 2 are equivalent. Before the run, it compiles
+     racerun.h with devkitARM and asserts its layout.
+   - Nothing calls Race::Init yet. 8e's InitForRace does.
 
-   After that:
-   - 8e: RaceCoordinator::InitForRace itself, ChangeState
-     (`0x00149520`) and GetDriverInfoByDriverNumber (`0x001edb40`)
-   - then the flow into a race
+   **Next is 8e: RaceCoordinator::InitForRace** (`0x00149988`, 512
+   bytes), with ChangeState (`0x00149520`) and
+   GetDriverInfoByDriverNumber (`0x001edb40`). What InitForRace does is
+   below. After that, the flow into a race.
 
    All of the following was read with `retaildis.py` on 2026-10-01.
    - **RaceCoordinator::InitForRace** (`0x00149988`, 512 bytes), in order:
@@ -1077,95 +1096,9 @@ and so replaced every boot.
         call to ChangeState(state).
    - InitPlayers, retail's DriverInfo, InitCars, AddRacingCar and
      CalculateRacerPositions are in `docs/formats/raceinit.md` now.
-   - **For 8d**, read on 2026-10-01:
-     - Race::Init(stage) runs AddRacingCars and SetRaceStage(stage). It
-       then takes RacingCarTable[0]'s car, or [1]'s under BeACop (+628)
-       with NumPlayerCars (+48) 2. That car's CarTypeInfo (+12) byte 230
-       is the class for tatt_construct, on bMalloc(2052,
-       "TimeAroundTrackTable", 0, 16), into +1712.
-     - RacingCar::Init(rc, car):
-       1. The car's pRacingCar (+28) is rc, and rc's pCar is the car.
-       2. RacePosition, PreviousRacePosition, FinishingOrder, FinishReason
-          and FinishedLapNumberExact are zeroed.
-       3. PreviousDistanceAroundTrack is retail Car+2032 times 100. That
-          is the car's TrackPathCoordinate (retail 2016) +16, its ratio.
-       4. BoundaryCrossingTimes, RunningTimes and PreviousRunningTimes
-          are 0, and BestRunningTimes and PreviousBestRunningTimes are
-          0x7fffffff. LapTimes, RaceTime, TopSpeed and AverageSpeed are
-          0.
-       5. NumLapsCompleted is 0, CurrentLapNumber -1 (a byte), and
-          Highest and CurrentBoundaryRegion -1.
-       6. UpdateLapCounts, then NumLapsLed is 0.
-     - UpdateLapCounts(rc):
-       1. CrossedFinishLine and CompletedNewLap are 0, and pct is the
-          car's ratio times 100.
-       2. For each boundary i, it calls CheckBoundaryCrossing(rc, &info,
-          pct, B[i]), with info word 8 zeroed first. On a crossing:
-          - Backward (info word 0 is 0): at the finish line,
-            CurrentLapNumber goes down by one. Nothing else happens.
-          - Forward:
-            1. At the finish line, CurrentLapNumber goes up by one. When
-               that passes NumLapsCompleted, NumLapsCompleted takes it and
-               CrossedFinishLine is 1.
-            2. CurrentBoundaryRegion is CurrentLapNumber * 5 + i.
-            3. When that is above HighestBoundaryRegion, CompletedNewLap
-               (+14) is 1 and the highest takes it. The time is t =
-               WorldTimer (gp-19576) minus info word 8, then
-               Timer::Round(&t, gp-31472). Then the times:
-               - With the replay manager's (gp-22440) word 0 at 0, and
-                 BoundaryCrossingTimes[0] set and not 0x7fffffff:
-                 PreviousRunningTimes[i] takes RunningTimes[i], which
-                 becomes t - BoundaryCrossingTimes[0]. The best times
-                 shift the same way, and the best keeps the lower. At the
-                 finish line, when CurrentLapNumber (unsigned) is below
-                 11, LapTimes[lap] takes RunningTimes[i].
-               - While replaying, only when TheRaceParameters +32 is 2
-                 and only at the finish line: RunningTimes[i] as above,
-                 without the shifts.
-               - BoundaryCrossingTimes[i] is t, except while replaying
-                 off the finish line or without +32 at 2.
-       3. With no replay, and the car's +956 at 3 or more, TopSpeed may
-          rise:
-          - For a player, it is the larger of TopSpeed and the car's +960.
-          - Otherwise it is the driver's (+44) virtual call (the table at
-            +556, slot 136/140), over max(1, State+928). That is clamped
-            by |State+896| and by CarTypeInfo +800 times gp-31468, and it
-            counts only between 0 and 1000.
-          Then, with the race's RaceTime above zero (times gp-31464),
-          AverageSpeed is the car's +940 over it.
-
-          These are retail Car offsets. Retail's CarState has a float
-          the port's lacks, at State+876: retail's FinishMovement
-          (`0x00131da8`) adds to it the distance the car's position moved
-          since vOldPos, after the Odometer (+872, as in the port). The
-          State fields from +876 to BurnOutAllow are the port's plus 4,
-          CurrentGear among them (car.md). RelCoordMatrix, 16-aligned,
-          would then move by 16, which would be why retail's Car fields
-          after State are 16 on. So +956 is nWheelsTouchingGround, +960
-          ForwardSpeed and +992 BoostFactor. +940 is the new distance, so
-          AverageSpeed needs the field, and the port's FinishMovement (the
-          demo's) needs to keep it.
-       4. CurrentLapNumberExact and FinishedLapNumberExact are
-          CurrentLapNumber plus GetLapNumberExact(pct). With gp-19560
-          above zero, dCurrentLapNumberExact is smoothed: itself times
-          gp-31460, plus the change over gp-19560 times gp-31456. The
-          change is from the old CurrentLapNumberExact, which Init leaves
-          unset. PreviousDistanceAroundTrack is pct.
-     - CheckBoundaryCrossing(rc, info, pct, b) zeroes info's three
-       words. d1 is ComparePercentDistances(pct, b), and d0 the same from
-       PreviousDistanceAroundTrack. With |d1| over 25 there is no
-       crossing. d0 < 0 <= d1 is forward (word 0 = 1), and d1 < 0 <= d0
-       backward (word 4 = 1). Word 8 is how long ago, in Timer ticks:
-       (int)(d1 * TrackLength (TheTrackPathManager +0) * gp-31476 / speed
-       * 4000 + 0.5), with the speed the car's +960 when that is over 1,
-       else 0 ticks.
-     - FakeStartlineCrossing(rc): BoundaryCrossingTimes[0] is WorldTimer,
-       Timer::Round(gp-31480); HighestBoundaryRegion is 0, and so are
-       CurrentBoundaryRegion and CurrentLapNumber when Point2Point is set.
-     - Timer::Round (`0x001a3e28`) calls Timer::RoundSeconds
-       (`0x001a3d70`), which is not ported: the seconds (ticks times
-       gp-29388) over f, floored and then rounded half up, times f, then
-       ceiled to a tick.
+   - The 8d decode (Race::Init, RacingCar::Init, UpdateLapCounts,
+     CheckBoundaryCrossing, FakeStartlineCrossing and
+     Timer::Round) is in `docs/formats/race.md` now.
      - `0x001473f8` (328 bytes, no symbol) is FinishCar's (`0x00148740`
        calls it), so it goes with FinishCar, not 8d.
    - Then the flow into a race:

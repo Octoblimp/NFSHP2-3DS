@@ -10738,3 +10738,91 @@ SortRacingCarsByLeadership, SetRaceStage and FakeStartlineCrossing, and
 Timer::Round. CONTINUE.md, step 8, has what Init, RacingCar::Init and
 UpdateLapCounts do. Then 8e (RaceCoordinator::InitForRace, ChangeState
 and GetDriverInfoByDriverNumber) and the flow into a race.
+
+## Session 31, continued (2026-10-01) -- Race::Init and the lap counting (step 8d)
+
+This is 8d, the fourth slice of step 8. It ports what a Race does once it
+is built: Race::Init and everything under it that counts laps, times the
+boundaries and orders the field.
+
+### The port
+
+`racerun.c` and `racerun.h` are new:
+- Race::Init (`0x00147960`), AddRacingCars (`0x00147dc0`) and
+  AddRacingCar (`0x00147e88`)
+- SetRaceStage (`0x00147ef0`) and SortRacingCarsByLeadership
+  (`0x00148218`)
+- RacingCar::Init (`0x00146bb0`), UpdateLapCounts (`0x00146fd0`),
+  CheckBoundaryCrossing (`0x00146e58`), FakeStartlineCrossing
+  (`0x00146e08`) and GetPlayer (`0x001475b8`)
+
+`timer.c` gains Timer::Round (`0x001a3e28`) and RoundSeconds
+(`0x001a3d70`), which round a time to a hundredth, half up, and then up
+to a whole tick.
+
+Race::Init adds the World's racing cars (the players' cars below
+AICarPos, then the AI racers up to CopCarPos), sorts them twice, sets
+the stage, and builds the
+TimeAroundTrackTable for the first car's class, or the second's for a
+two-player cop race. SetRaceStage sets the drivers going on the way to
+racing: the real drivers lose their start-line hold and the AI ones get
+full throttle with the brakes off. It stamps the start time and frames,
+and wakes the traffic at the countdown and the start.
+
+UpdateLapCounts checks each boundary for a crossing since the last call,
+from the percentage round the track, within 25 percent either side. A
+forward crossing of a region the car has not reached yet stamps the time
+the car crossed, backed off by how far past it is now at its speed, and
+rounded to a hundredth. That time gives the running, best and lap times.
+A backward crossing of the finish line takes a lap off. It also keeps the
+top and average speeds, the exact lap and its smoothed rate. The sort is
+retail's bubble sort: finished cars by their finishing order, the rest by
+the exact lap they reached.
+
+`race.h` adds the RaceTypes enum (type#1000) and TheRaceParameters'
+RaceType (+32, `0x0031a8b8`). While a replay plays, only a time trial's
+finish line is timed. FrontendDatabase::TheRaceIsLeaving is the one
+seam, gRaceIsLeavingFn. SetRaceStage calls it on the way to racing.
+
+The top speed of a car that is not the player's is what its driver
+wants, through CarDriver's slot 136, GetDesiredSpeed, which
+`cardriver.h` names now.
+
+Retail's CarState has one float the demo's lacks, at State+876, which
+UpdateLapCounts divides by the race time for the average speed. The port
+calls it DistanceMoved and keeps it at 1012, in the record's spare tail,
+so that every demo offset holds. The constructor zeroes it, as retail's
+does, and `carstate_check` and `physicscar_check` know the field. Retail's
+FinishMovement adds to it how far the car moved, and the port's, the
+demo's, does not yet. Until it has its retail pass, AverageSpeed reads 0
+in the game. CONTINUE.md records that as owed.
+
+### The checks
+
+`racerun_check.py` runs all ten functions and the two Timer ones as
+shipped in RetailEmu, with retail's GetLapNumberExact,
+ComparePercentDistances and TimeAroundTrackTable under them.
+`tools/src/racerun_test.c` runs `racerun.c` with `timer.c`,
+`racecore.c` and their callees over the same script. Only bMalloc,
+SetMovementMode, DisableStartLineState, TheRaceIsLeaving, UpdatePosition
+and the drivers' GetDesiredSpeed are stubbed. The desired speed sits in a
+vtable the script owns, behind a this-adjustment it sets. The Race, the
+Cars and their records are filled with 0xa5 first, so a field left alone
+shows.
+
+14 scenarios, 21656 ops, 40973 lines, 0 differ. Of 171 mutations,
+169 are caught and 2 are equivalent. Three of them are caught by crashing the harness and two by hanging it. The two equivalents are Init's store to FinishedLapNumberExact, which UpdateLapCounts writes again before anything reads it, and TopSpeed's test for a change before it stores. A first pass left nine survivors; eight of them were gaps in the script, and the edge-case scenario closes them.
+
+`docs/formats/race.md` has a section for 8d. CONTINUE.md marks 8d done
+and makes 8e next.
+
+The whole chain in CONTINUE.md, racerun_check included, passes: 84 commands, 0 failed, in 1015 s.
+`build_cia.ps1` builds the CIA, and check_3dsx passes. Nothing in the
+game calls Race::Init yet, so there is nothing new to see on Azahar.
+
+### Next
+
+8e: RaceCoordinator::InitForRace (`0x00149988`), ChangeState
+(`0x00149520`) and GetDriverInfoByDriverNumber (`0x001edb40`).
+CONTINUE.md, step 8, has what InitForRace does. Then the flow into a
+race.

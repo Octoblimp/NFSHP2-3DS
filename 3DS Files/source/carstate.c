@@ -49,11 +49,13 @@ static float carstate_f32(uint32_t bits)
 
 // 0x001b6170. The listing opens with three empty countdown loops -- the
 // compiler's leavings from inlining bVector3's do-nothing constructor three
-// times -- which is why nothing here corresponds to them.
+// times -- which is why nothing here corresponds to them. Retail's
+// (0x001c01a8) adds one store, DistanceMoved's, after Odometer's.
 void carstate_init(CarState *s, TopologyCoordinate *topo,
                    CarTypeInfoPrefix *info)
 {
     s->Odometer = 0.0f;
+    s->DistanceMoved = 0.0f;
 
     s->Position.x = 0.0f;
     s->Position.y = 0.0f;

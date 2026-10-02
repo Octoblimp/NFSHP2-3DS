@@ -201,8 +201,11 @@ class Info(object):
 def init(s, info):
     """0x001b6170. Two pointers, four scalars, then ResetCar. The three
     empty countdown loops the listing opens with are an inlined do-nothing
-    constructor and have no effect."""
+    constructor and have no effect. Retail's (0x001c01a8) zeroes one more
+    float after Odometer, which the port keeps as the tail's first four
+    bytes: DistanceMoved."""
     s.Odometer = f32(0.0)
+    s.tail[0:4] = [0, 0, 0, 0]
     s.Position[0] = s.Position[1] = s.Position[2] = f32(0.0)
     s.GeometryPosition[0] = s.GeometryPosition[1] = f32(0.0)
     s.GeometryPosition[2] = f32(0.0)
@@ -965,8 +968,10 @@ MUTATIONS = [
 
     # -- lifetime ------------------------------------------------------
     ("init-no-odometer", CS,
-     "    s->Odometer = 0.0f;" + NL + NL + "    s->Position.x = 0.0f;",
-     "    s->Position.x = 0.0f;"),
+     "    s->Odometer = 0.0f;" + NL + "    s->DistanceMoved",
+     "    s->DistanceMoved"),
+    ("init-no-distance", CS,
+     "    s->DistanceMoved = 0.0f;" + NL, ""),
     ("init-clears-pad", CS,
      "    s->Position.z = 0.0f;" + NL + NL + "    s->GeometryPosition.x",
      "    s->Position.z = 0.0f;" + NL + "    s->Position.pad = 0.0f;" + NL
