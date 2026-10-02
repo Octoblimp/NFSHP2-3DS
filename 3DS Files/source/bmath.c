@@ -101,7 +101,7 @@ uint32_t bSqrt32(uint32_t n)
 
 // ------------------------------------------------------------------ random
 
-uint32_t bDefaultSeed = 0x12345678u;   // 0x00324f90
+uint32_t bDefaultSeed = 0x12345678u;   // retail gp-14472 (0x00332068)
 
 // 0x00241cc8. The value handed back is the OLD seed reduced mod range, and
 // the state moves afterwards -- so the draw immediately after a reseed is

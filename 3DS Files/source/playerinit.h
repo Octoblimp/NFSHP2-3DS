@@ -76,20 +76,6 @@ void player_cleanup_after_race(struct Player *p);
 // FinishMovement calls it through gPlayerCleanUpJumpCamFn.
 void player_clean_up_jump_cam(struct Player *p);
 
-// cPlayerSettings::ResetToDefaults, 0x001edf90. Rumble 1 and the other
-// three leading bytes 0; the POV 1, or with SkipFE PlayerSkipFEPOVIndex;
-// bytes 5-7 0; CameraSpring 0, Lookback 1, PreferredHudFeatures 853, the
-// name "PLAYER"; New44 and New40 1, then the two records 0.
-void player_settings_reset_to_defaults(cPlayerSettings *s);
-
-// TheRaceParameters.PlayerSettings, retail's 0x0031ab24 (+652), 48 bytes
-// each: what the constructor copies. All zeroes on the disc;
-// RaceParameters::InitWithDefaults resets both.
-extern cPlayerSettings RaceParametersPlayerSettings[2];
-
-// The byte at gp-23172, 1 on the disc: ResetToDefaults' POV under SkipFE.
-extern uint8_t PlayerSkipFEPOVIndex;
-
 // ---------------------------------------------------------------- the seams
 
 // The constructor's. NisManager's constructor (0x001b0fe0) on bMalloc(320,

@@ -681,8 +681,10 @@ void bgf_begin_loading_frontend(BGameFlow* gf)
     // Retail stores RealTime in BeginScreenFadeTime here, for the demo
     // disc's slideshow in the Loop, and nothing else reads it.
 
-    // RaceParameters::InitWithDefaults and a bCountFreeMemory whose answer
-    // is kept for a debug print: nothing the flow reads.
+    // RaceParameters::InitWithDefaults, then a bCountFreeMemory whose
+    // answer is kept for a debug print.
+    trace(gf, "race defaults");
+    HOOK_VOID0(gf, raceDefaults);
 
     // FRONTA.BUN is the loading bundle that was meant to stay resident while
     // FRONTB streams in. It is a zero-byte file on this disc, and so are
@@ -1219,6 +1221,7 @@ static void languageChosen(BGameFlow* gf, int backOnUnset)
         if (backOnUnset) bgf_move_back_screen(gf, 1);
         return;
     }
+    if (!l->fromOptions) HOOK_VOID0(gf, frontendDefaults);
     if (!l->fromOptions) trace(gf, "frontend defaults");
     bgf_move_back_screen(gf, 1);
 }
@@ -1313,8 +1316,7 @@ void bgf_language_screen_callback(BGameFlow* gf, BScreenMessage msg,
 //   5. StartMovie (the string at 0x002bc430);
 //   6. TheEasterEggs' Start;
 //   7. the Easter egg group hidden, and +628, "shown", cleared.
-// The port has all but 2, which car select and the race it launches read,
-// and which come with them. The movie outlives the screen -- the destructor
+// The movie outlives the screen -- the destructor
 // (0x00216598) leaves it -- so the Mode Selects and Options, which start
 // their own, are what replace it.
 //
@@ -1398,6 +1400,10 @@ static void mainMenuCtor(BGameFlow* gf)
     m->timer = 0;
     if (a) bsel_init(a, &m->sel, BGF_SCREEN_NEW_MAIN_MENU);
     m->eggTimer = 0;
+    trace(gf, "challenge cars");
+    HOOK_VOID0(gf, challengeCars);
+    trace(gf, "race defaults");
+    HOOK_VOID0(gf, raceDefaults);
     m->timer = gf->realTimer;
     HOOK_VOID(gf, jukebox, 1);    // the main menu's
     // IndicatorMode 1, stored before AddItems, as on every screen with one:

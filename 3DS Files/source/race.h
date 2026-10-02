@@ -1,14 +1,11 @@
-// race -- Race, RacingCar and the corner of RaceParameters that ported code
-// reads.
+// race -- Race, RacingCar and RaceParameters.
 //
 // Race is 1716 bytes (.mdebug type#1645, the same in the demo and retail)
-// and RaceParameters 768 (type#3457). PhysicsCar::Move reads one word of
-// each -- the race's stage through pCurrentRace, and DamageEnabled through
-// BodyDamage::GetVisibleTotalDamage -- RealDriver reads BeACop, the AI's
-// route search reads TrackDirection, Car's catchup reads Boost and
-// PleaseResetMeLater BeACop and nMaxCops. RaceParameters is declared a
-// field at a time, as each is needed. Race's methods are racecore.c's;
-// this file keeps the two accessors everything else uses.
+// and RaceParameters 788 in retail (the demo's type#3457 is 768).
+// PhysicsCar::Move reads one word of each -- the race's stage through
+// pCurrentRace, and DamageEnabled through BodyDamage::GetVisibleTotalDamage.
+// Race's methods are racecore.c's and RaceParameters' raceparams.c's; this
+// file keeps the two accessors everything else uses.
 //
 // RaceCoordinator (144 bytes, type#4165) is task 26's as well: the state
 // machine above the race, from the flyby to the replays and the demos.
@@ -22,6 +19,7 @@
 #include <stdint.h>
 
 #include "bvector.h"
+#include "playersettings.h"
 #include "timer.h"
 
 // eRaceStage, from the .mdebug enum (the same in every unit that has it).
@@ -44,89 +42,10 @@ extern Race *pCurrentRace;
 // RaceStage is the first member.
 eRaceStage race_get_race_stage(const Race *r);
 
-// TheRaceParameters.DamageEnabled, 0x00312560 (RaceParameters+64). 0 from
-// InitWithDefaults (0x001df4a8, `sw zero,64(s2)`); the frontend's race
-// setup is what turns it on, and that setup is task 26's too.
-extern int32_t RaceParametersDamageEnabled;
-
-// TheRaceParameters.BeACop, retail's 0x0031ab0c (RaceParameters+628; the
-// demo's +624). Nonzero when the player is the cop: RealDriver's horn
-// toggles the siren through the cop manager then, and its nitro button
-// fires the cop's boost, and the Player's constructor takes the cop's NIS
-// overlay. 0 from InitWithDefaults; the Be A Cop setup screens set it.
-// Retail added the int at +624, which only tCopManager reads.
-extern int32_t RaceParametersBeACop;
-
-// TheRaceParameters.nMaxCops, 0x0031277c (RaceParameters+604). How many
-// cops the race may have out at once. PleaseResetMeLater compares it
-// signed against 0 (`blez`).
-extern int32_t RaceParametersMaxCops;
-
 // eTrackDirection, from the .mdebug.
 typedef int32_t eTrackDirection;
 #define TRACK_DIRECTION_FORWARD  ((eTrackDirection)0)
 #define TRACK_DIRECTION_BACKWARD ((eTrackDirection)1)
-
-// TheRaceParameters.TrackDirection, 0x0031252c (RaceParameters+12). Forward
-// from InitWithDefaults (`sw zero,12(s2)`). GetNearestRoutePoint reads it
-// to tell the traffic that runs with the player from the oncoming.
-extern eTrackDirection RaceParametersTrackDirection;
-
-// TheRaceParameters.Boost, 0x00312804 (RaceParameters+740). Nonzero turns
-// on the two-player catchup: Car::CalculateNewCatchupMultipliers returns
-// before reading anything else when it is 0.
-extern int32_t RaceParametersBoost;
-
-// TheRaceParameters.NumDriverInfo, retail's 0x0031aba0 (RaceParameters+776;
-// the demo's +756 at 0x00312814). The race's driver count; InitWithDefaults
-// starts it at 0. InitPhysics reads it in the image (`lw s0,10260(v0)`);
-// the port's takes it as an argument, and EndGameFlowLoadingTrackSpecific
-// passes this.
-extern int32_t RaceParametersNumDriverInfo;
-
-// TheRaceParameters.TrackNumber, retail's 0x0031a898 (RaceParameters+0):
-// the track the race is on, as GetTrackInfo numbers them. InitCars looks
-// up its TrackInfo.
-extern int32_t RaceParametersTrackNumber;
-
-// TheRaceParameters' DriverInfos, retail's 0x0031ab9c (RaceParameters+772):
-// the race's drivers, NumDriverInfo of them, 24 bytes apart in retail.
-// AddDriverInfo (0x001eda40) fills it as the frontend sets the race up;
-// nothing in the port does yet, so it is NULL and the count 0.
-extern struct DriverInfo *RaceParametersDriverInfo;
-
-// RaceParameters::GetDriverInfo(int), 0x001edb28: driver `i`, unchecked.
-struct DriverInfo *race_parameters_get_driver_info(int32_t i);
-
-// TheRaceParameters.NumPlayerCars (+48) and .NFSRaceMode (+596), at
-// retail's 0x0031a8c8 and 0x0031aaec (RaceParameters is 0x0031a898 there).
-// The frontend's setup screens write both as they leave -- You're The Cop's
-// select (0x001b74f8) is the first ported -- and the race they start reads
-// them. InitWithDefaults (0x001ed5c8) starts both at 1.
-extern int32_t RaceParametersNumPlayerCars;
-extern int32_t RaceParametersNFSRaceMode;
-
-// TheRaceParameters.NumAICars (+52), retail's 0x0031a8cc: how many AI
-// racers the race has. SetAIDriverModesFromPlayers splits the AI field at
-// half of it. InitWithDefaults starts it at 7 (`sw t2,52(s0)`).
-extern int32_t RaceParametersNumAICars;
-
-// TheRaceParameters.AIDemoMode (+24) and .ReplayDemoMode (+28), retail's
-// 0x0031a8b0 and 0x0031a8b4: the attract mode's two races, the AI driving
-// the player's car and a replay played back. The Player's constructor
-// picks the HUD's screen hashes only when both are 0, and InitPlayers takes
-// the player's car from World's array instead when AIDemoMode is set.
-// InitWithDefaults starts both at 0.
-extern int32_t RaceParametersAIDemoMode;
-extern int32_t RaceParametersReplayDemoMode;
-
-// TheRaceParameters.Point2Point (+40) and .NumLapsInRace (+44), retail's
-// 0x0031a8c0 and 0x0031a8c4. Race's constructor takes its lap count from
-// the second, and makes it 1 when both are set; FigureOutBoundaries adds
-// a finish line apart from the start only on a point-to-point race.
-// InitWithDefaults starts them at 0 and 2.
-extern int32_t RaceParametersPoint2Point;
-extern int32_t RaceParametersNumLapsInRace;
 
 // RaceTypes, type#1000.
 typedef enum RaceTypes {
@@ -138,14 +57,12 @@ typedef enum RaceTypes {
     RACE_TYPE_TOURNAMENT    = 5,
 } RaceTypes;
 
-// TheRaceParameters.RaceType (+32), retail's 0x0031a8b8. While a replay
-// plays, UpdateLapCounts times only a time trial's finish line.
-// InitWithDefaults starts it at RACE_TYPE_NONE.
-extern int32_t RaceParametersRaceType;
-
 // tGlobalDisplaySettings (type#1393), eight bytes: what the player picked
 // for the HUD, which RCStateNoneCallback copies from the frontend's on
-// RESTART_RACE and NEXT_RACE.
+// RESTART_RACE and NEXT_RACE. The demo's last two were Scoring and
+// padding; retail's defaults (0x001ee0a0) fill them from SkipFE's
+// EnableJumpCam and EnableZoneCam, the two switches retail took out of
+// every race setup's data, so the port names them for those.
 typedef struct tGlobalDisplaySettings {
     int8_t RearViewMirror;
     int8_t Units;
@@ -153,15 +70,141 @@ typedef struct tGlobalDisplaySettings {
     int8_t TwoPlayerTrackMapMode;
     int8_t BeTheCopTrackMapMode;
     int8_t LeaderboardMode;
-    int8_t Scoring;
-    int8_t pad;
+    int8_t JumpCams;                // the demo's Scoring
+    int8_t ZoneCams;                // the demo's pad
 } tGlobalDisplaySettings;
 
 typedef char global_display_settings_size_check[
     sizeof(tGlobalDisplaySettings) == 8 ? 1 : -1];
 
-// TheRaceParameters.GlobalDisplaySettings (+748), retail's 0x0031ab84.
-extern tGlobalDisplaySettings RaceParametersGlobalDisplaySettings;
+// ------------------------------------------------------- RaceParameters
+
+struct DriverInfo;
+
+// RaceParameters, 788 bytes in retail (the demo's type#3457 is 768).
+// Retail added the int at 624, which only tCopManager reads, so BeACop and
+// everything after it is 4 further on; PlayerSettings grew from 40 bytes
+// to 48 each; the demo's pEliminatedDriverTable and NumEliminated are gone
+// (DriverInfo carries EliminatedRank instead), and two words follow
+// NumDriverInfo: 780, which InitWithDefaults draws from the default seed,
+// and 784. The one pointer is the driver table, so the offsets hold where
+// pointers are 4 bytes; the checkers' harnesses build one by name.
+//
+// Who reads what so far: PhysicsCar::Move, DamageEnabled, through
+// BodyDamage::GetVisibleTotalDamage. RealDriver BeACop: its horn toggles
+// the siren through the cop manager then, its nitro button fires the
+// cop's boost, and the Player's constructor takes the cop's NIS overlay.
+// The AI's route search TrackDirection, to tell the traffic that runs
+// with the player from the oncoming. Car's catchup Boost: 0 returns from
+// CalculateNewCatchupMultipliers before anything else is read.
+// PleaseResetMeLater BeACop and nMaxCops, signed against 0 (`blez`).
+// InitCars TrackNumber's TrackInfo; SetAIDriverModesFromPlayers splits
+// the AI field at half of NumAICars; the Player's constructor picks the
+// HUD's screen hashes only while AIDemoMode and ReplayDemoMode are both
+// 0, and InitPlayers takes the player's car from World's array when
+// AIDemoMode is set. Race's constructor takes its lap count from
+// NumLapsInRace, 1 when Point2Point is set too, and FigureOutBoundaries a
+// finish line apart from the start on a point-to-point race. While a
+// replay plays, UpdateLapCounts times only a time trial's finish line.
+// The frontend's setup screens write NumPlayerCars and NFSRaceMode as
+// they leave -- You're The Cop's select (0x001b74f8) was the first ported.
+typedef struct RaceParameters {
+    int32_t   TrackNumber;                       //   0  GetTrackInfo's
+    int32_t   TrackWeather;                      //   4
+    int32_t   TrackTimeOfDay;                    //   8
+    eTrackDirection TrackDirection;              //  12
+    float     TrafficDensity;                    //  16
+    float     TrafficOncoming;                   //  20
+    int32_t   AIDemoMode;                        //  24  bool
+    int32_t   ReplayDemoMode;                    //  28  bool
+    int32_t   RaceType;                          //  32  RaceTypes
+    Timer     TimeTrialTime;                     //  36
+    int32_t   Point2Point;                       //  40
+    int32_t   NumLapsInRace;                     //  44
+    int32_t   NumPlayerCars;                     //  48
+    int32_t   NumAICars;                         //  52
+    int32_t   OpponentSelect;                    //  56
+    int8_t    PlayerStartPosition[2];            //  60
+    uint8_t   _pad62[2];                         //  62
+    int32_t   DamageEnabled;                     //  64  bool
+    int32_t   JumpCamsEnabled;                   //  68  bool
+    int32_t   ZoneCamsEnabled;                   //  72  bool
+    int32_t   TrainingLinesEnabled;              //  76  bool
+    int32_t   HasObjective;                      //  80  bool
+    char      sObjective[512];                   //  84
+    int32_t   NFSRaceMode;                       // 596
+    int32_t   EventTreeRace;                     // 600  bool
+    int32_t   nMaxCops;                          // 604
+    int32_t   bTickets;                          // 608
+    int32_t   bRoadBlocks;                       // 612
+    int32_t   bSpikeStrips;                      // 616
+    int32_t   bHelicopter;                       // 620
+    int32_t   New624;                            // 624  retail's
+    int32_t   BeACop;                            // 628
+    int32_t   BeACopResetTimerAfterArrest;       // 632
+    int32_t   nNumTicketsBeforeArrest;           // 636
+    int32_t   nNumBeACopRoadBlocks;              // 640
+    int32_t   nNumBeACopChoppers;                // 644
+    int32_t   CopStrength;                       // 648
+    cPlayerSettings PlayerSettings[2];           // 652  what Player copies
+    tGlobalDisplaySettings GlobalDisplaySettings; // 748
+    int32_t   OpponentStrength;                  // 756
+    int32_t   Boost;                             // 760  the catchup
+    float     BoostScale[2];                     // 764
+    struct DriverInfo *pDriverInfoTable;         // 772
+    int32_t   NumDriverInfo;                     // 776
+    int32_t   New780;                            // 780  retail's
+    int32_t   New784;                            // 784  retail's
+} RaceParameters;                                // 788
+
+#if UINTPTR_MAX == 0xFFFFFFFFu
+typedef char raceparameters_layout_check[
+    (offsetof(RaceParameters, TimeTrialTime) == 36
+     && offsetof(RaceParameters, PlayerStartPosition) == 60
+     && offsetof(RaceParameters, DamageEnabled) == 64
+     && offsetof(RaceParameters, sObjective) == 84
+     && offsetof(RaceParameters, NFSRaceMode) == 596
+     && offsetof(RaceParameters, BeACop) == 628
+     && offsetof(RaceParameters, PlayerSettings) == 652
+     && offsetof(RaceParameters, GlobalDisplaySettings) == 748
+     && offsetof(RaceParameters, Boost) == 760
+     && offsetof(RaceParameters, pDriverInfoTable) == 772
+     && offsetof(RaceParameters, New784) == 784
+     && sizeof(RaceParameters) == 788) ? 1 : -1];
+#endif
+
+// TheRaceParameters, retail's 0x0031a898 (the demo's 0x00312520): the race
+// the frontend sets up and the race reads. raceparams.h has its methods.
+// The image's is zero until _GLOBAL_$I$TheRaceParameters [73] runs
+// InitWithDefaults; race.c starts four fields at InitWithDefaults' values,
+// as they were when each was its own global, for the harnesses that link
+// race.c and never run the constructor.
+extern RaceParameters TheRaceParameters;
+
+// The names the port's readers have used since each field was first
+// needed, each the field itself.
+#define RaceParametersTrackNumber      (TheRaceParameters.TrackNumber)
+#define RaceParametersTrackDirection   (TheRaceParameters.TrackDirection)
+#define RaceParametersAIDemoMode       (TheRaceParameters.AIDemoMode)
+#define RaceParametersReplayDemoMode   (TheRaceParameters.ReplayDemoMode)
+#define RaceParametersRaceType         (TheRaceParameters.RaceType)
+#define RaceParametersPoint2Point      (TheRaceParameters.Point2Point)
+#define RaceParametersNumLapsInRace    (TheRaceParameters.NumLapsInRace)
+#define RaceParametersNumPlayerCars    (TheRaceParameters.NumPlayerCars)
+#define RaceParametersNumAICars        (TheRaceParameters.NumAICars)
+#define RaceParametersDamageEnabled    (TheRaceParameters.DamageEnabled)
+#define RaceParametersNFSRaceMode      (TheRaceParameters.NFSRaceMode)
+#define RaceParametersMaxCops          (TheRaceParameters.nMaxCops)
+#define RaceParametersBeACop           (TheRaceParameters.BeACop)
+#define RaceParametersPlayerSettings   (TheRaceParameters.PlayerSettings)
+#define RaceParametersGlobalDisplaySettings \
+    (TheRaceParameters.GlobalDisplaySettings)
+#define RaceParametersBoost            (TheRaceParameters.Boost)
+#define RaceParametersDriverInfo       (TheRaceParameters.pDriverInfoTable)
+#define RaceParametersNumDriverInfo    (TheRaceParameters.NumDriverInfo)
+
+// RaceParameters::GetDriverInfo(int), 0x001edb28: driver `i`, unchecked.
+struct DriverInfo *race_parameters_get_driver_info(int32_t i);
 
 // ------------------------------------------------------------- RacingCar
 

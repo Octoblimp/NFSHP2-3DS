@@ -128,6 +128,7 @@ SOURCES = [HARNESS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "bchunk.c", "trackpath.c", "quickspline.c", "bmem.c", "trackroute.c",
     "polyhedra.c", "vclip.c", "espresso.c", "difficultyinfo.c",
     "texturepack.c", "sun.c", "weatherman.c", "carinfo.c",
+    "characterinfo.c",
     "cartypeinfo.c", "langtab.c", "drivetrain.c", "engine.c", "wheel.c",
     "suspension.c", "steering.c", "rigidbody.c", "table.c")]
 
@@ -242,7 +243,7 @@ CLAIMS = {
     30: [0x00039100, 0x00039101, 0x00039102],
 }
 TAKER = {t: k for k, ts in CLAIMS.items() for t in ts}
-PORTED = {0, 1, 2, 4, 9, 11, 14, 16, 18, 19, 26, 29}
+PORTED = {0, 1, 2, 4, 9, 11, 14, 16, 18, 19, 23, 26, 29}
 
 # Retail's: the demo's without PhysPredict, slot 20, and HeliSheet (23) a
 # container. The rest of the guards are the demo's.

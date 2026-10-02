@@ -217,6 +217,14 @@ typedef struct {
     // OverwriteFred's calls after the copy (memcard.c), which take the
     // loaded settings into the rest of the game: Fred whole, as loaded.
     void (*fredLoaded)(void* user, uint8_t* fred);
+    // RaceParameters::InitWithDefaults (0x001ed5c8) on TheRaceParameters,
+    // which BeginGameFlowLoadingFrontEnd and NewMainMenu's constructor
+    // call; FrontendDatabase::InitWithDefaults (0x00183830) on Fred, the
+    // boot's language screen's; and MakeChallengeCarsAvailable
+    // (0x00183af8), NewMainMenu's (raceparams.h, fred.h).
+    void (*raceDefaults)(void* user);
+    void (*frontendDefaults)(void* user);
+    void (*challengeCars)(void* user);
 
     void (*sound)(void* user, int soundEvent);   // MakeFrontendSound
     void (*jukebox)(void* user, int start);      // sound::jukebox::Start/Stop

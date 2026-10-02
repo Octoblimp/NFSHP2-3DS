@@ -31,7 +31,7 @@ int32_t WorldTimer = 0;
 int32_t WorldTimeFrames = 0;
 int32_t WorldLoopCounter = 0;
 ReplayManager *pReplayManager;
-int32_t RaceParametersDamageEnabled;
+RaceParameters TheRaceParameters;
 CarTriggerEffectFn gCarTriggerEffectFn;
 
 static Car        car;

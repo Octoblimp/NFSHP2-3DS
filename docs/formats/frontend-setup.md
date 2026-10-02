@@ -325,10 +325,10 @@ calls `0x001b93e0` on it, which sets 2, 0, 1, 0, 1:
 | +12 | traffic | 0 |
 | +16 | damage | 1 |
 
-This screen only shows the last three. The port's Fred image took no
-defaults but the audio options' until now; `bsetup_fred_defaults` writes
-this block and `DataChallengeScreen`, and main.c calls it before the card
-loads.
+This screen only shows the last three. `fred.c`'s InitWithDefaults
+writes this block and `DataChallengeScreen` with the rest of Fred
+(`frontend-database.md`). `bsetup_fred_defaults`, which wrote only these
+two, is left for `setup_test`; main.c no longer calls it.
 
 ### `RaceSetupBaseClass`
 

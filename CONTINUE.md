@@ -1304,13 +1304,119 @@ and so replaced every boot.
      ops, 2333 lines, 0 differ. Of 254 mutations, 252 are caught and 2
      are equivalent (`uts_files_unguarded`, `utc_files_unguarded`).
 
-   **Next is 8l: wire the coordinator in and flow into a race**, for one
-   car on a track on Azahar (step 9). Nothing enters
-   `LOADING_TRACK_COMMON` yet. What it needs:
-   - a way in: the frontend's race start (FrontendDatabase::StartRace,
-     whose ChangeGameFlows are at `0x00185510` and `0x00185520`), or a
-     debug path that fills TheRaceParameters (track, cars, drivers) and
-     asks for state 4;
+   **8l-1, InitFred and TheRaceParameters, is done** (HANDOFF.md,
+   Session 31, continued: InitFred and TheRaceParameters (step 8l-1)).
+   `docs/formats/frontend-database.md` has the write-up.
+   - `fred.c` and `fred.h` are FrontendDatabase as retail's byte layout
+     (FrontendPlayerInfo 1744 bytes at `0x10738`), its constructor
+     (`0x001836a0`), InitFred (`0x00183820`), InitWithDefaults
+     (`0x00183830`), MakeChallengeCarsAvailable (`0x00183af8`),
+     HighScoreTable's InitStatsTables (`0x00186708`) and the four
+     FrontendPlayerInfo methods: SetCarAvailability, SetDefaultCarType,
+     AssignCarOfType and SetCharacterInfo.
+   - `raceparams.c` and `raceparams.h` are RaceParameters'
+     InitWithDefaults (`0x001ed5c8`), its static constructor
+     (`0x001ee590`, sinit's [73]) and tGlobalDisplaySettings' defaults
+     (`0x001ee0a0`). `race.h` has the 788-byte struct; its per-field
+     globals are macros on TheRaceParameters now.
+   - `characterinfo.c` is the character loader and unloader (chunks
+     `0x34300` and `0x34301`) and the four getters. `playersettings.c` is
+     cPlayerSettings' reset. `configitems.c` has the SkipFE and default-car
+     words at their disc values. `edisplay.c` has the display offsets.
+   - `gameflow.h` has three new hooks: raceDefaults, frontendDefaults and
+     challengeCars. `main.c` calls InitFred after the global chunks, where
+     it used to call `bsetup_fred_defaults`. GLOBALB's car chunks now also
+     go through LoaderCharacterInfo, and its track table through
+     LoaderTrackGeometry. Fred is `fred.c`'s, and the card loads over it.
+   - Seams: IsCarUnlocked (NULL answers 0, as a fresh save does), the
+     audio defaults (the jukebox's) and GetTranslatedString (the
+     language table's).
+   - `fred_check` runs retail's code in RetailEmu: 9 scenarios, 668 ops,
+     54344 lines, 0 differ. All 103 mutations are caught. bootflow (48
+     scenarios), player, loadertable, careffects, trackflow and every
+     checker that links `race.c` pass, `sinit_check` has 23 calls, and
+     Azahar passes. On the device the log reads `fred defaults: Player1
+     (Rick), Player2 (Wayne), car 37 / 37`.
+
+   **Next is 8l: flow into a race**, one car on a track on Azahar (step
+   9), in three slices. 8l-1 is done; 8l-2 is next. Nothing enters
+   `LOADING_TRACK_COMMON` yet.
+
+   The way in is retail's own debug path. With SkipFE (gp-23220) set,
+   `main` (`0x0012f000`) calls StartSkipFEGame (`0x00184bd8`) in place of
+   ChangeGameFlow(1). That fills TheRaceParameters from the SkipFE
+   globals (gp-23256 to gp-23132, the demo's SkipFE* names shifted by
+   568, or 572 past the new word at gp-23180) and jumps into StartRace
+   (`0x00184f68`), which asks for state 4 straight from NONE. The
+   shipped values are one car (type 37), no AI, no traffic and no cops,
+   on track 12 (TrackSelectedInConfigFile is -1), for 8 laps. Retail sets
+   SkipFE only from a joylog's config items (LoadConfigItems,
+   `0x0012faf0`); `Config.bin` (LoadConfig, `0x0012eda0`) holds only the
+   track. So the port needs its own switch. The frontend's way in, car
+   select's MaybeContinueToNextScreen (`0x00198b64`) and SelectTrackScreen's
+   StartRace (`0x001a0918`), comes later.
+
+   The RACING state has no callbacks: its row in the state table
+   (`0x002faea0`, 16 bytes a row) is all zeroes. MainLoop
+   (`0x0012f378`) runs the race: ServiceGameFlow, then the coordinator's
+   ExecuteQueuedMessages (gp-22216), World's DoTimestep,
+   UpdateCameraMovers, UpdateCameraShakers and eDisplayFrame.
+   EndGameFlowLoadingTrackSpecific builds the coordinator, and
+   BeginGameFlowUnloadingTrackSpecific deletes it.
+
+   - **8l-1, InitFred and TheRaceParameters (done, above).**
+     - TheRaceParameters as retail's struct, 788 bytes (InitWithDefaults
+       clears that much). race.h's per-field globals become macros on
+       it. It has its static init (`0x001ee590`, which sets the 14
+       DriverInfos at `0x0031abb0`), InitWithDefaults (`0x001ed5c8`) and
+       tGlobalDisplaySettings' defaults (`0x001ee0a0`).
+     - CharacterInfo: Loader/UnloaderCharacterInfo (`0x001d9330` and
+       `0x001d93b0`; chunks `0x34300`, 68 bytes a record, and `0x34301`,
+       180 bytes) and the four getters (`0x001d9480` to `0x001d9590`).
+     - FrontendDatabase's constructor (`0x001836a0`) and InitFred
+       (`0x00183820`, which calls InitWithDefaults at `0x00183830`).
+       InitializeEverything calls InitFred after InitializeSoundDriver.
+       The port's Fred stays the byte image, at retail's offsets:
+       FrontendPlayerInfo is 1744 bytes at `0x10738`; its parts are 64
+       car statuses of 24 bytes, CharacterInfo at 1536, cPlayerSettings
+       at 1604, RideInfoByGameMode[11] at 1652, and a word at 1740.
+     - The rest of what InitWithDefaults reaches:
+       - MakeChallengeCarsAvailable (`0x00183af8`). IsCarUnlocked
+         (`0x0024b208`) is a seam there, because the reward system is
+         not ported; NULL reads 0, which is what a fresh save answers.
+       - FrontendPlayerInfo's SetCharacterInfo, SetCarAvailability (with
+         `0x00187b08`, the skins), SetDefaultCarType, AssignCarOfType
+         and `0x001879b8`.
+       - The Data*::InitWithDefaults not yet ported, and HighScoreTable's
+         InitStatsTables (`0x00186708`).
+       - The two player names.
+     - `main.c` calls InitFred where it calls `bsetup_fred_defaults`
+       today.
+   - **8l-2, the race start (next).**
+     - The SkipFE globals, StartSkipFEGame and StartRace.
+     - SetupCarsForRace (`0x00185690`) and everything it calls:
+       CalculateStartingPositions (`0x00185fe8`), GenerateRandomRideInfo
+       (`0x00188218`), PickCharacterNumberThatIsntRacing, PickCopCharacterNumber,
+       DriverInfo's constructor (`0x00188610`), AddDriverInfo
+       (`0x001eda40`), RaceParameters' `0x001edc50`, `0x001edbc8` and
+       `0x001ede08`, AreThereAnyCarsOfType and AreThereAnyCarsOfColour,
+       SetRecordTimesToBeat, MaybeSetSelectedCarForMultiTrackEvent and
+       `0x001ff978`.
+     - RaceEvent's calls stay seams. UseTheRaceEvent is true only for
+       GameTypes 4, 8 and 9.
+     - ChooseHudTextures (`0x001ee388`) is an empty function in retail.
+     - Retail's BeginGameFlowUnloadingFrontEnd (`0x00168830`), which ends
+       in ChangeGameFlow(4). The port's `bgf_begin_unloading_frontend`
+       neither chains nor unlaunches the menus.
+     - The port's switch for SkipFE.
+   - **8l-3, the race.**
+     - `main.c` builds the coordinator (`gNewRaceCoordinatorFn`) and runs
+       MainLoop's race half. The track draws as trackview draws it, plus
+       RenderCars.
+     - The car's textures (LoadTexturesFromFile). With that seam NULL,
+       `carloader_begin_loading` leaves LoadingInProgress set and never
+       calls back, so Part1 never reaches Part2.
+     - The items below.
    - `pHudTexturePack` (`GLOBAL\HUDTEX.BIN`) and the texture-pack
      streaming behind LoadTexturesFromFile (`0x001acc98`), which the car
      loader's seam wants too;

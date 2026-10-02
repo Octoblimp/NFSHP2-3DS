@@ -762,8 +762,8 @@ static BChunkLoader saved_unload[BCHUNK_NUM_LOADERS];
 static int unported_slot(int k)
 {
     return !(k == 0 || k == 1 || k == 2 || k == 4 || k == 9 || k == 11
-             || k == 14 || k == 16 || k == 18 || k == 19 || k == 25
-             || k == 28);
+             || k == 14 || k == 16 || k == 18 || k == 19 || k == 22
+             || k == 25 || k == 28);
 }
 
 // --------------------------------------------------------------- dumps

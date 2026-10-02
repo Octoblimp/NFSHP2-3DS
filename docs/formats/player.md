@@ -142,8 +142,9 @@ bytes, the POV, bytes 5-7, `CameraSpring`, `Lookback`, the name through
 
 ### `TheRaceParameters`
 
-The port keeps `RaceParameters` as loose globals in `race.h`. Retail's
-offsets match the demo's through 596: `AIDemoMode` 24, `ReplayDemoMode` 28,
+`race.h` has `RaceParameters` as retail's 788-byte struct, and its old
+per-field names are macros on it; `frontend-database.md` has its defaults.
+Retail's offsets match the demo's through 596: `AIDemoMode` 24, `ReplayDemoMode` 28,
 `NumPlayerCars` 48, `NFSRaceMode` 596 and `nMaxCops` 604. Past that
 retail has one int more. `DoSnapshot` (`0x001ed6f8`) snapshots eleven ints
 at 604-644 where the demo has ten, then `CopStrength` at 648. `BeACop` is

@@ -46,10 +46,7 @@ typedef char sizes_distinct[
      && sizeof(Average) != 320 && sizeof(Average) != 512) ? 1 : -1];
 
 // What playerinit.c and nisoverlay.c reach outside themselves.
-int32_t RaceParametersBeACop;
-int32_t RaceParametersNumPlayerCars;
-int32_t RaceParametersAIDemoMode;
-int32_t RaceParametersReplayDemoMode;
+RaceParameters TheRaceParameters;
 int32_t WorldTimer;
 int32_t bResetGlare;
 const int *gPlayerCamSkipFE;

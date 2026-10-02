@@ -940,7 +940,7 @@ class RetailLoading(object):
             0x0014cbf8: screen_visibility,
             0x00144968: lambda _e: f.object_visible(arg(0), arg(1), arg(2)),
             0x00112858: lambda _e: f.say("display frame"),   # eDisplayFrame
-            0x001ed5c8: nothing,
+            0x001ed5c8: lambda _e: f.say("race defaults"),
             0x00257988: lambda _e: e.alloc(16),
             0x00103e68: nothing,                     # End's five Inits
             0x0011db90: nothing,
@@ -1823,12 +1823,12 @@ class RetailMainMenu(object):
             0x002488b0,                    # ~tHighlightAnimation
             0x001b9ae0,                    # ~tSlideInAnimation
             0x0016e120, 0x0016e168,        # SelectionSet, ~
-            0x00183af8,                    # MakeChallengeCarsAvailable
-            0x001ed5c8,                    # RaceParameters::InitWithDefaults
             0x0016ed50,                    # ConsiderStartDemoMode
         )
         stubs = {addr: (lambda _e: None) for addr in silent}
         stubs.update({
+            0x00183af8: lambda _e: f.say("challenge cars"),
+            0x001ed5c8: lambda _e: f.say("race defaults"),
             0x002491b0: blurb_ctor,
             0x00249280: lambda _e: f.say("menu kit released"),
             0x00248870: lambda _e: f.say(            # tHighlightAnimation()
@@ -2856,6 +2856,25 @@ MUTATIONS += [
      + NL + "                  BGF_OBJ_SCROLLING_TEXT, BGF_OBJ_WHITEOUT_BAR);"
      + NL + "    menuBloomInit(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_OBJ_ANIMATING_ITEM,"
      + NL + "                  BANIM_BLOOM_COLOR);"),
+    ("main-menu-no-challenge-cars", GF,
+     "    trace(gf, \"challenge cars\");" + NL
+     + "    HOOK_VOID0(gf, challengeCars);",
+     "    HOOK_VOID0(gf, challengeCars);"),
+    ("main-menu-no-race-defaults", GF,
+     "    HOOK_VOID0(gf, challengeCars);" + NL
+     + "    trace(gf, \"race defaults\");",
+     "    HOOK_VOID0(gf, challengeCars);"),
+    ("main-menu-defaults-swapped", GF,
+     "    trace(gf, \"challenge cars\");" + NL
+     + "    HOOK_VOID0(gf, challengeCars);" + NL
+     + "    trace(gf, \"race defaults\");",
+     "    trace(gf, \"race defaults\");" + NL
+     + "    trace(gf, \"challenge cars\");" + NL
+     + "    HOOK_VOID0(gf, challengeCars);"),
+    ("loading-no-race-defaults", GF,
+     "    // answer is kept for a debug print." + NL
+     + "    trace(gf, \"race defaults\");",
+     "    // answer is kept for a debug print."),
     ("main-menu-jukebox-silent", GF,
      "    HOOK_VOID(gf, jukebox, 1);    // the main menu's", "    (void)0;"),
     ("main-menu-jukebox-stops", GF,

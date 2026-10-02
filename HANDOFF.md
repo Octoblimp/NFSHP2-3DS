@@ -11449,3 +11449,98 @@ Nothing on the device enters the new states yet.
 the chain needs on the device before anything can enter
 LOADING_TRACK_COMMON: a way in, the HUD pack and the texture streaming,
 eDuplicateSolid, the RaceCoordinator and the cameras.
+
+## Session 31, continued (2026-10-02) -- InitFred and TheRaceParameters (step 8l-1)
+
+The user's ask: start 8l-1, InitFred and RaceParameters, and keep going
+through every task. The port, its harness and the checker were written
+over two contexts. This one closed the last four mutations, reran every
+checker, built, tested on Azahar, wrote the docs and committed.
+
+### The port
+
+`docs/formats/frontend-database.md` has the decode.
+
+- **FrontendDatabase** (`fred.c`, `fred.h`) is retail's byte layout, so
+  the card's save still loads over it whole. The parts are the
+  constructor (`0x001836a0`), InitFred (`0x00183820`) and InitWithDefaults
+  (`0x00183830`).
+  - InitWithDefaults clears the record and sets each Data* block's
+    defaults. It runs MakeChallengeCarsAvailable (`0x00183af8`) and gives
+    both players their default car. It resets their settings and sets the
+    two names from the language table.
+  - HighScoreTable's InitStatsTables (`0x00186708`) numbers the first
+    sixteen tracks that are their own high score track. The rest take
+    their twin's number, and every time starts at 0x7fffffff.
+  - FrontendPlayerInfo's SetCarAvailability, SetDefaultCarType,
+    AssignCarOfType and SetCharacterInfo are here too.
+- **RaceParameters** (`raceparams.c`, `raceparams.h`). These are its
+  InitWithDefaults (`0x001ed5c8`), its static constructor (`0x001ee590`)
+  and tGlobalDisplaySettings' defaults (`0x001ee0a0`). `race.h` has the
+  788-byte struct, and the per-field globals the earlier slices declared
+  are macros on TheRaceParameters now.
+- **The characters** (`characterinfo.c`): the loader and unloader of
+  chunks `0x34300` and `0x34301`, and the four getters.
+- **The smaller files.** `playersettings.c` is cPlayerSettings' reset.
+  `configitems.c` has the words LoadConfigItems fills: the SkipFE race and
+  the default cars, at their disc values. `edisplay.c` has the display
+  offsets.
+- **The wiring.**
+  - `main.c` calls InitFred after the global chunks, as
+    InitializeEverything does after the sound driver. That replaces
+    `bsetup_fred_defaults`, which only setup_test still uses.
+  - GLOBALB's chunks go through LoaderCharacterInfo, and its track table
+    through LoaderTrackGeometry.
+  - Three new flow hooks. RaceParameters' defaults run from
+    BeginGameFlowLoadingFrontEnd and NewMainMenu, Fred's from the
+    language screen, and MakeChallengeCarsAvailable from NewMainMenu.
+- **Seams.** IsCarUnlocked is NULL, which answers 0, as a fresh save does.
+  The audio options' defaults are the jukebox's, and GetTranslatedString
+  is the language table's.
+
+### The checks
+
+`fred_check` runs the image's code in RetailEmu. It covers both static
+constructors, InitFred and everything under it, the four player methods,
+InitStatsTables, RaceParameters' and the display's defaults, the character
+loader, unloader and getters, LoaderTrackGeometry and the display offsets.
+IsCarUnlocked, GetTranslatedString and the audio defaults are stubs on
+both sides. The data are GLOBALB's own: 64 cars, 66 tracks and ten
+characters, changed field by field.
+
+The checker has 9 scenarios, 668 ops and 54344 lines, with 0 differ.
+Getting there took four fixes:
+
+- the host's CarTypeInfo is wider than retail's 1376 bytes (it holds a
+  pointer), so the harness copies the records into a host array;
+- the model sign-extends its arguments, because the EE holds an int in a
+  64-bit register and retail tests `skin == -1` there;
+- two validator assertions, about twins out of range, needed the
+  scenarios changed;
+- realtime.c pulls in joylog.c and timer.c.
+
+All 103 mutations are caught. Four of them first survived and needed new
+scenarios:
+
+- a dash asked for on a car whose dash geometry is there but not offered;
+- both default cars of one type, with the first player's skin -1;
+- a fallback string that differs within its first 11 bytes, since
+  bStrNCpy keeps only 11;
+- New784 set to 1, since the memset already clears it.
+
+Every checker that takes no arguments passes, including bootflow (48
+scenarios), player, loadertable, careffects, trackflow and every one that
+links `race.c`. `sinit_check` has 23 calls. The 3DS build links and its
+relocations check out. On Azahar it boots, plays the movie, walks the
+frontend and exits cleanly. The log reads `fred defaults: Player1 (Rick),
+Player2 (Wayne), car 37 / 37`. Be The Cop's setup shows the same
+defaults as before, read from the real Fred now.
+
+### Next
+
+8l-2, the race start:
+
+- StartSkipFEGame (`0x00184bd8`), StartRace (`0x00184f68`) and
+  SetupCarsForRace (`0x00185690`), with the helpers under them;
+- the RaceEvent and EventTree calls as seams;
+- a switch for SkipFE.

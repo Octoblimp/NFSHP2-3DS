@@ -66,9 +66,10 @@ NL = chr(10)
 
 HARNESS = "tools/src/player_test.c"
 PIN = "3DS Files/source/playerinit.c"
+PSET = "3DS Files/source/playersettings.c"
 NIS = "3DS Files/source/nisoverlay.c"
 PLC = "3DS Files/source/player.c"
-SOURCES = [HARNESS, PIN, NIS, PLC]
+SOURCES = [HARNESS, PIN, PSET, NIS, PLC]
 
 HARNESS_TIMEOUT = 120
 
@@ -1422,28 +1423,28 @@ MUTATIONS = [
     M("score_top_none", PIN, "    float x = 0.0f, y = 0.0f;", "    float x = 0.0f, y = 1.0f;"),
     M("new2736_kept", PIN, "    p->New2736 = 0;\n", ""),
     # ResetToDefaults
-    M("rd_rumble", PIN, "    s->Rumble = 1;", "    s->Rumble = 0;"),
-    M("rd_hud_state", PIN, "    s->PlayersHudState = 0;\n", ""),
-    M("rd_style", PIN, "    s->DrivingStyle = 0;\n", ""),
-    M("rd_transmission", PIN, "    s->TransmissionType = 0;\n", ""),
-    M("rd_skip_ignored", PIN,
+    M("rd_rumble", PSET, "    s->Rumble = 1;", "    s->Rumble = 0;"),
+    M("rd_hud_state", PSET, "    s->PlayersHudState = 0;\n", ""),
+    M("rd_style", PSET, "    s->DrivingStyle = 0;\n", ""),
+    M("rd_transmission", PSET, "    s->TransmissionType = 0;\n", ""),
+    M("rd_skip_ignored", PSET,
       "    s->DriveCameraPOVIndex = gPlayerCamSkipFE != NULL && *gPlayerCamSkipFE\n",
       "    s->DriveCameraPOVIndex = 0\n"),
-    M("rd_pov_default", PIN, "        ? (int8_t)PlayerSkipFEPOVIndex : 1;", "        ? (int8_t)PlayerSkipFEPOVIndex : 0;"),
-    M("rd_pov_skip", PIN, "        ? (int8_t)PlayerSkipFEPOVIndex : 1;", "        ? 1 : 1;"),
-    M("rd_split", PIN, "    s->SplitTimeType = 0;\n", ""),
-    M("rd_lookback", PIN, "    s->Lookback = 1;", "    s->Lookback = 0;"),
-    M("rd_gender", PIN, "    s->PreferredGender = 0;\n", ""),
-    M("rd_new7", PIN, "    s->New7 = 0;\n", ""),
-    M("rd_spring", PIN, "    s->CameraSpring = 0;\n", ""),
-    M("rd_name", PIN, "    strcpy(s->PlayerName, \"PLAYER\");", "    strcpy(s->PlayerName, \"PLAYER1\");"),
-    M("rd_name_cleared", PIN, "    strcpy(s->PlayerName, \"PLAYER\");",
+    M("rd_pov_default", PSET, "        ? (int8_t)PlayerSkipFEPOVIndex : 1;", "        ? (int8_t)PlayerSkipFEPOVIndex : 0;"),
+    M("rd_pov_skip", PSET, "        ? (int8_t)PlayerSkipFEPOVIndex : 1;", "        ? 1 : 1;"),
+    M("rd_split", PSET, "    s->SplitTimeType = 0;\n", ""),
+    M("rd_lookback", PSET, "    s->Lookback = 1;", "    s->Lookback = 0;"),
+    M("rd_gender", PSET, "    s->PreferredGender = 0;\n", ""),
+    M("rd_new7", PSET, "    s->New7 = 0;\n", ""),
+    M("rd_spring", PSET, "    s->CameraSpring = 0;\n", ""),
+    M("rd_name", PSET, "    strcpy(s->PlayerName, \"PLAYER\");", "    strcpy(s->PlayerName, \"PLAYER1\");"),
+    M("rd_name_cleared", PSET, "    strcpy(s->PlayerName, \"PLAYER\");",
       "    memset(s->PlayerName, 0, sizeof s->PlayerName);\n    strcpy(s->PlayerName, \"PLAYER\");"),
-    M("rd_features", PIN, "    s->PreferredHudFeatures = 853;", "    s->PreferredHudFeatures = 852;"),
-    M("rd_new44", PIN, "    s->New44 = 1;", "    s->New44 = 0;"),
-    M("rd_new40", PIN, "    s->New40 = 1;", "    s->New40 = 0;"),
-    M("rd_total_record", PIN, "    s->BestTotalTimeRecord.PackedTime = 0;\n", ""),
-    M("rd_lap_record", PIN, "    s->BestLapTimeRecord.PackedTime = 0;\n", ""),
+    M("rd_features", PSET, "    s->PreferredHudFeatures = 853;", "    s->PreferredHudFeatures = 852;"),
+    M("rd_new44", PSET, "    s->New44 = 1;", "    s->New44 = 0;"),
+    M("rd_new40", PSET, "    s->New40 = 1;", "    s->New40 = 0;"),
+    M("rd_total_record", PSET, "    s->BestTotalTimeRecord.PackedTime = 0;\n", ""),
+    M("rd_lap_record", PSET, "    s->BestLapTimeRecord.PackedTime = 0;\n", ""),
     # CleanUpJumpCam
     M("jc_no_delete", PIN, "        gPreviewRouteDeleteFn(p->pJumpCamRoute);\n", "        ;\n"),
     M("jc_kept", PIN, "    p->pJumpCamRoute = NULL;\n}", "}"),

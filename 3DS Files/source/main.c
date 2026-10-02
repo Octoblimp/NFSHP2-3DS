@@ -58,6 +58,7 @@
 #include "carmodes.h"
 #include "carrenderinfo.h"
 #include "carstate.h"
+#include "characterinfo.h"
 #include "collision.h"
 #include "collisionbody.h"
 #include "emath.h"
@@ -66,6 +67,7 @@
 #include "eview.h"
 #include "gamedata.h"
 #include "fesound.h"
+#include "fred.h"
 #include "gameflow.h"
 #include "heapcfg.h"
 #include "geoview.h"
@@ -86,6 +88,7 @@
 #include "queuedfile.h"
 #include "race.h"
 #include "racecoord.h"
+#include "raceparams.h"
 #include "realcontroller.h"
 #include "realdriver.h"
 #include "realtime.h"
@@ -449,11 +452,9 @@ static void viewerCallback(BMenu* m, BScreenMessage msg,
 // when a screen comes back.
 static BsndDriver gSnd;
 
-// Fred (0x002fc050), what the card loads over. The frontend database is
-// still the port's defaults (memcard.h), bar the audio options at +148,
-// which the jukebox and the volumes read.
-static uint8_t g_fred[BMC_SAVE_SIZE];
-#define FRED_AUDIO_OPTIONS 148
+// Fred (0x002fc050), the frontend database (fred.h), which the card loads
+// over whole. The jukebox and the volumes read its audio options at +148.
+#define FRED_AUDIO_OPTIONS offsetof(FrontendDatabase, AudioOptionsScreenData)
 
 // sound::jukebox (0x003115d0), the EA TRAX player, and what it asks of the
 // game. The flow's CurrentGameFlowState is its gp-21420; the VBlank count
@@ -773,7 +774,7 @@ static void hookLoadResource(void* user, const char* path, BGameFlowDone done)
 // menu's.
 static void hookLoadSoundRegions(void* user, BGameFlowDone done)
 {
-    jb_music_set_selection(&g_jukebox, g_fred + FRED_AUDIO_OPTIONS,
+    jb_music_set_selection(&g_jukebox, Fred.AudioOptionsScreenData,
                            JB_CAT_MENU_MUSIC);
     bootQueue((Boot*)user, "sound regions", done);
 }
@@ -982,6 +983,54 @@ static void hookFredLoaded(void* user, uint8_t* fred)
     int mode = jb_audio_apply(&g_jukebox, fred + FRED_AUDIO_OPTIONS);
     g_audioMode = mode;             // sound::SetAudioMode
     logLine("audio options loaded: mode %d", mode);
+}
+
+// FrontendDatabase::InitWithDefaults' calls out (fred.h): the audio
+// options' defaults (0x001ef1c8), which want the jukebox's tunes, and
+// GetTranslatedString (0x0021e560) for the two players' default names.
+static void fredAudioDefaults(uint8_t* ao)
+{
+    jb_audio_init_with_defaults(&g_jukebox, ao, g_audioMode);
+}
+
+static const char* fredTranslate(int32_t id)
+{
+    static char text[64];
+    if (!g_boot.ui || !g_boot.ui->hasLang) return NULL;
+    if (langtab_copy(&g_boot.ui->lang, id, text, sizeof(text)) == 0)
+        return NULL;
+    return text;
+}
+
+// RaceParameters::InitWithDefaults, InitWithDefaults and
+// MakeChallengeCarsAvailable, where the flow calls them (gameflow.h).
+static void logFredDefaults(void)
+{
+    const FrontendPlayerInfo* p = Fred.FrontendPlayers;
+    logLine("fred defaults: %s (%s), %s (%s), car %d / %d",
+            p[0].mPlayerSettings.PlayerName, p[0].mCharacterInfo.CharacterName,
+            p[1].mPlayerSettings.PlayerName, p[1].mCharacterInfo.CharacterName,
+            (int)p[0].RideInfoByGameMode[0].Type,
+            (int)p[1].RideInfoByGameMode[0].Type);
+}
+
+static void hookRaceDefaults(void* user)
+{
+    (void)user;
+    race_parameters_init_with_defaults(&TheRaceParameters);
+}
+
+static void hookFrontendDefaults(void* user)
+{
+    (void)user;
+    fred_init_with_defaults(&Fred);
+    logFredDefaults();
+}
+
+static void hookChallengeCars(void* user)
+{
+    (void)user;
+    fred_make_challenge_cars_available(&Fred);
 }
 
 static void hookTrace(void* user, const char* line)
@@ -1625,12 +1674,12 @@ static void hookSetupHelpOverride(void* user, const int32_t* lines)
             lines[0] && lines[1] && lines[2] ? (long)lines[3] : 0L);
 }
 
-// The three FrontendDatabase calls car select starts with. Car select and
-// the cars' loading are the next slices; until then they are traced.
+// The three FrontendDatabase calls car select starts with. The first is
+// fred.c's; the other two come with car select.
 static void hookSetupChallengeCars(void* user)
 {
     (void)user;
-    logLine("fred MakeChallengeCarsAvailable (not ported)");
+    fred_make_challenge_cars_available(&Fred);
 }
 
 static void hookSetupPreloadCars(void* user)
@@ -1660,7 +1709,7 @@ static void hookJukebox(void* user, int start)
 {
     (void)user;
     if (start) {
-        jb_music_start(&g_jukebox, g_fred + FRED_AUDIO_OPTIONS, 1);
+        jb_music_start(&g_jukebox, Fred.AudioOptionsScreenData, 1);
     } else {
         jb_music_stop(&g_jukebox);
     }
@@ -1774,9 +1823,17 @@ static void loadGlobalCarInfo(UIBundle* b)
         uint32_t size = bchunk_u32(c + 4);
         if (size > (size_t)(end - c) - 8) break;
         taken += loader_car_info(c);
+        // LoaderCharacterInfo's two (characterinfo.h), and LoaderTrackGeometry
+        // for the track info table: the only chunk of its seven GLOBALB has.
+        // The others fall through to the topology tree's, which is the
+        // track bundle's.
+        taken += loader_character_info(c);
+        if (bchunk_u32(c) == 0x34201) taken += track_loader_geometry(c);
         c += 8 + size;
     }
-    logPrintf("car data: %d chunks, %d skins\n", taken, (int)NumSkinInfo);
+    logPrintf("car data: %d chunks, %d skins, %d characters, %d tracks\n",
+              taken, (int)NumSkinInfo, (int)NumCharacterInfo,
+              (int)HighestTrackNumber);
 }
 
 static const char* messageName(BScreenMessage msg)
@@ -2284,13 +2341,6 @@ int main(int argc, char** argv)
                   &kJukeboxWorld);
     jb_load_cartridge(&g_jukebox.jukebox, "SOUND\\JukeboxM.JBC", false);
     jb_default_category_volumes(&g_jukebox);
-    // FrontendDatabase::InitWithDefaults' audio options (0x001ef1c8), what
-    // the card's settings load over.
-    jb_audio_init_with_defaults(&g_jukebox, g_fred + FRED_AUDIO_OPTIONS,
-                                g_audioMode);
-    // And its two setup blocks (0x00183830): DataChallengeScreen at +8 and
-    // DataBeTheCopSetup at +64.
-    bsetup_fred_defaults(g_fred);
     logPrintf("Jukebox: %s, %u tunes\n",
               jb_is_cartridge_loaded(&g_jukebox.jukebox) ? "loaded" : "none",
               (unsigned)g_jukebox.jukebox.numTunes);
@@ -2367,6 +2417,9 @@ int main(int argc, char** argv)
     hooks.displayFrame     = hookDisplayFrame;
     hooks.newFileSys       = hookNewFileSys;
     hooks.fredLoaded       = hookFredLoaded;
+    hooks.raceDefaults     = hookRaceDefaults;
+    hooks.frontendDefaults = hookFrontendDefaults;
+    hooks.challengeCars    = hookChallengeCars;
     // The title screen's Start once its movies are done, NewMainMenu's
     // constructor's, and UnlaunchFrontendMenus' Stop.
     hooks.jukebox          = hookJukebox;
@@ -2383,12 +2436,18 @@ int main(int argc, char** argv)
              kScreens, NUM_SCREENS, kBootStages, NUM_BOOT_STAGES, &hooks);
     // FlailerScreenList's constructor makes its song monitor (0x0016c25c).
     bsm_init(&g_songMonitor, &kSongMonitorHooks);
-    g_flow.fred = g_fred;
+    g_flow.fred = fred_bytes();
     // Player's POV cycle reads SkipFE (gp-23220), which the flow holds.
     gPlayerCamSkipFE = &g_flow.skipFE;
     gCurrLanguageFn = currLanguage;
     bgf_load_global_chunks(&g_flow);
     logLine("global chunks loaded, LOADING drawn");
+    // InitFred (0x00183820), after the car data and the sound driver as in
+    // InitializeEverything: FrontendDatabase::InitWithDefaults on Fred.
+    gFredAudioOptionsDefaultsFn = fredAudioDefaults;
+    gFredTranslateFn = fredTranslate;
+    init_fred();
+    logFredDefaults();
 
     // What BeginGameFlowLoadingFrontend asks for, FRONTB, read here rather
     // than behind the loader; and INGAMEB, which the track viewer shares.
@@ -2602,7 +2661,7 @@ int main(int argc, char** argv)
         // sound::Update's jukebox (0x001af4c0): its Update and a delayed
         // start, then bSound::Update's -- the sample's callbacks. Its 8 ms
         // gate always passes at 60 frames a second.
-        jb_music_update(&g_jukebox, g_fred + FRED_AUDIO_OPTIONS, BOOT_DT);
+        jb_music_update(&g_jukebox, Fred.AudioOptionsScreenData, BOOT_DT);
         if (soundUp) jbstream_poll(&g_jukebox.jukebox);
 
         uiTimer += (uint32_t)(int)(BOOT_DT * 4000.0f);

@@ -5,28 +5,19 @@
 #include "car.h"
 
 Race   *pCurrentRace;                   // retail 0x003301f0
-int32_t RaceParametersDamageEnabled;    // 0x00312560
-int32_t RaceParametersBeACop;           // retail 0x0031ab0c
-int32_t RaceParametersMaxCops;          // 0x0031277c
-eTrackDirection RaceParametersTrackDirection; // 0x0031252c
-int32_t RaceParametersBoost;            // 0x00312804
-int32_t RaceParametersNumDriverInfo;    // retail 0x0031aba0
-int32_t RaceParametersTrackNumber;      // retail 0x0031a898
-DriverInfo *RaceParametersDriverInfo;   // retail 0x0031ab9c
-int32_t RaceParametersNumPlayerCars = 1;  // retail 0x0031a8c8
-int32_t RaceParametersNFSRaceMode   = 1;  // retail 0x0031aaec
-int32_t RaceParametersNumAICars     = 7;  // retail 0x0031a8cc
-int32_t RaceParametersAIDemoMode;       // retail 0x0031a8b0
-int32_t RaceParametersReplayDemoMode;   // retail 0x0031a8b4
-int32_t RaceParametersPoint2Point;      // retail 0x0031a8c0
-int32_t RaceParametersNumLapsInRace = 2;  // retail 0x0031a8c4
-int32_t RaceParametersRaceType;         // retail 0x0031a8b8
-tGlobalDisplaySettings RaceParametersGlobalDisplaySettings; // retail 0x0031ab84
+// The image's is zero until [73]; these four are InitWithDefaults' values,
+// which the harnesses that link this and not raceparams.c start from.
+RaceParameters TheRaceParameters = {      // retail 0x0031a898
+    .NumLapsInRace = 2,
+    .NumPlayerCars = 1,
+    .NumAICars     = 7,
+    .NFSRaceMode   = 1,
+};
 RaceCoordinator *pRaceCoordinator;      // retail 0x00330228
 
 DriverInfo *race_parameters_get_driver_info(int32_t i)
 {
-    return &RaceParametersDriverInfo[i];
+    return &TheRaceParameters.pDriverInfoTable[i];
 }
 
 eRaceStage race_get_race_stage(const Race *r)

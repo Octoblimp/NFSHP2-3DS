@@ -6,6 +6,7 @@
 
 #include "bchunk.h"
 #include "carinfo.h"
+#include "characterinfo.h"
 #include "difficultyinfo.h"
 #include "esolid.h"
 #include "polyhedra.h"
@@ -92,6 +93,16 @@ static int UnloaderCarInfo(uint8_t *c)
     return unloader_car_info(c);
 }
 
+static int LoaderCharacterInfo(uint8_t *c)
+{
+    return loader_character_info(c);
+}
+
+static int UnloaderCharacterInfo(uint8_t *c)
+{
+    return unloader_character_info(c);
+}
+
 // ---------------------------------------------------- the unported slots
 
 // A slot whose object is not ported: the image's guard, and the chunk to
@@ -141,8 +152,6 @@ UNPORTED(LoaderCops, UnloaderCops, 15, 0x80034500u)
 UNPORTED(LoaderBodyDamage, UnloaderBodyDamage, 17, 0x00034030u)
 UNPORTED(LoaderNisInfo, UnloaderNisInfo, 20, 0x00037010u)
 UNPORTED(LoaderSoundScape, UnloaderSoundScape, 21, 0x80038000u)
-UNPORTED(LoaderCharacterInfo, UnloaderCharacterInfo, 22,
-         0x00034300u, 0x00034301u)
 // Retail made the sheet a container, 0x80034800 of 0x34801 and 0x34802.
 UNPORTED(LoaderHeliSheet, UnloaderHeliSheet, 23, 0x80034800u)
 UNPORTED(LoaderEventTree, UnloaderEventTree, 24, 0x80034a00u)

@@ -18,8 +18,6 @@
 #include "sundraw.h"
 #include "topology.h"
 
-cPlayerSettings RaceParametersPlayerSettings[2];   // retail 0x0031ab24
-uint8_t PlayerSkipFEPOVIndex = 1;                  // gp-23172
 
 struct NisManager *(*gNewNisManagerFn)(void *mem, const char *name,
                                        int32_t number);
@@ -82,27 +80,6 @@ static float score_object_top(struct FlailerObjectChunk *o)
     if (o != NULL && gFlailerChunkGetTopLeftFn != NULL)
         gFlailerChunkGetTopLeftFn(o, &x, &y);
     return y;
-}
-
-void player_settings_reset_to_defaults(cPlayerSettings *s)
-{
-    s->Rumble = 1;
-    s->PlayersHudState = 0;
-    s->DrivingStyle = 0;
-    s->TransmissionType = 0;
-    s->DriveCameraPOVIndex = gPlayerCamSkipFE != NULL && *gPlayerCamSkipFE
-        ? (int8_t)PlayerSkipFEPOVIndex : 1;
-    s->SplitTimeType = 0;
-    s->Lookback = 1;
-    s->PreferredGender = 0;
-    s->New7 = 0;
-    s->CameraSpring = 0;
-    strcpy(s->PlayerName, "PLAYER");
-    s->PreferredHudFeatures = 853;
-    s->New44 = 1;
-    s->New40 = 1;
-    s->BestTotalTimeRecord.PackedTime = 0;
-    s->BestLapTimeRecord.PackedTime = 0;
 }
 
 struct Player *player_init(struct Player *p, JoystickPort port,

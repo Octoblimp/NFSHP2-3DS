@@ -66,14 +66,7 @@
 int32_t                eDisableFixUpTables;
 TopologyTree           TheTopologyTree;
 TrackPathManager       TheTrackPathManager;
-eTrackDirection        RaceParametersTrackDirection;
-int32_t                RaceParametersNumDriverInfo;
-int32_t                RaceParametersTrackNumber;
-struct DriverInfo     *RaceParametersDriverInfo;
-int32_t                RaceParametersNumPlayerCars;
-int32_t                RaceParametersAIDemoMode;
-int32_t                RaceParametersReplayDemoMode;
-tGlobalDisplaySettings RaceParametersGlobalDisplaySettings;
+RaceParameters         TheRaceParameters;
 RaceCoordinator       *pRaceCoordinator;
 void (*gEWaitUntilRenderingDoneFn)(void);
 CarLoader              TheCarLoader;
