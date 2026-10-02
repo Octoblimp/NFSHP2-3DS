@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-01), after Race::Init and the lap counting (8d). `HANDOFF.md` is the running
+(2026-10-01), after RaceCoordinator's lifetime (8e). `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -47,10 +47,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Eighty cross-checkers pass, plus the table generators:
+Eighty-one cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -76,6 +76,7 @@ player_check        3659 ops,   501513 lines, 0 differ   (287/287 mutations caug
 raceinit_check      3280 ops,    13317 lines, 0 differ   (123/123 mutations caught; retail's image)
 racecore_check      6097 ops,    18698 lines, 0 differ   (158 caught, 3 equivalent; retail's image)
 racerun_check      21656 ops,    40973 lines, 0 differ   (169 caught, 2 equivalent; retail's image)
+racecoord_check     7038 ops,    26129 lines, 0 differ   (135 caught, 1 equivalent; retail's image)
 trackroute_check   11 scenarios,  1353 lines, 0 differ   (57 caught, 1 equivalent)
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
 engine_check        8 scenarios,   414 lines, 0 differ   (56 caught, 2 equivalent)
@@ -967,7 +968,8 @@ and so replaced every boot.
      of them by crashing the harness. Before the run, it compiles
      player.h with devkitARM and asserts all 158 Player fields and 14
      overlay fields at retail's offsets.
-   - Nothing builds a Player yet. 8e's InitForRace does.
+   - Nothing builds a Player yet. 8e's InitForRace does, once
+     the flow into a race wires the coordinator in.
 
    **8b, InitCars and InitPlayers, is done** (HANDOFF.md, Session 31,
    continued: InitCars and InitPlayers (step 8b)).
@@ -997,7 +999,8 @@ and so replaced every boot.
      3280 ops, 13317 lines, 0 differ. All 123 mutations are caught,
      five of them by crashing the harness. Before the run, it compiles
      raceinit.h with devkitARM and asserts DriverInfo's layout.
-   - Nothing calls InitCars yet. 8e's InitForRace does.
+   - Nothing calls InitCars yet. 8e's InitForRace does, once
+     the flow into a race wires the coordinator in.
 
    **8c, Race's construction, is done** (HANDOFF.md, Session 31,
    continued: Race's construction (step 8c)). `docs/formats/race.md` has
@@ -1026,7 +1029,8 @@ and so replaced every boot.
      of them by crashing the harness, and 3 are equivalent. Before the
      run, it compiles racecore.h with devkitARM and asserts Race's and
      the table's layout.
-   - Nothing builds a Race yet. 8e's InitForRace does.
+   - Nothing builds a Race yet. 8e's InitForRace does, once
+     the flow into a race wires the coordinator in.
 
    **8d, Race::Init and the lap counting, is done** (HANDOFF.md,
    Session 31, continued: Race::Init and the lap counting (step 8d)).
@@ -1057,43 +1061,79 @@ and so replaced every boot.
      21656 ops, 40973 lines, 0 differ. Of 171 mutations, 169 are
      caught and 2 are equivalent. Before the run, it compiles
      racerun.h with devkitARM and asserts its layout.
-   - Nothing calls Race::Init yet. 8e's InitForRace does.
+   - Nothing calls Race::Init yet. 8e's InitForRace does, once
+     the flow into a race wires the coordinator in.
 
-   **Next is 8e: RaceCoordinator::InitForRace** (`0x00149988`, 512
-   bytes), with ChangeState (`0x00149520`) and
-   GetDriverInfoByDriverNumber (`0x001edb40`). What InitForRace does is
-   below. After that, the flow into a race.
+   **8e, RaceCoordinator's lifetime, is done** (HANDOFF.md, Session 31,
+   continued: RaceCoordinator's lifetime (step 8e)).
+   `docs/formats/race-coordinator.md` has the write-up.
+   - `racecoord.c` and `racecoord.h` have the constructor (`0x00149738`),
+     the destructor (`0x00149858`), InitForRace (`0x00149988`),
+     CleanupAfterRace (`0x00149b88`), CleanupPlayers (`0x00149d78`),
+     CleanupCars (`0x0014a5f0`), the queue (ChangeState `0x00149520`,
+     ExecuteQueuedMessages `0x00149578`, SendMessage `0x00149650`,
+     PostMessage `0x001496d8`), SetAIDriverModesFromPlayers
+     (`0x001cd240`) and GetDriverInfoByDriverNumber (`0x001edb40`).
+     `racecoordinator_new` is `new RaceCoordinator` for trackflow's seam.
+   - The ten state callbacks are a table of seams, gRCStateCallbacks.
+     A NULL entry takes nothing. Retail's table is at `0x002f0bf0`.
+   - The other seams, each NULL until its class lands: the pause menu,
+     the ReplayManager, DisableRenderEggs, collision_sound::Reset, the
+     speech queue, CleanUpAutoReplay, the Chopper's destructor,
+     KillAllActiveEffects, jukebox::Stop, sound3d_oneshot::Reset,
+     EndGameScreens' destructor and FindResourceFile by name.
+   - `race.h` gains TheRaceParameters' NumAICars (+52, 7).
+   - Retail's destructor frees what is left on the queue into the pool
+     it has just deleted. The port only empties the list.
+   - `racecoord_check` runs retail's code in RetailEmu: 175 scenarios,
+     7038 ops, 26129 lines, 0 differ. Of 136 mutations, 135 are
+     caught and 1 is equivalent. Before the run it compiles
+     racecoord.h with devkitARM and asserts its layout.
+   - **Not wired yet:** `main.c` leaves gNewRaceCoordinatorFn NULL, so
+     loading a track still builds no race. Wiring it builds the players,
+     the World and the cars through the real InitCars. That belongs to
+     the slice that flows into a race, which first needs the state
+     callbacks. trackflow.h's delete seam takes `int` flags, but
+     racecoordinator_destroy takes `int32_t`, which is `long` on
+     devkitARM. The wiring needs a cast or a wrapper.
 
-   All of the following was read with `retaildis.py` on 2026-10-01.
-   - **RaceCoordinator::InitForRace** (`0x00149988`, 512 bytes), in order:
-     1. **Player 0.** Built with bMalloc(2752, ..., 0, 16) and
-        Player(port 0, number 0) when either holds:
-        - GetDriverInfoByDriverNumber(0) (`0x001edb40`) finds a driver
-          whose byte 0 is 0 or below
-        - AIDemoMode is set
+   **Next is 8f: the state callbacks a race runs through.** Each one
+   answers RCMessages through a jump table on (msg - 1). In
+   RaceCoordinator.obj (`out/retail_syms.txt` has every size):
+   - RCStateNoneCallback (`0x0014a668`, 396 bytes). Its table is at
+     `0x002af8d0`, for msgs 1..10. RESTART_RACE is CleanupAfterRace,
+     InitForRace and sound::Mute(0). NEXT_RACE is
+     FrontendDatabase::SetupNextRace when the parameter is set, then
+     `0x001842a8` and ChangeGameFlow(7, 5). QUIT_RACE checks the demo
+     disc (port it as bActive 0: ChangeGameFlow(7, 0)).
+   - RCStateRaceInProgressCallback (`0x0014ae80`, 648; table
+     `0x002af9e0`, msgs 1..13). TICK displays the countdown number from
+     Race::GetCountdownNumberToDisplay (`0x001480c0`). At stage 4 it
+     marks the replay's beginning of time and calls
+     jukebox::DelayedStart(6.0). It checks the finish
+     (AreAllPlayersFinishedRacing, GetMostRecentlyFinishedPlayer,
+     TheRaceHasFinished). With two players, one who has finished gets
+     BeginDemoCameras on the other's car. ACTIVATE deletes the prerace
+     camera coordinator. UNACTIVATE displays countdown number 0. SKIP
+     finishes the race once every player has. REQUEST_PAUSE keeps the
+     port and the state, then goes to 6. REQUEST_AUTO_REPLAY goes to 5.
+     NEXT_RACE goes to 0 and sends NEXT_RACE on.
+   - DisplayCountdownNumber (`0x0014b260`, 376) and TheRaceHasFinished
+     (`0x0014bce0`, 248)
+   - RCStateCameraFlybyCallback (`0x0014abe0`, 276) and
+     RCStatePreRaceCallback (`0x0014acf8`, 392)
+   - RaceCoordinatorJoystickHandler (`0x0014a7f8`, 32), RequestPause
+     (`0x001832a8`) and RequestUnPause (`0x00174e00`), which post
+     messages
+   - then RCStatePauseCallback (`0x0014b3d8`, 400) and
+     RCStatePostRaceCallback (`0x0014bdd8`, 796). The replay states
+     (instant `0x0014b568`, auto `0x0014b848`) and the two demo states
+     (`0x0014a8c0`, `0x0014aa38`) come after.
+   Split it as the reads show. Then wire the coordinator in and flow
+   into a race: the main loop's UpdateCameraMovers, BeginCountdownCameras,
+   eDisplayFrame and RenderCars (below).
 
-        Player 1 (port 1, number 1) is built only for the first case, on
-        driver 1. Neither pointer is kept, since the constructor
-        registers itself in the tables.
-     2. GetTrackInfo on TheRaceParameters' word 0. The answer is unused.
-     3. ReplayManager (bMalloc(20664), `0x0013d448`) into gp-22440, Race
-        (1716, `0x001475e8`) into gp-22272, then World (5936,
-        `0x0014cd28`).
-     4. InitCars, then InitPlayers.
-     5. **The state and the stage**, first match wins:
-
-        | condition | state | stage |
-        |---|---|---|
-        | AIDemoMode, which also calls DisableRenderEggs (`0x0024c000`) | 8 | 4 |
-        | ReplayDemoMode | 9 | 4 |
-        | SkipFE (gp-23220) | 3 | 4 |
-        | BeACop | 1 | 1 |
-        | FindResourceFile finds the file named at `0x002af838` | 1 | 1 |
-        | none of these | 3 | 3 |
-     6. Race::Init(stage), SetupGhostCars, SetAIDriverModesFromPlayers
-        (`0x001cd240`), collision_sound::Reset (`0x001e51c8`) and the
-        speech manager's FlushQueue. Then gp-22216 = this, and a tail
-        call to ChangeState(state).
+   - The InitForRace decode is in `docs/formats/race-coordinator.md` now.
    - InitPlayers, retail's DriverInfo, InitCars, AddRacingCar and
      CalculateRacerPositions are in `docs/formats/raceinit.md` now.
    - The 8d decode (Race::Init, RacingCar::Init, UpdateLapCounts,

@@ -10826,3 +10826,111 @@ game calls Race::Init yet, so there is nothing new to see on Azahar.
 (`0x00149520`) and GetDriverInfoByDriverNumber (`0x001edb40`).
 CONTINUE.md, step 8, has what InitForRace does. Then the flow into a
 race.
+
+## Session 31, continued (2026-10-01) -- RaceCoordinator's lifetime (step 8e)
+
+This is 8e, the fifth slice of step 8. It ports the RaceCoordinator up to
+its state callbacks. That covers its constructor and destructor,
+InitForRace, which builds a race out of everything 8a to 8d ported, and
+CleanupAfterRace, which takes it down. It also covers the message queue
+the ten states run on.
+
+### The port
+
+`racecoord.c` and `racecoord.h` are new:
+- the constructor (`0x00149738`), the destructor (`0x00149858`) and
+  `racecoordinator_new`, which is `new RaceCoordinator`
+- InitForRace (`0x00149988`)
+- CleanupAfterRace (`0x00149b88`), CleanupPlayers (`0x00149d78`) and
+  CleanupCars (`0x0014a5f0`)
+- ChangeState (`0x00149520`), SendMessage (`0x00149650`), PostMessage
+  (`0x001496d8`) and ExecuteQueuedMessages (`0x00149578`)
+- SetAIDriverModesFromPlayers (`0x001cd240`) and
+  RaceParameters::GetDriverInfoByDriverNumber (`0x001edb40`)
+
+The RaceCoordinator is 144 bytes. Every field is where the demo has it.
+Retail adds one word at 140, in the demo's tail padding. Only the post-race
+callback uses it, so the port calls it PostRaceWord140 for now.
+
+InitForRace builds the players from the driver table: player 1 for driver
+0 (or the AI demo), player 2 for driver 1, each unless eliminated. Then
+it builds a ReplayManager, the Race and the World, and calls InitCars and
+InitPlayers. It picks the first state and the race's stage:
+- the AI demo, the replay demo, and SkipFE race at once
+- Be A Cop, or a loaded prerace animation, starts with the flyby
+- anything else starts with the countdown
+
+Then it calls Race::Init, the ghosts, the AI driving styles, and the
+sound and speech resets. It sets pRaceCoordinator, and changes state as
+a tail call. The constructor unloads the prerace animation first when
+pool 16 has less than 0x7d000 bytes free, so a short-on-memory race skips
+the flyby.
+
+The queue: SendMessage queues and runs the queue unless a message is
+running. PostMessage only queues. ExecuteQueuedMessages runs the state's
+callback for each message from the front, with ACTIVATE setting the state
+before the call and UNACTIVATE clearing it after. ChangeState is
+UNACTIVATE, ACTIVATE and TICK, in that order.
+
+The ten callbacks are a seam table, gRCStateCallbacks. A NULL entry
+takes nothing. Retail indexes its table unchecked, and the port guards
+the index. Most of what InitForRace and the cleanups call is a NULL seam
+until its class lands:
+- the pause menu, the ReplayManager and EndGameScreens
+- the Chopper's destructor and CleanUpAutoReplay
+- the effects, the jukebox, the one-shots, collision_sound and the speech
+  queue
+- FindResourceFile by name
+
+A NULL constructor seam allocates nothing.
+
+Retail's destructor ends with ~bTList, which frees any message left on
+the queue into the slot pool it deleted a moment before. The port only
+empties the list.
+
+`race.h` gains TheRaceParameters' NumAICars (+52), which the AI driving
+styles split the field by.
+
+`main.c` does not set trackflow's gNewRaceCoordinatorFn yet. Doing so
+would build players, a World and cars through the real InitCars as soon
+as a track loads, with every state callback still a NULL seam. It comes
+with the slice that flows into a race. trackflow.h's and replay.h's
+comments now give retail's addresses.
+
+### The checks
+
+`racecoord_check.py` runs all twelve functions as shipped in RetailEmu,
+with GetDriverInfo, GetRacingCar, GetDrivingStyle, RaceParameters::Print,
+World::FlushCollisions and RCQueuedMessage's destructor under them.
+`tools/src/racecoord_test.c` runs `racecoord.c` with `race.c` over the
+same script. Every other callee is stubbed on both sides. The World's
+constructor builds the scenario's world, and the Player's constructor
+registers the player as Player's own does. The ten state table entries
+point at fake callbacks. Script reactions make them answer a message with
+SendMessage, PostMessage, ChangeState or ExecuteQueuedMessages, run in
+the image from inside the stub with the registers saved and restored.
+
+175 scenarios, 7038 ops, 26129 lines, 0 differ. Of 136 mutations, 135
+are caught: eleven by crashing the harness and one by hanging it. The
+one equivalent is the destructor emptying the list, which no scenario
+can leave a message on, because of the use-after-free above. The first
+pass left one survivor: the executing flag cleared after the slot's free
+instead of before. The free line now prints the flag, which catches it.
+Before the run the checker compiles racecoord.h with devkitARM and
+asserts its layout.
+
+`docs/formats/race-coordinator.md` is new. CONTINUE.md marks 8e done and
+makes 8f, the state callbacks, next.
+
+The whole chain in CONTINUE.md, racecoord_check included, passes: 85 commands, 0 failed, in 1018 s.
+`build_cia.ps1` builds the CIA, and check_3dsx passes. Nothing in the
+game builds a RaceCoordinator yet, so there is nothing new to see on
+Azahar.
+
+### Next
+
+8f: the state callbacks a race runs through. Start with
+RCStateNoneCallback (`0x0014a668`), RCStateRaceInProgressCallback
+(`0x0014ae80`), DisplayCountdownNumber and TheRaceHasFinished, then the
+flyby and the prerace. CONTINUE.md, step 8, has the jump tables. Then
+wire the coordinator in and flow into a race.

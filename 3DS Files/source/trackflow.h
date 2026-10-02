@@ -50,13 +50,15 @@ extern void (*gInitWorldObjectsFn)(void);          // 0x001c3778
 extern void (*gInitAnimatedDriverFn)(void);        // 0x0019ee50
 extern void (*gInitAIPlansFn)(void);               // 0x001bbf00
 // `new RaceCoordinator`: bMalloc(144, "RaceCoordinator", 0, 16) and the
-// ctor (0x00147170). A NULL seam leaves pRaceCoordinator NULL.
+// ctor (retail 0x00149738; the demo's 0x00147170). racecoord.h's
+// racecoordinator_new is it. A NULL seam leaves pRaceCoordinator NULL.
 extern RaceCoordinator *(*gNewRaceCoordinatorFn)(void);
 
 // The Begin of unloading, in call order.
 extern void (*gSetFlailerScreenVisibilityFn)(uint32_t screen,
                                              int visibility); // 0x0014a3b8
-// RaceCoordinator's deleting dtor (0x00147288), with the 3 that frees it.
+// RaceCoordinator's deleting dtor (retail 0x00149858; the demo's
+// 0x00147288), with the 3 that frees it: racecoordinator_destroy.
 extern void (*gDeleteRaceCoordinatorFn)(RaceCoordinator *rc, int flags);
 extern void (*gUnloadAllTexturesFromFileFn)(TexturePack *p); // 0x001a2850
 extern void (*gCloseAIPlansFn)(void);              // 0x001bbf30

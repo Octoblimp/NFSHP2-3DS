@@ -288,8 +288,10 @@ extern void (*gRaceCoordinatorPostMessageFn)(struct RaceCoordinator *rc,
                                              int32_t msg,
                                              int32_t param); // 0x00147110
 
-// RCMessage 11, from the .mdebug enum.
-#define RC_SKIP_REPLAY 11
+// RCMessage 11, from the .mdebug enum. racecoord.h has them all.
+#ifndef RC_SKIP_REPLAY
+#define RC_SKIP_REPLAY ((int32_t)11)
+#endif
 
 // ------------------------------------------------ the constructor and so on
 //

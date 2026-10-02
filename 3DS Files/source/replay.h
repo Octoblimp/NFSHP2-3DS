@@ -62,7 +62,9 @@ typedef char replaysnapshot_layout_check[
     (offsetof(ReplaySnapshot, Name) == 8
      && offsetof(ReplaySnapshot, TotalInterestingValue) == 328) ? 1 : -1];
 
-extern ReplayManager *pReplayManager;   // gp-23008, 0x00323210
+// The demo's gp-23008 (0x00323210); retail's gp-22440 (0x00330148), which
+// RaceCoordinator::InitForRace sets to a new 20664-byte ReplayManager.
+extern ReplayManager *pReplayManager;
 
 // ReplayManager::GetData (0x0013cac0) and AddData (0x0013cb58). NULL
 // aborts: a caller that sets pReplayManager supplies both.

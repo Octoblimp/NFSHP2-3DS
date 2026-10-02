@@ -106,6 +106,11 @@ struct DriverInfo *race_parameters_get_driver_info(int32_t i);
 extern int32_t RaceParametersNumPlayerCars;
 extern int32_t RaceParametersNFSRaceMode;
 
+// TheRaceParameters.NumAICars (+52), retail's 0x0031a8cc: how many AI
+// racers the race has. SetAIDriverModesFromPlayers splits the AI field at
+// half of it. InitWithDefaults starts it at 7 (`sw t2,52(s0)`).
+extern int32_t RaceParametersNumAICars;
+
 // TheRaceParameters.AIDemoMode (+24) and .ReplayDemoMode (+28), retail's
 // 0x0031a8b0 and 0x0031a8b4: the attract mode's two races, the AI driving
 // the player's car and a replay played back. The Player's constructor
@@ -282,7 +287,8 @@ typedef int32_t RCState;
 
 typedef struct RaceCoordinator RaceCoordinator;
 
-// gp-22720, 0x00323330. NULL in the port until RaceCoordinator exists.
+// Retail's gp-22216, 0x00330228 (the demo's gp-22720). racecoord.c defines
+// the struct; InitForRace sets this and trackflow.c clears it.
 extern RaceCoordinator *pRaceCoordinator;
 
 // RaceCoordinator::GetCurrentState, inlined everywhere as `lw v0,0(a0)`:
