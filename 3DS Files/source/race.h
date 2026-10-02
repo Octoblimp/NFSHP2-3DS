@@ -47,10 +47,12 @@ eRaceStage race_get_race_stage(const Race *r);
 // setup is what turns it on, and that setup is task 26's too.
 extern int32_t RaceParametersDamageEnabled;
 
-// TheRaceParameters.BeACop, 0x00312790 (RaceParameters+624). Nonzero when
-// the player is the cop: RealDriver's horn toggles the siren through the
-// cop manager then, and its nitro button fires the cop's boost. 0 from
-// InitWithDefaults; the Be A Cop setup screens set it.
+// TheRaceParameters.BeACop, retail's 0x0031ab0c (RaceParameters+628; the
+// demo's +624). Nonzero when the player is the cop: RealDriver's horn
+// toggles the siren through the cop manager then, and its nitro button
+// fires the cop's boost, and the Player's constructor takes the cop's NIS
+// overlay. 0 from InitWithDefaults; the Be A Cop setup screens set it.
+// Retail added the int at +624, which only tCopManager reads.
 extern int32_t RaceParametersBeACop;
 
 // TheRaceParameters.nMaxCops, 0x0031277c (RaceParameters+604). How many
@@ -86,6 +88,15 @@ extern int32_t RaceParametersNumDriverInfo;
 // them. InitWithDefaults (0x001ed5c8) starts both at 1.
 extern int32_t RaceParametersNumPlayerCars;
 extern int32_t RaceParametersNFSRaceMode;
+
+// TheRaceParameters.AIDemoMode (+24) and .ReplayDemoMode (+28), retail's
+// 0x0031a8b0 and 0x0031a8b4: the attract mode's two races, the AI driving
+// the player's car and a replay played back. The Player's constructor
+// picks the HUD's screen hashes only when both are 0, and InitPlayers takes
+// the player's car from World's array instead when AIDemoMode is set.
+// InitWithDefaults starts both at 0.
+extern int32_t RaceParametersAIDemoMode;
+extern int32_t RaceParametersReplayDemoMode;
 
 // ------------------------------------------------------------- RacingCar
 

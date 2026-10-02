@@ -10458,3 +10458,107 @@ Player::InitForRace (`0x00181920`) and Player::CleanupAfterRace
 InitForRace, InitCars and InitPlayers, the Race constructor and
 Race::Init, and the flow into a race. CONTINUE.md, step 8, has the
 call lists.
+
+## Session 31, continued (2026-10-01) -- Player's lifetime (step 8a)
+
+This is 8a, the first slice of step 8. It gives Player retail's layout and
+ports the code that builds a Player, hands it a car and takes it back.
+
+### The layout
+
+`player.h` is retail's 2752-byte Player, field for field. The demo's is
+2480. The map comes from lining up the two constructors (`0x0016ee50` in
+the demo, `0x001751d8` in retail) and from the methods that read each
+field. Against the demo the fields move in bands: +12 for the race and
+zone words, +24 for the NIS words and the flailers, +64 from the radar
+on, +208 for the auto-replay words. Retail adds words at 20
+(pOtherPlayer), 180, 184, 2540 and 2616, and the score display at the
+end. The NIS overlay at 2560 is 56 bytes, not 40, and lastCar is at
+2616, not 2600. cPlayerSettings is retail's 48 bytes too: Lookback at 12
+is an int, and retail adds the byte at 7 and the words at 40 and 44. The
+offsets are asserted where pointers are 4 bytes. pSavedCameraMover2 moved
+from the port's 2480 to retail's 208, so camera.md's offset table has one
+column.
+
+The harnesses that build a Player by name (carmode, collisionbody,
+drivecam, realcontroller, realdriver, rendercars, shake, world,
+playercam) all still pass.
+
+### The port
+
+`playerinit.c` and `playerinit.h` are new:
+- the constructor (`0x001751d8`, 2580 bytes)
+- the destructor (`0x00175bf0`)
+- InitForRace (`0x00181920`)
+- PredetermineNisNumbers (`0x001819e0`)
+- CleanupAfterRace (`0x00181970`)
+- CleanUpJumpCam (`0x00176ab0`)
+- cPlayerSettings::ResetToDefaults (`0x001edf90`)
+
+`nisoverlay.c` and `nisoverlay.h` are new too, with NISOverlayManager's
+constructor, destructor, SetScreen (new in retail) and Finish. The HUD,
+the NIS manager, the samples, the driving line, the HUD animators,
+CreateRandomNisArray and SetInputMode are seams. Each is NULL until its
+class is ported, and the port skips a NULL one. With the NIS manager's
+seam NULL nothing is allocated, as playercam.c's movers do.
+
+The port differs from retail in three places, each written up in
+player.md:
+- Both player tables stop at two. Retail's third pPlayersByIndex entry
+  would be NumPlayers.
+- GetTopLeft is not called on a missing score object. Retail reads
+  through NULL there.
+- The Average is the port's size until Average's retail pass.
+
+TheRaceParameters' +628 is BeACop. `race.h` gains AIDemoMode and
+ReplayDemoMode, and `playerinit.h` has PlayerSettings[2] at +652.
+`main.c` now sets gPlayerCleanUpJumpCamFn, so Car::FinishMovement ends
+the jump cam through playerinit.c. Nothing builds a Player yet. 8b's
+InitCars and InitPlayers come first, then InitForRace.
+
+### The checks
+
+`player_check.py` runs retail's eleven functions in RetailEmu, and
+`tools/src/player_test.c` runs `playerinit.c`, `nisoverlay.c` and
+`player.c`, over one op script. Every callee is a stub that prints its
+arguments, except AutoPilotOff (a bare `jr ra`) and bStrCpy, which run.
+The script fills each Player before it is built (0xa5 mostly, sometimes
+0xff, 0x5a or 0), so a field a call leaves alone shows. It covers:
+- the ctor's flag combinations
+- ResetToDefaults
+- the destructor over what the player owns
+- InitForRace and CleanupAfterRace over the control modes
+- the score display's object masks
+- three random walks of 300, 800 and 1500 ops
+
+Before the run, the checker compiles `player.h` with devkitARM and asserts
+all 158 Player fields and 14 overlay fields at retail's offsets.
+
+8 scenarios, 3659 ops, 501513 lines, 0 differ. All 287 mutations are
+caught, and none are equivalent. Three crash the harness, as three of
+playercam's did: the constructor's index of 1, the constructor's count
+left alone, and the destructor's clear of index 0. Each leaves the
+player tables out of step, and the harness reads a NULL player.
+
+The first pass had four survivors: the destructor's zeroes of LastSpeed,
+the two Prev*Level words and LastSpeedSet. The constructor zeroes them
+too, and no op changed them in between. The F op can now set all four,
+and the destructor scenario and the walks use it. One mutant, removing
+the car's pPlayer clear, had emptied an `if` and did not compile. It now
+leaves an empty statement.
+
+`docs/formats/player.md` is new. CONTINUE.md has the 8b plan, read from
+retail: RaceCoordinator::InitForRace, InitPlayers, InitCars, AddRacingCar
+and CalculateRacerPositions, and retail's 24-byte DriverInfo.
+
+The whole chain in CONTINUE.md, player_check included, passes: 81
+commands, 0 failed, 959 s. `build_cia.ps1` builds the CIA. Nothing in
+the game builds a Player yet, so there is nothing new to see on Azahar.
+
+### Next
+
+8b: InitCars (`0x0014a2c8`) and InitPlayers (`0x00149cb8`), with
+AddRacingCar (`0x00149f10`) and CalculateRacerPositions (`0x0014a020`).
+CONTINUE.md, step 8, has what each does. Then 8c (Race's constructor,
+Race::Init and SetupGhostCars) and 8d (RaceCoordinator::InitForRace and
+ChangeState).

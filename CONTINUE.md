@@ -47,10 +47,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Seventy-six cross-checkers pass, plus the table generators:
+Seventy-seven cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -72,6 +72,7 @@ orbit_check         3416 ops,    28635 lines, 0 differ   (119 caught, 5 equivale
 shake_check         4114 ops,    10604 lines, 0 differ   (95 caught, 3 equivalent; retail's image)
 drivecam_check     45598 ops,   105702 lines, 0 differ   (474 caught, 19 equivalent; retail's image)
 playercam_check     5277 ops,   162056 lines, 0 differ   (109/109 mutations caught; retail's image)
+player_check        3659 ops,   501513 lines, 0 differ   (287/287 mutations caught; retail's image)
 trackroute_check   11 scenarios,  1353 lines, 0 differ   (57 caught, 1 equivalent)
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
 engine_check        8 scenarios,   414 lines, 0 differ   (56 caught, 2 equivalent)
@@ -907,8 +908,9 @@ and so replaced every boot.
    - The coordinators are deleted before the same-type test, as retail
      does. Movers are deleted through their virtual destructor, so the
      orbit's joystick handlers come off.
-   - `player.h` gains pSavedCameraMover2 (retail +208) at the port's
-     2480, past the demo's layout. SkipFE is `gPlayerCamSkipFE`, which
+   - `player.h` gained pSavedCameraMover2 (retail +208), first at the
+     port's 2480 and at 208 since 8a gave Player retail's layout. SkipFE
+     is `gPlayerCamSkipFE`, which
      `main.c` points at the flow's skipFE.
    - Restoring with nothing saved does nothing. Retail calls Enable
      through NULL there. Its two callers, RequestZone and ClearZone,
@@ -919,238 +921,184 @@ and so replaced every boot.
      counts as caught.
    - Nothing calls these yet.
 
-   **Next is step 8, and its first slice is 8a**: the Player constructor
-   (`0x001751d8`, 2580 bytes), Player::InitForRace (`0x00181920`) and
-   Player::CleanupAfterRace (`0x00181970`). Nothing builds a Player yet,
-   so nothing calls playercam. RaceCoordinator::InitForRace builds both
-   players (`0x001499f0`, `0x00149a34`).
-   - The constructor is `(JoystickPort port, int number)`. It:
-     - adds itself to pPlayersByIndex (gp-20928, counted at gp-20920)
-       and pPlayersByNumber (gp-20936)
-     - copies retail's 48-byte settings from `0x0031ab24 + 48 * number`
-     - stores the port, GetJoystickType's answer and the number
-     - sets ViewID (24) and RearViewMirrorViewID (28) from
-       TheRaceParameters' NumPlayerCars (`0x0031a898 + 48`). With one
-       player car, the view is 1 and the mirror 3. With two, the views are
-       1 and 2 by number, and there is no mirror (0).
-     - clears the camera words 200-228
-     - builds the TopologyCoordinate at 1768 and the NISOverlayManager at
-       2560 (`0x00182350`), then calls `0x001829a8` (new in retail) on
-       the overlay with NisOverlayHash (776)
-     - bMallocs a NisManager (320 bytes, `0x001b0fe0`, named by
-       bSPrintf) into 244, and an Average of 10 (`0x0018fbf0`) into 160
-     - bMallocs 164 bytes into 1652 (the zone jumpers' CameraDataItems)
-       and 512 bytes into 1760
-     - takes GetInGameSample's answer into 1404
-     - finds four flailer objects for the HUD (FindFlailerObject
-       `0x00143d50`, GetTopLeft `0x00140978`) into 2700-2728
+   **8a, Player's lifetime, is done** (HANDOFF.md, Session 31,
+   continued: Player's lifetime (step 8a)). `docs/formats/player.md` has
+   the write-up.
+   - `player.h` is retail's 2752-byte Player, field for field, with
+     retail's 48-byte cPlayerSettings. The offsets are asserted where
+     pointers are 4 bytes. pSavedCameraMover2 is at retail's 208 now, and
+     camera.md's offset table has one column. lastCar is at 2616, not
+     the 2600 the first 8a notes gave.
+   - `playerinit.c` and `playerinit.h` have the constructor
+     (`0x001751d8`), the destructor (`0x00175bf0`), InitForRace
+     (`0x00181920`), PredetermineNisNumbers (`0x001819e0`),
+     CleanupAfterRace (`0x00181970`), CleanUpJumpCam (`0x00176ab0`) and
+     cPlayerSettings::ResetToDefaults (`0x001edf90`). `nisoverlay.c` and
+     `nisoverlay.h` have NISOverlayManager (56 bytes in retail): its
+     constructor (`0x00182350`), destructor (`0x00182430`), SetScreen
+     (`0x001829a8`) and Finish (`0x00182948`).
+   - These are seams:
+     - the HUD's Flailer calls
+     - the NIS manager's three calls
+     - the zone sample's and the driving line's destructors
+     - the HUD animators' destructor
+     - CreateRandomNisArray
+     - SetInputMode
 
-     Retail's Player ends near 2740 bytes.
-   - Player::InitForRace(Car *) is 80 bytes:
-     - The car's player (+24) becomes this, and MyCar the car.
-     - The settings' byte at 34 goes to the car's +988.
-     - When the car's word at +32 is 1, SetManualTransmission
-       (`0x0013b390`) goes to the car's driver (+44) with the settings'
-       byte at 35.
-     - Then it tail-calls PredetermineNisNumbers (`0x001819e0`). That
-       runs CreateRandomNisArray (`0x00181a28`) for NIS types 1 and 2,
-       and sets 236 and 232 to -1.
-   - Player::CleanupAfterRace (112 bytes, from
-     RaceCoordinator::CleanupPlayers) undoes it, in order:
-     - AutoPilotOff (`0x001788b0`), which is an empty `jr ra` in
-       retail, and RadialBlurOff (`0x0010f1b0`, `gRadialBlurOffFn`)
-     - RemoveCameraMovers, which is ported
-     - NisManager::Stop (`0x001b1388`) while the manager's +68 is set
-     - `0x00182948` on the overlay at +2560. retail_match names it
-       MovePursuitMeter at a score of 0.12, but it is the overlay's. It
-       shows the overlay's flailer screen, and puts back the scale and
-       top that `0x001829a8` read with FlailerGetScale and
-       FlailerGetTopLeftY. It is HUD, a seam.
-     - SetInputMode(0) (`0x001776b0`)
-     - clearing MyCar and the car's player
+     With gNewNisManagerFn NULL there is no manager.
+   - The port differs from retail in three places:
+     - Both player tables stop at two. Retail's third pPlayersByIndex
+       entry would be the count.
+     - GetTopLeft isn't called on a missing score object.
+     - The Average is the port's size until Average's retail pass.
+   - TheRaceParameters' +628, which the overlay test reads, is BeACop.
+     `race.h` has AIDemoMode and ReplayDemoMode, and `playerinit.h` has
+     RaceParametersPlayerSettings[2] (+652). When
+     RaceParameters::InitWithDefaults is ported, it still owes
+     ResetToDefaults on both settings.
+   - `main.c` sets gPlayerCleanUpJumpCamFn, so Car::FinishMovement ends
+     the jump cam through playerinit.c.
+   - `player_check` runs retail's code in RetailEmu: 8 scenarios, 3659
+     ops, 501513 lines, 0 differ. All 287 mutations are caught, three
+     of them by crashing the harness. Before the run, it compiles
+     player.h with devkitARM and asserts all 158 Player fields and 14
+     overlay fields at retail's offsets.
+   - Nothing builds a Player yet. 8b's InitForRace does.
 
-     These callees are ported already:
-     - SetManualTransmission, as `realdriver_set_manual_transmission`
-     - Average's constructor, as `average_init`
-     - TopologyCoordinate's, as `topology_init`, from the topology's
-       retail pass
-     - GetJoystickType
+   **Next is 8b: InitCars and InitPlayers**, with AddRacingCar and
+   CalculateRacerPositions under them. After that:
+   - 8c: Race's constructor (`0x001475e8`, 244 bytes), Race::Init
+     (`0x00147960`) and SetupGhostCars (`0x001485e0`)
+   - 8d: RaceCoordinator::InitForRace itself and ChangeState
+     (`0x00149520`)
+   - then the flow into a race
 
-     retail_match marks two of them changed, and both are still the
-     demo's:
-     - SetManualTransmission (0.93) differs only in Car's CurrentGear
-       offset, which the port reads by name.
-     - Average (0.76) has a new layout. Its first three fields are bytes
-       at 0, 1 and 2, and the buffer pointer is at 12, not 20. Diff its
-       other methods (`retail_match.py --diff`) before a Player keeps
-       one.
-   - SetInputMode (`0x001776b0`, 1240 bytes) moves Player's joystick
-     handlers from the mode in PlayerInputMode (196) to the new one, with
-     RemoveJoyHandler, AddJoyHandler and IsJoyHandlerAdded. It also makes
-     vtable calls on the movers at 200, 204 and 208. The player's buttons
-     reach the game through it, so step 8 needs it. It can be a seam in
-     8a.
-   - Give Player retail's layout in this pass, as Camera,
-     TopologyCoordinate and TrackInfo got theirs. Assert the offsets
-     where pointers are 4 bytes, as `chopper.h` does. The constructor
-     writes most of the struct, so the demo's layout would need a map
-     from retail's offsets for every field. pSavedCameraMover2 then moves
-     to 208, and camera.md's offset table becomes one column.
-     - `docs/retail_layout.txt` has the bands from the demo's offsets,
-       and `out/player_stab.txt` the demo's names.
-     - Retail's cPlayerSettings is 48 bytes. The save game will read it
-       in place (step 17), so it takes retail's layout too.
-       ResetToDefaults (`0x001edf90`) makes Rumble 1 and Lookback 1,
-       PreferredHudFeatures 853, and the two new words 1. The POV byte is
-       1, or with SkipFE the byte at gp-23172.
-     - Retail's word at 20 is new. When there are two players, the
-       constructor points each one's 20 at the other.
-     - The bands are rough, so map each field from a method that uses
-       it. Around 160-196 they are wrong: AICarController::GlueOn
-       (`0x00190f38`) counts at 192, so nGlueCount is there. The
-       constructor clears five bits of a 64-bit word at 184, which looks
-       like DrivingControls (32 bits in the demo). Past 1296 and past
-       2600, retail adds words the demo lacks. Eight of the demo's bytes
-       between 2396 and 2448 are gone, perhaps bLiveSplitOffset and
-       fInitialLiveSplitY.
-   - **Found in the first 8a session (2026-09-30), before any code.**
-     No code is written yet and player.h is as 7d left it. Regenerate the
-     listings with `python tools/retaildis.py --addr 0x001751d8 --count
-     645` (retail) and the demo's ctor at `0x0016ee50` (2104 bytes).
-     - The map below comes from lining up the two constructors. It
-       replaces the bands where they differ:
-       - +12 for demo 68-164: TimeFinishedRacing 80, FinishAnimationLength
-         84, nZoneCurrent 88, nZonePrevious 92, nZoneCredits 96,
-         tAutoZoneTimers 104, pRoute 136, pZoneSample 140,
-         bZoneMuffleSound 144, fZoneMuffleVolume 148, 152, fFreezeZone
-         DelayTimer 156, pAverageSpeedRatio 160, tAverageSpeedTimer 164,
-         fMaxSpeedRatio 168, LastTimeCarInTrouble 172,
-         TimeToDisplayResetPrompt 176.
-       - 152 (the demo's bIgnoreNextPovChange) is a Timer in retail. The
-         ctor zeroes it with the Timers, RacingJoyHandler reads and writes
-         it, and ChangeCameraMover zeroes it.
-       - New in retail: 180, zeroed, which FillInRaceOverMessages reads;
-         and 184, a Timer, which RequestZone, ClearZoneSound and the
-         destructor read.
-       - DrivingControls 188, nGlueCount 192, PlayerInputMode 196, and
-         the camera words 200-228 with pSavedCameraMover2 at 208.
-       - +24 for demo 208-1316: ArrestNisIndex 232, TicketNisIndex 236,
-         NisFinishedCallbackParam 240, pNisManager 244, the four NIS
-         arrays at 248, 376, 504 and 632, bWrongWay 760, bLookBack 764,
-         CurrentHudFeatures 768, HudScreenHash 772, NisOverlayHash 776,
-         and the flailers from 780.
-       - +64 from demo 1340: pRadarBeep 1404, RadarTimer 1408,
-         strEventTitle 1412, strEventScore 1444, strPrevScore 1476 ...
-         pHudAnimations 1540, bCheckTopSpeed 1640, SpeedFactor 1644, myCD
-         1652, EyeVerts 1664, BankVerts 1712, FOVtable 1760, pJumpCamRoute
-         1764, Topology 1768 (704 bytes).
-       - +208 for the auto-replay words, 2472-2480. 2540 is new: the ctor
-         sets it to 1 and UpdateScoring clears it.
-       - bCollisionDetected 2544, bSmokeableHit 2548, BestLapRecordData
-         2552, BestTotalRecordData 2556, mFlailerNIS 2560 (56 bytes in
-         retail, not 40), lastCar 2600. 2616 is new.
-       - LastCrossingTime 2620, bSegmentCollisionDetected 2624,
-         baPlaceReached 2628, bShownMusicTitle 2660, CurrentJukeboxIndex
-         2664, and bRadarOffset 2668 .. HasHeardRaceOverSpeech 2692.
-       - New from 2696 to the end:
-         - the four flailers at 2700-2712, and their tops at 2716-2728
-         - a Timer at 2732, which the ctor sets to 0x7fffffff and
-           StartScoreAnimation writes
-         - 2736, which UpdateHud reads and writes
-     - The constructor, in order:
-       1. The Timers are zeroed in declaration order: 64, 68, 104-132,
-          152, 164, 172, 176, 184 and 1408. Then topology_init(1768),
-          NISOverlayManager's ctor (2560), 2620 = 0 and 2732 = 0.
-       2. It registers itself and copies the settings. Word 20 is zeroed.
-          When NumPlayers is 2 after the increment, byIndex[0]'s and
-          byIndex[1]'s word 20 point at each other.
-       3. It sets 8 (port), 12 (GetJoystickType) and 16 (number). It
-          zeroes 196, 80, 84, 2552, 2556, 88, 92, 140, 144, 148 and 156,
-          and zeroes the 8 zone timers with the credit bytes at 96+i.
-       4. It sets the views and zeroes 136, 200-228 and 768-776. Then the
-          hashes, only when TheRaceParameters' +24 and +28 are both 0:
-          - With 2 player cars, number 0 gets 772 = 0xa8eb7af0 and 776 =
-            0xd4d25ee7, and number 1 gets 0x6283be92 and 0xc17316c9. Any
-            other number gets nothing.
-          - Otherwise 772 = 0xf1f1f8e5 and 776 = 0x3ea89b7c.
-          - After either case, RP+628 nonzero makes 776 = 0x3ea89b7c.
-          Then `0x001829a8(overlay, 776)`.
-       5. It zeroes 4 and the flailer words, but not 984, 1068 or 1512.
-          It calls `bSPrintf(name, "Player%d", 1 - number)` and
-          bMalloc(320, "NisManager", 0, 16), then NisManager(mem, name,
-          number) into 244. It sets 232 = -1, 0 = 0, 240 = 0 and
-          236 = -1, zeroes the four 32-word arrays, and zeroes 192.
-       6. It calls bMalloc(16, "..\indep\src\player.cpp", 520, 16) and
-          Average(10) into 160, then zeroes 164, 168, 1540[20], 1620,
-          2544 and 180. It bMallocs 164 bytes (line 531) into 1652 and
-          512 bytes (line 532) into 1760, and zeroes 1764, 760, 764, 2480
-          and 2476. It calls bSPrintf(1444, "0") and bSPrintf(1476, "0")
-          and zeroes 2548. It zeroes 1176[12], 1224[10], 1264[5],
-          1284[4], 1112[7], 2628[8], 1372[3] and 1384[3].
-       7. It calls GetInGameSample("RadarBeep") into 1404. It zeroes
-          1408, 1624, 1104, 1108, 1628, 2616, 2624, 2660, 1368, 2668-2680
-          and 2688-2696. It sets 1644 = the float at gp-20916, 2620 =
-          (int)((float)RealTimer * f(gp-30476) * 4000 + 0.5) and
-          2664 = -1. It clears bits 0-4 of 188, through a 64-bit ld/sd at
-          184, and sets 2540 = 1640 = 1.
-       8. FindFlailerObject(0x49c15518, h, 2) for 0x464ba8ea -> 2704,
-          0xd911beac -> 2700, 0xf7f1cfb3 -> 2708 and 0xf88dd0b1 -> 2712.
-          Then GetTopLeft(chunk, &x, &y), which does not test NULL, sets
-          2720 = y(2704), 2716 = y(2700), 2724 = y(2708) - [2716] and
-          2728 = y(2712) - [2720].
-       9. It sets 2732 = 0x7fffffff and 2736 = 0.
-     - NISOverlayManager's ctor (220 bytes) zeroes 4, 8, 28 and 32 and
-       sets 36 = 40 = 1.0. It makes two bMalloc(48, "NISCubicAnimation",
-       0, 16), into 12 and 16. Each gets 0-12 zeroed, 36 = 40 = 1.0, and
-       shorts 44 = 0 and 46 = 1. `0x001829a8` stores the hash at +4. It
-       calls FlailerGetScale(hash, 0x76494c5b) twice, for 44 (x) and 48
-       (y), and FlailerGetTopLeftY for 52. All of it is HUD, so all of it
-       is seams.
-     - TheRaceParameters keeps the demo's offsets through 596: AIDemoMode
-       24, ReplayDemoMode 28, NumPlayerCars 48, NFSRaceMode 596 and
-       nMaxCops 604. DoSnapshot (`0x001ed6f8`) snapshots eleven ints at
-       604-644 where the demo has ten, then CopStrength at 648. The
-       settings follow at 652 (0x0031ab24), 48 bytes each. So one int is
-       new between 604 and 644.
-       - Still open: whether +628, the ctor's overlay test, is BeACop or
-         BeACopResetTimerAfterArrest. `retaildis.py --refs 0x0031ab0c`
-         (and 0x0031ab08) answers it, but each run takes minutes, so run
-         it in the background.
-       - The port keeps RaceParameters as loose globals in race.h. Add
-         AIDemoMode, ReplayDemoMode and PlayerSettings[2] there.
-     - The checker's plan:
-       - Link only player.c into the harness. The harness defines logging
-         stubs for topology_init, average_init, GetJoystickType, bMalloc,
-         realdriver_set_manual_transmission and
-         player_remove_camera_movers.
-       - The model stubs retail's versions of those at their addresses,
-         and its bSPrintf stub formats in Python.
-       - The port uses snprintf into the 32-byte buffers.
-       - With the flailer seams NULL, x and y read 0.
-   - Leave the HUD's flailers, the NIS managers and the samples as
-     seams, as 7d left the other movers.
-   - After 8a comes RaceCoordinator's side. InitForRace (`0x00149988`,
-     512 bytes) calls, in order:
-     - GetDriverInfoByDriverNumber
-     - bMalloc and the Player constructor, for each of two players
-     - GetTrackInfo
-     - the ReplayManager constructor (`0x0013d448`)
-     - the Race constructor (`0x001475e8`, 244 bytes)
-     - the World constructor (`0x0014cd28`)
-     - InitCars (`0x0014a2c8`, 808 bytes)
-     - InitPlayers (`0x00149cb8`, 188 bytes)
-     - DisableRenderEggs, then FindResourceFile
-     - Race::Init (`0x00147960`)
-     - SetupGhostCars
-     - SetAIDriverModesFromPlayers (`0x001cd240`)
-     - the collision sound's Reset (`0x001e51c8`)
-     - the speech manager's getInstance and FlushQueue
+   All of the following was read with `retaildis.py` on 2026-10-01.
+   - **RaceCoordinator::InitForRace** (`0x00149988`, 512 bytes), in order:
+     1. **Player 0.** Built with bMalloc(2752, ..., 0, 16) and
+        Player(port 0, number 0) when either holds:
+        - GetDriverInfoByDriverNumber(0) (`0x001edb40`) finds a driver
+          whose byte 0 is 0 or below
+        - AIDemoMode is set
 
-     InitPlayers calls Player::InitForRace for each player. The car is
-     World::GetCarByNumber(PlayerNumber) (`0x0014d508`), skipped when
-     NULL, unless TheRaceParameters' word at +24 is set. Then it is
-     World's car array (+44) at World+32 plus PlayerNumber. InitCars sets
-     `gCarInitRenderInfoFn` and the other carinit seams.
+        Player 1 (port 1, number 1) is built only for the first case, on
+        driver 1. Neither pointer is kept, since the constructor
+        registers itself in the tables.
+     2. GetTrackInfo on TheRaceParameters' word 0. The answer is unused.
+     3. ReplayManager (bMalloc(20664), `0x0013d448`) into gp-22440, Race
+        (1716, `0x001475e8`) into gp-22272, then World (5936,
+        `0x0014cd28`).
+     4. InitCars, then InitPlayers.
+     5. **The state and the stage**, first match wins:
+
+        | condition | state | stage |
+        |---|---|---|
+        | AIDemoMode, which also calls DisableRenderEggs (`0x0024c000`) | 8 | 4 |
+        | ReplayDemoMode | 9 | 4 |
+        | SkipFE (gp-23220) | 3 | 4 |
+        | BeACop | 1 | 1 |
+        | FindResourceFile finds the file named at `0x002af838` | 1 | 1 |
+        | none of these | 3 | 3 |
+     6. Race::Init(stage), SetupGhostCars, SetAIDriverModesFromPlayers
+        (`0x001cd240`), collision_sound::Reset (`0x001e51c8`) and the
+        speech manager's FlushQueue. Then gp-22216 = this, and a tail
+        call to ChangeState(state).
+   - **InitPlayers** (`0x00149cb8`, 188 bytes). For each player by
+     index:
+     - With AIDemoMode, the car is World's CarTable[AICarPos +
+       PlayerNumber], unchecked.
+     - Otherwise it is World::GetCarByNumber (`0x0014d508`,
+       `world_get_car_by_number`), skipped when NULL.
+
+     Then Player::InitForRace on that car. pCurrentWorld is gp-22120 in
+     retail; world.h's gp-22624 is the demo's.
+   - **Retail's DriverInfo is 24 bytes.** GetDriverInfo (`0x001edb28`)
+     indexes the array at RaceParameters+772 by 24, with the count at
+     +776 (race.h's NumDriverInfo comment has the demo's +756). Its
+     fields:
+     - byte 1 is the number GetDriverInfoByDriverNumber matches
+     - byte 4 is StartingPosition
+     - word 8 is TheDriverType
+     - byte 0 is new: above 0, InitForRace and InitCars both skip the
+       driver
+
+     The port's DriverInfo is still the demo's 20 bytes. Name byte 0 from
+     whoever writes it (the frontend's race setup) before a record is
+     read in place.
+   - **InitCars** (`0x0014a2c8`, 808 bytes), in order:
+     1. CalculateRacerPositions(8, locs) (`0x0014a020`) into eight
+        16-byte RacerStartLocations on the stack.
+     2. **The racers.** For each position 1-8, it takes the first driver
+        whose byte 0 is 0 or below and whose StartingPosition is that
+        position. With TheDriverType 1 (player) or 2 (AI racer), it calls
+        AddRacingCar(info, &locs[position - 1], type). Any other type
+        adds nothing, and so does a position no driver has.
+     3. BuildCarTable (`world_build_car_table`).
+     4. **The AI racers' routes.** It looks up GetTrackInfo(word
+        0)->word 124. If that is 0 or above, a two-word
+        NearestRoutePointInfo is built from the table at `0x00314438`
+        (+16 + 4n), and its second word is the first plus 1064. Then, for
+        each car from CarTable[AICarPos] up to CopCarPos, it takes the
+        controller at car +40:
+        - If the first car's info isn't IsValid (`0x001cd408`), it makes
+          three vtable calls on the controller: the slot at +76 with no
+          argument, and the slots at +52 and +60 with argument 1, which
+          give the info's two words.
+        - Otherwise it calls the slot at +44 with the two words.
+     5. **Traffic and cops**, over every driver:
+        - TheDriverType 3 goes to AddTrafficCar
+          (`world_add_traffic_car`).
+        - Types 4 and 5 go to AddCopCarToRace(info, 0) (`0x00227d78`),
+          counted.
+
+        Then BuildCarTable again.
+     6. **The helicopter** is built with bMalloc(976) and Chopper
+        (`0x001e7a90`) into World.Helicopter when there were cops, or
+        when the word at +328 of `*(0x0031d7f4)` is set.
+     7. With cops and BeACop, it calls AddCopCarToRace(NULL, 1).
+
+     The port's InitCars should also set `gCarInitRenderInfoFn` and
+     carinit's other seams.
+   - **AddRacingCar** (`0x00149f10`) runs in this order:
+     1. Builds a TrackPathCoordinate on the location (`0x002086f0`).
+     2. Takes the heading from bATan of its words 24 and 28, as an
+        unsigned short.
+     3. Builds Car(bMalloc(2208), info, location, heading) and calls
+        SetControlMode(type).
+     4. Calls SetMovementMode: with the word at gp-22960 for an AI
+        racer (type 2), and 1 otherwise.
+     5. Appends the car to World's CarList.
+     6. An AI racer also goes into AICarList through a bPNode
+        (`0x00250680`, `Malloc`), with the car at +8.
+     7. Destroys the TrackPathCoordinate.
+   - **CalculateRacerPositions(n, locs)** works in three steps:
+     1. **The markers.** It hashes one of two marker names, at
+        `0x002af898` for TrackDirection 0 (RaceParameters+12) and at
+        `0x002af8b0` otherwise. With at least n of those markers, the
+        location of each i is the marker whose word 12 is i, x and y from
+        its +16 and +20. One i with no marker spoils the lot.
+     2. **The fallback**, without the markers. A TrackPathCoordinate
+        (`0x002086b8`) steps along the path with UpdatePosition(d, 0) for
+        d = 10, 20 .. 100. Then location i is the coordinate after
+        UpdatePosition(100 + 17 * (i / 2), 3 for even i or -3 for odd).
+     3. **The heights.** Each z is GetElevation through a fresh
+        TopologyCoordinate, started from 0.
+   - **For 8c**, Race's constructor (`0x001475e8`) works in this order:
+     1. It zeroes the Timers at 12, 16 and 20, and constructs eight
+        RacingCars (`0x001493b8`) at 36 + 192i.
+     2. It sets gp-22272 (pCurrentRace in retail; race.h's gp-22776 is
+        the demo's) to this, and RaceStage to 0.
+     3. Word 1604 takes RaceParameters+44, but becomes 1 when both +44
+        and +40 are set.
+     4. It zeroes 4, 8, 12, 16, 24-32, 1608, 1612, 1640-1668 and 1712.
+        Word 20 becomes 0x7fffffff.
+     5. It calls FigureOutBoundaries (`0x00147b20`).
+
+     Race::Init(stage) (`0x00147960`) runs AddRacingCars (`0x00147dc0`)
+     and SetRaceStage (`0x00147ef0`). It then takes the first racing car,
+     or the second under BeACop with two player cars, and reads byte 230
+     of the record at that car's +12. That byte sizes a
+     TimeAroundTrackTable (bMalloc(2052), `0x001467a0`) into 1712.
    - Then the flow into a race:
      - the main loop's UpdateCameraMovers and UpdateCameraShakers
      - BeginCountdownCameras (`0x001768e0`) and UpdateNonGameState

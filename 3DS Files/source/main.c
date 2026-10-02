@@ -77,6 +77,7 @@
 #include "physicscar.h"
 #include "physicssystem.h"
 #include "playercam.h"
+#include "playerinit.h"
 #include "race.h"
 #include "realcontroller.h"
 #include "realdriver.h"
@@ -2070,9 +2071,11 @@ int main(int argc, char** argv)
 
     // World::DoTimestep ends every car's step with Car::FinishMovement,
     // which carfinish.c has ported since task 27's eleventh Car slice.
-    // Left NULL, the step aborts. Its four Player calls stay NULL until
-    // task 26 brings Player, and only a player's car reaches them.
+    // Left NULL, the step aborts. Only a player's car reaches its four
+    // Player calls. CleanUpJumpCam is playerinit.c's since step 8a; the
+    // zone calls and IsJumpCamAvailable stay NULL until they are ported.
     gCarFinishMovementFn = car_finish_movement;
+    gPlayerCleanUpJumpCamFn = player_clean_up_jump_cam;
 
     // Car::MaybeCameraShake, which World::DoTimestep asks of each player's
     // car: shake.c. Only a car with a player shakes, and none has one until

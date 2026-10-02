@@ -1150,29 +1150,28 @@ for `drivecam.c` and `orbitcam.c`.
 | `EnableCameraMovers()` | `0x001774a8` | |
 | `DisableCameraMovers()` | `0x00177558` | |
 
-The port keeps the demo's `Player` layout, because Car's catchup, the
-camera shake and the HUD read it. Retail's fields sit further in, and
-retail has a second saved mover the demo lacks. It goes at the end of the
-port's struct:
+The port's `Player` is retail's 2752 bytes, field for field (see
+[player.md](player.md)), so these are both sides' offsets. Retail has a
+second saved mover, which the demo lacks:
 
-| field | retail | port |
-|-------|--------|------|
-| `MyCar` | 4 | 4 |
-| `ViewID` | 24 | 20 |
-| `PlayerSettings` | 32 | 28 |
-| `PlayerSettings.DriveCameraPOVIndex` (byte) | 36 | 32 |
-| `PlayerSettings.CameraSpring` | 40 | 36 |
-| `pRoute` (the zone preview's) | 136 | 124 |
-| `pCameraMover` | 200 | 180 |
-| `pSavedCameraMover` | 204 | 184 |
-| `pSavedCameraMover2` | 208 | 2480 |
-| `pRVMCameraMover` | 212 | 188 |
-| `pDemoCameraCoordinator` | 216 | 192 |
-| `pCountdownCameraCoordinator` | 220 | 196 |
-| `pNisCameraCoordinator` | 224 | 200 |
-| `pVisibleDrivingLine` | 228 | 204 |
-| `pNisManager` | 244 | 220 |
-| `bLookBack` | 764 | 740 |
+| field | offset |
+|-------|--------|
+| `MyCar` | 4 |
+| `ViewID` | 24 |
+| `PlayerSettings` | 32 |
+| `PlayerSettings.DriveCameraPOVIndex` (byte) | 36 |
+| `PlayerSettings.CameraSpring` | 40 |
+| `pRoute` (the zone preview's) | 136 |
+| `pCameraMover` | 200 |
+| `pSavedCameraMover` | 204 |
+| `pSavedCameraMover2` | 208 |
+| `pRVMCameraMover` | 212 |
+| `pDemoCameraCoordinator` | 216 |
+| `pCountdownCameraCoordinator` | 220 |
+| `pNisCameraCoordinator` | 224 |
+| `pVisibleDrivingLine` | 228 |
+| `pNisManager` | 244 |
+| `bLookBack` | 764 |
 
 ### `ChangeCameraMover`
 
