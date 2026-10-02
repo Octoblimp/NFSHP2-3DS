@@ -11119,3 +11119,130 @@ On Azahar the boot log has `car data: 2 chunks, 235 skins`, and
 8i, CarLoader: each car's geometry and skin, read through
 GeometryFilename, so that eModel::Init finds the car's solids. Then 8j.
 CONTINUE.md has the lists.
+
+## Session 31, continued (2026-10-02) -- CarLoader (step 8i)
+
+The previous session stopped partway through, with the port, the harness
+and the checker written but none of it built. This one ran them, filled
+in the mutations, wrote the doc, wired `main.c` and committed.
+
+### The port
+
+`carloader.c` and `carloader.h` are retail's CarLoader, `0x001b0260` to
+`0x001b0fd0`. `docs/formats/car-loader.md` has the decode. There are
+three records:
+
+- **LoadedCar** (48 bytes) is one geometry file, a body or a dash.
+- **LoadedSkin** (20 bytes) is one car in one skin.
+- **CarLoader** (32 bytes) is a callback, RoundRobinFlag, InFrontEndFlag,
+  LoadingInProgress and the two lists.
+
+Both kinds of entry come from LoadedCarSlotPool, 42 slots of 48 bytes.
+
+**Load** counts one more instance of each entry the ride needs, making
+any it lacks: the car's body, its dash if the ride has one, and its skin.
+Retail names the files by `CompressedGeometryFilename` (+96) and
+`CompressedDashGeometryFilename` (+160); the demo read +64 and +128,
+which the last entry's plan had wrong.
+
+**BeginLoading** starts one load:
+
+- while any skin is still to load, the textures, one skin at a time
+  under round robin or all of them at once without it;
+- after that, the bodies and dashes, one file at a time.
+
+**LoadingDoneCallback** marks what was loading as loaded, drops what
+nobody wants and starts the next load. When nothing is left to start, it
+clears the kept callback and then calls it.
+
+**Unload** counts down, and **RemoveUnusedCarsAndSkins** unloads and
+frees what reaches 0, keeping an entry while it is still loading.
+**UnloadEverything** services the resource system until both lists are
+empty.
+
+Retail rewrote **GetUsedTextures**. A skin of -1 lists every skin the car
+has, through two CarTypeInfo getters that are new in retail and are now
+in `cartypeinfo.c`:
+
+- GetNumSkins (`0x001884b8`) is 1 for a cop.
+- GetSkinNumber (`0x001884d8`) is the language's livery for a cop: 1 in
+  English, 2 otherwise.
+
+The language comes through `gCurrLanguageFn`.
+
+The resource system and TexturePack's file loads are four seams, all
+NULL in the game for now. Two port-only choices:
+
+- UnloadEverything returns when the service seam is NULL, where retail
+  would spin.
+- The slot size is a literal 48, with a layout check on 32-bit builds.
+
+Retail lets a count go below 0 when an entry still loading is unloaded
+twice. The port does the same, and the checker covers it for a skin and a
+dash.
+
+`main.c` sets `gCurrLanguageFn` to the flow's `currLanguage` and calls
+`init_car_loader` after the frontend's bundles, as InitializeEverything
+does. `sinit.c` runs the static constructor at `__CTOR_LIST__` [56].
+
+### The checks
+
+`carloader_check` runs everything above as shipped, in RetailEmu, over
+GLOBALB's own 64 records. It stubs:
+
+- the slot pool (the lowest free slot, filled with 0xcd);
+- the seams, with each load's completion queued;
+- two callbacks, one of which calls BeginLoading again from inside the
+  completion.
+
+The script's D runs the oldest completion, and so does
+ServiceResourceLoading. After each op the transcript holds the loader,
+both lists and every back link. The eleven scenarios cover:
+
+- boot;
+- shared bodies and dashes;
+- the round robin flow;
+- UnloadEverything with loads pending;
+- round robin off and the front end;
+- the count wraps and a 130-instance ride;
+- GetUsedTextures' caps;
+- patched records (no skins, a cop with none, repeats);
+- a second loader, so a port that reaches for the global shows up;
+- all 64 cars at once, past the 512-texture cap;
+- IsLoaded on missing and unloaded dashes and skins.
+
+The first run segfaulted the harness, because the state print walked
+lists the static constructor had not set up yet. Each scenario now starts
+with the constructor, and both walks stop at a NULL link.
+
+11 scenarios, 583 ops, 10747 lines, 0 differ. Of 114 mutations, 107 are
+caught and 7 are equivalent:
+
+- the cap's `return` against `continue`, since nothing follows it;
+- clearing Loaded on an entry that is freed right after, twice;
+- dropping the `!Loading` tests in BeginLoading, twice, since nothing is
+  loading while LoadingInProgress is clear;
+- UnloadEverything's own Remove, which LoadingDoneCallback already runs;
+- GetSkinNumber's `%`, which its only caller never needs.
+
+The first pass left five unexplained. Four were holes in the script and
+one was a real equivalent:
+
+- no Q on a ride whose dash was missing or not yet loaded;
+- no Q on a loaded body under a skin not yet loaded;
+- no case where a body is unloaded mid-load while a different body waits.
+  The first try used types 7 and 8, which share the McLaren body, so it
+  tested nothing.
+- the equivalent was UnloadEverything's own Remove.
+
+`sinit_check` has 19 calls. `cartypeinfo_check`, `carinfo_check`,
+`carrenderinfo_check` and `loadertable_check` are unchanged. On Azahar
+the boot log has `car loader: pool up`, and `run_azahar_test.ps1`
+passes.
+
+### Next
+
+8j, the resource system (`0x00199320` .. `0x00199a60`). Every load into a
+race goes through it. Then 8k, the track-loading game flow states, and
+8l, the coordinator and the race. CONTINUE.md has what the disassembly
+showed of each.

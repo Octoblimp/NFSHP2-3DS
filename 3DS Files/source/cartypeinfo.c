@@ -76,6 +76,25 @@ int32_t cartypeinfo_get_random_skin(const CarTypeInfo *ct)
                                        &CarTypeInfoSkinSeed)];
 }
 
+int32_t (*gCurrLanguageFn)(void);
+
+int32_t cartypeinfo_get_num_skins(const CarTypeInfo *ct)
+{
+    if (ct->UsageType == CAR_USAGE_TYPE_COP)
+        return 1;
+    return ct->NumAvailableSkins;
+}
+
+int32_t cartypeinfo_get_skin_number(const CarTypeInfo *ct, int32_t i)
+{
+    if (ct->UsageType == CAR_USAGE_TYPE_COP) {
+        int32_t lang = gCurrLanguageFn != NULL ? gCurrLanguageFn() : 0;
+
+        return lang != 0 ? 2 : 1;
+    }
+    return ct->AvailableSkins[i % ct->NumAvailableSkins];
+}
+
 // 0x00323930. Set up by the car data loader, which is not ported.
 const CarTypeInfo *CarTypeInfoArray = NULL;
 

@@ -267,6 +267,22 @@ extern uint32_t CarTypeInfoSkinSeed;
 
 int32_t cartypeinfo_get_random_skin(const CarTypeInfo *ct);
 
+// GetNumSkins (retail 0x001884b8, not in the demo): 1 for a cop, and
+// NumAvailableSkins, a signed byte, for the rest.
+int32_t cartypeinfo_get_num_skins(const CarTypeInfo *ct);
+
+// GetSkinNumber (retail 0x001884d8, not in the demo): a cop's one skin is
+// 1 in English and 2 in any other language -- or before one is chosen,
+// at -1 -- and the rest have AvailableSkins[i % NumAvailableSkins]. With
+// no skins the console's divide traps; the port's would too, and nothing
+// asks: GetNumSkins is 0 then.
+int32_t cartypeinfo_get_skin_number(const CarTypeInfo *ct, int32_t i);
+
+// TheLanguageManager's CurrLanguage (0x0031c1c8), which GetSkinNumber
+// reads for a cop. The port's language is the flow's (gameflow.h), so
+// this asks for it; NULL reads as 0, English.
+extern int32_t (*gCurrLanguageFn)(void);
+
 // 0x001801c0, a free function rather than a method:
 //
 //     addiu v1,zero,1376 ; lw v0,-21184(gp) ; mult a0,a0,v1 ; addu v0,v0,a0

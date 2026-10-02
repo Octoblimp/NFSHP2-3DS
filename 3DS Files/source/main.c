@@ -54,6 +54,7 @@
 #include "cardriver.h"
 #include "carinfo.h"
 #include "carinit.h"
+#include "carloader.h"
 #include "carmodes.h"
 #include "carrenderinfo.h"
 #include "carstate.h"
@@ -421,6 +422,8 @@ static JBSound g_jukebox;
 static int     g_audioMode = 1;     // gp-18892, stereo
 
 static int      jbState(void* c) { (void)c; return g_flow.current; }
+// TheLanguageManager's CurrLanguage, for GetSkinNumber's cop skins.
+static int32_t  currLanguage(void) { return g_flow.currLanguage; }
 static int      jbMaxCops(void* c) { (void)c; return 0; }
 static uint32_t jbVBlank(void* c) { (void)c; return (uint32_t)FrameCounter; }
 static int      jbPaused(void* c) { (void)c; return 0; }
@@ -2307,6 +2310,7 @@ int main(int argc, char** argv)
     g_flow.fred = g_fred;
     // Player's POV cycle reads SkipFE (gp-23220), which the flow holds.
     gPlayerCamSkipFE = &g_flow.skipFE;
+    gCurrLanguageFn = currLanguage;
     bgf_load_global_chunks(&g_flow);
     logLine("global chunks loaded, LOADING drawn");
 
@@ -2314,6 +2318,12 @@ int main(int argc, char** argv)
     // than behind the loader; and INGAMEB, which the track viewer shares.
     addBundle(&ui, BUNDLE_FRONTEND);
     UIBundle* ingameBundle = addBundle(&ui, BUNDLE_INGAME);
+    // InitializeEverything's InitCarLoader (0x001b0260), after the
+    // frontend: the pool the car and skin entries come from. Nothing loads
+    // through TheCarLoader yet -- its seams are unset until the resource
+    // system is ported.
+    init_car_loader();
+    logPrintf("car loader: pool %s\n", LoadedCarSlotPool ? "up" : "missing");
 
     // The blurb moves to the bottom screen, so the top screen stops drawing
     // it -- and stops drawing the bar tAnimatedBlurb wipes it out with,

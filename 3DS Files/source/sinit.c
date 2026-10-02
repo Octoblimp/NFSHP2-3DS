@@ -4,9 +4,9 @@
 // and the _GLOBAL_$I$ it stands for. sinit_check reads those comments, so
 // their shape is fixed.
 //
-// None of the eighteen reads anything another one writes -- seventeen fill
+// None of the nineteen reads anything another one writes -- eighteen fill
 // Tables, Graphs, cameras, list heads, hashes, shakers and constants, and
-// the eighteenth builds the slot-pool manager -- so the order is kept
+// the nineteenth builds the slot-pool manager -- so the order is kept
 // because it is the image's, not because a different one would be
 // observed. The manager comes last for that reason too: it is entry 103,
 // long after the physics tables. The joystick's, [23], is named for EventNodeSlotPool but never
@@ -20,6 +20,7 @@
 #include "bslotpool.h"
 #include "car.h"
 #include "carinfo.h"
+#include "carloader.h"
 #include "collisionbody.h"
 #include "drivetarget.h"
 #include "eview.h"
@@ -50,6 +51,7 @@ void sinit_run(void)
     rigidbody_static_init();    // [41]  0x00193d20 _GLOBAL_$I$__9RigidBodyP13RigidBodyInfo
     wheel_static_init();        // [44]  0x0019b558 _GLOBAL_$I$SliderPositionsX
     aerodynamics_static_init(); // [54]  0x001a4de8 _GLOBAL_$I$FrontDownforceLocation
+    carloader_static_init();    // [56]  0x001a76a8 _GLOBAL_$I$TheCarLoader
     terraintype_static_init();  // [66]  0x001ca120 _GLOBAL_$I$TerrainTypeInfoTable
     collisionbody_static_init(); // [67]  0x001ce548 _GLOBAL_$I$TheCollisionStats
     mellowmover_static_init();  // [86]  0x00208420 _GLOBAL_$I$MellowForceFeedbackGraph
