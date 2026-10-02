@@ -11047,3 +11047,75 @@ not ported. So 8h is the car data loader (LoaderCarInfo and the
 acceleration tables), 8i is CarLoader (each car's geometry and skin),
 and 8j wires the coordinator in for one car on a track on Azahar.
 CONTINUE.md has the lists.
+
+## Session 31, continued (2026-10-02) -- the car data loader (step 8h)
+
+8g was committed. This slice ports slot 16 of the loader table from
+retail: LoaderCarInfo and UnloaderCarInfo, and the 64 acceleration
+tables they make, so that CarTypeInfoArray is set in the game and a Car
+can be built.
+
+### The port
+
+`carinfo.c`/`carinfo.h` are new. The constructor gives each table its
+own 32 entries over 0 to 200 km/h: 4.0 in the first 31 and 0 in the
+last. The static constructor runs it over all 64 from `sinit.c`, at
+`__CTOR_LIST__` [35]. 0x34600 points CarTypeInfoArray at the records,
+which start at `(chunk + 23) & ~15`, and makes each type's table.
+0x34601 points SkinInfoTable just past the header and counts the size
+over 64, unsigned. The unloader zeroes the globals and keeps the
+tables.
+
+MakeAccelerationTable walks the speed from 0 in 5 km/h steps up to
+500 km/h. Each step gives an acceleration from the torque at the
+previous step's RPM, through the final drive and the gear, over the
+wheel radius and the mass, with the front and rear mixed by
+TorqueSplit. It changes up at CalculateShiftPoints' up points, scaled
+by gShiftUpDetune. The samples, with the last zeroed, become a Table
+over 0 to the last speed, and the type's 32 entries sample it evenly.
+The 404-byte sample buffer is never freed, as in retail.
+
+`bchunkload.c` routes slot 16 to the port, and `main.c` offers it
+GLOBALB's top-level chunks at boot in the file's order
+(loadGlobalCarInfo). The demo-disc block, which blanks the geometry
+names of cars not on the demo, is left out.
+
+The last session's notes had six-gear cars reading an up point that
+CalculateShiftPoints never wrote (up[7]) and so taking boot-time stack
+residue. That was wrong. The top gear's up point is MaxRPM at
+NumGears + 1, so every point the walk reads is this car's. The checker
+proves it by running every load under seven stack fills.
+
+### The checks
+
+`carinfo_check` runs the static constructor, the loader, the unloader,
+GetAccelerationTable and MakeAccelerationTable as shipped, in
+RetailEmu, with only bMalloc stubbed. It covers:
+
+- GLOBALB's own two chunks at each word alignment;
+- the 64 records changed type by type (gears 0 to 6 and -1, the split,
+  unreachable red lines, narrow engines, three torque curves, odd
+  ratios, the mass, the radius, the interpolated up points, and one
+  record whose RPM lands exactly on its up point);
+- the drivetrain globals varied;
+- other chunk ids and skin sizes;
+- direct calls over Tables of 0 to 40 entries;
+- the constructor again over tables filled with a pattern.
+
+6 scenarios, 114 ops, 2181 lines, 0 differ. Of 78 mutations, 77 are
+caught. One is equivalent: `<=` against `<` at the 500 km/h cap, since
+no speed the walk reaches equals the cap.
+
+`loadertable_check` treats slot 16 as ported and links the car modules.
+Its numbers are unchanged. It has one new mutation, for the slot 16
+unloader: of 140, 138 are caught and 2 are equivalent. `sinit_check`
+has 18 calls.
+
+On Azahar the boot log has `car data: 2 chunks, 235 skins`, and
+`run_azahar_test.ps1` passes.
+
+### Next
+
+8i, CarLoader: each car's geometry and skin, read through
+GeometryFilename, so that eModel::Init finds the car's solids. Then 8j.
+CONTINUE.md has the lists.

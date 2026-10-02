@@ -44,6 +44,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include "bchunk.h"
 #include "bmenu.h"
 #include "bsnd.h"
 #include "bslotpool.h"
@@ -51,6 +52,7 @@
 #include "bsetup.h"
 #include "carcontroller.h"
 #include "cardriver.h"
+#include "carinfo.h"
 #include "carinit.h"
 #include "carmodes.h"
 #include "carrenderinfo.h"
@@ -1679,6 +1681,31 @@ static UIBundle* addBundle(UIRenderer* ui, const char* rel)
     return &ui->bundles[ui->numBundles - 1];
 }
 
+// LoadGlobalChunks' LoadResourceFile hands every top-level chunk of GLOBALB
+// to LoadChunks, slot 16 among them: LoaderCarInfo (carinfo.c), which
+// points CarTypeInfoArray and SkinInfoTable into the bundle and makes the
+// 64 acceleration tables. The port offers that slot GLOBALB's chunks in
+// the file's order, cars before skins as on the disc. The UI reads the
+// rest as it is, and the track viewer gives slot 2 the texture packs
+// itself (trackview.h). The bundle stays resident, as the records must.
+static void loadGlobalCarInfo(UIBundle* b)
+{
+    uint8_t* c;
+    uint8_t* end;
+    int taken = 0;
+
+    if (!b) return;
+    c = b->data;
+    end = b->data + b->len;
+    while (end - c >= 8) {
+        uint32_t size = bchunk_u32(c + 4);
+        if (size > (size_t)(end - c) - 8) break;
+        taken += loader_car_info(c);
+        c += 8 + size;
+    }
+    logPrintf("car data: %d chunks, %d skins\n", taken, (int)NumSkinInfo);
+}
+
 static const char* messageName(BScreenMessage msg)
 {
     switch (msg) {
@@ -2228,6 +2255,7 @@ int main(int argc, char** argv)
     static UIRenderer ui;
     uirender_init(&ui, 400.0f, 240.0f);
     UIBundle* globalBundle = addBundle(&ui, BUNDLE_GLOBAL);
+    loadGlobalCarInfo(globalBundle);
     addBundle(&ui, BUNDLE_DYNTEX);
 
     memset(&g_boot, 0, sizeof(g_boot));

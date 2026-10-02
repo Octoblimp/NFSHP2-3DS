@@ -127,7 +127,9 @@ SOURCES = [HARNESS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "carstate.c", "terraintypetab.c", "bslotpool.c", "bticker.c", "p32.c",
     "bchunk.c", "trackpath.c", "quickspline.c", "bmem.c", "trackroute.c",
     "polyhedra.c", "vclip.c", "espresso.c", "difficultyinfo.c",
-    "texturepack.c", "sun.c", "weatherman.c")]
+    "texturepack.c", "sun.c", "weatherman.c", "carinfo.c",
+    "cartypeinfo.c", "langtab.c", "drivetrain.c", "engine.c", "wheel.c",
+    "suspension.c", "steering.c", "rigidbody.c", "table.c")]
 
 HARNESS_TIMEOUT = 600
 EXTRACTED = ROOT / "extracted"
@@ -240,7 +242,7 @@ CLAIMS = {
     30: [0x00039100, 0x00039101, 0x00039102],
 }
 TAKER = {t: k for k, ts in CLAIMS.items() for t in ts}
-PORTED = {0, 1, 2, 4, 9, 11, 14, 18, 19, 26, 29}
+PORTED = {0, 1, 2, 4, 9, 11, 14, 16, 18, 19, 26, 29}
 
 # Retail's: the demo's without PhysPredict, slot 20, and HeliSheet (23) a
 # container. The rest of the guards are the demo's.
@@ -1978,6 +1980,8 @@ MUTATIONS = [
     ("unported-unload-flag", BCL, "slot, 1, c);", "slot, 0, c);"),
     ("slot-6-is-7", BCL, "    LoaderAcidFX,", "    LoaderEventManager,"),
     ("unloader-14-loads", BCL, "    unloader_sun,", "    loader_sun,"),
+    ("unloader-16-takes-none", BCL, "    return unloader_car_info(c);",
+     "    return 0;"),
     ("unloader-29-loads", BCL, "    unloader_weather_man,",
      "    loader_weather_man,"),
     ("loader-29-unloads", BCL, "    loader_weather_man,",

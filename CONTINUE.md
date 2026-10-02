@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-02), after the race coordinator's pause and post-race (8g). `HANDOFF.md` is the running
+(2026-10-02), after the car data loader (8h). `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -47,10 +47,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Eighty-two cross-checkers pass, plus the table generators:
+Eighty-three cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -82,6 +82,7 @@ trackroute_check   11 scenarios,  1353 lines, 0 differ   (57 caught, 1 equivalen
 carstate_check     10 scenarios,   653 lines, 0 differ   (56 caught, 7 equivalent)
 engine_check        8 scenarios,   414 lines, 0 differ   (56 caught, 2 equivalent)
 cartypeinfo_check   4 scenarios,   179 lines, 0 differ   (41/41 mutations caught)
+carinfo_check       114 ops,      2181 lines, 0 differ   (77 caught, 1 equivalent; retail's image)
 cardriver_check     5 scenarios,   118 lines, 0 differ   (45 caught, 1 equivalent)
 steering_check      5 scenarios,   873 lines, 0 differ   (43 caught, 1 equivalent)
 rigidbody_check    10 scenarios,   935 lines, 0 differ   (76 caught, 2 equivalent)
@@ -95,7 +96,7 @@ car_check          58 scenarios,  4242 lines, 0 differ   (238 caught, 16 equival
 physicssystem_check 12 scenarios,  739 lines, 0 differ   (61 caught, 1 equivalent)
 aerodynamics_check  7 scenarios,   107 lines, 0 differ   (74/74 mutations caught)
 physcomp_check      8 scenarios,   239 lines, 0 differ   (46 caught, 1 equivalent)
-sinit_check        17 calls,        0 problems           (6/6 mutations caught)
+sinit_check        18 calls,        0 problems           (6/6 mutations caught)
 physicscar_check  106 scenarios, 102908 lines, 0 differ (257 caught, 6 equivalent)
 mellowmover_check  39 scenarios, 56080 lines, 0 differ  (341 caught, 5 equivalent)
 carmode_check      74 transitions, 19 resets, 36093 lines, 0 differ (380 caught, 11 equivalent)
@@ -120,7 +121,7 @@ world_check         2742 ops,    15110 lines, 0 differ  (330/330 mutations caugh
 scenery_check       3450 ops,    16724 lines, 0 differ  (77 caught, 2 equivalent)
 scenerycull_check   7273 ops,    46687 lines, 0 differ  (147 caught, 1 equivalent)
 eview_check         2103 ops,    15454 lines, 0 differ  (152 caught, 1 equivalent)
-loadertable_check  37553 ops,    50792 lines, 0 differ  (137 caught, 2 equivalent)
+loadertable_check  37553 ops,    50792 lines, 0 differ  (138 caught, 2 equivalent)
 texturepack_check   6698 ops,    11464 lines, 0 differ  (131 caught, 1 equivalent)
 trackflow_check       16 scenarios,  709 lines, 0 differ  (73 caught, 1 equivalent)
 sky_check             46 scenarios, 1311 lines, 0 differ  (93 caught, 2 equivalent)
@@ -1154,24 +1155,37 @@ and so replaced every boot.
    Their table entries are NULL: ChangeState enters such a state, and no
    callback runs for its messages.
 
-   **Next is 8h: the car data loader.** Wiring the coordinator in showed
-   that no Car can be built in the game yet: Car's constructor reads
-   `CarTypeInfoArray[Type]` (gp-20616), and the array is NULL because
-   LoaderCarInfo is one of `bchunkload.c`'s UNPORTED slots (16). The
-   chunk is in `GLOBAL\GLOBALB.BUN` at 0x86b80, 88072 bytes: 64 records
-   of 1376 from the first 16-byte boundary past the header. 8h ports:
-   - LoaderCarInfo (`0x00187f98`, 400 bytes): 0x34600 sets the array and
-     makes each of the 64 types' acceleration tables; 0x34601 sets the
-     skin table (gp-20612) and its count, the size over 64 (gp-20608).
-     The demo-disc block (`0x002effe0`) is left out, as everywhere.
-   - UnloaderCarInfo (`0x00188128`), GetAccelerationTable
-     (`0x00188dd8`: 0x0030db70 plus type * 148) and MakeAccelerationTable
-     (`0x00188df0`, 728 bytes, over the ported Table and
-     CalculateShiftPoints).
-   - the global bundle's two chunks offered to it at boot, as retail's
-     LoadResourceFile of GLOBALB does.
+   **8h, the car data loader, is done** (HANDOFF.md, Session 31,
+   continued: the car data loader (step 8h)). `docs/formats/car-info.md`
+   has the write-up.
+   - `carinfo.c` and `carinfo.h` have LoaderCarInfo (`0x00187f98`),
+     UnloaderCarInfo (`0x00188128`), AccelerationTable's constructor
+     (`0x00188d68`), GetAccelerationTable (`0x00188dd8`),
+     MakeAccelerationTable (`0x00188df0`) and the static constructor
+     (`0x001890c8`, the demo's `0x00181060`, `__CTOR_LIST__` [35]) over
+     TheCarTypeAccelerationTable (`0x0030daf0`, 64 of 148 bytes).
+   - Slot 16 is ported in `bchunkload.c`, and `sinit.c` runs the
+     constructor. At boot `main.c`'s loadGlobalCarInfo offers slot 16
+     GLOBALB's top-level chunks in the file's order, so CarTypeInfoArray
+     and the 235 skins point into the resident bundle and the 64 tables
+     are made before the frontend loads. The rest of GLOBALB is still
+     only the UI's (trackview.h). Seen on Azahar: the boot log has
+     `car data: 2 chunks, 235 skins`, and `run_azahar_test.ps1` passes.
+   - MakeAccelerationTable's samples go to a 404-byte bMalloc that is
+     never freed (25856 bytes once, at boot), as in retail. With no
+     samples at all, which no record on the disc reaches, the port
+     leaves the table as it was.
+   - The last session's worry that six-gear cars read a stale up[7] was
+     wrong: CalculateShiftPoints writes the top gear's up point (MaxRPM)
+     at NumGears + 1, so every point the walk reads is the car's.
+     `carinfo_check` runs every load under seven stack fills and no
+     table moves.
+   - `carinfo_check` runs retail's code in RetailEmu: 6 scenarios, 114
+     ops, 2181 lines, 0 differ. Of 78 mutations, 77 are caught and 1 is
+     equivalent. `loadertable_check` links the car modules now and
+     treats slot 16 as ported.
 
-   **Then 8i: CarLoader** (`0x001b0260` .. `0x001b0e18`: Load,
+   **Next is 8i: CarLoader** (`0x001b0260` .. `0x001b0e18`: Load,
    BeginLoading, LoadingDoneCallback, IsLoaded, Unload, FindLoadedCar and
    the rest), which reads each car's `GeometryFilename` (CarTypeInfo+64)
    and skin so that `eModel::Init` finds the car's solids.

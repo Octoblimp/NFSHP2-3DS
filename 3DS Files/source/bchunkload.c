@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include "bchunk.h"
+#include "carinfo.h"
 #include "difficultyinfo.h"
 #include "esolid.h"
 #include "polyhedra.h"
@@ -81,6 +82,16 @@ static int UnloaderDifficultyInfo(uint8_t *c)
     return unloader_difficulty_info(c);
 }
 
+static int LoaderCarInfo(uint8_t *c)
+{
+    return loader_car_info(c);
+}
+
+static int UnloaderCarInfo(uint8_t *c)
+{
+    return unloader_car_info(c);
+}
+
 // ---------------------------------------------------- the unported slots
 
 // A slot whose object is not ported: the image's guard, and the chunk to
@@ -127,7 +138,6 @@ UNPORTED(LoaderCameras, UnloaderCameras, 13,
          0x80034405u, 0x80034410u, 0x80034415u, 0x80034420u, 0x80034425u,
          0x00034492u)
 UNPORTED(LoaderCops, UnloaderCops, 15, 0x80034500u)
-UNPORTED(LoaderCarInfo, UnloaderCarInfo, 16, 0x00034600u, 0x00034601u)
 UNPORTED(LoaderBodyDamage, UnloaderBodyDamage, 17, 0x00034030u)
 UNPORTED(LoaderNisInfo, UnloaderNisInfo, 20, 0x00037010u)
 UNPORTED(LoaderSoundScape, UnloaderSoundScape, 21, 0x80038000u)

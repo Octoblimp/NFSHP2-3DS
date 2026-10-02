@@ -55,8 +55,9 @@
 //     flipbook frame once, as RGBA8, and keeps them. The light lists are
 //     not ported, and the light-material pointers stay NULL.
 //   * GLOBALB's other chunks. The game loads the whole bundle at boot; the
-//     viewer hands only its two texture chunks to slot 2, and INGAMEB's the
-//     same, because the UI reads the rest of both as they are on the disc.
+//     boot offers slot 16 its car data (main.c), the viewer hands only its
+//     two texture chunks to slot 2, and INGAMEB's the same, because the UI
+//     reads the rest of both as they are on the disc.
 //     So InitVisibleZones' MARKER_BOUNDARY, whose solid is INGAMEB's,
 //     has none here.
 //   * SetScreenBuffers. Only the three things the matrices read are set:

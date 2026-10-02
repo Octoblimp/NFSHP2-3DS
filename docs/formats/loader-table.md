@@ -121,7 +121,7 @@ and "R-TB12" retail's, whose 279 top-level chunks all have a taker.
 | 13 | 13 | Cameras | `80034405`, `80034410`, `80034415`, `80034420`, `80034425`, `34492` | 1, 1, 1, 0, 1, 1 | 2 | 2 | -- |
 | 14 | 14 | Sun | `34202` | 1 | 1 | 1 | `sun.c` |
 | 15 | 15 | Cops | `80034500` | 1 | 1 | 1 | -- |
-| 16 | 16 | CarInfo | `34600`, `34601` | 1, 1 | 0 | 0 | -- |
+| 16 | 16 | CarInfo | `34600`, `34601` | 1, 1 | 0 | 0 | `carinfo.c` |
 | 17 | 17 | BodyDamage | `34030` | 52 | 0 | 0 | -- |
 | 18 | 18 | TrackRoutes | `34121` routes, `34122` signposts | 1, 1 | 2 | 2 | `trackroute.c` |
 | 19 | 19 | TrackPath | `80034147` | 1 | 1 | 1 | `trackpath.c` |

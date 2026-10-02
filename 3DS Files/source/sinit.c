@@ -4,9 +4,9 @@
 // and the _GLOBAL_$I$ it stands for. sinit_check reads those comments, so
 // their shape is fixed.
 //
-// None of the seventeen reads anything another one writes -- sixteen fill
+// None of the eighteen reads anything another one writes -- seventeen fill
 // Tables, Graphs, cameras, list heads, hashes, shakers and constants, and
-// the seventeenth builds the slot-pool manager -- so the order is kept
+// the eighteenth builds the slot-pool manager -- so the order is kept
 // because it is the image's, not because a different one would be
 // observed. The manager comes last for that reason too: it is entry 103,
 // long after the physics tables. The joystick's, [23], is named for EventNodeSlotPool but never
@@ -19,6 +19,7 @@
 #include "aerodynamics.h"
 #include "bslotpool.h"
 #include "car.h"
+#include "carinfo.h"
 #include "collisionbody.h"
 #include "drivetarget.h"
 #include "eview.h"
@@ -45,6 +46,7 @@ void sinit_run(void)
     track_static_init();        // [22]  0x00150938 _GLOBAL_$I$TrackPositionMarkerList
     joyevent_static_init();     // [23]  0x00152588 _GLOBAL_$I$EventNodeSlotPool
     shake_static_init();        // [24]  0x001537b8 _GLOBAL_$I$bShakeTest
+    carinfo_static_init();      // [35]  0x00181060 _GLOBAL_$I$FindCarLanguageInfo__F7CarType
     rigidbody_static_init();    // [41]  0x00193d20 _GLOBAL_$I$__9RigidBodyP13RigidBodyInfo
     wheel_static_init();        // [44]  0x0019b558 _GLOBAL_$I$SliderPositionsX
     aerodynamics_static_init(); // [54]  0x001a4de8 _GLOBAL_$I$FrontDownforceLocation

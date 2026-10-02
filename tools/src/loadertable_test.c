@@ -29,12 +29,15 @@
 #include "weatherman.h"
 
 // eview.c is not linked, whose eFrameCounter weatherman.c's query reads,
-// nor is realtime.c, whose clocks only texturepack.c's flipbooks read, nor
-// eviewmatrix.c, whose SunPosition sun.c's loader writes.
+// nor is realtime.c, whose clocks only texturepack.c's flipbooks and the
+// drivetrain and engine under slot 16's loader read, nor eviewmatrix.c,
+// whose SunPosition sun.c's loader writes.
 bNode SolidList;
 bNode ModelList;
 int32_t RealTimeFrames;
 int32_t WorldTimeFrames;
+int32_t WorldTimer;
+float WorldTimeElapsed;
 bVector3 SunPosition;
 uint32_t eFrameCounter;
 
@@ -759,7 +762,8 @@ static BChunkLoader saved_unload[BCHUNK_NUM_LOADERS];
 static int unported_slot(int k)
 {
     return !(k == 0 || k == 1 || k == 2 || k == 4 || k == 9 || k == 11
-             || k == 14 || k == 18 || k == 19 || k == 25 || k == 28);
+             || k == 14 || k == 16 || k == 18 || k == 19 || k == 25
+             || k == 28);
 }
 
 // --------------------------------------------------------------- dumps
