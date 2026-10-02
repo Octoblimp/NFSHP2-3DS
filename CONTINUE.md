@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-02), after CarLoader (8i). `HANDOFF.md` is the running
+(2026-10-02), after the track flow (8k). `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -1274,48 +1274,53 @@ and so replaced every boot.
    - The frontend's bundles (FRONTB, INGAMEB, GLOBALB) are still read by
      `main.c`'s addBundle, not through ResourceFile.
 
-   **Next is 8k: the track-loading game flow states.** All of them are NULL
-   in `main.c`'s `kGameFlowStages` today.
-   - **BeginGameFlowLoadingTrackCommon** (`0x00168db8`):
-     1. bCountFreeMemory;
-     2. unless SkipFE is set, LOADING_TRACK (`0xd0131dd1`) is made
-        visible (the demo disc's screen `0xf46de7f7` is left out);
-     3. LoadResourceFile(`GLOBAL\INGAMEA.BUN`, 2, 0), with gp-21376 set
-        to 1, and ServiceResourceLoading until IsResourceLoadingComplete;
-     4. LoadResourceFile(`GLOBAL\INGAMEB.LZC`, 2, 9, Part1), then
-        ChangeFilenameForHotChunking to `GLOBAL\INGAMEB.BUN`.
-   - **GameFlowLoadingTrackCommonPart1** (`0x00168ac0`). Retail's
-     DriverInfo has its RideInfo at +12, so byte 19 is
-     CanBeVertexDamaged.
-     1. TheCarLoader's RoundRobinFlag and InFrontEndFlag go to 0.
-     2. Every driver whose ride is not vertex-damageable is loaded. A
-        traffic car is loaded with skin -1 and its InstanceIndex set to
-        0; any other car's InstanceIndex is Load's answer.
-     3. Every driver whose ride is vertex-damageable is loaded.
-     4. BeginLoading runs with Part2 as the callback.
-   - **Part2** (`0x00168928`): for each driver whose InstanceIndex is
-     above 0, eDuplicateSolid copies the car's solids under the
-     instance's names: `%s_%c` to `%s_%c%d` for `A` and `B` on
-     vertex-damageable rides, and `%s_SCUFFS` to `%s_SCUFFS%d`, from the
-     car's BaseModelName (CarTypeInfo+32). Then
-     ChangeGameFlow(LOADING_TRACK_SPECIFIC).
-   - Then:
-     - LoadHudTextures (`0x00168c30`);
-     - BeginGameFlowLoadingTrackSpecific (`0x001690a0`) and its Parts 1
-       to 6 (`0x00169058` down to `0x00168f28`);
-     - retail's EndGameFlowLoadingTrackSpecific (`0x00169168`);
-     - the unloading pair (`0x00168ea0` and the Begin of unloading the
-       specific).
-   - `trackflow.c`'s End and Begin are still the demo's (`0x001645e8`,
-     `0x001646e0`). Retail changed the End (0.81), so recheck both
-     against retail.
+   **8k, the track-loading game flow states, is done** (HANDOFF.md,
+   Session 31, continued: the track flow (step 8k)).
+   `docs/formats/track-flow.md` has the write-up.
+   - `trackflow.c` and `trackflow.h` are retail's four track states and
+     their parts: BeginGameFlowLoadingTrackCommon (`0x00168db8`) and its
+     Parts 1 and 2, LoadHudTextures (`0x00168c30`),
+     BeginGameFlowLoadingTrackSpecific (`0x001690a0`) and its Parts 1 to
+     6, the End (`0x00169168`, now retail's: it sets the eggs unless a
+     demo), and both Begins of unloading (`0x00169288`, `0x00168ea0`, with
+     the leak checks and the eggs' reset).
+   - `hudtex.c` and `hudtex.h` are ChooseLoadableTextures (`0x001ee3c0`),
+     which Player::SetHudFeatures (`0x001796b0`) calls too.
+   - `gameflow.c` makes the speech public: `bgf_load_current_speech` and
+     `bgf_unload_current_speech` (LanguageManager's `0x0021e250` and
+     `0x0021e280`).
+   - `bfile.c` opens a missing `.LZC` as its `.BUN`: the card has the
+     tracks' TRACKB only expanded.
+   - `main.c` puts the four states in `kGameFlowStages` (rows 4, 5, 7 and
+     8), through wrappers that set `gTrackFlowGameFlow` first.
+     `trackview_free` runs the Begin of unloading with it NULL, so the
+     viewer neither changes the flow nor unloads the frontend's speech.
+   - New seams, NULL on the device: eFlashScreen, eDuplicateSolid,
+     eDeleteAllDuplicatedSolids, DemoModeReplayLoad,
+     LoadSoundRegionsInGame, SetRenderEggFromEasterEggs, ResetRenderEggs
+     and ClearTemporaryEasterEggs. A NULL load seam runs its callback at
+     once, so the chain still reaches RACING.
+   - `trackflow_check` runs retail's code in RetailEmu: 22 scenarios, 749
+     ops, 2333 lines, 0 differ. Of 254 mutations, 252 are caught and 2
+     are equivalent (`uts_files_unguarded`, `utc_files_unguarded`).
 
-   **Then 8l: wire the coordinator in and flow into a race**, for one
-   car on a track on Azahar (step 9):
+   **Next is 8l: wire the coordinator in and flow into a race**, for one
+   car on a track on Azahar (step 9). Nothing enters
+   `LOADING_TRACK_COMMON` yet. What it needs:
+   - a way in: the frontend's race start (FrontendDatabase::StartRace,
+     whose ChangeGameFlows are at `0x00185510` and `0x00185520`), or a
+     debug path that fills TheRaceParameters (track, cars, drivers) and
+     asks for state 4;
+   - `pHudTexturePack` (`GLOBAL\HUDTEX.BIN`) and the texture-pack
+     streaming behind LoadTexturesFromFile (`0x001acc98`), which the car
+     loader's seam wants too;
+   - LoadSoundRegionsInGame (`0x001ae798`), or its NULL;
+   - eDuplicateSolid (`0x00103bf0`: the eSolid copy constructor
+     `0x001147f0`, ChangeName `0x00103918`, FixStripEntryTable and the
+     solid list at gp-25712) and eDeleteAllDuplicatedSolids
+     (`0x00103d58`), for a second car of a type;
    - the RaceCoordinator built in `main.c` (`gNewRaceCoordinatorFn`) and
      its seams set where the port has the class;
-   - a way into a race: the frontend's start, or a debug path through the
-     track viewer to InitForRace on a track and car;
    - the main loop's UpdateCameraMovers and UpdateCameraShakers, and the
      coordinator's TICK;
    - BeginCountdownCameras (`0x001768e0`) and UpdateNonGameState

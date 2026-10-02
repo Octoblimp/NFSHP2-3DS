@@ -587,6 +587,16 @@ static void unloadSpeech(BGameFlow* gf)
     HOOK_VOID0(gf, unloadSpeech);
 }
 
+void bgf_load_current_speech(BGameFlow* gf)
+{
+    loadCurrentSpeech(gf);
+}
+
+void bgf_unload_current_speech(BGameFlow* gf)
+{
+    unloadSpeech(gf);
+}
+
 void bgf_set_curr_language(BGameFlow* gf, int language)
 {
     int old = gf->currLanguage;

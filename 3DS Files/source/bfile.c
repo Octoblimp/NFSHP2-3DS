@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "gamedata.h"
 
@@ -36,14 +37,34 @@ static int full_path(const char *name, char *out)
            && gamedata_path(rel, out, GAMEDATA_MAX_PATH) != NULL;
 }
 
-bFile *bOpen(const char *name)
+// The card holds the disc's big .LZC bundles expanded, under .BUN (the
+// tracks' TRACKB<n>), and ResourceFile loads a file with no COMP header as
+// it is. So a .LZC that is not there is looked for as the .BUN.
+static FILE *open_on_card(const char *name)
 {
     char   path[GAMEDATA_MAX_PATH];
+    char   alt[GAMEDATA_MAX_PATH];
+    FILE  *fp;
+    size_t n = strlen(name);
+
+    if (full_path(name, path) && (fp = fopen(path, "rb")) != NULL)
+        return fp;
+    if (n < 4 || n >= sizeof alt || strcmp(name + n - 4, ".LZC") != 0)
+        return NULL;
+    memcpy(alt, name, n - 4);
+    memcpy(alt + n - 4, ".BUN", 5);
+    if (!full_path(alt, path))
+        return NULL;
+    return fopen(path, "rb");
+}
+
+bFile *bOpen(const char *name)
+{
     FILE  *fp;
     bFile *f;
     long   len;
 
-    if (!full_path(name, path) || (fp = fopen(path, "rb")) == NULL)
+    if ((fp = open_on_card(name)) == NULL)
         return NULL;
     fseek(fp, 0, SEEK_END);
     len = ftell(fp);

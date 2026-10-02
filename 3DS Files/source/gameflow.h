@@ -443,6 +443,12 @@ void bgf_load_global_chunks(BGameFlow* gf);
 // French LOADING art (0x001681b0). The same language again does nothing.
 void bgf_set_curr_language(BGameFlow* gf, int language);
 
+// LanguageManager's 0x0021e250 and 0x0021e280: the current language's
+// speech in, once (LoadLocalizedSpeechFiles), and out again. The track
+// flow's Part1 and its Begin of unloading call them on TheLanguageManager.
+void bgf_load_current_speech(BGameFlow* gf);
+void bgf_unload_current_speech(BGameFlow* gf);
+
 // ServiceGameFlow (0x001680e8). Loops until the desired state stops moving,
 // so a Begin or Loop that redirects is serviced in the same call and costs
 // no frame. The OLD state's End runs before the NEW state's Begin.

@@ -11364,3 +11364,88 @@ cleanly, as before.
 loads as nothing), services until IsResourceLoadingComplete, then loads
 `GLOBAL\INGAMEB.LZC` with flags 9 and Part1 as the callback, and renames
 it `GLOBAL\INGAMEB.BUN`. CONTINUE.md has Part1, Part2 and the rest.
+
+## Session 31, continued (2026-10-02) -- the track flow (step 8k)
+
+The previous context ended with the port and the harness written and none
+of it built. This one wrote the checker's model on the retail image,
+brought it to 0 differ, ran the mutations, updated the docs and
+committed.
+
+### The port
+
+`docs/formats/track-flow.md` has the decode. The game flow's four track
+states are retail's now, with the callbacks that chain them:
+
+- **Loading the common part.** BeginGameFlowLoadingTrackCommon
+  (`0x00168db8`) counts free memory, puts the loading screen up unless
+  SkipFE, loads INGAMEA (0 bytes) and waits it out, then queues INGAMEB.
+  Part1 (`0x00168ac0`) loads the cars through TheCarLoader, the ones that
+  cannot be vertex-damaged first, with traffic at skin -1 and instance 0.
+  Part2 (`0x00168928`) copies each further instance's solids
+  (`%s_A%d`, `%s_B%d`, `%s_SCUFFS%d`) and moves to LOADING_TRACK_SPECIFIC.
+- **Loading the track's part.** The Begin (`0x001690a0`) queues TRACKA and
+  TRACKB. Parts 1 to 6 load the speech, the demo replay, the sound
+  regions, the HUD textures, PRERACEANIM unless SkipFE, the track's two
+  texture files and DRIVTEX, then take the loading screen down and move to
+  RACING.
+- **LoadHudTextures** (`0x00168c30`) loads the player's gauges and the
+  third-person gauge into the HUD pack. ChooseLoadableTextures
+  (`0x001ee3c0`) names them; it is in `hudtex.c`, because
+  Player::SetHudFeatures calls it too.
+- **The End** (`0x00169168`) is the demo's plus SetRenderEggFromEasterEggs
+  unless an AI or replay demo.
+- **The Begins of unloading** (`0x00169288`, `0x00168ea0`) end with a leak
+  check, a green eFlashScreen when free memory differs from before the
+  load. The track's also resets the eggs unless a demo, and its language
+  call is the speech's unload (`0x0021e280`), not the demo's
+  UnloadAllLanguages.
+
+What else changed:
+
+- `gameflow.c` makes its speech load and unload public, as
+  `bgf_load_current_speech` and `bgf_unload_current_speech`, and leaves
+  the statics bootflow's mutations name alone.
+- `bfile.c` opens a missing `.LZC` as its `.BUN`. The card has the
+  tracks' TRACKB only expanded, and ResourceFile loads a file with no
+  `COMP` header as it is.
+- `main.c` wires the four states into `kGameFlowStages` through wrappers
+  that set `gTrackFlowGameFlow`. `trackview_free` hides it around its
+  Begin of unloading, so the viewer neither changes the flow nor unloads
+  the frontend's speech.
+- Eight new seams, all NULL on the device. A NULL load seam runs its
+  callback at once, so the chain still reaches RACING.
+- Part2 builds its names in 48-byte buffers where retail's are 32 and
+  run over for a long name. The disc's longest base name is 11 letters.
+
+Nothing enters LOADING_TRACK_COMMON yet: that is 8l.
+
+### The checks
+
+`trackflow_check` runs the fifteen functions as shipped in RetailEmu,
+with GetDriverInfo, bSPrintf, bStringHash, bStrCmp, bStrLen, bMemSet and
+bMemCpy under them. Every other callee is a stub that prints its
+arguments and thirteen globals. The loads queue their callbacks, and the
+script's D runs the oldest, so a scenario walks the chain one link at a
+time. The cars are GLOBALB.BUN's own records.
+
+22 scenarios, 749 ops, 2333 lines: 0 differ on the first run. The
+mutation pass breaks the port in 254 ways and catches 252. The two
+equivalents are port-only: both Find loops without the Unload half of
+their guard, which the harness never sets apart. `p1c_racing_or_cop`
+survived the first pass, because the patched racer was its type's first
+instance and Load answered 0 either way; the scenario now loads from a
+base of 3.
+
+bootflow_check (48 scenarios, 0 differ) and bscreens_check (17, 0 differ)
+pass with `gameflow.c`'s new wrappers. So do sinit_check (21 calls) and
+rain_check. The 3DS build links, its relocations check out, and on Azahar it
+boots, plays the movie, walks the frontend and exits cleanly, as before.
+Nothing on the device enters the new states yet.
+
+### Next
+
+8l, wire the coordinator in and flow into a race. CONTINUE.md lists what
+the chain needs on the device before anything can enter
+LOADING_TRACK_COMMON: a way in, the HUD pack and the texture streaming,
+eDuplicateSolid, the RaceCoordinator and the cameras.

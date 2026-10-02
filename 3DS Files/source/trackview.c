@@ -1152,19 +1152,24 @@ void trackview_free(TrackView* v)
 
     // The Begin of unloading closes what the End started and hands the
     // track's files back through the two seams. Nothing is chunk-loaded
-    // unless the load got as far as `loaded`.
+    // unless the load got as far as `loaded`. The viewer is not a game
+    // flow state, so the Begin is run with no flow: it does not move the
+    // flow on or unload the frontend's speech.
     if (v->loaded) {
         void* (*find)(int)     = gFindResourceFileFn;
         void  (*unload)(void*) = gUnloadResourceFileFn;
+        BGameFlow* flow        = gTrackFlowGameFlow;
 
         s_unloading           = v;
         gFindResourceFileFn   = find_track_file;
         gUnloadResourceFileFn = unload_track_file;
+        gTrackFlowGameFlow    = NULL;
         BeginGameFlowUnloadingTrackSpecific();
         // Back to the resource system's (main.c), which the car loader
         // and the race coordinator unload through too.
         gFindResourceFileFn   = find;
         gUnloadResourceFileFn = unload;
+        gTrackFlowGameFlow    = flow;
         s_unloading           = NULL;
         v->linkedSolids = 0;
         if (gEModelRenderFn == render_model) {

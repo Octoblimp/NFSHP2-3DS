@@ -232,20 +232,56 @@ static const BBootStage kBootStages[] = {
 };
 #define NUM_BOOT_STAGES ((int)(sizeof(kBootStages) / sizeof(kBootStages[0])))
 
-// GameFlowStateInfoTable (0x002f2eb0). IN_FRONTEND and RACING are the
-// resting states and have no functions at all; the track and race states
-// belong to phases the port has not reached.
+// The track states are trackflow.c's, which change the flow through
+// gTrackFlowGameFlow: each Begin makes it the flow that entered the state,
+// and its load callbacks run on it later.
+static void flowBeginLoadingTrackCommon(BGameFlow* gf)
+{
+    gTrackFlowGameFlow = gf;
+    BeginGameFlowLoadingTrackCommon();
+}
+
+static void flowBeginLoadingTrackSpecific(BGameFlow* gf)
+{
+    gTrackFlowGameFlow = gf;
+    BeginGameFlowLoadingTrackSpecific();
+}
+
+static void flowEndLoadingTrackSpecific(BGameFlow* gf)
+{
+    (void)gf;
+    EndGameFlowLoadingTrackSpecific();
+}
+
+static void flowBeginUnloadingTrackSpecific(BGameFlow* gf)
+{
+    gTrackFlowGameFlow = gf;
+    BeginGameFlowUnloadingTrackSpecific();
+}
+
+static void flowBeginUnloadingTrackCommon(BGameFlow* gf)
+{
+    gTrackFlowGameFlow = gf;
+    BeginGameFlowUnloadingTrackCommon();
+}
+
+// GameFlowStateInfoTable, retail's 0x002faea0. IN_FRONTEND and RACING are
+// the resting states and have no functions at all, and LOADING_TRACK_
+// SPECIFIC's Loop (0x00169160) is empty. Nothing asks for a track state
+// yet: the frontend's race start is not ported.
 static const BGameFlowStateInfo kGameFlowStages[BGF_NUM_STATES] = {
     { "NONE",                     NULL, NULL, NULL },
     { "LOADING_FRONTEND",         bgf_begin_loading_frontend,
                                   bgf_end_loading_frontend, NULL },
     { "UNLOADING_FRONTEND",       bgf_begin_unloading_frontend, NULL, NULL },
     { "IN_FRONTEND",              NULL, NULL, NULL },
-    { "LOADING_TRACK_COMMON",     NULL, NULL, NULL },
-    { "LOADING_TRACK_SPECIFIC",   NULL, NULL, NULL },
+    { "LOADING_TRACK_COMMON",     flowBeginLoadingTrackCommon, NULL, NULL },
+    { "LOADING_TRACK_SPECIFIC",   flowBeginLoadingTrackSpecific,
+                                  flowEndLoadingTrackSpecific, NULL },
     { "RACING",                   NULL, NULL, NULL },
-    { "UNLOADING_TRACK_SPECIFIC", NULL, NULL, NULL },
-    { "UNLOADING_TRACK_COMMON",   NULL, NULL, NULL },
+    { "UNLOADING_TRACK_SPECIFIC", flowBeginUnloadingTrackSpecific, NULL,
+                                  NULL },
+    { "UNLOADING_TRACK_COMMON",   flowBeginUnloadingTrackCommon, NULL, NULL },
 };
 
 // ----------------------------------------------------------- the 3DS side
