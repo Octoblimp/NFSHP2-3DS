@@ -68,6 +68,7 @@
 #include "gamedata.h"
 #include "fesound.h"
 #include "fred.h"
+#include "fredrace.h"
 #include "gameflow.h"
 #include "heapcfg.h"
 #include "geoview.h"
@@ -270,8 +271,8 @@ static void flowBeginUnloadingTrackCommon(BGameFlow* gf)
 
 // GameFlowStateInfoTable, retail's 0x002faea0. IN_FRONTEND and RACING are
 // the resting states and have no functions at all, and LOADING_TRACK_
-// SPECIFIC's Loop (0x00169160) is empty. Nothing asks for a track state
-// yet: the frontend's race start is not ported.
+// SPECIFIC's Loop (0x00169160) is empty. A SkipFE boot's StartRace asks for
+// LOADING_TRACK_COMMON; the frontend's own way into a race is not ported.
 static const BGameFlowStateInfo kGameFlowStages[BGF_NUM_STATES] = {
     { "NONE",                     NULL, NULL, NULL },
     { "LOADING_FRONTEND",         bgf_begin_loading_frontend,
@@ -1031,6 +1032,41 @@ static void hookChallengeCars(void* user)
 {
     (void)user;
     fred_make_challenge_cars_available(&Fred);
+}
+
+// StartRace's game flow (fredrace.h): CurrentGameFlowState, and
+// ChangeGameFlow(state, NONE) on the flow. The race events' seams stay
+// NULL; no game type the port reaches uses them yet.
+static int32_t fredFlowState(void)
+{
+    return g_flow.current;
+}
+
+static void fredChangeFlow(int32_t state)
+{
+    bgf_change_state(&g_flow, state, BGF_NONE);
+}
+
+// What StartRace leaves in TheRaceParameters: the race, then a line a
+// driver.
+static void logRaceStart(void)
+{
+    const RaceParameters* rp = &TheRaceParameters;
+    logLine("race start: track %d, %d laps, race type %d, %d player, "
+            "%d AI, %d cops, %d drivers",
+            (int)rp->TrackNumber, (int)rp->NumLapsInRace, (int)rp->RaceType,
+            (int)rp->NumPlayerCars, (int)rp->NumAICars, (int)rp->nMaxCops,
+            (int)rp->NumDriverInfo);
+    for (int32_t i = 0; i < rp->NumDriverInfo; i++) {
+        const DriverInfo* d = race_parameters_get_driver_info(i);
+        logLine("  driver %d: type %d, car %d skin %d, character %d, "
+                "skill %d, grid %d",
+                (int)d->UniqueDriverNumber, (int)d->TheDriverType,
+                (int)d->CurrentRideInfo.Type,
+                (int)d->CurrentRideInfo.SkinNumber,
+                (int)d->CharacterNumber, (int)d->SkillLevel,
+                (int)d->StartingPosition);
+    }
 }
 
 static void hookTrace(void* user, const char* line)
@@ -2439,6 +2475,15 @@ int main(int argc, char** argv)
     g_flow.fred = fred_bytes();
     // Player's POV cycle reads SkipFE (gp-23220), which the flow holds.
     gPlayerCamSkipFE = &g_flow.skipFE;
+    // Retail sets SkipFE only from a joylog's config items (LoadConfigItems,
+    // 0x0012faf0, early in InitializeEverything), and the port reads no
+    // joylog: R held as the app starts is the port's switch. InitFred and
+    // the players' settings read it, so it is set before them.
+    hidScanInput();
+    if (hidKeysHeld() & KEY_R) {
+        g_flow.skipFE = 1;
+        logLine("SkipFE: R held at boot");
+    }
     gCurrLanguageFn = currLanguage;
     bgf_load_global_chunks(&g_flow);
     logLine("global chunks loaded, LOADING drawn");
@@ -2578,9 +2623,18 @@ int main(int argc, char** argv)
     setupHooks.trace               = hookTrace;
     bsetup_init(&g_setup, &g_flow, &setupHooks);
 
-    // main (0x0012da88): SkipFE ships as 0, so LoadLanguageInfo and then
+    // Retail's main (0x0012f000), after InitializeEverything: with SkipFE
+    // set, StartSkipFEGame on Fred, whose StartRace asks for
+    // LOADING_TRACK_COMMON straight from NONE; else
     // ChangeGameFlow(LOADING_FRONTEND). MainLoop takes it from there.
-    bgf_change_state(&g_flow, BGF_LOADING_FRONTEND, BGF_NONE);
+    gFredGameFlowStateFn  = fredFlowState;
+    gFredChangeGameFlowFn = fredChangeFlow;
+    if (g_flow.skipFE) {
+        fred_start_skip_fe_game(&Fred);
+        logRaceStart();
+    } else {
+        bgf_change_state(&g_flow, BGF_LOADING_FRONTEND, BGF_NONE);
+    }
 
     if (!georender_init()) {
         logPrintf("georender: shader would not load\n");

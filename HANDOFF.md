@@ -11544,3 +11544,109 @@ defaults as before, read from the real Fred now.
   SetupCarsForRace (`0x00185690`), with the helpers under them;
 - the RaceEvent and EventTree calls as seams;
 - a switch for SkipFE.
+
+## Session 31, continued (2026-10-02) -- the race start (step 8l-2)
+
+The user's ask: pick 8l-2 up where the last context stopped. The port,
+its harness and the checker were written there, and the checker was at
+0 differ. This context ran the mutation pass and closed its survivors,
+wired the switch into `main.c`, reran every checker, built, tested on
+Azahar, wrote the docs and committed.
+
+### The port
+
+`docs/formats/race-start.md` has the decode.
+
+- **StartSkipFEGame** (`0x00184bd8`) fills TheRaceParameters from the
+  SkipFE words and jumps into StartRace on the global Fred. As shipped
+  that is one car (type 37) on track 12 for 8 laps, with no AI, no
+  traffic and no cops.
+- **StartRace** (`0x00184f68`) runs the race event's part for GameTypes
+  4, 8 and 9, then the boost scales, the AI caps, point to point,
+  SetupCarsForRace, the settings and the record times. Last it changes
+  the flow: to UNLOADING_FRONTEND from IN_FRONTEND, and to
+  LOADING_TRACK_COMMON from any other state.
+- **SetupCarsForRace** (`0x00185690`) builds the drivers' table in four
+  groups:
+  - the players;
+  - the AI racers, with up to 500 attempts over GenerateRandomRideInfo
+    against the six-model limit and the type and colour rejections;
+  - six traffic cars, when there is traffic;
+  - the cops, on the cop car nearest the slowest class.
+
+  CalculateStartingPositions then grids everyone who has no slot, by how
+  quickly their car pulls away.
+- **RaceParameters** gains AddDriverInfo, GetDriverInfoByDriverNumber, the
+  restore and the eliminate, the model count and the two location
+  getters.
+- **Seams.** There are 17, for the race events, the event trees, the demo
+  replay and the reward cars. `main.c` sets only the flow's two.
+- **The switch** is R held at boot. Retail sets SkipFE only from a
+  joylog's config items, and the port reads no joylog. `main.c` reads the
+  pad once, after `bgf_init` and before InitFred, which reads SkipFE.
+  Then, as retail's main does, it calls `fred_start_skip_fe_game(&Fred)`
+  in place of ChangeGameFlow(LOADING_FRONTEND), and it logs the race and
+  each driver. `tools/run_azahar_race.ps1` holds R through the boot.
+- **Not ported:** BeginGameFlowUnloadingFrontEnd (`0x00168830`). The
+  SkipFE path never enters UNLOADING_FRONTEND, so it goes with the
+  frontend's way into a race. The doc lists what it calls.
+
+### The checks
+
+`fredrace_check` runs the image's code in RetailEmu: everything above
+and what it calls, with InitFred and the loaders setting the scene. The
+race events, the trees, the replay, the reward cars and ChangeGameFlow
+are stubs on both sides. It has 8 scenarios, 2527 ops and 50503 lines,
+with 0 differ.
+
+The first mutation pass caught 200 of 217; 17 survived. `s_holes` takes
+in what the other scenarios left alone:
+
+- the three game-type tests called alone. StartRace tests GameType 2
+  beside IsChallengeGame, so through it a mutant that lets 2 in hides;
+- a grid of exactly nine;
+- one cop at OpponentStrength 2, the only strength whose two skill
+  tables differ;
+- car 63 (the table's last) given a weight in the draw, and a car with a
+  weight but no skins;
+- an invalid track that keeps a high score index;
+- a torque curve that peaks at its last point;
+- the second database's totals moved (the `hs` op takes a salt now), so
+  a lookup in the wrong table shows;
+- a NumPlayerCars below 0, which SetupCarsForRace puts back to 0, with
+  no driver before the cops;
+- car 34, the class 2 cop, with no geometry. Cars 31 and 33 then tie,
+  one class away;
+- one AI racer over MaximumNumAICars;
+- a traffic car and a rank-1 knockout in the model count;
+- a driver left past the table's end.
+
+`cp_pos1` is equivalent. The driver being placed stays in the table
+with slot 0 until it is given one, so slot 0 always counts as held.
+
+A rerun of the 17 caught 16, so of 217 mutations 216 are caught and 1 is
+equivalent, with 0 unexplained.
+
+Every checker in the chain passes: 91 commands, 0 failed, among them
+fredrace_check (8 scenarios, 2527 ops, 50503 lines, 0 differ) and
+sinit_check's 23 calls. The 3DS build links, and check_3dsx reports
+its relocations OK.
+
+On Azahar, the switch at first never fired. The script posted R once,
+when the window appeared, and Azahar drops a press made before its
+render window takes the keyboard. Now it posts R every 150 ms until the
+log shows InitFred has run. The log then reads `SkipFE: R held at boot`
+and the race start: track 12, 8 laps, one driver, car 37 skin 1 on grid
+1. The flow goes from NONE to LOADING_TRACK_COMMON and runs its Begin.
+It then stays on LOADING at 60 fps, with no fault. By the code, that is
+Part1's car load waiting on the NULL LoadTexturesFromFile, though
+nothing logs the step. `run_azahar_test.ps1` passes: the boot without R
+walks the frontend as before.
+
+### Next
+
+8l-3, the race:
+
+- the car's textures (LoadTexturesFromFile), where Part1 stops now;
+- `main.c` building the coordinator and running MainLoop's race half;
+- the items under 8l-3 in CONTINUE.md.

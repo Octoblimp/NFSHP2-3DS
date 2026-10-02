@@ -87,3 +87,114 @@ void race_parameters_static_init(void)
         di->CurrentRideInfo.CanBeVertexDamaged = 0;
     }
 }
+
+void race_parameters_add_driver_info(RaceParameters *rp, const DriverInfo *d)
+{
+    if (rp->NumDriverInfo >= RACE_PARAMETERS_MAX_DRIVERS)
+        return;
+    rp->pDriverInfoTable[rp->NumDriverInfo] = *d;
+    rp->NumDriverInfo++;
+}
+
+DriverInfo *race_parameters_find_driver(RaceParameters *rp, int32_t number)
+{
+    int32_t i;
+
+    for (i = 0; i < rp->NumDriverInfo; i++)
+        if (rp->pDriverInfoTable[i].UniqueDriverNumber == number)
+            return &rp->pDriverInfoTable[i];
+    return NULL;
+}
+
+void race_parameters_restore_eliminated(RaceParameters *rp)
+{
+    int32_t i;
+
+    for (i = 0; i < rp->NumDriverInfo; i++) {
+        DriverInfo *d = &rp->pDriverInfoTable[i];
+
+        if (d->EliminatedRank <= 0)
+            continue;
+        if (d->TheDriverType == DRIVER_TYPE_PLAYER)
+            rp->NumPlayerCars++;
+        else if (d->TheDriverType == DRIVER_TYPE_AI_RACER)
+            rp->NumAICars++;
+        d->EliminatedRank = 0;
+    }
+}
+
+DriverInfo *race_parameters_eliminate_driver(RaceParameters *rp,
+                                             int32_t number, int32_t rank)
+{
+    DriverInfo *d = race_parameters_find_driver(rp, number);
+
+    if (d == NULL || d->EliminatedRank > 0)
+        return d;
+    d->EliminatedRank = (int8_t)rank;
+    if (d->TheDriverType == DRIVER_TYPE_PLAYER)
+        rp->NumPlayerCars--;
+    else if (d->TheDriverType == DRIVER_TYPE_AI_RACER)
+        rp->NumAICars--;
+    return d;
+}
+
+// The image reads a CarTypeInfo for any type. The port's only reads the
+// 64 there are: a ride of any other type counts as no model and matches
+// none.
+static const CarTypeInfo *ride_car(const RideInfo *r)
+{
+    return r->Type >= 0 && r->Type < 64 ? cartypeinfo_get(r->Type) : NULL;
+}
+
+int32_t race_parameters_too_many_models(RaceParameters *rp,
+                                        const RideInfo *ride)
+{
+    int32_t n = rp->NumDriverInfo;
+    int32_t models = 0;
+    int32_t i, j;
+
+    for (i = 0; i <= n; i++) {
+        const RideInfo *r;
+        const CarTypeInfo *ct;
+
+        // The table has room for 14; past that the port takes no rank.
+        if (i < RACE_PARAMETERS_MAX_DRIVERS
+            && rp->pDriverInfoTable[i].EliminatedRank > 0)
+            continue;
+        r = i < n ? &rp->pDriverInfoTable[i].CurrentRideInfo : ride;
+        ct = ride_car(r);
+        if (ct == NULL || ct->UsageType == CAR_USAGE_TYPE_TRAFFIC)
+            continue;
+        if (r->CanBeVertexDamaged != 0) {
+            models++;
+            continue;
+        }
+        for (j = 0; j < i; j++) {
+            const DriverInfo *dj = &rp->pDriverInfoTable[j];
+            const CarTypeInfo *cj;
+
+            if (dj->EliminatedRank > 0
+                || dj->CurrentRideInfo.CanBeVertexDamaged != 0)
+                continue;
+            cj = ride_car(&dj->CurrentRideInfo);
+            if (cj != NULL && strcmp(ct->CompressedGeometryFilename,
+                                     cj->CompressedGeometryFilename) == 0)
+                break;
+        }
+        if (j == i)
+            models++;
+    }
+    return models >= 6;
+}
+
+int32_t race_parameters_get_location_number(const RaceParameters *rp)
+{
+    return rp->TrackNumber / 10;
+}
+
+int32_t race_parameters_get_location_index(const RaceParameters *rp)
+{
+    int32_t loc = race_parameters_get_location_number(rp);
+
+    return loc == 6 ? 4 : loc - 1;
+}

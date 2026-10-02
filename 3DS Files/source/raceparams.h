@@ -45,4 +45,45 @@ void global_display_settings_init_with_defaults(tGlobalDisplaySettings *d);
 // is what InitWithDefaults' clear left.
 void race_parameters_static_init(void);
 
+
+// ------------------------------------------------- the driver table's methods
+//
+// The race start's (fredrace.h). Each takes the record, as the image's do;
+// every caller passes TheRaceParameters.
+
+// AddDriverInfo, 0x001eda40: a copy of `d` on the end of the table, while
+// it has fewer than 14. The image also looks up the ride's SkinInfo and
+// drops the answer.
+void race_parameters_add_driver_info(RaceParameters *rp, const DriverInfo *d);
+
+// GetDriverInfoByDriverNumber, 0x001edb40: the first driver with that
+// number, or NULL. racecoord.h's is the same on TheRaceParameters.
+DriverInfo *race_parameters_find_driver(RaceParameters *rp, int32_t number);
+
+// 0x001edc50. Every driver a knockout put out (a rank above 0) comes back:
+// a player or an AI racer adds one to its count again, and the rank goes
+// to 0. SetupCarsForRace runs it first, before it clears the table.
+void race_parameters_restore_eliminated(RaceParameters *rp);
+
+// 0x001edbc8. The driver with that number, unless it is missing or out
+// already, goes out at `rank`, and a player or an AI racer takes one off
+// its count. The driver, or NULL.
+DriverInfo *race_parameters_eliminate_driver(RaceParameters *rp,
+                                             int32_t number, int32_t rank);
+
+// 0x001ede08: whether the race would draw six models or more with `ride`
+// added. Each driver still in, and then `ride`, counts unless it is
+// traffic: one that can be vertex-damaged always, and the rest when no
+// earlier one (still in, and not vertex-damageable) has the same
+// compressed geometry. The image reads the table one past its end for
+// `ride`'s turn, and skips `ride` when that stale record has a rank.
+int32_t race_parameters_too_many_models(RaceParameters *rp,
+                                        const RideInfo *ride);
+
+// GetLocationNumber (0x001eddb8), the track number over ten, and
+// GetLocationIndex (0x001eddd8), the location less one but 4 for the
+// sixth: which of a car's five LocationProb weights the race uses.
+int32_t race_parameters_get_location_number(const RaceParameters *rp);
+int32_t race_parameters_get_location_index(const RaceParameters *rp);
+
 #endif

@@ -20,6 +20,12 @@
 // SkipFE start (0x00184bd8) puts gp-23188 into bHelicopter (+620) and
 // gp-23184 into bSpikeStrips (+616), so the port names the three for where
 // they go.
+//
+// SetupCarsForRace and StartRace read two more, past the default cars:
+// ForceAllAICarsToBeThisType, the AI's car type unless it is -1, and
+// MaximumNumAICars, the AI count StartRace allows (the demo's names, at the
+// demo's places after DefaultPlayer2SkinIndex less the one gp-23120 holds,
+// AllCarsAvailableInCarSelectScreen).
 
 #ifndef CONFIGITEMS_H
 #define CONFIGITEMS_H
@@ -51,6 +57,8 @@ extern int32_t DefaultPlayer1CarType;       // gp-23136, 37
 extern int32_t DefaultPlayer2CarType;       // gp-23132, 37
 extern int32_t DefaultPlayer1SkinIndex;     // gp-23128, 1
 extern int32_t DefaultPlayer2SkinIndex;     // gp-23124, 1
+extern int32_t ForceAllAICarsToBeThisType;  // gp-23116, -1
+extern int32_t MaximumNumAICars;            // gp-23112, 7
 
 // SkipFE as the image reads it, `lw -23220(gp)`: gameflow's skipFE
 // through gPlayerCamSkipFE, 0 while that is unset.

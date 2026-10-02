@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-02), after the track flow (8k). `HANDOFF.md` is the running
+(2026-10-02), after the race start (8l-2). `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -47,10 +47,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Eighty-four cross-checkers pass, plus the table generators:
+Eighty-seven cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/resource_check.py && python tools/fred_check.py && python tools/fredrace_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -124,7 +124,7 @@ scenerycull_check   7273 ops,    46687 lines, 0 differ  (147 caught, 1 equivalen
 eview_check         2103 ops,    15454 lines, 0 differ  (152 caught, 1 equivalent)
 loadertable_check  37553 ops,    50792 lines, 0 differ  (138 caught, 2 equivalent)
 texturepack_check   6698 ops,    11464 lines, 0 differ  (131 caught, 1 equivalent)
-trackflow_check       16 scenarios,  709 lines, 0 differ  (73 caught, 1 equivalent)
+trackflow_check       22 scenarios, 2333 lines, 0 differ  (252 caught, 2 equivalent; retail's image)
 sky_check             46 scenarios, 1311 lines, 0 differ  (93 caught, 2 equivalent)
 sun_check            115 scenarios, 3427 lines, 0 differ  (154/154 mutations caught)
 weather_check         75 scenarios, 4368 lines, 0 differ  (85 caught, 4 equivalent)
@@ -138,6 +138,9 @@ racesetup_check      398 ops,       3420 lines, 0 differ  (82 caught, 4 equivale
 carrenderinfo_check  321 scenarios, 105544 lines, 0 differ (161 caught, 2 equivalent)
 carrender_check      740 scenarios, 211648 lines, 0 differ (301 caught, 3 equivalent)
 rendercars_check    1272 scenarios,  20075 lines, 0 differ (89 caught, 0 equivalent)
+resource_check        10 scenarios,  3250 lines, 0 differ (153 caught, 2 equivalent; retail's image)
+fred_check             9 scenarios, 54344 lines, 0 differ (103/103 mutations caught; retail's image)
+fredrace_check         8 scenarios, 50503 lines, 0 differ (216 caught, 1 equivalent; retail's image)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -1338,9 +1341,47 @@ and so replaced every boot.
      Azahar passes. On the device the log reads `fred defaults: Player1
      (Rick), Player2 (Wayne), car 37 / 37`.
 
+   **8l-2, the race start, is done** (HANDOFF.md, Session 31, continued:
+   the race start (step 8l-2)). `docs/formats/race-start.md` has the
+   write-up.
+   - `fredrace.c` and `fredrace.h` are StartSkipFEGame (`0x00184bd8`),
+     StartRace (`0x00184f68`), SetupCarsForRace (`0x00185690`),
+     CalculateStartingPositions (`0x00185fe8`), GenerateRandomRideInfo
+     (`0x00188218`), GetRandomSkin (`0x00188460`), the character and cop
+     picks, AreThereAnyCarsOfType and OfColour, the unused-skin pick,
+     DriverInfo's constructor, RideInfo::Init, SetRecordTimesToBeat and
+     the four record indexes.
+   - `raceparams.c` adds AddDriverInfo (`0x001eda40`),
+     GetDriverInfoByDriverNumber (`0x001edb40`), the restore and the
+     eliminate (`0x001edc50`, `0x001edbc8`), the model count
+     (`0x001ede08`), and GetLocationNumber and GetLocationIndex.
+     `configitems.c` has ForceAllAICarsToBeThisType (-1) and
+     MaximumNumAICars (7).
+   - The race events, the event trees, the demo replay and the reward
+     cars are 17 seams. All are NULL on the device except the flow's two,
+     the current state and `bgf_change_state`. `TheRaceEventFields` holds
+     the four words of TheRaceEvent that the other game types touch.
+   - `main.c` is the switch. Holding R at boot sets SkipFE: the pad is
+     read once, after `bgf_init` and before InitFred. The boot then calls
+     `fred_start_skip_fe_game(&Fred)` in place of LOADING_FRONTEND and
+     logs the drivers. `tools/run_azahar_race.ps1` holds R and reads the
+     log.
+   - `fredrace_check` runs retail's code in RetailEmu: 8 scenarios, 2527
+     ops, 50503 lines, 0 differ. Of 217 mutations, 216 are caught and 1
+     is equivalent (`cp_pos1`). The full pass caught 200, and the other
+     17 were rerun after `s_holes` went in.
+   - On Azahar, R held at boot logs the race start (track 12, 8 laps, one
+     driver: car 37 skin 1 on grid 1). The flow enters
+     LOADING_TRACK_COMMON from NONE and runs its Begin, then stays on
+     LOADING at 60 fps. By the code, Part1's car load waits on the NULL
+     LoadTexturesFromFile; nothing logs that step. A boot without R walks
+     the frontend as before (`run_azahar_test.ps1` passes).
+   - Retail's BeginGameFlowUnloadingFrontEnd (`0x00168830`) is not
+     ported. It waits for the frontend's way into a race, below, and the
+     doc lists what it calls.
+
    **Next is 8l: flow into a race**, one car on a track on Azahar (step
-   9), in three slices. 8l-1 is done; 8l-2 is next. Nothing enters
-   `LOADING_TRACK_COMMON` yet.
+   9), in three slices. 8l-1 and 8l-2 are done; 8l-3 is next.
 
    The way in is retail's own debug path. With SkipFE (gp-23220) set,
    `main` (`0x0012f000`) calls StartSkipFEGame (`0x00184bd8`) in place of
@@ -1352,9 +1393,12 @@ and so replaced every boot.
    on track 12 (TrackSelectedInConfigFile is -1), for 8 laps. Retail sets
    SkipFE only from a joylog's config items (LoadConfigItems,
    `0x0012faf0`); `Config.bin` (LoadConfig, `0x0012eda0`) holds only the
-   track. So the port needs its own switch. The frontend's way in, car
-   select's MaybeContinueToNextScreen (`0x00198b64`) and SelectTrackScreen's
-   StartRace (`0x001a0918`), comes later.
+   track. So the port needs its own switch. The frontend's way in comes
+   later: car select's MaybeContinueToNextScreen (`0x00198b64`),
+   SelectTrackScreen's StartRace (`0x001a0918`), and
+   BeginGameFlowUnloadingFrontEnd (`0x00168830`), the state StartRace
+   asks for from IN_FRONTEND. The port's `bgf_begin_unloading_frontend`
+   neither chains nor unlaunches the menus.
 
    The RACING state has no callbacks: its row in the state table
    (`0x002faea0`, 16 bytes a row) is all zeroes. MainLoop
@@ -1392,24 +1436,12 @@ and so replaced every boot.
        - The two player names.
      - `main.c` calls InitFred where it calls `bsetup_fred_defaults`
        today.
-   - **8l-2, the race start (next).**
-     - The SkipFE globals, StartSkipFEGame and StartRace.
-     - SetupCarsForRace (`0x00185690`) and everything it calls:
-       CalculateStartingPositions (`0x00185fe8`), GenerateRandomRideInfo
-       (`0x00188218`), PickCharacterNumberThatIsntRacing, PickCopCharacterNumber,
-       DriverInfo's constructor (`0x00188610`), AddDriverInfo
-       (`0x001eda40`), RaceParameters' `0x001edc50`, `0x001edbc8` and
-       `0x001ede08`, AreThereAnyCarsOfType and AreThereAnyCarsOfColour,
-       SetRecordTimesToBeat, MaybeSetSelectedCarForMultiTrackEvent and
-       `0x001ff978`.
-     - RaceEvent's calls stay seams. UseTheRaceEvent is true only for
-       GameTypes 4, 8 and 9.
-     - ChooseHudTextures (`0x001ee388`) is an empty function in retail.
-     - Retail's BeginGameFlowUnloadingFrontEnd (`0x00168830`), which ends
-       in ChangeGameFlow(4). The port's `bgf_begin_unloading_frontend`
-       neither chains nor unlaunches the menus.
-     - The port's switch for SkipFE.
-   - **8l-3, the race.**
+   - **8l-2, the race start (done, above).** The SkipFE globals,
+     StartSkipFEGame, StartRace, SetupCarsForRace and everything it
+     calls, with RaceEvent's calls as seams and the port's switch for
+     SkipFE. UseTheRaceEvent is true only for GameTypes 4, 8 and 9.
+     ChooseHudTextures (`0x001ee388`) is an empty function in retail.
+   - **8l-3, the race (next).**
      - `main.c` builds the coordinator (`gNewRaceCoordinatorFn`) and runs
        MainLoop's race half. The track draws as trackview draws it, plus
        RenderCars.
@@ -1463,11 +1495,10 @@ and so replaced every boot.
    renderers, and the game flow calls RenderCars.
 
    Follow-ups found on the way:
-   - Retail's GetRandomSkin (`0x00188460`) is not the port's. A UsageType
-     (CarTypeInfo +1336) of 1 calls `0x001884d8(ct, 0)`, which is 2, or 1
-     when the word at `0x0031c1c8` is 0. Any other type takes
-     `AvailableSkins[bRandom(n)]` through `0x0025a488`, on the default
-     seed at gp-14472 (`docs/formats/car-type-info.md`).
+   - Retail's GetRandomSkin (`0x00188460`) is `fredrace.c`'s
+     `car_type_info_get_random_skin` since 8l-2. `cartypeinfo.c`'s
+     `cartypeinfo_get_random_skin` is the demo's, and nothing in the port
+     calls it now (`docs/formats/car-type-info.md`).
    - Retail's DriverInfo keeps TheDriverType at +8, and the port keeps it
      at +4. Since 8b the port's record is 24 bytes, as retail's is, but
      retail's rank byte 0 is the port's byte 20, and the next three bytes

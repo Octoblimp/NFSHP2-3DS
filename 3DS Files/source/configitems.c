@@ -31,6 +31,8 @@ int32_t DefaultPlayer1CarType = 37;         // gp-23136
 int32_t DefaultPlayer2CarType = 37;         // gp-23132
 int32_t DefaultPlayer1SkinIndex = 1;        // gp-23128
 int32_t DefaultPlayer2SkinIndex = 1;        // gp-23124
+int32_t ForceAllAICarsToBeThisType = -1;    // gp-23116
+int32_t MaximumNumAICars = 7;               // gp-23112
 
 int32_t config_skip_fe(void)
 {
