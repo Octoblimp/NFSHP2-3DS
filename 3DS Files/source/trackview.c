@@ -10,6 +10,7 @@
 
 #include "bchunk.h"
 #include "bchunkload.h"
+#include "carrenderinfo.h"
 #include "eefpu.h"
 #include "efog.h"
 #include "eframe.h"
@@ -420,6 +421,31 @@ static void count_defaulted(TrackView* v)
     }
 }
 
+// Entry k of a solid's texture table: the TextureInfo eFixUpTables put
+// beside the name, or a replacement written over it since.
+static const TextureInfo* table_texture(const GeoSolid* s, int k)
+{
+    return (const TextureInfo*)(uintptr_t)bchunk_u32(
+        s->textureTable + (size_t)k * 8 + 4);
+}
+
+static void resolve_slot(TrackView* v, TrackSolid* r, int k,
+                         const TextureInfo* info)
+{
+    TrackTex* t = info ? load_texture(v, info) : NULL;
+
+    memset(&r->slot[k], 0, sizeof r->slot[k]);
+    r->tex[k]             = t;
+    r->slot[k].uvScale[0] = 1.0f;
+    r->slot[k].uvScale[1] = 1.0f;
+    if (t && t->valid) {
+        r->slot[k].tex        = &t->tex;
+        r->slot[k].uvScale[0] = t->uvScale[0];
+        r->slot[k].uvScale[1] = t->uvScale[1];
+        r->slot[k].pass       = t->pass;
+    }
+}
+
 // Each of a solid's textures is the TextureInfo eFixUpTables put in its
 // table beside the name.
 static void resolve_textures(TrackView* v, int index)
@@ -441,18 +467,29 @@ static void resolve_textures(TrackView* v, int index)
         return;
     }
     for (k = 0; k < s->numTextures; k++) {
-        const TextureInfo* info = (const TextureInfo*)(uintptr_t)bchunk_u32(
-            s->textureTable + (size_t)k * 8 + 4);
-        TrackTex*          t    = info ? load_texture(v, info) : NULL;
+        resolve_slot(v, r, k, table_texture(s, k));
+    }
+}
 
-        r->tex[k]             = t;
-        r->slot[k].uvScale[0] = 1.0f;
-        r->slot[k].uvScale[1] = 1.0f;
-        if (t && t->valid) {
-            r->slot[k].tex        = &t->tex;
-            r->slot[k].uvScale[0] = t->uvScale[0];
-            r->slot[k].uvScale[1] = t->uvScale[1];
-            r->slot[k].pass       = t->pass;
+// RenderStrips (retail 0x0010dd58) applies the model's replacement table
+// to its solid's, then reads each strip's TextureInfo from the solid's
+// table as it draws. So a slot follows its entry: a car's skin, its damage
+// and its lights are entries that change between frames.
+static void follow_table(TrackView* v, int index)
+{
+    const GeoSolid* s = &v->solid[index];
+    TrackSolid*     r = &v->info[index];
+    int             k;
+
+    if (!r->slot || !r->tex) {
+        return;
+    }
+    for (k = 0; k < s->numTextures; k++) {
+        const TextureInfo* info = table_texture(s, k);
+        const TrackTex*    t    = r->tex[k];
+
+        if (t ? t->info != info : info != NULL) {
+            resolve_slot(v, r, k, info);
         }
     }
 }
@@ -560,6 +597,68 @@ static void bake_solid(TrackView* v, int index)
     batch_centres(r);
 }
 
+// ------------------------------------------------------------ other solids
+
+// A solid that is not the track's: a car's, from CarLoader's chunks, or a
+// copy eDuplicateSolid made. Its GeoSolid is over the eSolid in place, and
+// it goes in v->solid and v->info past the track's. A solid freed and
+// another loaded at its address is told apart by what it points at.
+static bool other_is(const GeoSolid* g, const eSolid* s)
+{
+    return g->nameHash == s->NameHash
+        && g->numStrips == s->NumStrips
+        && g->stripEntries == (const uint8_t*)s->StripEntryTable
+        && g->packet == (const uint8_t*)s->StripEntryDataStart
+        && g->textureTable == (const uint8_t*)s->pTextureTable;
+}
+
+static void forget_solid(TrackSolid* r)
+{
+    georender_free(&r->mesh);
+    free(r->slot);
+    free(r->tex);
+    free(r->centre);
+    memset(r, 0, sizeof *r);
+}
+
+static bool open_other(TrackView* v, int i, const eSolid* s)
+{
+    int rc;
+
+    forget_solid(&v->info[i]);
+    rc = geo_open_in_place(s, s->StripEntryTable, s->StripEntryDataStart,
+                           s->SizeofStripEntryData, s->pTextureTable,
+                           s->NumTextureTableEntries, s->LightMaterialTable,
+                           &v->solid[i]);
+    if (rc != GEO_OK) {
+        v->info[i].failed = true;
+        v->otherFailed++;
+        return false;
+    }
+    return true;
+}
+
+static int find_other(TrackView* v, const eSolid* s)
+{
+    int i, end = v->numSolids + v->numOther;
+
+    for (i = v->numSolids; i < end; i++) {
+        if (v->solid[i].header != (const uint8_t*)s) {
+            continue;
+        }
+        if (!other_is(&v->solid[i], s) && !open_other(v, i, s)) {
+            return -1;
+        }
+        return v->info[i].failed ? -1 : i;
+    }
+    if (v->numOther >= TRACKVIEW_MAX_OTHER) {
+        v->otherDropped++;
+        return -1;
+    }
+    v->numOther++;
+    return open_other(v, i, s) ? i : -1;
+}
+
 // ------------------------------------------------------------ eModel::Render
 
 // eActiveTexture's place in the frame: AddTexturesSorted (0x00107ee8) keeps
@@ -596,7 +695,8 @@ static void defer(TrackView* v, int solid, int batch, const bMatrix4* lv,
     d->order  = t->order;
     d->sorted = t->sorted;
     d->texUse = t->firstUse;
-    d->seq    = (uint16_t)v->numDeferred++;
+    d->seq    = v->deferredSeq++;
+    v->numDeferred++;
     if (t->sorted) {
         v->deferredSorted++;
     }
@@ -627,7 +727,10 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
     }
     i = find_solid(v, m->Solid);
     if (i < 0) {
-        return;
+        i = find_other(v, (const eSolid*)m->Solid);
+        if (i < 0) {
+            return;
+        }
     }
     r = &v->info[i];
     if (!r->baked) {
@@ -636,6 +739,10 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
             return;
         }
     }
+    if (m->pReplacementTextureTable != NULL) {
+        emodel_apply_replacement_texture_table(m);
+    }
+    follow_table(v, i);
     if (gpuCmdBufSize - gpuCmdBufOffset < CMDBUF_GUARD_WORDS) {
         v->cmdSkipped++;
         return;
@@ -1048,8 +1155,10 @@ static bool open_solids(TrackView* v)
 {
     int rc, i;
 
-    v->solid   = (GeoSolid*)calloc(TRACKVIEW_MAX_SOLIDS, sizeof *v->solid);
-    v->info    = (TrackSolid*)calloc(TRACKVIEW_MAX_SOLIDS, sizeof *v->info);
+    v->solid   = (GeoSolid*)calloc(TRACKVIEW_MAX_SOLIDS + TRACKVIEW_MAX_OTHER,
+                                   sizeof *v->solid);
+    v->info    = (TrackSolid*)calloc(TRACKVIEW_MAX_SOLIDS + TRACKVIEW_MAX_OTHER,
+                                     sizeof *v->info);
     v->texture = (TrackTex*)calloc(TRACKVIEW_MAX_TEXTURES, sizeof *v->texture);
     if (!v->solid || !v->info || !v->texture) {
         snprintf(v->note, sizeof v->note, "out of memory for the tables");
@@ -1245,11 +1354,8 @@ void trackview_free(TrackView* v)
         s_numSunRects = 0;
     }
     if (v->info) {
-        for (i = 0; i < v->numSolids; i++) {
-            georender_free(&v->info[i].mesh);
-            free(v->info[i].slot);
-            free(v->info[i].tex);
-            free(v->info[i].centre);
+        for (i = 0; i < v->numSolids + v->numOther; i++) {
+            forget_solid(&v->info[i]);
         }
     }
     unload_shared_packs(v);
@@ -1364,9 +1470,11 @@ static int compare_deferred(const void* pa, const void* pb)
     return a->seq > b->seq ? -1 : a->seq < b->seq;
 }
 
-static void draw_deferred(TrackView* v)
+// With `alpha` false, AttachSolidPolys alone: the unsorted batches draw
+// and the sorted ones stay for a later call. With it true, both lists.
+static void draw_deferred(TrackView* v, bool alpha)
 {
-    int i;
+    int i, kept = 0;
 
     qsort(v->deferred, (size_t)v->numDeferred, sizeof v->deferred[0],
           compare_deferred);
@@ -1374,6 +1482,10 @@ static void draw_deferred(TrackView* v)
         const TrackDeferred* d = &v->deferred[i];
         TrackSolid*          r = &v->info[d->solid];
 
+        if (d->sorted && !alpha) {
+            v->deferred[kept++] = *d;
+            continue;
+        }
         if (gpuCmdBufSize - gpuCmdBufOffset < CMDBUF_GUARD_WORDS) {
             v->cmdSkipped++;
             continue;
@@ -1383,6 +1495,7 @@ static void draw_deferred(TrackView* v)
                             r->slot ? v->solid[d->solid].numTextures : 0,
                             1u << d->batch);
     }
+    v->numDeferred = kept;
 }
 
 // ---------------------------------------------------------------- the sun
@@ -1833,6 +1946,7 @@ void trackview_draw(TrackView* v)
         v->drawList[0] = 0;
     }
     v->numDeferred     = 0;
+    v->deferredSeq     = 0;
     v->deferredSorted  = 0;
     v->deferredDropped = 0;
     v->texUses         = 0;
@@ -1853,17 +1967,16 @@ void trackview_draw(TrackView* v)
     georender_set_fog(s_fogOn ? &s_skyFogLut : NULL, s_fogColour);
     georender_set_zwrite(false);
     StuffSky(view);
-    draw_deferred(v);
+    draw_deferred(v, true);
     georender_set_zwrite(true);
     v->skyDrawn    = v->drawn;
-    v->numDeferred = 0;
 
     georender_set_fog(s_fogOn ? &s_fogLut : NULL, s_fogColour);
     scenery_stuff_scenery(&v->cull, view);
-    draw_deferred(v);
 
     // Then StuffSun (0x00112ecc), after DrawNisObjects, which has nothing
-    // to draw here. Its quads draw at once; see render_epoly.
+    // to draw here. Its quads draw at once; see render_epoly. Then the
+    // scenery's chain ends with AttachSolidPolys alone (0x001134a4).
     v->sunQuads       = 0;
     v->sunQuadsFailed = 0;
     georender_quads_rewind();
@@ -1871,6 +1984,16 @@ void trackview_draw(TrackView* v)
     s_quadTarget = view->pRenderTarget0;
     StuffSun(view);
     s_quadTarget = NULL;
+    georender_set_fog(s_fogOn ? &s_fogLut : NULL, s_fogColour);
+    draw_deferred(v, false);
+
+    // The cars' chain (0x0011363c): RenderCars for the view, and its
+    // AttachSolidPolys. Then AttachAlphaPolys (0x001137cc) draws the
+    // scenery's alpha list and the cars' together. RenderFrontEndCars
+    // draws nothing in a race.
+    render_cars(view);
+    draw_deferred(v, false);
+    draw_deferred(v, true);
     if (v->listFrame) {
         v->probePending = true;
     }

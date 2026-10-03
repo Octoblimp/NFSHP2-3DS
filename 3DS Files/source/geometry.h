@@ -141,6 +141,19 @@ enum {
 int geo_open(const void* data, size_t bytes, GeoSolidList* list,
              GeoSolid* storage, int maxSolids);
 
+// One solid that the engine's loader has already placed, from the 192-byte
+// eSolid and the tables its fix-up pointed it at: LoaderSolidList's
+// StripEntryTable, StripEntryDataStart and SizeofStripEntryData,
+// pTextureTable and NumTextureTableEntries, and LightMaterialTable. That
+// is how a car's solids are found, since CarLoader's chunks are not a
+// buffer that geo_open walks, and how a copy that eDuplicateSolid made is
+// found. The tables are taken as the engine indexes them, with no filler
+// skipped. Every pointer must outlive `out`.
+int geo_open_in_place(const void* header, const void* stripEntries,
+                      const void* packet, size_t packetSize,
+                      const void* textureTable, int numTextures,
+                      const void* lightMaterialTable, GeoSolid* out);
+
 // One eStripEntry out of the 64-byte table.
 int geo_strip_entry(const GeoSolid* solid, int index, GeoStripEntry* out);
 

@@ -30,9 +30,10 @@
 // StuffSky with the Z writes off, StuffScenery -- with eModel::Render
 // being this file's draw over georender.
 //
-// The loads go in the game's order. GLOBALB.BUN's and INGAMEB.BUN's
-// texture packs, which main() already holds for the UI and shares here, go
-// through slot 2 first, as the boot and LOADING_TRACK_COMMON leave them.
+// The loads go in the game's order. GLOBALB.BUN's texture packs are the
+// boot's (main.c's LoadGlobalChunks); INGAMEB.BUN's, which main() already
+// holds for the UI and shares here, go through slot 2 first, as
+// LOADING_TRACK_COMMON leaves them.
 // Then, as BeginGameFlowLoadingTrackSpecific does, eDisableFixUpTables is
 // set and the bundle loads, and TEX<n>TRACK.BIN and TEX<n>LOCATION.BIN
 // after it, each read whole; and EndGameFlowLoadingTrackSpecific (trackflow.c)
@@ -55,9 +56,9 @@
 //     flipbook frame once, as RGBA8, and keeps them. The light lists are
 //     not ported, and the light-material pointers stay NULL.
 //   * GLOBALB's other chunks. The game loads the whole bundle at boot; the
-//     boot offers slot 16 its car data (main.c), the viewer hands only its
-//     two texture chunks to slot 2, and INGAMEB's the same, because the UI
-//     reads the rest of both as they are on the disc.
+//     boot offers slots 2 and 16 its texture packs and car data (main.c),
+//     and the viewer hands only INGAMEB's two texture chunks to slot 2,
+//     because the UI reads the rest of both as they are on the disc.
 //     So InitVisibleZones' MARKER_BOUNDARY, whose solid is INGAMEB's,
 //     has none here.
 //   * SetScreenBuffers. Only the three things the matrices read are set:
@@ -88,7 +89,8 @@
 #define TRACKVIEW_TRACK        12       // the first track the viewer loads
 #define TRACKVIEW_NAME_MAX     32       // "TRACKS/TEX66LOCATION.BIN" and its 0
 #define TRACKVIEW_MAX_SOLIDS   1536     // retail's TRACKB61 and B64 have 1,345
-#define TRACKVIEW_MAX_TEXTURES 512      // its solids name 415 hashes
+#define TRACKVIEW_MAX_OTHER    512      // solids drawn that are not the track's
+#define TRACKVIEW_MAX_TEXTURES 1024     // its solids name 415 hashes; then the cars
 #define TRACKVIEW_NUM_TEXFILES 2        // TEX<n>TRACK.BIN, TEX<n>LOCATION.BIN
 #define TRACKVIEW_MAX_SHARED   2        // GLOBALB.BUN, INGAMEB.BUN
 #define TRACKVIEW_MAX_SHARED_CHUNKS 8   // their packs and flipbooks: 4
@@ -184,6 +186,11 @@ typedef struct {
     GeoSolid*    solid;         // sorted by header address, as geo_open walks
     TrackSolid*  info;
     int          numSolids;
+    // Past the track's, the other solids a model drew: the cars', and the
+    // copies eDuplicateSolid made. See render_model.
+    int          numOther;
+    int          otherDropped;  // past TRACKVIEW_MAX_OTHER, not drawn
+    int          otherFailed;   // that geo_open_in_place would not take
     int          linkedSolids;
     TrackTex*    texture;
     int          numTextures;
@@ -218,6 +225,7 @@ typedef struct {
     int  deferredSorted;        // of numDeferred, the ApplyAlphaSorting ones
     int  deferredDropped;       // past TRACKVIEW_MAX_DEFERRED, not drawn
     int  numDeferred;
+    uint16_t deferredSeq;       // the next one's seq, for the whole frame
     uint32_t frameStamp;
     uint16_t texUses;
     TrackDeferred deferred[TRACKVIEW_MAX_DEFERRED];
@@ -284,8 +292,8 @@ int trackview_next_track(int track, int step);
 bool trackview_switch(TrackView* v, int track);
 
 // A bundle main() holds resident, 128-aligned, whose texture packs the
-// track needs: GLOBALB.BUN, which has the default texture, then
-// INGAMEB.BUN, in the order the game loads them. After trackview_init;
+// track needs and nothing has loaded: INGAMEB.BUN. (GLOBALB.BUN's, with
+// the default texture, are loaded at boot and stay.) After trackview_init;
 // the bundle must outlive trackview_free. False when there is no room.
 bool trackview_share_bundle(TrackView* v, uint8_t* data, size_t len);
 

@@ -1896,17 +1896,20 @@ static void waitForGlobalChunks(void)
 }
 
 // LoadGlobalChunks' LoadResourceFile hands every top-level chunk of GLOBALB
-// to LoadChunks, slot 16 among them: LoaderCarInfo (carinfo.c), which
-// points CarTypeInfoArray and SkinInfoTable into the bundle and makes the
-// 64 acceleration tables. The port offers that slot GLOBALB's chunks in
-// the file's order, cars before skins as on the disc. The UI reads the
-// rest as it is, and the track viewer gives slot 2 the texture packs
-// itself (trackview.h). The bundle stays resident, as the records must.
+// to LoadChunks, slots 2 and 16 among them: LoaderTexturePack, whose pack
+// and flipbooks stay on TexturePackList for the whole game -- CARBOTTOM,
+// TIRE, WINDOW, the plates and the default texture are its -- and
+// LoaderCarInfo (carinfo.c), which points CarTypeInfoArray and
+// SkinInfoTable into the bundle and makes the 64 acceleration tables. The
+// port offers those slots GLOBALB's chunks in the file's order, cars
+// before skins as on the disc, and the UI reads the rest as it is. The
+// bundle stays resident, as the records and the pixels must.
 static void loadGlobalCarInfo(UIBundle* b)
 {
     uint8_t* c;
     uint8_t* end;
     int taken = 0;
+    int packs = 0;
 
     if (!b) return;
     c = b->data;
@@ -1914,6 +1917,7 @@ static void loadGlobalCarInfo(UIBundle* b)
     while (end - c >= 8) {
         uint32_t size = bchunk_u32(c + 4);
         if (size > (size_t)(end - c) - 8) break;
+        packs += loader_texture_pack(c);
         taken += loader_car_info(c);
         // LoaderCharacterInfo's two (characterinfo.h), and LoaderTrackGeometry
         // for the track info table: the only chunk of its seven GLOBALB has.
@@ -1923,9 +1927,10 @@ static void loadGlobalCarInfo(UIBundle* b)
         if (bchunk_u32(c) == 0x34201) taken += track_loader_geometry(c);
         c += 8 + size;
     }
-    logPrintf("car data: %d chunks, %d skins, %d characters, %d tracks\n",
+    logPrintf("car data: %d chunks, %d skins, %d characters, %d tracks; "
+              "%d texture chunks\n",
               taken, (int)NumSkinInfo, (int)NumCharacterInfo,
-              (int)HighestTrackNumber);
+              (int)HighestTrackNumber, packs);
 }
 
 static const char* messageName(BScreenMessage msg)
@@ -2264,6 +2269,39 @@ static void logRaceState(void)
     logLine("race: track drew %d of %d (%d sky), %d tris; %s",
             g_track.drawn, g_track.drawInfos, g_track.skyDrawn,
             g_track.drawnTris, g_track.note);
+    logLine("race: other solids %d (%d failed, %d dropped), textures %d "
+            "(%d missing, %d reduced), deferred %d dropped",
+            g_track.numOther, g_track.otherFailed, g_track.otherDropped,
+            g_track.numTextures, g_track.missingTextures,
+            g_track.reducedTextures, g_track.deferredDropped);
+    {
+        // Once, the other solids and what each texture slot draws with.
+        static int listed;
+        int        i, k;
+
+        for (i = listed; i < g_track.numOther; i++) {
+            const GeoSolid*   s = &g_track.solid[g_track.numSolids + i];
+            const TrackSolid* r = &g_track.info[g_track.numSolids + i];
+            char              line[512];
+            size_t            n;
+
+            n = (size_t)snprintf(line, sizeof line, "race: solid %.24s %d "
+                                 "strips %d batches:", s->name, s->numStrips,
+                                 r->mesh.numBatches);
+            for (k = 0; k < s->numTextures && n + 40 < sizeof line; k++) {
+                const TrackTex* t = r->tex ? r->tex[k] : NULL;
+
+                n += (size_t)snprintf(line + n, sizeof line - n,
+                                      " %.20s%s%s",
+                                      t && t->info ? t->info->DebugName
+                                                   : "(none)",
+                                      t && !t->valid ? "!" : "",
+                                      t && t->pass.blend ? "+" : "");
+            }
+            logLine("%s", line);
+            listed = i + 1;
+        }
+    }
     {
         char     line[160];
         size_t   n = 0;
@@ -2976,11 +3014,10 @@ int main(int argc, char** argv)
                   g_geo.hasCarPack ? "open" : "missing",
                   g_geo.hasGlobalPack ? "open" : "missing");
     }
-    // The track's textures are partly GLOBALB's and INGAMEB's, which the
-    // UI already holds; the viewer loads their packs from these copies.
+    // The track's textures are partly GLOBALB's, whose packs the boot has
+    // loaded, and INGAMEB's, which the UI already holds; the viewer loads
+    // INGAMEB's packs from that copy.
     bool trackOk = trackview_init(&g_track, TRACKVIEW_TRACK);
-    if (globalBundle)
-        trackview_share_bundle(&g_track, globalBundle->data, globalBundle->len);
     if (ingameBundle)
         trackview_share_bundle(&g_track, ingameBundle->data, ingameBundle->len);
     if (!trackOk) {

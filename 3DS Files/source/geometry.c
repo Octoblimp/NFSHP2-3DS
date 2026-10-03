@@ -413,6 +413,38 @@ int geo_open(const void* data, size_t bytes, GeoSolidList* list,
     return w.foundList ? GEO_OK : GEO_ENOSOLIDLIST;
 }
 
+int geo_open_in_place(const void* header, const void* stripEntries,
+                      const void* packet, size_t packetSize,
+                      const void* textureTable, int numTextures,
+                      const void* lightMaterialTable, GeoSolid* out)
+{
+    int rc;
+
+    memset(out, 0, sizeof *out);
+    if (!header) {
+        return GEO_EMALFORMED;
+    }
+    rc = read_solid_header(out, (const uint8_t*)header, SOLID_SIZE);
+    if (rc != GEO_OK) {
+        return rc;
+    }
+    if (out->numStrips > 0 && (!stripEntries || !packet)) {
+        return GEO_EMALFORMED;
+    }
+    out->header             = (const uint8_t*)header;
+    out->stripEntries       = (const uint8_t*)stripEntries;
+    out->packet             = (const uint8_t*)packet;
+    out->packetSize         = packetSize;
+    out->textureTable       = (const uint8_t*)textureTable;
+    out->numTextures        = textureTable && numTextures > 0 ? numTextures
+                                                              : 0;
+    out->lightMaterialTable = (const uint8_t*)lightMaterialTable;
+    if (!lightMaterialTable) {
+        out->numLightMaterials = 0;
+    }
+    return GEO_OK;
+}
+
 // -------------------------------------------------------------- VIF1 replay
 
 // A strip's packet is raw VIF1 code. Replaying it needs an image of VU memory
