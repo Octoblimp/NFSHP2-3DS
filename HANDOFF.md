@@ -11914,3 +11914,104 @@ first suspect.
 8m-2: DetermineHudFeatures (`0x00178da0`), its helper (`0x001795f8`) and
 SetHudFeatures (`0x001796b0`), which picks the HUD's objects and their
 layout from the car's gauge data. CONTINUE.md has the rest of 8m.
+
+## Session 31, continued (2026-10-03) -- the HUD's features (step 8m-2)
+
+Each frame, UpdateHud asks Player::DetermineHudFeatures which parts of the
+HUD the player should see. It hands the answer to SetHudFeatures, which
+shows or hides the Flailer objects behind each bit that changed and finds
+the ones UpdateHud writes into. 8m-2 ports both, so the HUD screen comes up
+in a race. `docs/formats/hud-features.md` has the write-up, with a name for
+each bit of the word.
+
+- **`playerhud.{c,h}`** hold:
+  - DetermineHudFeatures (`0x00178da0`) and its gauge helper
+    (`0x001795f8`).
+  - SetHudFeatures (`0x001796b0`): one block per bit, among them the
+    gauges placed from the car's `HudInfo`, the lap block and its labels,
+    the live split, the track map, the three pursuit meters, the radar,
+    Be The Cop and the cinema bars.
+  - SetTrackMapMode (`0x00178c90`) and its three mode tables.
+  - UpdateHud's head (`0x0017ecf0` to `0x0017ed34`): SetHudFeatures when
+    the answer differs from `CurrentHudFeatures`. `main.c` binds it to
+    `gPlayerUpdateHudFn`, so UpdateNonGameState runs it each frame. The
+    rest of UpdateHud is 8m-3.
+- Under them: IsNisPlaying, ShouldShowBustedText and the CopManager's
+  ShouldDisplayBustedText (`copmanager.c`), and RaceParameters::IsFreeRun
+  (`raceparams.c`).
+- `player.h` names the live split's fields (1300 to 1364) and retail's
+  lead title and time (1396 and 1400), which were padding.
+  `player_check` follows.
+- The callees not ported are seams, skipped when NULL:
+  SetRearViewMirrorCameraMover, InitializeFlailerTachometer, TrackMap's
+  constructor and destructor, FillInRaceOverMessages, RaceFinishedSpeech,
+  HudStartWrongWay, NISOverlayManager::SetVisible, ClearHudAnimations and
+  the egg test. None is bound yet.
+- `tools/ghidra_scripts/DecompileByAddr.java` decompiles the stripped
+  retail ELF by address, after naming what `out/retail_syms.txt` places.
+  `RetailSetGp.java` is the import's pre-script and sets gp.
+
+Retail's oddities are kept and listed in the doc, among them:
+
+- Preference bit 0x100 controls the lap counter, the best lap and the
+  choice of pursuit meter.
+- HudStartWrongWay runs once per object in the wrong-way group.
+- The lap label's point-to-point test repeats the time-trial test with the
+  race type reversed.
+- `or_format` writes `FormatOptions` with no dirty flag in three blocks.
+- The nZoneCurrent 1-or-2 check is dead, since an earlier check returns
+  for any zone.
+
+### The checks
+
+`tools/hudfeatures_check.py` runs retail's DetermineHudFeatures,
+SetHudFeatures and SetTrackMapMode in RetailEmu, on INGAMEB's Flailer
+chunk loaded by retail's LoaderFlailerChunk. Under them run retail's
+IsNisPlaying, ShouldShowBustedText, IsFreeRun, bSPrintf, bStringHash and
+the Flailer runtime. The other callees are stubs that print their
+arguments. `tools/src/hudfeatures_test.c` runs `playerhud.c` over
+`flailer.c`, `bui.c`, `bchunk.c`, `copmanager.c` and `raceparams.c` on
+the same bundle. After each op it compares Determine's answer, the stubs'
+calls, each Player's HUD fields, the views' `LetterBox`, the display
+settings and every Flailer object's bytes. After each dump both sides
+clear every object's `DirtyFlag`, as a drawn frame would.
+
+`hudfeatures_check`: 1298 ops, 10373 lines, 0 differ. The mutation pass
+makes 170 mutations: 164 are caught and 6 are equivalent, with 0
+unexplained. The doc gives each equivalent's reason. Six survivors of the
+first pass were gaps in the script, now caught:
+
+- three dirty-flag mutants, caught since the checker clears `DirtyFlag`
+  after each dump;
+- a circuit race with a time-trial time;
+- a pursuit meter over an earlier `PrevPursuitLevel`;
+- IsFreeRun's Be A Cop test.
+
+`player_check`: 8 scenarios, 3659 ops, 515143 lines, 0 differ.
+
+Writing the two-player script found one bug: the port showed the whole
+bars screen in a two-player race, where retail hides it and shows the
+player's half.
+
+On Azahar (`run_azahar_race.ps1 -HoldKeys 65`), the race runs as before
+with no crash, and the log's screens line lists `f1f1f8e5`, the
+one-player HUD. Shots are in `out/azahar_8m2`. These parts show the
+bundle's own placeholder texts (Lap 99/99, 00:00:00, 299), since nothing
+writes them until RenderHud (8m-3):
+
+- the lap block;
+- the third-person gauge;
+- the split time.
+
+These show too, and are 8m-3's:
+
+- the debug texts (C: xxxFPS, G: xxxFPS, xxxx yyyy zzzz, 11234 km), which
+  DisplayDebugInfo writes;
+- the tracker's seven triangles, which DrawTracker places.
+
+The App counter reads 20 FPS.
+
+### Next
+
+8m-3: the rest of UpdateHud and RenderHud (`0x0017f040`). CONTINUE.md
+lists RenderHud's callees.

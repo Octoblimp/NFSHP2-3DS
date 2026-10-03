@@ -198,3 +198,9 @@ int32_t race_parameters_get_location_index(const RaceParameters *rp)
 
     return loc == 6 ? 4 : loc - 1;
 }
+
+int32_t race_parameters_is_free_run(const RaceParameters *rp)
+{
+    return rp->RaceType == RACE_TYPE_SINGLE_RACE && rp->NumLapsInRace == 0
+        && rp->BeACop == 0;
+}

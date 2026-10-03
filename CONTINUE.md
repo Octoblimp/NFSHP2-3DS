@@ -1,9 +1,9 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-02), after the cars' lighting and environment map (8l-3b). `HANDOFF.md` is the running
-narrative; this file is the
-short list of what to do next and what not to trust.
+(2026-10-03), after 8m-2, the HUD's features; 8m-3, RenderHud, is next.
+`HANDOFF.md` is the running narrative; this file is the short list of what
+to do next and what not to trust.
 
 ## State
 
@@ -47,10 +47,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Eighty-eight cross-checkers pass, plus the table generators:
+Ninety cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/texturestream_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/resource_check.py && python tools/fred_check.py && python tools/fredrace_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/texturestream_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/resource_check.py && python tools/fred_check.py && python tools/fredrace_check.py && python tools/flailer_check.py && python tools/hudfeatures_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -72,7 +72,7 @@ orbit_check         3416 ops,    28635 lines, 0 differ   (119 caught, 5 equivale
 shake_check         4114 ops,    10604 lines, 0 differ   (95 caught, 3 equivalent; retail's image)
 drivecam_check     45598 ops,   105702 lines, 0 differ   (474 caught, 19 equivalent; retail's image)
 playercam_check     5277 ops,   162056 lines, 0 differ   (109/109 mutations caught; retail's image)
-player_check        3659 ops,   501513 lines, 0 differ   (287/287 mutations caught; retail's image)
+player_check        3659 ops,   515143 lines, 0 differ   (287/287 mutations caught; retail's image)
 raceinit_check      3280 ops,    13317 lines, 0 differ   (123/123 mutations caught; retail's image)
 racecore_check      6097 ops,    18698 lines, 0 differ   (158 caught, 3 equivalent; retail's image)
 racerun_check      21656 ops,    40973 lines, 0 differ   (169 caught, 2 equivalent; retail's image)
@@ -142,6 +142,8 @@ rendercars_check    1272 scenarios,  20075 lines, 0 differ (89 caught, 0 equival
 resource_check        10 scenarios,  3250 lines, 0 differ (153 caught, 2 equivalent; retail's image)
 fred_check             9 scenarios, 54344 lines, 0 differ (103/103 mutations caught; retail's image)
 fredrace_check         8 scenarios, 50503 lines, 0 differ (216 caught, 1 equivalent; retail's image)
+flailer_check      54104 ops,   120233 lines, 0 differ  (106 caught, 4 equivalent; retail's image)
+hudfeatures_check   1298 ops,    10373 lines, 0 differ  (164 caught, 6 equivalent; retail's image)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -1464,18 +1466,71 @@ and so replaced every boot.
        (3 projects, 86 screens on Azahar) and binds the race's Flailer
        seams to it. `flailer_check`: 54,104 ops, 120,233 lines, 0 differ.
        110 mutations: 106 caught, 4 equivalent.
-     - **8m-2:** DetermineHudFeatures (`0x00178da0`), its helper
-       `0x001795f8`, and SetHudFeatures (`0x001796b0`, 9836 bytes). Bind
-       `gPlayerSetHudFeaturesFn`. SetHudFeatures calls things that are
-       not ported yet, which become seams: TrackMap's constructor and
-       destructor, FillInRaceOverMessages, RaceFinishedSpeech,
-       HudStartWrongWay, ClearHudAnimations and
-       InitializeFlailerTachometer. DetermineHudFeatures also needs
-       IsNisPlaying (`0x00176520`) and ShouldShowBustedText
-       (`0x00182318`).
-     - **8m-3:** UpdateHud (`0x0017ecf0`), `0x0017d7c8`, RenderHud
-       (`0x00180014`), InitializeFlailerTachometer (`0x001434a0`) and
-       RenderFlailerTachometer (`0x00143858`).
+     - **8m-2, the HUD's features, is done** (HANDOFF.md, Session 31,
+       continued: the HUD's features (step 8m-2)).
+       `docs/formats/hud-features.md` has the write-up and a name for each
+       bit. `playerhud.{c,h}` hold DetermineHudFeatures (`0x00178da0`),
+       its gauge helper, SetHudFeatures (`0x001796b0`), SetTrackMapMode
+       and UpdateHud's head. `main.c` binds the head to
+       `gPlayerUpdateHudFn`. `hudfeatures_check`: 1298 ops, 10373 lines,
+       0 differ; 170 mutations, 164 caught, 6 equivalent. On Azahar the
+       one-player HUD screen (`f1f1f8e5`) comes up. It shows the bundle's
+       placeholder texts (Lap 99/99, 00:00:00), the debug texts and the
+       tracker's seven triangles, which RenderHud writes and places.
+       SetHudFeatures' seams are not bound yet:
+       SetRearViewMirrorCameraMover, InitializeFlailerTachometer,
+       TrackMap's constructor and destructor, FillInRaceOverMessages,
+       RaceFinishedSpeech, HudStartWrongWay and
+       NISOverlayManager::SetVisible.
+     - **8m-3:** the rest of UpdateHud (`0x0017ecf0`, 620 bytes),
+       RenderHud, InitializeFlailerTachometer (`0x001434a0`) and
+       RenderFlailerTachometer (`0x00143858`, the renderer's side).
+       RenderHud is at **`0x0017f040`**, where UpdateHud's tail call goes.
+       - UpdateHud after its head (`0x0017ed38` on), in order:
+         1. HudDoAnimations (`0x0017e038`).
+         2. `0x0017d7c8`, the score's fade. pFlailerScoreTitle and
+            ScoreTotal (+1152 and +1156) run by the start frame at +2732,
+            where 0x7fffffff means none:
+            - fade in over 0 to 0.5 s;
+            - hold to 4.5 s at alpha 128;
+            - fade out to 5 s;
+            - then hide both and reset the start frame.
+         3. The scoring. It runs when pCurrentRace's word 0 is 4 and the
+            coordinator (gp-22216) is not in state 4, 5, 6 or 7 and is not
+            a replay demo. On the first frame (+2736 clear), the finishing
+            scores: `0x001edcd0` on the string at `0x00319898`, the
+            table at `0x002fbc08` (36 bytes a row), ConvertScoreString,
+            bSPrintf into +1444, StartScore(15) and the flags at +2628.
+            Then, every frame, UpdateScoring.
+         4. RenderHud when CurrentHudFeatures is not 0.
+       The `0x00180014` from retail_syms is wrong. RenderHud runs to about
+       `0x00180ad8`, roughly 2,600 instructions, so it may split in two.
+       - RenderHud's callees to port:
+         - GetCurrentBestLapRecord
+         - Timer::PrintToString, through PrintToString `0x001a3838` and
+           GetHoursMinsSeconds `0x001a3b28`
+         - CalculateSplitTime `0x001487e8`
+         - GetLastStartLineCrossingTime `0x00147540` and GetLastLapTime
+           `0x00147570`
+         - GetLetterForGear `0x00178b70` (byte pairs at `0x002fbaf8`:
+           -1 'A', 0 'R', 1 'N', 2 '1' to 8 '7'; default 'X')
+         - GetFinishReasonID `0x00146788` (table `0x002f0bc0`)
+         - DriverInfo::GetName `0x00188770`
+         - `0x00187ed8` (the car type's translated name)
+         - `0x00224ec0`
+         - GetNumTickets `0x00228520`
+         - GetPursuitLevelForHUD `0x00227480`
+         - DisplayDebugInfo
+       - Seams until 8m-4: HudDoAnimations, UpdateScoring and StartScore,
+         HudStartSpeedAnimation and HudStartGrowAnimation,
+         UpdatePursuitMeter, UpdateRadarDetector, DrawTracker,
+         NISOverlayManager::Update (`0x001825f0`) and
+         TriggerTimerWarningSound.
+       - Ghidra headless decompiles by address with
+         `tools/ghidra_scripts/DecompileByAddr.java` (env
+         `DECOMPILE_ADDRS`, `DECOMPILE_OUT`, `RETAIL_SYMS`). Ghidra merges
+         RenderHud into UpdateHud, so read the disassembly from
+         `tools/retaildis.py` beside it.
      - **8m-4:** HudAnimator (`0x0023b0f8` to `0x0023bf60`),
        HudDoAnimations (`0x0017e038`), the HudStart* functions,
        UpdateScoring and StartScore, UpdatePursuitMeter (`0x0017c380`) and

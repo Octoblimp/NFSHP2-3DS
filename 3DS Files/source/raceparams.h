@@ -86,4 +86,7 @@ int32_t race_parameters_too_many_models(RaceParameters *rp,
 int32_t race_parameters_get_location_number(const RaceParameters *rp);
 int32_t race_parameters_get_location_index(const RaceParameters *rp);
 
+// IsFreeRun, 0x001ee390: a single race of no laps, not Be A Cop.
+int32_t race_parameters_is_free_run(const RaceParameters *rp);
+
 #endif

@@ -15,7 +15,8 @@
 // ViewID. The camera shake asks IsCameraPOVInCar. The camera functions in
 // playercam.c read the movers, the coordinators, the NIS manager, pRoute,
 // pVisibleDrivingLine and bLookBack. playerinit.c is the constructor, the
-// destructor and the race's two.
+// destructor and the race's two. playerhud.c works out CurrentHudFeatures
+// and fills the pFlailer* fields, the TrackMap and the radar's place.
 //
 // The offsets are asserted where pointers are 4 bytes, as chopper.h does.
 // On a 64-bit host every pointer widens and the fields after it move, so
@@ -168,13 +169,21 @@ struct Player {
     struct FlailerObjectChunk *pFlailerNitrousLight[10];   // 1224
     struct FlailerObjectChunk *pFlailerDamageLight[5];     // 1264
     struct FlailerObjectChunk *pFlailerBeTheCopTickets[4]; // 1284
-    // The demo's three live-split arrays (36 bytes) are 68 in retail, and
-    // nothing ported reads them; the constructor leaves them.
-    uint8_t       _flailers1300[68];             // 1300
+    // The live split, four rows of three in the demo and of four in
+    // retail, and the bar behind them, as SetHudFeatures finds them. The
+    // constructor leaves them.
+    struct FlailerObjectChunk *pFlailerLiveSplitStatus[4]; // 1300
+    struct FlailerObjectChunk *pFlailerLiveSplitSwatch[4]; // 1316
+    struct FlailerObjectChunk *pFlailerLiveSplitPos[4];    // 1332
+    struct FlailerObjectChunk *pFlailerLiveSplitBG[4];     // 1348
+    struct FlailerObjectChunk *pFlailerLiveSplitBar;       // 1364
     struct FlailerObjectChunk *pFlailerBeTheCopTime;       // 1368
     struct FlailerObjectChunk *pFlailerBeTheCopHelicopter[3]; // 1372
     struct FlailerObjectChunk *pFlailerBeTheCopRoadblock[3];  // 1384
-    uint8_t       _new1396[8];                   // 1396  retail's; the ctor leaves it
+    // Retail's: a two-player race's lap block, the leader's label and time.
+    // The constructor leaves them.
+    struct FlailerObjectChunk *pFlailerLeadTitle;          // 1396
+    struct FlailerObjectChunk *pFlailerLeadTime;           // 1400
 
     // The demo's plus 64.
     struct bSample *pRadarBeep;                  // 1404
@@ -267,7 +276,9 @@ typedef char player_layout_check[
          && offsetof(struct Player, pFlailerRacePosition) == 976
          && offsetof(struct Player, pFlailerTracker) == 1112
          && offsetof(struct Player, pFlailerBeTheCopTickets) == 1284
+         && offsetof(struct Player, pFlailerLiveSplitBG) == 1348
          && offsetof(struct Player, pFlailerBeTheCopTime) == 1368
+         && offsetof(struct Player, pFlailerLeadTime) == 1400
          && offsetof(struct Player, pRadarBeep) == 1404
          && offsetof(struct Player, strEventScore) == 1444
          && offsetof(struct Player, pHudAnimations) == 1540

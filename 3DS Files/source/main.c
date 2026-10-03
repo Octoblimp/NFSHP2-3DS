@@ -93,6 +93,7 @@
 #include "physicssystem.h"
 #include "nisoverlay.h"
 #include "playercam.h"
+#include "playerhud.h"
 #include "playerinit.h"
 #include "playerinput.h"
 #include "playerupdate.h"
@@ -2650,6 +2651,13 @@ int main(int argc, char** argv)
     // Player::CleanupAfterRace takes the player's handlers off through
     // SetInputMode(NONE); playerinput.c has it.
     gPlayerSetInputModeFn = player_set_input_mode;
+
+    // Player::SetHudFeatures (playerhud.c), which the destructor calls with
+    // 0 and UpdateHud every frame with DetermineHudFeatures' answer.
+    gPlayerSetHudFeaturesFn = player_set_hud_features;
+    // UpdateHud's head (playerhud.c), which UpdateNonGameState runs each
+    // frame: SetHudFeatures when DetermineHudFeatures' answer changed.
+    gPlayerUpdateHudFn = player_update_hud;
 
     // Car::MaybeCameraShake, which World::DoTimestep asks of each player's
     // car: shake.c. Only a car with a player shakes, and none has one until
