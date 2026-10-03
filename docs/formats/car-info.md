@@ -137,10 +137,27 @@ sampled:
   before the allocation, bMalloc's own, and builds a Table of no entries.
   No record on the disc gets there; the port returns with `t` as it was.
 
+## InitCarInfo and the car names
+
+InitializeEverything runs InitCarInfo (`0x00188d08`) straight after
+LoadGlobalChunks. For each of the 64 types it sets the record's
+`pCarSpecs` (byte 1368) to FindCarLanguageInfo(type) (`0x00187e80`), a
+row of the CarLanguageInfo table at `0x0030d578`: 50 rows of 28 bytes,
+the type and then six translated-string ids (`car-type-info.md` has the
+fields). The search answers the first row whose type matches, and the
+first row when none does; that row is type -1's, the Corvette's ids
+again. Types 49 to 63 have no row of their own.
+
+It then tail-calls `0x00188ca8`, which asks GetNumSkins (`0x001884b8`)
+of every type whose GeometryFilename is not empty and drops each answer.
+The port leaves that out.
+
 ## Checked by
 
 `tools/carinfo_check.py` runs the static constructor, the loader, the
-unloader, GetAccelerationTable and MakeAccelerationTable out of the retail
+unloader, GetAccelerationTable, MakeAccelerationTable,
+FindCarLanguageInfo (every type from -3 to 69 and three far ones, with
+the row's seven words) and InitCarInfo out of the retail
 image in RetailEmu over GLOBALB's own two chunks at each word alignment,
 the 64 records changed type by type (gear counts 0 to 6 and -1, the split,
 red lines out of reach, narrow engines, rising, signed and flat torque

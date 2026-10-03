@@ -720,7 +720,7 @@ static void run(char *line)
     else if (!strcmp(a[0], "map"))
         player_set_track_map_mode(players[curPlayer], inum(a[1]));
     else if (!strcmp(a[0], "upd"))
-        player_update_hud(players[curPlayer]);
+        player_update_hud_features(players[curPlayer]);
     else {
         printf("  no op %s\n", a[0]);
         exit(2);

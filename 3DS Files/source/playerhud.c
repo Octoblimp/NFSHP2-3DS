@@ -209,15 +209,15 @@ uint32_t player_determine_hud_features(struct Player *p)
             f |= HUD_COP_LOOKING_BACK;
         s = p->PlayerSettings.PreferredHudFeatures;
         if (s & 0x100)
-            f |= HUD_LAP_COUNTER;
+            f |= HUD_LAP_TIME;
         if (s & 0x4)
             f |= HUD_SPLIT_TIMES;
         if (s & 0x100)
-            f |= 0x100;
+            f |= HUD_BEST_LAP;
         if (s & 0x10)
             f |= HUD_RACE_POSITION;
         if (s & 0x100)
-            f |= HUD_BEST_LAP;
+            f |= HUD_LAP_COUNTER;
         if ((s & 0x200) && np == 1 && cop == 0
             && (rp->TimeTrialTime.PackedTime == 0
                 || rp->TimeTrialTime.PackedTime == 0x7fffffff)
@@ -238,11 +238,11 @@ uint32_t player_determine_hud_features(struct Player *p)
         }
         if (cop != 0) {
             if (p->PlayerNumber == 0)
-                f = (f & ~(HUD_LAP_COUNTER | HUD_SPLIT_TIMES | 0x100
-                           | HUD_RACE_POSITION | HUD_BEST_LAP))
+                f = (f & ~(HUD_LAP_TIME | HUD_SPLIT_TIMES | HUD_BEST_LAP
+                           | HUD_RACE_POSITION | HUD_LAP_COUNTER))
                     | HUD_BE_THE_COP;
             if (p->PlayerNumber == 1)
-                f = (f & ~(HUD_SPLIT_TIMES | 0x100 | HUD_RACE_POSITION))
+                f = (f & ~(HUD_SPLIT_TIMES | HUD_BEST_LAP | HUD_RACE_POSITION))
                     | HUD_BE_THE_COP;
         }
         if (!race_parameters_is_free_run(rp) && (cop == 0 || np != 2)
@@ -823,8 +823,8 @@ void player_set_hud_features(struct Player *p, uint32_t f)
         }
     }
 
-    if (chg & (HUD_LAP_COUNTER | HUD_BEST_LAP)) {
-        int32_t on = (f & (HUD_LAP_COUNTER | HUD_BEST_LAP)) != 0;
+    if (chg & (HUD_LAP_TIME | HUD_LAP_COUNTER)) {
+        int32_t on = (f & (HUD_LAP_TIME | HUD_LAP_COUNTER)) != 0;
 
         group_visibility(h, 0xb7a3bc7a, 0);
         p->pFlailerLapTime = find(h, 0xfc1b498a, FLAILER_TYPE_TEXT);
@@ -1040,7 +1040,7 @@ void player_set_hud_features(struct Player *p, uint32_t f)
 }
 
 // UpdateHud's head, 0x0017ed18 to 0x0017ed34.
-void player_update_hud(struct Player *p)
+void player_update_hud_features(struct Player *p)
 {
     uint32_t f = player_determine_hud_features(p);
 

@@ -1651,7 +1651,7 @@ MUTATIONS = [
       "if (rp->nMaxCops < 0)\n            rp->nMaxCops = 1;"),
     M("sc_aidemo", "if (rp->AIDemoMode == 0) {\n        int32_t numPlayers",
       "if (1) {\n        int32_t numPlayers"),
-    M("sc_player_gender", "list, 8, p->mPlayerSettings.New7);",
+    M("sc_player_gender", "list, 8, p->mPlayerSettings.PreferredGender);",
       "list, 8, -1);"),
     M("sc_beacop", "if (rp->BeACop != 0 && i == 0)", "if (rp->BeACop != 0)"),
     M("sc_beacop_off", "if (rp->BeACop != 0 && i == 0)", "if (0)"),

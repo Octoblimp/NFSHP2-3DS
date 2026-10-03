@@ -65,6 +65,10 @@ DriverInfo *race_parameters_find_driver(RaceParameters *rp, int32_t number);
 // to 0. SetupCarsForRace runs it first, before it clears the table.
 void race_parameters_restore_eliminated(RaceParameters *rp);
 
+// 0x001edcd0: how many drivers a knockout has put out, the ranks above 0.
+// UpdateHud's two-player scoring counts it.
+int32_t race_parameters_num_eliminated(const RaceParameters *rp);
+
 // 0x001edbc8. The driver with that number, unless it is missing or out
 // already, goes out at `rank`, and a player or an AI racer takes one off
 // its count. The driver, or NULL.

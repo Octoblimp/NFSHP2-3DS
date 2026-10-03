@@ -1426,8 +1426,8 @@ RealTimer += t;                        /* 0x00323cd0 -- 1/4000 s units */
 FrameCounter++;                        /* 0x00323cc8                   */
 ```
 
-`Timer` is a fixed-point second: `Timer::SetTime(f)` (`0x00134ef0`) stores
-`(int)(f * 4000.0f)`. So:
+`Timer` is a fixed-point second: `Timer::SetTime(f)` (retail `0x00136dd0`) stores
+`(int)(f * 4000.0f + 0.5f)`, rounded; the demo's (`0x00134ef0`) truncated. So:
 
 * `GameFlowLoadingFrontEnd`'s 181 / 361 / 541 are `RealTime` ticks -- 3, 6 and
   9 seconds.

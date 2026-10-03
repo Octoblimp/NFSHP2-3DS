@@ -81,20 +81,32 @@ task have had to line up.
 
 `pCarSpecs` at 1368 is **absent from the `.mdebug` entry**. It was
 recovered from `lw v0,1368(a0)` in all six string accessors, and it points
-at a record of translated-string ids:
+at a row of retail's CarLanguageInfo table (`0x0030d578`, 50 rows of 28
+bytes). InitCarInfo (`0x00188d08`) points every type at its row at boot,
+by FindCarLanguageInfo (`0x00187e80`): the first row whose type matches,
+else the first row, which is type -1's (a Corvette).
 
-| Off | Field |
-|----:|-------|
-| 0 | *(not read by any accessor)* |
-| 4 | ZeroTo60 |
-| 8 | TopSpeed |
-| 12 | BHP |
-| 16 | FullName |
-| 20 | ShortName |
+| Off | Field | The Corvette's |
+|----:|-------|----------------|
+| 0 | CarType, the search key | 0 |
+| 4 | ZeroTo60 | "3.9" |
+| 8 | TopSpeedMph | "171" |
+| 12 | TopSpeedKph | "275" |
+| 16 | BHP | "405" |
+| 20 | FullName | "Chevrolet Corvette Z06" |
+| 24 | ShortName | "Corvette" |
 
-The slot at 0 has no name here because nothing in the object touches it.
-The transcript sets it to a live id anyway, so an accessor that drifted one
-slot down would answer a real string rather than nothing.
+The demo's record was 24 bytes, without the km/h. Retail put it in at 12
+and moved the rest down a word, so retail's `0x00187eb8`, whose bytes are
+the demo's GetShortName (`+20`), now answers the full name, and a new
+accessor at `0x00187ed8` reads the short name at +24. GetCarSpecTopSpeed
+(`0x00187f38`) takes the units: 1 reads +12, 0 reads +8, anything else
+asks for id 0. The names come from what the ids translate to in
+`FE_ENGLISH.BIN`.
+
+The slot at 0 is never read by an accessor. The transcript sets it to a
+live id anyway, so an accessor that drifted one slot down would answer a
+real string rather than nothing.
 
 ### The nested records
 
@@ -134,9 +146,11 @@ the record then aligns to it, so `sizeof` is 1384 on a 64-bit host and
 
 ## Behaviour
 
-**The six string accessors** (0x0017ff38 .. 0x0017fff8) are each four
-instructions. Five read an id out of `pCarSpecs` and hand it to
-`GetTranslatedString(int)` at 0x0020b0e0, which is `langtab_get`.
+**The six string accessors** (retail's 0x00187eb8 .. 0x00187f78; the
+demo's 0x0017ff38 .. 0x0017fff8) are each four instructions, but for the
+top speed's, which picks its slot by the units. Five read an id out of
+`pCarSpecs` and hand it to `GetTranslatedString(int)`, which is
+`langtab_get`.
 
 `GetManufacturerName` is the odd one out, and the difference is easy to
 miss: `addiu a0,a0,192` is the *address* of the field, not a load through

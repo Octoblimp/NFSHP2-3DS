@@ -15,7 +15,8 @@
 // DefaultSkinNumber and Pad1, which the six string accessors dereference.
 // It points at a CarSpecs record of translated-string ids. The dump omits
 // it because it is a private member the STABS entry for CarTypeInfo does
-// not carry; it was recovered from `lw v0,1368(a0)` in all six.
+// not carry; it was recovered from `lw v0,1368(a0)` in all six. InitCarInfo
+// (carinfo.h) fills it in at boot.
 //
 // The nested Info structs split three ways. The ones the physics reads are
 // spelled out (WheelInfo, TireInfo, SuspensionInfo, DriveTrainInfo,
@@ -123,15 +124,21 @@ typedef struct ControlInfo {
     float dummy[3];             // 36
 } ControlInfo;
 
-// The record at CarTypeInfo+1368. Five translated-string ids; the field at
-// 0 is not read by any of the six accessors and is left unnamed.
+// The record at CarTypeInfo+1368: a row of retail's CarLanguageInfo table
+// (0x0030d578, carinfo.h), 28 bytes. The car type it is for, then six
+// translated-string ids. Retail has one more word than the demo's 24: the
+// top speed in km/h went in after the one in mph, so BHP and the two
+// names each sit a word later. The names come from what the ids translate
+// to (the Corvette's: "3.9", "171", "275", "405", "Chevrolet Corvette
+// Z06", "Corvette").
 typedef struct CarSpecs {
-    int32_t _unknown0; //  0
-    int32_t ZeroTo60;  //  4
-    int32_t TopSpeed;  //  8
-    int32_t BHP;       // 12
-    int32_t FullName;  // 16
-    int32_t ShortName; // 20
+    int32_t CarType;     //  0, FindCarLanguageInfo's key
+    int32_t ZeroTo60;    //  4
+    int32_t TopSpeedMph; //  8
+    int32_t TopSpeedKph; // 12
+    int32_t BHP;         // 16
+    int32_t FullName;    // 20
+    int32_t ShortName;   // 24
 } CarSpecs;
 
 // ------------------------------------------------------------ the record
@@ -219,14 +226,24 @@ typedef char cartypeinfo_layout_check[
      && sizeof(WheelInfo) == 32 && sizeof(TireInfo) == 32
      && sizeof(SuspensionInfo) == 32 && sizeof(DriveTrainInfo) == 64
      && sizeof(RigidBodyInfo) == 80 && sizeof(AeroInfo) == 16
-     && sizeof(ControlInfo) == 48 && sizeof(CarSpecs) == 24
+     && sizeof(ControlInfo) == 48 && sizeof(CarSpecs) == 28
      ) ? 1 : -1];
 #endif
 
-// The six string accessors, 0x0017ff38 .. 0x0017fff8. Five of them read an
-// id out of pCarSpecs and hand it to the translated-string table;
-// GetManufacturerName instead passes the *string* at byte 192 to the
-// by-name overload, so it is the only one that does not touch pCarSpecs.
+// The six string accessors, retail's 0x00187eb8 .. 0x00187f78. Five of
+// them read an id out of pCarSpecs and hand it to the translated-string
+// table; GetManufacturerName instead passes the *string* at byte 192 to
+// the by-name overload, so it is the only one that does not touch
+// pCarSpecs.
+//
+//   0x00187eb8  the full name, +20. Its bytes are the demo's GetShortName,
+//               which read +20 of the demo's shorter record.
+//   0x00187ed8  the short name, +24; not in the demo. RenderHud's
+//               leaderboard shows it.
+//   0x00187f18  GetCarSpec0To60, +4
+//   0x00187f38  GetCarSpecTopSpeed(units): +12 for 1 (metric), +8 for 0,
+//               and id 0 for anything else
+//   0x00187f78  GetCarSpecBHP, +16
 //
 // The port takes the table as an argument rather than reaching for a
 // global, so the cross-checker can drive it. GetTranslatedString(int) is
@@ -245,6 +262,7 @@ const char *cartypeinfo_get_car_spec_0_to_60(const CarTypeInfo *ct,
                                              const LangTable *t,
                                              size_t *outLen);
 const char *cartypeinfo_get_car_spec_top_speed(const CarTypeInfo *ct,
+                                               int32_t units,
                                                const LangTable *t,
                                                size_t *outLen);
 const char *cartypeinfo_get_car_spec_bhp(const CarTypeInfo *ct,

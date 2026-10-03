@@ -119,9 +119,9 @@ will read it in place (step 17), so it has retail's layout too.
 | 2 | `DrivingStyle` | 0; `InitForRace` gives it to the car |
 | 3 | `TransmissionType` | 0; `InitForRace` gives it to the driver |
 | 4 | `DriveCameraPOVIndex` | 1, or the byte at gp-23172 under SkipFE |
-| 5 | `SplitTimeType` | 0 |
-| 6 | `PreferredGender` | 0 |
-| 7 | `New7` | 0; padding in the demo |
+| 5 | `New5` | 0; retail's |
+| 6 | `SplitTimeType` | 0; the demo's 5. RenderHud's split mode, 0 to 3 |
+| 7 | `PreferredGender` | 0; the demo's 6, where 7 was padding |
 | 8 | `CameraSpring` | 0 |
 | 12 | `Lookback` | 1 |
 | 16 | `PreferredHudFeatures` | 853 |

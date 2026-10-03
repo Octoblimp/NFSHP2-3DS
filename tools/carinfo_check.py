@@ -65,6 +65,10 @@ UNLOADER = 0x00188128
 GET_TABLE = 0x00188dd8
 MAKE_TABLE = 0x00188df0
 SINIT = 0x001890c8
+FIND_LANG = 0x00187e80
+INIT_CAR_INFO = 0x00188d08
+LANG_TABLE = 0x0030d578           # CarLanguageInfo, 50 rows of 28
+LANG_ROW = 28
 BMALLOC = 0x002577c0
 TABLES = 0x0030daf0               # TheCarTypeAccelerationTable
 TABLE_STRIDE = 148
@@ -332,10 +336,23 @@ def s_make(ch):
     return out
 
 
+def s_language(ch):
+    """InitCarInfo over GLOBALB's records, and every type's row."""
+    car = ch[CAR_CHUNK]
+    recs = car_records(car)
+    out = [r_line(0, 0, car[:8], recs), r_line(4, 12, car[:8], recs),
+           "L 0", "I"]
+    out += ["Q %d" % t for t in range(-3, 70)]
+    out += ["Q %d" % t for t in (0x7fffffff, -0x80000000, 1000)]
+    # Again over records loaded at another alignment.
+    out += ["L 4", "I", "U 4", "U 0"]
+    return out
+
+
 def script():
     ch = globalb_chunks()
     return [s_boot(ch), s_align(ch), s_other(ch), s_made_up(ch),
-            s_residue(ch), s_make(ch)]
+            s_residue(ch), s_make(ch), s_language(ch)]
 
 
 def encode(scenarios):
@@ -493,6 +510,20 @@ class Model(object):
                     sp = e.reg[29] & M32
                     e.write(sp - STACK_FILL,
                             bytes.fromhex(t[1]) * (STACK_FILL // 4))
+                elif op == "I":
+                    e.call(INIT_CAR_INFO, limit=2000000)
+                    arr = e.u32(G_ARRAY)
+                    for i in range(NUM_TYPES):
+                        p = e.u32(arr + REC * i + 1368)
+                        self.emit("i %d %d" % (
+                            i, s32(p - LANG_TABLE) // LANG_ROW))
+                elif op == "Q":
+                    k = int(t[1])
+                    p = e.call(FIND_LANG, k & M32)
+                    self.emit("q %d = %d: %s" % (
+                        k, s32(p - LANG_TABLE) // LANG_ROW,
+                        " ".join(str(s32(e.u32(p + 4 * j)))
+                                 for j in range(7))))
                 elif op == "P":
                     w = int(t[1], 16)
                     for i in range(NUM_TYPES):
@@ -702,6 +733,35 @@ MUTATIONS = [
     M("unload-takes-all", "        NumSkinInfo = 0;" + NL + "        return 1;"
       + NL + "    }" + NL + "    return 0;", "        NumSkinInfo = 0;" + NL
       + "        return 1;" + NL + "    }" + NL + "    return 1;"),
+
+    # -- FindCarLanguageInfo and InitCarInfo -------------------------------
+    M("find-misses-last-row",
+      "    for (i = 0; i < CARINFO_NUM_LANGUAGE_INFO; i++)",
+      "    for (i = 0; i < CARINFO_NUM_LANGUAGE_INFO - 1; i++)"),
+    M("find-skips-first-row",
+      "    for (i = 0; i < CARINFO_NUM_LANGUAGE_INFO; i++)",
+      "    for (i = 1; i < CARINFO_NUM_LANGUAGE_INFO; i++)"),
+    M("find-falls-back-last",
+      "    return &CarLanguageInfoTable[0];",
+      "    return &CarLanguageInfoTable[CARINFO_NUM_LANGUAGE_INFO - 1];"),
+    M("find-falls-back-null", "    return &CarLanguageInfoTable[0];",
+      "    return NULL;"),
+    M("find-last-match",
+      "            return &CarLanguageInfoTable[i];",
+      "            return &CarLanguageInfoTable[i - (i > 0)];"),
+    M("table-row-swapped",
+      "    {   1,  42002,  43002,  43102,  44002,  41200,  41400 },",
+      "    {   1,  42002,  43002,  43102,  44002,  41400,  41200 },"),
+    M("table-fallback-row",
+      "    {  -1,  42002,  43002,  43102,  44002,  41100,  41300 },",
+      "    {  -1,  42003,  43002,  43102,  44002,  41100,  41300 },"),
+    M("init-misses-last-type",
+      "    for (i = 0; i < CARINFO_NUM_TYPES; i++)" + NL
+      + "        ((CarTypeInfo *)",
+      "    for (i = 0; i < CARINFO_NUM_TYPES - 1; i++)" + NL
+      + "        ((CarTypeInfo *)"),
+    M("init-off-by-one", "            find_car_language_info(i);",
+      "            find_car_language_info(i + 1);"),
 ]
 
 EQUIVALENT = {
@@ -709,6 +769,9 @@ EQUIVALENT = {
     # 0: the 100th is 138.888733 (0x430ae384) and the 101st 140.277618, so
     # none is the cap, 138.888901, and `<=` stops where `<` does.
     "stop-past-max": "no speed the walk reaches is the cap exactly",
+    # The first row is type -1's and also the fallback, so a search that
+    # never looks at it still answers it for -1.
+    "find-skips-first-row": "row 0 is both -1's and the fallback",
 }
 
 

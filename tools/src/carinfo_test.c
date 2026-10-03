@@ -22,6 +22,8 @@
 //   F <hex>                  the model's stack fill: nothing here
 //   P <hex>                  every table's entries, count, range and
 //                            multiplier set to the word, but its pointer
+//   I                        init_car_info, then each type's CarSpecs row
+//   Q <type>                 find_car_language_info: the row and its words
 //
 // Every op is echoed as "> " and its first 40 characters. Floats print as
 // their bits.
@@ -347,6 +349,28 @@ int main(int argc, char **argv)
             break;
         case 'F':
             break;
+        case 'I': {
+            int i;
+
+            init_car_info();
+            for (i = 0; i < CARINFO_NUM_TYPES; i++)
+                printf("i %d %d\n", i,
+                       (int)(CarTypeInfoArray[i].pCarSpecs
+                             - CarLanguageInfoTable));
+            break;
+        }
+        case 'Q': {
+            const CarSpecs *c;
+
+            sscanf(line + 2, "%d", &k);
+            c = find_car_language_info(k);
+            printf("q %d = %d: %d %d %d %d %d %d %d\n", k,
+                   (int)(c - CarLanguageInfoTable), (int)c->CarType,
+                   (int)c->ZeroTo60, (int)c->TopSpeedMph,
+                   (int)c->TopSpeedKph, (int)c->BHP, (int)c->FullName,
+                   (int)c->ShortName);
+            break;
+        }
         case 'P': {
             int i, j;
 

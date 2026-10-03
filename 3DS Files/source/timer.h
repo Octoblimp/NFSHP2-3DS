@@ -17,9 +17,13 @@ typedef struct Timer {
     uint32_t PackedTime;                        //   0
 } Timer;                                        //   4
 
-// 0x00134ef0. `seconds * 4000.0f`, then `cvt.w.s`, which truncates and
-// saturates: ee_trunc_w, not a cast. The multiplier is built with
-// `lui at,0x457a`, not loaded.
+// Retail 0x00136dd0, and its copies in other objects (0x0013ed60,
+// 0x001494e8, 0x001a3ed0 and more). `seconds * 4000.0f + 0.5f`, then
+// `cvt.w.s`, which truncates and saturates: ee_trunc_w, not a cast. So the
+// ticks are rounded, half up for a positive time and toward 0 by a half
+// for a negative one. Both constants are built with `lui`. The demo's
+// (0x00134ef0) had no 0.5 and truncated: a sixtieth was 66 ticks there and
+// is 67 in retail, so the world clock runs at retail's rate only with this.
 void timer_set_time(Timer *t, float seconds);
 
 // Retail 0x001a3d70 (the demo's 0x00199af8). The time in seconds rounded to
@@ -34,5 +38,54 @@ float timer_round_seconds(const Timer *t, float f);
 // `seconds * 4000 + 0.5`, then `cvt.w.s`. Race's start and each racing
 // car's crossings go through it with f = 0.01.
 void timer_round(Timer *t, float f);
+
+// A stamp the race has not set: 0 or 0x7fffffff. RacingCar's accessors
+// and the HUD test each crossing with both.
+#define TIMER_UNSET 0x7fffffffu
+static inline int timer_is_valid(const Timer *t)
+{
+    return t->PackedTime != 0 && t->PackedTime != TIMER_UNSET;
+}
+
+// The flags PrintToString takes: a '-' in the first character, or a '+'.
+// RenderHud's splits ask for the sign with 2; a negative time adds 1.
+#define TIMER_PRINT_MINUS 1
+#define TIMER_PRINT_SIGN  2
+
+// GetHoursMinsSeconds, 0x001a3b28. The stamp as a signed count of ticks:
+// the whole seconds split into hours, minutes and seconds by signed
+// division, and the ticks left over over 4, the milliseconds.
+void timer_get_hours_mins_seconds(const Timer *t, int32_t *h, int32_t *m,
+                                  int32_t *s, int32_t *ms);
+
+// PrintToString(char *, int flags, int h, int m, int s, int cs),
+// 0x001a3838. A template by the largest unit that is not 0 and by the
+// language (CurrLanguage, 0x0031c1c8, which the port takes as an
+// argument), then the numbers written into it by IntToString2 (0x001a37b8,
+// two places each, the first without leading zeros):
+//
+//   hours     "--h:--:--", or "--h:--'--\"" in French and Italian
+//   minutes   "--:--.--" English, "--:--:--" German, Spanish, Swedish,
+//             "--'--\"--" French, Italian
+//   seconds   "   --.--", "   --:--", "   --\"--" the same way
+//   neither   "    0.--", "    0:--", "    0\"--"
+//
+// With the sign asked for and ten or more hours or minutes, the text moves
+// right one, losing its last character. Then a '-' goes in the first for
+// flag 1, else a '+' for flag 2. `buf` takes at least 11 bytes.
+//
+// Retail does the move through the template itself, a bStrNCpy into the
+// string in its data that leaves the template's digits as this call's;
+// every later call writes the same places over, so the port moves through
+// a copy instead.
+void timer_print_to_string_hms(char *buf, int32_t flags, int32_t h,
+                               int32_t m, int32_t s, int32_t cs,
+                               int32_t language);
+
+// Timer::PrintToString(char *, int flags), 0x001a3b98. An unset stamp
+// prints as all zeros. Otherwise the parts of its size, and flag 1 added
+// when it is negative; the hundredths are the milliseconds over 10.
+void timer_print_to_string(const Timer *t, char *buf, int32_t flags,
+                           int32_t language);
 
 #endif

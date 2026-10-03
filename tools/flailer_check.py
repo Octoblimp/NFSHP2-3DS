@@ -57,8 +57,8 @@ NL = chr(10)
 
 HARNESS = "tools/src/flailer_test.c"
 FLAILER = "3DS Files/source/flailer.c"
-SOURCES = [HARNESS, FLAILER, "3DS Files/source/bui.c",
-           "3DS Files/source/bchunk.c"]
+SOURCES = [HARNESS, FLAILER, "3DS Files/source/bprintf.c",
+           "3DS Files/source/bui.c", "3DS Files/source/bchunk.c"]
 HARNESS_TIMEOUT = 60
 
 SD = Path(os.environ.get("APPDATA", "")) / "Azahar" / "sdmc" / "NFSHP2"

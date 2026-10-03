@@ -12015,3 +12015,166 @@ The App counter reads 20 FPS.
 
 8m-3: the rest of UpdateHud and RenderHud (`0x0017f040`). CONTINUE.md
 lists RenderHud's callees.
+
+## Session 31, continued (2026-10-03) -- RenderHud (step 8m-3)
+
+UpdateHud runs once a frame for each player. After its head (8m-2) it
+fades the score, scores the start bonus, and calls RenderHud
+(`0x0017f040`, 6812 bytes, with no symbol). RenderHud writes the frame's
+numbers into the HUD's Flailer objects. 8m-3 ports both, so the HUD shows
+the race. `docs/formats/hud-render.md` has the write-up.
+
+- **`hudrender.{c,h}`** hold:
+  - UpdateHud after its head: HudDoAnimations' seam, the score's fade
+    (`0x0017d7c8`), the start bonus and UpdateScoring's seam.
+  - RenderHud's sections:
+    - the speedo, the tach, the shift light and the gear;
+    - the lead, the lap time, the splits and the live split;
+    - the lap counter, the race position and the tyres;
+    - Be The Cop's panel and the trackers.
+  - GetCurrentBestLapRecord, ConvertScoreString, DisplayDebugInfo,
+    GetLetterForGear and TriggerTimerWarningSound.
+- **`racesplit.{c,h}`** hold the RacingCar lap accessors
+  (GetFinishReasonId and the four lap stamps) and Race::CalculateSplitTime
+  (`0x001487e8`).
+- **`bprintf.{c,h}`** is bWare's bSPrintf and bVSPrintf (`0x00251398`,
+  `0x00251440`). Its rules are not the C library's:
+  - `%f` with no precision has 3 places, and halves round away from 0.
+  - `%e` and `%g` have 3 exponent digits, and `%g` is `%e`.
+  - Unknown letters print themselves, and `%p` is `%.8X`.
+
+  `flailer.c`'s FlailerPrintf now goes through it.
+- **Under them:**
+  - `timer.c`: Timer::PrintToString (`0x001a3b98`), with its
+    language-dependent templates (`0x001a3838`), and GetHoursMinsSeconds
+    (`0x001a3b28`).
+  - Retail's Timer::SetTime (`0x00136dd0`) rounds, where the demo's
+    truncated. A sixtieth of a second is now 67 ticks, as in retail.
+    `realtime_check` now runs retail's clocks.
+  - `copmanager.c`: IsBeingPursued, GetPursuitLevelForHUD and
+    GetNumTickets.
+  - `raceparams.c`: NumEliminated (`0x001edcd0`).
+  - `carinfo.c`: InitCarInfo (`0x00188d08`) and FindCarLanguageInfo
+    (`0x00187e80`), with retail's CarLanguageInfo table (`0x0030d578`).
+    `main.c` runs InitCarInfo after the global chunks load, so each car
+    type's `pCarSpecs` points at its names.
+- **Retail layouts fixed:**
+  - Retail's CarSpecs row has a seventh word, the top speed in km/h, at
+    12. The port's names after it were one slot out, so the leaderboard's
+    ShortName read the full name.
+  - PlayerSettings has a new byte at 5. SplitTimeType and PreferredGender
+    move to 6 and 7.
+- `main.c` binds UpdateHud to `gPlayerUpdateHudFn` and
+  GetTranslatedString to `fredTranslate`.
+- **Still seams for 8m-4:**
+  - HudDoAnimations, UpdateScoring and StartScore;
+  - HudStartSpeedAnimation and HudStartGrowAnimation;
+  - UpdatePursuitMeter and UpdateRadarDetector;
+  - DrawTracker and NISOverlayManager::Update.
+
+  InitializeFlailerTachometer and RenderFlailerTachometer also move to
+  8m-4.
+
+Retail reads past its arrays and through unchecked pointers in some
+places. The port bounds or checks each one, and the doc lists them:
+
+- the helicopter and ticket lights;
+- the lead's other player;
+- the trackers' World;
+- the accessors' signed index;
+- the finish-reason table;
+- the cop arrays by CarIndex.
+
+### The checks
+
+`tools/hudrender_check.py` runs retail's UpdateHud, RenderHud and
+GetCurrentBestLapRecord in RetailEmu, over INGAMEB's Flailer chunk. Under
+them run retail's:
+
+- DetermineHudFeatures and SetHudFeatures;
+- the Flailer runtime;
+- PrintToString, CalculateSplitTime and the accessors;
+- NumEliminated, bSPrintf and bVSPrintf.
+
+The 8m-4 seams and the World's lookups are stubs that print their
+arguments. `tools/src/hudrender_test.c` runs the port on the same bundle.
+After each op the checker compares:
+
+- the stubs' calls;
+- each Player's HUD fields;
+- every Flailer object's bytes.
+
+`hudrender_check`: 1278 ops, 7620 lines, 0 differ. Its mutation pass
+makes 156 mutations: 152 are caught and 4 are equivalent. The doc gives
+each equivalent's reason:
+
+- the lead's fixed-width bit, which SetHudFeatures already set;
+- two tests on the big position's grow, whose values are always equal;
+- the port's bound on the boundary index.
+
+The first pass left 12 more survivors, and all were gaps in the script.
+Eight were the splits, whose comparison was printed on too few frames.
+The others were the score's fade at its unset stamp and at its 4 s hold,
+the shift light exactly at the red line, and the lead with no lap
+counter. The script now covers each one.
+
+`tools/bprintf_check.py` runs retail's bSPrintf against `b_snprintf`,
+with a guard behind the port's buffer. It covers:
+
+- 28 `%f` forms over about 170 values, with ties at every place;
+- every integer, string and pointer conversion with each flag;
+- `*` widths and precisions, and the size letters;
+- the HUD's own formats;
+- buffers of 0 to 17 bytes.
+
+`bprintf_check`: 5879 ops, 11758 lines, 0 differ. Its mutation pass makes
+36 mutations: 35 are caught, and 1 is equivalent (`h` on `%c`, which
+every C library ignores).
+
+The checkers this step touched, all 0 differ:
+
+| Checker | Result | Mutations |
+|---|---|---|
+| carinfo | 7 scenarios, 198 ops, 2602 lines | 85 caught, 2 equivalent |
+| cartypeinfo | 4 scenarios, 200 lines | 45 of 45 caught |
+| realtime | 20 scenarios, 1044 ops, 3470 lines | |
+| fredrace | 8 scenarios, 2527 ops, 50503 lines | |
+| hudfeatures | 1298 ops, 10373 lines | |
+| flailer | 54104 ops, 120233 lines | |
+| player | 8 scenarios, 3659 ops, 515143 lines | |
+
+Writing the checkers found two bugs in the port:
+
+- It printed with the C library, whose `%f` gives six places and rounds
+  halves to even. That is why `bprintf.c` exists.
+- The CarSpecs slot, above.
+
+On Azahar (`run_azahar_race.ps1 -HoldKeys 65 -OutDir outzahar_8m3`)
+the race runs with no crash:
+
+- The top screen's HUD shows Lap 1/8 and the record "--:--.--".
+- The lap time counts: 0.74 at 18.6 s, 4.21 at 28.8 s, 7.67 at 39.1 s.
+- The speed and gear rise: 13, 80 and 112, in gears 1, 2 and 3.
+- The leaderboard shows "1 Player1".
+- The debug strings and the trackers' triangles are hidden.
+- The bottom screen still shows the frontend's help. That is 8m-5.
+
+Speed is 100% and the App counter reads 20 FPS. The lap clock gains
+3.46 s in 10.2 s, a third of real time, so the world steps once for each
+drawn frame. CONTINUE.md's frame-rate item now says so.
+
+`tools/ghidra_headless.sh` is new. It launches Ghidra's headless analyzer
+from Git Bash through `java` and LaunchSupport, with no cmd.
+
+### Next
+
+8m-4 is in three parts. 8m-4a is the animations, 8m-4b the scoring and
+8m-4c the pursuit meter, the radar, the trackers and the NIS overlay.
+CONTINUE.md lists each with its addresses. 8m-5, the two-screen split,
+now has the user's layout (2026-10-03):
+
+- top screen: the speedometer where retail has it, the race position at
+  the bottom left, and the radar top middle;
+- bottom screen: the lap records and the other extra information, the
+  minimap, and Be The Cop's panel (the helicopter, roadblock and
+  spike-strip calls, the tickets and the damage).

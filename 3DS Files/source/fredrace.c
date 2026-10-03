@@ -582,7 +582,7 @@ void fred_setup_cars_for_race(FrontendDatabase *f)
         for (i = 0; i < numPlayers; i++) {
             FrontendPlayerInfo *p = &Fred.FrontendPlayers[i];
             int32_t c = pick_character_number_that_isnt_racing(
-                list, 8, p->mPlayerSettings.New7);
+                list, 8, p->mPlayerSettings.PreferredGender);
             RideInfo *sel;
 
             if (rp->BeACop != 0 && i == 0)

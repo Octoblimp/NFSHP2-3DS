@@ -37,10 +37,18 @@ const char *cartypeinfo_get_car_spec_0_to_60(const CarTypeInfo *ct,
 }
 
 const char *cartypeinfo_get_car_spec_top_speed(const CarTypeInfo *ct,
+                                               int32_t units,
                                                const LangTable *t,
                                                size_t *outLen)
 {
-    return langtab_get(t, ct->pCarSpecs->TopSpeed, outLen);
+    int32_t id = 0;
+
+    // 0x00187f38: 1 the km/h, 0 the mph, anything else id 0.
+    if (units == 1)
+        id = ct->pCarSpecs->TopSpeedKph;
+    else if (units == 0)
+        id = ct->pCarSpecs->TopSpeedMph;
+    return langtab_get(t, id, outLen);
 }
 
 const char *cartypeinfo_get_car_spec_bhp(const CarTypeInfo *ct,

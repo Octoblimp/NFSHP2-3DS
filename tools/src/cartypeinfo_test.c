@@ -274,6 +274,7 @@ static void accessors(const CarTypeInfo *ct, const LangTable *t,
 {
     size_t n;
     const char *s;
+    int units;
 
     n = 0xdead; s = cartypeinfo_get_full_name(ct, t, &n);
     show("full", tag, s, n);
@@ -281,8 +282,15 @@ static void accessors(const CarTypeInfo *ct, const LangTable *t,
     show("short", tag, s, n);
     n = 0xdead; s = cartypeinfo_get_car_spec_0_to_60(ct, t, &n);
     show("0to60", tag, s, n);
-    n = 0xdead; s = cartypeinfo_get_car_spec_top_speed(ct, t, &n);
-    show("topspd", tag, s, n);
+    for (units = 0; units <= 3; units++) {
+        static const int32_t asked[4] = { 0, 1, 2, -1 };
+        char what[16];
+
+        snprintf(what, sizeof what, "topspd%d", (int)asked[units]);
+        n = 0xdead;
+        s = cartypeinfo_get_car_spec_top_speed(ct, asked[units], t, &n);
+        show(what, tag, s, n);
+    }
     n = 0xdead; s = cartypeinfo_get_car_spec_bhp(ct, t, &n);
     show("bhp", tag, s, n);
     n = 0xdead; s = cartypeinfo_get_manufacturer_name(ct, t, &n);
@@ -303,31 +311,38 @@ static void scenario_strings(void)
 
     CarTypeInfo *ct = calloc(1, sizeof(CarTypeInfo));
 
-    // All five ids present, manufacturer present. The field at CarSpecs+0
-    // is set to something no accessor should ever reach for.
-    static const CarSpecs good = { 77, 102, 103, 104, 100, 101 };
+    // The ids present, manufacturer present. The field at CarSpecs+0 is
+    // set to something no accessor should ever reach for.
+    static const CarSpecs good = { 77, 102, 103, 101, 104, 100, 101 };
     ct->pCarSpecs = &good;
     memcpy(ct->ManufacturerName, "HONDA", 6);
     accessors(ct, &t, "good");
 
     // Every id absent, manufacturer absent.
-    static const CarSpecs bad = { 100, 1, 2, 3, 4, 5 };
+    static const CarSpecs bad = { 100, 1, 2, 3, 4, 5, 6 };
     ct->pCarSpecs = &bad;
     memcpy(ct->ManufacturerName, "NOPE", 5);
     accessors(ct, &t, "absent");
 
     // The out-of-range offset: the key is found, the offset is not usable.
-    static const CarSpecs oob = { 100, 999, 999, 999, 999, 999 };
+    static const CarSpecs oob = { 100, 999, 999, 999, 999, 999, 999 };
     ct->pCarSpecs = &oob;
     memset(ct->ManufacturerName, 0, 16);   // hashes to the empty-string key
     accessors(ct, &t, "oob");
 
     // Ids that swap two fields round, so an accessor reading the wrong
     // CarSpecs slot answers a different string rather than nothing.
-    static const CarSpecs swapped = { 100, 100, 101, 102, 103, 104 };
+    static const CarSpecs swapped = { 104, 100, 101, 102, 103, 104, 102 };
     ct->pCarSpecs = &swapped;
     memcpy(ct->ManufacturerName, "FORD", 5);
     accessors(ct, &t, "shifted");
+
+    // The km/h and the short name differ here, where the two above share
+    // an id.
+    static const CarSpecs rotated = { 0, 103, 104, 100, 101, 102, 999 };
+    ct->pCarSpecs = &rotated;
+    memcpy(ct->ManufacturerName, "HONDA", 6);
+    accessors(ct, &t, "rotated");
 
     // The manufacturer is the one accessor that does not read pCarSpecs at
     // all, so it still answers with a null pCarSpecs. The other five would

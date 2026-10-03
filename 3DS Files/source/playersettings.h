@@ -18,9 +18,13 @@
 // Retail's word at 12 is an int, where the demo's was the float
 // LookbackSpeed: ResetToDefaults (0x001edf90) makes it 1 and ToggleLookback
 // (0x001ee2d8) turns 0 and 1 into each other and leaves anything else. The
-// drive camera counts a look back only while it is 0. ResetToDefaults
-// also writes the byte at 7, which the demo left as padding, and the two
-// words retail added at 40 and 44; `0x001ee020` toggles the one at 44.
+// drive camera counts a look back only while it is 0. Retail put a byte
+// in at 5, which ResetToDefaults zeroes and nothing ported reads, so
+// SplitTimeType and PreferredGender are a byte later than the demo's and
+// the demo's padding at 7 is gone: RenderHud picks the split by the byte
+// at 6 and the feminine "1st" by the one at 7, and the frontend's
+// character pick reads 7. ResetToDefaults also writes the two words
+// retail added at 40 and 44; `0x001ee020` toggles the one at 44.
 // There are no pointers, so the record is the image's on every host: the
 // memory card saves the two in Fred's FrontendPlayers whole.
 typedef struct cPlayerSettings {
@@ -29,9 +33,9 @@ typedef struct cPlayerSettings {
     int8_t   DrivingStyle;                       //    2  InitForRace gives it the car
     int8_t   TransmissionType;                   //    3
     int8_t   DriveCameraPOVIndex;                //    4  the drive camera's POV
-    int8_t   SplitTimeType;                      //    5
-    int8_t   PreferredGender;                    //    6
-    int8_t   New7;                               //    7  retail's; 0 by default
+    int8_t   New5;                               //    5  retail's; 0 by default
+    int8_t   SplitTimeType;                      //    6  the demo's 5
+    int8_t   PreferredGender;                    //    7  the demo's 6
     int32_t  CameraSpring;                       //    8
     int32_t  Lookback;                           //   12  retail's; see above
     uint32_t PreferredHudFeatures;               //   16

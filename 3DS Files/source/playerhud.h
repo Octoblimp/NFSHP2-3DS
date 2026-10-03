@@ -10,8 +10,8 @@
 //
 // The bit names are the port's: retail has no symbols and the demo's
 // stabs give CurrentHudFeatures only as an unsigned int. Each is named for
-// what SetHudFeatures does with it. 0x10 and 0x100 are set by
-// DetermineHudFeatures and read by nothing here.
+// what SetHudFeatures or RenderHud does with it. 0x10 is set by
+// DetermineHudFeatures and read by neither.
 //
 // Written up in docs/formats/hud-features.md; checked on retail's image
 // by tools/hudfeatures_check.py.
@@ -32,12 +32,13 @@ struct TrackMap;
 #define HUD_TRACK_MAP         0x00000001u  // the TrackMap, made and freed
 #define HUD_TIRE_FORCE        0x00000002u  // the four tyre-force bitmaps
 #define HUD_RACE_OVER         0x00000004u  // the race-over messages
-#define HUD_LAP_COUNTER       0x00000008u  // the lap block, with HUD_BEST_LAP
+#define HUD_LAP_TIME          0x00000008u  // lap block, with HUD_LAP_COUNTER
 #define HUD_GAUGES            0x00000020u  // the bumper view's speedo and tach
 #define HUD_GAUGES_OUTSIDE    0x00000040u  // the third-person gauge
 #define HUD_SPLIT_TIMES       0x00000080u
+#define HUD_BEST_LAP          0x00000100u  // RenderHud's only
 #define HUD_RACE_POSITION     0x00000200u
-#define HUD_BEST_LAP          0x00000400u
+#define HUD_LAP_COUNTER       0x00000400u
 #define HUD_REAR_VIEW_MIRROR  0x00001000u
 #define HUD_LETTERBOX         0x00002000u  // the eView's LetterBox byte
 #define HUD_WRONG_WAY         0x00004000u
@@ -74,11 +75,10 @@ uint32_t player_determine_hud_features(struct Player *p);
 // CurrentHudFeatures is `features`.
 void player_set_hud_features(struct Player *p, uint32_t features);
 
-// Player::UpdateHud, 0x0017ecf0, so far its head (to 0x0017ed34):
-// DetermineHudFeatures, and SetHudFeatures when the answer differs from
-// CurrentHudFeatures. The rest (HudDoAnimations, the score's fade at
-// 0x0017d7c8, the scoring and RenderHud) is 8m-3.
-void player_update_hud(struct Player *p);
+// Player::UpdateHud's head, 0x0017ecf0 to 0x0017ed34: DetermineHudFeatures,
+// and SetHudFeatures when the answer differs from CurrentHudFeatures.
+// hudrender.h's player_update_hud is the whole of UpdateHud.
+void player_update_hud_features(struct Player *p);
 
 // 0x00178c90, the port's name (the demo's SetTrackMapMode__6Playeri): the
 // mode kept to the ones the race allows, stored in the race's display

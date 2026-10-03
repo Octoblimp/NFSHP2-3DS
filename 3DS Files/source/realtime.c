@@ -137,11 +137,12 @@ void AdvanceRealTime(void)
     RealLoopCounter = (int32_t)((uint32_t)RealLoopCounter + 1u);
 }
 
-// One second in: the ticks are `cvt.w.s` of the immediate 4000.0, and the
+// One second in: the ticks are `cvt.w.s` of 4000.5 (gp-29404, SetTime's
+// rounding folded in; the demo's was the immediate 4000.0), and the
 // seconds are those ticks times 0.00025. The prepare flag is left alone.
 void ResetWorldTime(void)
 {
-    int32_t ticks = ee_trunc_w(4000.0f);
+    int32_t ticks = ee_trunc_w(4000.5f);
 
     WorldTimeFrames = 1;
     WorldTimer = ticks;

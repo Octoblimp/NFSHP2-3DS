@@ -17,10 +17,10 @@ void player_settings_reset_to_defaults(cPlayerSettings *s)
     s->TransmissionType = 0;
     s->DriveCameraPOVIndex = gPlayerCamSkipFE != NULL && *gPlayerCamSkipFE
         ? (int8_t)PlayerSkipFEPOVIndex : 1;
-    s->SplitTimeType = 0;
+    s->New5 = 0;
     s->Lookback = 1;
+    s->SplitTimeType = 0;
     s->PreferredGender = 0;
-    s->New7 = 0;
     s->CameraSpring = 0;
     strcpy(s->PlayerName, "PLAYER");
     s->PreferredHudFeatures = 853;

@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "bprintf.h"
 #include "eefpu.h"
 
 float (*gFlailerTextScaledWidthFn)(struct FlailerTextChunk *t);
@@ -656,7 +657,7 @@ int32_t flailer_printf(uint32_t screen, uint32_t object, const char *fmt,
 
     if (o == NULL) return 0;
     va_start(ap, fmt);
-    n = vsnprintf(sPrintfBuffer, sizeof(sPrintfBuffer), fmt, ap);
+    n = b_vsnprintf(sPrintfBuffer, sizeof(sPrintfBuffer), fmt, ap);
     va_end(ap);
     flailertext_set_string(TEXT(o), sPrintfBuffer);
     return n;
@@ -669,7 +670,7 @@ int32_t flailer_printf_chunk(struct FlailerTextChunk *t, const char *fmt, ...)
 
     if (t == NULL) return 0;
     va_start(ap, fmt);
-    n = vsnprintf(sPrintfChunkBuffer, sizeof(sPrintfChunkBuffer), fmt, ap);
+    n = b_vsnprintf(sPrintfChunkBuffer, sizeof(sPrintfChunkBuffer), fmt, ap);
     va_end(ap);
     flailertext_set_string(t, sPrintfChunkBuffer);
     return n;

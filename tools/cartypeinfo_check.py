@@ -133,7 +133,7 @@ NESTED_SIZE = [
     ("AeroInfo", 16),
     ("ControlInfo", 48),
     ("EngineInfo", 64),
-    ("CarSpecs", 24),
+    ("CarSpecs", 28),
 ]
 
 # Fields inside the nested records, as an absolute offset from the top of
@@ -368,19 +368,30 @@ def show(tag, what, got):
         emit("%s %s %d [%s]" % (tag, what, got[1], got[0]))
 
 
-# The CarSpecs slot each accessor reads, from `lw a0,N(v0)`.
-#   GetCarSpec0To60     4
-#   GetCarSpecTopSpeed  8
-#   GetCarSpecBHP      12
-#   GetFullName        16
-#   GetShortName       20
-# Nothing reads slot 0.
-SPEC_SLOT = {"full": 4, "short": 5, "0to60": 1, "topspd": 2, "bhp": 3}
+# The CarSpecs slot each accessor reads, from retail's `lw a0,N(v0)`.
+#   0x00187eb8  the full name       20
+#   0x00187ed8  the short name      24
+#   GetCarSpec0To60                  4
+#   GetCarSpecTopSpeed(units)       12 for 1, 8 for 0, id 0 otherwise
+#   GetCarSpecBHP                   16
+# Nothing reads slot 0, the car type.
+SPEC_SLOT = {"full": 5, "short": 6, "0to60": 1, "bhp": 4}
+
+
+def top_speed_id(specs, units):
+    if units == 1:
+        return specs[3]
+    if units == 0:
+        return specs[2]
+    return 0
 
 
 def accessors(tag, specs, manufacturer):
-    for what in ("full", "short", "0to60", "topspd", "bhp"):
+    for what in ("full", "short", "0to60"):
         show(tag, what, langtab_get(specs[SPEC_SLOT[what]]))
+    for units in (0, 1, 2, -1):
+        show(tag, "topspd%d" % units, langtab_get(top_speed_id(specs, units)))
+    show(tag, "bhp", langtab_get(specs[SPEC_SLOT["bhp"]]))
     show(tag, "manuf",
          langtab_get_english(as_s32(bstring_hash(manufacturer))))
 
@@ -393,10 +404,11 @@ def s_strings():
     emit("hash FORD %d" % as_s32(bstring_hash("FORD")))
     emit("hash empty %d" % as_s32(bstring_hash("")))
 
-    accessors("good", [77, 102, 103, 104, 100, 101], "HONDA")
-    accessors("absent", [100, 1, 2, 3, 4, 5], "NOPE")
-    accessors("oob", [100, 999, 999, 999, 999, 999], "")
-    accessors("shifted", [100, 100, 101, 102, 103, 104], "FORD")
+    accessors("good", [77, 102, 103, 101, 104, 100, 101], "HONDA")
+    accessors("absent", [100, 1, 2, 3, 4, 5, 6], "NOPE")
+    accessors("oob", [100, 999, 999, 999, 999, 999, 999], "")
+    accessors("shifted", [104, 100, 101, 102, 103, 104, 102], "FORD")
+    accessors("rotated", [0, 103, 104, 100, 101, 102, 999], "HONDA")
 
     show("nullspecs", "manuf",
          langtab_get_english(as_s32(bstring_hash("FORD"))))
@@ -607,12 +619,14 @@ MUTATIONS = [
      + "    float SpeedLimiter;         // 32",
      "    float SpeedLimiter;         // 28" + NL
      + "    float MaxZMomentAccExtreme; // 32"),
-    ("carspecs-no-unknown0", CH,
-     "    int32_t _unknown0; //  0" + NL + "    int32_t ZeroTo60;  //  4",
-     "    int32_t ZeroTo60;  //  0"),
+    ("carspecs-no-cartype", CH,
+     "    int32_t CarType;     //  0, FindCarLanguageInfo's key" + NL,
+     ""),
     ("carspecs-name-order", CH,
-     "    int32_t FullName;  // 16" + NL + "    int32_t ShortName; // 20",
-     "    int32_t ShortName; // 16" + NL + "    int32_t FullName;  // 20"),
+     "    int32_t FullName;    // 20" + NL + "    int32_t ShortName;   // 24",
+     "    int32_t ShortName;   // 20" + NL + "    int32_t FullName;    // 24"),
+    ("carspecs-demo-layout", CH,
+     "    int32_t TopSpeedKph; // 12" + NL, ""),
 
     # -- the accessors ------------------------------------------------------
     ("full-reads-short", CI,
@@ -623,13 +637,20 @@ MUTATIONS = [
      "    return langtab_get(t, ct->pCarSpecs->FullName, outLen);"),
     ("0to60-reads-topspeed", CI,
      "    return langtab_get(t, ct->pCarSpecs->ZeroTo60, outLen);",
-     "    return langtab_get(t, ct->pCarSpecs->TopSpeed, outLen);"),
-    ("topspeed-reads-bhp", CI,
-     "    return langtab_get(t, ct->pCarSpecs->TopSpeed, outLen);",
-     "    return langtab_get(t, ct->pCarSpecs->BHP, outLen);"),
-    ("bhp-reads-unknown0", CI,
+     "    return langtab_get(t, ct->pCarSpecs->TopSpeedMph, outLen);"),
+    ("topspeed-units-swapped", CI,
+     "    if (units == 1)" + NL + "        id = ct->pCarSpecs->TopSpeedKph;",
+     "    if (units == 1)" + NL + "        id = ct->pCarSpecs->TopSpeedMph;"),
+    ("topspeed-mph-reads-bhp", CI,
+     "        id = ct->pCarSpecs->TopSpeedMph;",
+     "        id = ct->pCarSpecs->BHP;"),
+    ("topspeed-else-mph", CI,
+     "    else if (units == 0)" + NL, "    else" + NL),
+    ("topspeed-nonzero-metric", CI,
+     "    if (units == 1)", "    if (units != 0)"),
+    ("bhp-reads-cartype", CI,
      "    return langtab_get(t, ct->pCarSpecs->BHP, outLen);",
-     "    return langtab_get(t, ct->pCarSpecs->_unknown0, outLen);"),
+     "    return langtab_get(t, ct->pCarSpecs->CarType, outLen);"),
     ("manuf-by-id-not-hash", CI,
      "    return langtab_get_english(t," + NL
      + "                               (int32_t)bchunk_hash(ct->ManufacturerName),"

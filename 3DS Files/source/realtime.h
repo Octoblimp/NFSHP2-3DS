@@ -1,6 +1,9 @@
 // realtime -- the clock object: the video mode, the real clock and the
 // world clock (0x001992a0 .. 0x00199678, 1 KB), and the eighteen globals
-// they keep at 0x00323cc8 .. 0x00323d0c.
+// they keep at 0x00323cc8 .. 0x00323d0c. The addresses are the demo's;
+// retail's are 0x001a3390 .. 0x001a3760 and 0x00330c50 .. 0x00330c94
+// (gp-19616 .. gp-19548), and both clocks step their timers through
+// retail's rounding Timer::SetTime (timer.h).
 //
 //   FrameCounter                gp-20264  0x00323cc8  frames since boot
 //   CurrentVideoMode            gp-20260  0x00323ccc  VIDEO_MODE, 1 = NTSC

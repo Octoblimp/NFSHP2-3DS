@@ -80,6 +80,7 @@
 #include "heapcfg.h"
 #include "geoview.h"
 #include "georender.h"
+#include "hudrender.h"
 #include "joyevent.h"
 #include "joyhid.h"
 #include "joypad.h"
@@ -2655,9 +2656,15 @@ int main(int argc, char** argv)
     // Player::SetHudFeatures (playerhud.c), which the destructor calls with
     // 0 and UpdateHud every frame with DetermineHudFeatures' answer.
     gPlayerSetHudFeaturesFn = player_set_hud_features;
-    // UpdateHud's head (playerhud.c), which UpdateNonGameState runs each
-    // frame: SetHudFeatures when DetermineHudFeatures' answer changed.
+    // Player::UpdateHud (hudrender.c), which UpdateNonGameState runs each
+    // frame: SetHudFeatures when DetermineHudFeatures' answer changed, the
+    // start bonus, and RenderHud's numbers into the HUD's Flailer objects.
+    // Its animations, scoring, pursuit meter, radar, trackers and NIS
+    // overlay are 8m-4's and stay NULL. GetTranslatedString is the same
+    // lookup Fred's defaults use; every HUD caller copies the text out
+    // before the next call.
     gPlayerUpdateHudFn = player_update_hud;
+    gHudTranslateFn = fredTranslate;
 
     // Car::MaybeCameraShake, which World::DoTimestep asks of each player's
     // car: shake.c. Only a car with a player shakes, and none has one until
@@ -2822,6 +2829,9 @@ int main(int argc, char** argv)
     uirender_init(&ui, 400.0f, 240.0f);
     UIBundle* globalBundle = addBundle(&ui, BUNDLE_GLOBAL);
     loadGlobalCarInfo(globalBundle);
+    // InitCarInfo (0x00188d08), next in InitializeEverything: each car
+    // type's pCarSpecs.
+    if (CarTypeInfoArray) init_car_info();
     addBundle(&ui, BUNDLE_DYNTEX);
 
     memset(&g_boot, 0, sizeof(g_boot));

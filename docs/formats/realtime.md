@@ -15,6 +15,19 @@ image running in mipsemu as the oracle. Everything is ported except
 `WorldTimeDoSnapshot`, which waits on ReplaySnapshot like every
 `DoSnapshot`.
 
+The addresses here are the demo's. Retail has the same nine at
+0x001a3390 .. 0x001a36c0 and the globals at 0x00330c50 (gp-19616 up), and
+the checker runs retail's. Retail differs in two places:
+
+- **Timer::SetTime rounds.** Retail's (0x00136dd0, and the copies other
+  objects carry) is `cvt.w.s(seconds * 4000 + 0.5)`; the demo's
+  (0x00134ef0) had no 0.5. A sixtieth of a second is 66.67 ticks, so
+  retail's clocks step 67 a frame where the demo's stepped 66. The port's
+  `timer_set_time` is retail's.
+- **ResetWorldTime** loads 4000.5 from gp-29404 for its one second, the
+  rounding folded in, where the demo built 4000.0 with `lui`. Both
+  truncate to 4000.
+
 ## The globals
 
 | gp | Address | Name | .sdata | What it is |

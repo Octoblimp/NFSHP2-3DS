@@ -403,9 +403,10 @@ unchanged.
 
 `IsFinished` (`0x00232828`) answers "no" while the stored start time is 0 or
 `0x7fffffff`. `Start` (`0x00232818`) stores `RealTimer`, which counts in
-1/4000 s because `Timer::SetTime(float)` (`0x00134ef0`) is
-`(int)(f * 4000.0f)`. At 60fps `RealTimer` gains 66 a frame, so 0.25s is 1000
-ticks and the change lands on the 16th frame after the select.
+1/4000 s because `Timer::SetTime(float)` (retail `0x00136dd0`) is
+`(int)(f * 4000.0f + 0.5f)`. At 60fps `RealTimer` gains 67 a frame (the demo's
+truncating SetTime gave 66), so 0.25s is 1000 ticks and the change lands on
+the 15th frame after the select.
 
 ## `StartQuickRace` (`0x00203ae0`)
 

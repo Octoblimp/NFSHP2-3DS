@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """Cross-check 3DS Files/source/realtime.c against the image's clock object.
 
-The clock object is nine functions at 0x001992a0 .. 0x001995d8 and the
-eighteen globals at 0x00323cc8 .. 0x00323d0c: the video mode, the real
-clock MainLoop prepares from the ticker and advances once a frame, and the
-world clock it prepares from World::GetTimestep and advances with it. The
-image is the oracle. tools/mipsemu.py runs the nine functions out of
-NFSHP2.ELF, the harness (tools/src/realtime_test.c) runs the port, both
-walk the same script, and the two transcripts are diffed.
+The clock object is nine functions at retail 0x001a3390 .. 0x001a36bc
+(the demo's 0x001992a0 .. 0x001995d8) and the eighteen globals at
+0x00330c50 .. 0x00330c94: the video mode, the real clock MainLoop prepares
+from the ticker and advances once a frame, and the world clock it prepares
+from World::GetTimestep and advances with it. The image is the oracle.
+retail_model.RetailEmu runs the nine functions out of SLES_507.31, the
+harness (tools/src/realtime_test.c) runs the port, both walk the same
+script, and the two transcripts are diffed.
+
+Retail's functions are the demo's but for two things. Both clocks step
+their timers through retail's Timer::SetTime (0x00136dd0), which rounds,
+`seconds * 4000 + 0.5`, where the demo's truncated: a sixtieth is 67
+ticks, not 66. And ResetWorldTime loads 4000.5 from gp-29404 for the one
+second, where the demo built 4000.0 with `lui`; both truncate to 4000.
+The checker was the demo's until the HUD's slice found the rounding.
 
 Every op prints the eighteen globals after it, read out of the image's own
 .sdata on the model side, so the port's initial values are held to the
@@ -48,6 +56,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import mipsemu as me
+import retail_model
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -61,12 +70,13 @@ SOURCES = [
 ]
 
 RC = "3DS Files/source/realtime.c"
+TC = "3DS Files/source/timer.c"
 
-GP = 0x00328bf0
-G_BASE = GP - 20264             # FrameCounter, the first of the eighteen
-G_JL_REPLAYING = GP - 21256
-G_JL_CAPTURING = GP - 21252
-G_JL_REPEAT = GP - 21248
+GP = retail_model.RETAIL_GP
+G_BASE = GP - 19616             # FrameCounter, the first of the eighteen
+G_JL_REPLAYING = GP - 20668
+G_JL_CAPTURING = GP - 20664
+G_JL_REPEAT = GP - 20660
 FAKE_REPEAT = 0x01E30100
 
 NAMES = [
@@ -146,7 +156,7 @@ class Script(object):
         self.op(OP_ADV_REAL)
 
 
-# The windows, as the image holds them: gp-29840 .. gp-29828.
+# The windows, as the image holds them: gp-29428 .. gp-29416.
 PAL_LO, PAL_HI = 0x3ca3d70a, 0x3d75c28f
 NTSC_LO, NTSC_HI = 0x3c888889, 0x3d4cccce
 
@@ -336,7 +346,7 @@ class Model(object):
         self.sc = sc
         self.out = []
         self.feed = []
-        e = self.e = me.Emu(ieee=True)
+        e = self.e = retail_model.RetailEmu(ieee=True)
         self.fn = {k: e.addr_of(v) for k, v in SYM.items()}
         emit = self.out.append
 
@@ -641,7 +651,7 @@ MUTATIONS = [
      ""),
 
     # ResetWorldTime
-    ("rw-ticks", RC, "ee_trunc_w(4000.0f)", "ee_trunc_w(4001.0f)"),
+    ("rw-ticks", RC, "ee_trunc_w(4000.5f)", "ee_trunc_w(4001.0f)"),
     ("rw-frames", RC, "    WorldTimeFrames = 1;" + NL,
      "    WorldTimeFrames = 0;" + NL),
     ("rw-time", RC, "    WorldTime = 1;" + NL, "    WorldTime = 0;" + NL),
@@ -707,6 +717,11 @@ MUTATIONS = [
      + "}",
      "WorldTimeSeconds = (float)(uint32_t)WorldTimer * "
      "REALTIME_SECS_PER_TICK;" + NL + "}"),
+    # retail's SetTime
+    ("settime-truncates", TC, "ee_trunc_w(seconds * 4000.0f + 0.5f)",
+     "ee_trunc_w(seconds * 4000.0f)"),
+    ("settime-rounds-up", TC, "ee_trunc_w(seconds * 4000.0f + 0.5f)",
+     "ee_trunc_w(seconds * 4000.0f + 0.99f)"),
 ]
 
 EQUIVALENT = {

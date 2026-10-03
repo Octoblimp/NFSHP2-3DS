@@ -123,6 +123,15 @@ void race_parameters_restore_eliminated(RaceParameters *rp)
     }
 }
 
+int32_t race_parameters_num_eliminated(const RaceParameters *rp)
+{
+    int32_t i, n = 0;
+
+    for (i = 0; i < rp->NumDriverInfo; i++)
+        n += rp->pDriverInfoTable[i].EliminatedRank > 0;
+    return n;
+}
+
 DriverInfo *race_parameters_eliminate_driver(RaceParameters *rp,
                                              int32_t number, int32_t rank)
 {

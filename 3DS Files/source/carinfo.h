@@ -8,6 +8,8 @@
 //   GetAccelerationTable       0x00188dd8  (0x00180d70)
 //   MakeAccelerationTable      0x00188df0  (0x00180d88)
 //   the static constructor     0x001890c8  (0x00181060)
+//   FindCarLanguageInfo        0x00187e80  (0x0017ff00)
+//   InitCarInfo                0x00188d08  (0x00180cb0)
 //
 // tools/carinfo_check.py runs each of them out of the retail image in
 // RetailEmu, over GLOBALB's own chunks and made-up ones, and diffs the
@@ -91,5 +93,20 @@ int loader_car_info(uint8_t *chunk);
 // SkinInfoTable and NumSkinInfo; either answers 1. The acceleration tables
 // keep what they were made with.
 int unloader_car_info(uint8_t *chunk);
+
+// Retail's CarLanguageInfo table, 0x0030d578: a CarSpecs row (the type,
+// then six translated-string ids) for each of 49 types and a first row
+// for type -1. Types 49 to 63 have none and get the first row.
+#define CARINFO_NUM_LANGUAGE_INFO 50
+extern const CarSpecs CarLanguageInfoTable[CARINFO_NUM_LANGUAGE_INFO];
+
+// FindCarLanguageInfo(CarType), 0x00187e80: the first row for the type,
+// or the first row when none is.
+const CarSpecs *find_car_language_info(int32_t type);
+
+// InitCarInfo, 0x00188d08. InitializeEverything runs it straight after
+// LoadGlobalChunks: each of the 64 records' pCarSpecs (byte 1368) gets
+// its type's row. CarTypeInfoArray must be loaded.
+void init_car_info(void);
 
 #endif
