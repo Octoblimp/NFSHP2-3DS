@@ -196,8 +196,7 @@ TexturePack *texturepack_construct(TexturePack *p, const char *name,
     return p;
 }
 
-// ~LoadedTextureData, 0x001a2eb8.
-static void loadedtexturedata_destruct(LoadedTextureData *d, int32_t flags)
+void loadedtexturedata_destruct(LoadedTextureData *d, int32_t flags)
 {
     if (d->Buf != NULL)
         bFree(d->Buf);

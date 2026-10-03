@@ -126,7 +126,11 @@ extern char* fake_heap_end;
 
 NfsHeapInfo g_heapInfo;
 
-#define HEAP_WANT   (28u * 1024 * 1024)  // what the old 64MB grant effectively gave
+// A race needs more than the 28MB the old 64MB grant gave: at
+// LOADING_TRACK_SPECIFIC ~23MB is in use, and the track's bundles add
+// ~15MB more (TRACKB 8.6MB, TEX<n>LOCATION 4.8MB, the rest small), every
+// one a single block. 48MB leaves ~10MB over that.
+#define HEAP_WANT   (48u * 1024 * 1024)
 #define HEAP_MIN    ( 4u * 1024 * 1024)
 #define HEAP_STEP   ( 4u * 1024 * 1024)
 
@@ -173,10 +177,9 @@ void __system_allocateHeaps(void)
 	g_heapInfo.commitUsed = (u32)commitUsed;
 	g_heapInfo.avail      = avail;
 
-	// The malloc heap keeps the 28MB the old 64MB grant effectively gave it,
-	// so nothing regresses if the extended grant is ever refused, or on the
-	// .3dsx path (which inherits its host process memory and never sees
-	// app.rsf at all). Never claim more than half of a small grant.
+	// The malloc heap takes HEAP_WANT on every path, the .3dsx one included
+	// (which inherits its host process memory and never sees app.rsf at
+	// all). Never claim more than half of a small grant.
 	heapWant = HEAP_WANT;
 	if (heapWant > avail / 2)
 		heapWant = ALIGN4K(avail / 2);

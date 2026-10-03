@@ -38,6 +38,7 @@
 #include <3ds.h>
 #include <citro2d.h>
 #include <citro3d.h>
+#include <malloc.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,6 +46,7 @@
 #include <sys/stat.h>
 
 #include "bchunk.h"
+#include "bmem.h"
 #include "bmenu.h"
 #include "bsnd.h"
 #include "bslotpool.h"
@@ -98,6 +100,7 @@
 #include "shake.h"
 #include "terraintype.h"
 #include "texturepack.h"
+#include "texturestream.h"
 #include "topology.h"
 #include "track.h"
 #include "sky.h"
@@ -361,6 +364,10 @@ static FILE* g_log;
 static void logOpen(void)
 {
     g_log = fopen("sdmc:/nfshp2_debug.txt", "w");
+    // stderr is where bMalloc and the other fatal paths say why they abort,
+    // just before they do; on the device it would otherwise go nowhere.
+    if (freopen("sdmc:/nfshp2_stderr.txt", "w", stderr) != NULL)
+        setvbuf(stderr, NULL, _IONBF, 0);
 }
 
 static void logLine(const char* fmt, ...)
@@ -1072,6 +1079,17 @@ static void logRaceStart(void)
 static void hookTrace(void* user, const char* line)
 {
     (void)user;
+    // Each state's Begin carries the malloc heap's use: the track's bundles
+    // are the largest blocks the port asks for, and a bMalloc that fails
+    // aborts.
+    if (strncmp(line, "begin ", 6) == 0) {
+        struct mallinfo mi = mallinfo();
+        logLine("flow %s (heap: %lu KB used, %lu KB free; linear %lu KB free)",
+                line, (unsigned long)mi.uordblks / 1024,
+                (unsigned long)(g_heapInfo.heapGot - mi.uordblks) / 1024,
+                (unsigned long)linearSpaceFree() / 1024);
+        return;
+    }
     logLine("flow %s", line);
 }
 
@@ -1839,6 +1857,29 @@ static void* resFindByName(const char* name)
     return find_resource_file(name);
 }
 
+// LoadGlobalChunks' streamed packs (0x001683a0 and 0x0016856c): a
+// TexturePack with no file name, its table read from `file`, and none of
+// its pixels until they are asked for (texturestream.h).
+static TexturePack* newStreamedPack(const char* var, const char* name,
+                                    const char* file)
+{
+    TexturePack* p = texturepack_construct(
+        (TexturePack*)bMalloc((int)sizeof(TexturePack), var, 0, 16), name,
+        NULL);
+    texturepack_load_texture_table_from_file(p, file);
+    return p;
+}
+
+// LoadGlobalChunks' two waits (0x00168458, 0x001685f8): the resource
+// system serviced, and with it the queued reads, until nothing is loading
+// and DynTextures is reading nothing.
+static void waitForGlobalChunks(void)
+{
+    while (!is_resource_loading_complete()
+           || pDynamicTexturePack->CurrentLoadingTextureData != NULL)
+        (void)service_resource_loading();
+}
+
 // LoadGlobalChunks' LoadResourceFile hands every top-level chunk of GLOBALB
 // to LoadChunks, slot 16 among them: LoaderCarInfo (carinfo.c), which
 // points CarTypeInfoArray and SkinInfoTable into the bundle and makes the
@@ -2485,7 +2526,37 @@ int main(int argc, char** argv)
         logLine("SkipFE: R held at boot");
     }
     gCurrLanguageFn = currLanguage;
+    // LoadGlobalChunks' first pack, DynTextures, and its LOADING, which is
+    // waited on before the frame. Retail sets English between the table
+    // and the ask; on a fresh boot that renames nothing, so the port's
+    // bgf_load_global_chunks sets it after. The frame itself is drawn from
+    // the UI's DYNTEX bundle, not from this pack.
+    pDynamicTexturePack = newStreamedPack("pDynamicTexturePack",
+                                          "DynTextures", "GLOBAL\\DYNTEX.BIN");
+    if (texturepack_get_loaded_texture(pDynamicTexturePack, 0xab0e817d)
+        == NULL) {
+        uint32_t loading = 0xab0e817d;   // bStringHash("LOADING")
+        texturepack_load_textures_from_file(pDynamicTexturePack, &loading, 1,
+                                            NULL, 0);
+    }
+    waitForGlobalChunks();
     bgf_load_global_chunks(&g_flow);
+    // After the frame, the HUD's and the cars' packs, and the wait again.
+    pHudTexturePack = newStreamedPack("HudTexturePack", "HudTextures",
+                                      "GLOBAL\\HUDTEX.BIN");
+    pCarTexturePack = newStreamedPack("pCarTexturePack", "CarTextures",
+                                      "CARS\\TEXTURES.BIN");
+    waitForGlobalChunks();
+    // What CarLoader and the track flow stream through: the cars' skins
+    // and the HUD's textures.
+    gLoadTexturesFromFileFn      = texturepack_load_textures_from_file;
+    gUnloadTexturesFromFileFn    = texturepack_unload_textures_from_file;
+    gUnloadAllTexturesFromFileFn = texturepack_unload_all_textures_from_file;
+    logPrintf("streamed packs: DynTextures %d, HudTextures %d, "
+              "CarTextures %d textures\n",
+              (int)pDynamicTexturePack->NumTextures,
+              (int)pHudTexturePack->NumTextures,
+              (int)pCarTexturePack->NumTextures);
     logLine("global chunks loaded, LOADING drawn");
     // InitFred (0x00183820), after the car data and the sound driver as in
     // InitializeEverything: FrontendDatabase::InitWithDefaults on Fred.

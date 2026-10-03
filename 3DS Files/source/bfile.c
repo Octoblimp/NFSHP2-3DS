@@ -136,6 +136,11 @@ void bReadAsync(bFile *f, void *buf, int32_t n, bFileCallback cb,
     ndone++;
 }
 
+void bRead(bFile *f, void *buf, int32_t n)
+{
+    bReadAsync(f, buf, n, NULL, 0);
+}
+
 void bServiceFileSystem(void)
 {
     int n = ndone;

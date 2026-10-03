@@ -1,4 +1,5 @@
-// bfile -- bWare's file calls, the ones QueuedFile and ResourceFile make.
+// bfile -- bWare's file calls, the ones QueuedFile, ResourceFile and the
+// streamed texture packs make.
 //
 //   bOpen(const char *)                                  0x002544c0
 //   bClose(bFile *)                                      0x002544e8
@@ -6,17 +7,18 @@
 //   bFileSize(const char *)                              0x00254568
 //   bReadAsync(bFile *, void *, int, void (*)(bFile *, int), int)
 //                                                        0x002546e8
+//   bRead(bFile *, void *, int)                          0x002547f0
 //   bSeek(bFile *, int, int)                             0x00254830
 //   bServiceFileSystem()                                 0x002539b8
 //
 // Those are retail's addresses; the demo's are 0x0023c2a8, 0x0023c2d0,
-// 0x0023c338, 0x0023c350, 0x0023c4b0, 0x0023c5f8 and 0x0023b790, all the
-// same code. The image's are the PS2's: a name looked up in ZDIR.BIN and
-// read out of ZZDATA.BIN by the IOP, and a read's callback run from
-// bServiceFileSystem once the IOP says it is done. None of that is
-// ported. The port's are port-only, over stdio and the extracted tree on
-// the SD card (gamedata.h): a name is the disc's, `GLOBAL\INGAMEB.LZC`,
-// with its backslashes turned to slashes.
+// 0x0023c338, 0x0023c350, 0x0023c4b0, 0x0023c5b8, 0x0023c5f8 and
+// 0x0023b790, all the same code. The image's are the PS2's: a name looked
+// up in ZDIR.BIN and read out of ZZDATA.BIN by the IOP, and a read's
+// callback run from bServiceFileSystem once the IOP says it is done. None
+// of that is ported. The port's are port-only, over stdio and the
+// extracted tree on the SD card (gamedata.h): a name is the disc's,
+// `GLOBAL\INGAMEB.LZC`, with its backslashes turned to slashes.
 //
 // What the callers rely on is kept:
 //   * a missing file is a NULL bOpen and a negative bFileSize(name);
@@ -47,6 +49,10 @@ int32_t bFileSizeName(const char *name);
 void    bSeek(bFile *f, int32_t pos, int32_t whence);
 void    bReadAsync(bFile *f, void *buf, int32_t n, bFileCallback cb,
                    intptr_t param);
+// bRead(bFile *, void *, int), 0x002547f0 (the demo's 0x0023c5b8):
+// bReadAsync with no callback, then a wait on bIsAsyncDone. The port's
+// read is in when bReadAsync returns.
+void    bRead(bFile *f, void *buf, int32_t n);
 void    bServiceFileSystem(void);
 
 #endif

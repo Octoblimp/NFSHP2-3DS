@@ -26,12 +26,12 @@
 // hit, then the render targets', then with `use_default` the default
 // texture, 0x19006835.
 //
-// Not ported: the streaming half (LoadTextureTableFromFile and the
-// LoadedTextureData calls, 0x001a1f00 .. 0x001a28c0, StreamingTexturePack
-// and QueuedFile), which LoadGlobalChunks and LoadHudTextures use. What
+// The streaming half (LoadTextureTableFromFile and the LoadedTextureData
+// calls, 0x001a1f00 .. 0x001a28c0, retail's 0x001ac608 .. 0x001ad048),
+// which LoadGlobalChunks and LoadHudTextures use, is texturestream.c. What
 // the destructor needs of it is here: it waits out a streaming load and
 // frees the LoadedTextureData list, both empty for a pack a bundle
-// holds. Nor are the two lists' global destructors (0x001a2de0), which
+// holds. Not ported: the two lists' global destructors (0x001a2de0), which
 // only run past the end of main.
 //
 // Where it depends on what is not ported, it goes through a seam:
@@ -108,6 +108,10 @@ typedef struct TextureInfo {
     uint16_t  ImageVramAddress;             // 162
 } TextureInfo;                              // 164
 
+// LoadTexturesFromFile's callback, and the parameter it is called with
+// (texturestream.h). The image's are an int; a pointer here, on the host.
+typedef void (*LoadedTextureDataCallback)(intptr_t param);
+
 // LoadedTextureData, 44 bytes: a range of a streamed pack's blob.
 typedef struct LoadedTextureData {
     bNode     Node;                         //   0
@@ -118,8 +122,8 @@ typedef struct LoadedTextureData {
     uint8_t  *Buf;                          //  24
     int32_t   LoadingCompleted;             //  28
     int32_t   LoadingInProgress;            //  32
-    void    (*Callback)(int32_t);           //  36
-    int32_t   CallbackParam;                //  40
+    LoadedTextureDataCallback Callback;     //  36
+    intptr_t  CallbackParam;                //  40
 } LoadedTextureData;                        //  44
 
 // TexturePack, 148 bytes in retail, the demo's 132. Retail's Filename is
@@ -244,6 +248,10 @@ int unloader_texture_pack(uint8_t *chunk);
 // name's hash, the debugger's handle, and the pack at the list's tail.
 TexturePack *texturepack_construct(TexturePack *p, const char *name,
                                    const char *filename);
+
+// LoadedTextureData::~LoadedTextureData, 0x001a2eb8 (retail 0x001ad610):
+// its block freed; with bit 0 of `flags`, the range too.
+void loadedtexturedata_destruct(LoadedTextureData *d, int32_t flags);
 
 // TexturePack::~TexturePack, 0x001a1b98 (retail 0x001ac178): off the
 // list, and its LoadedTextureData freed; with bit 0 of `flags`, the pack

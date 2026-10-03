@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-02), after the race start (8l-2). `HANDOFF.md` is the running
+(2026-10-02), after texture streaming (8l-3a). `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -47,10 +47,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Eighty-seven cross-checkers pass, plus the table generators:
+Eighty-eight cross-checkers pass, plus the table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/resource_check.py && python tools/fred_check.py && python tools/fredrace_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/texturestream_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/resource_check.py && python tools/fred_check.py && python tools/fredrace_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -124,6 +124,7 @@ scenerycull_check   7273 ops,    46687 lines, 0 differ  (147 caught, 1 equivalen
 eview_check         2103 ops,    15454 lines, 0 differ  (152 caught, 1 equivalent)
 loadertable_check  37553 ops,    50792 lines, 0 differ  (138 caught, 2 equivalent)
 texturepack_check   6698 ops,    11464 lines, 0 differ  (131 caught, 1 equivalent)
+texturestream_check  380 ops,     7353 lines, 0 differ  (142/142 mutations caught; retail's image)
 trackflow_check       22 scenarios, 2333 lines, 0 differ  (252 caught, 2 equivalent; retail's image)
 sky_check             46 scenarios, 1311 lines, 0 differ  (93 caught, 2 equivalent)
 sun_check            115 scenarios, 3427 lines, 0 differ  (154/154 mutations caught)
@@ -1380,8 +1381,35 @@ and so replaced every boot.
      ported. It waits for the frontend's way into a race, below, and the
      doc lists what it calls.
 
+   **8l-3a, texture streaming, is done** (HANDOFF.md, Session 31,
+   continued: texture streaming (step 8l-3a)).
+   `docs/formats/texture-streaming.md` has the write-up.
+   - `texturestream.c` and `texturestream.h` are TexturePack's streaming
+     half, retail's `0x001ac608` to `0x001ad048` and the read's bridge
+     (`0x001ad608`): LoadTextureTableFromFile, the ranges (Find,
+     FindNotYetLoadedNeighbour, Add, Remove, Delete), Load and
+     UnloadTextureFromFile, Load and UnloadTexturesFromFile,
+     ServiceLoadingTextures and ReadCallback, UnloadAllTexturesFromFile and
+     GetLoadedSize. Retail's oddities are kept (the doc lists them).
+   - `main.c` makes LoadGlobalChunks' three packs (DynTextures,
+     HudTextures, CarTextures) with its two waits, and sets CarLoader's two
+     seams and trackflow's UnloadAllTexturesFromFile.
+   - `texturestream_check` runs retail's code in RetailEmu: 9 scenarios,
+     380 ops, 7353 lines, 0 differ. All 142 mutations are caught.
+   - **The malloc heap is 48 MB now, not 28** (`heapcfg.c`). At
+     LOADING_TRACK_SPECIFIC 22.8 MB is in use, and TRACKB12's 8.6 MB
+     block failed: bMalloc aborts, and Azahar closed with it. The
+     linear heap is 76 MB on Azahar with about 6 MB of it in use.
+   - `main.c` sends stderr to `sdmc:/nfshp2_stderr.txt`, so an abort's
+     reason (bMalloc's size and name) is on the card. Each state's Begin
+     logs the heap's and the linear heap's use.
+   - On Azahar, R held at boot now runs LOADING_TRACK_COMMON,
+     LOADING_TRACK_SPECIFIC and enters RACING at 60 fps. The screen still
+     shows LOADING, since nothing draws the race yet (8l-3b). A boot
+     without R passes `run_azahar_test.ps1` as before.
+
    **Next is 8l: flow into a race**, one car on a track on Azahar (step
-   9), in three slices. 8l-1 and 8l-2 are done; 8l-3 is next.
+   9), in three slices. 8l-1, 8l-2 and 8l-3a are done; 8l-3b is next.
 
    The way in is retail's own debug path. With SkipFE (gp-23220) set,
    `main` (`0x0012f000`) calls StartSkipFEGame (`0x00184bd8`) in place of
@@ -1441,17 +1469,33 @@ and so replaced every boot.
      calls, with RaceEvent's calls as seams and the port's switch for
      SkipFE. UseTheRaceEvent is true only for GameTypes 4, 8 and 9.
      ChooseHudTextures (`0x001ee388`) is an empty function in retail.
-   - **8l-3, the race (next).**
-     - `main.c` builds the coordinator (`gNewRaceCoordinatorFn`) and runs
-       MainLoop's race half. The track draws as trackview draws it, plus
-       RenderCars.
-     - The car's textures (LoadTexturesFromFile). With that seam NULL,
-       `carloader_begin_loading` leaves LoadingInProgress set and never
-       calls back, so Part1 never reaches Part2.
+   - **8l-3a, texture streaming (done, above).** LoadGlobalChunks' packs
+     and the streaming behind LoadTexturesFromFile (`0x001acc98`), which
+     CarLoader and LoadHudTextures use.
+   - **8l-3b, the race (next).**
+     - `main.c` builds the coordinator (`gNewRaceCoordinatorFn`,
+       `racecoordinator_new`; `gDeleteRaceCoordinatorFn`,
+       `racecoordinator_destroy`) and runs MainLoop's race half. The
+       track draws as trackview draws it, plus RenderCars.
+     - Retail's MainLoop (`0x0012f378`), in order: ServiceGameFlow; with a
+       coordinator (gp-22216), ExecuteQueuedMessages,
+       CheckForDemoDiscTimeout and SendMessage(RC_TICK, 0); ServiceGameFlow
+       again; UpdateStomper (empty); `0x0012f190` (the joylog's checksum,
+       debug) unless gp-21424; DetermineAllPlayersInputModes
+       (`0x00181c28`, Player::DetermineInputMode `0x00177608` for each);
+       PrepareRealTimestep. Paused flow: PrepareWorldTimestep(0) and
+       GenerateJoyEvents. Otherwise, with a World (gp-22120),
+       UpdateWorldPaused and IsWorldPaused, then the ReplayManager's
+       BeginFrame, World::GetTimestep, PrepareWorldTimestep,
+       GenerateJoyEvents, World::DoTimestep and EndFrame. Then
+       MenuSystemTick, UpdatePlayersNonGameState (`0x00181d88`,
+       Player::UpdateNonGameState `0x00180e60` for each),
+       ReplayScreen::Update, UpdateCameraCoordinators (`0x00199bd0`, the
+       list at gp-19920), UpdateCameraMovers, sound::Update,
+       UpdatePortRumblers, UpdateCameraShakers, World::DebugDisplay,
+       eDisplayFrame, ServiceResourceLoading, AdvanceRealTime and
+       AdvanceWorldTime.
      - The items below.
-   - `pHudTexturePack` (`GLOBAL\HUDTEX.BIN`) and the texture-pack
-     streaming behind LoadTexturesFromFile (`0x001acc98`), which the car
-     loader's seam wants too;
    - LoadSoundRegionsInGame (`0x001ae798`), or its NULL;
    - eDuplicateSolid (`0x00103bf0`: the eSolid copy constructor
      `0x001147f0`, ChangeName `0x00103918`, FixStripEntryTable and the

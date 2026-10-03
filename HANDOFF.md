@@ -11650,3 +11650,106 @@ walks the frontend as before.
 - the car's textures (LoadTexturesFromFile), where Part1 stops now;
 - `main.c` building the coordinator and running MainLoop's race half;
 - the items under 8l-3 in CONTINUE.md.
+
+## Session 31, continued (2026-10-02) -- texture streaming (step 8l-3a)
+
+The first slice of 8l-3. Part1 of LOADING_TRACK_COMMON hands the car's
+skins to CarLoader, which asks pCarTexturePack for them through
+LoadTexturesFromFile. That seam was NULL, so the callback never came and
+the flow stopped on LOADING. `docs/formats/texture-streaming.md` has the
+write-up.
+
+- **`texturestream.{c,h}`** is TexturePack's streaming half, retail's
+  `0x001ac608` to `0x001ad048`, with the read's bridge (`0x001ad608`):
+  - LoadTextureTableFromFile reads a pack file's first 128 KB, copies the
+    table out and keeps where the pixels start;
+  - Find, FindNotYetLoadedNeighbour, Add, Remove and DeleteLoadedTextureData
+    keep the list of ranges, each with its users, merging a range into a
+    neighbour not yet read within 1 KB;
+  - Load and UnloadTextureFromFile, Load and UnloadTexturesFromFile;
+  - ServiceLoadingTextures reads one range at a time through QueuedFile,
+    and ReadCallback assigns it, runs eFixUpTables and services again;
+  - UnloadAllTexturesFromFile and GetLoadedSize.
+- **Retail's oddities, kept**:
+  - an empty range sets the waiting count one up, not one down;
+  - a callback's empty range can be grown into a real one by a range at
+    most 1 KB into the blob, or merged away as a second neighbour, and its
+    callback is lost;
+  - a callback is a barrier to the sort.
+- **`texturepack.c`**: `loadedtexturedata_destruct` is no longer static,
+  and the record's callback takes an `intptr_t`. **`bfile.c`** gains
+  bRead.
+- **`main.c`** makes LoadGlobalChunks' three packs:
+  - DynTextures over `GLOBAL\DYNTEX.BIN`, then LOADING asked for and
+    waited on, before `bgf_load_global_chunks`;
+  - HudTextures over `GLOBAL\HUDTEX.BIN` and CarTextures over
+    `CARS\TEXTURES.BIN` after it, and the second wait;
+  - CarLoader's two seams and trackflow's UnloadAllTexturesFromFile.
+
+  MainLoop's ServiceResourceLoading runs the reads.
+
+### The heap
+
+With the car's textures streaming, the flow went on to
+LOADING_TRACK_SPECIFIC, and Azahar closed a moment later with nothing in
+its log but a clean shutdown. The user saw the same: the loading screen,
+then an exit. It was an abort. bMalloc cannot fail in the image, so the
+port's prints the size and name to stderr and aborts, and on the device
+stderr went nowhere. `main.c` now sends stderr to
+`sdmc:/nfshp2_stderr.txt`, which read:
+
+```
+bMalloc: 8984588 bytes for TRACKS\TRACKB12.LZC
+```
+
+Each state's Begin now logs the heap. At LOADING_TRACK_SPECIFIC 22.8 MB
+of the 28 MB malloc heap was in use, and the track's files want about
+15 MB more (TRACKB12 8.6 MB, TEX12LOCATION 4.8 MB, the rest small). The
+linear heap had 70 MB free of 76. So `heapcfg.c`'s HEAP_WANT is 48 MB
+now. A small grant still gives the malloc heap no more than half.
+
+### The checks
+
+`texturestream_check` runs the image's code in RetailEmu. That covers all
+of the above, plus TexturePack's constructor and destructor,
+AttachTextureTable, Assign and UnAssignTextureData, GetTexture,
+bList::Sort, QueuedFile and ServiceQueuedFiles. The file system, the heap
+and the slot pool are stubs on both sides. The files are the disc's three
+packs and packs the checker builds. 9 scenarios, 380 ops and 7353 lines
+give 0 differ.
+
+Of its 142 mutations, the first full pass caught 136. Two of the six it
+missed did not test what they meant to: a poked range sat inside a
+loaded one, and a marker's callback run after its free cannot be told
+from one run before, since a marker has no block. The other four got
+cases of their own: a palette larger than its image, a range below a
+callback's 0, two ranges that start together, and a range grown into a
+callback's. The second pass caught all 142, none equivalent. A hung
+mutant is killed after 60 s now, not 300.
+
+Every checker in the chain passes: 92 commands, 0 failed. The 3DS build
+links, and check_3dsx reports its relocations OK.
+
+On Azahar, R held at boot logs the three packs (`DynTextures 19,
+HudTextures 89, CarTextures 783 textures`), and the flow runs
+LOADING_TRACK_COMMON and LOADING_TRACK_SPECIFIC and enters RACING:
+
+```
+flow begin LOADING_TRACK_COMMON (heap: 20213 KB used, 28938 KB free; linear 70772 KB free)
+flow want LOADING_TRACK_SPECIFIC
+flow begin LOADING_TRACK_SPECIFIC (heap: 22772 KB used, 26379 KB free; linear 70644 KB free)
+flow want RACING
+flow end LOADING_TRACK_SPECIFIC
+flow state RACING
+```
+
+It runs at 60 fps on the LOADING screen, since nothing draws the race
+yet. `run_azahar_test.ps1` passes: the boot without R walks the frontend
+as before.
+
+### Next
+
+8l-3b: the coordinator and MainLoop's race half. CONTINUE.md lists
+MainLoop's calls in order. To draw the track, trackview needs a way to
+take the bundle the resource system already loaded, where today it reads
+and loads its own.

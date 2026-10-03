@@ -176,7 +176,7 @@ Write-Host ""
 Write-Host "Shots in $OutDir"
 if (Test-Path $debugLog) {
     Write-Host "--- nfshp2_debug.txt (race lines) ---"
-    Select-String -Path $debugLog -Pattern "SkipFE|race start|  driver|flow (want|state|begin|end|load)|carloader|resource|abort|assert|fatal" |
+    Select-String -Path $debugLog -Pattern "SkipFE|race start|  driver|flow (want|state|begin|end|load)|carloader|resource|streamed|global chunks|abort|assert|fatal" |
         Select-Object -Last 80 |
         ForEach-Object { Write-Host ("  " + $_.Line) }
 }
