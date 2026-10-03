@@ -65,6 +65,8 @@
 #include "characterinfo.h"
 #include "collision.h"
 #include "collisionbody.h"
+#include "eenvmap.h"
+#include "elight.h"
 #include "emath.h"
 #include "emodel.h"
 #include "esolid.h"
@@ -1895,6 +1897,20 @@ static void waitForGlobalChunks(void)
         (void)service_resource_loading();
 }
 
+// eLight.obj's two calls, through eviewmatrix.h's seams.
+static void* get_light_material_seam(uint32_t name_hash)
+{
+    return el_get_light_material(name_hash);
+}
+
+static void setup_light_context_seam(eLightContext* lc,
+                                     const bMatrix4* local_world,
+                                     const bMatrix4* hack,
+                                     const bVector4* eye, eView* view)
+{
+    el_setup_light_context(lc, local_world, hack, eye, view);
+}
+
 // LoadGlobalChunks' LoadResourceFile hands every top-level chunk of GLOBALB
 // to LoadChunks, slots 2 and 16 among them: LoaderTexturePack, whose pack
 // and flipbooks stay on TexturePackList for the whole game -- CARBOTTOM,
@@ -1925,6 +1941,8 @@ static void loadGlobalCarInfo(UIBundle* b)
         // track bundle's.
         taken += loader_character_info(c);
         if (bchunk_u32(c) == 0x34201) taken += track_loader_geometry(c);
+        // LoaderLightList's light materials, GLOBALB's first chunk.
+        if (bchunk_u32(c) == 0x3401e) taken += loader_light_list(c);
         c += 8 + size;
     }
     logPrintf("car data: %d chunks, %d skins, %d characters, %d tracks; "
@@ -2622,6 +2640,18 @@ int main(int argc, char** argv)
     gGetTextureInfoFn = texturepack_get_texture_info;
     eInitViews();
 
+    // eInitEngine's eInitEnvMap (0x00102f68): views 4 to 9 on targets 8 to
+    // 13, the cameras the cars' reflections are drawn from.
+    eenvmap_init();
+
+    // elInit, and eLight.obj's two calls the solids and the cars make
+    // through seams: elGetLightMaterial, which eFixUpTables uses to fill
+    // every solid's light materials, and elSetupLightContext, which the
+    // car's and the world's draws make before each model.
+    el_init();
+    gElGetLightMaterialFn  = get_light_material_seam;
+    gElSetupLightContextFn = setup_light_context_seam;
+
     // Car's constructor builds the car's render info through
     // Car::InitRenderInfo, and its destructor deletes it -- carrenderinfo.c
     // since step 6, reached from step 8b's InitCars. The emitter positions
@@ -3005,6 +3035,8 @@ int main(int argc, char** argv)
 
     if (!georender_init()) {
         logPrintf("georender: shader would not load\n");
+    } else if (!georender_envmap_init(64)) {
+        logPrintf("georender: no room for the environment map\n");
     }
     if (!geoview_init(&g_geo)) {
         logPrintf("geoview: %s\n", g_geo.note);
@@ -3257,6 +3289,7 @@ int main(int argc, char** argv)
                 const u32 sky = C2D_Color32(0x8c, 0xa8, 0xc8, 0xFF);
 
                 trackview_read_depth(&g_track, top);
+                trackview_draw_envmap(&g_track);
                 C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
                                       __builtin_bswap32(sky), 0);
                 C3D_FrameDrawOn(top);
@@ -3379,6 +3412,7 @@ int main(int argc, char** argv)
                 logLine("sun %s", g_track.probe);
                 g_track.probe[0] = '\0';
             }
+            trackview_draw_envmap(&g_track);
             C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
                                   __builtin_bswap32(sky), 0);
             C3D_FrameDrawOn(top);

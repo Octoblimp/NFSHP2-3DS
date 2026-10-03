@@ -35,7 +35,9 @@
 // Both byte fields reach the shader as the plain integer value, 0..255 and
 // -128..127 -- the PICA does not normalise an integer attribute -- so the
 // shader scales the colour by 1/255 and the normal by 1/127. See
-// geosolid.v.pica.
+// geosolid.v.pica. The colour is what the VIF's V4-5 unpack gave VU1, each
+// five bits shifted up three, so 0..248, and the alpha 255 or 0 for the
+// unpack's 0x80 or 0.
 typedef struct {
     float   pos[3];
     float   st[2];
@@ -44,16 +46,21 @@ typedef struct {
     uint8_t pad;
 } GeoRenderVertex;
 
-// A run of triangles sharing one texture. Strips are sorted by TextureNumber
-// when a solid is baked, so a solid draws in as many calls as it has distinct
-// textures -- 1 to 28 across the disc, usually fewer than 12.
+// A run of triangles sharing one texture, one eStripEntry Flags and one
+// LightMaterialIndex. Strips are sorted by the three when a solid is baked,
+// so a solid draws in as many calls as it has distinct ones -- 1 to 34
+// across the disc, usually fewer than 12. Within a solid the flags and the
+// material never differ between strips of one texture, so the split costs
+// nothing.
 typedef struct {
-    int first;                  // first vertex in the buffer
-    int count;                  // vertices, always a multiple of 3
-    int texture;                // index into the solid's texture table, or -1
+    int      first;             // first vertex in the buffer
+    int      count;             // vertices, always a multiple of 3
+    int      texture;           // index into the solid's texture table, or -1
+    uint16_t flags;             // eStripEntry's: 0x80 lit, 0x100 env mapped
+    int8_t   lightMaterial;     // the solid's LightMaterialTable index, or -1
 } GeoBatch;
 
-#define GEO_MAX_BATCHES 32
+#define GEO_MAX_BATCHES 64
 
 // How a strip's colour meets the frame's. The GS blends with its ALPHA_1
 // register, which CreateTextureContext (0x00109f48) takes whole from
@@ -151,9 +158,59 @@ void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
 // the PS2's main render target gives every strip: TEST_1 as UpdateGifTags
 // (0x00104ec0) builds it, depth GEQUAL, and alpha GREATER than 0x30 of the
 // GS's 0x80 -- 0x60 here, where the packs' alpha is doubled on the way in.
-// A batch with no texture draws opaque.
+// A batch with no texture draws opaque. The texture modulates the vertex
+// colour as the GS's does, Ct * Cv >> 7, so 0x80 is 1.0 and the colour can
+// double the texture; with no texture the colour is drawn as it is.
 void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
-                         int numTextures, uint32_t mask);
+                         int numTextures, uint64_t mask);
+
+// ---------------------------------------------------------- the lit strips
+
+// One lit batch's inputs to geolit.v.pica, from the model's eLightContext
+// and the strip's eLightMaterial, in the solid's own space. trackview.c's
+// lighting_for fills it; see there for where each comes from.
+typedef struct {
+    float lightDir[3][4];       // to each of the three lights
+    float difClr[3][4];         // each one's colour times the diffuse scale
+    float specClr[3][4];        // and the specular; [0][3] the gloss range
+    float ambient[4];           // and in [3] the alpha before the gloss
+    float eye[4];
+    float powParams[4];         // p, fast log2 of the maximum, 0.1, CBV/255
+    float envCol[3][4];         // EnvMapMatrix's columns, x and z negated
+    float fresnel[4];           // FresnelMid/128, FresnelHalf/128, 128/255
+    bool  lit;                  // flags & 0x80: the lighter's colour
+    bool  env;                  // flags & 0x100: and the environment pass
+    bool  gloss;                // flags & 4: the texture's alpha is a gloss map
+} GeoLighting;
+
+// Batch `b` of `mesh` with its texture's pass, as georender_draw_mask draws
+// it, but with the colour the lighter makes when `L->lit`, and then, when
+// `L->env` and there is an environment map, the strip again with the map:
+// added under the fresnel's alpha, or for a gloss map under the frame's,
+// which the first pass left there.
+void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
+                        int numTextures, int b, const GeoLighting* L);
+
+// --------------------------------------------------- the environment map
+
+// The map the environment passes read. Retail's eEnvMap draws six views
+// round the car into render targets 8 to 13 and eCreateEnvMapPrims
+// (0x00118810) folds them into a sphere map, which the VU1 reads by the
+// reflection. The PICA reads a cube map by the reflection itself, so here
+// the six views draw straight into a cube's faces, `size` on a side, in the
+// space the environment pass turns the reflection into; see eenvmap.h.
+bool georender_envmap_init(int size);
+
+// Face `face` of the map, +X to -Z as GPU_TEXFACE counts them, cleared to
+// `clear` (red in the top byte) and its depth to the far plane's, and with
+// `draw` bound to be drawn on, with a 90 degree projection. Call it between
+// C3D_FrameBegin and the top screen's C3D_FrameDrawOn.
+void georender_envmap_face(int face, uint32_t clear, bool draw);
+
+// Whether face `face` has been cleared or drawn, and whether all six have,
+// which the environment passes wait for.
+bool georender_envmap_face_done(int face);
+bool georender_envmap_ready(void);
 
 // eSetZWriteState(int), 0x001029c0: with it off, nothing drawn writes the
 // depth buffer, whatever its texture's pass says. eDisplayFrame turns it

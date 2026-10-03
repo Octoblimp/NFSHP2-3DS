@@ -12,8 +12,10 @@
 #include "bchunkload.h"
 #include "carrenderinfo.h"
 #include "eefpu.h"
+#include "eenvmap.h"
 #include "efog.h"
 #include "eframe.h"
+#include "elight.h"
 #include "emath.h"
 #include "emodel.h"
 #include "epoly.h"
@@ -82,6 +84,7 @@ static const char* const kTexFormats[TRACKVIEW_NUM_TEXFILES] = {
 static TrackView*      s_draw;      // the viewer StuffScenery draws for
 static C3D_Mtx         s_proj;
 static const bMatrix4* s_worldView;
+static bool            s_envFace;   // drawing into the environment map
 
 // A Z rect StuffSun asked for, and the target it is in the pixels of.
 typedef struct {
@@ -674,7 +677,8 @@ static void note_use(TrackView* v, TrackTex* t)
 }
 
 static void defer(TrackView* v, int solid, int batch, const bMatrix4* lv,
-                  const C3D_Mtx* mv, const TrackTex* t)
+                  const C3D_Mtx* mv, const TrackTex* t, const void* light,
+                  uint16_t flags)
 {
     static const float none[3];
     TrackDeferred*     d;
@@ -687,6 +691,8 @@ static void defer(TrackView* v, int solid, int batch, const bMatrix4* lv,
     d = &v->deferred[v->numDeferred];
     c = v->info[solid].centre ? v->info[solid].centre[batch] : none;
     d->modelView = *mv;
+    d->light     = light;
+    d->flags     = flags;
     // GetAABBZDepth: the centre through the local and view matrices, and
     // its z. A bMatrix4 multiplies the row vector on its left.
     d->depth  = c[0] * lv->v0.z + c[1] * lv->v1.z + c[2] * lv->v2.z + lv->v3.z;
@@ -702,6 +708,164 @@ static void defer(TrackView* v, int solid, int batch, const bMatrix4* lv,
     }
 }
 
+// ------------------------------------------------------------- the lighter
+
+// RenderStrips' flags for one batch (0x0010dd58): the strips' own, with 4
+// when the texture holds a gloss map in its alpha, less what the call
+// takes away. Render flags bit 0 takes the environment pass away, as does
+// EnableEnvMap off, and bit 1 the lighter; a model drawn with no light
+// context loses both, and 0x40, the road's specular. 0x200, a strip that
+// crosses the screen's edge, is VU1's clipping, which the PICA does
+// itself. Into the environment map, the environment pass is left out too:
+// on the PS2 it read the last frame's sphere map, but here it would read
+// the cube being drawn.
+static uint16_t strip_flags(const GeoBatch* b, const TrackTex* t,
+                            const void* light, uint32_t flags)
+{
+    uint16_t f      = b->flags;
+    uint16_t remove = 0;
+
+    if (t && t->info && t->info->GlossMapInAlpha) {
+        f |= 4;
+    }
+    if (EnableEnvMap == 0 || (flags & 1u) || s_envFace) {
+        remove |= 0x100;
+    }
+    if (flags & 2u) {
+        remove |= 0x80;
+    }
+    if (light == NULL) {
+        remove |= 0x1c0;
+    }
+    return (uint16_t)(f & ~remove);
+}
+
+// A batch's inputs to geolit.v.pica, from the model's eLightContext and
+// its strips' eLightMaterial, as RenderStrips sends them to VU1 with each
+// strip (see georender.h's GeoLighting and docs/formats/light.md). The
+// material is the strips' entry in the solid's LightMaterialTable, which
+// FixLightMaterialTable and ReplaceLightMaterial fill, or the default for
+// an index past it; its DMA data is the race's or the frontend's by
+// InGameFlag. A gloss map's strips take the gloss power and maximum for
+// their specular, and its alpha from the sun's.
+static void lighting_for(GeoLighting* L, const eLightContext* lc,
+                         const GeoSolid* s, int material, uint16_t f)
+{
+    const eLightMaterial*    m = NULL;
+    const eLightMaterialDma* d;
+    const float*             dir = &lc->LocalDirectionMatrix.v0.x;
+    const float*             clr = &lc->LocalColourMatrix.v0.x;
+    const float*             env = &lc->EnvMapMatrix.v0.x;
+    double                   p, bias;
+    int                      i, c;
+
+    if (material >= 0 && material < s->numLightMaterials
+        && s->lightMaterialTable) {
+        m = (const eLightMaterial*)(uintptr_t)bchunk_u32(
+            s->lightMaterialTable + (size_t)material * 8 + 4);
+    }
+    if (m == NULL) {
+        m = el_get_default_light_material();
+    }
+    d = InGameFlag ? &m->igDmaData : &m->feDmaData;
+
+    memset(L, 0, sizeof *L);
+    L->lit   = (f & 0x80) != 0;
+    L->env   = (f & 0x100) != 0;
+    L->gloss = (f & 4) != 0;
+
+    // LocalDirectionMatrix has the lights' directions as its columns, and
+    // LocalColourMatrix their colours as its rows, the ambient last.
+    for (i = 0; i < 3; i++) {
+        for (c = 0; c < 3; c++) {
+            L->lightDir[i][c] = dir[c * 4 + i];
+        }
+        L->difClr[i][0]  = clr[i * 4 + 0] * d->DiffuseR;
+        L->difClr[i][1]  = clr[i * 4 + 1] * d->DiffuseG;
+        L->difClr[i][2]  = clr[i * 4 + 2] * d->DiffuseB;
+        L->specClr[i][0] = clr[i * 4 + 0] * d->SpecularR;
+        L->specClr[i][1] = clr[i * 4 + 1] * d->SpecularG;
+        L->specClr[i][2] = clr[i * 4 + 2] * d->SpecularB;
+    }
+    L->ambient[0] = clr[12];
+    L->ambient[1] = clr[13];
+    L->ambient[2] = clr[14];
+    L->ambient[3] = L->gloss ? d->GlossAlphaMin : clr[15];
+    if (L->gloss) {
+        L->specClr[0][3] = d->GlossAlphaRange;
+    }
+    L->eye[0] = lc->LocalEyePosition.x;
+    L->eye[1] = lc->LocalEyePosition.y;
+    L->eye[2] = lc->LocalEyePosition.z;
+    L->eye[3] = 1.0f;
+
+    // The fast pow's maximum as its fast log2: the bias is bits(max) less
+    // p bits(1), so this is bits(max) / 2^23 - 127, and -127 for none.
+    p    = L->gloss ? d->GlossPower : d->SpecularPower;
+    bias = L->gloss ? d->GlossBias : d->SpecularBias;
+    L->powParams[0] = (float)p;
+    L->powParams[1] = (float)((bias + p * 1065353216.0 - 1065353216.0)
+                              / 8388608.0);
+    L->powParams[2] = d->SpecularMinDot;
+    L->powParams[3] = d->CBVMix;
+
+    // EnvMapMatrix's columns: a reflection times it, x and z negated, is
+    // in the map's space, which geolit mirrors in x to read the cube.
+    for (c = 0; c < 3; c++) {
+        float sign = c == 1 ? 1.0f : -1.0f;
+
+        L->envCol[c][0] = sign * env[0 * 4 + c];
+        L->envCol[c][1] = sign * env[1 * 4 + c];
+        L->envCol[c][2] = sign * env[2 * 4 + c];
+    }
+    L->fresnel[0] = d->FresnelMid / 128.0f;
+    L->fresnel[1] = d->FresnelHalf / 128.0f;
+    L->fresnel[2] = 128.0f / 255.0f;
+}
+
+static void draw_lit_batch(TrackView* v, int solid, int batch,
+                           const void* light, uint16_t f)
+{
+    TrackSolid* r = &v->info[solid];
+    GeoLighting L;
+
+    lighting_for(&L, (const eLightContext*)light, &v->solid[solid],
+                 r->mesh.batch[batch].lightMaterial, f);
+    georender_draw_lit(&r->mesh, r->slot,
+                       r->slot ? v->solid[solid].numTextures : 0, batch, &L);
+}
+
+// The solid an eModel draws, baked, with its table followed: the track's,
+// or another's (see find_other). -1 for none.
+static int model_solid(TrackView* v, eModel* m)
+{
+    TrackSolid* r;
+    int         i;
+
+    if (m->Solid == NULL) {
+        return -1;
+    }
+    i = find_solid(v, m->Solid);
+    if (i < 0) {
+        i = find_other(v, (const eSolid*)m->Solid);
+        if (i < 0) {
+            return -1;
+        }
+    }
+    r = &v->info[i];
+    if (!r->baked) {
+        bake_solid(v, i);
+        if (!r->baked) {
+            return -1;
+        }
+    }
+    if (m->pReplacementTextureTable != NULL) {
+        emodel_apply_replacement_texture_table(m);
+    }
+    follow_table(v, i);
+    return i;
+}
+
 // eModel::Render (0x0010c7c8) returns at once for a model with no solid,
 // then sets up the rigid and vertex animation and the strips' visibility
 // and has RenderStrips (0x0010c8a0) put each strip on a list: the frame's
@@ -709,7 +873,8 @@ static void defer(TrackView* v, int solid, int batch, const bMatrix4* lv,
 // otherwise. The port draws a solid as georender baked it, in the matrix
 // the cull gave -- local to world, then the view's -- and draws at once
 // only what the attach loops would draw first anyway: the order-0 textures
-// that are not sorted. The rest wait for trackview_draw.
+// that are not sorted. The rest wait for trackview_draw. A lit or
+// environment-mapped batch draws alone, with the light context.
 static void render_model(eModel* m, bMatrix4* matrix, void* light,
                          uint32_t flags)
 {
@@ -717,32 +882,18 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
     TrackSolid* r;
     bMatrix4    localView;
     C3D_Mtx     mv;
-    uint32_t    now = 0;
+    uint64_t    now = 0, lit = 0;
+    uint16_t    f[GEO_MAX_BATCHES];
     int         i, b, numTextures;
 
-    (void)light;
-    (void)flags;
     if (!v || m->Solid == NULL) {
         return;
     }
-    i = find_solid(v, m->Solid);
+    i = model_solid(v, m);
     if (i < 0) {
-        i = find_other(v, (const eSolid*)m->Solid);
-        if (i < 0) {
-            return;
-        }
+        return;
     }
     r = &v->info[i];
-    if (!r->baked) {
-        bake_solid(v, i);
-        if (!r->baked) {
-            return;
-        }
-    }
-    if (m->pReplacementTextureTable != NULL) {
-        emodel_apply_replacement_texture_table(m);
-    }
-    follow_table(v, i);
     if (gpuCmdBufSize - gpuCmdBufOffset < CMDBUF_GUARD_WORDS) {
         v->cmdSkipped++;
         return;
@@ -750,25 +901,39 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
     eMulMatrix(&localView, matrix, s_worldView);
     to_c3d(&localView, &mv);
     numTextures = r->slot ? v->solid[i].numTextures : 0;
-    for (b = 0; b < r->mesh.numBatches && b < 32; b++) {
-        int       k = r->mesh.batch[b].texture;
-        TrackTex* t = (r->tex && k >= 0 && k < numTextures) ? r->tex[k] : NULL;
+    for (b = 0; b < r->mesh.numBatches && b < GEO_MAX_BATCHES; b++) {
+        const GeoBatch* gb = &r->mesh.batch[b];
+        int             k  = gb->texture;
+        TrackTex*       t  = (r->tex && k >= 0 && k < numTextures) ? r->tex[k]
+                                                                 : NULL;
 
-        if (r->mesh.batch[b].count <= 0) {
+        if (gb->count <= 0) {
             continue;
         }
         if (t) {
             note_use(v, t);
         }
+        f[b] = strip_flags(gb, t, light, flags);
         if (!t || (t->order == 0 && !t->sorted)) {
-            now |= 1u << b;
+            if (f[b] & 0x180) {
+                lit |= (uint64_t)1 << b;
+            } else {
+                now |= (uint64_t)1 << b;
+            }
         } else {
-            defer(v, i, b, &localView, &mv, t);
+            defer(v, i, b, &localView, &mv, t, light, f[b]);
         }
     }
-    if (now) {
+    if (now || lit) {
         georender_set_camera(&s_proj, &mv);
+    }
+    if (now) {
         georender_draw_mask(&r->mesh, r->slot, numTextures, now);
+    }
+    for (b = 0; lit != 0; b++, lit >>= 1) {
+        if (lit & 1u) {
+            draw_lit_batch(v, i, b, light, f[b]);
+        }
     }
     v->drawn++;
     v->drawnTris += r->mesh.numTris;
@@ -1491,9 +1656,13 @@ static void draw_deferred(TrackView* v, bool alpha)
             continue;
         }
         georender_set_camera(&s_proj, &d->modelView);
-        georender_draw_mask(&r->mesh, r->slot,
-                            r->slot ? v->solid[d->solid].numTextures : 0,
-                            1u << d->batch);
+        if (d->flags & 0x180) {
+            draw_lit_batch(v, d->solid, d->batch, d->light, d->flags);
+        } else {
+            georender_draw_mask(&r->mesh, r->slot,
+                                r->slot ? v->solid[d->solid].numTextures : 0,
+                                (uint64_t)1 << d->batch);
+        }
     }
     v->numDeferred = kept;
 }
@@ -1899,24 +2068,38 @@ void trackview_read_depth(TrackView* v, C3D_RenderTarget* target)
     s_numSunRects = 0;
 }
 
-void trackview_draw(TrackView* v)
+// The environment views' clip volume ends 32 out (gp-24208): the cull's
+// matrices, which eDisplayFrame makes again before it (0x00113020), have
+// it as their e_farz.
+#define ENV_CLIP_FAR 32.0f
+
+// eDisplayFrame's start, for the views there are: new frame memory, the
+// view mode, UpdateEnvironmentMapCameras (0x00112a34) when
+// EnableEnvMapViews is set, each view's matrices, a cull info per view,
+// and the cull. The matrices the cull hands Render live in the frame
+// memory, and the draw is done with them before the next swap.
+static void begin_frame(TrackView* v)
 {
     eView* view = eGetView(EVIEW_ID_PLAYER1);
-    float  tanx, fovy;
     int    i;
 
-    if (!v->loaded || !FrameMemoryBuffer[0]) {
-        return;
-    }
-
-    // eDisplayFrame's order, for the one view there is: new frame memory,
-    // the view mode, the view's matrices, a cull info per view, the cull,
-    // and StuffScenery. The matrices the cull hands Render live in the
-    // frame memory, and the draw is done with them before the next swap.
+    // The GPU is done with the last frame by now, so the screen quads'
+    // ring starts again, before any view of this one draws a quad.
+    georender_quads_rewind();
     eSwapFrameMallocBuffers();
     MaybeChangeViewMode();
+    if (EnableEnvMapViews) {
+        update_environment_map_cameras();
+    }
     eview_set_max_z(view->pRenderTarget0);
     eview_calculate_view_matrices(view, 0.0f, 0.0f, 0.0f);
+    for (i = 0; i < 6; i++) {
+        eView* ev = EnvMapViews[i];
+
+        if (ev != NULL && ev->pCamera != NULL) {
+            eview_calculate_view_matrices(ev, 0.0f, 0.0f, ENV_CLIP_FAR);
+        }
+    }
     scenery_cull_setup_views(&v->cull, InGameFlag);
     scenery_do_culling(&v->cull);
     v->drawInfos = 0;
@@ -1924,6 +2107,110 @@ void trackview_draw(TrackView* v)
         v->drawInfos += (int)(v->cull.SceneryCullInfos[i].pCurrentDrawInfo
                               - v->cull.SceneryCullInfos[i].pFirstDrawInfo);
     }
+    v->frameBegun = true;
+}
+
+// A new texture order for a view: the frame's first use of each texture
+// starts again, and so do the lists.
+static void begin_view(TrackView* v)
+{
+    v->numDeferred     = 0;
+    v->deferredSeq     = 0;
+    v->deferredSorted  = 0;
+    v->deferredDropped = 0;
+    v->texUses         = 0;
+    if (++v->frameStamp == 0) {
+        v->frameStamp = 1;
+    }
+}
+
+// The environment views' share of eDisplayFrame: each active one's sky,
+// with the Z writes off and its matrices' own projection (0x00112e78),
+// and its scenery (0x00113168), with no fog. Retail does the views a pass
+// at a time with the players'; here each face is drawn whole before the
+// top screen is. The cars are not drawn into them -- RenderCars runs for
+// views 1 to 3 alone -- and eCreateEnvMapPrims' fold (0x00113594) is the
+// cube's own lookup. A face whose view is not active keeps what it last
+// drew, as retail's target does; one that has never drawn is cleared to
+// its target's grey, so the map is whole from the first frame.
+void trackview_draw_envmap(TrackView* v)
+{
+    int i;
+
+    if (!v->loaded || !FrameMemoryBuffer[0]) {
+        return;
+    }
+    begin_frame(v);
+    v->envFaces = 0;
+    v->envDrawn = 0;
+    if (!EnableEnvMapViews || !EnvMapCentreValid) {
+        return;
+    }
+    s_draw      = v;
+    s_envFace   = true;
+    v->listFrame = false;
+    georender_set_light(0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+    georender_set_fog(NULL, 0);
+    for (i = 0; i < 6; i++) {
+        eView*         view = EnvMapViews[i];
+        eRenderTarget* rt;
+        uint32_t       grey, clear;
+        int            face, drawn;
+
+        if (view == NULL || view->pCamera == NULL) {
+            continue;
+        }
+        rt    = view->pRenderTarget0;
+        face  = EnvMapCubeFace[i];
+        grey  = rt->BackgroundColour & 0xffu;
+        clear = grey << 24 | grey << 16 | grey << 8 | 0xffu;
+        if (!view->Active || !rt->Active) {
+            if (!georender_envmap_face_done(face)) {
+                georender_envmap_face(face, clear, false);
+            }
+            continue;
+        }
+        if (gpuCmdBufSize - gpuCmdBufOffset < CMDBUF_GUARD_WORDS) {
+            continue;
+        }
+        georender_envmap_face(face, clear, true);
+        Mtx_Persp(&s_proj, C3D_AngleFromDegrees(90.0f), 1.0f, view->NearZ,
+                  view->FarZ, false);
+        s_worldView  = view->WorldViewMatrix;
+        s_depthScale = -1.0f / view->NearZ;
+        C3D_DepthMap(false, s_depthScale, 0.0f);
+        begin_view(v);
+        drawn = v->drawn;
+
+        georender_set_zwrite(false);
+        StuffSky(view);
+        draw_deferred(v, true);
+        georender_set_zwrite(true);
+        scenery_stuff_scenery(&v->cull, view);
+        draw_deferred(v, false);
+        draw_deferred(v, true);
+
+        v->envFaces++;
+        v->envDrawn += v->drawn - drawn;
+    }
+    s_envFace = false;
+    s_draw    = NULL;
+}
+
+void trackview_draw(TrackView* v)
+{
+    eView* view = eGetView(EVIEW_ID_PLAYER1);
+    float  tanx, fovy;
+
+    if (!v->loaded || !FrameMemoryBuffer[0]) {
+        return;
+    }
+
+    // The frame's start, unless trackview_draw_envmap has made it.
+    if (!v->frameBegun) {
+        begin_frame(v);
+    }
+    v->frameBegun = false;
 
     // The top screen's width is the cull's: the cull's half-width at unit
     // depth is half the scissor over H, and the height follows from 5:3.
@@ -1945,14 +2232,7 @@ void trackview_draw(TrackView* v)
     if (v->listFrame) {
         v->drawList[0] = 0;
     }
-    v->numDeferred     = 0;
-    v->deferredSeq     = 0;
-    v->deferredSorted  = 0;
-    v->deferredDropped = 0;
-    v->texUses         = 0;
-    if (++v->frameStamp == 0) {
-        v->frameStamp = 1;
-    }
+    begin_view(v);
     // The fog, and the W-buffer, whose depth the PICA's fog looks up: the
     // view's own, from 1 at the near plane to 0 at the far, where the
     // Z-buffer's was near / d to the same two. So the depth tests are
@@ -1979,7 +2259,6 @@ void trackview_draw(TrackView* v)
     // scenery's chain ends with AttachSolidPolys alone (0x001134a4).
     v->sunQuads       = 0;
     v->sunQuadsFailed = 0;
-    georender_quads_rewind();
     georender_set_fog(s_fogOn ? &s_skyFogLut : NULL, s_fogColour);
     s_quadTarget = view->pRenderTarget0;
     StuffSun(view);

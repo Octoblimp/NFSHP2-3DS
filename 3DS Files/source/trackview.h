@@ -142,16 +142,20 @@ typedef struct {
 } TrackSolid;
 
 // A batch the frame holds back for the attach loops' order: its texture is
-// not an opaque order-0 one. See trackview_draw.
+// not an opaque order-0 one. See trackview_draw. `light` is the model's
+// eLightContext, in the frame memory, and `flags` RenderStrips' for the
+// batch; see strip_flags.
 typedef struct {
-    C3D_Mtx  modelView;
-    float    depth;             // the centre's view z, +z forward
-    uint16_t solid;
-    uint8_t  batch;
-    uint8_t  order;
-    bool     sorted;
-    uint16_t texUse;
-    uint16_t seq;
+    C3D_Mtx     modelView;
+    const void* light;
+    float       depth;          // the centre's view z, +z forward
+    uint16_t    solid;
+    uint8_t     batch;
+    uint8_t     order;
+    bool        sorted;
+    uint16_t    texUse;
+    uint16_t    seq;
+    uint16_t    flags;
 } TrackDeferred;
 
 typedef struct {
@@ -234,6 +238,9 @@ typedef struct {
     bool listFrame;             // this one did, into drawList
     char drawList[2048];
     int  cmdPeakWords;          // the most of the GPU list a frame has used
+    bool frameBegun;            // trackview_draw_envmap began this frame
+    int  envFaces;              // environment views drawn this frame
+    int  envDrawn;              // and the models drawn into them
 
     // --- the sun: what StuffSun drew and asked for, the frame just drawn.
     int   sunQuads;             // quads ePoly::Render drew
@@ -326,6 +333,14 @@ void trackview_input(TrackView* v, uint32_t kDown, uint32_t kHeld, int cpx,
 // render target, which must have a depth buffer; then StuffSun; then, as
 // eDisplayFrame ends, the flipbooks' next frames.
 void trackview_draw(TrackView* v);
+
+// The frame's start, which trackview_draw makes itself when this has not
+// -- UpdateEnvironmentMapCameras, the views' matrices and the cull -- and
+// then the environment views that are active this frame, each into its
+// face of the map the cars' environment passes read (see eenvmap.h). Call
+// it between C3D_FrameBegin and the top target's C3D_FrameDrawOn, before
+// trackview_draw; it leaves a face's target bound.
+void trackview_draw_envmap(TrackView* v);
 
 // The Z rects StuffSun asked for in the frame before, out of `target`'s
 // depth buffer and into their SunZBuffers, the way the PS2's transfer

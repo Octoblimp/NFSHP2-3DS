@@ -42,6 +42,7 @@
 #include "car.h"
 #include "cardamage.h"
 #include "cartypeinfo.h"
+#include "elight.h"
 #include "emodel.h"
 #include "eviewmatrix.h"
 #include "scenery.h"
@@ -67,20 +68,8 @@ typedef struct CarEmitterPosition {
     float     X, Y, Z;                      //  4
 } CarEmitterPosition;                       // 16
 
-// eLightFlare, 80 bytes (.mdebug), from eLightFlareSlotPool. The renderer's
-// type; the render info makes one for each light a car's markers name.
-typedef struct eLightFlare {
-    bNode     Node;                         //  0
-    uint32_t  NameHash;                     //  8
-    int8_t    Enabled;                      // 12
-    int8_t    Type;                         // 13
-    int16_t   Flags;                        // 14
-    char      Name[32];                     // 16
-    float     PositionX, PositionY, PositionZ;      // 48
-    float     pad0;                         // 60
-    float     DirectionX, DirectionY, DirectionZ;   // 64
-    float     pad1;                         // 76
-} eLightFlare;                              // 80
+// eLightFlare (elight.h), from eLightFlareSlotPool: the render info makes
+// one for each light a car's markers name.
 
 // ------------------------------------------------------ the part culler
 

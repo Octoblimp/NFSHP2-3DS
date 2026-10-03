@@ -346,8 +346,8 @@ void carrenderinfo_create_car_light_flares(CarRenderInfo *ri)
         f->PositionX = m->Position[0] - ri->BodyPivot.x;
         f->PositionY = m->Position[1] - ri->BodyPivot.y;
         f->PositionZ = m->Position[2] - ri->BodyPivot.z;
-        f->pad0 = 0.0f;
-        f->pad1 = 0.0f;
+        f->pad0 = 0;
+        f->pad1 = 0;
         if (dir < NUM_FLARE_DIRECTIONS) {
             f->DirectionX = kFlareDirections[dir][0];
             f->DirectionY = kFlareDirections[dir][1];

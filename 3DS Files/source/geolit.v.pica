@@ -1,0 +1,179 @@
+; Vertex shader for the lit strips: retail's VU1 lighter, the strips whose
+; flags have 0x80, and their environment pass, the ones with 0x100. See
+; docs/formats/light.md for the microcode this follows.
+;
+; Everything is in the solid's own space, as it is on VU1: the caller hands
+; over the light context elSetupLightContext built for the model, with the
+; directions and the eye already moved into it.
+;
+; vuiCalculateReflectionVectors (VU1 0x1620) makes the normal a unit vector
+; by 1/127 and reflects the ray from the eye about it, R = V - 2 (V.N) N, then
+; normalises R. The lighter (0x1998) dots N and R with the three lights'
+; directions: the diffuse is max(N.L, 0) and the specular's base max(R.L,
+; 0.1), raised to the material's power by a trick on the float's bits --
+; m * x^p is the float whose bits are p * bits(x) + bits(m) - p * bits(1).
+; That is a power taken through a logarithm that is straight between powers
+; of two, so it is not x^p: at x = 0.7 and p = 10 it is half of it. It is
+; done the same way here, with the exponent and mantissa pulled apart by
+; flr. The colour is the ambient, each light's colour by its diffuse and by
+; its specular, times 1 + (c - 255) CBVMix / 255 for the vertex colour c,
+; clamped to 0..255, where 128 is 1.0 as the GS counts it.
+
+.fvec projection[4], modelView[4]
+.fvec uvScale
+
+; The light context and the material, as georender_draw_lit packs them.
+.fvec lightDir[3]       ; to each light, unit, or zero for none
+.fvec difClr[3]         ; each light's colour times the material's diffuse
+.fvec specClr[3]        ; and times its specular; [0].w the gloss alpha's range
+.fvec ambient           ; the ambient, and in w the alpha before the gloss
+.fvec eye
+.fvec powParams         ; p, the fast log2 of the maximum, 0.1, CBVMix / 255
+.fvec envCol[3]         ; EnvMapMatrix's columns, x and z negated
+.fvec fresnel           ; FresnelMid / 128, FresnelHalf / 128, 128 / 255
+
+; The environment pass instead of the strip's own, and in it the lit colour
+; under the frame's alpha (a gloss map's strip) rather than grey under the
+; fresnel's.
+.bool envPass, glossEnv
+
+.constf consts(0.0, 1.0, -1.0, 0.5)
+.constf scales(0.00787402, 0.00392157, 0.0078125, 255.0)
+.alias  zeros consts.xxxx
+.alias  ones  consts.yyyy
+
+.in inpos  v0
+.in intex  v1
+.in inclr  v2
+.in innrm  v3
+
+.out outpos position
+.out outtex texcoord0.st
+.out -      texcoord0w outtex.p
+.out outclr color
+
+.entry vmain
+.proc vmain
+    ; Position, as geosolid.v.pica does it, so the two passes meet the
+    ; depth buffer at the same depth.
+    mov r0.xyz, inpos
+    mov r0.w,   ones
+
+    dp4 r1.x, modelView[0], r0
+    dp4 r1.y, modelView[1], r0
+    dp4 r1.z, modelView[2], r0
+    mov r1.w, ones
+
+    dp4 outpos.x, projection[0], r1
+    dp4 outpos.y, projection[1], r1
+    dp4 outpos.z, projection[2], r1
+    dp4 outpos.w, projection[3], r1
+
+    ; N, and R from the eye.
+    mul r2.xyz, scales.xxx, innrm
+    mov r2.w,   zeros
+    add r3.xyz, -eye, r0
+    mov r3.w,   zeros
+    dp3 r4.x, r3, r2
+    add r4.x, r4.x, r4.x
+    mul r5.xyz, r4.xxx, r2
+    add r3.xyz, r3, -r5
+    dp3 r4.x, r3, r3
+    rsq r4.x, r4.x
+    mul r3.xyz, r4.xxx, r3
+
+    ; The diffuse, max(N.L, 0), and the specular's base, max(R.L, 0.1).
+    dp3 r6.x, lightDir[0], r2
+    dp3 r6.y, lightDir[1], r2
+    dp3 r6.z, lightDir[2], r2
+    mov r6.w, zeros
+    max r6, zeros, r6
+    dp3 r7.x, lightDir[0], r3
+    dp3 r7.y, lightDir[1], r3
+    dp3 r7.z, lightDir[2], r3
+    max r7.xyz, powParams.zzz, r7
+
+    ; The bits of x over 2^23, less 127: e + m for x = 2^e (1 + m).
+    lg2 r8.x, r7.x
+    lg2 r8.y, r7.y
+    lg2 r8.z, r7.z
+    flr r8.xyz, r8
+    mov r9.xyz, -r8
+    ex2 r9.x, r9.x
+    ex2 r9.y, r9.y
+    ex2 r9.z, r9.z
+    mul r9.xyz, r9, r7
+    add r9.xyz, r9, r8
+    add r9.xyz, consts.zzz, r9
+
+    ; Times p, plus the maximum's, and back: 2^e (1 + m) for y = e + m.
+    mul r9.xyz,  powParams.xxx, r9
+    add r9.xyz,  powParams.yyy, r9
+    flr r10.xyz, r9
+    add r11.xyz, r9, -r10
+    add r11.xyz, ones, r11
+    ex2 r12.x, r10.x
+    ex2 r12.y, r10.y
+    ex2 r12.z, r10.z
+    mul r7.xyz, r12, r11
+
+    ; The colour, and the alpha: 128, or for a gloss map the material's
+    ; minimum plus its range by the sun's specular.
+    mov r13, ambient
+    mul r14, difClr[0], r6.xxxx
+    add r13, r13, r14
+    mul r14, difClr[1], r6.yyyy
+    add r13, r13, r14
+    mul r14, difClr[2], r6.zzzz
+    add r13, r13, r14
+    mul r14, specClr[0], r7.xxxx
+    add r13, r13, r14
+    mul r14, specClr[1], r7.yyyy
+    add r13, r13, r14
+    mul r14, specClr[2], r7.zzzz
+    add r13, r13, r14
+
+    ; The vertex colour's share. georender stores it as the VIF unpacked
+    ; it, c << 3, so 0..248 here.
+    add r14.xyz, -scales.www, inclr
+    mul r14.xyz, powParams.www, r14
+    add r14.xyz, ones, r14
+    mul r13.xyz, r13, r14
+    max r13, zeros, r13
+    min r13, scales.wwww, r13
+
+    ; Out: the colour over 255, which the combiner doubles under a texture
+    ; as the GS's modulate does, and the alpha over 128.
+    mul r15.xyz, scales.yyy, r13
+    mul r15.w,   scales.z,   r13.w
+
+    ifu envPass
+        ; R into the environment map's space, where the VU1 takes the
+        ; sphere map's coordinates from it, 0.5 + 0.5 r.xy / |r + (0, 0, 1)|.
+        ; The port's map is a cube in the same space but mirrored in x, as
+        ; its faces can only be drawn (see eenvmap.h), so R is read with
+        ; its x negated.
+        dp3 r8.x, envCol[0], r3
+        dp3 r8.y, envCol[1], r3
+        dp3 r8.z, envCol[2], r3
+        mov outtex.x,  -r8.x
+        mov outtex.yz, r8.yz
+
+        ifu glossEnv
+            mov outclr, r15
+        .else
+            ; Grey, 128, under FresnelMid + FresnelHalf r.z.
+            mul r12.x,   fresnel.y, r8.z
+            add r12.w,   fresnel.x, r12.x
+            mov r12.xyz, fresnel.zzz
+            mov outclr,  r12
+        .end
+    .else
+        mul r7, uvScale, intex
+        mov outtex.x, r7.x
+        add outtex.y, ones, -r7.y
+        mov outtex.z, zeros
+        mov outclr, r15
+    .end
+    end
+.end

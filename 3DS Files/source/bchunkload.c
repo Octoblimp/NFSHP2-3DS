@@ -8,6 +8,7 @@
 #include "carinfo.h"
 #include "characterinfo.h"
 #include "difficultyinfo.h"
+#include "elight.h"
 #include "esolid.h"
 #include "polyhedra.h"
 #include "scenery.h"
@@ -137,8 +138,6 @@ static int take(const uint32_t *types, size_t n, int slot, int unload,
     }
 
 UNPORTED(LoaderFontInfo, UnloaderFontInfo, 3, 0x00015010u, 0x00030200u)
-UNPORTED(LoaderLightList, UnloaderLightList, 5,
-         0x80034015u, 0x80034019u, 0x0003401cu, 0x0003401eu)
 UNPORTED(LoaderAcidFX, UnloaderAcidFX, 6,
          0x80035000u, 0x80035010u, 0x00035020u, 0x00035021u)
 UNPORTED(LoaderEventManager, UnloaderEventManager, 7, 0x80036000u)
@@ -170,7 +169,7 @@ BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     loader_texture_pack,            //  2
     LoaderFontInfo,                 //  3
     loader_solid_list,              //  4
-    LoaderLightList,                //  5
+    loader_light_list,              //  5
     LoaderAcidFX,                   //  6
     LoaderEventManager,             //  7
     LoaderPositionMarkers,          //  8
@@ -203,7 +202,7 @@ BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
     unloader_texture_pack,          //  2
     UnloaderFontInfo,               //  3
     unloader_solid_list,            //  4
-    UnloaderLightList,              //  5
+    unloader_light_list,            //  5
     UnloaderAcidFX,                 //  6
     UnloaderEventManager,           //  7
     UnloaderPositionMarkers,        //  8

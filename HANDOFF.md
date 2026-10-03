@@ -11753,3 +11753,74 @@ as before.
 MainLoop's calls in order. To draw the track, trackview needs a way to
 take the bundle the resource system already loaded, where today it reads
 and loads its own.
+
+## Session 31, continued (2026-10-02) -- the race (step 8l-3b)
+
+8l-3b went in as three commits. The first two have their own messages:
+`3853ceb` runs the race from MainLoop's race half, and `4811ca7` draws
+the cars. This entry is the third, the cars' lighting.
+`docs/formats/light.md` has the write-up.
+
+- **`elight.{c,h}`** is the database half of `eLight.obj`
+  (`0x00114f38` to `0x00117460`) and `vAABBTree`'s leaf query:
+  - LoaderTable slot 5: the light packs, the flares and GLOBALB's
+    320-byte materials, with BuildDmaData's sixteen words;
+  - QueryLightDatabase, with retail's arithmetic for the blended
+    ambients;
+  - elSetupLightContext: the sun and the two nearest point lights in the
+    model's space, the ambient, the eye and EnvMapMatrix.
+  `eLightFlare` moved from `carrenderinfo.h` to `elight.h`.
+- **`geolit.v.pica`** is the VU1 lighter (`0x1620`, `0x1998`): the
+  reflection, the diffuse and the specular by the fast power, CBVMix, the
+  gloss map, and the environment pass's fresnel.
+- **`eenvmap.{c,h}`** is eEnvMap (`eInitEnvMap` `0x00117508`,
+  `UpdateCameras` `0x001175c8`): views 4..9, retail's axes, frustum and
+  schedule, and the cull's exclude flags.
+- **`georender.c`** draws a lit batch and its environment pass.
+  **`trackview.c`**'s `lighting_for` fills the batch's inputs, and
+  `trackview_draw_envmap` draws the six views.
+
+### The cube map
+
+Retail folds its six views into a sphere map. The PICA reads a cube map
+by the reflection, so the port draws each view straight into a face.
+Three things had to be found on the way:
+
+- `C3D_RenderTargetCreateFromTex` checks that the texture's data is in
+  VRAM. A cube's `data` is its `C3D_TexCube` pointer, so the check fails
+  for every cube, and the first boot logged "no room for the environment
+  map". Each face's target is now made over a 2D `C3D_Tex` whose data is
+  that face's image, with the depth buffer in the other VRAM bank.
+- The PICA picks a face and its s and t by OpenGL's rule. Azahar's
+  `ConvertCubeCoord` (`renderer_software/sw_clipper.cpp`) has it, and a
+  marker drawn into each face confirmed it.
+- A render target puts NDC +y at t = 0, where OpenGL's framebuffer has it
+  at 1. So a face filled the way the rule wants is a mirror image of any
+  camera's view. Rather than flip every triangle's winding, the map's
+  space is mirrored: `geolit` reads the cube at `(-r.x, r.y, r.z)`, and
+  each face's camera looks along its axis with its up against the face's
+  t (`kCubeUp`).
+
+The screen quads' ring now rewinds at the start of the frame, not at the
+sun. With the env views drawing first, a rewind at the sun could reuse
+quads the frame had already queued.
+
+### Checks
+
+`loadertable_check` covers slot 5: the demo image gives 178 ops and 1617
+lines, and the retail image 37375 ops and 49175 lines, with 0 differ.
+Nothing else in the slice has a harness.
+
+On Azahar, R held at boot runs into RACING, and with the throttle held
+the Opel drives off the grid at 58-60 fps. The track draws about 310 of
+its 410 solids, 31,000 triangles. The car is lit by the sun with the
+sky in its reflections: the rear window is blue, and the deck has a
+sheen. In the env views the road under the car is near-clipped, and
+below the horizon the sky dome's lower half shows. That is what
+retail's near plane of 0.5 and its exclude flags give.
+
+### Next
+
+8l is done, and step 9, one car driving the track, is reached. Next is
+8m, the HUD, on the split decided on 2026-09-21. Then come the car's
+sounds and the racer AI. CONTINUE.md has the list.

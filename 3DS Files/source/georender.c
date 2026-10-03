@@ -8,6 +8,7 @@
 #include <3ds.h>
 
 #include "georender.h"
+#include "geolit_shbin.h"
 #include "geosolid_shbin.h"
 
 // --------------------------------------------------------------- the shader
@@ -35,6 +36,34 @@ static int s_uUvScale    = -1;
 static C3D_Mtx s_projection;
 static C3D_Mtx s_modelView;
 
+// geolit.v.pica, the lit strips' and the environment passes'.
+static DVLB_s*         s_litDvlb;
+static shaderProgram_s s_litProgram;
+static int s_lProjection = -1;
+static int s_lModelView  = -1;
+static int s_lUvScale    = -1;
+static int s_lLightDir   = -1;
+static int s_lDifClr     = -1;
+static int s_lSpecClr    = -1;
+static int s_lAmbient    = -1;
+static int s_lEye        = -1;
+static int s_lPowParams  = -1;
+static int s_lEnvCol     = -1;
+static int s_lFresnel    = -1;
+static int s_lEnvPass    = -1;
+static int s_lGlossEnv   = -1;
+
+// The environment map: the cube, each face as a 2D texture of its own, a
+// target over each, and the faces that have been cleared or drawn, a bit
+// each.
+static C3D_Tex           s_envTex;
+static C3D_TexCube       s_envCube;
+static C3D_Tex           s_envFaceTex[6];
+static C3D_RenderTarget* s_envFace[6];
+static unsigned          s_envDone;
+
+static void free_envmap(void);
+
 // The screen quads' ring, and the top screen's pixels as clip space.
 static GeoRenderVertex* s_quads;
 static int              s_numQuads;
@@ -56,6 +85,29 @@ bool georender_init(void)
     }
     shaderProgramInit(&s_program);
     shaderProgramSetVsh(&s_program, &s_dvlb->DVLE[0]);
+
+    s_litDvlb = DVLB_ParseFile((u32*)geolit_shbin, geolit_shbin_size);
+    if (!s_litDvlb) {
+        return false;
+    }
+    shaderProgramInit(&s_litProgram);
+    shaderProgramSetVsh(&s_litProgram, &s_litDvlb->DVLE[0]);
+#define LIT_UNIFORM(name) \
+    shaderInstanceGetUniformLocation(s_litProgram.vertexShader, name)
+    s_lProjection = LIT_UNIFORM("projection");
+    s_lModelView  = LIT_UNIFORM("modelView");
+    s_lUvScale    = LIT_UNIFORM("uvScale");
+    s_lLightDir   = LIT_UNIFORM("lightDir");
+    s_lDifClr     = LIT_UNIFORM("difClr");
+    s_lSpecClr    = LIT_UNIFORM("specClr");
+    s_lAmbient    = LIT_UNIFORM("ambient");
+    s_lEye        = LIT_UNIFORM("eye");
+    s_lPowParams  = LIT_UNIFORM("powParams");
+    s_lEnvCol     = LIT_UNIFORM("envCol");
+    s_lFresnel    = LIT_UNIFORM("fresnel");
+    s_lEnvPass    = LIT_UNIFORM("envPass");
+    s_lGlossEnv   = LIT_UNIFORM("glossEnv");
+#undef LIT_UNIFORM
 
     s_uProjection = shaderInstanceGetUniformLocation(s_program.vertexShader,
                                                      "projection");
@@ -101,6 +153,10 @@ void georender_exit(void)
     }
     linearFree(s_quads);
     s_quads = NULL;
+    free_envmap();
+    shaderProgramFree(&s_litProgram);
+    DVLB_Free(s_litDvlb);
+    s_litDvlb = NULL;
     shaderProgramFree(&s_program);
     DVLB_Free(s_dvlb);
     s_dvlb  = NULL;
@@ -110,15 +166,18 @@ void georender_exit(void)
 // ---------------------------------------------------------------- the bake
 
 // Strips are baked in texture order so that a solid draws in one call per
-// distinct texture rather than one per strip. eSolid does not store them
+// distinct texture rather than one per strip -- and within a texture by
+// flags and light material, which a batch has one of. eSolid does not store them
 // that way, so this is a pass over the entry table first -- which is cheap,
 // because eStripEntry carries NumVerts, NumPolys and TextureNumber and none
 // of them need the packet replayed to read. See the note in
 // docs/formats/solid-geometry.md about the entry table being a redundant
 // copy of the packet header; this is what that redundancy buys.
 typedef struct {
-    int texture;
-    int strip;
+    int      texture;
+    int      strip;
+    uint16_t flags;
+    int8_t   lightMaterial;
 } StripOrder;
 
 static int order_cmp(const void* a, const void* b)
@@ -128,6 +187,12 @@ static int order_cmp(const void* a, const void* b)
 
     if (x->texture != y->texture) {
         return x->texture < y->texture ? -1 : 1;
+    }
+    if (x->flags != y->flags) {
+        return x->flags < y->flags ? -1 : 1;
+    }
+    if (x->lightMaterial != y->lightMaterial) {
+        return x->lightMaterial < y->lightMaterial ? -1 : 1;
     }
     // Ties keep file order, so a solid bakes the same way every time.
     return x->strip < y->strip ? -1 : (x->strip > y->strip ? 1 : 0);
@@ -146,11 +211,12 @@ static void put_vertex(GeoRenderVertex* dst, const GeoStrip* s, int v)
     dst->st[1] = src->st[1];
 
     geo_unpack_colour(src->colour, rgba);
-    // RGBA5551 widened the way the rest of the project widens it: c * 255/31
-    // is exact at both ends, unlike a shift.
-    dst->colour[0] = (uint8_t)(rgba[0] * 255 / 31);
-    dst->colour[1] = (uint8_t)(rgba[1] * 255 / 31);
-    dst->colour[2] = (uint8_t)(rgba[2] * 255 / 31);
+    // RGBA5551 widened as the VIF's V4-5 unpack widens it, c << 3, which is
+    // what the GS's modulate and the lighter's CBVMix both count in: 0x80
+    // is 1.0 to the GS, so a full 248 nearly doubles a texture.
+    dst->colour[0] = (uint8_t)(rgba[0] << 3);
+    dst->colour[1] = (uint8_t)(rgba[1] << 3);
+    dst->colour[2] = (uint8_t)(rgba[2] << 3);
     dst->colour[3] = rgba[3] ? 255u : 0u;
 
     if (s->hasNormals) {
@@ -209,6 +275,8 @@ bool georender_bake(const GeoSolid* solid, GeoMesh* out)
                             && entry.textureNumber < solid->numTextures)
                          ? entry.textureNumber : -1;
         order[n].strip   = i;
+        order[n].flags   = entry.flags;
+        order[n].lightMaterial = (int8_t)entry.lightMaterial;
         n++;
         numTris += entry.numPolys;
     }
@@ -237,11 +305,15 @@ bool georender_bake(const GeoSolid* solid, GeoMesh* out)
             continue;
         }
 
-        // A new batch whenever the texture changes, which after the sort is
-        // once per distinct texture. The cap is a guard, not a limit that
-        // the data reaches: the largest table on the disc has 28 entries.
+        // A new batch whenever the texture, the flags or the material
+        // changes, which after the sort is once per distinct three. The cap
+        // is a guard, not a limit that the data reaches: the most on the
+        // disc is 34, TRN_SECTION40B's in TRACKB46.
         if (out->numBatches == 0
-            || out->batch[out->numBatches - 1].texture != order[i].texture) {
+            || out->batch[out->numBatches - 1].texture != order[i].texture
+            || out->batch[out->numBatches - 1].flags != order[i].flags
+            || out->batch[out->numBatches - 1].lightMaterial
+                   != order[i].lightMaterial) {
             if (out->numBatches >= GEO_MAX_BATCHES) {
                 break;
             }
@@ -249,6 +321,8 @@ bool georender_bake(const GeoSolid* solid, GeoMesh* out)
             batch->first   = at;
             batch->count   = 0;
             batch->texture = order[i].texture;
+            batch->flags   = order[i].flags;
+            batch->lightMaterial = order[i].lightMaterial;
         }
         batch = &out->batch[out->numBatches - 1];
 
@@ -336,26 +410,37 @@ static void bind_mesh(const GeoMesh* mesh)
                   s_ambient, s_ambient, s_ambient, 1.0f);
 }
 
-// One batch: its texture, or the vertex colour alone, and the draw.
-static void draw_batch(const GeoBatch* b, const GeoTexture* gt)
+// A batch's combiner: its texture, or the vertex colour alone. With `gs`
+// the texture modulates as the GS's does, Ct * Cv >> 7: the shaders hand
+// the colour over as c / 255, so the colour is doubled, and the alpha not,
+// because the packs' alpha was doubled when they were uploaded.
+static void set_combiner(const GeoTexture* gt, int uvScale, bool gs)
 {
     C3D_TexEnv* env = C3D_GetTexEnv(0);
 
     C3D_TexEnvInit(env);
     if (gt) {
         C3D_TexBind(0, gt->tex);
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale,
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, uvScale,
                       gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
         C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
         C3D_TexEnvFunc(env, C3D_Both, GPU_MODULATE);
+        if (gs) {
+            C3D_TexEnvScale(env, C3D_RGB, GPU_TEVSCALE_2);
+        }
     } else {
         // No texture: the vertex colour alone, which is what the 25
         // sentinel strips and any unresolved hash fall back to.
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale,
-                      1.0f, 1.0f, 0.0f, 1.0f);
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, uvScale, 1.0f, 1.0f, 0.0f, 1.0f);
         C3D_TexEnvSrc(env, C3D_Both, GPU_PRIMARY_COLOR, 0, 0);
         C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
     }
+}
+
+// One batch: its combiner and the draw.
+static void draw_batch(const GeoBatch* b, const GeoTexture* gt, bool gs)
+{
+    set_combiner(gt, s_uUvScale, gs);
     C3D_DrawArrays(GPU_TRIANGLES, b->first, b->count);
 }
 
@@ -393,7 +478,7 @@ void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
         const GeoBatch* b = &mesh->batch[i];
 
         if (b->count > 0) {
-            draw_batch(b, batch_texture(b, textures, numTextures));
+            draw_batch(b, batch_texture(b, textures, numTextures), false);
         }
     }
 }
@@ -475,7 +560,7 @@ static void set_pass(GeoPass pass)
 }
 
 void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
-                         int numTextures, uint32_t mask)
+                         int numTextures, uint64_t mask)
 {
     static const GeoPass opaque;
     GeoPass              last = opaque;
@@ -488,12 +573,12 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
     bind_mesh(mesh);
     C3D_CullFace(GPU_CULL_NONE);
 
-    for (i = 0; i < mesh->numBatches && i < 32; i++) {
+    for (i = 0; i < mesh->numBatches && i < 64; i++) {
         const GeoBatch*   b = &mesh->batch[i];
         const GeoTexture* gt;
         GeoPass           pass;
 
-        if (!(mask & (1u << i)) || b->count <= 0) {
+        if (!(mask & ((uint64_t)1 << i)) || b->count <= 0) {
             continue;
         }
         gt   = batch_texture(b, textures, numTextures);
@@ -505,13 +590,187 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
             last = pass;
             set  = true;
         }
-        draw_batch(b, gt);
+        draw_batch(b, gt, true);
     }
 }
 
 void georender_set_zwrite(bool on)
 {
     s_zwrite = on;
+}
+
+// ---------------------------------------------------------- the lit strips
+
+static void set_vec(int id, const float v[4])
+{
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, id, v[0], v[1], v[2], v[3]);
+}
+
+// geolit's program, the mesh's vertices, and the batch's light.
+static void bind_lit(const GeoMesh* mesh, const GeoLighting* L)
+{
+    C3D_BufInfo* buf;
+    int          i;
+
+    C3D_BindProgram(&s_litProgram);
+    C3D_SetAttrInfo(&s_attr);
+    buf = C3D_GetBufInfo();
+    BufInfo_Init(buf);
+    BufInfo_Add(buf, mesh->vbo, sizeof(GeoRenderVertex), 4, 0x3210);
+
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_lProjection, &s_projection);
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_lModelView,  &s_modelView);
+    for (i = 0; i < 3; i++) {
+        set_vec(s_lLightDir + i, L->lightDir[i]);
+        set_vec(s_lDifClr + i,   L->difClr[i]);
+        set_vec(s_lSpecClr + i,  L->specClr[i]);
+        set_vec(s_lEnvCol + i,   L->envCol[i]);
+    }
+    set_vec(s_lAmbient,   L->ambient);
+    set_vec(s_lEye,       L->eye);
+    set_vec(s_lPowParams, L->powParams);
+    set_vec(s_lFresnel,   L->fresnel);
+    C3D_BoolUnifSet(GPU_VERTEX_SHADER, s_lEnvPass,  false);
+    C3D_BoolUnifSet(GPU_VERTEX_SHADER, s_lGlossEnv, false);
+    C3D_CullFace(GPU_CULL_NONE);
+}
+
+void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
+                        int numTextures, int bi, const GeoLighting* L)
+{
+    static const GeoPass opaque;
+    const GeoBatch*      b;
+    const GeoTexture*    gt;
+    C3D_TexEnv*          env;
+
+    if (!s_ready || !mesh->vbo || bi < 0 || bi >= mesh->numBatches
+        || mesh->batch[bi].count <= 0) {
+        return;
+    }
+    b  = &mesh->batch[bi];
+    gt = batch_texture(b, textures, numTextures);
+
+    // The strip, with the lighter's colour or its own.
+    if (L->lit) {
+        bind_lit(mesh, L);
+        set_pass(gt ? gt->pass : opaque);
+        set_combiner(gt, s_lUvScale, true);
+        C3D_DrawArrays(GPU_TRIANGLES, b->first, b->count);
+    } else {
+        georender_draw_mask(mesh, textures, numTextures, (uint64_t)1 << bi);
+    }
+    if (!L->env || !georender_envmap_ready()) {
+        return;
+    }
+
+    // The environment pass: the strip again, the map under the colour the
+    // shader gives, added to the frame. It meets the depth the strip left
+    // and writes none, and leaves the frame's alpha alone, which for a
+    // gloss map is what it is added under.
+    if (!L->lit) {
+        bind_lit(mesh, L);
+    }
+    C3D_BoolUnifSet(GPU_VERTEX_SHADER, s_lEnvPass,  true);
+    C3D_BoolUnifSet(GPU_VERTEX_SHADER, s_lGlossEnv, L->gloss);
+    C3D_TexBind(0, &s_envTex);
+    env = C3D_GetTexEnv(0);
+    C3D_TexEnvInit(env);
+    C3D_TexEnvSrc(env, C3D_RGB, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
+    C3D_TexEnvFunc(env, C3D_RGB, GPU_MODULATE);
+    C3D_TexEnvScale(env, C3D_RGB, GPU_TEVSCALE_2);
+    C3D_TexEnvSrc(env, C3D_Alpha, GPU_PRIMARY_COLOR, 0, 0);
+    C3D_TexEnvFunc(env, C3D_Alpha, GPU_REPLACE);
+
+    // Added, so it fogs to black; see apply_fog_colour.
+    s_blend = GEO_BLEND_ADD;
+    apply_fog_colour();
+    if (L->gloss) {
+        C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_DST_ALPHA, GPU_ONE,
+                       GPU_ZERO, GPU_ONE);
+    } else {
+        C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA, GPU_ONE,
+                       GPU_ZERO, GPU_ONE);
+    }
+    C3D_DepthTest(true, GPU_GEQUAL, GPU_WRITE_COLOR);
+    C3D_AlphaTest(false, GPU_ALWAYS, 0);
+    C3D_DrawArrays(GPU_TRIANGLES, b->first, b->count);
+}
+
+// --------------------------------------------------- the environment map
+
+static void free_envmap(void)
+{
+    int f;
+
+    for (f = 0; f < 6; f++) {
+        if (s_envFace[f]) {
+            C3D_RenderTargetDelete(s_envFace[f]);
+            s_envFace[f] = NULL;
+        }
+    }
+    if (s_envTex.cube == &s_envCube) {
+        C3D_TexDelete(&s_envTex);
+    }
+    memset(&s_envTex, 0, sizeof s_envTex);
+    s_envDone = 0;
+}
+
+// The cube in VRAM, where the GPU can draw on it, and a target with its
+// own depth buffer over each face. Six faces of 64 are 96 KB of colour and
+// as much of depth.
+bool georender_envmap_init(int size)
+{
+    C3D_TexInitParams p = { (u16)size, (u16)size, 0, GPU_RGBA8,
+                            GPU_TEX_CUBE_MAP, true };
+    int               f;
+
+    if (s_envFace[0]) {
+        return true;
+    }
+    if (!C3D_TexInitWithParams(&s_envTex, &s_envCube, p)) {
+        memset(&s_envTex, 0, sizeof s_envTex);
+        return false;
+    }
+    // C3D_RenderTargetCreateFromTex asks whether the texture's data is in
+    // VRAM, and a cube's data is its C3D_TexCube, so a target is made over
+    // a 2D texture that is the face's image.
+    for (f = 0; f < 6; f++) {
+        s_envFaceTex[f]        = s_envTex;
+        s_envFaceTex[f].data   = s_envCube.data[f];
+        s_envFaceTex[f].param &= ~GPU_TEXTURE_MODE(7);
+        s_envFace[f] = C3D_RenderTargetCreateFromTex(
+            &s_envFaceTex[f], GPU_TEXFACE_2D, 0, GPU_RB_DEPTH24_STENCIL8);
+        if (!s_envFace[f]) {
+            free_envmap();
+            return false;
+        }
+    }
+    C3D_TexSetFilter(&s_envTex, GPU_LINEAR, GPU_LINEAR);
+    C3D_TexSetWrap(&s_envTex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+    s_envDone = 0;
+    return true;
+}
+
+bool georender_envmap_face_done(int face)
+{
+    return face >= 0 && face < 6 && (s_envDone & (1u << face)) != 0;
+}
+
+bool georender_envmap_ready(void)
+{
+    return s_envDone == 0x3fu;
+}
+
+void georender_envmap_face(int face, uint32_t clear, bool draw)
+{
+    if (!s_ready || face < 0 || face >= 6 || !s_envFace[face]) {
+        return;
+    }
+    C3D_RenderTargetClear(s_envFace[face], C3D_CLEAR_ALL, clear, 0);
+    if (draw) {
+        C3D_FrameDrawOn(s_envFace[face]);
+    }
+    s_envDone |= 1u << face;
 }
 
 // ------------------------------------------------------- the screen quads

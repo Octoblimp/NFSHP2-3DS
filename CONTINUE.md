@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-02), after texture streaming (8l-3a). `HANDOFF.md` is the running
+(2026-10-02), after the cars' lighting and environment map (8l-3b). `HANDOFF.md` is the running
 narrative; this file is the
 short list of what to do next and what not to trust.
 
@@ -1408,8 +1408,52 @@ and so replaced every boot.
      shows LOADING, since nothing draws the race yet (8l-3b). A boot
      without R passes `run_azahar_test.ps1` as before.
 
-   **Next is 8l: flow into a race**, one car on a track on Azahar (step
-   9), in three slices. 8l-1, 8l-2 and 8l-3a are done; 8l-3b is next.
+   **8l-3b, the race, is done** (HANDOFF.md, Session 31, continued: the
+   race (step 8l-3b)), in three commits:
+   - **The race from MainLoop** (`3853ceb`). `main.c` builds the
+     RaceCoordinator, and `raceFrame` is MainLoop's race half: the
+     queued messages, RC_TICK, DetermineAllPlayersInputModes
+     (`0x00181c28`), the world's step, UpdatePlayersNonGameState and the
+     camera movers and shakers. `playerinput.c` is Player's
+     DetermineInputMode (`0x00177608`), SetInputMode (`0x001776b0`) and
+     the handlers. The racing mode is what gives the car's RealDriver the
+     pad. `playerupdate.c` and `traffictele.c` came with it. The attach
+     loops' mode now picks the alpha test: modes 1 and 3 always pass
+     (`GeoPass.noAlphaTest`), so T_RD2DIRT's gloss map no longer cuts
+     the road's edge.
+   - **The cars drawn** (`4811ca7`). The solids that are not the track's
+     draw through trackview, with GLOBALB's packs for the car textures.
+     `tools/vu1dis.py` disassembles VU1 microcode.
+   - **The cars lit.** `elight.c` is eLight.obj's database half:
+     LoaderTable slot 5 (the light packs, flares and materials),
+     QueryLightDatabase, elSetupLightContext and vAABBTree's leaf query.
+     `geolit.v.pica` is the VU1 lighter and its environment pass.
+     `eenvmap.c` is eEnvMap's six views, which draw into a 64-square cube
+     map in VRAM. `docs/formats/light.md` has the write-up, with the two
+     PICA facts that set the cube's orientation and the citro3d check
+     that fails for every cube target.
+   - Not ported, and named in `raceFrame` where they would run:
+     ReplayManager's BeginFrame and EndFrame, ReplayScreen::Update,
+     UpdateCameraCoordinators (`0x00199bd0`) and UpdatePortRumblers.
+     LoadSoundRegionsInGame's seam is NULL, and the speech bank is not
+     loaded.
+   - On Azahar, R held at boot runs into RACING. The coordinator is in
+     RCSTATE_RACE_IN_PROGRESS and the race in stage RACING, as retail's
+     SkipFE puts them, so there is no countdown. With the throttle held
+     the Opel drives off the grid at 58-60 fps, with the chase camera
+     behind it. The track draws about 310 of 410 solids, 31,000
+     triangles, and the car is lit with the sky in its reflections.
+     `loadertable_check`: the demo image 178 ops and 1617 lines, the
+     retail image 37375 ops and 49175 lines, 0 differ.
+
+   **8l is done, and step 9 is reached: one car driving the track.** The
+   next slices, in the order the user set (cars and racing before menus):
+   - **8m, the HUD** (step 13, taken ahead of 10-12 since every later race
+     test reads it): on the split decided on 2026-09-21, with the minimap,
+     the lap and the objective on the bottom screen, and the speedometer
+     and the pursuit on the top. HudTextures is loaded already.
+   - The car's sounds (step 14): LoadSoundRegionsInGame and the engine.
+   - The racer AI (step 11), and a SkipFE race with AI cars in it.
 
    The way in is retail's own debug path. With SkipFE (gp-23220) set,
    `main` (`0x0012f000`) calls StartSkipFEGame (`0x00184bd8`) in place of
@@ -1472,7 +1516,7 @@ and so replaced every boot.
    - **8l-3a, texture streaming (done, above).** LoadGlobalChunks' packs
      and the streaming behind LoadTexturesFromFile (`0x001acc98`), which
      CarLoader and LoadHudTextures use.
-   - **8l-3b, the race (next).**
+   - **8l-3b, the race (done, above).**
      - `main.c` builds the coordinator (`gNewRaceCoordinatorFn`,
        `racecoordinator_new`; `gDeleteRaceCoordinatorFn`,
        `racecoordinator_destroy`) and runs MainLoop's race half. The
@@ -2664,8 +2708,8 @@ each class shows what it reaches.
 | 5 | ~~The retail model: mipsemu on `SLES_507.31` by retail_match's names, so that a checker can run the retail function~~ done, task 36's second slice: `tools/retail_model.py`, in `track_check` and `loadertable_check` | 1 |
 | 6 | ~~Car's constructor and destructor, and CarRenderInfo, from retail where retail changed them (all of them did), so that a car draws on the track~~ done. The constructor and destructor are done, task 36's tenth slice; CarRenderInfo's build is done, the eleventh; Render is done, the twelfth; RenderCars is done, the thirteenth. The front end's cars wait for the car selector (step 16) | 3-4 |
 | 7 | ~~Player and the chase cameras (CM_DRIVE and the rest of `cammover.c`'s set)~~ done, slices 7a-1 to 7d: the camera base, the shake, the drive camera, the orbit's retail pass and Player's camera functions. The other movers are seams until their classes are ported | 2 |
-| 8 | RaceCoordinator's InitForRace, InitCars, InitPlayers and Race::Init, and the game flow from the frontend into a race and back | 2-3 |
-| 9 | **One car driving the track.** Steps 4-8 are this milestone: about 9-11 slices | |
+| 8 | ~~RaceCoordinator's InitForRace, InitCars, InitPlayers and Race::Init~~ done, and the game flow into a race by SkipFE (8l). The frontend's way into a race and back is not done | 2-3 |
+| 9 | ~~**One car driving the track.**~~ Reached in 8l-3b | |
 | 10 | The retail pass over what is already ported: the 130 changed functions cited from a `.c` in `docs/retail_audit.txt`, module by module, each checker gaining a retail model run where it can | 4-6 |
 | 11 | The rest of task 26: the racer and traffic AI, the six classes behind Car's constructor seams | 4-6 |
 | 12 | The cops and the pursuit: CopManager, the cop drivers, roadblocks and spikes | 4-6 |
@@ -3069,6 +3113,4 @@ Ordered roughly by how much time it costs to rediscover.
 * **Car part transforms** are not decoded, so wheels, mirrors and wipers all
   sit at the origin. `geoview` steps solids one at a time rather than imply
   otherwise. Needed before a car can be driven.
-* Light materials (`0x0003401d`) decoded and carried on every strip, read by
-  nothing.
 * 58 unresolved texture hashes; only `0xece04847` = `WIPER01` named so far.
