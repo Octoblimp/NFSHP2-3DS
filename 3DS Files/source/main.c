@@ -82,6 +82,7 @@
 #include "georender.h"
 #include "hudanim.h"
 #include "hudrender.h"
+#include "hudscore.h"
 #include "joyevent.h"
 #include "joyhid.h"
 #include "joypad.h"
@@ -2661,8 +2662,8 @@ int main(int argc, char** argv)
     // Player::UpdateHud (hudrender.c), which UpdateNonGameState runs each
     // frame: SetHudFeatures when DetermineHudFeatures' answer changed, the
     // start bonus, and RenderHud's numbers into the HUD's Flailer objects.
-    // Its scoring, pursuit meter, radar, trackers and NIS overlay are
-    // 8m-4b's and 8m-4c's and stay NULL. GetTranslatedString is the same
+    // Its pursuit meter, radar, trackers and NIS overlay are 8m-4c's and
+    // stay NULL. GetTranslatedString is the same
     // lookup Fred's defaults use; every HUD caller copies the text out
     // before the next call.
     gPlayerUpdateHudFn = player_update_hud;
@@ -2677,6 +2678,10 @@ int main(int argc, char** argv)
     gPlayerHudStartWrongWayFn = player_hud_start_wrong_way;
     gPlayerClearHudAnimationsFn = player_clear_hud_animations;
     gHudAnimatorDeleteFn = hudanim_delete;
+    // The race's bonus scores (hudscore.c): UpdateHud runs UpdateScoring
+    // each frame and starts the start bonus through StartScore(e, value).
+    gUpdateScoringFn = player_update_scoring;
+    gStartScoreFn = player_start_score_value;
 
     // Car::MaybeCameraShake, which World::DoTimestep asks of each player's
     // car: shake.c. Only a car with a player shakes, and none has one until

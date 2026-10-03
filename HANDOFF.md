@@ -12315,3 +12315,100 @@ Housekeeping:
 13's scored texts, which 8m-4a already runs. PlayScoreSound
 (`0x00175100`) goes with them. Then 8m-4c, the pursuit meter, the radar, the trackers and the NIS
 overlay, and 8m-5, the two-screen split.
+
+## Session 31, continued (2026-10-03) -- the race's bonus scores (step 8m-4b)
+
+A bonus score is a line of ScoreInfoTable: a title such as CLEAN LAP, its
+language id and its points as text. When one is earned, its title and
+points fly in on the HUD's two event texts, and HudDoAnimations adds the
+points to `TotalScore` when the points text finishes. 8m-4b ports what
+earns the scores the HUD hands out itself, the sound and the animation.
+`docs/formats/hud-score.md` has the write-up.
+
+### The port
+
+- **`hudscore.{c,h}`** hold:
+  - PlayScoreSound (`0x00175100`): "ScorePoints" for BEAT THE COPS, TOOK
+    1ST PLACE, TOP SPEED and QUOTA FILLED, not in a replay or after the
+    race;
+  - Player::StartScoreAnimation (`0x0017d370`): slots 10 and 11's scored
+    texts, halved and moved for two players;
+  - GetFinishBonus (`0x0017e2d0`) and both StartScore with an eScoring
+    (`0x0017e3b0`, `0x0017e558`);
+  - UpdateScoring (`0x0017e820`): the blink, a lap's or a segment's end,
+    the top speed, a knock, the air and a place taken.
+- **`main.c`** binds UpdateHud's two seams, `gUpdateScoringFn` and
+  `gStartScoreFn`.
+- **Left out:** StartScore() (`0x0017e6e8`). Nothing calls it and no data
+  holds its address.
+- `hudscore.h` names eScoring from the table's English titles, since
+  retail keeps no names for it.
+
+What retail does that a reader would not guess:
+
+- StartScore(e, value) never reads `value`. Its callers print the points
+  into `strEventScore` first.
+- A knock's dot of the impulse against the car's up is added as
+  `(x*x + y*y) + z*z`, the VU's order, and the order shows: 1e8 - 1e8 +
+  0.5 is 0.5 one way and 0 the other.
+- When both bodies of a collision are the player's car, the second wins,
+  so the first's mass is the one tested.
+- UpdateScoring never clears `bNewTopSpeed`.
+- Place 8 scores the 1ST PLACE BONUS, one past TOOK 7TH PLACE. A race of
+  eight never takes eighth.
+- `baPlaceReached[place - 1]` is unbounded, so places 0, 9 and on reach
+  the Player's next words. The port reaches the same words for places -1
+  to 14 and skips the rest, which no race sets.
+
+### The checks
+
+`tools/hudscore_check.py` runs each function above in RetailEmu, over
+hudanim_check's model and INGAMEB's Flailer chunk.
+`tools/src/hudscore_test.c` runs the port. The stubs, scripted the same on
+both sides and logged, are GetRacingCar, IsBlinking, GetCollision,
+GetInGameSample, IsPlaying, Play, GetTranslatedString and each body's
+GetMassInverse.
+
+`hudscore_check`: 1608 ops, 6184 lines, 0 differ. Its mutation pass makes
+150 mutations, and all are caught. The first full pass left 4 survivors,
+all gaps in the script:
+
+- StartScore(e, value) for a scoring with a sound;
+- leading a lap with 0 laps done;
+- a knock with both bodies the player's car;
+- a dot that changes with the order of the adds.
+
+With those added, the 4 and `scorev-prints-score`, which had been listed
+as equivalent, were run again, and all 5 are caught. The first check had
+94 lines differing, from place 10: retail writes the word past
+`bShownMusicTitle` and the port skipped it. The port now reaches the same
+words.
+
+The whole chain: 94 checkers with `hudscore_check` added, and the four
+table generators. 0 of 98 failed, in 1849 seconds.
+
+On Azahar (`run_azahar_race.ps1 -HoldKeys 65 -WatchSeconds 40`, shots in
+`out/azahar_8m4b`), the race ran for 40 seconds with no crash, and the HUD
+shows as in 8m-4a. No score fired: the race has one driver and no lap was
+finished in that time. The chain was running on the same machine, so the
+frame rate was not read.
+
+`hudcop.{c,h}` (8m-4c-1) were written alongside and compile in the ARM
+build. They are not bound and have no checker yet, so they are not part
+of this step.
+
+### Next
+
+8m-4c, in three parts:
+
+- **8m-4c-1:** UpdateRadarDetector (`0x0017be70`), DrawTracker
+  (`0x0017c278`) and UpdatePursuitMeter (`0x0017c380`), in `hudcop.c`.
+- **8m-4c-2:** the rest of NISOverlayManager: Start, Update,
+  UpdateDateAndTime, SetVisible, new, StartArrest and StartTicket.
+- **8m-4c-3:** InitializeFlailerTachometer (`0x001434a0`) and
+  RenderFlailerTachometer (`0x00143858`).
+
+CONTINUE.md's "MovePursuitMeter (`0x00182948`)" was wrong.
+`retail_match` guessed it from a 0.12 ratio, but that address is
+NISOverlayManager::Finish, which is already ported. The pursuit meter
+moves inside UpdatePursuitMeter.
