@@ -72,22 +72,36 @@ Four functions decide the order, blend and depth state:
    (0x00104ae8) radix-sorts the keys (0x00104710) by depth, then by
    `7 - order`, and builds the list back to front. The result is
    `RenderingOrder` up and, within an order, farthest first.
-4. **The blend and depth state.** For each texture, the attach loops set
-   the mode to 3 when `GlossMapInAlpha` is set. A semitransparent texture
-   gets 3 when its order is past 2 and 1 otherwise, and an opaque one
-   gets 2. The mode loses bit 1 unless `eGetZWriteState`. Bit 0 is read
-   here as the GS's alpha blend enable. Order 4 (the shadows) uses the
-   target's `MatrixPack1` instead of `MatrixPack0`.
+4. **The depth and alpha test state.** Retail's attach loops (0x0010bb20
+   and 0x0010b838) give each texture a mode: bit 0 is set for
+   `IsAnySemitransparencyFlag` or `GlossMapInAlpha`, and bit 1 for
+   `bWriteZ`, which is cleared unless `eGetZWriteState`. (The demo's loops
+   worked the mode out from the order instead.) `AttachDmaDataList` sends
+   the render target's register block at `240 + 224 * mode`. The four
+   blocks differ only in ZBUF's mask and TEST_1 (below). Byte 117, the
+   record's `Padding`, picks the matrix pack:
+   - 1 is `MatrixPack1`;
+   - 2 is the pack at 148;
+   - anything else is `MatrixPack0`.
+
+   On the disc it is 1 on exactly the order-4 textures, the shadows, and
+   0 on the rest.
 
 `CreateTextureContext` (0x00109f48) writes TEX0, TEX1, MIPTBP1/2, CLAMP
 and `ALPHA_1 = AlphaFix << 32 | AlphaBits`, and no TEST or ZBUF. The main
 target's TEST_1 comes from `UpdateGifTags` (0x00104ec0):
-`ZTST << 17 | 0x10301 | ATST << 1`. The render target's setup gives it
-ZTST 2 and ATST 6, which mean:
+`ZTST << 17 | 0x10301 | ATST << 1` in the blocks for modes 0 and 2. The
+render target's setup gives it ZTST 2 and ATST 6, which mean:
 - the alpha test is on, and passes alpha GREATER than AREF 0x30 (of the
   GS's 0x80);
 - a pixel that fails is not written, colour or depth (AFAIL KEEP);
 - the depth test is GEQUAL.
+
+Modes 1 and 3 have `ZTST << 17 | 0x1000b` instead: the test is GEQUAL
+AREF 0, which every pixel passes. So a translucent texture's faint texels
+are blended rather than cut, and a gloss map in alpha never cuts holes.
+That matters most for T_RD2DIRT, the road's edge into the dirt: its
+alpha is a gloss map, and 80% of it is below the cut.
 
 ### The TextureInfo fields
 
@@ -97,9 +111,10 @@ The fields are in the 164-byte record, which `texture-pack.md` lays out:
 |---|---|---|
 | 41 | `RenderingOrder` | 0 opaque; 1 WATERC; 2 road water; 3 bulbs, skids; 4 SHADOW*; 5 other translucents; 7 the sun |
 | 77 | `ApplyAlphaSorting` | set on the semitransparent ones, and on five order-0 decals: START_LINE, XETT_GRAVELA, XETT_MULCHA, T_MULCH_BLENDA, W_BRIDGEFENCE |
-| 79 | `IsAnySemitransparencyFlag` | always with `bWriteZ` 0 and an order of 1 to 7 |
-| 80 | `bWriteZ` | 1 on every opaque texture |
-| 116 | `GlossMapInAlpha` | |
+| 79 | `IsAnySemitransparencyFlag` | always with an order of 1 to 7, and with `bWriteZ` 0 except on the order-1 and 2 waters (WATER*, WATERC*, the puddles, the waterfalls) |
+| 80 | `bWriteZ` | 1 on every opaque texture, and on those waters |
+| 116 | `GlossMapInAlpha` | the roads (T_ROAD*, ST_ROAD, T_RD2DIRT, W_ROADSTRIPES, the tunnel roads) and the car skins; all opaque, AlphaBits 0x0a |
+| 117 | `Padding` | the matrix pack, in retail; 1 on the order-4 textures |
 | 118 | `AlphaBits` | the GS's ALPHA_1 low byte, below |
 
 `AlphaBits` is `A | B << 2 | C << 4 | D << 6` of `(A - B) * C >> 7 + D`,
@@ -115,11 +130,12 @@ with A, B and D taken from Cs, Cd and 0, and C from As, Ad and FIX:
 ## What the port does
 
 - **`georender_draw_mask`** draws the batches in a bit mask, each with its
-  texture's `GeoPass`: the blend above and whether it writes depth. It
-  sets the target's test for every batch: depth GEQUAL, and alpha GREATER
-  than 0x60. That is AREF 0x30 doubled, because the packs' alpha is
-  doubled on the way in. `georender_draw` is unchanged for the geometry
-  viewer.
+  texture's `GeoPass`. The pass holds the blend above, whether the batch
+  writes depth, and whether it is alpha-tested. The tested ones are the
+  attach loops' modes 0 and 2: neither semitransparent nor a gloss map.
+  Depth is GEQUAL throughout. The alpha test is GREATER than 0x60, which
+  is AREF 0x30 doubled, because the packs' alpha is doubled on the way
+  in. `georender_draw` is unchanged for the geometry viewer.
 - **`render_model`** draws a solid's opaque order-0 unsorted batches at
   once. Every other batch is held back in `deferred[]`, with its
   model-view matrix and its box centre's view z.

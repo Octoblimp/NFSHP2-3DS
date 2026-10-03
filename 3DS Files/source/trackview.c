@@ -243,6 +243,8 @@ static GeoPass texture_pass(const TextureInfo* info)
 
     p.blend        = GEO_BLEND_NONE;
     p.noDepthWrite = info->bWriteZ == 0;
+    p.noAlphaTest  = info->IsAnySemitransparencyFlag
+                  || info->GlossMapInAlpha;
     if (info->IsAnySemitransparencyFlag) {
         switch (info->AlphaBits) {
         case 0x48: p.blend = GEO_BLEND_ADD;      break;
@@ -995,7 +997,8 @@ static void setup_view(void)
     MaybeChangeViewMode();
 }
 
-// Back to what trackview_init left: the tables and the bundle freed.
+// Back to what trackview_init left: the tables and the bundle freed. An
+// attached bundle is the flow's, and stays where it is.
 static void drop_bundle(TrackView* v)
 {
     free(v->solid);
@@ -1005,7 +1008,9 @@ static void drop_bundle(TrackView* v)
     v->info      = NULL;
     v->texture   = NULL;
     v->numSolids = 0;
-    if (v->data && v->dataLinear) {
+    if (v->attached) {
+        v->attached = false;
+    } else if (v->data && v->dataLinear) {
         linearFree(v->data);
     } else {
         free(v->data);
@@ -1014,22 +1019,13 @@ static void drop_bundle(TrackView* v)
     v->len  = 0;
 }
 
-bool trackview_load(TrackView* v)
+// eInitEngine's shares that nothing else has needed yet: the model pool,
+// and the frame memory the view matrices and the cull's object matrices
+// come out of. eframe_malloc does not know a buffer that failed from one
+// that was never made, so a failed one is freed again, which leaves every
+// frame allocation returning NULL.
+static bool engine_ready(TrackView* v)
 {
-    char     path[GAMEDATA_MAX_PATH];
-    uint64_t t0 = osGetTime();
-    bNode*   n;
-    int      rc, i;
-
-    if (v->loaded || !v->hasBundle) {
-        return v->loaded;
-    }
-
-    // eInitEngine's shares that nothing else has needed yet: the model
-    // pool, and the frame memory the view matrices and the cull's object
-    // matrices come out of. eframe_malloc does not know a buffer that
-    // failed from one that was never made, so a failed one is freed again,
-    // which leaves every frame allocation returning NULL.
     emodel_init_slot_pool();
     esolid_init_slot_pool();
     if (!FrameMemoryBuffer[0]) {
@@ -1044,6 +1040,75 @@ bool trackview_load(TrackView* v)
         snprintf(v->note, sizeof v->note, "no eModelSlotPool");
         return false;
     }
+    return true;
+}
+
+// The viewer's tables over v->data, and its solids found in it, in order.
+static bool open_solids(TrackView* v)
+{
+    int rc, i;
+
+    v->solid   = (GeoSolid*)calloc(TRACKVIEW_MAX_SOLIDS, sizeof *v->solid);
+    v->info    = (TrackSolid*)calloc(TRACKVIEW_MAX_SOLIDS, sizeof *v->info);
+    v->texture = (TrackTex*)calloc(TRACKVIEW_MAX_TEXTURES, sizeof *v->texture);
+    if (!v->solid || !v->info || !v->texture) {
+        snprintf(v->note, sizeof v->note, "out of memory for the tables");
+        return false;
+    }
+
+    rc = geo_open(v->data, v->len, &v->list, v->solid, TRACKVIEW_MAX_SOLIDS);
+    if (rc != GEO_OK) {
+        snprintf(v->note, sizeof v->note, "geo_open: %s", geo_error(rc));
+        return false;
+    }
+    v->numSolids = v->list.numSolids;
+    for (i = 1; i < v->numSolids; i++) {
+        if ((uintptr_t)v->solid[i].header <= (uintptr_t)v->solid[i - 1].header) {
+            snprintf(v->note, sizeof v->note, "solids out of order at %d", i);
+            return false;
+        }
+    }
+    return true;
+}
+
+// Once the track is in: the solids the models were linked to, the names
+// GetTextureInfo defaulted, and every model's solid baked.
+static void bake_models(TrackView* v)
+{
+    bNode* n;
+    int    i;
+
+    for (n = SolidList.next; n != &SolidList; n = n->next) {
+        v->linkedSolids++;
+    }
+    count_defaulted(v);
+
+    for (n = ModelList.next; n != &ModelList; n = n->next) {
+        eModel* m = (eModel*)(void*)n;
+
+        v->numModels++;
+        if (m->Solid == NULL) {
+            v->modelsWithoutSolid++;
+            continue;
+        }
+        i = find_solid(v, m->Solid);
+        if (i >= 0) {
+            bake_solid(v, i);
+        }
+    }
+}
+
+bool trackview_load(TrackView* v)
+{
+    char     path[GAMEDATA_MAX_PATH];
+    uint64_t t0 = osGetTime();
+
+    if (v->loaded || !v->hasBundle) {
+        return v->loaded;
+    }
+    if (!engine_ready(v)) {
+        return false;
+    }
 
     if (!gamedata_path(v->bundleName, path, sizeof path)) {
         snprintf(v->note, sizeof v->note, "path too long");
@@ -1054,29 +1119,9 @@ bool trackview_load(TrackView* v)
         snprintf(v->note, sizeof v->note, "cannot read %s", v->bundleName);
         return false;
     }
-
-    v->solid   = (GeoSolid*)calloc(TRACKVIEW_MAX_SOLIDS, sizeof *v->solid);
-    v->info    = (TrackSolid*)calloc(TRACKVIEW_MAX_SOLIDS, sizeof *v->info);
-    v->texture = (TrackTex*)calloc(TRACKVIEW_MAX_TEXTURES, sizeof *v->texture);
-    if (!v->solid || !v->info || !v->texture) {
-        snprintf(v->note, sizeof v->note, "out of memory for the tables");
+    if (!open_solids(v)) {
         drop_bundle(v);
         return false;
-    }
-
-    rc = geo_open(v->data, v->len, &v->list, v->solid, TRACKVIEW_MAX_SOLIDS);
-    if (rc != GEO_OK) {
-        snprintf(v->note, sizeof v->note, "geo_open: %s", geo_error(rc));
-        drop_bundle(v);
-        return false;
-    }
-    v->numSolids = v->list.numSolids;
-    for (i = 1; i < v->numSolids; i++) {
-        if ((uintptr_t)v->solid[i].header <= (uintptr_t)v->solid[i - 1].header) {
-            snprintf(v->note, sizeof v->note, "solids out of order at %d", i);
-            drop_bundle(v);
-            return false;
-        }
     }
 
     // The game's order. The shared bundles' packs are in first; then
@@ -1108,24 +1153,7 @@ bool trackview_load(TrackView* v)
     post_load_fixup();
     load_texture_files(v);
     EndGameFlowLoadingTrackSpecific();
-    for (n = SolidList.next; n != &SolidList; n = n->next) {
-        v->linkedSolids++;
-    }
-    count_defaulted(v);
-
-    for (n = ModelList.next; n != &ModelList; n = n->next) {
-        eModel* m = (eModel*)(void*)n;
-
-        v->numModels++;
-        if (m->Solid == NULL) {
-            v->modelsWithoutSolid++;
-            continue;
-        }
-        i = find_solid(v, m->Solid);
-        if (i >= 0) {
-            bake_solid(v, i);
-        }
-    }
+    bake_models(v);
 
     camera_set_field_of_view(&Player1Camera, TRACK_FOV);
     camera_set_near_z(&Player1Camera, TRACK_NEAR);
@@ -1146,6 +1174,37 @@ bool trackview_load(TrackView* v)
     return true;
 }
 
+bool trackview_attach(TrackView* v, uint8_t* data, size_t len)
+{
+    uint64_t t0 = osGetTime();
+
+    if (v->loaded) {
+        return true;
+    }
+    if (!data || !engine_ready(v)) {
+        return false;
+    }
+    v->data     = data;
+    v->len      = len;
+    v->attached = true;
+    if (!open_solids(v)) {
+        drop_bundle(v);
+        return false;
+    }
+    gEModelRenderFn = render_model;
+    gEPolyRenderFn  = render_epoly;
+    gETransferZBufferRectFn = transfer_zbuffer_rect;
+    v->chunkLen = count_chunks(v);
+    bake_models(v);
+    setup_view();
+
+    v->loaded = true;
+    v->loadMs = (int)(osGetTime() - t0);
+    snprintf(v->note, sizeof v->note, "%d sections, %d zones, attached",
+             v->numSections, v->numZones);
+    return true;
+}
+
 void trackview_free(TrackView* v)
 {
     int i;
@@ -1155,7 +1214,7 @@ void trackview_free(TrackView* v)
     // unless the load got as far as `loaded`. The viewer is not a game
     // flow state, so the Begin is run with no flow: it does not move the
     // flow on or unload the frontend's speech.
-    if (v->loaded) {
+    if (v->loaded && !v->attached) {
         void* (*find)(int)     = gFindResourceFileFn;
         void  (*unload)(void*) = gUnloadResourceFileFn;
         BGameFlow* flow        = gTrackFlowGameFlow;
@@ -1171,6 +1230,8 @@ void trackview_free(TrackView* v)
         gUnloadResourceFileFn = unload;
         gTrackFlowGameFlow    = flow;
         s_unloading           = NULL;
+    }
+    if (v->loaded) {
         v->linkedSolids = 0;
         if (gEModelRenderFn == render_model) {
             gEModelRenderFn = NULL;

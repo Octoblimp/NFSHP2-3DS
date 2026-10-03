@@ -397,7 +397,7 @@ static void s_flailer(uint32_t screen, int vis)
     say("SetFlailerScreenVisibility %08x %d", (unsigned)screen, vis);
 }
 
-static void s_delete_rc(RaceCoordinator *rc, int flags)
+static void s_delete_rc(RaceCoordinator *rc, int32_t flags)
 {
     say("~RaceCoordinator %s %d", label(rc), flags);
 }

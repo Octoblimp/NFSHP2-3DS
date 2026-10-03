@@ -254,6 +254,7 @@ typedef struct {
 
     // --- counters for the bring-up overlay.
     bool loaded;
+    bool attached;              // trackview_attach's: the flow owns `data`
     int  bakedSolids;
     int  bakedTris;
     int  skippedStrips;
@@ -295,9 +296,17 @@ bool trackview_share_bundle(TrackView* v, uint8_t* data, size_t len);
 // second call does nothing.
 bool trackview_load(TrackView* v);
 
+// The race's way in: the track the game flow has already loaded, its
+// bundle `data` (the ResourceFile's chunks, `len` bytes) and its texture
+// files, and EndGameFlowLoadingTrackSpecific already run. Nothing is read
+// or loaded; the solids are found in `data` and baked as trackview_load
+// bakes them, and the camera is left to the race's movers.
+bool trackview_attach(TrackView* v, uint8_t* data, size_t len);
+
 // Runs the Begin of unloading, which unloads the track's three files
 // through the UnloaderTable newest first; then the shared packs, and frees
-// it all.
+// it all. An attached track is the flow's to unload: only the viewer's own
+// tables and textures go.
 void trackview_free(TrackView* v);
 
 // One frame of the fly camera, into Player1Camera. `kDown` and `kHeld` are

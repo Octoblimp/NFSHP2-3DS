@@ -50,6 +50,8 @@
 #include "bmenu.h"
 #include "bsnd.h"
 #include "bslotpool.h"
+#include "camera.h"
+#include "cammover.h"
 #include "bscreens.h"
 #include "bsetup.h"
 #include "carcontroller.h"
@@ -88,6 +90,8 @@
 #include "physicssystem.h"
 #include "playercam.h"
 #include "playerinit.h"
+#include "playerinput.h"
+#include "playerupdate.h"
 #include "queuedfile.h"
 #include "race.h"
 #include "racecoord.h"
@@ -95,6 +99,7 @@
 #include "realcontroller.h"
 #include "realdriver.h"
 #include "realtime.h"
+#include "replay.h"
 #include "resource.h"
 #include "sinit.h"
 #include "shake.h"
@@ -109,6 +114,7 @@
 #include "weatherman.h"
 #include "trackflow.h"
 #include "trackview.h"
+#include "traffictele.h"
 #include "uirender.h"
 #include "wheel.h"
 #include "world.h"
@@ -536,6 +542,15 @@ static void hookSetScreenVisible(void* user, uint32_t screen, int visible)
     BUI*       ui = NULL;
     BUIScreen* s  = uirender_find_screen(b->ui, screen, &ui);
     if (s) s->visible = visible != 0;
+}
+
+// SetFlailerScreenVisibility (0x0014cbf8) for the code past the flow:
+// trackflow's loading screen, the coordinator's screens and the NIS
+// overlay. They pass retail's enum, where FLAILER_SCREEN_VISIBLE is 0.
+static void raceScreenVisibility(uint32_t screen, int visibility)
+{
+    hookSetScreenVisible(&g_boot, screen,
+                         visibility == FLAILER_SCREEN_VISIBLE);
 }
 
 static void hookSetObjectVisible(void* user, uint32_t screen, uint32_t object,
@@ -2100,6 +2115,227 @@ static void logTrackView(const char* event)
     }
 }
 
+// ------------------------------------------------------------- the race
+//
+// ReplayManager is 20664 bytes in retail and not ported. World::GetTimestep
+// and DoTimestep's checksum read pReplayManager with no test, so
+// InitForRace's `new ReplayManager` gets a block with every flag clear: not
+// replaying, not capturing. The other readers test pReplayManager or a flag
+// first, and with CapturingFlag clear nothing walks the snapshot lists.
+static ReplayManager* replayStandIn(void* mem)
+{
+    memset(mem, 0, REPLAY_MANAGER_SIZE);
+    return (ReplayManager*)mem;
+}
+
+static void replayStandInDestroy(ReplayManager* rm, int32_t flags)
+{
+    if (flags & 1) bFree(rm);
+}
+
+// ReplayManager::GetData (0x0013eb88) and AddData (0x0013ec20), as far as
+// retail's heads: GetData reads only while replaying with no error, and
+// AddData records only while capturing. GenerateJoyEvents hands every
+// frame's events to AddData, and the stand-in does neither, so neither
+// reaches bRepeat, which is not ported.
+static void replayNoRepeat(void)
+{
+    fprintf(stderr, "replay: bRepeat is not ported\n");
+    abort();
+}
+
+static int32_t replayGetData(ReplayManager* rm, int32_t bits, int32_t channel)
+{
+    (void)bits;
+    (void)channel;
+    if (!rm->ReplayingFlag || rm->RemoveDataError) return 0;
+    replayNoRepeat();
+    return 0;
+}
+
+static void replayAddData(ReplayManager* rm, int32_t value, int32_t bits,
+                          int32_t channel)
+{
+    (void)value;
+    (void)bits;
+    (void)channel;
+    if (rm->CapturingFlag) replayNoRepeat();
+}
+
+// eDisplayFrame draws what the views hold, and the port's is trackview's
+// draw. In a race it draws the track the flow loaded: TRACKB<n>.LZC, which
+// the resource system read and the loaders have already run over, so
+// trackview reads and loads nothing and the camera is the race's. It is
+// attached on the first frame of a race. The Begin of loading renamed the
+// file for hot chunking, so it goes by its .BUN name.
+static bool raceAttachTrack(void)
+{
+    char          name[32];
+    ResourceFile* rf;
+
+    if (g_track.loaded) return g_track.attached;
+    snprintf(name, sizeof name, "TRACKS\\TRACKB%d.BUN",
+             (int)RaceParametersTrackNumber);
+    rf = find_resource_file(name);
+    if (!rf || !rf->pFirstChunk) return false;
+    g_track.track = (int)RaceParametersTrackNumber;
+    if (!trackview_attach(&g_track, rf->pFirstChunk,
+                          (size_t)rf->SizeofChunks)) {
+        logLine("race: track not attached: %s", g_track.note);
+        return false;
+    }
+    logTrackView("attached to");
+    {
+        bNode* n;
+
+        for (n = TexturePackList.next; n != &TexturePackList; n = n->next) {
+            const TexturePack* tp = (const TexturePack*)(void*)n;
+
+            logLine("race: pack %s (%s), %d textures, %d waiting",
+                    tp->Name, tp->Filename, (int)tp->NumTextures,
+                    (int)tp->NumNotYetLoadedTextureDatas);
+        }
+        for (n = ResourceFileList.next; n != &ResourceFileList;
+             n = n->next) {
+            const ResourceFile* f = (const ResourceFile*)(void*)n;
+
+            logLine("race: file %s, %ld bytes of chunks",
+                    f->Filename, (long)f->SizeofChunks);
+        }
+    }
+    return true;
+}
+
+// Where the race is, once a second: the coordinator's state, the race's
+// stage, the world's clock, player 1's car and the view's camera.
+static void logRaceState(void)
+{
+    static int32_t next;
+    const eView*   view = eGetView(EVIEW_ID_PLAYER1);
+    const World*   w    = pCurrentWorld;
+    const struct Player* p = PlayerNumPlayers > 0 ? PlayerPlayersByIndex[0]
+                                                  : NULL;
+
+    if (WorldTimeFrames < next && next - WorldTimeFrames <= 60) return;
+    next = WorldTimeFrames + 60;
+    logLine("race: rc %d, stage %d, world %ld frames, %d cars; car 0 at "
+            "%.1f %.1f %.1f; mover %d, camera at %.1f %.1f %.1f",
+            (int)racecoordinator_get_current_state(pRaceCoordinator),
+            pCurrentRace ? (int)race_get_race_stage(pCurrentRace) : -1,
+            (long)WorldTimeFrames, w ? (int)w->TotalNumCars : -1,
+            w ? (double)w->CarPositionTable[0].x : 0.0,
+            w ? (double)w->CarPositionTable[0].y : 0.0,
+            w ? (double)w->CarPositionTable[0].z : 0.0,
+            p && p->pCameraMover ? (int)p->pCameraMover->Type : -1,
+            view->pCamera ? (double)view->pCamera->CurrentKey.Position.x : 0.0,
+            view->pCamera ? (double)view->pCamera->CurrentKey.Position.y : 0.0,
+            view->pCamera ? (double)view->pCamera->CurrentKey.Position.z : 0.0);
+    if (p && p->MyCar) {
+        const Car* c = p->MyCar;
+
+        logLine("race: car 0 angle %u, nose %.2f %.2f %.2f, speed %.2f, "
+                "vel %.3g %.3g %.3g, mode %d, %d wheels down",
+                (unsigned)c->State.Angle, (double)c->State.BodyMatrix.v0.x,
+                (double)c->State.BodyMatrix.v0.y,
+                (double)c->State.BodyMatrix.v0.z,
+                (double)c->State.ForwardSpeed, (double)c->State.Velocity.x,
+                (double)c->State.Velocity.y, (double)c->State.Velocity.z,
+                (int)c->TheMovementMode,
+                (int)c->State.nWheelsTouchingGround);
+        {
+            const CollisionBody* b;
+            int bodies = 0, dynamic = 0;
+
+            for (b = CollisionBodyList.next;
+                 b != (const CollisionBody*)(const void*)&CollisionBodyList;
+                 b = b->Link.next) {
+                bodies++;
+                dynamic += b->Dynamic != 0;
+            }
+            logLine("race: car 0 mover %p, driver %p throttle %.2f brake "
+                    "%.2f steer %.2f; %d bodies, %d dynamic; world dt %.4f",
+                    (void*)c->pCarMover, (void*)c->pCarDriver,
+                    c->pCarDriver ? (double)c->pCarDriver->Throttle : -1.0,
+                    c->pCarDriver ? (double)c->pCarDriver->Brake : -1.0,
+                    c->pCarDriver ? (double)c->pCarDriver->Steering : -1.0,
+                    bodies, dynamic, (double)WorldTimeElapsed);
+        }
+    }
+    logLine("race: track drew %d of %d (%d sky), %d tris; %s",
+            g_track.drawn, g_track.drawInfos, g_track.skyDrawn,
+            g_track.drawnTris, g_track.note);
+    {
+        char     line[160];
+        size_t   n = 0;
+        uint32_t i, count = uirender_screen_count(g_boot.ui);
+
+        line[0] = '\0';
+        for (i = 0; i < count && n + 12 < sizeof line; i++) {
+            BUI*       ui = NULL;
+            BUIScreen* sc = uirender_screen_at(g_boot.ui, i, &ui);
+
+            if (sc && sc->visible)
+                n += (size_t)snprintf(line + n, sizeof line - n, " %08lx",
+                                      (unsigned long)sc->nameHash);
+        }
+        logLine("race: screens up:%s", n ? line : " none");
+    }
+}
+
+// MainLoop's race half (0x0012f3c8 .. 0x0012f5fc), after the flow's
+// service: the coordinator, the world's step, and the cameras. The calls
+// the port does not have yet are named where they would be.
+static void raceFrame(void)
+{
+    RaceCoordinator* rc = pRaceCoordinator;
+    World*           w;
+
+    // The coordinator's queued messages, CheckForDemoDiscTimeout (the
+    // demo disc's, and the port runs as retail with DemoDiscManager off),
+    // a TICK, and ServiceGameFlow again.
+    racecoordinator_execute_queued_messages(rc);
+    racecoordinator_send_message(rc, RC_TICK, 0);
+    bgf_service(&g_flow);
+    if (pRaceCoordinator == NULL) return;
+
+    // UpdateStomper is empty, and 0x0012f190 is the joylog's checksum.
+    // Then the players' handlers for the coordinator's state: racing is
+    // what gives the car the pad.
+    determine_all_players_input_modes();
+
+    // The flow paused (the coordinator in PAUSE) steps the world by 0.
+    // Otherwise MainLoop asks for the World with no test: InitForRace made
+    // it with the coordinator. ReplayManager's BeginFrame and EndFrame are
+    // not ported; the stand-in is never playing back, so the step is the
+    // world's own.
+    w = pCurrentWorld;
+    if (is_game_flow_paused() || w == NULL) {
+        PrepareWorldTimestep(0.0f);
+        GenerateJoyEvents();
+    } else {
+        world_update_world_paused(w);
+        if (world_is_world_paused(w)) {
+            PrepareWorldTimestep(0.0f);
+            GenerateJoyEvents();
+        } else {
+            float step = world_get_timestep(w);
+
+            PrepareWorldTimestep(step);
+            GenerateJoyEvents();
+            world_do_timestep(w, step);
+        }
+    }
+
+    // MenuSystemTick is bgf_frame's. ReplayScreen::Update and
+    // UpdateCameraCoordinators (0x00199bd0) are not ported: no coordinator
+    // is built yet. sound::Update runs at the top of the frame, and
+    // UpdatePortRumblers has no rumble to drive.
+    update_players_non_game_state();
+    update_camera_movers();
+    update_camera_shakers();
+    logRaceState();
+}
+
 static void devLog(int slot, const char* fmt, ...)
 {
     static char last[DEV_SLOTS][192];
@@ -2313,6 +2549,10 @@ int main(int argc, char** argv)
     gCarFinishMovementFn = car_finish_movement;
     gPlayerCleanUpJumpCamFn = player_clean_up_jump_cam;
 
+    // Player::CleanupAfterRace takes the player's handlers off through
+    // SetInputMode(NONE); playerinput.c has it.
+    gPlayerSetInputModeFn = player_set_input_mode;
+
     // Car::MaybeCameraShake, which World::DoTimestep asks of each player's
     // car: shake.c. Only a car with a player shakes, and none has one until
     // step 8.
@@ -2336,10 +2576,12 @@ int main(int argc, char** argv)
     // -- emodel.c since task 27's twenty-third slice -- and eInitViews,
     // which gives views 0 to 3 their ids, targets and cameras. The frame
     // memory is the track viewer's to ask for: 5 MB the frontend never
-    // touches.
+    // touches. eFixUpTables looks every solid's textures up through
+    // GetTextureInfo; left NULL, a race's track draws with none.
     emodel_init_slot_pool();
-    gEModelInitFn    = emodel_init;
-    gEModelDestroyFn = emodel_delete;
+    gEModelInitFn     = emodel_init;
+    gEModelDestroyFn  = emodel_delete;
+    gGetTextureInfoFn = texturepack_get_texture_info;
     eInitViews();
 
     // Car's constructor builds the car's render info through
@@ -2578,6 +2820,22 @@ int main(int argc, char** argv)
     gUnloadResourceFileFn     = resUnloadFile;
     gFindResourceFileFn       = resFindByType;
     gFindResourceFileByNameFn = resFindByName;
+    gSetFlailerScreenVisibilityFn = raceScreenVisibility;
+    // EndGameFlowLoadingTrackSpecific's last call, `new RaceCoordinator`,
+    // whose constructor builds the race -- InitForRace's players, Race,
+    // World and cars -- and the Begin of unloading's delete. InitForRace's
+    // ReplayManager is the stand-in above.
+    gNewRaceCoordinatorFn    = racecoordinator_new;
+    gDeleteRaceCoordinatorFn = racecoordinator_destroy;
+    gReplayManagerCtorFn     = replayStandIn;
+    gReplayManagerDestroyFn  = replayStandInDestroy;
+    gReplayManagerGetData    = replayGetData;
+    gReplayManagerAddData    = replayAddData;
+    // World's constructor makes its TrafficTeleporter, and its destructor
+    // deletes it and any car left on CarList.
+    gTrafficTeleporterCtorFn    = traffic_teleporter_construct;
+    gTrafficTeleporterDestroyFn = traffic_teleporter_destroy;
+    gCarDestroyFn               = car_destruct;
     logPrintf("car loader: pool %s\n", LoadedCarSlotPool ? "up" : "missing");
 
     // The blurb moves to the bottom screen, so the top screen stops drawing
@@ -2794,11 +3052,10 @@ int main(int argc, char** argv)
 
         // MainLoop's clocks (0x0012dbd0). It prepares the real step at the
         // top of a frame from the ticker, and the world's from the real one
-        // when there is no race, as there is not yet here. It advances both
-        // at the frame's end (0x0012de70), which here is the top of the
-        // next one. The ticker's measure is BOOT_DT, since the display is
-        // vsynced. FrameCounter is the PS2's vertical-blank count, and so
-        // one a frame.
+        // when there is no race. It advances both at the frame's end
+        // (0x0012de70), which here is the top of the next one. The ticker's
+        // measure is BOOT_DT, since the display is vsynced. FrameCounter is
+        // the PS2's vertical-blank count, and so one a frame.
         if (clockStarted) {
             AdvanceRealTime();
             AdvanceWorldTime();
@@ -2806,19 +3063,25 @@ int main(int argc, char** argv)
         clockStarted = true;
         FrameCounter++;
         PrepareRealTimestep(BOOT_DT);
-        PrepareWorldTimestep(RealTimeElapsed);
+        // A race up as the frame begins takes its world step, and the
+        // events, after the coordinator's TICK: raceFrame. One the flow
+        // makes in this frame starts on the next.
+        bool raceUp = pRaceCoordinator != NULL;
+        if (!raceUp) PrepareWorldTimestep(RealTimeElapsed);
 
         // The PS2 reads the pads from its vertical-blank interrupt; here it
         // is once a frame, after the HID scan the read is built from, and
         // after the clocks, as GenerateJoyEvents is in MainLoop.
         ReadJoystickData();
-        GenerateJoyEvents();
+        if (!raceUp) GenerateJoyEvents();
         if (GetJoystickType(0) != joyType) {
             joyType = GetJoystickType(0);
             logPrintf("joystick: port 0 type %d\n", (int)joyType);
         }
 
-        if (kDown & KEY_SELECT) {
+        // The viewers are the frontend's: the track viewer would read a
+        // second track over the race's, and the race stops for neither.
+        if ((kDown & KEY_SELECT) && !raceUp && !g_track.attached) {
             mode = (mode + 1) % MODE_COUNT;
             if (mode != MODE_SCREENS && vHasMenu) {
                 bmenu_unactivate(&vMenu);
@@ -2912,6 +3175,17 @@ int main(int argc, char** argv)
             // MainLoop: one pass of the flow per frame. The display is
             // vsynced below, so the timestep is a frame.
             bgf_frame(&g_flow, BOOT_DT);
+            if (raceUp && pRaceCoordinator != NULL) {
+                raceFrame();
+                (void)raceAttachTrack();
+            }
+            // The Begin of unloading deleted the coordinator and is
+            // unloading the track's files: the view lets go of the bundle
+            // before anything else can read it.
+            if (pRaceCoordinator == NULL && g_track.attached) {
+                trackview_free(&g_track);
+                logLine("race: track detached");
+            }
 
             // This used to be five lines of console on the bottom screen.
             // The bottom screen is the blurb's now, and the flow's state is
@@ -2939,7 +3213,22 @@ int main(int argc, char** argv)
             updateBlurb(&g_boot, BOOT_DT);
 
             C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
-            C2D_TargetClear(top, clear);
+            if (g_track.attached) {
+                // eDisplayFrame: the race's view, then the Flailer screens
+                // over it. The sun's Z rects are read first, from the last
+                // frame's depth, as the track viewer reads them.
+                const u32 sky = C2D_Color32(0x8c, 0xa8, 0xc8, 0xFF);
+
+                trackview_read_depth(&g_track, top);
+                C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
+                                      __builtin_bswap32(sky), 0);
+                C3D_FrameDrawOn(top);
+                trackview_draw(&g_track);
+                C2D_Prepare();
+                C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
+            } else {
+                C2D_TargetClear(top, clear);
+            }
             C2D_SceneBegin(top);
             uirender_draw_visible(&ui, 1.0f);
             C2D_TargetClear(g_bot, BOT_BACK);

@@ -57,11 +57,10 @@ typedef struct {
 
 // How a strip's colour meets the frame's. The GS blends with its ALPHA_1
 // register, which CreateTextureContext (0x00109f48) takes whole from
-// TextureInfo's AlphaBits, and it blends at all only when the strip goes
-// out with alpha blending on -- which the solid and alpha attach loops
-// (0x0010a7f0, 0x0010a4c0) turn on for a texture whose
-// IsAnySemitransparencyFlag is set. The disc's textures use four
-// equations, out of (A - B) * C + D with A, B and D from {Cs, Cd, 0}:
+// TextureInfo's AlphaBits. Every texture on the disc that is not
+// semitransparent has AlphaBits 0x0a, Cs, which is no blend at all, so
+// the port blends only the semitransparent ones. The disc's textures use
+// four equations, out of (A - B) * C + D with A, B and D from {Cs, Cd, 0}:
 typedef enum {
     GEO_BLEND_NONE,             // not semitransparent, or AlphaBits 0x0a: Cs
     GEO_BLEND_ALPHA,            // 0x44, (Cs - Cd) * As + Cd
@@ -70,10 +69,21 @@ typedef enum {
 } GeoBlend;
 
 // A texture's fragment state, for georender_draw_mask. Zero is an opaque
-// strip that writes depth, which is what a texture no pack holds gets.
+// strip that writes depth and is alpha-tested, which is what a texture no
+// pack holds gets.
+//
+// The two flags are the attach loops' mode (retail's 0x0010bb20 and
+// 0x0010b838): bit 1 is bWriteZ, and bit 0 is IsAnySemitransparencyFlag
+// or GlossMapInAlpha. The mode picks one of the render target's four
+// register blocks, at 240 + 224 * mode, that UpdateGifTags (0x00104ec0)
+// builds. The blocks differ only in ZBUF's mask and TEST_1: modes 0 and
+// 2 test alpha GREATER than AREF 0x30, and 1 and 3 GEQUAL 0, which
+// always passes. So a gloss map in alpha, which is mostly below 0x30 on
+// a road's edge, is never a cut-out.
 typedef struct {
     uint8_t blend;              // GeoBlend
     bool    noDepthWrite;       // TextureInfo's bWriteZ clear
+    bool    noAlphaTest;        // semitransparent, or GlossMapInAlpha
 } GeoPass;
 
 // One entry of a solid's texture table, resolved. `uvScale` is the image's

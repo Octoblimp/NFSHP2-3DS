@@ -13,13 +13,20 @@
 # Usage:
 #   powershell -File tools/run_azahar_race.ps1
 #   powershell -File tools/run_azahar_race.ps1 -WatchSeconds 60
+#   powershell -File tools/run_azahar_race.ps1 -HoldKeys 65   # A, the gas
+#
+# -HoldKeys are virtual-key codes in Azahar's default keyboard profile (A is
+# 65, B 83, the D-pad's left and right F 70 and H 72), held from the moment
+# the flow enters RACING until the run ends. They are posted again every
+# 150 ms, as R is, so a press Azahar drops does not end the hold.
 
 param(
     [int]$WatchSeconds = 30,      # after the race start, before the last shot
     [int]$RunSeconds = 180,       # hard ceiling on the whole run
     [string]$AzaharExe = "C:\Program Files\Azahar\azahar.exe",
     [string]$Target3dsx = "",
-    [string]$OutDir = ""
+    [string]$OutDir = "",
+    [int[]]$HoldKeys = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -163,13 +170,24 @@ $loop = Wait-ForLog "entering main loop" 60
 Write-Host ("  SkipFE: {0}  race start: {1}  main loop: {2}" -f $skip, $race, $loop)
 Shot "race-start"
 
+if ($HoldKeys.Count -gt 0) {
+    $racing = Wait-ForLog "flow state RACING" 60
+    Write-Host ("  RACING: {0}; holding {1}" -f $racing, ($HoldKeys -join ","))
+}
+
 $end = (Get-Date).AddSeconds($WatchSeconds)
 $n = 1
+$nextShot = (Get-Date).AddSeconds(5)
 while ((Get-Date) -lt $end -and (Alive)) {
-    Start-Sleep -Milliseconds 5000
-    $n++
-    Shot ("race-{0}" -f $n)
+    foreach ($k in $HoldKeys) { [Hp2Race]::KeyDown($hwnd, $k) }
+    Start-Sleep -Milliseconds 150
+    if ((Get-Date) -ge $nextShot) {
+        $n++
+        Shot ("race-{0}" -f $n)
+        $nextShot = (Get-Date).AddSeconds(5)
+    }
 }
+foreach ($k in $HoldKeys) { [Hp2Race]::KeyUp($hwnd, $k) }
 if (Alive) { $proc | Stop-Process -Force }
 
 Write-Host ""

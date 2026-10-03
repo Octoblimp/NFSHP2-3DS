@@ -100,7 +100,7 @@ extern void (*gSetFlailerScreenVisibilityFn)(uint32_t screen,
                                              int visibility); // 0x0014cbf8
 // RaceCoordinator's deleting dtor (0x00149858), with the 3 that frees it:
 // racecoordinator_destroy.
-extern void (*gDeleteRaceCoordinatorFn)(RaceCoordinator *rc, int flags);
+extern void (*gDeleteRaceCoordinatorFn)(RaceCoordinator *rc, int32_t flags);
 extern void (*gUnloadAllTexturesFromFileFn)(TexturePack *p); // 0x001acf98
 extern void (*gCloseAIPlansFn)(void);              // 0x001c6058
 extern void (*gCloseAnimatedDriverFn)(void);       // 0x001a9458

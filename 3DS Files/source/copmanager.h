@@ -10,6 +10,7 @@
 #ifndef COPMANAGER_H
 #define COPMANAGER_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 struct Car;
@@ -32,6 +33,27 @@ struct tPursuit {
 // gp-15620, 0x00331bec (the demo's gp-16500). NULL outside a race with
 // cops, and NULL in the port until tCopManager exists.
 extern tCopManager *pCopManager;
+
+// tCopManager's head as Player::SetInputMode reads it, inline: the
+// demo's nPlayerCopIndex and Cops[7] were at 8 and 12, and retail's are
+// a word later.
+typedef struct tCopManagerHead {
+    uint8_t  Unported[12];                //  0
+    int32_t  nPlayerCopIndex;             // 12  -1 for none
+    tCop    *Cops[7];                     // 16
+} tCopManagerHead;
+
+// Be A Cop's player cop: Cops[nPlayerCopIndex], or NULL for -1. Retail
+// then reads the cop's pMyCar with no test, through NULL when there is
+// none; the port's callers test. A NULL manager has none here.
+static inline tCop *copmanager_get_player_cop(tCopManager *m)
+{
+    const tCopManagerHead *h = (const tCopManagerHead *)(const void *)m;
+
+    if (h == NULL || h->nPlayerCopIndex == -1)
+        return NULL;
+    return h->Cops[h->nPlayerCopIndex];
+}
 
 // tCopManager::GetCopByCar (0x00224f70), the cop driving `c`, and
 // GetCopByChase (0x00224fc8), the cop chasing it. Seams until task 26; a

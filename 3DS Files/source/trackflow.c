@@ -46,7 +46,7 @@ void (*gSetRenderEggFromEasterEggsFn)(void);
 RaceCoordinator *(*gNewRaceCoordinatorFn)(void);
 
 void (*gSetFlailerScreenVisibilityFn)(uint32_t screen, int visibility);
-void (*gDeleteRaceCoordinatorFn)(RaceCoordinator *rc, int flags);
+void (*gDeleteRaceCoordinatorFn)(RaceCoordinator *rc, int32_t flags);
 void (*gUnloadAllTexturesFromFileFn)(TexturePack *p);
 void (*gCloseAIPlansFn)(void);
 void (*gCloseAnimatedDriverFn)(void);

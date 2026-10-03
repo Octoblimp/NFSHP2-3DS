@@ -466,6 +466,12 @@ static void set_pass(GeoPass pass)
     C3D_DepthTest(true, GPU_GEQUAL,
                   pass.noDepthWrite || !s_zwrite ? GPU_WRITE_COLOR
                                                  : GPU_WRITE_ALL);
+    // AREF 0x30, doubled with the packs' alpha.
+    if (pass.noAlphaTest) {
+        C3D_AlphaTest(false, GPU_ALWAYS, 0);
+    } else {
+        C3D_AlphaTest(true, GPU_GREATER, 0x60);
+    }
 }
 
 void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
@@ -481,7 +487,6 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
     }
     bind_mesh(mesh);
     C3D_CullFace(GPU_CULL_NONE);
-    C3D_AlphaTest(true, GPU_GREATER, 0x60);
 
     for (i = 0; i < mesh->numBatches && i < 32; i++) {
         const GeoBatch*   b = &mesh->batch[i];
@@ -494,7 +499,8 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
         gt   = batch_texture(b, textures, numTextures);
         pass = gt ? gt->pass : opaque;
         if (!set || pass.blend != last.blend
-            || pass.noDepthWrite != last.noDepthWrite) {
+            || pass.noDepthWrite != last.noDepthWrite
+            || pass.noAlphaTest != last.noAlphaTest) {
             set_pass(pass);
             last = pass;
             set  = true;
