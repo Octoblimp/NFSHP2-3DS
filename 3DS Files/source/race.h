@@ -358,7 +358,7 @@ extern RaceCoordinator *pRaceCoordinator;
 // CurrentRCState is the first member.
 RCState racecoordinator_get_current_state(const RaceCoordinator *rc);
 
-// 0x00134b00, sixteen bytes: CurrentRCState == RCSTATE_REPLAY_DEMO_MODE.
+// 0x001369a8, sixteen bytes: CurrentRCState == RCSTATE_REPLAY_DEMO_MODE.
 // The only one of the Is* tests the image keeps out of line.
 int32_t racecoordinator_is_replay_demo_mode(const RaceCoordinator *rc);
 

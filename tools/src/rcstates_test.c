@@ -1056,7 +1056,7 @@ static void op(char *line)
     }
     if (!strcmp(c, "TS")) {
         tse[n[0]].FinishPosition = n[1];
-        tse[n[0]].UniqueDriverNumber = n[0];
+        tse[n[0]].UniqueDriveNumber = n[0];
         tsPresent[n[0]] = n[2];
         return;
     }

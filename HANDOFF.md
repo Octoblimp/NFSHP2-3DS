@@ -12149,7 +12149,7 @@ Writing the checkers found two bugs in the port:
   halves to even. That is why `bprintf.c` exists.
 - The CarSpecs slot, above.
 
-On Azahar (`run_azahar_race.ps1 -HoldKeys 65 -OutDir outzahar_8m3`)
+On Azahar (`run_azahar_race.ps1 -HoldKeys 65 -OutDir out/azahar_8m3`)
 the race runs with no crash:
 
 - The top screen's HUD shows Lap 1/8 and the record "--:--.--".
@@ -12178,3 +12178,140 @@ now has the user's layout (2026-10-03):
 - bottom screen: the lap records and the other extra information, the
   minimap, and Be The Cop's panel (the helicopter, roadblock and
   spike-strip calls, the tickets and the damage).
+
+## Session 31, continued (2026-10-03) -- the HUD's animations (step 8m-4a)
+
+The HUD's moving parts are HudAnimators. Each one moves one Flailer text
+or bitmap from a start to an end over a time: its top left, its scale, its
+alpha and a text's colour. The Player holds twenty, each made on demand.
+8m-4a ports HudAnimator and the Player functions that start, run and clear
+them. `docs/formats/hud-anim.md` has the write-up.
+
+### The port
+
+- **`hudanim.{c,h}`** hold HudAnimator, 288 bytes from `bMalloc(288, 16)`:
+  - the constructor and destructor (`0x0023b0f8`, `0x0023b168`);
+  - its three StartAnimation: the scored text, the text and the bitmap
+    (`0x0023b1e0`, `0x0023b498`, `0x0023b5e0`);
+  - both DoAnimation (`0x0023b788`, `0x0023bb58`) and FinishAnimation
+    (`0x0023bf60`).
+- **The Player's side**, in the same file:
+  - ClearHudAnimations (`0x0017c7c8`) and HudStartWrongWay
+    (`0x0017c888`);
+  - HudStartGrowAnimation (`0x0017cb18`) and HudStartSpeedAnimation
+    (`0x0017cd30`);
+  - the text's and the bitmap's HudStartAnimation (`0x0017cfb8`,
+    `0x0017d130`);
+  - HudDoAnimations (`0x0017e038`) and AddToTotalScore (`0x0017e350`).
+- **`main.c`** binds six seams: HudDoAnimations, HudStartSpeedAnimation,
+  HudStartGrowAnimation, HudStartWrongWay, ClearHudAnimations and the
+  animator's delete, which the Player's destructor calls.
+- **Left out:** nothing in retail calls HudStartBlink, StartBlink, the
+  blink's DoAnimation, SetVisibility or StartMusicTitleAnimation, and no
+  data holds their addresses.
+- **Headers:**
+  - `rcpost.h` drops its three-field TransientStatsElement for
+    `fred.h`'s 100-byte one, so the two can be included together;
+    `main.c` now includes both. The old copy spelled the second field
+    `UniqueDriverNumber`. The .mdebug (type#692) and `fred.h` have
+    `UniqueDriveNumber`, so `rcstates_test.c` now uses that.
+  - `race.h` cites IsReplayDemoMode at retail's `0x001369a8`, not the
+    demo's `0x00134b00`.
+
+What retail does that a reader would not guess:
+
+- The time each Player function is handed is never read. Every start
+  reads WorldTimer itself, and so does DoAnimation(Timer). Only the scored
+  DoAnimation reads the Timer it is handed.
+- Nothing clamps `t` below 0 or the alpha at all. SetAlpha keeps the low
+  byte, so an alpha of 300 shows as 44.
+- A bitmap start leaves a running animator alone. Calling HudStartWrongWay
+  again while WRONG WAY runs does nothing.
+- An animator with both a text and a bitmap moves the text.
+- A scored text's late frame carries its lateness into the next phase.
+
+The port differs in two places, and neither shows in the checker:
+
+- It skips the NULL text or bitmap that retail writes through, and the
+  NULL `b` the grow functions read.
+- It bounds the scored text's string to 63 characters.
+
+### The checks
+
+`tools/hudanim_check.py` runs each retail function above in RetailEmu,
+over INGAMEB's Flailer chunk. Under them run retail's ConvertScoreString,
+bSPrintf, bStrToLong, bStrNCmp, IsFreeRun and the Flailer runtime.
+`tools/src/hudanim_test.c` runs the port on the same bundle.
+
+The stubbed bMalloc fills each new animator with a pattern by offset, so a
+field that nothing writes shows the same on both sides. After each op the
+checker compares:
+
+- each Player's twenty slots: the allocation number and the 288 bytes,
+  with the two objects by name;
+- `TotalScore`;
+- every Flailer object's bytes;
+- the scored DoAnimation's answer.
+
+`hudanim_check`: 473 ops, 2829 lines, 0 differ. Its mutation pass makes
+292 mutations: 290 are caught and 2 are equivalent:
+
+- `lerp-w-dropped`: the colour's fourth component is never used;
+- `da-inactive-run`: every animator call checks `bActive` first.
+
+The first pass left ten survivors. Two were the equivalents above. The
+other eight were gaps in the script, mostly FinishAnimation's bitmap path
+(`fin-bitmap-*`), which no case had reached. The script now finishes
+bitmaps in the unused slots 6 and 7, runs DoAnimation on a finished
+text, and runs slot 12's scored text through its third phase.
+
+The checkers this step touched, all 0 differ:
+
+| Checker | Result | Why it ran |
+|---|---|---|
+| hudrender | 1278 ops, 7620 lines | calls the seams 8m-4a fills |
+| hudfeatures | 1298 ops, 10373 lines | includes `rcpost.h` |
+| rcstates | 600 scenarios, 29584 ops, 64046 lines | the TransientStatsElement change |
+| flailer | 54104 ops, 120233 lines | under the animations |
+| player | 8 scenarios, 3659 ops, 515143 lines | the destructor's delete seam |
+
+The whole chain passes: 93 checkers with `hudanim_check` added, and the
+four table generators, 0 of 97 failed, in 23 minutes. `rcstates_check` failed to compile before the
+field-name fix above.
+
+On Azahar (`run_azahar_race.ps1 -HoldKeys 65`, shots in
+`out/azahar_8m4a` and `out/azahar_8m4a_2`) the race runs with no crash:
+
+- At 96 km/h the speedo shows only its digits.
+- At 102 a larger, faded "100" sits behind them. That is the speed's grow,
+  which RenderHud starts on passing a multiple of 50 from 100 to 400.
+- By 115 the grow has faded out, a second after it started.
+- The lap time, the lap counter and the leaderboard show as in 8m-3.
+
+The first run read 57% speed and 11 FPS, with a mutation pass running on
+the same machine. The second, on an idle machine, read 100% and 20 FPS,
+as in 8m-3. CONTINUE.md's frame-rate item now warns about readings taken
+under load.
+
+Housekeeping:
+
+- The first mutation pass was cut off when the last session ended, and it
+  left `hudanim.c` holding `da-17-skipped`, with its
+  `.mutate-backup` beside it. The original was put back from the backup
+  and checked with `cmp` before the pass was rerun.
+- HANDOFF's 8m-3 entry had `out\azahar_8m3` with `\a` turned into a BEL
+  byte. It now reads `out/azahar_8m3`, and no other doc has a control
+  byte.
+- `build_cia.ps1` sets `$ErrorActionPreference = "Stop"`. If its output
+  is redirected inside PowerShell (`2>$null`, `2>&1`), the linker's
+  "missing .note.GNU-stack" warning becomes a terminating error. Run it
+  with no redirection.
+
+### Next
+
+8m-4b, the scoring: StartScoreAnimation (`0x0017d370`), GetFinishBonus
+(`0x0017e2d0`), the three StartScore (`0x0017e3b0`, `0x0017e558`,
+`0x0017e6e8`) and UpdateScoring (`0x0017e820`). They start slots 10 to
+13's scored texts, which 8m-4a already runs. PlayScoreSound
+(`0x00175100`) goes with them. Then 8m-4c, the pursuit meter, the radar, the trackers and the NIS
+overlay, and 8m-5, the two-screen split.

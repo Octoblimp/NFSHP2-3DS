@@ -80,6 +80,7 @@
 #include "heapcfg.h"
 #include "geoview.h"
 #include "georender.h"
+#include "hudanim.h"
 #include "hudrender.h"
 #include "joyevent.h"
 #include "joyhid.h"
@@ -102,6 +103,7 @@
 #include "race.h"
 #include "racecoord.h"
 #include "raceparams.h"
+#include "rcpost.h"
 #include "rcstates.h"
 #include "realcontroller.h"
 #include "realdriver.h"
@@ -2659,12 +2661,22 @@ int main(int argc, char** argv)
     // Player::UpdateHud (hudrender.c), which UpdateNonGameState runs each
     // frame: SetHudFeatures when DetermineHudFeatures' answer changed, the
     // start bonus, and RenderHud's numbers into the HUD's Flailer objects.
-    // Its animations, scoring, pursuit meter, radar, trackers and NIS
-    // overlay are 8m-4's and stay NULL. GetTranslatedString is the same
+    // Its scoring, pursuit meter, radar, trackers and NIS overlay are
+    // 8m-4b's and 8m-4c's and stay NULL. GetTranslatedString is the same
     // lookup Fred's defaults use; every HUD caller copies the text out
     // before the next call.
     gPlayerUpdateHudFn = player_update_hud;
     gHudTranslateFn = fredTranslate;
+    // The HUD's animations (hudanim.c): UpdateHud runs them each frame,
+    // RenderHud starts the speed's and the position's grows, SetHudFeatures
+    // starts WRONG WAY, SetHudFeatures and BeginPause clear them, and the
+    // Player's destructor frees them.
+    gHudDoAnimationsFn = player_hud_do_animations;
+    gHudStartSpeedAnimationFn = player_hud_start_speed_animation;
+    gHudStartGrowAnimationFn = player_hud_start_grow_animation;
+    gPlayerHudStartWrongWayFn = player_hud_start_wrong_way;
+    gPlayerClearHudAnimationsFn = player_clear_hud_animations;
+    gHudAnimatorDeleteFn = hudanim_delete;
 
     // Car::MaybeCameraShake, which World::DoTimestep asks of each player's
     // car: shake.c. Only a car with a player shakes, and none has one until

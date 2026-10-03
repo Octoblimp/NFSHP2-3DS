@@ -17,6 +17,7 @@
 
 #include <stdint.h>
 
+#include "fred.h"
 #include "joystick.h"
 #include "racecoord.h"
 
@@ -115,13 +116,7 @@ extern void (*gEndGameScreensSuspendFn)(struct EndGameScreens *s);
 
 // TransientStats::GetDriver (0x00187080) on TheTransientStats
 // (0x002fc3dc): the race's stats element for a driver number, or NULL.
-// Retail's element is 100 bytes; this is its head, as the demo's .mdebug
-// names it (type#692).
-typedef struct TransientStatsElement {
-    int32_t FinishPosition;        // 0
-    int32_t UniqueDriverNumber;    // 4
-    int32_t FinishReason;          // 8
-} TransientStatsElement;
+// The element is fred.h's, 100 bytes in retail.
 extern const TransientStatsElement *(*gTransientStatsGetDriverFn)(
     int32_t driverNumber);
 
