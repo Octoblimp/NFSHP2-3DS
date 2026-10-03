@@ -899,29 +899,48 @@ bool uirender_object_bounds(UIRenderer* r, const BUI* ui, uint32_t index,
     return true;
 }
 
+float uirender_text_scaled_width(UIRenderer* r, const BUI* ui,
+                                 uint32_t index)
+{
+    BUIObject o;
+    if (!r || !ui || !bui_object(ui, index, &o)) return 0.0f;
+    if (o.type != BUI_TYPE_TEXT) return 0.0f;
+    UIFont* f = find_font(r, o.fontHash);
+    if (!f) return 0.0f;
+    size_t      len = 0;
+    const char* s   = object_text(r, &o, &len);
+    float       sum = 0.0f;
+    for (size_t i = 0; s && i < len; i++) {
+        BGlyph g;
+        if (bfont_glyph(&f->font, (unsigned char)s[i], &g))
+            sum += g.advance;
+    }
+    return o.scaleX * sum;
+}
+
+bool uirender_texture_size(UIRenderer* r, uint32_t hash, int32_t* w,
+                           int32_t* h)
+{
+    *w = *h = 0;
+    if (!r) return false;
+    int idx = find_texture(r, hash);
+    if (idx < 0) return false;
+    UITexture* t = &r->textures[idx];
+    if (!t->override && !t->valid) return false;
+    *w = t->override ? t->overrideW : t->w;
+    *h = t->override ? t->overrideH : t->h;
+    return true;
+}
+
 int32_t uirender_object_width(UIRenderer* r, const BUI* ui, uint32_t index)
 {
     BUIObject o;
     if (!r || !ui || !bui_object(ui, index, &o)) return 0;
-    if (o.type == BUI_TYPE_TEXT) {
-        UIFont* f = find_font(r, o.fontHash);
-        if (!f) return 0;
-        size_t      len = 0;
-        const char* s   = object_text(r, &o, &len);
-        float       sum = 0.0f;
-        for (size_t i = 0; s && i < len; i++) {
-            BGlyph g;
-            if (bfont_glyph(&f->font, (unsigned char)s[i], &g))
-                sum += g.advance;
-        }
-        return (int32_t)(o.scaleX * sum);
-    }
+    if (o.type == BUI_TYPE_TEXT)
+        return (int32_t)uirender_text_scaled_width(r, ui, index);
     if (o.type == BUI_TYPE_BITMAP) {
-        int idx = find_texture(r, o.textureHash);
-        if (idx < 0) return 0;
-        UITexture* t = &r->textures[idx];
-        if (!t->override && !t->valid) return 0;
-        uint16_t tw = t->override ? t->overrideW : t->w;
+        int32_t tw, th;
+        if (!uirender_texture_size(r, o.textureHash, &tw, &th)) return 0;
         return (int32_t)((float)tw * o.scaleX);
     }
     return 0;

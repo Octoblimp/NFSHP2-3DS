@@ -73,6 +73,7 @@
 #include "eview.h"
 #include "gamedata.h"
 #include "fesound.h"
+#include "flailer.h"
 #include "fred.h"
 #include "fredrace.h"
 #include "gameflow.h"
@@ -90,6 +91,7 @@
 #include "physcomp.h"
 #include "physicscar.h"
 #include "physicssystem.h"
+#include "nisoverlay.h"
 #include "playercam.h"
 #include "playerinit.h"
 #include "playerinput.h"
@@ -98,6 +100,7 @@
 #include "race.h"
 #include "racecoord.h"
 #include "raceparams.h"
+#include "rcstates.h"
 #include "realcontroller.h"
 #include "realdriver.h"
 #include "realtime.h"
@@ -1833,6 +1836,11 @@ static void initPlatformPerf(void)
     APT_SetAppCpuTimeLimit(80);
 }
 
+// Each bundle with a Flailer chunk is also LoaderFlailerChunk's project,
+// on the tail of the list, in the order retail loads them: GLOBALB at
+// boot, FRONTB with the frontend, INGAMEB with the race (flailer.h). Three
+// screens are in both FRONTB and INGAMEB, and the order decides which one
+// a find gets.
 static UIBundle* addBundle(UIRenderer* ui, const char* rel)
 {
     char path[GAMEDATA_MAX_PATH];
@@ -1841,7 +1849,41 @@ static UIBundle* addBundle(UIRenderer* ui, const char* rel)
         logPrintf("  missing %s\n", rel);
         return NULL;
     }
-    return &ui->bundles[ui->numBundles - 1];
+    UIBundle* b = &ui->bundles[ui->numBundles - 1];
+    if (b->hasUI && !flailer_add_project(&b->ui))
+        logPrintf("  %s: not a retail Flailer project\n", rel);
+    return b;
+}
+
+// The renderer's answers to the Flailer runtime's size questions
+// (flailer.h): the text's GetScaledWidth and GetScaledHeight, by the
+// object's place in its bundle, and a bitmap's TextureInfo size.
+static float flailerTextWidth(struct FlailerTextChunk* t)
+{
+    BUI*     ui  = NULL;
+    uint32_t idx = 0;
+    if (!flailer_object_index(&t->Object, &ui, &idx)) return 0.0f;
+    return uirender_text_scaled_width(g_boot.ui, ui, idx);
+}
+
+static float flailerTextHeight(struct FlailerTextChunk* t)
+{
+    BUI*     ui  = NULL;
+    uint32_t idx = 0;
+    if (!flailer_object_index(&t->Object, &ui, &idx)) return 0.0f;
+    return uirender_object_height(g_boot.ui, ui, idx);
+}
+
+static bool flailerTextureSize(struct FlailerBitmapChunk* b, int32_t* w,
+                               int32_t* h)
+{
+    return uirender_texture_size(g_boot.ui, b->TextureHash, w, h);
+}
+
+// The countdown's read of an object's Visibility byte (rcstates.h).
+static int32_t flailerObjectVisibility(struct FlailerObjectChunk* o)
+{
+    return o->Visibility;
 }
 
 // The resource system (resource.h) behind the seams that reach it: the car
@@ -2889,6 +2931,32 @@ int main(int argc, char** argv)
     gFindResourceFileFn       = resFindByType;
     gFindResourceFileByNameFn = resFindByName;
     gSetFlailerScreenVisibilityFn = raceScreenVisibility;
+    // The Flailer runtime (flailer.h) behind the race's object calls: the
+    // Player's HUD lookups, the countdown's, and the NIS overlay's BUSTED.
+    gFlailerTextScaledWidthFn   = flailerTextWidth;
+    gFlailerTextScaledHeightFn  = flailerTextHeight;
+    gFlailerBitmapTextureSizeFn = flailerTextureSize;
+    gFindFlailerObjectFn        = flailer_find_object;
+    gFlailerChunkGetTopLeftFn   = flailerobject_get_top_left;
+    gFlailerObjectVisibilityFn  = flailerObjectVisibility;
+    gFlailerSetVisibilityFn     = flailer_set_visibility;
+    gFlailerSetAlphaFn          = flailer_set_alpha;
+    gFlailerScaleAboutCenterFn  = flailer_scale_about_center;
+    gFlailerGetScaleFn          = flailer_get_scale;
+    gFlailerGetTopLeftYFn       = flailer_get_top_left_y;
+    gFlailerChunkSetScaleXFn    = flailerobject_set_scale_x;
+    gFlailerChunkSetScaleYFn    = flailerobject_set_scale_y;
+    gFlailerChunkSetTopLeftYFn  = flailerobject_set_top_left_y;
+    {
+        int      n = 0;
+        uint32_t linked = 0, count;
+        while (flailer_project_at(n, NULL, &count)) {
+            linked += count;
+            n++;
+        }
+        logPrintf("flailer: %d projects, %lu screens\n", n,
+                  (unsigned long)linked);
+    }
     // EndGameFlowLoadingTrackSpecific's last call, `new RaceCoordinator`,
     // whose constructor builds the race -- InitForRace's players, Race,
     // World and cars -- and the Begin of unloading's delete. InitForRace's

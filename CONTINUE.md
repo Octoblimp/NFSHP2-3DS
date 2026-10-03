@@ -1451,9 +1451,42 @@ and so replaced every boot.
    - **8m, the HUD** (step 13, taken ahead of 10-12 since every later race
      test reads it): on the split decided on 2026-09-21, with the minimap,
      the lap and the objective on the bottom screen, and the speedometer
-     and the pursuit on the top. HudTextures is loaded already.
+     and the pursuit on the top. HudTextures is loaded already. It goes in
+     five slices:
+     - **8m-1, the Flailer runtime, is done** (HANDOFF.md, Session 31,
+       continued: the Flailer runtime (step 8m-1)).
+       `docs/formats/flailer-runtime.md` has the write-up. `flailer.c`
+       and `flailer.h` are retail's lookups (FindFlailerScreen,
+       FindFlailerObject, ByGroup), the object, text and bitmap methods,
+       and the Flailer* wrappers from `0x00143e70` to `0x00145690`. They
+       write into the chunk bytes `bui.c` holds, so `uirender.c` draws
+       what the game sets. `main.c` registers each bundle as a project
+       (3 projects, 86 screens on Azahar) and binds the race's Flailer
+       seams to it. `flailer_check`: 54,104 ops, 120,233 lines, 0 differ.
+       110 mutations: 106 caught, 4 equivalent.
+     - **8m-2:** DetermineHudFeatures (`0x00178da0`), its helper
+       `0x001795f8`, and SetHudFeatures (`0x001796b0`, 9836 bytes). Bind
+       `gPlayerSetHudFeaturesFn`. SetHudFeatures calls things that are
+       not ported yet, which become seams: TrackMap's constructor and
+       destructor, FillInRaceOverMessages, RaceFinishedSpeech,
+       HudStartWrongWay, ClearHudAnimations and
+       InitializeFlailerTachometer. DetermineHudFeatures also needs
+       IsNisPlaying (`0x00176520`) and ShouldShowBustedText
+       (`0x00182318`).
+     - **8m-3:** UpdateHud (`0x0017ecf0`), `0x0017d7c8`, RenderHud
+       (`0x00180014`), InitializeFlailerTachometer (`0x001434a0`) and
+       RenderFlailerTachometer (`0x00143858`).
+     - **8m-4:** HudAnimator (`0x0023b0f8` to `0x0023bf60`),
+       HudDoAnimations (`0x0017e038`), the HudStart* functions,
+       UpdateScoring and StartScore, UpdatePursuitMeter (`0x0017c380`) and
+       UpdateRadarDetector.
+     - **8m-5:** the two-screen split.
    - The car's sounds (step 14): LoadSoundRegionsInGame and the engine.
    - The racer AI (step 11), and a SkipFE race with AI cars in it.
+   - The frame rate. Azahar's App counter reads about 30 FPS in the race
+     before the cars were lit and 20-29 since, while the world steps at
+     60. The six environment views drawn each frame are the first suspect
+     for the drop.
 
    The way in is retail's own debug path. With SkipFE (gp-23220) set,
    `main` (`0x0012f000`) calls StartSkipFEGame (`0x00184bd8`) in place of

@@ -125,6 +125,10 @@ typedef struct {
     // one on with FlailerSetScreenVisibility, so the file's Visible field is
     // padding. This is the runtime state, and it starts out false.
     bool     visible;
+    // The screen chunk's own payload, which is what retail's
+    // FindFlailerScreen hands back (flailer.h). NULL for a container that
+    // has none, which the loader never links.
+    const uint8_t* def;
 } BUIScreen;
 
 typedef struct {

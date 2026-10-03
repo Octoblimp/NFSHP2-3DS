@@ -11824,3 +11824,93 @@ retail's near plane of 0.5 and its exclude flags give.
 8l is done, and step 9, one car driving the track, is reached. Next is
 8m, the HUD, on the split decided on 2026-09-21. Then come the car's
 sounds and the racer AI. CONTINUE.md has the list.
+
+## Session 31, continued (2026-10-03) -- the Flailer runtime (step 8m-1)
+
+The HUD, the pause menus and the frontend change their screens through
+retail's Flailer runtime: they find a screen by hash, find an object on it
+by hash, then set its string, colour, alpha, position, scale or texture.
+8m-1 ports that runtime, so the later HUD slices can call it as retail
+does. `docs/formats/flailer-runtime.md` has the write-up.
+
+- **`flailer.{c,h}`** hold:
+  - LoaderFlailerChunk's linking, as `flailer_add_project`.
+  - FindFlailerScreen with its move-to-front, FindFlailerObject and
+    FindFlailerObjectByGroup.
+  - The object, text and bitmap methods (`0x00140518` to `0x00141488`).
+  - The Flailer* wrappers (`0x00143e70` to `0x00145690`), including the
+    group walks and both MakeVerticalLines.
+
+  As on the PS2, an object is its chunk's payload. The setters write into
+  the bytes `bui.c` already holds, so `uirender.c` draws whatever the game
+  last set. The structs carry retail's layout and a compile-time check on
+  every offset the code uses.
+- **The seams.** Text sizes come from the font and bitmap sizes from the
+  texture, both of which the renderer owns, so `main.c` binds three seams
+  to `uirender.c`:
+  - `uirender_text_scaled_width` is GetScaledWidth itself.
+  - `uirender_object_height` answers the text's height.
+  - `uirender_texture_size` is GetTextureInfo's Width and Height, an
+    override's if the texture has one.
+- **`main.c`** registers each bundle that has a Flailer chunk as a
+  project when it loads it: GLOBALB, then FRONTB, then INGAMEB. It binds
+  the race's existing seams to the runtime: the Player's HUD lookups, the
+  countdown's and the NIS overlay's. `bui.c` keeps each screen chunk's
+  payload (`BUIScreen::def`), which is what FindFlailerScreen returns.
+
+Retail's oddities are kept and listed in the doc, among them:
+
+- GetCenter adds half the width to both coordinates.
+- FlailerSetCenterX centres on the height.
+- The text's ScaleAboutCenter moves Y by `ScaleX` when the text is
+  right-aligned.
+- The bitmap's SetAlpha stamps dirty even when nothing changes.
+
+Four departures are also listed:
+
+- FlailerPrintf's buffers.
+- SetString's copy.
+- FlailerGetCenter on a missing object returns 0, where the PS2 returns
+  stack garbage.
+- GetTextureInfo's cache: the port asks the renderer every time.
+
+Three screens are in both FRONTB and INGAMEB. Retail unloads FRONTB for
+the race, but the port keeps it. The Player's constructor finds a screen
+on INGAMEB while the race loads, which moves INGAMEB ahead of FRONTB, so
+the shared screens still resolve to INGAMEB's copies during a race.
+
+### The checks
+
+`tools/flailer_check.py` runs retail's own LoaderFlailerChunk on
+GLOBALB, FRONTB and INGAMEB in RetailEmu, with INGAMEB loaded twice so
+that every INGAMEB screen is in two projects. It then runs retail's
+lookups, methods and wrappers there. `tools/src/flailer_test.c` runs
+`flailer.c` over `bui.c` on the same files. The size seams are stubbed by
+the same formula on both sides. The checker compares:
+
+- each call's result;
+- the bytes of the object it touched;
+- the order of the projects and of their screens;
+- periodic CRCs of every screen and object.
+
+The result: 54,104 ops, 120,233 lines, 0 differ. Of 110 mutations, 106
+are caught and 4 are equivalent by construction (the doc gives the
+reasons).
+
+On Azahar, R held at boot logs `flailer: 3 projects, 86 screens` and runs
+into RACING as before. The HUD still draws nothing, because nothing calls
+SetHudFeatures or RenderHud yet; those are 8m-2 and 8m-3.
+
+Azahar's App counter reads 24-29 FPS with the throttle held. The last run
+before this slice (the lighting) read 20-22, and the runs before the cars
+were lit read about 30, so this slice did not slow anything down. The world still steps 60 times a second of game time. The
+earlier entries give "58-60 fps", which does not match the App counter; it
+was likely read from the world's step count. Drawing at about 25 FPS is a
+cost to look at, and the six environment views drawn each frame are the
+first suspect.
+
+### Next
+
+8m-2: DetermineHudFeatures (`0x00178da0`), its helper (`0x001795f8`) and
+SetHudFeatures (`0x001796b0`), which picks the HUD's objects and their
+layout from the car's gauge data. CONTINUE.md has the rest of 8m.

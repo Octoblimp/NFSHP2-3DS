@@ -170,6 +170,16 @@ bool uirender_object_bounds(UIRenderer* r, const BUI* ui, uint32_t index,
 // bitmap's CalculateWidth, (int)(texture width * ScaleX). 0 for anything
 // else, a missing font or a missing texture.
 int32_t uirender_object_width(UIRenderer* r, const BUI* ui, uint32_t index);
+// GetScaledWidth (0x00140d30) itself, the float: the advances of the text
+// the object shows -- its language string when it has one -- summed, then
+// times ScaleX. 0 if the object is not text or its font is missing.
+float uirender_text_scaled_width(UIRenderer* r, const BUI* ui,
+                                 uint32_t index);
+// The Width and Height of the texture `hash` names, an override's if it
+// has one: what FlailerBitmapChunk::GetTextureInfo (0x00141368) hands the
+// size questions. False, with both 0, for a texture no bundle has.
+bool uirender_texture_size(UIRenderer* r, uint32_t hash, int32_t* w,
+                           int32_t* h);
 // FlailerObjectChunk::GetHeightFloat (0x00140688): a text object's
 // GetScaledHeight (0x00140cd8), ScaleY * (float)(int)font height, and a
 // bitmap's CalculateHeightFloat (0x00141488), texture height * ScaleY with

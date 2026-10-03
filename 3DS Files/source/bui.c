@@ -42,6 +42,7 @@ static void walk_screen(BUI* ui, const uint8_t* payload, uint32_t size,
             screen->resY       = bchunk_u16(it.payload + 26);
             screen->numObjects = bchunk_u16(it.payload + 28);
             screen->visible    = false;
+            screen->def        = it.payload;
             continue;
         }
         if (ui->objects) {
