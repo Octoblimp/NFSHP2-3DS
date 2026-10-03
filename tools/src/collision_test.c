@@ -1,5 +1,5 @@
 // collision_test -- the harness tools/collision_check.py runs against
-// Collision.obj, 3DS Files/source/collision.c, and World's two
+// retail's Collision.obj, 3DS Files/source/collision.c, and World's two
 // GetDistanceToClosestPlayer overloads in world.c.
 //
 // It reads a script of hex words from argv[1], one op and its operands at a
@@ -338,6 +338,9 @@ static void dump(Collision *c)
     printf(" mag %08x wit %s sample %s scrape %s\n",
            (unsigned)fb(c->TotalImpulseMagnitude), label(c->pWitness),
            label(c->Sample), label(c->Scrape));
+    printf(" ");
+    v4("dir", &c->ImpulseDirection);
+    printf("\n");
 }
 
 static void list(void)

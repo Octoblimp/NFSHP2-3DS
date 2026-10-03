@@ -165,6 +165,11 @@ TRACKB21 races.
 Retail changed the sun's draw and its loader, and Sky.obj beside them is
 the demo's, moved. The sky check adds retail TRACKB12's own sun chunk.
 
+`collision_check.py` moved wholly onto the retail image in step 8m-4b.
+Retail grew the Collision record to 112 bytes for the impulse direction
+the scoring reads, and changed InitCollision, the constructor, AddImpulse
+and GetTerrainType with it.
+
 ## The data
 
 406 directory entries to the demo's 223. The retail disc lays three files

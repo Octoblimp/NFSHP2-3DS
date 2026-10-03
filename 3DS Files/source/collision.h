@@ -1,6 +1,7 @@
-// collision -- Collision.obj (0x0020b238 .. 0x0020b87c): the record of two
-// bodies in contact, which lives from the first touch until they have been
-// apart for CollisionLifetime.
+// collision -- Collision.obj (retail 0x0021e5c8 .. 0x0021ec54, the demo's
+// 0x0020b238 .. 0x0020b87c): the record of two bodies in contact, which
+// lives from the first touch until they have been apart for
+// CollisionLifetime.
 //
 // A witness makes one when its bodies first touch (BeginCollision,
 // contact.c) and hands it every impulse CollisionImpulse applies
@@ -12,8 +13,15 @@
 // The start of a nearby one and every scrape and hard knock near a player
 // reach the sound and the terrain's particles.
 //
-// The sixteenth slice of task 27. The image's DoSnapshot (0x0020b3c0) is the
+// The sixteenth slice of task 27. The image's DoSnapshot (0x0021e760) is the
 // replay's, which the port does not have.
+//
+// Retail's pass (step 8m-4b): retail made the record 112 bytes. The sixteen
+// it added hold the direction of the last impulse AddImpulse took near a
+// player, which Player::UpdateScoring reads. InitCollision, the
+// constructor, AddImpulse and GetTerrainType changed for it and for the
+// 144-byte TerrainTypeInfo; the rest is the demo's, moved. The addresses
+// below are retail's.
 //
 // docs/formats/collision.md has the decode.
 
@@ -38,10 +46,12 @@ typedef struct CollisionNode {
 
 //   Collision:Tt254=s96!1,020,245               base bTNode<Collision>
 //
-// No virtuals. InitialContactPoint's fourth lane is the point's own, or left
-// as the pool gave it when there is no point; CurrentContactPoint and
-// CurrentScrapeSpeed are only written by AddImpulse, and Sample only when the
-// constructor asks the sound for one.
+// The demo's stab; retail's record is 112 bytes. No virtuals.
+// InitialContactPoint's fourth lane is the point's own, or left as the pool
+// gave it when there is no point; CurrentContactPoint and CurrentScrapeSpeed
+// are only written by AddImpulse, and Sample only when the constructor asks
+// the sound for one. ImpulseDirection's first three lanes start at 0 and
+// its fourth as the pool gave it.
 typedef struct Collision {
     CollisionNode Link;                         //  0  bTNode<Collision>
     Timer     CollisionTime;                    //  8
@@ -55,7 +65,8 @@ typedef struct Collision {
     CollisionBodyWitness *pWitness;             // 84
     struct CollisionSample *Sample;             // 88
     struct CollisionSample *Scrape;             // 92
-} Collision;                                    // 96
+    bVector3  ImpulseDirection;                 // 96  retail's; unit length
+} Collision;                                    // 112
 
 // Offset n on the console plus k pointers' worth of slack on a wider host.
 typedef char collision_layout_check[
@@ -67,24 +78,25 @@ typedef char collision_layout_check[
      && CB_AT(Collision, pWitness, 84, 3)
      && CB_AT(Collision, Sample, 88, 4)
      && CB_AT(Collision, Scrape, 92, 5)
-     && sizeof(Collision) == CB_ROUND(96 + 5 * CB_SLACK)) ? 1 : -1];
+     && CB_AT(Collision, ImpulseDirection, 96, 6)
+     && sizeof(Collision) == CB_ROUND(112 + 6 * CB_SLACK)) ? 1 : -1];
 
 // ------------------------------------------------------------ the globals
 
-// gp-16760, 0x00324a78. Made by InitCollision.
+// gp-15880, 0x00331ae8. Made by InitCollision.
 extern BSlotPool *CollisionSlotPool;
 
-// gp-16764, 0x00324a74, 0.3 (3e99999a): how long, in seconds, a collision
+// gp-15884, 0x00331ae4, 0.3 (3e99999a): how long, in seconds, a collision
 // outlives its last contact. Nothing writes it.
 extern float CollisionLifetime;
 
 // ---------------------------------------------------------------- the seams
 //
 // What a collision starts outside the collision system, none of it ported:
-// collision_sound's sample for a new collision (0x001d7c20), its release
-// (0x001d7d60) and its scrape (0x001d80e0), which are task 29's; and
-// TerrainEffectEmitters::TriggerEffect (0x0020e350) on pTerrainEffectEmitters
-// (gp-16704, 0x00324ab0), the particles. The image calls all four with no
+// collision_sound's sample for a new collision (0x001e5278), its release
+// (0x001e53b0) and its scrape (0x001e57d0), which are task 29's; and
+// TerrainEffectEmitters::TriggerEffect (0x00222438) on pTerrainEffectEmitters
+// (gp-15816, 0x00331b28), the particles. The image calls all four with no
 // test. A NULL seam skips the call -- a collision makes no sound and no
 // sparks -- and CreateSample's skipped answer is NULL, which is also what the
 // sound hands back when it has no voice to give.
@@ -104,63 +116,65 @@ extern void (*gTerrainEffectTriggerFn)(void *emitters, int32_t effect,
 
 // ---------------------------------------------------------------- the calls
 
-// 0x0020b238 and 0x0020b268. bNewSlotPool(96, 32, "CollisionSlotPool", 16),
-// and its delete. EndGameFlowLoadingTrackSpecific and
+// 0x0021e5c8 and 0x0021e5f8. bNewSlotPool(112, 32, "CollisionSlotPool",
+// 16), and its delete. EndGameFlowLoadingTrackSpecific and
 // BeginGameFlowUnloadingTrackSpecific are the callers.
 void init_collision(void);
 void close_collision(void);
 
-// 0x0020b290. Onto the tail of pCurrentWorld's CollisionList, stamped now,
-// with nothing added up yet. With a point: the point kept, and a sample
-// asked for if a player is within 100. Without one: the point's first
-// three lanes zeroed.
+// 0x0021e620. Onto the tail of pCurrentWorld's CollisionList, stamped now,
+// with nothing added up yet and no direction. With a point: the point
+// kept, and a sample asked for if a player is within 100. Without one: the
+// point's first three lanes zeroed.
 Collision *collision_construct(Collision *c, CollisionBodyWitness *w,
                                bVector3 *pt);
 
-// `new Collision(w, pt)`, as BeginCollision (0x001cbe18) writes it:
+// `new Collision(w, pt)`, as BeginCollision (0x001d63b8) writes it:
 // bOMalloc on CollisionSlotPool and the constructor on what it gives, with
 // no test. The pool keeps the default flags, so a full one grows and every
 // slot comes out zeroed: a field the constructor does not write is 0.
 // contact.c's gCollisionNewFn.
 Collision *collision_new(CollisionBodyWitness *w, bVector3 *pt);
 
-// 0x0020b358. Off the list, the sample released, and the slot back to the
+// 0x0021e6f8. Off the list, the sample released, and the slot back to the
 // pool when flags & 1. collisionbody.c's gCollisionDestroyFn, with 3.
 void collision_destroy(Collision *c, int32_t flags);
 
-// 0x0020b870. bFree on CollisionSlotPool.
+// 0x0021ec48. bFree on CollisionSlotPool.
 void collision_delete(void *p);
 
-// 0x0020b450. One impulse of a contact at `at`: added in (all four lanes)
+// 0x0021e7f0. One impulse of a contact at `at`: added in (all four lanes)
 // with its length, the contact stamped and kept, and `scrape` as the
 // sliding speed. Within 50 of a player on the ground plane, a scrape past
-// the terrain's minimum makes its sparks and sound, and a knock past its
-// minimum force its impact. contact.c's gCollisionAddImpulseFn.
+// the terrain's minimum makes its sparks and sound, a knock past its
+// minimum force its impact, and then the impulse over its length (all four
+// lanes, the length of three) becomes ImpulseDirection. contact.c's
+// gCollisionAddImpulseFn.
 void collision_add_impulse(Collision *c, bVector3 *at, bVector3 *impulse,
                            float scrape);
 
-// 0x0020b668. Whether the last contact is younger than CollisionLifetime.
+// 0x0021ea40. Whether the last contact is younger than CollisionLifetime.
 // The argument is the timestep, and is not read.
 int32_t collision_update(Collision *c, float dt);
 
-// 0x0020b6a8. The witness's EndCollision, which destroys this.
+// 0x0021ea80. The witness's EndCollision, which destroys this.
 void collision_end(Collision *c);
 
-// 0x0020b6b0. The two bodies' terrains, and whichever has the higher
+// 0x0021ea88. The two bodies' terrains, and whichever has the higher
 // CollisionPriority; the first on a tie.
 int32_t collision_get_terrain_type(Collision *c);
 
-// 0x0020b748. Both bodies cars.
+// 0x0021eb20. Both bodies cars.
 int32_t collision_is_two_car_collision(Collision *c);
 
-// 0x0020b770. Each body's Car if it is a car's body, else NULL.
+// 0x0021eb48. Each body's Car if it is a car's body, else NULL.
 void collision_get_colliding_cars(Collision *c, struct Car **car1,
                                   struct Car **car2);
 
-// 0x0020b7b8. Either car has a Player.
+// 0x0021eb90. Either car has a Player.
 int32_t collision_is_player_involved(Collision *c);
 
-// 0x0020b800. Either body a smokeable's.
+// 0x0021ebd8. Either body a smokeable's.
 int32_t collision_is_smokeable_involved(Collision *c);
 
 // The inline getters the stab lists that only hand back a field. Its

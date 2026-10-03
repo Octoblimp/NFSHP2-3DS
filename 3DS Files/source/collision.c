@@ -8,6 +8,8 @@
 // AddImpulse's vectors are the VU's quadwords, as contact.c's are: the add
 // is all four lanes, and a length is `sqrt.s` of the squares summed x, then
 // y, then z.
+//
+// Retail's: the 112-byte record and ImpulseDirection (step 8m-4b).
 
 #include "collision.h"
 
@@ -24,7 +26,7 @@
 // ------------------------------------------------------------ the globals
 
 BSlotPool *CollisionSlotPool;
-float      CollisionLifetime = 0.3f;        // 0x00324a74  3e99999a
+float      CollisionLifetime = 0.3f;        // 0x00331ae4  3e99999a
 
 struct CollisionSample *(*gCollisionSoundCreateSampleFn)(Collision *c);
 void (*gCollisionSoundReleaseSampleFn)(Collision *c);
@@ -36,7 +38,7 @@ void (*gTerrainEffectTriggerFn)(void *emitters, int32_t effect,
                                 const bVector3 *at, const bVector3 *velocity);
 
 // The literals. The two distances are built with `lui`; the tick is
-// gp-27680, 0.00025 (3983126f), a second over 4000.
+// gp-27200, 0.00025 (3983126f), a second over 4000.
 #define SAMPLE_DISTANCE   100.0f            // 42c80000
 #define EFFECT_DISTANCE    50.0f            // 42480000
 #define TICK_SECONDS      0.00025f
@@ -55,6 +57,18 @@ static Collision *cnode(WorldList *l)
 static float dot3(const bVector3 *a, const bVector3 *b)
 {
     return (a->x * b->x + a->y * b->y) + a->z * b->z;
+}
+
+// `vrsqrt Q,vf00w,vf02x ; vaddq.x ; vmulx.xyzw`: all four lanes over the
+// length of three. The VU divides a zero length the EE's way, FLT_MAX.
+static void normalize4(bVector3 *out, const bVector3 *v)
+{
+    float inv = 0.0f + ee_div(1.0f, sqrtf(dot3(v, v)));
+
+    out->x = v->x * inv;
+    out->y = v->y * inv;
+    out->z = v->z * inv;
+    out->pad = v->pad * inv;
 }
 
 // `min.s` and `max.s`, fs then ft.
@@ -161,6 +175,10 @@ Collision *collision_construct(Collision *c, CollisionBodyWitness *w,
     }
     c->LastContactTime.PackedTime = (uint32_t)WorldTimer;
     c->CollisionTime.PackedTime = (uint32_t)WorldTimer;
+    // Retail's. The fourth lane is not written.
+    c->ImpulseDirection.x = 0.0f;
+    c->ImpulseDirection.z = 0.0f;
+    c->ImpulseDirection.y = 0.0f;
     return c;
 }
 
@@ -250,6 +268,8 @@ void collision_add_impulse(Collision *c, bVector3 *at, bVector3 *impulse,
             zero.pad = 0.0f;
             trigger_effect(TERRAIN_EFFECT_COLLISION_IMPACT, tt, s, at, &zero);
         }
+        // Retail's: read again from the impulse after the effects.
+        normalize4(&c->ImpulseDirection, impulse);
     }
 }
 

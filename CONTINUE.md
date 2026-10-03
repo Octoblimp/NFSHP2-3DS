@@ -1574,16 +1574,72 @@ and so replaced every boot.
        roadblock and spike-strip calls, the tickets and the damage).
        RenderHud stays retail's; the split moves objects between the
        screens when they are drawn.
+   - **13b, New 3DS mode in full and a steady 30 FPS** (task 28, set by
+     the user on 2026-10-03). It comes right after the HUD, because every
+     race test after it (the AI, the cops) needs the race in real time.
+     - **The target** is the New 3DS in New 3DS mode.
+     - **Only the optimizations the New 3DS needs to hold 30 go in.**
+     - **Nothing is done for the Old 3DS alone.** It keeps booting and
+       gets whatever the New 3DS work gives it.
+
+     It goes in four slices:
+     - **13b-1, the real clock and the pacing.**
+       - The race runs at a third of real time at 20 FPS because the
+         port hands PrepareRealTimestep `BOOT_DT` (1/60 s) every frame.
+       - Retail hands it the ticker's measure and holds it to 1/60 to
+         0.05 s on NTSC, or 1/50 to 0.06 s on PAL (`realtime.c`). So
+         retail itself runs in real time down to 20 FPS.
+       - Feed it the measured time from svcGetSystemTick. Check
+         `FrameCounter` (the PS2's vertical-blank count) and the
+         jukebox's 8 ms gate against a frame that is not 1/60 s.
+       - Pace the race at 30: C3D_FrameRate(30), or two vertical
+         blanks a frame. In the race only, so every frame is 33.3 ms
+         and none alternate with 16.7. The frontend and the movies stay
+         at 60.
+     - **13b-2, a frame profiler.**
+       - Each frame's time by phase, from svcGetSystemTick: the flow,
+         the coordinator, the world's step, the cameras, UpdateHud, the
+         draw's CPU side, and the GPU (C3D_GetProcessingTime and
+         C3D_GetDrawingTime).
+       - A line a second in `nfshp2_debug.txt`, and a corner of the
+         bottom screen, behind a switch.
+       - At boot, log what the console gave: the model, the speedup,
+         the memory grant (`g_heapInfo`) and the cores.
+     - **13b-3, New 3DS mode in full.** Check each part at runtime
+       rather than assume it from `app.rsf`, in the CIA and the .3dsx
+       both:
+       - **804 MHz and the L2 cache:** `initPlatformPerf` calls
+         `osSetSpeedupEnable(true)`. Confirm by the profiler that it
+         takes.
+       - **The 178 MB extended memory** (the CIA only): the heap is a
+         fixed 48 MB (`heapcfg.c`). Size it from the grant on New 3DS,
+         so the later tracks, cars and AI have room.
+       - **Core 2** (`CanAccessCore2`): the movie decoder uses it
+         already. Move to it only what the profiler shows is worth it.
+         The streams (the jukebox, the texture and resource loading)
+         go first, since they need no change to the game's order of
+         work.
+       - **Core 1**, the system core (`APT_SetAppCpuTimeLimit(80)`):
+         keep it for the audio and streaming threads.
+     - **13b-4, only what the profile demands.**
+       - With 13b-2's numbers on a New 3DS, cut the largest cost,
+         re-measure, and stop once the race holds 30.
+       - The first suspect is the six environment-map views drawn each
+         frame (`eEnvMap`). After that: the draw calls per solid, the
+         CPU-side transforms, the physics.
+       - Keep retail's look. A cut that changes it, such as a view
+         updated every other frame or drawn smaller, goes to the user
+         first.
+       - Re-measure after the AI (step 11) and the cops (step 12).
+         Repeat only if the race drops under 30.
+
+     Azahar is set to New 3DS (`is_new_3ds=true`), but neither its GPU
+     timing nor its CPU timing is the hardware's. Its FPS is a guide, and
+     the hardware's is the measure. Take no reading while a build or a
+     checker runs on the same machine: 8m-4a's first run read 57% and
+     11 FPS that way, and 100% and 20 FPS idle.
    - The car's sounds (step 14): LoadSoundRegionsInGame and the engine.
    - The racer AI (step 11), and a SkipFE race with AI cars in it.
-   - The frame rate. Azahar's App counter reads about 30 FPS in the race
-     before the cars were lit and 20-29 since. The world steps once for
-     each drawn frame, not at 60: at 20 FPS the HUD's lap clock gains
-     3.46 s in 10.2 s of real time, a third of real time. The six
-     environment views drawn each frame are the first suspect for the
-     drop. A reading taken while a mutation pass or a build runs on the
-     same machine is not the port's: 8m-4a's first run read 57% and
-     11 FPS that way, and 100% and 20 FPS once the machine was idle.
 
    The way in is retail's own debug path. With SkipFE (gp-23220) set,
    `main` (`0x0012f000`) calls StartSkipFEGame (`0x00184bd8`) in place of
@@ -2844,12 +2900,13 @@ each class shows what it reaches.
 | 11 | The rest of task 26: the racer and traffic AI, the six classes behind Car's constructor seams | 4-6 |
 | 12 | The cops and the pursuit: CopManager, the cop drivers, roadblocks and spikes | 4-6 |
 | 13 | The two-screen HUD, to the split decided below. In progress as 8m: 8m-1 to 8m-4a are done; 8m-4b (the scoring), 8m-4c (the pursuit meter, the radar, the trackers, the NIS overlay) and 8m-5 (the split) are left | 7, 4 done |
+| 13b | New 3DS mode in full and a steady 30 FPS race (task 28), right after step 13: the real clock and the pacing, a frame profiler, New 3DS mode checked part by part, then only the optimizations the New 3DS needs. Set by the user on 2026-10-03 | 4 |
 | 14 | The car and world sounds and the speech | 2-3 |
 | 15 | **A whole race with the AI and the cops.** Steps 10-14 add about 15-23 slices | |
 | 16 | The full frontend from retail: the 44 screens still plain or unregistered (`screen_registry.py --check-port`), the event tree (the career), the tourneys and the car selector | 6-10 |
 | 17 | Save data on the SD card in the memory card's place: Phils Load Save, the autosave, the boot autoload and the options (task 29) | 2-3 |
 | 18 | Every track and car: the thirty tracks and the whole car list load and race | 1-2 |
-| 19 | Old 3DS performance: 16-bit or ETC1 textures, fewer draw calls, and the New 3DS's second core (task 28) | 2-3 |
+| 19 | ~~Old 3DS performance~~ no work of its own since 2026-10-03: the target is the New 3DS (step 13b). The Old 3DS keeps booting and gets what the New 3DS work gives it | 0 |
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
 That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
@@ -2868,6 +2925,7 @@ goes in.
   | Step | Slices left |
   |---|---|
   | 13, the HUD: 8m-4b, 8m-4c, 8m-5 | 3 |
+  | 13b, New 3DS mode and 30 FPS | 4 |
   | 10, the retail pass | 4-6 |
   | 11, the racer and traffic AI | 4-6 |
   | 12, the cops | 4-6 |
@@ -2875,14 +2933,14 @@ goes in.
   | 16, the frontend | 6-10 |
   | 17, the saves | 2-3 |
   | 18, every track and car | 1-2 |
-  | 19, Old 3DS performance | 2-3 |
+  | 19, Old 3DS performance (dropped, 2026-10-03) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **29-44** |
+  | **Total** | **31-45** |
 
-- **How far along:** about 18-21 of the road's 47-65 slices are done,
+- **How far along:** about 18-21 of the road's 49-66 slices are done,
   roughly a third. The estimates run low. Step 13 was put at 1-2 slices
   and is taking 7, and step 8 took eighteen commits (8a to 8l) for its
-  2-3. Read the 29-44 as a floor.
+  2-3. Read the 31-45 as a floor.
 - **The pace:** 62 commits from 2026-09-27 to 2026-10-03, most of them a
   slice each.
 - **Not yet in the count:** the replay, and the frame rate. Azahar reads

@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
-"""Cross-check 3DS Files/source/collision.c against the image's Collision.obj.
+"""Cross-check 3DS Files/source/collision.c against retail's Collision.obj.
 
-Collision.obj is 0x0020b238 .. 0x0020b87c: InitCollision and CloseCollision,
-the constructor and destructor, AddImpulse, Update, End, GetTerrainType and
-the four questions about who is in a collision, with the inline bTNode
-destructor and operator delete. World's two GetDistanceToClosestPlayer
-overloads (0x0014bb60 and 0x0014bbb8), which the constructor and AddImpulse
-call, come with them, from world.c. DoSnapshot is the replay's and is not
-ported. The image is the oracle. tools/mipsemu.py runs the functions out of
-NFSHP2.ELF, the harness (tools/src/collision_test.c) runs the port, both
-walk the same script, and the two transcripts are diffed.
+Collision.obj is retail's 0x0021e5c8 .. 0x0021ec54: InitCollision and
+CloseCollision, the constructor and destructor, AddImpulse, Update, End,
+GetTerrainType and the four questions about who is in a collision, with the
+inline bTNode destructor and operator delete. World's two
+GetDistanceToClosestPlayer overloads (0x0014e3e8 and 0x0014e440), which the
+constructor and AddImpulse call, come with them, from world.c. DoSnapshot is
+the replay's and is not ported. The image is the oracle. tools/mipsemu.py
+runs the functions out of retail's SLES_507.31 (retail_model.RetailEmu),
+the harness (tools/src/collision_test.c) runs the port, both walk the same
+script, and the two transcripts are diffed.
+
+The check ran on the demo's NFSHP2.ELF until step 8m-4b. Retail made the
+record 112 bytes, its last sixteen the direction of the last impulse near a
+player, and changed InitCollision, the constructor and AddImpulse for it
+and GetTerrainType for the 144-byte TerrainTypeInfo; so the port took
+retail's and the check moved wholly onto the retail image, whose own
+TerrainTypeInfoTable is the one terraintypetab.c carries.
 
 The pool is the image's own bNewSlotPool, bOMalloc and bFree against
 bslotpool.c, each handed a block the script owns; so a slot label (Cn) is
@@ -35,6 +43,8 @@ reaches:
     lane is the stack's, which the transcript does not print.
   * Update subtracts unsigned and converts signed; its argument is unread.
   * GetTerrainType keeps the first body's terrain on a tie.
+  * The direction is written only within 50 of a player, after the effects;
+    a zero impulse divides the EE's way, FLT_MAX, and makes zeroes.
 
     python tools/collision_check.py
     python tools/collision_check.py --mutate
@@ -53,6 +63,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import mipsemu as me
+import retail_model
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -71,13 +82,14 @@ CC = "3DS Files/source/collision.c"
 CH = "3DS Files/source/collision.h"
 WC = "3DS Files/source/world.c"
 
-GP = 0x00328bf0
-G_WORLD = GP - 22624                # pCurrentWorld
-G_TIMER = GP - 20224                # WorldTimer
-G_POOL = GP - 16760                 # CollisionSlotPool
-G_LIFETIME = GP - 16764             # CollisionLifetime
-G_TEE = GP - 16704                  # pTerrainEffectEmitters
+GP = retail_model.RETAIL_GP
+G_WORLD = GP - 22120                # pCurrentWorld
+G_TIMER = GP - 19576                # WorldTimer
+G_POOL = GP - 15880                 # CollisionSlotPool
+G_LIFETIME = GP - 15884             # CollisionLifetime
+G_TEE = GP - 15816                  # pTerrainEffectEmitters
 HEADER = 48                         # a SlotPool's header on the console
+REC = 112                           # retail's Collision
 
 NB, NW, NCAR, NS, NPT = 4, 4, 2, 4, 4
 NSLOT = 32
@@ -513,7 +525,7 @@ class Model(object):
     def __init__(self, sc):
         self.sc = sc
         self.out = []
-        e = self.e = me.Emu(ieee=True, eediv=True)
+        e = self.e = retail_model.RetailEmu(ieee=True, eediv=True)
         e.stub_bware()
         self.fn = {k: e.addr_of(v) for k, v in SYM.items()}
         a = e.alloc
@@ -532,8 +544,8 @@ class Model(object):
         self.imp = a(16, 16)
         self.outw = a(16, 16)
         self.vec = a(16, 16)
-        self.raw = [a(96, 16) for _ in range(2)]
-        self.arena_n = HEADER + NSLOT * 96 + 64
+        self.raw = [a(REC, 16) for _ in range(2)]
+        self.arena_n = HEADER + NSLOT * REC + 64
         self.arena = a(self.arena_n, 16)
         self.terrain = [0] * NB
         self.handles = []
@@ -712,6 +724,7 @@ class Model(object):
                   + " mag %08x wit %s sample %s scrape %s"
                   % (e.u32(c + 80), L(e.u32(c + 84)), L(e.u32(c + 88)),
                      L(e.u32(c + 92))))
+        self.emit(" " + self.v4("dir", c + 96))
 
     def list(self):
         e, L = self.e, self.label
@@ -760,7 +773,7 @@ class Model(object):
             elif op == OP_RAW:
                 k, wi, p = arg(), arg(), arg()
                 emit("raw R%d W%d P%d" % (k, wi, p - 1))
-                e.write(self.raw[k], b"\xa5" * 96)
+                e.write(self.raw[k], b"\xa5" * REC)
                 c = call("ctor", self.raw[k], self.wit[wi],
                          self.pts + 16 * (p - 1) if p else 0) & M32
                 self.handles.append(c)
@@ -1003,6 +1016,13 @@ _m("ctor-no-time", "    c->CollisionTime.PackedTime = (uint32_t)WorldTimer;" + N
    "")
 _m("ctor-times-zero", "    c->CollisionTime.PackedTime = (uint32_t)WorldTimer;",
    "    c->CollisionTime.PackedTime = 0;")
+# retail's direction
+_m("ctor-dir-x", "    c->ImpulseDirection.x = 0.0f;" + NL, "")
+_m("ctor-dir-y", "    c->ImpulseDirection.y = 0.0f;" + NL, "")
+_m("ctor-dir-z", "    c->ImpulseDirection.z = 0.0f;" + NL, "")
+_m("ctor-dir-pad", "    c->ImpulseDirection.y = 0.0f;" + NL,
+   "    c->ImpulseDirection.y = 0.0f;" + NL
+   + "    c->ImpulseDirection.pad = 0.0f;" + NL)
 
 # destroy and delete
 _m("dtor-no-next", "    prev->Link.next = next;" + NL, "")
@@ -1108,6 +1128,22 @@ _m("imp-impact-scale", "trigger_effect(TERRAIN_EFFECT_COLLISION_IMPACT, tt, s, a
    "trigger_effect(TERRAIN_EFFECT_COLLISION_IMPACT, tt, len, at, &zero);")
 _m("imp-emitters", "        gTerrainEffectTriggerFn(pTerrainEffectEmitters, effect, terrain,",
    "        gTerrainEffectTriggerFn(NULL, effect, terrain,")
+# retail's direction
+_m("dir-none", "        normalize4(&c->ImpulseDirection, impulse);" + NL, "")
+_m("dir-always", "        normalize4(&c->ImpulseDirection, impulse);" + NL
+   + "    }" + NL, "    }" + NL
+   + "    normalize4(&c->ImpulseDirection, impulse);" + NL)
+_m("dir-total", "        normalize4(&c->ImpulseDirection, impulse);",
+   "        normalize4(&c->ImpulseDirection, &c->TotalImpulse);")
+_m("dir-no-pad", "    out->pad = v->pad * inv;", "    out->pad = v->pad;")
+_m("dir-pad-zero", "    out->pad = v->pad * inv;", "    out->pad = 0.0f;")
+_m("dir-y-x", "    out->y = v->y * inv;", "    out->y = v->x * inv;")
+_m("dir-len", "    float inv = 0.0f + ee_div(1.0f, sqrtf(dot3(v, v)));",
+   "    float inv = 0.0f + ee_div(1.0f, dot3(v, v));")
+_m("dir-ieee", "    float inv = 0.0f + ee_div(1.0f, sqrtf(dot3(v, v)));",
+   "    float inv = 0.0f + 1.0f / sqrtf(dot3(v, v));")
+_m("dir-len4", "    float inv = 0.0f + ee_div(1.0f, sqrtf(dot3(v, v)));",
+   "    float inv = 0.0f + ee_div(1.0f, sqrtf(dot3(v, v) + v->pad * v->pad));")
 _m("effect-scrape-const", "#define TERRAIN_EFFECT_COLLISION_SCRAPE 6",
    "#define TERRAIN_EFFECT_COLLISION_SCRAPE 7", CH)
 _m("effect-impact-const", "#define TERRAIN_EFFECT_COLLISION_IMPACT 5",

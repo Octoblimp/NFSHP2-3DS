@@ -2009,6 +2009,22 @@ is citro3d and owns the top.
         task 36 goes first.
 28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag
+        **Re-scoped by the user on 2026-10-03:** New 3DS mode in full,
+        and a smooth 30 FPS race on the New 3DS. Only the optimizations
+        the New 3DS needs to hold 30 go in. Nothing is done for the Old
+        3DS alone; it keeps booting and gets what the New 3DS work gives
+        it. CONTINUE.md's step 13b has the four slices, taken right after
+        the HUD (step 13):
+        - **13b-1:** the real clock. Feed PrepareRealTimestep the measured
+          frame time in place of `BOOT_DT`; retail's own clamp then runs
+          the race in real time down to 20 FPS. Pace the race at 30.
+        - **13b-2:** a frame profiler by phase, plus the console's model,
+          speedup, memory grant and cores logged at boot.
+        - **13b-3:** New 3DS mode checked part by part at runtime: 804 MHz
+          and L2, the 178 MB extended memory (the heap sized from the
+          grant), and core 2 for the streams where the profile says so.
+        - **13b-4:** only the cuts the profile demands, keeping retail's
+          look. Any cut that changes the look goes to the user first.
 
 ## Phase 5 -- Polish
 
@@ -2029,6 +2045,8 @@ is citro3d and owns the top.
 30. [ ] Split-screen/multiplayer scope decision (HP2 supported split-screen;
         not committed to yet -- decide once single-player core is solid)
 31. [ ] Final CIA packaging + Old3DS/New3DS compatibility pass
+        (Since 2026-10-03 the New 3DS is the target, task 28. The Old 3DS
+        pass checks only that it boots.)
 
 ## Asked for during the port
 
