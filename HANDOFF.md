@@ -12739,3 +12739,96 @@ generators. 0 of 101 failed, in 1325 s (`out/chain_8m5.txt`).
 
 - **8m-6a:** TrackMap's mode table, constructor, destructor, GetAngle,
   GetCameraDirection, GetCarUVPosition and GetBoxOnMap (CONTINUE.md).
+
+## Session 31, continued (2026-10-03) -- the minimap's table, constructor and turn (step 8m-6a)
+
+TrackMap, the race's minimap, is in with seven of its fourteen functions,
+and EvalCubic. Nothing draws it yet: the clip and the map come in 8m-6b,
+and Render and the draw on the bottom screen in 8m-6c.
+`docs/formats/trackmap.md` has the write-up.
+
+### The port
+
+- **`trackmap.{c,h}`** hold:
+  - the record, 176 bytes, with the demo's .mdebug names and offsets,
+    and a layout check on 32-bit builds;
+  - InitTrackMapModeInfo (`0x001bd1f8`): the eleven 68-byte modes at
+    `0x003140b8` and the nine marker colours at `0x003143a8`;
+  - the constructor (`0x001babb8`) and the destructor (`0x001badc8`);
+  - GetAngle (`0x001bb678`), with EvalCubic (`0x001bdad0`);
+  - GetCameraDirection (`0x001bd0b0`), GetCarUVPosition (`0x001bca50`)
+    and GetBoxOnMap (`0x001bcae8`).
+- **`main.c`** binds gDeleteTrackMapFn to `trackmap_delete`, and
+  gNewTrackMapFn to `newTrackMapLogged`: `trackmap_new` with a line in
+  the debug log for each map made, giving the track and
+  SufficientDataToRenderMe.
+- **`playerhud.c`**'s SetTrackMapMode writes `CurrentMode`, where it used
+  to write the word at 160. The `hudfeatures` and `hudrender` harnesses
+  make a `sizeof(TrackMap)` map and dump its `CurrentMode`.
+
+What retail does that a reader would not guess:
+
+- The constructor asks for `TRACK%d_MAP` without the default texture,
+  and for the other six with it. START_LINE is needed only when the race
+  is a loop (TheRaceParameters.Point2Point is 0). A missing BKGBMP never
+  stops the map.
+- GetAngle eases the map's turn toward the camera's heading: one cubic
+  step for x and one for y, over t = ticks x 0.00025 x 0.9. It reads the
+  eased direction after GetCameraDirection, which may just have started
+  the ease.
+- GetCameraDirection always answers 1. With the drive camera it turns
+  the camera's direction by the look back. With another mover it gives
+  the car's heading before the race and the eased direction during it.
+- GetCarUVPosition negates the world y before it adds the map's top.
+
+### The checks
+
+`trackmap_check` runs retail's functions, with bSPrintf, bStringHash and
+the matrix code under them, in the emulator against `trackmap.c`,
+`emath.c` and `bmath.c`.
+
+- **Stubs:** GetTextureInfo (answers from a mask and logs each name) and
+  eGetView.
+- **Model fix:** the emulator runs no static constructors, so the model
+  runs eMathInit and the constructor at `0x0011bf70`. Without it,
+  eMulVector's w is 0 and row 3 of the matrix drops out.
+- **Script:** the tables; the constructor over all 128 texture masks,
+  each missing pointer, Point2Point, every track number and nine
+  rotations; GetCarUVPosition and GetBoxOnMap over calibrations,
+  matrices, boxes and angles; GetCameraDirection over every mover kind,
+  race stage and look back; GetAngle in every mode, through a whole turn
+  and over time steps out to 2^31 either way, with a WorldTimer that
+  wraps.
+- **Result:** 2399 ops, 6631 lines, 0 differ.
+- **Mutation pass:** 111 mutations, 110 caught, 1 equivalent
+  (`angle-plus-half-turn`: on a 16-bit angle, less 32768 and plus 32768
+  are the same).
+  - The first pass left `angle-time-before-dir` alive. The script now
+    starts the ease with a speed already set, which catches it.
+- **The harness crash on the way:** time steps of 2^31 in a row overflow
+  the ease to infinity, and the port's bATan then reads past its table.
+  The EE saturates instead. One such step is days of WorldTimer, so the
+  script takes each from a settled ease. `trackmap.md` has the numbers.
+
+hudfeatures_check (1298 ops) and hudrender_check (1278 ops) still pass,
+0 differ.
+
+The whole chain: 98 checkers with `trackmap_check` added, and the four
+table generators. 0 of 102 failed, in 1556 s (`out/chain_8m6a.txt`).
+
+The ARM build is clean, and the 32-bit layout check compiles.
+
+On Azahar (`run_azahar_race.ps1 -HoldKeys 65 -WatchSeconds 15`, track
+12), shots in `out/azahar_8m6a`:
+
+- The debug log has `trackmap: track 12, sufficient 1`: the map is made
+  once as the race's HUD comes up, and all seven textures load,
+  `TRACK12_MAP` from `TRACKS\TEX12TRACK.BIN` among them.
+- The HUD is as it was after 8m-5. Nothing draws the map yet.
+- 20 FPS. No crash.
+
+### Next
+
+- **8m-6b:** MapToScreen, ClipPolygon with EmitPoint, GetSideOfLine and
+  IsPointInPoly, CalculateCentroidOfQuad, DrawOverOrUnderLay and DrawMap
+  (CONTINUE.md).

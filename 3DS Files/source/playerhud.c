@@ -24,6 +24,7 @@
 #include "rcpost.h"
 #include "realtime.h"
 #include "trackflow.h"
+#include "trackmap.h"
 
 void (*gPlayerSetRearViewMirrorCameraMoverFn)(struct Player *p, uint32_t on);
 void (*gInitializeFlailerTachometerFn)(struct FlailerObjectChunk *needle,
@@ -36,9 +37,6 @@ void (*gPlayerFillInRaceOverMessagesFn)(struct Player *p);
 void (*gRaceFinishedSpeechFn)(struct Car *c, int32_t reason);
 void (*gPlayerHudStartWrongWayFn)(struct Player *p);
 void (*gNisOverlaySetVisibleFn)(NISOverlayManager *o, uint32_t on);
-
-// The word in the TrackMap SetTrackMapMode hands the mode to.
-#define TRACKMAP_MODE_WORD 160
 
 // CarHudInfo, read out of CarTypeInfo's HudInfo bytes as hudtex.c does.
 #define HUDINFO_IS_INTEGRATED 0
@@ -325,8 +323,7 @@ void player_set_track_map_mode(struct Player *p, int32_t mode)
         p->TimeTrackMapModeChanged = (uint32_t)RealTimeFrames;
     }
     if (p->pTrackMap != NULL)
-        memcpy((uint8_t *)p->pTrackMap + TRACKMAP_MODE_WORD, &mode,
-               sizeof mode);
+        p->pTrackMap->CurrentMode = mode;
 }
 
 // ------------------------------------------------------------ SetHudFeatures

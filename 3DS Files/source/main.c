@@ -88,6 +88,7 @@
 #include "hudscore.h"
 #include "hudsplit.h"
 #include "hudtach.h"
+#include "trackmap.h"
 #include "joyevent.h"
 #include "joyhid.h"
 #include "joypad.h"
@@ -400,6 +401,19 @@ static void logLine(const char* fmt, ...)
     va_end(ap);
     fputc('\n', g_log);
     fflush(g_log);           // an emulator kill must not lose the tail
+}
+
+// gNewTrackMapFn: trackmap_new, with a line in the log for each map made,
+// so a run shows whether the map found its seven textures.
+static struct TrackMap *newTrackMapLogged(TrackInfo *track, struct Car *car,
+                                          struct Player *p)
+{
+    TrackMap *m = trackmap_new(track, car, p);
+
+    logLine("trackmap: track %d, sufficient %d",
+            track != NULL ? (int)track->TrackNumber : -1,
+            (int)m->SufficientDataToRenderMe);
+    return m;
 }
 
 // Everything on the console is worth having in the log too.
@@ -2726,6 +2740,10 @@ int main(int argc, char** argv)
     // The tach's red band (hudtach.c): SetHudFeatures lays the points over
     // the gradient, and uirender.c cuts the band out of them as it draws.
     gInitializeFlailerTachometerFn = flailer_initialize_tachometer;
+    // The minimap (trackmap.c): SetHudFeatures makes one when the HUD's
+    // TRACK_MAP feature comes on. Nothing draws it until 8m-6c.
+    gNewTrackMapFn = newTrackMapLogged;
+    gDeleteTrackMapFn = trackmap_delete;
 
     // Car::MaybeCameraShake, which World::DoTimestep asks of each player's
     // car: shake.c. Only a car with a player shakes, and none has one until

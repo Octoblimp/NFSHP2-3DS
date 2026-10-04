@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-03), after 8m-5, the two-screen split; 8m-6, the minimap
-(TrackMap), is next. "Where the port stands" below has the count of what is left.
+(2026-10-03), after 8m-6a, the minimap's table, constructor and turn;
+8m-6b, the map's clip and draw, is next. "Where the port stands" below has the count of what is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
@@ -51,7 +51,7 @@ run -- see "Next" below for why, and for what task 27 owes it.
 Ninety-seven cross-checkers pass, plus the four table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/texturestream_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/resource_check.py && python tools/fred_check.py && python tools/fredrace_check.py && python tools/flailer_check.py && python tools/hudfeatures_check.py && python tools/bprintf_check.py && python tools/hudrender_check.py && python tools/hudanim_check.py && python tools/hudscore_check.py && python tools/hudcop_check.py && python tools/hudnis_check.py && python tools/hudtach_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/texturestream_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/resource_check.py && python tools/fred_check.py && python tools/fredrace_check.py && python tools/flailer_check.py && python tools/hudfeatures_check.py && python tools/bprintf_check.py && python tools/hudrender_check.py && python tools/hudanim_check.py && python tools/hudscore_check.py && python tools/hudcop_check.py && python tools/hudnis_check.py && python tools/hudtach_check.py && python tools/trackmap_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -1672,15 +1672,26 @@ and so replaced every boot.
        | InitTrackMapModeInfo | `0x001bd1f8` | 1428 |
        Player::RenderTrackMap (`0x00181c08`) calls Render, and
        eDisplayFrame calls that for each player after StuffDemoPolys.
-       - **8m-6a:** InitTrackMapModeInfo (it fills the eleven 68-byte
-         TrackMapModeInformations at `0x003140b8` and nine 3-byte
-         marker colours at `0x003143a8`), the constructor (textures
-         TRACK%d_MAP, CAR_MARKER, CAR_MARKERB, TRACKMAPFRAME, MAPBACK,
-         START_LINE, BKGBMP; START_LINE is needed only when
-         TheRaceParameters.Point2Point (+40) is 0), the destructor,
-         GetAngle with EvalCubic (`0x001bdad0`), GetCameraDirection,
-         GetCarUVPosition and GetBoxOnMap. Bind gNewTrackMapFn and
-         gDeleteTrackMapFn.
+       - **8m-6a is done** (HANDOFF.md, Session 31, continued: the
+         minimap's table, constructor and turn (step 8m-6a)).
+         `docs/formats/trackmap.md` has the write-up.
+         - `trackmap.{c,h}` hold the record (176 bytes, a layout
+           check on 32-bit builds), InitTrackMapModeInfo (the eleven
+           68-byte modes at `0x003140b8` and the nine marker colours
+           at `0x003143a8`), the constructor and destructor, GetAngle
+           with EvalCubic (`0x001bdad0`), GetCameraDirection,
+           GetCarUVPosition and GetBoxOnMap.
+         - `main.c` binds gDeleteTrackMapFn to `trackmap_delete`, and
+           gNewTrackMapFn to `newTrackMapLogged`, which logs the track
+           and SufficientDataToRenderMe for each map made.
+           SetTrackMapMode writes `CurrentMode`.
+         - `trackmap_check`: 2399 ops, 6631 lines, 0 differ; 111
+           mutations, 110 caught, 1 equivalent.
+         - Azahar (`out/azahar_8m6a`): the log has `trackmap: track
+           12, sufficient 1`, so all seven textures load in a race.
+           20 FPS, no crash. Nothing draws the map until 8m-6c.
+         - GetBoxOnMap's argument names (f, b, l, r) are the port's.
+           Render's calls in 8m-6c will show what retail passes.
        - **8m-6b:** MapToScreen (a tilt by AngleX and a projection at
          H), ClipPolygon with EmitPoint, GetSideOfLine and IsPointInPoly,
          CalculateCentroidOfQuad (`0x001bda40`), DrawOverOrUnderLay and
@@ -3019,7 +3030,7 @@ each class shows what it reaches.
 | 10 | The retail pass over what is already ported: the 130 changed functions cited from a `.c` in `docs/retail_audit.txt`, module by module, each checker gaining a retail model run where it can | 4-6 |
 | 11 | The rest of task 26: the racer and traffic AI, the six classes behind Car's constructor seams | 4-6 |
 | 12 | The cops and the pursuit: CopManager, the cop drivers, roadblocks and spikes | 4-6 |
-| 13 | The two-screen HUD, to the split decided below. In progress as 8m: 8m-1 to 8m-5 are done; 8m-6 (the minimap, three slices) is left | 10, 7 done |
+| 13 | The two-screen HUD, to the split decided below. In progress as 8m: 8m-1 to 8m-5 and 8m-6a are done; 8m-6b and 8m-6c (the minimap's draw) are left | 10, 8 done |
 | 13b | New 3DS mode in full and a steady 30 FPS race (task 28), right after step 13: the real clock and the pacing, a frame profiler, New 3DS mode checked part by part, then only the optimizations the New 3DS needs. Set by the user on 2026-10-03 | 4 |
 | 14 | The car and world sounds and the speech | 2-3 |
 | 15 | **A whole race with the AI and the cops.** Steps 10-14 add about 15-23 slices | |
@@ -3033,18 +3044,18 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-03, after 8m-5)
+### Where the port stands (2026-10-03, after 8m-6a)
 
 - **Done:** steps 1-9. One car drives the retail track at the retail
   start, lit, with the chase camera, and the HUD shows the race on the
   top screen with its animations. Tasks 1-25 and 32-35 are closed: 29 of
   36. The open ones are 26-31 and 36.
-- **In progress:** step 13, the HUD. Seven of its ten slices are done.
+- **In progress:** step 13, the HUD. Eight of its ten slices are done.
 - **Left, in the table's units:**
 
   | Step | Slices left |
   |---|---|
-  | 13, the HUD: 8m-6a to 8m-6c | 3 |
+  | 13, the HUD: 8m-6b and 8m-6c | 2 |
   | 13b, New 3DS mode and 30 FPS | 4 |
   | 10, the retail pass | 4-6 |
   | 11, the racer and traffic AI | 4-6 |
@@ -3055,13 +3066,13 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped, 2026-10-03) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **31-45** |
+  | **Total** | **30-44** |
 
-- **How far along:** about 19-22 of the road's 50-67 slices are done,
+- **How far along:** about 20-23 of the road's 50-67 slices are done,
   roughly a third. The estimates run low. Step 13 was put at 1-2 slices
-  and is taking 7, and step 8 took eighteen commits (8a to 8l) for its
-  2-3. Read the 31-45 as a floor.
-- **The pace:** 63 commits from 2026-09-27 to 2026-10-03, most of them a
+  and is taking 10, and step 8 took eighteen commits (8a to 8l) for its
+  2-3. Read the 30-44 as a floor.
+- **The pace:** 64 commits from 2026-09-27 to 2026-10-03, most of them a
   slice each.
 - **Not yet in the count:** the replay, and the frame rate. Azahar reads
   about 20 FPS in the race, and the world steps once per drawn frame, so

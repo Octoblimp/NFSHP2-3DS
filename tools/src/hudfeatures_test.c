@@ -50,6 +50,7 @@
 #include "rcpost.h"
 #include "realtime.h"
 #include "trackflow.h"
+#include "trackmap.h"
 
 #define MAX_LOADS 4
 #define NUM_VIEWS 4
@@ -229,7 +230,7 @@ static struct TrackMap *new_map(TrackInfo *t, struct Car *c,
 {
     printf("  newmap t%d c%d %s\n", t == CurrentTrackInfo,
            p != NULL && c == p->MyCar, player_name(p));
-    return (struct TrackMap *)calloc(1, 176);
+    return (struct TrackMap *)calloc(1, sizeof(TrackMap));
 }
 
 static void delete_map(struct TrackMap *m)
@@ -411,14 +412,13 @@ static void dump_player(int n)
                 memcpy(&v, a, sizeof v);
                 snprintf(text, sizeof text, "%s", obj_name(v, nb, sizeof nb));
             } else if (d->kind == 'm') {
-                uint8_t *m;
-                int32_t  mode;
+                TrackMap *m;
                 memcpy(&m, a, sizeof m);
                 if (m == NULL) {
                     snprintf(text, sizeof text, "none");
                 } else {
-                    memcpy(&mode, m + 160, 4);
-                    snprintf(text, sizeof text, "map:%d", mode);
+                    snprintf(text, sizeof text, "map:%d",
+                             (int)m->CurrentMode);
                 }
             } else {
                 uint32_t v;
