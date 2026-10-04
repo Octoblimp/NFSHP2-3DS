@@ -267,7 +267,7 @@ typedef struct {
     // object positions, hit boxes and the menu all stay in the 640x480
     // space the disc authored, and only the final quad is stretched.
     float scaleX, scaleY;
-    float originX, originY;   // 0 now; see uirender_draw_screen
+    float originX, originY;   // 0 but for a placement's move (UIPlacement)
     float alpha;              // the renderer's global fade
 } UIView;
 
@@ -935,6 +935,36 @@ static bool object_hidden(const UIRenderer* r, uint32_t nameHash)
     return false;
 }
 
+void uirender_set_placements(UIRenderer* r, const UIPlacement* table, int n)
+{
+    if (!r) return;
+    r->placements    = table;
+    r->numPlacements = table ? n : 0;
+}
+
+// Whether any placement names this screen, so a screen with none is
+// skipped whole.
+static bool screen_placed(const UIRenderer* r, const BUIScreen* screen)
+{
+    for (int i = 0; i < r->numPlacements; i++)
+        if (r->placements[i].screenHash == screen->nameHash) return true;
+    return false;
+}
+
+static const UIPlacement* placement_of(const UIRenderer* r,
+                                       const BUIScreen* screen,
+                                       const BUIObject* o)
+{
+    for (int i = 0; i < r->numPlacements; i++) {
+        const UIPlacement* p = &r->placements[i];
+        if (p->screenHash != screen->nameHash) continue;
+        if (p->nameHash ? p->nameHash == o->nameHash
+                        : p->groupHash == o->groupHash)
+            return p;
+    }
+    return NULL;
+}
+
 bool uirender_text_extent(UIRenderer* r, const BUI* ui, uint32_t index,
                           float* outW, float* outH)
 {
@@ -1067,10 +1097,13 @@ static UIView screen_view(const UIRenderer* r, const BUIScreen* screen,
     return v;
 }
 
-// One screen's share of one layer, in file order.
+// One screen's share of one layer, in file order: the objects placed on
+// `target` (UIR_TARGET_*), each moved by its placement.
 static void draw_layer(UIRenderer* r, BUI* ui, const BUIScreen* screen,
-                       int layer, const UIView* v)
+                       int layer, const UIView* v, int target)
 {
+    bool placed = screen_placed(r, screen);
+
     for (uint32_t i = 0; i < screen->count; i++) {
         BUIObject o;
         if (!bui_object(ui, screen->first + i, &o)) continue;
@@ -1078,8 +1111,16 @@ static void draw_layer(UIRenderer* r, BUI* ui, const BUIScreen* screen,
         if (o.visible != BUI_VISIBLE) continue;
         // Drawn on the bottom screen instead; see uirender_hide_object.
         if (object_hidden(r, o.nameHash)) continue;
-        if (o.type == BUI_TYPE_BITMAP)    draw_bitmap(r, &o, v);
-        else if (o.type == BUI_TYPE_TEXT) draw_text(r, &o, v);
+
+        const UIPlacement* p = placed ? placement_of(r, screen, &o) : NULL;
+        if ((p ? p->target : UIR_TARGET_TOP) != target) continue;
+        UIView ov = *v;
+        if (p) {
+            ov.originX += p->dx * v->scaleX;
+            ov.originY += p->dy * v->scaleY;
+        }
+        if (o.type == BUI_TYPE_BITMAP)    draw_bitmap(r, &o, &ov);
+        else if (o.type == BUI_TYPE_TEXT) draw_text(r, &o, &ov);
     }
 }
 
@@ -1097,7 +1138,7 @@ void uirender_draw_screen(UIRenderer* r, BUI* ui, const BUIScreen* screen,
 
     C2D_SetTintMode(C2D_TintMult);
     for (int pass = 0; pass < BUI_NUM_LAYERS; pass++)
-        draw_layer(r, ui, screen, kLayerOrder[pass], &v);
+        draw_layer(r, ui, screen, kLayerOrder[pass], &v, UIR_TARGET_TOP);
     end_gs_scale();
 }
 
@@ -1115,10 +1156,43 @@ void uirender_draw_visible(UIRenderer* r, float alpha)
                 const BUIScreen* screen = &ui->screens[s];
                 if (!screen->visible) continue;
                 UIView v = screen_view(r, screen, alpha);
-                draw_layer(r, ui, screen, kLayerOrder[pass], &v);
+                draw_layer(r, ui, screen, kLayerOrder[pass], &v,
+                           UIR_TARGET_TOP);
             }
         }
     }
     end_gs_scale();
+}
+
+// The same walk for the bottom screen's share. The target's size stands
+// in for the top screen's while it runs, since screen_view and the
+// bitmap paths read it.
+bool uirender_draw_visible_bottom(UIRenderer* r, float targetW,
+                                  float targetH, float alpha)
+{
+    float w = r->targetW, h = r->targetH;
+    bool  any = false;
+
+    r->targetW = targetW;
+    r->targetH = targetH;
+    C2D_SetTintMode(C2D_TintMult);
+    for (int pass = 0; pass < BUI_NUM_LAYERS; pass++) {
+        for (int b = 0; b < r->numBundles; b++) {
+            if (!r->bundles[b].hasUI) continue;
+            BUI* ui = &r->bundles[b].ui;
+            for (uint32_t s = 0; s < ui->numScreens; s++) {
+                const BUIScreen* screen = &ui->screens[s];
+                if (!screen->visible || !screen_placed(r, screen)) continue;
+                any = true;
+                UIView v = screen_view(r, screen, alpha);
+                draw_layer(r, ui, screen, kLayerOrder[pass], &v,
+                           UIR_TARGET_BOTTOM);
+            }
+        }
+    }
+    end_gs_scale();
+    r->targetW = w;
+    r->targetH = h;
+    return any;
 }
 #endif  // __3DS__

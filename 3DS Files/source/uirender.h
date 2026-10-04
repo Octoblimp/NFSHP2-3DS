@@ -26,6 +26,22 @@
 #define UIR_MAX_FONTS    16
 #define UIR_MAX_HIDDEN   8
 
+// The two screens an object can draw on. See UIPlacement.
+#define UIR_TARGET_TOP    0
+#define UIR_TARGET_BOTTOM 1
+
+// Where one object of one screen draws, or every object of one group:
+// the top screen or the bottom, moved by (dx, dy) in the screen's 640x480
+// space. The port's own -- the PS2 had one screen -- and set by
+// uirender_set_placements. A nameHash of 0 matches by groupHash instead.
+typedef struct {
+    uint32_t screenHash;
+    uint32_t nameHash;
+    uint32_t groupHash;
+    uint8_t  target;     // UIR_TARGET_*
+    float    dx, dy;
+} UIPlacement;
+
 // The button icons embedded in UI strings. IsHelpCharacter (0x0013f9a8) is
 // literally `(u8)(c - 128) < 18`, and RenderHelpCharacter maps each to a
 // glyph of the BUTTONSOUT font through an 18-byte table at 0x002e8a10.
@@ -87,6 +103,11 @@ typedef struct {
     // uirender_hide_object().
     uint32_t  hidden[UIR_MAX_HIDDEN];
     int       numHidden;
+
+    // Where objects draw, the caller's table. See
+    // uirender_set_placements().
+    const UIPlacement* placements;
+    int                numPlacements;
 
     float     targetW, targetH;   // the C3D render target, e.g. 400x240
     float     scrollTime;         // seconds, for UV-scrolling textures
@@ -241,4 +262,19 @@ const char* uirender_object_string(UIRenderer* r, const BUI* ui,
 // list. This is a draw-time skip rather than a visibility write because the
 // frontend's own animations set that field every frame.
 void uirender_hide_object(UIRenderer* r, uint32_t nameHash);
+
+// The table of where objects draw (UIPlacement): the first entry that
+// matches an object wins, and an object with none draws on the top screen.
+// The table stays the caller's and must outlive the renderer's use of it;
+// NULL clears it. Like uirender_hide_object, this is a draw-time choice,
+// so the game's own writes to the objects are left alone.
+void uirender_set_placements(UIRenderer* r, const UIPlacement* table, int n);
+
+// Draws the objects placed on the bottom screen, into a target of
+// targetW x targetH with citro2d's scene already begun on it. Only screens
+// with a placement are walked. A 640x480 screen is drawn at targetW / 640
+// by targetH / 480, so on the 320x240 bottom screen each object keeps its
+// place and its 4:3 shape. Answers whether any such screen was visible.
+bool uirender_draw_visible_bottom(UIRenderer* r, float targetW,
+                                  float targetH, float alpha);
 #endif  // __3DS__

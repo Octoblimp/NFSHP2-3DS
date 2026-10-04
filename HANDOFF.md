@@ -12672,3 +12672,70 @@ both:
 - **8m-5:** the two-screen split, as the user placed it (CONTINUE.md).
 - **The bumper view's sliver**, against PCSX2, when the bumper view is
   next looked at.
+
+## Session 31, continued (2026-10-03) -- the HUD on two screens (step 8m-5)
+
+The race HUD is split over the two screens as the user placed it.
+`docs/formats/hud-split.md` has the write-up.
+
+- **Top screen:** the speedometer and tach, the race position moved from
+  the top left to the bottom left, the radar and the pursuit meter.
+- **Bottom screen:** the lap block, the split times, the live split
+  list, the score and Be The Cop's panel. The minimap joins them in 8m-6.
+
+How it is made:
+
+- RenderHud and SetHudFeatures are untouched. The split is made when
+  the objects are drawn.
+- `uirender.h` gains `UIPlacement`: a screen and an object, or a whole
+  group, with the screen it draws on and a move in the 640x480 space.
+  `uirender_set_placements` takes a table of them, and the first match
+  wins.
+- `draw_layer` skips the objects placed on the other screen and moves
+  the view's origin for a placed one.
+- `uirender_draw_visible_bottom` walks only the screens with a
+  placement. It draws the bottom screen's share at 320/640 by 240/480,
+  so retail's places and the 4:3 shape are kept.
+- `hudsplit.c` holds the table for the one-player HUD screen
+  (`f1f1f8e5`). `main.c` installs it at boot. In a race the bottom screen
+  draws the HUD's half when the HUD is up, and the frontend's panel
+  otherwise.
+- The race position moves down 360: its block spans y 7 to 113, so it
+  ends 7 above the bottom edge.
+
+No retail function is behind the split, so there is no checker and no
+mutation pass.
+
+The ARM build is clean.
+
+On Azahar (`run_azahar_race.ps1 -HoldKeys 65`), shots in
+`out/azahar_8m5`:
+
+- The bottom screen shows the lap block at the top right and the live
+  split row ("1 Player1") at the top left.
+- The top screen shows only the gauges.
+- 20 FPS. No crash.
+
+Two test runs:
+
+- **Three AI cars.** A SkipFE build with three AI cars aborted in
+  carmodes: "AIDriver is not ported". A one-car race hides the race
+  position (SetHudFeatures), so the position is not seen yet.
+- **The move.** A one-run build drew the lap block on the top screen
+  with the position's 360. It landed 360 lower, at the bottom right.
+
+The user ran that test build and saw the moved lap block. It was rebuilt
+at once to the real table. Test builds with a visible change are not
+left on disk any more.
+
+**Not checked:** the race position, the score, the split times and Be
+The Cop's panel in their new places. They need the AI, the cops or a
+time trial with a record.
+
+The whole chain: 97 checkers, none added, and the four table
+generators. 0 of 101 failed, in 1325 s (`out/chain_8m5.txt`).
+
+### Next
+
+- **8m-6a:** TrackMap's mode table, constructor, destructor, GetAngle,
+  GetCameraDirection, GetCarUVPosition and GetBoxOnMap (CONTINUE.md).

@@ -86,6 +86,7 @@
 #include "hudnis.h"
 #include "hudrender.h"
 #include "hudscore.h"
+#include "hudsplit.h"
 #include "hudtach.h"
 #include "joyevent.h"
 #include "joyhid.h"
@@ -3060,6 +3061,11 @@ int main(int argc, char** argv)
     uirender_hide_object(&ui, BSCR_OBJ_SCROLLING_TEXT);
     uirender_hide_object(&ui, BSCR_OBJ_WHITEOUT_BAR);
 
+    // The race HUD on two screens (hudsplit.h): what the player watches
+    // stays on the top screen, and the lap block, the splits, the score
+    // and Be The Cop's panel go to the bottom one.
+    hudsplit_install(&ui);
+
     // FONT_A is the frontend's body face -- 357 of the disc's 934 text
     // objects use it -- and the panel is its only user here. A bundle
     // without it falls the panel back to whatever font loaded first, which
@@ -3449,7 +3455,9 @@ int main(int argc, char** argv)
             uirender_draw_visible(&ui, 1.0f);
             C2D_TargetClear(g_bot, BOT_BACK);
             C2D_SceneBegin(g_bot);
-            {
+            // In a race the bottom screen is the HUD's other half
+            // (hudsplit.h), and the frontend's panel when the HUD is down.
+            if (!uirender_draw_visible_bottom(&ui, BOT_W, BOT_H, 1.0f)) {
                 char        title[48];
                 const char* body = g_blurbShown;
                 float       fade = g_blurbFade;

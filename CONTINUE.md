@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-03), after 8m-4c-3, the tach's red band; 8m-5, the two-screen
-split, is next. "Where the port stands" below has the count of what is left.
+(2026-10-03), after 8m-5, the two-screen split; 8m-6, the minimap
+(TrackMap), is next. "Where the port stands" below has the count of what is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
@@ -1631,15 +1631,69 @@ and so replaced every boot.
        `tools/ghidra_headless.sh` with no cmd. It merges functions that
        have no symbol into their callers and gets EABI float arguments
        wrong, so read the disassembly from `tools/retaildis.py` beside it.
-     - **8m-5:** the two-screen split, as the user placed it
-       (2026-10-03). Top screen: the speedometer where retail has it,
-       the race position (1st to last) moved to the bottom left, and
-       the cop radar top middle as normal. Bottom screen: the extra
-       information (the lap records, lap and split times and the
-       like), the minimap, and Be The Cop's panel (the helicopter,
-       roadblock and spike-strip calls, the tickets and the damage).
-       RenderHud stays retail's; the split moves objects between the
-       screens when they are drawn.
+     - **8m-5, the two-screen split, is done** (HANDOFF.md, Session
+       31, continued: the HUD on two screens (step 8m-5)), as the user
+       placed it on 2026-10-03. `docs/formats/hud-split.md` has the
+       write-up.
+       - Top screen: the speedometer and tach, the race position moved
+         from the top left to the bottom left, the radar and the
+         pursuit meter.
+       - Bottom screen: the lap block, the split times, the live split
+         list, the score and Be The Cop's panel; the minimap with 8m-6.
+       - `hudsplit.{c,h}` hold the table. `uirender.{c,h}` gain
+         `UIPlacement`, `uirender_set_placements` and
+         `uirender_draw_visible_bottom`, which draws the 640x480 frame
+         at half size. RenderHud stays retail's.
+       - No checker, since no retail function is behind it.
+       - Azahar (`out/azahar_8m5`): the lap block and the split row on
+         the bottom screen, the gauges alone on the top. 20 FPS.
+       - **Not checked:** the race position at the bottom left, the
+         score, the split times and Be The Cop's panel. A one-car race
+         hides the position, and the races that show the others need
+         the AI, the cops or a time trial.
+     - **8m-6, the minimap (TrackMap)**, which the split puts on the
+       bottom screen. Retail's TrackMap is 176 bytes (the demo's stabs
+       give the fields) and fourteen functions, about 11.5 KB:
+       | function | address | size |
+       |---|---|---|
+       | ctor (TrackInfo *, Car *, Player *) | `0x001babb8` | 528 |
+       | dtor | `0x001badc8` | 28 |
+       | Render | `0x001bade8` | 2188 |
+       | GetAngle | `0x001bb678` | 300 |
+       | DrawMap | `0x001bb7a8` | 1192 |
+       | DrawMarker | `0x001bbc50` | 824 |
+       | DrawOverOrUnderLay | `0x001bbf88` | 440 |
+       | ClipPolygon | `0x001bc140` | 2236 |
+       | EmitPoint | `0x001bca08` | 72 |
+       | GetCarUVPosition | `0x001bca50` | 148 |
+       | GetBoxOnMap | `0x001bcae8` | 364 |
+       | MapToScreen | `0x001bcc58` | 1112 |
+       | GetCameraDirection | `0x001bd0b0` | 324 |
+       | InitTrackMapModeInfo | `0x001bd1f8` | 1428 |
+       Player::RenderTrackMap (`0x00181c08`) calls Render, and
+       eDisplayFrame calls that for each player after StuffDemoPolys.
+       - **8m-6a:** InitTrackMapModeInfo (it fills the eleven 68-byte
+         TrackMapModeInformations at `0x003140b8` and nine 3-byte
+         marker colours at `0x003143a8`), the constructor (textures
+         TRACK%d_MAP, CAR_MARKER, CAR_MARKERB, TRACKMAPFRAME, MAPBACK,
+         START_LINE, BKGBMP; START_LINE is needed only when
+         TheRaceParameters.Point2Point (+40) is 0), the destructor,
+         GetAngle with EvalCubic (`0x001bdad0`), GetCameraDirection,
+         GetCarUVPosition and GetBoxOnMap. Bind gNewTrackMapFn and
+         gDeleteTrackMapFn.
+       - **8m-6b:** MapToScreen (a tilt by AngleX and a projection at
+         H), ClipPolygon with EmitPoint, GetSideOfLine and IsPointInPoly,
+         CalculateCentroidOfQuad (`0x001bda40`), DrawOverOrUnderLay and
+         DrawMap.
+       - **8m-6c:** DrawMarker and Render (the player, the pursued car,
+         the AI and the cops, the roadblocks, the start and finish
+         lines), RenderTrackMap from the race frame, and the draw.
+         ePoly::Render (`0x0010fa68`) with a layer puts the poly in the
+         Flailer layer list: 15 the underlay, 14 the map, 13 the
+         markers, 0 the frame. uirender needs a per-layer list of
+         polys, placed on the bottom screen like the HUD's objects. The
+         map's UVs carry q (perspective), so the draw sets w = 1/q per
+         vertex for the PICA's perspective-correct interpolation.
    - **13b, New 3DS mode in full and a steady 30 FPS** (task 28, set by
      the user on 2026-10-03). It comes right after the HUD, because every
      race test after it (the AI, the cops) needs the race in real time.
@@ -2965,7 +3019,7 @@ each class shows what it reaches.
 | 10 | The retail pass over what is already ported: the 130 changed functions cited from a `.c` in `docs/retail_audit.txt`, module by module, each checker gaining a retail model run where it can | 4-6 |
 | 11 | The rest of task 26: the racer and traffic AI, the six classes behind Car's constructor seams | 4-6 |
 | 12 | The cops and the pursuit: CopManager, the cop drivers, roadblocks and spikes | 4-6 |
-| 13 | The two-screen HUD, to the split decided below. In progress as 8m: 8m-1 to 8m-4c are done; 8m-5 (the split) is left | 7, 6 done |
+| 13 | The two-screen HUD, to the split decided below. In progress as 8m: 8m-1 to 8m-5 are done; 8m-6 (the minimap, three slices) is left | 10, 7 done |
 | 13b | New 3DS mode in full and a steady 30 FPS race (task 28), right after step 13: the real clock and the pacing, a frame profiler, New 3DS mode checked part by part, then only the optimizations the New 3DS needs. Set by the user on 2026-10-03 | 4 |
 | 14 | The car and world sounds and the speech | 2-3 |
 | 15 | **A whole race with the AI and the cops.** Steps 10-14 add about 15-23 slices | |
@@ -2979,18 +3033,18 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-03, after 8m-4c)
+### Where the port stands (2026-10-03, after 8m-5)
 
 - **Done:** steps 1-9. One car drives the retail track at the retail
   start, lit, with the chase camera, and the HUD shows the race on the
   top screen with its animations. Tasks 1-25 and 32-35 are closed: 29 of
   36. The open ones are 26-31 and 36.
-- **In progress:** step 13, the HUD. Six of its seven slices are done.
+- **In progress:** step 13, the HUD. Seven of its ten slices are done.
 - **Left, in the table's units:**
 
   | Step | Slices left |
   |---|---|
-  | 13, the HUD: 8m-5 | 1 |
+  | 13, the HUD: 8m-6a to 8m-6c | 3 |
   | 13b, New 3DS mode and 30 FPS | 4 |
   | 10, the retail pass | 4-6 |
   | 11, the racer and traffic AI | 4-6 |
@@ -3001,13 +3055,13 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped, 2026-10-03) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **29-43** |
+  | **Total** | **31-45** |
 
-- **How far along:** about 18-21 of the road's 49-66 slices are done,
+- **How far along:** about 19-22 of the road's 50-67 slices are done,
   roughly a third. The estimates run low. Step 13 was put at 1-2 slices
   and is taking 7, and step 8 took eighteen commits (8a to 8l) for its
   2-3. Read the 31-45 as a floor.
-- **The pace:** 62 commits from 2026-09-27 to 2026-10-03, most of them a
+- **The pace:** 63 commits from 2026-09-27 to 2026-10-03, most of them a
   slice each.
 - **Not yet in the count:** the replay, and the frame rate. Azahar reads
   about 20 FPS in the race, and the world steps once per drawn frame, so
