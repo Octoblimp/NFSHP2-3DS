@@ -3599,14 +3599,24 @@ int main(int argc, char** argv)
             // (hudsplit.h), and the frontend's panel when the HUD is down.
             if (uirender_draw_visible_bottom(&ui, BOT_W, BOT_H, 1.0f)) {
                 // eDisplayFrame's RenderTrackMap for each player, after
-                // the Flailer layers: the minimap, where hudsplit.h puts
-                // it, at the HUD's scale.
+                // the Flailer layers: the minimap, made bigger in the
+                // bottom screen's free lower left (hudsplit_map_place).
                 if (g_track.loaded) {
+                    float mapScale = 1.0f, mapDx = 0.0f, mapDy = 0.0f;
+
                     for (int i = 0; i < PlayerNumPlayers; i++) {
                         player_render_track_map(PlayerPlayersByIndex[i]);
                     }
+                    if (PlayerNumPlayers == 1
+                        && PlayerPlayersByIndex[0]->pTrackMap != NULL) {
+                        hudsplit_map_place(
+                            PlayerPlayersByIndex[0]->pTrackMap
+                                ->CurrentlyDisplayedMode,
+                            &mapScale, &mapDx, &mapDy);
+                    }
                     C2D_Flush();
-                    trackview_draw_flailer_polys(&g_track, BOT_W, BOT_H);
+                    trackview_draw_flailer_polys(&g_track, BOT_W, BOT_H,
+                                                 mapScale, mapDx, mapDy);
                     C2D_Prepare();
                     C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
                 }

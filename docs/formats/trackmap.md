@@ -472,8 +472,11 @@ The port follows this:
 - Then `trackview_draw_flailer_polys` draws the queue on the bottom
   screen:
   - by GS Z, lowest first, and in the order given within one Z;
-  - at the HUD's scale, 640 by 480 to 320 by 240, so the map sits where
-    retail puts it, as the bottom screen's other HUD objects do;
+  - moved and scaled first, in the 640 by 480, by `hudsplit_map_place`.
+    In a one-player race this makes the map bigger, in the bottom
+    screen's free lower left (`hud-split.md`, "The minimap's place");
+  - then at the HUD's scale, 640 by 480 to 320 by 240, as the bottom
+    screen's other HUD objects are;
   - through `georender_draw_hud_quad_w`, with the texture's blend and
     alpha test.
 - The map's UVs carry DrawMap's q for the GS's perspective-correct

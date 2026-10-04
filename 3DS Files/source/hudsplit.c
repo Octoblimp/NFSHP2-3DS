@@ -4,6 +4,9 @@
 
 #ifdef __3DS__
 
+#include "playerhud.h"
+#include "trackmap.h"
+
 // The race position's offset, in the 640x480 space. Its three objects
 // span y 7 to 113 at the top left: BIGRACE_POSITION's font is 106 high.
 // Moved down by 360, the block ends 7 above the bottom edge, as it
@@ -53,6 +56,50 @@ void hudsplit_install(UIRenderer* r)
 {
     uirender_set_placements(r, kSplit,
                             (int)(sizeof kSplit / sizeof kSplit[0]));
+}
+
+// The minimap's room, in the 640x480. Above it, the live split list's
+// rows reach y 190. To its right, the score's event lines are
+// right-justified at x 547, from y 281 up, at half scale.
+#define MAP_LEFT    16.0f
+#define MAP_RIGHT   368.0f
+#define MAP_TOP     204.0f
+#define MAP_BOTTOM  466.0f
+
+void hudsplit_map_place(int32_t mode, float* scale, float* dx, float* dy)
+{
+    const TrackMapModeInformation* mi;
+    float cx, cy, w, h, s;
+
+    *scale = 1.0f;
+    *dx    = 0.0f;
+    *dy    = 0.0f;
+    if (mode < 0 || mode >= TRACKMAP_NUM_MODES || mode == TRACKMAP_MODE_OFF
+        || mode == TRACKMAP_MODE_2_PLAYER) {
+        return;
+    }
+    mi = &TrackMapModeInfo[mode];
+    if (mi->ClippingWidth < 1000.0f) {
+        cx = mi->ClippingX;
+        cy = mi->ClippingY;
+        w  = mi->ClippingWidth;
+        h  = mi->ClippingHeight;
+    } else {
+        cx = mi->X;
+        cy = mi->Y;
+        w  = mi->Width;
+        h  = mi->Height;
+    }
+    if (w <= 0.0f || h <= 0.0f) {
+        return;
+    }
+    s = (MAP_RIGHT - MAP_LEFT) / w;
+    if ((MAP_BOTTOM - MAP_TOP) / h < s) {
+        s = (MAP_BOTTOM - MAP_TOP) / h;
+    }
+    *scale = s;
+    *dx    = MAP_LEFT + w * s * 0.5f - cx * s;
+    *dy    = (MAP_TOP + MAP_BOTTOM) * 0.5f - cy * s;
 }
 
 #endif  // __3DS__

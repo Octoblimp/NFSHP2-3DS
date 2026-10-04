@@ -14,8 +14,9 @@ function is behind it. The user placed it on 2026-10-03:
   - the split times and the live split list;
   - the score and the event bonuses;
   - Be The Cop's panel;
-  - the minimap (step 8m-6c, `trackmap.md`), drawn after the rest at
-    the same half size, where retail puts it.
+  - the minimap (step 8m-6c, `trackmap.md`), drawn after the rest. The
+    user asked for it bigger on 2026-10-04, so it fills the screen's
+    free lower left (see "The minimap's place").
 
 ## How it is made
 
@@ -63,6 +64,54 @@ BIGRACE_POSITION's font is 106 high. Moved down by 360, the block ends
 **The live split list** sits under LIVE_SPLIT_POSITION_A when the race
 position shows, and at LIVE_SPLIT_POSITION_B otherwise
 (`show_live_split`). It keeps that place on the bottom screen.
+
+## The minimap's place
+
+At retail's place and half size, mode 0's map was a 70 by 46 pixel box
+at the bottom screen's left. Everything below the live split list was
+empty. `hudsplit_map_place` moves and scales the map's polys in the
+640×480 before they go to the screen, so Render, DrawMap and the
+checked trackmap code are not changed:
+
+- **The room** is x 16 to 368 and y 204 to 466. Above it, the live
+  split list's rows reach y 190. To its right, the score's event lines
+  are right-justified at x 547, from y 281 up, at half scale. The lap
+  block and Be The Cop's panel are at the top right.
+- **The box** is the displayed mode's clipping box. A mode that does
+  not clip (a ClippingWidth of 1000) uses its Width by Height about its
+  X, Y instead.
+- The box is made as big as fits in the room, keeping its shape, and
+  put at the room's left, halfway down. Each vertex goes to
+  `x × scale + dx`, `y × scale + dy`.
+- Modes 6 (off) and 7 (two players) are left as they are, and so is
+  every mode in a race of more than one player.
+
+| modes | box | scale | on the bottom screen |
+|-------|-----|-------|----------------------|
+| 0, 1 (3D) | 139 × 91.3 at 92, 240 | 2.53 | 176 × 116 pixels at 8, 110 |
+| 2, 3, 10 (2D) | 100 × 100 at 72, 243 | 2.62 | 131 × 131 at 8, 102 |
+| 4, 8 (fixed) | 130 × 130 at 79, 256 | 2.02 | 131 × 131 at 8, 102 |
+| 5, 9 (maximum size) | 262 × 262 at 320, 243 | 1 | 131 × 131 at 8, 102 |
+
+The road's lines, the dots and the frame scale with the map, as a
+closer view would show them. Modes 5 and 9 keep retail's size, since
+their box already fills the room's height; they only move left, out of
+the screen's middle.
+
+On Azahar (`run_azahar_race.ps1 -HoldKeys 65`, track 12, mode 0), with
+shots in `out/azahar_13b3`, and before and after side by side in
+`out/minimap_before_after.png`:
+
+- The map's box is 176 by 115 pixels, with its top left 8 in from the
+  left edge and 110 down. Before, it was 70 by 46.
+- The road, the start line and the player's arrow keep their shape and
+  their places in the box.
+- The lap block and the live split list's row are where they were.
+- 20 FPS, as before.
+
+Not checked yet: the 2D, fixed and maximum-size modes, Be The Cop's
+modes, and the score's event lines beside the map. Each needs a race
+that the port cannot start yet, or a map mode the options set.
 
 ## What stays on the top
 

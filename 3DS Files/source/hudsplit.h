@@ -8,8 +8,9 @@
 // position moves from the top left to the bottom left. The rest goes to
 // the bottom screen: the lap block (the lap, the times and the record),
 // the split times and the live split list, the score, and Be The Cop's
-// panel. The minimap (trackmap.c) is drawn there too, after the HUD, at
-// the same half size: main.c's trackview_draw_flailer_polys.
+// panel. The minimap (trackmap.c) is drawn there too, after the HUD:
+// main.c's trackview_draw_flailer_polys. It is moved and made bigger, to
+// fill the screen's free lower left (hudsplit_map_place).
 //
 // RenderHud writes the Flailer objects as on the PS2. The split is made
 // when they are drawn (uirender_set_placements), so none of retail's
@@ -21,6 +22,8 @@
 #ifndef HUDSPLIT_H
 #define HUDSPLIT_H
 
+#include <stdint.h>
+
 #include "uirender.h"
 
 // The one-player HUD screen in INGAMEB (playerinit.c's
@@ -30,6 +33,15 @@
 #ifdef __3DS__
 // Hands uirender the split's table, which is static and stays good.
 void hudsplit_install(UIRenderer* r);
+
+// Where the one-player minimap goes on the bottom screen, for the mode
+// Render drew: its box, in the 640x480, goes to x * *scale + *dx and
+// y * *scale + *dy. The box is the mode's clipping box, or its Width by
+// Height about X, Y for a mode that does not clip. It is made as big as
+// fits in the room under the live split list and left of the score's
+// lines, keeping its shape, and put at the room's left, halfway down.
+// Mode 6, and the two players' mode 7, stay where they are.
+void hudsplit_map_place(int32_t mode, float* scale, float* dx, float* dy);
 #endif
 
 #endif  // HUDSPLIT_H

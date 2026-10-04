@@ -2043,7 +2043,9 @@ static void render_epoly(ePoly* p, TextureInfo* info, int flags)
 // scales the Flailer's 640 by 480 to the target's pixels, 512 by 448 on
 // the PS2; here the target is `width` by `height`. Each vertex's ST is
 // the GS's S / Q and T / Q, carried across the quad by a w of 1 / Q.
-void trackview_draw_flailer_polys(TrackView* v, float width, float height)
+// The port's move and scale go first, in the 640 by 480.
+void trackview_draw_flailer_polys(TrackView* v, float width, float height,
+                                  float scale, float dx, float dy)
 {
     static const uint8_t kStrip[4] = { 0, 1, 3, 2 };
     int   order[TRACKVIEW_FLAILER_POLYS];
@@ -2098,8 +2100,8 @@ void trackview_draw_flailer_polys(TrackView* v, float width, float height)
             float     w  = qq > 0.0f ? 1.0f / qq : 1.0f;
             float     d  = qq > 0.0f ? qq : 1.0f;
 
-            q[k].pos[0] = p->Vertices[m].x * sx * w;
-            q[k].pos[1] = p->Vertices[m].y * sy * w;
+            q[k].pos[0] = (p->Vertices[m].x * scale + dx) * sx * w;
+            q[k].pos[1] = (p->Vertices[m].y * scale + dy) * sy * w;
             q[k].pos[2] = w;
             q[k].st[0]  = p->UVs[m][0] / d;
             q[k].st[1]  = p->UVs[m][1] / d;

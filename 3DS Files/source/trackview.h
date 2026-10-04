@@ -363,9 +363,12 @@ void trackview_draw(TrackView* v);
 // queue starts again. The PS2 attaches them at eDisplayFrame's end, after
 // the HUD's Flailer layers, with each one's GS Z from its z; here they
 // draw in the order of those Zs, the lowest first, and in the order given
-// within one. citro2d is flushed first and is to be prepared again after,
-// as for georender_draw_hud_quad.
-void trackview_draw_flailer_polys(TrackView* v, float width, float height);
+// within one. Each vertex is first moved to x * scale + dx and y * scale
+// + dy in the 640 by 480 (hudsplit_map_place; 1, 0, 0 for where Render
+// put it). citro2d is flushed first and is to be prepared again after, as
+// for georender_draw_hud_quad.
+void trackview_draw_flailer_polys(TrackView* v, float width, float height,
+                                  float scale, float dx, float dy);
 
 // The environment map's targets, and the fold's triangles from the sample
 // table, which eenvmap_init has to have built. False if there is no room.
