@@ -59,7 +59,13 @@ ASFLAGS	:=	-g $(ARCH)
 # meta/app.rsf's StackSize covers the CIA. What actually keeps both safe is that
 # the frontend loader chain no longer needs ~35KB of stack -- see texpack.c's
 # s_active[] comment and loadFngScreen()'s scratch below.
-LDFLAGS	=	-specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
+LDFLAGS	=	-specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map) \
+			$(C3DWRAP)
+
+# citro3d's uniform upload, skipped when nothing changed: see c3dwrap.c.
+C3DWRAP	:=	-Wl,--wrap=C3D_UpdateUniforms \
+			-Wl,--wrap=C3Di_LoadShaderUniforms \
+			-Wl,--wrap=C3Di_DirtyUniforms
 
 LIBS	:= -lcitro2d -lcitro3d -lctru -lm
 

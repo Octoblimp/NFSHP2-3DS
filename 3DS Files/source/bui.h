@@ -161,6 +161,11 @@ BUIScreen* bui_find_screen(BUI* ui, uint32_t nameHash);
 // Unpacks object `index` (absolute, i.e. screen->first + n).
 bool bui_object(const BUI* ui, uint32_t index, BUIObject* out);
 
+// Object `index`'s Visible (BUIVisibility) and Z, as bui_object reads
+// them, without the rest. False where bui_object fails on the fields
+// every object has.
+bool bui_object_layer(const BUI* ui, uint32_t index, int* visible, int* z);
+
 // Finds an object by NameHash inside one screen. `type` is a BUIObjectType
 // to require, or BUI_TYPE_NONE for "any" -- FindFlailerObject (0x001419c8)
 // only compares Type when the argument is non-zero. Returns an absolute

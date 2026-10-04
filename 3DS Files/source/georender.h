@@ -164,6 +164,21 @@ void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
 void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
                          int numTextures, uint64_t mask);
 
+// A run of georender_draw_mask and georender_draw_lit calls with nothing
+// else drawn between them (step 13b-4): the models eModel::Render draws as
+// the cull hands them over. In a run georender sends only what changed
+// since its last draw. The program, the attributes and the uniforms that
+// change with the camera, the light and the fog go once; the cull mode
+// once; the model-view when it changes; a mesh's vertex buffer as the one
+// register of where it starts; the pass when the next batch's differs;
+// the combiner and the ST scale when they differ; and the texture when it
+// is another. Outside a
+// run every draw sends its whole state, as before. A batch draws the same
+// either way. A lit batch, or georender_set_light, _set_fog,
+// _set_depth_range or _set_zwrite, makes the run forget what it sent.
+void georender_run_begin(void);
+void georender_run_end(void);
+
 // ---------------------------------------------------------- the lit strips
 
 // One lit batch's inputs to geolit.v.pica, from the model's eLightContext

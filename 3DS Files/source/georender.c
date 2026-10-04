@@ -41,6 +41,52 @@ static int s_uFogRow     = -1;
 static C3D_Mtx s_projection;
 static C3D_Mtx s_modelView;
 
+// What a run (georender_run_begin) has sent, which its next draw need not
+// send again. run_forget clears it all.
+static struct {
+    bool           on;
+    bool           bound;       // s_program, s_attr and the frame's uniforms
+    C3D_Mtx        projection;  // which they were sent for
+    bool           mvSet;
+    C3D_Mtx        modelView;
+    bool           bufSet;      // citro3d's buffers, sent with a draw
+    u32            bufBase;     // the base buffer 0's offset is from
+    bool           culled;      // C3D_CullFace(GPU_CULL_NONE)
+    bool           passSet;
+    GeoPass        pass;
+    int            combiner;    // -1 unknown; 0 the colour; 1, 2 the texture
+    const C3D_Tex* tex;         // texture unit 0's; NULL unknown
+    bool           uvSet;
+    float          uvScale[2];
+} s_run;
+
+static void run_forget(void)
+{
+    bool on = s_run.on;
+
+    memset(&s_run, 0, sizeof s_run);
+    s_run.on       = on;
+    s_run.combiner = -1;
+}
+
+void georender_run_begin(void)
+{
+    s_run.on = true;
+    run_forget();
+}
+
+void georender_run_end(void)
+{
+    // A run writes buffer 0's offset itself (bind_mesh), so citro3d's
+    // copy is stale: marked changed, it is sent again before its next
+    // draw, and the GPU's matches it.
+    if (s_run.bufSet) {
+        C3D_GetBufInfo();
+    }
+    s_run.on = false;
+    run_forget();
+}
+
 // geolit.v.pica, the lit strips' and the environment passes'.
 static DVLB_s*         s_litDvlb;
 static shaderProgram_s s_litProgram;
@@ -428,45 +474,85 @@ void georender_set_light(float x, float y, float z,
     s_lightClr[1] = g;
     s_lightClr[2] = b;
     s_ambient     = ambient;
+    s_run.bound   = false;
 }
 
 // The program, the vertex buffer and the uniforms, which every batch of a
-// mesh shares.
+// mesh shares. In a run the program, the attributes and the uniforms that
+// change only with the camera, the light and the fog go once, and the
+// model-view when it changes. Every mesh's buffer has the same layout, so
+// after the run's first, a mesh's buffer is where it starts: one register
+// in place of citro3d's twelve buffers.
 static void bind_mesh(const GeoMesh* mesh)
 {
     C3D_BufInfo* buf;
 
-    C3D_BindProgram(&s_program);
-    C3D_SetAttrInfo(&s_attr);
+    if (!s_run.bound
+        || memcmp(&s_run.projection, &s_projection, sizeof s_projection)) {
+        C3D_BindProgram(&s_program);
+        C3D_SetAttrInfo(&s_attr);
+        C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uProjection, &s_projection);
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightVec,
+                      s_lightVec[0], s_lightVec[1], s_lightVec[2], 0.0f);
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightClr,
+                      s_lightClr[0], s_lightClr[1], s_lightClr[2], 1.0f);
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uAmbient,
+                      s_ambient, s_ambient, s_ambient, 1.0f);
+        set_fog_row(s_uFogRow, &s_projection);
+        s_run.bound      = s_run.on;
+        s_run.projection = s_projection;
+    }
 
-    buf = C3D_GetBufInfo();
-    BufInfo_Init(buf);
-    BufInfo_Add(buf, mesh->vbo, sizeof(GeoRenderVertex), 4, 0x3210);
-
-    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uProjection, &s_projection);
-    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uModelView,  &s_modelView);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightVec,
-                  s_lightVec[0], s_lightVec[1], s_lightVec[2], 0.0f);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightClr,
-                  s_lightClr[0], s_lightClr[1], s_lightClr[2], 1.0f);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uAmbient,
-                  s_ambient, s_ambient, s_ambient, 1.0f);
-    set_fog_row(s_uFogRow, &s_projection);
+    if (s_run.bufSet) {
+        GPUCMD_AddWrite(GPUREG_ATTRIBBUFFER0_OFFSET,
+                        osConvertVirtToPhys(mesh->vbo) - s_run.bufBase);
+    } else {
+        buf = C3D_GetBufInfo();
+        BufInfo_Init(buf);
+        BufInfo_Add(buf, mesh->vbo, sizeof(GeoRenderVertex), 4, 0x3210);
+        // citro3d sends these with the next draw (draw_batch), and only
+        // then can a write of the offset follow them.
+        s_run.bufBase = buf->base_paddr;
+    }
+    if (!s_run.mvSet
+        || memcmp(&s_run.modelView, &s_modelView, sizeof s_modelView)) {
+        C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uModelView, &s_modelView);
+        s_run.mvSet     = s_run.on;
+        s_run.modelView = s_modelView;
+    }
 }
 
 // A batch's combiner: its texture, or the vertex colour alone. With `gs`
 // the texture modulates as the GS's does, Ct * Cv >> 7: the shaders hand
 // the colour over as c / 255, so the colour is doubled, and the alpha not,
-// because the packs' alpha was doubled when they were uploaded.
-static void set_combiner(const GeoTexture* gt, int uvScale, bool gs)
+// because the packs' alpha was doubled when they were uploaded. With
+// `cached`, in a run, only what differs from the last batch's is sent.
+static void set_combiner(const GeoTexture* gt, int uvScale, bool gs,
+                         bool cached)
 {
-    C3D_TexEnv* env = C3D_GetTexEnv(0);
+    int         combiner = gt ? (gs ? 2 : 1) : 0;
+    float       u        = gt ? gt->uvScale[0] : 1.0f;
+    float       v        = gt ? gt->uvScale[1] : 1.0f;
+    C3D_TexEnv* env;
 
+    if (gt && (!cached || s_run.tex != gt->tex)) {
+        C3D_TexBind(0, gt->tex);
+        s_run.tex = cached ? gt->tex : NULL;
+    }
+    if (!cached || !s_run.uvSet || s_run.uvScale[0] != u
+        || s_run.uvScale[1] != v) {
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, uvScale, u, v, 0.0f, 1.0f);
+        s_run.uvSet      = cached;
+        s_run.uvScale[0] = u;
+        s_run.uvScale[1] = v;
+    }
+    if (cached && s_run.combiner == combiner) {
+        return;
+    }
+    s_run.combiner = cached ? combiner : -1;
+    env = C3D_GetTexEnv(0);
     C3D_TexEnvInit(env);
     if (gt) {
-        C3D_TexBind(0, gt->tex);
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, uvScale,
-                      gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
         C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
         C3D_TexEnvFunc(env, C3D_Both, GPU_MODULATE);
         if (gs) {
@@ -475,7 +561,6 @@ static void set_combiner(const GeoTexture* gt, int uvScale, bool gs)
     } else {
         // No texture: the vertex colour alone, which is what the 25
         // sentinel strips and any unresolved hash fall back to.
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, uvScale, 1.0f, 1.0f, 0.0f, 1.0f);
         C3D_TexEnvSrc(env, C3D_Both, GPU_PRIMARY_COLOR, 0, 0);
         C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
     }
@@ -484,8 +569,9 @@ static void set_combiner(const GeoTexture* gt, int uvScale, bool gs)
 // One batch: its combiner and the draw.
 static void draw_batch(const GeoBatch* b, const GeoTexture* gt, bool gs)
 {
-    set_combiner(gt, s_uUvScale, gs);
+    set_combiner(gt, s_uUvScale, gs, s_run.on);
     C3D_DrawArrays(GPU_TRIANGLES, b->first, b->count);
+    s_run.bufSet = s_run.on;
 }
 
 static const GeoTexture* batch_texture(const GeoBatch* b,
@@ -561,6 +647,7 @@ static void apply_fog_colour(void)
 
 void georender_set_fog(const GeoFog* fog, uint32_t colour)
 {
+    run_forget();
     s_fog        = fog && fog->tex.data ? fog : NULL;
     s_fogColour  = colour & 0xffffffu;
     s_fogApplied = ~0u;
@@ -579,6 +666,7 @@ void georender_set_depth_range(float near, float far)
         s_fogNear = near;
         s_fogFar  = far;
     }
+    s_run.bound = false;
 }
 
 // The fog's s for the view's depth u, where texture unit 1 reads step j's
@@ -685,7 +773,15 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
         return;
     }
     bind_mesh(mesh);
-    C3D_CullFace(GPU_CULL_NONE);
+    if (!s_run.culled) {
+        C3D_CullFace(GPU_CULL_NONE);
+        s_run.culled = s_run.on;
+    }
+    // In a run the pass the last batch set holds.
+    if (s_run.passSet) {
+        last = s_run.pass;
+        set  = true;
+    }
 
     for (i = 0; i < mesh->numBatches && i < 64; i++) {
         const GeoBatch*   b = &mesh->batch[i];
@@ -706,11 +802,14 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
         }
         draw_batch(b, gt, true);
     }
+    s_run.passSet = s_run.on && set;
+    s_run.pass    = last;
 }
 
 void georender_set_zwrite(bool on)
 {
-    s_zwrite = on;
+    s_zwrite      = on;
+    s_run.passSet = false;
 }
 
 // ---------------------------------------------------------- the lit strips
@@ -726,6 +825,8 @@ static void bind_lit(const GeoMesh* mesh, const GeoLighting* L)
     C3D_BufInfo* buf;
     int          i;
 
+    // geolit's program and uniforms replace what a run has sent.
+    run_forget();
     C3D_BindProgram(&s_litProgram);
     C3D_SetAttrInfo(&s_attr);
     buf = C3D_GetBufInfo();
@@ -769,7 +870,7 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     if (L->lit) {
         bind_lit(mesh, L);
         set_pass(gt ? gt->pass : opaque);
-        set_combiner(gt, s_lUvScale, true);
+        set_combiner(gt, s_lUvScale, true, false);
         C3D_DrawArrays(GPU_TRIANGLES, b->first, b->count);
     } else {
         georender_draw_mask(mesh, textures, numTextures, (uint64_t)1 << bi);

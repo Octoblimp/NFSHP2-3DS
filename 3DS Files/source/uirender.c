@@ -1097,31 +1097,39 @@ static UIView screen_view(const UIRenderer* r, const BUIScreen* screen,
     return v;
 }
 
-// One screen's share of one layer, in file order: the objects placed on
-// `target` (UIR_TARGET_*), each moved by its placement.
+// One object of `layer`, if it is visible there and placed on `target`
+// (UIR_TARGET_*), moved by its placement.
+static void draw_object(UIRenderer* r, BUI* ui, const BUIScreen* screen,
+                        uint32_t index, int layer, const UIView* v,
+                        int target, bool placed)
+{
+    BUIObject o;
+    if (!bui_object(ui, index, &o)) return;
+    if (o.z != layer) return;
+    if (o.visible != BUI_VISIBLE) return;
+    // Drawn on the bottom screen instead; see uirender_hide_object.
+    if (object_hidden(r, o.nameHash)) return;
+
+    const UIPlacement* p = placed ? placement_of(r, screen, &o) : NULL;
+    if ((p ? p->target : UIR_TARGET_TOP) != target) return;
+    UIView ov = *v;
+    if (p) {
+        ov.originX += p->dx * v->scaleX;
+        ov.originY += p->dy * v->scaleY;
+    }
+    if (o.type == BUI_TYPE_BITMAP)    draw_bitmap(r, &o, &ov);
+    else if (o.type == BUI_TYPE_TEXT) draw_text(r, &o, &ov);
+}
+
+// One screen's share of one layer, in file order.
 static void draw_layer(UIRenderer* r, BUI* ui, const BUIScreen* screen,
                        int layer, const UIView* v, int target)
 {
     bool placed = screen_placed(r, screen);
 
-    for (uint32_t i = 0; i < screen->count; i++) {
-        BUIObject o;
-        if (!bui_object(ui, screen->first + i, &o)) continue;
-        if (o.z != layer) continue;
-        if (o.visible != BUI_VISIBLE) continue;
-        // Drawn on the bottom screen instead; see uirender_hide_object.
-        if (object_hidden(r, o.nameHash)) continue;
-
-        const UIPlacement* p = placed ? placement_of(r, screen, &o) : NULL;
-        if ((p ? p->target : UIR_TARGET_TOP) != target) continue;
-        UIView ov = *v;
-        if (p) {
-            ov.originX += p->dx * v->scaleX;
-            ov.originY += p->dy * v->scaleY;
-        }
-        if (o.type == BUI_TYPE_BITMAP)    draw_bitmap(r, &o, &ov);
-        else if (o.type == BUI_TYPE_TEXT) draw_text(r, &o, &ov);
-    }
+    for (uint32_t i = 0; i < screen->count; i++)
+        draw_object(r, ui, screen, screen->first + i, layer, v, target,
+                    placed);
 }
 
 // Z is a layer index, and eDisplayFrame walks the layers in the fixed, mostly
@@ -1145,22 +1153,95 @@ void uirender_draw_screen(UIRenderer* r, BUI* ui, const BUIScreen* screen,
 // The layer table is one for the whole frame, and every visible screen adds
 // its strips to it: a layer is drawn for all of them before the next layer
 // starts, screens in the order the bundles were added.
-void uirender_draw_visible(UIRenderer* r, float alpha)
+//
+// Built as retail builds LayerRenderInfoTable: one walk of the screens'
+// objects appends each visible one to its Z's list, and the layers are
+// drawn from the lists (step 13b-4). Asking every object its Z once per
+// layer unpacked each of them 29 times a frame. Past UIR_LAYER_ITEMS the
+// walk goes a layer at a time, as it did.
+#define UIR_LAYER_ITEMS 1024
+
+typedef struct {
+    uint32_t index;     // absolute object index
+    int16_t  next;      // the next in the layer, or -1
+    uint8_t  bundle;
+    uint8_t  pad;
+    uint16_t screen;
+} UILayerItem;
+
+static UILayerItem s_layerItems[UIR_LAYER_ITEMS];
+
+static bool screen_drawn(const UIRenderer* r, const BUIScreen* screen,
+                         int target)
 {
-    C2D_SetTintMode(C2D_TintMult);
-    for (int pass = 0; pass < BUI_NUM_LAYERS; pass++) {
-        for (int b = 0; b < r->numBundles; b++) {
-            if (!r->bundles[b].hasUI) continue;
-            BUI* ui = &r->bundles[b].ui;
-            for (uint32_t s = 0; s < ui->numScreens; s++) {
-                const BUIScreen* screen = &ui->screens[s];
-                if (!screen->visible) continue;
-                UIView v = screen_view(r, screen, alpha);
-                draw_layer(r, ui, screen, kLayerOrder[pass], &v,
-                           UIR_TARGET_TOP);
+    return screen->visible
+           && (target != UIR_TARGET_BOTTOM || screen_placed(r, screen));
+}
+
+static void draw_visible(UIRenderer* r, float alpha, int target)
+{
+    int16_t head[BUI_NUM_LAYERS], tail[BUI_NUM_LAYERS];
+    int     n = 0;
+
+    for (int z = 0; z < BUI_NUM_LAYERS; z++) head[z] = tail[z] = -1;
+    for (int b = 0; b < r->numBundles && n >= 0; b++) {
+        if (!r->bundles[b].hasUI) continue;
+        const BUI* ui = &r->bundles[b].ui;
+        for (uint32_t s = 0; s < ui->numScreens && n >= 0; s++) {
+            const BUIScreen* screen = &ui->screens[s];
+            if (!screen_drawn(r, screen, target)) continue;
+            for (uint32_t i = 0; i < screen->count; i++) {
+                int visible, z;
+                if (!bui_object_layer(ui, screen->first + i, &visible, &z))
+                    continue;
+                if (visible != BUI_VISIBLE || z < 0 || z >= BUI_NUM_LAYERS)
+                    continue;
+                if (n >= UIR_LAYER_ITEMS) {
+                    n = -1;
+                    break;
+                }
+                s_layerItems[n].index  = screen->first + i;
+                s_layerItems[n].next   = -1;
+                s_layerItems[n].bundle = (uint8_t)b;
+                s_layerItems[n].screen = (uint16_t)s;
+                if (tail[z] < 0) head[z] = (int16_t)n;
+                else             s_layerItems[tail[z]].next = (int16_t)n;
+                tail[z] = (int16_t)n;
+                n++;
             }
         }
     }
+
+    for (int pass = 0; pass < BUI_NUM_LAYERS; pass++) {
+        int layer = kLayerOrder[pass];
+        if (n < 0) {
+            for (int b = 0; b < r->numBundles; b++) {
+                if (!r->bundles[b].hasUI) continue;
+                BUI* ui = &r->bundles[b].ui;
+                for (uint32_t s = 0; s < ui->numScreens; s++) {
+                    const BUIScreen* screen = &ui->screens[s];
+                    if (!screen_drawn(r, screen, target)) continue;
+                    UIView v = screen_view(r, screen, alpha);
+                    draw_layer(r, ui, screen, layer, &v, target);
+                }
+            }
+            continue;
+        }
+        for (int k = head[layer]; k >= 0; k = s_layerItems[k].next) {
+            const UILayerItem* it     = &s_layerItems[k];
+            BUI*               ui     = &r->bundles[it->bundle].ui;
+            const BUIScreen*   screen = &ui->screens[it->screen];
+            UIView             v      = screen_view(r, screen, alpha);
+            draw_object(r, ui, screen, it->index, layer, &v, target,
+                        screen_placed(r, screen));
+        }
+    }
+}
+
+void uirender_draw_visible(UIRenderer* r, float alpha)
+{
+    C2D_SetTintMode(C2D_TintMult);
+    draw_visible(r, alpha, UIR_TARGET_TOP);
     end_gs_scale();
 }
 
@@ -1175,21 +1256,14 @@ bool uirender_draw_visible_bottom(UIRenderer* r, float targetW,
 
     r->targetW = targetW;
     r->targetH = targetH;
-    C2D_SetTintMode(C2D_TintMult);
-    for (int pass = 0; pass < BUI_NUM_LAYERS; pass++) {
-        for (int b = 0; b < r->numBundles; b++) {
-            if (!r->bundles[b].hasUI) continue;
-            BUI* ui = &r->bundles[b].ui;
-            for (uint32_t s = 0; s < ui->numScreens; s++) {
-                const BUIScreen* screen = &ui->screens[s];
-                if (!screen->visible || !screen_placed(r, screen)) continue;
-                any = true;
-                UIView v = screen_view(r, screen, alpha);
-                draw_layer(r, ui, screen, kLayerOrder[pass], &v,
-                           UIR_TARGET_BOTTOM);
-            }
-        }
+    for (int b = 0; b < r->numBundles && !any; b++) {
+        if (!r->bundles[b].hasUI) continue;
+        const BUI* ui = &r->bundles[b].ui;
+        for (uint32_t s = 0; s < ui->numScreens && !any; s++)
+            any = screen_drawn(r, &ui->screens[s], UIR_TARGET_BOTTOM);
     }
+    C2D_SetTintMode(C2D_TintMult);
+    draw_visible(r, alpha, UIR_TARGET_BOTTOM);
     end_gs_scale();
     r->targetW = w;
     r->targetH = h;

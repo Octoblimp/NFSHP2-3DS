@@ -169,6 +169,20 @@ Each second of a race, `frameprof` logs a line (wrapped here):
   and the GPU's.
 - Retail's two rates, as the HUD would print them.
 
+Since 13b-4 a `models:` line follows each `frame:` line, with
+`render_model`'s counts for the second (`draw-cuts.md`):
+
+    models: view 306 models, 988 batches at once, 22 lit, 33 held,
+    50588 words; envmap 121 models, 517 batches at once, 0 lit, 62
+    held, 22772 words
+
+- **view** is the player's view, and **envmap** the faces the envmap
+  drew. Each is a mean a frame: the models rendered, the batches drawn
+  in the model's own call, the lit batches, the batches held for the
+  lists, and the GPU command words the models wrote.
+- It has no times. A tick read is an SVC, and timing each model's parts
+  cost 5 ms a frame on Azahar.
+
 The milliseconds are exact: 294912 EE ticks to the millisecond, not
 bGetTickerDifference's 300000.
 
@@ -268,3 +282,6 @@ Frames of 50.1 ms on the straight, and 52 to 54.5 where the world takes
 
 The cull itself is cheap. The models' render and the envmap are more
 than half the frame (25 of 50 ms), and step 13b-4 starts on the models.
+
+13b-4's cuts, and the frames after each, are in `draw-cuts.md`. After
+13b-4d the race on Azahar runs at 27.9 to 30 FPS, with a draw of 26 ms.

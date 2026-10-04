@@ -1058,11 +1058,15 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
     C3D_Mtx     mv;
     uint64_t    now = 0, lit = 0;
     uint16_t    f[GEO_MAX_BATCHES];
-    int         i, b, numTextures;
+    int         i, b, numTextures, held = 0;
+    // The frame profiler's counts (frameprof.h): the view's or the envmap's.
+    uint32_t*   prof = FrameProfDraw.models[s_envFace ? 1 : 0];
+    uint32_t    words;
 
     if (!v || m->Solid == NULL) {
         return;
     }
+    words = gpuCmdBufOffset;
     i = model_solid(v, m);
     if (i < 0) {
         return;
@@ -1096,8 +1100,13 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
             }
         } else {
             defer(v, i, b, &localView, &mv, t, light, f[b]);
+            held++;
         }
     }
+    prof[FRAMEPROF_M_MODELS]++;
+    prof[FRAMEPROF_M_NOW] += (uint32_t)__builtin_popcountll(now);
+    prof[FRAMEPROF_M_LIT] += (uint32_t)__builtin_popcountll(lit);
+    prof[FRAMEPROF_M_HELD] += (uint32_t)held;
     if (now || lit) {
         georender_set_camera(&s_proj, &mv);
     }
@@ -1109,6 +1118,7 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
             draw_lit_batch(v, i, b, light, f[b]);
         }
     }
+    prof[FRAMEPROF_M_WORDS] += gpuCmdBufOffset - words;
     v->drawn++;
     v->drawnTris += r->mesh.numTris;
     if (matrix == &eMathIdentityMatrix) {
@@ -2571,7 +2581,9 @@ void trackview_draw_envmap(TrackView* v)
         StuffSky(view);
         draw_deferred(v, true);
         georender_set_zwrite(true);
+        georender_run_begin();
         scenery_stuff_scenery(&v->cull, view);
+        georender_run_end();
         draw_deferred(v, false);
         draw_deferred(v, true);
 
@@ -2639,7 +2651,11 @@ void trackview_draw(TrackView* v)
     FRAMEPROF_STAMP(FRAMEPROF_SKY);
 
     georender_set_fog(s_fogOn ? &s_fog : NULL, s_fogColour);
+    // eModel::Render for each model draws only through georender, so it
+    // is one run (georender_run_begin).
+    georender_run_begin();
     scenery_stuff_scenery(&v->cull, view);
+    georender_run_end();
     FRAMEPROF_STAMP(FRAMEPROF_MODELS);
 
     // Then StuffSun (0x00112ecc), after DrawNisObjects, which has nothing

@@ -60,6 +60,9 @@ void frameprof_add(FrameProf *fp, const MainLoopTimingStats *t,
     fp->stage[FRAMEPROF_SUBMIT] += t->DisplayFrame - prev;
     fp->jukeboxDecode += d->jukeboxDecode;
     fp->jukeboxRead += d->jukeboxRead;
+    for (s = 0; s < 2 * FRAMEPROF_M_COUNT; s++)
+        fp->models[s / FRAMEPROF_M_COUNT][s % FRAMEPROF_M_COUNT] +=
+            d->models[s / FRAMEPROF_M_COUNT][s % FRAMEPROF_M_COUNT];
 
     fp->total += frame;
     if (frame > fp->worst)
@@ -74,14 +77,29 @@ static double mean_ms(const FrameProf *fp, uint64_t ticks)
     return (double)ticks / fp->frames / FRAMEPROF_TICKS_PER_MS;
 }
 
+// One view's part of the models' line: its counts a frame.
+static int models_part(const FrameProf *fp, int v, char *buf, size_t n)
+{
+    const uint64_t *m = fp->models[v];
+    double f = fp->frames;
+
+    return snprintf(buf, n,
+                    "%.0f models, %.0f batches at once, %.0f lit, %.0f held, "
+                    "%.0f words",
+                    m[FRAMEPROF_M_MODELS] / f, m[FRAMEPROF_M_NOW] / f,
+                    m[FRAMEPROF_M_LIT] / f, m[FRAMEPROF_M_HELD] / f,
+                    m[FRAMEPROF_M_WORDS] / f);
+}
+
 bool frameprof_line(FrameProf *fp, char *buf, size_t n)
 {
     double secs;
+    int len;
 
     if (fp->frames == 0 || fp->total < FRAMEPROF_LINE_TICKS)
         return false;
     secs = (double)fp->total / BTICKER_RATE_HZ;
-    snprintf(buf, n,
+    len = snprintf(buf, n,
              "frame: %.1f fps, %.1f ms, worst %.1f; sound %.1f, flow %.1f, "
              "race %.1f, world %.1f, cameras %.1f, draw %.1f, loads %.1f; "
              "draw: prep %.1f, cull %.1f, envmap %.1f, sky %.1f, "
@@ -116,6 +134,15 @@ bool frameprof_line(FrameProf *fp, char *buf, size_t n)
              (double)(fp->c3dCpuMs / fp->frames),
              (double)(fp->c3dGpuMs / fp->frames),
              (int)PreviousCpuFrameRate, (int)PreviousGpuFrameRate);
+    if (len > 0 && (size_t)len < n) {
+        len += snprintf(buf + len, n - len, "\nmodels: view ");
+        if (len > 0 && (size_t)len < n)
+            len += models_part(fp, 0, buf + len, n - len);
+        if (len > 0 && (size_t)len < n)
+            len += snprintf(buf + len, n - len, "; envmap ");
+        if (len > 0 && (size_t)len < n)
+            models_part(fp, 1, buf + len, n - len);
+    }
     frameprof_reset(fp);
     return true;
 }

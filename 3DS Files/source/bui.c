@@ -190,6 +190,15 @@ bool bui_object(const BUI* ui, uint32_t index, BUIObject* out)
     return true;
 }
 
+bool bui_object_layer(const BUI* ui, uint32_t index, int* visible, int* z)
+{
+    const uint8_t* p = fields(ui, index, 56, NULL);
+    if (!p) return false;
+    *visible = (int8_t)p[17];
+    *z       = (int8_t)p[18];
+    return true;
+}
+
 int32_t bui_find_object(const BUI* ui, const BUIScreen* screen,
                         uint32_t nameHash, int type)
 {

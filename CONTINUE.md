@@ -1,13 +1,14 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-04), after 13b-3: New 3DS mode in full. The CIA can now open
-ptm:sysm, so the speedup to 804 MHz goes through; the heap is sized
-from the grant; the boot logs the clock, and the log has the jukebox
-worker's time. The draw's stages are named for what they time: the
-models' render (13-18 ms) and the envmap (8-10 ms) are half the frame.
-13b-4, the profile's cuts, is next, starting on the models. "Where the
-port stands" below has the count of what is left.
+(2026-10-04), after 13b-4a to 13b-4d, the draw's first cuts. On Azahar
+the race went from 20 FPS to 28-30, and the draw from 39-46 ms to 26
+(`docs/formats/draw-cuts.md`). georender sends what changed within a
+run of models. citro3d's uniform upload is skipped when nothing
+changed. The Flailer layers are drawn from one walk, as retail's
+layer table has them. 13b-4 goes on until the race holds 30: the
+models (9 ms), the envmap (6), the cars (4) and the cull (3) are what
+is left. "Where the port stands" below has the count of what is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
@@ -1857,15 +1858,31 @@ and so replaced every boot.
        - Cut the largest cost, re-measure, and stop once the race holds
          30. A New 3DS's `frame:` lines decide the order; until the user
          runs one, Azahar's proportions are the guide.
-       - 13b-3's profile on Azahar puts the models first
-         (`scenery_stuff_scenery`, eModel::Render for each kept model:
-         12.6-17.8 ms). Look first at `render_model`'s work per model
-         and per batch: the state set, the texture binds and the lit
-         batches' uniform uploads (`draw_lit_batch`'s `bind_lit`, about
-         20 a batch). Then the envmap (the six cube views and the fold,
-         7.8-10 ms), the two Flailer screens (about 5 ms each) and the
-         cars (4.4 ms). The cull is 2.2-2.9 ms and the world's step
-         2-5 ms.
+       - ~~13b-4a to 13b-4d~~ done in Session 31 (`draw-cuts.md`):
+         - **a**, georender's runs: in one eModel::Render loop the
+           program, the frame's uniforms, the cull mode, the pass, the
+           combiner and the texture go only when they change. A
+           `models:` line after each `frame:` line counts the models,
+           batches and words.
+         - **b**, a mesh's vertex buffer as one register write
+           (`GPUREG_ATTRIBBUFFER0_OFFSET`) after the run's first, and
+           the model-view only when it changes.
+         - **c**, `c3dwrap.c`: `C3D_UpdateUniforms` wrapped at link
+           time (the Makefile's `C3DWRAP`), so a draw with no uniform
+           changed skips citro3d's two 96-flag scans.
+         - **d**, the Flailer layers drawn from lists built in one walk,
+           as retail's LayerRenderInfoTable. The port unpacked every
+           object 29 times a frame to compare its Z: 4.7 and 5.4 ms
+           for the two screens, now 0.3 and 0.9.
+       - On Azahar after 13b-4d (`out/azahar_13b4e`): 27.9-30 FPS,
+         frames of 34.2 ms on average, some of three blanks. The draw is
+         26.1 ms: models 9.3, envmap 6.3, cars 4.3, cull 2.7, scenery
+         1.1, bottom 0.9, sky 0.8, hud 0.3. The world takes 1.4-3.7.
+       - **Next, 13b-4e:** the cars stage, which is `render_cars` and
+         both deferred lists. The lists draw outside a georender run,
+         so each held batch sends its whole state. Then the models' and
+         the envmap's cost per draw (texture binds, `C3D_DrawArrays`),
+         then the cull.
        - Keep retail's look. A cut that changes it, such as a view
          updated every other frame or drawn smaller, goes to the user
          first.
@@ -3160,16 +3177,17 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-04, after 13b-3)
+### Where the port stands (2026-10-04, after 13b-4d)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 13b-4, the profile's cuts, starting on the models'
-  render. 13b-1 (the real clock and the pacing), 13b-2 (the frame
-  profiler) and 13b-3 (New 3DS mode in full) are done.
+- **Next:** step 13b-4e, the cars stage, then the models' cost per
+  draw. 13b-1 (the real clock and the pacing), 13b-2 (the frame
+  profiler), 13b-3 (New 3DS mode in full) and 13b-4a to 13b-4d (the
+  draw's first cuts) are done.
 - **Left, in the table's units:**
 
   | Step | Slices left |
@@ -3190,11 +3208,11 @@ goes in.
   roughly a third. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
   Read the 25-39 as a floor.
-- **The pace:** 78 commits from 2026-09-27 to 2026-10-04, most of them a
+- **The pace:** 79 commits from 2026-09-27 to 2026-10-04, most of them a
   slice each.
 - **Not yet in the count:** the replay, and with it the race's music
   (see step 14's note). The race runs in real time since 13b-1, at
-  about 20 FPS on Azahar. Holding 30 is 13b-4.
+  28-30 FPS on Azahar since 13b-4d. Holding 30 is the rest of 13b-4.
 
 ## What not to trust
 

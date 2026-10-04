@@ -3708,7 +3708,7 @@ int main(int argc, char** argv)
 
                 jbstream_busy(&decode, &read);
                 if (g_track.attached) {
-                    char line[512];
+                    char line[1024];
 
                     FrameProfDraw.jukeboxDecode = decode - jbDecode;
                     FrameProfDraw.jukeboxRead = read - jbRead;

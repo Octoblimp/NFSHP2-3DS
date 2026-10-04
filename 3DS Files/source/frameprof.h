@@ -47,6 +47,11 @@
 // decode and its reads for the frame to frameprof (jbstream_busy). Only
 // the decode is CPU time: a read sleeps in the kernel (step 13b-3).
 //
+// trackview's render_model, eModel::Render, counts what it draws (step
+// 13b-4): FrameProfDraw.models, the player's view's [0] and the envmap's
+// faces' [1]. Its line follows the frame's. Timing its parts cost 5 ms a
+// frame on Azahar, a system tick read being an SVC, so it is not timed.
+//
 // A line has the frame rate, the mean frame and the longest, each phase's
 // mean in milliseconds, the draw's stages, the two waits, citro3d's own two
 // times (the CPU's from C3D_FrameBegin to C3D_FrameEnd, and the GPU's), and
@@ -92,6 +97,16 @@ enum {
     FRAMEPROF_STAMPED
 };
 
+// render_model's counts in a frame, for one view or the envmap's faces.
+enum {
+    FRAMEPROF_M_MODELS,     // models drawn
+    FRAMEPROF_M_NOW,        // batches drawn at once
+    FRAMEPROF_M_LIT,        // lit or environment-mapped batches, each alone
+    FRAMEPROF_M_HELD,       // batches put on the lists
+    FRAMEPROF_M_WORDS,      // GPU command words written
+    FRAMEPROF_M_COUNT
+};
+
 // One frame's draw: the ticks around the two waits, and each stamped
 // stage's end (0 when it was not stamped).
 typedef struct FrameProfTicks {
@@ -101,6 +116,7 @@ typedef struct FrameProfTicks {
     uint32_t end[FRAMEPROF_STAMPED];
     uint32_t jukeboxDecode;     // the jukebox worker's, this frame
     uint32_t jukeboxRead;
+    uint32_t models[2][FRAMEPROF_M_COUNT];  // the view's, the envmap's
 } FrameProfTicks;
 
 extern FrameProfTicks FrameProfDraw;
@@ -117,6 +133,7 @@ typedef struct FrameProf {
     uint64_t stage[FRAMEPROF_DRAW_STAGES];
     uint64_t jukeboxDecode;
     uint64_t jukeboxRead;
+    uint64_t models[2][FRAMEPROF_M_COUNT];
     uint32_t worst;                     // the longest frame, EE ticks
     float    c3dCpuMs;                  // summed
     float    c3dGpuMs;
@@ -134,7 +151,7 @@ void frameprof_add(FrameProf *fp, const MainLoopTimingStats *t,
                    float c3dCpuMs, float c3dGpuMs);
 
 // Once the frames add up to a second: the line into buf, the sums reset,
-// and true.
+// and true. The models' line follows the frame's, after a newline.
 bool frameprof_line(FrameProf *fp, char *buf, size_t n);
 
 #endif

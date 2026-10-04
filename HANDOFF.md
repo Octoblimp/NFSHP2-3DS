@@ -13391,3 +13391,90 @@ and the boot to the menus (`out/azahar_13b3_fe`).
   uniform uploads first. Then the envmap.
 - A New 3DS's `clock:` and `frame:` lines would settle the speedup and
   the order of 13b-4's cuts.
+
+## Session 31, continued (2026-10-04) -- the draw's first cuts (steps 13b-4a to 13b-4d)
+
+The race on Azahar went from 20 FPS to 28-30, and the draw from 39-46 ms
+to 26, with the same picture. Four cuts, each measured on its own run.
+`docs/formats/draw-cuts.md` has why each one leaves the picture as it
+was.
+
+### The port
+
+- **13b-4a, georender's runs** (`georender.c`, `trackview.c`).
+  `georender_run_begin` and `_run_end` bracket a run of draws with
+  nothing else drawn between them: `scenery_stuff_scenery`, and each
+  envmap face's. Within a run, these go only when they change:
+  - the program, the attributes, and the frame's uniforms (the
+    projection, the light, the ambient, the fog's row);
+  - the cull mode;
+  - the pass;
+  - the combiner and the ST scale;
+  - the texture.
+
+  A lit batch, the fog, the light, the depth range and the Z writes
+  make the run forget what it sent. A one-run dump of a redwood's
+  commands (454 words, six batches) showed what was being sent again.
+  A `models:` line after each `frame:` line counts `render_model`'s
+  models, batches, lit and held batches, and words (`frameprof.c`).
+- **13b-4b, a mesh's buffer as one register.** After the draw that
+  sends citro3d's `BufInfo`, a mesh's buffer in a run is one write of
+  `GPUREG_ATTRIBBUFFER0_OFFSET`, in place of 40 words. The model-view
+  goes only when it changes. `georender_run_end` marks citro3d's
+  `BufInfo` changed, so its copy and the GPU agree again.
+- **13b-4c, `c3dwrap.c`.** Every `C3D_DrawArrays` ran
+  `C3D_UpdateUniforms` twice, for the vertex and the geometry shader.
+  Each call tests 96 dirty flags one by one: about 1,200 instructions a
+  draw with nothing to send. The Makefile's `C3DWRAP` links with
+  `--wrap`, and the wrapper calls citro3d's function only when a public
+  dirty flag is set, or a shader's constants may be waiting.
+  `C3Di_LoadShaderUniforms` and `C3Di_DirtyUniforms` are wrapped to
+  note those.
+- **13b-4d, the Flailer layers from one walk** (`uirender.c`, `bui.c`).
+  The port walked every visible screen's objects once for each of the
+  29 layers. Each time it unpacked the whole object to compare its Z.
+  `draw_visible` now builds the layer lists in one walk, as retail's
+  AddFlailerStrip fills LayerRenderInfoTable. It reads only the Visible
+  and Z bytes (`bui_object_layer`), then draws the layers in
+  `BUI_LAYER_ORDER`. The order within a layer is unchanged: bundle,
+  then screen, then the file's order.
+
+### The checks
+
+13b-4a to 13b-4c have no retail function behind them. 13b-4d keeps
+eDisplayFrame's layer order, which `BUI_LAYER_ORDER` already held, and
+draws the same objects in the same order, so its checkers are the
+chain's Flailer ones. The whole chain: 100 checkers and the four table generators in 1468 s, 0 of 104 failed (`out/chain_13b4.txt`), `bui_check`, `flailer_check` and the HUD's among them.
+
+### On Azahar
+
+Track 12, holding the gas. Each run's mean over its seconds:
+
+| | 13b-3 | 13b-4a | 13b-4b | 13b-4c | 13b-4d |
+|---|---|---|---|---|---|
+| models | 16.4 to 17.8 | 12.1 to 13.8 | 11.8 | 9.2 | 9.3 |
+| envmap | 7.8 to 10.0 | 6.7 to 8.6 | 7.8 | 6.3 | 6.3 |
+| hud | 4.7 to 4.8 | 4.8 | 4.8 | 4.7 | 0.3 |
+| bottom | 5.3 to 5.4 | 5.4 | 5.4 | 5.4 | 0.9 |
+| the draw | 44 to 46 | 39.6 to 40.6 | 39.2 | 35.0 | 26.1 |
+| FPS | 20 | 20 | 19.6 | 19.8 | 29.2 |
+
+The runs are `out/azahar_13b3b`, `13b4b`, `13b4c`, `13b4d` and
+`13b4e`. After 13b-4d the seconds read 27.9 to 30.0 FPS: frames of two
+blanks, with some of three where the models or the world run long. The
+CPU's frame is about 29 ms of the 33.3.
+
+The view's words went from 103,000 a frame to 50,500, and the envmap's
+from 40,000 to 23,000. The wrapper changes no word: 50,588 for 306
+models against 13b-4b's 50,523 for 308. The shots match before and
+after each cut, apart from where the car drove. In 13b-4b's shot 3 it
+ran into the roadside ferns, which draw in front of it.
+
+### Next
+
+- **13b-4e:** the cars stage (4.3 ms). That is `render_cars` and both
+  deferred lists, which draw outside a run, so each held batch sends
+  its whole state. Then the models' cost per draw, then the cull.
+- A New 3DS's `clock:`, `frame:` and `models:` lines would show how
+  far the hardware is from these numbers. Azahar's CPU is 268 MHz at
+  about an instruction a tick, and a New 3DS runs at 804 MHz.
