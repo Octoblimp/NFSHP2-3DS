@@ -12412,3 +12412,77 @@ CONTINUE.md's "MovePursuitMeter (`0x00182948`)" was wrong.
 `retail_match` guessed it from a 0.12 ratio, but that address is
 NISOverlayManager::Finish, which is already ported. The pursuit meter
 moves inside UpdatePursuitMeter.
+
+## Session 31, continued (2026-10-03) -- the HUD's cop parts (step 8m-4c-1)
+
+Three of the HUD's parts follow the cops: the radar detector's row of
+lights and its beep, the trackers over the cars near the player, and the
+pursuit meter with its tickets. UpdateHud calls each through a seam, and
+this step fills them. `docs/formats/hud-cop.md` has the write-up.
+
+### The port
+
+- **`hudcop.{c,h}`** hold Player::UpdateRadarDetector (`0x0017be70`),
+  DrawTracker (`0x0017c278`) and UpdatePursuitMeter (`0x0017c380`).
+- **`main.c`** binds `gUpdateRadarDetectorFn`, `gDrawTrackerFn` and
+  `gUpdatePursuitMeterFn`.
+- tCopManager::GetRadarDetectorIntensity (`0x002274a8`) walks the cops
+  and the track path, so it stays a seam until step 12. Until then the
+  radar reads 0: every light unlit and no beep.
+
+What retail does that a reader would not guess:
+
+- The lights lit are the intensity times 11, truncated, at most 10.
+  Lights 10 and 11 are never lit by the count; they swell off lights 8
+  and 9. The swell is started every frame, but a bitmap start leaves a
+  running animator be, so while the lights stay up the light pulses.
+- The beep's test is `<`. For 9 lights at 620 ticks the two sides are
+  equal, and it does not beep.
+- DrawTracker adds the squares as `(dx*dx + dy*dy) + dz*dz`, the VU's
+  order. Its cap on the scale never acts: by then the distance is at
+  most 50, and 50 x 0.02 rounds to exactly 1.
+- Going down a level, the meter flies out one bar more than it loses.
+- 0x00182bb8 and 0x00182c18, which `retail_match` had called
+  NISOverlayManager's "new" and a "MovePursuitMeter", are Player
+  functions that lay out the score texts. Nothing calls either.
+
+Where the port differs: no cop manager yet; the radar's flag starts at
+0, where retail reads the stack; the port skips a missing light, X,
+tracker or sample where retail writes through it; and levels over 4,
+which tCopManager never gives, stay on bars 0 to 3.
+
+### The checks
+
+`hudcop_check` runs the three retail functions in the emulator against
+the port, over hudanim's checker on INGAMEB's Flailer chunk: 1187 ops,
+4763 lines, 0 differ. The mutation pass makes 120 mutations: 115 are
+caught and 5 are equivalent, each with its reason in the checker and the
+doc. The first pass left `tracker-dist-order` alive. Two places found by
+search, where adding the squares in the other order changes the scale's
+last bit, are now in the script, and it is caught.
+
+The whole chain: 95 checkers with `hudcop_check` added, and the four
+table generators: 0 of 99 failed, in 1722 seconds
+(`out/chain_8m4c1.txt`). It ran beside 8m-4c-2's mutation pass, which
+only `hudnis_check` builds.
+
+The ARM build is clean. It also compiled `hudnis.c` (8m-4c-2), which is
+in the source folder but not yet called.
+
+On Azahar (`run_azahar_race.ps1 -HoldKeys 65 -WatchSeconds 40`, shots in
+`out/azahar_8m4c1`), the race ran for 40 seconds with no crash, and the
+HUD shows as in 8m-4b. The race has no cops, so DetermineHudFeatures
+leaves the radar and the meter off, and with no AI cars no tracker is
+drawn. The first try went to the title screen: the boot key was missed
+while the chain was running. The second started the race. The frame rate
+was not read, since the chain was running.
+
+### Next
+
+- **8m-4c-2:** the rest of NISOverlayManager: Start (`0x00182488`),
+  Update (`0x001825f0`), UpdateDateAndTime (`0x00182748`), SetVisible
+  (`0x00182a48`), StartArrest, StartTicket and StartBusted. `hudnis.c`
+  and its harness are written; the checker, the doc and the bindings
+  are left.
+- **8m-4c-3:** InitializeFlailerTachometer (`0x001434a0`) and
+  RenderFlailerTachometer (`0x00143858`).

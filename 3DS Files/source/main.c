@@ -81,6 +81,7 @@
 #include "geoview.h"
 #include "georender.h"
 #include "hudanim.h"
+#include "hudcop.h"
 #include "hudrender.h"
 #include "hudscore.h"
 #include "joyevent.h"
@@ -2662,10 +2663,9 @@ int main(int argc, char** argv)
     // Player::UpdateHud (hudrender.c), which UpdateNonGameState runs each
     // frame: SetHudFeatures when DetermineHudFeatures' answer changed, the
     // start bonus, and RenderHud's numbers into the HUD's Flailer objects.
-    // Its pursuit meter, radar, trackers and NIS overlay are 8m-4c's and
-    // stay NULL. GetTranslatedString is the same
-    // lookup Fred's defaults use; every HUD caller copies the text out
-    // before the next call.
+    // Its NIS overlay is 8m-4c-2's and stays NULL. GetTranslatedString is
+    // the same lookup Fred's defaults use; every HUD caller copies the text
+    // out before the next call.
     gPlayerUpdateHudFn = player_update_hud;
     gHudTranslateFn = fredTranslate;
     // The HUD's animations (hudanim.c): UpdateHud runs them each frame,
@@ -2682,6 +2682,13 @@ int main(int argc, char** argv)
     // each frame and starts the start bonus through StartScore(e, value).
     gUpdateScoringFn = player_update_scoring;
     gStartScoreFn = player_start_score_value;
+    // The HUD's cop parts (hudcop.c): the radar detector, the trackers and
+    // the pursuit meter, which UpdateHud calls when the HUD shows them. The
+    // radar's GetRadarDetectorIntensity comes with the cops (step 12); until
+    // then it reads 0.
+    gUpdateRadarDetectorFn = player_update_radar_detector;
+    gDrawTrackerFn = player_draw_tracker;
+    gUpdatePursuitMeterFn = player_update_pursuit_meter;
 
     // Car::MaybeCameraShake, which World::DoTimestep asks of each player's
     // car: shake.c. Only a car with a player shakes, and none has one until
