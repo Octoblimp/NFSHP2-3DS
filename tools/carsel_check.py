@@ -107,6 +107,7 @@ G_NSKINS = GP - 20608
 F_CALLBACK = 0x00198928
 F_PRELOAD = 0x00194898
 F_CLOSE = 0x00194fb0
+F_SELECTOR = 0x001950d0                 # CarSelector's constructor
 
 S_XL = 0x0021e560
 S_XS = 0x0021e508
@@ -370,6 +371,11 @@ def s_cop(s):
     for d in (UP, UP, DOWN, DOWN, DOWN, UP):
         s.msg(d)
         s.tick(1)
+    # One player hears the second pad's presses too.
+    s.msg(RIGHT, port=1)
+    s.tick(1, ports=(1,))
+    s.msg(LEFT, port=1)
+    s.tick(36)
     # Across every car to the end and back, rendering each.
     n = len(s.of(0, 0)) + len(s.of(0, 1)) + len(s.of(0, 4)) + 2
     walk(s, 0, n, RIGHT)
@@ -514,6 +520,97 @@ def s_two(s):
     s.g("players", 1)
 
 
+def s_extra(s):
+    """The corners the runs above leave: a race with one player, the
+    loader's timing, the skins one way, the popups' pad and two cops."""
+    s.g("gametype", 3)
+    s.g("players", 1)
+    s.g("lang", 0)
+    s.g("allcars", 0)
+    s.statuses(0, kind_a)
+    avail = s.of(0, 0)
+    one = [c for c in avail if c.nskins == 1][0]
+    many = [c for c in avail if c.nskins >= 3][0]
+    hidden = [c for c in s.cars if s.cars_status[(0, c.type)] == 3][0]
+    allisl = lambda v: s.add(*["isl|%d|%d" % (c.type, v)  # noqa: E731
+                               for c in s.cars])
+    # No help; the ride a hidden car, so the list's first is the one.
+    s.add("ride|0|3|%d|0" % hidden.type)
+    s.msg(ACTIVATE, SCREEN_1P, 0)
+    s.tick(50)
+    # Into the orbit view and out with the same button.
+    s.joy(0, 33, 1)
+    s.tick(4)
+    s.joy(0, 33, 1)
+    s.tick(40)
+    # With the gearbox popup up the pad does nothing.
+    s.msg(SELECT, CHOOSE)
+    s.joy(0, 33, 1)
+    s.tick(2)
+    s.msg(DISMISS, param=0)
+    s.tick(40)
+    # The row at rest at once: the swap still waits for the fade.
+    s.g("relapsed", F(1.0))
+    s.msg(RIGHT)
+    s.tick(3)
+    s.g("relapsed", F(1.0 / 60))
+    s.tick(40)
+    # A car still loading when the next is chosen: loaded, not shown.
+    allisl(0)
+    s.msg(RIGHT)
+    s.tick(40)
+    s.msg(RIGHT)
+    allisl(1)
+    s.tick(60)
+    # The last car, locked: the box stays for a release, hides for a
+    # press with no orbit, and the back button brings it back.
+    # Long enough for it to load and fade in: the button reaches the
+    # orbit's test only at fade 0.
+    walk(s, 0, len(s.cars) + 2, RIGHT, render=False, every=6)
+    s.tick(60)
+    s.tick(50, render=True)
+    s.joy(0, 33, 0)
+    s.tick(2, render=True)
+    s.joy(0, 33, 1)
+    s.tick(2, render=True)
+    s.msg(BACK)
+    s.tick(2, render=True)
+    # Back to the first, and a manual gearbox chosen.
+    walk(s, 0, len(s.cars) + 2, LEFT, render=False, every=6)
+    s.tick(50)
+    s.msg(SELECT, CHOOSE)
+    s.msg(DISMISS, param=3)
+    s.msg(DISMISS, param=5)
+    s.msg(UNACTIVATE, SCREEN_1P, 0)
+    # One skin: up does nothing. Three or more: up is the one before.
+    for c in (one, many):
+        s.add("ride|0|3|%d|%d" % (c.type, c.skins[0]))
+        s.msg(ACTIVATE, SCREEN_1P, 0)
+        s.tick(50)
+        s.msg(UP)
+        s.tick(2)
+        s.msg(UP)
+        s.tick(2)
+        s.msg(UNACTIVATE, SCREEN_1P, 0)
+    # Out while the car still loads.
+    allisl(0)
+    s.msg(ACTIVATE, SCREEN_1P, 0)
+    s.tick(2)
+    s.msg(UNACTIVATE, SCREEN_1P, 0)
+    allisl(1)
+    # Two players as cops: only the first's set is the cops'.
+    s.g("gametype", 7)
+    s.g("players", 2)
+    s.statuses(1, kind_b)
+    s.msg(ACTIVATE, SCREEN_2P, 0)
+    s.msg(ACTIVATE, SCREEN_2P_LO, 1)
+    s.tick(3, ports=(0, 1))
+    s.msg(UNACTIVATE, SCREEN_2P_LO, 1)
+    s.msg(UNACTIVATE, SCREEN_2P, 0)
+    s.add("close")
+    s.g("players", 1)
+
+
 def script():
     s = Script()
     common(s)
@@ -521,6 +618,7 @@ def script():
     s_single(s, 8, 1, 1)
     s_single(s, 9, 2, 0)
     s_two(s)
+    s_extra(s)
     return s.ops
 
 
@@ -573,6 +671,8 @@ class Model(fc.Model):
             e.stub(a, fn)
         for a in SILENT:
             e.stub(a, lambda em: 0)
+        self.building = 0
+        e.hook(F_SELECTOR, self.h_selector)
 
     # ---- stubs
 
@@ -694,6 +794,9 @@ class Model(fc.Model):
             em.reg[5] & M32, em.reg[6] & M32, em.reg[7] & M32,
             self.string(em.reg[8] & M32), em.fpr[12] & M32))
 
+    def h_selector(self, em):
+        self.building = em.reg[4] & M32
+
     def selectors(self):
         p = self.e.u32(G_SCREEN)
         if not p:
@@ -703,7 +806,11 @@ class Model(fc.Model):
 
     def s_reinit(self, em):
         car = em.reg[4] & M32
-        for _, c in self.selectors():
+        # The selector being built is not on the screen yet.
+        sels = [c for _, c in self.selectors()]
+        if self.building and self.building not in sels:
+            sels.append(self.building)
+        for c in sels:
             if self.e.u32(c + 36) == car:
                 self.emit("  show %s player %d" % (
                     self.ride(em.reg[5] & M32), s32(self.e.u32(c + 28))))
@@ -965,9 +1072,426 @@ def M(name, before, after, rel=H):
 
 
 MUTATIONS = [
+    # CarListSort's keys and its tie.
+    M("sort-available", "uint32_t ka = a->available ? 0 : 0x40000000u;",
+      "uint32_t ka = a->available ? 0x40000000u : 0;"),
+    M("sort-cop", "if (ca->UsageType == CAR_USAGE_TYPE_COP) ka += 0x01000000u;",
+      "if (ca->UsageType == CAR_USAGE_TYPE_COP) ka += 0x00000100u;"),
+    M("sort-hp", "ka += (uint32_t)((int32_t)ca->HighPerformance << 16);",
+      "ka += (uint32_t)((int32_t)ca->HighPerformance << 4);"),
+    M("sort-class", "ka += (uint32_t)((5 - (int32_t)ca->CarClass) << 8);",
+      "ka += (uint32_t)((int32_t)ca->CarClass << 8);"),
+    M("sort-name-tie",
+      "ka += bStrCmp(nameA, trId(s_sortHooks, specFullName(cb))) > 0;",
+      "ka += bStrCmp(nameA, trId(s_sortHooks, specFullName(cb))) >= 0;"),
+    M("sort-name-way",
+      "ka += bStrCmp(nameA, trId(s_sortHooks, specFullName(cb))) > 0;",
+      "ka += bStrCmp(nameA, trId(s_sortHooks, specFullName(cb))) < 0;"),
+    M("sort-strict", "return !(kb < ka);", "return ka < kb;"),
+
+    # The set: its init and its copy.
+    M("set-hidden-shown",
+      "if (st->nStatus == CAR_STATUS_HIDDEN" + NL
+      + "            && !AllCarsAvailableInCarSelectScreen)",
+      "if (st->nStatus == CAR_STATUS_HIDDEN)"),
+    M("set-egg-cops", "h->eggActive(h->user, i, copsOnly))) {",
+      "h->eggActive(h->user, i, 0))) {"),
+    M("set-no-egg",
+      "|| (h->eggActive && h->eggActive(h->user, i, copsOnly))) {",
+      "|| (h->eggActive && h->eggActive(h->user, i, copsOnly) && 0)) {"),
+    M("set-unlocked", "            unlocked++;" + NL, ""),
+    M("set-ride-skin", "carSetSkin(c, (int8_t)ride->SkinNumber);",
+      "carSetSkin(c, cti(i)->DefaultSkinNumber);"),
+    M("set-ride-game", "ride = fpi_get_selected_ride_info(player, Fred.GameType);",
+      "ride = fpi_get_selected_ride_info(player, 3);"),
+    M("set-current-last",
+      "    if (!s->current && s->list.next != &s->list)" + NL
+      + "        s->current = (VisibleCar*)s->list.next;",
+      "    if (!s->current && s->list.next != &s->list)" + NL
+      + "        s->current = (VisibleCar*)s->list.prev;"),
+    M("set-renumber", "((VisibleCar*)node)->carIndex = i++;",
+      "((VisibleCar*)node)->carIndex = ++i;"),
+    M("set-no-sort", "    blist_sort(&s->list, carListSort);" + NL, ""),
+    M("copy-skin", "to->skinIndex = from->skinIndex;", "to->skinIndex = 0;"),
+    M("copy-available", "to->available = from->available;",
+      "to->available = 1;"),
+    M("copy-current", "if (from == s->current) d->current = to;",
+      "if (0) d->current = to;"),
+    M("copy-index", "to->carIndex  = from->carIndex;", "to->carIndex  = 0;"),
+    M("skin-next-wrap", "if (++c->skinIndex >= c->status->nSkins)",
+      "if (++c->skinIndex > c->status->nSkins)"),
+    M("skin-prev-wrap", "if (--c->skinIndex < 0) c->skinIndex = c->status->nSkins - 1;",
+      "if (--c->skinIndex < 0) c->skinIndex = 0;"),
+    M("car-thumb-name", "c->thumbHash = hashf(\"THUMBNAIL_%s\", cti(type)->CarTypeName);",
+      "c->thumbHash = hashf(\"THUMBNAIL%s\", cti(type)->CarTypeName);"),
+
+    # The preload and the close.
+    M("preload-same", "if (g_m->preloaded[i] == type) continue;",
+      "if (0) continue;"),
+    M("preload-unload", "if (g_m->preloaded[i] != -1) loaderUnload(h, g_m->preloaded[i]);",
+      "(void)0;"),
+    M("preload-cops", "i == 0 && Fred.GameType == GAME_TYPE_BE_A_COP);",
+      "i == 1 && Fred.GameType == GAME_TYPE_BE_A_COP);"),
+    M("preload-one", "for (i = 0; i < Fred.NumPlayerCars && i < 2; i++) {",
+      "for (i = 0; i < Fred.NumPlayerCars && i < 1; i++) {"),
+    M("preload-no-begin", "        loaderLoad(h, type);" + NL
+      + "        loaderBeginLoading(h);",
+      "        loaderLoad(h, type);"),
+    M("close-no-unload", "if (g_m) preloadUnload();", "(void)0;"),
+    M("close-keep", "        g_m->preloaded[i] = -1;" + NL + "    }",
+      "    }"),
+
+    # feAlphaAnimation.
+    M("fade-bound", "&& f->count < BCARSEL_MAX_FADE) {", "&& f->count < 48) {"),
+    M("fade-bitmap-corner", "ee_trunc_w(f->el[n].alpha[i] * s), i);",
+      "ee_trunc_w(f->el[n].alpha[0] * s), i);"),
+    M("fade-object-scale",
+      "flailerobject_set_alpha(o, ee_trunc_w(f->el[n].alpha[0] * s));",
+      "flailerobject_set_alpha(o, ee_trunc_w(f->el[n].alpha[0]));"),
+    M("fade-restore", "ee_trunc_w(f->el[n].alpha[i]), i);",
+      "ee_trunc_w(f->el[n].alpha[i] * 0.5f), i);"),
+    M("fade-restore-object",
+      "flailerobject_set_alpha(o, ee_trunc_w(f->el[n].alpha[0]));" + NL
+      + "        }" + NL + "    }" + NL + "    f->count = 0;",
+      "flailerobject_set_alpha(o, 0);" + NL
+      + "        }" + NL + "    }" + NL + "    f->count = 0;"),
+
+    # AnimationGroup.
+    M("slide-init-start", "OBJ_UNLOCK_BOX, 640.0f,", "OBJ_UNLOCK_BOX, 650.0f,"),
+    M("slide-duration", "              u->x, 0.5f);", "              u->x, 1.0f);"),
+    M("slide-show-start",
+      "slideSetup(&u->slide, 650.0f, u->x);" + NL + "    u->state = 2;",
+      "slideSetup(&u->slide, 640.0f, u->x);" + NL + "    u->state = 2;"),
+    M("slide-threshold", "a->spline.arrivalThreshold = 1.0f;",
+      "a->spline.arrivalThreshold = 2.0f;"),
+    M("slide-restore", "slidePlace(a, a->savedX, a->savedY);",
+      "slidePlace(a, a->savedX + 1, a->savedY);"),
+    M("slide-jump", "    s->val   = s->valDesired;" + NL
+      + "    s->dval  = s->dvalDesired;" + NL + "    splineAim(s, end);",
+      "    s->dval  = s->dvalDesired;" + NL + "    splineAim(s, end);"),
+
+    # The unlock box.
+    M("unlock-delay", "if (0.4f < t) {", "if (0.3f < t) {"),
+    M("unlock-frac", "frac = (t - 0.4f) / 0.5f;", "frac = (t - 0.4f) / 0.25f;"),
+    M("unlock-alpha-full", "frac < 1.0f ? ee_trunc_w((float)u->alpha * frac)",
+      "frac < 0.5f ? ee_trunc_w((float)u->alpha * frac)"),
+    M("unlock-clock", "float t    = (float)(RealTimer - u->start) * 0.00025f;",
+      "float t    = (float)(RealTimer - u->start) * 0.0005f;"),
+    M("unlock-same-car", "    if (car == u->car) return;" + NL, ""),
+    M("unlock-state-free", "        u->state = 0;" + NL + "    } else {",
+      "        u->state = 1;" + NL + "    } else {"),
+    M("unlock-group-shown",
+      "flailer_set_group_visibility(u->screen, OBJ_UNLOCK_GROUP, 0);" + NL
+      + "        flailer_set_visibility(u->screen, OBJ_UNLOCK_FADE, 0);" + NL
+      + "        u->state = 0;",
+      "flailer_set_group_visibility(u->screen, OBJ_UNLOCK_GROUP, 1);" + NL
+      + "        flailer_set_visibility(u->screen, OBJ_UNLOCK_FADE, 0);" + NL
+      + "        u->state = 0;"),
+    M("unlock-text-shown",
+      "flailer_set_visibility(u->screen, OBJ_UNLOCK_TEXT, 0);" + NL
+      + "    snprintf",
+      "flailer_set_visibility(u->screen, OBJ_UNLOCK_TEXT, 1);" + NL
+      + "    snprintf"),
+    M("unlock-flag-init", "unlockSetCar(c, cur(c), c->port == 1);",
+      "unlockSetCar(c, cur(c), c->port != 1);"),
+    M("unlock-flag-move", "unlockSetCar(c, car, c->port == 1);",
+      "unlockSetCar(c, car, c->port ^ 1);"),
+    M("unlock-render-state", "|| c->allUnlocked || u->state != 2)" + NL
+      + "        return;",
+      "|| c->allUnlocked)" + NL + "        return;"),
+    M("unlock-render-avail", "if (!u->car || u->car->available ||",
+      "if (!u->car ||"),
+    M("unlock-joy-pressed", "if (ev == BCARSEL_JOY_CHANGE_MODE && pressed && u->car",
+      "if (ev == BCARSEL_JOY_CHANGE_MODE && u->car"),
+    M("unlock-joy-avail", "&& !u->car->available && !c->allUnlocked) {",
+      "&& !c->allUnlocked) {"),
+    M("unlock-hide-sound", "unlockHide(u);" + NL + "            sound(c->hooks, 5);",
+      "unlockHide(u);" + NL + "            sound(c->hooks, 6);"),
+    M("unlock-show-pressed", "if (pressed) {" + NL + "            unlockShow(u);",
+      "if (1) {" + NL + "            unlockShow(u);"),
+    M("unlock-cb-noise", "data->noise = 5;", "data->noise = 6;"),
+    M("unlock-cb-back",
+      "        case BMSG_MENUITEM_PAD_DOWN:" + NL
+      + "        case BMSG_SCREEN_BACK_BUTTON:" + NL
+      + "            unlockShow(u);",
+      "        case BMSG_MENUITEM_PAD_DOWN:" + NL
+      + "            unlockShow(u);"),
+    M("unlock-cb-state", "    if (u->state != 1) return 0;", "    if (u->state == 2) return 0;"),
+    M("covered-status", "&& car->status->nStatus == 4;",
+      "&& car->status->nStatus == 1;"),
+
+    # The make's logo and the badge.
+    M("logo-hp-cut", "buf[n >= 2 ? n - 2 : 0] = 0;", "buf[n >= 2 ? n - 1 : 0] = 0;"),
+    M("logo-1p-names", "    if (c->twoPlayer) {" + NL + "        if (ct->HighPerformance) {",
+      "    if (1) {" + NL + "        if (ct->HighPerformance) {"),
+    M("logo-cop-names", "{ \"CROWNVIC\",    \"CROWNVICNOCOP\" },",
+      "{ \"CROWNVIC\",    \"CROWNVIC\" },"),
+    M("logo-prefix", "return hashf(\"CARLOGO_%s\", buf);",
+      "return hashf(\"CARLOGO%s\", buf);"),
+    M("badge-1p", "    if (!c->twoPlayer) return 0;" + NL, ""),
+    M("badge-cop", "return bchunk_hash(\"LOGO_SHERIFF\");",
+      "return bchunk_hash(\"LOGO_NFS\");"),
+    M("badge-hp", "if (isHP(type)) return bchunk_hash(\"LOGO_NFS\");",
+      "if (0) return bchunk_hash(\"LOGO_NFS\");"),
+    M("logo-covered", "    if (covered(c, car)) {" + NL
+      + "        flailer_set_visibility(c->screen, OBJ_CAR_NAME, 0);",
+      "    if (0) {" + NL
+      + "        flailer_set_visibility(c->screen, OBJ_CAR_NAME, 0);"),
+
+    # The info bar.
+    M("info-kph", "if (units == 1) speed = ct->pCarSpecs->TopSpeedKph;",
+      "if (units == 1) speed = ct->pCarSpecs->TopSpeedMph;"),
+    M("info-units-label", "trId(h, units != 0 ? LANG_KPH : LANG_MPH));",
+      "trId(h, units == 1 ? LANG_KPH : LANG_MPH));"),
+    M("info-plus-hp", "int         plus  = ct->HighPerformance || cop;",
+      "int         plus  = cop;"),
+    M("info-minus", "plus ? \"-\" : \"\", trId(h, LANG_SECONDS));",
+      "plus ? \"+\" : \"\", trId(h, LANG_SECONDS));"),
+    M("info-class", "\"%d\", ct->CarClass + 1);", "\"%d\", ct->CarClass);"),
+    M("info-cop-shown", "if (covered(c, car) || cop) {", "if (covered(c, car)) {"),
+    M("info-unlocked-shown", "useTreeEvent() ? 0 : 1);", "1);"),
+    M("info-unlocked-count", "(int)c->set.unlocked," + NL, "(int)c->set.used," + NL),
+    M("tree-event-range", "return Fred.GameType >= 8 && Fred.GameType < 10;",
+      "return Fred.GameType >= 8 && Fred.GameType < 9;"),
+
+    # The help bar.
+    M("help-single", "if (gt == 8) {" + NL + "            setHelp(h, kHelpChooseSingle);",
+      "if (gt == 8) {" + NL + "            setHelp(h, kHelpChooseChamp);"),
+    M("help-champ-line", "800053, 800054, 800400,", "800053, 800054, 800401,"),
+    M("help-cop1", "if (npc == 1) setHelp(h, kHelpChooseCop1);",
+      "if (npc == 1) setHelp(h, kHelpChooseCop2);"),
+    M("help-1p-none", "if (npc == 1) setHelp(h, NULL);",
+      "if (npc == 1) setHelp(h, kHelpChoose2P);"),
+    M("help-2p", "else if (npc == 2) setHelp(h, kHelpChoose2P);",
+      "else if (npc == 2) setHelp(h, NULL);"),
+    M("help-orbit-single", "if (gt == 8) setHelp(h, kHelpOrbitSingle);",
+      "if (gt == 8) setHelp(h, kHelpOrbit);"),
+    M("help-orbit-champ", "else if (gt == 9) setHelp(h, kHelpOrbitChamp);",
+      "else if (gt == 9) setHelp(h, kHelpOrbit);"),
+    M("help-orbit-line", "{800023, 800024, 800027, 0}", "{800023, 800024, 800025, 0}"),
+
+    # The swatches.
+    M("swatch-1p-x", "        x = 587;", "        x = 588;"),
+    M("swatch-2p-y", "        y = 77;", "        y = 78;"),
+    M("swatch-2plo-y", "        y = 321;", "        y = 320;"),
+    M("swatch-step", "y + 18 * i);", "y + 17 * i);"),
+    M("swatch-ring", "y + 18 * i - 4);", "y + 18 * i - 5);"),
+    M("swatch-ring-x", "OBJ_SWATCH_RING, x - 4,", "OBJ_SWATCH_RING, x - 5,"),
+    M("swatch-bottom", "18 * c->nSwatches + y + 2);", "18 * c->nSwatches + y + 3);"),
+    M("swatch-top", "OBJ_SWATCH_TOP, x, y - 22);", "OBJ_SWATCH_TOP, x, y - 21);"),
+    M("swatch-one", "if (c->nSwatches < 2 || covered(c, cur(c))) {",
+      "if (c->nSwatches < 1 || covered(c, cur(c))) {"),
+    M("swatch-covered", "if (c->nSwatches < 2 || covered(c, cur(c))) {",
+      "if (c->nSwatches < 2) {"),
+    M("swatch-colour", "c->swatchColour[i] = si ? si->ColourSwatchHash : 0;",
+      "c->swatchColour[i] = si ? si->ColourSwatchHash ^ 1 : 0;"),
+    M("swatch-name", "c->swatchHash[i]   = hashf(\"SWATCH_%d\", (int)i);",
+      "c->swatchHash[i]   = hashf(\"SWATCH_%d\", (int)i + 1);"),
+    M("swatch-close", "    closeSwatches(c);" + NL + "    c->nSwatches = car->status->nSkins;",
+      "    c->nSwatches = car->status->nSkins;"),
+
+    # The thumbnail row.
+    M("thumbs-base-1p", "#define THUMB_BASE_1P   377.0f", "#define THUMB_BASE_1P   378.0f"),
+    M("thumbs-base-2p", "#define THUMB_BASE_2P   395.0f", "#define THUMB_BASE_2P   394.0f"),
+    M("thumbs-step", "#define THUMB_STEP      39.0f", "#define THUMB_STEP      40.0f"),
+    M("thumbs-lock-target", "    if (!car->available) t -= (float)lockW;" + NL, ""),
+    M("thumbs-1p-y", "    else y = 402;", "    else y = 401;"),
+    M("thumbs-2p-y", "BCARSEL_SCREEN_2P) y = 25;", "BCARSEL_SCREEN_2P) y = 26;"),
+    M("thumbs-2plo-y", "y = 265;", "y = 264;"),
+    M("thumbs-pitch", "        off += 39;", "        off += 38;"),
+    M("thumbs-lock-first", "if (!car->available && car->node.prev != &c->set.list" + NL
+      + "            && ((VisibleCar*)car->node.prev)->available) {",
+      "if (!car->available && car->node.prev != &c->set.list) {"),
+    M("thumbs-lock-shift", "        if (lockShown) x += lockW;" + NL, ""),
+    M("thumbs-cloaks", "if (covered(c, car) && q < MAX_CLOAKS) {",
+      "if (covered(c, car) && q < 3) {"),
+    M("thumbs-duration", "    s->duration = 0.5f;", "    s->duration = 1.0f;"),
+    M("thumbs-hide-all", "    for (i = 0; i < BCARSEL_MAX_CARS; i++)" + NL
+      + "        flailer_set_visibility(c->screen," + NL,
+      "    for (i = 0; i < BCARSEL_MAX_CARS - 1; i++)" + NL
+      + "        flailer_set_visibility(c->screen," + NL),
+
+    # The fade groups.
+    M("fadegroups-a", "float s = c->shownMode * 3.0f;", "float s = c->shownMode * 2.0f;"),
+    M("fadegroups-cop", "    if (isCop(cur(c)->type)) fadeScale(&c->fadeB, 0.0f);" + NL, ""),
+    M("fadegroups-c-third", "c->shownMode < 1.0f / 3.0f)", "c->shownMode < 0.5f)"),
+    M("fadegroups-c-orbit", "    if (c->shownMode == c->orbitMode)" + NL
+      + "        fadeScale(&c->fadeC, 0.0f);",
+      "    if (c->shownMode == c->orbitMode)" + NL
+      + "        fadeScale(&c->fadeC, 0.5f);"),
+
+    # The orbit view and the JoyHandler.
+    M("orbit-left", "? -9000.0f", "? -8000.0f"),
+    M("orbit-up", "? 10000.0f", "? 11000.0f"),
+    M("orbit-lr-scale", "* 70.3125f;", "* 70.0f;"),
+    M("orbit-ud-scale", "* -78.125f;", "* 78.125f;"),
+    M("orbit-lr-centre", "((float)pressed - 128.0f) * 70.3125f;",
+      "((float)pressed - 127.0f) * 70.3125f;"),
+    M("joy-fade", "if (!pressed || c->twoPlayer || c->fade != 0) return;",
+      "if (!pressed || c->twoPlayer) return;"),
+    M("joy-2p", "if (!pressed || c->twoPlayer || c->fade != 0) return;",
+      "if (!pressed || c->fade != 0) return;"),
+    M("joy-state", "    unlockJoy(c, ev, pressed);" + NL + "    if (c->state != 0) return;",
+      "    unlockJoy(c, ev, pressed);"),
+    M("joy-touch", "            c->orbitTouched = 1;" + NL
+      + "            c->orbitFrame   = RealTimeFrames;" + NL
+      + "            c->orbitSpeedX  = !pressed",
+      "            c->orbitFrame   = RealTimeFrames;" + NL
+      + "            c->orbitSpeedX  = !pressed"),
+    M("can-orbit-help", "if (h->helpMenuActive && h->helpMenuActive(h->user)) return 0;",
+      "if (h->helpMenuActive && !h->helpMenuActive(h->user)) return 0;"),
+    M("can-orbit-mode", "    if (c->mode != c->chooseMode) return 0;" + NL, ""),
+    M("can-orbit-locked", "    return car->available || c->allUnlocked;",
+      "    return 1;"),
+    M("orbit-speak-lang", "(h->language ? h->language(h->user) : 0) == 0",
+      "(h->language ? h->language(h->user) : 0) <= 1"),
+    M("orbit-speak-args", "h->speakCar(h->user, car->type, isCop(car->type), isHP(car->type));",
+      "h->speakCar(h->user, car->type, isHP(car->type), isCop(car->type));"),
+    M("orbit-untouched", "    c->orbitTouched = 0;" + NL + "    if (soundEnabled(h)",
+      "    if (soundEnabled(h)"),
+    M("choose-fade-level", "if (soundEnabled(c->hooks)) speechFade(c->hooks, 1.0f);",
+      "if (soundEnabled(c->hooks)) speechFade(c->hooks, 0.5f);"),
+
+    # The popups.
+    M("popup-flags", "cfg.flags        = BPOPUP_HORIZONTAL | BPOPUP_CANCELABLE;",
+      "cfg.flags        = BPOPUP_HORIZONTAL;"),
+    M("popup-dismiss-param", "cfg.dismissParam = 6;", "cfg.dismissParam = 5;"),
+    M("popup-2p-screen", "BCARSEL_SCREEN_2P) cfg.screen = POPUP_SCREEN_2P;",
+      "BCARSEL_SCREEN_2P) cfg.screen = POPUP_SCREEN_2P_LO;"),
+    M("popup-1p-screen", "BCARSEL_SCREEN_1P) cfg.screen = POPUP_SCREEN_1P;",
+      "BCARSEL_SCREEN_1P) cfg.screen = POPUP_SCREEN_2P;"),
+    M("popup-trans-start", "cfg.startButton    = c->transmission;",
+      "cfg.startButton    = 0;"),
+    M("popup-handling-start", "cfg.startButton    = c->handling;",
+      "cfg.startButton    = c->transmission;"),
+    M("popup-trans-third", "cfg.buttonParam[2] = 3;", "cfg.buttonParam[2] = 2;"),
+    M("popup-handling-param", "cfg.buttonParam[1] = 5;", "cfg.buttonParam[1] = 4;"),
+    M("popup-wait-param", "cfg.buttonParam[0] = 7;", "cfg.buttonParam[0] = 6;"),
+    M("popup-port", "cfg.joyPort      = c->port;", "cfg.joyPort      = 0;"),
+    M("advance-top", "if (c->state != 3) c->state++;", "if (c->state != 2) c->state++;"),
+    M("devance-floor", "if (c->state != 0) c->state--;", "c->state--;"),
+
+    # The tick.
+    M("tick-fade-in", "        c->fade -= 3;", "        c->fade -= 4;"),
+    M("tick-fade-out", "        c->fade += 7;", "        c->fade += 6;"),
+    M("tick-fade-floor", "        if (c->fade < 0) c->fade = 0;" + NL, ""),
+    M("tick-timeout", "&& RealTimeFrames - c->orbitFrame > ORBIT_TIMEOUT) {",
+      "&& RealTimeFrames - c->orbitFrame >= ORBIT_TIMEOUT) {"),
+    M("tick-timeout-fade", "        if (soundEnabled(h)) speechFade(h, 1.0f);" + NL
+      + "    }" + NL + "    if (c->shownMode",
+      "    }" + NL + "    if (c->shownMode"),
+    M("tick-turn", "#define TURN_STEP       46", "#define TURN_STEP       45"),
+    M("tick-turn-touched", "if (c->shownMode == c->chooseMode || !c->orbitTouched)",
+      "if (c->shownMode == c->chooseMode)"),
+    M("tick-mode-step", "#define MODE_STEP       0.03f", "#define MODE_STEP       0.04f"),
+    M("tick-next-rest", "!(bcarsel_next_car(&c->set, cur(c)) == cur(c)" + NL
+      + "                             && c->thumbs.state == 0));",
+      "!(bcarsel_next_car(&c->set, cur(c)) == cur(c)));"),
+    M("tick-swap-rest", "        && c->thumbs.state == 0) {" + NL + "        c->pending = cur(c);",
+      "        ) {" + NL + "        c->pending = cur(c);"),
+    M("tick-swap-faded", "c->loaded != cur(c) && c->fade == c->fadeMax",
+      "c->loaded != cur(c)"),
+    M("tick-show-faded", "        if (c->fade == c->fadeMax) showLoadedCar(c);" + NL, ""),
+    M("tick-pending-current", "        if (c->loaded == cur(c)) {" + NL
+      + "            updateCarCover(c);" + NL + "            showLoadedCar(c);",
+      "        if (1) {" + NL
+      + "            updateCarCover(c);" + NL + "            showLoadedCar(c);"),
+
+    # The constructor and destructor.
+    M("init-fade-max", "c->fadeMax      = 130;", "c->fadeMax      = 128;"),
+    M("init-turn", "c->turnAngle = 16123;", "c->turnAngle = 16124;"),
+    M("init-tilt", "c->turnTilt  = 15712;", "c->turnTilt  = 15713;"),
+    M("init-points", "flailer_printf(screen, OBJ_POINTS, \"%s %d\",",
+      "flailer_printf(screen, OBJ_POINTS, \"%s %d \","),
+    M("init-no-tick", "    selTick(c);" + NL + "    trace(h, \"carsel player",
+      "    trace(h, \"carsel player"),
+    M("destroy-sound", "h->stopSound(h->user, 12);", "h->stopSound(h->user, 13);"),
+    M("destroy-pending", "    if (c->pending) loaderUnload(h, c->pending->type);" + NL, ""),
+    M("destroy-slide", "    slideRestore(&c->unlock.slide);" + NL, ""),
+
+    # The callback.
+    M("cb-select-orbit-noise", "            if (c->mode == c->orbitMode) {" + NL
+      + "                data->noise = 0;",
+      "            if (c->mode == c->orbitMode) {" + NL
+      + "                data->noise = 1;"),
+    M("cb-select-item", "            if (data->itemHash != BCARSEL_ITEM_CHOOSE) return;" + NL, ""),
+    M("cb-select-state", "            if (c->state != 0) return;" + NL
+      + "            if (cur(c)->available",
+      "            if (cur(c)->available"),
+    M("cb-select-locked", "if (cur(c)->available || c->allUnlocked) advanceState(c);",
+      "advanceState(c);"),
+    M("cb-move-shown", "            if (c->shownMode != c->chooseMode) return;" + NL, ""),
+    M("cb-move-sound", "sound(h, msg == BMSG_MENUITEM_PAD_LEFT ? 13 : 12);",
+      "sound(h, msg == BMSG_MENUITEM_PAD_LEFT ? 12 : 13);"),
+    M("cb-move-sound-fade", "            if (c->fade != c->fadeMax)" + NL
+      + "                sound(", "            if (1)" + NL + "                sound("),
+    M("cb-move-end", "            if (car == cur(c)) return;" + NL, ""),
+    M("cb-skin-param", "            data->param = 1;", "            data->param = 0;"),
+    M("cb-skin-one", "&& c->nSwatches >= 2", "&& c->nSwatches >= 1"),
+    M("cb-skin-sound", "                sound(h, 14);", "                sound(h, 15);"),
+    M("cb-skin-way", "if (msg == BMSG_MENUITEM_PAD_UP) carPrevSkin(cur(c));",
+      "if (msg == BMSG_MENUITEM_PAD_UP) carNextSkin(cur(c));"),
+    M("cb-skin-show", "                if (c->loaded == cur(c)) showLoadedCar(c);" + NL, ""),
+    M("cb-back-param", "                data->param = 0;" + NL
+      + "                enterChooseMode(c);",
+      "                data->param = 1;" + NL + "                enterChooseMode(c);"),
+    M("cb-dismiss-popup", "            c->popup = -1;" + NL
+      + "            switch (data->param) {",
+      "            switch (data->param) {"),
+    M("cb-dismiss-manual", "case 2: c->transmission = 1;", "case 2: c->transmission = 2;"),
+    M("cb-dismiss-wait", "                case 7: ok = 1; break;" + NL, ""),
+    M("cb-dismiss-noise", "if (maybeContinue()) data->noise = 18;",
+      "if (maybeContinue()) data->noise = 17;"),
+    M("cb-render", "            unlockRender(c);" + NL, ""),
+
+    # SelectCarScreen.
+    M("selector-index", "return Fred.NumPlayerCars == 2 ? data->port != 0 : 0;",
+      "return data->port != 0;"),
+    M("activate-port-none", "        if (data->port == -1) return;" + NL
+      + "        idx = data->port != 0;" + NL + "    }" + NL
+      + "    player = &Fred.FrontendPlayers[idx];",
+      "        idx = data->port != 0;" + NL + "    }" + NL
+      + "    player = &Fred.FrontendPlayers[idx];"),
+    M("activate-player-num", "idx ? 2 : 1, data->itemHash", "idx ? 1 : 2, data->itemHash"),
+    M("activate-cops", "idx == 0 && Fred.GameType == GAME_TYPE_BE_A_COP);",
+      "Fred.GameType == GAME_TYPE_BE_A_COP);"),
+    M("activate-count", "    p->count++;" + NL, ""),
+    M("deactivate-count", "    p->count--;" + NL, ""),
+    M("setsel-manual", "player->mPlayerSettings.TransmissionType = 2;",
+      "player->mPlayerSettings.TransmissionType = 1;"),
+    M("setsel-style", "else if (c->handling == 1) player->mPlayerSettings.DrivingStyle = 1;",
+      "else if (c->handling == 1) player->mPlayerSettings.DrivingStyle = 0;"),
+    M("setsel-dash", "(uint32_t)skinAt(car->status, car->skinIndex)," + NL
+      + "                               1);",
+      "(uint32_t)skinAt(car->status, car->skinIndex)," + NL
+      + "                               0);"),
+    M("all-ready", "c->state != (c->twoPlayer ? 3 : 2)", "c->state != (c->twoPlayer ? 2 : 2)"),
+    M("continue-champ", "if (Fred.GameType == 8 || Fred.GameType == 9) {",
+      "if (Fred.GameType == 8) {"),
+    M("continue-screen", "\"Select Track\", 1);", "\"Select Track\", 0);"),
+    M("unactivate-help", "            setHelp(h, NULL);" + NL
+      + "            screenDeactivate(p, data);",
+      "            screenDeactivate(p, data);"),
+    M("unactivate-fade", "speechFade(h, 0.2f);", "speechFade(h, 0.25f);"),
+    M("unactivate-perport", "                h->setPerPortJoy(h->user, 0);",
+      "                h->setPerPortJoy(h->user, 1);"),
+    M("back-selected", "            if (p) screenSetSelectedCars(p);" + NL, ""),
+    M("joy-port-filter", "if (c->twoPlayer && c->port != port) continue;",
+      "if (c->port != port) continue;"),
 ]
 
 EQUIVALENT = {
+    "slide-init-start": "the constructor's unlockSetCar sets the slide up "
+                        "again from 650 before anything reads it: u->car "
+                        "starts NULL and the current car never is",
+    "unlock-render-avail": "the box is at state 2 only with no car or a "
+                           "locked one: SetCar puts an available car's at 0, "
+                           "and only a locked car's hides to 1 and back",
+    "unlock-joy-avail": "the same: at state 2 the car is a locked one",
+    "badge-1p": "\"Select Car\" has no BADGE object, so the one-player "
+                "badge's texture and visibility go nowhere",
+    "thumbs-hide-all": "car 63, the FIRETRUCK, has no THUMBNAIL_ object on "
+                       "any of the three screens",
 }
 
 

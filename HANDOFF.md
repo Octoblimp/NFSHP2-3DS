@@ -13628,3 +13628,30 @@ the fade fix, and the main.c change has not been built since.
   `docs/formats/car-select.md`, and a commit of those.
 - Then SC-2 (the 3D car, its camera, cover, lighting and spotlights,
   and the pad's mapping), SC-3 (the nebula), and 13b-4f.
+
+## Session 33 (2026-10-04) -- SC-1 finished; SC-2, the 3D car, begun
+
+Session 32 ran out of context with SC-1's checker half done. This
+session finished it, then started on the car itself.
+
+### SC-1
+
+- **The checker agrees with retail over the whole script:** 7282 ops,
+  430239 lines, 0 differ. The four changes left untried at the end of
+  session 32 held. The model's slowness was accepted: the plain run
+  takes about seven minutes, in the background.
+- **It found two more bugs in `bcarsel.c`:**
+  - The ScreenCallback's left and right passed `port ^ 1` as
+    FormatUnlockBlurbForCar's last argument. Retail computes
+    `(port ^ 1) < 1`, which is `port == 1`, the same as Init.
+  - The info bar translated each unit before its figure. Retail
+    translates the figure first, which the translation stub's log
+    shows. C leaves the order of a call's arguments open, so the port
+    now fetches the figure into a local first.
+- **The mutation pass** has 201 mutations: 196 caught, 5 equivalent.
+  `docs/formats/car-select.md`, "The checker", says why each of the five
+  can't show.
+- **The build** has the fade bound's fix and UseTreeEvent inline.
+  bootflow_check: 48 scenarios, 27964 lines, 0 differ.
+- **`docs/formats/car-select.md` is new:** the screens and their
+  objects, the cars, the unlock box, the selector and the checker.

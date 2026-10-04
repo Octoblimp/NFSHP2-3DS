@@ -2369,10 +2369,14 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
         on the same base with other rows.
 - On 2026-09-29 the user moved the port back to cars and racing: the
   items below wait unless a race needs them.
-- [ ] **Car select.**
-  - The car on a lit turntable.
-  - The make's logo and the badge.
-  - The row of car icons.
-  - "Cars Unlocked" and "NFS Points".
+- [ ] **Car select** (`bcarsel.c`, `docs/formats/car-select.md`).
+  - [x] SC-1, retail's SelectCarScreen and CarSelector as logic and 2D:
+        the make's logo and the badge, the row of car icons, "Cars
+        Unlocked" and "NFS Points", the unlock box and the popups.
+        `carsel_check` runs retail's on the image: 7282 ops, 0 differ;
+        201 mutations, 196 caught, 5 equivalent.
+  - [ ] SC-2, the car on a lit turntable: the camera, the car and its
+        reflection, the light, the cover and the platform.
+  - [ ] SC-3, the nebula behind it.
 - [ ] **The briefing.** "You're The Cop", with its button list over the
       track's picture.

@@ -580,9 +580,8 @@ static void unlockHide(BCarSelUnlock* u)
     u->hide  = RealTimer;
 }
 
-// SetCar (0x00194b28). `flag` is FormatUnlockBlurbForCar's last argument,
-// which the two callers write differently: Init passes port == 1, the
-// ScreenCallback's left and right port ^ 1.
+// SetCar (0x00194b28). `flag` is FormatUnlockBlurbForCar's last argument:
+// both callers pass port == 1 (the ScreenCallback as (port ^ 1) < 1).
 static void unlockSetCar(CarSelector* c, VisibleCar* car, int flag)
 {
     const BCarSelHooks* h = c->hooks;
@@ -808,23 +807,26 @@ static void updateInfoBar(CarSelector* c)
         for (i = 0; i < 8; i++)
             flailer_set_visibility(c->screen, kInfo[i], 0);
     } else {
-        int     plus  = ct->HighPerformance || cop;
-        int32_t units = Fred.DisplayOptionsData.Units;
-        int32_t speed = 0;
+        int         plus  = ct->HighPerformance || cop;
+        int32_t     units = Fred.DisplayOptionsData.Units;
+        int32_t     speed = 0;
+        const char* value;
         for (i = 0; i < 8; i++)
             flailer_set_visibility(c->screen, kInfo[i], 1);
         if (ct->pCarSpecs) {
             if (units == 1) speed = ct->pCarSpecs->TopSpeedKph;
             else if (units == 0) speed = ct->pCarSpecs->TopSpeedMph;
         }
-        flailer_printf(c->screen, OBJ_TOP_SPEED, "%s%s %s", trId(h, speed),
+        // Each figure is translated before its unit, as retail calls them.
+        value = trId(h, speed);
+        flailer_printf(c->screen, OBJ_TOP_SPEED, "%s%s %s", value,
                        plus ? "+" : "",
                        trId(h, units != 0 ? LANG_KPH : LANG_MPH));
-        flailer_printf(c->screen, OBJ_ZERO_TO_60, "%s%s %s",
-                       trId(h, ct->pCarSpecs ? ct->pCarSpecs->ZeroTo60 : 0),
+        value = trId(h, ct->pCarSpecs ? ct->pCarSpecs->ZeroTo60 : 0);
+        flailer_printf(c->screen, OBJ_ZERO_TO_60, "%s%s %s", value,
                        plus ? "-" : "", trId(h, LANG_SECONDS));
-        flailer_printf(c->screen, OBJ_BHP, "%s%s %s",
-                       trId(h, ct->pCarSpecs ? ct->pCarSpecs->BHP : 0),
+        value = trId(h, ct->pCarSpecs ? ct->pCarSpecs->BHP : 0);
+        flailer_printf(c->screen, OBJ_BHP, "%s%s %s", value,
                        plus ? "+" : "", trId(h, LANG_BHP));
         flailer_printf(c->screen, OBJ_CLASS, "%d", ct->CarClass + 1);
         flailer_printf(c->screen, OBJ_CLASS_LABEL, "%s", trId(h, LANG_CLASS));
@@ -1340,7 +1342,7 @@ static void selCallback(CarSelector* c, BScreenMessage msg,
             car = msg == BMSG_MENUITEM_PAD_RIGHT
                       ? bcarsel_next_car(&c->set, cur(c))
                       : bcarsel_prev_car(&c->set, cur(c));
-            unlockSetCar(c, car, c->port ^ 1);
+            unlockSetCar(c, car, c->port == 1);
             if (car == cur(c)) return;
             if (c->fade != c->fadeMax)
                 sound(h, msg == BMSG_MENUITEM_PAD_LEFT ? 13 : 12);

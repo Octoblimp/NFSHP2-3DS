@@ -1,10 +1,10 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 32
-(2026-10-04), part way through the car selector's first part (SC-1).
-**Start at "Now" just below.** SC-1's code is written and was seen on
-Azahar. Its checker against retail is half done, and SC-1 is committed
-as work in progress. Session 31 took the race on Azahar from 20 FPS to 28-30 and
+Where the next session picks up. Updated in Session 33
+(2026-10-04), in the car selector's second part (SC-2).
+**Start at "Now" just below.** SC-1, the car selector as logic and 2D,
+is finished and checked against retail. SC-2 adds the 3D car on its
+turntable. Session 31 took the race on Azahar from 20 FPS to 28-30 and
 the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`). The rest
 of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) comes after
 the car selector. "Where the port stands" below has the count of what
@@ -12,128 +12,70 @@ is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
-## Now: the car selector's first part (SC-1), its checker unfinished
+## Now: the car selector's 3D car (SC-2)
 
-Session 32 ran out of context here, on 2026-10-04. The user asked for
-the car selector after seeing the stand-in Select Car screen ("Could
-use work LOL"). SC-1 is retail's SelectCarScreen and CarSelector
-(`SLES_507.31`) as logic and 2D. SC-2 is the 3D car, and SC-3 the
-nebula.
+The user asked for the car selector after seeing the stand-in Select
+Car screen ("Could use work LOL"). Retail's shows the car in 3D on a lit
+turntable. SC-1 is retail's SelectCarScreen and CarSelector
+(`SLES_507.31`) as logic and 2D, in `bcarsel.c`. SC-2 is the 3D car,
+and SC-3 the nebula behind it. `docs/formats/car-select.md` has all of
+it.
 
-**Written, and committed as work in progress:**
-- `3DS Files/source/bcarsel.c` and `.h`:
-  - VisibleCarSet, with CarListSort.
-  - The preload and CloseSelectCarScreen.
-  - The fade groups (feAlphaAnimation).
-  - The unlock box: its slide (AnimationGroup) and its blurb.
-  - The swatches.
-  - The thumbnail row, with the lock and the cloaks.
-  - The make's logo and the two-player badge.
-  - The info bar and the help lines.
-  - The JoyHandler (the orbit view).
-  - The three popups: the gearbox, the handling and the wait.
-  - SetSelectedCars and MaybeContinueToNextScreen.
+**SC-1 is done.** `carsel_check` agrees with retail over the whole
+script: 7282 ops, 430239 lines. Its mutation pass catches 196 of 201,
+and the other 5 are equivalent. The checker found that
+`BCARSEL_MAX_FADE` was 48 when FRONTB's fade groups hold up to 103
+objects. It is 128 now, and that is built. The plain run takes about
+seven minutes, most of it the model's 170 ms ticks, so run it in the
+background.
 
-  Each function's comment gives its retail address.
-- `nfsrewards.c` and `.h`: FormatUnlockBlurbForCar.
-- `main.c` and `gameflow.c`/`.h`: the hooks and the screen. UseTreeEvent
-  (game types 8 and 9) is now inline in bcarsel.c, and its hook is gone
-  from main.c. **That has not been built yet**, so run
-  `tools/build_cia.ps1` first.
-- `tools/run_azahar_carsel.ps1` boots Azahar into Select Car. Earlier in
-  session 32, SC-1 showed on Azahar as retail has it: the logo top left,
-  the badge, the thumbnail row, and "Cars Unlocked n/m  NFS Points n".
-  That was before the fix below.
-- `tools/src/carsel_test.c` (the harness) and `tools/carsel_check.py`
-  (the model, the script and the mutation pass, after hudnis_check).
+**SC-2, in four parts:**
+- **SC-2a, the camera.** `selcam.c` is SelectCarCameraMover
+  (CM_SELECT_CAR) with its sounds, checked by `selcam_check`.
+- **SC-2b, the car and its light.** `fecar.c` is FrontEndRenderingCar
+  and RenderFrontEndCars. `elight.c` gains SetSelectCarLighting and
+  elSetupLightContext's frontend branch. Both are checked by
+  `fecar_check`.
+- **SC-2c, the selector's 3D wiring**, in `bcarsel.c`, with
+  `carsel_check` extended over it:
+  - the two FrontEndRenderingCars at c[36] and c[40] (c[40] is the
+    reflection);
+  - the SelectCarCameraMover at c+188;
+  - CARCOVER and PLATFORM;
+  - ShowLoadedCar, UpdateRenderingCarParameters and UpdateCover;
+  - the Tick's SetSelectCarLighting call;
+  - the spotlights.
+- **SC-2d, the draw on the device:**
+  - `main.c` sets gElInFrontendFn and gElCarSelectActiveFn
+    (bcarsel_active);
+  - the frontend's 3D view, with no track;
+  - the camera, the platform, the car and its reflection;
+  - the frame's memory.
 
-**Fixed, found by the checker:** `BCARSEL_MAX_FADE` (bcarsel.h) was 48.
-FRONTB's fade group A has 102 objects on the 1P screen, and 98 and 103
-on the two-player halves. Most of the thumbnail row never faded out in
-the orbit view. The bound is 128 now. That fix is not in a build yet.
+  Then Azahar screenshots against the user's PCSX2 photos.
 
-**The checker, as it stands:**
-- **The harness** links (SOURCES needed langtab.c) and runs the whole
-  script in 2 s. It took 54 s until `note()` began each search at its
-  last hit.
-- **The model** runs four retail functions:
-  - SelectCarScreenCallback (0x00198928);
-  - the JoyHandler bridge (0x00198e28);
-  - the preload (0x00194898);
-  - CloseSelectCarScreen (0x00194fb0).
-
-  GetTextureInfo (0x001abf48) is stubbed to 0. Its only two callers are
-  the tick, whose swatch texture only feeds SetSelectCarLighting, and
-  InitSpotlights, which does nothing without its texture. Both are SC-2.
-- **The first 400 ops agreed byte for byte** once MAX_FADE was fixed.
-  Four changes since then have not been run together:
-  - The set-up ops (g, fs, ride, pts, xl, egg, ev, isl) no longer dump,
-    on either side.
-  - `walk()` renders each press and ticks after every `every` presses.
-  - The orbit timeout is tested at exactly 2400 frames (it stays) and
-    2401 (it leaves).
-  - A DISMISS 0 comes at state 0.
-- **The blocker is the model's speed.** A TICK costs 169 ms in mipsemu,
-  an ACTIVATE 0.55 s, and everything else 2-25 ms. The script has 1,129
-  ticks, about 3.5 minutes in all. There are three ways out:
-  - Cut the long settling runs. The fade needs 44 ticks to fall from 130
-    at 3 a tick, the orbit's mode needs 34 at 0.03 a tick, and a reload's
-    fade-out needs 19 at 7 a tick.
-  - Profile the tick. updateThumbnails, with 25 cloak hashes and a
-    visibility call per car, is the likely cost.
-  - Accept a run of a few minutes, in the background.
-- **`MUTATIONS` is empty.** About 80 are planned:
-  - the sort's keys and its tie;
-  - the set's init and copy;
-  - the preload's skip and unload;
-  - the fade bound and scale;
-  - the slide's start and duration;
-  - the unlock box's timing, guards and sounds;
-  - `covered()`;
-  - the logo's two-player names and the badge;
-  - the info bar's units, plus signs and class;
-  - OBJ_UNLOCKED's visibility;
-  - the help tables;
-  - the swatches' places and colours;
-  - the thumbnails' base, step, y and lock;
-  - the fade groups' scales;
-  - the orbit speeds;
-  - the popups' fields and screens;
-  - the advance and devance guards;
-  - AllReady;
-  - SetSelectedCars' mapping;
-  - the tick's fade steps, timeout and arrows;
-  - each case of the callback;
-  - `selectorIndex`;
-  - the screen's activate and unactivate;
-  - `bcarsel_joy`'s port filter.
-- **Session 32's diff helpers** were scratch files, not in the repo, and
-  are quick to rewrite:
-  - a per-op diff that narrows each object line to the bytes that
-    differ (byte 43 is DirtyFlag, which every Flailer setter stamps);
-  - a time per op type;
-  - the model on the first N ops.
-
-**To finish SC-1, in order:**
-1. Get the checker to agree on the whole script.
-2. Add the mutations. Do not build while `--mutate` runs.
-3. Run `tools/build_cia.ps1`, then `bootflow_check`.
-4. Write `docs/formats/car-select.md` (new): the screens and their
-   objects, nfsrewards, UseTreeEvent and the checker.
-5. Add `carsel_check` to the checker list under "State".
-6. Commit the finished checker, the doc and whatever the build needed.
+**Retail's facts for SC-2c and SC-2d:**
+- eDisplayFrame calls RenderFrontEndCars four times:
+  - (view, 1, 0, 1, 0) at 0x00112c1c and 0x00112d2c, the environment
+    map's faces;
+  - (view, 0, 1, 1, 1) at 0x001136bc, the reflections;
+  - (view, 1, 0, 0, 1) at 0x001136d4, the cars, after RenderCars.
+- The Tick calls SetSelectCarLighting at 0x0019729c.
+  - The brightness is (1 - the swatch's weighted luminance)^4.
+  - Locked is all four of: gp-23120 == 0, c[76] == 0, c[80]'s
+    VisibleCar non-NULL with available == 0, and the status's
+    nStatus == 2.
+- Render flag 1 means no envmap. What flags 8 and 16 mean is not known.
+  The port's render_model ignores them.
 
 **Gaps, on purpose:**
 - The event trees are not ported, so findEventForCar is NULL in main.c
   and the device shows no tree blurbs.
-- The pad's mapping to `bcarsel_joy` is SC-2's. So are the 3D car, the
-  camera, the cover, the platform, the lighting, the spotlights and
-  OverRideAlpha.
 - The nebula is SC-3.
 - Select Track is still a plain screen.
 - Joy event 34 does nothing in retail either.
 
-**Then:** SC-2, SC-3, and after them 13b-4f.
+**Then:** SC-3, and after it 13b-4f.
 
 ## State
 
@@ -177,10 +119,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Ninety-seven cross-checkers pass, plus the four table generators:
+Ninety-eight cross-checkers pass, plus the four table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/mainloop_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/texturestream_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/resource_check.py && python tools/fred_check.py && python tools/fredrace_check.py && python tools/flailer_check.py && python tools/hudfeatures_check.py && python tools/bprintf_check.py && python tools/hudrender_check.py && python tools/hudanim_check.py && python tools/hudscore_check.py && python tools/hudcop_check.py && python tools/hudnis_check.py && python tools/hudtach_check.py && python tools/trackmap_check.py && python tools/envsample_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/mainloop_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/texturestream_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/resource_check.py && python tools/fred_check.py && python tools/fredrace_check.py && python tools/flailer_check.py && python tools/hudfeatures_check.py && python tools/bprintf_check.py && python tools/hudrender_check.py && python tools/hudanim_check.py && python tools/hudscore_check.py && python tools/hudcop_check.py && python tools/hudnis_check.py && python tools/hudtach_check.py && python tools/carsel_check.py && python tools/trackmap_check.py && python tools/envsample_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -188,7 +130,7 @@ bvector_check      27 scenarios,  5721 lines, 0 differ   (23/23 mutations caught
 bmath_check        19 scenarios,  6643 lines, 0 differ   (11/11 mutations caught)
 banim_check        23 scenarios,  2219 lines, 0 differ
 bscreens_check     17 scenarios,  1277 lines, 0 differ
-bootflow_check     48 scenarios, 27890 lines, 0 differ   (187 caught, 3 equivalent)
+bootflow_check     48 scenarios, 27964 lines, 0 differ   (187 caught, 3 equivalent)
 bslotpool_check    18 scenarios,  1025 lines, 0 differ   (47/47 mutations caught)
 geometry_check     30 files,     42047 lines, 0 differ   (53/53 mutations caught)
 texsrc_check       6 packs, 2 levels, 2958 textures, 0 differ
@@ -282,6 +224,7 @@ hudscore_check      1608 ops,     6184 lines, 0 differ  (150 caught, 0 equivalen
 hudcop_check        1187 ops,     4763 lines, 0 differ  (115 caught, 5 equivalent; retail's image)
 hudnis_check         818 ops,     4359 lines, 0 differ  (118 caught, 1 equivalent; retail's image)
 hudtach_check       2287 ops,     7804 lines, 0 differ  (89 caught, 4 equivalent; retail's image)
+carsel_check        7282 ops,   430239 lines, 0 differ  (196 caught, 5 equivalent; retail's image)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -3316,8 +3259,8 @@ goes in.
   and 36.
 - **Next:** the car selector (step 16's SelectCarScreen, CarSelector
   and the front end's car), which the user asked for on 2026-10-04.
-  SC-1 (the logic and the 2D) is written and its checker is half done;
-  see "Now" at the top.
+  SC-1 (the logic and the 2D) is done and checked; SC-2, the 3D car, is
+  under way. See "Now" at the top.
   Then 13b-4f, the models' cost per draw. 13b-1 (the real clock and the
   pacing), 13b-2 (the frame profiler), 13b-3 (New 3DS mode in full) and
   13b-4a to 13b-4e (the draw's cuts) are done.
@@ -3346,8 +3289,7 @@ goes in.
 - **Not yet in the count:** the replay, and with it the race's music
   (see step 14's note). The race runs in real time since 13b-1, at
   28-30 FPS on Azahar since 13b-4d. Holding 30 is the rest of 13b-4.
-  The car selector's 2D is retail's now (SC-1, its checker unfinished).
-  The car itself is SC-2.
+  The car selector's 2D is retail's now (SC-1). The car itself is SC-2.
 
 ## What not to trust
 
