@@ -39,6 +39,17 @@ reaches:
     already set in the branch's delay slot.
   * ResetWorldTime leaves NeedToPrepareWorldTimestep alone.
 
+Since step 13b-1 it also runs MainLoop's measure (0x0012f43c ..
+0x0012f468), the port's prepare_real_timestep_from_ticker: the
+milliseconds bGetTickerDifference gives from the last frame's tick (s2)
+to a new one, times 0.001 (gp-32048), into PrepareRealTimestep, and then a
+second tick into s2. The model runs the fragment itself, from 0x0012f43c
+to the call of IsGameFlowPaused, whose stub ends the run. bGetTicker
+answers from the script's ticks on both sides and logs each read, so the
+reads' number and order against the joylog's calls are compared too. The
+frames are paced at 30, 20 and 60 a second, jittered, across the
+counter's wrap, long, still and backwards.
+
     python tools/realtime_check.py
     python tools/realtime_check.py --mutate
     python tools/realtime_check.py --dump out/realtime
@@ -67,6 +78,7 @@ SOURCES = [
     "3DS Files/source/realtime.c",
     "3DS Files/source/joylog.c",
     "3DS Files/source/timer.c",
+    "3DS Files/source/bticker.c",
 ]
 
 RC = "3DS Files/source/realtime.c"
@@ -78,6 +90,17 @@ G_JL_REPLAYING = GP - 20668
 G_JL_CAPTURING = GP - 20664
 G_JL_REPEAT = GP - 20660
 FAKE_REPEAT = 0x01E30100
+
+# MainLoop's measure, run as a fragment: from the bGetTicker before
+# bGetTickerDifference to the call of IsGameFlowPaused, with the new tick
+# in s2 by then (the call's delay slot).
+F_MEASURE = 0x0012f43c
+F_TICKER = 0x00250f38           # bGetTicker
+F_PAUSED = 0x001680b8           # IsGameFlowPaused
+S2 = 18
+
+# The EE's Count rate, in cycles a second, as bticker.h scales the 3DS's.
+EE_HZ = 294912000
 
 NAMES = [
     "FrameCounter", "CurrentVideoMode", "RealTimer", "RealTime",
@@ -103,7 +126,8 @@ SYM = {
 
 (OP_TAG, OP_SET_MODE, OP_GET_MODE, OP_FROMQ, OP_QUANT, OP_PREP_REAL,
  OP_ADV_REAL, OP_RESET_WORLD, OP_PREP_WORLD, OP_ADV_WORLD, OP_FLAGS,
- OP_FEED, OP_POKE, OP_DUMP) = range(1, 15)
+ OP_FEED, OP_POKE, OP_DUMP, OP_TICKS, OP_SET_TICKER,
+ OP_MEASURE) = range(1, 18)
 
 bits = me.f_to_bits
 fbits = me.fbits_to
@@ -154,6 +178,20 @@ class Script(object):
         self.op(OP_POKE, IDX["RealTimeElapsedError"], b)
         self.op(OP_PREP_REAL, 0)
         self.op(OP_ADV_REAL)
+
+    def ticks(self, *ts):
+        self.op(OP_TICKS, len(ts), *ts)
+
+    def measured(self, last, cycles, prep=700):
+        """One of MainLoop's frames: the measure's tick `cycles` after
+        `last`, less the prepare's own `prep`, and the kept tick `prep`
+        after that; then the clock advances. Returns the kept tick."""
+        t1 = (last + cycles - prep) & M32
+        t2 = (t1 + prep) & M32
+        self.ticks(t1, t2)
+        self.op(OP_MEASURE)
+        self.op(OP_ADV_REAL)
+        return t2
 
 
 # The windows, as the image holds them: gp-29428 .. gp-29416.
@@ -335,7 +373,84 @@ def script():
         else:
             sc.op(OP_FEED, rnd.randrange(0, 256))
     sc.op(OP_DUMP)
+
+    measure_script(sc)
+    sc.op(OP_DUMP)
     return sc
+
+
+def measure_script(sc):
+    """MainLoop's measure (step 13b-1), frame after frame."""
+    sc.tag("measure, ntsc, 30 frames a second")
+    sc.op(OP_FLAGS, 0, 1, 1)
+    sc.op(OP_SET_MODE, 1)
+    sc.poke_f("RealTimeElapsedError", 0.0)
+    sc.poke_f("RealTimeElapsedFrame", 0.0)
+    sc.op(OP_SET_TICKER, 0x10000000)
+    last = 0x10000000
+    for _ in range(90):
+        last = sc.measured(last, EE_HZ // 30)
+
+    sc.tag("measure, 20 and 60 frames a second")
+    for _ in range(40):
+        last = sc.measured(last, EE_HZ // 20)
+    for _ in range(60):
+        last = sc.measured(last, EE_HZ // 60, prep=300)
+    for _ in range(30):             # vsynced at 30 on a 59.83 Hz screen
+        last = sc.measured(last, EE_HZ * 2 * 4481136 // 268111856)
+
+    sc.tag("measure, jittered")
+    rnd = random.Random(20261004)
+    for _ in range(200):
+        ms = rnd.choice([rnd.uniform(10.0, 70.0), 33.3, 33.4, 50.0,
+                         rnd.uniform(16.0, 17.5), rnd.uniform(49.0, 52.0)])
+        last = sc.measured(last, int(ms * EE_HZ / 1000.0),
+                           prep=rnd.randrange(0, 5000))
+
+    sc.tag("measure, across the counter's wrap")
+    sc.op(OP_SET_TICKER, 0xFFF00000)
+    last = 0xFFF00000
+    for _ in range(12):
+        last = sc.measured(last, EE_HZ // 30)
+
+    sc.tag("measure, a long frame, still and backwards")
+    for cycles, prep in ((EE_HZ, 700),           # a second's load
+                         (EE_HZ * 14, 700),      # under the wrap's 14.56 s
+                         (EE_HZ * 15, 700),      # over it: wraps small
+                         (0, 0),                 # the same tick
+                         (700, 700),             # the measure's tick still
+                         (EE_HZ // 30, 0),
+                         (-1000, 0),             # backwards: the top bit
+                         (-EE_HZ // 30, 0),
+                         (0x80000000, 0),
+                         (0x80000001, 0),
+                         (0x7FFFFFFF, 0)):
+        last = sc.measured(last, cycles, prep)
+
+    sc.tag("measure, pal")
+    sc.op(OP_SET_MODE, 0)
+    for _ in range(20):
+        last = sc.measured(last, EE_HZ // 25)
+    for _ in range(10):
+        last = sc.measured(last, EE_HZ // 60)
+    sc.op(OP_SET_MODE, 1)
+
+    sc.tag("measure, replaying")
+    sc.op(OP_FLAGS, 1, 1, 1)
+    for step, loop in ((120, 3), (60, 4), (180, 5)):
+        sc.op(OP_FEED, step)
+        sc.op(OP_FEED, loop)
+        last = sc.measured(last, EE_HZ // 30)
+    sc.op(OP_FLAGS, 0, 1, 1)
+    for _ in range(3):
+        last = sc.measured(last, EE_HZ // 30)
+
+    sc.tag("measure, a dry ticker")
+    sc.ticks(last + EE_HZ // 30)    # the kept tick reads 0
+    sc.op(OP_MEASURE)
+    sc.op(OP_ADV_REAL)
+    sc.op(OP_MEASURE)               # both read 0
+    sc.op(OP_ADV_REAL)
 
 
 # ================================================================ the model
@@ -362,8 +477,20 @@ class Model(object):
                  % (s32(em.reg[5]), s32(em.reg[6]), s32(em.reg[7]),
                     "" if em.reg[4] & M32 == FAKE_REPEAT else " rep?"))
 
+        def ticker(em):
+            v = self.ticks.pop(0) if self.ticks else 0
+            emit("  tick -> %08x" % v)
+            return v
+
+        def paused(em):
+            em.reg[me.RA] = em.RETURN       # the fragment's end
+            return 0
+
+        self.ticks = []
         e.stub("RemoveData__7bRepeatii", rep_remove)
         e.stub("AddData__7bRepeatiii", rep_add)
+        e.stub(F_TICKER, ticker)
+        e.stub(F_PAUSED, paused)
         # The fake repeat never runs out, as in joystick_check: RemoveData's
         # end test wants word 36 below word 32 and word 40 clear, AddData's
         # wants word 8 below 8 * word 20 - 68.
@@ -441,6 +568,16 @@ class Model(object):
                 out.append("poke %d %08x" % (k, v))
             elif op == OP_DUMP:
                 self.dump()
+            elif op == OP_TICKS:
+                self.ticks.extend(arg() for _ in range(arg()))
+            elif op == OP_SET_TICKER:
+                e.reg[S2] = arg()
+                out.append("ticker %08x" % (e.reg[S2] & M32))
+            elif op == OP_MEASURE:
+                out.append("measure %08x" % (e.reg[S2] & M32))
+                e.run(F_MEASURE)
+                self.dump()
+                out.append("  ticker %08x" % (e.reg[S2] & M32))
             else:
                 raise SystemExit("op %d" % op)
         return out
@@ -717,6 +854,36 @@ MUTATIONS = [
      + "}",
      "WorldTimeSeconds = (float)(uint32_t)WorldTimer * "
      "REALTIME_SECS_PER_TICK;" + NL + "}"),
+    # MainLoop's measure
+    ("ml-scale", RC, "REALTIME_SECS_PER_MSEC    0.001f",
+     "REALTIME_SECS_PER_MSEC    0.00101f"),
+    ("ml-no-scale", RC,
+     "bGetTicker())" + NL + "                        * REALTIME_SECS_PER_MSEC);",
+     "bGetTicker()));"),
+    ("ml-divides", RC, "                        * REALTIME_SECS_PER_MSEC);",
+     "                        / 1000.0f);"),
+    ("ml-swapped", RC, "bGetTickerDifference(*ticker, bGetTicker())",
+     "bGetTickerDifference(bGetTicker(), *ticker)"),
+    ("ml-fix-difference", RC, "bGetTickerDifference(*ticker, bGetTicker())",
+     "(float)bGetFixTickerDifference(*ticker, bGetTicker())"),
+    ("ml-ticker-kept", RC, "    *ticker = bGetTicker();" + NL, ""),
+    ("ml-ticker-first", RC,
+     "    PrepareRealTimestep(bGetTickerDifference(*ticker, bGetTicker())"
+     + NL + "                        * REALTIME_SECS_PER_MSEC);" + NL
+     + "    *ticker = bGetTicker();",
+     "    uint32_t now = bGetTicker(), from = *ticker;" + NL
+     + "    *ticker = bGetTicker();" + NL
+     + "    PrepareRealTimestep(bGetTickerDifference(from, now)" + NL
+     + "                        * REALTIME_SECS_PER_MSEC);"),
+    ("ml-one-read", RC,
+     "    PrepareRealTimestep(bGetTickerDifference(*ticker, bGetTicker())"
+     + NL + "                        * REALTIME_SECS_PER_MSEC);" + NL
+     + "    *ticker = bGetTicker();",
+     "    uint32_t now = bGetTicker();" + NL
+     + "    PrepareRealTimestep(bGetTickerDifference(*ticker, now)" + NL
+     + "                        * REALTIME_SECS_PER_MSEC);" + NL
+     + "    *ticker = now;"),
+
     # retail's SetTime
     ("settime-truncates", TC, "ee_trunc_w(seconds * 4000.0f + 0.5f)",
      "ee_trunc_w(seconds * 4000.0f)"),

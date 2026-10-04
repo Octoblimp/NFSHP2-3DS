@@ -13106,3 +13106,84 @@ them. The checker covers all of them.
 
 - **13b-1:** the real clock and the pacing (CONTINUE.md). Step 13 is
   done.
+
+## Session 31, continued (2026-10-04) -- the real clock and the pacing (step 13b-1)
+
+The race runs in real time. MainLoop's measure is ported, so the world
+steps by the time a frame took, not by a sixtieth. At 20 frames a second
+the race used to run at a third of real time. A race frame now takes at
+least two vertical blanks. `docs/formats/realtime.md` has the write-up,
+in "The frame on the 3DS".
+
+### The port
+
+- **`realtime.c`** adds `prepare_real_timestep_from_ticker`, MainLoop's
+  measure (`0x0012f43c` .. `0x0012f468`):
+  - bGetTickerDifference from the last frame's tick (s2) to a new one;
+  - times 0.001 (gp-32048);
+  - into PrepareRealTimestep;
+  - and then a second tick into s2, so the prepare's own time counts in
+    the next frame.
+- **`main.c`**:
+  - `BOOT_DT` is gone. The flow, the blurb, the UI's scrolling counter
+    and the two viewers take the real step. The jukebox's delayed start
+    takes the world's (gp-19560), as sound::Update does.
+  - `FrameCounter` is `C3D_FrameCounter(0)`, the top screen's blanks.
+  - **The pacing.** In a race, when no blank has come since the last
+    frame's sync, the loop waits one more before C3D_FrameBegin. Every
+    race frame is two blanks or more, and none is 16.7 ms between two of
+    33.3. A slow frame is not held back further. The frontend and the
+    movies stay at 60.
+  - `race: clock` logs the wall, real and world seconds, the step, the
+    blanks and the frames drawn, each world second.
+
+What retail does that a reader would not guess:
+
+- bGetTickerDifference divides by 300 MHz, while the ticks come at
+  294.912 MHz. PrepareRealTimestep's 1.0167 makes up for it, to within
+  0.05%.
+- The step is held under NTSC's 0.05 s. Under 20 frames a second, the
+  world runs slow on the PS2 too.
+- sound::Update's 8 ms gate passes at any rate up to 125 frames a
+  second, so the port needs no gate.
+
+### The checks
+
+- **`realtime_check`** runs MainLoop's measure as a fragment of the
+  image, from `0x0012f43c` to the call of IsGameFlowPaused, whose stub
+  ends the run. bGetTicker answers from the script on both sides and
+  logs each read. The frames:
+  - at 30, 20 and 60 a second, and at two of the 3DS's blanks;
+  - 200 jittered;
+  - across the counter's wrap;
+  - long, still and backwards;
+  - PAL, replaying, and a dry ticker.
+
+  28 scenarios, 2016 ops, 8781 lines, 0 differ. The mutation pass: 103
+  mutations, 101 caught, 2 equivalent (the old two).
+- **`joystick_check`**, **`joyhid_check`**, **`fred_check`** and
+  **`fredrace_check`** link `bticker.c` now. Each links `realtime.c`,
+  which reads the ticker since this slice. The chain's first run failed
+  the four at the link.
+
+The whole chain: 99 checkers and the four table generators in 1510 s. 4 of 103 failed on the first run, all four at the link (above); rerun, each is 0 differ, so 0 of 103 fail (`out/chain_13b1.txt`).
+
+### On Azahar
+
+The race on track 12 (`out/azahar_13b1`), at Speed 101%:
+
+- 20 frames a second, at three blanks each. The blanks come at 59.8 a
+  wall second.
+- The step sits at NTSC's ceiling, 0.05 s, with a few at 0.048 to 0.0497.
+- While the frames take 50 ms or less, the world keeps pace with the
+  wall: 5.986 world seconds in 6.017 wall seconds. Past 50 ms the
+  ceiling drops the excess, as on the PS2, and the world gets about 0.93
+  of a wall second.
+- No crash. The user, playing it: "RUNS SO GOOD NOW!"
+
+### Next
+
+- **13b-2:** the frame profiler (CONTINUE.md). Retail's own is
+  MainLoopTiming's ten ticks and CalculateFrameRate. Its "C: %dfps" and
+  "G: %dfps" are Player::DisplayDebugInfo's, behind
+  DisplayPlayerDebugInfo (gp-20700).

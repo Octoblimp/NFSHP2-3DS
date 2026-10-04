@@ -80,7 +80,7 @@ SOURCES = [HARNESS, FRR, RPC, CFC] + [
     "3DS Files/source/" + f for f in (
         "fred.c", "race.c", "characterinfo.c", "edisplay.c", "playersettings.c",
         "difficultyinfo.c", "cartypeinfo.c", "langtab.c", "realtime.c",
-        "joylog.c", "timer.c", "track.c",
+        "bticker.c", "joylog.c", "timer.c", "track.c",
         "terraintype.c", "cartrack.c", "carstate.c", "emath.c", "bmatrix.c",
         "terraintypetab.c", "bslotpool.c", "bvector.c", "bmath.c",
         "bmathtab.c", "bchunk.c", "p32.c")]

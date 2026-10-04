@@ -2,6 +2,7 @@
 
 #include "realtime.h"
 
+#include "bticker.h"
 #include "eefpu.h"
 #include "joylog.h"
 #include "timer.h"
@@ -47,6 +48,9 @@ int32_t NeedToPrepareWorldTimestep = 1;
 #define REALTIME_FRAMES_PER_SEC   60.0f
 #define REALTIME_SECS_PER_FRAME   0.0166666675f
 #define REALTIME_SECS_PER_TICK    0.000250000012f
+
+// MainLoop's measure is in milliseconds, times gp-32048 (0x3a83126f).
+#define REALTIME_SECS_PER_MSEC    0.001f
 
 // The joylog's two channels for the step: the quantised step in 8 bits on
 // channel 2, and the low four bits of the loop count on channel 4.
@@ -117,6 +121,16 @@ void PrepareRealTimestep(float seconds)
     }
     RealTimeElapsedQuantized = q;
     RealTimeElapsed = GetRealTimeElapsedFromQuantized(q);
+}
+
+// The step is measured from the last frame's tick to a new one, and the
+// tick kept for the next frame is read again after the prepare, so the
+// prepare's own time counts in the next frame's step.
+void prepare_real_timestep_from_ticker(uint32_t *ticker)
+{
+    PrepareRealTimestep(bGetTickerDifference(*ticker, bGetTicker())
+                        * REALTIME_SECS_PER_MSEC);
+    *ticker = bGetTicker();
 }
 
 // Whole sixtieths out of the running remainder, and at least one a frame

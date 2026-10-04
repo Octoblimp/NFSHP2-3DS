@@ -75,8 +75,8 @@ PSC = "3DS Files/source/playersettings.c"
 CFC = "3DS Files/source/configitems.c"
 SOURCES = [HARNESS, FRC, RPC, CIC, EDC, PSC, CFC] + [
     "3DS Files/source/" + f for f in (
-        "cartypeinfo.c", "langtab.c", "realtime.c", "joylog.c", "timer.c",
-        "track.c",
+        "cartypeinfo.c", "langtab.c", "realtime.c", "bticker.c", "joylog.c",
+        "timer.c", "track.c",
         "terraintype.c", "cartrack.c", "carstate.c", "emath.c", "bmatrix.c",
         "terraintypetab.c", "bslotpool.c", "bvector.c", "bmath.c",
         "bmathtab.c", "bchunk.c", "p32.c")]

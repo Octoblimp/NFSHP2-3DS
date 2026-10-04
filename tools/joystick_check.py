@@ -80,6 +80,7 @@ JC = "3DS Files/source/joystick.c"
 SOURCES = [HARNESS, JEC, JPC, JLC, RPC,
            "3DS Files/source/p32.c",
            "3DS Files/source/realtime.c",
+           "3DS Files/source/bticker.c",
            "3DS Files/source/timer.c",
            "3DS Files/source/scannertab.c",
            "3DS Files/source/joystick.c",

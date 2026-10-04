@@ -35,9 +35,13 @@
 // the ticker. It prepares the world's step from World::GetTimestep in a
 // race, from 0 while the flow, the world or the replay is paused, and from
 // the real step when there is no race. It advances both at the frame's end.
-// The port's main loop does the same, with no race yet, and with BOOT_DT as
-// the ticker's measure. InitDisplaySystem sets the video mode. The port
-// keeps the image's NTSC.
+// The port's main loop does the same, with the ticker's measure since step
+// 13b-1 (prepare_real_timestep_from_ticker). InitDisplaySystem sets the
+// video mode. The port keeps the image's NTSC.
+//
+// FrameCounter is the vertical-blank count PSX2VBlank keeps, and MainLoop
+// waits at a frame's end until it has moved. On the 3DS it is the top
+// screen's count, citro3d's C3D_FrameCounter(0) at its default rate of 60.
 //
 // WorldTimeDoSnapshot (0x001995d8) is not ported: it waits on
 // ReplaySnapshot, like every DoSnapshot.
@@ -87,6 +91,12 @@ int32_t GetQuantizedRealTimeElapsed(float seconds);
 // 0x00199300. The frame's real step, from `seconds` as the ticker measured
 // it. Replaying a joylog, the step is the log's instead.
 void PrepareRealTimestep(float seconds);
+
+// MainLoop's measure (0x0012f43c .. 0x0012f468): PrepareRealTimestep from
+// bGetTickerDifference(*ticker, bGetTicker()) * 0.001, the milliseconds
+// since the last frame's tick, then a new tick into *ticker. MainLoop keeps
+// the tick in s2, read first at its entry.
+void prepare_real_timestep_from_ticker(uint32_t *ticker);
 
 // 0x00199410. The real clock forward by the prepared step.
 void AdvanceRealTime(void);

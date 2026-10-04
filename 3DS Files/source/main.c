@@ -51,6 +51,7 @@
 #include "bmenu.h"
 #include "bsnd.h"
 #include "bslotpool.h"
+#include "bticker.h"
 #include "camera.h"
 #include "cammover.h"
 #include "bscreens.h"
@@ -350,10 +351,6 @@ typedef struct {
     int         numPending;
 } Boot;
 
-// One pass of the flow per frame, and the display is vsynced, so this is the
-// timestep for both the flow's clocks and the movie's.
-#define BOOT_DT (1.0f / 60.0f)
-
 static Boot g_boot;
 static BGameFlow g_flow;
 static BScreens g_uiScreens;
@@ -516,7 +513,7 @@ static BsndDriver gSnd;
 
 // sound::jukebox (0x003115d0), the EA TRAX player, and what it asks of the
 // game. The flow's CurrentGameFlowState is its gp-21420; the VBlank count
-// is FrameCounter, one a frame; nothing pauses the flow or sets cops yet.
+// is FrameCounter; nothing pauses the flow or sets cops yet.
 static JBSound g_jukebox;
 static int     g_audioMode = 1;     // gp-18892, stereo
 
@@ -2394,6 +2391,15 @@ static void logRaceState(void)
             g_track.drawnTris, g_track.note);
     logLine("race: minimap %d polys (%d failed)", g_track.flailerPolys,
             g_track.flailerFailed);
+    // Step 13b-1's measure: against the wall clock, the real and world
+    // clocks should keep pace, and the frames drawn and the blanks give
+    // the frame rate and the blanks a frame.
+    logLine("race: clock wall %.3f s, real %.3f s, world %.3f s; step "
+            "%.4f; %ld blanks, %lu frames drawn",
+            (double)svcGetSystemTick() / SYSCLOCK_ARM11,
+            (double)RealTimer * 0.00025, (double)WorldTimeSeconds,
+            (double)RealTimeElapsed, (long)FrameCounter,
+            (unsigned long)eFrameCounter);
     logLine("race: other solids %d (%d failed, %d dropped), textures %d "
             "(%d missing, %d reduced), deferred %d dropped; strips %d "
             "(%d dropped)",
@@ -3293,6 +3299,11 @@ int main(int argc, char** argv)
     uint32_t uiTimer = 0;
     int32_t  joyType = -1;
     bool     clockStarted = false;
+    // MainLoop's s2, the tick its measure starts from, read first at its
+    // entry (0x0012f3a0).
+    uint32_t frameTicker = bGetTicker();
+    // The top screen's blank count when the last frame's sync returned.
+    u32      lastSync = 0;
 
     while (aptMainLoop()) {
         hidScanInput();
@@ -3303,26 +3314,29 @@ int main(int argc, char** argv)
         bsnd_update(&gSnd);
         // sound::Update's jukebox (0x001af4c0): its Update and a delayed
         // start, then bSound::Update's -- the sample's callbacks. Its 8 ms
-        // gate always passes at 60 frames a second.
-        jb_music_update(&g_jukebox, Fred.AudioOptionsScreenData, BOOT_DT);
+        // gate passes at any frame rate up to 125. The delayed start counts
+        // down by the world's step (gp-19560), which is still the last
+        // frame's here: the clocks advance below.
+        jb_music_update(&g_jukebox, Fred.AudioOptionsScreenData,
+                        WorldTimeElapsed);
         if (soundUp) jbstream_poll(&g_jukebox.jukebox);
 
-        uiTimer += (uint32_t)(int)(BOOT_DT * 4000.0f);
-        uirender_set_time(&ui, (float)uiTimer * 0.00025f);
-
-        // MainLoop's clocks (0x0012dbd0). It prepares the real step at the
-        // top of a frame from the ticker, and the world's from the real one
-        // when there is no race. It advances both at the frame's end
-        // (0x0012de70), which here is the top of the next one. The ticker's
-        // measure is BOOT_DT, since the display is vsynced. FrameCounter is
-        // the PS2's vertical-blank count, and so one a frame.
+        // MainLoop's clocks (0x0012f378). It prepares the real step at the
+        // top of a frame from the ticker (0x0012f43c), and the world's from
+        // the real one when there is no race. It advances both at the
+        // frame's end (0x0012f62c), which here is the top of the next one.
+        // FrameCounter is the vertical-blank count PSX2VBlank keeps: the
+        // top screen's, from citro3d (realtime.h).
         if (clockStarted) {
             AdvanceRealTime();
             AdvanceWorldTime();
         }
         clockStarted = true;
-        FrameCounter++;
-        PrepareRealTimestep(BOOT_DT);
+        FrameCounter = (int32_t)C3D_FrameCounter(0);
+        prepare_real_timestep_from_ticker(&frameTicker);
+
+        uiTimer += (uint32_t)(int)(RealTimeElapsed * 4000.0f);
+        uirender_set_time(&ui, (float)uiTimer * 0.00025f);
         // A race up as the frame begins takes its world step, and the
         // events, after the coordinator's TICK: raceFrame. One the flow
         // makes in this frame starts on the next.
@@ -3432,9 +3446,8 @@ int main(int argc, char** argv)
                 }
             }
 
-            // MainLoop: one pass of the flow per frame. The display is
-            // vsynced below, so the timestep is a frame.
-            bgf_frame(&g_flow, BOOT_DT);
+            // MainLoop: one pass of the flow per frame, by the real step.
+            bgf_frame(&g_flow, RealTimeElapsed);
             if (raceUp && pRaceCoordinator != NULL) {
                 raceFrame();
                 (void)raceAttachTrack();
@@ -3470,9 +3483,18 @@ int main(int argc, char** argv)
                         g_boot.note);
             }
 
-            updateBlurb(&g_boot, BOOT_DT);
+            updateBlurb(&g_boot, RealTimeElapsed);
 
+            // The race is paced at 30 (step 13b-1): a frame takes two
+            // vertical blanks at least, so none is 16.7 ms between two of
+            // 33.3. C3D_FrameBegin's sync waits for the next blank; when
+            // none has come since the last frame's, one more wait first.
+            // A slower frame is not held back further. The frontend and
+            // the movies stay at 60.
+            if (g_track.attached && C3D_FrameCounter(0) == lastSync)
+                C3D_FrameSync();
             C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+            lastSync = C3D_FrameCounter(0);
             if (g_track.attached) {
                 // eDisplayFrame: the race's view, then the Flailer screens
                 // over it. The sun's Z rects are read first, from the last
@@ -3538,7 +3560,7 @@ int main(int argc, char** argv)
             if (kDown & KEY_START) break;
             hidCircleRead(&pad);
             geoview_input(&g_geo, kDown, hidKeysHeld(), pad.dx, pad.dy,
-                          BOOT_DT);
+                          RealTimeElapsed);
 
             devLog(0, "geo car %d/%d %s",
                    g_geo.numCars ? g_geo.curCar + 1 : 0, g_geo.numCars,
@@ -3608,7 +3630,7 @@ int main(int argc, char** argv)
             }
             hidCircleRead(&pad);
             trackview_input(&g_track, kDown, hidKeysHeld(), pad.dx, pad.dy,
-                            BOOT_DT);
+                            RealTimeElapsed);
 
             C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
             // The last frame is drawn now, and its depth is still there:

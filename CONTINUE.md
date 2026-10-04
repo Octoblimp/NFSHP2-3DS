@@ -1,10 +1,10 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-04), after 8m-6c: the minimap's markers, its Render and its
-draw on the bottom screen. That finishes step 13, the HUD. Step 13b, New
-3DS mode in full and a steady 30 FPS race, is next. "Where the port
-stands" below has the count of what is left.
+(2026-10-04), after 13b-1: the real clock and the pacing. The race now
+runs in real time, with each frame at least two vertical blanks long.
+13b-2, the frame profiler, is next. "Where the port stands" below has the
+count of what is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
@@ -1772,19 +1772,29 @@ and so replaced every boot.
        gets whatever the New 3DS work gives it.
 
      It goes in four slices:
-     - **13b-1, the real clock and the pacing.**
-       - The race runs at a third of real time at 20 FPS because the
-         port hands PrepareRealTimestep `BOOT_DT` (1/60 s) every frame.
-       - Retail hands it the ticker's measure and holds it to 1/60 to
-         0.05 s on NTSC, or 1/50 to 0.06 s on PAL (`realtime.c`). So
-         retail itself runs in real time down to 20 FPS.
-       - Feed it the measured time from svcGetSystemTick. Check
-         `FrameCounter` (the PS2's vertical-blank count) and the
-         jukebox's 8 ms gate against a frame that is not 1/60 s.
-       - Pace the race at 30: C3D_FrameRate(30), or two vertical
-         blanks a frame. In the race only, so every frame is 33.3 ms
-         and none alternate with 16.7. The frontend and the movies stay
-         at 60.
+     - ~~**13b-1, the real clock and the pacing.**~~ Done in Session
+       31 (`realtime.md`, "The frame on the 3DS"):
+       - `prepare_real_timestep_from_ticker` is MainLoop's measure
+         (`0x0012f43c`): the ticker's difference from s2, times 0.001,
+         into PrepareRealTimestep, and s2 read again after. `BOOT_DT`
+         is gone. The flow, the blurb, the UI counter and the viewers
+         take the real step, and the jukebox's delayed start the
+         world's.
+       - `FrameCounter` is `C3D_FrameCounter(0)`, the top screen's
+         blanks. sound::Update's 8 ms gate passes at any rate up to
+         125, so it stays out.
+       - The pacing: in a race, a frame with no blank since the last
+         frame's sync waits one more before C3D_FrameBegin, so every
+         frame is two blanks or more and none is 16.7 ms. The frontend
+         and the movies stay at 60.
+       - `race: clock` logs the wall, real and world seconds, the step,
+         the blanks and the frames drawn, each world second.
+       - `realtime_check`: 28 scenarios, 2016 ops, 8781 lines, 0
+         differ; 103 mutations, 101 caught, 2 equivalent.
+       - On Azahar (track 12, Speed 101%): 20 FPS at three blanks a
+         frame, the step at NTSC's 0.05 s ceiling, and the world keeps
+         pace with the wall (5.986 s in 6.017 s). Under 20 FPS the
+         ceiling drops the excess, as on the PS2.
      - **13b-2, a frame profiler.**
        - Each frame's time by phase, from svcGetSystemTick: the flow,
          the coordinator, the world's step, the cameras, UpdateHud, the
@@ -3102,19 +3112,20 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-04, after 8m-6c)
+### Where the port stands (2026-10-04, after 13b-1)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 13b, New 3DS mode and a steady 30 FPS.
+- **Next:** step 13b-2, the frame profiler. 13b-1, the real clock and
+  the pacing, is done.
 - **Left, in the table's units:**
 
   | Step | Slices left |
   |---|---|
-  | 13b, New 3DS mode and 30 FPS | 4 |
+  | 13b, New 3DS mode and 30 FPS | 3 |
   | 10, the retail pass | 4-6 |
   | 11, the racer and traffic AI | 4-6 |
   | 12, the cops | 4-6 |
@@ -3124,18 +3135,16 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped, 2026-10-03) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **28-42** |
+  | **Total** | **27-41** |
 
-- **How far along:** about 22-25 of the road's 50-67 slices are done,
+- **How far along:** about 23-26 of the road's 50-67 slices are done,
   roughly a third. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
-  Read the 28-42 as a floor.
-- **The pace:** 73 commits from 2026-09-27 to 2026-10-04, most of them a
+  Read the 27-41 as a floor.
+- **The pace:** 74 commits from 2026-09-27 to 2026-10-04, most of them a
   slice each.
-- **Not yet in the count:** the replay, and the frame rate. Azahar reads
-  about 20 FPS in the race, and the world steps once per drawn frame, so
-  the race runs at a third of real time, not just choppy (the frame-rate
-  item under "Next").
+- **Not yet in the count:** the replay. The race runs in real time
+  since 13b-1, at about 20 FPS on Azahar. Holding 30 is 13b-2 to 13b-4.
 
 ## What not to trust
 

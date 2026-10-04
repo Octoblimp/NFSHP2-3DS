@@ -5,20 +5,23 @@
 // time (the checker has the list), and prints what the model prints: one
 // line an op, the joylog's calls as they happen, and the eighteen globals
 // after every op that can move them. joylog.c is the port's own, with a
-// logging repeat behind its two seams, as in joystick_test.c.
+// logging repeat behind its two seams, as in joystick_test.c. bGetTicker
+// answers from the script's ticks and logs each read, for MainLoop's
+// measure (prepare_real_timestep_from_ticker).
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "bticker.h"
 #include "joylog.h"
 #include "realtime.h"
 
 enum {
     OP_TAG = 1, OP_SET_MODE, OP_GET_MODE, OP_FROMQ, OP_QUANT, OP_PREP_REAL,
     OP_ADV_REAL, OP_RESET_WORLD, OP_PREP_WORLD, OP_ADV_WORLD, OP_FLAGS,
-    OP_FEED, OP_POKE, OP_DUMP,
+    OP_FEED, OP_POKE, OP_DUMP, OP_TICKS, OP_SET_TICKER, OP_MEASURE,
 };
 
 // In address order, gp-20264 up: the order the checker reads them in.
@@ -100,6 +103,24 @@ static void jl_add(int32_t value, int32_t bits, int32_t ch)
     printf("  jl add %d bits %d ch %d\n", value, bits, ch);
 }
 
+// ------------------------------------------------------------- the ticker
+
+#define MAX_TICKS 64
+
+static uint32_t ticks[MAX_TICKS];
+static int ticks_head, ticks_tail;
+static uint32_t frame_ticker;     // MainLoop's s2
+
+static uint32_t scripted_ticker(void)
+{
+    uint32_t v = ticks_head < ticks_tail ? ticks[ticks_head++] : 0;
+
+    printf("  tick -> %08x\n", (unsigned)v);
+    if (ticks_head == ticks_tail)
+        ticks_head = ticks_tail = 0;
+    return v;
+}
+
 int main(int argc, char **argv)
 {
     unsigned int op;
@@ -110,6 +131,7 @@ int main(int argc, char **argv)
     }
     gJoylogRepeatGetData = jl_get;
     gJoylogRepeatAddData = jl_add;
+    bSetTickerSource(scripted_ticker);
 
     while (fscanf(script, "%x", &op) == 1) {
         switch (op) {
@@ -195,6 +217,27 @@ int main(int argc, char **argv)
         }
         case OP_DUMP:
             dump();
+            break;
+        case OP_TICKS: {
+            uint32_t n = next();
+            while (n-- > 0) {
+                if (ticks_tail == MAX_TICKS) {
+                    fprintf(stderr, "ticks overflow\n");
+                    return 2;
+                }
+                ticks[ticks_tail++] = next();
+            }
+            break;
+        }
+        case OP_SET_TICKER:
+            frame_ticker = next();
+            printf("ticker %08x\n", (unsigned)frame_ticker);
+            break;
+        case OP_MEASURE:
+            printf("measure %08x\n", (unsigned)frame_ticker);
+            prepare_real_timestep_from_ticker(&frame_ticker);
+            dump();
+            printf("  ticker %08x\n", (unsigned)frame_ticker);
             break;
         default:
             fprintf(stderr, "op %u\n", op);

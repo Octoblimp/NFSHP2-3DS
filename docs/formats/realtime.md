@@ -178,21 +178,80 @@ keeps its frame count and its loop count. The seconds come from the
 
 ## MainLoop's order
 
-    PrepareRealTimestep(ticker difference * gp-32124)     0x0012dc98
+The demo's addresses, then retail's (MainLoop is `0x0012f378` there):
+
+    s2 = bGetTicker()                                      retail 0x0012f3a0
+    loop:
+    LastFrameCounter = FrameCounter                        gp-23228
+    ... the flow, the coordinator, the pads ...
+    PrepareRealTimestep(ticker difference * 0.001)  0x0012dc98, 0x0012f454
+    s2 = bGetTicker()                                      0x0012f45c
     PrepareWorldTimestep(...)                              0x0012dce8 ..
     GenerateJoyEvents()
-    ... the frame ...
-    AdvanceRealTime()                                      0x0012de70
-    AdvanceWorldTime()                                     0x0012de78
-    wait for FrameCounter to move
+    ... the frame, eDisplayFrame ...
+    AdvanceRealTime()                               0x0012de70, 0x0012f62c
+    AdvanceWorldTime()                              0x0012de78, 0x0012f634
+    wait until FrameCounter - LastFrameCounter > 0         0x0012f648
 
-The port's main loop does the same, with no race yet. Its ticker's
-measure is `BOOT_DT`, 1/60, because the display is vsynced. It advances
-both clocks at the top of the next frame instead of the end of this one,
-which is the same sequence of calls. It still counts `FrameCounter` once
-a loop. `gameflow.c` keeps its own clock in the flow's record, and the UI
-keeps its own RealTimer-style counter for the scrolling textures. Neither
-has been folded in yet.
+**The measure** is `bGetTickerDifference(s2, bGetTicker())`, in
+milliseconds, times gp-32048 (gp-32124 in the demo), which is 0.001. It
+runs from the last frame's tick, read just after that frame's prepare, to
+this one's. bGetTickerDifference divides the EE's 294.912 MHz count by
+300 MHz, so its milliseconds are 1.7% short. The 1.0167 in
+PrepareRealTimestep puts that back: 294.912 × 1.0167 / 300 is 0.99946.
+So RealTimeElapsed is the frame's real time, held to 1/60 to 0.05 s on
+NTSC. The game runs in real time down to 20 frames a second, and slows
+below that.
+
+**The wait** makes every frame at least one vertical blank long, so
+retail never runs faster than 60. `FrameCounter` is the count PSX2VBlank
+keeps.
+
+## The frame on the 3DS (step 13b-1)
+
+The port's main loop makes the same calls in the same order. It advances
+both clocks at the top of the next frame instead of the end of this one.
+
+- **The measure** is `prepare_real_timestep_from_ticker(&frameTicker)`
+  in `realtime.c`, retail's fragment line for line. `frameTicker` is s2,
+  read first just before the loop. `bGetTicker` scales the 3DS's system
+  tick to the EE's 294.912 MHz (`bticker.h`), so the difference means
+  what it meant on the PS2. Until 13b-1 the measure was a constant 1/60,
+  and a race drawn at 20 frames a second ran at a third of real time.
+- **FrameCounter** is the top screen's vertical-blank count,
+  `C3D_FrameCounter(0)`, set at the top of each frame. citro3d counts it
+  in its own blank handler, at its default rate of 60. The joy events'
+  repeats (6 and 25 blanks) and the jukebox's seed read it.
+- **The pacing.** In a race (the track's view attached) a frame takes at
+  least two blanks. C3D_FrameBegin's sync waits for the next blank, and
+  when none has come since the last frame's, the loop waits one more
+  first. So a frame that fits in 33.3 ms is shown for exactly 33.3 ms,
+  and no frame is 16.7 ms between two of 33.3. A slower frame is not held
+  back further: it waits for the next blank, as on the PS2. The frontend
+  and the movies stay at 60.
+- **The other clocks** take the real step too: the flow's own copy
+  (`bgf_frame`), the blurb's fade, the UI's scrolling-texture counter and
+  the two viewers. The jukebox's delayed start counts down by
+  `WorldTimeElapsed` (gp-19560), as sound::Update does. sound::Update's
+  8 ms gate passes at any rate up to 125 frames a second, so the port
+  leaves it out.
+- **The log.** Each world second of a race logs `race: clock`, with the
+  wall clock, RealTimer, WorldTimeSeconds, the step, the blanks and the
+  frames drawn. Two lines apart give the frame rate, the blanks a frame,
+  and whether the clocks keep pace with the wall.
+
+**On Azahar** (track 12, Speed 101%):
+
+- The race draws 20 frames a second, three blanks each, and the blanks
+  come at 59.8 a wall second.
+- The step sits at NTSC's ceiling, 0.05 s, with a few at 0.048 to 0.0497.
+  A 50 ms frame scaled by 1.0167 is just over it.
+- While the frames take 50 ms or less, the world keeps pace with the
+  wall: 5.986 world seconds in 6.017 wall seconds. When they run past
+  50 ms the ceiling drops the excess, as on the PS2, and the world gets
+  about 0.93 of a wall second.
+
+The race used to run at a third of real time. It now runs at real time.
 
 ## Checking it
 
@@ -226,8 +285,31 @@ The script covers:
   and huge steps, and wrapping;
 - a 600-op random walk.
 
-The result is 20 scenarios, 1044 ops and 3470 lines, with 0 differ. There
-are 93 mutations: 91 are caught and 2 are equivalent by construction.
+Since 13b-1 it runs MainLoop's measure too. The model runs retail's
+fragment from `0x0012f43c`, with s2 set, and the stub for
+IsGameFlowPaused (`0x001680b8`) ends the run; s2 then holds the new tick.
+The harness calls `prepare_real_timestep_from_ticker`. On both sides
+bGetTicker answers from the script and logs each read, so the number of
+reads and their order against the joylog's calls are compared. The frames
+are:
+
+- 90 at 30 a second, 40 at 20, 60 at 60, and 30 at two of the 3DS's
+  blanks (59.83 Hz);
+- 200 jittered, from 10 to 70 ms;
+- twelve across the 32-bit counter's wrap;
+- a second's load, 14 and 15 s (past the wrap, so the difference wraps
+  small), no time at all, and backwards, with the difference's top bit
+  set;
+- PAL at 25 and 60 a second;
+- replaying, where the step comes from the log but both ticks are still
+  read;
+- a dry ticker, which reads 0.
+
+The result is 28 scenarios, 2016 ops and 8781 lines, with 0 differ.
+There are 103 mutations: 101 are caught and 2 are equivalent by
+construction. `ml-ticker-kept` and `ml-one-read` leave a tick unread each
+frame, so the script's ticks overflow the harness's queue and it exits
+(caught). The two equivalent mutations:
 
 - `pr-error-unsigned` reads the timer as unsigned in the error term. A
   clamped step is 66 to 240 ticks, so the top bit is never set.
