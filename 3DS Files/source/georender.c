@@ -225,6 +225,10 @@ bool georender_init(void)
     s_strips = (GeoRenderVertex*)linearAlloc(GEO_STRIP_RING
                                              * sizeof(GeoRenderVertex));
     s_numStripVerts = 0;
+    // Both rings are on the linear heap, which C3D_FrameEnd(0) flushes
+    // whole before the GPU runs the frame's commands, so a quad or a
+    // strip is not flushed when it is written. A flush of each was a
+    // call to the GSP service, a strip's 4 to 30 vertices at a time.
 
     s_ready = true;
     return true;
@@ -603,6 +607,7 @@ void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
     C3D_CullFace(GPU_CULL_NONE);
     C3D_DepthTest(true, GPU_GREATER,
                   s_zwrite ? GPU_WRITE_ALL : GPU_WRITE_COLOR);
+    s_run.passSet = false;
 
     for (i = 0; i < mesh->numBatches; i++) {
         const GeoBatch* b = &mesh->batch[i];
@@ -1035,6 +1040,7 @@ void georender_envmap_fold(unsigned views)
     if (!s_ready || !s_sphere || !s_fold || (views & 0x3fu) == 0) {
         return;
     }
+    run_forget();
     if (!s_sphereCleared) {
         C3D_RenderTargetClear(s_sphere, C3D_CLEAR_COLOR, 0, 0);
         s_sphereCleared = true;
@@ -1116,9 +1122,11 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
         || !gt->tex) {
         return false;
     }
+    // Its own program, buffer, uniforms and state: in a run, the next
+    // draw sends its whole state again.
+    run_forget();
     dst = &s_quads[s_numQuads * 4];
     memcpy(dst, v, 4u * sizeof *dst);
-    GSPGPU_FlushDataCache(dst, 4u * sizeof *dst);
 
     C3D_BindProgram(&s_program);
     C3D_SetAttrInfo(&s_attr);
@@ -1239,9 +1247,9 @@ bool georender_draw_strip(const GeoRenderVertex* v, int n, const GeoTexture* gt)
         || s_numStripVerts + n > GEO_STRIP_RING) {
         return false;
     }
+    run_forget();
     dst = &s_strips[s_numStripVerts];
     memcpy(dst, v, (size_t)n * sizeof *dst);
-    GSPGPU_FlushDataCache(dst, (u32)n * sizeof *dst);
 
     C3D_BindProgram(&s_program);
     C3D_SetAttrInfo(&s_attr);

@@ -172,7 +172,9 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
 // once; the model-view when it changes; a mesh's vertex buffer as the one
 // register of where it starts; the pass when the next batch's differs;
 // the combiner and the ST scale when they differ; and the texture when it
-// is another. Outside a
+// is another. The screen quads, the strips, the lit batches and the
+// envmap's fold set their own state, and the run's next draw sends its
+// whole state after them. Outside a
 // run every draw sends its whole state, as before. A batch draws the same
 // either way. A lit batch, or georender_set_light, _set_fog,
 // _set_depth_range or _set_zwrite, makes the run forget what it sent.
@@ -306,8 +308,8 @@ void georender_set_fog(const GeoFog* fog, uint32_t colour);
 // quad draws where that is GEQUAL to the buffer's; with -1, everywhere.
 // It never writes the depth. The vertices go into a ring on
 // the linear heap, which georender_quads_rewind starts again once the GPU
-// is done with the last frame. False when the ring is full or there is no
-// texture.
+// is done with the last frame, and which C3D_FrameEnd(0) flushes with the
+// rest of the heap. False when the ring is full or there is no texture.
 bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                          uint8_t blend, float depth);
 // The same for a Flailer poly over the HUD, on a screen `width` by

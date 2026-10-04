@@ -284,4 +284,4 @@ The cull itself is cheap. The models' render and the envmap are more
 than half the frame (25 of 50 ms), and step 13b-4 starts on the models.
 
 13b-4's cuts, and the frames after each, are in `draw-cuts.md`. After
-13b-4d the race on Azahar runs at 27.9 to 30 FPS, with a draw of 26 ms.
+13b-4e the race on Azahar runs at 27.5 to 30 FPS, with a draw of 23 ms.

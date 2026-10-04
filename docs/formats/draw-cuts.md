@@ -200,29 +200,65 @@ and the bottom screen 0.9, from 5.4. Both screens match 13b-4c's shots:
 the tachometer, the gear and the speed on top, and the player's panel,
 the lap times and the minimap below.
 
+## 13b-4e: the strips' flushes, and the last runs
+
+The cars stage was 4.3 ms for one car. A probe build timed its parts
+with `svcGetSystemTick`: RenderCars 1.5 ms, the solid list 0.1, and the
+alpha list 2.7. In the alpha list, 27 strips took 2.33 ms, 86 µs each,
+against about 20 µs for a held batch. A strip is eBeginStrip's
+vertices, here the car's shadows and the road's strips.
+
+`georender_draw_strip` copied each strip into its ring and called
+`GSPGPU_FlushDataCache` on it, as `draw_screen_quad` did for each quad.
+That is a request to the GSP service each time. Neither is needed.
+`C3D_FrameEnd(0)` flushes the whole linear heap
+(`__ctru_linear_heap`, `__ctru_linear_heap_size`) after it queues the
+frame's commands and before `gxCmdQueueRun` starts them. Both rings are
+`linearAlloc`'d, and every `C3D_FrameEnd` in `main.c` passes 0. With
+the flushes gone, the 27 strips take 0.68 ms.
+
+The same step brackets the sky, the scenery's solid list and the cars'
+chain with `georender_run_begin` and `_run_end`, as 13b-4a did the
+models. Every path that sets citro3d's state itself forgets the run
+first: the screen quads, the strips, the lit batches and the envmap's
+fold. `georender_draw` sets its own depth test, so it clears the run's
+pass. That saved 0.5 ms (`out/azahar_13b4f`: the draw 25.6).
+
+**Why the picture is the same.** The GPU reads the same vertices: the
+flush still comes before the GPU runs the frame, only once and for the
+whole heap. The runs send the same state, only not twice.
+
+**On Azahar** (`out/azahar_13b4g`): the cars stage takes 2.6 ms, from
+4.3; the scenery's 0.5, from 1.1, with the sun's quads; and the bottom
+screen 0.5, from 0.9, with the minimap's. The shots match 13b-4d's: the
+sun and its glare, the car's shadow, and the road's strips.
+
 ## Where 13b-4 stands
 
 On Azahar, track 12, holding the gas, the mean of each second's line
 over a run of about 25 seconds:
 
-| | 13b-3 | 13b-4a | 13b-4b | 13b-4c | 13b-4d |
-|---|---|---|---|---|---|
-| models | 16.4 to 17.8 | 12.1 to 13.8 | 11.8 | 9.2 | 9.3 |
-| envmap | 7.8 to 10.0 | 6.7 to 8.6 | 7.8 | 6.3 | 6.3 |
-| cars | 4.4 to 4.6 | 4.4 | 4.4 | 4.3 | 4.3 |
-| hud | 4.7 to 4.8 | 4.8 | 4.8 | 4.7 | 0.3 |
-| bottom | 5.3 to 5.4 | 5.4 | 5.4 | 5.4 | 0.9 |
-| the draw | 44 to 46 | 39.6 to 40.6 | 39.2 | 35.0 | 26.1 |
-| the frame | 50.1 ms | 50.1 ms | 51.1 ms | 50.6 ms | 34.2 ms |
-| FPS | 20 | 20 | 19.6 | 19.8 | 29.2 |
+| | 13b-3 | 13b-4a | 13b-4b | 13b-4c | 13b-4d | 13b-4e |
+|---|---|---|---|---|---|---|
+| models | 16.4 to 17.8 | 12.1 to 13.8 | 11.8 | 9.2 | 9.3 | 9.2 |
+| envmap | 7.8 to 10.0 | 6.7 to 8.6 | 7.8 | 6.3 | 6.3 | 6.2 |
+| scenery | | | | | 1.1 | 0.5 |
+| cars | 4.4 to 4.6 | 4.4 | 4.4 | 4.3 | 4.3 | 2.6 |
+| hud | 4.7 to 4.8 | 4.8 | 4.8 | 4.7 | 0.3 | 0.2 |
+| bottom | 5.3 to 5.4 | 5.4 | 5.4 | 5.4 | 0.9 | 0.5 |
+| the draw | 44 to 46 | 39.6 to 40.6 | 39.2 | 35.0 | 26.1 | 23.3 |
+| the frame | 50.1 ms | 50.1 ms | 51.1 ms | 50.6 ms | 34.2 ms | 33.8 ms |
+| FPS | 20 | 20 | 19.6 | 19.8 | 29.2 | 29.6 |
 
-After 13b-4d, the seconds run from 27.9 to 30.0 FPS: frames of 33.3 ms,
-two blanks, with some of three. The CPU's frame is about 29 ms: the
-draw is 26.1 and the world 1.4 to 3.7. Where a second's models or
-world run long, a frame passes 33.3 ms and takes three blanks.
+After 13b-4e, the seconds run from 27.5 to 30.0 FPS: frames of 33.3 ms,
+two blanks, with some of three. The CPU's frame is about 26 ms: the
+draw is 23.3 and the world 1.4 to 4.5. The wait for the blank is 7.9
+ms a frame. Where a second's models or world run long, a frame passes
+33.3 ms and takes three blanks; the worst frame of a second is still
+34 to 67 ms.
 
 Azahar runs the CPU at 268 MHz, about an instruction a tick. A New 3DS
 runs at 804 MHz with its L2 cache, so the same work should take well
 under these times there. Only a New 3DS's `frame:` lines can say how
-much. On Azahar, what is left to cut is the models (9.3), the envmap
-(6.3), the cars (4.3) and the cull (2.7).
+much. On Azahar, what is left to cut is the models (9.2), the envmap
+(6.2), the cull (2.7) and the cars (2.6), and the long frames' spikes.

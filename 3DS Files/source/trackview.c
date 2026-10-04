@@ -2644,8 +2644,10 @@ void trackview_draw(TrackView* v)
     // drawn before any of the scenery. Then the Z writes back on.
     georender_set_fog(s_fogOn ? &s_skyFog : NULL, s_fogColour);
     georender_set_zwrite(false);
+    georender_run_begin();
     StuffSky(view);
     draw_deferred(v, true);
+    georender_run_end();
     georender_set_zwrite(true);
     v->skyDrawn    = v->drawn;
     FRAMEPROF_STAMP(FRAMEPROF_SKY);
@@ -2668,16 +2670,22 @@ void trackview_draw(TrackView* v)
     StuffSun(view);
     s_quadTarget = NULL;
     georender_set_fog(s_fogOn ? &s_fog : NULL, s_fogColour);
+    georender_run_begin();
     draw_deferred(v, false);
+    georender_run_end();
     FRAMEPROF_STAMP(FRAMEPROF_SCENERY);
 
     // The cars' chain (0x0011363c): RenderCars for the view, and its
     // AttachSolidPolys. Then AttachAlphaPolys (0x001137cc) draws the
     // scenery's alpha list and the cars' together. RenderFrontEndCars
     // draws nothing in a race.
+    // The sky, the scenery's list and these draw only through georender,
+    // so each is a run too.
+    georender_run_begin();
     render_cars(view);
     draw_deferred(v, false);
     draw_deferred(v, true);
+    georender_run_end();
     FRAMEPROF_STAMP(FRAMEPROF_CARS);
     if (v->listFrame) {
         v->probePending = true;

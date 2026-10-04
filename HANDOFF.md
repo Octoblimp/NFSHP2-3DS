@@ -13478,3 +13478,75 @@ ran into the roadside ferns, which draw in front of it.
 - A New 3DS's `clock:`, `frame:` and `models:` lines would show how
   far the hardware is from these numbers. Azahar's CPU is 268 MHz at
   about an instruction a tick, and a New 3DS runs at 804 MHz.
+
+## Session 31, continued (2026-10-04) -- the strips' flushes (step 13b-4e)
+
+The draw on Azahar went from 26.1 ms to 23.3, and the cars stage from
+4.3 to 2.6, with the same picture. `docs/formats/draw-cuts.md` has the
+section.
+
+### The port
+
+- **The strips and quads are not flushed one at a time**
+  (`georender.c`). `georender_draw_strip` and `draw_screen_quad` called
+  `GSPGPU_FlushDataCache` on each strip's or quad's few vertices: a
+  request to the GSP service each time. `C3D_FrameEnd(0)` flushes the
+  whole linear heap after it queues the frame and before the GPU runs
+  it (citro3d's disassembly: `__ctru_linear_heap` and its size, then
+  `gxCmdQueueRun`). Both rings are `linearAlloc`'d, and every
+  `C3D_FrameEnd` in `main.c` passes 0.
+- **The last runs** (`trackview.c`, `georender.c`). The sky, the
+  scenery's solid list and the cars' chain are each a georender run.
+  The screen quads, the strips, the lit batches and the envmap's fold
+  forget the run first, since they set citro3d's state themselves.
+  `georender_draw` clears the run's pass after its own depth test.
+
+### How it was found
+
+A probe build (not committed) timed the cars stage's parts with
+`svcGetSystemTick`. RenderCars took 1.5 ms: the shadows 0.5, the body
+0.65, the tyres 0.3. The solid list took 0.1 and the alpha list 2.7. In
+the alpha list, 27 strips took 2.33 ms, 86 µs each, against about 20 µs
+for each of 20-35 held batches. Without the flushes the strips take
+0.68 ms.
+
+### The checks
+
+No retail function changed, and no checker builds `georender.c` or
+`trackview.c`. The chain: 0 of 104 failed, 1483 s (out/chain_13b4e.txt).
+
+### On Azahar
+
+Track 12, holding the gas (`out/azahar_13b4f` for the runs alone,
+`out/azahar_13b4g` for both):
+
+| | 13b-4d | the runs | 13b-4e |
+|---|---|---|---|
+| models | 9.3 | 9.2 | 9.2 |
+| scenery | 1.1 | 0.8 | 0.5 |
+| cars | 4.3 | 4.3 | 2.6 |
+| bottom | 0.9 | 0.9 | 0.5 |
+| the draw | 26.1 | 25.6 | 23.3 |
+| FPS | 29.2 | 29.4 | 29.6 |
+
+The seconds read 27.5 to 30 FPS, and the wait for the blank is 7.9 ms
+a frame. A second's worst frame is still 34 to 67 ms, where the models
+or the world run long. The shots match 13b-4d's: the sun and its
+glare, the car's shadow and the road's strips.
+
+### The user
+
+During one run the boot key was lost and the game opened in the front
+end. The user, watching, went through the menus to Select Car, sent a
+shot of it, and wrote "Could use work LOL". The car selector is the
+port's stand-in panel over the disc's screen: no car, and the stats'
+lines on top of each other.
+
+### Next
+
+- **The car selector** (step 16): retail's SelectCarScreen, the
+  CarSelector and the front end's car (tCarModelViewer,
+  FrontEndRenderingCar, RenderFrontEndCars `0x00123d28`). It comes
+  before the rest of 13b-4.
+- Then 13b-4f: the models' and the envmap's cost per draw, the cull,
+  and the long frames.
