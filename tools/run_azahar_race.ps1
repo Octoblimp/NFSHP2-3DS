@@ -14,6 +14,8 @@
 #   powershell -File tools/run_azahar_race.ps1
 #   powershell -File tools/run_azahar_race.ps1 -WatchSeconds 60
 #   powershell -File tools/run_azahar_race.ps1 -HoldKeys 65   # A, the gas
+#   powershell -File tools/run_azahar_race.ps1 -HoldKeys 65,70 -ShotSeconds 1
+#                                    # a circle to the left, a shot a second
 #
 # -HoldKeys are virtual-key codes in Azahar's default keyboard profile (A is
 # 65, B 83, the D-pad's left and right F 70 and H 72), held from the moment
@@ -26,7 +28,8 @@ param(
     [string]$AzaharExe = "C:\Program Files\Azahar\azahar.exe",
     [string]$Target3dsx = "",
     [string]$OutDir = "",
-    [int[]]$HoldKeys = @()
+    [int[]]$HoldKeys = @(),
+    [double]$ShotSeconds = 5      # between the shots while racing
 )
 
 $ErrorActionPreference = "Stop"
@@ -177,14 +180,14 @@ if ($HoldKeys.Count -gt 0) {
 
 $end = (Get-Date).AddSeconds($WatchSeconds)
 $n = 1
-$nextShot = (Get-Date).AddSeconds(5)
+$nextShot = (Get-Date).AddSeconds($ShotSeconds)
 while ((Get-Date) -lt $end -and (Alive)) {
     foreach ($k in $HoldKeys) { [Hp2Race]::KeyDown($hwnd, $k) }
     Start-Sleep -Milliseconds 150
     if ((Get-Date) -ge $nextShot) {
         $n++
         Shot ("race-{0}" -f $n)
-        $nextShot = (Get-Date).AddSeconds(5)
+        $nextShot = (Get-Date).AddSeconds($ShotSeconds)
     }
 }
 foreach ($k in $HoldKeys) { [Hp2Race]::KeyUp($hwnd, $k) }

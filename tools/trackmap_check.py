@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
-"""Cross-check 3DS Files/source/trackmap.c, the minimap's first part (step
-8m-6a), against the retail image, SLES_507.31.
+"""Cross-check 3DS Files/source/trackmap.c, the minimap (steps 8m-6a and
+8m-6b), against the retail image, SLES_507.31.
 
 **The model** is retail's own: InitTrackMapModeInfo (0x001bd1f8), the
 constructor (0x001babb8), GetAngle (0x001bb678) with EvalCubic
 (0x001bdad0), GetCameraDirection (0x001bd0b0), GetCarUVPosition
-(0x001bca50) and GetBoxOnMap (0x001bcae8), with bSPrintf, bStringHash and
-the matrix code under them run as they are. The harness
-(tools/src/trackmap_test.c) runs trackmap.c over emath.c and bmath.c.
+(0x001bca50) and GetBoxOnMap (0x001bcae8); and DrawMap (0x001bb7a8),
+MapToScreen (0x001bcc58), ClipPolygon (0x001bc140) with EmitPoint,
+GetSideOfLine (0x001cb138), CalculateCentroidOfQuad (0x001bda40) and
+DrawOverOrUnderLay (0x001bbf88). bSPrintf, bStringHash, the matrix code
+and ePoly's constructor run under them as they are. The harness
+(tools/src/trackmap_test.c) runs trackmap.c over emath.c, bmath.c and
+epoly.c.
 
 **The stubs** are GetTextureInfo (0x001abf48), which answers each of the
-seven names from a mask, and eGetView (0x00107c90), which answers the one
-view. Both log their calls. WorldTimer, pCurrentRace's RaceStage and
-TheRaceParameters.Point2Point are set in memory.
+seven names from a mask; eGetView (0x00107c90), which answers the one
+view; and ePoly::Render (0x0010fa68), the port's gEPolyRenderFn. All three
+log their calls, Render with the whole poly. WorldTimer, pCurrentRace's
+RaceStage and TheRaceParameters.Point2Point are set in memory.
 
 **Compared**, after each op, are the map's fields by name, its pointers
-by what they point at; the two tables after InitTrackMapModeInfo, field
-by field (the padding is left out: retail never writes it); and what each
-call answers.
+by what they point at; a test ePoly's fields, retail's offsets 16 to 152;
+the two tables after InitTrackMapModeInfo, field by field (the padding is
+left out: retail never writes it); and what each call answers.
 
 **The script** builds the tables over a pattern; constructs with each of
 the three pointers missing, every texture mask with and without
@@ -27,6 +32,20 @@ boxes; runs EvalCubic alone; asks the camera's direction with no mover,
 other movers and the drive camera, each race stage, look backs and eased
 directions about the 0.001 test; and eases GetAngle through a turning
 camera and every mode, with time steps from none to a wrap.
+
+For 8m-6b it tests points against lines, on them and either side; takes
+centroids; projects point sets in each drawn mode and under hand-set
+tilts, distances, places (loaded without their sign) and heights, fading
+to both saturations; clips quads inside, outside, across one edge and two,
+around the box, exactly on it, as an octagon, with ties for the top point
+about 0.001, both windings and sixty seeded random convex quads, in each
+mode's box and hand-set ones, with UVs, colours, layers and textures; draws
+the frame and the backing in each mode and with IsDrawn and HasBorder set
+by hand; and draws the map in every mode from several places and turns,
+zoomed to a pursued car at several distances, without scrolling, at
+hand-set alphas, heights and view distances, without a map texture and
+under a second calibration. Only convex quads are clipped: retail's
+buffers hold the eight points those can make.
 
     python tools/trackmap_check.py
     python tools/trackmap_check.py --mutate [--only a,b]
@@ -55,7 +74,7 @@ HARNESS = "tools/src/trackmap_test.c"
 TRACKMAP = "3DS Files/source/trackmap.c"
 SOURCES = [HARNESS, TRACKMAP] + ["3DS Files/source/" + f for f in (
     "emath.c", "bmatrix.c", "bvector.c", "bmath.c", "bmathtab.c",
-    "bprintf.c", "bmem.c")]
+    "bprintf.c", "bmem.c", "epoly.c")]
 
 F_INIT = 0x001bd1f8
 F_CTOR = 0x001babb8
@@ -64,10 +83,17 @@ F_CAMDIR = 0x001bd0b0
 F_UV = 0x001bca50
 F_BOX = 0x001bcae8
 F_CUBIC = 0x001bdad0
+F_M2S = 0x001bcc58
+F_SIDE = 0x001cb138
+F_CENTROID = 0x001bda40
+F_CLIP = 0x001bc140
+F_OVERLAY = 0x001bbf88
+F_DRAWMAP = 0x001bb7a8
 EMATH_INIT = 0x0011b138
 EMATH_SINIT = 0x0011bf70                # 0x002dc400 = (0, 0, 0, 1)
 S_TEXINFO = 0x001abf48
 S_GETVIEW = 0x00107c90
+S_RENDER = 0x0010fa68                   # ePoly::Render
 
 MODES = 0x003140b8
 COLOURS = 0x003143a8
@@ -323,6 +349,274 @@ def scenario_angle():
     return s
 
 
+# ---- 8m-6b
+
+def scenario_side():
+    lines = [((0.0, 0.0), (1.0, 0.0)), ((22.0, 193.0), (122.0, 193.0)),
+             ((122.0, 293.0), (22.0, 293.0)), ((22.0, 293.0), (22.0, 193.0)),
+             ((-1.5, 2.5), (3.25, -7.0)), ((0.0, 0.0), (0.0, 0.0)),
+             ((1e4, -1e4), (-1e4, 1e4))]
+    points = [(0.0, 0.0), (0.5, 1.0), (0.5, -1.0), (2.0, 0.0), (-3.0, 5.0),
+              (72.0, 243.0), (22.0, 193.0), (122.0, 192.999),
+              (100.0, 100.0), (1e-7, 1e-7), (-0.0, 0.0), (22.0, 500.0),
+              (0.875, -2.25)]
+    s = []
+    for a, b in lines:
+        for p in points:
+            s += ["side|" + "|".join(F(v) for v in a + b + p)]
+    return s
+
+
+QUADS = [
+    ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)),
+    ((0.25, -0.5), (1.5, 0.125), (0.75, 2.0), (-1.0, 0.875)),
+    ((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)),
+    ((1e4, -2e4), (3e4, 5e3), (-7e3, 9e3), (-1e4, -1e4)),
+    ((0.1, 0.2), (0.3, 0.4), (0.5, 0.6), (0.7, 0.8)),
+    ((22.0, 193.0), (122.0, 193.0), (122.0, 293.0), (22.0, 293.0)),
+    ((-0.0, -0.0), (3.0, -0.0), (-0.0, 7.0), (5.0, 5.0)),
+]
+
+
+def scenario_centroid():
+    return ["centroid|" + "|".join(F(v) for p in q for v in p)
+            for q in QUADS]
+
+
+def m2s(pts):
+    return "m2s|" + "|".join(F(v) for p in pts for v in p)
+
+
+M2S_POINTS = [
+    [(-65.0, -65.0, 0.0), (65.0, -65.0, 0.0), (65.0, 65.0, 0.0),
+     (-65.0, 65.0, 0.0)],
+    [(-95.0, -95.0, 0.0), (95.0, -95.0, 0.0), (95.0, 95.0, 0.0),
+     (-95.0, 95.0, 0.0)],
+    [(0.0, 0.0, 0.0), (10.5, -3.25, 40.0), (-7.0, 12.0, -60.0),
+     (1.0, 1.0, 126.0)],
+    [(3.0, 4.0, 1e-3), (-3.0, 4.0, -1e-3), (0.0, 0.0, 200.0),
+     (2.0, -2.0, 1e12)],
+    [(131.0, -17.0, 5.0), (-0.0, -0.0, -0.0), (50.0, 50.0, 90.0),
+     (-120.0, 30.0, -100.0)],
+]
+
+
+def scenario_m2s():
+    s = ["fillmodes", "init", "cal|0|0|%s|0" % F(100.0), "mask|0", "fill",
+         "ctor|1|1|1", "poly"]
+    for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10):
+        s += ["f|164|%d" % m]
+        for pts in M2S_POINTS:
+            s += [m2s(pts)]
+    # Hand-set tilts, distances, places and heights in mode 0.
+    s += ["f|164|0"]
+    for ang in (0, 0x4000, 0x2000, 0xc000, 0x8000, 0x1234):
+        s += ["mode|0|0|2|%#x" % ang, m2s(M2S_POINTS[2])]
+    s += ["mode|0|0|2|0xd5da"]
+    for h in (50.0, 1000.0, 0.5, 333.25):
+        s += ["mode|0|4|4|%s" % F(h), m2s(M2S_POINTS[0]),
+              m2s(M2S_POINTS[4])]
+    s += ["mode|0|4|4|%s" % F(200.0)]
+    for x, y in ((0x8000, 0xffff), (0x7fff, 0), (0xffff, 0x8000),
+                 (0x1234, 0xfedc)):
+        s += ["mode|0|8|2|%#x" % x, "mode|0|10|2|%#x" % y,
+              m2s(M2S_POINTS[0])]
+    for ht in (1.0, -190.0, 1e-3, 3000.0):
+        s += ["mode|0|16|4|%s" % F(ht), m2s(M2S_POINTS[2]),
+              m2s(M2S_POINTS[3])]
+    s += ["init"]
+    return s
+
+
+def clip_quad(q, uvs=None, cols=None):
+    s = ["poly"]
+    for i, (x, y) in enumerate(q):
+        s += ["pv|%d|%s|%s" % (i, F(x), F(y))]
+    for i in range(4):
+        u, v, w = uvs[i] if uvs else (0.25 * i, 1.0 - 0.125 * i, 1.0)
+        s += ["puv|%d|%s|%s|%s" % (i, F(u), F(v), F(w))]
+    for i in range(4):
+        c = cols[i] if cols else (0x80402010 + 0x01030507 * i)
+        s += ["pc|%d|%#x" % (i, c)]
+    return s
+
+
+def rot_rect(cx, cy, hw, hh, deg):
+    a = math.radians(deg)
+    c, d = math.cos(a), math.sin(a)
+    return tuple((cx + x * c - y * d, cy + x * d + y * c)
+                 for x, y in ((-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)))
+
+
+CLIP_QUADS = [
+    ((40.0, 210.0), (100.0, 210.0), (100.0, 280.0), (40.0, 280.0)),
+    ((200.0, 0.0), (300.0, 0.0), (300.0, 50.0), (200.0, 50.0)),
+    ((-90.0, 200.0), (0.0, 200.0), (0.0, 250.0), (-90.0, 250.0)),
+    ((40.0, 300.0), (90.0, 300.0), (90.0, 400.0), (40.0, 400.0)),
+    ((40.0, 100.0), (90.0, 100.0), (90.0, 190.0), (40.0, 190.0)),
+    ((0.0, 170.0), (150.0, 170.0), (150.0, 320.0), (0.0, 320.0)),
+    ((10.0, 220.0), (60.0, 220.0), (60.0, 260.0), (10.0, 260.0)),
+    ((100.0, 180.0), (140.0, 180.0), (140.0, 210.0), (100.0, 210.0)),
+    ((72.0, 151.0), (164.0, 243.0), (72.0, 335.0), (-20.0, 243.0)),
+    ((22.0, 193.0), (122.0, 193.0), (122.0, 293.0), (22.0, 293.0)),
+    ((50.0, 200.0), (90.0, 200.0005), (90.0, 260.0), (50.0, 260.0)),
+    ((90.0, 200.0), (90.0, 260.0), (50.0, 260.0), (50.0, 200.0005)),
+    ((90.0, 200.0), (90.0, 260.0), (50.0, 260.0), (50.0, 200.0011)),
+    ((30.0, 200.0), (30.0, 200.0), (110.0, 250.0), (40.0, 280.0)),
+    ((0.0, 230.0), (40.0, 170.0), (60.0, 175.0), (10.0, 260.0)),
+    ((115.0, 280.0), (160.0, 285.0), (150.0, 330.0), (110.0, 300.0)),
+    ((-20.0, 243.0), (72.0, 335.0), (164.0, 243.0), (72.0, 151.0)),
+    ((0.0, 320.0), (150.0, 320.0), (150.0, 170.0), (0.0, 170.0)),
+]
+CLIP_QUADS += [rot_rect(72.0, 243.0, 80.0, 40.0, d)
+               for d in (30.0, 45.0, 60.0, 135.0, -17.0)]
+CLIP_QUADS += [rot_rect(72.0, 243.0, 65.0, 65.0, d)
+               for d in (0.0, 45.0, 10.0, 80.0)]
+CLIP_QUADS += [rot_rect(30.0, 200.0, 20.0, 12.0, 25.0),
+               rot_rect(120.0, 290.0, 9.0, 30.0, 70.0)]
+
+
+def convex(q):
+    sg = 0
+    for i in range(4):
+        a, b, c = q[i], q[(i + 1) % 4], q[(i + 2) % 4]
+        cr = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])
+        if abs(cr) < 1.0:
+            return False
+        if sg and (cr > 0) != (sg > 0):
+            return False
+        sg = cr
+    return True
+
+
+def random_quads(n, seed):
+    import random
+    r = random.Random(seed)
+    out = []
+    while len(out) < n:
+        cx, cy = r.uniform(0.0, 150.0), r.uniform(170.0, 320.0)
+        angs = sorted(r.uniform(0.0, 2 * math.pi) for _ in range(4))
+        if r.random() < 0.3:
+            angs.reverse()
+        q = tuple((round(cx + rr * math.cos(a), 3),
+                   round(cy + rr * math.sin(a), 3))
+                  for a, rr in ((a, r.uniform(10.0, 130.0)) for a in angs))
+        if convex(q):
+            out.append(q)
+    return out
+
+
+def scenario_clip():
+    s = ["fillmodes", "init", "cal|0|0|%s|0" % F(100.0), "mask|0", "fill",
+         "ctor|1|1|1", "f|164|2"]
+    for q in CLIP_QUADS:
+        s += clip_quad(q) + ["clip|0|14"]
+    # UVs, colours, alphas, textures and layers.
+    uvs = [(0.0, 0.0, 0.005), (1.0, 0.0, 0.004), (1.0, 1.0, 0.0045),
+           (0.0, 1.0, 0.0055)]
+    cols = [0x00ffffff, 0x80000000, 0xff123456, 0x7f00ff00]
+    for q in (CLIP_QUADS[5], CLIP_QUADS[8], CLIP_QUADS[6], CLIP_QUADS[14]):
+        s += clip_quad(q, uvs, cols) + ["clip|0|14"]
+        for t, l in ((3, 0), (4, 15), (-1, 13), (6, -3), (0, 1000)):
+            s += ["clip|%d|%d" % (t, l)]
+    # Each mode's box.
+    for m in (0, 1, 3, 4, 5, 7, 8, 9, 10):
+        s += ["f|164|%d" % m]
+        for q in (CLIP_QUADS[5], CLIP_QUADS[8], rot_rect(80.0, 240.0, 70.0,
+                                                         50.0, 20.0)):
+            s += clip_quad(q) + ["clip|0|14"]
+    # Hand-set boxes: a place loaded as a halfword without its sign.
+    s += ["f|164|2"]
+    for cx, cy, cw, ch in ((0x8000, 0xffff, 100.0, 100.0),
+                           (72, 243, 37.5, 151.25), (72, 243, 0.0, 0.0),
+                           (60, 250, 3.0, 200.0), (0xffff, 243, 200.0, 100.0),
+                           (72, 0xfff0, 100.0, 600.0)):
+        s += ["mode|2|20|2|%#x" % cx, "mode|2|22|2|%#x" % cy,
+              "mode|2|24|4|%s" % F(cw), "mode|2|28|4|%s" % F(ch)]
+        for q in (CLIP_QUADS[5], CLIP_QUADS[8], CLIP_QUADS[0]):
+            s += clip_quad(q) + ["clip|0|14"]
+    s += ["init"]
+    for q in random_quads(60, 8062):
+        s += clip_quad(q) + ["clip|0|14"]
+    return s
+
+
+def scenario_overlay():
+    s = ["fillmodes", "init", "cal|0|0|%s|0" % F(100.0), "mask|0", "fill",
+         "ctor|1|1|1"]
+    for m in range(11):
+        s += ["f|164|%d" % m]
+        for t, l in ((3, 0), (4, 15), (-1, 7)):
+            s += ["overlay|%d|%d" % (t, l)]
+    s += ["f|164|2"]
+    for drawn in (0, 1, 2, 0x80):
+        for border in (0, 1, 2, 0x80):
+            s += ["mode|2|64|1|%#x" % drawn, "mode|2|65|1|%#x" % border,
+                  "overlay|3|0"]
+    s += ["mode|2|20|2|0x8000", "mode|2|22|2|0xffff",
+          "mode|2|24|4|%s" % F(37.5), "mode|2|28|4|%s" % F(-12.25),
+          "overlay|4|15", "init"]
+    return s
+
+
+DM_POS = [(0.0, 0.0), (-1200.5, 830.25), (-150.0, -900.0),
+          (1199.5, -1569.75), (37.25, 412.5)]
+DM_ANGLES = (0, 0x4000, 0x1234, 0xc000, 0xffff, 0x8000)
+
+
+def scenario_drawmap():
+    s = ["fillmodes", "init",
+         "cal|%s|%s|%s|0x1234" % (F(-1200.5), F(830.25), F(2400.0)),
+         "mask|0", "fill", "ctor|1|1|1", "pursued|0",
+         "ppos|%s|%s" % (F(-100.0), F(50.0))]
+    for m in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10):
+        s += ["f|164|%d" % m]
+        for x, y in DM_POS[:4]:
+            s += ["pos|%s|%s" % (F(x), F(y))]
+            for a in DM_ANGLES[:4]:
+                s += ["drawmap|%#x" % a]
+    # Zooming to keep the pursued car in view, mode 10's.
+    s += ["f|164|10", "pos|%s|%s" % (F(-150.0), F(-900.0))]
+    for px, py in ((-150.0, -900.0), (-100.0, -900.0), (-150.0, -1000.0),
+                   (500.0, 300.0), (-1200.5, 830.25), (-149.0, -899.5)):
+        s += ["pursued|1", "ppos|%s|%s" % (F(px), F(py))]
+        for a in (0, 0x1234):
+            s += ["drawmap|%#x" % a]
+    s += ["pursued|0", "drawmap|0x1234"]
+    # Hand-set: no scrolling, zooming in mode 2, alphas.
+    s += ["f|164|2", "pos|%s|%s" % (F(37.25), F(412.5))]
+    s += ["mode|2|57|1|0", "drawmap|0", "drawmap|0x4000",
+          "mode|2|57|1|2", "drawmap|0x1234", "mode|2|57|1|1"]
+    s += ["mode|2|40|1|1", "pursued|1", "ppos|%s|%s" % (F(-37.0), F(80.0)),
+          "drawmap|0x2000", "mode|2|40|1|0x80", "drawmap|0x2000",
+          "pursued|0", "drawmap|0x2000", "mode|2|40|1|0", "pursued|1",
+          "drawmap|0x2000", "pursued|0"]
+    for al in (0.5, 0.29, 2.0, -1.0, 0.0, 1.0001, 3e7):
+        s += ["mode|2|60|4|%s" % F(al), "drawmap|0x1234"]
+    s += ["mode|2|60|4|%s" % F(1.0)]
+    for ht in (100.0, 260.0):
+        s += ["mode|2|16|4|%s" % F(ht), "drawmap|0x1234"]
+    s += ["mode|2|16|4|%s" % F(130.0)]
+    for fwd, back in ((0.1, 0.9), (1.0, 0.0), (0.0, 0.0), (2.5, 0.75)):
+        s += ["mode|2|32|4|%s" % F(fwd), "mode|2|36|4|%s" % F(back),
+              "drawmap|0x5555"]
+    s += ["init"]
+    # A missing map texture, then the other places and angles in mode 0.
+    s += ["mask|1", "fill", "ctor|1|1|1", "f|164|2", "drawmap|0",
+          "mask|0", "fill", "ctor|1|1|1", "f|164|0"]
+    for x, y in DM_POS:
+        s += ["pos|%s|%s" % (F(x), F(y))]
+        for a in DM_ANGLES:
+            s += ["drawmap|%#x" % a]
+    # Another calibration's turn.
+    s += ["cal|%s|%s|%s|0xd5da" % (F(512.0), F(-256.0), F(1024.0)), "fill",
+          "ctor|1|1|1", "f|164|2", "pos|%s|%s" % (F(1000.0), F(-700.0)),
+          "drawmap|0x1234", "f|164|3", "drawmap|0x1234", "f|164|10",
+          "pursued|1", "ppos|%s|%s" % (F(700.0), F(-650.0)), "drawmap|0x1234",
+          "pursued|0"]
+    return s
+
+
 def script():
     s = []
     s += scenario_tables()
@@ -332,6 +626,12 @@ def script():
     s += scenario_cubic()
     s += scenario_camdir()
     s += scenario_angle()
+    s += scenario_side()
+    s += scenario_centroid()
+    s += scenario_m2s()
+    s += scenario_clip()
+    s += scenario_overlay()
+    s += scenario_drawmap()
     return s
 
 
@@ -357,10 +657,13 @@ class Model(object):
         self.race = e.alloc(16, align=16)
         self.texs = [e.alloc(16, align=16) for _ in TEX_NAMES]
         self.scratch = e.alloc(64, align=16)
+        self.pcar = e.alloc(2400, align=16)
+        self.poly = e.alloc(160, align=16)
+        self.pts = e.alloc(64, align=16)
         for a, n in ((self.track, 176), (self.car, 2400),
                      (self.player, 256), (self.view, 256),
                      (self.camera, 128), (self.mover, 256),
-                     (self.race, 16)):
+                     (self.race, 16), (self.pcar, 2400), (self.poly, 160)):
             e.write(a, bytes(n))
         e.put32(self.view + 60, self.view + 60)
         e.put32(self.view + 64, self.view + 60)
@@ -370,13 +673,16 @@ class Model(object):
         e.put32(POINT2POINT, 0)
         self.mask = 0
         self.last = None
+        self.last_poly = None
         self.names = {self.track: "track", self.car: "car",
-                      self.player: "player"}
+                      self.player: "player", self.pcar: "pcar"}
         for i, a in enumerate(self.texs):
             self.names[a] = "tex%d" % i
         e.stub(S_TEXINFO, self.s_texinfo)
         e.stub(S_GETVIEW, self.s_getview)
+        e.stub(S_RENDER, self.s_render)
         self.fill()
+        self.fill_poly()
 
     def emit(self, s):
         self.out.append(s)
@@ -404,6 +710,12 @@ class Model(object):
         self.emit("  view %d" % s32(em.reg[4]))
         return self.view
 
+    def s_render(self, em):
+        t = em.reg[5] & M32
+        name = "0" if t == 0 else self.names.get(t, "?%08x" % t)
+        self.emit("  render %s %d%s" % (name, s32(em.reg[6]),
+                                        self.poly_fields(em.reg[4] & M32)))
+
     # ---- output
 
     def ptr(self, off, w):
@@ -412,6 +724,18 @@ class Model(object):
         if w == (0xa5000000 + off) & M32:
             return "junk"
         return self.names.get(w, "?%08x" % w)
+
+    def poly_fields(self, a):
+        # As the harness prints an ePoly: retail's offsets 16 to 152, and
+        # whether pDynamicFrameMemory is set.
+        e = self.e
+        parts = ["%08x" % e.u32(a + o) for o in range(16, 128, 4)]
+        b = e.read(a + 128, 28)
+        parts += ["%02x%02x%02x%02x" % tuple(b[4 * i:4 * i + 4])
+                  for i in range(4)]
+        parts += ["%d" % b[16 + k] for k in range(9)]
+        parts += ["%d" % (e.u32(a + 156) != 0)]
+        return " " + " ".join(parts)
 
     def dump(self):
         e = self.e
@@ -425,6 +749,10 @@ class Model(object):
         line = "  map " + " ".join(parts)
         if line != self.last:
             self.last = line
+            self.emit(line)
+        line = "  poly" + self.poly_fields(self.poly)
+        if line != self.last_poly:
+            self.last_poly = line
             self.emit(line)
 
     def dump_tables(self):
@@ -450,6 +778,15 @@ class Model(object):
         for o in range(0, MAP_SIZE, 4):
             self.e.put32(self.map + o, 0xa5000000 + o)
 
+    def fill_poly(self):
+        for o in range(16, 156, 4):
+            self.e.put32(self.poly + o, 0xa5000000 + o)
+        self.e.put32(self.poly + 156, 0)
+
+    def tex_arg(self, w):
+        i = s32(w)
+        return self.texs[i] if 0 <= i < len(self.texs) else 0
+
     def op(self, a):
         e = self.e
         o = a[0]
@@ -464,6 +801,69 @@ class Model(object):
         elif o == "init":
             e.call(F_INIT, self.map, limit=100000)
             tables = True
+        elif o == "mode":
+            n = v(3)
+            e.write(MODES + 68 * v(1) + v(2),
+                    struct.pack("<I", v(4))[:n])
+        elif o == "pos":
+            e.put32(self.car + 96, v(1))
+            e.put32(self.car + 100, v(2))
+        elif o == "ppos":
+            e.put32(self.pcar + 96, v(1))
+            e.put32(self.pcar + 100, v(2))
+        elif o == "pursued":
+            e.put32(self.map + 144, self.pcar if v(1) else 0)
+        elif o == "poly":
+            self.fill_poly()
+        elif o == "pv":
+            e.put32(self.poly + 16 + 16 * v(1), v(2))
+            e.put32(self.poly + 20 + 16 * v(1), v(3))
+        elif o == "puv":
+            for k in range(3):
+                e.put32(self.poly + 80 + 12 * v(1) + 4 * k, v(2 + k))
+        elif o == "pc":
+            e.put32(self.poly + 128 + 4 * v(1), v(2))
+        elif o == "m2s":
+            p = self.pts
+            for i in range(4):
+                for k in range(3):
+                    e.put32(p + 16 * i + 4 * k, v(1 + 3 * i + k))
+            e.call(F_M2S, self.map, self.poly, p, p + 16, p + 32, p + 48,
+                   limit=1000000)
+            self.emit("  pts " + " ".join(
+                "%08x" % e.u32(p + 16 * i + 4 * k)
+                for i in range(4) for k in range(3)))
+        elif o == "side":
+            p = self.scratch
+            for k in range(6):
+                e.put32(p + 4 * k, v(1 + k))
+            r = e.call(F_SIDE, p, p + 8, p + 16, limit=10000)
+            self.emit("  side %d" % r)
+        elif o == "centroid":
+            p, q = self.scratch, self.scratch + 32
+            for k in range(8):
+                e.put32(p + 4 * k, v(1 + k))
+            e.put32(q, 0x7f7f0051)
+            e.put32(q + 4, 0x7f7f0052)
+            e.call(F_CENTROID, q, p, limit=10000)
+            self.emit("  centroid %08x %08x" % (e.u32(q), e.u32(q + 4)))
+        elif o == "clip":
+            e.call(F_CLIP, self.map, self.poly, self.tex_arg(v(1)), v(2),
+                   limit=10000000)
+        elif o == "overlay":
+            e.call(F_OVERLAY, self.map, self.tex_arg(v(1)), v(2),
+                   limit=1000000)
+        elif o == "drawmap":
+            c, q = self.scratch, self.scratch + 16
+            e.put32(c, 0x7f7f0031)
+            e.put32(c + 4, 0x7f7f0032)
+            for k in range(4):
+                e.put32(q + 8 * k, 0x7f7f0040 + 2 * k)
+                e.put32(q + 8 * k + 4, 0x7f7f0041 + 2 * k)
+            e.call(F_DRAWMAP, self.map, c, q, v(1) & 0xffff, limit=10000000)
+            self.emit("  drawmap " + " ".join(
+                "%08x" % e.u32(a_) for a_ in
+                [c, c + 4] + [q + 4 * k for k in range(8)]))
         elif o == "tables":
             tables = True
         elif o == "ctor":
@@ -734,6 +1134,95 @@ MUTATIONS = [
     M("box-c2-x", "    corner[2].x = -left;", "    corner[2].x = left;"),
     M("box-c3-y", "    corner[3].y = -backward;", "    corner[3].y = -forward;"),
     M("box-three-corners", "    for (i = 0; i < 4; i++) {\n        corner[i].z", "    for (i = 0; i < 3; i++) {\n        corner[i].z"),
+
+    # MapToScreen.
+    M("m2s-no-tilt", "    eRotateX(&tilt, &tilt, info->AngleX);\n", ""),
+    M("m2s-x-signed", "h) + (float)(uint16_t)info->X;", "h) + (float)info->X;"),
+    M("m2s-y-signed", "h) + (float)(uint16_t)info->Y;", "h) + (float)info->Y;"),
+    M("m2s-no-projection", "            p[i]->y * h / (p[i]->z + h)", "            p[i]->y"),
+    M("m2s-projection-minus", "            p[i]->x * h / (p[i]->z + h)", "            p[i]->x * h / (h - p[i]->z)"),
+    M("m2s-fade-from-1", "        if (0.0f < p[i]->z)", "        if (1.0f < p[i]->z)"),
+    M("m2s-fade-half", "(info->Height * 0.666666687f)) * 128.0f);", "(info->Height * 0.5f)) * 128.0f);"),
+    M("m2s-fade-127", "(info->Height * 0.666666687f)) * 128.0f);", "(info->Height * 0.666666687f)) * 127.0f);"),
+    M("m2s-fade-unsaturated", "(uint8_t)ee_trunc_w(\n                (1.0f", "(uint8_t)(int32_t)(\n                (1.0f"),
+    M("m2s-near-127", "            poly->Colours[i][3] = 128;", "            poly->Colours[i][3] = 127;"),
+
+    # GetSideOfLine.
+    M("side-cross-sign", "    float c = ex * dy + ey * -dx;", "    float c = ex * dy - ey * -dx;"),
+    M("side-on-line-1", "    if (c < 0.0f)\n        return -1;\n    return 0;", "    if (c < 0.0f)\n        return -1;\n    return 1;"),
+    M("side-le", "    if (0.0f < c)\n        return 1;", "    if (0.0f <= c)\n        return 1;"),
+
+    # CalculateCentroidOfQuad.
+    M("centroid-third", "    const float third = 0.333333343f;", "    const float third = 0.3333333f;"),
+    M("centroid-b-from-1", "    float bx = ((q[0].x + q[2].x) + q[3].x) * third;", "    float bx = ((q[1].x + q[2].x) + q[3].x) * third;"),
+    M("centroid-assoc", "    float ay = ((q[0].y + q[1].y) + q[2].y) * third;", "    float ay = (q[0].y + (q[1].y + q[2].y)) * third;"),
+
+    # ClipPolygon.
+    M("clip-corner-hh", "    clip[0].x = cx - hw;", "    clip[0].x = cx - hh;"),
+    M("clip-cx-signed", "    cx = (float)(uint16_t)info->ClippingX;\n    cy = (float)(uint16_t)info->ClippingY;\n    clip[0]", "    cx = (float)info->ClippingX;\n    cy = (float)(uint16_t)info->ClippingY;\n    clip[0]"),
+    M("clip-cy-signed", "    cy = (float)(uint16_t)info->ClippingY;\n    clip[0]", "    cy = (float)info->ClippingY;\n    clip[0]"),
+    M("clip-on-line-out", "!= -1;\n            int in_j", "== 1;\n            int in_j"),
+    M("clip-prev-1", "    prev = 3;", "    prev = 1;"),
+    M("clip-prev-stays", "        prev = k;\n", ""),
+    M("clip-t-num-plus", "lx - (pts[i].x - a->x) * ly)", "lx + (pts[i].x - a->x) * ly)"),
+    M("clip-t-den-plus", "/ (dx * ly - (pts[j].y - pts[i].y) * lx);", "/ (dx * ly + (pts[j].y - pts[i].y) * lx);"),
+    M("clip-ip-y-from-j", "ip.y = pts[i].y + t * (pts[j].y - pts[i].y);", "ip.y = pts[j].y + t * (pts[j].y - pts[i].y);"),
+    M("clip-uv-z-flat", "iuv.z = uvs[i].z + t * (uvs[j].z - uvs[i].z);", "iuv.z = uvs[i].z;"),
+    M("clip-uv-x-from-y", "iuv.x = uvs[i].x + t * (uvs[j].x - uvs[i].x);", "iuv.x = uvs[i].y + t * (uvs[j].x - uvs[i].x);"),
+    M("clip-alpha-flat", "+ t * (float)((int32_t)alphas[j] - (int32_t)alphas[i]));", "+ 0.0f);"),
+    M("clip-alpha-unsigned", "(float)((int32_t)alphas[j] - (int32_t)alphas[i])", "(float)(uint8_t)(alphas[j] - alphas[i])"),
+    M("clip-emit-i", "            if (in_j)\n", "            if (in_i)\n"),
+    M("clip-top-le", "        if (outPts[i].y < outPts[top].y)", "        if (outPts[i].y <= outPts[top].y)"),
+    M("clip-top-exact", "outPts[top].y) <= 0.001f", "outPts[top].y) <= 0.0f"),
+    M("clip-top-0.01", "outPts[top].y) <= 0.001f", "outPts[top].y) <= 0.01f"),
+    M("clip-top-rightmost", "&& outPts[i].x < outPts[top].x)", "&& outPts[i].x > outPts[top].x)"),
+    M("clip-top-first", "    top = 0;\n    for (i = 1; i < count; i++) {", "    top = 0;\n    for (i = count; i < count; i++) {"),
+    M("clip-fan-start-2", "    start = 1;\n    while", "    start = 2;\n    while"),
+    M("clip-fan-short", "    while (start < count - 1) {", "    while (start < count - 2) {"),
+    M("clip-fan-clamp-le", "            if (!(last < count))", "            if (!(last <= count))"),
+    M("clip-fan-no-wrap", "                idx -= count;", "                idx = count - 1;"),
+    M("clip-fan-step", "        start = last;\n", "        start = last + 1;\n"),
+    M("clip-rgb-0", "                out.Colours[s][c] = poly->Colours[s][c];", "                out.Colours[s][c] = poly->Colours[0][c];"),
+    M("clip-rgb-top", "            out.Colours[0][c] = poly->Colours[0][c];", "            out.Colours[0][c] = poly->Colours[top & 3][c];"),
+    M("clip-layer-14", "    z = (float)layer;\n    start = 1;", "    z = 14.0f;\n    start = 1;"),
+    M("clip-no-flailer", "        out.Flailer = 1;\n", ""),
+    M("clip-flags-1", "            gEPolyRenderFn(&out, tex, 0);", "            gEPolyRenderFn(&out, tex, 1);"),
+    M("clip-top-q-of-v", "        out.UVs[0][2] = outUVs[top].z;", "        out.UVs[0][2] = outUVs[top].y;"),
+    M("clip-top-alpha-0", "        out.Colours[0][3] = outAlphas[top];", "        out.Colours[0][3] = outAlphas[0];"),
+
+    # DrawOverOrUnderLay.
+    M("overlay-no-border-test", "    if (info->HasBorder == 0)\n        return;\n", ""),
+    M("overlay-no-drawn-test", "    if (info->IsDrawn == 0)\n        return;\n    poly.Flailer = 1;", "    poly.Flailer = 1;"),
+    M("overlay-z-0", "        poly.Vertices[i].z = z;", "        poly.Vertices[i].z = 0.0f;"),
+    M("overlay-corner-2", "    poly.Vertices[2].y = cy + hh;", "    poly.Vertices[2].y = cy - hh;"),
+    M("overlay-x-signed", "    cx = (float)(uint16_t)info->ClippingX;\n    cy = (float)(uint16_t)info->ClippingY;\n    poly.", "    cx = (float)info->ClippingX;\n    cy = (float)(uint16_t)info->ClippingY;\n    poly."),
+    M("overlay-no-flailer", "    poly.Flailer = 1;\n    if (gEPolyRenderFn != NULL)\n        gEPolyRenderFn(&poly, tex, 0);", "    if (gEPolyRenderFn != NULL)\n        gEPolyRenderFn(&poly, tex, 0);"),
+
+    # DrawMap.
+    M("dm-no-drawn-test", "    if (info->IsDrawn == 0)\n        return;\n    epoly_init(&poly);\n    carUV", "    epoly_init(&poly);\n    carUV"),
+    M("dm-always-scrolls", "    if (info->HasScrolling != 0) {", "    if (1) {"),
+    M("dm-zoom-untested", "        if (info->ZoomToKeepPursuedCarInView != 0\n            && m->CurrentlyPursuedCar", "        if (m->CurrentlyPursuedCar"),
+    M("dm-dist-dy-x", "            float dy = a->y - b->y;", "            float dy = a->x - b->y;"),
+    M("dm-dist-squared", "            float dist = sqrtf(dx * dx + dy * dy);", "            float dist = dx * dx + dy * dy;"),
+    M("dm-zoom-ratio-flipped", "* (info->Width / info->ClippingWidth) + 0.1f;", "* (info->ClippingWidth / info->Width) + 0.1f;"),
+    M("dm-zoom-tenth", "* (info->Width / info->ClippingWidth) + 0.1f;", "* (info->Width / info->ClippingWidth) + 0.2f;"),
+    M("dm-zoom-width", "            fwd = dist / m->CurrentTrack->TrackMapCalibrationMapWidthMetres", "            fwd = dist / 2400.0f"),
+    M("dm-side-forward", "            side = (fwd + back) * 0.5f;", "            side = fwd;"),
+    M("dm-current-forward-back", "        m->CurrentViewDistanceForward = fwd;", "        m->CurrentViewDistanceForward = back;"),
+    M("dm-no-current-back", "        m->CurrentViewDistanceBackward = back;\n", ""),
+    M("dm-outer-1.1", "side * 1.2f, side * 1.2f, angle, outer);", "side * 1.1f, side * 1.2f, angle, outer);"),
+    M("dm-box-angle-0", "fwd, back, side, side, angle, box);", "fwd, back, side, side, 0, box);"),
+    M("dm-unit-box-x", "            box[i].x = (i == 1 || i == 2) ? 1.0f : 0.0f;", "            box[i].x = (i == 1 || i == 3) ? 1.0f : 0.0f;"),
+    M("dm-unit-no-outer", "            outer[i] = box[i];\n", ""),
+    M("dm-centroid-outer", "    calculate_centroid_of_quad(centre, box);", "    calculate_centroid_of_quad(centre, outer);"),
+    M("dm-height-of-width", "    hh = info->Height * 0.5f;\n    p[0]", "    hh = info->Width * 0.5f;\n    p[0]"),
+    M("dm-p1-x", "    p[1].x = hw;", "    p[1].x = -hw;"),
+    M("dm-no-alpha", "(uint8_t)ee_trunc_w((float)poly.Colours[i][3] * info->Alpha);", "(uint8_t)ee_trunc_w((float)poly.Colours[i][3] * 1.0f);"),
+    M("dm-alpha-unsaturated", "(uint8_t)ee_trunc_w((float)poly.Colours[i][3] * info->Alpha);", "(uint8_t)(int32_t)((float)poly.Colours[i][3] * info->Alpha);"),
+    M("dm-q-flat", "        float r = 1.0f / (p[i].z + info->H);", "        float r = 1.0f / info->H;"),
+    M("dm-q-not-scaled", "        poly.UVs[i][2] *= r;\n", ""),
+    M("dm-layer-13", "    trackmap_clip_polygon(m, &poly, m->TrackMapTexture, 14);", "    trackmap_clip_polygon(m, &poly, m->TrackMapTexture, 13);"),
+    M("dm-no-car-uv", "    trackmap_get_car_uv_position(m, &carUV, &m->CarToTrack->State.Position);\n", ""),
 ]
 
 EQUIVALENT = {

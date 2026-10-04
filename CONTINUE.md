@@ -1,8 +1,9 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-03), after 8m-6a, the minimap's table, constructor and turn;
-8m-6b, the map's clip and draw, is next. "Where the port stands" below has the count of what is left.
+(2026-10-03), after 8m-6b, the minimap's draw: DrawMap, MapToScreen,
+ClipPolygon and the frame; 8m-6c, the markers, Render and the draw on the
+bottom screen, is next. "Where the port stands" below has the count of what is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
@@ -1690,13 +1691,25 @@ and so replaced every boot.
          - Azahar (`out/azahar_8m6a`): the log has `trackmap: track
            12, sufficient 1`, so all seven textures load in a race.
            20 FPS, no crash. Nothing draws the map until 8m-6c.
-         - GetBoxOnMap's argument names (f, b, l, r) are the port's.
-           Render's calls in 8m-6c will show what retail passes.
-       - **8m-6b:** MapToScreen (a tilt by AngleX and a projection at
-         H), ClipPolygon with EmitPoint, GetSideOfLine and IsPointInPoly,
-         CalculateCentroidOfQuad (`0x001bda40`), DrawOverOrUnderLay and
-         DrawMap.
-       - **8m-6c:** DrawMarker and Render (the player, the pursued car,
+       - **8m-6b is done** (HANDOFF.md, Session 31, continued: the
+         minimap's draw (step 8m-6b)). `trackmap.md` has the write-up.
+         - `trackmap.c` adds DrawMap, MapToScreen (the tilt by AngleX,
+           the projection at H and the fade), ClipPolygon with
+           EmitPoint (Sutherland-Hodgman to the mode's box, then a fan
+           of quads from the top point), DrawOverOrUnderLay, and the
+           free GetSideOfLine (`0x001cb138`) and
+           CalculateCentroidOfQuad (`0x001bda40`).
+         - They hand Flailer polys, flags 0, to `gEPolyRenderFn`.
+           Nothing calls them until Render, so nothing draws yet.
+         - DrawMap's calls bear out GetBoxOnMap's argument names:
+           forward and backward, then one side distance as both l and
+           r.
+         - `trackmap_check`: 5092 ops, 12519 lines, 0 differ.
+           The mutation pass: 188, 187 caught, 1 equivalent.
+         - Azahar (`out/azahar_8m6b`): 19 FPS, no crash, the HUD as
+           before.
+       - **8m-6c:** DrawMarker with IsPointInPoly (`0x001cb1f0`) and
+         Render (the player, the pursued car,
          the AI and the cops, the roadblocks, the start and finish
          lines), RenderTrackMap from the race frame, and the draw.
          ePoly::Render (`0x0010fa68`) with a layer puts the poly in the
@@ -3030,7 +3043,7 @@ each class shows what it reaches.
 | 10 | The retail pass over what is already ported: the 130 changed functions cited from a `.c` in `docs/retail_audit.txt`, module by module, each checker gaining a retail model run where it can | 4-6 |
 | 11 | The rest of task 26: the racer and traffic AI, the six classes behind Car's constructor seams | 4-6 |
 | 12 | The cops and the pursuit: CopManager, the cop drivers, roadblocks and spikes | 4-6 |
-| 13 | The two-screen HUD, to the split decided below. In progress as 8m: 8m-1 to 8m-5 and 8m-6a are done; 8m-6b and 8m-6c (the minimap's draw) are left | 10, 8 done |
+| 13 | The two-screen HUD, to the split decided below. In progress as 8m: 8m-1 to 8m-5, 8m-6a and 8m-6b are done; 8m-6c (the minimap's markers, Render and the draw on the bottom screen) is left | 10, 9 done |
 | 13b | New 3DS mode in full and a steady 30 FPS race (task 28), right after step 13: the real clock and the pacing, a frame profiler, New 3DS mode checked part by part, then only the optimizations the New 3DS needs. Set by the user on 2026-10-03 | 4 |
 | 14 | The car and world sounds and the speech | 2-3 |
 | 15 | **A whole race with the AI and the cops.** Steps 10-14 add about 15-23 slices | |
@@ -3044,18 +3057,18 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-03, after 8m-6a)
+### Where the port stands (2026-10-03, after 8m-6b)
 
 - **Done:** steps 1-9. One car drives the retail track at the retail
   start, lit, with the chase camera, and the HUD shows the race on the
   top screen with its animations. Tasks 1-25 and 32-35 are closed: 29 of
   36. The open ones are 26-31 and 36.
-- **In progress:** step 13, the HUD. Eight of its ten slices are done.
+- **In progress:** step 13, the HUD. Nine of its ten slices are done.
 - **Left, in the table's units:**
 
   | Step | Slices left |
   |---|---|
-  | 13, the HUD: 8m-6b and 8m-6c | 2 |
+  | 13, the HUD: 8m-6c | 1 |
   | 13b, New 3DS mode and 30 FPS | 4 |
   | 10, the retail pass | 4-6 |
   | 11, the racer and traffic AI | 4-6 |
@@ -3066,12 +3079,12 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped, 2026-10-03) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **30-44** |
+  | **Total** | **29-43** |
 
-- **How far along:** about 20-23 of the road's 50-67 slices are done,
+- **How far along:** about 21-24 of the road's 50-67 slices are done,
   roughly a third. The estimates run low. Step 13 was put at 1-2 slices
   and is taking 10, and step 8 took eighteen commits (8a to 8l) for its
-  2-3. Read the 30-44 as a floor.
+  2-3. Read the 29-43 as a floor.
 - **The pace:** 64 commits from 2026-09-27 to 2026-10-03, most of them a
   slice each.
 - **Not yet in the count:** the replay, and the frame rate. Azahar reads

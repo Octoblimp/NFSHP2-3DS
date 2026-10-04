@@ -1,4 +1,4 @@
-# The minimap, part one: TrackMap's table, constructor and turn (step 8m-6a)
+# The minimap: TrackMap's table, turn and draw (steps 8m-6a and 8m-6b)
 
 TrackMap is the race's minimap. Each player has one while the HUD's
 TRACK_MAP feature is on (`hud-features.md`): SetHudFeatures makes it
@@ -8,18 +8,31 @@ Player::RenderTrackMap (`0x00181c08`) calls its Render each frame, after
 StuffDemoPolys. Render arrives in 8m-6c, so nothing draws the map yet.
 
 Retail's TrackMap has fourteen functions (CONTINUE.md lists them all).
-This part ports seven, plus EvalCubic, all in `trackmap.c`:
+8m-6a ports seven, plus EvalCubic: the table, the constructor and the
+turn. 8m-6b ports five more, plus GetSideOfLine and
+CalculateCentroidOfQuad: the map's own draw. All are in `trackmap.c`:
 
-| function | address | size | port |
-|----------|---------|------|------|
-| InitTrackMapModeInfo | `0x001bd1f8` | 1428 | `trackmap_init_mode_info` |
-| TrackMap(TrackInfo *, Car *, Player *) | `0x001babb8` | 528 | `trackmap_construct`, `trackmap_new` |
-| ~TrackMap | `0x001badc8` | 28 | `trackmap_delete` |
-| GetAngle | `0x001bb678` | 300 | `trackmap_get_angle` |
-| EvalCubic | `0x001bdad0` | 100 | `eval_cubic` |
-| GetCameraDirection | `0x001bd0b0` | 324 | `trackmap_get_camera_direction` |
-| GetCarUVPosition | `0x001bca50` | 148 | `trackmap_get_car_uv_position` |
-| GetBoxOnMap | `0x001bcae8` | 364 | `trackmap_get_box_on_map` |
+| step | function | address | size | port |
+|------|----------|---------|------|------|
+| 8m-6a | InitTrackMapModeInfo | `0x001bd1f8` | 1428 | `trackmap_init_mode_info` |
+| 8m-6a | TrackMap(TrackInfo *, Car *, Player *) | `0x001babb8` | 528 | `trackmap_construct`, `trackmap_new` |
+| 8m-6a | ~TrackMap | `0x001badc8` | 28 | `trackmap_delete` |
+| 8m-6a | GetAngle | `0x001bb678` | 300 | `trackmap_get_angle` |
+| 8m-6a | EvalCubic | `0x001bdad0` | 100 | `eval_cubic` |
+| 8m-6a | GetCameraDirection | `0x001bd0b0` | 324 | `trackmap_get_camera_direction` |
+| 8m-6a | GetCarUVPosition | `0x001bca50` | 148 | `trackmap_get_car_uv_position` |
+| 8m-6a | GetBoxOnMap | `0x001bcae8` | 364 | `trackmap_get_box_on_map` |
+| 8m-6b | DrawMap | `0x001bb7a8` | 1192 | `trackmap_draw_map` |
+| 8m-6b | MapToScreen | `0x001bcc58` | 1112 | `trackmap_map_to_screen` |
+| 8m-6b | ClipPolygon | `0x001bc140` | 2236 | `trackmap_clip_polygon` |
+| 8m-6b | EmitPoint | `0x001bca08` | 72 | `emit_point`, static |
+| 8m-6b | DrawOverOrUnderLay | `0x001bbf88` | 440 | `trackmap_draw_over_or_under_lay` |
+| 8m-6b | GetSideOfLine | `0x001cb138` | 136 | `get_side_of_line` |
+| 8m-6b | CalculateCentroidOfQuad | `0x001bda40` | 144 | `calculate_centroid_of_quad` |
+
+The draws hand their polys to epoly.h's `gEPolyRenderFn`, as Flailer
+polys with flags 0. That is ePoly::Render (`0x0010fa68`) in retail, and
+trackview binds it in the port.
 
 `main.c` binds playerhud's `gDeleteTrackMapFn` to `trackmap_delete`,
 and `gNewTrackMapFn` to `newTrackMapLogged`. That is `trackmap_new`
@@ -51,8 +64,8 @@ retail's are the same.
 | 136 | PlayerToTrack | |
 | 140 | CurrentTrack | |
 | 144 | CurrentlyPursuedCar | |
-| 148 | CurrentViewDistanceForward | not set here |
-| 152 | CurrentViewDistanceBackward | not set here |
+| 148 | CurrentViewDistanceForward | DrawMap's, when it scrolls |
+| 152 | CurrentViewDistanceBackward | DrawMap's, when it scrolls |
 | 156 | SufficientDataToRenderMe | 0 when the map cannot be drawn |
 | 160 | CurrentMode | SetTrackMapMode's |
 | 164 | CurrentlyDisplayedMode | the one Render draws |
@@ -208,8 +221,122 @@ point on the map:
   each with z 0.
 - Each corner goes through T, and out keeps its x and y.
 
-The names f, b, l and r are the port's. Render's calls in 8m-6c will
-show what retail passes.
+The names f, b, l and r are the port's, and DrawMap's calls bear them
+out. It passes its view distances forward and backward as f and b. It
+passes one side distance as both l and r: the mean of the two, or the
+zoom's distance.
+
+## DrawMap
+
+DrawMap(centre, outer[4], angle) draws the part of the map texture
+about the car. Render (8m-6c) passes the angle GetAngle gave, and draws
+the markers inside `outer`.
+
+1. If the displayed mode's IsDrawn is 0, it returns, writing nothing.
+2. A local ePoly is constructed. The car's UV comes from
+   GetCarUVPosition of CarToTrack's position (Car +96).
+3. **With HasScrolling,** it takes three distances, in UVs:
+   - Zooming, when ZoomToKeepPursuedCarInView is set and there is a
+     CurrentlyPursuedCar (mode 10): all three are
+     `dist / MapWidthMetres × (Width / ClippingWidth) + 0.1`. Here dist is
+     the distance in x and y from the car to the pursued car, and
+     MapWidthMetres is the track's TrackMapCalibrationMapWidthMetres.
+   - Otherwise, forward is ViewDistanceForward, backward is
+     ViewDistanceBackward, and the side is their mean.
+   - Forward and backward are stored in CurrentViewDistanceForward and
+     CurrentViewDistanceBackward.
+   - The box is GetBoxOnMap(carUV, forward, backward, side, side,
+     angle). `outer` is the same box with each distance × 1.2.
+4. **Without it,** the box and `outer` are the whole texture: (0, 0),
+   (1, 0), (1, 1), (0, 1). The view distances are left alone.
+5. The box's corners become the poly's u and v. `centre` is
+   CalculateCentroidOfQuad of the box.
+6. The four points (∓Width/2, ∓Height/2, 0), from the top left
+   clockwise, go through MapToScreen.
+7. Each vertex's alpha is multiplied by the mode's Alpha, and
+   truncated.
+8. Each vertex's u, v and q (1 from the constructor) are multiplied by
+   1 / (z + H), where z is the tilted point's. That is the GS's
+   perspective-correct texturing.
+9. ClipPolygon draws it with TrackMapTexture, at layer 14.
+
+The poly keeps the constructor's colour, 128 grey.
+
+## MapToScreen
+
+MapToScreen(poly, p0, p1, p2, p3) tilts and projects four points.
+
+1. The tilt is the identity turned about X by the mode's AngleX. Each
+   point is multiplied by it in place, so the caller sees the tilted
+   points.
+2. Each vertex is
+   `(x·H / (z + H) + X, y·H / (z + H) + Y)`. H is the mode's distance,
+   and X and Y are loaded as unsigned halfwords.
+3. Each vertex's alpha fades with depth. For z > 0 it is
+   `(1 − z / (Height × 0.666666687)) × 128`, truncated; otherwise it is
+   128.
+
+It writes only the vertices' x and y and the alphas.
+
+## ClipPolygon and EmitPoint
+
+ClipPolygon(poly, texture, layer) clips the poly to the mode's box and
+draws what is left.
+
+1. **The box** is (ClippingX, ClippingY) ± half the clipping width and
+   height. The place is loaded as unsigned halfwords. Its corners run
+   clockwise from the top left.
+2. **The poly:** its vertices' x and y, its UVs (u, v, q) and its
+   alphas are copied out.
+3. **Sutherland-Hodgman**, once for each corner k from 0 to 3, against
+   the line from corner k to the corner before it (3 for k = 0). A point
+   is in unless GetSideOfLine calls it −1, so a point on the line is in.
+   For each edge from point j to point i:
+   - point j is emitted if it is in;
+   - if one is in and the other out, the crossing is emitted, with
+     `t = ((pᵢ.y − a.y)·lx − (pᵢ.x − a.x)·ly) / (dx·ly − dy·lx)`.
+     Here a is corner k, (lx, ly) runs from it to the other corner, and
+     (dx, dy) = pⱼ − pᵢ. The point, u, v and q are pᵢ + t·(pⱼ − pᵢ).
+     The alpha is `aᵢ + t·(aⱼ − aᵢ)`, as floats, truncated.
+   EmitPoint (`0x001bca08`) appends a point, its UV and its alpha, and
+   counts it.
+4. **The top point** is the one with the least y. A later point within
+   0.001 of its y takes over if its x is less.
+5. **The fan:** quads from the top point, each sharing its last point
+   with the next. With n points, the first quad is the top point and the
+   next three, the second starts from the third, and so on, while the
+   start is less than n − 1. A point past the last repeats the last.
+   Eight points make three quads, four make one, three make one with its
+   last point twice, and fewer make none.
+   - Each quad is a new ePoly, with Flailer set.
+   - Its vertices take the clipped points' x, y, UVs and alphas, and z =
+     (float)layer.
+   - Vertex s takes the red, green and blue of the source poly's vertex
+     s.
+   - It goes to Render with the texture and flags 0.
+
+## GetSideOfLine and CalculateCentroidOfQuad
+
+**GetSideOfLine**(a, b, p) is a free function. With (dx, dy) = b − a and
+(ex, ey) = p − a, it takes `c = ex·dy + ey·(−dx)`. It answers 1 for
+c > 0, −1 for c < 0, and 0 on the line, or when a and b are one point.
+
+**CalculateCentroidOfQuad**(out, q[4]) is another. It averages the
+centroids of the triangles q0 q1 q2 and q0 q2 q3, each × 0.333333343.
+It writes y before x.
+
+## DrawOverOrUnderLay
+
+DrawOverOrUnderLay(texture, layer) draws the frame (TRACKMAPFRAME, layer
+0) or the backing (MAPBACK, layer 15) over the mode's box. Render
+(8m-6c) chooses which.
+
+1. If the mode's HasBorder is 0, it returns.
+2. A local ePoly takes z = (float)layer at every vertex, and the box's
+   corners, clockwise from the top left, as ClipPolygon builds them.
+3. If the mode's IsDrawn is 0, it returns without drawing.
+4. Otherwise it sets Flailer and goes to Render with the texture and
+   flags 0, with the constructor's UVs and colours.
 
 ## Where the port differs
 
@@ -227,19 +354,35 @@ show what retail passes.
     days of WorldTimer, so a game never sees one.
   - The checker takes the longest step once, from a settled ease, and
     not twice.
+- **EmitPoint's buffers.** Retail's ClipPolygon keeps eight points in
+  each buffer, and EmitPoint does not test the count.
+  - A convex quad clipped to a box makes at most eight: each of the four
+    lines adds at most one point.
+  - DrawMap's quad is a projected rectangle, so it is convex.
+  - The port drops a point past the eighth, where retail would write it
+    over the next buffer. The checker clips only convex quads.
+- **Float to integer.** The three alphas use eefpu.h's `ee_trunc_w`,
+  which saturates by sign as the EE's `cvt.w.s` does. A plain cast on
+  x86 gives 0x80000000 for any overflow. Only hand-set modes overflow,
+  such as a negative Height or an Alpha of 3e7.
+- **Division by zero.** z + H and Height are zero only in mode 6, which
+  DrawMap does not draw (IsDrawn is 0). The EE would give ±FLT_MAX there,
+  and the port an infinity. The checker keeps out of it.
 
 ## The checker
 
 `tools/trackmap_check.py` runs retail's own functions, with bSPrintf,
-bStringHash and the matrix code under them, against the harness
-(`tools/src/trackmap_test.c`) over `trackmap.c`, `emath.c` and
-`bmath.c`.
+bStringHash, the matrix code and ePoly's constructor under them, against
+the harness (`tools/src/trackmap_test.c`) over `trackmap.c`, `emath.c`,
+`bmath.c` and `epoly.c`.
 
 **What is stubbed or set by hand:**
 
 - **GetTextureInfo** answers each of the seven names from a mask, and
   logs the name and both flags.
 - **eGetView** answers the one view and logs the id.
+- **ePoly::Render** (`0x0010fa68`), the port's `gEPolyRenderFn`, logs
+  the texture, the flags and the whole poly.
 - **eMathInit and the static constructor at `0x0011bf70`** are run
   first. That constructor writes eMulVector's (0, 0, 0, 1). The
   emulator runs no static constructors, and without it w is 0, so row 3
@@ -250,8 +393,10 @@ bStringHash and the matrix code under them, against the harness
 
 - the map's fields by name, with its pointers named by what they point
   at;
+- a test ePoly's fields, retail's offsets 16 to 152, and whether
+  pDynamicFrameMemory is set;
 - the tables, field by field, after InitTrackMapModeInfo;
-- each call's answer.
+- each call's answer, and what it wrote back.
 
 **The script** covers:
 
@@ -277,7 +422,32 @@ bStringHash and the matrix code under them, against the harness
   - looking back;
   - with the other movers before and during the race;
   - with time steps from none to 2³¹ either way, and a WorldTimer that
-    wraps past PreviousTime.
+    wraps past PreviousTime;
+- GetSideOfLine, thirteen points against seven lines: either side, on
+  the line, and a line of one point;
+- CalculateCentroidOfQuad, with seven quads;
+- MapToScreen:
+  - five point sets in each drawn mode;
+  - hand-set tilts, distances, heights, and places loaded without their
+    sign;
+  - fades to both saturations;
+- ClipPolygon:
+  - quads inside, outside on each side, across one edge and two, around
+    the box, exactly on it, and as an octagon;
+  - ties for the top point about 0.001, and both windings;
+  - sixty seeded random convex quads;
+  - each mode's box, and hand-set boxes;
+  - UVs, colours, alphas, layers and textures, NULL included;
+- DrawOverOrUnderLay, in each mode and with IsDrawn and HasBorder set by
+  hand;
+- DrawMap:
+  - in every mode, from several places and turns;
+  - zoomed to a pursued car at several distances, under two
+    calibrations;
+  - with zoom set but no pursued car, and a pursued car without zoom;
+  - without scrolling, and with hand-set alphas, heights and view
+    distances;
+  - without a map texture.
 
 **Not driven:**
 
@@ -286,14 +456,18 @@ bStringHash and the matrix code under them, against the harness
   own.
 - The `return 0` after GetCameraDirection in GetAngle, which no call
   reaches: GetCameraDirection always answers 1.
+- A NULL CarToTrack in DrawMap: retail reads its position without a
+  test, and Render (8m-6c) is what keeps it from drawing then.
 
     python tools/trackmap_check.py
     python tools/trackmap_check.py --mutate
 
-**Result:** 2399 ops and 6631 lines, 0 differ.
+**Result:** after 8m-6a, 2399 ops and 6631 lines; after 8m-6b, 5092
+ops and 12519 lines. 0 differ.
 
-**The mutation pass:** 111 mutations, 110 caught, 1 equivalent, 0
-unexplained (`out/trackmap_mutate.txt`). The equivalent one,
+**The mutation pass:** 188 mutations, 187 caught, 1 equivalent, 0
+unexplained (`out/trackmap_mutate.txt`): 8m-6a's 111 and 8m-6b's
+77. The equivalent one,
 `angle-plus-half-turn`, adds 0x8000 to the angle instead of taking it
 away. On a 16-bit angle the two are the same.
 
@@ -314,9 +488,12 @@ A race on track 12, played as `run_azahar_race.ps1` drives it
   includes `TRACK12_MAP` in `TRACKS\TEX12TRACK.BIN`; the other six are
   in `GLOBAL\INGAMEB.BUN`.
 
-## Left for 8m-6b and 8m-6c
+After 8m-6b, the same race (`out/azahar_8m6b`) ran at 19 FPS with no
+crash. The HUD and the log's `trackmap` line are as before. Nothing calls
+the draws until Render, so the screen does not change.
 
-- **8m-6b:** MapToScreen (the tilt by AngleX and the projection at H),
-  ClipPolygon with EmitPoint, DrawOverOrUnderLay and DrawMap.
-- **8m-6c:** DrawMarker and Render, and the draw on the bottom screen.
-  Render sets CurrentlyDisplayedMode and the view distances.
+## Left for 8m-6c
+
+DrawMarker (`0x001bbc50`) with IsPointInPoly (`0x001cb1f0`), and Render
+(`0x001bade8`), and the draw on the bottom screen. Render sets
+CurrentlyDisplayedMode and calls the draws above.

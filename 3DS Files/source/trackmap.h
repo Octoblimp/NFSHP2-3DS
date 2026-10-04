@@ -7,8 +7,8 @@
 // when the feature goes off. SetTrackMapMode writes CurrentMode, and
 // Render (8m-6c) draws the mode CurrentlyDisplayedMode names.
 //
-// This part (8m-6a) holds the mode table and what Render reads the map's
-// place and turn from:
+// 8m-6a holds the mode table and what Render reads the map's place and
+// turn from:
 // - InitTrackMapModeInfo (0x001bd1f8) fills TrackMapModeInfo, eleven
 //   modes, and TrackMapMarkerInfo, nine marker colours. Every
 //   constructor runs it again.
@@ -20,6 +20,15 @@
 // - GetCarUVPosition (0x001bca50) takes a point in the world to the map
 //   texture's UVs, and GetBoxOnMap (0x001bcae8) turns a box about a point
 //   on the map.
+//
+// 8m-6b draws the map itself, as Flailer polys through gEPolyRenderFn:
+// - DrawMap (0x001bb7a8) cuts the part of the map texture about the car,
+//   tilts and projects it with MapToScreen (0x001bcc58), and clips it.
+// - ClipPolygon (0x001bc140) clips a poly to the mode's box with
+//   GetSideOfLine (0x001cb138) and EmitPoint (0x001bca08), and draws what
+//   is left as a fan of quads.
+// - DrawOverOrUnderLay (0x001bbf88) draws the frame and the backing over
+//   the mode's box. CalculateCentroidOfQuad (0x001bda40) is DrawMap's.
 //
 // Written up in docs/formats/trackmap.md; checked on retail's image by
 // tools/trackmap_check.py.
@@ -33,6 +42,7 @@
 #include "bmatrix.h"
 #include "bvector.h"
 #include "car.h"
+#include "epoly.h"
 #include "player.h"
 #include "texturepack.h"
 #include "track.h"
@@ -185,5 +195,49 @@ void trackmap_get_box_on_map(TrackMap *m, const bVector2 *centre,
 // of the direction's two parts. *x moves toward `target` over `t`, and *v
 // is its speed.
 void eval_cubic(float *x, float *v, float target, float t);
+
+// 0x001bcc58. Tilts the four points in place about X by the mode's
+// AngleX, then projects each at the mode's H onto poly's vertex of the
+// same number: x = p.x * H / (p.z + H) + X, and y the same with Y. Only
+// the vertices' x and y and the colours' alpha are written. A point
+// beyond the plane (z > 0) fades, to an alpha of (1 - z / (Height * 2/3))
+// * 128; the others get 128.
+void trackmap_map_to_screen(TrackMap *m, ePoly *poly, bVector3 *p0,
+                            bVector3 *p1, bVector3 *p2, bVector3 *p3);
+
+// 0x001bb7a8. Draws the map texture on layer 14, if the mode draws:
+// - In a mode that scrolls, the part about the car: a box of the view
+//   distances, turned by `angle`. In a mode that zooms to keep the pursued
+//   car in view, the box grows with the distance to it. The distances go
+//   in CurrentViewDistanceForward and Backward.
+// - In the others, the whole texture.
+// The box is the poly's UVs, and the mode's Width by Height is tilted and
+// projected by trackmap_map_to_screen, faded by the mode's Alpha, and
+// clipped. *centre is the box's centre and outer[4] the box grown by 1.2,
+// both in the map texture's UVs: the markers are placed by them.
+void trackmap_draw_map(TrackMap *m, bVector2 *centre, bVector2 outer[4],
+                       uint16_t angle);
+
+// 0x001bbf88. Draws `tex` over the mode's clipping box as one poly, its z
+// `layer`, if the mode has a border and draws. Render draws MAPBACK on
+// layer 15 under the map and TRACKMAPFRAME on 0 over everything.
+void trackmap_draw_over_or_under_lay(TrackMap *m, TextureInfo *tex,
+                                     int32_t layer);
+
+// 0x001bc140. Clips the quad in `poly` (its vertices' x and y, its UVs and
+// its alphas) to the mode's clipping box, one edge at a time, and draws
+// what is left as quads fanned from its top point, each a Flailer poly on
+// `layer` with `tex`. The fan's colours are poly's, by corner.
+void trackmap_clip_polygon(TrackMap *m, ePoly *poly, TextureInfo *tex,
+                           int32_t layer);
+
+// 0x001cb138. Which side of the line from a to b the point p is on: 1 for
+// (p - a) x (b - a) above 0, -1 below, 0 on it.
+int32_t get_side_of_line(const bVector2 *a, const bVector2 *b,
+                         const bVector2 *p);
+
+// 0x001bda40. The mean of the centroids of the quad's two triangles,
+// (0, 1, 2) and (0, 2, 3).
+void calculate_centroid_of_quad(bVector2 *out, const bVector2 q[4]);
 
 #endif  // TRACKMAP_H

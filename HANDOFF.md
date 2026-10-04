@@ -12832,3 +12832,86 @@ On Azahar (`run_azahar_race.ps1 -HoldKeys 65 -WatchSeconds 15`, track
 - **8m-6b:** MapToScreen, ClipPolygon with EmitPoint, GetSideOfLine and
   IsPointInPoly, CalculateCentroidOfQuad, DrawOverOrUnderLay and DrawMap
   (CONTINUE.md).
+
+## Session 31, continued (2026-10-03) -- the minimap's draw (step 8m-6b)
+
+TrackMap draws the map itself now: DrawMap, MapToScreen, ClipPolygon
+with EmitPoint, DrawOverOrUnderLay, and the free GetSideOfLine and
+CalculateCentroidOfQuad. Nothing calls them until Render, in 8m-6c, so
+the screen is as it was. `docs/formats/trackmap.md` has the write-up.
+
+### The port
+
+- **`trackmap.c`** adds:
+  - DrawMap (`0x001bb7a8`): the box about the car's UV, the map's quad
+    tilted and projected, its alphas and its perspective UVs, clipped at
+    layer 14;
+  - MapToScreen (`0x001bcc58`): the tilt by AngleX, the projection at
+    H, and the fade with depth;
+  - ClipPolygon (`0x001bc140`) with EmitPoint (`0x001bca08`):
+    Sutherland-Hodgman against the mode's box, then quads fanned from
+    the top point;
+  - DrawOverOrUnderLay (`0x001bbf88`): the frame or the backing over the
+    box;
+  - GetSideOfLine (`0x001cb138`) and CalculateCentroidOfQuad
+    (`0x001bda40`).
+- The draws hand their polys to `gEPolyRenderFn` as Flailer polys with
+  flags 0, as retail hands them to ePoly::Render (`0x0010fa68`).
+- The three alpha conversions use `ee_trunc_w`, so an overflow saturates
+  as on the EE.
+- EmitPoint drops a ninth point, where retail would overrun its buffer.
+  Only a non-convex quad makes one, and DrawMap's is convex.
+
+What retail does that a reader would not guess:
+
+- MapToScreen tilts the caller's points in place, and DrawMap uses the
+  tilted z for the UVs' q: 1 / (z + H).
+- The places (X, Y, ClippingX, ClippingY) are int16 in the record but
+  loaded unsigned.
+- A point on a clip line is in. The top point is the least y, and a
+  point within 0.001 of that y takes over if its x is less.
+- With n points the fan makes quads while the start is under n - 1, so
+  three points make one quad with its last point twice.
+- DrawMap writes the view distances only when it scrolls. Zooming (mode
+  10, with a pursued car) uses one distance for all four sides:
+  dist / map width x (Width / ClippingWidth) + 0.1.
+- DrawOverOrUnderLay tests HasBorder first and IsDrawn last.
+
+### The checks
+
+`trackmap_check` gains retail's six functions and EmitPoint, run with
+ePoly's constructor under them, and a stub for ePoly::Render that logs
+the whole poly. The harness now links `epoly.c`. After each op it dumps
+a test ePoly too.
+
+- **The script adds:**
+  - GetSideOfLine over 91 cases, and seven centroids;
+  - MapToScreen over five point sets in each drawn mode, with hand-set
+    tilts, distances, places and heights, and fades to both saturations;
+  - ClipPolygon over 29 hand-made quads and 60 seeded random convex
+    ones, in each mode's box and in hand-set boxes;
+  - DrawOverOrUnderLay in each mode, with IsDrawn and HasBorder set by
+    hand;
+  - DrawMap in every mode, from several places and turns, zoomed under
+    two calibrations, and hand-set.
+- **Result:** 5092 ops, 12519 lines, 0 differ, on the first run.
+- **Mutation pass:** 188 mutations, 187 caught, 1 equivalent, 0
+  unexplained: the 77 new ones all caught.
+  - One of the new ones, a fan clamp to n - 2, hung the harness: the
+    start never moved. It was replaced by a clamp at n.
+
+The whole chain: 98 checkers and the four table generators. 0 of
+102 failed, in 1156 s (`out/chain_8m6b.txt`).
+
+### On Azahar
+
+The race on track 12 (`run_azahar_race.ps1 -HoldKeys 65 -WatchSeconds
+15`, shots in `out/azahar_8m6b`): 19 FPS, Speed 101%, no crash. The
+HUD is as after 8m-5, and the log has `trackmap: track 12, sufficient
+1`. Nothing draws the map until Render.
+
+### Next
+
+- **8m-6c:** DrawMarker with IsPointInPoly, Render, RenderTrackMap from
+  the race frame, and the per-layer draw on the bottom screen
+  (CONTINUE.md).
