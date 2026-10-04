@@ -1,18 +1,139 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 31
-(2026-10-04), after 13b-4e. On Azahar the race went from 20 FPS to
-28-30, and the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`).
-georender sends what changed within a run of draws, and citro3d's
-uniform upload is skipped when nothing changed. The Flailer layers
-are drawn from one walk, as retail's layer table has them. The strips
-and quads are no longer flushed one by one. **Next is the car
-selector** (step 16's SelectCarScreen): on 2026-10-04 the user saw its
-stand-in screen and wrote "Could use work LOL". The rest of 13b-4 (the
-models, 9 ms; the envmap, 6; the cull, 3) comes after it. "Where the
-port stands" below has the count of what is left.
+Where the next session picks up. Updated in Session 32
+(2026-10-04), part way through the car selector's first part (SC-1).
+**Start at "Now" just below.** SC-1's code is written and was seen on
+Azahar. Its checker against retail is half done, and SC-1 is committed
+as work in progress. Session 31 took the race on Azahar from 20 FPS to 28-30 and
+the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`). The rest
+of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) comes after
+the car selector. "Where the port stands" below has the count of what
+is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
+
+## Now: the car selector's first part (SC-1), its checker unfinished
+
+Session 32 ran out of context here, on 2026-10-04. The user asked for
+the car selector after seeing the stand-in Select Car screen ("Could
+use work LOL"). SC-1 is retail's SelectCarScreen and CarSelector
+(`SLES_507.31`) as logic and 2D. SC-2 is the 3D car, and SC-3 the
+nebula.
+
+**Written, and committed as work in progress:**
+- `3DS Files/source/bcarsel.c` and `.h`:
+  - VisibleCarSet, with CarListSort.
+  - The preload and CloseSelectCarScreen.
+  - The fade groups (feAlphaAnimation).
+  - The unlock box: its slide (AnimationGroup) and its blurb.
+  - The swatches.
+  - The thumbnail row, with the lock and the cloaks.
+  - The make's logo and the two-player badge.
+  - The info bar and the help lines.
+  - The JoyHandler (the orbit view).
+  - The three popups: the gearbox, the handling and the wait.
+  - SetSelectedCars and MaybeContinueToNextScreen.
+
+  Each function's comment gives its retail address.
+- `nfsrewards.c` and `.h`: FormatUnlockBlurbForCar.
+- `main.c` and `gameflow.c`/`.h`: the hooks and the screen. UseTreeEvent
+  (game types 8 and 9) is now inline in bcarsel.c, and its hook is gone
+  from main.c. **That has not been built yet**, so run
+  `tools/build_cia.ps1` first.
+- `tools/run_azahar_carsel.ps1` boots Azahar into Select Car. Earlier in
+  session 32, SC-1 showed on Azahar as retail has it: the logo top left,
+  the badge, the thumbnail row, and "Cars Unlocked n/m  NFS Points n".
+  That was before the fix below.
+- `tools/src/carsel_test.c` (the harness) and `tools/carsel_check.py`
+  (the model, the script and the mutation pass, after hudnis_check).
+
+**Fixed, found by the checker:** `BCARSEL_MAX_FADE` (bcarsel.h) was 48.
+FRONTB's fade group A has 102 objects on the 1P screen, and 98 and 103
+on the two-player halves. Most of the thumbnail row never faded out in
+the orbit view. The bound is 128 now. That fix is not in a build yet.
+
+**The checker, as it stands:**
+- **The harness** links (SOURCES needed langtab.c) and runs the whole
+  script in 2 s. It took 54 s until `note()` began each search at its
+  last hit.
+- **The model** runs four retail functions:
+  - SelectCarScreenCallback (0x00198928);
+  - the JoyHandler bridge (0x00198e28);
+  - the preload (0x00194898);
+  - CloseSelectCarScreen (0x00194fb0).
+
+  GetTextureInfo (0x001abf48) is stubbed to 0. Its only two callers are
+  the tick, whose swatch texture only feeds SetSelectCarLighting, and
+  InitSpotlights, which does nothing without its texture. Both are SC-2.
+- **The first 400 ops agreed byte for byte** once MAX_FADE was fixed.
+  Four changes since then have not been run together:
+  - The set-up ops (g, fs, ride, pts, xl, egg, ev, isl) no longer dump,
+    on either side.
+  - `walk()` renders each press and ticks after every `every` presses.
+  - The orbit timeout is tested at exactly 2400 frames (it stays) and
+    2401 (it leaves).
+  - A DISMISS 0 comes at state 0.
+- **The blocker is the model's speed.** A TICK costs 169 ms in mipsemu,
+  an ACTIVATE 0.55 s, and everything else 2-25 ms. The script has 1,129
+  ticks, about 3.5 minutes in all. There are three ways out:
+  - Cut the long settling runs. The fade needs 44 ticks to fall from 130
+    at 3 a tick, the orbit's mode needs 34 at 0.03 a tick, and a reload's
+    fade-out needs 19 at 7 a tick.
+  - Profile the tick. updateThumbnails, with 25 cloak hashes and a
+    visibility call per car, is the likely cost.
+  - Accept a run of a few minutes, in the background.
+- **`MUTATIONS` is empty.** About 80 are planned:
+  - the sort's keys and its tie;
+  - the set's init and copy;
+  - the preload's skip and unload;
+  - the fade bound and scale;
+  - the slide's start and duration;
+  - the unlock box's timing, guards and sounds;
+  - `covered()`;
+  - the logo's two-player names and the badge;
+  - the info bar's units, plus signs and class;
+  - OBJ_UNLOCKED's visibility;
+  - the help tables;
+  - the swatches' places and colours;
+  - the thumbnails' base, step, y and lock;
+  - the fade groups' scales;
+  - the orbit speeds;
+  - the popups' fields and screens;
+  - the advance and devance guards;
+  - AllReady;
+  - SetSelectedCars' mapping;
+  - the tick's fade steps, timeout and arrows;
+  - each case of the callback;
+  - `selectorIndex`;
+  - the screen's activate and unactivate;
+  - `bcarsel_joy`'s port filter.
+- **Session 32's diff helpers** were scratch files, not in the repo, and
+  are quick to rewrite:
+  - a per-op diff that narrows each object line to the bytes that
+    differ (byte 43 is DirtyFlag, which every Flailer setter stamps);
+  - a time per op type;
+  - the model on the first N ops.
+
+**To finish SC-1, in order:**
+1. Get the checker to agree on the whole script.
+2. Add the mutations. Do not build while `--mutate` runs.
+3. Run `tools/build_cia.ps1`, then `bootflow_check`.
+4. Write `docs/formats/car-select.md` (new): the screens and their
+   objects, nfsrewards, UseTreeEvent and the checker.
+5. Add `carsel_check` to the checker list under "State".
+6. Commit the finished checker, the doc and whatever the build needed.
+
+**Gaps, on purpose:**
+- The event trees are not ported, so findEventForCar is NULL in main.c
+  and the device shows no tree blurbs.
+- The pad's mapping to `bcarsel_joy` is SC-2's. So are the 3D car, the
+  camera, the cover, the platform, the lighting, the spotlights and
+  OverRideAlpha.
+- The nebula is SC-3.
+- Select Track is still a plain screen.
+- Joy event 34 does nothing in retail either.
+
+**Then:** SC-2, SC-3, and after them 13b-4f.
 
 ## State
 
@@ -3195,6 +3316,8 @@ goes in.
   and 36.
 - **Next:** the car selector (step 16's SelectCarScreen, CarSelector
   and the front end's car), which the user asked for on 2026-10-04.
+  SC-1 (the logic and the 2D) is written and its checker is half done;
+  see "Now" at the top.
   Then 13b-4f, the models' cost per draw. 13b-1 (the real clock and the
   pacing), 13b-2 (the frame profiler), 13b-3 (New 3DS mode in full) and
   13b-4a to 13b-4e (the draw's cuts) are done.
@@ -3223,8 +3346,8 @@ goes in.
 - **Not yet in the count:** the replay, and with it the race's music
   (see step 14's note). The race runs in real time since 13b-1, at
   28-30 FPS on Azahar since 13b-4d. Holding 30 is the rest of 13b-4.
-  The car selector is still the port's stand-in panel over the disc's
-  screen: no car, and the stats' lines on top of each other.
+  The car selector's 2D is retail's now (SC-1, its checker unfinished).
+  The car itself is SC-2.
 
 ## What not to trust
 

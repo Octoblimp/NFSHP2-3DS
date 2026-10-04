@@ -13550,3 +13550,81 @@ lines on top of each other.
   before the rest of 13b-4.
 - Then 13b-4f: the models' and the envmap's cost per draw, the cull,
   and the long frames.
+
+## Session 32 (2026-10-04) -- the car selector's first part (SC-1), unfinished
+
+The user asked for the car selector after seeing the stand-in Select
+Car screen. Its retail look, from the user's PCSX2 photo:
+- the make's logo top left and the badge top right;
+- the thumbnail row along the bottom;
+- "Cars Unlocked: 1/5  NFS Points: 0".
+
+The session ran out of context with SC-1 written and committed as
+work in progress, and its checker half done. CONTINUE.md's "Now" section has the exact
+state and the order to finish in.
+
+### The port
+
+- **`bcarsel.c` and `.h`.** Retail's SelectCarScreen and CarSelector,
+  read from `SLES_507.31`, as logic and 2D:
+  - VisibleCarSet, with CarListSort through blist_sort.
+  - The preload and CloseSelectCarScreen.
+  - The fade groups, the unlock box and its slide.
+  - The swatches.
+  - The thumbnail row, with the lock and the cloaks.
+  - The logo and badge.
+  - The info bar and the help.
+  - The JoyHandler's orbit.
+  - The gearbox, handling and wait popups.
+  - SetSelectedCars and MaybeContinueToNextScreen.
+
+  Everything outside the selector is a hook in `BCarSelHooks`.
+- **`nfsrewards.c` and `.h`.** FormatUnlockBlurbForCar, the unlock
+  box's text.
+- **`main.c` and `gameflow.c`.** The hooks, and the screen in the game
+  flow.
+- **UseTreeEvent.** It was a hook that main.c never set. It is now
+  inline in bcarsel.c: game types 8 and 9, as
+  FrontendDatabase::UseTreeEvent (0x001841e8) has it.
+- **`BCARSEL_MAX_FADE` went from 48 to 128.** Fade group A has 102
+  objects on the 1P screen, so the old bound left most of the
+  thumbnail row unfaded in the orbit view. The checker found it.
+
+### The checker
+
+`tools/carsel_check.py` runs retail's SelectCarScreenCallback, its
+JoyHandler bridge, the preload and CloseSelectCarScreen in mipsemu,
+over FRONTB's Flailer chunk and GLOBALB's car records and skins.
+`tools/src/carsel_test.c` runs bcarsel.c over the same files. The stubs
+log in the same words on both sides. After each action the dump shows:
+- every selector field;
+- the car list in order;
+- the unlock box, the thumbnail spline, the swatches and the orbit
+  speeds;
+- the preload, the CarLoader's flags and the players' settings;
+- every Flailer object's bytes.
+
+The script has four parts:
+- You're The Cop with one player;
+- a single race (game type 8) in another language and units;
+- the championship (game type 9);
+- two players, one on each half of the screen.
+
+Status:
+- The first 400 ops agree once the fade bound was fixed.
+- The full run is held up by the model's speed: a tick costs 169 ms in
+  the emulator, and the script has about 1,100 ticks.
+- The mutations are planned but not written.
+
+### On Azahar
+
+SC-1 was seen earlier in the session through
+`tools/run_azahar_carsel.ps1`, as retail lays it out. That was before
+the fade fix, and the main.c change has not been built since.
+
+### Next
+
+- Finish SC-1: the checker, the mutations, the build, bootflow_check,
+  `docs/formats/car-select.md`, and a commit of those.
+- Then SC-2 (the 3D car, its camera, cover, lighting and spotlights,
+  and the pad's mapping), SC-3 (the nebula), and 13b-4f.

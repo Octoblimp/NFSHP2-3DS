@@ -55,6 +55,8 @@
 #include "camera.h"
 #include "cammover.h"
 #include "bscreens.h"
+#include "bcarsel.h"
+#include "nfsrewards.h"
 #include "bsetup.h"
 #include "carcontroller.h"
 #include "cardriver.h"
@@ -250,8 +252,12 @@ static const BScreenConfig kScreens[] = {
     // a screen per pad, and this is player one's -- the 3DS never gets
     // there, as it never has a second pad.
     { "Select Car",              0xb5074ab4u,   // SelectCarScreen
-      bgf_plain_screen_callback },
+      bcarsel_screen_callback },
     { "Select Car2P",            0x18dc8e52u,   // SelectCarScreen
+      bcarsel_screen_callback },
+    // Where car select goes on to for every game type but the single race
+    // and the championship, You're The Cop's included.
+    { "Select Track",            0x15417b53u,   // TrackSelectScreenCallback
       bgf_plain_screen_callback },
     // Same Flailer screen as "Language Options Pre FE" above, entered under
     // a second name from the Options menu. The ELF registers both, to one
@@ -1826,10 +1832,11 @@ static void hookSetupChallengeCars(void* user)
     fred_make_challenge_cars_available(&Fred);
 }
 
+// 0x00183ec0, which jumps to car select's preload (bcarsel.c).
 static void hookSetupPreloadCars(void* user)
 {
     (void)user;
-    logLine("fred preload the first car (not ported)");
+    bcarsel_preload();
 }
 
 static void hookSetupRaceAfterSetup(void* user)
@@ -2251,6 +2258,199 @@ static UIWrapStyle botStyle(UIRenderer* ui, uint32_t color, float px,
     h = uirender_line_height(ui, &st);
     if (h > 0.0f) st.scale = px / h;
     return st;
+}
+
+// ------------------------------------------------------------ car select
+//
+// BCarSelHooks, for bcarsel.c: retail's SelectCarScreen and CarSelector
+// (step 16, SC-1). The selector writes its own objects through flailer.c;
+// these are the rest -- the language table, the car loader, the popups and
+// the flow.
+
+static BCarSel g_carsel;
+
+// GetTranslatedString's answers, into a ring: one Printf can hold two, and
+// a popup keeps its message while the screen goes on translating.
+#define CARSEL_RING     8
+#define CARSEL_RING_LEN 256
+
+static char* carselRing(void)
+{
+    static char ring[CARSEL_RING][CARSEL_RING_LEN];
+    static int  next;
+    return ring[next++ % CARSEL_RING];
+}
+
+static const char* hookCarSelTranslate(void* user, int32_t id)
+{
+    Boot* b   = (Boot*)user;
+    char* out = carselRing();
+    if (!b->ui || !b->ui->hasLang) return NULL;
+    if (langtab_copy(&b->ui->lang, id, out, CARSEL_RING_LEN) == 0)
+        return NULL;
+    return out;
+}
+
+// GetTranslatedString(const char*) (0x0021e508): by the English text's
+// hash, and the text itself when the table has no row for it.
+static const char* hookCarSelTranslateString(void* user, const char* s)
+{
+    Boot*       b = (Boot*)user;
+    const char* t;
+    size_t      len = 0;
+    char*       out;
+
+    if (!s || !b->ui || !b->ui->hasLang) return s;
+    t = langtab_get_english(&b->ui->lang, (int32_t)bchunk_hash(s), &len);
+    if (!t) return s;
+    out = carselRing();
+    if (len >= CARSEL_RING_LEN) len = CARSEL_RING_LEN - 1;
+    memcpy(out, t, len);
+    out[len] = 0;
+    return out;
+}
+
+static void hookCarSelSound(void* user, int32_t event)
+{
+    fesound_play((int)event, user);
+}
+
+// StopFrontendSound: the port's frontend sounds are one-shots with nothing
+// to stop.
+static void hookCarSelStopSound(void* user, int32_t event)
+{
+    (void)user;
+    (void)event;
+}
+
+static int hookCarSelSummonPopup(void* user, BPopupConfig* cfg)
+{
+    (void)user;
+    cfg->parent = g_flow.screen;
+    return bpopup_summon(&g_flow, cfg);
+}
+
+static void hookCarSelDismissPopup(void* user, int popup)
+{
+    (void)user;
+    bpopup_dismiss(&g_flow, popup);
+}
+
+static void hookCarSelChangeToScreen(void* user, const char* name, int push)
+{
+    (void)user;
+    bgf_change_to_screen(&g_flow, name, push);
+}
+
+// FrontendDatabase::StartRace, for the single race and the championship.
+static void hookCarSelStartRace(void* user)
+{
+    (void)user;
+    fred_start_race(&Fred);
+    logRaceStart();
+}
+
+static void hookCarSelLoaderFrontEnd(void* user)
+{
+    (void)user;
+    TheCarLoader.InFrontEndFlag = 1;
+    TheCarLoader.RoundRobinFlag = 1;
+}
+
+static void hookCarSelLoaderLoad(void* user, const RideInfo* ri)
+{
+    (void)user;
+    (void)carloader_load(&TheCarLoader, ri);
+}
+
+static int hookCarSelLoaderIsLoaded(void* user, const RideInfo* ri)
+{
+    (void)user;
+    return carloader_is_loaded(&TheCarLoader, ri, 0);
+}
+
+static void hookCarSelLoaderUnload(void* user, const RideInfo* ri)
+{
+    (void)user;
+    carloader_unload(&TheCarLoader, ri);
+}
+
+static void hookCarSelLoaderBeginLoading(void* user)
+{
+    (void)user;
+    carloader_begin_loading(&TheCarLoader, NULL);
+}
+
+// RenderTextIntoRectangle (0x001451e0): the blurb wrapped into the
+// rectangle bitmap's box, from its top left. The disc's text object only
+// lends its font; the port draws in FONT_A at the top screen's scale, as
+// the bottom panel does.
+static void hookCarSelRenderText(void* user, uint32_t screen,
+                                 uint32_t object, uint32_t rect,
+                                 const char* text, float scale)
+{
+    Boot*       b = (Boot*)user;
+    float       x = 0.0f, y = 0.0f;
+    float       sx = 400.0f / 640.0f, sy = 240.0f / 480.0f;
+    UIWrapStyle st;
+
+    (void)scale;
+    if (!flailer_find_object(screen, object, FLAILER_TYPE_TEXT)
+        || !flailer_find_object(screen, rect, FLAILER_TYPE_BITMAP))
+        return;
+    flailer_get_top_left_position(screen, rect, &x, &y);
+    st = botStyle(b->ui, C2D_Color32(0xff, 0xff, 0xff, 0xff), 10.0f, false);
+    uirender_draw_wrapped(b->ui, text, 0, &st, x * sx, y * sy,
+                          (float)flailer_get_width(screen, rect) * sx, 1.0f);
+}
+
+static void hookCarSelShowLoadedCar(void* user, int player,
+                                    const RideInfo* ri)
+{
+    (void)user;
+    logLine("carsel show car %ld skin %d for player %d (3D is SC-2)",
+            (long)ri->Type, (int)ri->SkinNumber, player);
+}
+
+static int32_t hookCarSelLanguage(void* user)
+{
+    (void)user;
+    return g_flow.currLanguage;
+}
+
+// FormatUnlockBlurbForCar, nfsrewards.c's. The event trees are not ported,
+// so no car is an event's reward yet.
+static void hookCarSelFormatUnlockBlurb(void* user, char* buf, int len,
+                                        int32_t carType, int32_t gameType,
+                                        int flag)
+{
+    NFSRewardHooks h;
+    memset(&h, 0, sizeof(h));
+    h.user      = user;
+    h.translate = hookCarSelTranslate;
+    h.language  = hookCarSelLanguage;
+    nfs_format_unlock_blurb_for_car(&h, buf, len, carType, gameType, flag);
+}
+
+static void hookCarSelStopMovie(void* user)
+{
+    (void)user;
+    bgf_stop_movie(&g_flow);
+}
+
+static void hookCarSelInit(void* user)
+{
+    (void)user;
+    bcarsel_init_screen();
+}
+
+// BeginGameFlowUnloadingFrontEnd's CloseSelectCarScreen and
+// TheCarLoader.UnloadEverything.
+static void hookCarSelClose(void* user)
+{
+    (void)user;
+    bcarsel_close_screen();
+    carloader_unload_everything(&TheCarLoader);
 }
 
 // The bring-up overlays that used to be printf'd to the console on the
@@ -3074,6 +3274,8 @@ int main(int argc, char** argv)
     hooks.jukebox          = hookJukebox;
     hooks.songMonitor      = hookSongMonitor;
     hooks.easterEggs       = hookEasterEggs;
+    hooks.initSelectCar    = hookCarSelInit;
+    hooks.closeSelectCar   = hookCarSelClose;
     hooks.moveBrackets     = hookMoveBrackets;   // NewMainMenu's highlight
     hooks.setBlurb         = hookSetBlurb;
     hooks.trace            = hookTrace;
@@ -3312,6 +3514,31 @@ int main(int argc, char** argv)
     setupHooks.setRaceParameters   = hookSetupRaceParameters;
     setupHooks.trace               = hookTrace;
     bsetup_init(&g_setup, &g_flow, &setupHooks);
+
+    BCarSelHooks carselHooks;
+    memset(&carselHooks, 0, sizeof(carselHooks));
+    carselHooks.user               = &g_boot;
+    carselHooks.translate          = hookCarSelTranslate;
+    carselHooks.translateString    = hookCarSelTranslateString;
+    carselHooks.sound              = hookCarSelSound;
+    carselHooks.stopSound          = hookCarSelStopSound;
+    carselHooks.setHelpOverride    = hookSetupHelpOverride;
+    carselHooks.summonPopup        = hookCarSelSummonPopup;
+    carselHooks.dismissPopup       = hookCarSelDismissPopup;
+    carselHooks.changeToScreen     = hookCarSelChangeToScreen;
+    carselHooks.startRace          = hookCarSelStartRace;
+    carselHooks.loaderFrontEnd     = hookCarSelLoaderFrontEnd;
+    carselHooks.loaderLoad         = hookCarSelLoaderLoad;
+    carselHooks.loaderIsLoaded     = hookCarSelLoaderIsLoaded;
+    carselHooks.loaderUnload       = hookCarSelLoaderUnload;
+    carselHooks.loaderBeginLoading = hookCarSelLoaderBeginLoading;
+    carselHooks.renderTextIntoRectangle = hookCarSelRenderText;
+    carselHooks.formatUnlockBlurb  = hookCarSelFormatUnlockBlurb;
+    carselHooks.showLoadedCar      = hookCarSelShowLoadedCar;
+    carselHooks.language           = hookCarSelLanguage;
+    carselHooks.stopMovie          = hookCarSelStopMovie;
+    carselHooks.trace              = hookTrace;
+    bcarsel_init(&g_carsel, &carselHooks);
 
     // Retail's main (0x0012f000), after InitializeEverything: with SkipFE
     // set, StartSkipFEGame on Fred, whose StartRace asks for
@@ -3645,6 +3872,15 @@ int main(int argc, char** argv)
             }
             C2D_SceneBegin(top);
             uirender_draw_visible(&ui, 1.0f);
+            // FlailerScreenList::Render's RENDER, which car select's
+            // unlock box draws its blurb on.
+            if (!g_track.attached && g_flow.screen
+                && g_flow.screen->callback == bcarsel_screen_callback) {
+                BScreenCallbackData rd;
+                memset(&rd, 0, sizeof(rd));
+                rd.itemHash = g_flow.screen->hash;
+                bcarsel_screen_callback(&g_flow, BMSG_SCREEN_RENDER, &rd);
+            }
             FRAMEPROF_STAMP(FRAMEPROF_HUD);
             C2D_TargetClear(g_bot, BOT_BACK);
             C2D_SceneBegin(g_bot);

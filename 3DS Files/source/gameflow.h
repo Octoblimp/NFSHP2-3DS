@@ -257,6 +257,12 @@ typedef struct {
     // replayLoaded (+8) set in the flow.
     int  (*replayConsiderLaunching)(void* user);
     void (*replayLaunch)(void* user);
+    // InitSelectCarScreen (0x00194fa8), EndGameFlowLoadingFrontEnd's; and
+    // BeginGameFlowUnloadingFrontEnd's CloseSelectCarScreen (0x00194fb0)
+    // with TheCarLoader's UnloadEverything (0x001b08c0) after it (bcarsel.h,
+    // carloader.h). Neither is traced: the boot transcript predates them.
+    void (*initSelectCar)(void* user);
+    void (*closeSelectCar)(void* user);
 
     // Transcript. Every observable step calls this, which is what
     // tools/bootflow_check.py diffs.

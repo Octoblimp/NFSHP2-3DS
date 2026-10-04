@@ -710,6 +710,7 @@ void bgf_end_loading_frontend(BGameFlow* gf)
     // and the bundles are already up by the time the flow starts, so the
     // only part of this that has an effect is the visibility and the launch.
     // (The demo disc hid its slideshow's last panel instead.)
+    HOOK_VOID0(gf, initSelectCar);
     screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 0);
     objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);
     bgf_launch_frontend_menus(gf);
@@ -719,6 +720,7 @@ void bgf_begin_unloading_frontend(BGameFlow* gf)
 {
     bgf_change_to_screen(gf, NULL, 0);
     bgf_reset_stack(gf);
+    HOOK_VOID0(gf, closeSelectCar);
 }
 
 // ------------------------------------------------------- TitleMoviesToPlay
