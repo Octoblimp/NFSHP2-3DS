@@ -163,6 +163,7 @@ bool bui_object(const BUI* ui, uint32_t index, BUIObject* out)
     out->animation    = (int32_t)bchunk_u32(p + 44);
     out->renderOnPoly = bchunk_u32(p + 48);
     out->clipToPoly   = bchunk_u32(p + 52);
+    out->chunk        = ui->objects[index].shift ? base : NULL;
 
     if (out->type == BUI_TYPE_BITMAP) {
         if (size < 120) return false;

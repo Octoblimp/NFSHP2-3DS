@@ -12570,3 +12570,105 @@ shows. The mutation pass was running, so the frame rate was not read.
 - **8m-4c-3:** InitializeFlailerTachometer (`0x001434a0`) and
   RenderFlailerTachometer (`0x00143858`). CONTINUE.md has what is read
   of them so far.
+
+## Session 31, continued (2026-10-03) -- the tach's red band (step 8m-4c-3)
+
+Both tachometers have a red band from the red line to the top of the
+dial. It is a TACH_GRADIENT bitmap (Animation 10): TACHGRADIENT
+(`0x39c9eead`) in the chase view, and TACHGRADIENT2 (`0x7307c47f`) in
+the bumper view. The
+port drew it as a quad, so the whole ring was red. Retail cuts a fan out
+of it, from the centre to the red line. `docs/formats/hud-tach.md` has
+the write-up.
+
+### The port
+
+- **`hudtach.{c,h}`** hold InitializeFlailerTachometer (`0x001434a0`),
+  RenderFlailerTachometer (`0x00143858`) and next_power_of_2
+  (`0x0013ff60`).
+  - Init lays nine points over the gradient: the centre, then the edge
+    middles and corners clockwise from the bottom. Each point carries
+    the UVs over the power-of-two allocation.
+  - Render draws the quarters before the needle's whole, and then one
+    cut, through the table at `0x002f09e0`.
+- **`main.c`** binds `gInitializeFlailerTachometerFn`, which
+  SetHudFeatures calls when it finds the gauges.
+- **`uirender.c`**'s `draw_bitmap` sends a TACH_GRADIENT bitmap to the
+  new `draw_tach`:
+  - Render fills a pool of four ePolys.
+  - Each one draws as a strip in ePoly::Render's order, through the new
+    `georender_draw_hud_quad`, between a `C2D_Flush` and a
+    `C2D_Prepare`.
+  - With no list, nothing draws, as on the PS2.
+- **`georender.c`**: `georender_draw_quad`'s body is now
+  `draw_screen_quad`, with the matrix and the alpha test as arguments.
+  `georender_draw_hud_quad` uses it on citro2d's mapping, blended as
+  citro2d blends, with no alpha or depth test. It first sets texenv
+  stages 1 to 5 to pass the colour through. citro2d leaves its own image
+  stages there; it sets 1 to 3 again at its next draw after
+  `C2D_Prepare`, and `C2D_Prepare` sets 4 and 5. The tint mode is in
+  bits 16 to 19 of citro2d's flags, which `C2D_Prepare` leaves alone.
+- **`bui.{c,h}`**: `BUIObject.chunk` is the object itself on retail's
+  layout, the memory the Flailer setters write. It is NULL on the
+  demo's layout.
+- **The word at +108** holds a token, not the list's address, which does
+  not fit on a 64-bit host: 0 for none, otherwise 1 + a slot in
+  `hudtach.c`'s table of four. `hudtach_points` turns it back.
+
+What retail does that a reader would not guess:
+
+- The cut poly's colours are all `0x80808080`, not the bitmap's.
+- With s = 2, Render leaves the cut's corner 2 at ePoly's constructor
+  default, (64, 64) with uv (1, 1). The strip's second triangle then
+  runs to that point, a sliver across the screen. The chase view always
+  cuts with s = 1. In the bumper view, 38 of the 51 cars that show
+  the gradient cut with s = 2. The other 13 have the tach in the speedo,
+  and SetHudFeatures hides it. The port draws what retail draws, and it
+  has not been compared with PCSX2.
+- Init converts the texture's size unsigned and halves the scaled size
+  with a signed divide.
+- Past the four quarters the table runs into zeros to row 27, then
+  pointers. Only a Rotation of −2160 or below reaches the pointers.
+
+### The checks
+
+`hudtach_check` runs Init and Render from retail's image in the emulator
+against `hudtach.c` and `epoly.c`.
+
+- **Stubs:** GetTextureInfo, and an AddPoly that hands out blocks
+  retail's ePoly constructor filled.
+- **Script:** both disc gradients through every degree and out to
+  INT_MIN, then sizes, scales, layers, colours and lists.
+- **Result:** 2287 ops, 7804 lines, 0 differ.
+- **Mutation pass:** 93 mutations, 89 caught, 4 equivalent. The four are
+  `pow2-zero-kept`, `init-uhalf-no-zero-add`, `table-row0` and
+  `angle-q-floor`; `hud-tach.md` says why each is equivalent.
+  - The first pass left `angle-c-cast` alive. A C cast of 360 − INT_MIN
+    overflows where the EE saturates.
+  - INT_MIN is in the script now. Both sides stop after 27 polys, so the
+    24 million quarters it asks for end there.
+- **Model fix:** the model first refreshed its pool only on a Render,
+  and kept stale corners in the polys it had not refreshed. It now
+  rebuilds exactly the polys the last Render used.
+
+The whole chain: 97 checkers with `hudtach_check` added, and the four
+table generators. 0 of 101 failed, in 1545 s
+(`out/chain_8m4c3.txt`).
+
+The ARM build is clean.
+
+On Azahar (`run_azahar_race.ps1 -HoldKeys 65 -WatchSeconds 30`, OPEL,
+car 37, in the chase view), shots in `out/azahar_8m4c3` before the stage
+reset and in `out/azahar_8m4c3b` after it. The band looks the same in
+both:
+
+- The band runs from about half past twelve to half past two.
+- The needle, the gear and the speed draw as before.
+- The rest of the HUD is as before.
+- 20 FPS. No crash in 30 seconds.
+
+### Next
+
+- **8m-5:** the two-screen split, as the user placed it (CONTINUE.md).
+- **The bumper view's sliver**, against PCSX2, when the bumper view is
+  next looked at.

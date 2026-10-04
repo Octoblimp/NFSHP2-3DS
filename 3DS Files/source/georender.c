@@ -780,8 +780,9 @@ void georender_quads_rewind(void)
     s_numQuads = 0;
 }
 
-bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
-                         uint8_t blend, bool depthTest)
+static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
+                             const C3D_Mtx* screen, uint8_t blend,
+                             bool alphaTest, bool depthTest)
 {
     GeoRenderVertex* dst;
     C3D_BufInfo*     buf;
@@ -802,7 +803,7 @@ bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
     BufInfo_Add(buf, s_quads, sizeof(GeoRenderVertex), 4, 0x3210);
 
     // The vertex colour and nothing else: no light, and an ambient of one.
-    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uProjection, &s_screen);
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uProjection, screen);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uModelView,  &s_identity);
     C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightVec, 0.0f, 0.0f, 1.0f, 0.0f);
     C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightClr, 0.0f, 0.0f, 0.0f, 1.0f);
@@ -822,7 +823,11 @@ bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
     C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_2);
 
     C3D_CullFace(GPU_CULL_NONE);
-    C3D_AlphaTest(true, GPU_GREATER, 0x60);
+    if (alphaTest) {
+        C3D_AlphaTest(true, GPU_GREATER, 0x60);
+    } else {
+        C3D_AlphaTest(false, GPU_ALWAYS, 0);
+    }
     set_blend(blend);
     C3D_DepthTest(true, depthTest ? GPU_GEQUAL : GPU_ALWAYS, GPU_WRITE_COLOR);
     C3D_DrawArrays(GPU_TRIANGLE_STRIP, s_numQuads * 4, 4);
@@ -831,4 +836,26 @@ bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
     // What draws next sets its own combiner, but not always its scale.
     C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_1);
     return true;
+}
+
+bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
+                         uint8_t blend, bool depthTest)
+{
+    return draw_screen_quad(v, gt, &s_screen, blend, true, depthTest);
+}
+
+bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
+                             float width, float height)
+{
+    C3D_Mtx screen;
+    int     i;
+
+    // citro2d's stages after the first are still set for its own images.
+    // Here they pass the first stage's colour through; citro2d sets 1 to
+    // 3 again at its next draw after C2D_Prepare, and C2D_Prepare 4 and 5.
+    for (i = 1; i < 6; i++) {
+        C3D_TexEnvInit(C3D_GetTexEnv(i));
+    }
+    Mtx_OrthoTilt(&screen, 0.0f, width, height, 0.0f, 1.0f, -1.0f, true);
+    return draw_screen_quad(v, gt, &screen, GEO_BLEND_ALPHA, false, false);
 }

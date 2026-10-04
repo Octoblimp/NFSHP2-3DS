@@ -100,6 +100,9 @@ typedef struct {
     int32_t  animation;      // BUIAnimation
     uint32_t renderOnPoly;   // nameHash of the object to draw onto
     uint32_t clipToPoly;     // nameHash of the object to clip against
+    // The object itself on retail's layout, the FlailerObjectChunk
+    // (flailer.h) the setters write; NULL on the demo's.
+    const uint8_t* chunk;
 
     // BUI_TYPE_BITMAP
     uint32_t textureHash;

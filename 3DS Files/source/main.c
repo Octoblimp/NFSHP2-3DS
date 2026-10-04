@@ -86,6 +86,7 @@
 #include "hudnis.h"
 #include "hudrender.h"
 #include "hudscore.h"
+#include "hudtach.h"
 #include "joyevent.h"
 #include "joyhid.h"
 #include "joypad.h"
@@ -2721,6 +2722,9 @@ int main(int argc, char** argv)
     gNisOverlayUpdateFn = nisoverlay_update;
     gNisOverlaySetVisibleFn = nisoverlay_set_visible;
     gCdReadClockFn = cdReadClock;
+    // The tach's red band (hudtach.c): SetHudFeatures lays the points over
+    // the gradient, and uirender.c cuts the band out of them as it draws.
+    gInitializeFlailerTachometerFn = flailer_initialize_tachometer;
 
     // Car::MaybeCameraShake, which World::DoTimestep asks of each player's
     // car: shake.c. Only a car with a player shakes, and none has one until

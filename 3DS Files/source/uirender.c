@@ -6,6 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "epoly.h"
+#include "georender.h"
+#include "hudtach.h"
+
 // RenderHelpCharacter (0x0013f9b8) hashes this name and calls FindFont.
 #define HELP_FONT_HASH 0xb85de386u   // bStringHash("BUTTONSOUT")
 
@@ -373,11 +377,89 @@ void uirender_override_texture(UIRenderer* r, uint32_t hash, C3D_Tex* tex,
 #define UIR_TEX_SPLASH_SCREEN 0xf9117c29u   // the title's two movie planes
 #define UIR_TEX_PANELMOVIE    0xc3f0caefu   // the menus' background movie
 
+// RenderSingleFlailerBitmap (0x001428f0) never draws a TACH_GRADIENT bitmap
+// as a quad. It hands the bitmap and the list its word at 108 names to
+// RenderFlailerTachometer (hudtach.h) and draws the polys that makes, each
+// a strip in ePoly::Render's order; with no list, before Init or on the
+// demo's layout, nothing. citro2d has no strip with a colour per corner,
+// so they draw through georender, after what citro2d has queued, and
+// citro2d is set up again after them as the race frame sets it up.
+#define UIR_TACH_POLYS 4
+
+typedef struct {
+    ePoly polys[UIR_TACH_POLYS];
+    int   n;
+} TachPolys;
+
+// FlailerStrip::AddPoly (0x00145868): a constructed poly. Past four the
+// table's rows are zeros, and their polys nothing.
+static ePoly* tach_add_poly(void* ctx)
+{
+    TachPolys* tp = (TachPolys*)ctx;
+    if (tp->n >= UIR_TACH_POLYS) return NULL;
+    epoly_init(&tp->polys[tp->n]);
+    return &tp->polys[tp->n++];
+}
+
+static void draw_tach(UIRenderer* r, const BUIObject* o, const UIView* v,
+                      UITexture* t)
+{
+    static const uint8_t kStrip[4] = { 0, 1, 3, 2 };
+    const struct FlailerBitmapChunk* b =
+        (const struct FlailerBitmapChunk*)o->chunk;
+    const FlailerTachometerPointList* list;
+    TachPolys       tp;
+    GeoTexture      gt;
+    GeoRenderVertex q[4];
+
+    if (!b || t->override || !t->valid) return;
+    list = hudtach_points(b);
+    if (!list) return;
+    tp.n = 0;
+    flailer_render_tachometer(b, list, tach_add_poly, &tp);
+    if (tp.n == 0) return;
+
+    // The points' UVs are over the image's next power of two, which the
+    // upload's allocation can be bigger than.
+    memset(&gt, 0, sizeof gt);
+    gt.tex        = &t->tex;
+    gt.uvScale[0] = (float)next_power_of_2(t->w) / (float)t->tex.width;
+    gt.uvScale[1] = (float)next_power_of_2(t->h) / (float)t->tex.height;
+
+    end_gs_scale();
+    C2D_Flush();
+    for (int k = 0; k < tp.n; k++) {
+        const ePoly* p = &tp.polys[k];
+        memset(q, 0, sizeof q);
+        for (int i = 0; i < 4; i++) {
+            const int n = kStrip[i];
+            float     a = (float)p->Colours[n][3] * v->alpha;
+            if (a > 255.0f) a = 255.0f;
+            if (a < 0.0f)   a = 0.0f;
+            q[i].pos[0]    = v->originX + p->Vertices[n].x * v->scaleX;
+            q[i].pos[1]    = v->originY + p->Vertices[n].y * v->scaleY;
+            q[i].st[0]     = p->UVs[n][0];
+            q[i].st[1]     = p->UVs[n][1];
+            q[i].colour[0] = p->Colours[n][0];
+            q[i].colour[1] = p->Colours[n][1];
+            q[i].colour[2] = p->Colours[n][2];
+            q[i].colour[3] = (uint8_t)a;
+        }
+        georender_draw_hud_quad(q, &gt, r->targetW, r->targetH);
+    }
+    C2D_Prepare();
+    C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
+}
+
 static void draw_bitmap(UIRenderer* r, const BUIObject* o, const UIView* v)
 {
     int idx = find_texture(r, o->textureHash);
     if (idx < 0) return;
     UITexture* t = &r->textures[idx];
+    if (o->animation == BUI_TACH_GRADIENT) {
+        draw_tach(r, o, v, t);
+        return;
+    }
     if (!t->override && !t->valid) return;
     if (!t->override && (o->textureHash == UIR_TEX_SPLASH_SCREEN
                          || o->textureHash == UIR_TEX_PANELMOVIE))

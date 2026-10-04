@@ -240,6 +240,12 @@ void georender_set_fog(C3D_FogLut* lut, uint32_t colour);
 // texture.
 bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                          uint8_t blend, bool depthTest);
+// The same for a Flailer poly over the HUD, on a screen `width` by
+// `height`, citro2d's mapping: blended as citro2d blends, with neither
+// the alpha test nor the depth test, as the rest of the HUD draws. The
+// caller flushes citro2d first and runs C2D_Prepare after.
+bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
+                             float width, float height);
 void georender_quads_rewind(void);
 
 #endif
