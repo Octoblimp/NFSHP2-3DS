@@ -13187,3 +13187,109 @@ The race on track 12 (`out/azahar_13b1`), at Speed 101%:
   MainLoopTiming's ten ticks and CalculateFrameRate. Its "C: %dfps" and
   "G: %dfps" are Player::DisplayDebugInfo's, behind
   DisplayPlayerDebugInfo (gp-20700).
+
+## Session 31, continued (2026-10-04) -- the frame profiler (step 13b-2)
+
+Each race frame's time is in the log now, phase by phase and the draw
+stage by stage. Retail's own profiler is ported: MainLoop's ten ticks,
+CalculateFrameRate, and the two times it reads from the display. The
+port adds a line a second. `docs/formats/frame-profiler.md` has the
+write-up.
+
+### The port
+
+- **`mainloop.c`**:
+  - MainLoopTiming (`0x002f0058`, the mdebug's type 3247): ten ticks,
+    StartTime to LimitFrameRate.
+  - CalculateFrameRate (`0x0012f090`):
+    - the CPU's time is the frame less the GPU wait, floored at 0.1 ms;
+    - the GPU's time is the VIF's;
+    - 1000 over each is its rate;
+    - all four are kept when bit 3 of RealTimeFrames changes.
+  - MaybePrintTiming, `jr ra` in both images.
+  - Retail's DoScreenPrintf loop over the cars changes nothing. It is
+    left out, like `carfinish.c`'s.
+- **`edisplay.c`**: WaitBufferSwapTime and VifTime, milliseconds in
+  16.16 from bGetFixTickerDifference. GetWaitForBufferSwapTime and
+  GetVifTime scale them by 2^-16.
+- **`hudrender.c`**: DisplayDebugInfo's "C: %dfps" and "G: %dfps" print
+  PreviousCpuFrameRate and PreviousGpuFrameRate, in place of the two
+  names nothing wrote.
+- **`main.c`**:
+  - stamps the ten ticks at the port's own phase ends;
+  - splits C3D_FrameBegin(C3D_FRAME_SYNCDRAW) into C3D_FrameSync and
+    C3D_FrameBegin(0), so the blank's wait and the GPU's are timed
+    apart. The GPU's wait is WaitBufferSwapTime, and
+    C3D_GetDrawingTime is VifTime.
+  - `SHOW_FRAME_RATES` (0) turns on DisplayPlayerDebugInfo for the
+    HUD's rates.
+  - At boot, a `console:` line: the model, New 3DS or not, the
+    speedup, the memory type, the grant, the heap, linear, and core 1's
+    limit.
+- **`frameprof.c`**, the port's own: a `frame:` line a second of a race.
+  - The frame rate, the mean frame and the longest.
+  - Each phase.
+  - The draw's nine stages. `main.c` and `trackview.c` stamp their
+    ends.
+  - The two waits, citro3d's two times, and retail's two rates.
+
+### The checks
+
+- **`mainloop_check`** runs CalculateFrameRate and the two getters out
+  of the image. The script covers:
+  - frames at 30, 20 and 60 a second;
+  - the floors;
+  - bit 3 of the frame count;
+  - each other field off the frame's end;
+  - the counter's wrap;
+  - long and backwards frames;
+  - a 400-op walk.
+
+  11 scenarios, 4195 ops, 5097 lines, 0 differ. 46 mutations, 46
+  caught.
+- `hudrender_check`, `hudanim_check`, `hudcop_check` and
+  `hudscore_check` define the two kept rates in their harnesses. `hudrender_check`'s `debug-fps-rounded`
+  is caught.
+
+The whole chain: 100 checkers and the four table generators in 1444 s. 1 of 104 failed: hudscore_check's harness, which links hudrender.c, did not define the two rates it now reads. With them it gives 1608 ops, 6184 lines, 0 differ, so 0 of 104 fail (`out/chain_13b2.txt`).
+
+### On Azahar
+
+The race on track 12, holding the gas, at Speed 100%
+(`out/azahar_13b2b`):
+
+- `console: New 3DS XL (model 4), New 3DS, speedup asked, memory type
+  6, grant 126976KB, heap 49152KB, linear 76420KB, core 1 limit 80%`.
+- 18 to 20 frames a second. **The draw is 45 of the 50 ms**, all of it
+  CPU:
+
+  | Stage | ms |
+  |---|---|
+  | cull (`scenery_stuff_scenery`) | 15 to 18 |
+  | envmap (the Z rects read back, the six cube views) | 10 to 13 |
+  | bottom screen | 5.3 |
+  | HUD and the trackview's tail | 4.7 to 5.4 |
+  | cars | 4.3 to 4.6 |
+  | scenery's list | 0.9 to 1.8 |
+  | sky | 0.8 |
+
+  The world's step takes 2 to 7 ms. Sound, the flow, the race's
+  coordinator, the cameras and the loads take 0.1 ms or less each.
+- citro3d's GPU time is 0.7 ms and its wait is 0. Azahar's GPU takes
+  almost no emulated time, so only the hardware can say what the GPU
+  costs.
+- After the track loads, linear has 33.6 MB free of 76: the race uses
+  about 43 MB of linear and 23 MB of heap.
+
+Azahar counts instructions, not a New 3DS's cycles at 804 MHz. So the
+proportions are what count, not the milliseconds.
+
+### Next
+
+- **13b-3, New 3DS mode in full** (CONTINUE.md). `app.rsf` already asks
+  for 178 MB, 804 MHz, the L2 cache and core 2. What is left:
+  - confirm at runtime that the speedup takes;
+  - size the heap from the grant;
+  - move work to core 2 only where the profile says so. The profile
+    puts nothing worth moving outside the draw.
+- **13b-4** starts with the cull and the envmap.

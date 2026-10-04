@@ -67,6 +67,7 @@
 #include "characterinfo.h"
 #include "collision.h"
 #include "collisionbody.h"
+#include "edisplay.h"
 #include "eenvmap.h"
 #include "elight.h"
 #include "emath.h"
@@ -76,6 +77,7 @@
 #include "gamedata.h"
 #include "fesound.h"
 #include "flailer.h"
+#include "frameprof.h"
 #include "fred.h"
 #include "fredrace.h"
 #include "gameflow.h"
@@ -97,6 +99,7 @@
 #include "jukebox.h"
 #include "songmon.h"
 #include "avimovie.h"
+#include "mainloop.h"
 #include "mellowmover.h"
 #include "physcomp.h"
 #include "physicscar.h"
@@ -135,6 +138,13 @@
 #include "uirender.h"
 #include "wheel.h"
 #include "world.h"
+
+// The race's frame rates on the HUD (step 13b-2): Player::DisplayDebugInfo's
+// "C: %dfps" and "G: %dfps", with the car's position and odometer, which
+// retail shows with its pause debug menu's "Show debug Info"
+// (DisplayPlayerDebugInfo). 1 shows them, on the top screen's left; the
+// build the user plays has 0.
+#define SHOW_FRAME_RATES 0
 
 // The top screen's render target is built here rather than by
 // C2D_CreateScreenTarget, which asks C3D_RenderTargetCreate for no depth
@@ -1886,6 +1896,36 @@ static void hookStartQuickRace(void* user, const BQuickRace* p)
 
 // ---------------------------------------------------------------- 3DS glue
 
+// What the console gave (step 13b-2): its model, whether it is a New 3DS
+// and so asked for the speedup, the memory type, the grant, the heap and
+// core 1's limit.
+static void logConsole(void)
+{
+    static const char* const kModels[] = {
+        "3DS", "3DS XL", "New 3DS", "2DS", "New 3DS XL", "New 2DS XL",
+    };
+    u8   model = 0xff;
+    bool isNew3DS = false;
+    u32  core1 = 0;
+    bool cfg = R_SUCCEEDED(cfguInit());
+
+    if (cfg) {
+        if (R_FAILED(CFGU_GetSystemModel(&model))) model = 0xff;
+        cfguExit();
+    }
+    (void)APT_CheckNew3DS(&isNew3DS);
+    if (R_FAILED(APT_GetAppCpuTimeLimit(&core1))) core1 = 0;
+    logPrintf("console: %s (model %d), %s, speedup %s, memory type %lu, "
+              "grant %luKB, heap %luKB, linear %luKB, core 1 limit %lu%%\n",
+              model < 6 ? kModels[model] : "unknown", (int)model,
+              isNew3DS ? "New 3DS" : "Old 3DS", isNew3DS ? "asked" : "not asked",
+              (unsigned long)osGetApplicationMemType(),
+              (unsigned long)(g_heapInfo.commitMax / 1024),
+              (unsigned long)(g_heapInfo.heapGot / 1024),
+              (unsigned long)(g_heapInfo.linearGot / 1024),
+              (unsigned long)core1);
+}
+
 static void initPlatformPerf(void)
 {
     bool isNew3DS = false;
@@ -2479,23 +2519,29 @@ static void raceFrame(void)
     // it with the coordinator. ReplayManager's BeginFrame and EndFrame are
     // not ported; the stand-in is never playing back, so the step is the
     // world's own.
+    // MainLoopTiming's ticks (mainloop.h) are stamped where MainLoop
+    // stamps them: after the events, and after the world's step.
     w = pCurrentWorld;
     if (is_game_flow_paused() || w == NULL) {
         PrepareWorldTimestep(0.0f);
         GenerateJoyEvents();
+        MainLoopTiming.GenerateJoyEvents = bGetTicker();
     } else {
         world_update_world_paused(w);
         if (world_is_world_paused(w)) {
             PrepareWorldTimestep(0.0f);
             GenerateJoyEvents();
+            MainLoopTiming.GenerateJoyEvents = bGetTicker();
         } else {
             float step = world_get_timestep(w);
 
             PrepareWorldTimestep(step);
             GenerateJoyEvents();
+            MainLoopTiming.GenerateJoyEvents = bGetTicker();
             world_do_timestep(w, step);
         }
     }
+    MainLoopTiming.WorldDoTimestep = bGetTicker();
 
     // MenuSystemTick is bgf_frame's. ReplayScreen::Update and
     // UpdateCameraCoordinators (0x00199bd0) are not ported: no coordinator
@@ -2503,6 +2549,7 @@ static void raceFrame(void)
     // UpdatePortRumblers has no rumble to drive.
     update_players_non_game_state();
     update_camera_movers();
+    MainLoopTiming.UpdateCameraMovers = bGetTicker();
     update_camera_shakers();
     logRaceState();
 }
@@ -2856,6 +2903,7 @@ int main(int argc, char** argv)
               (unsigned long)(g_heapInfo.heapAsked / 1024),
               (unsigned long)(g_heapInfo.heapGot / 1024),
               (unsigned long)(g_heapInfo.linearGot / 1024));
+    logConsole();
 
     if (!gamedata_init()) {
         fatalConsole();
@@ -3304,8 +3352,13 @@ int main(int argc, char** argv)
     uint32_t frameTicker = bGetTicker();
     // The top screen's blank count when the last frame's sync returned.
     u32      lastSync = 0;
+    // The race's phases, a line a second (frameprof.h).
+    FrameProf prof;
+    frameprof_reset(&prof);
+    DisplayPlayerDebugInfo = SHOW_FRAME_RATES;
 
     while (aptMainLoop()) {
+        MainLoopTiming.StartTime = bGetTicker();
         hidScanInput();
         u32 kDown = hidKeysDown();
 
@@ -3320,6 +3373,7 @@ int main(int argc, char** argv)
         jb_music_update(&g_jukebox, Fred.AudioOptionsScreenData,
                         WorldTimeElapsed);
         if (soundUp) jbstream_poll(&g_jukebox.jukebox);
+        MainLoopTiming.UpdateSound = bGetTicker();
 
         // MainLoop's clocks (0x0012f378). It prepares the real step at the
         // top of a frame from the ticker (0x0012f43c), and the world's from
@@ -3447,7 +3501,14 @@ int main(int argc, char** argv)
             }
 
             // MainLoop: one pass of the flow per frame, by the real step.
+            // bgf_frame is the flow's service and the menus' tick both.
+            // With no race the race's three stamps are the same tick.
             bgf_frame(&g_flow, RealTimeElapsed);
+            MainLoopTiming.ServiceGameFlow = bGetTicker();
+            MainLoopTiming.MenuSystemTick = MainLoopTiming.ServiceGameFlow;
+            MainLoopTiming.GenerateJoyEvents = MainLoopTiming.ServiceGameFlow;
+            MainLoopTiming.WorldDoTimestep = MainLoopTiming.ServiceGameFlow;
+            MainLoopTiming.UpdateCameraMovers = MainLoopTiming.ServiceGameFlow;
             if (raceUp && pRaceCoordinator != NULL) {
                 raceFrame();
                 (void)raceAttachTrack();
@@ -3491,10 +3552,26 @@ int main(int argc, char** argv)
             // none has come since the last frame's, one more wait first.
             // A slower frame is not held back further. The frontend and
             // the movies stay at 60.
+            //
+            // C3D_FRAME_SYNCDRAW's sync is made here, so the wait for the
+            // blank and C3D_FrameBegin's wait for the GPU are timed apart
+            // (step 13b-2). The second is eWaitUntilRenderingDone's, which
+            // eDisplayFrame times into WaitBufferSwapTime. VifTime is the
+            // GPU's last frame, on the same scale (frame-profiler.md).
+            uint32_t syncTick = bGetTicker();
             if (g_track.attached && C3D_FrameCounter(0) == lastSync)
                 C3D_FrameSync();
-            C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+            C3D_FrameSync();
+            uint32_t gpuTick = bGetTicker();
+            C3D_FrameBegin(0);
+            uint32_t drawTick = bGetTicker();
+            frameprof_begin_draw(syncTick, gpuTick, drawTick);
             lastSync = C3D_FrameCounter(0);
+            WaitBufferSwapTime = (int32_t)bGetFixTickerDifference(gpuTick,
+                                                                  drawTick);
+            VifTime = (int32_t)bGetFixTickerDifference(
+                0, (uint32_t)(C3D_GetDrawingTime()
+                              * (float)(BTICKER_RATE_HZ / 1000u)));
             if (g_track.attached) {
                 // eDisplayFrame: the race's view, then the Flailer screens
                 // over it. The sun's Z rects are read first, from the last
@@ -3503,6 +3580,7 @@ int main(int argc, char** argv)
 
                 trackview_read_depth(&g_track, top);
                 trackview_draw_envmap(&g_track);
+                FRAMEPROF_STAMP(FRAMEPROF_ENVMAP);
                 C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
                                       __builtin_bswap32(sky), 0);
                 C3D_FrameDrawOn(top);
@@ -3514,6 +3592,7 @@ int main(int argc, char** argv)
             }
             C2D_SceneBegin(top);
             uirender_draw_visible(&ui, 1.0f);
+            FRAMEPROF_STAMP(FRAMEPROF_HUD);
             C2D_TargetClear(g_bot, BOT_BACK);
             C2D_SceneBegin(g_bot);
             // In a race the bottom screen is the HUD's other half
@@ -3546,11 +3625,31 @@ int main(int argc, char** argv)
                 drawBotPanel(&ui, title, body, fade,
                              "A select   B back   START go   SELECT viewer");
             }
+            FRAMEPROF_STAMP(FRAMEPROF_BOTTOM);
             C3D_FrameEnd(0);
+            MainLoopTiming.DisplayFrame = bGetTicker();
             // MainLoop's ServiceResourceLoading, after eDisplayFrame: the
             // resource system's, then the frontend's bundles (bootQueue).
             (void)service_resource_loading();
             bootServiceLoads(&g_boot);
+            MainLoopTiming.ServiceFileSystem = bGetTicker();
+
+            // MainLoop's end (0x0012f664): the last tick, then
+            // CalculateFrameRate and MaybePrintTiming. The race's phases go
+            // to the log a second at a time.
+            MainLoopTiming.LimitFrameRate = bGetTicker();
+            CalculateFrameRate();
+            MaybePrintTiming();
+            if (g_track.attached) {
+                char line[512];
+
+                frameprof_add(&prof, &MainLoopTiming, C3D_GetProcessingTime(),
+                              C3D_GetDrawingTime());
+                if (frameprof_line(&prof, line, sizeof line))
+                    logLine("%s", line);
+            } else {
+                frameprof_reset(&prof);
+            }
             continue;
         }
 

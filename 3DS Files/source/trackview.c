@@ -22,6 +22,7 @@
 #include "esolid.h"
 #include "eview.h"
 #include "eviewmatrix.h"
+#include "frameprof.h"
 #include "gamedata.h"
 #include "scenery.h"
 #include "sky.h"
@@ -2632,9 +2633,11 @@ void trackview_draw(TrackView* v)
     draw_deferred(v, true);
     georender_set_zwrite(true);
     v->skyDrawn    = v->drawn;
+    FRAMEPROF_STAMP(FRAMEPROF_SKY);
 
     georender_set_fog(s_fogOn ? &s_fog : NULL, s_fogColour);
     scenery_stuff_scenery(&v->cull, view);
+    FRAMEPROF_STAMP(FRAMEPROF_CULL);
 
     // Then StuffSun (0x00112ecc), after DrawNisObjects, which has nothing
     // to draw here. Its quads draw at once; see render_epoly. Then the
@@ -2647,6 +2650,7 @@ void trackview_draw(TrackView* v)
     s_quadTarget = NULL;
     georender_set_fog(s_fogOn ? &s_fog : NULL, s_fogColour);
     draw_deferred(v, false);
+    FRAMEPROF_STAMP(FRAMEPROF_SCENERY);
 
     // The cars' chain (0x0011363c): RenderCars for the view, and its
     // AttachSolidPolys. Then AttachAlphaPolys (0x001137cc) draws the
@@ -2655,6 +2659,7 @@ void trackview_draw(TrackView* v)
     render_cars(view);
     draw_deferred(v, false);
     draw_deferred(v, true);
+    FRAMEPROF_STAMP(FRAMEPROF_CARS);
     if (v->listFrame) {
         v->probePending = true;
     }

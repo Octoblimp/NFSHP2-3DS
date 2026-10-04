@@ -83,6 +83,8 @@ Race           *pCurrentRace;
 RaceCoordinator *pRaceCoordinator;
 World          *pCurrentWorld;
 int32_t         RealTimeFrames;
+float           PreviousCpuFrameRate;   // mainloop.c's
+float           PreviousGpuFrameRate;
 int32_t         WorldTimer;
 int32_t         WorldTimeFrames;
 int32_t         WorldLoopCounter;
@@ -1053,8 +1055,8 @@ static void set_global(char **a, int n)
     else if (!strcmp(k, "smf")) SpeedMinFactor = fnum(a[1]);
     else if (!strcmp(k, "tach")) TachTestRpm = fnum(a[1]);
     else if (!strcmp(k, "debug")) DisplayPlayerDebugInfo = (int32_t)v;
-    else if (!strcmp(k, "cpu")) DebugCpuFps = fnum(a[1]);
-    else if (!strcmp(k, "gpu")) DebugGpuFps = fnum(a[1]);
+    else if (!strcmp(k, "cpu")) PreviousCpuFrameRate = fnum(a[1]);
+    else if (!strcmp(k, "gpu")) PreviousGpuFrameRate = fnum(a[1]);
     else if (!strcmp(k, "lang")) language = (int32_t)v;
     else if (!strcmp(k, "zone")) zone = (int32_t)v;
     else if (!strcmp(k, "lapx")) lapExact = fnum(a[1]);

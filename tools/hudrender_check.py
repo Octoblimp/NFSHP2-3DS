@@ -1072,8 +1072,8 @@ MUTATIONS = [
     M("debug-km-scale", "car->State.Odometer * 0.001f",
       "car->State.Odometer * 0.01f"),
     M("debug-pos-places", '"%.0f %.0f %.0f s%d"', '"%.1f %.0f %.0f s%d"'),
-    M("debug-fps-rounded", '"C: %dfps", ee_trunc_w(DebugCpuFps)',
-      '"C: %dfps", (int32_t)(DebugCpuFps + 0.5f)'),
+    M("debug-fps-rounded", '"C: %dfps", ee_trunc_w(PreviousCpuFrameRate)',
+      '"C: %dfps", (int32_t)(PreviousCpuFrameRate + 0.5f)'),
 
     # The gauges.
     M("needle-span-wrong-way", "(360.0f - a0) + a1;", "(360.0f - a1) + a0;"),

@@ -103,10 +103,6 @@ extern float   SpeedMinFactor;          // gp-20912  0.7
 extern int32_t LiveUpdateSplitTimeRate; // gp-20944  0
 extern float   TachTestRpm;             // gp-18380  100 means the car's
 extern int32_t DisplayPlayerDebugInfo;  // gp-20700  0
-// The two frame rates DisplayDebugInfo prints, 0x0032fe28 and 0x0032fe2c;
-// the port's names. Nothing writes them.
-extern float   DebugCpuFps;
-extern float   DebugGpuFps;
 
 // ----------------------------------------------------------------- seams
 //

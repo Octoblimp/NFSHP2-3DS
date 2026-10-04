@@ -317,7 +317,9 @@ DisplayDebugInfo runs every frame.
 2. It writes their visibility byte directly from `DisplayPlayerDebugInfo`
    (gp-20700).
 3. When that is set, it prints:
-   - `"C: %dfps"` and `"G: %dfps"` of the two frame rates;
+   - `"C: %dfps"` and `"G: %dfps"` of CalculateFrameRate's kept rates,
+     PreviousCpuFrameRate and PreviousGpuFrameRate (gp-23240 and
+     gp-23236, `mainloop.c`; `frame-profiler.md`);
    - `"%.0f %.0f %.0f s%d"` of the car's position and the zone;
    - `"%f km"` of the odometer.
 

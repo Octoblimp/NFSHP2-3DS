@@ -16,6 +16,7 @@
 #include "drivetarget.h"
 #include "eefpu.h"
 #include "flailer.h"
+#include "mainloop.h"
 #include "player.h"
 #include "playerhud.h"
 #include "playerinit.h"
@@ -32,8 +33,6 @@ float   SpeedMinFactor          = 0.7f;
 int32_t LiveUpdateSplitTimeRate;
 float   TachTestRpm             = 100.0f;
 int32_t DisplayPlayerDebugInfo;
-float   DebugCpuFps;
-float   DebugGpuFps;
 
 const char *(*gHudTranslateFn)(int32_t id);
 void (*gHudDoAnimationsFn)(struct Player *p);
@@ -329,9 +328,9 @@ void player_display_debug_info(struct Player *p)
     zone = scenery_get_current_zone_number();
     car = p->MyCar;
     km = car != NULL ? car->State.Odometer * 0.001f : 0.0f;
-    b_snprintf(buf, sizeof buf, "C: %dfps", ee_trunc_w(DebugCpuFps));
+    b_snprintf(buf, sizeof buf, "C: %dfps", ee_trunc_w(PreviousCpuFrameRate));
     set_string(p->pFlailerCFPSString, buf);
-    b_snprintf(buf, sizeof buf, "G: %dfps", ee_trunc_w(DebugGpuFps));
+    b_snprintf(buf, sizeof buf, "G: %dfps", ee_trunc_w(PreviousGpuFrameRate));
     set_string(p->pFlailerGFPSString, buf);
     if (car != NULL) {
         b_snprintf(buf, sizeof buf, "%.0f %.0f %.0f s%d",

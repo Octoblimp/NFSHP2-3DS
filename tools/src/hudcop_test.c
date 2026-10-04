@@ -78,6 +78,8 @@ Race           *pCurrentRace;
 RaceCoordinator *pRaceCoordinator;
 World          *pCurrentWorld;
 int32_t         RealTimeFrames;
+float           PreviousCpuFrameRate;   // mainloop.c's
+float           PreviousGpuFrameRate;
 int32_t         RealTimer;
 int32_t         WorldTimer;
 int32_t         WorldTimeFrames;
