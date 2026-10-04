@@ -185,31 +185,59 @@ typedef struct {
 
 // Batch `b` of `mesh` with its texture's pass, as georender_draw_mask draws
 // it, but with the colour the lighter makes when `L->lit`, and then, when
-// `L->env` and there is an environment map, the strip again with the map:
-// added under the fresnel's alpha, or for a gloss map under the frame's,
-// which the first pass left there.
+// `L->env` and the sphere map has been folded, the strip again with the
+// map: added under the fresnel's alpha, or for a gloss map under the
+// frame's, which the first pass left there.
 void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
                         int numTextures, int b, const GeoLighting* L);
 
 // --------------------------------------------------- the environment map
 
 // The map the environment passes read. Retail's eEnvMap draws six views
-// round the car into render targets 8 to 13 and eCreateEnvMapPrims
-// (0x00118810) folds them into a sphere map, which the VU1 reads by the
-// reflection. The PICA reads a cube map by the reflection itself, so here
-// the six views draw straight into a cube's faces, `size` on a side, in the
-// space the environment pass turns the reflection into; see eenvmap.h.
-bool georender_envmap_init(int size);
+// round the car into render targets 8 to 13, and eCreateEnvMapPrims
+// (0x00118810) folds them into a sphere map on target 14, which the VU1
+// reads by the reflection. Here the six views draw into a cube's faces,
+// `size` on a side, in the space the environment pass turns the reflection
+// into (see eenvmap.h), and the fold reads the cube by direction instead of
+// each view's target by its u and v. Both are 16 bits a texel, 5551, as
+// retail's PSMCT16 targets are. The sphere map is `mapSize` on a side.
+//
+// `fold` is the fold's triangles, GEO_FOLD_GRID_VERTS a grid, in the order
+// of the sample table's ten grids (eenvmap.h): each vertex where it lands
+// on the map, in clip space, and the direction the cube is read at.
+#define GEO_FOLD_GRIDS      10
+#define GEO_FOLD_GRID_VERTS 150
 
-// Face `face` of the map, +X to -Z as GPU_TEXFACE counts them, cleared to
-// `clear` (red in the top byte) and its depth to the far plane's, and with
-// `draw` bound to be drawn on, with a 90 degree projection. Call it between
-// C3D_FrameBegin and the top screen's C3D_FrameDrawOn.
+typedef struct {
+    float pos[2];
+    float dir[3];
+} GeoFoldVertex;
+
+bool georender_envmap_init(int size, int mapSize, const GeoFoldVertex* fold);
+
+// Face `face` of the cube, +X to -Z as GPU_TEXFACE counts them, cleared to
+// `clear` (red in the top byte, as RGBA8; it is cut to 5551 here) and its
+// depth to the far plane's, and with `draw` bound to be drawn on, with a
+// 90 degree projection. Call it between C3D_FrameBegin and the top
+// screen's C3D_FrameDrawOn.
 void georender_envmap_face(int face, uint32_t clear, bool draw);
 
-// Whether face `face` has been cleared or drawn, and whether all six have,
-// which the environment passes wait for.
+// Whether face `face` has been cleared or drawn.
 bool georender_envmap_face_done(int face);
+
+// eCreateEnvMapPrims: the grids of the views in `views` (bit i for view
+// i, as eEnvMap counts them) folded into the sphere map. CreateEnvMap
+// (0x00118150) draws each view's grid but face 2's, and CreateBackEnvMap
+// (0x00118498) face 2's four back grids. Each strip is RGBAQ (96, 96, 96,
+// 64) under the target's texel, modulated, and ALPHA_1 0x44 blends it over
+// what the map held: half the view's texel at 0.75, and half the map. The
+// map is cleared once, when it is first folded, and never again; retail
+// never clears target 14. Call it after the faces and before the top
+// screen's C3D_FrameDrawOn.
+void georender_envmap_fold(unsigned views);
+
+// Whether the sphere map has been folded, which the environment passes
+// wait for.
 bool georender_envmap_ready(void);
 
 // eSetZWriteState(int), 0x001029c0: with it off, nothing drawn writes the
@@ -217,11 +245,36 @@ bool georender_envmap_ready(void);
 // off for the sky. It starts on.
 void georender_set_zwrite(bool on);
 
-// The fog the draws after it take: the PICA's, by `lut` and in `colour`
-// (red in the low byte), or none for a NULL `lut`. The blends that add to
-// the frame or take from it fog to black instead; see set_blend. The LUT
-// is uploaded when it is bound, so one that changes is bound again.
-void georender_set_fog(C3D_FogLut* lut, uint32_t colour);
+// ------------------------------------------------------------------ the fog
+
+// The fog's fraction of the colour kept, by the view's depth u = (far - d)
+// / (far - near), 0 at the far plane and 1 at the near: GEO_FOG_STEPS
+// steps, the fraction at each step's start and the last's end, and
+// straight between, as the PICA's own fog lookup has it. It is a texture
+// of GEO_FOG_TEX_W by 8, A8, which texture unit 1 reads at an s each
+// vertex hands over, so the fog does not ride on the depth buffer. The
+// PICA's fog reads the depth the buffer is given, and its W-buffer, which
+// that wants, is too coarse for a plate on a car's body.
+#define GEO_FOG_STEPS 128
+#define GEO_FOG_TEX_W 256
+
+typedef struct {
+    C3D_Tex tex;
+} GeoFog;
+
+// Fills `fog` with `keep`, its texture made the first time and kept for
+// good. Call it after C3D_FrameBegin, which waits for the GPU to be done
+// with the last frame, and before the draws that take it. False when there
+// is no memory.
+bool georender_fog_fill(GeoFog* fog, const float keep[GEO_FOG_STEPS + 1]);
+
+// The view's near and far planes, from which the draws find u.
+void georender_set_depth_range(float near, float far);
+
+// The fog the draws after it take: `fog` in `colour` (red in the low byte),
+// or none for NULL. The blends that add to the frame or take from it fog
+// to black instead; see set_blend.
+void georender_set_fog(const GeoFog* fog, uint32_t colour);
 
 // ------------------------------------------------------- the screen quads
 
@@ -232,14 +285,14 @@ void georender_set_fog(C3D_FogLut* lut, uint32_t colour);
 // drawn as a strip in the order given -- ePoly::Render's, for
 // trackview.c's render_epoly. The texture modulates the vertex colour on
 // the GS's scale, where 0x80 is 1.0; `blend` is a GeoBlend; the alpha test
-// is the main target's. With `depthTest` the quad draws where its depth,
-// which the caller's depth map gives, is GEQUAL to the buffer's; without,
-// everywhere. It never writes the depth. The vertices go into a ring on
+// is the main target's. With a `depth` of 0 or more, the Z-buffer's, the
+// quad draws where that is GEQUAL to the buffer's; with -1, everywhere.
+// It never writes the depth. The vertices go into a ring on
 // the linear heap, which georender_quads_rewind starts again once the GPU
 // is done with the last frame. False when the ring is full or there is no
 // texture.
 bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
-                         uint8_t blend, bool depthTest);
+                         uint8_t blend, float depth);
 // The same for a Flailer poly over the HUD, on a screen `width` by
 // `height`, citro2d's mapping: blended as citro2d blends, with neither
 // the alpha test nor the depth test, as the rest of the HUD draws. The
@@ -247,5 +300,20 @@ bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
 bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                              float width, float height);
 void georender_quads_rewind(void);
+
+// ------------------------------------------------------------- the strips
+
+// How many strip vertices a frame can draw, in a ring of their own that
+// georender_quads_rewind starts again with the quads'.
+#define GEO_STRIP_RING 4096
+
+// A strip eBeginStrip (retail 0x00110488) built: `n` vertices in a
+// model's space, drawn as a triangle strip with the camera
+// georender_set_camera last gave. The colour, alpha too, is the GS's,
+// where 0x80 is 1.0, and the texture modulates it; the pass is the
+// texture's, with the main target's tests, as georender_draw_mask draws
+// a batch. False when the ring is full, or for no texture.
+bool georender_draw_strip(const GeoRenderVertex* v, int n,
+                          const GeoTexture* gt);
 
 #endif

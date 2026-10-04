@@ -31,6 +31,7 @@
 .fvec powParams         ; p, the fast log2 of the maximum, 0.1, CBVMix / 255
 .fvec envCol[3]         ; EnvMapMatrix's columns, x and z negated
 .fvec fresnel           ; FresnelMid / 128, FresnelHalf / 128, 128 / 255
+.fvec fogRow            ; the fog's distance, as geosolid.v.pica has it
 
 ; The environment pass instead of the strip's own, and in it the lit colour
 ; under the frame's alpha (a gloss map's strip) rather than grey under the
@@ -51,6 +52,7 @@
 .out outtex texcoord0.st
 .out -      texcoord0w outtex.p
 .out outclr color
+.out outfog texcoord1
 
 .entry vmain
 .proc vmain
@@ -68,6 +70,8 @@
     dp4 outpos.y, projection[1], r1
     dp4 outpos.z, projection[2], r1
     dp4 outpos.w, projection[3], r1
+    dp4 outfog.x, fogRow, r1
+    mov outfog.y, consts.w
 
     ; N, and R from the eye.
     mul r2.xyz, scales.xxx, innrm
@@ -148,16 +152,22 @@
     mul r15.w,   scales.z,   r13.w
 
     ifu envPass
-        ; R into the environment map's space, where the VU1 takes the
-        ; sphere map's coordinates from it, 0.5 + 0.5 r.xy / |r + (0, 0, 1)|.
-        ; The port's map is a cube in the same space but mirrored in x, as
-        ; its faces can only be drawn (see eenvmap.h), so R is read with
-        ; its x negated.
+        ; R into the environment map's space, and the sphere map's
+        ; coordinates from it as the VU1 takes them,
+        ; 0.5 + 0.5 r.xy / |r + (0, 0, 1)|. The fold put each point of the
+        ; map where ComputeReflectionST puts its direction, so this reads
+        ; it back.
         dp3 r8.x, envCol[0], r3
         dp3 r8.y, envCol[1], r3
         dp3 r8.z, envCol[2], r3
-        mov outtex.x,  -r8.x
-        mov outtex.yz, r8.yz
+        mov r9.xy,  r8.xy
+        add r9.z,   ones, r8.z
+        dp3 r10.x,  r9, r9
+        rsq r10.x,  r10.x
+        mul r10.x,  consts.w, r10.x
+        mul r11.xy, r10.xx, r8.xy
+        add outtex.xy, consts.ww, r11.xy
+        mov outtex.z,  zeros
 
         ifu glossEnv
             mov outclr, r15

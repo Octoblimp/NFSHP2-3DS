@@ -17,7 +17,9 @@ The port is in `3DS Files/source/`:
   query and the view's cache;
 - `efog.{c,h}`: the fog's globals, `fpow`, `RemapLinearIntoClut8`, the
   palettes and the two attaches, with the PICA's side of the fog;
-- `trackview.c`: the PICA's fog, from the palette the image makes.
+- `trackview.c`: the fog's fractions, from the palette the image makes;
+- `georender.c`: the fog laid on, through texture unit 1 and the last
+  combiner stage.
 
 `tools/weather_check.py` cross-checks `weatherman.c` and `efog.c`
 against `tools/src/weather_test.c`.
@@ -210,28 +212,48 @@ B, C, D and FIX, and six floats that nothing in the slice reads:
 ## On the 3DS
 
 The PICA has no pass that reads its own depth buffer back as a texture.
-So `trackview.c` makes the palette before the frame, and lays the fog on
-with the PICA's fog as each thing is drawn:
+So `trackview.c` makes the palette before the frame, and `georender.c`
+lays the fog on as each thing is drawn:
 
-- The depth map becomes a W-buffer, `C3D_DepthMap(false, -1 / near, 0)`,
-  so the depth the PICA's fog looks up is the view's own:
-  u = (far - d) / (far - near). The depth tests are the ones they were.
+- The fog goes by the view's depth u = (far - d) / (far - near), 1 at the
+  near plane and 0 at the far.
 - For u, the GS's Z is `zmin + (zmax - zmin) * near * u / (far - u *
   (far - near))`, from ZMin and ZMax. `efog_depth_alpha` puts that Z
   through the image's own depth palettes. That alpha indexes the fog
   palette, and the fraction of the frame that `ALPHA_1` keeps is
   `efog_keep`'s: `1 - a / 128` for mode 0's blend and `a / 128` for mode
   1's.
-- The fog lookup has 128 entries, each with its step to the next, with
-  that fraction as the fragment's share. The fog's colour is the
-  palette's one colour. A palette with more than one colour where its
-  alpha is not 0, or mode 1's with any colour but black, is not the
-  PICA's fog: it is left off and counted.
-- The sky and the sun get a lookup that is constant at Z = 0, since the
-  dome leaves the Z as the clear did. The additive and subtractive blends
-  get a fog colour of 0.
-- After the track, the depth map goes back to the Z-buffer's and the fog
-  goes off.
+- The fraction is taken at 129 steps, u = j / 128, and is straight
+  between them. The fog's colour is the palette's one colour. A palette
+  with more than one colour where its alpha is not 0, or mode 1's with
+  any colour but black, is not a colour by a fraction: it is left off and
+  counted.
+- The sky and the sun get fractions that are constant at Z = 0, since
+  the dome leaves the Z as the clear did. The additive and subtractive
+  blends get a fog colour of 0.
+- After the track, the fog goes off.
+
+The fractions are a 256 by 8 A8 texture, step j in column j and the last
+step's past it, every row alike. Texture unit 1 reads it bilinear and
+clamped, so between two columns' middles it is straight, as the steps
+are. Each vertex hands over its s in texcoord1: its view-space position
+dotted with the projection's w row, scaled and offset (`fogRow` in
+`geosolid` and `geolit`), so s = (128 u + 0.5) / 256 for its u. The
+texcoord is perspective-correct, so the s a fragment gets is its own
+depth's. The last combiner stage, 5, is `INTERPOLATE(previous, fog
+colour, texture 1's alpha)`: the colour by the fraction kept and the fog
+by the rest, with the alpha passed. A screen quad's s is a constant, from
+its depth.
+
+The PICA has a fog unit of its own, a 128-entry lookup by the fragment's
+depth, which the port used first. The depth it looks up is the one the
+depth buffer gets, so the fog wanted a W-buffer, `C3D_DepthMap(false, -1
+/ near, 0)`, whose depth is u. On the PICA that depth does not hold a
+decal to its surface: a car's licence plate, drawn over the body at the
+same depth, broke up into the body within a second of the race's start.
+The Z-buffer's depth, `near (far - d) / ((far - near) d)`, holds it. So
+the depth buffer is the Z-buffer's, citro3d's own map, and the fog goes
+by the texture.
 
 In Azahar, TRACKB12 logs these lines:
 

@@ -98,16 +98,15 @@ static eRenderTarget* s_quadTarget;     // the view StuffSun draws for
 static SunRect        s_sunRects[NUM_SUN_ZBUFFERS];
 static int            s_numSunRects;
 
-// The fog: the PICA's lookups for the view's palette, by depth, one for
-// the scenery and one for the sky and the sun; the colour; and the planes
-// the last frame's depth was between. See fog_attach.
-static C3D_FogLut s_fogLut;
-static C3D_FogLut s_skyFogLut;
+// The fog: its fractions for the view's palette, by depth, one for the
+// scenery and one for the sky and the sun; the colour; and the planes the
+// last frame's view was between. See fog_attach.
+static GeoFog     s_fog;
+static GeoFog     s_skyFog;
 static bool       s_fogOn;
 static uint32_t   s_fogColour;
 static float      s_depthNear = TRACK_NEAR;
 static float      s_depthFar  = TRACK_FAR;
-static float      s_depthScale;     // the W-buffer's, while the frame draws
 
 static void render_epoly(ePoly* p, TextureInfo* info, int flags);
 static void transfer_zbuffer_rect(uint8_t* dst, int x, int y, int w, int h);
@@ -702,9 +701,169 @@ static void defer(TrackView* v, int solid, int batch, const bMatrix4* lv,
     d->sorted = t->sorted;
     d->texUse = t->firstUse;
     d->seq    = v->deferredSeq++;
+    d->strip  = -1;
     v->numDeferred++;
     if (t->sorted) {
         v->deferredSorted++;
+    }
+}
+
+// ------------------------------------------------------------- the strips
+
+// The most vertices one strip takes here. exBeginStrip (0x00110848) takes
+// 96, and the shadows' strips are fewer.
+#define STRIP_MAX 128
+
+// The strip being built: eBeginStrip (0x00110488) lays out a VU1 packet
+// for `n` vertices, and eAddVertex (0x00110790), eAddColour (0x001107e0)
+// and eAddUV (0x001107f8) each fill their own area of it, with a count of
+// their own. The ex set (0x00110848 ..) keeps the same three in a table
+// and hands them to the e set at its end.
+static struct {
+    TrackTex*       tex;
+    bMatrix4        m;
+    int             n, nv, nc, nuv;
+    GeoRenderVertex v[STRIP_MAX];
+} s_strip;
+
+// eBeginStrip's packet comes from the frame memory, and 0 is none left;
+// here it is the view's strip store and its lists. A texture that would
+// not upload is no strip either.
+static int32_t strip_begin(void* texture, int32_t n, bMatrix4* m)
+{
+    TrackView* v = s_draw;
+    TrackTex*  t;
+
+    s_strip.tex = NULL;
+    if (v == NULL || texture == NULL || m == NULL || n < 0 || n > STRIP_MAX
+        || v->numStrips >= TRACKVIEW_MAX_STRIPS
+        || v->numStripVerts + n > TRACKVIEW_MAX_STRIP_VERTS
+        || v->numDeferred >= TRACKVIEW_MAX_DEFERRED) {
+        if (v != NULL) {
+            v->stripsDropped++;
+        }
+        return 0;
+    }
+    t = load_texture(v, (const TextureInfo*)texture);
+    if (t == NULL || !t->valid) {
+        return 0;
+    }
+    memset(s_strip.v, 0, (size_t)n * sizeof s_strip.v[0]);
+    s_strip.tex = t;
+    s_strip.m   = *m;
+    s_strip.n   = n;
+    s_strip.nv  = s_strip.nc = s_strip.nuv = 0;
+    return 1;
+}
+
+// exBeginStrip: at most 96. Its end cuts the strip into runs of as many
+// as one packet holds, each starting on the last two of the one before;
+// drawn whole, the triangles are the same.
+static int32_t ex_strip_begin(void* texture, int32_t n, bMatrix4* m)
+{
+    if (!(n < 97)) {
+        return 0;
+    }
+    return strip_begin(texture, n, m);
+}
+
+static void strip_add_vertex(const bVector3* p)
+{
+    if (s_strip.tex && s_strip.nv < s_strip.n) {
+        GeoRenderVertex* q = &s_strip.v[s_strip.nv++];
+
+        q->pos[0] = p->x;
+        q->pos[1] = p->y;
+        q->pos[2] = p->z;
+    }
+}
+
+// The GS's RGBA, red in the low byte.
+static void strip_add_colour(uint32_t c)
+{
+    if (s_strip.tex && s_strip.nc < s_strip.n) {
+        GeoRenderVertex* q = &s_strip.v[s_strip.nc++];
+
+        q->colour[0] = (uint8_t)c;
+        q->colour[1] = (uint8_t)(c >> 8);
+        q->colour[2] = (uint8_t)(c >> 16);
+        q->colour[3] = (uint8_t)(c >> 24);
+    }
+}
+
+static void strip_add_uv(float s, float t)
+{
+    if (s_strip.tex && s_strip.nuv < s_strip.n) {
+        GeoRenderVertex* q = &s_strip.v[s_strip.nuv++];
+
+        q->st[0] = s;
+        q->st[1] = t;
+    }
+}
+
+// eEndStrip (0x00110608) puts the packet on its texture's list, with the
+// strip's matrix, or on the alpha list when the texture has
+// ApplyAlphaSorting, keyed by the first vertex's z through the view's
+// WorldViewMatrix -- the vertex as it is, not through the strip's matrix.
+static void strip_end(void)
+{
+    TrackView*     v = s_draw;
+    TrackTex*      t = s_strip.tex;
+    TrackStrip*    s;
+    TrackDeferred* d;
+    bMatrix4       localView;
+    const float*   p;
+
+    s_strip.tex = NULL;
+    if (v == NULL || t == NULL) {
+        return;
+    }
+    note_use(v, t);
+    s        = &v->strips[v->numStrips];
+    s->tex   = t;
+    s->first = (uint16_t)v->numStripVerts;
+    s->count = (uint16_t)s_strip.n;
+    memcpy(&v->stripVerts[v->numStripVerts], s_strip.v,
+           (size_t)s_strip.n * sizeof s_strip.v[0]);
+    v->numStripVerts += s_strip.n;
+
+    d = &v->deferred[v->numDeferred++];
+    memset(d, 0, sizeof *d);
+    eMulMatrix(&localView, &s_strip.m, s_worldView);
+    to_c3d(&localView, &d->modelView);
+    p        = s_strip.v[0].pos;
+    d->depth = p[0] * s_worldView->v0.z + p[1] * s_worldView->v1.z
+             + p[2] * s_worldView->v2.z + s_worldView->v3.z;
+    d->order  = t->order;
+    d->sorted = t->sorted;
+    d->texUse = t->firstUse;
+    d->seq    = v->deferredSeq++;
+    d->strip  = (int16_t)v->numStrips++;
+    if (t->sorted) {
+        v->deferredSorted++;
+    }
+}
+
+static const eStripFns kStripFns = {
+    strip_begin, strip_add_vertex, strip_add_colour, strip_add_uv, strip_end,
+};
+static const eStripFns kExStripFns = {
+    ex_strip_begin, strip_add_vertex, strip_add_colour, strip_add_uv,
+    strip_end,
+};
+
+static void draw_strip(TrackView* v, const TrackDeferred* d)
+{
+    const TrackStrip* s = &v->strips[d->strip];
+    GeoTexture        gt;
+
+    gt.tex        = (C3D_Tex*)&s->tex->tex;
+    gt.uvScale[0] = s->tex->uvScale[0];
+    gt.uvScale[1] = s->tex->uvScale[1];
+    gt.pass       = s->tex->pass;
+    georender_set_camera(&s_proj, &d->modelView);
+    if (georender_draw_strip(&v->stripVerts[s->first], s->count, &gt)) {
+        v->stripsDrawn++;
     }
 }
 
@@ -1421,6 +1580,8 @@ bool trackview_load(TrackView* v)
     eDisableFixUpTables = 1;
     gEModelRenderFn = render_model;
     gEPolyRenderFn  = render_epoly;
+    gEStripFns      = kStripFns;
+    gExStripFns     = kExStripFns;
     gETransferZBufferRectFn = transfer_zbuffer_rect;
     v->chunkLen = count_chunks(v);
     load_chunks(v->data, (int32_t)v->chunkLen);
@@ -1467,6 +1628,8 @@ bool trackview_attach(TrackView* v, uint8_t* data, size_t len)
     }
     gEModelRenderFn = render_model;
     gEPolyRenderFn  = render_epoly;
+    gEStripFns      = kStripFns;
+    gExStripFns     = kExStripFns;
     gETransferZBufferRectFn = transfer_zbuffer_rect;
     v->chunkLen = count_chunks(v);
     bake_models(v);
@@ -1512,6 +1675,12 @@ void trackview_free(TrackView* v)
         }
         if (gEPolyRenderFn == render_epoly) {
             gEPolyRenderFn = NULL;
+        }
+        if (gEStripFns.Begin == strip_begin) {
+            memset(&gEStripFns, 0, sizeof gEStripFns);
+        }
+        if (gExStripFns.Begin == ex_strip_begin) {
+            memset(&gExStripFns, 0, sizeof gExStripFns);
         }
         if (gETransferZBufferRectFn == transfer_zbuffer_rect) {
             gETransferZBufferRectFn = NULL;
@@ -1645,7 +1814,7 @@ static void draw_deferred(TrackView* v, bool alpha)
           compare_deferred);
     for (i = 0; i < v->numDeferred; i++) {
         const TrackDeferred* d = &v->deferred[i];
-        TrackSolid*          r = &v->info[d->solid];
+        TrackSolid*          r;
 
         if (d->sorted && !alpha) {
             v->deferred[kept++] = *d;
@@ -1655,6 +1824,11 @@ static void draw_deferred(TrackView* v, bool alpha)
             v->cmdSkipped++;
             continue;
         }
+        if (d->strip >= 0) {
+            draw_strip(v, d);
+            continue;
+        }
+        r = &v->info[d->solid];
         georender_set_camera(&s_proj, &d->modelView);
         if (d->flags & 0x180) {
             draw_lit_batch(v, d->solid, d->batch, d->light, d->flags);
@@ -1785,16 +1959,9 @@ static void render_epoly(ePoly* p, TextureInfo* info, int flags)
     } else {
         blend = t->pass.blend;
     }
-    // The W-buffer's map gives every fragment of a screen quad the one
-    // depth; a scale of 0 and the offset put it where the Z says.
+    // Every fragment of a screen quad has the one depth, where its Z says.
     depth = depth_of_gs_z((float)ee_trunc_w(p->Vertices[0].z));
-    if (depth >= 0.0f) {
-        C3D_DepthMap(false, 0.0f, depth);
-    }
-    drawn = georender_draw_quad(q, &gt, blend, depth >= 0.0f);
-    if (depth >= 0.0f) {
-        C3D_DepthMap(false, s_depthScale, 0.0f);
-    }
+    drawn = georender_draw_quad(q, &gt, blend, depth);
     if (!drawn) {
         v->sunQuadsFailed++;
         return;
@@ -1846,19 +2013,25 @@ static uint32_t tiled_index(int x, int y)
     return ((by >> 3) * (240u / 8u) + (bx >> 3)) * 64u + m;
 }
 
-// The GS's Z for a depth u the PICA wrote. The PICA's is the W-buffer's,
-// the view's depth d as (far - d) / (far - near): 1 at the near plane, 0
-// at the far. The GS's is the hyperbola between the same two, near / d
-// taken to that 1 and 0, from ZMin to ZMax -- floats in [2, 4), whose
-// mantissas are the Z, 16 and 0x0ff000.
-static float gs_z_of(float u)
+// The GS's Z for a depth the PICA wrote. The PICA's is the Z-buffer's,
+// the view's depth d as near (far - d) / ((far - near) d): 1 at the near
+// plane, 0 at the far. The GS's is the same hyperbola from ZMin to ZMax --
+// floats in [2, 4), whose mantissas are the Z, 16 and 0x0ff000.
+static float gs_z_of_depth(float t)
 {
     const float zmin = (ZMin - 2.0f) * 4194304.0f;
     const float zmax = (ZMax - 2.0f) * 4194304.0f;
-    float       d    = s_depthFar - u * (s_depthFar - s_depthNear);
-    float       t    = d > 0.0f ? s_depthNear * u / d : 1.0f;
 
     return zmin + (zmax - zmin) * t;
+}
+
+// And for the fog's u, the view's depth as (far - d) / (far - near), whose
+// Z-buffer depth is near u / d.
+static float gs_z_of(float u)
+{
+    float d = s_depthFar - u * (s_depthFar - s_depthNear);
+
+    return gs_z_of_depth(d > 0.0f ? s_depthNear * u / d : 1.0f);
 }
 
 // The fog's palette is looked up by the Z as a PSMZ16S read gives it,
@@ -1881,12 +2054,13 @@ static uint32_t gs_z(uint32_t d24)
     if (d24 == 0) {
         return 0;
     }
-    return gs_z24(gs_z_of((float)d24 / 16777215.0f));
+    return gs_z24(gs_z_of_depth((float)d24 / 16777215.0f));
 }
 
-// gs_z_of backwards: the PICA's depth whose GS Z is g, or -1 for a Z at
-// or past the nearest the scenery reaches, which passes against anything.
-// A Z under the farthest is the depth 0, which only the clear has.
+// gs_z_of_depth backwards: the PICA's depth whose GS Z is g, or -1 for a
+// Z at or past the nearest the scenery reaches, which passes against
+// anything. A Z under the farthest is the depth 0, which only the clear
+// has.
 static float depth_of_gs_z(float g)
 {
     const float zmin = (ZMin - 2.0f) * 4194304.0f;
@@ -1896,40 +2070,35 @@ static float depth_of_gs_z(float g)
     if (!(t < 1.0f)) {
         return -1.0f;
     }
-    if (t <= 0.0f) {
-        return 0.0f;
-    }
-    return t * s_depthFar / (s_depthNear + t * (s_depthFar - s_depthNear));
+    return t <= 0.0f ? 0.0f : t;
 }
 
 // ------------------------------------------------------------------ the fog
 
-// A lookup of the PICA's fog: entry j for the depth j / 128, and its step
-// to the next. The fraction is efog_keep's for the GS's Z there, or for a
-// Z of 0 for the sky's -- the dome leaves the Z as the clear did, and the
-// sun draws where the dome shows.
-static void fog_lut(C3D_FogLut* lut, const uint32_t* palette,
-                    const FogModeInfo* mode, bool sky)
+// The fog's fractions: step j for the view's depth j / GEO_FOG_STEPS, as
+// u = (far - d) / (far - near). The fraction is efog_keep's for the GS's Z
+// there, or for a Z of 0 for the sky's -- the dome leaves the Z as the
+// clear did, and the sun draws where the dome shows. False when the fog's
+// texture could not be made.
+static bool fog_fill(GeoFog* fog, const uint32_t* palette,
+                     const FogModeInfo* mode, bool sky)
 {
-    float keep[129];
-    float data[256];
+    float keep[GEO_FOG_STEPS + 1];
     int   j;
 
-    for (j = 0; j <= 128; j++) {
-        uint16_t z = sky ? 0 : gs_z16(gs_z_of((float)j / 128.0f));
+    for (j = 0; j <= GEO_FOG_STEPS; j++) {
+        float    u = (float)j / (float)GEO_FOG_STEPS;
+        uint16_t z = sky ? 0 : gs_z16(gs_z_of(u));
 
         keep[j] = efog_keep(palette, mode, z);
     }
-    for (j = 0; j < 128; j++) {
-        data[j]       = keep[j];
-        data[128 + j] = keep[j + 1] - keep[j];
-    }
-    FogLut_FromArray(lut, data);
+    return georender_fog_fill(fog, keep);
 }
 
 // eAttachFog's seam, where the image builds the fog's sprite: the one
-// view's palette as the PICA's fog. A palette the PICA's fog cannot be
-// is left off, and counted.
+// view's palette as the fog's fractions. A palette the fog cannot be, a
+// colour by a fraction, is left off, and counted, as is one whose texture
+// could not be made.
 static void fog_attach(eView* view, const uint32_t* palette,
                        const FogModeInfo* mode)
 {
@@ -1948,8 +2117,11 @@ static void fog_attach(eView* view, const uint32_t* palette,
         v->fogUnfit++;
         return;
     }
-    fog_lut(&s_fogLut, palette, mode, false);
-    fog_lut(&s_skyFogLut, palette, mode, true);
+    if (!fog_fill(&s_fog, palette, mode, false)
+        || !fog_fill(&s_skyFog, palette, mode, true)) {
+        v->fogUnfit++;
+        return;
+    }
     s_fogColour = colour;
     s_fogOn     = true;
     for (k = 0; k < TRACKVIEW_FOG_SAMPLES; k++) {
@@ -1962,7 +2134,7 @@ static void fog_attach(eView* view, const uint32_t* palette,
 
 // eDisplayFrame's fog (0x00113420), which the PS2 lays over the frame once
 // it is drawn; see efog.h. Its palette depends on nothing drawn, so here
-// it is made first, and the PICA's fog lays it on as each thing is drawn.
+// it is made first, and georender lays it on as each thing is drawn.
 static void fog_frame(TrackView* v, eView* view)
 {
     const WeatherQuery* q = &CachedWeatherQueries[view->ID];
@@ -2118,10 +2290,77 @@ static void begin_view(TrackView* v)
     v->deferredSeq     = 0;
     v->deferredSorted  = 0;
     v->deferredDropped = 0;
+    v->numStrips       = 0;
+    v->numStripVerts   = 0;
     v->texUses         = 0;
     if (++v->frameStamp == 0) {
         v->frameStamp = 1;
     }
+}
+
+// A point of eCreateEnvMapPrims' strips (0x00118810) for the fold. On the
+// map, it is where the GS puts it: s and t across target 14's 256 pixels,
+// cut to a whole pixel as the strip's XYZ2 is, and moved half a pixel, as
+// the PICA takes a pixel's colour at its centre where the GS takes it at
+// its corner. The texel is the cube's, by the grid's direction mirrored as
+// the cube is (see eenvmap.h); a back grid's is face 2's at its u and v,
+// whose direction create_ref_sample_table's face 2 gives.
+static GeoFoldVertex fold_vertex(const EnvMapRefSample* e, int g)
+{
+    GeoFoldVertex o;
+    float         px = (float)(int)(e->s * 256.0f - 128.0f + 2048.0f)
+                       - 1920.0f;
+    float         py = (float)(int)(e->t * 256.0f - 128.0f + 2048.0f)
+                       - 1920.0f;
+
+    o.pos[0] = (px + 0.5f) / 128.0f - 1.0f;
+    o.pos[1] = 1.0f - (py + 0.5f) / 128.0f;
+    if (g < 6) {
+        o.dir[0] = -e->x;
+        o.dir[1] = e->y;
+        o.dir[2] = e->z;
+    } else {
+        o.dir[0] = -(1.0f - 2.0f * e->u);
+        o.dir[1] = 2.0f * e->v - 1.0f;
+        o.dir[2] = -1.0f;
+    }
+    return o;
+}
+
+// Each grid's 5 by 5 quads as two triangles each, in the strips' order.
+bool trackview_envmap_init(void)
+{
+    GeoFoldVertex* mesh = (GeoFoldVertex*)malloc(
+        GEO_FOLD_GRIDS * GEO_FOLD_GRID_VERTS * sizeof(GeoFoldVertex));
+    GeoFoldVertex* o    = mesh;
+    bool           ok;
+    int            g, r, c;
+
+    if (mesh == NULL) {
+        return false;
+    }
+    for (g = 0; g < GEO_FOLD_GRIDS; g++) {
+        EnvMapRefSample (*T)[ENVMAP_SAMPLE_SIDE] = EnvMapRefSampleTable[g];
+
+        for (r = 0; r < 5; r++) {
+            for (c = 0; c < 5; c++) {
+                GeoFoldVertex a = fold_vertex(&T[r][c], g);
+                GeoFoldVertex b = fold_vertex(&T[r + 1][c], g);
+                GeoFoldVertex d = fold_vertex(&T[r][c + 1], g);
+                GeoFoldVertex e = fold_vertex(&T[r + 1][c + 1], g);
+
+                *o++ = a;
+                *o++ = b;
+                *o++ = d;
+                *o++ = b;
+                *o++ = d;
+                *o++ = e;
+            }
+        }
+    }
+    ok = georender_envmap_init(64, 256, mesh);
+    free(mesh);
+    return ok;
 }
 
 // The environment views' share of eDisplayFrame: each active one's sky,
@@ -2129,13 +2368,14 @@ static void begin_view(TrackView* v)
 // and its scenery (0x00113168), with no fog. Retail does the views a pass
 // at a time with the players'; here each face is drawn whole before the
 // top screen is. The cars are not drawn into them -- RenderCars runs for
-// views 1 to 3 alone -- and eCreateEnvMapPrims' fold (0x00113594) is the
-// cube's own lookup. A face whose view is not active keeps what it last
-// drew, as retail's target does; one that has never drawn is cleared to
-// its target's grey, so the map is whole from the first frame.
+// views 1 to 3 alone. Then eCreateEnvMapPrims (0x00113594) folds the
+// views drawn into the sphere map. A face whose view is not active keeps
+// what it last drew, as retail's target does, and is not folded; one that
+// has never drawn is cleared to its target's grey.
 void trackview_draw_envmap(TrackView* v)
 {
-    int i;
+    unsigned views = 0;
+    int      i;
 
     if (!v->loaded || !FrameMemoryBuffer[0]) {
         return;
@@ -2177,8 +2417,6 @@ void trackview_draw_envmap(TrackView* v)
         Mtx_Persp(&s_proj, C3D_AngleFromDegrees(90.0f), 1.0f, view->NearZ,
                   view->FarZ, false);
         s_worldView  = view->WorldViewMatrix;
-        s_depthScale = -1.0f / view->NearZ;
-        C3D_DepthMap(false, s_depthScale, 0.0f);
         begin_view(v);
         drawn = v->drawn;
 
@@ -2192,9 +2430,11 @@ void trackview_draw_envmap(TrackView* v)
 
         v->envFaces++;
         v->envDrawn += v->drawn - drawn;
+        views |= 1u << i;
     }
     s_envFace = false;
     s_draw    = NULL;
+    georender_envmap_fold(views);
 }
 
 void trackview_draw(TrackView* v)
@@ -2227,31 +2467,30 @@ void trackview_draw(TrackView* v)
     v->drawnTris    = 0;
     v->drawnInPlace = 0;
     v->cmdSkipped   = 0;
+    v->stripsDrawn  = 0;
+    v->stripsDropped = 0;
     v->listFrame    = v->listPending;
     v->listPending  = false;
     if (v->listFrame) {
         v->drawList[0] = 0;
     }
     begin_view(v);
-    // The fog, and the W-buffer, whose depth the PICA's fog looks up: the
-    // view's own, from 1 at the near plane to 0 at the far, where the
-    // Z-buffer's was near / d to the same two. So the depth tests are
-    // the ones they were.
+    // The fog, which georender lays on by the view's depth between its
+    // planes. The depth buffer is the Z-buffer's.
     fog_frame(v, view);
-    s_depthScale = -1.0f / view->NearZ;
-    C3D_DepthMap(false, s_depthScale, 0.0f);
+    georender_set_depth_range(view->NearZ, view->FarZ);
 
     // eDisplayFrame's sky (0x00112a38 .. 0x00112b0c): the Z writes off,
     // StuffSky for the view, and what it put on the lists attached and
     // drawn before any of the scenery. Then the Z writes back on.
-    georender_set_fog(s_fogOn ? &s_skyFogLut : NULL, s_fogColour);
+    georender_set_fog(s_fogOn ? &s_skyFog : NULL, s_fogColour);
     georender_set_zwrite(false);
     StuffSky(view);
     draw_deferred(v, true);
     georender_set_zwrite(true);
     v->skyDrawn    = v->drawn;
 
-    georender_set_fog(s_fogOn ? &s_fogLut : NULL, s_fogColour);
+    georender_set_fog(s_fogOn ? &s_fog : NULL, s_fogColour);
     scenery_stuff_scenery(&v->cull, view);
 
     // Then StuffSun (0x00112ecc), after DrawNisObjects, which has nothing
@@ -2259,11 +2498,11 @@ void trackview_draw(TrackView* v)
     // scenery's chain ends with AttachSolidPolys alone (0x001134a4).
     v->sunQuads       = 0;
     v->sunQuadsFailed = 0;
-    georender_set_fog(s_fogOn ? &s_skyFogLut : NULL, s_fogColour);
+    georender_set_fog(s_fogOn ? &s_skyFog : NULL, s_fogColour);
     s_quadTarget = view->pRenderTarget0;
     StuffSun(view);
     s_quadTarget = NULL;
-    georender_set_fog(s_fogOn ? &s_fogLut : NULL, s_fogColour);
+    georender_set_fog(s_fogOn ? &s_fog : NULL, s_fogColour);
     draw_deferred(v, false);
 
     // The cars' chain (0x0011363c): RenderCars for the view, and its
@@ -2284,10 +2523,9 @@ void trackview_draw(TrackView* v)
     follow_flipbooks(v);
 
     // citro2d draws the bottom screen next and sets only what it needs:
-    // the alpha test is put back off and the blend back to its own, the
-    // fog off and the depth map back to the Z-buffer's.
+    // the alpha test is put back off and the blend back to its own, and
+    // the fog off.
     georender_set_fog(NULL, 0);
-    C3D_DepthMap(true, -1.0f, 0.0f);
     C3D_AlphaTest(false, GPU_ALWAYS, 0);
     C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA,
                    GPU_ONE_MINUS_SRC_ALPHA, GPU_SRC_ALPHA,

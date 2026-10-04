@@ -8,6 +8,7 @@
 #include <3ds.h>
 
 #include "georender.h"
+#include "geofold_shbin.h"
 #include "geolit_shbin.h"
 #include "geosolid_shbin.h"
 
@@ -20,11 +21,14 @@ static bool            s_ready;
 static bool            s_zwrite = true;
 
 // The fog georender_set_fog last gave, the blend set_blend last set, and
-// the colour last handed to the PICA for the two.
-static C3D_FogLut*     s_fogLut;
+// the colour last handed to the fog's stage for the two; and the planes
+// georender_set_depth_range gave, for the fog's distance.
+static const GeoFog*   s_fog;
 static uint32_t        s_fogColour;
 static uint8_t         s_blend = GEO_BLEND_NONE;
 static uint32_t        s_fogApplied;
+static float           s_fogNear = 1.0f;
+static float           s_fogFar  = 2.0f;
 
 static int s_uProjection = -1;
 static int s_uModelView  = -1;
@@ -32,6 +36,7 @@ static int s_uLightVec   = -1;
 static int s_uLightClr   = -1;
 static int s_uAmbient    = -1;
 static int s_uUvScale    = -1;
+static int s_uFogRow     = -1;
 
 static C3D_Mtx s_projection;
 static C3D_Mtx s_modelView;
@@ -52,6 +57,7 @@ static int s_lEnvCol     = -1;
 static int s_lFresnel    = -1;
 static int s_lEnvPass    = -1;
 static int s_lGlossEnv   = -1;
+static int s_lFogRow     = -1;
 
 // The environment map: the cube, each face as a 2D texture of its own, a
 // target over each, and the faces that have been cleared or drawn, a bit
@@ -62,11 +68,27 @@ static C3D_Tex           s_envFaceTex[6];
 static C3D_RenderTarget* s_envFace[6];
 static unsigned          s_envDone;
 
+// The sphere map, retail's target 14, and a target over it; the fold's
+// program and its triangles; and whether the map has been cleared, and
+// folded.
+static C3D_Tex           s_sphereTex;
+static C3D_RenderTarget* s_sphere;
+static DVLB_s*           s_foldDvlb;
+static shaderProgram_s   s_foldProgram;
+static C3D_AttrInfo      s_foldAttr;
+static GeoFoldVertex*    s_fold;
+static bool              s_sphereCleared;
+static bool              s_sphereFolded;
+
 static void free_envmap(void);
+static void set_fog_row(int id, const C3D_Mtx* projection);
 
 // The screen quads' ring, and the top screen's pixels as clip space.
 static GeoRenderVertex* s_quads;
 static int              s_numQuads;
+// The strips' ring, and the vertices of it the frame has used.
+static GeoRenderVertex* s_strips;
+static int              s_numStripVerts;
 static C3D_Mtx          s_screen;
 static C3D_Mtx          s_identity;
 static float   s_lightVec[3] = { 0.0f, 0.0f, 1.0f };
@@ -107,7 +129,18 @@ bool georender_init(void)
     s_lFresnel    = LIT_UNIFORM("fresnel");
     s_lEnvPass    = LIT_UNIFORM("envPass");
     s_lGlossEnv   = LIT_UNIFORM("glossEnv");
+    s_lFogRow     = LIT_UNIFORM("fogRow");
 #undef LIT_UNIFORM
+
+    s_foldDvlb = DVLB_ParseFile((u32*)geofold_shbin, geofold_shbin_size);
+    if (!s_foldDvlb) {
+        return false;
+    }
+    shaderProgramInit(&s_foldProgram);
+    shaderProgramSetVsh(&s_foldProgram, &s_foldDvlb->DVLE[0]);
+    AttrInfo_Init(&s_foldAttr);
+    AttrInfo_AddLoader(&s_foldAttr, 0, GPU_FLOAT, 2);   // the map's point
+    AttrInfo_AddLoader(&s_foldAttr, 1, GPU_FLOAT, 3);   // the cube's
 
     s_uProjection = shaderInstanceGetUniformLocation(s_program.vertexShader,
                                                      "projection");
@@ -121,6 +154,8 @@ bool georender_init(void)
                                                      "ambientClr");
     s_uUvScale    = shaderInstanceGetUniformLocation(s_program.vertexShader,
                                                      "uvScale");
+    s_uFogRow     = shaderInstanceGetUniformLocation(s_program.vertexShader,
+                                                     "fogRow");
 
     // The order here is the shader's v0..v3 and the order of the fields in
     // GeoRenderVertex; the two have to agree and there is nothing that
@@ -141,6 +176,9 @@ bool georender_init(void)
     s_quads = (GeoRenderVertex*)linearAlloc(GEO_QUAD_RING * 4u
                                             * sizeof(GeoRenderVertex));
     s_numQuads = 0;
+    s_strips = (GeoRenderVertex*)linearAlloc(GEO_STRIP_RING
+                                             * sizeof(GeoRenderVertex));
+    s_numStripVerts = 0;
 
     s_ready = true;
     return true;
@@ -153,7 +191,12 @@ void georender_exit(void)
     }
     linearFree(s_quads);
     s_quads = NULL;
+    linearFree(s_strips);
+    s_strips = NULL;
     free_envmap();
+    shaderProgramFree(&s_foldProgram);
+    DVLB_Free(s_foldDvlb);
+    s_foldDvlb = NULL;
     shaderProgramFree(&s_litProgram);
     DVLB_Free(s_litDvlb);
     s_litDvlb = NULL;
@@ -408,6 +451,7 @@ static void bind_mesh(const GeoMesh* mesh)
                   s_lightClr[0], s_lightClr[1], s_lightClr[2], 1.0f);
     C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uAmbient,
                   s_ambient, s_ambient, s_ambient, 1.0f);
+    set_fog_row(s_uFogRow, &s_projection);
 }
 
 // A batch's combiner: its texture, or the vertex colour alone. With `gs`
@@ -483,39 +527,109 @@ void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
     }
 }
 
-// The PICA's fog comes before its blend, where the PS2's came after the
-// frame was done. For a blend over the frame the two are the same. A blend
-// that adds to the frame, or takes from it, would add or take the fog's
-// colour again, so those two take black: what they add then fades by the
-// fog's fraction, as it does on the PS2 with the frame under it.
+// The fog is the last combiner stage's, before the blend, where the PS2's
+// came after the frame was done. For a blend over the frame the two are
+// the same. A blend that adds to the frame, or takes from it, would add or
+// take the fog's colour again, so those two take black: what they add then
+// fades by the fog's fraction, as it does on the PS2 with the frame under
+// it. The stage is the colour before it, by the fraction texture unit 1
+// reads, and the fog's colour by the rest, as the PICA's own fog was; the
+// alpha passes. Stage 5 is the fog's alone: the draws set the stages
+// before it.
 static void apply_fog_colour(void)
 {
-    uint32_t c;
+    C3D_TexEnv* env;
+    uint32_t    c;
 
-    if (s_fogLut == NULL) {
+    if (s_fog == NULL) {
         return;
     }
     c = s_blend == GEO_BLEND_ADD || s_blend == GEO_BLEND_SUBTRACT
             ? 0u : s_fogColour;
-    if (c != s_fogApplied) {
-        C3D_FogColor(c);
-        s_fogApplied = c;
+    if (c == s_fogApplied) {
+        return;
+    }
+    env = C3D_GetTexEnv(5);
+    C3D_TexEnvInit(env);
+    C3D_TexEnvSrc(env, C3D_RGB, GPU_PREVIOUS, GPU_CONSTANT, GPU_TEXTURE1);
+    C3D_TexEnvOpRgb(env, GPU_TEVOP_RGB_SRC_COLOR, GPU_TEVOP_RGB_SRC_COLOR,
+                    GPU_TEVOP_RGB_SRC_ALPHA);
+    C3D_TexEnvFunc(env, C3D_RGB, GPU_INTERPOLATE);
+    C3D_TexEnvColor(env, 0xff000000u | c);
+    s_fogApplied = c;
+}
+
+void georender_set_fog(const GeoFog* fog, uint32_t colour)
+{
+    s_fog        = fog && fog->tex.data ? fog : NULL;
+    s_fogColour  = colour & 0xffffffu;
+    s_fogApplied = ~0u;
+    if (s_fog == NULL) {
+        C3D_TexBind(1, NULL);
+        C3D_TexEnvInit(C3D_GetTexEnv(5));
+        return;
+    }
+    C3D_TexBind(1, (C3D_Tex*)&s_fog->tex);
+    apply_fog_colour();
+}
+
+void georender_set_depth_range(float near, float far)
+{
+    if (far > near && near > 0.0f) {
+        s_fogNear = near;
+        s_fogFar  = far;
     }
 }
 
-void georender_set_fog(C3D_FogLut* lut, uint32_t colour)
+// The fog's s for the view's depth u, where texture unit 1 reads step j's
+// fraction at u = j / GEO_FOG_STEPS: texel j's middle.
+static float fog_s(float u)
 {
-    s_fogLut    = lut;
-    s_fogColour = colour & 0xffffffu;
-    if (lut == NULL) {
-        C3D_FogGasMode(GPU_NO_FOG, GPU_PLAIN_DENSITY, false);
-        C3D_FogLutBind(NULL);
-        return;
+    return (u * (float)GEO_FOG_STEPS + 0.5f) / (float)GEO_FOG_TEX_W;
+}
+
+// For a projection whose w is the view's depth d: u = (far - d) / (far -
+// near), so s is d by a, plus b, and the row is w's row by a, plus b in
+// w, the view-space position's being 1.
+static void set_fog_row(int id, const C3D_Mtx* projection)
+{
+    float a = (fog_s(0.0f) - fog_s(1.0f)) / (s_fogFar - s_fogNear);
+    float b = fog_s(0.0f) - a * s_fogFar;
+    const C3D_FVec* w = &projection->r[3];
+
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, id, a * w->x, a * w->y, a * w->z,
+                  a * w->w + b);
+}
+
+// Every row of the texture is the same, so a texel's byte is its column's
+// fraction: step j's for column j, and the last step's past it. The PICA
+// lays a texture out in 8 by 8 tiles, here one row of them, each in Morton
+// order, x in the even bits.
+bool georender_fog_fill(GeoFog* fog, const float keep[GEO_FOG_STEPS + 1])
+{
+    uint8_t* p;
+    int      k, m;
+
+    if (!fog->tex.data) {
+        if (!C3D_TexInit(&fog->tex, GEO_FOG_TEX_W, 8, GPU_A8)) {
+            memset(&fog->tex, 0, sizeof fog->tex);
+            return false;
+        }
+        C3D_TexSetFilter(&fog->tex, GPU_LINEAR, GPU_LINEAR);
+        C3D_TexSetWrap(&fog->tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     }
-    C3D_FogGasMode(GPU_FOG, GPU_PLAIN_DENSITY, false);
-    C3D_FogLutBind(lut);
-    s_fogApplied = ~0u;
-    apply_fog_colour();
+    p = (uint8_t*)fog->tex.data;
+    for (k = 0; k < GEO_FOG_TEX_W / 8; k++) {
+        for (m = 0; m < 64; m++) {
+            int   x = k * 8 + ((m & 1) | (m >> 1 & 2) | (m >> 2 & 4));
+            float f = keep[x < GEO_FOG_STEPS ? x : GEO_FOG_STEPS];
+
+            f = f < 0.0f ? 0.0f : f > 1.0f ? 1.0f : f;
+            p[k * 64 + m] = (uint8_t)(f * 255.0f + 0.5f);
+        }
+    }
+    GSPGPU_FlushDataCache(p, fog->tex.size);
+    return true;
 }
 
 // The GS's ALPHA_1 equations as the PICA's blend unit writes them. The
@@ -630,6 +744,7 @@ static void bind_lit(const GeoMesh* mesh, const GeoLighting* L)
     set_vec(s_lEye,       L->eye);
     set_vec(s_lPowParams, L->powParams);
     set_vec(s_lFresnel,   L->fresnel);
+    set_fog_row(s_lFogRow, &s_projection);
     C3D_BoolUnifSet(GPU_VERTEX_SHADER, s_lEnvPass,  false);
     C3D_BoolUnifSet(GPU_VERTEX_SHADER, s_lGlossEnv, false);
     C3D_CullFace(GPU_CULL_NONE);
@@ -663,8 +778,8 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
         return;
     }
 
-    // The environment pass: the strip again, the map under the colour the
-    // shader gives, added to the frame. It meets the depth the strip left
+    // The environment pass: the strip again, the sphere map under the
+    // colour the shader gives, added to the frame. It meets the depth the strip left
     // and writes none, and leaves the frame's alpha alone, which for a
     // gloss map is what it is added under.
     if (!L->lit) {
@@ -672,7 +787,7 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     }
     C3D_BoolUnifSet(GPU_VERTEX_SHADER, s_lEnvPass,  true);
     C3D_BoolUnifSet(GPU_VERTEX_SHADER, s_lGlossEnv, L->gloss);
-    C3D_TexBind(0, &s_envTex);
+    C3D_TexBind(0, &s_sphereTex);
     env = C3D_GetTexEnv(0);
     C3D_TexEnvInit(env);
     C3D_TexEnvSrc(env, C3D_RGB, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
@@ -702,6 +817,20 @@ static void free_envmap(void)
 {
     int f;
 
+    if (s_sphere) {
+        C3D_RenderTargetDelete(s_sphere);
+        s_sphere = NULL;
+    }
+    if (s_sphereTex.data) {
+        C3D_TexDelete(&s_sphereTex);
+    }
+    memset(&s_sphereTex, 0, sizeof s_sphereTex);
+    if (s_fold) {
+        linearFree(s_fold);
+        s_fold = NULL;
+    }
+    s_sphereCleared = false;
+    s_sphereFolded  = false;
     for (f = 0; f < 6; f++) {
         if (s_envFace[f]) {
             C3D_RenderTargetDelete(s_envFace[f]);
@@ -716,12 +845,16 @@ static void free_envmap(void)
 }
 
 // The cube in VRAM, where the GPU can draw on it, and a target with its
-// own depth buffer over each face. Six faces of 64 are 96 KB of colour and
-// as much of depth.
-bool georender_envmap_init(int size)
+// own depth buffer over each face; then the sphere map, with a target of
+// no depth, and the fold's triangles in linear memory. Both are 16 bits a
+// texel, as retail's PSMCT16 targets are: six faces of 64 are 48 KB of
+// colour and 96 KB of depth, and a map of 256 is 128 KB.
+bool georender_envmap_init(int size, int mapSize, const GeoFoldVertex* fold)
 {
-    C3D_TexInitParams p = { (u16)size, (u16)size, 0, GPU_RGBA8,
+    C3D_TexInitParams p = { (u16)size, (u16)size, 0, GPU_RGBA5551,
                             GPU_TEX_CUBE_MAP, true };
+    size_t            n = GEO_FOLD_GRIDS * GEO_FOLD_GRID_VERTS
+                          * sizeof(GeoFoldVertex);
     int               f;
 
     if (s_envFace[0]) {
@@ -748,7 +881,35 @@ bool georender_envmap_init(int size)
     C3D_TexSetFilter(&s_envTex, GPU_LINEAR, GPU_LINEAR);
     C3D_TexSetWrap(&s_envTex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     s_envDone = 0;
+
+    // Read bilinear and clamped, as TEX1_1 and CLAMP_1 have the GS read
+    // the map.
+    if (!C3D_TexInitVRAM(&s_sphereTex, (u16)mapSize, (u16)mapSize,
+                         GPU_RGBA5551)) {
+        memset(&s_sphereTex, 0, sizeof s_sphereTex);
+        free_envmap();
+        return false;
+    }
+    s_sphere = C3D_RenderTargetCreateFromTex(&s_sphereTex, GPU_TEXFACE_2D, 0,
+                                             -1);
+    s_fold   = (GeoFoldVertex*)linearAlloc(n);
+    if (!s_sphere || !s_fold) {
+        free_envmap();
+        return false;
+    }
+    C3D_TexSetFilter(&s_sphereTex, GPU_LINEAR, GPU_LINEAR);
+    C3D_TexSetWrap(&s_sphereTex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+    memcpy(s_fold, fold, n);
+    GSPGPU_FlushDataCache(s_fold, n);
     return true;
+}
+
+// An RGBA8 colour, red in the top byte, as a 5551 target's fill takes it:
+// each channel's top five bits, and the alpha's top bit.
+static uint32_t to_5551(uint32_t c)
+{
+    return (c >> 27 & 0x1fu) << 11 | (c >> 19 & 0x1fu) << 6
+           | (c >> 11 & 0x1fu) << 1 | (c >> 7 & 1u);
 }
 
 bool georender_envmap_face_done(int face)
@@ -758,7 +919,67 @@ bool georender_envmap_face_done(int face)
 
 bool georender_envmap_ready(void)
 {
-    return s_envDone == 0x3fu;
+    return s_sphereFolded;
+}
+
+void georender_envmap_fold(unsigned views)
+{
+    // eCreateEnvMapPrims' order: CreateEnvMap for each view but 2, then
+    // CreateBackEnvMap's four grids if view 2 drew.
+    static const uint8_t kOrder[9] = { 0, 1, 3, 4, 5, 6, 7, 8, 9 };
+    C3D_BufInfo*         buf;
+    C3D_TexEnv*          env;
+    int                  i;
+
+    if (!s_ready || !s_sphere || !s_fold || (views & 0x3fu) == 0) {
+        return;
+    }
+    if (!s_sphereCleared) {
+        C3D_RenderTargetClear(s_sphere, C3D_CLEAR_COLOR, 0, 0);
+        s_sphereCleared = true;
+    }
+    C3D_FrameDrawOn(s_sphere);
+
+    C3D_BindProgram(&s_foldProgram);
+    C3D_SetAttrInfo(&s_foldAttr);
+    buf = C3D_GetBufInfo();
+    BufInfo_Init(buf);
+    BufInfo_Add(buf, s_fold, sizeof(GeoFoldVertex), 2, 0x10);
+
+    // The texel by the strips' colour, the GS's modulate with a colour
+    // under 0x80, so not doubled; and the strips' alpha alone, as TEXA's
+    // TA1 is 0x80 and every texel of a face has its alpha bit.
+    C3D_TexBind(0, &s_envTex);
+    env = C3D_GetTexEnv(0);
+    C3D_TexEnvInit(env);
+    C3D_TexEnvSrc(env, C3D_RGB, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
+    C3D_TexEnvFunc(env, C3D_RGB, GPU_MODULATE);
+    C3D_TexEnvSrc(env, C3D_Alpha, GPU_PRIMARY_COLOR, 0, 0);
+    C3D_TexEnvFunc(env, C3D_Alpha, GPU_REPLACE);
+    for (i = 1; i < 6; i++) {
+        C3D_TexEnvInit(C3D_GetTexEnv(i));
+    }
+
+    // ALPHA_1 0x44, (Cs - Cd) As + Cd, leaving the map's alpha, which no
+    // pass reads. PRIM 0x54 has no fog, which stage 5 had; no depth, and
+    // no alpha test.
+    s_blend = GEO_BLEND_ALPHA;
+    C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA,
+                   GPU_ONE_MINUS_SRC_ALPHA, GPU_ZERO, GPU_ONE);
+    C3D_CullFace(GPU_CULL_NONE);
+    C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);
+    C3D_AlphaTest(false, GPU_ALWAYS, 0);
+    for (i = 0; i < 9; i++) {
+        int g = kOrder[i];
+
+        if (views & 1u << (g < 6 ? g : 2)) {
+            C3D_DrawArrays(GPU_TRIANGLES, g * GEO_FOLD_GRID_VERTS,
+                           GEO_FOLD_GRID_VERTS);
+        }
+    }
+    s_fogApplied = ~0u;
+    apply_fog_colour();
+    s_sphereFolded = true;
 }
 
 void georender_envmap_face(int face, uint32_t clear, bool draw)
@@ -766,7 +987,8 @@ void georender_envmap_face(int face, uint32_t clear, bool draw)
     if (!s_ready || face < 0 || face >= 6 || !s_envFace[face]) {
         return;
     }
-    C3D_RenderTargetClear(s_envFace[face], C3D_CLEAR_ALL, clear, 0);
+    C3D_RenderTargetClear(s_envFace[face], C3D_CLEAR_ALL, to_5551(clear),
+                          0);
     if (draw) {
         C3D_FrameDrawOn(s_envFace[face]);
     }
@@ -777,12 +999,13 @@ void georender_envmap_face(int face, uint32_t clear, bool draw)
 
 void georender_quads_rewind(void)
 {
-    s_numQuads = 0;
+    s_numQuads      = 0;
+    s_numStripVerts = 0;
 }
 
 static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                              const C3D_Mtx* screen, uint8_t blend,
-                             bool alphaTest, bool depthTest)
+                             bool alphaTest, float depth)
 {
     GeoRenderVertex* dst;
     C3D_BufInfo*     buf;
@@ -811,6 +1034,22 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
     C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale,
                   gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
 
+    // Every fragment at `depth`: the Z-buffer's map with a scale of 0 and
+    // the depth as its offset. The fog's distance is the view's depth
+    // there, u = (far - d) / (far - near) for d = near far / (near + z
+    // (far - near)); with no depth, the near plane's.
+    if (depth >= 0.0f) {
+        float u = depth * s_fogFar
+                  / (s_fogNear + depth * (s_fogFar - s_fogNear));
+
+        C3D_DepthMap(true, 0.0f, depth);
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uFogRow, 0.0f, 0.0f, 0.0f,
+                      fog_s(u));
+    } else {
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uFogRow, 0.0f, 0.0f, 0.0f,
+                      fog_s(1.0f));
+    }
+
     // The GS's modulate is Ct * Cv >> 7, so a vertex colour of 0x80 is 1.0
     // and 0xff nearly 2. The shader hands the colour over 255, so the
     // combiner doubles it; the alpha the same, over the packs' alpha, which
@@ -829,9 +1068,13 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
         C3D_AlphaTest(false, GPU_ALWAYS, 0);
     }
     set_blend(blend);
-    C3D_DepthTest(true, depthTest ? GPU_GEQUAL : GPU_ALWAYS, GPU_WRITE_COLOR);
+    C3D_DepthTest(true, depth >= 0.0f ? GPU_GEQUAL : GPU_ALWAYS,
+                  GPU_WRITE_COLOR);
     C3D_DrawArrays(GPU_TRIANGLE_STRIP, s_numQuads * 4, 4);
     s_numQuads++;
+    if (depth >= 0.0f) {
+        C3D_DepthMap(true, -1.0f, 0.0f);
+    }
 
     // What draws next sets its own combiner, but not always its scale.
     C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_1);
@@ -839,9 +1082,9 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
 }
 
 bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
-                         uint8_t blend, bool depthTest)
+                         uint8_t blend, float depth)
 {
-    return draw_screen_quad(v, gt, &s_screen, blend, true, depthTest);
+    return draw_screen_quad(v, gt, &s_screen, blend, true, depth);
 }
 
 bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
@@ -857,5 +1100,55 @@ bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
         C3D_TexEnvInit(C3D_GetTexEnv(i));
     }
     Mtx_OrthoTilt(&screen, 0.0f, width, height, 0.0f, 1.0f, -1.0f, true);
-    return draw_screen_quad(v, gt, &screen, GEO_BLEND_ALPHA, false, false);
+    return draw_screen_quad(v, gt, &screen, GEO_BLEND_ALPHA, false, -1.0f);
+}
+
+// ------------------------------------------------------------- the strips
+
+bool georender_draw_strip(const GeoRenderVertex* v, int n, const GeoTexture* gt)
+{
+    GeoRenderVertex* dst;
+    C3D_BufInfo*     buf;
+    C3D_TexEnv*      env;
+
+    if (!s_ready || !s_strips || n < 3 || !gt || !gt->tex
+        || s_numStripVerts + n > GEO_STRIP_RING) {
+        return false;
+    }
+    dst = &s_strips[s_numStripVerts];
+    memcpy(dst, v, (size_t)n * sizeof *dst);
+    GSPGPU_FlushDataCache(dst, (u32)n * sizeof *dst);
+
+    C3D_BindProgram(&s_program);
+    C3D_SetAttrInfo(&s_attr);
+    buf = C3D_GetBufInfo();
+    BufInfo_Init(buf);
+    BufInfo_Add(buf, s_strips, sizeof(GeoRenderVertex), 4, 0x3210);
+
+    // The vertex colour and nothing else, as the screen quads have it.
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uProjection, &s_projection);
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uModelView,  &s_modelView);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightVec, 0.0f, 0.0f, 1.0f, 0.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightClr, 0.0f, 0.0f, 0.0f, 1.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uAmbient,  1.0f, 1.0f, 1.0f, 1.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale,
+                  gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
+    set_fog_row(s_uFogRow, &s_projection);
+
+    // The colour and its alpha are the GS's, 0x80 for 1.0, so the
+    // combiner doubles both, as it does for the screen quads.
+    C3D_TexBind(0, gt->tex);
+    env = C3D_GetTexEnv(0);
+    C3D_TexEnvInit(env);
+    C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
+    C3D_TexEnvFunc(env, C3D_Both, GPU_MODULATE);
+    C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_2);
+
+    C3D_CullFace(GPU_CULL_NONE);
+    set_pass(gt->pass);
+    C3D_DrawArrays(GPU_TRIANGLE_STRIP, s_numStripVerts, n);
+    s_numStripVerts += n;
+
+    C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_1);
+    return true;
 }

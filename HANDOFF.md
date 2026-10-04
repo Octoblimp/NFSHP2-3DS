@@ -12915,3 +12915,109 @@ HUD is as after 8m-5, and the log has `trackmap: track 12, sufficient
 - **8m-6c:** DrawMarker with IsPointInPoly, Render, RenderTrackMap from
   the race frame, and the per-layer draw on the bottom screen
   (CONTINUE.md).
+
+## Session 31, continued (2026-10-03) -- the cars' look: the strips, the sphere map, the depth and the fog
+
+The user asked for the cars to look better, and pointed at the
+Speedster's roof, which came out silver from every side. The comparison
+was the PS2's own frame: the red Mustang (car 11) at the start of track
+31, `out/ps2_roof/21.png`, against the same car and track on Azahar.
+Four things came of it, and the car now matches the PS2's frame
+(`out/car_ps2_vs_3ds.png`).
+
+### The port
+
+- **The strips.** CarRenderInfo::Render's strip builders, `gEStripFns`
+  and `gExStripFns`, had no renderer, so the shadows did not draw.
+  `trackview.c` binds both: the builders fill a strip as eBeginStrip's
+  packet is filled, eEndStrip's list and depth key defer it, and
+  `georender_draw_strip` draws it from a ring on the linear heap.
+  `docs/formats/track-render.md` has the write-up.
+- **The sphere map.** The environment pass read the cube by the
+  reflection, which retail never does. Retail folds its six views into
+  target 14, a 256-square sphere map, through the sample table
+  `CreateRefSampleTable` builds, and each fold is half the new views at
+  0.75 and half the old map. Nothing clears the map. The cube's raw
+  texels at full strength were what made the paint silver and crumpled.
+  - `eenvmap.c` gains `create_ref_sample_table` (0x00117a38) and
+    `compute_reflection_st` (0x001179b0), with the table, and
+    `eenvmap_init` builds it first, as eInitEnvMap does.
+  - `georender_envmap_fold` folds the cube into a 256-square RGBA5551
+    map with retail's grids, order, colour and blend, from triangles
+    `trackview_envmap_init` builds once (`geofold.v.pica`). The cube is
+    RGBA5551 too, as the PSMCT16 targets are.
+  - `geolit`'s environment pass reads the sphere map at retail's
+    `0.5 + 0.5 r.xy / |r + (0, 0, 1)|`.
+  - `docs/formats/light.md` has the table, the fold and the port's map.
+- **The depth.** The licence plate drew clean for about a second, then
+  broke up into the body. The port's depth buffer was a W-buffer, which
+  the PICA's fog wanted, and on the PICA its depth does not hold a decal
+  to its surface. The Z-buffer's does: with it the plate stays clean
+  (the user's word for the test build: "PERFECT"). So the depth buffer is
+  the Z-buffer's, citro3d's own map, everywhere.
+  - `depth_of_gs_z` and `gs_z` are simpler for it: the Z-buffer's depth
+    is the `t` the GS's Z is linear in (`docs/formats/sun-draw.md`).
+  - `georender_draw_quad` takes the quad's depth, and maps it itself.
+- **The fog.** The PICA's fog unit reads the depth buffer's depth, so
+  with the Z-buffer it went wrong: the test build's far scenery was 12
+  levels too bright. The fog is now a texture: the fraction at 129 steps
+  of the view's depth, 256 by 8 A8, read by texture unit 1 at an s each
+  vertex hands over (`fogRow` in `geosolid` and `geolit`), and laid on by
+  combiner stage 5, `INTERPOLATE(previous, fog colour, texture 1)`.
+  Additive and subtractive passes still fog to black.
+  `docs/formats/weather-fog.md` has it.
+- **bMalloc zeroes.** CarRenderInfo's constructor reconnects the bodies'
+  texture tables before their models are set up, so
+  `emodel_reconnect_texture_table` read a NumReplacementTextures the
+  heap block happened to hold. A race load died there with an unmapped
+  read. The PS2's pools come to the image zeroed, and so does
+  `bMalloc` now.
+
+### The checks
+
+- `envsample_check` (new) runs the image's CreateRefSampleTable and
+  ComputeReflectionST in mipsemu against `eenvmap.c`'s: the table built
+  over a fill and over zeros, every sample word for word, and
+  ComputeReflectionST on the table's 216 directions, the axes and 300
+  random vectors. 529 steps, 1996 lines, 0 differ. The mutation pass: 25
+  mutations, 24 caught, 1 equivalent (the init's call to the table,
+  which the harness makes itself).
+- The whole chain: 99 checkers (`envsample_check` added) and the four
+  table generators, in 1508 s (`out/chain_fog.txt`). `fred_check`
+  differed there on 18 lines, because `configitems.c` still held the
+  roof test's car and track; with them put back it runs 0 of 54344. So
+  0 of 103 failed.
+
+### On Azahar
+
+- Track 31 with the Mustang (`out/azahar_fogtex`): 30 FPS, the plate
+  clean in every shot. Against the last W-buffer run
+  (`out/azahar_fold4`) the frame differs by 0.21 levels on average, and
+  the sky, far and near bands by 0.3 at most, so the fog is as it was.
+  The pixels that differ by more are the plate's, garbled before and
+  clean now (`out/cmp_cmp_a_cmp_b.png`).
+- **The Speedster's roof is retail's.** It is a hardtop of seven strips
+  of OPEL_A (43, 44, 85, 89, 91, 95 and 102) on one texel of the skin,
+  (316, 280), dark grey on all nine skins (57 to 74). Their light
+  material is 4, CARSKIN, which the skin replaces with its paint
+  (RegPaintRed on skin 1, gloss alpha 36 to 80), so the paint's gloss and
+  its sphere-map pass light it. On Azahar (track 12, car 37, skin 1) it
+  is (98, 100, 106) with the environment pass off and (133, 135, 141)
+  with it on.
+  - The PS2 does the same. IGCD's two shots of the car select (the NFS
+    Edition, skin 9, texel (65, 65, 74)) show the hardtop a light
+    lavender grey, (80, 77, 98) on top to (171, 166, 188) at its edge
+    (`out/roof37_retail_vs_port.png`).
+  - The GS state behind it holds against the image too. The main
+    target's frame buffer is PSMCT32: it is RelativeToFrameBuffer, and
+    MainDraw0Context and MainDraw1Context are targets 15 to 20, whose
+    FrameMode is 0. So the first pass's alpha reaches the gloss pass's
+    Ad. TEST_1 is ATE, GREATER than 0, AFAIL KEEP.
+  - The roof strips' baked colours are all 255, so CBVMix leaves them
+    alone.
+
+### Next
+
+- **8m-6c:** DrawMarker with IsPointInPoly, Render, RenderTrackMap from
+  the race frame, and the per-layer draw on the bottom screen
+  (CONTINUE.md).

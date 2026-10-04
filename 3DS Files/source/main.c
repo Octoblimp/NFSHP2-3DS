@@ -2378,10 +2378,12 @@ static void logRaceState(void)
             g_track.drawn, g_track.drawInfos, g_track.skyDrawn,
             g_track.drawnTris, g_track.note);
     logLine("race: other solids %d (%d failed, %d dropped), textures %d "
-            "(%d missing, %d reduced), deferred %d dropped",
+            "(%d missing, %d reduced), deferred %d dropped; strips %d "
+            "(%d dropped)",
             g_track.numOther, g_track.otherFailed, g_track.otherDropped,
             g_track.numTextures, g_track.missingTextures,
-            g_track.reducedTextures, g_track.deferredDropped);
+            g_track.reducedTextures, g_track.deferredDropped,
+            g_track.stripsDrawn, g_track.stripsDropped);
     {
         // Once, the other solids and what each texture slot draws with.
         static int listed;
@@ -3205,7 +3207,7 @@ int main(int argc, char** argv)
 
     if (!georender_init()) {
         logPrintf("georender: shader would not load\n");
-    } else if (!georender_envmap_init(64)) {
+    } else if (!trackview_envmap_init()) {
         logPrintf("georender: no room for the environment map\n");
     }
     if (!geoview_init(&g_geo)) {

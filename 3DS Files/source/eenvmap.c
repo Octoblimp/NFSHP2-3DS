@@ -22,6 +22,13 @@ bVector3 EnvMapCentre;
 int32_t  EnvMapCentreValid;
 bMatrix4 EnvMapFaceMatrix[6];
 int32_t  EnableEnvMapViews = 1;                 // gp-21072
+EnvMapRefSample EnvMapRefSampleTable[ENVMAP_SAMPLE_GRIDS][ENVMAP_SAMPLE_SIDE]
+                                    [ENVMAP_SAMPLE_SIDE];
+
+// gp-32464, the grid's step across a target two wide, and gp-32460, how far
+// past the rim, as a share of the half-width, a back grid's centre lands.
+#define SAMPLE_STEP   0.4f
+#define SAMPLE_SPREAD 0.16f
 
 // 0x002d6e40, which the static constructor sets: the world's up, +z.
 static const bVector3 kUp = { 0.0f, 0.0f, 1.0f, 0.0f };
@@ -73,10 +80,123 @@ static const float kCubeUp[6][3] = {
 #define ENV_FAR_Z 10000.0f
 #define ENV_FOV   30180
 
+void compute_reflection_st(bVector3 *d, bVector2 *st)
+{
+    float q, x, y, z, m;
+
+    // VU0: the length's square as (x x + y y) + z z, Q its reciprocal
+    // root, and all four lanes by Q.
+    q = 1.0f / sqrtf((d->x * d->x + d->y * d->y) + d->z * d->z);
+    d->x   *= q;
+    d->y   *= q;
+    d->z   *= q;
+    d->pad *= q;
+    x = d->x;
+    y = d->y;
+    z = d->z + 1.0f;
+    m = sqrtf((x * x + y * y) + z * z);
+    m = m + m;
+    st->y = y / m + 0.5f;
+    st->x = x / m + 0.5f;
+}
+
+// A back grid: row r leaves the sample `e` on the edge of the face beside
+// face 2, along the way from the sphere's centre through it, 0.16 of the
+// half-width at the last column. The target is read from face 2's edge at
+// (u0, v0) towards its centre, (u0 + du w, v0 + dv w) at column w / 5.
+static void back_row(EnvMapRefSample *row, const EnvMapRefSample *e,
+                     float u0, float du, float v0, float dv)
+{
+    bVector2 n;
+    float    cs, ct, hx, hy;
+    int      c;
+
+    n.x = e->s - 0.5f;
+    n.y = e->t - 0.5f;
+    cs  = n.x + 0.5f;
+    ct  = n.y + 0.5f;
+    bNormalize2(&n, &n);
+    hx = n.x * 0.5f;
+    hy = n.y * 0.5f;
+    for (c = 0; c < 6; c++) {
+        float w = (float)c / 5.0f;
+
+        row[c].s = cs + hx * w * SAMPLE_SPREAD;
+        row[c].t = ct + hy * w * SAMPLE_SPREAD;
+        row[c].u = u0 + du * w;
+        row[c].v = v0 + dv * w;
+    }
+}
+
+void create_ref_sample_table(void)
+{
+    EnvMapRefSample (*T)[ENVMAP_SAMPLE_SIDE][ENVMAP_SAMPLE_SIDE] =
+        EnvMapRefSampleTable;
+    int f, r, c;
+
+    // Each view's grid: its direction in the map's space, by the view
+    // (the switch at 0x002ac5f0), where that lands in the sphere map, and
+    // the target's u and v.
+    for (f = 0; f < 6; f++) {
+        for (r = 0; r < 6; r++) {
+            for (c = 0; c < 6; c++) {
+                EnvMapRefSample *e = &T[f][r][c];
+                float    a = SAMPLE_STEP * (float)r;
+                float    b = SAMPLE_STEP * (float)c;
+                bVector3 d = { 0.0f, 0.0f, 0.0f, 0.0f };
+                bVector2 st;
+
+                switch (f) {
+                case 0:
+                    d.x = a + -1.0f, d.y = b + -1.0f, d.z = 1.0f;
+                    break;
+                case 1:
+                    d.x = 1.0f, d.y = b + -1.0f, d.z = 1.0f - a;
+                    break;
+                case 2:
+                    d.x = 1.0f - a, d.y = b + -1.0f, d.z = -1.0f;
+                    break;
+                case 3:
+                    d.x = -1.0f, d.y = b + -1.0f, d.z = a + -1.0f;
+                    break;
+                case 4:
+                    d.x = a + -1.0f, d.y = -1.0f, d.z = b + -1.0f;
+                    break;
+                default:
+                    d.x = a + -1.0f, d.y = 1.0f, d.z = 1.0f - b;
+                    break;
+                }
+                e->x = d.x;
+                e->y = d.y;
+                e->z = d.z;
+                compute_reflection_st(&d, &st);
+                e->s = st.x;
+                e->t = st.y;
+                e->u = a * 0.5f;
+                e->v = b * 0.5f;
+            }
+        }
+    }
+
+    // Face 2's four edges, each from the face that shares it: face 4's
+    // first column, face 1's last row, face 5's last column and face 3's
+    // first row.
+    for (r = 0; r < 6; r++) {
+        float k  = (float)r / 5.0f;
+        float k1 = 1.0f - k;
+
+        back_row(T[6][r], &T[4][r][0], k1, 0.5f - k1, 0.0f, 0.5f);
+        back_row(T[7][r], &T[1][5][r], 0.0f, 0.5f, k, 0.5f - k);
+        back_row(T[8][r], &T[5][r][5], k1, 0.5f - k1, 1.0f, -0.5f);
+        back_row(T[9][r], &T[3][0][r], 1.0f, -0.5f, k, 0.5f - k);
+    }
+}
+
 int eenvmap_init(void)
 {
     int i;
 
+    create_ref_sample_table();
     for (i = 0; i < 6; i++) {
         eView         *view = eGetView(EVIEW_ID_ENVMAP_LO + i);
         eRenderTarget *rt   = eGetRenderTarget(8 + i);

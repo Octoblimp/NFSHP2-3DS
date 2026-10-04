@@ -171,6 +171,38 @@ Where the port departs from the engine:
 - **No light materials.** Scenery is prelit, and the port draws it in its
   vertex colour times its texture.
 
+## The strips
+
+CarRenderInfo::Render builds the shadows, and other immediate geometry,
+through the two strip builders (`gEStripFns`, `gExStripFns`). On the PS2
+eBeginStrip (0x00110488) lays out a VU1 packet in frame memory for n
+vertices. eAddVertex (0x00110790), eAddColour (0x001107e0) and eAddUV
+(0x001107f8) each fill their own area of it, with a count of their own.
+eEndStrip (0x00110608) puts the packet on its texture's list with the
+strip's matrix, or on the alpha list when the texture has
+ApplyAlphaSorting, keyed by the first vertex's z through the view's
+WorldViewMatrix: the vertex as it is, not through the strip's matrix.
+The ex set (exBeginStrip, 0x00110848 ..) takes at most 96 vertices and
+cuts the strip into runs a packet holds, each starting on the last two of
+the run before, so drawn whole the triangles are the same.
+
+`trackview.c` binds both sets while a track is loaded:
+
+- `strip_begin` takes up to 128 vertices into the view's strip store, and
+  returns 0, as a full frame memory does, when the store or the deferred
+  list is full or the texture will not upload. `ex_strip_begin` turns
+  down more than 96 first.
+- The three adds fill the vertex, the GS's RGBA (red in the low byte, 0x80
+  for 1.0) and the UV, each with its own count.
+- `strip_end` copies the strip into the store and defers it like a batch,
+  with its texture's order, sort and first use, the strip's matrix
+  through the view's, and eEndStrip's depth key.
+- `draw_deferred` draws it in its place with `georender_draw_strip`: a
+  triangle strip from a 4096-vertex ring on the linear heap, rewound with
+  the screen quads' each frame, through the scenery's shader with no
+  light, the texture modulating the colour doubled, and the texture's
+  pass.
+
 ## Two build fixes that came with it
 
 - **The command buffer is four times citro3d's default.** A track frame

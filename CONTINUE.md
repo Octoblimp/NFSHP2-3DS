@@ -1,9 +1,10 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-03), after 8m-6b, the minimap's draw: DrawMap, MapToScreen,
-ClipPolygon and the frame; 8m-6c, the markers, Render and the draw on the
-bottom screen, is next. "Where the port stands" below has the count of what is left.
+(2026-10-03), after 8m-6b, the minimap's draw, and the cars' look: the
+strips and shadows, retail's sphere map, the Z-buffer and the fog by
+texture. 8m-6c, the markers, Render and the draw on the bottom screen, is
+next. "Where the port stands" below has the count of what is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
@@ -52,7 +53,7 @@ run -- see "Next" below for why, and for what task 27 owes it.
 Ninety-seven cross-checkers pass, plus the four table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/texturestream_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/resource_check.py && python tools/fred_check.py && python tools/fredrace_check.py && python tools/flailer_check.py && python tools/hudfeatures_check.py && python tools/bprintf_check.py && python tools/hudrender_check.py && python tools/hudanim_check.py && python tools/hudscore_check.py && python tools/hudcop_check.py && python tools/hudnis_check.py && python tools/hudtach_check.py && python tools/trackmap_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/texturestream_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/resource_check.py && python tools/fred_check.py && python tools/fredrace_check.py && python tools/flailer_check.py && python tools/hudfeatures_check.py && python tools/bprintf_check.py && python tools/hudrender_check.py && python tools/hudanim_check.py && python tools/hudscore_check.py && python tools/hudcop_check.py && python tools/hudnis_check.py && python tools/hudtach_check.py && python tools/trackmap_check.py && python tools/envsample_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -1440,9 +1441,11 @@ and so replaced every boot.
      QueryLightDatabase, elSetupLightContext and vAABBTree's leaf query.
      `geolit.v.pica` is the VU1 lighter and its environment pass.
      `eenvmap.c` is eEnvMap's six views, which draw into a 64-square cube
-     map in VRAM. `docs/formats/light.md` has the write-up, with the two
-     PICA facts that set the cube's orientation and the citro3d check
-     that fails for every cube target.
+     map in VRAM. Since Session 31 the cube is folded into retail's
+     256-square sphere map, which the environment pass reads.
+     `docs/formats/light.md` has the write-up, with the two PICA facts
+     that set the cube's orientation and the citro3d check that fails
+     for every cube target.
    - Not ported, and named in `raceFrame` where they would run:
      ReplayManager's BeginFrame and EndFrame, ReplayScreen::Update,
      UpdateCameraCoordinators (`0x00199bd0`) and UpdatePortRumblers.
@@ -1718,6 +1721,24 @@ and so replaced every boot.
          polys, placed on the bottom screen like the HUD's objects. The
          map's UVs carry q (perspective), so the draw sets w = 1/q per
          vertex for the PICA's perspective-correct interpolation.
+   - **The cars' look is done** (HANDOFF.md, Session 31, continued: the
+     cars' look), set by the user on 2026-10-03, with the PS2's frame of
+     the Mustang on track 31 to match.
+     - `trackview.c` renders `gEStripFns` and `gExStripFns`, so the
+       shadows draw (`track-render.md`).
+     - The cube folds into retail's sphere map through the sample table
+       (`light.md`). `envsample_check`: 0 differ; 25 mutations, 24
+       caught, 1 equivalent.
+     - The depth buffer is the Z-buffer's. The W-buffer let the licence
+       plate break up into the body.
+     - The fog is a texture read by unit 1 and laid on by combiner stage
+       5, since the PICA's fog unit reads the depth buffer
+       (`weather-fog.md`).
+     - `bMalloc` zeroes, as the PS2's pools do: CarRenderInfo's
+       constructor reads its bodies' NumReplacementTextures before it
+       sets them.
+     - **Not done:** the light flares and AnimatedDriver::Render, the
+       other two of Render's seams, have no renderer yet.
    - **13b, New 3DS mode in full and a steady 30 FPS** (task 28, set by
      the user on 2026-10-03). It comes right after the HUD, because every
      race test after it (the AI, the cops) needs the race in real time.

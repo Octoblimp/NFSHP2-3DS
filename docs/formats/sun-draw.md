@@ -289,9 +289,10 @@ GS Z to the PICA's depth:
   clear has. The quad draws GEQUAL, so only over the sky.
 - A Z between is the depth that Z has.
 
-The viewer's depth is the W-buffer's, whose scale is `-1 / NearZ`.
-`render_epoly` sets a scale of 0 and the quad's depth as the offset, so
-every fragment has that depth, and puts the frame's scale back after.
+The viewer's depth is the Z-buffer's, which is `t` itself, so a GS Z's
+depth is its `t`. `georender_draw_quad` maps the depth with a scale of 0
+and the quad's depth as the offset, so every fragment has that depth,
+and puts the Z-buffer's map back after.
 The viewer sets its target's `ZBufferMode` to PSMZ24, since the PICA's
 depth buffer is 24 bits, so `MaxZ` is 16777215.
 

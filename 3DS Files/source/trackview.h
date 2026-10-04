@@ -98,6 +98,8 @@
 #define TRACKVIEW_ROUTE        1        // the racing route the stops are on
 #define TRACKVIEW_STOPS        24       // how many stops round it
 #define TRACKVIEW_MAX_DEFERRED 1024     // batches held back for the alpha pass
+#define TRACKVIEW_MAX_STRIPS   256      // eBeginStrip's strips in a view
+#define TRACKVIEW_MAX_STRIP_VERTS 2048  // and their vertices
 #define TRACKVIEW_FOG_SAMPLES  5        // depths the fog's fraction is logged at
 
 // One TextureInfo a solid's table points at. `tex` is what the solids'
@@ -144,7 +146,8 @@ typedef struct {
 // A batch the frame holds back for the attach loops' order: its texture is
 // not an opaque order-0 one. See trackview_draw. `light` is the model's
 // eLightContext, in the frame memory, and `flags` RenderStrips' for the
-// batch; see strip_flags.
+// batch; see strip_flags. Or one of eBeginStrip's strips, which always
+// wait, with `strip` its index in the view's strips.
 typedef struct {
     C3D_Mtx     modelView;
     const void* light;
@@ -156,7 +159,16 @@ typedef struct {
     uint16_t    texUse;
     uint16_t    seq;
     uint16_t    flags;
+    int16_t     strip;          // -1 for a batch
 } TrackDeferred;
+
+// One of eBeginStrip's strips: its texture, and its vertices in the
+// view's store.
+typedef struct {
+    const TrackTex* tex;
+    uint16_t        first;
+    uint16_t        count;
+} TrackStrip;
 
 typedef struct {
     // --- the track, and its files' names on the card.
@@ -233,6 +245,12 @@ typedef struct {
     uint32_t frameStamp;
     uint16_t texUses;
     TrackDeferred deferred[TRACKVIEW_MAX_DEFERRED];
+    TrackStrip      strips[TRACKVIEW_MAX_STRIPS];
+    GeoRenderVertex stripVerts[TRACKVIEW_MAX_STRIP_VERTS];
+    int  numStrips;
+    int  numStripVerts;
+    int  stripsDropped;         // that found the store or the lists full
+    int  stripsDrawn;           // in the frame just drawn
     int  cmdSkipped;            // draws left out because the GPU list was full
     bool listPending;           // the next frame lists what it draws
     bool listFrame;             // this one did, into drawList
@@ -334,12 +352,17 @@ void trackview_input(TrackView* v, uint32_t kDown, uint32_t kHeld, int cpx,
 // eDisplayFrame ends, the flipbooks' next frames.
 void trackview_draw(TrackView* v);
 
+// The environment map's targets, and the fold's triangles from the sample
+// table, which eenvmap_init has to have built. False if there is no room.
+bool trackview_envmap_init(void);
+
 // The frame's start, which trackview_draw makes itself when this has not
 // -- UpdateEnvironmentMapCameras, the views' matrices and the cull -- and
 // then the environment views that are active this frame, each into its
-// face of the map the cars' environment passes read (see eenvmap.h). Call
-// it between C3D_FrameBegin and the top target's C3D_FrameDrawOn, before
-// trackview_draw; it leaves a face's target bound.
+// face of the cube, and those folded into the sphere map the cars'
+// environment passes read (see eenvmap.h). Call it between C3D_FrameBegin
+// and the top target's C3D_FrameDrawOn, before trackview_draw; it leaves
+// the sphere map's target, or a face's, bound.
 void trackview_draw_envmap(TrackView* v);
 
 // The Z rects StuffSun asked for in the frame before, out of `target`'s

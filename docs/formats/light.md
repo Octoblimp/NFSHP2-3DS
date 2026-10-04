@@ -202,19 +202,75 @@ The views cull to 32 units (gp-24208), and the cull leaves out flags 2
 and 0x100 for them. The road under the car is near-clipped. So the faces
 hold the sky, the trees and the far scenery, and below the horizon the
 sky dome's lower half. The cars draw only into views 1..3.
-`eCreateEnvMapPrims` (0x00118810) folds the six targets into the sphere
-map.
+
+## The sphere map
+
+The targets are PSMCT16. Views 4..9 draw into targets 8..13, 64 square,
+and target 14, 256 square, is the sphere map the environment pass reads.
+
+`CreateRefSampleTable` (0x00117a38), from `eInitEnvMap`, fills the table
+at 0x002d7130: ten grids of 7 by 7 samples, 28 bytes each (`x, y, z, s,
+t, u, v`). Rows and columns 6 are never written.
+
+- Grids 0..5 are a 6 by 6 grid on each view's target, u and v from 0 to
+  1, with the direction that texel looks along in the map's space, and
+  `ComputeReflectionST`'s s and t for it: `0.5 + 0.5 d.xy / |d + (0, 0,
+  1)|` for d made unit.
+- Grids 6..9 spread target 10, the view behind the map, round the
+  sphere's rim, one grid from each of its edges to its centre. They have
+  no direction; their s and t are on the rim.
+
+`eCreateEnvMapPrims` (0x00118810) folds the targets into target 14 each
+frame. `CreateEnvMap` (0x00118150) draws the grid of each view that drew
+this frame, except view 2's, and `CreateBackEnvMap` (0x00118498) draws
+the four back grids if view 2 drew. Each cell is two triangles of a strip:
+
+- XYZ2 is `trunc(st * 256 - 128 + 2048)` in each axis, on a target whose
+  offset is 1920, and UV is the view's texel at u and v.
+- PRIM is 0x54, with no fog. RGBAQ is (96, 96, 96, 64), modulated, so the
+  texel comes in at 0.75 and the alpha at a half.
+- ALPHA_1 is 0x44, `(Cs - Cd) As + Cd`: target 14 becomes `0.5 * 0.75 *
+  Ct + 0.5 * map`.
+
+Nothing clears target 14. Each fold is half the new views and half what
+the map held, so the map is a running blend. A view drawn every frame
+settles in a few frames, and one that takes turns fades towards each new
+look as its turn comes.
 
 ## The port's map
 
-The PICA reads a cube map by the reflection itself, so the six views draw
-straight into a 64-square RGBA8 cube in VRAM, one face each, with a depth
-buffer per face. Each view keeps retail's axis, frustum and schedule. Its
-camera is the cube face's: the same frustum, rolled by a multiple of 90
-degrees so the face's texels run the cube's way. A face whose view is
-inactive keeps what it last drew. A face that has never drawn is cleared
-to its target's grey. The environment pass waits until all six have been
-cleared or drawn.
+The six views draw into a 64-square cube in VRAM, one face each, with a
+depth buffer per face. The cube is RGBA5551, as retail's PSMCT16 targets
+are. Each view keeps retail's axis, frustum and schedule. Its camera is
+the cube face's: the same frustum, rolled by a multiple of 90 degrees so
+the face's texels run the cube's way. A face whose view is inactive keeps
+what it last drew. A face that has never drawn is cleared to its
+target's grey.
+
+Then `georender_envmap_fold` folds the cube into the sphere map, a
+256-square RGBA5551 texture in VRAM with a target over it and no depth.
+`trackview_envmap_init` builds the fold's triangles once from the sample
+table: 25 cells of two triangles a grid, 150 vertices, ten grids.
+
+- Each vertex is where retail's lands: its XYZ2 less the offset, moved
+  half a pixel, since the PICA samples a pixel at its centre, in clip
+  space.
+- It reads the cube at the sample's direction, in the cube's mirrored
+  space below: `(-x, y, z)`. A back grid's sample has no direction, so
+  its u and v on view 2's target give one: `(1 - 2u, 2v - 1, -1)`,
+  mirrored the same way.
+- The grids draw in retail's order and by its rule: a view's grid when
+  the view drew this frame, but view 2's, and the four back grids when
+  view 2 drew.
+- The colour is (0.75, 0.75, 0.75, 0.5), the texel by it, and the blend
+  `SRC_ALPHA, ONE_MINUS_SRC_ALPHA`, with no depth, no alpha test and no
+  fog. So the map is the same running blend as retail's.
+- The map is cleared to 0 once, when it is first folded, and never
+  after. The environment pass waits for that first fold.
+
+The environment pass in `geolit` reads the sphere map at retail's s and
+t, `0.5 + 0.5 r.xy / |r + (0, 0, 1)|`. `tools/envsample_check.py` runs
+the image's table and ComputeReflectionST against `eenvmap.c`'s.
 
 Two hardware facts set the orientation:
 
@@ -226,8 +282,8 @@ Two hardware facts set the orientation:
 
 So a face filled the way the rule wants is a mirror image of any camera's
 view. Drawing it mirrored would flip every triangle's winding. Instead the
-map's space is mirrored: `geolit` reads the cube at `(-r.x, r.y, r.z)`.
-In that space each face's camera looks along the face's axis, with its up
+map's space is mirrored: the fold reads the cube at `(-x, y, z)`. In
+that space each face's camera looks along the face's axis, with its up
 the opposite of the way the face's t runs (`kCubeUp` in `eenvmap.c`).
 
 `C3D_RenderTargetCreateFromTex` checks that `tex->data` is in VRAM. A

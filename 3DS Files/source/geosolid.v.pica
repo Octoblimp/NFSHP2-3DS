@@ -30,6 +30,14 @@
 ; a different size.
 .fvec uvScale
 
+; The fog's distance: the view-space position dotted with this is the s at
+; which texture unit 1 reads the fog's fraction (see georender_set_fog).
+; It is the projection's w row scaled and offset, so the distance is the
+; view's depth as the W-buffer had it, and the texcoord's interpolation is
+; perspective-correct, as the W-buffer's was. A screen quad's is a
+; constant, in w.
+.fvec fogRow
+
 .constf consts(0.0, 1.0, -1.0, 0.5)
 .alias  zeros consts.xxxx
 .alias  ones  consts.yyyy
@@ -50,6 +58,7 @@
 .out outpos position
 .out outtex texcoord0
 .out outclr color
+.out outfog texcoord1
 
 .entry vmain
 .proc vmain
@@ -66,6 +75,10 @@
     dp4 outpos.y, projection[1], r1
     dp4 outpos.z, projection[2], r1
     dp4 outpos.w, projection[3], r1
+
+    ; The fog's s, and a t in the middle of its rows, which are all alike.
+    dp4 outfog.x, fogRow, r1
+    mov outfog.y, consts.w
 
     ; ST. S needs only the pad scale; T needs the scale and then a flip.
     ;
