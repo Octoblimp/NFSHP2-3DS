@@ -5,6 +5,7 @@
 #include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static BMemMallocHook g_malloc;
 static BMemFreeHook   g_free;
@@ -34,6 +35,13 @@ void *bMalloc(int size, const char *name, int flags, int pool)
         fprintf(stderr, "bMalloc: %d bytes for %s\n", size, name);
         abort();
     }
+    // Zeroed, as the PS2's pools come to it: the image reads some blocks
+    // before it writes them. CarRenderInfo's constructor reconnects the
+    // bodies' texture tables while its eModels' constructors have cleared
+    // only their names and solids, so NumReplacementTextures is whatever
+    // the block held, and a heap block that held anything sends
+    // emodel_reconnect_texture_table off through a stale pointer.
+    memset(p, 0, (size_t)size);
     return p;
 }
 
