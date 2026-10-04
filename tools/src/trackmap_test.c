@@ -2,9 +2,12 @@
 // its constructor, GetAngle with EvalCubic, GetCameraDirection,
 // GetCarUVPosition and GetBoxOnMap (8m-6a); MapToScreen, GetSideOfLine,
 // CalculateCentroidOfQuad, ClipPolygon, DrawOverOrUnderLay and DrawMap
-// (8m-6b). One TrackMap, track, car, pursued car, player, view, drive
-// camera and poly. A script of ops, one per line, fields split on '|';
-// numbers are C literals, floats their bits:
+// (8m-6b); IsPointInPoly, DrawMarker and Render (8m-6c). One TrackMap,
+// track, car, pursued car, player, view, drive camera and poly; for Render
+// a World, a Race, eight cars c0 to c7 with their types and racing cars,
+// two players, a cop manager with seven cops, four pursuits and four
+// roadblocks, and a ghost. A script of ops, one per line, fields split on
+// '|'; numbers are C literals, floats their bits, and -1 is none:
 //
 //   fill            every field of the map to its pattern: retail's offset
 //                   with 0xa5 on top, and the pointers to junk
@@ -52,6 +55,32 @@
 //                   for none) on layer L
 //   overlay|T|L     DrawOverOrUnderLay
 //   drawmap|A       DrawMap at angle A
+//   ipp|N|PX|PY|X0|Y0|..  IsPointInPoly of P in the N-gon
+//   marker|PX|PY|PZ|CX|CY|A|COL|L|T|MA|W|H|O0X|O0Y|..|O3Y  DrawMarker of
+//                   the point about the centre at angle A, in colour COL
+//                   (-1 a pattern), on layer L with texture T, turned by
+//                   MA, W by H, in the box O
+//   render          Render
+//   wnull|V rnull|V cmgr|V  pCurrentWorld, pCurrentRace and pCopManager:
+//                   1 the one, 0 NULL
+//   wpos|A|C|T      the World's AICarPos, CopCarPos and TrafficCarPos
+//   wcar|I|C        its CarTable[I], car C
+//   cpos|C|X|Y      car C's Position, x and y
+//   cang|C|A        its Angle
+//   cvis|C|R|V      its RenderingEnabled (an int8) and bVisibleOnTrackMap
+//   cusage|C|U      its type's UsageType
+//   crace|C|P       its racing car's RacePosition (an int8)
+//   pcar|P|C        player P's MyCar
+//   players|N|I0|I1|B0|B1  PlayerNumPlayers, PlayersByIndex and ByNumber
+//   copidx|I        the manager's nPlayerCopIndex
+//   cop|K|P         Cops[K] to cop K, chasing in pursuit P; -2 for NULL
+//   pursuit|P|C|R   pursuit P's pChasedCar and pRoadBlock
+//   plist|P..       the PursuitList, in order
+//   rb|R|X|Y|A      roadblock R's v2Position and aTrackMapIconAngle
+//   ghost|V         the race's pReplayingGhostCarWorldObject
+//   gmat|X0|Y0|X3|Y3|Z3  the ghost's Matrix: v0's x and y, v3
+//   sline|SX|SY|FX|FY  the race's StartLinePosition and FinishLinePosition
+//   lines|S|F       the track's TrackMapStartLineAngle and FinishLineAngle
 //
 // After each op: the map's fields and the poly's when they changed, the
 // tables after init. The texture and view seams log their calls, and
@@ -66,6 +95,8 @@
 #include "cammover.h"
 #include "camera.h"
 #include "car.h"
+#include "cartypeinfo.h"
+#include "copmanager.h"
 #include "drivecam.h"
 #include "epoly.h"
 #include "eview.h"
@@ -74,14 +105,21 @@
 #include "realtime.h"
 #include "track.h"
 #include "trackmap.h"
+#include "world.h"
+#include "worldobject.h"
 
-#define NUM_ARGS  16
+#define NUM_ARGS  32
+#define NUM_POOL  8
 #define LINE_MAX_ 4096
 #define NUM_TEX   7
 
 int32_t        WorldTimer;
 RaceParameters TheRaceParameters;
 Race          *pCurrentRace;
+World         *pCurrentWorld;
+int32_t        PlayerNumPlayers;
+struct Player *PlayerPlayersByNumber[2];
+struct Player *PlayerPlayersByIndex[2];
 
 static TrackMap         map;
 static TrackInfo        track;
@@ -92,7 +130,18 @@ static eView            view;
 static Camera           camera;
 static DriveCameraMover mover;
 static ePoly            poly;
-static int32_t          raceStage[4];
+static Race             race;
+static World            world;
+static Car              pool[NUM_POOL];
+static CarTypeInfo      types[NUM_POOL];
+static RacingCar        racing[NUM_POOL];
+static Player           players[2];
+static WorldObject      ghost;
+static tCopManagerHead  copManager;
+static tCop             cops[7];
+static tPursuit         pursuits[4];
+static tRoadBlock       roadBlocks[4];
+static TrackMapMarkerColour colourPattern = { 0xa1, 0xb2, 0xc3 };
 static uint32_t         texMask;
 static char             texs[NUM_TEX][16];
 static char             junk;
@@ -134,6 +183,11 @@ static const char *ptr_name(const void *p)
     if (p == &car) return "car";
     if (p == &pursuedCar) return "pcar";
     if (p == &player) return "player";
+    for (i = 0; i < NUM_POOL; i++)
+        if (p == &pool[i]) {
+            snprintf(buf[k], sizeof buf[k], "c%d", i);
+            return buf[k];
+        }
     for (i = 0; i < NUM_TEX; i++)
         if (p == texs[i]) {
             snprintf(buf[k], sizeof buf[k], "tex%d", i);
@@ -286,6 +340,12 @@ eRaceStage race_get_race_stage(const Race *r)
     return *(const eRaceStage *)(const void *)r;
 }
 
+struct RacingCar *race_get_racing_car(Race *r, struct Car *c)
+{
+    (void)r;
+    return c->pRacingCar;
+}
+
 static void render_poly(ePoly *p, TextureInfo *tex, int flags)
 {
     char line[LINE_MAX_];
@@ -299,6 +359,13 @@ static void render_poly(ePoly *p, TextureInfo *tex, int flags)
 static uint32_t num(const char *s)
 {
     return (uint32_t)strtoul(s, NULL, 0);
+}
+
+static Car *car_arg(const char *s)
+{
+    int32_t i = (int32_t)num(s);
+
+    return (i >= 0 && i < NUM_POOL) ? &pool[i] : NULL;
 }
 
 static TextureInfo *tex_arg(const char *s)
@@ -421,7 +488,7 @@ static void run(char *line)
     } else if (!strcmp(a[0], "world")) {
         WorldTimer = (int32_t)num(a[1]);
     } else if (!strcmp(a[0], "stage")) {
-        raceStage[0] = (int32_t)num(a[1]);
+        race.RaceStage = (eRaceStage)(int32_t)num(a[1]);
     } else if (!strcmp(a[0], "view")) {
         player.ViewID = (int32_t)num(a[1]);
     } else if (!strcmp(a[0], "mover")) {
@@ -564,6 +631,117 @@ static void run(char *line)
             printf(" %08x %08x", (unsigned)bitsf(o[i].x),
                    (unsigned)bitsf(o[i].y));
         printf("\n");
+    } else if (!strcmp(a[0], "ipp")) {
+        bVector2 pt, q[8];
+        int32_t k, cnt = (int32_t)num(a[1]);
+        pt.x = fbits(num(a[2]));
+        pt.y = fbits(num(a[3]));
+        for (k = 0; k < cnt && k < 8; k++) {
+            q[k].x = fbits(num(a[4 + 2 * k]));
+            q[k].y = fbits(num(a[5 + 2 * k]));
+        }
+        printf("  ipp %d\n", (int)is_point_in_poly(&pt, q, cnt));
+    } else if (!strcmp(a[0], "marker")) {
+        bVector3 pos;
+        bVector2 c, o[4];
+        int32_t col = (int32_t)num(a[7]);
+        int k;
+        pos.x = fbits(num(a[1]));
+        pos.y = fbits(num(a[2]));
+        pos.z = fbits(num(a[3]));
+        c.x = fbits(num(a[4]));
+        c.y = fbits(num(a[5]));
+        for (k = 0; k < 4; k++) {
+            o[k].x = fbits(num(a[13 + 2 * k]));
+            o[k].y = fbits(num(a[14 + 2 * k]));
+        }
+        trackmap_draw_marker(&map, &pos, &c, (uint16_t)num(a[6]), o,
+                             col < 0 ? &colourPattern : &TrackMapMarkerInfo[col],
+                             (int32_t)num(a[8]), tex_arg(a[9]),
+                             (uint16_t)num(a[10]), fbits(num(a[11])),
+                             fbits(num(a[12])));
+    } else if (!strcmp(a[0], "render")) {
+        trackmap_render(&map);
+    } else if (!strcmp(a[0], "wnull")) {
+        pCurrentWorld = num(a[1]) ? &world : NULL;
+    } else if (!strcmp(a[0], "rnull")) {
+        pCurrentRace = num(a[1]) ? &race : NULL;
+    } else if (!strcmp(a[0], "cmgr")) {
+        pCopManager = num(a[1]) ? (tCopManager *)(void *)&copManager : NULL;
+    } else if (!strcmp(a[0], "wpos")) {
+        world.AICarPos = (int32_t)num(a[1]);
+        world.CopCarPos = (int32_t)num(a[2]);
+        world.TrafficCarPos = (int32_t)num(a[3]);
+    } else if (!strcmp(a[0], "wcar")) {
+        world.CarTable[num(a[1])] = car_arg(a[2]);
+    } else if (!strcmp(a[0], "cpos")) {
+        pool[num(a[1])].State.Position.x = fbits(num(a[2]));
+        pool[num(a[1])].State.Position.y = fbits(num(a[3]));
+    } else if (!strcmp(a[0], "cang")) {
+        pool[num(a[1])].State.Angle = (uint16_t)num(a[2]);
+    } else if (!strcmp(a[0], "cvis")) {
+        pool[num(a[1])].RenderingEnabled = (int8_t)num(a[2]);
+        pool[num(a[1])].bVisibleOnTrackMap = (int32_t)num(a[3]);
+    } else if (!strcmp(a[0], "cusage")) {
+        types[num(a[1])].UsageType = (int32_t)num(a[2]);
+    } else if (!strcmp(a[0], "crace")) {
+        racing[num(a[1])].RacePosition = (int8_t)num(a[2]);
+    } else if (!strcmp(a[0], "pcar")) {
+        players[num(a[1])].MyCar = car_arg(a[2]);
+    } else if (!strcmp(a[0], "players")) {
+        int k;
+        PlayerNumPlayers = (int32_t)num(a[1]);
+        for (k = 0; k < 2; k++) {
+            int32_t ix = (int32_t)num(a[2 + k]), bn = (int32_t)num(a[4 + k]);
+            PlayerPlayersByIndex[k] = (ix >= 0 && ix < 2) ? &players[ix] : NULL;
+            PlayerPlayersByNumber[k] = (bn >= 0 && bn < 2) ? &players[bn] : NULL;
+        }
+    } else if (!strcmp(a[0], "copidx")) {
+        copManager.nPlayerCopIndex = (int32_t)num(a[1]);
+    } else if (!strcmp(a[0], "cop")) {
+        int32_t k = (int32_t)num(a[1]), pu = (int32_t)num(a[2]);
+        if (pu == -2) {
+            copManager.Cops[k] = NULL;
+        } else {
+            copManager.Cops[k] = &cops[k];
+            cops[k].pMyPursuit = (pu >= 0 && pu < 4) ? &pursuits[pu] : NULL;
+        }
+    } else if (!strcmp(a[0], "pursuit")) {
+        int32_t pu = (int32_t)num(a[1]), r = (int32_t)num(a[3]);
+        pursuits[pu].pChasedCar = car_arg(a[2]);
+        pursuits[pu].pRoadBlock = (r >= 0 && r < 4) ? &roadBlocks[r] : NULL;
+    } else if (!strcmp(a[0], "plist")) {
+        tPursuitNode *head = &copManager.PursuitList, *prev = head;
+        int k;
+        for (k = 1; k < n; k++) {
+            tPursuitNode *node = &pursuits[num(a[k])].Node;
+            prev->Next = node;
+            node->Prev = prev;
+            prev = node;
+        }
+        prev->Next = head;
+        head->Prev = prev;
+    } else if (!strcmp(a[0], "rb")) {
+        tRoadBlock *r = &roadBlocks[num(a[1])];
+        r->v2Position.x = fbits(num(a[2]));
+        r->v2Position.y = fbits(num(a[3]));
+        r->aTrackMapIconAngle = (uint16_t)num(a[4]);
+    } else if (!strcmp(a[0], "ghost")) {
+        race.pReplayingGhostCarWorldObject = num(a[1]) ? &ghost : NULL;
+    } else if (!strcmp(a[0], "gmat")) {
+        ghost.Matrix.v0.x = fbits(num(a[1]));
+        ghost.Matrix.v0.y = fbits(num(a[2]));
+        ghost.Matrix.v3.x = fbits(num(a[3]));
+        ghost.Matrix.v3.y = fbits(num(a[4]));
+        ghost.Matrix.v3.z = fbits(num(a[5]));
+    } else if (!strcmp(a[0], "sline")) {
+        race.StartLinePosition.x = fbits(num(a[1]));
+        race.StartLinePosition.y = fbits(num(a[2]));
+        race.FinishLinePosition.x = fbits(num(a[3]));
+        race.FinishLinePosition.y = fbits(num(a[4]));
+    } else if (!strcmp(a[0], "lines")) {
+        track.TrackMapStartLineAngle = (uint16_t)num(a[1]);
+        track.TrackMapFinishLineAngle = (uint16_t)num(a[2]);
     } else {
         printf("  bad op %s\n", a[0]);
     }
@@ -576,12 +754,20 @@ int main(int argc, char **argv)
 {
     static char line[LINE_MAX_];
     FILE       *f;
+    int         i;
 
     if (argc < 2) return 2;
     f = fopen(argv[1], "r");
     if (!f) return 2;
 
-    pCurrentRace = (Race *)(void *)raceStage;
+    pCurrentRace = &race;
+    for (i = 0; i < NUM_POOL; i++) {
+        pool[i].pCarTypeInfo = &types[i];
+        pool[i].pRacingCar = &racing[i];
+    }
+    copManager.nPlayerCopIndex = -1;
+    copManager.PursuitList.Next = &copManager.PursuitList;
+    copManager.PursuitList.Prev = &copManager.PursuitList;
     view.CameraMoverList.next = &view.CameraMoverList;
     view.CameraMoverList.prev = &view.CameraMoverList;
     mover.base.pCamera = &camera;

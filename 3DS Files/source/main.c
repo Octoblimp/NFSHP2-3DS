@@ -409,10 +409,25 @@ static struct TrackMap *newTrackMapLogged(TrackInfo *track, struct Car *car,
                                           struct Player *p)
 {
     TrackMap *m = trackmap_new(track, car, p);
+    const TextureInfo *tex[7] = {
+        m->TrackMapTexture, m->CarMarkerNonrotatingTexture,
+        m->CarMarkerRotatingTexture, m->OverlayTexture, m->UnderlayTexture,
+        m->StartFinishLineTexture, m->RoadblockTexture,
+    };
 
     logLine("trackmap: track %d, sufficient %d",
             track != NULL ? (int)track->TrackNumber : -1,
             (int)m->SufficientDataToRenderMe);
+    for (int i = 0; i < 7; i++) {
+        if (tex[i] != NULL) {
+            logLine("trackmap: texture %d %.24s %dx%d, %d bits, semi %d",
+                    i, tex[i]->DebugName, (int)tex[i]->Width,
+                    (int)tex[i]->Height, (int)tex[i]->BitDepth,
+                    (int)tex[i]->IsAnySemitransparencyFlag);
+        } else {
+            logLine("trackmap: texture %d none", i);
+        }
+    }
     return m;
 }
 
@@ -2377,6 +2392,8 @@ static void logRaceState(void)
     logLine("race: track drew %d of %d (%d sky), %d tris; %s",
             g_track.drawn, g_track.drawInfos, g_track.skyDrawn,
             g_track.drawnTris, g_track.note);
+    logLine("race: minimap %d polys (%d failed)", g_track.flailerPolys,
+            g_track.flailerFailed);
     logLine("race: other solids %d (%d failed, %d dropped), textures %d "
             "(%d missing, %d reduced), deferred %d dropped; strips %d "
             "(%d dropped)",
@@ -2743,9 +2760,11 @@ int main(int argc, char** argv)
     // the gradient, and uirender.c cuts the band out of them as it draws.
     gInitializeFlailerTachometerFn = flailer_initialize_tachometer;
     // The minimap (trackmap.c): SetHudFeatures makes one when the HUD's
-    // TRACK_MAP feature comes on. Nothing draws it until 8m-6c.
+    // TRACK_MAP feature comes on, and the race's frame renders it on the
+    // bottom screen, after the HUD's half there.
     gNewTrackMapFn = newTrackMapLogged;
     gDeleteTrackMapFn = trackmap_delete;
+    gTrackMapRenderFn = trackmap_render;
 
     // Car::MaybeCameraShake, which World::DoTimestep asks of each player's
     // car: shake.c. Only a car with a player shakes, and none has one until
@@ -3477,7 +3496,20 @@ int main(int argc, char** argv)
             C2D_SceneBegin(g_bot);
             // In a race the bottom screen is the HUD's other half
             // (hudsplit.h), and the frontend's panel when the HUD is down.
-            if (!uirender_draw_visible_bottom(&ui, BOT_W, BOT_H, 1.0f)) {
+            if (uirender_draw_visible_bottom(&ui, BOT_W, BOT_H, 1.0f)) {
+                // eDisplayFrame's RenderTrackMap for each player, after
+                // the Flailer layers: the minimap, where hudsplit.h puts
+                // it, at the HUD's scale.
+                if (g_track.loaded) {
+                    for (int i = 0; i < PlayerNumPlayers; i++) {
+                        player_render_track_map(PlayerPlayersByIndex[i]);
+                    }
+                    C2D_Flush();
+                    trackview_draw_flailer_polys(&g_track, BOT_W, BOT_H);
+                    C2D_Prepare();
+                    C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
+                }
+            } else {
                 char        title[48];
                 const char* body = g_blurbShown;
                 float       fade = g_blurbFade;

@@ -1103,6 +1103,29 @@ bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
     return draw_screen_quad(v, gt, &screen, GEO_BLEND_ALPHA, false, -1.0f);
 }
 
+bool georender_draw_hud_quad_w(const GeoRenderVertex v[4],
+                               const GeoTexture* gt, uint8_t blend,
+                               bool alphaTest, float width, float height)
+{
+    C3D_Mtx screen;
+    int     i;
+
+    for (i = 1; i < 6; i++) {
+        C3D_TexEnvInit(C3D_GetTexEnv(i));
+    }
+    // The shader's position is (x w, y w, w, 1). The screen's matrix M
+    // takes (x, y, 0, 1), so this one is M with its third column moved to
+    // the fourth's place and nothing left in the fourth: it gives
+    // M (x w, y w, 0, w), which the divide by w puts at (x, y), and the
+    // interpolation is perspective-correct by w.
+    Mtx_OrthoTilt(&screen, 0.0f, width, height, 0.0f, 1.0f, -1.0f, true);
+    for (i = 0; i < 4; i++) {
+        screen.r[i].z = screen.r[i].w;
+        screen.r[i].w = 0.0f;
+    }
+    return draw_screen_quad(v, gt, &screen, blend, alphaTest, -1.0f);
+}
+
 // ------------------------------------------------------------- the strips
 
 bool georender_draw_strip(const GeoRenderVertex* v, int n, const GeoTexture* gt)

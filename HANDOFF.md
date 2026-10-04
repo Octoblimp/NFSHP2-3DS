@@ -13021,3 +13021,88 @@ Four things came of it, and the car now matches the PS2's frame
 - **8m-6c:** DrawMarker with IsPointInPoly, Render, RenderTrackMap from
   the race frame, and the per-layer draw on the bottom screen
   (CONTINUE.md).
+
+## Session 31, continued (2026-10-04) -- the minimap's markers, Render and draw (step 8m-6c)
+
+The minimap is on the bottom screen. TrackMap's last three functions are
+ported, Player::RenderTrackMap calls Render from the race frame, and the
+Flailer polys Render makes are drawn at the HUD's half size, where retail
+puts them. `docs/formats/trackmap.md` has the write-up.
+
+### The port
+
+- **`trackmap.c`** adds:
+  - IsPointInPoly (`0x001cb1f0`): the crossing test, j trailing i from
+    n - 1;
+  - DrawMarker (`0x001bbc50`): one marker's UV turned about the centre,
+    scaled by the view, boxed by GetBoxOnMap, put on the screen by
+    MapToScreen and clipped by ClipPolygon;
+  - Render (`0x001bade8`): the backing, the map, the start and finish
+    lines, the AI's cars, the cops, the roadblocks, a ghost, the players
+    and the frame, each on its Flailer layer and in its colour. A
+    pursuit's chased car switches the map to Be The Cop's targeting
+    (mode 10).
+- **`copmanager.c`** adds GetNumActiveRoadBlocks (`0x00226968`) and
+  GetActiveRoadBlock (`0x00226238`), with `tRoadBlock`.
+- **`playerhud.c`** adds Player::RenderTrackMap (`0x00181c08`), through
+  `gTrackMapRenderFn`, which `main.c` binds to `trackmap_render`.
+- **The draw.**
+  - trackview's `render_epoly` queues each Flailer poly with its texture
+    (`TRACKVIEW_FLAILER_POLYS`, 128).
+  - `main.c` renders each player's map after the bottom screen's HUD.
+  - `trackview_draw_flailer_polys` draws the queue there:
+    - by retail's Flailer Z table (`0x002c9e70`), lowest GS Z first;
+    - at the HUD's half size;
+    - with each texture's blend, and its alpha test when it is not
+      semitransparent.
+  - `georender_draw_hud_quad_w` takes a w per vertex. DrawMap's UVs carry
+    q, as the GS's STQ does, and the PICA's perspective-correct
+    interpolation does the divide.
+  - `GEO_QUAD_RING` is 192.
+
+What retail does that a reader would not guess:
+
+- A cop is never drawn as the pursued car. An AI car is, in colour 7 on
+  layer 3.
+- The roadblock count is read again on each pass of the loop.
+- The two players swap layers when player 2 is ahead.
+- The roadblocks turn in every mode. The dots turn only with
+  HasRotatingCarDots.
+
+### The checks
+
+- **`trackmap_check`** adds retail's three functions and the two
+  roadblock walks. Render runs over a World, a Race, eight cars, two
+  players, seven cops, four pursuits, four roadblocks and a ghost, at
+  retail's offsets. 6012 ops, 15025 lines, 0 differ.
+  - The mutation pass: 284 mutations, 283 caught, 1 equivalent. The 96
+    new ones are all caught, three of them in `copmanager.c`.
+- **`hudfeatures_check`** runs Player::RenderTrackMap, with and without a
+  map, for each player. 1305 ops, 10382 lines, 0 differ. Its two new
+  mutations are caught.
+
+The whole chain: 99 checkers and the four table generators, 0 of 103 failed, in 1525 s. bprintf_check's line there is hostbuild's warning that a mutant of realtime.c was in flight as it built (13b-1's mutation pass overlapped the chain's end). bprintf_check does not link realtime.c, and run again alone it gives 5879 ops, 11758 lines, 0 differ (`out/chain_8m6c.txt`).
+The runner now splits each command and runs it without a shell, so no
+cmd.exe is started.
+
+### On Azahar
+
+The race on track 12 (`out/azahar_8m6c`): 20 FPS, no crash.
+
+- Mode 0's tilted map is on the bottom screen, halfway down on the left,
+  with its backing, the road in perspective, the start line and player
+  1's orange dot.
+- The log has `race: minimap 6 polys (0 failed)` each second, and each
+  of the seven textures with its size and flags.
+- TRACKMAPFRAME is not semitransparent. Its clear middle is cut by the
+  alpha test, as on the PS2. Without the test it drew an opaque black
+  box over the map.
+
+**Not checked on screen:** the other modes, the AI's and the cops' dots,
+the roadblocks, the ghost and two players. SkipFE's race has none of
+them. The checker covers all of them.
+
+### Next
+
+- **13b-1:** the real clock and the pacing (CONTINUE.md). Step 13 is
+  done.

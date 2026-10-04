@@ -3,8 +3,8 @@
 player shows and showing them, against the retail image, SLES_507.31.
 
 **The model** is retail's own: Player::DetermineHudFeatures (0x00178da0),
-SetHudFeatures (0x001796b0) and SetTrackMapMode (0x00178c90, the port's
-name), and under them IsNisPlaying, ShouldShowBustedText,
+SetHudFeatures (0x001796b0), SetTrackMapMode (0x00178c90, the port's
+name) and RenderTrackMap (0x00181c08), and under them IsNisPlaying, ShouldShowBustedText,
 tCopManager::ShouldDisplayBustedText, RaceParameters::IsFreeRun, the
 gauge helper (0x001795f8), SetTrackMapMode's three table searches,
 bSPrintf, bStringHash and the whole Flailer runtime on INGAMEB's Flailer
@@ -18,7 +18,7 @@ bchunk.c, copmanager.c and raceparams.c on the same bundle.
 SetFlailerScreenVisibility (both copies, 0x0014cbf8 and 0x0016eb68),
 SetRearViewMirrorCameraMover, ClearHudAnimations, HudStartWrongWay,
 FillInRaceOverMessages, RaceFinishedSpeech, NISOverlayManager::SetVisible,
-InitializeFlailerTachometer, TrackMap's constructor and destructor,
+InitializeFlailerTachometer, TrackMap's constructor, destructor and Render,
 eGetView and ChooseLoadableTextures, each printing its arguments; the
 camera's GetPOV, IsExteriorView and IsLookingBack, through a fake vtable
 at +40, answer what the script says; bMalloc hands out zeroed memory;
@@ -37,7 +37,8 @@ one nothing writes prints "stray" until something does.
 then SetHudFeatures through each bit on and off in one- and two-player
 races, Be A Cop, free run, time trials and point to point, with the
 gauges' cameras and cars both ways, then SetTrackMapMode over every mode
-in each kind of race, and last a few frames of UpdateHud's head, which
+in each kind of race, RenderTrackMap with a map and without one, and
+last a few frames of UpdateHud's head, which
 calls SetHudFeatures only when DetermineHudFeatures' answer changed.
 
     python tools/hudfeatures_check.py
@@ -82,6 +83,7 @@ EGGS = 0x0031d7e8                       # TheEasterEggs, the port's name
 F_DETERMINE = 0x00178da0
 F_SET = 0x001796b0
 F_MAP = 0x00178c90
+F_RENDER_MAP = 0x00181c08
 F_COLOUR = 0x001831d0
 
 S_SCREEN = (0x0014cbf8, 0x0016eb68)
@@ -93,6 +95,7 @@ S_NISVIS = 0x00182a48
 S_TACH = 0x001434a0
 S_MAP_NEW = 0x001babb8
 S_MAP_DEL = 0x001badc8
+S_MAP_RENDER = 0x001bade8
 S_SPEECH = 0x00206ab8
 S_TEXTURES = 0x001ee3c0
 S_VIEW = 0x00107c90
@@ -476,14 +479,15 @@ def s_two_players():
 
 
 def s_map():
-    s = ["use|0", "set|0x1"]
+    s = ["use|0", "rmap", "set|0x1", "rmap"]
     for env in ([], ["pl|0|PN|1"], ["pl|0|PN|0", "g|np|2"], ["use|1"],
                 ["use|0", "rp|BeACop|1"], ["rp|BeACop|0", "g|np|1"]):
         s += env
         for m in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, -1):
             s.append("map|%d" % m)
             s.append("g|frames|%d" % (1000 + 7 * (m + 2)))
-    s += ["set|0", "map|3", "map|0", "g|frames|1000"]
+    s += ["use|1", "rmap", "use|0", "rmap", "set|0", "rmap", "map|3",
+          "map|0", "g|frames|1000"]
     return s
 
 
@@ -584,6 +588,7 @@ class Model(fc.Model):
         e.stub(S_TACH, self.s_tach)
         e.stub(S_MAP_NEW, self.s_map_new)
         e.stub(S_MAP_DEL, self.s_map_del)
+        e.stub(S_MAP_RENDER, self.s_map_render)
         e.stub(S_SPEECH, self.s_speech)
         e.stub(S_TEXTURES, self.s_textures)
         e.stub(S_VIEW, self.s_view)
@@ -646,6 +651,11 @@ class Model(fc.Model):
         ok = m == self.e.u32(self.player() + 1528)
         self.emit("  delmap %s" % ("ok" if ok and flags == 3 else
                                    "bad" if not ok else "flags %d" % flags))
+
+    def s_map_render(self, em):
+        m = self.arg(em, 0)
+        ok = m == self.e.u32(self.player() + 1528)
+        self.emit("  rendermap %s" % ("ok" if ok else "bad"))
 
     def s_speech(self, em):
         c = self.arg(em, 0)
@@ -857,6 +867,8 @@ class Model(fc.Model):
             e.call(F_SET, self.player(), s32(v(1)), limit=200000000)
         elif o == "map":
             e.call(F_MAP, self.player(), s32(v(1)), limit=1000000)
+        elif o == "rmap":
+            e.call(F_RENDER_MAP, self.player(), limit=1000000)
         elif o == "upd":
             # UpdateHud's head (0x0017ed18 to 0x0017ed34): SetHudFeatures
             # only when the answer differs from CurrentHudFeatures.
@@ -1073,6 +1085,15 @@ MUTATIONS = [
       "pov = m->vtbl->GetPOV(m, 0);"),
     M("gauge-incar-outside", "    if (pov->Type == POV_INCAR)",
       "    if (pov->Type != POV_BUMPER)"),
+
+    # RenderTrackMap.
+    M("rmap-no-test",
+      "    if (p->pTrackMap != NULL && gTrackMapRenderFn != NULL)\n"
+      "        gTrackMapRenderFn(p->pTrackMap);",
+      "    if (gTrackMapRenderFn != NULL)\n"
+      "        gTrackMapRenderFn(p->pTrackMap);"),
+    M("rmap-never",
+      "        gTrackMapRenderFn(p->pTrackMap);", "        ;"),
 
     # SetTrackMapMode.
     M("map-1p-table",

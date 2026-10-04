@@ -86,6 +86,11 @@ void player_update_hud_features(struct Player *p);
 // and handed to the TrackMap.
 void player_set_track_map_mode(struct Player *p, int32_t mode);
 
+// Player::RenderTrackMap, 0x00181c08: the TrackMap's Render, if the player
+// has one. eDisplayFrame calls it for each player after the HUD's Flailer
+// layers.
+void player_render_track_map(struct Player *p);
+
 // Player::IsNisPlaying, 0x00176520: the NisManager's word at +68, read
 // with no test of the manager. The port reads it through playerinit.h's
 // gNisManagerIsPlayingFn, and no manager or no seam is not playing.
@@ -115,6 +120,8 @@ extern struct TrackMap *(*gNewTrackMapFn)(TrackInfo *track, struct Car *car,
                                           struct Player *p);
 // TrackMap's deleting destructor (0x001badc8) with 3.
 extern void (*gDeleteTrackMapFn)(struct TrackMap *m);
+// TrackMap::Render (0x001bade8).
+extern void (*gTrackMapRenderFn)(struct TrackMap *m);
 // Player::FillInRaceOverMessages (0x00181558).
 extern void (*gPlayerFillInRaceOverMessagesFn)(struct Player *p);
 // RaceFinishedSpeech (0x00206ab8), with the car's RacingCar FinishReason.

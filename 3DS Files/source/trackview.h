@@ -96,6 +96,7 @@
 #define TRACKVIEW_MAX_SHARED_CHUNKS 8   // their packs and flipbooks: 4
 #define TRACKVIEW_MAX_FRAMES   64       // flipbook frames past the first: 46
 #define TRACKVIEW_ROUTE        1        // the racing route the stops are on
+#define TRACKVIEW_FLAILER_POLYS 128     // a frame's minimap; one race's is ~60
 #define TRACKVIEW_STOPS        24       // how many stops round it
 #define TRACKVIEW_MAX_DEFERRED 1024     // batches held back for the alpha pass
 #define TRACKVIEW_MAX_STRIPS   256      // eBeginStrip's strips in a view
@@ -268,6 +269,10 @@ typedef struct {
     int   sunRectX, sunRectY;   // the last Z rect asked for
     int   sunRects;             // rects trackview_read_depth read back
     int   sunSky;               // of their pixels, the ones under 2
+
+    // --- the Flailer polys: TrackMap's, the frame just drawn.
+    int   flailerPolys;         // quads trackview_draw_flailer_polys drew
+    int   flailerFailed;        // and the ones it could not, or had no room for
     bool  probePending;         // the next read-back logs the probe
     char  probe[512];           // what it found, for main() to log; "" if not
 
@@ -351,6 +356,16 @@ void trackview_input(TrackView* v, uint32_t kDown, uint32_t kHeld, int cpx,
 // render target, which must have a depth buffer; then StuffSun; then, as
 // eDisplayFrame ends, the flipbooks' next frames.
 void trackview_draw(TrackView* v);
+
+// The Flailer polys ePoly::Render was handed since the last call -- the
+// minimap's, from Player::RenderTrackMap -- drawn on the bound target,
+// `width` by `height`, which takes the Flailer's 640 by 480; then the
+// queue starts again. The PS2 attaches them at eDisplayFrame's end, after
+// the HUD's Flailer layers, with each one's GS Z from its z; here they
+// draw in the order of those Zs, the lowest first, and in the order given
+// within one. citro2d is flushed first and is to be prepared again after,
+// as for georender_draw_hud_quad.
+void trackview_draw_flailer_polys(TrackView* v, float width, float height);
 
 // The environment map's targets, and the fold's triangles from the sample
 // table, which eenvmap_init has to have built. False if there is no room.

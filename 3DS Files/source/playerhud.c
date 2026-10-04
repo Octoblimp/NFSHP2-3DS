@@ -33,6 +33,7 @@ void (*gInitializeFlailerTachometerFn)(struct FlailerObjectChunk *needle,
 struct TrackMap *(*gNewTrackMapFn)(TrackInfo *track, struct Car *car,
                                    struct Player *p);
 void (*gDeleteTrackMapFn)(struct TrackMap *m);
+void (*gTrackMapRenderFn)(struct TrackMap *m);
 void (*gPlayerFillInRaceOverMessagesFn)(struct Player *p);
 void (*gRaceFinishedSpeechFn)(struct Car *c, int32_t reason);
 void (*gPlayerHudStartWrongWayFn)(struct Player *p);
@@ -324,6 +325,12 @@ void player_set_track_map_mode(struct Player *p, int32_t mode)
     }
     if (p->pTrackMap != NULL)
         p->pTrackMap->CurrentMode = mode;
+}
+
+void player_render_track_map(struct Player *p)
+{
+    if (p->pTrackMap != NULL && gTrackMapRenderFn != NULL)
+        gTrackMapRenderFn(p->pTrackMap);
 }
 
 // ------------------------------------------------------------ SetHudFeatures

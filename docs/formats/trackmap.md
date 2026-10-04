@@ -1,16 +1,19 @@
-# The minimap: TrackMap's table, turn and draw (steps 8m-6a and 8m-6b)
+# The minimap: TrackMap's table, turn and draw (steps 8m-6a to 8m-6c)
 
 TrackMap is the race's minimap. Each player has one while the HUD's
 TRACK_MAP feature is on (`hud-features.md`): SetHudFeatures makes it
 with `new TrackMap(CurrentTrackInfo, car, player)` and deletes it when
 the feature goes off. SetTrackMapMode writes the mode into it.
-Player::RenderTrackMap (`0x00181c08`) calls its Render each frame, after
-StuffDemoPolys. Render arrives in 8m-6c, so nothing draws the map yet.
+Player::RenderTrackMap (`0x00181c08`) calls its Render each frame:
+eDisplayFrame calls it for each player (`0x00113c38`), after the HUD's
+Flailer layers and StuffDemoPolys.
 
 Retail's TrackMap has fourteen functions (CONTINUE.md lists them all).
 8m-6a ports seven, plus EvalCubic: the table, the constructor and the
 turn. 8m-6b ports five more, plus GetSideOfLine and
-CalculateCentroidOfQuad: the map's own draw. All are in `trackmap.c`:
+CalculateCentroidOfQuad: the map's own draw. 8m-6c ports the last two,
+DrawMarker and Render, with IsPointInPoly and the cop manager's two
+roadblock walks. All the TrackMap ones are in `trackmap.c`:
 
 | step | function | address | size | port |
 |------|----------|---------|------|------|
@@ -29,16 +32,33 @@ CalculateCentroidOfQuad: the map's own draw. All are in `trackmap.c`:
 | 8m-6b | DrawOverOrUnderLay | `0x001bbf88` | 440 | `trackmap_draw_over_or_under_lay` |
 | 8m-6b | GetSideOfLine | `0x001cb138` | 136 | `get_side_of_line` |
 | 8m-6b | CalculateCentroidOfQuad | `0x001bda40` | 144 | `calculate_centroid_of_quad` |
+| 8m-6c | IsPointInPoly | `0x001cb1f0` | 252 | `is_point_in_poly` |
+| 8m-6c | DrawMarker | `0x001bbc50` | 824 | `trackmap_draw_marker` |
+| 8m-6c | Render | `0x001bade8` | 2188 | `trackmap_render` |
+
+8m-6c also ports, outside `trackmap.c`:
+
+| function | address | size | port |
+|----------|---------|------|------|
+| tCopManager::GetNumActiveRoadBlocks | `0x00226968` | 60 | `copmanager_get_num_active_road_blocks` |
+| tCopManager::GetActiveRoadBlock | `0x00226238` | 92 | `copmanager_get_active_road_block` |
+| Player::RenderTrackMap | `0x00181c08` | 28 | playerhud's `player_render_track_map` |
 
 The draws hand their polys to epoly.h's `gEPolyRenderFn`, as Flailer
 polys with flags 0. That is ePoly::Render (`0x0010fa68`) in retail, and
 trackview binds it in the port.
 
-`main.c` binds playerhud's `gDeleteTrackMapFn` to `trackmap_delete`,
-and `gNewTrackMapFn` to `newTrackMapLogged`. That is `trackmap_new`
-with a line in `sdmc:/nfshp2_debug.txt` for each map made, giving the
-track and whether the map found its textures. SetTrackMapMode now
-writes the `CurrentMode` field, where it used to write the word at 160.
+`main.c` binds three of playerhud's seams:
+
+- `gDeleteTrackMapFn` to `trackmap_delete`;
+- `gTrackMapRenderFn` to `trackmap_render`;
+- `gNewTrackMapFn` to `newTrackMapLogged`. That is `trackmap_new` with
+  lines in `sdmc:/nfshp2_debug.txt` for each map made: the track,
+  whether the map found its textures, and each texture's name, size,
+  depth and IsAnySemitransparencyFlag.
+
+SetTrackMapMode writes the `CurrentMode` field, where it used to write
+the word at 160.
 
 ## The record
 
@@ -338,6 +358,130 @@ DrawOverOrUnderLay(texture, layer) draws the frame (TRACKMAPFRAME, layer
 4. Otherwise it sets Flailer and goes to Render with the texture and
    flags 0, with the constructor's UVs and colours.
 
+## IsPointInPoly
+
+IsPointInPoly(p, poly, n) is the crossing test. It walks the n edges
+with j trailing i, starting at j = n − 1, and flips its answer for each
+edge that p's horizontal line crosses to p's right:
+
+- the edge counts when one end's y is at most p.y and the other's is
+  greater, so a vertex level with p counts once;
+- it crosses to the right when p.x < (x_j − x_i)(p.y − y_i) / (y_j − y_i)
+  + x_i.
+
+With n of 0 or less it answers 0.
+
+## DrawMarker
+
+DrawMarker(pos, centre, angle, outer[4], colour, layer, texture,
+markerAngle, width, height) draws one marker: a car's dot, a line, a
+roadblock or the ghost. The last argument is on the stack; the two sizes
+are floats.
+
+1. If the displayed mode's IsDrawn is 0, it returns.
+2. The position's UV comes from GetCarUVPosition. If IsPointInPoly says
+   it is outside `outer`, it returns: DrawMap's box at 1.2 times the
+   view, or the whole map in a mode without scrolling.
+3. A local ePoly is constructed. The UV less the centre is turned by
+   −angle: eIdentity, eRotateZ and eMulVector3, with z 0.
+4. With HasScrolling, the turned UV is divided by the sum of the current
+   view distances. Retail divides y first.
+5. GetBoxOnMap makes a box about it, height / 2 forward and back and
+   width / 2 to each side, turned by markerAngle.
+6. Each corner goes to −box.x × Width and −box.y × Height. MapToScreen
+   puts them on the screen, at z 0.
+7. The colour's red, green and blue go on all four vertices; the alpha
+   is what MapToScreen faded.
+8. ClipPolygon draws it on `layer` with the texture.
+
+## Render
+
+Render() draws the whole map. It returns at once unless the map has
+SufficientDataToRenderMe and there are pCurrentWorld and pCurrentRace.
+
+1. CurrentlyPursuedCar is cleared and CurrentlyDisplayedMode set to
+   CurrentMode.
+2. **Be The Cop's targeting:** unless the mode is 6 (off), and if there
+   is a pCopManager whose player's cop (nPlayerCopIndex, Cops[]) has a
+   pursuit with a chased car, that car is CurrentlyPursuedCar and the
+   displayed mode is 10.
+3. outer and the centre are zeroed. If GetAngle answers 0, it returns.
+4. The backing on layer 15, then DrawMap.
+5. The start line on layer 13: START_LINE in colour 6, at the race's
+   StartLinePosition, turned by the track's TrackMapStartLineAngle plus
+   the calibration's rotation less the map's angle. On a point to point
+   race, the finish line the same at FinishLinePosition with
+   TrackMapFinishLineAngle. Their size is the mode's
+   StartFinishLineWidth by StartFinishLineHeight.
+6. The dots are CAR_MARKERB in a mode with HasRotatingCarDots, and
+   CAR_MARKER otherwise. A dot turns by the calibration's rotation less
+   the car's Angle and the map's angle plus 0x4000, and does not turn in
+   the other modes. Its size is CarDotSize square.
+7. **The World's cars,** each one drawn only with RenderingEnabled and
+   bVisibleOnTrackMap:
+   - the AI's, from AICarPos to CopCarPos, in colour 3 on layer 5, or
+     colour 7 on layer 3 for CurrentlyPursuedCar;
+   - the cops, from CopCarPos to TrafficCarPos, in colour 4 on layer 6.
+     A cop is never shown as the pursued car.
+8. **The roadblocks,** with a pCopManager: GetActiveRoadBlock for each
+   of GetNumActiveRoadBlocks, the count read again each time. Each is
+   BKGBMP in colour 8 on layer 7, at its v2Position, at the lines' size,
+   turned by the calibration's rotation less its aTrackMapIconAngle and
+   the map's angle, plus 0x4000. It turns in every mode.
+9. **The ghost,** if the race has a pReplayingGhostCarWorldObject: in
+   colour 5 on layer 4 at its matrix's v3, turned (in a turning mode) by
+   bATan of the matrix's first row.
+10. **The players:**
+    - one player: player 1's car, if drawn, in colour 0 on layer 1;
+    - two: by number, colours 0 and 1 on layers 1 and 2, swapped when
+      player 2's RacePosition is less than player 1's. A player is drawn
+      only with RenderingEnabled and bVisibleOnTrackMap.
+    - A player who is CurrentlyPursuedCar takes colour 7 on layer 3. One
+      in a cop car (UsageType 1) takes colour 2.
+11. The frame on layer 0.
+
+The two roadblock walks go over the cop manager's PursuitList:
+GetNumActiveRoadBlocks counts the pursuits with a pRoadBlock, and
+GetActiveRoadBlock(i) answers the i-th of them, or NULL.
+
+## The draw on the 3DS
+
+ePoly::Render puts a Flailer poly on its texture's list like any other.
+Its GS Z comes from a table at `0x002c9e70`, by the poly's z:
+
+| z | GS Z |
+|---|------|
+| 0 to 15 | MaxZ − (10 + z) |
+| 16 to 19 | MaxZ − (5 to 8) |
+| 20 to 24 | 5, 4, 3, 2, 1 |
+| 25 to 28 | MaxZ − (1 to 4) |
+
+The test is GEQUAL, so a lower z draws over a higher one: the frame
+(0) over the players (1, 2) over everything down to the backing (15).
+Render scales the poly by the target's AspectRatio2DX and 2DY, which
+take the Flailer's 640 by 480 to the PS2's 512 by 448. The texture's
+attach mode sets the blend, and the alpha test GREATER than AREF 0x30
+for a texture that is not semitransparent (georender.h's GeoPass).
+
+The port follows this:
+
+- trackview's `render_epoly` keeps each Flailer poly, with its texture,
+  in a queue of 128 (`TRACKVIEW_FLAILER_POLYS`). It does not draw them.
+- `main.c` calls `player_render_track_map` for each player, on the
+  bottom screen, after the HUD's half there (`hudsplit.h`).
+- Then `trackview_draw_flailer_polys` draws the queue on the bottom
+  screen:
+  - by GS Z, lowest first, and in the order given within one Z;
+  - at the HUD's scale, 640 by 480 to 320 by 240, so the map sits where
+    retail puts it, as the bottom screen's other HUD objects do;
+  - through `georender_draw_hud_quad_w`, with the texture's blend and
+    alpha test.
+- The map's UVs carry DrawMap's q for the GS's perspective-correct
+  STQ. Each vertex goes to the GPU as (x w, y w, w) with w = 1 / q, and
+  the screen's matrix has its third column moved to its fourth. The
+  PICA's own perspective-correct interpolation then does what the GS's
+  S / Q and T / Q did.
+
 ## Where the port differs
 
 - **The mode table** is copied whole, padding included. Retail stores
@@ -368,13 +512,22 @@ DrawOverOrUnderLay(texture, layer) draws the frame (TRACKMAPFRAME, layer
 - **Division by zero.** z + H and Height are zero only in mode 6, which
   DrawMap does not draw (IsDrawn is 0). The EE would give ±FLT_MAX there,
   and the port an infinity. The checker keeps out of it.
+- **The draw's order.** On the PS2 the map's GS Zs meet the HUD's own,
+  drawn earlier at their layers' Zs. The port draws the map after the
+  bottom screen's HUD, in its own Z order. In a one-player race no
+  other bottom-screen HUD object is under the map's box.
+- **The vertices' fractions.** Render drops the fraction of each GS
+  pixel. The port keeps it, at half the size.
+- **A q of 0 or less** draws as q = 1. DrawMap's q is 1 / (z + H), and
+  positive in every mode.
 
 ## The checker
 
 `tools/trackmap_check.py` runs retail's own functions, with bSPrintf,
-bStringHash, the matrix code and ePoly's constructor under them, against
-the harness (`tools/src/trackmap_test.c`) over `trackmap.c`, `emath.c`,
-`bmath.c` and `epoly.c`.
+bStringHash, bATan, the matrix code and ePoly's constructor under them,
+against the harness (`tools/src/trackmap_test.c`) over `trackmap.c`,
+`emath.c`, `bmath.c`, `epoly.c` and `copmanager.c`. For Render, retail's
+own Race::GetRacingCar and the two roadblock walks run too.
 
 **What is stubbed or set by hand:**
 
@@ -388,6 +541,10 @@ the harness (`tools/src/trackmap_test.c`) over `trackmap.c`, `emath.c`,
   emulator runs no static constructors, and without it w is 0, so row 3
   of the matrix would drop out.
 - **WorldTimer, RaceStage and Point2Point** are set in memory.
+- **For Render,** pCurrentWorld, pCurrentRace, pCopManager and the
+  player tables are set in memory. Behind them are a World, a Race,
+  eight cars with their types and racing cars, two players, seven cops,
+  four pursuits, four roadblocks and a ghost, each at retail's offsets.
 
 **What is compared**, after each op:
 
@@ -447,7 +604,28 @@ the harness (`tools/src/trackmap_test.c`) over `trackmap.c`, `emath.c`,
   - with zoom set but no pursued car, and a pursued car without zoom;
   - without scrolling, and with hand-set alphas, heights and view
     distances;
-  - without a map texture.
+  - without a map texture;
+- IsPointInPoly, with polygons of none to eight sides, and points
+  inside, outside, on edges and corners, and level with them;
+- DrawMarker:
+  - in every mode, in and out of the box, about several centres and
+    turns, with and without scrolling;
+  - with hand-set view distances, sizes, turns, colours, layers and
+    textures, and IsDrawn set by hand;
+  - under a turned calibration;
+- Render:
+  - with nothing to render, and with no world or no race;
+  - in every mode;
+  - into Be The Cop's targeting each way, and out of it each way;
+  - with the AI's cars and the cops drawn, hidden and pursued, and the
+    World's three positions over their ranges;
+  - with the roadblocks in and out of the pursuits, in several orders,
+    in turning modes and not;
+  - with a ghost turned and still;
+  - with one player and two, in both race orders, in cop cars, and
+    pursued;
+  - on loops and point to points, with a turning camera, and without
+    START_LINE.
 
 **Not driven:**
 
@@ -463,11 +641,11 @@ the harness (`tools/src/trackmap_test.c`) over `trackmap.c`, `emath.c`,
     python tools/trackmap_check.py --mutate
 
 **Result:** after 8m-6a, 2399 ops and 6631 lines; after 8m-6b, 5092
-ops and 12519 lines. 0 differ.
+ops and 12519 lines; after 8m-6c, 6012 ops and 15025 lines. 0 differ.
 
-**The mutation pass:** 188 mutations, 187 caught, 1 equivalent, 0
-unexplained (`out/trackmap_mutate.txt`): 8m-6a's 111 and 8m-6b's
-77. The equivalent one,
+**The mutation pass:** 284 mutations, 283 caught, 1 equivalent, 0
+unexplained (`out/trackmap_mutate.txt`): 8m-6a's 111, 8m-6b's 77 and
+8m-6c's 96, three of them in `copmanager.c`. The equivalent one,
 `angle-plus-half-turn`, adds 0x8000 to the angle instead of taking it
 away. On a 16-bit angle the two are the same.
 
@@ -475,6 +653,11 @@ away. On a 16-bit angle the two are the same.
 hudfeatures_check (1298 ops) and hudrender_check (1278 ops), 0 differ.
 Their harnesses now make a `sizeof(TrackMap)` map, and dump its
 `CurrentMode`.
+
+After 8m-6c, hudfeatures_check also runs Player::RenderTrackMap, with
+TrackMap::Render stubbed: with a map and without one, for each player.
+That is 1305 ops and 10382 lines, 0 differ. Its two new mutations,
+dropping the map's test and the call, are caught.
 
 ## On Azahar
 
@@ -492,8 +675,15 @@ After 8m-6b, the same race (`out/azahar_8m6b`) ran at 19 FPS with no
 crash. The HUD and the log's `trackmap` line are as before. Nothing calls
 the draws until Render, so the screen does not change.
 
-## Left for 8m-6c
+After 8m-6c, the same race (`out/azahar_8m6c`) ran at 20 FPS with no
+crash:
 
-DrawMarker (`0x001bbc50`) with IsPointInPoly (`0x001cb1f0`), and Render
-(`0x001bade8`), and the draw on the bottom screen. Render sets
-CurrentlyDisplayedMode and calls the draws above.
+- **The map** is on the bottom screen, on the left, halfway down:
+  mode 0, the tilted one, with its backing. It shows the road in
+  perspective, the start line, and player 1's orange dot.
+- **The log** has `race: minimap 6 polys (0 failed)` each second: the
+  backing, the map's quads, the start line, the dot and the frame.
+- **The textures:** TRACKMAPFRAME and START_LINE are not
+  semitransparent, and the other five are. The frame's clear middle is
+  cut out by the alpha test, as it is on the PS2; without the test it
+  drew as an opaque black box over the whole map.

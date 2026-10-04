@@ -14,11 +14,30 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "bvector.h"
+
 struct Car;
 
 typedef struct tCopManager tCopManager;
 typedef struct tPursuit tPursuit;
 typedef struct tCop tCop;
+
+// The demo's type#1303 is 120 bytes: a roadblock a pursuit called. These
+// are the two fields the minimap reads, at the demo's offsets, which
+// retail's TrackMap::Render reads them at too. The two cops' pointers at
+// 0 are bytes here, so the offsets hold on any host.
+typedef struct tRoadBlock {
+    uint8_t  Unported0[28];             //   0
+    uint16_t aTrackMapIconAngle;        //  28  a BAM
+    uint8_t  Unported30[38];            //  30
+    bVector2 v2Position;                //  68
+    uint8_t  Unported76[44];            //  76
+} tRoadBlock;                           // 120
+
+typedef char troadblock_layout_check[
+    (offsetof(tRoadBlock, aTrackMapIconAngle) == 28
+     && offsetof(tRoadBlock, v2Position) == 68
+     && sizeof(tRoadBlock) == 120) ? 1 : -1];
 
 // The demo's type#5558 is 32 bytes; these are its first two words.
 struct tCop {
@@ -40,7 +59,8 @@ struct tPursuit {
     tPursuitNode Node;                  //    0
     uint8_t     Unported8[8];           //    8
     struct Car *pChasedCar;             //   16, the demo's 20
-    uint8_t     Unported20[1472];       //   20
+    tRoadBlock *pRoadBlock;             //   20, the demo's 24; NULL for none
+    uint8_t     Unported24[1468];       //   24
     int32_t     nHUDPursuitLevel;       // 1492  the HUD's pursuit meter
     uint8_t     Unported1496[64];       // 1496
     // Retail's. RenderHud lights one more Be The Cop roadblock, in the
@@ -51,6 +71,7 @@ struct tPursuit {
 #if UINTPTR_MAX == 0xFFFFFFFFu
 typedef char tpursuit_layout_check[
     (offsetof(struct tPursuit, pChasedCar) == 16
+     && offsetof(struct tPursuit, pRoadBlock) == 20
      && offsetof(struct tPursuit, nHUDPursuitLevel) == 1492
      && offsetof(struct tPursuit, New1560) == 1560) ? 1 : -1];
 #endif
@@ -158,6 +179,14 @@ int32_t copmanager_get_pursuit_level_for_hud(tCopManager *m,
 // tCopManager::GetNumTickets, 0x00228520: the signed byte nNumTickets of
 // CarPullovers[c->CarIndex], the index read as a short.
 int32_t copmanager_get_num_tickets(tCopManager *m, struct Car *c);
+
+// tCopManager::GetNumActiveRoadBlocks, 0x00226968: how many pursuits in
+// PursuitList have a pRoadBlock.
+int32_t copmanager_get_num_active_road_blocks(tCopManager *m);
+
+// tCopManager::GetActiveRoadBlock, 0x00226238: the pRoadBlock of the
+// i-th pursuit in PursuitList that has one, counting from 0, or NULL.
+tRoadBlock *copmanager_get_active_road_block(tCopManager *m, int32_t i);
 
 // tCopManager::GetCopByCar (0x00224f70), the cop driving `c`, and
 // GetCopByChase (0x00224fc8), the cop chasing it. Seams until task 26; a

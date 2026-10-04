@@ -278,8 +278,10 @@ void georender_set_fog(const GeoFog* fog, uint32_t colour);
 
 // ------------------------------------------------------- the screen quads
 
-// How many screen quads a frame can draw. The sun and its glare are 12.
-#define GEO_QUAD_RING 64
+// How many screen quads a frame can draw. The sun and its glare are 12,
+// the tach a few, and the minimap up to trackview.h's
+// TRACKVIEW_FLAILER_POLYS.
+#define GEO_QUAD_RING 192
 
 // One quad in the top screen's pixels, x right to 400 and y down to 240,
 // drawn as a strip in the order given -- ePoly::Render's, for
@@ -299,6 +301,14 @@ bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
 // caller flushes citro2d first and runs C2D_Prepare after.
 bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                              float width, float height);
+// The same with a w for each vertex, for the GS's STQ: each `pos` is
+// (x w, y w, w) for the screen's (x, y), and the ST interpolates over the
+// quad as the GS's S / Q and T / Q do, with w = 1 / Q. `blend` is a
+// GeoBlend and `alphaTest` the main target's test, both the poly's
+// texture's.
+bool georender_draw_hud_quad_w(const GeoRenderVertex v[4],
+                               const GeoTexture* gt, uint8_t blend,
+                               bool alphaTest, float width, float height);
 void georender_quads_rewind(void);
 
 // ------------------------------------------------------------- the strips

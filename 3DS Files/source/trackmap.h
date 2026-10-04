@@ -5,7 +5,7 @@
 // SetHudFeatures makes one per player when the HUD's TRACK_MAP feature
 // comes on (`new TrackMap`, playerhud.h's gNewTrackMapFn) and deletes it
 // when the feature goes off. SetTrackMapMode writes CurrentMode, and
-// Render (8m-6c) draws the mode CurrentlyDisplayedMode names.
+// Render draws the mode CurrentlyDisplayedMode names.
 //
 // 8m-6a holds the mode table and what Render reads the map's place and
 // turn from:
@@ -29,6 +29,13 @@
 //   is left as a fan of quads.
 // - DrawOverOrUnderLay (0x001bbf88) draws the frame and the backing over
 //   the mode's box. CalculateCentroidOfQuad (0x001bda40) is DrawMap's.
+//
+// 8m-6c draws the markers and the whole map:
+// - DrawMarker (0x001bbc50) places a marker about a world point, if
+//   IsPointInPoly (0x001cb1f0) finds it on the map's part.
+// - Render (0x001bade8), which Player::RenderTrackMap (0x00181c08) calls
+//   for each player from the frame, draws the backing, the map, the
+//   lines, the cars, the roadblocks and the frame.
 //
 // Written up in docs/formats/trackmap.md; checked on retail's image by
 // tools/trackmap_check.py.
@@ -98,6 +105,18 @@ typedef struct TrackMapMarkerColour {
 } TrackMapMarkerColour;
 
 #define TRACKMAP_NUM_MARKER_COLOURS 9
+
+// TrackMapMarkerInfo's nine, by what Render draws in each. The names are
+// the port's.
+#define TRACKMAP_MARKER_PLAYER_1      0
+#define TRACKMAP_MARKER_PLAYER_2      1
+#define TRACKMAP_MARKER_PLAYER_COP    2  // a player driving a cop car
+#define TRACKMAP_MARKER_AI            3
+#define TRACKMAP_MARKER_COP           4
+#define TRACKMAP_MARKER_GHOST         5
+#define TRACKMAP_MARKER_START_FINISH  6
+#define TRACKMAP_MARKER_PURSUED       7
+#define TRACKMAP_MARKER_ROADBLOCK     8
 
 // Retail's 0x003140b8 and 0x003143a8 (the demo's TrackMapModeInfo and
 // TrackMapMarkerInfo). Filled by trackmap_init_mode_info.
@@ -239,5 +258,40 @@ int32_t get_side_of_line(const bVector2 *a, const bVector2 *b,
 // 0x001bda40. The mean of the centroids of the quad's two triangles,
 // (0, 1, 2) and (0, 2, 3).
 void calculate_centroid_of_quad(bVector2 *out, const bVector2 q[4]);
+
+// 0x001cb1f0. 1 if `p` is inside the n-gon `poly`, by the edges a ray from
+// it to +x crosses: an edge counts when p's y is from its lower end up to,
+// but not at, its upper end, and p is left of it.
+int32_t is_point_in_poly(const bVector2 *p, const bVector2 *poly, int32_t n);
+
+// 0x001bbc50. Draws a marker for the world point `pos`, if the mode draws
+// and the point's UVs are in `outer`:
+// - Its place is its UVs less `centre`, turned back by the map's `angle`,
+//   and in a mode that scrolls, over the two view distances' sum.
+// - About that, a box `width` across and `height` along, turned by
+//   `markerAngle`, is taken through the mode's Width and Height, both
+//   negated, tilted and projected by trackmap_map_to_screen.
+// - The poly takes the colour and is clipped on `layer` with `tex`.
+void trackmap_draw_marker(TrackMap *m, const bVector3 *pos,
+                          const bVector2 *centre, uint16_t angle,
+                          const bVector2 outer[4],
+                          const TrackMapMarkerColour *colour, int32_t layer,
+                          TextureInfo *tex, uint16_t markerAngle, float width,
+                          float height);
+
+// 0x001bade8. The minimap, if the map has what it needs and there is a
+// world and a race:
+// - The mode shown is CurrentMode, or Be The Cop's targeting mode while
+//   the player's cop chases a car, which is CurrentlyPursuedCar.
+// - The backing on layer 15, the map, the start line, and a point to
+//   point's finish line, on 13.
+// - The AI's cars on 5, the cops on 6, the roadblocks on 7, a ghost on 4
+//   and the players on 1 and 2 (the one ahead on 1). The pursued car is on
+//   3 in its own colour. A car is drawn when RenderingEnabled and
+//   bVisibleOnTrackMap are set.
+// - The frame on layer 0.
+// Car dots turn with the cars in a mode with HasRotatingCarDots, and the
+// lines and roadblocks always turn.
+void trackmap_render(TrackMap *m);
 
 #endif  // TRACKMAP_H

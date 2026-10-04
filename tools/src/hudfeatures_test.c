@@ -240,6 +240,12 @@ static void delete_map(struct TrackMap *m)
     free(m);
 }
 
+static void render_map(struct TrackMap *m)
+{
+    printf("  rendermap %s\n",
+           m == players[curPlayer]->pTrackMap ? "ok" : "bad");
+}
+
 static void race_over(struct Player *p)
 {
     printf("  raceover %s\n", player_name(p));
@@ -719,6 +725,8 @@ static void run(char *line)
         player_set_hud_features(players[curPlayer], num(a[1]));
     else if (!strcmp(a[0], "map"))
         player_set_track_map_mode(players[curPlayer], inum(a[1]));
+    else if (!strcmp(a[0], "rmap"))
+        player_render_track_map(players[curPlayer]);
     else if (!strcmp(a[0], "upd"))
         player_update_hud_features(players[curPlayer]);
     else {
@@ -747,6 +755,7 @@ int main(int argc, char **argv)
     gInitializeFlailerTachometerFn = init_tach;
     gNewTrackMapFn = new_map;
     gDeleteTrackMapFn = delete_map;
+    gTrackMapRenderFn = render_map;
     gPlayerFillInRaceOverMessagesFn = race_over;
     gRaceFinishedSpeechFn = speech;
     gPlayerHudStartWrongWayFn = wrong_way;

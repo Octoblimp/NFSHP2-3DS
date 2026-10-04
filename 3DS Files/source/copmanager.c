@@ -46,3 +46,33 @@ int32_t copmanager_get_num_tickets(tCopManager *m, struct Car *c)
 
     return pl[c->CarIndex].nNumTickets;
 }
+
+int32_t copmanager_get_num_active_road_blocks(tCopManager *m)
+{
+    tPursuitNode *list = &copmanager_head(m)->PursuitList;
+    tPursuitNode *n;
+    int32_t       count = 0;
+
+    for (n = list->Next; n != list; n = n->Next)
+        if (((tPursuit *)(void *)n)->pRoadBlock != NULL)
+            count++;
+    return count;
+}
+
+tRoadBlock *copmanager_get_active_road_block(tCopManager *m, int32_t i)
+{
+    tPursuitNode *list = &copmanager_head(m)->PursuitList;
+    tPursuitNode *n;
+    int32_t       k = 0;
+
+    for (n = list->Next; n != list; n = n->Next) {
+        tRoadBlock *rb = ((tPursuit *)(void *)n)->pRoadBlock;
+
+        if (rb == NULL)
+            continue;
+        if (k == i)
+            return rb;
+        k++;
+    }
+    return NULL;
+}

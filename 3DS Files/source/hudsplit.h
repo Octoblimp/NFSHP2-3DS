@@ -8,7 +8,8 @@
 // position moves from the top left to the bottom left. The rest goes to
 // the bottom screen: the lap block (the lap, the times and the record),
 // the split times and the live split list, the score, and Be The Cop's
-// panel. The minimap goes there too, when TrackMap is ported.
+// panel. The minimap (trackmap.c) is drawn there too, after the HUD, at
+// the same half size: main.c's trackview_draw_flailer_polys.
 //
 // RenderHud writes the Flailer objects as on the PS2. The split is made
 // when they are drawn (uirender_set_placements), so none of retail's

@@ -14,7 +14,8 @@ function is behind it. The user placed it on 2026-10-03:
   - the split times and the live split list;
   - the score and the event bonuses;
   - Be The Cop's panel;
-  - the minimap, once TrackMap is ported.
+  - the minimap (step 8m-6c, `trackmap.md`), drawn after the rest at
+    the same half size, where retail puts it.
 
 ## How it is made
 

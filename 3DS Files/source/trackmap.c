@@ -10,6 +10,8 @@
 #include "bmem.h"
 #include "bprintf.h"
 #include "cammover.h"
+#include "cartypeinfo.h"
+#include "copmanager.h"
 #include "drivecam.h"
 #include "eefpu.h"
 #include "emath.h"
@@ -17,6 +19,8 @@
 #include "eview.h"
 #include "race.h"
 #include "realtime.h"
+#include "world.h"
+#include "worldobject.h"
 
 TrackMapModeInformation TrackMapModeInfo[TRACKMAP_NUM_MODES];
 TrackMapMarkerColour    TrackMapMarkerInfo[TRACKMAP_NUM_MARKER_COLOURS];
@@ -603,4 +607,277 @@ void trackmap_draw_map(TrackMap *m, bVector2 *centre, bVector2 outer[4],
         poly.UVs[i][2] *= r;
     }
     trackmap_clip_polygon(m, &poly, m->TrackMapTexture, 14);
+}
+
+// ------------------------------------------ the markers and Render (8m-6c)
+
+int32_t is_point_in_poly(const bVector2 *p, const bVector2 *poly, int32_t n)
+{
+    int32_t c = 0, i, j = n - 1;
+
+    for (i = 0; i < n; i++) {
+        if ((poly[i].y <= p->y && p->y < poly[j].y)
+            || (poly[j].y <= p->y && p->y < poly[i].y)) {
+            if (p->x < (poly[j].x - poly[i].x) * (p->y - poly[i].y)
+                       / (poly[j].y - poly[i].y) + poly[i].x)
+                c ^= 1;
+        }
+        j = i;
+    }
+    return c;
+}
+
+void trackmap_draw_marker(TrackMap *m, const bVector3 *pos,
+                          const bVector2 *centre, uint16_t angle,
+                          const bVector2 outer[4],
+                          const TrackMapMarkerColour *colour, int32_t layer,
+                          TextureInfo *tex, uint16_t markerAngle, float width,
+                          float height)
+{
+    const TrackMapModeInformation *info =
+        &TrackMapModeInfo[m->CurrentlyDisplayedMode];
+    ePoly    poly;
+    bMatrix4 rot;
+    bVector2 uv, box[4];
+    bVector3 v, p[4];
+    int      i;
+
+    if (info->IsDrawn == 0)
+        return;
+    uv.x = 0.0f;
+    uv.y = 0.0f;
+    trackmap_get_car_uv_position(m, &uv, pos);
+    if (is_point_in_poly(&uv, outer, 4) == 0)
+        return;
+    epoly_init(&poly);
+
+    // From the map's centre, turned back by the map's turn.
+    eIdentity(&rot);
+    eRotateZ(&rot, &rot, (uint16_t)-angle);
+    v.x = uv.x - centre->x;
+    v.y = uv.y - centre->y;
+    v.z = 0.0f;
+    eMulVector3(&v, &rot, &v);
+    uv.x = v.x;
+    uv.y = v.y;
+    if (info->HasScrolling != 0) {
+        float d = m->CurrentViewDistanceForward
+                + m->CurrentViewDistanceBackward;
+
+        uv.y = v.y / d;
+        uv.x = v.x / d;
+    }
+    trackmap_get_box_on_map(m, &uv, height * 0.5f, height * 0.5f,
+                            width * 0.5f, width * 0.5f, markerAngle, box);
+    for (i = 0; i < 4; i++) {
+        poly.Vertices[i].x = -box[i].x * info->Width;
+        poly.Vertices[i].y = -box[i].y * info->Height;
+    }
+    for (i = 0; i < 4; i++) {
+        p[i].x = poly.Vertices[i].x;
+        p[i].y = poly.Vertices[i].y;
+        p[i].z = 0.0f;
+    }
+    trackmap_map_to_screen(m, &poly, &p[0], &p[1], &p[2], &p[3]);
+    for (i = 0; i < 4; i++) {
+        poly.Colours[i][0] = colour->Red;
+        poly.Colours[i][1] = colour->Green;
+        poly.Colours[i][2] = colour->Blue;
+    }
+    trackmap_clip_polygon(m, &poly, tex, layer);
+}
+
+// A car dot's turn: the car's against the map's, in a mode whose dots
+// turn, and none in the others.
+static uint16_t dot_angle(const TrackMap *m, uint16_t heading,
+                          uint16_t angle)
+{
+    if (TrackMapModeInfo[m->CurrentlyDisplayedMode].HasRotatingCarDots == 0)
+        return 0;
+    return (uint16_t)(m->CurrentTrack->TrackMapCalibrationRotation - heading
+                      - angle + 16384);
+}
+
+// A player's car: the pursued car's colour on layer 3 if it is chased, or
+// the cop player's colour in a cop car.
+static void draw_player(TrackMap *m, Car *c, int32_t marker, int32_t layer,
+                        const bVector2 *centre, uint16_t angle,
+                        const bVector2 outer[4], TextureInfo *dots)
+{
+    const TrackMapModeInformation *info =
+        &TrackMapModeInfo[m->CurrentlyDisplayedMode];
+
+    if (c == m->CurrentlyPursuedCar) {
+        marker = TRACKMAP_MARKER_PURSUED;
+        layer = 3;
+    } else if (c->pCarTypeInfo->UsageType == CAR_USAGE_TYPE_COP) {
+        marker = TRACKMAP_MARKER_PLAYER_COP;
+    }
+    trackmap_draw_marker(m, &c->State.Position, centre, angle, outer,
+                         &TrackMapMarkerInfo[marker], layer, dots,
+                         dot_angle(m, c->State.Angle, angle),
+                         info->CarDotSize, info->CarDotSize);
+}
+
+// A car from the World's table on `layer` in `marker`'s colour, if it is
+// drawn; the pursued car takes its own colour on layer 3 when `pursued`.
+static void draw_car(TrackMap *m, Car *c, int32_t marker, int32_t layer,
+                     int pursued, const bVector2 *centre, uint16_t angle,
+                     const bVector2 outer[4], TextureInfo *dots)
+{
+    const TrackMapModeInformation *info =
+        &TrackMapModeInfo[m->CurrentlyDisplayedMode];
+
+    if (c->RenderingEnabled == 0 || c->bVisibleOnTrackMap == 0)
+        return;
+    if (pursued && c == m->CurrentlyPursuedCar) {
+        marker = TRACKMAP_MARKER_PURSUED;
+        layer = 3;
+    }
+    trackmap_draw_marker(m, &c->State.Position, centre, angle, outer,
+                         &TrackMapMarkerInfo[marker], layer, dots,
+                         dot_angle(m, c->State.Angle, angle),
+                         info->CarDotSize, info->CarDotSize);
+}
+
+// The start line, or the finish line, at `at`, turned by the track's
+// `lineAngle` and the map's turn `turn`.
+static void draw_line(TrackMap *m, const bVector2 *at, uint16_t lineAngle,
+                      uint16_t turn, const bVector2 *centre, uint16_t angle,
+                      const bVector2 outer[4])
+{
+    const TrackMapModeInformation *info =
+        &TrackMapModeInfo[m->CurrentlyDisplayedMode];
+    bVector3 pos;
+
+    pos.x = at->x;
+    pos.y = at->y;
+    pos.z = 0.0f;
+    trackmap_draw_marker(m, &pos, centre, angle, outer,
+                         &TrackMapMarkerInfo[TRACKMAP_MARKER_START_FINISH],
+                         13, m->StartFinishLineTexture,
+                         (uint16_t)(lineAngle + turn),
+                         info->StartFinishLineWidth,
+                         info->StartFinishLineHeight);
+}
+
+void trackmap_render(TrackMap *m)
+{
+    const TrackMapModeInformation *info;
+    TextureInfo *dots;
+    bVector2     centre, outer[4];
+    uint16_t     angle, turn;
+    int32_t      i;
+
+    if (m->SufficientDataToRenderMe == 0 || pCurrentWorld == NULL
+        || pCurrentRace == NULL)
+        return;
+
+    // Be The Cop's targeting while the player's cop chases a car, unless
+    // the map is off.
+    m->CurrentlyPursuedCar = NULL;
+    m->CurrentlyDisplayedMode = m->CurrentMode;
+    if (m->CurrentMode != 6 && pCopManager != NULL) {
+        tCop *cop = copmanager_get_player_cop(pCopManager);
+
+        if (cop != NULL && cop->pMyPursuit != NULL) {
+            m->CurrentlyPursuedCar = cop->pMyPursuit->pChasedCar;
+            if (m->CurrentlyPursuedCar != NULL)
+                m->CurrentlyDisplayedMode = TRACKMAP_MODE_COP_TARGETING;
+        }
+    }
+    memset(outer, 0, sizeof outer);
+    centre.x = 0.0f;
+    centre.y = 0.0f;
+    if (trackmap_get_angle(m, &angle) == 0)
+        return;
+
+    trackmap_draw_over_or_under_lay(m, m->UnderlayTexture, 15);
+    trackmap_draw_map(m, &centre, outer, angle);
+    info = &TrackMapModeInfo[m->CurrentlyDisplayedMode];
+
+    turn = (uint16_t)(m->CurrentTrack->TrackMapCalibrationRotation - angle);
+    draw_line(m, &pCurrentRace->StartLinePosition,
+              m->CurrentTrack->TrackMapStartLineAngle, turn, &centre, angle,
+              outer);
+    if (TheRaceParameters.Point2Point != 0)
+        draw_line(m, &pCurrentRace->FinishLinePosition,
+                  m->CurrentTrack->TrackMapFinishLineAngle, turn, &centre,
+                  angle, outer);
+    dots = info->HasRotatingCarDots != 0 ? m->CarMarkerRotatingTexture
+                                         : m->CarMarkerNonrotatingTexture;
+
+    // The AI's cars, then the cops: the World's table from AICarPos to
+    // CopCarPos, then on to TrafficCarPos.
+    for (i = 0; i < pCurrentWorld->CopCarPos - pCurrentWorld->AICarPos; i++)
+        draw_car(m, pCurrentWorld->CarTable[pCurrentWorld->AICarPos + i],
+                 TRACKMAP_MARKER_AI, 5, 1, &centre, angle, outer, dots);
+    for (i = 0; i < pCurrentWorld->TrafficCarPos - pCurrentWorld->CopCarPos;
+         i++)
+        draw_car(m, pCurrentWorld->CarTable[pCurrentWorld->CopCarPos + i],
+                 TRACKMAP_MARKER_COP, 6, 0, &centre, angle, outer, dots);
+
+    // The roadblocks, which always turn, at the lines' size.
+    if (pCopManager != NULL) {
+        for (i = 0; i < copmanager_get_num_active_road_blocks(pCopManager);) {
+            const tRoadBlock *rb =
+                copmanager_get_active_road_block(pCopManager, i++);
+            bVector3 pos;
+
+            pos.x = rb->v2Position.x;
+            pos.y = rb->v2Position.y;
+            pos.z = 0.0f;
+            trackmap_draw_marker(
+                m, &pos, &centre, angle, outer,
+                &TrackMapMarkerInfo[TRACKMAP_MARKER_ROADBLOCK], 7,
+                m->RoadblockTexture,
+                (uint16_t)(m->CurrentTrack->TrackMapCalibrationRotation
+                           - rb->aTrackMapIconAngle - angle + 16384),
+                info->StartFinishLineWidth, info->StartFinishLineHeight);
+        }
+    }
+
+    // A ghost being replayed, turned by its matrix's first row.
+    if (pCurrentRace->pReplayingGhostCarWorldObject != NULL) {
+        WorldObject *g = pCurrentRace->pReplayingGhostCarWorldObject;
+        uint16_t     a = 0;
+
+        if (info->HasRotatingCarDots != 0)
+            a = (uint16_t)(m->CurrentTrack->TrackMapCalibrationRotation
+                           - bATan(g->Matrix.v0.x, g->Matrix.v0.y) - angle
+                           + 16384);
+        trackmap_draw_marker(m, (const bVector3 *)(const void *)&g->Matrix.v3,
+                             &centre, angle, outer,
+                             &TrackMapMarkerInfo[TRACKMAP_MARKER_GHOST], 4,
+                             dots, a, info->CarDotSize, info->CarDotSize);
+    }
+
+    // The players last, the one ahead in the race over the other.
+    if (PlayerNumPlayers == 1) {
+        Player *p = PlayerPlayersByIndex[0];
+        Car    *c = p != NULL ? p->MyCar : NULL;
+
+        if (c != NULL && c->RenderingEnabled != 0
+            && c->bVisibleOnTrackMap != 0)
+            draw_player(m, c, TRACKMAP_MARKER_PLAYER_1, 1, &centre, angle,
+                        outer, dots);
+    } else if (PlayerNumPlayers == 2) {
+        Car *c1 = PlayerPlayersByNumber[0]->MyCar;
+        Car *c2 = PlayerPlayersByNumber[1]->MyCar;
+        const struct RacingCar *r1 = race_get_racing_car(pCurrentRace, c1);
+        const struct RacingCar *r2 = race_get_racing_car(pCurrentRace, c2);
+        int32_t l1 = 1, l2 = 2;
+
+        if (r2->RacePosition < r1->RacePosition) {
+            l1 = 2;
+            l2 = 1;
+        }
+        if (c1->RenderingEnabled != 0 && c1->bVisibleOnTrackMap != 0)
+            draw_player(m, c1, TRACKMAP_MARKER_PLAYER_1, l1, &centre, angle,
+                        outer, dots);
+        if (c2->RenderingEnabled != 0 && c2->bVisibleOnTrackMap != 0)
+            draw_player(m, c2, TRACKMAP_MARKER_PLAYER_2, l2, &centre, angle,
+                        outer, dots);
+    }
+    trackmap_draw_over_or_under_lay(m, m->OverlayTexture, 0);
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Cross-check 3DS Files/source/trackmap.c, the minimap (steps 8m-6a and
-8m-6b), against the retail image, SLES_507.31.
+"""Cross-check 3DS Files/source/trackmap.c, the minimap (steps 8m-6a,
+8m-6b and 8m-6c), against the retail image, SLES_507.31.
 
 **The model** is retail's own: InitTrackMapModeInfo (0x001bd1f8), the
 constructor (0x001babb8), GetAngle (0x001bb678) with EvalCubic
@@ -8,16 +8,23 @@ constructor (0x001babb8), GetAngle (0x001bb678) with EvalCubic
 (0x001bca50) and GetBoxOnMap (0x001bcae8); and DrawMap (0x001bb7a8),
 MapToScreen (0x001bcc58), ClipPolygon (0x001bc140) with EmitPoint,
 GetSideOfLine (0x001cb138), CalculateCentroidOfQuad (0x001bda40) and
-DrawOverOrUnderLay (0x001bbf88). bSPrintf, bStringHash, the matrix code
-and ePoly's constructor run under them as they are. The harness
-(tools/src/trackmap_test.c) runs trackmap.c over emath.c, bmath.c and
-epoly.c.
+DrawOverOrUnderLay (0x001bbf88); and IsPointInPoly (0x001cb1f0),
+DrawMarker (0x001bbc50) and Render (0x001bade8), with tCopManager's
+GetNumActiveRoadBlocks (0x00226968) and GetActiveRoadBlock (0x00226238)
+and Race::GetRacingCar (0x00149158). bSPrintf, bStringHash, bATan, the
+matrix code and ePoly's constructor run under them as they are. The
+harness (tools/src/trackmap_test.c) runs trackmap.c over emath.c, bmath.c,
+epoly.c and copmanager.c.
 
 **The stubs** are GetTextureInfo (0x001abf48), which answers each of the
 seven names from a mask; eGetView (0x00107c90), which answers the one
 view; and ePoly::Render (0x0010fa68), the port's gEPolyRenderFn. All three
 log their calls, Render with the whole poly. WorldTimer, pCurrentRace's
-RaceStage and TheRaceParameters.Point2Point are set in memory.
+RaceStage and TheRaceParameters.Point2Point are set in memory, and for
+Render pCurrentWorld, pCurrentRace, pCopManager and the player tables,
+over a World, a Race, eight cars with their types and racing cars, two
+players, seven cops, four pursuits, four roadblocks and a ghost, each at
+retail's offsets.
 
 **Compared**, after each op, are the map's fields by name, its pointers
 by what they point at; a test ePoly's fields, retail's offsets 16 to 152;
@@ -47,6 +54,17 @@ hand-set alphas, heights and view distances, without a map texture and
 under a second calibration. Only convex quads are clipped: retail's
 buffers hold the eight points those can make.
 
+For 8m-6c it tests points against polygons of none to eight sides, inside,
+outside, on their edges and corners and level with them; draws markers in
+every mode, in and out of the box, about several centres and turns, with
+and without scrolling, at hand-set view distances, sizes, turns, colours,
+layers and textures; and renders the map with nothing to render, with no
+world or race, in every mode, through each way to Be The Cop's targeting
+and each way out of it, with the AI's cars and the cops drawn, hidden and
+pursued, the roadblocks in and out of the pursuits, a ghost turned and
+still, one player and two in both orders, cop cars, a pursued player, and
+loops and point to points.
+
     python tools/trackmap_check.py
     python tools/trackmap_check.py --mutate [--only a,b]
     python tools/trackmap_check.py --dump out/trackmap
@@ -74,7 +92,7 @@ HARNESS = "tools/src/trackmap_test.c"
 TRACKMAP = "3DS Files/source/trackmap.c"
 SOURCES = [HARNESS, TRACKMAP] + ["3DS Files/source/" + f for f in (
     "emath.c", "bmatrix.c", "bvector.c", "bmath.c", "bmathtab.c",
-    "bprintf.c", "bmem.c", "epoly.c")]
+    "bprintf.c", "bmem.c", "epoly.c", "copmanager.c")]
 
 F_INIT = 0x001bd1f8
 F_CTOR = 0x001babb8
@@ -89,6 +107,9 @@ F_CENTROID = 0x001bda40
 F_CLIP = 0x001bc140
 F_OVERLAY = 0x001bbf88
 F_DRAWMAP = 0x001bb7a8
+F_IPP = 0x001cb1f0
+F_MARKER = 0x001bbc50
+F_RENDER = 0x001bade8
 EMATH_INIT = 0x0011b138
 EMATH_SINIT = 0x0011bf70                # 0x002dc400 = (0, 0, 0, 1)
 S_TEXINFO = 0x001abf48
@@ -100,6 +121,12 @@ COLOURS = 0x003143a8
 GP = 0x003358f0
 WORLD_TIMER = GP - 19576
 CURRENT_RACE = GP - 22272
+CURRENT_WORLD = GP - 22120
+COP_MANAGER = GP - 15620
+NUM_PLAYERS = GP - 20920
+BY_INDEX = GP - 20928
+BY_NUMBER = GP - 20936
+NUM_POOL = 8
 POINT2POINT = 0x0031a8c0
 
 MAP_SIZE = 176
@@ -617,6 +644,237 @@ def scenario_drawmap():
     return s
 
 
+# ---- 8m-6c
+
+def octagon(cx, cy, r):
+    return [(cx + r * math.cos(k * math.pi / 4 + 0.3),
+             cy + r * math.sin(k * math.pi / 4 + 0.3)) for k in range(8)]
+
+
+IPP_POLYS = [
+    [],
+    [(0.0, 0.0)],
+    [(0.0, 0.0), (4.0, 4.0)],
+    [(0.0, 0.0), (4.0, 0.0), (2.0, 3.0)],
+    [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)],
+    [(0.0, 4.0), (4.0, 4.0), (4.0, 0.0), (0.0, 0.0)],
+    [(2.0, -1.0), (5.0, 2.0), (2.0, 5.0), (-1.0, 2.0)],
+    [(0.0, 0.0), (4.0, 0.0), (4.0, 0.0), (0.0, 4.0)],
+    [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (2.0, 1.0), (0.0, 4.0)],
+    [(0.0, 0.0), (4.0, 0.0), (0.0, 4.0), (4.0, 4.0)],
+    octagon(2.0, 2.0, 2.5),
+    [(-0.0661, 1.0838), (0.6047, 1.2604), (0.7813, 0.5896),
+     (0.1105, 0.4130)],
+]
+
+IPP_POINTS = [
+    (1.0, 1.0), (2.0, 2.0), (0.0, 0.0), (4.0, 4.0), (2.0, 0.0), (0.0, 2.0),
+    (4.0, 2.0), (2.0, 4.0), (-1.0, 2.0), (5.0, 2.0), (2.0, -1.0),
+    (2.0, 5.0), (3.999, 3.999), (1.0, 3.5), (2.0, 1.5), (2.0, 0.5),
+    (3.0, 3.0), (-0.0, -0.0), (2.0, 3.0), (1e-7, 1e-7), (0.35, 0.85),
+    (0.7, 0.5), (1e9, 2.0),
+]
+
+
+def scenario_ipp():
+    s = []
+    for poly in IPP_POLYS:
+        for pt in IPP_POINTS:
+            s += ["ipp|%d|%s|%s|" % ((len(poly),) + tuple(F(v) for v in pt))
+                  + "|".join(F(v) for q in poly for v in q)]
+    return s
+
+
+OUTER = [(-0.2, -0.2), (1.2, -0.2), (1.2, 1.2), (-0.2, 1.2)]
+TILTED = [(0.30, 0.10), (0.85, 0.35), (0.60, 0.90), (0.05, 0.65)]
+
+
+def marker(pos, centre, a, col, layer, tex, ma, w, h, outer=OUTER):
+    return ("marker|" + "|".join(F(v) for v in pos) + "|"
+            + "|".join(F(v) for v in centre)
+            + "|%#x|%d|%d|%d|%#x|%s|%s|" % (a, col, layer, tex, ma, F(w),
+                                             F(h))
+            + "|".join(F(v) for q in outer for v in q))
+
+
+MK_POS = [(500.0, -500.0, 0.0), (100.0, -900.0, 3.0), (990.0, -10.0, -2.0),
+          (1500.0, -500.0, 0.0), (-150.0, -480.0, 0.0), (430.0, -380.0, 7.0),
+          (500.0, 150.0, 0.0), (0.0, 0.0, 0.0)]
+
+
+def scenario_marker():
+    s = ["fillmodes", "init", "cal|0|0|%s|0" % F(1000.0), "mask|0", "fill",
+         "ctor|1|1|1", "f|148|%s" % F(0.33), "f|152|%s" % F(0.33)]
+    # Every mode, places in and out of the box, two centres and turns.
+    for m in range(11):
+        s += ["f|164|%d" % m]
+        for pos in MK_POS:
+            for centre, a in (((0.5, 0.5), 0), ((0.45, 0.52), 0x1234)):
+                s += [marker(pos, centre, a, 3, 5, 1, 0x4000, 0.1, 0.1)]
+    # Turns, sizes, colours, layers and textures in a mode that scrolls and
+    # one that does not.
+    for m in (2, 5):
+        s += ["f|164|%d" % m]
+        for a in (0, 0x4000, 0x8000, 0xc000, 0xffff, 0x2aaa):
+            for ma in (0, 0x2000, 0xc000, 0x8001):
+                s += [marker(MK_POS[5], (0.5, 0.5), a, 0, 1, 2, ma, 0.1,
+                             0.1)]
+        for w, h in ((0.06, 0.06), (0.1, 0.05), (0.0, 0.0), (-0.02, 0.3),
+                     (0.039982, 0.18498), (2.0, 1.5)):
+            s += [marker(MK_POS[4], (0.5, 0.5), 0x1234, 6, 13, 5, 0x3000,
+                         w, h)]
+        for col in range(-1, 9):
+            s += [marker(MK_POS[0], (0.5, 0.5), 0, col, col + 3, 1, 0, 0.1,
+                         0.1)]
+        for tex, layer in ((6, 7), (-1, 0), (3, 15), (4, 2)):
+            s += [marker(MK_POS[1], (0.48, 0.55), 0x7000, 8, layer, tex,
+                         0x0123, 0.05, 0.15)]
+    # View distances for the scroll, a hand-set height and width.
+    s += ["f|164|2"]
+    for fwd, back in ((0.1, 0.9), (1.0, 0.25), (0.441781, 0.202055),
+                      (5.0, 3.0)):
+        s += ["f|148|%s" % F(fwd), "f|152|%s" % F(back),
+              marker(MK_POS[5], (0.5, 0.5), 0x1234, 3, 5, 2, 0x5555, 0.1,
+                     0.1)]
+    s += ["f|148|%s" % F(0.33), "f|152|%s" % F(0.33)]
+    for wd, ht in ((100.0, 260.0), (40.0, 40.0)):
+        s += ["mode|2|12|4|%s" % F(wd), "mode|2|16|4|%s" % F(ht),
+              marker(MK_POS[5], (0.5, 0.5), 0x1234, 3, 5, 2, 0x5555, 0.1,
+                     0.1)]
+    s += ["init"]
+    # A tilted box: points either side of each edge.
+    s += ["f|164|5"]
+    for x, y in ((300.0, -100.0), (310.0, -150.0), (850.0, -350.0),
+                 (860.0, -350.0), (600.0, -900.0), (600.0, -910.0),
+                 (50.0, -650.0), (40.0, -650.0), (450.0, -500.0)):
+        s += [marker((x, y, 0.0), (0.5, 0.5), 0, 4, 6, 2, 0x1000, 0.1, 0.1,
+                     TILTED)]
+    # A turned calibration and an undrawn mode by hand.
+    s += ["cal|%s|%s|%s|0xd5da" % (F(-1200.5), F(830.25), F(2400.0)),
+          "fill", "ctor|1|1|1", "f|148|%s" % F(0.33), "f|152|%s" % F(0.33),
+          "f|164|0"]
+    for pos in ((0.0, 0.0, 0.0), (-150.0, -900.0, 0.0), (37.25, 412.5, 1.0)):
+        s += [marker(pos, (0.5, 0.5), 0x1234, 2, 1, 1, 0x4000, 0.09589,
+                     0.09589)]
+    s += ["mode|0|64|1|0", marker((0.0, 0.0, 0.0), (0.5, 0.5), 0, 2, 1, 1,
+                                  0, 0.1, 0.1),
+          "mode|0|64|1|0x80", marker((0.0, 0.0, 0.0), (0.5, 0.5), 0, 2, 1,
+                                     1, 0, 0.1, 0.1), "init"]
+    return s
+
+
+# The cars for Render, about the tracked car at (37.25, 412.5): the two
+# players' c0 and c1, the AI's c2 to c4, the cops c5 and c6, and c7.
+RENDER_CARS = [
+    ((37.25, 412.5), 0x0000), ((80.0, 390.0), 0x1000),
+    ((-60.0, 500.0), 0x4000), ((150.0, 300.0), 0x8000),
+    ((10.0, 700.0), 0xc000), ((-200.0, 250.0), 0x2345),
+    ((260.0, 520.0), 0xfedc), ((2000.0, -2000.0), 0x0100),
+]
+
+
+def render_setup():
+    s = ["fillmodes", "init",
+         "cal|%s|%s|%s|0x1234" % (F(-1200.5), F(830.25), F(2400.0)),
+         "mask|0", "fill", "ctor|1|1|1", "pos|%s|%s" % (F(37.25), F(412.5)),
+         "mover|1", "stage|4", "view|0", "lookback|0",
+         "camdir|%s|%s|%s" % (F(0.6), F(0.8), F(0.0)), "world|1000",
+         "f|0|%s" % F(0.6), "f|4|%s" % F(0.8), "f|8|0", "f|12|0",
+         "f|16|1000", "lines|0x0400|0x9000",
+         "sline|%s|%s|%s|%s" % (F(30.0), F(420.0), F(-90.0), F(610.0))]
+    for i, ((x, y), a) in enumerate(RENDER_CARS):
+        s += ["cpos|%d|%s|%s" % (i, F(x), F(y)), "cang|%d|%#x" % (i, a),
+              "cvis|%d|1|1" % i, "wcar|%d|%d" % (i, i)]
+    s += ["wpos|2|5|7", "pcar|0|0", "pcar|1|1", "players|1|0|-1|0|-1"]
+    return s
+
+
+def scenario_render():
+    s = render_setup()
+    # Nothing to render: no data, no world, no race.
+    s += ["f|160|2", "render", "wnull|1", "rnull|0", "render", "rnull|1",
+          "f|156|0", "render", "f|156|1", "render"]
+    # Every mode.
+    for m in range(11):
+        s += ["f|160|%d" % m, "render"]
+    s += ["f|160|2"]
+    # Be The Cop's targeting, each way in and out of it.
+    s += ["cmgr|1", "render", "copidx|2", "cop|2|-2", "render",
+          "cop|2|-1", "render", "pursuit|0|-1|-1", "cop|2|0", "render",
+          "pursuit|0|3|-1", "render", "f|160|6", "render", "f|160|0",
+          "render", "f|160|4", "render", "f|160|2"]
+    for c in (0, 5, 2, 7):
+        s += ["pursuit|0|%d|-1" % c, "render"]
+    s += ["copidx|0", "cop|0|1", "pursuit|1|4|-1", "render", "copidx|-1",
+          "render"]
+    # The AI's cars and the cops hidden and shown.
+    for c, r, v in ((2, 0, 1), (3, 1, 0), (4, 0x80, 1), (5, 1, 2),
+                    (6, 0, 0), (2, 1, 0x80000000)):
+        s += ["cvis|%d|%#x|%#x" % (c, r, v), "render"]
+    for c in range(7):
+        s += ["cvis|%d|1|1" % c]
+    for ai, cop, tr in ((2, 2, 2), (5, 2, 7), (0, 7, 8), (3, 3, 6),
+                        (2, 5, 4)):
+        s += ["wpos|%d|%d|%d" % (ai, cop, tr), "render"]
+    s += ["wpos|2|5|7"]
+    # The roadblocks.
+    for r, (x, y, a) in enumerate(((50.0, 450.0, 0x0000),
+                                   (-100.0, 380.0, 0x4000),
+                                   (120.0, 600.0, 0x9abc),
+                                   (5000.0, 5000.0, 0x1111))):
+        s += ["rb|%d|%s|%s|%#x" % (r, F(x), F(y), a)]
+    s += ["pursuit|0|3|0", "pursuit|1|-1|-1", "pursuit|2|4|2",
+          "pursuit|3|-1|1"]
+    for order in ((0, 1, 2, 3), (1,), (), (3, 2, 1, 0), (2,), (0, 2)):
+        s += ["plist" + "".join("|%d" % k for k in order), "render"]
+    s += ["plist|0|1|2|3", "f|160|4", "render", "f|160|5", "render",
+          "f|160|2", "cmgr|0", "render", "cmgr|1", "plist", "copidx|-1"]
+    # A ghost, turned and still.
+    s += ["ghost|1", "gmat|%s|%s|%s|%s|%s" % (F(0.6), F(-0.8), F(-20.0),
+                                              F(440.0), F(3.0))]
+    for m in (2, 4, 5, 0):
+        s += ["f|160|%d" % m, "render"]
+    s += ["gmat|%s|%s|%s|%s|%s" % (F(-1.0), F(0.0), F(5000.0), F(0.0),
+                                   F(0.0)), "render", "ghost|0", "f|160|2"]
+    # One player: none, no car, hidden, a cop car, pursued.
+    s += ["players|1|-1|-1|-1|-1", "render", "players|1|0|-1|0|-1",
+          "pcar|0|-1", "render", "pcar|0|0", "cvis|0|0|1", "render",
+          "cvis|0|1|0", "render", "cvis|0|1|1", "cusage|0|1", "render",
+          "cusage|0|2", "render", "cusage|0|0", "cmgr|1", "copidx|3",
+          "cop|3|0", "pursuit|0|0|-1", "render", "cusage|0|1", "render",
+          "cusage|0|0", "copidx|-1", "players|1|1|-1|0|-1", "render"]
+    # Two players, in both orders and level.
+    s += ["players|2|0|1|0|1", "f|160|7"]
+    for p0, p1 in ((1, 2), (2, 1), (3, 3), (-1, 5), (0x7f, 0x80)):
+        s += ["crace|0|%#x" % (p0 & 0xff), "crace|1|%#x" % (p1 & 0xff),
+              "render"]
+    s += ["crace|0|1", "crace|1|2"]
+    for v0, v1 in ((0, 1), (1, 0), (0, 0)):
+        s += ["cvis|0|%d|1" % v0, "cvis|1|1|%d" % v1, "render"]
+    s += ["cvis|0|1|1", "cvis|1|1|1", "cusage|1|1", "render", "cusage|0|1",
+          "render", "copidx|3", "pursuit|0|1|-1", "render",
+          "pursuit|0|0|-1", "crace|0|4", "render", "copidx|-1",
+          "cusage|0|0", "cusage|1|0", "players|2|0|1|1|0", "render"]
+    s += ["players|0|0|1|0|1", "render", "players|3|0|1|0|1", "render",
+          "players|1|0|-1|0|-1", "f|160|2"]
+    # Point to point: the finish line too.
+    s += ["p2p|1", "render", "lines|0xffff|0x0001", "render", "p2p|0x100",
+          "render", "f|160|5", "render", "p2p|1",
+          "sline|%s|%s|%s|%s" % (F(-30.0), F(395.0), F(5000.0), F(0.0)),
+          "render", "p2p|0", "f|160|2"]
+    # The camera turning while the map scrolls.
+    w = 1000
+    for k in range(6):
+        a = k * 2 * math.pi / 5.0
+        w += 120
+        s += ["camdir|%s|%s|%s" % (F(math.cos(a)), F(math.sin(a)), F(0.0)),
+              "world|%d" % w, "render"]
+    # A missing START_LINE texture.
+    s += ["mask|0x20", "fill", "ctor|1|1|1", "f|160|2", "render",
+          "mask|0", "init"]
+    return s
+
+
 def script():
     s = []
     s += scenario_tables()
@@ -632,6 +890,9 @@ def script():
     s += scenario_clip()
     s += scenario_overlay()
     s += scenario_drawmap()
+    s += scenario_ipp()
+    s += scenario_marker()
+    s += scenario_render()
     return s
 
 
@@ -654,17 +915,46 @@ class Model(object):
         self.view = e.alloc(256, align=16)
         self.camera = e.alloc(128, align=16)
         self.mover = e.alloc(256, align=16)
-        self.race = e.alloc(16, align=16)
+        self.race = e.alloc(1720, align=16)
         self.texs = [e.alloc(16, align=16) for _ in TEX_NAMES]
         self.scratch = e.alloc(64, align=16)
         self.pcar = e.alloc(2400, align=16)
         self.poly = e.alloc(160, align=16)
         self.pts = e.alloc(64, align=16)
+        self.buf = e.alloc(128, align=16)
+        self.world = e.alloc(112, align=16)
+        self.pool = [e.alloc(2400, align=16) for _ in range(NUM_POOL)]
+        self.types = [e.alloc(1344, align=16) for _ in range(NUM_POOL)]
+        self.racing = [e.alloc(192, align=16) for _ in range(NUM_POOL)]
+        self.players = [e.alloc(256, align=16) for _ in range(2)]
+        self.ghost = e.alloc(128, align=16)
+        self.mgr = e.alloc(64, align=16)
+        self.cops = [e.alloc(32, align=16) for _ in range(7)]
+        self.pursuits = [e.alloc(32, align=16) for _ in range(4)]
+        self.rbs = [e.alloc(120, align=16) for _ in range(4)]
+        self.pattern = e.alloc(16, align=16)
         for a, n in ((self.track, 176), (self.car, 2400),
                      (self.player, 256), (self.view, 256),
                      (self.camera, 128), (self.mover, 256),
-                     (self.race, 16), (self.pcar, 2400), (self.poly, 160)):
+                     (self.race, 1720), (self.pcar, 2400), (self.poly, 160),
+                     (self.world, 112), (self.ghost, 128), (self.mgr, 64)):
             e.write(a, bytes(n))
+        for group, n in ((self.pool, 2400), (self.types, 1344),
+                         (self.racing, 192), (self.players, 256),
+                         (self.cops, 32), (self.pursuits, 32),
+                         (self.rbs, 120)):
+            for a in group:
+                e.write(a, bytes(n))
+        for i in range(NUM_POOL):
+            e.put32(self.pool[i] + 12, self.types[i])
+            e.put32(self.pool[i] + 28, self.racing[i])
+        e.put32(self.mgr + 12, -1)
+        e.put32(self.mgr + 44, self.mgr + 44)
+        e.put32(self.mgr + 48, self.mgr + 44)
+        e.write(self.pattern, bytes([0xa1, 0xb2, 0xc3, 0]))
+        for g in (CURRENT_WORLD, COP_MANAGER, NUM_PLAYERS, BY_INDEX,
+                  BY_INDEX + 4, BY_NUMBER, BY_NUMBER + 4):
+            e.put32(g, 0)
         e.put32(self.view + 60, self.view + 60)
         e.put32(self.view + 64, self.view + 60)
         e.put32(self.mover + 24, self.camera)
@@ -678,6 +968,8 @@ class Model(object):
                       self.player: "player", self.pcar: "pcar"}
         for i, a in enumerate(self.texs):
             self.names[a] = "tex%d" % i
+        for i, a in enumerate(self.pool):
+            self.names[a] = "c%d" % i
         e.stub(S_TEXINFO, self.s_texinfo)
         e.stub(S_GETVIEW, self.s_getview)
         e.stub(S_RENDER, self.s_render)
@@ -787,6 +1079,10 @@ class Model(object):
         i = s32(w)
         return self.texs[i] if 0 <= i < len(self.texs) else 0
 
+    def car_arg(self, w):
+        i = s32(w)
+        return self.pool[i] if 0 <= i < NUM_POOL else 0
+
     def op(self, a):
         e = self.e
         o = a[0]
@@ -866,6 +1162,107 @@ class Model(object):
                 [c, c + 4] + [q + 4 * k for k in range(8)]))
         elif o == "tables":
             tables = True
+        elif o == "ipp":
+            p, q = self.buf, self.buf + 16
+            n = s32(v(1))
+            e.put32(p, v(2))
+            e.put32(p + 4, v(3))
+            for k in range(min(n, 8)):
+                e.put32(q + 8 * k, v(4 + 2 * k))
+                e.put32(q + 8 * k + 4, v(5 + 2 * k))
+            r = e.call(F_IPP, p, q, v(1), limit=100000)
+            self.emit("  ipp %d" % r)
+        elif o == "marker":
+            p, c, q = self.buf, self.buf + 16, self.buf + 32
+            for k in range(3):
+                e.put32(p + 4 * k, v(1 + k))
+            e.put32(c, v(4))
+            e.put32(c + 4, v(5))
+            for k in range(8):
+                e.put32(q + 4 * k, v(13 + k))
+            col = s32(v(7))
+            colour = self.pattern if col < 0 else COLOURS + 3 * col
+            e.put32(e.reg[29], v(10) & 0xffff)
+            e.fpr[12] = v(11)
+            e.fpr[13] = v(12)
+            e.call(F_MARKER, self.map, p, c, v(6) & 0xffff, q, colour, v(8),
+                   self.tex_arg(v(9)), limit=10000000)
+        elif o == "render":
+            e.call(F_RENDER, self.map, limit=100000000)
+        elif o == "wnull":
+            e.put32(CURRENT_WORLD, self.world if v(1) else 0)
+        elif o == "rnull":
+            e.put32(CURRENT_RACE, self.race if v(1) else 0)
+        elif o == "cmgr":
+            e.put32(COP_MANAGER, self.mgr if v(1) else 0)
+        elif o == "wpos":
+            for k in range(3):
+                e.put32(self.world + 32 + 4 * k, v(1 + k))
+        elif o == "wcar":
+            e.put32(self.world + 44 + 4 * v(1), self.car_arg(v(2)))
+        elif o == "cpos":
+            e.put32(self.pool[v(1)] + 96, v(2))
+            e.put32(self.pool[v(1)] + 100, v(3))
+        elif o == "cang":
+            e.write(self.pool[v(1)] + 932, struct.pack("<H", v(2) & 0xffff))
+        elif o == "cvis":
+            e.mem[self.pool[v(1)] + 1192] = v(2) & 0xff
+            e.put32(self.pool[v(1)] + 2164, v(3))
+        elif o == "cusage":
+            e.put32(self.types[v(1)] + 1336, v(2))
+        elif o == "crace":
+            e.mem[self.racing[v(1)] + 10] = v(2) & 0xff
+        elif o == "pcar":
+            e.put32(self.players[v(1)] + 4, self.car_arg(v(2)))
+        elif o == "players":
+            e.put32(NUM_PLAYERS, v(1))
+            for k in range(2):
+                ix, bn = s32(v(2 + k)), s32(v(4 + k))
+                e.put32(BY_INDEX + 4 * k,
+                        self.players[ix] if 0 <= ix < 2 else 0)
+                e.put32(BY_NUMBER + 4 * k,
+                        self.players[bn] if 0 <= bn < 2 else 0)
+        elif o == "copidx":
+            e.put32(self.mgr + 12, v(1))
+        elif o == "cop":
+            k, pu = v(1), s32(v(2))
+            if pu == -2:
+                e.put32(self.mgr + 16 + 4 * k, 0)
+            else:
+                e.put32(self.mgr + 16 + 4 * k, self.cops[k])
+                e.put32(self.cops[k],
+                        self.pursuits[pu] if 0 <= pu < 4 else 0)
+        elif o == "pursuit":
+            pu, r = v(1), s32(v(3))
+            e.put32(self.pursuits[pu] + 16, self.car_arg(v(2)))
+            e.put32(self.pursuits[pu] + 20,
+                    self.rbs[r] if 0 <= r < 4 else 0)
+        elif o == "plist":
+            head = self.mgr + 44
+            prev = head
+            for k in range(1, len(a)):
+                node = self.pursuits[v(k)]
+                e.put32(prev, node)
+                e.put32(node + 4, prev)
+                prev = node
+            e.put32(prev, head)
+            e.put32(head + 4, prev)
+        elif o == "rb":
+            r = self.rbs[v(1)]
+            e.put32(r + 68, v(2))
+            e.put32(r + 72, v(3))
+            e.write(r + 28, struct.pack("<H", v(4) & 0xffff))
+        elif o == "ghost":
+            e.put32(self.race + 1660, self.ghost if v(1) else 0)
+        elif o == "gmat":
+            for k, off in enumerate((32, 36, 80, 84, 88)):
+                e.put32(self.ghost + off, v(1 + k))
+        elif o == "sline":
+            for k in range(4):
+                e.put32(self.race + 1640 + 4 * k, v(1 + k))
+        elif o == "lines":
+            e.write(self.track + 106, struct.pack("<HH", v(1) & 0xffff,
+                                                  v(2) & 0xffff))
         elif o == "ctor":
             e.call(F_CTOR, self.map, self.track if v(1) else 0,
                    self.car if v(2) else 0, self.player if v(3) else 0,
@@ -1022,7 +1419,7 @@ MUTATIONS = [
     M("ctor-displayed-0", "    m->CurrentlyDisplayedMode = 6;", "    m->CurrentlyDisplayedMode = 0;"),
     M("ctor-mode-0", "    m->CurrentMode = 6;", "    m->CurrentMode = 0;"),
     M("ctor-time-0", "    m->PreviousTime = (uint32_t)WorldTimer;\n    m->CurrentTrack", "    m->PreviousTime = 0;\n    m->CurrentTrack"),
-    M("ctor-no-pursued", "    m->CurrentlyPursuedCar = NULL;\n", ""),
+    M("ctor-no-pursued", "    m->CurrentlyPursuedCar = NULL;\n    m->CurrentMode = 6;", "    m->CurrentMode = 6;"),
     M("ctor-no-prev-x", "    m->PreviousCameraDirection.x = 0.0f;\n    m->PreviousCameraDirection.y = 0.0f;\n    m->CurrentCameraSpeed",
       "    m->PreviousCameraDirection.y = 0.0f;\n    m->CurrentCameraSpeed"),
     M("ctor-no-speed-y", "    m->CurrentCameraSpeed.y = 0.0f;\n", ""),
@@ -1200,7 +1597,7 @@ MUTATIONS = [
 
     # DrawMap.
     M("dm-no-drawn-test", "    if (info->IsDrawn == 0)\n        return;\n    epoly_init(&poly);\n    carUV", "    epoly_init(&poly);\n    carUV"),
-    M("dm-always-scrolls", "    if (info->HasScrolling != 0) {", "    if (1) {"),
+    M("dm-always-scrolls", "    if (info->HasScrolling != 0) {\n        if (info->ZoomToKeepPursuedCarInView", "    if (1) {\n        if (info->ZoomToKeepPursuedCarInView"),
     M("dm-zoom-untested", "        if (info->ZoomToKeepPursuedCarInView != 0\n            && m->CurrentlyPursuedCar", "        if (m->CurrentlyPursuedCar"),
     M("dm-dist-dy-x", "            float dy = a->y - b->y;", "            float dy = a->x - b->y;"),
     M("dm-dist-squared", "            float dist = sqrtf(dx * dx + dy * dy);", "            float dist = dx * dx + dy * dy;"),
@@ -1223,6 +1620,115 @@ MUTATIONS = [
     M("dm-q-not-scaled", "        poly.UVs[i][2] *= r;\n", ""),
     M("dm-layer-13", "    trackmap_clip_polygon(m, &poly, m->TrackMapTexture, 14);", "    trackmap_clip_polygon(m, &poly, m->TrackMapTexture, 13);"),
     M("dm-no-car-uv", "    trackmap_get_car_uv_position(m, &carUV, &m->CarToTrack->State.Position);\n", ""),
+
+    # IsPointInPoly.
+    M("ipp-lower-lt", "        if ((poly[i].y <= p->y && p->y < poly[j].y)", "        if ((poly[i].y < p->y && p->y < poly[j].y)"),
+    M("ipp-upper-le", "            || (poly[j].y <= p->y && p->y < poly[i].y)) {", "            || (poly[j].y <= p->y && p->y <= poly[i].y)) {"),
+    M("ipp-x-le", "            if (p->x < (poly[j].x - poly[i].x)", "            if (p->x <= (poly[j].x - poly[i].x)"),
+    M("ipp-no-pi-x", "                       / (poly[j].y - poly[i].y) + poly[i].x)", "                       / (poly[j].y - poly[i].y))"),
+    M("ipp-j-from-0", "    int32_t c = 0, i, j = n - 1;", "    int32_t c = 0, i, j = 0;"),
+    M("ipp-j-stays", "        j = i;\n    }\n    return c;", "    }\n    return c;"),
+    M("ipp-sets", "                c ^= 1;", "                c = 1;"),
+
+    # DrawMarker.
+    M("mk-no-drawn-test", "    if (info->IsDrawn == 0)\n        return;\n    uv.x = 0.0f;", "    uv.x = 0.0f;"),
+    M("mk-of-current-mode", "        &TrackMapModeInfo[m->CurrentlyDisplayedMode];\n    ePoly    poly;\n    bMatrix4 rot;", "        &TrackMapModeInfo[m->CurrentMode];\n    ePoly    poly;\n    bMatrix4 rot;"),
+    M("mk-no-in-test", "    if (is_point_in_poly(&uv, outer, 4) == 0)\n        return;\n", ""),
+    M("mk-in-3", "    if (is_point_in_poly(&uv, outer, 4) == 0)", "    if (is_point_in_poly(&uv, outer, 3) == 0)"),
+    M("mk-turn-not-negated", "    eRotateZ(&rot, &rot, (uint16_t)-angle);", "    eRotateZ(&rot, &rot, angle);"),
+    M("mk-centre-y-of-x", "    v.y = uv.y - centre->y;", "    v.y = uv.y - centre->x;"),
+    M("mk-not-turned", "    eMulVector3(&v, &rot, &v);\n    uv.x = v.x;", "    uv.x = v.x;"),
+    M("mk-always-scrolls", "    if (info->HasScrolling != 0) {\n        float d", "    if (1) {\n        float d"),
+    M("mk-scroll-forward-twice", "                + m->CurrentViewDistanceBackward;", "                + m->CurrentViewDistanceForward;"),
+    M("mk-scroll-x-unscaled", "        uv.x = v.x / d;\n", ""),
+    M("mk-scroll-reciprocal", "        uv.y = v.y / d;", "        uv.y = v.y * (1.0f / d);"),
+    M("mk-box-width-height-swapped", "    trackmap_get_box_on_map(m, &uv, height * 0.5f, height * 0.5f,\n                            width * 0.5f, width * 0.5f, markerAngle, box);",
+      "    trackmap_get_box_on_map(m, &uv, width * 0.5f, width * 0.5f,\n                            height * 0.5f, height * 0.5f, markerAngle, box);"),
+    M("mk-box-forward-whole", "    trackmap_get_box_on_map(m, &uv, height * 0.5f, height * 0.5f,", "    trackmap_get_box_on_map(m, &uv, height, height * 0.5f,"),
+    M("mk-box-not-turned", "width * 0.5f, width * 0.5f, markerAngle, box);", "width * 0.5f, width * 0.5f, 0, box);"),
+    M("mk-x-not-negated", "        poly.Vertices[i].x = -box[i].x * info->Width;", "        poly.Vertices[i].x = box[i].x * info->Width;"),
+    M("mk-y-by-width", "        poly.Vertices[i].y = -box[i].y * info->Height;", "        poly.Vertices[i].y = -box[i].y * info->Width;"),
+    M("mk-z-1", "        p[i].z = 0.0f;\n    }\n    trackmap_map_to_screen", "        p[i].z = 1.0f;\n    }\n    trackmap_map_to_screen"),
+    M("mk-green-of-red", "        poly.Colours[i][1] = colour->Green;", "        poly.Colours[i][1] = colour->Red;"),
+    M("mk-no-blue", "        poly.Colours[i][2] = colour->Blue;\n", ""),
+    M("mk-layer-14", "    trackmap_clip_polygon(m, &poly, tex, layer);", "    trackmap_clip_polygon(m, &poly, tex, 14);"),
+
+    # The dots' turn, the players' and the cars' colours and layers.
+    M("dot-always-turns", "    if (TrackMapModeInfo[m->CurrentlyDisplayedMode].HasRotatingCarDots == 0)\n        return 0;\n", ""),
+    M("dot-heading-added", "TrackMapCalibrationRotation - heading\n", "TrackMapCalibrationRotation + heading\n"),
+    M("dot-no-quarter", "                      - angle + 16384);\n}", "                      - angle);\n}"),
+    M("player-pursued-layer-1", "        layer = 3;\n    } else if", "        layer = 1;\n    } else if"),
+    M("player-no-cop-colour", "    } else if (c->pCarTypeInfo->UsageType == CAR_USAGE_TYPE_COP) {\n        marker = TRACKMAP_MARKER_PLAYER_COP;\n    }", "    }"),
+    M("player-cop-over-pursued", "    } else if (c->pCarTypeInfo->UsageType", "    }\n    if (c->pCarTypeInfo->UsageType"),
+    M("player-cop-is-2", "UsageType == CAR_USAGE_TYPE_COP) {", "UsageType == 2) {"),
+    M("car-no-render-test", "    if (c->RenderingEnabled == 0 || c->bVisibleOnTrackMap == 0)\n        return;", "    if (c->bVisibleOnTrackMap == 0)\n        return;"),
+    M("car-no-visible-test", "    if (c->RenderingEnabled == 0 || c->bVisibleOnTrackMap == 0)\n        return;", "    if (c->RenderingEnabled == 0)\n        return;"),
+    M("car-pursued-always", "    if (pursued && c == m->CurrentlyPursuedCar) {", "    if (c == m->CurrentlyPursuedCar) {"),
+    M("car-pursued-never", "    if (pursued && c == m->CurrentlyPursuedCar) {", "    if (pursued && c == NULL) {"),
+    M("car-pursued-layer-1", "        layer = 3;\n    }\n    trackmap_draw_marker", "        layer = 1;\n    }\n    trackmap_draw_marker"),
+    M("line-layer-12", "                         13, m->StartFinishLineTexture,", "                         12, m->StartFinishLineTexture,"),
+    M("line-not-turned", "                         (uint16_t)(lineAngle + turn),", "                         (uint16_t)lineAngle,"),
+    M("line-size-swapped", "                         info->StartFinishLineWidth,\n                         info->StartFinishLineHeight);",
+      "                         info->StartFinishLineHeight,\n                         info->StartFinishLineWidth);"),
+
+    # Render.
+    M("render-no-data-test", "    if (m->SufficientDataToRenderMe == 0 || pCurrentWorld == NULL\n", "    if (pCurrentWorld == NULL\n"),
+    M("render-no-world-test", "    if (m->SufficientDataToRenderMe == 0 || pCurrentWorld == NULL\n", "    if (m->SufficientDataToRenderMe == 0\n"),
+    M("render-no-race-test", "        || pCurrentRace == NULL)\n        return;", "        )\n        return;"),
+    M("render-pursued-kept", "    m->CurrentlyPursuedCar = NULL;\n    m->CurrentlyDisplayedMode = m->CurrentMode;", "    m->CurrentlyDisplayedMode = m->CurrentMode;"),
+    M("render-off-targets", "    if (m->CurrentMode != 6 && pCopManager != NULL) {", "    if (pCopManager != NULL) {"),
+    M("render-no-chase-targets", "            if (m->CurrentlyPursuedCar != NULL)\n                m->CurrentlyDisplayedMode", "            m->CurrentlyDisplayedMode"),
+    M("render-targets-large", "                m->CurrentlyDisplayedMode = TRACKMAP_MODE_COP_TARGETING;", "                m->CurrentlyDisplayedMode = TRACKMAP_MODE_COP_LARGE;"),
+    M("render-no-underlay", "    trackmap_draw_over_or_under_lay(m, m->UnderlayTexture, 15);\n", ""),
+    M("render-underlay-14", "    trackmap_draw_over_or_under_lay(m, m->UnderlayTexture, 15);", "    trackmap_draw_over_or_under_lay(m, m->UnderlayTexture, 14);"),
+    M("render-overlay-1", "    trackmap_draw_over_or_under_lay(m, m->OverlayTexture, 0);", "    trackmap_draw_over_or_under_lay(m, m->OverlayTexture, 1);"),
+    M("render-turn-plus", "    turn = (uint16_t)(m->CurrentTrack->TrackMapCalibrationRotation - angle);", "    turn = (uint16_t)(m->CurrentTrack->TrackMapCalibrationRotation + angle);"),
+    M("render-finish-always", "    if (TheRaceParameters.Point2Point != 0)\n        draw_line", "    if (1)\n        draw_line"),
+    M("render-finish-byte", "    if (TheRaceParameters.Point2Point != 0)\n        draw_line", "    if ((int8_t)TheRaceParameters.Point2Point != 0)\n        draw_line"),
+    M("render-finish-start-angle", "                  m->CurrentTrack->TrackMapFinishLineAngle, turn, &centre,", "                  m->CurrentTrack->TrackMapStartLineAngle, turn, &centre,"),
+    M("render-start-finish-angle", "              m->CurrentTrack->TrackMapStartLineAngle, turn, &centre, angle,", "              m->CurrentTrack->TrackMapFinishLineAngle, turn, &centre, angle,"),
+    M("render-finish-at-start", "        draw_line(m, &pCurrentRace->FinishLinePosition,", "        draw_line(m, &pCurrentRace->StartLinePosition,"),
+    M("render-dots-swapped", "    dots = info->HasRotatingCarDots != 0 ? m->CarMarkerRotatingTexture\n                                         : m->CarMarkerNonrotatingTexture;",
+      "    dots = info->HasRotatingCarDots != 0 ? m->CarMarkerNonrotatingTexture\n                                         : m->CarMarkerRotatingTexture;"),
+    M("render-ai-from-0", "        draw_car(m, pCurrentWorld->CarTable[pCurrentWorld->AICarPos + i],", "        draw_car(m, pCurrentWorld->CarTable[i],"),
+    M("render-ai-to-traffic", "    for (i = 0; i < pCurrentWorld->CopCarPos - pCurrentWorld->AICarPos; i++)", "    for (i = 0; i < pCurrentWorld->TrafficCarPos - pCurrentWorld->AICarPos; i++)"),
+    M("render-ai-cop-colour", "                 TRACKMAP_MARKER_AI, 5, 1,", "                 TRACKMAP_MARKER_COP, 5, 1,"),
+    M("render-ai-layer-6", "                 TRACKMAP_MARKER_AI, 5, 1,", "                 TRACKMAP_MARKER_AI, 6, 1,"),
+    M("render-ai-not-pursued", "                 TRACKMAP_MARKER_AI, 5, 1,", "                 TRACKMAP_MARKER_AI, 5, 0,"),
+    M("render-cops-from-ai", "        draw_car(m, pCurrentWorld->CarTable[pCurrentWorld->CopCarPos + i],", "        draw_car(m, pCurrentWorld->CarTable[pCurrentWorld->AICarPos + i],"),
+    M("render-cops-pursued", "                 TRACKMAP_MARKER_COP, 6, 0,", "                 TRACKMAP_MARKER_COP, 6, 1,"),
+    M("render-cops-layer-5", "                 TRACKMAP_MARKER_COP, 6, 0,", "                 TRACKMAP_MARKER_COP, 5, 0,"),
+    M("render-rb-no-manager-test", "    if (pCopManager != NULL) {\n        for (i = 0;", "    {\n        for (i = 0;"),
+    M("render-rb-pre-increment", "copmanager_get_active_road_block(pCopManager, i++);", "copmanager_get_active_road_block(pCopManager, ++i);"),
+    M("render-rb-angle-added", "                           - rb->aTrackMapIconAngle - angle + 16384),", "                           + rb->aTrackMapIconAngle - angle + 16384),"),
+    M("render-rb-no-quarter", "                           - rb->aTrackMapIconAngle - angle + 16384),", "                           - rb->aTrackMapIconAngle - angle),"),
+    M("render-rb-dot-size", "                info->StartFinishLineWidth, info->StartFinishLineHeight);\n        }", "                info->CarDotSize, info->CarDotSize);\n        }"),
+    M("render-rb-layer-8", "                &TrackMapMarkerInfo[TRACKMAP_MARKER_ROADBLOCK], 7,", "                &TrackMapMarkerInfo[TRACKMAP_MARKER_ROADBLOCK], 8,"),
+    M("render-rb-dot-texture", "                m->RoadblockTexture,\n", "                dots,\n"),
+    M("render-ghost-always-turns", "        if (info->HasRotatingCarDots != 0)\n            a = (uint16_t)", "        if (1)\n            a = (uint16_t)"),
+    M("render-ghost-atan-swapped", "bATan(g->Matrix.v0.x, g->Matrix.v0.y)", "bATan(g->Matrix.v0.y, g->Matrix.v0.x)"),
+    M("render-ghost-v1", "bATan(g->Matrix.v0.x, g->Matrix.v0.y)", "bATan(g->Matrix.v1.x, g->Matrix.v1.y)"),
+    M("render-ghost-at-v2", "(const bVector3 *)(const void *)&g->Matrix.v3,", "(const bVector3 *)(const void *)&g->Matrix.v2,"),
+    M("render-ghost-layer-5", "&TrackMapMarkerInfo[TRACKMAP_MARKER_GHOST], 4,", "&TrackMapMarkerInfo[TRACKMAP_MARKER_GHOST], 5,"),
+    M("render-ghost-ai-colour", "&TrackMapMarkerInfo[TRACKMAP_MARKER_GHOST], 4,", "&TrackMapMarkerInfo[TRACKMAP_MARKER_AI], 4,"),
+    M("render-one-by-number", "        Player *p = PlayerPlayersByIndex[0];", "        Player *p = PlayerPlayersByNumber[0];"),
+    M("render-one-no-render-test", "        if (c != NULL && c->RenderingEnabled != 0\n            && c->bVisibleOnTrackMap != 0)", "        if (c != NULL\n            && c->bVisibleOnTrackMap != 0)"),
+    M("render-one-no-visible-test", "        if (c != NULL && c->RenderingEnabled != 0\n            && c->bVisibleOnTrackMap != 0)", "        if (c != NULL && c->RenderingEnabled != 0)"),
+    M("render-one-layer-2", "            draw_player(m, c, TRACKMAP_MARKER_PLAYER_1, 1, &centre, angle,", "            draw_player(m, c, TRACKMAP_MARKER_PLAYER_1, 2, &centre, angle,"),
+    M("render-two-for-three", "    } else if (PlayerNumPlayers == 2) {", "    } else if (PlayerNumPlayers >= 2) {"),
+    M("render-two-by-index", "        Car *c2 = PlayerPlayersByNumber[1]->MyCar;", "        Car *c2 = PlayerPlayersByIndex[1]->MyCar;"),
+    M("render-two-order-le", "        if (r2->RacePosition < r1->RacePosition) {", "        if (r2->RacePosition <= r1->RacePosition) {"),
+    M("render-two-order-flipped", "        if (r2->RacePosition < r1->RacePosition) {", "        if (r1->RacePosition < r2->RacePosition) {"),
+    M("render-two-order-unsigned", "        if (r2->RacePosition < r1->RacePosition) {", "        if ((uint8_t)r2->RacePosition < (uint8_t)r1->RacePosition) {"),
+    M("render-two-l2-stays", "            l1 = 2;\n            l2 = 1;\n", "            l1 = 2;\n"),
+    M("render-two-c1-of-c2", "        if (c1->RenderingEnabled != 0 && c1->bVisibleOnTrackMap != 0)", "        if (c2->RenderingEnabled != 0 && c1->bVisibleOnTrackMap != 0)"),
+    M("render-two-c2-no-visible-test", "        if (c2->RenderingEnabled != 0 && c2->bVisibleOnTrackMap != 0)", "        if (c2->RenderingEnabled != 0)"),
+    M("render-two-c2-player-1", "            draw_player(m, c2, TRACKMAP_MARKER_PLAYER_2, l2,", "            draw_player(m, c2, TRACKMAP_MARKER_PLAYER_1, l2,"),
+
+    # The roadblock walks.
+    M("rbn-all-pursuits", "        if (((tPursuit *)(void *)n)->pRoadBlock != NULL)\n            count++;", "        count++;", "3DS Files/source/copmanager.c"),
+    M("rbg-from-1", "    int32_t       k = 0;\n\n    for (n = list->Next; n != list; n = n->Next) {\n        tRoadBlock", "    int32_t       k = 1;\n\n    for (n = list->Next; n != list; n = n->Next) {\n        tRoadBlock", "3DS Files/source/copmanager.c"),
+    M("rbg-counts-empty", "        if (rb == NULL)\n            continue;\n        if (k == i)", "        if (k == i && rb != NULL)", "3DS Files/source/copmanager.c"),
 ]
 
 EQUIVALENT = {

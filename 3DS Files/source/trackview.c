@@ -98,6 +98,20 @@ static eRenderTarget* s_quadTarget;     // the view StuffSun draws for
 static SunRect        s_sunRects[NUM_SUN_ZBUFFERS];
 static int            s_numSunRects;
 
+// The Flailer polys handed to ePoly::Render since trackview_draw_flailer_
+// polys last ran: TrackMap's, which eDisplayFrame makes after the HUD's
+// Flailer layers (Player::RenderTrackMap, from 0x00113c38) and attaches
+// at its end. They wait here for the screen the minimap is on.
+typedef struct {
+    ePoly        poly;
+    TextureInfo* info;
+    int32_t      z;             // the GS Z's order; see flailer_z
+} FlailerPoly;
+
+static FlailerPoly s_flailer[TRACKVIEW_FLAILER_POLYS];
+static int         s_numFlailer;
+static int         s_flailerDropped;
+
 // The fog: its fractions for the view's palette, by depth, one for the
 // scenery and one for the sky and the sun; the colour; and the planes the
 // last frame's view was between. See fog_attach.
@@ -1686,6 +1700,9 @@ void trackview_free(TrackView* v)
             gETransferZBufferRectFn = NULL;
         }
         s_numSunRects = 0;
+        // Their textures go with the track.
+        s_numFlailer     = 0;
+        s_flailerDropped = 0;
     }
     if (v->info) {
         for (i = 0; i < v->numSolids + v->numOther; i++) {
@@ -1858,6 +1875,45 @@ static void target_to_screen(float x, float y, int targetW, int targetH,
     *sy = 120.0f + (y - (float)(targetH >> 1)) * k / aspY;
 }
 
+// The table Render takes a Flailer poly's z into (0x002c9e70), 29 of 32
+// set. Its GS Z is MaxZ less the entry, but for a z of 20 to 24, whose Z
+// is the entry; z 0 to 15, the minimap's, are 10 to 25 under MaxZ, so a
+// higher z draws under a lower.
+static const uint8_t kFlailerZ[32] = {
+    10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+    5, 6, 7, 8, 5, 4, 3, 2, 1, 1, 2, 3, 4, 0, 0, 0,
+};
+
+// The order of a z's GS Z, with MaxZ as 65536; only the order is wanted.
+// Render indexes the table unchecked, so a z past it reads what follows;
+// here it is the table's last, 0, and on top of everything.
+static int32_t flailer_z(float z)
+{
+    int32_t i = ee_trunc_w(z);
+
+    if (i < 0 || i > 31) {
+        i = 31;
+    }
+    if ((uint32_t)(i - 20) < 5u) {
+        return kFlailerZ[i];
+    }
+    return 65536 - kFlailerZ[i];
+}
+
+static void queue_flailer(const ePoly* p, TextureInfo* info)
+{
+    FlailerPoly* f;
+
+    if (s_numFlailer >= TRACKVIEW_FLAILER_POLYS) {
+        s_flailerDropped++;
+        return;
+    }
+    f       = &s_flailer[s_numFlailer++];
+    f->poly = *p;
+    f->info = info;
+    f->z    = flailer_z(p->Vertices[0].z);
+}
+
 // A SunPoly's own ALPHA_1, where any other poly takes its texture's. C is
 // As in every one StuffSun makes.
 static uint8_t poly_blend(const ePoly* p)
@@ -1902,7 +1958,15 @@ static void render_epoly(ePoly* p, TextureInfo* info, int flags)
     // `flags` keeps the packet in the poly's frame memory, for a poly
     // drawn again unchanged; nothing here needs it.
     (void)flags;
-    if (info == NULL || v == NULL || rt == NULL) {
+    if (info == NULL) {
+        return;
+    }
+    // The minimap's, for whichever screen it is on.
+    if (p->Flailer) {
+        queue_flailer(p, info);
+        return;
+    }
+    if (v == NULL || rt == NULL) {
         return;
     }
     if (p->SunPoly) {
@@ -1970,6 +2034,85 @@ static void render_epoly(ePoly* p, TextureInfo* info, int flags)
     v->sunAt[0] = mx;
     v->sunAt[1] = my;
     v->sunAlpha = p->Colours[0][3];
+}
+
+// Render's packet for each queued poly, as render_epoly has it -- the
+// texture's blend, and its alpha test unless it is semitransparent -- but
+// for the position: the minimap's polys set ApplyAspectRatio, which
+// scales the Flailer's 640 by 480 to the target's pixels, 512 by 448 on
+// the PS2; here the target is `width` by `height`. Each vertex's ST is
+// the GS's S / Q and T / Q, carried across the quad by a w of 1 / Q.
+void trackview_draw_flailer_polys(TrackView* v, float width, float height)
+{
+    static const uint8_t kStrip[4] = { 0, 1, 3, 2 };
+    int   order[TRACKVIEW_FLAILER_POLYS];
+    float sx = width / 640.0f, sy = height / 480.0f;
+    int   n = s_numFlailer, i, j, k;
+
+    v->flailerPolys  = 0;
+    v->flailerFailed = s_flailerDropped;
+    s_numFlailer     = 0;
+    s_flailerDropped = 0;
+    if (!v->loaded) {
+        v->flailerFailed += n;
+        return;
+    }
+
+    // The lowest Z first: the GS's GEQUAL leaves the highest on top, and
+    // of two at one Z, the later.
+    for (i = 0; i < n; i++) {
+        for (j = i; j > 0 && s_flailer[order[j - 1]].z > s_flailer[i].z; j--) {
+            order[j] = order[j - 1];
+        }
+        order[j] = i;
+    }
+
+    for (i = 0; i < n; i++) {
+        const FlailerPoly* f = &s_flailer[order[i]];
+        const ePoly*       p = &f->poly;
+        TrackTex*          t;
+        GeoTexture         gt;
+        GeoRenderVertex    q[4];
+        uint8_t            blend;
+
+        if (gpuCmdBufSize - gpuCmdBufOffset < CMDBUF_GUARD_WORDS) {
+            v->cmdSkipped++;
+            v->flailerFailed++;
+            continue;
+        }
+        t = load_texture(v, f->info);
+        if (t == NULL || !t->valid) {
+            v->flailerFailed++;
+            continue;
+        }
+        gt.tex        = &t->tex;
+        gt.uvScale[0] = t->uvScale[0];
+        gt.uvScale[1] = t->uvScale[1];
+        gt.pass       = t->pass;
+
+        memset(q, 0, sizeof q);
+        for (k = 0; k < 4; k++) {
+            const int m  = kStrip[k];
+            float     qq = p->UVs[m][2];
+            float     w  = qq > 0.0f ? 1.0f / qq : 1.0f;
+            float     d  = qq > 0.0f ? qq : 1.0f;
+
+            q[k].pos[0] = p->Vertices[m].x * sx * w;
+            q[k].pos[1] = p->Vertices[m].y * sy * w;
+            q[k].pos[2] = w;
+            q[k].st[0]  = p->UVs[m][0] / d;
+            q[k].st[1]  = p->UVs[m][1] / d;
+            memcpy(q[k].colour, p->Colours[m], 4);
+        }
+        blend = f->info->IsAnySemitransparencyFlag ? t->pass.blend
+                                                   : GEO_BLEND_NONE;
+        if (georender_draw_hud_quad_w(q, &gt, blend, !t->pass.noAlphaTest,
+                                      width, height)) {
+            v->flailerPolys++;
+        } else {
+            v->flailerFailed++;
+        }
+    }
 }
 
 // eTransferZBufferRect (0x00110610): the PS2 puts the rect on a queue that
