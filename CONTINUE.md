@@ -1,11 +1,13 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-04), after 13b-2: the frame profiler. The race runs in real
-time, and the log says where each frame's 50 ms go: 45 of them are the
-draw's CPU side, and over half the frame is the scenery's cull and the
-envmap. 13b-3, New 3DS mode in full, is next. "Where the port stands"
-below has the count of what is left.
+(2026-10-04), after 13b-3: New 3DS mode in full. The CIA can now open
+ptm:sysm, so the speedup to 804 MHz goes through; the heap is sized
+from the grant; the boot logs the clock, and the log has the jukebox
+worker's time. The draw's stages are named for what they time: the
+models' render (13-18 ms) and the envmap (8-10 ms) are half the frame.
+13b-4, the profile's cuts, is next, starting on the models. "Where the
+port stands" below has the count of what is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
@@ -1821,33 +1823,49 @@ and so replaced every boot.
          5.3, the HUD 5, the cars 4.4. The world is 2-7 ms. Azahar's
          GPU takes almost no emulated time, so its numbers mean little
          there.
-     - **13b-3, New 3DS mode in full.** Check each part at runtime
-       rather than assume it from `app.rsf`, in the CIA and the .3dsx
-       both:
-       - **804 MHz and the L2 cache:** `initPlatformPerf` calls
-         `osSetSpeedupEnable(true)`, and the `console:` line says it
-         was asked. Confirm that it takes: the same race's `frame:`
-         lines with it and without it.
-       - **The 178 MB extended memory** (the CIA only): the heap is a
-         fixed 48 MB (`heapcfg.c`). Size it from the grant on New 3DS,
-         so the later tracks, cars and AI have room.
-       - **Core 2** (`CanAccessCore2`): the movie decoder uses it
-         already. Move to it only what the profiler shows is worth it.
-         The streams (the jukebox, the texture and resource loading)
-         go first, since they need no change to the game's order of
-         work.
-       - **Core 1**, the system core (`APT_SetAppCpuTimeLimit(80)`):
-         keep it for the audio and streaming threads.
+     - ~~**13b-3, New 3DS mode in full.**~~ Done in Session 31
+       (`new3ds-mode.md`):
+       - **The clock.** The CIA's service list lacked `ptm:sysm`, so
+         `osSetSpeedupEnable(true)` failed silently and nothing restored
+         the clock after the HOME menu. `app.rsf` adds it. A `clock:`
+         line at boot times a 2,000,000-turn loop as launched, with the
+         speedup off and back on; their ratio is the clock's.
+       - **The memory.** `heapcfg.c` gives the linear heap what is
+         left after the heap's 48 MB, up to 80 MB (`LINEAR_WANT`), and
+         the malloc heap the rest, up to its 96 MB window. The CIA on a
+         New 3DS gets 80 and 96; the .3dsx and an Old 3DS divide as
+         before.
+       - **The cores.** The jukebox worker sums its decode and read
+         time (`jbstream_busy`): a `jukebox:` section in the `frame:`
+         line, and a line of its own every five seconds out of a race.
+         In the menus it decodes 6-7 ms a second, under 1% of core 0,
+         so it stays there. Nothing else outside the draw is worth
+         moving.
+       - **The draw's stages renamed.** 13b-2's "cull" was
+         `scenery_stuff_scenery`, the models' render, and the real cull
+         (`scenery_do_culling` in `begin_frame`) was inside "envmap".
+         `frameprof` now has cull, envmap, sky, models, scenery, cars,
+         hud and bottom.
+       - On Azahar (track 12): the clock line reads x1.00, since
+         Azahar runs ConfigureNew3DSCPU as unimplemented (its log has
+         all four calls). The .3dsx's grant is 124 MB, so the split is
+         unchanged. Frames of 50-54 ms: models 12.6-17.8, envmap
+         7.8-10, bottom 5.3, hud 4.7, cars 4.4, cull 2.2-2.9.
+       - **On hardware, still to see:** the clock line's x3, the CIA's
+         96 + 80 MB, and the `frame:` lines at 804 MHz.
      - **13b-4, only what the profile demands.**
-       - With 13b-2's numbers on a New 3DS, cut the largest cost,
-         re-measure, and stop once the race holds 30.
-       - 13b-2's profile on Azahar puts the cull
-         (`scenery_stuff_scenery`, 15-18 ms) first, and the envmap (the
-         sun's Z rects read back and the six cube-map views, 10-13 ms)
-         second. Then the two Flailer screens (5 ms each) and the cars
-         (4.4 ms). The world's step is 2-7 ms. Check the order on a New
-         3DS before cutting, since Azahar's CPU clock is not the
-         hardware's.
+       - Cut the largest cost, re-measure, and stop once the race holds
+         30. A New 3DS's `frame:` lines decide the order; until the user
+         runs one, Azahar's proportions are the guide.
+       - 13b-3's profile on Azahar puts the models first
+         (`scenery_stuff_scenery`, eModel::Render for each kept model:
+         12.6-17.8 ms). Look first at `render_model`'s work per model
+         and per batch: the state set, the texture binds and the lit
+         batches' uniform uploads (`draw_lit_batch`'s `bind_lit`, about
+         20 a batch). Then the envmap (the six cube views and the fold,
+         7.8-10 ms), the two Flailer screens (about 5 ms each) and the
+         cars (4.4 ms). The cull is 2.2-2.9 ms and the world's step
+         2-5 ms.
        - Keep retail's look. A cut that changes it, such as a view
          updated every other frame or drawn smaller, goes to the user
          first.
@@ -1860,6 +1878,14 @@ and so replaced every boot.
      checker runs on the same machine: 8m-4a's first run read 57% and
      11 FPS that way, and 100% and 20 FPS idle.
    - The car's sounds (step 14): LoadSoundRegionsInGame and the engine.
+   - **No music in a race** (found in 13b-3). The flow stops the
+     jukebox when the menus go, and retail starts it again from the
+     race coordinator's TICK, `DelayedStart(6.0)`, once the
+     ReplayManager has marked the beginning of time. The port has no
+     ReplayManager, so `rcstates.c` never reaches the call, and nothing
+     sets `gJukeboxDelayedStartFn`. Put it in with step 14, or with the
+     replay's slice: the jukebox's DelayedStart, and the
+     ReplayManager's BeginningOfTime and MarkTheBeginningOfTime.
    - The racer AI (step 11), and a SkipFE race with AI cars in it.
 
    The way in is retail's own debug path. With SkipFE (gp-23220) set,
@@ -3134,20 +3160,21 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-04, after 13b-2)
+### Where the port stands (2026-10-04, after 13b-3)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 13b-3, New 3DS mode in full. 13b-1, the real clock and
-  the pacing, and 13b-2, the frame profiler, are done.
+- **Next:** step 13b-4, the profile's cuts, starting on the models'
+  render. 13b-1 (the real clock and the pacing), 13b-2 (the frame
+  profiler) and 13b-3 (New 3DS mode in full) are done.
 - **Left, in the table's units:**
 
   | Step | Slices left |
   |---|---|
-  | 13b, New 3DS mode and 30 FPS | 2 |
+  | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
   | 11, the racer and traffic AI | 4-6 |
   | 12, the cops | 4-6 |
@@ -3157,17 +3184,17 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped, 2026-10-03) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **26-40** |
+  | **Total** | **25-39** |
 
-- **How far along:** about 24-27 of the road's 50-67 slices are done,
+- **How far along:** about 25-28 of the road's 50-67 slices are done,
   roughly a third. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
-  Read the 26-40 as a floor.
-- **The pace:** 76 commits from 2026-09-27 to 2026-10-04, most of them a
+  Read the 25-39 as a floor.
+- **The pace:** 78 commits from 2026-09-27 to 2026-10-04, most of them a
   slice each.
-- **Not yet in the count:** the replay. The race runs in real time
-  since 13b-1, at about 20 FPS on Azahar. Holding 30 is 13b-3 and
-  13b-4.
+- **Not yet in the count:** the replay, and with it the race's music
+  (see step 14's note). The race runs in real time since 13b-1, at
+  about 20 FPS on Azahar. Holding 30 is 13b-4.
 
 ## What not to trust
 

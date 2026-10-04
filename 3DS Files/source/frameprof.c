@@ -58,6 +58,8 @@ void frameprof_add(FrameProf *fp, const MainLoopTimingStats *t,
         prev = end;
     }
     fp->stage[FRAMEPROF_SUBMIT] += t->DisplayFrame - prev;
+    fp->jukeboxDecode += d->jukeboxDecode;
+    fp->jukeboxRead += d->jukeboxRead;
 
     fp->total += frame;
     if (frame > fp->worst)
@@ -82,9 +84,11 @@ bool frameprof_line(FrameProf *fp, char *buf, size_t n)
     snprintf(buf, n,
              "frame: %.1f fps, %.1f ms, worst %.1f; sound %.1f, flow %.1f, "
              "race %.1f, world %.1f, cameras %.1f, draw %.1f, loads %.1f; "
-             "draw: prep %.1f, envmap %.1f, sky %.1f, cull %.1f, "
-             "scenery %.1f, cars %.1f, hud %.1f, bottom %.1f, submit %.1f; "
-             "waits: vsync %.1f, gpu %.1f; citro3d cpu %.1f, gpu %.1f; "
+             "draw: prep %.1f, cull %.1f, envmap %.1f, sky %.1f, "
+             "models %.1f, scenery %.1f, cars %.1f, hud %.1f, bottom %.1f, "
+             "submit %.1f; "
+             "waits: vsync %.1f, gpu %.1f; jukebox: decode %.2f, "
+             "read %.2f; citro3d cpu %.1f, gpu %.1f; "
              "C %d fps, G %d fps",
              fp->frames / secs, mean_ms(fp, fp->total),
              (double)fp->worst / FRAMEPROF_TICKS_PER_MS,
@@ -96,9 +100,10 @@ bool frameprof_line(FrameProf *fp, char *buf, size_t n)
              mean_ms(fp, fp->phase[FRAMEPROF_DRAW]),
              mean_ms(fp, fp->phase[FRAMEPROF_LOADS]),
              mean_ms(fp, fp->stage[FRAMEPROF_PREP]),
+             mean_ms(fp, fp->stage[FRAMEPROF_CULL]),
              mean_ms(fp, fp->stage[FRAMEPROF_ENVMAP]),
              mean_ms(fp, fp->stage[FRAMEPROF_SKY]),
-             mean_ms(fp, fp->stage[FRAMEPROF_CULL]),
+             mean_ms(fp, fp->stage[FRAMEPROF_MODELS]),
              mean_ms(fp, fp->stage[FRAMEPROF_SCENERY]),
              mean_ms(fp, fp->stage[FRAMEPROF_CARS]),
              mean_ms(fp, fp->stage[FRAMEPROF_HUD]),
@@ -106,6 +111,8 @@ bool frameprof_line(FrameProf *fp, char *buf, size_t n)
              mean_ms(fp, fp->stage[FRAMEPROF_SUBMIT]),
              mean_ms(fp, fp->phase[FRAMEPROF_VSYNC]),
              mean_ms(fp, fp->phase[FRAMEPROF_GPU_WAIT]),
+             mean_ms(fp, fp->jukeboxDecode),
+             mean_ms(fp, fp->jukeboxRead),
              (double)(fp->c3dCpuMs / fp->frames),
              (double)(fp->c3dGpuMs / fp->frames),
              (int)PreviousCpuFrameRate, (int)PreviousGpuFrameRate);

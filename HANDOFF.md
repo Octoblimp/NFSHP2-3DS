@@ -13293,3 +13293,101 @@ proportions are what count, not the milliseconds.
   - move work to core 2 only where the profile says so. The profile
     puts nothing worth moving outside the draw.
 - **13b-4** starts with the cull and the envmap.
+
+## Session 31, continued (2026-10-04) -- New 3DS mode in full (step 13b-3)
+
+Each part of New 3DS mode is checked at runtime now, not assumed from
+`app.rsf`. The CIA could not reach the speedup, and now can. The heap is
+sized from the grant. The jukebox worker's time is in the log, and the
+draw's stages have the right names. `docs/formats/new3ds-mode.md` has
+the write-up.
+
+Between 13b-2 and 13b-3, commit 2260d0e made the minimap bigger, as the
+user asked: `hudsplit_map_place` fits the displayed mode's box into the
+bottom screen's free lower left, 176 by 116 pixels in mode 0 against
+retail's 70 by 46 (`hud-split.md`, "The minimap's place").
+
+### The port
+
+- **`app.rsf`** adds `ptm:sysm`. libctru's `osSetSpeedupEnable` is
+  `ptmSysmInit` then `PTMSYSM_ConfigureNew3DSCPU`, and APT makes the
+  same call each time the app wakes. Without the service the call
+  failed silently: the CIA ran at the ExHeader's clock, and nothing put
+  it back after the HOME menu.
+- **`heapcfg.c`**:
+  - the linear heap asks for what is left after the heap's 48 MB, up to
+    80 MB (`LINEAR_WANT`);
+  - the malloc heap takes the rest, up to its 96 MB window
+    (`HEAP_AREA`), and never less than 48 MB.
+
+  A New 3DS's CIA gets 80 and 96. The .3dsx (124 MB) and an Old 3DS
+  divide as before.
+- **`main.c`**:
+  - `logClock`, after the `console:` line, times a 2,000,000-turn
+    `subs`/`bne` loop three times by the system tick: as launched, with
+    the speedup off, and with it back on. The `clock:` line has whether
+    ptm:sysm opened, the three times, and the last two's ratio.
+  - The jukebox worker's time each frame of a race goes to the `frame:`
+    line. Out of a race it has a line of its own every five seconds
+    while a tune streams.
+- **`jbstream.c`**: the worker sums its decode and read ticks, and
+  `jbstream_busy` reads them.
+- **`frameprof.c` and `trackview.c`**: the draw's stages renamed.
+  13b-2's "cull" ended at `scenery_stuff_scenery`, so it timed the
+  models' render. The real cull (`scenery_do_culling` in `begin_frame`)
+  was inside "envmap". `begin_frame` now stamps the cull's end, and the
+  old stage is "models". The line is prep, cull, envmap, sky, models,
+  scenery, cars, hud, bottom and submit, then a `jukebox:` section.
+
+### The checks
+
+No retail function is behind any of it, so there is no checker and no
+mutation pass. `jbstream_check` still gives 0 differ with the timed
+pump.
+
+The whole chain: 100 checkers and the four table generators in 1460 s,
+0 of 104 failed (`out/chain_13b3.txt`).
+
+### On Azahar
+
+Two runs: the race on track 12, holding the gas (`out/azahar_13b3b`),
+and the boot to the menus (`out/azahar_13b3_fe`).
+
+- `clock: ptm:sysm open; 2000000 loops in 14.98 ms as launched, 14.98
+  ms without the speedup, 14.98 ms with it (x1.00)`. Azahar's log has
+  all four ConfigureNew3DSCPU calls (0, 3, 0, 3) and reports each as
+  unimplemented. So the service opens and the calls arrive, but only a
+  New 3DS can show the x3.
+- The grant is 124 MB, so the split is as before: heap 49152 KB, linear
+  76416 KB.
+- In the menus the jukebox worker decodes 6.1 to 7.0 ms a second and
+  reads 5.2 to 7.8 ms a second, under 1% of core 0. It stays on core 0.
+  Nothing else outside the draw is worth moving.
+- The race, with the stages named rightly: frames of 50.1 ms on the
+  straight and 52 to 54.5 ms where the world takes 4 to 4.7 ms.
+
+  | Stage | ms |
+  |---|---|
+  | models | 12.6 to 17.8 |
+  | envmap | 7.8 to 10.0 |
+  | bottom | 5.3 to 5.4 |
+  | hud | 4.7 to 4.8 |
+  | cars | 4.4 to 4.6 |
+  | cull | 2.2 to 2.9 |
+  | scenery | 0.9 to 1.8 |
+  | sky | 0.8 |
+
+- **No music in a race.** The race's `jukebox:` section reads 0.00
+  throughout. Retail restarts the jukebox from the race coordinator's
+  TICK (`DelayedStart(6.0)`), once the ReplayManager has marked the
+  beginning of time. The port has no ReplayManager, so `rcstates.c`
+  never reaches the call, and nothing sets `gJukeboxDelayedStartFn`.
+  It is in CONTINUE.md, beside step 14.
+
+### Next
+
+- **13b-4**, the profile's cuts, starting on the models' render:
+  `render_model`'s work per model and per batch, the lit batches'
+  uniform uploads first. Then the envmap.
+- A New 3DS's `clock:` and `frame:` lines would settle the speedup and
+  the order of 13b-4's cuts.

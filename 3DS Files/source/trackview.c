@@ -2426,6 +2426,7 @@ static void begin_frame(TrackView* v)
                               - v->cull.SceneryCullInfos[i].pFirstDrawInfo);
     }
     v->frameBegun = true;
+    FRAMEPROF_STAMP(FRAMEPROF_CULL);
 }
 
 // A new texture order for a view: the frame's first use of each texture
@@ -2639,7 +2640,7 @@ void trackview_draw(TrackView* v)
 
     georender_set_fog(s_fogOn ? &s_fog : NULL, s_fogColour);
     scenery_stuff_scenery(&v->cull, view);
-    FRAMEPROF_STAMP(FRAMEPROF_CULL);
+    FRAMEPROF_STAMP(FRAMEPROF_MODELS);
 
     // Then StuffSun (0x00112ecc), after DrawNisObjects, which has nothing
     // to draw here. Its quads draw at once; see render_epoly. Then the

@@ -74,6 +74,7 @@ uint32_t jbs_decode(JBSDecoder* d, const uint8_t* pair, int16_t* out,
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "bticker.h"
 #include "gamedata.h"
 
 #define JBS_WAVES        8
@@ -107,6 +108,9 @@ typedef struct {
     uint32_t     head, count;
     // For the log: pairs read, and samples queued and given back played.
     uint32_t     pairsRead, samplesQueued, samplesPlayed;
+    // For the frame line (jbstream_busy): the decode's and the reads' EE
+    // ticks, summed.
+    volatile uint32_t decodeTicks, readTicks;
 
     uint32_t     events;           // EV_*, atomic
 
@@ -179,13 +183,23 @@ static void pump(JBStream* s)
         JBSWave* w = &s->waves[(s->head + s->count) % JBS_WAVES];
         uint32_t n = 0;
         while (n < JBS_WAVE_FRAMES * JBS_SAMPLES && !s->dec.ended) {
-            if ((!s->havePair || s->dec.frame >= JBS_FRAMES) &&
-                !next_pair(s)) {
-                s->dec.ended = true;         // short or unreadable: stop
-                break;
+            uint32_t t0;
+
+            if (!s->havePair || s->dec.frame >= JBS_FRAMES) {
+                bool ok;
+
+                t0 = bGetTicker();
+                ok = next_pair(s);
+                s->readTicks += bGetTicker() - t0;
+                if (!ok) {
+                    s->dec.ended = true;     // short or unreadable: stop
+                    break;
+                }
             }
+            t0 = bGetTicker();
             n += jbs_decode(&s->dec, s->pair, w->pcm + 2 * n,
                             JBS_WAVE_FRAMES - n / JBS_SAMPLES);
+            s->decodeTicks += bGetTicker() - t0;
         }
         if (!n) {
             break;
@@ -515,6 +529,12 @@ void jbstream_stats(JBStreamStats* out)
     out->samplesPlayed = s->samplesPlayed;
     LightLock_Unlock(&s->lock);
     out->mix = s->mixSet;
+}
+
+void jbstream_busy(uint32_t* decodeTicks, uint32_t* readTicks)
+{
+    *decodeTicks = g_js.decodeTicks;
+    *readTicks = g_js.readTicks;
 }
 
 #endif

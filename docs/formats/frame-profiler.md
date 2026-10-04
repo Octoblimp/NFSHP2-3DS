@@ -1,4 +1,4 @@
-# The frame profiler (step 13b-2)
+# The frame profiler (steps 13b-2 and 13b-3)
 
 Where a race frame's time goes, so 13b-4 cuts the largest cost first.
 It has two halves:
@@ -123,10 +123,10 @@ on the PS2: the frame's start and its end.
 Each second of a race, `frameprof` logs a line (wrapped here):
 
     frame: 20.0 fps, 50.1 ms, worst 50.8; sound 0.0, flow 0.0, race 0.1,
-    world 2.0, cameras 0.1, draw 45.2, loads 0.0; draw: prep 0.0, envmap
-    11.2, sky 0.8, cull 16.4, scenery 1.8, cars 4.5, hud 4.8, bottom 5.3,
-    submit 0.3; waits: vsync 2.8, gpu 0.0; citro3d cpu 44.8, gpu 0.7;
-    C 20 fps, G 1362 fps
+    world 1.9, cameras 0.1, draw 45.2, loads 0.0; draw: prep 0.0, cull
+    2.3, envmap 8.9, sky 0.8, models 16.4, scenery 1.8, cars 4.5, hud 4.7,
+    bottom 5.4, submit 0.3; waits: vsync 2.8, gpu 0.0; jukebox: decode
+    0.00, read 0.00; citro3d cpu 44.8, gpu 0.8; C 20 fps, G 1362 fps
 
 - The frame rate, the mean frame and the longest.
 - Each phase's mean in milliseconds:
@@ -143,9 +143,10 @@ Each second of a race, `frameprof` logs a line (wrapped here):
   | Stage | From the last stamp to |
   |---|---|
   | prep | the waits: the track's attach, the log, the blurb |
-  | envmap | after the waits: the sun's Z rects read back, and the cars' cube map |
+  | cull | after the waits: the sun's Z rects read back, then `begin_frame`: the frame's memory, the views' matrices, and `scenery_do_culling` for every view |
+  | envmap | the cars' cube map: its six views drawn, and the fold to the sphere map |
   | sky | StuffSky and its lists drawn |
-  | cull | `scenery_stuff_scenery`: the cull, and the lists built |
+  | models | `scenery_stuff_scenery`: eModel::Render for each model the cull kept, its batches drawn or put on the lists |
   | scenery | StuffSun, and the scenery's solid list drawn |
   | cars | RenderCars, the cars' solids, and both alpha lists |
   | hud | the rest of `trackview_draw`, and the top screen's Flailer layers |
@@ -153,7 +154,17 @@ Each second of a race, `frameprof` logs a line (wrapped here):
   | submit | C3D_FrameEnd |
 
   A stage that a frame does not stamp takes no time in it.
+
+  Before 13b-3 the stages were named wrongly. 13b-2's "cull" ended at
+  `scenery_stuff_scenery`, so it timed the models' render, and the cull
+  itself was inside "envmap". 13b-3 stamps the cull's end in
+  `begin_frame` and names the old stage "models".
 - The two waits.
+- The jukebox's worker (since 13b-3): the milliseconds it spent
+  decoding, and reading the card, while the frame ran. The worker
+  preempts the game on core 0, so this time is also inside whichever
+  phase it interrupted. Only the decode is CPU time
+  (`new3ds-mode.md`).
 - citro3d's own times: the CPU's from C3D_FrameBegin to C3D_FrameEnd,
   and the GPU's.
 - Retail's two rates, as the HUD would print them.
@@ -163,7 +174,9 @@ bGetTickerDifference's 300000.
 
 At boot the log has a `console:` line: the model, whether it is a New 3DS,
 whether the speedup was asked for, the memory type, the memory grant, the
-heap, and core 1's time limit.
+heap, and core 1's time limit. Since 13b-3 a `clock:` line follows it,
+and out of a race the jukebox has a line of its own every five seconds
+(`new3ds-mode.md`).
 
 ## Checking it
 
@@ -230,5 +243,28 @@ The race on track 12, holding the gas, at Speed 100%
   comes from one frame every eight sixtieths, so it jumps.
 
 Azahar's CPU clock is a count of instructions, not a New 3DS's. So the
-proportions are what count. The cull and the envmap are more than half
-the frame (28 of 50 ms), and step 13b-4 starts on them.
+proportions are what count.
+
+The table's "cull" is the models' render (see the stages, above). The
+13b-3 build, which names the stages rightly, on the same race
+(`out/azahar_13b3b`):
+
+| Stage | ms |
+|---|---|
+| models | 12.6 to 17.8 |
+| envmap | 7.8 to 10.0 |
+| bottom | 5.3 to 5.4 |
+| hud | 4.7 to 4.8 |
+| cars | 4.4 to 4.6 |
+| cull | 2.2 to 2.9 |
+| scenery | 0.9 to 1.8 |
+| sky | 0.8 |
+| submit | 0.3 |
+| prep | 0.0 to 0.1 |
+
+Frames of 50.1 ms on the straight, and 52 to 54.5 where the world takes
+4 to 4.7 ms. The jukebox reads 0.00: no music plays in a race
+(`new3ds-mode.md`).
+
+The cull itself is cheap. The models' render and the envmap are more
+than half the frame (25 of 50 ms), and step 13b-4 starts on the models.

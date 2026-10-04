@@ -27,9 +27,13 @@
 //
 //   prep     UpdateCameraMovers to the waits: the track's attach, the log,
 //            the blurb
-//   envmap   after the waits: the sun's Z rects and the cars' cube map
+//   cull     after the waits: the sun's Z rects read back, then
+//            trackview's begin_frame: the frame memory, the views'
+//            matrices, and scenery_do_culling for every view
+//   envmap   the six cube views drawn, and the fold to the sphere map
 //   sky      StuffSky and its lists
-//   cull     scenery_stuff_scenery: the cull and the lists' build
+//   models   scenery_stuff_scenery: eModel::Render for each model the
+//            cull kept, its batches drawn or put on the lists
 //   scenery  StuffSun and the scenery's solid list drawn
 //   cars     RenderCars, the cars' solids, and both alpha lists
 //   hud      the rest of trackview_draw and the top screen's Flailer layers
@@ -37,6 +41,11 @@
 //   submit   C3D_FrameEnd
 //
 // A stage not stamped in a frame takes no time in it.
+//
+// The jukebox's worker shares core 0 with the game and preempts it
+// wherever it wakes, so its time is inside the phases. main.c hands its
+// decode and its reads for the frame to frameprof (jbstream_busy). Only
+// the decode is CPU time: a read sleeps in the kernel (step 13b-3).
 //
 // A line has the frame rate, the mean frame and the longest, each phase's
 // mean in milliseconds, the draw's stages, the two waits, citro3d's own two
@@ -72,9 +81,10 @@ enum {
 
 // The draw's stages, stamped at their ends.
 enum {
+    FRAMEPROF_CULL,
     FRAMEPROF_ENVMAP,
     FRAMEPROF_SKY,
-    FRAMEPROF_CULL,
+    FRAMEPROF_MODELS,
     FRAMEPROF_SCENERY,
     FRAMEPROF_CARS,
     FRAMEPROF_HUD,
@@ -89,13 +99,15 @@ typedef struct FrameProfTicks {
     uint32_t gpu;       // after it, before C3D_FrameBegin's wait
     uint32_t draw;      // after C3D_FrameBegin
     uint32_t end[FRAMEPROF_STAMPED];
+    uint32_t jukeboxDecode;     // the jukebox worker's, this frame
+    uint32_t jukeboxRead;
 } FrameProfTicks;
 
 extern FrameProfTicks FrameProfDraw;
 
 #define FRAMEPROF_STAMP(stage) (FrameProfDraw.end[(stage)] = bGetTicker())
 
-// The draw's stages in the sums: prep, the seven stamped, and submit.
+// The draw's stages in the sums: prep, the eight stamped, and submit.
 #define FRAMEPROF_DRAW_STAGES (FRAMEPROF_STAMPED + 2)
 
 typedef struct FrameProf {
@@ -103,6 +115,8 @@ typedef struct FrameProf {
     uint64_t total;                     // EE ticks, StartTime to the end
     uint64_t phase[FRAMEPROF_PHASES];   // EE ticks
     uint64_t stage[FRAMEPROF_DRAW_STAGES];
+    uint64_t jukeboxDecode;
+    uint64_t jukeboxRead;
     uint32_t worst;                     // the longest frame, EE ticks
     float    c3dCpuMs;                  // summed
     float    c3dGpuMs;

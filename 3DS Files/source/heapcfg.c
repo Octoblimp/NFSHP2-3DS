@@ -129,10 +129,24 @@ NfsHeapInfo g_heapInfo;
 // A race needs more than the 28MB the old 64MB grant gave: at
 // LOADING_TRACK_SPECIFIC ~23MB is in use, and the track's bundles add
 // ~15MB more (TRACKB 8.6MB, TEX<n>LOCATION 4.8MB, the rest small), every
-// one a single block. 48MB leaves ~10MB over that.
+// one a single block. 48MB leaves ~10MB over that. It is the malloc heap's
+// floor; a grant with more to spare gives it more (LINEAR_WANT).
 #define HEAP_WANT   (48u * 1024 * 1024)
 #define HEAP_MIN    ( 4u * 1024 * 1024)
 #define HEAP_STEP   ( 4u * 1024 * 1024)
+
+// The malloc heap's window in the address space, 96MB: it can never be
+// larger than that, whatever the grant.
+#define HEAP_AREA   ((u32)(OS_HEAP_AREA_END - OS_HEAP_AREA_BEGIN))
+
+// The linear heap's ask, under the bank's ceiling (step 13b-3). A race on
+// track 12 uses 43MB of it: 13b-2's log has 33.6MB free of 76 once the
+// track is in. The malloc heap is the tighter of the two, with ~10MB to
+// spare in a race. So a grant larger than HEAP_WANT plus this gives the
+// malloc heap the rest, up to its window: on a New 3DS's 178MB, the
+// linear heap gets 80MB and the malloc heap 96MB. A grant of 124MB or
+// less divides as it did before (the .3dsx on a New 3DS, an Old 3DS).
+#define LINEAR_WANT (80u * 1024 * 1024)
 
 // FCRAM is organised in 128MB physical banks (Old3DS has one at 0x20000000,
 // New3DS adds a second above it). A physically contiguous block cannot cross
@@ -177,22 +191,26 @@ void __system_allocateHeaps(void)
 	g_heapInfo.commitUsed = (u32)commitUsed;
 	g_heapInfo.avail      = avail;
 
-	// The malloc heap takes HEAP_WANT on every path, the .3dsx one included
-	// (which inherits its host process memory and never sees app.rsf at
-	// all). Never claim more than half of a small grant.
+	// The malloc heap takes HEAP_WANT at least on every path, the .3dsx one
+	// included (which inherits its host process memory and never sees
+	// app.rsf at all). Never claim more than half of a small grant.
 	heapWant = HEAP_WANT;
 	if (heapWant > avail / 2)
 		heapWant = ALIGN4K(avail / 2);
 
 	// Everything the malloc heap does not want goes to the linear heap, up to
-	// one FCRAM bank. Reserving heapWant here is what guarantees the malloc
-	// heap still has commit budget left after the linear heap is taken.
+	// LINEAR_WANT, and never past one FCRAM bank. Reserving heapWant here is
+	// what guarantees the malloc heap still has commit budget left after the
+	// linear heap is taken.
 	//
-	// On an Old 3DS `avail - heapWant` is ~68MB and is itself the binding
-	// limit; on a New 3DS it is ~150MB and the bank ceiling binds instead.
-	// Either way the step-down below finds what the kernel will actually give,
-	// so this is an upper bound and not a prediction.
+	// On an Old 3DS `avail - heapWant` is ~46MB and on a New 3DS's .3dsx
+	// ~75MB, and is itself the binding limit; on a New 3DS's CIA it is
+	// ~128MB and LINEAR_WANT binds instead. Either way the step-down below
+	// finds what the kernel will actually give, so this is an upper bound
+	// and not a prediction.
 	want = avail - heapWant;
+	if (want > LINEAR_WANT)
+		want = LINEAR_WANT;
 	if (want > FCRAM_BANK)
 		want = FCRAM_BANK;
 	want = ALIGN4K(want);
@@ -221,10 +239,16 @@ void __system_allocateHeaps(void)
 		                                         : LINEAR_MIN;
 	}
 
-	// Malloc heap second, at the fixed 0x08000000 base libctru uses. This one
-	// does not need contiguity and its budget was reserved above, so the
-	// step-down here is belt and braces.
-	want = heapWant;
+	// Malloc heap second, at the fixed 0x08000000 base libctru uses: all the
+	// grant the linear heap left, up to the heap's window. This one does not
+	// need contiguity and its budget was reserved above, so the step-down
+	// here is belt and braces.
+	want = avail - __ctru_linear_heap_size;
+	if (want < heapWant)
+		want = heapWant;
+	if (want > HEAP_AREA)
+		want = HEAP_AREA;
+	want = ALIGN4K(want);
 	g_heapInfo.heapAsked = want;
 	for (;;) {
 		__ctru_heap = 0;

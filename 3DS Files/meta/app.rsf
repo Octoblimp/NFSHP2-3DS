@@ -197,6 +197,12 @@ AccessControlInfo:
   # memory region, right after config load and before C3D_Init -- exactly
   # where ndspInit() runs. First real-hardware boot ever attempted for this
   # project caught it.
+  # ptm:sysm added in step 13b-3 (2026-10-04): libctru's osSetSpeedupEnable
+  # is ptmSysmInit then PTMSYSM_ConfigureNew3DSCPU, and APT calls the same
+  # (aptWaitForWakeUp) each time the app wakes, from the HOME menu or from
+  # sleep. Without it the call fails and the CIA's clock is only the
+  # ExHeader's CpuSpeed above. The boot log's `clock:` line says whether
+  # ptm:sysm opened and what the speedup gave.
   ServiceAccessControl:
    - cfg:u
    - gsp::Gpu
@@ -205,6 +211,7 @@ AccessControlInfo:
    - ac:u
    - ndm:u
    - ptm:u
+   - ptm:sysm
    - dsp::DSP
 
 SystemControlInfo:

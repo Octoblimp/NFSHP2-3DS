@@ -1896,9 +1896,56 @@ static void hookStartQuickRace(void* user, const BQuickRace* p)
 
 // ---------------------------------------------------------------- 3DS glue
 
+// The loop the CPU's clock is read by (step 13b-3): CLOCK_LOOPS turns of a
+// subs and a bne, timed by the system tick, which counts 268 MHz at either
+// clock. Only the ratio between two runs means anything.
+#define CLOCK_LOOPS 2000000u
+
+static u32 clockLoopTicks(void)
+{
+    u32 n = CLOCK_LOOPS;
+    u64 t0 = svcGetSystemTick();
+
+    __asm__ volatile("1: subs %0, %0, #1\n\tbne 1b" : "+r"(n) : : "cc");
+    return (u32)(svcGetSystemTick() - t0);
+}
+
+static double clockTicksMs(u32 ticks)
+{
+    return (double)ticks * 1000.0 / SYSCLOCK_ARM11;
+}
+
+// Whether the speedup took (step 13b-3). libctru's osSetSpeedupEnable goes
+// through ptm:sysm, so its opening is logged. On a New 3DS with it, the
+// loop runs as launched, then with the speedup off and back on: the last
+// two's ratio is the clock's, about 3 when the speedup takes, and the
+// first says which the launch gave. The speedup is left on, as
+// initPlatformPerf left it.
+static void logClock(bool isNew3DS)
+{
+    Result sysm = ptmSysmInit();
+    u32    launched, slow, fast;
+
+    if (R_SUCCEEDED(sysm)) ptmSysmExit();
+    launched = clockLoopTicks();
+    if (!isNew3DS || R_FAILED(sysm)) {
+        logPrintf("clock: ptm:sysm %08lx; %u loops in %.2f ms as launched\n",
+                  (unsigned long)sysm, CLOCK_LOOPS, clockTicksMs(launched));
+        return;
+    }
+    osSetSpeedupEnable(false);
+    slow = clockLoopTicks();
+    osSetSpeedupEnable(true);
+    fast = clockLoopTicks();
+    logPrintf("clock: ptm:sysm open; %u loops in %.2f ms as launched, "
+              "%.2f ms without the speedup, %.2f ms with it (x%.2f)\n",
+              CLOCK_LOOPS, clockTicksMs(launched), clockTicksMs(slow),
+              clockTicksMs(fast), fast ? (double)slow / fast : 0.0);
+}
+
 // What the console gave (step 13b-2): its model, whether it is a New 3DS
 // and so asked for the speedup, the memory type, the grant, the heap and
-// core 1's limit.
+// core 1's limit. Then the clock (logClock).
 static void logConsole(void)
 {
     static const char* const kModels[] = {
@@ -1924,6 +1971,7 @@ static void logConsole(void)
               (unsigned long)(g_heapInfo.heapGot / 1024),
               (unsigned long)(g_heapInfo.linearGot / 1024),
               (unsigned long)core1);
+    logClock(isNew3DS);
 }
 
 static void initPlatformPerf(void)
@@ -3352,8 +3400,13 @@ int main(int argc, char** argv)
     uint32_t frameTicker = bGetTicker();
     // The top screen's blank count when the last frame's sync returned.
     u32      lastSync = 0;
-    // The race's phases, a line a second (frameprof.h).
+    // The race's phases, a line a second (frameprof.h), and the jukebox
+    // worker's sums at the last frame's end. Out of a race the worker has
+    // a line of its own every five seconds: its sums and the tick at the
+    // last one.
     FrameProf prof;
+    uint32_t  jbDecode = 0, jbRead = 0;
+    uint32_t  jbLineTick = frameTicker, jbLineDecode = 0, jbLineRead = 0;
     frameprof_reset(&prof);
     DisplayPlayerDebugInfo = SHOW_FRAME_RATES;
 
@@ -3650,15 +3703,46 @@ int main(int argc, char** argv)
             MainLoopTiming.LimitFrameRate = bGetTicker();
             CalculateFrameRate();
             MaybePrintTiming();
-            if (g_track.attached) {
-                char line[512];
+            {
+                uint32_t decode, read;
 
-                frameprof_add(&prof, &MainLoopTiming, C3D_GetProcessingTime(),
-                              C3D_GetDrawingTime());
-                if (frameprof_line(&prof, line, sizeof line))
-                    logLine("%s", line);
-            } else {
-                frameprof_reset(&prof);
+                jbstream_busy(&decode, &read);
+                if (g_track.attached) {
+                    char line[512];
+
+                    FrameProfDraw.jukeboxDecode = decode - jbDecode;
+                    FrameProfDraw.jukeboxRead = read - jbRead;
+                    frameprof_add(&prof, &MainLoopTiming,
+                                  C3D_GetProcessingTime(),
+                                  C3D_GetDrawingTime());
+                    if (frameprof_line(&prof, line, sizeof line))
+                        logLine("%s", line);
+                    jbLineTick = MainLoopTiming.LimitFrameRate;
+                    jbLineDecode = decode;
+                    jbLineRead = read;
+                } else {
+                    uint32_t span = MainLoopTiming.LimitFrameRate
+                                  - jbLineTick;
+
+                    frameprof_reset(&prof);
+                    if (span >= 5u * BTICKER_RATE_HZ) {
+                        // Milliseconds a second: the ticks over the
+                        // span's, times 1000.
+                        if (decode != jbLineDecode || read != jbLineRead)
+                            logLine("jukebox: decode %.2f ms a second, "
+                                    "read %.2f, over %.1f s",
+                                    (double)(decode - jbLineDecode) * 1000.0
+                                        / span,
+                                    (double)(read - jbLineRead) * 1000.0
+                                        / span,
+                                    (double)span / BTICKER_RATE_HZ);
+                        jbLineTick = MainLoopTiming.LimitFrameRate;
+                        jbLineDecode = decode;
+                        jbLineRead = read;
+                    }
+                }
+                jbDecode = decode;
+                jbRead = read;
             }
             continue;
         }

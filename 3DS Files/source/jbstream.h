@@ -61,4 +61,10 @@ typedef struct {
 } JBStreamStats;
 void jbstream_stats(JBStreamStats* out);
 
+// The worker's time (step 13b-3), in EE ticks (bGetTicker), summed and
+// wrapping: decoding, and reading the card. Read without the lock, which
+// the worker holds through its reads, so the game's thread never waits on
+// it.
+void jbstream_busy(uint32_t* decodeTicks, uint32_t* readTicks);
+
 #endif
