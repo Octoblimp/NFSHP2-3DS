@@ -71,15 +71,22 @@ if (state != 1) {
     MakeCoeffs();
 }
 t = time + dt / duration;
+time = t;
 if (t >= arrivalThreshold) {
     if (arrivalThreshold >= 1.0) { val = valDesired; dval = dvalDesired; }
     state = 0;
 } else {
-    time = t;
-    val  = evaluate(t);
-    dval = derivative(t);
+    val  = evaluate(t);     /* ((a*t + b)*t + dVal)*t + Val, GetVal       */
+    dval = derivative(t);   /* (a*(t*3) + (b + b))*t + dVal, GetdVal      */
 }
 ```
+
+`time` is stored before the arrival test, in the branch's delay slot, so a
+spline that arrives keeps the `t` it arrived at. The two evaluations round
+in the order shown: `derivative` multiplies `t` by 3 first and doubles `b`
+before adding. `bspline_get_dval` had `(a*t)*3 + b + b` until step 8m-4c-2,
+whose checker runs retail's own tCubic1D (`hud-nis.md`); `dVal` was off in
+its last bit.
 
 Three things about it are worth stating plainly, because they are what the
 port has to reproduce rather than improve:

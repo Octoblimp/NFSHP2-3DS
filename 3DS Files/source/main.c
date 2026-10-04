@@ -44,6 +44,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "bchunk.h"
 #include "bmem.h"
@@ -82,6 +83,7 @@
 #include "georender.h"
 #include "hudanim.h"
 #include "hudcop.h"
+#include "hudnis.h"
 #include "hudrender.h"
 #include "hudscore.h"
 #include "joyevent.h"
@@ -1034,6 +1036,30 @@ static const char* fredTranslate(int32_t id)
     if (langtab_copy(&g_boot.ui->lang, id, text, sizeof(text)) == 0)
         return NULL;
     return text;
+}
+
+// sceCdReadClock, for the NIS overlay's date and time (hudnis.c): the
+// 3DS's clock in the drive's BCD. The 3DS keeps local time, so time() is
+// the wall clock already and gmtime_r reads it as it stands.
+static uint8_t toBcd(int v)
+{
+    return (uint8_t)(((v / 10) << 4) | (v % 10));
+}
+
+static int32_t cdReadClock(NisClock* c)
+{
+    time_t now = time(NULL);
+    struct tm t;
+    if (gmtime_r(&now, &t) == NULL) return 0;
+    c->stat = 0;
+    c->second = toBcd(t.tm_sec);
+    c->minute = toBcd(t.tm_min);
+    c->hour = toBcd(t.tm_hour);
+    c->pad = 0;
+    c->day = toBcd(t.tm_mday);
+    c->month = toBcd(t.tm_mon + 1);
+    c->year = toBcd(t.tm_year % 100);
+    return 1;
 }
 
 // RaceParameters::InitWithDefaults, InitWithDefaults and
@@ -2663,9 +2689,8 @@ int main(int argc, char** argv)
     // Player::UpdateHud (hudrender.c), which UpdateNonGameState runs each
     // frame: SetHudFeatures when DetermineHudFeatures' answer changed, the
     // start bonus, and RenderHud's numbers into the HUD's Flailer objects.
-    // Its NIS overlay is 8m-4c-2's and stays NULL. GetTranslatedString is
-    // the same lookup Fred's defaults use; every HUD caller copies the text
-    // out before the next call.
+    // GetTranslatedString is the same lookup Fred's defaults use; every HUD
+    // caller copies the text out before the next call.
     gPlayerUpdateHudFn = player_update_hud;
     gHudTranslateFn = fredTranslate;
     // The HUD's animations (hudanim.c): UpdateHud runs them each frame,
@@ -2689,6 +2714,13 @@ int main(int argc, char** argv)
     gUpdateRadarDetectorFn = player_update_radar_detector;
     gDrawTrackerFn = player_draw_tracker;
     gUpdatePursuitMeterFn = player_update_pursuit_meter;
+    // The NIS overlay (hudnis.c): RenderHud updates it, SetHudFeatures shows
+    // and hides it, and its date and time come off the 3DS's clock, which
+    // is local already, so gScfGetLocalTimeFn stays NULL. The Start* that
+    // play it come with the NIS.
+    gNisOverlayUpdateFn = nisoverlay_update;
+    gNisOverlaySetVisibleFn = nisoverlay_set_visible;
+    gCdReadClockFn = cdReadClock;
 
     // Car::MaybeCameraShake, which World::DoTimestep asks of each player's
     // car: shake.c. Only a car with a player shakes, and none has one until

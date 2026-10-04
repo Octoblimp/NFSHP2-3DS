@@ -6,10 +6,12 @@
 // (0x00182350) builds its two animation tracks, SetScreen (0x001829a8,
 // new in retail) takes the overlay's Flailer screen and reads the BUSTED
 // text's authored scale and top, and Finish (0x00182948) hides the screen
-// and puts the text back as SetScreen found it. Start, Update and the
-// three Start* that play the overlay are the NIS's, and wait on it.
+// and puts the text back as SetScreen found it. Start, Update,
+// UpdateDateAndTime, SetVisible and the three Start* that play the overlay
+// are in hudnis.c.
 //
-// Every Flailer call is a seam, NULL until the HUD is ported; see each.
+// Every Flailer call here is a seam, as these four were ported before the
+// Flailer runtime; see each.
 //
 // Written up in docs/formats/player.md; checked on retail's image by
 // tools/player_check.py.
@@ -34,8 +36,8 @@ struct FlailerObjectChunk;
 #define NISOVERLAY_BUSTED_OBJECT 0x76494c5bu
 
 // 56 bytes in retail. The demo's (.mdebug type#3487) is 40: retail added
-// the word at 24, which moved sx .. ScaleY down by 4, and the three words
-// SetScreen fills. The tracks are tCubic1D, which banim.h ports as
+// PointsDisplay at 24, which moved sx .. ScaleY down by 4, and the three
+// words SetScreen fills. The tracks are tCubic1D, which banim.h ports as
 // BSpline (48 bytes). Retail has no symbols; the new names are the port's.
 typedef struct NISOverlayManager {
     uint32_t  LastDateTimeUpdate;               //  0
@@ -44,7 +46,7 @@ typedef struct NISOverlayManager {
     BSpline  *ScaleAnimationTrack;              // 12
     BSpline  *AlphaAnimationTrack;              // 16
     struct FlailerObjectChunk *BustedDisplay;   // 20  the BUSTED text
-    uint32_t  New24;                            // 24  retail's; unread so far
+    struct FlailerObjectChunk *PointsDisplay;   // 24  the bounty's "+2000"
     float     sx;                               // 28
     float     sy;                               // 32
     float     ScaleX;                           // 36
@@ -69,7 +71,7 @@ typedef char nisoverlay_layout_check[
 // 1, and bMallocs the two tracks (48, "NISCubicAnimation", 0, 16), scale
 // first. Each track is tCubic1D's constructor inlined: the values zeroed,
 // duration and threshold 1, state 0 and flags 1; the coefficients and
-// the time are left. LastDateTimeUpdate, BustedDisplay and New24 are
+// the time are left. LastDateTimeUpdate, BustedDisplay and PointsDisplay are
 // left too.
 NISOverlayManager *nisoverlay_init(NISOverlayManager *o);
 

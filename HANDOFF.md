@@ -12486,3 +12486,87 @@ was not read, since the chain was running.
   are left.
 - **8m-4c-3:** InitializeFlailerTachometer (`0x001434a0`) and
   RenderFlailerTachometer (`0x00143858`).
+
+## Session 31, continued (2026-10-03) -- the NIS overlay (step 8m-4c-2)
+
+A ticket, an arrest or a bust plays under a camcorder overlay: a REC
+light that blinks, the date and the time, BUSTED!, and the bounty's
+"+2000". The constructor, the destructor, SetScreen and Finish were
+ported with the Player. This step is the rest. `docs/formats/hud-nis.md`
+has the write-up.
+
+### The port
+
+- **`hudnis.{c,h}`** hold Start (`0x00182488`), Update (`0x001825f0`),
+  UpdateDateAndTime (`0x00182748`), SetVisible (`0x00182a48`),
+  StartArrest (`0x001832f8`), StartTicket (`0x00183308`) and StartBusted
+  (`0x00228f10`).
+- **`main.c`** binds `gNisOverlayUpdateFn` (RenderHud's) and
+  `gNisOverlaySetVisibleFn` (SetHudFeatures'). `gCdReadClockFn` is a new
+  reader of the 3DS's clock: `time()` through `gmtime_r`, written as the
+  drive's BCD. `gScfGetLocalTimeFn` stays NULL, since the 3DS's clock is
+  local already.
+- **`nisoverlay.h`**: the word at +24 is `PointsDisplay`, the "+2000"
+  text Start finds. `player_check` and its harness use the new name.
+- The three Start* are called by the cops' NIS code, so nothing calls
+  them until step 12.
+
+What retail does that a reader would not guess:
+
+- Any month that is not 2 to 12 takes January's name, 0 and 13 and up
+  included: the test is unsigned `month − 2 < 11`. The BCD is decoded
+  with no check, so `0xff` is 165.
+- English prints "%s %d 20%02d" and every other language
+  "%d %s 20%02d".
+- The date's 31-frame wait is a wrapping difference compared signed, so
+  frames going back make it wait.
+- BUSTED!'s scale and alpha are set every frame from the two tracks, so
+  it shrinks from 5 to its own scale while it fades in over a quarter
+  second.
+- `0x00182bb8` and `0x00182c18`, once listed here as the overlay's
+  "new", are Player functions, and nothing calls them.
+
+**banim.c's GetdVal.** This checker is the first to run the port's
+BSpline against retail's own tCubic1D. `bspline_get_dval` computed
+`((c0 × t) × 3 + c1 + c1) × t + c2`, where retail computes
+`(c0 × (t × 3) + (c1 + c1)) × t + c2`, so `dval` was off in its last bit
+from the third frame on. `banim_check`'s Python model made the same
+mistake in the first product, which is why the two agreed. Both now
+follow retail. `banim_check`, `bscreens_check`, `setup_check`,
+`racesetup_check` and `bootflow_check`, the other checkers that build
+`banim.c`, pass with it. The fix was written up in
+`frontend-animation.md` in the last session but never reached the code;
+this session found it when the checker showed 78 lines off.
+
+Where the port differs: the points' alpha is skipped without a points
+text, no coordinator counts as no replay, a missing clock or
+translation leaves the date be, and the wait's subtraction is unsigned
+so that it cannot overflow.
+
+### The checks
+
+`hudnis_check` runs the seven retail functions in the emulator against
+the port, over retail's SplineSeek, FlailerPrintf with bSPrintf and the
+Flailer runtime on INGAMEB: 818 ops, 4359 lines, 0 differ. The mutation
+pass makes 119 mutations: 118 are caught and 1 is equivalent
+(`arrest-state-after`: Start never reads `State`). The first pass left
+`start-last-kept` alive, since every scripted Start had a clock that
+worked and wrote the field again. Two Starts are now in the script,
+one with a clock that fails and one with a busy clock.
+
+The whole chain: 96 checkers with `hudnis_check` added, and the four
+table generators. 0 of 100 failed, in 1591 s
+(`out/chain_8m4c2.txt`).
+
+The ARM build is clean.
+
+On Azahar (`run_azahar_race.ps1 -HoldKeys 65 -WatchSeconds 40`, shots in
+`out/azahar_8m4c2`), the race ran for 40 seconds with no crash, and the
+HUD shows as in 8m-4c-1. The race has no cops, so the overlay never
+shows. The mutation pass was running, so the frame rate was not read.
+
+### Next
+
+- **8m-4c-3:** InitializeFlailerTachometer (`0x001434a0`) and
+  RenderFlailerTachometer (`0x00143858`). CONTINUE.md has what is read
+  of them so far.

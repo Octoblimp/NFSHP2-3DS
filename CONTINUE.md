@@ -1,8 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 31
-(2026-10-03), after 8m-4c-1, the radar, the trackers and the pursuit
-meter; 8m-4c-2, the NIS overlay's date, time and BUSTED, is next. "Where the port stands" below has the count of what is left.
+(2026-10-03), after 8m-4c-2, the NIS overlay's date, time and BUSTED;
+8m-4c-3, the tachometer's gradient, is next. "Where the port stands" below has the count of what is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
@@ -48,10 +48,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Ninety-five cross-checkers pass, plus the four table generators:
+Ninety-six cross-checkers pass, plus the four table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/texturestream_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/resource_check.py && python tools/fred_check.py && python tools/fredrace_check.py && python tools/flailer_check.py && python tools/hudfeatures_check.py && python tools/bprintf_check.py && python tools/hudrender_check.py && python tools/hudanim_check.py && python tools/hudscore_check.py && python tools/hudcop_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/texturestream_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/resource_check.py && python tools/fred_check.py && python tools/fredrace_check.py && python tools/flailer_check.py && python tools/hudfeatures_check.py && python tools/bprintf_check.py && python tools/hudrender_check.py && python tools/hudanim_check.py && python tools/hudscore_check.py && python tools/hudcop_check.py && python tools/hudnis_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -150,6 +150,7 @@ hudrender_check     1278 ops,     7620 lines, 0 differ  (152 caught, 4 equivalen
 hudanim_check        473 ops,     2829 lines, 0 differ  (290 caught, 2 equivalent; retail's image)
 hudscore_check      1608 ops,     6184 lines, 0 differ  (150 caught, 0 equivalent; retail's image)
 hudcop_check        1187 ops,     4763 lines, 0 differ  (115 caught, 5 equivalent; retail's image)
+hudnis_check         818 ops,     4359 lines, 0 differ  (118 caught, 1 equivalent; retail's image)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
@@ -1582,23 +1583,52 @@ and so replaced every boot.
              reads 0 until then. It writes its flag as a word (`sw`),
              and only for a cop in range; retail reads the stack
              otherwise, and the port's flag starts at 0.
-         - **8m-4c-2:** the rest of NISOverlayManager: Start
-           (`0x00182488`), Update (`0x001825f0`), UpdateDateAndTime
-           (`0x00182748`), SetVisible (`0x00182a48`), StartArrest
-           (`0x001832f8`), StartTicket (`0x00183308`) and StartBusted
-           (`0x00228f10`). The constructor, destructor, SetScreen and
-           Finish are already ported. CONTINUE used to list a "new
-           (`0x00182bb8`)"; that and `0x00182c18` are Player functions
-           that lay out the score texts, and nothing calls either.
-           `hudnis.{c,h}` and `tools/src/hudnis_test.c` are written;
-           the word at +24 is now named `PointsDisplay` (the bounty's
-           "+2000"), and `player_check` passes with it. Still to do:
-           `tools/hudnis_check.py`, `docs/formats/hud-nis.md`, and
-           binding `gNisOverlayUpdateFn`, `gNisOverlaySetVisibleFn` and
-           a 3DS `gCdReadClockFn` in `main.c`.
+         - **8m-4c-2, the NIS overlay, is done** (HANDOFF.md, Session
+           31, continued: the NIS overlay (step 8m-4c-2)).
+           `docs/formats/hud-nis.md` has the write-up. `hudnis.{c,h}`
+           hold Start (`0x00182488`), Update (`0x001825f0`),
+           UpdateDateAndTime (`0x00182748`), SetVisible (`0x00182a48`),
+           StartArrest (`0x001832f8`), StartTicket (`0x00183308`) and
+           StartBusted (`0x00228f10`). `main.c` binds
+           `gNisOverlayUpdateFn`, `gNisOverlaySetVisibleFn` and
+           `gCdReadClockFn`, a reader of the 3DS's clock. The word at
+           +24 is now `PointsDisplay`, the bounty's "+2000".
+           - `hudnis_check`: 818 ops, 4359 lines, 0 differ; 119
+             mutations, 118 caught, 1 equivalent.
+           - `bspline_get_dval` now rounds as retail's GetdVal does,
+             and `banim_check`'s model with it (`hud-nis.md`, "banim.c's
+             GetdVal").
+           - Azahar (`out/azahar_8m4c2`): no crash in 40 seconds. The
+             race has no cops, so the overlay is never shown.
+           - The Start* are called by the cops' NIS code (step 12).
          - **8m-4c-3:** InitializeFlailerTachometer (`0x001434a0`, 952
            bytes) and RenderFlailerTachometer (`0x00143858`, 1272), the
-           renderer's side.
+           renderer's side. Both tach gradients in INGAMEB
+           (`0x7307c47f`, `0x39c9eead`) are AnimationMode 10, and the
+           port draws them whole, so the red arc is always full. What
+           is read so far:
+           - Init(needle, gradient, list) ignores the needle. From the
+             gradient's texture size (w, h), padded sizes (pw, ph) and
+             scale, it writes 9 points of 20 bytes (x, y, z, u, v):
+             the centre, then bottom middle, bottom left, left middle,
+             top left, top middle, top right, right middle and bottom
+             right. z is the Z byte (+42). It stores the list at +108
+             and caches the TextureInfo at +84.
+           - Render(gradient, list) takes `360 - Rotation` (+64, an
+             int) and splits it into q = /90 and r = %90. Quads from
+             the table at `0x002f09e0`, rows (0,7,8,1), (0,5,6,7),
+             (0,3,4,5), (0,1,2,3), are the four quarters. Rows 1 to
+             q - 1 are drawn whole, in the bitmap's colours. Row q (or
+             1) is drawn cut: s = 2, or 1 with r - 45 when r > 45;
+             f = 1 - r / 45 (gp-31488 is 1/45); corner 1 is
+             lerp(row[s], row[s + 1], f); corners s + 1 to 3 copy their
+             points; with s = 2, corner 2 keeps ePoly's default. The
+             cut quad's colours are all `0x80808080`.
+           - The quarters are axis-aligned rectangles, so citro2d can
+             draw them. The cut quad is not, so it needs a textured
+             quad of its own on citro3d, or two triangles.
+           - The PS2 word at +108 cannot hold a host pointer;
+             decide how the renderer finds the list.
 
        Ghidra headless decompiles by address with
        `tools/ghidra_scripts/DecompileByAddr.java` (env `DECOMPILE_ADDRS`,

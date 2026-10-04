@@ -300,7 +300,7 @@ NIS_FIELDS = [
     ("LastDateTimeUpdate", 0, "w", 1), ("ScreenHash", 4, "w", 1),
     ("State", 8, "w", 1), ("ScaleAnimationTrack", 12, "p", 1),
     ("AlphaAnimationTrack", 16, "p", 1), ("BustedDisplay", 20, "p", 1),
-    ("New24", 24, "w", 1), ("sx", 28, "w", 1), ("sy", 32, "w", 1),
+    ("PointsDisplay", 24, "p", 1), ("sx", 28, "w", 1), ("sy", 32, "w", 1),
     ("ScaleX", 36, "w", 1), ("ScaleY", 40, "w", 1),
     ("SavedScaleX", 44, "w", 1), ("SavedScaleY", 48, "w", 1),
     ("SavedTopLeftY", 52, "w", 1),

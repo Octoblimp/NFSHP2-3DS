@@ -498,7 +498,7 @@ static const Field playerFields[] = {
 static const Field nisFields[] = {
     NW(LastDateTimeUpdate), NW(ScreenHash), NW(State),
     NP(ScaleAnimationTrack), NP(AlphaAnimationTrack), NP(BustedDisplay),
-    NW(New24), NW(sx), NW(sy), NW(ScaleX), NW(ScaleY), NW(SavedScaleX),
+    NP(PointsDisplay), NW(sx), NW(sy), NW(ScaleX), NW(ScaleY), NW(SavedScaleX),
     NW(SavedScaleY), NW(SavedTopLeftY),
 };
 

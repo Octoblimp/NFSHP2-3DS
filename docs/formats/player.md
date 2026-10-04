@@ -314,7 +314,7 @@ retail; the demo's (.mdebug type#3487) is 40.
 | 12 | `ScaleAnimationTrack` | a `tCubic1D`, 48 bytes |
 | 16 | `AlphaAnimationTrack` | the same |
 | 20 | `BustedDisplay` | the BUSTED text's chunk |
-| 24 | `New24` | retail's; unread so far |
+| 24 | `PointsDisplay` | the bounty's "+2000" text; Start finds it (`hud-nis.md`) |
 | 28, 32 | `sx`, `sy` | |
 | 36, 40 | `ScaleX`, `ScaleY` | |
 | 44, 48, 52 | `SavedScaleX`, `SavedScaleY`, `SavedTopLeftY` | retail's: what `SetScreen` read |
@@ -327,8 +327,8 @@ words are new.
   `tCubic1D`'s constructor inlined: the four values zeroed, `duration`
   and `arrivalThreshold` 1, `state` 0 and `flags` 1. A track's
   coefficients and time are left. Then `ScaleY` and `ScaleX` are 1, and
-  `sx` and `sy` 0. `LastDateTimeUpdate`, `BustedDisplay` and `New24` are
-  left.
+  `sx` and `sy` 0. `LastDateTimeUpdate`, `BustedDisplay` and
+  `PointsDisplay` are left.
 * **The destructor** frees both tracks without testing them, and frees
   the overlay too with bit 0 of the flags. The Player's passes 2.
 * **`SetScreen(hash)`**, new in retail, stores the hash. It calls

@@ -132,7 +132,8 @@ float bspline_get_val(const BSpline* s, float t)
 
 float bspline_get_dval(const BSpline* s, float t)
 {
-    return (s->coeff[0] * t * 3.0f + s->coeff[1] + s->coeff[1]) * t
+    // Retail's order: t*3 first, and b doubled before the add.
+    return (s->coeff[0] * (t * 3.0f) + (s->coeff[1] + s->coeff[1])) * t
            + s->coeff[2];
 }
 

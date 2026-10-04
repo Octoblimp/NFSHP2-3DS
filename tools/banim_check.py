@@ -389,8 +389,9 @@ class Spline(object):
                    + c[3])
 
     def get_dval(self, t):
+        # t*3 first, as retail's GetdVal does; hudnis_check runs retail's.
         c = self.coeff
-        return f32(f32(f32(f32(f32(c[0] * t) * f32(3.0)) + f32(c[1] + c[1]))
+        return f32(f32(f32(f32(c[0] * f32(t * f32(3.0))) + f32(c[1] + c[1]))
                        * t) + c[2])
 
     def seek(self, dt):
