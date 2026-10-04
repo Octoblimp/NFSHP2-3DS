@@ -13655,3 +13655,17 @@ session finished it, then started on the car itself.
   bootflow_check: 48 scenarios, 27964 lines, 0 differ.
 - **`docs/formats/car-select.md` is new:** the screens and their
   objects, the cars, the unlock box, the selector and the checker.
+
+### SC-2a, the camera
+
+- **`selcam.c` and `.h`** are retail's SelectCarCameraMover
+  (CM_SELECT_CAR): the constructor, the destructor, the setters,
+  SetMode, Update, and the three quaternion helpers Update calls. Retail's
+  Slerp (0x001a7280) is its own, not bQuaternion's bSlerp: it writes back
+  into both of its inputs.
+- **The four sounds** go through `gSelCamSound`, which SC-2d fills.
+- **`selcam_check`** runs retail's over its own CameraMover base and
+  eView table: 11 scenarios, 4266 ops, 52296 lines, 0 differ. Its
+  mutation pass catches 141 of 143, and the other 2 are equivalent.
+- **`docs/formats/car-select.md`** has a new section, "The turntable
+  camera".

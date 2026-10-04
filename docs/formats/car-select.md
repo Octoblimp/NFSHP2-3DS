@@ -268,3 +268,109 @@ transcript:
   goes nowhere.
 - `thumbs-hide-all`: car 63, the FIRETRUCK, has no THUMBNAIL_ object on
   any of the three screens.
+
+## The turntable camera (SC-2a)
+
+`selcam.c` is retail's SelectCarCameraMover, camera mover type
+CM_SELECT_CAR, from CameraMover.obj.
+
+| function | address | port |
+|----------|---------|------|
+| the constructor, the destructor | `0x0015a698`, `0x0015a880` | `selcam_init`, `selcam_destroy` |
+| the setters | `0x0015a940` .. `0x0015a9f8`, `0x0015fab8` .. `0x0015fad8` | `selcam_set_*`, `selcam_get_mode_param` |
+| SetMode | `0x0015aa08` | `selcam_set_mode` |
+| Update | `0x0015abb0` | `selcam_update` |
+| MyQuaternionMultiply, NormalizeQuaternion | `0x0015aab0`, `0x0015ab58` | `selcam_quat_multiply`, `selcam_quat_normalize` |
+| Slerp | `0x001a7280` | `selcam_slerp` |
+| the vtable | `0x002b1950` | `SelectCarCameraMoverVtbl` |
+
+The mover blends between two views of the car:
+- **The stats view** is still. SetOrientationStats gives its heading
+  and tilt. It sits RadiusStats from the car and looks past
+  OffsetStats.
+- **The orbit view** turns. The selector's sticks set three desired
+  speeds: round the car, the tilt and the distance. The car select
+  sets the radius to 7.25, the offsets to (0, 0, 0.55) and (0, 0, 0.4),
+  the stats heading and tilt to 0x2200 and 0x0900, and the orbit's
+  tilt to 0x0c00.
+
+Each frame, Update does this:
+1. It moves each speed toward its desired one, at 45000, 23700 and
+   17.02 a second, never past it.
+2. It turns Blend into t = 1 - (cos(Blend * pi) + 1) / 2, kept within
+   0 to 1.
+3. When Blend is exactly 0, the orbit starts over: the tilt at 50000,
+   the radius at 13.2, and the orbit's quaternion from the stats
+   heading.
+4. In the orbit, it spins the orbit's quaternion about z. Every 60th
+   frame of a counter that all movers share (gp-21664), it then
+   renormalises the quaternion.
+5. It slerps from the stats view's quaternion to the orbit's by t, and
+   moves between the two offsets by t.
+6. In the orbit, it moves the tilt and bounces it off its stops, 0xebab
+   and 0xc34f. Past the bottom, the tilt goes back to 50000. The speed
+   turns round at 0.165 of itself.
+7. It tilts by the stats tilt plus t times the difference.
+8. In the orbit, it moves the radius between 10.95 and 15.5 and bounces
+   it the same way.
+9. Also in the orbit, it sets the hum. Its volume follows the fastest
+   of the three speeds, each scaled, and its pitch falls as the camera
+   backs off.
+10. It backs off by RadiusStats plus t times the difference to the
+    orbit's radius.
+11. It walks Blend 0.03 toward the mode.
+12. Unless Camera::StopUpdating is set, it gives the camera a field of
+    view of 4500 and the distance as its target distance. Then it sets
+    the camera's matrix.
+
+A bounce plays the bump sound at 0.0006 of the new tilt speed, or 0.8
+of the new radius speed, when that is over 0.107.
+
+The four sounds are bSamples. They are made only while SoundEnabled
+(gp-23056) is set:
+- `MenuCarDisplayOn`;
+- `MenuCarDisplayOff`;
+- `MenuCarDisplayActive`, the orbit's hum;
+- `MenuCarOrbitBump`.
+
+SetMode(0) plays Off and stops the hum. SetMode(1) starts the hum at
+volume 0 and plays On. The port sends them through `gSelCamSound`,
+which SC-2d fills.
+
+Retail's quirks, kept:
+- Slerp is not bQuaternion's bSlerp. When the two quaternions point
+  apart, it negates the first in place. When they are within 0.05 of
+  opposite, it overwrites the second with one at right angles to the
+  first. Both writes land in the mover.
+- FOVStats and FOVOrbit are stored and never read. The field of view
+  is always 4500.
+- The constructor never writes the two quaternions. The stats view's
+  comes only from SetOrientationStats.
+- NormalizeQuaternion has no guard against a zero length.
+- SetMode, the bumps and the hum test SoundEnabled, not whether the
+  sample was made.
+
+`tools/selcam_check.py` runs retail's constructor, destructor, Update,
+setters, SetMode and the three helpers in mipsemu. Retail's CameraMover
+base, Camera::SetCameraMatrix and matrix layer run under them, over
+retail's own eView table. `tools/src/selcam_test.c` runs the port over
+the same script. On both sides the sound is a recorder, and every camera
+and mover starts from a byte pattern.
+
+The script covers:
+- construction and destruction, with and without sound;
+- every setter at its edge values;
+- SetMode's sounds, and a mode that is neither;
+- the car select's flow: the stats view, into the orbit, the sticks
+  against every stop, and back out;
+- the stops hit exactly, the counter at its turns, odd and NaN blends,
+  a frozen camera and no time;
+- two movers sharing the counter;
+- Slerp at every branch, off the unit sphere and with NaNs;
+- three random walks of 300, 900 and 1500 steps.
+
+It is 11 scenarios, 4266 ops and 52296 lines, with 0 differ. The
+mutation pass catches 141 of 143. The other two can't show:
+- `dtor-vtbl`: the base's destructor puts its own vtable in straight
+  after.
+- `upd-pos-pad`: eTranslate takes only x, y and z.
