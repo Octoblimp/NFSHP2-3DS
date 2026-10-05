@@ -1,4 +1,5 @@
-// hangwatch -- where the game was when it stopped (hangwatch.h).
+// hangwatch -- where the game was when it stopped, and where the GPU's
+// time goes (hangwatch.h).
 
 #include "hangwatch.h"
 
@@ -6,12 +7,22 @@
 #include <citro3d.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
+
+#include "georender.h"
 
 // citro3d's context, whose first member is the GX queue its frames go
 // through: C3D_FrameBegin waits on it, stops it and clears it, and
 // C3D_FrameEnd runs it. The type is citro3d's own and not in its headers.
+// In the libcitro3d.a this links (disassembled, 2026-10-05) its command
+// buffer is at 20 and its flags at 32; hangwatch_gpu_begin checks the
+// first before a timing frame sets the second.
 extern u8  __C3D_Context[];
 extern u32 __ctru_linear_heap, __ctru_linear_heap_size;
+
+// citro3d's own (its internal.h): every uniform the shader has been
+// given, and its constants, marked changed, so the next draw sends them.
+void C3Di_DirtyUniforms(GPU_SHADER_TYPE type);
 
 const char *volatile HangwatchTrail[HANGWATCH_TRAIL];
 volatile uint32_t    HangwatchMarks;
@@ -24,16 +35,6 @@ static volatile uint32_t s_frames;       // frames begun
 static volatile uint32_t s_beatMs;       // the last one's, in ms
 static volatile uint32_t s_marksAtBeat;
 static int               s_peak;         // the most GX entries a frame had
-static int               s_armed;        // frames left to check
-static bool              s_checking;     // this frame
-
-// The draw check (below).
-static bool              s_perDraw;      // this frame's draws one at a time
-static bool              s_perDrawDone;  // once a boot
-static bool              s_shadowOff;    // after the first race's check
-static unsigned          s_draws;        // this frame's
-static unsigned          s_issues;       // logged, of at most kMaxIssues
-static u32               s_linLo, s_linHi;
 
 static gxCmdQueue_s *queue(void)
 {
@@ -160,8 +161,6 @@ void hangwatch_start(void (*log)(const char *fmt, ...))
     s32 prio = 0x30;
 
     s_log = log;
-    s_linLo = osConvertVirtToPhys((const void *)__ctru_linear_heap);
-    s_linHi = s_linLo + __ctru_linear_heap_size;
     svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
     if (prio > 0x18) prio--;
     s_thread = threadCreate(watch_main, NULL, 16 << 10, prio, -2, true);
@@ -182,425 +181,6 @@ bool hangwatch_main_loop(void)
     return up;
 }
 
-void hangwatch_gpu_arm(int frames)
-{
-    s_armed = frames;
-}
-
-void hangwatch_gpu_begin(void)
-{
-    hangwatch_mark("C3D_FrameBegin done");
-    s_checking = s_armed > 0;
-    if (!s_checking) return;
-    s_armed--;
-    s_perDraw = !s_perDrawDone;
-    s_perDrawDone = true;
-    s_log("gpu check: frame %lu%s", (unsigned long)s_frames,
-          s_perDraw ? ", each draw alone" : "");
-}
-
-// The commands so far to the GPU, as C3D_FrameEnd sends them, and
-// waited on. The queue is stopped again after, as the frame had it, and
-// emptied, as citro3d's own sync transfer empties it within a frame: a
-// frame's 33rd entry is svcBreak, and the draws one at a time make
-// hundreds. A draw's (no `stage`) is logged only if it is not done.
-static void gpu_wait(const char *stage, bool split)
-{
-    gxCmdQueue_s *q = queue();
-    u64           t0 = svcGetSystemTick();
-    unsigned      n = q->numEntries;
-    bool          done;
-
-    if (split) {
-        // The flush after the split, as C3D_FrameEnd has it: the split
-        // writes the list's FINALIZE, and flushed before it those words
-        // stayed in the CPU's cache, so the GPU read stale memory where
-        // the list should end and stopped (the New 3DS XL's 2 MB L2 keeps
-        // them; Azahar has no cache). Every check build to 2026-10-05
-        // stopped at its first list with a draw that way.
-        C3D_FrameSplit(0);
-        GSPGPU_FlushDataCache((const void *)__ctru_linear_heap,
-                              __ctru_linear_heap_size);
-        n = q->numEntries;
-        gxCmdQueueRun(q);
-    }
-    done = gxCmdQueueWait(q, 2 * (s64)SYSCLOCK_ARM11);
-    if (done) {
-        if (split) {
-            gxCmdQueueStop(q);
-            gxCmdQueueClear(q);
-        }
-        if (stage)
-            s_log("gpu check: %s done in %.2f ms, %u entries", stage,
-                  ms_since(t0), n);
-        else if (ms_since(t0) > 20.0)
-            s_log("gpu check: draw %u took %.1f ms", s_draws, ms_since(t0));
-        return;
-    }
-    if (stage)
-        s_log("gpu check: %s NOT done in 2 s", stage);
-    else
-        s_log("gpu check: draw %u NOT done in 2 s", s_draws);
-    log_queue("gpu check");
-    log_regs("gpu check");
-    s_checking = false;
-    s_perDraw = false;
-    s_armed = 0;
-}
-
-// ------------------------------------------------------- the draw check
-//
-// What the GPU is told, read back out of citro3d's command buffer from
-// boot to the end of the first race's checked frames: the registers the
-// draws read, and at each draw its vertex buffers, its textures and its
-// target checked against the memory the GPU may reach, the linear heap
-// and VRAM. Azahar reads past those without a word where the console's
-// bus may stop. In the first checked frame each draw is also logged
-// before it goes, and is sent and waited on alone, so that the last line
-// before a stop names the draw.
-
-#define REGS       0x300
-#define VRAM_LO    0x18000000u
-#define VRAM_HI    0x18600000u
-static const unsigned kMaxIssues = 40;
-
-static u32         s_reg[REGS];
-static u8          s_regBytes[REGS];  // which bytes have been written
-static const u32  *s_cur;             // the frame's first command not read
-static const shaderProgram_s *s_prog;
-
-static bool reachable(u32 pa, u32 len)
-{
-    if (pa >= s_linLo && pa < s_linHi) return len <= s_linHi - pa;
-    if (pa >= VRAM_LO && pa < VRAM_HI) return len <= VRAM_HI - pa;
-    return false;
-}
-
-static bool known(unsigned reg)
-{
-    return s_regBytes[reg] == 0xf;
-}
-
-static const char *last_mark(void)
-{
-    const char *m = HangwatchTrail[(HangwatchMarks - 1) % HANGWATCH_TRAIL];
-
-    return m ? m : "?";
-}
-
-static void issue(const char *what, u32 a, u32 b)
-{
-    if (s_issues >= kMaxIssues) return;
-    s_issues++;
-    s_log("draw check: frame %lu draw %u (at %s): %s %08lx %08lx",
-          (unsigned long)s_frames, s_draws, last_mark(), what,
-          (unsigned long)a, (unsigned long)b);
-}
-
-// Bits a texel, by the PICA's format number.
-static const u8 kTexBits[14] = { 32, 24, 16, 16, 16, 16, 16, 8, 8, 8, 4, 4,
-                                 4, 8 };
-// Each unit's dimensions, parameters, LOD, address and format registers.
-static const u16 kTexReg[3][5] = {
-    { 0x082, 0x083, 0x084, 0x085, 0x08e },
-    { 0x092, 0x093, 0x094, 0x095, 0x096 },
-    { 0x09a, 0x09b, 0x09c, 0x09d, 0x09e },
-};
-
-// One texture unit, into `line`: its address, size, format and mode.
-static size_t check_unit(int u, char *line, size_t len, size_t cap)
-{
-    const u16 *r = kTexReg[u];
-    u32        dim, w, h, fmt, mode, levels, size = 0, pa, l;
-
-    if (!known(r[0]) || !known(r[3]) || !(s_regBytes[r[4]] & 1)) {
-        return len + (size_t)snprintf(line + len, cap - len, "; t%d ?", u);
-    }
-    dim = s_reg[r[0]];
-    h = dim & 0x7ff;
-    w = dim >> 16 & 0x7ff;
-    fmt = s_reg[r[4]] & 0xf;
-    mode = s_reg[r[1]] >> 28 & 7;
-    levels = (s_reg[r[2]] >> 16 & 0xf) + 1;
-    pa = (s_reg[r[3]] & 0x0fffffff) << 3;
-    if (fmt > 13) issue("texture format", (u32)u, fmt);
-    if (w < 8 || h < 8 || w > 1024 || h > 1024 || (w & 7) || (h & 7))
-        issue("texture size", (u32)u, w << 16 | h);
-    for (l = 0; l < levels && fmt <= 13; l++) {
-        size += (w >> l) * (h >> l) * kTexBits[fmt] / 8;
-    }
-    if (!reachable(pa, size)) issue("texture address", (u32)u << 28 | size,
-                                    pa);
-    // A cube's other five faces: their addresses' low 22 bits, the rest
-    // the first face's.
-    if (u == 0 && (mode == 1 || mode == 4)) {
-        for (l = 0; l < 5; l++) {
-            u32 f = ((s_reg[0x086 + l] & 0x3fffff)
-                     | (s_reg[0x085] & 0x0fc00000)) << 3;
-
-            if (!known(0x086 + l) || !reachable(f, size))
-                issue("cube face address", l + 1, f);
-        }
-    }
-    return len + (size_t)snprintf(line + len, cap - len,
-                                  "; t%d %08lx %lux%lu f%lu m%lu l%lu", u,
-                                  (unsigned long)pa, (unsigned long)w,
-                                  (unsigned long)h, (unsigned long)fmt,
-                                  (unsigned long)mode, (unsigned long)levels);
-}
-
-// A float24 register (1 sign, 7 exponent, 16 mantissa bits) as a float.
-static float f24(u32 v)
-{
-    union { u32 u; float f; } x;
-
-    v &= 0xffffff;
-    if ((v & 0x7fffff) == 0) return 0.0f;
-    x.u = (v >> 23) << 31 | ((v >> 16 & 0x7f) + 64) << 23 | (v & 0xffff) << 7;
-    return x.f;
-}
-
-// The viewport, the scissor and the shader's outputs, into `line`, and the
-// first two checked against the target: a fragment past it is a write past
-// the buffer, which on the console may be past what the bus maps.
-static size_t check_view(u32 fw, u32 fh, char *line, size_t len, size_t cap)
-{
-    u32 vw = (u32)(f24(s_reg[0x041]) * 2.0f + 0.5f);
-    u32 vh = (u32)(f24(s_reg[0x043]) * 2.0f + 0.5f);
-    u32 vx = s_reg[0x068] & 0x3ff, vy = s_reg[0x068] >> 16 & 0x3ff;
-    u32 sm = s_reg[0x065] & 3;
-    u32 sx0 = s_reg[0x066] & 0x3ff, sy0 = s_reg[0x066] >> 16 & 0x3ff;
-    u32 sx1 = s_reg[0x067] & 0x3ff, sy1 = s_reg[0x067] >> 16 & 0x3ff;
-
-    if (vx + vw > fw || vy + vh > fh)
-        issue("viewport", vx << 16 | vy, vw << 16 | vh);
-    if (sm != 0 && (sx1 >= fw || sy1 >= fh))
-        issue("scissor", s_reg[0x066], s_reg[0x067]);
-    return len + (size_t)snprintf(line + len, cap - len,
-                                  "; vp %lu,%lu %lux%lu sc%lu %lu,%lu-%lu,%lu"
-                                  " out %lu/%03lx",
-                                  (unsigned long)vx, (unsigned long)vy,
-                                  (unsigned long)vw, (unsigned long)vh,
-                                  (unsigned long)sm, (unsigned long)sx0,
-                                  (unsigned long)sy0, (unsigned long)sx1,
-                                  (unsigned long)sy1,
-                                  (unsigned long)(s_reg[0x04f] & 7),
-                                  (unsigned long)(s_reg[0x2bd] & 0xffff));
-}
-
-// Loader i's vertex as the PICA reads it: each attribute aligned to its
-// element's size, and a padding entry (12 to 15, 4 to 16 bytes) to 4.
-// A stride that is not this freezes the PICA (3dbrew's GPU/Pitfalls),
-// which Azahar does not.
-static u32 loader_size(int i)
-{
-    static const u8 kElem[4] = { 1, 1, 2, 4 };
-    u32 c1 = s_reg[0x204 + 3 * i], c2 = s_reg[0x205 + 3 * i];
-    u32 n = c2 >> 28, off = 0, k;
-
-    for (k = 0; k < n; k++) {
-        u32 a = (k < 8 ? c1 >> (4 * k) : c2 >> (4 * (k - 8))) & 0xf;
-
-        if (a < 12) {
-            u32 f = (a < 8 ? s_reg[0x201] >> (4 * a)
-                           : s_reg[0x202] >> (4 * (a - 8))) & 0xf;
-            u32 e = kElem[f & 3];
-
-            off = (off + e - 1) & ~(e - 1);
-            off += e * ((f >> 2) + 1);
-        } else {
-            off = (off + 3) & ~3u;
-            off += (a - 11) * 4;
-        }
-    }
-    return off;
-}
-
-// The draw the commands just read start: what it reads and writes,
-// checked, and in the first checked frame logged.
-static void check_draw(bool elements)
-{
-    static const char *const kPrim[4] = { "tris", "strip", "fan", "geo" };
-    char     line[512];
-    size_t   len;
-    u32      base = (s_reg[0x200] & 0x1fffffff) << 3;
-    u32      attrs = (s_reg[0x202] >> 28) + 1, comps = 0;
-    u32      first = s_reg[0x22a], count = s_reg[0x228];
-    u32      units = s_reg[0x080], dim = s_reg[0x11e];
-    u32      fw = dim & 0x7ff, fh = (dim >> 12 & 0x3ff) + 1;
-    u32      cpa = (s_reg[0x11d] & 0x0fffffff) << 3;
-    u32      dpa = (s_reg[0x11c] & 0x0fffffff) << 3;
-    u32      cb = 2 + (s_reg[0x117] & 3);
-    u32      dfmt = s_reg[0x116] & 3;
-    u32      db = dfmt == 3 ? 4 : dfmt == 2 ? 3 : 2;
-    bool     colour = (s_reg[0x112] | s_reg[0x113]) & 0xf;
-    bool     depth = (s_reg[0x114] | s_reg[0x115]) & 0x3;
-    int      i;
-
-    s_draws++;
-    len = (size_t)snprintf(line, sizeof line, "draw %u at %s: %s %lu+%lu",
-                           s_draws, last_mark(),
-                           elements ? "elements"
-                                    : kPrim[s_reg[0x25e] >> 8 & 3],
-                           (unsigned long)first, (unsigned long)count);
-    if (s_prog && s_prog->vertexShader && s_prog->vertexShader->dvle)
-        len += (size_t)snprintf(line + len, sizeof line - len, ", vsh %lu",
-                                (unsigned long)
-                                s_prog->vertexShader->dvle->dvlp->codeSize);
-    if (count == 0 || count > 0x100000 || first > 0x100000)
-        issue("vertex count", first, count);
-    if (elements) {
-        u32 ib = s_reg[0x227];
-
-        if (!reachable(base + (ib & 0x0fffffff),
-                       count * (ib >> 31 ? 2u : 1u)))
-            issue("index buffer", base, ib);
-    }
-    for (i = 0; i < 12; i++) {
-        u32 c2 = s_reg[0x205 + 3 * i];
-        u32 n = c2 >> 28, stride = c2 >> 16 & 0xff;
-        u32 pa = base + (s_reg[0x203 + 3 * i] & 0x0fffffff);
-        u32 size;
-
-        if (n == 0) continue;
-        comps += n;
-        if (!known(0x203 + 3 * i) || !known(0x205 + 3 * i)) {
-            issue("vertex buffer not known", (u32)i, c2);
-            continue;
-        }
-        size = known(0x201) && known(0x204 + 3 * i) ? loader_size(i) : 0;
-        if (size != 0 && size != stride)
-            issue("vertex stride", (u32)i << 16 | size, stride);
-        len += (size_t)snprintf(line + len, sizeof line - len,
-                                "; vb%d %08lx %lu/%lu=%lu", i,
-                                (unsigned long)pa, (unsigned long)n,
-                                (unsigned long)stride, (unsigned long)size);
-        if (!elements && !reachable(pa + first * stride, count * stride))
-            issue("vertex buffer", pa + first * stride, count * stride);
-    }
-    if (comps != attrs) issue("attributes", attrs, comps);
-    if ((s_reg[0x242] & 0xf) + 1 != attrs
-        || (s_reg[0x2b9] & 0xf) + 1 != attrs)
-        issue("shader inputs", s_reg[0x242], s_reg[0x2b9]);
-    for (i = 0; i < 3; i++) {
-        if (units >> i & 1) len = check_unit(i, line, len, sizeof line);
-    }
-    len += (size_t)snprintf(line + len, sizeof line - len,
-                            "; fb %lux%lu c %08lx/%lu%s d %08lx/%lu%s",
-                            (unsigned long)fw, (unsigned long)fh,
-                            (unsigned long)cpa, (unsigned long)cb,
-                            colour ? "" : " off", (unsigned long)dpa,
-                            (unsigned long)db, depth ? "" : " off");
-    if (colour && !reachable(cpa, fw * fh * cb))
-        issue("colour buffer", cpa, fw << 16 | fh);
-    if (depth && !reachable(dpa, fw * fh * db))
-        issue("depth buffer", dpa, fw << 16 | fh);
-    len = check_view(fw, fh, line, len, sizeof line);
-    if (s_perDraw) s_log("%s", line);
-}
-
-static void reg_write(unsigned reg, unsigned mask, u32 v)
-{
-    u32 m = (mask & 1 ? 0xffu : 0) | (mask & 2 ? 0xff00u : 0)
-            | (mask & 4 ? 0xff0000u : 0) | (mask & 8 ? 0xff000000u : 0);
-
-    if (reg >= REGS) return;
-    s_reg[reg] = (s_reg[reg] & ~m) | (v & m);
-    s_regBytes[reg] |= (u8)mask;
-    if (reg == 0x22e || reg == 0x22f) check_draw(reg == 0x22f);
-}
-
-// The commands from the last read to `end`: a parameter and a header, the
-// header's extra parameters, and a word more when there are an odd number.
-static void read_commands(const u32 *end)
-{
-    const u32 *p = s_cur;
-
-    if (!p || end < p || end - p > 0x400000) {
-        if (p) issue("command buffer", (u32)p, (u32)end);
-        s_cur = NULL;
-        return;
-    }
-    while (end - p >= 2) {
-        u32      hdr = p[1];
-        unsigned reg = hdr & 0xffff, mask = hdr >> 16 & 0xf;
-        unsigned extra = hdr >> 20 & 0x7ff, i;
-        bool     inc = hdr >> 31;
-
-        if ((u32)(end - p) < 2 + extra + (extra & 1)) {
-            issue("command past the end", hdr, (u32)(end - p));
-            break;
-        }
-        if (reg >= 0x400) issue("command register", hdr, p[0]);
-        reg_write(reg, mask, p[0]);
-        for (i = 0; i < extra; i++) {
-            reg_write(inc ? reg + 1 + i : reg, mask, p[2 + i]);
-        }
-        p += 2 + extra + (extra & 1);
-    }
-    s_cur = p;
-}
-
-void __real_C3D_DrawArrays(GPU_Primitive_t primitive, int first, int size);
-void __wrap_C3D_DrawArrays(GPU_Primitive_t primitive, int first, int size);
-void __real_C3D_DrawElements(GPU_Primitive_t primitive, int count, int type,
-                             const void *indices);
-void __wrap_C3D_DrawElements(GPU_Primitive_t primitive, int count, int type,
-                             const void *indices);
-bool __real_C3D_FrameBegin(u8 flags);
-bool __wrap_C3D_FrameBegin(u8 flags);
-void __real_C3D_BindProgram(shaderProgram_s *program);
-void __wrap_C3D_BindProgram(shaderProgram_s *program);
-
-// After a draw: its commands read, and in the first checked frame the
-// draw sent and waited on alone.
-static void after_draw(void)
-{
-    if (s_shadowOff) return;
-    read_commands(gpuCmdBuf + gpuCmdBufOffset);
-    if (s_perDraw) {
-        s_beatMs = now_ms();
-        gpu_wait(NULL, true);
-    }
-}
-
-void __wrap_C3D_DrawArrays(GPU_Primitive_t primitive, int first, int size)
-{
-    __real_C3D_DrawArrays(primitive, first, size);
-    after_draw();
-}
-
-// citro2d's.
-void __wrap_C3D_DrawElements(GPU_Primitive_t primitive, int count, int type,
-                             const void *indices)
-{
-    __real_C3D_DrawElements(primitive, count, type, indices);
-    after_draw();
-}
-
-// A frame's commands start at the buffer's start.
-bool __wrap_C3D_FrameBegin(u8 flags)
-{
-    bool ok = __real_C3D_FrameBegin(flags);
-
-    if (ok && !s_shadowOff) {
-        s_cur = gpuCmdBuf + gpuCmdBufOffset;
-        s_draws = 0;
-    }
-    return ok;
-}
-
-void __wrap_C3D_BindProgram(shaderProgram_s *program)
-{
-    s_prog = program;
-    __real_C3D_BindProgram(program);
-}
-
-bool hangwatch_per_draw(void)
-{
-    return s_perDraw;
-}
-
 void hangwatch_log(const char *fmt, ...)
 {
     char    line[512];
@@ -613,10 +193,345 @@ void hangwatch_log(const char *fmt, ...)
     s_log("%s", line);
 }
 
+// ------------------------------------------------------- the timing frame
+
+static bool     s_racing;
+static bool     s_due;
+static bool     s_timing;      // this frame
+static bool     s_broken;      // a wait failed: no more timing frames
+static bool     s_noReplay;    // no target for the replays: stages only
+static bool     s_envDone;     // this frame's first envmap view sent again
+static uint32_t s_nextMs;      // when the next is due
+static char     s_line[768];   // this frame's stages
+static size_t   s_len;
+static unsigned s_stages;      // on it
+static double   s_total;
+
+static u32 *c3d_flags(void)
+{
+    return (u32 *)(void *)(__C3D_Context + 32);
+}
+
+// citro3d's C3DiF_ flags for all a list's draws read, which
+// C3Di_UpdateContext sends before the next draw: the attributes, the
+// buffers, the effect, the framebuffer, the viewport, the scissor, the
+// program and its code, the combiner buffer, the lighting switch, the
+// texture units and their switch, the fog table and the six combiners.
+#define C3D_FLAGS_ALL (0x4u | 0x8u | 0x10u | 0x20u | 0x40u | 0x80u | 0x100u \
+                       | 0x200u | 0x400u | 0x800u | 0x4000u | (1u << 17)   \
+                       | (7u << 23) | (0x3fu << 26))
+
+// Everything sent again before the next draw. Each list a timing frame
+// splits off then starts with all it reads, so it can be sent again on
+// its own; and the list after a replay does not find the GPU as the
+// replay left it. georender's runs send a buffer's start as one register
+// over citro3d's (georender.h), so they start again too.
+static void send_all_again(void)
+{
+    *c3d_flags() |= C3D_FLAGS_ALL;
+    C3Di_DirtyUniforms(GPU_VERTEX_SHADER);
+    georender_forget();
+}
+
+// The queue run and waited on for 2 s at most, and then stopped and
+// emptied, as C3D_FrameBegin leaves it, when `run`. After C3D_FrameEnd it
+// runs already, and its callback is citro3d's.
+static bool wait_queue(bool run, double *ms)
+{
+    gxCmdQueue_s *q = queue();
+    u64           t0 = svcGetSystemTick();
+
+    if (run) gxCmdQueueRun(q);
+    if (!gxCmdQueueWait(q, 2 * (s64)SYSCLOCK_ARM11)) return false;
+    if (ms) *ms = ms_since(t0);
+    if (run) {
+        gxCmdQueueStop(q);
+        gxCmdQueueClear(q);
+    }
+    return true;
+}
+
+static void stuck(const char *what, const char *how)
+{
+    s_log("gpu time: %s%s%s NOT done in 2 s; no more timing frames", what,
+          how[0] ? ", " : "", how);
+    log_queue("gpu time");
+    log_regs("gpu time");
+    s_broken = true;
+    s_timing = false;
+}
+
+// The replays' target, the top screen's size and formats (RGBA8 over
+// D24S8) in VRAM of its own, and their 8x8 RGBA8 texture.
+#define OFF_W     240u
+#define OFF_H     400u
+#define OFF_WORDS (OFF_W * OFF_H)
+
+static u32 *s_offColour, *s_offDepth, *s_standin;
+
+static bool targets_made(void)
+{
+    if (s_offColour && s_offDepth && s_standin) return true;
+    if (s_noReplay) return false;
+    // Colour and depth in the two banks, as C3D_RenderTargetCreate puts
+    // them.
+    if (!s_offColour) s_offColour = (u32 *)vramAllocAt(OFF_WORDS * 4,
+                                                       VRAM_ALLOC_A);
+    if (!s_offColour) s_offColour = (u32 *)vramAlloc(OFF_WORDS * 4);
+    if (!s_offDepth) s_offDepth = (u32 *)vramAllocAt(OFF_WORDS * 4,
+                                                     VRAM_ALLOC_B);
+    if (!s_offDepth) s_offDepth = (u32 *)vramAlloc(OFF_WORDS * 4);
+    if (!s_standin) {
+        s_standin = (u32 *)linearAlloc(8 * 8 * 4);
+        if (s_standin) {
+            for (int i = 0; i < 64; i++) s_standin[i] = 0xff808080u;
+            GSPGPU_FlushDataCache(s_standin, 8 * 8 * 4);
+        }
+    }
+    if (s_offColour && s_offDepth && s_standin) return true;
+    s_log("gpu time: no VRAM or linear heap for the replays' target; the "
+          "stages are timed, and no list is sent again");
+    s_noReplay = true;
+    return false;
+}
+
+// The ways a list is sent again.
+enum { V_DRAWN, V_TEX8, V_PIXEL, V_VERTS, V_NOCLEAR, V_COUNT };
+
+typedef struct {
+    unsigned draws;      // GPUREG_DRAWARRAYS and _DRAWELEMENTS
+    unsigned verts;      // GPUREG_NUMVERTICES at each
+    unsigned texAddrs;   // a unit's address
+    unsigned clears;     // texture cache clears
+    u32      pending;    // GPUREG_NUMVERTICES
+    bool     fbFirst;    // the colour buffer's address before the first draw
+    bool     fbFits;     // every framebuffer within the replays' target
+} ListStats;
+
+// One register write's value in variant `v`. Every variant draws onto the
+// replays' target; the others change what their name says.
+static u32 patch(int v, unsigned reg, unsigned mask, u32 val, ListStats *st)
+{
+    bool pixel = v == V_PIXEL || v == V_VERTS;
+
+    switch (reg) {
+    case 0x11c:                       // GPUREG_DEPTHBUFFER_LOC
+        return osConvertVirtToPhys(s_offDepth) >> 3;
+    case 0x11d:                       // GPUREG_COLORBUFFER_LOC
+        if (st->draws == 0) st->fbFirst = true;
+        return osConvertVirtToPhys(s_offColour) >> 3;
+    case 0x11e:                       // GPUREG_FRAMEBUFFER_DIM
+        if ((val & 0x7ff) > OFF_W || (val >> 12 & 0x3ff) + 1 > OFF_H)
+            st->fbFits = false;
+        return val;
+    case 0x228:                       // GPUREG_NUMVERTICES
+        st->pending = val;
+        return v == V_VERTS && val > 3 ? 3 : val;
+    case 0x22e:                       // GPUREG_DRAWARRAYS
+    case 0x22f:                       // GPUREG_DRAWELEMENTS
+        st->draws++;
+        st->verts += st->pending;
+        return val;
+    case 0x080:                       // GPUREG_TEXUNIT_CONFIG
+        // Bit 16 clears the texture cache; citro3d sets it alone, in a
+        // write of byte 2 only, after each texture change.
+        if ((mask & 4) && (val & BIT(16))) st->clears++;
+        return v == V_NOCLEAR ? val & ~BIT(16) : val;
+    case 0x065:                       // GPUREG_SCISSORTEST_MODE: inside
+        return pixel ? 3 : val;
+    case 0x066:                       // _POS and _DIM, inclusive: (0, 0)
+    case 0x067:
+        return pixel ? 0 : val;
+    case 0x082: case 0x092: case 0x09a:   // TEXUNITn_DIM
+        return v == V_TEX8 ? (8u << 16 | 8u) : val;
+    case 0x084: case 0x094: case 0x09c:   // _LOD: the base level alone
+        return v == V_TEX8 ? val & 0x1fff : val;
+    case 0x085: case 0x095: case 0x09d:   // _ADDR1
+        st->texAddrs++;
+        return v == V_TEX8 ? osConvertVirtToPhys(s_standin) >> 3 : val;
+    case 0x08e: case 0x096: case 0x09e:   // _TYPE: RGBA8
+        return v == V_TEX8 ? 0 : val;
+    }
+    return val;
+}
+
+// The list `src` into `dst`, changed for variant `v`. Each command is a
+// parameter and a header, the header's extra parameters, and a word more
+// when there are an odd number of them. False unless the walk lands on
+// the list's end and the list sets its own target before it draws, and
+// in the replays' target's bounds.
+static bool copy_list(const u32 *src, u32 words, u32 *dst, int v,
+                      ListStats *st)
+{
+    u32 i = 0;
+
+    memset(st, 0, sizeof *st);
+    st->fbFits = true;
+    while (words - i >= 2) {
+        u32      hdr = src[i + 1];
+        unsigned reg = hdr & 0xffff, mask = hdr >> 16 & 0xf;
+        unsigned extra = hdr >> 20 & 0x7ff, k;
+        bool     inc = hdr >> 31;
+        u32      len = 2 + extra + (extra & 1);
+
+        if (len > words - i) return false;
+        dst[i] = patch(v, reg, mask, src[i], st);
+        dst[i + 1] = hdr;
+        for (k = 0; k < extra; k++)
+            dst[i + 2 + k] = patch(v, inc ? reg + 1 + k : reg, mask,
+                                   src[i + 2 + k], st);
+        if (extra & 1) dst[i + 2 + extra] = src[i + 2 + extra];
+        i += len;
+    }
+    return i == words && st->fbFirst && st->fbFits && st->draws > 0;
+}
+
+// A stage's list sent again onto the replays' target, cleared first as
+// the stage's own was, once each way.
+static void replay(const char *name, const u32 *list, u32 words)
+{
+    static const char *const kVariant[V_COUNT] = {
+        "as drawn", "8x8 textures", "1-pixel scissor",
+        "and 3 vertices a draw", "no texture cache clears"
+    };
+    char      line[512];
+    size_t    len;
+    ListStats st, first = {0};
+    double    ms[V_COUNT];
+    u32      *copy;
+    int       v;
+
+    if (!targets_made()) return;
+    copy = (u32 *)linearAlloc(words * 4);
+    if (!copy) {
+        s_log("gpu time: %s: no %lu bytes of linear heap to copy it into",
+              name, (unsigned long)words * 4);
+        return;
+    }
+    for (v = 0; v < V_COUNT; v++) {
+        if (!copy_list(list, words, copy, v, &st)) {
+            s_log("gpu time: %s: not sent again: %lu words, %u draws, the "
+                  "target %s, %s", name, (unsigned long)words, st.draws,
+                  st.fbFirst ? "set first" : "not set first",
+                  st.fbFits ? "fits" : "does not fit");
+            linearFree(copy);
+            return;
+        }
+        if (v == V_DRAWN) first = st;
+        s_beatMs = now_ms();
+        GX_MemoryFill(s_offColour, 0, s_offColour + OFF_WORDS,
+                      GX_FILL_TRIGGER | GX_FILL_32BIT_DEPTH, s_offDepth, 0,
+                      s_offDepth + OFF_WORDS,
+                      GX_FILL_TRIGGER | GX_FILL_32BIT_DEPTH);
+        if (!wait_queue(true, NULL)) {
+            stuck(name, "the replays' clear");
+            return;   // the copy stays: the GPU may yet read it
+        }
+        GSPGPU_FlushDataCache(copy, words * 4);
+        GX_ProcessCommandList(copy, words * 4, 0);
+        if (!wait_queue(true, &ms[v])) {
+            stuck(name, kVariant[v]);
+            return;
+        }
+    }
+    linearFree(copy);
+    len = (size_t)snprintf(line, sizeof line,
+                           "gpu time: %s sent again (%u draws, %u vertices, "
+                           "%u texture addresses, %u cache clears, %lu "
+                           "words):", name, first.draws, first.verts,
+                           first.texAddrs, first.clears,
+                           (unsigned long)words);
+    for (v = 0; v < V_COUNT && len < sizeof line; v++)
+        len += (size_t)snprintf(line + len, sizeof line - len, "%s %s %.2f",
+                                v ? ";" : "", kVariant[v], ms[v]);
+    s_log("%s", line);
+}
+
+void hangwatch_gpu_race(bool racing)
+{
+    uint32_t t = now_ms();
+
+    if (!racing) {
+        s_racing = false;
+        return;
+    }
+    if (!s_racing) {
+        s_racing = true;
+        s_nextMs = t + 5000;
+    }
+    if (!s_broken && (int32_t)(t - s_nextMs) >= 0) s_due = true;
+}
+
+void hangwatch_gpu_begin(void)
+{
+    hangwatch_mark("C3D_FrameBegin done");
+    if (!s_due) return;
+    s_due = false;
+    // A frame just begun writes from the command buffer's start, and the
+    // context is active.
+    if (*(u32 **)(void *)(__C3D_Context + 20) != gpuCmdBuf
+        || !(*c3d_flags() & 1)) {
+        s_log("gpu time: citro3d's context is not as hangwatch.c reads it "
+              "(buffer %p, flags %08lx); no timing frames", (void *)gpuCmdBuf,
+              (unsigned long)*c3d_flags());
+        s_broken = true;
+        return;
+    }
+    s_timing = true;
+    s_envDone = false;
+    s_total = 0.0;
+    s_stages = 0;
+    s_len = (size_t)snprintf(s_line, sizeof s_line, "gpu time: frame %lu:",
+                             (unsigned long)s_frames);
+}
+
+// A stage's commands, split off and timed, and sent again if it is one
+// of the two.
+static void time_stage(const char *name, bool split)
+{
+    gxCmdQueue_s *q = queue();
+    u32          *list = gpuCmdBuf;
+    u32           words = 0;
+    bool          listed = false;
+    double        ms = 0.0;
+
+    if (split) {
+        // The flush after the split, as C3D_FrameEnd has it: the split
+        // writes the list's FINALIZE, and flushed before it those words
+        // stay in the New 3DS's L2 cache (04aa510).
+        C3D_FrameSplit(0);
+        GSPGPU_FlushDataCache((const void *)__ctru_linear_heap,
+                              __ctru_linear_heap_size);
+        words = (u32)(gpuCmdBuf - list);
+        // The split's list is the queue's last entry.
+        if (words && q->numEntries) {
+            const gxCmdEntry_s *e = &q->entries[q->numEntries - 1];
+
+            listed = e->type == 1 && e->args[0] == (u32)list
+                     && e->args[1] == words * 4;
+        }
+    }
+    if (!wait_queue(split, &ms)) {
+        stuck(name, "");
+        return;
+    }
+    s_total += ms;
+    if (s_len < sizeof s_line)
+        s_len += (size_t)snprintf(s_line + s_len, sizeof s_line - s_len,
+                                  "%s %s %.2f", s_stages++ ? ";" : "",
+                                  name, ms);
+    if (listed && (!strcmp(name, "the models")
+                   || (!s_envDone && !strncmp(name, "envmap view", 11)))) {
+        s_envDone = s_envDone || name[0] == 'e';
+        replay(name, list, words);
+    }
+    if (split && s_timing) send_all_again();
+}
+
 void hangwatch_gpu_stage(const char *stage)
 {
     hangwatch_mark(stage);
-    if (s_checking) gpu_wait(stage, true);
+    if (s_timing) time_stage(stage, true);
 }
 
 void hangwatch_gpu_frame_end(void)
@@ -624,7 +539,7 @@ void hangwatch_gpu_frame_end(void)
     const gxCmdQueue_s *q = queue();
 
     hangwatch_mark("C3D_FrameEnd done");
-    if (!s_checking) {
+    if (!s_timing) {
         if ((int)q->numEntries > s_peak) {
             s_peak = (int)q->numEntries;
             s_log("gx queue: a frame used %d of %u entries", s_peak,
@@ -632,13 +547,8 @@ void hangwatch_gpu_frame_end(void)
         }
         return;
     }
-    gpu_wait("the frame's end and its transfers", false);
-    s_checking = false;
-    // The shadow's parse costs every draw; the race's checked frames are
-    // what it is for.
-    if (s_armed == 0) {
-        s_shadowOff = true;
-        s_perDraw = false;
-        s_log("draw check: %u issues; the shadow is off", s_issues);
-    }
+    time_stage("the frame's end", false);
+    if (s_timing) s_log("%s; %.1f ms in all", s_line, s_total);
+    s_timing = false;
+    s_nextMs = now_ms() + 10000;
 }

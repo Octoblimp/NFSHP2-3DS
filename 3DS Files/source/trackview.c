@@ -245,14 +245,16 @@ static TrackTex* find_texture(TrackView* v, const TextureInfo* info)
     return NULL;
 }
 
-static uint32_t pow2_at_least(uint32_t n)
+// The linear heap texpack_upload_chain takes for `e` from `level` down.
+static uint32_t chain_bytes(const TexInfo* e, int level)
 {
-    uint32_t p = 8;
+    uint32_t w, h, bytes = 0;
+    int      i, n = texpack_chain(e, level, &w, &h);
 
-    while (p < n) {
-        p <<= 1;
+    for (i = 0; i < n; i++) {
+        bytes += (w >> i) * (h >> i) * 4u;
     }
-    return p;
+    return bytes;
 }
 
 // What decides where and how a strip draws: see trackview_draw and
@@ -310,8 +312,9 @@ static bool texture_source(const TextureInfo* info, TexPack* tp, TexInfo* e)
     return true;
 }
 
-// The pixels `t`'s TextureInfo points at now, at `t->level`, into `out`.
-static bool upload_texture(const TrackTex* t, C3D_Tex* out)
+// The pixels `t`'s TextureInfo points at now, at `t->level`, into `out`:
+// the mip chain, or the one level when the chain will not fit.
+static bool upload_texture(TrackView* v, const TrackTex* t, C3D_Tex* out)
 {
     TexPack  tp;
     TexInfo  e;
@@ -319,9 +322,14 @@ static bool upload_texture(const TrackTex* t, C3D_Tex* out)
     uint8_t  tilable = t->info->TilableUV;
 
     if (!texture_source(t->info, &tp, &e)
-        || !texpack_level(&e, t->level, &w, &h, NULL, NULL)
-        || !texpack_upload(&tp, &e, t->level, out)) {
+        || !texpack_level(&e, t->level, &w, &h, NULL, NULL)) {
         return false;
+    }
+    if (!texpack_upload_chain(&tp, &e, t->level, out)) {
+        if (!texpack_upload(&tp, &e, t->level, out)) {
+            return false;
+        }
+        v->unchainedTextures++;
     }
 
     // Road and verge textures repeat thousands of times along a strip --
@@ -375,16 +383,17 @@ static TrackTex* load_texture(TrackView* v, const TextureInfo* info)
     }
     t->ownImage = info->ImageData;
 
-    // The largest level that leaves the reserve behind. The whole track at
-    // level 0 is 28.9 MB as RGBA8, which a New 3DS has room for and an Old
-    // one, with the bundle resident beside it, does not.
+    // The largest level whose chain leaves the reserve behind. The whole
+    // track at level 0 is 28.9 MB as RGBA8 and about 38 MB with its chains,
+    // which a New 3DS has room for and an Old one, with the bundle
+    // resident beside it, does not.
     for (level = 0; level < (int)e.levels; level++) {
         uint32_t bytes;
 
         if (!texpack_level(&e, level, &w, &h, NULL, NULL)) {
             continue;
         }
-        bytes = pow2_at_least(w) * pow2_at_least(h) * 4u;
+        bytes = chain_bytes(&e, level);
         if (linearSpaceFree() >= bytes + TEX_RESERVE) {
             break;
         }
@@ -394,7 +403,7 @@ static TrackTex* load_texture(TrackView* v, const TextureInfo* info)
         return t;
     }
     t->level = (uint8_t)level;
-    if (!upload_texture(t, &t->own)) {
+    if (!upload_texture(v, t, &t->own)) {
         v->missingTextures++;
         return t;
     }
@@ -565,7 +574,7 @@ static void follow_flipbooks(TrackView* v)
         }
         if (!f) {
             if (v->numFrames >= TRACKVIEW_MAX_FRAMES
-                || !upload_texture(t, &v->frame[v->numFrames].tex)) {
+                || !upload_texture(v, t, &v->frame[v->numFrames].tex)) {
                 v->frameFails++;
                 continue;
             }

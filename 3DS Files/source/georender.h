@@ -183,6 +183,11 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
 void georender_run_begin(void);
 void georender_run_end(void);
 
+// The run forgets what it sent, so its next draw sends its whole state:
+// for hangwatch's timing frame, which marks citro3d's whole state changed
+// after each list it times (hangwatch.h).
+void georender_forget(void);
+
 // ---------------------------------------------------------- the lit strips
 
 // One lit batch's inputs to geolit.v.pica, from the model's eLightContext
@@ -265,18 +270,6 @@ bool georender_envmap_ready(void);
 // frontend's elSetupLightContext points the cars' lighting at
 // CARSELECTENVMAP instead of target 14.
 void georender_set_env_texture(const C3D_Tex* tex);
-
-// The GPU probe, for the draw check's first frame (hangwatch.h) only:
-// one triangle at a time through geosolid's program and attributes,
-// onto `top`, a plain 64x64 RGBA8 target in VRAM and envmap face 0,
-// adding the depth test, texture unit 0, unit 1 and the alpha test one
-// at a time. Each is sent and waited on alone, so the last "draw N at
-// probe" line in the log before a stop names the first the GPU did not
-// finish. Then the first batch drawn after it goes, with its own data
-// and state, onto the plain target and `top` before its face. Call it
-// between C3D_FrameBegin and the envmap, before the top screen's
-// clear: nothing it draws shows.
-void georender_probe(C3D_RenderTarget* top);
 
 // eSetZWriteState(int), 0x001029c0: with it off, nothing drawn writes the
 // depth buffer, whatever its texture's pass says. eDisplayFrame turns it

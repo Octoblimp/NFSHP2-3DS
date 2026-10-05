@@ -122,6 +122,9 @@ bool texpack_get(const TexPack* tp, uint32_t index, TexInfo* out)
     out->scrollS    = bchunk_f32(r + 0x7c);
     out->scrollT    = bchunk_f32(r + 0x80);
     out->scrollStep = bchunk_f32(r + 0x84);
+
+    out->mmag = r[0x6f];
+    out->mmin = r[0x70];
     return true;
 }
 
@@ -319,19 +322,7 @@ bool texpack_decode(const TexPack* tp, const TexInfo* ti, int level,
     return true;
 }
 
-#ifdef __3DS__
-#include <3ds.h>
-#include <stdlib.h>
-
-// The PICA200 stores textures as 8x8 tiles in Morton order, and GPU_RGBA8 is
-// ABGR in memory, so a texel is written as (a, b, g, r) low byte first.
-static inline uint32_t morton8(uint32_t x, uint32_t y)
-{
-    uint32_t i = (x & 1) | ((y & 1) << 1)
-               | ((x & 2) << 1) | ((y & 2) << 2)
-               | ((x & 4) << 2) | ((y & 4) << 3);
-    return i;
-}
+// --- mip chains ----------------------------------------------------------
 
 // The smallest power of two >= n, floored at 8 because that is one Morton
 // tile and the GPU's minimum texture dimension.
@@ -341,6 +332,106 @@ static uint32_t pot_ceil(uint32_t n)
     while (p < n) p <<= 1;
     return p;
 }
+
+int texpack_chain(const TexInfo* ti, int base, uint32_t* outW, uint32_t* outH)
+{
+    uint32_t w, h, pw, ph, side;
+    int      n = 1;
+
+    if (!texpack_level(ti, base, &w, &h, NULL, NULL)) return 0;
+    pw = pot_ceil(w);
+    ph = pot_ceil(h);
+    // The PICA200's smallest level is 8 texels on the shorter side. The
+    // disc's own chains go no further: all 960 levels below the base in
+    // TEX12LOCATION are at least 8 on each side.
+    for (side = pw < ph ? pw : ph; side > 8 && n < TEXPACK_CHAIN_MAX; side >>= 1)
+        n++;
+    if (outW) *outW = pw;
+    if (outH) *outH = ph;
+    return n;
+}
+
+uint8_t texpack_cutout_alpha(const uint8_t* rgba, size_t texels)
+{
+    uint8_t hi = 0;
+    for (size_t i = 0; i < texels; i++) {
+        uint8_t a = rgba[i * 4 + 3];
+        if (a == 0 || a == hi) continue;
+        if (hi != 0) return 0;
+        hi = a;
+    }
+    return hi;
+}
+
+// A decoded w x h image into a cw x ch level, its right column and bottom
+// row repeated over the rest, as texpack_upload() pads.
+static void tile_padded(uint32_t* dst, const uint8_t* rgba, uint32_t w,
+                        uint32_t h, uint32_t cw, uint32_t ch)
+{
+    for (uint32_t y = 0; y < ch; y++) {
+        const uint8_t* row = rgba + (size_t)(y < h ? y : h - 1) * w * 4;
+        for (uint32_t x = 0; x < cw; x++) {
+            const uint8_t* s = row + (size_t)(x < w ? x : w - 1) * 4;
+            dst[texpack_tiled_index(x, y, cw)] =
+                ((uint32_t)s[3]) | ((uint32_t)s[2] << 8)
+              | ((uint32_t)s[1] << 16) | ((uint32_t)s[0] << 24);
+        }
+    }
+}
+
+bool texpack_chain_tiled(const TexPack* tp, const TexInfo* ti, int base,
+                         uint32_t* const level[], uint8_t* scratch,
+                         size_t scratchCap)
+{
+    uint32_t pw, ph, w, h;
+    int      n = texpack_chain(ti, base, &pw, &ph);
+    uint8_t  cutout = 0;
+
+    for (int i = 0; i < n; i++) {
+        uint32_t cw = pw >> i, ch = ph >> i;
+
+        // The disc's own level where it has one.
+        if (base + i < (int)ti->levels
+            && texpack_level(ti, base + i, &w, &h, NULL, NULL)
+            && w <= cw && h <= ch
+            && texpack_decode(tp, ti, base + i, scratch, scratchCap)) {
+            if (i == 0) cutout = texpack_cutout_alpha(scratch, (size_t)w * h);
+            tile_padded(level[i], scratch, w, h, cw, ch);
+            continue;
+        }
+        if (i == 0) return false;
+
+        // Otherwise the 2x2 mean of the level above. The disc's own chains
+        // come out that way in colour (within 2-5 of 255 on every level of
+        // TEX12LOCATION). A cut-out texture's levels keep its two alphas:
+        // of the disc's, 99% of texels with 3 or 4 opaque parents are
+        // opaque, 70% with 2, and 0.2% with 1. So half or more is opaque.
+        // The four texels under one are four words in a row, x then y.
+        for (uint32_t y = 0; y < ch; y++) {
+            for (uint32_t x = 0; x < cw; x++) {
+                const uint32_t* s = level[i - 1]
+                                  + texpack_tiled_index(2 * x, 2 * y, 2 * cw);
+                uint32_t        d = 0;
+
+                for (int c = 0; c < 32; c += 8) {
+                    uint32_t sum = ((s[0] >> c) & 0xff) + ((s[1] >> c) & 0xff)
+                                 + ((s[2] >> c) & 0xff) + ((s[3] >> c) & 0xff);
+                    uint32_t v = (sum + 2) >> 2;
+
+                    if (c == 0 && cutout)       // alpha is the low byte
+                        v = sum >= 2u * cutout ? cutout : 0;
+                    d |= v << c;
+                }
+                level[i][texpack_tiled_index(x, y, cw)] = d;
+            }
+        }
+    }
+    return n > 0;
+}
+
+#ifdef __3DS__
+#include <3ds.h>
+#include <stdlib.h>
 
 bool texpack_upload(const TexPack* tp, const TexInfo* ti, int level,
                     C3D_Tex* out)
@@ -372,21 +463,58 @@ bool texpack_upload(const TexPack* tp, const TexInfo* ti, int level,
     // The padding repeats the edge texel rather than being cleared, so that
     // GPU_LINEAR at the image's right and bottom edges blends with a copy of
     // itself -- exactly what CLAMP_TO_EDGE did before, and no seam.
-    uint32_t* dst = (uint32_t*)out->data;
-    for (uint32_t y = 0; y < ah; y++) {
-        for (uint32_t x = 0; x < aw; x++) {
-            const uint8_t* s = rgba + ((size_t)(y < h ? y : h - 1) * w
-                                     + (x < w ? x : w - 1)) * 4;
-            uint32_t tile = (y >> 3) * (aw >> 3) + (x >> 3);
-            dst[tile * 64 + morton8(x, y)] =
-                ((uint32_t)s[3]) | ((uint32_t)s[2] << 8)
-              | ((uint32_t)s[1] << 16) | ((uint32_t)s[0] << 24);
-        }
-    }
+    tile_padded((uint32_t*)out->data, rgba, w, h, aw, ah);
     C3D_TexFlush(out);
     C3D_TexSetFilter(out, GPU_LINEAR, GPU_LINEAR);
     C3D_TexSetWrap(out, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     free(rgba);
+    return true;
+}
+
+bool texpack_upload_chain(const TexPack* tp, const TexInfo* ti, int base,
+                          C3D_Tex* out)
+{
+    uint32_t  pw, ph;
+    int       n = texpack_chain(ti, base, &pw, &ph);
+    size_t    cap = texpack_decode_size(ti, base);
+    uint32_t* level[TEXPACK_CHAIN_MAX];
+    uint8_t*  scratch;
+    bool      ok;
+
+    if (n < 1 || pw > 1024 || ph > 1024 || cap == 0) return false;
+
+    // The made levels are made in the texture itself, from the level
+    // above it there: a 512x320 car skin took 1.25 MB of the heap padded
+    // and halved beside it, which the heap did not have once a race had
+    // loaded, and the car drew without its paint (2026-10-05).
+    scratch = (uint8_t*)malloc(cap);
+    if (!scratch) return false;
+    C3D_TexInitParams p = { (u16)pw, (u16)ph, (u8)(n - 1), GPU_RGBA8,
+                            GPU_TEX_2D, false };
+    if (!C3D_TexInitWithParams(out, NULL, p)) {
+        free(scratch);
+        return false;
+    }
+    for (int i = 0; i < n; i++)
+        level[i] = (uint32_t*)C3D_TexGetImagePtr(out, out->data, i, NULL);
+    ok = texpack_chain_tiled(tp, ti, base, level, scratch, cap);
+    free(scratch);
+    if (!ok) {
+        C3D_TexDelete(out);
+        return false;
+    }
+    C3D_TexFlush(out);
+
+    // The record's filters. MMIN 2-5 are GL's NEAREST_MIPMAP_NEAREST,
+    // NEAREST_MIPMAP_LINEAR, LINEAR_MIPMAP_NEAREST and
+    // LINEAR_MIPMAP_LINEAR; 0 and 1 have no mips on the GS, and take the
+    // nearer level's filter between levels here.
+    C3D_TexSetFilter(out, ti->mmag ? GPU_LINEAR : GPU_NEAREST,
+                     (ti->mmin == 1 || ti->mmin >= 4) ? GPU_LINEAR
+                                                      : GPU_NEAREST);
+    C3D_TexSetFilterMipmap(out, (ti->mmin == 3 || ti->mmin == 5)
+                                    ? GPU_LINEAR : GPU_NEAREST);
+    C3D_TexSetWrap(out, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     return true;
 }
 #endif

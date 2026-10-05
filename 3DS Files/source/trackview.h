@@ -304,6 +304,7 @@ typedef struct {
     int  skippedStrips;
     int  missingTextures;       // no TextureInfo, or one that would not upload
     int  reducedTextures;       // uploaded below level 0 for want of room
+    int  unchainedTextures;     // uploads with no mip chain, for want of room
     int  defaultedHashes;       // table names GetTextureInfo gave the default
     uint32_t defaulted[TRACKVIEW_MAX_TEXTURES];
     int  frameUploads;          // flipbook frames uploaded so far

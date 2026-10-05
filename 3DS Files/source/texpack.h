@@ -60,6 +60,13 @@ typedef struct {
     float          scrollS;
     float          scrollT;
     float          scrollStep;
+
+    // The GS's TEX1 filters, MMAG at 0x6f and MMIN at 0x70: MMAG 0 nearest,
+    // 1 linear; MMIN 0 and 1 the same with no mips, 2-5 nearest/linear
+    // within a level and nearest/linear between levels, GL-style. Every
+    // track texture on the disc has MMAG 1 and MMIN 3.
+    uint8_t        mmag;
+    uint8_t        mmin;
 } TexInfo;
 
 // Finds the first texture pack at or below buf[off, off+len) and fills `tp`.
@@ -110,6 +117,41 @@ float texpack_scroll_axis(float time, float speed, int type, float step);
 // so a renderer whose v counts up from the bottom subtracts *outT.
 void texpack_scroll(const TexInfo* ti, float time, float* outS, float* outT);
 
+// --- mip chains for the PICA200 ---
+//
+// A chain starts at the disc's level `base`, padded to a power of two on
+// each side as texpack_upload() pads, and halves down to 8 texels on the
+// shorter side. Level i is the disc's level base + i where the pack has
+// it, and the 2x2 mean of level i - 1 where it does not.
+#define TEXPACK_CHAIN_MAX 8
+
+// The padded size of the chain's first level and how many levels it has,
+// or 0 if the texture has no level `base`.
+int texpack_chain(const TexInfo* ti, int base, uint32_t* outW, uint32_t* outH);
+
+// The one nonzero alpha of an RGBA8888 image whose alphas are all 0 or
+// that value -- a cut-out, such as a fence -- or 0 for any other image.
+uint8_t texpack_cutout_alpha(const uint8_t* rgba, size_t texels);
+
+// Where texel (x, y) of a w-wide level is in the PICA200's layout: 8x8
+// tiles, row by row, and Morton order inside each.
+static inline uint32_t texpack_tiled_index(uint32_t x, uint32_t y, uint32_t w)
+{
+    uint32_t m = (x & 1) | ((y & 1) << 1) | ((x & 2) << 1) | ((y & 2) << 2)
+               | ((x & 4) << 2) | ((y & 4) << 3);
+    return ((y >> 3) * (w >> 3) + (x >> 3)) * 64 + m;
+}
+
+// The whole chain, in that layout as GPU_RGBA8 takes it: one word a texel,
+// (a, b, g, r) from its low byte. level[i] is where level i goes, (w >> i)
+// x (h >> i) of the padded size. A level the disc lacks is made from the
+// one above it where it already is in level[i - 1], so the only other
+// memory is `scratch`, texpack_decode_size(ti, base) bytes, for the disc's
+// levels as they decode. A made level of a cut-out keeps its two alphas.
+bool texpack_chain_tiled(const TexPack* tp, const TexInfo* ti, int base,
+                         uint32_t* const level[], uint8_t* scratch,
+                         size_t scratchCap);
+
 #ifdef __3DS__
 #include <citro3d.h>
 
@@ -126,4 +168,11 @@ void texpack_scroll(const TexInfo* ti, float time, float* outS, float* outT);
 // Anything above 1024 in either axis is still refused.
 bool texpack_upload(const TexPack* tp, const TexInfo* ti, int level,
                     C3D_Tex* out);
+
+// As texpack_upload(), with the whole chain from level `base` in one
+// GPU_RGBA8 texture and the record's MMAG/MMIN filters. A third larger
+// than level `base` alone, in the linear heap; the heap takes only what
+// texpack_upload() takes, the decoded level.
+bool texpack_upload_chain(const TexPack* tp, const TexInfo* ti, int base,
+                          C3D_Tex* out);
 #endif

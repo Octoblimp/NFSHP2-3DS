@@ -2579,12 +2579,16 @@ static void logTrackView(const char* event)
               g_track.note);
     logPrintf("trackview: %d solids linked, %d models, %d "
               "without a solid, %d baked, %d tris, %d textures "
-              "(%d missing, %d reduced), %u KB linear free\n",
+              "(%d missing, %d reduced, %d unchained), %u KB linear "
+              "free, %lu KB heap free\n",
               g_track.linkedSolids, g_track.numModels,
               g_track.modelsWithoutSolid, g_track.bakedSolids,
               g_track.bakedTris, g_track.numTextures,
               g_track.missingTextures, g_track.reducedTextures,
-              (unsigned)(linearSpaceFree() / 1024u));
+              g_track.unchainedTextures,
+              (unsigned)(linearSpaceFree() / 1024u),
+              (unsigned long)(g_heapInfo.heapGot - mallinfo().uordblks)
+                  / 1024);
     logPrintf("trackview: %d texture packs, %d flipbooks, %d "
               "names given the default, %d breaks, files in "
               "%s %s\n",
@@ -2786,11 +2790,12 @@ static void logRaceState(void)
             (double)RealTimeElapsed, (long)FrameCounter,
             (unsigned long)eFrameCounter);
     logLine("race: other solids %d (%d failed, %d dropped), textures %d "
-            "(%d missing, %d reduced), deferred %d dropped; strips %d "
-            "(%d dropped)",
+            "(%d missing, %d reduced, %d unchained), deferred %d dropped; "
+            "strips %d (%d dropped)",
             g_track.numOther, g_track.otherFailed, g_track.otherDropped,
             g_track.numTextures, g_track.missingTextures,
-            g_track.reducedTextures, g_track.deferredDropped,
+            g_track.reducedTextures, g_track.unchainedTextures,
+            g_track.deferredDropped,
             g_track.stripsDrawn, g_track.stripsDropped);
     {
         // Once, the other solids and what each texture slot draws with.
@@ -3775,8 +3780,6 @@ int main(int argc, char** argv)
     uint32_t frameTicker = bGetTicker();
     // The top screen's blank count when the last frame's sync returned.
     u32      lastSync = 0;
-    // A race's first frames are checked stage by stage (hangwatch.h).
-    bool     raceGpuChecked = false;
     // The race's phases, a line a second (frameprof.h), and the jukebox
     // worker's sums at the last frame's end. Out of a race the worker has
     // a line of its own every five seconds: its sums and the tick at the
@@ -3957,7 +3960,6 @@ int main(int argc, char** argv)
             if (pRaceCoordinator == NULL && g_track.attached) {
                 trackview_free(&g_track);
                 logLine("race: track detached");
-                raceGpuChecked = false;
             }
 
             // This used to be five lines of console on the bottom screen.
@@ -4003,10 +4005,7 @@ int main(int argc, char** argv)
                 C3D_FrameSync();
             C3D_FrameSync();
             uint32_t gpuTick = bGetTicker();
-            if (g_track.attached && !raceGpuChecked) {
-                hangwatch_gpu_arm(3);
-                raceGpuChecked = true;
-            }
+            hangwatch_gpu_race(g_track.attached);
             hangwatch_mark("C3D_FrameBegin: the GPU's last frame");
             C3D_FrameBegin(0);
             hangwatch_gpu_begin();
@@ -4029,10 +4028,6 @@ int main(int argc, char** argv)
 
                 hangwatch_mark("the sun's depth read");
                 trackview_read_depth(&g_track, top);
-                // The GPU probe, in the draw check's first frame only
-                // (georender.h): before the envmap and the top
-                // screen's clear, so nothing it draws shows.
-                georender_probe(top);
                 trackview_draw_envmap(&g_track);
                 FRAMEPROF_STAMP(FRAMEPROF_ENVMAP);
                 C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
