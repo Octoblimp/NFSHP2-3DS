@@ -6,8 +6,10 @@ Where the next session picks up. Updated in Session 33
 and 2D and its 3D car on the turntable, are finished and checked
 against retail. SC-3 adds the nebula. SC-3a, the effect system's data,
 and SC-3b, its emitting and stepping, are done and committed. The
-New 3DS XL's race hang (below) was the 3D vertex's stride; the fixed
-build waits on the user's device run, and SC-3c goes on meanwhile.
+New 3DS XL's race hang (below) is likely the 3D vertex's stride,
+fixed; the check builds' stops were the check's own flush order, also
+fixed. That build waits on the user's device run; SC-3c goes on
+meanwhile.
 Session 31 took the race on Azahar from 20 FPS to 28-30 and
 the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`). The rest
 of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) comes after
@@ -161,7 +163,21 @@ are four parts:
     the frontend's 3D never draws. On Azahar the same draw (draw 16
     after the probes) has the same addresses, and the sky's 3168
     vertices are all finite, 1446 of them at w <= 0.
-  - **The cause (found 2026-10-05): the vertex stride.** The probe
+  - **The check's own stop (found 2026-10-05).** The stride-fix build
+    stopped at the same first probe draw (`nfshp2_debug_stride_fix.txt`),
+    with `28=28`. hangwatch's `gpu_wait` flushed the linear heap and
+    then called C3D_FrameSplit, which writes the list's FINALIZE: those
+    words stayed in the CPU's cache (the New 3DS's 2 MB L2), and the GPU
+    read stale memory where the list should end. Every check build since
+    the first watchdog one sent its lists that way, and each stopped at
+    its first split list with a draw in it: envmap view 0, then draw 1,
+    then the probe's first triangle. So none of those stops says where
+    the race hangs. `gpu_wait` now splits, then flushes, then runs the
+    queue, as C3D_FrameEnd does. On Azahar all 1798 draws go one at a
+    time and the race keeps 30 FPS. That build is with the user.
+  - The original hang, with no check in the build, fits the stride:
+    frame 1 got to C3D_FrameEnd and the GPU never finished its list.
+  - **The vertex stride (fixed 2026-10-05).** The probe
     build's log (`nfshp2_debug_probe.txt`) stopped at its first draw:
     one triangle through geosolid onto the top screen, with no texture
     and no depth test. 3dbrew's GPU/Pitfalls page says the PICA freezes

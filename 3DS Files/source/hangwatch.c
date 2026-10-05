@@ -212,9 +212,15 @@ static void gpu_wait(const char *stage, bool split)
     bool          done;
 
     if (split) {
+        // The flush after the split, as C3D_FrameEnd has it: the split
+        // writes the list's FINALIZE, and flushed before it those words
+        // stayed in the CPU's cache, so the GPU read stale memory where
+        // the list should end and stopped (the New 3DS XL's 2 MB L2 keeps
+        // them; Azahar has no cache). Every check build to 2026-10-05
+        // stopped at its first list with a draw that way.
+        C3D_FrameSplit(0);
         GSPGPU_FlushDataCache((const void *)__ctru_linear_heap,
                               __ctru_linear_heap_size);
-        C3D_FrameSplit(0);
         n = q->numEntries;
         gxCmdQueueRun(q);
     }
