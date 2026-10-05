@@ -154,6 +154,14 @@ const bVector3 *camera_mover_get_position(const CameraMover *m);
 const bVector3 *camera_mover_get_direction(const CameraMover *m);
 void camera_mover_set_player(CameraMover *m, void *player);
 
+// Retail's 0x00157888: world up (0, 0, 1) turned `roll` about the unit way
+// from `eye` to `look`. The mover is not read. TrackCarCameraMover banks
+// with it.
+void camera_mover_compute_banked_up_vector(CameraMover *m, bVector3 *out,
+                                           const bVector3 *eye,
+                                           const bVector3 *look,
+                                           uint16_t roll);
+
 // Retail's UpdateCameraMovers, 0x0015ef28. For each of the ten views, the
 // FIRST mover on its list is updated, by its vtable, and the rest wait. The
 // movers read RealTimeElapsed themselves. Two debug tails are left out: the

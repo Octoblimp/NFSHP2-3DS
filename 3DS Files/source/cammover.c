@@ -1,5 +1,8 @@
 // cammover -- CameraMover.obj, the base. See cammover.h.
 #include "cammover.h"
+
+#include <math.h>
+
 #include "emath.h"
 
 static const char *const MOVER_NAMES[] = {
@@ -141,6 +144,36 @@ const bVector3 *camera_mover_get_direction(const CameraMover *m)
 void camera_mover_set_player(CameraMover *m, void *player)
 {
     m->pPlayer = player;
+}
+
+// 0x00157888. The way from eye to look, normalised on VU0 (all four lanes,
+// by 1 / sqrt), the axis of a `roll` turn, and world up turned by it. Up's
+// pad lane is the stack's; eMulVector makes it 1 anyway.
+void camera_mover_compute_banked_up_vector(CameraMover *m, bVector3 *out,
+                                           const bVector3 *eye,
+                                           const bVector3 *look,
+                                           uint16_t roll)
+{
+    bMatrix4 r;
+    bVector3 axis, up;
+    float q;
+
+    (void)m;
+    axis.x = look->x - eye->x;
+    axis.y = look->y - eye->y;
+    axis.z = look->z - eye->z;
+    axis.pad = look->pad - eye->pad;
+    q = 1.0f / sqrtf((axis.x * axis.x + axis.y * axis.y) + axis.z * axis.z);
+    axis.x = axis.x * q;
+    axis.y = axis.y * q;
+    axis.z = axis.z * q;
+    axis.pad = axis.pad * q;
+    eCreateAxisRotationMatrix(&r, &axis, roll);
+    up.x = 0.0f;
+    up.y = 0.0f;
+    up.z = 1.0f;
+    up.pad = 0.0f;
+    eMulVector3(out, &r, &up);
 }
 
 // The first mover on a view's list, or NULL, as both loops below test it:
