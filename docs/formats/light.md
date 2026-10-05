@@ -262,8 +262,12 @@ look as its turn comes.
 ## The port's map
 
 The six views draw into a 64-square cube in VRAM, one face each, with a
-depth buffer per face. The cube is RGBA5551, as retail's PSMCT16 targets
-are. Each view keeps retail's axis, frustum and schedule. Its camera is
+depth buffer per face. The cube is RGBA8 over D24S8 depth, the top
+screen's pair. It was RGBA5551, as retail's PSMCT16 targets are, until a
+New 3DS XL's GPU stopped at a face's first draw (2026-10-05). The
+suspect is the pair: a 16-bit colour buffer over a 32-bit depth buffer.
+Each view
+keeps retail's axis, frustum and schedule. Its camera is
 the cube face's: the same frustum, rolled by a multiple of 90 degrees so
 the face's texels run the cube's way. A face whose view is inactive keeps
 what it last drew. A face that has never drawn is cleared to its

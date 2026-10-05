@@ -971,12 +971,17 @@ static void free_envmap(void)
 
 // The cube in VRAM, where the GPU can draw on it, and a target with its
 // own depth buffer over each face; then the sphere map, with a target of
-// no depth, and the fold's triangles in linear memory. Both are 16 bits a
-// texel, as retail's PSMCT16 targets are: six faces of 64 are 48 KB of
-// colour and 96 KB of depth, and a map of 256 is 128 KB.
+// no depth, and the fold's triangles in linear memory. The sphere map is
+// 16 bits a texel, as retail's PSMCT16 targets are. The cube is RGBA8:
+// the PICA is given a colour buffer as wide as its depth buffer, as the
+// top screen's RGBA8 and D24S8 are. A New 3DS XL's GPU stopped at a
+// 5551 face's first draw over D24S8 depth (2026-10-05); that pair is the
+// suspect.
+// Six faces of 64 are 96 KB of colour and 96 KB of depth, and a map of
+// 256 is 128 KB.
 bool georender_envmap_init(int size, int mapSize, const GeoFoldVertex* fold)
 {
-    C3D_TexInitParams p = { (u16)size, (u16)size, 0, GPU_RGBA5551,
+    C3D_TexInitParams p = { (u16)size, (u16)size, 0, GPU_RGBA8,
                             GPU_TEX_CUBE_MAP, true };
     size_t            n = GEO_FOLD_GRIDS * GEO_FOLD_GRID_VERTS
                           * sizeof(GeoFoldVertex);
@@ -1027,14 +1032,6 @@ bool georender_envmap_init(int size, int mapSize, const GeoFoldVertex* fold)
     memcpy(s_fold, fold, n);
     GSPGPU_FlushDataCache(s_fold, n);
     return true;
-}
-
-// An RGBA8 colour, red in the top byte, as a 5551 target's fill takes it:
-// each channel's top five bits, and the alpha's top bit.
-static uint32_t to_5551(uint32_t c)
-{
-    return (c >> 27 & 0x1fu) << 11 | (c >> 19 & 0x1fu) << 6
-           | (c >> 11 & 0x1fu) << 1 | (c >> 7 & 1u);
 }
 
 bool georender_envmap_face_done(int face)
@@ -1118,8 +1115,7 @@ void georender_envmap_face(int face, uint32_t clear, bool draw)
     if (!s_ready || face < 0 || face >= 6 || !s_envFace[face]) {
         return;
     }
-    C3D_RenderTargetClear(s_envFace[face], C3D_CLEAR_ALL, to_5551(clear),
-                          0);
+    C3D_RenderTargetClear(s_envFace[face], C3D_CLEAR_ALL, clear, 0);
     if (draw) {
         C3D_FrameDrawOn(s_envFace[face]);
     }

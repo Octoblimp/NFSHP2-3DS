@@ -216,8 +216,9 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
 // reads by the reflection. Here the six views draw into a cube's faces,
 // `size` on a side, in the space the environment pass turns the reflection
 // into (see eenvmap.h), and the fold reads the cube by direction instead of
-// each view's target by its u and v. Both are 16 bits a texel, 5551, as
-// retail's PSMCT16 targets are. The sphere map is `mapSize` on a side.
+// each view's target by its u and v. The sphere map is 16 bits a texel,
+// 5551, as retail's PSMCT16 targets are, and `mapSize` on a side; the
+// cube is RGBA8, as wide as its faces' D24S8 depth (see georender.c).
 //
 // `fold` is the fold's triangles, GEO_FOLD_GRID_VERTS a grid, in the order
 // of the sample table's ten grids (eenvmap.h): each vertex where it lands
@@ -233,7 +234,7 @@ typedef struct {
 bool georender_envmap_init(int size, int mapSize, const GeoFoldVertex* fold);
 
 // Face `face` of the cube, +X to -Z as GPU_TEXFACE counts them, cleared to
-// `clear` (red in the top byte, as RGBA8; it is cut to 5551 here) and its
+// `clear` (red in the top byte, as RGBA8) and its
 // depth to the far plane's, and with `draw` bound to be drawn on, with a
 // 90 degree projection. Call it between C3D_FrameBegin and the top
 // screen's C3D_FrameDrawOn.
