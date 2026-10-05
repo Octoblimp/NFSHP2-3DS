@@ -219,7 +219,12 @@ bool georender_init(void)
     AttrInfo_AddLoader(&s_attr, 0, GPU_FLOAT,         3);   // position
     AttrInfo_AddLoader(&s_attr, 1, GPU_FLOAT,         2);   // ST
     AttrInfo_AddLoader(&s_attr, 2, GPU_UNSIGNED_BYTE, 4);   // colour
-    AttrInfo_AddLoader(&s_attr, 3, GPU_BYTE,          3);   // normal
+    // The normal is loaded as four bytes, the pad its w, which neither
+    // shader reads: the PICA freezes when a loader's attributes do not
+    // fill its stride (3dbrew's GPU/Pitfalls), and three would leave 27
+    // of the 28. Azahar draws either way; a New 3DS XL stopped at the
+    // first draw (2026-10-05).
+    AttrInfo_AddLoader(&s_attr, 3, GPU_BYTE,          4);   // normal, pad
 
     Mtx_Identity(&s_projection);
     Mtx_Identity(&s_modelView);
@@ -1088,11 +1093,11 @@ static void free_envmap(void)
 // The cube in VRAM, where the GPU can draw on it, and a target with its
 // own depth buffer over each face; then the sphere map, with a target of
 // no depth, and the fold's triangles in linear memory. The sphere map is
-// 16 bits a texel, as retail's PSMCT16 targets are. The cube is RGBA8:
-// the PICA is given a colour buffer as wide as its depth buffer, as the
-// top screen's RGBA8 and D24S8 are. A New 3DS XL's GPU stopped at a
-// 5551 face's first draw over D24S8 depth (2026-10-05); that pair is the
-// suspect.
+// 16 bits a texel, as retail's PSMCT16 targets are. The cube is RGBA8
+// over D24S8 depth, the top screen's pair. It was RGBA5551 until a New
+// 3DS XL stopped at a face's first draw (2026-10-05); the stop was the
+// vertex stride (georender_init), not the pair, and a 5551 face waits on
+// a device run.
 // Six faces of 64 are 96 KB of colour and 96 KB of depth, and a map of
 // 256 is 128 KB.
 bool georender_envmap_init(int size, int mapSize, const GeoFoldVertex* fold)

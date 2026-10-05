@@ -31,6 +31,8 @@
 // the struct has to be in that order too and there is nothing that checks
 // it. Three floats of position, two of ST, four unsigned bytes of colour,
 // three signed bytes of normal, and a pad byte to round the stride to 28.
+// The loader takes the normal and the pad as four bytes: the PICA freezes
+// when a loader's attributes do not fill its stride.
 //
 // Both byte fields reach the shader as the plain integer value, 0..255 and
 // -128..127 -- the PICA does not normalise an integer attribute -- so the

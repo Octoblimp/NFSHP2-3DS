@@ -264,9 +264,10 @@ look as its turn comes.
 The six views draw into a 64-square cube in VRAM, one face each, with a
 depth buffer per face. The cube is RGBA8 over D24S8 depth, the top
 screen's pair. It was RGBA5551, as retail's PSMCT16 targets are, until a
-New 3DS XL's GPU stopped at a face's first draw (2026-10-05). The
-suspect is the pair: a 16-bit colour buffer over a 32-bit depth buffer.
-Each view
+New 3DS XL's GPU stopped at a face's first draw (2026-10-05). The stop
+was the vertex stride, not the pair: the PICA freezes when a loader's
+attributes do not fill its stride, and the normal's three bytes left 27
+of 28 (`georender_init`). A 5551 face waits on a device run. Each view
 keeps retail's axis, frustum and schedule. Its camera is
 the cube face's: the same frustum, rolled by a multiple of 90 degrees so
 the face's texels run the cube's way. A face whose view is inactive keeps

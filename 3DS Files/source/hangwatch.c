@@ -382,6 +382,34 @@ static size_t check_view(u32 fw, u32 fh, char *line, size_t len, size_t cap)
                                   (unsigned long)(s_reg[0x2bd] & 0xffff));
 }
 
+// Loader i's vertex as the PICA reads it: each attribute aligned to its
+// element's size, and a padding entry (12 to 15, 4 to 16 bytes) to 4.
+// A stride that is not this freezes the PICA (3dbrew's GPU/Pitfalls),
+// which Azahar does not.
+static u32 loader_size(int i)
+{
+    static const u8 kElem[4] = { 1, 1, 2, 4 };
+    u32 c1 = s_reg[0x204 + 3 * i], c2 = s_reg[0x205 + 3 * i];
+    u32 n = c2 >> 28, off = 0, k;
+
+    for (k = 0; k < n; k++) {
+        u32 a = (k < 8 ? c1 >> (4 * k) : c2 >> (4 * (k - 8))) & 0xf;
+
+        if (a < 12) {
+            u32 f = (a < 8 ? s_reg[0x201] >> (4 * a)
+                           : s_reg[0x202] >> (4 * (a - 8))) & 0xf;
+            u32 e = kElem[f & 3];
+
+            off = (off + e - 1) & ~(e - 1);
+            off += e * ((f >> 2) + 1);
+        } else {
+            off = (off + 3) & ~3u;
+            off += (a - 11) * 4;
+        }
+    }
+    return off;
+}
+
 // The draw the commands just read start: what it reads and writes,
 // checked, and in the first checked frame logged.
 static void check_draw(bool elements)
@@ -426,6 +454,7 @@ static void check_draw(bool elements)
         u32 c2 = s_reg[0x205 + 3 * i];
         u32 n = c2 >> 28, stride = c2 >> 16 & 0xff;
         u32 pa = base + (s_reg[0x203 + 3 * i] & 0x0fffffff);
+        u32 size;
 
         if (n == 0) continue;
         comps += n;
@@ -433,10 +462,13 @@ static void check_draw(bool elements)
             issue("vertex buffer not known", (u32)i, c2);
             continue;
         }
+        size = known(0x201) && known(0x204 + 3 * i) ? loader_size(i) : 0;
+        if (size != 0 && size != stride)
+            issue("vertex stride", (u32)i << 16 | size, stride);
         len += (size_t)snprintf(line + len, sizeof line - len,
-                                "; vb%d %08lx %lu/%lu", i,
+                                "; vb%d %08lx %lu/%lu=%lu", i,
                                 (unsigned long)pa, (unsigned long)n,
-                                (unsigned long)stride);
+                                (unsigned long)stride, (unsigned long)size);
         if (!elements && !reachable(pa + first * stride, count * stride))
             issue("vertex buffer", pa + first * stride, count * stride);
     }

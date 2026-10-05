@@ -6,8 +6,9 @@ Where the next session picks up. Updated in Session 33
 and 2D and its 3D car on the turntable, are finished and checked
 against retail. SC-3 adds the nebula. SC-3a, the effect system's data,
 and SC-3b, its emitting and stepping, are done and committed. The
-New 3DS XL's race hang (below) waits on the user's log from the
-hangwatch build; SC-3c goes on meanwhile. Session 31 took the race on Azahar from 20 FPS to 28-30 and
+New 3DS XL's race hang (below) was the 3D vertex's stride; the fixed
+build waits on the user's device run, and SC-3c goes on meanwhile.
+Session 31 took the race on Azahar from 20 FPS to 28-30 and
 the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`). The rest
 of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) comes after
 the car selector. "Where the port stands" below has the count of what
@@ -145,13 +146,52 @@ are four parts:
     0's command list, the boot's first georender draws, with the GPU
     wedged: its registers stopped answering GSP too. Azahar flags
     nothing.
-  - The draw check build is with the user now (`3DS Files/Hang Test
-    Build/`, HANDOFF.md, "The draw check"). It sends each draw of
-    the first race frame alone and logs it first. In its
-    `nfshp2_debug.txt`, the last `draw N at ...` line before `gpu
-    check: draw N NOT done` is the draw, with its buffers, textures,
-    target and viewport. If every draw finishes alone and a later
-    stage check stops, the hang is between draws, not in one.
+  - The draw check's log (2026-10-05, kept as
+    `nfshp2_debug_draw_check.txt`) stopped at draw 1, the sky into
+    envmap face 0: a 16-bit RGBA5551 colour buffer over a 32-bit D24S8
+    depth buffer. Every address was in range and the clear before it
+    was done. Nothing else the device had drawn on mixed the two
+    sizes.
+  - The cube faces are RGBA8 now (commit 1644100), the top screen's
+    pair. The device still stopped at the same draw, now
+    `c .../4` (`nfshp2_debug_rgba8_face.txt`), so the pair was not it.
+    The faces stay RGBA8 for now; georender.c and light.md say so and
+    name the real cause.
+  - It was the first georender draw the device ever ran: with R held
+    the frontend's 3D never draws. On Azahar the same draw (draw 16
+    after the probes) has the same addresses, and the sky's 3168
+    vertices are all finite, 1446 of them at w <= 0.
+  - **The cause (found 2026-10-05): the vertex stride.** The probe
+    build's log (`nfshp2_debug_probe.txt`) stopped at its first draw:
+    one triangle through geosolid onto the top screen, with no texture
+    and no depth test. 3dbrew's GPU/Pitfalls page says the PICA freezes
+    when a loader's attributes do not fill the stride CONFIG2 gives it.
+    GeoRenderVertex's loader was float3, float2, ubyte4 and byte3, 27
+    bytes, against a stride of 28. Azahar draws either way.
+    - The fix: the normal is loaded as four bytes, the pad its w,
+      which neither shader reads (`georender_init`). The fold's vertex
+      (20) and citro2d's (32) already filled theirs.
+    - The draw check now works out each loader's size by the PICA's
+      alignment and flags a stride that is not it, and logs both
+      (`4/28=28`). On Azahar all 1798 draws of the checked frame match,
+      with 0 issues, and the race keeps 30 FPS.
+    - The page's other freezes are not in the port: each output
+      component is written once on every path of geosolid, geolit and
+      geofold; no shader has a MOVA; unit 1 only ever has A8 textures,
+      not 4-bit ones.
+    - The fixed build is in `3DS Files/Hang Test Build/`, with the
+      probe and the draw check still in, so a later stop still names
+      its draw. Once the device runs the race, take them out (or keep
+      them off), and try the envmap's faces as RGBA5551 again on the
+      device: the pair was not the cause.
+  - The probe (`georender_probe`, commit 8f165d3; in the draw check's
+    frame only, and nothing it draws shows) draws one triangle through
+    geosolid at a time onto the top screen, a plain 64x64 RGBA8 VRAM
+    target and envmap face 0, adding the depth test, unit 0, unit 1
+    and the alpha test. Then the sky's first batch goes onto the plain
+    target, the top screen and its face (`probe sky 1..3`). It pokes
+    unit 1 through citro3d's context (+280, +32), since C3D_TexBind
+    cannot set a unit to NULL, and checks the place first.
 - **SC-3c:** RenderEffects (0x00128da0) and its draw on the device.
 - **SC-3d:** the CarSelector's nebula. It is 20 emitters of
   "XE_SelectCarNebula" (string 0x002b4ef8, group FE_EMITTER), with
