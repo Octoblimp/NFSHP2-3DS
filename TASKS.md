@@ -2375,8 +2375,18 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
         Unlocked" and "NFS Points", the unlock box and the popups.
         `carsel_check` runs retail's on the image: 7282 ops, 0 differ;
         201 mutations, 196 caught, 5 equivalent.
-  - [ ] SC-2, the car on a lit turntable: the camera, the car and its
-        reflection, the light, the cover and the platform.
+  - [x] SC-2, the car on a lit turntable: the camera, the car and its
+        reflection, the light, the cover and the platform. `selcam_check`,
+        `fecar_check` and `carsel_check` agree with retail; on Azahar it
+        matches the user's photo 7 at 60 FPS.
   - [ ] SC-3, the nebula behind it.
+    - [x] SC-3a, the effect system's data (`acidsys.c`,
+          `docs/formats/acidfx.md`): the pools, LoaderTable slot 6, the
+          lookups and copies, and the auto emitters. `afx_check` runs
+          retail's on the image: 9295 ops, 0 differ; 175 mutations, 172
+          caught, 3 equivalent.
+    - [ ] SC-3b, TriggerEmitter, DoTimeStep and UpdateInterestPoints.
+    - [ ] SC-3c, RenderEffects and its draw on the device.
+    - [ ] SC-3d, the car select's nebula.
 - [ ] **The briefing.** "You're The Cop", with its button list over the
       track's picture.

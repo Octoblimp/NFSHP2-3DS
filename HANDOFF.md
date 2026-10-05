@@ -13629,7 +13629,7 @@ the fade fix, and the main.c change has not been built since.
 - Then SC-2 (the 3D car, its camera, cover, lighting and spotlights,
   and the pad's mapping), SC-3 (the nebula), and 13b-4f.
 
-## Session 33 (2026-10-04) -- SC-1 finished; SC-2, the 3D car, done
+## Session 33 (2026-10-04) -- SC-1 finished; SC-2, the 3D car, done; SC-3a done
 
 Session 32 ran out of context with SC-1's checker half done. This
 session finished it, then started on the car itself.
@@ -13831,7 +13831,192 @@ and the icons. On Azahar it runs at 60 FPS, about 4 ms a frame.
   frontres.c: they are the device's half, the part the checkers stub.
 - **`docs/formats/car-select.md`** has "The draw on the device (SC-2d)".
 
-### Next
+### SC-3a, the effect system's data half
 
-SC-3, the nebula: the frontend effects that eDisplayFrame draws between
-RENDER and AttachSolidPolys, behind the car. Then 13b-4f.
+SC-3 is the nebula behind the car: the frontend's effects, which
+eDisplayFrame draws between RENDER and AttachSolidPolys. The effect
+system is AcidFXE.obj. SC-3a is its data half, with no particles moving
+or drawn yet. The session ran out of context with the port and the
+harness written; the continuation wrote the checker, wired it in and
+finished. `docs/formats/acidfx.md` is the write-up.
+
+**Files:**
+- `3DS Files/source/acidsys.h` and `acidsys.c` are the port.
+- `tools/src/afx_test.c` is the harness.
+- `tools/afx_check.py` is the checker, on selcam_check's pattern, with
+  mutpar.
+
+**Retail's functions (SLES_507.31; GP 0x003358f0):**
+
+| Function | Address | Notes |
+|---|---|---|
+| static init | 0x0012a220 | sets EmitterDataList (gp-23512) empty, then constructs FrameEffects (0x002ef5e0) and WorldEffects (0x002ef640) |
+| AcidEffectSystem ctor | 0x00127418 | both lists empty; zeroes 64, 68, the bytes 72..77, 80, 84, 88 and 92; leaves InterestPoints and 78..79 |
+| afxInit | 0x00126d70 | bNewSlotPool(32, 1000, "AcidParticleSlotPool", 16), (28, 400, "AcidActiveGroupSlotPool", 16) and (192, 600, "AcidEmitterSlotPool", 16), at gp-23528, gp-23524 and gp-23520. It clears flags bits 1 and 2 on the particle and group pools only |
+| afxClose | 0x00126e08 | KillAll on FE, then on WE; deletes the particle and the group pools and NULLs them. It has no callers |
+| LoaderAcidFX | 0x00126e50 | the containers 0x80035000 and 0x80035010 return 1; header at (chunk+23)&~15, version at +8, count at +12, records at +16; datas 0x35021 v4, 544 B each, onto EDL's tail; emitters 0x35020 v5, 192 B each, SetEmitterData(EmitterDataNameHash) then AddAutoEmitter(WorldEffects); a wrong version returns 1 and does nothing; any other type returns 0 |
+| UnloaderAcidFX | 0x00126f60 | the same, unlinking the datas and RemoveAutoEmitter(WE) each emitter, in pack order |
+| afxTrackLoader / afxTrackUnloader | 0x00127068 / 0x00127070 | empty |
+| afxUpdateTextures | 0x00127078 | called from PostLoadFixup; for each data whose Texture is NULL or whose NameHash (+32) differs, GetTextureInfo(0x001abf48)(TextureNameHash, 0, 0) |
+| afxAddEmitterData / afxRemoveEmitterData | 0x001270e8 / 0x00127108 | |
+| afxGetEmitterData | 0x00127120 | |
+| afxGetEmitter | 0x00127198 | over WE's auto list. Name and group: e->NameHash, then the data's group (a NULL data is skipped). Group only: the same. Name only: the **data's** NameHash, and a NULL data reads address 8; the port skips it |
+| afxCopyEmitter | 0x00127228 | bOMalloc(ep); bMemSet(+8, 0, 184) **even on NULL**, which the port does not; NumAcidEmitters++ (gp-23516) even on NULL; NameHash = bStringHash(0x002534a8)(src Name); bStrNCpy(0x002535a0)(Name, src, 63); Name[63] = 0; SetEmitterData(src data); copies LocalWorld |
+| afxGetEmitters | 0x001272e0 | loops afxGetEmitter(0, group, prev); each copy goes on the list's tail, and a failed copy is skipped |
+| afxDeleteEmitters | 0x00127368 | unlinks from the head, then calls delete(3) |
+| SetEmitterData(ptr) / (hash) | 0x001273c0 / 0x001273d8 | NULL leaves the data and returns 0 |
+| TweakerCheck / RenderDebug | 0x00127490 / 0x00127498 | empty |
+| AddAutoEmitter | 0x001274a0 | see below |
+| RemoveAutoEmitter | 0x00127688 | unlinks and counts down |
+| KillAllActiveEffects | 0x001276a8 | unlinks each group from the head, then calls group delete(3) |
+| AcidEmitter delete | 0x00124e20 (twin 0x0012a3f8) | NumAcidEmitters--; with flags&1, bFree(ep) at 0x00257ca0 |
+| AcidActiveGroup delete | 0x0012a258 | NULLs Emitter (+12) and EmitterData (+8); frees each particle from the head to pp; with flags&1, frees the group to gp |
+
+Not ported: the system's destructor (0x0012a398) and the static fini
+(0x0012a1e0). Both run only at exit.
+
+**AddAutoEmitter (0x001274a0):**
+1. If RandomSeed (+36) is 0, step AcidRandomSeed (gp-23504, 0x23985727
+   at boot) by xorshift: `x^=x<<17; x^=x>>13; x^=x<<5`. Then
+   RandomSeed = cvt.w.s(((float)(int)(x & 0x7fffffff) * 2^-31) * 2^31),
+   which saturates.
+2. Then by the data and State:
+   - A NULL data, or State 2: set State to 2 and add to the tail.
+   - State <u 2 (0 OFF, 1 ON): take the cycle and its variance from the
+     data, On (32/36) for ON and Off (40/44) for OFF.
+     - If the cycle is not zero (c.eq.s, so -0 counts as zero):
+       w = var * cycle; xorshift the emitter's own seed;
+       cycle = (cycle - w) + unit(seed) * w.
+     - Add to the **head**, with RemainingCycleTime = cycle and
+       EmissionCountdown = 0.
+   - State 3 (LIBRARY): add to the tail.
+   - Any other State: set it to 2 and add to the tail.
+3. NumAutoEmitters (+80) goes up in every case.
+
+**The disc's data:**
+- GLOBALB has 111 datas (0x35021 at 0xa3480) and 112 emitters (0x35020
+  at 0xb2080), all LIBRARY.
+- Each of the 30 tracks, TRACKB11..16, 21..26, 31..36, 41..46 and
+  61..66, has both packs: 1 to 20 datas and 10 to 40 emitters, all ON.
+- Every Acid chunk is at the top level. On the disc, the pointers,
+  RandomSeed and the cycle times are all 0.
+- XE_SelectCarNebula is GLOBALB's one FE_EMITTER data.
+- One thing to check in SC-3d: GLOBALB's group is
+  CARFX_BREAK_LICENSE_PLATE_REAR, but carrenderinfo.c's kCarFxNames has
+  CARFX_BREAK_LICENSE_PLATE_RIGHT. See whether retail's string table
+  says RIGHT too.
+
+**The harness (`afx_test.c SCRIPT RECORDS`):**
+- RECORDS is two int32s, the data count and the emitter count, then
+  the 544-byte datas and the 192-byte emitters.
+- The harness rebuilds each record in the host's layout. A non-zero
+  disc pointer becomes the pattern pointer, "pat".
+- It defines its own slot pools: fixed arenas, the lowest free slot,
+  zeroed if flags&2 and 0xa5 otherwise. They print "newpool", "omalloc
+  pp|gp|ep -> name" (or null or full), "free pool name" and "delpool".
+- Its GetTextureInfo prints "gti hash ud iu -> tN|null". Mode is
+  hash%3, or set by TXM: 0 gives NULL, 1 a match, 2 NameHash^1.
+- Names: D/E k.c.i for records, p/g/e n for slots, gN.pl, t N, L N,
+  FE.act, FE.auto, WE.act, WE.auto and EDL. A list's i-th node is
+  `list.i`, and "r" is the last CP, RA, GD or GE result.
+- Ops:
+  - B n
+  - D (the full dump), DL k (list k in full), DE e (one emitter in full)
+  - BR k (reset buffer k)
+  - CH k type ver count mis kind(D/E/-) first
+  - S, I, C
+  - L k c, U k c, LA k, UA k (newest first)
+  - T, TXM hash mode
+  - GD name group after, GE name group after
+  - CP e, NL k, GS k group, DS k
+  - SD e d, SH e hash
+  - AA sys e, RA sys e
+  - K sys, MG sys e np (a group with np particles, on the head), GX g
+    flags
+  - ED e flags, ED2 e flags
+  - CT sys
+  - PE e field val, with fields st rc ec rs de nh dh d nm nmz
+  - PD d field val, with fields on onv off offv nh gh th tex
+  - SEED v, F pool n (the pool fails after n more)
+
+  Every op but D, DL, DE, BR, CH, PE, PD, SEED and F ends with a short
+  line, "s n .. seed .. edl .. FE a/b/c WE a/b/c".
+- Names print with non-ASCII as '.'. Floats print as bits, with any NaN
+  as "nan". Hashes passed to retail must be sign-extended (s32) in the
+  model, because the image compares 64-bit registers.
+
+**The model (afx_check.py):**
+- **Memory:** fake pools at 0x01000000 + 64*i, with flags at +20 set to
+  15. The arenas are at 0x01010000, 0x01020000 and 0x01030000 (32, 28
+  and 192 bytes a slot). The lists are at 0x01080000, the textures at
+  0x01090000 (164 bytes, NameHash at +32), and the buffers at
+  0x01100000 + k*0x100000. The records are in the disc's layout, with
+  the Node and any non-zero pointer set to 0xa5a5a5a5.
+- **Stubs:** bNewSlotPool 0x00257c10, bDeleteSlotPool 0x00257c48,
+  bOMalloc 0x00257c80, bFree(pool, p) 0x00257ca0, and GetTextureInfo
+  0x001abf48. bFree(void*) 0x00257850 traps. bStringHash, bStrNCpy and
+  bMemSet run as shipped. Assert that word 8 of the image is 0.
+- **Scenarios:**
+  - the boot over GLOBALB and TRACKB12, with lookups, GS over the 26
+    CARFX names and FE_EMITTER, then the unloads and close;
+  - all 30 tracks in turn over GLOBALB;
+  - AddAutoEmitter's edges, over emitter records in a version-6 chunk
+    so they don't load: every state, a NULL data, cycles of
+    0/-0/NaN/inf/denormal, the variances, and seeds made by inverting
+    the xorshift so that unit*2^31 rounds to 2^31;
+  - versions, other types, count 0 and mis 0/4/8/12;
+  - copies with the pool failing, 63-char names, and every delete
+    flag;
+  - MG/K/GX and close with groups;
+  - TXM texture modes;
+  - a fuzz that tracks what "r" holds, so it never adds a linked
+    emitter twice and never unloads.
+
+  As written, s_tracks takes the 30 tracks six to a scenario, and the
+  fuzz runs three times: 400 ops on TRACKB12, 1200 on TRACKB24 and 2500
+  on TRACKB61. With s_edges (below) that is 16 scenarios.
+
+**Results:**
+- `afx_check`: 16 scenarios, 9295 ops, 35221 lines, 0 differ. The model
+  and the harness agreed once the model printed exactly what the
+  harness does; no bug turned up in acidsys.c.
+- **The mutation pass** has 175 mutations: 172 caught, 3 equivalent
+  (cp-name-64, cp-no-term, aa-disabled; acidfx.md says why). The first
+  pass left 9. Six were gaps in the script, closed by a new scenario,
+  s_edges, and four harness additions:
+  - `PF pool hexflags` sets a pool's flags, so a pool that doesn't zero
+    shows afxCopyEmitter's clear (cp-no-memset).
+  - The `nmg` field fills Name with 'G' before copying the name in. The
+    dumps print a name's bytes after its terminator as " +hex" when any
+    are not zero (strncpy-no-stop).
+  - Every list dump ends with " !p" when the head's prev isn't the last
+    node walked (kill-no-unlink).
+  - Lookups with both hashes 0 over a data whose group is 0, and an
+    emitter whose NameHash isn't its data's (gd-both-zero,
+    ge-both-zero, ge-name-group).
+- `loadertable_check`: the demo image's 178 ops and the retail image's
+  37375, 0 differ. PORTED gains 6, the harness's unported_slot gains
+  `k == 6`, SOURCES gains acidsys.c, and the slot's mutation is now
+  `slot-6-is-7`.
+- `sinit_check`: 24 calls, 0 problems.
+
+**The wiring:**
+- `sinit.c` calls acid_static_init as entry 9 (0x00128cd0 in the demo's
+  list).
+- `bchunkload.c`'s slot 6 is loader_acid_fx and unloader_acid_fx; the
+  UNPORTED stub is gone.
+- `main.c` calls afx_init after eenvmap_init, as InitializeEverything's
+  afxInit follows InitDisplaySystem. It sets gAfxUpdateTexturesFn,
+  gAfxGetEmittersFn, gAcidEmitterDeleteFn (a wrapper,
+  acidEmitterDelete) and gKillAllActiveEffectsFn (WorldEffects'
+  KillAll). loadGlobalCarInfo takes GLOBALB's packs with
+  `taken += loader_acid_fx(c)`.
+- The first build failed on gAfxUpdateTexturesFn: main.c needed
+  bchunkload.h.
+
+**On Azahar:**
+- The carsel run passes with 0 unmapped accesses. The log says "car
+  data: 8 chunks", where it said 6: GLOBALB's two Acid packs are taken.
+- A 25-second race on TRACKB12 reaches RACING and drives as before (539
+  frames drawn, about 28 FPS). azahar_log has 0 unmapped accesses and
+  `nfshp2_stderr.txt` is empty.

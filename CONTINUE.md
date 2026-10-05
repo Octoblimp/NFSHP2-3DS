@@ -1,10 +1,11 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 33
-(2026-10-04), in the car selector's second part (SC-2).
-**Start at "Now" just below.** SC-1, the car selector as logic and 2D,
-is finished and checked against retail. SC-2 adds the 3D car on its
-turntable. Session 31 took the race on Azahar from 20 FPS to 28-30 and
+(2026-10-04), after SC-3a, the first part of the nebula behind the car.
+**Start at "Now" just below.** SC-1 and SC-2, the car selector as logic
+and 2D and its 3D car on the turntable, are finished and checked
+against retail. SC-3 adds the nebula. SC-3a, the effect system's data,
+is done and committed; SC-3b is next. Session 31 took the race on Azahar from 20 FPS to 28-30 and
 the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`). The rest
 of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) comes after
 the car selector. "Where the port stands" below has the count of what
@@ -12,7 +13,7 @@ is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
-## Now: the car selector's 3D car (SC-2)
+## Now: the nebula behind the car (SC-3), after the 3D car (SC-2)
 
 The user asked for the car selector after seeing the stand-in Select
 Car screen ("Could use work LOL"). Retail's shows the car in 3D on a lit
@@ -98,9 +99,48 @@ checkers to it as they are touched; selcam_check is the pattern.
 - Select Track is still a plain screen.
 - Joy event 34 does nothing in retail either.
 
-**Next: SC-3, the nebula** behind the car, the frontend's effects
-that eDisplayFrame draws between RENDER and AttachSolidPolys. Then
-13b-4f.
+**SC-3, the nebula, is in progress.** It is the frontend's effects,
+which eDisplayFrame draws between RENDER and AttachSolidPolys, behind
+the car. The effect system is retail's AcidFXE.obj (0x00126d70 ..
+0x001276fc and 0x0012a1e0 .. 0x0012a5e8). `docs/formats/acidfx.md` has
+SC-3a's retail facts, and HANDOFF.md, "SC-3a", the harness's ops. There
+are four parts:
+- **SC-3a, the data half, is done.** `acidsys.{c,h}` has the four
+  structs at retail's offsets, the three slot pools (afxInit, afxClose),
+  slot 6 (LoaderAcidFX, UnloaderAcidFX), afxUpdateTextures, the lookups
+  and copies (afxGetEmitterData, afxGetEmitter, afxCopyEmitter,
+  afxGetEmitters, afxDeleteEmitters, both SetEmitterData), and
+  AcidEffectSystem's constructor, AddAutoEmitter, RemoveAutoEmitter,
+  KillAllActiveEffects and the deleting destructors.
+  - `afx_check` runs 9295 ops over 16 scenarios with 0 differ, and its
+    mutation pass (mutpar) catches 172 of 175, with 3 equivalent.
+    `loadertable_check` (slot 6 now ported) and `sinit_check` (24
+    calls) still agree.
+  - The device runs it: acid_static_init in sinit_run, afx_init after
+    the display's init, GLOBALB's two packs in loadGlobalCarInfo, the
+    tracks' through slot 6, and the four seams set
+    (gAfxUpdateTexturesFn, gAfxGetEmittersFn, gAcidEmitterDeleteFn,
+    gKillAllActiveEffectsFn). Each car now takes copies of GLOBALB's
+    CARFX emitters. The carsel and race runs on Azahar have 0 unmapped
+    accesses.
+- **SC-3b, next:** TriggerEmitter (0x00127700, changed from the demo),
+  DoTimeStep (0x00128718) and UpdateInterestPoints (0x001286a0).
+  - Disassemble them from `SLES_507.31` first, and compare with the
+    demo's (with symbols) to see what changed.
+  - Grow `afx_test.c` and `afx_check.py` rather than starting new ones.
+    They already lay out the disc's records, the pools and the lists.
+    The particle pool's slots are filled with 0xa5, since afxInit
+    clears ZERO_ALLOCATED_MEMORY on it.
+- **SC-3c:** RenderEffects (0x00128da0) and its draw on the device.
+- **SC-3d:** the CarSelector's nebula. It is 20 emitters of
+  "XE_SelectCarNebula" (string 0x002b4ef8, group FE_EMITTER), with
+  UpdateNebula and SetEmitterState (0x0016c3b0).
+  - Replace carsel_check's silent stubs.
+  - Run the frontend's DoTimeStep and RenderEffects in
+    trackview_draw_frontend.
+  - Run it on Azahar.
+
+Then 13b-4f.
 
 ## State
 

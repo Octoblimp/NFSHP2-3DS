@@ -4,7 +4,7 @@
 // and the _GLOBAL_$I$ it stands for. sinit_check reads those comments, so
 // their shape is fixed.
 //
-// None of the twenty-three reads anything another one writes -- twenty-two
+// None of the twenty-four reads anything another one writes -- twenty-three
 // fill Tables, Graphs, cameras, list heads, hashes, shakers, constants and
 // two sets of defaults, and the last builds the slot-pool manager -- so the
 // order is kept because it is the image's, not because a different one
@@ -19,6 +19,7 @@
 
 #include "sinit.h"
 
+#include "acidsys.h"
 #include "aerodynamics.h"
 #include "bslotpool.h"
 #include "car.h"
@@ -47,6 +48,7 @@ void sinit_run(void)
 {
     eview_static_init();        // [2]   0x00114098 _GLOBAL_$I$FloatingVBlankTimeMin
     sky_static_init();          // [6]   0x0011cfb8 _GLOBAL_$I$SkydomeModel
+    acid_static_init();         // [9]   0x00128cd0 _GLOBAL_$I$AcidCycleStateNames
     car_static_init();          // [14]  0x001347c0 _GLOBAL_$I$fDraftFalloff
     physicscar_static_init();   // [15]  0x00137438 _GLOBAL_$I$RigidBodySlotPool
     realdriver_static_init();   // [17]  0x0013aa88 _GLOBAL_$I$PowerSlideYawCoef

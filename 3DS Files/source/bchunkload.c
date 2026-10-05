@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 
+#include "acidsys.h"
 #include "bchunk.h"
 #include "carinfo.h"
 #include "characterinfo.h"
@@ -138,8 +139,6 @@ static int take(const uint32_t *types, size_t n, int slot, int unload,
     }
 
 UNPORTED(LoaderFontInfo, UnloaderFontInfo, 3, 0x00015010u, 0x00030200u)
-UNPORTED(LoaderAcidFX, UnloaderAcidFX, 6,
-         0x80035000u, 0x80035010u, 0x00035020u, 0x00035021u)
 UNPORTED(LoaderEventManager, UnloaderEventManager, 7, 0x80036000u)
 UNPORTED(LoaderPositionMarkers, UnloaderPositionMarkers, 8, 0x00034013u)
 UNPORTED(LoaderFlailerChunk, UnloaderFlailerChunk, 10, 0x80010200u)
@@ -170,7 +169,7 @@ BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     LoaderFontInfo,                 //  3
     loader_solid_list,              //  4
     loader_light_list,              //  5
-    LoaderAcidFX,                   //  6
+    loader_acid_fx,                 //  6
     LoaderEventManager,             //  7
     LoaderPositionMarkers,          //  8
     loader_collision_volumes,       //  9
@@ -203,7 +202,7 @@ BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
     UnloaderFontInfo,               //  3
     unloader_solid_list,            //  4
     unloader_light_list,            //  5
-    UnloaderAcidFX,                 //  6
+    unloader_acid_fx,               //  6
     UnloaderEventManager,           //  7
     UnloaderPositionMarkers,        //  8
     unloader_collision_volumes,     //  9

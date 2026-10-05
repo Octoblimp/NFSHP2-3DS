@@ -46,7 +46,9 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#include "acidsys.h"
 #include "bchunk.h"
+#include "bchunkload.h"
 #include "bmem.h"
 #include "bmenu.h"
 #include "bsnd.h"
@@ -2161,6 +2163,9 @@ static void loadGlobalCarInfo(UIBundle* b)
         if (bchunk_u32(c) == 0x34201) taken += track_loader_geometry(c);
         // LoaderLightList's light materials, GLOBALB's first chunk.
         if (bchunk_u32(c) == 0x3401e) taken += loader_light_list(c);
+        // LoaderAcidFX: GLOBALB's 111 emitter datas, then its 112 library
+        // emitters onto WorldEffects (acidsys.c).
+        taken += loader_acid_fx(c);
         c += 8 + size;
     }
     logPrintf("car data: %d chunks, %d skins, %d characters, %d tracks; "
@@ -3036,6 +3041,19 @@ static void hookDisplayFrame(void* user)
     C3D_FrameEnd(0);
 }
 
+// ~bTList<AcidEmitter> deletes each emitter it takes off a car's effect
+// list with AcidEmitter's deleting destructor, 3.
+static void acidEmitterDelete(bNode* emitter, int32_t flags)
+{
+    acid_emitter_delete((AcidEmitter*)emitter, flags);
+}
+
+// RaceCoordinator's cleanup kills the world's effects.
+static void killAllWorldEffects(void)
+{
+    acid_system_kill_all_active_effects(&WorldEffects);
+}
+
 static float topologyElevation(void* tc, const bVector3* pos,
                                int32_t* terrain, bVector3* normal)
 {
@@ -3192,6 +3210,18 @@ int main(int argc, char** argv)
     // eInitEngine's eInitEnvMap (0x00102f68): views 4 to 9 on targets 8 to
     // 13, the cameras the cars' reflections are drawn from.
     eenvmap_init();
+
+    // InitializeEverything's afxInit (0x00126d70), after InitDisplaySystem
+    // and before LoadGlobalChunks: the effect system's particle, group and
+    // emitter pools (acidsys.c). PostLoadFixup's afxUpdateTextures gives
+    // each emitter data its texture. Each car copies its effects' emitters
+    // out of WorldEffects through afxGetEmitters, and deletes them again;
+    // the race's cleanup kills the world's effects.
+    afx_init();
+    gAfxUpdateTexturesFn    = afx_update_textures;
+    gAfxGetEmittersFn       = afx_get_emitters;
+    gAcidEmitterDeleteFn    = acidEmitterDelete;
+    gKillAllActiveEffectsFn = killAllWorldEffects;
 
     // elInit, and eLight.obj's two calls the solids and the cars make
     // through seams: elGetLightMaterial, which eFixUpTables uses to fill
