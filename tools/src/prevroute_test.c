@@ -19,13 +19,23 @@
 #include "bmem.h"
 #include "car.h"
 #include "cartypeinfo.h"
+#include "hudanim.h"
 #include "player.h"
+#include "playercam.h"
+#include "playerhud.h"
 #include "playerinit.h"
+#include "playerinput.h"
 #include "playerzone.h"
 #include "previewroute.h"
 #include "race.h"
+#include "rcstates.h"
+#include "realdriver.h"
+#include "realtime.h"
+#include "topology.h"
 #include "track.h"
+#include "trackcarcam.h"
 #include "trackroute.h"
+#include "world.h"
 
 #define NROUTES 6
 #define LINES   21
@@ -203,6 +213,139 @@ void player_clean_up_jump_cam(struct Player *p)
     if (p->pJumpCamRoute != NULL)
         preview_route_delete(p->pJumpCamRoute);
     p->pJumpCamRoute = NULL;
+}
+
+// What the rest of playerzone.c reaches, the zones and the jump cam's
+// movers, which tools/playerzone_check.py checks. Never called here.
+int32_t PlayerNumPlayers;
+struct Player *PlayerPlayersByIndex[2];
+int32_t SoundEnabled;
+int32_t WorldTimer;
+int32_t RealTimer;
+float WorldTimeElapsed;
+int32_t TweakerPauseWorld;
+World *pCurrentWorld;
+RaceCoordinator *pRaceCoordinator;
+Race *pCurrentRace;
+void (*gSamplePlayFn)(struct bSample *s, float volume, float a, float b);
+struct bSample *(*gGetInGameSampleFn)(const char *name);
+void (*gSampleDeleteFn)(struct bSample *s);
+void (*gRadialBlurOnFn)(int32_t);
+void (*gRadialBlurOffFn)(int32_t);
+CameraMover *(*gZoneFreezeCameraMoverFn)(void *mem, int viewID,
+                                         struct Car *car,
+                                         CameraMover *saved);
+CameraMover *(*gZonePreviewCameraMoverFn)(void *mem, int viewID,
+                                          struct PreviewRoute *route,
+                                          bVector3 *pos);
+
+static void unreached(const char *what)
+{
+    fprintf(stderr, "%s called\n", what);
+    exit(2);
+}
+
+int32_t player_is_nis_playing(const struct Player *p)
+{
+    (void)p;
+    unreached("player_is_nis_playing");
+    return 0;
+}
+
+RCState racecoordinator_get_current_state(const RaceCoordinator *rc)
+{
+    (void)rc;
+    unreached("racecoordinator_get_current_state");
+    return 0;
+}
+
+int32_t racecoordinator_is_replay_demo_mode(const RaceCoordinator *rc)
+{
+    (void)rc;
+    unreached("racecoordinator_is_replay_demo_mode");
+    return 0;
+}
+
+eRaceStage race_get_race_stage(const Race *r)
+{
+    (void)r;
+    unreached("race_get_race_stage");
+    return 0;
+}
+
+void player_change_camera_mover(struct Player *p, CameraMoverType type,
+                                int keep)
+{
+    (void)p, (void)type, (void)keep;
+    unreached("player_change_camera_mover");
+}
+
+void player_restore_camera_mover(struct Player *p)
+{
+    (void)p;
+    unreached("player_restore_camera_mover");
+}
+
+void player_clear_hud_animations(struct Player *p)
+{
+    (void)p;
+    unreached("player_clear_hud_animations");
+}
+
+void player_determine_input_mode(struct Player *p)
+{
+    (void)p;
+    unreached("player_determine_input_mode");
+}
+
+void world_set_world_paused(World *w, float seconds,
+                            void (*callback)(int32_t), int32_t param)
+{
+    (void)w, (void)seconds, (void)callback, (void)param;
+    unreached("world_set_world_paused");
+}
+
+void world_set_time_scale(World *w, float scale, float timer,
+                          void (*callback)(int32_t), int32_t param)
+{
+    (void)w, (void)scale, (void)timer, (void)callback, (void)param;
+    unreached("world_set_time_scale");
+}
+
+void world_reset_time_scale(World *w)
+{
+    (void)w;
+    unreached("world_reset_time_scale");
+}
+
+TrackCarCameraMover *track_car_camera_mover_init(
+    TrackCarCameraMover *m, int viewID, struct Car *c,
+    const CameraDataItems *d, const CameraShake *shake, int focusEffects)
+{
+    (void)m, (void)viewID, (void)c, (void)d, (void)shake, (void)focusEffects;
+    unreached("track_car_camera_mover_init");
+    return NULL;
+}
+
+void topology_init(TopologyCoordinate *tc)
+{
+    (void)tc;
+    unreached("topology_init");
+}
+
+void topology_destroy(TopologyCoordinate *tc)
+{
+    (void)tc;
+    unreached("topology_destroy");
+}
+
+float topology_get_elevation(TopologyCoordinate *tc, const bVector3 *pt,
+                             int32_t *terrain, bVector3 *normal,
+                             int32_t *found)
+{
+    (void)tc, (void)pt, (void)terrain, (void)normal, (void)found;
+    unreached("topology_get_elevation");
+    return 0.0f;
 }
 
 // ------------------------------------------------------------ the dumps
