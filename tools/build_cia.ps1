@@ -142,3 +142,13 @@ $threedsx = Join-Path $projectDir "NFSHP2-3DS.3dsx"
 if ($LASTEXITCODE -ne 0) {
     throw "check_3dsx: $threedsx would not load"
 }
+
+# A vertex shader that leaves an output component unwritten, or writes one
+# twice, freezes a real 3DS's GPU at its first draw and draws on Azahar;
+# see tools/check_shbin.py.
+$shbins = @(Get-ChildItem (Join-Path $projectDir "build") -Filter *.shbin |
+            ForEach-Object { $_.FullName })
+& python (Join-Path $PSScriptRoot "check_shbin.py") @shbins
+if ($LASTEXITCODE -ne 0) {
+    throw "check_shbin: a shader would freeze the GPU"
+}

@@ -60,6 +60,15 @@
 .out outclr color
 .out outfog texcoord1
 
+; Each output register is written whole, every component exactly once,
+; even the z and w the texcoords do not use: the PICA freezes on a
+; component of an enabled output written twice or never (3dbrew's
+; GPU/Pitfalls). The hardware enables an output register whole, in
+; GPUREG_SH_OUTMAP_MASK, so all four count. Azahar draws either way; a
+; New 3DS XL stopped at the first draw through this shader, one triangle
+; with no texture and no depth test (2026-10-05). citro2d's shader and
+; NFSU2-3DS's, which run on the device, write all four of each.
+
 .entry vmain
 .proc vmain
     ; Position: model -> view -> clip.
@@ -79,6 +88,7 @@
     ; The fog's s, and a t in the middle of its rows, which are all alike.
     dp4 outfog.x, fogRow, r1
     mov outfog.y, consts.w
+    mov outfog.zw, zeros
 
     ; ST. S needs only the pad scale; T needs the scale and then a flip.
     ;
@@ -97,6 +107,7 @@
     mul r7, uvScale, intex
     mov outtex.x, r7.x
     add outtex.y, ones, -r7.y
+    mov outtex.zw, zeros
 
     ; The normal is rotated by the model-view's upper 3x3 -- dp3, not dp4,
     ; so the translation column cannot move a direction.

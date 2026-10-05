@@ -27,7 +27,10 @@
     mov r0.w,  consts.y
     mov outpos, r0
 
+    ; And outtex's w, which nothing reads: the PICA freezes on a component
+    ; of an output register left unwritten (see geosolid.v.pica).
     mov outtex.xyz, indir.xyz
+    mov outtex.w,   consts.x
     mov outclr, rgbaq
     end
 .end

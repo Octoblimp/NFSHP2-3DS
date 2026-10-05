@@ -54,6 +54,10 @@
 .out outclr color
 .out outfog texcoord1
 
+; Every component of each output register is written exactly once on
+; every path, the unused w of outtex and z and w of outfog too: the PICA
+; freezes otherwise (see geosolid.v.pica).
+
 .entry vmain
 .proc vmain
     ; Position, as geosolid.v.pica does it, so the two passes meet the
@@ -72,6 +76,8 @@
     dp4 outpos.w, projection[3], r1
     dp4 outfog.x, fogRow, r1
     mov outfog.y, consts.w
+    mov outfog.zw, zeros
+    mov outtex.w, zeros
 
     ; N, and R from the eye.
     mul r2.xyz, scales.xxx, innrm

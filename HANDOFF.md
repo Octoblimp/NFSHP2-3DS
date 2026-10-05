@@ -14120,3 +14120,92 @@ lists of each envmap view and of the player's view.
 The build is in `3DS Files/Hang Test Build/`. In the device's log, the
 last `draw N` line before `gpu check: draw N NOT done` is the draw that
 stops the GPU.
+
+## Session 34 (2026-10-05) -- the New 3DS XL's race hang; SC-3c's CPU half
+
+The user ran each build on a New 3DS XL and put its `nfshp2_debug.txt`
+in `3DS Files/Hang Test Build/`. Each log is kept there by name. Every
+one stopped at the boot's first georender draw. That is the first 3D
+the device ever drew: with R held at boot, the frontend's 3D never
+draws.
+
+### What each build found
+
+- **The draw check** (`nfshp2_debug_draw_check.txt`, commit 25b31d3).
+  It stopped at draw 1, the sky into envmap face 0, a 16-bit RGBA5551
+  colour buffer over a 32-bit D24S8 depth buffer. Every address was in
+  range.
+- **RGBA8 faces** (`nfshp2_debug_rgba8_face.txt`, 1644100). Same stop,
+  with the face now RGBA8. So the pair was not it. The faces stay RGBA8
+  until a device run tries 5551 again.
+- **The probe** (`nfshp2_debug_probe.txt`, 8f165d3). `georender_probe`
+  draws one geosolid triangle at a time before the envmap, each with a
+  feature more than the last. It stopped at the first one: onto the top
+  screen, with no texture and no depth test.
+- **The vertex stride** (`nfshp2_debug_stride_fix.txt`, 62924cd).
+  3dbrew's GPU/Pitfalls: a loader's attributes must fill the stride
+  CONFIG2 gives it. GeoRenderVertex's were float3, float2, ubyte4 and
+  byte3, 27 bytes, against a stride of 28. The normal now loads as four
+  bytes, the pad its w. The draw check now works out each loader's size
+  by the PICA's alignment and logs it (`4/28=28`). The device still
+  stopped at the probe's first triangle.
+- **The check's flush order** (`nfshp2_debug_flush_fix.txt`, 04aa510).
+  hangwatch's `gpu_wait` flushed the linear heap and then called
+  C3D_FrameSplit, which writes the list's FINALIZE. On the New 3DS
+  (2 MB L2) those words could stay in the cache. It now splits, flushes
+  and runs, as C3D_FrameEnd does. The device still stopped at the same
+  triangle.
+- **The output components** (this session's last build, 02:30). With
+  the stride, units, depth test and target ruled out, the shader is
+  what is left. 3dbrew's GPU/Pitfalls: "Each configured output component
+  has to be written exactly once or the PICA freezes."
+  GPUREG_SH_OUTMAP_MASK enables output registers whole, so all four
+  components of each count.
+  - `.out outtex texcoord0` gets the mask xyzw from picasso. geosolid
+    wrote only `.x` and `.y` of its `texcoord0` and `texcoord1`. geolit
+    never wrote o1.w or o3.zw, and geofold never wrote o1.w.
+  - The user pointed at NFSU2-3DS, which drew its world on hardware.
+    Its three shaders (`car`, `scene`, `vshader`) and citro2d's
+    `render2d` (dumped from libcitro2d.a) all write every component of
+    every output. The rest of NFSU2's world path is ours: citro3d,
+    RGBA8 over D24S8, float loaders that fill their 32-byte stride.
+  - The fix writes the missing components as zeros, once on every path.
+  - `tools/check_shbin.py` follows each DVLE's code both ways through
+    every IFU and IFC. It counts each output register's component writes
+    on each path to END, and flags two MOVAs in a row. CALL, LOOP, JMP
+    and BREAK are refused as not followed. `build_cia.ps1` runs it on
+    `build/*.shbin` after check_3dsx. It passes the fixed three,
+    NFSU2's three and citro2d's, and fails the old three on exactly the
+    components above.
+  - On Azahar the checked frame passes every draw, with 0 unmapped
+    accesses, the race at 29.5 FPS, and the picture as before.
+  - The build is with the user. If the race runs, take the probe and
+    the per-draw check out and try 5551 faces. If it stops, the last
+    `draw N at` line names the draw.
+
+### Earlier wrong turns, for the record
+
+- CONTINUE.md said, after the stride fix, that each output component
+  was written once in all three shaders. It was wrong: picasso gives
+  an output with no mask named all four components, and the shaders
+  wrote two. `tools/check_shbin.py` reads the binary now.
+- The RGBA5551/D24S8 pair, and then the check's own flush order, were
+  each taken for the cause in turn. The flush-order fix was real, but
+  the device's stop did not move.
+
+### SC-3c, RenderEffects' CPU half (not committed)
+
+`acid_system_render_effects` (retail 0x00128da0) in `acidsys.c`, with
+`acidz` (gp-23440, 4) and the `gEAttachDirectDataFn` seam (eAttachDirect
+Data, 0x00110378). It builds each group's GS packet in frame memory as
+retail does: a REGLIST tag of PRIM, RGBAQ and four ST/XYZ2 pairs; 80
+bytes a sprite; the packet stops 33 words before CurrentBufferEnd. It
+hands the packet over with the sprites' mean truncated view depth.
+- A corner's Z is (bits(sc.z) & 0x0fffffff) >> acidz. The scenery's
+  packed XYZF2 takes bits 4..27 of the same float, so a particle's Z is
+  the scenery's real GS Z.
+- `tools/mipsemu.py` gained vftoi0. afx_check runs 30 scenarios with 0
+  differ. Its mutation pass has 394 mutants: 390 caught, 4 equivalent,
+  0 unexplained.
+- Still owed: the section in `docs/formats/acidfx.md`, the commit, and
+  the draw on the device, which CONTINUE.md lays out step by step.

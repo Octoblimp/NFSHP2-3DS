@@ -5,11 +5,15 @@ Where the next session picks up. Updated in Session 33
 **Start at "Now" just below.** SC-1 and SC-2, the car selector as logic
 and 2D and its 3D car on the turntable, are finished and checked
 against retail. SC-3 adds the nebula. SC-3a, the effect system's data,
-and SC-3b, its emitting and stepping, are done and committed. The
-New 3DS XL's race hang (below) is likely the 3D vertex's stride,
-fixed; the check builds' stops were the check's own flush order, also
-fixed. That build waits on the user's device run; SC-3c goes on
-meanwhile.
+and SC-3b, its emitting and stepping, are done and committed. SC-3c's
+CPU half (RenderEffects) is done and checked but not committed; its
+draw on the device is next. **First, though: the New 3DS XL's race
+hang** (below). Session 34 (2026-10-05) found that geosolid, geolit
+and geofold left output components unwritten, which freezes the PICA
+at the first draw through them and which Azahar draws through. They
+are fixed, a build check (`tools/check_shbin.py`) now refuses such a
+shader, and that build is in `3DS Files/Hang Test Build/`, waiting on
+the user's device run. Read their new `nfshp2_debug.txt` there first.
 Session 31 took the race on Azahar from 20 FPS to 28-30 and
 the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`). The rest
 of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) comes after
@@ -191,15 +195,50 @@ are four parts:
       alignment and flags a stride that is not it, and logs both
       (`4/28=28`). On Azahar all 1798 draws of the checked frame match,
       with 0 issues, and the race keeps 30 FPS.
-    - The page's other freezes are not in the port: each output
-      component is written once on every path of geosolid, geolit and
-      geofold; no shader has a MOVA; unit 1 only ever has A8 textures,
-      not 4-bit ones.
-    - The fixed build is in `3DS Files/Hang Test Build/`, with the
-      probe and the draw check still in, so a later stop still names
-      its draw. Once the device runs the race, take them out (or keep
-      them off), and try the envmap's faces as RGBA5551 again on the
-      device: the pair was not the cause.
+    - No shader has a MOVA, and unit 1 only ever has A8 textures, not
+      4-bit ones. (This bullet said each output component was written
+      once too. It was wrong: see the next bullet.)
+  - **The output components (fixed 2026-10-05, Session 34).** The
+    flush-fix build (`nfshp2_debug_flush_fix.txt`) still stopped at the
+    probe's first triangle: geosolid onto the top screen, no texture
+    units, no depth test, stride `28=28`, the queue's entry not done in
+    2 s. With everything else stripped away, the shader is what is
+    left.
+    - 3dbrew's GPU/Pitfalls: each configured output component must be
+      written exactly once or the PICA freezes.
+      GPUREG_SH_OUTMAP_MASK enables an output register whole, one bit
+      per register, so all four components count, even ones no
+      semantic reads.
+    - picasso gave geosolid's `texcoord0` and `texcoord1` the mask
+      xyzw. The shader wrote `.x` and `.y` of each, so o1.zw and o3.zw
+      were never written. geolit never wrote o1.w or o3.zw, and geofold
+      never wrote o1.w.
+    - citro2d's shader, which the device runs every frame, and all three
+      of NFSU2-3DS's (`../NFSU2-3DS/3DS Files/source/*.v.pica`), which
+      drew its world on hardware, write all four components of every
+      output. The user pointed at NFSU2-3DS. Its world path is
+      otherwise ours: citro3d, RGBA8 over D24S8 targets, loaders that
+      fill their stride (3 floats, 3 floats, 2 floats; 32).
+    - The fix writes the missing components as zeros (`mov outtex.zw,
+      zeros` and the like), once on every path.
+    - `tools/check_shbin.py`, run by `build_cia.ps1` after
+      check_3dsx, follows each shader both ways through every IFU and
+      IFC and fails the build on a component of an output written
+      twice or never, and on two MOVAs in a row. It passes the fixed
+      three, citro2d's and NFSU2's, and fails the old three on exactly
+      the components above.
+    - On Azahar: the checked frame's draws all pass, 0 unmapped
+      accesses, 29.5 FPS, and the race looks as it did.
+    - The stride fix stays: it was a real fault too. Which of the two
+      stopped the original build cannot be told now; both were in it.
+  - **The build in `3DS Files/Hang Test Build/`** (02:30) has the
+    shader fix, with the probe and the draw check still in, so a later
+    stop still names its draw. Older logs are kept there by name.
+    - If the race runs: take the probe and the per-draw check out (or
+      keep them off), and try the envmap's faces as RGBA5551 again on
+      the device. The pair was not the cause.
+    - If it stops: the last `draw N at` line names the draw. Check
+      3dbrew's GPU pages again, and compare NFSU2-3DS's setup.
   - The probe (`georender_probe`, commit 8f165d3; in the draw check's
     frame only, and nothing it draws shows) draws one triangle through
     geosolid at a time onto the top screen, a plain 64x64 RGBA8 VRAM
@@ -209,6 +248,57 @@ are four parts:
     unit 1 through citro3d's context (+280, +32), since C3D_TexBind
     cannot set a unit to NULL, and checks the place first.
 - **SC-3c:** RenderEffects (0x00128da0) and its draw on the device.
+  - **The CPU half is done, checked, and not committed.** It is in
+    `acidsys.{c,h}` (acid_system_render_effects, acidz, the
+    gEAttachDirectDataFn seam), `acidfx.{c,h}`, `tools/afx_check.py`,
+    `tools/src/afx_test.c`, and `tools/mipsemu.py` (vftoi0). afx_check
+    runs 30 scenarios with 0 differ, and its mutation pass gives 394
+    mutants: 390 caught, 4 equivalent, 0 unexplained. Still owed:
+    RenderEffects' section in `docs/formats/acidfx.md`. Then commit
+    it, without the hang's files.
+  - **The draw on the device is next.** Nothing calls RenderEffects on
+    the device yet, and gEAttachDirectDataFn is NULL.
+    - Retail's order: RenderEffects for FrameEffects, then
+      WorldEffects, after StuffSun and before AttachSolidPolys. In
+      `trackview_draw`, that is after StuffSun, while `s_quadTarget` is
+      still the view's target, and before `draw_deferred(v, false)`.
+      The envmap views draw none.
+    - eAttachDirectData puts the packet on the texture's list, or on the
+      alpha sort list at depth z (the sprites' mean view depth) when
+      the texture has ApplyAlphaSorting. In `trackview.c`, that means a
+      deferred item like `strip_end`'s, with order, sorted, texUse and
+      seq from the TrackTex (`note_use`). Set and clear the seam where
+      gEPolyRenderFn is set and cleared (about lines 1632, 1680 and
+      1726).
+    - Decode the packet when it is attached; it lives in frame memory.
+      The tag is 16 bytes (NLOOP | 0x8000, 0xa42a4000, 0x42424210,
+      0x42); refuse any other. Each 80-byte sprite has RGBAQ in w[2] (R
+      in the low byte), then four corners, i from 0 to 3: S and T as
+      floats in w[4+4i] and w[5+4i], XYZ2 in w[6+4i] (x in the low 16
+      bits, y in the high, both 12.4) and Z in w[7+4i]. The corners
+      run -,- / +,- / -,+ / +,+, so the four are a strip as they come.
+    - Position: target x = x/16 - (2048 - ScissorW/2), and y likewise
+      with ScissorH; then `target_to_screen` with the target's
+      AspectRatioX and AspectRatioY, as `render_epoly` does.
+    - Depth: Z is the scenery's real GS Z, shifted down by acidz (4),
+      so use `depth_of_gs_z((float)(Z << acidz))`. Its -1 means nearer
+      than anything: use just under 1. acidz is only ever read
+      (0x00128f08).
+    - A new georender call draws a batch of sprites in one draw: a
+      linear-heap ring of six vertices a sprite (GPU_TRIANGLES); the
+      screen ortho (`s_screen`) with its z row (0, 0, -1, 0), so a
+      vertex's z is its depth under the default C3D_DepthMap(true, -1,
+      0). Clamp the depth to [1e-7, 1 - 2^-16]. TexEnv0 is texture
+      times colour, TEVSCALE_2, as `draw_screen_quad` has it, and
+      `set_pass(t->pass)`: the blend from AlphaBits, no alpha test for
+      a semitransparent texture, no depth write unless bWriteZ. There
+      is no fog (PRIM 0x54 has FGE clear): bind `s_noFogTex` to unit 1
+      for the draw and put the fog's texture back after.
+    - The particle pool is 1000 (afxInit). Keep the sprite store in the
+      TrackView like the strips' (begin_view resets it), or one static
+      in trackview.c, since one view draws at a time.
+    - Then test the race on Azahar: 0 unmapped accesses, 30 FPS.
+      WorldEffects runs DoTimeStep in World's step already.
 - **SC-3d:** the CarSelector's nebula. It is 20 emitters of
   "XE_SelectCarNebula" (string 0x002b4ef8, group FE_EMITTER), with
   UpdateNebula and SetEmitterState (0x0016c3b0).

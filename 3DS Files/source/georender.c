@@ -1095,9 +1095,11 @@ static void free_envmap(void)
 // no depth, and the fold's triangles in linear memory. The sphere map is
 // 16 bits a texel, as retail's PSMCT16 targets are. The cube is RGBA8
 // over D24S8 depth, the top screen's pair. It was RGBA5551 until a New
-// 3DS XL stopped at a face's first draw (2026-10-05); the stop was the
-// vertex stride (georender_init), not the pair, and a 5551 face waits on
-// a device run.
+// 3DS XL stopped at a face's first draw (2026-10-05). The stop was not
+// the pair: it was the first draw through geosolid, where the PICA
+// freezes on two faults Azahar draws through, the vertex stride
+// (georender_init) and output components the shader left unwritten
+// (geosolid.v.pica). A 5551 face waits on a device run.
 // Six faces of 64 are 96 KB of colour and 96 KB of depth, and a map of
 // 256 is 128 KB.
 bool georender_envmap_init(int size, int mapSize, const GeoFoldVertex* fold)
