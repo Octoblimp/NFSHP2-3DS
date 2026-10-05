@@ -14489,3 +14489,93 @@ the capture flag as `nfshp2_capture.txt.off`. Rename one back to use it.
   now gets the jump cam (the slow motion, the roadside camera, then the
   close one) where it used to get the drive camera. No flag files are
   needed.
+
+## Session 38 (2026-10-05) -- the effect system's draw, the nebula, and indexed meshes
+
+### The jump cam on the device
+
+The user ran build 6f168b6 on the New 3DS XL: "The ramp and jump camera
+looked AMAZING!!!!" Their log (`3DS Files/nfshp2_debug_capture2.txt`)
+has one jump: zone 0 to 6 at world frame 3935, 6 to 7 at 3975, and 7 to
+0 at 4023 as a wheel landed. Those are the spans of 40 and 48 frames
+that Azahar's run had. The speed was as before:
+
+| models in view | seconds | FPS median | GPU median |
+|---|---|---|---|
+| under 150 | 55 | 28.9 | 27.0 ms |
+| 150-199 | 20 | 24.6 | 32.0 |
+| 200 or more | 39 | 16.4 | 46.9 |
+
+### SC-3c and SC-3d: the effect system's draw, and the nebula
+
+| Commit | What |
+|---|---|
+| `b7cb25c` | RenderEffects (0x00128da0) and its checker |
+| `24976dd` | the particles on the device: `georender_draw_sprites`, the trackview's `attach_direct_data` |
+| `6427cc5` | the car select's nebula (SC-3d) |
+
+- **The nebula.** 20 emitters of XE_SelectCarNebula ring the turntable
+  on FrameEffects. UpdateNebula places them each Tick and moves their
+  shared data's colour keys from blue toward a locked car's red-brown
+  by 0.01 a Tick. main.c steps FrameEffects by 1/60 after each
+  `C3D_FrameEnd`. `docs/formats/acidfx.md`, "The car select's nebula
+  (SC-3d)", has the facts.
+- **The checker.** `carsel_check` runs the nebula as shipped: 8364
+  ops, 513,642 lines, 0 differ. Its first run died at the 257th emitter
+  ("stray omalloc"), as the harness's pool was 256; it is 1024 now.
+  Its 29 nebula mutations are all caught but `neb-unlocked-only`.
+- **`neb-unlocked-only` is equivalent.** UpdateNebula tests the
+  selector's c[76], as retail's does at 0x001963f0. c[76] is 0 from the
+  constructor on. Its only other write in retail is joy event 34's at
+  0x00196b5c, behind a call to 0x0016fdb0, which is `return 0` (the
+  same stub that hides Load All Languages). The port's JoyHandler
+  leaves event 34 out and says why.
+- **On Azahar.** The car select logs 20 auto emitters, 20 groups and 3
+  to 30 particles and sprites a frame, with 0 dropped or refused. A
+  faint blue haze rises round the car. 0 unmapped accesses.
+
+### 13b-4f: indexed meshes (609b418)
+
+Session 36's device timing put the models' vertex work at about 7.5 ms
+of the GPU's frame. That is the one large share that can be cut without
+changing a pixel.
+
+- **The strips.** TRACKB12's 133,795 triangles are in 10,394 strips,
+  mostly runs of separate quads cut by ADC restarts. As a list they are
+  401,385 vertices. As GPU strips joined by degenerates they would be
+  335,909, only 16% fewer, so strips were tried first and dropped.
+  Indexed, with each distinct vertex once a solid, they are 176,505.
+  The `stripstats` scripts that measured this were scratch, not kept.
+- **The cache.** A simulated first-in-first-out post-vertex cache
+  shades this many vertices a triangle in the strips' order: 1.70 with
+  4 entries, 1.62 with 8, 1.54 with 16, against the list's 3.
+- **The code.** `georender_bake` hashes each vertex's 28 bytes and
+  writes three 16-bit indices a triangle. One `linearAlloc` block holds
+  the vertices, then the indices. The draws use `C3D_DrawElements`. The
+  linear heap for TRACKB12's meshes falls from 11.2 MB to 5.8.
+- **The cost.** Each draw writes 8 command words more for the triangle
+  element mode: 63,274 words a frame for 312 models against 54,338.
+- **The check.** The baseline (the list) and the indexed build were
+  both captured on Azahar 6 s in (`out/cap_list`, `out/cap_idx`). The
+  depth buffers match to the bit. The colour differs in 85 pixels by at
+  most 5, round the car, whose reflection is the envmap's. The envmap's
+  faces draw on a schedule that the capture's hitch moves.
+- **The capture's own fault.** The lod0 frames differed more: the
+  Opel's window was pink in one. The numbered frame had painted the
+  envmap's faces and fold in their numbers, and a face keeps what it
+  drew until it draws again. `capture_offscreen` now leaves the
+  envmap's draws as they are in the numbered and level-0 frames.
+- **On Azahar** (`out/azahar_idx2`): 29.2 FPS with 300 to 380 models in
+  view, 0 unmapped accesses. Azahar's GPU is not the device's, so only
+  the device's timing lines can show the gain.
+
+`docs/formats/draw-cuts.md`, "13b-4f: indexed meshes", has it all. The
+`models:` line now ends each half with the batches' indices.
+
+### With the user
+
+- `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 609b418 (comments
+  changed since). Ask for the race's `frame:` and `models:` lines in a
+  heavy stretch, a timing run with `sdmc:/nfshp2_gputiming.txt`, how
+  the nebula and the smoke look, and whether the light-blue wedge over
+  the Opel's roof is still there.

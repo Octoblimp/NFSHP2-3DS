@@ -1,13 +1,12 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 37
-(2026-10-05), after the jump cam.
-**Start at "Now" just below.** SC-1 and SC-2, the car selector as logic
-and 2D and its 3D car on the turntable, are finished and checked
-against retail. SC-3 adds the nebula. SC-3a, the effect system's data,
-and SC-3b, its emitting and stepping, are done and committed. SC-3c's
-CPU half (RenderEffects) is done and checked but not committed; its
-draw on the device is next.
+Where the next session picks up. Updated in Session 38
+(2026-10-05), after the nebula and the indexed meshes.
+**Start at "Now" just below.** The car selector is finished and checked
+against retail: SC-1 (the logic and 2D), SC-2 (the 3D car on its
+turntable) and SC-3 (the effect system and the nebula, commits b7cb25c,
+24976dd and 6427cc5). 13b-4f, the device GPU's cost per model, is under
+way: the indexed meshes are in (609b418) and with the user.
 
 **The race on the New 3DS XL** (below, "The race on the device"):
 - **Speed.** With Session 35's mip chains it runs at 27-29 FPS where
@@ -16,25 +15,65 @@ draw on the device is next.
   race drops to 17-18 FPS (14 at worst). HANDOFF's Session 37 has the
   table.
 - **The jump cam is ported and on (Session 37, commits ce37726 to
-  6f168b6).** It runs on Azahar as retail's does, and a ramp no longer
-  aborts or falls back to the drive camera.
+  6f168b6).** The user's ramp on the device "looked AMAZING". Its log
+  (`3DS Files/nfshp2_debug_capture2.txt`) has zone 0 to 6 at world
+  frame 3935, 6 to 7 at 3975 and 7 to 0 at 4023, the spans Azahar's run
+  had. Its speed was as before: 28.9 FPS and a GPU median of 27.0 ms
+  under 150 models in view, 24.6 and 32.0 at 150-199, 16.4 and 46.9 at
+  200 or more.
 - **The capture.** The device's capture (Session 37) showed no dark box
   in its frame. It showed the light-blue wedge to be the Opel's own
   WINDOW batch (draws 722 and 723), which the device puts one corner of
   above the roof. That is open.
 - **With the user.** The build (`3DS Files/NFSHP2-3DS.3dsx`, commit
-  6f168b6) has the jump cam. Ask how a ramp looks on the device, and
-  for their `nfshp2_debug.txt`: its `race: zone` lines give each zone's
-  start and end.
+  609b418) has the nebula, the race's smoke and the indexed meshes. Ask
+  for:
+  - the race's `frame:` and `models:` lines in a heavy stretch, and
+    whether the FPS there moved from 16-18;
+  - a timing run (`sdmc:/nfshp2_gputiming.txt` on the card): the
+    models' "1-pixel scissor" less "3 vertices a draw" is the vertex
+    work, about 7.5 ms before;
+  - how the car select's nebula and the chimney smoke look, with the
+    `carsel: nebula` and `race: effects` lines;
+  - whether the light-blue wedge over the Opel's roof is still there.
 Session 31 took the race on Azahar from 20 FPS to 28-30 and
 the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`). The rest
-of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) comes after
-the car selector. "Where the port stands" below has the count of what
+of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) is 13b-4f,
+now. "Where the port stands" below has the count of what
 is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
-## Now: the nebula behind the car (SC-3), after the 3D car (SC-2)
+## Now: 13b-4f, the device GPU's cost per model
+
+The device's GPU takes 43-47 ms a frame with 200-380 models in view,
+and the lap drops to 16-18 FPS there. Session 36's timing frames split
+the models' list (895 draws): the texture fetch about 6.5 ms, the fill
+about 10.2 with the fetch in it, the vertex work about 7.5, the draws'
+own cost about 1.44, the texture cache clears about 0.35.
+`docs/formats/draw-cuts.md`, "13b-4f", has the detail.
+
+- **Done (609b418): indexed meshes.** `georender_bake` keeps each
+  distinct vertex once a solid and the batches draw with
+  `C3D_DrawElements`. TRACKB12's 401,385 list vertices are 176,505, and
+  the post-vertex cache should shade about 1.7 a triangle where the
+  list shaded 3. On Azahar the picture is the list's (the same depth to
+  the bit) at 29.2 FPS; only the device can show the gain. The capture
+  no longer numbers the envmap's draws (`capture_offscreen`).
+- **Next, each kept only if the device's log shows it helps** (memory:
+  gpu-speed-plan):
+  1. The fill and the fetch: the PICA's early depth test, with the
+     opaque models drawn nearer first; then lossless RGB8 for textures
+     of one alpha, which fetch three bytes a texel where RGBA8 fetches
+     four.
+  2. The envmap's cube faces back to RGBA5551 (the face pair was not
+     the hang; the user's "lossless only" is about the disc's textures).
+  3. Each draw's own cost: fewer state changes between batches.
+  4. On the CPU: the envmap (6.2 ms on Azahar), the cull (2.7).
+- Then the road beyond 13b: the retail pass, the AI, the cops, the
+  sounds (memory: cars-racing-over-menus).
+
+## The car selector (SC-1 to SC-3), done
 
 The user asked for the car selector after seeing the stand-in Select
 Car screen ("Could use work LOL"). Retail's shows the car in 3D on a lit
@@ -116,11 +155,11 @@ checkers to it as they are touched; selcam_check is the pattern.
 **Gaps, on purpose:**
 - The event trees are not ported, so findEventForCar is NULL in main.c
   and the device shows no tree blurbs.
-- The nebula is SC-3.
+- The nebula is done (SC-3d).
 - Select Track is still a plain screen.
 - Joy event 34 does nothing in retail either.
 
-**SC-3, the nebula, is in progress.** It is the frontend's effects,
+**SC-3, the nebula, is done.** It is the frontend's effects,
 which eDisplayFrame draws between RENDER and AttachSolidPolys, behind
 the car. The effect system is retail's AcidFXE.obj (0x00126d70 ..
 0x001276fc and 0x0012a1e0 .. 0x0012a5e8). `docs/formats/acidfx.md` has
@@ -363,67 +402,19 @@ are four parts:
     LOD bias, or the made levels' sizes, so the PICA's choice agrees
     with the GS's. If it still has one, read the box's draws and their
     depth.
-- **SC-3c:** RenderEffects (0x00128da0) and its draw on the device.
-  - **The CPU half is done, checked, and not committed.** It is in
-    `acidsys.{c,h}` (acid_system_render_effects, acidz, the
-    gEAttachDirectDataFn seam), `acidfx.{c,h}`, `tools/afx_check.py`,
-    `tools/src/afx_test.c`, and `tools/mipsemu.py` (vftoi0). afx_check
-    runs 30 scenarios with 0 differ, and its mutation pass gives 394
-    mutants: 390 caught, 4 equivalent, 0 unexplained. Still owed:
-    RenderEffects' section in `docs/formats/acidfx.md`. Then commit
-    it, without the hang's files.
-  - **The draw on the device is next.** Nothing calls RenderEffects on
-    the device yet, and gEAttachDirectDataFn is NULL.
-    - Retail's order: RenderEffects for FrameEffects, then
-      WorldEffects, after StuffSun and before AttachSolidPolys. In
-      `trackview_draw`, that is after StuffSun, while `s_quadTarget` is
-      still the view's target, and before `draw_deferred(v, false)`.
-      The envmap views draw none.
-    - eAttachDirectData puts the packet on the texture's list, or on the
-      alpha sort list at depth z (the sprites' mean view depth) when
-      the texture has ApplyAlphaSorting. In `trackview.c`, that means a
-      deferred item like `strip_end`'s, with order, sorted, texUse and
-      seq from the TrackTex (`note_use`). Set and clear the seam where
-      gEPolyRenderFn is set and cleared (about lines 1632, 1680 and
-      1726).
-    - Decode the packet when it is attached; it lives in frame memory.
-      The tag is 16 bytes (NLOOP | 0x8000, 0xa42a4000, 0x42424210,
-      0x42); refuse any other. Each 80-byte sprite has RGBAQ in w[2] (R
-      in the low byte), then four corners, i from 0 to 3: S and T as
-      floats in w[4+4i] and w[5+4i], XYZ2 in w[6+4i] (x in the low 16
-      bits, y in the high, both 12.4) and Z in w[7+4i]. The corners
-      run -,- / +,- / -,+ / +,+, so the four are a strip as they come.
-    - Position: target x = x/16 - (2048 - ScissorW/2), and y likewise
-      with ScissorH; then `target_to_screen` with the target's
-      AspectRatioX and AspectRatioY, as `render_epoly` does.
-    - Depth: Z is the scenery's real GS Z, shifted down by acidz (4),
-      so use `depth_of_gs_z((float)(Z << acidz))`. Its -1 means nearer
-      than anything: use just under 1. acidz is only ever read
-      (0x00128f08).
-    - A new georender call draws a batch of sprites in one draw: a
-      linear-heap ring of six vertices a sprite (GPU_TRIANGLES); the
-      screen ortho (`s_screen`) with its z row (0, 0, -1, 0), so a
-      vertex's z is its depth under the default C3D_DepthMap(true, -1,
-      0). Clamp the depth to [1e-7, 1 - 2^-16]. TexEnv0 is texture
-      times colour, TEVSCALE_2, as `draw_screen_quad` has it, and
-      `set_pass(t->pass)`: the blend from AlphaBits, no alpha test for
-      a semitransparent texture, no depth write unless bWriteZ. There
-      is no fog (PRIM 0x54 has FGE clear): bind `s_noFogTex` to unit 1
-      for the draw and put the fog's texture back after.
-    - The particle pool is 1000 (afxInit). Keep the sprite store in the
-      TrackView like the strips' (begin_view resets it), or one static
-      in trackview.c, since one view draws at a time.
-    - Then test the race on Azahar: 0 unmapped accesses, 30 FPS.
-      WorldEffects runs DoTimeStep in World's step already.
-- **SC-3d:** the CarSelector's nebula. It is 20 emitters of
-  "XE_SelectCarNebula" (string 0x002b4ef8, group FE_EMITTER), with
-  UpdateNebula and SetEmitterState (0x0016c3b0).
-  - Replace carsel_check's silent stubs.
-  - Run the frontend's DoTimeStep and RenderEffects in
-    trackview_draw_frontend.
-  - Run it on Azahar.
+- **SC-3c is done** (b7cb25c, 24976dd). RenderEffects (0x00128da0)
+  is in `acidsys.c`, checked by `afx_check` (30 scenarios, 0 differ;
+  394 mutants, 390 caught, 4 equivalent). `trackview_draw` and
+  `trackview_draw_frontend` run it for FrameEffects and WorldEffects
+  in eDisplayFrame's order, and `georender_draw_sprites` draws its
+  packets. On Azahar TRACKB12's chimney smoke draws at 29.4 FPS.
+  `docs/formats/acidfx.md` has it.
+- **SC-3d is done** (6427cc5). The CarSelector's 20 emitters of
+  XE_SelectCarNebula and UpdateNebula, checked by `carsel_check`
+  (8364 ops, 0 differ; 29 nebula mutations, 28 caught, 1
+  equivalent). main.c steps FrameEffects each frame. On Azahar a faint
+  blue haze rises round the car.
 
-Then 13b-4f.
 
 ## State
 
@@ -2300,9 +2291,10 @@ and so replaced every boot.
          23.3 ms: models 9.2, envmap 6.2, cull 2.7, cars 2.6, sky 0.8,
          scenery 0.5, bottom 0.5, hud 0.2. The world takes 1.4-4.5. The
          worst frame of a second is 34-67 ms.
-       - **Next, 13b-4f** (after the car selector): the models' and the
-         envmap's cost per draw (texture binds, `C3D_DrawArrays`), then
-         the cull, then the spikes that make a frame of three blanks.
+       - **13b-4f, under way** ("Now" at the top): the device GPU's
+         cost per model. The indexed meshes are in (609b418). Then the
+         fill and the fetch, the draws' own cost, the envmap, the cull,
+         and the spikes that make a frame of three blanks.
          To time a stage's parts, a probe of `svcGetSystemTick` marks
          is cheap enough at tens of marks a frame; at a thousand it
          costs 5 ms.
@@ -3600,22 +3592,18 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-04, after 13b-4e)
+### Where the port stands (2026-10-05, after SC-3 and 13b-4f's indexed meshes)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** the car selector (step 16's SelectCarScreen, CarSelector
-  and the front end's car), which the user asked for on 2026-10-04.
-  SC-1 (the logic and the 2D) is done and checked. SC-2, the 3D car,
-  is done: the camera, the car, its light and the selector's wiring
-  (SC-2a to SC-2c), and the draw on the device (SC-2d). The nebula
-  (SC-3) is next. See "Now" at the top.
-  Then 13b-4f, the models' cost per draw. 13b-1 (the real clock and the
-  pacing), 13b-2 (the frame profiler), 13b-3 (New 3DS mode in full) and
-  13b-4a to 13b-4e (the draw's cuts) are done.
+- **Next:** 13b-4f, the device GPU's cost per model. See "Now" at the
+  top. The car selector (SC-1 to SC-3) is done, the nebula and the
+  effect system with it. 13b-1 (the real clock and the pacing), 13b-2
+  (the frame profiler), 13b-3 (New 3DS mode in full), 13b-4a to 13b-4e
+  (the draw's cuts) and the jump cam are done.
 - **Left, in the table's units:**
 
   | Step | Slices left |

@@ -2400,7 +2400,7 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
         reflection, the light, the cover and the platform. `selcam_check`,
         `fecar_check` and `carsel_check` agree with retail; on Azahar it
         matches the user's photo 7 at 60 FPS.
-  - [ ] SC-3, the nebula behind it.
+  - [x] SC-3, the nebula behind it.
     - [x] SC-3a, the effect system's data (`acidsys.c`,
           `docs/formats/acidfx.md`): the pools, LoaderTable slot 6, the
           lookups and copies, and the auto emitters. `afx_check` runs
@@ -2410,7 +2410,12 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
           (`acidsys.c`), with hermite_basis. `afx_check`: 14885 ops,
           0 differ; 313 mutations, 310 caught, 3 equivalent. World's
           step runs WorldEffects' on the device.
-    - [ ] SC-3c, RenderEffects and its draw on the device.
-    - [ ] SC-3d, the car select's nebula.
+    - [x] SC-3c, RenderEffects and its draw on the device (`acidsys.c`,
+          `georender_draw_sprites`). `afx_check`: 20624 ops, 0 differ;
+          394 mutations, 390 caught, 4 equivalent. The race's smoke
+          draws on Azahar at 29.4 FPS.
+    - [x] SC-3d, the car select's nebula (`bcarsel.c`). `carsel_check`:
+          8364 ops, 0 differ; 29 nebula mutations, 28 caught, 1
+          equivalent.
 - [ ] **The briefing.** "You're The Cop", with its button list over the
       track's picture.
