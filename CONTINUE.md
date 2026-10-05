@@ -1,12 +1,14 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 38
-(2026-10-05), after the nebula and the indexed meshes.
-**Start at "Now" just below.** The car selector is finished and checked
-against retail: SC-1 (the logic and 2D), SC-2 (the 3D car on its
-turntable) and SC-3 (the effect system and the nebula, commits b7cb25c,
-24976dd and 6427cc5). 13b-4f, the device GPU's cost per model, is under
-way: the indexed meshes are in (609b418) and with the user.
+(2026-10-05), after the racer AI's first slice.
+**Start at "Now" just below.** Step 11, the racer AI, is under way:
+11a, what an AI car knows as it drives, is done and checked against
+retail. The car selector is finished and checked against retail: SC-1
+(the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
+effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
+13b-4f, the device GPU's cost per model, waits on the user's timing
+run of 2fc77fc (below).
 
 **The race on the New 3DS XL** (below, "The race on the device"):
 - **Speed.** With Session 35's mip chains it runs at 27-29 FPS where
@@ -43,12 +45,52 @@ way: the indexed meshes are in (609b418) and with the user.
 Session 31 took the race on Azahar from 20 FPS to 28-30 and
 the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`). The rest
 of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) is 13b-4f,
-now. "Where the port stands" below has the count of what
-is left.
+which waits on the device. "Where the port stands" below has the count
+of what is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
-## Now: 13b-4f, the device GPU's cost per model
+## Now: step 11, the racer AI
+
+Retail's racers are AICarController and AIDriver. They stand on a
+DrivingInformation, a DrivingChoice, CarCollisionPredict, an AIPlan and
+its actions. Each slice is checked against retail in mipsemu, as the
+car's were.
+
+- **11a, done:** what an AI car knows as it drives.
+  - `nearbycar.c` has NearbyCarList (BuildArray, ClearArray and the
+    three lookups), DrivingInformation's Clear, and five of the AI's
+    free functions: CalculateMaxAcceleration, CanICatchThisCar,
+    DoWeCareAboutThisCar, GetCurrentCurvatureOfDrivingLine and
+    HighlightDrivingLine.
+  - `drivinglocation.c` has DrivingLocation's methods, and
+    `drivingchoice.h` the choice's record. `drivetarget.h`'s stand-in
+    for the location is gone.
+  - `nearbycar_check`: 36 scenarios, 10,309 lines, 0 differ; 99
+    mutations, all caught. The ten other checkers that link
+    `drivetarget.c` still have 0 differ.
+  - `docs/formats/ai-driving-info.md` has the detail. The belt mover's
+    gravity is a seam (`gBeltMoverGravityFn`) until BeltMover is
+    ported.
+- **11b, next:** DrivingChoice's methods, retail 0x00241b88 ..
+  0x002455f8 (about 13 KB). `out/retail_syms.txt` lists them: IsValid,
+  IsEqualTo, BuildDriveTarget, IsDriveable, MakeNewChoice, TryChoice,
+  IsEnoughRoom, TryToDriveAroundCar, GetPreferredSideOfCar,
+  FillUpDriveTarget, AddToDriveTarget, GetSpeedBackToLine,
+  ReduceCurrentL, BuildDriveTargetAroundCar and DoSmoothOffsetChange.
+  Several changed after the demo (in some only 0.17 to 0.53 of the
+  words agree), and the demo's AdvancePoint, GetRoutePointsToUse and
+  MakeDriveTargetParallelToCar have no place in retail. Read retail's
+  own code to find whether they were inlined.
+- 11c: CarCollisionPredict, AIPlan and the AIAction base.
+- 11d: the actions.
+- 11e and 11f: AICarController and AIDriver (`gAIDriverCtorFn` in
+  `carmodes.h`, and `gAICarControllerGetCurrentDrivingLineSpeedFn` in
+  `car.h`).
+- 11g: a SkipFE race with AI cars in it. "The road to the full game"
+  has the way in.
+
+## Waiting on the device: 13b-4f, the device GPU's cost per model
 
 The device's GPU takes 43-47 ms a frame with 200-380 models in view,
 and the lap drops to 16-18 FPS there. Session 36's timing frames split
@@ -2318,7 +2360,7 @@ and so replaced every boot.
          23.3 ms: models 9.2, envmap 6.2, cull 2.7, cars 2.6, sky 0.8,
          scenery 0.5, bottom 0.5, hud 0.2. The world takes 1.4-4.5. The
          worst frame of a second is 34-67 ms.
-       - **13b-4f, under way** ("Now" at the top): the device GPU's
+       - **13b-4f, under way** ("Waiting on the device" at the top): the device GPU's
          cost per model. The indexed meshes are in (609b418). Then the
          fill and the fetch, the draws' own cost, the envmap, the cull,
          and the spikes that make a frame of three blanks.
@@ -3621,15 +3663,17 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-05, after SC-3 and 13b-4f's indexed meshes)
+### Where the port stands (2026-10-05, after 11a, the AI's first slice)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** 13b-4f, the device GPU's cost per model. See "Now" at the
-  top. The car selector (SC-1 to SC-3) is done, the nebula and the
+- **Next:** step 11, the racer AI: 11b, DrivingChoice's methods. See
+  "Now" at the top. 11a (what an AI car knows as it drives) is done.
+  13b-4f, the device GPU's cost per model, waits on the device's timing
+  run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
   (the frame profiler), 13b-3 (New 3DS mode in full), 13b-4a to 13b-4e
   (the draw's cuts) and the jump cam are done.
@@ -3639,7 +3683,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI | 4-6 |
+  | 11, the racer and traffic AI (11a done) | 6-8 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |
@@ -3647,12 +3691,13 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped; New 3DS only since 2026-10-05) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **25-39** |
+  | **Total** | **27-41** |
 
 - **How far along:** about 25-28 of the road's 50-67 slices are done,
   roughly a third. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
-  Read the 25-39 as a floor.
+  Read the 27-41 as a floor. Step 11 was put at 4-6 before its slices
+  were laid out; they are seven, 11a to 11g, and traffic beside them.
 - **The pace:** 80 commits from 2026-09-27 to 2026-10-04, most of them a
   slice each.
 - **Not yet in the count:** the replay, and with it the race's music

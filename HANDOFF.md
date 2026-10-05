@@ -14490,7 +14490,7 @@ the capture flag as `nfshp2_capture.txt.off`. Rename one back to use it.
   close one) where it used to get the drive camera. No flag files are
   needed.
 
-## Session 38 (2026-10-05) -- the effect system's draw, the nebula, and indexed meshes
+## Session 38 (2026-10-05) -- the effect system's draw, the nebula, indexed meshes, and the AI's first slice
 
 ### The jump cam on the device
 
@@ -14605,6 +14605,41 @@ the test) and RGB8's differ everywhere, as they must.
 Session 36's lines also put the envmap at a third of a light frame's
 GPU: three views at 3.6-4.0 ms each. Its 1-pixel scissor saves almost
 nothing, so it is vertex work and draws, which the indexed meshes cut.
+
+### Step 11a: what an AI car knows as it drives
+
+The racer AI starts with the records every AI car keeps:
+- a NearbyCarList, the cars around it;
+- a DrivingLocation, the route, point and line it drives;
+- a DrivingChoice, the line or the side of a car it has chosen.
+
+`nearbycar.c` has the list's BuildArray, ClearArray and three lookups,
+DrivingInformation's Clear and five of the AI's free functions.
+`drivinglocation.c` has the location's methods. `drivetarget.h`'s
+stand-in for the location is gone; AddPointToTarget reads the line's
+low byte as retail does.
+
+`nearbycar_check` runs the retail image in mipsemu as the oracle, with
+only the belt mover's gravity stubbed. It has 36 scenarios, 10,309
+lines and 0 differ, and catches all 99 mutations. Things the image
+showed:
+- BuildArray keeps the car itself in its own list, at its own origin.
+- A car tried and not kept leaves its Position, Velocity and TheCar in
+  the next free entry.
+- The sort keeps ties and NaNs in their order.
+- CalculateMaxAcceleration's cap keeps the drag force when it is below
+  the table's acceleration, a force kept as an acceleration, as retail
+  has it.
+- A straight line's curvature is -0.
+- GetNumSecondsLeftInRelaxedSwitch takes the tick difference as a
+  signed word.
+`docs/formats/ai-driving-info.md` has the rest. The ten other checkers
+that link `drivetarget.c` still have 0 differ, and the 3DS build
+succeeds. Nothing in the race calls these yet, so the build plays as
+2fc77fc.
+
+Next is 11b, DrivingChoice's methods (retail 0x00241b88 ..
+0x002455f8).
 
 ### With the user
 

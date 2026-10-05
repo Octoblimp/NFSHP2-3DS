@@ -112,27 +112,14 @@ typedef char drivetarget_layout_check[
 
 // ------------------------------------------------ DrivingLocation, likewise
 //
-// Not ported, and only three of its fields are reachable from here. Every
-// one of them is pinned by an instruction in the DrivingLocation overload
-// of AddPointToTarget (0x00208e60) or in DrivingLocation::IsClear
-// (0x00223fe8), which is two instructions long:
+// Its own header since step 11a. The DrivingLocation overload of
+// AddPointToTarget (0x00208e60) reads three of its fields, with IsClear
+// (retail 0x00239c80) two instructions long:
 //
 //     lw v0,0(a0) ; sltiu v0,v0,1        IsClear is `pRoute == NULL`
 //     lw v0,4(s0)                        pRoutePoint
-//     lb t0,8(s0)                        DrivingLine
-#ifndef DRIVINGLOCATION_H
-#define DRIVINGLOCATION_H
-
-typedef struct DrivingLocation {
-    TrackRoute      *pRoute;       // 0
-    TrackRoutePoint *pRoutePoint;  // 4
-    int8_t           DrivingLine;  // 8
-} DrivingLocation;
-
-// 0x00223fe8.
-int drivinglocation_is_clear(const DrivingLocation *d);
-
-#endif /* DRIVINGLOCATION_H */
+//     lb t0,8(s0)                        DrivingLine's low byte
+#include "drivinglocation.h"
 
 // ------------------------------------------------------------- the constants
 //

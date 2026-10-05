@@ -102,12 +102,6 @@ static const bVector3 *dt_point_at(const DriveTarget *t, int i)
 
 // ---------------------------------------------------------- the free functions
 
-int drivinglocation_is_clear(const DrivingLocation *d)
-{
-    // 0x00223fe8: lw v0,0(a0) ; sltiu v0,v0,1. One word at offset zero.
-    return d->pRoute == 0;
-}
-
 int ai_is_point_ahead_of_car(const bVector2 *p, Car *car, float thresh)
 {
     // 0x001c0e30. The car's velocity is normalised first and the delta
@@ -593,7 +587,8 @@ void drivetarget_add_point3_dl(DriveTarget *t, const bVector3 *p,
         rpn = (int16_t)(loc->pRoutePoint - loc->pRoute->TrackRoutePointTable);
     }
 
-    dl = loc->DrivingLine;
+    // `lb`: the word's low byte, sign-extended.
+    dl = (int8_t)loc->DrivingLine;
     drivetarget_add_point3(t, p, route, rpn, dl, check, car);
 }
 

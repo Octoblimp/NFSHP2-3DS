@@ -1561,6 +1561,19 @@ is citro3d and owns the top.
         - the zones' samples;
         - RadialBlurOn and RadialBlurOff.
         Written up in `docs/formats/camera.md`.
+
+        **The racer AI's first slice (11a) is closed.** `nearbycar.c`
+        is NearbyCarList (BuildArray, ClearArray and the three
+        lookups), DrivingInformation's Clear, and CalculateMaxAcceleration,
+        CanICatchThisCar, DoWeCareAboutThisCar,
+        GetCurrentCurvatureOfDrivingLine and HighlightDrivingLine.
+        `drivinglocation.c` is DrivingLocation's methods, and
+        `drivingchoice.h` the choice's record. `nearbycar_check` runs
+        the image as the oracle, with only the belt mover's gravity
+        stubbed (`gBeltMoverGravityFn`): 36 scenarios, 10,309 lines,
+        0 differ; 99 mutations, all caught. Written up in
+        `docs/formats/ai-driving-info.md`. Next is 11b, DrivingChoice's
+        methods (0x00241b88 .. 0x002455f8).
 27. [ ] Track rendering/streaming, collision. Task 24's debt is paid:
         `QuickSpline.obj` and `TrackPath.obj` are ported (Session 29,
         continued), and `TrackPathCoordinate::UpdatePosition` measures
