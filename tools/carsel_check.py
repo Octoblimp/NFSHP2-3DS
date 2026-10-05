@@ -22,19 +22,27 @@ buffer), MakeFrontendSound and StopFrontendSound, SetHelpOverride, the help
 menu's IsActive, the popups' Summon and Dismiss, ChangeToScreen and
 StartRace, CarLoader's Load, IsLoaded, Unload and BeginLoading (and its two
 flags, which the screen's constructor sets), the easter eggs, the event
-trees' IsCarAnEventReward, RenderTextIntoRectangle, ShowLoadedCar's
-ReInit of the first rendering car, the commentary's SPCH_AddEventV and
-fade, StopMovie, the screen list's per-pad filter and AssignCarOfType.
-The 3D car, the camera mover, the platform, the lighting, the spotlights
-and the nebula (SC-2 and SC-3) are stubbed silent; the camera mover keeps
-the two orbit speeds the JoyHandler writes, which are compared.
+trees' IsCarAnEventReward, RenderTextIntoRectangle, the commentary's
+SPCH_AddEventV and fade, StopMovie, the screen list's per-pad filter and
+AssignCarOfType. And the 3D the selector drives (SC-2c): the two
+FrontEndRenderingCars' constructor (which only clears and keeps the view),
+ReInit and destructor; SelectCarCameraMover's constructor, destructor and
+SetMode, logged, and its five setters, which keep what they are given;
+eModel's Init (its Solid scripted), UnInit, destructor and Render;
+SetSelectCarLighting; and GetTextureInfo, which answers each swatch with a
+texture made from its hash, or with one of four kinds of nothing.
+UpdateRenderingCarParameters, UpdateCarCover, ShowLoadedCar and the
+lighting's sum run for real, as do eIdentity and the rotations under them,
+and the frame-malloc inline over a scripted buffer. The spotlights and the
+nebula (SC-3) are stubbed silent.
 
 **Compared** are the stubs' logs, what the callback leaves in the
 ScreenCallbackData, and after each op every line that changed: the screen,
 each selector's fields, its car list in order, the unlock box, the
-thumbnails' spline, the swatches and the orbit speeds; the preload's two
-cars; the CarLoader's flags; both players' gearbox and handling; and every
-Flailer object's bytes.
+thumbnails' spline, the swatches, both rendering cars (flags, model,
+lights, place and every matrix) and the camera's fields; the frame
+buffer; the preload's two cars; the CarLoader's flags; both players'
+gearbox and handling; and every Flailer object's bytes.
 
 **The script** runs You're The Cop's player, a single race (a tree event)
 and the championship with one player, and two players on both halves;
@@ -44,19 +52,25 @@ and every way out of it, the help menu up, both units, three languages and
 every event tree; and the preload and the close.
 
     python tools/carsel_check.py
-    python tools/carsel_check.py --mutate [--only a,b]
+    python tools/carsel_check.py --mutate [--only a,b] [--jobs N]
     python tools/carsel_check.py --dump out/carsel
+
+The model's transcript is cached (tools/mutpar.py), so a run after one
+that changed only the port, the harness or the mutations skips the seven
+minutes. The mutants build outside the tree, sixteen at once.
 """
 import argparse
 import os
 import struct
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import flailer_check as fc              # noqa: E402
 import hostbuild                        # noqa: E402
+import mutpar                           # noqa: E402
 import physicscar_check as pcc          # noqa: E402
 import retail_model                     # noqa: E402
 from mipsemu import M32, s32            # noqa: E402
@@ -71,7 +85,9 @@ SOURCES = [HARNESS, BCARSEL, "3DS Files/source/nfsrewards.c",
            "3DS Files/source/bmath.c", "3DS Files/source/bmathtab.c",
            "3DS Files/source/flailer.c", "3DS Files/source/bprintf.c",
            "3DS Files/source/bui.c", "3DS Files/source/bchunk.c",
-           "3DS Files/source/cartypeinfo.c", "3DS Files/source/langtab.c"]
+           "3DS Files/source/cartypeinfo.c", "3DS Files/source/langtab.c",
+           "3DS Files/source/emath.c", "3DS Files/source/bmatrix.c",
+           "3DS Files/source/bvector.c"]
 
 GLOBALB = ROOT / "extracted-retail" / "GLOBAL" / "GLOBALB.BUN"
 FRONTB = fc.SD / "FRONTEND" / "FRONTB.BUN"
@@ -103,11 +119,19 @@ G_MENU = GP - 21324                     # CurrentMenuSystem
 G_CARS = GP - 20616                     # CarTypeInfoArray
 G_SKINS = GP - 20612
 G_NSKINS = GP - 20608
+G_FPOS = GP - 19388                     # CurrentBufferPos
+G_FEND = GP - 19384                     # CurrentBufferEnd
+G_FFAIL = GP - 19372                    # FrameMallocFailed
+G_FAMOUNT = GP - 19368                  # FrameMallocFailAmount
 
 F_CALLBACK = 0x00198928
 F_PRELOAD = 0x00194898
 F_CLOSE = 0x00194fb0
 F_SELECTOR = 0x001950d0                 # CarSelector's constructor
+# selectcar.cpp's static initializer: the camera's three offsets, eight
+# vectors nothing here reads, and the two FlailerScreenConfigs, whose
+# constructor (0x0016ad88) is stubbed silent.
+F_SINIT = 0x00198bc8
 
 S_XL = 0x0021e560
 S_XS = 0x0021e508
@@ -141,21 +165,31 @@ S_REMOVEJOY = 0x001541e8
 S_OMALLOC = 0x00257c80
 S_MOVER = 0x0015a698
 MOVER_VT = 0x002b1950                   # _vt$20SelectCarCameraMover
+S_FERC_DTOR = 0x0011e7d8
+S_MODEL_INIT = 0x0010c558
+S_MODEL_UNINIT = 0x0010c5b0
+S_MODEL_DTOR = 0x00114cf0
+S_MODEL_RENDER = 0x0010dc80
+S_CAM_MODE = 0x0015aa08
+S_CAM_RADIUS = 0x0015a940
+S_CAM_OFFSET = 0x0015a948
+S_CAM_ORBIT = 0x0015a958
+S_CAM_FOV = 0x0015a968
+S_CAM_ORIENT = 0x0015a978
+S_CAM_DTOR = 0x0015a880
+S_LIGHTING = 0x001157c0
+S_TEXINFO = 0x001abf48
 SILENT = [
-    0x0011e7d8, 0x0011e858,             # FrontEndRenderingCar dtor, alpha
-    0x0010c558, 0x0010c5b0, 0x00114cf0, 0x0010dc80,     # eModel
-    0x0015aa08, 0x0015a978, 0x0015a948, 0x0015a940, 0x0015a958,
-    0x0015a968, 0x0015a880,             # SelectCarCameraMover
-    0x001157c0,                         # SetSelectCarLighting
+    0x0016ad88,                         # FlailerScreenConfig's constructor
+    0x0011e858,                         # FrontEndRenderingCar's alpha
     0x001273d8, 0x001274a0, 0x00127688, 0x00124e20, 0x001276a8,  # Acid
     0x001963b8,                         # UpdateNebula
-    0x00197ce0,                         # UpdateRenderingCarParameters
     0x0016c3b0,                         # SetEmitterState
     0x00114e98, 0x00114e90,             # delete
-    # GetTextureInfo: the tick's swatch texture only feeds the lighting, and
-    # InitSpotlights does nothing without its texture.
-    0x001abf48,
 ]
+
+FERC_SIZE = 656
+MOVER_SIZE = 192
 
 CAR_REC = 1376
 CAR_CHUNK, SKIN_CHUNK = 0x34600, 0x34601
@@ -167,6 +201,11 @@ CHOOSE = 0x52e039f3
 
 SELECT, LEFT, RIGHT, UP, DOWN = 1, 6, 7, 8, 9
 ACTIVATE, UNACTIVATE, BACK, TICK, RENDER, DISMISS = 11, 12, 17, 18, 19, 21
+
+# The frame buffer: room for 400 platforms, then the rest fail, for the
+# runs before s_extra; room for all after its own tests.
+FRAME_FIRST = 64 * 400 + 32
+FRAME = 1 << 16
 
 
 def F(v):
@@ -294,6 +333,13 @@ def kind_b(c):
     return (0, 1, 4, 0, 3, 0)[(c.type * 3 + 2) % 6]
 
 
+def kind_c(c):
+    """Every status, the locked (2) and the hidden (3) among them: with
+    AllCarsAvailableInCarSelectScreen both are listed, neither available,
+    and the light stays lit on a locked one all the same."""
+    return (0, 2, 4, 3, 0, 2, 1)[c.type % 7]
+
+
 def common(s):
     specs, rows = spec_ops()
     s.add("load|%s" % FRONTB, "cars|%s" % GLOBALB)
@@ -314,6 +360,7 @@ def common(s):
                  ("help", 0), ("pi", 3), ("gametype", 7), ("players", 1)):
         s.g(k, v)
     s.g("relapsed", F(1.0 / 60))
+    s.add("frame|%d" % FRAME_FIRST)
     s.g("rtimer", s.rtimer)
     s.g("rframes", s.rframes)
 
@@ -342,6 +389,11 @@ def s_cop(s):
     s.tick(3)
     s.add("isl|%d|1" % cop.type)
     s.tick(48, render=True)
+    # The camera's blend turns the front wheels straight. At 0.0001 the
+    # turn is 4239.58, which truncates.
+    for b in (0.5, 1.0, 0.3, 0.0001, 0.0):
+        s.add("blend|0|%s" % F(b))
+        s.tick(1)
     # The orbit view, the sticks and the rest of the events.
     s.joy(0, 33, 1)
     s.joy(0, 33, 0)
@@ -430,13 +482,14 @@ def s_single(s, gt, lang, units):
     s.g("lang", lang)
     s.g("units", units)
     s.g("allcars", 1 if gt == 8 else 0)
-    s.statuses(0, kind_b)
+    s.statuses(0, kind_c if gt == 8 else kind_b)
     locked = s.of(0, 1) + s.of(0, 4)
     for c in locked[:2]:
         s.add("egg|%d|1" % c.type)
     for i, c in enumerate(locked[2:6]):
         s.add("ev|%d|%d|%d" % (c.type, (0, 1, 2, 0)[i], (5, -3, 7, 200)[i]))
-    car = s.of(0, 0, usage=0)[1]
+    # With every car listed, the ride is a locked one, which loads.
+    car = s.of(0, 2, usage=0)[0] if gt == 8 else s.of(0, 0, usage=0)[1]
     s.add("ride|0|%d|%d|%d" % (gt, car.type, 99), "pts|0|-5")
     s.msg(ACTIVATE, SCREEN_1P, 1 if gt == 8 else 0)
     s.tick(50, render=True)
@@ -481,6 +534,8 @@ def s_two(s):
     s.msg(ACTIVATE, SCREEN_2P, 0)
     s.msg(ACTIVATE, SCREEN_2P_LO, 1)
     s.tick(50, ports=(0, 1), render=True)
+    s.add("blend|1|%s" % F(0.75))
+    s.tick(1, ports=(0, 1))
     s.joy(0, 33, 1)
     s.joy(1, 33, 1)
     s.joy(1, 35, 1)
@@ -538,6 +593,17 @@ def s_extra(s):
     s.add("ride|0|3|%d|0" % hidden.type)
     s.msg(ACTIVATE, SCREEN_1P, 0)
     s.tick(50)
+    # The platform with no frame buffer, one just too small, room for one
+    # and room for two.
+    for n in (0, 64, 65, 130):
+        s.add("frame|%d" % n)
+        for _ in range(3):
+            s.msg(RENDER, param=0, noise=0)
+    s.add("frame|%d" % FRAME)
+    # No swatch texture, and each part of one missing: no light.
+    for mode in (0, 2, 3, 4, 1):
+        s.add("tex|%d" % mode)
+        s.tick(1)
     # Into the orbit view and out with the same button.
     s.joy(0, 33, 1)
     s.tick(4)
@@ -592,11 +658,22 @@ def s_extra(s):
         s.msg(UP)
         s.tick(2)
         s.msg(UNACTIVATE, SCREEN_1P, 0)
-    # Out while the car still loads.
+    # Two locked cars, one of them an easter egg's and so lit.
+    locked = s.of(0, 2)
+    s.add("egg|%d|1" % locked[0].type)
+    for c in locked[:2]:
+        s.add("ride|0|3|%d|%d" % (c.type, c.skins[0]))
+        s.msg(ACTIVATE, SCREEN_1P, 0)
+        s.tick(3)
+        s.msg(UNACTIVATE, SCREEN_1P, 0)
+    s.add("egg|%d|0" % locked[0].type)
+    # Out while the car still loads, its models with no solid.
     allisl(0)
+    s.add("solid|0")
     s.msg(ACTIVATE, SCREEN_1P, 0)
     s.tick(2)
     s.msg(UNACTIVATE, SCREEN_1P, 0)
+    s.add("solid|1")
     allisl(1)
     # Two players as cops: only the first's set is the cops'.
     s.g("gametype", 7)
@@ -631,8 +708,13 @@ class Model(fc.Model):
         self.lines = {}
         e.write(FRED, bytes(FRED_SIZE))
         for g in (G_RTIMER, G_RTIME, G_RFRAMES, G_RELAPSED, G_SOUND,
-                  G_ALLCARS, G_SCREEN, LANGUAGE):
+                  G_ALLCARS, G_SCREEN, LANGUAGE, G_FPOS, G_FEND, G_FFAIL,
+                  G_FAMOUNT):
             e.put32(g, 0)
+        self.frame = 0
+        self.solid = 1
+        self.texmode = 1
+        self.tex = e.alloc(256, align=16)
         e.put32(G_PRE, M32)
         e.put32(G_PRE + 4, M32)
         e.write(LOADER, bytes(16))
@@ -658,19 +740,32 @@ class Model(fc.Model):
             S_ISLOADED: self.s_isloaded, S_UNLOAD: self.s_unload,
             S_BEGIN: self.s_begin, S_EGG: self.s_egg,
             S_ISEVENT: self.s_isevent, S_FINDEVENT: self.s_findevent,
-            S_RTEXT: self.s_rtext, S_FERC: lambda em: em.reg[4] & M32,
-            S_REINIT: self.s_reinit, S_SPEECH: lambda em: self.speech,
+            S_RTEXT: self.s_rtext, S_REINIT: self.s_reinit, S_SPEECH: lambda em: self.speech,
             S_FADE: self.s_fade, S_SPEAK: self.s_speak,
             S_CONVERT: lambda em: em.reg[4] & M32,
             S_STOPMOVIE: self.s_stopmovie, S_PERPORT: self.s_perport,
             S_ASSIGN: self.s_assign, S_ADDJOY: self.s_addjoy,
             S_REMOVEJOY: self.s_removejoy, S_OMALLOC: self.s_omalloc,
-            S_MOVER: self.s_mover,
+            S_MOVER: self.s_mover, S_FERC_DTOR: self.s_ferc_dtor,
+            S_MODEL_INIT: self.s_model_init,
+            S_MODEL_UNINIT: self.s_model_uninit,
+            S_MODEL_DTOR: self.s_model_dtor,
+            S_MODEL_RENDER: self.s_model_render,
+            S_CAM_MODE: self.s_cam_mode, S_CAM_DTOR: self.s_cam_dtor,
+            S_CAM_RADIUS: lambda em: self.e.put32(
+                (em.reg[4] & M32) + 64, em.fpr[12] & M32),
+            S_CAM_OFFSET: lambda em: self.copy12(em, 80),
+            S_CAM_ORBIT: lambda em: self.copy12(em, 96),
+            S_CAM_FOV: lambda em: self.put16((em.reg[4] & M32) + 144,
+                                             em.reg[5]),
+            S_CAM_ORIENT: self.s_cam_orient, S_LIGHTING: self.s_lighting,
+            S_TEXINFO: self.s_texinfo, S_FERC: self.s_ferc,
         }
         for a, fn in stubs.items():
             e.stub(a, fn)
         for a in SILENT:
             e.stub(a, lambda em: 0)
+        e.call(F_SINIT)
         self.building = 0
         e.hook(F_SELECTOR, self.h_selector)
 
@@ -804,16 +899,96 @@ class Model(fc.Model):
         return [(i, self.e.u32(p + 4 + 4 * i)) for i in range(2)
                 if self.e.u32(p + 4 + 4 * i)]
 
+    # ---- the 3D seams
+
+    def put16(self, a, v):
+        self.e.write(a, struct.pack("<H", v & 0xffff))
+
+    def copy12(self, em, off):
+        e = self.e
+        a, v = em.reg[4] & M32, em.reg[5] & M32
+        e.write(a + off, bytes(e.mem[v:v + 12]))
+
+    @staticmethod
+    def fe_name(f, e):
+        return "refl" if e.u32(f + 636) else "car"
+
+    def s_ferc(self, em):
+        a = em.reg[4] & M32
+        self.e.write(a, bytes(FERC_SIZE))
+        self.e.put32(a + 20, em.reg[6])
+        self.emit("  fecar init view %d ride %d" % (
+            s32(em.reg[6] & M32), 1 if em.reg[5] & M32 else 0))
+        return a
+
     def s_reinit(self, em):
-        car = em.reg[4] & M32
-        # The selector being built is not on the screen yet.
-        sels = [c for _, c in self.selectors()]
-        if self.building and self.building not in sels:
-            sels.append(self.building)
-        for c in sels:
-            if self.e.u32(c + 36) == car:
-                self.emit("  show %s player %d" % (
-                    self.ride(em.reg[5] & M32), s32(self.e.u32(c + 28))))
+        f = em.reg[4] & M32
+        self.emit("  reinit %s view %d ride %s" % (
+            self.fe_name(f, self.e), s32(self.e.u32(f + 20)),
+            self.ride(em.reg[5] & M32)))
+
+    def s_ferc_dtor(self, em):
+        f = em.reg[4] & M32
+        self.emit("  fecar delete %s view %d model %d" % (
+            self.fe_name(f, self.e), s32(self.e.u32(f + 20)),
+            1 if self.e.u32(f + 624) else 0))
+
+    def s_model_init(self, em):
+        a = em.reg[4] & M32
+        self.e.put32(a + 8, em.reg[5])
+        self.e.put32(a + 12, self.solid)
+        self.emit("  model init %08x" % (em.reg[5] & M32))
+
+    def s_model_uninit(self, em):
+        a = em.reg[4] & M32
+        self.emit("  model uninit %08x" % self.e.u32(a + 8))
+        self.e.put32(a + 12, 0)
+
+    def s_model_dtor(self, em):
+        self.emit("  model delete %08x" % self.e.u32((em.reg[4] & M32) + 8))
+
+    def s_model_render(self, em):
+        e = self.e
+        m = em.reg[5] & M32
+        self.emit("  model render %08x at %d light %d flags %d matrix %s" % (
+            e.u32((em.reg[4] & M32) + 8), s32((m - self.frame) & M32),
+            1 if em.reg[6] & M32 else 0, em.reg[7] & M32,
+            bytes(e.mem[m:m + 64]).hex()))
+
+    def s_cam_mode(self, em):
+        self.emit("  cam mode %d" % s32(em.reg[5] & M32))
+
+    def s_cam_dtor(self, em):
+        self.emit("  cam delete")
+
+    def s_cam_orient(self, em):
+        a = em.reg[4] & M32
+        self.put16(a + 56, em.reg[5])
+        self.put16(a + 60, em.reg[6])
+
+    def s_lighting(self, em):
+        self.emit("  light %d %d %08x" % (
+            s32(em.reg[4] & M32), s32(em.reg[5] & M32), em.fpr[12] & M32))
+
+    def s_texinfo(self, em):
+        """GetTextureInfo, as the harness's: a swatch whose fourth texel is
+        the hash's bits 4..6, over eight colours from its high bytes."""
+        e = self.e
+        h = em.reg[4] & M32
+        self.emit("  tex %08x %d" % (h, s32(em.reg[5] & M32)))
+        if self.texmode == 0:
+            return 0
+        ti, image, pal = self.tex, self.tex + 160, self.tex + 176
+        e.write(ti, bytes(160))
+        e.write(image, bytes([0, 0, 0, (h >> 4) & 7]))
+        e.write(pal, b"".join(bytes([((h >> 8) + 37 * k) & 255,
+                                     ((h >> 16) + 59 * k) & 255,
+                                     ((h >> 24) + 83 * k) & 255, 0x80])
+                              for k in range(8)))
+        e.put32(ti + 144, 0 if self.texmode == 2 else image)
+        e.put32(ti + 60, 0 if self.texmode == 3 else 32)
+        e.put32(ti + 148, 0 if self.texmode == 4 else pal)
+        return ti
 
     def s_fade(self, em):
         self.emit("  fade %08x" % (em.fpr[12] & M32))
@@ -851,7 +1026,9 @@ class Model(fc.Model):
 
     def s_mover(self, em):
         a = em.reg[4] & M32
+        self.e.write(a, bytes(MOVER_SIZE))
         self.e.put32(a + 40, MOVER_VT)
+        self.emit("  cam init view %d" % s32(em.reg[5] & M32))
         return a
 
     # ---- output
@@ -921,9 +1098,27 @@ class Model(fc.Model):
         self.note("swatch%d" % i, " ".join(
             "%08x:%08x" % (g(c + 236 + 4 * k), g(c + 276 + 4 * k))
             for k in range(10)))
+        self.dump_fecar("fe%d" % i, c, g(c + 36))
+        self.dump_fecar("fr%d" % i, c, g(c + 40))
         m = g(c + 188)
-        self.note("orbitspeed%d" % i, "%08x %08x" % (
-            (g(m + 152), g(m + 160)) if m else (0, 0)))
+        self.note("cam%d" % i, (
+            "blend %08x angle %d tilt %d radius %08x off %08x %08x %08x "
+            "orbit %08x %08x %08x fov %d desired %08x %08x") % (
+            g(m + 48), e.u16(m + 56), e.u16(m + 60), g(m + 64), g(m + 80),
+            g(m + 84), g(m + 88), g(m + 96), g(m + 100), g(m + 104),
+            e.u16(m + 144), g(m + 152), g(m + 160)))
+
+    def dump_fecar(self, key, c, f):
+        e = self.e
+        g = e.u32
+        pm = g(f + 624)
+        self.note(key, (
+            "en %d refl %d model %s lights %d %d pos %08x %08x %08x %s") % (
+            s32(g(f + 628)), s32(g(f + 636)),
+            "0" if not pm else "cover" if pm == c + 44 else "stray",
+            s32(g(f + 640)), s32(g(f + 644)), g(f + 32), g(f + 36),
+            g(f + 40), bytes(e.mem[f + 48:f + 112]).hex()))
+        self.note(key + "w", bytes(e.mem[f + 112:f + 624]).hex())
 
     def dump(self):
         e = self.e
@@ -939,6 +1134,9 @@ class Model(fc.Model):
         self.note("pre", "%d %d" % (s32(g(G_PRE)), s32(g(G_PRE + 4))))
         self.note("carloader", "%d %d" % (s32(g(LOADER + 4)),
                                           s32(g(LOADER + 8))))
+        self.note("frame", "used %d failed %d amount %d" % (
+            s32((g(G_FPOS) - self.frame) & M32), s32(g(G_FFAIL)),
+            g(G_FAMOUNT)))
         for i in range(2):
             st = F_FPI + FPI_SIZE * i + FPI_SETTINGS
             self.note("pl%d" % i, "trans %d style %d" % (
@@ -1026,6 +1224,21 @@ class Model(fc.Model):
             self.ev[v(1)] = (v(2), v(3))
         elif o == "isl":
             self.isl[v(1)] = v(2)
+        elif o == "tex":
+            self.texmode = v(1)
+        elif o == "solid":
+            self.solid = v(1)
+        elif o == "blend":
+            c = e.u32(e.u32(G_SCREEN) + 4 + 4 * v(1))
+            e.put32(e.u32(c + 188) + 48, v(2) & M32)
+        elif o == "frame":
+            n = v(1)
+            self.frame = e.alloc(n, align=16) if n else 0
+            if n:
+                e.write(self.frame, bytes(n))
+            for g, x in ((G_FPOS, self.frame), (G_FEND, self.frame + n),
+                         (G_FFAIL, 0), (G_FAMOUNT, 0)):
+                e.put32(g, x)
         elif o == "msg":
             d = self.data
             e.write(d, struct.pack("<Iiii", v(2) & M32, v(3), v(4), v(5)))
@@ -1049,6 +1262,18 @@ class Model(fc.Model):
 
 def model(lines):
     return Model().run(lines)
+
+
+# The line the mutations start at, spelt so that this one does not match.
+MUTATIONS_HEADER = "# " + "=" * 61 + " mutations" + NL
+
+
+def model_cached(lines):
+    """model(lines), or its last transcript when nothing it reads has
+    changed. Nothing past the mutations' header is the model's."""
+    return mutpar.model_cached(
+        lines, model, data=[GLOBALB, FRONTB] + [fc.SD / r for r in fc.LOADS],
+        cut=MUTATIONS_HEADER)
 
 
 # ================================================================= build
@@ -1335,9 +1560,11 @@ MUTATIONS = [
       "    unlockJoy(c, ev, pressed);"),
     M("joy-touch", "            c->orbitTouched = 1;" + NL
       + "            c->orbitFrame   = RealTimeFrames;" + NL
-      + "            c->orbitSpeedX  = !pressed",
+      + "            c->mover.DesiredHorizSpeed =" + NL,
       "            c->orbitFrame   = RealTimeFrames;" + NL
-      + "            c->orbitSpeedX  = !pressed"),
+      + "            c->mover.DesiredHorizSpeed =" + NL),
+    M("joy-lr-vert", "c->mover.DesiredHorizSpeed = ((float)pressed",
+      "c->mover.DesiredVertSpeed = ((float)pressed"),
     M("can-orbit-help", "if (h->helpMenuActive && h->helpMenuActive(h->user)) return 0;",
       "if (h->helpMenuActive && !h->helpMenuActive(h->user)) return 0;"),
     M("can-orbit-mode", "    if (c->mode != c->chooseMode) return 0;" + NL, ""),
@@ -1444,6 +1671,115 @@ MUTATIONS = [
       "if (maybeContinue()) data->noise = 17;"),
     M("cb-render", "            unlockRender(c);" + NL, ""),
 
+    # SC-2c: the cover and the shown car.
+    M("cover-covered", "eModel* m = covered(c, cur(c)) ? &c->cover : NULL;",
+      "eModel* m = covered(c, cur(c)) ? NULL : &c->cover;"),
+    M("cover-refl", "c->reflection.pModel = m;", "c->reflection.pModel = NULL;"),
+    M("show-skin", "skinAt(c->loaded->status, c->loaded->skinIndex), 0, 0);",
+      "skinAt(c->loaded->status, 0), 0, 0);"),
+    M("show-dash", "c->loaded->skinIndex), 0, 0);", "c->loaded->skinIndex), 1, 0);"),
+    M("show-refl", "    fecar_reinit(&c->reflection, &ri);" + NL, ""),
+
+    # The cars on the turntable.
+    M("urcp-loaded", "ct = cti(c->loaded->type);", "ct = cti(cur(c)->type);"),
+    M("urcp-lift", "#define CAR_LIFT        0.01f", "#define CAR_LIFT        0.02f"),
+    M("urcp-radius", "ct->Wheels[0].Radius - ct->Wheels[0].PositionZ",
+      "ct->Wheels[0].Radius + ct->Wheels[0].PositionZ"),
+    M("urcp-refl-z", "    if (reflection) z = -z;" + NL, ""),
+    M("urcp-pos-x", "f->Position.x = 0.0f;", "f->Position.x = z;"),
+    M("urcp-flip-y", "        f->BodyMatrix.v0.y = -f->BodyMatrix.v0.y;" + NL, ""),
+    M("urcp-flip-z", "        f->BodyMatrix.v2.z = -f->BodyMatrix.v2.z;" + NL, ""),
+    M("urcp-turn", "eRotateZ(&f->BodyMatrix, &f->BodyMatrix, c->turnAngle);",
+      "eRotateZ(&f->BodyMatrix, &f->BodyMatrix, c->turnAngle + 1);"),
+    M("urcp-steer", "#define WHEEL_STEER     4240", "#define WHEEL_STEER     4241"),
+    M("urcp-blend", "(1.0f - c->mover.Blend)", "(1.0f + c->mover.Blend)"),
+    M("urcp-steer-round", "* (float)WHEEL_STEER);", "* (float)WHEEL_STEER + 0.5f);"),
+    M("urcp-front", "        if (i < 2) {", "        if (i < 1) {"),
+    M("urcp-brake-steer", "            eRotateZ(b, b, steer);" + NL, ""),
+    M("urcp-tire-roll", "        eRotateY(t, t, 0);" + NL, ""),
+    M("urcp-wheel-y", "t->v3.y = b->v3.y = ct->Wheels[i].PositionY;",
+      "t->v3.y = b->v3.y = ct->Wheels[i].PositionX;"),
+    M("urcp-wheel-w", "        t->v3.w = b->v3.w = 1.0f;", "        t->v3.w = 1.0f;"),
+
+    # The light.
+    M("light-one-skin", "car->status->nSkins == 1 ? 0 : car->skinIndex;",
+      "car->skinIndex;"),
+    M("light-default", "GetTextureInfo(c->swatchColour[i], 1, 0);",
+      "GetTextureInfo(c->swatchColour[i], 0, 0);"),
+    M("light-covered", "if (!covered(c, car) && ti && ti->ImageData",
+      "if (ti && ti->ImageData"),
+    M("light-image", "&& ti->ImageData && ti->PaletteData)", "&& ti->PaletteData)"),
+    M("light-palsize", "&& ti->ImageData && ti->PaletteData)",
+      "&& ti->ImageData && ti->PaletteSize && ti->PaletteData)"),
+    M("light-paldata", "&& ti->ImageData && ti->PaletteData)", "&& ti->ImageData)"),
+    M("light-texel", "4 * ti->ImageData[3];", "4 * ti->ImageData[2];"),
+    M("light-r", "#define LUM_R           0.299f", "#define LUM_R           0.3f"),
+    M("light-g", "#define LUM_G           0.587f", "#define LUM_G           0.586f"),
+    M("light-b", "#define LUM_B           0.114f", "#define LUM_B           0.115f"),
+    M("light-scale", "#define LUM_SCALE       (1.0f / 255.0f)",
+      "#define LUM_SCALE       (1.0f / 256.0f)"),
+    M("light-square", "        bright *= bright;" + NL + "        bright *= bright;",
+      "        bright *= bright;"),
+    M("light-one-minus", "bright = 1.0f - ((float)col[0]",
+      "bright = 0.5f - ((float)col[0]"),
+    M("light-locked-status", "#define CAR_STATUS_LOCKED 2", "#define CAR_STATUS_LOCKED 1"),
+    M("light-locked-all", "if (!AllCarsAvailableInCarSelectScreen && !c->allUnlocked && c->loaded",
+      "if (!c->allUnlocked && c->loaded"),
+    M("light-locked-avail", "        && !c->loaded->available)" + NL
+      + "        locked =", "        )" + NL + "        locked ="),
+
+    # The camera.
+    M("cam-radius-1p", "#define CAM_RADIUS_1P   12.93f", "#define CAM_RADIUS_1P   12.94f"),
+    M("cam-radius-2p", "#define CAM_RADIUS_2P   16.5f", "#define CAM_RADIUS_2P   16.6f"),
+    M("cam-heading", "#define CAM_HEADING     0", "#define CAM_HEADING     1"),
+    M("cam-tilt-1p", "#define CAM_TILT_1P     15262", "#define CAM_TILT_1P     15263"),
+    M("cam-tilt-2p", "#define CAM_TILT_2P     15654", "#define CAM_TILT_2P     15655"),
+    M("cam-off-1p", "kOffsetStats1P = {0.27398f", "kOffsetStats1P = {0.27399f"),
+    M("cam-off-2p", "{-0.62f, 0.0f, -1.05f", "{-0.62f, 0.0f, -1.06f"),
+    M("cam-orbit", "{0.0f, 0.0f, -0.6384f", "{0.0f, 0.0f, -0.6385f"),
+    M("cam-fov", "selcam_set_fov_stats(&c->mover, c->turnFOV);",
+      "selcam_set_fov_stats(&c->mover, c->turnTilt);"),
+    M("cam-2p-radius", "selcam_set_radius_stats(&c->mover, CAM_RADIUS_2P);",
+      "selcam_set_radius_stats(&c->mover, CAM_RADIUS_1P);"),
+    M("cam-mode-orbit", "selcam_set_mode(&c->mover, SELCAM_MODE_ORBIT);",
+      "selcam_set_mode(&c->mover, SELCAM_MODE_STATS);"),
+    M("cam-mode-choose", "    adjustHelp(c);" + NL
+      + "    selcam_set_mode(&c->mover, SELCAM_MODE_STATS);" + NL, "    adjustHelp(c);" + NL),
+    M("cam-mode-timeout", "        adjustHelp(c);" + NL
+      + "        selcam_set_mode(&c->mover, SELCAM_MODE_STATS);" + NL,
+      "        adjustHelp(c);" + NL),
+
+    # The platform.
+    M("render-identity", "                eIdentity(m);" + NL, ""),
+    M("render-size", "eframe_malloc(sizeof(bMatrix4))", "eframe_malloc(sizeof(bMatrix4) + 16)"),
+    M("render-model", "gEModelRenderFn(&c->platform, m, NULL, 0);",
+      "gEModelRenderFn(&c->cover, m, NULL, 0);"),
+    M("render-flags", "gEModelRenderFn(&c->platform, m, NULL, 0);",
+      "gEModelRenderFn(&c->platform, m, NULL, 4);"),
+
+    # The 3D's constructor and destructor.
+    M("init-refl", "    c->reflection.Reflection = 1;" + NL, ""),
+    M("init-refl-enabled", "    c->reflection.Enabled    = 1;" + NL, ""),
+    M("init-cover-name", "bchunk_hash(\"CARCOVER\")", "bchunk_hash(\"CARCOVR\")"),
+    M("init-platform-name", "bchunk_hash(\"PLATFORM\")", "bchunk_hash(\"PLATFORMS\")"),
+    M("init-refl-view", "fecar_init(&c->reflection, NULL, playerNum);",
+      "fecar_init(&c->reflection, NULL, 0);"),
+    M("init-cam-view", "selcam_init(&c->mover, playerNum);", "selcam_init(&c->mover, 0);"),
+    M("init-light", "el_set_select_car_lighting(playerNum, 0, 0.0f);",
+      "el_set_select_car_lighting(playerNum, 1, 0.0f);"),
+    M("destroy-platform-uninit", "    if (c->platform.Solid) emodel_uninit(&c->platform);" + NL, ""),
+    M("destroy-platform-solid", "if (c->platform.Solid) emodel_uninit",
+      "if (1) emodel_uninit"),
+    M("destroy-cover-uninit", "    if (c->cover.Solid) emodel_uninit(&c->cover);" + NL, ""),
+    M("destroy-unhook", "    c->car.pModel        = NULL;" + NL, ""),
+    M("destroy-cam", "    selcam_destroy(&c->mover);" + NL, ""),
+    M("destroy-refl", "    fecar_delete(&c->reflection, 2);" + NL, ""),
+    M("destroy-platform-delete", "    emodel_delete(&c->platform, 2);" + NL, ""),
+    M("destroy-cover-delete", "    emodel_delete(&c->cover, 2);" + NL, ""),
+    M("tick-urcp-refl", "updateRenderingCarParameters(c, &c->reflection, 1);",
+      "updateRenderingCarParameters(c, &c->reflection, 0);"),
+    M("tick-light", "    updateLighting(c);" + NL, ""),
+
     # SelectCarScreen.
     M("selector-index", "return Fred.NumPlayerCars == 2 ? data->port != 0 : 0;",
       "return data->port != 0;"),
@@ -1492,10 +1828,19 @@ EQUIVALENT = {
                 "badge's texture and visibility go nowhere",
     "thumbs-hide-all": "car 63, the FIRETRUCK, has no THUMBNAIL_ object on "
                        "any of the three screens",
+    # SC-2c's.
+    "urcp-flip-y": "the identity's v0.y is 0, and eRotateZ's sums lose the "
+                   "sign of the -0 the flip makes",
+    "urcp-tire-roll": "eRotateY by 0 multiplies by an exact identity: the "
+                      "table's sine of 0 is 0 and its cosine 1",
+    "urcp-wheel-w": "eIdentity has already put 1 in the brake's v3.w, and "
+                    "eRotateZ leaves row 3 alone",
+    "light-one-skin": "SetSkin, NextSkin and PrevSkin can only leave a "
+                      "one-skin car's index at 0",
 }
 
 
-def mutate_pass(only=None):
+def mutate_pass(only=None, jobs=None):
     todo = [m for m in MUTATIONS if only is None or m[0] in only]
     if only:
         unknown = set(only) - {m[0] for m in MUTATIONS}
@@ -1503,89 +1848,29 @@ def mutate_pass(only=None):
             print("no such mutation: %s" % ", ".join(sorted(unknown)))
             return 1
     lines = script()
-    base = model(lines)
-    caught, survived, missing, equivalent = 0, [], [], []
+    base = model_cached(lines)
     indir = tempfile.TemporaryDirectory()
     scp = write_script(indir.name, lines)
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
         out = Path(tmp) / "base.txt"
+        t0 = time.monotonic()
         run_harness(exe, scp, out)
-        if diff(base, out.read_text(encoding="latin-1").splitlines(),
-                quiet=True):
+        took = time.monotonic() - t0
+        got = out.read_text(encoding="latin-1").splitlines()
+        if diff(base, got, quiet=True):
             print("base already differs -- fix that before mutating")
             return 1
+        print("base: %d ops, %d lines, 0 differ" % (len(lines), len(got)),
+              flush=True)
 
-    for m in todo:
-        name, rel, before, after = m
-        path = ROOT / rel
-        text = path.read_text(encoding="utf-8", newline="")
-        crlf = "\r\n" in text
-        probe = before.replace(NL, "\r\n") if crlf else before
-        repl = after.replace(NL, "\r\n") if crlf else after
-        if text.count(probe) != 1:
-            missing.append(name)
-            print("  %-44s PATTERN %s" % (
-                name, "NOT FOUND" if not text.count(probe) else "NOT UNIQUE"))
-            continue
-        new = text.replace(probe, repl, 1)
-        try:
-            hostbuild.write_source(path, new)
-            with tempfile.TemporaryDirectory() as tmp:
-                try:
-                    exe = build_harness(tmp)
-                except SystemExit:
-                    print("  %-44s did not compile (caught)" % name)
-                    caught += 1
-                    continue
-                out = Path(tmp) / "m.txt"
-                rc = run_harness(exe, scp, out)
-                if rc == pcc.HARNESS_HUNG:
-                    print("  %-44s hung the harness (caught)" % name)
-                    caught += 1
-                    continue
-                if rc != 0:
-                    print("  %-44s crashed the harness (caught)" % name)
-                    caught += 1
-                    continue
-                n = diff(base, out.read_text(encoding="latin-1")
-                         .splitlines(), quiet=True)
-                if n:
-                    print("  %-44s caught, %d lines" % (name, n))
-                    caught += 1
-                elif name in EQUIVALENT:
-                    print("  %-44s survived, equivalent by construction"
-                          % name)
-                    equivalent.append(name)
-                else:
-                    print("  %-44s SURVIVED" % name)
-                    survived.append(name)
-        finally:
-            try:
-                hostbuild.write_source(path, text)
-            except OSError:
-                sys.exit("could not restore %s -- it still holds the "
-                         "mutation %s. Put the original line back before "
-                         "trusting anything printed above." % (rel, name))
+    limit = mutpar.timeout_for(took)
+    tally = mutpar.run_pass(
+        todo, SOURCES, "carsel_test",
+        lambda exe, out: mutpar.run_exe([exe, scp], out, limit),
+        base, diff, EQUIVALENT, jobs)
     indir.cleanup()
-
-    real = [m for m in todo if m[0] not in missing]
-    holes = [s for s in survived if s not in EQUIVALENT]
-    ran = {m[0] for m in todo}
-    stale = [n for n in EQUIVALENT
-             if n not in equivalent and n not in missing
-             and (n in ran or only is None)]
-    if missing:
-        print("%d PATTERN NOT FOUND -- the tally above is over %d of %d"
-              % (len(missing), len(real), len(todo)))
-    print("%d mutations, %d caught, %d equivalent, %d unexplained"
-          % (len(real), caught, len(equivalent), len(holes)))
-    for name in holes:
-        print("  unexplained: %s" % name)
-    for name in stale:
-        print("  listed as equivalent but %s: %s"
-              % ("caught" if name in ran else "names no mutation", name))
-    return 1 if (holes or missing or stale) else 0
+    return mutpar.summarize(todo, only, EQUIVALENT, tally)
 
 
 def main():
@@ -1593,14 +1878,18 @@ def main():
     ap.add_argument("--mutate", action="store_true")
     ap.add_argument("--only", metavar="NAME,...",
                     help="with --mutate, only these mutations")
+    ap.add_argument("--jobs", type=int, metavar="N",
+                    help="with --mutate, mutants at once (default %d)"
+                    % mutpar.JOBS)
     ap.add_argument("--dump", metavar="PREFIX")
     args = ap.parse_args()
 
     if args.mutate:
-        sys.exit(mutate_pass(args.only.split(",") if args.only else None))
+        sys.exit(mutate_pass(args.only.split(",") if args.only else None,
+                             args.jobs))
 
     lines = script()
-    got = model(lines)
+    got = model_cached(lines)
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
         scp = write_script(tmp, lines)

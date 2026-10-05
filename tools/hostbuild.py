@@ -267,21 +267,23 @@ class BuildEnvironmentError(RuntimeError):
     the transcript."""
 
 
-def _fail(err, what):
-    sys.stderr.write(err)
+def _fail(err, what, quiet=False):
+    if not quiet:
+        sys.stderr.write(err)
     if "error" not in err.lower():
         raise BuildEnvironmentError("%s with no diagnostic -- the build "
                                     "environment, not the code" % what)
     sys.exit(what)
 
 
-def _compile_direct(cc, flags, todo, exe, objs):
+def _compile_direct(cc, flags, todo, exe, objs, inc):
     env = dict(os.environ)
     env.setdefault("TMPDIR", "/tmp")
+    incs = [a for d in inc for a in ("-I", str(d))]
 
     def one(job):
         src, obj = job
-        return subprocess.run([cc] + flags + ["-I", str(SRC), "-c", str(src),
+        return subprocess.run([cc] + flags + incs + ["-c", str(src),
                                "-o", str(obj)],
                               capture_output=True, text=True, env=env)
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
@@ -294,12 +296,13 @@ def _compile_direct(cc, flags, todo, exe, objs):
     return r.returncode == 0, err + r.stdout + r.stderr
 
 
-def _compile_msys(tmp, flags, todo, exe, objs):
+def _compile_msys(tmp, flags, todo, exe, objs, inc):
     fl = " ".join(flags)
+    incs = " ".join("-I " + quote(d) for d in inc)
     lines = ["fail=0"]
     for i, (src, obj) in enumerate(todo):
-        lines.append("gcc %s -I %s -c %s -o %s 2>%s & p%d=$!"
-                     % (fl, quote(SRC), quote(src), quote(obj),
+        lines.append("gcc %s %s -c %s -o %s 2>%s & p%d=$!"
+                     % (fl, incs, quote(src), quote(obj),
                         quote(str(obj) + ".err"), i))
     for i in range(len(todo)):
         lines.append("wait $p%d || fail=1" % i)
@@ -316,8 +319,7 @@ def _compile_msys(tmp, flags, todo, exe, objs):
     return r.returncode == 0, r.stdout + r.stderr
 
 
-def _build_cached(tmp, srcs, exe, flags):
-    global _mode
+def _build_cached(tmp, srcs, exe, flags, quiet=False):
     tmp = Path(tmp)
     CACHE.mkdir(parents=True, exist_ok=True)
     _prune()
@@ -337,36 +339,58 @@ def _build_cached(tmp, srcs, exe, flags):
                 os.utime(cached)
             except OSError:
                 pass
-
-    cc = (os.environ.get("CC") or shutil.which("cc") or shutil.which("gcc")
-          or shutil.which("clang"))
-    ok, err, direct_err = False, "", ""
-    if cc and _mode != "msys":
-        ok, err = _compile_direct(cc, flags, todo, exe, objs)
-        if ok and todo:
-            _mode = "direct"
-        elif not ok:
-            direct_err = err
-    if not ok and _mode != "direct" and MSYS_BASH.exists():
-        ok, err = _compile_msys(tmp, flags, todo, exe, objs)
-        if not ok:
-            _fail(err, "compile failed (msys2 bash)")
-        if todo:
-            _mode = "msys"
-    if not ok:
-        if not cc:
-            sys.exit("no host C compiler found (set CC)")
-        _fail(direct_err or err, "compile failed")
-    if err.strip():
-        print("compiler warnings:" + NL + err.rstrip())
+    _compile_link(tmp, todo, objs, exe, flags, [SRC], quiet)
     for s, cached, fresh, hit in plan:
         if cached is not None and not hit:
             _keep(fresh, cached)
     return exe
 
 
-def build(tmp, sources, name="hosttest", flags=None):
-    """Compile `sources` into `tmp`, returning the executable's path."""
+def _compile_link(tmp, todo, objs, exe, flags, inc, quiet):
+    """Compile each (source, object) of `todo` and link `objs` into exe,
+    directly or through msys2's shell, whichever this machine needs."""
+    global _mode
+    cc = (os.environ.get("CC") or shutil.which("cc") or shutil.which("gcc")
+          or shutil.which("clang"))
+    ok, err, direct_err = False, "", ""
+    if cc and _mode != "msys":
+        ok, err = _compile_direct(cc, flags, todo, exe, objs, inc)
+        if ok and todo:
+            _mode = "direct"
+        elif not ok:
+            direct_err = err
+    if not ok and _mode != "direct" and MSYS_BASH.exists():
+        ok, err = _compile_msys(tmp, flags, todo, exe, objs, inc)
+        if not ok:
+            _fail(err, "compile failed (msys2 bash)", quiet)
+        if todo:
+            _mode = "msys"
+    if not ok:
+        if not cc:
+            sys.exit("no host C compiler found (set CC)")
+        _fail(direct_err or err, "compile failed", quiet)
+    if err.strip() and not quiet:
+        print("compiler warnings:" + NL + err.rstrip())
+
+
+def build_objects(tmp, todo, objs, name="hosttest", flags=None, inc=None,
+                  quiet=False):
+    """Compile each (source, object) pair of `todo`, with `inc` as the
+    include path (default `3DS Files/source`), and link the objects `objs`
+    into `tmp`. Nothing is cached. mutpar builds its snapshot of the tree
+    with this, and each mutant from the snapshot's objects."""
+    flags = list(flags or FLAGS)
+    exe = Path(tmp) / (name + (".exe" if os.name == "nt" else ""))
+    _compile_link(Path(tmp), [(Path(s), Path(o)) for s, o in todo],
+                  [Path(o) for o in objs], exe, flags,
+                  [Path(d) for d in (inc or [SRC])], quiet)
+    return exe
+
+
+def build(tmp, sources, name="hosttest", flags=None, quiet=False):
+    """Compile `sources` into `tmp`, returning the executable's path.
+    `quiet` keeps the warnings and a failed compile's errors to itself, for
+    mutpar's mutants, many of which build at once."""
     recover()
     flags = list(flags or FLAGS)
     srcs = [Path(s) if Path(s).is_absolute() else (ROOT / s) for s in sources]
@@ -375,7 +399,7 @@ def build(tmp, sources, name="hosttest", flags=None):
             sys.exit("no such source: %s" % s)
     exe = Path(tmp) / (name + (".exe" if os.name == "nt" else ""))
     if not os.environ.get("HOSTBUILD_NO_CACHE"):
-        return _build_cached(tmp, srcs, exe, flags)
+        return _build_cached(tmp, srcs, exe, flags, quiet)
     direct_err = ""
 
     cc = (os.environ.get("CC") or shutil.which("cc") or shutil.which("gcc")

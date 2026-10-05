@@ -22,11 +22,17 @@
 //   msg|MSG|ITEM|PORT|PARAM|NOISE   SelectCarScreenCallback
 //   joy|PORT|EV|PRESSED    the JoyHandler, as AddJoyHandler delivers it
 //   preload, close
+//   tex|MODE               GetTextureInfo's answer: 0 none, 1 a swatch, 2 one
+//                          with no image, 3 no palette size, 4 no palette
+//   solid|V                the Solid eModel::Init gives the next model
+//   blend|I|V              selector I's camera's Blend
+//   frame|SIZE             a fresh frame-malloc buffer of SIZE bytes
 //
 // After each msg, joy, preload and close every line that changed: the
-// screen, each selector's fields, cars, unlock box and thumbnail row, the
-// preload, the CarLoader's two flags, the players' settings and every
-// Flailer object's bytes. The hooks log their calls in the model's stubs'
+// screen, each selector's fields, cars, unlock box and thumbnail row, its
+// two rendering cars and its camera, the frame buffer, the preload, the
+// CarLoader's two flags, the players' settings and every Flailer object's
+// bytes. The hooks and the 3D seams log their calls in the model's stubs'
 // words.
 #include <stddef.h>
 #include <stdint.h>
@@ -37,11 +43,16 @@
 #include "bcarsel.h"
 #include "bui.h"
 #include "cartypeinfo.h"
+#include "eframe.h"
+#include "elight.h"
+#include "emodel.h"
 #include "flailer.h"
 #include "fred.h"
 #include "fredrace.h"
 #include "nfsrewards.h"
 #include "realtime.h"
+#include "scenerycull.h"
+#include "texturepack.h"
 
 #define MAX_LOADS  4
 #define NUM_ARGS   48
@@ -355,20 +366,22 @@ static uint32_t fbits(float f)
     return v;
 }
 
+static void hex_bytes(char *out, const uint8_t *p, int n)
+{
+    static const char digits[] = "0123456789abcdef";
+    for (int i = 0; i < n; i++) {
+        *out++ = digits[p[i] >> 4];
+        *out++ = digits[p[i] & 15];
+    }
+    *out = 0;
+}
+
 static void h_rtext(void *u, uint32_t screen, uint32_t obj, uint32_t rect,
                     const char *text, float scale)
 {
     (void)u;
     printf("  rtext %08x %08x %08x \"%s\" %08x\n", (unsigned)screen,
            (unsigned)obj, (unsigned)rect, text, (unsigned)fbits(scale));
-}
-
-static void h_show(void *u, int player, const RideInfo *r)
-{
-    char t[64];
-    (void)u;
-    ride_text(t, r);
-    printf("  show %s player %d\n", t, player);
 }
 
 static void h_speak(void *u, int32_t type, int cop, int hp)
@@ -406,6 +419,156 @@ static void h_stop_movie(void *u)
 {
     (void)u;
     printf("  stopmovie\n");
+}
+
+// ------------------------------------------------------------ the 3D seams
+
+// The rendering cars, the camera, the models, the light and the textures
+// are stubbed, here as in the model. The constructors only clear and keep
+// the view; the camera's setters keep what they are given, raw.
+
+uint8_t *CurrentBufferPos;
+uint8_t *CurrentBufferEnd;
+int32_t  FrameMallocFailed;
+uint32_t FrameMallocFailAmount;
+static uint8_t *frameBase;
+
+void (*gEModelRenderFn)(eModel *m, bMatrix4 *matrix, void *light,
+                        uint32_t flags);
+
+static uint32_t solidNext = 1;
+static int      texMode = 1;
+
+void fecar_init(FrontEndRenderingCar *f, RideInfo *ride, int32_t view_id)
+{
+    memset(f, 0, sizeof *f);
+    f->ViewID = view_id;
+    printf("  fecar init view %d ride %d\n", (int)view_id, ride != NULL);
+}
+
+void fecar_reinit(FrontEndRenderingCar *f, RideInfo *ride)
+{
+    char t[64];
+    ride_text(t, ride);
+    printf("  reinit %s view %d ride %s\n", f->Reflection ? "refl" : "car",
+           (int)f->ViewID, t);
+}
+
+void fecar_delete(FrontEndRenderingCar *f, int32_t flags)
+{
+    (void)flags;
+    printf("  fecar delete %s view %d model %d\n",
+           f->Reflection ? "refl" : "car", (int)f->ViewID, f->pModel != NULL);
+}
+
+void selcam_init(SelectCarCameraMover *o, int viewID)
+{
+    memset(o, 0, sizeof *o);
+    printf("  cam init view %d\n", viewID);
+}
+
+void selcam_destroy(SelectCarCameraMover *o)
+{
+    (void)o;
+    printf("  cam delete\n");
+}
+
+void selcam_set_mode(SelectCarCameraMover *o, int32_t mode)
+{
+    (void)o;
+    printf("  cam mode %d\n", (int)mode);
+}
+
+void selcam_set_radius_stats(SelectCarCameraMover *o, float r)
+{
+    o->RadiusStats = r;
+}
+
+void selcam_set_offset_stats(SelectCarCameraMover *o, const bVector3 *v)
+{
+    o->OffsetStats.x = v->x;
+    o->OffsetStats.y = v->y;
+    o->OffsetStats.z = v->z;
+}
+
+void selcam_set_offset_orbit(SelectCarCameraMover *o, const bVector3 *v)
+{
+    o->OffsetOrbit.x = v->x;
+    o->OffsetOrbit.y = v->y;
+    o->OffsetOrbit.z = v->z;
+}
+
+void selcam_set_fov_stats(SelectCarCameraMover *o, uint16_t fov)
+{
+    o->FOVStats = fov;
+}
+
+void selcam_set_orientation_stats(SelectCarCameraMover *o, uint16_t angle,
+                                  uint16_t tilt)
+{
+    o->AngleZ = angle;
+    o->TiltStats = tilt;
+}
+
+void emodel_init(eModel *m, uint32_t name_hash)
+{
+    m->NameHash = name_hash;
+    m->Solid = (void *)(uintptr_t)solidNext;
+    printf("  model init %08x\n", (unsigned)name_hash);
+}
+
+void emodel_uninit(eModel *m)
+{
+    printf("  model uninit %08x\n", (unsigned)m->NameHash);
+    m->Solid = NULL;
+}
+
+void emodel_delete(eModel *m, int32_t flags)
+{
+    (void)flags;
+    printf("  model delete %08x\n", (unsigned)m->NameHash);
+}
+
+static void h_render(eModel *m, bMatrix4 *matrix, void *light,
+                     uint32_t flags)
+{
+    char text[160];
+    hex_bytes(text, (const uint8_t *)matrix, 64);
+    printf("  model render %08x at %ld light %d flags %u matrix %s\n",
+           (unsigned)m->NameHash, (long)((uint8_t *)matrix - frameBase),
+           light != NULL, (unsigned)flags, text);
+}
+
+void el_set_select_car_lighting(int32_t view_id, int32_t locked,
+                                float bright)
+{
+    printf("  light %d %d %08x\n", (int)view_id, (int)locked,
+           (unsigned)fbits(bright));
+}
+
+// A swatch: its fourth texel the hash's bits 4..6, a palette of eight
+// colours from the hash's three high bytes.
+TextureInfo *GetTextureInfo(uint32_t hash, int use_default,
+                            int include_unloaded)
+{
+    static TextureInfo ti;
+    static uint8_t     image[4], palette[32];
+
+    (void)include_unloaded;
+    printf("  tex %08x %d\n", (unsigned)hash, use_default);
+    if (texMode == 0) return NULL;
+    memset(&ti, 0, sizeof ti);
+    image[3] = (uint8_t)((hash >> 4) & 7);
+    for (int k = 0; k < 8; k++) {
+        palette[4 * k] = (uint8_t)((hash >> 8) + 37u * (uint32_t)k);
+        palette[4 * k + 1] = (uint8_t)((hash >> 16) + 59u * (uint32_t)k);
+        palette[4 * k + 2] = (uint8_t)((hash >> 24) + 83u * (uint32_t)k);
+        palette[4 * k + 3] = 0x80;
+    }
+    ti.ImageData = texMode == 2 ? NULL : image;
+    ti.PaletteSize = texMode == 3 ? 0 : 32;
+    ti.PaletteData = texMode == 4 ? NULL : palette;
+    return &ti;
 }
 
 // ------------------------------------------------------- Flailer's seams
@@ -565,6 +728,31 @@ static void status_name(char *out, const CarStatus *st)
     strcpy(out, "stray");
 }
 
+// A rendering car: its flags, model, lights, place and body on one line,
+// its wheels' matrices on another.
+static void dump_fecar(const char *key, const CarSelector *c,
+                       const FrontEndRenderingCar *f)
+{
+    static char text[2048];
+    char        k[16];
+    char       *o = text;
+
+    o += sprintf(o, "en %d refl %d model %s lights %d %d pos %08x %08x %08x ",
+                 (int)f->Enabled, (int)f->Reflection,
+                 !f->pModel                ? "0"
+                 : f->pModel == &c->cover ? "cover"
+                                           : "stray",
+                 (int)f->Headlights, (int)f->CopLights,
+                 (unsigned)fbits(f->Position.x), (unsigned)fbits(f->Position.y),
+                 (unsigned)fbits(f->Position.z));
+    hex_bytes(o, (const uint8_t *)&f->BodyMatrix, 64);
+    note(key, text);
+    snprintf(k, sizeof k, "%sw", key);
+    hex_bytes(text, (const uint8_t *)f->TireMatrices, 256);
+    hex_bytes(text + 512, (const uint8_t *)f->BrakeMatrices, 256);
+    note(k, text);
+}
+
 static void dump_selector(int i, const CarSelector *c)
 {
     static char text[8192];
@@ -629,9 +817,28 @@ static void dump_selector(int i, const CarSelector *c)
                      (unsigned)c->swatchHash[k], (unsigned)c->swatchColour[k]);
     note(key, text);
 
-    snprintf(key, sizeof key, "orbitspeed%d", i);
-    snprintf(text, sizeof text, "%08x %08x", (unsigned)fbits(c->orbitSpeedX),
-             (unsigned)fbits(c->orbitSpeedY));
+    snprintf(key, sizeof key, "fe%d", i);
+    dump_fecar(key, c, &c->car);
+    snprintf(key, sizeof key, "fr%d", i);
+    dump_fecar(key, c, &c->reflection);
+
+    snprintf(key, sizeof key, "cam%d", i);
+    {
+        const SelectCarCameraMover *m = &c->mover;
+        snprintf(text, sizeof text,
+                 "blend %08x angle %d tilt %d radius %08x off %08x %08x %08x "
+                 "orbit %08x %08x %08x fov %d desired %08x %08x",
+                 (unsigned)fbits(m->Blend), (int)m->AngleZ, (int)m->TiltStats,
+                 (unsigned)fbits(m->RadiusStats),
+                 (unsigned)fbits(m->OffsetStats.x),
+                 (unsigned)fbits(m->OffsetStats.y),
+                 (unsigned)fbits(m->OffsetStats.z),
+                 (unsigned)fbits(m->OffsetOrbit.x),
+                 (unsigned)fbits(m->OffsetOrbit.y),
+                 (unsigned)fbits(m->OffsetOrbit.z), (int)m->FOVStats,
+                 (unsigned)fbits(m->DesiredHorizSpeed),
+                 (unsigned)fbits(m->DesiredVertSpeed));
+    }
     note(key, text);
 }
 
@@ -656,6 +863,10 @@ static void dump(void)
     snprintf(text, sizeof text, "%d %d", (int)loaderFlags[0],
              (int)loaderFlags[1]);
     note("carloader", text);
+    snprintf(text, sizeof text, "used %ld failed %d amount %u",
+             (long)(CurrentBufferPos - frameBase), (int)FrameMallocFailed,
+             (unsigned)FrameMallocFailAmount);
+    note("frame", text);
     for (int i = 0; i < 2; i++) {
         char key[8];
         snprintf(key, sizeof key, "pl%d", i);
@@ -797,7 +1008,19 @@ static void run(char *line)
         printf("  data %d %d\n", (int)d.param, (int)d.noise);
     } else if (!strcmp(a[0], "joy"))
         bcarsel_joy(inum(a[1]), inum(a[2]), (uint8_t)num(a[3]));
-    else if (!strcmp(a[0], "preload")) bcarsel_preload();
+    else if (!strcmp(a[0], "tex")) texMode = inum(a[1]);
+    else if (!strcmp(a[0], "solid")) solidNext = num(a[1]);
+    else if (!strcmp(a[0], "blend"))
+        module.screen->selectors[inum(a[1])]->mover.Blend = fnum(a[2]);
+    else if (!strcmp(a[0], "frame")) {
+        uint32_t size = num(a[1]);
+        free(frameBase);
+        frameBase = size ? (uint8_t *)calloc(size, 1) : NULL;
+        CurrentBufferPos = frameBase;
+        CurrentBufferEnd = frameBase ? frameBase + size : NULL;
+        FrameMallocFailed = 0;
+        FrameMallocFailAmount = 0;
+    } else if (!strcmp(a[0], "preload")) bcarsel_preload();
     else if (!strcmp(a[0], "close")) bcarsel_close_screen();
     else {
         printf("  no op %s\n", a[0]);
@@ -822,6 +1045,7 @@ int main(int argc, char **argv)
     gFlailerTextScaledWidthFn = text_w;
     gFlailerTextScaledHeightFn = text_h;
     gFlailerBitmapTextureSizeFn = texture_size;
+    gEModelRenderFn = h_render;
 
     for (int i = 0; i < NUM_CARS; i++) {
         loadedAns[i] = 1;
@@ -847,7 +1071,6 @@ int main(int argc, char **argv)
     h.eggActive = h_egg;
     h.formatUnlockBlurb = h_blurb;
     h.renderTextIntoRectangle = h_rtext;
-    h.showLoadedCar = h_show;
     h.speakCar = h_speak;
     h.speechFade = h_fade;
     h.soundEnabled = h_sound_enabled;

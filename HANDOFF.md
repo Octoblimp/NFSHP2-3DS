@@ -13694,3 +13694,73 @@ session finished it, then started on the car itself.
 - **`docs/formats/car-select.md`** has "The turntable car".
   **`docs/formats/light.md`** has "In the frontend", in place of the
   note that it wasn't ported.
+
+### SC-2c, the selector's 3D
+
+- **`bcarsel.c` drives the 3D now.** The selector keeps the car, its
+  reflection, the CARCOVER and PLATFORM models and the camera inside
+  itself, where retail keeps pointers. Here is what each part does:
+  - The constructor builds them.
+  - The Tick sets the camera, the cars' matrices
+    (UpdateRenderingCarParameters) and the light.
+  - ShowLoadedCar ReInits both cars, and UpdateCarCover puts the cover
+    on them.
+  - RENDER draws the platform from frame memory.
+  - The destructor takes the cover off before deleting the cars.
+  - The JoyHandler's orbit speeds go to the camera.
+  The showLoadedCar hook is gone.
+- **The spotlights are dead code in retail**, so they are not ported.
+  InitSpotlights' copies of BRUSHEDMETAL are never read, and
+  UpdateSpotlight is empty.
+- **`carsel_check` covers it.** The 3D calls are stubs that log the
+  same on both sides. The dump adds both cars, the camera and the frame
+  buffer. The run found two things:
+  - The model never ran selectcar.cpp's static initializer, so retail's
+    camera offsets were 0. It runs now, with FlailerScreenConfig's
+    constructor silent.
+  - Retail lights a car whose swatch has no palette size. Its test is
+    TextureInfo's "loaded" test, and then it reads the palette anyway.
+    The port now tests for an image and palette data. A texture with no
+    palette data at all would have retail read address 0; the port
+    gives it no light.
+  - The light's cheat went untested. No kind of car list ever listed a
+    hidden car with AllCarsAvailableInCarSelectScreen set, so a mutant
+    that dropped the cheat from the light's test survived. The cheat's
+    single race now lists every status (kind_c, by type % 7), and its
+    ride is a locked car.
+- **The checker agrees with retail:** 7373 ops, 459051 lines, 0 differ.
+  The mutation pass catches 264 of 273. Nine are equivalent: SC-1's
+  five, and four of SC-2c's, each argued in EQUIVALENT:
+  - `urcp-flip-y`: the identity's v0.y is 0, and eRotateZ's sums lose
+    the sign of the -0;
+  - `urcp-tire-roll`: eRotateY by 0 is an exact identity;
+  - `urcp-wheel-w`: eIdentity already put 1 in the brake's v3.w;
+  - `light-one-skin`: a one-skin car's index can only be 0.
+- **Mutation passes are quicker: `tools/mutpar.py`.** The user asked
+  for it: a two-hour pass doesn't fit in a session. carsel, selcam and
+  fecar use it now:
+  - The model's transcript is cached under a sha256 of the checker up
+    to its mutations and of every source and header. A pass after an
+    EQUIVALENT-only edit skips the model.
+  - Once the model is done, a snapshot copies the sources and every
+    header in `3DS Files/source` into a temporary directory and builds
+    them once. That build has to give the base transcript, or the pass
+    stops.
+  - Each mutant is built from the snapshot, never the tree. A source
+    mutant compiles one file and links with the snapshot's objects; a
+    header mutant compiles a whole copy of the snapshot. So the tree
+    may be edited and built while the mutants run.
+  - Up to sixteen mutants build and run at once, and the lines print
+    in the pass's order.
+  - `hostbuild.build_objects` builds uncached objects with a chosen
+    include path, and hostbuild's object cache key now covers every
+    header, so a header edit can't reuse a stale object.
+  carsel's pass took 11m42s, about 8 minutes of it the model (it was
+  24 minutes); fecar's takes 25 s and selcam's 43 s.
+- **The build is clean, and Azahar runs car select** through a car
+  change, a skin, the transmission popup and back, with no abort. It
+  looks as it did: 2D only.
+- **On the device nothing draws yet.** render_model returns outside the
+  race's draw. The CarRenderInfos are built and the light table is set
+  each tick.
+- **`docs/formats/car-select.md`** has "The selector's 3D (SC-2c)".

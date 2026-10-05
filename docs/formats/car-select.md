@@ -229,18 +229,16 @@ FRONTB's Flailer chunk and GLOBALB's car records and skins.
 The stubs are scripted the same on both sides and log in the same
 words: the translations, the sounds, the help, the popups, the screen
 changes, the CarLoader, the easter eggs, the event trees, the text in
-its rectangle, ShowLoadedCar, the commentary and AssignCarOfType. The
-3D car, the camera mover, the platform, the lighting, the spotlights
-and the nebula are silent. GetTextureInfo answers 0: its only callers
-are the tick's swatch texture, which feeds only SetSelectCarLighting,
-and InitSpotlights, which does nothing without its texture.
+its rectangle, the commentary and AssignCarOfType. The 3D's stubs are
+SC-2c's (its "The checker" below). The spotlights and the nebula are
+silent.
 
 After each message, joy event, preload and close, every line that
 changed is printed:
 - the screen and each selector's fields;
 - the car list in order;
 - the unlock box, the thumbnail spline and the swatches;
-- the camera's two orbit speeds;
+- both rendering cars, the camera's fields and the frame buffer;
 - the preload's two cars and the CarLoader's flags;
 - both players' gearbox and handling;
 - every Flailer object's bytes.
@@ -255,12 +253,15 @@ the help menu up, both units and all three languages.
 
 The model is slow: a tick costs about 170 ms in mipsemu, most of it
 retail's bSPrintf and FindFlailerObject for the 25 cloaks. The whole
-script takes about seven minutes. The mutation pass runs the model once
-and each mutant's harness in about two seconds.
+script takes about eight minutes. The mutation pass runs the model once,
+and keeps its transcript for the next pass as long as the checker above
+its mutations and the sources are unchanged. The mutants build from a
+snapshot of the sources and run sixteen at a time (tools/mutpar.py);
+the whole pass takes about twelve minutes.
 
-The script is 7282 ops and 430239 lines, with 0 differ. The mutation
-pass catches 196 of 201 mutations. The other five can't change the
-transcript:
+At SC-1 the script was 7282 ops and 430239 lines, with 0 differ. The
+mutation pass caught 196 of 201 mutations. The other five can't change
+the transcript:
 - `slide-init-start`: the constructor's unlockSetCar sets the slide up
   again from 650 before anything reads it.
 - `unlock-render-avail` and `unlock-joy-avail`: the box is at state 2
@@ -415,7 +416,9 @@ enabled car of the view that has a CarRenderInfo:
 - **Any other car** draws when `cars` is set, and its flags start at 0.
 - **Flag 8** joins when `pass8` is 0, and **flag 16** when `pass16` is.
   Either also joins when its force flag (gp-23596, gp-23600) is set.
-  What 8 and 16 mean isn't known; the port's renderer ignores them.
+  RenderStrips (`0x0010de10`) reads them: flag 16 skips a solid's
+  alpha strips, and flag 8 skips its solid ones. So a car can be drawn
+  in two halves. The port's renderer doesn't read them yet.
 - **A car with its own eModel** draws that with the body matrix, and
   nothing else.
 - **Otherwise the car is centred:** it moves in x by the middle of its
@@ -427,11 +430,22 @@ RenderFrontEndCar sets ForceCarLOD and ForceTireLOD to 0, or to 1 for a
 reflection, and calls CarRenderInfo::Render. Afterwards it puts each one
 back, unless Render changed it.
 
-eDisplayFrame calls RenderFrontEndCars four times a frame:
-- (view, 1, 0, 1, 0) at `0x00112c1c` and `0x00112d2c`, for the
-  environment map's faces;
-- (view, 0, 1, 1, 1) at `0x001136bc`, for the reflections;
-- (view, 1, 0, 0, 1) at `0x001136d4`, for the cars, after RenderCars.
+eDisplayFrame calls RenderFrontEndCars four times a frame. The first
+two run only in the frontend (CurrentGameFlowState 3), for views 1 and
+2:
+- (view, 1, 0, 1, 0) at `0x00112c1c` draws the cars' solid strips
+  (flag 16), before anything else in the view.
+- The same call at `0x00112d2c` draws them again into the second
+  target of the optional antialiasing pass.
+- (view, 0, 1, 1, 1) at `0x001136bc` draws the reflections, after the
+  platform and the effects.
+- (view, 1, 0, 0, 1) at `0x001136d4` draws the cars' alpha strips
+  (flag 8). These go in with the platform's and the effects' alpha
+  polygons.
+
+None of the four is for the environment map's faces. In the frontend
+the cars' environment map is the texture CARSELECTENVMAP (hash
+`0x4ecc769c`).
 
 ### The lighting
 
@@ -495,3 +509,158 @@ The script covers:
 It is 7 scenarios, 1439 ops and 13217 lines, with 0 differ. The
 mutation pass catches 124 of 125. The other, `rfcs-unused-arg`, can't
 show: RenderFrontEndCar never reads its seventh argument.
+
+## The selector's 3D (SC-2c)
+
+The selector drives the camera, the two cars, the cover, the platform
+and the light from its constructor, Tick, RENDER and destructor.
+
+| function | address | port |
+|----------|---------|------|
+| UpdateCarCover | `0x00195c40` | `updateCarCover` |
+| UpdateRenderingCarParameters | `0x00197ce0` | `updateRenderingCarParameters` |
+| ShowLoadedCar | `0x00197ff8` | `showLoadedCar` |
+| the Tick's light | `0x001970b0` .. `0x0019729c` | `updateLighting` |
+| InitSpotlights, UpdateSpotlight | `0x00194fd0`, `0x00196038` | not ported |
+
+Retail bMallocs the two cars and the camera mover and keeps pointers to
+them at c[36], c[40] and c[188]. The port keeps them inside the
+selector.
+
+**The constructor** adds these, after the joy handlers:
+- Two FrontEndRenderingCars for view `playerNum`, with no ride. The
+  second is the reflection, with Reflection and Enabled at 1.
+- The CARCOVER eModel at c+44, which is Init'd from its name's hash
+  only while it has no Solid.
+- The SelectCarCameraMover, for view `playerNum`.
+- SetSelectCarLighting(playerNum, 0, 0.0), after the info bar.
+- The PLATFORM eModel at c+164, after the help, also only while it has
+  no Solid.
+- The cars' headlights and cop lights (c[380], c[384]), at 0.
+
+**The Tick sets the camera** every frame, after the turntable turns:
+
+| | one player | two players |
+|-|------------|-------------|
+| RadiusStats | 12.93 (gp-20040) | 16.5 (gp-20036) |
+| OffsetStats | (0.27398, 0, -0.53), `0x00310200` | (-0.62, 0, -1.05), `0x003341c0` |
+| tilt | 15262 (gp-20044) | 15654 |
+
+Both use OffsetOrbit (0, 0, -0.6384) at `0x003341b0`, heading 0
+(gp-20108) and FOV c[226]. selectcar.cpp's static initializer
+(`0x00198bc8`) writes the three offsets. After the shown mode, the Tick
+calls UpdateRenderingCarParameters for the car with 0 and the
+reflection with 1. Then come the fade groups and the light.
+
+The camera's mode follows the selector's. Going into the orbit view
+sets it to orbit. Going back to choosing sets it to stats, by the
+button or by the timeout. The JoyHandler's directions set the mover's
+DesiredHorizSpeed (+152) and DesiredVertSpeed (+160).
+
+**UpdateRenderingCarParameters(car, reflection)** does nothing without
+a loaded car. With one:
+- The body sits at (0, 0, z). z is the first wheel's radius less its
+  height, plus 0.01 (gp-23740). A reflection sits at −z.
+- The body matrix is the identity, turned in Z by the turntable's
+  angle. A reflection's has the X axis's y and the Z axis's z negated
+  first.
+- Each wheel's tyre and brake matrices are the identity at the wheel's
+  place on the car. Retail turns the tyre in Y by 0. The front two are
+  turned in Z by `(1 − Blend) × 4240` (gp-20106), truncated: steered in
+  the stats view, straight in the orbit.
+- The car's Headlights and CopLights come from c[380] and c[384].
+
+gp-20106 is not past 0x8000, so retail's other blend, for an angle
+that is, never runs. The port leaves it out.
+
+**UpdateCarCover** puts the CARCOVER model on both cars while the chosen
+car is covered, and takes it off otherwise. RenderFrontEndCars draws a
+car's own model in place of the car.
+
+**ShowLoadedCar** ReInits both cars with the loaded car in the skin it
+wears, instance 0, no dash. Retail also asks GetSkinInfo for the skin
+and drops the answer.
+
+**The light** (`0x001970b0` .. `0x0019729c`):
+- The swatch is the first with one skin, or the one worn.
+- GetTextureInfo gives its colour texture, with the default allowed.
+- On a car that isn't covered, with the texture loaded, the colour is
+  the palette's entry for the fourth texel. Loaded means it has an image,
+  and palette data unless its palette's size is 0. Retail then reads the
+  palette anyway, so a texture with no palette size still lights the
+  car. One with no palette data at all would have retail read from
+  address 0. The port tests for an image and palette data, and gives
+  that texture no light.
+- `bright` is `(1 − (0.299 r + 0.587 g + 0.114 b) / 255)^4`, and 0
+  otherwise.
+- `locked` is as "The lighting" above has it.
+
+**RENDER** frame-mallocs a matrix, sets it to the identity and draws
+PLATFORM with it, with no light context and flags 0. With no frame
+memory left it draws nothing. Then the unlock box draws its blurb.
+
+**The destructor**, after the popup:
+1. UnInits the platform if it has a Solid.
+2. Closes the swatches, runs the preload twice and unloads the cars.
+3. Takes the cover off both cars, whose destructor would delete it.
+4. Deletes the camera, the car and the reflection.
+5. UnInits the cover if it has a Solid.
+6. Stops sound 12 and puts the slide back.
+7. Destroys the platform's model, puts the three fades back and
+   destroys the cover's.
+
+**The spotlights are dead code.** InitSpotlights copies BRUSHEDMETAL's
+alpha and colour channels into gp-20084 and gp-20080, and nothing reads
+them. UpdateSpotlight is empty. The constructor's two buffers the size
+of the spotlight's (c[316], c[320]) and its two 1.0s (c[324], c[328])
+are never read either. The port has none of them.
+
+**On the device nothing draws yet.** render_model returns outside the
+race's draw, and gElInFrontendFn and gElCarSelectActiveFn are still
+NULL. ShowLoadedCar does build the two CarRenderInfos, and the light
+table is set every tick. SC-2d draws them.
+
+### The checker
+
+`carsel_check` covers all of it. Its 3D stubs log the same on both
+sides:
+- the FrontEndRenderingCars' constructor, which only clears and keeps
+  the view, ReInit and destructor;
+- the camera's constructor, destructor and SetMode, and its five
+  setters, which keep what they are given;
+- eModel's Init (its Solid scripted), UnInit, destructor and Render;
+- SetSelectCarLighting;
+- GetTextureInfo, which answers each swatch with a texture made from
+  its hash, or with nothing, no image, no palette size or no palette.
+
+UpdateRenderingCarParameters, UpdateCarCover, ShowLoadedCar, the light's
+sum, eIdentity, the rotations and the frame-malloc run for real, over
+a scripted buffer. Retail's static initializer runs first, with
+FlailerScreenConfig's constructor stubbed silent. The dump adds both
+cars (flags, model, lights, place and every matrix), the camera's
+fields and the frame buffer.
+
+The script adds:
+- the camera's blend at 0.5, 1, 0.3 and 0, for one player and two;
+- the platform with no frame buffer, one just too small, room for one
+  and room for two;
+- each kind of missing swatch texture;
+- two locked cars, one lit by an easter egg;
+- models with no Solid.
+
+The whole script is now 7373 ops and 459051 lines, with 0 differ. The
+light needed one more kind of car list: the old kinds never listed a
+hidden car with AllCarsAvailableInCarSelectScreen set, so a mutant that
+dropped the cheat from the light's test survived. The cheat's
+single race now lists every status, and its ride is a locked car.
+
+The mutation pass catches 264 of 273 mutations. Nine can't change the
+transcript: SC-1's five above, and four of SC-2c's:
+- `urcp-flip-y`: the identity's v0.y is 0, and eRotateZ's sums lose the
+  sign of the -0 the flip makes.
+- `urcp-tire-roll`: eRotateY by 0 multiplies by an exact identity, since
+  the table's sine of 0 is 0 and its cosine 1.
+- `urcp-wheel-w`: eIdentity has already put 1 in the brake's v3.w, and
+  eRotateZ leaves row 3 alone.
+- `light-one-skin`: SetSkin, NextSkin and PrevSkin can only leave a
+  one-skin car's index at 0.

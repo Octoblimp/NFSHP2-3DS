@@ -33,7 +33,10 @@ Every car starts from a byte pattern, so what a call leaves alone shows.
 A float prints as its bits, a NaN as "nan", and a pointer by what it is.
 
     python tools/fecar_check.py
-    python tools/fecar_check.py --mutate [--only a,b]
+    python tools/fecar_check.py --mutate [--only a,b] [--jobs N]
+
+The model's transcript is cached, and --mutate builds and runs its
+mutants out of the tree, several at once (tools/mutpar.py).
     python tools/fecar_check.py --dump out/fecar
 """
 
@@ -44,10 +47,12 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hostbuild
+import mutpar
 import physicscar_check as pcc
 import retail_model
 from mipsemu import M32, f_to_bits, s32
@@ -784,6 +789,17 @@ class Model(object):
 # ================================================================ the build
 
 
+# The line the mutations start at, spelt so that this one does not match.
+MUTATIONS_HEADER = "# " + "=" * 60 + " the mutations" + NL
+
+
+def model_cached(sc):
+    """Model().run(sc), or its last transcript when nothing it reads has
+    changed (tools/mutpar.py)."""
+    return mutpar.model_cached(sc, lambda s: Model().run(s),
+                               cut=MUTATIONS_HEADER)
+
+
 def build_harness(tmp, name="fecar_test"):
     return hostbuild.build(tmp, SOURCES, name=name)
 
@@ -1044,98 +1060,37 @@ EQUIVALENT = {
 }
 
 
-def mutate_pass(only=None):
+def mutate_pass(only=None, jobs=None):
     todo = [m for m in MUTATIONS if only is None or m[0] in only]
     if only:
         unknown = set(only) - {m[0] for m in MUTATIONS}
         if unknown:
             print("no such mutation: %s" % ", ".join(sorted(unknown)))
             return 1
-    hostbuild.recover()
-    m = Model()
     sc = script()
-    base = m.run(sc)
-    caught, survived, missing, equivalent = 0, [], [], []
+    base = model_cached(sc)
     scdir = tempfile.TemporaryDirectory()
     scp = Path(scdir.name) / "scenarios.txt"
     scp.write_text(encode(sc))
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
         out = Path(tmp) / "base.txt"
+        t0 = time.monotonic()
         run_harness(exe, scp, out)
-        if diff(base, out.read_text().splitlines(), quiet=True):
+        took = time.monotonic() - t0
+        got = out.read_text().splitlines()
+        if diff(base, got, quiet=True):
             print("base already differs -- fix that before mutating")
             return 1
+        print("base: %d lines, 0 differ" % len(got), flush=True)
 
-    for mut in todo:
-        name, rel, before, after = mut
-        path = ROOT / rel
-        text = path.read_text(encoding="utf-8", newline="")
-        crlf = "\r\n" in text
-        probe = before.replace(NL, "\r\n") if crlf else before
-        repl = after.replace(NL, "\r\n") if crlf else after
-        if text.count(probe) != 1:
-            missing.append(name)
-            print("  %-44s PATTERN %s" % (
-                name, "NOT FOUND" if not text.count(probe) else "NOT UNIQUE"))
-            continue
-        new = text.replace(probe, repl, 1)
-        try:
-            hostbuild.write_source(path, new)
-            with tempfile.TemporaryDirectory() as tmp:
-                try:
-                    exe = build_harness(tmp)
-                except SystemExit:
-                    print("  %-44s did not compile (caught)" % name)
-                    caught += 1
-                    continue
-                out = Path(tmp) / "m.txt"
-                rc = run_harness(exe, scp, out)
-                if rc == pcc.HARNESS_HUNG:
-                    print("  %-44s hung the harness (caught)" % name)
-                    caught += 1
-                    continue
-                if rc != 0:
-                    print("  %-44s crashed the harness (caught)" % name)
-                    caught += 1
-                    continue
-                n = diff(base, out.read_text().splitlines(), quiet=True)
-                if n:
-                    print("  %-44s caught, %d lines" % (name, n))
-                    caught += 1
-                elif name in EQUIVALENT:
-                    print("  %-44s survived, equivalent by construction"
-                          % name)
-                    equivalent.append(name)
-                else:
-                    print("  %-44s SURVIVED" % name)
-                    survived.append(name)
-        finally:
-            try:
-                hostbuild.write_source(path, text)
-            except OSError:
-                sys.exit("could not restore %s -- it still holds the "
-                         "mutation %s. Put the original line back before "
-                         "trusting anything printed above." % (rel, name))
+    limit = mutpar.timeout_for(took)
+    tally = mutpar.run_pass(
+        todo, SOURCES, "fecar_test",
+        lambda exe, out: mutpar.run_exe([exe, scp], out, limit),
+        base, diff, EQUIVALENT, jobs)
     scdir.cleanup()
-
-    real = [m for m in todo if m[0] not in missing]
-    holes = [s for s in survived if s not in EQUIVALENT]
-    ran = {m[0] for m in todo}
-    stale = [n for n in EQUIVALENT
-             if n not in equivalent and n not in missing
-             and (n in ran or only is None)]
-    if missing:
-        print("%d PATTERN NOT FOUND -- the tally above is over %d of %d"
-              % (len(missing), len(real), len(todo)))
-    print("%d mutations, %d caught, %d equivalent, %d unexplained"
-          % (len(real), caught, len(equivalent), len(holes)))
-    for name in holes:
-        print("  unexplained: %s" % name)
-    for name in stale:
-        print("  listed as equivalent but %s: %s"
-              % ("caught" if name in ran else "names no mutation", name))
-    return 1 if (holes or missing or stale) else 0
+    return mutpar.summarize(todo, only, EQUIVALENT, tally)
 
 
 def main():
@@ -1143,15 +1098,18 @@ def main():
     ap.add_argument("--mutate", action="store_true")
     ap.add_argument("--only", metavar="NAME,...",
                     help="with --mutate, only these mutations")
+    ap.add_argument("--jobs", type=int, metavar="N",
+                    help="with --mutate, mutants at once (default %d)"
+                    % mutpar.JOBS)
     ap.add_argument("--dump", metavar="PREFIX")
     args = ap.parse_args()
 
     if args.mutate:
-        sys.exit(mutate_pass(args.only.split(",") if args.only else None))
+        sys.exit(mutate_pass(args.only.split(",") if args.only else None,
+                             args.jobs))
 
-    m = Model()
     sc = script()
-    lines = m.run(sc)
+    lines = model_cached(sc)
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
         scp = Path(tmp) / "scenarios.txt"

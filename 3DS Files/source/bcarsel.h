@@ -27,16 +27,21 @@
 // spline. banim.c has the demo's AnimationGroup, whose saved position is a
 // float pair and whose constructor differs; this is retail's.
 //
-// What is left for SC-2 and SC-3, and how it shows here: the car in 3D
-// (FrontEndRenderingCar, the CARCOVER and PLATFORM models, the camera
-// mover, the spotlights and SetSelectCarLighting) and the nebula's
-// AcidEmitters. The selector keeps their fields and runs everything around
-// them; ShowLoadedCar is a hook, and the turntable's angle turns as retail
-// turns it.
+// The car in 3D (SC-2c): each selector keeps its two FrontEndRenderingCars
+// (fecar.c), the car and its reflection; the CARCOVER model, which both
+// wear while the car is covered; the PLATFORM model, the turntable, drawn
+// on each RENDER; and its SelectCarCameraMover (selcam.c). The Tick sets the
+// camera, the cars' matrices (UpdateRenderingCarParameters) and the light
+// (SetSelectCarLighting, elight.c). Retail's spotlights are dead: the
+// BRUSHEDMETAL channels InitSpotlights copies are never read, and
+// UpdateSpotlight is empty, so neither is ported. The nebula's
+// AcidEmitters are SC-3.
 //
 // The Flailer calls are flailer.c's own, so tools/carsel_check.py runs
-// retail's code in mipsemu over the same FRONTB screens. Everything else
-// goes out through BCarSelHooks. Written up in docs/formats/car-select.md.
+// retail's code in mipsemu over the same FRONTB screens. The 3D calls go
+// straight to fecar.c, selcam.c, emodel.c, elight.c and texturepack.c,
+// each checked on its own; everything else goes out through BCarSelHooks.
+// Written up in docs/formats/car-select.md.
 
 #ifndef BCARSEL_H
 #define BCARSEL_H
@@ -48,7 +53,10 @@
 #include "bmenu.h"
 #include "bpopup.h"
 #include "car.h"
+#include "fecar.h"
 #include "fred.h"
+#include "scenery.h"
+#include "selcam.h"
 
 // The two FlailerScreenConfigs' hashes: one player's, and the two-player
 // screen, which is entered once a pad. 0x18dc8e53 is a third layout the
@@ -140,10 +148,6 @@ typedef struct BCarSelHooks {
                                     uint32_t object, uint32_t rect,
                                     const char* text, float scale);
 
-    // ShowLoadedCar (0x00197ff8), SC-2's: the loaded car, in this skin, on
-    // both rendering cars. `player` is 1 or 2.
-    void (*showLoadedCar)(void* user, int player, const RideInfo* ri);
-
     // The commentary: EnterOrbitMode's line about the car (speech
     // events 211 for a cop and 146 for the rest, by ConvertCarType), and
     // speech::mgr_t::fade.
@@ -230,13 +234,18 @@ typedef struct BCarSelUnlock {
     int32_t      hide;         // 356  RealTimer when it was hidden
 } BCarSelUnlock;
 
-// CarSelector, 1024 bytes in retail. The offsets are retail's.
+// CarSelector, 1024 bytes in retail. The offsets are retail's. Retail
+// bMallocs the two rendering cars and the camera mover and keeps
+// pointers; the port keeps them in place.
 typedef struct CarSelector {
     VisibleCarSet set;          //   0
     int32_t     port;           //  20
     int32_t     twoPlayer;      //  24
-    int32_t     playerNum;      //  28  1 or 2
+    int32_t     playerNum;      //  28  1 or 2, the cars' and camera's view
     uint32_t    screen;         //  32
+    FrontEndRenderingCar car;        //  36
+    FrontEndRenderingCar reflection; //  40  Reflection 1
+    eModel      cover;          //  44  CARCOVER, both cars' while covered
     int32_t     fadeMax;        //  68  130
     int32_t     fade;           //  72  the black over the car
     int32_t     allUnlocked;    //  76
@@ -256,17 +265,19 @@ typedef struct CarSelector {
     BCarSelFade fadeA;          // 128  0x0015678f, out as orbit comes in
     BCarSelFade fadeB;          // 140  0x036e80bf, in with orbit
     BCarSelFade fadeC;          // 152  0x0961a600
-    // The camera mover's orbit speeds (its +152 and +160), which the
-    // JoyHandler sets and SC-2's camera reads.
-    float       orbitSpeedX;
-    float       orbitSpeedY;
+    eModel      platform;       // 164  PLATFORM, the turntable
+    SelectCarCameraMover mover; // 188
+    // 192 .. 216: four words the turntable's start sets and nothing reads.
     uint16_t    turnTilt;       // 224
     uint16_t    turnFOV;        // 226
     uint16_t    turnAngle;      // 228  the turntable, 46 a frame
     int32_t     nSwatches;      // 232
     uint32_t    swatchHash[BCARSEL_MAX_SWATCHES];    // 236
     uint32_t    swatchColour[BCARSEL_MAX_SWATCHES];  // 276
+    // 316 .. 328: the spotlights' two buffers and two 1.0s, unread.
     BSpline     thumbs;         // 332  the thumbnail row's X
+    int32_t     headlights;     // 380  the cars' Headlights and CopLights:
+    int32_t     copLights;      // 384  0 from the constructor on
     BCarSelUnlock unlock;       // 652
     const BCarSelHooks* hooks;
 } CarSelector;
@@ -301,6 +312,8 @@ void bcarsel_joy(int port, int32_t event, uint8_t pressed);
 // 0x00194898 (Fred's 0x00183ec0): each player's first car loading before
 // car select is entered. And InitSelectCarScreen / CloseSelectCarScreen,
 // at the frontend's load and unload; Close also unloads the preload.
+// Init only jumps to InitSpotlights, whose copies of BRUSHEDMETAL nothing
+// reads, so it is empty.
 void bcarsel_preload(void);
 void bcarsel_init_screen(void);
 void bcarsel_close_screen(void);

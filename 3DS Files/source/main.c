@@ -2404,14 +2404,6 @@ static void hookCarSelRenderText(void* user, uint32_t screen,
                           (float)flailer_get_width(screen, rect) * sx, 1.0f);
 }
 
-static void hookCarSelShowLoadedCar(void* user, int player,
-                                    const RideInfo* ri)
-{
-    (void)user;
-    logLine("carsel show car %ld skin %d for player %d (3D is SC-2)",
-            (long)ri->Type, (int)ri->SkinNumber, player);
-}
-
 static int32_t hookCarSelLanguage(void* user)
 {
     (void)user;
@@ -3534,7 +3526,6 @@ int main(int argc, char** argv)
     carselHooks.loaderBeginLoading = hookCarSelLoaderBeginLoading;
     carselHooks.renderTextIntoRectangle = hookCarSelRenderText;
     carselHooks.formatUnlockBlurb  = hookCarSelFormatUnlockBlurb;
-    carselHooks.showLoadedCar      = hookCarSelShowLoadedCar;
     carselHooks.language           = hookCarSelLanguage;
     carselHooks.stopMovie          = hookCarSelStopMovie;
     carselHooks.trace              = hookTrace;

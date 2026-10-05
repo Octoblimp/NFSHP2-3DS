@@ -21,13 +21,22 @@ turntable. SC-1 is retail's SelectCarScreen and CarSelector
 and SC-3 the nebula behind it. `docs/formats/car-select.md` has all of
 it.
 
-**SC-1 is done.** `carsel_check` agrees with retail over the whole
-script: 7282 ops, 430239 lines. Its mutation pass catches 196 of 201,
-and the other 5 are equivalent. The checker found that
+**SC-1 is done.** At its end, `carsel_check` agreed with retail over
+the whole script: 7282 ops, 430239 lines. Its mutation pass caught 196
+of 201, and the other 5 are equivalent. SC-2c has grown both since. The checker found that
 `BCARSEL_MAX_FADE` was 48 when FRONTB's fade groups hold up to 103
 objects. It is 128 now, and that is built. The plain run takes about
-seven minutes, most of it the model's 170 ms ticks, so run it in the
+eight minutes, most of it the model's 170 ms ticks, so run it in the
 background.
+
+**Mutation passes are quicker (tools/mutpar.py).** carsel, selcam and
+fecar use it. The model's transcript is cached by a hash of the checker
+above its mutations and of every source and header, so a pass after an
+EQUIVALENT-only edit skips the model. The mutants build from a snapshot
+of the sources taken once the model is done, sixteen at a time, so the
+tree may be edited, and built, while they run. carsel's pass is about
+12 minutes (it was 24), fecar's 25 s, selcam's 43 s. Convert other
+checkers to it as they are touched; selcam_check is the pattern.
 
 **SC-2, in four parts:**
 - **SC-2a, the camera, is done.** `selcam.c` is SelectCarCameraMover
@@ -40,57 +49,58 @@ background.
   database and over a pack of six lights. Its mutation pass catches 124
   of 125 (1 equivalent). Nothing on the device calls them yet:
   gElInFrontendFn and gElCarSelectActiveFn stay NULL until SC-2d.
-- **SC-2c, the selector's 3D wiring**, in `bcarsel.c`, with
-  `carsel_check` extended over it:
-  - the two FrontEndRenderingCars at c[36] and c[40] (c[40] is the
-    reflection);
-  - the SelectCarCameraMover at c+188;
-  - CARCOVER and PLATFORM;
-  - ShowLoadedCar, UpdateRenderingCarParameters and UpdateCover;
-  - the Tick's SetSelectCarLighting call;
-  - the spotlights.
+- **SC-2c, the selector's 3D, is done.** `bcarsel.c` keeps the car,
+  its reflection, the CARCOVER and PLATFORM models and the camera in
+  place. The Tick sets the camera, the cars' matrices and the light,
+  and RENDER draws the platform. The spotlights are dead code in retail
+  and not ported. `carsel_check` runs 7373 ops, 459051 lines, 0
+  differ, and its mutation pass catches 264 of 273 (9 equivalent). On
+  the device the CarRenderInfos
+  are built, but nothing draws yet: render_model returns outside the
+  race's draw. `docs/formats/car-select.md`, "The selector's 3D
+  (SC-2c)", has retail's facts.
 - **SC-2d, the draw on the device:**
-  - `main.c` sets gElInFrontendFn and gElCarSelectActiveFn
-    (bcarsel_active);
-  - the frontend's 3D view, with no track;
-  - the camera, the platform, the car and its reflection;
-  - the frame's memory.
+  - **FRONTB's engine half.** The device reads FRONTB only for the UI
+    (`addBundle`, held resident). Retail's frontend load puts the whole
+    file through LoadChunks, PostLoadFixup and then the callback. Its
+    top-level chunks are:
+    - the solid list, with 17 solids: PLATFORM, the 15 TRACK*_MINI and
+      CARCOVER;
+    - the texture pack, 12.5 MB;
+    - the anim pack;
+    - the Flailer chunk, which the UI already has, so it must not be
+      added twice;
+    - two event trees and four fonts, all unported.
+    loader_solid_list fixes its strip tables in place (it adds the data
+    pointer), so it is not idempotent. Load it from a fresh copy each
+    time the frontend loads, at the same offset mod 128. Unload in
+    reverse when the frontend unloads, after closeSelectCar.
+  - **The cars' solids** come through the real CarLoader in the
+    frontend. Check that they reach SolidList and that the CarRenderInfo
+    finds them.
+  - **The hooks.** `main.c` sets gElInFrontendFn (flow state 3) and
+    gElCarSelectActiveFn (bcarsel_active). It also calls
+    update_camera_movers() in frontend frames, as retail's MainLoop does
+    every frame.
+  - **The frontend's 3D view, with no track.** A second TrackView with
+    no bundle sets `s_draw`, the camera and the frame's memory. Each
+    frame it draws in eDisplayFrame's order (0x00112858):
+    1. the cars' solid strips, (view, 1, 0, 1, 0);
+    2. RENDER, which queues the platform;
+    3. the reflections, (view, 0, 1, 1, 1);
+    4. the cars' alpha strips, (view, 1, 0, 0, 1);
+    5. the alpha polygons.
+    The cull is skipped in the frontend. The 3D goes under the UI's
+    layers.
+  - **Its texture cache must be flushable.** Car textures load and
+    unload as the selection moves, and addresses are reused. Flush on a
+    car's unload, after the next C3D_FrameBegin.
+  - **The flags.** Render flag 1 means no envmap; the frontend's envmap
+    is CARSELECTENVMAP (hash 0x4ecc769c). Flag 16 skips a solid's alpha
+    strips and flag 8 its solid ones (RenderStrips, 0x0010de10). The
+    port's render_model ignores them so far.
 
   Then Azahar screenshots against the user's PCSX2 photos.
-
-**Retail's facts for SC-2c and SC-2d:**
-- The constructor (0x001950d0) builds, after the joy handlers:
-  - c[36] and c[40], two FrontEndRenderingCars for view `playerNum`
-    (c[28]), with no ride. c[40] gets Reflection 1.
-  - The CARCOVER eModel at c+44 and the PLATFORM one at c+164, each
-    cleared and then Init'd from its name's hash.
-  - The SelectCarCameraMover at c[188], for view `playerNum`.
-  - SetSelectCarLighting(playerNum, 0, 0.0).
-  - c[316] and c[320], two buffers the size of the spotlight's (or
-    NULL without them), and c[324] and c[328] at 1.0.
-- InitSpotlights (0x00194fd0) copies BRUSHEDMETAL's alpha and colour
-  channels into gp-20084 and gp-20080. Nothing reads them back, and
-  UpdateSpotlight (0x00196038) is empty.
-- The Tick sets the camera each frame. Two players use RadiusStats
-  gp-20036 and OffsetStats 0x003341c0. One player uses gp-20040 and
-  0x00310200. Both use OffsetOrbit 0x003341b0, SetOrientationStats
-  (gp-20108, tilt 15654 for two players or gp-20044 for one), and
-  SetFOVStats(c[226]). It then calls UpdateRenderingCarParameters
-  (0x00197ce0) for c[36] with 0 and c[40] with 1.
-- The turntable turns by gp-20110 a frame while the mode is settled at
-  choose, or while orbitTouched is 0.
-- eDisplayFrame calls RenderFrontEndCars four times:
-  - (view, 1, 0, 1, 0) at 0x00112c1c and 0x00112d2c, the environment
-    map's faces;
-  - (view, 0, 1, 1, 1) at 0x001136bc, the reflections;
-  - (view, 1, 0, 0, 1) at 0x001136d4, the cars, after RenderCars.
-- The Tick calls SetSelectCarLighting at 0x0019729c.
-  - The brightness is (1 - the swatch's weighted luminance)^4.
-  - Locked is all four of: gp-23120 == 0, c[76] == 0, c[80]'s
-    VisibleCar non-NULL with available == 0, and the status's
-    nStatus == 2.
-- Render flag 1 means no envmap. What flags 8 and 16 mean is not known.
-  The port's render_model ignores them.
 
 **Gaps, on purpose:**
 - The event trees are not ported, so findEventForCar is NULL in main.c
@@ -248,7 +258,7 @@ hudscore_check      1608 ops,     6184 lines, 0 differ  (150 caught, 0 equivalen
 hudcop_check        1187 ops,     4763 lines, 0 differ  (115 caught, 5 equivalent; retail's image)
 hudnis_check         818 ops,     4359 lines, 0 differ  (118 caught, 1 equivalent; retail's image)
 hudtach_check       2287 ops,     7804 lines, 0 differ  (89 caught, 4 equivalent; retail's image)
-carsel_check        7282 ops,   430239 lines, 0 differ  (196 caught, 5 equivalent; retail's image)
+carsel_check        7373 ops,   459051 lines, 0 differ  (264 caught, 9 equivalent; retail's image)
 selcam_check        4266 ops,    52296 lines, 0 differ  (141 caught, 2 equivalent; retail's image)
 fecar_check         1439 ops,    13217 lines, 0 differ  (124 caught, 1 equivalent; retail's image)
 gen_bmath_tables --check           bmathtab.c is up to date
@@ -3285,8 +3295,10 @@ goes in.
   and 36.
 - **Next:** the car selector (step 16's SelectCarScreen, CarSelector
   and the front end's car), which the user asked for on 2026-10-04.
-  SC-1 (the logic and the 2D) is done and checked; SC-2, the 3D car, is
-  under way. See "Now" at the top.
+  SC-1 (the logic and the 2D) is done and checked. Of SC-2, the 3D car,
+  the camera, the car, its light and the selector's wiring (SC-2a to
+  SC-2c) are done. The draw on the device (SC-2d) is next. See "Now" at
+  the top.
   Then 13b-4f, the models' cost per draw. 13b-1 (the real clock and the
   pacing), 13b-2 (the frame profiler), 13b-3 (New 3DS mode in full) and
   13b-4a to 13b-4e (the draw's cuts) are done.

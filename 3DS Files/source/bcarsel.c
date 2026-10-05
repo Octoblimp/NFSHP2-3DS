@@ -9,9 +9,15 @@
 #include "bchunk.h"
 #include "cartypeinfo.h"
 #include "eefpu.h"
+#include "eframe.h"
+#include "elight.h"
+#include "emath.h"
+#include "emodel.h"
 #include "flailer.h"
 #include "fredrace.h"
 #include "realtime.h"
+#include "scenerycull.h"
+#include "texturepack.h"
 
 int32_t AllCarsAvailableInCarSelectScreen;
 
@@ -78,6 +84,33 @@ static BCarSel* g_m;
 #define ORBIT_TIMEOUT   2400              // RealTimeFrames, 40 s
 #define MODE_STEP       0.03f
 #define TURN_STEP       46
+
+// The camera, set each Tick (selectcar.cpp's tweakables): the stats view's
+// radius (gp-20040, two players' gp-20036), heading (gp-20108) and tilt
+// (gp-20044, two players' an immediate), and the offsets, which the
+// static initializer (0x00198bc8) sets: 0x00310200, two players'
+// 0x003341c0, and the orbit's 0x003341b0.
+#define CAM_RADIUS_1P   12.93f
+#define CAM_RADIUS_2P   16.5f
+#define CAM_HEADING     0
+#define CAM_TILT_1P     15262
+#define CAM_TILT_2P     15654
+static const bVector3 kOffsetStats1P = {0.27398f, 0.0f, -0.53f, 0.0f};
+static const bVector3 kOffsetStats2P = {-0.62f, 0.0f, -1.05f, 0.0f};
+static const bVector3 kOffsetOrbit   = {0.0f, 0.0f, -0.6384f, 0.0f};
+
+// UpdateRenderingCarParameters': the front wheels' turn in the stats view
+// (gp-20106), and how far the body sits above its wheels (gp-23740).
+#define WHEEL_STEER     4240
+#define CAR_LIFT        0.01f
+
+// The swatch's luminance, as the light's brightness reads it.
+#define LUM_R           0.299f
+#define LUM_G           0.587f
+#define LUM_B           0.114f
+#define LUM_SCALE       (1.0f / 255.0f)
+
+#define CAR_STATUS_LOCKED 2               // SetSelectCarLighting's dark car
 
 // ------------------------------------------------------------ the hooks
 
@@ -416,8 +449,9 @@ static void preloadUnload(void)
     }
 }
 
-// InitSelectCarScreen is InitSpotlights (SC-2's); Close unloads the
-// preload, then CloseSpotlights.
+// InitSelectCarScreen is InitSpotlights, whose copies of BRUSHEDMETAL
+// nothing reads (bcarsel.h); Close unloads the preload, then
+// CloseSpotlights.
 void bcarsel_init_screen(void)
 {
 }
@@ -691,23 +725,110 @@ static int covered(const CarSelector* c, const VisibleCar* car)
            && car->status->nStatus == 4;
 }
 
-// UpdateCarCover: the cover on both rendering cars, SC-2's.
+// UpdateCarCover (0x00195c40): the cover on both rendering cars while the
+// chosen car is covered, which draw it in place of the car.
 static void updateCarCover(CarSelector* c)
 {
-    (void)c;
+    eModel* m = covered(c, cur(c)) ? &c->cover : NULL;
+
+    c->car.pModel        = m;
+    c->reflection.pModel = m;
 }
 
-// ShowLoadedCar (0x00197ff8).
+// ShowLoadedCar (0x00197ff8): the loaded car, in the skin worn, on both
+// rendering cars. Instance 0, no dash. Retail also asks GetSkinInfo for
+// the skin and drops the answer.
 static void showLoadedCar(CarSelector* c)
 {
-    const BCarSelHooks* h = c->hooks;
-    RideInfo            ri;
+    RideInfo ri;
 
-    if (!c->loaded) return;
-    // Instance 0, the skin worn, no dash.
     ride_info_init(&ri, c->loaded->type,
                    skinAt(c->loaded->status, c->loaded->skinIndex), 0, 0);
-    if (h->showLoadedCar) h->showLoadedCar(h->user, c->playerNum, &ri);
+    fecar_reinit(&c->car, &ri);
+    fecar_reinit(&c->reflection, &ri);
+}
+
+// UpdateRenderingCarParameters (0x00197ce0): a car on the turntable. The
+// body is turned by the turntable's angle, its first wheel's radius less
+// that wheel's height (and a little) above the floor; the reflection is
+// as far below it, upside down. Each wheel is where it is on the car, and
+// the front two are turned by WHEEL_STEER in the stats view, straight in
+// the orbit, by the camera's blend. gp-20106 is not past 0x8000, so
+// retail's other way of blending, for an angle that is, is never taken.
+static void updateRenderingCarParameters(CarSelector* c,
+                                         FrontEndRenderingCar* f,
+                                         int reflection)
+{
+    const CarTypeInfo* ct;
+    float              z;
+    uint16_t           steer;
+    int                i;
+
+    if (!c->loaded) return;
+    ct = cti(c->loaded->type);
+    z  = ct->Wheels[0].Radius - ct->Wheels[0].PositionZ + CAR_LIFT;
+    if (reflection) z = -z;
+    f->Headlights = c->headlights;
+    f->CopLights  = c->copLights;
+    f->Position.x = 0.0f;
+    f->Position.y = 0.0f;
+    f->Position.z = z;
+    eIdentity(&f->BodyMatrix);
+    if (reflection) {
+        f->BodyMatrix.v0.y = -f->BodyMatrix.v0.y;
+        f->BodyMatrix.v2.z = -f->BodyMatrix.v2.z;
+    }
+    eRotateZ(&f->BodyMatrix, &f->BodyMatrix, c->turnAngle);
+
+    steer = (uint16_t)(int32_t)((1.0f - c->mover.Blend) * (float)WHEEL_STEER);
+    for (i = 0; i < 4; i++) {
+        bMatrix4* t = &f->TireMatrices[i];
+        bMatrix4* b = &f->BrakeMatrices[i];
+
+        eIdentity(t);
+        eIdentity(b);
+        eRotateY(t, t, 0);
+        if (i < 2) {
+            eRotateZ(b, b, steer);
+            eRotateZ(t, t, steer);
+        }
+        t->v3.x = b->v3.x = ct->Wheels[i].PositionX;
+        t->v3.y = b->v3.y = ct->Wheels[i].PositionY;
+        t->v3.z = b->v3.z = ct->Wheels[i].PositionZ;
+        t->v3.w = b->v3.w = 1.0f;
+    }
+}
+
+// The Tick's light (0x001970b0 .. 0x0019729c). The brightness is the worn
+// skin's swatch -- its fourth texel's palette colour -- as one less its
+// luminance, to the fourth: dark paint lights the car up, light paint
+// less. A covered car has none. The car is dark when the loaded one is
+// still locked.
+//
+// Retail's test is TextureInfo's loaded one -- an image, and palette data
+// unless the palette's size is 0 -- and then it reads the palette
+// regardless, so a texture with no palette size still lights the car. One
+// with no palette data at all would have retail read from address 0; the
+// port gives it no light instead.
+static void updateLighting(CarSelector* c)
+{
+    VisibleCar*        car    = cur(c);
+    float              bright = 0.0f;
+    int                locked = 0;
+    int32_t            i      = car->status->nSkins == 1 ? 0 : car->skinIndex;
+    const TextureInfo* ti     = GetTextureInfo(c->swatchColour[i], 1, 0);
+
+    if (!covered(c, car) && ti && ti->ImageData && ti->PaletteData) {
+        const uint8_t* col = ti->PaletteData + 4 * ti->ImageData[3];
+        bright = 1.0f - ((float)col[0] * LUM_R + (float)col[1] * LUM_G
+                         + (float)col[2] * LUM_B) * LUM_SCALE;
+        bright *= bright;
+        bright *= bright;
+    }
+    if (!AllCarsAvailableInCarSelectScreen && !c->allUnlocked && c->loaded
+        && !c->loaded->available)
+        locked = c->loaded->status->nStatus == CAR_STATUS_LOCKED;
+    el_set_select_car_lighting(c->playerNum, locked, bright);
 }
 
 // The make's logo: CARLOGO_ and the car's name, which for two players is
@@ -1037,12 +1158,14 @@ static void enterOrbitMode(CarSelector* c)
         h->speakCar(h->user, car->type, isCop(car->type), isHP(car->type));
     adjustHelp(c);
     trace(h, "carsel orbit");
+    selcam_set_mode(&c->mover, SELCAM_MODE_ORBIT);
 }
 
 static void enterChooseMode(CarSelector* c)
 {
     c->mode = c->chooseMode;
     adjustHelp(c);
+    selcam_set_mode(&c->mover, SELCAM_MODE_STATS);
     if (soundEnabled(c->hooks)) speechFade(c->hooks, 1.0f);
     trace(c->hooks, "carsel choose");
 }
@@ -1071,27 +1194,27 @@ static void selJoy(CarSelector* c, int32_t ev, uint8_t pressed)
         case BCARSEL_JOY_ORBIT_RIGHT:
             c->orbitTouched = 1;
             c->orbitFrame   = RealTimeFrames;
-            c->orbitSpeedX  = !pressed ? 0.0f
-                              : ev == BCARSEL_JOY_ORBIT_LEFT ? -9000.0f
-                                                             : 9000.0f;
+            c->mover.DesiredHorizSpeed =
+                !pressed ? 0.0f
+                : ev == BCARSEL_JOY_ORBIT_LEFT ? -9000.0f : 9000.0f;
             break;
         case BCARSEL_JOY_ORBIT_UP:
         case BCARSEL_JOY_ORBIT_DOWN:
             c->orbitTouched = 1;
             c->orbitFrame   = RealTimeFrames;
-            c->orbitSpeedY  = !pressed ? 0.0f
-                              : ev == BCARSEL_JOY_ORBIT_UP ? 10000.0f
-                                                           : -10000.0f;
+            c->mover.DesiredVertSpeed =
+                !pressed ? 0.0f
+                : ev == BCARSEL_JOY_ORBIT_UP ? 10000.0f : -10000.0f;
             break;
         case BCARSEL_JOY_ORBIT_LEFTRIGHT:
             c->orbitTouched = 1;
             c->orbitFrame   = RealTimeFrames;
-            c->orbitSpeedX  = ((float)pressed - 128.0f) * 70.3125f;
+            c->mover.DesiredHorizSpeed = ((float)pressed - 128.0f) * 70.3125f;
             break;
         case BCARSEL_JOY_ORBIT_UPDOWN:
             c->orbitTouched = 1;
             c->orbitFrame   = RealTimeFrames;
-            c->orbitSpeedY  = ((float)pressed - 128.0f) * -78.125f;
+            c->mover.DesiredVertSpeed = ((float)pressed - 128.0f) * -78.125f;
             break;
         default:
             break;
@@ -1213,10 +1336,23 @@ static void selTick(CarSelector* c)
         && RealTimeFrames - c->orbitFrame > ORBIT_TIMEOUT) {
         c->mode = c->chooseMode;
         adjustHelp(c);
+        selcam_set_mode(&c->mover, SELCAM_MODE_STATS);
         if (soundEnabled(h)) speechFade(h, 1.0f);
     }
     if (c->shownMode == c->chooseMode || !c->orbitTouched)
         c->turnAngle = (uint16_t)(c->turnAngle + TURN_STEP);
+
+    if (c->twoPlayer) {
+        selcam_set_radius_stats(&c->mover, CAM_RADIUS_2P);
+        selcam_set_offset_stats(&c->mover, &kOffsetStats2P);
+    } else {
+        selcam_set_radius_stats(&c->mover, CAM_RADIUS_1P);
+        selcam_set_offset_stats(&c->mover, &kOffsetStats1P);
+    }
+    selcam_set_offset_orbit(&c->mover, &kOffsetOrbit);
+    selcam_set_orientation_stats(&c->mover, CAM_HEADING,
+                                 c->twoPlayer ? CAM_TILT_2P : CAM_TILT_1P);
+    selcam_set_fov_stats(&c->mover, c->turnFOV);
 
     if (c->shownMode < c->mode) {
         c->shownMode += MODE_STEP;
@@ -1226,7 +1362,10 @@ static void selTick(CarSelector* c)
         c->shownMode -= MODE_STEP;
         if (c->shownMode < c->mode) c->shownMode = c->mode;
     }
+    updateRenderingCarParameters(c, &c->car, 0);
+    updateRenderingCarParameters(c, &c->reflection, 1);
     updateFadeGroups(c);
+    updateLighting(c);
     unlockTick(&c->unlock);
     flailer_set_visibility(c->screen, OBJ_NEXT_ARROW,
                            !(bcarsel_next_car(&c->set, cur(c)) == cur(c)
@@ -1268,6 +1407,13 @@ static void selInit(CarSelector* c, const BCarSelHooks* h, int32_t port,
     c->thumbs.duration         = 1.0f;
     c->thumbs.flags            = 1;
     unlockInit(&c->unlock, screen);
+    // The car and its reflection, in the player's view, with no ride yet.
+    fecar_init(&c->car, NULL, playerNum);
+    fecar_init(&c->reflection, NULL, playerNum);
+    c->reflection.Reflection = 1;
+    c->reflection.Enabled    = 1;
+    if (!c->cover.Solid) emodel_init(&c->cover, bchunk_hash("CARCOVER"));
+    selcam_init(&c->mover, playerNum);
     // 0x00196660, the turntable's start.
     c->turnTilt  = 15712;
     c->turnFOV   = 7236;
@@ -1281,7 +1427,10 @@ static void selInit(CarSelector* c, const BCarSelHooks* h, int32_t port,
     updateCarCover(c);
     updateLogo(c);
     updateInfoBar(c);
+    el_set_select_car_lighting(playerNum, 0, 0.0f);
     adjustHelp(c);
+    if (!c->platform.Solid)
+        emodel_init(&c->platform, bchunk_hash("PLATFORM"));
     c->nSwatches = 0;
     setupSwatches(c);
     c->fade = c->fadeMax;
@@ -1289,6 +1438,8 @@ static void selInit(CarSelector* c, const BCarSelHooks* h, int32_t port,
     updateFadeGroups(c);
     flailer_printf(screen, OBJ_POINTS, "%s %d", trId(h, LANG_NFS_POINTS),
                    (int)points);
+    c->headlights = 0;
+    c->copLights  = 0;
     selTick(c);
     trace(h, "carsel player %d on %08lx: %d cars, %d unlocked, %s",
           (int)playerNum, (unsigned long)screen, (int)c->set.total,
@@ -1301,16 +1452,28 @@ static void selDestroy(CarSelector* c)
     const BCarSelHooks* h = c->hooks;
 
     dismissPopup(c);
+    if (c->platform.Solid) emodel_uninit(&c->platform);
     closeSwatches(c);
     bcarsel_preload();
     bcarsel_preload();
     if (c->loaded) loaderUnload(h, c->loaded->type);
     if (c->pending) loaderUnload(h, c->pending->type);
+    // The cover is the selector's: off both cars first, whose deletion
+    // would delete it. Retail frees the cars and the mover too; the port's
+    // are in place, so the cars go without bit 0.
+    c->car.pModel        = NULL;
+    c->reflection.pModel = NULL;
+    selcam_destroy(&c->mover);
+    fecar_delete(&c->car, 2);
+    fecar_delete(&c->reflection, 2);
+    if (c->cover.Solid) emodel_uninit(&c->cover);
     if (h->stopSound) h->stopSound(h->user, 12);
     slideRestore(&c->unlock.slide);
+    emodel_delete(&c->platform, 2);
     fadeRestore(&c->fadeC);
     fadeRestore(&c->fadeB);
     fadeRestore(&c->fadeA);
+    emodel_delete(&c->cover, 2);
 }
 
 static int maybeContinue(void);
@@ -1380,9 +1543,16 @@ static void selCallback(CarSelector* c, BScreenMessage msg,
             selTick(c);
             break;
 
-        case BMSG_SCREEN_RENDER:
+        case BMSG_SCREEN_RENDER: {
+            // The turntable where it stands, with no light context.
+            bMatrix4* m = (bMatrix4*)eframe_malloc(sizeof(bMatrix4));
+            if (m) {
+                eIdentity(m);
+                if (gEModelRenderFn) gEModelRenderFn(&c->platform, m, NULL, 0);
+            }
             unlockRender(c);
             break;
+        }
 
         case BMSG_POPUP_DISMISS:
             c->popup = -1;
