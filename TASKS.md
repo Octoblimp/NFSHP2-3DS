@@ -2066,8 +2066,9 @@ is citro3d and owns the top.
 30. [ ] Split-screen/multiplayer scope decision (HP2 supported split-screen;
         not committed to yet -- decide once single-player core is solid)
 31. [ ] Final CIA packaging + Old3DS/New3DS compatibility pass
-        (Since 2026-10-03 the New 3DS is the target, task 28. The Old 3DS
-        pass checks only that it boots.)
+        (Since 2026-10-03 the New 3DS is the target, task 28. Since
+        2026-10-05 it is the only one, the user's call: an Old 3DS stops
+        at boot with a message (6ac29d1), and the pass checks only that.)
 
 ## Asked for during the port
 

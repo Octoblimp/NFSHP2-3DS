@@ -77,6 +77,34 @@ So since 13b-3:
 The bottom two divide as they did before 13b-3. Both step-downs stay:
 an ask that the kernel refuses costs 4 MB a try, not a panic.
 
+## An Old 3DS
+
+Since 2026-10-05 the port is for the New 3DS alone, the user's call.
+`main` checks `APT_CheckNew3DS` right after the `console:` line. On an
+Old 3DS or 2DS it logs `console: not a New 3DS, so the port stops
+here`, puts the reason on the top screen (`fatalConsole`, as for
+missing data) and exits on START:
+
+    This port needs a New 3DS, New 3DS XL
+    or New 2DS XL.
+
+    A race needs more memory and a faster CPU
+    than an Old 3DS or 2DS can give it.
+
+Why there is no Old 3DS mode:
+- **Memory.** The user's Old 3DS ran the .3dsx under the Homebrew
+  Launcher with 64 MB: a 31.8 MB heap and a 31.8 MB linear heap.
+  Holding R went to the race, and loading TRACKB12 ran the heap out:
+  bMalloc's abort, back to the launcher. The race needs about 43 MB of
+  heap and 46 MB of linear heap. A CIA would get 96 MB (`SystemMode`),
+  with little to spare once the AI's and the cops' cars load, and that
+  Old 3DS would not install the CIA.
+- **The CPU.** 268 MHz without the L2 cache, a third of the New 3DS's.
+  The GPU is the same on both.
+
+Azahar shows the message with `is_new_3ds=false` in
+`%APPDATA%\Azahar\config\qt-config.ini`.
+
 ## The cores
 
 - **Core 0** runs the game, as the PS2's one CPU did. Two other threads

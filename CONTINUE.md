@@ -26,8 +26,8 @@ way: the indexed meshes are in (609b418) and with the user.
   WINDOW batch (draws 722 and 723), which the device puts one corner of
   above the roof. That is open.
 - **With the user.** The build (`3DS Files/NFSHP2-3DS.3dsx`, commit
-  609b418) has the nebula, the race's smoke and the indexed meshes. Ask
-  for:
+  6ac29d1) has the nebula, the race's smoke, the indexed meshes and the
+  Old 3DS's message. Ask for:
   - the race's `frame:` and `models:` lines in a heavy stretch, and
     whether the FPS there moved from 16-18;
   - a timing run (`sdmc:/nfshp2_gputiming.txt` on the card): the
@@ -35,7 +35,9 @@ way: the indexed meshes are in (609b418) and with the user.
     work, about 7.5 ms before;
   - how the car select's nebula and the chimney smoke look, with the
     `carsel: nebula` and `race: effects` lines;
-  - whether the light-blue wedge over the Opel's roof is still there.
+  - whether the light-blue wedge over the Opel's roof is still there;
+  - on their Old 3DS, that the .3dsx now shows "This port needs a New
+    3DS" and goes back to the launcher on START (6ac29d1).
 Session 31 took the race on Azahar from 20 FPS to 28-30 and
 the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`). The rest
 of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) is 13b-4f,
@@ -53,6 +55,10 @@ about 10.2 with the fetch in it, the vertex work about 7.5, the draws'
 own cost about 1.44, the texture cache clears about 0.35.
 `docs/formats/draw-cuts.md`, "13b-4f", has the detail.
 
+- **The Old 3DS (6ac29d1).** The user's Old 3DS ran the .3dsx out of
+  heap at the race's track (a 31.8 MB heap and a 31.8 MB linear heap
+  under the Homebrew Launcher). They chose the New 3DS alone, for good:
+  an Old 3DS now stops at boot with a message. No Old 3DS mode, ever.
 - **Done (609b418): indexed meshes.** `georender_bake` keeps each
   distinct vertex once a solid and the batches draw with
   `C3D_DrawElements`. TRACKB12's 401,385 list vertices are 176,505, and
@@ -2180,8 +2186,9 @@ and so replaced every boot.
      race test after it (the AI, the cops) needs the race in real time.
      - **The target** is the New 3DS in New 3DS mode.
      - **Only the optimizations the New 3DS needs to hold 30 go in.**
-     - **Nothing is done for the Old 3DS alone.** It keeps booting and
-       gets whatever the New 3DS work gives it.
+     - **Nothing is done for the Old 3DS.** Since 2026-10-05 the port
+       is the New 3DS's alone, the user's call: an Old 3DS stops at boot
+       with a message (6ac29d1, `new3ds-mode.md`, "An Old 3DS").
 
      It goes in four slices:
      - ~~**13b-1, the real clock and the pacing.**~~ Done in Session
@@ -3028,7 +3035,9 @@ and so replaced every boot.
    - **The track fits the Old 3DS's linear heap.** `heapcfg.c` gives it
      about 68 MB. The scenery's 932 solids are 122,937 triangles, which is
      10.3 MB as `georender`'s triangle lists. Their 330 textures are
-     27.3 MB as RGBA8, and 11 more are in no pack.
+     27.3 MB as RGBA8, and 11 more are in no pack. That was before the
+     race grew: on 2026-10-05 an Old 3DS's .3dsx ran its heap out at the
+     track, and the port now stops on an Old 3DS (step 19).
    - **The track's surface is loaded on hardware, but not built.** The
      track viewer's `load_chunks` reaches `track_loader_geometry` and
      TopologyTree::Loader now, with the collision volumes and the track
@@ -3585,7 +3594,7 @@ each class shows what it reaches.
 | 16 | The full frontend from retail: the 44 screens still plain or unregistered (`screen_registry.py --check-port`), the event tree (the career), the tourneys and the car selector | 6-10 |
 | 17 | Save data on the SD card in the memory card's place: Phils Load Save, the autosave, the boot autoload and the options (task 29) | 2-3 |
 | 18 | Every track and car: the thirty tracks and the whole car list load and race | 1-2 |
-| 19 | ~~Old 3DS performance~~ no work of its own since 2026-10-03: the target is the New 3DS (step 13b). The Old 3DS keeps booting and gets what the New 3DS work gives it | 0 |
+| 19 | ~~Old 3DS performance~~ none: since 2026-10-05 the port is the New 3DS's alone (the user's call). An Old 3DS shows "This port needs a New 3DS" at boot and exits on START (6ac29d1); there is no Old 3DS mode | 0 |
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
 That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
@@ -3616,7 +3625,7 @@ goes in.
   | 16, the frontend | 6-10 |
   | 17, the saves | 2-3 |
   | 18, every track and car | 1-2 |
-  | 19, Old 3DS performance (dropped, 2026-10-03) | 0 |
+  | 19, Old 3DS performance (dropped; New 3DS only since 2026-10-05) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
   | **Total** | **25-39** |
 

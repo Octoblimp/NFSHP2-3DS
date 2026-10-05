@@ -14572,10 +14572,29 @@ changing a pixel.
 `docs/formats/draw-cuts.md`, "13b-4f: indexed meshes", has it all. The
 `models:` line now ends each half with the batches' indices.
 
+### The Old 3DS (6ac29d1)
+
+The user's Old 3DS crashed back to the Homebrew Launcher on holding R
+into the race; the CIA would not install on it. Their log had the
+.3dsx's grant split into a 31.8 MB heap and a 31.8 MB linear heap, and
+the track's load ran the heap out (bMalloc's abort). The race needs
+about 43 MB of heap and 46 MB of linear heap. Asked whether to support
+it with a lower-detail mode that leaves the New 3DS alone, they chose
+"New 3DS only, for good".
+
+- `main` now checks `APT_CheckNew3DS` after the `console:` line. On an
+  Old 3DS it logs `console: not a New 3DS, so the port stops here`,
+  says on the top screen that the port needs a New 3DS, New 3DS XL or
+  New 2DS XL, and exits on START.
+- On Azahar the New 3DS's race is as before (30 FPS). In Azahar's Old
+  3DS mode (`is_new_3ds=false`) the message shows
+  (`out/azahar_old3ds_gate/01_message.png`).
+- `docs/formats/new3ds-mode.md`, "An Old 3DS", has why.
+
 ### With the user
 
-- `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 609b418 (comments
-  changed since). Ask for the race's `frame:` and `models:` lines in a
-  heavy stretch, a timing run with `sdmc:/nfshp2_gputiming.txt`, how
-  the nebula and the smoke look, and whether the light-blue wedge over
-  the Opel's roof is still there.
+- `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 6ac29d1. Ask for the
+  race's `frame:` and `models:` lines in a heavy stretch, a timing run
+  with `sdmc:/nfshp2_gputiming.txt`, how the nebula and the smoke look,
+  whether the light-blue wedge over the Opel's roof is still there, and
+  that their Old 3DS now shows the message.
