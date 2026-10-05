@@ -13,9 +13,14 @@
 // every emitter on WorldEffects' auto emitters. GLOBALB has 111 datas and
 // 112 emitters, every one LIBRARY, a template that afxGetEmitters copies
 // for a car, a smoke bomb or the car select's nebula; each track has 10 to
-// 40 emitters, every one ON. TriggerEmitter, DoTimeStep and RenderEffects,
-// which make the particles, move them and draw them, come next (SC-3b,
-// SC-3c).
+// 40 emitters, every one ON.
+//
+// TriggerEmitter (0x00127700), DoTimeStep (0x00128718) and
+// UpdateInterestPoints (0x001286a0) make the particles and move them: an
+// emitter near one of the three interest points emits into an active
+// group, one group per emitter and car, and each step ages, slows and
+// moves every particle and frees the dead ones. RenderEffects, which draws
+// them, comes next (SC-3c).
 //
 // FrameEffects (retail 0x002ef5e0) is the frontend's system, which the car
 // select's nebula goes on; WorldEffects (0x002ef640) is the race's.
@@ -125,12 +130,17 @@ typedef struct AcidEmitter {
     char      Name[64];                     // 128
 } AcidEmitter;                              // 192
 
-// AcidParticle, 32 bytes (type#2708).
+// AcidParticle, 32 bytes (type#2708). Life is seconds times 1024, which
+// DoTimeStep reads signed (lh): a life past 32 s, 60 s at most, is
+// negative there and the particle dies on its first step. Speed is
+// world units a second times 128, read unsigned (lhu); the .mdebug has it
+// signed. VX, VY and VZ are the direction times 127, Inherit the share of
+// the car's motion times 255, and Frame the contact sheet's cell.
 typedef struct AcidParticle {
     bNode     Node;                         //   0
     uint16_t  Life;                         //   8
     int16_t   Angle;                        //  10
-    int16_t   Speed;                        //  12
+    uint16_t  Speed;                        //  12
     uint8_t   Inherit;                      //  14
     uint8_t   Pad;                          //  15
     float     X;                            //  16
@@ -310,5 +320,50 @@ void acid_system_remove_auto_emitter(AcidEffectSystem *s, AcidEmitter *e);
 // KillAllActiveEffects (0x001276a8): each active group off the list from
 // its head and deleted.
 void acid_system_kill_all_active_effects(AcidEffectSystem *s);
+
+// UpdateInterestPoints (0x001286a0): the eyes of views 1, 2 and 0, into
+// InterestPoints[0], [1] and [2], each only while its view has a camera.
+void acid_system_update_interest_points(AcidEffectSystem *s);
+
+// TriggerEmitter (0x00127700): time_step's particles from one emitter.
+//
+// Nothing happens unless the emitter's position is within its data's
+// FarClip of an interest point. An emitter with no seed takes one first,
+// as AddAutoEmitter gives it. It emits while ON, or always for a negative
+// time_step, a burst of -time_step seconds; a positive step stops at the
+// end of the emitter's cycle.
+//
+// The particles go into the emitter's last group if that group is still
+// the emitter's and the car's, or else a new one on the system's tail. A
+// full group pool keeps the last group, whatever it is, and none emits
+// nothing. A particle is drawn from the emitter's seed: its direction
+// across the spread (a disc about the emitter's y, or angles about x, y
+// and z), its place in the volume, its first frame, its life, angle and
+// speed, and its share of the emitter's InheritVelocity, which a data with
+// MotionLive leaves to DoTimeStep. DontEmit, or a full particle pool,
+// draws one and keeps none. A group left with no particles is freed, and
+// LastActiveGroup still names it.
+void acid_system_trigger_emitter(AcidEffectSystem *s, AcidEmitter *e,
+                                 float time_step, void *car);
+
+// DoTimeStep (0x00128718), from World's step for WorldEffects
+// (0x0014e110, after TweakerCheck), the frontend's frame for FrameEffects
+// (0x00113fd0), and 0x0012a0f4 for a system of its own.
+//
+// Each auto emitter from the head, up to and including the first that is
+// neither ON nor OFF: an ON one emits, and an ON or OFF one's cycle runs
+// down and flips, the next cycle drawn from its variance and less the
+// overrun. In the frontend (CurrentGameFlowState 3) each data's ColourBasis
+// and ExtraBasis are made again from its keys. Then every particle of
+// every group ages; one whose life is gone is freed, and the rest turn
+// their frames, slow by their data's drag, fall by its gravity and move,
+// with their share of the car's own motion when the data has MotionLive.
+// A group left with no particles is freed. UpdateTime is the step's
+// milliseconds.
+void acid_system_do_time_step(AcidEffectSystem *s, float dt);
+
+// CurrentGameFlowState (gp-21420), which DoTimeStep reads for the
+// frontend's 3. NULL reads 0.
+extern int32_t (*gAcidGameFlowStateFn)(void);
 
 #endif

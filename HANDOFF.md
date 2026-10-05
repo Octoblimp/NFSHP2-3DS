@@ -14020,3 +14020,29 @@ Not ported: the system's destructor (0x0012a398) and the static fini
 - A 25-second race on TRACKB12 reaches RACING and drives as before (539
   frames drawn, about 28 FPS). azahar_log has 0 unmapped accesses and
   `nfshp2_stderr.txt` is empty.
+
+### SC-3b, emitting and stepping
+
+TriggerEmitter (0x00127700), DoTimeStep (0x00128718),
+UpdateInterestPoints (0x001286a0) and hermite_basis are ported, in
+`acidsys.c` and `acidfx.c`. `docs/formats/acidfx.md`, "Emitting and
+stepping", has what each does.
+
+- Two values come off the stack uninitialised in the listing:
+  TriggerEmitter's first direction w (sp+204) and the frontend's control
+  matrix's columns 2 and 3 (sp+0..63). The port and the model zero both.
+- `afx_check` grew eight scenarios, with stubs for bSlotMalloc,
+  bIsSlotPoolFull, eGetView and the ticker: 24 scenarios, 14885 ops,
+  79706 lines, 0 differ. The mutation pass has 313 mutations, 310 caught
+  and the 3 equivalent ones from SC-3a. `tr-dist-2d` (the FarClip
+  distance without z) was missed at first, so a view inside FarClip
+  across x and y and past it in z was added.
+- The old AddAutoEmitter mutations' anchors now appear in TriggerEmitter
+  and DoTimeStep too. They take a `pre` of the lines before them, so each
+  stays on AddAutoEmitter.
+- `eview_check`: 12 scenarios, 2103 ops, 0 differ.
+- main.c sets `gWorldEffectsTweakerCheckFn`, `gWorldEffectsDoTimeStepFn`
+  and `gAcidGameFlowStateFn`. On Azahar the race runs at 30 FPS with 0
+  unmapped accesses, and the car select passes.
+
+Next is the New 3DS XL hang the user reported (CONTINUE.md), then SC-3c.

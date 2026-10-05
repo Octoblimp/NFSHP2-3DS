@@ -2385,7 +2385,10 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
           lookups and copies, and the auto emitters. `afx_check` runs
           retail's on the image: 9295 ops, 0 differ; 175 mutations, 172
           caught, 3 equivalent.
-    - [ ] SC-3b, TriggerEmitter, DoTimeStep and UpdateInterestPoints.
+    - [x] SC-3b, TriggerEmitter, DoTimeStep and UpdateInterestPoints
+          (`acidsys.c`), with hermite_basis. `afx_check`: 14885 ops,
+          0 differ; 313 mutations, 310 caught, 3 equivalent. World's
+          step runs WorldEffects' on the device.
     - [ ] SC-3c, RenderEffects and its draw on the device.
     - [ ] SC-3d, the car select's nebula.
 - [ ] **The briefing.** "You're The Cop", with its button list over the

@@ -1,11 +1,12 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 33
-(2026-10-04), after SC-3a, the first part of the nebula behind the car.
+(2026-10-04), after SC-3b, the second part of the nebula behind the car.
 **Start at "Now" just below.** SC-1 and SC-2, the car selector as logic
 and 2D and its 3D car on the turntable, are finished and checked
 against retail. SC-3 adds the nebula. SC-3a, the effect system's data,
-is done and committed; SC-3b is next. Session 31 took the race on Azahar from 20 FPS to 28-30 and
+and SC-3b, its emitting and stepping, are done and committed; first
+the New 3DS XL's race hang (below), then SC-3c. Session 31 took the race on Azahar from 20 FPS to 28-30 and
 the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`). The rest
 of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) comes after
 the car selector. "Where the port stands" below has the count of what
@@ -123,14 +124,17 @@ are four parts:
     gKillAllActiveEffectsFn). Each car now takes copies of GLOBALB's
     CARFX emitters. The carsel and race runs on Azahar have 0 unmapped
     accesses.
-- **SC-3b, next:** TriggerEmitter (0x00127700, changed from the demo),
-  DoTimeStep (0x00128718) and UpdateInterestPoints (0x001286a0).
-  - Disassemble them from `SLES_507.31` first, and compare with the
-    demo's (with symbols) to see what changed.
-  - Grow `afx_test.c` and `afx_check.py` rather than starting new ones.
-    They already lay out the disc's records, the pools and the lists.
-    The particle pool's slots are filled with 0xa5, since afxInit
-    clears ZERO_ALLOCATED_MEMORY on it.
+- **SC-3b is done.** TriggerEmitter (0x00127700), DoTimeStep
+  (0x00128718), UpdateInterestPoints (0x001286a0) and hermite_basis.
+  - `afx_check` runs 14885 ops over 24 scenarios with 0 differ, and
+    its mutation pass catches 310 of 313, with the same 3 equivalent.
+    `eview_check` still agrees.
+  - World's step runs WorldEffects' DoTimeStep on the device. The race
+    and carsel runs on Azahar have 0 unmapped accesses.
+- **First, the hang on a New 3DS XL** (2026-10-04, the user's): with R
+  held, the race's first frame drew (1.7 s, most of it the textures'
+  first upload) and then nothing; HOME was dead and the console had
+  to be powered off. It was the first race on real hardware.
 - **SC-3c:** RenderEffects (0x00128da0) and its draw on the device.
 - **SC-3d:** the CarSelector's nebula. It is 20 emitters of
   "XE_SelectCarNebula" (string 0x002b4ef8, group FE_EMITTER), with

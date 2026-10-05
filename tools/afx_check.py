@@ -9,10 +9,15 @@ The model is the image. These run as shipped: the static constructor
 afxCopyEmitter (0x00127228), afxGetEmitters (0x001272e0) and
 afxDeleteEmitters (0x00127368), both SetEmitterData (0x001273c0,
 0x001273d8), AcidEffectSystem's constructor (0x00127418), AddAutoEmitter
-(0x001274a0), RemoveAutoEmitter (0x00127688) and KillAllActiveEffects
-(0x001276a8), and the deleting destructors of AcidEmitter (0x00124e20 and
-its twin 0x0012a3f8) and AcidActiveGroup (0x0012a258). Under them run
-bStringHash, bStrNCpy, bMemSet and the node and list destructors. The
+(0x001274a0), RemoveAutoEmitter (0x00127688), KillAllActiveEffects
+(0x001276a8), TriggerEmitter (0x00127700), UpdateInterestPoints
+(0x001286a0) and DoTimeStep (0x00128718), and the deleting destructors of
+AcidEmitter (0x00124e20 and its twin 0x0012a3f8), AcidActiveGroup
+(0x0012a258) and AcidParticle (0x0012a348). Under them run bStringHash,
+bStrNCpy, bMemSet, the node and list destructors, hermite_basis
+(0x00126960) with fInvertMatrix and eMulMatrix, eRotateX, Y and Z,
+eMulVector, bSin and bCos; eMathInit (0x0011b138) and eMathE's static
+constructor (0x0011bf70) run once first, as the boot runs them. The
 harness (tools/src/afx_test.c) runs the port over the same script, and
 the two transcripts are diffed.
 
@@ -20,10 +25,24 @@ Stubs, the same on both sides: the three slot pools are fixed arenas that
 hand out their lowest free slot, zeroed when the pool's flags have
 ZERO_ALLOCATED_MEMORY and filled with 0xa5 when not, and print each call
 (bNewSlotPool 0x00257c10, bDeleteSlotPool 0x00257c48, bOMalloc 0x00257c80,
-bFree(pool, p) 0x00257ca0). GetTextureInfo (0x001abf48) answers by a rule
+bFree(pool, p) 0x00257ca0, and bMalloc(pool) 0x00257c60). bIsSlotPoolFull
+(0x00257d10) is 1 when the script has said the pool fails or no slot is
+free, and prints its answer. GetTextureInfo (0x001abf48) answers by a rule
 on the hash: NULL, a texture of that name, or one whose NameHash is the
 hash with its low bit flipped. bFree(void *) (0x00257850) is never
-reached and stops the model if it is.
+reached and stops the model if it is. eGetView (0x00107c90) gives three
+views of the model's, each with a camera the script places or none (its
+pCamera at 56, the camera's CurrentKey.Position at 64); bGetTicker
+(0x00250f38) counts up by 0x1234567 a call and bGetTickerDifference
+(0x00250f48) is half the count between. A car is 2 KB of the model's, of
+which DoTimeStep reads only the velocity, at 112. CurrentGameFlowState
+(gp-21420) is the script's.
+
+Two of the listings read their stack before writing it. TriggerEmitter's
+direction keeps the w of the last eMulVector, and before the first one
+whatever its frame held at 204; DoTimeStep hands hermite_basis a matrix
+whose columns 2 and 3 it never writes, at 0 of its frame. The model
+zeroes both on each entry, and the port starts them at zero.
 
 The records are the disc's: GLOBALB's 111 datas and 112 emitters and each
 of the 30 tracks' packs, from extracted-retail. Each is put in a chunk as
@@ -44,6 +63,7 @@ loaded from memory would be.
     python tools/afx_check.py --dump out/afx
 """
 import argparse
+import math
 import os
 import random
 import re
@@ -67,7 +87,10 @@ NL = chr(10)
 
 HARNESS = "tools/src/afx_test.c"
 ACIDC = "3DS Files/source/acidsys.c"
-SOURCES = [HARNESS, ACIDC]
+ACIDFX = "3DS Files/source/acidfx.c"
+SOURCES = [HARNESS, ACIDC, ACIDFX] + ["3DS Files/source/" + f for f in (
+    "emath.c", "bmatrix.c", "bmath.c", "bmathtab.c",
+    "bvector.c")]
 
 HARNESS_TIMEOUT = 120
 
@@ -109,13 +132,26 @@ KILL_ALL = 0x001276a8
 EMITTER_DEL = 0x00124e20
 EMITTER_DEL2 = 0x0012a3f8
 GROUP_DEL = 0x0012a258
+TRIGGER = 0x00127700
+UPDATE_IP = 0x001286a0
+DO_STEP = 0x00128718
+TRIGGER_FRAME = 560               # the direction's w at 204 of the frame
+STEP_FRAME = 304                  # the control matrix at 0 of the frame
+EMATH_INIT = 0x0011b138
+EMATH_CTOR = 0x0011bf70           # 0x002dc400 = (0, 0, 0, 1)
+G_FLOW = GP - 21420               # CurrentGameFlowState
 
 B_NEW_POOL = 0x00257c10
 B_DEL_POOL = 0x00257c48
 B_OMALLOC = 0x00257c80
 B_FREE_SLOT = 0x00257ca0
 B_FREE = 0x00257850
+B_MALLOC = 0x00257c60
+B_IS_FULL = 0x00257d10
 GET_TEXTURE_INFO = 0x001abf48
+E_GET_VIEW = 0x00107c90
+B_TICKER = 0x00250f38
+B_TICKER_DIFF = 0x00250f48
 
 CALL_LIMIT = 4000000
 
@@ -135,6 +171,15 @@ TEX_SIZE = 164
 TEX_NAMEHASH = 32
 NTEX = 512
 NTXM = 64
+VIEWS = 0x010c0000                # view i at VIEWS + 0x100 * i
+VIEW_CAMERA = 56
+CAMS = 0x010c1000                 # its camera at CAMS + 0x200 * i
+CAM_POSITION = 64
+NVIEW = 3
+CARS = 0x010c2000                 # car k at CARS + 0x800 * k
+CAR_VELOCITY = 112
+NCAR = 2
+TICK = 0x1234567
 BUFS = 0x01100000                 # buffer k at BUFS + k * BUF_STRIDE
 BUF_STRIDE = 0x100000
 NBUF = 8
@@ -794,6 +839,408 @@ def s_fuzz(rnd, disc, n, track):
     return out
 
 
+# ------------------------------------------------- TriggerEmitter, DoTimeStep
+
+DT30 = h(1.0 / 30)
+DTS = (1.0 / 30, 1.0 / 60, 0.1, 0.5, -0.25, -1.0, 0.0, -0.0, 2.0)
+
+# What the scripts write into a data, at its retail offset: the bytes and
+# the floats TriggerEmitter and DoTimeStep read, over values that keep the
+# emission loop short (the rate stays at or above zero and below 300 a
+# second).
+DATA_MODS = (
+    ("b", 24, (0, 1)),                          # SpreadAsDisc
+    ("b", 25, (0, 1, 2, 3)),                    # ContactSheetW
+    ("b", 26, (0, 1, 2, 3)),                    # ContactSheetH
+    ("b", 27, (0, 10, 15, 30, 127, 200)),       # AnimFPS
+    ("b", 28, (0, 1, 2)),                       # RandomStartFrame
+    ("b", 29, (0, 1)),                          # RandomRotationDirection
+    ("b", 30, (0, 1)),                          # MotionLive
+    ("w", 48, (0.0, 0.5, 1.0, 5.0, 30.0, 200.0)),       # NumParticles
+    ("w", 52, (0.0, 0.25, 0.5, 1.0)),
+    ("w", 56, (0.05, 0.5, 2.0, 10.0, 33.0, 70.0)),      # Life
+    ("w", 60, (0.0, 0.25, 0.7)),
+    ("w", 64, (0.0, 1.0, 10.0, 275.0, 600.0)),          # Speed
+    ("w", 68, (0.0, 0.5, 1.0)),
+    ("w", 72, (0.0, 15.0, 360.0, 720.0)),               # InitialAngleRange
+    ("w", 76, (0.0, 30.0, 180.0, 359.0, 720.0)),        # SpreadAngle
+    ("w", 80, (0.0, 0.1, 0.5, 1.0, 1.5)),               # MotionInherit
+    ("w", 84, (0.0, 0.3, 1.0)),
+    ("w", 96, (0.0, 1.5, -3.0)),                        # VolumeCenter
+    ("w", 100, (0.0, 1.5, -3.0)),
+    ("w", 104, (0.0, 1.5, -3.0)),
+    ("w", 112, (0.0, 2.0, 10.0)),                       # VolumeExtent
+    ("w", 116, (0.0, 2.0, 10.0)),
+    ("w", 120, (0.0, 2.0, 10.0)),
+    ("w", 128, (50.0, 150.0, 5000.0, 0.0)),             # FarClip
+    ("w", 132, (0.0, -10.0, 20.0, -0.05)),              # Gravity
+    ("w", 136, (0.0, 0.02, 0.6, -0.05)),                # Drag
+)
+
+
+def pd(ref, kind, off, v):
+    return "PD %s %s %d %s" % (ref, kind, off, "%02x" % v if kind == "b"
+                               else h(v))
+
+
+def data_mods(rnd, ref, n):
+    out = []
+    for kind, off, vals in rnd.sample(DATA_MODS, n):
+        out.append(pd(ref, kind, off, rnd.choice(vals)))
+    return out
+
+
+def emit_pos(disc, i):
+    return struct.unpack_from("<4f", disc.emits[i], 96)
+
+
+def cam(v, x, y, z, w=1.0):
+    return "CAM %d %s %s %s %s" % (v, h(x), h(y), h(z), h(w))
+
+
+def cam_at(disc, v, i, dx=0.0):
+    x, y, z, w = emit_pos(disc, i)
+    return cam(v, x + dx, y, z, w)
+
+
+def rot_rows(ref, a, b):
+    """LocalWorld's rows 0 to 2: a turn of a about z, then b about x."""
+    ca, sa, cb, sb = math.cos(a), math.sin(a), math.cos(b), math.sin(b)
+    rows = ((ca, sa, 0.0, 0.0), (-sa * cb, ca * cb, sb, 0.0),
+            (sa * sb, -ca * sb, cb, 0.0))
+    return ["PE %s w %d %s" % (ref, 48 + 16 * r + 4 * c, h(rows[r][c]))
+            for r in range(3) for c in range(4)]
+
+
+def glob_data(disc, i):
+    """The D0.0 name of GLOBALB emitter i's data."""
+    want = disc.emit_data(i)
+    for j in disc.file_datas(0):
+        if disc.data_name(j) == want:
+            return "D0.0.%d" % j
+    raise SystemExit("emitter %d has no data in GLOBALB" % i)
+
+
+def s_interest(rnd, disc):
+    """UpdateInterestPoints with each view's camera there or not, into
+    each system."""
+    out = ["S", "UIP WE", "UIP FE"]
+    out += [cam(0, 1.0, 2.0, 3.0, 4.0), "UIP WE", "D"]
+    out += [cam(1, -5.0, 0.5, 1e9, -0.0), cam(2, 7.0, 0x7fc00000, 0.0, 1.0),
+            "UIP FE", "UIP WE"]
+    out += ["CAM 1 null", cam(0, 9.0, 9.0, 9.0, 9.0), "UIP FE",
+            "CAM 0 null", "CAM 2 null", cam(1, 3.0, 2.0, 1.0, 0.0), "UIP FE",
+            "CAM 1 null", "UIP WE", "D"]
+    return out
+
+
+def s_trigger(rnd, disc):
+    """TriggerEmitter at its edges, on copies of GLOBALB's emitters: far
+    and near, ON and not, bursts, the cycle's end, a countdown left over,
+    the last group kept, made again for another car, and kept when the
+    pool is full; DontEmit and the particles' pool running out. Then each
+    of GLOBALB's emitters, its data changed, from one view or another."""
+    out = ["S", "I"] + load(disc, 0, 0)
+    d0 = glob_data(disc, 0)
+    fc = struct.unpack_from("<f", disc.datas[int(d0.split(".")[2])], 128)[0]
+    far = [cam(v, 1e4 * (v + 1), 0.0, 0.0) for v in range(3)]
+    # e0 at the origin; each view at its FarClip, which is not near, and
+    # just inside it.
+    out += far + ["UIP WE"]
+    out += ["CP E0.1.0", "PE r st 1", "PE r w 96 0", "PE r w 100 0",
+            "PE r w 104 0", "TR WE r %s null" % DT30]
+    for v in (1, 2, 0):
+        out += [cam(v, fc, 0.0, 0.0), "UIP WE", "TR WE e0 %s null" % DT30,
+                cam(v, 0.0, -fc * 0.999, 0.0), "UIP WE",
+                "TR WE e0 %s null" % DT30, far[v], "UIP WE"]
+    # Inside FarClip across x and y, past it with z.
+    out += [cam(0, fc * 0.6, fc * 0.6, fc * 0.6), "UIP WE",
+            "TR WE e0 %s null" % DT30, far[0], "UIP WE"]
+    out += [cam(1, 0.5, 0.0, 0.0), "UIP WE", "TR WE e0 %s null" % DT30,
+            "DP WE",
+            "TR WE e0 %s null" % DT30, "TR WE e0 %s c0" % DT30,
+            "TR WE e0 %s c0" % DT30, "DP WE", "D"]
+    out += ["PE e0 st 0", "TR WE e0 %s null" % DT30,
+            "TR WE e0 %s null" % h(-0.5), "DP WE"]
+    for st in (2, 3, -1, 4):
+        out += ["PE e0 st %d" % st, "TR WE e0 %s null" % DT30,
+                "TR WE e0 %s c1" % h(-0.1)]
+    out += ["PE e0 st 1", "PE e0 rc %s" % h(0.01),
+            "TR WE e0 %s null" % h(0.1), "PE e0 rc %s" % h(5.0),
+            "TR WE e0 %s null" % h(0.1), "PE e0 rc %s" % h(-1.0),
+            "TR WE e0 %s null" % h(0.1), "PE e0 rc 0",
+            "PE e0 ec %s" % h(2.0), "TR WE e0 %s null" % DT30,
+            "PE e0 ec %s" % h(0.05), "TR WE e0 %s null" % h(0.2),
+            "PE e0 ec %s" % h(-3.0), "TR WE e0 %s null" % h(0.2), "DP WE"]
+    # DontEmit draws and keeps nothing, and its new group is freed.
+    out += ["PE e0 ec 0", "PE e0 de 1", "TR WE e0 %s c1" % h(0.25),
+            "DE e0", "PE e0 de 0", "TR WE e0 %s c1" % DT30, "DP WE"]
+    # A full group pool: the last group, whoever's car it has; none.
+    out += ["F gp 0", "TR WE e0 %s c0" % h(0.2), "F gp -1", "DP WE",
+            "CP E0.1.1", "PE r st 1", "F gp 0", "TR WE r %s null" % h(0.5),
+            "F gp -1", "DE r"]
+    # The particles' pool running out half way.
+    out += ["F pp 2", "TR WE e0 %s null" % h(-1.0), "F pp -1",
+            "F pp 0", "TR WE e0 %s null" % h(-1.0), "F pp -1", "DP WE", "D"]
+    out += ["K WE", "D"]
+    # The odd steps.
+    for dt in (0x7fc00000, 0xffc00000, 1e-30, -1e-30, 0x00000001):
+        out += ["PE e0 ec 0", "PE e0 rc 0", "TR WE e0 %s null" % h(dt)]
+    out += ["DP WE", "K WE"]
+    # Each of GLOBALB's emitters.
+    views = (1, 2, 0)
+    for k, i in enumerate(disc.file_emits(0)):
+        dref = glob_data(disc, i)
+        v = views[k % 3]
+        out += ["CP E0.1.%d" % i, "PE r st %d" % rnd.choice((1, 1, 1, 0))]
+        if k % 4 == 1:
+            out += data_mods(rnd, dref, rnd.randrange(1, 8))
+        if k % 5 == 2:
+            out += rot_rows("r", rnd.uniform(-3, 3), rnd.uniform(-1.5, 1.5))
+        if k % 3 == 0:
+            out += ["PE r w %d %s" % (112 + 4 * c, h(rnd.choice((0.0, 5.0,
+                                                                 -20.0))))
+                    for c in range(3)]
+        out += ["CAM %d null" % u for u in views if u != v]
+        out += [cam_at(disc, v, i, rnd.choice((0.0, 0.0, 30.0))), "UIP WE"]
+        car = rnd.choice(("null", "c0", "c1"))
+        for _ in range(rnd.randrange(1, 4)):
+            out += ["TR WE r %s %s" % (h(rnd.choice(DTS)), car)]
+        out += ["DP WE", "K WE", "ED r 3"]
+    out += ["D"]
+    return out
+
+
+def s_step(rnd, disc):
+    """DoTimeStep over a track's ON emitters, with the camera among them
+    and then elsewhere; the frontend's bases made again from every data's
+    keys; the ticker's difference."""
+    t12 = disc.index("TRACKB12")
+    em = list(disc.file_emits(t12))
+    out = ["S", "I"] + load(disc, 0, 0) + load(disc, 1, t12) + ["T"]
+    out += [cam_at(disc, 1, em[0])]
+    for k in range(48):
+        out.append("DT WE %s" % DT30)
+        if k % 12 == 11:
+            out += ["DP WE"]
+    out += ["D", "CAM 1 null", cam_at(disc, 2, em[17], 20.0)]
+    for dt in (1.0 / 60, 0.1, 0.5, 1.0 / 30, 2.0, 1.0 / 30, 0.0, 1.0 / 30):
+        out += ["DT WE %s" % h(dt)]
+    out += ["DP WE", "D"]
+    # The frontend's state: each data's bases.
+    out += ["FS 3", "DT FE %s" % DT30]
+    out += ["DD EDL.%d" % j for j in range(0, 150, 7)]
+    out += ["FS 2", "PD D0.0.4 w 144 %s" % h(0.5), "DT FE %s" % DT30,
+            "DD EDL.4", "FS 3", "DT FE %s" % DT30, "DD EDL.4"]
+    # Keys that are not a cubic's: two the same.
+    out += ["PD D0.0.5 w 148 0", "DT FE %s" % DT30, "DD EDL.5", "FS 0",
+            "DT WE %s" % DT30, "DP WE", "K WE", "DT WE %s" % DT30, "D"]
+    return out
+
+
+def s_physics(rnd, disc):
+    """The particles' step: frames turning at each rate and sheet, drag
+    and gravity, a car's motion, lives at their edges, and particles that
+    do not move."""
+    out = ["S", "I"] + load(disc, 0, 0)
+    out += ["CV 0 %s %s %s" % (h(10.0), h(-2.0), h(5.0)),
+            "CV 1 %s %s %s" % (h(-30.0), h(0.0), h(1.0))]
+    cases = [
+        [("b", 30, 1), ("w", 80, 0.5)],
+        [("b", 30, 1), ("w", 80, 0.0)],
+        [("b", 30, 1), ("w", 80, 1.0), ("w", 84, 0.3)],
+        [("b", 27, 15), ("b", 25, 2), ("b", 26, 2), ("b", 28, 1)],
+        [("b", 27, 30), ("b", 25, 3), ("b", 26, 1)],
+        [("b", 27, 127), ("b", 25, 0), ("b", 26, 0)],
+        [("b", 27, 200), ("b", 25, 1), ("b", 26, 3), ("b", 28, 1)],
+        [("w", 132, -10.0), ("w", 136, 0.6)],
+        [("w", 132, 20.0), ("w", 136, -0.05)],
+        [("w", 64, 0.0), ("w", 68, 0.0), ("w", 132, 0.0), ("w", 80, 0.0)],
+        [("w", 56, 33.0), ("w", 60, 0.0)],
+        [("w", 56, 70.0), ("w", 60, 0.25)],
+        [("w", 56, 0.05), ("w", 60, 0.7)],
+        [("w", 56, 1.0 / 30), ("w", 60, 0.0)],
+        [("w", 64, 600.0), ("w", 68, 1.0)],
+        [("w", 64, 275.0), ("w", 76, 359.0), ("b", 24, 1)],
+    ]
+    emits = list(disc.file_emits(0))
+    for k, mods in enumerate(cases):
+        i = emits[(k * 7) % len(emits)]
+        dref = glob_data(disc, i)
+        out += [pd(dref, kind, off, v) for kind, off, v in mods]
+        out += ["PD %s w 48 %s" % (dref, h(rnd.choice((5.0, 30.0)))),
+                "PD %s w 128 %s" % (dref, h(5000.0))]
+        out += ["CP E0.1.%d" % i, "PE r st 1", cam_at(disc, 1, i), "UIP WE"]
+        car = ("c0", "null", "c1")[k % 3]
+        out += ["TR WE r %s %s" % (h(0.5), car), "DP WE"]
+        for s in range(12):
+            out += ["DT WE %s" % h((1.0 / 30, 1.0 / 60, 0.1)[s % 3])]
+            if s % 4 == 3:
+                out += ["DP WE"]
+        out += ["K WE", "ED r 3"]
+    out += ["D"]
+    return out
+
+
+def s_cycles(rnd, disc):
+    """The auto emitters' cycles: ON and OFF turning over, cycles of zero
+    that never do, variances; and the walk stopping at the first emitter
+    that is neither, after its own turn."""
+    out = ["S", "I"] + load(disc, 0, 0) + [cam(0, 0.0, 0.0, 0.0)]
+    cyc = ((0.1, 0.5, 0.2, 0.25), (0.0, 0.0, 0.3, 0.0), (0.05, 0.0, 0.0, 0.0),
+           (1.0 / 30, 1.0, 1.0 / 30, 1.0), (0.5, 2.0, 0.07, 0.5))
+    emits = list(disc.file_emits(0))
+    for k, (on, onv, off, offv) in enumerate(cyc):
+        i = emits[3 + 11 * k]
+        dref = glob_data(disc, i)
+        out += ["PD %s on %s" % (dref, h(on)), "PD %s onv %s" % (dref, h(onv)),
+                "PD %s off %s" % (dref, h(off)),
+                "PD %s offv %s" % (dref, h(offv)),
+                "PD %s w 128 %s" % (dref, h(5000.0)),
+                "PD %s w 48 %s" % (dref, h(10.0)),
+                "PD %s w 56 %s" % (dref, h(0.2))]
+        out += ["CP E0.1.%d" % i, "PE r st %d" % (k & 1), "PE r rs 0",
+                "PE r w 96 0", "PE r w 100 0", "PE r w 104 0", "AA FE r"]
+    out += ["D"]
+    for s in range(40):
+        out += ["DT FE %s" % h((1.0 / 30, 0.05, 1.0 / 60, 0.2)[s % 4])]
+        if s % 10 == 9:
+            out += ["D", "DP FE"]
+    # The walk's stop.
+    for st in (3, 2, -1, 5, 1):
+        out += ["PE FE.auto.1 st %d" % st, "DT FE %s" % DT30,
+                "DT FE %s" % h(0.3), "D"]
+    out += ["PE FE.auto.0 st 4", "DT FE %s" % DT30, "D", "K FE", "D"]
+    return out
+
+
+def s_nebula(rnd, disc):
+    """The car select's nebula, as the frontend runs it: a copy of
+    XE_SelectCarNebula, ON in FrameEffects, the frontend's camera at it,
+    and the frontend's state."""
+    out = ["S", "I"] + load(disc, 0, 0)
+    neb = [i for i in disc.file_emits(0)
+           if _cstr(disc.emits[i][128:192]) == "XE_SelectCarNebula"]
+    assert len(neb) == 1
+    i = neb[0]
+    out += ["CP E0.1.%d" % i, "PE r st 1", "AA FE r", "D",
+            cam(0, 0.0, 0.5, 1.5), "FS 3"]
+    for s in range(120):
+        out += ["DT FE %s" % DT30]
+        if s % 30 == 29:
+            out += ["DP FE", "DD %s" % glob_data(disc, i)]
+    out += ["D", "FS 0"]
+    for s in range(30):
+        out += ["DT FE %s" % h(1.0 / 60 if s & 1 else 0.05)]
+    out += ["DP FE", "D"]
+    return out
+
+
+def s_fx_fuzz(rnd, disc, n, track):
+    """TriggerEmitter and DoTimeStep in any order, with the data and the
+    emitters changed under them, cameras moved and cars driven. It never
+    gives an emitter on a list a NULL data, never adds one twice, and
+    keeps each emission's rate in bounds."""
+    out = ["S", "I"] + load(disc, 0, 0) + load(disc, 1, track) + ["T"]
+    datas = ["D0.0.%d" % j for j in disc.file_datas(0)]
+    datas += ["D1.0.%d" % j for j in range(disc.files[track][2])]
+    gl = list(disc.file_emits(0))
+    tr = list(disc.file_emits(track))
+    count = {"FE": 0, "WE": len(gl) + len(tr)}
+    copies = []
+    free = []
+    r_free = False
+
+    def auto(s):
+        return "%s.auto.%d" % (s, rnd.randrange(max(1, count[s])))
+
+    def emitter():
+        k = rnd.random()
+        if copies and k < 0.4:
+            return rnd.choice(copies)
+        if count["FE"] and k < 0.6:
+            return auto("FE")
+        return auto("WE")
+
+    for _ in range(n):
+        k = rnd.random()
+        if k < 0.08:
+            i = rnd.choice(gl + tr)
+            out += ["CP %s" % ("E0.1.%d" % (i - gl[0]) if i in gl
+                               else "E1.1.%d" % (i - tr[0]))]
+            r_free = True
+        elif k < 0.13:
+            if r_free:
+                s = rnd.choice(("FE", "WE"))
+                out += ["PE r st %d" % rnd.choice((0, 1, 1, 2, 3)),
+                        "AA %s r" % s]
+                count[s] += 1
+                r_free = False
+        elif k < 0.33:
+            s = rnd.choice(("FE", "WE"))
+            e = "r" if r_free and rnd.random() < 0.5 else emitter()
+            out += ["TR %s %s %s %s" % (s, e, h(rnd.choice(DTS)),
+                                        rnd.choice(("null", "c0", "c1")))]
+        elif k < 0.50:
+            dt = rnd.choice((1.0 / 30, 1.0 / 30, 1.0 / 60, 0.1, 0.0, 0.5))
+            out += ["DT %s %s" % (rnd.choice(("FE", "WE")), h(dt))]
+        elif k < 0.60:
+            e = "r" if r_free and rnd.random() < 0.5 else emitter()
+            f = rnd.choice(("st", "rc", "ec", "rs", "de", "pos", "iv", "rot"))
+            if f == "st":
+                out += ["PE %s st %d" % (e, rnd.choice((0, 1, 1, 2, 3, -1)))]
+            elif f in ("rc", "ec"):
+                out += ["PE %s %s %s" % (e, f, h(rnd.choice(
+                    (0.0, 0.01, 0.5, 3.0, -1.0))))]
+            elif f in ("rs", "de"):
+                out += ["PE %s %s %08x" % (e, f, rnd.choice(
+                    (0, 1, rnd.randrange(1 << 32))))]
+            elif f == "pos":
+                out += ["PE %s w %d %s" % (e, 96 + 4 * c, h(rnd.uniform(
+                    -50, 50))) for c in range(3)]
+            elif f == "iv":
+                out += ["PE %s w %d %s" % (e, 112 + 4 * c, h(rnd.uniform(
+                    -30, 30))) for c in range(3)]
+            else:
+                out += rot_rows(e, rnd.uniform(-3, 3), rnd.uniform(-1.5, 1.5))
+        elif k < 0.70:
+            out += data_mods(rnd, rnd.choice(datas), rnd.randrange(1, 4))
+        elif k < 0.73:
+            d = rnd.choice(datas)
+            out += ["PD %s %s %s" % (d, f, h(rnd.choice((0.0, 0.05, 0.5, 2.0))))
+                    for f in ("on", "off")]
+        elif k < 0.80:
+            v = rnd.randrange(3)
+            if rnd.random() < 0.2:
+                out += ["CAM %d null" % v]
+            elif rnd.random() < 0.5:
+                out += [cam(v, rnd.uniform(-50, 50), rnd.uniform(-50, 50),
+                            rnd.uniform(-5, 5))]
+            else:
+                out += [cam_at(disc, v, rnd.choice(gl + tr),
+                               rnd.uniform(-20, 20))]
+        elif k < 0.83:
+            out += ["CV %d %s %s %s" % (rnd.randrange(2), h(rnd.uniform(-40, 40)),
+                                         h(rnd.uniform(-40, 40)),
+                                         h(rnd.uniform(-5, 5)))]
+        elif k < 0.85:
+            out += ["FS %d" % rnd.choice((0, 0, 0, 3, 1))]
+        elif k < 0.87:
+            out += ["UIP %s" % rnd.choice(("FE", "WE"))]
+        elif k < 0.89:
+            out += ["K %s" % rnd.choice(("FE", "WE"))]
+        elif k < 0.96:
+            out += ["DP %s" % rnd.choice(("FE", "WE"))]
+        elif k < 0.98:
+            out += ["DD %s" % rnd.choice(datas)]
+        else:
+            out += ["D"]
+        if r_free and out[-1].startswith("CP"):
+            copies.append("e%d" % len(copies))
+    out += ["FS 0", "DP FE", "DP WE", "D"]
+    return out
+
+
 def script(disc):
     rnd = random.Random(0xac1dfe)
     sc = [s_boot(rnd, disc)]
@@ -805,6 +1252,13 @@ def script(disc):
            s_edges(rnd, disc)]
     for n, t in ((400, "TRACKB12"), (1200, "TRACKB24"), (2500, "TRACKB61")):
         sc.append(s_fuzz(rnd, disc, n, disc.index(t)))
+    # TriggerEmitter and DoTimeStep, on a generator of their own so that
+    # the scenarios above stay as they were.
+    rnd = random.Random(0xac1d5b)
+    sc += [s_interest(rnd, disc), s_trigger(rnd, disc), s_step(rnd, disc),
+           s_physics(rnd, disc), s_cycles(rnd, disc), s_nebula(rnd, disc)]
+    for n, t in ((600, "TRACKB12"), (1500, "TRACKB33")):
+        sc.append(s_fx_fuzz(rnd, disc, n, disc.index(t)))
     return sc
 
 
@@ -850,7 +1304,18 @@ class Model(object):
         e.stub(B_OMALLOC, lambda em: self.omalloc(self.arg(0)))
         e.stub(B_FREE_SLOT, self.st_free)
         e.stub(B_FREE, self.st_bfree)
+        e.stub(B_MALLOC, lambda em: self.omalloc(self.arg(0), "malloc"))
+        e.stub(B_IS_FULL, self.st_is_full)
         e.stub(GET_TEXTURE_INFO, self.st_gti)
+        e.stub(E_GET_VIEW, self.st_get_view)
+        e.stub(B_TICKER, self.st_ticker)
+        e.stub(B_TICKER_DIFF, self.st_ticker_diff)
+        e.hook(TRIGGER, lambda em: em.put32(
+            (em.reg[29] - TRIGGER_FRAME + 204) & M32, 0))
+        e.hook(DO_STEP, lambda em: em.write(
+            (em.reg[29] - STEP_FRAME) & M32, bytes(64)))
+        e.call(EMATH_INIT, limit=10000)
+        e.call(EMATH_CTOR, limit=1000)
         for i, nm in enumerate(POOL_NAMES):
             a = 0x002b0000 + (-11480, -11456, -11432)[i]
             assert self.cstr(a) == nm, nm
@@ -860,6 +1325,7 @@ class Model(object):
         self.reg = 0
         self.tex_hash = []
         self.txm = []
+        self.ticker = 0
 
     def emit(self, s):
         self.out.append(s)
@@ -912,17 +1378,17 @@ class Model(object):
     def st_del_pool(self, em):
         self.emit("  delpool %s" % self.pool_name(self.arg(0)))
 
-    def omalloc(self, p):
+    def omalloc(self, p, what="omalloc"):
         i = self.pool_index(p)
         if i < 0:
-            self.emit("  omalloc %s -> null" % ("null" if p == 0 else "?"))
+            self.emit("  %s %s -> null" % (what, "null" if p == 0 else "?"))
             return 0
         if self.fail_after[i] == 0:
-            self.emit("  omalloc %s -> null" % POOL_SHORT[i])
+            self.emit("  %s %s -> null" % (what, POOL_SHORT[i]))
             return 0
         k = self.used[i].find(0)
         if k < 0:
-            self.emit("  omalloc %s -> full" % POOL_SHORT[i])
+            self.emit("  %s %s -> full" % (what, POOL_SHORT[i]))
             return 0
         if self.fail_after[i] > 0:
             self.fail_after[i] -= 1
@@ -930,8 +1396,33 @@ class Model(object):
         a = ARENA[i] + SLOT[i] * k
         zero = self.w(p + POOL_FLAGS) & 2
         self.fill(a, SLOT[i], 0 if zero else PATB)
-        self.emit("  omalloc %s -> %s" % (POOL_SHORT[i], self.nm(a)))
+        self.emit("  %s %s -> %s" % (what, POOL_SHORT[i], self.nm(a)))
         return a
+
+    def st_is_full(self, em):
+        p = self.arg(0)
+        i = self.pool_index(p)
+        if i < 0:
+            self.emit("  full? %s -> 1" % ("null" if p == 0 else "?"))
+            return 1
+        r = 1 if self.fail_after[i] == 0 or self.used[i].find(0) < 0 else 0
+        self.emit("  full? %s -> %d" % (POOL_SHORT[i], r))
+        return r
+
+    def st_get_view(self, em):
+        v = s32(self.arg(0))
+        if not 0 <= v < NVIEW:
+            raise SystemExit("view %d" % v)
+        return VIEWS + 0x100 * v
+
+    def st_ticker(self, em):
+        self.ticker = (self.ticker + TICK) & M32
+        return self.ticker
+
+    def st_ticker_diff(self, em):
+        d = (self.arg(1) - self.arg(0)) & M32
+        self.e.fpr[0] = fb(struct.unpack("<f", struct.pack("<f", float(d)))[0]
+                           * 0.5)
 
     def st_free(self, em):
         p, slot = self.arg(0), self.arg(1)
@@ -982,6 +1473,9 @@ class Model(object):
                  WE + 8: "WE.auto", G_EDL: "EDL"}
         if a in fixed:
             return fixed[a]
+        for k in range(NCAR):
+            if a == CARS + 0x800 * k:
+                return "c%d" % k
         if LISTS <= a < LISTS + 8 * NLIST and (a - LISTS) % 8 == 0:
             return "L%d" % ((a - LISTS) // 8)
         if TEXS <= a < TEXS + TEX_SIZE * len(self.tex_hash) \
@@ -1041,6 +1535,8 @@ class Model(object):
             return ARENA[p] + SLOT[p] * self.atoi(t[1:])
         if t[0] == "t" and t[1:2].isdigit():
             return TEXS + TEX_SIZE * self.atoi(t[1:])
+        if t[0] == "c" and t[1:2].isdigit():
+            return CARS + 0x800 * self.atoi(t[1:])
         dot = t.rfind(".")
         if dot < 0:
             if t[0] == "L":
@@ -1140,6 +1636,38 @@ class Model(object):
             " ".join("%02x" % u8(s + 72 + i) for i in range(6)),
             s32(w(s + 80)), s32(w(s + 84)), fx(w(s + 88)), fx(w(s + 92)),
             " ".join(fx(w(s + 16 + 4 * i)) for i in range(12))))
+
+    def pip(self, tag, s):
+        self.emit("  %s ip %s" % (tag, " ".join(fx(self.w(s + 16 + 4 * i))
+                                                for i in range(12))))
+
+    def pparticles(self, tag, s):
+        w, mem = self.w, self.e.mem
+        g, c = w(s), 0
+        while g != s and c < 5000:
+            parts = ["  %s %s d %s e %s c %s:" % (
+                tag, self.nm(g), self.nm(w(g + 8)), self.nm(w(g + 12)),
+                self.nm(w(g + 16)))]
+            pl = g + 20
+            p, k = w(pl), 0
+            while p != pl and k < 5000:
+                life, ang, spd, inh, pad = struct.unpack_from("<HHHBB", mem,
+                                                              p + 8)
+                vx, vy, vz, fr = struct.unpack_from("<BBBB", mem, p + 28)
+                parts.append(
+                    " %s[%04x %04x %04x %02x %02x %s %s %s %02x %02x %02x %02x]"
+                    % (self.nm(p), life, ang, spd, inh, pad, fx(w(p + 16)),
+                       fx(w(p + 20)), fx(w(p + 24)), vx, vy, vz, fr))
+                p = w(p)
+                k += 1
+            self.emit("".join(parts))
+            g = w(g)
+            c += 1
+
+    def pbases(self, d):
+        self.emit("  cb %s xb %s" % (
+            " ".join(fx(self.w(d + 256 + 4 * i)) for i in range(16)),
+            " ".join(fx(self.w(d + 320 + 4 * i)) for i in range(16))))
 
     def pool_str(self, p):
         if p == 0:
@@ -1254,6 +1782,11 @@ class Model(object):
         self.reg = 0
         self.tex_hash = []
         self.txm = []
+        e.write(VIEWS, bytes(0x100 * NVIEW))
+        e.write(CAMS, bytes(0x200 * NVIEW))
+        e.write(CARS, bytes(0x800 * NCAR))
+        self.ticker = 0
+        self.put(G_FLOW, 0)
 
     def sys_tok(self, t):
         return FE if t == "FE" else WE
@@ -1290,8 +1823,20 @@ class Model(object):
             self.add_tail(pl, p)
         self.add_head(s, g)
 
-    def set_field_e(self, e, f, v):
-        if f == "st":
+    def set_tail(self, a, first_off, f, args):
+        off, v = int(args[0], 0), int(args[1], 16)
+        if off < first_off:
+            raise SystemExit("offset %d before the tail" % off)
+        if f == "w":
+            self.put(a + off, v)
+        else:
+            self.e.write(a + off, bytes([v & 0xff]))
+
+    def set_field_e(self, e, f, args):
+        v = args[0]
+        if f in ("w", "b"):
+            self.set_tail(e, 36, f, args)
+        elif f == "st":
             self.put(e + 16, int(v, 0))
         elif f in ("rc", "ec", "rs", "de", "nh", "dh"):
             off = {"rc": 20, "ec": 24, "rs": 36, "de": 40, "nh": 8,
@@ -1310,10 +1855,13 @@ class Model(object):
         else:
             raise SystemExit("bad field %s" % f)
 
-    def set_field_d(self, d, f, v):
+    def set_field_d(self, d, f, args):
+        v = args[0]
         offs = {"on": 32, "onv": 36, "off": 40, "offv": 44, "nh": 8,
                 "gh": 16, "th": 12}
-        if f in offs:
+        if f in ("w", "b"):
+            self.set_tail(d, 24, f, args)
+        elif f in offs:
             self.put(d + offs[f], int(v, 16))
         elif f == "tex":
             self.put(d + 20, self.ref(v))
@@ -1344,17 +1892,46 @@ class Model(object):
             if e == 0:
                 self.emit("  (none)")
             else:
-                self.set_field_e(e, t[2], t[3])
+                self.set_field_e(e, t[2], t[3:])
             return
         if c == "PD":
             d = self.ref(t[1])
             if d == 0:
                 self.emit("  (none)")
             else:
-                self.set_field_d(d, t[2], t[3])
+                self.set_field_d(d, t[2], t[3:])
             return
         if c == "SEED":
             self.put(G_SEED, int(t[1], 16))
+            return
+        if c == "CAM":
+            v = int(t[1], 0)
+            if t[2] == "null":
+                self.put(VIEWS + 0x100 * v + VIEW_CAMERA, 0)
+            else:
+                cam = CAMS + 0x200 * v
+                for i in range(4):
+                    self.put(cam + CAM_POSITION + 4 * i, int(t[2 + i], 16))
+                self.put(VIEWS + 0x100 * v + VIEW_CAMERA, cam)
+            return
+        if c == "CV":
+            car = CARS + 0x800 * int(t[1], 0)
+            for i in range(3):
+                self.put(car + CAR_VELOCITY + 4 * i, int(t[2 + i], 16))
+            return
+        if c == "FS":
+            self.put(G_FLOW, int(t[1], 0))
+            return
+        if c == "DP":
+            s = self.sys_tok(t[1])
+            self.pparticles("FE" if s == FE else "WE", s)
+            return
+        if c == "DD":
+            d = self.ref(t[1])
+            if d == 0:
+                self.emit("  (none)")
+            else:
+                self.pbases(d)
             return
         if c == "F":
             self.fail_after[POOL_SHORT.index(t[1])] = int(t[2], 0)
@@ -1441,6 +2018,23 @@ class Model(object):
                 self.emit("  (none)")
             else:
                 self.call(GROUP_DEL, g, f)
+        elif c == "UIP":
+            s = self.sys_tok(t[1])
+            self.call(UPDATE_IP, s)
+            self.pip("FE" if s == FE else "WE", s)
+        elif c == "TR":
+            s, em, car = self.sys_tok(t[1]), self.ref(t[2]), self.ref(t[4])
+            if em == 0:
+                self.emit("  (none)")
+            else:
+                self.e.fpr[12] = int(t[3], 16)
+                self.call(TRIGGER, s, em, car)
+                self.emit("  em" + self.pemit_short(em))
+        elif c == "DT":
+            s = self.sys_tok(t[1])
+            self.e.fpr[12] = int(t[2], 16)
+            self.call(DO_STEP, s)
+            self.emit("  ut %s" % fx(self.w(s + 92)))
         elif c == "CT":
             s = self.sys_tok(t[1])
             self.fill(s, SYS_SIZE)
@@ -1508,8 +2102,8 @@ def write_inputs(d, disc, sc):
 # ============================================================ the mutations
 
 
-def M(name, before, after, rel=ACIDC):
-    return (name, rel, before, after)
+def M(name, before, after, rel=ACIDC, pre=""):
+    return (name, rel, pre + before, pre + after)
 
 
 MUTATIONS = [
@@ -1852,7 +2446,8 @@ MUTATIONS = [
     M("gx-no-particles", "        unlink_node(p);\n        bSlotFree(AcidParticleSlotPool, p);",
       "        unlink_node(p);"),
     M("gx-particle-pool", "        bSlotFree(AcidParticleSlotPool, p);",
-      "        bSlotFree(AcidActiveGroupSlotPool, p);"),
+      "        bSlotFree(AcidActiveGroupSlotPool, p);",
+      pre="        unlink_node(p);\n"),
     M("gx-flag", "    if (flags & 1)\n        bSlotFree(AcidActiveGroupSlotPool, g);",
       "    if (flags & 2)\n        bSlotFree(AcidActiveGroupSlotPool, g);"),
     M("gx-pool", "        bSlotFree(AcidActiveGroupSlotPool, g);",
@@ -1876,19 +2471,25 @@ MUTATIONS = [
       "    s->UpdateTime = 0.0f;\n    s->InterestPoints[0].x = 0.0f;\n"),
     # AddAutoEmitter
     M("aa-seed-always", "    if (e->RandomSeed == 0) {\n        AcidRandomSeed",
-      "    if (1) {\n        AcidRandomSeed"),
+      "    if (1) {\n        AcidRandomSeed",
+      pre="{\n"),
     M("aa-seed-never", "    if (e->RandomSeed == 0) {\n        AcidRandomSeed",
-      "    if (0) {\n        AcidRandomSeed"),
-    M("aa-seed-no-step", "        AcidRandomSeed = acid_xorshift(AcidRandomSeed);\n", ""),
+      "    if (0) {\n        AcidRandomSeed",
+      pre="{\n"),
+    M("aa-seed-no-step", "        AcidRandomSeed = acid_xorshift(AcidRandomSeed);\n", "",
+      pre="{\n    if (e->RandomSeed == 0) {\n"),
     M("aa-seed-scale", "                                             * 2147483648.0f);",
-      "                                             * 2147483520.0f);"),
+      "                                             * 2147483520.0f);",
+      pre="{\n    if (e->RandomSeed == 0) {\n        AcidRandomSeed = acid_xorshift(AcidRandomSeed);\n        e->RandomSeed = (uint32_t)ee_trunc_w(acid_unit(AcidRandomSeed)\n"),
     M("aa-seed-trunc", "e->RandomSeed = (uint32_t)ee_trunc_w(acid_unit(AcidRandomSeed)\n"
       "                                             * 2147483648.0f);",
       "e->RandomSeed = (uint32_t)(acid_unit(AcidRandomSeed)\n"
-      "                                             * 2147483648.0f);"),
+      "                                             * 2147483648.0f);",
+      pre="{\n    if (e->RandomSeed == 0) {\n        AcidRandomSeed = acid_xorshift(AcidRandomSeed);\n        "),
     M("aa-seed-raw", "e->RandomSeed = (uint32_t)ee_trunc_w(acid_unit(AcidRandomSeed)\n"
       "                                             * 2147483648.0f);",
-      "e->RandomSeed = AcidRandomSeed;"),
+      "e->RandomSeed = AcidRandomSeed;",
+      pre="{\n    if (e->RandomSeed == 0) {\n        AcidRandomSeed = acid_xorshift(AcidRandomSeed);\n        "),
     M("aa-null-data", "    if (e->EmitterData == NULL || e->State == ACID_DISABLED) {",
       "    if (e->State == ACID_DISABLED) {"),
     M("aa-disabled", "    if (e->EmitterData == NULL || e->State == ACID_DISABLED) {",
@@ -1907,17 +2508,25 @@ MUTATIONS = [
     M("aa-on-off", "        if (e->State != ACID_OFF) {\n            cycle = d->OnCycle;",
       "        if (e->State == ACID_OFF) {\n            cycle = d->OnCycle;"),
     M("aa-on-var", "            var = d->OnCycleVariance;",
-      "            var = d->OffCycleVariance;"),
-    M("aa-off-cycle", "            cycle = d->OffCycle;", "            cycle = d->OnCycle;"),
+      "            var = d->OffCycleVariance;",
+      pre="            cycle = d->OnCycle;\n"),
+    M("aa-off-cycle", "            cycle = d->OffCycle;", "            cycle = d->OnCycle;",
+      pre="        } else {\n"),
     M("aa-off-var", "            var = d->OffCycleVariance;\n        }",
       "            var = d->OnCycleVariance;\n        }"),
-    M("aa-zero", "        if (cycle != 0.0f) {", "        if (cycle > 0.0f) {"),
-    M("aa-zero-always", "        if (cycle != 0.0f) {", "        if (1) {"),
-    M("aa-w", "            float w = var * cycle;", "            float w = var;"),
-    M("aa-no-step", "            e->RandomSeed = acid_xorshift(e->RandomSeed);\n", ""),
-    M("aa-sub", "            cycle = cycle - w;\n", ""),
+    M("aa-zero", "        if (cycle != 0.0f) {", "        if (cycle > 0.0f) {",
+      pre="        }\n"),
+    M("aa-zero-always", "        if (cycle != 0.0f) {", "        if (1) {",
+      pre="        }\n"),
+    M("aa-w", "            float w = var * cycle;", "            float w = var;",
+      pre="        if (cycle != 0.0f) {\n"),
+    M("aa-no-step", "            e->RandomSeed = acid_xorshift(e->RandomSeed);\n", "",
+      pre="\n"),
+    M("aa-sub", "            cycle = cycle - w;\n", "",
+      pre="            e->RandomSeed = acid_xorshift(e->RandomSeed);\n"),
     M("aa-add", "            cycle = cycle + acid_unit(e->RandomSeed) * w;",
-      "            cycle = cycle + acid_unit(e->RandomSeed) * var;"),
+      "            cycle = cycle + acid_unit(e->RandomSeed) * var;",
+      pre="            cycle = cycle - w;\n"),
     M("aa-double", "            cycle = cycle - w;\n"
       "            cycle = cycle + acid_unit(e->RandomSeed) * w;",
       "            cycle = (float)((double)cycle - (double)w\n"
@@ -1933,10 +2542,13 @@ MUTATIONS = [
       "        e->RemainingCycleTime = cycle;",
       "        add_tail(&s->AutoEmitterList, &e->Node);\n"
       "        e->RemainingCycleTime = cycle;"),
-    M("aa-no-rc", "        e->RemainingCycleTime = cycle;\n", ""),
-    M("aa-no-ec", "        e->EmissionCountdown = 0.0f;\n", ""),
+    M("aa-no-rc", "        e->RemainingCycleTime = cycle;\n", "",
+      pre="        add_head(&s->AutoEmitterList, &e->Node);\n"),
+    M("aa-no-ec", "        e->EmissionCountdown = 0.0f;\n", "",
+      pre="        e->RemainingCycleTime = cycle;\n"),
     M("aa-ec-cycle", "        e->EmissionCountdown = 0.0f;\n",
-      "        e->EmissionCountdown = cycle;\n"),
+      "        e->EmissionCountdown = cycle;\n",
+      pre="        e->RemainingCycleTime = cycle;\n"),
     M("aa-library", "        if (e->State != ACID_LIBRARY)\n            e->State = ACID_DISABLED;",
       "        e->State = ACID_DISABLED;"),
     M("aa-other-keep", "        if (e->State != ACID_LIBRARY)\n            e->State = ACID_DISABLED;",
@@ -1958,6 +2570,280 @@ MUTATIONS = [
       "        acid_active_group_delete((AcidActiveGroup *)g, 2);"),
     M("kill-no-unlink", "        unlink_node(g);\n        acid_active_group_delete",
       "        s->ActiveGroupList.next = g->next;\n        acid_active_group_delete"),
+    # the draws
+    M("next-no-step", "    *seed = acid_xorshift(*seed);\n    return acid_unit(*seed);",
+      "    return acid_unit(acid_xorshift(*seed));"),
+    M("bam-360", "* 65536.0f) / 360);", "* 65536.0f) / 359);"),
+    M("bam-scale", "* 65536.0f) / 360);", "* 65535.0f) / 360);"),
+    M("bam-half", "ee_trunc_w((u * full - half)", "ee_trunc_w((u * full + half)"),
+    # UpdateInterestPoints
+    M("uip-order", "        EVIEW_ID_PLAYER1, EVIEW_ID_PLAYER2, EVIEW_ID_FRONTEND",
+      "        EVIEW_ID_PLAYER2, EVIEW_ID_PLAYER1, EVIEW_ID_FRONTEND"),
+    M("uip-12", "                   sizeof s->InterestPoints[i]);",
+      "                   12);"),
+    M("uip-target", "&c->CurrentKey.Position,", "&c->CurrentKey.Target,"),
+    # TriggerEmitter: the gates
+    M("tr-ip-2", "    for (i = 0; i < 3; i++) {\n        float dx = e->LocalWorld.v3.x",
+      "    for (i = 0; i < 2; i++) {\n        float dx = e->LocalWorld.v3.x"),
+    M("tr-farclip-le", "sqrtf(dx * dx + dy * dy + dz * dz) < d->FarClip",
+      "sqrtf(dx * dx + dy * dy + dz * dz) <= d->FarClip"),
+    M("tr-dist-2d", "sqrtf(dx * dx + dy * dy + dz * dz) < d->FarClip",
+      "sqrtf(dx * dx + dy * dy) < d->FarClip"),
+    M("tr-seed-far", "    if (e->RandomSeed == 0) {\n"
+      "        AcidRandomSeed = acid_xorshift(AcidRandomSeed);\n"
+      "        e->RandomSeed = (uint32_t)ee_trunc_w(acid_unit(AcidRandomSeed)\n"
+      "                                             * 2147483648.0f);\n    }\n"
+      "    if (!close_enough)\n        return;\n",
+      "    if (!close_enough)\n        return;\n"
+      "    if (e->RandomSeed == 0) {\n"
+      "        AcidRandomSeed = acid_xorshift(AcidRandomSeed);\n"
+      "        e->RandomSeed = (uint32_t)ee_trunc_w(acid_unit(AcidRandomSeed)\n"
+      "                                             * 2147483648.0f);\n    }\n"),
+    M("tr-on-gate", "    if (e->State != ACID_ON && !(time_step < 0.0f))\n        return;",
+      "    if (e->State != ACID_ON)\n        return;"),
+    M("tr-gate-le", "    if (e->State != ACID_ON && !(time_step < 0.0f))",
+      "    if (e->State != ACID_ON && !(time_step <= 0.0f))"),
+    M("tr-rc-zero", "if (e->RemainingCycleTime != 0.0f && e->RemainingCycleTime < ets)",
+      "if (e->RemainingCycleTime < ets)"),
+    M("tr-burst-sign", "        ets = -time_step;\n    }", "        ets = time_step;\n    }"),
+    M("tr-ec-le", "    if (ec < ets) {\n        g = e->LastActiveGroup;",
+      "    if (ec <= ets) {\n        g = e->LastActiveGroup;"),
+    # the group
+    M("tr-lag-emitter", "(g == NULL || g->Emitter != e || g->pCar != car)",
+      "(g == NULL || g->pCar != car)"),
+    M("tr-lag-car", "(g == NULL || g->Emitter != e || g->pCar != car)",
+      "(g == NULL || g->Emitter != e)"),
+    M("tr-full-ignored", "            && !bIsSlotPoolFull(AcidActiveGroupSlotPool)) {",
+      "            ) {"),
+    M("tr-group-head", "            add_tail(&s->ActiveGroupList, &g->Node);",
+      "            add_head(&s->ActiveGroupList, &g->Node);"),
+    M("tr-no-lag", "            e->LastActiveGroup = g;\n", ""),
+    M("tr-group-car", "            g->pCar = car;\n", "            g->pCar = NULL;\n"),
+    # the constants
+    M("tr-angle-scale", "d->InitialAngleRange * 182.04445f;",
+      "d->InitialAngleRange * 182.0f;"),
+    M("tr-angle-half", "float angle = -angle_range * 0.5f;",
+      "float angle = angle_range * 0.5f;"),
+    M("tr-npv", "float npv = d->NumParticlesVariance * d->NumParticles;",
+      "float npv = d->NumParticlesVariance;"),
+    M("tr-spv", "float spv = d->SpeedVariance * d->Speed;",
+      "float spv = d->SpeedVariance;"),
+    M("tr-miv", "float miv = d->MotionInheritVariance * d->MotionInherit;",
+      "float miv = d->MotionInheritVariance;"),
+    M("tr-lv", "float lv = d->LifeVariance * d->Life;", "float lv = d->LifeVariance;"),
+    M("tr-half", "half = full * 0.5f;", "half = full * 0.25f;"),
+    M("tr-np", "float np = d->NumParticles - npv;", "float np = d->NumParticles;"),
+    M("tr-speed", "float speed = d->Speed - spv;", "float speed = d->Speed;"),
+    M("tr-life", "float life = d->Life - lv;", "float life = d->Life;"),
+    M("tr-mi", "float mi = d->MotionInherit - miv;", "float mi = d->MotionInherit;"),
+    M("tr-start-frame", "            if (d->RandomStartFrame)\n                num_anim_frames",
+      "            if (0)\n                num_anim_frames"),
+    M("tr-frames-w", "                    << ((int8_t)d->ContactSheetH & 31));\n            pdir.w",
+      "                    << ((int8_t)d->ContactSheetW & 31));\n            pdir.w"),
+    # the loop and the direction
+    M("tr-loop-lt", "            while (ec <= ets) {", "            while (ec < ets) {"),
+    M("tr-disc-off", "                if (d->SpreadAsDisc) {", "                if (0) {"),
+    M("tr-spin-range", "spread_bam(acid_next(&seed), 360.0f,\n"
+      "                                               180.0f);",
+      "spread_bam(acid_next(&seed), 360.0f,\n"
+      "                                               90.0f);"),
+    M("tr-disc-order",
+      "                    uint16_t yaw = spread_bam(acid_next(&seed), full, half);\n"
+      "                    uint16_t spin = spread_bam(acid_next(&seed), 360.0f,\n"
+      "                                               180.0f);",
+      "                    uint16_t spin = spread_bam(acid_next(&seed), 360.0f,\n"
+      "                                               180.0f);\n"
+      "                    uint16_t yaw = spread_bam(acid_next(&seed), full, half);"),
+    M("tr-disc-cos-sin", "                    pdir.x = bCosBam(spin);\n"
+      "                    pdir.y = bSinBam(spin);",
+      "                    pdir.x = bSinBam(spin);\n"
+      "                    pdir.y = bCosBam(spin);"),
+    M("tr-disc-z", "                    pdir.z = 0.0f;\n", "                    pdir.z = 1.0f;\n"),
+    M("tr-disc-rot", "eRotateY(&rot, &eMathIdentityMatrix, yaw);",
+      "eRotateX(&rot, &eMathIdentityMatrix, yaw);"),
+    M("tr-disc-no-orient", "                    eMulVector4(&pdir, &local_orientation, &pdir);\n", ""),
+    M("tr-xyz-order", "                    eRotateX(&rot, &eMathIdentityMatrix, ax);\n"
+      "                    eRotateY(&rot, &rot, ay);",
+      "                    eRotateY(&rot, &eMathIdentityMatrix, ay);\n"
+      "                    eRotateX(&rot, &rot, ax);"),
+    M("tr-no-z", "                    eRotateZ(&rot, &rot, az);\n", ""),
+    M("tr-axis-v2", "eMulVector4(&pdir, &rot, &local_world.v2);",
+      "eMulVector4(&pdir, &rot, &local_world.v1);"),
+    # the place, the frame, life, angle and speed
+    M("tr-vol-x", "+ (u * d->VolumeExtent.x - d->VolumeExtent.x * 0.5f);",
+      "+ (u * d->VolumeExtent.x);"),
+    M("tr-vol-y-center", "                ppos.y = d->VolumeCenter.y\n",
+      "                ppos.y = d->VolumeCenter.x\n"),
+    M("tr-ppos-w", "                ppos.w = 1.0f;\n", "                ppos.w = 0.0f;\n"),
+    M("tr-ppos-world", "eMulVector4(&ppos, &local_world, &ppos);",
+      "eMulVector4(&ppos, &local_orientation, &ppos);"),
+    M("tr-frame-draw", "anim_frame = (uint32_t)ee_trunc_w(acid_next(&seed)",
+      "anim_frame = (uint32_t)ee_trunc_w(acid_unit(seed)"),
+    M("tr-life-var", "plife = life + acid_next(&seed) * lv;",
+      "plife = life + acid_next(&seed) * life;"),
+    M("tr-angle-var", "fangle = angle + acid_next(&seed) * angle_range;",
+      "fangle = angle + acid_next(&seed) * angle;"),
+    M("tr-speed-var", "pspeed = speed + acid_next(&seed) * spv;",
+      "pspeed = speed + acid_next(&seed) * speed;"),
+    M("tr-draw-order", "                plife = life + acid_next(&seed) * lv;\n"
+      "                fangle = angle + acid_next(&seed) * angle_range;",
+      "                fangle = angle + acid_next(&seed) * angle_range;\n"
+      "                plife = life + acid_next(&seed) * lv;"),
+    # the inherited motion
+    M("tr-mi-always", "                if (mi != 0.0f) {", "                if (1) {"),
+    M("tr-inherit-hi", "                    if (!(inherit < 1.0f))\n"
+      "                        inherit = 1.0f;\n", ""),
+    M("tr-motionlive", "                    if (!d->MotionLive) {", "                    if (1) {"),
+    M("tr-vel-iv", "+ inherit * e->InheritVelocity.x;", "+ e->InheritVelocity.x;"),
+    M("tr-vel-y", "float vy = pspeed * pdir.y\n", "float vy = pspeed * pdir.x\n"),
+    M("tr-len", "float len2 = vx * vx + vy * vy + vz * vz;",
+      "float len2 = vx * vx + vy * vy;"),
+    M("tr-pspeed-keep", "                        pspeed = sqrtf(len2);\n", ""),
+    M("tr-q", "                        q = 1.0f / sqrtf(len2);",
+      "                        q = 1.0f / len2;"),
+    # the particle
+    M("tr-angle-mask", "& 0xfffeu;", "& 0xffffu;"),
+    M("tr-rrd", "                pangle |= seed & 1u;", "                pangle |= 1u;"),
+    M("tr-rrd-always", "                if (d->RandomRotationDirection)\n"
+      "                    pangle |= seed & 1u;", "                pangle |= seed & 1u;"),
+    M("tr-cap-60", "                if (60.0f < plife)\n                    plife = 60.0f;",
+      "                if (32.0f < plife)\n                    plife = 32.0f;"),
+    M("tr-dontemit", "                if (e->DontEmit == 0\n", "                if (1\n"),
+    M("tr-pp-full", "                    && !bIsSlotPoolFull(AcidParticleSlotPool)) {",
+      "                    ) {"),
+    M("tr-sp-clamp", "                    if (!(sp < 65535.0f))           // gp-32100\n"
+      "                        sp = 65535.0f;\n", ""),
+    M("tr-sp-scale", "float sp = pspeed * 128.0f;", "float sp = pspeed * 127.0f;"),
+    M("tr-vz-127", "p->VZ = (int8_t)ee_trunc_w(pdir.z * 127.0f);",
+      "p->VZ = (int8_t)ee_trunc_w(pdir.z * 128.0f);"),
+    M("tr-vx-y", "p->VX = (int8_t)ee_trunc_w(pdir.x * 127.0f);",
+      "p->VX = (int8_t)ee_trunc_w(pdir.y * 127.0f);"),
+    M("tr-inherit-255", "p->Inherit = (uint8_t)ee_trunc_w(inherit * 255.0f);",
+      "p->Inherit = (uint8_t)ee_trunc_w(inherit * 256.0f);"),
+    M("tr-life-1024", "p->Life = (uint16_t)ee_trunc_w(plife * 1024.0f);",
+      "p->Life = (uint16_t)ee_trunc_w(plife * 1000.0f);"),
+    M("tr-xyz", "                    p->Y = py;\n", "                    p->Y = px;\n"),
+    M("tr-particle-head", "                    add_tail(&g->ParticleList, &p->Node);",
+      "                    add_head(&g->ParticleList, &p->Node);"),
+    # the countdown
+    M("tr-ec-rate", "ec = 1.0f / (np + acid_next(&seed) * npv);", "ec = 1.0f / np;"),
+    M("tr-ec-240", "                if (240.0f < ec)\n                    ec = 240.0f;",
+      "                if (120.0f < ec)\n                    ec = 120.0f;"),
+    M("tr-seed-store", "            e->RandomSeed = seed;\n", ""),
+    M("tr-empty-keep", "            if (g->ParticleList.next == &g->ParticleList) {\n"
+      "                unlink_node(&g->Node);\n"
+      "                acid_active_group_delete(g, 3);\n            }\n        }\n    }",
+      "        }\n    }"),
+    M("tr-ec-burst", "    e->EmissionCountdown = 0.0f <= time_step ? ec - ets : 0.0f;",
+      "    e->EmissionCountdown = ec - ets;"),
+    M("tr-ec-final", "    e->EmissionCountdown = 0.0f <= time_step ? ec - ets : 0.0f;",
+      "    e->EmissionCountdown = 0.0f <= time_step ? ec : 0.0f;"),
+    # DoTimeStep: the auto emitters
+    M("dt-lifestep", "int32_t lifestep = ee_trunc_w(dt * 1024.0f);",
+      "int32_t lifestep = ee_trunc_w(dt * 1000.0f);"),
+    M("dt-no-uip", "    acid_system_update_interest_points(s);\n"
+      "    for (n = s->AutoEmitterList.next",
+      "    for (n = s->AutoEmitterList.next"),
+    M("dt-trigger-dt", "acid_system_trigger_emitter(s, e, dt, NULL);",
+      "acid_system_trigger_emitter(s, e, -dt, NULL);"),
+    M("dt-found-off", "        else if (st != ACID_OFF)\n            found = 1;",
+      "        else\n            found = 1;"),
+    M("dt-no-break", "        if (found)\n            break;\n", ""),
+    M("dt-rct-zero", "        if (rct != 0.0f && (uint32_t)st < 2) {",
+      "        if ((uint32_t)st < 2) {"),
+    M("dt-rct-signed", "        if (rct != 0.0f && (uint32_t)st < 2) {",
+      "        if (rct != 0.0f && st < 2) {"),
+    M("dt-rct-le", "            if (!(rct <= 0.0f)) {", "            if (!(rct < 0.0f)) {"),
+    M("dt-off-on-var", "                    var = d->OnCycleVariance;\n"
+      "                    st = ACID_ON;",
+      "                    var = d->OffCycleVariance;\n"
+      "                    st = ACID_ON;"),
+    M("dt-off-cycle", "                    cycle = d->OnCycle;\n                } else {",
+      "                    cycle = d->OffCycle;\n                } else {"),
+    M("dt-on-cycle", "                    cycle = d->OffCycle;\n                }",
+      "                    cycle = d->OnCycle;\n                }"),
+    M("dt-flip-st", "                    st = ACID_OFF;\n", "                    st = ACID_ON;\n"),
+    M("dt-cycle-zero", "                if (cycle != 0.0f) {\n"
+      "                    float w = var * cycle;",
+      "                if (1) {\n                    float w = var * cycle;"),
+    M("dt-no-overrun", "                    cycle = cycle + rct;\n", ""),
+    M("dt-no-seed", "                    e->RandomSeed = acid_xorshift(e->RandomSeed);\n"
+      "                    cycle = cycle - w;", "                    cycle = cycle - w;"),
+    M("dt-ec-keep", "                e->EmissionCountdown = 0.0f;\n            }\n"
+      "        }\n        if (found)", "            }\n        }\n        if (found)"),
+    # the frontend's bases
+    M("dt-flow-2", "gAcidGameFlowStateFn() == 3", "gAcidGameFlowStateFn() == 2"),
+    M("dt-key-third", "float k0 = d->KeyPositions.x * 0.33333334f;",
+      "float k0 = d->KeyPositions.x * 0.3333f;"),
+    M("dt-k-order", "hermite_basis(&d->ColourBasis, &d->ColourMatrix, k0, k1, k2, k3);",
+      "hermite_basis(&d->ColourBasis, &d->ColourMatrix, k0, k2, k1, k3);"),
+    M("dt-size-w", "            ctrl.v3.x = d->Size.w;", "            ctrl.v3.x = d->Size.z;"),
+    M("dt-ra-scale", "ctrl.v0.y = d->RelativeAngle.x * 182.04445f;",
+      "ctrl.v0.y = d->RelativeAngle.x * 182.0f;"),
+    M("dt-ra-row", "            ctrl.v1.y = d->RelativeAngle.y * 182.04445f;",
+      "            ctrl.v1.y = d->RelativeAngle.x * 182.04445f;"),
+    M("dt-ctrl-col", "            ctrl.v2.x = d->Size.z;", "            ctrl.v2.z = d->Size.z;"),
+    M("dt-ctrl-garbage", "        memset(&ctrl, 0, sizeof ctrl);\n",
+      "        memset(&ctrl, 0xa5, sizeof ctrl);\n"),
+    M("dt-colour-ctrl", "hermite_basis(&d->ColourBasis, &d->ColourMatrix,",
+      "hermite_basis(&d->ColourBasis, &ctrl,"),
+    # the particles
+    M("dt-mask", "<< ((int8_t)d->ContactSheetH & 31)) - 1u);",
+      "<< ((int8_t)d->ContactSheetH & 31)) - 0u);"),
+    M("dt-fps-1000", "fpsd = ee_trunc_w(1.0f / (float)(int8_t)d->AnimFPS * 1024.0f);",
+      "fpsd = ee_trunc_w(1.0f / (float)(int8_t)d->AnimFPS * 1000.0f);"),
+    M("dt-fps-unsigned", "fpsd = ee_trunc_w(1.0f / (float)(int8_t)d->AnimFPS",
+      "fpsd = ee_trunc_w(1.0f / (float)d->AnimFPS"),
+    M("dt-cv-yz", "            cvz = dt * c->State.Velocity.z;\n"
+      "            cvy = dt * c->State.Velocity.y;",
+      "            cvz = dt * c->State.Velocity.y;\n"
+      "            cvy = dt * c->State.Velocity.z;"),
+    M("dt-life-signed", "            int32_t old = (int16_t)p->Life;",
+      "            int32_t old = p->Life;"),
+    M("dt-die-lt", "            if (nl <= 0) {", "            if (nl < 0) {"),
+    M("dt-frame-step", "((int32_t)frame + old / fpsd\n"
+      "                                            - nl / fpsd)",
+      "((int32_t)frame + 1)"),
+    M("dt-frame-nomask", " - nl / fpsd) & (uint32_t)mask;", " - nl / fpsd);"),
+    M("dt-spd-127", "* 0.0078125f * (1.0f / 127.0f);", "* 0.0078125f * (1.0f / 128.0f);"),
+    M("dt-inh-255", "inh = (float)p->Inherit * (1.0f / 255.0f);",
+      "inh = (float)p->Inherit * (1.0f / 256.0f);"),
+    M("dt-sign-flip", "            sx = vx < 0.0f ? 1.0f : -1.0f;",
+      "            sx = vx < 0.0f ? -1.0f : 1.0f;"),
+    M("dt-grav", "vz = vz + (grav + sz * vz * (vz * drag)) * dt;",
+      "vz = vz + (sz * vz * (vz * drag)) * dt;"),
+    M("dt-drag-x", "vx = vx + sx * drag * (vx * vx) * dt;",
+      "vx = vx + sx * drag * vx * dt;"),
+    M("dt-pos-dt", "            z += vz * dt;", "            z += vz;"),
+    M("dt-ml-pos", "                x += cvx * inh;", "                x += cvx;"),
+    M("dt-len", "len = sqrtf(vx * vx + vy * vy + vz * vz);",
+      "len = sqrtf(vx * vx + vy * vy);"),
+    M("dt-speed-128", "p->Speed = (uint16_t)ee_trunc_w(len * 128.0f);",
+      "p->Speed = (uint16_t)ee_trunc_w(len * 127.0f);"),
+    M("dt-no-frame", "            p->Frame = (uint8_t)frame;\n", ""),
+    M("dt-no-life", "            p->Life = (uint16_t)nl;\n", ""),
+    M("dt-vz-store", "p->VZ = (int8_t)ee_trunc_w(vz * inv * 127.0f);",
+      "p->VZ = (int8_t)ee_trunc_w(vy * inv * 127.0f);"),
+    M("dt-free-empty", "        if (g->ParticleList.next == &g->ParticleList) {\n"
+      "            unlink_node(&g->Node);\n"
+      "            acid_active_group_delete(g, 3);\n        }\n    }\n    s->UpdateTime",
+      "    }\n    s->UpdateTime"),
+    M("dt-ut-order", "s->UpdateTime = bGetTickerDifference(start, bGetTicker());",
+      "s->UpdateTime = bGetTickerDifference(bGetTicker(), start);"),
+    M("dt-ut-no-start", "s->UpdateTime = bGetTickerDifference(start, bGetTicker());",
+      "s->UpdateTime = bGetTickerDifference(0, bGetTicker());"),
+    M("dt-particle-flags", "acid_particle_delete(p, 3);", "acid_particle_delete(p, 2);"),
+    # hermite_basis
+    M("herm-h", "{  2.0f, -2.0f,  1.0f,  1.0f },", "{  2.0f, -2.0f,  1.0f,  0.0f },",
+      rel=ACIDFX),
+    M("herm-m", "{ 3.0f, 2.0f, 1.0f, 0.0f }", "{ 3.0f, 2.0f, 1.0f, 1.0f }",
+      rel=ACIDFX),
+    M("herm-cube", "t.v2.x = k2 * k2 * k2;", "t.v2.x = k2 * k2;", rel=ACIDFX),
+    M("herm-w", "t.v3.w = 1.0f;", "t.v3.w = 0.0f;", rel=ACIDFX),
+    M("herm-order", "eMulMatrix(&a, &kM, &inv);", "eMulMatrix(&a, &inv, &kM);",
+      rel=ACIDFX),
+    M("herm-ctrl", "eMulMatrix(o, &b, ctrl);", "eMulMatrix(o, ctrl, &b);",
+      rel=ACIDFX),
 ]
 
 EQUIVALENT = {

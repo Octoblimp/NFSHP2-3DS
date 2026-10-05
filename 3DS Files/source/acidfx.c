@@ -8,6 +8,8 @@
 
 #include "acidfx.h"
 
+#include "emath.h"
+
 float fDeterminant(const bMatrix4 *m)
 {
     float a[16];
@@ -78,4 +80,31 @@ void fInvertMatrix(bMatrix4 *out, const bMatrix4 *m)
     o[15] = inv * (a[1] * a[6] * a[8] - a[2] * a[5] * a[8] + a[2] * a[4] * a[9] -
                    a[0] * a[6] * a[9] - a[1] * a[4] * a[10] + a[0] * a[5] * a[10]);
     memcpy(out, o, sizeof o);
+}
+
+void hermite_basis(bMatrix4 *o, const bMatrix4 *ctrl, float k0, float k1,
+                   float k2, float k3)
+{
+    static const bMatrix4 kHermite = {
+        {  2.0f, -2.0f,  1.0f,  1.0f },
+        { -3.0f,  3.0f, -2.0f, -1.0f },
+        {  0.0f,  0.0f,  1.0f,  0.0f },
+        {  1.0f,  0.0f,  0.0f,  0.0f }
+    };
+    static const bMatrix4 kM = {
+        { 0.0f, 0.0f, 0.0f, 1.0f },
+        { 1.0f, 1.0f, 1.0f, 1.0f },
+        { 0.0f, 0.0f, 1.0f, 0.0f },
+        { 3.0f, 2.0f, 1.0f, 0.0f }
+    };
+    bMatrix4 t, inv, a, b;
+
+    t.v0.x = k0 * k0 * k0;  t.v0.y = k0 * k0;  t.v0.z = k0;  t.v0.w = 1.0f;
+    t.v1.x = k1 * k1 * k1;  t.v1.y = k1 * k1;  t.v1.z = k1;  t.v1.w = 1.0f;
+    t.v2.x = k2 * k2 * k2;  t.v2.y = k2 * k2;  t.v2.z = k2;  t.v2.w = 1.0f;
+    t.v3.x = k3 * k3 * k3;  t.v3.y = k3 * k3;  t.v3.z = k3;  t.v3.w = 1.0f;
+    fInvertMatrix(&inv, &t);
+    eMulMatrix(&a, &kM, &inv);
+    eMulMatrix(&b, &kHermite, &a);
+    eMulMatrix(o, &b, ctrl);
 }

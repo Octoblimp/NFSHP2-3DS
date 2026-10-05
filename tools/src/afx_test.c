@@ -3,8 +3,12 @@
 //
 // The slot pools are this file's: three fixed arenas, each handing out its
 // lowest free slot, zeroed when the pool has ZERO_ALLOCATED_MEMORY and
-// filled with 0xa5 when not. GetTextureInfo is a stub that answers by a
-// rule on the hash. The host has 8-byte pointers, so each record the
+// filled with 0xa5 when not, and full when the script says so or when no
+// slot is free. GetTextureInfo is a stub that answers by a rule on the
+// hash. eGetView gives three views of this file's, each with a camera the
+// script places or none; bGetTicker counts up by 0x1234567 a call, and
+// bGetTickerDifference is half the count between. The cars are two of this
+// file's, of which only the velocity is read. The host has 8-byte pointers, so each record the
 // script puts in a chunk is laid out as the host's struct, field by field
 // from the disc's bytes; a chunk's pack header is where the loader will
 // look for it, the payload rounded up to 16, from an address with the
@@ -21,6 +25,11 @@
 
 #include "acidsys.h"
 #include "bslotpool.h"
+#include "bticker.h"
+#include "camera.h"
+#include "car.h"
+#include "emath.h"
+#include "eview.h"
 #include "texturepack.h"
 
 #define PATB 0xa5
@@ -121,6 +130,21 @@ static bNode lists[NLIST];
 // "r": what the last CP, RA, GD or GE gave.
 static void *reg;
 
+// ---------------------------------------------- the views, ticker and cars
+
+#define NVIEW 3
+#define NCAR 2
+static eView views[NVIEW];
+static Camera cams[NVIEW];
+static Car cars[NCAR];
+static uint32_t ticker;
+static int32_t flow;
+
+static int32_t flow_state(void)
+{
+    return flow;
+}
+
 // ------------------------------------------------------------------ names
 
 static char *nbuf(void)
@@ -152,6 +176,11 @@ static const char *nm(const void *p)
     if (p == &EmitterDataList)
         return "EDL";
     s = nbuf();
+    for (i = 0; i < NCAR; i++)
+        if (p == &cars[i]) {
+            sprintf(s, "c%d", i);
+            return s;
+        }
     for (i = 0; i < NLIST; i++)
         if (p == &lists[i]) {
             sprintf(s, "L%d", i);
@@ -263,23 +292,31 @@ void bDeleteSlotPool(BSlotPool *pool)
            : pool_index(pool) >= 0 ? kPoolShort[pool_index(pool)] : "?");
 }
 
-void *bSlotOMalloc(BSlotPool *pool)
+static int free_slot(int i)
+{
+    int k;
+
+    for (k = 0; k < kSlots[i]; k++)
+        if (!used[i][k])
+            return k;
+    return -1;
+}
+
+static void *slot_alloc(BSlotPool *pool, const char *what)
 {
     int i = pool_index(pool), k;
 
     if (i < 0) {
-        printf("  omalloc %s -> null\n", pool == NULL ? "null" : "?");
+        printf("  %s %s -> null\n", what, pool == NULL ? "null" : "?");
         return NULL;
     }
     if (fail_after[i] == 0) {
-        printf("  omalloc %s -> null\n", kPoolShort[i]);
+        printf("  %s %s -> null\n", what, kPoolShort[i]);
         return NULL;
     }
-    for (k = 0; k < kSlots[i]; k++)
-        if (!used[i][k])
-            break;
-    if (k == kSlots[i]) {
-        printf("  omalloc %s -> full\n", kPoolShort[i]);
+    k = free_slot(i);
+    if (k < 0) {
+        printf("  %s %s -> full\n", what, kPoolShort[i]);
         return NULL;
     }
     if (fail_after[i] > 0)
@@ -287,9 +324,52 @@ void *bSlotOMalloc(BSlotPool *pool)
     used[i][k] = 1;
     memset(arena[i] + kHostSize[i] * k,
            (pool->flags & BSP_ZERO_ALLOCATED_MEMORY) ? 0 : PATB, kHostSize[i]);
-    printf("  omalloc %s -> %s\n", kPoolShort[i],
+    printf("  %s %s -> %s\n", what, kPoolShort[i],
            nm(arena[i] + kHostSize[i] * k));
     return arena[i] + kHostSize[i] * k;
+}
+
+void *bSlotOMalloc(BSlotPool *pool)
+{
+    return slot_alloc(pool, "omalloc");
+}
+
+void *bSlotMalloc(BSlotPool *pool)
+{
+    return slot_alloc(pool, "malloc");
+}
+
+int bIsSlotPoolFull(const BSlotPool *pool)
+{
+    int i = pool_index(pool), r;
+
+    if (i < 0) {
+        printf("  full? %s -> 1\n", pool == NULL ? "null" : "?");
+        return 1;
+    }
+    r = fail_after[i] == 0 || free_slot(i) < 0;
+    printf("  full? %s -> %d\n", kPoolShort[i], r);
+    return r;
+}
+
+eView *eGetView(int32_t id)
+{
+    if (id < 0 || id >= NVIEW) {
+        fprintf(stderr, "view %d\n", (int)id);
+        exit(3);
+    }
+    return &views[id];
+}
+
+uint32_t bGetTicker(void)
+{
+    ticker += 0x1234567u;
+    return ticker;
+}
+
+float bGetTickerDifference(uint32_t from, uint32_t to)
+{
+    return (float)(to - from) * 0.5f;
 }
 
 void bSlotFree(BSlotPool *pool, void *slot)
@@ -420,6 +500,8 @@ static void *ref(const char *t)
     }
     if (t[0] == 't' && t[1] >= '0' && t[1] <= '9')
         return &texs[atoi(t + 1)];
+    if (t[0] == 'c' && t[1] >= '0' && t[1] <= '9')
+        return &cars[atoi(t + 1)];
     dot = strrchr(t, '.');
     if (dot == NULL) {
         if (t[0] == 'L')
@@ -565,6 +647,60 @@ static void psystem(const char *tag, AcidEffectSystem *s)
            fx(s->RenderTime), fx(s->UpdateTime));
     for (i = 0; i < 12; i++)
         printf(" %s", fx(ip[i]));
+    printf("\n");
+}
+
+static void pip(const char *tag, const AcidEffectSystem *s)
+{
+    const float *ip = &s->InterestPoints[0].x;
+    int i;
+
+    printf("  %s ip", tag);
+    for (i = 0; i < 12; i++)
+        printf(" %s", fx(ip[i]));
+    printf("\n");
+}
+
+// DP: each group of the system, and each of its particles.
+static void pparticles(const char *tag, AcidEffectSystem *s)
+{
+    bNode *n;
+    int c = 0;
+
+    for (n = s->ActiveGroupList.next; n != &s->ActiveGroupList && c < 5000;
+         n = n->next, c++) {
+        AcidActiveGroup *g = (AcidActiveGroup *)n;
+        bNode *pn;
+        int k = 0;
+
+        printf("  %s %s d %s e %s c %s:", tag, nm(g), nm(g->EmitterData),
+               nm(g->Emitter), nm(g->pCar));
+        for (pn = g->ParticleList.next; pn != &g->ParticleList && k < 5000;
+             pn = pn->next, k++) {
+            const AcidParticle *p = (const AcidParticle *)pn;
+
+            printf(" %s[%04x %04x %04x %02x %02x %s %s %s %02x %02x %02x %02x]",
+                   nm(p), (unsigned)p->Life, (unsigned)(uint16_t)p->Angle,
+                   (unsigned)p->Speed, (unsigned)p->Inherit, (unsigned)p->Pad,
+                   fx(p->X), fx(p->Y), fx(p->Z), (unsigned)(uint8_t)p->VX,
+                   (unsigned)(uint8_t)p->VY, (unsigned)(uint8_t)p->VZ,
+                   (unsigned)p->Frame);
+        }
+        printf("\n");
+    }
+}
+
+static void pbases(const AcidEmitterData *d)
+{
+    const float *c = &d->ColourBasis.v0.x, *x = &d->ExtraBasis.v0.x;
+    int i;
+
+    printf("  cb");
+    for (i = 0; i < 16; i++)
+        printf(" %s", fx(c[i]));
+    printf(" xb");
+    for (i = 0; i < 16; i++)
+        printf(" %s", fx(x[i]));
     printf("\n");
 }
 
@@ -737,6 +873,11 @@ static void reset(void)
     reg = NULL;
     ntex = 0;
     ntxm = 0;
+    memset(views, 0, sizeof views);
+    memset(cams, 0, sizeof cams);
+    memset(cars, 0, sizeof cars);
+    ticker = 0;
+    flow = 0;
 }
 
 static AcidEffectSystem *sys_tok(void)
@@ -746,9 +887,30 @@ static AcidEffectSystem *sys_tok(void)
     return !strcmp(t, "FE") ? &FrameEffects : &WorldEffects;
 }
 
+// w or b: a word or a byte at a retail offset, from the first one past the
+// pointers (first_off) on, where both sides lay the struct out alike.
+static void set_tail(void *first, int first_off, const char *f)
+{
+    int off = itok();
+    uint32_t v = xtok();
+    uint8_t *a;
+
+    if (off < first_off) {
+        fprintf(stderr, "offset %d before the tail\n", off);
+        exit(2);
+    }
+    a = (uint8_t *)first + (off - first_off);
+    if (!strcmp(f, "w"))
+        memcpy(a, &v, 4);
+    else
+        *a = (uint8_t)v;
+}
+
 static void set_field_e(AcidEmitter *e, const char *f)
 {
-    if (!strcmp(f, "st"))
+    if (!strcmp(f, "w") || !strcmp(f, "b"))
+        set_tail(&e->RandomSeed, 36, f);
+    else if (!strcmp(f, "st"))
         e->State = itok();
     else if (!strcmp(f, "rc"))
         e->RemainingCycleTime = ftok();
@@ -791,7 +953,9 @@ static void set_field_e(AcidEmitter *e, const char *f)
 
 static void set_field_d(AcidEmitterData *d, const char *f)
 {
-    if (!strcmp(f, "on"))
+    if (!strcmp(f, "w") || !strcmp(f, "b"))
+        set_tail(&d->SpreadAsDisc, 24, f);
+    else if (!strcmp(f, "on"))
         d->OnCycle = ftok();
     else if (!strcmp(f, "onv"))
         d->OnCycleVariance = ftok();
@@ -866,6 +1030,8 @@ int main(int argc, char **argv)
         return 2;
     }
     memset(&PATPTR, PATB, sizeof PATPTR);
+    eMathInit();
+    gAcidGameFlowStateFn = flow_state;
     fp = fopen(argv[2], "rb");
     if (!fp) {
         perror(argv[2]);
@@ -1081,6 +1247,70 @@ int main(int argc, char **argv)
             else
                 set_field_d(d, f);
             continue;
+        } else if (!strcmp(t, "CAM")) {
+            int v = itok();
+            const char *a = tok();
+
+            if (!strcmp(a, "null")) {
+                views[v].pCamera = NULL;
+            } else {
+                uint32_t w[4];
+                int k;
+
+                w[0] = (uint32_t)strtoul(a, NULL, 16);
+                for (k = 1; k < 4; k++)
+                    w[k] = xtok();
+                memcpy(&cams[v].CurrentKey.Position, w, 16);
+                views[v].pCamera = &cams[v];
+            }
+            continue;
+        } else if (!strcmp(t, "CV")) {
+            Car *c = &cars[itok()];
+
+            c->State.Velocity.x = ftok();
+            c->State.Velocity.y = ftok();
+            c->State.Velocity.z = ftok();
+            continue;
+        } else if (!strcmp(t, "FS")) {
+            flow = itok();
+            continue;
+        } else if (!strcmp(t, "DP")) {
+            AcidEffectSystem *s = sys_tok();
+
+            pparticles(s == &FrameEffects ? "FE" : "WE", s);
+            continue;
+        } else if (!strcmp(t, "DD")) {
+            AcidEmitterData *d = (AcidEmitterData *)ref(tok());
+
+            if (d == NULL)
+                printf("  (none)\n");
+            else
+                pbases(d);
+            continue;
+        } else if (!strcmp(t, "UIP")) {
+            AcidEffectSystem *s = sys_tok();
+
+            acid_system_update_interest_points(s);
+            pip(s == &FrameEffects ? "FE" : "WE", s);
+        } else if (!strcmp(t, "TR")) {
+            AcidEffectSystem *s = sys_tok();
+            AcidEmitter *e = (AcidEmitter *)ref(tok());
+            float dt = ftok();
+            void *car = ref(tok());
+
+            if (e == NULL) {
+                printf("  (none)\n");
+            } else {
+                acid_system_trigger_emitter(s, e, dt, car);
+                printf("  em");
+                pemit_short(e);
+                printf("\n");
+            }
+        } else if (!strcmp(t, "DT")) {
+            AcidEffectSystem *s = sys_tok();
+
+            acid_system_do_time_step(s, ftok());
+            printf("  ut %s\n", fx(s->UpdateTime));
         } else if (!strcmp(t, "SEED")) {
             AcidRandomSeed = xtok();
             continue;

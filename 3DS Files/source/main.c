@@ -3054,6 +3054,18 @@ static void killAllWorldEffects(void)
     acid_system_kill_all_active_effects(&WorldEffects);
 }
 
+// World's step (0x0014e110): WorldEffects' TweakerCheck, then its
+// DoTimeStep.
+static void worldEffectsTweakerCheck(void)
+{
+    acid_system_tweaker_check(&WorldEffects);
+}
+
+static void worldEffectsDoTimeStep(float dt)
+{
+    acid_system_do_time_step(&WorldEffects, dt);
+}
+
 static float topologyElevation(void* tc, const bVector3* pos,
                                int32_t* terrain, bVector3* normal)
 {
@@ -3216,12 +3228,17 @@ int main(int argc, char** argv)
     // emitter pools (acidsys.c). PostLoadFixup's afxUpdateTextures gives
     // each emitter data its texture. Each car copies its effects' emitters
     // out of WorldEffects through afxGetEmitters, and deletes them again;
-    // the race's cleanup kills the world's effects.
+    // the race's cleanup kills the world's effects. World's step runs the
+    // world's auto emitters and ages their particles; DoTimeStep reads the
+    // game's flow state for the frontend's.
     afx_init();
-    gAfxUpdateTexturesFn    = afx_update_textures;
-    gAfxGetEmittersFn       = afx_get_emitters;
-    gAcidEmitterDeleteFn    = acidEmitterDelete;
-    gKillAllActiveEffectsFn = killAllWorldEffects;
+    gAfxUpdateTexturesFn        = afx_update_textures;
+    gAfxGetEmittersFn           = afx_get_emitters;
+    gAcidEmitterDeleteFn        = acidEmitterDelete;
+    gKillAllActiveEffectsFn     = killAllWorldEffects;
+    gWorldEffectsTweakerCheckFn = worldEffectsTweakerCheck;
+    gWorldEffectsDoTimeStepFn   = worldEffectsDoTimeStep;
+    gAcidGameFlowStateFn        = fredFlowState;
 
     // elInit, and eLight.obj's two calls the solids and the cars make
     // through seams: elGetLightMaterial, which eFixUpTables uses to fill

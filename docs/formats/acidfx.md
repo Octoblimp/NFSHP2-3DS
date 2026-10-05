@@ -1,4 +1,4 @@
-# The effect system's data (AcidFXE.obj, step 16, SC-3a)
+# The effect system (AcidFXE.obj, step 16, SC-3a and SC-3b)
 
 The effect system makes the game's particles: smoke from the tyres,
 sparks, water, fire, the munitions and the nebula behind the car in the
@@ -8,9 +8,10 @@ car select. It is retail's `AcidFXE.obj` (`SLES_507.31`, 0x00126d70 ..
 
 SC-3a is its data half: the slot pools, the emitter datas and emitters a
 file brings, LoaderTable slot 6, the lookups, the copies the cars take,
-and an AcidEffectSystem's auto emitters and active groups. Nothing makes,
-moves or draws a particle yet. TriggerEmitter and DoTimeStep are SC-3b,
-RenderEffects is SC-3c, and the car select's nebula is SC-3d.
+and an AcidEffectSystem's auto emitters and active groups. SC-3b makes
+and moves the particles: TriggerEmitter, DoTimeStep and
+UpdateInterestPoints. Nothing draws one yet: RenderEffects is SC-3c, and
+the car select's nebula is SC-3d.
 
 The port is `3DS Files/source/acidsys.{c,h}`. `tools/afx_check.py` runs
 every function here on the retail image in mipsemu, and
@@ -215,6 +216,91 @@ to the groups' pool.
 
 TweakerCheck (0x00127490) and RenderDebug (0x00127498) are empty.
 
+## Emitting and stepping (SC-3b)
+
+**UpdateInterestPoints** (0x001286a0) copies the eye of views 1, 2 and
+0, in that order, into InterestPoints[0], [1] and [2]: each view's
+camera's CurrentKey.Position, 12 bytes. A view with no camera leaves its
+point as it was.
+
+**TriggerEmitter** (0x00127700), with a time step and a car:
+1. Nothing without a data. The emitter is near if its LocalWorld's
+   position is within the data's FarClip (+128) of any of the three
+   interest points, by `sqrt(dx² + dy² + dz²) < FarClip`.
+2. An emitter with no seed takes one as AddAutoEmitter gives it, near or
+   not. Then a far emitter stops, and so does one that isn't ON unless
+   the step is negative.
+3. The time to emit: the step, cut to RemainingCycleTime when that isn't
+   0 and is shorter; a negative step is a burst of `-step` seconds.
+4. If EmissionCountdown is under that time, the particles go into the
+   emitter's LastActiveGroup while it is still the emitter's and the
+   car's. Otherwise a new group goes on the system's tail, unless the
+   groups' pool is full, which keeps the last group, whatever it is.
+   With no group, nothing is emitted.
+5. Each particle is drawn from the emitter's seed, xorshifted before
+   each draw, in this order:
+   - the direction: on a disc (SpreadAsDisc), a yaw across SpreadAngle
+     and a spin across 360°, as `(cos spin, sin spin, 0)` turned by the
+     yaw about y and then by the emitter's orientation; otherwise angles
+     about x, y and z across SpreadAngle, turning the emitter's z axis;
+   - its place in the volume, about VolumeCenter, through LocalWorld;
+   - its first frame, over the contact sheet's frames when the data has
+     RandomStartFrame;
+   - its life, angle and speed, each the data's less its variance plus
+     a draw of twice that;
+   - its share of the emitter's InheritVelocity, when MotionInherit is
+     not 0, clamped to [0, 1]. Without MotionLive the share is added to
+     the velocity now, and the direction and speed come from the sum.
+     With MotionLive it is kept for DoTimeStep.
+   The angle's bit 0 is the seed's when the data has
+   RandomRotationDirection. Life is capped at 60 s.
+6. A particle is kept unless DontEmit is set or the particles' pool is
+   full; either way it was drawn. It stores its speed ×128 (to 65535),
+   its direction ×127, its share ×255, its life ×1024, its angle and its
+   world position.
+7. The countdown to the next particle is `1 / (NumParticles - variance +
+   draw × 2 × variance)`, between 0 and 240. Particles are drawn while
+   the countdown fits in the time left.
+8. A group left with no particles is freed, and LastActiveGroup still
+   names it. EmissionCountdown is what is left of the countdown, or 0
+   after a burst.
+
+The listing keeps the direction's w on its stack, and on the disc's path
+it writes only x, y and z, so the first w is whatever the stack held
+(sp+204 of a 560-byte frame). The port and the model both start it at 0.
+It only reaches x, y and z as 0 × w.
+
+**DoTimeStep** (0x00128718), with dt:
+1. UpdateInterestPoints.
+2. Each auto emitter from the head, up to and including the first that
+   is neither ON nor OFF. An ON one emits, with dt and no car. An ON or
+   OFF one with a RemainingCycleTime that isn't 0 runs it down. When the
+   time runs out, the emitter flips, and the new cycle is drawn as
+   AddAutoEmitter draws it, less the overrun. Its countdown goes to 0.
+3. In the frontend (CurrentGameFlowState 3), each data's ColourBasis and
+   ExtraBasis are made again by hermite_basis, from its KeyPositions
+   over 3. ColourBasis comes from the ColourMatrix, and ExtraBasis from
+   Size and RelativeAngle (in BAMs) in columns 0 and 1. Columns 2 and 3
+   of that control matrix are never written, so they are whatever the
+   stack held (sp+0..63 of a 304-byte frame). The port and the model
+   zero them.
+4. Each group's particles age by `dt × 1024`, and one whose life is gone
+   is freed. The rest:
+   - turn their frames at AnimFPS, masked to the sheet;
+   - slow by Drag, against the sign of each axis and by its square;
+   - fall by Gravity;
+   - move, with their share of the car's step when the data has
+     MotionLive, its MotionInherit is over 0 and the group has a car;
+   - store their new speed, direction, frame and life.
+   A group left with no particles is freed.
+5. UpdateTime is the ticker's difference over the step.
+
+**hermite_basis** (0x00126960, acidfx.c; the demo's 0x001254d0 is the
+same code) gives `o = H × M × inverse(T) × ctrl`. T's rows are
+(k³, k², k, 1) for each key, M's are (0 0 0 1) (1 1 1 1) (0 0 1 0)
+(3 2 1 0), and H is Hermite's, (2 -2 1 1) (-3 3 -2 -1) (0 0 1 0)
+(1 0 0 0). Each product is an eMulMatrix, M × inverse(T) first.
+
 ## On the device
 
 - `sinit_run` calls `acid_static_init` as entry 9 (`sinit_check`: 24
@@ -226,13 +312,20 @@ TweakerCheck (0x00127490) and RenderDebug (0x00127498) are empty.
     with which each CarRenderInfo takes its emitter lists and deletes
     them;
   - `gKillAllActiveEffectsFn` (racecoord.h), WorldEffects' KillAll.
+- World's step runs WorldEffects' TweakerCheck and DoTimeStep through
+  `gWorldEffectsTweakerCheckFn` and `gWorldEffectsDoTimeStepFn`
+  (world.h), and DoTimeStep reads the flow state through
+  `gAcidGameFlowStateFn`, which is Fred's. FrameEffects' step in the
+  frontend's frame (0x00113fd0) comes with the nebula, SC-3d.
 - LoaderTable slot 6 is `loader_acid_fx` and `unloader_acid_fx`
   (bchunkload.c), so every track's packs load. GLOBALB is loaded by hand
   in `loadGlobalCarInfo`, which now takes its two packs too: the car
   data log says 8 chunks, where it said 6.
 - On Azahar the car select run passes with 0 unmapped accesses. A race
   on TRACKB12 runs as before (539 frames in 19 s), with 0 unmapped
-  accesses and an empty `nfshp2_stderr.txt`.
+  accesses and an empty `nfshp2_stderr.txt`. With SC-3b's step the
+  race still runs at 30 FPS with 0 unmapped accesses, and the car
+  select passes.
 
 ## The checker
 
@@ -284,8 +377,27 @@ There are 16 scenarios:
   over TRACKB61. The fuzz knows what each op returned, so it never adds
   an emitter that is already on a list and never names one it deleted.
 
-All 16 scenarios agree: 9295 ops, 35221 lines, 0 differ. The mutation
-pass (tools/mutpar.py) catches 172 of 175 mutations. The other three
+SC-3b adds stubs for bSlotMalloc and bIsSlotPoolFull (a pool can be
+made to say it is full), eGetView with a camera per view, and the
+ticker. Its ops set the cameras and a car's velocity, change a data's
+or an emitter's fields, run UpdateInterestPoints, TriggerEmitter and
+DoTimeStep, and dump every group's particles and every data's bases.
+It has eight more scenarios:
+- UpdateInterestPoints with each view's camera there or not;
+- TriggerEmitter at its edges: exactly at FarClip and just inside, for
+  each view and in z alone, ON and not, bursts, the cycle's end, the
+  last group kept or made again, the pools full, DontEmit; then each
+  of GLOBALB's emitters with its data changed;
+- DoTimeStep over a track's ON emitters, and the frontend's bases;
+- the particles' step: frames, drag, gravity, a car's motion and
+  lives at their edges;
+- the auto emitters' cycles, and the walk stopping where retail's
+  does;
+- the car select's nebula, as the frontend would run it;
+- two fuzz runs of 600 and 1500 ops, over TRACKB12 and TRACKB33.
+
+All 24 scenarios agree: 14885 ops, 79706 lines, 0 differ. The mutation
+pass (tools/mutpar.py) catches 310 of 313 mutations. The other three
 can't change what either side does:
 - `cp-name-64`: bStrNCpy's 64th byte goes to Name[63], which the next
   line clears.
@@ -299,8 +411,6 @@ demo image's 178 ops and the retail image's 37375, 0 differ on both.
 
 ## Still open
 
-- **SC-3b:** TriggerEmitter (0x00127700, changed from the demo),
-  DoTimeStep (0x00128718) and UpdateInterestPoints (0x001286a0).
 - **SC-3c:** RenderEffects (0x00128da0) and its draw on the device.
 - **SC-3d:** the car select's nebula, 20 emitters of XE_SelectCarNebula
   with UpdateNebula and SetEmitterState (0x0016c3b0).
