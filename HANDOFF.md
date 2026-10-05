@@ -14084,3 +14084,39 @@ it changes nothing that is drawn.
 
 For the device: copy `NFSHP2-3DS.cia` (or the `.3dsx`), hold R at
 boot, and give it 15 s after it stops before powering off.
+
+**The device's answer (2026-10-05).** The New 3DS XL's log
+(`3DS Files/Hang Test Build/nfshp2_debug_first_watchdog.txt`) has the
+first race frame (21) pass the cull and stop in envmap view 0: the GX
+queue's fill (the face's clear) done, and its command list (57 KB, from
+the frame's start) never done. That is the first georender draw of the
+boot, since R skips the car select. The watchdog's register read
+through GSP never came back, nor did its 10 s line, so the GPU's
+registers stopped answering too: the GPU is wedged, not just late.
+Azahar's log has nothing for that run.
+
+**The draw check** (`hangwatch.c`, the rest of it) says which draw.
+`-Wl,--wrap` on C3D_DrawArrays, C3D_DrawElements (citro2d's),
+C3D_FrameBegin and C3D_BindProgram reads citro3d's command buffer back
+into a shadow of the PICA's registers, from boot to the end of the first
+race's checked frames, then stops. At each draw it checks the vertex
+buffers, the index buffer, the three texture units (and a cube's five
+other faces), the colour and depth buffers, the viewport and the scissor
+against the linear heap and VRAM, and the attribute counts against the
+shader's inputs. In the first checked frame each draw is logged
+(`draw N at <mark>: ...`) and then sent and waited on alone; a draw over
+20 ms says so. Marks inside the stages name the sky, the scenery and the
+lists of each envmap view and of the player's view.
+- After each wait the GX queue is stopped and cleared, as citro3d's own
+  sync transfer does within a frame: the draws one at a time are 1781
+  entries in frame 21, and the queue's 33rd is svcBreak.
+- HANGWRAP has to come before C3DWRAP in the Makefile: C3DWRAP's `:=`
+  took it empty, and the first build linked no wrapper at all.
+- On Azahar frame 21 takes 3.7 s, with 1781 draws (envmap views 0, 1 and
+  5: 2 sky, 103 to 211 scenery, 22 to 24 list draws each; the fold, 3;
+  the player's view, 2 sky, 1068 models, 58 sun, 99 cars), and 0 issues.
+  The race goes on at 30 FPS after.
+
+The build is in `3DS Files/Hang Test Build/`. In the device's log, the
+last `draw N` line before `gpu check: draw N NOT done` is the draw that
+stops the GPU.

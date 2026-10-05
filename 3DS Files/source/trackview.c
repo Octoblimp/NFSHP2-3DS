@@ -2608,12 +2608,15 @@ void trackview_draw_envmap(TrackView* v)
         drawn = v->drawn;
 
         georender_set_zwrite(false);
+        hangwatch_mark("an envmap view's sky");
         StuffSky(view);
         draw_deferred(v, true);
         georender_set_zwrite(true);
+        hangwatch_mark("an envmap view's scenery");
         georender_run_begin();
         scenery_stuff_scenery(&v->cull, view);
         georender_run_end();
+        hangwatch_mark("an envmap view's lists");
         draw_deferred(v, false);
         draw_deferred(v, true);
 
@@ -2624,6 +2627,7 @@ void trackview_draw_envmap(TrackView* v)
     }
     s_envFace = false;
     s_draw    = NULL;
+    hangwatch_mark("the envmap's fold begun");
     georender_envmap_fold(views);
     hangwatch_gpu_stage("the envmap's fold");
 }
@@ -2676,6 +2680,7 @@ void trackview_draw(TrackView* v)
     // drawn before any of the scenery. Then the Z writes back on.
     georender_set_fog(s_fogOn ? &s_skyFog : NULL, s_fogColour);
     georender_set_zwrite(false);
+    hangwatch_mark("the sky begun");
     georender_run_begin();
     StuffSky(view);
     draw_deferred(v, true);
@@ -2688,6 +2693,7 @@ void trackview_draw(TrackView* v)
     georender_set_fog(s_fogOn ? &s_fog : NULL, s_fogColour);
     // eModel::Render for each model draws only through georender, so it
     // is one run (georender_run_begin).
+    hangwatch_mark("the models begun");
     georender_run_begin();
     scenery_stuff_scenery(&v->cull, view);
     georender_run_end();
@@ -2701,6 +2707,7 @@ void trackview_draw(TrackView* v)
     v->sunQuadsFailed = 0;
     georender_set_fog(s_fogOn ? &s_skyFog : NULL, s_fogColour);
     s_quadTarget = view->pRenderTarget0;
+    hangwatch_mark("the sun begun");
     StuffSun(view);
     s_quadTarget = NULL;
     georender_set_fog(s_fogOn ? &s_fog : NULL, s_fogColour);
@@ -2716,6 +2723,7 @@ void trackview_draw(TrackView* v)
     // draws nothing in a race.
     // The sky, the scenery's list and these draw only through georender,
     // so each is a run too.
+    hangwatch_mark("the cars begun");
     georender_run_begin();
     render_cars(view);
     draw_deferred(v, false);

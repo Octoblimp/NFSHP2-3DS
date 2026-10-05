@@ -141,12 +141,17 @@ are four parts:
     Nothing found by reading: every draw has a count, the buffers
     are linear, the targets are in VRAM, and no frame comes near
     citro3d's 32 GX entries (9 at most on Azahar).
-  - `hangwatch.c` is the build for the device (HANDOFF.md, "The
-    hang's watchdog"). With its `nfshp2_debug.txt`, look for
-    `hangwatch:` and `gpu check:` lines: a stage `NOT done` is a
-    GPU stop there; `none moving` at `C3D_FrameBegin: the GPU's last
-    frame` is a GPU stop after the checked frames; `still moving` is
-    a CPU loop, the marks naming where.
+  - The watchdog build's log (2026-10-05) put the stop in envmap view
+    0's command list, the boot's first georender draws, with the GPU
+    wedged: its registers stopped answering GSP too. Azahar flags
+    nothing.
+  - The draw check build is with the user now (`3DS Files/Hang Test
+    Build/`, HANDOFF.md, "The draw check"). It sends each draw of
+    the first race frame alone and logs it first. In its
+    `nfshp2_debug.txt`, the last `draw N at ...` line before `gpu
+    check: draw N NOT done` is the draw, with its buffers, textures,
+    target and viewport. If every draw finishes alone and a later
+    stage check stops, the hang is between draws, not in one.
 - **SC-3c:** RenderEffects (0x00128da0) and its draw on the device.
 - **SC-3d:** the CarSelector's nebula. It is 20 emitters of
   "XE_SelectCarNebula" (string 0x002b4ef8, group FE_EMITTER), with
