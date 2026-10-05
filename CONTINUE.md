@@ -5,8 +5,9 @@ Where the next session picks up. Updated in Session 33
 **Start at "Now" just below.** SC-1 and SC-2, the car selector as logic
 and 2D and its 3D car on the turntable, are finished and checked
 against retail. SC-3 adds the nebula. SC-3a, the effect system's data,
-and SC-3b, its emitting and stepping, are done and committed; first
-the New 3DS XL's race hang (below), then SC-3c. Session 31 took the race on Azahar from 20 FPS to 28-30 and
+and SC-3b, its emitting and stepping, are done and committed. The
+New 3DS XL's race hang (below) waits on the user's log from the
+hangwatch build; SC-3c goes on meanwhile. Session 31 took the race on Azahar from 20 FPS to 28-30 and
 the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`). The rest
 of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) comes after
 the car selector. "Where the port stands" below has the count of what
@@ -131,10 +132,21 @@ are four parts:
     `eview_check` still agrees.
   - World's step runs WorldEffects' DoTimeStep on the device. The race
     and carsel runs on Azahar have 0 unmapped accesses.
-- **First, the hang on a New 3DS XL** (2026-10-04, the user's): with R
+- **The hang on a New 3DS XL** (2026-10-04, the user's): with R
   held, the race's first frame drew (1.7 s, most of it the textures'
   first upload) and then nothing; HOME was dead and the console had
   to be powered off. It was the first race on real hardware.
+  - The log says only that frame 1 got to C3D_FrameEnd. The next
+    frame line is a second later, so the stop is anywhere after.
+    Nothing found by reading: every draw has a count, the buffers
+    are linear, the targets are in VRAM, and no frame comes near
+    citro3d's 32 GX entries (9 at most on Azahar).
+  - `hangwatch.c` is the build for the device (HANDOFF.md, "The
+    hang's watchdog"). With its `nfshp2_debug.txt`, look for
+    `hangwatch:` and `gpu check:` lines: a stage `NOT done` is a
+    GPU stop there; `none moving` at `C3D_FrameBegin: the GPU's last
+    frame` is a GPU stop after the checked frames; `still moving` is
+    a CPU loop, the marks naming where.
 - **SC-3c:** RenderEffects (0x00128da0) and its draw on the device.
 - **SC-3d:** the CarSelector's nebula. It is 20 emitters of
   "XE_SelectCarNebula" (string 0x002b4ef8, group FE_EMITTER), with

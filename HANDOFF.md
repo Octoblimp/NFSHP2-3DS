@@ -14046,3 +14046,41 @@ stepping", has what each does.
   unmapped accesses, and the car select passes.
 
 Next is the New 3DS XL hang the user reported (CONTINUE.md), then SC-3c.
+
+### The hang's watchdog
+
+The user's first race on a New 3DS XL stopped after frame 1, with HOME
+dead (CONTINUE.md). `hangwatch.c` says where, into `nfshp2_debug.txt`;
+it changes nothing that is drawn.
+
+- The main loop and the draw are marked (`hangwatch_mark`, a pointer
+  and a count). A watchdog thread, one priority above the main
+  thread's and on its core, logs the last 16 marks when no frame has
+  begun for 3 s, again at 10 s and every 30 s, and `frames again` if
+  they come back. It also logs whether the marks still move, citro3d's
+  GX queue (entries, sent, done, and what is left), and a few GPU
+  registers through GSPGPU_ReadHWRegs. aptMainLoop's wait is HOME or
+  sleep, and is not reported.
+- The GPU check, for the first 3 frames of each race: at the end of
+  each draw stage (the cull, each envmap view, the fold, the sky, the
+  models, the scenery, the cars, the HUD, the bottom screen) the
+  commands so far go to the GPU and are waited on for 2 s. The linear
+  heap is flushed first, as C3D_FrameEnd flushes it, and the queue is
+  stopped after, as the frame had it. A stage that does not finish is
+  `NOT done`, with the queue and the registers.
+- A frame's most GX entries is logged when it grows: citro3d's queue
+  holds 32, and gxCmdQueueAdd's 33rd is svcBreak. The race has 9 at
+  most, the car select 6.
+- Read from libctru and citro3d's objects: gxCmdQueueWait's timeout is
+  in ticks, though gx.h says nanoseconds, and it waits on
+  gspWaitForAnyEvent, which the vertical blanks wake. gxCmdQueueStop
+  with nothing running clears the bound queue; gxCmdQueueRun binds it
+  again, as C3D_FrameEnd does.
+- On Azahar the race keeps 30 FPS with 0 unmapped accesses, its 36
+  stage checks finish, and the car select passes with no watchdog line.
+  A build with a 5 s spin and then a sleep at world frames 200 and 400
+  (taken out again) had the watchdog log both: `still moving` and
+  `frames again after 5.1 s`, then `none moving` at 3 s and 10 s.
+
+For the device: copy `NFSHP2-3DS.cia` (or the `.3dsx`), hold R at
+boot, and give it 15 s after it stops before powering off.

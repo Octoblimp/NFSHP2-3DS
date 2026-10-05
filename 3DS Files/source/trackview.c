@@ -25,6 +25,7 @@
 #include "fecar.h"
 #include "frameprof.h"
 #include "gamedata.h"
+#include "hangwatch.h"
 #include "scenery.h"
 #include "sky.h"
 #include "sun.h"
@@ -2460,6 +2461,7 @@ static void begin_frame(TrackView* v)
                               - v->cull.SceneryCullInfos[i].pFirstDrawInfo);
     }
     v->frameBegun = true;
+    hangwatch_gpu_stage("the cull");
     FRAMEPROF_STAMP(FRAMEPROF_CULL);
 }
 
@@ -2555,6 +2557,10 @@ bool trackview_envmap_init(void)
 // has never drawn is cleared to its target's grey.
 void trackview_draw_envmap(TrackView* v)
 {
+    static const char* const kFace[6] = {
+        "envmap view 0", "envmap view 1", "envmap view 2",
+        "envmap view 3", "envmap view 4", "envmap view 5",
+    };
     unsigned views = 0;
     int      i;
 
@@ -2614,10 +2620,12 @@ void trackview_draw_envmap(TrackView* v)
         v->envFaces++;
         v->envDrawn += v->drawn - drawn;
         views |= 1u << i;
+        hangwatch_gpu_stage(kFace[i]);
     }
     s_envFace = false;
     s_draw    = NULL;
     georender_envmap_fold(views);
+    hangwatch_gpu_stage("the envmap's fold");
 }
 
 void trackview_draw(TrackView* v)
@@ -2674,6 +2682,7 @@ void trackview_draw(TrackView* v)
     georender_run_end();
     georender_set_zwrite(true);
     v->skyDrawn    = v->drawn;
+    hangwatch_gpu_stage("the sky");
     FRAMEPROF_STAMP(FRAMEPROF_SKY);
 
     georender_set_fog(s_fogOn ? &s_fog : NULL, s_fogColour);
@@ -2682,6 +2691,7 @@ void trackview_draw(TrackView* v)
     georender_run_begin();
     scenery_stuff_scenery(&v->cull, view);
     georender_run_end();
+    hangwatch_gpu_stage("the models");
     FRAMEPROF_STAMP(FRAMEPROF_MODELS);
 
     // Then StuffSun (0x00112ecc), after DrawNisObjects, which has nothing
@@ -2697,6 +2707,7 @@ void trackview_draw(TrackView* v)
     georender_run_begin();
     draw_deferred(v, false);
     georender_run_end();
+    hangwatch_gpu_stage("the sun and the scenery's list");
     FRAMEPROF_STAMP(FRAMEPROF_SCENERY);
 
     // The cars' chain (0x0011363c): RenderCars for the view, and its
@@ -2710,6 +2721,7 @@ void trackview_draw(TrackView* v)
     draw_deferred(v, false);
     draw_deferred(v, true);
     georender_run_end();
+    hangwatch_gpu_stage("the cars and the alpha lists");
     FRAMEPROF_STAMP(FRAMEPROF_CARS);
     if (v->listFrame) {
         v->probePending = true;
