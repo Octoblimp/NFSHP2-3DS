@@ -4,6 +4,7 @@
 
 #include <3ds.h>
 #include <citro3d.h>
+#include <stdarg.h>
 #include <stdio.h>
 
 // citro3d's context, whose first member is the GX queue its frames go
@@ -555,6 +556,23 @@ void __wrap_C3D_BindProgram(shaderProgram_s *program)
 {
     s_prog = program;
     __real_C3D_BindProgram(program);
+}
+
+bool hangwatch_per_draw(void)
+{
+    return s_perDraw;
+}
+
+void hangwatch_log(const char *fmt, ...)
+{
+    char    line[512];
+    va_list ap;
+
+    if (!s_log) return;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    s_log("%s", line);
 }
 
 void hangwatch_gpu_stage(const char *stage)

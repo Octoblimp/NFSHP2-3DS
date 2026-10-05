@@ -60,6 +60,13 @@ void hangwatch_gpu_begin(void);
 // so far to the GPU and waited on, in a checked frame. A mark otherwise.
 void hangwatch_gpu_stage(const char *stage);
 
+// In the draw check's first frame, while each draw goes to the GPU
+// alone: when georender's probe and its look at the meshes run.
+bool hangwatch_per_draw(void);
+
+// A line into the log, as the watchdog's go.
+void hangwatch_log(const char *fmt, ...);
+
 // After C3D_FrameEnd: the frame's GX queue counted, and in a checked
 // frame its last commands and the screens' transfers waited on.
 void hangwatch_gpu_frame_end(void);

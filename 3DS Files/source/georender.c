@@ -8,6 +8,7 @@
 #include <3ds.h>
 
 #include "georender.h"
+#include "hangwatch.h"
 #include "geofold_shbin.h"
 #include "geolit_shbin.h"
 #include "geosolid_shbin.h"
@@ -495,6 +496,75 @@ void georender_set_light(float x, float y, float z,
     s_run.bound   = false;
 }
 
+// The draw check's look at its first frame's first meshes: the positions
+// through the model-view and the projection, as geosolid takes them, on
+// the CPU. A NaN or an infinity among them, or a point at w <= 0, is what
+// the PICA must clip, and the console's may not clip as Azahar's does.
+static void probe_mesh(const GeoMesh* mesh)
+{
+    static int logged;
+    float      lo[3] = { INFINITY, INFINITY, INFINITY };
+    float      hi[3] = { -INFINITY, -INFINITY, -INFINITY };
+    int        bad = 0, behind = 0, i, k;
+
+    if (logged >= 4 || !hangwatch_per_draw()) {
+        return;
+    }
+    logged++;
+    for (i = 0; i < mesh->numVerts; i++) {
+        const float* p = mesh->vbo[i].pos;
+        C3D_FVec     e = Mtx_MultiplyFVec4(&s_modelView,
+                                           FVec4_New(p[0], p[1], p[2], 1.0f));
+        C3D_FVec     c;
+        float        n[3];
+
+        e.w = 1.0f;
+        c   = Mtx_MultiplyFVec4(&s_projection, e);
+        if (!isfinite(p[0]) || !isfinite(p[1]) || !isfinite(p[2])
+            || !isfinite(c.x) || !isfinite(c.y) || !isfinite(c.z)
+            || !isfinite(c.w)) {
+            bad++;
+            continue;
+        }
+        if (c.w <= 0.0f) {
+            behind++;
+            continue;
+        }
+        n[0] = c.x / c.w;
+        n[1] = c.y / c.w;
+        n[2] = c.z / c.w;
+        for (k = 0; k < 3; k++) {
+            lo[k] = n[k] < lo[k] ? n[k] : lo[k];
+            hi[k] = n[k] > hi[k] ? n[k] : hi[k];
+        }
+    }
+    hangwatch_log("probe mesh %d: %d verts, %d batches, at %p; %d not "
+                  "finite, %d at w <= 0; over w x %.3g..%.3g, y %.3g..%.3g, "
+                  "z %.3g..%.3g", logged, mesh->numVerts, mesh->numBatches,
+                  (void*)mesh->vbo, bad, behind, (double)lo[0],
+                  (double)hi[0], (double)lo[1], (double)hi[1],
+                  (double)lo[2], (double)hi[2]);
+    for (k = 0; k < 2; k++) {
+        const C3D_Mtx* m = k ? &s_modelView : &s_projection;
+
+        hangwatch_log("probe mesh %d: %s %g %g %g %g, %g %g %g %g, "
+                      "%g %g %g %g, %g %g %g %g", logged,
+                      k ? "model-view" : "projection",
+                      (double)m->r[0].x, (double)m->r[0].y,
+                      (double)m->r[0].z, (double)m->r[0].w,
+                      (double)m->r[1].x, (double)m->r[1].y,
+                      (double)m->r[1].z, (double)m->r[1].w,
+                      (double)m->r[2].x, (double)m->r[2].y,
+                      (double)m->r[2].z, (double)m->r[2].w,
+                      (double)m->r[3].x, (double)m->r[3].y,
+                      (double)m->r[3].z, (double)m->r[3].w);
+    }
+    if (logged == 1) {
+        hangwatch_log("probe mesh: fog planes %g %g", (double)s_fogNear,
+                      (double)s_fogFar);
+    }
+}
+
 // The program, the vertex buffer and the uniforms, which every batch of a
 // mesh shares. In a run the program, the attributes and the uniforms that
 // change only with the camera, the light and the fog go once, and the
@@ -505,6 +575,7 @@ static void bind_mesh(const GeoMesh* mesh)
 {
     C3D_BufInfo* buf;
 
+    probe_mesh(mesh);
     if (!s_run.bound
         || memcmp(&s_run.projection, &s_projection, sizeof s_projection)) {
         C3D_BindProgram(&s_program);
@@ -584,11 +655,56 @@ static void set_combiner(const GeoTexture* gt, int uvScale, bool gs,
     }
 }
 
+// The probe's second half (georender_probe, at the end of this file): the
+// first batch drawn after it, with its own data and state, onto the
+// probe's plain target and the top screen before it goes onto its face.
+// A stop at the first two is the batch's, and at the third the face's.
+static bool              s_probeSky;
+static C3D_RenderTarget* s_probeTop;
+static C3D_RenderTarget* s_probeFace;
+static C3D_RenderTarget* s_probeTarget;
+
+// The mark the draws were under, which the batch's own draw goes back to
+// after; NULL if nothing was probed.
+static const char* probe_sky(const GeoBatch* b)
+{
+    const char* under = HangwatchTrail[(HangwatchMarks - 1u)
+                                       % HANGWATCH_TRAIL];
+
+    s_probeSky = false;
+    if (!hangwatch_per_draw() || !s_probeTarget || !s_probeFace) {
+        return NULL;
+    }
+    hangwatch_log("probe: the next batch, %d+%d, onto the plain target, the "
+                  "top screen and its face", b->first, b->count);
+    C3D_RenderTargetClear(s_probeTarget, C3D_CLEAR_ALL, 0x000000ffu, 0);
+    C3D_FrameDrawOn(s_probeTarget);
+    hangwatch_mark("probe sky 1: the batch onto the plain target");
+    C3D_DrawArrays(GPU_TRIANGLES, b->first, b->count);
+    if (s_probeTop && hangwatch_per_draw()) {
+        C3D_FrameDrawOn(s_probeTop);
+        hangwatch_mark("probe sky 2: the batch onto the top screen");
+        C3D_DrawArrays(GPU_TRIANGLES, b->first, b->count);
+    }
+    C3D_FrameDrawOn(s_probeFace);
+    hangwatch_mark("probe sky 3: the batch onto its face, as the game draws "
+                   "it");
+    return under;
+}
+
 // One batch: its combiner and the draw.
 static void draw_batch(const GeoBatch* b, const GeoTexture* gt, bool gs)
 {
+    const char* under = NULL;
+
     set_combiner(gt, s_uUvScale, gs, s_run.on);
+    if (s_probeSky) {
+        under = probe_sky(b);
+    }
     C3D_DrawArrays(GPU_TRIANGLES, b->first, b->count);
+    if (under) {
+        hangwatch_mark(under);
+    }
     s_run.bufSet = s_run.on;
 }
 
@@ -1118,6 +1234,7 @@ void georender_envmap_face(int face, uint32_t clear, bool draw)
     C3D_RenderTargetClear(s_envFace[face], C3D_CLEAR_ALL, clear, 0);
     if (draw) {
         C3D_FrameDrawOn(s_envFace[face]);
+        s_probeFace = s_envFace[face];
     }
     s_envDone |= 1u << face;
 }
@@ -1303,4 +1420,204 @@ bool georender_draw_strip(const GeoRenderVertex* v, int n, const GeoTexture* gt)
 
     C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_1);
     return true;
+}
+
+// ------------------------------------------------------- the GPU probe
+//
+// The draw check's frame on a New 3DS XL stopped at the boot's first
+// georender draw, the sky into envmap face 0, with the face RGBA5551 and
+// again with it RGBA8 (2026-10-05). Azahar flags nothing there. These
+// draws go before it in that frame (georender.h), each a feature more
+// than the last.
+
+// citro3d's context, which hangwatch.c reads too: its flags at 32, with
+// texture unit u's changed at bit 23 + u, and the units' textures from
+// 280, where C3D_TexBind stores them in the citro3d this links. A unit is
+// on when its texture is not NULL, and C3D_TexBind cannot give units 1
+// and 2 a NULL, so the probe sets them here. It checks the place first.
+extern u8 __C3D_Context[];
+
+static C3D_Tex**         s_probeUnits = (C3D_Tex**)(void*)(__C3D_Context + 280);
+static u32*              s_probeFlags = (u32*)(void*)(__C3D_Context + 32);
+static GeoRenderVertex*  s_probeVerts;
+static C3D_Tex           s_probeTex;
+static C3D_Tex           s_probeTargetTex;
+
+static void probe_unit(int unit, C3D_Tex* tex)
+{
+    s_probeUnits[unit] = tex;
+    *s_probeFlags |= 1u << (23 + unit);
+}
+
+// The triangle, its texture and the plain target, made once.
+static bool probe_make(void)
+{
+    static const float kXY[3][2] = {
+        { -0.5f, -0.5f }, { 0.5f, -0.5f }, { 0.0f, 0.5f }
+    };
+    int i;
+
+    if (!s_probeVerts) {
+        s_probeVerts = (GeoRenderVertex*)linearAlloc(
+            3 * sizeof(GeoRenderVertex));
+        if (!s_probeVerts) {
+            return false;
+        }
+        for (i = 0; i < 3; i++) {
+            GeoRenderVertex* v = &s_probeVerts[i];
+
+            memset(v, 0, sizeof *v);
+            v->pos[0]    = kXY[i][0];
+            v->pos[1]    = kXY[i][1];
+            v->pos[2]    = -0.5f;
+            v->st[0]     = 0.5f;
+            v->st[1]     = 0.5f;
+            memset(v->colour, 0xff, sizeof v->colour);
+            v->normal[2] = 127;
+        }
+        GSPGPU_FlushDataCache(s_probeVerts, 3 * sizeof(GeoRenderVertex));
+    }
+    if (!s_probeTex.data) {
+        if (!C3D_TexInit(&s_probeTex, 8, 8, GPU_RGBA8)) {
+            memset(&s_probeTex, 0, sizeof s_probeTex);
+            return false;
+        }
+        memset(s_probeTex.data, 0xff, s_probeTex.size);
+        GSPGPU_FlushDataCache(s_probeTex.data, s_probeTex.size);
+    }
+    if (!s_probeTarget) {
+        if (!C3D_TexInitVRAM(&s_probeTargetTex, 64, 64, GPU_RGBA8)) {
+            memset(&s_probeTargetTex, 0, sizeof s_probeTargetTex);
+            return false;
+        }
+        s_probeTarget = C3D_RenderTargetCreateFromTex(
+            &s_probeTargetTex, GPU_TEXFACE_2D, 0, GPU_RB_DEPTH24_STENCIL8);
+        if (!s_probeTarget) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void georender_probe(C3D_RenderTarget* top)
+{
+    // Marks, which live for the program.
+    static const char* const kStep[3][5] = {
+        { "probe top 1: one triangle, the colour alone, no units, no depth "
+          "test",
+          "probe top 2: and the depth test, GEQUAL, writing",
+          "probe top 3: and unit 0, an 8x8 RGBA8 texture",
+          "probe top 4: and unit 1, the 8x8 A8 no-fog texture",
+          "probe top 5: and the alpha test, GREATER 0x60" },
+        { "probe plain 1: one triangle, the colour alone, no units, no "
+          "depth test",
+          "probe plain 2: and the depth test, GEQUAL, writing",
+          "probe plain 3: and unit 0, an 8x8 RGBA8 texture",
+          "probe plain 4: and unit 1, the 8x8 A8 no-fog texture",
+          "probe plain 5: and the alpha test, GREATER 0x60" },
+        { "probe face 1: one triangle, the colour alone, no units, no "
+          "depth test",
+          "probe face 2: and the depth test, GEQUAL, writing",
+          "probe face 3: and unit 0, an 8x8 RGBA8 texture",
+          "probe face 4: and unit 1, the 8x8 A8 no-fog texture",
+          "probe face 5: and the alpha test, GREATER 0x60" },
+    };
+    static const char* const kTarget[3] = {
+        "the top screen, RGBA8 over D24S8",
+        "a plain 64x64 RGBA8 texture in VRAM over D24S8",
+        "envmap face 0, RGBA8 over D24S8",
+    };
+    C3D_RenderTarget* targets[3];
+    C3D_Tex*          before0;
+    C3D_Tex*          saved[2];
+    C3D_BufInfo*      buf;
+    C3D_TexEnv*       env;
+    int               t, s;
+
+    if (!s_ready || !hangwatch_per_draw()) {
+        return;
+    }
+    if (!probe_make()) {
+        hangwatch_log("probe: its triangle, texture or target could not be "
+                      "made; no probe");
+        return;
+    }
+    before0 = s_probeUnits[0];
+    C3D_TexBind(0, &s_probeTex);
+    if (s_probeUnits[0] != &s_probeTex) {
+        hangwatch_log("probe: citro3d's units are not at 280; no probe");
+        run_forget();
+        return;
+    }
+    saved[0] = before0;
+    saved[1] = s_probeUnits[1];
+    hangwatch_log("probe: units before it 0 %p, 1 %p (no-fog %p, fog %p); "
+                  "triangle %p, texture %p, plain target %p", (void*)saved[0],
+                  (void*)saved[1], (void*)&s_noFogTex,
+                  s_fog ? (const void*)&s_fog->tex : NULL,
+                  (void*)s_probeVerts, s_probeTex.data,
+                  s_probeTargetTex.data);
+
+    run_forget();
+    C3D_BindProgram(&s_program);
+    C3D_SetAttrInfo(&s_attr);
+    buf = C3D_GetBufInfo();
+    BufInfo_Init(buf);
+    BufInfo_Add(buf, s_probeVerts, sizeof(GeoRenderVertex), 4, 0x3210);
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uProjection, &s_identity);
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uModelView, &s_identity);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightVec, 0.0f, 0.0f, 1.0f, 0.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightClr, 0.0f, 0.0f, 0.0f, 1.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uAmbient, 1.0f, 1.0f, 1.0f, 1.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale, 1.0f, 1.0f, 0.0f, 1.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uFogRow, 0.0f, 0.0f, 0.0f, 0.5f);
+    C3D_CullFace(GPU_CULL_NONE);
+    C3D_TexEnvInit(C3D_GetTexEnv(5));
+
+    targets[0] = top;
+    targets[1] = s_probeTarget;
+    targets[2] = s_envFace[0];
+    for (t = 0; t < 3 && hangwatch_per_draw(); t++) {
+        if (!targets[t]) {
+            hangwatch_log("probe: no %s", kTarget[t]);
+            continue;
+        }
+        hangwatch_log("probe: onto %s", kTarget[t]);
+        C3D_RenderTargetClear(targets[t], C3D_CLEAR_ALL, 0x000000ffu, 0);
+        C3D_FrameDrawOn(targets[t]);
+        for (s = 0; s < 5 && hangwatch_per_draw(); s++) {
+            probe_unit(0, s >= 2 ? &s_probeTex : NULL);
+            probe_unit(1, s >= 3 ? &s_noFogTex : NULL);
+            env = C3D_GetTexEnv(0);
+            C3D_TexEnvInit(env);
+            if (s >= 2) {
+                C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR,
+                              0);
+                C3D_TexEnvFunc(env, C3D_Both, GPU_MODULATE);
+            } else {
+                C3D_TexEnvSrc(env, C3D_Both, GPU_PRIMARY_COLOR, 0, 0);
+                C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
+            }
+            C3D_DepthTest(s >= 1, GPU_GEQUAL,
+                          s >= 1 ? GPU_WRITE_ALL : GPU_WRITE_COLOR);
+            C3D_AlphaTest(s >= 4, GPU_GREATER, 0x60);
+            hangwatch_mark(kStep[t][s]);
+            C3D_DrawArrays(GPU_TRIANGLES, 0, 3);
+        }
+    }
+    if (hangwatch_per_draw()) {
+        hangwatch_log("probe: every draw done");
+        s_probeTop = top;
+        s_probeSky = true;
+    }
+
+    // Back as it was, for the envmap's draws.
+    probe_unit(0, saved[0]);
+    probe_unit(1, saved[1]);
+    C3D_AlphaTest(false, GPU_ALWAYS, 0);
+    C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
+    C3D_TexEnvInit(C3D_GetTexEnv(0));
+    s_fogApplied = ~0u;
+    apply_fog_colour();
+    run_forget();
 }

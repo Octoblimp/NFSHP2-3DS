@@ -4029,6 +4029,10 @@ int main(int argc, char** argv)
 
                 hangwatch_mark("the sun's depth read");
                 trackview_read_depth(&g_track, top);
+                // The GPU probe, in the draw check's first frame only
+                // (georender.h): before the envmap and the top
+                // screen's clear, so nothing it draws shows.
+                georender_probe(top);
                 trackview_draw_envmap(&g_track);
                 FRAMEPROF_STAMP(FRAMEPROF_ENVMAP);
                 C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
