@@ -5,7 +5,8 @@ the picture as it was. The profile (`frame-profiler.md`) picks the
 order. 13b-4a to 13b-4c have no retail function behind them: the PS2
 drew through VU1 and the GS, and those cuts are in how the port feeds
 citro3d. 13b-4d draws the Flailer layers the way retail's
-LayerRenderInfoTable does.
+LayerRenderInfoTable does. 13b-4f is the first cut for the device's
+GPU rather than the CPU: indexed meshes.
 
 ## What a model costs
 
@@ -24,6 +25,8 @@ ms of a 50 ms frame. The `models:` line (since 13b-4, after each
   **held** ones go on the lists for later (sorted, or of a later
   rendering order).
 - **words** are the GPU command words written, from `gpuCmdBufOffset`.
+- **indices** (since 13b-4f) are the batches' indices, three a
+  triangle, the held ones' too.
 
 A first build also timed `render_model`'s parts with the system tick.
 That cost 5 ms a frame, since a tick read is an SVC, so the line keeps
@@ -232,6 +235,95 @@ whole heap. The runs send the same state, only not twice.
 4.3; the scenery's 0.5, from 1.1, with the sun's quads; and the bottom
 screen 0.5, from 0.9, with the minimap's. The shots match 13b-4d's: the
 sun and its glare, the car's shadow, and the road's strips.
+
+## 13b-4f: indexed meshes
+
+Session 36's timing frames on the New 3DS XL split the models' list (895
+draws) like this:
+
+| What | GPU ms |
+|---|---|
+| the texture fetch | about 6.5 |
+| the fill, the fetch included | about 10.2 |
+| the vertex work | about 7.5 |
+| each draw's own cost, all of them | about 1.44 |
+| the texture cache clears | about 0.35 |
+
+With 200 to 380 models in view the GPU takes 43 to 47 ms a frame. Of
+these, only the vertex work can be cut without changing a pixel.
+
+**What the strips are.** TRACKB12 has 133,795 triangles in 10,394
+strips, 12.87 triangles and 22.88 vertices a strip. Most strips are runs
+of separate quads, cut by the ADC bit's restarts, so a strip shares
+little with itself. The vertices the GPU fetches and shades:
+
+| Drawn as | Vertices |
+|---|---|
+| a triangle list (13b-3 to 13b-4e) | 401,385 |
+| GPU strips joined by degenerate triangles | 335,909 |
+| an indexed list, each distinct vertex once a solid | 176,505 |
+
+The PICA's post-vertex cache then shades once a vertex that the last
+few triangles shared. Simulated as first in, first out, in the strips'
+order, it shades this many vertices a triangle:
+
+| Cache entries | Vertices shaded a triangle |
+|---|---|
+| none (the list) | 3 |
+| 4 | 1.70 |
+| 8 | 1.62 |
+| 16 | 1.54 |
+
+**The bake.** `georender_bake` sizes its buffers from the strip
+entries' NumVerts and NumPolys, then decodes the strips in the batches'
+order.
+- Each vertex goes through an open-addressing hash of its 28 bytes, so
+  one already in the mesh gets the same index.
+- Each triangle goes in as three 16-bit indices. A batch's `first` and
+  `count` are now indices.
+- The mesh is one `linearAlloc` block: the vertices, then the indices
+  from the next 16 bytes.
+- A strip that would take the mesh past 65,536 vertices is skipped and
+  counted. None on the disc does.
+
+TRACKB12's meshes take 5.8 MB of the linear heap, down from 11.2.
+
+**The draw.** `C3D_DrawElements` with `C3D_UNSIGNED_SHORT`. citro3d
+gives the PICA the indices' address less the attribute buffers' base.
+The mesh's vertex buffer is at its own offset from that base, so index
+0 is the mesh's first vertex.
+- Around each draw, citro3d turns the triangle element mode on and off
+  (GEOSTAGE_CONFIG). That is 8 command words a draw more than
+  `C3D_DrawArrays`: 63,274 words a frame for 312 models, where the list
+  wrote 54,338.
+- The lit pass, the env pass and the capture's frames draw the same
+  way. `batch_centres` reads the vertices through the indices.
+- The timing frame already counted `GPUREG_DRAWELEMENTS`. Its
+  "vertices" are now the indices.
+
+**Why the picture is the same.** The triangles are the list's, in the
+list's order, with the same vertex bytes. The cull is off on every mesh
+path, so a triangle's winding does not matter.
+
+On Azahar, the capture's first frame 6 s in was taken with both builds
+(`out/cap_list`, `out/cap_idx`):
+- the depth buffers are the same to the bit;
+- the colour differs in 85 pixels, by at most 5, all round the car.
+
+The car's reflection is the envmap's. The envmap's faces draw on a
+schedule, and the capture's hitch moves where that schedule falls.
+
+**The capture's own fault.** The comparison found one, now fixed. The
+numbered frame painted the envmap's faces and its fold in their numbers
+too. A face keeps what it drew until it draws again, so the car's
+reflection in the level-0 frame showed the numbers. `capture_offscreen`
+now leaves those draws as they always are in both frames.
+
+**On Azahar** (`out/azahar_idx2`): 29.2 FPS with 300 to 380 models in
+view, and 0 unmapped accesses. Azahar does not model the PICA's cost,
+so the saving can only show in a New 3DS's lines: the `models:` line's
+indices, and the timing frame's "1-pixel scissor" less "3 vertices a
+draw".
 
 ## Where 13b-4 stands
 

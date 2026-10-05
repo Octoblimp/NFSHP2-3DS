@@ -373,14 +373,65 @@ static void put_vertex(GeoRenderVertex* dst, const GeoStrip* s, int v)
     dst->pad = 0;
 }
 
+// A batch is an indexed triangle list: its triangles in the strips' order,
+// three 16-bit indices each into the mesh's vertices. A vertex goes in
+// once however many triangles and strips share it -- the same position,
+// ST, colour and normal, byte for byte -- so the PICA fetches it once, and
+// its post-vertex cache (which C3D_DrawElements clears after each draw)
+// shades a corner the last few triangles had once. The shipped strips are
+// mostly runs of separate quads cut by ADC restarts, so a GPU strip saves
+// little: TRACKB12's 133,795 triangles are 401,385 vertices as a list and
+// 335,909 as strips joined by degenerates, but 176,505 indexed, and with a
+// cache of 4 the GPU shades 1.70 a triangle where the list shaded 3. The
+// draw order of the triangles is the list's.
+typedef struct {
+    GeoRenderVertex* vert;      // malloc'd, the entries' NumVerts summed
+    int32_t*         slot;      // the hash's: a vertex, or -1
+    uint32_t         mask;      // its size less 1, a power of two
+    int              n;
+} VertexSet;
+
+static uint32_t vertex_hash(const GeoRenderVertex* v)
+{
+    const uint8_t* p = (const uint8_t*)v;
+    uint32_t       h = 2166136261u;
+    size_t         i;
+
+    for (i = 0; i < sizeof *v; i++) {
+        h = (h ^ p[i]) * 16777619u;
+    }
+    return h;
+}
+
+// The index of a vertex the same as `v`, which is added if there is none.
+static int vertex_index(VertexSet* s, const GeoRenderVertex* v)
+{
+    uint32_t h = vertex_hash(v) & s->mask;
+
+    while (s->slot[h] >= 0) {
+        if (!memcmp(&s->vert[s->slot[h]], v, sizeof *v)) {
+            return s->slot[h];
+        }
+        h = (h + 1) & s->mask;
+    }
+    s->vert[s->n] = *v;
+    s->slot[h]    = s->n;
+    return s->n++;
+}
+
 bool georender_bake(const GeoSolid* solid, GeoMesh* out)
 {
     StripOrder*    order;
     GeoStrip*      strip;
+    VertexSet      set     = { 0 };
+    uint16_t*      idx;
     int            numTris = 0;
+    int            cap     = 0;
     int            n       = 0;
     int            i;
     int            at      = 0;
+    size_t         vbytes;
+    uint32_t       size;
 
     memset(out, 0, sizeof *out);
     for (i = 0; i < 3; i++) {
@@ -391,16 +442,42 @@ bool georender_bake(const GeoSolid* solid, GeoMesh* out)
         return true;
     }
 
-    order = (StripOrder*)malloc((size_t)solid->numStrips * sizeof *order);
-    strip = (GeoStrip*)malloc(sizeof *strip);
-    if (!order || !strip) {
-        free(order);
-        free(strip);
-        return false;
+    // NumVerts and NumPolys from the entry table are the header's, so the
+    // buffers can be sized without decoding anything: no more vertices than
+    // the strips have, and three indices a triangle.
+    for (i = 0; i < solid->numStrips; i++) {
+        GeoStripEntry entry;
+
+        if (geo_strip_entry(solid, i, &entry) != GEO_OK) {
+            continue;
+        }
+        if (entry.numPolys > 0) {
+            cap += entry.numVerts;
+        }
+        numTris += entry.numPolys;
+    }
+    if (numTris <= 0 || cap <= 0) {
+        return true;
     }
 
-    // NumPolys from the entry table is the triangle count, so the buffer can
-    // be sized exactly without decoding anything.
+    for (size = 1; size < 2u * (uint32_t)cap; size <<= 1) {
+    }
+    order    = (StripOrder*)malloc((size_t)solid->numStrips * sizeof *order);
+    strip    = (GeoStrip*)malloc(sizeof *strip);
+    set.vert = (GeoRenderVertex*)malloc((size_t)cap * sizeof *set.vert);
+    set.slot = (int32_t*)malloc((size_t)size * sizeof *set.slot);
+    idx      = (uint16_t*)malloc((size_t)numTris * 3u * sizeof *idx);
+    if (!order || !strip || !set.vert || !set.slot || !idx) {
+        free(order);
+        free(strip);
+        free(set.vert);
+        free(set.slot);
+        free(idx);
+        return false;
+    }
+    memset(set.slot, 0xff, (size_t)size * sizeof *set.slot);
+    set.mask = size - 1u;
+
     for (i = 0; i < solid->numStrips; i++) {
         GeoStripEntry entry;
 
@@ -418,27 +495,14 @@ bool georender_bake(const GeoSolid* solid, GeoMesh* out)
         order[n].flags   = entry.flags;
         order[n].lightMaterial = (int8_t)entry.lightMaterial;
         n++;
-        numTris += entry.numPolys;
-    }
-    if (numTris <= 0) {
-        free(order);
-        free(strip);
-        return true;
     }
 
     qsort(order, (size_t)n, sizeof *order, order_cmp);
 
-    out->vbo = (GeoRenderVertex*)linearAlloc((size_t)numTris * 3u
-                                             * sizeof(GeoRenderVertex));
-    if (!out->vbo) {
-        free(order);
-        free(strip);
-        return false;
-    }
-
     for (i = 0; i < n; i++) {
         GeoBatch* batch;
-        int       t;
+        int       local[GEO_MAX_STRIP_VERTS];
+        int       t, c;
 
         if (geo_decode_strip(solid, order[i].strip, strip) != GEO_OK) {
             out->skippedStrips++;
@@ -466,28 +530,59 @@ bool georender_bake(const GeoSolid* solid, GeoMesh* out)
         }
         batch = &out->batch[out->numBatches - 1];
 
+        // The entry's NumVerts and NumPolys sized the buffers; a strip that
+        // decodes to more than they claimed would run past the end. It
+        // never happens -- the cross-check compares them on all 18,848
+        // strips -- but the buffers are the one thing here that cannot be
+        // allowed to depend on that holding. Nor can a 16-bit index.
+        if (at + 3 * strip->numTris > numTris * 3
+            || set.n + strip->numVerts > cap
+            || set.n + strip->numVerts > 65536) {
+            out->skippedStrips++;
+            continue;
+        }
+        for (c = 0; c < strip->numVerts; c++) {
+            local[c] = -1;
+        }
         for (t = 0; t < strip->numTris; t++) {
-            int c;
-
-            // The entry's NumPolys sized the buffer; a strip that decodes to
-            // more than it claimed would run past the end. It never happens
-            // -- the cross-check compares the two on all 18,848 strips --
-            // but the buffer is the one thing here that cannot be allowed to
-            // depend on that holding.
-            if (at + 3 > numTris * 3) {
-                break;
-            }
             for (c = 0; c < 3; c++) {
-                put_vertex(&out->vbo[at++], strip, strip->tri[t][c]);
+                int v = strip->tri[t][c];
+
+                if (local[v] < 0) {
+                    GeoRenderVertex r;
+
+                    put_vertex(&r, strip, v);
+                    local[v] = vertex_index(&set, &r);
+                }
+                idx[at++] = (uint16_t)local[v];
             }
             batch->count += 3;
             out->numTris++;
         }
     }
-    out->numVerts = at;
+
+    // The vertices, then the indices from the next 16 bytes, in one block.
+    vbytes   = ((size_t)set.n * sizeof(GeoRenderVertex) + 15u) & ~(size_t)15u;
+    out->vbo = set.n > 0 ? (GeoRenderVertex*)linearAlloc(
+                               vbytes + (size_t)at * sizeof *idx)
+                         : NULL;
+    if (out->vbo) {
+        memcpy(out->vbo, set.vert, (size_t)set.n * sizeof *set.vert);
+        out->ibo = (uint16_t*)((uint8_t*)out->vbo + vbytes);
+        memcpy(out->ibo, idx, (size_t)at * sizeof *idx);
+        out->numVerts   = set.n;
+        out->numIndices = at;
+    }
 
     free(order);
     free(strip);
+    free(set.vert);
+    free(set.slot);
+    free(idx);
+    if (!out->vbo && set.n > 0) {
+        memset(out, 0, sizeof *out);
+        return false;
+    }
     return true;
 }
 
@@ -583,13 +678,26 @@ static void alpha_test(bool on, int ref)
     C3D_AlphaTest(on, on ? GPU_GREATER : GPU_ALWAYS, ref);
 }
 
+// A draw of `count` vertices from `first`, or, with an index buffer, of
+// the `count` indices from `first`: a mesh's batch (georender_bake).
+static void issue(GPU_Primitive_t prim, int first, int count,
+                  const uint16_t* ibo)
+{
+    if (ibo != NULL) {
+        C3D_DrawElements(prim, count, C3D_UNSIGNED_SHORT, ibo + first);
+    } else {
+        C3D_DrawArrays(prim, first, count);
+    }
+}
+
 // A numbered draw (capture.h): its colour is its number, red the low byte,
 // green the high and blue 0x55, as the first stage's constant with no fog
 // after it and no blend. The alpha is the draw's own, so a cut-out cuts as
 // it does, and one that blends is cut to where its alpha shows. Then what
 // it changed is put back as the next draw expects to find it.
 static void draw_id(GPU_Primitive_t prim, int first, int count,
-                    const C3D_Tex* tex, const char* what)
+                    const uint16_t* ibo, const C3D_Tex* tex,
+                    const char* what)
 {
     int         id      = capture_next_id();
     bool        blended = s_blend != GEO_BLEND_NONE;
@@ -618,7 +726,7 @@ static void draw_id(GPU_Primitive_t prim, int first, int count,
     if (blended) {
         C3D_AlphaTest(true, GPU_GREATER, 0x08);
     }
-    C3D_DrawArrays(prim, first, count);
+    issue(prim, first, count, ibo);
 
     s_run.combiner = -1;
     s_run.passSet  = false;
@@ -627,11 +735,12 @@ static void draw_id(GPU_Primitive_t prim, int first, int count,
     alpha_test(s_atOn, s_atRef);
 }
 
-static void draw_arrays(GPU_Primitive_t prim, int first, int count,
-                        const C3D_Tex* tex, const char* what)
+static void draw_prims(GPU_Primitive_t prim, int first, int count,
+                       const uint16_t* ibo, const C3D_Tex* tex,
+                       const char* what)
 {
     if (capture_ids_on()) {
-        draw_id(prim, first, count, tex, what);
+        draw_id(prim, first, count, ibo, tex, what);
         return;
     }
     if (capture_lod0_on() && tex != NULL && tex->maxLevel > 0) {
@@ -642,12 +751,18 @@ static void draw_arrays(GPU_Primitive_t prim, int first, int count,
 
         t->maxLevel = 0;
         C3D_TexBind(0, t);
-        C3D_DrawArrays(prim, first, count);
+        issue(prim, first, count, ibo);
         t->maxLevel = keep;
         C3D_TexBind(0, t);
         return;
     }
-    C3D_DrawArrays(prim, first, count);
+    issue(prim, first, count, ibo);
+}
+
+static void draw_arrays(GPU_Primitive_t prim, int first, int count,
+                        const C3D_Tex* tex, const char* what)
+{
+    draw_prims(prim, first, count, NULL, tex, what);
 }
 
 // A batch's combiner: its texture, or the vertex colour alone. With `gs`
@@ -695,11 +810,12 @@ static void set_combiner(const GeoTexture* gt, int uvScale, bool gs,
 }
 
 // One batch: its combiner and the draw.
-static void draw_batch(const GeoBatch* b, const GeoTexture* gt, bool gs)
+static void draw_batch(const GeoMesh* mesh, const GeoBatch* b,
+                       const GeoTexture* gt, bool gs)
 {
     set_combiner(gt, s_uUvScale, gs, s_run.on);
-    draw_arrays(GPU_TRIANGLES, b->first, b->count, gt ? gt->tex : NULL,
-                "batch");
+    draw_prims(GPU_TRIANGLES, b->first, b->count, mesh->ibo,
+               gt ? gt->tex : NULL, "batch");
     s_run.bufSet = s_run.on;
 }
 
@@ -738,7 +854,8 @@ void georender_draw(const GeoMesh* mesh, const GeoTexture* textures,
         const GeoBatch* b = &mesh->batch[i];
 
         if (b->count > 0) {
-            draw_batch(b, batch_texture(b, textures, numTextures), false);
+            draw_batch(mesh, b, batch_texture(b, textures, numTextures),
+                       false);
         }
     }
 }
@@ -932,7 +1049,7 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
             last = pass;
             set  = true;
         }
-        draw_batch(b, gt, true);
+        draw_batch(mesh, b, gt, true);
     }
     s_run.passSet = s_run.on && set;
     s_run.pass    = last;
@@ -1004,8 +1121,8 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
         bind_lit(mesh, L);
         set_pass(gt ? gt->pass : opaque);
         set_combiner(gt, s_lUvScale, true, false);
-        draw_arrays(GPU_TRIANGLES, b->first, b->count, gt ? gt->tex : NULL,
-                    "lit");
+        draw_prims(GPU_TRIANGLES, b->first, b->count, mesh->ibo,
+                   gt ? gt->tex : NULL, "lit");
     } else {
         georender_draw_mask(mesh, textures, numTextures, (uint64_t)1 << bi);
     }
@@ -1045,7 +1162,8 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     }
     C3D_DepthTest(true, GPU_GEQUAL, GPU_WRITE_COLOR);
     alpha_test(false, 0);
-    draw_arrays(GPU_TRIANGLES, b->first, b->count, sphere, "env pass");
+    draw_prims(GPU_TRIANGLES, b->first, b->count, mesh->ibo, sphere,
+               "env pass");
 }
 
 // --------------------------------------------------- the environment map

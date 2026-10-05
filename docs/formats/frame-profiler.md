@@ -182,6 +182,8 @@ Since 13b-4 a `models:` line follows each `frame:` line, with
   lists, and the GPU command words the models wrote.
 - It has no times. A tick read is an SVC, and timing each model's parts
   cost 5 ms a frame on Azahar.
+- Since 13b-4f each half ends with its batches' indices, three a
+  triangle (`63274 words, 96333 indices`).
 
 The milliseconds are exact: 294912 EE ticks to the millisecond, not
 bGetTickerDifference's 300000.

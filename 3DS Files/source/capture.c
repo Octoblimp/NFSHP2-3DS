@@ -24,6 +24,7 @@ static u64      s_start;
 static int      s_seconds = CAPTURE_SECONDS;
 static bool     s_ids;
 static bool     s_lod0;
+static bool     s_offscreen;
 static int      s_nextId;
 static char*    s_legend;
 static size_t   s_legendLen;
@@ -203,12 +204,17 @@ bool capture_read(C3D_RenderTarget* top)
 
 bool capture_ids_on(void)
 {
-    return s_ids;
+    return s_ids && !s_offscreen;
 }
 
 bool capture_lod0_on(void)
 {
-    return s_lod0;
+    return s_lod0 && !s_offscreen;
+}
+
+void capture_offscreen(bool on)
+{
+    s_offscreen = on;
 }
 
 int capture_next_id(void)

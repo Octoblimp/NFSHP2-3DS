@@ -55,8 +55,8 @@ typedef struct {
 // material never differ between strips of one texture, so the split costs
 // nothing.
 typedef struct {
-    int      first;             // first vertex in the buffer
-    int      count;             // vertices, always a multiple of 3
+    int      first;             // first index in the mesh's ibo
+    int      count;             // indices, three a triangle
     int      texture;           // index into the solid's texture table, or -1
     uint16_t flags;             // eStripEntry's: 0x80 lit, 0x100 env mapped
     int8_t   lightMaterial;     // the solid's LightMaterialTable index, or -1
@@ -108,7 +108,9 @@ typedef struct {
 
 typedef struct {
     GeoRenderVertex* vbo;               // linearAlloc'd; georender_free owns it
+    uint16_t*        ibo;               // in vbo's block, after the vertices
     int              numVerts;
+    int              numIndices;
     GeoBatch         batch[GEO_MAX_BATCHES];
     int              numBatches;
     int              numTris;
@@ -122,14 +124,13 @@ typedef struct {
 bool georender_init(void);
 void georender_exit(void);
 
-// Decodes every strip of `solid` into one triangle-list vertex buffer on the
-// linear heap. This is the expensive call -- it replays every VIF packet in
+// Decodes every strip of `solid` into one indexed mesh on the linear heap:
+// each distinct vertex once, 28 bytes, then three 16-bit indices a
+// triangle. This is the expensive call -- it replays every VIF packet in
 // the solid -- so it belongs at load time, not in a frame.
 //
-// Memory is 28 bytes per vertex and three vertices per triangle, so the
-// disc's largest solid (911TURBO_A, 4,139 triangles) takes 348 KB. Nothing
-// is shared between strips in the source data, so an indexed draw would save
-// nothing here.
+// The disc's largest solid, 911TURBO_A (4,138 triangles), is 4,255
+// vertices and 141 KB, where a triangle list took 348 KB.
 //
 // Returns false only if the allocation fails; a solid whose strips will not
 // decode still bakes, with the bad ones counted in skippedStrips.

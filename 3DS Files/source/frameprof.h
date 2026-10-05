@@ -104,6 +104,8 @@ enum {
     FRAMEPROF_M_LIT,        // lit or environment-mapped batches, each alone
     FRAMEPROF_M_HELD,       // batches put on the lists
     FRAMEPROF_M_WORDS,      // GPU command words written
+    FRAMEPROF_M_INDICES,    // the batches' indices, three a triangle,
+                            // held ones too
     FRAMEPROF_M_COUNT
 };
 

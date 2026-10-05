@@ -617,7 +617,7 @@ static void batch_centres(TrackSolid* r)
         }
         for (k = gb->first; k < gb->first + gb->count; k++) {
             for (c = 0; c < 3; c++) {
-                float p = r->mesh.vbo[k].pos[c];
+                float p = r->mesh.vbo[r->mesh.ibo[k]].pos[c];
 
                 mn[c] = p < mn[c] ? p : mn[c];
                 mx[c] = p > mx[c] ? p : mx[c];
@@ -1243,7 +1243,7 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
     C3D_Mtx     mv;
     uint64_t    now = 0, lit = 0;
     uint16_t    f[GEO_MAX_BATCHES];
-    int         i, b, numTextures, held = 0;
+    int         i, b, numTextures, held = 0, indices = 0;
     // The frame profiler's counts (frameprof.h): the view's or the envmap's.
     uint32_t*   prof = FrameProfDraw.models[s_envFace ? 1 : 0];
     uint32_t    words;
@@ -1283,6 +1283,7 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
         if (t) {
             note_use(v, t);
         }
+        indices += gb->count;
         f[b] = strip_flags(gb, t, light, flags);
         if (!t || (t->order == 0 && !t->sorted)) {
             if (f[b] & 0x180) {
@@ -1299,6 +1300,7 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
     prof[FRAMEPROF_M_NOW] += (uint32_t)__builtin_popcountll(now);
     prof[FRAMEPROF_M_LIT] += (uint32_t)__builtin_popcountll(lit);
     prof[FRAMEPROF_M_HELD] += (uint32_t)held;
+    prof[FRAMEPROF_M_INDICES] += (uint32_t)indices;
     if (now || lit) {
         georender_set_camera(&s_proj, &mv);
     }
@@ -2760,6 +2762,7 @@ void trackview_draw_envmap(TrackView* v)
     s_draw      = v;
     s_envFace   = true;
     v->listFrame = false;
+    capture_offscreen(true);
     georender_set_light(0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
     georender_set_fog(NULL, 0);
     for (i = 0; i < 6; i++) {
@@ -2813,6 +2816,7 @@ void trackview_draw_envmap(TrackView* v)
     s_draw    = NULL;
     hangwatch_mark("the envmap's fold begun");
     georender_envmap_fold(views);
+    capture_offscreen(false);
     hangwatch_gpu_stage("the envmap's fold");
 }
 

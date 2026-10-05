@@ -23,6 +23,8 @@
 //     but with every texture read from its level 0 alone, for what the
 //     PICA's choice of mip level does to the frame.
 //
+// The envmap's faces draw as they always do in both (capture_offscreen).
+//
 // Never otherwise: the writes are a hitch of a second or so, and the frame
 // of numbers is seen for a frame. Azahar's capture of the same frame is the
 // same files in its sdmc folder, to compare.
@@ -52,6 +54,12 @@ bool capture_ids_on(void);
 
 // This frame's draws read their textures' level 0 alone.
 bool capture_lod0_on(void);
+
+// Draws into a texture -- the envmap's faces and its fold -- are drawn as
+// they always are, neither numbered nor at level 0: a face keeps what it
+// drew until it draws again, and the car's reflection would show the
+// numbers in the frames after.
+void capture_offscreen(bool on);
 
 // The next draw's number, from 1, and a line of the legend for it.
 int  capture_next_id(void);
