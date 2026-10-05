@@ -1,22 +1,31 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 36
-(2026-10-05), after the race's second run on the device.
+Where the next session picks up. Updated in Session 37
+(2026-10-05), after the jump cam.
 **Start at "Now" just below.** SC-1 and SC-2, the car selector as logic
 and 2D and its 3D car on the turntable, are finished and checked
 against retail. SC-3 adds the nebula. SC-3a, the effect system's data,
 and SC-3b, its emitting and stepping, are done and committed. SC-3c's
 CPU half (RenderEffects) is done and checked but not committed; its
-draw on the device is next. **First, though: the race on the New 3DS
-XL** (below, "The race on the device"). With Session 35's mip chains it
-runs at 27-28 FPS there, the GPU at 27-28 ms a frame (it was 113-120).
-Session 36 (commit 8bf178a) moved the log's writes to a thread (they
-were the hitches) and put a stand-in for the jump cam (the ramp's
-abort). A still car shows a dark box on the rock wall behind it, which
-Azahar does not draw; commit 7480451 adds a capture mode to see the
-device's frame. That build (`3DS Files/NFSHP2-3DS.3dsx`) is with the
-user, with `sdmc:/nfshp2_capture.txt` asked for: read their capture
-files with `tools/capture_view.py` and their `nfshp2_debug.txt` first.
+draw on the device is next.
+
+**The race on the New 3DS XL** (below, "The race on the device"):
+- **Speed.** With Session 35's mip chains it runs at 27-29 FPS where
+  under about 150 models are in view, the GPU's median 27-30 ms a frame.
+  With 200-380 in view the GPU's median is 43-47 ms (up to 58), and the
+  race drops to 17-18 FPS (14 at worst). HANDOFF's Session 37 has the
+  table.
+- **The jump cam is ported and on (Session 37, commits ce37726 to
+  6f168b6).** It runs on Azahar as retail's does, and a ramp no longer
+  aborts or falls back to the drive camera.
+- **The capture.** The device's capture (Session 37) showed no dark box
+  in its frame. It showed the light-blue wedge to be the Opel's own
+  WINDOW batch (draws 722 and 723), which the device puts one corner of
+  above the roof. That is open.
+- **With the user.** The build (`3DS Files/NFSHP2-3DS.3dsx`, commit
+  6f168b6) has the jump cam. Ask how a ramp looks on the device, and
+  for their `nfshp2_debug.txt`: its `race: zone` lines give each zone's
+  start and end.
 Session 31 took the race on Azahar from 20 FPS to 28-30 and
 the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`). The rest
 of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) comes after
@@ -292,15 +301,44 @@ are four parts:
     out, on core 2 of a New 3DS. stderr stays synchronous. The timing
     frame (a hitch of about 150 ms) now runs only when
     `sdmc:/nfshp2_gputiming.txt` is on the card as the race starts.
-  - **The ramp's abort (8bf178a).** "carfinish:
-    Player::IsJumpCamAvailable is not ported". `no_jump_cam` answers 0,
-    retail's answer for a route too short, so the car flies on under
-    the drive camera. The jump cam itself (PreviewRoute,
-    TrackCarCameraMover, the zone movers, RequestZone and ClearZone,
-    its sounds, RadialBlur) is still to port, with checkers.
-  - **The still car's oddity, open.** In the user's photos the car
-    stands still and the rock wall behind it is pale and blurred, with a
-    dark sharp box in it and a light-blue wedge up from the roof.
+  - **The ramp's abort (8bf178a), then the jump cam (Session 37).**
+    8bf178a's stand-in, `no_jump_cam`, is gone. `playerzone.c`,
+    `previewroute.c`, `spline.c` and `trackcarcam.c` are the jump cam,
+    checked by `prevroute_check`, `trackcarcam_check` and
+    `playerzone_check` (0 differ; every mutation caught but one
+    equivalent). `docs/formats/camera.md` has three sections on it: "The
+    jump cam's route", "The jump cam's mover" and "The camera zones".
+    Still seams, NULL in `main.c`:
+    - the freeze and preview zones' movers (zones 1 and 2 are a dead
+      button);
+    - the zones' sounds (the sample seams in `playerzone.h`);
+    - `RadialBlurOn` and `RadialBlurOff`.
+  - **The warp, for Azahar runs.** `sdmc:/nfshp2_warp.txt` holds
+    `seconds x y z angle speed` (`warp.h`). It puts the car anywhere,
+    once a race. `4 -1346.1 413.4 -68.5 610 55` with the gas held
+    (`run_azahar_race.ps1 -HoldKeys 65`) meets the jump at x = -1200 on
+    track 12. Azahar's copy is parked as `nfshp2_warp.txt.off`.
+  - **The device's capture (Session 37): no box, and the wedge is the
+    car's window.**
+    - In the capture's frame the rock wall was dark and sharp, as on
+      Azahar. The level-0 frame was a mean of 4.31 from it.
+    - The linear heap was 20000000 to 25000000, inside the PICA's
+      window.
+    - The wedge is draws 722 and 723: the Opel's WINDOW batch, 21
+      vertices, lit (blend 1) and then its env pass (blend 2). All its
+      corners are inside the car on the disc, but on the device one
+      ends up above the roof. Azahar draws it right.
+    - Open: the batch's vertices as the car's strips build them, and
+      what the device's PICA does with them that Azahar's does not
+      (`pica-freezes-azahar-misses` in memory lists the known
+      differences).
+    - The PNGs are in `out/cap_device` (`wedge_zoom.png`).
+    - The box may only show on a still car after a while. Ask the user
+      for a capture later in a still race if it comes back.
+
+    Session 36's notes, before the capture: in the user's photos the
+    car stands still and the rock wall behind it is pale and blurred,
+    with a dark sharp box in it and a light-blue wedge up from the roof.
     Moving, it goes. Azahar draws none of it. On Azahar the box's place
     is W_MOUNTVERS1 (the wall, the models' batch) under
     SHADOWSPINEMIDFADE2 (blend ALPHA) and the wedge's is

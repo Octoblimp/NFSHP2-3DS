@@ -14353,3 +14353,139 @@ hands the packet over with the sprites' mean truncated view depth.
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` from commit 7480451, with
   `sdmc:/nfshp2_capture.txt` to make, a race left still for 10 s, and
   the five `nfshp2_cap_*` files and `nfshp2_debug.txt` wanted back.
+
+## Session 37 (2026-10-05) -- the device's capture, and the jump cam
+
+### The device's capture (build 7480451)
+
+The user ran the capture build on the New 3DS XL, with the car left
+still. The files are in `3DS Files`: `nfshp2_cap_*` and
+`nfshp2_debug_capture.txt`, uncommitted. The PNGs from
+`tools/capture_view.py` are in `out/cap_device`, including
+`wedge_zoom.png` and `az_vs_dev.png`.
+
+- **No dark box in this frame.** The device's frame 6 s in matches
+  Azahar's almost pixel for pixel. The rock wall is dark and sharp, as
+  on Azahar. The level-0 frame is a mean of 4.31 from the mipped one
+  (3798 pixels off by more than 24), so the mip choice made no box in
+  this run.
+- **The linear heap is in the PICA's window.** The log's line is
+  `Linear heap: physical 20000000 to 25000000`, under 0x28000000, so
+  that idea is gone too.
+- **The light-blue wedge is the car's.** It is not the road shadow
+  guessed in Session 36. The draws under it (box 200,125 to 212,150)
+  are 722 and 723: the Opel's WINDOW batch (21 vertices, 7 triangles,
+  texture WINDOW 128x128), lit with blend 1, then its env pass with
+  blend 2. The disc's corners for those triangles are all inside the
+  car, so on the device one corner ends up above the roof. Azahar draws
+  the window right.
+  - Nothing was found yet. Open: how that batch's vertices are built
+    and transformed (the car's strips, the WINDOW+ batches in the log's
+    `race: solid OPEL_A` line).
+- **The GPU's time per frame.** These are the `citro3d gpu` numbers,
+  over the 275 seconds of the run, sorted by models in view:
+
+  | models in view | seconds | GPU median | GPU range | FPS median |
+  |---|---|---|---|---|
+  | under 100 | 70 | 27.0 ms | 20.5-31.9 | 28.9 |
+  | 100-149 | 94 | 29.6 | 23.6-46.6 | 26.7 |
+  | 150-199 | 41 | 33.1 | 29.3-51.3 | 23.9 |
+  | 200-249 | 43 | 43.0 | 31.1-58.0 | 18.0 |
+  | 250-299 | 12 | 46.6 | 33.2-57.8 | 17.9 |
+  | 300 or more | 15 | 45.4 | 36.7-48.9 | 16.9 |
+
+  The heavy stretches (around (-579, 287), with 262 models and 887
+  batches at once) are where the lap drops to 14-19 FPS. That is the
+  rest of 13b-4's work (the models, the envmap, the cull).
+
+### The jump cam, ported and checked
+
+The jump cam was ported in four commits:
+
+| Commit | What |
+|---|---|
+| `ce37726` | `PreviewRoute` and `Player::IsJumpCamAvailable` |
+| `351b187` | `Spline` and `TrackCarCameraMover` |
+| `ee33932` | `ChangeCameraMover`'s types 15 and 16, `RequestZone`, `ClearZone`, `ClearZoneSound` and `PlayerClearZone` |
+| `6f168b6` | the wiring in `main.c`, the warp, and the docs |
+
+`docs/formats/camera.md` has three new sections: "The jump cam's
+route", "The jump cam's mover" and "The camera zones".
+
+The checkers:
+
+| Checker | Scenarios | Ops | Lines | Differ | Mutations |
+|---|---|---|---|---|---|
+| `prevroute_check` | 18 | 2934 | 23375 | 0 | 57 caught |
+| `trackcarcam_check` | 14 | 6969 | 33697 | 0 | 157 caught |
+| `playerzone_check` | 23 | 5283 | 24580 | 0 | 197 caught, 1 equivalent |
+
+The equivalent mutation is `z-gap-force`. Without `force`, any time
+under the 0.1 s gap is under the 5 s one too, which has already said
+no.
+
+Notes from the checkers:
+
+- **Pad lanes.** The pad (w) lanes of the eye, bank and FOV points are
+  the stack's in retail and are not compared. The port's are 0.
+- **Zones outside 0..7.** A current zone outside 0..7 indexes past
+  `RequestZone`'s two byte tables on both sides, which is undefined.
+  It is not tried.
+- **The harness.** `playerzone_test.c` maps its players at 0x30000000
+  (`mmap` with `MAP_FIXED`). `prevroute_test.c` stubs the rest of
+  `playerzone.c`, never called there.
+- **Mutation survivors, fixed.**
+  - `j-dot-order` and `j-dot-z` led to `s_jump_ties`: velocities across
+    the edge-to-edge line on a banked straight, and straight up.
+  - `w-sound-enabled` led to `s_quiet_wrong`: sound off with the wrong
+    way, no route, or a route that violates the topology.
+
+### In the race
+
+`main.c` no longer has `no_jump_cam`. It sets these:
+
+- `gPlayerIsJumpCamAvailableFn`
+- `gPlayerRequestZoneFn` and `gPlayerClearZoneFn`
+- `gPlayerJumpCamMoverFn`
+- `gPreviewRouteDeleteFn`
+
+These stay NULL:
+
+- **The freeze and preview zones (1 and 2).** Their movers and calls are
+  NULL, so `RequestZone` refuses them before anything changes, as a dead
+  button.
+- **The radial blur and the zone sounds.** `gRadialBlurOn/OffFn` and
+  the sample seams are NULL, so the zones are unblurred and silent.
+- **The zone buttons.** The slow-motion one (zone 3) now works if a
+  scanner config maps it. Whether the default config maps it was not
+  checked.
+
+The log gives `race: zone A -> B at world frame N, mover M, time scale
+S` at each change, and `zone Z` on the once-a-second line.
+
+`warp.c` is for test runs only, and changes nothing without its file.
+With `sdmc:/nfshp2_warp.txt` on the card as a race starts, the line
+`seconds x y z angle speed` puts player 1's car there through
+`Car::ResetToPosition` once the race has run that long. Angle 0 is +x.
+
+On Azahar, the warp was set to `4 -1346.1 413.4 -68.5 610 55` with the
+gas held. That is the straight before the jump the user's lap took at
+x = -1200 on track 12.
+
+- **The zones.** 0 -> 6 at world frame 442 (time scale 0.40), 6 -> 7 at
+  482, and 7 -> 0 at 525 as a wheel landed.
+- **The look.** The camera stood low at the road's edge, looking up as
+  the car flew past the covered bridge, with the HUD off. Zone 7 was
+  close on the car. Then the chase camera came back with "HUGE AIR
+  +250".
+- **The frame rate** was 30 FPS throughout.
+
+The warp file in Azahar's sdmc is parked as `nfshp2_warp.txt.off`, and
+the capture flag as `nfshp2_capture.txt.off`. Rename one back to use it.
+
+### With the user
+
+- `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from commit 6f168b6. A ramp
+  now gets the jump cam (the slow motion, the roadside camera, then the
+  close one) where it used to get the drive camera. No flag files are
+  needed.

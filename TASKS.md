@@ -1540,6 +1540,27 @@ is citro3d and owns the top.
         unscaled; fixed, with `fn slp divide` and two mutants. Seven of
         the eight seams remain: the four movers, and AIDriver,
         TrafficDriver and CopDriver.
+
+        **The jump cam is closed (Session 37, commits ce37726, 351b187,
+        ee33932 and 6f168b6).** The jump cam was the Player half of
+        Car::FinishMovement's four seams. `previewroute.c` is
+        PreviewRoute and IsJumpCamAvailable. `spline.c` and
+        `trackcarcam.c` are Spline and TrackCarCameraMover.
+        `playerzone.c` is ChangeCameraMover's types 15 and 16,
+        RequestZone, ClearZone, ClearZoneSound and PlayerClearZone.
+        `main.c` sets all four seams, the jump mover and the route's
+        delete. The checkers have 0 differ:
+        - `prevroute_check`: 2934 ops, 57 mutations caught.
+        - `trackcarcam_check`: 6969 ops, 157 caught.
+        - `playerzone_check`: 5283 ops, 197 caught, 1 equivalent.
+        On Azahar a ramp gives zone 6 at 0.4 speed under the roadside
+        camera, then zone 7, then the chase camera as the car lands, at
+        30 FPS. Still seams, NULL in `main.c`:
+        - ZoneFreezeCameraMover and ZonePreviewCameraMover (zones 1 and
+          2 are a dead button);
+        - the zones' samples;
+        - RadialBlurOn and RadialBlurOff.
+        Written up in `docs/formats/camera.md`.
 27. [ ] Track rendering/streaming, collision. Task 24's debt is paid:
         `QuickSpline.obj` and `TrackPath.obj` are ported (Session 29,
         continued), and `TrackPathCoordinate::UpdatePosition` measures
