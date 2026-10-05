@@ -1,19 +1,20 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 33
-(2026-10-04), after SC-3b, the second part of the nebula behind the car.
+Where the next session picks up. Updated in Session 35
+(2026-10-05), after the race's first run on the device.
 **Start at "Now" just below.** SC-1 and SC-2, the car selector as logic
 and 2D and its 3D car on the turntable, are finished and checked
 against retail. SC-3 adds the nebula. SC-3a, the effect system's data,
 and SC-3b, its emitting and stepping, are done and committed. SC-3c's
 CPU half (RenderEffects) is done and checked but not committed; its
-draw on the device is next. **First, though: the New 3DS XL's race
-hang** (below). Session 34 (2026-10-05) found that geosolid, geolit
-and geofold left output components unwritten, which freezes the PICA
-at the first draw through them and which Azahar draws through. They
-are fixed, a build check (`tools/check_shbin.py`) now refuses such a
-shader, and that build is in `3DS Files/Hang Test Build/`, waiting on
-the user's device run. Read their new `nfshp2_debug.txt` there first.
+draw on the device is next. **First, though: the race's speed on the
+New 3DS XL** (below, "The race on the device"). The hang is fixed: the
+shaders' unwritten output components (Session 34) were it, and the
+race loads and drives on the device, at 8 FPS, with the GPU taking
+113-120 ms a frame. Session 35 gave the textures mip chains and
+replaced the hang check with a GPU timing frame. That build
+(`3DS Files/NFSHP2-3DS.3dsx`, commit 0355be5) is with the user; read
+their `nfshp2_debug.txt` and `nfshp2_stderr.txt` first.
 Session 31 took the race on Azahar from 20 FPS to 28-30 and
 the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`). The rest
 of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) comes after
@@ -231,22 +232,52 @@ are four parts:
       accesses, 29.5 FPS, and the race looks as it did.
     - The stride fix stays: it was a real fault too. Which of the two
       stopped the original build cannot be told now; both were in it.
-  - **The build in `3DS Files/Hang Test Build/`** (02:30) has the
-    shader fix, with the probe and the draw check still in, so a later
-    stop still names its draw. Older logs are kept there by name.
-    - If the race runs: take the probe and the per-draw check out (or
-      keep them off), and try the envmap's faces as RGBA5551 again on
-      the device. The pair was not the cause.
-    - If it stops: the last `draw N at` line names the draw. Check
-      3dbrew's GPU pages again, and compare NFSU2-3DS's setup.
-  - The probe (`georender_probe`, commit 8f165d3; in the draw check's
-    frame only, and nothing it draws shows) draws one triangle through
-    geosolid at a time onto the top screen, a plain 64x64 RGBA8 VRAM
-    target and envmap face 0, adding the depth test, unit 0, unit 1
-    and the alpha test. Then the sky's first batch goes onto the plain
-    target, the top screen and its face (`probe sky 1..3`). It pokes
-    unit 1 through citro3d's context (+280, +32), since C3D_TexBind
-    cannot set a unit to NULL, and checks the place first.
+  - **It was the output components.** The build in
+    `3DS Files/Hang Test Build/` (02:30), with that fix, loaded the race
+    on the device and drove it. Its log is kept there with the older
+    ones. The probe and the per-draw check are gone (commit 0355be5).
+- **The race on the device (2026-10-05): 8 FPS, the GPU's.** The
+  device's GPU takes 113-120 ms a frame: the models' list 78 ms, each
+  envmap view 5-7 ms. The CPU's part is about what Azahar shows (23 ms).
+  The user wants retail's look kept whole and the hardware used to the
+  full. Their answers (memory: gpu-speed-plan):
+  - Lossless textures only: RGBA8 where alpha varies, and, later, RGB8
+    with the combiner's alpha for a texture of one alpha. No ETC1, no
+    16-bit.
+  - Mip chains: the disc's, and made ones for the single-level
+    textures. **Done** (commit 0355be5): `texpack_upload_chain`, about
+    38 MB for the track where level 0 alone was 28.9. A chain that will
+    not fit uploads as its one level and is counted `unchained` in the
+    race's texture line.
+  - A timing build first. **Done, and with the user:** every 10 s of a
+    race (first at 5 s), one frame times each draw stage on the GPU and
+    sends the models' and the first envmap view's lists again, a
+    different way each time, onto a VRAM target never shown. The race
+    hitches each time (65 ms on Azahar, up to a second or so on the
+    device) and looks as it does otherwise.
+    Azahar's GPU times (0.12 ms) mean nothing; only the device's count.
+  - Then indexed meshes and the early depth test, each kept only if the
+    device's log shows it helps.
+  - **Reading the timing lines.** `gpu time: frame N:` has each stage's
+    ms and the sum. `gpu time: the models sent again (draws, vertices,
+    texture addresses, cache clears, words)` has five times:
+    - texture fetch is about "as drawn" less "8x8 textures";
+    - fill (pixels: depth, blend, the combiners) is about "as drawn"
+      less "1-pixel scissor";
+    - vertex work is about "1-pixel scissor" less "3 vertices a draw";
+    - what is left at "3 vertices a draw" is each draw's own cost:
+      the commands, the state, the texture changes;
+    - the texture cache clears cost about "as drawn" less "no texture
+      cache clears".
+  - **What to do with them.** Fetch or cache clears large: sort the
+    models' batches by texture, and send a cache clear only when the
+    texture changes (it is about one a draw now). Fill large: the early
+    depth test, and opaque draws nearer first. Vertex work large:
+    indexed meshes (the strips' shared vertices go once, and the PICA's
+    vertex cache works). Per-draw large: fewer, bigger draws. Then the
+    lossless RGB8 textures, and the envmap's cube faces back to
+    RGBA5551, as they were before the hang hunt made them RGBA8 (the
+    face pair was not the hang).
 - **SC-3c:** RenderEffects (0x00128da0) and its draw on the device.
   - **The CPU half is done, checked, and not committed.** It is in
     `acidsys.{c,h}` (acid_system_render_effects, acidz, the
@@ -3530,6 +3561,16 @@ goes in.
 ## What not to trust
 
 Ordered roughly by how much time it costs to rediscover.
+
+* **The race's heap is nearly full.** About 6 MB of the 48 MB malloc
+  heap is free once the track has loaded (2026-10-05, Azahar), and not
+  in one piece. A car's textures upload after that, so a big scratch
+  malloc in a texture upload fails there and nowhere else. The mip
+  chains' first build asked for 1.25 MB for a 512x320 skin: the
+  Speedster drew with no paint, only its reflection. The solids listing
+  in the race log marks a texture that would not upload with `!`
+  (`OPEL_SKIN1!`), and the texture line counts it as missing. Keep
+  scratch to the decoded level, or use the linear heap.
 
 * **A checker whose model was written from the disassembly can share a
   misreading with the port.** `drivetarget_check`'s model and

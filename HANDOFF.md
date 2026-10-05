@@ -14209,3 +14209,89 @@ hands the packet over with the sprites' mean truncated view depth.
   0 unexplained.
 - Still owed: the section in `docs/formats/acidfx.md`, the commit, and
   the draw on the device, which CONTINUE.md lays out step by step.
+
+## Session 35 (2026-10-05) -- the race runs on the device; mip chains and a GPU timing frame
+
+### The device's run
+
+- The user's run of the Hang Test Build (02:30) loaded the race and
+  drove it. The shaders' output components were the hang. The log is
+  `3DS Files/Hang Test Build/nfshp2_debug.txt`.
+- 8 FPS, held by the GPU: 113-120 ms a frame, the models' list 78 ms of
+  it and each envmap view 5-7 ms (the per-draw check's times). The CPU's
+  part is about Azahar's. 39 MB of the linear heap was free after the
+  track.
+- The user asked for options that keep retail's look whole and use the
+  hardware to the full, as questions. Their answers (memory
+  gpu-speed-plan): lossless textures only; the disc's mip chains and
+  made ones for the single-level textures; a timing build first; then
+  indexed meshes and the early depth test, each kept only if the
+  device's log shows it helps.
+
+### Mip chains (commit 0355be5)
+
+- GS TEX1's MMIN: 0 NEAREST, 1 LINEAR, 2 NEAREST_MIPMAP_NEAREST, 3
+  NEAREST_MIPMAP_LINEAR, 4 LINEAR_MIPMAP_NEAREST, 5
+  LINEAR_MIPMAP_LINEAR. Every track and car record has MMAG 1 and MMIN
+  3: linear up close, nearest in a level, linear between levels.
+  TexInfo now carries both (record bytes 0x6f and 0x70), and
+  `texpack_upload_chain` sets the PICA's filters from them.
+- The disc's chains: each level is within 2-5 of 255 of the 2x2 mean of
+  the one above in colour. A cut-out's levels keep its two alphas: 99%
+  of texels with 3 or 4 opaque parents are opaque, 70% with 2, 0.2%
+  with 1. The made levels follow that: the mean, and for a cut-out
+  (`texpack_cutout_alpha`) opaque when 2 or more of 4 are.
+- A chain is padded to powers of two as `texpack_upload` pads (the edge
+  repeated) and stops at 8 texels on the shorter side, the PICA's
+  smallest; the disc's chains stop there too.
+- `texpack_chain_tiled` (portable) writes every level straight into the
+  PICA's tiles. A made level is made from the level above where it
+  already is: in Morton order the four texels under one are four words
+  in a row. So the heap takes only the decoded level.
+  `texpack_test --chain` reads the tiles back, and its CRCs are the
+  same as the first version's for every texture of TEX12LOCATION (from
+  levels 0 and 1), TEX12TRACK, CARS/TEXTURES, DYNTEX and DRIVTEX.
+  `texpack_check.py --chain` matches them against `texture_convert.py`.
+- trackview picks a texture's level by the chain's size (`chain_bytes`):
+  about 38 MB for the track where level 0 alone was 28.9. 24.7 MB of
+  the linear heap is left on Azahar. A chain that will not upload falls
+  back to the one level, counted as `unchained`.
+- **The transparent car.** The first build made the levels in two heap
+  buffers, the padded level and its half: 1.25 MB for the Speedster's
+  512x320 skin. The race's heap has about 6 MB free after the track,
+  in pieces, and the skin did not upload. The solids listing showed
+  `OPEL_SKIN1!` and the texture line 1 missing; the car drew with only
+  its env map's reflection, which the user saw as transparent. The
+  tiled build fixed it: 0 missing, 0 unchained, the paint back. The
+  track-load line now logs the heap's free KB beside the linear heap's.
+
+### The timing frame (hangwatch.c)
+
+- The probe (`georender_probe`) and the per-draw check are gone, with
+  the Makefile's wraps for them. The watchdog stays as it was.
+  `georender_forget` is new, for the frame's resends.
+- Every 10 s of a race, the first 5 s in, one frame ends each draw
+  stage with a split, a flush and a wait, and logs `gpu time: frame N:`
+  with each stage's ms and the sum. The split's list is checked against
+  the GX queue's last entry first, and citro3d is told to send all its
+  state again after it.
+- The models' list and the first envmap view's are copied and sent
+  again onto a 400x240 RGBA8 target and a D24S8 depth buffer in VRAM
+  (banks A and B), cleared before each. The copy's commands are walked
+  and patched: the targets (0x11C-0x11E), the scissor (0x065-0x067),
+  NUMVERTICES (0x228), the three units' sizes, LODs, addresses and types
+  for the 8x8 stand-in, and TEXUNIT_CONFIG's cache-clear bit (0x080,
+  bit 16). Five ways: as drawn; 8x8 textures; a 1-pixel scissor; that
+  and 3 vertices a draw; no texture cache clears. CONTINUE.md says how
+  to read the differences.
+- On Azahar: envmap view 0 is about 205 draws, 30-41k vertices; the
+  models 120-1090 draws as the view turns, about one cache clear a draw.
+  The race keeps 30 FPS with a 63-66 ms hitch at each timing frame.
+  Every GPU time is about 0.12 ms there, which says nothing; the
+  device's say it all.
+
+### With the user
+
+- `3DS Files/NFSHP2-3DS.3dsx` and `.cia` from commit 0355be5. Wanted
+  back: `nfshp2_debug.txt` and `nfshp2_stderr.txt` after a minute or so
+  of driving.
