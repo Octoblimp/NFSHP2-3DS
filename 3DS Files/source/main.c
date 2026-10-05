@@ -88,6 +88,7 @@
 #include "gameflow.h"
 #include "hangwatch.h"
 #include "heapcfg.h"
+#include "logwriter.h"
 #include "geoview.h"
 #include "georender.h"
 #include "hudanim.h"
@@ -408,21 +409,47 @@ static FILE* g_log;
 static void logOpen(void)
 {
     g_log = fopen("sdmc:/nfshp2_debug.txt", "w");
+    // The lines go to the card from a thread of their own (logwriter.h):
+    // written in place, a race's once-a-second lines cost the device that
+    // second's frame, and more while the card was slow.
+    logwriter_start(g_log);
+    atexit(logwriter_drain);
     // stderr is where bMalloc and the other fatal paths say why they abort,
     // just before they do; on the device it would otherwise go nowhere.
+    // It stays unbuffered and in place, so the reason is on the card
+    // before abort() takes the process down.
     if (freopen("sdmc:/nfshp2_stderr.txt", "w", stderr) != NULL)
         setvbuf(stderr, NULL, _IONBF, 0);
 }
 
 static void logLine(const char* fmt, ...)
 {
+    char    line[2048];
     va_list ap;
+    int     n;
+
     if (!g_log) return;
     va_start(ap, fmt);
-    vfprintf(g_log, fmt, ap);
+    n = vsnprintf(line, sizeof line - 1, fmt, ap);
     va_end(ap);
-    fputc('\n', g_log);
-    fflush(g_log);           // an emulator kill must not lose the tail
+    if (n < 0) return;
+    if ((size_t)n > sizeof line - 2) n = (int)(sizeof line - 2);
+    line[n++] = '\n';
+    logwriter_put(line, (size_t)n);
+}
+
+// gPlayerIsJumpCamAvailableFn until the jump cam is ported: no jump cam.
+// Retail's (0x00170408) cleans up, builds a PreviewRoute 50 to 75 ahead of
+// the car, and answers whether it has five points. The port has neither
+// PreviewRoute nor the camera the route is for (TrackCarCameraMover in
+// RequestZone's zones 6 and 7). No is retail's answer for a route too
+// short, after cleaning up, and the car flies on under the drive camera,
+// as retail's does with the jump cams off. Unset, it aborted at the
+// user's first ramp on the New 3DS XL (2026-10-05).
+static int32_t no_jump_cam(Player *p)
+{
+    player_clean_up_jump_cam(p);
+    return 0;
 }
 
 // gNewTrackMapFn: trackmap_new, with a line in the log for each map made,
@@ -3144,10 +3171,12 @@ int main(int argc, char** argv)
     // World::DoTimestep ends every car's step with Car::FinishMovement,
     // which carfinish.c has ported since task 27's eleventh Car slice.
     // Left NULL, the step aborts. Only a player's car reaches its four
-    // Player calls. CleanUpJumpCam is playerinit.c's since step 8a; the
-    // zone calls and IsJumpCamAvailable stay NULL until they are ported.
+    // Player calls. CleanUpJumpCam is playerinit.c's since step 8a, and
+    // IsJumpCamAvailable is no_jump_cam's until the jump cam is ported.
+    // The zone calls stay NULL: only the jump cam's zones reach them.
     gCarFinishMovementFn = car_finish_movement;
     gPlayerCleanUpJumpCamFn = player_clean_up_jump_cam;
+    gPlayerIsJumpCamAvailableFn = no_jump_cam;
 
     // Player::CleanupAfterRace takes the player's handlers off through
     // SetInputMode(NONE); playerinput.c has it.

@@ -16,15 +16,18 @@
 //     are. Again at 10 s and every 30 s, and once more if frames come back.
 //     Not while the loop waits in aptMainLoop: that is HOME or sleep.
 //
-//   * The timing frame, every 10 s of a race. At the end of each draw stage
-//     the commands so far go to the GPU and are waited on, and the frame's
-//     line has each stage's GPU time. Two of the stages' command lists, the
-//     models' and the first envmap view's, are then copied and sent again
-//     onto a target of their own in VRAM that is never shown, several ways:
-//     as drawn; with every texture an 8x8 one; with a 1-pixel scissor; with
+//   * The timing frame, every 10 s of a race when the SD card has
+//     HANGWATCH_TIMING_FLAG, an empty file, and never otherwise: each one
+//     is a hitch of about 150 ms, and the build the user plays has to be
+//     smooth (2026-10-05). At the end of each draw stage the commands so
+//     far go to the GPU and are waited on, and the frame's line has each
+//     stage's GPU time. Two of the stages' command lists, the models' and
+//     the first envmap view's, are then copied and sent again onto a
+//     target of their own in VRAM that is never shown, several ways: as
+//     drawn; with every texture an 8x8 one; with a 1-pixel scissor; with
 //     that and 3 vertices a draw; and with no texture cache clears. What
-//     each takes says what the stage's time is spent on. The frame takes
-//     about half a second longer than others, and looks as they do.
+//     each takes says what the stage's time is spent on. The frame looks
+//     as the others do.
 //
 // A mark is two stores. Each frame's GX queue is counted too: citro3d's
 // holds 32 entries, and the 33rd is svcBreak, so a new most is logged. A
@@ -55,8 +58,12 @@ static inline void hangwatch_mark(const char *where)
 // aptMainLoop, marked as the wait it is, and a frame begun after it.
 bool hangwatch_main_loop(void);
 
+// The file whose presence at a race's start turns its timing frames on.
+#define HANGWATCH_TIMING_FLAG "sdmc:/nfshp2_gputiming.txt"
+
 // Before C3D_FrameBegin, each frame: whether a race is being drawn. The
-// first timing frame is 5 s into a race, and the next 10 s after each.
+// first timing frame is 5 s into a race, and the next 10 s after each,
+// when the flag file is there.
 void hangwatch_gpu_race(bool racing);
 
 // After C3D_FrameBegin: a timing frame starts, when one is due.
