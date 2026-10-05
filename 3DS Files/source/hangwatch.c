@@ -7,6 +7,7 @@
 #include <citro3d.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "georender.h"
@@ -296,8 +297,19 @@ static bool targets_made(void)
     return false;
 }
 
-// The ways a list is sent again.
-enum { V_DRAWN, V_TEX8, V_PIXEL, V_VERTS, V_NOCLEAR, V_COUNT };
+// The ways a list is sent again. The last three are 13b-4f's questions.
+// The early depth test (GPUREG_EARLYDEPTH_*) is the PICA's test before the
+// texture fetch and the combiners. Its buffer is the GPU's own and how it
+// updates is not documented anywhere public, and Azahar does not emulate
+// it, so the device has to say both what it saves and whether the picture
+// stays the same: each early variant's target is compared with the list's
+// as drawn. The port's depth is nearer-greater (GEQUAL, cleared to 0), and
+// the registers do not say which side of the compare the buffer is on, so
+// both are tried. RGB8 reads every RGBA8 texture as RGB8: the texels are
+// wrong, but the fetch is the three bytes a texel that the lossless RGB8
+// of the textures with one alpha would fetch (memory: gpu-speed-plan).
+enum { V_DRAWN, V_TEX8, V_PIXEL, V_VERTS, V_NOCLEAR, V_EARLY_GE,
+       V_EARLY_LE, V_RGB8, V_COUNT };
 
 typedef struct {
     unsigned draws;      // GPUREG_DRAWARRAYS and _DRAWELEMENTS
@@ -314,8 +326,17 @@ typedef struct {
 static u32 patch(int v, unsigned reg, unsigned mask, u32 val, ListStats *st)
 {
     bool pixel = v == V_PIXEL || v == V_VERTS;
+    bool early = v == V_EARLY_GE || v == V_EARLY_LE;
 
     switch (reg) {
+    case 0x061:                       // GPUREG_EARLYDEPTH_FUNC
+        if (v == V_EARLY_GE) return GPU_EARLYDEPTH_GEQUAL;
+        return v == V_EARLY_LE ? GPU_EARLYDEPTH_LEQUAL : val;
+    case 0x062:                       // _TEST1 and _TEST2: on
+    case 0x118:
+        return early ? 1 : val;
+    case 0x06a:                       // _DATA, the clear value: the depth's 0
+        return early ? 0 : val;
     case 0x11c:                       // GPUREG_DEPTHBUFFER_LOC
         return osConvertVirtToPhys(s_offDepth) >> 3;
     case 0x11d:                       // GPUREG_COLORBUFFER_LOC
@@ -350,8 +371,9 @@ static u32 patch(int v, unsigned reg, unsigned mask, u32 val, ListStats *st)
     case 0x085: case 0x095: case 0x09d:   // _ADDR1
         st->texAddrs++;
         return v == V_TEX8 ? osConvertVirtToPhys(s_standin) >> 3 : val;
-    case 0x08e: case 0x096: case 0x09e:   // _TYPE: RGBA8
-        return v == V_TEX8 ? 0 : val;
+    case 0x08e: case 0x096: case 0x09e:   // _TYPE: RGBA8, or RGB8 for it
+        if (v == V_TEX8) return GPU_RGBA8;
+        return v == V_RGB8 && val == GPU_RGBA8 ? GPU_RGB8 : val;
     }
     return val;
 }
@@ -387,35 +409,68 @@ static bool copy_list(const u32 *src, u32 words, u32 *dst, int v,
     return i == words && st->fbFirst && st->fbFits && st->draws > 0;
 }
 
+// The pixels of the replays' target that differ from `drawn`, colour then
+// depth: the target read back as capture.c reads the top screen's.
+static void differ(const u32 *drawn, unsigned *colour, unsigned *depth)
+{
+    u32 i;
+
+    *colour = *depth = 0;
+    for (i = 0; i < OFF_WORDS; i++) {
+        if (s_offColour[i] != drawn[i]) (*colour)++;
+        if (s_offDepth[i] != drawn[OFF_WORDS + i]) (*depth)++;
+    }
+}
+
 // A stage's list sent again onto the replays' target, cleared first as
-// the stage's own was, once each way.
+// the stage's own was, once each way. RGB8's picture is compared too: its
+// texels are wrong, so it must differ. An early variant's copy starts with
+// four words more: the early depth buffer cleared to the depth's 0, as
+// citro3d's frame split clears it.
 static void replay(const char *name, const u32 *list, u32 words)
 {
     static const char *const kVariant[V_COUNT] = {
         "as drawn", "8x8 textures", "1-pixel scissor",
-        "and 3 vertices a draw", "no texture cache clears"
+        "and 3 vertices a draw", "no texture cache clears",
+        "early depth >=", "early depth <=", "RGB8 for RGBA8"
     };
-    char      line[512];
+    char      line[1024];
     size_t    len;
     ListStats st, first = {0};
     double    ms[V_COUNT];
-    u32      *copy;
+    unsigned  diffColour[V_COUNT] = {0}, diffDepth[V_COUNT] = {0};
+    u32      *copy, *drawn;
+    bool      compared;
     int       v;
 
     if (!targets_made()) return;
-    copy = (u32 *)linearAlloc(words * 4);
+    copy = (u32 *)linearAlloc((words + 4) * 4);
     if (!copy) {
         s_log("gpu time: %s: no %lu bytes of linear heap to copy it into",
-              name, (unsigned long)words * 4);
+              name, (unsigned long)(words + 4) * 4);
         return;
     }
+    // The as-drawn target, colour then depth, for the early variants'.
+    drawn = (u32 *)malloc(OFF_WORDS * 8);
+    if (!drawn)
+        s_log("gpu time: %s: no %lu bytes of heap to compare the early "
+              "depth test's pictures in", name, (unsigned long)OFF_WORDS * 8);
     for (v = 0; v < V_COUNT; v++) {
-        if (!copy_list(list, words, copy, v, &st)) {
+        bool early = v == V_EARLY_GE || v == V_EARLY_LE;
+        u32 *start = early ? copy : copy + 4;
+        u32  size = (early ? words + 4 : words) * 4;
+
+        copy[0] = 0;                       // GPUREG_EARLYDEPTH_DATA
+        copy[1] = 0x7u << 16 | 0x06a;
+        copy[2] = 1;                       // GPUREG_EARLYDEPTH_CLEAR
+        copy[3] = 0xfu << 16 | 0x063;
+        if (!copy_list(list, words, copy + 4, v, &st)) {
             s_log("gpu time: %s: not sent again: %lu words, %u draws, the "
                   "target %s, %s", name, (unsigned long)words, st.draws,
                   st.fbFirst ? "set first" : "not set first",
                   st.fbFits ? "fits" : "does not fit");
             linearFree(copy);
+            free(drawn);
             return;
         }
         if (v == V_DRAWN) first = st;
@@ -426,16 +481,26 @@ static void replay(const char *name, const u32 *list, u32 words)
                       GX_FILL_TRIGGER | GX_FILL_32BIT_DEPTH);
         if (!wait_queue(true, NULL)) {
             stuck(name, "the replays' clear");
+            free(drawn);
             return;   // the copy stays: the GPU may yet read it
         }
-        GSPGPU_FlushDataCache(copy, words * 4);
-        GX_ProcessCommandList(copy, words * 4, 0);
+        GSPGPU_FlushDataCache(copy, (words + 4) * 4);
+        GX_ProcessCommandList(start, size, 0);
         if (!wait_queue(true, &ms[v])) {
             stuck(name, kVariant[v]);
+            free(drawn);
             return;
+        }
+        if (drawn && v == V_DRAWN) {
+            memcpy(drawn, s_offColour, OFF_WORDS * 4);
+            memcpy(drawn + OFF_WORDS, s_offDepth, OFF_WORDS * 4);
+        } else if (drawn && (early || v == V_RGB8)) {
+            differ(drawn, &diffColour[v], &diffDepth[v]);
         }
     }
     linearFree(copy);
+    compared = drawn != NULL;
+    free(drawn);
     len = (size_t)snprintf(line, sizeof line,
                            "gpu time: %s sent again (%u draws, %u vertices, "
                            "%u texture addresses, %u cache clears, %lu "
@@ -446,6 +511,14 @@ static void replay(const char *name, const u32 *list, u32 words)
         len += (size_t)snprintf(line + len, sizeof line - len, "%s %s %.2f",
                                 v ? ";" : "", kVariant[v], ms[v]);
     s_log("%s", line);
+    if (compared)
+        s_log("gpu time: %s, the early depth test's pictures against as "
+              "drawn: >= %u colour and %u depth pixels differ, <= %u and %u "
+              "(of %u; RGB8's wrong texels, which show that the compare "
+              "sees a change, %u)", name, diffColour[V_EARLY_GE],
+              diffDepth[V_EARLY_GE], diffColour[V_EARLY_LE],
+              diffDepth[V_EARLY_LE], (unsigned)OFF_WORDS,
+              diffColour[V_RGB8]);
 }
 
 void hangwatch_gpu_race(bool racing)

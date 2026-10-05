@@ -25,9 +25,11 @@
 //     the first envmap view's, are then copied and sent again onto a
 //     target of their own in VRAM that is never shown, several ways: as
 //     drawn; with every texture an 8x8 one; with a 1-pixel scissor; with
-//     that and 3 vertices a draw; and with no texture cache clears. What
-//     each takes says what the stage's time is spent on. The frame looks
-//     as the others do.
+//     that and 3 vertices a draw; with no texture cache clears; with the
+//     PICA's early depth test on, compared either way (13b-4f), each
+//     with its target's pixels counted against as drawn's; and with every
+//     RGBA8 texture fetched as RGB8. What each takes says what the stage's
+//     time is spent on. The frame looks as the others do.
 //
 // A mark is two stores. Each frame's GX queue is counted too: citro3d's
 // holds 32 entries, and the 33rd is svcBreak, so a new most is logged. A
