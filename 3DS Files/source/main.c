@@ -86,6 +86,7 @@
 #include "fredrace.h"
 #include "frontres.h"
 #include "gameflow.h"
+#include "capture.h"
 #include "hangwatch.h"
 #include "heapcfg.h"
 #include "logwriter.h"
@@ -2807,6 +2808,12 @@ static void logRaceState(void)
             g_track.drawnTris, g_track.note);
     logLine("race: minimap %d polys (%d failed)", g_track.flailerPolys,
             g_track.flailerFailed);
+    logLine("race: sun %d quads (%d failed), last at %.0f %.0f alpha %d; "
+            "Z rect at %d %d, %d read back, %d of it sky",
+            g_track.sunQuads, g_track.sunQuadsFailed,
+            (double)g_track.sunAt[0], (double)g_track.sunAt[1],
+            g_track.sunAlpha, g_track.sunRectX, g_track.sunRectY,
+            g_track.sunRects, g_track.sunSky);
     // Step 13b-1's measure: against the wall clock, the real and world
     // clocks should keep pace, and the frames drawn and the blanks give
     // the frame rate and the blanks a frame.
@@ -3331,6 +3338,15 @@ int main(int argc, char** argv)
               (unsigned long)(g_heapInfo.heapAsked / 1024),
               (unsigned long)(g_heapInfo.heapGot / 1024),
               (unsigned long)(g_heapInfo.linearGot / 1024));
+    {
+        // The PICA reaches a vertex buffer only within 256 MB of the
+        // attribute buffers' base, so where the linear heap sits matters.
+        extern u32 __ctru_linear_heap, __ctru_linear_heap_size;
+        u32 pa = osConvertVirtToPhys((void*)__ctru_linear_heap);
+
+        logPrintf("Linear heap: physical %08lx to %08lx\n", (unsigned long)pa,
+                  (unsigned long)(pa + __ctru_linear_heap_size));
+    }
     logConsole();
 
     if (!gamedata_init()) {
@@ -4035,6 +4051,7 @@ int main(int argc, char** argv)
             C3D_FrameSync();
             uint32_t gpuTick = bGetTicker();
             hangwatch_gpu_race(g_track.attached);
+            capture_race(g_track.attached);
             hangwatch_mark("C3D_FrameBegin: the GPU's last frame");
             C3D_FrameBegin(0);
             hangwatch_gpu_begin();
@@ -4056,6 +4073,8 @@ int main(int argc, char** argv)
                 const u32 sky = C2D_Color32(0x8c, 0xa8, 0xc8, 0xFF);
 
                 hangwatch_mark("the sun's depth read");
+                if (capture_read(top))
+                    trackview_capture_names(&g_track);
                 trackview_read_depth(&g_track, top);
                 trackview_draw_envmap(&g_track);
                 FRAMEPROF_STAMP(FRAMEPROF_ENVMAP);

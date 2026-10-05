@@ -8,9 +8,11 @@
 #include <3ds.h>
 
 #include "georender.h"
+#include "capture.h"
 #include "geofold_shbin.h"
 #include "geolit_shbin.h"
 #include "geosolid_shbin.h"
+#include "hangwatch.h"
 
 // --------------------------------------------------------------- the shader
 
@@ -34,6 +36,11 @@ static float           s_fogFar  = 2.0f;
 // the type of what a unit past 0 is given, so NULL there is a read of
 // address 12; no stage reads this one.
 static C3D_Tex         s_noFogTex;
+
+// The alpha test georender last set, for a numbered draw to put back
+// (capture.h).
+static bool            s_atOn;
+static int             s_atRef;
 
 static int s_uProjection = -1;
 static int s_uModelView  = -1;
@@ -550,6 +557,83 @@ static void bind_mesh(const GeoMesh* mesh)
     }
 }
 
+static void apply_fog_colour(void);
+static void set_blend(uint8_t blend);
+
+static void alpha_test(bool on, int ref)
+{
+    s_atOn  = on;
+    s_atRef = ref;
+    C3D_AlphaTest(on, on ? GPU_GREATER : GPU_ALWAYS, ref);
+}
+
+// A numbered draw (capture.h): its colour is its number, red the low byte,
+// green the high and blue 0x55, as the first stage's constant with no fog
+// after it and no blend. The alpha is the draw's own, so a cut-out cuts as
+// it does, and one that blends is cut to where its alpha shows. Then what
+// it changed is put back as the next draw expects to find it.
+static void draw_id(GPU_Primitive_t prim, int first, int count,
+                    const C3D_Tex* tex, const char* what)
+{
+    int         id      = capture_next_id();
+    bool        blended = s_blend != GEO_BLEND_NONE;
+    C3D_TexEnv* env     = C3D_GetTexEnv(0);
+    int         i;
+
+    capture_note("%d %s; %s, first %d, %d verts; tex %p (data %p, %dx%d); "
+                 "blend %d, alpha test %d/%02x; view %.2f %.2f %.2f",
+                 id, HangwatchTrail[(HangwatchMarks - 1u) % HANGWATCH_TRAIL],
+                 what, first, count, (const void*)tex,
+                 tex ? tex->data : NULL, tex ? tex->width : 0,
+                 tex ? tex->height : 0, s_blend, s_atOn, s_atRef,
+                 (double)s_modelView.r[0].w, (double)s_modelView.r[1].w,
+                 (double)s_modelView.r[2].w);
+    C3D_TexEnvSrc(env, C3D_RGB, GPU_CONSTANT, 0, 0);
+    C3D_TexEnvOpRgb(env, GPU_TEVOP_RGB_SRC_COLOR, GPU_TEVOP_RGB_SRC_COLOR,
+                    GPU_TEVOP_RGB_SRC_COLOR);
+    C3D_TexEnvFunc(env, C3D_RGB, GPU_REPLACE);
+    C3D_TexEnvScale(env, C3D_RGB, GPU_TEVSCALE_1);
+    C3D_TexEnvColor(env, 0xff550000u | ((uint32_t)id & 0xffffu));
+    for (i = 1; i < 6; i++) {
+        C3D_TexEnvInit(C3D_GetTexEnv(i));
+    }
+    C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_ONE, GPU_ZERO, GPU_ONE,
+                   GPU_ZERO);
+    if (blended) {
+        C3D_AlphaTest(true, GPU_GREATER, 0x08);
+    }
+    C3D_DrawArrays(prim, first, count);
+
+    s_run.combiner = -1;
+    s_run.passSet  = false;
+    s_fogApplied   = ~0u;
+    set_blend(s_blend);
+    alpha_test(s_atOn, s_atRef);
+}
+
+static void draw_arrays(GPU_Primitive_t prim, int first, int count,
+                        const C3D_Tex* tex, const char* what)
+{
+    if (capture_ids_on()) {
+        draw_id(prim, first, count, tex, what);
+        return;
+    }
+    if (capture_lod0_on() && tex != NULL && tex->maxLevel > 0) {
+        // Unit 0's texture with its chain cut to level 0, sent again for
+        // this draw and as it was for the next.
+        C3D_Tex* t    = (C3D_Tex*)tex;
+        u8       keep = t->maxLevel;
+
+        t->maxLevel = 0;
+        C3D_TexBind(0, t);
+        C3D_DrawArrays(prim, first, count);
+        t->maxLevel = keep;
+        C3D_TexBind(0, t);
+        return;
+    }
+    C3D_DrawArrays(prim, first, count);
+}
+
 // A batch's combiner: its texture, or the vertex colour alone. With `gs`
 // the texture modulates as the GS's does, Ct * Cv >> 7: the shaders hand
 // the colour over as c / 255, so the colour is doubled, and the alpha not,
@@ -598,7 +682,8 @@ static void set_combiner(const GeoTexture* gt, int uvScale, bool gs,
 static void draw_batch(const GeoBatch* b, const GeoTexture* gt, bool gs)
 {
     set_combiner(gt, s_uUvScale, gs, s_run.on);
-    C3D_DrawArrays(GPU_TRIANGLES, b->first, b->count);
+    draw_arrays(GPU_TRIANGLES, b->first, b->count, gt ? gt->tex : NULL,
+                "batch");
     s_run.bufSet = s_run.on;
 }
 
@@ -786,9 +871,9 @@ static void set_pass(GeoPass pass)
                                                  : GPU_WRITE_ALL);
     // AREF 0x30, doubled with the packs' alpha.
     if (pass.noAlphaTest) {
-        C3D_AlphaTest(false, GPU_ALWAYS, 0);
+        alpha_test(false, 0);
     } else {
-        C3D_AlphaTest(true, GPU_GREATER, 0x60);
+        alpha_test(true, 0x60);
     }
 }
 
@@ -903,7 +988,8 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
         bind_lit(mesh, L);
         set_pass(gt ? gt->pass : opaque);
         set_combiner(gt, s_lUvScale, true, false);
-        C3D_DrawArrays(GPU_TRIANGLES, b->first, b->count);
+        draw_arrays(GPU_TRIANGLES, b->first, b->count, gt ? gt->tex : NULL,
+                    "lit");
     } else {
         georender_draw_mask(mesh, textures, numTextures, (uint64_t)1 << bi);
     }
@@ -942,8 +1028,8 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
                        GPU_ZERO, GPU_ONE);
     }
     C3D_DepthTest(true, GPU_GEQUAL, GPU_WRITE_COLOR);
-    C3D_AlphaTest(false, GPU_ALWAYS, 0);
-    C3D_DrawArrays(GPU_TRIANGLES, b->first, b->count);
+    alpha_test(false, 0);
+    draw_arrays(GPU_TRIANGLES, b->first, b->count, sphere, "env pass");
 }
 
 // --------------------------------------------------- the environment map
@@ -1108,13 +1194,13 @@ void georender_envmap_fold(unsigned views)
                    GPU_ONE_MINUS_SRC_ALPHA, GPU_ZERO, GPU_ONE);
     C3D_CullFace(GPU_CULL_NONE);
     C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);
-    C3D_AlphaTest(false, GPU_ALWAYS, 0);
+    alpha_test(false, 0);
     for (i = 0; i < 9; i++) {
         int g = kOrder[i];
 
         if (views & 1u << (g < 6 ? g : 2)) {
-            C3D_DrawArrays(GPU_TRIANGLES, g * GEO_FOLD_GRID_VERTS,
-                           GEO_FOLD_GRID_VERTS);
+            draw_arrays(GPU_TRIANGLES, g * GEO_FOLD_GRID_VERTS,
+                        GEO_FOLD_GRID_VERTS, &s_envTex, "fold");
         }
     }
     s_fogApplied = ~0u;
@@ -1204,14 +1290,14 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
 
     C3D_CullFace(GPU_CULL_NONE);
     if (alphaTest) {
-        C3D_AlphaTest(true, GPU_GREATER, 0x60);
+        alpha_test(true, 0x60);
     } else {
-        C3D_AlphaTest(false, GPU_ALWAYS, 0);
+        alpha_test(false, 0);
     }
     set_blend(blend);
     C3D_DepthTest(true, depth >= 0.0f ? GPU_GEQUAL : GPU_ALWAYS,
                   GPU_WRITE_COLOR);
-    C3D_DrawArrays(GPU_TRIANGLE_STRIP, s_numQuads * 4, 4);
+    draw_arrays(GPU_TRIANGLE_STRIP, s_numQuads * 4, 4, gt->tex, "quad");
     s_numQuads++;
     if (depth >= 0.0f) {
         C3D_DepthMap(true, -1.0f, 0.0f);
@@ -1310,7 +1396,7 @@ bool georender_draw_strip(const GeoRenderVertex* v, int n, const GeoTexture* gt)
 
     C3D_CullFace(GPU_CULL_NONE);
     set_pass(gt->pass);
-    C3D_DrawArrays(GPU_TRIANGLE_STRIP, s_numStripVerts, n);
+    draw_arrays(GPU_TRIANGLE_STRIP, s_numStripVerts, n, gt->tex, "strip");
     s_numStripVerts += n;
 
     C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_1);

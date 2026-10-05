@@ -427,3 +427,7 @@ void trackview_draw_envmap(TrackView* v);
 // queue fills them once the frame is drawn. Call it between
 // C3D_FrameBegin, which waits for the GPU, and the target's clear.
 void trackview_read_depth(TrackView* v, C3D_RenderTarget* target);
+
+// The capture's legend (capture.h): each texture's C3D_Tex, as a numbered
+// draw names it, and the name and size of what it holds.
+void trackview_capture_names(const TrackView* v);

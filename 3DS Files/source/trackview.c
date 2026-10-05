@@ -25,6 +25,7 @@
 #include "fecar.h"
 #include "frameprof.h"
 #include "gamedata.h"
+#include "capture.h"
 #include "hangwatch.h"
 #include "scenery.h"
 #include "sky.h"
@@ -2428,6 +2429,20 @@ void trackview_read_depth(TrackView* v, C3D_RenderTarget* target)
         v->sunRects++;
     }
     s_numSunRects = 0;
+}
+
+void trackview_capture_names(const TrackView* v)
+{
+    int i;
+
+    for (i = 0; i < v->numTextures; i++) {
+        const TrackTex* t = &v->texture[i];
+
+        capture_note("tex %p (data %p, %dx%d, level %d) %s",
+                     (const void*)&t->tex, t->tex.data, t->tex.width,
+                     t->tex.height, t->level,
+                     t->info ? t->info->DebugName : "?");
+    }
 }
 
 // The environment views' clip volume ends 32 out (gp-24208): the cull's
