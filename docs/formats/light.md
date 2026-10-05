@@ -140,8 +140,30 @@ lighter reads for one model. Everything is in the model's own space:
 - `EnvMapMatrix`: the model's matrix times `hack_man_matrix`, with the eye
   in its last row.
 
-The car-select screen's three fixed directions (gp-21420 == 3) are not
-ported. In the frontend the world's lighting is taken.
+### In the frontend
+
+In the frontend (CurrentGameFlowState, gp-21420, is 3), the directions
+and colours are the frontend's own, and SunlightIntensity is 1:
+- **On the car select** (IsCarSelectScreenActive), they come from
+  SetSelectCarLighting's set: view 2 takes the second set (0x002d5ff0),
+  and every other view the first (0x002d5f70). The directions are held
+  in view space. They are turned by the inverse of the view's
+  WorldViewMatrix into world space, then into the model's like the
+  rest. The set's three colours and its ambient replace the four rows.
+  `docs/formats/car-select.md`, "The turntable car", has how the set is
+  filled.
+- **Elsewhere in the frontend** it uses three fixed directions
+  (0x002d5b70): (0, -5, 5), (4.3, 2.5, 2.5) and (-4.3, 2.5, 2.5). The
+  colours are greys of 128, 64 and 64, and the ambient is 0
+  (0x002d5ba0).
+
+The three colour rows get 0 in w and the ambient 128. The query still
+runs, but its ambient and the override are overwritten.
+
+For the directions, retail asks IsCarSelectScreenActive twice: before
+it inverts the view's matrix, and again before it turns them. A no the
+second time would turn a third set (0x002d5b40) instead. The answer
+can't change between the two calls, so the port asks once there.
 
 ## The lighter
 

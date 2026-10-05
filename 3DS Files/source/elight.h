@@ -250,13 +250,53 @@ int query_light_database(eLightQuery *q, const bVector3 *pos);
 
 // elSetupLightContext (0x00115978), what eviewmatrix.h's
 // gElSetupLightContextFn points at. -1 without lc or local_world, else 1.
+// In the frontend the lights are the frontend's: with car select up,
+// `view`'s set of elSelectCarLights, turned out of the view's space by its
+// WorldViewMatrix; otherwise elFrontEndLightDir and elFrontEndLightColour.
+// Either way the sunlight intensity is 1.
 int el_setup_light_context(eLightContext *lc, const bMatrix4 *local_world,
                            const bMatrix4 *hack, const bVector4 *eye,
                            eView *view);
 
-// CurrentGameFlowState == 3 (IN_FRONTEND), which takes the car-select
-// screen's lighting instead of the world's. That branch is not ported;
-// NULL, or a zero return, takes the world's.
+// CurrentGameFlowState == 3 (IN_FRONTEND), which takes the frontend's
+// lights instead of the world's. NULL, or a zero return, takes the
+// world's.
 extern int (*gElInFrontendFn)(void);
+
+// IsCarSelectScreenActive (0x00198418), which picks the car-select
+// screen's lights out of the frontend's. NULL answers 0.
+extern int (*gElCarSelectActiveFn)(void);
+
+// The car-select screen's lights: three directions in the view's space,
+// their colours, and the ambient. Colours run 0 .. 255, where 128 is 1.0
+// on the GS's scale. SetSelectCarLighting fills them.
+typedef struct eSelectCarLights {
+    struct {
+        bVector4 Colour;                //  0 + 32i
+        bVector4 Direction;             // 16 + 32i
+    } Light[3];
+    bVector4 Ambient;                   // 96
+    bVector4 pad;                       // 112  never written
+} eSelectCarLights;
+
+// [0] at 0x002d5f70, for every view but 2; [1] at 0x002d5ff0, for view 2,
+// the second player's. Zero until SetSelectCarLighting runs.
+extern eSelectCarLights elSelectCarLights[2];
+
+// The frontend's lights away from car select, from the static initializer:
+// directions (0, -5, 5), (4.3, 2.5, 2.5) and (-4.3, 2.5, 2.5) (0x002d5b70)
+// and colours 128, 64 and 64 with no ambient (0x002d5ba0). Unlike the car
+// select's, the directions are in the world's space.
+extern bVector4 elFrontEndLightDir[3];
+extern bVector4 elFrontEndLightColour[4];
+
+// SetSelectCarLighting (0x001157c0): view 2's set when `view_id` is 2,
+// else the other. A `locked` car, one whose status is 2, gets the dark
+// set, whose colours and ambient are all black. Otherwise the three lights' colours are
+// 80, 64 and (128, 128, 180), each lane plus `bright` * 30 and at most
+// 255, with an ambient of 32. Retail fills the colours' w lanes from its
+// stack; elSetupLightContext never reads them, and the port writes 0.
+void el_set_select_car_lighting(int32_t view_id, int32_t locked,
+                                float bright);
 
 #endif

@@ -36,6 +36,45 @@ bVector4 elSunColour = { 80.0f, 80.0f, 80.0f, 0.0f };
 bVector4 elAmbientOverride = { 0.0f, 0.0f, 0.0f, 0.0f };
 
 int (*gElInFrontendFn)(void);
+int (*gElCarSelectActiveFn)(void);
+
+eSelectCarLights elSelectCarLights[2];
+
+bVector4 elFrontEndLightDir[3] = {
+    { 0.0f, -5.0f, 5.0f, 0.0f },
+    { 4.3f, 2.5f, 2.5f, 0.0f },
+    { -4.3f, 2.5f, 2.5f, 0.0f },
+};
+bVector4 elFrontEndLightColour[4] = {
+    { 128.0f, 128.0f, 128.0f, 0.0f },
+    { 64.0f, 64.0f, 64.0f, 0.0f },
+    { 64.0f, 64.0f, 64.0f, 0.0f },
+    { 0.0f, 0.0f, 0.0f, 0.0f },
+};
+
+// SetSelectCarLighting's tables, from the static initializer: the lit
+// set's colours (0x003328c0, 0x003328b0, 0x003328a0), its ambient
+// (0x00332890) and its directions (0x00332840, 0x00332830, 0x00332820);
+// the dark set's colours (0x00332880 .. 0x00332860), its ambient
+// (0x00332850) and its directions (0x00332810, 0x00332800, 0x003327f0).
+static const bVector4 s_car_colour[3] = {
+    { 80.0f, 80.0f, 80.0f, 0.0f },
+    { 64.0f, 64.0f, 64.0f, 0.0f },
+    { 128.0f, 128.0f, 180.0f, 0.0f },
+};
+static const bVector4 s_car_ambient = { 32.0f, 32.0f, 32.0f, 0.0f };
+static const bVector4 s_car_dir[3] = {
+    { 6.82f, -6.1f, -8.56f, 0.0f },
+    { -5.0f, -1.0f, 0.0f, 0.0f },
+    { 1.28f, -1.17f, 1.28f, 0.0f },
+};
+static const bVector4 s_dark_colour[3];
+static const bVector4 s_dark_ambient;
+static const bVector4 s_dark_dir[3] = {
+    { 0.0f, 9.38f, -5.0f, 0.0f },
+    { -5.0f, 10.0f, 0.0f, 0.0f },
+    { 0.307f, 10.0f, 2.82f, 0.0f },
+};
 
 void el_init(void)
 {
@@ -419,6 +458,41 @@ int query_light_database(eLightQuery *q, const bVector3 *pos)
 
 // ------------------------------------------------------ the light context
 
+// min.s against 255, which keeps a NaN.
+static float min255(float v)
+{
+    return 255.0f < v ? 255.0f : v;
+}
+
+void el_set_select_car_lighting(int32_t view_id, int32_t locked,
+                                float bright)
+{
+    eSelectCarLights *s = &elSelectCarLights[view_id == 2 ? 1 : 0];
+    float add;
+    int i;
+
+    if (locked) {
+        for (i = 0; i < 3; i++) {
+            s->Light[i].Colour = s_dark_colour[i];
+            s->Light[i].Direction = s_dark_dir[i];
+        }
+        s->Ambient = s_dark_ambient;
+        return;
+    }
+    add = bright * 30.0f;
+    for (i = 0; i < 3; i++) {
+        s->Light[i].Colour.x = min255(s_car_colour[i].x + add);
+        s->Light[i].Colour.y = min255(s_car_colour[i].y + add);
+        s->Light[i].Colour.z = min255(s_car_colour[i].z + add);
+        s->Light[i].Colour.w = 0.0f;
+        s->Light[i].Direction = s_car_dir[i];
+    }
+    s->Ambient.x = min255(s_car_ambient.x);
+    s->Ambient.y = min255(s_car_ambient.y);
+    s->Ambient.z = min255(s_car_ambient.z);
+    s->Ambient.w = 0.0f;
+}
+
 // Normalised, as the VU0 does it: every lane times 1/sqrt(x^2+y^2+z^2).
 // The port leaves a zero vector at zero.
 static void normalize4(bVector4 *o, const bVector4 *v)
@@ -443,30 +517,49 @@ int el_setup_light_context(eLightContext *lc, const bMatrix4 *local_world,
     float px, py, pz;
     float r, g, b;
     float intensity;
+    int frontend;
     int n;
     int i;
 
-    (void)view;
     if (lc == NULL || local_world == NULL)
         return -1;
     memset(lc, 0, sizeof *lc);
     eInvertRotationMatrix(&inv, local_world);
     n = query_light_database(&q, (const bVector3 *)&local_world->v3);
+    frontend = gElInFrontendFn != NULL && gElInFrontendFn();
 
     // The directions to the sun, far off, and to the two nearest point
-    // lights, into model space. The car-select screen's three fixed
-    // directions (gp-21420 == 3) are not ported.
+    // lights; in the frontend, its three. Then into model space.
     memset(dir, 0, sizeof dir);
     px = local_world->v3.x;
     py = local_world->v3.y;
     pz = local_world->v3.z;
-    dir[0].x = elSunDir.x * 10000.0f - px;
-    dir[0].y = elSunDir.y * 10000.0f - py;
-    dir[0].z = elSunDir.z * 10000.0f - pz;
-    for (i = 0; i < n && i < 2; i++) {
-        dir[i + 1].x = q.Lights[i]->PositionX - px;
-        dir[i + 1].y = q.Lights[i]->PositionY - py;
-        dir[i + 1].z = q.Lights[i]->PositionZ - pz;
+    if (frontend) {
+        if (gElCarSelectActiveFn != NULL && gElCarSelectActiveFn()) {
+            const eSelectCarLights *s =
+                &elSelectCarLights[view->ID == 2 ? 1 : 0];
+            bMatrix4 vinv;
+
+            // Retail asks IsCarSelectScreenActive a second time between
+            // the two, and with a no would turn three other directions
+            // (0x002d5b40) instead. It cannot answer differently.
+            eInvertRotationMatrix(&vinv, view->WorldViewMatrix);
+            for (i = 0; i < 3; i++)
+                eMulVector3((bVector3 *)&dir[i], &vinv,
+                            (const bVector3 *)&s->Light[i].Direction);
+        } else {
+            for (i = 0; i < 3; i++)
+                dir[i] = elFrontEndLightDir[i];
+        }
+    } else {
+        dir[0].x = elSunDir.x * 10000.0f - px;
+        dir[0].y = elSunDir.y * 10000.0f - py;
+        dir[0].z = elSunDir.z * 10000.0f - pz;
+        for (i = 0; i < n && i < 2; i++) {
+            dir[i + 1].x = q.Lights[i]->PositionX - px;
+            dir[i + 1].y = q.Lights[i]->PositionY - py;
+            dir[i + 1].z = q.Lights[i]->PositionZ - pz;
+        }
     }
     for (i = 0; i < 3; i++) {
         eMulVector3((bVector3 *)&dir[i], &inv, (const bVector3 *)&dir[i]);
@@ -517,22 +610,47 @@ int el_setup_light_context(eLightContext *lc, const bMatrix4 *local_world,
         intensity = 0.0f;
     lc->SunlightIntensity = intensity;
 
-    // The sun's colour, never below 0.7 of itself, and the point lights'
-    // by their influence. Their blue is left 0: retail works it out and
-    // never stores it.
-    if (intensity < 0.7f)
-        intensity = 0.7f;
-    lc->LocalColourMatrix.v0.x = intensity * elSunColour.x;
-    lc->LocalColourMatrix.v0.y = intensity * elSunColour.y;
-    lc->LocalColourMatrix.v0.z = intensity * elSunColour.z;
-    for (i = 0; i < n && i < 2; i++) {
-        bVector4 *row = &lc->LocalColourMatrix.v1 + i;
-        float c[4];
+    if (frontend) {
+        // The frontend's colours and ambient over all of that, in full.
+        const bVector4 *c[4];
 
-        light_colour(q.Lights[i], c);
-        row->x = q.Influences[i] * c[0];
-        row->y = q.Influences[i] * c[1];
-        row->z = 0.0f;
+        for (i = 0; i < 4; i++)
+            c[i] = &elFrontEndLightColour[i];
+        if (gElCarSelectActiveFn != NULL && gElCarSelectActiveFn()) {
+            const eSelectCarLights *s =
+                &elSelectCarLights[view->ID == 2 ? 1 : 0];
+
+            for (i = 0; i < 3; i++)
+                c[i] = &s->Light[i].Colour;
+            c[3] = &s->Ambient;
+        }
+        for (i = 0; i < 4; i++) {
+            bVector4 *row = &lc->LocalColourMatrix.v0 + i;
+
+            row->x = c[i]->x;
+            row->y = c[i]->y;
+            row->z = c[i]->z;
+            row->w = i == 3 ? 128.0f : 0.0f;
+        }
+        lc->SunlightIntensity = 1.0f;
+    } else {
+        // The sun's colour, never below 0.7 of itself, and the point
+        // lights' by their influence. Their blue is left 0: retail works
+        // it out and never stores it.
+        if (intensity < 0.7f)
+            intensity = 0.7f;
+        lc->LocalColourMatrix.v0.x = intensity * elSunColour.x;
+        lc->LocalColourMatrix.v0.y = intensity * elSunColour.y;
+        lc->LocalColourMatrix.v0.z = intensity * elSunColour.z;
+        for (i = 0; i < n && i < 2; i++) {
+            bVector4 *row = &lc->LocalColourMatrix.v1 + i;
+            float c[4];
+
+            light_colour(q.Lights[i], c);
+            row->x = q.Influences[i] * c[0];
+            row->y = q.Influences[i] * c[1];
+            row->z = 0.0f;
+        }
     }
 
     if (eye != NULL) {

@@ -13669,3 +13669,28 @@ session finished it, then started on the car itself.
   mutation pass catches 141 of 143, and the other 2 are equivalent.
 - **`docs/formats/car-select.md`** has a new section, "The turntable
   camera".
+
+### SC-2b, the car and its light
+
+- **`fecar.c` and `.h`** are retail's FrontEndRenderingCar: the
+  constructor, ReInit, the deleting destructor, RenderFrontEndCar and
+  RenderFrontEndCars. A reflection draws only in view mode 1, and a
+  car is centred in x on its body's bounding box.
+- **`elight.c`** gains SetSelectCarLighting, the car select's two light
+  sets, lit or dark, and elSetupLightContext's frontend branch. In the
+  frontend the directions and colours are the frontend's own, and
+  SunlightIntensity is 1. The tables come from eLight.obj's static
+  initializer, which the checker runs.
+- **`fecar_check`**: 7 scenarios, 1439 ops, 13217 lines, 0 differ; 125
+  mutations, 124 caught, 1 equivalent. The first mutation pass left one
+  unexplained: dropping the frontend's SunlightIntensity of 1. An empty
+  light database already gives 1, so the checker now links in a pack of
+  six lights, which also tests the world path's point lights. Each side
+  asks its own QueryLightDatabase how many are near, and the mask
+  follows that.
+- **The device is unchanged:** nothing sets gElInFrontendFn or
+  gElCarSelectActiveFn yet. The build is clean, and loadertable_check,
+  the other checker over elight.c, still passes.
+- **`docs/formats/car-select.md`** has "The turntable car".
+  **`docs/formats/light.md`** has "In the frontend", in place of the
+  note that it wasn't ported.

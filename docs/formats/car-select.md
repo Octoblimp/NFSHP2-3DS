@@ -3,8 +3,9 @@
 Every race setup leads to car select: You're The Cop's Setup, a single
 race, the championship, and two players. It is retail's SelectCarScreen
 and CarSelector (`SLES_507.31`), which the demo disc has only in part.
-SC-1 ports them as logic and 2D in `bcarsel.c`. SC-2 adds the car in 3D,
-and SC-3 the nebula behind it.
+SC-1 ports them as logic and 2D in `bcarsel.c`. SC-2 adds the car in 3D:
+its camera (`selcam.c`), the car and its reflection (`fecar.c`) and
+their light (`elight.c`). SC-3 adds the nebula behind it.
 
 | class or function | address | port |
 |-------------------|---------|------|
@@ -374,3 +375,123 @@ mutation pass catches 141 of 143. The other two can't show:
 - `dtor-vtbl`: the base's destructor puts its own vtable in straight
   after.
 - `upd-pos-pad`: eTranslate takes only x, y and z.
+
+## The turntable car (SC-2b)
+
+`fecar.c` is retail's FrontEndRenderingCar, a car the frontend draws,
+from CarRender.obj. `elight.c` has the car select's lighting.
+
+| function | address | port |
+|----------|---------|------|
+| FrontEndRenderingCar's constructor, ReInit, deleting destructor | `0x0011e5c0`, `0x0011e758`, `0x0011e7d8` | `fecar_init`, `fecar_reinit`, `fecar_delete` |
+| RenderFrontEndCar | `0x00123c90` | `render_front_end_car` |
+| RenderFrontEndCars | `0x00123d28` | `render_front_end_cars` |
+| SetSelectCarLighting | `0x001157c0` | `el_set_select_car_lighting` |
+| elSetupLightContext, its frontend branch | `0x00115978` | `el_setup_light_context` |
+
+### FrontEndRenderingCar
+
+The car select has two of these: the car and its reflection. Each one
+is 648 bytes and has these parts:
+- It is on FrontEndRenderingCarList (gp-23656) and belongs to one view.
+- It holds its own copy of a RideInfo, and a CarRenderInfo built from
+  that copy with no Car.
+- Its owner sets its body, tyre and brake matrices.
+- It can hold an eModel of its own, drawn instead of the car.
+
+The constructor sets up a ride of type -1 with the rest 0, and hands the
+given ride to ReInit. Then every matrix is the identity, the position is
+0, Enabled is 1, and the car joins the list at its tail. ReInit deletes
+the CarRenderInfo, if any. With a ride, it copies the ride and builds a
+new CarRenderInfo from the copy, from bMalloc's pool 16. The destructor
+waits for the renderer and deletes the CarRenderInfo and the eModel,
+each with flags 3. Then it leaves the list, and with bit 0 of its flags
+it frees the car.
+
+`RenderFrontEndCars(view, cars, reflections, pass8, pass16)` draws every
+enabled car of the view that has a CarRenderInfo:
+- **A reflection** draws only when `reflections` is set and the view
+  mode is 1. Its flags start at 17: flag 1 is no environment map.
+- **Any other car** draws when `cars` is set, and its flags start at 0.
+- **Flag 8** joins when `pass8` is 0, and **flag 16** when `pass16` is.
+  Either also joins when its force flag (gp-23596, gp-23600) is set.
+  What 8 and 16 mean isn't known; the port's renderer ignores them.
+- **A car with its own eModel** draws that with the body matrix, and
+  nothing else.
+- **Otherwise the car is centred:** it moves in x by the middle of its
+  body's bounding box, so it sits in the middle of the turntable.
+- **The forced lights:** headlights give 3, the head and brake lights.
+  Cop lights add 8. A reflection gets none.
+
+RenderFrontEndCar sets ForceCarLOD and ForceTireLOD to 0, or to 1 for a
+reflection, and calls CarRenderInfo::Render. Afterwards it puts each one
+back, unless Render changed it.
+
+eDisplayFrame calls RenderFrontEndCars four times a frame:
+- (view, 1, 0, 1, 0) at `0x00112c1c` and `0x00112d2c`, for the
+  environment map's faces;
+- (view, 0, 1, 1, 1) at `0x001136bc`, for the reflections;
+- (view, 1, 0, 0, 1) at `0x001136d4`, for the cars, after RenderCars.
+
+### The lighting
+
+`SetSelectCarLighting(view, locked, bright)` fills one of two light
+sets: the second (`0x002d5ff0`) for view 2, and the first (`0x002d5f70`)
+for any other. Each set has three lights, each a colour and a direction,
+and an ambient:
+- **Locked**, the set is dark. The colours and the ambient are black,
+  and the directions are (0, 9.38, -5), (-5, 10, 0) and
+  (0.307, 10, 2.82).
+- **Otherwise it is lit.** The colours are greys of 80 and 64 and a
+  bluish (128, 128, 180), each plus `bright * 30`, at most 255. The
+  ambient is 32. The directions are (6.82, -6.1, -8.56), (-5, -1, 0)
+  and (1.28, -1.17, 1.28).
+
+The tables are filled by eLight.obj's static initializer
+(`0x00117098`). The cap at 255 is the EE's `min.s`, which keeps a NaN,
+and the port does the same. Retail leaves the lit colours' w lanes and
+the ambient's from its stack. The port writes 0 there, and nothing
+reads them.
+
+The selector's Tick calls it at `0x0019729c`:
+- `bright` is (1 - the swatch's weighted luminance)^4, so a dark paint
+  gets brighter lights.
+- `locked` is all four of: gp-23120 is 0, c[76] is 0, the VisibleCar at
+  c[80] is there and not available, and the status's nStatus is 2.
+
+elSetupLightContext then lights every model with the set, in the view's
+space (`docs/formats/light.md`, "In the frontend").
+
+### The checker
+
+`tools/fecar_check.py` runs retail's FrontEndRenderingCar constructor,
+ReInit and destructor, RenderFrontEndCars, SetSelectCarLighting and
+elSetupLightContext in mipsemu. eLight.obj's static initializer runs
+first, to fill the tables. `tools/src/fecar_test.c` runs `fecar.c` and
+`elight.c` over the same script. These calls are stubs that print what
+they get, the same on both sides:
+- bMalloc;
+- CarRenderInfo's constructor, destructor and Render;
+- eModel's Render, GetBoundingBox (which answers the script's box) and
+  destructor;
+- eWaitUntilRenderingDone and the free.
+
+The light context runs over an empty light database, or over a pack the
+script links in: a root over two leaves, and six lights of every type
+and attenuation. Retail leaves a direction on its stack when its point
+light isn't near, so the dumps leave out the words it reaches. Each side
+asks its own QueryLightDatabase how many are near, and that is printed
+too.
+
+The script covers:
+- building, rebuilding and deleting cars on and off the list;
+- every pass of RenderFrontEndCars, against cars and reflections, with
+  eModels, force flags and Render changing the LODs;
+- SetSelectCarLighting for every view, locked and lit, at NaN,
+  infinite and out-of-range brightness;
+- the light context in and out of the frontend, with and without the
+  car select, over three views with and without the pack.
+
+It is 7 scenarios, 1439 ops and 13217 lines, with 0 differ. The
+mutation pass catches 124 of 125. The other, `rfcs-unused-arg`, can't
+show: RenderFrontEndCar never reads its seventh argument.

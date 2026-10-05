@@ -33,10 +33,13 @@ background.
 - **SC-2a, the camera, is done.** `selcam.c` is SelectCarCameraMover
   (CM_SELECT_CAR) with its sounds. `selcam_check` runs 4266 ops with 0
   differ, and its mutation pass catches 141 of 143 (2 equivalent).
-- **SC-2b, the car and its light.** `fecar.c` is FrontEndRenderingCar
-  and RenderFrontEndCars. `elight.c` gains SetSelectCarLighting and
-  elSetupLightContext's frontend branch. Both are checked by
-  `fecar_check`.
+- **SC-2b, the car and its light, is done.** `fecar.c` is
+  FrontEndRenderingCar and RenderFrontEndCars. `elight.c` gains
+  SetSelectCarLighting and elSetupLightContext's frontend branch.
+  `fecar_check` runs 1439 ops with 0 differ, over an empty light
+  database and over a pack of six lights. Its mutation pass catches 124
+  of 125 (1 equivalent). Nothing on the device calls them yet:
+  gElInFrontendFn and gElCarSelectActiveFn stay NULL until SC-2d.
 - **SC-2c, the selector's 3D wiring**, in `bcarsel.c`, with
   `carsel_check` extended over it:
   - the two FrontEndRenderingCars at c[36] and c[40] (c[40] is the
@@ -56,6 +59,26 @@ background.
   Then Azahar screenshots against the user's PCSX2 photos.
 
 **Retail's facts for SC-2c and SC-2d:**
+- The constructor (0x001950d0) builds, after the joy handlers:
+  - c[36] and c[40], two FrontEndRenderingCars for view `playerNum`
+    (c[28]), with no ride. c[40] gets Reflection 1.
+  - The CARCOVER eModel at c+44 and the PLATFORM one at c+164, each
+    cleared and then Init'd from its name's hash.
+  - The SelectCarCameraMover at c[188], for view `playerNum`.
+  - SetSelectCarLighting(playerNum, 0, 0.0).
+  - c[316] and c[320], two buffers the size of the spotlight's (or
+    NULL without them), and c[324] and c[328] at 1.0.
+- InitSpotlights (0x00194fd0) copies BRUSHEDMETAL's alpha and colour
+  channels into gp-20084 and gp-20080. Nothing reads them back, and
+  UpdateSpotlight (0x00196038) is empty.
+- The Tick sets the camera each frame. Two players use RadiusStats
+  gp-20036 and OffsetStats 0x003341c0. One player uses gp-20040 and
+  0x00310200. Both use OffsetOrbit 0x003341b0, SetOrientationStats
+  (gp-20108, tilt 15654 for two players or gp-20044 for one), and
+  SetFOVStats(c[226]). It then calls UpdateRenderingCarParameters
+  (0x00197ce0) for c[36] with 0 and c[40] with 1.
+- The turntable turns by gp-20110 a frame while the mode is settled at
+  choose, or while orbitTouched is 0.
 - eDisplayFrame calls RenderFrontEndCars four times:
   - (view, 1, 0, 1, 0) at 0x00112c1c and 0x00112d2c, the environment
     map's faces;
@@ -120,10 +143,10 @@ Task 24 closed Phase 3: `TrackRoute.obj` is ported and the track's
 centreline, its driving lines and its signposts all load. It is diffed, not
 run -- see "Next" below for why, and for what task 27 owes it.
 
-Ninety-nine cross-checkers pass, plus the four table generators:
+One hundred cross-checkers pass, plus the four table generators:
 
 ```bash
-python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/mainloop_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/texturestream_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/resource_check.py && python tools/fred_check.py && python tools/fredrace_check.py && python tools/flailer_check.py && python tools/hudfeatures_check.py && python tools/bprintf_check.py && python tools/hudrender_check.py && python tools/hudanim_check.py && python tools/hudscore_check.py && python tools/hudcop_check.py && python tools/hudnis_check.py && python tools/hudtach_check.py && python tools/carsel_check.py && python tools/selcam_check.py && python tools/trackmap_check.py && python tools/envsample_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
+python tools/bvector_check.py && python tools/bmath_check.py && python tools/banim_check.py && python tools/bscreens_check.py && python tools/bootflow_check.py && python tools/bslotpool_check.py && python tools/geometry_check.py && python tools/texsrc_check.py && python tools/bui_check.py extracted/FRONTEND/FRONTB.BUN && python tools/sndbank_check.py out/SOUND && python tools/bsnd_check.py out/SOUND && python tools/emath_check.py && python tools/camera_check.py && python tools/cambase_check.py && python tools/orbit_check.py && python tools/shake_check.py && python tools/drivecam_check.py && python tools/playercam_check.py && python tools/player_check.py && python tools/raceinit_check.py && python tools/racecore_check.py && python tools/racerun_check.py && python tools/racecoord_check.py && python tools/rcstates_check.py && python tools/trackroute_check.py && python tools/carstate_check.py && python tools/engine_check.py && python tools/cartypeinfo_check.py && python tools/carinfo_check.py && python tools/carloader_check.py && python tools/cardriver_check.py && python tools/steering_check.py && python tools/rigidbody_check.py && python tools/suspension_check.py && python tools/wheel_check.py && python tools/drivetrain_check.py && python tools/drivetarget_check.py && python tools/drivetarget_image_check.py && python tools/graph_check.py && python tools/car_check.py && python tools/physicssystem_check.py && python tools/aerodynamics_check.py && python tools/physcomp_check.py && python tools/sinit_check.py && python tools/physicscar_check.py && python tools/mellowmover_check.py && python tools/carmode_check.py && python tools/careffects_check.py && python tools/carinit_check.py && python tools/difficulty_check.py && python tools/joystick_check.py && python tools/joyhid_check.py && python tools/realtime_check.py && python tools/mainloop_check.py && python tools/realdriver_check.py && python tools/quickspline_check.py && python tools/trackpath_check.py && python tools/average_check.py && python tools/airoute_check.py && python tools/realcontroller_check.py && python tools/track_check.py && python tools/vclip_check.py && python tools/polyhedra_check.py && python tools/collisionbody_check.py && python tools/collision_check.py && python tools/world_check.py && python tools/scenery_check.py && python tools/scenerycull_check.py && python tools/eview_check.py && python tools/loadertable_check.py && python tools/texturepack_check.py && python tools/texturestream_check.py && python tools/trackflow_check.py && python tools/sky_check.py && python tools/sun_check.py && python tools/weather_check.py && python tools/rain_check.py && python tools/mv3_check.py && python tools/jukebox_check.py && python tools/jbstream_check.py && python tools/songmon_check.py && python tools/setup_check.py && python tools/racesetup_check.py && python tools/carrenderinfo_check.py && python tools/carrender_check.py && python tools/rendercars_check.py && python tools/resource_check.py && python tools/fred_check.py && python tools/fredrace_check.py && python tools/flailer_check.py && python tools/hudfeatures_check.py && python tools/bprintf_check.py && python tools/hudrender_check.py && python tools/hudanim_check.py && python tools/hudscore_check.py && python tools/hudcop_check.py && python tools/hudnis_check.py && python tools/hudtach_check.py && python tools/carsel_check.py && python tools/selcam_check.py && python tools/fecar_check.py && python tools/trackmap_check.py && python tools/envsample_check.py && python tools/gen_bmath_tables.py --check && python tools/gen_bsnd_tables.py --check && python tools/gen_scanner_tables.py --check && python tools/gen_terrain_table.py --check
 ```
 
 ```
@@ -227,6 +250,7 @@ hudnis_check         818 ops,     4359 lines, 0 differ  (118 caught, 1 equivalen
 hudtach_check       2287 ops,     7804 lines, 0 differ  (89 caught, 4 equivalent; retail's image)
 carsel_check        7282 ops,   430239 lines, 0 differ  (196 caught, 5 equivalent; retail's image)
 selcam_check        4266 ops,    52296 lines, 0 differ  (141 caught, 2 equivalent; retail's image)
+fecar_check         1439 ops,    13217 lines, 0 differ  (124 caught, 1 equivalent; retail's image)
 gen_bmath_tables --check           bmathtab.c is up to date
 gen_bsnd_tables  --check           bsndtab.c is up to date
 gen_scanner_tables --check         joyeventid.h, scannertab.c are up to date
