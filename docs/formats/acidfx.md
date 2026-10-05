@@ -363,7 +363,7 @@ flares and before AttachSolidPolys. The envmap views draw none.
 matrix, by eMulVector4, with t³ made as t² × t.
 
 The port's seam for eAttachDirectData is `gEAttachDirectDataFn`, which
-the device's trackview fills (below).
+the device's trackview sets around its two calls (below).
 
 ## On the device
 
@@ -385,6 +385,34 @@ the device's trackview fills (below).
   (bchunkload.c), so every track's packs load. GLOBALB is loaded by hand
   in `loadGlobalCarInfo`, which now takes its two packs too: the car
   data log says 8 chunks, where it said 6.
+- **The draw (SC-3c).** `trackview_draw` runs RenderEffects for
+  FrameEffects and then WorldEffects after StuffSun and before the
+  scenery's AttachSolidPolys, and `trackview_draw_frontend` after RENDER,
+  as eDisplayFrame does. gEAttachDirectDataFn is the trackview's
+  `attach_direct_data` for those two calls alone:
+  - it refuses any tag but RenderEffects' (counted `refused`);
+  - it decodes the packet at once, as it lives in the frame memory: each
+    corner's XYZ2 to the target's pixels (less 2048 less half the
+    scissor) and then to the top screen's by `target_to_screen`, as
+    `render_epoly` does; its Z shifted back up acidz to a GS Z, and to
+    the Z-buffer's depth by `depth_of_gs_z`, nearer than the scenery
+    reaches being just under 1; its ST, and the RGBAQ's colour;
+  - it puts the sprites on the lists as a deferred item, like a strip's,
+    with the texture's order, its first use, and the mean view depth for
+    the alpha sort.
+  - `georender_draw_sprites` draws a set in one call, two triangles a
+    sprite, from a ring of 1000 sprites on the linear heap. Its matrix is
+    the screen's with the z row (0, 0, -1, 0), so a corner's z is its
+    depth. The combiner is the strips' (texture times colour, doubled),
+    the pass is the texture's, and unit 1 has the no-fog texture for the
+    draw, as PRIM 0x54 has no FGE.
+  - The race's log has a line a second: `race: effects` with
+    WorldEffects' auto emitters, its groups, the particles RenderEffects
+    found visible and the sprites drawn, dropped and refused.
+  - On Azahar, TRACKB12 has 152 auto emitters. With the gas held from
+    the start, 4 to 9 groups make 30 to 126 sprites a frame: the
+    chimney smoke over the cabins by the start. The race keeps 29.4 FPS,
+    with 0 unmapped accesses.
 - On Azahar the car select run passes with 0 unmapped accesses. A race
   on TRACKB12 runs as before (539 frames in 19 s), with 0 unmapped
   accesses and an empty `nfshp2_stderr.txt`. With SC-3b's step the
@@ -506,8 +534,6 @@ demo image's 178 ops and the retail image's 37375, 0 differ on both.
 
 ## Still open
 
-- **SC-3c's draw on the device:** the trackview's eAttachDirectData
-  and a sprite batch in georender.
 - **SC-3d:** the car select's nebula, 20 emitters of XE_SelectCarNebula
   with UpdateNebula and SetEmitterState (0x0016c3b0).
 - GLOBALB has a group CARFX_BREAK_LICENSE_PLATE_REAR, but carrenderinfo.c's

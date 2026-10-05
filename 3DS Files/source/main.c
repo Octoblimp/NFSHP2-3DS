@@ -2834,6 +2834,22 @@ static void logRaceState(void)
             g_track.deferredDropped,
             g_track.stripsDrawn, g_track.stripsDropped);
     {
+        // The effects: WorldEffects' auto emitters and active groups, the
+        // particles RenderEffects found visible, and the sprites drawn.
+        const bNode* n;
+        int          groups = 0;
+
+        for (n = WorldEffects.ActiveGroupList.next;
+             n != NULL && n != &WorldEffects.ActiveGroupList; n = n->next) {
+            groups++;
+        }
+        logLine("race: effects %d auto emitters, %d groups, %d particles "
+                "visible; %d sprites drawn (%d dropped, %d refused)",
+                (int)WorldEffects.NumAutoEmitters, groups,
+                (int)WorldEffects.NumVisibleParticles, g_track.spritesDrawn,
+                g_track.spritesDropped, g_track.spritesRefused);
+    }
+    {
         // Once, the other solids and what each texture slot draws with.
         static int listed;
         int        i, k;

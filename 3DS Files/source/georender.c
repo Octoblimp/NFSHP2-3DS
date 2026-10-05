@@ -155,7 +155,13 @@ static int              s_numQuads;
 // The strips' ring, and the vertices of it the frame has used.
 static GeoRenderVertex* s_strips;
 static int              s_numStripVerts;
+// The sprites' ring, six vertices a sprite, and the sprites drawn from it.
+static GeoRenderVertex* s_sprites;
+static int              s_numSprites;
 static C3D_Mtx          s_screen;
+// The screen's mapping with a vertex's z as its depth: z row (0, 0, -1,
+// 0), which C3D_DepthMap's default scale of -1 turns back into z.
+static C3D_Mtx          s_spriteScreen;
 static C3D_Mtx          s_identity;
 static float   s_lightVec[3] = { 0.0f, 0.0f, 1.0f };
 static float   s_lightClr[3] = { 1.0f, 1.0f, 1.0f };
@@ -250,6 +256,14 @@ bool georender_init(void)
     s_strips = (GeoRenderVertex*)linearAlloc(GEO_STRIP_RING
                                              * sizeof(GeoRenderVertex));
     s_numStripVerts = 0;
+    s_sprites = (GeoRenderVertex*)linearAlloc(GEO_SPRITE_RING * 6u
+                                              * sizeof(GeoRenderVertex));
+    s_numSprites = 0;
+    s_spriteScreen = s_screen;
+    s_spriteScreen.r[2].x = 0.0f;
+    s_spriteScreen.r[2].y = 0.0f;
+    s_spriteScreen.r[2].z = -1.0f;
+    s_spriteScreen.r[2].w = 0.0f;
     // Both rings are on the linear heap, which C3D_FrameEnd(0) flushes
     // whole before the GPU runs the frame's commands, so a quad or a
     // strip is not flushed when it is written. A flush of each was a
@@ -273,6 +287,8 @@ void georender_exit(void)
     s_quads = NULL;
     linearFree(s_strips);
     s_strips = NULL;
+    linearFree(s_sprites);
+    s_sprites = NULL;
     C3D_TexDelete(&s_noFogTex);
     free_envmap();
     shaderProgramFree(&s_foldProgram);
@@ -1226,6 +1242,7 @@ void georender_quads_rewind(void)
 {
     s_numQuads      = 0;
     s_numStripVerts = 0;
+    s_numSprites    = 0;
 }
 
 static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
@@ -1399,6 +1416,74 @@ bool georender_draw_strip(const GeoRenderVertex* v, int n, const GeoTexture* gt)
     draw_arrays(GPU_TRIANGLE_STRIP, s_numStripVerts, n, gt->tex, "strip");
     s_numStripVerts += n;
 
+    C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_1);
+    return true;
+}
+
+// ------------------------------------------------------------ the sprites
+
+bool georender_draw_sprites(const GeoRenderVertex* v, int n,
+                            const GeoTexture* gt)
+{
+    GeoRenderVertex* dst;
+    C3D_BufInfo*     buf;
+    C3D_TexEnv*      env;
+    int              first = s_numSprites * 6;
+    int              i;
+
+    if (!s_ready || !s_sprites || n <= 0 || !gt || !gt->tex
+        || s_numSprites + n > GEO_SPRITE_RING) {
+        return false;
+    }
+    run_forget();
+    // A strip of four is the triangles 0 1 2 and 2 1 3.
+    dst = &s_sprites[first];
+    for (i = 0; i < n; i++, v += 4, dst += 6) {
+        dst[0] = v[0];
+        dst[1] = v[1];
+        dst[2] = v[2];
+        dst[3] = v[2];
+        dst[4] = v[1];
+        dst[5] = v[3];
+    }
+
+    C3D_BindProgram(&s_program);
+    C3D_SetAttrInfo(&s_attr);
+    buf = C3D_GetBufInfo();
+    BufInfo_Init(buf);
+    BufInfo_Add(buf, s_sprites, sizeof(GeoRenderVertex), 4, 0x3210);
+
+    // The vertex colour and nothing else, as the screen quads have it.
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uProjection, &s_spriteScreen);
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uModelView,  &s_identity);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightVec, 0.0f, 0.0f, 1.0f, 0.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightClr, 0.0f, 0.0f, 0.0f, 1.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uAmbient,  1.0f, 1.0f, 1.0f, 1.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale,
+                  gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uFogRow, 0.0f, 0.0f, 0.0f,
+                  fog_s(1.0f));
+    // No fog: unit 1 keeps all of the colour for the draw.
+    if (s_fog != NULL && s_noFogTex.data) {
+        C3D_TexBind(1, &s_noFogTex);
+    }
+
+    // As the screen quads' and the strips': the GS's 0x80 is 1.0.
+    C3D_TexBind(0, gt->tex);
+    env = C3D_GetTexEnv(0);
+    C3D_TexEnvInit(env);
+    C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
+    C3D_TexEnvFunc(env, C3D_Both, GPU_MODULATE);
+    C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_2);
+
+    C3D_CullFace(GPU_CULL_NONE);
+    set_pass(gt->pass);
+    draw_arrays(GPU_TRIANGLES, first, n * 6, gt->tex, "sprites");
+    s_numSprites += n;
+
+    if (s_fog != NULL) {
+        C3D_TexBind(1, (C3D_Tex*)&s_fog->tex);
+    }
     C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_1);
     return true;
 }

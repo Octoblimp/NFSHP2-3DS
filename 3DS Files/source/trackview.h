@@ -148,7 +148,8 @@ typedef struct {
 // not an opaque order-0 one. See trackview_draw. `light` is the model's
 // eLightContext, in the frame memory, and `flags` RenderStrips' for the
 // batch; see strip_flags. Or one of eBeginStrip's strips, which always
-// wait, with `strip` its index in the view's strips.
+// wait, with `strip` its index in the view's strips; or one of
+// RenderEffects' packets, its sprites set `sprites` of trackview.c's.
 typedef struct {
     C3D_Mtx     modelView;
     const void* light;
@@ -161,6 +162,7 @@ typedef struct {
     uint16_t    seq;
     uint16_t    flags;
     int16_t     strip;          // -1 for a batch
+    int16_t     sprites;        // -1 but for RenderEffects' packets
 } TrackDeferred;
 
 // One of eBeginStrip's strips: its texture, and its vertices in the
@@ -252,6 +254,9 @@ typedef struct {
     int  numStripVerts;
     int  stripsDropped;         // that found the store or the lists full
     int  stripsDrawn;           // in the frame just drawn
+    int  spritesDrawn;          // RenderEffects' sprites, the frame just drawn
+    int  spritesDropped;        // that found the store, the lists or the ring full
+    int  spritesRefused;        // packets that were not RenderEffects' shape
     int  cmdSkipped;            // draws left out because the GPU list was full
     bool listPending;           // the next frame lists what it draws
     bool listFrame;             // this one did, into drawList

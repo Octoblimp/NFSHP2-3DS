@@ -8,6 +8,7 @@
 
 #include <3ds.h>
 
+#include "acidsys.h"
 #include "bchunk.h"
 #include "bchunkload.h"
 #include "carrenderinfo.h"
@@ -126,9 +127,14 @@ static uint32_t   s_fogColour;
 static float      s_depthNear = TRACK_NEAR;
 static float      s_depthFar  = TRACK_FAR;
 
+// The GS's screen is 4096 pixels across with the target in the middle.
+#define GS_CENTRE 2048.0f
+
 static void render_epoly(ePoly* p, TextureInfo* info, int flags);
 static void transfer_zbuffer_rect(uint8_t* dst, int x, int y, int w, int h);
 static float depth_of_gs_z(float g);
+static void target_to_screen(float x, float y, int targetW, int targetH,
+                             float aspX, float aspY, float* sx, float* sy);
 
 // ------------------------------------------------------------------ helpers
 
@@ -745,6 +751,7 @@ static void defer(TrackView* v, int solid, int batch, const bMatrix4* lv,
     d->texUse = t->firstUse;
     d->seq    = v->deferredSeq++;
     d->strip  = -1;
+    d->sprites = -1;
     v->numDeferred++;
     if (t->sorted) {
         v->deferredSorted++;
@@ -882,6 +889,7 @@ static void strip_end(void)
     d->texUse = t->firstUse;
     d->seq    = v->deferredSeq++;
     d->strip  = (int16_t)v->numStrips++;
+    d->sprites = -1;
     if (t->sorted) {
         v->deferredSorted++;
     }
@@ -908,6 +916,155 @@ static void draw_strip(TrackView* v, const TrackDeferred* d)
     if (georender_draw_strip(&v->stripVerts[s->first], s->count, &gt)) {
         v->stripsDrawn++;
     }
+}
+
+// ------------------------------------------------------------ the effects
+
+// The sprites RenderEffects (retail 0x00128da0) hands eAttachDirectData, a
+// group's packet at a time, decoded as they come: the packet is in the
+// frame memory. One view draws at a time, so one store does; begin_view
+// empties it. The particle pool is 1000 (afxInit) and the groups' 400.
+#define SPRITE_MAX      1000
+#define SPRITE_SET_MAX  400
+
+typedef struct {
+    const TrackTex* tex;
+    uint16_t        first;      // in s_spriteCorners, four a sprite
+    uint16_t        count;      // sprites
+} SpriteSet;
+
+static GeoRenderVertex s_spriteCorners[SPRITE_MAX * 4];
+static SpriteSet       s_spriteSets[SPRITE_SET_MAX];
+static int             s_numSprites;
+static int             s_numSpriteSets;
+
+// A corner's depth: its Z is the scenery's GS Z shifted down acidz (see
+// acid_system_render_effects), so shifted back it is a GS Z in the units
+// depth_of_gs_z takes. One nearer than the scenery reaches passes against
+// anything, as on the GS; the clip volume wants the depth inside (0, 1).
+static float sprite_depth(uint32_t z)
+{
+    float d = depth_of_gs_z((float)(z << (acidz & 31)));
+
+    if (d < 0.0f || d > 1.0f - 1.0f / 65536.0f) {
+        return 1.0f - 1.0f / 65536.0f;
+    }
+    return d < 1e-7f ? 1e-7f : d;
+}
+
+// eAttachDirectData (0x00110378), for RenderEffects' packets alone: the
+// packet goes on its texture's list of the current target, or on the
+// alpha list at depth z when the texture has ApplyAlphaSorting. Here it is
+// a deferred item like a strip's, in the attach loops' order. The tag must
+// be RenderEffects': NLOOP sprites with EOP, PRE with PRIM 0x54, a REGLIST
+// of 10 (PRIM, RGBAQ, then ST and XYZ2 four times). Each sprite is 20
+// words: RGBAQ at 2 (R in the low byte, Q 1 at 3), and corner i's S and T
+// at 4 + 4i and 5 + 4i, its XYZ2 at 6 + 4i (x the low 16 bits and y the
+// high, both 12.4 on the GS's screen) and its Z at 7 + 4i.
+static void attach_direct_data(void* texture, float z, void* data,
+                               uint16_t qwc)
+{
+    TrackView*      v  = s_draw;
+    eRenderTarget*  rt = s_quadTarget;
+    const uint32_t* w  = (const uint32_t*)data;
+    TrackTex*       t;
+    TrackDeferred*  d;
+    SpriteSet*      set;
+    float           offX, offY;
+    uint32_t        n, i;
+    int             c;
+
+    if (v == NULL || rt == NULL || texture == NULL || w == NULL) {
+        return;
+    }
+    n = w[0] & 0x7fffu;
+    if ((w[0] >> 15) != 1u || w[1] != 0xa42a4000u || w[2] != 0x42424210u
+        || w[3] != 0x42u || n == 0 || qwc != n * 5u + 1u) {
+        v->spritesRefused++;
+        return;
+    }
+    if (s_numSprites + (int)n > SPRITE_MAX || s_numSpriteSets >= SPRITE_SET_MAX
+        || v->numDeferred >= TRACKVIEW_MAX_DEFERRED) {
+        v->spritesDropped += (int)n;
+        return;
+    }
+    t = load_texture(v, (const TextureInfo*)texture);
+    if (t == NULL || !t->valid) {
+        v->spritesDropped += (int)n;
+        return;
+    }
+
+    offX = GS_CENTRE - (float)(rt->ScissorW >> 1);
+    offY = GS_CENTRE - (float)(rt->ScissorH >> 1);
+    set        = &s_spriteSets[s_numSpriteSets];
+    set->tex   = t;
+    set->first = (uint16_t)(s_numSprites * 4);
+    set->count = (uint16_t)n;
+    for (i = 0; i < n; i++) {
+        const uint32_t*  sp = w + 4 + i * 20;
+        GeoRenderVertex* q  = &s_spriteCorners[(s_numSprites + (int)i) * 4];
+
+        memset(q, 0, 4 * sizeof *q);
+        for (c = 0; c < 4; c++) {
+            uint32_t xyz = sp[6 + 4 * c];
+            float    x   = (float)(xyz & 0xffffu) * 0.0625f - offX;
+            float    y   = (float)(xyz >> 16) * 0.0625f - offY;
+
+            target_to_screen(x, y, rt->ScissorW, rt->ScissorH,
+                             rt->AspectRatioX, rt->AspectRatioY,
+                             &q[c].pos[0], &q[c].pos[1]);
+            q[c].pos[2] = sprite_depth(sp[7 + 4 * c]);
+            memcpy(&q[c].st[0], &sp[4 + 4 * c], sizeof(float));
+            memcpy(&q[c].st[1], &sp[5 + 4 * c], sizeof(float));
+            q[c].colour[0] = (uint8_t)sp[2];
+            q[c].colour[1] = (uint8_t)(sp[2] >> 8);
+            q[c].colour[2] = (uint8_t)(sp[2] >> 16);
+            q[c].colour[3] = (uint8_t)(sp[2] >> 24);
+        }
+    }
+    s_numSprites += (int)n;
+
+    note_use(v, t);
+    d = &v->deferred[v->numDeferred++];
+    memset(d, 0, sizeof *d);
+    d->depth   = z;
+    d->order   = t->order;
+    d->sorted  = t->sorted;
+    d->texUse  = t->firstUse;
+    d->seq     = v->deferredSeq++;
+    d->strip   = -1;
+    d->sprites = (int16_t)s_numSpriteSets++;
+    if (t->sorted) {
+        v->deferredSorted++;
+    }
+}
+
+static void draw_sprites(TrackView* v, const TrackDeferred* d)
+{
+    const SpriteSet* s = &s_spriteSets[d->sprites];
+    GeoTexture       gt;
+
+    gt.tex        = (C3D_Tex*)&s->tex->tex;
+    gt.uvScale[0] = s->tex->uvScale[0];
+    gt.uvScale[1] = s->tex->uvScale[1];
+    gt.pass       = s->tex->pass;
+    if (georender_draw_sprites(&s_spriteCorners[s->first], s->count, &gt)) {
+        v->spritesDrawn += s->count;
+    } else {
+        v->spritesDropped += s->count;
+    }
+}
+
+// eDisplayFrame's RenderEffects (0x001134a4's loop): FrameEffects', then
+// WorldEffects', for the view s_draw draws, onto its first target.
+static void render_effects(eView* view)
+{
+    s_quadTarget         = view->pRenderTarget0;
+    gEAttachDirectDataFn = attach_direct_data;
+    acid_system_render_effects(&FrameEffects, view);
+    acid_system_render_effects(&WorldEffects, view);
+    gEAttachDirectDataFn = NULL;
+    s_quadTarget         = NULL;
 }
 
 // ------------------------------------------------------------- the lighter
@@ -1891,6 +2048,10 @@ static void draw_deferred(TrackView* v, bool alpha)
             draw_strip(v, d);
             continue;
         }
+        if (d->sprites >= 0) {
+            draw_sprites(v, d);
+            continue;
+        }
         r = &v->info[d->solid];
         georender_set_camera(&s_proj, &d->modelView);
         if (d->flags & 0x180) {
@@ -1905,9 +2066,6 @@ static void draw_deferred(TrackView* v, bool alpha)
 }
 
 // ---------------------------------------------------------------- the sun
-
-// The GS's screen is 4096 pixels across with the target in the middle.
-#define GS_CENTRE 2048.0f
 
 // A target pixel's place on the top screen: the view's projection, which
 // has the cull's width across 400 pixels and square pixels. The PS2's y is
@@ -2500,6 +2658,8 @@ static void begin_view(TrackView* v)
     v->numStrips       = 0;
     v->numStripVerts   = 0;
     v->texUses         = 0;
+    s_numSprites       = 0;
+    s_numSpriteSets    = 0;
     if (++v->frameStamp == 0) {
         v->frameStamp = 1;
     }
@@ -2688,6 +2848,9 @@ void trackview_draw(TrackView* v)
     v->cmdSkipped   = 0;
     v->stripsDrawn  = 0;
     v->stripsDropped = 0;
+    v->spritesDrawn   = 0;
+    v->spritesDropped = 0;
+    v->spritesRefused = 0;
     v->listFrame    = v->listPending;
     v->listPending  = false;
     if (v->listFrame) {
@@ -2726,7 +2889,9 @@ void trackview_draw(TrackView* v)
 
     // Then StuffSun (0x00112ecc), after DrawNisObjects, which has nothing
     // to draw here. Its quads draw at once; see render_epoly. Then the
-    // scenery's chain ends with AttachSolidPolys alone (0x001134a4).
+    // effects (RenderEffects, FrameEffects' and WorldEffects'), whose
+    // sprites wait on the lists, and the scenery's chain ends with
+    // AttachSolidPolys alone (0x001134a4).
     v->sunQuads       = 0;
     v->sunQuadsFailed = 0;
     georender_set_fog(s_fogOn ? &s_skyFog : NULL, s_fogColour);
@@ -2735,6 +2900,7 @@ void trackview_draw(TrackView* v)
     StuffSun(view);
     s_quadTarget = NULL;
     georender_set_fog(s_fogOn ? &s_fog : NULL, s_fogColour);
+    render_effects(view);
     georender_run_begin();
     draw_deferred(v, false);
     georender_run_end();
@@ -2908,6 +3074,9 @@ bool trackview_draw_frontend(TrackView* v, void (*render)(void*),
     v->cmdSkipped   = 0;
     v->stripsDrawn  = 0;
     v->stripsDropped = 0;
+    v->spritesDrawn   = 0;
+    v->spritesDropped = 0;
+    v->spritesRefused = 0;
     begin_view(v);
     georender_set_fog(NULL, 0);
     georender_set_depth_range(view->NearZ, view->FarZ);
@@ -2922,14 +3091,16 @@ bool trackview_draw_frontend(TrackView* v, void (*render)(void*),
     georender_set_env_texture(env && env->valid ? &env->tex : NULL);
 
     // 0x00112c1c: the cars, their solid strips; view 0's Flailer layers
-    // 24 to 20 (drawn already); RenderFlailerModels' RENDER, the nebula
-    // effects (not ported) and AttachSolidPolys. Then the reflections,
-    // the cars' alpha strips, AttachSolidPolys and AttachAlphaPolys.
+    // 24 to 20 (drawn already); RenderFlailerModels' RENDER, the effects
+    // (the nebula's, FrameEffects') and AttachSolidPolys. Then the
+    // reflections, the cars' alpha strips, AttachSolidPolys and
+    // AttachAlphaPolys.
     georender_run_begin();
     render_front_end_cars(view, 1, 0, 1, 0);
     if (render != NULL) {
         render(user);
     }
+    render_effects(view);
     draw_deferred(v, false);
     render_front_end_cars(view, 0, 1, 1, 1);
     render_front_end_cars(view, 1, 0, 0, 1);

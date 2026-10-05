@@ -357,4 +357,22 @@ void georender_quads_rewind(void);
 bool georender_draw_strip(const GeoRenderVertex* v, int n,
                           const GeoTexture* gt);
 
+// ------------------------------------------------------------ the sprites
+
+// How many sprites a frame can draw, in a ring of their own that
+// georender_quads_rewind starts again with the quads': the effect system's
+// particle pool is 1000 (afxInit).
+#define GEO_SPRITE_RING 1000
+
+// The sprites one of RenderEffects' packets holds (retail 0x00128da0):
+// `n` quads in the top screen's pixels, x right to 400 and y down to 240,
+// four corners each in the packet's order, -,- / +,- / -,+ / +,+, so each
+// four are a strip. Each corner's z is its Z-buffer depth, in (0, 1). They
+// draw in one call as two triangles each. The colour is the GS's, 0x80 for
+// 1.0, and the texture modulates it; the pass is the texture's, with the
+// main target's tests, as a strip's. PRIM 0x54 has no fog, so none is laid
+// on. False when the ring is full, or for no texture.
+bool georender_draw_sprites(const GeoRenderVertex* v, int n,
+                            const GeoTexture* gt);
+
 #endif
