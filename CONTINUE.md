@@ -1,20 +1,22 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 35
-(2026-10-05), after the race's first run on the device.
+Where the next session picks up. Updated in Session 36
+(2026-10-05), after the race's second run on the device.
 **Start at "Now" just below.** SC-1 and SC-2, the car selector as logic
 and 2D and its 3D car on the turntable, are finished and checked
 against retail. SC-3 adds the nebula. SC-3a, the effect system's data,
 and SC-3b, its emitting and stepping, are done and committed. SC-3c's
 CPU half (RenderEffects) is done and checked but not committed; its
-draw on the device is next. **First, though: the race's speed on the
-New 3DS XL** (below, "The race on the device"). The hang is fixed: the
-shaders' unwritten output components (Session 34) were it, and the
-race loads and drives on the device, at 8 FPS, with the GPU taking
-113-120 ms a frame. Session 35 gave the textures mip chains and
-replaced the hang check with a GPU timing frame. That build
-(`3DS Files/NFSHP2-3DS.3dsx`, commit 0355be5) is with the user; read
-their `nfshp2_debug.txt` and `nfshp2_stderr.txt` first.
+draw on the device is next. **First, though: the race on the New 3DS
+XL** (below, "The race on the device"). With Session 35's mip chains it
+runs at 27-28 FPS there, the GPU at 27-28 ms a frame (it was 113-120).
+Session 36 (commit 8bf178a) moved the log's writes to a thread (they
+were the hitches) and put a stand-in for the jump cam (the ramp's
+abort). A still car shows a dark box on the rock wall behind it, which
+Azahar does not draw; commit 7480451 adds a capture mode to see the
+device's frame. That build (`3DS Files/NFSHP2-3DS.3dsx`) is with the
+user, with `sdmc:/nfshp2_capture.txt` asked for: read their capture
+files with `tools/capture_view.py` and their `nfshp2_debug.txt` first.
 Session 31 took the race on Azahar from 20 FPS to 28-30 and
 the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`). The rest
 of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) comes after
@@ -278,6 +280,51 @@ are four parts:
     lossless RGB8 textures, and the envmap's cube faces back to
     RGBA5551, as they were before the hang hunt made them RGBA8 (the
     face pair was not the hang).
+- **The second run (Session 36, build 0355be5): 27-28 FPS.** The
+  timing frames say 27.5-27.9 ms of GPU a frame: each envmap view
+  3.6-4.0, the fold 0.3, the sky 1.4, the models 5.7, the sun and
+  scenery 1.5, the cars and alpha lists 5.6, the bottom screen 1.1, the
+  frame's end 0.7. The CPU's draw is about 10 ms. The worst frame each
+  second was 70-150 ms: the log's own writes (fixed in 8bf178a, below).
+  That run has no AI, cops or other cars; more will be needed for them.
+  - **Hitches (fixed, 8bf178a).** `logwriter.c` puts each log line in
+    a 128 KB ring that a thread one priority below the main loop writes
+    out, on core 2 of a New 3DS. stderr stays synchronous. The timing
+    frame (a hitch of about 150 ms) now runs only when
+    `sdmc:/nfshp2_gputiming.txt` is on the card as the race starts.
+  - **The ramp's abort (8bf178a).** "carfinish:
+    Player::IsJumpCamAvailable is not ported". `no_jump_cam` answers 0,
+    retail's answer for a route too short, so the car flies on under
+    the drive camera. The jump cam itself (PreviewRoute,
+    TrackCarCameraMover, the zone movers, RequestZone and ClearZone,
+    its sounds, RadialBlur) is still to port, with checkers.
+  - **The still car's oddity, open.** In the user's photos the car
+    stands still and the rock wall behind it is pale and blurred, with a
+    dark sharp box in it and a light-blue wedge up from the roof.
+    Moving, it goes. Azahar draws none of it. On Azahar the box's place
+    is W_MOUNTVERS1 (the wall, the models' batch) under
+    SHADOWSPINEMIDFADE2 (blend ALPHA) and the wedge's is
+    SHADOWSPINEMIDR, a road shadow decal (blend ALPHA). Ruled out: the
+    mips' colours and alphas, the sun's glare (0 quads), the driver and
+    the light flares (not hooked up), a race on the strips' buffers. The
+    likeliest: the PICA picks mip levels its own way (per triangle,
+    say), so most of the wall reads small levels and the box reads
+    level 0. Less likely: the linear heap past the PICA's 256 MB vertex
+    window (the log's `Linear heap: physical` line says; on Azahar it is
+    20000000 to 24a33000). If it crosses 28000000, base georender's
+    attribute buffers at 0x20000000 (after each BufInfo_Init and in
+    `s_run.bufBase`).
+  - **The capture (commit 7480451).** With `sdmc:/nfshp2_capture.txt`
+    on the card as a race starts (its number the seconds in, 6 if none),
+    `capture.c` writes `nfshp2_cap_colour.bmp` and `_depth.bmp`, then a
+    frame of each georender draw in a flat colour that is its number
+    (`_ids.bmp`, with the legend `_ids.txt`), then a frame with every
+    texture at level 0 alone (`_lod0.bmp`). `tools/capture_view.py DIR
+    --out OUT --box X0,Y0,X1,Y1` makes PNGs and names the draws under a
+    box. If the level-0 frame has no box, the mip choice is it: set the
+    LOD bias, or the made levels' sizes, so the PICA's choice agrees
+    with the GS's. If it still has one, read the box's draws and their
+    depth.
 - **SC-3c:** RenderEffects (0x00128da0) and its draw on the device.
   - **The CPU half is done, checked, and not committed.** It is in
     `acidsys.{c,h}` (acid_system_render_effects, acidz, the

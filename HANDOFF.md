@@ -14295,3 +14295,61 @@ hands the packet over with the sprites' mean truncated view depth.
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` from commit 0355be5. Wanted
   back: `nfshp2_debug.txt` and `nfshp2_stderr.txt` after a minute or so
   of driving.
+
+## Session 36 (2026-10-05) -- 28 FPS on the device; the hitches, the ramp, the still car's oddity
+
+### The device's run of 0355be5
+
+- The race ran at 27-28 FPS on the New 3DS XL. The timing frames: 27.5-
+  27.9 ms of GPU a frame, each envmap view 3.6-4.0 ms, the models 5.7,
+  the cars and alpha lists 5.6, the sky 1.4, the sun and scenery 1.5,
+  the bottom screen 1.1. The mip chains took the models' list from 78 ms
+  to under 6. No AI, cops or other cars were in it.
+- The user saw hitches, more after the first lap; the ramp aborted the
+  game; and a still car showed a dark box on the rock wall behind it.
+
+### The hitches and the ramp (commit 8bf178a)
+
+- The race's once-a-second log lines cost their frame 50-60 ms, 150-240
+  while the card was slow, once 1.2 s. `logwriter.c` copies each line
+  into a 128 KB ring; a thread one priority below the main loop, on core
+  2 of a New 3DS (else 1, else any), writes and flushes. The main loop
+  waits only on a full ring. stderr stays synchronous, for abort
+  reasons; atexit drains the ring.
+- The timing frame is a hitch of about 150 ms each 10 s, so it runs only
+  with `sdmc:/nfshp2_gputiming.txt` on the card at the race's start, and
+  the log says which.
+- The ramp: `carfinish: Player::IsJumpCamAvailable is not ported`. The
+  seam is `no_jump_cam` (CleanUpJumpCam and 0, retail's answer for a
+  route too short): no zone is requested and the car flies on under the
+  drive camera.
+
+### The still car's oddity, and the capture (commit 7480451)
+
+- On Azahar the box's place is W_MOUNTVERS1 (the models' batch) under
+  SHADOWSPINEMIDFADE2, and the wedge's SHADOWSPINEMIDR (a road shadow,
+  blend ALPHA). Ruled out: the mips' colours and alphas, the sun's glare
+  (0 quads drawn), the driver and the light flares (not hooked up), the
+  strips' buffers (C3D_FrameBegin waits for the GPU).
+- Two ideas left: the PICA's choice of mip level (the pale, blurred wall
+  reading small levels, the box level 0), and the linear heap past the
+  PICA's vertex window (base 0x18000000 plus 28 bits). main.c now logs
+  `Linear heap: physical`; Azahar's is 20000000 to 24a33000.
+- `capture.c`, armed by `sdmc:/nfshp2_capture.txt`: the colour and depth
+  of the frame N s in (N from the file, 6 if none), the next frame's
+  draws numbered as flat colours with a legend (georender's
+  `draw_arrays` and `alpha_test` wrap every draw site and alpha test so
+  the numbered draw can put both back), and the frame after with every
+  texture at level 0 alone (maxLevel 0 and a rebind about each draw).
+  `trackview_capture_names` puts the textures' names first in the
+  legend. `tools/capture_view.py` makes PNGs: the depth stretched, the
+  numbers in a palette, the level-0 frame and its difference, and the
+  draws under each `--box`.
+- On Azahar: 761 draws numbered, 53 on screen; the level-0 frame a mean
+  of 3.4 from the mipped one.
+
+### With the user
+
+- `3DS Files/NFSHP2-3DS.3dsx` and `.cia` from commit 7480451, with
+  `sdmc:/nfshp2_capture.txt` to make, a race left still for 10 s, and
+  the five `nfshp2_cap_*` files and `nfshp2_debug.txt` wanted back.
