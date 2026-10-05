@@ -292,11 +292,14 @@ $az  = @(); if (Test-Path $azaharLog) { $az  = Get-Content $azaharLog }
 $crashSigs = @("PANIC", "segfault", "Unhandled exception", "svcBreak")
 $crash = $az | Where-Object { $l = $_; $crashSigs | Where-Object { $l -match $_ } }
 $leftLoop = $dbg | Where-Object { $_ -match "^left main loop" }
-$carsel   = $dbg | Where-Object { $_ -match "^carsel " }
+$carsel   = $dbg | Where-Object { $_ -match "^(flow )?carsel " }
+# Azahar only logs a read of unmapped memory; the device takes a data abort.
+$unmapped = $az | Where-Object { $_ -match "unmapped (Read|Write)" }
 
 $verdict = "UNKNOWN"
 if (-not $booted)       { $verdict = "FAIL (never reached the main loop)" }
 elseif ($crash)         { $verdict = "FAIL (crash: $($crash[0]))" }
+elseif ($unmapped)      { $verdict = "FAIL ($(@($unmapped).Count) unmapped accesses, first: $(@($unmapped)[0]))" }
 elseif (-not $atCarSel) { $verdict = "PARTIAL (never reached Select Car)" }
 elseif (-not $carsel)   { $verdict = "PARTIAL (Select Car came up, but the selector logged nothing)" }
 elseif ($leftLoop)      { $verdict = "PASS (car select walked, exited cleanly)" }
@@ -305,7 +308,7 @@ else                    { $verdict = "PASS (car select walked)" }
 
 Write-Host ""
 Write-Host "=== carsel lines ==="
-$carsel | ForEach-Object { Write-Host $_ }
+$carsel | Select-Object -Last 20 | ForEach-Object { Write-Host $_ }
 Write-Host ""
 Write-Host "=== nfshp2_debug.txt (last 25) ==="
 $dbg | Select-Object -Last 25 | ForEach-Object { Write-Host $_ }

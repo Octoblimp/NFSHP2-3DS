@@ -30,6 +30,11 @@ static uint32_t        s_fogApplied;
 static float           s_fogNear = 1.0f;
 static float           s_fogFar  = 2.0f;
 
+// What texture unit 1 holds with the fog off. citro3d's C3D_TexBind reads
+// the type of what a unit past 0 is given, so NULL there is a read of
+// address 12; no stage reads this one.
+static C3D_Tex         s_noFogTex;
+
 static int s_uProjection = -1;
 static int s_uModelView  = -1;
 static int s_uLightVec   = -1;
@@ -125,6 +130,9 @@ static C3D_AttrInfo      s_foldAttr;
 static GeoFoldVertex*    s_fold;
 static bool              s_sphereCleared;
 static bool              s_sphereFolded;
+// A texture the environment passes take in place of the sphere map, as
+// the car select's CARSELECTENVMAP, or NULL.
+static const C3D_Tex*    s_envOverride;
 
 static void free_envmap(void);
 static void set_fog_row(int id, const C3D_Mtx* projection);
@@ -229,6 +237,11 @@ bool georender_init(void)
     // whole before the GPU runs the frame's commands, so a quad or a
     // strip is not flushed when it is written. A flush of each was a
     // call to the GSP service, a strip's 4 to 30 vertices at a time.
+    if (!C3D_TexInit(&s_noFogTex, 8, 8, GPU_A8)) {
+        return false;
+    }
+    memset(s_noFogTex.data, 0xff, s_noFogTex.size);
+    GSPGPU_FlushDataCache(s_noFogTex.data, s_noFogTex.size);
 
     s_ready = true;
     return true;
@@ -243,6 +256,7 @@ void georender_exit(void)
     s_quads = NULL;
     linearFree(s_strips);
     s_strips = NULL;
+    C3D_TexDelete(&s_noFogTex);
     free_envmap();
     shaderProgramFree(&s_foldProgram);
     DVLB_Free(s_foldDvlb);
@@ -657,7 +671,9 @@ void georender_set_fog(const GeoFog* fog, uint32_t colour)
     s_fogColour  = colour & 0xffffffu;
     s_fogApplied = ~0u;
     if (s_fog == NULL) {
-        C3D_TexBind(1, NULL);
+        if (s_noFogTex.data) {
+            C3D_TexBind(1, &s_noFogTex);
+        }
         C3D_TexEnvInit(C3D_GetTexEnv(5));
         return;
     }
@@ -863,6 +879,7 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     const GeoBatch*      b;
     const GeoTexture*    gt;
     C3D_TexEnv*          env;
+    const C3D_Tex*       sphere;
 
     if (!s_ready || !mesh->vbo || bi < 0 || bi >= mesh->numBatches
         || mesh->batch[bi].count <= 0) {
@@ -880,7 +897,9 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     } else {
         georender_draw_mask(mesh, textures, numTextures, (uint64_t)1 << bi);
     }
-    if (!L->env || !georender_envmap_ready()) {
+    sphere = s_envOverride ? s_envOverride
+           : georender_envmap_ready() ? &s_sphereTex : NULL;
+    if (!L->env || !sphere) {
         return;
     }
 
@@ -893,7 +912,7 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     }
     C3D_BoolUnifSet(GPU_VERTEX_SHADER, s_lEnvPass,  true);
     C3D_BoolUnifSet(GPU_VERTEX_SHADER, s_lGlossEnv, L->gloss);
-    C3D_TexBind(0, &s_sphereTex);
+    C3D_TexBind(0, (C3D_Tex*)sphere);
     env = C3D_GetTexEnv(0);
     C3D_TexEnvInit(env);
     C3D_TexEnvSrc(env, C3D_RGB, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
@@ -1026,6 +1045,11 @@ bool georender_envmap_face_done(int face)
 bool georender_envmap_ready(void)
 {
     return s_sphereFolded;
+}
+
+void georender_set_env_texture(const C3D_Tex* tex)
+{
+    s_envOverride = tex;
 }
 
 void georender_envmap_fold(unsigned views)

@@ -290,6 +290,12 @@ typedef struct {
     float       fogKeep[TRACKVIEW_FOG_SAMPLES]; // of the colour, at depths
     float       fogSkyKeep;     // and the sky's
 
+    // --- the frontend's view (trackview_attach_frontend): no track, every
+    // solid an other one, and what is to go when the next frame begins.
+    bool frontend;
+    bool forgetPending;         // trackview_forget_later
+    bool freePending;           // trackview_free_later
+
     // --- counters for the bring-up overlay.
     bool loaded;
     bool attached;              // trackview_attach's: the flow owns `data`
@@ -340,6 +346,38 @@ bool trackview_load(TrackView* v);
 // or loaded; the solids are found in `data` and baked as trackview_load
 // bakes them, and the camera is left to the race's movers.
 bool trackview_attach(TrackView* v, uint8_t* data, size_t len);
+
+// The frontend's view, which has no track: every solid it draws is an
+// other one (the car select's platform, out of FRONTB.BUN, and the
+// frontend's cars), found as a model draws it. Nothing is read or
+// loaded. Free it with trackview_free_later.
+bool trackview_attach_frontend(TrackView* v);
+
+// A resource or a texture pack is going: the frontend view's solids and
+// textures may be over memory that is about to hold something else, so
+// they are all forgotten when the next frame begins, before anything
+// draws, and found again as they are drawn. A frame the GPU may still be
+// drawing is done with by then.
+void trackview_forget_later(TrackView* v);
+
+// The frontend is unloading: the frontend view goes, all of it, when the
+// next frame begins.
+void trackview_free_later(TrackView* v);
+
+// Call it after C3D_FrameBegin, which waits for the GPU, and before
+// anything draws: what forget_later and free_later put off happens here.
+void trackview_frame_begun(TrackView* v);
+
+// The frontend's eDisplayFrame (0x00112a38) for view 1 into the bound
+// render target, which must have a depth buffer and has had its Flailer
+// back layers, 24 to 20, drawn: the cars' solid strips, `render(user)`
+// for FlailerScreenList::RenderFlailerModels' RENDER, which draws the car
+// select's platform, AttachSolidPolys; the reflections and the cars'
+// alpha strips, AttachSolidPolys and AttachAlphaPolys. The environment
+// passes read CARSELECTENVMAP. No cull, no sky, no fog. citro2d is to be
+// flushed first and prepared again after. False when nothing was drawn.
+bool trackview_draw_frontend(TrackView* v, void (*render)(void*),
+                             void* user);
 
 // Runs the Begin of unloading, which unloads the track's three files
 // through the UnloaderTable newest first; then the shared packs, and frees

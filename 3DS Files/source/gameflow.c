@@ -721,6 +721,7 @@ void bgf_begin_unloading_frontend(BGameFlow* gf)
     bgf_change_to_screen(gf, NULL, 0);
     bgf_reset_stack(gf);
     HOOK_VOID0(gf, closeSelectCar);
+    HOOK_VOID0(gf, unloadFrontEnd);
 }
 
 // ------------------------------------------------------- TitleMoviesToPlay

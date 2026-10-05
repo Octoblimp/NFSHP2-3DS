@@ -22,6 +22,7 @@
 #include "esolid.h"
 #include "eview.h"
 #include "eviewmatrix.h"
+#include "fecar.h"
 #include "frameprof.h"
 #include "gamedata.h"
 #include "scenery.h"
@@ -337,6 +338,15 @@ static bool upload_texture(const TrackTex* t, C3D_Tex* out)
     return true;
 }
 
+// A texture whose TextureInfo had no pixels yet is tried again once it
+// has them: loader_texture_pack writes ImageData into a record that the
+// tables may already point at. One that had them and would not upload
+// is not tried again until it is forgotten.
+static bool retry_texture(const TrackTex* t)
+{
+    return !t->valid && t->ownImage == NULL && t->info->ImageData != NULL;
+}
+
 static TrackTex* load_texture(TrackView* v, const TextureInfo* info)
 {
     TrackTex* t = find_texture(v, info);
@@ -345,13 +355,15 @@ static TrackTex* load_texture(TrackView* v, const TextureInfo* info)
     uint32_t  w = 0, h = 0;
     int       level;
 
-    if (t) {
+    if (t && !retry_texture(t)) {
         return t;
     }
-    if (v->numTextures >= TRACKVIEW_MAX_TEXTURES) {
-        return NULL;
+    if (!t) {
+        if (v->numTextures >= TRACKVIEW_MAX_TEXTURES) {
+            return NULL;
+        }
+        t = &v->texture[v->numTextures++];
     }
-    t = &v->texture[v->numTextures++];
     memset(t, 0, sizeof *t);
     t->info       = info;
     t->uvScale[0] = 1.0f;
@@ -360,6 +372,7 @@ static TrackTex* load_texture(TrackView* v, const TextureInfo* info)
         v->missingTextures++;
         return t;
     }
+    t->ownImage = info->ImageData;
 
     // The largest level that leaves the reserve behind. The whole track at
     // level 0 is 28.9 MB as RGBA8, which a New 3DS has room for and an Old
@@ -505,7 +518,11 @@ static void follow_table(TrackView* v, int index)
         const TextureInfo* info = table_texture(s, k);
         const TrackTex*    t    = r->tex[k];
 
-        if (t ? t->info != info : info != NULL) {
+        // A retried texture another solid made valid is taken up too.
+        if (t ? t->info != info
+                    || (t->valid ? r->slot[k].tex != &t->tex
+                                 : retry_texture(t))
+              : info != NULL) {
             resolve_slot(v, r, k, info);
         }
     }
@@ -1086,6 +1103,13 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
                                                                  : NULL;
 
         if (gb->count <= 0) {
+            continue;
+        }
+        // RenderStrips' 16 leaves out the strips whose texture has
+        // ApplyAlphaSorting, and its 8 the others: the frontend draws a
+        // car's solid strips and its alpha ones in two calls.
+        if (flags & ((t && t->info && t->info->ApplyAlphaSorting) ? 16u
+                                                                   : 8u)) {
             continue;
         }
         if (t) {
@@ -2713,4 +2737,176 @@ void trackview_draw(TrackView* v)
     }
     // eDisplayFrame's very end (0x00113d2c): the frame is counted.
     eFrameCounter++;
+}
+
+// ------------------------------------------------------------ the frontend
+
+bool trackview_attach_frontend(TrackView* v)
+{
+    if (v->loaded) {
+        return true;
+    }
+    if (!engine_ready(v)) {
+        return false;
+    }
+    v->solid   = (GeoSolid*)calloc(TRACKVIEW_MAX_OTHER, sizeof *v->solid);
+    v->info    = (TrackSolid*)calloc(TRACKVIEW_MAX_OTHER, sizeof *v->info);
+    v->texture = (TrackTex*)calloc(TRACKVIEW_MAX_TEXTURES, sizeof *v->texture);
+    if (!v->solid || !v->info || !v->texture) {
+        free(v->solid);
+        free(v->info);
+        free(v->texture);
+        v->solid   = NULL;
+        v->info    = NULL;
+        v->texture = NULL;
+        snprintf(v->note, sizeof v->note, "out of memory for the tables");
+        return false;
+    }
+    v->numSolids = 0;
+    v->frontend  = true;
+    v->attached  = true;
+    setup_view();
+    v->loaded = true;
+    snprintf(v->note, sizeof v->note, "frontend");
+    return true;
+}
+
+// The other solids, the textures and the flipbook frames, all of them,
+// to be found again as they are drawn. Only the frontend's view does
+// this: a track's solids keep pointers into the textures.
+static void forget_all(TrackView* v)
+{
+    int i;
+
+    for (i = v->numSolids; i < v->numSolids + v->numOther; i++) {
+        forget_solid(&v->info[i]);
+    }
+    for (i = 0; i < v->numTextures; i++) {
+        if (v->texture[i].valid) {
+            C3D_TexDelete(&v->texture[i].own);
+        }
+    }
+    for (i = 0; i < v->numFrames; i++) {
+        C3D_TexDelete(&v->frame[i].tex);
+    }
+    v->numOther    = 0;
+    v->numTextures = 0;
+    v->numFrames   = 0;
+}
+
+void trackview_forget_later(TrackView* v)
+{
+    if (v->loaded && v->frontend) {
+        v->forgetPending = true;
+    }
+}
+
+void trackview_free_later(TrackView* v)
+{
+    if (v->loaded && v->frontend) {
+        v->freePending = true;
+    }
+}
+
+void trackview_frame_begun(TrackView* v)
+{
+    if (!v->loaded || !v->frontend) {
+        return;
+    }
+    if (v->freePending || v->forgetPending) {
+        forget_all(v);
+        v->forgetPending = false;
+    }
+    if (v->freePending) {
+        free(v->solid);
+        free(v->info);
+        free(v->texture);
+        memset(v, 0, sizeof *v);
+    }
+}
+
+bool trackview_draw_frontend(TrackView* v, void (*render)(void*),
+                             void* user)
+{
+    eView*          view = eGetView(EVIEW_ID_PLAYER1);
+    const TrackTex* env  = NULL;
+    float           tanx, fovy;
+
+    if (!v->loaded || !v->frontend || !FrameMemoryBuffer[0]) {
+        return false;
+    }
+
+    // eDisplayFrame's start: new frame memory, the view mode and view 1's
+    // matrices from its camera, which SelectCarCameraMover moves. The
+    // frontend culls nothing.
+    georender_quads_rewind();
+    eSwapFrameMallocBuffers();
+    MaybeChangeViewMode();
+    eview_set_max_z(view->pRenderTarget0);
+    eview_calculate_view_matrices(view, 0.0f, 0.0f, 0.0f);
+
+    // The race's projection; see trackview_draw.
+    tanx = (float)view->pRenderTarget0->ScissorW * 0.5f / view->H;
+    fovy = 2.0f * atanf(tanx * 240.0f / 400.0f);
+    Mtx_PerspTilt(&s_proj, fovy, 400.0f / 240.0f, view->NearZ, view->FarZ,
+                  false);
+    georender_set_light(0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+
+    // The seams the race's view sets too, and lets go of when it is freed.
+    gEModelRenderFn = render_model;
+    gEStripFns      = kStripFns;
+    gExStripFns     = kExStripFns;
+    s_draw        = v;
+    s_worldView   = view->WorldViewMatrix;
+    v->drawn        = 0;
+    v->drawnTris    = 0;
+    v->drawnInPlace = 0;
+    v->cmdSkipped   = 0;
+    v->stripsDrawn  = 0;
+    v->stripsDropped = 0;
+    begin_view(v);
+    georender_set_fog(NULL, 0);
+    georender_set_depth_range(view->NearZ, view->FarZ);
+    georender_set_zwrite(true);
+
+    // elSetupLightContext's frontend branch points the environment map at
+    // CARSELECTENVMAP (pTextureInfoCarSelectEnvMap, eFixUpTables') where
+    // the race's is target 14.
+    if (pTextureInfoCarSelectEnvMap != NULL) {
+        env = load_texture(v, (const TextureInfo*)pTextureInfoCarSelectEnvMap);
+    }
+    georender_set_env_texture(env && env->valid ? &env->tex : NULL);
+
+    // 0x00112c1c: the cars, their solid strips; view 0's Flailer layers
+    // 24 to 20 (drawn already); RenderFlailerModels' RENDER, the nebula
+    // effects (not ported) and AttachSolidPolys. Then the reflections,
+    // the cars' alpha strips, AttachSolidPolys and AttachAlphaPolys.
+    georender_run_begin();
+    render_front_end_cars(view, 1, 0, 1, 0);
+    if (render != NULL) {
+        render(user);
+    }
+    draw_deferred(v, false);
+    render_front_end_cars(view, 0, 1, 1, 1);
+    render_front_end_cars(view, 1, 0, 0, 1);
+    draw_deferred(v, false);
+    draw_deferred(v, true);
+    georender_run_end();
+    s_draw = NULL;
+    georender_set_env_texture(NULL);
+
+    // eDisplayFrame's end: the flipbooks' next frames.
+    UpdateTextureAnimations();
+    follow_flipbooks(v);
+
+    // As trackview_draw leaves it for citro2d.
+    C3D_AlphaTest(false, GPU_ALWAYS, 0);
+    C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA,
+                   GPU_ONE_MINUS_SRC_ALPHA, GPU_SRC_ALPHA,
+                   GPU_ONE_MINUS_SRC_ALPHA);
+    if ((int)gpuCmdBufOffset > v->cmdPeakWords) {
+        v->cmdPeakWords = (int)gpuCmdBufOffset;
+    }
+    eFrameCounter++;
+    return true;
 }

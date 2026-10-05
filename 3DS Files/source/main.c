@@ -82,6 +82,7 @@
 #include "frameprof.h"
 #include "fred.h"
 #include "fredrace.h"
+#include "frontres.h"
 #include "gameflow.h"
 #include "heapcfg.h"
 #include "geoview.h"
@@ -385,6 +386,11 @@ static GeoView g_geo;
 // The track viewer's, for the same reason: the cull info alone is 2 KB, and
 // the texture packs' indexes ride along.
 static TrackView g_track;
+
+// The frontend's 3D view, the car select's (trackview_attach_frontend),
+// and FRONTB as the UI holds it, whose engine half frontres loads.
+static TrackView g_feView;
+static UIBundle* g_frontBundle;
 
 // ------------------------------------------------------- the run log
 //
@@ -846,6 +852,12 @@ static void bootQueue(Boot* b, const char* what, BGameFlowDone done)
 
 static void hookLoadResource(void* user, const char* path, BGameFlowDone done)
 {
+    // FRONTB, which the UI has read already: its chunks go through the
+    // LoaderTable here, as the ResourceFile's would, before the callback.
+    if (strcmp(path, "FRONTEND\\FRONTB.LZC") == 0 && g_frontBundle) {
+        bool ok = frontres_load(g_frontBundle->data, g_frontBundle->len);
+        logLine("frontres: FRONTB %s", ok ? "loaded" : "not loaded, no room");
+    }
     bootQueue((Boot*)user, path, done);
 }
 
@@ -2059,6 +2071,15 @@ static void resService(void)
 static void resUnloadFile(void* file)
 {
     unload_resource_file((ResourceFile*)file);
+    trackview_forget_later(&g_feView);
+}
+
+// CarLoader's UnloadTexturesFromFile: the skins' pixels go, and another
+// car's may come in where they were.
+static void unloadTexturesFromFile(TexturePack* p, uint32_t* hashes, int n)
+{
+    texturepack_unload_textures_from_file(p, hashes, n);
+    trackview_forget_later(&g_feView);
 }
 
 static void* resFindByType(int type)
@@ -2381,6 +2402,15 @@ static void hookCarSelLoaderBeginLoading(void* user)
     carloader_begin_loading(&TheCarLoader, NULL);
 }
 
+// RENDER reaches the car select inside the frontend's 3D, where citro2d
+// can't draw: the blurb waits there for the Flailer layers to be done.
+static struct {
+    bool     defer;
+    bool     queued;
+    uint32_t screen, object, rect;
+    char     text[256];             // CarSelector's blurb's size
+} g_carselText;
+
 // RenderTextIntoRectangle (0x001451e0): the blurb wrapped into the
 // rectangle bitmap's box, from its top left. The disc's text object only
 // lends its font; the port draws in FONT_A at the top screen's scale, as
@@ -2395,6 +2425,14 @@ static void hookCarSelRenderText(void* user, uint32_t screen,
     UIWrapStyle st;
 
     (void)scale;
+    if (g_carselText.defer) {
+        g_carselText.queued = true;
+        g_carselText.screen = screen;
+        g_carselText.object = object;
+        g_carselText.rect   = rect;
+        snprintf(g_carselText.text, sizeof g_carselText.text, "%s", text);
+        return;
+    }
     if (!flailer_find_object(screen, object, FLAILER_TYPE_TEXT)
         || !flailer_find_object(screen, rect, FLAILER_TYPE_BITMAP))
         return;
@@ -2402,6 +2440,50 @@ static void hookCarSelRenderText(void* user, uint32_t screen,
     st = botStyle(b->ui, C2D_Color32(0xff, 0xff, 0xff, 0xff), 10.0f, false);
     uirender_draw_wrapped(b->ui, text, 0, &st, x * sx, y * sy,
                           (float)flailer_get_width(screen, rect) * sx, 1.0f);
+}
+
+// FlailerScreenList::RenderFlailerModels' RENDER to the car select,
+// which draws its platform and, through the hook, its unlock blurb.
+static void carselRender(void* user)
+{
+    (void)user;
+    if (g_flow.screen && g_flow.screen->callback == bcarsel_screen_callback) {
+        BScreenCallbackData rd;
+        memset(&rd, 0, sizeof(rd));
+        rd.itemHash = g_flow.screen->hash;
+        bcarsel_screen_callback(&g_flow, BMSG_SCREEN_RENDER, &rd);
+    }
+}
+
+// The frontend's eDisplayFrame with a selector up: view 0's Flailer
+// layers 24 to 20, the cars and the platform over them, and the rest of
+// the layers over those; then the blurb RENDER queued.
+static void drawCarSelTop(UIRenderer* ui)
+{
+    bool drawn;
+
+    if (!g_feView.loaded && frontres_loaded())
+        (void)trackview_attach_frontend(&g_feView);
+    // citro2d's depth test is left off for the layers: they write no depth
+    // for the cars to meet.
+    C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
+    uirender_draw_visible_passes(ui, 1.0f, 0, UIR_BACK_PASSES);
+    C2D_Flush();
+    g_carselText.defer  = true;
+    g_carselText.queued = false;
+    drawn = trackview_draw_frontend(&g_feView, carselRender, NULL);
+    g_carselText.defer = false;
+    C2D_Prepare();
+    C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
+    uirender_draw_visible_passes(ui, 1.0f, UIR_BACK_PASSES, BUI_NUM_LAYERS);
+    if (!drawn)
+        carselRender(NULL);
+    if (g_carselText.queued) {
+        g_carselText.queued = false;
+        hookCarSelRenderText(&g_boot, g_carselText.screen,
+                             g_carselText.object, g_carselText.rect,
+                             g_carselText.text, 1.0f);
+    }
 }
 
 static int32_t hookCarSelLanguage(void* user)
@@ -2443,6 +2525,23 @@ static void hookCarSelClose(void* user)
     (void)user;
     bcarsel_close_screen();
     carloader_unload_everything(&TheCarLoader);
+}
+
+// BeginGameFlowUnloadingFrontEnd's resource loop: FRONTB goes, and the
+// frontend's view with it, when the next frame begins.
+static void hookUnloadFrontEnd(void* user)
+{
+    (void)user;
+    frontres_unload();
+    trackview_free_later(&g_feView);
+    logLine("frontres: FRONTB unloaded");
+}
+
+// elSetupLightContext's two questions: the frontend's lights are the
+// flow's IN_FRONTEND state's, and the car select's while a selector is up.
+static int elInFrontend(void)
+{
+    return g_flow.current == BGF_IN_FRONTEND;
 }
 
 // The bring-up overlays that used to be printf'd to the console on the
@@ -3268,6 +3367,7 @@ int main(int argc, char** argv)
     hooks.easterEggs       = hookEasterEggs;
     hooks.initSelectCar    = hookCarSelInit;
     hooks.closeSelectCar   = hookCarSelClose;
+    hooks.unloadFrontEnd   = hookUnloadFrontEnd;
     hooks.moveBrackets     = hookMoveBrackets;   // NewMainMenu's highlight
     hooks.setBlurb         = hookSetBlurb;
     hooks.trace            = hookTrace;
@@ -3316,7 +3416,7 @@ int main(int argc, char** argv)
     // What CarLoader and the track flow stream through: the cars' skins
     // and the HUD's textures.
     gLoadTexturesFromFileFn      = texturepack_load_textures_from_file;
-    gUnloadTexturesFromFileFn    = texturepack_unload_textures_from_file;
+    gUnloadTexturesFromFileFn    = unloadTexturesFromFile;
     gUnloadAllTexturesFromFileFn = texturepack_unload_all_textures_from_file;
     logPrintf("streamed packs: DynTextures %d, HudTextures %d, "
               "CarTextures %d textures\n",
@@ -3333,8 +3433,10 @@ int main(int argc, char** argv)
 
     // What BeginGameFlowLoadingFrontend asks for, FRONTB, read here rather
     // than behind the loader; and INGAMEB, which the track viewer shares.
-    addBundle(&ui, BUNDLE_FRONTEND);
+    g_frontBundle = addBundle(&ui, BUNDLE_FRONTEND);
     UIBundle* ingameBundle = addBundle(&ui, BUNDLE_INGAME);
+    gElInFrontendFn      = elInFrontend;
+    gElCarSelectActiveFn = bcarsel_active;
     // InitializeEverything's InitCarLoader (0x001b0260), after the
     // frontend: the pool the car and skin entries come from. Its loads go
     // through the resource system; nothing asks it for a car yet.
@@ -3783,6 +3885,11 @@ int main(int argc, char** argv)
             if (raceUp && pRaceCoordinator != NULL) {
                 raceFrame();
                 (void)raceAttachTrack();
+            } else if (g_flow.current == BGF_IN_FRONTEND) {
+                // MainLoop's UpdateCameraMovers, which raceFrame makes in
+                // a race; in the frontend the car select's camera is the
+                // one mover.
+                update_camera_movers();
             }
             // The Begin of unloading deleted the coordinator and is
             // unloading the track's files: the view lets go of the bundle
@@ -3836,6 +3943,9 @@ int main(int argc, char** argv)
             uint32_t gpuTick = bGetTicker();
             C3D_FrameBegin(0);
             uint32_t drawTick = bGetTicker();
+            // The GPU is done with the last frame: what the frontend's view
+            // let go of since can be freed.
+            trackview_frame_begun(&g_feView);
             frameprof_begin_draw(syncTick, gpuTick, drawTick);
             lastSync = C3D_FrameCounter(0);
             WaitBufferSwapTime = (int32_t)bGetFixTickerDifference(gpuTick,
@@ -3862,16 +3972,10 @@ int main(int argc, char** argv)
                 C2D_TargetClear(top, clear);
             }
             C2D_SceneBegin(top);
-            uirender_draw_visible(&ui, 1.0f);
-            // FlailerScreenList::Render's RENDER, which car select's
-            // unlock box draws its blurb on.
-            if (!g_track.attached && g_flow.screen
-                && g_flow.screen->callback == bcarsel_screen_callback) {
-                BScreenCallbackData rd;
-                memset(&rd, 0, sizeof(rd));
-                rd.itemHash = g_flow.screen->hash;
-                bcarsel_screen_callback(&g_flow, BMSG_SCREEN_RENDER, &rd);
-            }
+            if (!g_track.attached && bcarsel_active())
+                drawCarSelTop(&ui);
+            else
+                uirender_draw_visible(&ui, 1.0f);
             FRAMEPROF_STAMP(FRAMEPROF_HUD);
             C2D_TargetClear(g_bot, BOT_BACK);
             C2D_SceneBegin(g_bot);

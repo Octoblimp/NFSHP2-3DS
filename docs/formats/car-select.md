@@ -664,3 +664,143 @@ transcript: SC-1's five above, and four of SC-2c's:
   eRotateZ leaves row 3 alone.
 - `light-one-skin`: SetSkin, NextSkin and PrevSkin can only leave a
   one-skin car's index at 0.
+
+## The draw on the device (SC-2d)
+
+SC-2d draws SC-2c's cars, cover and platform on the top screen, under
+and over the selector's Flailer layers, as retail's frontend
+eDisplayFrame (`0x00112c1c`) does. Nothing in it changes what the
+selector, the cars or the camera do, so it has no checker of its own.
+It is the device's half: what the checkers' stubs stand for.
+
+### FRONTB's engine half
+
+Retail's BeginGameFlowLoadingFrontend loads `FRONTEND\FRONTB.LZC` as a
+ResourceFile: every chunk goes through LoadChunks, then PostLoadFixup,
+before the flow's callback. The device has read FRONTB at boot, for the
+UI, and keeps it. `frontres.c` puts that copy through the same two
+calls when the flow asks for the file (main.c's `hookLoadResource`).
+FRONTB's top-level chunks:
+
+| chunk | what | loaded by |
+|-------|------|-----------|
+| `0x80034000` at offset 0, 1,499,656 bytes | the solid list: PLATFORM, the fifteen TRACK*_MINI and CARCOVER | `loader_solid_list`, on a fresh copy |
+| `0xb0300001` | the texture pack, 12.5 MB | `loader_texture_pack`, in place |
+| `0xb0300100` | the anim pack | in place |
+| `0x80010200` | the Flailer chunk | a slot not ported: the UI has it |
+| `0x80034a00`, twice | the event trees | not ported |
+| `0x15010`, four times | the fonts | not ported: the UI has them |
+
+`loader_solid_list` fixes its tables up in place, and can't do it twice.
+Each load takes a fresh copy of the chunk, `memalign`ed so that it sits
+as far into its first 128 bytes as it does in the file. That keeps what
+the chunk aligns inside itself aligned. The unload runs UnloadChunks
+newest chunk first, as TraverseChunksBackwards does, frees the copy and
+runs PostLoadFixup again.
+
+The unload is BeginGameFlowUnloadingFrontEnd's loop over
+FindResourceFile(1) and UnloadResourceFile. The flow reaches it through
+a new hook, `unloadFrontEnd`, after `closeSelectCar`. It isn't traced,
+so `bootflow_check` and `bscreens_check` are unchanged.
+
+### The frontend's view
+
+The race's track viewer (`trackview.c`) already turns eModels into
+citro3d draws. The frontend gets a second TrackView, `g_feView` in
+main.c, which `trackview_attach_frontend` sets up with no track: it
+has only the tables for the other solids and for the textures, and no
+cull info. It is attached the first time car select draws with FRONTB
+loaded.
+
+Its solids and textures are found as they are drawn, as the race's
+other solids are. A track's solids keep pointers into its textures; the
+frontend's don't have to, so the frontend's view can forget all of
+them at once:
+- `trackview_forget_later` asks for it when a resource file or a car's
+  textures are unloaded (`resUnloadFile`, and `unloadTexturesFromFile`
+  in place of `gUnloadTexturesFromFileFn`). Another car can be loaded
+  where the old one was.
+- `trackview_free_later` asks for it when FRONTB is unloaded, and frees
+  the tables too.
+- Both happen in `trackview_frame_begun`, called right after
+  C3D_FrameBegin, which has waited for the GPU to finish the last frame.
+
+A texture whose TextureInfo has no image yet, a car's that is still
+loading, is tried again on the next draw. One that had an image and
+failed (no room, or the upload) is not.
+
+### The draw
+
+`trackview_draw_frontend(view, render, user)` is eDisplayFrame's
+frontend path for view 1 (Player1Camera, which the
+SelectCarCameraMover moves). It returns false, and draws nothing, until
+the view is attached and there is frame memory.
+1. A new frame's memory, MaybeChangeViewMode, and the view's matrices
+   from its camera. The frontend culls nothing.
+2. The race's projection, light and seams (`gEModelRenderFn`, the strip
+   functions), the fog off, the near and far planes, depth writes on.
+3. The environment map is CARSELECTENVMAP (`pTextureInfoCarSelectEnvMap`,
+   set by eFixUpTables), where the race's is target 14. elSetupLightContext's
+   frontend branch makes this choice. `georender_set_env_texture` puts
+   that texture in the sphere map's place for the draw.
+4. `render_front_end_cars(view, 1, 0, 1, 0)`: the cars' solid strips.
+5. The selector's RENDER: the platform, and the unlock blurb.
+6. AttachSolidPolys.
+7. `render_front_end_cars(view, 0, 1, 1, 1)`: the reflections, then
+   `(view, 1, 0, 0, 1)`: the cars' alpha strips.
+8. AttachSolidPolys, then AttachAlphaPolys.
+9. UpdateTextureAnimations, and the alpha test and blend left as citro2d
+   wants them.
+
+Retail's frontend draws view 0's Flailer layers 24 to 20 between steps
+4 and 5. Those layers don't write depth, so the port draws them first,
+and steps 4 and 5 land over them the same. `uirender_draw_visible_passes`
+draws a range of BUI_LAYER_ORDER, whose first UIR_BACK_PASSES (5) passes
+are layers 24 to 20. main.c's `drawCarSelTop` draws those, flushes
+citro2d, draws the 3D, prepares citro2d again, and draws the rest of the
+layers. The nebula effects, between steps 5 and 6, are SC-3.
+
+**The strips' passes.** RenderStrips' flag 16 leaves out the strips
+whose texture has ApplyAlphaSorting, and its flag 8 leaves out the
+others. `render_front_end_cars` adds 8 when its `pass8` is 0 and 16
+when its `pass16` is 0; a reflection starts from 17. The track viewer's
+`render_model` now tests both, for every eModel it draws.
+
+**The blurb.** RENDER reaches the unlock box's blurb inside the 3D,
+where citro2d can't draw. While the 3D draws, `hookCarSelRenderText`
+queues the blurb (one, of up to 255 characters, CarSelector's size),
+and `drawCarSelTop` draws it after the layers. If the 3D can't draw,
+`drawCarSelTop` sends RENDER itself after the layers, as before SC-2d.
+
+**The camera.** MainLoop's UpdateCameraMovers runs in every frame. The
+port's race frame already ran it; frames in the frontend now do too,
+which is what moves the SelectCarCameraMover.
+
+**The fog off.** `georender_set_fog(NULL, …)` bound NULL to texture
+unit 1. citro3d's C3D_TexBind reads the type of what it is given for a
+unit past 0, so this read address 12. Azahar logs that as an unmapped
+read; on the device it is a data abort. The race has done this at
+the end of every frame since the fog became a texture. The car select
+did it from its first frame. Unit 1 now gets an 8×8 A8 texture of its
+own, which no stage reads.
+
+### On Azahar
+
+`tools/run_azahar_carsel.ps1` walks car select: the cop cars, right
+twice, left, a skin, the transmission popup, cancel and back. Its
+verdict now counts Azahar's unmapped reads as a failure, and finds the
+selector's lines, which are `flow carsel …`.
+
+The run is clean: no unmapped reads, and the flow leaves the main loop.
+- The Crown Victoria stands lit on the platform, with its reflection in
+  the floor, under the name and over the grid. 60 FPS, about 4 ms a
+  frame.
+- The two locked cars, the BMW M5 and the Mustang, are their own models
+  in the dark, behind the LOCKED box.
+- Back on the Crown Victoria, the turntable has turned it to show its
+  side and then its back.
+- The transmission popup dims the car with the rest.
+- Back returns to You're The Cop's setup with the car select's 3D gone.
+
+Not done here: the nebula (SC-3), the spotlights (dead code, above) and
+the frontend's other eModels. TRACK*_MINI is the track select's.

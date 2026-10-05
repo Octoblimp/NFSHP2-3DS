@@ -169,6 +169,14 @@ void uirender_draw_screen(UIRenderer* r, BUI* ui, const BUIScreen* screen,
 // while the frontend loads, and how the flow's screens reach the display.
 void uirender_draw_visible(UIRenderer* r, float alpha);
 
+// Passes [from, to) of that walk, BUI_LAYER_ORDER's indices. The frontend's
+// eDisplayFrame draws the first UIR_BACK_PASSES of them, layers 24 to 20,
+// before its 3D -- the car select's cars and platform -- and the rest
+// after.
+#define UIR_BACK_PASSES 5
+void uirender_draw_visible_passes(UIRenderer* r, float alpha, int from,
+                                  int to);
+
 // The scaled width and height of a text object, as FlailerTextChunk's own
 // GetScaledWidth/GetScaledHeight compute them -- the pair ScaleAboutCenter
 // needs. False if the object is not text; true with both zero if its font

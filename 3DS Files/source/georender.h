@@ -257,6 +257,12 @@ void georender_envmap_fold(unsigned views);
 // wait for.
 bool georender_envmap_ready(void);
 
+// A sphere map the environment passes bind in place of the folded one,
+// and which they need not wait for; NULL gives the folded one back. The
+// frontend's elSetupLightContext points the cars' lighting at
+// CARSELECTENVMAP instead of target 14.
+void georender_set_env_texture(const C3D_Tex* tex);
+
 // eSetZWriteState(int), 0x001029c0: with it off, nothing drawn writes the
 // depth buffer, whatever its texture's pass says. eDisplayFrame turns it
 // off for the sky. It starts on.

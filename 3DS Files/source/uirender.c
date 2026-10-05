@@ -1178,7 +1178,8 @@ static bool screen_drawn(const UIRenderer* r, const BUIScreen* screen,
            && (target != UIR_TARGET_BOTTOM || screen_placed(r, screen));
 }
 
-static void draw_visible(UIRenderer* r, float alpha, int target)
+static void draw_visible(UIRenderer* r, float alpha, int target, int from,
+                         int to)
 {
     int16_t head[BUI_NUM_LAYERS], tail[BUI_NUM_LAYERS];
     int     n = 0;
@@ -1212,7 +1213,7 @@ static void draw_visible(UIRenderer* r, float alpha, int target)
         }
     }
 
-    for (int pass = 0; pass < BUI_NUM_LAYERS; pass++) {
+    for (int pass = from; pass < to; pass++) {
         int layer = kLayerOrder[pass];
         if (n < 0) {
             for (int b = 0; b < r->numBundles; b++) {
@@ -1240,8 +1241,17 @@ static void draw_visible(UIRenderer* r, float alpha, int target)
 
 void uirender_draw_visible(UIRenderer* r, float alpha)
 {
+    uirender_draw_visible_passes(r, alpha, 0, BUI_NUM_LAYERS);
+}
+
+void uirender_draw_visible_passes(UIRenderer* r, float alpha, int from,
+                                  int to)
+{
+    if (from < 0) from = 0;
+    if (to > BUI_NUM_LAYERS) to = BUI_NUM_LAYERS;
+    if (from >= to) return;
     C2D_SetTintMode(C2D_TintMult);
-    draw_visible(r, alpha, UIR_TARGET_TOP);
+    draw_visible(r, alpha, UIR_TARGET_TOP, from, to);
     end_gs_scale();
 }
 
@@ -1263,7 +1273,7 @@ bool uirender_draw_visible_bottom(UIRenderer* r, float targetW,
             any = screen_drawn(r, &ui->screens[s], UIR_TARGET_BOTTOM);
     }
     C2D_SetTintMode(C2D_TintMult);
-    draw_visible(r, alpha, UIR_TARGET_BOTTOM);
+    draw_visible(r, alpha, UIR_TARGET_BOTTOM, 0, BUI_NUM_LAYERS);
     end_gs_scale();
     r->targetW = w;
     r->targetH = h;

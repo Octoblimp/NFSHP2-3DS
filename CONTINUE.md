@@ -59,48 +59,37 @@ checkers to it as they are touched; selcam_check is the pattern.
   are built, but nothing draws yet: render_model returns outside the
   race's draw. `docs/formats/car-select.md`, "The selector's 3D
   (SC-2c)", has retail's facts.
-- **SC-2d, the draw on the device:**
-  - **FRONTB's engine half.** The device reads FRONTB only for the UI
-    (`addBundle`, held resident). Retail's frontend load puts the whole
-    file through LoadChunks, PostLoadFixup and then the callback. Its
-    top-level chunks are:
-    - the solid list, with 17 solids: PLATFORM, the 15 TRACK*_MINI and
-      CARCOVER;
-    - the texture pack, 12.5 MB;
-    - the anim pack;
-    - the Flailer chunk, which the UI already has, so it must not be
-      added twice;
-    - two event trees and four fonts, all unported.
-    loader_solid_list fixes its strip tables in place (it adds the data
-    pointer), so it is not idempotent. Load it from a fresh copy each
-    time the frontend loads, at the same offset mod 128. Unload in
-    reverse when the frontend unloads, after closeSelectCar.
-  - **The cars' solids** come through the real CarLoader in the
-    frontend. Check that they reach SolidList and that the CarRenderInfo
-    finds them.
-  - **The hooks.** `main.c` sets gElInFrontendFn (flow state 3) and
-    gElCarSelectActiveFn (bcarsel_active). It also calls
-    update_camera_movers() in frontend frames, as retail's MainLoop does
-    every frame.
-  - **The frontend's 3D view, with no track.** A second TrackView with
-    no bundle sets `s_draw`, the camera and the frame's memory. Each
-    frame it draws in eDisplayFrame's order (0x00112858):
-    1. the cars' solid strips, (view, 1, 0, 1, 0);
-    2. RENDER, which queues the platform;
-    3. the reflections, (view, 0, 1, 1, 1);
-    4. the cars' alpha strips, (view, 1, 0, 0, 1);
-    5. the alpha polygons.
-    The cull is skipped in the frontend. The 3D goes under the UI's
-    layers.
-  - **Its texture cache must be flushable.** Car textures load and
-    unload as the selection moves, and addresses are reused. Flush on a
-    car's unload, after the next C3D_FrameBegin.
-  - **The flags.** Render flag 1 means no envmap; the frontend's envmap
-    is CARSELECTENVMAP (hash 0x4ecc769c). Flag 16 skips a solid's alpha
-    strips and flag 8 its solid ones (RenderStrips, 0x0010de10). The
-    port's render_model ignores them so far.
-
-  Then Azahar screenshots against the user's PCSX2 photos.
+- **SC-2d, the draw on the device, is done.** The car select shows
+  the user's PCSX2 photo 7: the Crown Victoria lit on its turntable,
+  with its reflection in the floor, under the make, the badge and the
+  icons. It runs at 60 FPS, about 4 ms a frame, on Azahar.
+  - `frontres.c` puts FRONTB, which the UI holds, through LoadChunks and
+    PostLoadFixup when the flow loads the frontend. The solid list gets
+    a fresh copy each time. A new flow hook, `unloadFrontEnd`, after
+    closeSelectCar, unloads it in reverse.
+  - `trackview_attach_frontend` and `trackview_draw_frontend` give the
+    frontend a second TrackView with no track, drawn in eDisplayFrame's
+    order. main.c's `drawCarSelTop` draws Flailer layers 24 to 20
+    (`UIR_BACK_PASSES`), the 3D, then the rest. The unlock blurb is
+    queued during the 3D and drawn after the layers.
+  - Its solids and textures are forgotten, after the next
+    C3D_FrameBegin, when a resource file or a car's textures unload.
+    They are freed with FRONTB.
+  - render_model honours RenderStrips' flags 8 and 16, in the race too.
+    The env map is CARSELECTENVMAP, through
+    `georender_set_env_texture`.
+  - main.c sets gElInFrontendFn and gElCarSelectActiveFn, and runs
+    update_camera_movers() in frontend frames.
+  - **A fix the race needed too.** `georender_set_fog(NULL)` bound NULL
+    to texture unit 1. citro3d reads the type of what it is given there,
+    so that read address 12 every frame. It was an unmapped read on
+    Azahar and would be a data abort on the device. Unit 1 now gets a
+    texture of its own. The race and car select runs both have 0
+    unmapped accesses, and `run_azahar_carsel.ps1` fails on any.
+  - `bootflow_check` (48 scenarios, 27964 lines) and `bscreens_check`
+    (17, 1277) still agree. Nothing else checked compiles the files
+    SC-2d touched. `docs/formats/car-select.md`, "The draw on the
+    device (SC-2d)", has it all.
 
 **Gaps, on purpose:**
 - The event trees are not ported, so findEventForCar is NULL in main.c
@@ -109,7 +98,9 @@ checkers to it as they are touched; selcam_check is the pattern.
 - Select Track is still a plain screen.
 - Joy event 34 does nothing in retail either.
 
-**Then:** SC-3, and after it 13b-4f.
+**Next: SC-3, the nebula** behind the car, the frontend's effects
+that eDisplayFrame draws between RENDER and AttachSolidPolys. Then
+13b-4f.
 
 ## State
 
@@ -3295,10 +3286,10 @@ goes in.
   and 36.
 - **Next:** the car selector (step 16's SelectCarScreen, CarSelector
   and the front end's car), which the user asked for on 2026-10-04.
-  SC-1 (the logic and the 2D) is done and checked. Of SC-2, the 3D car,
-  the camera, the car, its light and the selector's wiring (SC-2a to
-  SC-2c) are done. The draw on the device (SC-2d) is next. See "Now" at
-  the top.
+  SC-1 (the logic and the 2D) is done and checked. SC-2, the 3D car,
+  is done: the camera, the car, its light and the selector's wiring
+  (SC-2a to SC-2c), and the draw on the device (SC-2d). The nebula
+  (SC-3) is next. See "Now" at the top.
   Then 13b-4f, the models' cost per draw. 13b-1 (the real clock and the
   pacing), 13b-2 (the frame profiler), 13b-3 (New 3DS mode in full) and
   13b-4a to 13b-4e (the draw's cuts) are done.

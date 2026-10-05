@@ -13629,7 +13629,7 @@ the fade fix, and the main.c change has not been built since.
 - Then SC-2 (the 3D car, its camera, cover, lighting and spotlights,
   and the pad's mapping), SC-3 (the nebula), and 13b-4f.
 
-## Session 33 (2026-10-04) -- SC-1 finished; SC-2, the 3D car, begun
+## Session 33 (2026-10-04) -- SC-1 finished; SC-2, the 3D car, done
 
 Session 32 ran out of context with SC-1's checker half done. This
 session finished it, then started on the car itself.
@@ -13764,3 +13764,74 @@ session finished it, then started on the car itself.
   race's draw. The CarRenderInfos are built and the light table is set
   each tick.
 - **`docs/formats/car-select.md`** has "The selector's 3D (SC-2c)".
+
+### SC-2d, the draw on the device
+
+SC-2c's cars, cover and platform now draw on the top screen. The car
+select looks like the user's PCSX2 photo 7: the Crown Victoria lit on
+its turntable, its reflection in the floor, under the make, the badge
+and the icons. On Azahar it runs at 60 FPS, about 4 ms a frame.
+
+- **FRONTB's engine half (`frontres.c`).** The device reads FRONTB once,
+  at boot, for the UI. Retail's frontend load puts the whole file
+  through LoadChunks and PostLoadFixup, and `frontres_load` does the
+  same over the UI's copy when the flow asks for `FRONTEND\FRONTB.LZC`.
+  - The solid list (0x80034000, 1,499,656 bytes) is fixed up in place
+    and can't be fixed twice. Each load takes a fresh copy, `memalign`ed
+    to the same offset mod 128.
+  - The texture and anim packs load in place. The Flailer chunk, the
+    event trees and the fonts reach unported slots.
+  - The unload is a new BGameFlowHooks hook, `unloadFrontEnd`, after
+    closeSelectCar: BeginGameFlowUnloadingFrontEnd's resource loop. It
+    runs UnloadChunks newest first, frees the copy and runs PostLoadFixup.
+- **The frontend's view.** `trackview_attach_frontend` sets up a second
+  TrackView with no track. `trackview_draw_frontend` is eDisplayFrame's
+  frontend path for view 1, culling nothing:
+  1. the cars' solid strips;
+  2. the selector's RENDER, the platform;
+  3. AttachSolidPolys;
+  4. the reflections and the cars' alpha strips;
+  5. AttachSolidPolys and AttachAlphaPolys.
+  Retail draws Flailer layers 24 to 20 between the cars and RENDER.
+  They write no depth, so main.c's `drawCarSelTop` draws them first
+  (`uirender_draw_visible_passes`, `UIR_BACK_PASSES`), then the 3D,
+  then the rest.
+- **What the frontend view holds is forgotten** after the next
+  C3D_FrameBegin, once a resource file or a car's textures unload
+  (`trackview_forget_later`). It is freed with FRONTB
+  (`trackview_free_later`, `trackview_frame_begun`). A texture whose
+  image isn't loaded yet is tried again; one that failed is not.
+- **RenderStrips' flags 8 and 16** are honoured by render_model now, in
+  the race as well. 16 leaves out the strips whose texture has
+  ApplyAlphaSorting, and 8 the others.
+- **CARSELECTENVMAP is the env map**, through
+  `georender_set_env_texture`, as elSetupLightContext's frontend branch
+  has it.
+- **The unlock blurb** reaches citro2d inside the 3D. It is queued then
+  and drawn after the layers.
+- main.c sets gElInFrontendFn and gElCarSelectActiveFn, and runs
+  update_camera_movers() in frontend frames, which turns the camera.
+- **A NULL read every race frame, found here.** `georender_set_fog(NULL)`
+  called `C3D_TexBind(1, NULL)`, and citro3d reads the type of a unit
+  past 0's texture: a read of address 12. The race has done it at the
+  end of every frame since the fog became a texture (4dab922). Azahar
+  only logs it ("unmapped Read32 @ 0x0000000C", at C3D_TexBind or the
+  inlined call in georender_set_fog). On the device it would be a data
+  abort. Car select's first draw made it show. Unit 1 now gets an 8x8
+  A8 texture that no stage reads.
+- `tools/run_azahar_carsel.ps1` now fails on any unmapped access, and
+  finds the selector's lines (`flow carsel ...`; it looked for
+  `^carsel `). The carsel run passes: a car change, two locked cars in
+  the dark under LOCKED, the turntable turning, a skin, the popup, cancel
+  and back, then a clean exit. A 25-second race run has 0 unmapped
+  accesses, with the fog as it was.
+- **Checkers:** `bootflow_check` (48 scenarios, 27964 lines) and
+  `bscreens_check` (17 scenarios, 1277 lines) still agree; the hook is
+  untraced. No checker compiles trackview.c, georender.c, uirender.c or
+  frontres.c: they are the device's half, the part the checkers stub.
+- **`docs/formats/car-select.md`** has "The draw on the device (SC-2d)".
+
+### Next
+
+SC-3, the nebula: the frontend effects that eDisplayFrame draws between
+RENDER and AttachSolidPolys, behind the car. Then 13b-4f.

@@ -263,6 +263,10 @@ typedef struct {
     // carloader.h). Neither is traced: the boot transcript predates them.
     void (*initSelectCar)(void* user);
     void (*closeSelectCar)(void* user);
+    // Then its FindResourceFile(1) / UnloadResourceFile loop, which hands
+    // back FRONTB, the frontend's one resource file (frontres.h). Not
+    // traced either.
+    void (*unloadFrontEnd)(void* user);
 
     // Transcript. Every observable step calls this, which is what
     // tools/bootflow_check.py diffs.
