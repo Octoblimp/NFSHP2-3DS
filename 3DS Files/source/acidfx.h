@@ -1,6 +1,7 @@
 // acidfx -- AcidFXE.obj's matrix arithmetic (0x00124bf8 .. 0x001254d0):
-// fDeterminant and fInvertMatrix, a general 4x4 inverse by cofactors, and
-// hermite_basis (retail 0x00126960, the demo's 0x001254d0).
+// fDeterminant and fInvertMatrix, a general 4x4 inverse by cofactors,
+// hermite_basis (retail 0x00126960, the demo's 0x001254d0) and
+// hermite_parameter (0x00126af8), which RenderEffects reads a curve with.
 //
 // The view's matrices are the first caller the port has (CalculateViewMatricies
 // inverts the two clip-to-screen matrices); the effect system's DoTimeStep
@@ -36,5 +37,9 @@ void fInvertMatrix(bMatrix4 *o, const bMatrix4 *m);
 // is eMulMatrix, right to left as written: M * inverse(T) first.
 void hermite_basis(bMatrix4 *o, const bMatrix4 *ctrl, float k0, float k1,
                    float k2, float k3);
+
+// 0x00126af8. A curve at t: o = (t^3, t^2, t, 1) times m, by eMulVector4.
+// t^3 is t^2 times t.
+void hermite_parameter(bVector4 *o, const bMatrix4 *m, float t);
 
 #endif

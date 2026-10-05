@@ -12,11 +12,14 @@
 #include "camera.h"
 #include "car.h"
 #include "eefpu.h"
+#include "eframe.h"
 #include "emath.h"
 #include "eview.h"
+#include "eviewmatrix.h"
 #include "texturepack.h"
 
 int32_t (*gAcidGameFlowStateFn)(void);
+void (*gEAttachDirectDataFn)(void *tex, float z, void *data, uint16_t qwc);
 
 BSlotPool       *AcidParticleSlotPool;
 BSlotPool       *AcidActiveGroupSlotPool;
@@ -26,6 +29,7 @@ bNode            EmitterDataList = { &EmitterDataList, &EmitterDataList };
 uint32_t         AcidRandomSeed = 0x23985727u;
 AcidEffectSystem FrameEffects;
 AcidEffectSystem WorldEffects;
+int32_t          acidz = 4;
 
 // ---------------------------------------------------------------- helpers
 
@@ -839,4 +843,248 @@ void acid_system_do_time_step(AcidEffectSystem *s, float dt)
         }
     }
     s->UpdateTime = bGetTickerDifference(start, bGetTicker());
+}
+
+// ------------------------------------------------------------ the drawing
+
+static uint32_t acid_bits(float f)
+{
+    uint32_t u;
+
+    memcpy(&u, &f, sizeof u);
+    return u;
+}
+
+// The words between p and end, as the listing's subu and sra count them.
+static int32_t acid_words_left(const uint8_t *end, const uint8_t *p)
+{
+    return (int32_t)(end - p) >> 2;
+}
+
+// A lane of the colour, vmini'd to 255, vmax'd to 0 and vftoi0'd.
+static uint32_t acid_byte(float c)
+{
+    if (255.0f < c)
+        c = 255.0f;
+    if (c < 0.0f)
+        c = 0.0f;
+    return (uint32_t)ee_trunc_w(c);
+}
+
+// A turned corner (u, v) of the sprite, as VU0 does it: the turn's two
+// rows times u and v through ACC (its z and w terms add zeros), x by 8 and
+// y by 7 (the GS's pixels are 7/8 as tall), plus the centre, truncated.
+static void acid_corner(uint32_t *x, uint32_t *y, float c, float sn,
+                        float u, float v, float fx, float fy)
+{
+    float px = c * u + -sn * v;
+    float py = sn * u + c * v;
+
+    *x = (uint32_t)ee_trunc_w(px * 8.0f + fx);
+    *y = (uint32_t)ee_trunc_w(py * 7.0f + fy);
+}
+
+void acid_system_render_effects(AcidEffectSystem *s, struct eView *view)
+{
+    uint32_t start = bGetTicker();
+    const bMatrix4 *wv, *wc, *ws;
+    const Camera *cam;
+    const void *not_car;
+    const AcidEmitter *only;
+    float h;
+    int32_t total = 0;
+    bNode *n, *next;
+
+    if (view->ID == 1) {
+        s->RenderTime = 0.0f;
+        s->NumVisibleParticles = 0;
+    }
+    if (s->ActiveGroupList.next == &s->ActiveGroupList)
+        return;
+    wv = view->WorldViewMatrix;
+    cam = view->pCamera;
+    not_car = cam->CarNotToRender;
+    wc = view->WorldClipMatrix;
+    ws = view->WorldScreenMatrix;
+    h = CalculateH(cam->CurrentKey.FieldOfView);
+    only = (int8_t)s->OnlyShowCurrentEmitter != 0 ? s->CurrentEmitter : NULL;
+
+    for (n = s->ActiveGroupList.next; n != &s->ActiveGroupList; n = next) {
+        AcidActiveGroup *g = (AcidActiveGroup *)n;
+        const AcidEmitterData *d = g->EmitterData;
+        const Car *car = (const Car *)g->pCar;
+        bMatrix4 cb, xb;
+        float inv_life, max_size, far_clip, du, dv, depth_sum;
+        int32_t sw, sh, count;
+        uint32_t col_mask, row_mask;
+        uint8_t *end, *pkt, *p;
+        void *tex;
+        bNode *pn, *pnext;
+
+        next = n->next;
+        if (car != NULL) {
+            uint32_t bits = car->TheOverrideRenderingPosition.VisibleViewBits;
+
+            if (((bits >> (view->ID & 31)) & 1u) == 0)
+                continue;
+            switch (d->CarPosition) {
+            case 1:                         // FRONT_TIRES
+            case 5:                         // TIRE_FL
+            case 6:                         // TIRE_FR
+                if (not_car == car && cam->RenderDash != 0)
+                    continue;
+                break;
+            case 9:                         // ENGINE
+            case 11:                        // WINDSHIELD
+            case 26:                        // LICENSE_PLATE_REAR
+                if (view->ID != 3 && not_car == car)
+                    continue;
+                break;
+            case 10:                        // EXHAUST
+                if (view->ID == 3 || not_car == car)
+                    continue;
+                break;
+            default:
+                break;
+            }
+        }
+        inv_life = 1.0f / d->Life;
+        tex = d->Texture;
+        if (tex == NULL)
+            continue;
+        if (only != NULL && g->Emitter != only)
+            continue;
+        cb = d->ColourBasis;
+        xb = d->ExtraBasis;
+        max_size = d->MaxPixelSize;
+        if (max_size == 0.0f)
+            max_size = 512.0f;
+        far_clip = d->FarClip;
+        sh = (int8_t)d->ContactSheetH;
+        sw = (int8_t)d->ContactSheetW;
+        row_mask = ~(uint32_t)(~(uint64_t)0 << (sh & 63));
+        col_mask = ~(uint32_t)(~(uint64_t)0 << (sw & 63));
+        dv = 1.0f / (float)(int32_t)((uint32_t)1 << (sh & 31));
+        du = 1.0f / (float)(int32_t)((uint32_t)1 << (sw & 31));
+        end = CurrentBufferEnd;
+        pkt = CurrentBufferPos;
+        p = pkt + 16;
+        depth_sum = 0.0f;
+        count = 0;
+
+        for (pn = g->ParticleList.next;
+             pn != &g->ParticleList && acid_words_left(end, p) >= 33;
+             pn = pnext) {
+            const AcidParticle *pa = (const AcidParticle *)pn;
+            bVector4 pos, vv, sc, ex, col;
+            float t, size, u0, v0, u1, v1;
+            uint32_t a, z, rgba, x[4], y[4], w[20];
+            int32_t sx, sy;
+            int i;
+
+            pnext = pn->next;
+            pos.x = pa->X;
+            pos.y = pa->Y;
+            pos.z = pa->Z;
+            pos.w = 1.0f;
+            t = 1.0f - (float)(int16_t)pa->Life * 0.0009765625f * inv_life;
+            if (eGetClipFlags(&pos, wc) != 0)
+                continue;
+            eMulVector4(&vv, wv, &pos);
+            eRotTransPers(&sc, ws, &pos);
+            hermite_parameter(&ex, &xb, t);
+            size = 0.0f;
+            if (0.0f < ex.x)
+                size = ex.x * h / vv.z;
+            if (max_size < size)
+                size = max_size;
+            if (!(1.0f < size) || !(vv.z < far_clip))
+                continue;
+
+            a = (uint16_t)pa->Angle;
+            if (a & 1)
+                a = (a - ((uint32_t)ee_trunc_w(ex.y) & 0xffffu)) & 0xffffu;
+            else
+                a = (a + ((uint32_t)ee_trunc_w(ex.y) & 0xffffu)) & 0xffffu;
+            sx = ee_trunc_w(sc.x);
+            z = (uint32_t)((int32_t)(acid_bits(sc.z) & 0x0fffffffu)
+                           >> (acidz & 31));
+            sy = ee_trunc_w(sc.y);
+            if (a == 0) {
+                uint32_t hy = (uint32_t)ee_trunc_w(size * (0.875f * 8.0f));
+                uint32_t hx = (uint32_t)ee_trunc_w(size * (1.0f * 8.0f));
+                uint32_t x16 = (uint32_t)sx << 4, y16 = (uint32_t)sy << 4;
+
+                x[0] = x16 - hx;
+                y[0] = y16 - hy;
+                x[1] = x16 + hx;
+                y[1] = y16 - hy;
+                x[2] = x16 - hx;
+                y[2] = y16 + hy;
+                x[3] = x16 + hx;
+                y[3] = y16 + hy;
+            } else {
+                float ang = (float)(int32_t)a
+                          * 9.58738019107841e-05f;      // gp-32080, 2 pi/65536
+                float c = eSin(ang + 1.57079649f);      // gp-32076, 0x3fc90fdc
+                float sn = eSin(ang);
+                float fx = (float)(int32_t)((uint32_t)sx << 4);
+                float fy = (float)(int32_t)((uint32_t)sy << 4);
+
+                acid_corner(&x[0], &y[0], c, sn, -size, -size, fx, fy);
+                acid_corner(&x[1], &y[1], c, sn, size, -size, fx, fy);
+                acid_corner(&x[2], &y[2], c, sn, -size, size, fx, fy);
+                acid_corner(&x[3], &y[3], c, sn, size, size, fx, fy);
+            }
+            depth_sum += (float)ee_trunc_w(vv.z);
+            count++;
+
+            hermite_parameter(&col, &cb, t);
+            rgba = acid_byte(col.x) | acid_byte(col.y) << 8
+                 | acid_byte(col.z) << 16 | acid_byte(col.w) << 24;
+            u0 = (float)(int32_t)(pa->Frame & col_mask) * du;
+            v0 = (float)(int32_t)(((uint32_t)pa->Frame >> (sw & 31))
+                                  & row_mask) * dv;
+            u1 = u0 + du;
+            v1 = v0 + dv;
+
+            w[0] = 0x54;                            // PRIM
+            w[1] = 0;
+            w[2] = rgba;                            // RGBAQ, Q = 1
+            w[3] = 0x3f800000u;
+            for (i = 0; i < 4; i++) {
+                w[4 + i * 4] = acid_bits(i & 1 ? u1 : u0);      // ST
+                w[5 + i * 4] = acid_bits(i & 2 ? v1 : v0);
+                w[6 + i * 4] = y[i] << 16 | (x[i] & 0xffffu);   // XYZ2
+                w[7 + i * 4] = z;
+            }
+            memcpy(p, w, sizeof w);
+            p += sizeof w;
+        }
+
+        if (count == 0 || acid_words_left(end, p) < 33)
+            continue;
+        {
+            uint32_t tag[4];
+            float avg;
+
+            tag[0] = (uint32_t)count | 0x8000u;     // NLOOP, EOP
+            tag[1] = 0xa42a4000u;                   // REGLIST, PRIM 0x54, 10
+            tag[2] = 0x42424210u;                   // PRIM RGBAQ ST XYZ2 ...
+            tag[3] = 0x42u;
+            memcpy(pkt, tag, sizeof tag);
+            avg = depth_sum / (float)count;
+            if (CurrentBufferEnd < p) {
+                FrameMallocFailed = 1;
+                FrameMallocFailAmount += (uint32_t)(CurrentBufferEnd - p);
+            }
+            total += count;
+            CurrentBufferPos = p;
+            if (gEAttachDirectDataFn != NULL)
+                gEAttachDirectDataFn(tex, avg, pkt,
+                                     (uint16_t)(count * 5 + 1));
+        }
+    }
+    s->RenderTime += bGetTickerDifference(start, bGetTicker());
+    s->NumVisibleParticles += total;
 }

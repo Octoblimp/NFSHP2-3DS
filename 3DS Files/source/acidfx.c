@@ -108,3 +108,15 @@ void hermite_basis(bMatrix4 *o, const bMatrix4 *ctrl, float k0, float k1,
     eMulMatrix(&b, &kHermite, &a);
     eMulMatrix(o, &b, ctrl);
 }
+
+void hermite_parameter(bVector4 *o, const bMatrix4 *m, float t)
+{
+    bVector4 v;
+    float t2 = t * t;
+
+    v.x = t2 * t;
+    v.y = t2;
+    v.z = t;
+    v.w = 1.0f;
+    eMulVector4(o, m, &v);
+}

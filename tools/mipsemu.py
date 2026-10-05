@@ -877,6 +877,8 @@ class Emu(object):
             self.q = B(ieee_sqrt(self._sqrt_arg(F(T[(w >> 23) & 3]), pc)))
         elif idx == 0x3b:                             # vwaitq
             pass
+        elif idx == 0x14:                             # vftoi0
+            self._vput(ft, [ee_trunc_w(F(x)) & M32 for x in S], mask)
         else:
             raise MipsError("vu0 special 0x%02x at 0x%08x" % (idx, pc))
 

@@ -11,12 +11,14 @@ afxDeleteEmitters (0x00127368), both SetEmitterData (0x001273c0,
 0x001273d8), AcidEffectSystem's constructor (0x00127418), AddAutoEmitter
 (0x001274a0), RemoveAutoEmitter (0x00127688), KillAllActiveEffects
 (0x001276a8), TriggerEmitter (0x00127700), UpdateInterestPoints
-(0x001286a0) and DoTimeStep (0x00128718), and the deleting destructors of
-AcidEmitter (0x00124e20 and its twin 0x0012a3f8), AcidActiveGroup
-(0x0012a258) and AcidParticle (0x0012a348). Under them run bStringHash,
-bStrNCpy, bMemSet, the node and list destructors, hermite_basis
-(0x00126960) with fInvertMatrix and eMulMatrix, eRotateX, Y and Z,
-eMulVector, bSin and bCos; eMathInit (0x0011b138) and eMathE's static
+(0x001286a0), DoTimeStep (0x00128718) and RenderEffects (0x00128da0), and
+the deleting destructors of AcidEmitter (0x00124e20 and its twin
+0x0012a3f8), AcidActiveGroup (0x0012a258) and AcidParticle (0x0012a348).
+Under them run bStringHash, bStrNCpy, bMemSet, the node and list
+destructors, hermite_basis (0x00126960) with fInvertMatrix and eMulMatrix,
+hermite_parameter (0x00126af8), eRotateX, Y and Z, eMulVector,
+eRotTransPers, eGetClipFlags, eSin, bSin and bCos; eMathInit (0x0011b138)
+and eMathE's static
 constructor (0x0011bf70) run once first, as the boot runs them. The
 harness (tools/src/afx_test.c) runs the port over the same script, and
 the two transcripts are diffed.
@@ -35,8 +37,21 @@ views of the model's, each with a camera the script places or none (its
 pCamera at 56, the camera's CurrentKey.Position at 64); bGetTicker
 (0x00250f38) counts up by 0x1234567 a call and bGetTickerDifference
 (0x00250f48) is half the count between. A car is 2 KB of the model's, of
-which DoTimeStep reads only the velocity, at 112. CurrentGameFlowState
-(gp-21420) is the script's.
+which DoTimeStep reads the velocity, at 112, and RenderEffects the visible
+view bits, at 1300. CurrentGameFlowState (gp-21420) is the script's.
+
+RenderEffects' views are the same three, each with an ID and the three
+matrices it reads (WorldView, WorldClip, WorldScreen, at 68, 72 and 76)
+the script's, and its camera's FieldOfView, CarNotToRender and RenderDash
+(132, 444, 448). CalculateH (0x00104448) prints the FOV it is given and
+answers the script's H. The frame memory is 128 KB of the model's,
+CurrentBufferPos (gp-19388) and CurrentBufferEnd (gp-19384) where the
+script puts them, filled with 0xa5 on each reset; FrameMallocFailed and
+FrameMallocFailAmount (gp-19372, gp-19368) and acidz (gp-23440, 4) are
+the script's too. eAttachDirectData (0x00110378) prints the texture, the
+depth, where the packet is and every word of it; the port's call is
+gEAttachDirectDataFn. A particle's fields can be written (PP) at its
+retail offsets past the node.
 
 Two of the listings read their stack before writing it. TriggerEmitter's
 direction keeps the w of the last eMulVector, and before the first one
@@ -140,6 +155,14 @@ STEP_FRAME = 304                  # the control matrix at 0 of the frame
 EMATH_INIT = 0x0011b138
 EMATH_CTOR = 0x0011bf70           # 0x002dc400 = (0, 0, 0, 1)
 G_FLOW = GP - 21420               # CurrentGameFlowState
+RENDER = 0x00128da0               # RenderEffects
+ATTACH = 0x00110378               # eAttachDirectData
+CALC_H = 0x00104448               # CalculateH
+G_POS = GP - 19388                # CurrentBufferPos
+G_END = GP - 19384                # CurrentBufferEnd
+G_FAILED = GP - 19372             # FrameMallocFailed
+G_FAIL_AMOUNT = GP - 19368        # FrameMallocFailAmount
+G_ACIDZ = GP - 23440              # acidz
 
 B_NEW_POOL = 0x00257c10
 B_DEL_POOL = 0x00257c48
@@ -178,7 +201,18 @@ CAM_POSITION = 64
 NVIEW = 3
 CARS = 0x010c2000                 # car k at CARS + 0x800 * k
 CAR_VELOCITY = 112
+CAR_VIEW_BITS = 1300
 NCAR = 2
+MATS = 0x010c3000                 # view i's three at MATS + 0x100 * i
+VIEW_MATS = (68, 72, 76)
+CAM_FOV = 132
+CAM_NOT_CAR = 444
+CAM_DASH = 448
+FRAME = 0x010d0000                # the frame memory
+FRAME_SIZE = 0x20000
+# The frame from its start to its end, as the game starts it each frame.
+FRESH = "FB 0 %d" % FRAME_SIZE
+H0 = 0x43c80000                   # CalculateH's answer, 400
 TICK = 0x1234567
 BUFS = 0x01100000                 # buffer k at BUFS + k * BUF_STRIDE
 BUF_STRIDE = 0x100000
@@ -1259,7 +1293,442 @@ def script(disc):
            s_physics(rnd, disc), s_cycles(rnd, disc), s_nebula(rnd, disc)]
     for n, t in ((600, "TRACKB12"), (1500, "TRACKB33")):
         sc.append(s_fx_fuzz(rnd, disc, n, disc.index(t)))
+    # RenderEffects, on a third.
+    rnd = random.Random(0xac1d3c)
+    sc += [s_render(rnd, disc), s_render_cull(rnd, disc),
+           s_render_frame(rnd, disc), s_render_turn(rnd, disc)]
+    for n, t in ((300, "TRACKB12"), (500, "TRACKB45")):
+        sc.append(s_re_fuzz(rnd, disc, n, disc.index(t)))
     return sc
+
+
+# ------------------------------------------------------------ RenderEffects
+
+ZMIN_BITS = 0x40000010            # the scenery's GS Z range, as floats
+ZMAX_BITS = 0x400ff000
+EB = 320                          # ExtraBasis
+CB = 256                          # ColourBasis
+
+
+def _bits_f(w):
+    return struct.unpack("<f", struct.pack("<I", w & M32))[0]
+
+
+def _sub(a, b):
+    return [a[i] - b[i] for i in range(3)]
+
+
+def _dot(a, b):
+    return sum(a[i] * b[i] for i in range(3))
+
+
+def _cross(a, b):
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0]]
+
+
+def _unit(a):
+    n = math.sqrt(_dot(a, a))
+    return [x / n for x in a]
+
+
+def _mul(a, b):
+    return [[sum(a[r][k] * b[k][c] for k in range(4)) for c in range(4)]
+            for r in range(4)]
+
+
+def look_at(c, t):
+    """World to view, as rows a point is times: x right, y up, z ahead."""
+    f = _unit(_sub(t, c))
+    up = [0.0, 0.0, 1.0] if abs(f[2]) < 0.99 else [0.0, 1.0, 0.0]
+    r = _unit(_cross(f, up))
+    u = _cross(r, f)
+    return [[r[0], u[0], f[0], 0.0], [r[1], u[1], f[1], 0.0],
+            [r[2], u[2], f[2], 0.0],
+            [-_dot(c, r), -_dot(c, u), -_dot(c, f), 1.0]]
+
+
+def vm(v, k, m):
+    return "VM %d %d %s" % (v, k, " ".join(h(float(m[r][c]))
+                                           for r in range(4) for c in range(4)))
+
+
+def view_lines(v, vid, c, t, fov=0x2aaa, car="null", dash=0, hpix=400.0,
+               near=0.5, far=3000.0):
+    """View v, ID vid, from c at t: its camera there, and the three
+    matrices much as eview makes them. Screen x is 2048 and hpix times x
+    over z, y the same at 7/8 and down, z the scenery's ZMIN at far to ZMAX
+    at near; the clip box is the 640 by 448 screen, near to far."""
+    wv = look_at(c, t)
+    zmin, zmax = _bits_f(ZMIN_BITS), _bits_f(ZMAX_BITS)
+    bz = (zmax - zmin) / (1.0 / near - 1.0 / far)
+    az = zmin - bz / far
+    ps = [[hpix, 0.0, 0.0, 0.0], [0.0, -hpix * 0.875, 0.0, 0.0],
+          [2048.0, 2048.0, az, 1.0], [0.0, 0.0, bz, 0.0]]
+    cb = -2.0 / (1.0 / near - 1.0 / far)
+    ca = 1.0 - cb / far
+    pc = [[hpix / 320.0, 0.0, 0.0, 0.0],
+          [0.0, hpix * 0.875 / 224.0, 0.0, 0.0],
+          [0.0, 0.0, ca, 1.0], [0.0, 0.0, cb, 0.0]]
+    return [cam(v, c[0], c[1], c[2]), "VW %d %d" % (v, vid),
+            "VC %d %04x %s %d" % (v, fov, car, dash),
+            vm(v, 0, wv), vm(v, 1, _mul(wv, pc)), vm(v, 2, _mul(wv, ps))]
+
+
+def tex_lines(disc, drefs):
+    """A texture for each data's name, then afxUpdateTextures."""
+    seen = []
+    for d in drefs:
+        t = disc.data_tex(int(d.split(".")[2]))
+        if t not in seen:
+            seen.append(t)
+    return ["TXM %08x 1" % t for t in seen[:NTXM]] + ["T"]
+
+
+def place(ref, x, y, z):
+    return ["PE %s w %d %s" % (ref, 96 + 4 * i, h(c))
+            for i, c in enumerate((x, y, z))]
+
+
+def basis(dref, off, rows):
+    """A curve's whole matrix; rows[3] is its value where the others are
+    zero."""
+    return ["PD %s w %d %s" % (dref, off + 16 * r + 4 * c, h(rows[r][c]))
+            for r in range(4) for c in range(4)]
+
+
+def flat(x, y=0.0, z=0.0, w=0.0):
+    return [[0.0] * 4, [0.0] * 4, [0.0] * 4, [x, y, z, w]]
+
+
+def particle(pref, life, angle, x, y, z, frame=0):
+    out = []
+    for off, v in ((8, life), (10, angle)):
+        out += ["PP %s b %d %02x" % (pref, off, v & 0xff),
+                "PP %s b %d %02x" % (pref, off + 1, (v >> 8) & 0xff)]
+    out += ["PP %s w %d %s" % (pref, 16 + 4 * i, h(c))
+            for i, c in enumerate((x, y, z))]
+    return out + ["PP %s b 31 %02x" % (pref, frame & 0xff)]
+
+
+def s_render(rnd, disc):
+    """RenderEffects over copies of GLOBALB's emitters near the origin,
+    from three views (IDs 1, 2 and 3) at their own angles and FOVs, as the
+    particles age: each data's own sizes, colours, sheets, angles and
+    clips, with the cars' groups and the rest."""
+    out = ["S", "I"] + load(disc, 0, 0)
+    emits = list(disc.file_emits(0))
+    picks = emits[1::5]
+    drefs = [glob_data(disc, i) for i in picks]
+    out += tex_lines(disc, drefs)
+    out += view_lines(0, 1, (0.0, -12.0, 2.0), (0.0, 0.0, 1.0), 0x2aaa)
+    out += view_lines(1, 2, (9.0, 6.0, 4.0), (0.0, 0.0, 0.5), 0x3555)
+    out += view_lines(2, 3, (-3.0, 2.0, 30.0), (0.5, 0.0, 0.0), 0x2000)
+    out += ["UIP WE", "CB 0 ffffffff", "CB 1 ffffffff", "RE WE 0", "RE FE 1"]
+    for k, i in enumerate(picks):
+        dref = drefs[k]
+        out += ["PD %s w 128 %s" % (dref, h(5000.0)),
+                "PD %s w 48 %s" % (dref, h(rnd.choice((20.0, 40.0))))]
+        out += ["CP E0.1.%d" % i, "PE r st 1"]
+        out += place("r", rnd.uniform(-3, 3), rnd.uniform(-3, 3),
+                     rnd.uniform(0, 2))
+        out += ["TR WE r %s %s" % (h(0.25), ("null", "c0", "c1")[k % 3])]
+    out += ["RE WE 0", "RE WE 1", "RE WE 2", "D"]
+    for step in range(9):
+        out += ["DT WE %s" % h((1.0 / 30, 0.1, 0.25)[step % 3]), FRESH]
+        out += ["RE WE %d" % v for v in (1, 2, 0)]
+        if step % 4 == 3:
+            out += ["DP WE"]
+    # The frontend's bases, made again from the keys.
+    out += ["FS 3", "DT FE 0", "FS 0"]
+    for step in range(3):
+        out += ["DT WE %s" % DT30, FRESH, "RE WE 0", "RE WE 2"]
+    out += ["D"]
+    return out
+
+
+def s_render_cull(rnd, disc):
+    """Which groups draw: each CarPosition with the camera in the car and
+    not, the dash drawn and not, in view 3 and not; cars hidden from a
+    view, view IDs past 31 and negative; a data with no texture; a
+    current emitter shown alone; the empty system, and view 1 starting the
+    counts again. The frame starts again before each set of draws, as the
+    game's does each frame, so none runs out."""
+    out = ["S", "I"] + load(disc, 0, 0)
+    emits = list(disc.file_emits(0))
+    picks = [emits[4], emits[20], emits[33]]
+    drefs = [glob_data(disc, i) for i in picks]
+    out += tex_lines(disc, drefs)
+    tgt = (0.0, 0.0, 0.5)
+    out += view_lines(0, 1, (0.0, -10.0, 1.5), tgt)
+    out += view_lines(1, 2, (8.0, -2.0, 3.0), tgt, 0x3000)
+    out += view_lines(2, 3, (0.0, 10.0, 1.0), tgt, 0x2800)
+    out += ["UIP WE", "RE WE 0", "RE WE 1", "RE FE 2",
+            "CB 0 ffffffff", "CB 1 ffffffff"]
+    # e0, e1 and e2: c0's group, c1's and none's.
+    for k, i in enumerate(picks):
+        out += ["PD %s w 128 %s" % (drefs[k], h(5000.0)),
+                "PD %s w 48 %s" % (drefs[k], h(30.0)),
+                "PD %s w 56 %s" % (drefs[k], h(4.0)),
+                "CP E0.1.%d" % i, "PE r st 1"] + place("r", 0.3 * k, 0.0, 0.5)
+        out += ["TR WE r %s %s" % (h(0.2), ("c0", "c1", "null")[k])]
+    out += ["DT WE %s" % DT30, "RE WE 0", "RE WE 1", "RE WE 2", "D"]
+    for pos in (0, 1, 2, 4, 5, 6, 7, 9, 10, 11, 12, 25, 26, 27, -1):
+        out += ["PD %s w 88 %s" % (drefs[0], h(pos)),
+                "PD %s w 88 %s" % (drefs[1], h(pos))]
+        for car, dash in (("null", 0), ("c0", 0), ("c0", 1), ("c1", 7)):
+            out += ["VC 0 2aaa %s %d" % (car, dash),
+                    "VC 2 2800 %s %d" % (car, dash), FRESH, "RE WE 0",
+                    "RE WE 2"]
+    out += ["PD %s w 88 0" % drefs[0], "PD %s w 88 0" % drefs[1],
+            "VC 0 2aaa null 0", "VC 2 2800 null 0"]
+    # The cars' bits.
+    for bits in ("00000002", "fffffffd", "00000008", "fffffff7", "00000000",
+                 "80000000", "00000004"):
+        out += ["CB 0 %s" % bits, FRESH, "RE WE 0", "RE WE 1", "RE WE 2"]
+    out += [FRESH, "VW 1 34", "RE WE 1", "VW 1 -1", "RE WE 1",
+            "CB 0 ffffffff", "VW 1 2"]
+    # No texture.
+    out += [FRESH, "PD %s tex null" % drefs[2], "RE WE 0",
+            "PD %s tex t0" % drefs[2], "RE WE 0"]
+    # The current emitter alone.
+    for flag, cur in (("1", "e0"), ("1", "e2"), ("80", "e1"), ("1", "null"),
+                      ("100", "e0"), ("0", "e1"), ("7f", "WE.auto.0")):
+        out += ["OS WE %s %s" % (flag, cur), FRESH, "RE WE 0", "RE WE 1"]
+    out += ["OS WE 0 null"]
+    # The counts: view 1 starts them, the others add.
+    out += [FRESH, "RE WE 1", "RE WE 2", "RE WE 1", "RE WE 0", "RE WE 2"]
+    out += [FRESH, "VW 0 0", "RE WE 0", "VW 0 3", "RE WE 0", "VW 0 1",
+            "RE WE 0"]
+    # The empty system: view 1 still clears, and no time is taken.
+    out += ["K WE", "RE WE 1", "RE WE 0", "RE WE 2", "D"]
+    return out
+
+
+def crafted(disc, k, size=1.0, angle=0.0, colour=(200.0, 100.0, 50.0, 128.0),
+            life=2.0, far=1000.0, maxpix=0.0, sw=0, sh=0):
+    """Data k's draw set by hand: its size and angle curves flat, its
+    colour flat, its life, far clip, MaxPixelSize and contact sheet."""
+    d = "D0.0.%d" % k
+    return (basis(d, EB, flat(size, angle)) + basis(d, CB, flat(*colour))
+            + ["PD %s w 56 %s" % (d, h(life)), "PD %s w 128 %s" % (d, h(far)),
+               "PD %s w 140 %s" % (d, h(maxpix)),
+               "PD %s b 25 %02x" % (d, sw & 0xff),
+               "PD %s b 26 %02x" % (d, sh & 0xff)])
+
+
+def crafted_scene(disc):
+    """GLOBALB loaded and textured, view 0 (ID 1) at (0, -10, 0) looking at
+    the origin, and GLOBALB's emitter 5's data: its texture and its curves
+    the scenario's."""
+    out = ["S", "I"] + load(disc, 0, 0)
+    d = glob_data(disc, list(disc.file_emits(0))[5])
+    out += tex_lines(disc, [d])
+    out += view_lines(0, 1, (0.0, -10.0, 0.0), (0.0, 0.0, 0.0))
+    out += view_lines(1, 2, (0.0, -10.0, 0.0), (0.0, 0.0, 0.0))
+    return out, int(d.split(".")[2])
+
+
+def s_render_frame(rnd, disc):
+    """The frame memory running out: a packet stopped at 33 words left and
+    dropped, one that ends with just 33 left and is kept, a group after a
+    dropped one, an end before the start, starts anywhere in the frame,
+    and the frame used up over several draws."""
+    out, k = crafted_scene(disc)
+    em = "E0.1.5"
+    out += crafted(disc, k)
+    out += ["MG WE %s 3" % em, "MG WE %s 2" % em]
+    for j in range(5):
+        out += particle("p%d" % j, 1024, 0, 0.1 * j - 0.2, 0.0, 0.05 * j)
+    out += ["FF 0 0", "RE WE 0"]
+    # The head group (the last made) has p3 and p4; the next p0 to p2.
+    for n in (0, 1, 2, 3, 4, 5):
+        for extra in (-5, -4, -1, 0, 1, 3, 4):
+            out += ["FB 0 %d" % (16 + 80 * n + 132 + extra), "RE WE 0"]
+    for pos in (4, 8, 12, 0x100, 0x1fe00):
+        out += ["FB %d %d" % (pos, min(FRAME_SIZE, pos + 600)), "RE WE 0",
+                "RE WE 1"]
+    out += ["FB 512 256", "RE WE 0", "FB 512 512", "RE WE 0",
+            "FB 512 527", "RE WE 0", "FB 512 528", "RE WE 0"]
+    out += ["FB 0 3000", "FF 1 12345678"]
+    for _ in range(8):
+        out += ["RE WE 0", "RE WE 1"]
+    out += ["FF 0 0", "D"]
+    return out
+
+
+def s_render_turn(rnd, disc):
+    """The sprite: turned and not, its angle's step each way and its
+    wraps; sizes about a pixel, at and past MaxPixelSize and the far clip;
+    colours past 0 and 255; every contact sheet's width and height; ages
+    past the life; places off the screen, whose corners saturate; and
+    acidz."""
+    out, k = crafted_scene(disc)
+    em = "E0.1.5"
+    out += crafted(disc, k)
+    out += ["MG WE %s 6" % em]
+    lives = (0, 1, 512, 1024, 2047, 0x7fff)
+    for j in range(6):
+        out += particle("p%d" % j, lives[j], 0, 0.3 * j - 0.75, 0.0,
+                        0.1 * j - 0.2, j)
+    out += ["RE WE 0", "RE WE 1"]
+    angles = (0, 1, 2, 3, 0x7fff, 0x8000, 0xfffe, 0xffff, 0x4000, 0x1234)
+    turns = (0.0, 0.5, -0.5, 1.0, -1.0, 2.0, -2.0, 3.7, -3.7, 65536.0,
+             70000.5, -1e10, 1e10, 16384.0)
+    for t in turns:
+        out += basis("D0.0.%d" % k, EB, flat(1.0, t))
+        for j in range(6):
+            out += ["PP p%d b 10 %02x" % (j, rnd.choice(angles) & 0xff),
+                    "PP p%d b 11 %02x" % (j, rnd.choice(angles) >> 8)]
+        out += ["RE WE 0"]
+    for j, a in enumerate((0, 1, 0xffff, 2, 0xfffe, 0)):
+        out += ["PP p%d b 10 %02x" % (j, a & 0xff),
+                "PP p%d b 11 %02x" % (j, a >> 8)]
+    for t in (0.0, 1.0, -2.0, 2.0, 0.999):
+        out += basis("D0.0.%d" % k, EB, flat(1.0, t)) + ["RE WE 0"]
+    # Sizes: vv.z is 10 at the origin, so a pixel is 0.025.
+    for size, maxpix in ((-1.0, 0.0), (0.0, 0.0), (0.01, 0.0), (0.025, 0.0),
+                         (0.0251, 0.0), (1.0, 4.0), (12.8, 0.0), (100.0, 0.0),
+                         (100.0, 1e6), (5.0, -0.0), (5.0, 1.0), (5.0, 1.5),
+                         (3e9, 1e30)):
+        for t in (0.0, 0.75):
+            out += crafted(disc, k, size=size, angle=t, maxpix=maxpix)
+            out += ["RE WE 0"]
+    for far in (10.0, 10.001, 0.0, -5.0, 9.5, 1e30):
+        out += crafted(disc, k, far=far) + ["RE WE 0"]
+    # Colours.
+    for col in ((300.0, -5.0, 255.9, 0.5), (1e10, -1e10, 128.0, 64.99),
+                (255.0, 0.0, 254.99, 255.01), (-0.0, -0.5, 0.99, 1.0),
+                (256.0, -1.0, 256.0, -1.0), (-1.0, 256.0, 255.5, -0.99)):
+        out += crafted(disc, k, colour=col) + ["RE WE 0"]
+    # The curves at their ages, not flat.
+    out += basis("D0.0.%d" % k, EB, [[2.0, 100.0, 0.0, 0.0],
+                                     [-3.0, -50.0, 0.0, 0.0],
+                                     [1.5, 7.0, 0.0, 0.0],
+                                     [0.5, 3.0, 0.0, 0.0]])
+    out += basis("D0.0.%d" % k, CB, [[100.0, -200.0, 30.0, 400.0],
+                                     [50.0, 300.0, -40.0, -300.0],
+                                     [-20.0, 10.0, 80.0, 90.0],
+                                     [10.0, 20.0, 30.0, 40.0]])
+    for life in (2.0, 0.5, 1.0, 60.0, -1.0):
+        out += ["PD D0.0.%d w 56 %s" % (k, h(life)), "RE WE 0"]
+    out += ["PD D0.0.%d w 56 %s" % (k, h(2.0))]
+    # Ages past the life's start, from a Life read signed.
+    out += ["PP p2 b 9 ff", "RE WE 0", "PP p2 b 9 80", "RE WE 0",
+            "PP p2 b 9 02"]
+    # Contact sheets.
+    for sw, sh in ((1, 1), (2, 3), (3, 2), (4, 0), (0, 4), (7, 1), (8, 8),
+                   (31, 1), (1, 31), (32, 32), (33, 0), (0, 33), (63, 64),
+                   (64, 63), (0x7f, 0x80), (0x80, 0x7f), (0xc0, 0xe1),
+                   (0xff, 0xff), (0xe0, 0x20)):
+        out += crafted(disc, k, sw=sw, sh=sh)
+        for j, fr in enumerate((0, 1, 5, 0x37, 0x80, 0xff)):
+            out += ["PP p%d b 31 %02x" % (j, fr)]
+        out += ["RE WE 0"]
+    out += crafted(disc, k)
+    # Off the screen, with nothing clipped: corners that saturate.
+    out += [vm(0, 1, [[0.0] * 4] * 4)]
+    for x, z in ((1e6, 0.0), (-1e6, 3.0), (2e7, 0.0), (-2e7, -2e7),
+                 (1e9, 1e9), (0.0, 7e6), (-7e6, 0.0), (5e7, 5e7)):
+        out += particle("p0", 1024, 0x4000, x, 0.0, z)
+        out += particle("p1", 1024, 0, -x, 0.0, -z)
+        out += ["RE WE 0"]
+    # Behind the camera and beside it.
+    out += particle("p0", 1024, 0, 0.0, -20.0, 0.0)
+    out += particle("p1", 1024, 0, 3.0, -10.5, 1.0)
+    out += ["RE WE 0"]
+    # acidz.
+    for az in (0, 1, 3, 4, 27, 31, 32, 33, -1, -28):
+        out += ["AZ %d" % az, "RE WE 0"]
+    out += ["AZ 4", "D"]
+    return out
+
+
+def s_re_fuzz(rnd, disc, n, track):
+    """TriggerEmitter, DoTimeStep and RenderEffects in any order, with the
+    views moved, their IDs, cameras and cars' bits changed, the datas'
+    draws changed, the frame moved and acidz."""
+    out = ["S", "I"] + load(disc, 0, 0) + load(disc, 1, track)
+    gl = list(disc.file_emits(0))
+    datas = ["D0.0.%d" % j for j in disc.file_datas(0)]
+    texs = sorted({disc.data_tex(j) for j in disc.file_datas(0)})
+    out += ["TXM %08x %d" % (t, 0 if k % 9 == 0 else 1)
+            for k, t in enumerate(texs[:NTXM])] + ["T"]
+    out += ["PD %s w 128 %s" % (d, h(400.0)) for d in datas[::3]]
+    for v, vid in enumerate((1, 2, 3)):
+        out += view_lines(v, vid, (rnd.uniform(-15, 15), rnd.uniform(-15, 15),
+                                   rnd.uniform(0, 8)), (0.0, 0.0, 0.5))
+    out += ["UIP WE", "CB 0 ffffffff", "CB 1 ffffffff"]
+    copies = 0
+    for _ in range(n):
+        k = rnd.random()
+        if k < 0.12:
+            i = rnd.choice(gl)
+            out += ["CP E0.1.%d" % (i - gl[0]), "PE r st 1"]
+            out += place("r", rnd.uniform(-4, 4), rnd.uniform(-4, 4),
+                         rnd.uniform(0, 3))
+            out += ["TR WE r %s %s" % (h(rnd.choice((0.1, 0.2, 0.4))),
+                                       rnd.choice(("null", "c0", "c1")))]
+            copies += 1
+        elif k < 0.22:
+            if copies:
+                out += ["TR WE e%d %s %s" % (rnd.randrange(copies),
+                                             h(rnd.choice((0.05, 0.1))),
+                                             rnd.choice(("null", "c0", "c1")))]
+        elif k < 0.40:
+            out += ["DT WE %s" % h(rnd.choice((1.0 / 30, 1.0 / 60, 0.1, 0.0)))]
+        elif k < 0.70:
+            out += ["RE WE %d" % rnd.randrange(3)]
+        elif k < 0.74:
+            v = rnd.randrange(3)
+            out += view_lines(v, rnd.choice((0, 1, 2, 3, 3, 5)),
+                              (rnd.uniform(-15, 15), rnd.uniform(-15, 15),
+                               rnd.uniform(-1, 8)),
+                              (rnd.uniform(-2, 2), rnd.uniform(-2, 2),
+                               rnd.uniform(0, 2)),
+                              rnd.choice((0x2000, 0x2aaa, 0x3800)),
+                              rnd.choice(("null", "c0", "c1")),
+                              rnd.choice((0, 0, 1)))
+            out += ["UIP WE"]
+        elif k < 0.78:
+            out += ["CB %d %08x" % (rnd.randrange(2), rnd.choice(
+                (0xffffffff, 0xffffffff, 0xfffffff7, 0x2, rnd.randrange(1 << 32))))]
+        elif k < 0.86:
+            d = rnd.choice(datas)
+            f = rnd.choice(("pos", "max", "far", "sheet", "life"))
+            if f == "pos":
+                out += ["PD %s w 88 %s" % (d, h(rnd.choice((0, 1, 5, 6, 9, 10,
+                                                            11, 26, 3))))]
+            elif f == "max":
+                out += ["PD %s w 140 %s" % (d, h(rnd.choice((0.0, 8.0, 64.0,
+                                                             1000.0))))]
+            elif f == "far":
+                out += ["PD %s w 128 %s" % (d, h(rnd.choice((5.0, 15.0, 400.0))))]
+            elif f == "sheet":
+                out += ["PD %s b %d %02x" % (d, rnd.choice((25, 26)),
+                                             rnd.choice((0, 1, 2, 3, 4)))]
+            else:
+                out += ["PD %s w 56 %s" % (d, h(rnd.choice((0.5, 1.0, 3.0))))]
+        elif k < 0.89:
+            if copies and rnd.random() < 0.5:
+                out += ["OS WE %s e%d" % (rnd.choice(("1", "0")),
+                                          rnd.randrange(copies))]
+            else:
+                out += ["OS WE 0 null"]
+        elif k < 0.92:
+            pos = rnd.choice((0, 0, 64, 1000))
+            out += ["FB %d %d" % (pos, rnd.choice((FRAME_SIZE, pos + 2000,
+                                                   pos + 400, pos + 148)))]
+        elif k < 0.94:
+            out += ["AZ %d" % rnd.choice((4, 4, 0, 6, 31))]
+        elif k < 0.97:
+            out += ["DP WE"]
+        elif k < 0.98:
+            out += ["K WE"]
+        else:
+            out += ["D"]
+    out += ["DP WE", "D"]
+    return out
 
 
 def encode(scenarios):
@@ -1310,6 +1779,8 @@ class Model(object):
         e.stub(E_GET_VIEW, self.st_get_view)
         e.stub(B_TICKER, self.st_ticker)
         e.stub(B_TICKER_DIFF, self.st_ticker_diff)
+        e.stub(CALC_H, self.st_calc_h)
+        e.stub(ATTACH, self.st_attach)
         e.hook(TRIGGER, lambda em: em.put32(
             (em.reg[29] - TRIGGER_FRAME + 204) & M32, 0))
         e.hook(DO_STEP, lambda em: em.write(
@@ -1326,6 +1797,7 @@ class Model(object):
         self.tex_hash = []
         self.txm = []
         self.ticker = 0
+        self.h_value = H0
 
     def emit(self, s):
         self.out.append(s)
@@ -1423,6 +1895,16 @@ class Model(object):
         d = (self.arg(1) - self.arg(0)) & M32
         self.e.fpr[0] = fb(struct.unpack("<f", struct.pack("<f", float(d)))[0]
                            * 0.5)
+
+    def st_calc_h(self, em):
+        self.emit("  calch %04x" % (self.arg(0) & 0xffff))
+        self.e.fpr[0] = self.h_value
+
+    def st_attach(self, em):
+        tex, data, qwc = self.arg(0), self.arg(1), self.arg(2) & 0xffff
+        self.emit("  attach %s z %s at %+d qwc %d:%s" % (
+            self.nm(tex), fx(self.e.fpr[12]), s32(data - FRAME), qwc,
+            "".join(" %08x" % self.w(data + 4 * i) for i in range(qwc * 4))))
 
     def st_free(self, em):
         p, slot = self.arg(0), self.arg(1)
@@ -1785,8 +2267,20 @@ class Model(object):
         e.write(VIEWS, bytes(0x100 * NVIEW))
         e.write(CAMS, bytes(0x200 * NVIEW))
         e.write(CARS, bytes(0x800 * NCAR))
+        e.write(MATS, bytes(0x100 * NVIEW))
+        for v in range(NVIEW):
+            for k in range(3):
+                self.put(VIEWS + 0x100 * v + VIEW_MATS[k],
+                         MATS + 0x100 * v + 0x40 * k)
         self.ticker = 0
         self.put(G_FLOW, 0)
+        self.h_value = H0
+        self.put(G_ACIDZ, 4)
+        self.fill(FRAME, FRAME_SIZE)
+        self.put(G_POS, FRAME)
+        self.put(G_END, FRAME + FRAME_SIZE)
+        self.put(G_FAILED, 0)
+        self.put(G_FAIL_AMOUNT, 0)
 
     def sys_tok(self, t):
         return FE if t == "FE" else WE
@@ -1922,6 +2416,51 @@ class Model(object):
         if c == "FS":
             self.put(G_FLOW, int(t[1], 0))
             return
+        if c == "VW":
+            self.put(VIEWS + 0x100 * int(t[1], 0), int(t[2], 0) & M32)
+            return
+        if c == "VM":
+            a = MATS + 0x100 * int(t[1], 0) + 0x40 * int(t[2], 0)
+            for i in range(16):
+                self.put(a + 4 * i, int(t[3 + i], 16))
+            return
+        if c == "VC":
+            v = int(t[1], 0)
+            cam = CAMS + 0x200 * v
+            self.e.write(cam + CAM_FOV, struct.pack("<H", int(t[2], 16)))
+            self.put(cam + CAM_NOT_CAR, self.ref(t[3]))
+            self.put(cam + CAM_DASH, int(t[4], 0) & M32)
+            self.put(VIEWS + 0x100 * v + VIEW_CAMERA, cam)
+            return
+        if c == "CB":
+            self.put(CARS + 0x800 * int(t[1], 0) + CAR_VIEW_BITS, int(t[2], 16))
+            return
+        if c == "OS":
+            sy = self.sys_tok(t[1])
+            self.e.write(sy + 77, bytes([int(t[2], 16) & 0xff]))
+            self.put(sy + 64, self.ref(t[3]))
+            return
+        if c == "FB":
+            pos, end = int(t[1], 0), int(t[2], 0)
+            if not (0 <= pos <= FRAME_SIZE and 0 <= end <= FRAME_SIZE):
+                raise SystemExit("frame offsets %d %d" % (pos, end))
+            self.put(G_POS, FRAME + pos)
+            self.put(G_END, FRAME + end)
+            return
+        if c == "FF":
+            self.put(G_FAILED, int(t[1], 0) & M32)
+            self.put(G_FAIL_AMOUNT, int(t[2], 16))
+            return
+        if c == "AZ":
+            self.put(G_ACIDZ, int(t[1], 0) & M32)
+            return
+        if c == "H":
+            self.h_value = int(t[1], 16)
+            return
+        if c == "PP":
+            pa = self.ref(t[1])
+            self.set_tail(pa, 8, t[2], t[3:])
+            return
         if c == "DP":
             s = self.sys_tok(t[1])
             self.pparticles("FE" if s == FE else "WE", s)
@@ -2040,6 +2579,13 @@ class Model(object):
             self.fill(s, SYS_SIZE)
             self.call(SYS_CTOR, s)
             self.psystem("FE" if s == FE else "WE", s)
+        elif c == "RE":
+            s = self.sys_tok(t[1])
+            self.call(RENDER, s, VIEWS + 0x100 * int(t[2], 0))
+            self.emit("  re nv %d rt %s pos %+d fail %d %08x" % (
+                s32(self.w(s + 84)), fx(self.w(s + 88)),
+                s32(self.w(G_POS) - FRAME), s32(self.w(G_FAILED)),
+                self.w(G_FAIL_AMOUNT)))
         else:
             raise SystemExit("bad op %r" % (t,))
         self.pshort()
@@ -2464,8 +3010,10 @@ MUTATIONS = [
     M("ct-pne", "    s->PrintNearbyEmitters = 0;\n", ""),
     M("ct-osc", "    s->OnlyShowCurrentEmitter = 0;\n", ""),
     M("ct-num", "    s->NumAutoEmitters = 0;\n", ""),
-    M("ct-nvp", "    s->NumVisibleParticles = 0;\n", ""),
-    M("ct-rt", "    s->RenderTime = 0.0f;\n", ""),
+    M("ct-nvp", "    s->NumAutoEmitters = 0;\n    s->NumVisibleParticles = 0;\n",
+      "    s->NumAutoEmitters = 0;\n"),
+    M("ct-rt", "    s->RenderTime = 0.0f;\n    s->UpdateTime = 0.0f;\n",
+      "    s->UpdateTime = 0.0f;\n"),
     M("ct-ut", "    s->UpdateTime = 0.0f;\n", ""),
     M("ct-ip", "    s->UpdateTime = 0.0f;\n",
       "    s->UpdateTime = 0.0f;\n    s->InterestPoints[0].x = 0.0f;\n"),
@@ -2844,6 +3392,170 @@ MUTATIONS = [
       rel=ACIDFX),
     M("herm-ctrl", "eMulMatrix(o, &b, ctrl);", "eMulMatrix(o, ctrl, &b);",
       rel=ACIDFX),
+    # RenderEffects
+    M("re-reset-id", "if (view->ID == 1) {",
+      "if (view->ID == 2) {"),
+    M("re-reset-time", "        s->RenderTime = 0.0f;\n",
+      ""),
+    M("re-reset-nv", "        s->NumVisibleParticles = 0;\n    }",
+      "    }"),
+    M("re-empty", "        return;\n    wv = view->WorldViewMatrix;",
+      "        ;\n    wv = view->WorldViewMatrix;"),
+    M("re-fov", "CalculateH(cam->CurrentKey.FieldOfView)",
+      "CalculateH(0x2aaa)"),
+    M("re-only-sign", "(int8_t)s->OnlyShowCurrentEmitter != 0",
+      "s->OnlyShowCurrentEmitter == 1"),
+    M("re-only-cmp", "if (only != NULL && g->Emitter != only)",
+      "if (only != NULL && g->Emitter == only)"),
+    M("re-not-car", "not_car = cam->CarNotToRender;",
+      "not_car = NULL;"),
+    M("re-view-bit", "if (((bits >> (view->ID & 31)) & 1u) == 0)",
+      "if (((bits >> (view->ID & 31)) & 3u) == 0)"),
+    M("re-view-bit-not", "if (((bits >> (view->ID & 31)) & 1u) == 0)",
+      "if (((bits >> (view->ID & 31)) & 1u) != 0)"),
+    M("re-tires-dash", "if (not_car == car && cam->RenderDash != 0)",
+      "if (not_car == car)"),
+    M("re-tire-fr", "case 6:                         // TIRE_FR",
+      "case 7:                         // TIRE_FR"),
+    M("re-front-tires", "case 1:                         // FRONT_TIRES",
+      "case 2:                         // FRONT_TIRES"),
+    M("re-engine", "if (view->ID != 3 && not_car == car)",
+      "if (view->ID != 3 || not_car == car)"),
+    M("re-windshield", "case 11:                        // WINDSHIELD",
+      "case 12:                        // WINDSHIELD"),
+    M("re-plate", "case 26:                        // LICENSE_PLATE_REAR",
+      "case 27:                        // LICENSE_PLATE_REAR"),
+    M("re-exhaust", "if (view->ID == 3 || not_car == car)",
+      "if (view->ID == 3 && not_car == car)"),
+    M("re-inv-life", "inv_life = 1.0f / d->Life;",
+      "inv_life = d->Life;"),
+    M("re-no-tex", "if (tex == NULL)\n            continue;",
+      "if (tex == NULL)\n            ;"),
+    M("re-cb", "cb = d->ColourBasis;",
+      "cb = d->ExtraBasis;"),
+    M("re-max-default", "max_size = 512.0f;",
+      "max_size = 256.0f;"),
+    M("re-row-sw", "row_mask = ~(uint32_t)(~(uint64_t)0 << (sh & 63));",
+      "row_mask = ~(uint32_t)(~(uint64_t)0 << (sw & 63));"),
+    M("re-col-31", "col_mask = ~(uint32_t)(~(uint64_t)0 << (sw & 63));",
+      "col_mask = ~(uint32_t)(~(uint64_t)0 << (sw & 31));"),
+    M("re-dv-15", "dv = 1.0f / (float)(int32_t)((uint32_t)1 << (sh & 31));",
+      "dv = 1.0f / (float)(int32_t)((uint32_t)1 << (sh & 15));"),
+    M("re-du-unsigned", "du = 1.0f / (float)(int32_t)((uint32_t)1 << (sw & 31));",
+      "du = 1.0f / (float)((uint32_t)1 << (sw & 31));"),
+    M("re-header", "p = pkt + 16;",
+      "p = pkt + 32;"),
+    M("re-loop-32", "acid_words_left(end, p) >= 33;",
+      "acid_words_left(end, p) >= 32;"),
+    M("re-after-32", "if (count == 0 || acid_words_left(end, p) < 33)",
+      "if (count == 0 || acid_words_left(end, p) < 32)"),
+    M("re-count-0", "if (count == 0 || acid_words_left(end, p) < 33)",
+      "if (count < 0 || acid_words_left(end, p) < 33)"),
+    M("re-words-unsigned", "return (int32_t)(end - p) >> 2;",
+      "return (int32_t)((uint32_t)(end - p) >> 2);"),
+    M("re-t-one", "t = 1.0f - (float)(int16_t)pa->Life",
+      "t = (float)(int16_t)pa->Life"),
+    M("re-t-scale", "* 0.0009765625f * inv_life",
+      "* 0.001f * inv_life"),
+    M("re-t-signed", "(float)(int16_t)pa->Life",
+      "(float)pa->Life"),
+    M("re-clip", "if (eGetClipFlags(&pos, wc) != 0)",
+      "if (eGetClipFlags(&pos, wc) == 0)"),
+    M("re-wc-ws", "wc = view->WorldClipMatrix;",
+      "wc = view->WorldScreenMatrix;"),
+    M("re-rtp-wv", "eRotTransPers(&sc, ws, &pos);",
+      "eRotTransPers(&sc, wv, &pos);"),
+    M("re-size-pos", "if (0.0f < ex.x)",
+      "if (1.0f < ex.x)"),
+    M("re-size-z", "size = ex.x * h / vv.z;",
+      "size = ex.x * h;"),
+    M("re-size-max", "size = max_size;",
+      "size = max_size * 0.5f;"),
+    M("re-size-1", "if (!(1.0f < size) || !(vv.z < far_clip))",
+      "if (!(0.0f < size) || !(vv.z < far_clip))"),
+    M("re-far-eq", "if (!(1.0f < size) || !(vv.z < far_clip))",
+      "if (!(1.0f < size) || !(vv.z <= far_clip))"),
+    M("re-ang-odd", "if (a & 1)",
+      "if (a & 2)"),
+    M("re-ang-sub", "a = (a - ((uint32_t)ee_trunc_w(ex.y) & 0xffffu)) & 0xffffu;",
+      "a = (a + ((uint32_t)ee_trunc_w(ex.y) & 0xffffu)) & 0xffffu;"),
+    M("re-ang-add-mask", "a = (a + ((uint32_t)ee_trunc_w(ex.y) & 0xffffu)) & 0xffffu;",
+      "a = (a + ((uint32_t)ee_trunc_w(ex.y) & 0x7fffu)) & 0xffffu;"),
+    M("re-z-mask", "acid_bits(sc.z) & 0x0fffffffu",
+      "acid_bits(sc.z) & 0x7fffffffu"),
+    M("re-acidz", ">> (acidz & 31));",
+      ">> (acidz & 15));"),
+    M("re-sy", "sy = ee_trunc_w(sc.y);",
+      "sy = ee_trunc_w(sc.x);"),
+    M("re-hy", "ee_trunc_w(size * (0.875f * 8.0f))",
+      "ee_trunc_w(size * 8.0f)"),
+    M("re-x1", "x[1] = x16 + hx;",
+      "x[1] = x16 - hx;"),
+    M("re-y2", "y[2] = y16 + hy;",
+      "y[2] = y16 - hy;"),
+    M("re-ang-step", "* 9.58738019107841e-05f;",
+      "* 9.5873e-05f;"),
+    M("re-quarter", "eSin(ang + 1.57079649f);",
+      "eSin(ang + 1.5707964f);"),
+    M("re-sn", "float sn = eSin(ang);",
+      "float sn = eSin(-ang);"),
+    M("re-fx-unsigned", "float fx = (float)(int32_t)((uint32_t)sx << 4);",
+      "float fx = (float)((uint32_t)sx << 4);"),
+    M("re-fy-shift", "float fy = (float)(int32_t)((uint32_t)sy << 4);",
+      "float fy = (float)(int32_t)((uint32_t)sy << 3);"),
+    M("re-corner1", "acid_corner(&x[1], &y[1], c, sn, size, -size, fx, fy);",
+      "acid_corner(&x[1], &y[1], c, sn, -size, size, fx, fy);"),
+    M("re-corner-sn", "float px = c * u + -sn * v;",
+      "float px = c * u + sn * v;"),
+    M("re-corner-7", "*y = (uint32_t)ee_trunc_w(py * 7.0f + fy);",
+      "*y = (uint32_t)ee_trunc_w(py * 8.0f + fy);"),
+    M("re-depth", "depth_sum += (float)ee_trunc_w(vv.z);",
+      "depth_sum += vv.z;"),
+    M("re-avg", "avg = depth_sum / (float)count;",
+      "avg = depth_sum;"),
+    M("re-rgba-order", "rgba = acid_byte(col.x) | acid_byte(col.y) << 8",
+      "rgba = acid_byte(col.y) | acid_byte(col.x) << 8"),
+    M("re-byte-hi", "if (255.0f < c)\n        c = 255.0f;",
+      "if (256.0f < c)\n        c = 255.0f;"),
+    M("re-byte-lo", "if (c < 0.0f)\n        c = 0.0f;",
+      "if (c < -1.0f)\n        c = 0.0f;"),
+    M("re-u0-row", "u0 = (float)(int32_t)(pa->Frame & col_mask) * du;",
+      "u0 = (float)(int32_t)(pa->Frame & row_mask) * du;"),
+    M("re-v0-sh", "(((uint32_t)pa->Frame >> (sw & 31))",
+      "(((uint32_t)pa->Frame >> (sh & 31))"),
+    M("re-u1", "u1 = u0 + du;",
+      "u1 = u0 + dv;"),
+    M("re-st-order", "w[4 + i * 4] = acid_bits(i & 1 ? u1 : u0);",
+      "w[4 + i * 4] = acid_bits(i & 2 ? u1 : u0);"),
+    M("re-xyz-mask", "w[6 + i * 4] = y[i] << 16 | (x[i] & 0xffffu);",
+      "w[6 + i * 4] = y[i] << 16 | x[i];"),
+    M("re-prim", "w[0] = 0x54;",
+      "w[0] = 0x55;"),
+    M("re-q", "w[3] = 0x3f800000u;",
+      "w[3] = 0;"),
+    M("re-eop", "tag[0] = (uint32_t)count | 0x8000u;",
+      "tag[0] = (uint32_t)count;"),
+    M("re-total", "total += count;",
+      "total += 1;"),
+    M("re-pos", "CurrentBufferPos = p;",
+      "CurrentBufferPos = p + 16;"),
+    M("re-qwc", "(uint16_t)(count * 5 + 1)",
+      "(uint16_t)(count * 5)"),
+    M("re-attach-z", "gEAttachDirectDataFn(tex, avg, pkt,",
+      "gEAttachDirectDataFn(tex, depth_sum, pkt,"),
+    M("re-time", "s->RenderTime += bGetTickerDifference(start, bGetTicker());",
+      "s->RenderTime = bGetTickerDifference(start, bGetTicker());"),
+    M("re-nv", "s->NumVisibleParticles += total;",
+      "s->NumVisibleParticles = total;"),
+    # hermite_parameter
+    M("hp-cube", "    v.x = t2 * t;\n",
+      "    v.x = t2;\n", rel=ACIDFX),
+    M("hp-z", "    v.z = t;\n    v.w = 1.0f;",
+      "    v.z = t2;\n    v.w = 1.0f;", rel=ACIDFX),
+    M("hp-w", "    v.z = t;\n    v.w = 1.0f;",
+      "    v.z = t;\n    v.w = 0.0f;", rel=ACIDFX),
+    M("hp-y", "    v.y = t2;\n",
+      "    v.y = t;\n", rel=ACIDFX),
 ]
 
 EQUIVALENT = {
@@ -2853,6 +3565,10 @@ EQUIVALENT = {
                   "63 bytes stop short of it",
     "aa-disabled": "a State of 2 with a data reaches the last branch, which "
                    "sets it to 2 again and adds it to the tail",
+    "re-loop-32": "a particle written with 32 words left leaves 12, so the "
+                  "packet is dropped as it is when the loop stops at 32; "
+                  "the words past CurrentBufferPos are written again before "
+                  "any packet is attached",
 }
 
 

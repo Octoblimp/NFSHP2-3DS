@@ -1,4 +1,4 @@
-# The effect system (AcidFXE.obj, step 16, SC-3a and SC-3b)
+# The effect system (AcidFXE.obj, step 16, SC-3a to SC-3c)
 
 The effect system makes the game's particles: smoke from the tyres,
 sparks, water, fire, the munitions and the nebula behind the car in the
@@ -10,8 +10,9 @@ SC-3a is its data half: the slot pools, the emitter datas and emitters a
 file brings, LoaderTable slot 6, the lookups, the copies the cars take,
 and an AcidEffectSystem's auto emitters and active groups. SC-3b makes
 and moves the particles: TriggerEmitter, DoTimeStep and
-UpdateInterestPoints. Nothing draws one yet: RenderEffects is SC-3c, and
-the car select's nebula is SC-3d.
+UpdateInterestPoints. SC-3c draws them: RenderEffects builds each
+group's GS packet, and the device's trackview turns the packet into
+sprites. The car select's nebula is SC-3d.
 
 The port is `3DS Files/source/acidsys.{c,h}`. `tools/afx_check.py` runs
 every function here on the retail image in mipsemu, and
@@ -301,6 +302,69 @@ same code) gives `o = H × M × inverse(T) × ctrl`. T's rows are
 (3 2 1 0), and H is Hermite's, (2 -2 1 1) (-3 3 -2 -1) (0 0 1 0)
 (1 0 0 0). Each product is an eMulMatrix, M × inverse(T) first.
 
+## Drawing (SC-3c)
+
+**RenderEffects** (0x00128da0) runs from eDisplayFrame's view loop
+(0x001134a4), FrameEffects' and then WorldEffects', after the light
+flares and before AttachSolidPolys. The envmap views draw none.
+1. View 1 zeroes RenderTime and NumVisibleParticles. Then nothing
+   happens without an active group.
+2. It reads the view's WorldView, WorldClip and WorldScreen matrices,
+   its camera's CarNotToRender and RenderDash, and CalculateH of the
+   camera's FieldOfView.
+3. A group with a car draws only if bit `view->ID` of the car's
+   TheOverrideRenderingPosition.VisibleViewBits is set. By the data's
+   CarPosition:
+   - the front tyres' (1, 5, 6) not from inside this car with the dash
+     drawn;
+   - the engine's, windshield's and rear plate's (9, 11, 26) not from
+     inside this car, unless the view is 3;
+   - the exhaust's (10) not from inside this car, nor in view 3.
+4. A data with no Texture draws nothing, and with
+   OnlyShowCurrentEmitter set only CurrentEmitter's groups draw.
+5. Each particle, while 33 or more words are left before
+   CurrentBufferEnd:
+   - its age `t = 1 - Life / 1024 / data.Life`, Life read signed;
+   - it is dropped if eGetClipFlags gives anything for it;
+   - its view position by WorldView, its screen position by
+     eRotTransPers through WorldScreen;
+   - `hermite_parameter(ExtraBasis, t)`: x is the size, y the turn;
+   - its size, `x × H / view z` when x is over 0, at most MaxPixelSize
+     (512 when that is 0); it draws if over 1 and nearer than FarClip;
+   - its angle in BAMs, its own less the turn when its bit 0 is set and
+     plus it when not;
+   - the corners: unturned, ±size×8 across and ±size×7 down (the GS's
+     pixels are 7/8 as tall), round the screen point ×16; turned, the
+     two rows of the turn (by eSin of the angle and of the angle plus
+     π/2) times the corner, x by 8 and y by 7, then the centre, all
+     truncated;
+   - its Z, the bits of the screen z under the top four, shifted down
+     acidz (gp-23440, 4, only ever read);
+   - its colour, `hermite_parameter(ColourBasis, t)`, each lane cut to
+     0..255 and truncated (vftoi0);
+   - its cell on the contact sheet: the column is Frame's low
+     ContactSheetW bits, the row the next ContactSheetH bits, each
+     cell `1/2^W` wide and `1/2^H` tall.
+6. Each sprite is 80 bytes: PRIM 0x54 (a strip of two triangles,
+   textured, alpha blended, no fog), RGBAQ with Q 1, then ST and XYZ2
+   for the corners -,- / +,- / -,+ / +,+. The packet's GIF tag is 16
+   bytes, `NLOOP | 0x8000`, `0xa42a4000`, `0x42424210`, `0x42`: a
+   REGLIST of ten registers.
+7. A group with no sprites, or one that stopped with fewer than 33 words
+   left, is dropped whole. Otherwise the tag is written, a write past
+   CurrentBufferEnd sets FrameMallocFailed and adds the overrun to
+   FrameMallocFailAmount, CurrentBufferPos moves on, and
+   eAttachDirectData (0x00110378) takes the texture, the mean of the
+   sprites' truncated view depths, the packet and its quadwords (5 a
+   sprite and 1).
+8. RenderTime gains the ticks, NumVisibleParticles the sprites.
+
+**hermite_parameter** (0x00126af8) is `(t³, t², t, 1)` times the
+matrix, by eMulVector4, with t³ made as t² × t.
+
+The port's seam for eAttachDirectData is `gEAttachDirectDataFn`, which
+the device's trackview fills (below).
+
 ## On the device
 
 - `sinit_run` calls `acid_static_init` as entry 9 (`sinit_check`: 24
@@ -406,12 +470,44 @@ can't change what either side does:
 - `aa-disabled`: a DISABLED emitter with a data reaches the last branch,
   which sets it DISABLED again and adds it to the tail.
 
+SC-3c adds RenderEffects, with hermite_parameter, eRotTransPers,
+eGetClipFlags and eSin run as shipped. Each view gets an ID, its three
+matrices and its camera's FieldOfView, CarNotToRender and RenderDash
+from the script. CalculateH prints the FOV it is given and answers the
+script's H. The frame memory is 128 KB, filled with 0xa5 at each reset,
+and CurrentBufferPos and End, FrameMallocFailed and its amount, and acidz
+are the script's. eAttachDirectData prints the texture, the depth, where
+the packet is and every word of it. A particle's fields can be written
+at their retail offsets. VU0's vftoi0 is new in mipsemu. There are six
+more scenarios:
+- GLOBALB's emitters copied near the origin, with cars' groups, clipped
+  and not;
+- which groups draw: each CarPosition with the camera in the car and
+  out, the dash, each view, the cars' bits, no texture, the current
+  emitter alone, and the counts;
+- the frame memory running out: a packet stopped at 33 words left, and
+  the frame used up over several draws;
+- the sprite: turned and not, the turn each way, sizes about a pixel
+  and MaxPixelSize, colours past 0..255, the curves at their ages, ages
+  from a Life read signed, contact sheets, corners off the screen that
+  saturate, particles behind and beside the camera, and acidz;
+- two fuzz runs of 300 and 500 ops over TRACKB12 and TRACKB45 that
+  trigger, step and draw in any order, with the draws changed, the frame
+  moved and acidz.
+
+All 30 scenarios agree: 20624 ops, 97040 lines, 0 differ. The mutation
+pass gives 394 mutants: 390 caught and 4 equivalent, the three above and
+`re-loop-32`: a particle written with 32 words left leaves 12, so the
+packet is dropped as it is when the loop stops at 32, and the words past
+CurrentBufferPos are written again before any packet is attached.
+
 `tools/loadertable_check.py` runs slot 6 with the other loaders: the
 demo image's 178 ops and the retail image's 37375, 0 differ on both.
 
 ## Still open
 
-- **SC-3c:** RenderEffects (0x00128da0) and its draw on the device.
+- **SC-3c's draw on the device:** the trackview's eAttachDirectData
+  and a sprite batch in georender.
 - **SC-3d:** the car select's nebula, 20 emitters of XE_SelectCarNebula
   with UpdateNebula and SetEmitterState (0x0016c3b0).
 - GLOBALB has a group CARFX_BREAK_LICENSE_PLATE_REAR, but carrenderinfo.c's

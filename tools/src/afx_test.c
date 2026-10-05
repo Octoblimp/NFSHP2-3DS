@@ -8,11 +8,17 @@
 // hash. eGetView gives three views of this file's, each with a camera the
 // script places or none; bGetTicker counts up by 0x1234567 a call, and
 // bGetTickerDifference is half the count between. The cars are two of this
-// file's, of which only the velocity is read. The host has 8-byte pointers, so each record the
-// script puts in a chunk is laid out as the host's struct, field by field
-// from the disc's bytes; a chunk's pack header is where the loader will
-// look for it, the payload rounded up to 16, from an address with the
-// script's offset mod 16.
+// file's, of which DoTimeStep reads the velocity and RenderEffects the
+// visible view bits. RenderEffects' views have three matrices each that
+// the script sets, an ID and a camera's FOV, car not to render and dash;
+// the frame memory is this file's FRAME_SIZE bytes, its CurrentBufferPos
+// and CurrentBufferEnd where the script puts them. CalculateH prints the
+// FOV it is given and answers the script's H, and eAttachDirectData
+// (gEAttachDirectDataFn) prints the packet. The host has 8-byte pointers,
+// so each record the script puts in a chunk is laid out as the host's
+// struct, field by field from the disc's bytes; a chunk's pack header is
+// where the loader will look for it, the payload rounded up to 16, from an
+// address with the script's offset mod 16.
 //
 //     afx_test SCRIPT RECORDS
 
@@ -29,7 +35,9 @@
 #include "camera.h"
 #include "car.h"
 #include "emath.h"
+#include "eframe.h"
 #include "eview.h"
+#include "eviewmatrix.h"
 #include "texturepack.h"
 
 #define PATB 0xa5
@@ -137,8 +145,19 @@ static void *reg;
 static eView views[NVIEW];
 static Camera cams[NVIEW];
 static Car cars[NCAR];
+static bMatrix4 mats[NVIEW][3];   // WorldView, WorldClip, WorldScreen
 static uint32_t ticker;
 static int32_t flow;
+static uint32_t hval;             // CalculateH's answer
+
+// ------------------------------------------------------------ frame memory
+
+#define FRAME_SIZE 0x20000
+static _Alignas(16) uint8_t frame[FRAME_SIZE];
+uint8_t  *CurrentBufferPos;
+uint8_t  *CurrentBufferEnd;
+int32_t   FrameMallocFailed;
+uint32_t  FrameMallocFailAmount;
 
 static int32_t flow_state(void)
 {
@@ -359,6 +378,29 @@ eView *eGetView(int32_t id)
         exit(3);
     }
     return &views[id];
+}
+
+float CalculateH(uint16_t fov)
+{
+    float f;
+
+    printf("  calch %04x\n", (unsigned)fov);
+    memcpy(&f, &hval, 4);
+    return f;
+}
+
+static void attach_direct_data(void *tex, float z, void *data, uint16_t qwc)
+{
+    uint32_t w;
+    int i;
+
+    printf("  attach %s z %s at %+ld qwc %d:", nm(tex), fx(z),
+           (long)((uint8_t *)data - frame), (int)qwc);
+    for (i = 0; i < qwc * 4; i++) {
+        memcpy(&w, (uint8_t *)data + 4 * i, 4);
+        printf(" %08x", (unsigned)w);
+    }
+    printf("\n");
 }
 
 uint32_t bGetTicker(void)
@@ -876,8 +918,31 @@ static void reset(void)
     memset(views, 0, sizeof views);
     memset(cams, 0, sizeof cams);
     memset(cars, 0, sizeof cars);
+    memset(mats, 0, sizeof mats);
+    for (i = 0; i < NVIEW; i++) {
+        views[i].WorldViewMatrix = &mats[i][0];
+        views[i].WorldClipMatrix = &mats[i][1];
+        views[i].WorldScreenMatrix = &mats[i][2];
+    }
     ticker = 0;
     flow = 0;
+    hval = 0x43c80000u;
+    acidz = 4;
+    memset(frame, PATB, sizeof frame);
+    CurrentBufferPos = frame;
+    CurrentBufferEnd = frame + FRAME_SIZE;
+    FrameMallocFailed = 0;
+    FrameMallocFailAmount = 0;
+}
+
+// FB pos end: the frame memory's two ends, as offsets into it.
+static uint8_t *frame_at(int off)
+{
+    if (off < 0 || off > FRAME_SIZE) {
+        fprintf(stderr, "frame offset %d\n", off);
+        exit(2);
+    }
+    return frame + off;
 }
 
 static AcidEffectSystem *sys_tok(void)
@@ -1032,6 +1097,7 @@ int main(int argc, char **argv)
     memset(&PATPTR, PATB, sizeof PATPTR);
     eMathInit();
     gAcidGameFlowStateFn = flow_state;
+    gEAttachDirectDataFn = attach_direct_data;
     fp = fopen(argv[2], "rb");
     if (!fp) {
         perror(argv[2]);
@@ -1274,6 +1340,67 @@ int main(int argc, char **argv)
         } else if (!strcmp(t, "FS")) {
             flow = itok();
             continue;
+        } else if (!strcmp(t, "VW")) {
+            int v = itok();
+
+            views[v].ID = itok();
+            continue;
+        } else if (!strcmp(t, "VM")) {
+            int v = itok(), k = itok(), j;
+            uint32_t w[16];
+
+            for (j = 0; j < 16; j++)
+                w[j] = xtok();
+            memcpy(&mats[v][k], w, sizeof w);
+            continue;
+        } else if (!strcmp(t, "VC")) {
+            int v = itok();
+
+            cams[v].CurrentKey.FieldOfView = (uint16_t)xtok();
+            cams[v].CarNotToRender = ref(tok());
+            cams[v].RenderDash = itok();
+            views[v].pCamera = &cams[v];
+            continue;
+        } else if (!strcmp(t, "CB")) {
+            Car *c = &cars[itok()];
+
+            c->TheOverrideRenderingPosition.VisibleViewBits = xtok();
+            continue;
+        } else if (!strcmp(t, "OS")) {
+            AcidEffectSystem *s = sys_tok();
+
+            s->OnlyShowCurrentEmitter = (uint8_t)xtok();
+            s->CurrentEmitter = (AcidEmitter *)ref(tok());
+            continue;
+        } else if (!strcmp(t, "FB")) {
+            CurrentBufferPos = frame_at(itok());
+            CurrentBufferEnd = frame_at(itok());
+            continue;
+        } else if (!strcmp(t, "FF")) {
+            FrameMallocFailed = itok();
+            FrameMallocFailAmount = xtok();
+            continue;
+        } else if (!strcmp(t, "AZ")) {
+            acidz = itok();
+            continue;
+        } else if (!strcmp(t, "H")) {
+            hval = xtok();
+            continue;
+        } else if (!strcmp(t, "PP")) {
+            AcidParticle *pa = (AcidParticle *)ref(tok());
+            const char *f = tok();
+
+            set_tail(&pa->Life, 8, f);
+            continue;
+        } else if (!strcmp(t, "RE")) {
+            AcidEffectSystem *s = sys_tok();
+            int v = itok();
+
+            acid_system_render_effects(s, &views[v]);
+            printf("  re nv %d rt %s pos %+ld fail %d %08x\n",
+                   (int)s->NumVisibleParticles, fx(s->RenderTime),
+                   (long)(CurrentBufferPos - frame), (int)FrameMallocFailed,
+                   (unsigned)FrameMallocFailAmount);
         } else if (!strcmp(t, "DP")) {
             AcidEffectSystem *s = sys_tok();
 

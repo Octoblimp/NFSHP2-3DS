@@ -19,8 +19,11 @@
 // UpdateInterestPoints (0x001286a0) make the particles and move them: an
 // emitter near one of the three interest points emits into an active
 // group, one group per emitter and car, and each step ages, slows and
-// moves every particle and frees the dead ones. RenderEffects, which draws
-// them, comes next (SC-3c).
+// moves every particle and frees the dead ones. RenderEffects (0x00128da0)
+// draws them: each group's visible particles as one GS packet in the frame
+// memory, a sprite a particle, which eAttachDirectData hands to the
+// group's texture. The port's seam for that is gEAttachDirectDataFn, which
+// the device's trackview fills.
 //
 // FrameEffects (retail 0x002ef5e0) is the frontend's system, which the car
 // select's nebula goes on; WorldEffects (0x002ef640) is the race's.
@@ -365,5 +368,51 @@ void acid_system_do_time_step(AcidEffectSystem *s, float dt);
 // CurrentGameFlowState (gp-21420), which DoTimeStep reads for the
 // frontend's 3. NULL reads 0.
 extern int32_t (*gAcidGameFlowStateFn)(void);
+
+// ---------------------------------------------------------- the drawing
+
+struct eView;
+
+// acidz (gp-23440), 4: how far RenderEffects shifts a sprite's GS Z down,
+// to keep it in front of the scenery's (see RenderEffects).
+extern int32_t acidz;
+
+// RenderEffects (0x00128da0), from eDisplayFrame's view loop
+// (0x001134a4) for FrameEffects and then WorldEffects, after the light
+// flares and before AttachSolidPolys; the frontend's car select draws its
+// nebula with it too.
+//
+// View 1 zeroes RenderTime and NumVisibleParticles first; then nothing
+// happens unless there is a group. Each group draws unless its car is
+// hidden from the view (bit view->ID of VisibleViewBits) or the effect is
+// on a part the view should not show: the front tyres' when the camera
+// sits in this car with the dash drawn, the engine's, windshield's and
+// rear plate's from inside this car unless the view is 3, and the
+// exhaust's from inside this car or in view 3. A data with no texture
+// draws nothing, and nor does any but CurrentEmitter's while
+// OnlyShowCurrentEmitter is set.
+//
+// A group's packet is a REGLIST GIF tag of 10 registers (PRIM, RGBAQ, then
+// ST and XYZ2 four times) and 80 bytes a sprite, a strip of two triangles,
+// PRIM 0x54. A particle draws if it is inside the clip matrix, its size
+// (ExtraBasis' x at its age, times CalculateH over its view depth, at most
+// MaxPixelSize or 512) is over a pixel and it is nearer than FarClip. Its
+// angle (its own, plus or minus ExtraBasis' y by its low bit) turns the
+// sprite; its colour is ColourBasis at its age, each lane cut to 0..255;
+// its frame picks the contact sheet's cell. Every corner's Z is the screen
+// z's bits under the top four, shifted down acidz.
+//
+// The packet stops while fewer than 33 words are left before
+// CurrentBufferEnd, and a group that ends that close is dropped whole. A
+// kept one moves CurrentBufferPos on, and goes to gEAttachDirectDataFn with
+// the mean of its sprites' truncated view depths. RenderTime gains the
+// ticks, NumVisibleParticles the sprites.
+void acid_system_render_effects(AcidEffectSystem *s, struct eView *view);
+
+// eAttachDirectData (0x00110378): a GIF packet of qwc quadwords for the
+// texture's list of the current render target, at depth z when the
+// texture sorts its alpha. NULL drops the packet.
+extern void (*gEAttachDirectDataFn)(void *tex, float z, void *data,
+                                    uint16_t qwc);
 
 #endif
