@@ -1834,17 +1834,19 @@ is in `car.c`.
 
 ### The seams
 
-Four calls go to the Player, which task 26 has not brought yet:
+Four calls go to the Player (the demo's addresses, then retail's):
 
 ```
-Player::ClearZone(bool)            0x00171c70  aborts if unset
-Player::RequestZone(int, 3 bools)  0x00171610  aborts if unset
-Player::IsJumpCamAvailable         0x00170408  aborts if unset
-Player::CleanUpJumpCam             0x00170488  aborts if unset
+Player::ClearZone(bool)            0x00171c70  0x00178358  playerzone.c
+Player::RequestZone(int, 3 bools)  0x00171610  0x00177c88  playerzone.c
+Player::IsJumpCamAvailable         0x00170408  0x001769e8  playerzone.c
+Player::CleanUpJumpCam             0x00170488  0x00176ab0  playerinit.c
 ```
 
 They move the camera between zones, which changes the game, so an unset
-one aborts. Only a player's car reaches them. `player.h` names the three
+one aborts. `main.c` sets all four since Session 37; before that,
+`IsJumpCamAvailable` was a stand-in that cleaned up and answered no
+(`camera.md`, "The camera zones"). Only a player's car reaches them. `player.h` names the three
 fields the method reads, `nZoneCurrent` (76), `bWrongWay` (736) and
 `EyeVerts` (1600), with a layout check. `TrackPathCoordinate::ResetPosition`
 (`0x00134f18`, in Car.obj) is in `trackpath.c`: it forgets the point, then

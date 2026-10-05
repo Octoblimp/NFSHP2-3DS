@@ -118,6 +118,8 @@
 #include "playerinit.h"
 #include "playerinput.h"
 #include "playerupdate.h"
+#include "playerzone.h"
+#include "previewroute.h"
 #include "queuedfile.h"
 #include "race.h"
 #include "racecoord.h"
@@ -144,6 +146,7 @@
 #include "trackview.h"
 #include "traffictele.h"
 #include "uirender.h"
+#include "warp.h"
 #include "wheel.h"
 #include "world.h"
 
@@ -437,20 +440,6 @@ static void logLine(const char* fmt, ...)
     if ((size_t)n > sizeof line - 2) n = (int)(sizeof line - 2);
     line[n++] = '\n';
     logwriter_put(line, (size_t)n);
-}
-
-// gPlayerIsJumpCamAvailableFn until the jump cam is ported: no jump cam.
-// Retail's (0x00170408) cleans up, builds a PreviewRoute 50 to 75 ahead of
-// the car, and answers whether it has five points. The port has neither
-// PreviewRoute nor the camera the route is for (TrackCarCameraMover in
-// RequestZone's zones 6 and 7). No is retail's answer for a route too
-// short, after cleaning up, and the car flies on under the drive camera,
-// as retail's does with the jump cams off. Unset, it aborted at the
-// user's first ramp on the New 3DS XL (2026-10-05).
-static int32_t no_jump_cam(Player *p)
-{
-    player_clean_up_jump_cam(p);
-    return 0;
 }
 
 // gNewTrackMapFn: trackmap_new, with a line in the log for each map made,
@@ -2749,19 +2738,31 @@ static bool raceAttachTrack(void)
 }
 
 // Where the race is, once a second: the coordinator's state, the race's
-// stage, the world's clock, player 1's car and the view's camera.
+// stage, the world's clock, player 1's car and the view's camera; and a
+// camera zone's start and end as they come, as the jump cam's last a
+// second or two.
 static void logRaceState(void)
 {
     static int32_t next;
+    static int32_t lastZone;
     const eView*   view = eGetView(EVIEW_ID_PLAYER1);
     const World*   w    = pCurrentWorld;
     const struct Player* p = PlayerNumPlayers > 0 ? PlayerPlayersByIndex[0]
                                                   : NULL;
 
+    if (p && p->nZoneCurrent != lastZone) {
+        logLine("race: zone %d -> %d at world frame %ld, mover %d, "
+                "time scale %.2f", (int)lastZone, (int)p->nZoneCurrent,
+                (long)WorldTimeFrames,
+                p->pCameraMover ? (int)p->pCameraMover->Type : -1,
+                w ? (double)w->fTimeScale : 0.0);
+        lastZone = p->nZoneCurrent;
+    }
+
     if (WorldTimeFrames < next && next - WorldTimeFrames <= 60) return;
     next = WorldTimeFrames + 60;
     logLine("race: rc %d, stage %d, world %ld frames, %d cars; car 0 at "
-            "%.1f %.1f %.1f; mover %d, camera at %.1f %.1f %.1f",
+            "%.1f %.1f %.1f; mover %d, zone %d, camera at %.1f %.1f %.1f",
             (int)racecoordinator_get_current_state(pRaceCoordinator),
             pCurrentRace ? (int)race_get_race_stage(pCurrentRace) : -1,
             (long)WorldTimeFrames, w ? (int)w->TotalNumCars : -1,
@@ -2769,6 +2770,7 @@ static void logRaceState(void)
             w ? (double)w->CarPositionTable[0].y : 0.0,
             w ? (double)w->CarPositionTable[0].z : 0.0,
             p && p->pCameraMover ? (int)p->pCameraMover->Type : -1,
+            p ? (int)p->nZoneCurrent : -1,
             view->pCamera ? (double)view->pCamera->CurrentKey.Position.x : 0.0,
             view->pCamera ? (double)view->pCamera->CurrentKey.Position.y : 0.0,
             view->pCamera ? (double)view->pCamera->CurrentKey.Position.z : 0.0);
@@ -3178,12 +3180,19 @@ int main(int argc, char** argv)
     // World::DoTimestep ends every car's step with Car::FinishMovement,
     // which carfinish.c has ported since task 27's eleventh Car slice.
     // Left NULL, the step aborts. Only a player's car reaches its four
-    // Player calls. CleanUpJumpCam is playerinit.c's since step 8a, and
-    // IsJumpCamAvailable is no_jump_cam's until the jump cam is ported.
-    // The zone calls stay NULL: only the jump cam's zones reach them.
+    // Player calls. CleanUpJumpCam is playerinit.c's since step 8a; the
+    // jump cam is playerzone.c's: IsJumpCamAvailable's PreviewRoute ahead
+    // of the car, RequestZone's zones 6 and 7 with their slow motion and
+    // TrackCarCameraMovers, and ClearZone as the car lands. The freeze and
+    // preview zones (1 and 2) stay a dead button until their movers are
+    // ported, and the zones' sounds wait for the sample seams.
     gCarFinishMovementFn = car_finish_movement;
     gPlayerCleanUpJumpCamFn = player_clean_up_jump_cam;
-    gPlayerIsJumpCamAvailableFn = no_jump_cam;
+    gPlayerIsJumpCamAvailableFn = player_is_jump_cam_available;
+    gPlayerRequestZoneFn = player_request_zone;
+    gPlayerClearZoneFn = player_clear_zone;
+    gPlayerJumpCamMoverFn = player_jump_cam_mover;
+    gPreviewRouteDeleteFn = preview_route_delete;
 
     // Player::CleanupAfterRace takes the player's handlers off through
     // SetInputMode(NONE); playerinput.c has it.
@@ -4052,6 +4061,7 @@ int main(int argc, char** argv)
             uint32_t gpuTick = bGetTicker();
             hangwatch_gpu_race(g_track.attached);
             capture_race(g_track.attached);
+            warp_race(g_track.attached);
             hangwatch_mark("C3D_FrameBegin: the GPU's last frame");
             C3D_FrameBegin(0);
             hangwatch_gpu_begin();

@@ -1234,8 +1234,9 @@ The zone jumpers are two paths, 15 at `0x00176ddc` and 16 at
 
 Both lift the point to the ground under it (`TopologyCoordinate`), fill
 the `CameraDataItems` at player +1652, and build the
-`TrackCarCameraMover`. The port has none of `PreviewRoute`,
-`CameraDataItems` or `TrackCarCameraMover` yet.
+`TrackCarCameraMover`. `playerzone.c` has both since Session 37, as
+`gPlayerJumpCamMoverFn`; "The jump cam's mover" below has what each
+writes.
 
 ### The POV cycle
 
@@ -1293,9 +1294,12 @@ These are the seams:
 `SkipFE` is `gPlayerCamSkipFE`, which `main.c` points at the flow's
 `skipFE`. NULL reads as 0, the value the disc ships.
 
-Nothing calls these yet. Step 8 brings the callers:
-`Player::CleanupAfterRace` (which calls `RemoveCameraMovers`),
-`BeginCountdownCameras`, `UpdateNonGameState`, and the camera zones.
+Step 8 brought the callers: `Player::CleanupAfterRace` (which calls
+`RemoveCameraMovers`), `BeginCountdownCameras` and `UpdateNonGameState`.
+The camera zones came in Session 37, and `main.c` now sets
+`gPlayerJumpCamMoverFn` (`player_jump_cam_mover`) and
+`gPreviewRouteDeleteFn` (`preview_route_delete`). The freeze's and the
+preview's movers are still NULL.
 
 ### Divergences
 
@@ -1361,6 +1365,308 @@ and an empty list.
 Three mutants are caught by crashing the harness: reading the car only
 from World, reading World's list the other way, and ignoring SkipFE. Each
 reads a NULL car the scenarios keep away from.
+
+## The jump cam's route
+
+`Car::FinishMovement` asks for the jump cam once every eight loops while
+the car is in the air, over 30 m/s, the right way round, and with an
+average air time of more than 0.5 s and a height of more than 1.5
+(`car.md`). The first question is `Player::IsJumpCamAvailable`
+(`0x001769e8`):
+
+1. `CleanUpJumpCam` (`0x00176ab0`).
+2. On the track whose `SameAsTrackNumber` is 21, the answer is no within
+   40 of (1646, -884), as a box test, and no route is built.
+3. A `PreviewRoute` 50 out and 75 long from the car, into
+   `pJumpCamRoute` (player +1764).
+4. The answer is yes if the route has five points or more. If not, the
+   route is cleaned up again.
+
+`previewroute.c` is zonecameras.cpp's `PreviewRoute`, the road ahead as
+a run of racing route points. The zone preview (type 14) builds its own
+through `ZonePreviewCameraMover::FindRoute`, which is not ported.
+
+| `PreviewRoutePoint`, 24 bytes | offset |
+|---|---|
+| `pRoute`, the route it is on | 0 |
+| `pPoint`, the route point | 4 |
+| `fLength`, to the next point in 3D | 8 |
+| `fOffset`, to the right of the route point | 12 |
+| `nLine`, the driving line, -1 for the centre | 16 |
+| `fRouteGap`, how far off a route change landed | 20 |
+
+| `PreviewRoute`, 24 bytes, no vtable | offset |
+|---|---|
+| `pPoints` | 0 |
+| `nPoints` | 4 |
+| `vTrackDirection`, the car's `PathDirection` | 8 |
+| `fDistance`, asked for, then walked | 16 |
+| `fOffset`, the car to the right of point 0 | 20 |
+
+These are the route's functions:
+
+- **The constructor** (`0x00164630`) allocates `length / 4` points.
+  - The first point is the car's own route point, at the nearer of the
+    car class's two driving lines. This needs the car to have a route
+    and a route point, within `radius`.
+  - Without them, the first point is `ClosestPoint`'s pick.
+  - Then it calls `NextPoint` until the points run out, one fails, or
+    the walk is longer than `length`.
+  - It keeps the count and the walked length. If the first point fails,
+    the points are freed and the count is 0.
+- **`NextPoint`** (`0x001648a0`) finds the next route point on the same
+  route and line.
+  - Past the route's end, it uses `ClosestPoint` from the last point's
+    place, onto the next racing route ahead.
+  - The point before gets the 3D distance between the two as its
+    `fLength`, which is also returned.
+- **`ClosestDistance`** (`0x00164aa0`) tries the class's two lines,
+  `2 * line` and `2 * line + 1`.
+  - The first one the route has (`IsValid` or `IsFake`) wins.
+  - The centre is used only if neither is there and the point runs the
+    car's way.
+  - It answers the distance in the XY plane, or 1000000 if nothing was
+    measured.
+- **`ClosestPoint`** (`0x00164c80`) searches every racing route in the
+  manager's order, for the point ahead within the radius.
+  - The nearest point wins.
+  - The answer is no if the last route's search found nothing, because
+    retail keeps that route's answer.
+  - On a point-to-point race, it will not step back round the track.
+- **`PreviewRoutePoint::GetPosition`** (`0x00164418`, `0x00164428`) is
+  the point's place, along the route point and across it.
+
+`tools/prevroute_check.py` runs retail's constructor, destructor,
+`NextPoint`, `ClosestDistance`, `ClosestPoint` and `IsJumpCamAvailable`
+against the port:
+
+    python tools/prevroute_check.py            # 18 scenarios, 2934 ops, 23375 lines, 0 differ
+
+Its mutation pass catches all 57.
+
+## The jump cam's mover
+
+Both jump cam types build one `TrackCarCameraMover` (`CM_TRACK_CAR`,
+1136 bytes, `0x00159130`, vtable `0x002b1ad0`), from the
+`CameraDataItems` at player +1652 (164 bytes). The race has no track
+cameras, so the jump cam is its only user in the port.
+
+### `Spline`
+
+`spline.c` is spline.cpp's `Spline` (48 bytes): a Catmull-Rom curve
+through `bVector3` control points, counted by control point, so 0 is the
+first and n-1 the last. What happens outside 0..n-1 depends on the type:
+
+| Type | Outside 0..n-1 |
+|---|---|
+| CLAMP | held at the first or last point |
+| LOOP | wrapped with `bFMod` |
+| EXTRAPOLATE | one static point past either end, on the line through the last two |
+
+`GetPoint` (`0x00189948`) takes the four weights for u = t - floor(t),
+rounded as retail rounds them. `Evaluate` (`0x00189810`) sums
+`c0*P(t-1) + c1*P(t) + c2*P(t+1) + c3*P(t+2)` in that order, on all four
+lanes, so a point's pad lane is carried into the result. Only the
+constructor over an array, the destructor, `GetControlPoint`, `Evaluate`
+and `GetPoint` are ported. Calibration and the length searches have no
+caller yet.
+
+### `TrackCarCameraMover`
+
+The constructor copies the `CameraDataItems` and the `CameraShake` (560
+bytes). It builds four splines over the copies' arrays:
+
+- the field of view, 32 entries, degrees in x
+- the eye, `NumEyeVerts`
+- the bank, a BAM in x
+- the shake, `NumCVs`
+
+It also builds a focal-distance cubic, from +-(26 to 44) toward 0 over
+0.42 s, from `bRandom`'s default seed.
+
+The spring starts at (`SpringXVel`, `SpringYVel`, `SpringYVel`), with the
+record's Y twice. Retail tests a static vector first, but only that
+vector's initializer ever writes it.
+
+Each `Update` (`0x00159588`) does nothing while the flow is paused.
+Otherwise it does these, in order:
+
+1. **The eye.** It goes on the eye spline at the car's share of the
+   window from `MinAreaPercent` to `MaxAreaPercent` (or at its own speed
+   when not locked to the car). With a wipe, it goes on the line between
+   two points, at the car's projection pushed `WipeDistance` along it,
+   until the car pulls away.
+2. **The look.** It looks at the car, raised and moved sideways by the
+   enter compensations and the shake, then sprung (`CalcSpringForce`,
+   `0x00159540`).
+3. **The field of view.** It comes from the FOV spline at the car's
+   share of the `MinPercent`..`MaxPercent` window. An iso one is held at
+   a unit's distance.
+4. **The bank.** The bank spline rolls the up vector about the way the
+   camera looks (`ComputeBankedUpVector`, `0x00157888`).
+5. **The focus.** The depth of field stays on the car while the focus
+   effects are on. A frozen camera keeps its field of view and focus.
+
+The destructor (`0x00159490`) sets the focal distance and depth of field
+to 0 unless the camera is stopped, and sets `ClearVelocity`.
+
+### Types 15 and 16
+
+**Type 15** (`0x00176ddc`) writes the record for a camera beside the
+road, ahead of the car.
+
+- **The eye.** It is locked to the car's progress round the track
+  (`RatioAroundTrack`, turned round by `TrackDirection`). The progress
+  runs from where the car is to a route point near the end of
+  `pJumpCamRoute`: n - 1 of n under 6 points, else n - 3. That point's
+  ratio comes from a `TrackPathCoordinate` there.
+- **The two eye points.**
+  - The first is that point's edge of the road whose way from the car
+    runs least with the car's velocity. It is a unit up, and at least a
+    unit above the ground there.
+  - The other is route point 2's opposite edge, a unit up.
+  - `EnterHorizComp` is 0.4 for the left edge, -0.4 for the right.
+- **The rest.** The field of view is 20 degrees throughout, with no
+  bank, `NearClip` 0.5, `FarClip` 10000, `EnterVertComp` 0.2, and the
+  other fields 0. The area and the shake bank are left as they were.
+
+**Type 16** (`0x00177200`) starts again from the car's progress. It
+changes what 15 left:
+
+- It puts all three eye points at the third, raised to the car's height,
+  then above the ground.
+- It reverses `EnterHorizComp`.
+- It narrows the field of view from 20 by a quarter a step.
+- It keeps the focus effects on.
+
+Both end with a shake of nothing with two points, and the mover on the
+record. The pad lanes of the eye points and the tables are the stack's
+in retail, and 0 in the port.
+
+`tools/trackcarcam_check.py` runs retail's constructor, destructor,
+`Update`, the vtable's other slots and `Spline`'s against the port. It
+does not compare pad lanes retail leaves as the stack had them.
+
+    python tools/trackcarcam_check.py          # 14 scenarios, 6969 ops, 33697 lines, 0 differ
+
+Its mutation pass catches all 157. Types 15 and 16 are checked with the
+zones, below.
+
+## The camera zones
+
+A zone is one of these, each with its camera, a radial blur on the
+player's view and a sound:
+
+- a spell of slow or fast time
+- a pause
+- the jump cam
+
+`Player::nZoneCurrent` (player +88) holds it:
+
+| Zone | What | World | Camera | Sample |
+|---|---|---|---|---|
+| 1 | freeze | paused for `ZoneFreezeCameraMover::Duration` | 13, keep | Wind |
+| 2 | preview | paused for its duration | 14, keep | PreviewZone, at volume 0 |
+| 3 | slow motion | 0.333 for 8 s | — | SlomoZone |
+| 4 | short slow motion | 0.333 for 2 s | — | SlomoZone |
+| 5 | fast | 2 for 4 s | — | Wind |
+| 6 | the jump cam | 0.4 for 8 s | 15, keep, not in a replay | SlomoZone at pitch 0.9 |
+| 7 | after the jump | 0.4 for 8 s | 16, keep, not in a replay | SlomoZone at pitch 0.9 |
+
+### `RequestZone`
+
+`Player::RequestZone(zone, force, sound, muffle)` (`0x00177c88`) says no:
+
+- while an NIS plays, or in the AI demo
+- without `force`, within 5 s of this zone's last start
+  (`tAutoZoneTimers[zone]`)
+- with `force`, within 0.1 s of `tAutoZoneTimers[0]`, which `ClearZone`
+  stamps for the freeze and the preview
+- while the race is not racing
+- for zone 8 or more, or with two players
+- for 6 and 7 with the `JumpCams` setting off, or for 1 to 5 with
+  `ZoneCams` off
+- if any player is in 3 to 7 (the table at `0x00330798`), after a freeze
+  or preview the player is in has been cleared (`0x00330790`)
+
+Otherwise it starts the zone:
+
+1. `tIgnoreNextPovChange` becomes `RealTimer`.
+2. Without `force`, the zone's timer becomes `WorldTimer`.
+3. The HUD's animations are cleared.
+4. The zone's own start runs:
+   - **The freeze and the preview** refuse in a replay.
+   - **The preview** also refuses a wrong-way car, no route, or a
+     camera that `ViolatesTopology`, each with the "MenuWrong" sound. A
+     camera that violates it is put back after the sound.
+   - **Zone 6** calls `CleanUpJumpCam` after its mover is built, and in
+     a replay, where no mover is built.
+5. `RadialBlurOn` for the player's view.
+6. `nZoneCurrent` and the muffle are set.
+7. With `SoundEnabled`, `sound`, and category 0 above silence, the zone's
+   sample replaces `pZoneSample`.
+
+`FinishMovement` asks for 6 with `(0, 1, 1)`. It asks for 7 with
+`(0, 0, 1)` once `AirTimeSwitch` passes, after `ClearZone(0)`.
+
+### `ClearZone`
+
+`ClearZone(sound)` (`0x00178358`) does nothing outside a zone. Otherwise:
+
+1. `RadialBlurOff`.
+2. For the freeze and the preview, `tAutoZoneTimers[0]` is stamped,
+   unless `TweakerPauseWorld` holds the world.
+3. For those two and the jump cam's zones, `RestoreCameraMover`, outside
+   a replay.
+4. The world's time scale is reset.
+5. The zone moves to `nZonePrevious`, and the muffle goes.
+6. `ClearZoneSound` (`0x00178470`, which deletes the sample) if `sound`.
+7. `DetermineInputMode`.
+
+`PlayerClearZone` (`0x00177c80`) is `ClearZone(p, 1)`. It is what the
+world's pause and time scale call when they run out. `FinishMovement`
+clears 6 and 7 when a wheel touches down.
+
+### In the port
+
+`playerzone.c` has all of this. Some of it stays NULL in `main.c`:
+
+- **The freeze and the preview.** Their movers and calls
+  (`gZoneFreezeCameraMoverFn`, `gZonePreviewCameraMoverFn`,
+  `gZoneFreezeDurationFn` and the three `gZonePreview*Fn`) are NULL.
+  While they are, `RequestZone` refuses zones 1 and 2 before anything
+  changes, as a dead button.
+- **The radial blur and the zone's sound.** `gRadialBlurOn/OffFn` and
+  the sample seams are NULL, so the zones are silent and unblurred.
+- **The HUD.** It goes while a zone is up, as `DetermineHudFeatures`
+  says (`playerhud.c`).
+
+`tools/playerzone_check.py` runs retail's `RequestZone`, `ClearZone`,
+`ClearZoneSound`, `PlayerClearZone` and `ChangeCameraMover`'s types 15
+and 16 against the port. A current zone outside 0..7 indexes past the
+tables on both sides, so it is not tried.
+
+    python tools/playerzone_check.py           # 23 scenarios, 5283 ops, 24580 lines, 0 differ
+    python tools/playerzone_check.py --mutate  # 198 mutations, 197 caught, 1 equivalent
+
+The equivalent one is `z-gap-force`. Without `force`, any time under the
+0.1 s gap is under the 5 s one too, which has already said no.
+
+### On Azahar
+
+Session 37 tested the jump cam on track 12, with
+`sdmc:/nfshp2_warp.txt` (`warp.h`) set to
+`4 -1346.1 413.4 -68.5 610 55`. That puts the car on the straight before
+the jump the user's lap took at x = -1200. The run held the gas.
+
+- **The zones.** The log's `race: zone` lines show 0 -> 6 at world frame
+  442 with the time scale at 0.40, 6 -> 7 at 482, and 7 -> 0 at 525 as
+  the car landed.
+- **What it looked like.** The camera stood low at the road's edge,
+  looking up as the car flew past the covered bridge, with the HUD gone.
+  Zone 7 was close on the car. Then the chase camera came back with
+  "HUGE AIR +250".
+- **The frame rate** stayed at 30 FPS throughout.
 
 ## Divergences from the disc
 
