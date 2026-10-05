@@ -3390,6 +3390,25 @@ int main(int argc, char** argv)
     }
     logConsole();
 
+    // The port is for the New 3DS alone (the user's call, 2026-10-05). On
+    // an Old 3DS a race's track ran the heap out (bMalloc's abort, back to
+    // the Homebrew Launcher), and its CPU is a third of the speed, so it
+    // says so here rather than failing at the first race.
+    {
+        bool isNew3DS = false;
+        if (R_SUCCEEDED(APT_CheckNew3DS(&isNew3DS)) && !isNew3DS) {
+            logPrintf("console: not a New 3DS, so the port stops here\n");
+            fatalConsole();
+            printf("\nThis port needs a New 3DS, New 3DS XL\n");
+            printf("or New 2DS XL.\n\n");
+            printf("A race needs more memory and a faster CPU\n");
+            printf("than an Old 3DS or 2DS can give it.\n");
+            waitForExit();
+            gfxExit();
+            return 1;
+        }
+    }
+
     if (!gamedata_init()) {
         fatalConsole();
         printf("\nNo game data found.\n");
