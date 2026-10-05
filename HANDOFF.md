@@ -14591,9 +14591,24 @@ it with a lower-detail mode that leaves the New 3DS alone, they chose
   (`out/azahar_old3ds_gate/01_message.png`).
 - `docs/formats/new3ds-mode.md`, "An Old 3DS", has why.
 
+### The next cuts' probes
+
+The early depth test and the lossless RGB8 textures are the user's two
+chosen GPU tricks left. Neither can be judged on Azahar, so the timing
+frame now asks the device: the models' and the first envmap view's
+lists are sent again with the early depth test on (GEQUAL and LEQUAL,
+each compared pixel by pixel with "as drawn"), and with every RGBA8
+texture fetched as RGB8. `draw-cuts.md`, "The next cuts' probes", has
+the registers. On Azahar the early pictures match exactly (it ignores
+the test) and RGB8's differ everywhere, as they must.
+
+Session 36's lines also put the envmap at a third of a light frame's
+GPU: three views at 3.6-4.0 ms each. Its 1-pixel scissor saves almost
+nothing, so it is vertex work and draws, which the indexed meshes cut.
+
 ### With the user
 
-- `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 6ac29d1. Ask for the
+- `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the
   race's `frame:` and `models:` lines in a heavy stretch, a timing run
   with `sdmc:/nfshp2_gputiming.txt`, how the nebula and the smoke look,
   whether the light-blue wedge over the Opel's roof is still there, and

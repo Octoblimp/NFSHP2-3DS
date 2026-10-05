@@ -26,13 +26,15 @@ way: the indexed meshes are in (609b418) and with the user.
   WINDOW batch (draws 722 and 723), which the device puts one corner of
   above the roof. That is open.
 - **With the user.** The build (`3DS Files/NFSHP2-3DS.3dsx`, commit
-  6ac29d1) has the nebula, the race's smoke, the indexed meshes and the
-  Old 3DS's message. Ask for:
+  2fc77fc) has the nebula, the race's smoke, the indexed meshes, the
+  Old 3DS's message and the timing frame's probes. Ask for:
   - the race's `frame:` and `models:` lines in a heavy stretch, and
     whether the FPS there moved from 16-18;
   - a timing run (`sdmc:/nfshp2_gputiming.txt` on the card): the
     models' "1-pixel scissor" less "3 vertices a draw" is the vertex
-    work, about 7.5 ms before;
+    work, about 7.5 ms before; the early depth lines say whether that
+    test is safe on the device and what it saves, and "RGB8 for RGBA8"
+    what the lossless RGB8 would;
   - how the car select's nebula and the chimney smoke look, with the
     `carsel: nebula` and `race: effects` lines;
   - whether the light-blue wedge over the Opel's roof is still there;
@@ -66,6 +68,18 @@ own cost about 1.44, the texture cache clears about 0.35.
   list shaded 3. On Azahar the picture is the list's (the same depth to
   the bit) at 29.2 FPS; only the device can show the gain. The capture
   no longer numbers the envmap's draws (`capture_offscreen`).
+- **Probes (2fc77fc).** The timing frame sends the
+  models' and the first envmap view's lists again three ways more: with
+  the early depth test on, compared either way, each with its pixels
+  counted against "as drawn", and with every RGBA8 texture fetched as
+  RGB8. The early depth buffer's rules are documented nowhere public and
+  Azahar ignores the test, so the device decides both whether the
+  picture holds and what it saves. On Azahar both early pictures match
+  to the pixel and RGB8's differs in all of them, as it must.
+- **The envmap is a third of a light frame's GPU.** Session 36's lines
+  have three views at 3.6-4.0 ms each, of 27.7. Its "1-pixel scissor"
+  is 3.39 of 3.57: its 64 by 64 faces are vertex work and draws, not
+  fill. The indexed meshes are its cut; the early depth test is not.
 - **Next, each kept only if the device's log shows it helps** (memory:
   gpu-speed-plan):
   1. The fill and the fetch: the PICA's early depth test, with the
@@ -324,7 +338,13 @@ are four parts:
     - what is left at "3 vertices a draw" is each draw's own cost:
       the commands, the state, the texture changes;
     - the texture cache clears cost about "as drawn" less "no texture
-      cache clears".
+      cache clears";
+    - since 13b-4f's probes, "early depth >=" and "early depth <=" are
+      the list with the PICA's early depth test on, and the line after
+      counts the pixels of each that differ from "as drawn" (0 and 0 is
+      a picture the test leaves alone; RGB8's count, which must not be
+      0, shows the compare works). "RGB8 for RGBA8" is the fetch the
+      lossless RGB8 textures would have.
   - **What to do with them.** Fetch or cache clears large: sort the
     models' batches by texture, and send a cache clear only when the
     texture changes (it is about one a draw now). Fill large: the early

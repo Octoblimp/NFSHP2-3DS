@@ -325,6 +325,43 @@ so the saving can only show in a New 3DS's lines: the `models:` line's
 indices, and the timing frame's "1-pixel scissor" less "3 vertices a
 draw".
 
+### The next cuts' probes
+
+The timing frame (`hangwatch.c`) sends the models' and the first envmap
+view's lists again onto its VRAM target, a way at a time. 13b-4f adds
+three ways, so that one device run says what the next two cuts would
+save:
+
+| Way | What it changes in the copied list |
+|---|---|
+| early depth >= | `GPUREG_EARLYDEPTH_TEST1` and `_TEST2` on, `_FUNC` GEQUAL, `_DATA` 0 |
+| early depth <= | the same with `_FUNC` LEQUAL |
+| RGB8 for RGBA8 | each texture unit's `_TYPE` of RGBA8 made RGB8 |
+
+- **The early depth test** is the PICA's depth test ahead of the
+  texture fetch and the combiners, against a buffer of its own. citro3d
+  writes its four registers with every effect, and clears its buffer
+  with each framebuffer flush (`C3Di_SplitFrame`). 3dbrew and GBATEK
+  give the registers' fields and nothing of how the buffer updates:
+  its resolution, or whether a fragment that the alpha test later
+  kills still writes it. Azahar does not emulate it.
+- So each early way's target is read back and compared with "as
+  drawn"'s, pixel by pixel, colour and depth. Its copy starts with four
+  words more: `_DATA` 0, then `_CLEAR`.
+- The port's depth is nearer-greater: GEQUAL and GREATER, the buffer
+  cleared to 0. The registers do not say which side of the compare
+  the early buffer is on, so both ways are tried. The right one should
+  match "as drawn" and be quicker; the wrong one should drop most of
+  the picture.
+- **RGB8** reads the same addresses as three bytes a texel. Its texels
+  are wrong, but its fetch is the one the lossless RGB8 textures (the
+  ones of one alpha, memory: gpu-speed-plan) would have. Its pixels are
+  counted too: they must differ, which shows the compare works.
+
+On Azahar (`out/azahar_probe`), both early ways match "as drawn" to the
+pixel. RGB8 differs in 4,096 of the envmap face's 4,096 pixels and
+95,999 of the models' 96,000. The times are Azahar's 0.12 ms.
+
 ## Where 13b-4 stands
 
 On Azahar, track 12, holding the gas, the mean of each second's line
