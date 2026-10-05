@@ -3,10 +3,13 @@
 #include "bcarsel.h"
 
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "acidsys.h"
 #include "bchunk.h"
+#include "bmath.h"
 #include "cartypeinfo.h"
 #include "eefpu.h"
 #include "eframe.h"
@@ -111,6 +114,25 @@ static const bVector3 kOffsetOrbit   = {0.0f, 0.0f, -0.6384f, 0.0f};
 #define LUM_SCALE       (1.0f / 255.0f)
 
 #define CAR_STATUS_LOCKED 2               // SetSelectCarLighting's dark car
+
+// The nebula: 20 emitters of XE_SelectCarNebula (0x002b4ef8) on a ring of
+// 15 round the turntable, 1.25 below it. The locked shade moves 0.01 a
+// Tick (gp-29716, gp-29712). Its two ends are the static initializer's
+// (0x00198bc8), each four (r, g, b, a) keys for the data's ColourMatrix:
+// a car to drive's blue at 0x00310180, a locked car's at 0x003101c0.
+#define NEBULA_NAME     "XE_SelectCarNebula"
+#define NEBULA_COUNT    20
+#define NEBULA_RADIUS   15.0f
+#define NEBULA_Z        -1.25f
+#define NEBULA_STEP     0.01f
+static const bVector4 kNebulaOpen[4] = {
+    {60.0f, 100.0f, 180.0f, 0.0f},  {60.0f, 100.0f, 180.0f, 38.0f},
+    {60.0f, 100.0f, 180.0f, 41.0f}, {60.0f, 100.0f, 180.0f, 0.0f},
+};
+static const bVector4 kNebulaLocked[4] = {
+    {77.0f, 35.0f, 22.0f, 0.0f},    {34.0f, 12.0f, 12.0f, 125.0f},
+    {29.0f, 4.0f, 1.3f, 80.0f},     {21.0f, 2.6f, 0.0f, 0.0f},
+};
 
 // ------------------------------------------------------------ the hooks
 
@@ -1179,7 +1201,8 @@ static int canEnterOrbitMode(CarSelector* c, VisibleCar* car)
     return car->available || c->allUnlocked;
 }
 
-// JoyHandler (0x00196958).
+// JoyHandler (0x00196958). Event 34 sets allUnlocked when 0x0016fdb0 says
+// so, and it returns 0, so the case is left out.
 static void selJoy(CarSelector* c, int32_t ev, uint8_t pressed)
 {
     unlockJoy(c, ev, pressed);
@@ -1294,6 +1317,73 @@ static void devanceState(CarSelector* c)
     summonPopup(c);
 }
 
+// AcidEmitter::AcidEmitter(const char*) under its operator new, inline in
+// the constructor (0x001956e8): a slot from the emitters' pool, cleared
+// from its eighth byte, counted and named. Retail clears and names
+// whatever the pool gives; the port stops at NULL, counted.
+static AcidEmitter* nebulaNew(void)
+{
+    AcidEmitter* e = (AcidEmitter*)bSlotOMalloc(AcidEmitterSlotPool);
+
+    if (e != NULL)
+        memset(&e->NameHash, 0,
+               sizeof(*e) - offsetof(AcidEmitter, NameHash));
+    NumAcidEmitters++;
+    if (e == NULL) return NULL;
+    e->NameHash = bchunk_hash(NEBULA_NAME);
+    memcpy(e->Name, NEBULA_NAME, sizeof(NEBULA_NAME));
+    e->Name[63] = '\0';
+    return e;
+}
+
+// UpdateNebula (0x001963b8): the shade toward the locked red while the car
+// shown can't be driven, and back; then each emitter at its place on the
+// ring, turned to face along it, and its data's colour keys at the shade.
+// The emitters share one data, which each writes again.
+static void updateNebula(CarSelector* c)
+{
+    uint16_t step = 0;
+    int i, k;
+
+    if (cur(c)->available || c->allUnlocked) {
+        c->nebulaLocked -= NEBULA_STEP;
+        if (c->nebulaLocked < 0.0f) c->nebulaLocked = 0.0f;
+    } else {
+        c->nebulaLocked += NEBULA_STEP;
+        if (c->nebulaLocked > 1.0f) c->nebulaLocked = 1.0f;
+    }
+    if (c->nNebula != 0) step = (uint16_t)(0x10000 / c->nNebula);
+    for (i = 0; i < c->nNebula; i++) {
+        AcidEmitter*     e   = c->nebula[i];
+        uint16_t         bam = (uint16_t)(i * step);
+        AcidEmitterData* d;
+        bMatrix4         m;
+        bVector4*        key;
+
+        if (e == NULL) continue;
+        eIdentity(&m);
+        eRotateZ(&m, &m, (uint16_t)(bam + 16384));
+        m.v3.x = bCosBam(bam) * NEBULA_RADIUS;
+        m.v3.y = bSinBam(bam) * NEBULA_RADIUS;
+        m.v3.z = NEBULA_Z;
+        m.v3.w = 1.0f;
+        e->LocalWorld = m;
+        d = e->EmitterData;
+        if (d == NULL) continue;
+        key = &d->ColourMatrix.v0;
+        for (k = 0; k < 4; k++) {
+            const bVector4* a = &kNebulaOpen[k];
+            const bVector4* b = &kNebulaLocked[k];
+            float           t = c->nebulaLocked;
+
+            key[k].x = (b->x - a->x) * t + a->x;
+            key[k].y = (b->y - a->y) * t + a->y;
+            key[k].z = (b->z - a->z) * t + a->z;
+            key[k].w = (b->w - a->w) * t + a->w;
+        }
+    }
+}
+
 // Tick (0x00196d58).
 static void selTick(CarSelector* c)
 {
@@ -1375,6 +1465,7 @@ static void selTick(CarSelector* c)
                              && c->thumbs.state == 0));
     updateSwatches(c);
     updateThumbnails(c);
+    updateNebula(c);
 }
 
 // The constructor (0x001950d0).
@@ -1438,6 +1529,24 @@ static void selInit(CarSelector* c, const BCarSelHooks* h, int32_t port,
     updateFadeGroups(c);
     flailer_printf(screen, OBJ_POINTS, "%s %d", trId(h, LANG_NFS_POINTS),
                    (int)points);
+    // The nebula, one player's alone: each emitter ON with the data of its
+    // name, on FrameEffects, then placed.
+    if (twoPlayer) {
+        c->nNebula = 0;
+    } else {
+        c->nNebula      = NEBULA_COUNT;
+        c->nebulaLocked = 0.0f;
+        for (int i = 0; i < c->nNebula; i++) {
+            AcidEmitter* e = nebulaNew();
+
+            c->nebula[i] = e;
+            if (e == NULL) continue;
+            acid_emitter_set_emitter_data_hash(e, e->NameHash);
+            e->State = ACID_ON;
+            acid_system_add_auto_emitter(&FrameEffects, e);
+        }
+        updateNebula(c);
+    }
     c->headlights = 0;
     c->copLights  = 0;
     selTick(c);
@@ -1451,6 +1560,17 @@ static void selDestroy(CarSelector* c)
 {
     const BCarSelHooks* h = c->hooks;
 
+    // The nebula first: each emitter off FrameEffects and deleted, then
+    // what it left there killed. The listing would fault on an emitter
+    // the pool did not give; the port passes it by.
+    for (int i = 0; i < c->nNebula; i++) {
+        AcidEmitter* e = c->nebula[i];
+
+        if (e == NULL) continue;
+        acid_system_remove_auto_emitter(&FrameEffects, e);
+        acid_emitter_delete(e, 3);
+    }
+    acid_system_kill_all_active_effects(&FrameEffects);
     dismissPopup(c);
     if (c->platform.Solid) emodel_uninit(&c->platform);
     closeSwatches(c);

@@ -34,8 +34,13 @@
 // camera, the cars' matrices (UpdateRenderingCarParameters) and the light
 // (SetSelectCarLighting, elight.c). Retail's spotlights are dead: the
 // BRUSHEDMETAL channels InitSpotlights copies are never read, and
-// UpdateSpotlight is empty, so neither is ported. The nebula's
-// AcidEmitters are SC-3.
+// UpdateSpotlight is empty, so neither is ported.
+//
+// The nebula (SC-3d): one player's selector rings the turntable with 20
+// emitters of XE_SelectCarNebula on FrameEffects, which UpdateNebula
+// (0x001963b8) places each Tick and colours from blue to red-brown as the
+// car shown is locked. FlailerScreenList::SetEmitterState (0x0016c3b0),
+// which the destructor calls, is empty.
 //
 // The Flailer calls are flailer.c's own, so tools/carsel_check.py runs
 // retail's code in mipsemu over the same FRONTB screens. The 3D calls go
@@ -84,6 +89,7 @@
 #define BCARSEL_MAX_CARS     64
 #define BCARSEL_MAX_SWATCHES 10
 #define BCARSEL_MAX_SELECTORS 2
+#define BCARSEL_MAX_NEBULA   64            // the array's room; 20 are made
 
 // gp-23120, AllCarsAvailableInCarSelectScreen: 0 on the disc. Set, the
 // hidden cars are listed too.
@@ -278,6 +284,9 @@ typedef struct CarSelector {
     BSpline     thumbs;         // 332  the thumbnail row's X
     int32_t     headlights;     // 380  the cars' Headlights and CopLights:
     int32_t     copLights;      // 384  0 from the constructor on
+    struct AcidEmitter* nebula[BCARSEL_MAX_NEBULA]; // 388
+    int32_t     nNebula;        // 644  20, or 0 for two players
+    float       nebulaLocked;   // 648  0 blue .. 1 a locked car's red
     BCarSelUnlock unlock;       // 652
     const BCarSelHooks* hooks;
 } CarSelector;

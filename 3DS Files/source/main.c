@@ -2501,6 +2501,22 @@ static void drawCarSelTop(UIRenderer* ui)
     uirender_draw_visible_passes(ui, 1.0f, UIR_BACK_PASSES, BUI_NUM_LAYERS);
     if (!drawn)
         carselRender(NULL);
+    // The nebula, a line a second: FrameEffects' auto emitters and active
+    // groups, the particles RenderEffects found visible, the sprites drawn.
+    if (drawn && RealTimeFrames % 60 == 0) {
+        const bNode* n;
+        int          groups = 0;
+
+        for (n = FrameEffects.ActiveGroupList.next;
+             n != NULL && n != &FrameEffects.ActiveGroupList; n = n->next) {
+            groups++;
+        }
+        logLine("carsel: nebula %d auto emitters, %d groups, %d particles "
+                "visible; %d sprites drawn (%d dropped, %d refused)",
+                (int)FrameEffects.NumAutoEmitters, groups,
+                (int)FrameEffects.NumVisibleParticles, g_feView.spritesDrawn,
+                g_feView.spritesDropped, g_feView.spritesRefused);
+    }
     if (g_carselText.queued) {
         g_carselText.queued = false;
         hookCarSelRenderText(&g_boot, g_carselText.screen,
@@ -4168,6 +4184,10 @@ int main(int argc, char** argv)
             FRAMEPROF_STAMP(FRAMEPROF_BOTTOM);
             C3D_FrameEnd(0);
             hangwatch_gpu_frame_end();
+            // eDisplayFrame's end (0x00113fd0), its packets sent: FrameEffects,
+            // car select's nebula, a sixtieth of a second on (gp-32668) each
+            // frame drawn, the race's as well.
+            acid_system_do_time_step(&FrameEffects, 1.0f / 60.0f);
             MainLoopTiming.DisplayFrame = bGetTicker();
             // MainLoop's ServiceResourceLoading, after eDisplayFrame: the
             // resource system's, then the frontend's bundles (bootQueue).

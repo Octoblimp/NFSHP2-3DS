@@ -1,4 +1,4 @@
-# The effect system (AcidFXE.obj, step 16, SC-3a to SC-3c)
+# The effect system (AcidFXE.obj, step 16, SC-3a to SC-3d)
 
 The effect system makes the game's particles: smoke from the tyres,
 sparks, water, fire, the munitions and the nebula behind the car in the
@@ -12,7 +12,8 @@ and an AcidEffectSystem's auto emitters and active groups. SC-3b makes
 and moves the particles: TriggerEmitter, DoTimeStep and
 UpdateInterestPoints. SC-3c draws them: RenderEffects builds each
 group's GS packet, and the device's trackview turns the packet into
-sprites. The car select's nebula is SC-3d.
+sprites. SC-3d puts the car select's nebula on FrameEffects, and steps
+FrameEffects each frame.
 
 The port is `3DS Files/source/acidsys.{c,h}`. `tools/afx_check.py` runs
 every function here on the retail image in mipsemu, and
@@ -163,7 +164,8 @@ The copy's State is 0 (OFF) and its seed is 0.
 WorldEffects' auto emitters, from the head, and puts a copy of each one
 found on the list's tail. A copy the pool can't give is left out. The
 cars' CarRenderInfo takes one list for each of its CARFX groups this
-way, and the car select's nebula takes FE_EMITTER's.
+way. The car select's nebula does not: it makes its own emitters and
+finds FE_EMITTER's data by its name (below).
 
 **afxDeleteEmitters** (0x00127368) takes each emitter off the list from
 its head and runs its deleting destructor with flags 3.
@@ -365,6 +367,53 @@ matrix, by eMulVector4, with t³ made as t² × t.
 The port's seam for eAttachDirectData is `gEAttachDirectDataFn`, which
 the device's trackview sets around its two calls (below).
 
+## The car select's nebula (SC-3d)
+
+The haze behind the car in the car select is 20 emitters of
+XE_SelectCarNebula (its name at 0x002b4ef8) on FrameEffects.
+They belong to the CarSelector (bcarsel.c): its emitter pointers at +388,
+with room for 64, their count at +644 and the shade at +648.
+
+- **Making them.** CarSelector's constructor makes them in one-player
+  mode alone; with two players the count is 0. Each one comes from the
+  emitters' constructor (0x001956e8): a slot from AcidEmitterSlotPool,
+  cleared from NameHash to its end, NumAcidEmitters counted, and the
+  name and its hash written. Then SetEmitterData(unsigned int) with its
+  own hash finds GLOBALB's one FE_EMITTER data, the State is ON and
+  AddAutoEmitter puts it on FrameEffects. Retail names whatever the pool
+  gives; the port skips a NULL, counted as retail counts it.
+- **UpdateNebula** (0x001963b8) runs at the end of each Tick and once in
+  the constructor. The shade (0 blue, 1 red-brown) moves 0.01 toward 0
+  while the car shown can be driven (or every car is unlocked) and
+  toward 1 while it is locked. Each emitter i stands at BAM i * 65536 /
+  20 on a ring of radius 15 round the turntable, 1.25 below it: its
+  LocalWorld is eRotateZ(BAM + 16384) of the identity, so it faces
+  along the ring, at (cos * 15, sin * 15, -1.25). If it has a data, the
+  data's four ColourMatrix keys are the two ends' keys lerped by the
+  shade. The ends are the static initializer's (0x00198bc8): the car to
+  drive's blue at 0x00310180, a locked car's at 0x003101c0. All 20
+  emitters share the one data and each writes the same keys again.
+- **The destructor** runs RemoveAutoEmitter and the deleting destructor
+  (flags 3) on each emitter, then KillAllActiveEffects on FrameEffects.
+  FlailerScreenList::SetEmitterState (0x0016c3b0), which it calls next,
+  is empty.
+- The particles move in FrameEffects' DoTimeStep, which main.c now runs
+  each frame (below), and draw in `trackview_draw_frontend`'s
+  RenderEffects (SC-3c). DoTimeStep's interest points come from views
+  1, 2 and 0; in the frontend view 1 is Player1Camera, which the
+  selector's camera mover moves.
+
+`tools/carsel_check.py` runs UpdateNebula, the emitters' constructor
+and SetEmitterState as shipped, with SetEmitterData, AddAutoEmitter,
+RemoveAutoEmitter, the deleting destructor and KillAllActiveEffects
+logged on both sides; it compares every byte of each emitter and the
+data's ColourMatrix after each op. With the nebula's scenario the whole
+script agrees: 8364 ops, 513,642 lines, 0 differ. Its 29 nebula
+mutations are caught but one, `neb-unlocked-only`, which is equivalent:
+the shade's test reads the selector's c[76] as retail's does, and c[76]
+is 0 from the constructor on. Its one other write, joy event 34's at
+0x00196b5c, is behind 0x0016fdb0, which returns 0.
+
 ## On the device
 
 - `sinit_run` calls `acid_static_init` as entry 9 (`sinit_check`: 24
@@ -379,8 +428,11 @@ the device's trackview sets around its two calls (below).
 - World's step runs WorldEffects' TweakerCheck and DoTimeStep through
   `gWorldEffectsTweakerCheckFn` and `gWorldEffectsDoTimeStepFn`
   (world.h), and DoTimeStep reads the flow state through
-  `gAcidGameFlowStateFn`, which is Fred's. FrameEffects' step in the
-  frontend's frame (0x00113fd0) comes with the nebula, SC-3d.
+  `gAcidGameFlowStateFn`, which is Fred's.
+- **FrameEffects' step (SC-3d).** main.c's frame runs FrameEffects'
+  DoTimeStep with a sixtieth of a second (gp-32668) after
+  `C3D_FrameEnd`, as eDisplayFrame's end (0x00113fd0) does once its
+  packets are sent. It does this in every frame drawn, the race's too.
 - LoaderTable slot 6 is `loader_acid_fx` and `unloader_acid_fx`
   (bchunkload.c), so every track's packs load. GLOBALB is loaded by hand
   in `loadGlobalCarInfo`, which now takes its two packs too: the car
@@ -418,6 +470,12 @@ the device's trackview sets around its two calls (below).
   accesses and an empty `nfshp2_stderr.txt`. With SC-3b's step the
   race still runs at 30 FPS with 0 unmapped accesses, and the car
   select passes.
+- With SC-3d the car select's log has a line a second, `carsel: nebula`:
+  FrameEffects' auto emitters, its groups, the particles RenderEffects
+  found visible and the sprites drawn, dropped and refused. On Azahar
+  it says 20 auto emitters, 20 groups and 3 to 30 particles and sprites
+  a frame, 0 dropped and 0 refused. A faint blue haze rises round the
+  Crown Victoria, and the run passes with 0 unmapped accesses.
 
 ## The checker
 
@@ -534,8 +592,13 @@ demo image's 178 ops and the retail image's 37375, 0 differ on both.
 
 ## Still open
 
-- **SC-3d:** the car select's nebula, 20 emitters of XE_SelectCarNebula
-  with UpdateNebula and SetEmitterState (0x0016c3b0).
-- GLOBALB has a group CARFX_BREAK_LICENSE_PLATE_REAR, but carrenderinfo.c's
-  kCarFxNames has CARFX_BREAK_LICENSE_PLATE_RIGHT. If retail's string
-  says RIGHT, that car effect finds no emitters. Check it in SC-3d.
+- How the nebula and the chimney smoke look on the New 3DS itself, and
+  what the `carsel: nebula` and `race: effects` lines say there.
+- The freeze and preview cams' radial blur, and the zones' sounds
+  (camera.md), which the effect system doesn't draw.
+
+Settled: GLOBALB has a group CARFX_BREAK_LICENSE_PLATE_REAR, but
+retail's own name (0x002acab0, beside ..._FRONT) is
+CARFX_BREAK_LICENSE_PLATE_RIGHT, as carrenderinfo.c's kCarFxNames has
+it. So in retail the rear plate's effect finds no emitters, and the port
+does the same.

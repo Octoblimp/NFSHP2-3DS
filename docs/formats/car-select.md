@@ -5,7 +5,7 @@ race, the championship, and two players. It is retail's SelectCarScreen
 and CarSelector (`SLES_507.31`), which the demo disc has only in part.
 SC-1 ports them as logic and 2D in `bcarsel.c`. SC-2 adds the car in 3D:
 its camera (`selcam.c`), the car and its reflection (`fecar.c`) and
-their light (`elight.c`). SC-3 adds the nebula behind it.
+their light (`elight.c`). SC-3d adds the nebula behind it.
 
 | class or function | address | port |
 |-------------------|---------|------|
@@ -22,6 +22,8 @@ their light (`elight.c`). SC-3 adds the nebula behind it.
 | AnimationGroup (retail's) | `0x00248568` | `slide*` |
 | FormatUnlockBlurbForCar | `0x0024b548` | `nfs_format_unlock_blurb_for_car` (`nfsrewards.c`) |
 | FrontendDatabase::UseTreeEvent | `0x001841e8` | `useTreeEvent`, inline |
+| the nebula's AcidEmitter constructor, UpdateNebula | `0x001956e8`, `0x001963b8` | `nebulaNew`, `updateNebula` |
+| FlailerScreenList::SetEmitterState | `0x0016c3b0` | empty, left out |
 
 Everything outside the selector and the Flailer goes out through
 `BCarSelHooks`, which `main.c` fills. Each hook's comment in `bcarsel.h`
@@ -209,6 +211,9 @@ press. Then, only while choosing:
   ±10000 up and down, and the sticks `(v − 128) × 70.3125` and
   `(v − 128) × −78.125`. Each touch marks the view and restarts its
   clock.
+- Event 34 would set the selector's c[76], every car open, when
+  `0x0016fdb0` says so. That function returns 0, so c[76] stays the
+  constructor's 0 and the port leaves the case out.
 
 **The popups**: SELECT on an available car moves to the gearbox
 (automatic, manual, the third), then the handling (two), then, for two
@@ -230,8 +235,9 @@ The stubs are scripted the same on both sides and log in the same
 words: the translations, the sounds, the help, the popups, the screen
 changes, the CarLoader, the easter eggs, the event trees, the text in
 its rectangle, the commentary and AssignCarOfType. The 3D's stubs are
-SC-2c's (its "The checker" below). The spotlights and the nebula are
-silent.
+SC-2c's (its "The checker" below). The spotlights are silent. The
+nebula runs as shipped over logged effect-system calls (`acidfx.md`,
+"The car select's nebula (SC-3d)").
 
 After each message, joy event, preload and close, every line that
 changed is printed:
@@ -241,7 +247,8 @@ changed is printed:
 - both rendering cars, the camera's fields and the frame buffer;
 - the preload's two cars and the CarLoader's flags;
 - both players' gearbox and handling;
-- every Flailer object's bytes.
+- every Flailer object's bytes;
+- the nebula's emitters, every byte, and its data's colour keys.
 
 The script runs You're The Cop with one player, a single race in
 French with kilometres, the championship in German, and two players on
@@ -249,7 +256,9 @@ both halves. It goes across locked, covered, egged and hidden cars and
 every skin. It takes the orbit view in and out, including its timeout
 at exactly 2400 frames and at 2401. It hides the unlock box and brings
 it back, and runs every popup and every way out of it. It also covers
-the help menu up, both units and all three languages.
+the help menu up, both units and all three languages. The nebula's
+data is found by every emitter, by none, and by all but every third,
+and its shade goes to a locked car's red and back.
 
 The model is slow: a tick costs about 170 ms in mipsemu, most of it
 retail's bSPrintf and FindFlailerObject for the 25 cloaks. The whole
@@ -758,7 +767,8 @@ and steps 4 and 5 land over them the same. `uirender_draw_visible_passes`
 draws a range of BUI_LAYER_ORDER, whose first UIR_BACK_PASSES (5) passes
 are layers 24 to 20. main.c's `drawCarSelTop` draws those, flushes
 citro2d, draws the 3D, prepares citro2d again, and draws the rest of the
-layers. The nebula effects, between steps 5 and 6, are SC-3.
+layers. The nebula's sprites, between steps 5 and 6, are FrameEffects'
+RenderEffects (`acidfx.md`, SC-3c and SC-3d).
 
 **The strips' passes.** RenderStrips' flag 16 leaves out the strips
 whose texture has ApplyAlphaSorting, and its flag 8 leaves out the
@@ -802,5 +812,5 @@ The run is clean: no unmapped reads, and the flow leaves the main loop.
 - The transmission popup dims the car with the rest.
 - Back returns to You're The Cop's setup with the car select's 3D gone.
 
-Not done here: the nebula (SC-3), the spotlights (dead code, above) and
-the frontend's other eModels. TRACK*_MINI is the track select's.
+Not done here: the spotlights (dead code, above) and the frontend's
+other eModels. TRACK*_MINI is the track select's.

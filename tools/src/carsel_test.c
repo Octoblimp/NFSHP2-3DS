@@ -27,10 +27,13 @@
 //   solid|V                the Solid eModel::Init gives the next model
 //   blend|I|V              selector I's camera's Blend
 //   frame|SIZE             a fresh frame-malloc buffer of SIZE bytes
+//   neb|MODE               the nebula's SetEmitterData: 1 every emitter finds
+//                          its data, 0 none, 2 all but every third
 //
 // After each msg, joy, preload and close every line that changed: the
-// screen, each selector's fields, cars, unlock box and thumbnail row, its
-// two rendering cars and its camera, the frame buffer, the preload, the
+// screen, each selector's fields, cars, unlock box, thumbnail row and
+// nebula (its emitters' bytes), its two rendering cars and its camera,
+// the frame buffer, the nebula's data's colour keys, the preload, the
 // CarLoader's two flags, the players' settings and every Flailer object's
 // bytes. The hooks and the 3D seams log their calls in the model's stubs'
 // words.
@@ -40,6 +43,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "acidsys.h"
 #include "bcarsel.h"
 #include "bui.h"
 #include "cartypeinfo.h"
@@ -546,6 +550,80 @@ void el_set_select_car_lighting(int32_t view_id, int32_t locked,
            (unsigned)fbits(bright));
 }
 
+// The nebula's: the emitters' pool, its count and FrameEffects are the
+// harness's, each slot from a table with its bytes 0xa5. SetEmitterData,
+// AddAutoEmitter, RemoveAutoEmitter, the emitter's delete and
+// KillAllActiveEffects are stubbed, here as in the model, and name an
+// emitter by the order the pool gave it. SetEmitterData answers with one
+// data for all, as the script's `neb` says: 0 none, 1 every emitter, 2
+// all but every third.
+#define MAX_EMITTERS 1024
+
+BSlotPool       *AcidEmitterSlotPool;
+int32_t          NumAcidEmitters;
+AcidEffectSystem FrameEffects;
+static AcidEmitter     emitterSlots[MAX_EMITTERS];
+static int             numEmitterSlots;
+static AcidEmitterData nebulaData;
+static int             nebulaMode = 1;
+
+static int emitter_id(const AcidEmitter *e)
+{
+    if (e >= emitterSlots && e < emitterSlots + numEmitterSlots)
+        return (int)(e - emitterSlots);
+    return -1;
+}
+
+static const char *system_name(const AcidEffectSystem *s)
+{
+    return s == &FrameEffects ? "frame" : "stray";
+}
+
+void *bSlotOMalloc(BSlotPool *pool)
+{
+    AcidEmitter *e;
+
+    if (pool != AcidEmitterSlotPool || numEmitterSlots == MAX_EMITTERS) {
+        printf("  stray omalloc\n");
+        exit(2);
+    }
+    e = &emitterSlots[numEmitterSlots++];
+    memset(e, 0xa5, sizeof *e);
+    return e;
+}
+
+int32_t acid_emitter_set_emitter_data_hash(AcidEmitter *e, uint32_t hash)
+{
+    int id = emitter_id(e);
+    int found = nebulaMode == 1 || (nebulaMode == 2 && id % 3 != 0);
+
+    printf("  acid data e%d %08x %d\n", id, (unsigned)hash, found);
+    if (!found) return 0;
+    e->EmitterData = &nebulaData;
+    return 1;
+}
+
+void acid_system_add_auto_emitter(AcidEffectSystem *s, AcidEmitter *e)
+{
+    printf("  acid add %s e%d state %d\n", system_name(s), emitter_id(e),
+           (int)e->State);
+}
+
+void acid_system_remove_auto_emitter(AcidEffectSystem *s, AcidEmitter *e)
+{
+    printf("  acid remove %s e%d\n", system_name(s), emitter_id(e));
+}
+
+void acid_emitter_delete(AcidEmitter *e, int32_t flags)
+{
+    printf("  acid delete e%d %d\n", emitter_id(e), (int)flags);
+}
+
+void acid_system_kill_all_active_effects(AcidEffectSystem *s)
+{
+    printf("  acid kill %s\n", system_name(s));
+}
+
 // A swatch: its fourth texel the hash's bits 4..6, a palette of eight
 // colours from the hash's three high bytes.
 TextureInfo *GetTextureInfo(uint32_t hash, int use_default,
@@ -809,6 +887,37 @@ static void dump_selector(int i, const CarSelector *c)
     hex(text, (const uint8_t *)&c->thumbs, 0, 48);
     note(key, text);
 
+    snprintf(key, sizeof key, "neb%d", i);
+    o = text;
+    o += sprintf(o, "n %d shade %08x", (int)c->nNebula,
+                 (unsigned)fbits(c->nebulaLocked));
+    for (int k = 0; k < c->nNebula && k < BCARSEL_MAX_NEBULA; k++)
+        o += sprintf(o, " e%d", emitter_id(c->nebula[k]));
+    note(key, text);
+    for (int k = 0; k < c->nNebula && k < BCARSEL_MAX_NEBULA; k++) {
+        const AcidEmitter *e = c->nebula[k];
+        if (!e) continue;
+        snprintf(key, sizeof key, "neb%d.%d", i, k);
+        o = text;
+        o += sprintf(o, "hash %08x %08x state %d rem %08x cd %08x data %s "
+                     "last %d seed %08x dont %08x pad %08x world ",
+                     (unsigned)e->NameHash, (unsigned)e->EmitterDataNameHash,
+                     (int)e->State, (unsigned)fbits(e->RemainingCycleTime),
+                     (unsigned)fbits(e->EmissionCountdown),
+                     !e->EmitterData ? "0"
+                     : e->EmitterData == &nebulaData ? "neb" : "stray",
+                     e->LastActiveGroup != NULL, (unsigned)e->RandomSeed,
+                     (unsigned)e->DontEmit, (unsigned)e->pad2);
+        hex(o, (const uint8_t *)&e->LocalWorld, 0, 64);
+        o += strlen(o);
+        o += sprintf(o, " inherit ");
+        hex(o, (const uint8_t *)&e->InheritVelocity, 0, 16);
+        o += strlen(o);
+        o += sprintf(o, " name ");
+        hex(o, (const uint8_t *)e->Name, 0, 64);
+        note(key, text);
+    }
+
     snprintf(key, sizeof key, "swatch%d", i);
     o = text;
     *o = 0;
@@ -867,6 +976,12 @@ static void dump(void)
              (long)(CurrentBufferPos - frameBase), (int)FrameMallocFailed,
              (unsigned)FrameMallocFailAmount);
     note("frame", text);
+    {
+        char acid[200], *o = acid;
+        o += sprintf(o, "emitters %d colour ", (int)NumAcidEmitters);
+        hex(o, (const uint8_t *)&nebulaData.ColourMatrix, 0, 64);
+        note("acid", acid);
+    }
     for (int i = 0; i < 2; i++) {
         char key[8];
         snprintf(key, sizeof key, "pl%d", i);
@@ -1009,6 +1124,7 @@ static void run(char *line)
     } else if (!strcmp(a[0], "joy"))
         bcarsel_joy(inum(a[1]), inum(a[2]), (uint8_t)num(a[3]));
     else if (!strcmp(a[0], "tex")) texMode = inum(a[1]);
+    else if (!strcmp(a[0], "neb")) nebulaMode = inum(a[1]);
     else if (!strcmp(a[0], "solid")) solidNext = num(a[1]);
     else if (!strcmp(a[0], "blend"))
         module.screen->selectors[inum(a[1])]->mover.Blend = fnum(a[2]);
@@ -1051,6 +1167,7 @@ int main(int argc, char **argv)
         loadedAns[i] = 1;
         evTree[i] = -1;
     }
+    memset(&nebulaData, 0xa5, sizeof nebulaData);
 
     memset(&h, 0, sizeof h);
     h.translate = h_translate;

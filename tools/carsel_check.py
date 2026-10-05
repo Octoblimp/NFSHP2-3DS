@@ -33,15 +33,20 @@ SetSelectCarLighting; and GetTextureInfo, which answers each swatch with a
 texture made from its hash, or with one of four kinds of nothing.
 UpdateRenderingCarParameters, UpdateCarCover, ShowLoadedCar and the
 lighting's sum run for real, as do eIdentity and the rotations under them,
-and the frame-malloc inline over a scripted buffer. The spotlights and the
-nebula (SC-3) are stubbed silent.
+and the frame-malloc inline over a scripted buffer. The spotlights are
+stubbed silent. The nebula (SC-3d) runs for real -- UpdateNebula, the
+emitters' constructor from their slot pool and FlailerScreenList's empty
+SetEmitterState -- over logged SetEmitterData (which finds the one data
+for all, none or all but every third emitter), AddAutoEmitter,
+RemoveAutoEmitter, the emitter's destructor and KillAllActiveEffects.
 
 **Compared** are the stubs' logs, what the callback leaves in the
 ScreenCallbackData, and after each op every line that changed: the screen,
 each selector's fields, its car list in order, the unlock box, the
-thumbnails' spline, the swatches, both rendering cars (flags, model,
-lights, place and every matrix) and the camera's fields; the frame
-buffer; the preload's two cars; the CarLoader's flags; both players'
+thumbnails' spline, the swatches, the nebula's emitters (every byte), both
+rendering cars (flags, model, lights, place and every matrix) and the
+camera's fields; the frame buffer; the nebula data's colour keys; the
+preload's two cars; the CarLoader's flags; both players'
 gearbox and handling; and every Flailer object's bytes.
 
 **The script** runs You're The Cop's player, a single race (a tree event)
@@ -49,7 +54,9 @@ and the championship with one player, and two players on both halves;
 across locked, covered, egged and hidden cars, every skin, the orbit view
 in and out (and its timeout), the unlock box hidden and back, every popup
 and every way out of it, the help menu up, both units, three languages and
-every event tree; and the preload and the close.
+every event tree; the nebula's shade walked to red and back across every
+car, with its data found by all, none and some of the emitters; and the
+preload and the close.
 
     python tools/carsel_check.py
     python tools/carsel_check.py --mutate [--only a,b] [--jobs N]
@@ -179,12 +186,22 @@ S_CAM_ORIENT = 0x0015a978
 S_CAM_DTOR = 0x0015a880
 S_LIGHTING = 0x001157c0
 S_TEXINFO = 0x001abf48
+# The nebula's (SC-3d): SetEmitterData(unsigned int), AddAutoEmitter,
+# RemoveAutoEmitter, AcidEmitter's deleting destructor, KillAllActiveEffects;
+# FrameEffects, the emitters' pool and their count.
+S_SETDATA = 0x001273d8
+S_ADDAUTO = 0x001274a0
+S_REMOVEAUTO = 0x00127688
+S_EMITTER_DTOR = 0x00124e20
+S_KILLALL = 0x001276a8
+FRAME_EFFECTS = 0x002ef5e0
+G_EMITTER_POOL = GP - 23520
+G_NUM_EMITTERS = GP - 23516
+DATA_SIZE = 544                         # AcidEmitterData
+EMITTER_SIZE = 192
 SILENT = [
     0x0016ad88,                         # FlailerScreenConfig's constructor
     0x0011e858,                         # FrontEndRenderingCar's alpha
-    0x001273d8, 0x001274a0, 0x00127688, 0x00124e20, 0x001276a8,  # Acid
-    0x001963b8,                         # UpdateNebula
-    0x0016c3b0,                         # SetEmitterState
     0x00114e98, 0x00114e90,             # delete
 ]
 
@@ -688,6 +705,33 @@ def s_extra(s):
     s.g("players", 1)
 
 
+def s_nebula(s):
+    """The nebula: its data found by all but every third emitter, by none
+    and by all; the shade up to a locked car's red and held there, across
+    the list, and held at blue."""
+    s.g("gametype", 3)
+    s.g("players", 1)
+    s.g("lang", 0)
+    s.g("allcars", 0)
+    s.statuses(0, kind_a)
+    locked = (s.of(0, 1) + s.of(0, 4))[0]
+    avail = s.of(0, 0)[0]
+    s.add("neb|2", "ride|0|3|%d|%d" % (locked.type, locked.skins[0]))
+    s.msg(ACTIVATE, SCREEN_1P, 0)
+    s.tick(105)
+    walk(s, 0, len(s.cars) + 2, RIGHT, render=False)
+    s.tick(105)
+    s.msg(UNACTIVATE, SCREEN_1P, 0)
+    s.add("neb|0", "ride|0|3|%d|%d" % (avail.type, avail.skins[0]))
+    s.msg(ACTIVATE, SCREEN_1P, 0)
+    s.tick(3)
+    s.msg(UNACTIVATE, SCREEN_1P, 0)
+    s.add("neb|1")
+    s.msg(ACTIVATE, SCREEN_1P, 0)
+    s.tick(3)
+    s.msg(UNACTIVATE, SCREEN_1P, 0)
+
+
 def script():
     s = Script()
     common(s)
@@ -696,6 +740,7 @@ def script():
     s_single(s, 9, 2, 0)
     s_two(s)
     s_extra(s)
+    s_nebula(s)
     return s.ops
 
 
@@ -760,7 +805,20 @@ class Model(fc.Model):
                                              em.reg[5]),
             S_CAM_ORIENT: self.s_cam_orient, S_LIGHTING: self.s_lighting,
             S_TEXINFO: self.s_texinfo, S_FERC: self.s_ferc,
+            S_SETDATA: self.s_setdata, S_ADDAUTO: self.s_addauto,
+            S_REMOVEAUTO: self.s_removeauto,
+            S_EMITTER_DTOR: self.s_emitter_dtor, S_KILLALL: self.s_killall,
         }
+        # The nebula's emitters come from a pool of their own, told apart
+        # by its address, each slot's bytes 0xa5; the one data they share
+        # starts 0xa5 too.
+        self.pool = e.alloc(16, align=16)
+        e.put32(G_EMITTER_POOL, self.pool)
+        e.put32(G_NUM_EMITTERS, 0)
+        self.emitters = {}
+        self.nebmode = 1
+        self.nebdata = e.alloc(DATA_SIZE, align=16)
+        e.write(self.nebdata, b"\xa5" * DATA_SIZE)
         for a, fn in stubs.items():
             e.stub(a, fn)
         for a in SILENT:
@@ -1020,9 +1078,48 @@ class Model(fc.Model):
         self.joys.pop((s32(em.reg[4] & M32), s32(em.reg[5] & M32)), None)
 
     def s_omalloc(self, em):
+        if em.reg[4] & M32 == self.pool:
+            a = self.e.alloc(EMITTER_SIZE, align=16)
+            self.e.write(a, b"\xa5" * EMITTER_SIZE)
+            self.emitters[a] = len(self.emitters)
+            return a
         a = self.e.alloc(256, align=16)
         self.e.write(a, bytes(256))
         return a
+
+    def eid(self, a):
+        return self.emitters.get(a & M32, -1)
+
+    @staticmethod
+    def sysname(a):
+        return "frame" if a & M32 == FRAME_EFFECTS else "stray"
+
+    def s_setdata(self, em):
+        a = em.reg[4] & M32
+        i = self.eid(a)
+        found = self.nebmode == 1 or (self.nebmode == 2 and i % 3 != 0)
+        self.emit("  acid data e%d %08x %d" % (i, em.reg[5] & M32,
+                                               1 if found else 0))
+        if not found:
+            return 0
+        self.e.put32(a + 28, self.nebdata)
+        return 1
+
+    def s_addauto(self, em):
+        a = em.reg[5] & M32
+        self.emit("  acid add %s e%d state %d" % (
+            self.sysname(em.reg[4]), self.eid(a), s32(self.e.u32(a + 16))))
+
+    def s_removeauto(self, em):
+        self.emit("  acid remove %s e%d" % (self.sysname(em.reg[4]),
+                                            self.eid(em.reg[5])))
+
+    def s_emitter_dtor(self, em):
+        self.emit("  acid delete e%d %d" % (self.eid(em.reg[4]),
+                                            s32(em.reg[5] & M32)))
+
+    def s_killall(self, em):
+        self.emit("  acid kill %s" % self.sysname(em.reg[4]))
 
     def s_mover(self, em):
         a = em.reg[4] & M32
@@ -1095,6 +1192,24 @@ class Model(fc.Model):
             g(sl + 12), g(sl + 16), s32(g(sl + 20)), s32(g(sl + 24)),
             bytes(e.mem[sl + 28:sl + 76]).hex(), self.string(u + 92)))
         self.note("thumbs%d" % i, bytes(e.mem[c + 332:c + 380]).hex())
+        n = si(644)
+        ems = [g(c + 388 + 4 * k) for k in range(max(0, min(n, 64)))]
+        self.note("neb%d" % i, "n %d shade %08x%s" % (
+            n, g(c + 648), "".join(" e%d" % self.eid(a) for a in ems)))
+        for k, a in enumerate(ems):
+            if not a:
+                continue
+            d = g(a + 28)
+            self.note("neb%d.%d" % (i, k), (
+                "hash %08x %08x state %d rem %08x cd %08x data %s last %d "
+                "seed %08x dont %08x pad %08x world %s inherit %s "
+                "name %s") % (
+                g(a + 8), g(a + 12), s32(g(a + 16)), g(a + 20), g(a + 24),
+                "0" if not d else "neb" if d == self.nebdata else "stray",
+                1 if g(a + 32) else 0, g(a + 36), g(a + 40), g(a + 44),
+                bytes(e.mem[a + 48:a + 112]).hex(),
+                bytes(e.mem[a + 112:a + 128]).hex(),
+                bytes(e.mem[a + 128:a + 192]).hex()))
         self.note("swatch%d" % i, " ".join(
             "%08x:%08x" % (g(c + 236 + 4 * k), g(c + 276 + 4 * k))
             for k in range(10)))
@@ -1137,6 +1252,9 @@ class Model(fc.Model):
         self.note("frame", "used %d failed %d amount %d" % (
             s32((g(G_FPOS) - self.frame) & M32), s32(g(G_FFAIL)),
             g(G_FAMOUNT)))
+        self.note("acid", "emitters %d colour %s" % (
+            s32(g(G_NUM_EMITTERS)),
+            bytes(e.mem[self.nebdata + 160:self.nebdata + 224]).hex()))
         for i in range(2):
             st = F_FPI + FPI_SIZE * i + FPI_SETTINGS
             self.note("pl%d" % i, "trans %d style %d" % (
@@ -1226,6 +1344,8 @@ class Model(fc.Model):
             self.isl[v(1)] = v(2)
         elif o == "tex":
             self.texmode = v(1)
+        elif o == "neb":
+            self.nebmode = v(1)
         elif o == "solid":
             self.solid = v(1)
         elif o == "blend":
@@ -1814,6 +1934,65 @@ MUTATIONS = [
     M("back-selected", "            if (p) screenSetSelectedCars(p);" + NL, ""),
     M("joy-port-filter", "if (c->twoPlayer && c->port != port) continue;",
       "if (c->port != port) continue;"),
+    # The nebula (SC-3d): UpdateNebula.
+    M("neb-unlocked-only", "if (cur(c)->available || c->allUnlocked) {",
+      "if (cur(c)->available) {"),
+    M("neb-available-only", "if (cur(c)->available || c->allUnlocked) {",
+      "if (c->allUnlocked) {"),
+    M("neb-step-down", "c->nebulaLocked -= NEBULA_STEP;",
+      "c->nebulaLocked -= 0.02f;"),
+    M("neb-step-up", "c->nebulaLocked += NEBULA_STEP;",
+      "c->nebulaLocked += 0.011f;"),
+    M("neb-clamp-low", "if (c->nebulaLocked < 0.0f) c->nebulaLocked = 0.0f;",
+      ""),
+    M("neb-clamp-high", "if (c->nebulaLocked > 1.0f) c->nebulaLocked = 1.0f;",
+      ""),
+    M("neb-ring-step", "step = (uint16_t)(0x10000 / c->nNebula);",
+      "step = (uint16_t)(0x10000 / (c->nNebula + 1));"),
+    M("neb-face", "eRotateZ(&m, &m, (uint16_t)(bam + 16384));",
+      "eRotateZ(&m, &m, bam);"),
+    M("neb-x-sin", "m.v3.x = bCosBam(bam) * NEBULA_RADIUS;",
+      "m.v3.x = bSinBam(bam) * NEBULA_RADIUS;"),
+    M("neb-y-radius", "m.v3.y = bSinBam(bam) * NEBULA_RADIUS;",
+      "m.v3.y = bSinBam(bam) * 14.0f;"),
+    M("neb-z", "m.v3.z = NEBULA_Z;", "m.v3.z = -NEBULA_Z;"),
+    M("neb-key-row", "key = &d->ColourMatrix.v0;", "key = &d->ColourMatrix.v1;"),
+    M("neb-lerp-x", "key[k].x = (b->x - a->x) * t + a->x;",
+      "key[k].x = (b->x - a->x) * t + b->x;"),
+    M("neb-lerp-y", "key[k].y = (b->y - a->y) * t + a->y;",
+      "key[k].y = (b->y - a->y) * (1.0f - t) + a->y;"),
+    M("neb-lerp-z", "key[k].z = (b->z - a->z) * t + a->z;",
+      "key[k].z = (b->x - a->x) * t + a->z;"),
+    M("neb-lerp-w", "key[k].w = (b->w - a->w) * t + a->w;",
+      "key[k].w = (a->w - b->w) * t + a->w;"),
+    M("neb-tick", "    updateThumbnails(c);" + NL + "    updateNebula(c);" + NL,
+      "    updateThumbnails(c);" + NL),
+    # The emitters made, and unmade.
+    M("neb-new-clear", "sizeof(*e) - offsetof(AcidEmitter, NameHash));",
+      "sizeof(*e) - offsetof(AcidEmitter, NameHash) - 16);"),
+    M("neb-new-count", "    NumAcidEmitters++;" + NL, ""),
+    M("neb-new-hash", "e->NameHash = bchunk_hash(NEBULA_NAME);",
+      "e->NameHash = bchunk_hash(\"XE_SelectCarNebul\");"),
+    M("neb-two-player", "        c->nNebula = 0;" + NL,
+      "        c->nNebula = 1;" + NL),
+    M("neb-shade-start", "        c->nebulaLocked = 0.0f;" + NL,
+      "        c->nebulaLocked = 1.0f;" + NL),
+    M("neb-data", "            acid_emitter_set_emitter_data_hash(e, e->NameHash);" + NL,
+      ""),
+    M("neb-state", "            e->State = ACID_ON;" + NL,
+      "            e->State = ACID_OFF;" + NL),
+    M("neb-add", "            acid_system_add_auto_emitter(&FrameEffects, e);" + NL,
+      ""),
+    M("neb-place", "            acid_system_add_auto_emitter(&FrameEffects, e);" + NL
+      + "        }" + NL + "        updateNebula(c);" + NL,
+      "            acid_system_add_auto_emitter(&FrameEffects, e);" + NL
+      + "        }" + NL),
+    M("neb-remove", "        acid_system_remove_auto_emitter(&FrameEffects, e);" + NL,
+      ""),
+    M("neb-delete-flags", "acid_emitter_delete(e, 3);", "acid_emitter_delete(e, 1);"),
+    M("neb-kill", "    acid_system_kill_all_active_effects(&FrameEffects);" + NL
+      + "    dismissPopup(c);",
+      "    dismissPopup(c);"),
 ]
 
 EQUIVALENT = {
@@ -1837,6 +2016,10 @@ EQUIVALENT = {
                     "eRotateZ leaves row 3 alone",
     "light-one-skin": "SetSkin, NextSkin and PrevSkin can only leave a "
                       "one-skin car's index at 0",
+    # SC-3d's.
+    "neb-unlocked-only": "c[76] is 0 from the constructor on: its one "
+                         "other write, joy event 34's (0x00196b5c), is "
+                         "behind 0x0016fdb0, which returns 0",
 }
 
 
