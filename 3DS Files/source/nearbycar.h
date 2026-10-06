@@ -152,6 +152,14 @@ extern BeltMoverGravityFn gBeltMoverGravityFn;
 //   max   = (accel * 1.0 - drag / Body.Mass) + grade
 float ai_calculate_max_acceleration(Car *car, float speed);
 
+// 0x001ccf78. The most the car could decelerate at `speed`, negative: the
+// tyres' grip under the car's weight and its downforce, over its mass.
+//
+//   down  = (Aero.FrontDownforce + Aero.RearDownforce) * 0.5
+//   mu    = (Tires[1] + Tires[0]).StaticFrictionCoefficient * 0.5
+//   max   = -(((|speed| * down + 9.8 * Body.Mass) * mu) / Body.Mass)
+float ai_calculate_max_deceleration(Car *car, float speed);
+
 // 0x001ccfd8. Whether `car` could reach `nc` within
 // AIActionPassMaxTimeAheadToMakeAttempt seconds: the distance below the
 // closing speed's run plus half the difference in forward accelerations

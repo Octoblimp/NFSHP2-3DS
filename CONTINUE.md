@@ -1,11 +1,11 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 38
-(2026-10-06), after 11b-4b, MakeNewChoice.
+(2026-10-06), after 11c, AIPlan and the AIAction base.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
-11b-2 to 11b-4b, DrivingChoice whole, and 11b-4a, CarCollisionPredict,
-are done and checked against retail. The car selector is finished and checked against retail: SC-1
+11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, and
+11c, AIPlan and the AIAction base, are done and checked against retail. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -165,52 +165,68 @@ car's were.
     unexplained. 11b-4b's share is 149, with 140 caught and 9
     equivalent.
   - `docs/formats/ai-driving-choice.md` has the detail.
-- **11c, next:** AIPlan and the AIAction base.
-  - **What is in it.** AIPlan:
-    - the constructor (0x001cac70) and destructor (0x001cac48);
-    - SetTimeout (0x001cab90), which stamps WorldTimer's ticks and the
-      timeout;
-    - TimeToChange, IsExpired and the status tests;
-    - InitAIPlans and CloseAIPlans (0x001c6028 / 0x001c6058). These
-      make "AIActionSlotPool" (640 bytes, 15 slots) and close it, and
-      CloseAIPlans tail-calls DestoryTargetMarkers.
-  - AIAction:
-    - the constructor (0x001c6118, (int score, float timeout)) and
-      destructor (0x001c6b30);
-    - new and delete on the pool;
-    - SetDesiredSpeedSlowerThanThisCar, SetDesiredSpeedToMax
-      Acceleration and SetDesiredSpeedToMaxDeceleration;
-    - GetHeadingClassification (0x001c65e0) and
-      GetCollisionClassification (0x001c69d8);
-    - UpdateStatus (0x001c6a98), which calls HasExpired, HasFailed and
-      HasBeenAccomplished through the vptr at 16, at slots 56, 48 and
-      40;
-    - ClearPointsToDrive.
-  - The free CalculateMaxDeceleration (0x001ccf78) comes with it, and
-    IsPointAheadOfCar is already in `drivetarget.c`. The DoSnapshots
-    wait on ReplaySnapshot.
-  - **Retail's record is 608 bytes.**
-    - AIPlan is 20: CanExpire 0, ExpiryTimer 4, DeltaTime 8, Status 12
-      (PlanStatus: NOT_DONE, SUCCESS, FAILURE, EXPIRED), the vptr 16.
-    - PointsToDrive is at 32. Then PointsToDriveWillExecuteAction 560,
-      DesiredSpeed 564 and TimeToGetToDesiredSpeed 568.
-    - Retail's new float is at 572. It is passed to the driver's
-      SetDesiredSpeed as a third float, and PsychoDriver's
-      CalcThrottleAndBrake coasts within it of the desired speed. The
-      port calls it DesiredSpeedTolerance.
-    - Then UseDrivingLineSpeed 576, AllowedToUseThrottleAndBrake 580,
-      AllowedToUseBoost 584, Type 588 and Score 592.
-    - The constructor's int is the Score. Type is the subclasses'.
-  - The out-of-line accessors have no callers, and the setters are
-    empty in both images.
-  - Two things in GetHeadingClassification:
-    - Its second time-to-edge test repeats the first's three
-      conditions, so it is never reached: a car drifting left is never
-      timed.
-    - With the steer-to point asked for, it calls the driver's
-      GetSteerToPoint (slot 160) twice. The first answer goes through
-      WorldToCar and is dropped.
-- 11d: the actions.
+- **11c, done:** AIPlan and the AIAction base, in `aiaction.c`.
+  - AIPlan has its constructor, destructor, SetTimeout, TimeToChange
+    and the status tests.
+  - AIAction has:
+    - its constructor and destructor, and new and delete on
+      "AIActionSlotPool";
+    - UpdateStatus and the three SetDesiredSpeeds;
+    - GetHeadingClassification and GetCollisionClassification;
+    - ClearPointsToDrive and GetName.
+  - InitAIPlans and CloseAIPlans make the pool as a track loads and
+    delete it as it unloads (`gInitAIPlansFn`, `gCloseAIPlansFn`).
+    CalculateMaxDeceleration is in `nearbycar.c`.
+  - The record is retail's 608 bytes, with DesiredSpeedTolerance at
+    572. `aicarcontroller.h`'s placeholder for it is gone.
+  - SetDesiredSpeedSlowerThanThisCar divides by zero for a car keeping
+    pace (0x001c6520), so that divide is ee_div.
+  - `nearbycar_check`: 58 scenarios, 16,061 lines, 0 differ. Its
+    mutation pass has 220 mutations, all caught; 11c's share is 121. The
+    first pass left nine alive, all gaps in the script. s_ai_edges
+    closes them with exact cases: edges at exactly 0, a time to the edge
+    of exactly 1.0f, and a route whose direction is not unit length.
+  - `docs/formats/ai-action.md` has the detail.
+- **11d: the actions.** Eleven subclasses, retail 0x001c6ba0 to
+  0x001caa00; `out/retail_syms.txt` has every function. They split
+  three ways by size:
+  - **11d-1, next:** the five small ones:
+    - JustDrive (0x001c73c0; CalculatePointsToDrive is 468 bytes);
+    - Draft (0x001c7690);
+    - NudgeCar (0x001c8028);
+    - Block (0x001c8160);
+    - AccidentRecovery (0x001ca1f0, with SortOfParallelToTrack).
+
+    Each comes with its constructor, CalculateScore, the three tests,
+    CalculatePointsToDrive, GetName and destructor. The last two are
+    0x001ca5b8 to 0x001ca988.
+  - 11d-2: Pass (0x001c78f8, with SideOfCarIsOkay) and AvoidCars
+    (0x001c6ba0, whose CalculatePointsToDrive is 1220 bytes).
+  - 11d-3:
+    - PullOver (0x001c8298);
+    - GetUnstuck (0x001c8b30, with AreWeStuckBehindSomeone and the
+      goal points);
+    - AvoidRoadBlock (0x001c9668), which reads the cops' tRoadBlock;
+    - IJustGotHit (0x001c9c68).
+  - The demo's mangled names give the constructors' arguments. Every
+    one starts (int score, float timeout); after those come:
+
+    | Action | Then |
+    |---|---|
+    | AvoidCars | Car *, float, bool, bool |
+    | Pass | Car *, float |
+    | NudgeCar, Block, IJustGotHit | Car * |
+    | PullOver, GetUnstuck | float, float |
+    | AvoidRoadBlock | const tRoadBlock * |
+
+    JustDrive, Draft and AccidentRecovery take nothing more. Retail's
+    may differ where the ratio is low; read each constructor.
+  - Each subclass's fields sit sixteen bytes later than the demo's
+    (retail's 608-byte base). Their tables are in retail's `.data` near
+    `_vt$8AIAction` (0x002b7c90). The DoSnapshots wait on ReplaySnapshot.
+  - `nearbycar_check` has the base's ops and its stubs (the pool, the
+    driver's GetSteerToPoint). Its test table can give way to the real
+    tests.
 - 11e and 11f: AICarController and AIDriver (`gAIDriverCtorFn` in
   `carmodes.h`, and `gAICarControllerGetCurrentDrivingLineSpeedFn` in
   `car.h`).
@@ -3790,21 +3806,22 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-06, after 11b-4b, MakeNewChoice)
+### Where the port stands (2026-10-06, after 11c, AIPlan and AIAction)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11c, AIPlan and the AIAction
-  base. See "Now" at the top. These are done:
+- **Next:** step 11, the racer AI: 11d-1, the five small actions.
+  See "Now" at the top. These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
   - 11b-2, DrivingChoice's small methods and the walk;
   - 11b-3, BuildDriveTarget and round a car;
   - 11b-4a, CarCollisionPredict;
-  - 11b-4b, MakeNewChoice and the three it calls.
+  - 11b-4b, MakeNewChoice and the three it calls;
+  - 11c, AIPlan and the AIAction base.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -3816,7 +3833,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a and 11b-1 to 11b-4b done) | 5-7 |
+  | 11, the racer and traffic AI (11a to 11c done) | 6-8 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |
@@ -3824,15 +3841,16 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped; New 3DS only since 2026-10-05) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **26-40** |
+  | **Total** | **27-41** |
 
-- **How far along:** about 30-33 of the road's 56-73 slices are done,
+- **How far along:** about 31-34 of the road's 58-75 slices are done,
   roughly a third. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
-  Read the 26-40 as a floor. Step 11 was put at 4-6 before its slices
-  were laid out. They are eleven, with traffic beside them: 11a, 11b-1
-  to 11b-3, 11b-4a and 11b-4b, and 11c to 11g. 11b was one slice until DrivingChoice's 13 KB
-  were read.
+  Read the 27-41 as a floor. Step 11 was put at 4-6 before its slices
+  were laid out. They are thirteen, with traffic beside them: 11a, 11b-1
+  to 11b-3, 11b-4a and 11b-4b, 11c, 11d-1 to 11d-3, and 11e to 11g. 11b
+  was one slice until DrivingChoice's 13 KB were read, and 11d until the
+  eleven actions were counted.
 - **The pace:** 80 commits from 2026-09-27 to 2026-10-04, most of them a
   slice each.
 - **Not yet in the count:** the replay, and with it the race's music

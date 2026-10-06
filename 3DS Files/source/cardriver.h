@@ -95,6 +95,7 @@ typedef char cardriver_layout_check[
 #define CARDRIVER_VT_STOP_HONK_HORN   96
 #define CARDRIVER_VT_IS_HONKING      104
 #define CARDRIVER_VT_GET_DESIRED_SPEED 136
+#define CARDRIVER_VT_GET_STEER_TO_POINT 160
 
 // Twenty-one entries in each table, the empty header included.
 #define CARDRIVER_VT_ENTRIES 21

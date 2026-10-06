@@ -238,6 +238,19 @@ float ai_calculate_max_acceleration(Car *car, float speed)
     return (accel - dragAccel) + grade;
 }
 
+float ai_calculate_max_deceleration(Car *car, float speed)
+{
+    // 0x001ccf78. Retail's order: both halves before the weight, and the
+    // downforce term first in the sum.
+    CarTypeInfo *ti = car->pCarTypeInfo;
+    float down = (ti->Aero.FrontDownforce + ti->Aero.RearDownforce) * 0.5f;
+    float mu = (ti->Tires[1].StaticFrictionCoefficient
+                + ti->Tires[0].StaticFrictionCoefficient) * 0.5f;
+    float weight = RIGIDBODY_GRAVITY * ti->Body.Mass;
+
+    return -(((fabsf(speed) * down + weight) * mu) / ti->Body.Mass);
+}
+
 int ai_can_i_catch_this_car(NearbyCar *nc, Car *car, float maxAccel,
                             int flag)
 {

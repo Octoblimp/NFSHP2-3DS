@@ -47,6 +47,7 @@
 #include <time.h>
 
 #include "acidsys.h"
+#include "aiaction.h"
 #include "bchunk.h"
 #include "bchunkload.h"
 #include "bmem.h"
@@ -3191,6 +3192,7 @@ int main(int argc, char** argv)
     realdriver_install_vtable();
     collisionbody_install_vtables();
     carcollisionbody_install_vtable();
+    aiaction_install_vtables();
 
     // Car::SetControlMode reaches the controllers task 26 brings through
     // seams; a NULL one is a class not ported yet, and the arm aborts.
@@ -3642,6 +3644,10 @@ int main(int argc, char** argv)
     // whose constructor builds the race -- InitForRace's players, Race,
     // World and cars -- and the Begin of unloading's delete. InitForRace's
     // ReplayManager is the stand-in above.
+    // InitAIPlans and CloseAIPlans: the AI actions' slot pool, made as a
+    // track loads and deleted as it unloads.
+    gInitAIPlansFn           = ai_init_ai_plans;
+    gCloseAIPlansFn          = ai_close_ai_plans;
     gNewRaceCoordinatorFn    = racecoordinator_new;
     gDeleteRaceCoordinatorFn = racecoordinator_destroy;
     gReplayManagerCtorFn     = replayStandIn;

@@ -14902,6 +14902,70 @@ share is 149, with 140 caught and 9 equivalent.
 Next is 11c: AIPlan and the AIAction base. CONTINUE.md has retail's
 608-byte record and what is in the slice.
 
+### Step 11c: AIPlan and the AIAction base
+
+`aiaction.c` is the part of the racer AI every action shares:
+- AIPlan: its constructor, destructor, SetTimeout, TimeToChange and the
+  status tests;
+- AIAction's constructor and destructor, and new and delete on
+  "AIActionSlotPool" (640 bytes, 15 slots);
+- UpdateStatus, which asks HasExpired, HasFailed and HasBeenAccomplished
+  through the vptr in that order, each true answer overriding the last;
+- the three SetDesiredSpeeds, GetHeadingClassification,
+  GetCollisionClassification, ClearPointsToDrive and GetName;
+- InitAIPlans and CloseAIPlans, which `main.c` hands to the track's load
+  and unload (`gInitAIPlansFn`, `gCloseAIPlansFn`).
+
+CalculateMaxDeceleration (0x001ccf78) is in `nearbycar.c`. The record is
+retail's 608 bytes, with the float at 572 the port calls
+DesiredSpeedTolerance. `aicarcontroller.h` includes it now in place of
+its placeholder.
+
+Things the listing gives away:
+- SetTimeout's `c.le.s`: a timeout of -0 can expire, NaN cannot.
+- GetHeadingClassification's second time-to-edge test repeats the
+  first's three conditions, so a car drifting left is never timed.
+- With the steer check, GetHeadingClassification asks the driver's
+  GetSteerToPoint twice and drops the first answer.
+- GetCollisionClassification holds the contact's x, across the car,
+  against the box's y extents, along it.
+- SetDesiredSpeedSlowerThanThisCar divides by zero for a car keeping
+  pace (0x001c6520). The EE's FLT_MAX makes the time FLT_MAX or 0.1, so
+  the divide is ee_div. It is the only site the model sees take the
+  EE's path.
+
+The host build caught one thing first. bVector3 has no alignment of its
+own in the port, so on the PC PointsToDrive landed at 20. Both pads are
+spelt out now (`_pad20`, `_pad596`).
+
+`nearbycar_check` runs the base on retail's image. Its stubs are the
+pool's four calls, DestoryTargetMarkers, `__builtin_delete`, a test table
+for the three tests (deltas 0, 8 and -4, so `this` is seen adjusted) and
+each driver's GetSteerToPoint. The first run had 0 differ.
+
+The first mutation pass left nine alive, all gaps in the script:
+- the gap's association needed MyHalfSizeD set and times above the
+  0.1 s floor;
+- six of the heading's edges needed exact values: the right or left
+  distance exactly 0, and a drift of under 0.001 m/s;
+- one needed a time to the edge of exactly 1.0f. A search in the
+  function's float order found y = -6.999996 with vy = -1 on the
+  straight route;
+- one needed a route direction that is not unit length, since making a
+  unit vector unit again changed nothing.
+
+s_ai_edges has them all.
+
+`nearbycar_check` runs 58 scenarios, 9,667 ops and 16,061 lines, with
+0 differ. The mutation pass has 220 mutations, all caught; 11c's share
+is 121. `drivingchoice_check` still has 0 differ.
+`docs/formats/ai-action.md` has the detail. The CIA builds.
+
+Next is 11d, the actions, in three slices by size. 11d-1 is the five
+small ones: JustDrive, Draft, NudgeCar, Block and AccidentRecovery.
+CONTINUE.md lists each one's retail address and its constructor's
+arguments.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the

@@ -25,6 +25,25 @@ answers the script's value for whichever car's mover it is handed. It
 prints nothing, because the image calls CalculateMaxAcceleration twice
 where its answer is dead and the port does not.
 
+Step 11c added AIPlan and the AIAction base (aiaction.c): InitAIPlans and
+CloseAIPlans (0x001c6028, 0x001c6058), AIPlan's constructor, destructor,
+SetTimeout, TimeToChange and status tests (0x001cab48 .. 0x001cac70),
+AIAction's constructor (0x001c6118), destructor (0x001c6b30), new and
+delete, UpdateStatus (0x001c6a98), the three SetDesiredSpeeds (0x001c64e8,
+0x001c6530, 0x001c6588), GetHeadingClassification (0x001c65e0),
+GetCollisionClassification (0x001c69d8), ClearPointsToDrive and GetName,
+and the free CalculateMaxDeceleration (0x001ccf78). They run as shipped
+over retail's DriveTarget, WorldToCar, GetCarSpaceBoundingBox,
+IsPointAheadOfCar and the maths. Stubbed on both sides, each printing
+its arguments: the slot pool's bNewSlotPool, bDeleteSlotPool, bOMalloc
+and bFree, DestoryTargetMarkers and __builtin_delete; the three tests
+UpdateStatus asks through the vptr, answering the script's values from a
+table of the script's at 0x01210000 (with deltas 0, 8 and -4); and each
+car's driver's GetSteerToPoint (slot 160), answering the script's point.
+The model divides as the EE does, and the one divide by zero the script
+takes is SetDesiredSpeedSlowerThanThisCar's (0x001c6520), which the port
+spells ee_div.
+
 The cars are retail's at retail's offsets (docs/retail_layout.txt) and the
 port's by name: each car's position, velocity with its fourth lane,
 acceleration, body x axis, angle, forward speed, speed, boost and draft
@@ -67,7 +86,8 @@ NL = chr(10)
 HARNESS = "tools/src/nearbycar_test.c"
 NBC = "3DS Files/source/nearbycar.c"
 DLC = "3DS Files/source/drivinglocation.c"
-SOURCES = [HARNESS, NBC, DLC] + ["3DS Files/source/" + f for f in (
+AIA = "3DS Files/source/aiaction.c"
+SOURCES = [HARNESS, NBC, DLC, AIA] + ["3DS Files/source/" + f for f in (
     "drivetarget.c", "car.c", "carstate.c", "carinfo.c", "cartypeinfo.c",
     "langtab.c", "drivetrain.c", "engine.c", "wheel.c", "suspension.c",
     "steering.c", "rigidbody.c", "table.c", "trackroute.c", "trackpath.c",
@@ -100,6 +120,42 @@ DL_SECONDS = 0x00239bf8
 DL_ARE_WE = 0x00239c48
 BELT_GRAVITY = 0x00204668
 
+# 11c: AIPlan and the AIAction base.
+INIT_PLANS = 0x001c6028
+CLOSE_PLANS = 0x001c6058
+ACT_CTOR = 0x001c6118
+ACT_SLOWER = 0x001c64e8
+ACT_TO_ACC = 0x001c6530
+ACT_TO_DEC = 0x001c6588
+ACT_HEADING = 0x001c65e0
+ACT_COLLISION = 0x001c69d8
+ACT_UPDATE = 0x001c6a98
+ACT_CLEAR = 0x001caa60
+ACT_DELETE = 0x001caaf8
+ACT_NEW = 0x001cab08
+ACT_NEW_NAMED = 0x001cab28
+PLAN_CHANGE = 0x001cab48
+PLAN_TIMEOUT = 0x001cab90
+PLAN_STATUS = 0x001cabf0
+PLAN_NOT_DONE = 0x001cabf8
+PLAN_FAILURE = 0x001cac08
+PLAN_SUCCESS = 0x001cac18
+PLAN_EXPIRED = 0x001cac28
+PLAN_DTOR = 0x001cac48
+PLAN_CTOR = 0x001cac70
+MAX_DECEL = 0x001ccf78
+NEW_POOL = 0x00257c10
+DEL_POOL = 0x00257c48
+POOL_OMALLOC = 0x00257c80
+POOL_FREE = 0x00257ca0
+MARKERS = 0x001cb598
+BUILTIN_DELETE = 0x00114e98
+TDR = 0x00314630                  # TheDriveTargetRenderer
+ACTION_VT = 0x002b7c90            # _vt$8AIAction
+PLAN_VT = 0x002b7cd0              # _vt$6AIPlan
+# SetDesiredSpeedSlowerThanThisCar's divide, the port's ee_div.
+SLOWER_DIV = 0x001c6520
+
 TPM = 0x0031bc38                  # TheTrackPathManager, TrackLength at 0
 ACCEL = 0x0030daf0                # TheCarTypeAccelerationTable
 ACCEL_STRIDE = 148
@@ -115,6 +171,7 @@ GLOBALS = {
     "HROUTE": GP - 18316,         # HighlightDrivingLineInRouteNumber
     "HLINE": GP - 18312,          # HighlightDrivingLineNumber
     "TIMER": GP - 19576,          # WorldTimer
+    "POOL": GP - 18288,           # AIActionSlotPool
     "LEN": TPM,                   # TheTrackPathManager.TrackLength
 }
 
@@ -137,6 +194,23 @@ LOC = 0x01090c00
 ROUTES = 0x01100000
 ROUTE_STRIDE = 0x20000
 NROUTES = 4
+ACTIONS = 0x01200000              # four AIActions of the script's
+ACT_STRIDE = 0x400
+NACT = 4
+ACT_SIZE = 608
+TVT = 0x01210000                  # the test AIAction table
+DVT = 0x01210100                  # the test CarDriver table
+STUB_ACC = 0x01220000             # its functions, stubbed
+STUB_FAIL = 0x01220010
+STUB_EXP = 0x01220020
+STUB_STEER = 0x01220030
+DRIVERS = 0x01230000
+DRV_STRIDE = 0x400
+STEER = 0x01240000                # each car's steer-to point, 8 bytes
+COLL = 0x01250000                 # the Collision
+SLOTS = 0x01260000                # what bOMalloc hands out
+NSLOTS = 8
+POOL = 0x01270000                 # what bNewSlotPool hands back
 
 # The car, at retail's offsets.
 C_NEXT = 0
@@ -144,6 +218,7 @@ C_PREV = 4
 C_CTI = 12
 C_RIDE = 16
 C_PLAYER = 24
+C_DRIVER = 44
 C_CTL = 32
 C_MOV = 36
 C_MOVER = 48
@@ -162,6 +237,12 @@ C_REND = 1192
 C_DAT = 2036
 C_POOF = 2160
 CTI_MASS = 480
+CTI_MU0 = 428                     # Tires[0].StaticFrictionCoefficient
+CTI_MU1 = 460                     # Tires[1]'s
+CTI_FDOWN = 756                   # Aero.FrontDownforce
+CTI_RDOWN = 760                   # Aero.RearDownforce
+D_VTABLE = 556
+COLL_POINT = 32
 CTI_DRAG = 752
 CTI_LIMITER = 800
 B_MIN = 224
@@ -252,6 +333,32 @@ def route_at(k):
 # O                     DrivingLocation::Clear
 # F                     DrivingInformation::Clear
 # W                     NearbyCarList::ClearArray
+#
+# 11c's, on four AIActions of the script's (0..3), each dumped after:
+# a i score timeout     AIAction's constructor
+# b i timeout           AIPlan's constructor
+# t i timeout           SetTimeout
+# p i                   action i filled with 0xa5
+# w i off word          a word of action i: hex, or the tables' names
+#                       action, plan and test
+# q i                   TimeToChange, GetStatus and the four tests (i -1:
+#                       TimeToChange of NULL)
+# y exp fail acc        what the test table's three answer
+# u i                   UpdateStatus, with DrivingInformation
+# d i flags             the destructor, through slot 8
+# e i flags             AIPlan's destructor
+# g i                   GetName, through slot 32
+# x i                   ClearPointsToDrive
+# i / o                 InitAIPlans / CloseAIPlans
+# n named               operator new, plain (0) or named (1)
+# f ptr                 operator delete of n0.. or a0..
+# c k mu0 mu1 fd rd     car k's tyres' grip and downforces, and its driver
+# j k x y               car k's driver's steer-to point
+# s k speed             CalculateMaxDeceleration
+# r i k t / l i k t     SetDesiredSpeedToMaxAcceleration / Deceleration
+# m i e delta unused    SetDesiredSpeedSlowerThanThisCar of entry e
+# h k check             GetHeadingClassification at the location
+# k x y car             GetCollisionClassification of a contact point
 
 CAR_FIELDS = (
     "px", "py", "pz", "vx", "vy", "vz", "vw", "ax", "ay", "az",
@@ -688,6 +795,319 @@ def s_clear(rnd):
     return ops
 
 
+# ------------------------------------------------- 11c: AIPlan and AIAction
+
+
+def act_at(i):
+    return ACTIONS + ACT_STRIDE * i
+
+
+SPECIAL_TIMEOUTS = ("80000000", "7fc00000", "ff800000", "7f800000",
+                    "00000001", "80000001")
+
+
+def tmo(rnd):
+    if rnd.random() < 0.25:
+        return rnd.choice(SPECIAL_TIMEOUTS)
+    return h(f32(rnd.choice((-1.0, 0.0, 5.5, 1e-10, 30.0, -1e-10, 2.0,
+                             0.25, rnd.uniform(-5.0, 60.0)))))
+
+
+TIMERS = (0, 1, 3999, 4000, 123456, 0x7fffffff, 0x80000000, 0xffffffff,
+          16777217, 16777219, 0x7fffff80, 0x00ffffff, 0xff000001)
+
+
+def s_plans(rnd):
+    """AIPlan's timeout and status, on records made by hand."""
+    ops = []
+    for _ in range(40):
+        ops.append("G TIMER %08x" % rnd.choice(
+            TIMERS + (rnd.getrandbits(32), rnd.randrange(1 << 24))))
+        i = rnd.randrange(NACT)
+        k = rnd.randrange(5)
+        if k == 0:
+            ops.append("a %d %d %s" % (i, rnd.choice(
+                (0, 5, -3, 100, 0x7fffffff, rnd.randint(-1000, 1000))),
+                tmo(rnd)))
+        elif k == 1:
+            ops.append("b %d %s" % (i, tmo(rnd)))
+        elif k == 2:
+            ops.append("t %d %s" % (i, tmo(rnd)))
+        elif k == 3:
+            ops.append("p %d" % i)
+        else:
+            ops.append("w %d %d %08x" % (i, rnd.choice((0, 12)),
+                                         rnd.choice((0, 1, 2, 3, 4))))
+        ops.append("q %d" % i)
+    for st in (0, 1, 2, 3, 4, 0xffffffff, 0x103):
+        for ce in (0, 1, 2, 0x100, 0x80000000):
+            ops.append("w 0 12 %08x" % st)
+            ops.append("w 0 0 %08x" % ce)
+            ops.append("q 0")
+    ops.append("q -1")
+    return ops
+
+
+def s_update(rnd):
+    """UpdateStatus through the test table, every answer in turn, from
+    every status."""
+    ops = ["a 1 7 %s" % h(f32(3.0)), "w 1 16 test"]
+    for st in (0, 1, 2, 3):
+        for ex in (0, 1):
+            for fa in (0, 1):
+                for ac in (0, 1):
+                    ops.append("w 1 12 %08x" % st)
+                    ops.append("y %d %d %d" % (ex, fa, ac))
+                    ops.append("u 1")
+                    ops.append("q 1")
+    for _ in range(8):
+        ops.append("y %d %d %d" % tuple(rnd.choice((0, 1, 2, 0x100, -1))
+                                        for _ in range(3)))
+        ops.append("w 1 0 %08x" % rnd.choice((0, 1)))
+        ops.append("u 1")
+        ops.append("q 1")
+    return ops
+
+
+def s_life(rnd):
+    """The pool, new and delete, the destructors, ClearPointsToDrive and
+    GetName."""
+    ops = ["o", "i", "n 0", "n 1", "n 0", "f n1", "o", "o", "i", "n 1"]
+    ops.append("a 0 3 %s" % h(f32(2.0)))
+    ops.append("g 0")
+    for i, np in ((0, 5), (1, 1), (2, 20)):
+        if i:
+            ops.append("a %d %d %s" % (i, i, tmo(rnd)))
+        ops.append("w %d 32 %08x" % (i, np))
+        ops.append("w %d 544 %s" % (i, h(f32(rnd.uniform(1.0, 90.0)))))
+        ops.append("w %d 548 0000000%d" % (i, i + 2))
+        ops.append("x %d" % i)
+    ops.append("d 0 0")
+    ops.append("a 1 4 %s" % h(f32(1.5)))
+    ops.append("d 1 1")
+    ops.append("a 2 9 %s" % h(f32(-1.0)))
+    ops.append("d 2 3")
+    ops.append("a 3 1 %s" % h(f32(0.0)))
+    ops.append("d 3 2")
+    ops.append("e 3 0")
+    ops.append("e 3 1")
+    ops.append("e 3 3")
+    ops.append("f a2")
+    ops.append("f n0")
+    ops.append("o")
+    ops.append("f n0")
+    return ops
+
+
+def extras(rnd, k):
+    return "c %d %s %s %s %s" % (
+        k, h(f32(rnd.uniform(0.7, 1.6))), h(f32(rnd.uniform(0.7, 1.6))),
+        h(f32(rnd.choice((0.0, rnd.uniform(0.0, 12.0))))),
+        h(f32(rnd.choice((0.0, rnd.uniform(0.0, 12.0))))))
+
+
+def s_speed(rnd):
+    """CalculateMaxDeceleration and the three SetDesiredSpeeds."""
+    w = World(rnd)
+    ops = list(w.ops)
+    cars = []
+    for k in range(6):
+        line, v = w.car(k, rend=1, poof=0, px=rnd.uniform(-20.0, 20.0),
+                        py=rnd.uniform(-30.0, 30.0))
+        ops.append(line)
+        ops.append(extras(rnd, k))
+        cars.append(v)
+    ops.append(link(range(6)))
+    ops.append("a 0 1 %s" % h(f32(1.0)))
+    for _ in range(40):
+        k = rnd.randrange(6)
+        sp = rnd.choice((0.0, -0.0, rnd.uniform(-40.0, 80.0), 30.0,
+                         cars[k]["vmag"]))
+        ops.append("s %d %s" % (k, h(f32(sp))))
+        t = rnd.choice((0.5, 1.0, 0.0, rnd.uniform(0.0, 3.0), -1.0))
+        ops.append("%s 0 %d %s" % (rnd.choice("rl"), k, h(f32(t))))
+    for me in (0, 3):
+        ops.append("N %d 1" % me)
+        for e in range(6):
+            ops.append("m 0 %d %s %s" % (
+                e, h(f32(rnd.choice((0.0, 2.0, rnd.uniform(-5.0, 15.0))))),
+                h(f32(rnd.uniform(-3.0, 3.0)))))
+    # ClearArray zeroes MyHalfSizeD, so the gap is py - hd.
+    ops.append("W")
+    for _ in range(30):
+        vy = rnd.choice((0.0, -0.0, rnd.uniform(-30.0, 30.0),
+                         rnd.uniform(-30.0, -0.5), 1e-30))
+        py = rnd.choice((rnd.uniform(-40.0, 60.0), 0.0))
+        hd = f32(rnd.uniform(0.8, 2.8))
+        if rnd.random() < 0.2:
+            # The gap exactly closed.
+            py = hd
+        ops.append("Q %s %s %s %s %s %s %d" % (
+            h(f32(rnd.uniform(-10.0, 10.0))), h(f32(py)),
+            h(f32(rnd.uniform(-10.0, 10.0))), h(f32(vy)),
+            h(f32(rnd.uniform(0.8, 2.8))), h(f32(hd)), rnd.randrange(6)))
+        ops.append("m %d s %s %s" % (
+            rnd.randrange(NACT),
+            h(f32(rnd.choice((0.0, 2.0, 5.0, rnd.uniform(-5.0, 15.0))))),
+            h(f32(rnd.uniform(-3.0, 3.0)))))
+    # -0 - 0 is -0, which max.s with 0 second keeps.
+    ops.append(w.car(5, vmag=-0.0)[0])
+    ops.append("Q %s %s %s %s %s %s 5" % (h(0.0), h(f32(5.0)), h(0.0),
+                                          h(f32(-2.0)), h(f32(1.0)),
+                                          h(f32(2.0))))
+    for d in (0.0, -0.0):
+        ops.append("m 0 s %s %s" % (h(f32(d)), h(0.0)))
+    return ops
+
+
+def decode_points(lines):
+    pts = []
+    for ln in lines:
+        if ln.startswith("P "):
+            ws = [int(x, 16) for x in ln.split()[1:]]
+            f = struct.unpack("<8f", struct.pack("<8I", *ws[:8]))
+            pts.append((f[0], f[1], f[3], f[4], f[6], f[7]))
+    return pts
+
+
+def s_heading(rnd):
+    """GetHeadingClassification: a car at a route point, on the road and
+    off it, moving and not, with the driver's steer-to point ahead and
+    behind."""
+    w = World(rnd)
+    ops = list(w.ops)
+    lines = lay_route(rnd, 0, 20, 0) + lay_route(rnd, 1, 6, 1,
+                                                 straight=True)
+    ops += lines
+    pts = {0: decode_points(lines[:21]), 1: decode_points(lines[21:])}
+    for n in range(60):
+        r = rnd.choice((0, 0, 1))
+        j = rnd.randrange(len(pts[r]))
+        px, py, dx, dy, lw, rw = pts[r][j]
+        ops.append("D %d %d 0 00000000" % (r, j))
+        lat = rnd.choice((rnd.uniform(-lw - 4.0, rw + 4.0),
+                          rnd.uniform(-lw - 4.0, rw + 4.0),
+                          rw - 0.3, -lw + 0.3, rw + 1.0, -lw - 1.0, 0.0,
+                          rw - 1.5, -lw + 1.5))
+        along = rnd.uniform(-8.0, 8.0)
+        # (dy, -dx) is the way lat grows.
+        cx = px + along * dx + lat * dy
+        cy = py + along * dy - lat * dx
+        rhd = math.atan2(dy, dx)
+        sp = rnd.choice((0.0, 0.5, 0.99, 1.0, 1.01, rnd.uniform(2.0, 40.0),
+                         rnd.uniform(2.0, 40.0), rnd.uniform(2.0, 40.0)))
+        drift = rnd.choice((0.0, 0.1, -0.1, 0.5, -0.5, 1.2, -1.2, math.pi,
+                            rnd.uniform(-math.pi, math.pi)))
+        vhd = rhd + drift
+        vmag = rnd.choice((sp, sp, sp, -sp, sp * 0.5))
+        fwd = rnd.choice((sp, sp, -sp, 0.0))
+        bhd = rnd.choice((vhd, rhd, rhd + math.pi, vhd + math.pi,
+                          rnd.uniform(-math.pi, math.pi), rhd + 1.2,
+                          rhd + math.pi - 1.2))
+        ahd = rnd.choice((bhd, bhd, rhd + rnd.choice((1.0, -1.0, 2.0, -2.0)),
+                          rnd.uniform(-math.pi, math.pi)))
+        angle = int(round(ahd / (2 * math.pi) * 65536)) & 0xffff
+        bs = rnd.choice((1.0, 1.0, 0.6, 1.4))
+        ops.append(w.car(0, px=f32(cx), py=f32(cy), vx=sp * math.cos(vhd),
+                         vy=sp * math.sin(vhd), vmag=vmag, fwd=fwd,
+                         bx=bs * math.cos(bhd), by=bs * math.sin(bhd),
+                         angle=angle)[0])
+        if n == 0:
+            ops.append(extras(rnd, 0))
+        sd = rnd.uniform(-20.0, 20.0)
+        sa = rnd.choice((vhd, vhd + math.pi, rnd.uniform(-math.pi, math.pi)))
+        ops.append("j 0 %s %s" % (h(f32(cx + sd * math.cos(sa))),
+                                  h(f32(cy + sd * math.sin(sa)))))
+        ops.append("h 0 %d" % rnd.choice((0, 1, 1)))
+    return ops
+
+
+def s_collide(rnd):
+    """GetCollisionClassification of contact points all round each car."""
+    w = World(rnd)
+    ops = list(w.ops)
+    cars = []
+    for k in range(4):
+        line, v = w.car(k)
+        ops.append(line)
+        cars.append(v)
+    for _ in range(50):
+        k = rnd.randrange(4)
+        v = cars[k]
+        d = rnd.choice((rnd.uniform(0.0, 4.0), rnd.uniform(0.0, 1.5)))
+        a = rnd.uniform(-math.pi, math.pi)
+        ops.append("k %s %s %d" % (h(f32(v["px"] + d * math.cos(a))),
+                                   h(f32(v["py"] + d * math.sin(a))), k))
+    return ops
+
+
+def bare_route(k, n, rn, dx, dy):
+    """Route k along x in steps of ten, every point's direction (dx, dy)
+    and both widths 8."""
+    out = ["U %d %d %d" % (k, n, rn)]
+    for i in range(n):
+        raw = struct.pack("<12f", 10.0 * i, 0.0, 0.0, dx, dy, 10.0,
+                          8.0, 8.0, 0.0, 0.0, 10.0 * i, 0.0)[:44]
+        raw += struct.pack("<I", 0) + bytes(2 * LINES)
+        raw += bytes(LINES) + bytes([k])
+        out.append("P " + " ".join("%08x" % v for v in
+                                   struct.unpack("<28I", raw)))
+    return out
+
+
+# Cars on the straight route at its third point, (20, 0) facing +x, so the
+# lateral distance is exactly -y: (y, vy) and what each pins.
+HEADING_EDGES = (
+    (-8.0, -1.0),                 # right distance exactly 0, drifting right
+    (8.0, -20.0),                 # left exactly 0, 0.8 s to the right edge
+    (8.0, 1.0),                   # left exactly 0, drifting off it
+    (-7.9997, -0.0005),           # drifting right at under 0.001 m/s
+    (-6.999996185302734, -1.0),   # exactly 1 s to the right edge
+    (-6.000001907348633, -2.0),   # and again
+    (-8.0, 1.0), (8.0, -1.0), (0.0, 0.0005), (-7.9997, 0.0005),
+)
+
+
+def s_ai_edges(rnd):
+    """What the first mutation pass found the rest never did: the heading's
+    edges, a route whose direction is not unit length, and the gap to a car
+    with MyHalfSizeD set."""
+    w = World(rnd)
+    ops = list(w.ops)
+    ops += lay_route(rnd, 1, 6, 1, straight=True)
+    ops.append("D 1 2 0 00000000")
+    for py, vy in HEADING_EDGES:
+        for fwd in (10.0, -10.0):
+            ops.append(w.car(0, px=20.0, py=py, vx=10.0, vy=vy, vmag=10.0,
+                             fwd=fwd)[0])
+            ops.append("h 0 0")
+    # Direction (2, 0): the lateral distance is -2y, and the backwards test
+    # holds the body against the direction made unit.
+    ops += bare_route(2, 3, 2, 2.0, 0.0)
+    ops.append("D 2 1 0 00000000")
+    for deg in (60.0, 70.0, 75.0, 80.0, 85.0, 95.0, -75.0, 250.0):
+        a = math.radians(deg)
+        ops.append(w.car(0, px=10.0, py=-5.0, vx=-3.0, vy=-1.0, vmag=10.0,
+                         fwd=-5.0, bx=math.cos(a), by=math.sin(a))[0])
+        ops.append("h 0 0")
+    # SlowerThanThisCar with MyHalfSizeD from the list's car, and gaps that
+    # stay above the 0.1 s floor.
+    for k in range(3):
+        ops.append(w.car(k, rend=1, poof=0)[0])
+    ops.append(link([0, 1, 2]))
+    ops.append("N 0 1")
+    for _ in range(40):
+        ops.append("Q %s %s %s %s %s %s %d" % (
+            h(f32(rnd.uniform(-10.0, 10.0))), h(f32(rnd.uniform(6.0, 60.0))),
+            h(f32(rnd.uniform(-10.0, 10.0))), h(f32(rnd.uniform(0.3, 30.0))),
+            h(f32(rnd.uniform(0.8, 2.8))), h(f32(rnd.uniform(0.8, 2.8))),
+            rnd.randrange(3)))
+        ops.append("m %d s %s %s" % (rnd.randrange(NACT),
+                                     h(f32(rnd.uniform(-5.0, 15.0))),
+                                     h(f32(rnd.uniform(-3.0, 3.0)))))
+    return ops
+
+
 def script():
     rnd = random.Random(0x4ea6b9)
     sc = [s_basic(rnd), s_crowd(rnd), s_catch(rnd), s_round(rnd),
@@ -702,6 +1122,15 @@ def script():
         sc.append(s_maxacc(rnd))
         sc.append(s_curve(rnd))
         sc.append(s_location(rnd))
+    sc += [s_plans(rnd), s_update(rnd), s_life(rnd), s_speed(rnd),
+           s_heading(rnd), s_collide(rnd)]
+    for _ in range(3):
+        sc.append(s_plans(rnd))
+        sc.append(s_speed(rnd))
+        sc.append(s_heading(rnd))
+        sc.append(s_heading(rnd))
+        sc.append(s_collide(rnd))
+    sc.append(s_ai_edges(rnd))
     return sc
 
 
@@ -719,10 +1148,21 @@ def encode(scenarios):
 class Model(object):
     def __init__(self):
         self.out = []
-        self.e = retail_model.RetailEmu(ieee=True)
+        self.e = retail_model.RetailEmu(ieee=True, eediv=True)
         self.e.stub(BELT_GRAVITY, self.s_belt)
+        for a, fn in ((NEW_POOL, self.s_new_pool), (DEL_POOL, self.s_del_pool),
+                      (POOL_OMALLOC, self.s_omalloc),
+                      (POOL_FREE, self.s_pool_free), (MARKERS, self.s_markers),
+                      (BUILTIN_DELETE, self.s_delete),
+                      (STUB_ACC, self.s_ask("acc", 2)),
+                      (STUB_FAIL, self.s_ask("fail", 1)),
+                      (STUB_EXP, self.s_ask("exp", 0)),
+                      (STUB_STEER, self.s_steer)):
+            self.e.stub(a, fn)
         self.w = self.e.u32
         self.belt = {}
+        self.answers = [0, 0, 0]
+        self.nslot = 0
 
     def emit(self, s):
         self.out.append(s)
@@ -754,13 +1194,83 @@ class Model(object):
                 return "R%d" % k
             if off >= RT_HEADER and (off - RT_HEADER) % RT_POINT == 0:
                 return "R%d:%d" % (k, (off - RT_HEADER) // RT_POINT)
+        for i in range(NACT):
+            d = a - act_at(i)
+            if -64 <= d < ACT_STRIDE - 64:
+                return "a%d" % i + ("%+d" % d if d else "")
+        for i in range(NSLOTS):
+            if a == SLOTS + ACT_STRIDE * i:
+                return "n%d" % i
+        for k in range(NCARS):
+            if a == DRIVERS + DRV_STRIDE * k:
+                return "d%d" % k
+            if a == STEER + 8 * k:
+                return "st%d" % k
+        if a == POOL:
+            return "pool"
+        if a == TDR:
+            return "tdr"
+        if a == DI:
+            return "di"
         return "?%08x" % a
+
+    def vt_name(self, v):
+        return {ACTION_VT: "action", PLAN_VT: "plan",
+                TVT: "test"}.get(v, "%08x" % v)
+
+    def ptr_of(self, s):
+        if s[0] == "n":
+            return SLOTS + ACT_STRIDE * int(s[1:])
+        return act_at(int(s[1:]))
 
     # ---- the stub --------------------------------------------------------
 
     def s_belt(self, em):
         m = em.reg[4] & M32
         em.fpr[0] = self.belt[m]
+
+    def cstr(self, a):
+        mem = self.e.mem
+        end = mem.index(0, a)
+        return mem[a:end].decode("latin-1")
+
+    def s_new_pool(self, em):
+        r = em.reg
+        self.emit("  newpool %d %d %s %d" % (s32(r[4]), s32(r[5]),
+                                             self.cstr(r[6] & M32),
+                                             s32(r[7])))
+        return POOL
+
+    def s_del_pool(self, em):
+        self.emit("  delpool %s" % self.name(em.reg[4]))
+
+    def s_omalloc(self, em):
+        self.emit("  omalloc %s" % self.name(em.reg[4]))
+        a = SLOTS + ACT_STRIDE * self.nslot
+        self.nslot += 1
+        return a
+
+    def s_pool_free(self, em):
+        self.emit("  slotfree %s %s" % (self.name(em.reg[4]),
+                                        self.name(em.reg[5])))
+
+    def s_markers(self, em):
+        self.emit("  markers %s" % self.name(em.reg[4]))
+
+    def s_delete(self, em):
+        self.emit("  delete %s" % self.name(em.reg[4]))
+
+    def s_ask(self, what, k):
+        def ask(em):
+            self.emit("  ask %s %s %s" % (what, self.name(em.reg[4]),
+                                          self.name(em.reg[5])))
+            return self.answers[k]
+        return ask
+
+    def s_steer(self, em):
+        a = em.reg[4] & M32
+        self.emit("  steer %s" % self.name(a))
+        return STEER + 8 * ((a - DRIVERS) // DRV_STRIDE)
 
     # ---- the dumps -------------------------------------------------------
 
@@ -774,6 +1284,35 @@ class Model(object):
             self.emit("    %d %s %s %s %s %s %s %s" % (
                 i, fx(w(b)), fx(w(b + 4)), fx(w(b + 8)), fx(w(b + 12)),
                 fx(w(b + 16)), fx(w(b + 20)), self.name(w(b + 24))))
+
+    def dump_action(self, i):
+        w = self.w
+        mem = self.e.mem
+        a = act_at(i)
+
+        def s8(v):
+            return v - 256 if v >= 128 else v
+        self.emit("  act %d %08x %s %d %s" % (
+            s32(w(a)), w(a + 4), fx(w(a + 8)), s32(w(a + 12)),
+            self.vt_name(w(a + 16))))
+        self.emit("    ptd %d len %s lp %d sum %d" % (
+            s8(mem[a + 32]), fx(w(a + 544)), s8(mem[a + 548]),
+            sum(mem[a + 32:a + 560])))
+        self.emit("    %08x %s %s %s %d %d %d %08x %d" % (
+            w(a + 560), fx(w(a + 564)), fx(w(a + 568)), fx(w(a + 572)),
+            s32(w(a + 576)), s32(w(a + 580)), s32(w(a + 584)), w(a + 588),
+            s32(w(a + 592))))
+
+    def dump_speed(self, i):
+        w = self.w
+        a = act_at(i)
+        self.emit("  speed %s %s" % (fx(w(a + 564)), fx(w(a + 568))))
+
+    def vcall(self, a, slot, *args):
+        e = self.e
+        vp = self.w(a + 16)
+        delta = struct.unpack_from("<h", e.mem, vp + slot)[0]
+        return self.call(self.w(vp + slot + 4), (a + delta) & M32, *args)
 
     def dump_loc(self, a, tag="loc"):
         w = self.w
@@ -796,9 +1335,19 @@ class Model(object):
         for name, v in (("TDLF", 0x40400000), ("PASS", 0x40400000),
                         ("SECS", 0x40000000), ("DEF", 0x41a00000),
                         ("CAM", M32), ("HROUTE", M32), ("HLINE", M32),
-                        ("TIMER", 0), ("LEN", 0x44fa0000)):
+                        ("TIMER", 0), ("LEN", 0x44fa0000), ("POOL", 0)):
             e.put32(GLOBALS[name], v)
         self.belt = {}
+        self.fill(ACTIONS, ACT_STRIDE * NACT)
+        e.mem[TVT:TVT + 0x200] = bytes(0x200)
+        for slot, delta, fn in ((40, 0, STUB_ACC), (48, 8, STUB_FAIL),
+                                (56, -4, STUB_EXP)):
+            struct.pack_into("<hhI", e.mem, TVT + slot, delta, 0, fn)
+        struct.pack_into("<hhI", e.mem, DVT + 160, 0, 0, STUB_STEER)
+        e.mem[STEER:STEER + 8 * NCARS] = bytes(8 * NCARS)
+        e.mem[COLL:COLL + 64] = bytes(64)
+        self.answers = [0, 0, 0]
+        self.nslot = 0
 
     def link(self, ks):
         e = self.e
@@ -1008,6 +1557,105 @@ class Model(object):
         elif c == "W":
             self.call(CLEAR_ARRAY, LIST)
         else:
+            self.op11c(t)
+
+    def op11c(self, t):
+        e = self.e
+        w = self.w
+        c = t[0]
+        if c in "abtpwqudegx":
+            i = int(t[1]) if len(t) > 1 else 0
+            a = act_at(i)
+        if c == "a":
+            self.call(ACT_CTOR, a, int(t[2]), f12=int(t[3], 16))
+            self.dump_action(i)
+        elif c == "b":
+            self.call(PLAN_CTOR, a, f12=int(t[2], 16))
+            self.dump_action(i)
+        elif c == "t":
+            self.call(PLAN_TIMEOUT, a, f12=int(t[2], 16))
+            self.dump_action(i)
+        elif c == "p":
+            self.fill(a, ACT_SIZE)
+        elif c == "w":
+            v = {"action": ACTION_VT, "plan": PLAN_VT, "test": TVT}.get(t[3])
+            e.put32(a + int(t[2]), v if v is not None else int(t[3], 16))
+        elif c == "q":
+            if i < 0:
+                self.emit("  change %d" % self.call(PLAN_CHANGE, 0))
+                return
+            got = [self.call(fn, a) for fn in (
+                PLAN_CHANGE, PLAN_STATUS, PLAN_NOT_DONE, PLAN_FAILURE,
+                PLAN_SUCCESS, PLAN_EXPIRED)]
+            self.emit("  change %d status %d notdone %d fail %d ok %d "
+                      "exp %d" % tuple(got))
+        elif c == "y":
+            self.answers = [int(x) for x in t[1:4]]
+        elif c == "u":
+            self.call(ACT_UPDATE, a, DI)
+            self.emit("  status %d" % s32(w(a + 12)))
+        elif c == "d":
+            self.vcall(a, 8, int(t[2]))
+            self.dump_action(i)
+        elif c == "e":
+            self.call(PLAN_DTOR, a, int(t[2]))
+            self.dump_action(i)
+        elif c == "g":
+            self.emit("  name '%s'" % self.cstr(self.vcall(a, 32) & M32))
+        elif c == "x":
+            self.call(ACT_CLEAR, a)
+            self.dump_action(i)
+        elif c == "i":
+            self.call(INIT_PLANS)
+            self.emit("  pool %s" % self.name(w(GLOBALS["POOL"])))
+        elif c == "o":
+            self.call(CLOSE_PLANS)
+            self.emit("  pool %s" % self.name(w(GLOBALS["POOL"])))
+        elif c == "n":
+            if int(t[1]):
+                got = self.call(ACT_NEW_NAMED, 640, 0)
+            else:
+                got = self.call(ACT_NEW, 640)
+            self.emit("  new %s" % self.name(got))
+        elif c == "f":
+            self.call(ACT_DELETE, self.ptr_of(t[1]))
+        elif c == "c":
+            k = int(t[1])
+            cti = CTIS + CTI_STRIDE * k
+            for off, s in zip((CTI_MU0, CTI_MU1, CTI_FDOWN, CTI_RDOWN), t[2:6]):
+                e.put32(cti + off, int(s, 16))
+            drv = DRIVERS + DRV_STRIDE * k
+            e.put32(car_at(k) + C_DRIVER, drv)
+            e.put32(drv + D_VTABLE, DVT)
+        elif c == "j":
+            k = int(t[1])
+            e.put32(STEER + 8 * k, int(t[2], 16))
+            e.put32(STEER + 8 * k + 4, int(t[3], 16))
+        elif c == "s":
+            self.call(MAX_DECEL, self.car_ptr(t[1]), f12=int(t[2], 16))
+            self.emit("  maxdec %s" % fx(e.fpr[0]))
+        elif c in "rl":
+            i = int(t[1])
+            self.call(ACT_TO_ACC if c == "r" else ACT_TO_DEC, act_at(i),
+                      self.car_ptr(t[2]), f12=int(t[3], 16))
+            self.dump_speed(i)
+        elif c == "m":
+            if self.past(t[2]):
+                self.emit("  skip")
+                return
+            i = int(t[1])
+            self.call(ACT_SLOWER, act_at(i), self.entry(t[2]), LIST,
+                      f12=int(t[3], 16), f13=int(t[4], 16))
+            self.dump_speed(i)
+        elif c == "h":
+            got = self.call(ACT_HEADING, LOC, self.car_ptr(t[1]), int(t[2]))
+            self.emit("  heading %d" % got)
+        elif c == "k":
+            e.put32(COLL + COLL_POINT, int(t[1], 16))
+            e.put32(COLL + COLL_POINT + 4, int(t[2], 16))
+            got = self.call(ACT_COLLISION, COLL, self.car_ptr(t[3]))
+            self.emit("  hit %d" % got)
+        else:
             raise SystemExit("bad op %r" % (t,))
 
     def run(self, scenarios):
@@ -1018,6 +1666,11 @@ class Model(object):
                 if ln[0] not in "ACPU":
                     self.emit("> " + ln[:48])
                 self.op(ln.split())
+        stray = self.e.eediv_pcs - {SLOWER_DIV}
+        if stray:
+            raise SystemExit("the EE's divide by zero at %s, which the port "
+                             "divides as IEEE does"
+                             % ", ".join("0x%08x" % pc for pc in sorted(stray)))
         return self.out
 
 
@@ -1067,6 +1720,10 @@ def M(name, before, after, rel=NBC):
 
 def D(name, before, after):
     return (name, DLC, before, after)
+
+
+def A(name, before, after):
+    return (name, AIA, before, after)
 
 
 MUTATIONS = [
@@ -1280,6 +1937,262 @@ MUTATIONS = [
       "return left;"),
     D("dl-are-we", "return 0.0f < drivinglocation_get_num_seconds_left",
       "return 0.0f <= drivinglocation_get_num_seconds_left"),
+
+    # 11c: InitAIPlans and CloseAIPlans.
+    A("ip-size", "bNewSlotPool(AIACTION_SLOT_SIZE, AIACTION_SLOTS,",
+      "bNewSlotPool(AIACTION_SLOT_SIZE + 16, AIACTION_SLOTS,"),
+    A("ip-slots", "bNewSlotPool(AIACTION_SLOT_SIZE, AIACTION_SLOTS,",
+      "bNewSlotPool(AIACTION_SLOT_SIZE, AIACTION_SLOTS - 1,"),
+    A("ip-name", '"AIActionSlotPool", 16);', '"AIActionPool", 16);'),
+    A("ip-heap", '"AIActionSlotPool", 16);', '"AIActionSlotPool", 0);'),
+    A("cp-test", "if (AIActionSlotPool != NULL) {", "if (1) {"),
+    A("cp-keep", "        AIActionSlotPool = NULL;" + NL, ""),
+    A("cp-markers", "    drivetargetrenderer_destroy_target_markers("
+      "&TheDriveTargetRenderer);" + NL, ""),
+
+    # AIPlan.
+    A("pi-vt", "    p->_vtable = AIPLAN_VTABLE;" + NL
+      + "    aiplan_set_timeout(p, timeout);",
+      "    aiplan_set_timeout(p, timeout);"),
+    A("pd-vt", "    p->_vtable = AIPLAN_VTABLE;" + NL + "    if (flags & 1)",
+      "    if (flags & 1)"),
+    A("pd-flags", "if (flags & 1)" + NL + "        bFree(p);",
+      "if (flags & 2)" + NL + "        bFree(p);"),
+    A("pd-always", "if (flags & 1)" + NL + "        bFree(p);",
+      "if (1)" + NL + "        bFree(p);"),
+    A("st-le", "p->CanExpire = 0.0f <= timeout;",
+      "p->CanExpire = 0.0f < timeout;"),
+    A("st-delta", "p->DeltaTime = timeout;",
+      "p->DeltaTime = timeout + 1.0f;"),
+    A("st-half", "        + 0.5f);", "        + 0.0f);"),
+    A("st-scale", "#define AIA_SECONDS_TO_TICKS    4000.0f",
+      "#define AIA_SECONDS_TO_TICKS    4096.0f"),
+    A("st-ticks", "#define AIA_TICKS_TO_SECONDS    0.000250000012f",
+      "#define AIA_TICKS_TO_SECONDS    0.000251f"),
+    A("st-trunc", "(uint32_t)ee_trunc_w(", "(uint32_t)(int32_t)("),
+    A("st-unsigned", "((float)WorldTimer *", "((float)(uint32_t)WorldTimer *"),
+    A("tc-null", "if (p == NULL)" + NL + "        return 1;",
+      "if (p == NULL)" + NL + "        return 0;"),
+    A("tc-success", "if (p->Status == STATUS_SUCCESS || p->Status == "
+      "STATUS_FAILURE)", "if (p->Status == STATUS_FAILURE)"),
+    A("tc-failure", "if (p->Status == STATUS_SUCCESS || p->Status == "
+      "STATUS_FAILURE)", "if (p->Status == STATUS_SUCCESS)"),
+    A("tc-expired", "return p->Status == STATUS_EXPIRED && p->CanExpire != 0;"
+      + NL + "}" + NL + NL + "PlanStatus",
+      "return p->Status == STATUS_EXPIRED;" + NL + "}" + NL + NL
+      + "PlanStatus"),
+    A("tc-can-one", "return p->Status == STATUS_EXPIRED && p->CanExpire != 0;"
+      + NL + "}" + NL + NL + "PlanStatus",
+      "return p->Status == STATUS_EXPIRED && p->CanExpire == 1;" + NL + "}"
+      + NL + NL + "PlanStatus"),
+    A("gs-mask", "return p->Status;", "return p->Status & 3;"),
+    A("nd-le", "return p->Status == STATUS_NOT_DONE;",
+      "return p->Status <= STATUS_NOT_DONE;"),
+    A("fa-ge", "return p->Status == STATUS_FAILURE;",
+      "return p->Status >= STATUS_FAILURE;"),
+    A("ok-and", "return p->Status == STATUS_SUCCESS;",
+      "return p->Status & STATUS_SUCCESS;"),
+    A("ex-can", "return p->Status == STATUS_EXPIRED && p->CanExpire != 0;"
+      + NL + "}" + NL + NL + "// ---",
+      "return p->Status == STATUS_EXPIRED;" + NL + "}" + NL + NL + "// ---"),
+
+    # AIAction's constructor and destructor, new and delete.
+    A("ai-vt", "    a->Base._vtable = AIACTION_VTABLE;" + NL
+      + "    drivetarget_init", "    drivetarget_init"),
+    A("ai-target", "    drivetarget_init(&a->PointsToDrive);" + NL, ""),
+    A("ai-score", "a->Score = score;", "a->Score = score + 1;"),
+    A("ai-throttle", "a->AllowedToUseThrottleAndBrake = 1;",
+      "a->AllowedToUseThrottleAndBrake = 0;"),
+    A("ai-status", "a->Base.Status = STATUS_NOT_DONE;" + NL
+      + "    a->DesiredSpeed", "a->Base.Status = STATUS_SUCCESS;" + NL
+      + "    a->DesiredSpeed"),
+    A("ai-speed", "a->DesiredSpeed = 0.0f;", "a->DesiredSpeed = 1.0f;"),
+    A("ai-tolerance", "a->DesiredSpeedTolerance = 0.0f;",
+      "a->DesiredSpeedTolerance = 1.0f;"),
+    A("ai-time", "a->TimeToGetToDesiredSpeed = 0.0f;",
+      "a->TimeToGetToDesiredSpeed = 1.0f;"),
+    A("ai-line", "a->UseDrivingLineSpeed = 1;", "a->UseDrivingLineSpeed = 0;"),
+    A("ai-boost", "a->AllowedToUseBoost = 1;", "a->AllowedToUseBoost = 0;"),
+    A("ai-execute", "a->AllowedToUseBoost = 1;",
+      "a->AllowedToUseBoost = 1;" + NL
+      + "    a->PointsToDriveWillExecuteAction = 0;"),
+    A("ai-type", "a->AllowedToUseBoost = 1;",
+      "a->AllowedToUseBoost = 1;" + NL + "    a->Type = AIACTION_NONE;"),
+    A("ad-plan", "    aiplan_destroy(&a->Base, 0);" + NL, ""),
+    A("ad-plan-flags", "aiplan_destroy(&a->Base, 0);",
+      "aiplan_destroy(&a->Base, flags);"),
+    A("ad-flags", "if (flags & 1)" + NL + "        aiaction_delete(a);",
+      "if (flags & 2)" + NL + "        aiaction_delete(a);"),
+    A("ad-always", "if (flags & 1)" + NL + "        aiaction_delete(a);",
+      "if (1)" + NL + "        aiaction_delete(a);"),
+    A("an-pool", "return bSlotOMalloc(AIActionSlotPool);",
+      "return bSlotOMalloc(NULL);"),
+    A("dl-pool", "bSlotFree(AIActionSlotPool, p);", "bSlotFree(NULL, p);"),
+    A("dl-slot", "bSlotFree(AIActionSlotPool, p);",
+      "bSlotFree(AIActionSlotPool, NULL);"),
+
+    # UpdateStatus.
+    A("us-clear", "    a->Base.Status = STATUS_NOT_DONE;" + NL
+      + "    e = vt_slot", "    e = vt_slot"),
+    A("us-exp", "a->Base.Status = STATUS_EXPIRED;",
+      "a->Base.Status = STATUS_FAILURE;"),
+    A("us-fail", "        a->Base.Status = STATUS_FAILURE;" + NL
+      + "    e = vt_slot", "        a->Base.Status = STATUS_EXPIRED;" + NL
+      + "    e = vt_slot"),
+    A("us-acc", "        a->Base.Status = STATUS_SUCCESS;" + NL + "}",
+      "        a->Base.Status = STATUS_FAILURE;" + NL + "}"),
+    A("us-order", "e = vt_slot(a->Base._vtable, AIACTION_VT_HAS_EXPIRED);",
+      "e = vt_slot(a->Base._vtable, AIACTION_VT_HAS_BEEN_ACCOMPLISHED);"),
+    A("us-this", "(vt_this(a, e), info))" + NL
+      + "        a->Base.Status = STATUS_FAILURE;",
+      "(a, info))" + NL + "        a->Base.Status = STATUS_FAILURE;"),
+    A("us-info", "(vt_this(a, e), info))" + NL
+      + "        a->Base.Status = STATUS_SUCCESS;",
+      "(vt_this(a, e), NULL))" + NL + "        a->Base.Status = STATUS_SUCCESS;"),
+
+    # The three SetDesiredSpeeds.
+    A("sl-delta", "State.VelocityMagnitude - delta;",
+      "State.VelocityMagnitude + delta;"),
+    A("sl-clamp", "a->DesiredSpeed = max_s(speed, 0.0f);",
+      "a->DesiredSpeed = speed;"),
+    A("sl-clamp-order", "a->DesiredSpeed = max_s(speed, 0.0f);",
+      "a->DesiredSpeed = max_s(0.0f, speed);"),
+    A("sl-gap", "(nc->Position.y - list->MyHalfSizeD) - nc->ApparentHalfSizeD",
+      "(nc->Position.y - list->MyHalfSizeD) + nc->ApparentHalfSizeD"),
+    A("sl-gap-assoc", "(nc->Position.y - list->MyHalfSizeD) - "
+      "nc->ApparentHalfSizeD", "nc->Position.y - (list->MyHalfSizeD + "
+      "nc->ApparentHalfSizeD)"),
+    A("sl-div", "max_s(ee_div(gap, nc->Velocity.y),",
+      "max_s(gap / nc->Velocity.y,"),
+    A("sl-vy", "ee_div(gap, nc->Velocity.y)", "ee_div(gap, nc->Velocity.x)"),
+    A("sl-min", "#define AIA_MIN_TIME_TO_SPEED   0.100000001f",
+      "#define AIA_MIN_TIME_TO_SPEED   0.2f"),
+    A("ma-sum", "a->DesiredSpeed = v + accel * t;",
+      "a->DesiredSpeed = v - accel * t;"),
+    A("ma-time", "    a->TimeToGetToDesiredSpeed = t;" + NL
+      + "    a->DesiredSpeed = v + accel * t;",
+      "    a->TimeToGetToDesiredSpeed = v;" + NL
+      + "    a->DesiredSpeed = v + accel * t;"),
+    A("ma-speed", "ai_calculate_max_acceleration(car, v);",
+      "ai_calculate_max_acceleration(car, 0.0f);"),
+    A("md-sum", "a->DesiredSpeed = v + decel * t;",
+      "a->DesiredSpeed = v - decel * t;"),
+    A("md-time", "    a->TimeToGetToDesiredSpeed = t;" + NL
+      + "    a->DesiredSpeed = v + decel * t;",
+      "    a->TimeToGetToDesiredSpeed = v;" + NL
+      + "    a->DesiredSpeed = v + decel * t;"),
+    A("md-speed", "ai_calculate_max_deceleration(car, v);",
+      "ai_calculate_max_deceleration(car, 0.0f);"),
+    A("md-fn", "float decel = ai_calculate_max_deceleration(car, v);",
+      "float decel = -ai_calculate_max_acceleration(car, v);"),
+
+    # CalculateMaxDeceleration.
+    M("dc-down", "(ti->Aero.FrontDownforce + ti->Aero.RearDownforce) * 0.5f",
+      "(ti->Aero.FrontDownforce + ti->Aero.FrontDownforce) * 0.5f"),
+    M("dc-down-half", "ti->Aero.RearDownforce) * 0.5f;",
+      "ti->Aero.RearDownforce) * 0.25f;"),
+    M("dc-mu", "float mu = (ti->Tires[1].StaticFrictionCoefficient",
+      "float mu = (ti->Tires[0].StaticFrictionCoefficient"),
+    M("dc-mu-half", "+ ti->Tires[0].StaticFrictionCoefficient) * 0.5f;",
+      "+ ti->Tires[0].StaticFrictionCoefficient) * 0.25f;"),
+    M("dc-weight", "float weight = RIGIDBODY_GRAVITY * ti->Body.Mass;",
+      "float weight = ti->Body.Mass;"),
+    M("dc-abs", "return -(((fabsf(speed) * down", "return -(((speed * down"),
+    M("dc-assoc", "return -(((fabsf(speed) * down + weight) * mu) "
+      "/ ti->Body.Mass);", "return -((fabsf(speed) * down + weight * mu) "
+      "/ ti->Body.Mass);"),
+    M("dc-assoc-div", "return -(((fabsf(speed) * down + weight) * mu) "
+      "/ ti->Body.Mass);", "return -((fabsf(speed) * down + weight) * "
+      "(mu / ti->Body.Mass));"),
+    M("dc-neg", "return -(((fabsf(speed) * down + weight) * mu) "
+      "/ ti->Body.Mass);", "return (((fabsf(speed) * down + weight) * mu) "
+      "/ ti->Body.Mass);"),
+
+    # GetHeadingClassification.
+    A("hd-moving", "if (AIA_MOVING_SPEED < fabsf(car->State."
+      "VelocityMagnitude))", "if (AIA_MOVING_SPEED <= fabsf(car->State."
+      "VelocityMagnitude))"),
+    A("hd-abs", "if (AIA_MOVING_SPEED < fabsf(car->State."
+      "VelocityMagnitude))", "if (AIA_MOVING_SPEED < car->State."
+      "VelocityMagnitude)"),
+    A("hd-look", "#define AIA_LOOK_AHEAD_SECONDS  0.100000001f",
+      "#define AIA_LOOK_AHEAD_SECONDS  0.2f"),
+    A("hd-lat-sign", "        - (p->y - rp->Position.y) * rp->Direction.x;",
+      "        + (p->y - rp->Position.y) * rp->Direction.x;"),
+    A("hd-lat-axis", "return (p->x - rp->Position.x) * rp->Direction.y",
+      "return (p->x - rp->Position.x) * rp->Direction.x"),
+    A("hd-rate", "rate = (l_ahead - l_now) * AIA_RATE_SCALE;",
+      "rate = (r_ahead - r_now) * AIA_RATE_SCALE;"),
+    A("hd-rate-scale", "#define AIA_RATE_SCALE          10.0f",
+      "#define AIA_RATE_SCALE          5.0f"),
+    A("hd-rate-min", "if (AIA_EDGE_RATE_MIN < rate && 0.0f < r_now",
+      "if (0.0f < rate && 0.0f < r_now"),
+    A("hd-r-pos", "&& 0.0f < r_now && 0.0f < l_now)",
+      "&& 0.0f <= r_now && 0.0f < l_now)"),
+    A("hd-l-pos", "&& 0.0f < r_now && 0.0f < l_now)",
+      "&& 0.0f < r_now && 0.0f <= l_now)"),
+    A("hd-r-only", "&& 0.0f < r_now && 0.0f < l_now)", "&& 0.0f < r_now)"),
+    A("hd-l-only", "&& 0.0f < r_now && 0.0f < l_now)", "&& 0.0f < l_now)"),
+    A("hd-t", "t = r_now / rate;", "t = l_now / rate;"),
+    A("hd-soon", "if (t <= AIA_EDGE_SOON)", "if (t < AIA_EDGE_SOON)"),
+    A("hd-r-out", "else if (r_now < 0.0f && r_ahead < r_now)",
+      "else if (r_now < 0.0f)"),
+    A("hd-r-out-le", "else if (r_now < 0.0f && r_ahead < r_now)",
+      "else if (r_now <= 0.0f && r_ahead < r_now)"),
+    A("hd-l-out", "else if (l_now < 0.0f && l_ahead < l_now)",
+      "else if (l_now < 0.0f)"),
+    A("hd-l-out-le", "else if (l_now < 0.0f && l_ahead < l_now)",
+      "else if (l_now <= 0.0f && l_ahead < l_now)"),
+    A("hd-fwd", "r = 0.0f < car->State.ForwardSpeed",
+      "r = 0.0f <= car->State.ForwardSpeed"),
+    A("hd-slow-ahead", "#define AIA_SLOW_LOOK_AHEAD     2.0f",
+      "#define AIA_SLOW_LOOK_AHEAD     3.0f"),
+    A("hd-slow-cos", "dir.x = bCosBam(car->State.Angle);",
+      "dir.x = bSinBam(car->State.Angle);"),
+    A("hd-slow-r", "if (r_ahead < 0.0f && r_ahead - r_now < 0.0f)",
+      "if (r_ahead < 0.0f)"),
+    A("hd-slow-r-le", "if (r_ahead < 0.0f && r_ahead - r_now < 0.0f)",
+      "if (r_ahead < 0.0f && r_ahead - r_now <= 0.0f)"),
+    A("hd-slow-l", "else if (l_ahead < 0.0f && l_ahead - l_now < 0.0f)",
+      "else if (l_ahead < 0.0f)"),
+    A("hd-slow-l-le", "else if (l_ahead < 0.0f && l_ahead - l_now < 0.0f)",
+      "else if (l_ahead < 0.0f && l_ahead - l_now <= 0.0f)"),
+    A("hd-check", "if (r == HEADING_OUT_OF_ROUTE_FORWARDS && steer_check)",
+      "if (r == HEADING_OUT_OF_ROUTE_FORWARDS)"),
+    A("hd-first-ask", "        bVector2 local = *steer_to_point(car);" + NL
+      + NL + "        car_world_to_car(car, &local, &local);" + NL, ""),
+    A("hd-steer-ahead", "#define AIA_STEER_AHEAD         0.5f",
+      "#define AIA_STEER_AHEAD         0.0f"),
+    A("hd-steer-ok", "            r = HEADING_OKAY;" + NL + "    }" + NL
+      + "    if (r == HEADING_OUT_OF_ROUTE_BACKWARDS)",
+      "            r = HEADING_NONE;" + NL + "    }" + NL
+      + "    if (r == HEADING_OUT_OF_ROUTE_BACKWARDS)"),
+    A("hd-back", "if (r == HEADING_OUT_OF_ROUTE_BACKWARDS) {", "if (0) {"),
+    A("hd-back-cos", "#define AIA_BACKWARDS_COS       0.342000008f",
+      "#define AIA_BACKWARDS_COS       0.5f"),
+    A("hd-back-norm", "bNormalize2(&n_body, &body);", "n_body = body;"),
+    A("hd-back-route", "bNormalize2(&n_route, &route);", "n_route = route;"),
+    A("hd-back-dot", "< n_body.x * n_route.x + n_body.y * n_route.y)",
+      "< n_body.x * n_route.x - n_body.y * n_route.y)"),
+
+    # GetCollisionClassification.
+    A("co-share", "#define AIA_BOX_SHARE           0.949999988f",
+      "#define AIA_BOX_SHARE           0.9f"),
+    A("co-max", "local.x < max.y * AIA_BOX_SHARE",
+      "local.x < max.x * AIA_BOX_SHARE"),
+    A("co-min", "min.y * AIA_BOX_SHARE < local.x",
+      "min.x * AIA_BOX_SHARE < local.x"),
+    A("co-front", "return 0.0f < local.y ? COLLISION_IN_FRONT",
+      "return 0.0f > local.y ? COLLISION_IN_FRONT"),
+    A("co-side", "return 0.0f < local.x ? COLLISION_RIGHT_SIDE",
+      "return 0.0f > local.x ? COLLISION_RIGHT_SIDE"),
+
+    # ClearPointsToDrive, GetName and the tables.
+    A("cl-clear", "    drivetarget_clear(&a->PointsToDrive, NULL, 0.0f);" + NL,
+      ""),
+    A("gn-name", 'return "";', 'return "x";'),
+    A("vt-dtor", "E(aiaction_destroy),", "E(aiplan_destroy),"),
+    A("vt-name", "E(aiaction_get_name),", "{ 0, 0, NULL },"),
 ]
 
 EQUIVALENT = {}
