@@ -5,7 +5,8 @@
 // it diffs against the retail image, run in mipsemu over the same script.
 // Since step 11d-1 it runs the AI actions of aiactions.c too (the five
 // small ones, since 11d-2 Pass and AvoidCars, and since 11d-3a PullOver
-// and IJustGotHit), one at a time in a slot of their own, over a
+// and IJustGotHit, and since 11d-3b GetUnstuck and AvoidRoadBlock), one at
+// a time in a slot of their own, over a
 // DrivingInformation copied from the script's list, location and choice.
 //
 // The harness owns the cars, their controllers, choices and actions, the
@@ -24,7 +25,10 @@
 // acceleration table. For PullOver and IJustGotHit it owns the chopper,
 // the cop manager and its cops, the players, and each car's collisions,
 // which it answers for collisionbody.c and collision.c, each printing a
-// line.
+// line. For GetUnstuck and AvoidRoadBlock it owns each car's point to steer
+// to, the pursuits and their roadblocks, and stands in for each car's
+// controller's FindWhereIAm and its driver's ClearSteeringMemory and
+// GetSteerToPoint, each printing a line.
 //
 // A float prints as its bits, every NaN as "nan", and a pointer by what it
 // points at. The ops and every line's format are the checker's.
@@ -58,6 +62,7 @@
 #include "racecore.h"
 #include "topology.h"
 #include "track.h"
+#include "trackpath.h"
 #include "trackroute.h"
 #include "vtable.h"
 #include "world.h"
@@ -147,6 +152,8 @@ static union {
     AIActionAvoidCars        ac;
     AIActionPullOver         po;
     AIActionIJustGotHit      ij;
+    AIActionGetUnstuck       gu;
+    AIActionAvoidRoadBlock   rb;
     unsigned char            raw[AIACTION_SLOT_SIZE];
 } ab;
 static DrivingInformation info;
@@ -173,6 +180,14 @@ static tCop cops[7];
 static struct Player plobj[2];
 int32_t PlayerNumPlayers;
 struct Player *PlayerPlayersByIndex[2];
+
+// Step 11d-3b's: each car's point to steer to, and the cop manager's
+// pursuits and their roadblocks.
+#define NPURSUITS 4
+#define NRBS 4
+static bVector2 stps[NCARS];
+static tPursuit pursuits[NPURSUITS];
+static tRoadBlock rbs[NRBS];
 
 DriveTargetRenderer TheDriveTargetRenderer;
 
@@ -236,6 +251,7 @@ static const char *nm(const void *p)
     TRY(list.Array, NEARBYCARLIST_MAX, "e")
     TRY(info.MyNearbyCarList.Array, NEARBYCARLIST_MAX, "ie")
     TRY(bodies, NCARS, "b")
+    TRY(rbs, NRBS, "rb")
 #undef TRY
     if ((i = index_in(p, colls, sizeof colls[0][0], NCARS * NCOLLS)) >= 0) {
         sprintf(b, "col%d:%d", i / NCOLLS, i % NCOLLS);
@@ -476,6 +492,61 @@ void collision_get_colliding_cars(Collision *c, struct Car **car1,
     *car2 = coll_cars[i / NCOLLS][i % NCOLLS][1];
 }
 
+// ------------------------------------------------- 11d-3b's stubs
+
+static int driver_index(void *self)
+{
+    int i = index_in(self, cdrivers, sizeof cdrivers[0], NCARS);
+
+    if (i < 0) {
+        fprintf(stderr, "a driver that is not one of ours\n");
+        exit(2);
+    }
+    return i;
+}
+
+// The controller table's FindWhereIAm.
+static void fk_find_where_i_am(void *self)
+{
+    printf("  fwia %s\n", nm(&ctrls[ctrl_index(self)]));
+}
+
+// The test CarDriver table's ClearSteeringMemory and GetSteerToPoint, the
+// script's point for the car.
+static void fk_clear_steering_memory(void *self)
+{
+    printf("  csm %s\n", nm(&cars[driver_index(self)]));
+}
+
+static bVector2 *fk_steer_to_point(void *self)
+{
+    int i = driver_index(self);
+
+    printf("  stp %s\n", nm(&cars[i]));
+    return &stps[i];
+}
+
+// The manager's PursuitList: a pursuit for each spec, "-" for one with no
+// roadblock, linked both ways round the list's own node.
+static void set_pursuits(char **specs, int n)
+{
+    tPursuitNode *head = &copm.PursuitList, *prev = head;
+    int i;
+
+    for (i = 0; i < n && i < NPURSUITS; i++) {
+        tPursuit *p = &pursuits[i];
+
+        memset(p, 0, sizeof *p);
+        p->pRoadBlock = strcmp(specs[i], "-") == 0 ? NULL
+                                                   : &rbs[atoi(specs[i])];
+        p->Node.Prev = prev;
+        prev->Next = &p->Node;
+        prev = &p->Node;
+    }
+    prev->Next = head;
+    head->Prev = prev;
+}
+
 // ------------------------------------------------------------ the dumps
 
 static void dump_choice(const DrivingChoice *d, const char *tag)
@@ -600,6 +671,10 @@ static const char *vt_name(uint32_t v)
         return "vPO";
     case AIIJUSTGOTHIT_VTABLE:
         return "vIJ";
+    case AIGETUNSTUCK_VTABLE:
+        return "vGU";
+    case AIAVOIDROADBLOCK_VTABLE:
+        return "vRB";
     case AIACTION_VTABLE:
         return "vAA";
     case AIPLAN_VTABLE:
@@ -654,6 +729,12 @@ static void dump_act(void)
     else if (strcmp(kind, "ij") == 0)
         printf("  ij car %s last %08x\n", nm(ab.ij.CarIHit),
                (unsigned)ab.ij.LastDecisionReevaluationTime.PackedTime);
+    else if (strcmp(kind, "gu") == 0)
+        printf("  gu made %08x min %s on %d\n",
+               (unsigned)ab.gu.MyCreationTime.PackedTime,
+               fx(ab.gu.MinimumLifetime), (int)ab.gu.MinimumLifetimeInEffect);
+    else if (strcmp(kind, "rb") == 0)
+        printf("  rb %s\n", nm(ab.rb.RoadBlockToAvoid));
 }
 
 // After CalculatePointsToDrive: the information's choice and location, and
@@ -797,6 +878,14 @@ static void reset(void)
     PlayerPlayersByIndex[1] = NULL;
     memset(coll_two, 0, sizeof coll_two);
     memset(coll_cars, 0, sizeof coll_cars);
+    // Step 11d-3b's: no steer-to points, collision times, track length,
+    // roadblocks or pursuits.
+    memset(stps, 0, sizeof stps);
+    memset(colls, 0, sizeof colls);
+    memset(pursuits, 0, sizeof pursuits);
+    memset(rbs, 0, sizeof rbs);
+    memset(&copm, 0, sizeof copm);
+    TheTrackPathManager.TrackLength = 0.0f;
 }
 
 static void set_global(const char *name, uint32_t v)
@@ -836,6 +925,8 @@ static void set_global(const char *name, uint32_t v)
         HighlightDrivingLineInRouteNumber = (int32_t)v;
     else if (strcmp(name, "HLINE") == 0)
         HighlightDrivingLineNumber = (int32_t)v;
+    else if (strcmp(name, "TLEN") == 0)
+        TheTrackPathManager.TrackLength = f;
     else {
         fprintf(stderr, "bad global %s\n", name);
         exit(2);
@@ -979,6 +1070,8 @@ static void poke(const char *f, uint32_t v)
         { "po", "o616", offsetof(AIActionPullOver, IsMyDrivingChoiceOkay) },
         { "po", "o620", offsetof(AIActionPullOver, New620) },
         { "po", "o624", offsetof(AIActionPullOver, PullOverTimeout) },
+        { "gu", "o616",
+          offsetof(AIActionGetUnstuck, MinimumLifetimeInEffect) },
         { "ij", "r612",
           offsetof(AIActionIJustGotHit, LastDecisionReevaluationTime) },
     };
@@ -1035,6 +1128,11 @@ static void act_op(char **t, int n)
                             atoi(t[6]) & 2 ? NULL : &info.MyDrivingLocation);
         else if (strcmp(kind, "ij") == 0)
             aijustgothit_init(&ab.ij, score, timeout, car);
+        else if (strcmp(kind, "gu") == 0)
+            aigetunstuck_init(&ab.gu, score, timeout, fh(t[5]));
+        else if (strcmp(kind, "rb") == 0)
+            aiavoidroadblock_init(&ab.rb, score, timeout,
+                                  atoi(t[5]) >= 0 ? &rbs[atoi(t[5])] : NULL);
         else
             aiaccidentrecovery_init(&ab.ar, score, timeout);
         dump_act();
@@ -1113,6 +1211,14 @@ static void act_op(char **t, int n)
             dump_info();
         } else if (strcmp(k, "po") == 0) {
             got = aipullover_calculate_score(&info);
+        } else if (strcmp(k, "gu") == 0) {
+            got = aigetunstuck_calculate_score(&info);
+        } else if (strcmp(k, "rb") == 0) {
+            const tRoadBlock *out;
+
+            fill(&out, sizeof out);
+            got = aiavoidroadblock_calculate_score(&info, &out);
+            printf("  out %s\n", nm(out));
         } else {
             got = aiaccidentrecovery_calculate_score(&info);
         }
@@ -1198,6 +1304,7 @@ static void act_op(char **t, int n)
                 cops[i].pMyCar = car_ptr(t[2 + i]);
                 cops[i].DesiredLogicState = atoi(strchr(t[2 + i], ':') + 1);
             }
+            set_pursuits(NULL, 0);
             pCopManager = (tCopManager *)(void *)&copm;
         }
     } else if (strcmp(c, "pl") == 0) {
@@ -1216,6 +1323,44 @@ static void act_op(char **t, int n)
                &v, 4);
     } else if (strcmp(c, "sk") == 0) {
         drivers[atoi(t[1])].SkillLevel = (int8_t)atoi(t[2]);
+    } else if (strcmp(c, "ct") == 0) {
+        // 11d-3b's from here: a collision's time and contact point.
+        Collision *co = &colls[atoi(t[1])][atoi(t[2])];
+
+        co->CollisionTime.PackedTime = wh(t[3]);
+        co->CurrentContactPoint.x = fh(t[4]);
+        co->CurrentContactPoint.y = fh(t[5]);
+    } else if (strcmp(c, "stp") == 0) {
+        stps[atoi(t[1])].x = fh(t[2]);
+        stps[atoi(t[1])].y = fh(t[3]);
+    } else if (strcmp(c, "td") == 0) {
+        cars[atoi(t[1])].TheTrackPathCoordinate.DistanceAroundTrack = fh(t[2]);
+    } else if (strcmp(c, "rbf") == 0) {
+        // A roadblock: whether each cop is there, its route and point, its
+        // distance round the track, its spike belt and its escape lane.
+        tRoadBlock *r = &rbs[atoi(t[1])];
+
+        memset(r, 0, sizeof *r);
+        r->cops[0] = atoi(t[2]) ? (struct stAICop *)(void *)&cops[0] : NULL;
+        r->cops[1] = atoi(t[3]) ? (struct stAICop *)(void *)&cops[1] : NULL;
+        r->RoutePoint = point_of(t[4], t[5]);
+        r->Route = route_of(t[4]);
+        r->fDistanceAroundTrack = fh(t[6]);
+        r->v2SpikeBeltPos.x = fh(t[7]);
+        r->v2SpikeBeltPos.y = fh(t[8]);
+        r->v2EscapeLane.x = fh(t[9]);
+        r->v2EscapeLane.y = fh(t[10]);
+    } else if (strcmp(c, "pu") == 0) {
+        set_pursuits(t + 1, n - 1);
+        pCopManager = (tCopManager *)(void *)&copm;
+    } else if (strcmp(c, "as") == 0) {
+        printf("  aws %d\n", aigetunstuck_are_we_stuck_behind_someone(
+                                  &info.MyDrivingLocation,
+                                  &info.MyNearbyCarList));
+    } else if (strcmp(c, "ut") == 0) {
+        ctis[atoi(t[1])].UsageType = atoi(t[2]);
+    } else if (strcmp(c, "mv") == 0) {
+        cars[atoi(t[1])].State.MatrixValid = 0;
     } else {
         fprintf(stderr, "bad op %s\n", t[0]);
         exit(2);
@@ -1594,10 +1739,16 @@ int main(int argc, char **argv)
         (VtFn)fk_route_point;
     ctl_vt[VT_SLOT(CARCONTROLLER_VT_GET_AMOUNT_OUT_OF_BOUNDS)].fn =
         (VtFn)fk_oob;
+    ctl_vt[VT_SLOT(CARCONTROLLER_VT_FIND_WHERE_I_AM)].fn =
+        (VtFn)fk_find_where_i_am;
     vt_install(AICARCONTROLLER_VTABLE, ctl_vt, CARCONTROLLER_VT_ENTRIES);
     aiaction_install_vtables();
     aiactions_install_vtables();
     drv_vt[VT_SLOT(CARDRIVER_VT_GET_DRIVER_NUMBER)].fn = (VtFn)fk_driver_number;
+    drv_vt[VT_SLOT(CARDRIVER_VT_CLEAR_STEERING_MEMORY)].fn =
+        (VtFn)fk_clear_steering_memory;
+    drv_vt[VT_SLOT(CARDRIVER_VT_GET_STEER_TO_POINT)].fn =
+        (VtFn)fk_steer_to_point;
     vt_install(DVT, drv_vt, CARDRIVER_VT_ENTRIES);
 
     f = fopen(argv[1], "r");

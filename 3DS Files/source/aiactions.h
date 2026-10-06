@@ -33,8 +33,16 @@
 // - IJustGotHit (0x001c9c68 .. 0x001ca1ec): new choices every 0.2 s while
 //   touching a car, the speed by where that car is.
 // Their GetNames and destructors are 0x001ca628 to 0x001ca7e4.
-// GetUnstuck and AvoidRoadBlock are 11d-3b's. The DoSnapshots wait on
-// ReplaySnapshot.
+//
+// And 11d-3b's two:
+// - GetUnstuck (0x001c8b30 .. 0x001c9664): a car off the road, heading
+//   out of it, stuck behind a slow car or nosed into something backs
+//   towards a point three ahead on its line until it faces it;
+// - AvoidRoadBlock (0x001c9668 .. 0x001c9c64): a car closing on a manned
+//   roadblock steers onto its escape lane, slowing behind a racer in the
+//   way.
+// Their GetNames and destructors are 0x001ca698 to 0x001ca774. The
+// DoSnapshots wait on ReplaySnapshot.
 //
 // Checked against retail by tools/drivingchoice_check.py. Written up in
 // docs/formats/ai-action.md.
@@ -46,6 +54,7 @@
 
 #include "aiaction.h"
 #include "car.h"
+#include "copmanager.h"
 #include "nearbycar.h"
 #include "timer.h"
 
@@ -122,6 +131,19 @@ typedef struct AIActionIJustGotHit {
     Timer    LastDecisionReevaluationTime;      // 612
 } AIActionIJustGotHit;
 
+// 11d-3b's.
+typedef struct AIActionGetUnstuck {
+    AIAction Base;                              //   0
+    Timer    MyCreationTime;                    // 608
+    float    MinimumLifetime;                   // 612
+    int32_t  MinimumLifetimeInEffect;           // 616  a bool
+} AIActionGetUnstuck;
+
+typedef struct AIActionAvoidRoadBlock {
+    AIAction          Base;                     //   0
+    const tRoadBlock *RoadBlockToAvoid;         // 608
+} AIActionAvoidRoadBlock;
+
 #ifndef AIACTION_NO_ASSERT
 typedef char aiactions_layout_check[
     (offsetof(AIActionJustDrive, LastDecisionReevaluationTime) == 608
@@ -139,7 +161,12 @@ typedef char aiactions_layout_check[
      && offsetof(AIActionPullOver, New620) == 620
      && offsetof(AIActionPullOver, PullOverTimeout) == 624
      && offsetof(AIActionIJustGotHit, CarIHit) == 608
-     && sizeof(AIActionIJustGotHit) <= AIACTION_SLOT_SIZE) ? 1 : -1];
+     && sizeof(AIActionIJustGotHit) <= AIACTION_SLOT_SIZE
+     && offsetof(AIActionGetUnstuck, MyCreationTime) == 608
+     && offsetof(AIActionGetUnstuck, MinimumLifetime) == 612
+     && offsetof(AIActionGetUnstuck, MinimumLifetimeInEffect) == 616
+     && offsetof(AIActionAvoidRoadBlock, RoadBlockToAvoid) == 608
+     && sizeof(AIActionAvoidRoadBlock) <= AIACTION_SLOT_SIZE) ? 1 : -1];
 // What follows a car pointer is retail's only where a pointer is 4 bytes.
 #if UINTPTR_MAX == 0xFFFFFFFFu
 typedef char aiactions_layout_check32[
@@ -157,8 +184,8 @@ typedef char aiactions_layout_check32[
 #endif
 
 // The demo's tables (retail 0x002b7b10, 0x002b7bd0, 0x002b7b90, 0x002b7b50,
-// 0x002b79d0, 0x002b7c10, 0x002b7c50, 0x002b7ad0 and 0x002b7a10), eight
-// entries each in AIAction's slots.
+// 0x002b79d0, 0x002b7c10, 0x002b7c50, 0x002b7ad0, 0x002b7a10, 0x002b7a50
+// and 0x002b7a90), eight entries each in AIAction's slots.
 #define AIJUSTDRIVE_VTABLE         0x0029afa0u
 #define AIDRAFT_VTABLE             0x0029b060u
 #define AINUDGECAR_VTABLE          0x0029b020u
@@ -168,6 +195,8 @@ typedef char aiactions_layout_check32[
 #define AIAVOIDCARS_VTABLE         0x0029b0e0u
 #define AIPULLOVER_VTABLE          0x0029af60u
 #define AIIJUSTGOTHIT_VTABLE       0x0029aea0u
+#define AIGETUNSTUCK_VTABLE        0x0029aee0u
+#define AIAVOIDROADBLOCK_VTABLE    0x0029af20u
 
 // --------------------------------------------------------- JustDrive
 
@@ -491,7 +520,98 @@ void aijustgothit_calculate_points_to_drive(AIActionIJustGotHit *a,
 // 0x001ca628. "I just got hit!".
 const char *aijustgothit_get_name(AIActionIJustGotHit *a);
 
-// Installs the nine tables. The DoSnapshots are NULL.
+// -------------------------------------------------------- GetUnstuck
+
+// 0x001c8b30, (int score, float timeout, float minLifetime). Type
+// GET_UNSTUCK, created now, and the minimum lifetime in effect unless it
+// is -1, give or take 0.001.
+AIActionGetUnstuck *aigetunstuck_init(AIActionGetUnstuck *a, int32_t score,
+                                      float timeout, float minLifetime);
+
+// 0x001ca6a8.
+void aigetunstuck_destroy(AIActionGetUnstuck *a, int32_t flags);
+
+// 0x001c8c30, static. -1 in the grace period, with the location clear or
+// fewer than three wheels down. Stuck when the car is 20 m or more past an
+// edge of its route point; or, as an AI car at 25 m/s or less or traffic
+// at 20 or less, heading out of the route forwards; or stuck behind
+// someone; or with a collision in front 0.4 s old or more while going
+// under 1 m/s (1.001, give or take). Stuck asks the controller's
+// FindWhereIAm, and scores 500.
+int32_t aigetunstuck_calculate_score(DrivingInformation *info);
+
+// 0x001c8ee8, static. Not blinking, at 15 m/s or less, and a car on the
+// list that is not mine, at AISlowCarSpeed or less either way, overlapping
+// mine across and within 9 m ahead past the two half lengths. `loc` is
+// not read.
+int aigetunstuck_are_we_stuck_behind_someone(DrivingLocation *loc,
+                                             NearbyCarList *list);
+
+// 0x001c9140. Past the minimum lifetime, facing within 0.98 of the goal
+// point (three points on along the line) and not stuck behind someone.
+// Done asks FindWhereIAm and the driver's ClearSteeringMemory.
+int aigetunstuck_has_been_accomplished(AIActionGetUnstuck *a,
+                                       DrivingInformation *info);
+
+// 0x001c9340. The location clear or fewer than three wheels down; else,
+// past the minimum lifetime, heading out of the route backwards, or a
+// collision behind 0.4 s old or more while going under 1 m/s either way.
+// Failing asks FindWhereIAm and ClearSteeringMemory.
+int aigetunstuck_has_failed(AIActionGetUnstuck *a, DrivingInformation *info);
+
+// 0x001c9298. As JustDrive's, and expiring asks FindWhereIAm and
+// ClearSteeringMemory.
+int aigetunstuck_has_expired(AIActionGetUnstuck *a, DrivingInformation *info);
+
+// 0x001c9550. The goal point, then the route ahead parallel to the line,
+// backwards: -15 m/s for an AI car, -6 for any other. With the location
+// clear, no points and not the action's.
+void aigetunstuck_calculate_points_to_drive(AIActionGetUnstuck *a,
+                                            DrivingInformation *info);
+
+// 0x001ca698. "Get Unstuck".
+const char *aigetunstuck_get_name(AIActionGetUnstuck *a);
+
+// ---------------------------------------------------- AvoidRoadBlock
+
+// 0x001c9668, (int score, float timeout, const tRoadBlock *rb). Type
+// AVOID_ROADBLOCK and the roadblock.
+AIActionAvoidRoadBlock *aiavoidroadblock_init(AIActionAvoidRoadBlock *a,
+                                              int32_t score, float timeout,
+                                              const tRoadBlock *rb);
+
+// 0x001ca718.
+void aiavoidroadblock_destroy(AIActionAvoidRoadBlock *a, int32_t flags);
+
+// 0x001c9718, static. The first active roadblock with a cop that is more
+// than my speed times 2.5 s (and no less than 100 m) ahead round the
+// track: `*rb`, and 600. Otherwise -1 and `*rb` NULL.
+int32_t aiavoidroadblock_calculate_score(DrivingInformation *info,
+                                         const tRoadBlock **rb);
+
+// 0x001c9858. Both cops gone, or the roadblock more than 15 m behind.
+int aiavoidroadblock_has_been_accomplished(AIActionAvoidRoadBlock *a,
+                                           DrivingInformation *info);
+
+// 0x001c98d8 and 0x001c98d0. Never.
+int aiavoidroadblock_has_failed(AIActionAvoidRoadBlock *a,
+                                DrivingInformation *info);
+int aiavoidroadblock_has_expired(AIActionAvoidRoadBlock *a,
+                                 DrivingInformation *info);
+
+// 0x001c98e0. The route up to the roadblock's point (on its route), the
+// one ahead nearest the escape lane (within 5 m of the road), or the
+// route's last, edging from my offset off the line to the escape lane's
+// (my own past the road), then parallel, at the line's speed. Behind a
+// racer it would hit within a second, the speed is that car's less 0.1,
+// and no less than 30.
+void aiavoidroadblock_calculate_points_to_drive(AIActionAvoidRoadBlock *a,
+                                                DrivingInformation *info);
+
+// 0x001ca708. "Avoid Roadblock".
+const char *aiavoidroadblock_get_name(AIActionAvoidRoadBlock *a);
+
+// Installs the eleven tables. The DoSnapshots are NULL.
 void aiactions_install_vtables(void);
 
 #endif

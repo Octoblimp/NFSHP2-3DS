@@ -1,13 +1,12 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 38
-(2026-10-06), after 11d-3a, PullOver and IJustGotHit.
+(2026-10-06), after 11d-3b, GetUnstuck and AvoidRoadBlock.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
-AIPlan and the AIAction base, 11d-1, the five small actions, 11d-2,
-Pass and AvoidCars, and 11d-3a, PullOver and IJustGotHit, are done and
-checked against retail. The car selector is finished and checked against retail: SC-1
+AIPlan and the AIAction base, and 11d-1 to 11d-3b, all eleven actions,
+are done and checked against retail. Next is 11e, AICarController. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -284,40 +283,72 @@ car's were.
       Five of the earlier slices' patterns carry a line of context now.
     - `docs/formats/ai-action.md` has the detail, under "PullOver and
       IJustGotHit (11d-3a)".
-  - **11d-3b, next: GetUnstuck and AvoidRoadBlock**, the last two
-    actions. Retail's tables, by type:
-
-    | Type | Action | Table | Retail | dtor | CPTD |
-    |---:|---|---|---|---|---|
-    | 7 | GetUnstuck | 0x002b7a50 | 0x001c8b30 | 0x001ca6a8 | 0x001c9550 |
-    | 8 | AvoidRoadBlock | 0x002b7a90 | 0x001c9668 | 0x001ca718 | 0x001c98e0 |
-
-    The demo's tables are 0x0029aee0 and 0x0029af20, in the same order.
-    `python tools/retail_vtable.py 0x002b7a50` lists a table's
-    functions. 11d-3a's ops carry over: `@col` (collisions), `@sk`,
-    `@ti`, `@cl` and the rest.
-    - GetUnstuck's constructor is (int, float, float f13): 608 =
-      WorldTimer, 612 = f13, 616 = !(|f13 + 1| <= gp-28628). It also
-      has AreWeStuckBehindSomeone (0x001c8ee8, over the list's
-      28-byte entries), GetGoalTrackRoutePoint (0x001c9018) and both
-      GetGoalPoints (0x001c9070, 0x001c90d8). It reads Car+40's vptr
-      entry 72 and the driver's (Car+44) vptr+556 entry 128.
-    - AvoidRoadBlock's constructor is (int, float, const tRoadBlock *),
-      setting 608. Its score (0x001c9718, 600) uses GetActiveRoadBlock
-      and the TrackPathManager's CompareDistances. Its
-      CalculatePointsToDrive reads the road block's +36, +40 and +92.
+  - **11d-3b, done:** GetUnstuck and AvoidRoadBlock, the last two
+    actions, in `aiactions.c`. All eleven tables are installed.
+    - GetUnstuck (500) needs the grace period over, a location and 3
+      wheels down. It scores when my car is 20 m past an edge, or heads
+      out of the route forwards as an AI car at 25 m/s or less (traffic
+      at 20). It also scores when the car is stuck behind a slow one in
+      its way (within 9 m), or hit something in front at least 0.4 s ago
+      and is all but stopped.
+    - It backs out, at -15 m/s as AI and -6 otherwise, towards the point
+      three on from the location's, on its line. It is done facing that
+      point (a dot of 0.98) with no one in the way. It fails heading out
+      backwards, or backed into something. A minimum lifetime (-1 is
+      none) holds both tests off. Every way out asks the controller's
+      FindWhereIAm and the driver's ClearSteeringMemory.
+    - AvoidRoadBlock (600) takes the first active roadblock with a cop
+      ahead within my speed times 2.5 s, and no less than 100 m. It is
+      done 15 m past it, or when the cops are gone.
+    - Its points move smoothly to the escape lane's offset at the
+      roadblock's route point. Off that route it uses the closest point
+      ahead of the escape lane on mine, when the lane is under 5 m past
+      the edge there; otherwise it keeps my offset to my route's end. A
+      racer in the way within 1 s, ahead, is followed 0.1 slower, at no
+      less than 30 m/s.
+    - copmanager.h's tRoadBlock has the cops, the route and its point,
+      the spike belt, the escape lane and the distance round the track.
+      The checker stubs FindWhereIAm, ClearSteeringMemory and
+      GetSteerToPoint on both sides. The roadblocks, the pursuits and
+      the collisions' times are ops.
+    - `drivingchoice_check`: 778 scenarios, 274688 ops, 297126 lines,
+      0 differ.
+    - 186 mutations for 11d-3b: 180 caught (10 by a crash) and 6
+      equivalent. Across the checker, 1453 mutations: 1419 caught, 34
+      equivalent and 0 unexplained.
+    - The first pass left 32 alive. s_gu_edge, two rounds of thirteen
+      kinds, closes 26. Eleven kinds are on a straight road: the exact
+      edges of 20 m off, 25 and 20 m/s, 0.4 s, 15 m/s, the 0.98 facing,
+      the lifetime, the range, 15 m behind, 5 m off the road, and a racer
+      ahead. Two are on curved roads: where the search for the escape's
+      point starts, and the route's last point. Six are equivalent.
+      Three of the earlier patterns carry a line of context now.
+    - `docs/formats/ai-action.md` has the detail, under "GetUnstuck and
+      AvoidRoadBlock (11d-3b)".
   - The demo's mangled names gave the other constructors' arguments;
-    retail's, read from each constructor, are above. Every one starts
-    (int score, float timeout).
+    retail's, read from each constructor, are in
+    `docs/formats/ai-action.md`. Every one starts (int score, float
+    timeout).
   - Each subclass's fields sit sixteen bytes later than the demo's
     (retail's 608-byte base). Their tables are in retail's `.data` near
     `_vt$8AIAction` (0x002b7c90). The DoSnapshots wait on ReplaySnapshot.
   - `drivingchoice_check` has the actions' ops (`@n`, `@cp`, `@us`,
     `@t`, `@sc` and the rest) and stubs (the pool, GetElevation,
     PleaseResetMeLater). `nearbycar_check` keeps the base's.
-- 11e and 11f: AICarController and AIDriver (`gAIDriverCtorFn` in
-  `carmodes.h`, and `gAICarControllerGetCurrentDrivingLineSpeedFn` in
-  `car.h`).
+- **11e, next: AICarController**, which scores the actions, keeps the
+  best and drives by it.
+  - Retail's runs from 0x00190140 to about 0x00194058: some 16 KB in
+    about 50 functions (`grep AICarController out/retail_syms.txt`).
+    Think alone is 2536 bytes, DecideBoostFactor 904 and
+    ExecuteCurrentAction 868. Lay it out in slices by size first, as 11b
+    and 11d were.
+  - `aicarcontroller.h` has the record's head, to CurrentAction at 532.
+    Retail's record is 720 bytes.
+  - `gAICarControllerGetCurrentDrivingLineSpeedFn` in `car.h` is its
+    seam. FindWhereIAm (0x00192f10) is the method the actions call.
+- 11f: AIDriver, 0x0012ffc8 to 0x001308a0, about 2.3 KB, of which
+  ChooseNewAction is 1400 bytes. Its constructor is `gAIDriverCtorFn` in
+  `carmodes.h`. SetAIDriverModesFromPlayers (0x001cd240) goes with it.
 - 11g: a SkipFE race with AI cars in it. "The road to the full game"
   has the way in.
 
@@ -3894,14 +3925,14 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-06, after 11d-3a, PullOver and IJustGotHit)
+### Where the port stands (2026-10-06, after 11d-3b, GetUnstuck and AvoidRoadBlock)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11d-3b, GetUnstuck and AvoidRoadBlock.
+- **Next:** step 11, the racer AI: 11e, AICarController.
   See "Now" at the top. These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
@@ -3912,7 +3943,8 @@ goes in.
   - 11c, AIPlan and the AIAction base;
   - 11d-1, the five small actions;
   - 11d-2, Pass and AvoidCars;
-  - 11d-3a, PullOver and IJustGotHit.
+  - 11d-3a, PullOver and IJustGotHit;
+  - 11d-3b, GetUnstuck and AvoidRoadBlock.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -3924,7 +3956,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a to 11d-3a done) | 4-6 |
+  | 11, the racer and traffic AI (11a to 11d-3b done) | 3-5 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |
@@ -3932,12 +3964,12 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped; New 3DS only since 2026-10-05) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **25-39** |
+  | **Total** | **24-38** |
 
-- **How far along:** about 33-36 of the road's 58-75 slices are done,
+- **How far along:** about 34-37 of the road's 58-75 slices are done,
   roughly half. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
-  Read the 25-39 as a floor. Step 11 was put at 4-6 before its slices
+  Read the 24-38 as a floor. Step 11 was put at 4-6 before its slices
   were laid out. They are fourteen, with traffic beside them: 11a,
   11b-1 to 11b-3, 11b-4a and 11b-4b, 11c, 11d-1, 11d-2, 11d-3a and
   11d-3b, and 11e to 11g. 11b was one slice until DrivingChoice's 13 KB

@@ -10,7 +10,9 @@
 #include <stdint.h>
 
 #include "carcollisionpredict.h"
+#include "carcontroller.h"
 #include "cardriver.h"
+#include "cartypeinfo.h"
 #include "chopper.h"
 #include "collision.h"
 #include "collisionbody.h"
@@ -23,6 +25,8 @@
 #include "racecore.h"
 #include "realtime.h"   // WorldTimer
 #include "topology.h"
+#include "trackpath.h"
+#include "trackroute.h"
 #include "vtable.h"
 #include "world.h"
 
@@ -73,6 +77,26 @@
 #define AIIJ_SLOWER_BY         0.100000001f     // gp-28556
 #define AIIJ_SLOWER_UNUSED     0.200000003f     // gp-28552
 #define AIIJ_MIN_SPEED         20.0f            // lui 0x41a0
+#define AIGU_NO_LIFETIME       (-1.0f)          // lui 0xbf80
+#define AIGU_LIFETIME_EPSILON  0.00100000005f   // gp-28628
+#define AIGU_OFF_ROAD          20.0f            // lui 0x41a0
+#define AIGU_SLOW_AI           25.0f            // lui 0x41c8
+#define AIGU_SLOW_TRAFFIC      20.0f            // lui 0x41a0
+#define AIGU_HIT_AGO           0.400000006f     // gp-28620, gp-28592
+#define AIGU_STOPPED           1.0f             // lui 0x3f80
+#define AIGU_STOPPED_EPSILON   0.00100000005f   // gp-28616, gp-28588
+#define AIGU_BEHIND_GAP        9.0f             // lui 0x4110
+#define AIGU_FACING            0.980000019f     // gp-28608
+#define AIGU_REVERSE_AI        (-15.0f)         // lui 0xc170, twice
+#define AIGU_REVERSE           (-6.0f)          // lui 0xc0c0
+#define AIGU_GOAL_AHEAD        3                // route points
+#define AIRB_LOOK_SECONDS      2.5f             // lui 0x4020
+#define AIRB_LOOK_MIN          100.0f           // lui 0x42c8
+#define AIRB_PASSED            15.0f            // lui 0x4170
+#define AIRB_ON_ROAD           5.0f             // lui 0x40a0
+#define AIRB_HIT_WITHIN        1.0f             // lui 0x3f80
+#define AIRB_SLOWER_BY         0.100000001f     // gp-28584
+#define AIRB_MIN_SPEED         30.0f            // lui 0x41f0
 
 #define AIDR_SCORE   200
 #define AINC_SCORE   300
@@ -81,7 +105,9 @@
 #define AIAC_SCORE   400
 #define AIIJ_SCORE   400
 #define AIAR_SCORE   500
+#define AIGU_SCORE   500
 #define AIPO_SCORE   600
+#define AIRB_SCORE   600
 #define AIA_NO_SCORE (-1)
 
 float AIDriverAvoidCarsImpactTimeThreshold = 2.0f;
@@ -1449,6 +1475,495 @@ const char *aijustgothit_get_name(AIActionIJustGotHit *a)
     return "I just got hit!";
 }
 
+// -------------------------------------------------------- GetUnstuck
+
+typedef void (*AIActionsVoidFn)(void *self);
+
+// The car's controller's FindWhereIAm, through the vptr.
+static void find_where_i_am(Car *car)
+{
+    CarController *c = car->pCarController;
+    const VtEntry *e = vt_slot(c->_vtable, CARCONTROLLER_VT_FIND_WHERE_I_AM);
+
+    ((AIActionsVoidFn)e->fn)(vt_this(c, e));
+}
+
+// The car's driver's ClearSteeringMemory, through the vptr.
+static void clear_steering_memory(Car *car)
+{
+    CarDriver *d = car->pCarDriver;
+    const VtEntry *e = vt_slot(d->_vtable,
+                               CARDRIVER_VT_CLEAR_STEERING_MEMORY);
+
+    ((AIActionsVoidFn)e->fn)(vt_this(d, e));
+}
+
+// How far `p` is to the right of the route point's line, across its
+// direction.
+static float across(const bVector2 *p, const TrackRoutePoint *rp)
+{
+    return (p->x - rp->Position.x) * rp->Direction.y
+           - (p->y - rp->Position.y) * rp->Direction.x;
+}
+
+// How far `l` across the point is past the road's edge on its side:
+// negative on the road.
+static float past_the_edge(float l, const TrackRoutePoint *rp)
+{
+    if (0.0f < l)
+        return l - rp->RightWidth;
+    return -(l + rp->LeftWidth);
+}
+
+// The minimum lifetime is in effect and not yet up: `c.le.s` the lifetime
+// against the seconds, so a NaN is not up.
+static int too_young(const AIActionGetUnstuck *a)
+{
+    return a->MinimumLifetimeInEffect != 0
+           && !(a->MinimumLifetime <= seconds_since(&a->MyCreationTime));
+}
+
+// 0x001c9018, a method that does not read `this`: three points on from the
+// location's, in the same table. Retail tests that for NULL, which it
+// never is, and takes the route's last point then; past the route's end
+// it reads on into the table.
+static const TrackRoutePoint *goal_route_point(const DrivingLocation *loc)
+{
+    const TrackRoute *r = loc->pRoute;
+
+    return &r->TrackRoutePointTable[(loc->pRoutePoint
+                                     - r->TrackRoutePointTable)
+                                    + AIGU_GOAL_AHEAD];
+}
+
+// 0x001c9070 and 0x001c90d8, the same: the goal point on the location's
+// line.
+static void goal_point2(const DrivingLocation *loc, bVector2 *out)
+{
+    const TrackRoutePoint *p = goal_route_point(loc);
+
+    trpoint_get_position2(p, out, 0.0f,
+                          trpoint_get_driving_line_offset(
+                              p, loc->DrivingLine));
+}
+
+static void goal_point3(const DrivingLocation *loc, bVector3 *out)
+{
+    const TrackRoutePoint *p = goal_route_point(loc);
+
+    trpoint_get_position3(p, out, 0.0f,
+                          trpoint_get_driving_line_offset(
+                              p, loc->DrivingLine));
+}
+
+AIActionGetUnstuck *aigetunstuck_init(AIActionGetUnstuck *a, int32_t score,
+                                      float timeout, float minLifetime)
+{
+    // 0x001c8b30. The Timer's own constructor zeroes it first.
+    aiaction_init(&a->Base, score, timeout);
+    a->MyCreationTime.PackedTime = 0;
+    a->Base.Base._vtable = AIGETUNSTUCK_VTABLE;
+    a->Base.Type = AIACTION_GET_UNSTUCK;
+    a->MyCreationTime.PackedTime = (uint32_t)WorldTimer;
+    a->MinimumLifetime = minLifetime;
+    a->MinimumLifetimeInEffect =
+        !(fabsf(minLifetime - AIGU_NO_LIFETIME) <= AIGU_LIFETIME_EPSILON);
+    return a;
+}
+
+void aigetunstuck_destroy(AIActionGetUnstuck *a, int32_t flags)
+{
+    // 0x001ca6a8.
+    destroy_as(&a->Base, AIGETUNSTUCK_VTABLE, flags);
+}
+
+int32_t aigetunstuck_calculate_score(DrivingInformation *info)
+{
+    // 0x001c8c30.
+    NearbyCarList *list = &info->MyNearbyCarList;
+    DrivingLocation *loc = &info->MyDrivingLocation;
+    Car *me = list->MyCar;
+    CollisionBody *b;
+    int stuck = 0;
+    int32_t i;
+
+    if (race_grace_period_is_active(pCurrentRace, me)
+        || drivinglocation_is_clear(loc)
+        || me->State.nWheelsTouchingGround < 3)
+        return AIA_NO_SCORE;
+    if (loc->pRoutePoint != NULL) {
+        bVector2 pos;
+
+        pos.x = me->State.Position.x;
+        pos.y = me->State.Position.y;
+        if (AIGU_OFF_ROAD <= past_the_edge(across(&pos, loc->pRoutePoint),
+                                           loc->pRoutePoint))
+            stuck = 1;
+    }
+    if (!stuck
+        && ((me->TheControlMode == AI_CONTROL
+             && me->State.VelocityMagnitude <= AIGU_SLOW_AI)
+            || (me->TheControlMode == TRAFFIC_CONTROL
+                && me->State.VelocityMagnitude <= AIGU_SLOW_TRAFFIC))
+        && aiaction_get_heading_classification(loc, me, 1)
+           == HEADING_OUT_OF_ROUTE_FORWARDS)
+        stuck = 1;
+    if (!stuck)
+        stuck = aigetunstuck_are_we_stuck_behind_someone(loc, list);
+
+    // Nosed into something and all but stopped.
+    b = &me->pDynamicCollisionBody->Dynamic.Body;
+    for (i = 0; i < b->NumCollisions && !stuck; i++) {
+        Collision *c = collisionbody_get_collision(b, i);
+        float v;
+
+        if (aiaction_get_collision_classification(c, me)
+            != COLLISION_IN_FRONT)
+            continue;
+        if (!(AIGU_HIT_AGO <= seconds_since(&c->CollisionTime)))
+            continue;
+        v = me->State.VelocityMagnitude;
+        if (v < AIGU_STOPPED
+            || fabsf(v - AIGU_STOPPED) <= AIGU_STOPPED_EPSILON)
+            stuck = 1;
+    }
+    if (!stuck)
+        return AIA_NO_SCORE;
+    find_where_i_am(me);
+    return AIGU_SCORE;
+}
+
+int aigetunstuck_are_we_stuck_behind_someone(DrivingLocation *loc,
+                                             NearbyCarList *list)
+{
+    // 0x001c8ee8, static. Retail takes the absolute value of -15 to test
+    // my speed against, and does not take mine's. An entry with no car is
+    // read through.
+    Car *me = list->MyCar;
+    int stuck = 0;
+    int32_t i;
+
+    (void)loc;
+    if (car_is_blinking(me))
+        return 0;
+    if (!(me->State.VelocityMagnitude <= fabsf(AIGU_REVERSE_AI)))
+        return 0;
+    for (i = 0; i < list->NumCarsInArray && !stuck; i++) {
+        const NearbyCar *nc = &list->Array[i];
+
+        if (nc->TheCar == me)
+            continue;
+        if (!(fabsf(nc->TheCar->State.VelocityMagnitude) <= AISlowCarSpeed))
+            continue;
+        if (!(fabsf(nc->Position.x)
+              < list->MyHalfSizeL + nc->ApparentHalfSizeL))
+            continue;
+        if (!(0.0f < nc->Position.y))
+            continue;
+        if (nc->Position.y
+            < (list->MyHalfSizeD + nc->ApparentHalfSizeD) + AIGU_BEHIND_GAP)
+            stuck = 1;
+    }
+    return stuck;
+}
+
+int aigetunstuck_has_been_accomplished(AIActionGetUnstuck *a,
+                                       DrivingInformation *info)
+{
+    // 0x001c9140. Both directions are normalised in place.
+    NearbyCarList *list = &info->MyNearbyCarList;
+    DrivingLocation *loc = &info->MyDrivingLocation;
+    bVector2 goal, to, fwd;
+    int done = 0;
+
+    if (too_young(a))
+        return 0;
+    goal_point2(loc, &goal);
+    to.x = goal.x - list->MyCar->State.Position.x;
+    to.y = goal.y - list->MyCar->State.Position.y;
+    bNormalize2(&to, &to);
+    fwd.x = list->MyCar->State.BodyMatrix.v0.x;
+    fwd.y = list->MyCar->State.BodyMatrix.v0.y;
+    bNormalize2(&fwd, &fwd);
+    if (AIGU_FACING <= fwd.x * to.x + fwd.y * to.y)
+        done = !aigetunstuck_are_we_stuck_behind_someone(loc, list);
+    if (done) {
+        find_where_i_am(list->MyCar);
+        clear_steering_memory(list->MyCar);
+    }
+    return done;
+}
+
+int aigetunstuck_has_failed(AIActionGetUnstuck *a, DrivingInformation *info)
+{
+    // 0x001c9340.
+    NearbyCarList *list = &info->MyNearbyCarList;
+    DrivingLocation *loc = &info->MyDrivingLocation;
+    Car *me = list->MyCar;
+    int failed = 0;
+
+    if (drivinglocation_is_clear(loc) || me->State.nWheelsTouchingGround < 3) {
+        failed = 1;
+    } else if (too_young(a)) {
+        return 0;
+    } else if (aiaction_get_heading_classification(loc, me, 1)
+               == HEADING_OUT_OF_ROUTE_BACKWARDS) {
+        failed = 1;
+    } else {
+        // Backed into something and all but stopped.
+        CollisionBody *b = &me->pDynamicCollisionBody->Dynamic.Body;
+        int32_t i;
+
+        for (i = 0; i < b->NumCollisions && !failed; i++) {
+            Collision *c = collisionbody_get_collision(b, i);
+            float v;
+
+            if (aiaction_get_collision_classification(c, me)
+                != COLLISION_BEHIND)
+                continue;
+            if (!(AIGU_HIT_AGO <= seconds_since(&c->CollisionTime)))
+                continue;
+            v = me->State.VelocityMagnitude;
+            if (fabsf(v) < AIGU_STOPPED
+                || fabsf(v - AIGU_STOPPED) <= AIGU_STOPPED_EPSILON)
+                failed = 1;
+        }
+    }
+    if (failed) {
+        find_where_i_am(me);
+        clear_steering_memory(me);
+    }
+    return failed;
+}
+
+int aigetunstuck_has_expired(AIActionGetUnstuck *a, DrivingInformation *info)
+{
+    // 0x001c9298.
+    int expired = past_timeout(&a->Base.Base);
+
+    if (expired) {
+        find_where_i_am(info->MyNearbyCarList.MyCar);
+        clear_steering_memory(info->MyNearbyCarList.MyCar);
+    }
+    return expired;
+}
+
+void aigetunstuck_calculate_points_to_drive(AIActionGetUnstuck *a,
+                                            DrivingInformation *info)
+{
+    // 0x001c9550.
+    DrivingLocation *loc = &info->MyDrivingLocation;
+    DrivingChoice *choice = &info->MyDrivingChoice;
+    bVector3 goal;
+
+    if (!drivingchoice_type_is_driving_line(choice->Type))
+        drivingchoice_set_choice_location(choice, loc);
+    drivetarget_clear(&a->Base.PointsToDrive, NULL, 0.0f);
+    a->Base.DesiredSpeedTolerance = 0.0f;
+    a->Base.UseDrivingLineSpeed = 0;
+    a->Base.AllowedToUseBoost = 0;
+    a->Base.PointsToDriveWillExecuteAction = 1;
+    a->Base.AllowedToUseThrottleAndBrake = 1;
+    if (drivinglocation_is_clear(loc)) {
+        a->Base.PointsToDriveWillExecuteAction = 0;
+        return;
+    }
+    goal_point3(loc, &goal);
+    goal.pad = 0.0f;   // STACK-W
+    drivetarget_add_point3_dl(&a->Base.PointsToDrive, &goal, loc, 0, NULL);
+    drivingchoice_fill_up_drive_target(&a->Base.PointsToDrive, loc,
+                                       &info->MyNearbyCarList,
+                                       MOVEMENT_PARALLEL_TO_LINE, 1);
+    if (info->MyNearbyCarList.MyCar->TheControlMode == AI_CONTROL)
+        a->Base.DesiredSpeed = AIGU_REVERSE_AI;
+    else
+        a->Base.DesiredSpeed = AIGU_REVERSE;
+}
+
+const char *aigetunstuck_get_name(AIActionGetUnstuck *a)
+{
+    // 0x001ca698.
+    (void)a;
+    return "Get Unstuck";
+}
+
+// ---------------------------------------------------- AvoidRoadBlock
+
+AIActionAvoidRoadBlock *aiavoidroadblock_init(AIActionAvoidRoadBlock *a,
+                                              int32_t score, float timeout,
+                                              const tRoadBlock *rb)
+{
+    // 0x001c9668.
+    aiaction_init(&a->Base, score, timeout);
+    a->Base.Type = AIACTION_AVOID_ROADBLOCK;
+    a->RoadBlockToAvoid = rb;
+    a->Base.Base._vtable = AIAVOIDROADBLOCK_VTABLE;
+    return a;
+}
+
+void aiavoidroadblock_destroy(AIActionAvoidRoadBlock *a, int32_t flags)
+{
+    // 0x001ca718.
+    destroy_as(&a->Base, AIAVOIDROADBLOCK_VTABLE, flags);
+}
+
+int32_t aiavoidroadblock_calculate_score(DrivingInformation *info,
+                                         const tRoadBlock **rb)
+{
+    // 0x001c9718. The roadblock found is asked for again, and its spike
+    // belt put in my car's frame; nothing reads that.
+    Car *me = info->MyNearbyCarList.MyCar;
+    float range;
+    int found = 0;
+    int32_t i;
+
+    *rb = NULL;
+    if (pCopManager == NULL)
+        return AIA_NO_SCORE;
+    range = max_s(me->State.VelocityMagnitude * AIRB_LOOK_SECONDS,
+                  AIRB_LOOK_MIN);
+    for (i = 0;
+         i < copmanager_get_num_active_road_blocks(pCopManager) && !found;
+         i++) {
+        tRoadBlock *r = copmanager_get_active_road_block(pCopManager, i);
+
+        if (r->cops[0] == NULL && r->cops[1] == NULL)
+            continue;
+        if (trackpath_compare_distances(
+                &TheTrackPathManager,
+                me->TheTrackPathCoordinate.DistanceAroundTrack,
+                r->fDistanceAroundTrack) < -range) {
+            bVector2 local;
+
+            *rb = r;
+            found = 1;
+            car_world_to_car(
+                info->MyNearbyCarList.MyCar, &local,
+                &copmanager_get_active_road_block(pCopManager, i)
+                     ->v2SpikeBeltPos);
+        }
+    }
+    return found ? AIRB_SCORE : AIA_NO_SCORE;
+}
+
+int aiavoidroadblock_has_been_accomplished(AIActionAvoidRoadBlock *a,
+                                           DrivingInformation *info)
+{
+    // 0x001c9858.
+    const tRoadBlock *rb = a->RoadBlockToAvoid;
+
+    if (rb->cops[0] == NULL && rb->cops[1] == NULL)
+        return 1;
+    return AIRB_PASSED
+           < trackpath_compare_distances(
+               &TheTrackPathManager,
+               info->MyNearbyCarList.MyCar->TheTrackPathCoordinate
+                   .DistanceAroundTrack,
+               rb->fDistanceAroundTrack);
+}
+
+int aiavoidroadblock_has_failed(AIActionAvoidRoadBlock *a,
+                                DrivingInformation *info)
+{
+    // 0x001c98d8.
+    (void)a;
+    (void)info;
+    return 0;
+}
+
+int aiavoidroadblock_has_expired(AIActionAvoidRoadBlock *a,
+                                 DrivingInformation *info)
+{
+    // 0x001c98d0.
+    (void)a;
+    (void)info;
+    return 0;
+}
+
+void aiavoidroadblock_calculate_points_to_drive(AIActionAvoidRoadBlock *a,
+                                                DrivingInformation *info)
+{
+    // 0x001c98e0. The FuturePointList is on retail's stack, its count
+    // zeroed by its constructor.
+    NearbyCarList *list = &info->MyNearbyCarList;
+    DrivingLocation *loc = &info->MyDrivingLocation;
+    DrivingChoice *choice = &info->MyDrivingChoice;
+    const tRoadBlock *rb;
+    TrackRoutePoint *end;
+    FuturePointList l;
+    bVector2 pos, escape;
+    float fromL, toL, hitTime;
+    Car *hit;
+
+    if (!drivingchoice_type_is_driving_line(choice->Type))
+        drivingchoice_set_choice_location(choice, loc);
+    drivetarget_clear(&a->Base.PointsToDrive, NULL, 0.0f);
+    a->Base.DesiredSpeedTolerance = 0.0f;
+    a->Base.AllowedToUseThrottleAndBrake = 1;
+    a->Base.UseDrivingLineSpeed = 0;
+
+    // From my offset off the line to the escape lane's.
+    pos.x = list->MyCar->State.Position.x;
+    pos.y = list->MyCar->State.Position.y;
+    fromL = across(&pos, loc->pRoutePoint)
+            - trpoint_get_driving_line_offset(loc->pRoutePoint,
+                                              loc->DrivingLine);
+    rb = a->RoadBlockToAvoid;
+    escape = rb->v2EscapeLane;
+    if (loc->pRoute == rb->Route) {
+        end = rb->RoutePoint;
+        toL = across(&escape, end)
+              - trpoint_get_driving_line_offset(end, loc->DrivingLine);
+    } else {
+        end = troute_find_closest_point_ahead(loc->pRoute, &escape,
+                                              loc->pRoutePoint);
+        if (end != NULL
+            && past_the_edge(across(&escape, end), end) < AIRB_ON_ROAD) {
+            toL = across(&escape, end)
+                  - trpoint_get_driving_line_offset(end, loc->DrivingLine);
+        } else {
+            // No escape on this route: to its last point, keeping my
+            // offset.
+            end = &loc->pRoute->TrackRoutePointTable[loc->pRoute->NumPoints
+                                                      - 1];
+            toL = fromL;
+        }
+    }
+
+    l.NumPoints = 0;
+    drivingchoice_get_route_points_up_to(&l, loc, end);
+    drivingchoice_do_smooth_offset_change(&l, &a->Base.PointsToDrive, list,
+                                          l.NumPoints - 1, fromL, toL, 0);
+    drivingchoice_fill_up_drive_target(&a->Base.PointsToDrive, loc, list,
+                                       MOVEMENT_PARALLEL_TO_LINE, 0);
+    a->Base.UseDrivingLineSpeed = 1;
+
+    // A racer in the way, ahead: slow behind it.
+    hitTime = 0.0f;
+    hit = ccp_who_will_this_drive_target_hit(&a->Base.PointsToDrive, list,
+                                             loc, AIRB_HIT_WITHIN, &hitTime);
+    if (hit != NULL && hit->pCarTypeInfo->UsageType != CAR_USAGE_TYPE_COP
+        && hit->MyDriver->TheDriverType != DRIVER_TYPE_TRAFFIC_CAR) {
+        NearbyCar *nc = nearbycarlist_get_nearby_car(list, hit);
+
+        if (nc != NULL && 0.0f < nc->Position.y) {
+            a->Base.UseDrivingLineSpeed = 0;
+            aiaction_set_desired_speed_slower_than_this_car(
+                &a->Base, nc, list, AIRB_SLOWER_BY, AIRB_SLOWER_BY);
+            a->Base.DesiredSpeed = max_s(a->Base.DesiredSpeed,
+                                         AIRB_MIN_SPEED);
+        }
+    }
+    a->Base.PointsToDriveWillExecuteAction = 1;
+}
+
+const char *aiavoidroadblock_get_name(AIActionAvoidRoadBlock *a)
+{
+    // 0x001ca708.
+    (void)a;
+    return "Avoid Roadblock";
+}
+
 // ------------------------------------------------------------- the tables
 
 #define E(f) { 0, 0, (VtFn)(f) }
@@ -1562,6 +2077,30 @@ static const VtEntry aijustgothit_vt[AIACTION_VT_ENTRIES] = {
     E(aijustgothit_has_expired),                //  56  0x001c9f10
 };
 
+// Retail 0x002b7a50.
+static const VtEntry aigetunstuck_vt[AIACTION_VT_ENTRIES] = {
+    { 0, 0, NULL },
+    E(aigetunstuck_destroy),                    //   8  0x001ca6a8
+    PENDING,                                    //  16  DoSnapshot 0x001c8bb8
+    E(aigetunstuck_calculate_points_to_drive),  //  24  0x001c9550
+    E(aigetunstuck_get_name),                   //  32  0x001ca698
+    E(aigetunstuck_has_been_accomplished),      //  40  0x001c9140
+    E(aigetunstuck_has_failed),                 //  48  0x001c9340
+    E(aigetunstuck_has_expired),                //  56  0x001c9298
+};
+
+// Retail 0x002b7a90.
+static const VtEntry aiavoidroadblock_vt[AIACTION_VT_ENTRIES] = {
+    { 0, 0, NULL },
+    E(aiavoidroadblock_destroy),                //   8  0x001ca718
+    PENDING,                                    //  16  DoSnapshot 0x001c96b8
+    E(aiavoidroadblock_calculate_points_to_drive), // 24  0x001c98e0
+    E(aiavoidroadblock_get_name),               //  32  0x001ca708
+    E(aiavoidroadblock_has_been_accomplished),  //  40  0x001c9858
+    E(aiavoidroadblock_has_failed),             //  48  0x001c98d8
+    E(aiavoidroadblock_has_expired),            //  56  0x001c98d0
+};
+
 #undef PENDING
 #undef E
 
@@ -1577,4 +2116,7 @@ void aiactions_install_vtables(void)
     vt_install(AIAVOIDCARS_VTABLE, aiavoidcars_vt, AIACTION_VT_ENTRIES);
     vt_install(AIPULLOVER_VTABLE, aipullover_vt, AIACTION_VT_ENTRIES);
     vt_install(AIIJUSTGOTHIT_VTABLE, aijustgothit_vt, AIACTION_VT_ENTRIES);
+    vt_install(AIGETUNSTUCK_VTABLE, aigetunstuck_vt, AIACTION_VT_ENTRIES);
+    vt_install(AIAVOIDROADBLOCK_VTABLE, aiavoidroadblock_vt,
+               AIACTION_VT_ENTRIES);
 }

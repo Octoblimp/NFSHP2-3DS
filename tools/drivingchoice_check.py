@@ -229,6 +229,7 @@ GLOBALS = {
     "COPM": GP - 15620,           # pCopManager
     "PLAYERS": GP - 20928,        # PlayerPlayersByIndex, two words
     "NPLAYERS": GP - 20920,       # PlayerNumPlayers
+    "TLEN": 0x0031bc38,           # TheTrackPathManager.TrackLength
 }
 
 CARS = 0x01010000
@@ -241,7 +242,7 @@ ACTIONS = 0x01031000
 ACTION_STRIDE = 608
 LOCS = 0x01034000
 CTIS = 0x01040000
-CTI_STRIDE = 0x400
+CTI_STRIDE = 0x800                # UsageType at 1336
 DRIVERS = 0x01048000
 DRIVER_STRIDE = 32
 CDRIVERS = 0x01060000             # each car's CarDriver, its target first
@@ -294,10 +295,12 @@ NROUTES = 6
 # three they reach that are stubbed.
 ACT_CTORS = {"jd": 0x001c73c0, "dr": 0x001c7690, "nc": 0x001c8028,
              "bl": 0x001c8160, "ar": 0x001ca1f0, "pa": 0x001c78f8,
-             "ac": 0x001c6ba0, "po": 0x001c8298, "ij": 0x001c9c68}
+             "ac": 0x001c6ba0, "po": 0x001c8298, "ij": 0x001c9c68,
+             "gu": 0x001c8b30, "rb": 0x001c9668}
 ACT_SCORES = {"jd": 0x001c7458, "dr": 0x001c7720, "nc": 0x001c80d8,
               "bl": 0x001c8210, "ar": 0x001ca2a8, "pa": 0x001c79d8,
-              "ac": 0x001c6cf8, "po": 0x001c8400, "ij": 0x001c9d20}
+              "ac": 0x001c6cf8, "po": 0x001c8400, "ij": 0x001c9d20,
+              "gu": 0x001c8c30, "rb": 0x001c9718}
 UPDATE_STATUS = 0x001c6a98
 AR_PARALLEL = 0x001ca2f0
 GET_ELEVATION = 0x00152070        # TopologyCoordinate::GetElevation
@@ -322,7 +325,8 @@ C_BLINK = 2144                    # BlinkTimer, and BlinkDuration after it
 ACT_VTABLES = {0x002b7b10: "vJD", 0x002b7bd0: "vDR", 0x002b7b90: "vNC",
                0x002b7b50: "vBL", 0x002b79d0: "vAR", 0x002b7c90: "vAA",
                0x002b7cd0: "vPL", 0x002b7c10: "vPA", 0x002b7c50: "vAC",
-               0x002b7ad0: "vPO", 0x002b7a10: "vIJ"}
+               0x002b7ad0: "vPO", 0x002b7a10: "vIJ", 0x002b7a50: "vGU",
+               0x002b7a90: "vRB"}
 AB = 0x010b0000                   # the action, in a slot of the pool's size
 AB_BYTES = 640
 INFO = 0x010b1000                 # its DrivingInformation
@@ -341,7 +345,7 @@ IS_TWO_CAR = 0x0021eb20           # Collision::IsTwoCarCollision
 COLLIDING_CARS = 0x0021eb48       # Collision::GetCollidingCars
 COLLS = 0x010b5000
 NCOLLS = 4
-COLL_STRIDE = 16
+COLL_STRIDE = 64                  # 11d-3b's time at 8 and contact at 32
 B_NCOLL = 18                      # CollisionBody's NumCollisions, a byte
 # PullOver's CalculatePointsToDrive, whose choice at sp+0 of its 720-byte
 # frame retail never clears past the timeout: a location whose line gives
@@ -373,6 +377,37 @@ C_RIDE = 16
 C_BOOST = 992
 C_LIGHTS = 2056                   # the cop lights' word
 DRV_SKILL = 3                     # DriverInfo's SkillLevel, a byte
+# Step 11d-3b's. Each car's controller's test table, whose FindWhereIAm
+# is a stub; the drivers' ClearSteeringMemory and GetSteerToPoint, stubbed
+# in their table, and each car's point to steer to; each car's distance
+# round the track (the track's length is "G TLEN"); a collision's time and
+# contact point; GetUnstuck's AreWeStuckBehindSomeone; and the cop
+# manager's pursuits (PursuitList at 44, each pursuit's links at 0 and its
+# roadblock at 20) and their roadblocks, at retail's offsets.
+CVT = 0x010b3300
+CVT_BYTES = 0x80
+CVT_FWIA = 72
+STUB_FWIA = 0x010b3400
+DVT_CSM = 128
+STUB_CSM = 0x010b3410
+DVT_STP = 160
+STUB_STP = 0x010b3420
+STP = 0x010b3500
+K_VPTR = 8
+C_DIST = 2036
+CO_TIME = 8
+CO_CONTACT = 32
+AWS = 0x001c8ee8
+PURSUITS = 0x010b6000
+PURSUIT_STRIDE = 32
+NPURSUITS = 4
+PU_RB = 20
+COPM_PLIST = 44
+CTI_USAGE = 1336                  # CarTypeInfo's UsageType
+C_MATRIX_VALID = 1088             # CarState's MatrixValid, at 1024
+ROADBLOCKS = 0x010b6100
+RB_STRIDE = 120
+NRBS = 4
 # CarTypeInfo's: the body's mass, the two tyres' grip, the drag, the two
 # downforces and the speed limiter, and what set_car gives each car.
 CTI_FIELDS = (("mass", 480), ("drag", 752), ("limiter", 800),
@@ -1298,16 +1333,17 @@ def car_at_point(rnd, w, k, kr, j, lat, near, its=None, **kw):
 
 
 def place_other(rnd, w, sizes, k, kr, j0, near=False, reverse=None,
-                span=18, picks=(0, 0, 1, 2, 7, -1)):
+                span=18, picks=(0, 0, 1, 2, 7, -1), **kw):
     """Car k up to `span` points ahead of j0 on route kr: on its line,
-    near an edge or off the road; and its own target."""
+    near an edge or off the road; and its own target. `kw` overrides the
+    car's fields."""
     j = min(sizes[kr] - 2, j0 + rnd.randrange(1, span))
     p = w.pts[kr][j]
     lat = rnd.choice((off_of(p, 0), rnd.uniform(-3.0, 3.0),
                       rnd.uniform(-p["lw"], p["rw"]), p["rw"] - 1.0,
                       -p["lw"] + 1.0, p["rw"] + 4.9, p["rw"] + 5.1,
                       -p["lw"] - 4.9, -p["lw"] - 5.1, p["rw"] + 9.0))
-    v = car_at_point(rnd, w, k, kr, j, lat, near)
+    v = car_at_point(rnd, w, k, kr, j, lat, near, **kw)
     if reverse is None:
         reverse = rnd.random() < 0.2
     kt = rnd.choice((kr, kr, kr, 3, 4, 1))
@@ -4091,6 +4127,753 @@ def s_ph_gap(rnd, kind):
     return ops
 
 
+# ------------------------------------------------------- step 11d-3b's
+
+N_UNSTUCK = 40
+# WorldTimer's ticks after a time the action stored, either side of its
+# edges: a collision's 0.4 s (1600) and the minimum lifetimes' 0.5, 1, 2
+# and 5 s.
+GU_DELTAS = (0, 1, 1599, 1600, 1601, 1999, 2000, 2001, 3999, 4000, 4001,
+             7999, 8000, 8001, 19999, 20000, 20001, 40000, -1, -1600)
+# The minimum lifetimes: none (-1, or within 0.001 of it, which is 16777
+# ulps above and 8388 below, one more being past it), or seconds.
+GU_LIFETIMES = (-1.0, -1.0, -fstep(1.0, -16777), -fstep(1.0, -16778),
+                -fstep(1.0, 8388), -fstep(1.0, 8389), 0.0, 0.5, 1.0, 2.0,
+                5.0, -2.0)
+# My car's speeds either side of the stopped test's 1 (and 0.001 past it,
+# 8388 ulps), being stuck behind someone's 15, traffic's 20 and an AI
+# car's 25.
+GU_SPEEDS = (0.0, 0.5, -0.5, 0.999, 1.0, fstep(1.0, 8388),
+             fstep(1.0, 8389), -1.0, -fstep(1.0, -1), 1.5, 5.0, 14.99, 15.0,
+             fstep(15.0, 1), 19.99, 20.0, fstep(20.0, 1), 24.99, 25.0,
+             fstep(25.0, 1), 30.0, -16.0)
+BLINKS = (0, 0x7fffffff, 0, 1000, 3999, 4000, 4001, -1000)
+
+
+def gu_heading(v):
+    """The way car v's relative frame looks: along its velocity (back
+    along it when its forward speed is negative), or its body below 1
+    m/s."""
+    if v["vx"] * v["vx"] + v["vy"] * v["vy"] <= 1.0:
+        return math.atan2(v["by"], v["bx"])
+    a = math.atan2(v["vy"], v["vx"])
+    return a + math.pi if v["fs"] < 0.0 else a
+
+
+def s_unstuck(rnd):
+    """GetUnstuck as AIDriver drives it, on s_pull_hit's world: made, asked
+    for its points, its status, its tests, its name and its score, and
+    destroyed. Between, my car on the road, at its edges and 20 m past
+    them, heading along it, out of it and back, at each speed either side
+    of the tests', in AI, traffic and other modes, its wheels down or not
+    and blinking or not; its point to steer to ahead or not; its
+    collisions in front, behind and beside, old enough or not; the list's
+    cars either side of being in the way; the location clear; and the
+    clock either side of the grace period's end and each edge after the
+    times the action stored."""
+    w = World(rnd)
+    ops = w.ops
+    sizes = walk_world(rnd, w, nsigns=rnd.randint(0, 4))
+    if w.sign_points and rnd.random() < 0.4:
+        kl, js = rnd.choice(w.sign_points)
+        jl = max(0, js - rnd.randrange(1, 6))
+    else:
+        kl, jl = 0, rnd.randrange(0, 10)
+    # The goal is three points on from the location's, one past jl at
+    # most.
+    jl = min(jl, sizes[kl] - 5)
+    line = rnd.randrange(LINES)
+    others = [1, 2, 3, 4]
+    clock = [rnd.choice((0, 5000, 100000, 0x7ffff000))]
+    clear = [False]
+
+    def steer():
+        v = w.cars[0]
+        a = math.atan2(v["vy"], v["vx"]) + rnd.choice(
+            (0.0, 0.5, -1.0, 1.04, -1.05, 1.1, 2.0, math.pi))
+        d = rnd.choice((5.0, 20.0, 0.5))
+        ops.append("@stp 0 %s %s" % (h(f32(v["px"] + d * math.cos(a))),
+                                     h(f32(v["py"] + d * math.sin(a)))))
+
+    def colls():
+        n = rnd.choice((0, 0, 1, 1, 2, 3, 4))
+        ops.append("@col 0 %d%s" % (n, "".join(
+            " %d 0 %d" % (rnd.choice((0, 1)), rnd.choice(others + [-1]))
+            for _ in range(n))))
+        v = w.cars[0]
+        a = gu_heading(v)
+        for i in range(n):
+            along = rnd.choice((2.4, -2.4, 1.0, -1.0, 3.0, -3.0, 0.5))
+            lat = rnd.choice((0.0, 0.0, 0.3, -0.3, 0.84, -0.84, 0.9, -0.9,
+                              1.5, -1.5))
+            x = v["px"] + along * math.cos(a) + lat * math.sin(a)
+            y = v["py"] + along * math.sin(a) - lat * math.cos(a)
+            ago = rnd.choice((0, 1599, 1600, 1601, 4000, 100000, -100))
+            ops.append("@ct 0 %d %08x %s %s" % (
+                i, (clock[0] - ago) & M32, h(f32(x)), h(f32(y))))
+
+    def blink():
+        ops.append("@bk 0 %08x %s" % (
+            (clock[0] - rnd.choice(BLINKS)) & M32 if rnd.random() < 0.7
+            else rnd.choice((0, 0x7fffffff)),
+            h(f32(rnd.choice((0.0, 0.25, 1.0, 2.0))))))
+
+    def me():
+        p = w.pts[kl][jl]
+        lat = rnd.choice((off_of(p, line), rnd.uniform(-p["lw"], p["rw"]),
+                          p["rw"] - 0.5, -p["lw"] + 0.5, p["rw"] + 1.0,
+                          -p["lw"] - 1.0, p["rw"] + 19.9, p["rw"] + 20.1,
+                          -p["lw"] - 19.9, -p["lw"] - 20.1, p["rw"] + 30.0))
+        hd = heading_of(p) + rnd.choice((0.0, 0.0, 0.15, -0.15, 0.6, -0.6,
+                                         1.2, -1.2, 1.57, -1.57, 2.5,
+                                         math.pi))
+        x, y = beside(p, lat, rnd.uniform(-2.0, 3.0))
+        # A body that isn't level now and then, its x and y not unit
+        # length, for being done's normalize.
+        sc = rnd.choice((1.0, 1.0, 1.0, 0.8, 1.25, 3.0))
+        mover(rnd, w, 0, x, y, hd, rnd.choice(GU_SPEEDS),
+              back=rnd.random() < 0.3, ctl=rnd.choice((2, 2, 3, 3, 1, 0)),
+              act=rnd.choice((-1, 0, 5, 6)),
+              nw=rnd.choice((4, 4, 4, 3, 2)), bx=sc * math.cos(hd),
+              by=sc * math.sin(hd))
+        ops.append("@mv 0")
+        ops.extend(its_target(rnd, w, sizes, 0, kl, jl, picks=PICKS))
+        colls()
+        if rnd.random() < 0.6:
+            steer()
+        if rnd.random() < 0.3:
+            blink()
+
+    def other(k):
+        place_other(rnd, w, sizes, k, kl, jl, rnd.random() < 0.6,
+                    span=rnd.choice((2, 4, 7)), picks=PICKS)
+        boxed(rnd, w, k)
+
+    def gu_list():
+        """The list in s_pull_hit's way, its cars now and then at the
+        edges of being in my way: across, either side of the two half
+        widths together; ahead, either side of 0 and of the two half
+        lengths and 9 m."""
+        mine = w.cars[0]
+        hl = f32(rnd.uniform(0.8, 1.2))
+        hd = f32(rnd.uniform(2.0, 2.6))
+        order = list(others)
+        rnd.shuffle(order)
+        if rnd.random() < 0.8:
+            order.insert(rnd.randrange(len(order) + 1), 0)
+        ops.append("N 0 %d %s %s" % (len(order), h(hl), h(hd)))
+        for i, k in enumerate(order):
+            if k == 0:
+                # My own entry, now and then where another car would be in
+                # my way.
+                f = (0.0, 0.0, 0.0, 0.0, hl, f32(rnd.uniform(2.0, 2.6)))
+                if rnd.random() < 0.3:
+                    f = (rnd.choice((0.0, 0.5, -0.5)),
+                         rnd.choice((0.5, 1.0, 4.0)), 0.0, 0.0, hl, f[5])
+            else:
+                v = w.cars[k]
+                lx, ly = frame(mine, v["px"], v["py"])
+                hl2 = f32(rnd.uniform(0.8, 1.3))
+                hd2 = f32(rnd.uniform(2.0, 2.8))
+                if rnd.random() < 0.5:
+                    ex = f32(hl + hl2)
+                    ey = f32(f32(hd + hd2) + 9.0)
+                    lx = rnd.choice((0.0, ex, -ex, fstep(ex, -1),
+                                     -fstep(ex, -1), fstep(ex, 1),
+                                     rnd.uniform(-ex, ex), lx))
+                    ly = rnd.choice((ey, fstep(ey, -1), fstep(ey, 1), 0.0,
+                                     -0.0, 1e-6, -1.0, 4.0,
+                                     rnd.uniform(0.0, ey), ly))
+                f = (lx, ly, rnd.uniform(-5.0, 5.0), rnd.uniform(-5.0, 5.0),
+                     hl2, hd2)
+            ops.append("E %d %s %d" % (i, " ".join(h(f32(x)) for x in f),
+                                       k))
+
+    def info():
+        if rnd.random() < 0.85:
+            gu_list()
+        else:
+            ops.extend(seen_list(rnd, w, others))
+        clear[0] = rnd.random() < 0.08
+        if clear[0]:
+            ops.append("D -1 -1 %d 00000000" % line)
+        else:
+            ops.append("D %d %d %d %s" % (
+                kl, max(0, jl + rnd.choice((0, 0, 1, -1))),
+                line if rnd.random() < 0.8 else rnd.randrange(LINES),
+                rnd.choice(("00000000", "00000000", "00001388"))))
+        t = rnd.choice((0, 1, 1, 2, 3, 4, 5, 6, 7))
+        k = rnd.choice(others) if t in (5, 6) else rnd.choice((-1, -1, 1))
+        ops.append("X %d %d %d" % (t, k, rnd.choice((0, 0, 1))))
+        ops.append("@J")
+
+    def tick(base=None):
+        if base is not None:
+            clock[0] = base
+        clock[0] = (clock[0] + rnd.choice(GU_DELTAS)) & M32
+        ops.append("G TIMER %08x" % clock[0])
+
+    def race():
+        ops.append("R %08x" % ((clock[0] - rnd.choice(
+            GRACE_AGO + (100000, 100000, 100000))) & M32))
+
+    def slow():
+        ops.append("G SLOWCAR %s" % h(f32(rnd.choice(
+            (20.0, 5.0, 4.9, 5.01, 30.0, 0.0)))))
+
+    me()
+    for k in others + [5]:
+        other(k)
+    ops += decide(rnd, w)
+    ops.append("G TIMER %08x" % clock[0])
+    race()
+    if rnd.random() < 0.4:
+        slow()
+    info()
+    for _ in range(4):
+        if rnd.random() < 0.5:
+            tick()
+        made = clock[0]
+        score = rnd.choice((0, 500, 600, -1))
+        timeout = h(f32(rnd.choice(ACT_TIMEOUTS)))
+        mn = fb(f32(rnd.choice(GU_LIFETIMES)))
+        if rnd.random() < 0.05:
+            mn = NAN
+        ops.append("@n gu %d %s -1 %08x" % (score, timeout, mn))
+        for _ in range(rnd.randint(6, 14)):
+            r = rnd.random()
+            if r < 0.2:
+                tick(rnd.choice((None, made, made)))
+            elif r < 0.24:
+                race()
+            elif r < 0.31:
+                info()
+            elif r < 0.38:
+                me()
+                info()
+            elif r < 0.42:
+                other(rnd.choice(others))
+                info()
+            elif r < 0.47:
+                colls()
+            elif r < 0.5:
+                steer()
+            elif r < 0.53:
+                blink()
+            elif r < 0.55:
+                ops.append("@w 0 %d" % rnd.choice((2, 3, 4)))
+            elif r < 0.61:
+                f = rnd.choice(("can", "dt", "pt", "ds", "exp", "tt", "tol",
+                                "udl", "tb", "bo", "t608", "t608", "r612",
+                                "r612", "o616", "o616"))
+                if f in ("can", "pt", "udl", "tb", "bo", "o616"):
+                    v = rnd.choice((0, 1, 2))
+                elif f in ("exp", "t608"):
+                    v = (clock[0] - rnd.choice(GU_DELTAS)) & M32
+                elif f == "r612":
+                    v = fb(f32(rnd.choice(GU_LIFETIMES)))
+                else:
+                    v = fb(f32(rnd.choice((0.0, -1.0, 1.0, 2.0, 3.0, 5.0,
+                                           30.0))))
+                if rnd.random() < 0.1 and f not in ("can", "pt", "udl", "tb",
+                                                    "bo", "o616"):
+                    v = NAN
+                ops.append("@f %s %08x" % (f, v))
+            elif r < 0.68:
+                ops.append("@sc %s" % rnd.choice(("gu", "gu", "gu", "rb")))
+            elif r < 0.72:
+                ops.append("@as")
+            elif r < 0.74:
+                slow()
+            else:
+                # Not one of the tests with the location clear: being done
+                # reads its route.
+                op = rnd.choice(("@cp", "@cp", "@us", "@us", "@t", "@t",
+                                 "@t", "@nm"))
+                if clear[0] and op in ("@us", "@t"):
+                    op = rnd.choice(("@cp", "@sc gu", "@nm"))
+                ops.append(op)
+        if rnd.random() < 0.3:
+            ops += decide(rnd, w)
+        if rnd.random() < 0.6:
+            ops.append("@d %d" % rnd.choice((0, 1, 1, 3)))
+    return ops
+
+
+N_ROADBLOCK = 40
+# My car's speeds either side of 40, where 2.5 s of it is the least range,
+# 100 m.
+RB_SPEEDS = (0.0, 10.0, 20.0, 39.99, 40.0, 40.01, 50.0, 60.0, -10.0)
+RB_LENGTHS = (0.0, 0.0, 0.0, 1000.0, 3000.0, 5000.0)
+NRB = 4
+
+
+def s_roadblock(rnd):
+    """AvoidRoadBlock as AIDriver drives it, on s_pull_hit's world: made
+    for one of four roadblocks, asked for its points, its status, its
+    tests, its name and its score, and destroyed. Between, the pursuits
+    and their roadblocks, each with its cops or not, on my route ahead,
+    behind or on another, its escape lane on the road, either side of 5 m
+    past it, and past the route's end; my car's distance round the track
+    and the roadblocks' either side of the score's range and of 15 m
+    behind, with the track's length wrapping them or not; and the cars on
+    the list cops, traffic or racers."""
+    w = World(rnd)
+    ops = w.ops
+    sizes = walk_world(rnd, w, nsigns=rnd.randint(0, 4))
+    kl = rnd.choice((0, 0, 1, 2, 3))
+    jl = rnd.randrange(0, 8)
+    line = rnd.randrange(LINES)
+    others = [1, 2, 3, 4]
+    clock = [rnd.choice((0, 5000, 100000, 0x7ffff000))]
+    tlen = [rnd.choice(RB_LENGTHS)]
+    mine = [0.0]
+
+    def dist():
+        mine[0] = f32(rnd.uniform(0.0, tlen[0] or 3000.0))
+        ops.append("@td 0 %s" % h(mine[0]))
+
+    def me():
+        place_me(rnd, w, 0, kl, jl, line, vmag=rnd.choice(RB_SPEEDS),
+                 ctl=rnd.choice((2, 2, 3, 1, 0)),
+                 act=rnd.choice((-1, 0, 5, 6)))
+        boxed(rnd, w, 0)
+        ops.append("@mv 0")
+        ops.extend(its_target(rnd, w, sizes, 0, kl, jl, picks=PICKS))
+        dist()
+
+    def other(k):
+        # Now and then faster than the least speed and the 0.1 under it,
+        # so a hit car's own speed shows past the clamp.
+        kw = {}
+        if rnd.random() < 0.3:
+            kw["vmag"] = rnd.choice((29.95, 30.1, 30.15, 35.0, 50.0))
+        place_other(rnd, w, sizes, k, kl, jl, rnd.random() < 0.7,
+                    span=rnd.choice((2, 3, 5, 8)), picks=PICKS, **kw)
+        boxed(rnd, w, k)
+        if rnd.random() < 0.6:
+            ops.append("@ut %d %d" % (k, rnd.choice((0, 1, 1, 2))))
+
+    def roadblock(j):
+        c0, c1 = rnd.choice(((1, 1), (1, 1), (1, 0), (0, 1), (0, 0)))
+        if rnd.random() < 0.6:
+            rk = kl
+            rj = max(0, min(sizes[kl] - 1, jl + rnd.choice(
+                (0, 1, 2, 5, 10, 15, 25, -1, -3))))
+        else:
+            rk = rnd.choice([k for k in range(5) if k != kl])
+            rj = rnd.randrange(sizes[rk])
+        p = w.pts[rk][rj]
+        r = rnd.random()
+        if r < 0.5:
+            q, along = p, rnd.uniform(-3.0, 3.0)
+        elif r < 0.85:
+            q = w.pts[kl][min(sizes[kl] - 1, jl + rnd.randrange(0, 20))]
+            along = rnd.uniform(-3.0, 3.0)
+        else:
+            q, along = w.pts[kl][sizes[kl] - 1], 30.0
+        lat = rnd.choice((0.0, off_of(q, line), q["rw"] - 1.0,
+                          -q["lw"] + 1.0, q["rw"] + 4.9, q["rw"] + 5.1,
+                          -q["lw"] - 4.9, -q["lw"] - 5.1, q["rw"] + 12.0,
+                          -q["lw"] - 12.0))
+        ex, ey = beside(q, lat, along)
+        sx, sy = beside(p, rnd.uniform(-8.0, 8.0), rnd.uniform(-2.0, 2.0))
+        rng = max(f32(f32(w.cars[0]["vmag"]) * 2.5), 100.0)
+        off = rnd.choice((rng + 1.0, rng + 50.0, rng - 1.0, rng * 0.5, 0.0,
+                          -14.9, -15.1, -30.0, 300.0,
+                          rnd.uniform(-200.0, 400.0)))
+        d = mine[0] + off + rnd.choice((0.0, 0.0, tlen[0], -tlen[0]))
+        ops.append("@rbf %d %d %d %d %d %s %s %s %s %s" % (
+            j, c0, c1, rk, rj, h(f32(d)), h(f32(sx)), h(f32(sy)),
+            h(f32(ex)), h(f32(ey))))
+
+    def pursuits():
+        if rnd.random() < 0.15:
+            ops.append("@cm none")
+            return
+        specs = ["-" if rnd.random() < 0.3 else "%d" % rnd.randrange(NRB)
+                 for _ in range(rnd.choice((0, 1, 2, 2, 3, 4)))]
+        ops.append("@pu%s" % "".join(" " + s for s in specs))
+
+    def length():
+        tlen[0] = rnd.choice(RB_LENGTHS)
+        ops.append("G TLEN %s" % h(f32(tlen[0])))
+
+    def info():
+        if rnd.random() < 0.85:
+            lops, _ = act_list(rnd, w, others)
+        else:
+            lops = seen_list(rnd, w, others)
+        ops.extend(lops)
+        ops.append("D %d %d %d %s" % (
+            kl, max(0, jl + rnd.choice((0, 0, 1, -1))),
+            line if rnd.random() < 0.8 else rnd.randrange(LINES),
+            rnd.choice(("00000000", "00000000", "00001388"))))
+        t = rnd.choice((0, 1, 1, 2, 3, 4, 5, 6, 7))
+        k = rnd.choice(others) if t in (5, 6) else rnd.choice((-1, -1, 1))
+        ops.append("X %d %d %d" % (t, k, rnd.choice((0, 0, 1))))
+        ops.append("@J")
+
+    def tick():
+        clock[0] = (clock[0] + rnd.choice(GU_DELTAS)) & M32
+        ops.append("G TIMER %08x" % clock[0])
+
+    if tlen[0]:
+        ops.append("G TLEN %s" % h(f32(tlen[0])))
+    me()
+    for k in others + [5]:
+        other(k)
+    ops += decide(rnd, w)
+    ops.append("G TIMER %08x" % clock[0])
+    ops.append("R %08x" % ((clock[0] - rnd.choice(GRACE_AGO)) & M32))
+    for j in range(NRB):
+        roadblock(j)
+    pursuits()
+    info()
+    for _ in range(4):
+        if rnd.random() < 0.3:
+            tick()
+        score = rnd.choice((0, 600, 500, -1))
+        timeout = h(f32(rnd.choice(ACT_TIMEOUTS)))
+        ops.append("@n rb %d %s -1 %d" % (score, timeout,
+                                          rnd.randrange(NRB)))
+        for _ in range(rnd.randint(6, 14)):
+            r = rnd.random()
+            if r < 0.06:
+                tick()
+            elif r < 0.14:
+                info()
+            elif r < 0.2:
+                me()
+                info()
+            elif r < 0.26:
+                other(rnd.choice(others))
+                info()
+            elif r < 0.31:
+                dist()
+            elif r < 0.37:
+                roadblock(rnd.randrange(NRB))
+            elif r < 0.41:
+                pursuits()
+            elif r < 0.44:
+                length()
+            elif r < 0.48:
+                ops.append("@ut %d %d" % (rnd.choice(others),
+                                          rnd.choice((0, 1, 2))))
+            elif r < 0.52:
+                f = rnd.choice(("can", "dt", "pt", "ds", "exp", "tt", "tol",
+                                "udl", "tb", "bo"))
+                if f in ("can", "pt", "udl", "tb", "bo"):
+                    v = rnd.choice((0, 1, 2))
+                elif f == "exp":
+                    v = (clock[0] - rnd.choice(GU_DELTAS)) & M32
+                else:
+                    v = fb(f32(rnd.choice((0.0, -1.0, 1.0, 2.0, 3.0, 5.0,
+                                           30.0))))
+                ops.append("@f %s %08x" % (f, v))
+            elif r < 0.6:
+                ops.append("@sc %s" % rnd.choice(("rb", "rb", "rb", "gu")))
+            else:
+                ops.append(rnd.choice(("@cp", "@cp", "@cp", "@cp", "@us",
+                                       "@us", "@t", "@t", "@nm")))
+        if rnd.random() < 0.3:
+            ops += decide(rnd, w)
+        if rnd.random() < 0.6:
+            ops.append("@d %d" % rnd.choice((0, 1, 1, 3)))
+    return ops
+
+
+GU_EDGE_KINDS = ("gu-off", "gu-speed", "gu-coll", "gu-aws", "gu-face",
+                 "gu-young", "gu-fail", "gu-clear", "rb-range", "rb-esc",
+                 "rb-ahead", "rb-start", "rb-last")
+N_GU_EDGES = 2
+
+
+def face_layout(rnd):
+    """A whole dx ahead and, for the facing dot an ulp under 0.98, on it
+    and an ulp over, a dy across whose (dx, dy), normalised in
+    bNormalize2's float order, has that x."""
+    want = {fstep(0.98, n): n for n in (-1, 0, 1)}
+    while True:
+        dx = float(rnd.randrange(20, 31))
+        dy0 = f32(dx * math.tan(math.acos(0.98)))
+        found = {}
+        for n in range(-4000, 4000):
+            dy = fstep(dy0, n)
+            ln = f32(math.sqrt(f32(f32(dx * dx) + f32(dy * dy))))
+            k = want.get(f32(dx / ln))
+            if k is not None and k not in found:
+                found[k] = dy
+        if len(found) == 3:
+            return dx, found
+
+
+def first_not_behind(pts, e, start):
+    """FindClosestPointAhead's answer: from point `start` on, the first
+    point that `e` is not ahead of, short of the last; None for none."""
+    n = len(pts)
+    i = k = start
+    while True:
+        i += 1
+        q = pts[k]
+        if not ((e[0] - q["x"]) * q["dx"] + (e[1] - q["y"]) * q["dy"] > 0.0):
+            break
+        if i >= n:
+            break
+        k += 1
+    return k if i < n else None
+
+
+def s_gu_edge(rnd, kind):
+    """GetUnstuck and AvoidRoadBlock at their exact edges, on s_ph_gap's
+    straight road along x, 25 m each side with its lines on its centre,
+    so a car's across is -y exactly, and a second such road far off.
+
+    gu-off: my car exactly 20 m past either edge and an ulp either side.
+    gu-speed: an AI car at exactly 25 m/s and a traffic car at 20, an ulp
+    either side and 0.5 off, drifting out over the right edge with its
+    point to steer to behind it. gu-coll: something hit in front exactly
+    0.4 s ago and either side, at speeds either side of stopped. gu-aws:
+    a stopped car in my way, my speed exactly 15 and either side, facing
+    the goal. gu-face: the facing dot exactly 0.98 and an ulp either side
+    (face_layout). gu-young: a lifetime not in effect poked to 5 s or 1,
+    facing the goal. gu-fail: something hit behind exactly 0.4 s ago and
+    either side, at speeds either side of 1 and -1. gu-clear: the
+    location clear while the lifetime runs. rb-range: the roadblock
+    exactly the range ahead and an ulp either side, and between the
+    range and a mutant's; then exactly 15 m behind and either side, and
+    my wheels off the ground. rb-esc: a roadblock on the far road, its
+    escape lane exactly 5 m past either edge of mine and an ulp either
+    side, behind me, and off the road near my road's end. rb-ahead: a
+    stopped racer in my way, its entry level, behind or ahead.
+
+    rb-start and rb-last curve my road. rb-start bends it 0.2 rad a point,
+    so it comes back on itself: the escape lane is on the road a few
+    points ahead of me but behind the road's first point, so where the
+    search starts matters. rb-last bends it 0.05 a point, with the escape
+    lane off the road and me a few points from the end, so the target
+    runs to the last point; the fill-up after the smoothing works its
+    offset out again from a point it laid, in floats."""
+    w = World(rnd)
+    ops = w.ops
+    clock = rnd.choice((100000, 200000))
+    tout = h(f32(5.0))
+    none = h(-1.0)
+    jl = 10
+    rn = rnd.randrange(50)
+    pts = w.route(0, 40, rn, x=-200.0, y=0.0, hd=0.0,
+                  turn={"rb-start": 0.2, "rb-last": 0.05}.get(kind, 0.0),
+                  smooth=True)
+    w.route(1, 12, (rn + 1) % 50, x=-200.0, y=400.0, hd=0.0, turn=0.0,
+            smooth=True)
+    p = pts[jl]
+    hd = f32(2.25)
+    me = (0.0, 0.0, 0.0, 1.0, hd, 0)
+
+    def car(k, x, lat, v, **kw):
+        args = dict(px=f32(x), py=f32(-lat), pz=0.0, bx=1.0, by=0.0,
+                    vmag=f32(v), dn=0, cls=0, dtype=2, ctl=1, oob=-1.0,
+                    rpr=0, rpj=jl, ct=0, cc=-1, cx=0, act=-1, pl=0, nw=4,
+                    vx=f32(v), vy=0.0, fs=f32(v))
+        args.update(kw)
+        w.car(k, **args)
+        ops.append("A %d %s %s %s 0 %s" % (
+            k, h(0.0), h(0.0), h(0.0),
+            " ".join(h(f32(b)) for b in (-2.25, -1.0, -0.7, 2.25, 1.0, 0.7))))
+        if k == 0:
+            ops.append("@mv 0")
+
+    def info(rows, clear=False, j=jl):
+        ops.append("N 0 %d %s %s" % (len(rows), h(f32(1.0)), h(hd)))
+        for i, (lx, ly, vy, hl2, hd2, k) in enumerate(rows):
+            ops.append("E %d %s %s %s %s %s %s %d" % (
+                i, h(f32(lx)), h(f32(ly)), h(0.0), h(f32(vy)), h(f32(hl2)),
+                h(f32(hd2)), k))
+        ops.append("D -1 -1 0 00000000" if clear
+                   else "D 0 %d 0 00000000" % j)
+        ops.append("X 1 -1 0")
+        ops.append("@J")
+
+    def at(c):
+        ops.append("G TIMER %08x" % (c & M32))
+
+    def hit(dx, ago):
+        ops.append("@col 0 1 0 0 -1")
+        ops.append("@ct 0 0 %08x %s %s" % (
+            (clock - ago) & M32, h(f32(w.cars[0]["px"] + dx)),
+            h(f32(w.cars[0]["py"]))))
+
+    def rbf(d, rk=0, rj=jl + 5, ex=None, ey=-10.0):
+        q = w.pts[rk][rj]
+        ops.append("@rbf 0 1 1 %d %d %s %s %s %s %s" % (
+            rk, rj, h(f32(d)), h(f32(q["x"])), h(f32(q["y"])),
+            h(f32(q["x"] if ex is None else ex)), h(f32(ey))))
+
+    ops += ["@ch none", "@cm none", "@pl 0 0 0", "G SLOWCAR %s" % h(5.0),
+            "G TLEN %s" % h(0.0)]
+    at(clock)
+    ops.append("R %08x" % ((clock - 100000) & M32))
+    for k in (1, 2, 3, 4, 5):
+        car(k, -500.0 - 10.0 * k, 0.0, 0.0)
+    car(0, p["x"] + 1.0, 0.0, 20.0)
+    ops.append("@col 0 0")
+    x0 = p["x"] + 1.0
+    if kind == "gu-off":
+        for side in (1.0, -1.0):
+            for n in (0, -1, 1):
+                car(0, x0, side * fstep(45.0, n), 20.0)
+                info([me])
+                ops.append("@sc gu")
+    elif kind == "gu-speed":
+        a = -math.pi / 4.0
+        for ctl, edge in ((2, 25.0), (3, 20.0)):
+            for v in (edge, fstep(edge, 1), fstep(edge, -1), edge - 0.5,
+                      edge + 0.5):
+                car(0, x0, 20.0, v, ctl=ctl, bx=math.cos(a), by=math.sin(a),
+                    vx=v * math.cos(a), vy=v * math.sin(a))
+                ops.append("@stp 0 %s %s" % (h(f32(x0 - 50.0)), h(30.0)))
+                info([me])
+                ops.append("@sc gu")
+    elif kind == "gu-coll":
+        for ago in (1599, 1600, 1601, 4000):
+            for v in (0.5, -0.5, 0.999, 1.0, fstep(1.0, 8388),
+                      fstep(1.0, 8389), 1.5):
+                car(0, x0, 5.0, v)
+                hit(2.4, ago)
+                info([me])
+                ops.append("@sc gu")
+    elif kind == "gu-aws":
+        for v in (15.0, fstep(15.0, 1), fstep(15.0, -1), 10.0):
+            car(0, x0, 0.0, v)
+            car(1, x0 + 7.0, 0.0, 0.0)
+            info([(0.0, 5.0, 0.0, 1.0, 2.25, 1), me])
+            ops += ["@as", "@sc gu"]
+            at(clock)
+            ops += ["@n gu 500 %s -1 %s" % (tout, none), "@t", "@d 1"]
+    elif kind == "gu-face":
+        dx, dys = face_layout(rnd)
+        g = pts[jl + 3]
+        for n in (0, -1, 1):
+            car(0, g["x"] - dx, dys[n], 20.0)
+            info([me])
+            ops += ["@n gu 500 %s -1 %s" % (tout, none), "@t", "@d 1"]
+    elif kind == "gu-young":
+        for life, ticks in ((5.0, 4000), (5.0, 20000), (5.0, 20001),
+                            (1.0, 3999)):
+            car(0, x0, 0.0, 20.0)
+            info([me])
+            at(clock)
+            ops += ["@n gu 500 %s -1 %s" % (tout, none),
+                    "@f r612 %s" % h(f32(life))]
+            at(clock + ticks)
+            ops += ["@t", "@d 1"]
+        at(clock)
+    elif kind == "gu-fail":
+        for ago in (1599, 1600, 1601, 4000):
+            for v in (-1.5, -1.0, -fstep(1.0, -1), -0.5, 0.5, 1.0, 1.5):
+                car(0, x0, 5.0, v)
+                hit(-2.4, ago)
+                info([me])
+                at(clock - 8000)
+                ops.append("@n gu 500 %s -1 %s" % (tout, none))
+                at(clock)
+                ops += ["@t", "@d 1"]
+    elif kind == "gu-clear":
+        for life in (5.0, 2.0):
+            car(0, x0, 0.0, 20.0)
+            info([me])
+            ops.append("@n gu 500 %s -1 %s" % (tout, h(f32(life))))
+            info([me], clear=True)
+            ops += ["@t", "@us", "@cp", "@nm", "@d 1"]
+    elif kind == "rb-range":
+        ops.append("@pu 0")
+        for v, offs in ((0.0, (100.0, fstep(100.0, 1), fstep(100.0, -1),
+                               95.0)),
+                        (40.0, (100.0, fstep(100.0, 1))),
+                        (50.0, (125.0, fstep(125.0, 1), fstep(125.0, -1),
+                                110.0))):
+            car(0, x0, 0.0, v)
+            ops.append("@td 0 %s" % h(0.0))
+            info([me])
+            for off in offs:
+                rbf(off)
+                ops.append("@sc rb")
+        car(0, x0, 0.0, 20.0)
+        ops.append("@td 0 %s" % h(0.0))
+        info([me])
+        rbf(100.0)
+        ops.append("@n rb 600 %s -1 0" % tout)
+        for d in (-15.0, -fstep(15.0, 1), -fstep(15.0, -1)):
+            rbf(d)
+            ops.append("@t")
+        car(0, x0, 0.0, 20.0, nw=2)
+        ops.append("@td 0 %s" % h(0.0))
+        info([me])
+        ops += ["@t", "@us", "@d 1"]
+    elif kind == "rb-esc":
+        e = pts[jl + 5]["x"]
+        cases = [(e, -30.0, jl, 3.0), (e, -fstep(30.0, 1), jl, 3.0),
+                 (e, -fstep(30.0, -1), jl, -3.0), (e, 30.0, jl, -3.0),
+                 (e, fstep(30.0, 1), jl, 3.0),
+                 (pts[jl - 3]["x"] - 1.0, -2.0, jl, 3.0),
+                 (pts[jl - 3]["x"] - 1.0, 2.0, jl, -1.0),
+                 (pts[38]["x"], -40.0, 36, 3.0),
+                 (pts[38]["x"], 40.0, 35, -2.0)]
+        ops.append("@pu 0")
+        for ex, ey, j, lat in cases:
+            car(0, pts[j]["x"] + 1.0, lat, 20.0, rpj=j)
+            ops.append("@td 0 %s" % h(0.0))
+            info([me], j=j)
+            rbf(-500.0, rk=1, rj=5, ex=ex, ey=ey)
+            ops += ["@n rb 600 %s -1 0" % tout, "@cp", "@d 1"]
+    elif kind == "rb-ahead":
+        ops.append("@pu 0")
+        for y in (0.0, -0.0, -1.0, 3.0):
+            car(0, x0, 0.0, 20.0)
+            ops.append("@td 0 %s" % h(0.0))
+            car(1, x0 + 6.0, 0.0, 0.0)
+            ops.append("@ut 1 0")
+            info([(0.0, y, 0.0, 1.0, 2.25, 1), me])
+            rbf(-500.0, rj=jl + 8, ey=0.0)
+            ops += ["@n rb 600 %s -1 0" % tout, "@cp", "@d 1"]
+    elif kind == "rb-start":
+        ops.append("@pu 0")
+        cases = []
+        for jt in range(19, 27):
+            for le in (2.0, -2.0, 0.5):
+                e = beside(pts[jt], le, -0.5)
+                o = first_not_behind(pts, e, 16)
+                m = first_not_behind(pts, e, 0)
+                if o is not None and o >= 19 and (m is None or m < 16):
+                    cases.append((16, e, rnd.choice((-3.0, 4.0, 0.0))))
+        assert cases
+        rnd.shuffle(cases)
+        for j, (ex, ey), lat in cases[:4]:
+            q = pts[j]
+            x, y = beside(q, lat, 1.0)
+            car(0, 0.0, 0.0, 20.0, px=f32(x), py=f32(y), bx=q["dx"],
+                by=q["dy"], vx=20.0 * q["dx"], vy=20.0 * q["dy"], rpj=j)
+            ops.append("@td 0 %s" % h(0.0))
+            info([me], j=j)
+            rbf(-500.0, rk=1, rj=5, ex=ex, ey=ey)
+            ops += ["@n rb 600 %s -1 0" % tout, "@cp", "@d 1"]
+    else:
+        # rb-last
+        ops.append("@pu 0")
+        for j, lat in ((33, 3.3), (33, -7.7), (34, 12.1), (32, 0.7),
+                       (35, -1.9)):
+            ex, ey = beside(pts[37], 40.0, -0.5)
+            q = pts[j]
+            x, y = beside(q, lat, 1.0)
+            car(0, 0.0, 0.0, 20.0, px=f32(x), py=f32(y), bx=q["dx"],
+                by=q["dy"], vx=20.0 * q["dx"], vy=20.0 * q["dy"], rpj=j)
+            ops.append("@td 0 %s" % h(0.0))
+            info([me], j=j)
+            rbf(-500.0, rk=1, rj=5, ex=ex, ey=ey)
+            ops += ["@n rb 600 %s -1 0" % tout, "@cp", "@d 1"]
+    return ops
+
+
 def script():
     rnd = random.Random(0x11b2dc)
     sc = [s_small(rnd), s_valid(rnd), s_room(rnd), s_walk(rnd), s_fill(rnd),
@@ -4152,6 +4935,14 @@ def script():
     for _ in range(N_PH_GAPS):
         for kind in PH_GAP_KINDS:
             sc.append(s_ph_gap(rnd, kind))
+    # Step 11d-3b's.
+    for _ in range(N_UNSTUCK):
+        sc.append(s_unstuck(rnd))
+    for _ in range(N_ROADBLOCK):
+        sc.append(s_roadblock(rnd))
+    for _ in range(N_GU_EDGES):
+        for kind in GU_EDGE_KINDS:
+            sc.append(s_gu_edge(rnd, kind))
     return sc
 
 
@@ -4180,6 +4971,9 @@ class Model(object):
         self.e.stub(GET_COLLISION, self.s_get_collision)
         self.e.stub(IS_TWO_CAR, self.s_is_two_car)
         self.e.stub(COLLIDING_CARS, self.s_colliding_cars)
+        self.e.stub(STUB_FWIA, self.s_fwia)
+        self.e.stub(STUB_CSM, self.s_csm)
+        self.e.stub(STUB_STP, self.s_stp)
         self.w = self.e.u32
         self.grace0 = self.w(GLOBALS["GRACE"])
         self.gap0 = self.w(GLOBALS["GAP"])
@@ -4249,7 +5043,8 @@ class Model(object):
                 (ACTIONS, ACTION_STRIDE, NCARS, "a"),
                 (SIGNS, SIGN_SIZE, NSIGNS, "S"),
                 (LIST + LIST_ARRAY, NC_SIZE, LIST_MAX, "e"),
-                (BODIES, BODY_STRIDE, NCARS, "b")):
+                (BODIES, BODY_STRIDE, NCARS, "b"),
+                (ROADBLOCKS, RB_STRIDE, NRBS, "rb")):
             if base <= a < base + stride * n and (a - base) % stride == 0:
                 return "%s%d" % (tag, (a - base) // stride)
         if (COLLS <= a < COLLS + COLL_STRIDE * NCOLLS * NCARS
@@ -4368,6 +5163,32 @@ class Model(object):
         self.emit("  dnum %s" % self.name(car))
         return struct.unpack_from("<h", em.mem, car + C_DN)[0]
 
+    def driver_car(self, em):
+        k, off = divmod((em.reg[4] & M32) - CDRIVERS, CDRIVER_STRIDE)
+        if off or not 0 <= k < NCARS:
+            raise SystemExit("a driver that is not one of ours: %08x"
+                             % (em.reg[4] & M32))
+        return k
+
+    def s_fwia(self, em):
+        """The test controller table's FindWhereIAm."""
+        a = em.reg[4] & M32
+        k, off = divmod(a - CTRLS, CTRL_STRIDE)
+        if off or not 0 <= k < NCARS:
+            raise SystemExit("a controller that is not one of ours: %08x" % a)
+        self.emit("  fwia %s" % self.name(a))
+
+    def s_csm(self, em):
+        """The test CarDriver table's ClearSteeringMemory."""
+        self.emit("  csm %s" % self.name(car_at(self.driver_car(em))))
+
+    def s_stp(self, em):
+        """The test CarDriver table's GetSteerToPoint: the script's point
+        for the car."""
+        k = self.driver_car(em)
+        self.emit("  stp %s" % self.name(car_at(k)))
+        return STP + 8 * k
+
     # ---- the dumps -------------------------------------------------------
 
     def dump_choice(self, a, tag):
@@ -4484,6 +5305,21 @@ class Model(object):
             e.put32(GLOBALS[name], v)
         e.mem[DVT:DVT + DVT_BYTES] = bytes(DVT_BYTES)
         e.put32(DVT + DVT_DNUM + 4, STUB_DNUM)
+        # Step 11d-3b's: the two tables' stubs, no steer-to points, no
+        # collision times, track length or roadblocks, and no pursuits.
+        e.put32(DVT + DVT_CSM + 4, STUB_CSM)
+        e.put32(DVT + DVT_STP + 4, STUB_STP)
+        e.mem[CVT:CVT + CVT_BYTES] = bytes(CVT_BYTES)
+        e.put32(CVT + CVT_FWIA + 4, STUB_FWIA)
+        e.mem[STP:STP + 8 * NCARS] = bytes(8 * NCARS)
+        e.mem[COLLS:COLLS + COLL_STRIDE * NCOLLS * NCARS] = bytes(
+            COLL_STRIDE * NCOLLS * NCARS)
+        e.mem[PURSUITS:PURSUITS + PURSUIT_STRIDE * NPURSUITS] = bytes(
+            PURSUIT_STRIDE * NPURSUITS)
+        e.mem[ROADBLOCKS:ROADBLOCKS + RB_STRIDE * NRBS] = bytes(
+            RB_STRIDE * NRBS)
+        e.mem[COPM:COPM + 64] = bytes(64)
+        e.put32(GLOBALS["TLEN"], 0)
         # Step 11d-3a's: no chopper, cop manager, players or collisions;
         # car type 0's table.
         e.put32(WORLD + W_CHOPPER, 0)
@@ -4534,6 +5370,7 @@ class Model(object):
         e.put32(a + C_VEL + 4, v["vy"])
         e.put32(a + C_NW, v["nw"])
         e.put32(a + C_FS, v["fs"])
+        e.put32(ctrl + K_VPTR, CVT)
         e.put32(ctrl + K_LOC, LOCS + 16 * k)
         e.put32(ctrl + K_CHOICE, ch)
         e.put32(ctrl + K_EXCLUDE, PAT32)
@@ -4663,6 +5500,11 @@ class Model(object):
         elif self.kind == "ij":
             self.emit("  ij car %s last %08x" % (self.name(w(a + 608)),
                                                   w(a + 612)))
+        elif self.kind == "gu":
+            self.emit("  gu made %08x min %s on %d" % (
+                w(a + 608), fx(w(a + 612)), s32(w(a + 616))))
+        elif self.kind == "rb":
+            self.emit("  rb %s" % self.name(w(a + 608)))
 
     def dump_info(self):
         """After CalculatePointsToDrive: the information's choice and
@@ -4701,6 +5543,12 @@ class Model(object):
                 self.call(ACT_CTORS["ac"], AB, int(t[2]), self.car_ptr(t[4]),
                           int(t[6]), int(t[7]), f12=int(t[3], 16),
                           f13=int(t[5], 16))
+            elif t[1] == "gu":
+                self.call(ACT_CTORS["gu"], AB, int(t[2]), f12=int(t[3], 16),
+                          f13=int(t[5], 16))
+            elif t[1] == "rb":
+                self.call(ACT_CTORS["rb"], AB, int(t[2]), self.rb_ptr(t[5]),
+                          f12=int(t[3], 16))
             elif t[1] == "po":
                 # The last bit leaves out the list, the next the location.
                 z = int(t[6])
@@ -4735,7 +5583,7 @@ class Model(object):
             k = t[1]
             if k == "dr":
                 got = self.call(ACT_SCORES[k], INFO, self.car_ptr(t[2]))
-            elif k in ("nc", "bl", "ij"):
+            elif k in ("nc", "bl", "ij", "rb"):
                 e.put32(OUT, PAT32)
                 got = self.call(ACT_SCORES[k], INFO, OUT)
                 self.emit("  out %s" % self.name(w(OUT)))
@@ -4823,6 +5671,7 @@ class Model(object):
                     e.put32(COPM + 16 + 4 * i, cop)
                     e.put32(cop + 4, self.car_ptr(k))
                     e.put32(cop + 16, int(st))
+                self.pursuits([])
                 e.put32(GLOBALS["COPM"], COPM)
         elif c == "pl":
             e.put32(GLOBALS["NPLAYERS"], int(t[1]))
@@ -4835,8 +5684,66 @@ class Model(object):
         elif c == "sk":
             e.mem[DRIVERS + DRIVER_STRIDE * int(t[1]) + DRV_SKILL] = (
                 int(t[2]) & 0xff)
+        elif c == "ct":
+            # 11d-3b's from here: a collision's time and contact point.
+            a = COLLS + COLL_STRIDE * (NCOLLS * int(t[1]) + int(t[2]))
+            e.put32(a + CO_TIME, int(t[3], 16))
+            e.put32(a + CO_CONTACT, int(t[4], 16))
+            e.put32(a + CO_CONTACT + 4, int(t[5], 16))
+        elif c == "stp":
+            e.put32(STP + 8 * int(t[1]), int(t[2], 16))
+            e.put32(STP + 8 * int(t[1]) + 4, int(t[3], 16))
+        elif c == "td":
+            e.put32(self.car_ptr(t[1]) + C_DIST, int(t[2], 16))
+        elif c == "rbf":
+            # A roadblock: whether each cop is there, its route and point,
+            # its distance round the track, its spike belt and its escape
+            # lane.
+            a = self.rb_ptr(t[1])
+            e.mem[a:a + RB_STRIDE] = bytes(RB_STRIDE)
+            e.put32(a, COPS if int(t[2]) else 0)
+            e.put32(a + 4, COPS + COP_STRIDE if int(t[3]) else 0)
+            e.put32(a + 36, self.point_of(t[4], t[5]))
+            e.put32(a + 40, self.route_of(t[4]))
+            e.put32(a + 100, int(t[6], 16))
+            for off, x in zip((52, 56, 92, 96), t[7:11]):
+                e.put32(a + off, int(x, 16))
+        elif c == "pu":
+            # The pursuits, in order: "-" for one with no roadblock, else
+            # its roadblock.
+            self.pursuits(t[1:])
+            e.put32(GLOBALS["COPM"], COPM)
+        elif c == "as":
+            got = self.call(AWS, INFO + 464, INFO)
+            self.emit("  aws %d" % s32(got))
+        elif c == "ut":
+            # A car's type's UsageType.
+            e.put32(CTIS + CTI_STRIDE * int(t[1]) + CTI_USAGE, int(t[2]))
+        elif c == "mv":
+            # A car's relative frame made again when next asked for: the
+            # cache's valid word cleared.
+            e.put32(self.car_ptr(t[1]) + C_MATRIX_VALID, 0)
         else:
             raise SystemExit("bad op %r" % (t,))
+
+    def rb_ptr(self, s):
+        j = int(s)
+        return ROADBLOCKS + RB_STRIDE * j if j >= 0 else 0
+
+    def pursuits(self, specs):
+        """The manager's PursuitList: a pursuit for each spec, linked both
+        ways round the list's own node."""
+        e = self.e
+        head = COPM + COPM_PLIST
+        nodes = [head]
+        for i, s in enumerate(specs):
+            p = PURSUITS + PURSUIT_STRIDE * i
+            e.mem[p:p + PURSUIT_STRIDE] = bytes(PURSUIT_STRIDE)
+            e.put32(p + PU_RB, 0 if s == "-" else self.rb_ptr(s))
+            nodes.append(p)
+        for i, n in enumerate(nodes):
+            e.put32(n, nodes[(i + 1) % len(nodes)])
+            e.put32(n + 4, nodes[i - 1])
 
     def dump_after(self):
         """The car the list's car leaves out, and the world's two counts."""
@@ -6921,13 +7828,16 @@ MUTATIONS = [
     AM("dr-abs", "&& fabsf(nc->Position.x) <", "&& nc->Position.x <"),
     AM("dr-across-lt", "fabsf(nc->Position.x) < list->MyHalfSizeL",
        "fabsf(nc->Position.x) <= list->MyHalfSizeL"),
-    AM("dr-across-hl", "< list->MyHalfSizeL + nc->ApparentHalfSizeL",
-       "< nc->ApparentHalfSizeL"),
+    AM("dr-across-hl",
+       "fabsf(nc->Position.x) < list->MyHalfSizeL + nc->ApparentHalfSizeL",
+       "fabsf(nc->Position.x) < nc->ApparentHalfSizeL"),
     AM("dr-close-lt", "&& nc->Position.y < AIDR_CLOSE", "&& nc->Position.y <= AIDR_CLOSE"),
     AM("dr-close", "AIDR_CLOSE             6.0f", "AIDR_CLOSE             7.0f"),
     AM("dr-gap", "AIDR_GAP               20.0f", "AIDR_GAP               21.0f"),
     AM("dr-gap-sign", "- (AIDR_GAP - nc->Position.y)", "- (AIDR_GAP + nc->Position.y)"),
-    AM("dr-the-car", "nc->TheCar->State.VelocityMagnitude", "list->MyCar->State.VelocityMagnitude"),
+    AM("dr-the-car",
+       "float speed = nc->TheCar->State.VelocityMagnitude",
+       "float speed = list->MyCar->State.VelocityMagnitude"),
     AM("dr-lower", "if (speed < a->Base.DesiredSpeed) {", "if (speed <= a->Base.DesiredSpeed) {"),
     AM("dr-lower-any", "if (speed < a->Base.DesiredSpeed) {", "if (1) {"),
     AM("dr-ds", "            a->Base.DesiredSpeed = speed;\n", ""),
@@ -7003,8 +7913,9 @@ MUTATIONS = [
        "    // 0x001ca430.\n    (void)a;\n    (void)info;\n    return 1;"),
     AM("ar-exp", "    // 0x001ca3e8.\n    (void)info;\n    return past_timeout(&a->Base.Base);",
        "    // 0x001ca3e8.\n    (void)info;\n    return past_timeout_unstarted(&a->Base);"),
-    AM("ar-cp-line", "    if (!drivingchoice_type_is_driving_line(choice->Type))\n        drivingchoice_set_choice_location",
-       "    if (drivingchoice_type_is_driving_line(choice->Type))\n        drivingchoice_set_choice_location"),
+    AM("ar-cp-line",
+       "MyDrivingChoice;\n\n    if (!drivingchoice_type_is_driving_line(choice->Type))\n        drivingchoice_set_choice_location",
+       "MyDrivingChoice;\n\n    if (drivingchoice_type_is_driving_line(choice->Type))\n        drivingchoice_set_choice_location"),
     AM("ar-cp-move", "MOVEMENT_PARALLEL_TO_LINE);\n    a->Base.TimeToGetToDesiredSpeed",
        "MOVEMENT_TOWARDS_LINE);\n    a->Base.TimeToGetToDesiredSpeed"),
     AM("ar-tt", "    a->Base.TimeToGetToDesiredSpeed = 0.0f;\n    a->Base.UseDrivingLineSpeed = 0;",
@@ -7625,6 +8536,379 @@ MUTATIONS = [
     AM("vt-ij-exp", "E(aijustgothit_has_expired),", "E(aijustgothit_has_failed),"),
     AM("vt-install-po", "    vt_install(AIPULLOVER_VTABLE, aipullover_vt, AIACTION_VT_ENTRIES);\n", ""),
     AM("vt-install-ij", "    vt_install(AIIJUSTGOTHIT_VTABLE, aijustgothit_vt, AIACTION_VT_ENTRIES);\n", ""),
+    # -- step 11d-3b's: GetUnstuck and AvoidRoadBlock --------------------
+    AM("k-gu-no-lifetime", "#define AIGU_NO_LIFETIME       (-1.0f)",
+       "#define AIGU_NO_LIFETIME       (-2.0f)"),
+    AM("k-gu-lifetime-eps", "#define AIGU_LIFETIME_EPSILON  0.00100000005f",
+       "#define AIGU_LIFETIME_EPSILON  0.00200000009f"),
+    AM("k-gu-off-road", "#define AIGU_OFF_ROAD          20.0f",
+       "#define AIGU_OFF_ROAD          19.0f"),
+    AM("k-gu-slow-ai", "#define AIGU_SLOW_AI           25.0f",
+       "#define AIGU_SLOW_AI           24.0f"),
+    AM("k-gu-slow-traffic", "#define AIGU_SLOW_TRAFFIC      20.0f",
+       "#define AIGU_SLOW_TRAFFIC      19.0f"),
+    AM("k-gu-hit-ago", "#define AIGU_HIT_AGO           0.400000006f",
+       "#define AIGU_HIT_AGO           0.5f"),
+    AM("k-gu-stopped", "#define AIGU_STOPPED           1.0f",
+       "#define AIGU_STOPPED           1.5f"),
+    AM("k-gu-stopped-eps", "#define AIGU_STOPPED_EPSILON   0.00100000005f",
+       "#define AIGU_STOPPED_EPSILON   0.00200000009f"),
+    AM("k-gu-behind-gap", "#define AIGU_BEHIND_GAP        9.0f",
+       "#define AIGU_BEHIND_GAP        8.0f"),
+    AM("k-gu-facing", "#define AIGU_FACING            0.980000019f",
+       "#define AIGU_FACING            0.99000001f"),
+    AM("k-gu-reverse-ai", "#define AIGU_REVERSE_AI        (-15.0f)",
+       "#define AIGU_REVERSE_AI        (-14.0f)"),
+    AM("k-gu-reverse", "#define AIGU_REVERSE           (-6.0f)",
+       "#define AIGU_REVERSE           (-5.0f)"),
+    AM("k-gu-goal-ahead", "#define AIGU_GOAL_AHEAD        3 ",
+       "#define AIGU_GOAL_AHEAD        2 "),
+    AM("k-rb-look-seconds", "#define AIRB_LOOK_SECONDS      2.5f",
+       "#define AIRB_LOOK_SECONDS      2.0f"),
+    AM("k-rb-look-min", "#define AIRB_LOOK_MIN          100.0f",
+       "#define AIRB_LOOK_MIN          90.0f"),
+    AM("k-rb-passed", "#define AIRB_PASSED            15.0f",
+       "#define AIRB_PASSED            14.0f"),
+    AM("k-rb-on-road", "#define AIRB_ON_ROAD           5.0f",
+       "#define AIRB_ON_ROAD           4.0f"),
+    AM("k-rb-hit-within", "#define AIRB_HIT_WITHIN        1.0f",
+       "#define AIRB_HIT_WITHIN        2.0f"),
+    AM("k-rb-slower-by", "#define AIRB_SLOWER_BY         0.100000001f",
+       "#define AIRB_SLOWER_BY         0.200000003f"),
+    AM("k-rb-min-speed", "#define AIRB_MIN_SPEED         30.0f",
+       "#define AIRB_MIN_SPEED         29.0f"),
+    AM("k-gu-score", "#define AIGU_SCORE   500",
+       "#define AIGU_SCORE   501"),
+    AM("k-rb-score", "#define AIRB_SCORE   600",
+       "#define AIRB_SCORE   601"),
+    AM("gu-across-sign", "    return (p->x - rp->Position.x) * rp->Direction.y\n           - (p->y - rp->Position.y) * rp->Direction.x;",
+       "    return (p->x - rp->Position.x) * rp->Direction.y\n           + (p->y - rp->Position.y) * rp->Direction.x;"),
+    AM("gu-across-dir", "    return (p->x - rp->Position.x) * rp->Direction.y\n",
+       "    return (p->x - rp->Position.x) * rp->Direction.x\n"),
+    AM("gu-edge-right", "        return l - rp->RightWidth;",
+       "        return l - rp->LeftWidth;"),
+    AM("gu-edge-right-sign", "        return l - rp->RightWidth;",
+       "        return l + rp->RightWidth;"),
+    AM("gu-edge-left", "    return -(l + rp->LeftWidth);",
+       "    return -(l + rp->RightWidth);"),
+    AM("gu-edge-left-sign", "    return -(l + rp->LeftWidth);",
+       "    return l + rp->LeftWidth;"),
+    AM("gu-young-on", "    return a->MinimumLifetimeInEffect != 0\n           && ",
+       "    return 1\n           && "),
+    AM("gu-young-le", "           && !(a->MinimumLifetime <= seconds_since(&a->MyCreationTime));",
+       "           && !(a->MinimumLifetime < seconds_since(&a->MyCreationTime));"),
+    AM("gu-young-nan", "           && !(a->MinimumLifetime <= seconds_since(&a->MyCreationTime));",
+       "           && a->MinimumLifetime > seconds_since(&a->MyCreationTime);"),
+    AM("gu-goal2-line", "    trpoint_get_position2(p, out, 0.0f,\n                          trpoint_get_driving_line_offset(\n                              p, loc->DrivingLine));",
+       "    trpoint_get_position2(p, out, 0.0f,\n                          trpoint_get_driving_line_offset(\n                              p, 0));"),
+    AM("gu-goal3-line", "    trpoint_get_position3(p, out, 0.0f,\n                          trpoint_get_driving_line_offset(\n                              p, loc->DrivingLine));",
+       "    trpoint_get_position3(p, out, 0.0f,\n                          trpoint_get_driving_line_offset(\n                              p, 0));"),
+    AM("gu-ctor-made", "    a->MyCreationTime.PackedTime = (uint32_t)WorldTimer;\n    a->MinimumLifetime = minLifetime;",
+       "    a->MinimumLifetime = minLifetime;"),
+    AM("gu-ctor-min", "    a->MinimumLifetime = minLifetime;",
+       "    a->MinimumLifetime = 0.0f;"),
+    AM("gu-ctor-on-not", "        !(fabsf(minLifetime - AIGU_NO_LIFETIME) <= AIGU_LIFETIME_EPSILON);",
+       "        (fabsf(minLifetime - AIGU_NO_LIFETIME) <= AIGU_LIFETIME_EPSILON);"),
+    AM("gu-ctor-on-le", "        !(fabsf(minLifetime - AIGU_NO_LIFETIME) <= AIGU_LIFETIME_EPSILON);",
+       "        !(fabsf(minLifetime - AIGU_NO_LIFETIME) < AIGU_LIFETIME_EPSILON);"),
+    AM("gu-ctor-on-abs", "        !(fabsf(minLifetime - AIGU_NO_LIFETIME) <= AIGU_LIFETIME_EPSILON);",
+       "        !(minLifetime - AIGU_NO_LIFETIME <= AIGU_LIFETIME_EPSILON);"),
+    AM("gu-ctor-type", "    a->Base.Type = AIACTION_GET_UNSTUCK;",
+       "    a->Base.Type = AIACTION_AVOID_ROADBLOCK;"),
+    AM("gu-sc-grace", "    if (race_grace_period_is_active(pCurrentRace, me)\n        || drivinglocation_is_clear(loc)\n        || me->State.nWheelsTouchingGround < 3)\n        return AIA_NO_SCORE;",
+       "    if (0\n        || drivinglocation_is_clear(loc)\n        || me->State.nWheelsTouchingGround < 3)\n        return AIA_NO_SCORE;"),
+    AM("gu-sc-clear", "        || drivinglocation_is_clear(loc)\n        || me->State.nWheelsTouchingGround < 3)\n        return AIA_NO_SCORE;",
+       "        || me->State.nWheelsTouchingGround < 3)\n        return AIA_NO_SCORE;"),
+    AM("gu-sc-wheels", "        || me->State.nWheelsTouchingGround < 3)\n        return AIA_NO_SCORE;",
+       "        || me->State.nWheelsTouchingGround < 2)\n        return AIA_NO_SCORE;"),
+    AM("gu-sc-point", "    if (loc->pRoutePoint != NULL) {\n        bVector2 pos;",
+       "    if (0) {\n        bVector2 pos;"),
+    AM("gu-sc-pos-y", "        pos.y = me->State.Position.y;\n        if (AIGU_OFF_ROAD",
+       "        pos.y = me->State.Position.x;\n        if (AIGU_OFF_ROAD"),
+    AM("gu-sc-off-le", "        if (AIGU_OFF_ROAD <= past_the_edge(",
+       "        if (AIGU_OFF_ROAD < past_the_edge("),
+    AM("gu-sc-off-stuck", "                                           loc->pRoutePoint))\n            stuck = 1;",
+       "                                           loc->pRoutePoint))\n            stuck = 0;"),
+    AM("gu-sc-ai", "        && ((me->TheControlMode == AI_CONTROL\n",
+       "        && ((me->TheControlMode != AI_CONTROL\n"),
+    AM("gu-sc-ai-le", "             && me->State.VelocityMagnitude <= AIGU_SLOW_AI)",
+       "             && me->State.VelocityMagnitude < AIGU_SLOW_AI)"),
+    AM("gu-sc-traffic", "            || (me->TheControlMode == TRAFFIC_CONTROL\n",
+       "            || (me->TheControlMode == AI_CONTROL\n"),
+    AM("gu-sc-traffic-le", "                && me->State.VelocityMagnitude <= AIGU_SLOW_TRAFFIC))",
+       "                && me->State.VelocityMagnitude < AIGU_SLOW_TRAFFIC))"),
+    AM("gu-sc-head", "           == HEADING_OUT_OF_ROUTE_FORWARDS)\n        stuck = 1;",
+       "           == HEADING_OUT_OF_ROUTE_BACKWARDS)\n        stuck = 1;"),
+    AM("gu-sc-head-steer", "        && aiaction_get_heading_classification(loc, me, 1)\n           == HEADING_OUT_OF_ROUTE_FORWARDS)",
+       "        && aiaction_get_heading_classification(loc, me, 0)\n           == HEADING_OUT_OF_ROUTE_FORWARDS)"),
+    AM("gu-sc-head-or", "    if (!stuck\n        && ((me->TheControlMode",
+       "    if (!stuck\n        || ((me->TheControlMode"),
+    AM("gu-sc-aws", "        stuck = aigetunstuck_are_we_stuck_behind_someone(loc, list);",
+       "        stuck = 0;"),
+    AM("gu-sc-aws-always", "    if (!stuck)\n        stuck = aigetunstuck_are_we_stuck_behind_someone(loc, list);",
+       "    if (1)\n        stuck = aigetunstuck_are_we_stuck_behind_someone(loc, list);"),
+    AM("gu-sc-coll-front", "            != COLLISION_IN_FRONT)",
+       "            != COLLISION_BEHIND)"),
+    AM("gu-sc-coll-break", "    for (i = 0; i < b->NumCollisions && !stuck; i++) {",
+       "    for (i = 0; i < b->NumCollisions; i++) {"),
+    AM("gu-sc-coll-ago", "        if (!(AIGU_HIT_AGO <= seconds_since(&c->CollisionTime)))\n            continue;\n        v = me->State.VelocityMagnitude;\n        if (v < AIGU_STOPPED",
+       "        if (!(AIGU_HIT_AGO < seconds_since(&c->CollisionTime)))\n            continue;\n        v = me->State.VelocityMagnitude;\n        if (v < AIGU_STOPPED"),
+    AM("gu-sc-coll-ago-off", "        if (!(AIGU_HIT_AGO <= seconds_since(&c->CollisionTime)))\n            continue;\n        v = me->State.VelocityMagnitude;\n        if (v < AIGU_STOPPED",
+       "        v = me->State.VelocityMagnitude;\n        if (v < AIGU_STOPPED"),
+    AM("gu-sc-coll-lt", "        if (v < AIGU_STOPPED\n",
+       "        if (v <= AIGU_STOPPED\n"),
+    AM("gu-sc-coll-slow", "        if (v < AIGU_STOPPED\n            ||",
+       "        if (0\n            ||"),
+    AM("gu-sc-coll-eps", "        if (v < AIGU_STOPPED\n            || fabsf(v - AIGU_STOPPED) <= AIGU_STOPPED_EPSILON)\n            stuck = 1;",
+       "        if (v < AIGU_STOPPED)\n            stuck = 1;"),
+    AM("gu-sc-coll-eps-le", "            || fabsf(v - AIGU_STOPPED) <= AIGU_STOPPED_EPSILON)\n            stuck = 1;",
+       "            || fabsf(v - AIGU_STOPPED) < AIGU_STOPPED_EPSILON)\n            stuck = 1;"),
+    AM("gu-sc-coll-eps-abs", "            || fabsf(v - AIGU_STOPPED) <= AIGU_STOPPED_EPSILON)\n            stuck = 1;",
+       "            || v - AIGU_STOPPED <= AIGU_STOPPED_EPSILON)\n            stuck = 1;"),
+    AM("gu-sc-fwia", "    find_where_i_am(me);\n    return AIGU_SCORE;",
+       "    return AIGU_SCORE;"),
+    AM("gu-aws-blink", "    (void)loc;\n    if (car_is_blinking(me))\n        return 0;",
+       "    (void)loc;\n    if (0)\n        return 0;"),
+    AM("gu-aws-speed-le", "    if (!(me->State.VelocityMagnitude <= fabsf(AIGU_REVERSE_AI)))",
+       "    if (!(me->State.VelocityMagnitude < fabsf(AIGU_REVERSE_AI)))"),
+    AM("gu-aws-speed-abs", "    if (!(me->State.VelocityMagnitude <= fabsf(AIGU_REVERSE_AI)))",
+       "    if (!(me->State.VelocityMagnitude <= AIGU_REVERSE_AI))"),
+    AM("gu-aws-speed-off", "    if (!(me->State.VelocityMagnitude <= fabsf(AIGU_REVERSE_AI)))\n        return 0;\n",
+       ""),
+    AM("gu-aws-me", "        if (nc->TheCar == me)\n            continue;",
+       "        if (0)\n            continue;"),
+    AM("gu-aws-slow-abs", "        if (!(fabsf(nc->TheCar->State.VelocityMagnitude) <= AISlowCarSpeed))",
+       "        if (!(nc->TheCar->State.VelocityMagnitude <= AISlowCarSpeed))"),
+    AM("gu-aws-slow-le", "        if (!(fabsf(nc->TheCar->State.VelocityMagnitude) <= AISlowCarSpeed))",
+       "        if (!(fabsf(nc->TheCar->State.VelocityMagnitude) < AISlowCarSpeed))"),
+    AM("gu-aws-x-lt", "        if (!(fabsf(nc->Position.x)\n              < list->MyHalfSizeL + nc->ApparentHalfSizeL))",
+       "        if (!(fabsf(nc->Position.x)\n              <= list->MyHalfSizeL + nc->ApparentHalfSizeL))"),
+    AM("gu-aws-x-abs", "        if (!(fabsf(nc->Position.x)\n              < list->MyHalfSizeL",
+       "        if (!(nc->Position.x\n              < list->MyHalfSizeL"),
+    AM("gu-aws-x-l", "              < list->MyHalfSizeL + nc->ApparentHalfSizeL))",
+       "              < list->MyHalfSizeL + nc->ApparentHalfSizeD))"),
+    AM("gu-aws-y-lt", "        if (!(0.0f < nc->Position.y))\n            continue;\n        if (nc->Position.y\n",
+       "        if (!(0.0f <= nc->Position.y))\n            continue;\n        if (nc->Position.y\n"),
+    AM("gu-aws-gap-lt", "            < (list->MyHalfSizeD + nc->ApparentHalfSizeD) + AIGU_BEHIND_GAP)",
+       "            <= (list->MyHalfSizeD + nc->ApparentHalfSizeD) + AIGU_BEHIND_GAP)"),
+    AM("gu-aws-gap-assoc", "            < (list->MyHalfSizeD + nc->ApparentHalfSizeD) + AIGU_BEHIND_GAP)",
+       "            < list->MyHalfSizeD + (nc->ApparentHalfSizeD + AIGU_BEHIND_GAP))"),
+    AM("gu-aws-gap-l", "            < (list->MyHalfSizeD + nc->ApparentHalfSizeD) + AIGU_BEHIND_GAP)",
+       "            < (list->MyHalfSizeL + nc->ApparentHalfSizeD) + AIGU_BEHIND_GAP)"),
+    AM("gu-acc-young", "    if (too_young(a))\n        return 0;\n    goal_point2(loc, &goal);",
+       "    goal_point2(loc, &goal);"),
+    AM("gu-acc-to-x", "    to.x = goal.x - list->MyCar->State.Position.x;",
+       "    to.x = list->MyCar->State.Position.x - goal.x;"),
+    AM("gu-acc-to-y", "    to.y = goal.y - list->MyCar->State.Position.y;",
+       "    to.y = goal.y - list->MyCar->State.Position.x;"),
+    AM("gu-acc-norm-to", "    bNormalize2(&to, &to);\n",
+       ""),
+    AM("gu-acc-norm-fwd", "    bNormalize2(&fwd, &fwd);\n",
+       ""),
+    AM("gu-acc-fwd-x", "    fwd.x = list->MyCar->State.BodyMatrix.v0.x;",
+       "    fwd.x = list->MyCar->State.BodyMatrix.v0.y;"),
+    AM("gu-acc-fwd-vel", "    fwd.y = list->MyCar->State.BodyMatrix.v0.y;",
+       "    fwd.y = list->MyCar->State.Velocity.y;"),
+    AM("gu-acc-le", "    if (AIGU_FACING <= fwd.x * to.x + fwd.y * to.y)",
+       "    if (AIGU_FACING < fwd.x * to.x + fwd.y * to.y)"),
+    AM("gu-acc-dot", "    if (AIGU_FACING <= fwd.x * to.x + fwd.y * to.y)",
+       "    if (AIGU_FACING <= fwd.x * to.y + fwd.y * to.x)"),
+    AM("gu-acc-aws", "        done = !aigetunstuck_are_we_stuck_behind_someone(loc, list);",
+       "        done = 1;"),
+    AM("gu-acc-fwia", "        find_where_i_am(list->MyCar);\n        clear_steering_memory(list->MyCar);",
+       "        clear_steering_memory(list->MyCar);"),
+    AM("gu-acc-csm", "        find_where_i_am(list->MyCar);\n        clear_steering_memory(list->MyCar);",
+       "        find_where_i_am(list->MyCar);"),
+    AM("gu-fail-clear", "    if (drivinglocation_is_clear(loc) || me->State.nWheelsTouchingGround < 3) {",
+       "    if (me->State.nWheelsTouchingGround < 3) {"),
+    AM("gu-fail-wheels", "    if (drivinglocation_is_clear(loc) || me->State.nWheelsTouchingGround < 3) {",
+       "    if (drivinglocation_is_clear(loc) || me->State.nWheelsTouchingGround < 2) {"),
+    AM("gu-fail-young", "    } else if (too_young(a)) {\n        return 0;",
+       "    } else if (0) {\n        return 0;"),
+    AM("gu-fail-head", "               == HEADING_OUT_OF_ROUTE_BACKWARDS) {\n        failed = 1;",
+       "               == HEADING_OUT_OF_ROUTE_FORWARDS) {\n        failed = 1;"),
+    AM("gu-fail-head-steer", "    } else if (aiaction_get_heading_classification(loc, me, 1)\n               == HEADING_OUT_OF_ROUTE_BACKWARDS) {",
+       "    } else if (aiaction_get_heading_classification(loc, me, 0)\n               == HEADING_OUT_OF_ROUTE_BACKWARDS) {"),
+    AM("gu-fail-coll-behind", "                != COLLISION_BEHIND)",
+       "                != COLLISION_IN_FRONT)"),
+    AM("gu-fail-coll-break", "        for (i = 0; i < b->NumCollisions && !failed; i++) {",
+       "        for (i = 0; i < b->NumCollisions; i++) {"),
+    AM("gu-fail-ago", "            if (!(AIGU_HIT_AGO <= seconds_since(&c->CollisionTime)))\n                continue;\n            v = me->State.VelocityMagnitude;\n            if (fabsf(v)",
+       "            if (!(AIGU_HIT_AGO < seconds_since(&c->CollisionTime)))\n                continue;\n            v = me->State.VelocityMagnitude;\n            if (fabsf(v)"),
+    AM("gu-fail-ago-off", "            if (!(AIGU_HIT_AGO <= seconds_since(&c->CollisionTime)))\n                continue;\n            v = me->State.VelocityMagnitude;\n            if (fabsf(v)",
+       "            v = me->State.VelocityMagnitude;\n            if (fabsf(v)"),
+    AM("gu-fail-abs", "            if (fabsf(v) < AIGU_STOPPED",
+       "            if (v < AIGU_STOPPED"),
+    AM("gu-fail-lt", "            if (fabsf(v) < AIGU_STOPPED",
+       "            if (fabsf(v) <= AIGU_STOPPED"),
+    AM("gu-fail-eps", "            if (fabsf(v) < AIGU_STOPPED\n                || fabsf(v - AIGU_STOPPED) <= AIGU_STOPPED_EPSILON)\n                failed = 1;",
+       "            if (fabsf(v) < AIGU_STOPPED)\n                failed = 1;"),
+    AM("gu-fail-fwia", "    if (failed) {\n        find_where_i_am(me);\n        clear_steering_memory(me);\n    }",
+       "    if (failed) {\n        clear_steering_memory(me);\n    }"),
+    AM("gu-fail-csm", "    if (failed) {\n        find_where_i_am(me);\n        clear_steering_memory(me);\n    }",
+       "    if (failed) {\n        find_where_i_am(me);\n    }"),
+    AM("gu-exp", "    int expired = past_timeout(&a->Base.Base);",
+       "    int expired = 0;"),
+    AM("gu-exp-fwia", "        find_where_i_am(info->MyNearbyCarList.MyCar);\n        clear_steering_memory(info->MyNearbyCarList.MyCar);",
+       "        clear_steering_memory(info->MyNearbyCarList.MyCar);"),
+    AM("gu-exp-csm", "        find_where_i_am(info->MyNearbyCarList.MyCar);\n        clear_steering_memory(info->MyNearbyCarList.MyCar);",
+       "        find_where_i_am(info->MyNearbyCarList.MyCar);"),
+    AM("gu-cp-loc", "        drivingchoice_set_choice_location(choice, loc);\n    drivetarget_clear(&a->Base.PointsToDrive, NULL, 0.0f);\n    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.UseDrivingLineSpeed = 0;\n    a->Base.AllowedToUseBoost = 0;",
+       "        ;\n    drivetarget_clear(&a->Base.PointsToDrive, NULL, 0.0f);\n    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.UseDrivingLineSpeed = 0;\n    a->Base.AllowedToUseBoost = 0;"),
+    AM("gu-cp-loc-line", "    if (!drivingchoice_type_is_driving_line(choice->Type))\n        drivingchoice_set_choice_location(choice, loc);\n    drivetarget_clear(&a->Base.PointsToDrive, NULL, 0.0f);\n    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.UseDrivingLineSpeed = 0;\n    a->Base.AllowedToUseBoost = 0;",
+       "    if (drivingchoice_type_is_driving_line(choice->Type))\n        drivingchoice_set_choice_location(choice, loc);\n    drivetarget_clear(&a->Base.PointsToDrive, NULL, 0.0f);\n    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.UseDrivingLineSpeed = 0;\n    a->Base.AllowedToUseBoost = 0;"),
+    AM("gu-cp-clear", "    drivetarget_clear(&a->Base.PointsToDrive, NULL, 0.0f);\n    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.UseDrivingLineSpeed = 0;\n    a->Base.AllowedToUseBoost = 0;",
+       "    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.UseDrivingLineSpeed = 0;\n    a->Base.AllowedToUseBoost = 0;"),
+    AM("gu-cp-tol", "    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.UseDrivingLineSpeed = 0;\n    a->Base.AllowedToUseBoost = 0;",
+       "    a->Base.DesiredSpeedTolerance = 1.0f;\n    a->Base.UseDrivingLineSpeed = 0;\n    a->Base.AllowedToUseBoost = 0;"),
+    AM("gu-cp-udl", "    a->Base.UseDrivingLineSpeed = 0;\n    a->Base.AllowedToUseBoost = 0;\n    a->Base.PointsToDriveWillExecuteAction = 1;",
+       "    a->Base.UseDrivingLineSpeed = 1;\n    a->Base.AllowedToUseBoost = 0;\n    a->Base.PointsToDriveWillExecuteAction = 1;"),
+    AM("gu-cp-bo", "    a->Base.AllowedToUseBoost = 0;\n    a->Base.PointsToDriveWillExecuteAction = 1;\n    a->Base.AllowedToUseThrottleAndBrake = 1;\n    if (drivinglocation_is_clear(loc)) {",
+       "    a->Base.AllowedToUseBoost = 1;\n    a->Base.PointsToDriveWillExecuteAction = 1;\n    a->Base.AllowedToUseThrottleAndBrake = 1;\n    if (drivinglocation_is_clear(loc)) {"),
+    AM("gu-cp-pt", "    a->Base.PointsToDriveWillExecuteAction = 1;\n    a->Base.AllowedToUseThrottleAndBrake = 1;\n    if (drivinglocation_is_clear(loc)) {",
+       "    a->Base.PointsToDriveWillExecuteAction = 0;\n    a->Base.AllowedToUseThrottleAndBrake = 1;\n    if (drivinglocation_is_clear(loc)) {"),
+    AM("gu-cp-tb", "    a->Base.AllowedToUseThrottleAndBrake = 1;\n    if (drivinglocation_is_clear(loc)) {",
+       "    a->Base.AllowedToUseThrottleAndBrake = 0;\n    if (drivinglocation_is_clear(loc)) {"),
+    AM("gu-cp-clear-pt", "        a->Base.PointsToDriveWillExecuteAction = 0;\n        return;\n    }\n    goal_point3",
+       "        a->Base.PointsToDriveWillExecuteAction = 1;\n        return;\n    }\n    goal_point3"),
+    AM("gu-cp-goal", "    drivetarget_add_point3_dl(&a->Base.PointsToDrive, &goal, loc, 0, NULL);\n",
+       ""),
+    AM("gu-cp-goal-check", "    drivetarget_add_point3_dl(&a->Base.PointsToDrive, &goal, loc, 0, NULL);",
+       "    drivetarget_add_point3_dl(&a->Base.PointsToDrive, &goal, loc, 1, NULL);"),
+    AM("gu-cp-fill", "                                       MOVEMENT_PARALLEL_TO_LINE, 1);\n    if (info->MyNearbyCarList.MyCar->TheControlMode == AI_CONTROL)",
+       "                                       MOVEMENT_PARALLEL_TO_LINE, 0);\n    if (info->MyNearbyCarList.MyCar->TheControlMode == AI_CONTROL)"),
+    AM("gu-cp-fill-move", "                                       MOVEMENT_PARALLEL_TO_LINE, 1);\n    if (info->MyNearbyCarList.MyCar->TheControlMode == AI_CONTROL)",
+       "                                       MOVEMENT_TOWARDS_LINE, 1);\n    if (info->MyNearbyCarList.MyCar->TheControlMode == AI_CONTROL)"),
+    AM("gu-cp-ai", "    if (info->MyNearbyCarList.MyCar->TheControlMode == AI_CONTROL)\n        a->Base.DesiredSpeed = AIGU_REVERSE_AI;",
+       "    if (info->MyNearbyCarList.MyCar->TheControlMode != AI_CONTROL)\n        a->Base.DesiredSpeed = AIGU_REVERSE_AI;"),
+    AM("gu-name", "    return \"Get Unstuck\";",
+       "    return \"Get unstuck\";"),
+    AM("rb-ctor-type", "    a->Base.Type = AIACTION_AVOID_ROADBLOCK;",
+       "    a->Base.Type = AIACTION_GET_UNSTUCK;"),
+    AM("rb-ctor-rb", "    a->RoadBlockToAvoid = rb;",
+       "    a->RoadBlockToAvoid = NULL;"),
+    AM("rb-sc-null", "    *rb = NULL;\n    if (pCopManager == NULL)",
+       "    if (pCopManager == NULL)"),
+    AM("rb-sc-copm", "    if (pCopManager == NULL)\n        return AIA_NO_SCORE;\n    range",
+       "    if (0)\n        return AIA_NO_SCORE;\n    range"),
+    AM("rb-sc-range-max", "    range = max_s(me->State.VelocityMagnitude * AIRB_LOOK_SECONDS,\n                  AIRB_LOOK_MIN);",
+       "    range = me->State.VelocityMagnitude * AIRB_LOOK_SECONDS;"),
+    AM("rb-sc-found", "         i < copmanager_get_num_active_road_blocks(pCopManager) && !found;",
+       "         i < copmanager_get_num_active_road_blocks(pCopManager);"),
+    AM("rb-sc-cops-or", "        if (r->cops[0] == NULL && r->cops[1] == NULL)",
+       "        if (r->cops[0] == NULL || r->cops[1] == NULL)"),
+    AM("rb-sc-cop1", "        if (r->cops[0] == NULL && r->cops[1] == NULL)",
+       "        if (r->cops[0] == NULL && r->cops[0] == NULL)"),
+    AM("rb-sc-lt", "                r->fDistanceAroundTrack) < -range) {",
+       "                r->fDistanceAroundTrack) <= -range) {"),
+    AM("rb-sc-neg", "                r->fDistanceAroundTrack) < -range) {",
+       "                r->fDistanceAroundTrack) < range) {"),
+    AM("rb-sc-args", "                me->TheTrackPathCoordinate.DistanceAroundTrack,\n                r->fDistanceAroundTrack) < -range) {",
+       "                r->fDistanceAroundTrack,\n                me->TheTrackPathCoordinate.DistanceAroundTrack) < -range) {"),
+    AM("rb-sc-out", "            *rb = r;\n            found = 1;",
+       "            found = 1;"),
+    AM("rb-sc-score", "    return found ? AIRB_SCORE : AIA_NO_SCORE;",
+       "    return found ? AIRB_SCORE : 0;"),
+    AM("rb-acc-or", "    if (rb->cops[0] == NULL && rb->cops[1] == NULL)\n        return 1;",
+       "    if (rb->cops[0] == NULL || rb->cops[1] == NULL)\n        return 1;"),
+    AM("rb-acc-cop1", "    if (rb->cops[0] == NULL && rb->cops[1] == NULL)\n        return 1;",
+       "    if (rb->cops[0] == NULL && rb->cops[0] == NULL)\n        return 1;"),
+    AM("rb-acc-lt", "    return AIRB_PASSED\n           < trackpath_compare_distances(",
+       "    return AIRB_PASSED\n           <= trackpath_compare_distances("),
+    AM("rb-acc-args", "               info->MyNearbyCarList.MyCar->TheTrackPathCoordinate\n                   .DistanceAroundTrack,\n               rb->fDistanceAroundTrack);",
+       "               rb->fDistanceAroundTrack,\n               info->MyNearbyCarList.MyCar->TheTrackPathCoordinate\n                   .DistanceAroundTrack);"),
+    AM("rb-fail", "    // 0x001c98d8.\n    (void)a;\n    (void)info;\n    return 0;",
+       "    // 0x001c98d8.\n    (void)a;\n    (void)info;\n    return 1;"),
+    AM("rb-exp", "    // 0x001c98d0.\n    (void)a;\n    (void)info;\n    return 0;",
+       "    // 0x001c98d0.\n    (void)a;\n    (void)info;\n    return 1;"),
+    AM("rb-cp-loc", "        drivingchoice_set_choice_location(choice, loc);\n    drivetarget_clear(&a->Base.PointsToDrive, NULL, 0.0f);\n    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.AllowedToUseThrottleAndBrake = 1;",
+       "        ;\n    drivetarget_clear(&a->Base.PointsToDrive, NULL, 0.0f);\n    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.AllowedToUseThrottleAndBrake = 1;"),
+    AM("rb-cp-clear", "    drivetarget_clear(&a->Base.PointsToDrive, NULL, 0.0f);\n    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.AllowedToUseThrottleAndBrake = 1;",
+       "    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.AllowedToUseThrottleAndBrake = 1;"),
+    AM("rb-cp-tol", "    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.AllowedToUseThrottleAndBrake = 1;\n    a->Base.UseDrivingLineSpeed = 0;\n\n",
+       "    a->Base.DesiredSpeedTolerance = 1.0f;\n    a->Base.AllowedToUseThrottleAndBrake = 1;\n    a->Base.UseDrivingLineSpeed = 0;\n\n"),
+    AM("rb-cp-tb", "    a->Base.AllowedToUseThrottleAndBrake = 1;\n    a->Base.UseDrivingLineSpeed = 0;\n\n",
+       "    a->Base.AllowedToUseThrottleAndBrake = 0;\n    a->Base.UseDrivingLineSpeed = 0;\n\n"),
+    AM("rb-cp-from-sign", "    fromL = across(&pos, loc->pRoutePoint)\n            - trpoint",
+       "    fromL = across(&pos, loc->pRoutePoint)\n            + trpoint"),
+    AM("rb-cp-from-line", "    fromL = across(&pos, loc->pRoutePoint)\n            - trpoint_get_driving_line_offset(loc->pRoutePoint,\n                                              loc->DrivingLine);",
+       "    fromL = across(&pos, loc->pRoutePoint)\n            - trpoint_get_driving_line_offset(loc->pRoutePoint,\n                                              0);"),
+    AM("rb-cp-from-y", "    pos.y = list->MyCar->State.Position.y;\n    fromL",
+       "    pos.y = list->MyCar->State.Position.x;\n    fromL"),
+    AM("rb-cp-escape", "    escape = rb->v2EscapeLane;",
+       "    escape = rb->v2SpikeBeltPos;"),
+    AM("rb-cp-same", "    if (loc->pRoute == rb->Route) {",
+       "    if (loc->pRoute != rb->Route) {"),
+    AM("rb-cp-same-end", "        end = rb->RoutePoint;",
+       "        end = loc->pRoutePoint;"),
+    AM("rb-cp-same-to", "        toL = across(&escape, end)\n              - trpoint_get_driving_line_offset(end, loc->DrivingLine);\n    } else {",
+       "        toL = across(&escape, end)\n              + trpoint_get_driving_line_offset(end, loc->DrivingLine);\n    } else {"),
+    AM("rb-cp-closest-start", "        end = troute_find_closest_point_ahead(loc->pRoute, &escape,\n                                              loc->pRoutePoint);",
+       "        end = troute_find_closest_point_ahead(loc->pRoute, &escape,\n                                              loc->pRoute->TrackRoutePointTable);"),
+    AM("rb-cp-on-road", "            && past_the_edge(across(&escape, end), end) < AIRB_ON_ROAD) {",
+       "            && past_the_edge(across(&escape, end), end) <= AIRB_ON_ROAD) {"),
+    AM("rb-cp-on-road-off", "        if (end != NULL\n            && past_the_edge(across(&escape, end), end) < AIRB_ON_ROAD) {",
+       "        if (end != NULL) {"),
+    AM("rb-cp-other-to", "                  - trpoint_get_driving_line_offset(end, loc->DrivingLine);\n        } else {",
+       "                  + trpoint_get_driving_line_offset(end, loc->DrivingLine);\n        } else {"),
+    AM("rb-cp-last", "[loc->pRoute->NumPoints\n                                                      - 1];",
+       "[loc->pRoute->NumPoints\n                                                      - 2];"),
+    AM("rb-cp-last-from", "            toL = fromL;",
+       "            toL = 0.0f;"),
+    AM("rb-cp-smooth-index", "                                          l.NumPoints - 1, fromL, toL, 0);",
+       "                                          l.NumPoints - 2, fromL, toL, 0);"),
+    AM("rb-cp-smooth-swap", "                                          l.NumPoints - 1, fromL, toL, 0);",
+       "                                          l.NumPoints - 1, toL, fromL, 0);"),
+    AM("rb-cp-smooth-inside", "                                          l.NumPoints - 1, fromL, toL, 0);",
+       "                                          l.NumPoints - 1, fromL, toL, 1);"),
+    AM("rb-cp-smooth-off", "    drivingchoice_do_smooth_offset_change(&l, &a->Base.PointsToDrive, list,\n                                          l.NumPoints - 1, fromL, toL, 0);\n",
+       ""),
+    AM("rb-cp-fill", "                                       MOVEMENT_PARALLEL_TO_LINE, 0);\n    a->Base.UseDrivingLineSpeed = 1;",
+       "                                       MOVEMENT_PARALLEL_TO_LINE, 1);\n    a->Base.UseDrivingLineSpeed = 1;"),
+    AM("rb-cp-fill-move", "                                       MOVEMENT_PARALLEL_TO_LINE, 0);\n    a->Base.UseDrivingLineSpeed = 1;",
+       "                                       MOVEMENT_TOWARDS_LINE, 0);\n    a->Base.UseDrivingLineSpeed = 1;"),
+    AM("rb-cp-udl", "    a->Base.UseDrivingLineSpeed = 1;\n\n    // A racer",
+       "    a->Base.UseDrivingLineSpeed = 0;\n\n    // A racer"),
+    AM("rb-cp-cop", "    if (hit != NULL && hit->pCarTypeInfo->UsageType != CAR_USAGE_TYPE_COP",
+       "    if (hit != NULL && hit->pCarTypeInfo->UsageType == CAR_USAGE_TYPE_COP"),
+    AM("rb-cp-cop-off", "    if (hit != NULL && hit->pCarTypeInfo->UsageType != CAR_USAGE_TYPE_COP\n        && ",
+       "    if (hit != NULL\n        && "),
+    AM("rb-cp-traffic", "        && hit->MyDriver->TheDriverType != DRIVER_TYPE_TRAFFIC_CAR) {\n        NearbyCar",
+       "        && hit->MyDriver->TheDriverType == DRIVER_TYPE_TRAFFIC_CAR) {\n        NearbyCar"),
+    AM("rb-cp-traffic-off", "        && hit->MyDriver->TheDriverType != DRIVER_TYPE_TRAFFIC_CAR) {\n        NearbyCar",
+       "        ) {\n        NearbyCar"),
+    AM("rb-cp-ahead", "        if (nc != NULL && 0.0f < nc->Position.y) {",
+       "        if (nc != NULL && 0.0f <= nc->Position.y) {"),
+    AM("rb-cp-ahead-off", "        if (nc != NULL && 0.0f < nc->Position.y) {",
+       "        if (nc != NULL) {"),
+    AM("rb-cp-hit-udl", "            a->Base.UseDrivingLineSpeed = 0;\n            aiaction_set_desired_speed_slower_than_this_car(\n                &a->Base, nc, list, AIRB_SLOWER_BY",
+       "            a->Base.UseDrivingLineSpeed = 1;\n            aiaction_set_desired_speed_slower_than_this_car(\n                &a->Base, nc, list, AIRB_SLOWER_BY"),
+    AM("rb-cp-slower-b", "                &a->Base, nc, list, AIRB_SLOWER_BY, AIRB_SLOWER_BY);",
+       "                &a->Base, nc, list, AIRB_SLOWER_BY, 0.0f);"),
+    AM("rb-cp-min", "            a->Base.DesiredSpeed = max_s(a->Base.DesiredSpeed,\n                                         AIRB_MIN_SPEED);",
+       "            a->Base.DesiredSpeed = AIRB_MIN_SPEED;"),
+    AM("rb-cp-min-off", "            a->Base.DesiredSpeed = max_s(a->Base.DesiredSpeed,\n                                         AIRB_MIN_SPEED);\n",
+       ""),
+    AM("rb-cp-pt", "    a->Base.PointsToDriveWillExecuteAction = 1;\n}\n\nconst char *aiavoidroadblock_get_name",
+       "    a->Base.PointsToDriveWillExecuteAction = 0;\n}\n\nconst char *aiavoidroadblock_get_name"),
+    AM("rb-name", "    return \"Avoid Roadblock\";",
+       "    return \"Avoid RoadBlock\";"),
+    AM("vt-gu-cptd", "E(aigetunstuck_calculate_points_to_drive),",
+       "E(aiavoidroadblock_calculate_points_to_drive),"),
+    AM("vt-gu-name", "E(aigetunstuck_get_name),",
+       "E(aiavoidroadblock_get_name),"),
+    AM("vt-gu-acc", "E(aigetunstuck_has_been_accomplished),",
+       "E(aigetunstuck_has_failed),"),
+    AM("vt-gu-exp", "E(aigetunstuck_has_expired),",
+       "E(aigetunstuck_has_failed),"),
+    AM("vt-rb-acc", "E(aiavoidroadblock_has_been_accomplished),",
+       "E(aiavoidroadblock_has_failed),"),
+    AM("vt-rb-fail", "E(aiavoidroadblock_has_failed),",
+       "E(aigetunstuck_has_failed),"),
+    AM("vt-install-gu", "    vt_install(AIGETUNSTUCK_VTABLE, aigetunstuck_vt, AIACTION_VT_ENTRIES);\n",
+       ""),
+    AM("vt-install-rb", "    vt_install(AIAVOIDROADBLOCK_VTABLE, aiavoidroadblock_vt,\n               AIACTION_VT_ENTRIES);\n",
+       ""),
     # -- EstimateScore's distances, which a stale pick reads ------------------
     M("es-static", "    static float dist[DRIVETARGET_MAX_POINTS];",
       "    float dist[DRIVETARGET_MAX_POINTS] = { 0.0f };", rel=DT),
@@ -7743,6 +9027,26 @@ EQUIVALENT = {
         "MakeNewChoice stores *out on each of its four ways out before "
         "anything reads it, and PullOver never reads usedPreferred after.",
     "ij-slower-unused-k":
+        "SetDesiredSpeedSlowerThanThisCar does not read its second float.",
+    "gu-ctor-on-le":
+        "`<=` and `<` part only where |m + 1| is exactly 0.00100000005f. "
+        "For m within a factor of 2 of -1 the sum is exact (Sterbenz), a "
+        "multiple of 2^-24, which that is not; any other m is 0.5 or more "
+        "away.",
+    "gu-sc-coll-lt":
+        "At a speed of exactly 1 the epsilon test, |0| <= 0.001, holds "
+        "anyway.",
+    "gu-sc-coll-eps-le":
+        "`<=` and `<` part only where |v - 1| is exactly 0.00100000005f, "
+        "which no float v gives, as for gu-ctor-on-le.",
+    "gu-sc-coll-eps-abs":
+        "Without the fabsf the test differs only for v under 1 - 0.001, "
+        "where v < 1 has already made the car stuck; a NaN fails both.",
+    "gu-cp-goal-check":
+        "The goal is the first point of a target just cleared, and with "
+        "fewer than two points and no car AddPoint3 takes the point "
+        "whether it checks or not.",
+    "rb-cp-slower-b":
         "SetDesiredSpeedSlowerThanThisCar does not read its second float.",
 }
 

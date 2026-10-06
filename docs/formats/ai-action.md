@@ -30,8 +30,9 @@ AIActionType. AICarController (11e) scores the actions and keeps the best
 as its CurrentAction. Each frame it asks that action for the points to
 drive and the speed to drive them at, and asks it through UpdateStatus
 whether it is done. The actions themselves are 11d, with a section each
-at the end: the five small ones (11d-1), Pass and AvoidCars (11d-2), and
-PullOver and IJustGotHit (11d-3a). This is the base:
+at the end: the five small ones (11d-1), Pass and AvoidCars (11d-2),
+PullOver and IJustGotHit (11d-3a), and GetUnstuck and AvoidRoadBlock
+(11d-3b). This is the base:
 - the plan's timeout and status;
 - the record every action fills;
 - the pool the actions come from;
@@ -1174,3 +1175,289 @@ Its numbers:
 - 220 mutations for 11d-3a: 216 caught (11 by a crash) and 4 equivalent.
   Across the whole checker, 1267 mutations: 1239 caught, 28
   equivalent and 0 unexplained.
+
+## GetUnstuck and AvoidRoadBlock (11d-3b)
+
+    0x001c8b30  AIActionGetUnstuck::AIActionGetUnstuck(int, float, float)
+    0x001c8c30  AIActionGetUnstuck::CalculateScore(DrivingInformation *)
+    0x001c8ee8  AIActionGetUnstuck::AreWeStuckBehindSomeone(
+                    DrivingLocation *, NearbyCarList *), static
+    0x001c9018  the goal's route point (a method that doesn't read `this`)
+    0x001c9070  the goal point, 2D, and 3D (0x001c90d8)
+    0x001c9140  AIActionGetUnstuck::HasBeenAccomplished, HasExpired
+                (0x001c9298), HasFailed (0x001c9340)
+    0x001c9550  AIActionGetUnstuck::CalculatePointsToDrive
+    0x001c9668  AIActionAvoidRoadBlock::AIActionAvoidRoadBlock(int, float,
+                    const tRoadBlock *)
+    0x001c9718  AIActionAvoidRoadBlock::CalculateScore(DrivingInformation *,
+                    const tRoadBlock **)
+    0x001c9858  AIActionAvoidRoadBlock::HasBeenAccomplished, HasExpired
+                (0x001c98d0), HasFailed (0x001c98d8)
+    0x001c98e0  AIActionAvoidRoadBlock::CalculatePointsToDrive
+    0x001ca698  AIActionGetUnstuck::GetName, then its destructor 0x001ca6a8
+    0x001ca708  AIActionAvoidRoadBlock::GetName, then its destructor
+                0x001ca718
+
+The last two actions. A car that is stuck backs out towards a point
+further up its route, and a car with a roadblock ahead heads for the
+roadblock's escape lane. With these, every one of AIActionType 0 to 10
+is ported.
+
+### The records
+
+| Action | Type | 608 | 612 | 616 | GetName |
+|---|---:|---|---|---|---|
+| GetUnstuck | 7 | MyCreationTime | MinimumLifetime | MinimumLifetimeInEffect | "Get Unstuck" |
+| AvoidRoadBlock | 8 | RoadBlockToAvoid | | | "Avoid Roadblock" |
+
+GetUnstuck's Timer is zeroed by its own constructor, then set to
+WorldTimer. The minimum lifetime is in effect unless it is within 0.001
+of -1 (none). AvoidRoadBlock keeps its roadblock.
+
+The minimum lifetime holds when it is in effect and less time has gone
+since MyCreationTime than it (`c.le.s`, so a NaN lifetime never runs
+out). The goal is the route point three on from the location's, in the
+same table. Retail tests that pointer for NULL, which it never is, and
+past the route's end it reads on into the table; the goal point is on
+the location's line there.
+
+A point's "across" is how far right of a route point's line it is,
+across the point's direction; its "past the edge" is across less the
+RightWidth on the right, and -(across + LeftWidth) on the left, so
+negative on the road.
+
+### GetUnstuck
+
+CalculateScore:
+
+    -1 in my car's grace period, for a clear location, or with fewer
+        than 3 wheels on the ground
+    stuck when my car is 20 m or more past the edge at the location's
+        route point
+    or when, as an AI car at no more than 25 m/s or a traffic car at no
+        more than 20, I am heading out of the route forwards (with the
+        steer check)
+    or when AreWeStuckBehindSomeone
+    or when one of my collisions is in front, at least 0.4 s ago, and my
+        speed is under 1 or within 0.001 of it
+    stuck: my controller's FindWhereIAm, and 500; else -1
+
+AreWeStuckBehindSomeone:
+
+    0 when my car is blinking, or its speed is over |-15| (the absolute
+        value of the constant, not of my speed)
+    1 when any other car on the list has |speed| no more than
+        AISlowCarSpeed, |x| under MyHalfSizeL + its ApparentHalfSizeL,
+        and 0 < y < (MyHalfSizeD + its ApparentHalfSizeD) + 9
+
+An entry with no car is read through.
+
+HasBeenAccomplished:
+
+    0 while the minimum lifetime holds
+    to = the goal point less my position, normalised (bNormalize2)
+    fwd = my body's x and y (BodyMatrix.v0), normalised
+    done when fwd . to is at least 0.98 and not AreWeStuckBehindSomeone
+    done: FindWhereIAm and my driver's ClearSteeringMemory
+
+HasFailed:
+
+    failed for a clear location or fewer than 3 wheels down
+    else 0 while the minimum lifetime holds
+    else failed when heading out of the route backwards (steer check)
+    else failed when one of my collisions is behind, at least 0.4 s ago,
+        and |speed| is under 1 or my speed within 0.001 of 1
+    failed: FindWhereIAm and ClearSteeringMemory
+
+HasExpired is the timeout's, with FindWhereIAm and ClearSteeringMemory
+when it is past.
+
+CalculatePointsToDrive:
+
+    a choice that is not a line is set from the location
+    clear the points; tolerance 0, line speed 0, boost 0, executes 1,
+        throttle and brake 1
+    a clear location: executes 0, and done
+    add the goal point (3D) on the location's line, no check
+    FillUpDriveTarget parallel to the line, inside 1
+    DesiredSpeed -15 as an AI car, else -6
+
+FindWhereIAm is the CarController's (vptr +72) and ClearSteeringMemory
+the CarDriver's (vptr +128, `CARDRIVER_VT_CLEAR_STEERING_MEMORY`).
+
+### AvoidRoadBlock
+
+CalculateScore:
+
+    roadblock out = NULL; -1 with no cop manager
+    range = max(my speed * 2.5, 100)
+    the first active roadblock with either cop there whose distance
+        round the track, CompareDistances(mine, its), is under -range
+    600 and the roadblock out when one is found, else -1
+
+For the one found, retail asks GetActiveRoadBlock for it again and puts
+its spike belt in my car's frame (WorldToCar); nothing reads that.
+
+HasBeenAccomplished: 1 when neither of the roadblock's cops is there,
+else done when CompareDistances(mine, its) is over 15, the roadblock 15 m
+behind. HasFailed and HasExpired are 0.
+
+CalculatePointsToDrive:
+
+    a choice that is not a line is set from the location
+    clear the points; tolerance 0, throttle and brake 1, line speed 0
+    fromL = my across at the location's route point, less the line's
+        offset there
+    on the roadblock's route: end = its route point, toL = the escape
+        lane's across there less the line's offset
+    else end = FindClosestPointAhead(my route, the escape lane, from my
+            route point); when it is found and the escape lane is under
+            5 m past the edge there, toL as above at end
+        else end = my route's last point and toL = fromL
+    the route points up to end (a FuturePointList on the stack)
+    DoSmoothOffsetChange over them, from fromL to toL by the last,
+        inside 0
+    FillUpDriveTarget parallel to the line, inside 0; line speed 1
+    WhoWillThisDriveTargetHit within 1 s: a car that is not a cop (its
+        type info's UsageType) and not traffic, with an entry on the list
+        ahead (0 < y): line speed 0, SetDesiredSpeedSlowerThanThisCar
+        (0.1), and a desired speed of at least 30
+    executes 1
+
+### The constants
+
+| Where | Value | Port | Use |
+|------:|------:|------|-----|
+| lui 0xbf80 | -1 | AIGU_NO_LIFETIME | |
+| gp-28628 | 0.001 | AIGU_LIFETIME_EPSILON | |
+| lui 0x41a0 | 20 | AIGU_OFF_ROAD | past the edge |
+| lui 0x41c8 | 25 | AIGU_SLOW_AI | |
+| lui 0x41a0 | 20 | AIGU_SLOW_TRAFFIC | |
+| gp-28620, gp-28592 | 0.4 | AIGU_HIT_AGO | score, failed |
+| lui 0x3f80 | 1 | AIGU_STOPPED | |
+| gp-28616, gp-28588 | 0.001 | AIGU_STOPPED_EPSILON | |
+| lui 0x4110 | 9 | AIGU_BEHIND_GAP | |
+| gp-28608 | 0.98 | AIGU_FACING | |
+| lui 0xc170 | -15 | AIGU_REVERSE_AI | the speed, and AreWeStuckBehindSomeone's |
+| lui 0xc0c0 | -6 | AIGU_REVERSE | |
+| | 3 | AIGU_GOAL_AHEAD | route points |
+| | 500 | AIGU_SCORE | |
+| lui 0x4020 | 2.5 | AIRB_LOOK_SECONDS | |
+| lui 0x42c8 | 100 | AIRB_LOOK_MIN | |
+| lui 0x4170 | 15 | AIRB_PASSED | |
+| lui 0x40a0 | 5 | AIRB_ON_ROAD | |
+| lui 0x3f80 | 1 | AIRB_HIT_WITHIN | |
+| gp-28584 | 0.1 | AIRB_SLOWER_BY | |
+| lui 0x41f0 | 30 | AIRB_MIN_SPEED | |
+| | 600 | AIRB_SCORE | |
+
+### The tables
+
+| | Retail | Port's constant (the demo's) |
+|---|---|---|
+| `_vt$18AIActionGetUnstuck` | 0x002b7a50 | 0x0029aee0 |
+| `_vt$22AIActionAvoidRoadBlock` | 0x002b7a90 | 0x0029af20 |
+
+`aiactions_install_vtables` installs the eleven. DoSnapshot (0x001c8bb8
+and 0x001c96b8) is left pending.
+
+copmanager.h's tRoadBlock now has the two cops (0), the route point
+(36) and route (40), the spike belt (52), the escape lane (92) and the
+distance round the track (100). Its layout check holds where a pointer
+is 4 bytes. GetNumActiveRoadBlocks and GetActiveRoadBlock were already
+ported (copmanager.c), walking the PursuitList.
+
+### The checker
+
+drivingchoice_check adds:
+- `@n gu score timeout -1 lifetime` and `@n rb score timeout -1 j`, the
+  roadblock being `rbs[j]` (NULL for a negative j); `@sc gu` and `@sc rb` (its roadblock out
+  filled first); `@as`, AreWeStuckBehindSomeone;
+- `@ct k i time x y`, a collision's time and contact point; `@stp k x
+  y`, a car's point to steer to; `@td k dist`, its distance round the
+  track (the track's length is `G TLEN`); `@ut k usage`, its type info's
+  UsageType; `@mv k`, its MatrixValid cleared;
+- `@rbf j c0 c1 route point dist sx sy ex ey`, a roadblock, and `@pu
+  spec...`, the cop manager's pursuits, each a roadblock's number or `-`
+  for none, linked round PursuitList (44).
+
+On both sides FindWhereIAm is a stub in each controller's test table
+(CVT, +72), and ClearSteeringMemory and GetSteerToPoint in the drivers'
+(DVT, +128 and +160); each prints its car. CompareDistances,
+GetNumActiveRoadBlocks, GetActiveRoadBlock, FindClosestPointAhead,
+WorldToCar and IsBlinking run as shipped.
+
+s_unstuck, 40 scenarios, drives GetUnstuck as AIDriver would on
+s_pull_hit's world. Between the calls my car is on the road, at its
+edges and 20 m past them (and 0.1 either side), heading along it, out
+and back, at each speed either side of the tests' (1, 15, 20, 25 and
+0.001 past 1), as AI, traffic and other modes, with 2, 3 or 4 wheels
+down, blinking or not, its body not always unit length; its point to
+steer to is ahead or not; its collisions are in front, behind and
+beside, either side of 0.4 s old; the list's cars are either side of
+being in my way, my own entry among them now and then; and the minimum
+lifetime is none, either side of 0.001 from -1, or seconds.
+
+s_roadblock, 40 scenarios, drives AvoidRoadBlock the same way: four
+roadblocks on up to four pursuits, each with its cops or not, on my
+route ahead or behind or on another, its escape lane on the road, either
+side of 5 m past it and past the route's end; my distance round the
+track and the roadblocks' either side of the range and of 15 m behind,
+the track's length wrapping them or not; and the list's cars cops,
+traffic or racers, some either side of 30 and 30.1.
+
+The first mutation pass left 32 alive. s_gu_edge, two rounds of
+thirteen kinds, closes 26 of them. Eleven are on a straight road along x,
+25 m each side with its lines on its centre, so a car's across is -y
+exactly:
+- gu-off: my car exactly 20 m past either edge and an ulp either side.
+- gu-speed: an AI car at 25 m/s and a traffic car at 20, an ulp either
+  side and 0.5 off, drifting out over the right edge with its point to
+  steer to behind it.
+- gu-coll: something hit in front exactly 0.4 s ago and either side, at
+  speeds either side of stopped.
+- gu-aws: a stopped car in my way, my speed exactly 15 and either side,
+  facing the goal.
+- gu-face: the facing dot exactly 0.98 and an ulp either side, found by
+  searching dy over ulps in bNormalize2's float order.
+- gu-young: a lifetime not in effect, poked to 5 s or 1, facing the goal.
+- gu-fail: something hit behind exactly 0.4 s ago and either side, at
+  speeds either side of 1 and -1.
+- gu-clear: the location clear while the lifetime runs.
+- rb-range: the roadblock exactly the range ahead and an ulp either
+  side, then exactly 15 m behind and either side.
+- rb-esc: a roadblock on another road, its escape lane exactly 5 m past
+  either edge of mine and an ulp either side, behind me, and off the
+  road near my road's end.
+- rb-ahead: a stopped racer in my way, its entry level, behind or ahead.
+
+Two need a curved road:
+- rb-start bends it 0.2 rad a point, so it comes back on itself: the
+  escape lane is on the road a few points ahead of me but behind the
+  road's first point, so where the search starts matters.
+- rb-last bends it 0.05 a point, with the escape lane off the road and
+  me a few points from the end, so the target runs to the last point and
+  the fill-up works its offset out again in floats.
+
+The other six are equivalent:
+- gu-ctor-on-le: `<=` and `<` part only where |lifetime + 1| is exactly
+  0.00100000005f. Near -1 the sum is exact (Sterbenz), a multiple of
+  2^-24, which that is not.
+- gu-sc-coll-lt: at a speed of exactly 1 the epsilon test holds anyway.
+- gu-sc-coll-eps-le: the same argument as gu-ctor-on-le, about 1.
+- gu-sc-coll-eps-abs: without the fabsf, the test differs only for a
+  speed under 1 - 0.001, where `v < 1` holds already; a NaN fails both.
+- gu-cp-goal-check: the target was just cleared, so it has fewer than
+  two points, and with no car the point is accepted either way.
+- rb-cp-slower-b: SetDesiredSpeedSlowerThanThisCar doesn't read its
+  second float.
+
+Three of the earlier slices' patterns (dr-across-hl, dr-the-car and
+ar-cp-line) stopped being unique once these two were in the file, and
+carry a line of context.
+
+Its numbers:
+- 778 scenarios, 274688 ops, 297126 lines, 0 differ.
+- 186 mutations for 11d-3b: 180 caught (10 by a crash) and 6
+  equivalent. Across the whole checker, 1453 mutations: 1419 caught,
+  34 equivalent and 0 unexplained.

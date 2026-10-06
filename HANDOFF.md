@@ -15202,6 +15202,93 @@ Next is 11d-3b: GetUnstuck (0x001c8b30) and AvoidRoadBlock
 (0x001c9668), the last two actions. CONTINUE.md has what their listings
 give.
 
+### Step 11d-3b: GetUnstuck and AvoidRoadBlock
+
+`aiactions.c` has the last two actions, each with its constructor,
+CalculateScore, the three tests, CalculatePointsToDrive, GetName and
+destructor, and its table. All eleven of AIActionType are installed.
+- GetUnstuck (500) needs the grace period over, a location and 3 wheels
+  down. It scores when my car is 20 m or more past an edge, or heads out
+  of the route forwards as an AI car at 25 m/s or less (traffic at 20).
+  It also scores when AreWeStuckBehindSomeone finds a slow car in my way
+  within 9 m, or when something hit in front at least 0.4 s ago and I am
+  all but stopped. It calls the controller's FindWhereIAm before it
+  answers 500.
+- Its points are one goal point, three route points on from the
+  location's on its line, then the fill-up. It backs at -15 m/s as AI
+  and -6 otherwise. It is done when my body faces the goal (a dot of
+  0.98, both normalised in bNormalize2's order) and no one is in the
+  way. It fails heading out of the route backwards, or backed into
+  something at least 0.4 s ago and all but stopped. A minimum lifetime
+  (-1, give or take 0.001, is none) holds both tests off. Each way out
+  asks FindWhereIAm and the driver's ClearSteeringMemory.
+- AvoidRoadBlock (600) takes the first active roadblock with a cop
+  that is ahead by more than my speed times 2.5 s, and no less than 100
+  m, by CompareDistances. It is done 15 m past it, or when both cops are
+  gone, and never fails or expires.
+- Its points move smoothly from my offset to the escape lane's. On the
+  roadblock's route they end at its route point. Off it, they end at the
+  closest point ahead of the escape lane on my route, when the lane is
+  under 5 m past the edge there; otherwise at my route's last point,
+  keeping my offset. A racer (not a cop, not traffic) the points hit
+  within 1 s, ahead, is followed 0.1 slower, at no less than 30 m/s.
+
+Things the listing gives away:
+- AreWeStuckBehindSomeone tests my speed against |-15|, the constant's
+  absolute value, not my speed's. An entry with no car is read through.
+- The goal's route point is tested for NULL, which it never is; past
+  the route's end it reads on into the table.
+- The score's roadblock is asked for a second time and its spike belt
+  put in my car's frame. Nothing reads that.
+- SetDesiredSpeedSlowerThanThisCar is handed 0.1 twice; the second is
+  unread.
+
+copmanager.h's tRoadBlock now has the two cops, the route point and
+route, the spike belt, the escape lane and the distance round the track.
+The checker stubs FindWhereIAm in each controller's test table, and
+ClearSteeringMemory and GetSteerToPoint in the drivers', on both sides.
+CompareDistances, the active roadblocks, FindClosestPointAhead and
+WorldToCar run as shipped. New ops: `@ct` (a collision's time and
+contact), `@stp`, `@td`, `@rbf`, `@pu`, `@ut`, `@mv`, `@as`, `@n gu` and
+`@n rb`. s_unstuck and s_roadblock drive each action 40 times.
+
+The check gives 778 scenarios, 274688 ops, 297126 lines, 0 differ.
+11d-3b has 186 mutations: 180 caught (10 by a crash) and 6 equivalent.
+Across the checker, 1453 mutations: 1419 caught, 34 equivalent and 0
+unexplained. The first pass left 32 alive. s_gu_edge, two rounds of
+thirteen kinds, closes 26:
+- on a straight road, where a car's across is -y exactly: 20 m past
+  either edge, an AI car at 25 and traffic at 20, a hit exactly 0.4 s
+  ago in front and behind, my speed at 15 with a car in the way, the
+  facing dot at 0.98 (face_layout searches dy over ulps), the lifetime
+  poked, the location clear, the roadblock exactly the range ahead and
+  15 m behind, the escape lane exactly 5 m off the road, and a stopped
+  racer whose entry is level, behind or ahead;
+- on curved roads: rb-start bends the road back on itself, so the
+  escape lane is ahead of me but behind the road's first point, and
+  where the search starts matters; rb-last runs the target to the
+  route's last point, where the fill-up works its offset out in floats.
+The other six are equivalent:
+- gu-ctor-on-le and gu-sc-coll-eps-le: no lifetime or speed lands
+  exactly 0.00100000005f from -1 or 1 (Sterbenz);
+- gu-sc-coll-lt: at exactly 1 the epsilon test holds anyway;
+- gu-sc-coll-eps-abs: without the fabsf it differs only under 0.999,
+  where the speed is under 1 already;
+- gu-cp-goal-check: the target was just cleared, so the check has
+  nothing to test against;
+- rb-cp-slower-b: the unread second float.
+
+Three of the earlier slices' patterns (dr-across-hl, dr-the-car,
+ar-cp-line) stopped being unique once these two were in the file, and
+carry a line of context.
+
+`docs/formats/ai-action.md` has the detail, under "GetUnstuck and
+AvoidRoadBlock (11d-3b)". The CIA builds.
+
+Next is 11e: AICarController, retail's 0x00190140 to about 0x00194058,
+some 16 KB in about 50 functions. It wants laying out in slices by size
+first. CONTINUE.md has the start.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the

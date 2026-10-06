@@ -22,22 +22,45 @@ typedef struct tCopManager tCopManager;
 typedef struct tPursuit tPursuit;
 typedef struct tCop tCop;
 
-// The demo's type#1303 is 120 bytes: a roadblock a pursuit called. These
-// are the two fields the minimap reads, at the demo's offsets, which
-// retail's TrackMap::Render reads them at too. The two cops' pointers at
-// 0 are bytes here, so the offsets hold on any host.
+// The demo's type#1303 (type#2424 in .mdebug) is 120 bytes: a roadblock a
+// pursuit called. These are the fields read so far, at the demo's
+// offsets, which retail's code reads them at too: the minimap's two, and
+// the two cops, the route and its point, the spike belt, the escape lane
+// and the distance round the track that AIActionAvoidRoadBlock reads. The
+// rest are bytes. The offsets are retail's only where a pointer is 4
+// bytes.
+struct stAICop;
+struct TrackRoute;
+struct TrackRoutePoint;
+
 typedef struct tRoadBlock {
-    uint8_t  Unported0[28];             //   0
+    struct stAICop *cops[2];            //   0  NULL for none
+    uint8_t  Unported8[20];             //   8  pos, ang
     uint16_t aTrackMapIconAngle;        //  28  a BAM
-    uint8_t  Unported30[38];            //  30
+    uint8_t  Unported30[6];             //  30  Name at 32
+    struct TrackRoutePoint *RoutePoint; //  36
+    struct TrackRoute *Route;           //  40
+    uint8_t  Unported44[8];             //  44  fRoadWidth, nSpikeSide
+    bVector2 v2SpikeBeltPos;            //  52
+    uint8_t  Unported60[8];             //  60  v2SpikeBeltVec
     bVector2 v2Position;                //  68
-    uint8_t  Unported76[44];            //  76
+    uint8_t  Unported76[16];            //  76  D, L
+    bVector2 v2EscapeLane;              //  92
+    float    fDistanceAroundTrack;      // 100
+    uint8_t  Unported104[16];           // 104
 } tRoadBlock;                           // 120
 
+#if UINTPTR_MAX == 0xFFFFFFFFu
 typedef char troadblock_layout_check[
     (offsetof(tRoadBlock, aTrackMapIconAngle) == 28
+     && offsetof(tRoadBlock, RoutePoint) == 36
+     && offsetof(tRoadBlock, Route) == 40
+     && offsetof(tRoadBlock, v2SpikeBeltPos) == 52
      && offsetof(tRoadBlock, v2Position) == 68
+     && offsetof(tRoadBlock, v2EscapeLane) == 92
+     && offsetof(tRoadBlock, fDistanceAroundTrack) == 100
      && sizeof(tRoadBlock) == 120) ? 1 : -1];
+#endif
 
 // eLogicState, .mdebug t1052.
 typedef int32_t eLogicState;
