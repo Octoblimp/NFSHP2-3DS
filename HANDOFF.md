@@ -14966,6 +14966,64 @@ small ones: JustDrive, Draft, NudgeCar, Block and AccidentRecovery.
 CONTINUE.md lists each one's retail address and its constructor's
 arguments.
 
+### Step 11d-1: the five small AI actions
+
+`aiactions.c` has the first five of the eleven actions, each with its
+constructor, static CalculateScore, the three tests,
+CalculatePointsToDrive, GetName and destructor, and its table, which
+`main.c` installs:
+- JustDrive (score 0) drives the route on its line. At most every three
+  seconds it tries line 0 with IsDriveable and takes it when it is
+  driveable. AIDriverAvoidCarsImpactTimeThreshold (2.0f, gp-18168) is
+  defined here, as JustDrive is the first to read it.
+- Draft (200 with a car ahead) drives the route and slows behind a car
+  that overlaps it across and is under 6 m on: that car's speed less
+  (20 less the gap), when that is under the action's own speed. It only
+  ever lowers the speed.
+- NudgeCar (300) and Block (400) keep a car and do nothing with it. They
+  set PointsToDriveWillExecuteAction and are always accomplished.
+- AccidentRecovery (500 for a car with under two wheels down that is not
+  sort of parallel to the track) stops on the route, with no throttle or
+  brake, and resets the car once, five seconds after it was made.
+  SortOfParallelToTrack makes the body's up axis unit in VU0 and dots it
+  with GetElevation's normal against 0.707.
+
+Things the listing gives away:
+- JustDrive stores the time in a delay slot, so it is stored whenever
+  three seconds have gone, even for a car already on line 0.
+- NudgeCar's and Block's HasExpired test `seconds <= DeltaTime` with
+  `c.le.s`, so a NaN timeout goes on to the other tests. The other three
+  use `c.lt.s` the other way round, and a NaN never expires.
+- Retail leaves f14 stale for IsDriveable and f13 for every
+  BuildDriveTarget. Neither is read, and the port passes 0.
+
+`drivingchoice_check` runs them, not `nearbycar_check`, because the
+actions build drive targets on drivingchoice_check's routes. The actions
+run one at a time in a slot of their own, through retail's vptrs, over a
+DrivingInformation copied from the script's list, location and choice.
+The new stubs are the pool, DestoryTargetMarkers, GetElevation (the
+script's normal under the car) and PleaseResetMeLater. s_actions puts
+five actions in a row on s_choose's world. It steps the clock from the
+action's own times, puts the car ahead at Draft's edges and tilts the car
+about the 0.707 line.
+
+The check gives 352 scenarios, 142016 ops, 178348 lines, 0 differ.
+11d-1 has 136 mutations: 133 caught (1 by a crash) and 3 equivalent.
+Across the checker, 877 mutations: 863 caught, 14 equivalent and 0
+unexplained. The first pass left seven alive. Four were gaps in the
+script, which s_act_edges closes: the slot's 0xa5 fill answered the
+points test first, there was no -1 timeout, no exact 4000 ticks, and no
+normal between 0.5 and 0.707. The other three are equivalent:
+- jd-every: no tick count gives 3.0f;
+- jd-pref: the preferred scale only reaches the unread score;
+- jd-a: BuildDriveTarget doesn't read the float.
+
+`docs/formats/ai-action.md` has the detail, under "The small actions
+(11d-1)". The CIA builds.
+
+Next is 11d-2: Pass (0x001c78f8, with SideOfCarIsOkay) and AvoidCars
+(0x001c6ba0). The "@" ops and s_actions carry over.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the

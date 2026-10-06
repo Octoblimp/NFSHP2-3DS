@@ -48,6 +48,7 @@
 
 #include "acidsys.h"
 #include "aiaction.h"
+#include "aiactions.h"
 #include "bchunk.h"
 #include "bchunkload.h"
 #include "bmem.h"
@@ -3193,6 +3194,7 @@ int main(int argc, char** argv)
     collisionbody_install_vtables();
     carcollisionbody_install_vtable();
     aiaction_install_vtables();
+    aiactions_install_vtables();
 
     // Car::SetControlMode reaches the controllers task 26 brings through
     // seams; a NULL one is a class not ported yet, and the arm aborts.

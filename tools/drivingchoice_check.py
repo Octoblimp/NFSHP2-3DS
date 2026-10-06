@@ -28,7 +28,15 @@ and the way round a car. Step 11b-4a adds CarCollisionPredict
 (carcollisionpredict.c). Step 11b-4b adds IsDriveable, TryChoice,
 MakeNewChoice and TryToDriveAroundCar, over retail's own EstimateScore.
 EstimateScore's distances are carried from one call to the next, as the
-port's static array keeps them (EST_ENTRY).
+port's static array keeps them (EST_ENTRY). Step 11d-1 adds the five
+small AI actions of aiactions.c (JustDrive, Draft, NudgeCar, Block and
+AccidentRecovery) over retail's own AIAction base. They are run one at a
+time in a slot at AB, through retail's vptrs, over a DrivingInformation
+at INFO copied from the script's list, location and choice (the "@"
+ops). Four more stubs serve them: the slot pool (bNewSlotPool,
+bDeleteSlotPool, bOMalloc and bFree), DestoryTargetMarkers,
+TopologyCoordinate::GetElevation (0x00152070), which answers the
+script's normal under the car, and Car::PleaseResetMeLater (0x00133070).
 
 Three stubs, each of which prints a line, so the two sides must ask them
 the same questions in the same order:
@@ -82,7 +90,9 @@ DCC = "3DS Files/source/drivingchoice.c"
 RCC = "3DS Files/source/racecore.c"
 CCP = "3DS Files/source/carcollisionpredict.c"
 DT = "3DS Files/source/drivetarget.c"
-SOURCES = [HARNESS, DCC, RCC, CCP] + ["3DS Files/source/" + f for f in (
+AIA = "3DS Files/source/aiaction.c"
+AAS = "3DS Files/source/aiactions.c"
+SOURCES = [HARNESS, DCC, RCC, CCP, AIA, AAS] + ["3DS Files/source/" + f for f in (
     "nearbycar.c", "drivinglocation.c", "drivetarget.c", "obb.c", "car.c",
     "carstate.c", "carinfo.c", "cartypeinfo.c", "langtab.c", "drivetrain.c",
     "engine.c", "wheel.c", "suspension.c", "steering.c", "rigidbody.c",
@@ -189,6 +199,8 @@ GLOBALS = {
     "WORLD": GP - 22120,          # pCurrentWorld
     "MINSPEED": GP - 15136,       # TryToDriveAroundCarMinSpeedForDrivingLine
     "NLINES": GP - 20136,         # AICarControllerNumDrivingLinesToConsider
+    "POOL": GP - 18288,           # AIActionSlotPool
+    "AVOID": GP - 18168,          # AIDriverAvoidCarsImpactTimeThreshold
 }
 
 CARS = 0x01010000
@@ -249,6 +261,33 @@ ROUTES = 0x01100000
 ROUTE_STRIDE = 0x20000
 NROUTES = 6
 
+# Step 11d-1's: the five actions' constructors and static CalculateScores,
+# AIAction::UpdateStatus, AccidentRecovery's SortOfParallelToTrack, and the
+# three they reach that are stubbed.
+ACT_CTORS = {"jd": 0x001c73c0, "dr": 0x001c7690, "nc": 0x001c8028,
+             "bl": 0x001c8160, "ar": 0x001ca1f0}
+ACT_SCORES = {"jd": 0x001c7458, "dr": 0x001c7720, "nc": 0x001c80d8,
+              "bl": 0x001c8210, "ar": 0x001ca2a8}
+UPDATE_STATUS = 0x001c6a98
+AR_PARALLEL = 0x001ca2f0
+GET_ELEVATION = 0x00152070        # TopologyCoordinate::GetElevation
+RESET_LATER = 0x00133070          # Car::PleaseResetMeLater
+POOL_FREE = 0x00257ca0            # bSlotFree, which AIAction's delete reaches
+# Their tables and AIAction's and AIPlan's, by the names the harness gives
+# the demo's.
+ACT_VTABLES = {0x002b7b10: "vJD", 0x002b7bd0: "vDR", 0x002b7b90: "vNC",
+               0x002b7b50: "vBL", 0x002b79d0: "vAR", 0x002b7c90: "vAA",
+               0x002b7cd0: "vPL"}
+AB = 0x010b0000                   # the action, in a slot of the pool's size
+AB_BYTES = 640
+INFO = 0x010b1000                 # its DrivingInformation
+INFO_BYTES = 492
+POOL = 0x010b2000                 # what AIActionSlotPool holds
+# The action's fields the script pokes.
+ACT_FIELDS = {"can": 0, "exp": 4, "dt": 8, "st": 12, "pt": 560, "ds": 564,
+              "tt": 568, "tol": 572, "udl": 576, "tb": 580, "bo": 584,
+              "t608": 608, "r612": 612}
+
 # The car, at retail's offsets.
 C_DN = 10
 C_CTI = 12
@@ -261,6 +300,8 @@ C_POS = 96
 C_VEL = 112
 C_BM = 144
 C_NW = 956
+C_UP = 176                        # BodyMatrix's z axis
+C_TC = 1312                       # TheTopologyCoordinate, retail's
 C_FS = 960
 C_VMAG = 964
 C_BODY = 52
@@ -2394,6 +2435,283 @@ def s_tie():
     ops[k] = " ".join(f)
     return ops
 
+# Step 11d-1's.
+N_ACTIONS = 120
+ACT_KINDS = ("jd", "jd", "dr", "dr", "nc", "bl", "ar", "ar")
+# WorldTimer's ticks after the last time stored, either side of the edges:
+# a second is 4000, so JustDrive's three seconds are 12000 and
+# AccidentRecovery's five 20000.
+ACT_DELTAS = (0, 1, 2000, 3999, 4000, 4001, 11999, 12000, 12001, 19999,
+              20000, 20001, 40000, -1, -12000)
+ACT_TIMEOUTS = (0.0, -0.0, 1.0, 1.0, 3.0, 5.0, -1.0, 0.5)
+UPRIGHT = 0.707000017
+NAN = 0x7fc00000
+
+
+def fstep(v, n):
+    """The float n ulps above v, a positive float (below for n < 0)."""
+    return struct.unpack("<f", struct.pack("<I", fb(f32(v)) + n))[0]
+
+
+def act_list(rnd, w, others):
+    """The list as Think builds it, in order down the road, with my car (0)
+    among the rest at its own origin. The car just ahead of mine sits at
+    Draft's edges: across, either side of the two half widths together;
+    on, either side of 6 m. Answers the ops, and that car and its y."""
+    me = w.cars[0]
+    hl = f32(rnd.uniform(0.8, 1.2))
+    order = list(others)
+    rnd.shuffle(order)
+    mine = rnd.choice((0, 1, 1, 2, len(order)))
+    order.insert(mine, 0)
+    ops = ["N 0 %d %s %s" % (len(order), h(hl),
+                             h(f32(rnd.uniform(2.0, 2.6))))]
+    ahead = None
+    for i, k in enumerate(order):
+        if k == 0:
+            lx = ly = vx = vy = 0.0
+            hl2, hd2 = hl, f32(rnd.uniform(2.0, 2.6))
+        else:
+            v = w.cars[k]
+            lx, ly = frame(me, v["px"], v["py"])
+            vx, vy = rnd.uniform(-5.0, 5.0), rnd.uniform(-5.0, 5.0)
+            hl2 = f32(rnd.uniform(0.8, 1.3))
+            hd2 = f32(rnd.uniform(2.0, 2.8))
+            if i == mine - 1:
+                edge = f32(hl + hl2)
+                lx = rnd.choice((0.0, edge, -edge, fstep(edge, -1),
+                                 -fstep(edge, -1), fstep(edge, 1),
+                                 rnd.uniform(-edge, edge),
+                                 rnd.uniform(-4.0, 4.0), lx))
+                ly = f32(rnd.choice((6.0, fstep(6.0, -1), fstep(6.0, 1), 0.0,
+                                     -2.0, 3.0, 5.5, rnd.uniform(0.0, 6.0),
+                                     12.0, ly)))
+                ahead = (k, ly)
+        ops.append("E %d %s %s %s %s %s %s %d" % (
+            i, h(f32(lx)), h(f32(ly)), h(f32(vx)), h(f32(vy)), h(hl2),
+            h(hd2), k))
+    return ops, ahead
+
+
+def s_actions(rnd):
+    """The five actions as AIDriver drives them, on s_choose's world: each
+    made, asked for its points (JustDrive's IsDriveable and
+    BuildDriveTarget, Draft's and AccidentRecovery's BuildDriveTarget), its
+    status and its three tests, its name and its score, and destroyed; the
+    clock either side of each edge after the last time stored; the car
+    just ahead of mine at Draft's edges, and its speed at the gap's; and my
+    car's wheels, up axis and the ground's normal under it at
+    AccidentRecovery's."""
+    w = World(rnd)
+    ops = w.ops
+    sizes = walk_world(rnd, w, nsigns=rnd.randint(0, 4))
+    if w.sign_points and rnd.random() < 0.4:
+        kl, js = rnd.choice(w.sign_points)
+        jl = max(0, js - rnd.randrange(1, 6))
+    else:
+        kl, jl = 0, rnd.randrange(0, 10)
+    line = rnd.randrange(LINES)
+    others = [1, 2, 3, 4]
+    clock = [rnd.choice((0, 0, 5000, 0x7ffff000))]
+
+    def me():
+        place_me(rnd, w, 0, kl, jl, line,
+                 ctl=rnd.choice((0, 1, 2, 3, 3)),
+                 act=rnd.choice((-1, 0, 5, 6)))
+        boxed(rnd, w, 0)
+        ops.extend(its_target(rnd, w, sizes, 0, kl, jl, picks=PICKS))
+
+    def other(k):
+        place_other(rnd, w, sizes, k, kl, jl, rnd.random() < 0.6,
+                    span=rnd.choice((4, 7, 7, 12)), picks=PICKS)
+        boxed(rnd, w, k)
+
+    def tilt():
+        """My car's up axis and the ground's normal under it: straight up
+        with the normal's z either side of 0.707, or both anywhere."""
+        s = rnd.choice((1.0, 1.0, 2.0, 0.5, -1.0))
+        if rnd.random() < 0.5:
+            up = (0.0, 0.0, s, rnd.choice((0.0, 1.0)))
+            nz = rnd.choice((UPRIGHT, fstep(UPRIGHT, 1), fstep(UPRIGHT, -1),
+                             1.0, 0.0, 0.5, -0.9))
+            nx = math.sqrt(1.0 - nz * nz) * rnd.choice((1.0, -1.0))
+            nrm = (nx, 0.0, nz, 0.0)
+        else:
+            def unit():
+                a = rnd.uniform(-math.pi, math.pi)
+                b = rnd.uniform(0.0, math.pi)
+                return (math.sin(b) * math.cos(a), math.sin(b) * math.sin(a),
+                        math.cos(b))
+            u = unit()
+            up = (s * u[0], s * u[1], s * u[2], rnd.uniform(-1.0, 1.0))
+            nrm = unit() + (0.0,)
+            if rnd.random() < 0.6:
+                # Near 45 degrees from the axis.
+                c = rnd.choice((0.78, 0.785, 0.79, 0.3))
+                t = unit()
+                d = sum(x * y for x, y in zip(t, u))
+                p = [x - d * y for x, y in zip(t, u)]
+                n = math.sqrt(sum(x * x for x in p)) or 1.0
+                nrm = tuple(math.cos(c) * y + math.sin(c) * x / n
+                            for x, y in zip(p, u)) + (0.0,)
+        ops.append("@up 0 %s" % " ".join(h(f32(x)) for x in up))
+        ops.append("@nr 0 %s" % " ".join(h(f32(x)) for x in nrm))
+
+    def info():
+        lops, ahead = act_list(rnd, w, others)
+        ops.extend(lops)
+        if ahead is not None and rnd.random() < 0.7:
+            k, ly = ahead
+            gap = f32(20.0 - ly)
+            v = dict(w.cars[k])
+            v["vmag"] = rnd.choice((gap, fstep(gap, -1), fstep(gap, 1), 0.0,
+                                    30.0, 10.0))
+            w.car(k, **v)
+        ops.append("D %d %d %d %s" % (
+            kl, max(0, jl + rnd.choice((0, 0, 1, -1))),
+            line if rnd.random() < 0.8 else rnd.randrange(LINES),
+            rnd.choice(("00000000", "00000000", "00001388"))))
+        t = rnd.choice((0, 1, 1, 2, 3, 4, 5, 6, 7))
+        k = rnd.choice(others) if t in (5, 6) else rnd.choice((-1, -1, 1))
+        ops.append("X %d %d %d" % (t, k, rnd.choice((0, 0, 1))))
+        ops.append("@J")
+
+    def tick(base=None):
+        if base is not None:
+            clock[0] = base
+        clock[0] = (clock[0] + rnd.choice(ACT_DELTAS)) & M32
+        ops.append("G TIMER %08x" % clock[0])
+
+    me()
+    for k in others + [5]:
+        other(k)
+    tilt()
+    ops += decide(rnd, w)
+    ops.append("G TIMER %08x" % clock[0])
+    info()
+    for _ in range(5):
+        kind = rnd.choice(ACT_KINDS)
+        if rnd.random() < 0.5:
+            tick()
+        made = clock[0]
+        # JustDrive's last re-evaluation, as near as the script can tell.
+        last = [0]
+        ops.append("@n %s %d %s %d" % (
+            kind, rnd.choice((0, 100, 500, -1)),
+            h(f32(rnd.choice(ACT_TIMEOUTS))), rnd.choice((-1, 0, 1, 2))))
+        for _ in range(rnd.randint(4, 10)):
+            r = rnd.random()
+            if r < 0.3:
+                # From the action's own times: the timeout's, the
+                # re-evaluation's and the reset's, or onwards.
+                tick(rnd.choice((None, made, made,
+                                 last[0] if kind == "jd" else made)))
+            elif r < 0.36:
+                tilt()
+            elif r < 0.42:
+                ops.append("@w 0 %d" % rnd.choice((0, 1, 2, 3, 4, 4, 5)))
+            elif r < 0.48:
+                info()
+            elif r < 0.51:
+                me()
+                info()
+            elif r < 0.6:
+                f = rnd.choice(("can", "dt", "pt", "ds", "ds", "exp", "tt",
+                                "tol", "udl", "tb", "bo")
+                               + (("t608",) if kind in ("jd", "ar") else ())
+                               + (("r612",) * 2 if kind == "ar" else ()))
+                if f in ("can", "pt", "r612", "udl", "tb", "bo"):
+                    v = rnd.choice((0, 1, 2))
+                elif f in ("exp", "t608"):
+                    v = (clock[0] - rnd.choice(ACT_DELTAS)) & M32
+                else:
+                    v = fb(f32(rnd.choice((0.0, -1.0, 1.0, 3.0, 5.0, 30.0))))
+                    if rnd.random() < 0.1:
+                        v = NAN
+                if f == "t608":
+                    last[0] = v
+                ops.append("@f %s %08x" % (f, v))
+            elif r < 0.66:
+                k = rnd.choice(("jd", "dr", "nc", "bl", "ar"))
+                if k == "dr":
+                    ops.append("@sc dr %d" % rnd.choice((0, 0, 1, 2, 5)))
+                else:
+                    ops.append("@sc %s" % k)
+            elif r < 0.69:
+                ops.append("@par 0 %s" % h(f32(rnd.choice(
+                    (UPRIGHT, UPRIGHT, 0.0, -0.5, 0.99)))))
+            elif r < 0.72:
+                ops.append("G AVOID %s" % h(f32(rnd.choice(
+                    (2.0, 0.5, 5.0, 0.0)))))
+            else:
+                op = rnd.choice(("@cp", "@cp", "@cp", "@cp", "@us", "@us",
+                                 "@t", "@t", "@nm"))
+                if op == "@cp":
+                    if kind == "dr" and rnd.random() < 0.6:
+                        info()
+                    if kind == "jd" and s32(clock[0] - last[0]) >= 12000:
+                        last[0] = clock[0]
+                ops.append(op)
+        if rnd.random() < 0.3:
+            ops += decide(rnd, w)
+        if rnd.random() < 0.6:
+            ops.append("@d %d" % rnd.choice((0, 1, 1, 3)))
+    return ops
+
+
+def s_act_edges(rnd):
+    """The exact cases the random actions miss. NudgeCar's and Block's
+    HasExpired, each asked before any points: at a timeout that cannot
+    expire (-1), at exactly the timeout (4000 ticks for 1 s, from a clock
+    SetTimeout keeps exactly) and just past it, and with a NaN poked over a
+    timeout that can expire. PointsToDriveWillExecuteAction is poked to 0
+    first: the constructors leave it as the slot was. AccidentRecovery's score and accomplishment
+    with the ground's normal between 0.5 and 0.707 of the car's up, and
+    about both."""
+    w = World(rnd)
+    ops = w.ops
+    sizes = walk_world(rnd, w, nsigns=0)
+    line = rnd.randrange(LINES)
+    others = [1, 2, 3, 4]
+    place_me(rnd, w, 0, 0, 3, line, ctl=2, act=-1)
+    boxed(rnd, w, 0)
+    ops.extend(its_target(rnd, w, sizes, 0, 0, 3, picks=PICKS))
+    for k in others + [5]:
+        place_other(rnd, w, sizes, k, 0, 3, True, span=7, picks=PICKS)
+        boxed(rnd, w, k)
+    lops, _ = act_list(rnd, w, others)
+    ops.extend(lops)
+    ops.append("D 0 3 %d 00000000" % line)
+    ops.append("X 1 -1 0")
+    ops.append("@J")
+    base = 5000
+    for kind in ("nc", "bl"):
+        for timeout, poke, delta in ((-1.0, None, 0), (-1.0, None, 4001),
+                                     (-1.0, None, -1), (1.0, None, 4000),
+                                     (1.0, None, 3999), (1.0, None, 4001),
+                                     (1.0, NAN, 4001), (1.0, NAN, 0),
+                                     (0.0, NAN, 1)):
+            ops.append("G TIMER %08x" % base)
+            ops.append("@n %s 300 %s 1" % (kind, h(f32(timeout))))
+            if poke is not None:
+                ops.append("@f dt %08x" % poke)
+            # The slot's own fill would answer the points test first.
+            ops.append("@f pt 00000000")
+            ops.append("G TIMER %08x" % ((base + delta) & M32))
+            ops += ["@t", "@us", "@cp", "@t", "@d 1"]
+    ops.append("G TIMER %08x" % base)
+    ops.append("@up 0 %s" % " ".join(h(f32(x)) for x in (0.0, 0.0, 1.0, 0.0)))
+    for nz in (0.6, 0.69, 0.51, 0.5, fstep(0.5, 1), 0.45, 0.75,
+               fstep(UPRIGHT, 1)):
+        nx = math.sqrt(1.0 - nz * nz)
+        ops.append("@nr 0 %s" % " ".join(h(f32(x))
+                                         for x in (nx, 0.0, nz, 0.0)))
+        ops += ["@w 0 0", "@sc ar", "@w 0 1", "@sc ar",
+                "@n ar 500 %s 0" % h(f32(5.0)), "@w 0 4", "@t", "@us",
+                "@cp", "@d 1"]
+    return ops
+
+
 def script():
     rnd = random.Random(0x11b2dc)
     sc = [s_small(rnd), s_valid(rnd), s_room(rnd), s_walk(rnd), s_fill(rnd),
@@ -2434,6 +2752,10 @@ def script():
     for _ in range(N_PASS):
         sc.append(s_pass(rnd))
     sc.append(s_tie())
+    # Step 11d-1's.
+    for _ in range(N_ACTIONS):
+        sc.append(s_actions(rnd))
+    sc.append(s_act_edges(rnd))
     return sc
 
 
@@ -2455,6 +2777,9 @@ class Model(object):
         self.e.stub(SIGN_DECISION, self.s_sign)
         self.e.stub(GET_ROUTE_POINT, self.s_rp)
         self.e.stub(GET_OOB, self.s_oob)
+        self.e.stub(GET_ELEVATION, self.s_elev)
+        self.e.stub(RESET_LATER, self.s_reset_later)
+        self.e.stub(POOL_FREE, self.s_pool_free)
         self.w = self.e.u32
         self.grace0 = self.w(GLOBALS["GRACE"])
         self.gap0 = self.w(GLOBALS["GAP"])
@@ -2463,6 +2788,9 @@ class Model(object):
         self.slowtraffic0 = self.w(GLOBALS["SLOWTRAFFIC"])
         self.minspeed0 = self.w(GLOBALS["MINSPEED"])
         self.nlines0 = self.w(GLOBALS["NLINES"])
+        self.avoid0 = self.w(GLOBALS["AVOID"])
+        self.normal = {}
+        self.kind = ""
         d = struct.unpack("<f", struct.pack("<I", self.w(MIN_DIST)))[0]
         self.e.put32(MIN_DIST_SQ, fb(f32(d * d)))
         self.dec = {}
@@ -2514,6 +2842,25 @@ class Model(object):
             return "CH"
         if a == OTHER:
             return "OT"
+        if a == AB:
+            return "ab"
+        if a == INFO:
+            return "info"
+        if a == INFO + 464:
+            return "iloc"
+        if a == INFO + 480:
+            return "ich"
+        if a == POOL:
+            return "pool"
+        if (INFO + LIST_ARRAY <= a < INFO + LIST_ARRAY + NC_SIZE * LIST_MAX
+                and (a - INFO - LIST_ARRAY) % NC_SIZE == 0):
+            return "ie%d" % ((a - INFO - LIST_ARRAY) // NC_SIZE)
+        if CARS <= a < CARS + CAR_STRIDE * NCARS:
+            k, off = divmod(a - CARS, CAR_STRIDE)
+            if off == C_TC:
+                return "tc%d" % k
+            if off == C_POS:
+                return "pos%d" % k
         if ROUTES <= a < ROUTES + ROUTE_STRIDE * NROUTES:
             k, off = divmod(a - ROUTES, ROUTE_STRIDE)
             if off == 0:
@@ -2547,6 +2894,27 @@ class Model(object):
         car = em.reg[4] & M32
         self.emit("  oob %s" % self.name(car))
         em.fpr[0] = self.oob[self.car_index(car)]
+
+    def s_elev(self, em):
+        """GetElevation: the script's normal for the car whose coordinate
+        it is. The height and the terrain are not read."""
+        r = em.reg
+        tc = r[4] & M32
+        self.emit("  elev %s %s %d %d %d" % (
+            self.name(tc), self.name(r[5]), (r[6] & M32) != 0,
+            (r[7] & M32) != 0, (r[8] & M32) != 0))
+        k, off = divmod(tc - CARS, CAR_STRIDE)
+        if off == C_TC:
+            for i, v in enumerate(self.normal.get(k, (0, 0, 0, 0))):
+                self.e.put32((r[7] & M32) + 4 * i, v)
+        em.fpr[0] = 0
+
+    def s_reset_later(self, em):
+        self.emit("  reset %s" % self.name(em.reg[4]))
+
+    def s_pool_free(self, em):
+        self.emit("  slotfree %s %s" % (self.name(em.reg[4]),
+                                        self.name(em.reg[5])))
 
     # ---- the dumps -------------------------------------------------------
 
@@ -2642,6 +3010,8 @@ class Model(object):
         self.fill(LPTR, 4)
         self.fill(WALK, 24)
         self.fill(TARGET, TARGET_BYTES)
+        self.fill(AB, AB_BYTES)
+        self.fill(INFO, INFO_BYTES)
         e.mem[BODIES:BODIES + BODY_STRIDE * NCARS] = bytes(
             BODY_STRIDE * NCARS)
         e.put32(WORLD + W_ID, 0)
@@ -2655,11 +3025,14 @@ class Model(object):
                         ("SLOWCAR", self.slowcar0),
                         ("SLOWTRAFFIC", self.slowtraffic0),
                         ("MINSPEED", self.minspeed0),
-                        ("NLINES", self.nlines0)):
+                        ("NLINES", self.nlines0),
+                        ("POOL", POOL), ("AVOID", self.avoid0)):
             e.put32(GLOBALS[name], v)
         self.dec = {}
         self.rp = {}
         self.oob = {}
+        self.normal = {}
+        self.kind = ""
 
     def set_car(self, t):
         e = self.e
@@ -2771,6 +3144,112 @@ class Model(object):
         for i, v in f.items():
             e.fpr[int(i[1:])] = v & M32
         return e.call(fn, *args, limit=limit)
+
+    # ---- step 11d-1's ----------------------------------------------------
+
+    def cstr(self, a):
+        mem = self.e.mem
+        end = mem.index(0, a)
+        return mem[a:end].decode("latin-1")
+
+    def vt_name(self, v):
+        return ACT_VTABLES.get(v, "%08x" % v)
+
+    def dump_act(self):
+        """The action's fields, and the kind's own."""
+        w, a = self.w, AB
+        self.emit("  act can %d exp %08x dt %s st %d vt %s pt %d ds %s tt %s "
+                  "tol %s udl %d tb %d bo %d type %d score %d" % (
+                      s32(w(a)), w(a + 4), fx(w(a + 8)), s32(w(a + 12)),
+                      self.vt_name(w(a + 16)), s32(w(a + 560)),
+                      fx(w(a + 564)), fx(w(a + 568)), fx(w(a + 572)),
+                      s32(w(a + 576)), s32(w(a + 580)), s32(w(a + 584)),
+                      s32(w(a + 588)), s32(w(a + 592))))
+        if self.kind == "jd":
+            self.emit("  jd last %08x" % w(a + 608))
+        elif self.kind in ("nc", "bl"):
+            self.emit("  car %s" % self.name(w(a + 608)))
+        elif self.kind == "ar":
+            self.emit("  ar made %08x reset %d" % (w(a + 608),
+                                                   s32(w(a + 612))))
+
+    def dump_info(self):
+        """After CalculatePointsToDrive: the information's choice and
+        location, and what IsDriveable leaves behind."""
+        w = self.w
+        self.dump_choice(INFO + 480, "ich")
+        self.emit("  iloc %s %s %d %08x" % (
+            self.name(w(INFO + 464)), self.name(w(INFO + 468)),
+            s32(w(INFO + 472)), w(INFO + 476)))
+        self.emit("  exclude %s" % self.name(
+            w(w(w(INFO) + C_CTRL) + K_EXCLUDE)))
+        self.emit("  ids %d %d" % (w(WORLD + W_ID), w(WORLD + W_PDT_ID)))
+
+    def vcall(self, slot, *args):
+        """The action's virtual in `slot`, as g++ calls it: the entry's
+        delta added to this."""
+        vt = self.w(AB + 16)
+        delta = struct.unpack_from("<h", self.e.mem, vt + slot)[0]
+        return self.call(self.w(vt + slot + 4), (AB + delta) & M32, *args,
+                         limit=CHOOSE_LIMIT)
+
+    def act_op(self, t):
+        e, w = self.e, self.w
+        c = t[0][1:]
+        if c == "J":
+            e.mem[INFO:INFO + 464] = e.mem[LIST:LIST + 464]
+            e.mem[INFO + 464:INFO + 480] = e.mem[LOC:LOC + 16]
+            e.mem[INFO + 480:INFO + 492] = e.mem[CHOICE:CHOICE + 12]
+        elif c == "n":
+            self.kind = t[1]
+            self.fill(AB, AB_BYTES)
+            self.call(ACT_CTORS[t[1]], AB, int(t[2]), self.car_ptr(t[4]),
+                      f12=int(t[3], 16))
+            self.dump_act()
+            self.dump_target(AB + 32)
+        elif c == "cp":
+            self.vcall(24, INFO)
+            self.dump_act()
+            self.dump_target(AB + 32)
+            self.dump_info()
+        elif c == "us":
+            self.call(UPDATE_STATUS, AB, INFO, limit=CHOOSE_LIMIT)
+            self.emit("  status %d" % s32(w(AB + 12)))
+        elif c == "t":
+            got = [self.vcall(slot, INFO) for slot in (40, 48, 56)]
+            self.emit("  tests %d %d %d" % tuple(got))
+        elif c == "nm":
+            self.emit("  name %s" % self.cstr(self.vcall(32)))
+        elif c == "d":
+            self.vcall(8, int(t[1]))
+            self.emit("  vt %s" % self.vt_name(w(AB + 16)))
+        elif c == "sc":
+            k = t[1]
+            if k == "dr":
+                got = self.call(ACT_SCORES[k], INFO, self.car_ptr(t[2]))
+            elif k in ("nc", "bl"):
+                e.put32(OUT, PAT32)
+                got = self.call(ACT_SCORES[k], INFO, OUT)
+                self.emit("  out %s" % self.name(w(OUT)))
+            else:
+                got = self.call(ACT_SCORES[k], INFO)
+            self.emit("  score %d" % s32(got))
+        elif c == "par":
+            got = self.call(AR_PARALLEL, self.car_ptr(t[1]),
+                            f12=int(t[2], 16))
+            self.emit("  par %d" % got)
+        elif c == "up":
+            a = self.car_ptr(t[1]) + C_UP
+            for i in range(4):
+                e.put32(a + 4 * i, int(t[2 + i], 16))
+        elif c == "nr":
+            self.normal[int(t[1])] = [int(x, 16) for x in t[2:6]]
+        elif c == "w":
+            e.put32(self.car_ptr(t[1]) + C_NW, int(t[2]))
+        elif c == "f":
+            e.put32(AB + ACT_FIELDS[t[1]], int(t[2], 16))
+        else:
+            raise SystemExit("bad op %r" % (t,))
 
     def dump_after(self):
         """The car the list's car leaves out, and the world's two counts."""
@@ -3069,6 +3548,8 @@ class Model(object):
             self.dump_choice(CHOICE, "choice")
             self.dump_target()
             self.dump_after()
+        elif c.startswith("@"):
+            self.act_op(t)
         else:
             raise SystemExit("bad op %r" % (t,))
 
@@ -3130,6 +3611,10 @@ diff = pcc.diff
 
 def M(name, before, after, rel=DCC):
     return (name, rel, before, after)
+
+
+def AM(name, before, after):
+    return (name, AAS, before, after)
 
 
 MUTATIONS = [
@@ -4736,12 +5221,250 @@ MUTATIONS = [
       "d, list->MyCar, 0, list);\n    return done;"),
     M("ta-ret", "*out, list);\n    return done;\n}",
       "*out, list);\n    return !done;\n}"),
+    # -- step 11d-1's: the five actions ------------------------------------
+    AM("aa-tick", "0.000250000012f  // gp-28708", "0.00026f  // gp-28708"),
+    AM("aa-signed", "    return (float)(int32_t)((uint32_t)WorldTimer - t->PackedTime)",
+       "    return (float)((uint32_t)WorldTimer - t->PackedTime)"),
+    AM("aa-exp-lt", "return p->DeltaTime < seconds_since", "return p->DeltaTime <= seconds_since"),
+    AM("aa-exp-can", "           && p->CanExpire != 0;", ";"),
+    AM("aa-un-le", "if (seconds_since(&a->Base.ExpiryTimer) <= a->Base.DeltaTime)",
+       "if (seconds_since(&a->Base.ExpiryTimer) < a->Base.DeltaTime)"),
+    AM("aa-un-nan", "if (seconds_since(&a->Base.ExpiryTimer) <= a->Base.DeltaTime)",
+       "if (!(a->Base.DeltaTime < seconds_since(&a->Base.ExpiryTimer)))"),
+    AM("aa-un-pt", "    if (a->PointsToDriveWillExecuteAction != 0)\n        return 0;\n", ""),
+    AM("aa-un-can", "    return a->Base.CanExpire != 0;\n}", "    return 1;\n}"),
+    AM("aa-dtor-flags", "    aiaction_destroy(a, 0);\n    if (flags & 1)",
+       "    aiaction_destroy(a, 0);\n    if (flags & 2)"),
+    AM("aa-dtor-zero", "    aiaction_destroy(a, 0);", "    aiaction_destroy(a, flags);"),
+    AM("aa-line-test", "    if (drivingchoice_type_is_driving_line(choice->Type))\n        return;",
+       "    if (!drivingchoice_type_is_driving_line(choice->Type))\n        return;"),
+    AM("aa-line-set", "    drivingchoice_set_choice(choice, CHOICE_DRIVING_LINE_0, NULL, 0);",
+       "    drivingchoice_set_choice(choice, CHOICE_DRIVING_LINE_1, NULL, 0);"),
+    AM("aa-line-line", "drivingchoice_get_driving_line(CHOICE_DRIVING_LINE_0,\n                                       info",
+       "drivingchoice_get_driving_line(CHOICE_DRIVING_LINE_1,\n                                       info"),
+    AM("aa-line-relaxed", "info->MyNearbyCarList.MyCar),\n        1);",
+       "info->MyNearbyCarList.MyCar),\n        0);"),
+    AM("aa-avoid", "float AIDriverAvoidCarsImpactTimeThreshold = 2.0f;",
+       "float AIDriverAvoidCarsImpactTimeThreshold = 2.5f;"),
+    # JustDrive.
+    AM("jd-type", "a->Base.Type = AIACTION_JUST_DRIVE;", "a->Base.Type = AIACTION_DRAFT;"),
+    AM("jd-vt", "    a->Base.Base._vtable = AIJUSTDRIVE_VTABLE;",
+       "    a->Base.Base._vtable = AIDRAFT_VTABLE;"),
+    AM("jd-last", "    a->LastDecisionReevaluationTime.PackedTime = 0;",
+       "    a->LastDecisionReevaluationTime.PackedTime = (uint32_t)WorldTimer;"),
+    AM("jd-score", "    (void)info;\n    return 0;\n}\n\nint aijustdrive_has_been",
+       "    (void)info;\n    return 1;\n}\n\nint aijustdrive_has_been"),
+    AM("jd-acc", "    // 0x001c7460.\n    (void)a;\n    (void)info;\n    return 0;",
+       "    // 0x001c7460.\n    (void)a;\n    (void)info;\n    return 1;"),
+    AM("jd-fail", "    // 0x001c74b0.\n    (void)a;\n    (void)info;\n    return 0;",
+       "    // 0x001c74b0.\n    (void)a;\n    (void)info;\n    return 1;"),
+    AM("jd-exp", "    // 0x001c7468.\n    (void)info;\n    return past_timeout(&a->Base.Base);",
+       "    // 0x001c7468.\n    (void)info;\n    return 0;"),
+    AM("jd-every", "    if (AIJD_REEVALUATE_EVERY\n        <= (float)",
+       "    if (AIJD_REEVALUATE_EVERY\n        < (float)"),
+    AM("jd-every-const", "AIJD_REEVALUATE_EVERY  3.0f", "AIJD_REEVALUATE_EVERY  2.0f"),
+    AM("jd-now", "        a->LastDecisionReevaluationTime.PackedTime = (uint32_t)now;\n", ""),
+    AM("jd-now-inside",
+       "        a->LastDecisionReevaluationTime.PackedTime = (uint32_t)now;\n"
+       "        if (choice->Type != CHOICE_DRIVING_LINE_0) {\n",
+       "        if (choice->Type != CHOICE_DRIVING_LINE_0) {\n"
+       "            a->LastDecisionReevaluationTime.PackedTime = (uint32_t)now;\n"),
+    AM("jd-type-test", "        if (choice->Type != CHOICE_DRIVING_LINE_0) {",
+       "        if (!drivingchoice_type_is_driving_line(choice->Type)) {"),
+    AM("jd-try-line", "drivingchoice_set_choice(&c, CHOICE_DRIVING_LINE_0, NULL, 0);",
+       "drivingchoice_set_choice(&c, CHOICE_DRIVING_LINE_1, NULL, 0);"),
+    AM("jd-pref", "&c, &t, 0, &score,", "&c, &t, 1, &score,"),
+    AM("jd-a", "&info->MyNearbyCarList, 0.0f,\n                    AIDriverAvoid",
+       "&info->MyNearbyCarList, 1.0f,\n                    AIDriverAvoid"),
+    AM("jd-thr", "AIDriverAvoidCarsImpactTimeThreshold, 0.0f,",
+       "2.0f, 0.0f,"),
+    AM("jd-move", "                    MOVEMENT_TOWARDS_LINE)) {",
+       "                    MOVEMENT_PARALLEL_TO_LINE)) {"),
+    AM("jd-copy", "                *choice = c;\n", ""),
+    AM("jd-done", "                done = 1;\n", ""),
+    AM("jd-relaxed", "                    1);\n                drivetarget_assign",
+       "                    0);\n                drivetarget_assign"),
+    AM("jd-assign", "                drivetarget_assign(&a->Base.PointsToDrive, &t);\n", ""),
+    AM("jd-notdone", "    if (!done) {\n        make_choice_a_line(info);",
+       "    if (1) {\n        make_choice_a_line(info);"),
+    AM("jd-mkline", "    if (!done) {\n        make_choice_a_line(info);",
+       "    if (!done) {"),
+    AM("jd-build", "&info->MyNearbyCarList, 0.0f, 0.0f,\n                                         MOVEMENT_TOWARDS_LINE);",
+       "&info->MyNearbyCarList, 0.0f, 0.0f,\n                                         MOVEMENT_PARALLEL_TO_LINE);"),
+    AM("jd-tol", "    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.PointsToDriveWillExecuteAction = 1;\n    a->Base.UseDrivingLineSpeed = 1;",
+       "    a->Base.DesiredSpeedTolerance = 1.0f;\n    a->Base.PointsToDriveWillExecuteAction = 1;\n    a->Base.UseDrivingLineSpeed = 1;"),
+    AM("jd-pt", "    a->Base.PointsToDriveWillExecuteAction = 1;\n    a->Base.UseDrivingLineSpeed = 1;",
+       "    a->Base.PointsToDriveWillExecuteAction = 0;\n    a->Base.UseDrivingLineSpeed = 1;"),
+    AM("jd-udl", "    a->Base.UseDrivingLineSpeed = 1;\n    a->Base.AllowedToUseThrottleAndBrake = 1;\n    a->Base.AllowedToUseBoost = 1;",
+       "    a->Base.UseDrivingLineSpeed = 0;\n    a->Base.AllowedToUseThrottleAndBrake = 1;\n    a->Base.AllowedToUseBoost = 1;"),
+    AM("jd-tb", "    a->Base.AllowedToUseThrottleAndBrake = 1;\n    a->Base.AllowedToUseBoost = 1;\n}",
+       "    a->Base.AllowedToUseThrottleAndBrake = 0;\n    a->Base.AllowedToUseBoost = 1;\n}"),
+    AM("jd-bo", "    a->Base.AllowedToUseBoost = 1;\n}", "    a->Base.AllowedToUseBoost = 0;\n}"),
+    AM("jd-name", "\"Just Drive\"", "\"Just drive\""),
+    AM("jd-dtor", "destroy_as(&a->Base, AIJUSTDRIVE_VTABLE, flags);",
+       "destroy_as(&a->Base, AIJUSTDRIVE_VTABLE, 0);"),
+    # Draft.
+    AM("dr-type", "a->Base.Type = AIACTION_DRAFT;", "a->Base.Type = AIACTION_BLOCK;"),
+    AM("dr-vt", "    a->Base.Base._vtable = AIDRAFT_VTABLE;",
+       "    a->Base.Base._vtable = AIJUSTDRIVE_VTABLE;"),
+    AM("dr-score", "car) != NULL\n               ? AIDR_SCORE", "car) == NULL\n               ? AIDR_SCORE"),
+    AM("dr-score-car", "nearbycarlist_get_car_ahead(&info->MyNearbyCarList, car)",
+       "nearbycarlist_get_car_ahead(&info->MyNearbyCarList,\n                                       info->MyNearbyCarList.MyCar)"),
+    AM("dr-acc", "    // 0x001c7750.\n    (void)a;\n    (void)info;\n    return 0;",
+       "    // 0x001c7750.\n    (void)a;\n    (void)info;\n    return 1;"),
+    AM("dr-fail", "    // 0x001c77a0.\n    (void)a;\n    (void)info;\n    return 0;",
+       "    // 0x001c77a0.\n    (void)a;\n    (void)info;\n    return 1;"),
+    AM("dr-exp", "    // 0x001c7758.\n    (void)info;\n    return past_timeout(&a->Base.Base);",
+       "    // 0x001c7758.\n    (void)info;\n    return past_timeout_unstarted(&a->Base);"),
+    AM("dr-mkline", "    make_choice_a_line(info);\n    drivingchoice_build_drive_target(&info->MyDrivingChoice,",
+       "    drivingchoice_build_drive_target(&info->MyDrivingChoice,"),
+    AM("dr-move", "list, 0.0f,\n                                     0.0f, MOVEMENT_TOWARDS_LINE);",
+       "list, 0.0f,\n                                     0.0f, MOVEMENT_PARALLEL_TO_LINE);"),
+    AM("dr-tol", "    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.AllowedToUseBoost = 1;",
+       "    a->Base.DesiredSpeedTolerance = 1.0f;\n    a->Base.AllowedToUseBoost = 1;"),
+    AM("dr-bo", "    a->Base.AllowedToUseBoost = 1;\n    a->Base.UseDrivingLineSpeed = 1;",
+       "    a->Base.AllowedToUseBoost = 0;\n    a->Base.UseDrivingLineSpeed = 1;"),
+    AM("dr-udl", "    a->Base.UseDrivingLineSpeed = 1;\n    a->Base.AllowedToUseThrottleAndBrake = 1;\n    nc",
+       "    a->Base.UseDrivingLineSpeed = 0;\n    a->Base.AllowedToUseThrottleAndBrake = 1;\n    nc"),
+    AM("dr-tb", "    a->Base.AllowedToUseThrottleAndBrake = 1;\n    nc",
+       "    a->Base.AllowedToUseThrottleAndBrake = 0;\n    nc"),
+    AM("dr-ahead", "    nc = nearbycarlist_get_car_ahead(list, list->MyCar);",
+       "    nc = NULL;"),
+    AM("dr-abs", "&& fabsf(nc->Position.x) <", "&& nc->Position.x <"),
+    AM("dr-across-lt", "fabsf(nc->Position.x) < list->MyHalfSizeL",
+       "fabsf(nc->Position.x) <= list->MyHalfSizeL"),
+    AM("dr-across-hl", "< list->MyHalfSizeL + nc->ApparentHalfSizeL",
+       "< nc->ApparentHalfSizeL"),
+    AM("dr-close-lt", "&& nc->Position.y < AIDR_CLOSE", "&& nc->Position.y <= AIDR_CLOSE"),
+    AM("dr-close", "AIDR_CLOSE             6.0f", "AIDR_CLOSE             7.0f"),
+    AM("dr-gap", "AIDR_GAP               20.0f", "AIDR_GAP               21.0f"),
+    AM("dr-gap-sign", "- (AIDR_GAP - nc->Position.y)", "- (AIDR_GAP + nc->Position.y)"),
+    AM("dr-the-car", "nc->TheCar->State.VelocityMagnitude", "list->MyCar->State.VelocityMagnitude"),
+    AM("dr-lower", "if (speed < a->Base.DesiredSpeed) {", "if (speed <= a->Base.DesiredSpeed) {"),
+    AM("dr-lower-any", "if (speed < a->Base.DesiredSpeed) {", "if (1) {"),
+    AM("dr-ds", "            a->Base.DesiredSpeed = speed;\n", ""),
+    AM("dr-tt", "            a->Base.TimeToGetToDesiredSpeed = 0.0f;",
+       "            a->Base.TimeToGetToDesiredSpeed = 1.0f;"),
+    AM("dr-udl0", "            a->Base.UseDrivingLineSpeed = 0;", "            a->Base.UseDrivingLineSpeed = 1;"),
+    AM("dr-pt", "    a->Base.PointsToDriveWillExecuteAction = 1;\n}\n\n// "
+       "---------------------------------------------- NudgeCar",
+       "    a->Base.PointsToDriveWillExecuteAction = 0;\n}\n\n// "
+       "---------------------------------------------- NudgeCar"),
+    AM("dr-dtor", "destroy_as(&a->Base, AIDRAFT_VTABLE, flags);",
+       "destroy_as(&a->Base, AIDRAFT_VTABLE, 0);"),
+    # NudgeCar and Block.
+    AM("nc-type", "a->Base.Type = AIACTION_NUDGE_CAR;", "a->Base.Type = AIACTION_BLOCK;"),
+    AM("nc-car", "a->CarToNudge = car;", "a->CarToNudge = NULL;"),
+    AM("nc-vt", "    a->Base.Base._vtable = AINUDGECAR_VTABLE;",
+       "    a->Base.Base._vtable = AIBLOCK_VTABLE;"),
+    AM("bl-type", "a->Base.Type = AIACTION_BLOCK;", "a->Base.Type = AIACTION_NUDGE_CAR;"),
+    AM("bl-car", "a->CarToBlock = car;", "a->CarToBlock = NULL;"),
+    AM("bl-vt", "    a->Base.Base._vtable = AIBLOCK_VTABLE;",
+       "    a->Base.Base._vtable = AINUDGECAR_VTABLE;"),
+    AM("nc-score", "    return AINC_SCORE;", "    return AIBL_SCORE;"),
+    AM("nc-out", "    *car = NULL;\n    return AINC_SCORE;", "    return AINC_SCORE;"),
+    AM("bl-score", "    return AIBL_SCORE;", "    return AINC_SCORE;"),
+    AM("bl-out", "    *car = NULL;\n    return AIBL_SCORE;", "    return AIBL_SCORE;"),
+    AM("nc-acc", "    // 0x001c80e8.\n    (void)a;\n    (void)info;\n    return 1;",
+       "    // 0x001c80e8.\n    (void)a;\n    (void)info;\n    return 0;"),
+    AM("nc-fail", "    // 0x001c8148.\n    (void)a;\n    (void)info;\n    return 0;",
+       "    // 0x001c8148.\n    (void)a;\n    (void)info;\n    return 1;"),
+    AM("bl-acc", "    // 0x001c8220.\n    (void)a;\n    (void)info;\n    return 1;",
+       "    // 0x001c8220.\n    (void)a;\n    (void)info;\n    return 0;"),
+    AM("bl-fail", "    // 0x001c8280.\n    (void)a;\n    (void)info;\n    return 0;",
+       "    // 0x001c8280.\n    (void)a;\n    (void)info;\n    return 1;"),
+    AM("nc-exp", "    // 0x001c80f0.\n    (void)info;\n    return past_timeout_unstarted(&a->Base);",
+       "    // 0x001c80f0.\n    (void)info;\n    return past_timeout(&a->Base.Base);"),
+    AM("bl-exp", "    // 0x001c8228.\n    (void)info;\n    return past_timeout_unstarted(&a->Base);",
+       "    // 0x001c8228.\n    (void)info;\n    return past_timeout(&a->Base.Base);"),
+    AM("nc-pt", "    // 0x001c8150.\n    (void)info;\n    a->Base.PointsToDriveWillExecuteAction = 1;",
+       "    // 0x001c8150.\n    (void)info;\n    a->Base.PointsToDriveWillExecuteAction = 0;"),
+    AM("bl-pt", "    // 0x001c8288.\n    (void)info;\n    a->Base.PointsToDriveWillExecuteAction = 1;",
+       "    // 0x001c8288.\n    (void)info;\n    a->Base.PointsToDriveWillExecuteAction = 0;"),
+    AM("nc-dtor", "destroy_as(&a->Base, AINUDGECAR_VTABLE, flags);",
+       "destroy_as(&a->Base, AINUDGECAR_VTABLE, 0);"),
+    AM("bl-dtor", "destroy_as(&a->Base, AIBLOCK_VTABLE, flags);",
+       "destroy_as(&a->Base, AIBLOCK_VTABLE, 0);"),
+    # AccidentRecovery.
+    AM("ar-vt", "    a->Base.Base._vtable = AIACCIDENTRECOVERY_VTABLE;",
+       "    a->Base.Base._vtable = AIJUSTDRIVE_VTABLE;"),
+    AM("ar-type", "a->Base.Type = AIACTION_ACCIDENT_RECOVERY;", "a->Base.Type = AIACTION_NONE;"),
+    AM("ar-made", "    a->MyCreationTime.PackedTime = (uint32_t)WorldTimer;\n", ""),
+    AM("ar-reset0", "    a->HaveResetYet = 0;\n    return a;", "    a->HaveResetYet = 1;\n    return a;"),
+    AM("ar-score-nw", "if (car->State.nWheelsTouchingGround < 2)",
+       "if (car->State.nWheelsTouchingGround <= 2)"),
+    AM("ar-score-par", "crashed = !aiaccidentrecovery_sort_of_parallel_to_track(car,",
+       "crashed = aiaccidentrecovery_sort_of_parallel_to_track(car,"),
+    AM("ar-score-thr", "track(car,\n                                                                AIAR_UPRIGHT);",
+       "track(car,\n                                                                0.5f);"),
+    AM("ar-score", "return crashed ? AIAR_SCORE : AIA_NO_SCORE;",
+       "return crashed ? AIA_NO_SCORE : AIAR_SCORE;"),
+    AM("ar-upright", "AIAR_UPRIGHT           0.707000017f", "AIAR_UPRIGHT           0.7071f"),
+    AM("ar-par-lt", "return threshold < (ux * normal.x", "return threshold <= (ux * normal.x"),
+    AM("ar-par-norm", "    q = 1.0f / sqrtf(", "    q = 1.0f + 0.0f * sqrtf("),
+    AM("ar-par-z", "+ uz * normal.z;", "+ uz * normal.y;"),
+    AM("ar-par-found", "&terrain, &normal, NULL);", "&terrain, &normal, &terrain);"),
+    AM("ar-acc-reset", "    if (a->HaveResetYet != 0)\n        return 1;",
+       "    if (a->HaveResetYet != 0)\n        return 0;"),
+    AM("ar-acc-nw", "if (car->State.nWheelsTouchingGround != 4)",
+       "if (car->State.nWheelsTouchingGround < 4)"),
+    AM("ar-acc-par", "AIAR_UPRIGHT)\n           != 0;", "AIAR_UPRIGHT)\n           == 0;"),
+    AM("ar-fail", "    // 0x001ca430.\n    (void)a;\n    (void)info;\n    return 0;",
+       "    // 0x001ca430.\n    (void)a;\n    (void)info;\n    return 1;"),
+    AM("ar-exp", "    // 0x001ca3e8.\n    (void)info;\n    return past_timeout(&a->Base.Base);",
+       "    // 0x001ca3e8.\n    (void)info;\n    return past_timeout_unstarted(&a->Base);"),
+    AM("ar-cp-line", "    if (!drivingchoice_type_is_driving_line(choice->Type))\n        drivingchoice_set_choice_location",
+       "    if (drivingchoice_type_is_driving_line(choice->Type))\n        drivingchoice_set_choice_location"),
+    AM("ar-cp-move", "MOVEMENT_PARALLEL_TO_LINE);\n    a->Base.TimeToGetToDesiredSpeed",
+       "MOVEMENT_TOWARDS_LINE);\n    a->Base.TimeToGetToDesiredSpeed"),
+    AM("ar-tt", "    a->Base.TimeToGetToDesiredSpeed = 0.0f;\n    a->Base.UseDrivingLineSpeed = 0;",
+       "    a->Base.TimeToGetToDesiredSpeed = 1.0f;\n    a->Base.UseDrivingLineSpeed = 0;"),
+    AM("ar-udl", "    a->Base.UseDrivingLineSpeed = 0;\n    a->Base.DesiredSpeed = 0.0f;",
+       "    a->Base.UseDrivingLineSpeed = 1;\n    a->Base.DesiredSpeed = 0.0f;"),
+    AM("ar-ds", "    a->Base.DesiredSpeed = 0.0f;\n    a->Base.DesiredSpeedTolerance",
+       "    a->Base.DesiredSpeed = 1.0f;\n    a->Base.DesiredSpeedTolerance"),
+    AM("ar-tol", "    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.PointsToDriveWillExecuteAction = 1;\n    a->Base.AllowedToUseThrottleAndBrake = 0;",
+       "    a->Base.DesiredSpeedTolerance = 1.0f;\n    a->Base.PointsToDriveWillExecuteAction = 1;\n    a->Base.AllowedToUseThrottleAndBrake = 0;"),
+    AM("ar-pt", "    a->Base.PointsToDriveWillExecuteAction = 1;\n    a->Base.AllowedToUseThrottleAndBrake = 0;",
+       "    a->Base.PointsToDriveWillExecuteAction = 0;\n    a->Base.AllowedToUseThrottleAndBrake = 0;"),
+    AM("ar-tb", "    a->Base.AllowedToUseThrottleAndBrake = 0;", "    a->Base.AllowedToUseThrottleAndBrake = 1;"),
+    AM("ar-after-le", "if (AIAR_RESET_AFTER <= seconds_since", "if (AIAR_RESET_AFTER < seconds_since"),
+    AM("ar-after", "AIAR_RESET_AFTER       5.0f", "AIAR_RESET_AFTER       4.0f"),
+    AM("ar-once", "\n        && a->HaveResetYet == 0) {", ") {"),
+    AM("ar-reset-call", "        car_please_reset_me_later(info->MyNearbyCarList.MyCar);\n", ""),
+    AM("ar-reset-set", "        a->HaveResetYet = 1;\n", ""),
+    AM("ar-name", "\"Accident recovery\"", "\"Accident Recovery\""),
+    AM("ar-dtor", "destroy_as(&a->Base, AIACCIDENTRECOVERY_VTABLE, flags);",
+       "destroy_as(&a->Base, AIACCIDENTRECOVERY_VTABLE, 0);"),
+    # The tables.
+    AM("vt-jd-cptd", "E(aijustdrive_calculate_points_to_drive),   //  24",
+       "E(aidraft_calculate_points_to_drive),   //  24"),
+    AM("vt-dr-name", "E(aiaction_get_name),                       //  32  0x001caae0\n    E(aidraft",
+       "E(aijustdrive_get_name),                       //  32  0x001caae0\n    E(aidraft"),
+    AM("vt-dr-exp", "E(aidraft_has_expired),", "E(ainudgecar_has_expired),"),
+    AM("vt-nc-acc", "E(ainudgecar_has_been_accomplished),", "E(ainudgecar_has_failed),"),
+    AM("vt-bl-exp", "E(aiblock_has_expired),", "E(aidraft_has_expired),"),
+    AM("vt-ar-acc", "E(aiaccidentrecovery_has_been_accomplished),", "E(aiaccidentrecovery_has_failed),"),
+    AM("vt-ar-name", "E(aiaccidentrecovery_get_name),", "E(aiaction_get_name),"),
+    AM("vt-install", "    vt_install(AIBLOCK_VTABLE, aiblock_vt, AIACTION_VT_ENTRIES);\n", ""),
     # -- EstimateScore's distances, which a stale pick reads ------------------
     M("es-static", "    static float dist[DRIVETARGET_MAX_POINTS];",
       "    float dist[DRIVETARGET_MAX_POINTS] = { 0.0f };", rel=DT),
 ]
 
 EQUIVALENT = {
+    "jd-every":
+        "`<=` and `<` part only where the seconds are exactly 3.0f, and no "
+        "tick count gives that: 11999 ticks times 0.00025f is 2.99975f and "
+        "12000 is 3.0000002f.",
+    "jd-pref":
+        "A preferred IsDriveable scales only the score it hands back, which "
+        "JustDrive never reads (the driveable test is on the score before "
+        "it), and leaves out the choice's own car, which is NULL for "
+        "DRIVING_LINE_0, as the other arm does.",
+    "jd-a":
+        "IsDriveable hands that float to BuildDriveTarget, which does not "
+        "read it.",
     "mn-third":
         "MakeNewChoice's third arm needs the current choice's score off -1, "
         "and that score is bestScore read straight after the current try, "

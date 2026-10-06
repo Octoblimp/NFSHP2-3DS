@@ -1,11 +1,12 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 38
-(2026-10-06), after 11c, AIPlan and the AIAction base.
+(2026-10-06), after 11d-1, the five small AI actions.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
-11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, and
-11c, AIPlan and the AIAction base, are done and checked against retail. The car selector is finished and checked against retail: SC-1
+11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
+AIPlan and the AIAction base, and 11d-1, the five small actions, are
+done and checked against retail. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -190,18 +191,37 @@ car's were.
 - **11d: the actions.** Eleven subclasses, retail 0x001c6ba0 to
   0x001caa00; `out/retail_syms.txt` has every function. They split
   three ways by size:
-  - **11d-1, next:** the five small ones:
-    - JustDrive (0x001c73c0; CalculatePointsToDrive is 468 bytes);
-    - Draft (0x001c7690);
-    - NudgeCar (0x001c8028);
-    - Block (0x001c8160);
-    - AccidentRecovery (0x001ca1f0, with SortOfParallelToTrack).
-
-    Each comes with its constructor, CalculateScore, the three tests,
-    CalculatePointsToDrive, GetName and destructor. The last two are
-    0x001ca5b8 to 0x001ca988.
-  - 11d-2: Pass (0x001c78f8, with SideOfCarIsOkay) and AvoidCars
-    (0x001c6ba0, whose CalculatePointsToDrive is 1220 bytes).
+  - **11d-1, done:** the five small ones, in `aiactions.c`:
+    JustDrive, Draft, NudgeCar, Block and AccidentRecovery (with
+    SortOfParallelToTrack). Each has its constructor, CalculateScore,
+    the three tests, CalculatePointsToDrive, GetName and destructor, and
+    `main.c` installs the five tables.
+    - JustDrive tries line 0 with IsDriveable at most every three
+      seconds (AIDriverAvoidCarsImpactTimeThreshold, 2.0f, is defined
+      in `aiactions.c`). Draft slows behind a car under 6 m ahead, and
+      only ever lowers its speed. NudgeCar and Block only set
+      PointsToDriveWillExecuteAction and are always accomplished.
+      AccidentRecovery stops on the route and resets the car once,
+      five seconds after it was made.
+    - NudgeCar's and Block's HasExpired use `c.le.s` the other way
+      round, so a NaN timeout goes on to the other tests.
+    - Retail leaves f14 (IsDriveable) and f13 (BuildDriveTarget) stale;
+      neither is read, and the port passes 0.
+    - `drivingchoice_check` runs them, over retail's AIAction base:
+      - 352 scenarios, 142016 ops, 178348 lines, 0 differ;
+      - 136 mutations for 11d-1: 133 caught (1 by a crash) and 3
+        equivalent (jd-every, jd-pref, jd-a). Across the checker, 877
+        mutations: 863 caught, 14 equivalent and 0 unexplained.
+      - s_act_edges closes the first pass's four gaps: the slot's fill,
+        the -1 timeout, the exact 4000 ticks and normals between 0.5
+        and 0.707.
+    - `docs/formats/ai-action.md` has the detail, under "The small
+      actions (11d-1)".
+  - **11d-2, next:** Pass (0x001c78f8, with SideOfCarIsOkay) and
+    AvoidCars (0x001c6ba0, whose CalculatePointsToDrive is 1220
+    bytes). drivingchoice_check's "@" ops and s_actions carry over:
+    add the two kinds to ACT_KINDS and their constructors' arguments
+    to `@n`.
   - 11d-3:
     - PullOver (0x001c8298);
     - GetUnstuck (0x001c8b30, with AreWeStuckBehindSomeone and the
@@ -224,9 +244,9 @@ car's were.
   - Each subclass's fields sit sixteen bytes later than the demo's
     (retail's 608-byte base). Their tables are in retail's `.data` near
     `_vt$8AIAction` (0x002b7c90). The DoSnapshots wait on ReplaySnapshot.
-  - `nearbycar_check` has the base's ops and its stubs (the pool, the
-    driver's GetSteerToPoint). Its test table can give way to the real
-    tests.
+  - `drivingchoice_check` has the actions' ops (`@n`, `@cp`, `@us`,
+    `@t`, `@sc` and the rest) and stubs (the pool, GetElevation,
+    PleaseResetMeLater). `nearbycar_check` keeps the base's.
 - 11e and 11f: AICarController and AIDriver (`gAIDriverCtorFn` in
   `carmodes.h`, and `gAICarControllerGetCurrentDrivingLineSpeedFn` in
   `car.h`).
@@ -3806,14 +3826,14 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-06, after 11c, AIPlan and AIAction)
+### Where the port stands (2026-10-06, after 11d-1, the small actions)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11d-1, the five small actions.
+- **Next:** step 11, the racer AI: 11d-2, Pass and AvoidCars.
   See "Now" at the top. These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
@@ -3821,7 +3841,8 @@ goes in.
   - 11b-3, BuildDriveTarget and round a car;
   - 11b-4a, CarCollisionPredict;
   - 11b-4b, MakeNewChoice and the three it calls;
-  - 11c, AIPlan and the AIAction base.
+  - 11c, AIPlan and the AIAction base;
+  - 11d-1, the five small actions.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -3833,7 +3854,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a to 11c done) | 6-8 |
+  | 11, the racer and traffic AI (11a to 11d-1 done) | 5-7 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |
@@ -3841,12 +3862,12 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped; New 3DS only since 2026-10-05) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **27-41** |
+  | **Total** | **26-40** |
 
-- **How far along:** about 31-34 of the road's 58-75 slices are done,
-  roughly a third. The estimates run low. Step 13 was put at 1-2 slices
+- **How far along:** about 32-35 of the road's 58-75 slices are done,
+  roughly half. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
-  Read the 27-41 as a floor. Step 11 was put at 4-6 before its slices
+  Read the 26-40 as a floor. Step 11 was put at 4-6 before its slices
   were laid out. They are thirteen, with traffic beside them: 11a, 11b-1
   to 11b-3, 11b-4a and 11b-4b, 11c, 11d-1 to 11d-3, and 11e to 11g. 11b
   was one slice until DrivingChoice's 13 KB were read, and 11d until the
