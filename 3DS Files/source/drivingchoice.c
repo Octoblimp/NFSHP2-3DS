@@ -7,16 +7,23 @@
 #include <stdint.h>
 
 #include "aicarcontroller.h"
+#include "bvector.h"
+#include "cardriver.h"
 #include "cartypeinfo.h"
 #include "collisionbody.h"   // WilliamsAITuningMode
 #include "drivetarget.h"
 #include "drivinglocation.h"
+#include "eefpu.h"
 #include "nearbycar.h"
 #include "race.h"
 #include "racecore.h"
 #include "trackroute.h"
 
 AISignPostDecisionFn gAISignPostDecisionFn;
+
+int32_t AITrafficTuningMode;           // gp-15152, 0x00331dc0
+float   AISlowCarSpeed = 20.0f;        // gp-15120, 0x00331de0
+float   AISlowTrafficSpeed = 10.0f;    // gp-15116, 0x00331de4
 
 // Retail's constants. The two speeds are 60 and 66 mph in metres a second.
 #define DC_ON_ROAD          -0.00100000005f  // gp-26600, IsEnoughRoom
@@ -32,6 +39,17 @@ AISignPostDecisionFn gAISignPostDecisionFn;
 #define DC_PAST_TARGET      -10.0f           // lui 0xc120
 #define DC_MIN_POINTS        5
 #define DC_EDGE              1.0f            // lui 0x3f80, ReduceCurrentL
+#define DC_EXTRA_LATERAL     4.0f            // lui 0x4080
+#define DC_FAR_OFF_ROAD      5.0f            // lui 0x40a0
+#define DC_PARALLEL_SPEED    5.0f            // lui 0x40a0
+#define DC_PARALLEL_WHEELS   3
+#define DC_SAME_HEADING      0.707099974f    // gp-26580, cos 45
+#define DC_NO_EDGE           999999.0f       // gp-26572, and gp-26576 less
+#define DC_FAR_AWAY          1.0e14f         // gp-26568
+#define DC_SEARCH_STEP       0.0416666679f   // gp-26564, 1/24
+#define DC_GAP               2.0f            // lui 0x4000
+#define DC_GAP_PLAYER        1.5f            // lui 0x3fc0
+#define DC_GAP_SLOW          6.0f            // lui 0x40c0
 
 // `min.s` and `max.s`, fs then ft, as collision.c has them.
 static float min_s(float fs, float ft)
@@ -57,6 +75,23 @@ static float lateral(const TrackRoutePoint *p, float x, float y)
 {
     return (x - p->Position.x) * p->Direction.y
            - (y - p->Position.y) * p->Direction.x;
+}
+
+// A future point's route point. Every list the port walks is filled from
+// routes filed under their numbers.
+static TrackRoutePoint *fp_point(const FuturePoint *fp)
+{
+    return troute_get_point(route_numbered(fp->nRouteNumber),
+                            fp->nPointNumber);
+}
+
+// 0x002455b0. How far `l` across `p` is off the road: past the right edge
+// for an `l` above 0, past the left otherwise; negative on it.
+static float amount_out_of_bounds(const TrackRoutePoint *p, float l)
+{
+    if (0.0f < l)
+        return l - p->RightWidth;
+    return -(l + p->LeftWidth);
 }
 
 // ------------------------------------------------- the small methods
@@ -580,4 +615,343 @@ void drivingchoice_fill_up_drive_target(DriveTarget *t, DrivingLocation *loc,
     drivingchoice_set_choice_location(&dc, loc);
     drivingchoice_fixup_car_to_exclude_from_collision_prediction(
         &dc, list->MyCar, 0, list);
+}
+
+// ---------------------------------------- the target, and round a car
+
+int32_t futurepointlist_find_closest_point_ahead(const FuturePointList *l,
+                                                 const bVector2 *pos,
+                                                 int32_t start)
+{
+    // 0x00244d80. `pmaxw` with zero for the start, the count read once.
+    int32_t n = l->NumPoints;
+    int32_t i = start < 0 ? 0 : start;
+    int32_t best = -1;
+    float bestDist = DC_FAR_AWAY;
+
+    while (i < n) {
+        const TrackRoutePoint *p = fp_point(&l->Points[i]);
+        float dx = p->Position.x - pos->x;
+        float dy = p->Position.y - pos->y;
+        float d = sqrtf(dx * dx + dy * dy);
+        float ahead = -((pos->x - p->Position.x) * p->Direction.x
+                        + (pos->y - p->Position.y) * p->Direction.y);
+        int32_t skip;
+
+        if (0.0f < ahead && d < bestDist) {
+            bestDist = d;
+            best = i;
+        }
+        // `cvt.w.s`, then `slt` and `mult` for the max with 0. The add
+        // wraps as the image's does, past 5e10 m.
+        skip = ee_trunc_w(d * DC_SEARCH_STEP) - 2;
+        i = (int32_t)((uint32_t)i + (uint32_t)(0 < skip ? skip : 0) + 1u);
+    }
+    return best;
+}
+
+void drivingchoice_do_smooth_offset_change(FuturePointList *l, DriveTarget *t,
+                                           NearbyCarList *list, int32_t index,
+                                           float fromL, float toL, int inside)
+{
+    // 0x00244ea0.
+    int32_t last = index - 2, i;
+    const TrackRoutePoint *p0, *pe;
+    bVector2 a, b;
+    float slope;
+
+    if (last + 1 < 2)
+        return;
+    p0 = fp_point(&l->Points[0]);
+    pe = fp_point(&l->Points[last]);
+    trpoint_get_position2(p0, &a, 0.0f,
+                          trpoint_get_driving_line_offset(p0,
+                                                          l->Points[0].nLine));
+    trpoint_get_position2(pe, &b, 0.0f,
+                          trpoint_get_driving_line_offset(pe,
+                                                          l->Points[last].nLine));
+    // ee_div: the first and last points can be in one place (a point
+    // twice, or a sign's route starting where the sign is), and the EE's
+    // FLT_MAX there takes every point but the first to toL, where IEEE's
+    // 0/0 would be a NaN.
+    slope = ee_div(toL - fromL,
+                   sqrtf((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)));
+    if (!(t->NumPoints < DRIVETARGET_MAX_POINTS))
+        return;
+
+    i = 0;
+    do {
+        const FuturePoint *fp = &l->Points[i];
+        const TrackRoutePoint *p = fp_point(fp);
+        bVector2 c;
+        bVector3 pos;
+        float cur, lo, hi;
+
+        trpoint_get_position2(p, &c, 0.0f,
+                              trpoint_get_driving_line_offset(p, fp->nLine));
+        cur = fromL + sqrtf((a.x - c.x) * (a.x - c.x)
+                            + (a.y - c.y) * (a.y - c.y)) * slope;
+        // No further than toL, either way.
+        if (fromL < toL) {
+            if (toL < cur)
+                cur = toL;
+        } else if (toL <= fromL) {
+            if (cur < toL)
+                cur = toL;
+        }
+        cur = (cur + trpoint_get_driving_line_offset(p, fp->nLine))
+              + fp->fOffset;
+        if (inside) {
+            lo = (DC_EDGE - p->LeftWidth) + list->MyHalfSizeL;
+            hi = (p->RightWidth - DC_EDGE) - list->MyHalfSizeL;
+        } else {
+            lo = -p->LeftWidth;
+            hi = p->RightWidth;
+        }
+        // STACK-W, as in drivingchoice_add_to_drive_target.
+        pos.pad = 0.0f;
+        trpoint_get_position3(p, &pos, 0.0f, min_s(hi, max_s(cur, lo)));
+        drivetarget_add_point3(t, &pos, (int8_t)fp->nRouteNumber,
+                               (int16_t)fp->nPointNumber, (int8_t)fp->nLine,
+                               1, NULL);
+        i++;
+    } while (!(last < i) && t->NumPoints < DRIVETARGET_MAX_POINTS);
+}
+
+float drivingchoice_get_clearance(NearbyCarList *list, NearbyCar *nc,
+                                  const FuturePointList *l, int32_t index)
+{
+    // 0x002442c0. The image's first argument, the choice, is never read.
+    Car *me, *other;
+    float gap = 0.0f, least, v;
+
+    if (nc == NULL)
+        return 0.0f;
+    me = list->MyCar;
+    other = nc->TheCar;
+    if (l->NumPoints != 0) {
+        if (index == -1)
+            index = futurepointlist_find_closest_point_ahead(
+                l, (const bVector2 *)&other->State.Position, 0);
+        if (index != -1) {
+            const FuturePoint *f0 = &l->Points[0], *fi = &l->Points[index];
+            const TrackRoutePoint *p0 = fp_point(f0), *pi = fp_point(fi);
+            float mine, its;
+
+            mine = (lateral(p0, me->State.Position.x, me->State.Position.y)
+                    - trpoint_get_driving_line_offset(p0, f0->nLine))
+                   + f0->fOffset;
+            its = (lateral(pi, other->State.Position.x,
+                           other->State.Position.y)
+                   - trpoint_get_driving_line_offset(pi, fi->nLine))
+                  + fi->fOffset;
+            gap = (fabsf(mine - its) - list->MyHalfSizeL)
+                  - nc->ApparentHalfSizeL;
+        }
+    }
+
+    v = fabsf(other->State.VelocityMagnitude);
+    if (me->MyDriver->TheDriverType == DRIVER_TYPE_TRAFFIC_CAR)
+        least = DC_GAP;
+    else if (other->MyDriver->TheDriverType == DRIVER_TYPE_TRAFFIC_CAR
+                 ? v <= AISlowTrafficSpeed : v <= AISlowCarSpeed)
+        least = DC_GAP_SLOW;
+    else
+        least = other->pPlayer != NULL ? DC_GAP_PLAYER : DC_GAP;
+    return max_s(gap, least);
+}
+
+void drivingchoice_make_drive_target_parallel_to_car(
+    const DrivingChoice *d, DriveTarget *t, NearbyCarList *list,
+    const FuturePointList *l, float side)
+{
+    // 0x00243f70.
+    Car *other = d->pCar, *me = list->MyCar;
+    DriveTarget *its;
+    TrackRoute *r = NULL;
+    TrackRoutePoint *p = NULL;
+    bVector2 mine, theirs;
+    int32_t j, from = 0;
+
+    if (!(DC_PARALLEL_SPEED < other->State.VelocityMagnitude))
+        return;
+    if (!(DC_PARALLEL_SPEED < me->State.VelocityMagnitude))
+        return;
+    if (other->State.nWheelsTouchingGround < DC_PARALLEL_WHEELS)
+        return;
+    bNormalize2(&mine, (const bVector2 *)&me->State.Velocity);
+    bNormalize2(&theirs, (const bVector2 *)&other->State.Velocity);
+    if (!(DC_SAME_HEADING < mine.x * theirs.x + mine.y * theirs.y))
+        return;
+
+    its = &other->pCarDriver->MyDriveTarget;
+    j = drivetarget_get_first_point(its, &other->State);
+    while (t->NumPoints < DRIVETARGET_MAX_POINTS
+           && drivetarget_get_route_and_route_point(its, j, &r, &p)) {
+        const bVector3 *q = &its->Points[j];
+        float want = lateral(p, q->x, q->y) + side;
+        float lo = -DC_NO_EDGE, hi = DC_NO_EDGE, m;
+        bVector3 pos;
+
+        if (r->Type != TRACK_ROUTE_TRAFFIC) {
+            lo = -p->LeftWidth;
+            hi = p->RightWidth;
+        } else {
+            // On a traffic route, the road is our route's where it is
+            // nearest ahead of the point; with none ahead, no edge.
+            from = futurepointlist_find_closest_point_ahead(
+                l, (const bVector2 *)&p->Position, from);
+            if (from != -1) {
+                const TrackRoutePoint *e = fp_point(&l->Points[from]);
+                bVector2 le, re;
+                float ll, rl;
+
+                trpoint_get_position2(e, &le, 0.0f, -e->LeftWidth);
+                trpoint_get_position2(e, &re, 0.0f, e->RightWidth);
+                rl = lateral(p, re.x, re.y);
+                ll = lateral(p, le.x, le.y);
+                if (ll < rl) {
+                    lo = ll;
+                    hi = rl;
+                } else {
+                    lo = rl;
+                    hi = ll;
+                }
+            }
+        }
+        m = list->MyHalfSizeL + DC_EDGE;
+        lo = lo + m;
+        hi = hi - m;
+        // STACK-W.
+        pos.pad = 0.0f;
+        trpoint_get_position3(p, &pos, 0.0f, min_s(hi, max_s(want, lo)));
+        drivetarget_add_point3(t, &pos, its->Route[j],
+                               its->RoutePointNumber[j], its->DrivingLine[j],
+                               1, me);
+        j++;
+    }
+}
+
+int drivingchoice_build_drive_target_around_car(DrivingChoice *d,
+                                                DriveTarget *t,
+                                                NearbyCarList *list,
+                                                float unused,
+                                                DrivingLocation *loc)
+{
+    // 0x00243aa8.
+    FuturePointList fl;
+    NearbyCar *nc;
+    float currentL;
+    int32_t idx;
+    int done = 0;
+
+    (void)unused;
+    fl.NumPoints = 0;
+    nc = nearbycarlist_get_nearby_car(list, d->pCar);
+    currentL = 0.0f;
+    drivingchoice_get_route_points_to_use(&fl, t, loc, list, &currentL);
+    // The image reads the entry's car with no test: BuildDriveTarget only
+    // comes here once IsValid has found the car on the list. The port
+    // takes a missing one as a car not on the route ahead.
+    if (fl.NumPoints != 0 && nc != NULL
+        && (idx = futurepointlist_find_closest_point_ahead(
+                &fl, (const bVector2 *)&nc->TheCar->State.Position, 0))
+               != -1) {
+        const FuturePoint *fp = &fl.Points[idx];
+        TrackRoute *r;
+        TrackRoutePoint *p;
+        Car *other = nc->TheCar, *it;
+        float clearance, side, room, lat, along, passL;
+        int32_t line;
+        DriverType its;
+
+        clearance = drivingchoice_get_clearance(list, nc, &fl, idx);
+        if (d->UseExtraLateralDistance)
+            clearance = clearance + DC_EXTRA_LATERAL;
+        r = route_numbered(fp->nRouteNumber);
+        p = troute_get_point(r, fp->nPointNumber);
+        line = fp->nLine;
+        lat = lateral(p, other->State.Position.x, other->State.Position.y);
+        if (amount_out_of_bounds(p, lat) < DC_FAR_OFF_ROAD) {
+            bVector3 pos;
+
+            // Retail tests a debug word here (gp-15124, 0) and, when it is
+            // set, counts down the list's points with nothing done.
+            side = d->Type == CHOICE_LEFT_SIDE_OF_CAR ? -1.0f : 1.0f;
+            if (list->MyCar->MyDriver->TheDriverType
+                    == DRIVER_TYPE_TRAFFIC_CAR
+                && AITrafficTuningMode != 0)
+                side = -side;
+            room = side * ((list->MyHalfSizeL + nc->ApparentHalfSizeL)
+                           + clearance);
+            along = (other->State.Position.x - p->Position.x)
+                        * p->Direction.x
+                    + (other->State.Position.y - p->Position.y)
+                        * p->Direction.y;
+            passL = min_s((p->RightWidth - DC_EDGE) - list->MyHalfSizeL,
+                          max_s((lat + room) + fp->fOffset,
+                                list->MyHalfSizeL
+                                    - (p->LeftWidth - DC_EDGE)));
+
+            // The point beside the car, the way out to it, then the point.
+            pos.pad = 0.0f;   // STACK-W
+            trpoint_get_position3(p, &pos, along, passL);
+            drivingchoice_do_smooth_offset_change(
+                &fl, t, list, idx, currentL,
+                passL - trpoint_get_driving_line_offset(p, line), 1);
+            drivetarget_add_point3(t, &pos, (int8_t)r->RouteNumber,
+                                   (int16_t)troute_get_point_number(r, p),
+                                   (int8_t)line, 1, NULL);
+            t->LastPointToScore = (int8_t)(t->NumPoints - 1);
+
+            // Alongside a player that is no cop, or traffic when this is
+            // not traffic, follow its own target.
+            it = d->pCar;
+            its = it->MyDriver->TheDriverType;
+            if (it->pPlayer != NULL
+                    ? its != DRIVER_TYPE_COP
+                    : its == DRIVER_TYPE_TRAFFIC_CAR
+                          && list->MyCar->MyDriver->TheDriverType
+                                 != DRIVER_TYPE_TRAFFIC_CAR)
+                drivingchoice_make_drive_target_parallel_to_car(d, t, list,
+                                                                &fl, room);
+            drivingchoice_fill_up_drive_target(t, loc, list,
+                                               MOVEMENT_PARALLEL_TO_LINE, 1);
+            done = 1;
+        }
+    }
+    if (!done)
+        drivingchoice_fill_up_drive_target(t, loc, list,
+                                           MOVEMENT_PARALLEL_TO_LINE, 1);
+    return done;
+}
+
+int drivingchoice_build_drive_target(DrivingChoice *d, DriveTarget *t,
+                                     DrivingLocation *loc, NearbyCarList *list,
+                                     float unusedA, float unusedB,
+                                     MovementWithRespectToLine m)
+{
+    // 0x00241ea0.
+    int built = 0;
+
+    (void)unusedA;
+    (void)unusedB;
+    drivetarget_assign(t, &list->MyCar->pCarDriver->MyDriveTarget);
+    drivetarget_clear(t, list->MyCar, 0.0f);
+    if (!drivingchoice_is_valid(d, loc, list)) {
+        drivingchoice_fill_up_drive_target(t, loc, list, m, 1);
+    } else if (drivingchoice_type_is_driving_line(d->Type)) {
+        DrivingLocation onLine = *loc;
+
+        drivinglocation_set_driving_line(
+            &onLine, drivingchoice_get_driving_line(d->Type, list->MyCar), 0);
+        drivingchoice_fill_up_drive_target(t, &onLine, list, m, 1);
+        built = 1;
+    } else {
+        built = drivingchoice_build_drive_target_around_car(d, t, list, 0.0f,
+                                                            loc);
+    }
+    drivingchoice_fixup_car_to_exclude_from_collision_prediction(
+        d, list->MyCar, 0, list);
+    return built;
 }

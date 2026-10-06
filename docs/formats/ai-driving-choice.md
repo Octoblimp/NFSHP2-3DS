@@ -28,24 +28,35 @@
     0x002447c0  GetRoutePointsToUse (unnamed in retail)
     0x00244c88  the road-block list: the route's points up to one
     0x001492b0  Race::GracePeriodIsActive(Car *)
+    0x00241ea0  DrivingChoice::BuildDriveTarget(DriveTarget *,
+                    DrivingLocation *, NearbyCarList *, float, float,
+                    MovementWithRespectToLine)
+    0x00243aa8  DrivingChoice::BuildDriveTargetAroundCar(DriveTarget *,
+                    NearbyCarList *, float, DrivingLocation *)
+    0x00243f70  DrivingChoice::MakeDriveTargetParallelToCar (retail's also
+                    takes the walk's list)
+    0x00244ea0  DoSmoothOffsetChange (retail's takes the walk's list)
+    0x002442c0  the clearance beside a car (retail's own)
+    0x00244d80  the walk's closest point ahead (retail's own)
+    0x002455b0  how far a lateral is off the road
 
-Step 11b-2 of the racer AI. A DrivingChoice is the third part of an AI
+Steps 11b-2 and 11b-3 of the racer AI. A DrivingChoice is the third part of an AI
 car's DrivingInformation (`ai-driving-info.md`): one of the four driving
 lines, or one side of a car ahead. Each frame the controller turns its
 choice into a DriveTarget (`car-drive-target.md`), the points it steers
 at. For a line, FillUpDriveTarget walks the route ahead of the target's
 last point and puts a point on the line at each one. On the way it eases
 the car back towards the line at a speed that depends on how fast the car
-is going.
+is going. For a side, BuildDriveTargetAroundCar puts a point beside the
+car, with room to pass, eases out to it over the points before, and then
+follows the line again.
 
 The port is `3DS Files/source/drivingchoice.{c,h}`, with the grace period
 in `racecore.c`. AICarController's record, as much of it as these reach,
 is in `aicarcontroller.h`.
 
-Still to come:
-
-- 11b-3: BuildDriveTarget, BuildDriveTargetAroundCar and DoSmoothOffsetChange.
-- 11b-4: IsDriveable, TryChoice, TryToDriveAroundCar and MakeNewChoice.
+Still to come, in 11b-4: IsDriveable, TryChoice, TryToDriveAroundCar and
+MakeNewChoice.
 
 DoSnapshot (0x00241b88) is the replay's, and GetTextDescription
 (0x00241c38) is a debug string.
@@ -107,6 +118,22 @@ AICarController offsets read here:
 | 5 | | the fewest points the walk finds |
 | 12.0 | gp-22256 | StartOfRaceGracePeriod |
 | 0.5 | gp-22252 | TimeBetweenCarsForGracePeriodExit |
+| 4.0 | `lui 0x4080` | UseExtraLateralDistance's extra clearance |
+| 5.0 | `lui 0x40a0` | off the road too far to pass; the speed to drive alongside |
+| 3 | | the wheels on the ground to drive alongside |
+| 0.7071 | gp-26580 | cos 45: heading the same way, to drive alongside |
+| -999999, 999999 | gp-26576, gp-26572 | no edge, alongside on a traffic route |
+| 1e14 | gp-26568 | the search's first best distance |
+| 1/24 | gp-26564 | the search's step: a point skipped per 24 m, less two |
+| 2.0, 1.5, 6.0 | `lui 0x4000`, `0x3fc0`, `0x40c0` | the least clearance: any car, a player, a slow car |
+| 0 | gp-15152 | AITrafficTuningMode: traffic passes on the other side |
+| 20.0 | gp-15120 | AISlowCarSpeed |
+| 10.0 | gp-15116 | AISlowTrafficSpeed |
+
+The last three are `.sdata` words that nothing writes. The names are the
+port's; retail has no symbols. AIActionGetUnstuck reads AISlowCarSpeed
+too. gp-15124 is a debug word, 0, that gates a loop doing nothing (see
+below).
 
 ## The small methods
 
@@ -293,6 +320,117 @@ FillUpDriveTarget:
    a fix-up with `check` false. For a line choice that clears the car to
    exclude.
 
+## Building the target
+
+BuildDriveTarget (0x00241ea0) starts from a copy of my car's own target,
+emptied by `Clear(me, 0)`. Then:
+
+- **Not valid** (IsValid): FillUpDriveTarget with the movement asked
+  for, inside the edges. It returns 0.
+- **A driving line:** a copy of the location, its line set to the one
+  GetDrivingLine gives for the choice, then FillUpDriveTarget. It
+  returns 1.
+- **A side of a car:** BuildDriveTargetAroundCar, and its answer.
+
+Every way ends with FixupCarToExcludeFromCollisionPrediction(me, 0).
+The two floats it takes are never read.
+
+### Round a car
+
+BuildDriveTargetAroundCar (0x00243aa8) walks the route as
+GetRoutePointsToUse does, which also gives the current L, and finds the
+walk's point closest ahead of the car. With none, or with the car 5 m or
+more off the road there, it fills up parallel to the line, inside the
+edges, and returns 0. Otherwise:
+
+1. **The clearance**, from the function below, plus 4 m when the
+   choice's UseExtraLateralDistance is set.
+2. **The side:** -1 for LEFT_SIDE_OF_CAR, else +1. A traffic car flips
+   it while AITrafficTuningMode is set.
+3. **The room:** side times (my half size + its apparent half size +
+   clearance).
+4. **The passing L:** the car's lateral at the point, plus the room,
+   plus the point's offset, held 1 m and my half size inside each edge.
+5. **The point beside the car:** that lateral, at the car's distance
+   along the point.
+6. **The way out:** DoSmoothOffsetChange from the current L to the
+   passing L less the line's offset, inside the edges.
+7. **The point itself,** on the walk point's route, number and line,
+   which LastPointToScore then names.
+8. **Alongside:** if the car is a player that is no cop, or is traffic
+   while I am not, MakeDriveTargetParallelToCar with the room as its
+   side.
+9. **The rest:** FillUpDriveTarget parallel to the line, inside the
+   edges. It returns 1.
+
+### The closest point ahead
+
+0x00244d80 is retail's own. It starts at an index, taken as 0 when
+negative. A point counts when the position is behind it along its
+direction (strictly), and the nearest point that counts wins, the first
+on a tie. After each point it skips one point for every 24 m of
+distance, less two, so a far point jumps over those a car could not be
+near. With none ahead it gives -1.
+
+FindClosestPointAhead, which the walk itself uses, is a different
+function.
+
+### The clearance
+
+0x002442c0 is retail's own, the clearance wanted beside a car:
+
+- **The gap there is** across the walk: my lateral at its first point
+  and the car's at its own point, each less its line's offset and plus
+  the point's offset, apart, less both half sizes. With no points, or
+  none ahead of the car, it is 0. With no entry the answer is 0.
+- **The least gap** is 2 m when I am traffic. Otherwise it is 6 m
+  beside a slow car (at most AISlowTrafficSpeed for traffic and
+  AISlowCarSpeed for anything else, in either direction), 1.5 m beside
+  a player and 2 m beside the rest.
+
+The answer is the larger of the two, so the room asked for is never less
+than the room already there.
+
+### The way out
+
+DoSmoothOffsetChange (0x00244ea0) eases the target from one L to another
+over the walk's points up to two short of the index, of which there must
+be at least two. Each point's L grows with its distance from the first,
+measured on each point's line, so the last of them reaches the new L.
+No point goes past the new L either way. Each L is then put on its line
+with the point's offset added, held 1 m and my half size inside the
+edges (or just at them, when not inside), and added with its route,
+number and line. It stops when
+the target is full.
+
+The slope's divide is the EE's. The first and last points can be in one
+place (the same point twice, or a sign's route starting at the sign).
+The EE gives FLT_MAX there, which sends every point but the first to the
+new L. IEEE's 0/0 would be a NaN.
+
+### Alongside
+
+MakeDriveTargetParallelToCar (0x00243f70) does nothing unless:
+
+- both cars go faster than 5 m/s;
+- the other has at least three wheels on the ground;
+- their velocities point within 45 degrees of each other.
+
+From the other car's first point (GetFirstPoint) to the end of its own
+target, while mine has room, it adds that point's lateral plus the side.
+Each is held:
+
+- on a racing route, inside the point's edges;
+- on a traffic route, inside the road of my walk: its point closest
+  ahead of the route point, whose edges are measured across the route
+  point. Each search starts where the last one ended. With no point
+  ahead there is no edge.
+
+Each is held 1 m and my half size inside its edges. It goes in on the
+other's route, number and line, with AddPointToTarget's check against my
+car. That check refuses a point that doubles back, or one behind my car
+while the target has fewer than two points.
+
 ## Divergences
 
 Each one is written down where it happens in the source:
@@ -311,6 +449,17 @@ Each one is written down where it happens in the source:
   was on the stack. The port's is 0 (STACK-W, as in `car-drive-target.md`).
 - **`route_numbered`.** The image has no bound above on the route number.
   The port uses `trmgr_get_route`'s bound.
+- **BuildDriveTargetAroundCar's entry.** The image reads the car from
+  the list's entry with no test. BuildDriveTarget only calls it once
+  IsValid has found the car on the list. The port takes a missing entry
+  as a car not on the route ahead.
+- **DoSmoothOffsetChange's, MakeDriveTargetParallelToCar's and
+  BuildDriveTargetAroundCar's w.** Each is STACK-W, as with
+  AddToDriveTarget.
+
+Retail also tests a debug word (gp-15124, 0) in BuildDriveTargetAroundCar.
+When it is set, a loop at 0x002452b0 counts down the walk's points and
+does nothing else. The port leaves it out.
 
 ## Cross-check
 
@@ -327,7 +476,13 @@ Beneath the functions above, the image runs everything as shipped:
 - the route point's GetPosition and GetSignpost;
 - the sign's GetNewRoute and GetNewRoutePoint;
 - CalculateLookAheadDistance;
-- DriveTarget's AddPointToTarget and GetRouteAndRoutePoint.
+- DriveTarget's Assign, Clear, AddPointToTarget, GetRouteAndRoutePoint
+  and GetFirstPoint;
+- IsPointAheadOfCar and bNormalize2.
+
+The model runs with the EE's divide. The only divide by zero the script
+takes is DoSmoothOffsetChange's slope (0x00245050). The checker stops if
+any other site takes the EE's path.
 
 Three stubs print a line each, so both sides must ask the same questions
 in the same order:
@@ -339,7 +494,7 @@ in the same order:
 The grace period's two globals start as the image's data has them, so
 `racecore.c`'s initialisers are compared too.
 
-There are eight kinds of scenario:
+There are twelve kinds of scenario:
 
 | Scenario | What it covers |
 |----------|----------------|
@@ -351,13 +506,20 @@ There are eight kinds of scenario:
 | s_fill | FillUpDriveTarget for every movement, inside the edges or not, with the tuning mode on and off, signs taken at no speed, and NULL arguments |
 | s_speed | GetSpeedBackToLine either side of 60 and 66 mph, and the grace period's edges |
 | s_reduce | ReduceCurrentL either side of every bound |
+| s_around | BuildDriveTarget for a line, a side and neither, round cars of every kind on and off the road and past a sign, with the traffic tuning mode on and off and the slow speeds moved |
+| s_pieces | the closest point ahead from anywhere and any start, the clearance beside cars either side of each slow speed, the way out to every index either way, and alongside a car level with mine |
+| s_sign_pass | round a car just past a sign onto a route a metre or two to one side, so the walk's points there carry an offset |
+| s_back | the way out over a walk that doubles back, and alongside a car on a traffic route whose own target runs back down the walk |
 
-The script runs 45 scenarios, 20697 ops and 25798 lines, with 0 differ.
+The script runs 71 scenarios, 46212 ops and 79543 lines, with 0 differ.
 
-The mutation pass makes 240 mutations: every constant, every
-comparison's sense and bound, each store, each field read, and both of
-the grace period's initialisers. 239 are caught, 17 of them by a crash
-or a hang. One is equivalent: `fx-its-side`. That mutation drops the
-side-of-car test on the oncoming car's choice, but the two tests it
-guards accept only LEFT and RIGHT, so every other type fails them
-anyway.
+The mutation pass makes 385 mutations: every constant, every
+comparison's sense and bound, each store, each field read, the grace
+period's initialisers, the three globals and the EE's divide. 383 are
+caught, 22 of them by a crash or a hang. Two are equivalent:
+
+- `fx-its-side` drops the side-of-car test on the oncoming car's choice.
+  The two tests it guards accept only LEFT and RIGHT, so every other
+  type fails them anyway.
+- `sm-full` drops DoSmoothOffsetChange's test for a full target.
+  AddPointToTarget refuses a point then, and nothing else is written.

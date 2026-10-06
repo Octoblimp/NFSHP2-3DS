@@ -23,6 +23,7 @@
 #include "aicarcontroller.h"
 #include "car.h"
 #include "carcontroller.h"
+#include "cardriver.h"
 #include "cartypeinfo.h"
 #include "drivetarget.h"
 #include "drivingchoice.h"
@@ -69,6 +70,8 @@ static DrivingChoice choices[NCARS];
 static AIAction actions[NCARS];
 static CarTypeInfo ctis[NCARS];
 static DriverInfo drivers[NCARS];
+static CarDriver cdrivers[NCARS];
+static uint32_t players[NCARS][4];   // a player, never read
 static TrackRoutePoint *rps[NCARS];
 static float oobs[NCARS];
 static TrackRoute routes[NROUTES];
@@ -255,6 +258,19 @@ static void dump_choice(const DrivingChoice *d, const char *tag)
            (int)d->UseExtraLateralDistance);
 }
 
+static void dump_its(void)
+{
+    int k = index_in(choice.pCar, cars, sizeof cars[0], NCARS);
+    const DriveTarget *t;
+
+    if (k < 0)
+        return;
+    t = &cars[k].pCarDriver->MyDriveTarget;
+    printf("  its pk %d %d %d\n", (int)t->WhichPointIPicked,
+           (int)t->WhichPointIPickedCalculationTime,
+           (int)t->WhichPointIPickedTime);
+}
+
 static void dump_target(void)
 {
     const DriveTarget *t = &target;
@@ -305,6 +321,7 @@ static void reset(void)
     memset(actions, 0, sizeof actions);
     memset(ctis, 0, sizeof ctis);
     memset(drivers, 0, sizeof drivers);
+    memset(cdrivers, 0, sizeof cdrivers);
     memset(rps, 0, sizeof rps);
     memset(oobs, 0, sizeof oobs);
     memset(signs, 0, sizeof signs);
@@ -328,15 +345,22 @@ static void reset(void)
     // As racecore.c starts them, so its initialisers are compared too.
     {
         static int saved;
-        static float grace0, gap0;
+        static float grace0, gap0, slowcar0, slowtraffic0;
+        static int32_t traffic0;
 
         if (!saved) {
             grace0 = StartOfRaceGracePeriod;
             gap0 = TimeBetweenCarsForGracePeriodExit;
+            traffic0 = AITrafficTuningMode;
+            slowcar0 = AISlowCarSpeed;
+            slowtraffic0 = AISlowTrafficSpeed;
             saved = 1;
         }
         StartOfRaceGracePeriod = grace0;
         TimeBetweenCarsForGracePeriodExit = gap0;
+        AITrafficTuningMode = traffic0;
+        AISlowCarSpeed = slowcar0;
+        AISlowTrafficSpeed = slowtraffic0;
     }
     WilliamsAITuningMode = 0;
     AIDriverSecondsToLookAhead = 2.0f;
@@ -363,6 +387,12 @@ static void set_global(const char *name, uint32_t v)
         AIDriverSecondsToLookAhead = f;
     else if (strcmp(name, "DEF") == 0)
         AIDriverDefaultLookAhead = f;
+    else if (strcmp(name, "TRAFFIC") == 0)
+        AITrafficTuningMode = (int32_t)v;
+    else if (strcmp(name, "SLOWCAR") == 0)
+        AISlowCarSpeed = f;
+    else if (strcmp(name, "SLOWTRAFFIC") == 0)
+        AISlowTrafficSpeed = f;
     else {
         fprintf(stderr, "bad global %s\n", name);
         exit(2);
@@ -395,7 +425,8 @@ static TrackRoutePoint *point_of(const char *r, const char *j)
 // The order of the checker's CAR_FIELDS.
 enum {
     F_PX, F_PY, F_PZ, F_BX, F_BY, F_VMAG, F_DN, F_CLS, F_DTYPE, F_CTL,
-    F_OOB, F_RPR, F_RPJ, F_CT, F_CC, F_CX, F_ACT, NFIELDS
+    F_OOB, F_RPR, F_RPJ, F_CT, F_CC, F_CX, F_ACT, F_PL, F_NW, F_VX, F_VY,
+    F_FS, NFIELDS
 };
 
 static void set_car(char **t)
@@ -419,6 +450,12 @@ static void set_car(char **t)
     c->State.BodyMatrix.v0.x = fh(v[F_BX]);
     c->State.BodyMatrix.v0.y = fh(v[F_BY]);
     c->State.VelocityMagnitude = fh(v[F_VMAG]);
+    c->pPlayer = atoi(v[F_PL]) ? (Player *)(void *)players[k] : NULL;
+    c->pCarDriver = &cdrivers[k];
+    c->State.Velocity.x = fh(v[F_VX]);
+    c->State.Velocity.y = fh(v[F_VY]);
+    c->State.nWheelsTouchingGround = atoi(v[F_NW]);
+    c->State.ForwardSpeed = fh(v[F_FS]);
     a->Base.pCar = c;
     a->Base._vtable = AICARCONTROLLER_VTABLE;
     a->CurrentDrivingLocation = &locs[k];
@@ -439,6 +476,22 @@ static void set_choice(DrivingChoice *d, char **t)
     d->Type = atoi(t[1]);
     d->pCar = car_ptr(t[2]);
     d->UseExtraLateralDistance = atoi(t[3]);
+}
+
+// x y z rn j line sp, at the end of the target.
+static void put_point(DriveTarget *d, char **v)
+{
+    int i = d->NumPoints;
+
+    d->Points[i].x = fh(v[0]);
+    d->Points[i].y = fh(v[1]);
+    d->Points[i].z = fh(v[2]);
+    d->Points[i].pad = 0.0f;
+    d->Route[i] = (int8_t)atoi(v[3]);
+    d->RoutePointNumber[i] = (int16_t)atoi(v[4]);
+    d->DrivingLine[i] = (int8_t)atoi(v[5]);
+    d->CalculatedSpeed[i] = fh(v[6]);
+    d->NumPoints = (int8_t)(i + 1);
 }
 
 // ------------------------------------------------------------ the ops
@@ -517,17 +570,19 @@ static void op(char **t, int n)
         target.Length = fh(t[2]);
         target.LastPointToScore = -1;
     } else if (c == 'Y') {
-        int i = target.NumPoints;
+        put_point(&target, t + 1);
+    } else if (c == 'H') {
+        DriveTarget *d = &cdrivers[atoi(t[1])].MyDriveTarget;
 
-        target.Points[i].x = fh(t[1]);
-        target.Points[i].y = fh(t[2]);
-        target.Points[i].z = fh(t[3]);
-        target.Points[i].pad = 0.0f;
-        target.Route[i] = (int8_t)atoi(t[4]);
-        target.RoutePointNumber[i] = (int16_t)atoi(t[5]);
-        target.DrivingLine[i] = (int8_t)atoi(t[6]);
-        target.CalculatedSpeed[i] = fh(t[7]);
-        target.NumPoints = (int8_t)(i + 1);
+        memset(d, 0, sizeof *d);
+        d->TType = atoi(t[2]);
+        d->Length = fh(t[3]);
+        d->LastPointToScore = -1;
+        d->WhichPointIPicked = (int8_t)atoi(t[4]);
+        d->WhichPointIPickedCalculationTime = atoi(t[5]);
+        d->WhichPointIPickedTime = atoi(t[6]);
+    } else if (c == 'I') {
+        put_point(&cdrivers[atoi(t[1])].MyDriveTarget, t + 2);
     } else if (c == 'X') {
         set_choice(&choice, t);
     } else if (c == 'O') {
@@ -622,6 +677,43 @@ static void op(char **t, int n)
     } else if (c == 'u') {
         printf("  grace %d\n",
                race_grace_period_is_active(pCurrentRace, car_ptr(t[1])));
+    } else if (c == 'v' || c == 'w') {
+        int got;
+
+        if (c == 'v')
+            got = drivingchoice_build_drive_target(&choice, &target, &loc,
+                                                   &list, 1.0f, 2.0f,
+                                                   atoi(t[1]));
+        else
+            got = drivingchoice_build_drive_target_around_car(
+                &choice, &target, &list, 1.0f, &loc);
+        printf("  built %d\n", got);
+        dump_target();
+        printf("  exclude %s\n", nm(car_ai_controller(list.MyCar)
+                                        ->CarToExcludeFromCollisionPrediction));
+        dump_its();
+    } else if (c == 'x') {
+        bVector2 p;
+
+        p.x = fh(t[1]);
+        p.y = fh(t[2]);
+        printf("  ahead %d\n", (int)futurepointlist_find_closest_point_ahead(
+                                   &fpl, &p, atoi(t[3])));
+    } else if (c == 'y') {
+        int e = atoi(t[1]);
+
+        printf("  clear %s\n", fx(drivingchoice_get_clearance(
+                                   &list, e >= 0 ? &list.Array[e] : NULL,
+                                   &fpl, atoi(t[2]))));
+    } else if (c == 'z') {
+        drivingchoice_do_smooth_offset_change(&fpl, &target, &list, atoi(t[1]),
+                                              fh(t[2]), fh(t[3]), atoi(t[4]));
+        dump_target();
+    } else if (c == 'M') {
+        drivingchoice_make_drive_target_parallel_to_car(&choice, &target,
+                                                        &list, &fpl, fh(t[1]));
+        dump_target();
+        dump_its();
     } else {
         fprintf(stderr, "bad op %s\n", t[0]);
         exit(2);
@@ -637,6 +729,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: drivingchoice_test SCRIPT\n");
         return 2;
     }
+    drivetarget_static_init();
     memset(ctl_vt, 0, sizeof ctl_vt);
     ctl_vt[VT_SLOT(CARCONTROLLER_VT_GET_CURRENT_ROUTE_POINT)].fn =
         (VtFn)fk_route_point;

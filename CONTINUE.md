@@ -109,14 +109,27 @@ car's were.
     `nearbycar_check` and `drivetarget_check` still have 0 differ.
   - Five divergences are written down in the source and in
     `docs/formats/ai-driving-choice.md`, which has the rest.
-- **11b-3, next:** BuildDriveTarget (0x00241ea0) and
-  BuildDriveTargetAroundCar (0x00243aa8), with its two helpers
-  (0x00243f70, 0x002442c0), the list search (0x00244d80) and
-  DoSmoothOffsetChange. They stand on 11b-2's FillUpDriveTarget,
-  GetPreferredSideOfCar and the walk. Check them with
-  `drivingchoice_check`, adding to its scenarios.
-- 11b-4: CarCollisionPredict's four live functions, then IsDriveable,
-  TryChoice, TryToDriveAroundCar and MakeNewChoice.
+- **11b-3, done:** `drivingchoice.c` builds the target for a choice.
+  BuildDriveTarget (0x00241ea0) fills up an invalid choice as asked, a
+  line on that line, and sends a side to BuildDriveTargetAroundCar
+  (0x00243aa8). That one puts a point beside the car with room to
+  pass, eases out to it (DoSmoothOffsetChange, 0x00244ea0), follows the
+  car's own target alongside it when it is a player or traffic
+  (MakeDriveTargetParallelToCar, 0x00243f70), then fills up on the
+  line. Retail's own clearance (0x002442c0) and closest point ahead
+  (0x00244d80) are in too, with the three `.sdata` globals they read.
+  - `drivingchoice_check` runs with the EE's divide now: 71 scenarios,
+    79,543 lines, 0 differ. The slope's divide by zero (0x00245050) is
+    ee_div, and no other site takes the EE's path. Its mutation pass:
+    385 mutations, 383 caught, 2 equivalent.
+  - Two more divergences are in the source and in
+    `docs/formats/ai-driving-choice.md`: the entry read with no NULL
+    test, and the new points' w (STACK-W).
+- **11b-4, next:** CarCollisionPredict's four live functions, then
+  IsDriveable, TryChoice, TryToDriveAroundCar and MakeNewChoice.
+  TryChoice reads AITrafficTuningMode: traffic with it set may only
+  take a side of an AI racer or a player, and WillIHitThisCar gives
+  traffic 1000 there.
 - 11c: the rest of CarCollisionPredict, AIPlan and the AIAction base.
 - 11d: the actions.
 - 11e and 11f: AICarController and AIDriver (`gAIDriverCtorFn` in
@@ -3698,18 +3711,19 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-05, after 11b-2, DrivingChoice's walk)
+### Where the port stands (2026-10-05, after 11b-3, BuildDriveTarget)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11b-3, BuildDriveTarget and
-  BuildDriveTargetAroundCar. See "Now" at the top. These are done:
+- **Next:** step 11, the racer AI: 11b-4, CarCollisionPredict and
+  MakeNewChoice. See "Now" at the top. These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
-  - 11b-2, DrivingChoice's small methods and the walk.
+  - 11b-2, DrivingChoice's small methods and the walk;
+  - 11b-3, BuildDriveTarget and round a car.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -3721,7 +3735,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a, 11b-1 and 11b-2 done) | 7-9 |
+  | 11, the racer and traffic AI (11a and 11b-1 to 11b-3 done) | 6-8 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |
@@ -3729,12 +3743,12 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped; New 3DS only since 2026-10-05) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **28-42** |
+  | **Total** | **27-41** |
 
-- **How far along:** about 27-30 of the road's 55-72 slices are done,
+- **How far along:** about 28-31 of the road's 55-72 slices are done,
   roughly a third. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
-  Read the 28-42 as a floor. Step 11 was put at 4-6 before its slices
+  Read the 27-41 as a floor. Step 11 was put at 4-6 before its slices
   were laid out; they are ten, 11a, 11b-1 to 11b-4 and 11c to 11g, and
   traffic beside them. 11b was one slice until DrivingChoice's 13 KB
   were read.

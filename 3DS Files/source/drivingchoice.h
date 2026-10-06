@@ -5,9 +5,9 @@
 // a DriveTarget: the FuturePoint list, AdvancePoint and
 // GetRoutePointsToUse, which the demo named and retail keeps unnamed.
 //
-// Here so far (step 11b-2): the small methods, the room and the side
-// tests, and FillUpDriveTarget with everything under it. Still to come:
-// BuildDriveTargetAroundCar and DoSmoothOffsetChange (11b-3), then
+// Here so far (steps 11b-2 and 11b-3): the small methods, the room and
+// the side tests, FillUpDriveTarget with everything under it, and
+// BuildDriveTarget with the way round a car under it. Still to come:
 // IsDriveable, TryChoice, TryToDriveAroundCar and MakeNewChoice (11b-4).
 // DoSnapshot (0x00241b88) is the replay's, and GetTextDescription
 // (0x00241c38) a debug string.
@@ -96,6 +96,23 @@ typedef int (*AISignPostDecisionFn)(struct AICarController *c,
                                     struct Signpost *s, int32_t *line,
                                     struct DrivingLocation *loc);
 extern AISignPostDecisionFn gAISignPostDecisionFn;
+
+// Retail's, in DrivingChoice.obj's .sdata around WilliamsAITuningMode
+// (gp-15128). The demo has none of the three and retail is stripped, so
+// the names are the port's.
+//
+// AITrafficTuningMode (gp-15152, 0x00331dc0) is 0 and nothing in the image
+// writes it. Set, a traffic car passes on the other side of a car
+// (BuildDriveTargetAroundCar), drives round only racers and players
+// (TryChoice) and scales its collision prediction by 1000
+// (CarCollisionPredict::WillIHitThisCar).
+//
+// The two speeds (gp-15120 and gp-15116) are the most a car may do and
+// still be passed with 6 m to spare: 20 m/s for most, 10 for traffic.
+// AIActionGetUnstuck::AreWeStuckBehindSomeone reads the first too.
+extern int32_t AITrafficTuningMode;   // 0
+extern float   AISlowCarSpeed;        // 20.0f
+extern float   AISlowTrafficSpeed;    // 10.0f
 
 // ------------------------------------------------- the small methods
 
@@ -237,5 +254,67 @@ void drivingchoice_fill_up_drive_target(struct DriveTarget *t,
                                         struct NearbyCarList *list,
                                         MovementWithRespectToLine m,
                                         int inside);
+
+// ---------------------------------------- the target, and round a car
+
+// 0x00244d80, new in retail. The index of the list's point nearest `pos`
+// of those ahead of it, from `start` (a negative start is 0), or -1.
+// Past a point d metres away it skips d / 24 - 2 more.
+int32_t futurepointlist_find_closest_point_ahead(const FuturePointList *l,
+                                                 const bVector2 *pos,
+                                                 int32_t start);
+
+// 0x00244ea0. Retail's takes the list where the demo's took a route and
+// its points. Adds the list's points 0 to `index` - 2, `l` moving from
+// `fromL` to `toL` off each one's line in step with the distance along
+// the lines from point 0, and kept on the road (within a metre and the
+// car's half width with `inside`). Nothing below index 3.
+void drivingchoice_do_smooth_offset_change(FuturePointList *l,
+                                           struct DriveTarget *t,
+                                           struct NearbyCarList *list,
+                                           int32_t index, float fromL,
+                                           float toL, int inside);
+
+// 0x002442c0, new in retail. The room to leave between the two cars'
+// sides: how far apart they are across their lines now, measured at the
+// list's point 0 and at `index` (-1 asks the search), less both half
+// widths; and no less than 2 m, or 1.5 beside a player, or 6 beside a car
+// at AISlowCarSpeed or less (traffic, AISlowTrafficSpeed), or 2 for a
+// traffic car whatever it passes. 0 with no car.
+float drivingchoice_get_clearance(struct NearbyCarList *list,
+                                  struct NearbyCar *nc,
+                                  const FuturePointList *l, int32_t index);
+
+// 0x00243f70, the demo's MakeDriveTargetParallelToCar, which retail hands
+// the list. With both cars above 5 m/s, the other's three wheels on the
+// ground and the two headed within 45 degrees, the other car's own target
+// from its first point on, `side` across from it and kept on the road,
+// until the target is full.
+void drivingchoice_make_drive_target_parallel_to_car(
+    const DrivingChoice *d, struct DriveTarget *t, struct NearbyCarList *list,
+    const FuturePointList *l, float side);
+
+// 0x00243aa8. A point beside the choice's car, with the clearance and the
+// two half widths between them (4 m more with UseExtraLateralDistance), a
+// smooth way out to it and, behind a player or traffic, the car's own
+// target alongside; then the route ahead. 1 when it went round, 0 when
+// the car is not on the route ahead or is 5 m or more off the road, and
+// the target is only the route ahead. The float is not read.
+int drivingchoice_build_drive_target_around_car(DrivingChoice *d,
+                                                struct DriveTarget *t,
+                                                struct NearbyCarList *list,
+                                                float unused,
+                                                struct DrivingLocation *loc);
+
+// 0x00241ea0. The car's own target, emptied, then filled for the choice:
+// the route ahead on the choice's line, or round its car. An invalid
+// choice gets the route ahead on the location's line and 0; a line 1; a
+// car what BuildDriveTargetAroundCar answers. Then the car's
+// CarToExcludeFromCollisionPrediction is cleared. The floats are not read.
+int drivingchoice_build_drive_target(DrivingChoice *d, struct DriveTarget *t,
+                                     struct DrivingLocation *loc,
+                                     struct NearbyCarList *list,
+                                     float unusedA, float unusedB,
+                                     MovementWithRespectToLine m);
 
 #endif /* DRIVINGCHOICE_H */

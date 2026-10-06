@@ -14731,6 +14731,54 @@ through a NULL, a stray pointer or a stack word, or has no bound:
 Next is 11b-3: BuildDriveTarget (0x00241ea0) and
 BuildDriveTargetAroundCar (0x00243aa8) with its helpers.
 
+### Step 11b-3: BuildDriveTarget and round a car
+
+`drivingchoice.c` now builds the target for a choice:
+- BuildDriveTarget (0x00241ea0): an invalid choice fills up as asked, a
+  line fills up on that line, and a side goes round the car;
+- BuildDriveTargetAroundCar (0x00243aa8): the point beside the car with
+  room to pass, the way out to it, the car's own target alongside when
+  it is a player or traffic, then the line again;
+- its helpers: MakeDriveTargetParallelToCar (0x00243f70),
+  DoSmoothOffsetChange (0x00244ea0), the clearance (0x002442c0), the
+  walk's closest point ahead (0x00244d80) and how far a lateral is off
+  the road (0x002455b0).
+The traffic tuning mode and the two slow speeds are `.sdata` words
+nothing writes: AITrafficTuningMode, AISlowCarSpeed and
+AISlowTrafficSpeed, by the port's names.
+
+`drivingchoice_check` has four new kinds of scenario: s_around,
+s_pieces, s_sign_pass and s_back. The result: 71 scenarios, 46,212
+ops, 79,543 lines, 0 differ. The model now runs with the EE's divide.
+The one divide by zero the script takes is DoSmoothOffsetChange's slope
+(0x00245050), when the walk's first and last points are in one place.
+The port spells it ee_div, and the checker stops if any other site
+takes the EE's path. The mutation pass made 385 mutations: 383 caught,
+22 of them by a crash or a hang, and 2 equivalent. `sm-full` drops a
+full-target test that AddPointToTarget makes again.
+
+The first pass left 13 alive, gaps in the script, not in the port:
+- the near cars never slid, nor went at 20.5, 10.5, -25 or exactly 5,
+  nor had two wheels down;
+- the cars' own targets never ran back or onto another route;
+- the three globals were never moved;
+- no car stood past the look-ahead, and no walk crossed a sign onto a
+  route just to one side.
+Two needed s_back. `sm-cap-up` wants a walk that doubles back, so a
+point before the last is further from the first; the reworked s_pieces
+had stopped making one. `mp-from` wants a car alongside on a traffic
+route whose own target runs back down the walk, so each search for the
+road starts where the last one ended.
+
+Two more divergences are written down: BuildDriveTargetAroundCar's
+entry, which the image reads with no NULL test, and the new points' w
+(STACK-W). Retail's debug loop at 0x002452b0, behind a word that is 0,
+is left out. Only `drivingchoice_check` links `drivingchoice.c`. The
+CIA builds.
+
+Next is 11b-4: CarCollisionPredict's four live functions, then
+IsDriveable, TryChoice, TryToDriveAroundCar and MakeNewChoice.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the
