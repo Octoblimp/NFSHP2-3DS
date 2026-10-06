@@ -35,8 +35,10 @@
 #define NWOBJ 2
 #define PATTERN 0xa5
 
-// What racecore.c reaches outside the sources linked with it.
+// What racecore.c reaches outside the sources linked with it. The clock
+// is GracePeriodIsActive's, which drivingchoice_check checks.
 void (*gWorldObjectDeleteFn)(WorldObject *o);
+int32_t WorldTimer;
 
 static const char *const markerNames[NMARK] = {
     "ForwardStartLine", "BackwardStartLine", "ForwardFinishLine",

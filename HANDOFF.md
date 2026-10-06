@@ -14673,6 +14673,64 @@ Next is 11b-2: DrivingChoice's small methods and the walk along the
 route (retail 0x00241b88 .. 0x002455f8 is DrivingChoice.obj; the
 demo's AdvancePoint and GetRoutePointsToUse are there, unnamed).
 
+### Step 11b-2: DrivingChoice's small methods and the walk
+
+`drivingchoice.c` is the choice and what a line choice does with it:
+- the small methods: GetChoiceType, GetDrivingLine, the three
+  SetChoices, Clear, IsValid and IsEqualTo;
+- the side tests: IsEnoughRoom, FixupCarToExcludeFromCollisionPrediction
+  and GetPreferredSideOfCar;
+- the walk along the route: FuturePointList::Add, AdvancePoint,
+  GetRoutePointsToUse and the road block's point list;
+- the filling: GetSpeedBackToLine, ReduceCurrentL, AddToDriveTarget and
+  FillUpDriveTarget.
+Race::GracePeriodIsActive went into `racecore.c`, and as much of
+AICarController's record as these read into `aicarcontroller.h`.
+SignPostDecision is a seam, `gAISignPostDecisionFn`, until 11e.
+
+`drivingchoice_check` runs the image as the model, with three stubs:
+SignPostDecision, Car::GetRoutePoint and GetAmountOutOfBounds. The
+result: 45 scenarios, 20,697 ops, 25,798 lines, 0 differ. The mutation
+pass made 240 mutations: 239 caught, 1 equivalent. `fx-its-side` drops
+a side test that the two type tests under it already imply.
+
+The first pass left 14 alive, and closing them found these gaps in the
+script, not in the port:
+- **The grace period's globals.** Both sides set them at each
+  scenario's start, so `racecore.c`'s initialisers were never compared.
+  The model now starts them from the image's own data, and the harness
+  from the port's.
+- **The bend rule.** It needs a curvature near 0.12, and the noisy
+  routes never gave one. A smooth route, with points evenly spaced,
+  turning evenly and every line on the centre, has a curvature of
+  exactly sin(6 turn). `s_bend` runs seven curvatures, 0.09 to 0.3,
+  both ways round. Its roads are wide enough that no side is ever
+  blocked, so each rule's choice shows unflipped.
+- **FindClosestPointAhead's NULL.** It comes back when the other car is
+  past the route's next-to-last point. Taking the fallback away now
+  crashes, and moving it a point on is caught too.
+- **The else branch of where the target ends.** GetRouteAndRoutePoint
+  fails only on a point number of -1. The walk survives that only for a
+  racer whose target ends on a traffic route, since it then walks from
+  the location.
+- **A sign crossed at no speed.** It is rare in the random fills, so
+  `s_fill` now has ten of them.
+- **A full list of twenty.** This needed a look-ahead of 400 m.
+
+The five divergences are written down in the source and in
+`docs/formats/ai-driving-choice.md`. Each one is where the image reads
+through a NULL, a stray pointer or a stack word, or has no bound:
+- GetRoutePointsToUse with no route at the target's end;
+- the road-block list from a clear location;
+- FillUpDriveTarget's uninitialised choice;
+- AddToDriveTarget's w;
+- the route table's top.
+`racecore_check`, `racerun_check`, `nearbycar_check` and
+`drivetarget_check` still have 0 differ. The CIA builds.
+
+Next is 11b-3: BuildDriveTarget (0x00241ea0) and
+BuildDriveTargetAroundCar (0x00243aa8) with its helpers.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the

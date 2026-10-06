@@ -7,7 +7,9 @@
 #include <string.h>
 
 #include "bmem.h"
+#include "car.h"
 #include "eefpu.h"
+#include "realtime.h"   // WorldTimer
 #include "track.h"
 #include "trackpath.h"
 #include "trackroute.h"
@@ -352,4 +354,20 @@ float race_get_lap_number_exact(Race *r, float pct)
 void race_setup_ghost_cars(Race *r)
 {
     (void)r;
+}
+
+float StartOfRaceGracePeriod = 12.0f;               // gp-22256
+float TimeBetweenCarsForGracePeriodExit = 0.5f;     // gp-22252
+
+int race_grace_period_is_active(const Race *r, const struct Car *car)
+{
+    float grace = StartOfRaceGracePeriod;
+
+    // `(unsigned)(n - 101) < 49`: 101 to 149.
+    if ((uint32_t)(car->DriverNumber - 101) < 49u)
+        grace = grace + (float)(100 - car->DriverNumber)
+                        * TimeBetweenCarsForGracePeriodExit;
+    return (float)(int32_t)((uint32_t)WorldTimer - r->StartTime.PackedTime)
+               * 0.000250000012f
+           <= grace;
 }

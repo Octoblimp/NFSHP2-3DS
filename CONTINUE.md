@@ -1,10 +1,11 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 38
-(2026-10-05), after the racer AI's first slice.
+(2026-10-05), after 11b-2, DrivingChoice's small methods and the walk
+along the route.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
-11a, what an AI car knows as it drives, is done and checked against
-retail. The car selector is finished and checked against retail: SC-1
+11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
+and 11b-2 are done and checked against retail. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -87,21 +88,33 @@ car's were.
     for retail's -1 (`physicscar_check.retail_clear`), and
     `drivecam_check` divides the EE's way.
   - `docs/formats/car-drive-target.md`, "Retail's DriveTarget".
-- **11b-2, next:** DrivingChoice's small methods and the walk along
-  the route. Retail 0x00241b88 .. 0x002455f8 is DrivingChoice.obj. The
-  demo's AdvancePoint (0x00244588), GetRoutePointsToUse (0x002447c0)
-  and the FuturePoint list (ctor 0x001cad30, Add 0x00244768) are there
-  unnamed. 11b-2 is GetChoiceType, GetDrivingLine, the three SetChoices,
-  IsValid, IsEqualTo, Clear, IsEnoughRoom,
-  FixupCarToExcludeFromCollisionPrediction, GetPreferredSideOfCar,
-  AdvancePoint, GetRoutePointsToUse, GetSpeedBackToLine, ReduceCurrentL,
-  AddToDriveTarget, FillUpDriveTarget and the road block's point list
-  (0x00244c88). AICarController::SignPostDecision is a seam until 11e.
-  Check it with a `drivingchoice_check` in `nearbycar_check`'s pattern,
-  the image as the model.
-- 11b-3: BuildDriveTargetAroundCar (0x00243aa8) with its two helpers
-  (0x00243f70, 0x002442c0) and the list search (0x00244d80),
-  DoSmoothOffsetChange and BuildDriveTarget.
+- **11b-2, done:** DrivingChoice's small methods and the walk along
+  the route.
+  - `drivingchoice.c` has GetChoiceType, GetDrivingLine, the three
+    SetChoices, Clear, IsValid, IsEqualTo, IsEnoughRoom,
+    FixupCarToExcludeFromCollisionPrediction and GetPreferredSideOfCar.
+    It also has the walk: FuturePointList::Add, AdvancePoint,
+    GetRoutePointsToUse and the road block's point list (0x00244c88).
+    Then GetSpeedBackToLine, ReduceCurrentL, AddToDriveTarget and
+    FillUpDriveTarget.
+  - `racecore.c` has Race::GracePeriodIsActive (0x001492b0) and its two
+    globals. `aicarcontroller.h` has as much of the controller's record
+    as these read.
+  - AICarController::SignPostDecision is a seam
+    (`gAISignPostDecisionFn`) until 11e. Car::GetRoutePoint and
+    GetAmountOutOfBounds go through the controller's vtable.
+  - `drivingchoice_check` runs the image as the model: 45 scenarios,
+    25,798 lines, 0 differ. Its mutation pass: 240 mutations, 239
+    caught, 1 equivalent. `racecore_check`, `racerun_check`,
+    `nearbycar_check` and `drivetarget_check` still have 0 differ.
+  - Five divergences are written down in the source and in
+    `docs/formats/ai-driving-choice.md`, which has the rest.
+- **11b-3, next:** BuildDriveTarget (0x00241ea0) and
+  BuildDriveTargetAroundCar (0x00243aa8), with its two helpers
+  (0x00243f70, 0x002442c0), the list search (0x00244d80) and
+  DoSmoothOffsetChange. They stand on 11b-2's FillUpDriveTarget,
+  GetPreferredSideOfCar and the walk. Check them with
+  `drivingchoice_check`, adding to its scenarios.
 - 11b-4: CarCollisionPredict's four live functions, then IsDriveable,
   TryChoice, TryToDriveAroundCar and MakeNewChoice.
 - 11c: the rest of CarCollisionPredict, AIPlan and the AIAction base.
@@ -3685,17 +3698,18 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-05, after 11b-1, retail's DriveTarget)
+### Where the port stands (2026-10-05, after 11b-2, DrivingChoice's walk)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11b-2, DrivingChoice's small
-  methods and the walk along the route. See "Now" at the top. 11a (what
-  an AI car knows as it drives) and 11b-1 (retail's DriveTarget) are
-  done.
+- **Next:** step 11, the racer AI: 11b-3, BuildDriveTarget and
+  BuildDriveTargetAroundCar. See "Now" at the top. These are done:
+  - 11a, what an AI car knows as it drives;
+  - 11b-1, retail's DriveTarget;
+  - 11b-2, DrivingChoice's small methods and the walk.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -3707,7 +3721,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a and 11b-1 done) | 8-10 |
+  | 11, the racer and traffic AI (11a, 11b-1 and 11b-2 done) | 7-9 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |
@@ -3715,12 +3729,12 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped; New 3DS only since 2026-10-05) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **29-43** |
+  | **Total** | **28-42** |
 
-- **How far along:** about 26-29 of the road's 55-72 slices are done,
+- **How far along:** about 27-30 of the road's 55-72 slices are done,
   roughly a third. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
-  Read the 29-43 as a floor. Step 11 was put at 4-6 before its slices
+  Read the 28-42 as a floor. Step 11 was put at 4-6 before its slices
   were laid out; they are ten, 11a, 11b-1 to 11b-4 and 11c to 11g, and
   traffic beside them. 11b was one slice until DrivingChoice's 13 KB
   were read.

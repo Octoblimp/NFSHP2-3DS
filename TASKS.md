@@ -1580,9 +1580,18 @@ is citro3d and owns the top.
         car at rest. `drivetarget_check` and its image check: 22
         scenarios, 993 lines, 0 differ; 288 mutations, 268 caught, 20
         equivalent. The 54 checkers that link `drivetarget.c` or
-        `bvector.c` still have 0 differ. Next is 11b-2,
-        DrivingChoice's small methods and the walk along the route
-        (0x00241b88 .. 0x002455f8).
+        `bvector.c` still have 0 differ.
+
+        **11b-2: DrivingChoice's small methods and the walk.**
+        `drivingchoice.c` has the small methods, the side tests
+        (IsEnoughRoom, the fix-up, GetPreferredSideOfCar), the walk
+        (AdvancePoint, GetRoutePointsToUse, the road block's list) and
+        FillUpDriveTarget with what it calls. Race::GracePeriodIsActive
+        is in `racecore.c`. `drivingchoice_check` runs the image as the
+        model: 45 scenarios, 25,798 lines, 0 differ; 240 mutations, 239
+        caught, 1 equivalent. Written up in
+        `docs/formats/ai-driving-choice.md`. Next is 11b-3,
+        BuildDriveTarget and BuildDriveTargetAroundCar.
 27. [ ] Track rendering/streaming, collision. Task 24's debt is paid:
         `QuickSpline.obj` and `TrackPath.obj` are ported (Session 29,
         continued), and `TrackPathCoordinate::UpdatePosition` measures

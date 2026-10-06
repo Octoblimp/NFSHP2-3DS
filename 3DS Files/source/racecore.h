@@ -11,6 +11,7 @@
 //   Race::FigureOutBoundaries                         0x00147b20  568 bytes
 //   Race::GetLapNumberExact                           0x00147d58  104 bytes
 //   Race::SetupGhostCars                              0x001485e0   12 bytes
+//   Race::GracePeriodIsActive                         0x001492b0  112 bytes
 //   RacingCar::RacingCar                              0x001493b8  272 bytes
 //   TimeAroundTrackTable::~TimeAroundTrackTable       0x001494c8   28 bytes
 //
@@ -116,6 +117,20 @@ float race_get_lap_number_exact(Race *r, float pct);
 
 // 0x001485e0, empty in retail: no ghost car is made.
 void race_setup_ghost_cars(Race *r);
+
+// StartOfRaceGracePeriod (gp-22256, 12.0) and
+// TimeBetweenCarsForGracePeriodExit (gp-22252, 0.5). Only
+// GracePeriodIsActive reads them, and nothing writes them.
+extern float StartOfRaceGracePeriod;
+extern float TimeBetweenCarsForGracePeriodExit;
+
+// 0x001492b0. Whether the race's start is no more than the grace period
+// ago, in WorldTimer's ticks at 0.00025 s. The period is 12 s, but a car
+// numbered 101 to 149 has half a second less for each number past 100:
+// 11.5 s for 101, none from 124 on. DrivingChoice's GetSpeedBackToLine
+// asks it, and so do AIActionAvoidCars, AIActionPass, AIActionGetUnstuck
+// and AICarController::SignPostDecision.
+int race_grace_period_is_active(const Race *r, const struct Car *car);
 
 // -------------------------------------------------------------- the seam
 //
