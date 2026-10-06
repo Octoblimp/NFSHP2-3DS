@@ -1,5 +1,20 @@
 """Cross-check 3DS Files/source/drivetarget.c against the shipped image.
 
+**The image is retail's.** Until step 11b-1 this ran the demo's
+NFSHP2.ELF. Retail changed DriveTarget (a byte at 516, a new accessor,
+CalculateMaxSpeed split in two and EstimateScore rebuilt on the halves), so
+the port took retail's and the check moved wholly onto SLES_507.31
+(retail_model.RetailEmu), called by the demo's names where a function has a
+twin and by retail's address where it is new:
+
+  - 0x0021bdc8, the last corner EstimateScore scores;
+  - 0x0021d130, CalculateMaxSpeed from its third test on;
+  - 0x0021cf38, the first corner from the car's velocity.
+
+CarState's fields are at retail's offsets (ForwardSpeed 896,
+VelocityMagnitude 900, MatrixValid 1024) and the Car block is retail's
+size.
+
 drivetarget_check.py checks the port against a Python model written from
 the disassembly. The model and the port are two readings of one listing,
 and two readings can share a mistake. FillWithCurrentAcceleration's first
@@ -43,8 +58,9 @@ The functions covered are:
   - the three free functions, and DrivingLocation::IsClear;
   - the static initialiser, which computes MinDistanceToPointSquared.
 
-That is 0x002086f8..0x0020a840 without the two DoSnapshots, plus the
-out-of-line copy constructor at 0x001da210.
+That is retail's 0x0021b918..0x0021dbc0 without the two DoSnapshots, plus
+the out-of-line copy constructor at 0x001e7930: the demo's
+0x002086f8..0x0020a840 and 0x001da210, and the three methods retail added.
 
 **STACK-W.** Five sites build a stack bVector3 whose w lane is never
 written, then copy all sixteen bytes into the record with lqc2/sqc2:
@@ -79,16 +95,24 @@ the image's control flow or geometry reads garbage, and the run stops and
 says so. The count of masked lanes is printed, so a scenario that starts
 reaching a new STACK-W site shows up as a changed number.
 
-**The divides are the EE's.** The oracle is `Emu(ieee=True, eediv=True)`.
-A division by zero gives FLT_MAX, as on the console, where IEEE gives an
-infinity. The run reports which divide sites, if any, took that path. The
-port has none of them spelled with ee_div, so any site that does take it
-is a disagreement to explain.
+**The divides are the EE's.** The oracle is
+`RetailEmu(ieee=True, eediv=True)`. A division by zero gives FLT_MAX, as on
+the console, where IEEE gives an infinity or a NaN. The run reports which
+divide sites took that path, and they must be the two the port spells with
+ee_div, both reached by a car standing still:
+
+  - 0x0021d204, the _v half's projection of the acceleration on v1, which
+    is 0/0 when v1 (the car's velocity) is zero;
+  - 0x00258914, bNormalize2To's first divide, which is by zero when the
+    from-car corner asks for its length, the speed wanted at the point,
+    to be zero.
+
+Any other site is a disagreement to explain.
 
 **What is not the image:**
 
   - The Car and CarState are the fields DriveTarget reads, written at
-    their PS2 offsets into a zeroed 2016-byte block. car_set zeroes the
+    their PS2 offsets into a zeroed 2304-byte block. car_set zeroes the
     block again, as the harness's memset does.
   - The three routes are 115752-byte zeroed records with RouteNumber at
     +10. TheTrackRouteManager's table at +16 is rewritten from
@@ -118,6 +142,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import drivetarget_check as DT
 from mipsemu import Emu, SP, f_to_bits, fbits_to
+import retail_model
 
 ROOT = DT.ROOT
 NL = DT.NL
@@ -160,18 +185,26 @@ SYM = dict(
     route="GetRouteAndRoutePoint__11DriveTargetiPP10TrackRoutePP15TrackRoutePoint",
     isclear="IsClear__15DrivingLocation",
     sinit="_GLOBAL_$I$__11DriveTarget",
+    # retail only, so by address
+    lastcorner=0x0021BDC8,
+    maxspeedv=0x0021D130,
+    fromcar=0x0021CF38,
 )
 
-# DriveTarget.obj's text, from the constructor up to OBB's first method.
-OBJ_LO, OBJ_HI = 0x002086F8, 0x0020A840
+# DriveTarget.obj's text on retail, from the constructor up to OBB's first
+# method (the demo's 0x002086f8 .. 0x0020a840).
+OBJ_LO, OBJ_HI = 0x0021B918, 0x0021DBC0
 
-# The PS2 layouts: drivetarget.h, car.h, carstate.h and trackroute.h all
-# state these as CAR_AT / CARSTATE_AT / static asserts on the handheld.
+# The PS2 layouts, retail's. drivetarget.h, car.h, carstate.h and
+# trackroute.h state the demo's as CAR_AT / CARSTATE_AT / static asserts on
+# the handheld; docs/retail_layout.txt has CarState's +4 at 876 and +16 at
+# 944, and retail's GetTransformMatrix tests MatrixValid at 1024. Retail's
+# Car runs past 2144, so the block is a round number above that.
 DT_SIZE = 528
-CAR_SIZE = 2016
+CAR_SIZE = 2304
 CAR_DRIVER, CAR_PLAYER, CAR_STATE = 10, 24, 64
 CS_POS, CS_VEL, CS_ACC = 32, 48, 64
-CS_ANGLE, CS_FWD, CS_VMAG, CS_MVALID = 868, 892, 896, 1008
+CS_ANGLE, CS_FWD, CS_VMAG, CS_MVALID = 868, 896, 900, 1024
 ROUTE_SIZE = 115752
 ROUTE_NUMBER, ROUTE_POINTS, POINT_SIZE = 10, 1064, 112
 TRM_TABLE = 16          # two bTLists, then pTrackRoutes[100]
@@ -195,13 +228,14 @@ class Image(object):
     """One Emu, and the address each Python record lives at inside it."""
 
     def __init__(self, poison):
-        e = self.e = Emu(ieee=True, eediv=True)
+        e = self.e = retail_model.RetailEmu(ieee=True, eediv=True)
         e.stub_bware()
         e.stub("__builtin_delete", self._delete)
         self.fn = {k: e.addr_of(v) for k, v in SYM.items()}
         self.g_timer = e.addr_of("WorldTimer")
         self.g_camdef = e.addr_of("CameraFollowDefaultCar")
-        self.g_minsq = e.addr_of("DriveTargetMinDistanceToPointSquared")
+        # .sbss, so the name has no retail symbol: the data map's address.
+        self.g_minsq = e.data(0x00325354)
         self.g_trm = e.addr_of("TheTrackRouteManager") + TRM_TABLE
         self.poison = poison
         self.fillb = struct.pack("<I", poison) * (SCRUB // 4)
@@ -296,8 +330,9 @@ class Image(object):
         struct.pack_into("<20b", m, a + 476, *t.DL)
         struct.pack_into("<ib", m, a + 496, t.TType, t.Pick)
         m[a + 501:a + 504] = bytes(t.pad1)
-        struct.pack_into("<iif", m, a + 504, t.CalcT, t.BlendT, t.Length)
-        m[a + 516:a + 528] = bytes(t.pad2)
+        struct.pack_into("<iifb", m, a + 504, t.CalcT, t.BlendT, t.Length,
+                         t.Last)
+        m[a + 517:a + 528] = bytes(t.pad2)
         return a
 
     def get_dt(self, t):
@@ -313,8 +348,9 @@ class Image(object):
         t.DL = list(struct.unpack_from("<20b", m, a + 476))
         t.TType, t.Pick = struct.unpack_from("<ib", m, a + 496)
         t.pad1 = bytearray(m[a + 501:a + 504])
-        t.CalcT, t.BlendT, t.Length = struct.unpack_from("<iif", m, a + 504)
-        t.pad2 = bytearray(m[a + 516:a + 528])
+        t.CalcT, t.BlendT, t.Length, t.Last = struct.unpack_from(
+            "<iifb", m, a + 504)
+        t.pad2 = bytearray(m[a + 517:a + 528])
 
     def put_car(self, c):
         if c is None:
@@ -565,6 +601,30 @@ class Image(object):
         self.get_car(car)
         return r, struct.unpack_from("<f", self.e.mem, self.outf)[0]
 
+    def calculate_max_speed_v(self, car, v1, v2, dist, speed, out):
+        c = self.put_car(car)
+        a = self.put_vec(0, v1[:2])
+        b = self.put_vec(1, v2[:2])
+        struct.pack_into("<f", self.e.mem, self.outf, out)
+        r = self.call("maxspeedv", (self.this, c, a, b, self.outf),
+                      (dist, speed))
+        self.get_car(car)
+        return r, struct.unpack_from("<f", self.e.mem, self.outf)[0]
+
+    def calculate_max_speed_from_car(self, car, p, out, factor):
+        c = self.put_car(car)
+        v = self.put_vec(0, p[:2])
+        struct.pack_into("<f", self.e.mem, self.outf, out)
+        r = self.call("fromcar", (self.this, c, v, self.outf), (factor,))
+        self.get_car(car)
+        return r, struct.unpack_from("<f", self.e.mem, self.outf)[0]
+
+    def get_last_corner_to_score(self, t):
+        a = self.put_dt(t)
+        r = self.call("lastcorner", (a,))
+        self.get_dt(t)
+        return r
+
     def estimate_score(self, t, car):
         a = self.put_dt(t)
         c = self.put_car(car)
@@ -618,7 +678,9 @@ PATCH = [
     "get_route_and_route_point", "get_first_point", "set_point3",
     "set_point2", "shift_right", "shift_left", "add_point3", "add_point2",
     "add_point3_dl", "add_point2_dl", "interpolate_point", "clear",
-    "resample", "calculate_max_speed", "estimate_score",
+    "resample", "calculate_max_speed", "calculate_max_speed_v",
+    "calculate_max_speed_from_car", "get_last_corner_to_score",
+    "estimate_score",
     "fill_with_current_acceleration", "blend_with_current_acceleration",
     "dump", "static_init", "is_clear", "car_set",
 ]

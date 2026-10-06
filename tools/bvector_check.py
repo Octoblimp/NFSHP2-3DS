@@ -27,6 +27,7 @@ import argparse
 import difflib
 import math
 import os
+import struct
 import subprocess
 import sys
 import tempfile
@@ -63,6 +64,20 @@ def fsub(a, b):
 
 def fdiv(a, b):
     return f32(a / b)
+
+
+def ee_div(a, b):
+    """`div.s` as the R5900 has it for a zero or denormal divisor: FLT_MAX
+    signed by the XOR of the operands' signs, whatever the dividend.
+    eefpu.h's ee_div; mipsemu's `eediv`. No scenario here divides by zero
+    (the C harness says why); DriveTarget's model reaches it through
+    bNormalize2To, and both normalises spell it as the port does."""
+    ab = struct.unpack("<I", struct.pack("<f", a))[0]
+    bb = struct.unpack("<I", struct.pack("<f", b))[0]
+    if not bb & 0x7F800000:
+        r = ((ab ^ bb) & 0x80000000) | 0x7F7FFFFF
+        return struct.unpack("<f", struct.pack("<I", r))[0]
+    return fdiv(a, b)
 
 
 def fsqrt(x):
@@ -120,7 +135,7 @@ def bNormalize2(v):
 def bNormalize2To(v, ln):
     """0x002401f0. The zero case ignores `ln` and writes (1, 0)."""
     x, y = v
-    k = fdiv(fsqrt(fadd(fmul(x, x), fmul(y, y))), ln)
+    k = ee_div(fsqrt(fadd(fmul(x, x), fmul(y, y))), ln)
     if k == 0.0:
         return (f32(1.0), f32(0.0))
     return (fdiv(x, k), fdiv(y, k))
@@ -130,7 +145,7 @@ def bNormalize3To(v, ln):
     """0x00240250. VU0 sum, one reciprocal. Zero writes (ln, 0, 0)."""
     x, y, z = v
     n = fadd(fadd(fmul(x, x), fmul(y, y)), fmul(z, z))
-    k = fdiv(fsqrt(n), ln)
+    k = ee_div(fsqrt(n), ln)
     if k == 0.0:
         return (ln, f32(0.0), f32(0.0))
     r = fdiv(f32(1.0), k)

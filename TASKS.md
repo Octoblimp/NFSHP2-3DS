@@ -1572,8 +1572,17 @@ is citro3d and owns the top.
         the image as the oracle, with only the belt mover's gravity
         stubbed (`gBeltMoverGravityFn`): 36 scenarios, 10,309 lines,
         0 differ; 99 mutations, all caught. Written up in
-        `docs/formats/ai-driving-info.md`. Next is 11b, DrivingChoice's
-        methods (0x00241b88 .. 0x002455f8).
+        `docs/formats/ai-driving-info.md`.
+
+        **11b-1: DriveTarget is retail's.** The byte at 516 and its
+        accessor, CalculateMaxSpeed's split, the corner from the car
+        and EstimateScore's new walks, with the EE's two divides for a
+        car at rest. `drivetarget_check` and its image check: 22
+        scenarios, 993 lines, 0 differ; 288 mutations, 268 caught, 20
+        equivalent. The 54 checkers that link `drivetarget.c` or
+        `bvector.c` still have 0 differ. Next is 11b-2,
+        DrivingChoice's small methods and the walk along the route
+        (0x00241b88 .. 0x002455f8).
 27. [ ] Track rendering/streaming, collision. Task 24's debt is paid:
         `QuickSpline.obj` and `TrackPath.obj` are ported (Session 29,
         continued), and `TrackPathCoordinate::UpdatePosition` measures

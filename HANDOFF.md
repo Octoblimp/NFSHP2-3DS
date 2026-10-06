@@ -14638,8 +14638,40 @@ that link `drivetarget.c` still have 0 differ, and the 3DS build
 succeeds. Nothing in the race calls these yet, so the build plays as
 2fc77fc.
 
-Next is 11b, DrivingChoice's methods (retail 0x00241b88 ..
-0x002455f8).
+### Step 11b-1: retail's DriveTarget
+
+DrivingChoice builds its targets with DriveTarget, and the port's was
+the demo's. Retail's differs in five places:
+- a byte at 516, LastPointToScore, which Clear sets to -1 and
+  BuildDriveTargetAroundCar to the last point around a car;
+- its accessor, EstimateScore's last corner;
+- CalculateMaxSpeed split in two;
+- a first corner asked from the car itself;
+- EstimateScore's two walks rebuilt on those.
+The rest moved with CarState's fields and nothing else.
+
+A car at rest divides by zero twice in the from-car corner, where the
+EE gives FLT_MAX and the corner fits. IEEE's infinity and NaN would
+score every car at rest -1. Both divides are `ee_div`, the projection
+and `bNormalize2To`'s first; the image check lists exactly those two
+sites as the ones that took the EE's path.
+
+`drivetarget_check` models retail's listing, and the image check runs
+retail's image: 22 scenarios, 993 lines, 0 differ. The model's
+mutation pass: 288 mutations, 268 caught, 20 equivalent, each argued.
+`ct-no-clear` is caught now, since retail's Clear writes the byte the
+memset leaves 0.
+
+The 54 checkers that link `drivetarget.c` or `bvector.c` still have 0
+differ. The ones whose oracle is the demo image and runs Clear hook its
+tail for retail's -1 (`physicscar_check.retail_clear`), and
+`drivecam_check`'s oracle divides the EE's way: its outside view takes
+the same `bNormalize2To` divide below 8.32 m/s.
+`docs/formats/car-drive-target.md` has the detail.
+
+Next is 11b-2: DrivingChoice's small methods and the walk along the
+route (retail 0x00241b88 .. 0x002455f8 is DrivingChoice.obj; the
+demo's AdvancePoint and GetRoutePointsToUse are there, unnamed).
 
 ### With the user
 

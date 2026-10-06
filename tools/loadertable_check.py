@@ -128,7 +128,7 @@ SOURCES = [HARNESS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "bchunk.c", "trackpath.c", "quickspline.c", "bmem.c", "trackroute.c",
     "polyhedra.c", "vclip.c", "espresso.c", "difficultyinfo.c",
     "texturepack.c", "sun.c", "weatherman.c", "carinfo.c",
-    "characterinfo.c", "acidsys.c",
+    "characterinfo.c", "acidsys.c", "acidfx.c",
     "cartypeinfo.c", "langtab.c", "drivetrain.c", "engine.c", "wheel.c",
     "suspension.c", "steering.c", "rigidbody.c", "table.c", "elight.c")]
 

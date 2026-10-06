@@ -1051,6 +1051,8 @@ class Model(object):
         self.out = []
         e = self.e = Emu(ieee=True)
         e.stub_bware()
+        # Clear leaves retail's -1 in LastPointToScore.
+        pcc.retail_clear(e)
         self.fn = {k: e.addr_of(v) for k, v in FN_SYM.items()}
         self.glob_addr = [e.addr_of(a) for _, a in GLOBS]
         self.portname = {e.addr_of(k): v for k, v in FNMAP.items()}

@@ -16,6 +16,26 @@ distance at 0x00324a60 and the two camera globals at 0x003235d0. A typo in
 the header shows as a diff rather than as two files agreeing with each
 other.
 
+**Retail's pass (step 11b-1).** The constants are read out of retail's
+SLES_507.31 now, at retail's addresses: the pool is 0x0032ee84 and eleven
+slots, one more 0.001 than the demo's ten, and the five globals are where
+retail_model.py's data map puts them. Retail changed four of the functions
+modelled here and added three:
+
+  - a byte at 516, `Last` here and LastPointToScore in drivetarget.h,
+    which Clear sets to -1 on every way out and the copy constructor
+    copies (0x0021bbb0, 0x001e7930);
+  - get_last_corner_to_score (0x0021bdc8), where EstimateScore's second
+    walk now stops;
+  - calculate_max_speed_v (0x0021d130), the demo's CalculateMaxSpeed from
+    its third test on, and the shorter calculate_max_speed around it
+    (0x0021cfe8);
+  - calculate_max_speed_from_car (0x0021cf38), which EstimateScore's
+    first corner now asks instead, from the car's velocity (0x0021c920).
+
+The other changed functions moved CarState's fields, which this model does
+not see. drivetarget_image_check.py runs every scenario here on retail.
+
 The pool is read slot by slot rather than once per distinct value. The
 compiler pooled 0.001 three times -- Clear's speed floor, CalculateMaxSpeed's
 epsilon and CalculateTime's -- and 0.4 three times, once per use site in
@@ -56,12 +76,12 @@ into Length rather than the path length it started from. The two differ by
 one step.
 
 **EstimateScore's second walk measures from a point that does not move.**
-The inner loop runs `nxt` forward while measuring back to
-`Points[outer - 1]`, which stays put, so the legs get longer rather than
-being consecutive. That is what the image does and it is what makes the
+The inner loop runs forward while measuring back to `Points[outer - 1]`,
+which stays put, so the legs get longer rather than being consecutive. That is what the image does and it is what makes the
 skip-ahead threshold mean anything.
 
-**CalculateMaxSpeed computes a magnitude it never uses.** Two multiplies,
+**CalculateMaxSpeed computes a magnitude it never uses** (retail's
+calculate_max_speed_v still does). Two multiplies,
 an add and a sqrt on the parallel component, dead in the shipped build.
 It is kept, and it is argued in `EQUIVALENT` rather than dropped.
 
@@ -95,6 +115,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import bmath_check as BM
 import bvector_check as BV
+import mipsdis
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -121,6 +142,7 @@ CARH = "3DS Files/source/car.h"
 # The host widening car.h states as CAR_SLACK. Zero on ARM.
 CAR_SLACK = 8 - 4
 DC = "3DS Files/source/drivetarget.c"
+DLH = "3DS Files/source/drivinglocation.h"
 
 # The host this runs on, not the handheld. The PS2's pointer is four bytes
 # and this one's is eight, which moves two offsets in the DrivingLocation
@@ -159,42 +181,51 @@ def pint(tag, x):
 
 # --------------------------------------------------------- the image's data
 
+RETAIL_ELF = mipsdis.Elf(str(ROOT / "PS2 Files" / "Full Game" / "SLES_507.31"))
+
+
 def elf_f(addr):
-    return f32(struct.unpack("<f", BM.ELF.read(addr, 4))[0])
+    return f32(struct.unpack("<f", RETAIL_ELF.read(addr, 4))[0])
 
 
 def elf_i(addr):
-    return struct.unpack("<i", BM.ELF.read(addr, 4))[0]
+    return struct.unpack("<i", RETAIL_ELF.read(addr, 4))[0]
 
 
-# DriveTarget.obj's .lit4: 0x00321fa8, 0x28 long, ten anonymous slots. The
-# gp offsets are what the listing quotes (_gp is 0x00328bf0); the names are
-# this file's and drivetarget.h's, and they have to agree.
-K_CLEAR_EPS = elf_f(0x00321FA8)      # gp-27720
-K_AHEAD_DOT = elf_f(0x00321FAC)      # gp-27716
-K_SCORE_T1 = elf_f(0x00321FB0)       # gp-27712
-K_SCORE_T2 = elf_f(0x00321FB4)       # gp-27708
-K_SCORE_T3 = elf_f(0x00321FB8)       # gp-27704
-K_MAXSPEED_EPS = elf_f(0x00321FBC)   # gp-27700
-K_TIME_EPS = elf_f(0x00321FC0)       # gp-27696
-K_NO_TIME = elf_f(0x00321FC4)        # gp-27692
-K_PREDICT_DT = elf_f(0x00321FC8)     # gp-27688
-K_BLEND_SCALE = elf_f(0x00321FCC)    # gp-27684
+# DriveTarget.obj's .lit4: retail's 0x0032ee84, 0x2c long, eleven anonymous
+# slots (the demo's was 0x00321fa8 and ten). The gp offsets are what
+# retail's listing quotes (_gp is 0x003358f0); the names are this file's and
+# drivetarget.h's, and they have to agree.
+POOL = 0x0032EE84
+K_CLEAR_EPS = elf_f(POOL + 0)         # gp-27244
+K_AHEAD_DOT = elf_f(POOL + 4)         # gp-27240
+K_SCORE_T1 = elf_f(POOL + 8)          # gp-27236
+K_SCORE_T2 = elf_f(POOL + 12)         # gp-27232
+K_SCORE_T3 = elf_f(POOL + 16)         # gp-27228
+K_MAXSPEED_EPS = elf_f(POOL + 20)     # gp-27224
+K_MAXSPEED_V_EPS = elf_f(POOL + 24)   # gp-27220, retail's new slot
+K_TIME_EPS = elf_f(POOL + 28)         # gp-27216
+K_NO_TIME = elf_f(POOL + 32)          # gp-27212
+K_PREDICT_DT = elf_f(POOL + 36)       # gp-27208
+K_BLEND_SCALE = elf_f(POOL + 40)      # gp-27204
 
 # Inline `lui at,...` literals rather than pooled ones.
 K_FAST_CAR = f32(30.0)        # 0x41f00000, GetFirstPoint's speed gate
 K_MAX_LATERAL = f32(30.0)     # 0x41f00000, and the grip limit
 K_ACC_DOMINATES = f32(0.75)   # 0x3f400000, FillWithCurrentAcceleration
 K_BLEND_WINDOW = f32(0.75)    # 0x3f400000, BlendWithCurrentAcceleration
+K_FIRST_CORNER = f32(0.5)     # 0x3f000000, retail EstimateScore's factor
 
-# .sdata, named in the MAP file.
-AI_SECONDS = elf_f(0x00323A50)
-AI_DEFAULT = elf_f(0x00323A54)
-MIN_DIST = elf_f(0x00324A60)
-CAM_DEFAULT_INIT = elf_i(0x003235D0)
-CAM_INSTEAD = elf_i(0x003235D4)
+# .sdata, named in the demo's MAP file (0x00323a50, 0x00323a54,
+# 0x00324a60, 0x003235d0 and 0x003235d4) and moved where retail_model.py's
+# data map puts them.
+AI_SECONDS = elf_f(0x00330988)
+AI_DEFAULT = elf_f(0x0033098C)
+MIN_DIST = elf_f(0x00331A48)
+CAM_DEFAULT_INIT = elf_i(0x003304D4)
+CAM_INSTEAD = elf_i(0x003304D8)
 
-# 0x00325354 is .sbss -- no bytes in the file, because
+# 0x00325354 is .sbss (retail 0x003324d4) -- no bytes in the file, because
 # _GLOBAL_$I$__11DriveTarget computes it at start-up out of MIN_DIST. The
 # model runs that initialiser rather than folding the answer, so the four
 # instructions at 0x0020ab48 are modelled and not assumed.
@@ -213,10 +244,10 @@ def check_pool():
     """The pool is ten slots and several of them hold the same number. If
     the image ever stops agreeing with that, say so here rather than
     letting a macro in the header carry the claim alone."""
-    want = [0.001, 0.342, 0.4, 0.4, 0.4, 0.001, 0.001, 9999999.0, 0.1,
-            1.3333333]
+    want = [0.001, 0.342, 0.4, 0.4, 0.4, 0.001, 0.001, 0.001, 9999999.0,
+            0.1, 1.3333333]
     for i, w in enumerate(want):
-        got = elf_f(0x00321FA8 + 4 * i)
+        got = elf_f(POOL + 4 * i)
         if abs(got - w) > abs(w) * 1e-6 + 1e-9:
             sys.exit("lit4 slot %d is %r, expected about %r" % (i, got, w))
 
@@ -253,7 +284,8 @@ def i16(v):
 # The 528-byte layout, spelled as fields plus the three padding runs. The
 # pads are modelled as bytes because the assignment operator copies them and
 # the copy constructor does not, and that difference is one of the things
-# the transcript is for.
+# the transcript is for. Retail's byte at 516 is `Last`, and the third pad
+# run is the eleven bytes after it.
 
 
 class DriveTarget(object):
@@ -277,7 +309,8 @@ class DriveTarget(object):
         self.CalcT = w32
         self.BlendT = w32
         self.Length = f32(w)
-        self.pad2 = bytearray([b] * 12)
+        self.Last = i8(b)
+        self.pad2 = bytearray([b] * 11)
 
     def header_vec(self):
         """The record's own first sixteen bytes read as a bVector3. GetAngle
@@ -319,14 +352,16 @@ def assign(dst, src):
     dst.CalcT = src.CalcT
     dst.BlendT = src.BlendT
     dst.Length = src.Length
+    dst.Last = src.Last
     dst.pad2 = bytearray(src.pad2)
     return dst
 
 
 def copy_ctor(dst, src):
     """0x001da210, out of line in CarCollisionDetect.obj: five twenty-
-    iteration loops and eight scalar stores. No memcpy, so the three pad
-    runs keep whatever the destination already held."""
+    iteration loops and the scalar stores, eight on the demo and nine on
+    retail (0x001e7930), whose ninth is byte 516. No memcpy, so the three
+    pad runs keep whatever the destination already held."""
     for i in range(MAX_POINTS):
         dst.P[i] = list(src.P[i])
     for i in range(MAX_POINTS):
@@ -343,12 +378,13 @@ def copy_ctor(dst, src):
     dst.CalcT = src.CalcT
     dst.BlendT = src.BlendT
     dst.Length = src.Length
+    dst.Last = src.Last
     return dst
 
 
 def same_bytes(a, b):
     """What the harness's memcmp answers."""
-    for name in ("NumPoints", "TType", "Pick", "CalcT", "BlendT"):
+    for name in ("NumPoints", "TType", "Pick", "CalcT", "BlendT", "Last"):
         if getattr(a, name) != getattr(b, name):
             return 0
     if a.Length != b.Length or struct.pack("<f", a.Length) != struct.pack(
@@ -806,12 +842,13 @@ def interpolate_point(t, car, dist, out):
 
 
 def clear(t, car, speed):
-    """0x00208980. Everything last frame decided is thrown away except the
+    """0x00208980, retail 0x0021bbb0. Everything last frame decided is thrown away except the
     part of the path still in front of the car."""
     n = t.NumPoints
     if n == 0:
         t.Length = ZERO
         t.BlendT = 0
+        t.Last = -1
         t.CalcT = 0
         return
 
@@ -820,6 +857,7 @@ def clear(t, car, speed):
         t.NumPoints = 0
         t.Length = ZERO
         t.BlendT = 0
+        t.Last = -1
         t.CalcT = 0
         return
 
@@ -838,6 +876,7 @@ def clear(t, car, speed):
         t.NumPoints = 0
         t.Length = ZERO
         t.BlendT = 0
+        t.Last = -1
         t.CalcT = 0
         return
 
@@ -852,10 +891,12 @@ def clear(t, car, speed):
             add_point3(t, p, t.R[r], t.RPN[r], t.DL[r], 0, None)
             recalculate_length(t)
             t.BlendT = 0
+            t.Last = -1
             t.CalcT = 0
             return
     elif r >= 0:
         t.BlendT = 0
+        t.Last = -1
         t.CalcT = 0
         return
 
@@ -870,6 +911,7 @@ def clear(t, car, speed):
     add_point3(t, p, route, rpn, dl, 0, None)
     recalculate_length(t)
     t.BlendT = 0
+    t.Last = -1
     t.CalcT = 0
 
 
@@ -954,21 +996,15 @@ def resample(t, car):
 
 # ------------------------------------------------------------- the scoring
 
-def calculate_max_speed(car, p0, p1, p2, dist, speed, out):
-    """0x00209cf0. Two velocity vectors, the acceleration between them, and
+def calculate_max_speed_v(car, v1, v2, dist, speed, out):
+    """0x0021d130, retail only: the demo's CalculateMaxSpeed from its third
+    test on. Two velocity vectors, the acceleration between them, and
     whether its lateral part fits inside the grip. Returns (rc, out)."""
-    if fabs32(speed) <= K_MAXSPEED_EPS:
-        return 1, out
-    if fabs32(dist) <= K_MAXSPEED_EPS:
-        return 1, speed
-
-    v1 = BV.bNormalize2To((fsub(p1[0], p0[0]), fsub(p1[1], p0[1])), speed)
-    v2 = BV.bNormalize2To((fsub(p2[0], p1[0]), fsub(p2[1], p1[1])), out)
     dvx = fsub(v2[0], v1[0])
     dvy = fsub(v2[1], v1[1])
 
     time = calculate_time(dist, speed, out)
-    if fabs32(time) <= K_MAXSPEED_EPS:
+    if fabs32(time) <= K_MAXSPEED_V_EPS:
         return 1, speed
 
     # The reciprocal is taken once and multiplied twice, which is not the
@@ -977,8 +1013,10 @@ def calculate_max_speed(car, p0, p1, p2, dist, speed, out):
     accy = fmul(dvy, inv)
     accx = fmul(dvx, inv)
 
-    k = fdiv(fadd(fmul(v1[0], accx), fmul(v1[1], accy)),
-             fadd(fmul(v1[0], v1[0]), fmul(v1[1], v1[1])))
+    # A car standing still hands in a zero v1 and this is 0/0, which the EE
+    # answers with FLT_MAX: its products with v1's zeroes are zeroes.
+    k = BV.ee_div(fadd(fmul(v1[0], accx), fmul(v1[1], accy)),
+                  fadd(fmul(v1[0], v1[0]), fmul(v1[1], v1[1])))
     pary = fmul(v1[1], k)
     parx = fmul(v1[0], k)
     perpy = fsub(accy, pary)
@@ -993,14 +1031,48 @@ def calculate_max_speed(car, p0, p1, p2, dist, speed, out):
     grip = get_max_lateral_acceleration()
     if mag < grip:
         return 1, out
-    if fabs32(fsub(mag, grip)) <= K_MAXSPEED_EPS:
+    if fabs32(fsub(mag, grip)) <= K_MAXSPEED_V_EPS:
         return 1, out
     return 0, out
 
 
+def calculate_max_speed(car, p0, p1, p2, dist, speed, out):
+    """0x00209cf0, retail 0x0021cfe8. The two early answers and the two
+    velocities; calculate_max_speed_v does the rest. Returns (rc, out)."""
+    if fabs32(speed) <= K_MAXSPEED_EPS:
+        return 1, out
+    if fabs32(dist) <= K_MAXSPEED_EPS:
+        return 1, speed
+
+    v1 = BV.bNormalize2To((fsub(p1[0], p0[0]), fsub(p1[1], p0[1])), speed)
+    v2 = BV.bNormalize2To((fsub(p2[0], p1[0]), fsub(p2[1], p1[1])), out)
+    return calculate_max_speed_v(car, v1, v2, dist, speed, out)
+
+
+def calculate_max_speed_from_car(car, p, out, factor):
+    """0x0021cf38, retail only. A corner taken from where the car is going:
+    v1 is State.Velocity unscaled, v2 aims from the car at `p` at `out`,
+    the distance is `factor` times |ForwardSpeed| and the entry speed is
+    VelocityMagnitude. No early answers. Returns (rc, out)."""
+    s = car.State
+    dist = fmul(factor, fabs32(s.ForwardSpeed))
+    d = BV.bNormalize2To((fsub(p[0], s.Position[0]),
+                          fsub(p[1], s.Position[1])), out)
+    return calculate_max_speed_v(car, s.Velocity[:2], d, dist,
+                                 s.VelocityMagnitude, out)
+
+
+def get_last_corner_to_score(t):
+    """0x0021bdc8, retail only. NumPoints - 2 while byte 516 is -1, else
+    that byte less one, each narrowed through `sll 24 ; sra 24`."""
+    if t.Last == -1:
+        return i8(t.NumPoints - 2)
+    return i8(t.Last - 1)
+
+
 def estimate_score(t, car):
-    """0x002096b0, 1596 bytes. Fills CalculatedSpeed with the car's current
-    speed, walks the points in two nested passes asking CalculateMaxSpeed
+    """0x002096b0, retail 0x0021c920, 1556 bytes. Fills CalculatedSpeed with
+    the car's current speed, walks the points in two nested passes asking
     whether each corner fits, and returns the distance-weighted mean of the
     speeds -- or -1.0f if any corner did not."""
     # The image leaves this stack array untouched below `first`, and a stale
@@ -1010,7 +1082,6 @@ def estimate_score(t, car):
     ok = 1
     bail = 0
     max_ok = 1
-    leg = ZERO
 
     if t.NumPoints == 0:
         return f32(-1.0)
@@ -1045,78 +1116,68 @@ def estimate_score(t, car):
     if not bail:
         # Pass one: from the chosen point, skip forward while the car
         # reaches the next point inside the first threshold.
-        cur = first
-        leg = dist[first]
-        max_ok = 1
-        if calculate_time(leg, cs.VelocityMagnitude, t.S[first]) < K_SCORE_T1:
+        s0 = first
+        if calculate_time(dist[first], cs.VelocityMagnitude,
+                          t.S[first]) < K_SCORE_T1:
             if first < t.NumPoints:
-                cur = first + 1
+                s0 = first + 1
                 while True:
-                    dx = fsub(car.State.Position[0], t.P[cur][0])
-                    dy = fsub(car.State.Position[1], t.P[cur][1])
+                    dx = fsub(car.State.Position[0], t.P[s0][0])
+                    dy = fsub(car.State.Position[1], t.P[s0][1])
                     leg = len2(dx, dy)
                     if not (calculate_time(leg, cs.VelocityMagnitude,
-                                           t.S[cur]) < K_SCORE_T2):
+                                           t.S[s0]) < K_SCORE_T2):
                         break
-                    if not (cur < t.NumPoints):
+                    if not (s0 < t.NumPoints):
                         break
-                    cur += 1
+                    s0 += 1
 
-        nxt = cur + 1
-        if nxt < t.NumPoints:
-            max_ok, t.S[cur] = calculate_max_speed(
-                car, car.State.Position, t.P[cur], t.P[nxt],
-                leg, cs.VelocityMagnitude, t.S[cur])
+        # The first corner, from the car's velocity over half a second of
+        # its forward speed.
+        if s0 + 1 < t.NumPoints:
+            max_ok, t.S[s0] = calculate_max_speed_from_car(
+                car, t.P[s0], t.S[s0], K_FIRST_CORNER)
         if max_ok == 0:
             ok = 0
             bail = 1
 
-        if not bail:
-            cur = nxt
-            if cur + 1 < t.NumPoints:
-                nxt = cur + 1
+        last = get_last_corner_to_score(t)
+        s0 += 1
+        if not bail and not (last < s0):
+            # Pass two: the same question for every corner up to `last`,
+            # with the same skip-ahead inside it. The inner walk always
+            # measures back to Points[outer - 1], which stays put.
+            while True:
+                outer = s0
+                leg = len2(fsub(t.P[outer - 1][0], t.P[outer][0]),
+                           fsub(t.P[outer - 1][1], t.P[outer][1]))
 
-                # Pass two: the same question for every remaining corner,
-                # with the same skip-ahead inside it. The inner walk always
-                # measures back to Points[outer - 1], which stays put.
-                while True:
-                    outer = cur
-                    leg = len2(fsub(t.P[outer - 1][0], t.P[outer][0]),
-                               fsub(t.P[outer - 1][1], t.P[outer][1]))
+                if calculate_time(leg, t.S[outer - 1],
+                                  t.S[outer]) < K_SCORE_T3:
+                    if s0 < t.NumPoints:
+                        while True:
+                            s0 += 1
+                            leg = len2(fsub(t.P[outer - 1][0], t.P[s0][0]),
+                                       fsub(t.P[outer - 1][1], t.P[s0][1]))
+                            if not (calculate_time(leg, t.S[outer - 1],
+                                                   t.S[s0]) < K_SCORE_T3):
+                                break
+                            if not (s0 < t.NumPoints):
+                                break
 
-                    if calculate_time(leg, t.S[outer - 1],
-                                      t.S[outer]) < K_SCORE_T3:
-                        if outer < t.NumPoints:
-                            while True:
-                                cur = nxt
-                                leg = len2(
-                                    fsub(t.P[outer - 1][0], t.P[nxt][0]),
-                                    fsub(t.P[outer - 1][1], t.P[nxt][1]))
-                                if not (calculate_time(leg, t.S[outer - 1],
-                                                       t.S[nxt]) < K_SCORE_T3):
-                                    nxt += 1
-                                    break
-                                if not (nxt < t.NumPoints):
-                                    nxt += 1
-                                    break
-                                nxt += 1
+                if last < s0:
+                    bail = 1
+                else:
+                    max_ok, t.S[s0] = calculate_max_speed(
+                        car, t.P[outer - 1], t.P[s0], t.P[s0 + 1],
+                        leg, t.S[outer - 1], t.S[s0])
+                    s0 += 1
 
-                    if nxt < t.NumPoints:
-                        max_ok, t.S[cur] = calculate_max_speed(
-                            car, t.P[outer - 1], t.P[cur], t.P[nxt],
-                            leg, t.S[outer - 1], t.S[cur])
-                        cur = nxt
-                    else:
-                        bail = 1
-
-                    if max_ok == 0:
-                        ok = 0
-                        bail = 1
-                    if bail:
-                        break
-                    nxt = cur + 1
-                    if not (nxt < t.NumPoints):
-                        break
+                if max_ok == 0:
+                    ok = 0
+                    bail = 1
+                if bail or last < s0:
+                    break
 
     if not ok:
         return f32(-1.0)
@@ -1276,9 +1337,9 @@ def pdt(tag, t, n):
     """The scalars, then `n` slots. The slot count is given per call site
     rather than taken from NumPoints, because the interesting part of
     ShiftRight and ShiftLeft is what they leave past the end."""
-    emit("%s n %d len %s pick %d calct %d blendt %d ttype %d"
+    emit("%s n %d len %s pick %d calct %d blendt %d ttype %d last %d"
          % (tag, t.NumPoints, g9(t.Length), t.Pick, t.CalcT, t.BlendT,
-            t.TType))
+            t.TType, t.Last))
     for i in range(n):
         emit("%s [%02d] %s %s %s %s  s %s r %d p %d d %d"
              % (tag, i, g9(t.P[i][0]), g9(t.P[i][1]), g9(t.P[i][2]),
@@ -1298,7 +1359,10 @@ def pv3(tag, v):
 # ---------------------------------------------------------------- fixtures
 
 def dt_reset(t):
+    """Zeroed as Clear leaves it, LastPointToScore -1 (score every
+    corner) included."""
     t.fill(0)
+    t.Last = -1
 
 
 def dt_point(t, i, x, y, z, speed, route, rpn, dl):
@@ -1384,6 +1448,7 @@ def s_layout():
     pint("ly calct", 504)
     pint("ly blendt", 508)
     pint("ly length", 512)
+    pint("ly last", 516)
     pint("ly maxpoints", MAX_POINTS)
     # The three Car offsets DriveTarget reads. They were 10, 24 and 64
     # flat while drivetarget.h carried its own stand-in Car, whose
@@ -1428,8 +1493,11 @@ def s_ctor():
     for i in range(1, 16):
         t.pad0[i - 1] = (0x10 + i) & 0xFF
     t.pad1[0], t.pad1[1], t.pad1[2] = 0x71, 0x72, 0x73
-    for i in range(516, 528):
-        t.pad2[i - 516] = (0x80 + i - 516) & 0xFF
+    # Byte 516 is retail's LastPointToScore and the run after it the pad;
+    # the bytes written are the same as before there was a field.
+    t.Last = i8(0x80)
+    for i in range(517, 528):
+        t.pad2[i - 517] = (0x80 + i - 516) & 0xFF
     t.TType = 9
     t.Pick = 2
     t.CalcT = 44
@@ -2205,6 +2273,86 @@ def s_max_speed():
                                  f32(104.335953))
     pint("ms grip edge up", r)
 
+    # Retail's _v half on its own, handed the two velocities as they are: a
+    # straight, a gentle and a hard corner, then a time inside its epsilon.
+    v1 = [f32(20.0), ZERO]
+    for tag, v2, sp, dist in (("mv straight", [f32(20.0), ZERO], 20.0, 20.0),
+                              ("mv gentle", [f32(16.0), f32(12.0)], 20.0,
+                               20.0),
+                              ("mv hard", [ZERO, f32(40.0)], 40.0, 20.0)):
+        r, out = calculate_max_speed_v(car, v1, v2, f32(dist), f32(sp),
+                                       f32(sp))
+        pint(tag, r)
+        pf(tag + " out", out)
+    r, out = calculate_max_speed_v(car, v1, v1, f32(0.0005), f32(20.0),
+                                   f32(33.0))
+    pint("mv short", r)
+    pf("mv short out", out)
+
+    # It has neither of CalculateMaxSpeed's early answers, so a crawl into
+    # a hard corner is asked about and refused.
+    r, out = calculate_max_speed_v(car, v1, [ZERO, f32(40.0)], f32(20.0),
+                                   f32(0.0005), f32(40.0))
+    pint("mv slow", r)
+
+    # A zero v1, as from a car standing still: the projection divides 0 by
+    # 0, the EE's FLT_MAX, and the lateral part is the whole acceleration
+    # -- small here, so yes; large, so no.
+    r, out = calculate_max_speed_v(car, [ZERO, ZERO], [f32(3.0), f32(4.0)],
+                                   f32(20.0), ZERO, f32(5.0))
+    pint("mv zero v1", r)
+    r, out = calculate_max_speed_v(car, [ZERO, ZERO],
+                                   [f32(300.0), f32(400.0)], f32(20.0), ZERO,
+                                   f32(500.0))
+    pint("mv zero v1 hard", r)
+
+    # Retail's first-corner question: v1 is State.Velocity unscaled, v2
+    # aims from the car at the point, the distance is the factor times
+    # |ForwardSpeed| and the entry speed is VelocityMagnitude.
+    car_set(car, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 0, 20.0, 20.0)
+    for tag, p, want in (("mc ahead", [f32(30.0), ZERO], 20.0),
+                         ("mc wide", [f32(10.0), f32(30.0)], 20.0),
+                         ("mc slower", [f32(30.0), f32(2.0)], 12.0),
+                         ("mc fwd 20", [f32(30.0), f32(10.0)], 20.0)):
+        r, out = calculate_max_speed_from_car(car, p, f32(want),
+                                              K_FIRST_CORNER)
+        pint(tag, r)
+        pf(tag + " out", out)
+
+    # The same 18-degree corner at three forward speeds and one entry
+    # speed: half a second at 20 m/s fits, at 2 m/s it does not, and a car
+    # going backwards at 20 is measured by the size of its speed.
+    p = [f32(30.0), f32(10.0)]
+    car_set(car, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 0, 2.0, 20.0)
+    r, out = calculate_max_speed_from_car(car, p, f32(20.0), K_FIRST_CORNER)
+    pint("mc fwd 2", r)
+    car_set(car, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 0, -20.0, 20.0)
+    r, out = calculate_max_speed_from_car(car, p, f32(20.0), K_FIRST_CORNER)
+    pint("mc fwd back", r)
+
+    # The factor scales the distance, and VelocityMagnitude, not
+    # ForwardSpeed, is the entry speed.
+    car_set(car, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 0, 20.0, 20.0)
+    r, out = calculate_max_speed_from_car(car, p, f32(20.0), f32(0.05))
+    pint("mc factor", r)
+    car_set(car, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 0, 20.0, 200.0)
+    r, out = calculate_max_speed_from_car(car, p, f32(20.0), K_FIRST_CORNER)
+    pint("mc vmag", r)
+
+    # Standing still with nothing wanted at the point: bNormalize2To is
+    # asked for a length of zero and the _v half then divides 0 by 0. Both
+    # are the EE's FLT_MAX, and the corner fits -- on the point itself too,
+    # where the vector is zero as well and IEEE would make a NaN of it.
+    car_set(car, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0, 0.0)
+    r, out = calculate_max_speed_from_car(car, p, ZERO, K_FIRST_CORNER)
+    pint("mc stopped", r)
+    pf("mc stopped out", out)
+    car_set(car, 30.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0, 0.0)
+    r, out = calculate_max_speed_from_car(car, p, ZERO, K_FIRST_CORNER)
+    pint("mc stopped on point", r)
+    pf("mc stopped on point out", out)
+
+
 
 def s_estimate_score():
     t = DriveTarget()
@@ -2355,6 +2503,132 @@ def s_estimate_score():
     recalculate_length(t)
     car_set(car, 0.0, 0.0, 35.5, 0.0, 0.0, 0.0, 0, 35.5, 35.5)
     pf("es t2 mid", estimate_score(t, car))
+
+    # Retail's accessor, on its own: NumPoints - 2 while the byte is -1,
+    # the byte less one otherwise, both narrowed to a signed byte.
+    for n, last in ((5, -1), (0, -1), (1, -1), (20, -1), (5, 3), (5, 0),
+                    (5, 1), (20, 19), (3, -128), (3, 127)):
+        dt_reset(t)
+        t.NumPoints = n
+        t.Last = i8(last)
+        pint("es lastcorner %d %d" % (n, last), get_last_corner_to_score(t))
+
+    # At 40 m/s the first corner, from the car, fits and the walk's one
+    # corner, at point 3, does not. Cut at 1 the walk never starts (the
+    # accessor's 0 is below s0), at 2 it starts and bails on point 3 being
+    # past the cut, at 3 it stops just short of the bad corner and the
+    # target scores, and at 4 or -1 (NumPoints - 2) the bad corner is
+    # asked and refuses.
+    for k, last in enumerate((1, 2, 3, 4, -1)):
+        timer(515 + k)
+        dt_corner(t)
+        t.Last = last
+        car_set(car, 0.0, 0.0, 40.0, 5.0, 0.0, 0.0, 0, 40.0, 40.3112887)
+        pf("es corner last %d" % last, estimate_score(t, car))
+        pdt("es corner last %d after" % last, t, 5)
+
+    # The sweep with its last point hooked back: thirteen corners fit at
+    # 25 m/s and the fourteenth, the hook, does not. Every cut up to 18
+    # leaves the hook out and scores; 19 and -1 take it in.
+    for k, last in enumerate((2, 10, 18, 19, -1)):
+        timer(520 + k)
+        dt_reset(t)
+        for i in range(20):
+            dt_point(t, i, float(i) * 6.0, float(i) * float(i) * 0.5, 0.0,
+                     0.0, 2, i, 1)
+        dt_point(t, 19, 90.0, 162.0, 0.0, 0.0, 2, 19, 1)
+        t.NumPoints = 20
+        recalculate_length(t)
+        t.Last = last
+        car_set(car, 0.0, 0.0, 25.0, 0.0, 0.0, 0.0, 0, 25.0, 25.0)
+        pf("es hook last %d" % last, estimate_score(t, car))
+
+    # Standing still with VelocityMagnitude zero: the fill writes zero
+    # speeds, and the first corner divides by zero twice -- bNormalize2To's
+    # length of zero and the _v half's 0/0 projection -- and fits on the
+    # EE's FLT_MAX where IEEE's NaN would refuse it. Every later corner is
+    # entered at zero and answered early, and the score is zero.
+    timer(525)
+    dt_corner(t)
+    car_set(car, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0, 0.0)
+    pf("es stopped corner", estimate_score(t, car))
+    pdt("es stopped corner after", t, 5)
+
+    # The first corner's distance is half of |ForwardSpeed| and its entry
+    # speed is VelocityMagnitude, cut at 3 so the first corner alone
+    # decides: 40 fits, 4 is a tenth of the distance and does not, -40 is
+    # 40's size, and 0 is a time inside the epsilon, a yes that writes
+    # the entry speed.
+    for k, fwd in enumerate((40.0, 4.0, -40.0, 0.0)):
+        timer(526 + k)
+        dt_corner(t)
+        t.Last = 3
+        car_set(car, 0.0, 0.0, 40.0, 5.0, 0.0, 0.0, 0, fwd, 40.3112887)
+        pf("es corner fwd %g" % fwd, estimate_score(t, car))
+
+    # Pass one stops on the last point: (6, 0) is 0.15 s out at 40 m/s and
+    # (10, 20) 0.56 s. The first corner is asked only of a point with one
+    # after it, so this one -- a corner far too hard at 40 -- is never
+    # asked, and the target scores.
+    timer(530)
+    dt_reset(t)
+    dt_point(t, 0, 6.0, 0.0, 0.0, 0.0, 2, 0, 1)
+    dt_point(t, 1, 10.0, 20.0, 0.0, 0.0, 2, 1, 1)
+    t.NumPoints = 2
+    recalculate_length(t)
+    car_set(car, 0.0, 0.0, 40.0, 0.0, 0.0, 0.0, 0, 40.0, 40.0)
+    pf("es last point corner", estimate_score(t, car))
+
+    # The cut on its edge. At 20 m/s pass one stops on (20, 0), whose
+    # corner is straight, and the walk starts at s0 = 2. The leg to (30, 0)
+    # is 0.5 s, so nothing is skipped, and the corner there turns a right
+    # angle in 10 m: 40 m/s/s against 30. A cut of 2 (a byte of 3, or -1
+    # on four points) is not below s0, so the corner is asked and refuses;
+    # a cut of 1 ends the walk first.
+    for k, last in enumerate((-1, 3, 2)):
+        timer(531 + k)
+        dt_reset(t)
+        dt_point(t, 0, 6.0, 0.0, 0.0, 0.0, 2, 0, 1)
+        dt_point(t, 1, 20.0, 0.0, 0.0, 0.0, 2, 1, 1)
+        dt_point(t, 2, 30.0, 0.0, 0.0, 0.0, 2, 2, 1)
+        dt_point(t, 3, 30.0, 20.0, 0.0, 0.0, 2, 3, 1)
+        t.NumPoints = 4
+        recalculate_length(t)
+        t.Last = last
+        car_set(car, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 0, 20.0, 20.0)
+        pf("es cut edge %d" % last, estimate_score(t, car))
+
+    # The inner walk measures from Points[outer - 1], not from the point
+    # before. Points 6 m apart at 20 m/s are 0.3 s each, but (12, 0) to
+    # (24, 0) is 0.6 s, so the walk stops on (24, 0) and asks its corner,
+    # 33 m/s/s, which refuses. Measured point to point, the walk would run
+    # off the end and ask nothing.
+    timer(534)
+    dt_reset(t)
+    dt_point(t, 0, 6.0, 0.0, 0.0, 0.0, 2, 0, 1)
+    dt_point(t, 1, 12.0, 0.0, 0.0, 0.0, 2, 1, 1)
+    dt_point(t, 2, 18.0, 0.0, 0.0, 0.0, 2, 2, 1)
+    dt_point(t, 3, 24.0, 0.0, 0.0, 0.0, 2, 3, 1)
+    dt_point(t, 4, 24.0, 6.0, 0.0, 0.0, 2, 4, 1)
+    t.NumPoints = 5
+    recalculate_length(t)
+    car_set(car, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 0, 20.0, 20.0)
+    pf("es inner from base", estimate_score(t, car))
+
+    # A cut past the points, as a byte BuildDriveTargetAndCheckIt set and
+    # something since shortened the target under: the walk goes on past
+    # NumPoints - 2, asking about the slots beyond the last point. Slot 5
+    # is left from a longer target, 40 m/s at (40, 34); the corner there,
+    # into the zeroed slot 6, is far too hard, so a walk that reaches it
+    # refuses. A cut of 5 or less never asks it, and scores as -1 does.
+    for k, last in enumerate((6, 10)):
+        timer(535 + k)
+        dt_corner(t)
+        dt_point(t, 5, 40.0, 34.0, 1.5, 40.0, 4, 16, 2)
+        t.Last = last
+        car_set(car, 0.0, 0.0, 15.0, 2.0, 0.0, 0.0, 0, 15.0, 15.13275)
+        pf("es stale cut %d" % last, estimate_score(t, car))
+
 
 
 def s_fill():
@@ -2770,14 +3044,20 @@ MUTATIONS = [
     ("k-ahead-dot", DC, "#define K_AHEAD_DOT        0.342000008f",
      "#define K_AHEAD_DOT        0.5f"),
     ("k-score-t1", DC,
-     "#define K_SCORE_T1         0.400000006f    // gp-27712, EstimateScore",
-     "#define K_SCORE_T1         0.200000003f    // gp-27712, EstimateScore"),
+     "#define K_SCORE_T1         0.400000006f    // gp-27712 / -27236, "
+     "EstimateScore",
+     "#define K_SCORE_T1         0.200000003f    // gp-27712 / -27236, "
+     "EstimateScore"),
     ("k-score-t2", DC,
-     "#define K_SCORE_T2         0.400000006f    // gp-27708, EstimateScore",
-     "#define K_SCORE_T2         0.200000003f    // gp-27708, EstimateScore"),
+     "#define K_SCORE_T2         0.400000006f    // gp-27708 / -27232, "
+     "EstimateScore",
+     "#define K_SCORE_T2         0.200000003f    // gp-27708 / -27232, "
+     "EstimateScore"),
     ("k-score-t3", DC,
-     "#define K_SCORE_T3         0.400000006f    // gp-27704, EstimateScore",
-     "#define K_SCORE_T3         0.200000003f    // gp-27704, EstimateScore"),
+     "#define K_SCORE_T3         0.400000006f    // gp-27704 / -27228, "
+     "EstimateScore",
+     "#define K_SCORE_T3         0.200000003f    // gp-27704 / -27228, "
+     "EstimateScore"),
     ("k-maxspeed-eps", DC, "#define K_MAXSPEED_EPS     0.00100000005f",
      "#define K_MAXSPEED_EPS     0.100000001f"),
     ("k-time-eps", DC, "#define K_TIME_EPS         0.00100000005f",
@@ -2833,8 +3113,8 @@ MUTATIONS = [
      "    return (const bVector3 *)((const char *)t + i * 16);"),
 
     # -- the free functions --------------------------------------------
-    ("fr-isclear-tests-point", DC, "    return d->pRoute == 0;",
-     "    return d->pRoutePoint == 0;"),
+    ("fr-isclear-tests-point", DLH, "    return d->pRoute == NULL;",
+     "    return d->pRoutePoint == NULL;"),
     ("fr-ahead-inclusive", DC,
      "    return thresh < (v.x * d.x + v.y * d.y) ? 1 : 0;",
      "    return thresh <= (v.x * d.x + v.y * d.y) ? 1 : 0;"),
@@ -2895,7 +3175,10 @@ MUTATIONS = [
      "    dst->NumPoints = src->NumPoints;" + NL + "    dst->TType = src->TType;",
      "    dst->NumPoints = src->NumPoints;"),
     ("cp-drops-length", DC, "    dst->Length = src->Length;" + NL
-     + "    return dst;", "    return dst;"),
+     + "    dst->LastPointToScore", "    dst->LastPointToScore"),
+    ("cp-drops-last", DC,
+     "    dst->LastPointToScore = src->LastPointToScore;   // retail's ninth",
+     "    (void)0;"),
     ("cp-points-nineteen", DC,
      "    for (i = 0; i < DRIVETARGET_MAX_POINTS; i++) dst->Points[i] = src->Points[i];",
      "    for (i = 0; i < DRIVETARGET_MAX_POINTS - 1; i++) dst->Points[i] = src->Points[i];"),
@@ -3175,7 +3458,7 @@ MUTATIONS = [
     ("ap-dl-rpn-off-by-one", DC,
      "        rpn = (int16_t)(loc->pRoutePoint - loc->pRoute->TrackRoutePointTable);",
      "        rpn = (int16_t)(loc->pRoutePoint - loc->pRoute->TrackRoutePointTable) + 1;"),
-    ("ap-dl-line-negated", DC, "    dl = loc->DrivingLine;",
+    ("ap-dl-line-negated", DC, "    dl = (int8_t)loc->DrivingLine;",
      "    dl = (int8_t)-loc->DrivingLine;"),
     ("ap-dl2-keeps-z", DC,
      "    v.z = 0.0f;" + NL + "    v.y = p->y;" + NL + "    v.x = p->x;",
@@ -3275,6 +3558,14 @@ MUTATIONS += [
      "                                   t->DrivingLine[r], 0, 0);" + NL
      + "            drivetarget_recalculate_length(t);",
      "                                   t->DrivingLine[r], 0, 0);"),
+    ("cl-no-last-reset", DC,
+     "    t->WhichPointIPickedTime = 0;" + NL
+     + "    t->LastPointToScore = -1;" + NL,
+     "    t->WhichPointIPickedTime = 0;" + NL),
+    ("cl-last-reset-zero", DC, "    t->LastPointToScore = -1;" + NL
+     + "    t->WhichPointIPickedCalculationTime = 0;",
+     "    t->LastPointToScore = 0;" + NL
+     + "    t->WhichPointIPickedCalculationTime = 0;"),
     ("cl-collapse-uses-zero", DC,
      "        int f = drivetarget_get_first_point(t, &car->State);", "        int f = 0;"),
     ("cl-collapse-reads-after", DC,
@@ -3327,7 +3618,7 @@ MUTATIONS += [
      "    t->WhichPointIPickedCalculationTime = 0;" + NL + "}" + NL + NL
      + "// -------------------------------------------------------------- the scoring"),
 
-    # -- CalculateMaxSpeed ---------------------------------------------
+    # -- CalculateMaxSpeed and its retail halves ------------------------
     ("ms-slow-writes-out", DC,
      "    if (fabsf(speed) <= K_MAXSPEED_EPS) return 1;",
      "    if (fabsf(speed) <= K_MAXSPEED_EPS) { *pOut = speed; return 1; }"),
@@ -3340,22 +3631,31 @@ MUTATIONS += [
      "    bNormalize2To(&v1, &v1, *pOut);"),
     ("ms-v2-scaled-by-speed", DC, "    bNormalize2To(&v2, &v2, *pOut);",
      "    bNormalize2To(&v2, &v2, speed);"),
+    ("ms-split-entry-is-exit", DC,
+     "    return drivetarget_calculate_max_speed_v(t, car, &v1, &v2, dist, speed,",
+     "    return drivetarget_calculate_max_speed_v(t, car, &v1, &v2, dist, *pOut,"),
     ("ms-dv-reversed", DC,
-     "    dv.x = v2.x - v1.x;" + NL + "    dv.y = v2.y - v1.y;",
-     "    dv.x = v1.x - v2.x;" + NL + "    dv.y = v1.y - v2.y;"),
+     "    dv.x = v2->x - v1->x;" + NL + "    dv.y = v2->y - v1->y;",
+     "    dv.x = v1->x - v2->x;" + NL + "    dv.y = v1->y - v2->y;"),
     ("ms-time-args-swapped", DC,
      "    time = drivetarget_calculate_time(t, dist, speed, *pOut);",
      "    time = drivetarget_calculate_time(t, dist, *pOut, speed);"),
-    ("ms-time-eps-no-abs", DC, "    if (fabsf(time) <= K_MAXSPEED_EPS) {",
-     "    if (time <= K_MAXSPEED_EPS) {"),
+    ("ms-time-eps-no-abs", DC, "    if (fabsf(time) <= K_MAXSPEED_V_EPS) {",
+     "    if (time <= K_MAXSPEED_V_EPS) {"),
+    ("ms-v-short-no-write", DC,
+     "    if (fabsf(time) <= K_MAXSPEED_V_EPS) {" + NL + "        *pOut = speed;",
+     "    if (fabsf(time) <= K_MAXSPEED_V_EPS) {" + NL + "        (void)speed;"),
     ("ms-divides-twice", DC,
      "    inv = 1.0f / time;" + NL + "    acc.y = dv.y * inv;" + NL
      + "    acc.x = dv.x * inv;",
      "    inv = 1.0f / time;" + NL + "    acc.y = dv.y / time;" + NL
      + "    acc.x = dv.x / time;"),
     ("ms-projection-no-divide", DC,
-     "    k = (v1.x * acc.x + v1.y * acc.y) / (v1.x * v1.x + v1.y * v1.y);",
-     "    k = (v1.x * acc.x + v1.y * acc.y);"),
+     "    k = ee_div(v1->x * acc.x + v1->y * acc.y, v1->x * v1->x + v1->y * v1->y);",
+     "    k = (v1->x * acc.x + v1->y * acc.y);"),
+    ("ms-projection-ieee", DC,
+     "    k = ee_div(v1->x * acc.x + v1->y * acc.y, v1->x * v1->x + v1->y * v1->y);",
+     "    k = (v1->x * acc.x + v1->y * acc.y) / (v1->x * v1->x + v1->y * v1->y);"),
     ("ms-perp-is-par", DC,
      "    perp.y = acc.y - par.y;" + NL + "    perp.x = acc.x - par.x;",
      "    perp.y = par.y;" + NL + "    perp.x = par.x;"),
@@ -3366,8 +3666,42 @@ MUTATIONS += [
     ("ms-grip-flipped", DC, "    if (mag < grip) return 1;",
      "    if (grip < mag) return 1;"),
     ("ms-no-margin", DC,
-     "    if (fabsf(mag - grip) <= K_MAXSPEED_EPS) return 1;" + NL
+     "    if (fabsf(mag - grip) <= K_MAXSPEED_V_EPS) return 1;" + NL
      + "    return 0;", "    return 0;"),
+    ("fc-dist-no-abs", DC,
+     "    float dist = factor * fabsf(car->State.ForwardSpeed);",
+     "    float dist = factor * car->State.ForwardSpeed;"),
+    ("fc-dist-no-factor", DC,
+     "    float dist = factor * fabsf(car->State.ForwardSpeed);",
+     "    float dist = fabsf(car->State.ForwardSpeed);"),
+    ("fc-dist-uses-vmag", DC,
+     "    float dist = factor * fabsf(car->State.ForwardSpeed);",
+     "    float dist = factor * fabsf(car->State.VelocityMagnitude);"),
+    ("fc-aim-reversed", DC,
+     "    d.x = p->x - car->State.Position.x;" + NL
+     + "    d.y = p->y - car->State.Position.y;",
+     "    d.x = car->State.Position.x - p->x;" + NL
+     + "    d.y = car->State.Position.y - p->y;"),
+    ("fc-aim-not-scaled", DC, "    bNormalize2To(&d, &d, *pOut);",
+     "    (void)0;"),
+    ("fc-v1-is-accel", DC,
+     "        t, car, (const bVector2 *)&car->State.Velocity, &d, dist,",
+     "        t, car, (const bVector2 *)&car->State.Acceleration, &d, dist,"),
+    ("fc-entry-is-forward", DC,
+     "        car->State.VelocityMagnitude, pOut);",
+     "        car->State.ForwardSpeed, pOut);"),
+    ("bv-normalize2-ieee", "3DS Files/source/bvector.c",
+     "    float k = ee_div(sqrtf(x * x + y * y), len);",
+     "    float k = sqrtf(x * x + y * y) / len;"),
+    ("lc-all-is-last", DC,
+     "    if (t->LastPointToScore == -1) return (int8_t)(t->NumPoints - 2);",
+     "    if (t->LastPointToScore == -1) return (int8_t)(t->NumPoints - 1);"),
+    ("lc-any-negative-is-all", DC,
+     "    if (t->LastPointToScore == -1) return (int8_t)(t->NumPoints - 2);",
+     "    if (t->LastPointToScore < 0) return (int8_t)(t->NumPoints - 2);"),
+    ("lc-cut-not-less-one", DC,
+     "    return (int8_t)(t->LastPointToScore - 1);",
+     "    return t->LastPointToScore;"),
 
     # -- EstimateScore -------------------------------------------------
     ("es-empty-returns-zero", DC,
@@ -3398,51 +3732,70 @@ MUTATIONS += [
     ("es-fill-three-lane", DC, "            dist[i] = dt_len2(dx, dy);",
      "            dist[i] = dt_len3(dx, dy, 0.0f);"),
     ("es-pass1-threshold-t3", DC,
-     "    if (drivetarget_calculate_time(t, leg, cs->VelocityMagnitude," + NL
+     "    if (drivetarget_calculate_time(t, dist[first], cs->VelocityMagnitude," + NL
      + "                                   t->CalculatedSpeed[first]) < K_SCORE_T1) {",
-     "    if (drivetarget_calculate_time(t, leg, cs->VelocityMagnitude," + NL
+     "    if (drivetarget_calculate_time(t, dist[first], cs->VelocityMagnitude," + NL
      + "                                   t->CalculatedSpeed[first]) < K_SCORE_T3 * 0.5f) {"),
     ("es-pass1-leg-from-prev", DC,
-     "                float dx = car->State.Position.x - t->Points[cur].x;",
-     "                float dx = t->Points[cur - 1].x - t->Points[cur].x;"),
+     "                float dx = car->State.Position.x - t->Points[s0].x;",
+     "                float dx = t->Points[s0 - 1].x - t->Points[s0].x;"),
     ("es-pass1-inclusive", DC,
      "                if (!(drivetarget_calculate_time(t, leg, cs->VelocityMagnitude," + NL
-     + "                                                 t->CalculatedSpeed[cur])" + NL
+     + "                                                 t->CalculatedSpeed[s0])" + NL
      + "                      < K_SCORE_T2))",
      "                if (!(drivetarget_calculate_time(t, leg, cs->VelocityMagnitude," + NL
-     + "                                                 t->CalculatedSpeed[cur])" + NL
+     + "                                                 t->CalculatedSpeed[s0])" + NL
      + "                      <= K_SCORE_T2))"),
-    ("es-nxt-is-cur", DC, "    nxt = cur + 1;" + NL
-     + "    if (nxt < t->NumPoints) {", "    nxt = cur;" + NL
-     + "    if (nxt < t->NumPoints) {"),
+    ("es-first-corner-gate-loose", DC,
+     "    if (s0 + 1 < t->NumPoints)" + NL
+     + "        maxSpeedOK = drivetarget_calculate_max_speed_from_car(",
+     "    if (s0 < t->NumPoints)" + NL
+     + "        maxSpeedOK = drivetarget_calculate_max_speed_from_car("),
     ("es-maxspeed-not-consulted", DC,
-     "        maxSpeedOK = drivetarget_calculate_max_speed(" + NL
-     + "            t, car, (const bVector2 *)&car->State.Position,",
-     "        maxSpeedOK = 1; (void)drivetarget_calculate_max_speed(" + NL
-     + "            t, car, (const bVector2 *)&car->State.Position,"),
+     "        maxSpeedOK = drivetarget_calculate_max_speed_from_car(",
+     "        maxSpeedOK = 1; (void)drivetarget_calculate_max_speed_from_car("),
+    ("es-first-corner-next-point", DC,
+     "            t, car, (const bVector2 *)&t->Points[s0], &t->CalculatedSpeed[s0],",
+     "            t, car, (const bVector2 *)&t->Points[s0 + 1], &t->CalculatedSpeed[s0],"),
+    ("es-first-corner-whole-second", DC, "            K_FIRST_CORNER);",
+     "            1.0f);"),
     ("es-maxspeed-failure-ignored", DC,
      "    if (maxSpeedOK == 0) {" + NL + "        ok = 0;" + NL
-     + "        bail = 1;" + NL + "    }" + NL + "    if (bail) goto final;" + NL + NL
-     + "    cur = nxt;",
+     + "        bail = 1;" + NL + "    }" + NL + NL + "    // Read before",
      "    if (maxSpeedOK == 0) {" + NL + "        bail = 1;" + NL + "    }" + NL
-     + "    if (bail) goto final;" + NL + NL + "    cur = nxt;"),
+     + NL + "    // Read before"),
+    ("es-cut-not-advanced", DC,
+     "    s0 = s0 + 1;" + NL + "    if (bail) goto final;",
+     "    if (bail) goto final;"),
+    ("es-cut-ignored", DC, "    if (last < s0) goto final;", "    (void)0;"),
+    ("es-cut-inclusive", DC, "    if (last < s0) goto final;",
+     "    if (last <= s0) goto final;"),
     ("es-pass2-outer-base", DC,
      "        leg = dt_len2(t->Points[outer - 1].x - t->Points[outer].x,",
      "        leg = dt_len2(t->Points[outer].x - t->Points[outer + 1].x,"),
     ("es-pass2-inner-follows", DC,
-     "                    leg = dt_len2(t->Points[outer - 1].x - t->Points[nxt].x,",
-     "                    leg = dt_len2(t->Points[nxt - 1].x - t->Points[nxt].x,"),
+     "                    leg = dt_len2(t->Points[outer - 1].x - t->Points[s0].x,",
+     "                    leg = dt_len2(t->Points[s0 - 1].x - t->Points[s0].x,"),
     ("es-pass2-no-skip", DC,
      "        if (drivetarget_calculate_time(t, leg, t->CalculatedSpeed[outer - 1]," + NL
      + "                                       t->CalculatedSpeed[outer]) < K_SCORE_T3) {",
      "        if (0) {"),
     ("es-pass2-cur-not-advanced", DC,
-     "                leg, t->CalculatedSpeed[outer - 1], &t->CalculatedSpeed[cur]);" + NL
-     + "            cur = nxt;",
-     "                leg, t->CalculatedSpeed[outer - 1], &t->CalculatedSpeed[cur]);"),
+     "                leg, t->CalculatedSpeed[outer - 1], &t->CalculatedSpeed[s0]);" + NL
+     + "            s0++;",
+     "                leg, t->CalculatedSpeed[outer - 1], &t->CalculatedSpeed[s0]);"),
     ("es-pass2-no-bail-at-end", DC,
-     "        } else {" + NL + "            bail = 1;" + NL + "        }",
-     "        } else {" + NL + "            (void)0;" + NL + "        }"),
+     "        if (last < s0) {" + NL + "            bail = 1;" + NL + "        } else {",
+     "        if (last < s0) {" + NL + "            (void)0;" + NL + "        } else {"),
+    ("es-pass2-cut-is-demo-end", DC,
+     "        if (last < s0) {" + NL + "            bail = 1;",
+     "        if (t->NumPoints - 2 < s0) {" + NL + "            bail = 1;"),
+    ("es-pass2-loop-to-end", DC, "    } while (!bail && !(last < s0));",
+     "    } while (!bail && s0 + 1 < t->NumPoints);"),
+    ("es-pass2-failure-ignored", DC,
+     "        if (maxSpeedOK == 0) {" + NL + "            ok = 0;" + NL
+     + "            bail = 1;",
+     "        if (maxSpeedOK == 0) {" + NL + "            bail = 1;"),
     ("es-total-excludes-first", DC, "    total = dist[first];",
      "    total = 0.0f;"),
     ("es-trapezoid-not-halved", DC,
@@ -3590,8 +3943,11 @@ MUTATIONS += [
      "    int32_t  WhichPointIPicked;                // 500"),
     ("h-numpoints-unsigned", DH, "    int8_t   NumPoints;                        //   0",
      "    uint8_t  NumPoints;                        //   0"),
-    ("h-tail-pad-short", DH, "    uint8_t  _pad2[12];                        // 516",
-     "    uint8_t  _pad2[8];                         // 516"),
+    ("h-tail-pad-short", DH, "    uint8_t  _pad2[11];                        // 517",
+     "    uint8_t  _pad2[7];                         // 517"),
+    ("h-last-unsigned", DH,
+     "    int8_t   LastPointToScore;                 // 516  retail's; -1 is all",
+     "    uint8_t  LastPointToScore;                 // 516  retail's; -1 is all"),
 
     # The stand-in Car these two used to mutate is gone. They now aim at
     # the real record in car.h, which is what drivetarget.h includes, so
@@ -3612,12 +3968,6 @@ MUTATIONS += [
 # to reach it.
 EQUIVALENT = {
     # -- the record ----------------------------------------------------
-    "ct-no-clear":
-        "The copy constructor memsets the destination and then calls Clear "
-        "on it. Clear's own first act on a record with NumPoints == 0 is to "
-        "zero Length and the two stamps, and the memset has already zeroed "
-        "all three. There is no byte Clear can reach that the memset left "
-        "alone, so dropping the call cannot change a byte.",
     "ti-mean-distributed":
         "CalculateTime divides by (b + c) * 0.5f. Scaling by a half is exact "
         "in binary -- it only decrements the exponent -- so (b + c) * 0.5f "
@@ -3659,11 +4009,12 @@ EQUIVALENT = {
     # -- CalculateMaxSpeed ---------------------------------------------
     "ms-dv-reversed":
         "dv is used for nothing but acc = dv * inv, and acc for nothing but "
-        "k = (v1 . acc) / |v1|^2, par = v1 * k and perp = acc - par. "
-        "Negating dv negates acc exactly (a sign flip is exact), hence k, "
-        "hence par, hence perp; and perp reaches the answer only through "
-        "sqrt(px*px + py*py), where the squares put the sign back. The "
-        "magnitude is bit-identical.",
+        "k = ee_div(v1 . acc, |v1|^2), par = v1 * k and perp = acc - par. "
+        "Negating dv negates acc exactly (a sign flip is exact), hence the "
+        "dot product, hence k -- ee_div's FLT_MAX takes its sign from the "
+        "operands' as a quotient does -- hence par, hence perp; and perp "
+        "reaches the answer only through sqrt(px*px + py*py), where the "
+        "squares put the sign back. The magnitude is bit-identical.",
     "ms-time-args-swapped":
         "CalculateTime is symmetric in its last two arguments: the guard is "
         "`fabsf(b) <= eps && fabsf(c) <= eps` and the divisor is (b + c) * "
@@ -3674,6 +4025,15 @@ EQUIVALENT = {
         "and the very next line answers that case the same way: "
         "fabsf(mag - grip) is then zero, which is inside the margin, so both "
         "versions return 1.",
+    "fc-dist-no-abs":
+        "The from-car corner's distance reaches the answer only as "
+        "CalculateTime's numerator, and that function's guard reads the two "
+        "speeds, not the distance. Without the fabsf, factor * ForwardSpeed "
+        "is factor * |ForwardSpeed| or its exact negation, so time, the "
+        "reciprocal and acc are negated exactly too -- a time of zero is "
+        "caught by the guard's fabsf either way -- and from acc on this is "
+        "ms-dv-reversed's argument: the dot product and k flip sign, so do "
+        "par and perp, and the squares in the magnitude put it back.",
 
     # -- EstimateScore -------------------------------------------------
     "es-one-dist-reversed":
@@ -3681,40 +4041,51 @@ EQUIVALENT = {
         "dt_len2(dx, dy), which squares it. Reversing the subtraction "
         "negates dx exactly and the square puts it back.",
     "es-one-no-bail":
-        "With NumPoints == 1 the flag guards three things, and none of them "
-        "can write a different number. The fill loop writes "
-        "CalculatedSpeed[first] = VelocityMagnitude, which the one-point arm "
-        "has already written, and dist[first] with the subtraction reversed "
-        "-- squared again, so the same length. Pass one's inner walk and "
-        "both CalculateMaxSpeed calls are gated on an index being less than "
-        "NumPoints, which one point cannot satisfy. The score is read off "
-        "dist[first] and CalculatedSpeed[first] either way.",
+        "With NumPoints == 1 the flag guards the fill loop and the two "
+        "passes, and none of them can write a different number into what "
+        "the score reads. The fill loop writes CalculatedSpeed[first] = "
+        "VelocityMagnitude, which the one-point arm has already written, "
+        "and dist[first] with the subtraction reversed -- squared again, so "
+        "the same length. The first corner is gated on s0 + 1 < NumPoints, "
+        "which one point cannot satisfy. Pass two runs only when the "
+        "accessor's cut reaches s0, which is at least 1 by then, and its "
+        "questions write CalculatedSpeed[s0] at s0 >= 1, which a one-point "
+        "score never reads; it could fail the target, but only for a cut "
+        "of 2 or more on a one-point target, which neither Clear (-1) nor "
+        "BuildDriveTargetAndCheckIt (NumPoints - 1) leaves.",
     "es-fill-three-lane":
         "dt_len3(dx, dy, 0.0f) computes sqrtf((dx*dx + dy*dy) + 0.0f*0.0f). "
         "The two-lane sum is a sum of squares and so is never negative zero, "
         "and adding positive zero to it is the identity. Same argument to "
         "the same sqrt.",
     "es-pass2-no-bail-at-end":
-        "The flag that arm sets is read two lines later by `if (bail) "
-        "break;`, and the loop's own tail breaks on the same condition. That "
-        "arm is reached when nxt >= NumPoints, and on every path into it "
-        "cur is either nxt - 1 (the inner walk sets cur = nxt and then steps "
-        "nxt past it) or nxt - 1 by construction (`nxt = cur + 1` closes "
-        "each outer pass). So cur + 1 >= NumPoints, and the tail test "
-        "`if (!(nxt < NumPoints)) break;` leaves by the same door.",
+        "The arm is taken when last < s0, and nothing after it in the pass "
+        "touches s0 or last. maxSpeedOK still holds the 1 that let the pass "
+        "begin or go round, so the failure test does nothing, and the "
+        "loop's own condition `!(last < s0)` is false and leaves by the same "
+        "door the flag would have.",
+    "es-cut-ignored":
+        "Without the early exit, a cut below s0 runs pass two's body once. "
+        "s0 only grows in it (the skip-ahead's inner walk), so `last < s0` "
+        "still holds when the body asks, and it sets the flag without asking "
+        "any corner. maxSpeedOK is still 1 -- a refused first corner had "
+        "already left through the bail test above -- so the failure test "
+        "does nothing, and the loop leaves on the flag. Only locals change: "
+        "outer, the leg and s0, none of which the score reads.",
     "es-trapezoid-one-sided":
         "CalculatedSpeed[first] is VelocityMagnitude on every path that "
         "reaches the sum. The fill loop writes it on its first iteration, "
         "and the one-point arm writes it before that; the only later writes "
-        "are CalculateMaxSpeed's two `*pOut = speed` arms, and the speed it "
-        "is handed for the first point is VelocityMagnitude itself. The two "
-        "ends of the first trapezoid are the same float, so adding either "
-        "one twice is the same sum.",
+        "are the `*pOut = speed` arms of CalculateMaxSpeed and its _v half, "
+        "and the speed the first corner hands in is VelocityMagnitude "
+        "itself. The two ends of the first trapezoid are the same float, so "
+        "adding either one twice is the same sum.",
     "es-sum-pairs-shifted":
-        "Same reason, one point further along. CalculateMaxSpeed never "
-        "writes anything to CalculatedSpeed but the entry speed it was "
-        "given, and in the second walk that entry speed is "
-        "CalculatedSpeed[outer - 1]. By induction from the fill loop every "
+        "Same reason, one point further along. CalculateMaxSpeed and its "
+        "halves never write anything to CalculatedSpeed but the entry speed "
+        "they were given: VelocityMagnitude for the first corner and "
+        "CalculatedSpeed[outer - 1] in the second walk. By induction from "
+        "the fill loop every "
         "entry from `first` up is VelocityMagnitude, so "
         "CalculatedSpeed[i] + CalculatedSpeed[i - 1] and "
         "CalculatedSpeed[i] + CalculatedSpeed[i] add the same two floats. "

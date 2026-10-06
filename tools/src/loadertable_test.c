@@ -22,7 +22,10 @@
 #include "bchunkload.h"
 #include "bmath.h"
 #include "bslotpool.h"
+#include "eframe.h"
 #include "emodel.h"
+#include "eview.h"
+#include "eviewmatrix.h"
 #include "esolid.h"
 #include "sun.h"
 #include "texturepack.h"
@@ -40,6 +43,27 @@ int32_t WorldTimer;
 float WorldTimeElapsed;
 bVector3 SunPosition;
 uint32_t eFrameCounter;
+
+// Nor are eview.c, eviewmatrix.c and eframe.c for acidsys.c's
+// RenderEffects, which slot 6's loader never calls: these fail loudly.
+uint8_t *CurrentBufferPos;
+uint8_t *CurrentBufferEnd;
+int32_t FrameMallocFailed;
+uint32_t FrameMallocFailAmount;
+
+eView *eGetView(int32_t id)
+{
+    fprintf(stderr, "eGetView(%d) called\n", (int)id);
+    abort();
+    return NULL;
+}
+
+float CalculateH(uint16_t fov)
+{
+    fprintf(stderr, "CalculateH(%u) called\n", (unsigned)fov);
+    abort();
+    return 0.0f;
+}
 
 enum {
     OP_TAG, OP_BUF, OP_LEAF, OP_BULK, OP_OPEN, OP_CLOSE, OP_BUFEND,

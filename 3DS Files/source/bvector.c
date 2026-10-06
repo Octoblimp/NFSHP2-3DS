@@ -86,10 +86,18 @@ void bNormalize2(bVector2 *o, const bVector2 *v)
 
 // 0x002401f0. Note what happens when the vector is zero: it writes (1, 0)
 // and never looks at `len`. That is the shipped behaviour.
+//
+// The first divide, 0x0024020c (retail 0x00258914), is ee_div's. Retail's
+// DriveTarget asks for a length of zero whenever it aims the first corner
+// of a car standing still (drivetarget_calculate_max_speed_from_car hands
+// over a CalculatedSpeed of 0): FLT_MAX on the console where IEEE gives an
+// infinity, and for a zero vector as well, FLT_MAX where IEEE gives a NaN
+// that the k == 0 test lets through. The quotients after it are then the
+// console's zeroes, or numbers within a few ulps of the smallest normal.
 void bNormalize2To(bVector2 *o, const bVector2 *v, float len)
 {
     float y = v->y, x = v->x;
-    float k = sqrtf(x * x + y * y) / len;
+    float k = ee_div(sqrtf(x * x + y * y), len);
 
     if (k == 0.0f) {
         o->y = 0.0f;

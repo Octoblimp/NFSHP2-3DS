@@ -1127,6 +1127,8 @@ class Model(object):
         self.out = []
         e = self.e = Emu(ieee=True)
         e.stub_bware()
+        # Clear leaves retail's -1 in LastPointToScore.
+        pcc.retail_clear(e)
         self.mask = ALL_SEAMS
         self.ans = [1, 0, 0, 1, fb(-1.0)]
         self.glob_addr = [e.addr_of(a) for _, a in GLOBS]

@@ -72,17 +72,39 @@ car's were.
   - `docs/formats/ai-driving-info.md` has the detail. The belt mover's
     gravity is a seam (`gBeltMoverGravityFn`) until BeltMover is
     ported.
-- **11b, next:** DrivingChoice's methods, retail 0x00241b88 ..
-  0x002455f8 (about 13 KB). `out/retail_syms.txt` lists them: IsValid,
-  IsEqualTo, BuildDriveTarget, IsDriveable, MakeNewChoice, TryChoice,
-  IsEnoughRoom, TryToDriveAroundCar, GetPreferredSideOfCar,
-  FillUpDriveTarget, AddToDriveTarget, GetSpeedBackToLine,
-  ReduceCurrentL, BuildDriveTargetAroundCar and DoSmoothOffsetChange.
-  Several changed after the demo (in some only 0.17 to 0.53 of the
-  words agree), and the demo's AdvancePoint, GetRoutePointsToUse and
-  MakeDriveTargetParallelToCar have no place in retail. Read retail's
-  own code to find whether they were inlined.
-- 11c: CarCollisionPredict, AIPlan and the AIAction base.
+- **11b-1, done:** DriveTarget is retail's. DrivingChoice builds its
+  targets with retail's DriveTarget, so that came first.
+  - `drivetarget.c` gains retail's byte at 516 (LastPointToScore,
+    which Clear sets to -1), its accessor, CalculateMaxSpeed split in
+    two, the first corner from the car, and EstimateScore's rebuilt
+    walks. The from-car corner divides by zero for a car at rest, so
+    its projection and `bNormalize2To`'s first divide are `ee_div`.
+  - `drivetarget_check` and the image check, now run on retail's
+    image: 22 scenarios, 993 lines, 0 differ. The model's pass: 288
+    mutations, 268 caught, 20 equivalent.
+  - The 54 checkers that link `drivetarget.c` or `bvector.c` still
+    have 0 differ. The demo-image oracles that run Clear hook its tail
+    for retail's -1 (`physicscar_check.retail_clear`), and
+    `drivecam_check` divides the EE's way.
+  - `docs/formats/car-drive-target.md`, "Retail's DriveTarget".
+- **11b-2, next:** DrivingChoice's small methods and the walk along
+  the route. Retail 0x00241b88 .. 0x002455f8 is DrivingChoice.obj. The
+  demo's AdvancePoint (0x00244588), GetRoutePointsToUse (0x002447c0)
+  and the FuturePoint list (ctor 0x001cad30, Add 0x00244768) are there
+  unnamed. 11b-2 is GetChoiceType, GetDrivingLine, the three SetChoices,
+  IsValid, IsEqualTo, Clear, IsEnoughRoom,
+  FixupCarToExcludeFromCollisionPrediction, GetPreferredSideOfCar,
+  AdvancePoint, GetRoutePointsToUse, GetSpeedBackToLine, ReduceCurrentL,
+  AddToDriveTarget, FillUpDriveTarget and the road block's point list
+  (0x00244c88). AICarController::SignPostDecision is a seam until 11e.
+  Check it with a `drivingchoice_check` in `nearbycar_check`'s pattern,
+  the image as the model.
+- 11b-3: BuildDriveTargetAroundCar (0x00243aa8) with its two helpers
+  (0x00243f70, 0x002442c0) and the list search (0x00244d80),
+  DoSmoothOffsetChange and BuildDriveTarget.
+- 11b-4: CarCollisionPredict's four live functions, then IsDriveable,
+  TryChoice, TryToDriveAroundCar and MakeNewChoice.
+- 11c: the rest of CarCollisionPredict, AIPlan and the AIAction base.
 - 11d: the actions.
 - 11e and 11f: AICarController and AIDriver (`gAIDriverCtorFn` in
   `carmodes.h`, and `gAICarControllerGetCurrentDrivingLineSpeedFn` in
@@ -3663,15 +3685,17 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-05, after 11a, the AI's first slice)
+### Where the port stands (2026-10-05, after 11b-1, retail's DriveTarget)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11b, DrivingChoice's methods. See
-  "Now" at the top. 11a (what an AI car knows as it drives) is done.
+- **Next:** step 11, the racer AI: 11b-2, DrivingChoice's small
+  methods and the walk along the route. See "Now" at the top. 11a (what
+  an AI car knows as it drives) and 11b-1 (retail's DriveTarget) are
+  done.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -3683,7 +3707,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a done) | 6-8 |
+  | 11, the racer and traffic AI (11a and 11b-1 done) | 8-10 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |
@@ -3691,13 +3715,15 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped; New 3DS only since 2026-10-05) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **27-41** |
+  | **Total** | **29-43** |
 
-- **How far along:** about 25-28 of the road's 50-67 slices are done,
+- **How far along:** about 26-29 of the road's 55-72 slices are done,
   roughly a third. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
-  Read the 27-41 as a floor. Step 11 was put at 4-6 before its slices
-  were laid out; they are seven, 11a to 11g, and traffic beside them.
+  Read the 29-43 as a floor. Step 11 was put at 4-6 before its slices
+  were laid out; they are ten, 11a, 11b-1 to 11b-4 and 11c to 11g, and
+  traffic beside them. 11b was one slice until DrivingChoice's 13 KB
+  were read.
 - **The pace:** 80 commits from 2026-09-27 to 2026-10-04, most of them a
   slice each.
 - **Not yet in the count:** the replay, and with it the race's music

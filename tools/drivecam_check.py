@@ -34,6 +34,27 @@ into it. Most resets follow a scribble over the words only Update writes.
 After each Update the mover, every word of its camera and the two tuning
 words Update writes print.
 
+**The divides are the EE's.** The image runs in
+`RetailEmu(ieee=True, eediv=True)`: a division by zero gives FLT_MAX, as on
+the console, where IEEE gives an infinity or a NaN. Update's outside view
+takes one. Below 8.32 m/s the swing toward the velocity has no weight, and
+it asks bNormalize2To (0x002588f8) for a vector of length zero, whose first
+divide is by that zero; for a car at rest the vector is zero too, 0/0. The
+console's FLT_MAX makes the vector the smallest of numbers, or zeroes, where
+IEEE's infinity makes zeroes and its NaN makes NaNs. The port spells that
+divide with ee_div since 11b-1, when retail's DriveTarget came to need it
+too. The run lists the divide sites that took the EE's path, and it must be
+these three:
+
+  - 0x00258914, that one;
+  - 0x0015c5f8, CalculateLookbackAngle's reciprocal length, 1/0 for two
+    cars on one spot. The EE's FLT_MAX makes the direction zeroes and
+    IEEE's infinity makes it NaNs, and both fail the three compares and
+    answer 0xc000, so the port's plain divide stands;
+  - 0x0015db9c, Update's 1/x of the car in the camera's frame, 1/0 for a
+    car dead ahead. FLT_MAX and the infinity both clamp to 1000 with the
+    zero's sign, so that plain divide stands too.
+
     python tools/drivecam_check.py
     python tools/drivecam_check.py --mutate [--only a,b]
     python tools/drivecam_check.py --dump out/drivecam
@@ -1301,7 +1322,7 @@ def encode(scenarios):
 class Model(object):
     def __init__(self):
         self.out = []
-        self.e = retail_model.RetailEmu(ieee=True)
+        self.e = retail_model.RetailEmu(ieee=True, eediv=True)
         e = self.e
         e.stub(FUNK_EXISTS, lambda em: 0)
         e.stub(TOPO_CTOR, self.topo_init)
@@ -3113,6 +3134,9 @@ def main():
 
     n = diff(lines, harness)
     ops = sum(len(s) for s in sc)
+    if m.e.eediv_pcs:
+        print("divides that took the EE's zero-divisor path: %s"
+              % " ".join("%08x" % p for p in sorted(m.e.eediv_pcs)))
     print("%d scenarios, %d ops, %d lines, %d differ"
           % (len(sc), ops, len(harness), n))
     sys.exit(1 if (n or rc) else 0)

@@ -951,6 +951,20 @@ SINITS = [0x00137438, 0x00193d20, 0x0019b558, 0x001a4de8, 0x001347c0]
 
 CAR_SIZE = 2016
 DRIVER_SIZE = 560
+
+# The port's DriveTarget is retail's since step 11b-1, and retail's Clear
+# stores -1 into LastPointToScore (516) in its shared tail, 0x0021bda0. The
+# demo's tail, 0x00208b6c, is the same two stamp stores without it, and
+# every path through Clear reaches it with the record in s0. A check whose
+# oracle is the demo image and runs Clear hooks it, so the byte is
+# retail's.
+DEMO_CLEAR_TAIL = 0x00208b6c
+
+
+def retail_clear(e):
+    def store(em):
+        em.mem[(em.reg[16] & M32) + 516] = 0xff
+    e.hook(DEMO_CLEAR_TAIL, store)
 REALDRIVER_SIZE = 568
 PC_SIZE = 116
 

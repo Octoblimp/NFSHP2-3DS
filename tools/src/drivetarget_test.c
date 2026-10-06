@@ -42,10 +42,11 @@ static void pdt(const char *tag, const DriveTarget *t, int n)
 {
     int i;
 
-    printf("%s n %d len %.9g pick %d calct %d blendt %d ttype %d\n",
+    printf("%s n %d len %.9g pick %d calct %d blendt %d ttype %d last %d\n",
            tag, (int)t->NumPoints, (double)t->Length,
            (int)t->WhichPointIPicked, (int)t->WhichPointIPickedCalculationTime,
-           (int)t->WhichPointIPickedTime, (int)t->TType);
+           (int)t->WhichPointIPickedTime, (int)t->TType,
+           (int)t->LastPointToScore);
     for (i = 0; i < n; i++)
         printf("%s [%02d] %.9g %.9g %.9g %.9g  s %.9g r %d p %d d %d\n",
                tag, i, (double)t->Points[i].x, (double)t->Points[i].y,
@@ -65,7 +66,7 @@ static void ppad(const char *tag, const DriveTarget *t)
     for (i = 1; i < 16; i++) printf(" %02x", b[i]);
     printf("\n%s pad1 %02x %02x %02x\n", tag, b[501], b[502], b[503]);
     printf("%s pad2", tag);
-    for (i = 516; i < 528; i++) printf(" %02x", b[i]);
+    for (i = 517; i < 528; i++) printf(" %02x", b[i]);
     printf("\n");
 }
 
@@ -77,9 +78,12 @@ static void pv3(const char *tag, const bVector3 *v)
 
 // ---------------------------------------------------------------- fixtures
 
+// Zeroed as Clear leaves it, LastPointToScore -1 (score every corner)
+// included.
 static void dt_reset(DriveTarget *t)
 {
     memset(t, 0, sizeof(*t));
+    t->LastPointToScore = -1;
 }
 
 static void dt_point(DriveTarget *t, int i, float x, float y, float z,
@@ -165,6 +169,7 @@ static void s_layout(void)
     pint("ly calct", (int)offsetof(DriveTarget, WhichPointIPickedCalculationTime));
     pint("ly blendt", (int)offsetof(DriveTarget, WhichPointIPickedTime));
     pint("ly length", (int)offsetof(DriveTarget, Length));
+    pint("ly last", (int)offsetof(DriveTarget, LastPointToScore));
     pint("ly maxpoints", DRIVETARGET_MAX_POINTS);
     pint("ly car driver", (int)offsetof(Car, DriverNumber));
     pint("ly car player", (int)offsetof(Car, pPlayer));
@@ -1110,6 +1115,122 @@ static void s_max_speed(void)
     r = drivetarget_calculate_max_speed(0, &car, &p0, &p1, &p2, 33.625f,
                                         26.5625f, &out);
     pint("ms grip edge up", r);
+
+    // Retail's _v half on its own, handed the two velocities as they are: a
+    // straight, a gentle and a hard corner, then a time inside its epsilon.
+    {
+        static const struct { const char *tag; float x, y, sp, dist; } mv[] = {
+            { "mv straight", 20.0f,  0.0f, 20.0f, 20.0f },
+            { "mv gentle",   16.0f, 12.0f, 20.0f, 20.0f },
+            { "mv hard",      0.0f, 40.0f, 40.0f, 20.0f },
+        };
+        bVector2 v1, v2;
+        char tag[64];
+
+        v1.x = 20.0f; v1.y = 0.0f;
+        for (i = 0; i < 3; i++) {
+            v2.x = mv[i].x; v2.y = mv[i].y;
+            out = mv[i].sp;
+            r = drivetarget_calculate_max_speed_v(0, &car, &v1, &v2,
+                                                  mv[i].dist, mv[i].sp, &out);
+            pint(mv[i].tag, r);
+            snprintf(tag, sizeof(tag), "%s out", mv[i].tag);
+            pf(tag, out);
+        }
+        out = 33.0f;
+        r = drivetarget_calculate_max_speed_v(0, &car, &v1, &v1, 0.0005f,
+                                              20.0f, &out);
+        pint("mv short", r);
+        pf("mv short out", out);
+
+        // It has neither of CalculateMaxSpeed's early answers, so a crawl
+        // into a hard corner is asked about and refused.
+        v2.x = 0.0f; v2.y = 40.0f;
+        out = 40.0f;
+        r = drivetarget_calculate_max_speed_v(0, &car, &v1, &v2, 20.0f,
+                                              0.0005f, &out);
+        pint("mv slow", r);
+
+        // A zero v1, as from a car standing still: the projection divides
+        // 0 by 0, the EE's FLT_MAX, and the lateral part is the whole
+        // acceleration -- small here, so yes; large, so no.
+        v1.x = 0.0f; v1.y = 0.0f;
+        v2.x = 3.0f; v2.y = 4.0f;
+        out = 5.0f;
+        r = drivetarget_calculate_max_speed_v(0, &car, &v1, &v2, 20.0f, 0.0f,
+                                              &out);
+        pint("mv zero v1", r);
+        v2.x = 300.0f; v2.y = 400.0f;
+        out = 500.0f;
+        r = drivetarget_calculate_max_speed_v(0, &car, &v1, &v2, 20.0f, 0.0f,
+                                              &out);
+        pint("mv zero v1 hard", r);
+    }
+
+    // Retail's first-corner question: v1 is State.Velocity unscaled, v2
+    // aims from the car at the point, the distance is the factor times
+    // |ForwardSpeed| and the entry speed is VelocityMagnitude.
+    {
+        static const struct { const char *tag; float x, y, want; } mc[] = {
+            { "mc ahead",  30.0f,  0.0f, 20.0f },
+            { "mc wide",   10.0f, 30.0f, 20.0f },
+            { "mc slower", 30.0f,  2.0f, 12.0f },
+            { "mc fwd 20", 30.0f, 10.0f, 20.0f },
+        };
+        bVector2 p;
+        char tag[64];
+
+        car_set(&car, 0.0f, 0.0f, 20.0f, 0.0f, 0.0f, 0.0f, 0, 20.0f, 20.0f);
+        for (i = 0; i < 4; i++) {
+            p.x = mc[i].x; p.y = mc[i].y;
+            out = mc[i].want;
+            r = drivetarget_calculate_max_speed_from_car(0, &car, &p, &out,
+                                                         0.5f);
+            pint(mc[i].tag, r);
+            snprintf(tag, sizeof(tag), "%s out", mc[i].tag);
+            pf(tag, out);
+        }
+
+        // The same 18-degree corner at three forward speeds and one entry
+        // speed: half a second at 20 m/s fits, at 2 m/s it does not, and a
+        // car going backwards at 20 is measured by the size of its speed.
+        p.x = 30.0f; p.y = 10.0f;
+        car_set(&car, 0.0f, 0.0f, 20.0f, 0.0f, 0.0f, 0.0f, 0, 2.0f, 20.0f);
+        out = 20.0f;
+        r = drivetarget_calculate_max_speed_from_car(0, &car, &p, &out, 0.5f);
+        pint("mc fwd 2", r);
+        car_set(&car, 0.0f, 0.0f, 20.0f, 0.0f, 0.0f, 0.0f, 0, -20.0f, 20.0f);
+        out = 20.0f;
+        r = drivetarget_calculate_max_speed_from_car(0, &car, &p, &out, 0.5f);
+        pint("mc fwd back", r);
+
+        // The factor scales the distance, and VelocityMagnitude, not
+        // ForwardSpeed, is the entry speed.
+        car_set(&car, 0.0f, 0.0f, 20.0f, 0.0f, 0.0f, 0.0f, 0, 20.0f, 20.0f);
+        out = 20.0f;
+        r = drivetarget_calculate_max_speed_from_car(0, &car, &p, &out, 0.05f);
+        pint("mc factor", r);
+        car_set(&car, 0.0f, 0.0f, 20.0f, 0.0f, 0.0f, 0.0f, 0, 20.0f, 200.0f);
+        out = 20.0f;
+        r = drivetarget_calculate_max_speed_from_car(0, &car, &p, &out, 0.5f);
+        pint("mc vmag", r);
+
+        // Standing still with nothing wanted at the point: bNormalize2To is
+        // asked for a length of zero and the _v half then divides 0 by 0.
+        // Both are the EE's FLT_MAX, and the corner fits -- on the point
+        // itself too, where the vector is zero as well and IEEE would make
+        // a NaN of it.
+        car_set(&car, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+        out = 0.0f;
+        r = drivetarget_calculate_max_speed_from_car(0, &car, &p, &out, 0.5f);
+        pint("mc stopped", r);
+        pf("mc stopped out", out);
+        car_set(&car, 30.0f, 10.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+        out = 0.0f;
+        r = drivetarget_calculate_max_speed_from_car(0, &car, &p, &out, 0.5f);
+        pint("mc stopped on point", r);
+        pf("mc stopped on point out", out);
+    }
 }
 
 static void s_estimate_score(void)
@@ -1273,6 +1394,184 @@ static void s_estimate_score(void)
     drivetarget_recalculate_length(&t);
     car_set(&car, 0.0f, 0.0f, 35.5f, 0.0f, 0.0f, 0.0f, 0, 35.5f, 35.5f);
     pf("es t2 mid", drivetarget_estimate_score(&t, &car));
+
+    // Retail's accessor, on its own: NumPoints - 2 while the byte is -1,
+    // the byte less one otherwise, both narrowed to a signed byte.
+    {
+        static const int lc[][2] = {
+            { 5, -1 }, { 0, -1 }, { 1, -1 }, { 20, -1 }, { 5, 3 }, { 5, 0 },
+            { 5, 1 }, { 20, 19 }, { 3, -128 }, { 3, 127 },
+        };
+        char tag[64];
+
+        for (i = 0; i < 10; i++) {
+            dt_reset(&t);
+            t.NumPoints = (int8_t)lc[i][0];
+            t.LastPointToScore = (int8_t)lc[i][1];
+            snprintf(tag, sizeof(tag), "es lastcorner %d %d", lc[i][0],
+                     lc[i][1]);
+            pint(tag, drivetarget_get_last_corner_to_score(&t));
+        }
+    }
+
+    // At 40 m/s the first corner, from the car, fits and the walk's one
+    // corner, at point 3, does not. Cut at 1 the walk never starts (the
+    // accessor's 0 is below s0), at 2 it starts and bails on point 3 being
+    // past the cut, at 3 it stops just short of the bad corner and the
+    // target scores, and at 4 or -1 (NumPoints - 2) the bad corner is
+    // asked and refuses.
+    {
+        static const int8_t lasts[] = { 1, 2, 3, 4, -1 };
+        char tag[64];
+
+        for (i = 0; i < 5; i++) {
+            WorldTimer = 515 + i;
+            dt_corner(&t);
+            t.LastPointToScore = lasts[i];
+            car_set(&car, 0.0f, 0.0f, 40.0f, 5.0f, 0.0f, 0.0f, 0, 40.0f,
+                    40.3112887f);
+            snprintf(tag, sizeof(tag), "es corner last %d", (int)lasts[i]);
+            pf(tag, drivetarget_estimate_score(&t, &car));
+            snprintf(tag, sizeof(tag), "es corner last %d after",
+                     (int)lasts[i]);
+            pdt(tag, &t, 5);
+        }
+    }
+
+    // The sweep with its last point hooked back: thirteen corners fit at
+    // 25 m/s and the fourteenth, the hook, does not. Every cut up to 18
+    // leaves the hook out and scores; 19 and -1 take it in.
+    {
+        static const int8_t lasts[] = { 2, 10, 18, 19, -1 };
+        char tag[64];
+        int k;
+
+        for (k = 0; k < 5; k++) {
+            WorldTimer = 520 + k;
+            dt_reset(&t);
+            for (i = 0; i < 20; i++)
+                dt_point(&t, i, (float)i * 6.0f, (float)i * (float)i * 0.5f,
+                         0.0f, 0.0f, 2, i, 1);
+            dt_point(&t, 19, 90.0f, 162.0f, 0.0f, 0.0f, 2, 19, 1);
+            t.NumPoints = 20;
+            drivetarget_recalculate_length(&t);
+            t.LastPointToScore = lasts[k];
+            car_set(&car, 0.0f, 0.0f, 25.0f, 0.0f, 0.0f, 0.0f, 0, 25.0f,
+                    25.0f);
+            snprintf(tag, sizeof(tag), "es hook last %d", (int)lasts[k]);
+            pf(tag, drivetarget_estimate_score(&t, &car));
+        }
+    }
+
+    // Standing still with VelocityMagnitude zero: the fill writes zero
+    // speeds, and the first corner divides by zero twice -- bNormalize2To's
+    // length of zero and the _v half's 0/0 projection -- and fits on the
+    // EE's FLT_MAX where IEEE's NaN would refuse it. Every later corner is
+    // entered at zero and answered early, and the score is zero.
+    WorldTimer = 525;
+    dt_corner(&t);
+    car_set(&car, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0.0f, 0.0f);
+    pf("es stopped corner", drivetarget_estimate_score(&t, &car));
+    pdt("es stopped corner after", &t, 5);
+
+    // The first corner's distance is half of |ForwardSpeed| and its entry
+    // speed is VelocityMagnitude, cut at 3 so the first corner alone
+    // decides: 40 fits, 4 is a tenth of the distance and does not, -40 is
+    // 40's size, and 0 is a time inside the epsilon, a yes that writes
+    // the entry speed.
+    {
+        static const float fwds[] = { 40.0f, 4.0f, -40.0f, 0.0f };
+        char tag[64];
+
+        for (i = 0; i < 4; i++) {
+            WorldTimer = 526 + i;
+            dt_corner(&t);
+            t.LastPointToScore = 3;
+            car_set(&car, 0.0f, 0.0f, 40.0f, 5.0f, 0.0f, 0.0f, 0, fwds[i],
+                    40.3112887f);
+            snprintf(tag, sizeof(tag), "es corner fwd %g", (double)fwds[i]);
+            pf(tag, drivetarget_estimate_score(&t, &car));
+        }
+    }
+
+    // Pass one stops on the last point: (6, 0) is 0.15 s out at 40 m/s and
+    // (10, 20) 0.56 s. The first corner is asked only of a point with one
+    // after it, so this one -- a corner far too hard at 40 -- is never
+    // asked, and the target scores.
+    WorldTimer = 530;
+    dt_reset(&t);
+    dt_point(&t, 0, 6.0f, 0.0f, 0.0f, 0.0f, 2, 0, 1);
+    dt_point(&t, 1, 10.0f, 20.0f, 0.0f, 0.0f, 2, 1, 1);
+    t.NumPoints = 2;
+    drivetarget_recalculate_length(&t);
+    car_set(&car, 0.0f, 0.0f, 40.0f, 0.0f, 0.0f, 0.0f, 0, 40.0f, 40.0f);
+    pf("es last point corner", drivetarget_estimate_score(&t, &car));
+
+    // The cut on its edge. At 20 m/s pass one stops on (20, 0), whose
+    // corner is straight, and the walk starts at s0 = 2. The leg to (30, 0)
+    // is 0.5 s, so nothing is skipped, and the corner there turns a right
+    // angle in 10 m: 40 m/s/s against 30. A cut of 2 (a byte of 3, or -1
+    // on four points) is not below s0, so the corner is asked and refuses;
+    // a cut of 1 ends the walk first.
+    {
+        static const int8_t lasts[] = { -1, 3, 2 };
+        char tag[64];
+
+        for (i = 0; i < 3; i++) {
+            WorldTimer = 531 + i;
+            dt_reset(&t);
+            dt_point(&t, 0, 6.0f, 0.0f, 0.0f, 0.0f, 2, 0, 1);
+            dt_point(&t, 1, 20.0f, 0.0f, 0.0f, 0.0f, 2, 1, 1);
+            dt_point(&t, 2, 30.0f, 0.0f, 0.0f, 0.0f, 2, 2, 1);
+            dt_point(&t, 3, 30.0f, 20.0f, 0.0f, 0.0f, 2, 3, 1);
+            t.NumPoints = 4;
+            drivetarget_recalculate_length(&t);
+            t.LastPointToScore = lasts[i];
+            car_set(&car, 0.0f, 0.0f, 20.0f, 0.0f, 0.0f, 0.0f, 0, 20.0f,
+                    20.0f);
+            snprintf(tag, sizeof(tag), "es cut edge %d", (int)lasts[i]);
+            pf(tag, drivetarget_estimate_score(&t, &car));
+        }
+    }
+
+    // The inner walk measures from Points[outer - 1], not from the point
+    // before. Points 6 m apart at 20 m/s are 0.3 s each, but (12, 0) to
+    // (24, 0) is 0.6 s, so the walk stops on (24, 0) and asks its corner,
+    // 33 m/s/s, which refuses. Measured point to point, the walk would run
+    // off the end and ask nothing.
+    WorldTimer = 534;
+    dt_reset(&t);
+    dt_point(&t, 0, 6.0f, 0.0f, 0.0f, 0.0f, 2, 0, 1);
+    dt_point(&t, 1, 12.0f, 0.0f, 0.0f, 0.0f, 2, 1, 1);
+    dt_point(&t, 2, 18.0f, 0.0f, 0.0f, 0.0f, 2, 2, 1);
+    dt_point(&t, 3, 24.0f, 0.0f, 0.0f, 0.0f, 2, 3, 1);
+    dt_point(&t, 4, 24.0f, 6.0f, 0.0f, 0.0f, 2, 4, 1);
+    t.NumPoints = 5;
+    drivetarget_recalculate_length(&t);
+    car_set(&car, 0.0f, 0.0f, 20.0f, 0.0f, 0.0f, 0.0f, 0, 20.0f, 20.0f);
+    pf("es inner from base", drivetarget_estimate_score(&t, &car));
+
+    // A cut past the points, as a byte BuildDriveTargetAndCheckIt set and
+    // something since shortened the target under: the walk goes on past
+    // NumPoints - 2, asking about the slots beyond the last point. Slot 5
+    // is left from a longer target, 40 m/s at (40, 34); the corner there,
+    // into the zeroed slot 6, is far too hard, so a walk that reaches it
+    // refuses. A cut of 5 or less never asks it, and scores as -1 does.
+    {
+        static const int8_t lasts[] = { 6, 10 };
+        char tag[64];
+
+        for (i = 0; i < 2; i++) {
+            WorldTimer = 535 + i;
+            dt_corner(&t);
+            dt_point(&t, 5, 40.0f, 34.0f, 1.5f, 40.0f, 4, 16, 2);
+            t.LastPointToScore = lasts[i];
+            car_set(&car, 0.0f, 0.0f, 15.0f, 2.0f, 0.0f, 0.0f, 0, 15.0f,
+                    15.13275f);
+            snprintf(tag, sizeof(tag), "es stale cut %d", (int)lasts[i]);
+            pf(tag, drivetarget_estimate_score(&t, &car));
+        }
+    }
 }
 
 // ------------------------------------------------------- the two predictors

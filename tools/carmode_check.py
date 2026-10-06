@@ -1175,6 +1175,8 @@ class Model(mmc.Model):
                       ("jumpcam", self.on_jump_cam),
                       ("cleanup", self.on_clean_up)):
             e.stub(SYM[k], fn)
+        # Clear leaves retail's -1 in LastPointToScore.
+        pcc.retail_clear(e)
         self.install_fakes()
         self.put(pcc.G_USENEWCAL, 1)
         self.put(pcc.G_UGLY, fb(1.0))

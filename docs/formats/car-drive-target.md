@@ -27,6 +27,12 @@ a model written from the disassembly, and by
 `tools/drivetarget_image_check.py`, which runs the same scenarios through
 the shipped code in `tools/mipsemu.py`.
 
+The port is **retail's** DriveTarget since step 11b-1, and the image check
+runs SLES_507.31. Most of this page was written from the demo's listing,
+and its addresses are the demo's; retail's class is the demo's with a byte
+added, three methods added and two rebuilt on them. See
+[Retail's DriveTarget](#retails-drivetarget) for what changed.
+
 ## Car is not a prerequisite, and that was checked rather than assumed
 
 The task list had DriveTarget waiting on `Car`, on the strength of thirteen
@@ -75,7 +81,8 @@ unlike `CarDriver` there is no pointer hiding in the tail.
 | 504 | WhichPointIPickedCalculationTime | `int32_t` |
 | 508 | WhichPointIPickedTime | `int32_t` |
 | 512 | Length | `float` |
-| 516 | *(pad)* | 12 bytes, 516 rounded up to 33 × 16 |
+| 516 | LastPointToScore | `int8_t`, retail's; -1 is every corner |
+| 517 | *(pad)* | 11 bytes, 516 rounded up to 33 × 16 |
 
 The `.mdebug` entry gives the offsets and not the element types, so those
 came from the instructions that index each array:
@@ -368,6 +375,68 @@ the floor. Dead in the shipped image; kept in the port because the image
 has it, and argued in the checker's `EQUIVALENT` list rather than quietly
 deleted.
 
+## Retail's DriveTarget
+
+Retail's `DriveTarget.obj` is 0x0021b918..0x0021dbc0, and the copy
+constructor is at 0x001e7930. Diffed method by method against the demo's,
+most of it moved CarState's fields (ForwardSpeed to 896,
+VelocityMagnitude to 900, MatrixValid to 1024) and nothing else. Five
+things are new.
+
+**A byte at 516, `LastPointToScore`.** It was the demo's padding. `Clear`'s
+shared tail (0x0021bd98) is the demo's two stamp stores with
+`sb -1,516` between them, the copy constructor gains a ninth scalar copy
+after `Length`, and `DrivingChoice::BuildDriveTargetAroundCar` (0x00243e7c) sets it to
+`NumPoints - 1` once it has built a target. Assignment copies it with the
+rest of the 528 bytes, as before.
+
+**An accessor, 0x0021bdc8.** `EstimateScore`'s last corner:
+`NumPoints - 2` while the byte is -1, the byte less one otherwise, both
+narrowed through `sll 24 ; sra 24`. So a byte of -128 is 127, not -129.
+
+**CalculateMaxSpeed split in two.** The demo's function from its third test
+on is now its own method, 0x0021d130, which takes the two velocities
+ready-made. What is left at 0x0021cfe8 is the two early answers (speed,
+then distance), the two normalises, and a call. The new half has its own
+pool slot for its epsilon, the same 0.001.
+
+**A first corner from the car, 0x0021cf38.** v1 is `State.Velocity` as it
+stands, not normalised; v2 aims from the car's position at the point, at
+the speed wanted there; the distance is `factor * |ForwardSpeed|` and the
+entry speed is `VelocityMagnitude`. It has neither of CalculateMaxSpeed's
+early answers.
+
+**EstimateScore rebuilt on them, 0x0021c920.** The fill loop and the
+trapezoid sum are the demo's. The two walks are not:
+
+1. Pass one skips forward as before, and stops on `s0`. If `s0 + 1 <
+   NumPoints`, the first corner is the from-car question about
+   `Points[s0]` with a factor of 0.5 (an inline `lui 0x3f00`): half a
+   second of the car's forward speed, where the demo asked
+   `CalculateMaxSpeed` from the car's position through `Points[s0]` to the
+   next point.
+2. The accessor's cut is read **before** the failure is tested, and `s0`
+   is stepped past the first corner. A cut below `s0` ends the walk there.
+3. Pass two is the demo's skip-ahead, but bounded by the cut, not by
+   `NumPoints`: a walk that runs past the cut stops the pass without
+   asking and without failing it. The corner it asks about is
+   `Points[outer - 1]`, `Points[s0]`, `Points[s0 + 1]`.
+
+So a target the AI built is scored up to its second-last point, as the
+demo did, and one `Clear` left scores every corner, as -1 says.
+
+**A car standing still divides by zero twice.** The from-car corner has no
+early answers, so at rest it asks `bNormalize2To` for a length of zero (the
+speed wanted at the point is the car's, 0) and then projects the
+acceleration on a zero velocity, 0/0. Both are the EE's FLT_MAX: the
+normalise's quotients come out zero, the projection's products with v1's
+zeroes are zeroes, the lateral part is the whole acceleration, and the
+corner fits. IEEE's infinity and NaN would refuse it, and the target would
+score -1 for every car at rest. Both divides are `ee_div` in the port
+(`drivetarget_calculate_max_speed_v`'s projection and `bNormalize2To`'s
+first divide), and the image check lists exactly those two sites,
+0x0021d204 and 0x00258914, as the divides that took the EE's path.
+
 ## GetFirstPoint
 
 0x002091f0. Which point the car should be steering at, cached for the
@@ -471,7 +540,9 @@ the plain divide anyway, because the input cannot arrive: the arm is taken
 only at a `VelocityMagnitude` of at least 1, and both places that write that
 field (`mellowmover.c` and `physicscar.c`) compute it from this same
 `Velocity`. `eefpu.h`'s `ee_div` is kept for divides by zero that the game
-actually takes, and this is not one of them.
+actually takes, and this is not one of them. Retail's first corner from a
+car at rest takes two, and those are `ee_div`s: see
+[Retail's DriveTarget](#retails-drivetarget).
 
 ## FillWithCurrentAcceleration trusts a small acceleration, not a large one
 
@@ -540,7 +611,8 @@ existing fixtures could tell them apart.
 `tools/drivetarget_check.py` models the class from the disassembly at
 0x002086f8..0x0020a840, from the copy constructor at 0x001da210, and from
 the three free functions at 0x001c0e30, 0x001c0c20 and 0x001c3338 — not
-from the C. Every constant comes out of `PS2 Files/NFSHP2.ELF` by address,
+from the C. Since 11b-1 the parts retail changed are modelled from retail's
+listing, 0x0021b918..0x0021dbc0 and 0x001e7930. Every constant comes out of `PS2 Files/NFSHP2.ELF` by address,
 so a typo in the header shows as a diff rather than as two files agreeing
 with each other.
 
@@ -552,8 +624,8 @@ stand-ins, because DriveTarget touches five fields of one and two of the
 other.
 
 ```
-drivetarget_check        22 scenarios, 897 lines, 0 differ
-drivetarget_image_check  22 scenarios, 897 lines, 160 pad lanes masked, 0 differ
+drivetarget_check        22 scenarios, 993 lines, 0 differ
+drivetarget_image_check  22 scenarios, 993 lines, 160 pad lanes masked, 0 differ
 ```
 
 ### The image check
@@ -570,12 +642,13 @@ with a wrapper that:
 - reads the records back.
 
 An import-time check fails if the model gains a function that no wrapper
-replaces. The coverage is the whole of 0x002086f8..0x0020a840 except the two
-`DoSnapshot`s, plus the copy constructor at 0x001da210, the three free
-functions, `DrivingLocation::IsClear` and the static initialiser.
+replaces. Since 11b-1 the image is retail's, SLES_507.31. The coverage is
+the whole of 0x0021b918..0x0021dbc0 except the two `DoSnapshot`s, plus the
+copy constructor at 0x001e7930, the three free functions,
+`DrivingLocation::IsClear` and the static initialiser.
 
 What is not the image is what the C harness also supplies. `Car` is a zeroed
-2016-byte block with the fields DriveTarget reads at their PS2 offsets. The
+2304-byte block with the fields DriveTarget reads at retail's offsets. The
 three routes are zeroed 115752-byte records, with `TheTrackRouteManager`'s
 table rewritten before every call, and `pPlayer` is a dummy block that
 Blend only tests against zero.
@@ -584,8 +657,10 @@ The `STACK-W` lanes are found by two runs over two stack poisons, as
 described above. A lane that differs between the runs is allowed only in a
 column the print wrapper marked as a pad. A difference anywhere else would
 mean the image's control flow read garbage, and the run stops. The oracle
-divides the EE's way (`Emu(eediv=True)`), and no scenario reaches a divide
-by zero.
+divides the EE's way (`RetailEmu(ieee=True, eediv=True)`), and lists the
+divide sites that took the zero-divisor path. They are the two in
+[Retail's DriveTarget](#retails-drivetarget), 0x0021d204 and 0x00258914,
+both reached by the scenarios' cars at rest, and no others.
 
 ### Fixtures are spelled, not computed
 
@@ -598,10 +673,10 @@ about them.
 ### What the mutation pass moved
 
 ```
-python tools/drivetarget_check.py --mutate         # 262 mutations, 243 caught,
-                                                   # 19 equivalent, 0 unexplained
-python tools/drivetarget_image_check.py --mutate   # 262 mutations, 243 caught,
-                                                   # 19 equivalent, 0 unexplained
+python tools/drivetarget_check.py --mutate         # 288 mutations, 268 caught,
+                                                   # 20 equivalent, 0 unexplained
+python tools/drivetarget_image_check.py --mutate   # 288 mutations, 268 caught,
+                                                   # 20 equivalent, 0 unexplained
 ```
 
 The two checkers share one mutation list and one set of equivalence
@@ -611,7 +686,31 @@ to be visible against the image. The two newest entries,
 `fr-slp-pad-unscaled` and `fr-slp-divides`, are the StraightLinePredict pad
 above.
 
-The model's tally is one uninterrupted run. The image's comes from two. The
+**What 11b-1 moved.** Retail's DriveTarget brought 27 mutations of its
+own: the byte at 516 (`cl-no-last-reset`, `cl-last-reset-zero`,
+`cp-drops-last`, `h-last-unsigned`), the accessor (`lc-*`), the split
+CalculateMaxSpeed (`ms-split-entry-is-exit`, `ms-v-short-no-write`), the
+from-car corner (`fc-*`), the two EE divides (`ms-projection-ieee`,
+`bv-normalize2-ieee`) and the rebuilt walks (`es-first-corner-*`,
+`es-cut-*`, `es-pass2-*`). `es-nxt-is-cur` went with the demo's first
+corner. Four old ones were respelled to the new source, and one,
+`fr-isclear-tests-point`, now aims at `drivinglocation.h`, where `IsClear`
+has lived since 11a. The full pass caught all of the new ones but two, and
+both are argued in the checker: `fc-dist-no-abs` (the distance is only
+`CalculateTime`'s numerator, so dropping the `fabsf` negates the time, its
+inverse and the acceleration exactly, and the magnitude's squares put the
+sign back) and `es-cut-ignored` (without the early exit pass two's body
+runs once, and its own `last < s0` test leaves without asking a corner,
+changing only locals).
+
+One equivalence fell the other way. `ct-no-clear` drops the copy
+constructor's call to `Clear`, which in the demo could change nothing,
+because the memset had already zeroed everything `Clear` writes. Retail's
+`Clear` also stores -1 at 516, which the memset does not, so dropping the
+call leaves a copy whose `LastPointToScore` is 0, and the pass catches it.
+
+After 11b-1 both tallies are one uninterrupted run each. Before it, the
+model's was one run and the image's came from two. The
 first stopped after 36 mutants on a `BuildEnvironmentError` -- the msys2
 toolchain returning a failure with no diagnostic, which `hostbuild` says to
 rerun -- and the other 226 then ran in a fresh process with the build
@@ -621,7 +720,7 @@ model's own tally also came from two runs, split the same way after twelve.
 The first full pass left **72 survivors** on a transcript that already
 agreed with the model on every one of its 660 lines. That is the whole
 reason to run the pass: a clean diff says the two sides compute the same
-thing, not that the scenarios ever reach the code. The transcript is 897
+thing, not that the scenarios ever reach the code. The transcript is 993
 lines now.
 
 **Boundaries nothing sat on.** Most of the survivors were a `<` turned into
@@ -687,7 +786,7 @@ first point to 6 m fixed it. The lesson is the repo's own rule read back at
 it: **a model used to design a fixture has to be initialised the same way
 the transcript initialises it.**
 
-#### The nineteen that survive
+#### The twenty that survive
 
 Each one is argued in the checker's `EQUIVALENT` dict rather than left as a
 number in the tally, and the import asserts that every name there is a

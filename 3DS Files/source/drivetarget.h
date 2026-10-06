@@ -60,7 +60,8 @@ typedef struct DriveTarget {
     int32_t  WhichPointIPickedCalculationTime; // 504  loaded with lw
     int32_t  WhichPointIPickedTime;            // 508  AccelerationBlendingTime
     float    Length;                           // 512
-    uint8_t  _pad2[12];                        // 516
+    int8_t   LastPointToScore;                 // 516  retail's; -1 is all
+    uint8_t  _pad2[11];                        // 517
 } DriveTarget;
 
 // 528 = 33 * 16. The tail padding is not a guess: Points is an array of
@@ -68,6 +69,16 @@ typedef struct DriveTarget {
 // Nothing writes a vtable pointer into a DriveTarget -- the constructor
 // only memsets and calls Clear -- so unlike CarDriver there is no vptr
 // hiding in that tail.
+//
+// Retail put one byte at the front of that tail, and the record stayed 528
+// bytes. The name is the port's: retail is stripped and the demo has no
+// such field. Clear stores -1 there on every way out (`addiu v0,zero,-1 ;
+// sb v0,516(s0)`, retail 0x0021bd98), the copy constructor copies it, and
+// DrivingChoice::BuildDriveTargetAroundCar sets it to NumPoints - 1 once
+// the points around the car are in (0x00243e7c), before the points that
+// lead back to the line. EstimateScore reads it through
+// drivetarget_get_last_corner_to_score: with it set, the corners past the
+// car are not scored.
 #ifndef DRIVETARGET_NO_ASSERT
 typedef char drivetarget_layout_check[
     (offsetof(DriveTarget, Points) == 16
@@ -80,6 +91,7 @@ typedef char drivetarget_layout_check[
      && offsetof(DriveTarget, WhichPointIPickedCalculationTime) == 504
      && offsetof(DriveTarget, WhichPointIPickedTime) == 508
      && offsetof(DriveTarget, Length) == 512
+     && offsetof(DriveTarget, LastPointToScore) == 516
      && sizeof(DriveTarget) == 528) ? 1 : -1];
 #endif
 
@@ -177,7 +189,8 @@ void ai_straight_line_predict(Car *car, DriveTarget *t);
 
 // 0x002086f8. bMemSet to zero and then Clear(NULL, 0.0f) -- which, on a
 // record the memset has just zeroed, takes its NumPoints == 0 early-out
-// and never touches the Car it was not given.
+// and never touches the Car it was not given. On retail that way out
+// stores -1 in LastPointToScore too, so a new target scores every corner.
 DriveTarget *drivetarget_init(DriveTarget *t);
 
 // 0x00208768. The GNU v2 deleting destructor, minus the delete: the body
@@ -190,10 +203,11 @@ void drivetarget_destroy(DriveTarget *t);
 // tail-calls it.
 DriveTarget *drivetarget_assign(DriveTarget *dst, const DriveTarget *src);
 
-// 0x001da210, out of line in CarCollisionDetect.obj. Member-wise, not a
-// memcpy: five twenty-iteration loops and then the eight scalars. It does
-// *not* copy the three pad runs, which is a real asymmetry against
-// drivetarget_assign and the reason both are here.
+// 0x001da210, out of line in CarCollisionDetect.obj (retail 0x001e7930).
+// Member-wise, not a memcpy: five twenty-iteration loops and then the
+// scalars, retail's LastPointToScore among them. It does *not* copy the
+// three pad runs, which is a real asymmetry against drivetarget_assign
+// and the reason both are here.
 DriveTarget *drivetarget_copy(DriveTarget *dst, const DriveTarget *src);
 
 // 0x002087b8. bATan of Points[i+1] - Points[i] in x and y.
@@ -208,7 +222,9 @@ int32_t drivetarget_get_angle(DriveTarget *t, int i);
 // 0x00208980. The one that decides what survives a frame. Walks the
 // points until one is in front of the car, shifts that one down to zero,
 // interpolates a fresh point `speed` along the remaining path and keeps
-// only up to it. A speed of zero or less empties the target.
+// only up to it. A speed of zero or less empties the target. Retail
+// (0x0021bbb0) ends every way out at one tail that also puts -1 in
+// LastPointToScore.
 void drivetarget_clear(DriveTarget *t, Car *car, float speed);
 
 // 0x00208b98. Walks the path from the car through the points accumulating
@@ -258,20 +274,53 @@ void drivetarget_resample(DriveTarget *t, Car *car);
 // leaving it out would make the method count wrong.
 void drivetarget_dump(DriveTarget *t, Car *car, int checkCamera, int unused);
 
-// 0x002096b0. The distance-weighted average speed the car would hold
-// along this target, or -1.0f if any segment needs more lateral grip than
-// there is. The big one: 1596 bytes, three nested walks and two helpers.
+// 0x002096b0, retail 0x0021c920. The distance-weighted average speed the
+// car would hold along this target, or -1.0f if any segment needs more
+// lateral grip than there is. The big one: 1556 bytes on retail, three
+// nested walks and three helpers.
+//
+// Retail changed two things. The first corner is asked about from the
+// car's own velocity rather than from its position
+// (drivetarget_calculate_max_speed_from_car), and the second walk stops at
+// drivetarget_get_last_corner_to_score rather than at the end.
 float drivetarget_estimate_score(DriveTarget *t, Car *car);
 
-// 0x00209cf0. Given three consecutive points, an entry speed and a
-// proposed exit speed, decides whether the corner between them can be
-// taken -- and clamps the exit speed to the entry speed when it cannot
-// even ask. `pOut` is both the proposed speed and the answer. Returns 1
-// when the corner is fine, 0 when it is not.
+// Retail 0x0021bdc8, new in retail. Where EstimateScore's second walk
+// stops: NumPoints - 2 while LastPointToScore is -1, LastPointToScore - 1
+// once it is set. Both are narrowed to a signed byte, so an empty target
+// answers -2.
+int8_t drivetarget_get_last_corner_to_score(DriveTarget *t);
+
+// 0x00209cf0, retail 0x0021cfe8. Given three consecutive points, an entry
+// speed and a proposed exit speed, decides whether the corner between them
+// can be taken -- and clamps the exit speed to the entry speed when it
+// cannot even ask. `pOut` is both the proposed speed and the answer.
+// Returns 1 when the corner is fine, 0 when it is not.
+//
+// Retail kept the two early answers here and moved the rest into
+// drivetarget_calculate_max_speed_v, which it hands the two velocities.
 int drivetarget_calculate_max_speed(DriveTarget *t, Car *car,
                                     const bVector2 *p0, const bVector2 *p1,
                                     const bVector2 *p2, float dist,
                                     float speed, float *pOut);
+
+// Retail 0x0021d130, new in retail: the demo's CalculateMaxSpeed from its
+// third test on. `v1` is the velocity into the corner and `v2` the one out
+// of it, and whether the change between them over CalculateTime's time
+// asks more sideways than GetMaxLateralAcceleration is the answer. A time
+// within 0.001 of zero pins *pOut to `speed` and answers yes.
+int drivetarget_calculate_max_speed_v(DriveTarget *t, Car *car,
+                                      const bVector2 *v1, const bVector2 *v2,
+                                      float dist, float speed, float *pOut);
+
+// Retail 0x0021cf38, new in retail. The first corner, taken from where the
+// car is going: v1 is State.Velocity as it stands, v2 points from the car
+// to `p` at *pOut, the distance is `factor` times |ForwardSpeed| and the
+// entry speed is VelocityMagnitude. EstimateScore passes 0.5f. No early
+// answers, so a car standing still reaches the 0/0 below.
+int drivetarget_calculate_max_speed_from_car(DriveTarget *t, Car *car,
+                                             const bVector2 *p, float *pOut,
+                                             float factor);
 
 // 0x00209f30. `lui at,0x41f0 ; mtc1 at,$f0 ; jr ra` -- a constant 30.0f
 // that never looks at the car it is handed.

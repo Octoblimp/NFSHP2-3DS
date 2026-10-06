@@ -1,6 +1,14 @@
 // drivetarget -- DriveTarget.obj (0x002086f8 .. 0x0020a840), plus the copy
 // constructor at 0x001da210 and the three free functions the class calls.
 //
+// Retail's (step 11b-1): DriveTarget.obj is retail's 0x0021b918 ..
+// 0x0021dbb8. Retail added a byte at 516, LastPointToScore, which Clear
+// sets and the copy constructor copies, and three methods: the accessor
+// EstimateScore reads it through, and the two halves of a CalculateMaxSpeed
+// it split so that EstimateScore's first corner could start from the car's
+// velocity. The other changed functions moved CarState's fields and
+// nothing else. The addresses below are the demo's where nothing changed.
+//
 // Written from the listing. Every float expression keeps the image's
 // association and its divides: `(b + c) * 0.5f` is not `b * 0.5f + c * 0.5f`
 // once the sum rounds, and `x * (1.0f / y)` is not `x / y`. The three-lane
@@ -34,23 +42,27 @@
 #include <string.h>
 
 #include "bmath.h"
+#include "eefpu.h"
 #include "engine.h"   /* WorldTimer, gp-20224 */
 
 // ---------------------------------------------------------- the constants
 //
-// DriveTarget.obj's .lit4 is 0x00321fa8 and 0x28 long: ten anonymous
-// floats, listed here in address order with the gp offset the listing
-// quotes, because that is the only name they have.
-#define K_CLEAR_EPS        0.00100000005f  // gp-27720, Clear's speed floor
-#define K_AHEAD_DOT        0.342000008f    // gp-27716, cos 70 degrees
-#define K_SCORE_T1         0.400000006f    // gp-27712, EstimateScore
-#define K_SCORE_T2         0.400000006f    // gp-27708, EstimateScore
-#define K_SCORE_T3         0.400000006f    // gp-27704, EstimateScore
-#define K_MAXSPEED_EPS     0.00100000005f  // gp-27700, CalculateMaxSpeed
-#define K_TIME_EPS         0.00100000005f  // gp-27696, CalculateTime
-#define K_NO_TIME          9999999.0f      // gp-27692, CalculateTime
-#define K_PREDICT_DT       0.100000001f    // gp-27688, the integration step
-#define K_BLEND_SCALE      1.33333337f     // gp-27684, 1 / 0.75
+// DriveTarget.obj's .lit4 is the demo's 0x00321fa8, 0x28 long, and
+// retail's 0x0032ee84, 0x2c long: anonymous floats, listed here in address
+// order with the gp offsets the two listings quote (demo, then retail),
+// because that is the only name they have. Retail's one more is the 0.001
+// of the half of CalculateMaxSpeed it split out; every value is the demo's.
+#define K_CLEAR_EPS        0.00100000005f  // gp-27720 / -27244, Clear
+#define K_AHEAD_DOT        0.342000008f    // gp-27716 / -27240, cos 70
+#define K_SCORE_T1         0.400000006f    // gp-27712 / -27236, EstimateScore
+#define K_SCORE_T2         0.400000006f    // gp-27708 / -27232, EstimateScore
+#define K_SCORE_T3         0.400000006f    // gp-27704 / -27228, EstimateScore
+#define K_MAXSPEED_EPS     0.00100000005f  // gp-27700 / -27224, CalculateMaxSpeed
+#define K_MAXSPEED_V_EPS   0.00100000005f  //   retail -27220, its _v half
+#define K_TIME_EPS         0.00100000005f  // gp-27696 / -27216, CalculateTime
+#define K_NO_TIME          9999999.0f      // gp-27692 / -27212, CalculateTime
+#define K_PREDICT_DT       0.100000001f    // gp-27688 / -27208, the step
+#define K_BLEND_SCALE      1.33333337f     // gp-27684 / -27204, 1 / 0.75
 
 // Inline literals rather than pooled ones, so they are `lui at,...` in the
 // listing instead of a gp load.
@@ -58,6 +70,7 @@
 #define K_MAX_LATERAL      30.0f   // 0x41f00000, and the lateral grip limit
 #define K_ACC_DOMINATES    0.75f   // 0x3f400000, FillWithCurrentAcceleration
 #define K_BLEND_WINDOW     0.75f   // 0x3f400000, BlendWithCurrentAcceleration
+#define K_FIRST_CORNER     0.5f    // 0x3f000000, retail EstimateScore's factor
 
 float AIDriverSecondsToLookAhead = 2.0f;
 float AIDriverDefaultLookAhead   = 20.0f;
@@ -219,7 +232,8 @@ DriveTarget *drivetarget_copy(DriveTarget *dst, const DriveTarget *src)
     // 0x001da210, in CarCollisionDetect.obj. Member-wise, and that is the
     // difference from the assignment operator above: five twenty-iteration
     // loops and eight scalar stores, no memcpy, so the three pad runs keep
-    // whatever the destination already held.
+    // whatever the destination already held. Retail's (0x001e7930) has a
+    // ninth, `lbu v1,516 ; sb v1,516`, after Length.
     int i;
 
     for (i = 0; i < DRIVETARGET_MAX_POINTS; i++) dst->Points[i] = src->Points[i];
@@ -237,6 +251,7 @@ DriveTarget *drivetarget_copy(DriveTarget *dst, const DriveTarget *src)
     dst->WhichPointIPickedCalculationTime = src->WhichPointIPickedCalculationTime;
     dst->WhichPointIPickedTime = src->WhichPointIPickedTime;
     dst->Length = src->Length;
+    dst->LastPointToScore = src->LastPointToScore;   // retail's ninth
     return dst;
 }
 
@@ -705,7 +720,7 @@ int drivetarget_interpolate_point(DriveTarget *t, Car *car, float dist,
 
 void drivetarget_clear(DriveTarget *t, Car *car, float speed)
 {
-    // 0x00208980. Everything the AI decided last frame is thrown away
+    // 0x00208980, retail 0x0021bbb0. Everything the AI decided last frame is thrown away
     // except the part of the path that is still in front of the car.
     bVector3 p;
     int n, i, r;
@@ -713,18 +728,14 @@ void drivetarget_clear(DriveTarget *t, Car *car, float speed)
     n = t->NumPoints;
     if (n == 0) {
         t->Length = 0.0f;
-        t->WhichPointIPickedTime = 0;
-        t->WhichPointIPickedCalculationTime = 0;
-        return;
+        goto done;
     }
 
     // Standing still, or reversing, means there is no path worth keeping.
     if (fabsf(speed) <= K_CLEAR_EPS || speed < 0.0f) {
         t->NumPoints = 0;
         t->Length = 0.0f;
-        t->WhichPointIPickedTime = 0;
-        t->WhichPointIPickedCalculationTime = 0;
-        return;
+        goto done;
     }
 
     // Walk forward to the first point the car is still heading towards.
@@ -741,9 +752,7 @@ void drivetarget_clear(DriveTarget *t, Car *car, float speed)
         // Every point is behind the car.
         t->NumPoints = 0;
         t->Length = 0.0f;
-        t->WhichPointIPickedTime = 0;
-        t->WhichPointIPickedCalculationTime = 0;
-        return;
+        goto done;
     }
 
     if (i > 0) drivetarget_shift_left(t, i, 0);
@@ -756,14 +765,10 @@ void drivetarget_clear(DriveTarget *t, Car *car, float speed)
             drivetarget_add_point3(t, &p, t->Route[r], t->RoutePointNumber[r],
                                    t->DrivingLine[r], 0, 0);
             drivetarget_recalculate_length(t);
-            t->WhichPointIPickedTime = 0;
-            t->WhichPointIPickedCalculationTime = 0;
-            return;
+            goto done;
         }
     } else if (r >= 0) {
-        t->WhichPointIPickedTime = 0;
-        t->WhichPointIPickedCalculationTime = 0;
-        return;
+        goto done;
     }
 
     // r < 0: the interpolated point is on the first leg, so the whole
@@ -779,7 +784,13 @@ void drivetarget_clear(DriveTarget *t, Car *car, float speed)
         drivetarget_add_point3(t, &p, route, rpn, dl, 0, 0);
         drivetarget_recalculate_length(t);
     }
+
+done:
+    // Every way out ends here. Retail's tail (0x0021bd98) is the demo's two
+    // stores with LastPointToScore's -1 between them, so a target the AI
+    // clears scores every corner again until something sets it.
     t->WhichPointIPickedTime = 0;
+    t->LastPointToScore = -1;
     t->WhichPointIPickedCalculationTime = 0;
 }
 
@@ -869,15 +880,63 @@ done_keep:
 
 // -------------------------------------------------------------- the scoring
 
+int drivetarget_calculate_max_speed_v(DriveTarget *t, Car *car,
+                                      const bVector2 *v1, const bVector2 *v2,
+                                      float dist, float speed, float *pOut)
+{
+    // Retail 0x0021d130, new in retail: the demo's CalculateMaxSpeed from
+    // its third test on. Two velocity vectors, the acceleration between
+    // them, and the question of whether its lateral part fits inside the
+    // grip.
+    bVector2 dv, acc, par, perp;
+    float time, inv, k, mag, grip;
+
+    dv.x = v2->x - v1->x;
+    dv.y = v2->y - v1->y;
+
+    time = drivetarget_calculate_time(t, dist, speed, *pOut);
+    if (fabsf(time) <= K_MAXSPEED_V_EPS) {
+        *pOut = speed;
+        return 1;
+    }
+
+    // The reciprocal is taken once and multiplied twice, which is not the
+    // same as dividing twice.
+    inv = 1.0f / time;
+    acc.y = dv.y * inv;
+    acc.x = dv.x * inv;
+
+    // The divide is ee_div's. drivetarget_calculate_max_speed_from_car has
+    // no early answers, so a car standing still hands its zero velocity in
+    // as v1 and this is 0/0: FLT_MAX on the console, whose products with
+    // v1's zeroes are zeroes, so the lateral part is the whole of the
+    // acceleration. IEEE's NaN would refuse every corner instead.
+    k = ee_div(v1->x * acc.x + v1->y * acc.y, v1->x * v1->x + v1->y * v1->y);
+    par.y = v1->y * k;
+    par.x = v1->x * k;
+    perp.y = acc.y - par.y;
+    perp.x = acc.x - par.x;
+
+    mag = dt_len2(perp.x, perp.y);
+
+    // The parallel magnitude is computed here too -- two multiplies, an
+    // add and a sqrt -- and never used. Dead in the shipped image.
+    (void)dt_len2(par.x, par.y);
+
+    grip = drivetarget_get_max_lateral_acceleration(t, car);
+    if (mag < grip) return 1;
+    if (fabsf(mag - grip) <= K_MAXSPEED_V_EPS) return 1;
+    return 0;
+}
+
 int drivetarget_calculate_max_speed(DriveTarget *t, Car *car,
                                     const bVector2 *p0, const bVector2 *p1,
                                     const bVector2 *p2, float dist,
                                     float speed, float *pOut)
 {
-    // 0x00209cf0. Two velocity vectors, the acceleration between them,
-    // and the question of whether its lateral part fits inside the grip.
-    bVector2 v1, v2, dv, acc, par, perp;
-    float time, inv, k, mag, grip;
+    // 0x00209cf0, retail 0x0021cfe8. The two early answers and the two
+    // velocities; the rest is drivetarget_calculate_max_speed_v's.
+    bVector2 v1, v2;
 
     if (fabsf(speed) <= K_MAXSPEED_EPS) return 1;
     if (fabsf(dist) <= K_MAXSPEED_EPS) {
@@ -893,46 +952,42 @@ int drivetarget_calculate_max_speed(DriveTarget *t, Car *car,
     v2.y = p2->y - p1->y;
     bNormalize2To(&v2, &v2, *pOut);
 
-    dv.x = v2.x - v1.x;
-    dv.y = v2.y - v1.y;
+    return drivetarget_calculate_max_speed_v(t, car, &v1, &v2, dist, speed,
+                                             pOut);
+}
 
-    time = drivetarget_calculate_time(t, dist, speed, *pOut);
-    if (fabsf(time) <= K_MAXSPEED_EPS) {
-        *pOut = speed;
-        return 1;
-    }
+int drivetarget_calculate_max_speed_from_car(DriveTarget *t, Car *car,
+                                             const bVector2 *p, float *pOut,
+                                             float factor)
+{
+    // Retail 0x0021cf38, new in retail. v1 is the velocity itself, not
+    // scaled; v2 points from the car to `p` at the speed wanted there.
+    bVector2 d;
+    float dist = factor * fabsf(car->State.ForwardSpeed);
 
-    // The reciprocal is taken once and multiplied twice, which is not the
-    // same as dividing twice.
-    inv = 1.0f / time;
-    acc.y = dv.y * inv;
-    acc.x = dv.x * inv;
+    d.x = p->x - car->State.Position.x;
+    d.y = p->y - car->State.Position.y;
+    bNormalize2To(&d, &d, *pOut);
 
-    k = (v1.x * acc.x + v1.y * acc.y) / (v1.x * v1.x + v1.y * v1.y);
-    par.y = v1.y * k;
-    par.x = v1.x * k;
-    perp.y = acc.y - par.y;
-    perp.x = acc.x - par.x;
+    return drivetarget_calculate_max_speed_v(
+        t, car, (const bVector2 *)&car->State.Velocity, &d, dist,
+        car->State.VelocityMagnitude, pOut);
+}
 
-    mag = dt_len2(perp.x, perp.y);
-
-    // The parallel magnitude is computed here too -- two multiplies, an
-    // add and a sqrt -- and never used. Dead in the shipped image.
-    (void)dt_len2(par.x, par.y);
-
-    grip = drivetarget_get_max_lateral_acceleration(t, car);
-    if (mag < grip) return 1;
-    if (fabsf(mag - grip) <= K_MAXSPEED_EPS) return 1;
-    return 0;
+int8_t drivetarget_get_last_corner_to_score(DriveTarget *t)
+{
+    // Retail 0x0021bdc8, new in retail. Both arms narrow through
+    // `sll 24 ; sra 24`.
+    if (t->LastPointToScore == -1) return (int8_t)(t->NumPoints - 2);
+    return (int8_t)(t->LastPointToScore - 1);
 }
 
 float drivetarget_estimate_score(DriveTarget *t, Car *car)
 {
-    // 0x002096b0, 1596 bytes. Fills CalculatedSpeed with the car's current
-    // speed, walks the points in three nested passes asking
-    // CalculateMaxSpeed whether each corner fits, and returns the
-    // distance-weighted mean of the speeds it ends up with -- or -1.0f if
-    // any corner did not fit.
+    // 0x002096b0, retail 0x0021c920. Fills CalculatedSpeed with the car's
+    // current speed, walks the points in three nested passes asking whether
+    // each corner fits, and returns the distance-weighted mean of the
+    // speeds it ends up with -- or -1.0f if any corner did not fit.
     // The image leaves this stack array untouched below `first`, and there
     // is one path that can then read an entry nothing wrote: a stale
     // WhichPointIPicked cache whose value is past NumPoints skips the fill
@@ -942,7 +997,7 @@ float drivetarget_estimate_score(DriveTarget *t, Car *car)
     float dist[DRIVETARGET_MAX_POINTS] = { 0.0f };
     CarState *cs;
     int ok = 1, bail = 0, maxSpeedOK = 1;
-    int first, i, cur, nxt, outer;
+    int first, i, s0, outer, last;
     float leg = 0.0f;
     float acc, total;
 
@@ -984,94 +1039,88 @@ float drivetarget_estimate_score(DriveTarget *t, Car *car)
 
     // Pass one: from the chosen point, skip forward while the car reaches
     // the next point inside the first threshold.
-    cur = first;
-    leg = dist[first];
-    maxSpeedOK = 1;
-    if (drivetarget_calculate_time(t, leg, cs->VelocityMagnitude,
+    s0 = first;
+    if (drivetarget_calculate_time(t, dist[first], cs->VelocityMagnitude,
                                    t->CalculatedSpeed[first]) < K_SCORE_T1) {
         if (first < t->NumPoints) {
-            for (cur = first + 1;;) {
-                float dx = car->State.Position.x - t->Points[cur].x;
-                float dy = car->State.Position.y - t->Points[cur].y;
+            for (s0 = first + 1;;) {
+                float dx = car->State.Position.x - t->Points[s0].x;
+                float dy = car->State.Position.y - t->Points[s0].y;
 
                 leg = dt_len2(dx, dy);
                 if (!(drivetarget_calculate_time(t, leg, cs->VelocityMagnitude,
-                                                 t->CalculatedSpeed[cur])
+                                                 t->CalculatedSpeed[s0])
                       < K_SCORE_T2))
                     break;
-                if (!(cur < t->NumPoints)) break;
-                cur++;
+                if (!(s0 < t->NumPoints)) break;
+                s0++;
             }
         }
     }
 
-    nxt = cur + 1;
-    if (nxt < t->NumPoints) {
-        maxSpeedOK = drivetarget_calculate_max_speed(
-            t, car, (const bVector2 *)&car->State.Position,
-            (const bVector2 *)&t->Points[cur], (const bVector2 *)&t->Points[nxt],
-            leg, cs->VelocityMagnitude, &t->CalculatedSpeed[cur]);
-    }
+    // The first corner is the point the walk stopped on, taken from the
+    // car's velocity over half a second of its forward speed. The demo
+    // asked CalculateMaxSpeed instead, from the car's position through
+    // that point to the next.
+    if (s0 + 1 < t->NumPoints)
+        maxSpeedOK = drivetarget_calculate_max_speed_from_car(
+            t, car, (const bVector2 *)&t->Points[s0], &t->CalculatedSpeed[s0],
+            K_FIRST_CORNER);
     if (maxSpeedOK == 0) {
         ok = 0;
         bail = 1;
     }
+
+    // Read before the bail is tested, as the image does.
+    last = drivetarget_get_last_corner_to_score(t);
+    s0 = s0 + 1;
     if (bail) goto final;
+    if (last < s0) goto final;
 
-    cur = nxt;
-    if (!(cur + 1 < t->NumPoints)) goto final;
-    nxt = cur + 1;
-
-    // Pass two: the same question for every remaining corner, with the
+    // Pass two: the same question for every corner up to `last`, with the
     // same skip-ahead inside it.
-    for (;;) {
-        outer = cur;
+    do {
+        outer = s0;
         leg = dt_len2(t->Points[outer - 1].x - t->Points[outer].x,
                       t->Points[outer - 1].y - t->Points[outer].y);
 
         if (drivetarget_calculate_time(t, leg, t->CalculatedSpeed[outer - 1],
                                        t->CalculatedSpeed[outer]) < K_SCORE_T3) {
-            if (outer < t->NumPoints) {
+            if (s0 < t->NumPoints) {
                 // The inner walk always measures back to Points[outer-1],
-                // which stays put while `nxt` runs forward.
+                // which stays put while s0 runs forward.
                 for (;;) {
-                    cur = nxt;
-                    leg = dt_len2(t->Points[outer - 1].x - t->Points[nxt].x,
-                                  t->Points[outer - 1].y - t->Points[nxt].y);
+                    s0++;
+                    leg = dt_len2(t->Points[outer - 1].x - t->Points[s0].x,
+                                  t->Points[outer - 1].y - t->Points[s0].y);
                     if (!(drivetarget_calculate_time(t, leg,
                                                      t->CalculatedSpeed[outer - 1],
-                                                     t->CalculatedSpeed[nxt])
-                          < K_SCORE_T3)) {
-                        nxt++;
+                                                     t->CalculatedSpeed[s0])
+                          < K_SCORE_T3))
                         break;
-                    }
-                    if (!(nxt < t->NumPoints)) {
-                        nxt++;
-                        break;
-                    }
-                    nxt++;
+                    if (!(s0 < t->NumPoints)) break;
                 }
             }
         }
 
-        if (nxt < t->NumPoints) {
+        // A walk that ran past `last` stops the pass without asking, and
+        // without failing it.
+        if (last < s0) {
+            bail = 1;
+        } else {
             maxSpeedOK = drivetarget_calculate_max_speed(
                 t, car, (const bVector2 *)&t->Points[outer - 1],
-                (const bVector2 *)&t->Points[cur], (const bVector2 *)&t->Points[nxt],
-                leg, t->CalculatedSpeed[outer - 1], &t->CalculatedSpeed[cur]);
-            cur = nxt;
-        } else {
-            bail = 1;
+                (const bVector2 *)&t->Points[s0],
+                (const bVector2 *)&t->Points[s0 + 1],
+                leg, t->CalculatedSpeed[outer - 1], &t->CalculatedSpeed[s0]);
+            s0++;
         }
 
         if (maxSpeedOK == 0) {
             ok = 0;
             bail = 1;
         }
-        if (bail) break;
-        nxt = cur + 1;
-        if (!(nxt < t->NumPoints)) break;
-    }
+    } while (!bail && !(last < s0));
 
 final:
     if (!ok) return -1.0f;

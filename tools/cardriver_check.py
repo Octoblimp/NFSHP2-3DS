@@ -201,7 +201,9 @@ def s_ctor():
     emit("sportgear before %d" % before)
 
     emit("vtable %08x" % VTABLE)
-    emit("drivetarget zeroed 0")
+    # The byte sum of the DriveTarget: zero but for LastPointToScore, the
+    # -1 (0xff) that retail's Clear (0x0021bbb0, called last) leaves at 516.
+    emit("drivetarget zeroed 255")
     emit("steering 0")
     emit("throttle %s" % g9(0.0))
     emit("brake %s" % g9(0.0))
@@ -449,8 +451,8 @@ MUTATIONS = [
      "    float    Length;                           // 512",
      "    int32_t  Length;                           // 512"),
     ("dt-no-tail-pad", DH,
-     "    uint8_t  _pad2[12];                        // 516",
-     "    uint8_t  _pad2[4];                         // 516"),
+     "    uint8_t  _pad2[11];                        // 517",
+     "    uint8_t  _pad2[3];                         // 517"),
     ("dt-max-points-16", DH,
      "#define DRIVETARGET_MAX_POINTS 20",
      "#define DRIVETARGET_MAX_POINTS 16"),
