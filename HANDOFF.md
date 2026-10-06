@@ -14845,6 +14845,63 @@ equivalent. The first pass left 25 alive, all gaps in the script:
 Next is 11b-4b: IsDriveable, TryChoice, TryToDriveAroundCar and
 MakeNewChoice.
 
+### Step 11b-4b: MakeNewChoice
+
+DrivingChoice is whole. 11b-4b adds the four functions that choose
+(`drivingchoice.c`):
+- IsDriveable (0x00241ff8): builds the target for a choice, scores it
+  and asks WhoWillThisDriveTargetHit (its caller at 0x00242100). A
+  choice is driveable when it built, scored above -1 and hits later than
+  the longest time. With the longest time 99999 nothing is;
+- TryChoice (0x002428d0): tries one choice, the preferred one scoring
+  1.2 times, so a driveable preferred score can fall below -1;
+- MakeNewChoice (0x00242170): the current choice first, then the lines,
+  then each side of each car worth caring about, then the way round the
+  car in the way when nothing fits;
+- TryToDriveAroundCar (0x00242c20): the current choice, the line and
+  the two sides, the target saved and restored between them.
+EstimateScore's distances are static now, retail's 80-byte carry across
+calls (`drivetarget.c`).
+
+The first full run crashed the harness on s_jam. Bisecting the ops found
+a `V 3`, and an unbuffered debug build put it just after `rp c1`.
+IsEnoughRoom reads a car's route point with no NULL test when the car is
+off the road (oob < -0.25), and s_jam's cars had none. They do now, and
+nothing else changed.
+
+The first mutation pass left 19 alive:
+- 8 are equivalent, argued in the checker and the doc:
+  - tc-hittime-init: IsDriveable stores the no-hit time again first;
+  - mn-line-way: the car in the way is read only after the side test;
+  - tc-scored: |score + 1| is a multiple of 2^-24, and 0.001f is not
+    one;
+  - ta-saved and the four restores: BuildDriveTarget copies the
+    driver's own target over all 528 bytes before anything reads them.
+- s_jam caught four once its cars had route points: id-ok-lt,
+  mn-round, mn-round-target and mn-line-pref.
+- mn-rle needed an exact tie: the current choice hitting at 0.1f with
+  the way round hitting at once. s_tie is that case, built by hand. It
+  is the 59th s_jam from seed 11 with every longest time 99999, cut
+  after its third MakeNewChoice. Car 2's speed is bisected over its
+  floats to 0x40cab904, which makes the current choice's hit exactly
+  0.1f.
+- mn-opp-side, mn-opp-extra and mn-opp-pref needed an oncoming car
+  whose sides both fail and whose wider way round then wins. 24
+  s_choose scenarios never made one, so there are a hundred now.
+- mn-tried-or needed a car whose left side scored and right did not.
+  s_pass makes that: oncoming cars at 15 to 50 m/s, one swerve fitting
+  its corners and the other not.
+- ta-pref-left and ta-cur-pref fell to the full script.
+
+`drivingchoice_check` runs 231 scenarios, 105,136 ops and 151,404 lines,
+with 0 differ. The mutation pass has 741 mutations: 730 caught (27 of
+them by a crash or a hang), 11 equivalent and 0 unexplained. 11b-4b's
+share is 149, with 140 caught and 9 equivalent.
+`docs/formats/ai-driving-choice.md` has the detail. The CIA builds.
+
+Next is 11c: AIPlan and the AIAction base. CONTINUE.md has retail's
+608-byte record and what is in the slice.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the

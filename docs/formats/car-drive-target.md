@@ -347,12 +347,21 @@ asking how far ahead the car gets within a fixed time, not how long each
 individual segment takes.
 
 A single point is scored off the car's own speed and bails before any of
-the corner tests, which is also the only path where `dist[]` is read at an
-index the fill loop did not write. The image leaves that stack array
-uninitialised; the port zeroes it, and the divergence is noted here because
-it is undefined behaviour in C rather than a wrong number — a stale
-`WhichPointIPicked` past `NumPoints` is the only way to reach it, and no
-target the AI built can be in that state.
+the corner tests.
+
+**`dist[]` is a stack array, written only from `first` on, and a stale
+pick reads past it.** `GetFirstPoint`'s cache is keyed on `WorldTimer`
+alone. IsDriveable (`ai-driving-choice.md`) rebuilds one scratch target
+choice after choice in a frame, so every choice after the first gets the
+first one's pick. A shorter target then has `first` at or past
+`NumPoints`, the fill loop never runs, and the trapezoid reads `dist[first]`
+as the last call left it: the score is half of `CalculatedSpeed[first]`
+plus the car's speed when that word was a length, and -1 when it was never
+written. The port's array is `static`, so it holds what retail's stack
+holds when the last EstimateScore ran at the same depth, which is how
+IsDriveable calls it. Anything else that wrote those words in between is
+not modelled; drivingchoice_check leaves retail's stack alone between two
+calls at one depth in one op, so such a write would show.
 
 ## CalculateMaxSpeed, and a magnitude nobody reads
 

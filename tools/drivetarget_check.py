@@ -1070,15 +1070,18 @@ def get_last_corner_to_score(t):
     return i8(t.Last - 1)
 
 
+EST_DIST = [ZERO] * MAX_POINTS
+
+
 def estimate_score(t, car):
     """0x002096b0, retail 0x0021c920, 1556 bytes. Fills CalculatedSpeed with
     the car's current speed, walks the points in two nested passes asking
     whether each corner fits, and returns the distance-weighted mean of the
     speeds -- or -1.0f if any corner did not."""
-    # The image leaves this stack array untouched below `first`, and a stale
-    # WhichPointIPicked past NumPoints would then read an entry nothing
-    # wrote. The port zeroes it and says so; the model does the same.
-    dist = [ZERO] * MAX_POINTS
+    # The image's stack array, written only from `first` on: a cached pick
+    # at or past NumPoints reads what the last call left. The port keeps
+    # it static, and so does the model.
+    dist = EST_DIST
     ok = 1
     bail = 0
     max_ok = 1

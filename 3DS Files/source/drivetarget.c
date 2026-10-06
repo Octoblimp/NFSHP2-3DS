@@ -988,13 +988,18 @@ float drivetarget_estimate_score(DriveTarget *t, Car *car)
     // current speed, walks the points in three nested passes asking whether
     // each corner fits, and returns the distance-weighted mean of the
     // speeds it ends up with -- or -1.0f if any corner did not fit.
-    // The image leaves this stack array untouched below `first`, and there
-    // is one path that can then read an entry nothing wrote: a stale
-    // WhichPointIPicked cache whose value is past NumPoints skips the fill
-    // loop entirely. That cannot happen to a target the AI built, but it is
-    // undefined behaviour rather than a wrong number, so the array is
-    // zeroed here and the divergence noted.
-    float dist[DRIVETARGET_MAX_POINTS] = { 0.0f };
+    // The image's array is on its stack and is written only from `first`
+    // on. GetFirstPoint's cache is keyed on WorldTimer alone, so when
+    // IsDriveable rebuilds the one scratch target for choice after choice
+    // in a frame, every one after the first gets the first's pick. A
+    // shorter target then has `first` at or past NumPoints, the fill loop
+    // never runs, and the score is read from dist[first] as the last call
+    // left it in that frame: half CalculatedSpeed[first] plus the car's
+    // speed if that was a length, -1 if it was never written. The array is
+    // static so the port reads what retail's stack holds when the last
+    // EstimateScore ran at the same depth, which is how IsDriveable calls
+    // it; anything else that wrote those words in between is not seen.
+    static float dist[DRIVETARGET_MAX_POINTS];
     CarState *cs;
     int ok = 1, bail = 0, maxSpeedOK = 1;
     int first, i, s0, outer, last;

@@ -39,8 +39,18 @@
     0x002442c0  the clearance beside a car (retail's own)
     0x00244d80  the walk's closest point ahead (retail's own)
     0x002455b0  how far a lateral is off the road
+    0x00241ff8  DrivingChoice::IsDriveable(DriveTarget *, bool, float *,
+                    Car **, float *, DrivingLocation *, NearbyCarList *,
+                    float, float, float, MovementWithRespectToLine)
+    0x002428d0  DrivingChoice::TryChoice (static), MakeNewChoice's one try
+    0x00242170  DrivingChoice::MakeNewChoice(DriveTarget *,
+                    DrivingLocation *, NearbyCarList *, float, float,
+                    bool *, bool)
+    0x00242c20  DrivingChoice::TryToDriveAroundCar(DriveTarget *, bool *,
+                    NearbyCar *, DrivingLocation *, NearbyCarList *,
+                    float, float, float, bool)
 
-Steps 11b-2 and 11b-3 of the racer AI. A DrivingChoice is the third part of an AI
+Steps 11b-2, 11b-3 and 11b-4b of the racer AI. A DrivingChoice is the third part of an AI
 car's DrivingInformation (`ai-driving-info.md`): one of the four driving
 lines, or one side of a car ahead. Each frame the controller turns its
 choice into a DriveTarget (`car-drive-target.md`), the points it steers
@@ -55,9 +65,10 @@ The port is `3DS Files/source/drivingchoice.{c,h}`, with the grace period
 in `racecore.c`. AICarController's record, as much of it as these reach,
 is in `aicarcontroller.h`.
 
-Still to come, in 11b-4b: IsDriveable, TryChoice, TryToDriveAroundCar
-and MakeNewChoice. They ask CarCollisionPredict (11b-4a,
-`ai-collision-predict.md`) which car a target runs into.
+Choosing the choice itself is step 11b-4b: IsDriveable, TryChoice,
+MakeNewChoice and TryToDriveAroundCar. They build and score a target for
+each choice they try, and ask CarCollisionPredict (11b-4a,
+`ai-collision-predict.md`) which car it runs into.
 
 DoSnapshot (0x00241b88) is the replay's, and GetTextDescription
 (0x00241c38) is a debug string.
@@ -130,8 +141,15 @@ AICarController offsets read here:
 | 0 | gp-15152 | AITrafficTuningMode: traffic passes on the other side |
 | 20.0 | gp-15120 | AISlowCarSpeed |
 | 10.0 | gp-15116 | AISlowTrafficSpeed |
+| 99999 | gp-26628, -26620, -26608, -26596 | no hit yet |
+| 1.2 | gp-26624 | a preferred choice's score |
+| 0.1 | gp-26616 | how much sooner the way round may be hit than the current choice |
+| 0.001 | gp-26612, gp-26604 | a score of -1, give or take |
+| 20.0 | gp-15136 | TryToDriveAroundCarMinSpeedForDrivingLine |
+| 1 | gp-20136 | AICarControllerNumDrivingLinesToConsider |
 
-The last three are `.sdata` words that nothing writes. The names are the
+AITrafficTuningMode, AISlowCarSpeed, AISlowTrafficSpeed and the last two
+are `.sdata` words that nothing writes. The names are the
 port's; retail has no symbols. AIActionGetUnstuck reads AISlowCarSpeed
 too. gp-15124 is a debug word, 0, that gates a loop doing nothing (see
 below).
@@ -432,6 +450,133 @@ other's route, number and line, with AddPointToTarget's check against my
 car. That check refuses a point that doubles back, or one behind my car
 while the target has fewer than two points.
 
+## Choosing a new choice
+
+### IsDriveable
+
+IsDriveable (0x00241ff8) asks whether a choice can be driven for
+`maxTime` seconds without running into anyone:
+
+1. **The answers start** as a score of -1, no car hit, and a hit at 99999.
+2. **The target** comes from BuildDriveTarget, with the movement asked for.
+   A target that is not built is not driveable, and its score stays -1.
+3. **The score** is EstimateScore's for my car. At -1 or below the
+   choice is not driveable. Otherwise:
+   - a preferred choice's score is multiplied by 1.2, and its car is
+     left out of the prediction (the controller's
+     CarToExcludeFromCollisionPrediction);
+   - any other choice leaves no car out.
+4. **The hit** is WhoWillThisDriveTargetHit's, looking `maxTime` ahead.
+   The choice is driveable when that hit is later than `maxTime`. A
+   target that hits nothing reports 99999, so with `maxTime` at 99999
+   nothing is driveable.
+5. **Every call**, driveable or not, adds one to the world's
+   PotentialDriveTargetID.
+
+The score is tested before the 1.2. A preferred choice scoring between
+-1 and -1/1.2 is driveable, but its score ends up below -1.
+
+The first and third floats are never read.
+
+### TryChoice
+
+TryChoice (0x002428d0) is MakeNewChoice's one try. It is static in
+retail. It keeps a running best and a way round, both owned by the
+caller.
+
+1. **Traffic in AITrafficTuningMode** tries only a side of a racer or of
+   a player's car. Any other choice returns 0, and nothing is written.
+2. **The hit** starts as no car at 99999. Then IsDriveable runs, towards
+   the line. If the choice is driveable and its score beats the best
+   score:
+   - `*found` is set;
+   - the choice and its target become the best;
+   - the best's out becomes 0;
+   - the score becomes the best score.
+3. **The answer** is whether the choice scored: a score more than 0.001
+   from -1.
+4. **The way round.** A side of the car in the way, without extra
+   lateral distance, also becomes the way round when it is preferred.
+   Its choice, its target and its hit time are kept.
+
+### MakeNewChoice
+
+MakeNewChoice (0x00242170) picks the choice afresh.
+
+1. **The current choice** is the choice itself when it is valid.
+   Otherwise it is the location's line.
+2. **With `tryCurrent`, it is tried first.**
+   - It is preferred when it is the side GetPreferredSideOfCar gives for
+     its car (on the list).
+   - It is tried with no car in the way.
+   - Its score (the best score, so -1 unless it was found), its hit time
+     and its hit car are kept. The hit car becomes the car in the way.
+   - A preferred current choice that hit its own car is the way round
+     itself, with the target it built.
+3. **The lines.** If nothing is found, the first
+   AICarControllerNumDrivingLinesToConsider lines are tried, skipping the
+   current one, until one is found.
+4. **The sides.** If still nothing is found, every car the AI cares about
+   (AIDoWeCareAboutThisCar) is tried, found or not.
+   - Its left side is tried as preferred when GetPreferredSideOfCar says
+     left. Its right side is tried as preferred otherwise.
+   - Either is skipped when it is the current choice.
+   - If neither scored and the car is coming the other way (the two
+     velocities' dot product is negative), the preferred side is tried
+     again, with extra lateral distance, as preferred.
+5. **The outcome.**
+   - **Found:** the best choice, its target, and the best's out (0).
+   - **The way round:** if it is valid and the current choice's hit time,
+     less 0.1, is no later than the way round's. The way round's choice
+     and target are taken, and the out is 1.
+   - **Never reached:** the current choice when its score is off -1. That
+     score is -1 unless the current choice was found, and then the first
+     arm is taken. This arm would build the current choice parallel to
+     the line, with an out of 0.
+   - **Otherwise:** the location's line, FillUpDriveTarget parallel to
+     the line and inside the edges, an out of 0, and 0 returned.
+6. **The fix-up** (FixupCarToExcludeFromCollisionPrediction) runs with the
+   out as its check.
+
+Without `tryCurrent` the current choice's hit time is 99999. There is no
+car in the way then, so no way round is ever set.
+
+### TryToDriveAroundCar
+
+TryToDriveAroundCar (0x00242c20) gets past one car on the list:
+
+1. **The setup.**
+   - The side is GetPreferredSideOfCar's for the entry.
+   - The target is saved.
+   - The current choice is the choice, when it has a type.
+   - "Fast" means either car is going faster than
+     TryToDriveAroundCarMinSpeedForDrivingLine (20 m/s).
+2. **The current choice** is tried with `tryCurrent` when all of these
+   hold:
+   - it is not a line, unless fast;
+   - it is valid;
+   - it is not a side, or it is a side of this car.
+
+   It is preferred when it is the preferred side. If driveable, it is
+   kept, and the out is whether it was preferred.
+3. **The lines.** When fast, the first
+   AICarControllerNumDrivingLinesToConsider lines are tried, skipping
+   the current one. The first that is driveable is taken, with an out of
+   0.
+4. **The sides.** The preferred side is tried as preferred, then the
+   other side as not preferred. Each is skipped when it is the current
+   choice, or when not fast and IsEnoughRoom says there is no room. The
+   first that is driveable is taken, with an out of 1 or 0.
+5. **Nothing driveable.** The current choice is built parallel to the
+   line if it is still valid; otherwise the location's line is. The out
+   is left as the caller had it, and 0 is returned.
+6. **The fix-up** runs with the out.
+
+Before each IsDriveable the target is put back from the saved copy.
+BuildDriveTarget then copies my car's own target over all of it before
+reading it. The restores only matter if the target handed in were my
+car's own, and retail's callers hand in their action's target (at +32).
+
 ## Divergences
 
 Each one is written down where it happens in the source:
@@ -457,6 +602,12 @@ Each one is written down where it happens in the source:
 - **DoSmoothOffsetChange's, MakeDriveTargetParallelToCar's and
   BuildDriveTargetAroundCar's w.** Each is STACK-W, as with
   AddToDriveTarget.
+- **MakeNewChoice's current choice.** The image never clears it, so a
+  location whose line gives CHOICE_NONE (a negative odd line) leaves it
+  as the stack had it. The port's starts as Clear leaves one.
+- **EstimateScore's distances**, which IsDriveable reaches choice after
+  choice in one frame, are static in the port. Retail's are on its stack
+  (`car-drive-target.md`).
 
 Retail also tests a debug word (gp-15124, 0) in BuildDriveTargetAroundCar.
 When it is set, a loop at 0x002452b0 counts down the walk's points and
@@ -477,13 +628,23 @@ Beneath the functions above, the image runs everything as shipped:
 - the route point's GetPosition and GetSignpost;
 - the sign's GetNewRoute and GetNewRoutePoint;
 - CalculateLookAheadDistance;
-- DriveTarget's Assign, Clear, AddPointToTarget, GetRouteAndRoutePoint
-  and GetFirstPoint;
+- DriveTarget's Assign, Clear, AddPointToTarget, GetRouteAndRoutePoint,
+  GetFirstPoint and EstimateScore;
+- CarCollisionPredict (`ai-collision-predict.md`) and
+  AIDoWeCareAboutThisCar;
 - IsPointAheadOfCar and bNormalize2.
 
-The model runs with the EE's divide. The only divide by zero the script
-takes is DoSmoothOffsetChange's slope (0x00245050). The checker stops if
-any other site takes the EE's path.
+The model runs with the EE's divide. The script divides by zero at five
+sites, and the checker stops if any other site takes the EE's path:
+
+- DoSmoothOffsetChange's slope (0x00245050);
+- WillIHitThisCar's two steps along a leg of 0 (0x001e65ec, 0x001e65f4);
+- EstimateScore's two for a car at rest (0x0021d204, 0x00258914).
+
+EstimateScore keeps its twenty distances on its stack, and a stale pick
+reads them (`car-drive-target.md`). The port keeps them static. The model
+saves the 80 bytes when EstimateScore returns and puts them back when it
+is next entered, so the two read the same words.
 
 Three stubs print a line each, so both sides must ask the same questions
 in the same order:
@@ -495,7 +656,8 @@ in the same order:
 The grace period's two globals start as the image's data has them, so
 `racecore.c`'s initialisers are compared too.
 
-There are twelve kinds of scenario:
+There are sixteen kinds of scenario here. CarCollisionPredict's four are
+in its own document.
 
 | Scenario | What it covers |
 |----------|----------------|
@@ -511,19 +673,76 @@ There are twelve kinds of scenario:
 | s_pieces | the closest point ahead from anywhere and any start, the clearance beside cars either side of each slow speed, the way out to every index either way, and alongside a car level with mine |
 | s_sign_pass | round a car just past a sign onto a route a metre or two to one side, so the walk's points there carry an offset |
 | s_back | the way out over a walk that doubles back, and alongside a car on a traffic route whose own target runs back down the walk |
+| s_choose | the four choosers among four other cars (ahead on the line, oncoming, alongside, stopped, off the road), each with a box and a target of its own: from every choice, with the current one tried first and not, the lines to consider, the speed for them either side of what matters, and the traffic tuning mode on and off |
+| s_jam | MakeNewChoice and TryToDriveAroundCar in a jam: a car just ahead in my lane under 5 m/s or not, one oncoming in the next lane, and the current choice mostly a side of the car ahead. My car sometimes backs at under 1 m/s, so that a preferred score falls below -1, and the longest times take in 0 and 99999 |
+| s_pass | MakeNewChoice going past oncoming cars at 15 to 50 m/s, so that one swerve fits its corners and the other does not |
+| s_tie | the way round's `<=`: a current choice that hits at exactly 0.1f and a way round that hits at once (see below) |
 
 Step 11b-3's script ran 71 scenarios, 46212 ops and 79543 lines, with 0
 differ. CarCollisionPredict's checks are in the same checker
-(`ai-collision-predict.md`). With them the script runs 98 scenarios,
-61,530 ops and 97,604 lines, still 0 differ.
+(`ai-collision-predict.md`); with them, step 11b-4a's ran 98 scenarios and
+97,604 lines. Step 11b-4b's runs 231 scenarios, 105,136 ops and 151,404
+lines, still 0 differ.
 
-DrivingChoice's share of the mutation pass is 385 mutations: every constant, every
+s_tie is one scenario, built rather than drawn. With nothing found,
+MakeNewChoice goes round the car in the way when the current choice's hit,
+less 0.1, is no later than the way round's. `<=` and `<` part only where
+the two are one float, and no drawn scenario met that. The 59th s_jam from
+seed 11, with every longest time 99999 so that nothing is driveable, comes
+close at its third MakeNewChoice: the current choice hits the oncoming car
+0.083 s on, and the way round hits at once. Car 2's speed was then bisected
+over its floats until the current choice's hit was 0.1f exactly. That is
+0x40cab904 (0x40cab903 works too, and the floats either side do not). The
+scenario stops after that call.
+
+The mutation pass has 741 mutations: 730 caught (27 of them by a crash or
+a hang) and 11 equivalent, with 0 unexplained.
+
+DrivingChoice's share up to 11b-3 is 385 mutations: every constant, every
 comparison's sense and bound, each store, each field read, the grace
 period's initialisers, the three globals and the EE's divide. 383 are
-caught, 22 of them by a crash or a hang. Two are equivalent:
+caught, 22 of them by a crash or a hang. CarCollisionPredict's 207 are all
+caught (`ai-collision-predict.md`).
+
+Step 11b-4b's share is 149 mutations over IsDriveable, TryChoice,
+MakeNewChoice, TryToDriveAroundCar and EstimateScore's static distances.
+140 are caught, one by a crash. The first pass left 19 alive:
+
+- s_jam caught four of them (id-ok-lt, mn-round, mn-round-target,
+  mn-line-pref) once its cars had route points.
+- s_tie caught mn-rle.
+- A hundred s_choose scenarios caught mn-opp-side, mn-opp-extra and
+  mn-opp-pref. With 24, the oncoming car never had both sides fail and
+  its wider way round win.
+- s_pass caught mn-tried-or.
+- ta-pref-left and ta-cur-pref fell to the full script.
+
+The other 8, and the two from before, are equivalent:
 
 - `fx-its-side` drops the side-of-car test on the oncoming car's choice.
   The two tests it guards accept only LEFT and RIGHT, so every other
   type fails them anyway.
 - `sm-full` drops DoSmoothOffsetChange's test for a full target.
   AddPointToTarget refuses a point then, and nothing else is written.
+- `tc-hittime-init` changes TryChoice's first store to the hit time.
+  IsDriveable's first lines store DC_NO_HIT there again before anything
+  reads it.
+- `mn-line-way` hands TryChoice no car in the way for a line choice.
+  TryChoice reads that car only after its side-of-car test, and a line
+  returns there.
+- `tc-scored` makes "scored" `|score + 1| < 0.001` instead of `<=`. The
+  two part only where |score + 1| is 0.00100000005f (0x3a83126f). For a
+  score from -2 to -0.5 the subtraction is exact (Sterbenz), so
+  |score + 1| is a multiple of 2^-24. That float is 8589935 / 2^33, an
+  odd mantissa at 2^-33, so no such score reaches it. Any other score is
+  at least 0.5 from -1, and a NaN fails both.
+- `mn-third` drops MakeNewChoice's third arm. That arm needs the current
+  choice's score off -1, and the score is bestScore read straight after
+  the current try. TryChoice moves it only when it sets found, and then
+  the first arm is taken.
+- `ta-saved` and the four restores (`ta-cur-restore`, `ta-line-restore`,
+  `ta-first-restore`, `ta-second-restore`) touch the saved copy of the
+  target. Each restore is followed at once by IsDriveable, whose
+  BuildDriveTarget first copies the driver's own target over all 528
+  bytes. Retail's callers hand in their action's target (+32), never the
+  driver's, so the copy is never read.

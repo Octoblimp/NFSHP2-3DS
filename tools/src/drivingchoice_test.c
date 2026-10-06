@@ -91,6 +91,9 @@ static CarCollisionBody bodies[NCARS];
 static World world;
 static OBB obbs[DRIVETARGET_MAX_POINTS], obb_a, obb_b;
 static float outs[2];
+// TryChoice's best and its way round.
+static DrivingChoice best_ch, round_ch;
+static DriveTarget target2, target3;
 
 static struct {
     TrackRoute      *route;
@@ -286,9 +289,8 @@ static void dump_its(void)
            (int)t->WhichPointIPickedTime);
 }
 
-static void dump_target(void)
+static void dump_target(const DriveTarget *t)
 {
-    const DriveTarget *t = &target;
     int n = t->NumPoints, i;
 
     printf("  target n %d tt %d len %s last %d pk %d %d %d\n", n,
@@ -350,6 +352,16 @@ static void put_obb(OBB *o, char **v)
     o->a1 = fh(v[5]);
 }
 
+// After a choice is made: the car the list's car leaves out, and the
+// world's two counts.
+static void dump_after(void)
+{
+    printf("  exclude %s\n", nm(car_ai_controller(list.MyCar)
+                                    ->CarToExcludeFromCollisionPrediction));
+    printf("  ids %u %u\n", (unsigned)world.CollisionPredictionID,
+           (unsigned)world.PotentialDriveTargetID);
+}
+
 static void dump_walk(int got)
 {
     printf("  adv %d %s %s n %d o %s x %d l %d\n", got, nm(walk.route),
@@ -377,6 +389,7 @@ static void reset(void)
     memset(&race, 0, sizeof race);
     memset(bodies, 0, sizeof bodies);
     world.CollisionPredictionID = 0;
+    world.PotentialDriveTargetID = 0;
     pCurrentWorld = &world;
     memset(TheTrackRouteManager.pTrackRoutes, 0,
            sizeof TheTrackRouteManager.pTrackRoutes);
@@ -397,8 +410,8 @@ static void reset(void)
     // As racecore.c starts them, so its initialisers are compared too.
     {
         static int saved;
-        static float grace0, gap0, slowcar0, slowtraffic0;
-        static int32_t traffic0;
+        static float grace0, gap0, slowcar0, slowtraffic0, minspeed0;
+        static int32_t traffic0, nlines0;
 
         if (!saved) {
             grace0 = StartOfRaceGracePeriod;
@@ -406,6 +419,8 @@ static void reset(void)
             traffic0 = AITrafficTuningMode;
             slowcar0 = AISlowCarSpeed;
             slowtraffic0 = AISlowTrafficSpeed;
+            minspeed0 = TryToDriveAroundCarMinSpeedForDrivingLine;
+            nlines0 = AICarControllerNumDrivingLinesToConsider;
             saved = 1;
         }
         StartOfRaceGracePeriod = grace0;
@@ -413,6 +428,8 @@ static void reset(void)
         AITrafficTuningMode = traffic0;
         AISlowCarSpeed = slowcar0;
         AISlowTrafficSpeed = slowtraffic0;
+        TryToDriveAroundCarMinSpeedForDrivingLine = minspeed0;
+        AICarControllerNumDrivingLinesToConsider = nlines0;
     }
     WilliamsAITuningMode = 0;
     AIDriverSecondsToLookAhead = 2.0f;
@@ -445,6 +462,10 @@ static void set_global(const char *name, uint32_t v)
         AISlowCarSpeed = f;
     else if (strcmp(name, "SLOWTRAFFIC") == 0)
         AISlowTrafficSpeed = f;
+    else if (strcmp(name, "MINSPEED") == 0)
+        TryToDriveAroundCarMinSpeedForDrivingLine = f;
+    else if (strcmp(name, "NLINES") == 0)
+        AICarControllerNumDrivingLinesToConsider = (int32_t)v;
     else {
         fprintf(stderr, "bad global %s\n", name);
         exit(2);
@@ -715,7 +736,7 @@ static void op(char **t, int n)
     } else if (c == 's') {
         drivingchoice_add_to_drive_target(fh(t[1]), &loc,
                                           &fpl.Points[atoi(t[2])], &target);
-        dump_target();
+        dump_target(&target);
     } else if (c == 't') {
         int z = n > 3 ? atoi(t[3]) : 0;
 
@@ -723,7 +744,7 @@ static void op(char **t, int n)
                                            z & 1 ? NULL : &loc,
                                            z & 4 ? NULL : &list, atoi(t[1]),
                                            atoi(t[2]));
-        dump_target();
+        dump_target(&target);
         printf("  exclude %s\n", nm(car_ai_controller(list.MyCar)
                                         ->CarToExcludeFromCollisionPrediction));
     } else if (c == 'u') {
@@ -740,7 +761,7 @@ static void op(char **t, int n)
             got = drivingchoice_build_drive_target_around_car(
                 &choice, &target, &list, 1.0f, &loc);
         printf("  built %d\n", got);
-        dump_target();
+        dump_target(&target);
         printf("  exclude %s\n", nm(car_ai_controller(list.MyCar)
                                         ->CarToExcludeFromCollisionPrediction));
         dump_its();
@@ -760,11 +781,11 @@ static void op(char **t, int n)
     } else if (c == 'z') {
         drivingchoice_do_smooth_offset_change(&fpl, &target, &list, atoi(t[1]),
                                               fh(t[2]), fh(t[3]), atoi(t[4]));
-        dump_target();
+        dump_target(&target);
     } else if (c == 'M') {
         drivingchoice_make_drive_target_parallel_to_car(&choice, &target,
                                                         &list, &fpl, fh(t[1]));
-        dump_target();
+        dump_target(&target);
         dump_its();
     } else if (c == 'A') {
         int k = atoi(t[1]);
@@ -839,6 +860,64 @@ static void op(char **t, int n)
             &target, &list, atoi(t[2]) & 1 ? NULL : &loc, fh(t[1]), &outs[0]);
         printf("  who %s %s id %u\n", nm(got), fx(outs[0]),
                (unsigned)world.CollisionPredictionID);
+    } else if (c == '8') {
+        float score, hitTime;
+        Car *hitCar;
+        int got;
+
+        fill(&score, sizeof score);
+        fill(&hitTime, sizeof hitTime);
+        fill(&hitCar, sizeof hitCar);
+        got = drivingchoice_is_driveable(&choice, &target, atoi(t[1]), &score,
+                                         &hitCar, &hitTime, &loc, &list, 1.0f,
+                                         fh(t[3]), 2.0f, atoi(t[2]));
+        printf("  drive %d %s %s %s\n", got, fx(score), nm(hitCar),
+               fx(hitTime));
+        dump_target(&target);
+        dump_after();
+    } else if (c == '9') {
+        int found = atoi(t[3]), bout, got;
+        float bscore = fh(t[4]), rtime = fh(t[5]), htime;
+        Car *hcar;
+
+        fill(&bout, sizeof bout);
+        fill(&htime, sizeof htime);
+        fill(&hcar, sizeof hcar);
+        fill(&best_ch, sizeof best_ch);
+        fill(&round_ch, sizeof round_ch);
+        fill(&target2, sizeof target2);
+        fill(&target3, sizeof target3);
+        got = drivingchoice_try_choice(&choice, atoi(t[1]), fh(t[2]), &loc,
+                                       &list, 3.0f, &found, &target, &best_ch,
+                                       &target2, &bout, &bscore, &round_ch,
+                                       &target3, &rtime, &hcar, &htime,
+                                       car_ptr(t[6]));
+        printf("  try %d found %d bout %08x score %s round %s hit %s %s\n",
+               got, found, (unsigned)bout, fx(bscore), fx(rtime), nm(hcar),
+               fx(htime));
+        dump_choice(&best_ch, "best");
+        dump_choice(&round_ch, "round");
+        dump_target(&target);
+        dump_target(&target2);
+        dump_target(&target3);
+        dump_after();
+    } else if (c == '0' || c == 'V') {
+        int out = (int)wh(t[c == 'V' ? 4 : 3]), got;
+
+        if (c == '0') {
+            got = drivingchoice_make_new_choice(&choice, &target, &loc, &list,
+                                                fh(t[1]), 3.0f, &out,
+                                                atoi(t[2]));
+            printf("  new %d out %08x\n", got, (unsigned)out);
+        } else {
+            got = drivingchoice_try_to_drive_around_car(
+                &choice, &target, &out, &list.Array[atoi(t[1])], &loc, &list,
+                1.0f, fh(t[2]), 3.0f, atoi(t[3]));
+            printf("  around %d out %08x\n", got, (unsigned)out);
+        }
+        dump_choice(&choice, "choice");
+        dump_target(&target);
+        dump_after();
     } else {
         fprintf(stderr, "bad op %s\n", t[0]);
         exit(2);

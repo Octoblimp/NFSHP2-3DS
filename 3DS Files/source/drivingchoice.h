@@ -5,12 +5,12 @@
 // a DriveTarget: the FuturePoint list, AdvancePoint and
 // GetRoutePointsToUse, which the demo named and retail keeps unnamed.
 //
-// Here so far (steps 11b-2 and 11b-3): the small methods, the room and
-// the side tests, FillUpDriveTarget with everything under it, and
-// BuildDriveTarget with the way round a car under it. Still to come:
-// IsDriveable, TryChoice, TryToDriveAroundCar and MakeNewChoice (11b-4).
-// DoSnapshot (0x00241b88) is the replay's, and GetTextDescription
-// (0x00241c38) a debug string.
+// Here (steps 11b-2 to 11b-4b): the small methods, the room and the side
+// tests, FillUpDriveTarget with everything under it, BuildDriveTarget
+// with the way round a car under it, and the choosing: IsDriveable,
+// TryChoice, MakeNewChoice and TryToDriveAroundCar. Left out:
+// DoSnapshot (0x00241b88), the replay's, and GetTextDescription
+// (0x00241c38), a debug string.
 //
 // Checked against retail by tools/drivingchoice_check.py. Written up in
 // docs/formats/ai-driving-choice.md.
@@ -113,6 +113,20 @@ extern AISignPostDecisionFn gAISignPostDecisionFn;
 extern int32_t AITrafficTuningMode;   // 0
 extern float   AISlowCarSpeed;        // 20.0f
 extern float   AISlowTrafficSpeed;    // 10.0f
+
+// The demo's names for two more. Above
+// TryToDriveAroundCarMinSpeedForDrivingLine (gp-15136, 0x00331dd0), either
+// car's speed lets TryToDriveAroundCar try the driving lines, and its
+// sides without the room test;
+// AIActionPass::SideOfCarIsOkay reads it too. The demo read it against
+// the speed at Car 960, its VelocityMagnitude; retail's is at 964, the
+// same field.
+//
+// AICarControllerNumDrivingLinesToConsider (gp-20136, 0x00330a48) is 1,
+// and nothing writes it: the driving lines tried are DRIVING_LINE_0 to
+// this less one. AICarController::GetNewDrivingLine reads it too.
+extern float   TryToDriveAroundCarMinSpeedForDrivingLine;  // 20.0f
+extern int32_t AICarControllerNumDrivingLinesToConsider;   // 1
 
 // ------------------------------------------------- the small methods
 
@@ -316,5 +330,80 @@ int drivingchoice_build_drive_target(DrivingChoice *d, struct DriveTarget *t,
                                      struct NearbyCarList *list,
                                      float unusedA, float unusedB,
                                      MovementWithRespectToLine m);
+
+// ------------------------------------------------ choosing a new choice
+
+// 0x00241ff8. Builds `t` for the choice (BuildDriveTarget), scores it
+// (EstimateScore, into `*score`, -1 first) and, when it scores above -1,
+// asks CarCollisionPredict which car it runs into first (`*hitCar`,
+// `*hitTime`, NULL and 99999 first). A `preferred` choice scores 1.2
+// times as much and leaves its car out of the prediction; any other
+// leaves none out (the controller's CarToExcludeFromCollisionPrediction,
+// which BuildDriveTarget has just cleared). 1 when the first hit is later
+// than `maxTime`. Bumps the world's PotentialDriveTargetID either way.
+// `unusedA` goes to BuildDriveTarget, which does not read it; `unusedC`
+// is not read.
+int drivingchoice_is_driveable(DrivingChoice *d, struct DriveTarget *t,
+                               int preferred, float *score, Car **hitCar,
+                               float *hitTime, struct DrivingLocation *loc,
+                               struct NearbyCarList *list, float unusedA,
+                               float maxTime, float unusedC,
+                               MovementWithRespectToLine m);
+
+// 0x002428d0, a static of retail's, here for the checker. One try for
+// MakeNewChoice: IsDriveable of `c` into `t`, towards the line, and when
+// it is driveable and scores above `*bestScore`, `*found` is set and `c`,
+// `t` and the score become the best (`*bestOut` 0). A side of the car
+// `inTheWay`, without the extra distance, that is `preferred` is kept
+// as the way round (`*round`, `*roundTarget`, `*roundTime` its first
+// hit), driveable or not. 1 when the choice scored at all (not -1).
+// With AITrafficTuningMode a traffic car only tries a side of an AI
+// racer or a player's car, and answers 0 with nothing written for
+// anything else. `unused` is not read.
+int drivingchoice_try_choice(DrivingChoice *c, int preferred, float maxTime,
+                             struct DrivingLocation *loc,
+                             struct NearbyCarList *list, float unused,
+                             int *found, struct DriveTarget *t,
+                             DrivingChoice *best,
+                             struct DriveTarget *bestTarget, int *bestOut,
+                             float *bestScore, DrivingChoice *round,
+                             struct DriveTarget *roundTarget,
+                             float *roundTime, Car **hitCar, float *hitTime,
+                             Car *inTheWay);
+
+// 0x00242170. A new choice and its target, `t`. With `tryCurrent` the
+// current choice is tried first (the choice if it is valid, else the
+// location's line), preferred when it is the preferred side of its car;
+// the car it runs into is then the car in the way. Then, if nothing yet,
+// the first AICarControllerNumDrivingLinesToConsider driving lines; then
+// both sides of every car we care about, and its preferred side with the
+// extra distance for a car coming the other way of which neither side
+// scored. The best score wins, `*out` 0. With none, a side of the car in
+// the way that is no sooner hit than the current choice, less 0.1 s,
+// `*out` 1; else the location's line filled up parallel to it, `*out` 0.
+// `tryCurrent` also keeps each try from repeating the current choice.
+// Answers whether one was found; the controller's car to leave out is
+// fixed up from `*out`. `unused` is not read.
+int drivingchoice_make_new_choice(DrivingChoice *d, struct DriveTarget *t,
+                                  struct DrivingLocation *loc,
+                                  struct NearbyCarList *list, float maxTime,
+                                  float unused, int *out, int tryCurrent);
+
+// 0x00242c20. A way round `nc`'s car, from `t` as it is: first the
+// current choice (with `tryCurrent`, when it is valid, a side of this car
+// or a line, and a line only when fast), then, when either car is above
+// TryToDriveAroundCarMinSpeedForDrivingLine, the driving lines, then the
+// preferred side of the car and the other, each only fast or with
+// IsEnoughRoom. The first that IsDriveable takes is the choice, `*out`
+// 1 for a preferred side; with none, the current choice if still valid
+// or the location's line is built parallel to it and `*out` is left as
+// it was. `a` goes to BuildDriveTarget unread; `unused` is not read.
+int drivingchoice_try_to_drive_around_car(DrivingChoice *d,
+                                          struct DriveTarget *t, int *out,
+                                          struct NearbyCar *nc,
+                                          struct DrivingLocation *loc,
+                                          struct NearbyCarList *list, float a,
+                                          float maxTime, float unused,
+                                          int tryCurrent);
 
 #endif /* DRIVINGCHOICE_H */

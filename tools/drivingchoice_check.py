@@ -23,6 +23,13 @@ AddPointToTarget and GetRouteAndRoutePoint. The harness
 (tools/src/drivingchoice_test.c) runs the port over the same script, and
 the two transcripts are diffed.
 
+Later steps check more in the same way. Step 11b-3 adds BuildDriveTarget
+and the way round a car. Step 11b-4a adds CarCollisionPredict
+(carcollisionpredict.c). Step 11b-4b adds IsDriveable, TryChoice,
+MakeNewChoice and TryToDriveAroundCar, over retail's own EstimateScore.
+EstimateScore's distances are carried from one call to the next, as the
+port's static array keeps them (EST_ENTRY).
+
 Three stubs, each of which prints a line, so the two sides must ask them
 the same questions in the same order:
   AICarController::SignPostDecision (0x00191de0), which the port reaches
@@ -74,6 +81,7 @@ HARNESS = "tools/src/drivingchoice_test.c"
 DCC = "3DS Files/source/drivingchoice.c"
 RCC = "3DS Files/source/racecore.c"
 CCP = "3DS Files/source/carcollisionpredict.c"
+DT = "3DS Files/source/drivetarget.c"
 SOURCES = [HARNESS, DCC, RCC, CCP] + ["3DS Files/source/" + f for f in (
     "nearbycar.c", "drivinglocation.c", "drivetarget.c", "obb.c", "car.c",
     "carstate.c", "carinfo.c", "cartypeinfo.c", "langtab.c", "drivetrain.c",
@@ -130,6 +138,29 @@ OVERLAP = 0x001e6ac0
 # when a car is at its next point.
 WILL_DIVS = {0x001e65ec, 0x001e65f4}
 
+# Choosing a new choice (step 11b-4b).
+IS_DRIVEABLE = 0x00241ff8
+TRY_CHOICE = 0x002428d0
+MAKE_NEW = 0x00242170
+AROUND_CAR = 0x00242c20
+# A choice made among many cars runs the walk and the prediction a few
+# dozen times over.
+CHOOSE_LIMIT = 400000000
+# EstimateScore's two, which a car at rest takes and drivetarget.c spells
+# ee_div (tools/drivetarget_image_check.py).
+EST_DIVS = {0x0021d204, 0x00258914}
+# EstimateScore's entry and its one jr ra. Its 20 distances are a stack
+# array written only from the first point on, and IsDriveable's scratch
+# target, rebuilt choice after choice in one frame, keeps the first choice's
+# cached pick: a shorter target then scores off the distance the last call
+# left. drivetarget.c keeps the array static. The model leaves retail's own
+# stack alone from one call to the next at the same depth inside one op, so
+# anything there that overwrote the words would show, and carries the last
+# call's 80 bytes into a frame anywhere else.
+EST_ENTRY = 0x0021c920
+EST_RET = 0x0021cf2c
+EST_FRAME = 304
+
 # DriveTarget's MinDistanceToPoint and its square, which the image's
 # start-up code (0x0020ab48) works out and the emulator does not run.
 MIN_DIST = 0x00331a48
@@ -156,6 +187,8 @@ GLOBALS = {
     "SLOWCAR": GP - 15120,        # AISlowCarSpeed
     "SLOWTRAFFIC": GP - 15116,    # AISlowTrafficSpeed
     "WORLD": GP - 22120,          # pCurrentWorld
+    "MINSPEED": GP - 15136,       # TryToDriveAroundCarMinSpeedForDrivingLine
+    "NLINES": GP - 20136,         # AICarControllerNumDrivingLinesToConsider
 }
 
 CARS = 0x01010000
@@ -194,6 +227,21 @@ OBB_B = 0x01096100
 VEC_D = 0x01096200
 VEC_V = 0x01096210
 OUT = 0x01096300                  # the out floats
+BEST_CH = 0x01091020               # TryChoice's best and its way round
+ROUND_CH = 0x01091030
+TARGET2 = 0x01097000
+TARGET3 = 0x01097400
+# The words the choosing writes through: found, its out, the best score,
+# the way round's time, the car hit and when, IsDriveable's score and
+# MakeNewChoice's and TryToDriveAroundCar's out.
+O_FOUND = 0x01096320
+O_BOUT = O_FOUND + 4
+O_BSCORE = O_FOUND + 8
+O_RTIME = O_FOUND + 12
+O_HCAR = O_FOUND + 16
+O_HTIME = O_FOUND + 20
+O_SCORE = O_FOUND + 24
+O_OUT = O_FOUND + 28
 WORLD = 0x01098000
 BODIES = 0x010a0000               # each car's collision body
 BODY_STRIDE = 0x200
@@ -221,6 +269,7 @@ C_ANGLE = 932
 B_MIN = 224
 B_MAX = 240
 W_ID = 408
+W_PDT_ID = 412
 OBB_SIZE = 80
 NOBBS = 20
 CTI_CLASS = 230
@@ -372,6 +421,19 @@ def route_at(k):
 #                        and car k
 # 7 max z                WhoWillThisDriveTargetHit; z's 1 makes the
 #                        location NULL
+#
+# Choosing a new choice (step 11b-4b), each dumping what it leaves after
+# it: the car the list's car leaves out, and the world's
+# CollisionPredictionID and PotentialDriveTargetID.
+# 8 pref m max           IsDriveable of the choice into the target
+# 9 pref max found best round way
+#                        TryChoice of the choice, into the target: *found,
+#                        the best score and the way round's time as
+#                        given, car `way` (-1 NULL) in the way; the best
+#                        and the way round, their targets, the best's out
+#                        and the hit filled with 0xa5 first
+# 0 max try out          MakeNewChoice, *out as given
+# V e max try out        TryToDriveAroundCar of entry e, *out as given
 #
 # What the image would read from wherever a NULL or a stray pointer lands
 # is not scripted: a side-of-car choice always has a car, IsEnoughRoom's
@@ -1048,13 +1110,17 @@ def lateral_of(p, x, y):
     return (x - p["x"]) * p["dy"] - (y - p["y"]) * p["dx"]
 
 
-def its_target(rnd, w, sizes, k, kr, j, reverse=False):
+def its_target(rnd, w, sizes, k, kr, j, reverse=False,
+               picks=(0, 0, 1, 2, 7, -1)):
     """Car k's own target: up to eight points along route kr from about
     its point j, forwards or back, now and then jumping to another route,
-    and sometimes with a point that has no route or no number."""
+    and sometimes with a point that has no route or no number. A cached
+    pick of -1 is no state the game reaches (GetFirstPoint answers 0 to
+    NumPoints - 1 and a new target has 0); where it is read before a
+    point, the port and the image read the same bytes of the record."""
     ops = ["H %d %d %s %d %d %d" % (
         k, rnd.randrange(64), h(f32(rnd.uniform(0.0, 80.0))),
-        rnd.choice((0, 0, 1, 2, 7, -1)), rnd.choice((0, 1000, 5000)),
+        rnd.choice(picks), rnd.choice((0, 1000, 5000)),
         rnd.choice((0, 1000)))]
     jj = max(0, min(sizes[kr] - 1, j))
     for i in range(rnd.choice((0, 1, 2, 4, 6, 8, 8))):
@@ -1099,7 +1165,7 @@ def car_at_point(rnd, w, k, kr, j, lat, near, its=None, **kw):
 
 
 def place_other(rnd, w, sizes, k, kr, j0, near=False, reverse=None,
-                span=18):
+                span=18, picks=(0, 0, 1, 2, 7, -1)):
     """Car k up to `span` points ahead of j0 on route kr: on its line,
     near an edge or off the road; and its own target."""
     j = min(sizes[kr] - 2, j0 + rnd.randrange(1, span))
@@ -1113,7 +1179,7 @@ def place_other(rnd, w, sizes, k, kr, j0, near=False, reverse=None,
         reverse = rnd.random() < 0.2
     kt = rnd.choice((kr, kr, kr, 3, 4, 1))
     jt = j if kt == kr else rnd.randrange(sizes[kt])
-    w.ops += its_target(rnd, w, sizes, k, kt, jt, reverse)
+    w.ops += its_target(rnd, w, sizes, k, kt, jt, reverse, picks)
     return v
 
 
@@ -2000,6 +2066,334 @@ def s_stopped(rnd):
     return ops
 
 
+# ---------------------------------------- choosing a new choice (11b-4b)
+
+
+def boxed(rnd, w, k):
+    """Car k's box, angle and acceleration, about its heading."""
+    v = w.cars[k]
+    w.ops.append(extras(rnd, k, math.atan2(v["by"], v["bx"])))
+
+
+def seen_list(rnd, w, cars):
+    """The list: my car (0) and an entry for each of `cars`, where my car
+    sees it, now and then anywhere."""
+    me = w.cars[0]
+    ops = ["N 0 %d %s %s" % (len(cars), h(f32(rnd.uniform(0.8, 1.2))),
+                             h(f32(rnd.uniform(2.0, 2.6))))]
+    for i, k in enumerate(cars):
+        v = w.cars[k]
+        lx, ly = frame(me, v["px"], v["py"])
+        if rnd.random() < 0.1:
+            lx, ly = rnd.uniform(-3.0, 3.0), rnd.uniform(-5.0, 30.0)
+        ops.append("E %d %s %s %s %s %s %s %d" % (
+            i, h(f32(lx)), h(f32(ly)), h(f32(rnd.uniform(-5.0, 5.0))),
+            h(f32(rnd.uniform(-5.0, 5.0))), h(f32(rnd.uniform(0.8, 1.3))),
+            h(f32(rnd.uniform(2.0, 2.8))), k))
+    return ops
+
+
+# A hundred, for the oncoming car whose sides both fail and whose wider
+# way round then wins (mn-opp-side, mn-opp-extra, mn-opp-pref): 24 never
+# made one.
+N_CHOOSE = 100
+# Its own targets' cached picks. -1 would have WillIHitThisCar read the
+# box before its array, on retail's stack and in the port's static.
+PICKS = (0, 0, 1, 2, 7, 19)
+OUTS = ("00000000", "00000001", "a5a5a5a5")
+MAX_TIMES = (0.5, 1.0, 2.0, 3.0, 5.0)
+
+
+def s_choose(rnd):
+    """MakeNewChoice, TryToDriveAroundCar, TryChoice and IsDriveable: my
+    car among four others on walk_world's routes, ahead on the line,
+    oncoming, alongside, stopped and off the road, each with a box and a
+    target of its own; from every choice, with the current one tried
+    first and not, the lines to consider and the speed for them either
+    side of what matters, the traffic tuning mode on and off."""
+    w = World(rnd)
+    ops = w.ops
+    sizes = walk_world(rnd, w, nsigns=rnd.randint(0, 4))
+    if w.sign_points and rnd.random() < 0.4:
+        kl, js = rnd.choice(w.sign_points)
+        jl = max(0, js - rnd.randrange(1, 6))
+    else:
+        kl, jl = 0, rnd.randrange(0, 10)
+    line = rnd.randrange(LINES)
+    others = [1, 2, 3, 4]
+
+    def me():
+        place_me(rnd, w, 0, kl, jl, line,
+                 ctl=rnd.choice((0, 1, 2, 3, 3)),
+                 act=rnd.choice((-1, 0, 5, 6)))
+        boxed(rnd, w, 0)
+        ops.extend(its_target(rnd, w, sizes, 0, kl, jl, picks=PICKS))
+
+    def other(k):
+        place_other(rnd, w, sizes, k, kl, jl, rnd.random() < 0.6,
+                    span=rnd.choice((4, 7, 7, 12)), picks=PICKS)
+        boxed(rnd, w, k)
+
+    me()
+    for k in others + [5]:
+        other(k)
+    ops += seen_list(rnd, w, others)
+    ops += decide(rnd, w)
+    # The scratch target starts empty and then keeps whatever the last op
+    # built in it, as the controller's own does from frame to frame.
+    scratch = "T %d %s" % (rnd.choice((0, 9, 40)), h(f32(rnd.uniform(0.0, 60.0))))
+    ops.append(scratch)
+    for _ in range(14):
+        if rnd.random() < 0.1:
+            ops.append(scratch)
+        r = rnd.random()
+        if r < 0.3:
+            other(rnd.choice(others))
+            ops += seen_list(rnd, w, others)
+        elif r < 0.4:
+            me()
+            ops += seen_list(rnd, w, others)
+        if rnd.random() < 0.3:
+            ops.append("G TIMER %08x" % rnd.choice((0, 1000, 5000, 77777)))
+        if rnd.random() < 0.25:
+            ops.append("G TRAFFIC %08x" % rnd.choice((0, 1)))
+        if rnd.random() < 0.3:
+            ops.append("G MINSPEED %s" % h(f32(rnd.choice((
+                20.0, 0.0, 4.95, 5.0, 25.0, 100.0)))))
+        if rnd.random() < 0.3:
+            ops.append("G NLINES %08x" % rnd.choice((0, 1, 2, 4)))
+        if rnd.random() < 0.1:
+            ops.append("G SECS %s" % h(f32(rnd.choice((2.0, 0.5, 6.0)))))
+            ops.append("G DEF %s" % h(f32(rnd.choice((20.0, 60.0)))))
+        ops.append("D %d %d %d 00000000" % (
+            kl, max(0, jl + rnd.choice((0, 0, 1, -1))),
+            line if rnd.random() < 0.8 else rnd.randrange(LINES)))
+        t = rnd.choice((0, 1, 2, 3, 4, 5, 6, 5, 6, 7))
+        if t in (5, 6):
+            k = rnd.choice(others + [5])
+        else:
+            k = rnd.choice((-1, -1, -1, 1))
+        ops.append("X %d %d %d" % (t, k, rnd.choice((0, 0, 1))))
+        mx = h(f32(rnd.choice(MAX_TIMES)))
+        what = rnd.choice(("8", "9", "0", "0", "0", "V", "V"))
+        if what == "8":
+            ops.append("8 %d %d %s" % (rnd.choice((0, 1)),
+                                       rnd.choice((0, 0, 1, 2, 3)), mx))
+        elif what == "9":
+            ops.append("9 %d %s %d %s %s %d" % (
+                rnd.choice((0, 1)), mx, rnd.choice((0, 0, 1)),
+                h(f32(rnd.choice((-1.0, -1.0, 0.0, 0.5, 2.0)))),
+                h(f32(rnd.choice((99999.0, 1.0, 0.0)))),
+                rnd.choice([-1, k, k] + others)))
+        elif what == "0":
+            ops.append("0 %s %d %s" % (mx, rnd.choice((0, 1, 1)),
+                                       rnd.choice(OUTS)))
+        else:
+            ops.append("V %d %s %d %s" % (rnd.randrange(len(others)), mx,
+                                          rnd.choice((0, 1, 1)),
+                                          rnd.choice(OUTS)))
+        if rnd.random() < 0.2:
+            ops += decide(rnd, w)
+    return ops
+
+
+N_JAM = 24
+# 0, so that a hit at once is not driveable by a hair; 99999, which a
+# target that hits nothing gives too.
+JAM_MAX_TIMES = (0.0, 0.0, 1.0, 3.0, 5.0, 99999.0)
+# Backing at under 1 m/s scores a target between -1 and -1/1.2: a
+# preferred one then scores below -1.
+JAM_BACKING = (-0.85, -0.9, -0.95, -0.99)
+
+
+def s_jam(rnd, max_times=JAM_MAX_TIMES):
+    """MakeNewChoice and TryToDriveAroundCar in a jam: a car in my lane just
+    ahead, under 5 m/s or not, so that every target hits it at once when it
+    is; a car coming the other way in the next lane; two more about. The
+    current choice is mostly a side of the car ahead and is tried first, so
+    that its preferred side is kept as the way round when nothing will do.
+    Now and then my car backs at under 1 m/s, and the longest times asked
+    take in 0 and 99999."""
+    w = World(rnd)
+    ops = w.ops
+    sizes = walk_world(rnd, w, nsigns=rnd.randint(0, 2))
+    kl, jl = 0, rnd.randrange(0, 12)
+    line = rnd.randrange(LINES)
+    others = [1, 2, 3, 4]
+
+    def me():
+        p = w.pts[kl][jl]
+        if rnd.random() < 0.35:
+            x, y = beside(p, off_of(p, line) + rnd.uniform(-1.0, 1.0), 1.0)
+            mover(rnd, w, 0, x, y, heading_of(p), rnd.choice(JAM_BACKING),
+                  back=True, ctl=rnd.choice((0, 1, 2, 3, 3)),
+                  dtype=rnd.choice((2, 2, 3, 3, 4, 0)),
+                  act=rnd.choice((-1, 0, 5, 6)), oob=0.0, rpr=kl, rpj=jl)
+        else:
+            place_me(rnd, w, 0, kl, jl, line,
+                     ctl=rnd.choice((0, 1, 2, 3, 3)),
+                     act=rnd.choice((-1, 0, 5, 6)))
+            boxed(rnd, w, 0)
+        ops.extend(its_target(rnd, w, sizes, 0, kl, jl, picks=PICKS))
+
+    def ahead():
+        j = min(sizes[kl] - 2, jl + rnd.choice((1, 1, 2, 3)))
+        p = w.pts[kl][j]
+        x, y = beside(p, off_of(p, line) + rnd.uniform(-1.0, 1.0),
+                      rnd.uniform(-3.0, 3.0))
+        mover(rnd, w, 1, x, y,
+              heading_of(p) + rnd.choice((0.0, 0.0, 0.1, -0.1)),
+              rnd.choice((0.0, 2.0, 4.99, 5.0, 5.01, 8.0, 15.0)),
+              oob=rnd.choice((0.0, 0.0, -0.3)), rpr=kl, rpj=j)
+        ops.extend(its_target(rnd, w, sizes, 1, kl, j, picks=PICKS))
+
+    def oncoming():
+        j = min(sizes[kl] - 2, jl + rnd.randrange(1, 6))
+        p = w.pts[kl][j]
+        x, y = beside(p, off_of(p, line) + rnd.choice((-3.5, 3.5))
+                      + rnd.uniform(-1.0, 1.0), rnd.uniform(-3.0, 3.0))
+        mover(rnd, w, 2, x, y,
+              heading_of(p) + math.pi + rnd.choice((0.0, 0.0, 0.1, -0.1)),
+              rnd.choice((8.0, 15.0, 25.0, 35.0)),
+              oob=rnd.choice((0.0, 0.0, -0.3)), rpr=kl, rpj=j)
+        ops.extend(its_target(rnd, w, sizes, 2, kl, j, reverse=True,
+                              picks=PICKS))
+
+    def other(k):
+        place_other(rnd, w, sizes, k, kl, jl, rnd.random() < 0.6,
+                    span=rnd.choice((4, 7, 7, 12)), picks=PICKS)
+        boxed(rnd, w, k)
+
+    me()
+    ahead()
+    oncoming()
+    other(3)
+    other(4)
+    ops += seen_list(rnd, w, others)
+    ops += decide(rnd, w)
+    ops.append("T %d %s" % (rnd.choice((0, 9, 40)),
+                            h(f32(rnd.uniform(0.0, 60.0)))))
+    for _ in range(12):
+        r = rnd.random()
+        if r < 0.45:
+            rnd.choice((me, ahead, ahead, oncoming,
+                        lambda: other(rnd.choice((3, 4)))))()
+            ops += seen_list(rnd, w, others)
+        if rnd.random() < 0.3:
+            ops.append("G TIMER %08x" % rnd.choice((0, 1000, 5000, 77777)))
+        if rnd.random() < 0.15:
+            ops.append("G TRAFFIC %08x" % rnd.choice((0, 1)))
+        if rnd.random() < 0.2:
+            ops.append("G NLINES %08x" % rnd.choice((0, 1, 2)))
+        ops.append("D %d %d %d 00000000" % (
+            kl, max(0, jl + rnd.choice((0, 0, 1, -1))),
+            line if rnd.random() < 0.8 else rnd.randrange(LINES)))
+        t = rnd.choice((5, 6, 5, 6, 5, 6, 1, 0))
+        k = rnd.choice((1, 1, 1, 2, 3)) if t in (5, 6) else -1
+        ops.append("X %d %d %d" % (t, k, rnd.choice((0, 0, 0, 1))))
+        mx = h(f32(rnd.choice(max_times)))
+        what = rnd.choice(("0", "0", "0", "V", "V", "8"))
+        if what == "8":
+            ops.append("8 %d %d %s" % (rnd.choice((0, 1)),
+                                       rnd.choice((0, 0, 1)), mx))
+        elif what == "0":
+            ops.append("0 %s %d %s" % (mx, rnd.choice((1, 1, 1, 0)),
+                                       rnd.choice(OUTS)))
+        else:
+            ops.append("V %d %s %d %s" % (rnd.choice((0, 0, 1, 2, 3)), mx,
+                                          rnd.choice((1, 1, 1, 0)),
+                                          rnd.choice(OUTS)))
+    return ops
+
+
+
+
+N_PASS = 8
+
+
+def s_pass(rnd):
+    """MakeNewChoice going past cars coming the other way at speed: my car
+    at 15 to 50 m/s on its line, one oncoming car up to 3 m either side of
+    it and three more anywhere across the road, so that a swerve one way
+    fits its corners and the other way does not, and a car whose left side
+    scores and right side does not is not tried a third time."""
+    w = World(rnd)
+    ops = w.ops
+    sizes = walk_world(rnd, w, nsigns=0)
+    kl, jl = 0, rnd.randrange(0, 12)
+    line = rnd.randrange(LINES)
+    others = [1, 2, 3, 4]
+
+    def me():
+        p = w.pts[kl][jl]
+        x, y = beside(p, off_of(p, line) + rnd.uniform(-0.5, 0.5), 1.0)
+        mover(rnd, w, 0, x, y, heading_of(p),
+              rnd.choice((15.0, 20.0, 25.0, 30.0, 40.0, 50.0)),
+              ctl=rnd.choice((0, 1, 2, 3, 3)), dtype=rnd.choice((2, 2, 3, 0)),
+              act=rnd.choice((-1, 0, 5, 6)), oob=0.0, rpr=kl, rpj=jl)
+        ops.extend(its_target(rnd, w, sizes, 0, kl, jl, picks=PICKS))
+
+    def oncoming(k, near):
+        j = min(sizes[kl] - 2, jl + rnd.randrange(1, 4))
+        p = w.pts[kl][j]
+        lat = off_of(p, line) + (rnd.uniform(0.3, 3.0) * rnd.choice((1, -1))
+                                 if near else rnd.uniform(-8.0, 8.0))
+        x, y = beside(p, lat, rnd.uniform(-3.0, 3.0))
+        mover(rnd, w, k, x, y,
+              heading_of(p) + math.pi + rnd.choice((0.0, 0.0, 0.1, -0.1)),
+              rnd.choice((5.01, 8.0, 15.0, 25.0, 35.0)),
+              oob=0.0, rpr=kl, rpj=j)
+        ops.extend(its_target(rnd, w, sizes, k, kl, j, reverse=True,
+                              picks=PICKS))
+
+    me()
+    for k in others:
+        oncoming(k, k == 1)
+    ops += seen_list(rnd, w, others)
+    ops += decide(rnd, w)
+    ops.append("T %d %s" % (rnd.choice((0, 9, 40)),
+                            h(f32(rnd.uniform(0.0, 60.0)))))
+    for _ in range(12):
+        if rnd.random() < 0.5:
+            rnd.choice((me, lambda: oncoming(1, True),
+                        lambda: oncoming(rnd.choice((2, 3, 4)), False)))()
+            ops += seen_list(rnd, w, others)
+        if rnd.random() < 0.3:
+            ops.append("G TIMER %08x" % rnd.choice((0, 1000, 5000, 77777)))
+        ops.append("D %d %d %d 00000000" % (kl, jl, line))
+        t = rnd.choice((0, 1, 2, 5, 6))
+        k = rnd.choice((2, 3)) if t in (5, 6) else -1
+        ops.append("X %d %d %d" % (t, k, 0))
+        ops.append("0 %s %d %s" % (h(f32(rnd.choice((0.5, 1.0, 3.0)))),
+                                   rnd.choice((0, 1)), rnd.choice(OUTS)))
+    return ops
+
+# mn-rle's tie. With nothing found, MakeNewChoice goes round the car in the
+# way when the current choice's hit, less 0.1, is no later than the way
+# round's, and `<=` and `<` part only where the two are one float. s_jam's
+# 59th scenario from TIE_SEED, its longest times all 99999 so that nothing
+# is driveable, has its third MakeNewChoice's current choice hit the
+# oncoming car 0.083 s on and the way round hit at once. Car 2's speed,
+# found by bisection over its floats, makes the current choice's hit 0.1f
+# exactly; 0x40cab903 does too, and the floats either side do not.
+TIE_SEED = 11
+TIE_INDEX = 58
+TIE_CALL = 3
+TIE_SPEED = 0x40cab904
+
+
+def s_tie():
+    rnd = random.Random(TIE_SEED)
+    for _ in range(TIE_INDEX + 1):
+        ops = s_jam(rnd, max_times=(99999.0,))
+    calls = [i for i, op in enumerate(ops) if op.startswith("0 ")]
+    ops = ops[:calls[TIE_CALL - 1] + 1]
+    k = max(i for i, op in enumerate(ops) if op.startswith("C 2 "))
+    f = ops[k].split()
+    f[7] = "%08x" % TIE_SPEED
+    ops[k] = " ".join(f)
+    return ops
+
 def script():
     rnd = random.Random(0x11b2dc)
     sc = [s_small(rnd), s_valid(rnd), s_room(rnd), s_walk(rnd), s_fill(rnd),
@@ -2032,6 +2426,14 @@ def script():
         sc.append(s_meet(rnd))
     for _ in range(2):
         sc.append(s_stopped(rnd))
+    # Step 11b-4b's.
+    for _ in range(N_CHOOSE):
+        sc.append(s_choose(rnd))
+    for _ in range(N_JAM):
+        sc.append(s_jam(rnd))
+    for _ in range(N_PASS):
+        sc.append(s_pass(rnd))
+    sc.append(s_tie())
     return sc
 
 
@@ -2059,11 +2461,28 @@ class Model(object):
         self.traffic0 = self.w(GLOBALS["TRAFFIC"])
         self.slowcar0 = self.w(GLOBALS["SLOWCAR"])
         self.slowtraffic0 = self.w(GLOBALS["SLOWTRAFFIC"])
+        self.minspeed0 = self.w(GLOBALS["MINSPEED"])
+        self.nlines0 = self.w(GLOBALS["NLINES"])
         d = struct.unpack("<f", struct.pack("<I", self.w(MIN_DIST)))[0]
         self.e.put32(MIN_DIST_SQ, fb(f32(d * d)))
         self.dec = {}
         self.rp = {}
         self.oob = {}
+        self.dist = bytes(80)
+        self.calls = 0
+        self.est_at = None
+        self.e.hooks[EST_ENTRY] = self.h_est_in
+        self.e.hooks[EST_RET] = self.h_est_out
+
+    def h_est_in(self, em):
+        sp = (em.reg[29] - EST_FRAME) & M32
+        if (sp, self.calls) != self.est_at:
+            em.mem[sp:sp + 80] = self.dist
+        self.est_at = (sp, self.calls)
+
+    def h_est_out(self, em):
+        sp = em.reg[29] & M32
+        self.dist = bytes(em.mem[sp:sp + 80])
 
     def emit(self, s):
         self.out.append(s)
@@ -2226,6 +2645,7 @@ class Model(object):
         e.mem[BODIES:BODIES + BODY_STRIDE * NCARS] = bytes(
             BODY_STRIDE * NCARS)
         e.put32(WORLD + W_ID, 0)
+        e.put32(WORLD + W_PDT_ID, 0)
         for name, v in (("TIMER", 0), ("RACE", RACE), ("WORLD", WORLD),
                         ("GRACE", self.grace0), ("GAP", self.gap0),
                         ("WILLIAMS", 0),
@@ -2233,7 +2653,9 @@ class Model(object):
                         ("SIGNS", SIGNS), ("NSIGNS", NSIGNS),
                         ("TRAFFIC", self.traffic0),
                         ("SLOWCAR", self.slowcar0),
-                        ("SLOWTRAFFIC", self.slowtraffic0)):
+                        ("SLOWTRAFFIC", self.slowtraffic0),
+                        ("MINSPEED", self.minspeed0),
+                        ("NLINES", self.nlines0)):
             e.put32(GLOBALS[name], v)
         self.dec = {}
         self.rp = {}
@@ -2339,10 +2761,23 @@ class Model(object):
     # ---- the ops ---------------------------------------------------------
 
     def call(self, fn, *args, **f):
+        """fn(args), the floats given as f12=bits and so on, and the words
+        past the eighth as stack=[...], each in its 8-byte slot."""
         e = self.e
+        self.calls += 1
+        for i, v in enumerate(f.pop("stack", ())):
+            e.put32((e.reg[29] & M32) + 8 * i, v)
+        limit = f.pop("limit", 4000000)
         for i, v in f.items():
             e.fpr[int(i[1:])] = v & M32
-        return e.call(fn, *args, limit=4000000)
+        return e.call(fn, *args, limit=limit)
+
+    def dump_after(self):
+        """The car the list's car leaves out, and the world's two counts."""
+        w = self.w
+        self.emit("  exclude %s" % self.name(
+            w(w(w(LIST) + C_CTRL) + K_EXCLUDE)))
+        self.emit("  ids %d %d" % (w(WORLD + W_ID), w(WORLD + W_PDT_ID)))
 
     def op(self, t):
         e, w = self.e, self.w
@@ -2576,6 +3011,64 @@ class Model(object):
                             OUT, f12=int(t[1], 16))
             self.emit("  who %s %s id %d" % (self.name(got), fx(w(OUT)),
                                              w(WORLD + W_ID)))
+        elif c == "8":
+            for a in (O_SCORE, O_HCAR, O_HTIME):
+                e.put32(a, PAT32)
+            got = self.call(IS_DRIVEABLE, CHOICE, TARGET, int(t[1]), O_SCORE,
+                            O_HCAR, O_HTIME, LOC, LIST, f12=0x3f800000,
+                            f13=int(t[3], 16), f14=0x40000000,
+                            stack=[int(t[2])], limit=CHOOSE_LIMIT)
+            self.emit("  drive %d %s %s %s" % (got, fx(w(O_SCORE)),
+                                               self.name(w(O_HCAR)),
+                                               fx(w(O_HTIME))))
+            self.dump_target()
+            self.dump_after()
+        elif c == "9":
+            e.put32(O_FOUND, int(t[3]))
+            e.put32(O_BSCORE, int(t[4], 16))
+            e.put32(O_RTIME, int(t[5], 16))
+            for a in (O_BOUT, O_HCAR, O_HTIME):
+                e.put32(a, PAT32)
+            self.fill(BEST_CH, 12)
+            self.fill(ROUND_CH, 12)
+            self.fill(TARGET2, TARGET_BYTES)
+            self.fill(TARGET3, TARGET_BYTES)
+            got = self.call(TRY_CHOICE, CHOICE, int(t[1]), LOC, LIST, O_FOUND,
+                            TARGET, BEST_CH, TARGET2, f12=int(t[2], 16),
+                            f13=0x40400000,
+                            stack=[O_BOUT, O_BSCORE, ROUND_CH, TARGET3,
+                                   O_RTIME, O_HCAR, O_HTIME,
+                                   self.car_ptr(t[6])],
+                            limit=CHOOSE_LIMIT)
+            self.emit("  try %d found %d bout %08x score %s round %s hit %s %s"
+                      % (got, s32(w(O_FOUND)), w(O_BOUT), fx(w(O_BSCORE)),
+                         fx(w(O_RTIME)), self.name(w(O_HCAR)),
+                         fx(w(O_HTIME))))
+            self.dump_choice(BEST_CH, "best")
+            self.dump_choice(ROUND_CH, "round")
+            self.dump_target()
+            self.dump_target(TARGET2)
+            self.dump_target(TARGET3)
+            self.dump_after()
+        elif c == "0":
+            e.put32(O_OUT, int(t[3], 16))
+            got = self.call(MAKE_NEW, CHOICE, TARGET, LOC, LIST, O_OUT,
+                            int(t[2]), f12=int(t[1], 16), f13=0x40400000,
+                            limit=CHOOSE_LIMIT)
+            self.emit("  new %d out %08x" % (got, w(O_OUT)))
+            self.dump_choice(CHOICE, "choice")
+            self.dump_target()
+            self.dump_after()
+        elif c == "V":
+            e.put32(O_OUT, int(t[4], 16))
+            got = self.call(AROUND_CAR, CHOICE, TARGET, O_OUT,
+                            self.entry(t[1]), LOC, LIST, int(t[3]),
+                            f12=0x3f800000, f13=int(t[2], 16),
+                            f14=0x40400000, limit=CHOOSE_LIMIT)
+            self.emit("  around %d out %08x" % (got, w(O_OUT)))
+            self.dump_choice(CHOICE, "choice")
+            self.dump_target()
+            self.dump_after()
         else:
             raise SystemExit("bad op %r" % (t,))
 
@@ -2587,7 +3080,7 @@ class Model(object):
                 if ln[0] not in "CKPU":
                     self.emit("> " + ln[:48])
                 self.op(ln.split())
-        stray = self.e.eediv_pcs - {SMOOTH_DIV} - WILL_DIVS
+        stray = self.e.eediv_pcs - {SMOOTH_DIV} - WILL_DIVS - EST_DIVS
         if stray:
             raise SystemExit("the EE's divide by zero at %s, which the port "
                              "divides as IEEE does"
@@ -3471,7 +3964,8 @@ MUTATIONS = [
       "                                               MOVEMENT_TOWARDS_LINE, 1);\n            done = 1;"),
     M("ar-fill-inside", "                                               MOVEMENT_PARALLEL_TO_LINE, 1);\n            done = 1;",
       "                                               MOVEMENT_PARALLEL_TO_LINE, 0);\n            done = 1;"),
-    M("ar-done", "            done = 1;", "            done = 0;"),
+    M("ar-done", "MOVEMENT_PARALLEL_TO_LINE, 1);\n            done = 1;",
+      "MOVEMENT_PARALLEL_TO_LINE, 1);\n            done = 0;"),
     M("ar-fail-m", "    if (!done)\n        drivingchoice_fill_up_drive_target(t, loc, list,\n"
       "                                           MOVEMENT_PARALLEL_TO_LINE, 1);",
       "    if (!done)\n        drivingchoice_fill_up_drive_target(t, loc, list,\n"
@@ -3911,9 +4405,348 @@ MUTATIONS = [
     M("cn-hi", "*hi = e[2];", "*hi = e[3];", rel=CCP),
     M("cn-ret", "        return 1;\n    }\n    return 0;",
       "        return 0;\n    }\n    return 0;", rel=CCP),
+    # -- IsDriveable (11b-4b) -------------------------------------------
+    M("id-score-init", "    *score = -1.0f;\n    *hitCar = NULL;",
+      "    *score = 0.0f;\n    *hitCar = NULL;"),
+    M("id-hitcar-init",
+      "*hitCar = NULL;\n    *hitTime = DC_NO_HIT;\n    if (drivingchoice_build",
+      "*hitCar = list->MyCar;\n    *hitTime = DC_NO_HIT;\n"
+      "    if (drivingchoice_build"),
+    M("id-hittime-init",
+      "*hitTime = DC_NO_HIT;\n    if (drivingchoice_build",
+      "*hitTime = 0.0f;\n    if (drivingchoice_build"),
+    M("id-m", "maxTime,\n                                         m)) {",
+      "maxTime,\n                                         !m)) {"),
+    M("id-score-gt", "if (-1.0f < s) {", "if (-1.0f <= s) {"),
+    M("id-pref", "        if (preferred) {\n                *score",
+      "        if (!preferred) {\n                *score"),
+    M("id-pref-scale", "*score = s * DC_PREFERRED;", "*score = s;"),
+    M("id-exclude-pref",
+      "c->CarToExcludeFromCollisionPrediction = d->pCar;",
+      "c->CarToExcludeFromCollisionPrediction = NULL;"),
+    M("id-exclude-none",
+      "            } else {\n"
+      "                c->CarToExcludeFromCollisionPrediction = NULL;",
+      "            } else {\n"
+      "                c->CarToExcludeFromCollisionPrediction = d->pCar;"),
+    M("id-who-max", "loc,\n                                                         maxTime, hitTime);",
+      "loc,\n                                                         maxTime + 1.0f, hitTime);"),
+    M("id-ok-lt", "if (maxTime < *hitTime)", "if (maxTime <= *hitTime)"),
+    M("id-pdt", "    pCurrentWorld->PotentialDriveTargetID++;\n    return ok;",
+      "    return ok;"),
+    # -- TryChoice --------------------------------------------------------
+    M("tc-traffic",
+      "TheDriverType == DRIVER_TYPE_TRAFFIC_CAR\n        && AITrafficTuningMode != 0) {",
+      "TheDriverType != DRIVER_TYPE_TRAFFIC_CAR\n        && AITrafficTuningMode != 0) {"),
+    M("tc-tuning",
+      "DRIVER_TYPE_TRAFFIC_CAR\n        && AITrafficTuningMode != 0) {",
+      "DRIVER_TYPE_TRAFFIC_CAR\n        && AITrafficTuningMode == 0) {"),
+    M("tc-and", "DRIVER_TYPE_TRAFFIC_CAR\n        && AITrafficTuningMode != 0) {",
+      "DRIVER_TYPE_TRAFFIC_CAR\n        || AITrafficTuningMode != 0) {"),
+    M("tc-side", "        if (!drivingchoice_type_is_side_of_car(c->Type))\n            ok = 0;",
+      "        if (drivingchoice_type_is_side_of_car(c->Type))\n            ok = 0;"),
+    M("tc-racer", "TheDriverType != DRIVER_TYPE_AI_RACER\n                 && c->pCar",
+      "TheDriverType == DRIVER_TYPE_AI_RACER\n                 && c->pCar"),
+    M("tc-player", "&& c->pCar->pPlayer == NULL)", "&& c->pCar->pPlayer != NULL)"),
+    M("tc-racer-or", "DRIVER_TYPE_AI_RACER\n                 && c->pCar->pPlayer",
+      "DRIVER_TYPE_AI_RACER\n                 || c->pCar->pPlayer"),
+    M("tc-ok", "        if (!ok)\n            return 0;\n    }\n    *hitCar",
+      "        if (ok)\n            return 0;\n    }\n    *hitCar"),
+    M("tc-hittime-init",
+      "*hitTime = DC_NO_HIT;\n    if (drivingchoice_is_driveable",
+      "*hitTime = 0.0f;\n    if (drivingchoice_is_driveable"),
+    M("tc-pref", "drivingchoice_is_driveable(c, t, preferred, &score,",
+      "drivingchoice_is_driveable(c, t, 0, &score,"),
+    M("tc-m", "loc, list, 0.0f, maxTime, 0.0f,\n"
+      "                                   MOVEMENT_TOWARDS_LINE)",
+      "loc, list, 0.0f, maxTime, 0.0f,\n"
+      "                                   MOVEMENT_PARALLEL_TO_LINE)"),
+    M("tc-max", "loc, list, 0.0f, maxTime, 0.0f,\n"
+      "                                   MOVEMENT_TOWARDS_LINE)",
+      "loc, list, 0.0f, maxTime * 2.0f, 0.0f,\n"
+      "                                   MOVEMENT_TOWARDS_LINE)"),
+    M("tc-best-lt", "&& *bestScore < score) {", "&& *bestScore <= score) {"),
+    M("tc-best-and", "MOVEMENT_TOWARDS_LINE)\n        && *bestScore < score) {",
+      "MOVEMENT_TOWARDS_LINE)\n        || *bestScore < score) {"),
+    M("tc-found", "        *found = 1;\n        *best = *c;",
+      "        *found = 0;\n        *best = *c;"),
+    M("tc-best", "        *found = 1;\n        *best = *c;",
+      "        *found = 1;"),
+    M("tc-best-target", "drivetarget_assign(bestTarget, t);", ";"),
+    M("tc-bestout", "*bestOut = 0;", "*bestOut = 1;"),
+    M("tc-bestscore", "        *bestScore = score;\n", "\n"),
+    M("tc-scored", "scored = !(fabsf(score - -1.0f) <= DC_NO_SCORE);",
+      "scored = !(fabsf(score - -1.0f) < DC_NO_SCORE);"),
+    M("tc-scored-not", "scored = !(fabsf(score - -1.0f) <= DC_NO_SCORE);",
+      "scored = (fabsf(score - -1.0f) <= DC_NO_SCORE);"),
+    M("tc-round-side",
+      "    if (!drivingchoice_type_is_side_of_car(c->Type)\n        || c->Use",
+      "    if (drivingchoice_type_is_side_of_car(c->Type)\n        || c->Use"),
+    M("tc-round-extra", "|| c->UseExtraLateralDistance || c->pCar != inTheWay)",
+      "|| !c->UseExtraLateralDistance || c->pCar != inTheWay)"),
+    M("tc-round-car", "|| c->pCar != inTheWay)", "|| c->pCar == inTheWay)"),
+    M("tc-round-pref", "    if (preferred) {\n        *round = *c;",
+      "    if (!preferred) {\n        *round = *c;"),
+    M("tc-round", "        *round = *c;\n", "\n"),
+    M("tc-round-target", "drivetarget_assign(roundTarget, t);", ";"),
+    M("tc-round-time", "*roundTime = *hitTime;", "*roundTime = 0.0f;"),
+    M("tc-ret", "        *roundTime = *hitTime;\n    }\n    return scored;",
+      "        *roundTime = *hitTime;\n    }\n    return !scored;"),
+    # -- MakeNewChoice ----------------------------------------------------
+    M("mn-valid", "    if (drivingchoice_is_valid(d, loc, list))\n"
+      "        drivingchoice_set_choice_choice(&current, d);",
+      "    if (!drivingchoice_is_valid(d, loc, list))\n"
+      "        drivingchoice_set_choice_choice(&current, d);"),
+    M("mn-try-current",
+      "    if (tryCurrent) {\n        if (drivingchoice_type_is_side_of_car(current.Type)) {",
+      "    if (!tryCurrent) {\n        if (drivingchoice_type_is_side_of_car(current.Type)) {"),
+    M("mn-cur-side",
+      "        if (drivingchoice_type_is_side_of_car(current.Type)) {\n"
+      "            NearbyCar",
+      "        if (!drivingchoice_type_is_side_of_car(current.Type)) {\n"
+      "            NearbyCar"),
+    M("mn-cur-pside",
+      "                if (drivingchoice_get_preferred_side_of_car(nc, list, loc)) {",
+      "                if (!drivingchoice_get_preferred_side_of_car(nc, list, loc)) {"),
+    M("mn-pref-left",
+      "if (current.Type == CHOICE_LEFT_SIDE_OF_CAR)\n                        preferred = 1;",
+      "if (current.Type == CHOICE_RIGHT_SIDE_OF_CAR)\n                        preferred = 1;"),
+    M("mn-pref-right",
+      "} else if (current.Type == CHOICE_RIGHT_SIDE_OF_CAR) {\n"
+      "                    preferred = 1;",
+      "} else if (current.Type == CHOICE_LEFT_SIDE_OF_CAR) {\n"
+      "                    preferred = 1;"),
+    M("mn-cur-time", "currentTime = hitTime;", "currentTime = DC_NO_HIT;"),
+    M("mn-intheway", "inTheWay = hitCar;", "inTheWay = NULL;"),
+    M("mn-round-and", "if (preferred && current.pCar == inTheWay) {",
+      "if (preferred || current.pCar == inTheWay) {"),
+    M("mn-round-car", "if (preferred && current.pCar == inTheWay) {",
+      "if (preferred && current.pCar != inTheWay) {"),
+    M("mn-round", "            roundChoice = current;\n", "\n"),
+    M("mn-round-target", "drivetarget_assign(&round, &scratch);", ";"),
+    M("mn-lines", "    if (!found) {\n        for (i = 0;",
+      "    if (found) {\n        for (i = 0;"),
+    M("mn-lines-n",
+      "for (i = 0; i < AICarControllerNumDrivingLinesToConsider && !found;",
+      "for (i = 0; i <= AICarControllerNumDrivingLinesToConsider && !found;"),
+    M("mn-lines-stop",
+      "AICarControllerNumDrivingLinesToConsider && !found;",
+      "AICarControllerNumDrivingLinesToConsider;"),
+    M("mn-line", "drivingchoice_set_choice(&tryChoice, i + 1, NULL, 0);",
+      "drivingchoice_set_choice(&tryChoice, i, NULL, 0);"),
+    M("mn-line-skip",
+      "if (tryCurrent && drivingchoice_is_equal_to(&tryChoice, &current))",
+      "if (!tryCurrent && drivingchoice_is_equal_to(&tryChoice, &current))"),
+    M("mn-line-pref", "drivingchoice_try_choice(&tryChoice, 0, maxTime,",
+      "drivingchoice_try_choice(&tryChoice, 1, maxTime,"),
+    M("mn-line-way", "&hitCar, &hitTime,\n                                     inTheWay);",
+      "&hitCar, &hitTime,\n                                     NULL);"),
+    M("mn-cars", "    if (!found) {\n        // Every car",
+      "    if (found) {\n        // Every car"),
+    M("mn-cars-n", "for (i = 0; i < list->NumCarsInArray; i++) {\n"
+      "            NearbyCar *nc = &list->Array[i];\n            int side",
+      "for (i = 1; i < list->NumCarsInArray; i++) {\n"
+      "            NearbyCar *nc = &list->Array[i];\n            int side"),
+    M("mn-care", "            if (!ai_do_we_care_about_this_car(nc, list))\n"
+      "                continue;\n            side =",
+      "            if (ai_do_we_care_about_this_car(nc, list))\n"
+      "                continue;\n            side ="),
+    M("mn-left", "drivingchoice_set_choice(&tryChoice, CHOICE_LEFT_SIDE_OF_CAR,",
+      "drivingchoice_set_choice(&tryChoice, CHOICE_RIGHT_SIDE_OF_CAR,"),
+    M("mn-left-skip", "            if (!tryCurrent\n"
+      "                || !drivingchoice_is_equal_to(&tryChoice, &current))\n"
+      "                tried =",
+      "            if (tryCurrent\n"
+      "                || !drivingchoice_is_equal_to(&tryChoice, &current))\n"
+      "                tried ="),
+    M("mn-left-eq", "                || !drivingchoice_is_equal_to(&tryChoice, &current))\n"
+      "                tried =",
+      "                || drivingchoice_is_equal_to(&tryChoice, &current))\n"
+      "                tried ="),
+    M("mn-left-pref", "&tryChoice, side, maxTime,", "&tryChoice, !side, maxTime,"),
+    M("mn-left-tried", "&hitCar, &hitTime, inTheWay) != 0;",
+      "&hitCar, &hitTime, inTheWay) == 0;"),
+    M("mn-right", "drivingchoice_set_choice(&tryChoice, CHOICE_RIGHT_SIDE_OF_CAR,",
+      "drivingchoice_set_choice(&tryChoice, CHOICE_LEFT_SIDE_OF_CAR,"),
+    M("mn-right-skip", "            if (!tryCurrent\n"
+      "                || !drivingchoice_is_equal_to(&tryChoice, &current)) {",
+      "            if (tryCurrent\n"
+      "                || !drivingchoice_is_equal_to(&tryChoice, &current)) {"),
+    M("mn-right-pref", "&tryChoice, side ^ 1, maxTime,",
+      "&tryChoice, side, maxTime,"),
+    M("mn-tried-or", "tried = tried || r;", "tried = r;"),
+    M("mn-tried", "            if (!tried) {", "            if (tried) {"),
+    M("mn-dot-x", "float dot = v->x * mine->x;", "float dot = v->x * mine->y;"),
+    M("mn-dot-y", "dot = dot + v->y * mine->y;", "dot = v->y * mine->y;"),
+    M("mn-dot-lt", "if (dot < 0.0f) {", "if (dot > 0.0f) {"),
+    M("mn-opp-side", "side ? CHOICE_LEFT_SIDE_OF_CAR\n"
+      "                                         : CHOICE_RIGHT_SIDE_OF_CAR,",
+      "side ? CHOICE_RIGHT_SIDE_OF_CAR\n"
+      "                                         : CHOICE_LEFT_SIDE_OF_CAR,"),
+    M("mn-opp-extra", "                        nc->TheCar, 1);",
+      "                        nc->TheCar, 0);"),
+    M("mn-opp-pref", "                        &tryChoice, 1, maxTime,",
+      "                        &tryChoice, 0, maxTime,"),
+    M("mn-found", "    if (found) {\n        drivingchoice_set_choice_choice(d, &bestChoice);",
+      "    if (!found) {\n        drivingchoice_set_choice_choice(d, &bestChoice);"),
+    M("mn-found-set", "drivingchoice_set_choice_choice(d, &bestChoice);",
+      "drivingchoice_set_choice_choice(d, &roundChoice);"),
+    M("mn-found-target", "drivetarget_assign(t, &best);",
+      "drivetarget_assign(t, &round);"),
+    M("mn-found-out", "*out = bestOut;", "*out = 1;"),
+    M("mn-rvalid", "} else if (drivingchoice_is_valid(&roundChoice, loc, list)",
+      "} else if (!drivingchoice_is_valid(&roundChoice, loc, list)"),
+    M("mn-rand", "list)\n               && currentTime - DC_HIT_MARGIN <= roundTime) {",
+      "list)\n               || currentTime - DC_HIT_MARGIN <= roundTime) {"),
+    M("mn-rmargin", "currentTime - DC_HIT_MARGIN <= roundTime",
+      "currentTime + DC_HIT_MARGIN <= roundTime"),
+    M("mn-rle", "currentTime - DC_HIT_MARGIN <= roundTime",
+      "currentTime - DC_HIT_MARGIN < roundTime"),
+    M("mn-rset", "drivingchoice_set_choice_choice(d, &roundChoice);",
+      "drivingchoice_set_choice_choice(d, &bestChoice);"),
+    M("mn-rtarget", "drivetarget_assign(t, &round);",
+      "drivetarget_assign(t, &best);"),
+    M("mn-rout", "        *out = 1;\n    } else if (!(fabsf(currentScore",
+      "        *out = 0;\n    } else if (!(fabsf(currentScore"),
+    M("mn-third", "} else if (!(fabsf(currentScore - -1.0f) <= DC_NO_SCORE)) {",
+      "} else if (0) {"),
+    M("mn-fb-loc", "        drivingchoice_set_choice_location(d, loc);\n"
+      "        drivingchoice_fill_up_drive_target(t, loc, list,",
+      "        drivingchoice_fill_up_drive_target(t, loc, list,"),
+    M("mn-fb-m", "MOVEMENT_PARALLEL_TO_LINE, 1);\n        *out = 0;\n        found = 0;",
+      "MOVEMENT_TOWARDS_LINE, 1);\n        *out = 0;\n        found = 0;"),
+    M("mn-fb-flag", "MOVEMENT_PARALLEL_TO_LINE, 1);\n        *out = 0;\n        found = 0;",
+      "MOVEMENT_PARALLEL_TO_LINE, 0);\n        *out = 0;\n        found = 0;"),
+    M("mn-fb-out", "        *out = 0;\n        found = 0;",
+      "        *out = 1;\n        found = 0;"),
+    M("mn-fixup", "d, list->MyCar, *out, list);\n    return found;",
+      "d, list->MyCar, 0, list);\n    return found;"),
+    M("mn-ret", "    return found;\n}", "    return !found;\n}"),
+    # -- TryToDriveAroundCar ----------------------------------------------
+    M("ta-saved", "drivetarget_copy(&saved, t);", "drivetarget_init(&saved);"),
+    M("ta-current", "if (d->Type != CHOICE_NONE)\n        drivingchoice_set_choice_choice(&current, d);",
+      "if (d->Type == CHOICE_NONE)\n        drivingchoice_set_choice_choice(&current, d);"),
+    M("ta-fast-its", "            < nc->TheCar->State.VelocityMagnitude",
+      "            <= nc->TheCar->State.VelocityMagnitude"),
+    M("ta-fast-mine", "               < list->MyCar->State.VelocityMagnitude)",
+      "               <= list->MyCar->State.VelocityMagnitude)"),
+    M("ta-fast-or", "VelocityMagnitude\n        || TryToDriveAroundCarMinSpeedForDrivingLine",
+      "VelocityMagnitude\n        && TryToDriveAroundCarMinSpeedForDrivingLine"),
+    M("ta-try", "    if (tryCurrent\n        && (!drivingchoice_type_is_driving_line",
+      "    if (!tryCurrent\n        && (!drivingchoice_type_is_driving_line"),
+    M("ta-line", "(!drivingchoice_type_is_driving_line(current.Type) || fast)",
+      "(drivingchoice_type_is_driving_line(current.Type) || fast)"),
+    M("ta-line-or", "(!drivingchoice_type_is_driving_line(current.Type) || fast)",
+      "(!drivingchoice_type_is_driving_line(current.Type) && fast)"),
+    M("ta-valid", "        && drivingchoice_is_valid(&current, loc, list)\n        && (!",
+      "        && !drivingchoice_is_valid(&current, loc, list)\n        && (!"),
+    M("ta-side", "        && (!drivingchoice_type_is_side_of_car(current.Type)\n"
+      "            || nc->TheCar == current.pCar)) {",
+      "        && (drivingchoice_type_is_side_of_car(current.Type)\n"
+      "            || nc->TheCar == current.pCar)) {"),
+    M("ta-side-car", "|| nc->TheCar == current.pCar)) {",
+      "|| nc->TheCar != current.pCar)) {"),
+    M("ta-pref-left", "preferred = side != 0;", "preferred = side == 0;"),
+    M("ta-pref-right", "            preferred = side == 0;\n        drivetarget_assign",
+      "            preferred = side != 0;\n        drivetarget_assign"),
+    M("ta-cur-restore", "        drivetarget_assign(t, &saved);\n"
+      "        if (drivingchoice_is_driveable(&current,",
+      "        if (drivingchoice_is_driveable(&current,"),
+    M("ta-cur-pref", "drivingchoice_is_driveable(&current, t, preferred, &score,",
+      "drivingchoice_is_driveable(&current, t, 0, &score,"),
+    M("ta-cur-m", "&hitTime, loc, list, a, maxTime, 0.0f,\n"
+      "                                       MOVEMENT_TOWARDS_LINE)) {",
+      "&hitTime, loc, list, a, maxTime, 0.0f,\n"
+      "                                       MOVEMENT_PARALLEL_TO_LINE)) {"),
+    M("ta-cur-out", "*out = preferred;", "*out = !preferred;"),
+    M("ta-lines", "    if (!done && fast) {", "    if (!done || fast) {"),
+    M("ta-lines-fast", "    if (!done && fast) {", "    if (!done && !fast) {"),
+    M("ta-lines-n",
+      "for (i = 0; i < AICarControllerNumDrivingLinesToConsider && !done;",
+      "for (i = 0; i <= AICarControllerNumDrivingLinesToConsider && !done;"),
+    M("ta-lines-stop", "AICarControllerNumDrivingLinesToConsider && !done;",
+      "AICarControllerNumDrivingLinesToConsider;"),
+    M("ta-line-num", "drivingchoice_set_choice(&line, i + 1, NULL, 0);",
+      "drivingchoice_set_choice(&line, i, NULL, 0);"),
+    M("ta-line-skip", "if (tryCurrent && drivingchoice_is_equal_to(&line, &current))",
+      "if (!tryCurrent && drivingchoice_is_equal_to(&line, &current))"),
+    M("ta-line-restore", "            drivetarget_assign(t, &saved);\n"
+      "            if (drivingchoice_is_driveable(&line,",
+      "            if (drivingchoice_is_driveable(&line,"),
+    M("ta-line-set", "                drivingchoice_set_choice_choice(d, &line);\n", "\n"),
+    M("ta-line-out", "(d, &line);\n                done = 1;\n                *out = 0;",
+      "(d, &line);\n                done = 1;\n                *out = 1;"),
+    M("ta-sides", "    if (!done) {\n        DrivingChoice first, second;",
+      "    if (done) {\n        DrivingChoice first, second;"),
+    M("ta-first", "drivingchoice_set_choice(&first, side ? CHOICE_LEFT_SIDE_OF_CAR\n"
+      "                                              : CHOICE_RIGHT_SIDE_OF_CAR,",
+      "drivingchoice_set_choice(&first, side ? CHOICE_RIGHT_SIDE_OF_CAR\n"
+      "                                              : CHOICE_LEFT_SIDE_OF_CAR,"),
+    M("ta-second", "drivingchoice_set_choice(&second, side ? CHOICE_RIGHT_SIDE_OF_CAR\n"
+      "                                               : CHOICE_LEFT_SIDE_OF_CAR,",
+      "drivingchoice_set_choice(&second, side ? CHOICE_LEFT_SIDE_OF_CAR\n"
+      "                                               : CHOICE_RIGHT_SIDE_OF_CAR,"),
+    M("ta-first-skip", "if (!(tryCurrent && drivingchoice_is_equal_to(&first, &current))",
+      "if ((tryCurrent && drivingchoice_is_equal_to(&first, &current))"),
+    M("ta-first-eq", "if (!(tryCurrent && drivingchoice_is_equal_to(&first, &current))",
+      "if (!(tryCurrent && !drivingchoice_is_equal_to(&first, &current))"),
+    M("ta-first-fast", "&& (fast || drivingchoice_is_enough_room(&first, nc, list))) {",
+      "&& (drivingchoice_is_enough_room(&first, nc, list))) {"),
+    M("ta-first-room", "&& (fast || drivingchoice_is_enough_room(&first, nc, list))) {",
+      "&& (fast || !drivingchoice_is_enough_room(&first, nc, list))) {"),
+    M("ta-first-restore", "            drivetarget_assign(t, &saved);\n"
+      "            if (drivingchoice_is_driveable(&first,",
+      "            if (drivingchoice_is_driveable(&first,"),
+    M("ta-first-pref", "drivingchoice_is_driveable(&first, t, 1, &score,",
+      "drivingchoice_is_driveable(&first, t, 0, &score,"),
+    M("ta-first-set", "                drivingchoice_set_choice_choice(d, &first);\n"
+      "                done = 1;\n                *out = 1;",
+      "                done = 1;\n                *out = 1;"),
+    M("ta-first-out", "(d, &first);\n                done = 1;\n                *out = 1;",
+      "(d, &first);\n                done = 1;\n                *out = 0;"),
+    M("ta-second-done", "        if (!done\n            && !(tryCurrent",
+      "        if (1\n            && !(tryCurrent"),
+    M("ta-second-skip", "&& !(tryCurrent && drivingchoice_is_equal_to(&second, &current))",
+      "&& (tryCurrent && drivingchoice_is_equal_to(&second, &current))"),
+    M("ta-second-fast", "&& (fast || drivingchoice_is_enough_room(&second, nc, list))) {",
+      "&& (drivingchoice_is_enough_room(&second, nc, list))) {"),
+    M("ta-second-room", "&& (fast || drivingchoice_is_enough_room(&second, nc, list))) {",
+      "&& (fast || !drivingchoice_is_enough_room(&second, nc, list))) {"),
+    M("ta-second-restore", "            drivetarget_assign(t, &saved);\n"
+      "            if (drivingchoice_is_driveable(&second,",
+      "            if (drivingchoice_is_driveable(&second,"),
+    M("ta-second-pref", "drivingchoice_is_driveable(&second, t, 0, &score,",
+      "drivingchoice_is_driveable(&second, t, 1, &score,"),
+    M("ta-second-set", "                drivingchoice_set_choice_choice(d, &second);\n", "\n"),
+    M("ta-second-out", "(d, &second);\n                done = 1;\n                *out = 0;",
+      "(d, &second);\n                done = 1;\n                *out = 1;"),
+    M("ta-fb", "        if (!done) {\n            // The current choice",
+      "        if (done) {\n            // The current choice"),
+    M("ta-fb-valid", "            if (drivingchoice_is_valid(&current, loc, list))\n"
+      "                drivingchoice_set_choice_choice(&first, &current);",
+      "            if (!drivingchoice_is_valid(&current, loc, list))\n"
+      "                drivingchoice_set_choice_choice(&first, &current);"),
+    M("ta-fb-m", "drivingchoice_build_drive_target(&first, t, loc, list, a, maxTime,\n"
+      "                                             MOVEMENT_PARALLEL_TO_LINE);",
+      "drivingchoice_build_drive_target(&first, t, loc, list, a, maxTime,\n"
+      "                                             MOVEMENT_TOWARDS_LINE);"),
+    M("ta-fb-set", "MOVEMENT_PARALLEL_TO_LINE);\n            drivingchoice_set_choice_choice(d, &first);",
+      "MOVEMENT_PARALLEL_TO_LINE);"),
+    M("ta-fixup", "d, list->MyCar, *out, list);\n    return done;",
+      "d, list->MyCar, 0, list);\n    return done;"),
+    M("ta-ret", "*out, list);\n    return done;\n}",
+      "*out, list);\n    return !done;\n}"),
+    # -- EstimateScore's distances, which a stale pick reads ------------------
+    M("es-static", "    static float dist[DRIVETARGET_MAX_POINTS];",
+      "    float dist[DRIVETARGET_MAX_POINTS] = { 0.0f };", rel=DT),
 ]
 
 EQUIVALENT = {
+    "mn-third":
+        "MakeNewChoice's third arm needs the current choice's score off -1, "
+        "and that score is bestScore read straight after the current try, "
+        "which TryChoice moves only when it sets found -- and then the "
+        "first arm is taken. Without the try the score stays -1.",
     "fx-its-side":
         "The side test on the oncoming car's own choice guards two tests "
         "that its type is CHOICE_LEFT_SIDE_OF_CAR or CHOICE_RIGHT_SIDE_OF_"
@@ -3927,6 +4760,36 @@ EQUIVALENT = {
         "refuses it at its own NumPoints < 20 before touching anything, "
         "and the loop's own test then stops. Nothing in the pass writes "
         "anywhere else.",
+    "tc-hittime-init":
+        "TryChoice's store to *hitTime is followed by IsDriveable, whose "
+        "first lines store DC_NO_HIT there again before anything reads it.",
+    "mn-line-way":
+        "TryChoice reads the car in the way only after its side-of-car "
+        "test, and a line choice returns at that test.",
+    "tc-scored":
+        "`<=` and `<` part only where |score + 1| is 0.00100000005f. For a "
+        "score from -2 to -0.5 the subtraction is exact (Sterbenz), so "
+        "|score + 1| is a multiple of 2^-24, and that float, 0x3a83126f, "
+        "has an odd mantissa at 2^-33. Any other score is at least 0.5 "
+        "from -1, and a NaN fails both.",
+    "ta-saved":
+        "The saved target is read only by the four restores, each followed "
+        "at once by IsDriveable, whose BuildDriveTarget first copies the "
+        "driver's own target over all 528 bytes of t. Retail's callers "
+        "hand in their action's target (+32), never the driver's, so t is "
+        "never that target.",
+    "ta-cur-restore":
+        "IsDriveable's BuildDriveTarget copies the driver's own target over "
+        "all of t before reading it (see ta-saved).",
+    "ta-line-restore":
+        "IsDriveable's BuildDriveTarget copies the driver's own target over "
+        "all of t before reading it (see ta-saved).",
+    "ta-first-restore":
+        "IsDriveable's BuildDriveTarget copies the driver's own target over "
+        "all of t before reading it (see ta-saved).",
+    "ta-second-restore":
+        "IsDriveable's BuildDriveTarget copies the driver's own target over "
+        "all of t before reading it (see ta-saved).",
 }
 
 

@@ -1,11 +1,11 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 38
-(2026-10-05), after 11b-4a, CarCollisionPredict.
+(2026-10-06), after 11b-4b, MakeNewChoice.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
-11b-2 and 11b-3, DrivingChoice up to its targets, and 11b-4a,
-CarCollisionPredict, are done and checked against retail. The car selector is finished and checked against retail: SC-1
+11b-2 to 11b-4b, DrivingChoice whole, and 11b-4a, CarCollisionPredict,
+are done and checked against retail. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -146,12 +146,70 @@ car's were.
     s_meet and s_stopped. Its 207 mutations are all caught, so the
     checker's 592 have 590 caught and the old 2 equivalent.
   - `docs/formats/ai-collision-predict.md` has the detail.
-- **11b-4b, next:** IsDriveable (0x00241ff8, with its WhoWill caller
-  at 0x00242100), TryChoice (0x002428d0), TryToDriveAroundCar
-  (0x00242c20) and MakeNewChoice (0x00242170). TryChoice reads
-  AITrafficTuningMode: traffic with it set may only take a side of an
-  AI racer or a player, and WillIHitThisCar gives traffic 1000 there.
-- 11c: AIPlan and the AIAction base. CarCollisionPredict is whole.
+- **11b-4b, done:** DrivingChoice is whole. `drivingchoice.c` has
+  IsDriveable (0x00241ff8), TryChoice (0x002428d0), MakeNewChoice
+  (0x00242170) and TryToDriveAroundCar (0x00242c20).
+  - IsDriveable builds the target and asks WhoWillThisDriveTargetHit.
+    A choice is driveable when it built, scored above -1 and hits later
+    than the longest time.
+  - TryChoice tries one choice. MakeNewChoice tries the current choice,
+    the lines, then each side of each car worth caring about, and goes
+    round the car in the way when nothing fits.
+  - EstimateScore's distances are static now (retail's 80-byte carry),
+    in `drivetarget.c`.
+  - `drivingchoice_check`: 231 scenarios, 105,136 ops, 151,404 lines,
+    0 differ. Four new kinds of scenario: s_choose (a hundred), s_jam,
+    s_pass and s_tie. s_tie is one built case, an exact 0.1f tie found
+    by bisecting a car's speed.
+  - Its mutation pass: 741 mutations, 730 caught, 11 equivalent, 0
+    unexplained. 11b-4b's share is 149, with 140 caught and 9
+    equivalent.
+  - `docs/formats/ai-driving-choice.md` has the detail.
+- **11c, next:** AIPlan and the AIAction base.
+  - **What is in it.** AIPlan:
+    - the constructor (0x001cac70) and destructor (0x001cac48);
+    - SetTimeout (0x001cab90), which stamps WorldTimer's ticks and the
+      timeout;
+    - TimeToChange, IsExpired and the status tests;
+    - InitAIPlans and CloseAIPlans (0x001c6028 / 0x001c6058). These
+      make "AIActionSlotPool" (640 bytes, 15 slots) and close it, and
+      CloseAIPlans tail-calls DestoryTargetMarkers.
+  - AIAction:
+    - the constructor (0x001c6118, (int score, float timeout)) and
+      destructor (0x001c6b30);
+    - new and delete on the pool;
+    - SetDesiredSpeedSlowerThanThisCar, SetDesiredSpeedToMax
+      Acceleration and SetDesiredSpeedToMaxDeceleration;
+    - GetHeadingClassification (0x001c65e0) and
+      GetCollisionClassification (0x001c69d8);
+    - UpdateStatus (0x001c6a98), which calls HasExpired, HasFailed and
+      HasBeenAccomplished through the vptr at 16, at slots 56, 48 and
+      40;
+    - ClearPointsToDrive.
+  - The free CalculateMaxDeceleration (0x001ccf78) comes with it, and
+    IsPointAheadOfCar is already in `drivetarget.c`. The DoSnapshots
+    wait on ReplaySnapshot.
+  - **Retail's record is 608 bytes.**
+    - AIPlan is 20: CanExpire 0, ExpiryTimer 4, DeltaTime 8, Status 12
+      (PlanStatus: NOT_DONE, SUCCESS, FAILURE, EXPIRED), the vptr 16.
+    - PointsToDrive is at 32. Then PointsToDriveWillExecuteAction 560,
+      DesiredSpeed 564 and TimeToGetToDesiredSpeed 568.
+    - Retail's new float is at 572. It is passed to the driver's
+      SetDesiredSpeed as a third float, and PsychoDriver's
+      CalcThrottleAndBrake coasts within it of the desired speed. The
+      port calls it DesiredSpeedTolerance.
+    - Then UseDrivingLineSpeed 576, AllowedToUseThrottleAndBrake 580,
+      AllowedToUseBoost 584, Type 588 and Score 592.
+    - The constructor's int is the Score. Type is the subclasses'.
+  - The out-of-line accessors have no callers, and the setters are
+    empty in both images.
+  - Two things in GetHeadingClassification:
+    - Its second time-to-edge test repeats the first's three
+      conditions, so it is never reached: a car drifting left is never
+      timed.
+    - With the steer-to point asked for, it calls the driver's
+      GetSteerToPoint (slot 160) twice. The first answer goes through
+      WorldToCar and is dropped.
 - 11d: the actions.
 - 11e and 11f: AICarController and AIDriver (`gAIDriverCtorFn` in
   `carmodes.h`, and `gAICarControllerGetCurrentDrivingLineSpeedFn` in
@@ -3732,20 +3790,21 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-05, after 11b-4a, CarCollisionPredict)
+### Where the port stands (2026-10-06, after 11b-4b, MakeNewChoice)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11b-4b, MakeNewChoice and the
-  three it calls. See "Now" at the top. These are done:
+- **Next:** step 11, the racer AI: 11c, AIPlan and the AIAction
+  base. See "Now" at the top. These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
   - 11b-2, DrivingChoice's small methods and the walk;
   - 11b-3, BuildDriveTarget and round a car;
-  - 11b-4a, CarCollisionPredict.
+  - 11b-4a, CarCollisionPredict;
+  - 11b-4b, MakeNewChoice and the three it calls.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -3757,7 +3816,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a, 11b-1 to 11b-3 and 11b-4a done) | 6-8 |
+  | 11, the racer and traffic AI (11a and 11b-1 to 11b-4b done) | 5-7 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |
@@ -3765,12 +3824,12 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped; New 3DS only since 2026-10-05) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **27-41** |
+  | **Total** | **26-40** |
 
-- **How far along:** about 29-32 of the road's 56-73 slices are done,
+- **How far along:** about 30-33 of the road's 56-73 slices are done,
   roughly a third. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
-  Read the 27-41 as a floor. Step 11 was put at 4-6 before its slices
+  Read the 26-40 as a floor. Step 11 was put at 4-6 before its slices
   were laid out. They are eleven, with traffic beside them: 11a, 11b-1
   to 11b-3, 11b-4a and 11b-4b, and 11c to 11g. 11b was one slice until DrivingChoice's 13 KB
   were read.

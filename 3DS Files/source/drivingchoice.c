@@ -8,6 +8,7 @@
 
 #include "aicarcontroller.h"
 #include "bvector.h"
+#include "carcollisionpredict.h"
 #include "cardriver.h"
 #include "cartypeinfo.h"
 #include "collisionbody.h"   // WilliamsAITuningMode
@@ -18,12 +19,18 @@
 #include "race.h"
 #include "racecore.h"
 #include "trackroute.h"
+#include "world.h"
 
 AISignPostDecisionFn gAISignPostDecisionFn;
 
 int32_t AITrafficTuningMode;           // gp-15152, 0x00331dc0
 float   AISlowCarSpeed = 20.0f;        // gp-15120, 0x00331de0
 float   AISlowTrafficSpeed = 10.0f;    // gp-15116, 0x00331de4
+float   TryToDriveAroundCarMinSpeedForDrivingLine = 20.0f; // gp-15136
+
+// AICarController.obj's (0x00330a48), here until step 11e ports the
+// controller.
+int32_t AICarControllerNumDrivingLinesToConsider = 1;      // gp-20136
 
 // Retail's constants. The two speeds are 60 and 66 mph in metres a second.
 #define DC_ON_ROAD          -0.00100000005f  // gp-26600, IsEnoughRoom
@@ -50,6 +57,10 @@ float   AISlowTrafficSpeed = 10.0f;    // gp-15116, 0x00331de4
 #define DC_GAP               2.0f            // lui 0x4000
 #define DC_GAP_PLAYER        1.5f            // lui 0x3fc0
 #define DC_GAP_SLOW          6.0f            // lui 0x40c0
+#define DC_NO_HIT            99999.0f        // gp-26628, -26620, -26608, -26596
+#define DC_PREFERRED         1.20000005f     // gp-26624
+#define DC_HIT_MARGIN        0.100000001f    // gp-26616
+#define DC_NO_SCORE          0.00100000005f  // gp-26612, gp-26604
 
 // `min.s` and `max.s`, fs then ft, as collision.c has them.
 static float min_s(float fs, float ft)
@@ -954,4 +965,360 @@ int drivingchoice_build_drive_target(DrivingChoice *d, DriveTarget *t,
     drivingchoice_fixup_car_to_exclude_from_collision_prediction(
         d, list->MyCar, 0, list);
     return built;
+}
+
+// ------------------------------------------------ choosing a new choice
+
+int drivingchoice_is_driveable(DrivingChoice *d, DriveTarget *t,
+                               int preferred, float *score, Car **hitCar,
+                               float *hitTime, DrivingLocation *loc,
+                               NearbyCarList *list, float unusedA,
+                               float maxTime, float unusedC,
+                               MovementWithRespectToLine m)
+{
+    // 0x00241ff8.
+    int ok = 0;
+
+    (void)unusedC;
+    *score = -1.0f;
+    *hitCar = NULL;
+    *hitTime = DC_NO_HIT;
+    if (drivingchoice_build_drive_target(d, t, loc, list, unusedA, maxTime,
+                                         m)) {
+        float s = drivetarget_estimate_score(t, list->MyCar);
+
+        *score = s;
+        if (-1.0f < s) {
+            AICarController *c = car_ai_controller(list->MyCar);
+
+            if (preferred) {
+                *score = s * DC_PREFERRED;
+                c->CarToExcludeFromCollisionPrediction = d->pCar;
+            } else {
+                c->CarToExcludeFromCollisionPrediction = NULL;
+            }
+            *hitCar = ccp_who_will_this_drive_target_hit(t, list, loc,
+                                                         maxTime, hitTime);
+            if (maxTime < *hitTime)
+                ok = 1;
+        }
+    }
+    pCurrentWorld->PotentialDriveTargetID++;
+    return ok;
+}
+
+int drivingchoice_try_choice(DrivingChoice *c, int preferred, float maxTime,
+                             DrivingLocation *loc, NearbyCarList *list,
+                             float unused, int *found, DriveTarget *t,
+                             DrivingChoice *best, DriveTarget *bestTarget,
+                             int *bestOut, float *bestScore,
+                             DrivingChoice *round, DriveTarget *roundTarget,
+                             float *roundTime, Car **hitCar, float *hitTime,
+                             Car *inTheWay)
+{
+    // 0x002428d0. Static in retail.
+    float score = -1.0f;
+    int scored;
+
+    (void)unused;
+    if (list->MyCar->MyDriver->TheDriverType == DRIVER_TYPE_TRAFFIC_CAR
+        && AITrafficTuningMode != 0) {
+        int ok = 1;
+
+        if (!drivingchoice_type_is_side_of_car(c->Type))
+            ok = 0;
+        else if (c->pCar->MyDriver->TheDriverType != DRIVER_TYPE_AI_RACER
+                 && c->pCar->pPlayer == NULL)
+            ok = 0;
+        if (!ok)
+            return 0;
+    }
+    *hitCar = NULL;
+    *hitTime = DC_NO_HIT;
+    if (drivingchoice_is_driveable(c, t, preferred, &score, hitCar, hitTime,
+                                   loc, list, 0.0f, maxTime, 0.0f,
+                                   MOVEMENT_TOWARDS_LINE)
+        && *bestScore < score) {
+        *found = 1;
+        *best = *c;
+        drivetarget_assign(bestTarget, t);
+        *bestOut = 0;
+        *bestScore = score;
+    }
+    scored = !(fabsf(score - -1.0f) <= DC_NO_SCORE);
+    if (!drivingchoice_type_is_side_of_car(c->Type)
+        || c->UseExtraLateralDistance || c->pCar != inTheWay)
+        return scored;
+    if (preferred) {
+        *round = *c;
+        drivetarget_assign(roundTarget, t);
+        *roundTime = *hitTime;
+    }
+    return scored;
+}
+
+int drivingchoice_make_new_choice(DrivingChoice *d, DriveTarget *t,
+                                  DrivingLocation *loc, NearbyCarList *list,
+                                  float maxTime, float unused, int *out,
+                                  int tryCurrent)
+{
+    // 0x00242170. Retail's frame is 1984 bytes: the three targets and four
+    // choices are on its stack.
+    DriveTarget round, best, scratch;
+    DrivingChoice bestChoice, roundChoice, tryChoice, current;
+    int found = 0, bestOut = 0, preferred = 0;
+    float bestScore = -1.0f, roundTime = DC_NO_HIT, hitTime = DC_NO_HIT;
+    float currentScore = -1.0f, currentTime = DC_NO_HIT;
+    Car *hitCar = NULL, *inTheWay = NULL;
+    int32_t i;
+
+    drivetarget_init(&round);
+    drivetarget_init(&best);
+    drivetarget_init(&scratch);
+    drivingchoice_clear(&bestChoice);
+    drivingchoice_clear(&roundChoice);
+    drivingchoice_clear(&tryChoice);
+    // Retail never clears this one, so a location whose line gives
+    // CHOICE_NONE (a negative odd line) leaves it as the stack had it.
+    drivingchoice_clear(&current);
+    drivingchoice_set_choice_location(&current, loc);
+    if (drivingchoice_is_valid(d, loc, list))
+        drivingchoice_set_choice_choice(&current, d);
+
+    if (tryCurrent) {
+        if (drivingchoice_type_is_side_of_car(current.Type)) {
+            NearbyCar *nc = nearbycarlist_get_nearby_car(list, current.pCar);
+
+            if (nc != NULL) {
+                if (drivingchoice_get_preferred_side_of_car(nc, list, loc)) {
+                    if (current.Type == CHOICE_LEFT_SIDE_OF_CAR)
+                        preferred = 1;
+                } else if (current.Type == CHOICE_RIGHT_SIDE_OF_CAR) {
+                    preferred = 1;
+                }
+            }
+        }
+        drivingchoice_try_choice(&current, preferred, maxTime, loc, list,
+                                 unused, &found, &scratch, &bestChoice, &best,
+                                 &bestOut, &bestScore, &roundChoice, &round,
+                                 &roundTime, &hitCar, &hitTime, NULL);
+        // Read once here: a choice not found leaves the score at -1.
+        currentScore = bestScore;
+        currentTime = hitTime;
+        inTheWay = hitCar;
+        if (preferred && current.pCar == inTheWay) {
+            roundChoice = current;
+            drivetarget_assign(&round, &scratch);
+        }
+    }
+
+    if (!found) {
+        for (i = 0; i < AICarControllerNumDrivingLinesToConsider && !found;
+             i++) {
+            drivingchoice_set_choice(&tryChoice, i + 1, NULL, 0);
+            if (tryCurrent && drivingchoice_is_equal_to(&tryChoice, &current))
+                continue;
+            drivingchoice_try_choice(&tryChoice, 0, maxTime, loc, list, unused,
+                                     &found, &scratch, &bestChoice, &best,
+                                     &bestOut, &bestScore, &roundChoice,
+                                     &round, &roundTime, &hitCar, &hitTime,
+                                     inTheWay);
+        }
+    }
+
+    if (!found) {
+        // Every car, found or not.
+        for (i = 0; i < list->NumCarsInArray; i++) {
+            NearbyCar *nc = &list->Array[i];
+            int side, tried = 0;
+
+            if (!ai_do_we_care_about_this_car(nc, list))
+                continue;
+            side = drivingchoice_get_preferred_side_of_car(nc, list, loc);
+            drivingchoice_set_choice(&tryChoice, CHOICE_LEFT_SIDE_OF_CAR,
+                                     nc->TheCar, 0);
+            if (!tryCurrent
+                || !drivingchoice_is_equal_to(&tryChoice, &current))
+                tried = drivingchoice_try_choice(
+                            &tryChoice, side, maxTime, loc, list, unused,
+                            &found, &scratch, &bestChoice, &best, &bestOut,
+                            &bestScore, &roundChoice, &round, &roundTime,
+                            &hitCar, &hitTime, inTheWay) != 0;
+            drivingchoice_set_choice(&tryChoice, CHOICE_RIGHT_SIDE_OF_CAR,
+                                     nc->TheCar, 0);
+            if (!tryCurrent
+                || !drivingchoice_is_equal_to(&tryChoice, &current)) {
+                int r = drivingchoice_try_choice(
+                    &tryChoice, side ^ 1, maxTime, loc, list, unused, &found,
+                    &scratch, &bestChoice, &best, &bestOut, &bestScore,
+                    &roundChoice, &round, &roundTime, &hitCar, &hitTime,
+                    inTheWay);
+
+                tried = tried || r;
+            }
+            if (!tried) {
+                // Neither side scored: if the car is coming the other way,
+                // its preferred side with room to spare.
+                const bVector3 *v = &nc->TheCar->State.Velocity;
+                const bVector3 *mine = &list->MyCar->State.Velocity;
+                float dot = v->x * mine->x;
+
+                dot = dot + v->y * mine->y;
+                if (dot < 0.0f) {
+                    drivingchoice_set_choice(
+                        &tryChoice, side ? CHOICE_LEFT_SIDE_OF_CAR
+                                         : CHOICE_RIGHT_SIDE_OF_CAR,
+                        nc->TheCar, 1);
+                    drivingchoice_try_choice(
+                        &tryChoice, 1, maxTime, loc, list, unused, &found,
+                        &scratch, &bestChoice, &best, &bestOut, &bestScore,
+                        &roundChoice, &round, &roundTime, &hitCar, &hitTime,
+                        inTheWay);
+                }
+            }
+        }
+    }
+
+    if (found) {
+        drivingchoice_set_choice_choice(d, &bestChoice);
+        drivetarget_assign(t, &best);
+        *out = bestOut;
+    } else if (drivingchoice_is_valid(&roundChoice, loc, list)
+               && currentTime - DC_HIT_MARGIN <= roundTime) {
+        drivingchoice_set_choice_choice(d, &roundChoice);
+        drivetarget_assign(t, &round);
+        *out = 1;
+    } else if (!(fabsf(currentScore - -1.0f) <= DC_NO_SCORE)) {
+        // Never: the current choice's score is -1 unless it was found.
+        drivingchoice_set_choice_choice(d, &current);
+        drivingchoice_build_drive_target(&current, t, loc, list, 0.0f, unused,
+                                         MOVEMENT_PARALLEL_TO_LINE);
+        *out = 0;
+    } else {
+        drivingchoice_set_choice_location(d, loc);
+        drivingchoice_fill_up_drive_target(t, loc, list,
+                                           MOVEMENT_PARALLEL_TO_LINE, 1);
+        *out = 0;
+        found = 0;
+    }
+    drivingchoice_fixup_car_to_exclude_from_collision_prediction(
+        d, list->MyCar, *out, list);
+    return found;
+}
+
+int drivingchoice_try_to_drive_around_car(DrivingChoice *d, DriveTarget *t,
+                                          int *out, NearbyCar *nc,
+                                          DrivingLocation *loc,
+                                          NearbyCarList *list, float a,
+                                          float maxTime, float unused,
+                                          int tryCurrent)
+{
+    // 0x00242c20.
+    int side = drivingchoice_get_preferred_side_of_car(nc, list, loc);
+    int done = 0, fast = 0;
+    float score = -1.0f, hitTime = DC_NO_HIT;
+    Car *hitCar = NULL;
+    DriveTarget saved;
+    DrivingChoice current, line;
+    int32_t i;
+
+    (void)unused;
+    drivetarget_copy(&saved, t);
+    drivingchoice_clear(&current);
+    if (d->Type != CHOICE_NONE)
+        drivingchoice_set_choice_choice(&current, d);
+    if (TryToDriveAroundCarMinSpeedForDrivingLine
+            < nc->TheCar->State.VelocityMagnitude
+        || TryToDriveAroundCarMinSpeedForDrivingLine
+               < list->MyCar->State.VelocityMagnitude)
+        fast = 1;
+
+    if (tryCurrent
+        && (!drivingchoice_type_is_driving_line(current.Type) || fast)
+        && drivingchoice_is_valid(&current, loc, list)
+        && (!drivingchoice_type_is_side_of_car(current.Type)
+            || nc->TheCar == current.pCar)) {
+        int preferred = 0;
+
+        if (current.Type == CHOICE_LEFT_SIDE_OF_CAR)
+            preferred = side != 0;
+        else if (current.Type == CHOICE_RIGHT_SIDE_OF_CAR)
+            preferred = side == 0;
+        drivetarget_assign(t, &saved);
+        if (drivingchoice_is_driveable(&current, t, preferred, &score, &hitCar,
+                                       &hitTime, loc, list, a, maxTime, 0.0f,
+                                       MOVEMENT_TOWARDS_LINE)) {
+            done = 1;
+            *out = preferred;
+        }
+    }
+    drivingchoice_clear(&line);
+
+    if (!done && fast) {
+        for (i = 0; i < AICarControllerNumDrivingLinesToConsider && !done;
+             i++) {
+            drivingchoice_set_choice(&line, i + 1, NULL, 0);
+            if (tryCurrent && drivingchoice_is_equal_to(&line, &current))
+                continue;
+            drivetarget_assign(t, &saved);
+            if (drivingchoice_is_driveable(&line, t, 0, &score, &hitCar,
+                                           &hitTime, loc, list, a, maxTime,
+                                           0.0f, MOVEMENT_TOWARDS_LINE)) {
+                drivingchoice_set_choice_choice(d, &line);
+                done = 1;
+                *out = 0;
+            }
+        }
+    }
+
+    if (!done) {
+        DrivingChoice first, second;
+
+        drivingchoice_clear(&first);
+        drivingchoice_clear(&second);
+        drivingchoice_set_choice(&first, side ? CHOICE_LEFT_SIDE_OF_CAR
+                                              : CHOICE_RIGHT_SIDE_OF_CAR,
+                                 nc->TheCar, 0);
+        drivingchoice_set_choice(&second, side ? CHOICE_RIGHT_SIDE_OF_CAR
+                                               : CHOICE_LEFT_SIDE_OF_CAR,
+                                 nc->TheCar, 0);
+        if (!(tryCurrent && drivingchoice_is_equal_to(&first, &current))
+            && (fast || drivingchoice_is_enough_room(&first, nc, list))) {
+            drivetarget_assign(t, &saved);
+            if (drivingchoice_is_driveable(&first, t, 1, &score, &hitCar,
+                                           &hitTime, loc, list, a, maxTime,
+                                           0.0f, MOVEMENT_TOWARDS_LINE)) {
+                drivingchoice_set_choice_choice(d, &first);
+                done = 1;
+                *out = 1;
+            }
+        }
+        if (!done
+            && !(tryCurrent && drivingchoice_is_equal_to(&second, &current))
+            && (fast || drivingchoice_is_enough_room(&second, nc, list))) {
+            drivetarget_assign(t, &saved);
+            if (drivingchoice_is_driveable(&second, t, 0, &score, &hitCar,
+                                           &hitTime, loc, list, a, maxTime,
+                                           0.0f, MOVEMENT_TOWARDS_LINE)) {
+                drivingchoice_set_choice_choice(d, &second);
+                done = 1;
+                *out = 0;
+            }
+        }
+        if (!done) {
+            // The current choice if it still holds, else the location's
+            // line; `*out` is left as the caller had it.
+            drivingchoice_clear(&first);
+            if (drivingchoice_is_valid(&current, loc, list))
+                drivingchoice_set_choice_choice(&first, &current);
+            else
+                drivingchoice_set_choice_location(&first, loc);
+            drivingchoice_build_drive_target(&first, t, loc, list, a, maxTime,
+                                             MOVEMENT_PARALLEL_TO_LINE);
+            drivingchoice_set_choice_choice(d, &first);
+        }
+    }
+    drivingchoice_fixup_car_to_exclude_from_collision_prediction(
+        d, list->MyCar, *out, list);
+    return done;
 }
