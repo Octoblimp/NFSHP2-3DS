@@ -55,8 +55,9 @@ The port is `3DS Files/source/drivingchoice.{c,h}`, with the grace period
 in `racecore.c`. AICarController's record, as much of it as these reach,
 is in `aicarcontroller.h`.
 
-Still to come, in 11b-4: IsDriveable, TryChoice, TryToDriveAroundCar and
-MakeNewChoice.
+Still to come, in 11b-4b: IsDriveable, TryChoice, TryToDriveAroundCar
+and MakeNewChoice. They ask CarCollisionPredict (11b-4a,
+`ai-collision-predict.md`) which car a target runs into.
 
 DoSnapshot (0x00241b88) is the replay's, and GetTextDescription
 (0x00241c38) is a debug string.
@@ -511,9 +512,12 @@ There are twelve kinds of scenario:
 | s_sign_pass | round a car just past a sign onto a route a metre or two to one side, so the walk's points there carry an offset |
 | s_back | the way out over a walk that doubles back, and alongside a car on a traffic route whose own target runs back down the walk |
 
-The script runs 71 scenarios, 46212 ops and 79543 lines, with 0 differ.
+Step 11b-3's script ran 71 scenarios, 46212 ops and 79543 lines, with 0
+differ. CarCollisionPredict's checks are in the same checker
+(`ai-collision-predict.md`). With them the script runs 98 scenarios,
+61,530 ops and 97,604 lines, still 0 differ.
 
-The mutation pass makes 385 mutations: every constant, every
+DrivingChoice's share of the mutation pass is 385 mutations: every constant, every
 comparison's sense and bound, each store, each field read, the grace
 period's initialisers, the three globals and the EE's divide. 383 are
 caught, 22 of them by a crash or a hang. Two are equivalent:

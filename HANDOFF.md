@@ -14779,6 +14779,72 @@ CIA builds.
 Next is 11b-4: CarCollisionPredict's four live functions, then
 IsDriveable, TryChoice, TryToDriveAroundCar and MakeNewChoice.
 
+### Step 11b-4a: CarCollisionPredict
+
+11b-4 is two slices now. 11b-4a is CarCollisionPredict
+(`carcollisionpredict.c`): which car an AI car's target runs it into,
+and when. It has the four live methods and the three free functions
+under them:
+- WhoWillThisDriveTargetHit (0x001e5e60): of the cars worth caring
+  about, the first hit. A car stopped just ahead counts at 0. A car my
+  controller leaves out, or my car at under 0.001 m/s, never counts.
+  The world's CollisionPredictionID goes up once for each car tried;
+- IsThisCarStoppedDirectlyInFrontOfMe (0x001e6010);
+- WillIHitThisCar (0x001e60a0): the two targets are copied, then
+  filled, blended or straightened by who is traffic and who is backing
+  up blind. They are turned into boxes and walked together, one leg at
+  a time;
+- MakeOBBsForDriveTarget (0x001e6860): a box per point, the first along
+  the car and the rest along their legs;
+- WhenWillOverlapOccur2D (0x001e72f8), TimeIntervalForSeparatingAxis
+  (0x001e7238) and IntervalOverlap (0x001e6ac0): when two moving boxes
+  first overlap on the ground, axis by axis.
+SeparatingAxisTest, OBBOverlap2D, OBBOverlap3D and TimeToImpact have no
+callers and are left out.
+
+The walk divides by a leg's length, and a leg of 0 (a repeated point)
+divides 0 by 0. On the EE that is FLT_MAX, which leaves the car where it
+is, so both divides (0x001e65ec, 0x001e65f4) are ee_div. Retail keeps
+the two copies and forty boxes in a 4720-byte stack frame; the port
+keeps them static. Two of retail's corners are kept as they are:
+- a still axis with the boxes apart answers 9999, so two crawling cars
+  "hit" at 9999 s;
+- a miss after a long step comes out past 99999, which is a no.
+
+`drivingchoice_check` links it, and `obb.c` with it. There are seven new
+ops: 1 to 7 call the seven functions, and op 4 dumps every box. There
+are four new kinds of scenario:
+- s_predict: my car on a route with cars following, oncoming, crossing,
+  beside, stopped, behind and backing;
+- s_parts: the three free functions at their edges, and MakeOBBs;
+- s_meet: two cars that do meet a second or more on;
+- s_stopped: the stopped test's bounds.
+The result is 98 scenarios, 61,530 ops, 97,604 lines, 0 differ. The
+first run showed 1072 lines differing, all in the box dump: the
+harness's `fx` has sixteen buffers and the line printed nineteen.
+
+The mutation pass made 207 mutations of `carcollisionpredict.c`. All
+are caught, and the checker's 592 have 590 caught and the old 2
+equivalent. The first pass left 25 alive, all gaps in the script:
+- Most hits were at 0, with the boxes overlapping already, where the
+  path ahead does not matter. That hid the backing-up path, the blends
+  and the step's edges. s_meet makes hits a second or more on: head on,
+  catching up, at a crossing, either car backing into the other, both
+  at one speed on the route's own points so their legs end together,
+  and both crawling apart for the step past 99999.
+- A car with a negative VelocityMagnitude is predicted along its body,
+  away, so its fabs shows only when the other catches it up.
+- For any box MakeOBBs makes, the cosine of a's A0 against b's A1 is
+  exactly the negative of a's A1 against b's A0. Only axes no rotation
+  makes tell those two reaches apart.
+- The sort's `<` and `<=` differ only where -0 meets 0. Two such inputs
+  out of 256 do it.
+
+`docs/formats/ai-collision-predict.md` has the detail. The CIA builds.
+
+Next is 11b-4b: IsDriveable, TryChoice, TryToDriveAroundCar and
+MakeNewChoice.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the

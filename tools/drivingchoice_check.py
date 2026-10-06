@@ -73,8 +73,9 @@ NL = chr(10)
 HARNESS = "tools/src/drivingchoice_test.c"
 DCC = "3DS Files/source/drivingchoice.c"
 RCC = "3DS Files/source/racecore.c"
-SOURCES = [HARNESS, DCC, RCC] + ["3DS Files/source/" + f for f in (
-    "nearbycar.c", "drivinglocation.c", "drivetarget.c", "car.c",
+CCP = "3DS Files/source/carcollisionpredict.c"
+SOURCES = [HARNESS, DCC, RCC, CCP] + ["3DS Files/source/" + f for f in (
+    "nearbycar.c", "drivinglocation.c", "drivetarget.c", "obb.c", "car.c",
     "carstate.c", "carinfo.c", "cartypeinfo.c", "langtab.c", "drivetrain.c",
     "engine.c", "wheel.c", "suspension.c", "steering.c", "rigidbody.c",
     "table.c", "trackroute.c", "trackpath.c", "quickspline.c", "bchunk.c",
@@ -117,6 +118,18 @@ SMOOTH = 0x00244ea0
 # the model runs with the EE's divide, and no other site may take it.
 SMOOTH_DIV = 0x00245050
 
+# CarCollisionPredict (step 11b-4a).
+WHO = 0x001e5e60
+WILL = 0x001e60a0
+STOPPED = 0x001e6010
+MAKE_OBBS = 0x001e6860
+WHEN_2D = 0x001e72f8
+TISA = 0x001e7238
+OVERLAP = 0x001e6ac0
+# WillIHitThisCar's steps along each car's leg, which divide by a leg of 0
+# when a car is at its next point.
+WILL_DIVS = {0x001e65ec, 0x001e65f4}
+
 # DriveTarget's MinDistanceToPoint and its square, which the image's
 # start-up code (0x0020ab48) works out and the emulator does not run.
 MIN_DIST = 0x00331a48
@@ -142,6 +155,7 @@ GLOBALS = {
     "TRAFFIC": GP - 15152,        # AITrafficTuningMode
     "SLOWCAR": GP - 15120,        # AISlowCarSpeed
     "SLOWTRAFFIC": GP - 15116,    # AISlowTrafficSpeed
+    "WORLD": GP - 22120,          # pCurrentWorld
 }
 
 CARS = 0x01010000
@@ -174,6 +188,15 @@ RACE = 0x01093000
 SIGNS = 0x01094000
 NSIGNS = 32
 SIGN_SIZE = 12
+OBBS = 0x01095000                 # MakeOBBsForDriveTarget's twenty boxes
+OBB_A = 0x01096000
+OBB_B = 0x01096100
+VEC_D = 0x01096200
+VEC_V = 0x01096210
+OUT = 0x01096300                  # the out floats
+WORLD = 0x01098000
+BODIES = 0x010a0000               # each car's collision body
+BODY_STRIDE = 0x200
 ROUTES = 0x01100000
 ROUTE_STRIDE = 0x20000
 NROUTES = 6
@@ -192,6 +215,14 @@ C_BM = 144
 C_NW = 956
 C_FS = 960
 C_VMAG = 964
+C_BODY = 52
+C_ACC = 128
+C_ANGLE = 932
+B_MIN = 224
+B_MAX = 240
+W_ID = 408
+OBB_SIZE = 80
+NOBBS = 20
 CTI_CLASS = 230
 DRV_TYPE = 8
 K_LOC = 504
@@ -322,6 +353,25 @@ def route_at(k):
 # y e idx                the clearance beside entry e (-1 NULL)
 # z idx from to in       DoSmoothOffsetChange
 # M side                 MakeDriveTargetParallelToCar
+#
+# CarCollisionPredict's (step 11b-4a). Set up, and echoed:
+# A k ax ay vz ang mn mx car k's acceleration, its velocity's z, its angle
+#                        and its collision body's box (three words each)
+# Z k c                  car k's controller leaves out car c (-1 NULL)
+# S n                    the target's NumPoints by hand
+# The calls:
+# 1 a0 a1 b0 b1          IntervalOverlap
+# 2 v d r                TimeIntervalForSeparatingAxis
+# 3 a b dx dy vx vy      WhenWillOverlapOccur2D; each box is six words:
+#                        A0's and A1's x and y, a0 and a1
+# 4 t c scale z          MakeOBBsForDriveTarget of the target (t -1) or car
+#                        t's own, for car c (-1 NULL); z's bits make the
+#                        target and the boxes NULL (1, 2)
+# 5 e                    IsThisCarStoppedDirectlyInFrontOfMe, entry e
+# 6 k max                WillIHitThisCar: the list's car on the target,
+#                        and car k
+# 7 max z                WhoWillThisDriveTargetHit; z's 1 makes the
+#                        location NULL
 #
 # What the image would read from wherever a NULL or a stray pointer lands
 # is not scripted: a side-of-car choice always has a car, IsEnoughRoom's
@@ -1393,6 +1443,563 @@ def s_back(rnd):
     return ops
 
 
+# ------------------------------------------- CarCollisionPredict (11b-4a)
+
+
+def bam_of(a):
+    return int(round(a / (2.0 * math.pi) * 65536.0)) & 0xffff
+
+
+def extras(rnd, k, hd, flip=None):
+    """Car k's acceleration, velocity z, angle (about its heading, now and
+    then anything) and box: mostly a car's, now and then lopsided, inside
+    out on an axis or flat; inside out on axis `flip` when it is given."""
+    if rnd.random() < 0.1:
+        ang = rnd.randrange(65536)
+    else:
+        ang = bam_of(hd + rnd.choice((0.0, 0.0, 0.0, 0.05, -0.3)))
+    acc = rnd.choice(((0.0, 0.0), (0.0, 0.0),
+                      (rnd.uniform(-3.0, 3.0), rnd.uniform(-3.0, 3.0)),
+                      (rnd.uniform(-15.0, 15.0), rnd.uniform(-15.0, 15.0))))
+    hl = rnd.choice((2.3, 2.5, rnd.uniform(1.6, 3.2)))
+    hw = rnd.choice((0.9, 1.0, rnd.uniform(0.6, 1.4)))
+    hz = rnd.choice((0.7, rnd.uniform(0.4, 1.0)))
+    off = rnd.choice((0.0, 0.0, rnd.uniform(-0.5, 0.5)))
+    mn = [-hl + off, -hw, -hz]
+    mx = [hl + off, hw, hz]
+    r = rnd.random()
+    if flip is not None:
+        mn[flip], mx[flip] = mx[flip], mn[flip]
+    elif r < 0.06:
+        i = rnd.randrange(3)
+        mn[i], mx[i] = mx[i], mn[i]
+    elif r < 0.09:
+        mx[2] = mn[2]
+    vz = rnd.choice((0.0, 0.0, rnd.uniform(-2.0, 2.0)))
+    return "A %d %s %s %s %d %s" % (
+        k, h(f32(acc[0])), h(f32(acc[1])), h(f32(vz)), ang,
+        " ".join(h(f32(x)) for x in mn + mx))
+
+
+def mover(rnd, w, k, x, y, hd, speed, back=False, flip=None, **kw):
+    """Car k at (x, y) heading hd at `speed`, sliding a little; backing up
+    when `back`. A car at 1 m/s or more has a velocity to go by."""
+    slip = hd + rnd.choice((0.0, 0.0, 0.0, 0.1, -0.15))
+    vel = abs(speed)
+    if vel < 1.0 and rnd.random() < 0.5:
+        vel = 0.0
+    vd = slip + (math.pi if back else 0.0)
+    fs = -vel if back else vel * rnd.choice((1.0, 1.0, 0.98))
+    args = dict(px=x, py=y, bx=math.cos(hd), by=math.sin(hd), vmag=speed,
+                vx=max(vel, 1e-3) * math.cos(vd),
+                vy=max(vel, 1e-3) * math.sin(vd), fs=fs,
+                nw=rnd.choice((4, 4, 3)),
+                pl=rnd.choice((0, 0, 0, 1)),
+                dtype=rnd.choice((1, 2, 2, 3, 3, 4, 5)),
+                ctl=rnd.choice((1, 2, 2, 3, 3, 4)),
+                act=rnd.choice((-1, 5, 5, 7, 10, 11, 0, 6)),
+                oob=rnd.choice((0.0, -0.25, -0.2499, -0.2501, -1.0, 0.5,
+                                -0.3)))
+    args.update(kw)
+    v = w.car(k, **args)
+    w.ops.append(extras(rnd, k, hd, flip))
+    return v
+
+
+def lane_target(rnd, w, k, kr, j0, n, lat, rev=False):
+    """Car k's own target (k -1: the target): n points along route kr from
+    j0, forwards or back, lat across, now and then changing lane or
+    doubling a point."""
+    if k < 0:
+        ops = ["T %d %s" % (rnd.randrange(64), h(f32(rnd.uniform(0, 80))))]
+    else:
+        ops = ["H %d %d %s %d %d %d" % (
+            k, rnd.randrange(64), h(f32(rnd.uniform(0.0, 80.0))),
+            rnd.choice((0, 0, 1, 2, 7)), rnd.choice((0, 1000, 5000)),
+            rnd.choice((0, 1000)))]
+    pts = w.pts[kr]
+    j = j0
+    last = None
+    for i in range(n):
+        if rnd.random() < 0.1:
+            lat += rnd.choice((-3.5, 3.5, -1.0, 1.0))
+        if last is not None and rnd.random() < 0.06:
+            x, y = last
+        else:
+            j = max(0, min(len(pts) - 1, j))
+            x, y = beside(pts[j], lat * (-1.0 if rev else 1.0),
+                          rnd.uniform(-1.0, 1.0))
+        last = (x, y)
+        f = "%s %s %s %d %d %d %s" % (
+            h(f32(x)), h(f32(y)), h(f32(rnd.uniform(-2.0, 2.0))), w.rn[kr],
+            j, rnd.randrange(LINES), h(f32(rnd.uniform(0.0, 40.0))))
+        ops.append(("Y " if k < 0 else "I %d " % k) + f)
+        j += -1 if rev else 1
+    return ops
+
+
+def frame(me, x, y):
+    """Where (x, y) is from car `me`: across (right) and ahead."""
+    dx, dy = x - me["px"], y - me["py"]
+    return (dx * me["by"] - dy * me["bx"], dx * me["bx"] + dy * me["by"])
+
+
+SPEEDS_ME = (0.0, 0.0005, 0.001, 0.0011, 1.5, 1.999, 2.0, 2.001, 10.0, 20.0,
+             30.0, 45.0, -3.0)
+
+
+def s_predict(rnd):
+    """WillIHitThisCar and WhoWillThisDriveTargetHit: my car along a route
+    on a target of its points, and cars ahead going my way more slowly,
+    coming the other way, crossing on a second route, alongside, stopped,
+    behind and backing up, in every mode and action either side of each
+    test, the traffic tuning mode on and off."""
+    w = World(rnd)
+    ops = w.ops
+    turn = rnd.choice((0.0, 0.0, 0.02, -0.02, 0.05))
+    pts = w.route(0, 40, rnd.randrange(50), smooth=True, turn=turn)
+    jc = rnd.randrange(14, 26)
+    pc = pts[jc]
+    hd1 = heading_of(pc) + rnd.choice((math.pi / 2, -math.pi / 2, 0.7,
+                                       2.4))
+    w.route(1, 30, rnd.randrange(50, 70), smooth=True, turn=0.0,
+            x=pc["x"] - 150.0 * math.cos(hd1),
+            y=pc["y"] - 150.0 * math.sin(hd1), hd=hd1 - 0.0)
+    lanes = (-3.5, 0.0, 3.5)
+    others = [1, 2, 3, 4, 5, 6]
+
+    def place_me():
+        j0 = rnd.randrange(2, 8)
+        lat = rnd.choice(lanes) + rnd.uniform(-0.5, 0.5)
+        p = pts[j0]
+        x, y = beside(p, lat, rnd.uniform(-3.0, 3.0))
+        hd = heading_of(p) + rnd.choice((0.0, 0.0, 0.05, -0.08))
+        sp = rnd.choice(SPEEDS_ME)
+        back = rnd.random() < 0.12
+        me = mover(rnd, w, 0, x, y, hd, sp, back=back,
+                   ctl=rnd.choice((2, 2, 3, 3, 1)),
+                   dtype=rnd.choice((2, 2, 3, 3, 4)))
+        n = rnd.choice((0, 1, 2, 4, 8, 12, 20, 20))
+        ops.extend(lane_target(rnd, w, -1, 0, j0 + rnd.choice((0, 1, 1, 2)),
+                               n, lat))
+        if n and rnd.random() < 0.08:
+            # The first point on the car: a first leg of 0.
+            ops.append("T 0 00000000")
+            ops.append("Y %s %s 00000000 %d %d 0 00000000" % (
+                h(f32(x)), h(f32(y)), w.rn[0], j0))
+            ops.extend(lane_target(rnd, w, -1, 0, j0 + 1, n, lat)[1:])
+        return me, j0, lat
+
+    def place(k, me, j0):
+        kind = rnd.choice(("follow", "follow", "oncoming", "oncoming",
+                           "cross", "beside", "stopped", "behind", "back"))
+        sp = rnd.choice((0.0, 0.5, 4.9, 5.0, 5.01, 8.0, 15.0, 25.0, 35.0,
+                         -4.0))
+        lat = rnd.choice(lanes) + rnd.uniform(-0.6, 0.6)
+        rev = False
+        back = False
+        kr = 0
+        if kind == "follow":
+            j = j0 + rnd.randrange(1, 8)
+        elif kind == "oncoming":
+            j = j0 + rnd.randrange(3, 16)
+            rev = True
+        elif kind == "cross":
+            kr = 1
+            j = rnd.randrange(6, 14)
+        elif kind == "beside":
+            j = j0
+            lat = rnd.choice((lat + 3.5, lat - 3.5, lat + 2.0))
+        elif kind == "stopped":
+            j = j0 + rnd.randrange(1, 4)
+            sp = rnd.choice((0.0, 0.0, 2.0, 4.99, 5.0, 5.001, -2.0))
+        elif kind == "behind":
+            j = max(0, j0 - rnd.randrange(1, 3))
+        else:
+            j = j0 + rnd.randrange(1, 6)
+            back = True
+        p = w.pts[kr][min(j, len(w.pts[kr]) - 1)]
+        x, y = beside(p, lat * (-1.0 if rev else 1.0),
+                      rnd.uniform(-4.0, 4.0))
+        hd = heading_of(p) + (math.pi if rev else 0.0) + rnd.choice(
+            (0.0, 0.0, 0.1, -0.1))
+        mover(rnd, w, k, x, y, hd, sp, back=back)
+        ops.extend(lane_target(rnd, w, k, kr, j + (-1 if rev else 1),
+                               rnd.choice((0, 1, 3, 6, 10, 20)), lat,
+                               rev=rev))
+
+    def put_list(me):
+        cars = list(others)
+        rnd.shuffle(cars)
+        cars = cars[:rnd.choice((0, 1, 3, 6, 6))]
+        ops.append("N 0 %d %s %s" % (len(cars),
+                                     h(f32(rnd.uniform(0.8, 1.2))),
+                                     h(f32(rnd.uniform(2.0, 2.6)))))
+        for i, k in enumerate(cars):
+            v = w.cars[k]
+            lx, ly = frame(me, v["px"], v["py"])
+            if rnd.random() < 0.1:
+                lx, ly = rnd.uniform(-3.0, 3.0), rnd.uniform(-5.0, 30.0)
+            ops.append("E %d %s %s %s %s %s %s %d" % (
+                i, h(f32(lx)), h(f32(ly)), h(f32(rnd.uniform(-5.0, 5.0))),
+                h(f32(rnd.uniform(-5.0, 5.0))),
+                h(f32(rnd.uniform(0.8, 1.3))),
+                h(f32(rnd.uniform(2.0, 2.8))), k))
+        return len(cars)
+
+    me, j0, lat0 = place_me()
+    for k in others:
+        place(k, me, j0)
+    nl = put_list(me)
+    ops.append("D 0 %d 0 00000000" % j0)
+    for _ in range(30):
+        r = rnd.random()
+        if r < 0.15:
+            me, j0, lat0 = place_me()
+            nl = put_list(me)
+        elif r < 0.45:
+            place(rnd.choice(others), me, j0)
+            if rnd.random() < 0.5:
+                nl = put_list(me)
+        if rnd.random() < 0.3:
+            ops.append("G TIMER %08x" % rnd.choice((0, 1000, 5000)))
+        if rnd.random() < 0.15:
+            ops.append("G TRAFFIC %08x" % rnd.choice((0, 1)))
+        if rnd.random() < 0.15:
+            ops.append("G SECS %s" % h(f32(rnd.choice((2.0, 0.5, 4.0)))))
+            ops.append("G DEF %s" % h(f32(rnd.choice((20.0, 8.0, 60.0)))))
+        if rnd.random() < 0.2:
+            ops.append("Z 0 %d" % rnd.choice([-1] + others))
+        for e in range(nl):
+            if rnd.random() < 0.3:
+                ops.append("5 %d" % e)
+        for _ in range(rnd.choice((1, 2, 3))):
+            ops.append("6 %d %s" % (rnd.choice(others), h(f32(rnd.choice((
+                0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 5.0, 10.0, -1.0))))))
+        if rnd.random() < 0.08:
+            # Who's bounds on the count. Past 20 the target overflows, so
+            # only Who sees it, and then my car is placed again.
+            ops.append("S %d" % rnd.choice((0, -1, 21, 20, 100)))
+            ops.append("7 %s 0" % h(f32(5.0)))
+            me, j0, lat0 = place_me()
+            nl = put_list(me)
+        if rnd.random() < 0.06:
+            ops.append("D -1 -1 0 00000000")
+        elif rnd.random() < 0.1:
+            ops.append("D 0 %d 0 00000000" % j0)
+        ops.append("7 %s %d" % (h(f32(rnd.choice((0.5, 2.0, 3.0, 5.0,
+                                                   10.0)))),
+                                1 if rnd.random() < 0.05 else 0))
+    return ops
+
+
+def s_parts(rnd):
+    """IntervalOverlap, TimeIntervalForSeparatingAxis and
+    WhenWillOverlapOccur2D on their own, at every edge, and
+    MakeOBBsForDriveTarget over targets of every length and none."""
+    w = World(rnd)
+    ops = w.ops
+
+    def fv(*c):
+        return h(f32(rnd.choice(c)))
+
+    ends = (-9999.0, -5.0, -1.0, -0.5, 0.0, 0.0, 0.5, 1.0, 2.0, 5.0, 9999.0,
+            99999.0)
+    for _ in range(150):
+        e = [rnd.choice(ends + (rnd.uniform(-10.0, 10.0),)) for _ in range(4)]
+        if rnd.random() < 0.6:
+            e[0], e[1] = min(e[0], e[1]), max(e[0], e[1])
+            e[2], e[3] = min(e[2], e[3]), max(e[2], e[3])
+        ops.append("1 " + " ".join(h(f32(x)) for x in e))
+    still = 9.99999975e-05
+    for _ in range(150):
+        v = rnd.choice((0.0, still, -still, f32(still * 1.0000001),
+                        f32(still * 0.9999999), -f32(still * 1.0000001),
+                        rnd.uniform(-30.0, 30.0), rnd.uniform(-0.01, 0.01)))
+        d = rnd.choice((0.0, 2.0, -2.0, rnd.uniform(-50.0, 50.0)))
+        r = rnd.choice((abs(d), 2.0, rnd.uniform(0.0, 8.0), 0.0))
+        ops.append("2 %s %s %s" % (h(f32(v)), h(f32(d)), h(f32(r))))
+    for _ in range(250):
+        boxes = []
+        for _b in range(2):
+            a = rnd.uniform(-math.pi, math.pi)
+            ax = [math.cos(a), math.sin(a), -math.sin(a), math.cos(a)]
+            if rnd.random() < 0.25:
+                # Axes no turn makes. A box from MakeOBBs is turned, and
+                # then each cosine across is the other's size.
+                b = rnd.uniform(-math.pi, math.pi)
+                ax[2:] = [math.cos(b), math.sin(b)]
+            boxes += ax + [
+                      rnd.choice((2.3, rnd.uniform(0.5, 4.0), -2.0)),
+                      rnd.choice((1.0, rnd.uniform(0.3, 2.0)))]
+        dx, dy = rnd.uniform(-30.0, 30.0), rnd.uniform(-30.0, 30.0)
+        if rnd.random() < 0.2:
+            dx, dy = rnd.uniform(-2.0, 2.0), rnd.uniform(-2.0, 2.0)
+        sp = rnd.choice((0.0, 1e-5, rnd.uniform(0.0, 40.0)))
+        if rnd.random() < 0.7:
+            # Mostly closing on each other.
+            ln = math.hypot(dx, dy) or 1.0
+            vx, vy = -dx / ln * sp, -dy / ln * sp
+            vx += rnd.uniform(-3.0, 3.0)
+            vy += rnd.uniform(-3.0, 3.0)
+        else:
+            vx, vy = rnd.uniform(-30.0, 30.0), rnd.uniform(-30.0, 30.0)
+        if rnd.random() < 0.1:
+            vx = 0.0
+        ops.append("3 " + " ".join(h(f32(x)) for x in
+                                   boxes + [dx, dy, vx, vy]))
+    # The edges no draw lands on: ends that touch, -0 against 0, and two
+    # square boxes 2 m apart on x, closing or parting at 1 m/s, which touch
+    # at -0 and at 0.
+    ops += ["1 00000000 3f800000 80000000 40000000",
+            "1 00000000 3f800000 3f800000 40000000",
+            "1 3f800000 40000000 00000000 3f800000",
+            "1 80000000 00000000 00000000 3f800000",
+            "1 00000000 3f800000 80000000 80000000",
+            "1 bf800000 3f800000 80000000 00000000"]
+    sq = "3f800000 00000000 00000000 3f800000 3f800000 3f800000"
+    for v in ("bf800000", "3f800000"):
+        ops.append("3 %s %s 40000000 00000000 %s 00000000" % (sq, sq, v))
+    pts = w.route(0, 30, rnd.randrange(50), turn=rnd.choice((0.0, 0.1)))
+    for k in range(3):
+        p = pts[rnd.randrange(5)]
+        mover(rnd, w, k, p["x"], p["y"], heading_of(p), 10.0)
+    for _ in range(40):
+        if rnd.random() < 0.3:
+            k = rnd.randrange(3)
+            p = pts[rnd.randrange(5)]
+            mover(rnd, w, k, p["x"], p["y"], rnd.uniform(-3.2, 3.2), 10.0)
+        t = rnd.choice((-1, -1, 0, 1, 2))
+        n = rnd.choice((0, 1, 2, 5, 12, 20))
+        ops.extend(lane_target(rnd, w, t, 0, rnd.randrange(8), n,
+                               rnd.uniform(-4.0, 4.0),
+                               rev=rnd.random() < 0.2))
+        z = rnd.choice((0, 0, 0, 0, 1, 2))
+        ops.append("4 %d %d %s %d" % (t, rnd.choice((0, 1, 2, 2, -1)),
+                                      fv(1.0, 1.3, 1000.0, 0.0, -1.0),
+                                      z))
+    # A box inside out on each axis in turn, so the half sizes' fabsf
+    # shows.
+    for ax in (0, 1, 2):
+        p = pts[rnd.randrange(5)]
+        mover(rnd, w, 0, p["x"], p["y"], heading_of(p), 10.0, flip=ax)
+        ops.extend(lane_target(rnd, w, -1, 0, rnd.randrange(8), 3, 0.0))
+        for sc_ in ("3f800000", "bf800000"):
+            ops.append("4 -1 0 %s 0" % sc_)
+    return ops
+
+
+def exact_target(w, k, kr, j, n, lat, rev=False, picked=True):
+    """Car k's own target (k -1: the target): n points on route kr's own
+    points from j, `lat` across in the route's frame, nothing jittered.
+    With `picked`, the first point is cached as the one picked at time 0
+    and the blend's time is 0, so at WorldTimer 0 neither GetFirstPoint
+    nor the blend touches it."""
+    pts = w.pts[kr]
+    if k < 0:
+        ops = ["T 0 00000000"]
+    else:
+        ops = ["H %d 0 00000000 0 0 0" % k if picked
+               else "H %d 0 00000000 0 1000 1000" % k]
+    for i in range(n):
+        jj = j - i if rev else j + i
+        if not 0 <= jj < len(pts):
+            break
+        x, y = beside(pts[jj], lat)
+        f = "%s %s 00000000 %d %d 0 00000000" % (h(f32(x)), h(f32(y)),
+                                                 w.rn[kr], jj)
+        ops.append(("Y " if k < 0 else "I %d " % k) + f)
+    return ops
+
+
+# A backing car's actions, accident recovery twice.
+BACK_ACTS = (-1, 5, 7, 10, 10, 11, 0, 6)
+
+
+def s_meet(rnd):
+    """WillIHitThisCar where the two cars do meet, a second or more on:
+    head on, catching one up, at a crossing, one backing into the other,
+    both at one speed on the route's own points (so their legs end
+    together), and both crawling apart, where a step runs past 99999.
+    Who over the same two, either side of the hit."""
+    w = World(rnd)
+    ops = w.ops
+    pts = w.route(0, 40, rnd.randrange(50), smooth=True,
+                  turn=rnd.choice((0.0, 0.0, 0.02, -0.02)))
+    jc = rnd.randrange(18, 26)
+    pc = pts[jc]
+    hd1 = heading_of(pc) + rnd.choice((math.pi / 2, -math.pi / 2, 0.8,
+                                       2.3))
+    # Straight, so the crossing is its point 15.
+    w.route(1, 30, rnd.randrange(50, 70), smooth=True, turn=0.0,
+            x=pc["x"] - 150.0 * math.cos(hd1),
+            y=pc["y"] - 150.0 * math.sin(hd1), hd=hd1)
+
+    def flip():
+        return rnd.choice((None,) * 8 + (0, 1, 2))
+
+    def place(k, kr, j, lat, along, rev, sp, back=False, **kw):
+        p = w.pts[kr][max(0, min(len(w.pts[kr]) - 1, j))]
+        x, y = beside(p, lat, along)
+        hd = heading_of(p) + (math.pi if rev else 0.0)
+        return mover(rnd, w, k, x, y, hd, sp, back=back, flip=flip(), **kw)
+
+    for _ in range(18):
+        kind = rnd.choice(("headon", "catch", "cross", "cross", "back_me",
+                           "back_me", "back_it", "back_it", "even", "slow"))
+        timer = rnd.choice((7000, 7000, 7000, 0))
+        lat = rnd.choice((-3.5, 0.0, 3.5))
+        vm = rnd.choice((5.0, 10.0, 15.0, 20.0, 30.0))
+        vi = rnd.choice((0.0, 4.0, 8.0, 12.0, 20.0, 28.0))
+        when = rnd.uniform(0.6, 4.0)
+        j0 = rnd.randrange(3, 8)
+        kr, rev, back_me, back_it = 0, False, False, False
+        lat_i = lat + rnd.uniform(-0.8, 0.8)
+        along_i = rnd.uniform(-3.0, 3.0)
+        mine = its = None
+        kw_me, kw_it = {}, {}
+        if kind == "cross":
+            j0 = max(1, jc - max(1, int(round(vm * when / 10.0))))
+            arrive = (jc - j0) * 10.0 / vm
+            vi = rnd.choice((8.0, 12.0, 20.0, 28.0))
+            dist = vi * arrive + rnd.uniform(-4.0, 4.0)
+            n10 = int(dist // 10.0)
+            kr, ji = 1, max(0, 15 - n10)
+            along_i = -(dist - 10.0 * n10)
+            lat_i = rnd.uniform(-2.0, 2.0)
+        elif kind == "headon":
+            ji = j0 + max(2, int(round((vm + vi) * when / 10.0)))
+            rev = True
+        elif kind == "catch":
+            vi = min(vi, vm * 0.6)
+            ji = j0 + 1 + max(1, int(round((vm - vi) * when / 10.0)))
+        elif kind == "back_me":
+            ji = j0 - rnd.choice((1, 2, 3))
+            vm = rnd.choice((3.0, 6.0, 10.0, 15.0))
+            vi = rnd.choice((0.0, 0.0, 4.0, 10.0))
+            rev = rnd.random() < 0.3
+            back_me = True
+            kw_me["act"] = rnd.choice(BACK_ACTS)
+            if rnd.random() < 0.3:
+                # Under 1 m/s, so predicted along my body, away from it:
+                # it catches mine up sooner or later by my speed.
+                kw_me["vmag"] = -vm
+                vi = rnd.choice((4.0, 10.0))
+                rev = False
+        elif kind == "back_it":
+            ji = j0 + rnd.choice((1, 2, 3))
+            vm = rnd.choice((0.0, 0.0005, 5.0, 10.0))
+            vi = rnd.choice((3.0, 6.0, 10.0, 15.0))
+            back_it = True
+            kw_it["ctl"] = rnd.choice((1, 2, 2, 3, 3, 4))
+            kw_it["act"] = rnd.choice(BACK_ACTS)
+            if rnd.random() < 0.4:
+                # Under 1 m/s, so predicted along its body, away from me:
+                # mine catches it up, or not, by its speed.
+                kw_it["vmag"] = -vi
+                vm = rnd.choice((5.0, 10.0))
+        elif kind == "even":
+            vm = vi = rnd.choice((10.0, 20.0))
+            ji = j0 + rnd.choice((2, 3, 4, 6))
+            rev = rnd.random() < 0.6
+            lat_i, along_i = lat, 0.0
+            timer = 0
+            kw_me.update(dtype=2, pl=0)
+            kw_it.update(dtype=2, pl=0)
+            mine = exact_target(w, -1, 0, j0 + 1, rnd.choice((4, 8, 12)),
+                                lat)
+            its = exact_target(w, 1, 0, ji - 1 if rev else ji + 1,
+                               rnd.choice((4, 8, 12)), lat, rev=rev)
+        else:
+            # Both crawl, 0.001 m/s, apart: my first leg is 3 mm, so 3 s,
+            # and the next two legs are 150 m, so the second step is past
+            # 99999, never overlapping.
+            ji = j0 - 2
+            vm, vi = 0.0005, 0.0
+            rev = True
+            lat_i, along_i = lat, 0.0
+            timer = 0
+            kw_me.update(dtype=2, ctl=2, pl=0)
+            kw_it.update(dtype=2, ctl=2, pl=0)
+            p = pts[j0]
+            a = beside(p, lat, 0.003)
+            b = beside(p, lat, 150.003)
+            mine = ["T 0 00000000"] + [
+                "Y %s %s 00000000 %d %d 0 00000000" % (
+                    h(f32(q[0])), h(f32(q[1])), w.rn[0], j0) for q in (a, b)]
+            c = beside(pts[ji], lat, -150.0)
+            its = ["H 1 0 00000000 0 0 0",
+                   "I 1 %s %s 00000000 %d %d 0 00000000" % (
+                       h(f32(c[0])), h(f32(c[1])), w.rn[0], ji)]
+        if kind in ("headon", "catch", "cross") and rnd.random() < 0.4:
+            # Traffic off the road, its target blended unless it is just
+            # driving.
+            kw_it.update(dtype=3, pl=0,
+                         oob=rnd.choice((-0.25, -0.2501, -0.3, -1.0, 0.0)),
+                         act=rnd.choice((5, 5, 5, 7, 10, -1, 0, 6)))
+        ops.append("G TIMER %08x" % timer)
+        ops.append("G TRAFFIC %08x" % (1 if rnd.random() < 0.1 else 0))
+        me = place(0, 0, j0, lat, rnd.uniform(-1.0, 1.0)
+                   if kind not in ("even", "slow") else 0.0, False, vm,
+                   back=back_me, **kw_me)
+        place(1, kr, ji, lat_i, along_i, rev, vi, back=back_it, **kw_it)
+        if mine is None:
+            n = rnd.choice((0, 3, 6, 10, 20))
+            mine = lane_target(rnd, w, -1, 0, j0 + 1, n, lat)
+        if its is None:
+            n = rnd.choice((0, 3, 6, 10, 20))
+            step = -1 if rev else 1
+            its = lane_target(rnd, w, 1, kr, ji + step, n,
+                              -lat_i if rev else lat_i, rev=rev)
+        ops.extend(mine)
+        ops.extend(its)
+        lx, ly = frame(me, w.cars[1]["px"], w.cars[1]["py"])
+        ops.append("N 0 1 %s %s" % (h(f32(rnd.uniform(0.8, 1.2))),
+                                    h(f32(rnd.uniform(2.0, 2.6)))))
+        ops.append("E 0 %s %s 00000000 00000000 %s %s 1" % (
+            h(f32(lx)), h(f32(ly)), h(f32(rnd.uniform(0.8, 1.3))),
+            h(f32(rnd.uniform(2.0, 2.8)))))
+        ops.append("D 0 %d 0 00000000" % j0)
+        for _w in range(2):
+            ops.append("6 1 %s" % h(f32(rnd.choice((0.5, 1.0, 2.0, 3.0, 5.0,
+                                                    10.0)))))
+        ops.append("7 %s 0" % h(f32(rnd.choice((0.5, 1.0, 1.5, 2.0, 3.0,
+                                                5.0)))))
+    return ops
+
+
+def s_stopped(rnd):
+    """IsThisCarStoppedDirectlyInFrontOfMe either side of each bound:
+    speeds either side of 5 m/s both ways, entries either side of the box
+    across and of the 23 m ahead, and far behind."""
+    w = World(rnd)
+    ops = w.ops
+    speeds = (0.0, 4.99, 5.0, 5.01, 8.0, -2.0, -4.99, -5.0, -5.01, -8.0)
+    for k in range(7):
+        w.car(k, vmag=rnd.choice(speeds))
+    for _ in range(10):
+        hl, hd = rnd.uniform(0.8, 1.2), rnd.uniform(2.0, 2.6)
+        ops.append("N 0 6 %s %s" % (h(f32(hl)), h(f32(hd))))
+        for i in range(6):
+            L, D = rnd.uniform(0.8, 1.3), rnd.uniform(2.0, 2.8)
+            lx = rnd.uniform(-1.3, 1.3) * (hl + L)
+            r = rnd.random()
+            if r < 0.45:
+                ly = (hd + D) + 23.0 + rnd.uniform(-4.0, 1.0)
+            elif r < 0.65:
+                ly = -rnd.uniform(25.0, 60.0)
+            else:
+                ly = rnd.uniform(-10.0, 35.0)
+            ops.append("E %d %s %s 00000000 00000000 %s %s %d" % (
+                i, h(f32(lx)), h(f32(ly)), h(f32(L)), h(f32(D)),
+                rnd.randrange(1, 7)))
+        for i in range(6):
+            ops.append("5 %d" % i)
+        if rnd.random() < 0.5:
+            w.car(rnd.randrange(1, 7), vmag=rnd.choice(speeds))
+    return ops
+
+
 def script():
     rnd = random.Random(0x11b2dc)
     sc = [s_small(rnd), s_valid(rnd), s_room(rnd), s_walk(rnd), s_fill(rnd),
@@ -1416,6 +2023,15 @@ def script():
         sc.append(s_sign_pass(rnd))
     for _ in range(6):
         sc.append(s_back(rnd))
+    # Step 11b-4a's.
+    for _ in range(10):
+        sc.append(s_predict(rnd))
+    for _ in range(3):
+        sc.append(s_parts(rnd))
+    for _ in range(12):
+        sc.append(s_meet(rnd))
+    for _ in range(2):
+        sc.append(s_stopped(rnd))
     return sc
 
 
@@ -1552,6 +2168,31 @@ class Model(object):
                 i, s32(w(p)), s32(w(p + 4)), s32(w(p + 8)), fx(w(p + 12)),
                 s32(w(p + 16))))
 
+    def dump_obbs(self):
+        """The boxes written: up to the first whose a0 is still the fill.
+        A position's w is the target point's, which a STACK-W point leaves
+        to the stack, so only its x, y and z."""
+        w = self.w
+        n = 0
+        while n < NOBBS and w(OBBS + OBB_SIZE * n + 64) != PAT32:
+            n += 1
+        self.emit("  obbs %d" % n)
+        for i in range(n):
+            o = OBBS + OBB_SIZE * i
+            self.emit("    %d %s | %s | %s | %s | %s" % (
+                i, " ".join(fx(w(o + 4 * j)) for j in range(3)),
+                " ".join(fx(w(o + 16 + 4 * j)) for j in range(4)),
+                " ".join(fx(w(o + 32 + 4 * j)) for j in range(4)),
+                " ".join(fx(w(o + 48 + 4 * j)) for j in range(4)),
+                " ".join(fx(w(o + 64 + 4 * j)) for j in range(3))))
+
+    def put_obb(self, a, v):
+        """A0's and A1's x and y, a0 and a1; the rest 0."""
+        e = self.e
+        e.mem[a:a + OBB_SIZE] = bytes(OBB_SIZE)
+        for off, x in zip((16, 20, 32, 36, 64, 68), v):
+            e.put32(a + off, int(x, 16))
+
     def dump_walk(self, got):
         w = self.w
         self.emit("  adv %d %s %s n %d o %s x %d l %d" % (
@@ -1582,7 +2223,10 @@ class Model(object):
         self.fill(LPTR, 4)
         self.fill(WALK, 24)
         self.fill(TARGET, TARGET_BYTES)
-        for name, v in (("TIMER", 0), ("RACE", RACE),
+        e.mem[BODIES:BODIES + BODY_STRIDE * NCARS] = bytes(
+            BODY_STRIDE * NCARS)
+        e.put32(WORLD + W_ID, 0)
+        for name, v in (("TIMER", 0), ("RACE", RACE), ("WORLD", WORLD),
                         ("GRACE", self.grace0), ("GAP", self.gap0),
                         ("WILLIAMS", 0),
                         ("SECS", 0x40000000), ("DEF", 0x41a00000),
@@ -1872,6 +2516,66 @@ class Model(object):
             self.call(PARALLEL, CHOICE, TARGET, LIST, FPL, f12=int(t[1], 16))
             self.dump_target()
             self.dump_its()
+        elif c == "A":
+            k = int(t[1])
+            a = car_at(k)
+            b = BODIES + BODY_STRIDE * k
+            e.put32(a + C_ACC, int(t[2], 16))
+            e.put32(a + C_ACC + 4, int(t[3], 16))
+            e.put32(a + C_VEL + 8, int(t[4], 16))
+            struct.pack_into("<H", e.mem, a + C_ANGLE, int(t[5]) & 0xffff)
+            e.put32(a + C_BODY, b)
+            for i in range(3):
+                e.put32(b + B_MIN + 4 * i, int(t[6 + i], 16))
+                e.put32(b + B_MAX + 4 * i, int(t[9 + i], 16))
+        elif c == "Z":
+            e.put32(w(self.car_ptr(t[1]) + C_CTRL) + K_EXCLUDE,
+                    self.car_ptr(t[2]))
+        elif c == "S":
+            e.mem[TARGET] = int(t[1]) & 0xff
+        elif c == "1":
+            e.put32(OUT, PAT32)
+            e.put32(OUT + 4, PAT32)
+            got = self.call(OVERLAP, OUT, OUT + 4, f12=int(t[1], 16),
+                            f13=int(t[2], 16), f14=int(t[3], 16),
+                            f15=int(t[4], 16))
+            self.emit("  ovl %d %s %s" % (got, fx(w(OUT)), fx(w(OUT + 4))))
+        elif c == "2":
+            e.put32(OUT, PAT32)
+            e.put32(OUT + 4, PAT32)
+            self.call(TISA, OUT, OUT + 4, f12=int(t[1], 16),
+                      f13=int(t[2], 16), f14=int(t[3], 16))
+            self.emit("  tisa %s %s" % (fx(w(OUT)), fx(w(OUT + 4))))
+        elif c == "3":
+            self.put_obb(OBB_A, t[1:7])
+            self.put_obb(OBB_B, t[7:13])
+            for i in range(4):
+                e.put32(VEC_D + 4 * i, int(t[13 + i], 16) if i < 2 else 0)
+                e.put32(VEC_V + 4 * i, int(t[15 + i], 16) if i < 2 else 0)
+            self.call(WHEN_2D, OBB_A, OBB_B, VEC_D, VEC_V)
+            self.emit("  when %s" % fx(e.fpr[0]))
+        elif c == "4":
+            z = int(t[4])
+            tgt = TARGET if int(t[1]) < 0 else self.car_target(t[1])
+            self.fill(OBBS, OBB_SIZE * NOBBS)
+            self.call(MAKE_OBBS, 0, 0 if z & 1 else tgt,
+                      0 if z & 2 else OBBS, self.car_ptr(t[2]),
+                      f12=int(t[3], 16))
+            self.dump_obbs()
+        elif c == "5":
+            got = self.call(STOPPED, 0, self.entry(t[1]), LIST)
+            self.emit("  stopped %d" % got)
+        elif c == "6":
+            e.put32(OUT, PAT32)
+            got = self.call(WILL, 0, TARGET, LOC, w(LIST), self.car_ptr(t[1]),
+                            OUT, f12=int(t[2], 16))
+            self.emit("  will %d %s" % (got, fx(w(OUT))))
+        elif c == "7":
+            e.put32(OUT, PAT32)
+            got = self.call(WHO, 0, TARGET, LIST, 0 if int(t[2]) & 1 else LOC,
+                            OUT, f12=int(t[1], 16))
+            self.emit("  who %s %s id %d" % (self.name(got), fx(w(OUT)),
+                                             w(WORLD + W_ID)))
         else:
             raise SystemExit("bad op %r" % (t,))
 
@@ -1883,7 +2587,7 @@ class Model(object):
                 if ln[0] not in "CKPU":
                     self.emit("> " + ln[:48])
                 self.op(ln.split())
-        stray = self.e.eediv_pcs - {SMOOTH_DIV}
+        stray = self.e.eediv_pcs - {SMOOTH_DIV} - WILL_DIVS
         if stray:
             raise SystemExit("the EE's divide by zero at %s, which the port "
                              "divides as IEEE does"
@@ -2798,6 +3502,415 @@ MUTATIONS = [
       "        d, list->MyCar, 0, list);\n    return built;", "    return built;"),
     M("bd-fixup-check", "        d, list->MyCar, 0, list);\n    return built;",
       "        d, list->MyCar, 1, list);\n    return built;"),
+    # -- CarCollisionPredict (11b-4a): the constants -------------------
+    M("ck-no-hit", "#define CCP_NO_HIT          99999.0f",
+      "#define CCP_NO_HIT          9999.0f", rel=CCP),
+    M("ck-still", "#define CCP_STILL           0.00100000005f",
+      "#define CCP_STILL           0.5f", rel=CCP),
+    M("ck-traffic-scale", "#define CCP_TRAFFIC_SCALE   1.29999995f",
+      "#define CCP_TRAFFIC_SCALE   1.5f", rel=CCP),
+    M("ck-backing-scale", "#define CCP_BACKING_SCALE   1.29999995f",
+      "#define CCP_BACKING_SCALE   1.5f", rel=CCP),
+    M("ck-leg-done", "#define CCP_LEG_DONE        0.00100000005f",
+      "#define CCP_LEG_DONE        0.100000001f", rel=CCP),
+    M("ck-same", "#define CCP_SAME            0.00100000005f",
+      "#define CCP_SAME            99990.0f", rel=CCP),
+    M("ck-axis-still", "#define CCP_AXIS_STILL      9.99999975e-05f",
+      "#define CCP_AXIS_STILL      0.100000001f", rel=CCP),
+    M("ck-never", "#define CCP_NEVER           9999.0f",
+      "#define CCP_NEVER           999.0f", rel=CCP),
+    M("ck-always", "#define CCP_ALWAYS         -9999.0f",
+      "#define CCP_ALWAYS         -999.0f", rel=CCP),
+    M("ck-no-overlap", "#define CCP_NO_OVERLAP      99999.0f",
+      "#define CCP_NO_OVERLAP      9999.0f", rel=CCP),
+    M("ck-stopped-speed", "#define CCP_STOPPED_SPEED   5.0f",
+      "#define CCP_STOPPED_SPEED   4.0f", rel=CCP),
+    M("ck-stopped-ahead", "#define CCP_STOPPED_AHEAD   23.0f",
+      "#define CCP_STOPPED_AHEAD   20.0f", rel=CCP),
+    M("ck-on-road", "#define CCP_ON_ROAD        -0.25f",
+      "#define CCP_ON_ROAD        0.0f", rel=CCP),
+    M("ck-slow", "#define CCP_SLOW            2.0f",
+      "#define CCP_SLOW            3.0f", rel=CCP),
+    M("ck-tuning", "#define CCP_TUNING_SCALE    1000.0f",
+      "#define CCP_TUNING_SCALE    100.0f", rel=CCP),
+    M("ck-max-s", "return fs < ft ? ft : fs;", "return fs < ft ? fs : ft;",
+      rel=CCP),
+    M("ck-no-action", "return a == NULL ? AIACTION_NONE : a->Type;",
+      "return a == NULL ? AIACTION_JUST_DRIVE : a->Type;", rel=CCP),
+    M("ck-blind-unstuck",
+      "return type == AIACTION_GET_UNSTUCK || type == AIACTION_NONE",
+      "return type == AIACTION_NONE", rel=CCP),
+    M("ck-blind-none",
+      "return type == AIACTION_GET_UNSTUCK || type == AIACTION_NONE",
+      "return type == AIACTION_GET_UNSTUCK", rel=CCP),
+    M("ck-blind-accident",
+      "|| type == AIACTION_ACCIDENT_RECOVERY || t->NumPoints == 0;",
+      "|| t->NumPoints == 0;", rel=CCP),
+    M("ck-blind-empty",
+      "|| type == AIACTION_ACCIDENT_RECOVERY || t->NumPoints == 0;",
+      "|| type == AIACTION_ACCIDENT_RECOVERY;", rel=CCP),
+    # -- WhoWillThisDriveTargetHit ---------------------------------------
+    M("cw-clear", "if (loc == NULL || drivinglocation_is_clear(loc))",
+      "if (loc == NULL)", rel=CCP),
+    M("cw-np-lo", "if (t->NumPoints <= 0 ||", "if (t->NumPoints < 0 ||",
+      rel=CCP),
+    M("cw-np-hi", "!(t->NumPoints < CCP_MAX_POINTS + 1))",
+      "!(t->NumPoints < CCP_MAX_POINTS))", rel=CCP),
+    M("cw-care", "if (!ai_do_we_care_about_this_car(nc, list))\n"
+      "            continue;", "", rel=CCP),
+    M("cw-stopped-its", "its = 0.0f;\n            r = 1;",
+      "its = 1.0f;\n            r = 1;", rel=CCP),
+    M("cw-stopped-r", "its = 0.0f;\n            r = 1;",
+      "its = 0.0f;\n            r = 0;", rel=CCP),
+    M("cw-still-fabs",
+      "fabsf(list->MyCar->State.VelocityMagnitude) <= CCP_STILL",
+      "list->MyCar->State.VelocityMagnitude <= CCP_STILL", rel=CCP),
+    M("cw-still", "fabsf(list->MyCar->State.VelocityMagnitude) <= CCP_STILL",
+      "fabsf(list->MyCar->State.VelocityMagnitude) <= CCP_SLOW", rel=CCP),
+    M("cw-exclude", "                   || nc->TheCar == exclude) {",
+      "                   ) {", rel=CCP),
+    M("cw-cars", "r = ccp_will_i_hit_this_car(t, loc, list->MyCar, nc->TheCar,",
+      "r = ccp_will_i_hit_this_car(t, loc, nc->TheCar, list->MyCar,",
+      rel=CCP),
+    M("cw-max-time", "maxTime, &its);", "maxTime + 1.0f, &its);", rel=CCP),
+    M("cw-best", "if (r && its < best) {", "if (r && its <= best) {", rel=CCP),
+    M("cw-r", "if (r && its < best) {", "if (its < best) {", rel=CCP),
+    M("cw-best-init", "float best = CCP_NO_HIT;", "float best = 50.0f;",
+      rel=CCP),
+    M("cw-keep", "            best = its;\n", "", rel=CCP),
+    M("cw-id", "        pCurrentWorld->CollisionPredictionID++;\n", "",
+      rel=CCP),
+    M("cw-when", "    *when = best;\n    return hit;", "    return hit;",
+      rel=CCP),
+    # -- IsThisCarStoppedDirectlyInFrontOfMe -----------------------------
+    M("cs-fabs",
+      "if (!(fabsf(nc->TheCar->State.VelocityMagnitude) <= CCP_STOPPED_SPEED))",
+      "if (!(nc->TheCar->State.VelocityMagnitude <= CCP_STOPPED_SPEED))",
+      rel=CCP),
+    M("cs-speed", "<= CCP_STOPPED_SPEED))", "< CCP_STOPPED_SPEED))", rel=CCP),
+    M("cs-x-fabs", "return fabsf(nc->Position.x) <", "return nc->Position.x <",
+      rel=CCP),
+    M("cs-x-its", "< list->MyHalfSizeL + nc->ApparentHalfSizeL",
+      "< list->MyHalfSizeL", rel=CCP),
+    M("cs-x-mine", "< list->MyHalfSizeL + nc->ApparentHalfSizeL",
+      "< nc->ApparentHalfSizeL", rel=CCP),
+    M("cs-y-its", "(list->MyHalfSizeD + nc->ApparentHalfSizeD)",
+      "(list->MyHalfSizeD)", rel=CCP),
+    M("cs-y-mine", "(list->MyHalfSizeD + nc->ApparentHalfSizeD)",
+      "(nc->ApparentHalfSizeD)", rel=CCP),
+    M("cs-y-abs", "&& nc->Position.y <", "&& fabsf(nc->Position.y) <",
+      rel=CCP),
+    # -- WillIHitThisCar -------------------------------------------------
+    M("cl-its-target",
+      "drivetarget_copy(&s_its, &other->pCarDriver->MyDriveTarget);",
+      "drivetarget_copy(&s_its, t);", rel=CCP),
+    M("cl-my-traffic",
+      "if (me->MyDriver->TheDriverType == DRIVER_TYPE_TRAFFIC_CAR\n"
+      "        && CCP_ON_ROAD < car_get_amount_out_of_bounds(me))",
+      "if (CCP_ON_ROAD < car_get_amount_out_of_bounds(me))", rel=CCP),
+    M("cl-my-oob", "&& CCP_ON_ROAD < car_get_amount_out_of_bounds(me))",
+      "&& CCP_ON_ROAD <= car_get_amount_out_of_bounds(me))", rel=CCP),
+    M("cl-my-fill", "drivetarget_fill_with_current_acceleration(&s_mine, me);",
+      "drivetarget_blend_with_current_acceleration(&s_mine, me);", rel=CCP),
+    M("cl-my-blend",
+      "    else\n        drivetarget_blend_with_current_acceleration(&s_mine, me);",
+      "    else\n        ;", rel=CCP),
+    M("cl-its-traffic",
+      "if (other->MyDriver->TheDriverType == DRIVER_TYPE_TRAFFIC_CAR) {",
+      "if (other->MyDriver->TheDriverType != DRIVER_TYPE_TRAFFIC_CAR) {",
+      rel=CCP),
+    M("cl-its-oob", "if (CCP_ON_ROAD < car_get_amount_out_of_bounds(other))",
+      "if (CCP_ON_ROAD <= car_get_amount_out_of_bounds(other))", rel=CCP),
+    M("cl-its-fill",
+      "drivetarget_fill_with_current_acceleration(&s_its, other);",
+      "drivetarget_blend_with_current_acceleration(&s_its, other);",
+      rel=CCP),
+    M("cl-its-just", "else if (action_type(other) != AIACTION_JUST_DRIVE)",
+      "else", rel=CCP),
+    M("cl-its-blend",
+      "            drivetarget_blend_with_current_acceleration(&s_its, other);",
+      "            ;", rel=CCP),
+    M("cl-my-scale", "if (me->TheControlMode == TRAFFIC_CONTROL)",
+      "if (me->TheControlMode == AI_CONTROL)", rel=CCP),
+    M("cl-its-scale", "if (other->TheControlMode == TRAFFIC_CONTROL)\n",
+      "if (other->TheControlMode == AI_CONTROL)\n", rel=CCP),
+    M("cl-my-speed", "myV0 = mySpeed = me->State.VelocityMagnitude;",
+      "myV0 = mySpeed = me->State.ForwardSpeed;", rel=CCP),
+    M("cl-its-speed", "itsV0 = itsSpeed = other->State.VelocityMagnitude;",
+      "itsV0 = itsSpeed = other->State.ForwardSpeed;", rel=CCP),
+    M("cl-my-back",
+      "if (me->State.ForwardSpeed < 0.0f && backing_blind(me, &s_mine)) {",
+      "if (backing_blind(me, &s_mine)) {", rel=CCP),
+    M("cl-my-blind",
+      "if (me->State.ForwardSpeed < 0.0f && backing_blind(me, &s_mine)) {",
+      "if (me->State.ForwardSpeed < 0.0f) {", rel=CCP),
+    M("cl-my-predict", "        ai_straight_line_predict(me, &s_mine);\n", "",
+      rel=CCP),
+    M("cl-my-fabs", "mySpeed = fabsf(myV0);", "mySpeed = myV0;", rel=CCP),
+    M("cl-my-bscale", "myScale = CCP_BACKING_SCALE;", "myScale = 1.0f;",
+      rel=CCP),
+    M("cl-its-back", "if (other->State.ForwardSpeed < 0.0f\n",
+      "if (other->State.ForwardSpeed <= 0.0f\n", rel=CCP),
+    M("cl-its-ai", "&& (other->TheControlMode == AI_CONTROL\n",
+      "&& (other->TheControlMode == COP_CONTROL\n", rel=CCP),
+    M("cl-its-mode",
+      "            || other->TheControlMode == TRAFFIC_CONTROL)\n",
+      "            || other->TheControlMode == REAL_CONTROL)\n", rel=CCP),
+    M("cl-its-blind", "\n        && backing_blind(other, &s_its)) {", ") {",
+      rel=CCP),
+    M("cl-its-predict", "        ai_straight_line_predict(other, &s_its);\n",
+      "", rel=CCP),
+    M("cl-its-fabs", "itsSpeed = fabsf(itsV0);", "itsSpeed = itsV0;",
+      rel=CCP),
+    M("cl-its-bscale", "itsScale = CCP_BACKING_SCALE;", "itsScale = 1.0f;",
+      rel=CCP),
+    M("cl-my-floor", "    mySpeed = max_s(mySpeed, CCP_STILL);\n", "",
+      rel=CCP),
+    M("cl-its-floor", "    itsSpeed = max_s(itsSpeed, CCP_STILL);\n", "",
+      rel=CCP),
+    M("cl-my-slow", "if (mySpeed < CCP_SLOW)\n        myScale = 1.0f;", "",
+      rel=CCP),
+    M("cl-its-slow", "if (itsSpeed < CCP_SLOW)\n        itsScale = 1.0f;", "",
+      rel=CCP),
+    M("cl-tuning-type",
+      "if (me->MyDriver->TheDriverType == DRIVER_TYPE_TRAFFIC_CAR\n"
+      "        && AITrafficTuningMode != 0)",
+      "if (AITrafficTuningMode != 0)", rel=CCP),
+    M("cl-tuning-on", "&& AITrafficTuningMode != 0)",
+      "&& AITrafficTuningMode == 0)", rel=CCP),
+    M("cl-my-first", "i = drivetarget_get_first_point(&s_mine, &me->State);",
+      "i = 0;", rel=CCP),
+    M("cl-its-first",
+      "j = drivetarget_get_first_point(&s_its, &other->State);", "j = 0;",
+      rel=CCP),
+    M("cl-my-start", "myPos.y = me->State.Position.y;",
+      "myPos.y = me->State.Position.x;", rel=CCP),
+    M("cl-its-start", "itsPos.x = other->State.Position.x;",
+      "itsPos.x = me->State.Position.x;", rel=CCP),
+    M("cl-loop-i", "while (i < s_mine.NumPoints && j < s_its.NumPoints",
+      "while (i < s_mine.NumPoints - 1 && j < s_its.NumPoints", rel=CCP),
+    M("cl-loop-j", "&& j < s_its.NumPoints\n",
+      "&& j < s_its.NumPoints - 1\n", rel=CCP),
+    M("cl-loop-time", "&& elapsed <= maxTime) {", "&& elapsed < maxTime) {",
+      rel=CCP),
+    M("cl-loop-no-time", "\n           && elapsed <= maxTime) {", ") {",
+      rel=CCP),
+    M("cl-my-leg", "myLeg.y = myTo->y - myPos.y;",
+      "myLeg.y = myTo->y - itsPos.y;", rel=CCP),
+    M("cl-its-leg", "itsLeg.x = itsTo->x - itsPos.x;",
+      "itsLeg.x = itsTo->x - myPos.x;", rel=CCP),
+    M("cl-its-len", "itsLen = sqrtf(itsLeg.x * itsLeg.x + itsLeg.y * itsLeg.y);",
+      "itsLen = sqrtf(itsLeg.x * itsLeg.x + itsLeg.x * itsLeg.y);", rel=CCP),
+    M("cl-its-time", "itsTime = itsLen / itsSpeed;",
+      "itsTime = itsLen / mySpeed;", rel=CCP),
+    M("cl-my-time", "myTime = myLen / mySpeed;", "myTime = myLen / itsSpeed;",
+      rel=CCP),
+    M("cl-step", "step = myTime < itsTime ? myTime : itsTime;",
+      "step = myTime < itsTime ? itsTime : myTime;", rel=CCP),
+    M("cl-dx", "d.x = itsPos.x - myPos.x;", "d.x = myPos.x - itsPos.x;",
+      rel=CCP),
+    M("cl-dy", "d.y = itsPos.y - myPos.y;", "d.y = itsPos.y + myPos.y;",
+      rel=CCP),
+    M("cl-vx", "v.x = itsVel.x - myVel.x;", "v.x = myVel.x - itsVel.x;",
+      rel=CCP),
+    M("cl-vy", "v.y = itsVel.y - myVel.y;", "v.y = itsVel.y + myVel.y;",
+      rel=CCP),
+    M("cl-my-vel", "bNormalize2To(&myVel, &myVel, mySpeed);",
+      "bNormalize2To(&myVel, &myVel, itsSpeed);", rel=CCP),
+    M("cl-its-vel", "bNormalize2To(&itsVel, &itsVel, itsSpeed);",
+      "bNormalize2(&itsVel, &itsVel);", rel=CCP),
+    M("cl-boxes",
+      "at = ccp_when_will_overlap_occur_2d(&s_my_obbs[i], &s_its_obbs[j],",
+      "at = ccp_when_will_overlap_occur_2d(&s_my_obbs[i], &s_its_obbs[i],",
+      rel=CCP),
+    M("cl-at", "if (at <= step) {", "if (at < step) {", rel=CCP),
+    M("cl-hit", "hit = elapsed + at;", "hit = at;", rel=CCP),
+    M("cl-fm", "fm = ee_div(step * mySpeed, myLen);",
+      "fm = ee_div(step * itsSpeed, myLen);", rel=CCP),
+    M("cl-fi", "fi = ee_div(step * itsSpeed, itsLen);",
+      "fi = ee_div(step * itsSpeed, myLen);", rel=CCP),
+    M("cl-fm-ieee", "fm = ee_div(step * mySpeed, myLen);",
+      "fm = step * mySpeed / myLen;", rel=CCP),
+    M("cl-fi-ieee", "fi = ee_div(step * itsSpeed, itsLen);",
+      "fi = step * itsSpeed / itsLen;", rel=CCP),
+    M("cl-my-x", "myPos.x = myPos.x + (myTo->x - myPos.x) * fm;",
+      "myPos.x = myTo->x;", rel=CCP),
+    M("cl-its-y", "itsPos.y = itsPos.y + (itsTo->y - itsPos.y) * fi;",
+      "itsPos.y = itsPos.y + (itsTo->y - itsPos.y) * fm;", rel=CCP),
+    M("cl-its-x", "itsPos.x = itsPos.x + (itsTo->x - itsPos.x) * fi;",
+      "itsPos.x = itsTo->x;", rel=CCP),
+    M("cl-my-y", "myPos.y = myPos.y + (myTo->y - myPos.y) * fm;",
+      "myPos.y = myPos.y + (myTo->y - myPos.y) * fi;", rel=CCP),
+    M("cl-leg-done",
+      "if (fabsf(myTime - step) <= CCP_LEG_DONE)\n            i++;\n"
+      "        else\n            j++;",
+      "if (fabsf(itsTime - step) <= CCP_LEG_DONE)\n            j++;\n"
+      "        else\n            i++;", rel=CCP),
+    M("cl-both", "            i++;\n        else\n            j++;",
+      "            i++;\n        j++;", rel=CCP),
+    M("cl-elapsed", "elapsed = elapsed + step;", "elapsed = step;", rel=CCP),
+    M("cl-when", "    *when = hit;\n", "", rel=CCP),
+    M("cl-r-lt", "r = hit < CCP_NO_HIT && !(", "r = !(", rel=CCP),
+    # -- MakeOBBsForDriveTarget ------------------------------------------
+    M("co-np", "if (t == NULL || t->NumPoints <= 0 ||",
+      "if (t == NULL || t->NumPoints < 0 ||", rel=CCP),
+    M("co-obbs", "|| obbs == NULL || car == NULL)", "|| car == NULL)",
+      rel=CCP),
+    M("co-car", "|| obbs == NULL || car == NULL)", "|| obbs == NULL)",
+      rel=CCP),
+    M("co-h0", "h0 = fabsf((hi.x - lo.x) * 0.5f) * scale;",
+      "h0 = fabsf((hi.x - lo.x) * 0.5f);", rel=CCP),
+    M("co-h0-fabs", "h0 = fabsf((hi.x - lo.x) * 0.5f) * scale;",
+      "h0 = (hi.x - lo.x) * 0.5f * scale;", rel=CCP),
+    M("co-h1", "h1 = fabsf((hi.y - lo.y) * 0.5f) * scale;",
+      "h1 = fabsf((hi.x - lo.x) * 0.5f) * scale;", rel=CCP),
+    M("co-h2", "h2 = fabsf((hi.z - lo.z) * 0.5f) * scale;",
+      "h2 = fabsf((hi.z - lo.z) * 0.25f) * scale;", rel=CCP),
+    M("co-sincos", "bSinCos(&s, &c, car->State.Angle);",
+      "bSinCos(&c, &s, car->State.Angle);", rel=CCP),
+    M("co-0-a0x", "obbs[0].A0.x = c;", "obbs[0].A0.x = s;", rel=CCP),
+    M("co-0-a0y", "obbs[0].A0.y = s;", "obbs[0].A0.y = -s;", rel=CCP),
+    M("co-0-a1x", "obbs[0].A1.x = -s;", "obbs[0].A1.x = s;", rel=CCP),
+    M("co-0-a1y", "obbs[0].A1.y = c;", "obbs[0].A1.y = -c;", rel=CCP),
+    M("co-0-a0pad", "    obbs[0].A0.pad = 0.0f;\n", "", rel=CCP),
+    M("co-0-a2z", "obbs[0].A2.z = 1.0f;", "obbs[0].A2.z = 0.0f;", rel=CCP),
+    M("co-0-a2y", "    obbs[0].A2.y = 0.0f;\n", "", rel=CCP),
+    M("co-0-h0", "obbs[0].a0 = h0;", "obbs[0].a0 = h1;", rel=CCP),
+    M("co-0-h1", "obbs[0].a1 = h1;", "obbs[0].a1 = h0;", rel=CCP),
+    M("co-0-h2", "obbs[0].a2 = h2;", "obbs[0].a2 = h1;", rel=CCP),
+    M("co-0-pos", "obbs[0].Position = t->Points[0];",
+      "obbs[0].Position = t->Points[1];", rel=CCP),
+    M("co-loop", "for (i = 1; i < t->NumPoints; i++) {",
+      "for (i = 1; i < t->NumPoints - 1; i++) {", rel=CCP),
+    M("co-dir-y", "dir.y = t->Points[i - 1].y - t->Points[i].y;",
+      "dir.y = t->Points[i].y - t->Points[i - 1].y;", rel=CCP),
+    M("co-dir-x", "dir.x = t->Points[i - 1].x - t->Points[i].x;",
+      "dir.x = t->Points[i].x - t->Points[i - 1].x;", rel=CCP),
+    M("co-norm", "        bNormalize2(&dir, &dir);\n", "", rel=CCP),
+    M("co-a0y", "o->A0.y = dir.y;", "o->A0.y = dir.x;", rel=CCP),
+    M("co-a0x", "o->A0.x = dir.x;", "o->A0.x = -dir.x;", rel=CCP),
+    M("co-a1y", "o->A1.y = dir.x;", "o->A1.y = -dir.x;", rel=CCP),
+    M("co-a1x", "o->A1.x = -dir.y;", "o->A1.x = dir.y;", rel=CCP),
+    M("co-a1pad", "        o->A1.pad = 0.0f;\n", "", rel=CCP),
+    M("co-a2z", "o->A2.z = 1.0f;", "o->A2.z = -1.0f;", rel=CCP),
+    M("co-a2x", "        o->A2.x = 0.0f;\n", "", rel=CCP),
+    M("co-h0s", "o->a0 = h0;", "o->a0 = h1;", rel=CCP),
+    M("co-h1s", "o->a1 = h1;", "o->a1 = h2;", rel=CCP),
+    M("co-h2s", "o->a2 = h2;", "o->a2 = h0;", rel=CCP),
+    M("co-pos", "o->Position = t->Points[i];",
+      "o->Position = t->Points[i - 1];", rel=CCP),
+    # -- WhenWillOverlapOccur2D ------------------------------------------
+    M("cv-c10", "float c10 = a->A1.x * b->A0.x + a->A1.y * b->A0.y;",
+      "float c10 = a->A1.x * b->A0.x + a->A1.y * b->A1.y;", rel=CCP),
+    M("cv-c00", "float c00 = a->A0.x * b->A0.x + a->A0.y * b->A0.y;",
+      "float c00 = a->A0.x * b->A0.x - a->A0.y * b->A0.y;", rel=CCP),
+    M("cv-c11", "float c11 = a->A1.x * b->A1.x + a->A1.y * b->A1.y;",
+      "float c11 = a->A1.x * b->A1.x;", rel=CCP),
+    M("cv-c01", "float c01 = a->A0.x * b->A1.x + a->A0.y * b->A1.y;",
+      "float c01 = a->A0.x * b->A1.y + a->A0.y * b->A1.x;", rel=CCP),
+    M("cv-ra1-own", "float rA1 = (fabsf(a->a1) +", "float rA1 = (fabsf(a->a0) +",
+      rel=CCP),
+    M("cv-ra1-c", "fabsf(b->a0 * c10)) + fabsf(b->a1 * c11);",
+      "fabsf(b->a0 * c11)) + fabsf(b->a1 * c10);", rel=CCP),
+    M("cv-ra0-c", "fabsf(b->a0 * c00)) + fabsf(b->a1 * c01);",
+      "fabsf(b->a0 * c00));", rel=CCP),
+    M("cv-ra0-fabs", "fabsf(b->a0 * c00)) + fabsf(b->a1 * c01);",
+      "b->a0 * c00) + fabsf(b->a1 * c01);", rel=CCP),
+    M("cv-ra0-own", "float rA0 = (fabsf(a->a0) +", "float rA0 = (a->a0 +",
+      rel=CCP),
+    M("cv-rb1-c", "fabsf(a->a0 * c01)) + fabsf(a->a1 * c11);",
+      "fabsf(a->a0 * c10)) + fabsf(a->a1 * c11);", rel=CCP),
+    M("cv-rb1-own", "float rB1 = (fabsf(b->a1) +", "float rB1 = (fabsf(b->a0) +",
+      rel=CCP),
+    M("cv-rb0-c", "fabsf(a->a0 * c00)) + fabsf(a->a1 * c10);",
+      "fabsf(a->a0 * c00)) + fabsf(a->a1 * c01);", rel=CCP),
+    M("cv-rb0-own", "float rB0 = (fabsf(b->a0) +", "float rB0 = (fabsf(b->a1) +",
+      rel=CCP),
+    M("cv-a1-d", "v->x * a->A1.x + v->y * a->A1.y, d->x * a->A1.x + d->y * a->A1.y,",
+      "v->x * a->A1.x + v->y * a->A1.y, d->x * a->A1.x - d->y * a->A1.y,",
+      rel=CCP),
+    M("cv-a1-v", "v->x * a->A1.x + v->y * a->A1.y, d->x * a->A1.x + d->y * a->A1.y,",
+      "v->x * a->A0.x + v->y * a->A0.y, d->x * a->A1.x + d->y * a->A1.y,",
+      rel=CCP),
+    M("cv-a0-v", "v->x * a->A0.x + v->y * a->A0.y, d->x * a->A0.x + d->y * a->A0.y,",
+      "-(v->x * a->A0.x + v->y * a->A0.y), d->x * a->A0.x + d->y * a->A0.y,",
+      rel=CCP),
+    M("cv-a0-d", "v->x * a->A0.x + v->y * a->A0.y, d->x * a->A0.x + d->y * a->A0.y,",
+      "v->x * a->A0.x + v->y * a->A0.y, d->y * a->A0.x + d->x * a->A0.y,",
+      rel=CCP),
+    M("cv-b1-d", "v->x * b->A1.x + v->y * b->A1.y, d->x * b->A1.x + d->y * b->A1.y,",
+      "v->x * b->A1.x + v->y * b->A1.y, d->x * b->A1.x,", rel=CCP),
+    M("cv-b1-v", "v->x * b->A1.x + v->y * b->A1.y, d->x * b->A1.x + d->y * b->A1.y,",
+      "v->x * b->A1.x - v->y * b->A1.y, d->x * b->A1.x + d->y * b->A1.y,",
+      rel=CCP),
+    M("cv-b0-v", "v->x * b->A0.x + v->y * b->A0.y, d->x * b->A0.x + d->y * b->A0.y,",
+      "v->y * b->A0.x + v->x * b->A0.y, d->x * b->A0.x + d->y * b->A0.y,",
+      rel=CCP),
+    M("cv-b0-d", "v->x * b->A0.x + v->y * b->A0.y, d->x * b->A0.x + d->y * b->A0.y,",
+      "v->x * b->A0.x + v->y * b->A0.y, -(d->x * b->A0.x + d->y * b->A0.y),",
+      rel=CCP),
+    M("cv-r-a1", "rA1, &in[0], &in[1]);", "rA0, &in[0], &in[1]);", rel=CCP),
+    M("cv-r-a0", "rA0, &in[2], &in[3]);", "rA1, &in[2], &in[3]);", rel=CCP),
+    M("cv-r-b1", "rB1, &in[4], &in[5]);", "rB0, &in[4], &in[5]);", rel=CCP),
+    M("cv-r-b0", "rB0, &in[6], &in[7]);", "rB1, &in[6], &in[7]);", rel=CCP),
+    M("cv-ov1", "if (!ccp_interval_overlap(in[0], in[1], in[2], in[3], &lo, &hi)",
+      "if (!ccp_interval_overlap(in[0], in[1], in[0], in[1], &lo, &hi)",
+      rel=CCP),
+    M("cv-ov2", "        || !ccp_interval_overlap(lo, hi, in[4], in[5], &lo, &hi)\n",
+      "", rel=CCP),
+    M("cv-ov3",
+      "        || !ccp_interval_overlap(lo, hi, in[6], in[7], &lo, &hi)) {",
+      "        ) {", rel=CCP),
+    M("cv-fail", "        lo = CCP_NO_OVERLAP;\n        hi",
+      "        lo = -1.0f;\n        hi", rel=CCP),
+    M("cv-ret-lo", "if (0.0f < lo)\n        return lo;",
+      "if (0.0f <= lo)\n        return lo;", rel=CCP),
+    M("cv-ret-0", "if (lo < 0.0f && 0.0f < hi)", "if (lo < 0.0f)", rel=CCP),
+    M("cv-ret-0-hi", "if (lo < 0.0f && 0.0f < hi)",
+      "if (lo < 0.0f && 0.0f <= hi)", rel=CCP),
+    M("cv-ret-0-lo", "if (lo < 0.0f && 0.0f < hi)",
+      "if (lo <= 0.0f && 0.0f < hi)", rel=CCP),
+    M("cv-ret-none", "        return 0.0f;\n    return CCP_NO_OVERLAP;",
+      "        return 0.0f;\n    return hi;", rel=CCP),
+    # -- TimeIntervalForSeparatingAxis ------------------------------------
+    M("ct-still-fabs", "if (fabsf(v) < CCP_AXIS_STILL) {",
+      "if (v < CCP_AXIS_STILL) {", rel=CCP),
+    M("ct-still-le", "if (fabsf(v) < CCP_AXIS_STILL) {",
+      "if (fabsf(v) <= CCP_AXIS_STILL) {", rel=CCP),
+    M("ct-r", "if (r < fabsf(d)) {", "if (r <= fabsf(d)) {", rel=CCP),
+    M("ct-r-fabs", "if (r < fabsf(d)) {", "if (r < d) {", rel=CCP),
+    M("ct-never-min", "*tmin = CCP_NEVER;", "*tmin = CCP_ALWAYS;", rel=CCP),
+    M("ct-never-max", "*tmin = CCP_NEVER;\n            *tmax = CCP_NEVER;",
+      "*tmin = CCP_NEVER;\n            *tmax = CCP_ALWAYS;", rel=CCP),
+    M("ct-always-min", "*tmin = CCP_ALWAYS;", "*tmin = CCP_NEVER;", rel=CCP),
+    M("ct-always-max", "*tmin = CCP_ALWAYS;\n            *tmax = CCP_NEVER;",
+      "*tmin = CCP_ALWAYS;\n            *tmax = CCP_ALWAYS;", rel=CCP),
+    M("ct-return", "        return;\n    }\n    *tmax = (r - d) / v;",
+      "    }\n    *tmax = (r - d) / v;", rel=CCP),
+    M("ct-tmax", "*tmax = (r - d) / v;", "*tmax = (r + d) / v;", rel=CCP),
+    M("ct-tmin", "*tmin = -(r + d) / v;", "*tmin = (r + d) / v;", rel=CCP),
+    M("ct-tmin-d", "*tmin = -(r + d) / v;", "*tmin = -(r - d) / v;", rel=CCP),
+    M("ct-swap", "if (v < 0.0f) {", "if (v > 0.0f) {", rel=CCP),
+    M("ct-swap-half", "        *tmin = *tmax;\n        *tmax = lo;",
+      "        *tmin = *tmax;", rel=CCP),
+    # -- IntervalOverlap ------------------------------------------------
+    M("cn-passes", "for (n = 3; n > 0; n--) {", "for (n = 2; n > 0; n--) {",
+      rel=CCP),
+    M("cn-inner", "for (k = 0; k < n; k++) {", "for (k = 1; k < n; k++) {",
+      rel=CCP),
+    M("cn-cmp", "if (e[k + 1] < e[k]) {", "if (e[k + 1] <= e[k]) {",
+      rel=CCP),
+    M("cn-swap", "                e[k] = e[k + 1];\n                e[k + 1] = x;",
+      "                e[k] = e[k + 1];", rel=CCP),
+    M("cn-a0", "if (a0 <= e[1] && e[1] <= a1", "if (a0 < e[1] && e[1] <= a1",
+      rel=CCP),
+    M("cn-a1", "&& e[1] <= a1 &&", "&& e[1] < a1 &&", rel=CCP),
+    M("cn-b0", "&& b0 <= e[1] &&", "&& b0 < e[1] &&", rel=CCP),
+    M("cn-b1", "&& e[1] <= b1)", "&& e[1] < b1)", rel=CCP),
+    M("cn-lo", "*lo = e[1];", "*lo = e[0];", rel=CCP),
+    M("cn-hi", "*hi = e[2];", "*hi = e[3];", rel=CCP),
+    M("cn-ret", "        return 1;\n    }\n    return 0;",
+      "        return 0;\n    }\n    return 0;", rel=CCP),
 ]
 
 EQUIVALENT = {

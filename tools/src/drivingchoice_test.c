@@ -22,6 +22,8 @@
 
 #include "aicarcontroller.h"
 #include "car.h"
+#include "carcollisionpredict.h"
+#include "collisionbody.h"
 #include "carcontroller.h"
 #include "cardriver.h"
 #include "cartypeinfo.h"
@@ -34,6 +36,7 @@
 #include "track.h"
 #include "trackroute.h"
 #include "vtable.h"
+#include "world.h"
 #include "worldobject.h"
 
 #define NCARS   16
@@ -51,9 +54,8 @@ float   WorldTimeElapsed;
 // carcollisionbody.c's, which would bring the collision code with it.
 int32_t WilliamsAITuningMode;
 
-// racecore.c's destructor and boundary code reach these; nothing here
-// calls either.
-void (*gWorldObjectDeleteFn)(WorldObject *o);
+// racecore.c's boundary code reaches this; nothing here calls it.
+// gWorldObjectDeleteFn, which its destructor reaches too, is obb.c's.
 
 TrackPositionMarker *track_get_position_marker_named(const char *name, int i)
 {
@@ -85,6 +87,10 @@ static FuturePointList fpl;
 static float lval;
 static DriveTarget target;
 static Race race;
+static CarCollisionBody bodies[NCARS];
+static World world;
+static OBB obbs[DRIVETARGET_MAX_POINTS], obb_a, obb_b;
+static float outs[2];
 
 static struct {
     TrackRoute      *route;
@@ -114,6 +120,15 @@ static int is_pat(const void *p)
         if (((v >> (8 * i)) & 0xff) != PAT)
             return 0;
     return 1;
+}
+
+// Whether a float no longer holds the fill.
+static int written(const float *f)
+{
+    uint32_t u;
+
+    memcpy(&u, f, 4);
+    return u != 0xa5a5a5a5u;
 }
 
 static int index_in(const void *p, const void *base, size_t stride, int n)
@@ -301,6 +316,40 @@ static void dump_fpl(void)
     }
 }
 
+// The boxes written: up to the first whose a0 is still the fill. Only a
+// position's x, y and z, as the checker's.
+static void dump_obbs(void)
+{
+    int n = 0, i;
+
+    while (n < DRIVETARGET_MAX_POINTS && written(&obbs[n].a0))
+        n++;
+    printf("  obbs %d\n", n);
+    for (i = 0; i < n; i++) {
+        const OBB *o = &obbs[i];
+
+        // Two printfs: fx has 16 buffers, and a line is 19 values.
+        printf("    %d %s %s %s | %s %s %s %s | %s %s %s %s", i,
+               fx(o->Position.x), fx(o->Position.y), fx(o->Position.z),
+               fx(o->A0.x), fx(o->A0.y), fx(o->A0.z), fx(o->A0.pad),
+               fx(o->A1.x), fx(o->A1.y), fx(o->A1.z), fx(o->A1.pad));
+        printf(" | %s %s %s %s | %s %s %s\n", fx(o->A2.x), fx(o->A2.y),
+               fx(o->A2.z), fx(o->A2.pad), fx(o->a0), fx(o->a1), fx(o->a2));
+    }
+}
+
+// A0's and A1's x and y, a0 and a1; the rest 0.
+static void put_obb(OBB *o, char **v)
+{
+    memset(o, 0, sizeof *o);
+    o->A0.x = fh(v[0]);
+    o->A0.y = fh(v[1]);
+    o->A1.x = fh(v[2]);
+    o->A1.y = fh(v[3]);
+    o->a0 = fh(v[4]);
+    o->a1 = fh(v[5]);
+}
+
 static void dump_walk(int got)
 {
     printf("  adv %d %s %s n %d o %s x %d l %d\n", got, nm(walk.route),
@@ -326,6 +375,9 @@ static void reset(void)
     memset(oobs, 0, sizeof oobs);
     memset(signs, 0, sizeof signs);
     memset(&race, 0, sizeof race);
+    memset(bodies, 0, sizeof bodies);
+    world.CollisionPredictionID = 0;
+    pCurrentWorld = &world;
     memset(TheTrackRouteManager.pTrackRoutes, 0,
            sizeof TheTrackRouteManager.pTrackRoutes);
     for (i = 0; i < NSIGNS; i++) {
@@ -714,6 +766,79 @@ static void op(char **t, int n)
                                                         &list, &fpl, fh(t[1]));
         dump_target();
         dump_its();
+    } else if (c == 'A') {
+        int k = atoi(t[1]);
+        Car *car = &cars[k];
+        CarCollisionBody *b = &bodies[k];
+
+        car->State.Acceleration.x = fh(t[2]);
+        car->State.Acceleration.y = fh(t[3]);
+        car->State.Velocity.z = fh(t[4]);
+        car->State.Angle = (uint16_t)atoi(t[5]);
+        car->pDynamicCollisionBody = b;
+        b->Dynamic.LocalBBMin.x = fh(t[6]);
+        b->Dynamic.LocalBBMin.y = fh(t[7]);
+        b->Dynamic.LocalBBMin.z = fh(t[8]);
+        b->Dynamic.LocalBBMax.x = fh(t[9]);
+        b->Dynamic.LocalBBMax.y = fh(t[10]);
+        b->Dynamic.LocalBBMax.z = fh(t[11]);
+    } else if (c == 'Z') {
+        car_ai_controller(car_ptr(t[1]))->CarToExcludeFromCollisionPrediction =
+            car_ptr(t[2]);
+    } else if (c == 'S') {
+        target.NumPoints = (int8_t)atoi(t[1]);
+    } else if (c == '1') {
+        int got;
+
+        fill(outs, sizeof outs);
+        got = ccp_interval_overlap(fh(t[1]), fh(t[2]), fh(t[3]), fh(t[4]),
+                                   &outs[0], &outs[1]);
+        printf("  ovl %d %s %s\n", got, fx(outs[0]), fx(outs[1]));
+    } else if (c == '2') {
+        fill(outs, sizeof outs);
+        ccp_time_interval_for_separating_axis(fh(t[1]), fh(t[2]), fh(t[3]),
+                                              &outs[0], &outs[1]);
+        printf("  tisa %s %s\n", fx(outs[0]), fx(outs[1]));
+    } else if (c == '3') {
+        bVector3 d, v;
+
+        put_obb(&obb_a, t + 1);
+        put_obb(&obb_b, t + 7);
+        d.x = fh(t[13]);
+        d.y = fh(t[14]);
+        d.z = d.pad = 0.0f;
+        v.x = fh(t[15]);
+        v.y = fh(t[16]);
+        v.z = v.pad = 0.0f;
+        printf("  when %s\n",
+               fx(ccp_when_will_overlap_occur_2d(&obb_a, &obb_b, &d, &v)));
+    } else if (c == '4') {
+        int z = atoi(t[4]);
+        int k = atoi(t[1]);
+        DriveTarget *d = k < 0 ? &target : &cdrivers[k].MyDriveTarget;
+
+        fill(obbs, sizeof obbs);
+        ccp_make_obbs_for_drive_target(z & 1 ? NULL : d, z & 2 ? NULL : obbs,
+                                       car_ptr(t[2]), fh(t[3]));
+        dump_obbs();
+    } else if (c == '5') {
+        printf("  stopped %d\n", ccp_is_this_car_stopped_directly_in_front_of_me(
+                                      &list.Array[atoi(t[1])], &list));
+    } else if (c == '6') {
+        int got;
+
+        fill(outs, sizeof outs);
+        got = ccp_will_i_hit_this_car(&target, &loc, list.MyCar, car_ptr(t[1]),
+                                      fh(t[2]), &outs[0]);
+        printf("  will %d %s\n", got, fx(outs[0]));
+    } else if (c == '7') {
+        Car *got;
+
+        fill(outs, sizeof outs);
+        got = ccp_who_will_this_drive_target_hit(
+            &target, &list, atoi(t[2]) & 1 ? NULL : &loc, fh(t[1]), &outs[0]);
+        printf("  who %s %s id %u\n", nm(got), fx(outs[0]),
+               (unsigned)world.CollisionPredictionID);
     } else {
         fprintf(stderr, "bad op %s\n", t[0]);
         exit(2);

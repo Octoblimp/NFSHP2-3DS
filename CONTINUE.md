@@ -1,11 +1,11 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 38
-(2026-10-05), after 11b-2, DrivingChoice's small methods and the walk
-along the route.
+(2026-10-05), after 11b-4a, CarCollisionPredict.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
-and 11b-2 are done and checked against retail. The car selector is finished and checked against retail: SC-1
+11b-2 and 11b-3, DrivingChoice up to its targets, and 11b-4a,
+CarCollisionPredict, are done and checked against retail. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -125,12 +125,33 @@ car's were.
   - Two more divergences are in the source and in
     `docs/formats/ai-driving-choice.md`: the entry read with no NULL
     test, and the new points' w (STACK-W).
-- **11b-4, next:** CarCollisionPredict's four live functions, then
-  IsDriveable, TryChoice, TryToDriveAroundCar and MakeNewChoice.
-  TryChoice reads AITrafficTuningMode: traffic with it set may only
-  take a side of an AI racer or a player, and WillIHitThisCar gives
-  traffic 1000 there.
-- 11c: the rest of CarCollisionPredict, AIPlan and the AIAction base.
+- **11b-4a, done:** `carcollisionpredict.c` has CarCollisionPredict,
+  which car an AI car's target runs it into, and when.
+  - The four live methods are WhoWillThisDriveTargetHit (0x001e5e60),
+    IsThisCarStoppedDirectlyInFrontOfMe, WillIHitThisCar and
+    MakeOBBsForDriveTarget. The three free functions under them are
+    WhenWillOverlapOccur2D, TimeIntervalForSeparatingAxis and
+    IntervalOverlap. Its four dead functions are left out.
+  - Each car's target becomes a chain of boxes. The two are walked
+    together at their speeds, and each step asks when the current boxes
+    first overlap on the ground.
+  - The walk divides 0 by 0 on a leg of 0 (0x001e65ec, 0x001e65f4), so
+    both divides are ee_div. WillIHitThisCar's 4720-byte frame (two
+    targets and forty boxes) is static storage in the port.
+  - Retail's own corners: a still axis with the boxes apart answers
+    9999, so two crawling cars "hit" at 9999 s. A miss after a long
+    step comes out past 99999.
+  - `drivingchoice_check` links it, with `obb.c`: 98 scenarios, 97,604
+    lines, 0 differ. Four new kinds of scenario: s_predict, s_parts,
+    s_meet and s_stopped. Its 207 mutations are all caught, so the
+    checker's 592 have 590 caught and the old 2 equivalent.
+  - `docs/formats/ai-collision-predict.md` has the detail.
+- **11b-4b, next:** IsDriveable (0x00241ff8, with its WhoWill caller
+  at 0x00242100), TryChoice (0x002428d0), TryToDriveAroundCar
+  (0x00242c20) and MakeNewChoice (0x00242170). TryChoice reads
+  AITrafficTuningMode: traffic with it set may only take a side of an
+  AI racer or a player, and WillIHitThisCar gives traffic 1000 there.
+- 11c: AIPlan and the AIAction base. CarCollisionPredict is whole.
 - 11d: the actions.
 - 11e and 11f: AICarController and AIDriver (`gAIDriverCtorFn` in
   `carmodes.h`, and `gAICarControllerGetCurrentDrivingLineSpeedFn` in
@@ -3711,19 +3732,20 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-05, after 11b-3, BuildDriveTarget)
+### Where the port stands (2026-10-05, after 11b-4a, CarCollisionPredict)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11b-4, CarCollisionPredict and
-  MakeNewChoice. See "Now" at the top. These are done:
+- **Next:** step 11, the racer AI: 11b-4b, MakeNewChoice and the
+  three it calls. See "Now" at the top. These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
   - 11b-2, DrivingChoice's small methods and the walk;
-  - 11b-3, BuildDriveTarget and round a car.
+  - 11b-3, BuildDriveTarget and round a car;
+  - 11b-4a, CarCollisionPredict.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -3735,7 +3757,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a and 11b-1 to 11b-3 done) | 6-8 |
+  | 11, the racer and traffic AI (11a, 11b-1 to 11b-3 and 11b-4a done) | 6-8 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |
@@ -3745,12 +3767,12 @@ goes in.
   | 20, the split-screen decision and the final CIA | 1-2 |
   | **Total** | **27-41** |
 
-- **How far along:** about 28-31 of the road's 55-72 slices are done,
+- **How far along:** about 29-32 of the road's 56-73 slices are done,
   roughly a third. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
   Read the 27-41 as a floor. Step 11 was put at 4-6 before its slices
-  were laid out; they are ten, 11a, 11b-1 to 11b-4 and 11c to 11g, and
-  traffic beside them. 11b was one slice until DrivingChoice's 13 KB
+  were laid out. They are eleven, with traffic beside them: 11a, 11b-1
+  to 11b-3, 11b-4a and 11b-4b, and 11c to 11g. 11b was one slice until DrivingChoice's 13 KB
   were read.
 - **The pace:** 80 commits from 2026-09-27 to 2026-10-04, most of them a
   slice each.
