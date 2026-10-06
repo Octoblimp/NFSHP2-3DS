@@ -11,14 +11,20 @@
 
 #include "carcollisionpredict.h"
 #include "cardriver.h"
+#include "chopper.h"
+#include "collision.h"
+#include "collisionbody.h"
+#include "copmanager.h"
 #include "drivetarget.h"
 #include "drivingchoice.h"
 #include "drivinglocation.h"
+#include "player.h"
 #include "race.h"
 #include "racecore.h"
 #include "realtime.h"   // WorldTimer
 #include "topology.h"
 #include "vtable.h"
+#include "world.h"
 
 // Retail's constants: AIAction.obj's .lit4 and the few built with `lui`.
 #define AIA_TICKS_TO_SECONDS   0.000250000012f  // gp-28708 and the rest
@@ -41,13 +47,41 @@
 #define AIAC_ACROSS_MARGIN     1.0f             // lui 0x3f80
 #define AIAC_SLOWER_BY         0.100000001f     // gp-28712
 #define AIAC_MIN_SPEED_BEHIND  20.0f            // lui 0x41a0
+#define AIPO_CHOPPER_RANGE     150.0f           // lui 0x4316
+#define AIPO_LIGHTS_SECONDS    3.5f             // lui 0x4060
+#define AIPO_LIGHTS_MIN        100.0f           // lui 0x42c8
+#define AIPO_NO_TIMEOUT        (-999.0f)        // gp-28668
+#define AIPO_TIMEOUT_EPSILON   0.00100000005f   // gp-28664
+#define AIPO_REEVALUATE_EVERY  0.300000012f     // gp-28652
+#define AIPO_HIT_SOON          2.0f             // lui 0x4000
+#define AIPO_GENTLE            0.120000005f     // gp-28648
+#define AIPO_FIRM              0.200000003f     // gp-28644
+#define AIPO_BRAKE             0.200000003f     // gp-28640, gp-28636
+#define AIPO_TOO_FAST          15.0f            // lui 0x4170
+#define AIPO_ROOM_LOW          2.0f             // lui 0x4000
+#define AIPO_ROOM_HIGH         4.0f             // lui 0x4080
+#define AIPO_CREEP_SPEED       14.0f            // lui 0x4160
+#define AIPO_TOLERANCE         2.0f             // lui 0x4000
+#define AIPO_STOPPED           0.5f             // lui 0x3f00
+#define AIPO_TIME_TO_SPEED     0.200000003f     // gp-28632
+#define AIPO_CAREFUL_SKILL     (-2)
+#define AIIJ_REEVALUATE_EVERY  0.200000003f     // gp-28572
+#define AIIJ_BRAKE             0.200000003f     // gp-28568
+#define AIIJ_OVERLAP           2.79999995f      // gp-28564
+#define AIIJ_BACK_OFF          6.0f             // lui 0x40c0
+#define AIIJ_ACCEL             0.200000003f     // gp-28560, gp-28548
+#define AIIJ_SLOWER_BY         0.100000001f     // gp-28556
+#define AIIJ_SLOWER_UNUSED     0.200000003f     // gp-28552
+#define AIIJ_MIN_SPEED         20.0f            // lui 0x41a0
 
 #define AIDR_SCORE   200
 #define AINC_SCORE   300
 #define AIPA_SCORE   300
 #define AIBL_SCORE   400
 #define AIAC_SCORE   400
+#define AIIJ_SCORE   400
 #define AIAR_SCORE   500
+#define AIPO_SCORE   600
 #define AIA_NO_SCORE (-1)
 
 float AIDriverAvoidCarsImpactTimeThreshold = 2.0f;
@@ -967,6 +1001,454 @@ Car *aiavoidcars_get_car_to_avoid(AIActionAvoidCars *a)
     return a->CarToAvoid;
 }
 
+// --------------------------------------------------------- PullOver
+
+// 0x001c8660, a method that does not read `this`: the room between my car
+// and the right edge at `rp`, less my half width.
+static float room_to_the_right_edge(NearbyCarList *list,
+                                    const TrackRoutePoint *rp)
+{
+    const Car *me = list->MyCar;
+
+    return (rp->RightWidth - list->MyHalfSizeL)
+           - ((me->State.Position.x - rp->Position.x) * rp->Direction.y
+              - (me->State.Position.y - rp->Position.y) * rp->Direction.x);
+}
+
+// Car+2056 as retail reads it, a word: CopLights and the three bytes after.
+static int cop_lights_word(const Car *c)
+{
+    const uint8_t *p = (const uint8_t *)c + offsetof(Car, CopLights);
+
+    return (p[0] | p[1] | p[2] | p[3]) != 0;
+}
+
+// A car with its cop lights on, within 3.5 s at its speed and no less than
+// 100 m. The range is worked out before the lights are asked.
+static int cop_lights_in_range(const Car *c, const Car *me)
+{
+    float range = max_s(c->State.VelocityMagnitude * AIPO_LIGHTS_SECONDS,
+                        AIPO_LIGHTS_MIN);
+    float dx, dy;
+
+    if (!cop_lights_word(c))
+        return 0;
+    dx = c->State.Position.x - me->State.Position.x;
+    dy = c->State.Position.y - me->State.Position.y;
+    return sqrtf(dx * dx + dy * dy) <= range;
+}
+
+AIActionPullOver *aipullover_init(AIActionPullOver *a, int32_t score,
+                                  float timeout, float pullOverTimeout,
+                                  NearbyCarList *list, DrivingLocation *loc)
+{
+    // 0x001c8298. The two Timers' own constructors zero them first.
+    aiaction_init(&a->Base, score, timeout);
+    a->MyCreationTime.PackedTime = 0;
+    a->LastDecisionReevaluationTime.PackedTime = 0;
+    a->Base.Base._vtable = AIPULLOVER_VTABLE;
+    a->Base.Type = AIACTION_PULL_OVER;
+    a->MyCreationTime.PackedTime = (uint32_t)WorldTimer;
+    a->IsMyDrivingChoiceOkay = 1;
+    a->PullOverTimeout = pullOverTimeout;
+    if (list != NULL && loc != NULL)
+        a->New620 = AIPO_ROOM_LOW < room_to_the_right_edge(list,
+                                                           loc->pRoutePoint);
+    else
+        a->New620 = 1;
+    a->LastDecisionReevaluationTime.PackedTime = 0;
+    drivetarget_clear(&a->Base.PointsToDrive, NULL, 0.0f);
+    return a;
+}
+
+void aipullover_destroy(AIActionPullOver *a, int32_t flags)
+{
+    // 0x001ca788.
+    destroy_as(&a->Base, AIPULLOVER_VTABLE, flags);
+}
+
+int32_t aipullover_calculate_score(DrivingInformation *info)
+{
+    // 0x001c8400. Neither the players nor the cops' cars are tested for
+    // NULL; the cops themselves are.
+    Car *me = info->MyNearbyCarList.MyCar;
+    struct Chopper *h;
+    int near = 0, i;
+
+    if (me->TheControlMode != TRAFFIC_CONTROL)
+        return AIA_NO_SCORE;
+    h = pCurrentWorld->Helicopter;
+    // The plan by `sltiu`, so a negative one is none of 0 to 2.
+    if (h != NULL
+        && ((uint32_t)h->Plan < 3u || h->Plan == CHOPPLAN_BOMBING_RUN)) {
+        float dx = h->CurrentPos.x - me->State.Position.x;
+        float dy = h->CurrentPos.y - me->State.Position.y;
+
+        if (sqrtf(dx * dx + dy * dy) <= AIPO_CHOPPER_RANGE)
+            near = 1;
+    }
+    if (pCopManager != NULL) {
+        const tCopManagerHead *m = copmanager_head(pCopManager);
+
+        for (i = 0; i < m->nNumAICops && !near; i++) {
+            const tCop *cop = m->Cops[i];
+
+            if (cop == NULL || cop->DesiredLogicState == LS_DISABLED)
+                continue;
+            if (cop_lights_in_range(cop->pMyCar, me))
+                near = 1;
+        }
+    }
+    for (i = 0; i < PlayerNumPlayers && !near; i++)
+        if (cop_lights_in_range(PlayerPlayersByIndex[i]->MyCar, me))
+            near = 1;
+    return near ? AIPO_SCORE : AIA_NO_SCORE;
+}
+
+int aipullover_has_been_accomplished(AIActionPullOver *a,
+                                     DrivingInformation *info)
+{
+    // 0x001c8610.
+    (void)a;
+    if (info->MyNearbyCarList.MyCar->TheControlMode != TRAFFIC_CONTROL)
+        return 0;
+    return aipullover_calculate_score(info) == AIA_NO_SCORE;
+}
+
+int aipullover_has_failed(AIActionPullOver *a, DrivingInformation *info)
+{
+    // 0x001c8658.
+    (void)a;
+    (void)info;
+    return 0;
+}
+
+int aipullover_has_expired(AIActionPullOver *a, DrivingInformation *info)
+{
+    // 0x001c8650.
+    (void)a;
+    (void)info;
+    return 0;
+}
+
+void aipullover_calculate_points_to_drive(AIActionPullOver *a,
+                                          DrivingInformation *info)
+{
+    // 0x001c86a8. Retail leaves f13 stale for BuildDriveTarget and
+    // MakeNewChoice, neither of which reads it.
+    NearbyCarList *list = &info->MyNearbyCarList;
+    DrivingLocation *loc = &info->MyDrivingLocation;
+    DrivingChoice *choice = &info->MyDrivingChoice;
+    Car *me = list->MyCar;
+    int careful;
+
+    drivetarget_assign(&a->Base.PointsToDrive, &me->pCarDriver->MyDriveTarget);
+    a->Base.UseDrivingLineSpeed = 0;
+    a->Base.AllowedToUseThrottleAndBrake = 1;
+    a->Base.DesiredSpeedTolerance = 0.0f;
+    a->Base.AllowedToUseBoost = 0;
+    careful = me->MyDriver->SkillLevel == AIPO_CAREFUL_SKILL;
+
+    if (fabsf(a->PullOverTimeout - AIPO_NO_TIMEOUT) <= AIPO_TIMEOUT_EPSILON
+        || seconds_since(&a->MyCreationTime) < a->PullOverTimeout) {
+        float speed;
+
+        if (AIPO_REEVALUATE_EVERY
+                < seconds_since(&a->LastDecisionReevaluationTime)
+            || a->Base.PointsToDrive.NumPoints == 0) {
+            float hitTime = 0.0f;
+            Car *hit;
+
+            a->LastDecisionReevaluationTime.PackedTime = (uint32_t)WorldTimer;
+            if (!drivingchoice_type_is_driving_line(choice->Type))
+                drivingchoice_set_choice_location(choice, loc);
+            a->IsMyDrivingChoiceOkay = 1;
+            if (careful) {
+                drivingchoice_build_drive_target(choice,
+                                                 &a->Base.PointsToDrive, loc,
+                                                 list, 0.0f, 0.0f,
+                                                 MOVEMENT_PARALLEL_TO_LINE);
+            } else {
+                drivetarget_clear(&a->Base.PointsToDrive, NULL, 0.0f);
+                drivingchoice_fill_up_drive_target(
+                    &a->Base.PointsToDrive, loc, list,
+                    MOVEMENT_TOWARDS_RIGHT_SIDE_OF_TRACK, 0);
+            }
+            hit = ccp_who_will_this_drive_target_hit(
+                &a->Base.PointsToDrive, list, loc,
+                AIDriverAvoidCarsImpactTimeThreshold, &hitTime);
+            if (hit != NULL && hitTime < AIPO_HIT_SOON) {
+                DriveTarget t;
+                DrivingChoice c;
+                int usedPreferred = 1;
+
+                drivetarget_init(&t);
+                drivingchoice_set_choice(&c, CHOICE_LEFT_SIDE_OF_CAR, hit, 0);
+                a->IsMyDrivingChoiceOkay = drivingchoice_make_new_choice(
+                    &c, &t, loc, list, AIDriverAvoidCarsImpactTimeThreshold,
+                    0.0f, &usedPreferred, 1);
+                drivetarget_assign(&a->Base.PointsToDrive, &t);
+                *choice = c;
+                drivetarget_destroy(&t);
+            }
+        }
+
+        speed = me->State.VelocityMagnitude;
+        if (careful) {
+            if (a->IsMyDrivingChoiceOkay)
+                a->Base.DesiredSpeed =
+                    speed + ai_calculate_max_deceleration(me, speed)
+                            * AIPO_GENTLE;
+            else
+                a->Base.DesiredSpeed =
+                    speed + ai_calculate_max_deceleration(me, speed)
+                            * AIPO_FIRM;
+        } else if (drivinglocation_is_clear(loc)
+                   || !a->IsMyDrivingChoiceOkay) {
+            aiaction_set_desired_speed_to_max_deceleration(&a->Base, me,
+                                                           AIPO_BRAKE);
+        } else {
+            int stop;
+
+            // New620 holds while the room to the edge is over 2 m, and
+            // comes back over 4.
+            if (AIPO_TOO_FAST < speed) {
+                a->New620 = 1;
+                stop = 1;
+            } else {
+                float room = room_to_the_right_edge(list, loc->pRoutePoint);
+
+                if (a->New620) {
+                    if (room < AIPO_ROOM_LOW)
+                        a->New620 = 0;
+                } else if (AIPO_ROOM_HIGH < room) {
+                    a->New620 = 1;
+                }
+                stop = !a->New620;
+            }
+            if (stop)
+                aiaction_set_desired_speed_to_max_deceleration(&a->Base, me,
+                                                               AIPO_BRAKE);
+            else
+                a->Base.DesiredSpeed = AIPO_CREEP_SPEED;
+            a->Base.DesiredSpeedTolerance = AIPO_TOLERANCE;
+        }
+
+        // Stopped, or touching another car: stop.
+        if (a->Base.DesiredSpeed < AIPO_STOPPED) {
+            a->Base.DesiredSpeed = 0.0f;
+            a->Base.DesiredSpeedTolerance = 0.0f;
+        } else {
+            CollisionBody *b = &me->pDynamicCollisionBody->Dynamic.Body;
+            int32_t i;
+
+            for (i = 0; i < b->NumCollisions; i++)
+                if (collision_is_two_car_collision(
+                        collisionbody_get_collision(b, i))) {
+                    a->Base.DesiredSpeed = 0.0f;
+                    a->Base.DesiredSpeedTolerance = 0.0f;
+                    break;
+                }
+        }
+    } else {
+        // Past the timeout: the location's line, at a stop. Retail's
+        // choice is its stack until SetChoice, which leaves it alone for
+        // a negative odd line; the port's is cleared.
+        DrivingChoice c;
+
+        drivingchoice_clear(&c);
+        drivingchoice_set_choice_location(&c, loc);
+        drivingchoice_build_drive_target(&c, &a->Base.PointsToDrive, loc,
+                                         list, 0.0f, 0.0f,
+                                         MOVEMENT_PARALLEL_TO_LINE);
+        a->Base.DesiredSpeedTolerance = 0.0f;
+        a->Base.DesiredSpeed = 0.0f;
+    }
+    a->Base.PointsToDriveWillExecuteAction = 1;
+    a->Base.TimeToGetToDesiredSpeed = AIPO_TIME_TO_SPEED;
+}
+
+const char *aipullover_get_name(AIActionPullOver *a)
+{
+    // 0x001ca778.
+    (void)a;
+    return "Pull over";
+}
+
+// ------------------------------------------------------- IJustGotHit
+
+AIActionIJustGotHit *aijustgothit_init(AIActionIJustGotHit *a, int32_t score,
+                                       float timeout, Car *car)
+{
+    // 0x001c9c68.
+    aiaction_init(&a->Base, score, timeout);
+    a->Base.Type = AIACTION_I_JUST_GOT_HIT;
+    a->CarIHit = car;
+    a->Base.Base._vtable = AIIJUSTGOTHIT_VTABLE;
+    a->LastDecisionReevaluationTime.PackedTime = 0;
+    return a;
+}
+
+void aijustgothit_destroy(AIActionIJustGotHit *a, int32_t flags)
+{
+    // 0x001ca638.
+    destroy_as(&a->Base, AIIJUSTGOTHIT_VTABLE, flags);
+}
+
+int32_t aijustgothit_calculate_score(DrivingInformation *info, Car **car)
+{
+    // 0x001c9d20. Of the two-car collisions whose other car is on the
+    // list, the last one that beats the one held: any does when none is
+    // held (or the held car is NULL), one ahead does when the held one is
+    // behind, and otherwise a smaller y does.
+    NearbyCarList *list = &info->MyNearbyCarList;
+    CollisionBody *b = &list->MyCar->pDynamicCollisionBody->Dynamic.Body;
+    NearbyCar *best = NULL;
+    Car *bestCar = NULL;
+    int found = 0;
+    int32_t i;
+
+    *car = NULL;
+    for (i = 0; i < b->NumCollisions; i++) {
+        Collision *c = collisionbody_get_collision(b, i);
+        Car *c1 = NULL, *c2 = NULL, *other;
+        NearbyCar *nc;
+        int take;
+
+        if (!collision_is_two_car_collision(c))
+            continue;
+        collision_get_colliding_cars(c, &c1, &c2);
+        other = c1 == list->MyCar ? c2 : c1;
+        nc = nearbycarlist_get_nearby_car(list, other);
+        if (nc == NULL)
+            continue;
+        if (best == NULL || bestCar == NULL)
+            take = 1;
+        else if (best->Position.y < 0.0f && 0.0f < nc->Position.y)
+            take = 1;
+        else
+            take = nc->Position.y < best->Position.y;
+        if (take) {
+            bestCar = other;
+            best = nc;
+            found = 1;
+        }
+    }
+    if (!found)
+        return AIA_NO_SCORE;
+    *car = bestCar;
+    return AIIJ_SCORE;
+}
+
+int aijustgothit_has_been_accomplished(AIActionIJustGotHit *a,
+                                       DrivingInformation *info)
+{
+    // 0x001c9e90.
+    Car *car = NULL;
+    int none = aijustgothit_calculate_score(info, &car) == AIA_NO_SCORE;
+
+    if (!none)
+        a->CarIHit = car;
+    if (a->CarIHit == NULL
+        || nearbycarlist_get_nearby_car(&info->MyNearbyCarList, a->CarIHit)
+           == NULL)
+        return 1;
+    return none;
+}
+
+int aijustgothit_has_failed(AIActionIJustGotHit *a, DrivingInformation *info)
+{
+    // 0x001c9f58.
+    (void)a;
+    (void)info;
+    return 0;
+}
+
+int aijustgothit_has_expired(AIActionIJustGotHit *a, DrivingInformation *info)
+{
+    // 0x001c9f10.
+    (void)info;
+    return past_timeout(&a->Base.Base);
+}
+
+void aijustgothit_calculate_points_to_drive(AIActionIJustGotHit *a,
+                                            DrivingInformation *info)
+{
+    // 0x001c9f60. Retail leaves f13 stale for MakeNewChoice, which does
+    // not read it.
+    NearbyCarList *list = &info->MyNearbyCarList;
+    DrivingLocation *loc = &info->MyDrivingLocation;
+    NearbyCar *nc = nearbycarlist_get_nearby_car(list, a->CarIHit);
+    Car *me;
+
+    drivetarget_assign(&a->Base.PointsToDrive,
+                       &list->MyCar->pCarDriver->MyDriveTarget);
+    a->Base.AllowedToUseThrottleAndBrake = 1;
+    a->Base.DesiredSpeedTolerance = 0.0f;
+    a->Base.UseDrivingLineSpeed = 0;
+    if (AIIJ_REEVALUATE_EVERY < seconds_since(&a->LastDecisionReevaluationTime)
+        || a->Base.PointsToDrive.NumPoints == 0) {
+        int usedPreferred = 0;
+
+        a->LastDecisionReevaluationTime.PackedTime = (uint32_t)WorldTimer;
+        drivingchoice_make_new_choice(&info->MyDrivingChoice,
+                                      &a->Base.PointsToDrive, loc, list,
+                                      AIDriverAvoidCarsImpactTimeThreshold,
+                                      0.0f, &usedPreferred, 1);
+    }
+    me = list->MyCar;
+
+    if (aiaction_get_heading_classification(loc, me, 0)
+        == HEADING_OUT_OF_ROUTE_FORWARDS) {
+        aiaction_set_desired_speed_to_max_deceleration(&a->Base, me,
+                                                       AIIJ_BRAKE);
+    } else if (nc == NULL) {
+        a->Base.UseDrivingLineSpeed = 1;
+    } else if (a->CarIHit->pPlayer != NULL
+               && me->MyDriver->TheDriverType != DRIVER_TYPE_TRAFFIC_CAR) {
+        // A player's car, and I am no traffic: back off from it when it
+        // is clear ahead, get away when it is clear behind.
+        if ((list->MyHalfSizeD + nc->ApparentHalfSizeD) - AIIJ_OVERLAP
+            < nc->Position.y)
+            aiaction_set_desired_speed_slower_than_this_car(
+                &a->Base, nc, list, AIIJ_BACK_OFF, AIIJ_SLOWER_UNUSED);
+        else if (nc->Position.y
+                 < (-list->MyHalfSizeD - nc->ApparentHalfSizeD)
+                   + AIIJ_OVERLAP)
+            aiaction_set_desired_speed_to_max_acceleration(&a->Base, me,
+                                                           AIIJ_ACCEL);
+        else
+            a->Base.UseDrivingLineSpeed = 1;
+    } else if (!(0.0f < nc->Position.y)) {
+        aiaction_set_desired_speed_to_max_acceleration(&a->Base, me,
+                                                       AIIJ_ACCEL);
+    } else if (me->MyDriver->TheDriverType == DRIVER_TYPE_TRAFFIC_CAR
+               && me->State.BodyMatrix.v0.x
+                      * a->CarIHit->State.BodyMatrix.v0.x
+                  + me->State.BodyMatrix.v0.y
+                      * a->CarIHit->State.BodyMatrix.v0.y
+                  < 0.0f) {
+        // Traffic hit head on by a car ahead: hold the speed, hands off.
+        a->Base.TimeToGetToDesiredSpeed = 0.0f;
+        a->Base.DesiredSpeed = me->State.VelocityMagnitude;
+        a->Base.AllowedToUseThrottleAndBrake = 0;
+    } else {
+        aiaction_set_desired_speed_slower_than_this_car(
+            &a->Base, nc, list, AIIJ_SLOWER_BY, AIIJ_SLOWER_UNUSED);
+    }
+
+    if (!a->Base.UseDrivingLineSpeed && a->Base.DesiredSpeed < AIIJ_MIN_SPEED)
+        a->Base.DesiredSpeed = AIIJ_MIN_SPEED;
+    a->Base.PointsToDriveWillExecuteAction = 1;
+}
+
+const char *aijustgothit_get_name(AIActionIJustGotHit *a)
+{
+    // 0x001ca628.
+    (void)a;
+    return "I just got hit!";
+}
+
 // ------------------------------------------------------------- the tables
 
 #define E(f) { 0, 0, (VtFn)(f) }
@@ -1056,6 +1538,30 @@ static const VtEntry aiavoidcars_vt[AIACTION_VT_ENTRIES] = {
     E(aiavoidcars_has_expired),                 //  56  0x001c6ee8
 };
 
+// Retail 0x002b7ad0.
+static const VtEntry aipullover_vt[AIACTION_VT_ENTRIES] = {
+    { 0, 0, NULL },
+    E(aipullover_destroy),                      //   8  0x001ca788
+    PENDING,                                    //  16  DoSnapshot 0x001c8370
+    E(aipullover_calculate_points_to_drive),    //  24  0x001c86a8
+    E(aipullover_get_name),                     //  32  0x001ca778
+    E(aipullover_has_been_accomplished),        //  40  0x001c8610
+    E(aipullover_has_failed),                   //  48  0x001c8658
+    E(aipullover_has_expired),                  //  56  0x001c8650
+};
+
+// Retail 0x002b7a10.
+static const VtEntry aijustgothit_vt[AIACTION_VT_ENTRIES] = {
+    { 0, 0, NULL },
+    E(aijustgothit_destroy),                    //   8  0x001ca638
+    PENDING,                                    //  16  DoSnapshot 0x001c9cb8
+    E(aijustgothit_calculate_points_to_drive),  //  24  0x001c9f60
+    E(aijustgothit_get_name),                   //  32  0x001ca628
+    E(aijustgothit_has_been_accomplished),      //  40  0x001c9e90
+    E(aijustgothit_has_failed),                 //  48  0x001c9f58
+    E(aijustgothit_has_expired),                //  56  0x001c9f10
+};
+
 #undef PENDING
 #undef E
 
@@ -1069,4 +1575,6 @@ void aiactions_install_vtables(void)
                AIACTION_VT_ENTRIES);
     vt_install(AIPASS_VTABLE, aipass_vt, AIACTION_VT_ENTRIES);
     vt_install(AIAVOIDCARS_VTABLE, aiavoidcars_vt, AIACTION_VT_ENTRIES);
+    vt_install(AIPULLOVER_VTABLE, aipullover_vt, AIACTION_VT_ENTRIES);
+    vt_install(AIIJUSTGOTHIT_VTABLE, aijustgothit_vt, AIACTION_VT_ENTRIES);
 }

@@ -1,12 +1,13 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 38
-(2026-10-06), after 11d-2, Pass and AvoidCars.
+(2026-10-06), after 11d-3a, PullOver and IJustGotHit.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
-AIPlan and the AIAction base, 11d-1, the five small actions, and 11d-2,
-Pass and AvoidCars, are done and checked against retail. The car selector is finished and checked against retail: SC-1
+AIPlan and the AIAction base, 11d-1, the five small actions, 11d-2,
+Pass and AvoidCars, and 11d-3a, PullOver and IJustGotHit, are done and
+checked against retail. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -244,61 +245,67 @@ car's were.
       time far from Pass's.
     - `docs/formats/ai-action.md` has the detail, under "Pass and
       AvoidCars (11d-2)".
-  - **11d-3, next:** the last four, split in two by size. Retail's
-    tables, by type:
+  - **11d-3a, done:** PullOver and IJustGotHit, in `aiactions.c`, and
+    `main.c` installs their tables too (nine in all).
+    - PullOver (600) is for traffic only. It scores when the chopper is
+      within 150 m in plan 0, 1, 2 or a bombing run, or when an AI cop
+      (not disabled) or a player has cop lights on within its speed
+      times 3.5 s, and no less than 100 m. It is done when that stops.
+    - Its points head for the right edge, or stay on the line for a
+      careful driver (skill -2). Every 0.3 s it goes round a car hit
+      sooner than 2 s with MakeNewChoice. It creeps at 14 m/s while
+      there is room to the edge, losing the room under 2 m and getting
+      it back over 4 m, and brakes otherwise. It stops in a two-car
+      collision or under 0.5 m/s. Past its own timeout (-999 is none)
+      it stops on the line.
+    - IJustGotHit (400) takes my car's two-car collisions with a car on
+      the list, one ahead over one behind, else the smaller y, and is
+      done when there are none. Every 0.2 s it makes a new choice. It
+      backs off from a player's car ahead and gets away from one
+      behind. It also gets away from any car not ahead. As traffic hit
+      head on it holds its speed, hands off. Otherwise it slows behind,
+      and never under 20 off the line's speed.
+    - The checker stubs GetCollision, IsTwoCarCollision and
+      GetCollidingCars on both sides. CalculateMaxAcceleration and
+      CalculateMaxDeceleration now run as shipped, because IJustGotHit
+      reads the answer. The model clears PullOver's stack choice
+      (PO_CHOICE, sp+0 of 720) on the way in, as drivingchoice.c's is
+      cleared.
+    - `drivingchoice_check`: 672 scenarios, 239714 ops, 264995 lines,
+      0 differ.
+    - 220 mutations for 11d-3a: 216 caught (11 by a crash) and 4
+      equivalent. Across the checker, 1267 mutations: 1239 caught, 28
+      equivalent and 0 unexplained.
+    - The first pass left 14 alive, and s_ph_gap closes ten. Its cases
+      are the hit exactly 2 s on, the room either side of 2 and 4 in
+      both float orders, and car 2 blocking the way round car 1. It also
+      covers the list's entry with no car, a player's car at the back
+      overlap edge, and the head-on time to speed. Four are equivalent.
+      Five of the earlier slices' patterns carry a line of context now.
+    - `docs/formats/ai-action.md` has the detail, under "PullOver and
+      IJustGotHit (11d-3a)".
+  - **11d-3b, next: GetUnstuck and AvoidRoadBlock**, the last two
+    actions. Retail's tables, by type:
 
     | Type | Action | Table | Retail | dtor | CPTD |
     |---:|---|---|---|---|---|
-    | 6 | PullOver | 0x002b7ad0 | 0x001c8298 | 0x001ca788 | 0x001c86a8 |
-    | 9 | IJustGotHit | 0x002b7a10 | 0x001c9c68 | 0x001ca638 | 0x001c9f60 |
     | 7 | GetUnstuck | 0x002b7a50 | 0x001c8b30 | 0x001ca6a8 | 0x001c9550 |
     | 8 | AvoidRoadBlock | 0x002b7a90 | 0x001c9668 | 0x001ca718 | 0x001c98e0 |
 
-    The demo's tables are 0x0029af60, 0x0029aea0, 0x0029aee0 and
-    0x0029af20, in the same order.
-    `python tools/retail_vtable.py 0x002b7ad0` lists a table's
-    functions.
-    - **11d-3a: PullOver and IJustGotHit.**
-      - PullOver's constructor is (int, float, float f12, float f13,
-        a2, a3). Its callers pass a2 = driver+512 and a3 = driver+504,
-        and its DoSnapshot passes zeros.
-        - 608 is a Timer of WorldTimer, 612 a Timer of 0, 616 bool 1,
-          624 = f13.
-        - 620 = (2 < 0x001c8660(this, a2, a3->+4)) when both pointers
-          are set, else 1.
-        - 0x001c8660 is `(rp[28] - MyHalfSizeL) - ((car.x - rp.x) *
-          rp[16] - (car.y - rp.y) * rp[12])`.
-      - PullOver's CalculateScore (0x001c8400) is only for my car under
-        TRAFFIC_CONTROL. It answers 600 within 150 m of the chopper
-        (World+24, Plan < 3 or 4, from 832/836). Otherwise it answers
-        600 within max(speed * 3.5, 100) of a cop or a player whose car
-        has its siren on (HeadlightsAndHornOffDuration, Car+2056, not
-        0). The cops come from the cop manager (gp-15620: count +4, cops
-        +16) and the players from gp-20928 and gp-20920.
-      - PullOver's HasBeenAccomplished is "traffic and the score is -1";
-        HasFailed and HasExpired answer 0.
-      - PullOver's CalculatePointsToDrive is large. It uses MakeNewChoice,
-        CalculateMaxDeceleration and IsTwoCarCollision.
-      - IJustGotHit's constructor is (int, float, Car *), setting 608 and
-        612 = 0.
-      - IJustGotHit's CalculateScore (0x001c9d20) walks my CollisionBody's
-        collisions (Car+52, the count an int8 at +18). GetCollision walks
-        CollisionBodyWitnessList (GP-18352; a witness's pBody1 at 96,
-        pBody2 at 100, pCollision at 104). For a two-car collision with
-        the other car on the list, it answers 400 and the car.
-      - The checker needs witnesses on both sides, or a stub of
-        0x001d6f38 in the model and its own collisionbody_get_collision.
-    - **11d-3b: GetUnstuck and AvoidRoadBlock.**
-      - GetUnstuck's constructor is (int, float, float f13): 608 =
-        WorldTimer, 612 = f13, 616 = !(|f13 + 1| <= gp-28628). It also
-        has AreWeStuckBehindSomeone (0x001c8ee8, over the list's
-        28-byte entries), GetGoalTrackRoutePoint (0x001c9018) and both
-        GetGoalPoints (0x001c9070, 0x001c90d8). It reads Car+40's vptr
-        entry 72 and the driver's (Car+44) vptr+556 entry 128.
-      - AvoidRoadBlock's constructor is (int, float, const tRoadBlock *),
-        setting 608. Its score (0x001c9718, 600) uses GetActiveRoadBlock
-        and the TrackPathManager's CompareDistances. Its
-        CalculatePointsToDrive reads the road block's +36, +40 and +92.
+    The demo's tables are 0x0029aee0 and 0x0029af20, in the same order.
+    `python tools/retail_vtable.py 0x002b7a50` lists a table's
+    functions. 11d-3a's ops carry over: `@col` (collisions), `@sk`,
+    `@ti`, `@cl` and the rest.
+    - GetUnstuck's constructor is (int, float, float f13): 608 =
+      WorldTimer, 612 = f13, 616 = !(|f13 + 1| <= gp-28628). It also
+      has AreWeStuckBehindSomeone (0x001c8ee8, over the list's
+      28-byte entries), GetGoalTrackRoutePoint (0x001c9018) and both
+      GetGoalPoints (0x001c9070, 0x001c90d8). It reads Car+40's vptr
+      entry 72 and the driver's (Car+44) vptr+556 entry 128.
+    - AvoidRoadBlock's constructor is (int, float, const tRoadBlock *),
+      setting 608. Its score (0x001c9718, 600) uses GetActiveRoadBlock
+      and the TrackPathManager's CompareDistances. Its
+      CalculatePointsToDrive reads the road block's +36, +40 and +92.
   - The demo's mangled names gave the other constructors' arguments;
     retail's, read from each constructor, are above. Every one starts
     (int score, float timeout).
@@ -3887,14 +3894,14 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-06, after 11d-2, Pass and AvoidCars)
+### Where the port stands (2026-10-06, after 11d-3a, PullOver and IJustGotHit)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11d-3a, PullOver and IJustGotHit.
+- **Next:** step 11, the racer AI: 11d-3b, GetUnstuck and AvoidRoadBlock.
   See "Now" at the top. These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
@@ -3904,7 +3911,8 @@ goes in.
   - 11b-4b, MakeNewChoice and the three it calls;
   - 11c, AIPlan and the AIAction base;
   - 11d-1, the five small actions;
-  - 11d-2, Pass and AvoidCars.
+  - 11d-2, Pass and AvoidCars;
+  - 11d-3a, PullOver and IJustGotHit.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -3916,7 +3924,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a to 11d-2 done) | 5-7 |
+  | 11, the racer and traffic AI (11a to 11d-3a done) | 4-6 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |
@@ -3924,12 +3932,12 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped; New 3DS only since 2026-10-05) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **26-40** |
+  | **Total** | **25-39** |
 
-- **How far along:** about 32-35 of the road's 58-75 slices are done,
+- **How far along:** about 33-36 of the road's 58-75 slices are done,
   roughly half. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
-  Read the 26-40 as a floor. Step 11 was put at 4-6 before its slices
+  Read the 25-39 as a floor. Step 11 was put at 4-6 before its slices
   were laid out. They are fourteen, with traffic beside them: 11a,
   11b-1 to 11b-3, 11b-4a and 11b-4b, 11c, 11d-1, 11d-2, 11d-3a and
   11d-3b, and 11e to 11g. 11b was one slice until DrivingChoice's 13 KB

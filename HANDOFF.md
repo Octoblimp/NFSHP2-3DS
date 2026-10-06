@@ -15112,6 +15112,96 @@ Next is 11d-3a: PullOver and IJustGotHit. CONTINUE.md has what their
 listings give: the constructors, the scores and the collision walk.
 `tools/retail_vtable.py` lists a retail table's functions.
 
+### Step 11d-3a: PullOver and IJustGotHit
+
+`aiactions.c` has the two actions that read the world outside the list,
+each with its constructor, CalculateScore, the three tests,
+CalculatePointsToDrive, GetName and destructor, and its table. They are
+installed with the other seven, nine tables in all.
+- PullOver (600) is for traffic. It scores when the chopper is within
+  150 m in plan 0, 1, 2 or a bombing run (the plan tested with `sltiu`,
+  so a negative one is none). It also scores when an AI cop that isn't
+  disabled, or a player, has its car's cop lights on within the car's
+  speed times 3.5 s, and no less than 100 m. It is done when that
+  stops, and never fails or expires.
+- Its points head for the right edge, or for a careful driver (skill
+  -2) stay on the line. Every 0.3 s, a car hit sooner than 2 s is gone
+  round with MakeNewChoice from its left side. It creeps at 14 m/s while
+  there is room to the right edge and brakes otherwise. New620 holds
+  that: the constructor sets it when there is over 2 m, it is lost
+  under 2 m and back over 4 m, and over 15 m/s it is set and the car
+  brakes. A two-car collision, or a speed under 0.5, stops it. Past
+  PullOverTimeout (-999, give or take 0.001, is none) it stops on the
+  location's line.
+- IJustGotHit (400) takes my car's two-car collisions whose other car is
+  on the list: one ahead beats one behind, else the smaller y. It is
+  done when none is left or its car leaves the list. Every 0.2 s it
+  makes a new choice from the information's. It backs off a player's
+  car ahead (unless I am traffic) and gets away from one behind. It gets
+  away from any other car that is not ahead. As traffic hit head on it
+  holds its speed with the throttle and brake off. Otherwise it slows
+  behind, never under 20 off the line's speed. Heading out of the route
+  forwards, it brakes.
+
+Things the listing gives away:
+- The cop lights are read as a word: CopLights and the three bytes
+  after it. The range is worked out before the lights are asked.
+- Neither a cop's car nor a player's car is tested for NULL; the cops
+  are. IJustGotHit reads CarIHit through once its entry is found.
+- The list has an entry for no car, found for NULL. A collision whose
+  other car is NULL can be taken, and any later one beats it.
+- Past the timeout PullOver's choice is its stack until
+  SetChoiceLocation, which leaves it alone for a negative odd line. The
+  port clears it, and the model clears sp+0 of the 720-byte frame on
+  the way in (PO_CHOICE), as it does MakeNewChoice's.
+- PullOver hands MakeNewChoice a side used of 1, and never reads it.
+  SetDesiredSpeedSlowerThanThisCar is handed 0.2 second, unread.
+
+The checker stubs GetCollision, IsTwoCarCollision and GetCollidingCars
+on both sides, answering from each car's `@col` list. 11d-2's stub of
+CalculateMaxAcceleration is gone: IJustGotHit reads its answer, so it
+and CalculateMaxDeceleration run as shipped from each car's ride and
+type info (`@ti`), and the model checks fBeltAccelCoef is 1. The chopper
+(`@ch`), the cop manager (`@cm`), the players (`@pl`), the lights (`@cl`)
+and the skill (`@sk`) are ops too. copmanager.h has eLogicState and the
+fields of tCop and the manager's head the score reads. s_pull_hit drives
+each action 40 times on s_pass_avoid's world, and s_ph_edge runs the
+exact edges, six rounds of eight kinds.
+
+The check gives 672 scenarios, 239714 ops, 264995 lines, 0 differ.
+11d-3a has 220 mutations: 216 caught (11 by a crash) and 4 equivalent.
+Across the checker, 1267 mutations: 1239 caught, 28 equivalent and 0
+unexplained. The first pass left 14 alive. s_ph_gap, two rounds of six
+kinds on a straight road with every car square to it, closes ten:
+- the careful hit exactly 2 s on and either side, with AvoidCars'
+  time far from Pass's, and then the firm braking with downforce;
+- the room either side of 2 and 4 where retail's float order and the
+  other disagree (room_straddle searches for them);
+- car 2 beside car 1, so going round car 1 hits car 2 between the two
+  thresholds (found by an instrumented search);
+- the list's entry with no car taken first, then a car either side, and
+  CarIHit NULL with that entry on the list;
+- a player's car exactly at the back overlap edge and an ulp either
+  side;
+- traffic hit head on with its time to speed poked first.
+The other four are equivalent:
+- po-ctor-clear: a second Clear of a just-cleared target;
+- po-cp-nto-le: no PullOverTimeout lands exactly 0.00100000005f from
+  -999 (Sterbenz);
+- po-cp-used: MakeNewChoice's out, never read;
+- ij-slower-unused-k: the unread second float.
+
+Five of the earlier slices' patterns (jd-copy, jd-assign, ar-tb,
+ac-cp-assign, ac-cp-mnc-okay) stopped being unique once these two were
+in the file, and carry a line of context.
+
+`docs/formats/ai-action.md` has the detail, under "PullOver and
+IJustGotHit (11d-3a)". The CIA builds.
+
+Next is 11d-3b: GetUnstuck (0x001c8b30) and AvoidRoadBlock
+(0x001c9668), the last two actions. CONTINUE.md has what their listings
+give.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the

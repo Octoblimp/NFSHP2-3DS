@@ -29,8 +29,9 @@ doing: passing, avoiding cars, drafting, getting unstuck, and the rest of
 AIActionType. AICarController (11e) scores the actions and keeps the best
 as its CurrentAction. Each frame it asks that action for the points to
 drive and the speed to drive them at, and asks it through UpdateStatus
-whether it is done. The actions themselves are 11d; the five small ones
-are under "The small actions (11d-1)" at the end. This is the base:
+whether it is done. The actions themselves are 11d, with a section each
+at the end: the five small ones (11d-1), Pass and AvoidCars (11d-2), and
+PullOver and IJustGotHit (11d-3a). This is the base:
 - the plan's timeout and status;
 - the record every action fills;
 - the pool the actions come from;
@@ -882,3 +883,294 @@ Its numbers:
 - 170 mutations for 11d-2: 160 caught and 10 equivalent. Across the whole
   checker, 1047 mutations: 1023 caught, 24 equivalent and 0
   unexplained.
+
+## PullOver and IJustGotHit (11d-3a)
+
+    0x001c8298  AIActionPullOver::AIActionPullOver(int, float, float,
+                    NearbyCarList *, DrivingLocation *)
+    0x001c8400  AIActionPullOver::CalculateScore(DrivingInformation *)
+    0x001c8610  AIActionPullOver::HasBeenAccomplished, HasExpired
+                (0x001c8650), HasFailed (0x001c8658)
+    0x001c8660  the room to the right edge (a method that doesn't read
+                `this`)
+    0x001c86a8  AIActionPullOver::CalculatePointsToDrive
+    0x001c9c68  AIActionIJustGotHit::AIActionIJustGotHit(int, float, Car *)
+    0x001c9d20  AIActionIJustGotHit::CalculateScore(DrivingInformation *,
+                    Car **)
+    0x001c9e90  AIActionIJustGotHit::HasBeenAccomplished, HasExpired
+                (0x001c9f10), HasFailed (0x001c9f58)
+    0x001c9f60  AIActionIJustGotHit::CalculatePointsToDrive
+    0x001ca628  AIActionIJustGotHit::GetName, then its destructor 0x001ca638
+    0x001ca778  AIActionPullOver::GetName, then its destructor 0x001ca788
+
+Traffic pulls over for a cop, and a car that has just been hit reacts to
+it. These two are the first actions to read the world outside the list:
+the chopper, the cop manager, the players and my car's collisions.
+
+### The records
+
+| Action | Type | 608 | 612 | 616 | 620 | 624 | GetName |
+|---|---:|---|---|---|---|---|---|
+| PullOver | 6 | MyCreationTime | LastDecisionReevaluationTime | IsMyDrivingChoiceOkay | New620 | PullOverTimeout | "Pull over" |
+| IJustGotHit | 9 | CarIHit | LastDecisionReevaluationTime | | | | "I just got hit!" |
+
+The two Timers' own constructors zero them first. PullOver's constructor
+then sets MyCreationTime to WorldTimer, IsMyDrivingChoiceOkay to 1 and
+clears PointsToDrive a second time. New620 (retail's name is lost) is
+whether there was room to pull over: the room to the right edge at the
+location's route point is over 2 m, or 1 without a list and a location.
+IJustGotHit's constructor keeps the car and zeroes the time.
+
+The room to the right edge is the route point's RightWidth less
+MyHalfSizeL (my half width), less how far right of the point my car is,
+across the point's direction, in retail's order.
+
+### PullOver
+
+CalculateScore:
+
+    -1 unless my car is under TRAFFIC_CONTROL
+    near when the chopper is out, its Plan 0, 1, 2 (by `sltiu`, so a
+        negative one is none of them) or BOMBING_RUN, and it is within
+        150 m on the ground
+    near when an AI cop that is there and whose DesiredLogicState is not
+        LS_DISABLED has its car's lights on in range
+    near when a player's car has its lights on in range
+    600 when near, else -1
+
+A car's lights are in range when CopLights and the three bytes after it,
+read as a word, are not 0, and the car is within its speed times 3.5 s on
+the ground, and no less than 100 m. The range is worked out before the
+lights are asked. Neither a cop's car nor a player's car is tested for
+NULL; the cops themselves are.
+
+HasBeenAccomplished: 0 unless my car is under TRAFFIC_CONTROL, else done
+when CalculateScore says -1. HasFailed and HasExpired are 0.
+
+CalculatePointsToDrive:
+
+    PointsToDrive = my driver's own target; line speed 0, throttle 1,
+        tolerance 0, boost 0
+    careful = my driver's SkillLevel is -2
+    if PullOverTimeout is within 0.001 of -999 (none), or less time has
+            gone since MyCreationTime than PullOverTimeout:
+        if more than 0.3 s since the last re-evaluation, or no points:
+            LastDecisionReevaluationTime = WorldTimer
+            a choice that is not a line is set from the location; okay 1
+            careful: BuildDriveTarget from the information's choice,
+                parallel to the line
+            else: clear the points and FillUpDriveTarget towards the
+                right side of the track
+            WhoWillThisDriveTargetHit for the points, over the avoid
+                threshold
+            a hit sooner than 2 s: okay = MakeNewChoice from the left
+                side of that car into a target of its own, over the avoid
+                threshold, both sides; the points and the information's
+                choice take it
+        careful: speed + max deceleration * 0.12 when okay, * 0.2 when
+            not
+        else with the location clear or not okay: brake at 0.2
+        else:
+            over 15 m/s: New620 1, brake at 0.2
+            else New620 goes 0 under 2 m of room and back to 1 over 4 m;
+                brake at 0.2 when 0, 14 m/s when 1
+            tolerance 2
+        a desired speed under 0.5, or my car in any two-car collision:
+            speed and tolerance 0
+    else (past the timeout):
+        a cleared choice set from the location; BuildDriveTarget from it,
+            parallel to the line; speed and tolerance 0
+    PointsToDriveWillExecuteAction 1; TimeToGetToDesiredSpeed 0.2
+
+The braking speeds are SetDesiredSpeedToMaxDeceleration's, and the
+careful ones use CalculateMaxDeceleration at my car's own speed. Past the
+timeout, retail's choice is its stack until SetChoiceLocation, which
+leaves it alone for a negative odd line; the port clears it first. The
+side MakeNewChoice used is dropped.
+
+### IJustGotHit
+
+CalculateScore:
+
+    car out = NULL
+    for each of my car's collisions, two cars', whose other car has an
+            entry on the list:
+        take it when none is held or the held one's car is NULL; when the
+            held one is behind (y < 0) and this one ahead (0 < y); or
+            when its y is smaller
+    400 and the car out when one was taken, else -1
+
+The other car is the second one when the first is mine, else the first.
+An entry with no car is found for NULL, so a collision whose other car is
+NULL can be taken, and then any later one beats it.
+
+HasBeenAccomplished:
+
+    score again; when it scores, CarIHit = its car
+    done when CarIHit is NULL or off the list, or when it didn't score
+
+HasFailed is 0, and HasExpired is the timeout's, as JustDrive's.
+
+CalculatePointsToDrive:
+
+    nc = CarIHit's entry, asked first
+    PointsToDrive = my driver's own target; throttle 1, tolerance 0, line
+        speed 0
+    more than 0.2 s since the last re-evaluation, or no points:
+        LastDecisionReevaluationTime = WorldTimer; MakeNewChoice from the
+            information's choice into the points, over the avoid
+            threshold, both sides; the answers dropped
+    heading out of the route forwards: brake at 0.2
+    else no nc: line speed 1
+    else CarIHit has a player and I am not traffic:
+        ahead past (MyHalfSizeD + its ApparentHalfSizeD) - 2.8:
+            SetDesiredSpeedSlowerThanThisCar (6)
+        behind past (-MyHalfSizeD - its ApparentHalfSizeD) + 2.8:
+            accelerate at 0.2
+        else line speed 1
+    else not ahead (0 < y fails): accelerate at 0.2
+    else I am traffic and we face apart (the x and y of our two forward
+            vectors dotted, under 0): TimeToGetToDesiredSpeed 0, my
+            speed, and hands off the throttle and brake
+    else SetDesiredSpeedSlowerThanThisCar (0.1)
+    not on line speed: a desired speed of at least 20
+    PointsToDriveWillExecuteAction 1
+
+"Accelerate" is SetDesiredSpeedToMaxAcceleration, so CalculateMaxAcceleration's
+answer is read here. The heading is GetHeadingClassification with no steer
+check. Once nc is found, CarIHit is read through with no NULL test.
+
+### The constants
+
+| Where | Value | Port | Use |
+|------:|------:|------|-----|
+| lui 0x4316 | 150 | AIPO_CHOPPER_RANGE | |
+| lui 0x4060 | 3.5 | AIPO_LIGHTS_SECONDS | |
+| lui 0x42c8 | 100 | AIPO_LIGHTS_MIN | |
+| gp-28668 | -999 | AIPO_NO_TIMEOUT | |
+| gp-28664 | 0.001 | AIPO_TIMEOUT_EPSILON | |
+| gp-28652 | 0.3 | AIPO_REEVALUATE_EVERY | |
+| lui 0x4000 | 2 | AIPO_HIT_SOON | |
+| gp-28648 | 0.12 | AIPO_GENTLE | careful and okay |
+| gp-28644 | 0.2 | AIPO_FIRM | careful and not okay |
+| gp-28640, gp-28636 | 0.2 | AIPO_BRAKE | |
+| lui 0x4170 | 15 | AIPO_TOO_FAST | |
+| lui 0x4000, lui 0x4080 | 2, 4 | AIPO_ROOM_LOW, AIPO_ROOM_HIGH | New620 |
+| lui 0x4160 | 14 | AIPO_CREEP_SPEED | |
+| lui 0x4000 | 2 | AIPO_TOLERANCE | |
+| lui 0x3f00 | 0.5 | AIPO_STOPPED | |
+| gp-28632 | 0.2 | AIPO_TIME_TO_SPEED | |
+| | -2 | AIPO_CAREFUL_SKILL | |
+| gp-28572 | 0.2 | AIIJ_REEVALUATE_EVERY | |
+| gp-28568 | 0.2 | AIIJ_BRAKE | |
+| gp-28564 | 2.8 | AIIJ_OVERLAP | |
+| lui 0x40c0 | 6 | AIIJ_BACK_OFF | |
+| gp-28560, gp-28548 | 0.2 | AIIJ_ACCEL | |
+| gp-28556 | 0.1 | AIIJ_SLOWER_BY | |
+| gp-28552 | 0.2 | AIIJ_SLOWER_UNUSED | not read |
+| lui 0x41a0 | 20 | AIIJ_MIN_SPEED | |
+
+### The tables
+
+| | Retail | Port's constant (the demo's) |
+|---|---|---|
+| `_vt$16AIActionPullOver` | 0x002b7ad0 | 0x0029af60 |
+| `_vt$19AIActionIJustGotHit` | 0x002b7a10 | 0x0029aea0 |
+
+`aiactions_install_vtables` installs the nine. DoSnapshot (0x001c8370 and
+0x001c9cb8) is left pending.
+
+copmanager.h now has eLogicState, and tCop and tCopManagerHead as far as
+the score reads them: a cop's nCopNumber (8), LogicState (12) and
+DesiredLogicState (16), and the manager's nNumAICops (4) and nNumCops
+(8).
+
+### The checker
+
+drivingchoice_check adds:
+- `@n po score timeout -1 pot z`, with z's low bit leaving out the list
+  and the next bit the location, and `@n ij score timeout car`;
+- `@sc po` and `@sc ij` (its car out filled first);
+- `@col k n (two a b)...`, a car's collisions; `@ch none|plan x y`, the
+  chopper; `@cm none|n cop...`, the cop manager, each cop `-` or
+  `car:state`; `@pl n a b`, the players; `@cl k word`, a car's cop
+  lights; `@sk k skill`; and `@ti k` with a type info's mass, drag, speed
+  limiter, the two tyres' friction and the two downforces;
+- the globals COPM, PLAYERS and NPLAYERS.
+
+Three more stubs, on both sides: CollisionBody::GetCollision (0x001d6f38),
+Collision::IsTwoCarCollision (0x0021eb20) and Collision::GetCollidingCars
+(0x0021eb48), answering from each car's collisions. 11d-2's stub of
+CalculateMaxAcceleration is gone: IJustGotHit reads its answer, so it and
+CalculateMaxDeceleration run as shipped, from each car's ride info and
+type info. The model checks that nearbycar.c's fBeltAccelCoef is 1.
+
+PullOver's choice past the timeout is retail's stack (sp+0 of a 720-byte
+frame), so the model clears it on the way into CalculatePointsToDrive
+(PO_CPTD, PO_CHOICE), as it does MakeNewChoice's.
+
+s_pull_hit, 40 of each, drives PullOver or IJustGotHit as AIDriver would
+on s_pass_avoid's world. Between the calls it changes my car's collisions
+(two cars' or not, with cars on the list, off it, mine and none), its
+skill and type info, the chopper, the AI cops, the players and each car's
+lights, my car near the right edge and past it, and PullOver's location
+clear. The clock lands either side of 0.2 s, 0.3 s and the timeouts of 1,
+2 and 5 s, and PullOver's own timeout is none, 16 and 17 ulps either side
+of -999, or seconds.
+
+s_ph_edge, six rounds of eight kinds, runs the exact edges:
+- po-chopper: the chopper in each plan at exactly 150 m along an axis
+  and an ulp either side.
+- po-lights: the cops' and the players' cars at exactly their range and
+  an ulp either side, lights on or off, cops none or disabled.
+- po-pot: the timeout 16 and 17 ulps from -999, and its seconds exactly
+  up and either side.
+- po-room: exactly 2 m and 4 m of room and an ulp either side, at 15 m/s
+  and either side, and at the speeds where braking comes to exactly 0.5.
+- po-hit: a car stopped just ahead, or slower in my lane a second or so
+  on.
+- ij-score: the collisions' cars at y either side of 0 and level, a car
+  off the list, and an entry with no car.
+- ij-cp: the car I hit at a player's two overlap edges, at y 0, head on
+  or square, and at the speeds that come to exactly 20.
+- ij-head: my car drifting out over the right edge, forwards and back.
+
+The first mutation pass left 14 alive. s_ph_gap, two rounds of six
+kinds on a straight road with every car square to it, catches ten:
+- po-soon: PullOver careful with its hit exactly 2 s on and either side,
+  and AvoidCars' time apart from Pass's (po-soon-k, po-cp-hit-lt,
+  po-cp-who-time); then, inside the 0.3 s, the choice poked not okay, so
+  the firm braking runs with and without downforce (po-cp-firm-speed).
+- po-assoc: my car where the room to the edge, summed retail's way and
+  the other, falls either side of 2 or 4 (po-room-assoc).
+- po-mnc: car 1 hit 1.9375 s on and car 2 beside it, so going round car 1
+  hits car 2 between Pass's time and AvoidCars' (po-cp-mnc-time).
+- ij-null: the list's entry with no car taken first, then a car either
+  side of it (ij-sc-best-null); and CarIHit NULL with that entry on the
+  list (ij-acc-null).
+- ij-back: a player's car exactly at the back overlap edge and an ulp
+  either side (ij-cp-back-lt).
+- ij-tts: traffic hit head on, with its time to the speed poked first
+  (ij-cp-head-on-tts).
+
+The other four are equivalent:
+- po-ctor-clear: AIAction's constructor has just cleared PointsToDrive,
+  and nothing touches it between, so the second Clear makes the same
+  stores.
+- po-cp-nto-le: `<=` and `<` part only where |pot + 999| is exactly
+  0.00100000005f. Near -999 the sum is exact (Sterbenz), a multiple of
+  2^-14, which that is not; any other pot is 499.5 or more away.
+- po-cp-used: MakeNewChoice stores its out on each of its four ways out,
+  and PullOver never reads it.
+- ij-slower-unused-k: SetDesiredSpeedSlowerThanThisCar doesn't read its
+  second float.
+
+Five of the earlier slices' patterns (jd-copy, jd-assign, ar-tb,
+ac-cp-assign and ac-cp-mnc-okay) stopped being unique and carry a line
+of context.
+
+Its numbers:
+- 672 scenarios, 239714 ops, 264995 lines, 0 differ.
+- 220 mutations for 11d-3a: 216 caught (11 by a crash) and 4 equivalent.
+  Across the whole checker, 1267 mutations: 1239 caught, 28
+  equivalent and 0 unexplained.

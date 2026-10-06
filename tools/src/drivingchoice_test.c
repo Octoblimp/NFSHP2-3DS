@@ -4,9 +4,9 @@
 // op script tools/drivingchoice_check.py writes and prints the transcript
 // it diffs against the retail image, run in mipsemu over the same script.
 // Since step 11d-1 it runs the AI actions of aiactions.c too (the five
-// small ones, and since 11d-2 Pass and AvoidCars), one at a time in a slot
-// of their own, over a DrivingInformation copied from the script's list,
-// location and choice.
+// small ones, since 11d-2 Pass and AvoidCars, and since 11d-3a PullOver
+// and IJustGotHit), one at a time in a slot of their own, over a
+// DrivingInformation copied from the script's list, location and choice.
 //
 // The harness owns the cars, their controllers, choices and actions, the
 // list, the location, the routes and the signs, and three answers: the
@@ -18,9 +18,13 @@
 // driver's GetDriverNumber (a test table: the car's DriverNumber), each
 // printing a line. Everything else is the port's own: nearbycar.c,
 // drivinglocation.c, drivetarget.c, trackroute.c, aiaction.c and the
-// maths. Pass asks CalculateMaxAcceleration for a figure nothing reads, so
-// each car has a ride info and car type 0 an acceleration table only for
-// it to run on; the checker's model stubs it.
+// maths. For CalculateMaxAcceleration and CalculateMaxDeceleration each
+// car has a type info (the script's mass, grip, drag, downforce and
+// limiter), a ride info of car type 0, and that type a two-entry
+// acceleration table. For PullOver and IJustGotHit it owns the chopper,
+// the cop manager and its cops, the players, and each car's collisions,
+// which it answers for collisionbody.c and collision.c, each printing a
+// line.
 //
 // A float prints as its bits, every NaN as "nan", and a pointer by what it
 // points at. The ops and every line's format are the checker's.
@@ -36,16 +40,20 @@
 #include "bslotpool.h"
 #include "car.h"
 #include "carcollisionpredict.h"
+#include "chopper.h"
+#include "collision.h"
 #include "collisionbody.h"
 #include "carcontroller.h"
 #include "cardriver.h"
 #include "carinfo.h"
 #include "cartypeinfo.h"
+#include "copmanager.h"
 #include "drivetarget.h"
 #include "drivetargetrenderer.h"
 #include "drivingchoice.h"
 #include "drivinglocation.h"
 #include "nearbycar.h"
+#include "player.h"
 #include "race.h"
 #include "racecore.h"
 #include "topology.h"
@@ -137,6 +145,8 @@ static union {
     AIActionAccidentRecovery ar;
     AIActionPass             pa;
     AIActionAvoidCars        ac;
+    AIActionPullOver         po;
+    AIActionIJustGotHit      ij;
     unsigned char            raw[AIACTION_SLOT_SIZE];
 } ab;
 static DrivingInformation info;
@@ -149,6 +159,20 @@ static char kind[4];
 #define DVT 0x010b3000u
 static RideInfo ride;
 static VtEntry drv_vt[CARDRIVER_VT_ENTRIES];
+
+// Step 11d-3a's: each car's collisions, whether each is two cars' and its
+// two cars, the chopper, the cop manager's head and its cops, and the
+// players, which player.c would own.
+#define NCOLLS 4
+static Collision colls[NCARS][NCOLLS];
+static int32_t coll_two[NCARS][NCOLLS];
+static Car *coll_cars[NCARS][NCOLLS][2];
+static struct Chopper chopper;
+static tCopManagerHead copm;
+static tCop cops[7];
+static struct Player plobj[2];
+int32_t PlayerNumPlayers;
+struct Player *PlayerPlayersByIndex[2];
 
 DriveTargetRenderer TheDriveTargetRenderer;
 
@@ -211,7 +235,12 @@ static const char *nm(const void *p)
     TRY(signs, NSIGNS, "S")
     TRY(list.Array, NEARBYCARLIST_MAX, "e")
     TRY(info.MyNearbyCarList.Array, NEARBYCARLIST_MAX, "ie")
+    TRY(bodies, NCARS, "b")
 #undef TRY
+    if ((i = index_in(p, colls, sizeof colls[0][0], NCARS * NCOLLS)) >= 0) {
+        sprintf(b, "col%d:%d", i / NCOLLS, i % NCOLLS);
+        return b;
+    }
     if (p == &loc)
         return "loc";
     if (p == &choice)
@@ -402,6 +431,51 @@ static int32_t fk_driver_number(void *self)
     return cars[i].DriverNumber;
 }
 
+// ------------------------------------------------- 11d-3a's stubs
+
+// collisionbody.c's and collision.c's, which would bring the collision
+// code with them: the script's collisions for the car whose body it is.
+struct Collision *collisionbody_get_collision(CollisionBody *b, int32_t i)
+{
+    int k = index_in(b, bodies, sizeof bodies[0], NCARS);
+
+    printf("  getcol %s %d\n", nm(b), (int)i);
+    if (k < 0 || i < 0 || i >= NCOLLS) {
+        fprintf(stderr, "a collision that is not one of ours\n");
+        exit(2);
+    }
+    return &colls[k][i];
+}
+
+static int coll_index(const Collision *c)
+{
+    int i = index_in(c, colls, sizeof colls[0][0], NCARS * NCOLLS);
+
+    if (i < 0) {
+        fprintf(stderr, "a collision that is not one of ours\n");
+        exit(2);
+    }
+    return i;
+}
+
+int32_t collision_is_two_car_collision(Collision *c)
+{
+    int i = coll_index(c);
+
+    printf("  two %s\n", nm(c));
+    return coll_two[i / NCOLLS][i % NCOLLS];
+}
+
+void collision_get_colliding_cars(Collision *c, struct Car **car1,
+                                  struct Car **car2)
+{
+    int i = coll_index(c);
+
+    printf("  colliding %s\n", nm(c));
+    *car1 = coll_cars[i / NCOLLS][i % NCOLLS][0];
+    *car2 = coll_cars[i / NCOLLS][i % NCOLLS][1];
+}
+
 // ------------------------------------------------------------ the dumps
 
 static void dump_choice(const DrivingChoice *d, const char *tag)
@@ -522,6 +596,10 @@ static const char *vt_name(uint32_t v)
         return "vPA";
     case AIAVOIDCARS_VTABLE:
         return "vAC";
+    case AIPULLOVER_VTABLE:
+        return "vPO";
+    case AIIJUSTGOTHIT_VTABLE:
+        return "vIJ";
     case AIACTION_VTABLE:
         return "vAA";
     case AIPLAN_VTABLE:
@@ -567,6 +645,15 @@ static void dump_act(void)
                (unsigned)ab.ac.LastDecisionReevaluationTime.PackedTime,
                (unsigned)ab.ac.MyCreationTime.PackedTime,
                fx(ab.ac.MinLifetime), (int)ab.ac.UsedPreferredSide);
+    else if (strcmp(kind, "po") == 0)
+        printf("  po made %08x last %08x ok %d room %d pot %s\n",
+               (unsigned)ab.po.MyCreationTime.PackedTime,
+               (unsigned)ab.po.LastDecisionReevaluationTime.PackedTime,
+               (int)ab.po.IsMyDrivingChoiceOkay, (int)ab.po.New620,
+               fx(ab.po.PullOverTimeout));
+    else if (strcmp(kind, "ij") == 0)
+        printf("  ij car %s last %08x\n", nm(ab.ij.CarIHit),
+               (unsigned)ab.ij.LastDecisionReevaluationTime.PackedTime);
 }
 
 // After CalculatePointsToDrive: the information's choice and location, and
@@ -702,6 +789,14 @@ static void reset(void)
         t->MaxArg = 100.0f;
         t->IndexMultiplier = 0.01f;
     }
+    // Step 11d-3a's: no chopper, cop manager, players or collisions.
+    world.Helicopter = NULL;
+    pCopManager = NULL;
+    PlayerNumPlayers = 0;
+    PlayerPlayersByIndex[0] = NULL;
+    PlayerPlayersByIndex[1] = NULL;
+    memset(coll_two, 0, sizeof coll_two);
+    memset(coll_cars, 0, sizeof coll_cars);
 }
 
 static void set_global(const char *name, uint32_t v)
@@ -803,6 +898,15 @@ static void set_car(char **t)
     cdrivers[k]._vtable = DVT;
     c->pRideInfo = &ride;
     c->State.BoostFactor = 1.0f;
+    // What CalculateMaxAcceleration and CalculateMaxDeceleration read,
+    // until the script's "@ti".
+    ctis[k].Body.Mass = 1500.0f;
+    ctis[k].Aero.Drag = 0.0f;
+    ctis[k].Control.SpeedLimiter = 150.0f;
+    ctis[k].Tires[0].StaticFrictionCoefficient = 1.0f;
+    ctis[k].Tires[1].StaticFrictionCoefficient = 1.0f;
+    ctis[k].Aero.FrontDownforce = 0.0f;
+    ctis[k].Aero.RearDownforce = 0.0f;
     c->State.Velocity.x = fh(v[F_VX]);
     c->State.Velocity.y = fh(v[F_VY]);
     c->State.nWheelsTouchingGround = atoi(v[F_NW]);
@@ -858,8 +962,9 @@ static void poke(const char *f, uint32_t v)
         { "ds", 564 }, { "tt", 568 }, { "tol", 572 }, { "udl", 576 },
         { "tb", 580 }, { "bo", 584 }, { "t608", 608 }, { "r612", 612 },
     };
-    // Pass's and AvoidCars' fields after their car, at retail's offsets in
-    // the script and at the host's here, where a pointer is 8 bytes.
+    // Pass's, AvoidCars', PullOver's and IJustGotHit's own fields, at
+    // retail's offsets in the script and at the host's here, where a
+    // pointer is 8 bytes.
     static const struct {
         const char *kind, *name;
         size_t      off;
@@ -871,6 +976,11 @@ static void poke(const char *f, uint32_t v)
         { "ac", "o624", offsetof(AIActionAvoidCars, MyCreationTime) },
         { "ac", "o628", offsetof(AIActionAvoidCars, MinLifetime) },
         { "ac", "o632", offsetof(AIActionAvoidCars, UsedPreferredSide) },
+        { "po", "o616", offsetof(AIActionPullOver, IsMyDrivingChoiceOkay) },
+        { "po", "o620", offsetof(AIActionPullOver, New620) },
+        { "po", "o624", offsetof(AIActionPullOver, PullOverTimeout) },
+        { "ij", "r612",
+          offsetof(AIActionIJustGotHit, LastDecisionReevaluationTime) },
     };
     size_t i;
 
@@ -918,6 +1028,13 @@ static void act_op(char **t, int n)
         else if (strcmp(kind, "ac") == 0)
             aiavoidcars_init(&ab.ac, score, timeout, car, fh(t[5]),
                              atoi(t[6]), atoi(t[7]));
+        else if (strcmp(kind, "po") == 0)
+            // The last bit leaves out the list, the next the location.
+            aipullover_init(&ab.po, score, timeout, fh(t[5]),
+                            atoi(t[6]) & 1 ? NULL : &info.MyNearbyCarList,
+                            atoi(t[6]) & 2 ? NULL : &info.MyDrivingLocation);
+        else if (strcmp(kind, "ij") == 0)
+            aijustgothit_init(&ab.ij, score, timeout, car);
         else
             aiaccidentrecovery_init(&ab.ar, score, timeout);
         dump_act();
@@ -960,12 +1077,17 @@ static void act_op(char **t, int n)
             got = aijustdrive_calculate_score(&info);
         } else if (strcmp(k, "dr") == 0) {
             got = aidraft_calculate_score(&info, car_ptr(t[2]));
-        } else if (strcmp(k, "nc") == 0 || strcmp(k, "bl") == 0) {
+        } else if (strcmp(k, "nc") == 0 || strcmp(k, "bl") == 0
+                   || strcmp(k, "ij") == 0) {
             Car *out;
 
             fill(&out, sizeof out);
-            got = k[0] == 'n' ? ainudgecar_calculate_score(&info, &out)
-                              : aiblock_calculate_score(&info, &out);
+            if (k[0] == 'n')
+                got = ainudgecar_calculate_score(&info, &out);
+            else if (k[0] == 'b')
+                got = aiblock_calculate_score(&info, &out);
+            else
+                got = aijustgothit_calculate_score(&info, &out);
             printf("  out %s\n", nm(out));
         } else if (strcmp(k, "pa") == 0 || strcmp(k, "ac") == 0) {
             // Each out filled first, so what is not written shows.
@@ -989,6 +1111,8 @@ static void act_op(char **t, int n)
             printf("  secs %s ok %d used %d\n", fx(secs), (int)okay,
                    (int)used);
             dump_info();
+        } else if (strcmp(k, "po") == 0) {
+            got = aipullover_calculate_score(&info);
         } else {
             got = aiaccidentrecovery_calculate_score(&info);
         }
@@ -1023,6 +1147,75 @@ static void act_op(char **t, int n)
         cars[atoi(t[1])].State.nWheelsTouchingGround = atoi(t[2]);
     } else if (strcmp(c, "f") == 0) {
         poke(t[1], wh(t[2]));
+    } else if (strcmp(c, "ti") == 0) {
+        // 11d-3a's from here: a car's type info, as the maximum
+        // acceleration and deceleration read it.
+        CarTypeInfo *ti = &ctis[atoi(t[1])];
+
+        ti->Body.Mass = fh(t[2]);
+        ti->Aero.Drag = fh(t[3]);
+        ti->Control.SpeedLimiter = fh(t[4]);
+        ti->Tires[0].StaticFrictionCoefficient = fh(t[5]);
+        ti->Tires[1].StaticFrictionCoefficient = fh(t[6]);
+        ti->Aero.FrontDownforce = fh(t[7]);
+        ti->Aero.RearDownforce = fh(t[8]);
+    } else if (strcmp(c, "col") == 0) {
+        // A car's body and its collisions: each whether two cars' and
+        // which.
+        int k = atoi(t[1]), nc = atoi(t[2]), i;
+
+        cars[k].pDynamicCollisionBody = &bodies[k];
+        bodies[k].Dynamic.Body.NumCollisions = (int8_t)nc;
+        for (i = 0; i < nc; i++) {
+            coll_two[k][i] = atoi(t[3 + 3 * i]);
+            coll_cars[k][i][0] = car_ptr(t[4 + 3 * i]);
+            coll_cars[k][i][1] = car_ptr(t[5 + 3 * i]);
+        }
+    } else if (strcmp(c, "ch") == 0) {
+        if (strcmp(t[1], "none") == 0) {
+            world.Helicopter = NULL;
+        } else {
+            world.Helicopter = &chopper;
+            chopper.Plan = atoi(t[1]);
+            chopper.CurrentPos.x = fh(t[2]);
+            chopper.CurrentPos.y = fh(t[3]);
+        }
+    } else if (strcmp(c, "cm") == 0) {
+        // The AI cops' count, then each cop: "-" for none, else its car
+        // and its DesiredLogicState.
+        int i;
+
+        if (strcmp(t[1], "none") == 0) {
+            pCopManager = NULL;
+        } else {
+            memset(&copm, 0, sizeof copm);
+            memset(cops, 0, sizeof cops);
+            copm.nNumAICops = atoi(t[1]);
+            for (i = 0; i + 2 < n && i < 7; i++) {
+                if (strcmp(t[2 + i], "-") == 0)
+                    continue;
+                copm.Cops[i] = &cops[i];
+                cops[i].pMyCar = car_ptr(t[2 + i]);
+                cops[i].DesiredLogicState = atoi(strchr(t[2 + i], ':') + 1);
+            }
+            pCopManager = (tCopManager *)(void *)&copm;
+        }
+    } else if (strcmp(c, "pl") == 0) {
+        int i;
+
+        PlayerNumPlayers = atoi(t[1]);
+        for (i = 0; i < 2; i++) {
+            PlayerPlayersByIndex[i] = &plobj[i];
+            plobj[i].MyCar = car_ptr(t[2 + i]);
+        }
+    } else if (strcmp(c, "cl") == 0) {
+        // The cop lights' word, CopLights and the three bytes after it.
+        uint32_t v = wh(t[2]);
+
+        memcpy((unsigned char *)&cars[atoi(t[1])] + offsetof(Car, CopLights),
+               &v, 4);
+    } else if (strcmp(c, "sk") == 0) {
+        drivers[atoi(t[1])].SkillLevel = (int8_t)atoi(t[2]);
     } else {
         fprintf(stderr, "bad op %s\n", t[0]);
         exit(2);

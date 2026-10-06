@@ -39,11 +39,33 @@ typedef char troadblock_layout_check[
      && offsetof(tRoadBlock, v2Position) == 68
      && sizeof(tRoadBlock) == 120) ? 1 : -1];
 
-// The demo's type#5558 is 32 bytes; these are its first two words.
+// eLogicState, .mdebug t1052.
+typedef int32_t eLogicState;
+#define LS_INVALID          ((eLogicState)0)
+#define LS_LIMBO            ((eLogicState)1)
+#define LS_DISABLED         ((eLogicState)2)
+#define LS_SPEED_TRAP       ((eLogicState)3)
+#define LS_ROAD_BLOCK       ((eLogicState)4)
+#define LS_DRIVING_ON_PATROL ((eLogicState)5)
+#define LS_HOT_PURSUIT      ((eLogicState)6)
+#define LS_CAUGHT_SPEEDER   ((eLogicState)7)
+#define LS_GUARD_LOCATION   ((eLogicState)8)
+
+// The demo's type#5558 is 32 bytes; these are its first five words.
+// PullOver's CalculateScore (0x001c8400) reads DesiredLogicState at 16.
 struct tCop {
     tPursuit   *pMyPursuit;             //  0 NULL while not chasing
     struct Car *pMyCar;                 //  4
+    int32_t     nCopNumber;             //  8
+    eLogicState LogicState;             // 12
+    eLogicState DesiredLogicState;      // 16
 };
+
+#if UINTPTR_MAX == 0xFFFFFFFFu
+typedef char tcop_layout_check[
+    (offsetof(struct tCop, pMyCar) == 4
+     && offsetof(struct tCop, DesiredLogicState) == 16) ? 1 : -1];
+#endif
 
 // bTNode<tPursuit>: a pursuit's links in the manager's PursuitList. The
 // list's own node is the sentinel, so the last pursuit's Next is the list.
@@ -88,7 +110,8 @@ extern tCopManager *pCopManager;
 // byte offsets hold there too.
 typedef struct tCopManagerHead {
     int32_t  New0;                        //  0
-    uint8_t  Unported4[8];                //  4
+    int32_t  nNumAICops;                  //  4  PullOver's score walks these
+    int32_t  nNumCops;                    //  8
     int32_t  nPlayerCopIndex;             // 12  -1 for none
     tCop    *Cops[7];                     // 16
     tPursuitNode PursuitList;             // 44  bTList<tPursuit>

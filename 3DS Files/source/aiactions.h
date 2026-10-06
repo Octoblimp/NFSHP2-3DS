@@ -26,8 +26,15 @@
 //   when there is no way round.
 // Their GetNames, destructors and GetCarToAvoid are 0x001ca978 to
 // 0x001caa5c.
-// PullOver, GetUnstuck, AvoidRoadBlock and IJustGotHit are 11d-3's. The
-// DoSnapshots wait on ReplaySnapshot.
+//
+// And 11d-3a's two:
+// - PullOver (0x001c8298 .. 0x001c8b2c): a traffic car near a cop's
+//   lights or the chopper edges to the right side of the road and stops;
+// - IJustGotHit (0x001c9c68 .. 0x001ca1ec): new choices every 0.2 s while
+//   touching a car, the speed by where that car is.
+// Their GetNames and destructors are 0x001ca628 to 0x001ca7e4.
+// GetUnstuck and AvoidRoadBlock are 11d-3b's. The DoSnapshots wait on
+// ReplaySnapshot.
 //
 // Checked against retail by tools/drivingchoice_check.py. Written up in
 // docs/formats/ai-action.md.
@@ -97,6 +104,24 @@ typedef struct AIActionAvoidCars {
     int32_t  UsedPreferredSide;                 // 632  a bool
 } AIActionAvoidCars;
 
+// 11d-3a's. PullOver's word at 620 is retail's: whether there is room to
+// pull over to the right, set over 4 m to the edge and cleared under 2.
+// PullOverTimeout moved past it.
+typedef struct AIActionPullOver {
+    AIAction Base;                              //   0
+    Timer    MyCreationTime;                    // 608
+    Timer    LastDecisionReevaluationTime;      // 612
+    int32_t  IsMyDrivingChoiceOkay;             // 616  a bool
+    int32_t  New620;                            // 620  a bool
+    float    PullOverTimeout;                   // 624  -999 for none
+} AIActionPullOver;
+
+typedef struct AIActionIJustGotHit {
+    AIAction Base;                              //   0
+    Car     *CarIHit;                           // 608
+    Timer    LastDecisionReevaluationTime;      // 612
+} AIActionIJustGotHit;
+
 #ifndef AIACTION_NO_ASSERT
 typedef char aiactions_layout_check[
     (offsetof(AIActionJustDrive, LastDecisionReevaluationTime) == 608
@@ -107,7 +132,14 @@ typedef char aiactions_layout_check[
      && sizeof(AIActionAccidentRecovery) <= AIACTION_SLOT_SIZE
      && offsetof(AIActionPass, CarToPass) == 608
      && offsetof(AIActionAvoidCars, CarToAvoid) == 608
-     && sizeof(AIActionAvoidCars) <= AIACTION_SLOT_SIZE) ? 1 : -1];
+     && sizeof(AIActionAvoidCars) <= AIACTION_SLOT_SIZE
+     && offsetof(AIActionPullOver, MyCreationTime) == 608
+     && offsetof(AIActionPullOver, LastDecisionReevaluationTime) == 612
+     && offsetof(AIActionPullOver, IsMyDrivingChoiceOkay) == 616
+     && offsetof(AIActionPullOver, New620) == 620
+     && offsetof(AIActionPullOver, PullOverTimeout) == 624
+     && offsetof(AIActionIJustGotHit, CarIHit) == 608
+     && sizeof(AIActionIJustGotHit) <= AIACTION_SLOT_SIZE) ? 1 : -1];
 // What follows a car pointer is retail's only where a pointer is 4 bytes.
 #if UINTPTR_MAX == 0xFFFFFFFFu
 typedef char aiactions_layout_check32[
@@ -118,13 +150,15 @@ typedef char aiactions_layout_check32[
      && offsetof(AIActionAvoidCars, LastDecisionReevaluationTime) == 620
      && offsetof(AIActionAvoidCars, MyCreationTime) == 624
      && offsetof(AIActionAvoidCars, MinLifetime) == 628
-     && offsetof(AIActionAvoidCars, UsedPreferredSide) == 632) ? 1 : -1];
+     && offsetof(AIActionAvoidCars, UsedPreferredSide) == 632
+     && offsetof(AIActionIJustGotHit, LastDecisionReevaluationTime)
+        == 612) ? 1 : -1];
 #endif
 #endif
 
 // The demo's tables (retail 0x002b7b10, 0x002b7bd0, 0x002b7b90, 0x002b7b50,
-// 0x002b79d0, 0x002b7c10 and 0x002b7c50), eight entries each in
-// AIAction's slots.
+// 0x002b79d0, 0x002b7c10, 0x002b7c50, 0x002b7ad0 and 0x002b7a10), eight
+// entries each in AIAction's slots.
 #define AIJUSTDRIVE_VTABLE         0x0029afa0u
 #define AIDRAFT_VTABLE             0x0029b060u
 #define AINUDGECAR_VTABLE          0x0029b020u
@@ -132,6 +166,8 @@ typedef char aiactions_layout_check32[
 #define AIACCIDENTRECOVERY_VTABLE  0x0029ae60u
 #define AIPASS_VTABLE              0x0029b0a0u
 #define AIAVOIDCARS_VTABLE         0x0029b0e0u
+#define AIPULLOVER_VTABLE          0x0029af60u
+#define AIIJUSTGOTHIT_VTABLE       0x0029aea0u
 
 // --------------------------------------------------------- JustDrive
 
@@ -373,7 +409,89 @@ const char *aiavoidcars_get_name(AIActionAvoidCars *a);
 // 0x001ca9e8.
 Car *aiavoidcars_get_car_to_avoid(AIActionAvoidCars *a);
 
-// Installs the seven tables. The DoSnapshots are NULL.
+// --------------------------------------------------------- PullOver
+
+// 0x001c8298, (int score, float timeout, float pullOverTimeout,
+// NearbyCarList *list, DrivingLocation *loc). Type PULL_OVER, created now,
+// re-evaluated at 0, the choice okay, and New620 whether the room to the
+// right edge at loc's point is over 2 m (1 when either pointer is NULL).
+// PointsToDrive is cleared. The callers pass the controller's list and
+// location; the DoSnapshot passes NULLs.
+AIActionPullOver *aipullover_init(AIActionPullOver *a, int32_t score,
+                                  float timeout, float pullOverTimeout,
+                                  NearbyCarList *list,
+                                  DrivingLocation *loc);
+
+// 0x001ca788.
+void aipullover_destroy(AIActionPullOver *a, int32_t flags);
+
+// 0x001c8400, static. Only for a traffic car: 600 within 150 m of the
+// chopper while its plan is 0 to 2 or 4, or of a cop (not disabled) or a
+// player whose car's CopLights word is set, within three and a half
+// times that car's speed and no less than 100 m. Otherwise -1.
+int32_t aipullover_calculate_score(DrivingInformation *info);
+
+// 0x001c8610. A traffic car whose score is -1.
+int aipullover_has_been_accomplished(AIActionPullOver *a,
+                                     DrivingInformation *info);
+
+// 0x001c8658 and 0x001c8650. Never.
+int aipullover_has_failed(AIActionPullOver *a, DrivingInformation *info);
+int aipullover_has_expired(AIActionPullOver *a, DrivingInformation *info);
+
+// 0x001c86a8. My own target, no boost. Until PullOverTimeout (none at
+// -999): every 0.3 s, or with no points, the route ahead edging to the
+// right side of the track (a driver of skill -2 keeps to the choice's
+// line), and round a car it hits under 2 s with MakeNewChoice. A skill -2
+// driver slows at 12% (20% with no way round) of its most deceleration;
+// any other stops hard with no location or no way round, or when over 15
+// m/s or within 2 m of the edge, else holds 14 m/s until there. Under 0.5
+// m/s, or touching another car, it stops. Past the timeout, the
+// location's line at a stop.
+void aipullover_calculate_points_to_drive(AIActionPullOver *a,
+                                          DrivingInformation *info);
+
+// 0x001ca778. "Pull over".
+const char *aipullover_get_name(AIActionPullOver *a);
+
+// ------------------------------------------------------- IJustGotHit
+
+// 0x001c9c68, (int score, float timeout, Car *car). Type I_JUST_GOT_HIT,
+// the car, and the re-evaluation time 0.
+AIActionIJustGotHit *aijustgothit_init(AIActionIJustGotHit *a, int32_t score,
+                                       float timeout, Car *car);
+
+// 0x001ca638.
+void aijustgothit_destroy(AIActionIJustGotHit *a, int32_t flags);
+
+// 0x001c9d20, static. Of my body's two-car collisions with a car on the
+// list, the one to answer (see the source), into `*car`, and 400; -1 and
+// `*car` NULL for none.
+int32_t aijustgothit_calculate_score(DrivingInformation *info, Car **car);
+
+// 0x001c9e90. No two-car collision on the list now, or the car hit off
+// it. A collision now makes its car CarIHit.
+int aijustgothit_has_been_accomplished(AIActionIJustGotHit *a,
+                                       DrivingInformation *info);
+
+// 0x001c9f58. Never.
+int aijustgothit_has_failed(AIActionIJustGotHit *a, DrivingInformation *info);
+
+// 0x001c9f10. As JustDrive's.
+int aijustgothit_has_expired(AIActionIJustGotHit *a,
+                             DrivingInformation *info);
+
+// 0x001c9f60. My own target, a new choice (MakeNewChoice) every 0.2 s or
+// with no points. Heading off the road forwards, it brakes; else the speed
+// depends on where the car hit is (see the source), at no less than 20
+// m/s when not at the line's speed.
+void aijustgothit_calculate_points_to_drive(AIActionIJustGotHit *a,
+                                            DrivingInformation *info);
+
+// 0x001ca628. "I just got hit!".
+const char *aijustgothit_get_name(AIActionIJustGotHit *a);
+
+// Installs the nine tables. The DoSnapshots are NULL.
 void aiactions_install_vtables(void);
 
 #endif
