@@ -16,9 +16,18 @@
 // - AccidentRecovery (0x001ca1f0 .. 0x001ca524): stopped on the route
 //   until the car is back on its wheels, and reset after five seconds of
 //   not.
-// Their GetNames and destructors are 0x001ca5b8 to 0x001ca974. Pass,
-// AvoidCars, PullOver, GetUnstuck, AvoidRoadBlock and IJustGotHit are
-// 11d-2's and 11d-3's. The DoSnapshots wait on ReplaySnapshot.
+// Their GetNames and destructors are 0x001ca5b8 to 0x001ca974.
+//
+// And 11d-2's two:
+// - Pass (0x001c78f8 .. 0x001c8024): round a car ahead that can be
+//   caught, until it is ten metres behind;
+// - AvoidCars (0x001c6ba0 .. 0x001c73bc): a new choice round the car my
+//   own target runs into, re-made every 0.3 s, slowing behind that car
+//   when there is no way round.
+// Their GetNames, destructors and GetCarToAvoid are 0x001ca978 to
+// 0x001caa5c.
+// PullOver, GetUnstuck, AvoidRoadBlock and IJustGotHit are 11d-3's. The
+// DoSnapshots wait on ReplaySnapshot.
 //
 // Checked against retail by tools/drivingchoice_check.py. Written up in
 // docs/formats/ai-action.md.
@@ -69,6 +78,25 @@ typedef struct AIActionAccidentRecovery {
     int32_t  HaveResetYet;                      // 612  a bool
 } AIActionAccidentRecovery;
 
+// 11d-2's. The bools are words, as the image stores them.
+typedef struct AIActionPass {
+    AIAction Base;                              //   0
+    Car     *CarToPass;                         // 608
+    float    AmountToProjectIntoFuture;         // 612
+    Timer    MyCreationTime;                    // 616
+} AIActionPass;
+
+typedef struct AIActionAvoidCars {
+    AIAction Base;                              //   0
+    Car     *CarToAvoid;                        // 608
+    float    SecondsToImpact;                   // 612
+    int32_t  IsMyDrivingChoiceOkay;             // 616  a bool
+    Timer    LastDecisionReevaluationTime;      // 620
+    Timer    MyCreationTime;                    // 624
+    float    MinLifetime;                       // 628
+    int32_t  UsedPreferredSide;                 // 632  a bool
+} AIActionAvoidCars;
+
 #ifndef AIACTION_NO_ASSERT
 typedef char aiactions_layout_check[
     (offsetof(AIActionJustDrive, LastDecisionReevaluationTime) == 608
@@ -76,16 +104,34 @@ typedef char aiactions_layout_check[
      && offsetof(AIActionBlock, CarToBlock) == 608
      && offsetof(AIActionAccidentRecovery, MyCreationTime) == 608
      && offsetof(AIActionAccidentRecovery, HaveResetYet) == 612
-     && sizeof(AIActionAccidentRecovery) <= AIACTION_SLOT_SIZE) ? 1 : -1];
+     && sizeof(AIActionAccidentRecovery) <= AIACTION_SLOT_SIZE
+     && offsetof(AIActionPass, CarToPass) == 608
+     && offsetof(AIActionAvoidCars, CarToAvoid) == 608
+     && sizeof(AIActionAvoidCars) <= AIACTION_SLOT_SIZE) ? 1 : -1];
+// What follows a car pointer is retail's only where a pointer is 4 bytes.
+#if UINTPTR_MAX == 0xFFFFFFFFu
+typedef char aiactions_layout_check32[
+    (offsetof(AIActionPass, AmountToProjectIntoFuture) == 612
+     && offsetof(AIActionPass, MyCreationTime) == 616
+     && offsetof(AIActionAvoidCars, SecondsToImpact) == 612
+     && offsetof(AIActionAvoidCars, IsMyDrivingChoiceOkay) == 616
+     && offsetof(AIActionAvoidCars, LastDecisionReevaluationTime) == 620
+     && offsetof(AIActionAvoidCars, MyCreationTime) == 624
+     && offsetof(AIActionAvoidCars, MinLifetime) == 628
+     && offsetof(AIActionAvoidCars, UsedPreferredSide) == 632) ? 1 : -1];
+#endif
 #endif
 
-// The demo's tables (retail 0x002b7b10, 0x002b7bd0, 0x002b7b90, 0x002b7b50
-// and 0x002b79d0), eight entries each in AIAction's slots.
+// The demo's tables (retail 0x002b7b10, 0x002b7bd0, 0x002b7b90, 0x002b7b50,
+// 0x002b79d0, 0x002b7c10 and 0x002b7c50), eight entries each in
+// AIAction's slots.
 #define AIJUSTDRIVE_VTABLE         0x0029afa0u
 #define AIDRAFT_VTABLE             0x0029b060u
 #define AINUDGECAR_VTABLE          0x0029b020u
 #define AIBLOCK_VTABLE             0x0029afe0u
 #define AIACCIDENTRECOVERY_VTABLE  0x0029ae60u
+#define AIPASS_VTABLE              0x0029b0a0u
+#define AIAVOIDCARS_VTABLE         0x0029b0e0u
 
 // --------------------------------------------------------- JustDrive
 
@@ -226,7 +272,108 @@ void aiaccidentrecovery_calculate_points_to_drive(AIActionAccidentRecovery *a,
 // 0x001ca5b8. "Accident recovery".
 const char *aiaccidentrecovery_get_name(AIActionAccidentRecovery *a);
 
-// Installs the five tables. The DoSnapshots are NULL.
+// -------------------------------------------------------------- Pass
+
+// 0x001c78f8, (int score, float timeout, Car *car, float amount). Type
+// PASS, the car to pass, the amount (which nothing reads) and created
+// now.
+AIActionPass *aipass_init(AIActionPass *a, int32_t score, float timeout,
+                          Car *car, float amount);
+
+// 0x001ca988.
+void aipass_destroy(AIActionPass *a, int32_t flags);
+
+// 0x001c79d8, static. -1 in the grace period. Else the cars before mine in
+// the list, in order: one ahead, less than twice as far across as on,
+// that CanICatchThisCar says can be caught, is tried with
+// TryToDriveAroundCar (AIActionPassMaxTimeAheadToMakeAttempt) from the
+// information's choice into `choice`; the first that drives round it on
+// a side SideOfCarIsOkay allows is `*car`, and 300. Else -1. `choice` is
+// left as the last try left it. The float is not read.
+int32_t aipass_calculate_score(DrivingInformation *info, Car **car,
+                               DrivingChoice *choice, float *unused);
+
+// 0x001c7e28, static. A traffic car, one no faster than
+// TryToDriveAroundCarMinSpeedForDrivingLine, a line, or the preferred
+// side.
+int aipass_side_of_car_is_okay(NearbyCar *nc, DrivingChoice *choice,
+                               int preferred);
+
+// 0x001c7b90. When the list's first car is not the car to pass, the score
+// again, and a new choice it found becomes the information's, with its
+// car and a new creation time. Then, three seconds or more after that,
+// done when the car is off the list or more than ten metres past the two
+// half lengths behind. Done sets the location's relaxed switch.
+int aipass_has_been_accomplished(AIActionPass *a, DrivingInformation *info);
+
+// 0x001c7d48. The car is off the list, or, under three seconds on, ahead
+// and out of reach (CanICatchThisCar). Failing sets the relaxed switch.
+int aipass_has_failed(AIActionPass *a, DrivingInformation *info);
+
+// 0x001c7d00. As JustDrive's.
+int aipass_has_expired(AIActionPass *a, DrivingInformation *info);
+
+// 0x001c7ea8. Boost, throttle and brake, and the target from scratch: round
+// the car while it is ahead (TryToDriveAroundCar), the choice's line
+// parallel to it with IsDriveable once it is not, both at the line's
+// speed. With the car off the list, the line built parallel and the
+// points not the action's.
+void aipass_calculate_points_to_drive(AIActionPass *a,
+                                      DrivingInformation *info);
+
+// 0x001ca978. "Pass".
+const char *aipass_get_name(AIActionPass *a);
+
+// --------------------------------------------------------- AvoidCars
+
+// 0x001c6ba0, (int score, float timeout, Car *car, float secs, bool okay,
+// bool usedPreferred). Type AVOID_CARS, the car, the seconds to the hit,
+// the two flags, created and re-evaluated now, and MinLifetime two
+// seconds past the hit.
+AIActionAvoidCars *aiavoidcars_init(AIActionAvoidCars *a, int32_t score,
+                                    float timeout, Car *car, float secs,
+                                    int okay, int usedPreferred);
+
+// 0x001caa00.
+void aiavoidcars_destroy(AIActionAvoidCars *a, int32_t flags);
+
+// 0x001c6cf8, static. The car my own target runs into first
+// (WhoWillThisDriveTargetHit), when that is under
+// AIDriverAvoidCarsImpactTimeThreshold: `*car`, `*secs`, the information's
+// choice into `choice` and 400. In the grace period, a car that is no
+// player's is let be (`*okay` 1); else MakeNewChoice makes the choice,
+// `*okay` its answer. Otherwise -1, `*secs` 99999 and the flags 0.
+int32_t aiavoidcars_calculate_score(DrivingInformation *info, Car **car,
+                                    DrivingChoice *choice, float *secs,
+                                    int *okay, int *usedPreferred);
+
+// 0x001c6e78. Past MinLifetime; sets the relaxed switch.
+int aiavoidcars_has_been_accomplished(AIActionAvoidCars *a,
+                                      DrivingInformation *info);
+
+// 0x001c6ef0 and 0x001c6ee8. Never.
+int aiavoidcars_has_failed(AIActionAvoidCars *a, DrivingInformation *info);
+int aiavoidcars_has_expired(AIActionAvoidCars *a, DrivingInformation *info);
+
+// 0x001c6ef8. My own target, at the line's speed. Every 0.3 s or more (out
+// of the grace period, or avoiding a player's car) the choice is made
+// again with MakeNewChoice, from a side of the car when both are slow and
+// the choice is a line; a line it lands on becomes the location's, and is
+// highlighted. A choice not just made, or made with no points, is checked
+// with IsDriveable, from the location's line when it is not valid. With
+// no good choice and a car we care about close ahead, not blinking, the
+// speed is that car's less 0.1 (or the line's when both are slow), and no
+// less than 20 behind traffic or a cop.
+void aiavoidcars_calculate_points_to_drive(AIActionAvoidCars *a,
+                                           DrivingInformation *info);
+
+// 0x001ca9f0. "Avoid Cars".
+const char *aiavoidcars_get_name(AIActionAvoidCars *a);
+
+// 0x001ca9e8.
+Car *aiavoidcars_get_car_to_avoid(AIActionAvoidCars *a);
+
+// Installs the seven tables. The DoSnapshots are NULL.
 void aiactions_install_vtables(void);
 
 #endif

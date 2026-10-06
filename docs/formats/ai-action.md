@@ -599,3 +599,286 @@ Its numbers:
 - 136 mutations for 11d-1: 133 caught (1 by a crash) and 3 equivalent.
   Across the whole checker, 877 mutations: 863 caught, 14 equivalent and
   0 unexplained.
+
+## Pass and AvoidCars (11d-2)
+
+    0x001c6ba0  AIActionAvoidCars::AIActionAvoidCars(int, float, Car *,
+                    float, bool, bool)
+    0x001c6cf8  AIActionAvoidCars::CalculateScore(DrivingInformation *,
+                    Car **, DrivingChoice *, float *, bool *, bool *)
+    0x001c6e78  AIActionAvoidCars::HasBeenAccomplished, HasExpired
+                (0x001c6ee8), HasFailed (0x001c6ef0)
+    0x001c6ef8  AIActionAvoidCars::CalculatePointsToDrive
+    0x001c78f8  AIActionPass::AIActionPass(int, float, Car *, float)
+    0x001c79d8  AIActionPass::CalculateScore(DrivingInformation *, Car **,
+                    DrivingChoice *, float *)
+    0x001c7b90  AIActionPass::HasBeenAccomplished, HasExpired (0x001c7d00),
+                HasFailed (0x001c7d48)
+    0x001c7e28  AIActionPass::SideOfCarIsOkay(NearbyCar *, DrivingChoice *,
+                    bool)
+    0x001c7ea8  AIActionPass::CalculatePointsToDrive
+    0x001ca978  AIActionPass::GetName, then its destructor 0x001ca988,
+                AvoidCars' GetCarToAvoid 0x001ca9e8, GetName 0x001ca9f0
+                and destructor 0x001caa00
+
+The two big ones that build on DrivingChoice's choosing (11b-4b). Pass
+goes round a car ahead it can catch; AvoidCars steers off a hit my own
+target is heading for.
+
+### The records
+
+| Action | Type | 608 | 612 | 616 | 620 | 624 | 628 | 632 | GetName |
+|---|---:|---|---|---|---|---|---|---|---|
+| Pass | 0 | CarToPass | AmountToProjectIntoFuture | MyCreationTime | | | | | "Pass" |
+| AvoidCars | 1 | CarToAvoid | SecondsToImpact | IsMyDrivingChoiceOkay | LastDecisionReevaluationTime | MyCreationTime | MinLifetime | UsedPreferredSide | "Avoid Cars" |
+
+The bools are words: the constructors store them with `sw`, and the
+scores write their bool outs with `sw` too. Both constructors set their
+times to WorldTimer. AvoidCars' MinLifetime is the seconds it was made
+with plus 2. Nothing reads AmountToProjectIntoFuture or SecondsToImpact.
+
+The offsets after the car pointer are retail's only where a pointer is 4
+bytes, so their layout check sits under `UINTPTR_MAX == 0xFFFFFFFF`. The
+host checker pokes those fields by name.
+
+### Pass
+
+CalculateScore:
+
+    -1 in the grace period
+    for each car before mine in the list, while none is found:
+        skip it unless 0 < y, x < y + y (x signed) and CanICatchThisCar
+        the choice out = the information's choice
+        TryToDriveAroundCar from it into a target of its own, over
+            AIActionPassMaxTimeAheadToMakeAttempt, considering both sides
+        found when that works and SideOfCarIsOkay: the car out = this car
+    300 when found, else -1
+
+CalculateMaxAcceleration is asked for my car at its speed, and only
+CanICatchThisCar is handed the answer, which it doesn't read. The fourth
+out-argument isn't written. The cars before mine are the ones ahead, as
+Think orders the list. With my car not in it, GetCarsIndexInArray gives
+-1 and no car is tried.
+
+SideOfCarIsOkay:
+
+    yes for a car under TRAFFIC_CONTROL
+    yes when the car isn't faster than
+        TryToDriveAroundCarMinSpeedForDrivingLine (c.lt.s)
+    yes when the choice is a driving line
+    else the side TryToDriveAroundCar picked was the preferred one
+
+HasBeenAccomplished:
+
+    if the list has a car and its first car is not CarToPass:
+        score again into a cleared choice
+        when it scores and the choice is not the information's: take the
+            choice, the car, and restart MyCreationTime
+    done once 3 s have gone since MyCreationTime and CarToPass is off the
+        list or more than (MyHalfSizeD + its ApparentHalfSizeD) + 10
+        behind
+    a relaxed switch when done
+
+HasFailed: CarToPass is off the list, or within the first 3 s and ahead
+(y > 0) and CanICatchThisCar (with -1, so it asks the acceleration again
+and drops it) says no. A relaxed switch when failed. HasExpired is the
+timeout's, as JustDrive's.
+
+CalculatePointsToDrive:
+
+    clear PointsToDrive; UseDrivingLineSpeed 0; throttle, boost and
+        PointsToDriveWillExecuteAction 1
+    with CarToPass on the list:
+        ahead (y > 0): TryToDriveAroundCar into PointsToDrive, over the
+            avoid threshold, both sides
+        else: a choice that is not a line is set from the location, then
+            IsDriveable, not preferred, parallel to the line
+        UseDrivingLineSpeed 1
+    else:
+        a choice that is not a line is set from the location;
+        BuildDriveTarget, parallel to the line
+        UseDrivingLineSpeed 1, PointsToDriveWillExecuteAction 0
+
+None of the answers is read.
+
+### AvoidCars
+
+CalculateScore:
+
+    secs = 99999, okay and the side used 0
+    WhoWillThisDriveTargetHit for my car's own target, over the avoid
+        threshold
+    if it hits a car sooner than the threshold:
+        the car and secs out; the choice out = the information's choice
+        in the grace period against a car with no player: okay 1, side 0
+        else okay = MakeNewChoice from that choice, both sides
+        400
+    else -1
+
+HasBeenAccomplished: once `seconds <= MinLifetime` fails (`c.le.s`, so a
+NaN MinLifetime is done at once), with a relaxed switch. It never fails
+or expires.
+
+CalculatePointsToDrive:
+
+    PointsToDrive = my car's own target; tolerance 0; throttle and line
+        speed 1
+    ncAvoid, ncChoice = CarToAvoid's and the choice's car's entries
+    DoWeCareAboutThisCar for each, answers dropped
+    slow = ncAvoid and my speed < 10 and its car's < 5
+    reevaluate = not in the grace period, or CarToAvoid has a player;
+        and only more than 0.3 s after the last re-evaluation
+    if reevaluate:
+        a line choice, when slow, becomes the left side of the car to
+            avoid, or its right side when there is not enough room
+        UsedPreferredSide 0; okay = MakeNewChoice into PointsToDrive
+        a line choice whose line is not the location's sets the
+            location's line (no relaxed switch) and highlights it for my
+            driver number; ncChoice NULL
+        a side choice: ncChoice its car's entry
+        LastDecisionReevaluationTime = WorldTimer
+    unless it re-evaluated into points with a choice:
+        a choice that is none or not valid: okay 0, set from the location
+        okay = IsDriveable, preferred when UsedPreferredSide, towards the
+            line
+        no points: BuildDriveTarget parallel to the line, okay 0
+    if not okay and we care about ncAvoid or ncChoice, and ncAvoid's car
+            is on the list and not blinking:
+        close = for a car under REAL_CONTROL, MyHalfSizeD * 0.5 <
+                y + vy * 0.1; for any other, 0 < y
+        not close when |x| is not under (MyHalfSizeL + ApparentHalfSizeL)
+            + 1 and the car has no player
+        if close: UseDrivingLineSpeed 0, or 1 when slow, else
+            SetDesiredSpeedSlowerThanThisCar (0.1, 0.1); behind a traffic
+            car or a cop, DesiredSpeed at least 20
+    PointsToDriveWillExecuteAction 1
+
+Retail hands MakeNewChoice UsedPreferredSide's own address. The port
+hands it an int and copies the answer into the field after: the
+field's int32_t is a long on the 3DS, and MakeNewChoice's out is an
+int. MakeNewChoice stores the out on each of its ways out, so the two
+agree.
+
+In the grace period CarToAvoid is read through with no NULL test, so it
+must be a car. HighlightDrivingLine (0x001cb450) asks my car's driver for
+its number through the CarDriver's vptr (entry 80).
+
+### The constants
+
+| Where | Value | Port | Use |
+|------:|------:|------|-----|
+| gp-18164 | 3 | AIActionPassMaxTimeAheadToMakeAttempt | Pass's look ahead |
+| lui 0x4040 | 3 | AIPA_SETTLE | Pass's first seconds |
+| lui 0x4120 | 10 | AIPA_BEHIND | behind by |
+| gp-28680 | 99999 | AIPA_NO_HIT | IsDriveable's hit time, first |
+| gp-28736, gp-28720 | 99999 | AIAC_NO_HIT | no hit |
+| lui 0x4000 | 2 | AIAC_MIN_LIFETIME | |
+| gp-28724 | 0.3 | AIAC_REEVALUATE_EVERY | |
+| lui 0x4120, lui 0x40a0 | 10, 5 | AIAC_SLOW_ME, AIAC_SLOW_IT | slow |
+| gp-28716 | 0.1 | AIAC_LOOK_AHEAD | |
+| lui 0x3f00 | 0.5 | AIAC_HALF | |
+| lui 0x3f80 | 1 | AIAC_ACROSS_MARGIN | |
+| gp-28712 | 0.1 | AIAC_SLOWER_BY | both of SetDesiredSpeedSlowerThanThisCar's |
+| lui 0x41a0 | 20 | AIAC_MIN_SPEED_BEHIND | |
+
+### The tables
+
+| | Retail | Port's constant (the demo's) |
+|---|---|---|
+| `_vt$12AIActionPass` | 0x002b7c10 | 0x0029b0a0 |
+| `_vt$17AIActionAvoidCars` | 0x002b7c50 | 0x0029b0e0 |
+
+`aiactions_install_vtables` installs the seven.
+
+### The checker
+
+drivingchoice_check adds:
+- `@n pa score timeout car amount` and `@n ac score timeout car secs okay
+  used`;
+- `@sc pa` and `@sc ac`, with every out filled first, so what isn't
+  written shows;
+- `@so entry preferred` (SideOfCarIsOkay on the list's entry and the
+  information's choice), `@ga` (GetCarToAvoid) and `@bk car timer
+  duration` (a car's blink);
+- after AvoidCars' points, the two highlight globals; and the globals
+  PASS, CAM, HROUTE and HLINE.
+
+Two more stubs, on both sides:
+- CalculateMaxAcceleration (0x001cce50), in the model only. Its answer
+  reaches only CanICatchThisCar, which doesn't read it. The harness runs
+  the port's, so it gives each car a ride info and car type 0 a two-entry
+  acceleration table.
+- GetDriverNumber, in a test CarDriver table (DVT) every car's driver
+  points at. It prints the car and answers its DriverNumber.
+
+s_pass_avoid makes Pass or AvoidCars four times on s_actions' world. It
+times its clock steps from the action's own times either side of each
+edge: 0.3 s, AvoidCars' least lifetimes for its seconds (2, 2.25, 2.5, 3)
+and Pass's 3 s. It also steps either side of the grace period's end, for
+the default driver and for driver 120. It covers:
+- speeds either side of 5, 10 and the line's speed;
+- blinks either side of their end;
+- the camera on my car or not;
+- the look-ahead times moved, including an avoid threshold of 0 (a hit at
+  once is then not sooner) and 99999.
+
+s_pa_edge, eight rounds of ten kinds at the end, runs the exact cases
+that random worlds miss. Each builds its own few cars, with every car it
+doesn't need well behind:
+- pa-score: the car ahead at x exactly 2y, a float either side, and at
+  -2y, 1.5y and 0.5y, closing or pulling away, with the least speed at 0
+  or 5 sometimes.
+- pa-hba: the car to pass exactly 10 m past the two half lengths, a float
+  either side, and just short, with the clock 3 s on, a tick past and well
+  past.
+- pa-hf: both cars level at y 0 and still, with nothing accelerating, so
+  CanICatchThisCar is 0 < 0, at the clock either side of 3 s.
+- pa-cp: my car off its line, real or AI, with each kind of choice set
+  raw, so the line the points start from is not the choice's.
+- ac-time: AvoidCars' threshold (5 or 4) away from Pass's (0, 0.25 or
+  0.5), with my car closing on car 1 down one lane, so the hit comes one
+  or two seconds on; the points are asked again 0.3 s and 0.6 s later.
+- ac-null: a threshold so far ahead that every car is a hit, sometimes
+  with no location.
+- ac-close: a car stopped just ahead (car 4), so nothing is driveable,
+  with the car to avoid at each edge of the close test: half lengths,
+  look-ahead, x, real or not, across, blinking and slow.
+- ac-care: the stopped car, and a real car behind closing at 150, so only
+  the choice's car is cared about.
+- ac-stand: no location, with each line or none, and my own target empty
+  or not, made again. For a negative odd line, MakeNewChoice's current
+  choice keeps what retail's stack held, which drivingchoice.c clears; a
+  stale line choice there skipped one of the lines. The model clears it
+  on the way into MakeNewChoice (MAKE_NEW_CURRENT, sp+1696 of its
+  1984-byte frame).
+- ac-side: a still car a few points ahead and 3 to 6 m to the side, at a
+  speed either side of 5, so a line choice becomes a side of it.
+
+The first mutation pass left 45 alive; s_pa_edge catches 35 of them. The
+other ten are equivalent:
+- pa-nohit: IsDriveable stores DC_NO_HIT in the time before anything reads
+  it, and Pass drops the time after.
+- pa-cp-clear: every way on rebuilds the points with BuildDriveTarget,
+  which first copies the driver's own target over all of them.
+- pa-cp-drv-time: the time reaches BuildDriveTarget, which doesn't read
+  it, and WhoWillThisDriveTargetHit, where it only stops the walk; Pass
+  drops IsDriveable's answer, and the IDs move once a car either way.
+- ac-sc-used1: the side used was stored 0 at the top, and nothing between
+  writes it.
+- ac-cp-used0: MakeNewChoice stores its out on each of its four ways out.
+- ac-cp-none: IsValid answers 0 for CHOICE_NONE, so the type test says
+  only what the IsValid test says.
+- ac-cp-zero: the points are empty after IsDriveable only with no
+  location, where IsDriveable's own build made the same empty target.
+- ac-cp-build-move: that build runs only with no location, where
+  FillUpDriveTarget returns before it reads the movement.
+- ac-cp-build-okay: that store runs only with no location, where the
+  answer was 0 already.
+- ac-cp-slower-b: SetDesiredSpeedSlowerThanThisCar doesn't read its second
+  float.
+
+Its numbers:
+- 532 scenarios, 194029 ops, 218234 lines, 0 differ.
+- 170 mutations for 11d-2: 160 caught and 10 equivalent. Across the whole
+  checker, 1047 mutations: 1023 caught, 24 equivalent and 0
+  unexplained.

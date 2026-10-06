@@ -37,6 +37,10 @@ ops). Four more stubs serve them: the slot pool (bNewSlotPool,
 bDeleteSlotPool, bOMalloc and bFree), DestoryTargetMarkers,
 TopologyCoordinate::GetElevation (0x00152070), which answers the
 script's normal under the car, and Car::PleaseResetMeLater (0x00133070).
+Step 11d-2 adds Pass and AvoidCars, with two more stubs:
+CalculateMaxAcceleration (0x001cce50), whose answer nothing reads, and the
+GetDriverNumber of a test CarDriver table at DVT, which every car's driver
+has, answering the car's DriverNumber.
 
 Three stubs, each of which prints a line, so the two sides must ask them
 the same questions in the same order:
@@ -159,6 +163,10 @@ CHOOSE_LIMIT = 400000000
 # EstimateScore's two, which a car at rest takes and drivetarget.c spells
 # ee_div (tools/drivetarget_image_check.py).
 EST_DIVS = {0x0021d204, 0x00258914}
+# SetDesiredSpeedSlowerThanThisCar's, for a car keeping pace (aiaction.c
+# spells it ee_div; nearbycar_check's s_ai covers it). AvoidCars reaches
+# it behind a car level with mine.
+SLOWER_DIV = 0x001c6520
 # EstimateScore's entry and its one jr ra. Its 20 distances are a stack
 # array written only from the first point on, and IsDriveable's scratch
 # target, rebuilt choice after choice in one frame, keeps the first choice's
@@ -170,6 +178,11 @@ EST_DIVS = {0x0021d204, 0x00258914}
 EST_ENTRY = 0x0021c920
 EST_RET = 0x0021cf2c
 EST_FRAME = 304
+# MakeNewChoice's current choice, at sp+1696 in its 1984-byte frame, which
+# retail never clears: a location whose line gives no choice (a negative
+# odd line) leaves it as the stack had it. drivingchoice.c clears it, and
+# the model clears it on the way in.
+MAKE_NEW_CURRENT = 1696 - 1984
 
 # DriveTarget's MinDistanceToPoint and its square, which the image's
 # start-up code (0x0020ab48) works out and the emulator does not run.
@@ -201,6 +214,10 @@ GLOBALS = {
     "NLINES": GP - 20136,         # AICarControllerNumDrivingLinesToConsider
     "POOL": GP - 18288,           # AIActionSlotPool
     "AVOID": GP - 18168,          # AIDriverAvoidCarsImpactTimeThreshold
+    "PASS": GP - 18164,           # AIActionPassMaxTimeAheadToMakeAttempt
+    "CAM": GP - 21528,            # CameraFollowThisCarInstead
+    "HROUTE": GP - 18316,         # HighlightDrivingLineInRouteNumber
+    "HLINE": GP - 18312,          # HighlightDrivingLineNumber
 }
 
 CARS = 0x01010000
@@ -265,19 +282,37 @@ NROUTES = 6
 # AIAction::UpdateStatus, AccidentRecovery's SortOfParallelToTrack, and the
 # three they reach that are stubbed.
 ACT_CTORS = {"jd": 0x001c73c0, "dr": 0x001c7690, "nc": 0x001c8028,
-             "bl": 0x001c8160, "ar": 0x001ca1f0}
+             "bl": 0x001c8160, "ar": 0x001ca1f0, "pa": 0x001c78f8,
+             "ac": 0x001c6ba0}
 ACT_SCORES = {"jd": 0x001c7458, "dr": 0x001c7720, "nc": 0x001c80d8,
-              "bl": 0x001c8210, "ar": 0x001ca2a8}
+              "bl": 0x001c8210, "ar": 0x001ca2a8, "pa": 0x001c79d8,
+              "ac": 0x001c6cf8}
 UPDATE_STATUS = 0x001c6a98
 AR_PARALLEL = 0x001ca2f0
 GET_ELEVATION = 0x00152070        # TopologyCoordinate::GetElevation
 RESET_LATER = 0x00133070          # Car::PleaseResetMeLater
 POOL_FREE = 0x00257ca0            # bSlotFree, which AIAction's delete reaches
+# Step 11d-2's: Pass's SideOfCarIsOkay, AvoidCars' GetCarToAvoid,
+# CalculateMaxAcceleration (stubbed: its answer only reaches
+# CanICatchThisCar, which does not read it), the test CarDriver table with
+# its stubbed GetDriverNumber, and where the two scores' outs go: the car,
+# the choice (+16), the seconds (+32), okay (+36) and the side used (+40).
+SIDE_OK = 0x001c7e28
+GET_CAR_TO_AVOID = 0x001ca9e8
+MAX_ACCEL = 0x001cce50
+DVT = 0x010b3000
+DVT_BYTES = 0x100
+DVT_DNUM = 80                     # GetDriverNumber's entry
+STUB_DNUM = 0x010b3100
+SC_OUT = 0x010b3200
+SC_OUT_BYTES = 44
+CD_VPTR = 556                     # a CarDriver's vptr
+C_BLINK = 2144                    # BlinkTimer, and BlinkDuration after it
 # Their tables and AIAction's and AIPlan's, by the names the harness gives
 # the demo's.
 ACT_VTABLES = {0x002b7b10: "vJD", 0x002b7bd0: "vDR", 0x002b7b90: "vNC",
                0x002b7b50: "vBL", 0x002b79d0: "vAR", 0x002b7c90: "vAA",
-               0x002b7cd0: "vPL"}
+               0x002b7cd0: "vPL", 0x002b7c10: "vPA", 0x002b7c50: "vAC"}
 AB = 0x010b0000                   # the action, in a slot of the pool's size
 AB_BYTES = 640
 INFO = 0x010b1000                 # its DrivingInformation
@@ -286,7 +321,8 @@ POOL = 0x010b2000                 # what AIActionSlotPool holds
 # The action's fields the script pokes.
 ACT_FIELDS = {"can": 0, "exp": 4, "dt": 8, "st": 12, "pt": 560, "ds": 564,
               "tt": 568, "tol": 572, "udl": 576, "tb": 580, "bo": 584,
-              "t608": 608, "r612": 612}
+              "t608": 608, "r612": 612, "o616": 616, "o620": 620,
+              "o624": 624, "o628": 628, "o632": 632}
 
 # The car, at retail's offsets.
 C_DN = 10
@@ -2712,6 +2748,493 @@ def s_act_edges(rnd):
     return ops
 
 
+# Step 11d-2's.
+N_PASS_AVOID = 50
+# WorldTimer's ticks after a time the action stored, either side of its
+# edges: AvoidCars' re-evaluation every 0.3 s (1200), its least lifetime of
+# the seconds it was made with and 2 more (8000, 9000, 10000 and 12000 for
+# 0, 0.25, 0.5 and 1), and Pass's 3 s (12000).
+PA_DELTAS = (0, 1, 600, 1199, 1200, 1201, 2000, 4000, 7999, 8000, 8001,
+             8999, 9000, 9001, 9999, 10000, 10001, 11999, 12000, 12001,
+             40000, -1, -1200)
+AC_SECS = (0.0, 0.25, 0.5, 1.0, 1.0, 1.5, 2.0, -2.0, 99999.0)
+# The race's start before the clock: the grace period's 12 s (48000) and
+# a driver numbered 120's 2 s (8000), either side.
+GRACE_AGO = (0, 1000, 7999, 8000, 8001, 47999, 48000, 48001, 100000, -4000)
+
+
+def s_pass_avoid(rnd, kind):
+    """Pass or AvoidCars as AIDriver drives them, on s_actions' world: made
+    for each car (AvoidCars always for one), asked for its points, its
+    status, its tests, its name and its score, and destroyed; the clock
+    either side of each edge after the times it stored, and of the grace
+    period's end; my car and the rest either side of the slow speeds and
+    the speed for the line, blinking or not, the camera on my car or not,
+    and the look-ahead times moved."""
+    w = World(rnd)
+    ops = w.ops
+    sizes = walk_world(rnd, w, nsigns=rnd.randint(0, 4))
+    if w.sign_points and rnd.random() < 0.4:
+        kl, js = rnd.choice(w.sign_points)
+        jl = max(0, js - rnd.randrange(1, 6))
+    else:
+        kl, jl = 0, rnd.randrange(0, 10)
+    line = rnd.randrange(LINES)
+    others = [1, 2, 3, 4]
+    clock = [rnd.choice((0, 5000, 100000, 0x7ffff000))]
+    dn0 = rnd.choice((0, 0, 3, 101, 120))
+    nlist = [0]
+
+    def me():
+        kw = {}
+        if rnd.random() < 0.3:
+            kw["vmag"] = rnd.choice((9.99, 10.0, 10.01, 0.0))
+        place_me(rnd, w, 0, kl, jl, line,
+                 ctl=rnd.choice((0, 1, 2, 3, 3)),
+                 act=rnd.choice((-1, 0, 5, 6)), dn=dn0, **kw)
+        boxed(rnd, w, 0)
+        ops.extend(its_target(rnd, w, sizes, 0, kl, jl, picks=PICKS))
+
+    def other(k):
+        place_other(rnd, w, sizes, k, kl, jl, rnd.random() < 0.6,
+                    span=rnd.choice((4, 7, 7, 12)), picks=PICKS)
+        boxed(rnd, w, k)
+
+    def info():
+        if rnd.random() < 0.85:
+            lops, _ = act_list(rnd, w, others)
+            nlist[0] = len(others) + 1
+        else:
+            lops = seen_list(rnd, w, others)
+            nlist[0] = len(others)
+        ops.extend(lops)
+        ops.append("D %d %d %d %s" % (
+            kl, max(0, jl + rnd.choice((0, 0, 1, -1))),
+            line if rnd.random() < 0.8 else rnd.randrange(LINES),
+            rnd.choice(("00000000", "00000000", "00001388"))))
+        t = rnd.choice((0, 1, 1, 2, 3, 4, 5, 6, 7))
+        k = rnd.choice(others) if t in (5, 6) else rnd.choice((-1, -1, 1))
+        ops.append("X %d %d %d" % (t, k, rnd.choice((0, 0, 1))))
+        ops.append("@J")
+
+    def tick(base=None):
+        if base is not None:
+            clock[0] = base
+        clock[0] = (clock[0] + rnd.choice(PA_DELTAS)) & M32
+        ops.append("G TIMER %08x" % clock[0])
+
+    def race():
+        ops.append("R %08x" % ((clock[0] - rnd.choice(GRACE_AGO)) & M32))
+
+    me()
+    for k in others + [5]:
+        other(k)
+    ops += decide(rnd, w)
+    ops.append("G TIMER %08x" % clock[0])
+    if rnd.random() < 0.5:
+        ops.append("G CAM %08x" % dn0)
+    race()
+    info()
+    for _ in range(4):
+        if rnd.random() < 0.5:
+            tick()
+        made = clock[0]
+        last = [made]
+        score = rnd.choice((0, 300, 400, -1))
+        timeout = h(f32(rnd.choice(ACT_TIMEOUTS)))
+        if kind == "pa":
+            ops.append("@n pa %d %s %d %s" % (
+                score, timeout, rnd.choice((-1, 1, 2, 3, 4, 5)),
+                h(f32(rnd.uniform(0.0, 3.0)))))
+        else:
+            secs = fb(f32(rnd.choice(AC_SECS)))
+            if rnd.random() < 0.05:
+                secs = NAN
+            # Never no car: the grace period reads it.
+            ops.append("@n ac %d %s %d %08x %d %d" % (
+                score, timeout, rnd.choice((0, 1, 2, 3, 4, 5)), secs,
+                rnd.choice((0, 1)), rnd.choice((0, 1))))
+        for _ in range(rnd.randint(5, 12)):
+            r = rnd.random()
+            if r < 0.25:
+                tick(rnd.choice((None, made, made, last[0])))
+            elif r < 0.29:
+                race()
+            elif r < 0.37:
+                info()
+            elif r < 0.4:
+                me()
+                info()
+            elif r < 0.44:
+                other(rnd.choice(others))
+                info()
+            elif r < 0.49:
+                k = rnd.choice(others + [0, 5])
+                d = rnd.choice((0.0, 0.25, 1.0, 2.0))
+                ops.append("@bk %d %08x %s" % (k, rnd.choice((
+                    0, 0x7fffffff, clock[0], (clock[0] - 1000) & M32,
+                    (clock[0] - 3999) & M32, (clock[0] - 4000) & M32,
+                    (clock[0] - 4001) & M32, (clock[0] + 1000) & M32)),
+                    h(f32(d))))
+            elif r < 0.57:
+                fs = ["can", "dt", "pt", "ds", "exp", "tt", "tol", "udl",
+                      "tb", "bo"]
+                fs += ["o616"] * 2 if kind == "pa" else [
+                    "o616", "o620", "o620", "o624", "o624", "o628", "o632"]
+                f = rnd.choice(fs)
+                if f in ("can", "pt", "udl", "tb", "bo") or (
+                        kind == "ac" and f in ("o616", "o632")):
+                    v = rnd.choice((0, 1, 2))
+                elif f in ("exp", "o620", "o624") or (
+                        kind == "pa" and f == "o616"):
+                    v = (clock[0] - rnd.choice(PA_DELTAS)) & M32
+                    if f == "o620":
+                        last[0] = v
+                else:
+                    v = fb(f32(rnd.choice((0.0, -1.0, 1.0, 2.0, 3.0, 5.0,
+                                           30.0))))
+                    if rnd.random() < 0.1:
+                        v = NAN
+                ops.append("@f %s %08x" % (f, v))
+            elif r < 0.65:
+                ops.append("@sc %s" % rnd.choice((kind, kind, "pa", "ac")))
+            elif r < 0.69:
+                ops.append("@so %d %d" % (rnd.randrange(nlist[0]),
+                                          rnd.choice((0, 1, 1, 2))))
+            elif r < 0.75:
+                g = rnd.choice(("AVOID", "PASS", "MINSPEED", "CAM", "CAM",
+                                "GRACE"))
+                if g == "AVOID":
+                    v = h(f32(rnd.choice((2.0, 0.5, 5.0, 0.0, 99999.0))))
+                elif g == "PASS":
+                    v = h(f32(rnd.choice((3.0, 0.5, 1.0, 6.0, 0.0))))
+                elif g == "MINSPEED":
+                    v = h(f32(rnd.choice((20.0, 0.0, 4.95, 5.0, 25.0))))
+                elif g == "CAM":
+                    v = "%08x" % (rnd.choice((-1, dn0, dn0, 0, 5)) & M32)
+                else:
+                    v = h(f32(rnd.choice((12.0, 0.0, 2.0))))
+                ops.append("G %s %s" % (g, v))
+            else:
+                op = rnd.choice(("@cp", "@cp", "@cp", "@cp", "@us", "@us",
+                                 "@t", "@t", "@nm", "@ga"))
+                if op == "@cp" and s32(clock[0] - last[0]) > 1200:
+                    last[0] = clock[0]
+                ops.append(op)
+        if rnd.random() < 0.3:
+            ops += decide(rnd, w)
+        if rnd.random() < 0.6:
+            ops.append("@d %d" % rnd.choice((0, 1, 1, 3)))
+    return ops
+
+
+# The edges s_pass_avoid's random draws miss, one kind of scenario each.
+PA_EDGE_KINDS = ("pa-score", "pa-hba", "pa-hf", "pa-cp", "ac-time",
+                 "ac-null", "ac-close", "ac-care", "ac-stand", "ac-side")
+N_PA_EDGES = 8
+# A car stopped just ahead: IsThisCarStoppedDirectlyInFrontOfMe answers a
+# hit at 0 for it, so nothing is driveable and IsMyDrivingChoiceOkay is 0.
+BLOCKER = 4
+
+
+def zero_box(rnd, w, k):
+    """Car k's box, as boxed() makes it, with no acceleration."""
+    v = w.cars[k]
+    f = extras(rnd, k, math.atan2(v["by"], v["bx"])).split()
+    f[2] = f[3] = h(0.0)
+    w.ops.append(" ".join(f))
+
+
+def s_pa_edge(rnd, kind):
+    """Pass and AvoidCars at the edges of their tests, on s_pass_avoid's
+    world with the list set by hand.
+
+    pa-score: the car to pass ahead of mine in the list with x at y, 2y
+    and -2y and either side, closing fast, the choice a line or either
+    side of it, at speeds either side of the speed for the line.
+    pa-hba: three seconds on, the car to pass behind at exactly 10 m past
+    the two half lengths, either side, and between the half length's and
+    the half width's sums and the 9 m and 10 m. pa-hf: inside the three
+    seconds, the car level with mine (y 0), no car accelerating, so it
+    cannot be caught. pa-cp: the points with the car at y 0 and behind,
+    my car off its line out of the grace period, and a line choice that
+    names a car.
+    ac-time: AvoidCars' times far from Pass's, so hits between them count
+    for one and not the other. ac-null: AvoidCars' time past 99999, with
+    no car cared about. ac-close: a car stopped just ahead, and the car to
+    avoid at the close test's edges (half my length, a tenth of a second
+    on, across) or blinking, my car at the slow speed and either side.
+    ac-care: the car to avoid behind, closing fast, and the choice's car
+    cared about or not, made again or not. ac-stand: no location, no line
+    and an empty target of my own, made again. ac-side: a slow car to the
+    side, my car slow on a line, made again."""
+    w = World(rnd)
+    ops = w.ops
+    sizes = walk_world(rnd, w, nsigns=0)
+    jl = rnd.randrange(2, 12)
+    line = rnd.randrange(LINES)
+    p = w.pts[0][jl]
+    clock = rnd.choice((100000, 200000))
+    hl = f32(rnd.uniform(0.8, 1.2))
+    hd = f32(rnd.uniform(2.0, 2.6))
+    secs = h(f32(rnd.choice((0.0, 1.0, 2.0))))
+    tout = h(f32(5.0))
+
+    kw = dict(ctl=rnd.choice((1, 2, 2, 3)), act=-1, dn=0)
+    sp = {"pa-score": (20.0, 25.0, 35.0, 10.0),
+          "pa-cp": (10.0, 20.0, 30.0, 35.0),
+          "ac-close": (20.0, 20.0, 10.0, 11.0, 5.0, 9.99, 12.0),
+          "ac-care": (20.0, 35.0, 60.0),
+          "ac-stand": (20.0, 35.0),
+          "ac-side": (5.0, 8.0, 9.99)}.get(kind)
+    if sp:
+        kw["vmag"] = rnd.choice(sp)
+    if kind == "pa-cp":
+        kw["ctl"] = rnd.choice((1, 2))
+        kw["px"], kw["py"] = beside(p, off_of(p, line) + rnd.choice(
+            (-3.0, 3.0, 2.0, -1.5)), 1.0)
+    place_me(rnd, w, 0, 0, jl, line, **kw)
+    if kind == "pa-hf":
+        zero_box(rnd, w, 0)
+    else:
+        boxed(rnd, w, 0)
+    if kind == "ac-stand" and rnd.random() < 0.5:
+        ops.append("H 0 %d %s 0 0 0" % (rnd.randrange(64), h(f32(20.0))))
+    else:
+        ops.extend(its_target(rnd, w, sizes, 0, 0, jl, picks=PICKS))
+    for k in (1, 2, 3, 4, 5):
+        place_other(rnd, w, sizes, k, 0, jl, True,
+                    span=rnd.choice((4, 7)), picks=PICKS)
+        if kind == "pa-hf" and k == 1:
+            zero_box(rnd, w, k)
+        else:
+            boxed(rnd, w, k)
+
+    def recar(k, **kw):
+        v = dict(w.cars[k])
+        v.update(kw)
+        w.car(k, **v)
+
+    def row(k, **kw):
+        if k == 0:
+            r = dict(lx=0.0, ly=0.0, vx=0.0, vy=0.0, hl2=hl, hd2=hd)
+        else:
+            v = w.cars[k]
+            lx, ly = frame(w.cars[0], v["px"], v["py"])
+            r = dict(lx=lx, ly=ly, vx=rnd.uniform(-5.0, 5.0),
+                     vy=rnd.uniform(-5.0, 5.0),
+                     hl2=f32(rnd.uniform(0.8, 1.3)),
+                     hd2=f32(rnd.uniform(2.0, 2.8)))
+        r.update(kw)
+        r["k"] = k
+        return r
+
+    def behind(ks):
+        return [row(k, ly=-15.0 - 4.0 * i) for i, k in enumerate(ks)]
+
+    def info(rows, x, loc=None):
+        ops.append("N 0 %d %s %s" % (len(rows), h(hl), h(hd)))
+        for i, r in enumerate(rows):
+            ops.append("E %d %s %s %s %s %s %s %d" % (
+                i, h(f32(r["lx"])), h(f32(r["ly"])), h(f32(r["vx"])),
+                h(f32(r["vy"])), h(f32(r["hl2"])), h(f32(r["hd2"])),
+                r["k"]))
+        ops.append(loc or "D 0 %d %d 00000000" % (jl, line))
+        ops.append(x)
+        ops.append("@J")
+
+    def at(t):
+        ops.append("G TIMER %08x" % (t & M32))
+
+    def lines():
+        return "X %d -1 0" % rnd.choice((1, 2, 3))
+
+    ops += decide(rnd, w)
+    at(clock)
+    ops.append("R %08x" % ((clock - rnd.choice((100000, 100000, 0)))
+                           & M32))
+    if kind == "pa-score":
+        recar(1, vmag=rnd.choice((30.0, 25.0, 20.5, 10.0)),
+              ctl=rnd.choice((1, 2, 4, 4, 3)), pl=rnd.choice((0, 0, 1)))
+        if rnd.random() < 0.3:
+            ops.append("G MINSPEED %s" % h(f32(rnd.choice((0.0, 5.0)))))
+        for _ in range(4):
+            y = f32(rnd.uniform(3.0, 20.0))
+            x = rnd.choice((f32(1.5 * y), y + y, -(y + y), f32(-3.0 * y),
+                            f32(0.5 * y), fstep(y + y, -1), fstep(y + y, 1),
+                            f32(1.99 * y), -fstep(y + y, -1)))
+            rest = [2, 3, 4, 5]
+            rows = [row(1, lx=x, ly=y, vx=rnd.uniform(-3.0, 3.0),
+                        vy=rnd.choice((-60.0, -40.0, 60.0))), row(0)]
+            rows += behind(rest) if rnd.random() < 0.5 else [
+                row(k) for k in rest]
+            info(rows, rnd.choice((lines(), "X 5 1 0", "X 6 1 0",
+                                   "X 5 1 1", "X 6 1 0")))
+            ops.append("@sc pa")
+        ops += ["@n pa 300 %s 1 %s" % (tout, h(f32(1.0))), "@cp", "@t",
+                "@d 1"]
+    elif kind == "pa-hba":
+        for _ in range(5):
+            hd2 = f32(rnd.uniform(2.0, 2.8))
+            s = f32(f32(hd + hd2) + 10.0)
+            y = rnd.choice((-s, -s, -fstep(s, 1), -fstep(s, -1),
+                            -f32(f32(hd + hd2) + 9.5), f32(-s + 0.4),
+                            f32(-s + 0.2)))
+            rows = [row(1, lx=rnd.uniform(-3.0, 3.0), ly=y, hd2=hd2),
+                    row(0)] + [row(k) for k in (2, 3, 4, 5)]
+            info(rows, rnd.choice((lines(), "X 5 1 0")))
+            at(clock)
+            ops.append("@n pa 300 %s 1 %s" % (tout, h(f32(1.0))))
+            at(clock + rnd.choice((12000, 12001, 40000)))
+            ops += ["@t", "@us", "@d 1"]
+    elif kind == "pa-hf":
+        for _ in range(4):
+            rows = [row(1, lx=rnd.choice((0.0, 2.0, -4.0)),
+                        ly=rnd.choice((0.0, 0.0, 0.001)), vx=0.0, vy=0.0),
+                    row(0)] + [row(k) for k in (2, 3, 4, 5)]
+            info(rows, lines())
+            at(clock)
+            ops.append("@n pa 300 %s 1 %s" % (tout, h(f32(1.0))))
+            at(clock + rnd.choice((0, 1, 4000, 11999)))
+            ops += ["@t", "@d 1"]
+    elif kind == "pa-cp":
+        for _ in range(4):
+            y = rnd.choice((0.0, 0.0, -3.0, -0.5, 5.0, -10.0))
+            rows = [row(1, ly=y), row(0)] + [row(k) for k in (2, 3, 4, 5)]
+            if rnd.random() < 0.5:
+                rows[0], rows[1] = rows[1], rows[0]
+            info(rows, rnd.choice(("X 1 1 0", "X 2 1 0", "X 2 3 0",
+                                   lines(), "X 5 1 0", "X 6 1 0")))
+            ops += ["@n pa 300 %s 1 %s" % (tout, h(f32(1.0))), "@cp", "@t",
+                    "@d 1"]
+    elif kind == "ac-time":
+        # My car and car 1 a few points on in one lane, each with a target
+        # down it, car 1 slower: a hit a second or two on.
+        ops.append("G AVOID %s" % h(f32(rnd.choice((5.0, 4.0)))))
+        ops.append("G PASS %s" % h(f32(rnd.choice((0.0, 0.25, 0.5)))))
+        lat = off_of(p, line) + rnd.uniform(-1.0, 1.0)
+        x, y = beside(p, lat, 1.0)
+        a = heading_of(p)
+        recar(0, px=x, py=y, bx=math.cos(a), by=math.sin(a), vmag=20.0,
+              vx=20.0 * math.cos(a), vy=20.0 * math.sin(a), fs=20.0)
+        j = min(sizes[0] - 8, jl + rnd.choice((1, 2, 3)))
+        pj = w.pts[0][j]
+        v = rnd.choice((6.0, 8.0, 10.0, 15.0))
+        x, y = beside(pj, lat + rnd.uniform(-0.5, 0.5))
+        a = heading_of(pj)
+        recar(1, px=x, py=y, bx=math.cos(a), by=math.sin(a), vmag=v,
+              vx=v * math.cos(a), vy=v * math.sin(a), fs=v, oob=0.0,
+              ctl=rnd.choice((1, 2, 4)), act=-1, nw=4)
+        for k, j0 in ((0, jl + 1), (1, j + 1)):
+            ops.append("H %d %d %s 0 0 0" % (k, rnd.randrange(64),
+                                             h(f32(40.0))))
+            for i in range(6):
+                jj = min(sizes[0] - 1, j0 + i)
+                f = tgt_point(w, 0, jj, lat, line, sp=20.0).split()
+                ops.append("I %d %s" % (k, " ".join(f[1:])))
+        for _ in range(3):
+            rows = [row(1), row(0)] + behind([2, 3, 4, 5])
+            info(rows, rnd.choice((lines(), "X 5 1 0", "X 6 1 0")))
+            ops.append("@sc ac")
+        at(clock)
+        ops += ["@n ac 400 %s %d %s 0 0" % (tout, rnd.randint(1, 4), secs),
+                "@cp"]
+        at(clock + 1201)
+        ops.append("@cp")
+        at(clock + 2402)
+        ops += ["@cp", "@t", "@d 1"]
+    elif kind == "ac-null":
+        ops.append("G AVOID %s" % h(f32(rnd.choice((200000.0, 1.0e6)))))
+        for _ in range(3):
+            rows = [row(0)] + behind([1, 2, 3, 4, 5])
+            info(rows, rnd.choice((lines(), "X 5 1 0")),
+                 rnd.choice((None, None, "D -1 -1 %d 00000000" % line)))
+            ops.append("@sc ac")
+    elif kind == "ac-close":
+        recar(BLOCKER, vmag=0.0, pl=0)
+        for case in ("half", "half-l", "half-k", "look-k", "look-x", "real",
+                     "across", "blink", "slow", "slow"):
+            hl2 = f32(rnd.uniform(0.8, 1.3))
+            ctl = 1 if case in ("half", "half-l", "half-k", "look-k",
+                                "look-x") else rnd.choice((1, 2, 3, 4))
+            recar(1, vmag=rnd.choice((0.0, 3.0, 4.99) if case == "slow"
+                                     else (20.0, 5.01, 0.0)),
+                  ctl=ctl, pl=0, dtype=rnd.choice((1, 2, 3, 4)))
+            x, y, vx, vy = {
+                "half": (0.0, f32(hd * 0.5), 0.0, 0.0),
+                "half-l": (0.0, f32((hl + hd) * 0.25), 0.0, 0.0),
+                "half-k": (0.0, f32(hd * 0.55), 0.0, 0.0),
+                "look-k": (0.0, f32(hd * 0.5 - 2.0), 0.0, 15.0),
+                "look-x": (0.0, f32(hd * 0.5 - 1.0), 0.0, 20.0),
+                "real": (0.0, 0.5, 0.0, 0.0),
+                "across": (rnd.choice((1.0, -1.0))
+                           * f32(f32(hl + hl2) + 1.0), 3.0, 0.0, 0.0),
+                "blink": (0.0, 3.0, 0.0, 0.0),
+                "slow": (0.0, 3.0, 0.0, 0.0)}[case]
+            rows = [row(BLOCKER, lx=0.0, ly=3.0, vx=0.0, vy=0.0, hl2=1.0,
+                        hd2=2.0),
+                    row(1, lx=x, ly=y, vx=vx, vy=vy, hl2=hl2), row(0)]
+            rows += [row(k) for k in (2, 3, 5)]
+            info(rows, rnd.choice((lines(), lines(), "X 5 4 0")))
+            if case == "blink":
+                ops.append("@bk 1 %08x %s" % ((clock - 1000) & M32,
+                                              h(f32(2.0))))
+            at(clock)
+            ops += ["@n ac 400 %s 1 %s 0 0" % (tout, secs), "@cp", "@t",
+                    "@d 1"]
+            ops.append("@bk 1 00000000 %s" % h(0.0))
+    elif kind == "ac-care":
+        recar(BLOCKER, vmag=0.0, pl=0)
+        recar(1, vmag=20.0, ctl=1, pl=0)
+        for _ in range(3):
+            rows = [row(BLOCKER, lx=0.0, ly=3.0, vx=0.0, vy=0.0, hl2=1.0,
+                        hd2=2.0),
+                    row(1, lx=0.0, ly=-12.0, vx=0.0, vy=150.0), row(0)]
+            rows += [row(k) for k in (2, 3, 5)]
+            x = rnd.choice(("X 5 4 0", "X 6 4 0", lines(), lines(),
+                            "X 1 4 0", "X 2 4 0", "X 5 2 0"))
+            info(rows, x)
+            at(clock)
+            ops += ["@n ac 400 %s 1 %s 0 0" % (tout, secs), "@cp"]
+            info(rows, x)
+            at(clock + 1201)
+            ops += ["@cp", "@t", "@d 1"]
+    elif kind == "ac-stand":
+        for _ in range(3):
+            rows = [row(0)] + behind([1, 2, 3, 4, 5])
+            x = rnd.choice(("X 0 -1 0", "X 0 -1 0", lines()))
+            ln = rnd.choice((line, -1, -1, 3))
+            info(rows, x, "D -1 -1 %d 00000000" % ln)
+            at(clock)
+            ops.append("@n ac 400 %s 1 %s 0 0" % (tout, secs))
+            # With no line, MakeNewChoice's current choice is what its
+            # stack held, which the model clears (MAKE_NEW_CURRENT).
+            at(clock + 1201)
+            ops += ["@cp", "@t", "@d 1"]
+    else:
+        # ac-side
+        ops.append("G AVOID %s" % h(f32(rnd.choice((0.0, 0.25, 0.5, 2.0)))))
+        j = min(sizes[0] - 2, jl + rnd.randrange(1, 4))
+        pj = w.pts[0][j]
+        car_at_point(rnd, w, 1, 0, j, off_of(pj, line)
+                     + rnd.choice((1.0, -1.0)) * rnd.uniform(3.0, 6.0), True,
+                     vmag=rnd.choice((0.0, 3.0, 4.9)),
+                     oob=rnd.choice((0.0, -0.5, -0.5)), rpr=0, rpj=j, pl=0,
+                     ctl=rnd.choice((1, 2, 3)))
+        boxed(rnd, w, 1)
+        for _ in range(3):
+            # Beside my lane, so not stopped in front of me.
+            rows = [row(1, lx=rnd.choice((1.0, -1.0))
+                        * rnd.uniform(3.0, 5.0)), row(0)]
+            rows += behind([2, 3, 4, 5])
+            info(rows, lines())
+            at(clock)
+            ops.append("@n ac 400 %s 1 %s 0 0" % (tout, secs))
+            at(clock + 1201)
+            ops += ["@cp", "@t", "@d 1"]
+    return ops
+
+
 def script():
     rnd = random.Random(0x11b2dc)
     sc = [s_small(rnd), s_valid(rnd), s_room(rnd), s_walk(rnd), s_fill(rnd),
@@ -2756,6 +3279,13 @@ def script():
     for _ in range(N_ACTIONS):
         sc.append(s_actions(rnd))
     sc.append(s_act_edges(rnd))
+    # Step 11d-2's.
+    for _ in range(N_PASS_AVOID):
+        sc.append(s_pass_avoid(rnd, "pa"))
+        sc.append(s_pass_avoid(rnd, "ac"))
+    for _ in range(N_PA_EDGES):
+        for kind in PA_EDGE_KINDS:
+            sc.append(s_pa_edge(rnd, kind))
     return sc
 
 
@@ -2780,6 +3310,8 @@ class Model(object):
         self.e.stub(GET_ELEVATION, self.s_elev)
         self.e.stub(RESET_LATER, self.s_reset_later)
         self.e.stub(POOL_FREE, self.s_pool_free)
+        self.e.stub(MAX_ACCEL, self.s_max_accel)
+        self.e.stub(STUB_DNUM, self.s_dnum)
         self.w = self.e.u32
         self.grace0 = self.w(GLOBALS["GRACE"])
         self.gap0 = self.w(GLOBALS["GAP"])
@@ -2789,6 +3321,7 @@ class Model(object):
         self.minspeed0 = self.w(GLOBALS["MINSPEED"])
         self.nlines0 = self.w(GLOBALS["NLINES"])
         self.avoid0 = self.w(GLOBALS["AVOID"])
+        self.pass0 = self.w(GLOBALS["PASS"])
         self.normal = {}
         self.kind = ""
         d = struct.unpack("<f", struct.pack("<I", self.w(MIN_DIST)))[0]
@@ -2801,6 +3334,11 @@ class Model(object):
         self.est_at = None
         self.e.hooks[EST_ENTRY] = self.h_est_in
         self.e.hooks[EST_RET] = self.h_est_out
+        self.e.hooks[MAKE_NEW] = self.h_make_new_in
+
+    def h_make_new_in(self, em):
+        a = (em.reg[29] + MAKE_NEW_CURRENT) & M32
+        em.mem[a:a + 12] = bytes(12)
 
     def h_est_in(self, em):
         sp = (em.reg[29] - EST_FRAME) & M32
@@ -2916,6 +3454,19 @@ class Model(object):
         self.emit("  slotfree %s %s" % (self.name(em.reg[4]),
                                         self.name(em.reg[5])))
 
+    def s_max_accel(self, em):
+        em.fpr[0] = 0
+
+    def s_dnum(self, em):
+        """The test CarDriver's GetDriverNumber: its car's DriverNumber."""
+        k, off = divmod((em.reg[4] & M32) - CDRIVERS, CDRIVER_STRIDE)
+        if off or not 0 <= k < NCARS:
+            raise SystemExit("a driver that is not one of ours: %08x"
+                             % (em.reg[4] & M32))
+        car = car_at(k)
+        self.emit("  dnum %s" % self.name(car))
+        return struct.unpack_from("<h", em.mem, car + C_DN)[0]
+
     # ---- the dumps -------------------------------------------------------
 
     def dump_choice(self, a, tag):
@@ -3026,8 +3577,12 @@ class Model(object):
                         ("SLOWTRAFFIC", self.slowtraffic0),
                         ("MINSPEED", self.minspeed0),
                         ("NLINES", self.nlines0),
-                        ("POOL", POOL), ("AVOID", self.avoid0)):
+                        ("POOL", POOL), ("AVOID", self.avoid0),
+                        ("PASS", self.pass0), ("CAM", M32), ("HROUTE", M32),
+                        ("HLINE", M32)):
             e.put32(GLOBALS[name], v)
+        e.mem[DVT:DVT + DVT_BYTES] = bytes(DVT_BYTES)
+        e.put32(DVT + DVT_DNUM + 4, STUB_DNUM)
         self.dec = {}
         self.rp = {}
         self.oob = {}
@@ -3060,6 +3615,7 @@ class Model(object):
         e.put32(a + C_VMAG, v["vmag"])
         e.put32(a + C_PLAYER, PLAYERS + PLAYER_STRIDE * k if v["pl"] else 0)
         e.put32(a + C_CDRIVER, CDRIVERS + CDRIVER_STRIDE * k)
+        e.put32(CDRIVERS + CDRIVER_STRIDE * k + CD_VPTR, DVT)
         e.put32(a + C_VEL, v["vx"])
         e.put32(a + C_VEL + 4, v["vy"])
         e.put32(a + C_NW, v["nw"])
@@ -3172,6 +3728,14 @@ class Model(object):
         elif self.kind == "ar":
             self.emit("  ar made %08x reset %d" % (w(a + 608),
                                                    s32(w(a + 612))))
+        elif self.kind == "pa":
+            self.emit("  pa car %s amt %s made %08x" % (
+                self.name(w(a + 608)), fx(w(a + 612)), w(a + 616)))
+        elif self.kind == "ac":
+            self.emit("  ac car %s secs %s ok %d last %08x made %08x min %s "
+                      "used %d" % (self.name(w(a + 608)), fx(w(a + 612)),
+                                   s32(w(a + 616)), w(a + 620), w(a + 624),
+                                   fx(w(a + 628)), s32(w(a + 632))))
 
     def dump_info(self):
         """After CalculatePointsToDrive: the information's choice and
@@ -3203,8 +3767,16 @@ class Model(object):
         elif c == "n":
             self.kind = t[1]
             self.fill(AB, AB_BYTES)
-            self.call(ACT_CTORS[t[1]], AB, int(t[2]), self.car_ptr(t[4]),
-                      f12=int(t[3], 16))
+            if t[1] == "pa":
+                self.call(ACT_CTORS["pa"], AB, int(t[2]), self.car_ptr(t[4]),
+                          f12=int(t[3], 16), f13=int(t[5], 16))
+            elif t[1] == "ac":
+                self.call(ACT_CTORS["ac"], AB, int(t[2]), self.car_ptr(t[4]),
+                          int(t[6]), int(t[7]), f12=int(t[3], 16),
+                          f13=int(t[5], 16))
+            else:
+                self.call(ACT_CTORS[t[1]], AB, int(t[2]),
+                          self.car_ptr(t[4]), f12=int(t[3], 16))
             self.dump_act()
             self.dump_target(AB + 32)
         elif c == "cp":
@@ -3212,6 +3784,9 @@ class Model(object):
             self.dump_act()
             self.dump_target(AB + 32)
             self.dump_info()
+            if self.kind == "ac":
+                self.emit("  highlight %d %d" % (s32(w(GLOBALS["HROUTE"])),
+                                                 s32(w(GLOBALS["HLINE"]))))
         elif c == "us":
             self.call(UPDATE_STATUS, AB, INFO, limit=CHOOSE_LIMIT)
             self.emit("  status %d" % s32(w(AB + 12)))
@@ -3231,9 +3806,33 @@ class Model(object):
                 e.put32(OUT, PAT32)
                 got = self.call(ACT_SCORES[k], INFO, OUT)
                 self.emit("  out %s" % self.name(w(OUT)))
+            elif k in ("pa", "ac"):
+                # Each out filled first, so what is not written shows.
+                self.fill(SC_OUT, SC_OUT_BYTES)
+                outs = (SC_OUT, SC_OUT + 16, SC_OUT + 32)
+                if k == "ac":
+                    outs += (SC_OUT + 36, SC_OUT + 40)
+                got = self.call(ACT_SCORES[k], INFO, *outs,
+                                limit=CHOOSE_LIMIT)
+                self.emit("  out %s" % self.name(w(SC_OUT)))
+                self.dump_choice(SC_OUT + 16, "sch")
+                self.emit("  secs %s ok %d used %d" % (
+                    fx(w(SC_OUT + 32)), s32(w(SC_OUT + 36)),
+                    s32(w(SC_OUT + 40))))
+                self.dump_info()
             else:
                 got = self.call(ACT_SCORES[k], INFO)
             self.emit("  score %d" % s32(got))
+        elif c == "so":
+            got = self.call(SIDE_OK, INFO + LIST_ARRAY + NC_SIZE * int(t[1]),
+                            INFO + 480, int(t[2]))
+            self.emit("  sok %d" % got)
+        elif c == "ga":
+            self.emit("  ga %s" % self.name(self.call(GET_CAR_TO_AVOID, AB)))
+        elif c == "bk":
+            a = self.car_ptr(t[1]) + C_BLINK
+            e.put32(a, int(t[2], 16))
+            e.put32(a + 4, int(t[3], 16))
         elif c == "par":
             got = self.call(AR_PARALLEL, self.car_ptr(t[1]),
                             f12=int(t[2], 16))
@@ -3561,7 +4160,8 @@ class Model(object):
                 if ln[0] not in "CKPU":
                     self.emit("> " + ln[:48])
                 self.op(ln.split())
-        stray = self.e.eediv_pcs - {SMOOTH_DIV} - WILL_DIVS - EST_DIVS
+        stray = (self.e.eediv_pcs - {SMOOTH_DIV, SLOWER_DIV} - WILL_DIVS
+                 - EST_DIVS)
         if stray:
             raise SystemExit("the EE's divide by zero at %s, which the port "
                              "divides as IEEE does"
@@ -5250,8 +5850,8 @@ MUTATIONS = [
     AM("jd-type", "a->Base.Type = AIACTION_JUST_DRIVE;", "a->Base.Type = AIACTION_DRAFT;"),
     AM("jd-vt", "    a->Base.Base._vtable = AIJUSTDRIVE_VTABLE;",
        "    a->Base.Base._vtable = AIDRAFT_VTABLE;"),
-    AM("jd-last", "    a->LastDecisionReevaluationTime.PackedTime = 0;",
-       "    a->LastDecisionReevaluationTime.PackedTime = (uint32_t)WorldTimer;"),
+    AM("jd-last", "AIJUSTDRIVE_VTABLE;\n    a->LastDecisionReevaluationTime.PackedTime = 0;",
+       "AIJUSTDRIVE_VTABLE;\n    a->LastDecisionReevaluationTime.PackedTime = (uint32_t)WorldTimer;"),
     AM("jd-score", "    (void)info;\n    return 0;\n}\n\nint aijustdrive_has_been",
        "    (void)info;\n    return 1;\n}\n\nint aijustdrive_has_been"),
     AM("jd-acc", "    // 0x001c7460.\n    (void)a;\n    (void)info;\n    return 0;",
@@ -5276,8 +5876,8 @@ MUTATIONS = [
     AM("jd-pref", "&c, &t, 0, &score,", "&c, &t, 1, &score,"),
     AM("jd-a", "&info->MyNearbyCarList, 0.0f,\n                    AIDriverAvoid",
        "&info->MyNearbyCarList, 1.0f,\n                    AIDriverAvoid"),
-    AM("jd-thr", "AIDriverAvoidCarsImpactTimeThreshold, 0.0f,",
-       "2.0f, 0.0f,"),
+    AM("jd-thr", "AIDriverAvoidCarsImpactTimeThreshold, 0.0f,\n                    MOVEMENT_TOWARDS_LINE)) {",
+       "2.0f, 0.0f,\n                    MOVEMENT_TOWARDS_LINE)) {"),
     AM("jd-move", "                    MOVEMENT_TOWARDS_LINE)) {",
        "                    MOVEMENT_PARALLEL_TO_LINE)) {"),
     AM("jd-copy", "                *choice = c;\n", ""),
@@ -5345,7 +5945,8 @@ MUTATIONS = [
     AM("dr-ds", "            a->Base.DesiredSpeed = speed;\n", ""),
     AM("dr-tt", "            a->Base.TimeToGetToDesiredSpeed = 0.0f;",
        "            a->Base.TimeToGetToDesiredSpeed = 1.0f;"),
-    AM("dr-udl0", "            a->Base.UseDrivingLineSpeed = 0;", "            a->Base.UseDrivingLineSpeed = 1;"),
+    AM("dr-udl0", "            a->Base.TimeToGetToDesiredSpeed = 0.0f;\n            a->Base.UseDrivingLineSpeed = 0;",
+       "            a->Base.TimeToGetToDesiredSpeed = 0.0f;\n            a->Base.UseDrivingLineSpeed = 1;"),
     AM("dr-pt", "    a->Base.PointsToDriveWillExecuteAction = 1;\n}\n\n// "
        "---------------------------------------------- NudgeCar",
        "    a->Base.PointsToDriveWillExecuteAction = 0;\n}\n\n// "
@@ -5389,7 +5990,8 @@ MUTATIONS = [
     AM("ar-vt", "    a->Base.Base._vtable = AIACCIDENTRECOVERY_VTABLE;",
        "    a->Base.Base._vtable = AIJUSTDRIVE_VTABLE;"),
     AM("ar-type", "a->Base.Type = AIACTION_ACCIDENT_RECOVERY;", "a->Base.Type = AIACTION_NONE;"),
-    AM("ar-made", "    a->MyCreationTime.PackedTime = (uint32_t)WorldTimer;\n", ""),
+    AM("ar-made", "AIACTION_ACCIDENT_RECOVERY;\n    a->MyCreationTime.PackedTime = (uint32_t)WorldTimer;\n",
+       "AIACTION_ACCIDENT_RECOVERY;\n"),
     AM("ar-reset0", "    a->HaveResetYet = 0;\n    return a;", "    a->HaveResetYet = 1;\n    return a;"),
     AM("ar-score-nw", "if (car->State.nWheelsTouchingGround < 2)",
        "if (car->State.nWheelsTouchingGround <= 2)"),
@@ -5447,6 +6049,277 @@ MUTATIONS = [
     AM("vt-ar-acc", "E(aiaccidentrecovery_has_been_accomplished),", "E(aiaccidentrecovery_has_failed),"),
     AM("vt-ar-name", "E(aiaccidentrecovery_get_name),", "E(aiaction_get_name),"),
     AM("vt-install", "    vt_install(AIBLOCK_VTABLE, aiblock_vt, AIACTION_VT_ENTRIES);\n", ""),
+    # Pass.
+    AM("pa-amt", "    a->AmountToProjectIntoFuture = amount;\n", ""),
+    AM("pa-car", "    a->CarToPass = car;\n    a->Base", "    a->CarToPass = NULL;\n    a->Base"),
+    AM("pa-vt", "    a->Base.Base._vtable = AIPASS_VTABLE;",
+       "    a->Base.Base._vtable = AIAVOIDCARS_VTABLE;"),
+    AM("pa-made", "    a->MyCreationTime.PackedTime = (uint32_t)WorldTimer;\n    a->Base.Type = AIACTION_PASS;",
+       "    a->Base.Type = AIACTION_PASS;"),
+    AM("pa-type", "a->Base.Type = AIACTION_PASS;", "a->Base.Type = AIACTION_DRAFT;"),
+    AM("pa-dtor", "destroy_as(&a->Base, AIPASS_VTABLE, flags);",
+       "destroy_as(&a->Base, AIPASS_VTABLE, 0);"),
+    AM("pa-sc-grace", "    if (race_grace_period_is_active(pCurrentRace, me))\n        return AIA_NO_SCORE;\n", ""),
+    AM("pa-sc-n", "    n = nearbycarlist_get_cars_index_in_array(list, me);",
+       "    n = list->NumCarsInArray;"),
+    AM("pa-sc-found", "for (i = 0; i < n && !found; i++)", "for (i = 0; i < n; i++)"),
+    AM("pa-sc-y", "        if (!(0.0f < nc->Position.y)\n", "        if (!(0.0f <= nc->Position.y)\n"),
+    AM("pa-sc-x", "            || !(nc->Position.x < nc->Position.y + nc->Position.y)\n",
+       "            || !(nc->Position.x < nc->Position.y)\n"),
+    AM("pa-sc-x-abs", "            || !(nc->Position.x < nc->Position.y + nc->Position.y)\n",
+       "            || !(fabsf(nc->Position.x) < nc->Position.y + nc->Position.y)\n"),
+    AM("pa-sc-x-le", "            || !(nc->Position.x < nc->Position.y + nc->Position.y)\n",
+       "            || !(nc->Position.x <= nc->Position.y + nc->Position.y)\n"),
+    AM("pa-sc-catch", "            || !ai_can_i_catch_this_car(nc, me, maxAccel, 1))",
+       "            || 0)"),
+    AM("pa-sc-copy", "        *choice = info->MyDrivingChoice;\n        if (drivingchoice_try_to_drive_around_car(",
+       "        if (drivingchoice_try_to_drive_around_car("),
+    AM("pa-sc-time", "0.0f, AIActionPassMaxTimeAheadToMakeAttempt, 0.0f, 1)",
+       "0.0f, AIDriverAvoidCarsImpactTimeThreshold, 0.0f, 1)"),
+    AM("pa-sc-flag", "0.0f, AIActionPassMaxTimeAheadToMakeAttempt, 0.0f, 1)",
+       "0.0f, AIActionPassMaxTimeAheadToMakeAttempt, 0.0f, 0)"),
+    AM("pa-sc-side", "            && aipass_side_of_car_is_okay(nc, choice, preferred)) {",
+       "            ) {"),
+    AM("pa-sc-side-pref", "aipass_side_of_car_is_okay(nc, choice, preferred)",
+       "aipass_side_of_car_is_okay(nc, choice, 1)"),
+    AM("pa-sc-car", "            *car = nc->TheCar;\n            found = 1;", "            found = 1;"),
+    AM("pa-score", "#define AIPA_SCORE   300", "#define AIPA_SCORE   200"),
+    AM("pa-so-traffic", "    if (car->TheControlMode == TRAFFIC_CONTROL)\n        return 1;\n    if (!(TryTo",
+       "    if (car->TheControlMode == REAL_CONTROL)\n        return 1;\n    if (!(TryTo"),
+    AM("pa-so-speed", "    if (!(TryToDriveAroundCarMinSpeedForDrivingLine\n          < car->State.VelocityMagnitude))",
+       "    if (!(TryToDriveAroundCarMinSpeedForDrivingLine\n          <= car->State.VelocityMagnitude))"),
+    AM("pa-so-line", "    if (drivingchoice_type_is_driving_line(choice->Type))\n        return 1;\n    return preferred != 0;",
+       "    return preferred != 0;"),
+    AM("pa-so-pref", "    return preferred != 0;", "    return 0;"),
+    AM("pa-acc-car", "list->Array[0].TheCar != a->CarToPass", "list->Array[0].TheCar == a->CarToPass"),
+    AM("pa-acc-ge", "        if (aipass_calculate_score(info, &car, &c, &amount) >= 0\n",
+       "        if (aipass_calculate_score(info, &car, &c, &amount) < 0\n"),
+    AM("pa-acc-eq", "            && !drivingchoice_is_equal_to(&info->MyDrivingChoice, &c)) {",
+       "            ) {"),
+    AM("pa-acc-copy", "            info->MyDrivingChoice = c;\n            a->CarToPass = car;",
+       "            a->CarToPass = car;"),
+    AM("pa-acc-setcar", "            a->CarToPass = car;\n            a->MyCreationTime", "            a->MyCreationTime"),
+    AM("pa-acc-made", "            a->MyCreationTime.PackedTime = (uint32_t)WorldTimer;\n        }\n    }",
+       "        }\n    }"),
+    AM("pa-settle", "#define AIPA_SETTLE            3.0f", "#define AIPA_SETTLE            2.5f"),
+    AM("pa-acc-settle", "    if (!(seconds_since(&a->MyCreationTime) < AIPA_SETTLE)) {",
+       "    if ((seconds_since(&a->MyCreationTime) < AIPA_SETTLE)) {"),
+    AM("pa-acc-behind", "nc->Position.y < -((list->MyHalfSizeD + nc->ApparentHalfSizeD)",
+       "nc->Position.y <= -((list->MyHalfSizeD + nc->ApparentHalfSizeD)"),
+    AM("pa-acc-hd", "nc->Position.y < -((list->MyHalfSizeD + nc->ApparentHalfSizeD)",
+       "nc->Position.y < -((list->MyHalfSizeL + nc->ApparentHalfSizeD)"),
+    AM("pa-behind", "#define AIPA_BEHIND            10.0f", "#define AIPA_BEHIND            9.0f"),
+    AM("pa-acc-relaxed", "            done = 1;\n    }\n    if (done)\n        drivinglocation_set_relaxed_switch(&info->MyDrivingLocation, 1);",
+       "            done = 1;\n    }\n    if (done)\n        drivinglocation_set_relaxed_switch(&info->MyDrivingLocation, 0);"),
+    AM("pa-fail-null", "    if (nc == NULL)\n        failed = 1;", "    if (nc == NULL)\n        failed = 0;"),
+    AM("pa-fail-settle", "    else if (seconds_since(&a->MyCreationTime) < AIPA_SETTLE\n             && 0.0f < nc->Position.y)",
+       "    else if (0.0f < nc->Position.y)"),
+    AM("pa-fail-y", "             && 0.0f < nc->Position.y)", "             && 0.0f <= nc->Position.y)"),
+    AM("pa-fail-catch", "        failed = !ai_can_i_catch_this_car(nc, list->MyCar, -1.0f, 0);",
+       "        failed = ai_can_i_catch_this_car(nc, list->MyCar, -1.0f, 0);"),
+    AM("pa-fail-relaxed", "    if (failed)\n        drivinglocation_set_relaxed_switch(&info->MyDrivingLocation, 1);",
+       "    if (failed)\n        drivinglocation_set_relaxed_switch(&info->MyDrivingLocation, 0);"),
+    AM("pa-exp", "    // 0x001c7d00.\n    (void)info;\n    return past_timeout(&a->Base.Base);",
+       "    // 0x001c7d00.\n    (void)info;\n    return 0;"),
+    AM("pa-cp-clear", "    drivetarget_clear(&a->Base.PointsToDrive, NULL, 0.0f);\n    a->Base.UseDrivingLineSpeed = 0;\n    a->Base.AllowedToUseThrottleAndBrake = 1;\n    a->Base.AllowedToUseBoost = 1;",
+       "    a->Base.UseDrivingLineSpeed = 0;\n    a->Base.AllowedToUseThrottleAndBrake = 1;\n    a->Base.AllowedToUseBoost = 1;"),
+    AM("pa-cp-tb", "    a->Base.AllowedToUseThrottleAndBrake = 1;\n    a->Base.AllowedToUseBoost = 1;\n    a->Base.PointsToDriveWillExecuteAction = 1;\n    nc =",
+       "    a->Base.AllowedToUseThrottleAndBrake = 0;\n    a->Base.AllowedToUseBoost = 1;\n    a->Base.PointsToDriveWillExecuteAction = 1;\n    nc ="),
+    AM("pa-cp-bo", "    a->Base.AllowedToUseBoost = 1;\n    a->Base.PointsToDriveWillExecuteAction = 1;\n    nc =",
+       "    a->Base.AllowedToUseBoost = 0;\n    a->Base.PointsToDriveWillExecuteAction = 1;\n    nc ="),
+    AM("pa-cp-pt", "    a->Base.PointsToDriveWillExecuteAction = 1;\n    nc = nearbycarlist_get_nearby_car(list, a->CarToPass);",
+       "    a->Base.PointsToDriveWillExecuteAction = 0;\n    nc = nearbycarlist_get_nearby_car(list, a->CarToPass);"),
+    AM("pa-cp-y", "        if (0.0f < nc->Position.y) {\n            drivingchoice_try_to_drive_around_car(",
+       "        if (0.0f <= nc->Position.y) {\n            drivingchoice_try_to_drive_around_car("),
+    AM("pa-cp-time", "loc, list,\n                0.0f, AIDriverAvoidCarsImpactTimeThreshold, 0.0f, 1);",
+       "loc, list,\n                0.0f, AIActionPassMaxTimeAheadToMakeAttempt, 0.0f, 1);"),
+    AM("pa-cp-flag", "loc, list,\n                0.0f, AIDriverAvoidCarsImpactTimeThreshold, 0.0f, 1);",
+       "loc, list,\n                0.0f, AIDriverAvoidCarsImpactTimeThreshold, 0.0f, 0);"),
+    AM("pa-cp-setloc", "            if (!drivingchoice_type_is_driving_line(choice->Type))\n                drivingchoice_set_choice_location(choice, loc);\n            drivingchoice_is_driveable(",
+       "            drivingchoice_is_driveable("),
+    AM("pa-cp-drv-time", "                                       AIDriverAvoidCarsImpactTimeThreshold,\n                                       0.0f, MOVEMENT_PARALLEL_TO_LINE);",
+       "                                       AIActionPassMaxTimeAheadToMakeAttempt,\n                                       0.0f, MOVEMENT_PARALLEL_TO_LINE);"),
+    AM("pa-cp-drv-move", "                                       0.0f, MOVEMENT_PARALLEL_TO_LINE);",
+       "                                       0.0f, MOVEMENT_TOWARDS_LINE);"),
+    AM("pa-cp-drv-pref", "drivingchoice_is_driveable(choice, &a->Base.PointsToDrive, 0,\n",
+       "drivingchoice_is_driveable(choice, &a->Base.PointsToDrive, 1,\n"),
+    AM("pa-cp-udl", "        a->Base.UseDrivingLineSpeed = 1;\n    } else {",
+       "        a->Base.UseDrivingLineSpeed = 0;\n    } else {"),
+    AM("pa-cp-else-setloc", "    } else {\n        if (!drivingchoice_type_is_driving_line(choice->Type))\n            drivingchoice_set_choice_location(choice, loc);\n        drivingchoice_build_drive_target(choice, &a->Base.PointsToDrive, loc,\n                                         list, 0.0f, 0.0f,\n                                         MOVEMENT_PARALLEL_TO_LINE);\n        a->Base.UseDrivingLineSpeed = 1;",
+       "    } else {\n        drivingchoice_build_drive_target(choice, &a->Base.PointsToDrive, loc,\n                                         list, 0.0f, 0.0f,\n                                         MOVEMENT_PARALLEL_TO_LINE);\n        a->Base.UseDrivingLineSpeed = 1;"),
+    AM("pa-cp-else-move", "                                         MOVEMENT_PARALLEL_TO_LINE);\n        a->Base.UseDrivingLineSpeed = 1;\n        a->Base.PointsToDriveWillExecuteAction = 0;",
+       "                                         MOVEMENT_TOWARDS_LINE);\n        a->Base.UseDrivingLineSpeed = 1;\n        a->Base.PointsToDriveWillExecuteAction = 0;"),
+    AM("pa-cp-else-udl", "        a->Base.UseDrivingLineSpeed = 1;\n        a->Base.PointsToDriveWillExecuteAction = 0;",
+       "        a->Base.UseDrivingLineSpeed = 0;\n        a->Base.PointsToDriveWillExecuteAction = 0;"),
+    AM("pa-cp-else-pt", "        a->Base.PointsToDriveWillExecuteAction = 0;\n    }\n}",
+       "        a->Base.PointsToDriveWillExecuteAction = 1;\n    }\n}"),
+    AM("pa-name", "\"Pass\"", "\"pass\""),
+    # AvoidCars.
+    AM("ac-last", "    a->LastDecisionReevaluationTime.PackedTime = (uint32_t)WorldTimer;\n    a->CarToAvoid = car;",
+       "    a->CarToAvoid = car;"),
+    AM("ac-car", "    a->CarToAvoid = car;\n", "    a->CarToAvoid = NULL;\n"),
+    AM("ac-okay", "    a->IsMyDrivingChoiceOkay = okay;", "    a->IsMyDrivingChoiceOkay = !okay;"),
+    AM("ac-used", "    a->UsedPreferredSide = usedPreferred;", "    a->UsedPreferredSide = 0;"),
+    AM("ac-secs", "    a->SecondsToImpact = secs;", "    a->SecondsToImpact = 0.0f;"),
+    AM("ac-type", "a->Base.Type = AIACTION_AVOID_CARS;", "a->Base.Type = AIACTION_PASS;"),
+    AM("ac-min", "    a->MinLifetime = secs + AIAC_MIN_LIFETIME;", "    a->MinLifetime = AIAC_MIN_LIFETIME;"),
+    AM("ac-min-k", "#define AIAC_MIN_LIFETIME      2.0f", "#define AIAC_MIN_LIFETIME      2.5f"),
+    AM("ac-made", "    a->MyCreationTime.PackedTime = (uint32_t)WorldTimer;\n    return a;\n}\n\nvoid aiavoidcars_destroy",
+       "    return a;\n}\n\nvoid aiavoidcars_destroy"),
+    AM("ac-vt", "    a->Base.Base._vtable = AIAVOIDCARS_VTABLE;", "    a->Base.Base._vtable = AIPASS_VTABLE;"),
+    AM("ac-dtor", "destroy_as(&a->Base, AIAVOIDCARS_VTABLE, flags);",
+       "destroy_as(&a->Base, AIAVOIDCARS_VTABLE, 0);"),
+    AM("ac-nohit", "#define AIAC_NO_HIT            99999.0f", "#define AIAC_NO_HIT            9999.0f"),
+    AM("pa-nohit", "#define AIPA_NO_HIT            99999.0f", "#define AIPA_NO_HIT            9999.0f"),
+    AM("ac-sc-secs", "    *secs = AIAC_NO_HIT;\n", "    *secs = 0.0f;\n"),
+    AM("ac-sc-okay0", "    *okay = 0;\n    *usedPreferred = 0;\n    hit", "    *usedPreferred = 0;\n    hit"),
+    AM("ac-sc-used0", "    *usedPreferred = 0;\n    hit", "    hit"),
+    AM("ac-sc-time", "        &list->MyCar->pCarDriver->MyDriveTarget, list, loc,\n        AIDriverAvoidCarsImpactTimeThreshold, &hitTime);",
+       "        &list->MyCar->pCarDriver->MyDriveTarget, list, loc,\n        AIActionPassMaxTimeAheadToMakeAttempt, &hitTime);"),
+    AM("ac-sc-null", "    if (hit != NULL && hitTime < AIDriverAvoidCarsImpactTimeThreshold) {",
+       "    if (hitTime < AIDriverAvoidCarsImpactTimeThreshold) {"),
+    AM("ac-sc-lt", "    if (hit != NULL && hitTime < AIDriverAvoidCarsImpactTimeThreshold) {",
+       "    if (hit != NULL && hitTime <= AIDriverAvoidCarsImpactTimeThreshold) {"),
+    AM("ac-sc-car", "        *car = hit;\n", ""),
+    AM("ac-sc-secsout", "        *secs = hitTime;\n", ""),
+    AM("ac-sc-grace", "        grace = race_grace_period_is_active(pCurrentRace, list->MyCar);",
+       "        grace = 0;"),
+    AM("ac-sc-copy", "        *choice = info->MyDrivingChoice;\n        if (grace", "        if (grace"),
+    AM("ac-sc-player", "        if (grace && hit->pPlayer == NULL) {", "        if (grace) {"),
+    AM("ac-sc-okay1", "            *okay = 1;\n            *usedPreferred = 0;\n        } else {",
+       "            *okay = 0;\n            *usedPreferred = 0;\n        } else {"),
+    AM("ac-sc-used1", "            *okay = 1;\n            *usedPreferred = 0;\n        } else {",
+       "            *okay = 1;\n        } else {"),
+    AM("ac-sc-mnc-time", "                choice, &t, loc, list, AIDriverAvoidCarsImpactTimeThreshold,\n                0.0f, usedPreferred, 1);",
+       "                choice, &t, loc, list, AIActionPassMaxTimeAheadToMakeAttempt,\n                0.0f, usedPreferred, 1);"),
+    AM("ac-sc-mnc-flag", "                0.0f, usedPreferred, 1);", "                0.0f, usedPreferred, 0);"),
+    AM("ac-score", "#define AIAC_SCORE   400", "#define AIAC_SCORE   300"),
+    AM("ac-acc-le", "    int done = !(seconds_since(&a->MyCreationTime) <= a->MinLifetime);",
+       "    int done = !(seconds_since(&a->MyCreationTime) < a->MinLifetime);"),
+    AM("ac-acc-relaxed", "    if (done)\n        drivinglocation_set_relaxed_switch(&info->MyDrivingLocation, 1);\n    return done;\n}\n\nint aiavoidcars_has_failed",
+       "    if (done)\n        drivinglocation_set_relaxed_switch(&info->MyDrivingLocation, 0);\n    return done;\n}\n\nint aiavoidcars_has_failed"),
+    AM("ac-fail", "    // 0x001c6ef0.\n    (void)a;\n    (void)info;\n    return 0;",
+       "    // 0x001c6ef0.\n    (void)a;\n    (void)info;\n    return 1;"),
+    AM("ac-exp", "    // 0x001c6ee8.\n    (void)a;\n    (void)info;\n    return 0;",
+       "    // 0x001c6ee8.\n    (void)a;\n    (void)info;\n    return 1;"),
+    AM("ac-cp-assign", "    drivetarget_assign(&a->Base.PointsToDrive, &me->pCarDriver->MyDriveTarget);\n", ""),
+    AM("ac-cp-tol", "    a->Base.DesiredSpeedTolerance = 0.0f;\n    a->Base.AllowedToUseThrottleAndBrake = 1;\n    a->Base.UseDrivingLineSpeed = 1;\n    // Asked",
+       "    a->Base.DesiredSpeedTolerance = 1.0f;\n    a->Base.AllowedToUseThrottleAndBrake = 1;\n    a->Base.UseDrivingLineSpeed = 1;\n    // Asked"),
+    AM("ac-cp-tb", "    a->Base.AllowedToUseThrottleAndBrake = 1;\n    a->Base.UseDrivingLineSpeed = 1;\n    // Asked",
+       "    a->Base.AllowedToUseThrottleAndBrake = 0;\n    a->Base.UseDrivingLineSpeed = 1;\n    // Asked"),
+    AM("ac-cp-udl", "    a->Base.UseDrivingLineSpeed = 1;\n    // Asked", "    a->Base.UseDrivingLineSpeed = 0;\n    // Asked"),
+    AM("ac-cp-slow-me", "me->State.VelocityMagnitude < AIAC_SLOW_ME", "me->State.VelocityMagnitude <= AIAC_SLOW_ME"),
+    AM("ac-cp-slow-it", "ncAvoid->TheCar->State.VelocityMagnitude < AIAC_SLOW_IT",
+       "ncAvoid->TheCar->State.VelocityMagnitude <= AIAC_SLOW_IT"),
+    AM("ac-cp-slow-me-k", "#define AIAC_SLOW_ME           10.0f", "#define AIAC_SLOW_ME           12.0f"),
+    AM("ac-cp-slow-it-k", "#define AIAC_SLOW_IT           5.0f", "#define AIAC_SLOW_IT           6.0f"),
+    AM("ac-cp-slow-mine", "me->State.VelocityMagnitude < AIAC_SLOW_ME", "ncAvoid->TheCar->State.VelocityMagnitude < AIAC_SLOW_ME"),
+    AM("ac-cp-grace", "    reevaluate = !race_grace_period_is_active(pCurrentRace, me)\n                 || a->CarToAvoid->pPlayer != NULL;",
+       "    reevaluate = 1;"),
+    AM("ac-cp-player", "                 || a->CarToAvoid->pPlayer != NULL;", "                 || a->CarToAvoid->pPlayer == NULL;"),
+    AM("ac-cp-every", "    if (!(AIAC_REEVALUATE_EVERY\n          < seconds_since(&a->LastDecisionReevaluationTime)))",
+       "    if (!(AIAC_REEVALUATE_EVERY\n          <= seconds_since(&a->LastDecisionReevaluationTime)))"),
+    AM("ac-cp-every-k", "#define AIAC_REEVALUATE_EVERY  0.300000012f", "#define AIAC_REEVALUATE_EVERY  0.5f"),
+    AM("ac-cp-every-off", "        reevaluate = 0;\n", ""),
+    AM("ac-cp-line-slow", "        if (drivingchoice_type_is_driving_line(choice->Type) && slow) {",
+       "        if (slow) {"),
+    AM("ac-cp-line-only", "        if (drivingchoice_type_is_driving_line(choice->Type) && slow) {",
+       "        if (drivingchoice_type_is_driving_line(choice->Type) && slow && 0) {"),
+    AM("ac-cp-left", "            drivingchoice_set_choice(choice, CHOICE_LEFT_SIDE_OF_CAR,\n",
+       "            drivingchoice_set_choice(choice, CHOICE_RIGHT_SIDE_OF_CAR,\n"),
+    AM("ac-cp-room", "            if (!drivingchoice_is_enough_room(choice, ncAvoid, list))",
+       "            if (drivingchoice_is_enough_room(choice, ncAvoid, list))"),
+    AM("ac-cp-right", "                drivingchoice_set_choice(choice, CHOICE_RIGHT_SIDE_OF_CAR,\n",
+       "                drivingchoice_set_choice(choice, CHOICE_LEFT_SIDE_OF_CAR,\n"),
+    AM("ac-cp-used0", "        a->UsedPreferredSide = 0;\n        a->IsMyDrivingChoiceOkay = drivingchoice_make_new_choice(",
+       "        a->IsMyDrivingChoiceOkay = drivingchoice_make_new_choice("),
+    AM("ac-cp-mnc-time", "            AIDriverAvoidCarsImpactTimeThreshold, 0.0f, &used, 1);",
+       "            AIActionPassMaxTimeAheadToMakeAttempt, 0.0f, &used, 1);"),
+    AM("ac-cp-mnc-flag", "0.0f, &used, 1);", "0.0f, &used, 0);"),
+    AM("ac-cp-used-copy", "        a->UsedPreferredSide = used;\n", ""),
+    AM("ac-cp-mnc-okay", "        a->IsMyDrivingChoiceOkay = drivingchoice_make_new_choice(",
+       "        a->IsMyDrivingChoiceOkay = !drivingchoice_make_new_choice("),
+    AM("ac-cp-change", "            if (drivingchoice_get_driving_line(choice->Type, me)\n                != loc->DrivingLine) {",
+       "            if (1) {"),
+    AM("ac-cp-setline", "                    loc, drivingchoice_get_driving_line(choice->Type, me), 0);",
+       "                    loc, drivingchoice_get_driving_line(choice->Type, me), 1);"),
+    AM("ac-cp-highlight", "                ai_highlight_driving_line(loc, driver_number(me));\n", ""),
+    AM("ac-cp-nc-null", "            ncChoice = NULL;\n", ""),
+    AM("ac-cp-side", "        } else if (drivingchoice_type_is_side_of_car(choice->Type)) {\n            ncChoice = nearbycarlist_get_nearby_car(list, choice->pCar);\n        }",
+       "        }"),
+    AM("ac-cp-last", "        a->LastDecisionReevaluationTime.PackedTime = (uint32_t)WorldTimer;\n    }",
+       "    }"),
+    AM("ac-cp-stand-pts", "    if (!(a->Base.PointsToDrive.NumPoints != 0 && choice->Type != CHOICE_NONE\n          && reevaluate)) {",
+       "    if (!(choice->Type != CHOICE_NONE\n          && reevaluate)) {"),
+    AM("ac-cp-stand-none", "    if (!(a->Base.PointsToDrive.NumPoints != 0 && choice->Type != CHOICE_NONE\n          && reevaluate)) {",
+       "    if (!(a->Base.PointsToDrive.NumPoints != 0\n          && reevaluate)) {"),
+    AM("ac-cp-stand-re", "    if (!(a->Base.PointsToDrive.NumPoints != 0 && choice->Type != CHOICE_NONE\n          && reevaluate)) {",
+       "    if (!(a->Base.PointsToDrive.NumPoints != 0 && choice->Type != CHOICE_NONE)) {"),
+    AM("ac-cp-none", "        if (choice->Type == CHOICE_NONE\n            || !drivingchoice_is_valid(choice, loc, list)) {",
+       "        if (!drivingchoice_is_valid(choice, loc, list)) {"),
+    AM("ac-cp-valid", "        if (choice->Type == CHOICE_NONE\n            || !drivingchoice_is_valid(choice, loc, list)) {",
+       "        if (choice->Type == CHOICE_NONE) {"),
+    AM("ac-cp-setloc", "            a->IsMyDrivingChoiceOkay = 0;\n            drivingchoice_set_choice_location(choice, loc);\n",
+       "            a->IsMyDrivingChoiceOkay = 0;\n"),
+    AM("ac-cp-drv-used", "            choice, &a->Base.PointsToDrive, a->UsedPreferredSide, &score,",
+       "            choice, &a->Base.PointsToDrive, 0, &score,"),
+    AM("ac-cp-drv-move", "            AIDriverAvoidCarsImpactTimeThreshold, 0.0f, MOVEMENT_TOWARDS_LINE);",
+       "            AIDriverAvoidCarsImpactTimeThreshold, 0.0f, MOVEMENT_PARALLEL_TO_LINE);"),
+    AM("ac-cp-drv-time", "            AIDriverAvoidCarsImpactTimeThreshold, 0.0f, MOVEMENT_TOWARDS_LINE);",
+       "            AIActionPassMaxTimeAheadToMakeAttempt, 0.0f, MOVEMENT_TOWARDS_LINE);"),
+    AM("ac-cp-zero", "        if (a->Base.PointsToDrive.NumPoints == 0) {", "        if (a->Base.PointsToDrive.NumPoints < 0) {"),
+    AM("ac-cp-build-move", "                                             MOVEMENT_PARALLEL_TO_LINE);\n            a->IsMyDrivingChoiceOkay = 0;",
+       "                                             MOVEMENT_TOWARDS_LINE);\n            a->IsMyDrivingChoiceOkay = 0;"),
+    AM("ac-cp-build-okay", "                                             MOVEMENT_PARALLEL_TO_LINE);\n            a->IsMyDrivingChoiceOkay = 0;",
+       "                                             MOVEMENT_PARALLEL_TO_LINE);"),
+    AM("ac-cp-close-okay", "    if (!a->IsMyDrivingChoiceOkay\n        && (ai_do_we_care", "    if (1\n        && (ai_do_we_care"),
+    AM("ac-cp-care-avoid", "        && (ai_do_we_care_about_this_car(ncAvoid, list)\n            || ai_do_we_care_about_this_car(ncChoice, list))",
+       "        && (ai_do_we_care_about_this_car(ncChoice, list))"),
+    AM("ac-cp-care-choice", "        && (ai_do_we_care_about_this_car(ncAvoid, list)\n            || ai_do_we_care_about_this_car(ncChoice, list))",
+       "        && (ai_do_we_care_about_this_car(ncAvoid, list))"),
+    AM("ac-cp-blink", "        && ncAvoid != NULL && !car_is_blinking(ncAvoid->TheCar)) {",
+       "        && ncAvoid != NULL) {"),
+    AM("ac-cp-real", "        if (car->TheControlMode == REAL_CONTROL)", "        if (car->TheControlMode == TRAFFIC_CONTROL)"),
+    AM("ac-cp-half", "            close = list->MyHalfSizeD * AIAC_HALF\n                    < ncAvoid->Position.y",
+       "            close = list->MyHalfSizeD * AIAC_HALF\n                    <= ncAvoid->Position.y"),
+    AM("ac-cp-half-l", "            close = list->MyHalfSizeD * AIAC_HALF", "            close = list->MyHalfSizeL * AIAC_HALF"),
+    AM("ac-cp-half-k", "#define AIAC_HALF              0.5f", "#define AIAC_HALF              0.6f"),
+    AM("ac-cp-look-k", "#define AIAC_LOOK_AHEAD        0.100000001f", "#define AIAC_LOOK_AHEAD        0.2f"),
+    AM("ac-cp-look-x", "+ ncAvoid->Velocity.y * AIAC_LOOK_AHEAD;", "+ ncAvoid->Velocity.x * AIAC_LOOK_AHEAD;"),
+    AM("ac-cp-ahead", "            close = 0.0f < ncAvoid->Position.y;", "            close = 0.0f <= ncAvoid->Position.y;"),
+    AM("ac-cp-across", "        if (!(fabsf(ncAvoid->Position.x)\n              < (list->MyHalfSizeL",
+       "        if (!(fabsf(ncAvoid->Position.x)\n              <= (list->MyHalfSizeL"),
+    AM("ac-cp-across-abs", "        if (!(fabsf(ncAvoid->Position.x)\n", "        if (!((ncAvoid->Position.x)\n"),
+    AM("ac-cp-across-hl", "              < (list->MyHalfSizeL + ncAvoid->ApparentHalfSizeL)",
+       "              < (list->MyHalfSizeL + ncAvoid->ApparentHalfSizeD)"),
+    AM("ac-cp-across-k", "#define AIAC_ACROSS_MARGIN     1.0f", "#define AIAC_ACROSS_MARGIN     2.0f"),
+    AM("ac-cp-across-player", "            && car->pPlayer == NULL)\n            close = 0;", "            )\n            close = 0;"),
+    AM("ac-cp-udl0", "            a->Base.UseDrivingLineSpeed = 0;\n            if (slow)",
+       "            a->Base.UseDrivingLineSpeed = 1;\n            if (slow)"),
+    AM("ac-cp-slow-udl", "            if (slow)\n                a->Base.UseDrivingLineSpeed = 1;",
+       "            if (slow)\n                a->Base.UseDrivingLineSpeed = 0;"),
+    AM("ac-cp-slower-a", "                    &a->Base, ncAvoid, list, AIAC_SLOWER_BY, AIAC_SLOWER_BY);",
+       "                    &a->Base, ncAvoid, list, 0.0f, AIAC_SLOWER_BY);"),
+    AM("ac-cp-slower-b", "                    &a->Base, ncAvoid, list, AIAC_SLOWER_BY, AIAC_SLOWER_BY);",
+       "                    &a->Base, ncAvoid, list, AIAC_SLOWER_BY, 0.0f);"),
+    AM("ac-cp-slower-k", "#define AIAC_SLOWER_BY         0.100000001f", "#define AIAC_SLOWER_BY         0.2f"),
+    AM("ac-cp-traffic", "            if (car->MyDriver->TheDriverType == DRIVER_TYPE_TRAFFIC_CAR\n                || car->MyDriver->TheDriverType == DRIVER_TYPE_COP)",
+       "            if (car->MyDriver->TheDriverType == DRIVER_TYPE_COP)"),
+    AM("ac-cp-cop", "            if (car->MyDriver->TheDriverType == DRIVER_TYPE_TRAFFIC_CAR\n                || car->MyDriver->TheDriverType == DRIVER_TYPE_COP)",
+       "            if (car->MyDriver->TheDriverType == DRIVER_TYPE_TRAFFIC_CAR)"),
+    AM("ac-cp-min-k", "#define AIAC_MIN_SPEED_BEHIND  20.0f", "#define AIAC_MIN_SPEED_BEHIND  25.0f"),
+    AM("ac-cp-max", "    return fs < ft ? ft : fs;", "    return fs < ft ? fs : ft;"),
+    AM("ac-cp-pt", "    a->Base.PointsToDriveWillExecuteAction = 1;\n}\n\nconst char *aiavoidcars_get_name",
+       "    a->Base.PointsToDriveWillExecuteAction = 0;\n}\n\nconst char *aiavoidcars_get_name"),
+    AM("ac-name", "\"Avoid Cars\"", "\"Avoid cars\""),
+    AM("ac-ga", "    // 0x001ca9e8.\n    return a->CarToAvoid;", "    // 0x001ca9e8.\n    return NULL;"),
+    AM("ac-dnum", "    return ((CarDriverNumberFn)e->fn)(vt_this(d, e));", "    (void)e;\n    return car->DriverNumber;"),
+    AM("vt-pa-acc", "E(aipass_has_been_accomplished),            //  40", "E(aipass_has_failed),            //  40"),
+    AM("vt-pa-exp", "E(aipass_has_expired),                      //  56", "E(aiavoidcars_has_expired),                      //  56"),
+    AM("vt-ac-cptd", "E(aiavoidcars_calculate_points_to_drive),   //  24", "E(aipass_calculate_points_to_drive),   //  24"),
+    AM("vt-ac-name", "E(aiavoidcars_get_name),                    //  32", "E(aiaction_get_name),                    //  32"),
+    AM("vt-ac-fail", "E(aiavoidcars_has_failed),                  //  48", "E(aiavoidcars_has_been_accomplished),                  //  48"),
+    AM("vt-install-pa", "    vt_install(AIPASS_VTABLE, aipass_vt, AIACTION_VT_ENTRIES);\n", ""),
     # -- EstimateScore's distances, which a stale pick reads ------------------
     M("es-static", "    static float dist[DRIVETARGET_MAX_POINTS];",
       "    float dist[DRIVETARGET_MAX_POINTS] = { 0.0f };", rel=DT),
@@ -5513,6 +6386,44 @@ EQUIVALENT = {
     "ta-second-restore":
         "IsDriveable's BuildDriveTarget copies the driver's own target over "
         "all of t before reading it (see ta-saved).",
+    # Step 11d-2's.
+    "pa-nohit":
+        "IsDriveable's first lines store DC_NO_HIT in *hitTime before "
+        "anything reads it, and Pass drops the time after.",
+    "pa-cp-clear":
+        "Every way on rebuilds PointsToDrive with BuildDriveTarget, whose "
+        "first step copies the driver's own target over all of it: "
+        "IsDriveable's, the last arm's, and TryToDriveAroundCar's, whose "
+        "saved copy is put back only just before one (see ta-saved).",
+    "pa-cp-drv-time":
+        "The time reaches BuildDriveTarget, which does not read it, and "
+        "WhoWillThisDriveTargetHit, where it only stops the walk: the hit "
+        "and its time come back to IsDriveable's answer, which Pass drops, "
+        "and the IDs move once a car either way.",
+    "ac-sc-used1":
+        "*usedPreferred was stored 0 at the top, and nothing between "
+        "writes it.",
+    "ac-cp-used0":
+        "MakeNewChoice stores *out on each of its four ways out.",
+    "ac-cp-none":
+        "IsValid answers 0 for CHOICE_NONE (neither a line nor a side of a "
+        "car), so the type test only says what the IsValid test says.",
+    "ac-cp-zero":
+        "PointsToDrive is empty after IsDriveable only for a clear "
+        "location (with one, GetRoutePointsToUse always gives a point and "
+        "FillUpDriveTarget adds it). Then IsDriveable's BuildDriveTarget "
+        "built the same empty target, with the same choice and the same "
+        "car left out, and answered 0, so a second build changes nothing.",
+    "ac-cp-build-move":
+        "This BuildDriveTarget runs only for a clear location (see "
+        "ac-cp-zero), where FillUpDriveTarget returns before it reads the "
+        "movement.",
+    "ac-cp-build-okay":
+        "This store runs only for a clear location (see ac-cp-zero), where "
+        "IsDriveable's BuildDriveTarget did not build, so it answered 0 "
+        "already.",
+    "ac-cp-slower-b":
+        "SetDesiredSpeedSlowerThanThisCar does not read its second float.",
 }
 
 

@@ -3,9 +3,10 @@
 // drive target, and for Race::GracePeriodIsActive in racecore.c. Runs the
 // op script tools/drivingchoice_check.py writes and prints the transcript
 // it diffs against the retail image, run in mipsemu over the same script.
-// Since step 11d-1 it runs the five small AI actions of aiactions.c too,
-// one at a time in a slot of their own, over a DrivingInformation copied
-// from the script's list, location and choice.
+// Since step 11d-1 it runs the AI actions of aiactions.c too (the five
+// small ones, and since 11d-2 Pass and AvoidCars), one at a time in a slot
+// of their own, over a DrivingInformation copied from the script's list,
+// location and choice.
 //
 // The harness owns the cars, their controllers, choices and actions, the
 // list, the location, the routes and the signs, and three answers: the
@@ -13,10 +14,13 @@
 // and amount out of bounds (through the controller's vtable), each of
 // which prints a line as the checker's stubs do. For the actions it also
 // stands in for the slot pool, the drive target's markers, GetElevation
-// (the script's normal under each car) and PleaseResetMeLater, each
+// (the script's normal under each car), PleaseResetMeLater and each car's
+// driver's GetDriverNumber (a test table: the car's DriverNumber), each
 // printing a line. Everything else is the port's own: nearbycar.c,
 // drivinglocation.c, drivetarget.c, trackroute.c, aiaction.c and the
-// maths.
+// maths. Pass asks CalculateMaxAcceleration for a figure nothing reads, so
+// each car has a ride info and car type 0 an acceleration table only for
+// it to run on; the checker's model stubs it.
 //
 // A float prints as its bits, every NaN as "nan", and a pointer by what it
 // points at. The ops and every line's format are the checker's.
@@ -35,6 +39,7 @@
 #include "collisionbody.h"
 #include "carcontroller.h"
 #include "cardriver.h"
+#include "carinfo.h"
 #include "cartypeinfo.h"
 #include "drivetarget.h"
 #include "drivetargetrenderer.h"
@@ -130,12 +135,20 @@ static union {
     AIActionNudgeCar         nc;
     AIActionBlock            bl;
     AIActionAccidentRecovery ar;
+    AIActionPass             pa;
+    AIActionAvoidCars        ac;
     unsigned char            raw[AIACTION_SLOT_SIZE];
 } ab;
 static DrivingInformation info;
 static char fake_pool[16];
 static bVector3 normals[NCARS];
 static char kind[4];
+
+// Step 11d-2's: the cars' ride info and the drivers' test table, at the
+// checker's address for it.
+#define DVT 0x010b3000u
+static RideInfo ride;
+static VtEntry drv_vt[CARDRIVER_VT_ENTRIES];
 
 DriveTargetRenderer TheDriveTargetRenderer;
 
@@ -374,6 +387,21 @@ void car_please_reset_me_later(Car *c)
     printf("  reset %s\n", nm(c));
 }
 
+// ------------------------------------------------- 11d-2's stubs
+
+// The test CarDriver table's GetDriverNumber: the car's DriverNumber.
+static int32_t fk_driver_number(void *self)
+{
+    int i = index_in(self, cdrivers, sizeof cdrivers[0], NCARS);
+
+    if (i < 0) {
+        fprintf(stderr, "a driver that is not one of ours\n");
+        exit(2);
+    }
+    printf("  dnum %s\n", nm(&cars[i]));
+    return cars[i].DriverNumber;
+}
+
 // ------------------------------------------------------------ the dumps
 
 static void dump_choice(const DrivingChoice *d, const char *tag)
@@ -490,6 +518,10 @@ static const char *vt_name(uint32_t v)
         return "vBL";
     case AIACCIDENTRECOVERY_VTABLE:
         return "vAR";
+    case AIPASS_VTABLE:
+        return "vPA";
+    case AIAVOIDCARS_VTABLE:
+        return "vAC";
     case AIACTION_VTABLE:
         return "vAA";
     case AIPLAN_VTABLE:
@@ -524,6 +556,17 @@ static void dump_act(void)
         printf("  ar made %08x reset %d\n",
                (unsigned)ab.ar.MyCreationTime.PackedTime,
                (int)ab.ar.HaveResetYet);
+    else if (strcmp(kind, "pa") == 0)
+        printf("  pa car %s amt %s made %08x\n", nm(ab.pa.CarToPass),
+               fx(ab.pa.AmountToProjectIntoFuture),
+               (unsigned)ab.pa.MyCreationTime.PackedTime);
+    else if (strcmp(kind, "ac") == 0)
+        printf("  ac car %s secs %s ok %d last %08x made %08x min %s "
+               "used %d\n", nm(ab.ac.CarToAvoid), fx(ab.ac.SecondsToImpact),
+               (int)ab.ac.IsMyDrivingChoiceOkay,
+               (unsigned)ab.ac.LastDecisionReevaluationTime.PackedTime,
+               (unsigned)ab.ac.MyCreationTime.PackedTime,
+               fx(ab.ac.MinLifetime), (int)ab.ac.UsedPreferredSide);
 }
 
 // After CalculatePointsToDrive: the information's choice and location, and
@@ -608,10 +651,11 @@ static void reset(void)
         static int saved;
         static float grace0, gap0, slowcar0, slowtraffic0, minspeed0;
         static int32_t traffic0, nlines0;
-        static float avoid0;
+        static float avoid0, pass0;
 
         if (!saved) {
             avoid0 = AIDriverAvoidCarsImpactTimeThreshold;
+            pass0 = AIActionPassMaxTimeAheadToMakeAttempt;
             grace0 = StartOfRaceGracePeriod;
             gap0 = TimeBetweenCarsForGracePeriodExit;
             traffic0 = AITrafficTuningMode;
@@ -629,6 +673,7 @@ static void reset(void)
         TryToDriveAroundCarMinSpeedForDrivingLine = minspeed0;
         AICarControllerNumDrivingLinesToConsider = nlines0;
         AIDriverAvoidCarsImpactTimeThreshold = avoid0;
+        AIActionPassMaxTimeAheadToMakeAttempt = pass0;
     }
     AIActionSlotPool = (BSlotPool *)fake_pool;
     fill(&ab, sizeof ab);
@@ -641,6 +686,22 @@ static void reset(void)
     SignpostArray = signs;
     NumSignposts = NSIGNS;
     gAISignPostDecisionFn = sign_decision;
+    CameraFollowThisCarInstead = -1;
+    HighlightDrivingLineInRouteNumber = -1;
+    HighlightDrivingLineNumber = -1;
+    // Only for CalculateMaxAcceleration to run on: car type 0's table, two
+    // entries over 0 to 100.
+    {
+        static float accel[2] = { 0.0f, 1.0f };
+        Table *t = get_acceleration_table(0);
+
+        memset(&ride, 0, sizeof ride);
+        t->pTable = accel;
+        t->NumEntries = 2;
+        t->MinArg = 0.0f;
+        t->MaxArg = 100.0f;
+        t->IndexMultiplier = 0.01f;
+    }
 }
 
 static void set_global(const char *name, uint32_t v)
@@ -672,6 +733,14 @@ static void set_global(const char *name, uint32_t v)
         AICarControllerNumDrivingLinesToConsider = (int32_t)v;
     else if (strcmp(name, "AVOID") == 0)
         AIDriverAvoidCarsImpactTimeThreshold = f;
+    else if (strcmp(name, "PASS") == 0)
+        AIActionPassMaxTimeAheadToMakeAttempt = f;
+    else if (strcmp(name, "CAM") == 0)
+        CameraFollowThisCarInstead = (int32_t)v;
+    else if (strcmp(name, "HROUTE") == 0)
+        HighlightDrivingLineInRouteNumber = (int32_t)v;
+    else if (strcmp(name, "HLINE") == 0)
+        HighlightDrivingLineNumber = (int32_t)v;
     else {
         fprintf(stderr, "bad global %s\n", name);
         exit(2);
@@ -731,6 +800,9 @@ static void set_car(char **t)
     c->State.VelocityMagnitude = fh(v[F_VMAG]);
     c->pPlayer = atoi(v[F_PL]) ? (Player *)(void *)players[k] : NULL;
     c->pCarDriver = &cdrivers[k];
+    cdrivers[k]._vtable = DVT;
+    c->pRideInfo = &ride;
+    c->State.BoostFactor = 1.0f;
     c->State.Velocity.x = fh(v[F_VX]);
     c->State.Velocity.y = fh(v[F_VY]);
     c->State.nWheelsTouchingGround = atoi(v[F_NW]);
@@ -786,8 +858,27 @@ static void poke(const char *f, uint32_t v)
         { "ds", 564 }, { "tt", 568 }, { "tol", 572 }, { "udl", 576 },
         { "tb", 580 }, { "bo", 584 }, { "t608", 608 }, { "r612", 612 },
     };
+    // Pass's and AvoidCars' fields after their car, at retail's offsets in
+    // the script and at the host's here, where a pointer is 8 bytes.
+    static const struct {
+        const char *kind, *name;
+        size_t      off;
+    } own[] = {
+        { "pa", "o616", offsetof(AIActionPass, MyCreationTime) },
+        { "ac", "o616", offsetof(AIActionAvoidCars, IsMyDrivingChoiceOkay) },
+        { "ac", "o620",
+          offsetof(AIActionAvoidCars, LastDecisionReevaluationTime) },
+        { "ac", "o624", offsetof(AIActionAvoidCars, MyCreationTime) },
+        { "ac", "o628", offsetof(AIActionAvoidCars, MinLifetime) },
+        { "ac", "o632", offsetof(AIActionAvoidCars, UsedPreferredSide) },
+    };
     size_t i;
 
+    for (i = 0; i < sizeof own / sizeof own[0]; i++)
+        if (strcmp(kind, own[i].kind) == 0 && strcmp(f, own[i].name) == 0) {
+            memcpy(ab.raw + own[i].off, &v, 4);
+            return;
+        }
     for (i = 0; i < sizeof fields / sizeof fields[0]; i++)
         if (strcmp(f, fields[i].name) == 0) {
             memcpy(ab.raw + fields[i].off, &v, 4);
@@ -797,7 +888,7 @@ static void poke(const char *f, uint32_t v)
     exit(2);
 }
 
-// Step 11d-1's, each "@" and a name.
+// Step 11d-1's and 11d-2's, each "@" and a name.
 static void act_op(char **t, int n)
 {
     const char *c = t[0] + 1;
@@ -822,6 +913,11 @@ static void act_op(char **t, int n)
             ainudgecar_init(&ab.nc, score, timeout, car);
         else if (strcmp(kind, "bl") == 0)
             aiblock_init(&ab.bl, score, timeout, car);
+        else if (strcmp(kind, "pa") == 0)
+            aipass_init(&ab.pa, score, timeout, car, fh(t[5]));
+        else if (strcmp(kind, "ac") == 0)
+            aiavoidcars_init(&ab.ac, score, timeout, car, fh(t[5]),
+                             atoi(t[6]), atoi(t[7]));
         else
             aiaccidentrecovery_init(&ab.ar, score, timeout);
         dump_act();
@@ -833,6 +929,10 @@ static void act_op(char **t, int n)
         dump_act();
         dump_target(&ab.a.PointsToDrive);
         dump_info();
+        if (strcmp(kind, "ac") == 0)
+            printf("  highlight %d %d\n",
+                   (int)HighlightDrivingLineInRouteNumber,
+                   (int)HighlightDrivingLineNumber);
     } else if (strcmp(c, "us") == 0) {
         aiaction_update_status(&ab.a, &info);
         printf("  status %d\n", (int)ab.a.Base.Status);
@@ -867,10 +967,41 @@ static void act_op(char **t, int n)
             got = k[0] == 'n' ? ainudgecar_calculate_score(&info, &out)
                               : aiblock_calculate_score(&info, &out);
             printf("  out %s\n", nm(out));
+        } else if (strcmp(k, "pa") == 0 || strcmp(k, "ac") == 0) {
+            // Each out filled first, so what is not written shows.
+            Car *out;
+            DrivingChoice ch;
+            float secs;
+            int32_t okay, used;
+
+            fill(&out, sizeof out);
+            fill(&ch, sizeof ch);
+            fill(&secs, sizeof secs);
+            fill(&okay, sizeof okay);
+            fill(&used, sizeof used);
+            if (k[0] == 'p')
+                got = aipass_calculate_score(&info, &out, &ch, &secs);
+            else
+                got = aiavoidcars_calculate_score(&info, &out, &ch, &secs,
+                                                  &okay, &used);
+            printf("  out %s\n", nm(out));
+            dump_choice(&ch, "sch");
+            printf("  secs %s ok %d used %d\n", fx(secs), (int)okay,
+                   (int)used);
+            dump_info();
         } else {
             got = aiaccidentrecovery_calculate_score(&info);
         }
         printf("  score %d\n", (int)got);
+    } else if (strcmp(c, "so") == 0) {
+        printf("  sok %d\n", aipass_side_of_car_is_okay(
+                                 &info.MyNearbyCarList.Array[atoi(t[1])],
+                                 &info.MyDrivingChoice, atoi(t[2])));
+    } else if (strcmp(c, "ga") == 0) {
+        printf("  ga %s\n", nm(aiavoidcars_get_car_to_avoid(&ab.ac)));
+    } else if (strcmp(c, "bk") == 0) {
+        cars[atoi(t[1])].BlinkTimer = (int32_t)wh(t[2]);
+        cars[atoi(t[1])].BlinkDuration = fh(t[3]);
     } else if (strcmp(c, "par") == 0) {
         printf("  par %d\n", aiaccidentrecovery_sort_of_parallel_to_track(
                                  car_ptr(t[1]), fh(t[2])));
@@ -1273,6 +1404,8 @@ int main(int argc, char **argv)
     vt_install(AICARCONTROLLER_VTABLE, ctl_vt, CARCONTROLLER_VT_ENTRIES);
     aiaction_install_vtables();
     aiactions_install_vtables();
+    drv_vt[VT_SLOT(CARDRIVER_VT_GET_DRIVER_NUMBER)].fn = (VtFn)fk_driver_number;
+    vt_install(DVT, drv_vt, CARDRIVER_VT_ENTRIES);
 
     f = fopen(argv[1], "r");
     if (f == NULL) {

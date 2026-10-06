@@ -15024,6 +15024,94 @@ normal between 0.5 and 0.707. The other three are equivalent:
 Next is 11d-2: Pass (0x001c78f8, with SideOfCarIsOkay) and AvoidCars
 (0x001c6ba0). The "@" ops and s_actions carry over.
 
+### Step 11d-2: Pass and AvoidCars
+
+`aiactions.c` has the two big actions that build on DrivingChoice's
+choosing, each with its constructor, CalculateScore, the three tests,
+CalculatePointsToDrive, GetName and destructor, and its table; `main.c`
+installs seven tables now.
+- Pass (300) goes round a car ahead of mine in the list that it can
+  catch: 0 < y, x < 2y (signed) and CanICatchThisCar, then
+  TryToDriveAroundCar over AIActionPassMaxTimeAheadToMakeAttempt (3.0f,
+  gp-18164, defined here) and SideOfCarIsOkay. It is done 3 s on with
+  the car off the list or 10 m behind the two half lengths, and fails
+  when the car leaves the list, or in its first 3 s is ahead and can't
+  be caught.
+- AvoidCars (400) answers a hit my own target is heading for, under
+  the avoid threshold, with MakeNewChoice. Its points are made again
+  every 0.3 s outside the grace period. A line choice, when both cars
+  are slow, becomes a side of the car to avoid first. When no choice is
+  driveable and the car to avoid is close ahead, it slows behind it.
+  Its least lifetime is its seconds to impact plus 2.
+
+Things the listing gives away:
+- Pass asks CalculateMaxAcceleration and hands the answer to
+  CanICatchThisCar, which doesn't read it. HasFailed asks with -1, so
+  the image works it out again and drops it.
+- AvoidCars asks DoWeCareAboutThisCar twice at the top and drops both
+  answers. In the grace period it reads CarToAvoid's player with no
+  NULL test.
+- AvoidCars' HasBeenAccomplished tests `seconds <= MinLifetime` with
+  `c.le.s`, so a NaN lifetime is done at once.
+- SetDesiredSpeedSlowerThanThisCar is handed 0.1 twice; it reads the
+  first.
+
+The model stubs CalculateMaxAcceleration (0x001cce50); the harness runs
+the port's, with a ride info for each car and a two-entry table for car
+type 0. GetDriverNumber is a test CarDriver table (DVT) on both sides,
+which every car's driver points at. s_pass_avoid makes Pass or
+AvoidCars four times on s_actions' world, with the clock either side of
+each edge and of the grace period's end.
+
+The check gives 532 scenarios, 194029 ops, 218234 lines, 0 differ.
+11d-2 has 170 mutations: 160 caught and 10 equivalent. Across the
+checker, 1047 mutations: 1023 caught, 24 equivalent and 0
+unexplained. The first pass left 45 alive, 35 of them gaps in the
+script. s_pa_edge closes them:
+- x at exactly 2y, and either side of it;
+- the car to pass exactly 10 m past the half lengths, and level at y 0
+  with nothing accelerating;
+- a car stopped just ahead, so that nothing is driveable, with the car
+  to avoid at each edge of the close test;
+- the car to avoid behind but closing fast, so only the choice's car is
+  cared about;
+- no location, with an empty target of my own;
+- AvoidCars' threshold far from Pass's, with a hit between them.
+
+For a negative odd line, MakeNewChoice's current choice keeps what
+retail's stack held, where the port clears it. In ac-stand, with no
+line, a stale line choice there skipped one of the lines, which put
+PotentialDriveTargetID one behind the port. The model now clears that
+choice on the way into MakeNewChoice (MAKE_NEW_CURRENT, sp+1696), as
+drivingchoice.c does. That let ac-stand make the choice again with no
+line, which catches ac-cp-stand-none.
+
+Four of 11d-1's mutation patterns (jd-last, jd-thr, dr-udl0, ar-made)
+stopped being unique once Pass and AvoidCars were in the file. Each now
+carries a line of context.
+
+The first CIA build failed on AvoidCars' call to MakeNewChoice: it
+handed over &UsedPreferredSide, an int32_t, where MakeNewChoice takes
+an int *. The host's int32_t is an int, but devkitARM's is a long. The
+port now hands it an int and copies the answer into the field after;
+MakeNewChoice stores the out on each of its ways out, so nothing
+changes. The copy has its own mutation (ac-cp-used-copy, caught).
+
+The ten equivalents are written down in the checker. Four are stores
+that change nothing: the value is overwritten before it is read, or is
+there already. Three only reach a
+build that is already empty, which happens only with no location. One
+is a time that only stops a walk whose answers are dropped, one is
+IsValid's own answer for CHOICE_NONE, and one is the unread second
+float.
+
+`docs/formats/ai-action.md` has the detail, under "Pass and AvoidCars
+(11d-2)". The CIA builds.
+
+Next is 11d-3a: PullOver and IJustGotHit. CONTINUE.md has what their
+listings give: the constructors, the scores and the collision walk.
+`tools/retail_vtable.py` lists a retail table's functions.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the
