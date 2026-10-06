@@ -5,8 +5,9 @@ Where the next session picks up. Updated in Session 38
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
-AIPlan and the AIAction base, and 11d-1 to 11d-3b, all eleven actions,
-are done and checked against retail. Next is 11e, AICarController. The car selector is finished and checked against retail: SC-1
+AIPlan and the AIAction base, 11d-1 to 11d-3b, all eleven actions, and
+11e-0, Average at retail's size, are done and checked against retail.
+Next is the rest of 11e, AICarController. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -337,6 +338,13 @@ car's were.
     PleaseResetMeLater). `nearbycar_check` keeps the base's.
 - **11e, next: AICarController**, which scores the actions, keeps the
   best and drives by it.
+  - **11e-0 is done: Average at retail's size.** Retail's Average is 16
+    bytes with its three counters as bytes (the demo's 24, with words),
+    and PidError 40 (the demo's 56). The controller keeps two (580 and
+    692), so `average.c` came first. `average_check` runs retail's image
+    now: 552 ops, 972 lines, 0 differ; 73 mutations, 72 caught and one
+    equivalent. GetLastValue (0x0018fdf8) is new in retail and unused.
+    `docs/formats/average.md` has it.
   - Retail's runs from 0x00190140 to about 0x00194058: some 16 KB in
     about 50 functions (`grep AICarController out/retail_syms.txt`).
     Think alone is 2536 bytes, DecideBoostFactor 904 and

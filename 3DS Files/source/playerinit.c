@@ -247,7 +247,7 @@ struct Player *player_init(struct Player *p, JoystickPort port,
     }
     p->nGlueCount = 0;
 
-    // Retail's Average is 16 bytes; the port's is still the demo's.
+    // Retail's Average, 16 bytes on the console.
     mem = bMalloc((int)sizeof(Average), PLAYER_CPP, 520, 16);
     p->pAverageSpeedRatio = average_init((Average *)mem, 10);
     p->tAverageSpeedTimer.PackedTime = 0;

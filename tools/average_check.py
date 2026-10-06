@@ -1,18 +1,25 @@
-"""Cross-check 3DS Files/source/average.c against the image's own code.
+"""Cross-check 3DS Files/source/average.c against the retail image's own
+code.
 
 Average, PidError and Linear are the three small filters out of table.cpp
-(0x00187550 .. 0x00187918). RealController keeps an Average of eight; the
-AI driver, the psycho driver (three PidErrors), the AI car controller, the
-belt mover, the AI engine sound and the player's joystick port keep more.
+(retail 0x0018fbf0 .. 0x00190080). RealController keeps an Average of
+eight; the AI driver, the psycho driver (three PidErrors), the AI car
+controller, the belt mover, the AI engine sound and the player's joystick
+port keep more.
 
-The oracle is the image itself, run in tools/mipsemu.py:
+The oracle is SLES_507.31 itself, run in tools/mipsemu.py:
 
-- Average's constructor, destructor, Record, Reset and Flush;
+- Average's constructor, destructor, Record, Reset, Flush (0x0018fda0)
+  and GetLastValue (0x0018fdf8, new in retail, which nothing calls);
 - PidError's destructor, Record and Reset;
 - Linear's Init and GetValue.
 
+Retail's Average is 16 bytes, with its three counters as bytes; the
+demo's was 24, with words. A ring of 256 slots or more keeps the low byte
+of its count, but its buffer is sized by the whole count.
+
 PidError's constructor is inline at every call site. The model does what
-PsychoDriver's copies do (0x001376cc..0x001376f8): the two Average
+PsychoDriver's copies do (0x00139808..0x00139834): the two Average
 constructors, then a zero into each error.
 
 The points worth pinning:
@@ -47,7 +54,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import physicscar_check as pcc
-from mipsemu import Emu, M32, s32
+import retail_model
+from mipsemu import M32, s32
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -61,37 +69,43 @@ HARNESS_TIMEOUT = 60
 
 # ================================================================ the image
 
-NAVG, NPID = 8, 4
-AVG = 0x01E00000                    # NAVG * 24
-PID = 0x01E00400                    # NPID * 56
+NAVG, NPID = 10, 4
+AVG_SIZE, PID_SIZE = 16, 40
+AVG = 0x01E00000                    # NAVG * 16
+PID = 0x01E00400                    # NPID * 40
 LIN = 0x01E00800                    # one Linear
 SLACK = 16
 MAX_DUMP = 64
 
+# Retail's addresses. The matcher leaves Flush unplaced, and GetLastValue
+# is new.
 SYM = dict(
-    ctor="__7Averagei",
-    dtor="_$_7Average",
-    record="Record__7Averagef",
-    reset="Reset__7Averagef",
-    flush="Flush__7Averagef",
-    pdtor="_$_8PidError",
-    precord="Record__8PidErrorff",
-    preset="Reset__8PidErrorf",
-    linit="Init__6Linearffff",
-    lget="GetValue__6Linearf",
+    ctor=0x0018fbf0,
+    dtor=0x0018fc68,
+    record=0x0018fcb8,
+    reset=0x0018fd50,
+    flush=0x0018fda0,
+    last=0x0018fdf8,
+    pdtor=0x0013ad28,
+    precord=0x0018ff30,
+    preset=0x00190008,
+    linit=0x00190050,
+    lget=0x00190070,
 )
 
 (OP_TAG, OP_NEW, OP_DEL, OP_REC, OP_RESET, OP_FLUSH, OP_POKE, OP_DPOKE,
  OP_DUMP, OP_PNEW, OP_PDEL, OP_PREC, OP_PRESET, OP_PDUMP, OP_LINIT,
- OP_LGET, OP_JUNK, OP_PJUNK) = range(18)
+ OP_LGET, OP_JUNK, OP_PJUNK, OP_LAST) = range(19)
 
 ARGS = {OP_TAG: 1, OP_NEW: 2, OP_DEL: 2, OP_REC: 2, OP_RESET: 2,
         OP_FLUSH: 2, OP_POKE: 3, OP_DPOKE: 3, OP_DUMP: 1, OP_PNEW: 3,
         OP_PDEL: 2, OP_PREC: 3, OP_PRESET: 2, OP_PDUMP: 1, OP_LINIT: 4,
-        OP_LGET: 1, OP_JUNK: 1, OP_PJUNK: 1}
+        OP_LGET: 1, OP_JUNK: 1, OP_PJUNK: 1, OP_LAST: 1}
 
+# The three counters are bytes.
 F_SLOTS, F_CUR, F_N, F_TOTAL, F_AVG = range(5)
-FOFF = {F_SLOTS: 0, F_CUR: 4, F_N: 8, F_TOTAL: 12, F_AVG: 16}
+FOFF = {F_SLOTS: 0, F_CUR: 1, F_N: 2, F_TOTAL: 4, F_AVG: 8}
+F_BYTE = (F_SLOTS, F_CUR, F_N)
 
 
 def fb(x):
@@ -272,10 +286,24 @@ def script():
     for cur in (3, 4, 6):
         sc.op(OP_POKE, 5, F_CUR, cur)
         sc.rec(5, 0.5)
-    # Negative samples: still below the slot count, so it counts up.
+    # A count of -3 is the byte 253, over the slot count, so it no longer
+    # counts up; 255 would wrap to 0 if it did.
     sc.op(OP_POKE, 5, F_N, -3)
     sc.rec(5, 1.0)
     sc.rec(5, 1.0)
+    # The dump would read 255 slots, past the buffer, so it waits for the
+    # count to come back.
+    sc.op(OP_POKE, 5, F_SLOTS, 255)
+    sc.op(OP_POKE, 5, F_N, 254)
+    sc.op(OP_POKE, 5, F_CUR, 2)
+    sc.rec(5, 1.5, dump=False)
+    sc.op(OP_POKE, 5, F_SLOTS, 4)
+    sc.op(OP_DUMP, 5)
+    sc.op(OP_POKE, 5, F_SLOTS, 255)
+    sc.rec(5, 1.5, dump=False)
+    sc.op(OP_POKE, 5, F_SLOTS, 4)
+    sc.op(OP_DUMP, 5)
+    sc.op(OP_POKE, 5, F_N, 3)
     # A shrunk ring: the index beyond the new count wraps.
     sc.op(OP_POKE, 5, F_SLOTS, 2)
     sc.op(OP_POKE, 5, F_CUR, 1)
@@ -290,6 +318,56 @@ def script():
     for i in range(130):
         sc.rec(6, f32(rnd.uniform(-500.0, 500.0)), dump=(i % 13 == 12))
     sc.op(OP_DUMP, 6)
+
+    # -- the bytes --------------------------------------------------------
+    # 300 slots keep 44 in the byte, over a buffer of all 300.
+    sc.tag("wide")
+    sc.op(OP_JUNK, 8)
+    sc.op(OP_NEW, 8, 300)
+    sc.op(OP_DUMP, 8)
+    for v in (1.0, 2.0, 3.0):
+        sc.rec(8, v)
+    # The index at 255, inside the buffer: its step is the byte 0, under
+    # the count, so the stored 0 stands without the wrap.
+    sc.op(OP_POKE, 8, F_CUR, 255)
+    sc.op(OP_DPOKE, 8, 255, fb(0.5))
+    sc.rec(8, 2.5)
+    sc.op(OP_POKE, 8, F_CUR, 43)
+    sc.rec(8, 4.5)
+    sc.op(OP_RESET, 8, 0.25)
+    sc.op(OP_DUMP, 8)
+    sc.op(OP_FLUSH, 8, 0.75)
+    sc.op(OP_DUMP, 8)
+    sc.op(OP_DEL, 8, 1)
+    # 256 slots keep none.
+    sc.tag("256")
+    sc.op(OP_JUNK, 9)
+    sc.op(OP_NEW, 9, 256)
+    sc.op(OP_DUMP, 9)
+    for v in (2.0, -1.0):
+        sc.rec(9, v)
+    sc.op(OP_DEL, 9, 1)
+
+    # -- GetLastValue -----------------------------------------------------
+    sc.tag("last")
+    sc.op(OP_JUNK, 8)
+    sc.op(OP_NEW, 8, 3)
+    sc.op(OP_LAST, 8)
+    for v in (1.25, -2.0, 3.5, 4.75, 0.5):
+        sc.rec(8, v, dump=False)
+        sc.op(OP_LAST, 8)
+    # No samples, with a sample in the ring.
+    sc.op(OP_POKE, 8, F_N, 0)
+    sc.op(OP_LAST, 8)
+    sc.op(OP_POKE, 8, F_N, 1)
+    for cur in (0, 1, 2):
+        sc.op(OP_POKE, 8, F_CUR, cur)
+        sc.op(OP_LAST, 8)
+    # The index at 0 of a ring shrunk to one slot reads slot 0.
+    sc.op(OP_POKE, 8, F_SLOTS, 1)
+    sc.op(OP_POKE, 8, F_CUR, 0)
+    sc.op(OP_LAST, 8)
+    sc.op(OP_DEL, 8, 1)
 
     # -- the destructor ---------------------------------------------------
     sc.tag("delete")
@@ -328,6 +406,7 @@ def script():
     sc.op(OP_PDUMP, 1)
     sc.op(OP_PJUNK, 2)
     sc.op(OP_PNEW, 2, 1, 2)
+    sc.op(OP_PDUMP, 2)
     sc.prec(2, 1.0, 0.5)
     sc.prec(2, 3.0, 0.25)
 
@@ -357,9 +436,9 @@ class Model(object):
     def __init__(self, sc):
         self.sc = sc
         self.out = []
-        e = self.e = Emu(ieee=True, eediv=True)
+        e = self.e = retail_model.RetailEmu(ieee=True, eediv=True)
         e.stub_bware()
-        self.fn = {k: e.addr_of(v) for k, v in SYM.items()}
+        self.fn = dict(SYM)
         self.heap = []                  # (addr, span, label)
         self.stubs()
 
@@ -371,12 +450,12 @@ class Model(object):
         if a == 0:
             return "null"
         for i in range(NAVG):
-            if a == AVG + 24 * i:
+            if a == AVG + AVG_SIZE * i:
                 return "a%d" % i
         for i in range(NPID):
-            if a == PID + 56 * i:
+            if a == PID + PID_SIZE * i:
                 return "p%d" % i
-            if a == PID + 56 * i + 24:
+            if a == PID + PID_SIZE * i + AVG_SIZE:
                 return "p%d.d" % i
         for base, span, name in self.heap:
             if base <= a < base + span:
@@ -407,19 +486,19 @@ class Model(object):
         def free(em):
             self.emit("  free %s" % self.label(arg(0)))
 
-        e.stub("bMalloc__FiPCcii", malloc)
-        e.stub("__builtin_delete", free)
-        e.stub("bFree__FPv", free)
+        e.stub(0x002577c0, malloc)         # bMalloc
+        e.stub(0x00114e98, free)           # __builtin_delete
+        e.stub(0x00257850, free)           # bFree
 
     def dump(self, name, a):
         e = self.e
-        n = s32(e.u32(a))
+        n = e.u8(a)
         self.emit("%s slots %d cur %d n %d total %08x avg %08x data %s"
-                  % (name, n, s32(e.u32(a + 4)), s32(e.u32(a + 8)),
-                     e.u32(a + 12), e.u32(a + 16),
-                     self.label(e.u32(a + 20))))
+                  % (name, n, e.u8(a + 1), e.u8(a + 2),
+                     e.u32(a + 4), e.u32(a + 8),
+                     self.label(e.u32(a + 12))))
         k = min(n + 1, MAX_DUMP)
-        d = e.u32(a + 20)
+        d = e.u32(a + 12)
         for i in range(0, k, 8):
             self.emit("  d%d %s" % (i, " ".join(
                 "%08x" % e.u32(d + 4 * j) for j in range(i, min(i + 8, k)))))
@@ -427,12 +506,11 @@ class Model(object):
     def junk(self, a, seed):
         e = self.e
         u = 0x7f000000 | seed
-        e.put32(a, 0x1111 + seed)
-        e.put32(a + 4, 0x2222 + seed)
-        e.put32(a + 8, 0x3333 + seed)
-        e.put32(a + 12, u)
-        e.put32(a + 16, u ^ 0x00400000)
-        e.put32(a + 20, 0)
+        e.write(a, bytes([(0x11 + seed) & 0xff, (0x22 + seed) & 0xff,
+                          (0x33 + seed) & 0xff]))
+        e.put32(a + 4, u)
+        e.put32(a + 8, u ^ 0x00400000)
+        e.put32(a + 12, 0)
 
     def run(self):
         e, fn = self.e, self.fn
@@ -442,57 +520,64 @@ class Model(object):
             if code == OP_TAG:
                 self.emit("[%s]" % tags[a[0]])
             elif code == OP_NEW:
-                r = e.call(fn["ctor"], AVG + 24 * a[0], a[1])
+                r = e.call(fn["ctor"], AVG + AVG_SIZE * a[0], a[1])
                 self.emit("new a%d %d -> %s" % (a[0], s32(a[1]),
                                                 self.label(r)))
             elif code == OP_DEL:
                 self.emit("del a%d %d" % (a[0], a[1]))
-                e.call(fn["dtor"], AVG + 24 * a[0], a[1])
+                e.call(fn["dtor"], AVG + AVG_SIZE * a[0], a[1])
             elif code in (OP_REC, OP_RESET, OP_FLUSH):
                 name = {OP_REC: "rec", OP_RESET: "reset",
                         OP_FLUSH: "flush"}[code]
                 self.emit("%s a%d %08x" % (name, a[0], a[1]))
                 e.fpr[12] = a[1]
                 e.call(fn[{OP_REC: "record", OP_RESET: "reset",
-                           OP_FLUSH: "flush"}[code]], AVG + 24 * a[0])
+                           OP_FLUSH: "flush"}[code]], AVG + AVG_SIZE * a[0])
             elif code == OP_POKE:
-                e.put32(AVG + 24 * a[0] + FOFF[a[1]], a[2])
+                p = AVG + AVG_SIZE * a[0] + FOFF[a[1]]
+                if a[1] in F_BYTE:
+                    e.write(p, bytes([a[2] & 0xff]))
+                else:
+                    e.put32(p, a[2])
             elif code == OP_DPOKE:
-                d = e.u32(AVG + 24 * a[0] + 20)
+                d = e.u32(AVG + AVG_SIZE * a[0] + 12)
                 e.put32(d + 4 * a[1], a[2])
             elif code == OP_DUMP:
-                p = AVG + 24 * a[0]
+                p = AVG + AVG_SIZE * a[0]
                 self.dump("a%d" % a[0], p)
                 # GetValue and GetTotal are inline: the loads.
                 self.emit("value %08x total %08x"
-                          % (e.u32(p + 16), e.u32(p + 12)))
+                          % (e.u32(p + 8), e.u32(p + 4)))
+            elif code == OP_LAST:
+                e.call(fn["last"], AVG + AVG_SIZE * a[0])
+                self.emit("last a%d -> %08x" % (a[0], e.fpr[0] & M32))
             elif code == OP_PNEW:
-                # Inline: PsychoDriver's copy, 0x001376cc..0x001376f8.
-                p = PID + 56 * a[0]
+                # Inline: PsychoDriver's copy, 0x00139808..0x00139834.
+                p = PID + PID_SIZE * a[0]
                 e.call(fn["ctor"], p, a[1])
-                e.call(fn["ctor"], p + 24, a[2])
-                e.put32(p + 48, 0)
-                e.put32(p + 52, 0)
+                e.call(fn["ctor"], p + AVG_SIZE, a[2])
+                e.put32(p + 32, 0)
+                e.put32(p + 36, 0)
                 self.emit("pnew p%d %d %d -> %s"
                           % (a[0], s32(a[1]), s32(a[2]), self.label(p)))
             elif code == OP_PDEL:
                 self.emit("pdel p%d %d" % (a[0], a[1]))
-                e.call(fn["pdtor"], PID + 56 * a[0], a[1])
+                e.call(fn["pdtor"], PID + PID_SIZE * a[0], a[1])
             elif code == OP_PREC:
                 self.emit("prec p%d %08x %08x" % (a[0], a[1], a[2]))
                 e.fpr[12] = a[1]
                 e.fpr[13] = a[2]
-                e.call(fn["precord"], PID + 56 * a[0])
+                e.call(fn["precord"], PID + PID_SIZE * a[0])
             elif code == OP_PRESET:
                 self.emit("preset p%d %08x" % (a[0], a[1]))
                 e.fpr[12] = a[1]
-                e.call(fn["preset"], PID + 56 * a[0])
+                e.call(fn["preset"], PID + PID_SIZE * a[0])
             elif code == OP_PDUMP:
-                p = PID + 56 * a[0]
+                p = PID + PID_SIZE * a[0]
                 self.emit("p%d err %08x prev %08x"
-                          % (a[0], e.u32(p + 48), e.u32(p + 52)))
+                          % (a[0], e.u32(p + 32), e.u32(p + 36)))
                 self.dump("p%d.i" % a[0], p)
-                self.dump("p%d.d" % a[0], p + 24)
+                self.dump("p%d.d" % a[0], p + AVG_SIZE)
             elif code == OP_LINIT:
                 for k in range(4):
                     e.fpr[12 + k] = a[k]
@@ -505,14 +590,14 @@ class Model(object):
                 e.call(fn["lget"], LIN)
                 self.emit("lget %08x -> %08x" % (a[0], e.fpr[0] & M32))
             elif code == OP_JUNK:
-                self.junk(AVG + 24 * a[0], a[0])
+                self.junk(AVG + AVG_SIZE * a[0], a[0])
             elif code == OP_PJUNK:
-                p = PID + 56 * a[0]
+                p = PID + PID_SIZE * a[0]
                 u = 0x7e000000 | a[0]
                 self.junk(p, 16 + a[0])
-                self.junk(p + 24, 32 + a[0])
-                e.put32(p + 48, u)
-                e.put32(p + 52, u ^ 0x00200000)
+                self.junk(p + AVG_SIZE, 32 + a[0])
+                e.put32(p + 32, u)
+                e.put32(p + 36, u ^ 0x00200000)
             else:
                 raise ValueError("op %d" % code)
         return self.out
@@ -556,17 +641,21 @@ MUTATIONS = [
     ("ctor-samples", AC, "    a->nSamples     = 0;\n", ""),
     ("ctor-total", AC, "    a->fTotal       = 0.0f;\n", ""),
     ("ctor-average", AC, "    a->fAverage     = 0.0f;\n", ""),
-    ("ctor-slots", AC, "    a->nSlots       = slots;",
-     "    a->nSlots       = slots + 1;"),
+    ("ctor-slots", AC, "    a->nSlots       = (uint8_t)slots;",
+     "    a->nSlots       = (uint8_t)(slots + 1);"),
+    ("ctor-slots-byte", AC, "    a->nSlots       = (uint8_t)slots;",
+     "    a->nSlots       = (uint8_t)(slots > 255 ? 255 : slots);"),
     ("ctor-size", AC, "(uint32_t)slots << 2", "(uint32_t)slots << 3"),
+    ("ctor-size-byte", AC, "int32_t size = (int32_t)((uint32_t)slots << 2);",
+     "int32_t size = (int32_t)((uint32_t)(uint8_t)slots << 2);"),
     ("ctor-name", AC, '"..\\\\indep\\\\src\\\\table.cpp"',
      '"..\\\\indep\\\\src\\\\average.cpp"'),
-    ("ctor-line", AC, "table.cpp\", 120, 16", "table.cpp\", 121, 16"),
-    ("ctor-pool", AC, "table.cpp\", 120, 16", "table.cpp\", 120, 0"),
+    ("ctor-line", AC, "table.cpp\", 167, 16", "table.cpp\", 120, 16"),
+    ("ctor-pool", AC, "table.cpp\", 167, 16", "table.cpp\", 167, 0"),
     ("ctor-clear", AC, "    memset(a->pData, 0, (size_t)(uint32_t)size);\n",
      ""),
-    ("ctor-return", AC, "    a->pData = bMalloc(size, \"..\\\\indep\\\\src\\\\table.cpp\", 120, 16);\n    memset(a->pData, 0, (size_t)(uint32_t)size);\n    return a;",
-     "    a->pData = bMalloc(size, \"..\\\\indep\\\\src\\\\table.cpp\", 120, 16);\n    memset(a->pData, 0, (size_t)(uint32_t)size);\n    return NULL;"),
+    ("ctor-return", AC, "    memset(a->pData, 0, (size_t)(uint32_t)size);\n    return a;",
+     "    memset(a->pData, 0, (size_t)(uint32_t)size);\n    return NULL;"),
 
     # -- the destructor -----------------------------------------------------
     ("dtor-data", AC, "    bFree(a->pData);\n    if (flags & 1)\n        bFree(a);",
@@ -575,29 +664,36 @@ MUTATIONS = [
      "    bFree(a->pData);\n    if (flags & 2)"),
 
     # -- Record -------------------------------------------------------------
-    ("rec-count-test", AC, "    if (n < slots) {", "    if (n <= slots) {"),
-    ("rec-count-store", AC, "        a->nSamples = n;\n", ""),
-    ("rec-count-step", AC, "        n = n + 1;", "        n = n + 2;"),
+    ("rec-count-test", AC, "    if (a->nSamples < a->nSlots)",
+     "    if (a->nSamples <= a->nSlots)"),
+    ("rec-count-store", AC,
+     "        a->nSamples = (uint8_t)(a->nSamples + 1);\n", ""),
+    ("rec-count-step", AC, "        a->nSamples = (uint8_t)(a->nSamples + 1);",
+     "        a->nSamples = (uint8_t)(a->nSamples + 2);"),
+    ("rec-count-signed", AC, "    if (a->nSamples < a->nSlots)",
+     "    if ((int8_t)a->nSamples < (int8_t)a->nSlots)"),
     ("rec-add", AC, "    a->fTotal = a->fTotal + v;", "    a->fTotal = a->fTotal;"),
     ("rec-order", AC,
-     "    a->fTotal = a->fTotal + v;\n    cur  = a->nCurrentSlot;\n    slot = &a->pData[cur];\n    a->nCurrentSlot = cur + 1;\n    a->fTotal = a->fTotal - *slot;",
-     "    cur  = a->nCurrentSlot;\n    slot = &a->pData[cur];\n    a->nCurrentSlot = cur + 1;\n    a->fTotal = a->fTotal + (v - *slot);"),
+     "    a->fTotal = a->fTotal + v;\n    cur  = a->nCurrentSlot;\n    slot = &a->pData[cur];\n    a->fTotal = a->fTotal - *slot;",
+     "    cur  = a->nCurrentSlot;\n    slot = &a->pData[cur];\n    a->fTotal = a->fTotal + (v - *slot);"),
     ("rec-sub", AC, "    a->fTotal = a->fTotal - *slot;", ""),
     ("rec-store", AC, "    *slot = v;\n", ""),
-    ("rec-step", AC, "    a->nCurrentSlot = cur + 1;",
-     "    a->nCurrentSlot = cur;"),
-    ("rec-divisor", AC, "ee_div(a->fTotal, (float)n)",
-     "ee_div(a->fTotal, (float)slots)"),
-    ("rec-plain-div", AC, "ee_div(a->fTotal, (float)n)",
-     "(a->fTotal / (float)n)"),
-    ("rec-wrap-test", AC, "    if (!(cur + 1 < slots))",
-     "    if (!(cur < slots))"),
-    ("rec-wrap-le", AC, "    if (!(cur + 1 < slots))",
-     "    if (!(cur + 1 <= slots))"),
+    ("rec-step", AC, "    a->nCurrentSlot = (uint8_t)(cur + 1);\n    if",
+     "    a->nCurrentSlot = (uint8_t)cur;\n    if"),
+    ("rec-divisor", AC, "ee_div(a->fTotal, (float)a->nSamples)",
+     "ee_div(a->fTotal, (float)a->nSlots)"),
+    ("rec-plain-div", AC, "ee_div(a->fTotal, (float)a->nSamples)",
+     "(a->fTotal / (float)a->nSamples)"),
+    ("rec-wrap-test", AC, "    if (!((uint8_t)(cur + 1) < a->nSlots))",
+     "    if (!((uint8_t)cur < a->nSlots))"),
+    ("rec-wrap-le", AC, "    if (!((uint8_t)(cur + 1) < a->nSlots))",
+     "    if (!((uint8_t)(cur + 1) <= a->nSlots))"),
+    ("rec-wrap-byte", AC, "    if (!((uint8_t)(cur + 1) < a->nSlots))",
+     "    if (!(cur + 1 < a->nSlots))"),
     ("rec-wrap-store", AC,
-     "    if (!(cur + 1 < slots))\n        a->nCurrentSlot = 0;\n", ""),
-    ("rec-slots-late", AC, "    int32_t slots = a->nSlots;\n    int32_t n     = a->nSamples;",
-     "    int32_t slots = a->nSamples;\n    int32_t n     = a->nSamples;"),
+     "    if (!((uint8_t)(cur + 1) < a->nSlots))\n        a->nCurrentSlot = 0;\n", ""),
+    ("rec-slots-late", AC, "    if (!((uint8_t)(cur + 1) < a->nSlots))",
+     "    if (!((uint8_t)(cur + 1) < a->nSamples))"),
 
     # -- Reset --------------------------------------------------------------
     ("reset-fill", AC,
@@ -634,6 +730,17 @@ MUTATIONS = [
     ("get-value", AC, "    return a->fAverage;", "    return a->fTotal;"),
     ("get-total", AC, "    return a->fTotal;\n}\n\n// ----",
      "    return a->fAverage;\n}\n\n// ----"),
+
+    # -- GetLastValue -------------------------------------------------------
+    ("last-empty", AC, "    if (a->nSamples == 0)\n        return 0.0f;\n", ""),
+    ("last-empty-value", AC, "        return 0.0f;\n    i = ",
+     "        return a->pData[0];\n    i = "),
+    ("last-index", AC, "    i = (int32_t)a->nCurrentSlot - 1;",
+     "    i = (int32_t)a->nCurrentSlot;"),
+    ("last-wrap", AC, "    if (i < 0)\n        i = (int32_t)a->nSlots - 1;",
+     "    if (i <= 0)\n        i = (int32_t)a->nSlots - 1;"),
+    ("last-wrap-to", AC, "        i = (int32_t)a->nSlots - 1;",
+     "        i = 0;"),
 
     # -- PidError -----------------------------------------------------------
     ("pinit-integral", AC, "    average_init(&p->aIntegral, integralSlots);",
@@ -681,7 +788,11 @@ MUTATIONS = [
     ("lget", AC, "    return l->m * x + l->b;", "    return l->m * (x + l->b);"),
 ]
 
-EQUIVALENT = {}
+EQUIVALENT = {
+    # The step and the test differ only at an index of 255, where the
+    # step's byte is 0: kept under the test, wrapped to 0 without it.
+    "rec-wrap-byte": "the stored step is already 0 when the two differ",
+}
 
 for _name in EQUIVALENT:
     assert any(_m[0] == _name for _m in MUTATIONS), _name

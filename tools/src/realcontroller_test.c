@@ -336,6 +336,10 @@ static void *malloc_hook(int size, const char *name, int flags, int pool)
         shown = 40;
     else if (strcmp(name, "..\\indep\\src\\quickspline.cpp") == 0)
         shown = size - QS_SLACK_BYTES;
+    // The model is the demo's image, whose Average names line 120 of
+    // table.cpp; the port's is retail's, line 167.
+    if (strcmp(name, "..\\indep\\src\\table.cpp") == 0 && flags == 167)
+        flags = 120;
     if (nblocks == MAX_BLOCKS) {
         fprintf(stderr, "out of blocks\n");
         exit(2);

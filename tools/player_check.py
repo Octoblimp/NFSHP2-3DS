@@ -1317,7 +1317,7 @@ MUTATIONS = [
     M("glue_kept", PIN, "    p->nGlueCount = 0;\n", ""),
     # the Average, the jump cam's two and the HUD animators
     M("avg_size", PIN, "bMalloc((int)sizeof(Average), PLAYER_CPP, 520, 16);",
-      "bMalloc(24, PLAYER_CPP, 520, 16);"),
+      "bMalloc(20, PLAYER_CPP, 520, 16);"),
     M("avg_line", PIN, "PLAYER_CPP, 520, 16);", "PLAYER_CPP, 521, 16);"),
     M("avg_slots", PIN, "average_init((Average *)mem, 10);", "average_init((Average *)mem, 9);"),
     M("max_speed_kept", PIN, "    p->fMaxSpeedRatio = 0.0f;\n", ""),

@@ -17,12 +17,12 @@
 enum {
     OP_TAG, OP_NEW, OP_DEL, OP_REC, OP_RESET, OP_FLUSH, OP_POKE, OP_DPOKE,
     OP_DUMP, OP_PNEW, OP_PDEL, OP_PREC, OP_PRESET, OP_PDUMP, OP_LINIT,
-    OP_LGET, OP_JUNK, OP_PJUNK
+    OP_LGET, OP_JUNK, OP_PJUNK, OP_LAST
 };
 
 enum { F_SLOTS, F_CUR, F_N, F_TOTAL, F_AVG };
 
-#define NAVG      8
+#define NAVG      10
 #define NPID      4
 #define SLACK     16        // 0xcd bytes past every block, both sides
 #define MAX_HEAP  1024
@@ -196,9 +196,9 @@ static void junk(Average *a, int32_t seed)
     uint32_t u = 0x7f000000u | (uint32_t)seed;
     float    f;
 
-    a->nSlots = 0x1111 + seed;
-    a->nCurrentSlot = 0x2222 + seed;
-    a->nSamples = 0x3333 + seed;
+    a->nSlots = (uint8_t)(0x11 + seed);
+    a->nCurrentSlot = (uint8_t)(0x22 + seed);
+    a->nSamples = (uint8_t)(0x33 + seed);
     memcpy(&f, &u, 4);
     a->fTotal = f;
     u ^= 0x00400000u;
@@ -287,9 +287,9 @@ int main(int argc, char **argv)
             int32_t slot = next(), f = next(), v = next();
             Average *a = &avgs[slot];
             switch (f) {
-            case F_SLOTS: a->nSlots = v; break;
-            case F_CUR:   a->nCurrentSlot = v; break;
-            case F_N:     a->nSamples = v; break;
+            case F_SLOTS: a->nSlots = (uint8_t)v; break;
+            case F_CUR:   a->nCurrentSlot = (uint8_t)v; break;
+            case F_N:     a->nSamples = (uint8_t)v; break;
             case F_TOTAL: memcpy(&a->fTotal, &v, 4); break;
             case F_AVG:   memcpy(&a->fAverage, &v, 4); break;
             }
@@ -308,6 +308,12 @@ int main(int argc, char **argv)
             printf("value %08x total %08x\n",
                    (unsigned)fbits(average_get_value(&avgs[slot])),
                    (unsigned)fbits(average_get_total(&avgs[slot])));
+            break;
+        }
+        case OP_LAST: {
+            int32_t slot = next();
+            printf("last a%d -> %08x\n", slot,
+                   (unsigned)fbits(average_get_last_value(&avgs[slot])));
             break;
         }
         case OP_PNEW: {

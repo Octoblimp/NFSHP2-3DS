@@ -15289,6 +15289,32 @@ Next is 11e: AICarController, retail's 0x00190140 to about 0x00194058,
 some 16 KB in about 50 functions. It wants laying out in slices by size
 first. CONTINUE.md has the start.
 
+### Step 11e-0: Average at retail's size
+
+AICarController keeps two Averages (at 580 and 692), and the port's was
+still the demo's, so it came first.
+- Retail's Average is 16 bytes: nSlots, nCurrentSlot and nSamples are
+  bytes at 0, 1 and 2, then the total, the mean and the buffer at 4, 8
+  and 12. The demo's was 24, with words. PidError shrank with it, from
+  56 bytes to 40.
+- The constructor keeps the slot count's low byte but sizes the buffer
+  by the whole count: 300 slots keep 44, 256 keep none. Record stores
+  the index's step as a byte, so at 255 it is 0 before the wrap's test.
+- The buffer names `table.cpp` line 167 (the demo's 120).
+  realcontroller_check still runs the demo's image, so its harness shows
+  167 as 120.
+- GetLastValue (0x0018fdf8) is new in retail and nothing calls it: 0
+  before the first sample, else the slot before the index.
+- average_check runs retail's image now (RetailEmu, retail addresses):
+  552 ops, 972 lines, 0 differ. Its 73 mutations: 72 caught, and
+  rec-wrap-byte equivalent (the two differ only at an index of 255,
+  where the step's byte is 0 either way).
+- player_check: on the host sizeof(Average) is 24 now, which made its
+  avg_size mutation (a hard 24) equivalent; it is 20 now. 3659 ops, 0
+  differ, and the Average's four mutations are caught.
+
+`docs/formats/average.md` has the detail. The CIA builds.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the
