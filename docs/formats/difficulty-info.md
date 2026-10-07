@@ -120,9 +120,24 @@ DecideBoostFactor reads the two position ratio statics.
 
 ## In the port
 
-Only `TwoPlayerCatchup` has a reader in the port: Car's
-`CalculateNewCatchupMultipliers` (`car.md`). The AI's fields are laid out
-so their offsets are checked, and are for the AI's port to read.
+These readers are in the port, each checked against retail:
+- Car's `CalculateNewCatchupMultipliers` (`car.md`) reads
+  `TwoPlayerCatchup`.
+- FredRace's race set-up reads `AINonExplicitMode`'s `BoostScale` and
+  `SkillLevelDistribution`.
+- AICarController (`ai-car-controller.md`) reads the rest:
+  - SignPostDecision reads `TakeSignChance` (11e-2).
+  - DecideBoostFactor reads `BoostCalculationFrequency`, the skills'
+    `SlowFactor` and the two position-ratio tables (11e-3).
+  - CalculateDistanceAndPositionBoost reads `MaxDistanceForBoost`, the
+    two distance graphs and the two position-boost rows (11e-3).
+
+Every other AI field is laid out so its offset is checked. These are
+still to come:
+- ExecuteCurrentAction's `RoutePointChangeFrequency` and
+  `RoutePointVariance` (11e-4);
+- AIDriver's ShouldWeAvoidThisCar, reading `CollisionAvoidanceChance`
+  (11f).
 
 ## Checking it
 

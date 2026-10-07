@@ -32,7 +32,7 @@ Step 11e ports it in slices:
 | 11e-4 | the honking and ExecuteCurrentAction |
 | 11e-5 | Think |
 
-This file has 11e-1 and 11e-2. Two slots still wait: DoSnapshot waits on
+This file has 11e-1 to 11e-3. Two slots still wait: DoSnapshot waits on
 ReplaySnapshot, and Think is 11e-5's.
 
 ## The record, 720 bytes
@@ -438,6 +438,194 @@ along its route and takes the signs it passes. Its argument isn't read.
    A sign not taken has its GetNewRoute asked for and the answer dropped.
 5. At the end with no sign taken, it calls FindWhereIAm.
 
+## The belt, the glue and the boost
+
+Retail calls only some of these. Think (11e-5) asks WeNeedTheBelt and
+WeCanHaveTheBelt. ExecuteCurrentAction (11e-4) calls DecideBoostFactor,
+which calls CalculateDistanceAndPositionBoost. WeHaveTheGlue is called
+only by the other glue functions.
+
+WeHaveTheBelt, WeNeedTheGlue, WeCanHaveTheGlue, GlueOn, GlueOff and
+GetGlueSpeed have no callers at all: no `jal` reaches them, and no word
+in the image holds their addresses. So the glue never runs in the game.
+The port has all eleven, checked, for whoever calls them.
+
+The unit's globals:
+
+| Global | What |
+|--------|------|
+| gp-20344 | bBeltMover, 1 |
+| gp-20336 | the glue's Graph: the two points at 0x00310108, (-20, 0.1) and (20, -0.1), built by `_GLOBAL_$I$sRankHeadings` (0x00193f00) |
+| gp-20132 | the catchup's off switch (`CarControllerDisableCatchup`), 0 |
+| gp-20296 | nLastGlueReason, the last no WeCanHaveTheGlue gave |
+
+### The belt
+
+**WeHaveTheBelt** (0x00190af8) answers whether the car's TheMovementMode
+is the belt's. **WeNeedTheBelt** (0x00190b10) answers bBeltMover, and
+doesn't read the controller.
+
+**WeCanHaveTheBelt** (0x00190b20) answers 1 unless one of these holds,
+tested in this order:
+- the drive target has fewer than 3 points;
+- the race coordinator is in AIDemoMode (8);
+- OffBeltTimer or RealPhysicsTimer is running;
+- ForwardSpeed is under 5 m/s, or no wheel touches the ground;
+- there is no action, or the action is PullOver, GetUnstuck,
+  AccidentRecovery, AvoidRoadBlock or IJustGotHit;
+- the driver is careful (skill -2);
+- a player is within 120 m (World::GetDistanceToClosestPlayer);
+- the race clock is under 30 s.
+
+The race clock is the race's RaceTime, read as a signed word, times
+0.00025.
+
+### The glue
+
+The glue holds an AI car beside a player's at about the player's speed.
+
+**WeHaveTheGlue** (0x00190c78) answers whether pGlueCar is set.
+**WeNeedTheGlue** (0x00190c88) answers 0.
+
+**WeCanHaveTheGlue(p)** (0x00190c90) answers whether the car may glue
+itself to player `p`'s car, or keep the glue it has. With the glue on, the
+player asked about is the glued car's, not `p`. Each no stores its reason
+in nLastGlueReason (4 is no one's):
+
+| Reason | No because |
+|-------:|------------|
+| 1 | there is no action |
+| 2 | the action's Type is PullOver (6) or later, compared signed |
+| 3 | the player's speed ratio (Player::GetSpeedRatio, the mean of pAverageSpeedRatio) is under 0.94 |
+| 5 | the cars are too far apart |
+| 6 | their speeds differ too much |
+| 7 | their headings differ too much |
+| 8 | GlueOnTimer has run out |
+| 9 | GlueOffTimer is still running |
+| 10 | the player is ahead of me in the race |
+
+Reasons 1 to 3 are tested first. Then:
+- the distance is between the cars' positions;
+- the speed difference is `|their VelocityMagnitude - mine|`;
+- the heading is the dot of the two velocities, each normalised by the
+  VU0. `vrsqrt` divides by zero for a car standing still, which the EE
+  answers with FLT_MAX, so that car's direction is 0.
+
+With the glue on:
+- **GlueOnTimer run out:** GlueOffTimer is set to 20 s, and the answer is
+  no (8).
+- Otherwise it is held within 60 m (5), 10 m/s (6) and a dot of 0.5 (7).
+
+Without the glue:
+- **GlueOffTimer still running:** no (9).
+- Otherwise it is taken within 30 m (5), 6 m/s (6) and a dot of 0.7 (7),
+  and only when the player isn't ahead (10): its car's RacePosition is no
+  smaller than mine.
+
+Each limit itself passes: the tests are `60 < d` and `dot < 0.5`, so
+exactly 60 m, or a dot of exactly 0.5, holds.
+
+**GlueOn(p)** (0x00190f38) does nothing with the glue already on.
+Otherwise it:
+- counts the player's nGlueCount (192) up;
+- sets GlueOnTimer to 7 s;
+- glues on to the player's car;
+- sets fCurrentGlueTimeBias to 0.2.
+
+Retail then asks the race for both cars' RacingCars and reads neither.
+
+**GlueOff** (0x00190fb8) does nothing with the glue off. Otherwise it
+clears pGlueCar and counts the glued car's player's nGlueCount down. It
+leaves both timers alone.
+
+**GetGlueSpeed** (0x00190ff8) is the speed to drive at, glued. When
+either car has no RacingCar, it answers the driver's GetDesiredSpeed
+(slot 136). Otherwise:
+
+1. **The gap.** `gap` is the distance between the cars, negative when the
+   glued car is ahead in the race.
+2. **The time bias.** `gap -= fCurrentGlueTimeBias x their speed`.
+3. **The factor.** `f = (graph(gap) + 1) + (my speed - theirs) x -0.05 /
+   (gap x (gap x 0.01) + 1)`. `graph` is the glue Graph: +0.1 with the
+   glued car 20 m ahead, -0.1 with it 20 m behind, flat past the ends.
+4. **The answer.** `f` is clamped to 0.9-1.1, and the answer is `f` times
+   the glued car's speed.
+
+### The boost
+
+**CalculateDistanceAndPositionBoost(me, them, &dist, &pos)** (0x00192c78)
+works out two boosts from TheDifficultyInfo (`difficulty-info.md`), both
+zeroed first.
+
+1. With the race parameters' Boost off, it stops there.
+2. **The laps.** `laps` is my CurrentLapNumberExact less theirs. In a cop
+   race (BeACop, or SkipFE with SkipFEBeACop) the laps are brought within
+   half a lap: `laps - floor(laps + 0.5)`. The floor is `cvt.w.s`, less
+   one when that rounded up.
+3. **The distance.** `ahead` is the track's length times `laps`. Past
+   MaxDistanceForBoost (988, as `!(ahead <= max)`) both boosts stay 0.
+4. **The distance boost.** Each of the two seven-point Graphs (the low
+   skill's at 0 and the high's at 56) gives its value at `ahead`. A Linear
+   from skill 0 to 9 between those two gives `dist` at the driver's skill (a
+   negative skill as 0).
+5. **The speed term.** `dist` gains `(my speed - theirs) x -0.005 /
+   (ahead x (ahead x 0.01) + 1)`, clamped to within 0.05 either way.
+6. **The position boost.** `diff` is their RacePosition less mine. The
+   index is `diff + 7` for `diff` of 0 or more, else `diff + 8`, so 0 to 7
+   for 8 to 1 behind and 7 to 15 for level to 8 ahead. A Linear from 0 to
+   9 between the two position-boost rows' entries (112 and 176) gives
+   `pos` at the clamped skill.
+
+**DecideBoostFactor** (0x001928f0) sets the car's BoostFactor (992). It
+does nothing at all for a car with no RacingCar, with bBoostAllowed (640)
+clear, or with a player.
+
+1. **What it reads first.** `allowed` is whether the action has
+   AllowedToUseBoost set (no action, no boost). `early` is whether the race
+   clock is under 30 s.
+2. **The frequency.** It returns unless BoostCalculationFrequency (984) is
+   under `(WorldTimer - LastBoostCalculationTime)` in seconds. The
+   difference is a signed word.
+3. LastBoostCalculationTime becomes WorldTimer, and pCatchupPlayer is
+   cleared.
+4. **The catchup.** It runs only with the catchup on, outside AIDemoMode
+   and with NumPlayerCars over 0:
+   - With `allowed` clear, BoostFactor is set to 1 and it returns.
+   - In the first 30 s the factor stays 1.
+   - After that, with one player, that player is the catchup
+     player, and the boosts are taken against its RacingCar.
+   - With two, the target is picked below.
+   - In both cases the factor is `(dist + 1) + pos x BoostScale[the
+     player's PlayerNumber]`. With no players, or more than two, it is 1.
+5. **The speed ratio.** With `allowed` and a catchup player, the factor is
+   multiplied by `max((ratio - 1) x t + 1, slow)`:
+   - `slow` is the clamped skill's SlowFactor (368 + 28 x skill + 20).
+   - The factor changes only when Player::CatchupAllowed(slow) passes:
+     the player's speed-ratio Average is full (as many samples as slots)
+     and `slow` is under its fMaxSpeedRatio (168).
+   - `ratio` is the player's speed ratio.
+   - `t` is a two-entry Table from skill 0 to 9, at the skill. Its row is
+     PositionRatioOverOne's (240) for a ratio of 1 or more, else
+     PositionRatioUnderOne's (304), by the player's RacePosition, place 1
+     first. Retail adds `232 + 8 x place` or `296 + 8 x place`, so place 0
+     reads the row before each table.
+6. BoostFactor is set to the factor.
+
+**The two-player target.**
+1. The leader is the player with the smaller RacePosition, player 0 when
+   level; the other is the trailer.
+2. `n` starts at NumAICars / 2.
+3. It is counted up once if the leader's place is no further back than
+   `n`, and once more if the trailer's place is no further back than the
+   new `n`.
+4. An AI car placed past `n` catches up to the trailer; the rest catch up
+   to the leader.
+
+The pCatchupPlayer and BoostScale are that player's.
+
+PrintBoostCalculationForAllCars and PrintBoostCalculationForThisCar
+(gp-20128, gp-20124) are read, but their prints are gone from retail.
+
 ## Checking it
 
     python tools/aicarcontroller_check.py
@@ -461,7 +649,10 @@ the table. Everything beneath those methods runs as shipped too:
 - GetCarAhead and HighlightDrivingLine;
 - from 11e-2, SignPostDecision wherever it is reached: the harness points
   drivingchoice.h's seam at the port's, as main.c does, and the model
-  reaches retail's through DrivingChoice::AdvancePoint.
+  reaches retail's through DrivingChoice::AdvancePoint;
+- from 11e-3, the Graph, Linear and Table, World::GetDistanceToClosestPlayer,
+  Race::GetRacingCar and the coordinator's state. The model builds the
+  glue's Graph with the image's own start-up code.
 
 The stand-ins each print a line:
 
@@ -483,6 +674,15 @@ The stand-ins each print a line:
 - World::Random (0x0014e548), answering the script's queue, then 0.
 - GetTrackInfo (0x00153420), answering a TrackInfo of the script's. Its
   SignpostGracePeriod is -1 until the script sets it.
+- The test driver table's GetDesiredSpeed (136), answering the script's
+  speed for the car.
+
+The 11e-3 ops fill the rest as memory: the players and their speed-ratio
+Averages, the RacingCars, the race parameters' fields, TheDifficultyInfo
+and the World's PlayerPositions. WeCanHaveTheGlue's two `vrsqrt` divide
+by zero for a car standing still. drivingchoice_check's Model now keeps
+the divides it allows in a class attribute, `OK_DIVS`, which this
+checker's Model extends with those two (`GLUE_DIVS`).
 
 The scenarios:
 
@@ -532,10 +732,44 @@ The scenarios:
 - **s_sticky's edge (12):** the look-ahead at its 250 m clamp and the first
   sign just inside it, so a clamp of 249 stops short.
 
-The check gives 378 scenarios, 67592 ops, 40802 lines, 0 differ.
+11e-3's, from their own random seed. Each round of the first three fails
+at most one test, chosen at random, with every other test passing
+(`gate_picker`). A fifth of the rounds instead pass each test on their
+own.
 
-Its mutation pass has 226 mutations: 217 caught and 9 equivalent. 11e-2's
-share is 100: 96 caught (sp-ret by crashing the harness) and 4 equivalent.
+- **s_belt (40):** WeCanHaveTheBelt's eleven tests. The speed is set at
+  5 m/s and an ulp under, the players at 120 m and an ulp either side, and
+  the race clock a tick either side of 30 s and negative. WeHaveTheBelt
+  runs over the modes, and WeNeedTheBelt over bBeltMover.
+- **s_glue (60):** WeCanHaveTheGlue, held and taken.
+  - The distance, speed gap and heading sit at their edges and just past.
+  - A heading is exact when both cars run along an axis at powers of two.
+    The player's car takes a unit vector whose x is the edge and whose
+    squares sum to 1, so the normalise leaves it.
+  - A speed gap is exact with one car's speed 0.
+  - Some cars stand still, and the action types run from -1 to 11.
+  - GlueOn and GlueOff run with the glue on and off, and GetGlueSpeed
+    with and without both RacingCars.
+- **s_boost (60):** DecideBoostFactor and
+  CalculateDistanceAndPositionBoost over eleven early outs.
+  - The race has one player or two.
+  - The frequency sits at its edge (2000 ticks for 0.5 s), with the timer
+    behind and ahead.
+  - The cop race's half-lap fold and the speed ratio's rows are covered.
+- **s_boost's catchup (30):** two players, with every early out passed and
+  MaxDistanceForBoost 1e9. NumAICars runs from 0 to 9 and every place is
+  drawn from 1 to 8, ties among them, so the split falls each side of
+  each car.
+
+The check gives 568 scenarios, 95996 ops, 75041 lines, 0 differ.
+
+Its mutation pass has 407 mutations: 394 caught and 13 equivalent.
+- 11e-2's share is 100: 96 caught (sp-ret by crashing the harness) and 4
+  equivalent.
+- 11e-3's is 181: 177 caught (5 by crashing the harness) and 4
+  equivalent.
+- ct-glue and ct-catchup carry a line of context, as GlueOff and
+  DecideBoostFactor repeat their lines.
 
 | Mutation | Why it's equivalent |
 |----------|---------------------|
@@ -546,6 +780,9 @@ share is 100: 96 caught (sp-ret by crashing the harness) and 4 equivalent.
 | dsd-clamp | `max(100, min(a, 250))` and `min(250, max(a, 100))` differ only for a NaN, which the EE doesn't have |
 | dsd-max-args | `max.s`'s two orders differ only for a NaN |
 | sp-relaxed, sp-again-relaxed | as gl-relax, for SignPostDecision's two GetNewDrivingLines |
+| wcb-race-le, dbf-early-le | the race clock is whole ticks, and none rounds to 30 s exactly: 120000 ticks is 30.000002 and 119999 is 29.99975 |
+| dbf-ratio-allowed | pCatchupPlayer is cleared before the catchup and set only past its `!allowed` return |
+| dbf-ratio-over | at a ratio of exactly 1 the row's value is multiplied by 0 |
 
 Some things the checker found along the way:
 
@@ -567,6 +804,14 @@ Some things the checker found along the way:
 - **No NaN.** mipsemu's EE FPU has no NaN or infinity: 0x7fc00000 is a
   huge number, so a NaN speed's look-ahead is 250 there, where an IEEE FPU
   gives a NaN.
+- **CatchupAllowed's argument.** Player::CatchupAllowed(f) (0x001811f8)
+  compares `f`, DecideBoostFactor's SlowFactor, against fMaxSpeedRatio.
+  The port's first try compared the speed ratio's mean.
+- **The glue is never called.** No `jal` reaches WeCanHaveTheGlue, GlueOn,
+  GlueOff or GetGlueSpeed, and no word in the image holds their addresses
+  (above).
+- **The action type is signed.** WeCanHaveTheGlue's PullOver test is
+  signed, so a type of -1 goes on to the speed ratio.
 
 Not scripted:
 
@@ -581,4 +826,7 @@ Not scripted:
 - DoStickyDecisions with no sign past the look-ahead (it loops for ever),
   or with a used decision's sign past the table;
 - DoStickyDecisions or FindSignpostIndex after SignPostDecision stored a
-  decision into nSignpostIndex with every slot used.
+  decision into nSignpostIndex with every slot used;
+- the glue with no player, or with the glued car's player gone (retail
+  reads through both);
+- GetGlueSpeed with the glue off (it reads pGlueCar's RacingCar).

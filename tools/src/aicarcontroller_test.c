@@ -1,5 +1,5 @@
 // Host harness for 3DS Files/source/aicarcontroller.c, the AI car
-// controller (steps 11e-1 and 11e-2). Runs the op script tools/aicarcontroller_check.py
+// controller (steps 11e-1 to 11e-3). Runs the op script tools/aicarcontroller_check.py
 // writes and prints the transcript it diffs against the retail image, run
 // in mipsemu over the same script.
 //
@@ -16,7 +16,9 @@
 // queue and GetTrackInfo a TrackInfo of the script's, each printing a line
 // as the checker's stubs do. drivingchoice_test.c's stand-in for the sign
 // decision gives way to the port's SignPostDecision, as main.c's seam
-// does.
+// does. For 11e-3 it has full players (player.c's PlayerPlayersByNumber
+// with them), each car's RacingCar, a race coordinator, playercam.c's
+// SkipFE pointer and the drivers' GetDesiredSpeed, answering the script.
 //
 // A float prints as its bits, every NaN as "nan", and a pointer by what it
 // points at. The ops and every line's format are the checker's.
@@ -24,7 +26,9 @@
 
 #include "average.h"
 #include "bmem.h"
+#include "configitems.h"
 #include "difficultyinfo.h"
+#include "playercam.h"
 #include "raceinit.h"
 
 // raceinit.c's, as it starts.
@@ -65,6 +69,21 @@ static TrackInfo tinfo;
 #define NRANDOM 16
 static float rq[NRANDOM];
 static int nrq, irq;
+
+// 11e-3's: each car's player and its speed ratio's Average, its RacingCar,
+// the race coordinator (its state the first word), SkipFE's word and what
+// each driver's GetDesiredSpeed answers.
+static struct Player plr[NCARS];
+static int plr_used[NCARS];
+static Average pavg[NCARS];
+static RacingCar rcars[NCARS];
+static uint32_t rcoord[4];
+static int skipfe;
+static float gds[NCARS];
+
+// player.c's and playercam.c's.
+struct Player *PlayerPlayersByNumber[2];
+const int *gPlayerCamSkipFE;
 
 // ------------------------------------------------------------ the stubs
 
@@ -160,6 +179,14 @@ TrackInfo *track_get_info(int i)
     return &tinfo;
 }
 
+static float fk_get_desired_speed(void *self)
+{
+    int k = driver_index(self);
+
+    printf("  gds %s\n", nm(&cars[k]));
+    return gds[k];
+}
+
 // ------------------------------------------------------------ the names
 
 static const char *ac_nm(const void *p, char *b)
@@ -198,6 +225,10 @@ static const char *ac_nm(const void *p, char *b)
     }
     if ((i = index_in(p, facts, sizeof facts[0], NFACTS)) >= 0) {
         sprintf(b, "fa%d", i);
+        return b;
+    }
+    if ((i = index_in(p, plr, sizeof plr[0], NCARS)) >= 0) {
+        sprintf(b, "P%d", i);
         return b;
     }
     return NULL;
@@ -239,6 +270,31 @@ static void ac_reset(void)
            sizeof TheDifficultyInfo.AISkillLevel);
     nrq = irq = 0;
     gAISignPostDecisionFn = aicarcontroller_sign_post_decision;
+    // 11e-3's: no players, RacingCars, catchup, SkipFE, race parameters,
+    // difficulty or player positions; the coordinator in state 0.
+    memset(plr, 0, sizeof plr);
+    memset(plr_used, 0, sizeof plr_used);
+    memset(pavg, 0, sizeof pavg);
+    memset(rcars, 0, sizeof rcars);
+    memset(rcoord, 0, sizeof rcoord);
+    memset(gds, 0, sizeof gds);
+    pRaceCoordinator = (RaceCoordinator *)(void *)rcoord;
+    bBeltMover = 1;
+    CarControllerDisableCatchup = 0;
+    nLastGlueReason = 0;
+    skipfe = 0;
+    gPlayerCamSkipFE = &skipfe;
+    SkipFEBeACop = 0;
+    PlayerPlayersByNumber[0] = NULL;
+    PlayerPlayersByNumber[1] = NULL;
+    TheRaceParameters.NumPlayerCars = 0;
+    TheRaceParameters.NumAICars = 0;
+    TheRaceParameters.BeACop = 0;
+    TheRaceParameters.Boost = 0;
+    TheRaceParameters.BoostScale[0] = 0.0f;
+    TheRaceParameters.BoostScale[1] = 0.0f;
+    memset(&TheDifficultyInfo, 0, sizeof TheDifficultyInfo);
+    memset(world.PlayerPositions, 0, sizeof world.PlayerPositions);
 }
 
 // ------------------------------------------------------------ the dumps
@@ -350,6 +406,28 @@ static void dump_signs(int k)
     printf("  S sticky");
     for (i = 0; i < AICC_NUM_STICKY_DECISIONS; i++)
         printf(" %08x", (unsigned)c->aStickyDecisions[i]);
+    printf("\n");
+}
+
+static struct Player *plr_ptr(const char *s)
+{
+    int k = atoi(s);
+
+    return k >= 0 ? &plr[k] : NULL;
+}
+
+static void dump_glue(int k)
+{
+    AICarController *c = &ctrls[k];
+    int i;
+
+    printf("  G glue %s on %08x off %08x bias %s reason %d n", nm(c->pGlueCar),
+           (unsigned)c->GlueOnTimer.PackedTime,
+           (unsigned)c->GlueOffTimer.PackedTime, fx(c->fCurrentGlueTimeBias),
+           (int)nLastGlueReason);
+    for (i = 0; i < NCARS; i++)
+        if (plr_used[i])
+            printf(" %d", (int)plr[i].nGlueCount);
     printf("\n");
 }
 
@@ -649,6 +727,142 @@ static void ac_op(char **t, int n)
         aicarcontroller_get_current_track_route_point(a, &cars[k]);
         dump_signs(k);
         dump_where(k);
+    // 11e-3's.
+    } else if (strcmp(c, "P") == 0) {
+        struct Player *p = &plr[k];
+        Average *v = &pavg[k];
+
+        memset(p, 0, sizeof *p);
+        memset(v, 0, sizeof *v);
+        p->MyCar = &cars[k];
+        p->PlayerNumber = atoi(t[2]);
+        p->pAverageSpeedRatio = v;
+        v->fAverage = fh(t[3]);
+        p->fMaxSpeedRatio = fh(t[4]);
+        v->nSlots = (uint8_t)atoi(t[5]);
+        v->nSamples = (uint8_t)atoi(t[6]);
+        p->nGlueCount = atoi(t[7]);
+        cars[k].pPlayer = p;
+        plr_used[k] = 1;
+    } else if (strcmp(c, "PT") == 0) {
+        int i;
+
+        PlayerNumPlayers = k;
+        for (i = 0; i < 2; i++) {
+            PlayerPlayersByIndex[i] = plr_ptr(t[2 + i]);
+            PlayerPlayersByNumber[i] = plr_ptr(t[4 + i]);
+        }
+    } else if (strcmp(c, "rc") == 0) {
+        if (strcmp(t[2], "x") == 0) {
+            cars[k].pRacingCar = NULL;
+        } else {
+            memset(&rcars[k], 0, sizeof rcars[k]);
+            rcars[k].pCar = &cars[k];
+            rcars[k].RacePosition = (int8_t)atoi(t[2]);
+            rcars[k].CurrentLapNumberExact = fh(t[3]);
+            cars[k].pRacingCar = &rcars[k];
+        }
+    } else if (strcmp(c, "RC") == 0) {
+        rcoord[0] = (uint32_t)k;
+    } else if (strcmp(c, "rp") == 0) {
+        TheRaceParameters.NumPlayerCars = atoi(t[1]);
+        TheRaceParameters.NumAICars = atoi(t[2]);
+        TheRaceParameters.BeACop = atoi(t[3]);
+        TheRaceParameters.Boost = atoi(t[4]);
+        TheRaceParameters.BoostScale[0] = fh(t[5]);
+        TheRaceParameters.BoostScale[1] = fh(t[6]);
+    } else if (strcmp(c, "sfe") == 0) {
+        skipfe = k;
+        SkipFEBeACop = atoi(t[2]);
+    } else if (strcmp(c, "dw") == 0) {
+        int i;
+
+        for (i = 2; i < n; i++) {
+            uint32_t v = wh(t[i]);
+
+            memcpy((char *)&TheDifficultyInfo + k + 4 * (i - 2), &v, 4);
+        }
+    } else if (strcmp(c, "gds") == 0) {
+        gds[k] = fh(t[2]);
+    } else if (strcmp(c, "wp") == 0) {
+        world.PlayerPositions[k].x = fh(t[2]);
+        world.PlayerPositions[k].y = fh(t[3]);
+        world.PlayerPositions[k].z = fh(t[4]);
+    } else if (strcmp(c, "bm") == 0) {
+        bBeltMover = k;
+    } else if (strcmp(c, "dc") == 0) {
+        CarControllerDisableCatchup = k;
+    } else if (strcmp(c, "ab") == 0) {
+        facts[k].AllowedToUseBoost = atoi(t[2]);
+    } else if (strcmp(c, "np") == 0) {
+        cdrivers[k].MyDriveTarget.NumPoints = (int8_t)atoi(t[2]);
+    } else if (strcmp(c, "vel") == 0) {
+        cars[k].State.Velocity.x = fh(t[2]);
+        cars[k].State.Velocity.y = fh(t[3]);
+        cars[k].State.Velocity.z = fh(t[4]);
+    } else if (strcmp(c, "fsw") == 0) {
+        cars[k].State.ForwardSpeed = fh(t[2]);
+        cars[k].State.nWheelsTouchingGround = atoi(t[3]);
+    } else if (strcmp(c, "kf") == 0) {
+        const char *f = t[2];
+
+        if (strcmp(f, "lbt") == 0)
+            a->LastBoostCalculationTime.PackedTime = wh(t[3]);
+        else if (strcmp(f, "ob") == 0)
+            a->OffBeltTimer.PackedTime = wh(t[3]);
+        else if (strcmp(f, "rp") == 0)
+            a->RealPhysicsTimer.PackedTime = wh(t[3]);
+        else if (strcmp(f, "on") == 0)
+            a->GlueOnTimer.PackedTime = wh(t[3]);
+        else if (strcmp(f, "off") == 0)
+            a->GlueOffTimer.PackedTime = wh(t[3]);
+        else if (strcmp(f, "glue") == 0)
+            a->pGlueCar = car_ptr(t[3]);
+        else if (strcmp(f, "bias") == 0)
+            a->fCurrentGlueTimeBias = fh(t[3]);
+        else if (strcmp(f, "ba") == 0)
+            a->bBoostAllowed = atoi(t[3]);
+        else if (strcmp(f, "cp") == 0)
+            a->pCatchupPlayer = plr_ptr(t[3]);
+        else {
+            fprintf(stderr, "bad field %s\n", f);
+            exit(2);
+        }
+    } else if (strcmp(c, "whb") == 0) {
+        printf("  belt %d\n", aicarcontroller_we_have_the_belt(a));
+    } else if (strcmp(c, "wnb") == 0) {
+        printf("  belt %d\n", aicarcontroller_we_need_the_belt(a));
+    } else if (strcmp(c, "wcb") == 0) {
+        printf("  belt %d\n", aicarcontroller_we_can_have_the_belt(a));
+    } else if (strcmp(c, "whg") == 0) {
+        printf("  glue %d\n", aicarcontroller_we_have_the_glue(a));
+    } else if (strcmp(c, "wng") == 0) {
+        printf("  glue %d\n", aicarcontroller_we_need_the_glue(a));
+    } else if (strcmp(c, "wcg") == 0) {
+        printf("  glue %d\n",
+               aicarcontroller_we_can_have_the_glue(a, plr_ptr(t[2])));
+        dump_glue(k);
+    } else if (strcmp(c, "gon") == 0) {
+        aicarcontroller_glue_on(a, plr_ptr(t[2]));
+        dump_glue(k);
+    } else if (strcmp(c, "goff") == 0) {
+        aicarcontroller_glue_off(a);
+        dump_glue(k);
+    } else if (strcmp(c, "ggs") == 0) {
+        printf("  gspeed %s\n", fx(aicarcontroller_get_glue_speed(a)));
+    } else if (strcmp(c, "cdp") == 0) {
+        float d, p;
+
+        fill(&d, sizeof d);
+        fill(&p, sizeof p);
+        aicarcontroller_calculate_distance_and_position_boost(
+            a, &rcars[atoi(t[2])], &rcars[atoi(t[3])], &d, &p);
+        printf("  dpb %s %s\n", fx(d), fx(p));
+    } else if (strcmp(c, "dbf") == 0) {
+        aicarcontroller_decide_boost_factor(a);
+        printf("  boost %s lbt %08x cp %s\n", fx(cars[k].State.BoostFactor),
+               (unsigned)a->LastBoostCalculationTime.PackedTime,
+               nm(a->pCatchupPlayer));
     } else {
         fprintf(stderr, "bad op %s\n", t[0]);
         exit(2);
@@ -690,6 +904,8 @@ int main(int argc, char **argv)
         (VtFn)fk_set_steer_to_point;
     drv_vt[VT_SLOT(CARDRIVER_VT_ZERO_STEERING_MEMORY)].fn =
         (VtFn)fk_zero_steering_memory;
+    drv_vt[VT_SLOT(CARDRIVER_VT_GET_DESIRED_SPEED)].fn =
+        (VtFn)fk_get_desired_speed;
     vt_install(DVT, drv_vt, CARDRIVER_VT_ENTRIES);
     nm_more = ac_nm;
     reset_more = ac_reset;

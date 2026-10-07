@@ -10,16 +10,33 @@
 #include "bmem.h"
 #include "cardriver.h"
 #include "carmodes.h"
+#include "configitems.h"
 #include "difficultyinfo.h"
 #include "drivetarget.h"
 #include "drivingchoice.h"
+#include "eefpu.h"
+#include "graph.h"
+#include "player.h"
 #include "race.h"
 #include "racecore.h"
 #include "raceinit.h"
+#include "realtime.h"
+#include "table.h"
 #include "track.h"
 #include "trackpath.h"
 #include "vtable.h"
 #include "world.h"
+
+// The unit's globals the belt, the glue and the boost read: gp-20344,
+// gp-20336 (built by _GLOBAL_$I$sRankHeadings, 0x00193f00, from the two
+// points at 0x00310108), gp-20132 and gp-20296.
+int32_t bBeltMover = 1;
+static const bVector2 glue_boost_points[2] = {
+    { -20.0f, 0.100000001f }, { 20.0f, -0.100000001f }
+};
+Graph gGlueBoostGraph = { glue_boost_points, 2 };
+int32_t CarControllerDisableCatchup;
+int32_t nLastGlueReason;
 
 // gp-29940 and gp-29928, the constructor's and JustReset's: -1/140, so
 // each car's first evaluation is staggered by its index.
@@ -69,6 +86,66 @@
 #define STICKY_LINE_MASK 0xfcu
 #define STICKY_SIGN(w)   (((w) >> 8) & 0xffu)
 
+// WeCanHaveTheBelt: none under 5 m/s forward (`lui 0x40a0`), for a careful
+// driver (skill -2), within 120 m of a player (`lui 0x42f0`) or in the
+// race's first 30 s (`lui 0x41f0`, on the race clock by gp-29916, the
+// same 0.00025).
+#define AICC_BELT_MIN_SPEED       5.0f
+#define AICC_CAREFUL_SKILL        (-2)
+#define AICC_BELT_PLAYER_RANGE  120.0f
+#define AICC_BELT_RACE_SECONDS   30.0f
+
+// WeCanHaveTheGlue: the player's speed ratio no less than 0.94
+// (gp-29912). The glue is taken within 30 m, 6 m/s of the player's speed
+// and a heading dot of 0.7 (gp-29904), and held within 60 m, 10 m/s and
+// 0.5. GlueOn's GlueOnTimer (gp-29900, 28000.5) and the GlueOffTimer the
+// end of a hold sets (gp-29908, 80000.5) are 7 and 20 s, and its
+// fCurrentGlueTimeBias 0.2 (gp-29896).
+#define AICC_GLUE_MIN_RATIO     0.939999998f
+#define AICC_GLUE_TAKE_RANGE   30.0f
+#define AICC_GLUE_TAKE_SPEED    6.0f
+#define AICC_GLUE_TAKE_DOT      0.699999988f
+#define AICC_GLUE_HOLD_RANGE   60.0f
+#define AICC_GLUE_HOLD_SPEED   10.0f
+#define AICC_GLUE_HOLD_DOT      0.5f
+#define AICC_GLUE_ON_SECONDS    7.0f
+#define AICC_GLUE_OFF_SECONDS  20.0f
+#define AICC_GLUE_TIME_BIAS     0.200000003f
+
+// nLastGlueReason, the last no WeCanHaveTheGlue gave (4 is no one's).
+#define AICC_GLUE_NO_ACTION       1
+#define AICC_GLUE_NO_ACTION_TYPE  2   // PullOver or later
+#define AICC_GLUE_NO_SPEED_RATIO  3
+#define AICC_GLUE_NO_RANGE        5
+#define AICC_GLUE_NO_SPEED        6
+#define AICC_GLUE_NO_HEADING      7
+#define AICC_GLUE_NO_TIME         8   // GlueOnTimer has run out
+#define AICC_GLUE_NO_OFF_TIME     9   // GlueOffTimer still runs
+#define AICC_GLUE_NO_AHEAD       10   // the player is ahead of me
+
+// GetGlueSpeed: the glued car's speed times the glue graph's value at the
+// gap, plus one, plus my speed over its times -0.05 (gp-29888) over one
+// plus the gap squared times 0.01 (gp-29892); then 0.9 to 1.1 (gp-29884,
+// gp-29880).
+#define AICC_GLUE_SPEED_GAIN  (-0.0500000007f)
+#define AICC_GLUE_GAP_SCALE     0.00999999978f
+#define AICC_GLUE_MIN_FACTOR    0.899999976f
+#define AICC_GLUE_MAX_FACTOR    1.10000002f
+
+// The boost: none in the race's first 30 s (`lui 0x41f0`, gp-29824's
+// 0.00025 again); the skill axis 0 to 9 (`lui 0x4110`) of its Linears and
+// Table; seven points in each distance graph; and
+// CalculateDistanceAndPositionBoost's speed term, the speed over theirs
+// times -0.005 (gp-29816) over one plus the distance squared times 0.01
+// (gp-29820), within 0.05 either way (gp-29812, gp-29808).
+#define AICC_BOOST_RACE_SECONDS     30.0f
+#define AICC_LO_SKILL                0.0f
+#define AICC_HI_SKILL                9.0f
+#define AICC_DISTANCE_BOOST_POINTS   7
+#define AICC_BOOST_SPEED_GAIN      (-0.00499999989f)
+#define AICC_BOOST_GAP_SCALE         0.00999999978f
+#define AICC_BOOST_SPEED_LIMIT       0.0500000007f
+
 typedef void       (*DriverFn)(void *self);
 typedef void       (*DriverPointFn)(void *self, bVector2 *p);
 typedef void       (*ActionDtorFn)(void *self, int32_t flags);
@@ -76,6 +153,7 @@ typedef void       (*ActionInfoFn)(void *self, DrivingInformation *info);
 typedef void       (*SetRouteFn)(void *self, TrackRoute *r,
                                  TrackRoutePoint *p);
 typedef void       (*ControllerFn)(void *self);
+typedef float      (*DriverSpeedFn)(void *self);
 
 // ------------------------------------------------------------ dispatch
 
@@ -721,6 +799,372 @@ void aicarcontroller_get_current_track_route_point(AICarController *c,
     }
     if (atEnd && !took)
         find_where_i_am(c);
+}
+
+// ------------------------------------------ the belt, the glue and the boost
+
+int aicarcontroller_we_have_the_belt(AICarController *c)
+{
+    // 0x00190af8.
+    return c->Base.pCar->TheMovementMode == BELT_MOVEMENT;
+}
+
+int aicarcontroller_we_need_the_belt(AICarController *c)
+{
+    // 0x00190b10.
+    (void)c;
+    return bBeltMover != 0;
+}
+
+int aicarcontroller_we_can_have_the_belt(AICarController *c)
+{
+    // 0x00190b20.
+    Car *car = c->Base.pCar;
+    AIActionType type;
+
+    if (c->Base.Driver->MyDriveTarget.NumPoints < 3)
+        return 0;
+    if (racecoordinator_get_current_state(pRaceCoordinator)
+        == RCSTATE_AI_DEMO_MODE)
+        return 0;
+    if (timer_is_valid(&c->OffBeltTimer)
+        || timer_is_valid(&c->RealPhysicsTimer))
+        return 0;
+    if (car->State.ForwardSpeed < AICC_BELT_MIN_SPEED
+        || car->State.nWheelsTouchingGround <= 0)
+        return 0;
+    if (c->CurrentAction == NULL)
+        return 0;
+    type = c->CurrentAction->Type;
+    if (type == AIACTION_PULL_OVER || type == AIACTION_GET_UNSTUCK
+        || type == AIACTION_ACCIDENT_RECOVERY
+        || type == AIACTION_AVOID_ROADBLOCK
+        || type == AIACTION_I_JUST_GOT_HIT)
+        return 0;
+    if (car->MyDriver->SkillLevel == AICC_CAREFUL_SKILL)
+        return 0;
+    if (world_get_distance_to_closest_player(pCurrentWorld,
+                                             &car->State.Position)
+        < AICC_BELT_PLAYER_RANGE)
+        return 0;
+    return !((float)(int32_t)pCurrentRace->RaceTime.PackedTime
+                 * AICC_TICKS_TO_SECONDS
+             < AICC_BELT_RACE_SECONDS);
+}
+
+int aicarcontroller_we_have_the_glue(AICarController *c)
+{
+    // 0x00190c78.
+    return c->pGlueCar != NULL;
+}
+
+int aicarcontroller_we_need_the_glue(AICarController *c)
+{
+    // 0x00190c88.
+    (void)c;
+    return 0;
+}
+
+// The VU0's normalise of a car's velocity, all four lanes by `vrsqrt`'s
+// quotient: a car standing still divides by zero, which the EE answers
+// with FLT_MAX, so its direction is 0.
+static void unit_velocity(const Car *car, bVector3 *u)
+{
+    const bVector3 *v = &car->State.Velocity;
+    float q = ee_div(1.0f, sqrtf((v->x * v->x + v->y * v->y) + v->z * v->z));
+
+    u->x = v->x * q;
+    u->y = v->y * q;
+    u->z = v->z * q;
+}
+
+static int no_glue(int32_t reason)
+{
+    nLastGlueReason = reason;
+    return 0;
+}
+
+int aicarcontroller_we_can_have_the_glue(AICarController *c, Player *p)
+{
+    // 0x00190c90. With the glue on, the glued car's player is asked
+    // about, not `p`.
+    Car *mine = c->Base.pCar, *theirs;
+    bVector3 a, b, d;
+    float dist, dv, dot;
+
+    if (aicarcontroller_we_have_the_glue(c))
+        p = c->pGlueCar->pPlayer;
+    if (c->CurrentAction == NULL)
+        return no_glue(AICC_GLUE_NO_ACTION);
+    if (c->CurrentAction->Type >= AIACTION_PULL_OVER)
+        return no_glue(AICC_GLUE_NO_ACTION_TYPE);
+    if (player_get_speed_ratio(p) < AICC_GLUE_MIN_RATIO)
+        return no_glue(AICC_GLUE_NO_SPEED_RATIO);
+    theirs = p->MyCar;
+    unit_velocity(mine, &a);
+    unit_velocity(theirs, &b);
+    d.x = mine->State.Position.x - theirs->State.Position.x;
+    d.y = mine->State.Position.y - theirs->State.Position.y;
+    d.z = mine->State.Position.z - theirs->State.Position.z;
+    dist = sqrtf((d.x * d.x + d.y * d.y) + d.z * d.z);
+    dv = fabsf(theirs->State.VelocityMagnitude
+               - mine->State.VelocityMagnitude);
+    dot = (a.x * b.x + a.y * b.y) + a.z * b.z;
+    if (aicarcontroller_we_have_the_glue(c)) {
+        // Held while GlueOnTimer runs and the cars stay together; when it
+        // has run out, GlueOffTimer starts.
+        if (!timer_is_valid(&c->GlueOnTimer)) {
+            nLastGlueReason = AICC_GLUE_NO_TIME;
+            timer_set_time(&c->GlueOffTimer, AICC_GLUE_OFF_SECONDS);
+            return 0;
+        }
+        if (AICC_GLUE_HOLD_RANGE < dist)
+            return no_glue(AICC_GLUE_NO_RANGE);
+        if (AICC_GLUE_HOLD_SPEED < dv)
+            return no_glue(AICC_GLUE_NO_SPEED);
+        if (dot < AICC_GLUE_HOLD_DOT)
+            return no_glue(AICC_GLUE_NO_HEADING);
+        return 1;
+    }
+    if (timer_is_valid(&c->GlueOffTimer))
+        return no_glue(AICC_GLUE_NO_OFF_TIME);
+    if (AICC_GLUE_TAKE_RANGE < dist)
+        return no_glue(AICC_GLUE_NO_RANGE);
+    if (AICC_GLUE_TAKE_SPEED < dv)
+        return no_glue(AICC_GLUE_NO_SPEED);
+    if (dot < AICC_GLUE_TAKE_DOT)
+        return no_glue(AICC_GLUE_NO_HEADING);
+    if (theirs->pRacingCar->RacePosition < mine->pRacingCar->RacePosition)
+        return no_glue(AICC_GLUE_NO_AHEAD);
+    return 1;
+}
+
+void aicarcontroller_glue_on(AICarController *c, Player *p)
+{
+    // 0x00190f38. Retail then asks the race for both cars' RacingCars and
+    // reads neither.
+    if (aicarcontroller_we_have_the_glue(c))
+        return;
+    p->nGlueCount++;
+    timer_set_time(&c->GlueOnTimer, AICC_GLUE_ON_SECONDS);
+    c->pGlueCar = p->MyCar;
+    c->fCurrentGlueTimeBias = AICC_GLUE_TIME_BIAS;
+}
+
+void aicarcontroller_glue_off(AICarController *c)
+{
+    // 0x00190fb8.
+    Car *g;
+
+    if (!aicarcontroller_we_have_the_glue(c))
+        return;
+    g = c->pGlueCar;
+    c->pGlueCar = NULL;
+    g->pPlayer->nGlueCount--;
+}
+
+float aicarcontroller_get_glue_speed(AICarController *c)
+{
+    // 0x00190ff8.
+    Car *mine = c->Base.pCar, *g = c->pGlueCar;
+    RacingCar *rm = race_get_racing_car(pCurrentRace, mine);
+    RacingCar *rg = race_get_racing_car(pCurrentRace, g);
+    float gap, gv, dv, f;
+    bVector3 d;
+
+    if (rm == NULL || rg == NULL) {
+        CarDriver *drv = c->Base.Driver;
+        const VtEntry *e = vt_slot(drv->_vtable,
+                                   CARDRIVER_VT_GET_DESIRED_SPEED);
+
+        return ((DriverSpeedFn)e->fn)(vt_this(drv, e));
+    }
+    d.x = mine->State.Position.x - g->State.Position.x;
+    d.y = mine->State.Position.y - g->State.Position.y;
+    d.z = mine->State.Position.z - g->State.Position.z;
+    gap = sqrtf((d.x * d.x + d.y * d.y) + d.z * d.z);
+    if (rg->RacePosition < rm->RacePosition)
+        gap = -gap;
+    gv = g->State.VelocityMagnitude;
+    dv = mine->State.VelocityMagnitude - gv;
+    gap = gap - c->fCurrentGlueTimeBias * gv;
+    f = (graph_get_value(&gGlueBoostGraph, gap) + 1.0f)
+        + dv * AICC_GLUE_SPEED_GAIN / (gap * (gap * AICC_GLUE_GAP_SCALE)
+                                       + 1.0f);
+    f = max_s(f, AICC_GLUE_MIN_FACTOR);
+    return min_s(AICC_GLUE_MAX_FACTOR, f) * gv;
+}
+
+void aicarcontroller_calculate_distance_and_position_boost(
+    AICarController *c, RacingCar *me, RacingCar *them, float *dist,
+    float *pos)
+{
+    // 0x00192c78.
+    const DifficultyInfo *di = &TheDifficultyInfo;
+    float laps, ahead, skill, k;
+    Graph lo, hi;
+    Linear l;
+    int32_t s, diff, i;
+
+    *dist = 0.0f;
+    *pos = 0.0f;
+    if (!TheRaceParameters.Boost)
+        return;
+    laps = me->CurrentLapNumberExact - them->CurrentLapNumberExact;
+    if (TheRaceParameters.BeACop || (config_skip_fe() && SkipFEBeACop)) {
+        // Within half a lap either way: laps - floor(laps + 0.5).
+        float x = laps + 0.5f;
+        float f = (float)ee_trunc_w(x);
+
+        if (x < f)
+            f -= 1.0f;
+        laps = (x - f) - 0.5f;
+    }
+    ahead = TheTrackPathManager.TrackLength * laps;
+    if (!(ahead <= di->Misc.MaxDistanceForBoost))
+        return;
+    graph_init(&lo, di->AIDistanceBoostLoSkill, AICC_DISTANCE_BOOST_POINTS);
+    graph_init(&hi, di->AIDistanceBoostHiSkill, AICC_DISTANCE_BOOST_POINTS);
+    linear_init(&l, AICC_LO_SKILL, graph_get_value(&lo, ahead),
+                AICC_HI_SKILL, graph_get_value(&hi, ahead));
+    s = c->Base.pCar->MyDriver->SkillLevel;
+    skill = (float)(s < 0 ? 0 : s);
+    *dist = linear_get_value(&l, skill);
+    k = (me->pCar->State.VelocityMagnitude
+         - them->pCar->State.VelocityMagnitude) * AICC_BOOST_SPEED_GAIN
+        / (ahead * (ahead * AICC_BOOST_GAP_SCALE) + 1.0f);
+    k = max_s(k, -AICC_BOOST_SPEED_LIMIT);
+    *dist = *dist + min_s(AICC_BOOST_SPEED_LIMIT, k);
+    // By how many places they are ahead of me (`movz`): 0 to 7 for 8 to 1
+    // behind, 7 to 15 for level to 8 ahead.
+    diff = them->RacePosition - me->RacePosition;
+    i = diff >= 0 ? diff + 7 : diff + 8;
+    linear_init(&l, AICC_LO_SKILL, di->AIPositionBoostLoSkill[i],
+                AICC_HI_SKILL, di->AIPositionBoostHiSkill[i]);
+    *pos = linear_get_value(&l, skill);
+}
+
+// The two-player race's: the player the AI car catches up to and that
+// player's RacingCar. The leader, player 0 when level, unless my place is
+// past half the AI field, one more when the leader is no further back
+// than that, and one more again when the other is no further back than
+// that.
+static Player *catchup_target(RacingCar *mine, RacingCar **target)
+{
+    Player *lead = PlayerPlayersByNumber[0], *trail = PlayerPlayersByNumber[1];
+    RacingCar *rl = lead->MyCar->pRacingCar, *rt = trail->MyCar->pRacingCar;
+    int32_t n;
+
+    if (rt->RacePosition < rl->RacePosition) {
+        Player *p = lead;
+        RacingCar *r = rl;
+
+        lead = trail;
+        rl = rt;
+        trail = p;
+        rt = r;
+    }
+    n = TheRaceParameters.NumAICars / 2;
+    if (!(n < rl->RacePosition))
+        n++;
+    if (!(n < rt->RacePosition))
+        n++;
+    if (n < mine->RacePosition) {
+        *target = rt;
+        return trail;
+    }
+    *target = rl;
+    return lead;
+}
+
+// A PositionRatio row by RacePosition, the first place 1: the row before
+// the first for place 0, as retail's `232 + 8 * place` and `296 + 8 *
+// place` from the table's start read (AIPositionBoostHiSkill's last two
+// before the over-one rows, the over-one rows' last before the under-one).
+static const float *position_ratio_row(int over, int32_t place)
+{
+    size_t off = over ? offsetof(DifficultyInfo, PositionRatioOverOne)
+                      : offsetof(DifficultyInfo, PositionRatioUnderOne);
+
+    return (const float *)(const void *)((const char *)&TheDifficultyInfo
+                                         + off + 8 * (place - 1));
+}
+
+void aicarcontroller_decide_boost_factor(AICarController *c)
+{
+    // 0x001928f0. Retail reads PrintBoostCalculationForAllCars and
+    // ForThisCar (gp-20128, gp-20124), whose prints are gone.
+    Car *car = c->Base.pCar;
+    RacingCar *rc = car->pRacingCar;
+    float boost = 1.0f;
+    int allowed, early;
+    Player *cp;
+
+    if (rc == NULL || !c->bBoostAllowed || car->pPlayer != NULL)
+        return;
+    allowed = c->CurrentAction != NULL
+              && c->CurrentAction->AllowedToUseBoost != 0;
+    early = (float)(int32_t)pCurrentRace->RaceTime.PackedTime
+                * AICC_TICKS_TO_SECONDS
+            < AICC_BOOST_RACE_SECONDS;
+    if (!(TheDifficultyInfo.Misc.BoostCalculationFrequency
+          < (float)(int32_t)((uint32_t)WorldTimer
+                             - c->LastBoostCalculationTime.PackedTime)
+                * AICC_TICKS_TO_SECONDS))
+        return;
+    c->LastBoostCalculationTime.PackedTime = (uint32_t)WorldTimer;
+    c->pCatchupPlayer = NULL;
+    if (!CarControllerDisableCatchup
+        && racecoordinator_get_current_state(pRaceCoordinator)
+               != RCSTATE_AI_DEMO_MODE
+        && TheRaceParameters.NumPlayerCars > 0) {
+        if (!allowed) {
+            car->State.BoostFactor = boost;
+            return;
+        }
+        if (!early) {
+            float dist = 0.0f, pos = 0.0f, scale = 1.0f;
+
+            if (PlayerNumPlayers == 1) {
+                Player *p = PlayerPlayersByIndex[0];
+
+                c->pCatchupPlayer = p;
+                scale = TheRaceParameters.BoostScale[p->PlayerNumber];
+                aicarcontroller_calculate_distance_and_position_boost(
+                    c, rc, p->MyCar->pRacingCar, &dist, &pos);
+            } else if (PlayerNumPlayers == 2) {
+                RacingCar *target;
+                Player *p = catchup_target(rc, &target);
+
+                aicarcontroller_calculate_distance_and_position_boost(
+                    c, rc, target, &dist, &pos);
+                c->pCatchupPlayer = p;
+                scale = TheRaceParameters.BoostScale[p->PlayerNumber];
+            }
+            boost = (dist + 1.0f) + pos * scale;
+        }
+    }
+    cp = c->pCatchupPlayer;
+    if (allowed && cp != NULL) {
+        // The player's speed ratio, by the table for its place and my
+        // skill, unless it has no full average or is near its best.
+        int32_t s = car->MyDriver->SkillLevel;
+        float slow, ratio, f;
+        Table t;
+
+        s = s < 0 ? 0 : s;
+        slow = TheDifficultyInfo.AISkillLevel[s].SlowFactor;
+        if (player_catchup_allowed(cp, slow)) {
+            int32_t place = cp->MyCar->pRacingCar->RacePosition;
+
+            ratio = player_get_speed_ratio(cp);
+            table_init(&t, position_ratio_row(1.0f <= ratio, place), 2,
+                       AICC_LO_SKILL, AICC_HI_SKILL);
+            f = (ratio - 1.0f) * table_get_value(&t, (float)s) + 1.0f;
+            boost *= max_s(f, slow);
+        }
+    }
+    car->State.BoostFactor = boost;
 }
 
 // -------------------------------------------------------- the action

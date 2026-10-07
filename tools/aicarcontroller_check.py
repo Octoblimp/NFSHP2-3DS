@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Cross-check 3DS Files/source/aicarcontroller.c -- the AI car controller,
-steps 11e-1 and 11e-2's parts of it -- against the retail image, run in
+steps 11e-1 to 11e-3's parts of it -- against the retail image, run in
 mipsemu.
 
 The model is retail's image, over drivingchoice_check.py's world: its cars,
@@ -18,14 +18,20 @@ port now takes from retail), GetCurrentDrivingLineSpeed, ForceBoost,
 ReleaseBoost, AboutToFly, SetOffBeltTimer, the exclusion's get and set,
 GetCurrentDrivingLocation and DebugDisplay; and 11e-2's FindSignpostIndex,
 GetStickyIndex, DoStickyDecisions, SignPostDecision and
-GetCurrentTrackRoutePoint. SignPostDecision runs as shipped wherever it is
+GetCurrentTrackRoutePoint; and 11e-3's WeHaveTheBelt, WeNeedTheBelt,
+WeCanHaveTheBelt, WeHaveTheGlue, WeNeedTheGlue, WeCanHaveTheGlue, GlueOn,
+GlueOff, GetGlueSpeed, DecideBoostFactor and
+CalculateDistanceAndPositionBoost. SignPostDecision runs as shipped wherever it is
 reached, DrivingChoice::AdvancePoint too, as main.c points
 drivingchoice.h's seam at the port's. Under them everything the port
 has runs as shipped too: the Average's constructor and destructor,
 Signpost::GetIndex, the route manager's table, DistanceIsWithinRoute,
 FindClosestPoint, GetPosition, the DrivingLocation, DrivingChoice and
 DrivingInformation methods, IsDriveable and all beneath it,
-GetCarAhead and HighlightDrivingLine.
+GetCarAhead and HighlightDrivingLine, and 11e-3's Graph, Linear, Table,
+World::GetDistanceToClosestPlayer, Race::GetRacingCar and the
+RaceCoordinator's state. The glue's Graph is built by the image's own
+start-up code (_GLOBAL_$I$sRankHeadings) in the model.
 
 **The stand-ins**, each printing a line, so both sides must ask the same
 questions in the same order:
@@ -52,13 +58,20 @@ questions in the same order:
   World::Random (0x0014e548): the world (1 for pCurrentWorld) and the
     range, answering the script's queue, then 0;
   GetTrackInfo (0x00153420): the track number, answering a TrackInfo of
-    the script's, its SignpostGracePeriod -1 until set.
+    the script's, its SignpostGracePeriod -1 until set;
+  the test driver table's GetDesiredSpeed (136): the car, answering the
+    script's speed for it.
+11e-3's players (PLR), their speed-ratio Averages, the RacingCars, the
+coordinator's state, the race parameters' fields, TheDifficultyInfo and
+the World's PlayerPositions are memory the script fills. WeCanHaveTheGlue's
+two vrsqrt divide by zero for a car standing still (GLUE_DIVS), which the
+model allows.
 
 A float prints as its bits, a NaN as "nan", and a pointer by what it is,
 as drivingchoice_check names them, with these added: kn3, kl3 and kc3 car
 3's controller's own list, location and choice, ke3:5 its list's sixth
-entry, m4 the fifth block bMalloc handed out and fa2 the third fake
-action. vK is _vt$15AICarController, vT the test table, vC
+entry, m4 the fifth block bMalloc handed out, fa2 the third fake
+action and P1 car 1's player. vK is _vt$15AICarController, vT the test table, vC
 drivingchoice_check's, vB _vt$13CarController and vF the actions'.
 
     python tools/aicarcontroller_check.py
@@ -93,10 +106,11 @@ NL = chr(10)
 
 HARNESS = "tools/src/aicarcontroller_test.c"
 AICC = "3DS Files/source/aicarcontroller.c"
+PLAYER_H = "3DS Files/source/player.h"
 CCC = "3DS Files/source/carcontroller.c"
 SOURCES = [HARNESS] + dcc.SOURCES[1:] + ["3DS Files/source/" + f for f in (
     "aicarcontroller.c", "carcontroller.c", "average.c", "timer.c",
-    "difficultyinfo.c")]
+    "difficultyinfo.c", "configitems.c")]
 
 # ================================================================ the image
 
@@ -119,6 +133,11 @@ F = {
     # 11e-2's.
     "fsi": 0x00191d40, "gsi": 0x00191d90, "dsd": 0x00191b30,
     "spd": 0x00191de0, "gct": 0x001921f8,
+    # 11e-3's.
+    "whb": 0x00190af8, "wnb": 0x00190b10, "wcb": 0x00190b20,
+    "whg": 0x00190c78, "wng": 0x00190c88, "wcg": 0x00190c90,
+    "gon": 0x00190f38, "goff": 0x00190fb8, "ggs": 0x00190ff8,
+    "dbf": 0x001928f0, "cdp": 0x00192c78,
 }
 BMALLOC = 0x002577c0
 BFREE = 0x00257850
@@ -156,6 +175,43 @@ TINFO = 0x010c2500                # GetTrackInfo's answer
 TINFO_SIZE = 164
 TI_GRACE = 128                    # its SignpostGracePeriod
 NRANDOM = 16
+
+# 11e-3's. _GLOBAL_$I$sRankHeadings builds the glue's Graph (gp-20336) over
+# its two points at 0x00310108, which the emulator does not run until the
+# model calls it. WeCanHaveTheGlue's two `vrsqrt`s divide by zero for a car
+# standing still, as the EE does and the port's ee_div spells.
+GLUE_CTOR = 0x00193f00
+GLUE_DIVS = {0x00190d28, 0x00190d54}
+G3 = {
+    "BELT": dcc.GP - 20344,       # bBeltMover
+    "DISABLE": dcc.GP - 20132,    # CarControllerDisableCatchup
+    "REASON": dcc.GP - 20296,     # nLastGlueReason
+    "RCOORD": dcc.GP - 22216,     # pRaceCoordinator
+    "BYNUM": dcc.GP - 20936,      # PlayerPlayersByNumber, two words
+    "SKIPFE": dcc.GP - 23220,     # SkipFE
+    "SKIPFE_COP": dcc.GP - 23176,  # SkipFEBeACop
+}
+DIFF = 0x002f0080                 # TheDifficultyInfo
+DIFF_SIZE = 992
+RP_FIELDS = {"npc": 48, "nai": 52, "cop": 628, "boost": 760, "s0": 764,
+             "s1": 768}           # TheRaceParameters'
+STUB_GDS = 0x010b34b0             # the drivers' GetDesiredSpeed (136)
+DVT_GDS = 136
+PLR = 0x010c5000                  # car k's player, retail's offsets
+PLR_STRIDE = 0x200
+P_CAR, P_NUM, P_AVG, P_MAX, P_GLUE = 4, 16, 160, 168, 192
+PAVG = 0x010c7000                 # its speed ratio's Average
+PAVG_STRIDE = 16
+RCARS = 0x010c7400                # car k's RacingCar
+RC_STRIDE = 192
+RC_POS, RC_LAP = 10, 20
+C_RC = 28
+RCOORD = 0x010c8000               # the race coordinator, its state at 0
+W_PPOS = 336                      # World's PlayerPositions, 16 bytes each
+A_BOOST = 584                     # an action's AllowedToUseBoost
+# The controller's fields %kf sets.
+KF = {"lbt": 564, "ob": 568, "rp": 572, "glue": 588, "on": 592, "off": 596,
+      "bias": 604, "ba": 640, "cp": 644}
 
 # The controller, by retail's offsets.
 K_SIZE = 720
@@ -274,6 +330,39 @@ def fact_at(i):
 #                        controller's location
 # %gct k                 GetCurrentTrackRoutePoint
 #
+# 11e-3's. Set up:
+# %P k pn ratio max slots n glue  car k's player, P k: its PlayerNumber,
+#                        its speed ratio's mean, slot and sample counts,
+#                        fMaxSpeedRatio and nGlueCount
+# %PT n i0 i1 b0 b1      PlayerNumPlayers, the players by index and by
+#                        number (each the player of that car, -1 NULL)
+# %rc k pos lap          car k's RacingCar: its RacePosition and
+#                        CurrentLapNumberExact (%rc k x: none)
+# %RC state              the race coordinator's state
+# %rp npc nai cop boost s0 s1  TheRaceParameters' NumPlayerCars, NumAICars,
+#                        BeACop, Boost and BoostScale
+# %sfe skipfe cop        SkipFE and SkipFEBeACop
+# %dw off w0 ..          words into TheDifficultyInfo from byte off
+# %gds k f               what car k's driver's GetDesiredSpeed answers
+# %wp i x y z            the world's PlayerPositions[i]
+# %bm v / %dc v          bBeltMover / CarControllerDisableCatchup
+# %ab i v                fake action i's AllowedToUseBoost
+# %np k n                car k's driver's target's NumPoints
+# %vel k x y z           car k's velocity
+# %fsw k fs nw           car k's ForwardSpeed and nWheelsTouchingGround
+# %kf k field v          controller k's lbt, ob, rp, on and off timers,
+#                        glue (a car), bias, ba (bBoostAllowed) or cp (the
+#                        player of a car)
+# The calls:
+# %whb k / %wnb k / %wcb k  WeHaveTheBelt / WeNeedTheBelt / WeCanHaveTheBelt
+# %whg k / %wng k        WeHaveTheGlue / WeNeedTheGlue
+# %wcg k p               WeCanHaveTheGlue with car p's player
+# %gon k p / %goff k     GlueOn with car p's player / GlueOff
+# %ggs k                 GetGlueSpeed
+# %cdp k me them         CalculateDistanceAndPositionBoost on two cars'
+#                        RacingCars
+# %dbf k                 DecideBoostFactor
+#
 # Not scripted: a find on a controller whose table is vK and whose
 # location is clear (retail's slot 112 is __pure_virtual), a route number
 # over 99 (retail reads on past the manager's table), FindClosestTrackRoute
@@ -284,7 +373,12 @@ def fact_at(i):
 # with no sign past the look-ahead (retail goes round the signs for ever) or
 # with a used decision's sign past the table; and DoStickyDecisions or
 # FindSignpostIndex after SignPostDecision stored a decision with every
-# slot used, into nSignpostIndex, which they index the signs by.
+# slot used, into nSignpostIndex, which they index the signs by. From
+# 11e-3: GetGlueSpeed with no glued car (the port reads through NULL where
+# retail reads address 28), a player's car or the AI car out of the race
+# where the glue or the boost reads its RacingCar, a skill over 9 (past
+# AISkillLevel), a place gap past eight either way (past the position
+# boosts), and a velocity whose squares underflow (the EE flushes them).
 
 # Distances either side of the ones that matter.
 SECS = (0.0, 0.5, 1.5, 2.0, 3.0, -1.0, 0.000125, 0.0001, 1e6, 1e9, -1e9,
@@ -1280,6 +1374,426 @@ def s_trackpoint_edge(rnd):
     return ops
 
 
+# ---------------------------------------------------------------- 11e-3's
+
+T30 = 120000                      # 30 s of race time, in ticks
+TIMERS = (0, 0x7fffffff, 1, 28000, 80000, 0x80000000, 0xffffffff)
+UNSET_TIMERS = (0, 0x7fffffff)
+BELT_STOP = (6, 7, 8, 9, 10)      # PullOver, GetUnstuck, AvoidRoadBlock,
+                                  # IJustGotHit, AccidentRecovery
+
+
+def below(x):
+    """The float just under x."""
+    return ulp(f32(x), -1)
+
+
+def above(x):
+    return ulp(f32(x), 1)
+
+
+def near(x):
+    x = f32(x)
+    return rnd_pick(x, below(x), above(x))
+
+
+def rnd_pick(*xs):
+    return xs[_PICK.randrange(len(xs))]
+
+
+_PICK = random.Random(0)
+
+
+def unit3(rnd, flat=False):
+    a = rnd.uniform(-math.pi, math.pi)
+    e = 0.0 if flat else rnd.uniform(-0.3, 0.3)
+    return (math.cos(a) * math.cos(e), math.sin(a) * math.cos(e),
+            math.sin(e))
+
+
+def turned(u, c, rnd):
+    """A unit vector at the angle whose cosine is c from u, about z."""
+    s = math.sqrt(max(0.0, 1.0 - c * c)) * rnd.choice((1, -1))
+    x, y, z = u
+    return (x * c - y * s, x * s + y * c, z)
+
+
+def vec_op(op, k, v):
+    return "%s %d %s" % (op, k, " ".join(h(f32(c)) for c in v))
+
+
+def int_pos(rnd):
+    return tuple(float(rnd.randint(-100, 100)) for _ in range(3))
+
+
+def fword(s):
+    """The float a hex word's bits make."""
+    return struct.unpack("<f", struct.pack("<I", int(s, 16)))[0]
+
+
+def gate_picker(rnd, gates, none=3, single=0.8, p_ok=0.85):
+    """ok(gate) for one round: four rounds in five fail at most one of
+    `gates`, chosen at random (or none), with every other passing; the rest
+    pass each on its own with p_ok."""
+    if rnd.random() < single:
+        fail = rnd.choice(list(gates) + [None] * none)
+        return lambda g: g != fail
+    return lambda g: rnd.random() < p_ok
+
+
+BELT_GATES = ("np", "demo", "ob", "rp", "fs", "nw", "act", "type", "skill",
+              "range", "race")
+BELT_TYPES = (0, 1, 2, 3, 4, 5, 11, 12, -1)
+
+
+def s_belt(rnd):
+    """WeCanHaveTheBelt over each of its tests either side, the race clock
+    and the distance to the players at their edges, and WeHaveTheBelt and
+    WeNeedTheBelt on the movement mode and bBeltMover."""
+    w = World(rnd)
+    me = int_pos(rnd)
+    w.car(0, px=me[0], py=me[1], pz=me[2], pl=0, act=-1)
+    ops = w.ops + ["%NS 0", "%n 0", "%dr 0"]
+    for i in range(3):
+        ops.append("%%fa %d %d 0 0 0" % (i, rnd.choice(BELT_TYPES
+                                                       + BELT_STOP)))
+    for _ in range(rnd.randrange(6, 14)):
+        ok = gate_picker(rnd, BELT_GATES)
+        ops.append("%%np 0 %d" % (rnd.choice((3, 4, 20)) if ok("np")
+                                  else rnd.choice((0, 2, -1))))
+        ops.append("%%RC %d" % (rnd.choice((0, 3, 9, 7)) if ok("demo")
+                                else 8))
+        for f in ("ob", "rp"):
+            ops.append("%%kf 0 %s %08x" % (f, rnd.choice(UNSET_TIMERS)
+                                            if ok(f)
+                                            else rnd.choice(TIMERS[2:])))
+        fs = (rnd.choice((5.0, above(5.0), 30.0)) if ok("fs")
+              else rnd.choice((below(5.0), 0.0, -10.0)))
+        nw = rnd.choice((1, 4)) if ok("nw") else rnd.choice((0, -1))
+        ops.append("%%fsw 0 %s %d" % (h(f32(fs)), nw))
+        if not ok("act"):
+            i = -1
+        else:
+            i = rnd.randrange(3)
+            ops.append("%%fa %d %d 0 0 0" % (i, rnd.choice(
+                BELT_TYPES if ok("type") else BELT_STOP)))
+        ops.append("%%cur 0 %d" % i)
+        ops.append("@sk 0 %d" % (rnd.choice((-3, -1, 0, 5, 9)) if ok("skill")
+                                 else -2))
+        far = rnd.choice((120.0, above(120.0), 300.0, 1000.0)) \
+            if ok("range") else rnd.choice((below(120.0), 119.0, 0.0))
+        for j in range(2):
+            d = far if j == 0 else rnd.choice((far, 1000.0, 5000.0))
+            ax = rnd.randrange(3)
+            pos = list(me)
+            pos[ax] += d * rnd.choice((1, -1))
+            ops.append(vec_op("%wp", j if rnd.random() < 0.5 else 1 - j,
+                              pos))
+        ops.append("%%rt 0 %08x" % (rnd.choice((T30, T30 + 1, 10 * T30))
+                                    if ok("race")
+                                    else rnd.choice((T30 - 1, 0, T30 // 2,
+                                                     0xffffffff,
+                                                     0x80000000))))
+        ops.append("%wcb 0")
+        if rnd.random() < 0.3:
+            ops.append("%%mm 0 %d" % rnd.choice((0, 1, 4, 5, 6, 6, 7)))
+            ops.append("%whb 0")
+        if rnd.random() < 0.2:
+            ops.append("%%bm %d" % rnd.choice((0, 1, 2, -1)))
+            ops.append("%wnb 0")
+    return ops
+
+
+RATIO_OK = (0.939999998, 1.0, 1.2, 0.95)
+RATIO_NO = (0.93999994, 0.5, 0.0)
+# Each test's passing and failing values near its edge, held and taken.
+GLUE_EDGES = {
+    True: dict(dist=((0.0, 10.0, 59.0, 60.0), (61.0, 60.5, 100.0)),
+               dv=((0.0, 5.0, 9.0, 10.0),
+                   (above(10.0), above(10.0), 10.5, 11.0, 30.0)),
+               dot=((1.0, 0.9, 0.6, 0.51), (0.49, 0.3, -0.5, -1.0))),
+    False: dict(dist=((0.0, 10.0, 29.0, 30.0), (31.0, 30.5, 45.0, 100.0)),
+                dv=((0.0, 3.0, 5.5, 6.0),
+                    (above(6.0), above(6.0), 6.5, 7.0, 30.0)),
+                dot=((1.0, 0.9, 0.8, 0.71), (0.69, 0.6, 0.3, -1.0))),
+}
+# Unit vectors (x, y) whose x is a heading edge's dot exactly: x*x + y*y
+# rounds to 1, so the VU0's normalise leaves them as they are. Held and
+# taken, passing then failing.
+GLUE_DOTS = {
+    True: ((("3f000000", "3f5db3d7"), ("3f000001", "3f5db3d7")),
+           (("3effffff", "3f5db3d7"),)),
+    False: ((("3f333333", "3f36d211"), ("3f333334", "3f36d210")),
+            (("3f333332", "3f36d212"),)),
+}
+GLUE_HELD_GATES = ("act", "type", "ratio", "on", "dist", "dv", "dot")
+GLUE_TAKE_GATES = ("act", "type", "ratio", "off", "dist", "dv", "dot",
+                   "ahead")
+
+
+def glue_layout(rnd, me, k, held, np_):
+    """Car k (a player's) placed, both cars moving, and my controller's
+    timers and action, failing at most one test (gate_picker)."""
+    ok = gate_picker(rnd, GLUE_HELD_GATES if held else GLUE_TAKE_GATES)
+    ed = GLUE_EDGES[held]
+    ops = ["%%P %d %d %s %s 4 4 %d" % (
+        k, k - 1, h(f32(rnd.choice(RATIO_OK if ok("ratio") else RATIO_NO))),
+        h(f32(1.0)), rnd.choice((0, 1, 2)))]
+    d = rnd.choice(ed["dist"][0 if ok("dist") else 1])
+    if rnd.random() < 0.5:
+        pos = list(me)
+        pos[rnd.randrange(3)] += d * rnd.choice((1, -1))
+    else:
+        u = unit3(rnd, flat=rnd.random() < 0.5)
+        pos = [me[i] + d * u[i] for i in range(3)]
+    ops.append(vec_op("%pos", k, pos))
+    sm = rnd.choice((1.0, 20.0, rnd.uniform(1.0, 60.0)))
+    st = rnd.choice((1.0, 20.0, rnd.uniform(1.0, 60.0)))
+    if rnd.random() < 0.4:
+        # The heading at its edge exactly: my car along an axis, theirs at
+        # the edge's angle, both at powers of two.
+        x, y = rnd.choice(GLUE_DOTS[held][0 if ok("dot") else 1])
+        x, y = fword(x), fword(y) * rnd.choice((1, -1))
+        sm, st = rnd.choice((1.0, 4.0, 32.0)), rnd.choice((1.0, 2.0, 16.0))
+        ax, sg = rnd.randrange(2), rnd.choice((1, -1))
+        mv = [0.0, 0.0, 0.0]
+        tv = [0.0, 0.0, 0.0]
+        mv[ax] = sg
+        tv[ax] = sg * x
+        tv[1 - ax] = y
+    else:
+        mv = unit3(rnd, flat=rnd.random() < 0.6)
+        tv = turned(mv, rnd.choice(ed["dot"][0 if ok("dot") else 1]), rnd)
+        if rnd.random() < 0.1:
+            # Standing still: the normalise divides by zero.
+            if rnd.random() < 0.5:
+                sm = 0.0
+            else:
+                st = 0.0
+    ops.append(vec_op("%vel", 0, [c * sm for c in mv]))
+    ops.append(vec_op("%vel", k, [c * st for c in tv]))
+    dv = rnd.choice(ed["dv"][0 if ok("dv") else 1])
+    if dv in (above(10.0), above(6.0)) or rnd.random() < 0.4:
+        # Exactly dv apart: one car's speed 0.
+        a, z = f32(dv), 0.0
+        if rnd.random() < 0.5:
+            a, z = z, a
+        ops.append("%%vm 0 %s" % h(a))
+        ops.append("%%vm %d %s" % (k, h(z)))
+    else:
+        vm = f32(rnd.choice((20.0, 35.5, rnd.uniform(0.0, 60.0))))
+        ops.append("%%vm 0 %s" % h(vm))
+        ops.append("%%vm %d %s" % (k, h(f32(vm + dv * rnd.choice((1, -1))))))
+    on = rnd.choice(TIMERS[2:] if ok("on") else UNSET_TIMERS)
+    off = rnd.choice(UNSET_TIMERS if ok("off") else TIMERS[2:])
+    ops.append("%%kf 0 on %08x" % (on if held or rnd.random() < 0.5
+                                   else rnd.choice(TIMERS)))
+    ops.append("%%kf 0 off %08x" % (off if not held or rnd.random() < 0.5
+                                    else rnd.choice(TIMERS)))
+    mine = rnd.randint(1, 8)
+    theirs = rnd.randint(mine, 8) if ok("ahead") else rnd.randint(0, mine - 1)
+    ops.append("%%rc 0 %d %s" % (mine, h(f32(rnd.uniform(0.0, 3.0)))))
+    ops.append("%%rc %d %d %s" % (k, theirs, h(f32(rnd.uniform(0.0, 3.0)))))
+    for j in range(1, np_):
+        if j != k:
+            ops.append("%%rc %d %d %s" % (j, rnd.randint(1, 8),
+                                          h(f32(1.5))))
+    ops.append("%%fa 0 %d 0 0 0" % (rnd.choice((0, 1, 2, 5, -1))
+                                    if ok("type")
+                                    else rnd.choice((6, 7, 10, 11))))
+    ops.append("%%cur 0 %d" % (0 if ok("act") else -1))
+    return ops
+
+
+def s_glue(rnd):
+    """WeCanHaveTheGlue held and taken over each test either side (the
+    distance, speeds and headings at and near their edges, standing cars
+    among them), GlueOn and GlueOff with the glue on and off, and
+    GetGlueSpeed with and without both RacingCars."""
+    w = World(rnd)
+    me = int_pos(rnd)
+    w.car(0, px=me[0], py=me[1], pz=me[2], pl=0, act=-1)
+    np_ = rnd.choice((2, 3))
+    for k in range(1, np_):
+        w.car(k, pl=0, act=-1)
+    ops = w.ops + ["%NS 0", "%n 0", "%dr 0"]
+    for k in range(1, np_):
+        ops.append("%%P %d %d %s %s 4 4 %d" % (
+            k, k - 1, h(f32(1.0)), h(f32(1.0)), rnd.choice((0, 1, 3, -1))))
+    ops.append("%%gds 0 %s" % h(f32(rnd.uniform(0.0, 60.0))))
+    glued = None
+    if rnd.random() < 0.5:
+        glued = rnd.randrange(1, np_)
+        ops.append("%%kf 0 glue %d" % glued)
+        ops.append("%%kf 0 bias %s" % h(f32(rnd.choice(
+            (0.2, 0.0, 0.5, rnd.uniform(-1.0, 1.0))))))
+    for _ in range(rnd.randrange(6, 12)):
+        k = glued if glued is not None else rnd.randrange(1, np_)
+        ops += glue_layout(rnd, me, k, glued is not None, np_)
+        c = rnd.randrange(10)
+        if c < 5:
+            # A player who isn't the glued one's, with the glue on.
+            p = rnd.randrange(1, np_) if rnd.random() < 0.2 else k
+            ops.append("%%wcg 0 %d" % p)
+        elif c == 5:
+            ops.append("%%gon 0 %d" % k)
+            if glued is None:
+                glued = k
+        elif c == 6:
+            ops.append("%goff 0")
+            glued = None
+        elif c == 7:
+            ops.append(rnd.choice(("%whg 0", "%wng 0")))
+        elif glued is not None:
+            if rnd.random() < 0.3:
+                ops.append("%%rc %d x" % rnd.choice((0, glued)))
+            ops.append("%ggs 0")
+        else:
+            ops.append("%%wcg 0 %d" % k)
+    return ops
+
+
+def diff_ops(rnd):
+    """TheDifficultyInfo's boost tables, filled: the distance graphs (seven
+    rising points each), the position boosts, the speed-ratio rows, each
+    skill's SlowFactor and the Misc frequency and range."""
+    words = [0] * (DIFF_SIZE // 4)
+
+    def put(off, x):
+        words[off // 4] = fbits(f32(x))
+
+    for base in (0, 56):
+        xs = sorted(rnd.sample(range(-3000, 3000, 7), 7))
+        for i, x in enumerate(xs):
+            put(base + 8 * i, x + rnd.choice((0.0, 0.5)))
+            put(base + 8 * i + 4, rnd.uniform(-0.3, 0.3))
+    for i in range(32):
+        put(112 + 4 * i, rnd.uniform(-0.3, 0.3))
+    for i in range(32):
+        put(240 + 4 * i, rnd.uniform(-2.0, 2.0))
+    for s in range(NSKILLS):
+        put(368 + SKILL_STRIDE * s + 20, rnd.choice(
+            (rnd.uniform(0.5, 1.2), rnd.uniform(0.5, 1.2), 0.0, 1.0)))
+    put(984, rnd.choice((0.0, 0.5, 1.0, 2.0, -1.0)))
+    put(988, rnd.choice((500.0, 1e4, 1e5, 2000.0, -1.0, 0.0)))
+    ops = []
+    for off in range(0, DIFF_SIZE, 64):
+        ops.append("%%dw %d %s" % (off, " ".join(
+            "%08x" % v for v in words[off // 4:off // 4 + 16])))
+    return ops
+
+
+BOOST_GATES = ("npc", "boost", "full", "RC", "dc", "ba", "ab", "act",
+               "race", "freq", "rc")
+
+
+def boost_round(rnd, np_, catchup=False):
+    """A race set up for the boost, failing at most one early out
+    (gate_picker); for `catchup`, none, and the two-player race with the
+    AI field and every place drawn round the split."""
+    ok = (lambda g: True) if catchup else gate_picker(rnd, BOOST_GATES)
+    ops = ["%%rp %d %d %d %d %s %s" % (
+        rnd.choice((1, 2, 3)) if ok("npc") else rnd.choice((0, -1)),
+        rnd.randrange(10) if catchup else rnd.choice((0, 1, 3, 4, 7, 8, 9)),
+        rnd.choice((0, 0, 1)), 1 if ok("boost") else 0,
+        h(f32(rnd.uniform(0.0, 2.0))), h(f32(rnd.uniform(0.0, 2.0))))]
+    if catchup:
+        n = 2
+    elif np_ == 3:
+        n = rnd.choice((1, 2, 2)) if rnd.random() < 0.8 else rnd.choice(
+            (0, 3))
+    else:
+        n = 1 if rnd.random() < 0.8 else 0
+    b0, b1 = (1, 2) if rnd.random() < 0.6 else (2, 1)
+    if np_ == 2:
+        b0 = b1 = 1
+    ops.append("%%PT %d %d %d %d %d" % (n, rnd.randrange(1, np_), -1, b0,
+                                         b1))
+    if rnd.random() < 0.3:
+        ops.append("%%sfe %d %d" % (rnd.choice((0, 1)), rnd.choice((0, 1))))
+    if catchup:
+        places = [rnd.randint(1, 8) for _ in range(np_)]
+    else:
+        places = list(range(1, 9))
+        rnd.shuffle(places)
+        if rnd.random() < 0.15:
+            places[rnd.randrange(np_)] = 0
+        if np_ == 3 and rnd.random() < 0.15:
+            # The two players level.
+            places[2] = places[1]
+    for k in range(np_):
+        ops.append("%%rc %d %d %s" % (k, places[k], h(f32(
+            rnd.choice((0.0, 1.0, 2.0, 3.0)) + rnd.choice(
+                (0.0, 0.25, 0.5, 0.75, rnd.uniform(0.0, 1.0)))))))
+    ops.append("@sk 0 %d" % rnd.choice((-3, -1, 0, 1, 4, 8, 9)))
+    for k in range(np_):
+        ops.append("%%vm %d %s" % (k, h(f32(rnd.uniform(0.0, 60.0)))))
+    for k in range(1, np_):
+        ops.append("%%P %d %d %s %s %d %d 0" % (
+            k, k - 1, h(f32(rnd.choice((1.0, 0.9, 1.1,
+                                        rnd.uniform(0.5, 1.5))))),
+            h(f32(rnd.choice((1.0, 1.2, 0.8, 2.0)))),
+            4, 4 if ok("full") else rnd.choice((3, 0))))
+    ops.append("%%RC %d" % (rnd.choice((0, 3)) if ok("RC") else 8))
+    ops.append("%%dc %d" % (0 if ok("dc") else 1))
+    ops.append("%%kf 0 ba %d" % (1 if ok("ba") else 0))
+    ops.append("%%ab 0 %d" % (rnd.choice((1, 2)) if ok("ab") else 0))
+    ops.append("%%cur 0 %d" % (0 if ok("act") else -1))
+    ops.append("%%rt 0 %08x" % (rnd.choice((T30, T30 + 1, 3 * T30))
+                                if ok("race")
+                                else rnd.choice((T30 - 1, 0, 0xffffffff))))
+    now = rnd.randrange(0, 400000)
+    ops.append("G TIMER %08x" % now)
+    if catchup:
+        # Every frequency passes 8001 ticks on.
+        lbt = 8001
+    elif ok("freq"):
+        lbt = rnd.choice((1, 2001, 4001, 8001, 100000, 400001))
+    else:
+        lbt = rnd.choice((0, 2000, 4000, 8000, -1, -4001))
+    ops.append("%%kf 0 lbt %08x" % ((now - lbt) & M32))
+    if not ok("rc"):
+        ops.append("%rc 0 x")
+    if rnd.random() < 0.3:
+        ops.append("G TLEN %s" % h(f32(rnd.choice(
+            (0.0, 1000.0, 3456.5, rnd.uniform(500.0, 8000.0))))))
+    return ops
+
+
+def s_boost(rnd, catchup=False):
+    """CalculateDistanceAndPositionBoost and DecideBoostFactor over one
+    player and two (each leading, and the AI car either side of the split),
+    the catchup on and off, the cop race's lap fraction, the boost
+    frequency and the race clock at their edges, and the speed ratio's
+    table; for `catchup`, the two-player race with every early out passed,
+    the split round each place."""
+    w = World(rnd)
+    w.car(0, pl=0, act=-1)
+    np_ = 3 if catchup else rnd.choice((2, 3, 3))
+    for k in range(1, np_):
+        w.car(k, pl=0, act=-1)
+    ops = w.ops + ["%NS 0", "%n 0", "%dr 0"]
+    if not catchup and rnd.random() < 0.08:
+        # My car a player's: no boost at all.
+        ops.append("%%P 0 1 %s %s 4 4 0" % (h(f32(1.0)), h(f32(1.0))))
+    ops += diff_ops(rnd)
+    if catchup:
+        # Every distance within range.
+        ops.append("%%dw 988 %s" % h(f32(1e9)))
+    ops.append("G TLEN %s" % h(f32(rnd.choice(
+        (1000.0, 3456.5, rnd.uniform(500.0, 8000.0))))))
+    ops.append("%fa 0 0 0 0 0")
+    for _ in range(rnd.randrange(5, 10)):
+        ops += boost_round(rnd, np_, catchup)
+        if rnd.random() < 0.4:
+            k = rnd.randrange(np_)
+            ops.append("%%cdp 0 %d %d" % (rnd.choice((0, k)), k))
+        ops.append("%dbf 0")
+        if rnd.random() < 0.2:
+            ops.append("%dbf 0")
+    return ops
+
+
 N_BUILD = 40
 N_WHERE = 30
 N_LINE = 16
@@ -1292,6 +1806,10 @@ N_TRACKPOINT_EDGE = 30
 N_SIGNINDEX = 20
 N_TAKECHANCE = 20
 N_STICKY_EDGE = 12
+N_BELT = 40
+N_GLUE = 60
+N_BOOST = 60
+N_CATCHUP = 30
 
 
 def script():
@@ -1322,6 +1840,16 @@ def script():
         sc.append(s_takechance(rnd))
     for _ in range(N_STICKY_EDGE):
         sc.append(s_sticky(rnd, edge=True))
+    rnd = random.Random(0x11e3)
+    _PICK.seed(0x11e3)
+    for _ in range(N_BELT):
+        sc.append(s_belt(rnd))
+    for _ in range(N_GLUE):
+        sc.append(s_glue(rnd))
+    for _ in range(N_BOOST):
+        sc.append(s_boost(rnd))
+    for _ in range(N_CATCHUP):
+        sc.append(s_boost(rnd, catchup=True))
     return sc
 
 
@@ -1332,6 +1860,8 @@ encode = dcc.encode
 
 
 class Model(dcc.Model):
+    OK_DIVS = dcc.Model.OK_DIVS | GLUE_DIVS
+
     def __init__(self):
         dcc.Model.__init__(self)
         e = self.e
@@ -1363,6 +1893,12 @@ class Model(dcc.Model):
         self.rnums = {}
         self.rq = []
         self.ri = 0
+        # 11e-3's: the drivers' GetDesiredSpeed, and the glue's Graph built
+        # as the image's start-up code builds it.
+        e.stub(STUB_GDS, self.s_gds)
+        self.gds = {}
+        self.plrs = set()
+        self.call(GLUE_CTOR)
 
     # ---- names -----------------------------------------------------------
 
@@ -1391,6 +1927,9 @@ class Model(dcc.Model):
         if (FACTS <= a < FACTS + FACT_SIZE * NFACTS
                 and (a - FACTS) % FACT_SIZE == 0):
             return "fa%d" % ((a - FACTS) // FACT_SIZE)
+        if (PLR <= a < PLR + PLR_STRIDE * NCARS
+                and (a - PLR) % PLR_STRIDE == 0):
+            return "P%d" % ((a - PLR) // PLR_STRIDE)
         return n
 
     def vtn(self, v):
@@ -1495,6 +2034,11 @@ class Model(dcc.Model):
         self.emit("  tinfo %d" % s32(em.reg[4]))
         return TINFO
 
+    def s_gds(self, em):
+        k = self.driver_car(em)
+        self.emit("  gds %s" % self.name(car_at(k)))
+        em.fpr[0] = self.gds.get(k, 0)
+
     # ---- the world -------------------------------------------------------
 
     def reset(self):
@@ -1524,6 +2068,24 @@ class Model(dcc.Model):
         self.rnums = {}
         self.rq = []
         self.ri = 0
+        # 11e-3's: no players, RacingCars, catchup, SkipFE, race parameters,
+        # difficulty or player positions; the coordinator in state 0.
+        e.put32(DVT + DVT_GDS + 4, STUB_GDS)
+        e.mem[PLR:PLR + PLR_STRIDE * NCARS] = bytes(PLR_STRIDE * NCARS)
+        e.mem[PAVG:PAVG + PAVG_STRIDE * NCARS] = bytes(PAVG_STRIDE * NCARS)
+        e.mem[RCARS:RCARS + RC_STRIDE * NCARS] = bytes(RC_STRIDE * NCARS)
+        e.mem[RCOORD:RCOORD + 16] = bytes(16)
+        for name, v in (("BELT", 1), ("DISABLE", 0), ("REASON", 0),
+                        ("RCOORD", RCOORD), ("BYNUM", 0), ("SKIPFE", 0),
+                        ("SKIPFE_COP", 0)):
+            e.put32(G3[name], v)
+        e.put32(G3["BYNUM"] + 4, 0)
+        for off in RP_FIELDS.values():
+            e.put32(RACE_PARAMS + off, 0)
+        e.mem[DIFF:DIFF + DIFF_SIZE] = bytes(DIFF_SIZE)
+        e.mem[WORLD + W_PPOS:WORLD + W_PPOS + 32] = bytes(32)
+        self.gds = {}
+        self.plrs = set()
 
     # ---- the dumps -------------------------------------------------------
 
@@ -1601,6 +2163,18 @@ class Model(dcc.Model):
             s8(self.e.mem[c + K_LTR])))
         self.emit("  S sticky" + "".join(" %08x" % w(c + K_STICKY + 4 * i)
                                          for i in range(NSTICKY)))
+
+    def plr_at(self, k):
+        return PLR + PLR_STRIDE * k if k >= 0 else 0
+
+    def dump_glue(self, k):
+        w = self.w
+        a = ctrl_at(k)
+        self.emit("  G glue %s on %08x off %08x bias %s reason %d n%s" % (
+            self.name(w(a + KF["glue"])), w(a + KF["on"]), w(a + KF["off"]),
+            fx(w(a + KF["bias"])), s32(w(G3["REASON"])),
+            "".join(" %d" % s32(w(self.plr_at(i) + P_GLUE))
+                    for i in sorted(self.plrs))))
 
     def dump_facts(self):
         for i in range(NFACTS):
@@ -1839,8 +2413,114 @@ class Model(dcc.Model):
             self.call(F["gct"], a, car)
             self.dump_signs(k)
             self.dump_where(k)
-        else:
+        elif not self.pct3(c, k, a, car, t):
             raise SystemExit("bad op %r" % (t,))
+
+    def pct3(self, c, k, a, car, t):
+        """11e-3's ops; False for none of them."""
+        e, w = self.e, self.w
+        if c == "P":
+            p, avg = self.plr_at(k), PAVG + PAVG_STRIDE * k
+            e.mem[p:p + PLR_STRIDE] = bytes(PLR_STRIDE)
+            e.mem[avg:avg + PAVG_STRIDE] = bytes(PAVG_STRIDE)
+            e.put32(p + P_CAR, car)
+            e.put32(p + P_NUM, int(t[2]) & M32)
+            e.put32(p + P_AVG, avg)
+            e.put32(avg + 8, int(t[3], 16))
+            e.put32(p + P_MAX, int(t[4], 16))
+            e.mem[avg] = int(t[5]) & 0xff
+            e.mem[avg + 2] = int(t[6]) & 0xff
+            e.put32(p + P_GLUE, int(t[7]) & M32)
+            e.put32(car + C_PLAYER, p)
+            self.plrs.add(k)
+        elif c == "PT":
+            e.put32(GLOBALS["NPLAYERS"], k & M32)
+            for i in range(2):
+                e.put32(GLOBALS["PLAYERS"] + 4 * i,
+                        self.plr_at(int(t[2 + i])))
+                e.put32(G3["BYNUM"] + 4 * i, self.plr_at(int(t[4 + i])))
+        elif c == "rc":
+            r = RCARS + RC_STRIDE * k
+            if t[2] == "x":
+                e.put32(car + C_RC, 0)
+            else:
+                e.mem[r:r + RC_STRIDE] = bytes(RC_STRIDE)
+                e.put32(r, car)
+                e.mem[r + RC_POS] = int(t[2]) & 0xff
+                e.put32(r + RC_LAP, int(t[3], 16))
+                e.put32(car + C_RC, r)
+        elif c == "RC":
+            e.put32(RCOORD, k & M32)
+        elif c == "rp":
+            for name, v in zip(("npc", "nai", "cop", "boost"), t[1:5]):
+                e.put32(RACE_PARAMS + RP_FIELDS[name], int(v) & M32)
+            e.put32(RACE_PARAMS + RP_FIELDS["s0"], int(t[5], 16))
+            e.put32(RACE_PARAMS + RP_FIELDS["s1"], int(t[6], 16))
+        elif c == "sfe":
+            e.put32(G3["SKIPFE"], k & M32)
+            e.put32(G3["SKIPFE_COP"], int(t[2]) & M32)
+        elif c == "dw":
+            for i, v in enumerate(t[2:]):
+                e.put32(DIFF + k + 4 * i, int(v, 16))
+        elif c == "gds":
+            self.gds[k] = int(t[2], 16)
+        elif c == "wp":
+            for i in range(3):
+                e.put32(WORLD + W_PPOS + 16 * k + 4 * i, int(t[2 + i], 16))
+        elif c == "bm":
+            e.put32(G3["BELT"], k & M32)
+        elif c == "dc":
+            e.put32(G3["DISABLE"], k & M32)
+        elif c == "ab":
+            e.put32(fact_at(k) + A_BOOST, int(t[2]) & M32)
+        elif c == "np":
+            e.mem[CDRIVERS + CDRIVER_STRIDE * k] = int(t[2]) & 0xff
+        elif c == "vel":
+            for i in range(3):
+                e.put32(car + dcc.C_VEL + 4 * i, int(t[2 + i], 16))
+        elif c == "fsw":
+            e.put32(car + dcc.C_FS, int(t[2], 16))
+            e.put32(car + dcc.C_NW, int(t[3]) & M32)
+        elif c == "kf":
+            f, v = t[2], t[3]
+            if f == "glue":
+                e.put32(a + KF[f], self.car_ptr(v))
+            elif f == "cp":
+                e.put32(a + KF[f], self.plr_at(int(v)))
+            elif f == "ba":
+                e.put32(a + KF[f], int(v) & M32)
+            else:
+                e.put32(a + KF[f], int(v, 16))
+        elif c in ("whb", "wnb", "wcb"):
+            self.emit("  belt %d" % s32(self.call(F[c], a)))
+        elif c in ("whg", "wng"):
+            self.emit("  glue %d" % s32(self.call(F[c], a)))
+        elif c == "wcg":
+            got = self.call(F[c], a, self.plr_at(int(t[2])))
+            self.emit("  glue %d" % s32(got))
+            self.dump_glue(k)
+        elif c == "gon":
+            self.call(F[c], a, self.plr_at(int(t[2])))
+            self.dump_glue(k)
+        elif c == "goff":
+            self.call(F[c], a)
+            self.dump_glue(k)
+        elif c == "ggs":
+            self.call(F[c], a)
+            self.emit("  gspeed %s" % fx(e.fpr[0]))
+        elif c == "cdp":
+            self.fill(OUTP, 8)
+            self.call(F[c], a, RCARS + RC_STRIDE * int(t[2]),
+                      RCARS + RC_STRIDE * int(t[3]), OUTP, OUTP + 4)
+            self.emit("  dpb %s %s" % (fx(w(OUTP)), fx(w(OUTP + 4))))
+        elif c == "dbf":
+            self.call(F[c], a)
+            self.emit("  boost %s lbt %08x cp %s" % (
+                fx(w(car + C_BOOST)), w(a + KF["lbt"]),
+                self.name(w(a + KF["cp"]))))
+        else:
+            return False
+        return True
 
     def op(self, t):
         if t[0].startswith("%"):
@@ -1896,7 +2576,8 @@ MUTATIONS = [
       "    c->CurrentRoutePointLookahead = 1;"),
     M("ct-exclude", "    c->CarToExcludeFromCollisionPrediction = NULL;\n"
       "    c->LastBoostCalculationTime", "    c->LastBoostCalculationTime"),
-    M("ct-glue", "    c->pGlueCar = NULL;\n", ""),
+    M("ct-glue", "    c->pGlueCar = NULL;\n    c->GlueOnTimer.PackedTime = 0;",
+      "    c->GlueOnTimer.PackedTime = 0;"),
     M("ct-progress", "    timer_set_time(&c->ProgressTimer, AICC_PROGRESS_SECONDS);",
       "    timer_set_time(&c->ProgressTimer, AICC_OFF_BELT_SECONDS);"),
     M("ct-avg10", "                           CAR_MEMORY_POOL), 10);",
@@ -1907,8 +2588,8 @@ MUTATIONS = [
       "    c->bBoostAllowed = 1;", "    c->bBoostAllowed = 1;"),
     M("ct-boost", "    c->bBoostAllowed = 1;\n    c->pCatchupPlayer = NULL;",
       "    c->bBoostAllowed = 0;\n    c->pCatchupPlayer = NULL;"),
-    M("ct-catchup", "    c->pCatchupPlayer = NULL;",
-      "    c->pCatchupPlayer = (struct Player *)(void *)c;"),
+    M("ct-catchup", "    c->pCatchupPlayer = NULL;\n    c->LastTimeNonGetUnstuckActionWasCalled",
+      "    c->pCatchupPlayer = (struct Player *)(void *)c;\n    c->LastTimeNonGetUnstuckActionWasCalled"),
     M("ct-pot", "    c->PullOverTimeout = AICC_PULL_OVER_TIMEOUT;",
       "    c->PullOverTimeout = 0.0f;"),
     M("ct-sign", "    c->nSignpostIndex = signpost_get_index(car->TheTrackPathCoordinate\n"
@@ -2351,6 +3032,266 @@ MUTATIONS = [
       "#define AICC_TAKEN_SIGN_TICKS 10001.5f"),
     M("gc-end-find", "    if (atEnd && !took)", "    if (atEnd)"),
     M("gc-end-took", "    if (atEnd && !took)", "    if (!took)"),
+    # 11e-3's. The belt.
+    M("whb-mode", "    return c->Base.pCar->TheMovementMode == BELT_MOVEMENT;",
+      "    return c->Base.pCar->TheMovementMode != BELT_MOVEMENT;"),
+    M("wnb-flag", "    return bBeltMover != 0;", "    return 1;"),
+    M("wcb-np", "    if (c->Base.Driver->MyDriveTarget.NumPoints < 3)",
+      "    if (c->Base.Driver->MyDriveTarget.NumPoints < 2)"),
+    M("wcb-np-le", "    if (c->Base.Driver->MyDriveTarget.NumPoints < 3)",
+      "    if (c->Base.Driver->MyDriveTarget.NumPoints <= 3)"),
+    M("wcb-demo", "        == RCSTATE_AI_DEMO_MODE)\n        return 0;\n    if (timer_is_valid(&c->OffBeltTimer)",
+      "        == RCSTATE_POSTRACE)\n        return 0;\n    if (timer_is_valid(&c->OffBeltTimer)"),
+    M("wcb-ob", "    if (timer_is_valid(&c->OffBeltTimer)\n        || timer_is_valid(&c->RealPhysicsTimer))",
+      "    if (timer_is_valid(&c->RealPhysicsTimer))"),
+    M("wcb-rp", "    if (timer_is_valid(&c->OffBeltTimer)\n        || timer_is_valid(&c->RealPhysicsTimer))",
+      "    if (timer_is_valid(&c->OffBeltTimer))"),
+    M("wcb-speed", "#define AICC_BELT_MIN_SPEED       5.0f", "#define AICC_BELT_MIN_SPEED       5.5f"),
+    M("wcb-speed-le", "    if (car->State.ForwardSpeed < AICC_BELT_MIN_SPEED",
+      "    if (car->State.ForwardSpeed <= AICC_BELT_MIN_SPEED"),
+    M("wcb-wheels", "        || car->State.nWheelsTouchingGround <= 0)\n        return 0;\n    if (c->CurrentAction == NULL)\n        return 0;\n    type",
+      "        || car->State.nWheelsTouchingGround < 0)\n        return 0;\n    if (c->CurrentAction == NULL)\n        return 0;\n    type"),
+    M("wcb-noact", "    if (c->CurrentAction == NULL)\n        return 0;\n    type = c->CurrentAction->Type;",
+      "    if (c->CurrentAction == NULL)\n        return 1;\n    type = c->CurrentAction->Type;"),
+    M("wcb-po", "    if (type == AIACTION_PULL_OVER || type == AIACTION_GET_UNSTUCK",
+      "    if (0 || type == AIACTION_GET_UNSTUCK"),
+    M("wcb-gu", "    if (type == AIACTION_PULL_OVER || type == AIACTION_GET_UNSTUCK",
+      "    if (type == AIACTION_PULL_OVER || 0"),
+    M("wcb-ar", "        || type == AIACTION_ACCIDENT_RECOVERY\n        || type == AIACTION_AVOID_ROADBLOCK",
+      "        || 0\n        || type == AIACTION_AVOID_ROADBLOCK"),
+    M("wcb-rb", "        || type == AIACTION_AVOID_ROADBLOCK\n        || type == AIACTION_I_JUST_GOT_HIT)",
+      "        || 0\n        || type == AIACTION_I_JUST_GOT_HIT)"),
+    M("wcb-ij", "        || type == AIACTION_AVOID_ROADBLOCK\n        || type == AIACTION_I_JUST_GOT_HIT)",
+      "        || type == AIACTION_AVOID_ROADBLOCK\n        || 0)"),
+    M("wcb-careful", "#define AICC_CAREFUL_SKILL        (-2)", "#define AICC_CAREFUL_SKILL        (-1)"),
+    M("wcb-range", "#define AICC_BELT_PLAYER_RANGE  120.0f", "#define AICC_BELT_PLAYER_RANGE  121.0f"),
+    M("wcb-range-le", "        < AICC_BELT_PLAYER_RANGE)", "        <= AICC_BELT_PLAYER_RANGE)"),
+    M("wcb-race", "#define AICC_BELT_RACE_SECONDS   30.0f", "#define AICC_BELT_RACE_SECONDS   30.5f"),
+    M("wcb-race-le", "             < AICC_BELT_RACE_SECONDS);", "             <= AICC_BELT_RACE_SECONDS);"),
+    M("wcb-race-u", "    return !((float)(int32_t)pCurrentRace->RaceTime.PackedTime",
+      "    return !((float)pCurrentRace->RaceTime.PackedTime"),
+    M("wcb-race-not", "    return !((float)(int32_t)pCurrentRace->RaceTime.PackedTime",
+      "    return !!((float)(int32_t)pCurrentRace->RaceTime.PackedTime"),
+    # The glue.
+    M("whg-car", "    return c->pGlueCar != NULL;", "    return c->pGlueCar == NULL;"),
+    M("wng-zero", "int aicarcontroller_we_need_the_glue(AICarController *c)\n{\n    // 0x00190c88.\n    (void)c;\n    return 0;",
+      "int aicarcontroller_we_need_the_glue(AICarController *c)\n{\n    // 0x00190c88.\n    (void)c;\n    return 1;"),
+    M("uv-div", "    float q = ee_div(1.0f, sqrtf((v->x * v->x + v->y * v->y) + v->z * v->z));",
+      "    float q = 1.0f / sqrtf((v->x * v->x + v->y * v->y) + v->z * v->z);"),
+    M("uv-z", "    u->z = v->z * q;", "    u->z = v->y * q;"),
+    M("ng-reason", "    nLastGlueReason = reason;\n    return 0;", "    (void)reason;\n    return 0;"),
+    M("wcg-held-p", "    if (aicarcontroller_we_have_the_glue(c))\n        p = c->pGlueCar->pPlayer;\n", ""),
+    M("wcg-noact", "        return no_glue(AICC_GLUE_NO_ACTION);",
+      "        return no_glue(AICC_GLUE_NO_ACTION_TYPE);"),
+    M("wcg-type", "    if (c->CurrentAction->Type >= AIACTION_PULL_OVER)",
+      "    if (c->CurrentAction->Type > AIACTION_PULL_OVER)"),
+    M("wcg-type-u", "    if (c->CurrentAction->Type >= AIACTION_PULL_OVER)",
+      "    if ((uint32_t)c->CurrentAction->Type >= AIACTION_PULL_OVER)"),
+    M("wcg-ratio", "#define AICC_GLUE_MIN_RATIO     0.939999998f", "#define AICC_GLUE_MIN_RATIO     0.940000057f"),
+    M("wcg-ratio-le", "    if (player_get_speed_ratio(p) < AICC_GLUE_MIN_RATIO)",
+      "    if (player_get_speed_ratio(p) <= AICC_GLUE_MIN_RATIO)"),
+    M("wcg-dz", "    d.z = mine->State.Position.z - theirs->State.Position.z;\n    dist",
+      "    d.z = 0.0f;\n    dist"),
+    M("wcg-dv-abs", "    dv = fabsf(theirs->State.VelocityMagnitude\n               - mine->State.VelocityMagnitude);",
+      "    dv = (theirs->State.VelocityMagnitude\n               - mine->State.VelocityMagnitude);"),
+    M("wcg-dot-z", "    dot = (a.x * b.x + a.y * b.y) + a.z * b.z;", "    dot = a.x * b.x + a.y * b.y;"),
+    M("wcg-on", "        if (!timer_is_valid(&c->GlueOnTimer)) {", "        if (timer_is_valid(&c->GlueOnTimer)) {"),
+    M("wcg-no-time", "            nLastGlueReason = AICC_GLUE_NO_TIME;\n", ""),
+    M("wcg-off-set", "            timer_set_time(&c->GlueOffTimer, AICC_GLUE_OFF_SECONDS);\n", ""),
+    M("wcg-off-secs", "#define AICC_GLUE_OFF_SECONDS  20.0f", "#define AICC_GLUE_OFF_SECONDS  21.0f"),
+    M("wcg-hold-range", "#define AICC_GLUE_HOLD_RANGE   60.0f", "#define AICC_GLUE_HOLD_RANGE   61.0f"),
+    M("wcg-hold-range-le", "        if (AICC_GLUE_HOLD_RANGE < dist)", "        if (AICC_GLUE_HOLD_RANGE <= dist)"),
+    M("wcg-hold-speed", "#define AICC_GLUE_HOLD_SPEED   10.0f", "#define AICC_GLUE_HOLD_SPEED   10.0000010f"),
+    M("wcg-hold-speed-le", "        if (AICC_GLUE_HOLD_SPEED < dv)", "        if (AICC_GLUE_HOLD_SPEED <= dv)"),
+    M("wcg-hold-dot", "#define AICC_GLUE_HOLD_DOT      0.5f", "#define AICC_GLUE_HOLD_DOT      0.500000060f"),
+    M("wcg-hold-dot-le", "        if (dot < AICC_GLUE_HOLD_DOT)", "        if (dot <= AICC_GLUE_HOLD_DOT)"),
+    M("wcg-hold-yes", "            return no_glue(AICC_GLUE_NO_HEADING);\n        return 1;",
+      "            return no_glue(AICC_GLUE_NO_HEADING);\n        return 0;"),
+    M("wcg-off-test", "    if (timer_is_valid(&c->GlueOffTimer))\n        return no_glue(AICC_GLUE_NO_OFF_TIME);",
+      "    if (0)\n        return no_glue(AICC_GLUE_NO_OFF_TIME);"),
+    M("wcg-take-range", "#define AICC_GLUE_TAKE_RANGE   30.0f", "#define AICC_GLUE_TAKE_RANGE   30.25f"),
+    M("wcg-take-range-le", "    if (AICC_GLUE_TAKE_RANGE < dist)", "    if (AICC_GLUE_TAKE_RANGE <= dist)"),
+    M("wcg-take-speed", "#define AICC_GLUE_TAKE_SPEED    6.0f", "#define AICC_GLUE_TAKE_SPEED    6.00000048f"),
+    M("wcg-take-speed-le", "    if (AICC_GLUE_TAKE_SPEED < dv)", "    if (AICC_GLUE_TAKE_SPEED <= dv)"),
+    M("wcg-take-dot", "#define AICC_GLUE_TAKE_DOT      0.699999988f", "#define AICC_GLUE_TAKE_DOT      0.700000048f"),
+    M("wcg-take-dot-le", "    if (dot < AICC_GLUE_TAKE_DOT)", "    if (dot <= AICC_GLUE_TAKE_DOT)"),
+    M("wcg-ahead", "    if (theirs->pRacingCar->RacePosition < mine->pRacingCar->RacePosition)",
+      "    if (theirs->pRacingCar->RacePosition <= mine->pRacingCar->RacePosition)"),
+    M("wcg-ahead-swap", "    if (theirs->pRacingCar->RacePosition < mine->pRacingCar->RacePosition)",
+      "    if (mine->pRacingCar->RacePosition < theirs->pRacingCar->RacePosition)"),
+    M("wcg-take-yes", "        return no_glue(AICC_GLUE_NO_AHEAD);\n    return 1;",
+      "        return no_glue(AICC_GLUE_NO_AHEAD);\n    return 0;"),
+    M("rs-action", "#define AICC_GLUE_NO_ACTION       1", "#define AICC_GLUE_NO_ACTION       11"),
+    M("rs-type", "#define AICC_GLUE_NO_ACTION_TYPE  2", "#define AICC_GLUE_NO_ACTION_TYPE  11"),
+    M("rs-ratio", "#define AICC_GLUE_NO_SPEED_RATIO  3", "#define AICC_GLUE_NO_SPEED_RATIO  11"),
+    M("rs-range", "#define AICC_GLUE_NO_RANGE        5", "#define AICC_GLUE_NO_RANGE        11"),
+    M("rs-speed", "#define AICC_GLUE_NO_SPEED        6", "#define AICC_GLUE_NO_SPEED        11"),
+    M("rs-heading", "#define AICC_GLUE_NO_HEADING      7", "#define AICC_GLUE_NO_HEADING      11"),
+    M("rs-time", "#define AICC_GLUE_NO_TIME         8", "#define AICC_GLUE_NO_TIME         11"),
+    M("rs-off", "#define AICC_GLUE_NO_OFF_TIME     9", "#define AICC_GLUE_NO_OFF_TIME     11"),
+    M("rs-ahead", "#define AICC_GLUE_NO_AHEAD       10", "#define AICC_GLUE_NO_AHEAD       11"),
+    M("gon-have", "    if (aicarcontroller_we_have_the_glue(c))\n        return;\n    p->nGlueCount++;",
+      "    p->nGlueCount++;"),
+    M("gon-count", "    p->nGlueCount++;\n", ""),
+    M("gon-timer", "    timer_set_time(&c->GlueOnTimer, AICC_GLUE_ON_SECONDS);\n", ""),
+    M("gon-secs", "#define AICC_GLUE_ON_SECONDS    7.0f", "#define AICC_GLUE_ON_SECONDS    7.5f"),
+    M("gon-car", "    c->pGlueCar = p->MyCar;\n", ""),
+    M("gon-bias", "    c->fCurrentGlueTimeBias = AICC_GLUE_TIME_BIAS;\n", ""),
+    M("gon-bias-val", "#define AICC_GLUE_TIME_BIAS     0.200000003f", "#define AICC_GLUE_TIME_BIAS     0.25f"),
+    M("goff-null", "    c->pGlueCar = NULL;\n    g->pPlayer->nGlueCount--;", "    g->pPlayer->nGlueCount--;"),
+    M("goff-count", "    c->pGlueCar = NULL;\n    g->pPlayer->nGlueCount--;", "    c->pGlueCar = NULL;"),
+    M("goff-have", "    if (!aicarcontroller_we_have_the_glue(c))\n        return;\n    g = c->pGlueCar;",
+      "    g = c->pGlueCar;"),
+    M("ggs-rm", "    if (rm == NULL || rg == NULL) {", "    if (rg == NULL) {"),
+    M("ggs-rg", "    if (rm == NULL || rg == NULL) {", "    if (rm == NULL) {"),
+    M("ggs-gds", "        return ((DriverSpeedFn)e->fn)(vt_this(drv, e));", "        (void)e;\n        return 0.0f;"),
+    M("ggs-sign", "    if (rg->RacePosition < rm->RacePosition)\n        gap = -gap;",
+      "    if (rg->RacePosition <= rm->RacePosition)\n        gap = -gap;"),
+    M("ggs-sign-swap", "    if (rg->RacePosition < rm->RacePosition)\n        gap = -gap;",
+      "    if (rm->RacePosition < rg->RacePosition)\n        gap = -gap;"),
+    M("ggs-bias", "    gap = gap - c->fCurrentGlueTimeBias * gv;", "    gap = gap + c->fCurrentGlueTimeBias * gv;"),
+    M("ggs-dv", "    dv = mine->State.VelocityMagnitude - gv;", "    dv = gv - mine->State.VelocityMagnitude;"),
+    M("ggs-graph", "    f = (graph_get_value(&gGlueBoostGraph, gap) + 1.0f)",
+      "    f = (graph_get_value(&gGlueBoostGraph, -gap) + 1.0f)"),
+    M("ggs-gain", "#define AICC_GLUE_SPEED_GAIN  (-0.0500000007f)", "#define AICC_GLUE_SPEED_GAIN  (-0.06f)"),
+    M("ggs-scale", "#define AICC_GLUE_GAP_SCALE     0.00999999978f", "#define AICC_GLUE_GAP_SCALE     0.02f"),
+    M("ggs-one", "                                       + 1.0f);\n    f = max_s(f, AICC_GLUE_MIN_FACTOR);",
+      "                                       + 2.0f);\n    f = max_s(f, AICC_GLUE_MIN_FACTOR);"),
+    M("ggs-min", "    f = max_s(f, AICC_GLUE_MIN_FACTOR);\n", ""),
+    M("ggs-min-val", "#define AICC_GLUE_MIN_FACTOR    0.899999976f", "#define AICC_GLUE_MIN_FACTOR    0.95f"),
+    M("ggs-max", "    return min_s(AICC_GLUE_MAX_FACTOR, f) * gv;", "    return f * gv;"),
+    M("ggs-max-val", "#define AICC_GLUE_MAX_FACTOR    1.10000002f", "#define AICC_GLUE_MAX_FACTOR    1.05f"),
+    M("ggs-points", "    { -20.0f, 0.100000001f }, { 20.0f, -0.100000001f }",
+      "    { -20.0f, 0.100000001f }, { 21.0f, -0.100000001f }"),
+    M("ggs-points-y", "    { -20.0f, 0.100000001f }, { 20.0f, -0.100000001f }",
+      "    { -20.0f, 0.100000001f }, { 20.0f, -0.125f }"),
+    # The boost.
+    M("cdp-dist0", "    *dist = 0.0f;\n    *pos = 0.0f;\n    if (!TheRaceParameters.Boost)",
+      "    *pos = 0.0f;\n    if (!TheRaceParameters.Boost)"),
+    M("cdp-pos0", "    *dist = 0.0f;\n    *pos = 0.0f;\n    if (!TheRaceParameters.Boost)",
+      "    *dist = 0.0f;\n    if (!TheRaceParameters.Boost)"),
+    M("cdp-boost", "    if (!TheRaceParameters.Boost)\n        return;\n    laps", "    laps"),
+    M("cdp-laps", "    laps = me->CurrentLapNumberExact - them->CurrentLapNumberExact;",
+      "    laps = them->CurrentLapNumberExact - me->CurrentLapNumberExact;"),
+    M("cdp-cop", "    if (TheRaceParameters.BeACop || (config_skip_fe() && SkipFEBeACop)) {",
+      "    if ((config_skip_fe() && SkipFEBeACop)) {"),
+    M("cdp-sfe", "    if (TheRaceParameters.BeACop || (config_skip_fe() && SkipFEBeACop)) {",
+      "    if (TheRaceParameters.BeACop) {"),
+    M("cdp-sfe-only", "    if (TheRaceParameters.BeACop || (config_skip_fe() && SkipFEBeACop)) {",
+      "    if (TheRaceParameters.BeACop || SkipFEBeACop) {"),
+    M("cdp-sfe-cop", "    if (TheRaceParameters.BeACop || (config_skip_fe() && SkipFEBeACop)) {",
+      "    if (TheRaceParameters.BeACop || config_skip_fe()) {"),
+    M("cdp-floor", "        if (x < f)\n            f -= 1.0f;\n", ""),
+    M("cdp-floor-le", "        if (x < f)\n            f -= 1.0f;\n", "        if (x <= f)\n            f -= 1.0f;\n"),
+    M("cdp-half", "        laps = (x - f) - 0.5f;", "        laps = x - f;"),
+    M("cdp-ahead", "    ahead = TheTrackPathManager.TrackLength * laps;", "    ahead = laps;"),
+    M("cdp-range", "    if (!(ahead <= di->Misc.MaxDistanceForBoost))", "    if (!(ahead < di->Misc.MaxDistanceForBoost))"),
+    M("cdp-range-abs", "    if (!(ahead <= di->Misc.MaxDistanceForBoost))", "    if (!(fabsf(ahead) <= di->Misc.MaxDistanceForBoost))"),
+    M("cdp-lo", "    graph_init(&lo, di->AIDistanceBoostLoSkill, AICC_DISTANCE_BOOST_POINTS);",
+      "    graph_init(&lo, di->AIDistanceBoostHiSkill, AICC_DISTANCE_BOOST_POINTS);"),
+    M("cdp-hi", "    graph_init(&hi, di->AIDistanceBoostHiSkill, AICC_DISTANCE_BOOST_POINTS);",
+      "    graph_init(&hi, di->AIDistanceBoostLoSkill, AICC_DISTANCE_BOOST_POINTS);"),
+    M("cdp-points", "#define AICC_DISTANCE_BOOST_POINTS   7", "#define AICC_DISTANCE_BOOST_POINTS   6"),
+    M("cdp-lin", "    linear_init(&l, AICC_LO_SKILL, graph_get_value(&lo, ahead),",
+      "    linear_init(&l, AICC_LO_SKILL, graph_get_value(&hi, ahead),"),
+    M("cdp-skill", "    skill = (float)(s < 0 ? 0 : s);", "    skill = (float)s;"),
+    M("cdp-lo-skill", "#define AICC_LO_SKILL                0.0f", "#define AICC_LO_SKILL                1.0f"),
+    M("cdp-hi-skill", "#define AICC_HI_SKILL                9.0f", "#define AICC_HI_SKILL                8.0f"),
+    M("cdp-k", "    k = (me->pCar->State.VelocityMagnitude\n         - them->pCar->State.VelocityMagnitude)",
+      "    k = (them->pCar->State.VelocityMagnitude\n         - me->pCar->State.VelocityMagnitude)"),
+    M("cdp-gain", "#define AICC_BOOST_SPEED_GAIN      (-0.00499999989f)", "#define AICC_BOOST_SPEED_GAIN      (-0.006f)"),
+    M("cdp-scale", "#define AICC_BOOST_GAP_SCALE         0.00999999978f", "#define AICC_BOOST_GAP_SCALE         0.02f"),
+    M("cdp-one", "        / (ahead * (ahead * AICC_BOOST_GAP_SCALE) + 1.0f);",
+      "        / (ahead * (ahead * AICC_BOOST_GAP_SCALE) + 2.0f);"),
+    M("cdp-kmin", "    k = max_s(k, -AICC_BOOST_SPEED_LIMIT);\n", ""),
+    M("cdp-kmax", "    *dist = *dist + min_s(AICC_BOOST_SPEED_LIMIT, k);", "    *dist = *dist + k;"),
+    M("cdp-klim", "#define AICC_BOOST_SPEED_LIMIT       0.0500000007f", "#define AICC_BOOST_SPEED_LIMIT       0.04f"),
+    M("cdp-diff", "    diff = them->RacePosition - me->RacePosition;", "    diff = me->RacePosition - them->RacePosition;"),
+    M("cdp-diff0", "    i = diff >= 0 ? diff + 7 : diff + 8;", "    i = diff > 0 ? diff + 7 : diff + 8;"),
+    M("cdp-diff7", "    i = diff >= 0 ? diff + 7 : diff + 8;", "    i = diff + 8;"),
+    M("cdp-diff8", "    i = diff >= 0 ? diff + 7 : diff + 8;", "    i = diff + 7;"),
+    M("cdp-plo", "    linear_init(&l, AICC_LO_SKILL, di->AIPositionBoostLoSkill[i],",
+      "    linear_init(&l, AICC_LO_SKILL, di->AIPositionBoostHiSkill[i],"),
+    M("cdp-pskill", "    *pos = linear_get_value(&l, skill);", "    *pos = linear_get_value(&l, (float)s);"),
+    M("ct-swap", "    if (rt->RacePosition < rl->RacePosition) {", "    if (rt->RacePosition <= rl->RacePosition) {"),
+    M("ct-swap-rt", "        rl = rt;\n        trail = p;\n        rt = r;\n", "        rl = rt;\n        trail = p;\n"),
+    M("ct-half", "    n = TheRaceParameters.NumAICars / 2;", "    n = (TheRaceParameters.NumAICars + 1) / 2;"),
+    M("ct-rl", "    if (!(n < rl->RacePosition))\n        n++;", "    if (!(n <= rl->RacePosition))\n        n++;"),
+    M("ct-rt", "    if (!(n < rt->RacePosition))\n        n++;", "    if (!(n <= rt->RacePosition))\n        n++;"),
+    M("ct-rt-skip", "    if (!(n < rt->RacePosition))\n        n++;\n", ""),
+    M("ct-mine", "    if (n < mine->RacePosition) {", "    if (n <= mine->RacePosition) {"),
+    M("ct-target", "        *target = rt;\n        return trail;", "        *target = rl;\n        return trail;"),
+    M("pr-over", "    size_t off = over ? offsetof(DifficultyInfo, PositionRatioOverOne)\n                      : offsetof(DifficultyInfo, PositionRatioUnderOne);",
+      "    size_t off = over ? offsetof(DifficultyInfo, PositionRatioUnderOne)\n                      : offsetof(DifficultyInfo, PositionRatioOverOne);"),
+    M("pr-place", "                                         + off + 8 * (place - 1));",
+      "                                         + off + 8 * place);"),
+    M("dbf-rc", "    if (rc == NULL || !c->bBoostAllowed || car->pPlayer != NULL)",
+      "    if (rc == NULL || car->pPlayer != NULL)"),
+    M("dbf-player", "    if (rc == NULL || !c->bBoostAllowed || car->pPlayer != NULL)",
+      "    if (rc == NULL || !c->bBoostAllowed)"),
+    M("dbf-allowed", "    allowed = c->CurrentAction != NULL\n              && c->CurrentAction->AllowedToUseBoost != 0;",
+      "    allowed = c->CurrentAction != NULL;"),
+    M("dbf-early", "#define AICC_BOOST_RACE_SECONDS     30.0f", "#define AICC_BOOST_RACE_SECONDS     30.5f"),
+    M("dbf-early-le", "            < AICC_BOOST_RACE_SECONDS;", "            <= AICC_BOOST_RACE_SECONDS;"),
+    M("dbf-early-u", "    early = (float)(int32_t)pCurrentRace->RaceTime.PackedTime",
+      "    early = (float)pCurrentRace->RaceTime.PackedTime"),
+    M("dbf-freq", "    if (!(TheDifficultyInfo.Misc.BoostCalculationFrequency\n          < (float)",
+      "    if (!(TheDifficultyInfo.Misc.BoostCalculationFrequency\n          <= (float)"),
+    M("dbf-freq-u", "          < (float)(int32_t)((uint32_t)WorldTimer\n",
+      "          < (float)((uint32_t)WorldTimer\n"),
+    M("dbf-lbt", "    c->LastBoostCalculationTime.PackedTime = (uint32_t)WorldTimer;\n", ""),
+    M("dbf-cp-null", "    c->pCatchupPlayer = NULL;\n    if (!CarControllerDisableCatchup",
+      "    if (!CarControllerDisableCatchup"),
+    M("dbf-dc", "    if (!CarControllerDisableCatchup\n", "    if (1\n"),
+    M("dbf-demo", "               != RCSTATE_AI_DEMO_MODE\n        && TheRaceParameters.NumPlayerCars > 0) {",
+      "               != RCSTATE_RACE_IN_PROGRESS\n        && TheRaceParameters.NumPlayerCars > 0) {"),
+    M("dbf-npc", "        && TheRaceParameters.NumPlayerCars > 0) {", "        && TheRaceParameters.NumPlayerCars >= 0) {"),
+    M("dbf-npc1", "        && TheRaceParameters.NumPlayerCars > 0) {", "        && TheRaceParameters.NumPlayerCars > 1) {"),
+    M("dbf-not-set", "        if (!allowed) {\n            car->State.BoostFactor = boost;\n            return;",
+      "        if (!allowed) {\n            return;"),
+    M("dbf-not", "        if (!allowed) {\n            car->State.BoostFactor = boost;\n            return;\n        }\n", ""),
+    M("dbf-early-skip", "        if (!early) {", "        if (1) {"),
+    M("dbf-dist1", "            float dist = 0.0f, pos = 0.0f, scale = 1.0f;",
+      "            float dist = 1.0f, pos = 0.0f, scale = 1.0f;"),
+    M("dbf-np1", "            if (PlayerNumPlayers == 1) {", "            if (PlayerNumPlayers <= 1) {"),
+    M("dbf-np2", "            } else if (PlayerNumPlayers == 2) {", "            } else if (PlayerNumPlayers >= 2) {"),
+    M("dbf-cp1", "                c->pCatchupPlayer = p;\n                scale = TheRaceParameters.BoostScale[p->PlayerNumber];\n                aicarcontroller",
+      "                scale = TheRaceParameters.BoostScale[p->PlayerNumber];\n                aicarcontroller"),
+    M("dbf-scale1", "                scale = TheRaceParameters.BoostScale[p->PlayerNumber];\n                aicarcontroller",
+      "                scale = TheRaceParameters.BoostScale[0];\n                aicarcontroller"),
+    M("dbf-args1", "                    c, rc, p->MyCar->pRacingCar, &dist, &pos);",
+      "                    c, rc, p->MyCar->pRacingCar, &pos, &dist);"),
+    M("dbf-me1", "                    c, rc, p->MyCar->pRacingCar, &dist, &pos);",
+      "                    c, p->MyCar->pRacingCar, rc, &dist, &pos);"),
+    M("dbf-args2", "                    c, rc, target, &dist, &pos);", "                    c, target, rc, &dist, &pos);"),
+    M("dbf-cp2", "                c->pCatchupPlayer = p;\n                scale = TheRaceParameters.BoostScale[p->PlayerNumber];\n            }",
+      "                scale = TheRaceParameters.BoostScale[p->PlayerNumber];\n            }"),
+    M("dbf-scale2", "                scale = TheRaceParameters.BoostScale[p->PlayerNumber];\n            }",
+      "                scale = TheRaceParameters.BoostScale[1];\n            }"),
+    M("dbf-formula", "            boost = (dist + 1.0f) + pos * scale;", "            boost = (dist + 1.0f) + pos;"),
+    M("dbf-formula-d", "            boost = (dist + 1.0f) + pos * scale;", "            boost = 1.0f + pos * scale;"),
+    M("dbf-ratio-allowed", "    if (allowed && cp != NULL) {", "    if (cp != NULL) {"),
+    M("dbf-ratio-clamp", "        s = s < 0 ? 0 : s;\n        slow =", "        slow ="),
+    M("dbf-slow-idx", "        slow = TheDifficultyInfo.AISkillLevel[s].SlowFactor;",
+      "        slow = TheDifficultyInfo.AISkillLevel[s + 1].SlowFactor;"),
+    M("dbf-ratio-place", "            int32_t place = cp->MyCar->pRacingCar->RacePosition;",
+      "            int32_t place = rc->RacePosition;"),
+    M("dbf-ratio-over", "            table_init(&t, position_ratio_row(1.0f <= ratio, place), 2,",
+      "            table_init(&t, position_ratio_row(1.0f < ratio, place), 2,"),
+    M("dbf-ratio-n", "            table_init(&t, position_ratio_row(1.0f <= ratio, place), 2,",
+      "            table_init(&t, position_ratio_row(1.0f <= ratio, place), 3,"),
+    M("dbf-ratio-f", "            f = (ratio - 1.0f) * table_get_value(&t, (float)s) + 1.0f;",
+      "            f = ratio * table_get_value(&t, (float)s);"),
+    M("dbf-ratio-max", "            boost *= max_s(f, slow);", "            boost *= f;"),
+    M("dbf-ratio-mul", "            boost *= max_s(f, slow);", "            boost = max_s(f, slow);"),
+    M("dbf-set", "    }\n    car->State.BoostFactor = boost;\n}\n", "    }\n}\n"),
+    M("pl-full", "    return a->nSlots == a->nSamples && f < p->fMaxSpeedRatio;",
+      "    return f < p->fMaxSpeedRatio;", rel=PLAYER_H),
+    M("pl-max", "    return a->nSlots == a->nSamples && f < p->fMaxSpeedRatio;",
+      "    return a->nSlots == a->nSamples;", rel=PLAYER_H),
+    M("pl-max-le", "    return a->nSlots == a->nSamples && f < p->fMaxSpeedRatio;",
+      "    return a->nSlots == a->nSamples && f <= p->fMaxSpeedRatio;", rel=PLAYER_H),
+    M("pl-ratio", "    return p->pAverageSpeedRatio->fAverage;", "    return 1.0f;", rel=PLAYER_H),
 ]
 
 EQUIVALENT = {
@@ -2384,6 +3325,20 @@ EQUIVALENT = {
         "location, never a target IsDriveable reads.",
     "sp-again-relaxed":
         "As sp-relaxed, for the second GetNewDrivingLine.",
+    "wcb-race-le":
+        "The race clock is whole ticks, and no whole tick count times "
+        "0.000250000012f rounds to 30 exactly: 120000 ticks is 30.000002, "
+        "119999 is 29.99975, so < and <= agree.",
+    "dbf-early-le":
+        "As wcb-race-le, for DecideBoostFactor's own 30 s.",
+    "dbf-ratio-allowed":
+        "pCatchupPlayer is cleared before the catchup and set only past its "
+        "!allowed return, so a catchup player means the action allows the "
+        "boost.",
+    "dbf-ratio-over":
+        "At a speed ratio of exactly 1 the row's value is multiplied by "
+        "ratio - 1, 0, and the rows hold finite values, so either row gives "
+        "1.",
 }
 
 

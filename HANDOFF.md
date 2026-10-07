@@ -15447,6 +15447,110 @@ Found along the way:
 Every other checker still runs clean. `docs/formats/ai-car-controller.md`
 has the detail, under "The signposts". The CIA builds.
 
+### Step 11e-3: AICarController's belt, glue and boost
+
+`aicarcontroller.c` gains eleven functions:
+- the belt's WeHaveTheBelt (0x00190af8), WeNeedTheBelt (0x00190b10) and
+  WeCanHaveTheBelt (0x00190b20);
+- the glue's WeHaveTheGlue (0x00190c78), WeNeedTheGlue (0x00190c88),
+  WeCanHaveTheGlue (0x00190c90), GlueOn (0x00190f38), GlueOff
+  (0x00190fb8) and GetGlueSpeed (0x00190ff8);
+- the boost's DecideBoostFactor (0x001928f0) and
+  CalculateDistanceAndPositionBoost (0x00192c78).
+
+They come with the unit's globals: bBeltMover (gp-20344, 1), the glue's
+two-point Graph (gp-20336, (-20, 0.1) to (20, -0.1)), the catchup's off
+switch (gp-20132) and nLastGlueReason (gp-20296).
+
+- **WeCanHaveTheBelt.** It answers no for any of these: under 3 drive
+  target points; AIDemoMode; OffBeltTimer or RealPhysicsTimer running;
+  under 5 m/s forward or no wheel down; no action, or PullOver,
+  GetUnstuck, AccidentRecovery, AvoidRoadBlock or IJustGotHit; a careful
+  driver; a player within 120 m; under 30 s raced.
+- **WeCanHaveTheGlue.** Reasons 1 to 10 go into nLastGlueReason (4 is
+  unused).
+  - It refuses with no action, an action type of PullOver or later
+    (signed), or a speed ratio under 0.94.
+  - It holds within 60 m, 10 m/s and a heading dot of 0.5 while
+    GlueOnTimer runs. When that runs out, GlueOffTimer is set to 20 s.
+  - It takes within 30 m, 6 m/s and 0.7, with GlueOffTimer out and the
+    player not ahead.
+  - Each velocity is normalised by the VU0's `vrsqrt`, so a standing car's
+    direction is 0.
+- **GlueOn and GlueOff.** GlueOn counts nGlueCount up and sets 7 s and a
+  bias of 0.2. GlueOff counts it down.
+- **GetGlueSpeed.** Without both RacingCars it answers the driver's
+  GetDesiredSpeed. Otherwise it is the glued car's speed times
+  `(graph(gap - bias x speed) + 1) + dv x -0.05 / (gap^2 x 0.01 + 1)`,
+  clamped to 0.9-1.1. The gap is negative with the glued car ahead.
+- **CalculateDistanceAndPositionBoost.** The laps between the cars are
+  folded to within half a lap in a cop race. Times the track length that
+  gives `ahead`, and nothing comes of it past MaxDistanceForBoost.
+  - The two distance Graphs, between skill 0 and 9, give `dist`, plus a
+    speed term clamped to 0.05.
+  - The position boost's index is `diff + 7`, or `diff + 8` when the
+    player is behind.
+- **DecideBoostFactor.** Nothing changes for a car with no RacingCar,
+  with no boost allowed, or with a player.
+  - It runs every BoostCalculationFrequency seconds.
+  - With the catchup on, outside AIDemoMode and with player cars, an
+    action that doesn't allow the boost sets 1.
+  - After 30 s, the factor is `(dist + 1) + pos x BoostScale`, against
+    the one player or the two-player target. That target is the leader,
+    or the trailer for an AI car placed past NumAICars / 2, plus one for
+    each player within it.
+  - It is then scaled by the player's speed ratio through the
+    PositionRatio table, no less than the skill's SlowFactor, when
+    Player::CatchupAllowed(SlowFactor) passes.
+
+`player.h` gains `player_get_speed_ratio` and `player_catchup_allowed`
+(0x001811e8 and 0x001811f8). Retail's CatchupAllowed compares its
+argument with fMaxSpeedRatio, not the mean, as the first try had it.
+
+Only Think's two belt calls and ExecuteCurrentAction's DecideBoostFactor
+have callers in retail. WeHaveTheBelt and the glue's WeNeed, WeCanHave,
+GlueOn, GlueOff and GetGlueSpeed are reached by no `jal` and no data
+word, so the glue never runs in the game.
+
+The checker:
+- **The stand-in.** It stands in the driver table's GetDesiredSpeed.
+- **The memory.** The script fills the rest: players, speed-ratio
+  Averages, RacingCars, the coordinator's state, the race parameters'
+  fields, TheDifficultyInfo and the World's player positions.
+- **The glue Graph.** The model builds it with the image's own start-up
+  code (0x00193f00, which also stores 0xc000 at gp-13390; whose that is
+  is still to find).
+- **The divides.** drivingchoice_check's Model keeps its allowed divides
+  in a class attribute, `OK_DIVS`. This Model adds WeCanHaveTheGlue's two
+  `vrsqrt` (`GLUE_DIVS`).
+- **The scenarios.** s_belt (40), s_glue (60), s_boost (60) and s_boost's
+  catchup (30) come from their own seed.
+  - Each round of the first three fails at most one test, chosen at
+    random (`gate_picker`).
+  - The glue's headings hit their edges exactly through unit vectors
+    whose squares sum to 1, and its speed gaps through one car at 0.
+  - The catchup draws every NumAICars and place, so the two-player split
+    falls each side of each car.
+- 568 scenarios, 95996 ops, 75041 lines, 0 differ.
+- 407 mutations: 394 caught, 13 equivalent. 11e-3's are 181: 177 caught
+  (5 by crashing the harness) and 4 equivalent.
+  - wcb-race-le and dbf-early-le: no whole tick count is 30 s exactly
+    (120000 is 30.000002).
+  - dbf-ratio-allowed: a catchup player is only ever set past the
+    `!allowed` return.
+  - dbf-ratio-over: at a ratio of exactly 1 the row is multiplied by 0.
+- The first pass left 16 alive, which led to the changes above:
+  - Two of the constant mutations (0.94f, 0.7f) were the same float as
+    the constant. They and three more now move it one ulp.
+  - The rest needed the one-failure rounds, the exact headings and gaps,
+    the catchup set and a type of -1.
+  - ct-glue and ct-catchup carry a line of context, as GlueOff and
+    DecideBoostFactor repeat their lines.
+
+Every other checker still runs clean. `docs/formats/ai-car-controller.md`
+has the detail, under "The belt, the glue and the boost", and
+`difficulty-info.md` lists the port's readers. The CIA builds.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the

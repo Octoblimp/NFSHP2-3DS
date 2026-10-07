@@ -29,6 +29,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "average.h"
 #include "bvector.h"
 #include "joystick.h"
 #include "nisoverlay.h"
@@ -313,5 +314,20 @@ int32_t player_is_camera_pov_in_car(const struct Player *p);
 extern int32_t        PlayerNumPlayers;
 extern struct Player *PlayerPlayersByNumber[2];
 extern struct Player *PlayerPlayersByIndex[2];
+
+// Player::GetSpeedRatio, 0x001811e8: the mean of pAverageSpeedRatio.
+static inline float player_get_speed_ratio(const struct Player *p)
+{
+    return p->pAverageSpeedRatio->fAverage;
+}
+
+// Player::CatchupAllowed(float), 0x001811f8: the speed ratio's average
+// full (as many samples as slots) and `f` under fMaxSpeedRatio.
+static inline int player_catchup_allowed(const struct Player *p, float f)
+{
+    const Average *a = p->pAverageSpeedRatio;
+
+    return a->nSlots == a->nSamples && f < p->fMaxSpeedRatio;
+}
 
 #endif

@@ -1,15 +1,16 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 38
-(2026-10-06), after 11e-2, AICarController's signposts.
+(2026-10-06), after 11e-3, AICarController's belt, glue and boost.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
 AIPlan and the AIAction base, 11d-1 to 11d-3b, all eleven actions,
 11e-0, Average at retail's size, 11e-1, AICarController's record,
-route methods and actions, and 11e-2, its signposts and sticky
-decisions, are done and checked against retail. Next is 11e-3, the
-belt, the glue and the boost. The car selector is finished and checked against retail: SC-1
+route methods and actions, 11e-2, its signposts and sticky
+decisions, and 11e-3, its belt, glue and boost, are done and checked
+against retail. Next is 11e-4, MaybeHonkAndOrBlinkHeadlights and
+ExecuteCurrentAction. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -390,6 +391,25 @@ car's were.
     look-ahead loops for ever, so the script always has one.
     track.h, topology.md, trackroute.h and track-route.md had the grace
     gate and AIHint wrong, and are fixed.
+  - **11e-3 is done: the belt, the glue and the boost.** WeHaveTheBelt,
+    WeNeedTheBelt (bBeltMover), WeCanHaveTheBelt (eleven tests: 3 points,
+    not AIDemoMode, both belt timers off, 5 m/s forward on a wheel, an
+    action that isn't PullOver, GetUnstuck, AccidentRecovery,
+    AvoidRoadBlock or IJustGotHit, not careful, no player within 120 m,
+    30 s raced), the glue's seven (WeHave/WeNeed/WeCanHaveTheGlue,
+    GlueOn, GlueOff, GetGlueSpeed over the gp-20336 Graph), and
+    DecideBoostFactor with CalculateDistanceAndPositionBoost (the
+    distance and position boosts from TheDifficultyInfo, the two-player
+    catchup target, the speed ratio's table). `player.h` gains
+    `player_get_speed_ratio` and `player_catchup_allowed`, the second
+    comparing its argument (the SlowFactor) with fMaxSpeedRatio. The glue
+    has no caller in retail, so it never runs in the game.
+    drivingchoice_check's Model keeps its allowed divides in `OK_DIVS`,
+    which aicarcontroller_check extends with WeCanHaveTheGlue's two
+    `vrsqrt`. 568 scenarios, 95996 ops, 75041 lines, 0 differ; 407
+    mutations, 394 caught, 13 equivalent (11e-3's 181: 177 caught, 4
+    equivalent, two of them the 30 s clock no whole tick count reaches
+    exactly).
   - Retail's runs from 0x00190140 to about 0x00194058: some 16 KB in
     about 50 functions (`grep AICarController out/retail_syms.txt`).
     Think alone is 2536 bytes, DecideBoostFactor 904 and
@@ -410,10 +430,16 @@ car's were.
       DoStickyDecisions, SignPostDecision (main.c's
       `gAISignPostDecisionFn`) and GetCurrentTrackRoutePoint. The jump
       table at 0x002b4cb0 is SignPostDecision's.
-    - **11e-3, next:** the belt, the glue and the boost: WeHave/WeNeed/
+    - 11e-3 (done): the belt, the glue and the boost: WeHave/WeNeed/
       WeCanHave the belt and the glue, GlueOn, GlueOff, GetGlueSpeed,
-      DecideBoostFactor, CalculateDistanceAndPositionBoost.
-    - 11e-4: MaybeHonkAndOrBlinkHeadlights and ExecuteCurrentAction.
+      DecideBoostFactor, CalculateDistanceAndPositionBoost. Of these
+      only the belt's WeNeed and WeCanHave (Think's) and DecideBoostFactor
+      (ExecuteCurrentAction's) have callers in retail.
+    - **11e-4, next:** MaybeHonkAndOrBlinkHeadlights and
+      ExecuteCurrentAction (which reads RoutePointChangeFrequency and
+      RoutePointVariance, and calls DecideBoostFactor). The start-up
+      code at 0x00193f00 that builds the glue Graph also stores 0xc000
+      at gp-13390; find out whose that is when a slice reads it.
     - 11e-5: Think.
   - `aicarcontroller.h` has the whole 720-byte record. 684 and 688 are
     retail's own (TakenSignpostIndex and TakenSignpostTimer, named for
@@ -4008,8 +4034,8 @@ goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11e-3, AICarController's belt, glue
-  and boost.
+- **Next:** step 11, the racer AI: 11e-4, AICarController's
+  MaybeHonkAndOrBlinkHeadlights and ExecuteCurrentAction.
   See "Now" at the top. These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
@@ -4024,7 +4050,8 @@ goes in.
   - 11d-3b, GetUnstuck and AvoidRoadBlock;
   - 11e-0, Average at retail's size;
   - 11e-1, AICarController's record, route methods and action;
-  - 11e-2, AICarController's signposts and sticky decisions.
+  - 11e-2, AICarController's signposts and sticky decisions;
+  - 11e-3, AICarController's belt, glue and boost.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -4036,7 +4063,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a to 11d-3b done) | 3-5 |
+  | 11, the racer and traffic AI (11a to 11e-3 done) | 3-5 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |

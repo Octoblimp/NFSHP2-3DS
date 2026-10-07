@@ -12,9 +12,11 @@
 // interruption and points, the physics mode, the line speed, the boosts
 // and the small accessors. 11e-2 has the sticky decisions and signposts,
 // SignPostDecision among them (main.c points drivingchoice.h's seam at
-// it). The belt, glue and boost decisions are 11e-3's, the honking and
-// ExecuteCurrentAction 11e-4's, and Think 11e-5's. AIAction is in
-// aiaction.h (11c). docs/formats/ai-car-controller.md has the detail.
+// it). 11e-3 has the belt, the glue and the boost: whether the car may
+// go on the belt or glue itself to a player, the glued speed, and the
+// catchup boost. The honking and ExecuteCurrentAction are 11e-4's, and
+// Think 11e-5's. AIAction is in aiaction.h (11c).
+// docs/formats/ai-car-controller.md has the detail.
 //
 // The offsets are retail's. They agree with the demo's stab (type#1344,
 // 704 bytes) up to aStickyDecisions at 652, which retail makes eight words
@@ -32,6 +34,7 @@
 #include "car.h"
 #include "carcontroller.h"
 #include "drivinglocation.h"
+#include "graph.h"
 #include "nearbycar.h"
 #include "timer.h"
 #include "trackroute.h"
@@ -276,6 +279,77 @@ int aicarcontroller_sign_post_decision(AICarController *c, Signpost *s,
 // not read.
 void aicarcontroller_get_current_track_route_point(AICarController *c,
                                                    Car *car);
+
+// ------------------------------------------ the belt, the glue and the boost
+
+// The unit's globals: bBeltMover (gp-20344, 1), the glue's boost graph
+// (gp-20336, (-20, 0.1) to (20, -0.1)), CarControllerDisableCatchup
+// (gp-20132, 0) and nLastGlueReason (gp-20296), the reason the last
+// WeCanHaveTheGlue said no.
+extern int32_t bBeltMover;
+extern Graph   gGlueBoostGraph;
+extern int32_t CarControllerDisableCatchup;
+extern int32_t nLastGlueReason;
+
+// 0x00190af8. The car's movement mode is the belt's (6).
+int aicarcontroller_we_have_the_belt(AICarController *c);
+
+// 0x00190b10. bBeltMover.
+int aicarcontroller_we_need_the_belt(AICarController *c);
+
+// 0x00190b20. Whether the car may go on the belt: a drive target of three
+// points or more, the race coordinator not in its AI demo, neither
+// OffBeltTimer nor RealPhysicsTimer set, at least 5 m/s forward with a
+// wheel down, an action that isn't PullOver, GetUnstuck, AvoidRoadBlock,
+// IJustGotHit or AccidentRecovery, a driver who isn't careful (skill -2),
+// no player within 120 m and the race 30 s old.
+int aicarcontroller_we_can_have_the_belt(AICarController *c);
+
+// 0x00190c78 / 0x00190c88. A glued car; and 0, as retail's `jr ra`.
+int aicarcontroller_we_have_the_glue(AICarController *c);
+int aicarcontroller_we_need_the_glue(AICarController *c);
+
+// 0x00190c90. Whether the car may glue itself to `p`'s car, or, with the
+// glue on, keep it on the glued car's own player: an action before
+// PullOver and the player's speed ratio no less than 0.94; held while
+// GlueOnTimer runs within 60 m, 10 m/s and a heading dot of 0.5 (the end
+// of GlueOnTimer starts GlueOffTimer, 20 s); taken with GlueOffTimer not
+// set, within 30 m, 6 m/s and 0.7, the player's car not ahead. Each no
+// leaves its reason in nLastGlueReason.
+int aicarcontroller_we_can_have_the_glue(AICarController *c,
+                                         struct Player *p);
+
+// 0x00190f38. With no glue: the player's nGlueCount up one, GlueOnTimer
+// 7 s, the player's car glued, fCurrentGlueTimeBias 0.2.
+void aicarcontroller_glue_on(AICarController *c, struct Player *p);
+
+// 0x00190fb8. With glue: unglued, and its player's nGlueCount down one.
+void aicarcontroller_glue_off(AICarController *c);
+
+// 0x00190ff8. The glued car's speed by the gap to it (negative with it
+// ahead in the race, less the bias times its speed), through the glue
+// graph and the speed difference, within 0.9 and 1.1 of its speed. With
+// either car out of the race, the driver's GetDesiredSpeed.
+float aicarcontroller_get_glue_speed(AICarController *c);
+
+// 0x00192c78. With the race's boost on, how much the car (`me`) is behind
+// `them` (a lap fraction within half a lap either way for a cop race, the
+// track's length times that) up to MaxDistanceForBoost, through the
+// distance graphs between the low and high skill, plus a term for the
+// speeds within 0.05 either way, into `dist`; the position boost for
+// their places into `pos`. Both 0 otherwise.
+void aicarcontroller_calculate_distance_and_position_boost(
+    AICarController *c, struct RacingCar *me, struct RacingCar *them,
+    float *dist, float *pos);
+
+// 0x001928f0. For an AI car in the race with the boost allowed, every
+// BoostCalculationFrequency seconds: the catchup boost to the player (one
+// player), or the lead or trailing player by place (two), past the
+// race's first 30 s and with the action's AllowedToUseBoost; then, for a
+// player with a full average short of its best, its speed ratio by the
+// table for its place and the car's skill, no lower than the skill's
+// SlowFactor. Into the car's BoostFactor.
+void aicarcontroller_decide_boost_factor(AICarController *c);
 
 // -------------------------------------------------------- the action
 

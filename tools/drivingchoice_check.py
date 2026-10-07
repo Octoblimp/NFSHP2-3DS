@@ -6047,6 +6047,10 @@ class Model(object):
         else:
             raise SystemExit("bad op %r" % (t,))
 
+    # The sites where the script divides by zero, as the EE does, and the
+    # port spells ee_div; a checker over this model adds its own.
+    OK_DIVS = frozenset({SMOOTH_DIV, SLOWER_DIV} | WILL_DIVS | EST_DIVS)
+
     def run(self, scenarios):
         for i, sc in enumerate(scenarios):
             self.emit("B %d" % i)
@@ -6055,8 +6059,7 @@ class Model(object):
                 if ln[0] not in "CKPU":
                     self.emit("> " + ln[:48])
                 self.op(ln.split())
-        stray = (self.e.eediv_pcs - {SMOOTH_DIV, SLOWER_DIV} - WILL_DIVS
-                 - EST_DIVS)
+        stray = self.e.eediv_pcs - self.OK_DIVS
         if stray:
             raise SystemExit("the EE's divide by zero at %s, which the port "
                              "divides as IEEE does"
