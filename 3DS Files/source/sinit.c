@@ -4,7 +4,7 @@
 // and the _GLOBAL_$I$ it stands for. sinit_check reads those comments, so
 // their shape is fixed.
 //
-// None of the twenty-four reads anything another one writes -- twenty-three
+// None of the twenty-five reads anything another one writes -- twenty-four
 // fill Tables, Graphs, cameras, list heads, hashes, shakers, constants and
 // two sets of defaults, and the last builds the slot-pool manager -- so the
 // order is kept because it is the image's, not because a different one
@@ -32,6 +32,7 @@
 #include "joyevent.h"
 #include "mellowmover.h"
 #include "physicscar.h"
+#include "psychodriver.h"
 #include "queuedfile.h"
 #include "raceparams.h"
 #include "realdriver.h"
@@ -51,6 +52,7 @@ void sinit_run(void)
     acid_static_init();         // [9]   0x00128cd0 _GLOBAL_$I$AcidCycleStateNames
     car_static_init();          // [14]  0x001347c0 _GLOBAL_$I$fDraftFalloff
     physicscar_static_init();   // [15]  0x00137438 _GLOBAL_$I$RigidBodySlotPool
+    psychodriver_static_init(); // [16]  0x00138d68 _GLOBAL_$I$PidProportionalData
     realdriver_static_init();   // [17]  0x0013aa88 _GLOBAL_$I$PowerSlideYawCoef
     scenery_static_init();      // [21]  0x0014e718 _GLOBAL_$I$CurrentZoneNumber
     track_static_init();        // [22]  0x00150938 _GLOBAL_$I$TrackPositionMarkerList

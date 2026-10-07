@@ -117,6 +117,7 @@
 #include "physcomp.h"
 #include "physicscar.h"
 #include "physicssystem.h"
+#include "psychodriver.h"
 #include "nisoverlay.h"
 #include "playercam.h"
 #include "playerhud.h"
@@ -3200,6 +3201,7 @@ int main(int argc, char** argv)
     aiactions_install_vtables();
     aicarcontroller_install_vtables();
     beltmover_install_vtables();
+    psychodriver_install_vtables();
 
     // Car::SetControlMode reaches the controllers task 26 brings through
     // seams; a NULL one is a class not ported yet, and the arm aborts.

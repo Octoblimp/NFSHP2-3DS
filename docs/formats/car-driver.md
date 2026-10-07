@@ -12,7 +12,7 @@ Cross-checked by `tools/cardriver_check.py` against
 ## CarDriver
 
 560 bytes. The base of the driver hierarchy -- `RealDriver` (the human),
-`PsychoDriver` (the AI) and `NullDriver` all derive from it -- and on its
+[`PsychoDriver`](psycho-driver.md) (the AI) and `NullDriver` all derive from it -- and on its
 own it is an input record and nothing else.
 
 | Off | Field | Type |

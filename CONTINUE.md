@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 38
-(2026-10-07), after 11e-6, the BeltMover.
+(2026-10-07), after 11f-1, PsychoDriver.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
@@ -10,9 +10,10 @@ AIPlan and the AIAction base, 11d-1 to 11d-3b, all eleven actions,
 route methods and actions, 11e-2, its signposts and sticky
 decisions, 11e-3, its belt, glue and boost, 11e-4, its horn and
 ExecuteCurrentAction, 11e-5, its Think with Timer::CountDown and
-Race::CanAICarsStartDriving, and 11e-6, the BeltMover, are done and
-checked against retail. Next is 11f-1, PsychoDriver, the AI's CarDriver,
-which AIDriver's constructor builds. The car selector is finished and checked against retail: SC-1
+Race::CanAICarsStartDriving, 11e-6, the BeltMover, and 11f-1,
+PsychoDriver, the AI's CarDriver, are done and checked against retail.
+Next is 11f-2, AIDriver, which builds a PsychoDriver as its car's
+driver. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -501,38 +502,27 @@ car's were.
   - `gAICarControllerGetCurrentDrivingLineSpeedFn` in `car.h` is the
     line speed's seam, set in main.c. drivingchoice_check still stubs
     FindWhereIAm (0x00192f10) for the actions.
-- **11f-1, next: PsychoDriver**, the AI's CarDriver. AIDriver's
-  constructor bMallocs one (`__12PsychoDriverP3Car`, 0x00139760) as its
-  car's driver, so it comes first. It was not in the plan until Session
-  38 listed AIDriver's calls. Retail has it at 0x00139760 to 0x0013a6ac
-  (about 3.9 KB), with its small getters at 0x0013ac80 to 0x0013ad24,
-  PidError's destructor at 0x0013ad28 and the start-up code at
-  0x0013ab68 (`_GLOBAL_$I$PidProportionalData`, 280 bytes).
-  - The functions (retail sizes): the constructor (388), the destructor
-    (128), SetDesiredSpeed (20, three floats and a bool), DoSnapshot
-    (232, waits on ReplaySnapshot), GetError (192), ZeroSteeringMemory
-    (64), ClearSteeringMemory (68), GetMovementIndex (100), Drive
-    (1940), SetTarget (88), CalcSteerToPoint (268), CalcThrottleAndBrake
-    (232), StartHonkHorn, StopHonkHorn and IsHonking, GetDriverNumber,
-    StepOnItJeeves, SetLowGear, GetDesiredSpeed, SetMaxThrottle,
-    GetSteerToPoint and SetSteerToPoint. Four short functions retail
-    added are unnamed: 0x00139bb0 (48, which the constructor calls),
-    0x0013a630, 0x0013ad00 and 0x0013ad08 (8 each). The demo's
-    RunLinePredict, MaxSpeedAlongPath, DoSpeedPredict, MaxSpeedFromCar,
-    MaxSpeedToTarget, ZeroThrottleMemory, ClearThrottleMemory and
-    GetDesiredTimeToSpeed have no retail placement: find whether they
-    were inlined or dropped (GetDesiredTimeToSpeed is the driver
-    table's slot 144, which the BeltMover calls).
-  - The record is CarDriver's 560 bytes (the DriveTarget at 0, Steering
-    at 528, the vptr at 556) and then about 56 more: 560 the car, 564
-    to 600 the speeds and memories, and 604, 608 and 612 three PidErrors
-    (bMalloc'd, 40 bytes: two Averages and two floats).
-  - Split it if Drive's 1940 bytes need their own slice: 11f-1a the
-    record, the small methods and the PidErrors, 11f-1b Drive,
-    CalcSteerToPoint and CalcThrottleAndBrake.
-- 11f-2: AIDriver, 0x0012ffc8 to 0x001308a0, about 2.3 KB, of which
-  ChooseNewAction is 1400 bytes. Its constructor is `gAIDriverCtorFn` in
-  `carmodes.h`. SetAIDriverModesFromPlayers (0x001cd240) goes with it.
+- 11f-1 (done): PsychoDriver (PsychoDriver.obj, 0x00139700 to 0x0013a6ac
+  and 0x0013ab68 to 0x0013ad84), in `psychodriver.{c,h}`, all but
+  DoSnapshot, with AIDrivingInfo.obj's two SteerStraight functions. The
+  624-byte record keeps CarDriver's 560 and adds the car, the steer-to
+  point, the speed with its time and tolerance, the e-brake timer, the
+  direction latch and three PidErrors (body, heading, velocity). Drive
+  steers on a PID of the heading's or the body's error (the body's when
+  the two disagree), turns the wheel at the speed table's rate, and
+  picks the gear and pedals by a latch on the speed's sign. Indices 3
+  and 4 (traffic, delivery, and mellow under traffic control) take
+  their weights from arrays, the rest from seven Tables the start-up
+  code builds (sinit.c's [16]). The demo's line predictor is gone from
+  retail. 0x0013a630 (a `sw zero,0(a2)`) and SetEBrakeTimer have no
+  caller, so the e-brake never comes on. main.c installs the table; the
+  horn's seams stay NULL until BaseCarSound. `tools/psychodriver_check.py`:
+  55673 ops, 49373 lines, 0 differ; 247 mutations, 238 caught, 9
+  equivalent. `docs/formats/psycho-driver.md` has it all.
+- **11f-2, next: AIDriver**, 0x0012ffc8 to 0x001308a0, about 2.3 KB, of
+  which ChooseNewAction is 1400 bytes. Its constructor is
+  `gAIDriverCtorFn` in `carmodes.h` and bMallocs the 624-byte
+  PsychoDriver. SetAIDriverModesFromPlayers (0x001cd240) goes with it.
 - 11g: a SkipFE race with AI cars in it. "The road to the full game"
   has the way in.
 
@@ -4109,14 +4099,14 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-07, after 11e-6, the BeltMover)
+### Where the port stands (2026-10-07, after 11f-1, PsychoDriver)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11f-1, PsychoDriver.
+- **Next:** step 11, the racer AI: 11f-2, AIDriver.
   See "Now" at the top. These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
@@ -4135,7 +4125,8 @@ goes in.
   - 11e-3, AICarController's belt, glue and boost;
   - 11e-4, AICarController's horn and ExecuteCurrentAction;
   - 11e-5, AICarController's Think;
-  - 11e-6, the BeltMover.
+  - 11e-6, the BeltMover;
+  - 11f-1, PsychoDriver.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -4147,7 +4138,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a to 11e-6 done) | 3-4 |
+  | 11, the racer and traffic AI (11a to 11f-1 done) | 2-3 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |
@@ -4155,12 +4146,12 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped; New 3DS only since 2026-10-05) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **24-37** |
+  | **Total** | **23-36** |
 
-- **How far along:** about 34-37 of the road's 58-75 slices are done,
+- **How far along:** about 35-38 of the road's 58-75 slices are done,
   roughly half. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
-  Read the 24-37 as a floor. Step 11 was put at 4-6 before its slices
+  Read the 23-36 as a floor. Step 11 was put at 4-6 before its slices
   were laid out. They are fourteen, with traffic beside them: 11a,
   11b-1 to 11b-3, 11b-4a and 11b-4b, 11c, 11d-1, 11d-2, 11d-3a and
   11d-3b, and 11e to 11g. 11b was one slice until DrivingChoice's 13 KB

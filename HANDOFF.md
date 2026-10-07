@@ -15785,6 +15785,70 @@ host size back to the image's 72, as it does RealController's, and its
 size-beltmover mutation follows the sizeof (caught). Every other checker
 still runs clean, and the CIA builds.
 
+### Step 11f-1: PsychoDriver
+
+`psychodriver.{c,h}` are retail's PsychoDriver.obj (0x00139700 to
+0x0013a6ac and 0x0013ab68 to 0x0013ad84), all but DoSnapshot, with
+AIDrivingInfo.obj's SteerStraightVector3D and SteerStraightVelocity3D.
+It is the AI's CarDriver: AIDriver's constructor (11f-2) and
+TrafficDriver's each build one on their car.
+
+- **The record**, 624 bytes: CarDriver's 560, the car, the steer-to
+  point, MaxThrottle (never read), the desired speed with its time and
+  tolerance, AllowedToUseThrottleAndBrake, the e-brake timer, the
+  direction latch and three PidErrors, "Phsycho" Body, Heading and
+  Velocity (40 bytes each: Averages of 15/5, 15/5 and 6/3).
+- **The tuning.** The start-up code (sinit.c's [16], 0x0013ab68) builds
+  seven Tables over the speed and sets fPsychoCounterDiff. Indices 3
+  and 4 of GetMovementIndex (traffic, delivery, and mellow under
+  traffic control) take their weights from four arrays instead.
+- **Drive** steers on a PID of the heading's error, or the body's when
+  the two disagree in sign or the heading's is much the larger or the
+  car is under 5 m/s. It clears the steering's memory through the table
+  when the car touches another, turns the wheel at the speed table's
+  rate (twice that back towards the middle), and picks the gear and the
+  pedals by a latch on the speed's sign: a car rolling the wrong way
+  faster than 7 m/s brakes until under 2. CalcThrottleAndBrake (new in
+  retail) coasts within the tolerance and otherwise nudges the pedals
+  by a clamped PID on the speed.
+- **Not reached.** 0x0013a630 (a `sw zero,0(a2)`), SetMaxThrottle,
+  StepOnItJeeves, ClearThrottleMemory and SetEBrakeTimer have no
+  caller, so the e-brake never comes on in the game.
+- **Wired in.** main.c installs the table. The horn's three seams stay
+  NULL until BaseCarSound is ported (a NULL one is the no-sound answer).
+
+The checker, `tools/psychodriver_check.py`, is new:
+- **What runs as shipped.** Every method but DoSnapshot, the destructor
+  and Drive through the table, with ~CarDriver, ~DriveTarget, Average,
+  PidError, Table, bATan, bSinCos, bNormalize and the start-up code
+  beneath.
+- **The stand-ins.** bMalloc and the frees, DriveTarget's constructor,
+  Clear, operator=, Resample and InterpolatePoint, the two collision
+  calls, GetYawAlways and the horn's three.
+- **The scenarios.** Every table's grid, RadianWrap's edges, each
+  constructor and destructor flag, GetError about 1 m/s, every movement
+  mode pair, and drives over the wheels down, collisions, every latch
+  edge, the time about 0.001, the e-brake about 20 mph, the wheel about
+  180 degrees, dt under 0.0001, the swap's tests met exactly, 200 m, a
+  fixed index at up to 175 m/s, steering ratios to 40000 (`cvt.w.s`
+  saturates) and 150 random drives.
+- **Rounding.** The order of the sums in the steer shows only where it
+  moves the wheel across a BAM. A search of `rounding_drive`'s seeds
+  found steps where it does: three on a fixed index with a steering
+  ratio of hundreds, and one in about 15000 on a speed-table index.
+- 55673 ops, 49373 lines, 0 differ.
+- 247 mutations: 238 caught (3 by crashing the harness), 9 equivalent:
+  rw-le (no BAM is 3.14159 radians exactly), rw-dead (the angle is
+  unsigned), ni-steer (CarDriver's constructor zeroed it), ni-zs and
+  ni-zt (a fresh PidError is what Reset(0) leaves), dd-vt (nothing
+  derives), dr-fwd (a desired speed of 0 takes the slow branch first),
+  dr-rate-dbl1 and dr-rate-dbl2 (with `des == cur` the step is 0). The
+  first pass left 11; a time left of -0 in a step of 0 then caught
+  dr-tfloor, first thought equivalent.
+
+`docs/formats/psycho-driver.md` has the detail, and `car-driver.md`
+links it. Every other checker still runs clean, and the CIA builds.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the
