@@ -14686,7 +14686,8 @@ demo's AdvancePoint and GetRoutePointsToUse are there, unnamed).
   FillUpDriveTarget.
 Race::GracePeriodIsActive went into `racecore.c`, and as much of
 AICarController's record as these read into `aicarcontroller.h`.
-SignPostDecision is a seam, `gAISignPostDecisionFn`, until 11e.
+SignPostDecision is a seam, `gAISignPostDecisionFn`, which main.c points
+at the port's since 11e-2.
 
 `drivingchoice_check` runs the image as the model, with three stubs:
 SignPostDecision, Car::GetRoutePoint and GetAmountOutOfBounds. The
@@ -15381,6 +15382,70 @@ changes. realcontroller_check still runs the demo's image, so it stubs
 CarController::SetToPhysicsMode with retail's. Every
 other checker still runs clean. `docs/formats/ai-car-controller.md` has
 the detail. The CIA builds.
+
+### Step 11e-2: AICarController's signposts and sticky decisions
+
+`aicarcontroller.c` gains FindSignpostIndex (0x00191d40), GetStickyIndex
+(0x00191d90), DoStickyDecisions (0x00191b30), SignPostDecision
+(0x00191de0) and GetCurrentTrackRoutePoint (0x001921f8). main.c points
+drivingchoice.h's `gAISignPostDecisionFn` at the port's SignPostDecision,
+so DrivingChoice::AdvancePoint asks it.
+- A decision is a sticky word: bit 0 the slot in use, bit 1 the sign
+  taken, bits 2-7 the line, bits 8-15 the sign's index. DoStickyDecisions
+  drops one more than 10 m past its sign (and TakenSignpostIndex with it),
+  then, while a slot is free, decides the signs from nSignpostIndex on
+  within AIDriverSecondsToLookAhead x speed x 1.1 (gp-29840), clamped to
+  100-250 m.
+- SignPostDecision: a Backwards sign, or a Cloaked one but AlwaysTake,
+  keeps the line with no decision; a decided sign answers from its slot.
+  AlwaysTake is taken. Any other waits out the sign grace period:
+  GetTrackInfo(TrackNumber)'s SignpostGracePeriod, -1 for
+  Race::GracePeriodIsActive, else seconds on the race clock (x 0.00025).
+  Then Equivalent on World::Random < 0.5, DontTake never, the rest by a
+  draw against the skill's TakeSignChance (skill read signed and clamped
+  to 0..9; the switch at 0x002b4cb0: the first chance takes Slower, the
+  second Faster, the third none, over all Faster). A taken sign needs a
+  driveable line from GetNewDrivingLine (relaxed), else it isn't taken;
+  AIHint 2 sets TakenSignpostIndex. A line outside 0..1 becomes the kept
+  one. The store goes in the first free slot, and with none free, over
+  nSignpostIndex (retail's `652 + 4 x -1`), which the port does too.
+- GetCurrentTrackRoutePoint: FindWhereIAm with the location clear or the
+  car further off its point's road than MyHalfSizeL; else the location
+  moves to FindClosestPointAhead's point (the last at the end), and the
+  signs between are decided until one is taken, which puts the location
+  on its route (relaxed), sets LastTrackRouteNumber, and for AIHint 1
+  TakenSignpostTimer to 10000 ticks (2.5 s). At the end with no sign
+  taken, FindWhereIAm. Its car argument isn't read.
+
+The checker stands in World::Random (the script's queue, then 0) and
+GetTrackInfo (a TrackInfo of the script's), and adds s_signdec (60),
+s_sticky (50), s_trackpoint (30), s_trackpoint_edge (30), s_signindex
+(20), s_takechance (20) and s_sticky's edge (12), from their own seed.
+- 378 scenarios, 67592 ops, 40802 lines, 0 differ.
+- 226 mutations: 217 caught, 9 equivalent. 11e-2's are 100: 96 caught
+  (sp-ret by crashing the harness) and 4 equivalent.
+  - dsd-clamp and dsd-max-args: the clamp's orders differ only for a
+    NaN, which the EE doesn't have.
+  - sp-relaxed and sp-again-relaxed: as gl-relax, the relaxed switch
+    never reaches a target IsDriveable reads.
+- The first pass left 13 alive and the full one dsd-max; the script
+  gained draws at each chance, the grace clock's first tick past (4001
+  for 1 s), seconds of 1 and 3 at the clamps, s_takechance, and the
+  edge family with a sign just inside 250 m.
+
+Found along the way:
+- mipsemu's EE FPU has no NaN: a NaN speed's look-ahead is 250 there,
+  a NaN under IEEE. It isn't scripted.
+- DoStickyDecisions goes round the signs for ever with no sign past the
+  look-ahead and a slot free; every scenario has a sign 1000 m on.
+- track.h and topology.md said the grace period gates "a 0x400
+  signpost"; it gates every sign but AlwaysTake. trackroute.h and
+  track-route.md said only AIHint 2 is tested; 1 is too.
+- ct-tsi, oob-cross and gc-cross carry a line of context, as the new
+  code repeats their lines.
+
+Every other checker still runs clean. `docs/formats/ai-car-controller.md`
+has the detail, under "The signposts". The CIA builds.
 
 ### With the user
 

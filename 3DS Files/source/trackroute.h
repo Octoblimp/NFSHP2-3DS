@@ -60,10 +60,12 @@ typedef struct Signpost {
     float    Distance;  // 4   distance around the track, filled by
                         //     signpost_set_distances
     int32_t  AIHint;    // 8   retail's. 0, 1 or 2 on every retail track.
-                        //     Only 2 is tested, by AICarController::
+                        //     2 is tested by AICarController::
                         //     SignPostDecision: a car that takes such a sign
                         //     keeps its index and holds to the far point's
-                        //     driving-line speed (ExecuteCurrentAction)
+                        //     driving-line speed (ExecuteCurrentAction).
+                        //     1 is tested by GetCurrentTrackRoutePoint,
+                        //     which sets TakenSignpostTimer to 2.5 s
 } Signpost;
 
 #define SIGNPOST_SIGN_MASK    0x07u

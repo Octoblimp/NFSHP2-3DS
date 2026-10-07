@@ -74,6 +74,7 @@
 #include "characterinfo.h"
 #include "collision.h"
 #include "collisionbody.h"
+#include "drivingchoice.h"
 #include "edisplay.h"
 #include "eenvmap.h"
 #include "elight.h"
@@ -3206,6 +3207,10 @@ int main(int argc, char** argv)
     // an AICarController since step 11e-1.
     gAICarControllerGetCurrentDrivingLineSpeedFn =
         aicarcontroller_line_speed_seam;
+
+    // DrivingChoice::AdvancePoint asks the controller's SignPostDecision,
+    // ported in step 11e-2. drivingchoice_check keeps its stand-in here.
+    gAISignPostDecisionFn = aicarcontroller_sign_post_decision;
 
     // RealDriver's reset button puts the car back on its route through
     // Car::ResetToRoutePoint, which carreset.c has ported since task 27's

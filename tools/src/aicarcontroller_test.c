@@ -1,5 +1,5 @@
 // Host harness for 3DS Files/source/aicarcontroller.c, the AI car
-// controller (step 11e-1). Runs the op script tools/aicarcontroller_check.py
+// controller (steps 11e-1 and 11e-2). Runs the op script tools/aicarcontroller_check.py
 // writes and prints the transcript it diffs against the retail image, run
 // in mipsemu over the same script.
 //
@@ -12,8 +12,11 @@
 // Car::SetMovementMode (carmodes.c's), the drivers' SetSteerToPoint and
 // ZeroSteeringMemory, a test controller table whose GetRouteNumbersToUse
 // and ChooseNewAction answer the script, and fake actions whose destructor
-// and CalculatePointsToDrive print, each printing a line as the checker's
-// stubs do.
+// and CalculatePointsToDrive print, World::Random answering the script's
+// queue and GetTrackInfo a TrackInfo of the script's, each printing a line
+// as the checker's stubs do. drivingchoice_test.c's stand-in for the sign
+// decision gives way to the port's SignPostDecision, as main.c's seam
+// does.
 //
 // A float prints as its bits, every NaN as "nan", and a pointer by what it
 // points at. The ops and every line's format are the checker's.
@@ -21,6 +24,7 @@
 
 #include "average.h"
 #include "bmem.h"
+#include "difficultyinfo.h"
 #include "raceinit.h"
 
 // raceinit.c's, as it starts.
@@ -57,6 +61,10 @@ static int choose_q[16], nchoose, ichoose;
 static int32_t rnum_first[NCARS], rnum_last[NCARS];
 static VtEntry tvt[AICARCONTROLLER_VT_ENTRIES];
 static VtEntry avt[AIACTION_VT_ENTRIES];
+static TrackInfo tinfo;
+#define NRANDOM 16
+static float rq[NRANDOM];
+static int nrq, irq;
 
 // ------------------------------------------------------------ the stubs
 
@@ -138,6 +146,20 @@ static void fk_action_points(void *self, DrivingInformation *i)
     facts[k].PointsToDriveWillExecuteAction = fa_pt[k];
 }
 
+// worldstep.c's: the script's queue, then 0.
+float world_random_f(World *w, float f)
+{
+    printf("  random %d %s\n", w == &world, fx(f));
+    return irq < nrq ? rq[irq++] : 0.0f;
+}
+
+// track.c's, which would bring the track's loading with it.
+TrackInfo *track_get_info(int i)
+{
+    printf("  tinfo %d\n", i);
+    return &tinfo;
+}
+
 // ------------------------------------------------------------ the names
 
 static const char *ac_nm(const void *p, char *b)
@@ -210,6 +232,13 @@ static void ac_reset(void)
     memset(rnum_first, 0, sizeof rnum_first);
     memset(rnum_last, 0, sizeof rnum_last);
     nDefaultMovementMode = MELLOW_MOVEMENT;
+    memset(&tinfo, 0, sizeof tinfo);
+    tinfo.SignpostGracePeriod = -1;
+    TheRaceParameters.TrackNumber = 0;
+    memset(TheDifficultyInfo.AISkillLevel, 0,
+           sizeof TheDifficultyInfo.AISkillLevel);
+    nrq = irq = 0;
+    gAISignPostDecisionFn = aicarcontroller_sign_post_decision;
 }
 
 // ------------------------------------------------------------ the dumps
@@ -307,6 +336,21 @@ static void dump_where(int k)
     printf("  K ltr %d hl %d %d\n", (int)c->LastTrackRouteNumber,
            (int)HighlightDrivingLineInRouteNumber,
            (int)HighlightDrivingLineNumber);
+}
+
+static void dump_signs(int k)
+{
+    AICarController *c = &ctrls[k];
+    int i;
+
+    printf("  S sign %d ts %d tt %08x ltr %d\n", (int)c->nSignpostIndex,
+           (int)c->TakenSignpostIndex,
+           (unsigned)c->TakenSignpostTimer.PackedTime,
+           (int)c->LastTrackRouteNumber);
+    printf("  S sticky");
+    for (i = 0; i < AICC_NUM_STICKY_DECISIONS; i++)
+        printf(" %08x", (unsigned)c->aStickyDecisions[i]);
+    printf("\n");
 }
 
 static void dump_facts(void)
@@ -555,6 +599,56 @@ static void ac_op(char **t, int n)
                nm(aicarcontroller_get_current_driving_location(a)));
     } else if (strcmp(c, "dd") == 0) {
         aicarcontroller_debug_display(a);
+    // 11e-2's.
+    } else if (strcmp(c, "rnd") == 0) {
+        int i;
+
+        nrq = irq = 0;
+        for (i = 0; i < k && i < NRANDOM && 2 + i < n; i++)
+            rq[nrq++] = fh(t[2 + i]);
+    } else if (strcmp(c, "tg") == 0) {
+        tinfo.SignpostGracePeriod = k;
+    } else if (strcmp(c, "tn") == 0) {
+        TheRaceParameters.TrackNumber = k;
+    } else if (strcmp(c, "rt") == 0) {
+        race.RaceTime.PackedTime = wh(t[2]);
+    } else if (strcmp(c, "si") == 0) {
+        a->nSignpostIndex = atoi(t[2]);
+    } else if (strcmp(c, "ts") == 0) {
+        a->TakenSignpostIndex = atoi(t[2]);
+    } else if (strcmp(c, "hl") == 0) {
+        a->MyCurrentDrivingInformation.MyNearbyCarList.MyHalfSizeL = fh(t[2]);
+    } else if (strcmp(c, "vm") == 0) {
+        cars[k].State.VelocityMagnitude = fh(t[2]);
+    } else if (strcmp(c, "tsc") == 0) {
+        int i;
+
+        for (i = 0; i < 3; i++)
+            TheDifficultyInfo.AISkillLevel[k].TakeSignChance[i] = fh(t[2 + i]);
+    } else if (strcmp(c, "sf") == 0) {
+        signs[k].Flags = (uint8_t)atoi(t[2]);
+        signs[k].AIHint = atoi(t[3]);
+    } else if (strcmp(c, "fsi") == 0) {
+        aicarcontroller_find_signpost_index(a);
+        printf("  sign %d\n", (int)a->nSignpostIndex);
+    } else if (strcmp(c, "gsi") == 0) {
+        printf("  free %d\n", (int)aicarcontroller_get_sticky_index(a));
+    } else if (strcmp(c, "dsd") == 0) {
+        aicarcontroller_do_sticky_decisions(a);
+        dump_signs(k);
+        dump_where(k);
+    } else if (strcmp(c, "spd") == 0) {
+        int32_t line = atoi(t[3]);
+        int got = aicarcontroller_sign_post_decision(
+            a, &signs[atoi(t[2])], &line, a->CurrentDrivingLocation);
+
+        printf("  take %d line %d\n", got, (int)line);
+        dump_signs(k);
+        dump_where(k);
+    } else if (strcmp(c, "gct") == 0) {
+        aicarcontroller_get_current_track_route_point(a, &cars[k]);
+        dump_signs(k);
+        dump_where(k);
     } else {
         fprintf(stderr, "bad op %s\n", t[0]);
         exit(2);

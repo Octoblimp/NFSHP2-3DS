@@ -87,11 +87,12 @@ typedef struct FuturePointList {
     FuturePoint Points[FUTUREPOINTLIST_MAX];      // 4
 } FuturePointList;                                // 404
 
-// While AICarController is not ported (step 11e), AdvancePoint asks its
-// SignPostDecision (0x00191de0) through this: whether to take the sign
-// onto its new route, and the line to drive there, through `line`. The
-// last argument is the controller's CurrentDrivingLocation. NULL takes no
-// sign.
+// AdvancePoint asks the controller's SignPostDecision (0x00191de0) through
+// this: whether to take the sign onto its new route, and the line to drive
+// there, through `line`. The last argument is the controller's
+// CurrentDrivingLocation. main.c points it at
+// aicarcontroller_sign_post_decision (step 11e-2); drivingchoice_check
+// keeps its own stand-in here. NULL takes no sign.
 typedef int (*AISignPostDecisionFn)(struct AICarController *c,
                                     struct Signpost *s, int32_t *line,
                                     struct DrivingLocation *loc);

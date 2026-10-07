@@ -245,12 +245,17 @@ It takes 2 at once, takes 4 on a coin flip, and never takes 5.
     Sign   0 Faster  1 Slower  2 AlwaysTake  3 Stop  4 Equivalent  5 DontTake
 
 `AIHint` is retail's. Across all 30 retail tracks it is 0 (1,628 signs),
-1 (264) or 2 (128). Only 2 is tested, in SignPostDecision: a car that takes
-such a sign keeps its index (controller +684). `ExecuteCurrentAction` then
-holds it to the far point's driving-line speed until `DoStickyDecisions`
-drops the sign behind it. What 0 and 1 mean is not read anywhere. The AI's
-retail pass will name the field properly; `trackroute.h` calls 2
-`SIGNPOST_AIHINT_HOLD_LINE_SPEED`.
+1 (264) or 2 (128). Two values are tested
+(`docs/formats/ai-car-controller.md`):
+
+- **2, in SignPostDecision.** A car that takes such a sign keeps its index
+  (controller +684). `ExecuteCurrentAction` then holds it to the far
+  point's driving-line speed until `DoStickyDecisions` drops the sign
+  behind it. `trackroute.h` calls 2 `SIGNPOST_AIHINT_HOLD_LINE_SPEED`.
+- **1, in GetCurrentTrackRoutePoint.** A car that takes such a sign's route
+  sets TakenSignpostTimer (controller +688) to 10000 ticks, 2.5 s.
+
+0 is not read anywhere.
 
 `Distance` is **not** meaningful on disc -- track 12's values range from
 `1.4e-45` to `5.6e+14` and are plainly whatever the editor's heap held.

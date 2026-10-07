@@ -382,9 +382,10 @@ Retail's `GetTrackInfo` (0x00153420) and `LoaderTrackGeometry`
 
 `SignpostGracePeriod`'s one reader is retail's
 `AICarController::SignPostDecision` (0x00191efc). At -1 it keeps the demo's
-test, `Race::GracePeriodIsActive`. Anything else is a race time the AI must
-be past before it takes a `0x400` signpost. Every retail track has -1 but
-T23, T26, T42 and T45, which have 0.
+test, `Race::GracePeriodIsActive`. Anything else is a race time in seconds
+the AI must be past before it takes any sign but AlwaysTake
+(`docs/formats/ai-car-controller.md`). Every retail track has -1 but T23,
+T26, T42 and T45, which have 0.
 
 Retail GLOBALB's `0x34201` has 66 entries, and 30 are named: 11-16, 21-26,
 31-36, 41-46 and 61-66, the five locations' three tracks and their three

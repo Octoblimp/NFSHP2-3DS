@@ -48,8 +48,9 @@ TrackPositionMarker *track_get_position_marker_named(const char *name, int i);
 // Retail put SignpostGracePeriod in before SoundRegion. Its one reader is
 // retail's AICarController::SignPostDecision (0x00191efc): -1 keeps the
 // demo's test, Race::GracePeriodIsActive, and anything else is a race
-// time the AI must be past before it takes a 0x400 signpost. Retail's
-// thirty tracks have -1 but for T23, T26, T42 and T45, which have 0.
+// time in seconds the AI must be past before it takes any sign but
+// AlwaysTake. Retail's thirty tracks have -1 but for T23, T26, T42 and
+// T45, which have 0.
 typedef struct TrackInfo {
     char     Name[32];                           //   0
     char     Location[32];                       //  32

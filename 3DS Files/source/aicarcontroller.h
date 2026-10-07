@@ -10,8 +10,9 @@
 // Step 11e ports it in slices. 11e-1 has the record, the constructor and
 // destructor, the table, the route methods, JustReset, the action's
 // interruption and points, the physics mode, the line speed, the boosts
-// and the small accessors. The sticky decisions and signposts are 11e-2's,
-// the belt, glue and boost decisions 11e-3's, the honking and
+// and the small accessors. 11e-2 has the sticky decisions and signposts,
+// SignPostDecision among them (main.c points drivingchoice.h's seam at
+// it). The belt, glue and boost decisions are 11e-3's, the honking and
 // ExecuteCurrentAction 11e-4's, and Think 11e-5's. AIAction is in
 // aiaction.h (11c). docs/formats/ai-car-controller.md has the detail.
 //
@@ -224,6 +225,57 @@ void aicarcontroller_clear_sticky_decisions(AICarController *c);
 // 0x00192848. The driver steers to the point a metre ahead of the car,
 // along its heading.
 void aicarcontroller_steer_straight_ahead(AICarController *c);
+
+// -------------------------------------------------------- the signposts
+//
+// A sticky decision is a word: bit 0 the slot in use, bit 1 the sign
+// taken, bits 2 to 7 the line (0 or 1, or the location's), bits 8 to 15
+// the sign's index in SignpostArray.
+
+// 0x00191d40. nSignpostIndex on past every sign behind the car's distance
+// round the track (`c.lt.s`), stopping at 0 when it wraps.
+void aicarcontroller_find_signpost_index(AICarController *c);
+
+// 0x00191d90. The first sticky decision not in use, or -1.
+int32_t aicarcontroller_get_sticky_index(AICarController *c);
+
+// 0x00191b30. Each decision in use more than 10 m past its sign is
+// dropped, and TakenSignpostIndex with it when it is that sign's. Then,
+// while a slot is free, the signs from nSignpostIndex on: one behind is
+// passed, one within AIDriverSecondsToLookAhead times my speed times 1.1
+// (100 to 250 m) is decided with a line of -1 and passed, and the first
+// further on stops it.
+void aicarcontroller_do_sticky_decisions(AICarController *c);
+
+// 0x00191de0. Whether to take sign `s` onto its new route, and the line
+// to drive there through `line`. A Backwards sign, or a Cloaked one but
+// for AlwaysTake, is not taken and keeps the location's line (line 0's
+// with the location clear) without a decision. A sign already decided
+// answers its decision. Otherwise: AlwaysTake is taken; any other only
+// past the grace period (the track's SignpostGracePeriod on the race
+// clock, or Race::GracePeriodIsActive with -1 there); then Equivalent on
+// a coin flip (World::Random under 0.5), DontTake never, and the rest by
+// my skill's TakeSignChance. A sign taken but AlwaysTake needs
+// GetNewDrivingLine to find a driveable line on its route (relaxed, `loc`
+// highlighted), else it is not taken; an AIHint 2 sign it takes becomes
+// TakenSignpostIndex. A sign taken still with a negative line asks
+// GetNewDrivingLine for one. A line other than 0 or 1 becomes the one a
+// sign not taken keeps. The decision goes in the first free slot, and with
+// none free, over nSignpostIndex, as retail's -1 slot lands there.
+int aicarcontroller_sign_post_decision(AICarController *c, Signpost *s,
+                                       int32_t *line, DrivingLocation *loc);
+
+// 0x001921f8. With the location clear, or the car further past its
+// point's road than MyHalfSizeL either side, FindWhereIAm (through the
+// table). Otherwise the location moves to the first point ahead of the
+// car (the route's last with none ahead), and the signs on the points
+// from the old to the new are decided in turn: the first taken puts the
+// location on the sign's route and point, relaxed, LastTrackRouteNumber
+// the old route's, and an AIHint 1 sign sets TakenSignpostTimer to 10000
+// ticks. At the route's end with no sign taken, FindWhereIAm. `car` is
+// not read.
+void aicarcontroller_get_current_track_route_point(AICarController *c,
+                                                   Car *car);
 
 // -------------------------------------------------------- the action
 

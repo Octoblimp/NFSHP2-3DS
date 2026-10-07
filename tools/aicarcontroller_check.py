@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Cross-check 3DS Files/source/aicarcontroller.c -- the AI car controller,
-step 11e-1's part of it -- against the retail image, run in mipsemu.
+steps 11e-1 and 11e-2's parts of it -- against the retail image, run in
+mipsemu.
 
 The model is retail's image, over drivingchoice_check.py's world: its cars,
 routes, signs, list and test tables, its stubs and every one of its ops,
@@ -15,7 +16,11 @@ GeneratePointsToFulfillAction, GetCurrentActionType,
 ForceMyCurrentAction, SetToPhysicsMode (and CarController's, which the
 port now takes from retail), GetCurrentDrivingLineSpeed, ForceBoost,
 ReleaseBoost, AboutToFly, SetOffBeltTimer, the exclusion's get and set,
-GetCurrentDrivingLocation and DebugDisplay. Under them everything the port
+GetCurrentDrivingLocation and DebugDisplay; and 11e-2's FindSignpostIndex,
+GetStickyIndex, DoStickyDecisions, SignPostDecision and
+GetCurrentTrackRoutePoint. SignPostDecision runs as shipped wherever it is
+reached, DrivingChoice::AdvancePoint too, as main.c points
+drivingchoice.h's seam at the port's. Under them everything the port
 has runs as shipped too: the Average's constructor and destructor,
 Signpost::GetIndex, the route manager's table, DistanceIsWithinRoute,
 FindClosestPoint, GetPosition, the DrivingLocation, DrivingChoice and
@@ -43,7 +48,11 @@ questions in the same order:
     op sets up has, now with GetCurrentRoutePoint (56) and
     GetAmountOutOfBounds (64) answering the script's point and amount: the
     model no longer stubs Car::GetRoutePoint and GetAmountOutOfBounds, which
-    reach a built controller's own methods through its table.
+    reach a built controller's own methods through its table;
+  World::Random (0x0014e548): the world (1 for pCurrentWorld) and the
+    range, answering the script's queue, then 0;
+  GetTrackInfo (0x00153420): the track number, answering a TrackInfo of
+    the script's, its SignpostGracePeriod -1 until set.
 
 A float prints as its bits, a NaN as "nan", and a pointer by what it is,
 as drivingchoice_check names them, with these added: kn3, kl3 and kc3 car
@@ -73,6 +82,7 @@ from drivingchoice_check import (CARS, CAR_STRIDE, CTRLS, CTRL_STRIDE,
                                  CDRIVERS, CDRIVER_STRIDE, NCARS, PLAYERS,
                                  PLAYER_STRIDE, LIST, LOC, CHOICE, SIGNS,
                                  SIGN_SIZE, GLOBALS, DVT, CVT, PATTERN, LINES,
+                                 RACE, WORLD,
                                  car_at, route_at, h, f32, fb, fx, s8,
                                  World, walk_world, place_me, place_other,
                                  seen_list, decide, boxed, heading_of)
@@ -85,7 +95,8 @@ HARNESS = "tools/src/aicarcontroller_test.c"
 AICC = "3DS Files/source/aicarcontroller.c"
 CCC = "3DS Files/source/carcontroller.c"
 SOURCES = [HARNESS] + dcc.SOURCES[1:] + ["3DS Files/source/" + f for f in (
-    "aicarcontroller.c", "carcontroller.c", "average.c", "timer.c")]
+    "aicarcontroller.c", "carcontroller.c", "average.c", "timer.c",
+    "difficultyinfo.c")]
 
 # ================================================================ the image
 
@@ -105,10 +116,21 @@ F = {
     "rb": 0x00193780, "gx": 0x00193fe0, "ex": 0x00193fe8,
     "gdl": 0x00193ff8, "cat": 0x00194000, "force": 0x00194020,
     "ob": 0x00194028, "cc": 0x001c0100,
+    # 11e-2's.
+    "fsi": 0x00191d40, "gsi": 0x00191d90, "dsd": 0x00191b30,
+    "spd": 0x00191de0, "gct": 0x001921f8,
 }
 BMALLOC = 0x002577c0
 BFREE = 0x00257850
 SET_MOVEMENT = 0x00131618
+WORLD_RANDOM = 0x0014e548         # World::Random(float)
+GET_TRACK_INFO = 0x00153420
+RACE_PARAMS = 0x0031a898          # TheRaceParameters, TrackNumber at 0
+SKILLS = 0x002f0080 + 368         # TheDifficultyInfo.AISkillLevel
+SKILL_STRIDE = 28
+NSKILLS = 10
+RACE_TIME = 16                    # Race::RaceTime
+S_FLAGS, S_HINT = 1, 8            # a sign's Flags byte and AIHint
 
 # The checker's own memory, past drivingchoice_check's.
 STUB_SSTP = 0x010b3430
@@ -130,6 +152,10 @@ OUTP = 0x010c2410
 FACTS = 0x010c3000
 FACT_SIZE = 608
 NFACTS = 8
+TINFO = 0x010c2500                # GetTrackInfo's answer
+TINFO_SIZE = 164
+TI_GRACE = 128                    # its SignpostGracePeriod
+NRANDOM = 16
 
 # The controller, by retail's offsets.
 K_SIZE = 720
@@ -232,12 +258,33 @@ def fact_at(i):
 # %ex k car / %gx k      the car to exclude, set / got
 # %gdl k / %dd k         GetCurrentDrivingLocation / DebugDisplay
 #
+# 11e-2's. Set up:
+# %rnd n v0 ..           World::Random's next n answers
+# %tg g / %tn n          the TrackInfo's SignpostGracePeriod / TrackNumber
+# %rt 0 t                the race's RaceTime, in ticks
+# %tsc s c0 c1 c2        skill level s's TakeSignChance
+# %sf i flags hint       sign i's Flags byte and AIHint
+# %si k i / %ts k i      controller k's nSignpostIndex / TakenSignpostIndex
+# %hl k f                its own list's MyHalfSizeL
+# %vm k f                car k's VelocityMagnitude
+# The calls:
+# %fsi k / %gsi k        FindSignpostIndex / GetStickyIndex
+# %dsd k                 DoStickyDecisions
+# %spd k i line          SignPostDecision on sign i from the line, at the
+#                        controller's location
+# %gct k                 GetCurrentTrackRoutePoint
+#
 # Not scripted: a find on a controller whose table is vK and whose
 # location is clear (retail's slot 112 is __pure_virtual), a route number
 # over 99 (retail reads on past the manager's table), FindClosestTrackRoute
 # finding a route through vC (whose SetCurrentRoute is no one's), and
 # GeneratePointsToFulfillAction's second CalculatePointsToDrive on a NULL
-# action.
+# action. From 11e-2: a NaN speed (the EE has no NaN, and retail's
+# look-ahead comes out at 250 where an IEEE FPU's is a NaN); DoStickyDecisions
+# with no sign past the look-ahead (retail goes round the signs for ever) or
+# with a used decision's sign past the table; and DoStickyDecisions or
+# FindSignpostIndex after SignPostDecision stored a decision with every
+# slot used, into nSignpostIndex, which they index the signs by.
 
 # Distances either side of the ones that matter.
 SECS = (0.0, 0.5, 1.5, 2.0, 3.0, -1.0, 0.000125, 0.0001, 1e6, 1e9, -1e9,
@@ -401,12 +448,14 @@ def number_zero(w):
         p["rn"] = 0
 
 
-def route_world(rnd):
+def route_world(rnd, nsigns=None):
     """drivingchoice_check's walk world with its signs and decisions, my
     car (0) near a route and a few more about, their targets, the list,
     and my controller built, its table the test one."""
     w = World(rnd)
-    sizes = walk_world(rnd, w, nsigns=rnd.choice((0, 2, 4)))
+    if nsigns is None:
+        nsigns = rnd.choice((0, 2, 4))
+    sizes = walk_world(rnd, w, nsigns=nsigns)
     if rnd.random() < 0.25:
         number_zero(w)
     w.ops += decide(rnd, w)
@@ -735,11 +784,514 @@ def s_action(rnd):
     return ops
 
 
+# ---- 11e-2's: the signposts and sticky decisions
+
+F11 = f32(1.1)                    # gp-29840
+TICK = f32(0.00025)               # gp-29836
+
+
+def fbits(x):
+    return struct.unpack("<I", struct.pack("<f", x))[0]
+
+
+def ulp(x, n=1):
+    """f32 x moved n ulps, down for a negative n, across zero."""
+    b = fbits(x)
+    i = -(b & 0x7fffffff) if b >> 31 else b
+    i += n
+    b = i if i >= 0 else 0x80000000 | -i
+    return struct.unpack("<f", struct.pack("<I", b))[0]
+
+
+def around(x):
+    return (ulp(x, -1), x, ulp(x, 1))
+
+
+def look_ahead(v, secs=2.0):
+    """DoStickyDecisions' look-ahead for a speed, in floats."""
+    a = f32(f32(secs) * f32(f32(v) * F11))
+    return min(250.0, max(a, 100.0))
+
+
+def edge_speed(rnd, target, secs=2.0):
+    """A speed whose look-ahead comes out at the target, or an ulp or two
+    from it."""
+    v = f32(target / secs / F11)
+    return ulp(v, rnd.choice((-2, -1, 0, 0, 1, 2)))
+
+
+def grace_ticks(g):
+    """The race clocks either side of the first one past SignpostGracePeriod
+    g, in floats: on track 1 that is 4001, as 4000 ticks come to exactly
+    1 s."""
+    t = 4000 * g - 3
+    while not float(g) < f32(f32(t) * TICK):
+        t += 1
+    return (t - 2, t - 1, t - 1, t, t, t + 1)
+
+
+def clamp_skill(s):
+    return 0 if s < 0 else 9 if s > 9 else s
+
+
+SIGN_SPEEDS = (0.0, 5.0, 20.0, 35.0, 60.0, 80.0, 100.0, 150.0, -10.0)
+SKILLS_TRIED = (-128, -3, -1, 0, 0, 1, 2, 4, 8, 9, 10, 12, 127)
+CHANCES = (0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0)
+HINTS = (0, 0, 1, 1, 2, 2, 3, -1)
+
+
+def sign_flags(rnd, sign=None):
+    """A sign's Flags byte: its Sign, now and then Backwards or Cloaked,
+    and the bits SignPostDecision never reads."""
+    f = rnd.choice((0, 0, 1, 1, 2, 2, 2, 3, 4, 4, 5, 6, 7)) if sign is None \
+        else sign
+    if rnd.random() < 0.12:
+        f |= 0x08
+    if rnd.random() < 0.15:
+        f |= 0x40
+    if rnd.random() < 0.3:
+        f |= rnd.choice((0x10, 0x20, 0x80, 0xb0))
+    return f
+
+
+def sign_routes(rnd, w, sizes, n, flags=None):
+    """Signs 0 to n-1 each leading on to a point of a route, now and then
+    to a number with no route; each one's Flags kept in `flags`."""
+    ops = []
+    for i in range(n):
+        k2 = rnd.randrange(5)
+        rn = w.rn[k2] if rnd.random() < 0.92 else 98
+        ops.append("K %d %d %d" % (i, rn, rnd.randrange(sizes[k2] - 5)))
+        f = sign_flags(rnd)
+        if flags is not None:
+            flags[i] = f
+        ops.append("%%sf %d %d %d" % (i, f, rnd.choice(HINTS)))
+    return ops
+
+
+def chance_ops(rnd, sk=None):
+    """A skill level's TakeSignChance: three rising, or not."""
+    s = rnd.randrange(NSKILLS) if sk is None else sk
+    cs = sorted(rnd.choice(CHANCES) for _ in range(3))
+    if rnd.random() < 0.15:
+        rnd.shuffle(cs)
+    return "%%tsc %d %s" % (s, " ".join(h(f32(c)) for c in cs)), cs
+
+
+def draws_for(rnd, cs, eq=False):
+    """World::Random's answers: at and either side of the chances, or of
+    an Equivalent sign's 0.5, 0, 1, a NaN or anything."""
+    out = []
+    for _ in range(rnd.randrange(1, 4)):
+        c = rnd.randrange(8)
+        if eq and c < 5:
+            x = rnd.choice(around(f32(0.5)))
+        elif c < 4:
+            x = rnd.choice(around(f32(rnd.choice(cs))))
+        elif c == 4:
+            x = rnd.choice(around(f32(0.5)))
+        elif c == 5:
+            x = rnd.choice((0.0, 1.0, f32(0.999)))
+        elif c == 6:
+            out.append("7fc00000")
+            continue
+        else:
+            x = f32(rnd.random())
+        out.append(h(x))
+    return "%%rnd %d %s" % (len(out), " ".join(out))
+
+
+def grace_ops(rnd, clock):
+    """The track's SignpostGracePeriod: none (-1), so the race's grace
+    period decides, or a time with the race clock either side of it."""
+    ops = ["%%tn %d" % rnd.choice((0, 0, 3, 7, 12, 15))]
+    c = rnd.randrange(5)
+    if c < 2:
+        ops.append("%tg -1")
+        ops.append("G TIMER %08x" % clock)
+        ops.append("R %08x" % ((clock - rnd.choice(dcc.GRACE_AGO)) & M32))
+    else:
+        g = rnd.choice((0, 1, 5, 12, 30, -2, 1000000))
+        ops.append("%%tg %d" % g)
+        if abs(g) < 1000 and rnd.random() < 0.8:
+            t = rnd.choice(grace_ticks(g))
+        else:
+            t = rnd.choice((0, 1, 4000, 48000, 0x7fffffff, -4000))
+        ops.append("%%rt 0 %08x" % (t & M32))
+    return ops
+
+
+def sticky_words(rnd, nsg, i=None, full=False, dsd=False):
+    """Eight sticky decisions: used or not, taken or not, any line, and a
+    sign's index, now and then sign i's. For DoStickyDecisions every used
+    one's sign is one of ours, which it reads."""
+    ws = []
+    for _ in range(NSTICKY):
+        used = 1 if full else rnd.choice((0, 0, 1))
+        if dsd:
+            s = rnd.randrange(nsg)
+        elif i is not None and rnd.random() < 0.3:
+            s = i
+        else:
+            s = rnd.randrange(256) if rnd.random() < 0.2 else rnd.randrange(nsg)
+        hi = rnd.getrandbits(16) if rnd.random() < 0.3 else 0
+        ws.append((hi << 16) | (s << 8) | (rnd.randrange(64) << 2)
+                  | (rnd.randrange(2) << 1) | used)
+    return "%%sk 0 %s" % " ".join("%08x" % v for v in ws)
+
+
+def s_signdec(rnd):
+    """SignPostDecision on every kind of sign and flag, inside the sign
+    grace period and out of it, the race's or the track's, through each
+    skill level's chances with draws at and either side of the row the
+    car's skill clamps to (an Equivalent sign's at 0.5), over sticky
+    decisions for the sign and not, every slot used and not, from a line
+    of -1, 0, 1 and past, at the location or with it clear, its line 0 or
+    1 now and then."""
+    w, sizes, others = route_world(rnd, nsigns=rnd.choice((2, 4, 6)))
+    ops = w.ops
+    nsg = rnd.choice((4, 8, 12))
+    flags = {}
+    ops += sign_routes(rnd, w, sizes, nsg, flags)
+    ops.append("%%NS %d" % nsg)
+    clock = rnd.choice((100000, 200000, 5000))
+    ops += grace_ops(rnd, clock)
+    rows = {}
+    for s in range(NSKILLS):
+        if rnd.random() < 0.5:
+            op, rows[s] = chance_ops(rnd, s)
+            ops.append(op)
+    sk = [0]
+
+    def skill():
+        sk[0] = rnd.choice(SKILLS_TRIED)
+        ops.append("@sk 0 %d" % sk[0])
+        s = clamp_skill(sk[0])
+        # The row the skill comes to, set more often than not.
+        if s not in rows or rnd.random() < 0.3:
+            op, rows[s] = chance_ops(rnd, s)
+            ops.append(op)
+
+    skill()
+    for _ in range(rnd.randrange(6, 14)):
+        i = rnd.randrange(nsg)
+        c = rnd.randrange(12)
+        if c == 0:
+            ops += grace_ops(rnd, clock)
+        elif c == 1:
+            skill()
+        elif c == 2:
+            ops.append(sticky_words(rnd, nsg, i,
+                                    full=rnd.random() < 0.3))
+        elif c == 3:
+            ops.append(rnd.choice(("%cs 0", "%gsi 0")))
+        elif c == 4:
+            ops.append(loc_op(rnd, sizes))
+        elif c == 5:
+            ops.append("%%L 0 -1 -1 %d 0" % rnd.choice((-1, 0, 1, 1)))
+        if c >= 6 or rnd.random() < 0.3:
+            if rnd.random() < 0.5:
+                flags[i] = sign_flags(rnd)
+                ops.append("%%sf %d %d %d" % (i, flags[i],
+                                              rnd.choice(HINTS)))
+            row = rows.get(clamp_skill(sk[0]), [0.0, 0.0, 0.0])
+            ops.append(draws_for(rnd, row, eq=flags[i] & 7 == 4))
+            ops.append("%%spd 0 %d %d" % (i, rnd.choice((-1, -1, -1, 0, 1,
+                                                          2, 3, 20, -2))))
+    return ops
+
+
+def s_takechance(rnd):
+    """The draw by skill on its own: past the sign grace period, each Sign
+    that reaches TakeSignChance (Faster, Slower, Stop and the two with no
+    name), the draw at and either side of each of the skill's three
+    chances, rising strictly or with two of them equal, the decisions
+    cleared before each."""
+    w, sizes, others = route_world(rnd, nsigns=4)
+    ops = w.ops
+    nsg = 6
+    ops += sign_routes(rnd, w, sizes, nsg)
+    ops += ["%%NS %d" % nsg, "%tg 0", "%rt 0 00010000"]
+    sk = rnd.choice(SKILLS_TRIED)
+    ops.append("@sk 0 %d" % sk)
+    cs = sorted(f32(v) for v in rnd.sample((0.1, 0.25, 0.4, 0.5, 0.6, 0.75,
+                                            0.9), 3))
+    if rnd.random() < 0.25:
+        j = rnd.randrange(2)
+        cs[j + 1] = cs[j]
+    ops.append("%%tsc %d %s" % (clamp_skill(sk), " ".join(h(c) for c in cs)))
+    for _ in range(rnd.randrange(8, 16)):
+        i = rnd.randrange(nsg)
+        ops.append("%%sf %d %d %d" % (i, rnd.choice((0, 0, 1, 1, 3, 6, 7)),
+                                      rnd.choice(HINTS)))
+        x = rnd.choice(around(rnd.choice(cs)) + (0.0, 1.0))
+        ops += ["%%rnd 1 %s" % h(x), "%cs 0"]
+        ops.append("%%spd 0 %d %d" % (i, rnd.choice((-1, 0, 1))))
+    return ops
+
+
+def s_sticky(rnd, edge=False):
+    """FindSignpostIndex, GetStickyIndex and DoStickyDecisions: decisions
+    dropped exactly 10 m past their sign and either side, the look-ahead
+    at its 100 and 250 m clamps and between, signs behind me, at me and
+    exactly the look-ahead on, the index wrapping at NumSignposts, the
+    track's length or none, and the decision on a sign the car took
+    forgotten with it. There is always a sign past the look-ahead, else
+    retail goes round its signs for ever. With `edge`, the speed puts the
+    look-ahead at its 250 m clamp and the first sign just inside it, where
+    a clamp of 249 would stop short."""
+    w, sizes, others = route_world(rnd, nsigns=rnd.choice((2, 4)))
+    ops = w.ops
+    tlen = rnd.choice((0.0, 0.0, 5000.0, 3000.0))
+    ops.append("G TLEN %s" % h(f32(tlen)))
+    nsg = rnd.choice((2, 3, 4, 8, 12, 16))
+    ops += sign_routes(rnd, w, sizes, nsg)
+    ops.append("%%NS %d" % nsg)
+    clock = rnd.choice((100000, 200000))
+    ops += grace_ops(rnd, clock)
+    ops.append("@sk 0 %d" % rnd.choice(SKILLS_TRIED))
+    op, cs = chance_ops(rnd, 0)
+    ops.append(op)
+    exact = rnd.random() < 0.6
+    mine = 0.0 if exact else f32(rnd.choice((100.0, 1234.5, 2990.0,
+                                              4990.0, 20.0)))
+    secs = 2.0 if rnd.random() < 0.7 else rnd.choice((1.0, 3.0))
+    c = 1 if edge else rnd.randrange(4)
+    if c == 0:
+        v = edge_speed(rnd, 100.0, secs)
+    elif c == 1:
+        v = edge_speed(rnd, 250.0, secs)
+    else:
+        v = f32(rnd.choice(SIGN_SPEEDS))
+    ahead = look_ahead(v, secs)
+    rels = []
+    for _ in range(nsg - 1):
+        c = rnd.randrange(9)
+        if c == 0:
+            rels.append(rnd.choice(around(-10.0)))
+        elif c == 1:
+            rels.append(rnd.choice(around(ahead)))
+        elif c == 2:
+            rels.append(rnd.choice((0.0, -0.0, ulp(0.0, 1), -ulp(0.0, 1))))
+        elif c == 3:
+            rels.append(rnd.choice((-5.0, -50.0, -400.0, -2600.0)))
+        elif c == 4:
+            rels.append(f32(rnd.uniform(0.0, ahead)))
+        elif c == 5:
+            rels.append(f32(rnd.uniform(-300.0, 600.0)))
+        else:
+            rels.append(f32(rnd.uniform(-20.0, 260.0)))
+    if edge:
+        rels[0] = rnd.choice((ulp(ahead, -1), ulp(ahead, -2), 249.5,
+                              249.0, ulp(249.0, 1)))
+        rels[1:] = [f32(r - 300.0) if 0.0 <= r < 260.0 else r
+                    for r in rels[1:]]
+    rels.append(1000.0)
+    if rnd.random() < 0.8:
+        rels.sort()
+    else:
+        rnd.shuffle(rels)
+    ds = [f32(mine + r) for r in rels]
+    for i, d in enumerate(ds):
+        ops.append("%%S %d %s" % (i, h(d)))
+    ops.append("%%d 0 %s" % h(mine))
+    ops.append("%%vm 0 %s" % h(v))
+    ops.append("G SECS %s" % h(f32(secs)))
+    ops.append(sticky_words(rnd, nsg, dsd=True, full=rnd.random() < 0.15))
+    if rnd.random() < 0.6:
+        ops.append("%%ts 0 %d" % rnd.choice((-1, 0, 1, 2, rnd.randrange(nsg))))
+    ops.append("%%si 0 %d" % rnd.randrange(nsg))
+    if edge:
+        ops += ["%fsi 0", "%dsd 0"]
+    for _ in range(rnd.randrange(3, 8)):
+        c = rnd.randrange(8)
+        if c == 0:
+            ops.append("%fsi 0")
+        elif c == 1:
+            ops.append("%gsi 0")
+        elif c == 2:
+            # On a little: the decisions behind me go, more signs come in.
+            mine2 = f32(mine + rnd.choice((0.0, 5.0, 10.0, 10.5, 50.0,
+                                           100.0)))
+            if all(f32(d - mine2) < 260.0 for d in ds):
+                continue
+            ops.append("%%d 0 %s" % h(mine2))
+            mine = mine2
+        elif c == 3:
+            ops.append("%%vm 0 %s" % h(f32(rnd.choice(SIGN_SPEEDS))))
+        elif c == 4:
+            ops.append(sticky_words(rnd, nsg, dsd=True))
+            ops.append("%%si 0 %d" % rnd.randrange(nsg))
+        elif c == 5:
+            ops.append(draws_for(rnd, cs))
+        else:
+            ops.append("%dsd 0")
+    ops.append("%dsd 0")
+    return ops
+
+
+def s_signindex(rnd):
+    """FindSignpostIndex from each sign, my car before the signs, at one,
+    between them and past them all, with the entry past the table's end
+    far ahead or not, so that where it wraps at NumSignposts decides; and
+    GetStickyIndex over sticky decisions of every kind."""
+    w = World(rnd)
+    w.car(0, pl=0)
+    ops = w.ops
+    n = rnd.choice((1, 2, 3, 5, 8))
+    ds = sorted(f32(rnd.uniform(-100.0, 1000.0)) for _ in range(n))
+    if n > 1 and rnd.random() < 0.3:
+        ds[1] = ds[0]
+    for i, d in enumerate(ds):
+        ops.append("%%S %d %s" % (i, h(d)))
+    ops.append("%%S %d %s" % (n, h(f32(rnd.choice((1e6, 1e6, -1e6, ds[-1]))))))
+    ops.append("%%NS %d" % n)
+    ops += ["%%d 0 %s" % h(ds[0]), "%n 0"]
+    for _ in range(rnd.randrange(4, 10)):
+        c = rnd.randrange(6)
+        if c == 0:
+            mine = f32(ds[0] - 1.0)
+        elif c == 1:
+            mine = rnd.choice(ds)
+        elif c == 2:
+            mine = f32(rnd.uniform(ds[0], ds[-1]))
+        elif c == 3:
+            mine = ulp(ds[-1], 1)
+        else:
+            mine = f32(ds[-1] + rnd.choice((1.0, 500.0)))
+        ops.append("%%d 0 %s" % h(mine))
+        ops.append("%%si 0 %d" % rnd.randrange(n))
+        ops.append("%fsi 0")
+        if rnd.random() < 0.4:
+            ops.append(sticky_words(rnd, n, full=rnd.random() < 0.3))
+            ops.append("%gsi 0")
+    return ops
+
+
+def s_trackpoint(rnd):
+    """GetCurrentTrackRoutePoint on the walk world: my car about a sign's
+    point and the location a few points short of it, on the road, near an
+    edge or off it, the location clear, and the signs taken or not."""
+    w, sizes, others = route_world(rnd, nsigns=rnd.choice((4, 6, 8)))
+    ops = w.ops
+    nsg = w.nsign
+    for i in range(nsg):
+        ops.append("%%sf %d %d %d" % (
+            i, sign_flags(rnd, rnd.choice((2, 2, 0, 1, 4, 5, None))),
+            rnd.choice(HINTS)))
+    ops.append("%%NS %d" % max(nsg, 1))
+    clock = rnd.choice((100000, 200000))
+    ops += grace_ops(rnd, clock)
+    ops.append("@sk 0 %d" % rnd.choice(SKILLS_TRIED))
+    op, cs = chance_ops(rnd, 0)
+    ops.append(op)
+    me = w.cars[0]
+    ops.append("%%rn 0 %d %d" % rnd.choice(((0, 99), (0, 99), (0, 49))))
+    for _ in range(rnd.randrange(3, 8)):
+        if w.sign_points and rnd.random() < 0.8:
+            kr, js = rnd.choice(w.sign_points)
+        else:
+            kr = rnd.randrange(5)
+            js = rnd.randrange(sizes[kr])
+        j = max(0, js - rnd.randrange(0, 5))
+        jc = min(sizes[kr] - 1, js + rnd.choice((-1, 0, 0, 1, 2, 5, 30)))
+        p = w.pts[kr][jc]
+        lat = rnd.choice((0.0, rnd.uniform(-3.0, 3.0), p["rw"] + 0.5,
+                          -p["lw"] - 0.5, p["rw"] + 1.5, -p["lw"] - 1.5,
+                          p["rw"] + 10.0))
+        x, y = dcc.beside(p, lat, rnd.uniform(-3.0, 8.0))
+        ops.append("%%pos 0 %s %s %s" % (h(f32(x)), h(f32(y)),
+                                         h(f32(me["pz"]))))
+        if rnd.random() < 0.1:
+            ops.append("%L 0 -1 -1 -1 0")
+        else:
+            ops.append("%%L 0 %d %d %d 0" % (kr, j, rnd.choice(
+                (0, 1, rnd.randrange(LINES), -1))))
+        if rnd.random() < 0.3:
+            ops.append("%%hl 0 %s" % h(f32(rnd.choice((0.0, 1.0, 2.25,
+                                                         5.0)))))
+        if rnd.random() < 0.3:
+            ops.append(sticky_words(rnd, max(nsg, 1),
+                                    full=rnd.random() < 0.2))
+        ops.append(draws_for(rnd, cs))
+        ops.append("%gct 0")
+    return ops
+
+
+def s_trackpoint_edge(rnd):
+    """GetCurrentTrackRoutePoint on a straight road along x, 25 m each side,
+    so my car's offset across it is -y exactly: exactly the half length
+    past either edge and an ulp either side, on its points and between,
+    behind the location's point, and past the road's last point with a
+    sign taken there or not."""
+    w = World(rnd)
+    ops = w.ops
+    n0 = 12
+    rn0, rn1 = rnd.sample(range(50), 2)
+    sj = sorted(rnd.sample(range(n0), rnd.choice((0, 1, 2, 3, 4))))
+    signs = {j: i for i, j in enumerate(sj)}
+    pts = w.route(0, n0, rn0, x=-60.0, y=0.0, hd=0.0, turn=0.0,
+                  smooth=True, signs=signs)
+    w.route(1, 12, rn1, x=-60.0, y=60.0, hd=0.0, turn=0.0, smooth=True)
+    for i in range(len(sj)):
+        w.sign(1, rnd.randrange(8))
+        ops.append("%%sf %d %d %d" % (
+            i, sign_flags(rnd, rnd.choice((2, 2, 2, 0, 5))),
+            rnd.choice(HINTS)))
+    nsg = max(1, len(sj))
+    ops.append("%%NS %d" % nsg)
+    sp = f32(rnd.choice((0.0, 20.0)))
+    w.car(0, px=pts[3]["x"], py=0.0, pz=0.0, bx=1.0, by=0.0, vmag=sp,
+          vx=sp, vy=0.0, dn=0, cls=0, dtype=2, ctl=1, oob=0.0, rpr=-1,
+          rpj=-1, ct=0, cc=-1, cx=0, act=-1, pl=0, nw=4, fs=sp)
+    boxed(rnd, w, 0)
+    ops += seen_list(rnd, w, [])
+    ops.append("G TIMER %08x" % 100000)
+    ops.append("R 00000000")
+    ops.append("G TLEN %s" % h(0.0))
+    ops += ["%d 0 0", "%n 0", "%dr 0", "%v 0 1",
+            "D 0 3 0 00000000", "X 1 -1 0", "%J 0", "%rn 0 0 99"]
+    ops.append("%tg -1")
+    margin = f32(rnd.choice((2.25, 2.0, 0.0)))
+    edge = f32(25.0 + margin)
+    for _ in range(rnd.randrange(4, 9)):
+        j = rnd.randrange(n0 - 1)
+        c = rnd.randrange(6)
+        if c < 3:
+            along = rnd.choice((0.0, 0.5, 5.0, 9.5, 10.0, 20.0, -0.5))
+            y = rnd.choice(around(edge) + around(-edge) + (0.0, 3.0))
+        elif c == 3:
+            along = rnd.choice((0.0, 5.0))
+            y = f32(rnd.choice((0.0, 26.0, -26.0, 40.0)))
+        else:
+            # Past the last point.
+            j = rnd.choice((n0 - 1, n0 - 2, n0 - 3, n0 - 5))
+            along = 10.0 * (n0 - 1 - j) + rnd.choice((0.0, 0.5, 4.0, 30.0))
+            y = f32(rnd.choice((0.0, 0.0, 10.0, -10.0)))
+        x = f32(pts[j]["x"] + along)
+        ops.append("%%pos 0 %s %s %s" % (h(x), h(y), h(0.0)))
+        ops.append("%%L 0 0 %d %d 0" % (j, rnd.choice((0, 1, -1, 3))))
+        ops.append("%%hl 0 %s" % h(margin))
+        if rnd.random() < 0.3:
+            ops.append(sticky_words(rnd, nsg, full=rnd.random() < 0.2))
+        elif rnd.random() < 0.5:
+            ops.append("%cs 0")
+        ops.append("%gct 0")
+    return ops
+
+
 N_BUILD = 40
 N_WHERE = 30
 N_LINE = 16
 N_ACTION = 30
 N_RELAX = 40
+N_SIGNDEC = 60
+N_STICKY = 50
+N_TRACKPOINT = 30
+N_TRACKPOINT_EDGE = 30
+N_SIGNINDEX = 20
+N_TAKECHANCE = 20
+N_STICKY_EDGE = 12
 
 
 def script():
@@ -755,6 +1307,21 @@ def script():
         sc.append(s_action(rnd))
     for _ in range(N_RELAX):
         sc.append(s_relax(rnd))
+    rnd = random.Random(0x11e2)
+    for _ in range(N_SIGNDEC):
+        sc.append(s_signdec(rnd))
+    for _ in range(N_STICKY):
+        sc.append(s_sticky(rnd))
+    for _ in range(N_TRACKPOINT):
+        sc.append(s_trackpoint(rnd))
+    for _ in range(N_TRACKPOINT_EDGE):
+        sc.append(s_trackpoint_edge(rnd))
+    for _ in range(N_SIGNINDEX):
+        sc.append(s_signindex(rnd))
+    for _ in range(N_TAKECHANCE):
+        sc.append(s_takechance(rnd))
+    for _ in range(N_STICKY_EDGE):
+        sc.append(s_sticky(rnd, edge=True))
     return sc
 
 
@@ -783,12 +1350,19 @@ class Model(dcc.Model):
         e.stub(STUB_CHOOSE, self.s_choose)
         e.stub(STUB_ADEL, self.s_adel)
         e.stub(STUB_ACP, self.s_acp)
+        # SignPostDecision runs as shipped (11e-2), from AdvancePoint too,
+        # as main.c points drivingchoice.h's seam at the port's.
+        del e.stubs[dcc.SIGN_DECISION]
+        e.stub(WORLD_RANDOM, self.s_random)
+        e.stub(GET_TRACK_INFO, self.s_tinfo)
         self.vt0 = bytes(e.mem[AICC_VTABLE:AICC_VTABLE + AICC_VT_BYTES])
         self.nheap = 0
         self.fa_pt = [0] * NFACTS
         self.queue = []
         self.qi = 0
         self.rnums = {}
+        self.rq = []
+        self.ri = 0
 
     # ---- names -----------------------------------------------------------
 
@@ -908,6 +1482,19 @@ class Model(dcc.Model):
         self.emit("  acp %s %s" % (self.name(a), self.name(em.reg[5])))
         self.e.put32(a + A_PT, self.fa_pt[i] & M32)
 
+    def s_random(self, em):
+        self.emit("  random %d %s" % (int(em.reg[4] & M32 == WORLD),
+                                      fx(em.fpr[12])))
+        v = 0
+        if self.ri < len(self.rq):
+            v = self.rq[self.ri]
+            self.ri += 1
+        em.fpr[0] = v
+
+    def s_tinfo(self, em):
+        self.emit("  tinfo %d" % s32(em.reg[4]))
+        return TINFO
+
     # ---- the world -------------------------------------------------------
 
     def reset(self):
@@ -925,11 +1512,18 @@ class Model(dcc.Model):
         e.put32(CVT + 56 + 4, STUB_CRP)
         e.put32(CVT + 64 + 4, STUB_COOB)
         e.mem[FACTS:FACTS + FACT_SIZE * NFACTS] = bytes(FACT_SIZE * NFACTS)
+        e.mem[TINFO:TINFO + TINFO_SIZE] = bytes(TINFO_SIZE)
+        e.put32(TINFO + TI_GRACE, M32)
+        e.put32(RACE_PARAMS, 0)
+        e.mem[SKILLS:SKILLS + SKILL_STRIDE * NSKILLS] = bytes(
+            SKILL_STRIDE * NSKILLS)
         self.nheap = 0
         self.fa_pt = [0] * NFACTS
         self.queue = []
         self.qi = 0
         self.rnums = {}
+        self.rq = []
+        self.ri = 0
 
     # ---- the dumps -------------------------------------------------------
 
@@ -998,6 +1592,15 @@ class Model(dcc.Model):
         self.emit("  K ltr %d hl %d %d" % (
             s8(self.e.mem[c + K_LTR]), s32(w(GLOBALS["HROUTE"])),
             s32(w(GLOBALS["HLINE"]))))
+
+    def dump_signs(self, k):
+        w = self.w
+        c = ctrl_at(k)
+        self.emit("  S sign %d ts %d tt %08x ltr %d" % (
+            s32(w(c + K_SIGN)), s32(w(c + K_TS)), w(c + K_TS + 4),
+            s8(self.e.mem[c + K_LTR])))
+        self.emit("  S sticky" + "".join(" %08x" % w(c + K_STICKY + 4 * i)
+                                         for i in range(NSTICKY)))
 
     def dump_facts(self):
         for i in range(NFACTS):
@@ -1191,6 +1794,51 @@ class Model(dcc.Model):
             self.emit("  dloc %s" % self.name(self.call(F["gdl"], a)))
         elif c == "dd":
             self.call(F["dd"], a)
+        # 11e-2's.
+        elif c == "rnd":
+            self.rq = [int(v, 16) for v in t[2:2 + min(k, NRANDOM)]]
+            self.ri = 0
+        elif c == "tg":
+            e.put32(TINFO + TI_GRACE, k & M32)
+        elif c == "tn":
+            e.put32(RACE_PARAMS, k & M32)
+        elif c == "rt":
+            e.put32(RACE + RACE_TIME, int(t[2], 16))
+        elif c == "si":
+            e.put32(a + K_SIGN, int(t[2]) & M32)
+        elif c == "ts":
+            e.put32(a + K_TS, int(t[2]) & M32)
+        elif c == "hl":
+            e.put32(a + K_LIST + LIST_HL, int(t[2], 16))
+        elif c == "vm":
+            e.put32(car + dcc.C_VMAG, int(t[2], 16))
+        elif c == "tsc":
+            for i in range(3):
+                e.put32(SKILLS + SKILL_STRIDE * k + 4 * i, int(t[2 + i], 16))
+        elif c == "sf":
+            s = SIGNS + SIGN_SIZE * k
+            e.mem[s + S_FLAGS] = int(t[2]) & 0xff
+            e.put32(s + S_HINT, int(t[3]) & M32)
+        elif c == "fsi":
+            self.call(F["fsi"], a)
+            self.emit("  sign %d" % s32(w(a + K_SIGN)))
+        elif c == "gsi":
+            self.emit("  free %d" % s32(self.call(F["gsi"], a)))
+        elif c == "dsd":
+            self.call(F["dsd"], a)
+            self.dump_signs(k)
+            self.dump_where(k)
+        elif c == "spd":
+            e.put32(LINEVAR, int(t[3]) & M32)
+            got = self.call(F["spd"], a, SIGNS + SIGN_SIZE * int(t[2]),
+                            LINEVAR, w(a + K_LOC))
+            self.emit("  take %d line %d" % (s32(got), s32(w(LINEVAR))))
+            self.dump_signs(k)
+            self.dump_where(k)
+        elif c == "gct":
+            self.call(F["gct"], a, car)
+            self.dump_signs(k)
+            self.dump_where(k)
         else:
             raise SystemExit("bad op %r" % (t,))
 
@@ -1267,7 +1915,8 @@ MUTATIONS = [
       "                                               .DistanceAroundTrack);",
       "    c->nSignpostIndex = 0;"),
     M("ct-bs", "    c->BrakeStanding = 1;", "    c->BrakeStanding = 0;"),
-    M("ct-tsi", "    c->TakenSignpostIndex = -1;", "    c->TakenSignpostIndex = 0;"),
+    M("ct-tsi", "    c->TakenSignpostIndex = -1;\n    c->TakenSignpostTimer",
+      "    c->TakenSignpostIndex = 0;\n    c->TakenSignpostTimer"),
     # The destructor.
     M("dt-action", "    if (c->CurrentAction != NULL)\n        delete_action(c->CurrentAction);\n"
       "    if (c->pProgress", "    if (c->pProgress"),
@@ -1304,8 +1953,8 @@ MUTATIONS = [
       "    if (0.0f <= f)\n        return f - p->RightWidth;"),
     M("oob-rw", "        return f - p->RightWidth;", "        return f - p->LeftWidth;"),
     M("oob-lw", "    return -(f + p->LeftWidth);", "    return -(f + p->RightWidth);"),
-    M("oob-cross", "        - (pos->y - p->Position.y) * p->Direction.x;",
-      "        + (pos->y - p->Position.y) * p->Direction.x;"),
+    M("oob-cross", "        - (pos->y - p->Position.y) * p->Direction.x;\n    if (0.0f < f)",
+      "        + (pos->y - p->Position.y) * p->Direction.x;\n    if (0.0f < f)"),
     # FindWhereIAm.
     M("fw-clear", "    drivinglocation_clear(c->CurrentDrivingLocation);\n"
       "    e = vt_slot(c->Base._vtable, AICARCONTROLLER_VT_GET_ROUTE_NUMBERS_TO_USE);",
@@ -1503,6 +2152,205 @@ MUTATIONS = [
     M("cc-arg", "    (void)car;\n    carcontroller_physics_or_mellow(c->pCar);",
       "    carcontroller_physics_or_mellow(car != NULL ? car : c->pCar);",
       rel=CCC),
+    # 11e-2's. The index's step and FindSignpostIndex.
+    M("ns-wrap", "    c->nSignpostIndex = i;\n    if (!(i < (int32_t)NumSignposts))",
+      "    c->nSignpostIndex = i;\n    if (!(i <= (int32_t)NumSignposts))"),
+    M("ns-zero", "    if (!(i < (int32_t)NumSignposts))\n        c->nSignpostIndex = 0;",
+      "    if (!(i < (int32_t)NumSignposts))\n        c->nSignpostIndex = 1;"),
+    M("fsi-lt", "    while (SignpostArray[c->nSignpostIndex].Distance < mine) {",
+      "    while (SignpostArray[c->nSignpostIndex].Distance <= mine) {"),
+    M("fsi-wrap", "        if (!(i < (int32_t)NumSignposts)) {",
+      "        if (!(i <= (int32_t)NumSignposts)) {"),
+    M("fsi-zero", "            c->nSignpostIndex = 0;\n            return;",
+      "            c->nSignpostIndex = 1;\n            return;"),
+    M("fsi-mine", "    // 0x00191d40.\n    float mine = c->Base.pCar->TheTrackPathCoordinate.DistanceAroundTrack;",
+      "    // 0x00191d40.\n    float mine = c->Base.pCar->State.VelocityMagnitude;"),
+    # GetStickyIndex.
+    M("gsi-bit", "        if (!(c->aStickyDecisions[i] & STICKY_USED))\n            return i;",
+      "        if (!(c->aStickyDecisions[i] & STICKY_TAKE))\n            return i;"),
+    M("gsi-none", "            return i;\n    return -1;", "            return i;\n    return 0;"),
+    M("gsi-n", "    for (i = 0; i < AICC_NUM_STICKY_DECISIONS; i++)\n"
+      "        if (!(c->aStickyDecisions[i] & STICKY_USED))",
+      "    for (i = 0; i < AICC_NUM_STICKY_DECISIONS - 1; i++)\n"
+      "        if (!(c->aStickyDecisions[i] & STICKY_USED))"),
+    # DoStickyDecisions.
+    M("dsd-used", "        if (!(w & STICKY_USED))\n            continue;\n", ""),
+    M("dsd-drop", "        if (AICC_STICKY_DROP\n            < trackpath_compare_distances(",
+      "        if (AICC_STICKY_DROP\n            <= trackpath_compare_distances("),
+    M("dsd-drop-k", "#define AICC_STICKY_DROP      10.0f",
+      "#define AICC_STICKY_DROP      10.5f"),
+    M("dsd-drop-args", "                &TheTrackPathManager, mine,\n"
+      "                SignpostArray[STICKY_SIGN(w)].Distance)) {",
+      "                &TheTrackPathManager,\n"
+      "                SignpostArray[STICKY_SIGN(w)].Distance, mine)) {"),
+    M("dsd-clear", "            c->aStickyDecisions[i] &= ~STICKY_USED;",
+      "            c->aStickyDecisions[i] &= ~STICKY_TAKE;"),
+    M("dsd-ts", "                == c->TakenSignpostIndex)\n                c->TakenSignpostIndex = -1;",
+      "                == c->TakenSignpostIndex)\n                c->TakenSignpostIndex = 0;"),
+    M("dsd-ts-test", "                == c->TakenSignpostIndex)\n",
+      "                != c->TakenSignpostIndex)\n"),
+    M("dsd-scale", "#define AICC_SIGN_SPEED_SCALE 1.10000002f",
+      "#define AICC_SIGN_SPEED_SCALE 1.20000005f"),
+    M("dsd-secs", "    ahead = AIDriverSecondsToLookAhead\n            * (car->State.VelocityMagnitude",
+      "    ahead = 2.0f\n            * (car->State.VelocityMagnitude"),
+    M("dsd-min", "#define AICC_SIGN_AHEAD_MIN   100.0f",
+      "#define AICC_SIGN_AHEAD_MIN   101.0f"),
+    M("dsd-max", "#define AICC_SIGN_AHEAD_MAX   250.0f",
+      "#define AICC_SIGN_AHEAD_MAX   249.0f"),
+    M("dsd-clamp", "    ahead = min_s(AICC_SIGN_AHEAD_MAX, max_s(ahead, AICC_SIGN_AHEAD_MIN));",
+      "    ahead = max_s(AICC_SIGN_AHEAD_MIN, min_s(ahead, AICC_SIGN_AHEAD_MAX));"),
+    M("dsd-max-args", "    ahead = min_s(AICC_SIGN_AHEAD_MAX, max_s(ahead, AICC_SIGN_AHEAD_MIN));",
+      "    ahead = min_s(AICC_SIGN_AHEAD_MAX, max_s(AICC_SIGN_AHEAD_MIN, ahead));"),
+    M("dsd-loop", "    while (aicarcontroller_get_sticky_index(c) != -1) {",
+      "    while (aicarcontroller_get_sticky_index(c) > 0) {"),
+    M("dsd-behind", "        if (d < 0.0f) {\n            next_signpost(c);",
+      "        if (d <= 0.0f) {\n            next_signpost(c);"),
+    M("dsd-ahead", "        } else if (d < ahead) {", "        } else if (d <= ahead) {"),
+    M("dsd-d-args", "        float d = trackpath_compare_distances(&TheTrackPathManager,\n"
+      "                                              s->Distance, mine);",
+      "        float d = trackpath_compare_distances(&TheTrackPathManager,\n"
+      "                                              mine, s->Distance);"),
+    M("dsd-line", "            int32_t line = -1;\n\n            aicarcontroller_sign_post_decision(",
+      "            int32_t line = 0;\n\n            aicarcontroller_sign_post_decision("),
+    # The line a sign not taken keeps, and the sign grace period.
+    M("kl-clear", "    if (drivinglocation_is_clear(loc))\n        return drivingchoice_get_driving_line(",
+      "    if (0)\n        return drivingchoice_get_driving_line("),
+    M("kl-line", "        return drivingchoice_get_driving_line(CHOICE_DRIVING_LINE_0,",
+      "        return drivingchoice_get_driving_line(CHOICE_DRIVING_LINE_1,"),
+    M("pg-neg1", "    if (g == -1)\n        return !race_grace_period_is_active(",
+      "    if (g < 0)\n        return !race_grace_period_is_active("),
+    M("pg-race", "        return !race_grace_period_is_active(pCurrentRace, c->Base.pCar);",
+      "        return race_grace_period_is_active(pCurrentRace, c->Base.pCar);"),
+    M("pg-lt", "    return (float)g < (float)(int32_t)pCurrentRace->RaceTime.PackedTime",
+      "    return (float)g <= (float)(int32_t)pCurrentRace->RaceTime.PackedTime"),
+    M("pg-tick", "#define AICC_TICKS_TO_SECONDS 0.000250000012f",
+      "#define AICC_TICKS_TO_SECONDS 0.000250000041f"),
+    M("pg-track", "    int32_t g = track_get_info(TheRaceParameters.TrackNumber)",
+      "    int32_t g = track_get_info(0)"),
+    M("pg-unsigned", "    return (float)g < (float)(int32_t)pCurrentRace->RaceTime.PackedTime",
+      "    return (float)g < (float)(uint32_t)pCurrentRace->RaceTime.PackedTime"),
+    # The draw by skill.
+    M("tk-max", "    skill = skill < 0 ? 0 : skill;\n", ""),
+    M("tk-min", "    skill = skill < 9 ? skill : 9;", "    skill = skill < 8 ? skill : 8;"),
+    M("tk-arg", "    r = world_random_f(pCurrentWorld, 1.0f);\n    chance =",
+      "    r = world_random_f(pCurrentWorld, 0.5f);\n    chance ="),
+    M("tk-row", "    chance = TheDifficultyInfo.AISkillLevel[skill].TakeSignChance;",
+      "    chance = TheDifficultyInfo.AISkillLevel[0].TakeSignChance;"),
+    M("tk-le0", "    if (r <= chance[0])", "    if (r < chance[0])"),
+    M("tk-le1", "    else if (r <= chance[1])", "    else if (r < chance[1])"),
+    M("tk-le2", "    else if (r <= chance[2])", "    else if (r < chance[2])"),
+    M("tk-k2", "        k = 2;\n    else if (r <= chance[1])",
+      "        k = 3;\n    else if (r <= chance[1])"),
+    M("tk-k1", "        k = 1;\n    else if (r <= chance[2])",
+      "        k = 2;\n    else if (r <= chance[2])"),
+    M("tk-k3", "        k = 3;\n    switch (k) {", "        k = 0;\n    switch (k) {"),
+    M("tk-case0", "        return sign == SIGN_FASTER;\n    case 2:",
+      "        return sign == SIGN_SLOWER;\n    case 2:"),
+    M("tk-case2", "    case 2:\n        return sign == SIGN_SLOWER;",
+      "    case 2:\n        return sign == SIGN_FASTER;"),
+    M("tk-default", "    default:\n        return 0;\n    }\n}",
+      "    default:\n        return 1;\n    }\n}"),
+    # SignPostDecision.
+    M("sp-back", "    if ((flags & SIGNPOST_BACKWARDS) != 0\n        ||",
+      "    if (0\n        ||"),
+    M("sp-cloak", "        || ((flags & SIGNPOST_CLOAKED) != 0 && sign != SIGN_ALWAYS_TAKE)) {",
+      "        || (flags & SIGNPOST_CLOAKED) != 0) {"),
+    M("sp-cloak-at", "        || ((flags & SIGNPOST_CLOAKED) != 0 && sign != SIGN_ALWAYS_TAKE)) {",
+      "        || ((flags & SIGNPOST_CLOAKED) != 0 && sign != SIGN_EQUIVALENT)) {"),
+    M("sp-early-line", "        *line = keep_line(c, loc);\n        return 0;",
+      "        return 0;"),
+    M("sp-index", "    index = (uint32_t)(s - SignpostArray) & 0xffu;",
+      "    index = (uint32_t)(s - SignpostArray + 1) & 0xffu;"),
+    M("sp-match-used", "        if ((w & STICKY_USED) && STICKY_SIGN(w) == index) {",
+      "        if (STICKY_SIGN(w) == index) {"),
+    M("sp-match-line", "            *line = (int32_t)((w >> 2) & 0x3fu);",
+      "            *line = (int32_t)((w >> 2) & 0x1fu);"),
+    M("sp-match-take", "            return (int)((w >> 1) & 1u);",
+      "            return (int)(w & 1u);"),
+    M("sp-at", "    if (sign == SIGN_ALWAYS_TAKE) {\n        take = 1;",
+      "    if (sign == SIGN_STOP) {\n        take = 1;"),
+    M("sp-grace", "        if (!past_sign_grace(c))\n            take = 0;",
+      "        if (past_sign_grace(c))\n            take = 0;"),
+    M("sp-eq", "            take = world_random_f(pCurrentWorld, 1.0f) < 0.5f;",
+      "            take = world_random_f(pCurrentWorld, 1.0f) <= 0.5f;"),
+    M("sp-eq-sign", "        else if (sign == SIGN_EQUIVALENT)",
+      "        else if (sign == SIGN_STOP)"),
+    M("sp-dont", "        else if (sign == SIGN_DONT_TAKE)\n            take = 0;",
+      "        else if (sign == SIGN_DONT_TAKE)\n            take = 1;"),
+    M("sp-notake-line", "            *line = loc->DrivingLine;",
+      "            *line = keep_line(c, loc);"),
+    M("sp-relaxed", "                       signpost_get_new_route_point(s), 1, line, loc)) {",
+      "                       signpost_get_new_route_point(s), 0, line, loc)) {"),
+    M("sp-hint", "            if (s->AIHint == SIGNPOST_AIHINT_HOLD_LINE_SPEED)",
+      "            if (s->AIHint != SIGNPOST_AIHINT_HOLD_LINE_SPEED)"),
+    M("sp-hint-idx", "                c->TakenSignpostIndex = (int32_t)index;",
+      "                c->TakenSignpostIndex = (int32_t)index + 1;"),
+    M("sp-fail", "        } else {\n            take = 0;\n        }\n    }",
+      "        } else {\n            take = 1;\n        }\n    }"),
+    M("sp-again", "    if (take && *line < 0)\n", "    if (take && *line < -1)\n"),
+    M("sp-again-take", "    if (take && *line < 0)\n", "    if (*line < 0)\n"),
+    M("sp-again-relaxed", "            c, signpost_get_new_route(s), signpost_get_new_route_point(s), 1,\n",
+      "            c, signpost_get_new_route(s), signpost_get_new_route_point(s), 0,\n"),
+    M("sp-range", "    if (!((uint32_t)*line < 2u))", "    if (!((uint32_t)*line < 3u))"),
+    M("sp-range-signed", "    if (!((uint32_t)*line < 2u))", "    if (!(*line < 2))"),
+    M("sp-slot0", "    slotp = slot >= 0 ? &c->aStickyDecisions[slot]",
+      "    slotp = slot > 0 ? &c->aStickyDecisions[slot]"),
+    M("sp-slot-full", "                      : (uint32_t *)(void *)&c->nSignpostIndex;",
+      "                      : &c->aStickyDecisions[0];"),
+    M("sp-store-used", "    v = ((*slotp | STICKY_USED) & ~STICKY_TAKE) | ((uint32_t)take << 1);",
+      "    v = (*slotp & ~STICKY_TAKE) | ((uint32_t)take << 1);"),
+    M("sp-store-take", "    v = ((*slotp | STICKY_USED) & ~STICKY_TAKE) | ((uint32_t)take << 1);",
+      "    v = (*slotp | STICKY_USED) | ((uint32_t)take << 1);"),
+    M("sp-store-line", "    v = (v & ~STICKY_LINE_MASK) | (((uint32_t)*line & 0x3fu) << 2);",
+      "    v = v | (((uint32_t)*line & 0x3fu) << 2);"),
+    M("sp-store-sign", "    *slotp = (v & ~0xff00u) | (index << 8);",
+      "    *slotp = v | (index << 8);"),
+    M("sp-store-hi", "    *slotp = (v & ~0xff00u) | (index << 8);",
+      "    *slotp = (v & 0xffu) | (index << 8);"),
+    M("sp-ret", "    *slotp = (v & ~0xff00u) | (index << 8);\n    return take;",
+      "    *slotp = (v & ~0xff00u) | (index << 8);\n    return 1;"),
+    # GetCurrentTrackRoutePoint.
+    M("gc-margin", "    float margin = c->MyCurrentDrivingInformation.MyNearbyCarList.MyHalfSizeL;",
+      "    float margin = c->MyCurrentDrivingInformation.MyNearbyCarList.MyHalfSizeD;"),
+    M("gc-clear", "        find_where_i_am(c);\n        return;\n    }\n    p = loc->pRoutePoint;",
+      "        return;\n    }\n    p = loc->pRoutePoint;"),
+    M("gc-cross", "        - (pos->y - p->Position.y) * p->Direction.x;\n"
+      "    if (p->RightWidth",
+      "        + (pos->y - p->Position.y) * p->Direction.x;\n"
+      "    if (p->RightWidth"),
+    M("gc-right", "    if (p->RightWidth < f - margin || f + margin < -p->LeftWidth) {",
+      "    if (p->RightWidth <= f - margin || f + margin < -p->LeftWidth) {"),
+    M("gc-left", "    if (p->RightWidth < f - margin || f + margin < -p->LeftWidth) {",
+      "    if (p->RightWidth < f - margin || f + margin <= -p->LeftWidth) {"),
+    M("gc-sides", "    if (p->RightWidth < f - margin || f + margin < -p->LeftWidth) {",
+      "    if (p->LeftWidth < f - margin || f + margin < -p->RightWidth) {"),
+    M("gc-margin-sign", "    if (p->RightWidth < f - margin || f + margin < -p->LeftWidth) {",
+      "    if (p->RightWidth < f + margin || f - margin < -p->LeftWidth) {"),
+    M("gc-off-find", "        find_where_i_am(c);\n        return;\n    }\n    r = loc->pRoute;",
+      "        return;\n    }\n    r = loc->pRoute;"),
+    M("gc-end", "    if (np == NULL) {\n        atEnd = 1;", "    if (np == NULL) {\n        atEnd = 0;"),
+    M("gc-last", "        np = &r->TrackRoutePointTable[r->NumPoints - 1];",
+      "        np = &r->TrackRoutePointTable[r->NumPoints - 2];"),
+    M("gc-setpt", "    drivinglocation_set_route_point(c->CurrentDrivingLocation, np);\n", ""),
+    M("gc-from", "    for (i = troute_get_point_number(r, p); i <= last; i++) {",
+      "    for (i = troute_get_point_number(r, p) + 1; i <= last; i++) {"),
+    M("gc-to", "    for (i = troute_get_point_number(r, p); i <= last; i++) {",
+      "    for (i = troute_get_point_number(r, p); i < last; i++) {"),
+    M("gc-line", "        int32_t line = -1;\n\n        if (!trpoint_has_signpost(pt))",
+      "        int32_t line = 0;\n\n        if (!trpoint_has_signpost(pt))"),
+    M("gc-ltr", "                                          : (int8_t)l->pRoute->RouteNumber;",
+      "                                          : (int8_t)(l->pRoute->RouteNumber + 1);"),
+    M("gc-relaxed", "                                      signpost_get_new_route_point(s), line,\n"
+      "                                      1);",
+      "                                      signpost_get_new_route_point(s), line,\n"
+      "                                      0);"),
+    M("gc-break", "                    (int32_t)AICC_TAKEN_SIGN_TICKS;\n            break;\n",
+      "                    (int32_t)AICC_TAKEN_SIGN_TICKS;\n"),
+    M("gc-hint", "            if (s->AIHint == 1)", "            if (s->AIHint == 2)"),
+    M("gc-timer", "#define AICC_TAKEN_SIGN_TICKS 10000.5f",
+      "#define AICC_TAKEN_SIGN_TICKS 10001.5f"),
+    M("gc-end-find", "    if (atEnd && !took)", "    if (atEnd)"),
+    M("gc-end-took", "    if (atEnd && !took)", "    if (!took)"),
 ]
 
 EQUIVALENT = {
@@ -1524,6 +2372,18 @@ EQUIVALENT = {
         "own list and nothing in 11e-1 moves it.",
     "gp-ahead":
         "GetCarAhead only reads; retail calls it and drops the answer.",
+    "dsd-clamp":
+        "max(100, min(a, 250)) and min(250, max(a, 100)) agree for every "
+        "a but a NaN, which the EE does not have (retail's look-ahead for a "
+        "NaN speed is 250).",
+    "dsd-max-args":
+        "max.s's two orders differ only for a NaN, which the EE does not "
+        "have.",
+    "sp-relaxed":
+        "As gl-relax: GetNewDrivingLine's relaxed flag reaches only its own "
+        "location, never a target IsDriveable reads.",
+    "sp-again-relaxed":
+        "As sp-relaxed, for the second GetNewDrivingLine.",
 }
 
 

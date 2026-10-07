@@ -10,10 +10,16 @@
 #include "bmem.h"
 #include "cardriver.h"
 #include "carmodes.h"
+#include "difficultyinfo.h"
 #include "drivetarget.h"
 #include "drivingchoice.h"
+#include "race.h"
+#include "racecore.h"
 #include "raceinit.h"
+#include "track.h"
+#include "trackpath.h"
 #include "vtable.h"
+#include "world.h"
 
 // gp-29940 and gp-29928, the constructor's and JustReset's: -1/140, so
 // each car's first evaluation is staggered by its index.
@@ -38,6 +44,30 @@
 
 // FindClosestTrackRoute's FindClosestPoint flags: 3, ahead and posted.
 #define AICC_ROUTE_FLAGS (TRFIND_AHEAD_ONLY | TRFIND_POSTED_ONLY)
+
+// DoStickyDecisions: a decision is dropped 10 m past its sign (`lui
+// 0x4120`), and signs are decided AIDriverSecondsToLookAhead times my
+// speed times 1.1 (gp-29840) ahead, but no less than 100 m and no more
+// than 250.
+#define AICC_STICKY_DROP      10.0f
+#define AICC_SIGN_SPEED_SCALE 1.10000002f
+#define AICC_SIGN_AHEAD_MIN   100.0f
+#define AICC_SIGN_AHEAD_MAX   250.0f
+
+// SignPostDecision's race clock (gp-29836): ticks to seconds.
+#define AICC_TICKS_TO_SECONDS 0.000250000012f
+
+// GetCurrentTrackRoutePoint's TakenSignpostTimer: gp-29832, 10000.5,
+// through `cvt.w.s`, so 10000 ticks. Not WorldTimer plus that: the
+// timer is a span of 2.5 s, as `Timer(2.5f)` builds one.
+#define AICC_TAKEN_SIGN_TICKS 10000.5f
+
+// A sticky decision's word: bit 0 the slot in use, bit 1 the sign taken,
+// bits 2 to 7 the line, bits 8 to 15 the sign's index (a byte).
+#define STICKY_USED      0x1u
+#define STICKY_TAKE      0x2u
+#define STICKY_LINE_MASK 0xfcu
+#define STICKY_SIGN(w)   (((w) >> 8) & 0xffu)
 
 typedef void       (*DriverFn)(void *self);
 typedef void       (*DriverPointFn)(void *self, bVector2 *p);
@@ -72,6 +102,25 @@ static void choose_new_action(AICarController *c, AIAction **out,
                                AICARCONTROLLER_VT_CHOOSE_NEW_ACTION);
 
     ((AICarControllerChooseFn)e->fn)(vt_this(c, e), out, type);
+}
+
+static void find_where_i_am(AICarController *c)
+{
+    const VtEntry *e = vt_slot(c->Base._vtable,
+                               CARCONTROLLER_VT_FIND_WHERE_I_AM);
+
+    ((ControllerFn)e->fn)(vt_this(c, e));
+}
+
+// `max.s` and `min.s`.
+static float max_s(float fs, float ft)
+{
+    return fs < ft ? ft : fs;
+}
+
+static float min_s(float fs, float ft)
+{
+    return fs < ft ? fs : ft;
 }
 
 // -------------------------------------------------------- the record
@@ -396,6 +445,282 @@ void aicarcontroller_steer_straight_ahead(AICarController *c)
     d = c->Base.Driver;
     e = vt_slot(d->_vtable, CARDRIVER_VT_SET_STEER_TO_POINT);
     ((DriverPointFn)e->fn)(vt_this(d, e), &to);
+}
+
+// ---------------------------------------------------------- the signposts
+
+// nSignpostIndex one on, and back to 0 at NumSignposts (`slt`, signed).
+static void next_signpost(AICarController *c)
+{
+    int32_t i = c->nSignpostIndex + 1;
+
+    c->nSignpostIndex = i;
+    if (!(i < (int32_t)NumSignposts))
+        c->nSignpostIndex = 0;
+}
+
+void aicarcontroller_find_signpost_index(AICarController *c)
+{
+    // 0x00191d40.
+    float mine = c->Base.pCar->TheTrackPathCoordinate.DistanceAroundTrack;
+
+    while (SignpostArray[c->nSignpostIndex].Distance < mine) {
+        int32_t i = c->nSignpostIndex + 1;
+
+        c->nSignpostIndex = i;
+        if (!(i < (int32_t)NumSignposts)) {
+            c->nSignpostIndex = 0;
+            return;
+        }
+    }
+}
+
+int32_t aicarcontroller_get_sticky_index(AICarController *c)
+{
+    // 0x00191d90.
+    int32_t i;
+
+    for (i = 0; i < AICC_NUM_STICKY_DECISIONS; i++)
+        if (!(c->aStickyDecisions[i] & STICKY_USED))
+            return i;
+    return -1;
+}
+
+void aicarcontroller_do_sticky_decisions(AICarController *c)
+{
+    // 0x00191b30.
+    Car *car = c->Base.pCar;
+    float mine = car->TheTrackPathCoordinate.DistanceAroundTrack;
+    float ahead;
+    int i;
+
+    for (i = 0; i < AICC_NUM_STICKY_DECISIONS; i++) {
+        uint32_t w = c->aStickyDecisions[i];
+
+        if (!(w & STICKY_USED))
+            continue;
+        if (AICC_STICKY_DROP
+            < trackpath_compare_distances(
+                &TheTrackPathManager, mine,
+                SignpostArray[STICKY_SIGN(w)].Distance)) {
+            c->aStickyDecisions[i] &= ~STICKY_USED;
+            if ((int32_t)STICKY_SIGN(c->aStickyDecisions[i])
+                == c->TakenSignpostIndex)
+                c->TakenSignpostIndex = -1;
+        }
+    }
+    ahead = AIDriverSecondsToLookAhead
+            * (car->State.VelocityMagnitude * AICC_SIGN_SPEED_SCALE);
+    ahead = min_s(AICC_SIGN_AHEAD_MAX, max_s(ahead, AICC_SIGN_AHEAD_MIN));
+    while (aicarcontroller_get_sticky_index(c) != -1) {
+        Signpost *s = &SignpostArray[c->nSignpostIndex];
+        float d = trackpath_compare_distances(&TheTrackPathManager,
+                                              s->Distance, mine);
+
+        if (d < 0.0f) {
+            next_signpost(c);
+        } else if (d < ahead) {
+            int32_t line = -1;
+
+            aicarcontroller_sign_post_decision(c, s, &line,
+                                               c->CurrentDrivingLocation);
+            next_signpost(c);
+        } else {
+            break;
+        }
+    }
+}
+
+// The line a sign not taken keeps: the location's, or line 0's with the
+// location clear.
+static int32_t keep_line(AICarController *c, const DrivingLocation *loc)
+{
+    if (drivinglocation_is_clear(loc))
+        return drivingchoice_get_driving_line(CHOICE_DRIVING_LINE_0,
+                                              c->Base.pCar);
+    return loc->DrivingLine;
+}
+
+// Whether the AI may take a sign other than AlwaysTake yet: past the
+// track's SignpostGracePeriod on the race clock, or with -1 there, out of
+// the race's grace period.
+static int past_sign_grace(AICarController *c)
+{
+    int32_t g = track_get_info(TheRaceParameters.TrackNumber)
+                    ->SignpostGracePeriod;
+
+    if (g == -1)
+        return !race_grace_period_is_active(pCurrentRace, c->Base.pCar);
+    return (float)g < (float)(int32_t)pCurrentRace->RaceTime.PackedTime
+                          * AICC_TICKS_TO_SECONDS;
+}
+
+// A Faster, Slower or Stop sign, by my skill's TakeSignChance: a draw at
+// or under the first takes a Slower sign, one at or under the second, or
+// over all three, a Faster one, and one between the second and the third
+// none. SignPostDecision's switch (the table at 0x002b4cb0).
+static int take_by_skill(AICarController *c, uint32_t sign)
+{
+    int32_t skill = c->Base.pCar->MyDriver->SkillLevel;
+    const float *chance;
+    float r;
+    int k = 0;
+
+    // `pmaxw` and `pminw`: 0 to 9.
+    skill = skill < 0 ? 0 : skill;
+    skill = skill < 9 ? skill : 9;
+    r = world_random_f(pCurrentWorld, 1.0f);
+    chance = TheDifficultyInfo.AISkillLevel[skill].TakeSignChance;
+    if (r <= chance[0])
+        k = 2;
+    else if (r <= chance[1])
+        k = 1;
+    else if (r <= chance[2])
+        k = 3;
+    switch (k) {
+    case 0:
+    case 1:
+        return sign == SIGN_FASTER;
+    case 2:
+        return sign == SIGN_SLOWER;
+    default:
+        return 0;
+    }
+}
+
+int aicarcontroller_sign_post_decision(AICarController *c, Signpost *s,
+                                       int32_t *line, DrivingLocation *loc)
+{
+    // 0x00191de0.
+    uint32_t flags = s->Flags;
+    uint32_t sign = flags & SIGNPOST_SIGN_MASK;
+    uint32_t index, v;
+    uint32_t *slotp;
+    int32_t slot;
+    int take = 0;
+    int i;
+
+    if ((flags & SIGNPOST_BACKWARDS) != 0
+        || ((flags & SIGNPOST_CLOAKED) != 0 && sign != SIGN_ALWAYS_TAKE)) {
+        *line = keep_line(c, loc);
+        return 0;
+    }
+    index = (uint32_t)(s - SignpostArray) & 0xffu;
+    for (i = 0; i < AICC_NUM_STICKY_DECISIONS; i++) {
+        uint32_t w = c->aStickyDecisions[i];
+
+        if ((w & STICKY_USED) && STICKY_SIGN(w) == index) {
+            *line = (int32_t)((w >> 2) & 0x3fu);
+            return (int)((w >> 1) & 1u);
+        }
+    }
+    slot = aicarcontroller_get_sticky_index(c);
+    if (sign == SIGN_ALWAYS_TAKE) {
+        take = 1;
+    } else {
+        if (!past_sign_grace(c))
+            take = 0;
+        else if (sign == SIGN_EQUIVALENT)
+            take = world_random_f(pCurrentWorld, 1.0f) < 0.5f;
+        else if (sign == SIGN_DONT_TAKE)
+            take = 0;
+        else
+            take = take_by_skill(c, sign);
+        if (!take) {
+            // Not IsClear: the location's line as it is.
+            *line = loc->DrivingLine;
+        } else if (aicarcontroller_get_new_driving_line(
+                       c, signpost_get_new_route(s),
+                       signpost_get_new_route_point(s), 1, line, loc)) {
+            if (s->AIHint == SIGNPOST_AIHINT_HOLD_LINE_SPEED)
+                c->TakenSignpostIndex = (int32_t)index;
+        } else {
+            take = 0;
+        }
+    }
+    // A taken sign with no line yet (AlwaysTake's, from a caller's -1)
+    // asks for one, and keeps whatever it gets.
+    if (take && *line < 0)
+        aicarcontroller_get_new_driving_line(
+            c, signpost_get_new_route(s), signpost_get_new_route_point(s), 1,
+            line, loc);
+    if (!((uint32_t)*line < 2u))
+        *line = keep_line(c, loc);
+    // With every slot in use, retail's `652 + 4 * -1` is nSignpostIndex,
+    // which takes the decision instead.
+    slotp = slot >= 0 ? &c->aStickyDecisions[slot]
+                      : (uint32_t *)(void *)&c->nSignpostIndex;
+    v = ((*slotp | STICKY_USED) & ~STICKY_TAKE) | ((uint32_t)take << 1);
+    v = (v & ~STICKY_LINE_MASK) | (((uint32_t)*line & 0x3fu) << 2);
+    *slotp = (v & ~0xff00u) | (index << 8);
+    return take;
+}
+
+void aicarcontroller_get_current_track_route_point(AICarController *c,
+                                                   Car *car)
+{
+    // 0x001921f8. `car` is not read.
+    float margin = c->MyCurrentDrivingInformation.MyNearbyCarList.MyHalfSizeL;
+    DrivingLocation *loc = c->CurrentDrivingLocation;
+    TrackRoute *r;
+    TrackRoutePoint *p, *np;
+    const bVector3 *pos;
+    float f;
+    int atEnd = 0, took = 0;
+    int32_t i, last;
+
+    (void)car;
+    if (drivinglocation_is_clear(loc)) {
+        find_where_i_am(c);
+        return;
+    }
+    p = loc->pRoutePoint;
+    pos = &c->Base.pCar->State.Position;
+    f = (pos->x - p->Position.x) * p->Direction.y
+        - (pos->y - p->Position.y) * p->Direction.x;
+    if (p->RightWidth < f - margin || f + margin < -p->LeftWidth) {
+        find_where_i_am(c);
+        return;
+    }
+    r = loc->pRoute;
+    np = troute_find_closest_point_ahead(
+        r, (const bVector2 *)(const void *)pos, p);
+    if (np == NULL) {
+        atEnd = 1;
+        np = &r->TrackRoutePointTable[r->NumPoints - 1];
+    }
+    drivinglocation_set_route_point(c->CurrentDrivingLocation, np);
+    last = troute_get_point_number(r, np);
+    for (i = troute_get_point_number(r, p); i <= last; i++) {
+        TrackRoutePoint *pt = &r->TrackRoutePointTable[i];
+        Signpost *s;
+        int32_t line = -1;
+
+        if (!trpoint_has_signpost(pt))
+            continue;
+        s = trpoint_get_signpost(pt);
+        if (aicarcontroller_sign_post_decision(c, s, &line,
+                                               c->CurrentDrivingLocation)) {
+            DrivingLocation *l = c->CurrentDrivingLocation;
+
+            c->LastTrackRouteNumber = drivinglocation_is_clear(l)
+                                          ? -1
+                                          : (int8_t)l->pRoute->RouteNumber;
+            drivinglocation_set_route(c->CurrentDrivingLocation,
+                                      signpost_get_new_route(s),
+                                      signpost_get_new_route_point(s), line,
+                                      1);
+            took = 1;
+            if (s->AIHint == 1)
+                c->TakenSignpostTimer.PackedTime =
+                    (int32_t)AICC_TAKEN_SIGN_TICKS;
+            break;
+        }
+        // Asked for, and dropped.
+        signpost_get_new_route(s);
+    }
+    if (atEnd && !took)
+        find_where_i_am(c);
 }
 
 // -------------------------------------------------------- the action

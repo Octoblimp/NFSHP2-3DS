@@ -32,7 +32,7 @@ Step 11e ports it in slices:
 | 11e-4 | the honking and ExecuteCurrentAction |
 | 11e-5 | Think |
 
-This file has 11e-1. Two slots still wait: DoSnapshot waits on
+This file has 11e-1 and 11e-2. Two slots still wait: DoSnapshot waits on
 ReplaySnapshot, and Think is 11e-5's.
 
 ## The record, 720 bytes
@@ -74,9 +74,9 @@ vPreviousLinePoint move from 676 and 688 to 692 and 704.
 | 640 | bBoostAllowed |
 | 644 | pCatchupPlayer |
 | 648 | nSignpostIndex |
-| 652 | aStickyDecisions, eight words; bit 0 says a slot is in use |
-| 684 | TakenSignpostIndex: retail's own, the sign whose route the car took (-1 none) |
-| 688 | TakenSignpostTimer: retail's own, set when GetCurrentTrackRoutePoint takes a sign's route |
+| 652 | aStickyDecisions, eight words (below) |
+| 684 | TakenSignpostIndex: retail's own, the AIHint 2 sign whose route the car took (-1 none) |
+| 688 | TakenSignpostTimer: retail's own, set to 10000 ticks when GetCurrentTrackRoutePoint takes an AIHint 1 sign's route |
 | 692 | pDeltaLineSpeed, an Average of 5 |
 | 696 | 8 bytes of padding |
 | 704 | vPreviousLinePoint, a quadword |
@@ -309,6 +309,135 @@ The remaining small methods:
 - **The exclusion** (0x00193fe0 get, 0x00193fe8 set) and
   **GetCurrentDrivingLocation** (0x00193ff8) are plain accessors.
 
+## The signposts
+
+A signpost (`docs/formats/track-route.md`) marks a junction: at its point,
+the road branches on to its NewRoute and NewPoint, and its Sign says what
+the AI makes of it. The controller decides each sign once, a little before
+it gets there, and keeps the decision until it is 10 m past it. The
+decisions live in the eight sticky words:
+
+| Bits | What |
+|-----:|------|
+| 0 | the slot is in use |
+| 1 | the sign is taken |
+| 2-7 | the driving line to take it on |
+| 8-15 | the sign's index, a byte |
+| 16-31 | kept as they were |
+
+nSignpostIndex (648) is the next sign to decide, an index into
+SignpostArray.
+
+**FindSignpostIndex** (0x00191d40) steps nSignpostIndex on while its sign's
+Distance is below my car's distance round the track. Those are plain
+compares, not CompareDistances. It stops at the first sign that isn't
+behind, or at 0 when it steps past NumSignposts (`slt`, signed).
+
+**GetStickyIndex** (0x00191d90) answers the first slot not in use, or -1.
+
+**DoStickyDecisions** (0x00191b30) runs in two passes.
+
+1. **The drop.** Each decision in use is dropped when its sign is more than
+   10 m behind me: `10 < CompareDistances(mine, sign)`. Dropping it clears
+   bit 0 only. When its sign is TakenSignpostIndex, that goes back to -1.
+2. **The look-ahead.** The car looks AIDriverSecondsToLookAhead times its
+   speed times 1.1 (gp-29840) ahead. That is clamped to no less than 100 m
+   and no more than 250, as `min(250, max(a, 100))`.
+
+Then, while a slot is free, it takes the sign at nSignpostIndex. `d` is
+CompareDistances(sign, mine):
+
+- `d < 0`, behind me: step on;
+- `d < ahead`: SignPostDecision on it, with a line of -1 and the
+  controller's location, then step on;
+- otherwise stop.
+
+Stepping on wraps at NumSignposts, as in FindSignpostIndex. A sign that
+already has a decision answers from its slot and uses none. So with no
+sign past the look-ahead and a slot free, retail goes round the signs for
+ever. The checker always puts a sign past it.
+
+**SignPostDecision(s, &line, loc)** (0x00191de0) answers whether the car
+takes sign `s`, and on which line. DrivingChoice::AdvancePoint reaches it
+through drivingchoice.h's seam, `gAISignPostDecisionFn`, which main.c
+points at `aicarcontroller_sign_post_decision`.
+
+1. **The early outs.** A Backwards sign, or a Cloaked one that isn't
+   AlwaysTake, is not taken. `*line` is the kept line: line 0's
+   (CarClass x 2) with the location clear, else the location's own. Nothing
+   is stored.
+2. **A decision already made.** A slot in use with this sign's index
+   answers from the slot: bits 2-7 into `*line`, and bit 1.
+3. **The decision.** First it notes the free slot (GetStickyIndex). Then:
+   - AlwaysTake is taken.
+   - Every other sign is never taken inside the sign grace period. The
+     period is GetTrackInfo(TrackNumber)'s SignpostGracePeriod (+128). At
+     -1 the car must be out of Race::GracePeriodIsActive. Anything else is
+     a time in seconds: the car must be past it, `g < RaceTime x 0.00025`
+     (gp-29836, ticks to seconds).
+   - Past the grace period, Equivalent is taken on World::Random(1) < 0.5,
+     and DontTake never.
+   - The rest (Faster, Slower, Stop and the unnamed 6 and 7) draw r =
+     World::Random(1) against the TakeSignChance of the driver's skill.
+     The skill byte is read signed (`lb`) and clamped to 0..9
+     (`pmaxw`, `pminw`). Then:
+
+| Draw | Takes |
+|------|-------|
+| r <= chance[0] | Slower |
+| r <= chance[1] | Faster |
+| r <= chance[2] | none |
+| over all three | Faster |
+
+   That is a switch through the table at 0x002b4cb0, cases 2, 1, 3 and 0.
+   A Stop sign is never taken, but it still draws.
+
+   A sign not taken sets `*line` to the location's DrivingLine as it is.
+   Unlike the early outs, there is no IsClear test.
+
+   A taken sign other than AlwaysTake asks GetNewDrivingLine (relaxed) for
+   the sign's route and point, into `*line`. If no line is driveable, the
+   sign is not taken after all. If it is driveable and the sign's AIHint is
+   2, TakenSignpostIndex becomes the sign's index.
+4. **AlwaysTake's line.** A taken sign whose line is still negative (from
+   the caller's -1) asks GetNewDrivingLine again, and keeps whatever it
+   gives.
+5. **The range check.** A line that isn't 0 or 1 (`sltiu 2`, unsigned)
+   becomes the kept line.
+6. **The store.** It writes into the slot noted at the start: bit 0 set,
+   bit 1 the answer, bits 2-7 the line's low six bits, bits 8-15 the
+   sign's index.
+
+   With every slot in use, the slot is -1 and retail's `652 + 4 x -1` is
+   nSignpostIndex. The decision goes there, and the next sign to decide
+   becomes a sticky word. The port does the same. AdvancePoint and
+   GetCurrentTrackRoutePoint can get there; DoStickyDecisions can't, as it
+   stops with no slot free.
+
+**GetCurrentTrackRoutePoint(car)** (0x001921f8) moves the location on
+along its route and takes the signs it passes. Its argument isn't read.
+
+1. With the location clear, it calls FindWhereIAm (slot 72) and returns.
+2. **Off the road.** `f` is my car's offset across the location's point
+   (as GetAmountOutOfBounds has it), with a margin of the list's
+   MyHalfSizeL. If `RightWidth < f - margin` or `f + margin < -LeftWidth`,
+   it calls FindWhereIAm and returns.
+3. **The new point.** It asks FindClosestPointAhead from the location's
+   point. With none, the car is at the end, and it uses the route's last
+   point. The location takes the new point.
+4. **The signs.** It goes over the route's points from the old one to the
+   new one, both included. Each point with a sign gets SignPostDecision,
+   with a line of -1 and the location. On a take:
+   - LastTrackRouteNumber becomes the location's route's number, -1 with
+     it clear;
+   - the location takes the sign's route, point and line, relaxed;
+   - an AIHint 1 sign sets TakenSignpostTimer.PackedTime to 10000
+     (gp-29832, 10000.5 through `cvt.w.s`), a span of 2.5 s;
+   - the loop stops.
+
+   A sign not taken has its GetNewRoute asked for and the answer dropped.
+5. At the end with no sign taken, it calls FindWhereIAm.
+
 ## Checking it
 
     python tools/aicarcontroller_check.py
@@ -329,7 +458,10 @@ the table. Everything beneath those methods runs as shipped too:
   GetPosition;
 - the location, choice and information;
 - IsDriveable and everything beneath it;
-- GetCarAhead and HighlightDrivingLine.
+- GetCarAhead and HighlightDrivingLine;
+- from 11e-2, SignPostDecision wherever it is reached: the harness points
+  drivingchoice.h's seam at the port's, as main.c does, and the model
+  reaches retail's through DrivingChoice::AdvancePoint.
 
 The stand-ins each print a line:
 
@@ -348,6 +480,9 @@ The stand-ins each print a line:
   GetAmountOutOfBounds answer the script. The model now leaves
   Car::GetRoutePoint and GetAmountOutOfBounds unstubbed, so that a built
   controller is reached through its own table.
+- World::Random (0x0014e548), answering the script's queue, then 0.
+- GetTrackInfo (0x00153420), answering a TrackInfo of the script's. Its
+  SignpostGracePeriod is -1 until the script sets it.
 
 The scenarios:
 
@@ -368,9 +503,39 @@ The scenarios:
   would decide. My car is off its line and past 29.5 m/s, the grace period
   is over, and slower cars sit ahead on or near the line.
 
-The check gives 156 scenarios, 24485 ops, 15468 lines, 0 differ.
+11e-2's, from their own random seed:
 
-Its mutation pass has 126 mutations: 121 caught and 5 equivalent.
+- **s_signdec (60):** SignPostDecision on every Sign and flag, inside and
+  past the grace period (the race's, or the track's at the first clock
+  past it and either side). Draws land at and either side of the chance
+  row the skill clamps to, and an Equivalent's at 0.5. It runs over
+  decisions for the sign and not, every slot used and not, lines of -1, 0,
+  1 and past, and the location at a point or clear.
+- **s_sticky (50):** FindSignpostIndex, GetStickyIndex and
+  DoStickyDecisions. Decisions are dropped exactly 10 m past their sign
+  and either side. The look-ahead sits at its clamps and between, with
+  seconds of 1, 2 and 3. Signs lie behind me, at me and exactly the
+  look-ahead on. The index wraps, the track has a length or none, and a
+  taken sign's decision is forgotten with it.
+- **s_trackpoint (30):** GetCurrentTrackRoutePoint on the walk world: my
+  car about a sign's point, on the road, near an edge or off it, and the
+  location clear.
+- **s_trackpoint_edge (30):** the same on a straight road along x, so the
+  car's offset is -y exactly. The car sits exactly the half length past
+  either edge and an ulp either side, behind the location's point, and
+  past the last point with a sign taken there or not.
+- **s_signindex (20):** FindSignpostIndex from each sign, with the car
+  before, at, between and past the signs, so where it wraps decides; and
+  GetStickyIndex over every kind of word.
+- **s_takechance (20):** the draw by skill alone, at and either side of
+  each chance, with the chances rising strictly or two of them equal.
+- **s_sticky's edge (12):** the look-ahead at its 250 m clamp and the first
+  sign just inside it, so a clamp of 249 stops short.
+
+The check gives 378 scenarios, 67592 ops, 40802 lines, 0 differ.
+
+Its mutation pass has 226 mutations: 217 caught and 9 equivalent. 11e-2's
+share is 100: 96 caught (sp-ret by crashing the harness) and 4 equivalent.
 
 | Mutation | Why it's equivalent |
 |----------|---------------------|
@@ -378,6 +543,9 @@ Its mutation pass has 126 mutations: 121 caught and 5 equivalent.
 | gl-relax0 | SetRoute's switch is overwritten by SetDrivingLine's on every pass before IsDriveable reads it, and with no pass the location isn't read |
 | gl-list | the constructor points CurrentNearbyCarList at the controller's own list, and nothing in 11e-1 moves it |
 | gp-ahead | GetCarAhead only reads, and retail drops its answer |
+| dsd-clamp | `max(100, min(a, 250))` and `min(250, max(a, 100))` differ only for a NaN, which the EE doesn't have |
+| dsd-max-args | `max.s`'s two orders differ only for a NaN |
+| sp-relaxed, sp-again-relaxed | as gl-relax, for SignPostDecision's two GetNewDrivingLines |
 
 Some things the checker found along the way:
 
@@ -392,6 +560,13 @@ Some things the checker found along the way:
   slot 0, the first one FindClosestTrackRoute takes past its `bltz`, was
   never filled. `number_zero` files route 0 under number 0 a quarter of
   the time, and its signs with it.
+- **The grace gate.** track.h and topology.md said SignpostGracePeriod
+  gated "a 0x400 signpost". It gates every sign but AlwaysTake.
+- **AIHint 1.** track-route.md said only AIHint 2 is tested. 1 is tested
+  too, by GetCurrentTrackRoutePoint, which sets TakenSignpostTimer.
+- **No NaN.** mipsemu's EE FPU has no NaN or infinity: 0x7fc00000 is a
+  huge number, so a NaN speed's look-ahead is 250 there, where an IEEE FPU
+  gives a NaN.
 
 Not scripted:
 
@@ -401,4 +576,9 @@ Not scripted:
 - FindClosestTrackRoute finding a route through drivingchoice_check's
   table, whose SetCurrentRoute is no one's;
 - GeneratePointsToFulfillAction's second CalculatePointsToDrive on a NULL
-  action.
+  action;
+- a NaN speed (above);
+- DoStickyDecisions with no sign past the look-ahead (it loops for ever),
+  or with a used decision's sign past the table;
+- DoStickyDecisions or FindSignpostIndex after SignPostDecision stored a
+  decision into nSignpostIndex with every slot used.
