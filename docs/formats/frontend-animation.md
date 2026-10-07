@@ -111,6 +111,23 @@ frontend's only caller passes 0 for both, so the bug cannot fire here and the
 port does not carry it; `banim.h` records it next to the declaration so the
 next caller knows.
 
+### GetddVal and tCubic2D, for the belt mover
+
+The BeltMover ([belt-mover.md](belt-mover.md), step 11e-6) is the first
+caller outside the frontend and the HUD, and it needs two more pieces:
+
+- **GetddVal** (0x001da830), the second derivative,
+  `a*(t*6) + (b + b)`, rounded in that order. `bspline_get_ddval` is it.
+- **tCubic2D**, two tCubic1Ds side by side (96 bytes, `BSpline2D`). Its
+  SetVal, SetdVal and SetValDesired are inline in the belt mover: each
+  stores x and then y, and each sets that axis's state to 2 when the new
+  value differs from its partner (`ValDesired` for a value, `dValDesired`
+  for a rate, `Val` for a desired value). Seek seeks x and then y, and
+  GetVal and GetdVal read the pair. They are `bspline2d_*`.
+
+`tools/beltmover_check.py` runs retail's GetddVal on each of the mover's
+five cubics, and the mover's own inline copies of the rest.
+
 ## AnimationGroup
 
 One `tCubic1D` plus a screen hash, a group hash, a master object hash, and

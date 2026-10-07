@@ -26,6 +26,7 @@
 #include "bmem.h"
 #include "bslotpool.h"
 #include "bticker.h"
+#include "beltmover.h"
 #include "car.h"
 #include "cardamage.h"
 #include "collision.h"
@@ -325,7 +326,7 @@ static void *hook_malloc(int size, const char *name, int flags, int pool)
         return p;
     }
     memset(p, 0xa5, (size_t)size);
-    // The three records the port has are its own size; the log shows the
+    // The five records the port has are its own size; the log shows the
     // image's, so a wrong size still shows.
     if (strcmp(name, "PhysicsCar") == 0 && size == (int)sizeof(PhysicsCar)) {
         t = &pct_PhysicsCar;
@@ -341,6 +342,10 @@ static void *hook_malloc(int size, const char *name, int flags, int pool)
                && size == (int)sizeof(RealController)) {
         // Ported, though the stand-in still builds in it here.
         shown = CM_IMG_REALCONTROLLER;
+    } else if (strcmp(name, "BeltMover") == 0
+               && size == (int)sizeof(BeltMover)) {
+        // Ported too (11e-6), and a stand-in here like RealController.
+        shown = CM_IMG_BELTMOVER;
     }
     g_nalloc++;
     snprintf(nm, sizeof nm, "%s#%d", name, g_nalloc);

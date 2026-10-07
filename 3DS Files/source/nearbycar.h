@@ -134,10 +134,9 @@ void drivinginformation_clear(DrivingInformation *d);
 
 // ---------------------------------------------------- the free functions
 
-// While BeltMover is not ported, CalculateMaxAcceleration reaches its
-// GetAccelerationDueToGravity (0x00204668) through this. No car is in
-// BELT_MOVEMENT until it is: SetMovementMode's arm aborts on its NULL
-// constructor seam (carmodes.h).
+// CalculateMaxAcceleration reaches BeltMover's
+// GetAccelerationDueToGravity (0x00204668) through this, which main.c
+// points at beltmover.c's: nearbycar.c sits below the mover in the link.
 typedef float (*BeltMoverGravityFn)(CarMover *m);
 extern BeltMoverGravityFn gBeltMoverGravityFn;
 

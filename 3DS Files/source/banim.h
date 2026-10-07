@@ -28,6 +28,8 @@
 
 #include <stdint.h>
 
+#include "bvector.h"
+
 // ---------------------------------------------------------------- the world
 
 // FlailerObjectType, as FindFlailerObject takes it: 0 matches any type.
@@ -174,6 +176,33 @@ float bspline_get_dval(const BSpline* s, float t);
 // and read 0x001d0818 first, because the guard tests the third argument
 // while the call one instruction later passes the second.
 void  bspline_seek(BSpline* s, float dt);
+// GetddVal, retail's 0x001da830: the curve's second derivative in its own
+// parameter, `a * (t * 6) + (b + b)`. The BeltMover is its one caller, and
+// throws the answer away.
+float bspline_get_ddval(const BSpline* s, float t);
+
+// ------------------------------------------------------------- tCubic2D
+
+// Two tCubic1Ds, x at 0 and y at 48: 96 bytes in the original. The
+// BeltMover's two are its only users. Retail's addresses: SetVal
+// 0x001daa00, SetdVal 0x001daa50, SetValDesired 0x001daaa0, GetVal
+// 0x001dab38, GetdVal 0x001dab50 and cPoint::SplineSeek(tCubic2D *, float)
+// 0x001db000. Each setter stores both lanes and marks a lane for a new seek
+// (state 2) when the value it stored differs from that lane's partner:
+// SetVal and SetdVal test against the desired values, SetValDesired against
+// the current one. The seek is the tCubic1D one on x, then on y, both with
+// their clamps at 0 -- which is bspline_seek.
+typedef struct BSpline2D {
+    BSpline x;
+    BSpline y;
+} BSpline2D;
+
+void bspline2d_set_val(BSpline2D* s, const bVector2* v);
+void bspline2d_set_dval(BSpline2D* s, const bVector2* v);
+void bspline2d_set_val_desired(BSpline2D* s, const bVector2* v);
+void bspline2d_get_val(const BSpline2D* s, bVector2* out);
+void bspline2d_get_dval(const BSpline2D* s, bVector2* out);
+void bspline2d_seek(BSpline2D* s, float dt);
 
 // ---------------------------------------------------------- AnimationGroup
 

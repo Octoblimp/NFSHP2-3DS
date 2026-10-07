@@ -43,8 +43,9 @@ everything beneath these functions:
 - bATan, bCos, bNormalize and the e-matrix calls;
 - bMemSet and bMemCpy.
 
-The only stub is the belt mover's gravity. 99 mutations are caught, and
-none are excused.
+The only stub is the belt mover's gravity, which
+[belt-mover.md](belt-mover.md) checks on its own. 99 mutations are caught,
+and none are excused.
 
 ## The records
 
@@ -186,8 +187,9 @@ Notes on the terms:
   of `(x^2 + y^2) + z^2`.
 - fBeltAccelCoef (gp-16600) is 1.0. Gravity (gp-19912) is 9.8.
 
-BeltMover is not ported. The port reaches it through
-`gBeltMoverGravityFn`, and no car can be in BELT_MOVEMENT until it is.
+BeltMover's is in [belt-mover.md](belt-mover.md). nearbycar.c sits below
+the mover in the link, so it reaches it through `gBeltMoverGravityFn`,
+which main.c points at beltmover.c's.
 
 ## CanICatchThisCar
 

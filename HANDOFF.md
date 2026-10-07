@@ -15711,6 +15711,80 @@ Every other checker still runs clean. `docs/formats/ai-car-controller.md`
 has the detail, under "Think", and `race.md` has CountDown and
 CanAICarsStartDriving. The CIA builds.
 
+### Step 11e-6: the BeltMover
+
+`beltmover.{c,h}` are retail's BeltMover.obj (0x00204098 to 0x002056b4),
+all but DoSnapshot. It is the cheap mover AICarController::Think puts an
+AI car on when no player is near.
+
+- **The belt.** SetBelt resamples the driver's DriveTarget and makes its
+  points a QuickSpline's (EXTRAPOLATED, 20 points, w 0). FindCoordinates
+  finds the car's parameter `v` on it, its rate `dv` (the speed in
+  control points a second) and `ddv`, towards 0.899 of the desired speed
+  over the desired time, clamped to the car's most acceleration and to
+  -20 m/s/s. The car's parameter is `v + t(dv + t ddv)` on the belt's
+  clock.
+- **Move** puts the car on the curve each frame:
+  - the heading, eased towards the tangent 0.5 s on by a tCubic2D;
+  - the slide out of a bend, from an Average of the sideways
+    acceleration 0.3 s on through SlideCoef's two Graphs, by a second
+    tCubic2D;
+  - the offset across the belt, by a tCubic1D the slide steers.
+
+  It then writes the position, yaw rate, velocity and speeds outright,
+  places the four Wheels and their slips, makes skids near a player, and
+  sets the controller's OffBeltTimer (0.6 s) when AverageAir says the
+  belt drops away.
+- **banim.c** gains GetddVal (0x001da830) and the tCubic2D's inline
+  SetVal, SetdVal, SetValDesired, GetVal, GetdVal and Seek
+  (`bspline2d_*`). cPoint::SplineSeek's two clamps never run: every seek
+  the mover makes passes 0 for both.
+- **Wired in.** main.c sets `gBeltMoverCtorFn`, `gBeltMoverSetBeltFn` and
+  `gBeltMoverGravityFn` and installs the table. BELTMOVER_SIZE is
+  `sizeof(BeltMover)`. No AI car is made in the game yet (AIDriver is
+  11f-2), so nothing reaches it.
+
+The checker, `tools/beltmover_check.py`, is new:
+- **What runs as shipped.** Every method but DoSnapshot, through the
+  table where retail calls them so, with QuickSpline, Average, Graph,
+  the tCubics, bSin, bCos, bATan, bNormalize and the Graphs' start-up
+  code beneath.
+- **The stand-ins.** bOMalloc and the Wheel's constructor, SetState,
+  MaybeMakeSkids and destructor; DriveTarget::Resample;
+  CalculateMaxAcceleration; PutFlatOnTrack (a scripted lift);
+  CalculateGeometryPosition; ShouldVisualEffectsBeGenerated; the
+  closest player's distance; ComputeFakeRPM; ~CarMover; and the driver's
+  GetDesiredSpeed and GetDesiredTimeToSpeed.
+- **The scenarios.** Construction, straight, hill, bend, crest,
+  hairpin and random belts, every way to `ddv` and its tie with the most
+  acceleration, SlideCoef's knees, the EE's divides (no length, a
+  standing car, a Move at scale 0), the w lanes, `dt` round 0.0001, the
+  wheels' numbers, the skids at 200 m and the destructor with each
+  pointer cleared.
+- 6049 ops, 34239 lines, 0 differ.
+- 277 mutations: 271 caught (8 by crashing the harness), 6 equivalent:
+  cross-z (each cross product is against (0, 0, 1), so z is a zero
+  either way), del-vptr (nothing derives from BeltMover), sb-dirty
+  (SetNumControlPoints has set the flag), air-h-le (h is exactly 0 only
+  for a dt of 0), mv-s-w (only the sum's x and y are read) and mv-steer
+  (cvt.w.s and a halfword store give the same bits for 65535.0 and
+  -1.0). The first pass left 30; the rest became scenarios.
+
+Found on the way:
+- A belt of one point has no length, so its scale is the EE's FLT_MAX.
+  A Move then overflows, which the EE clamps and the host does not, so
+  the one-point scenario is given a length. The scale's own divide is
+  checked at FindCoordinates, with the car standing.
+- AverageAir's step rounds alike either way for Move's 0.5 s, a power of
+  two, so the checker also asks it over 0.7 s.
+
+`docs/formats/belt-mover.md` has the detail. `car-modes.md`,
+`ai-driving-info.md`, `ai-car-controller.md`, `quickspline.md` and
+`frontend-animation.md` follow it. `carmode_check` maps the BeltMover's
+host size back to the image's 72, as it does RealController's, and its
+size-beltmover mutation follows the sizeof (caught). Every other checker
+still runs clean, and the CIA builds.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the

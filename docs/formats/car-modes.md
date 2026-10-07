@@ -146,6 +146,10 @@ Eight of the classes these two tables build belong to task 26:
 - **Movers:** TrafficCar, DeliveryMover, CopMover, BeltMover.
 - **Controllers:** RealController, AIDriver, TrafficDriver, CopDriver.
 
+Two are ported: RealController ([real-controller.md](real-controller.md))
+and BeltMover ([belt-mover.md](belt-mover.md), step 11e-6). main.c sets
+their seams at boot, and their `_SIZE` constants are `sizeof`.
+
 Car allocates each one itself and hands the memory to the constructor, so
 the port does the same. It calls the constructor through a pointer:
 

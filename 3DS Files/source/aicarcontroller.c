@@ -1510,8 +1510,8 @@ static void set_desired_speed(AICarController *c, float speed, float time,
     ((DriverDesiredSpeedFn)e->fn)(vt_this(d, e), speed, time, tol, allowed);
 }
 
-// BeltMover::SetBelt, through carmodes.h's seam until the BeltMover is
-// ported.
+// BeltMover::SetBelt, through carmodes.h's seam, which main.c sets and a
+// harness may leave NULL.
 static void set_belt(CarMover *m)
 {
     if (gBeltMoverSetBeltFn == NULL) {

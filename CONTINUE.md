@@ -1,7 +1,7 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 38
-(2026-10-07), after 11e-5, AICarController's Think.
+(2026-10-07), after 11e-6, the BeltMover.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
@@ -9,9 +9,10 @@ AIPlan and the AIAction base, 11d-1 to 11d-3b, all eleven actions,
 11e-0, Average at retail's size, 11e-1, AICarController's record,
 route methods and actions, 11e-2, its signposts and sticky
 decisions, 11e-3, its belt, glue and boost, 11e-4, its horn and
-ExecuteCurrentAction, and 11e-5, its Think with Timer::CountDown and
-Race::CanAICarsStartDriving, are done and checked against retail. Next
-is 11e-6, the BeltMover. The car selector is finished and checked against retail: SC-1
+ExecuteCurrentAction, 11e-5, its Think with Timer::CountDown and
+Race::CanAICarsStartDriving, and 11e-6, the BeltMover, are done and
+checked against retail. Next is 11f-1, PsychoDriver, the AI's CarDriver,
+which AIDriver's constructor builds. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -475,52 +476,24 @@ car's were.
       clock), between thinks, and the think: the sticky decisions,
       BuildArray, the track route point, the action (a new JustDrive by
       bOMalloc for none), the points, ExecuteCurrentAction and the belt.
-      BeltMover::SetBelt is carmodes.h's `gBeltMoverSetBeltFn`, NULL
-      until 11e-6, and Think aborts if it would call it then. Retail's
+      BeltMover::SetBelt is carmodes.h's `gBeltMoverSetBeltFn` (main.c
+      sets it since 11e-6; a harness that leaves it NULL aborts). Retail's
       BuildArray reads RenderingEnabled as a byte at Car+1192 and
       IsPoofed the word at 2160 (the demo's 1160 and 2120). 865
       scenarios, 173272 ops, 170252 lines, 0 differ; 654 mutations, 639
       caught, 15 equivalent (11e-5's 132: 130 caught, 2 equivalent).
-    - **11e-6, next: the BeltMover** (BeltMover.obj, 0x00204098 to
-      0x002055c4, about 5.5 KB; the demo's at 0x001f1ca8). Session 38
-      read it whole (`out/beltmover_retail.txt`, regenerable with
-      `tools/retaildis.py --addr 0x00204098 --count 1400`). It is the
-      cheap mover for an AI car far from every player: the car rides a
-      QuickSpline through its DriveTarget's points.
-      - The functions: the constructor (776, `__9BeltMoverP3Car`), the
-        destructor (192), ClearCalculatedVariables (`jr ra`), DoSnapshot
-        (336, waits on ReplaySnapshot), Dot (176), GetAccelerationDueTo
-        Gravity (132, nearbycar.c's `gBeltMoverGravityFn`),
-        GetMaximumAcceleration (40, CalculateMaxAcceleration 0x001cce50,
-        the port's `ai_calculate_max_acceleration`), FindCoordinates
-        (628), SetBelt (156), SlideCoef (424), AverageAir (416), Move
-        (1572), DebugScreenPrint (`jr ra`), GetPoint (176, retail's own;
-        the demo's was 88), GetDerivative (128) and GetSecondDerivative
-        (236). The start-up code at 0x002055c8 builds two Graphs at
-        gp-16592 and gp-16584, which SlideCoef picks between by the word
-        at 52.
-      - The record, 72 bytes: CarMover's (vptr at 4, the car at 8), then
-        12 the spline parameter, 16 the length's scale (control points
-        over the DriveTarget's length at 512), 20 a QuickSpline (2,
-        basis 0, 20 points), 24 a tCubic1D (48 bytes), 28/32/36 the
-        param's polynomial, 40 and 44 two tCubic2Ds (96 bytes each), 48
-        an Average of 30, 52 a flag, 56 four Wheels (bOMalloc on
-        gp-22824, each `__5WheelP9WheelInfoP8TireInfoP11ControlInfo
-        P8CarState`).
-      - What it needs that the port lacks: tCubic2D's SetVal, SetdVal,
-        SetValDesired, GetVal and GetdVal (0x001daa00 on), tCubic1D's
-        GetddVal (0x001da830), cPoint::SplineSeek for tCubic1D with its
-        two clamps (0x001daec8; banim.h's `bspline_seek` leaves the
-        clamps out) and for tCubic2D (0x001db000). Everything else is in
-        the port: QuickSpline (GetPoint, SetNumControlPoints,
-        FindClosestControlPoint, FindClosestParam), DriveTarget::Resample,
-        Wheel::SetState(CarState...) (`wheel_set_state_from_car_state`),
-        MaybeMakeSkids, Car::PutFlatOnTrack, ShouldVisualEffectsBe
-        Generated, ComputeFakeRPM, CarState::CalculateGeometryPosition,
-        World::GetDistanceToClosestPlayer, Graph, bATan and bNormalize.
-      - Wire it in: `gBeltMoverCtorFn`, `gBeltMoverSetBeltFn` and
-        `gBeltMoverGravityFn` in main.c, with BELTMOVER_SIZE becoming
-        the port's sizeof.
+    - 11e-6 (done): the BeltMover (BeltMover.obj, 0x00204098 to
+      0x002056b4), in `beltmover.{c,h}`, all but DoSnapshot. The car
+      rides a QuickSpline through its DriveTarget's points, its place a
+      quadratic in the belt's clock, its heading and slide eased by two
+      tCubic2Ds and its offset by a tCubic1D. banim.c gains GetddVal
+      (0x001da830) and the tCubic2D's inline methods (`bspline2d_*`);
+      cPoint::SplineSeek's two clamps never run, as every seek the mover
+      makes passes 0 for both. main.c sets `gBeltMoverCtorFn`,
+      `gBeltMoverSetBeltFn` and `gBeltMoverGravityFn`, and
+      BELTMOVER_SIZE is `sizeof(BeltMover)`. `tools/beltmover_check.py`:
+      6049 ops, 34239 lines, 0 differ; 277 mutations, 271 caught, 6 equivalent.
+      `docs/formats/belt-mover.md` has it all.
   - `aicarcontroller.h` has the whole 720-byte record. 684 and 688 are
     retail's own (TakenSignpostIndex and TakenSignpostTimer, named for
     what 11e-2's SignPostDecision and GetCurrentTrackRoutePoint and
@@ -528,7 +501,36 @@ car's were.
   - `gAICarControllerGetCurrentDrivingLineSpeedFn` in `car.h` is the
     line speed's seam, set in main.c. drivingchoice_check still stubs
     FindWhereIAm (0x00192f10) for the actions.
-- 11f: AIDriver, 0x0012ffc8 to 0x001308a0, about 2.3 KB, of which
+- **11f-1, next: PsychoDriver**, the AI's CarDriver. AIDriver's
+  constructor bMallocs one (`__12PsychoDriverP3Car`, 0x00139760) as its
+  car's driver, so it comes first. It was not in the plan until Session
+  38 listed AIDriver's calls. Retail has it at 0x00139760 to 0x0013a6ac
+  (about 3.9 KB), with its small getters at 0x0013ac80 to 0x0013ad24,
+  PidError's destructor at 0x0013ad28 and the start-up code at
+  0x0013ab68 (`_GLOBAL_$I$PidProportionalData`, 280 bytes).
+  - The functions (retail sizes): the constructor (388), the destructor
+    (128), SetDesiredSpeed (20, three floats and a bool), DoSnapshot
+    (232, waits on ReplaySnapshot), GetError (192), ZeroSteeringMemory
+    (64), ClearSteeringMemory (68), GetMovementIndex (100), Drive
+    (1940), SetTarget (88), CalcSteerToPoint (268), CalcThrottleAndBrake
+    (232), StartHonkHorn, StopHonkHorn and IsHonking, GetDriverNumber,
+    StepOnItJeeves, SetLowGear, GetDesiredSpeed, SetMaxThrottle,
+    GetSteerToPoint and SetSteerToPoint. Four short functions retail
+    added are unnamed: 0x00139bb0 (48, which the constructor calls),
+    0x0013a630, 0x0013ad00 and 0x0013ad08 (8 each). The demo's
+    RunLinePredict, MaxSpeedAlongPath, DoSpeedPredict, MaxSpeedFromCar,
+    MaxSpeedToTarget, ZeroThrottleMemory, ClearThrottleMemory and
+    GetDesiredTimeToSpeed have no retail placement: find whether they
+    were inlined or dropped (GetDesiredTimeToSpeed is the driver
+    table's slot 144, which the BeltMover calls).
+  - The record is CarDriver's 560 bytes (the DriveTarget at 0, Steering
+    at 528, the vptr at 556) and then about 56 more: 560 the car, 564
+    to 600 the speeds and memories, and 604, 608 and 612 three PidErrors
+    (bMalloc'd, 40 bytes: two Averages and two floats).
+  - Split it if Drive's 1940 bytes need their own slice: 11f-1a the
+    record, the small methods and the PidErrors, 11f-1b Drive,
+    CalcSteerToPoint and CalcThrottleAndBrake.
+- 11f-2: AIDriver, 0x0012ffc8 to 0x001308a0, about 2.3 KB, of which
   ChooseNewAction is 1400 bytes. Its constructor is `gAIDriverCtorFn` in
   `carmodes.h`. SetAIDriverModesFromPlayers (0x001cd240) goes with it.
 - 11g: a SkipFE race with AI cars in it. "The road to the full game"
@@ -4107,14 +4109,14 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-07, after 11e-5, AICarController's Think)
+### Where the port stands (2026-10-07, after 11e-6, the BeltMover)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11e-6, the BeltMover.
+- **Next:** step 11, the racer AI: 11f-1, PsychoDriver.
   See "Now" at the top. These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
@@ -4132,7 +4134,8 @@ goes in.
   - 11e-2, AICarController's signposts and sticky decisions;
   - 11e-3, AICarController's belt, glue and boost;
   - 11e-4, AICarController's horn and ExecuteCurrentAction;
-  - 11e-5, AICarController's Think.
+  - 11e-5, AICarController's Think;
+  - 11e-6, the BeltMover.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -4144,7 +4147,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a to 11e-5 done) | 3-4 |
+  | 11, the racer and traffic AI (11a to 11e-6 done) | 3-4 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |
@@ -4162,6 +4165,8 @@ goes in.
   11b-1 to 11b-3, 11b-4a and 11b-4b, 11c, 11d-1, 11d-2, 11d-3a and
   11d-3b, and 11e to 11g. 11b was one slice until DrivingChoice's 13 KB
   were read, and 11d until the eleven actions were counted and read.
+  11f became two (PsychoDriver, then AIDriver) when AIDriver's
+  constructor was found to build a PsychoDriver.
 - **The pace:** 80 commits from 2026-09-27 to 2026-10-04, most of them a
   slice each.
 - **Not yet in the count:** the replay, and with it the race's music

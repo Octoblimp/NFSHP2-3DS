@@ -30,7 +30,7 @@ the eight classes task 26 has not ported, the labels, and the scenarios.
 **The heap.** Every `new` in the four methods but NullMover's and
 MellowMover's is `bMalloc(size, name, 0, 16)`, and every delete is
 `__builtin_delete`. Both sides log each one -- the name, the image's size
-(the harness maps the four ported records' host sizes back), the flags
+(the harness maps the five ported records' host sizes back), the flags
 and the pool -- fill a new block with 0xa5 and a freed one with 0xdd, and
 never reuse either. So a field a constructor forgets shows as 0xa5, and a
 read of a destroyed object as 0xdd, on both sides alike.
@@ -975,12 +975,13 @@ def generate(cti):
     w("#define CM_DSPEED1 0x%08xu" % fb(DSPEED[1]))
     w("#define CM_FAKE_VT 0x%08xu" % FAKE_VT)
     w("#define CM_FAKE_VT_DRIVER 0x%08xu" % FAKE_VT_DRIVER)
-    # The image's sizes for the four records the port allocates itself,
+    # The image's sizes for the five records the port allocates itself,
     # which the harness's log shows in place of the host's.
     w("#define CM_IMG_PHYSICSCAR %d" % pcc.PC_SIZE)
     w("#define CM_IMG_NULLCONTROLLER %d" % 12)
     w("#define CM_IMG_NULLDRIVER %d" % DRIVER_SIZE)
     w("#define CM_IMG_REALCONTROLLER %d" % 84)
+    w("#define CM_IMG_BELTMOVER %d" % 72)
     w("#define CM_STRAY %d" % STRAY)
     w("#define CM_NORMAL_X 0x%08xu" % pcc.NORMAL[0])
     w("#define CM_NORMAL_Y 0x%08xu" % pcc.NORMAL[1])
@@ -2491,8 +2492,9 @@ MUTATIONS = [
      "#define DELIVERYMOVER_SIZE   196"),
     ("size-copmover", CMH, "#define COPMOVER_SIZE        112",
      "#define COPMOVER_SIZE        116"),
-    ("size-beltmover", CMH, "#define BELTMOVER_SIZE        72",
-     "#define BELTMOVER_SIZE        76"),
+    ("size-beltmover", CMH,
+     "#define BELTMOVER_SIZE       ((int)sizeof(BeltMover))",
+     "#define BELTMOVER_SIZE       ((int)sizeof(BeltMover) + 4)"),
     ("size-realcontroller", CMH,
      "#define REALCONTROLLER_SIZE  ((int)sizeof(RealController))",
      "#define REALCONTROLLER_SIZE  ((int)sizeof(RealController) + 4)"),

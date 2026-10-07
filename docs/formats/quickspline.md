@@ -20,7 +20,7 @@ the enum has:
 |--------|----------|--------|
 | TrackPathManager::Init (0x001f50e0) | LOOP for a closed path, EXTRAPOLATED for an open one | the path's point count, then `CalibrateLength(16)` |
 | RealController (0x002247e0) | EXTRAPOLATED | 4 |
-| BeltMover (0x001f1d60) | EXTRAPOLATED | 20 |
+| BeltMover (0x001f1d60; retail's 0x00204098, [belt-mover.md](belt-mover.md)) | EXTRAPOLATED | 20 |
 
 Nothing constructs a `LINE` spline. Nothing calls the constructor that
 takes a caller's buffer. Both are ported anyway: they are in the object,

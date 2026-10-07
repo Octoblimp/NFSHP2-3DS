@@ -34,8 +34,9 @@ Step 11e ports it in slices:
 
 This file has 11e-1 to 11e-5. One slot still waits: DoSnapshot, on
 ReplaySnapshot. Think calls BeltMover::SetBelt through carmodes.h's
-`gBeltMoverSetBeltFn` until the BeltMover is ported, and aborts while
-that is NULL.
+`gBeltMoverSetBeltFn`, which main.c points at beltmover.c's (11e-6,
+[belt-mover.md](belt-mover.md)); a harness that leaves it NULL makes Think
+abort rather than go on.
 
 ## The record, 720 bytes
 

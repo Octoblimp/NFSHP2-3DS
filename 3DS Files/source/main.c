@@ -52,6 +52,7 @@
 #include "aicarcontroller.h"
 #include "bchunk.h"
 #include "bchunkload.h"
+#include "beltmover.h"
 #include "bmem.h"
 #include "bmenu.h"
 #include "bsnd.h"
@@ -3198,10 +3199,15 @@ int main(int argc, char** argv)
     aiaction_install_vtables();
     aiactions_install_vtables();
     aicarcontroller_install_vtables();
+    beltmover_install_vtables();
 
     // Car::SetControlMode reaches the controllers task 26 brings through
     // seams; a NULL one is a class not ported yet, and the arm aborts.
     gRealControllerCtorFn = realcontroller_construct;
+
+    // BELT_MOVEMENT's mover, its SetBelt for AICarController::Think and
+    // its slope for CalculateMaxAcceleration (11e-6).
+    beltmover_install_seams();
 
     // Car::GetDrivingLineSpeed asks an AI or traffic car's controller,
     // an AICarController since step 11e-1.

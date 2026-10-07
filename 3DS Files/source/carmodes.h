@@ -9,11 +9,11 @@
 // mover Car.obj emits for a car nothing moves. The four are declared in
 // car.h with the rest of Car; this header is what they build.
 //
-// **Seven of the twelve things the two tables build are not ported.** The
-// movers TrafficCar, DeliveryMover, CopMover and BeltMover and the
-// controllers AIDriver, TrafficDriver and CopDriver are task 26's;
-// RealController is ported (realcontroller.h), and main.c sets its seam at
-// boot. Car allocates each itself -- `bMalloc(size, name, 0, 16)` --
+// **Six of the twelve things the two tables build are not ported.** The
+// movers TrafficCar, DeliveryMover and CopMover and the controllers
+// AIDriver, TrafficDriver and CopDriver are task 26's; RealController and
+// BeltMover are ported (realcontroller.h, beltmover.h), and main.c sets
+// their seams at boot. Car allocates each itself -- `bMalloc(size, name, 0, 16)` --
 // and calls its constructor with (memory, car), so the port does the same
 // and reaches the constructor through a seam below. A NULL seam is an
 // object the port cannot build yet, and the arm aborts there, the way
@@ -30,6 +30,7 @@
 #include "car.h"
 #include "carcontroller.h"
 #include "carstate.h"
+#include "beltmover.h"         // BELTMOVER_SIZE
 #include "physicscar.h"        // CarMover
 #include "realcontroller.h"    // REALCONTROLLER_SIZE
 
@@ -89,8 +90,9 @@ extern CarMoverCtorFn gCopMoverCtorFn;         // 0x00196f00
 extern CarMoverCtorFn gBeltMoverCtorFn;        // 0x001f1ca8
 
 // BeltMover::SetBelt, 0x00204990: AICarController::Think's, each think
-// it keeps the belt (BeltMover::Move is the other caller). NULL until
-// the BeltMover is ported, when Think aborts rather than go on.
+// it keeps the belt (BeltMover::Move is the other caller). main.c points
+// it at beltmover.c's; a harness that leaves it NULL makes Think abort
+// rather than go on.
 typedef void (*BeltMoverSetBeltFn)(CarMover *m);
 extern BeltMoverSetBeltFn gBeltMoverSetBeltFn;
 
@@ -102,11 +104,11 @@ extern CarControllerCtorFn gCopDriverCtorFn;       // 0x00197d48
 // The image's bMalloc sizes for them, which are each class's mdebug size.
 // Each becomes sizeof() when its class is ported: on a 64-bit host the
 // records are wider. RealController's already has, and is 84 bytes on the
-// console and 160 on a 64-bit host.
+// console and 160 on a 64-bit host, and BeltMover's 72 on the console.
 #define TRAFFICCAR_SIZE       36
 #define DELIVERYMOVER_SIZE   192
 #define COPMOVER_SIZE        112
-#define BELTMOVER_SIZE        72
+#define BELTMOVER_SIZE       ((int)sizeof(BeltMover))
 #define REALCONTROLLER_SIZE  ((int)sizeof(RealController))
 #define AIDRIVER_SIZE        720
 #define TRAFFICDRIVER_SIZE   720

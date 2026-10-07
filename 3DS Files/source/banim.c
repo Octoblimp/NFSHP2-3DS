@@ -174,6 +174,55 @@ void bspline_seek(BSpline* s, float dt)
     }
 }
 
+float bspline_get_ddval(const BSpline* s, float t)
+{
+    return s->coeff[0] * (t * 6.0f) + (s->coeff[1] + s->coeff[1]);
+}
+
+// --------------------------------------------------------------- tCubic2D
+
+void bspline2d_set_val(BSpline2D* s, const bVector2* v)
+{
+    s->x.val = v->x;
+    if (v->x != s->x.valDesired) s->x.state = 2;
+    s->y.val = v->y;
+    if (v->y != s->y.valDesired) s->y.state = 2;
+}
+
+void bspline2d_set_dval(BSpline2D* s, const bVector2* v)
+{
+    s->x.dval = v->x;
+    if (v->x != s->x.dvalDesired) s->x.state = 2;
+    s->y.dval = v->y;
+    if (v->y != s->y.dvalDesired) s->y.state = 2;
+}
+
+void bspline2d_set_val_desired(BSpline2D* s, const bVector2* v)
+{
+    s->x.valDesired = v->x;
+    if (v->x != s->x.val) s->x.state = 2;
+    s->y.valDesired = v->y;
+    if (v->y != s->y.val) s->y.state = 2;
+}
+
+void bspline2d_get_val(const BSpline2D* s, bVector2* out)
+{
+    out->x = s->x.val;
+    out->y = s->y.val;
+}
+
+void bspline2d_get_dval(const BSpline2D* s, bVector2* out)
+{
+    out->x = s->x.dval;
+    out->y = s->y.dval;
+}
+
+void bspline2d_seek(BSpline2D* s, float dt)
+{
+    bspline_seek(&s->x, dt);
+    bspline_seek(&s->y, dt);
+}
+
 // ---------------------------------------------------------- AnimationGroup
 
 void banim_group_init(BAnim* a, BAnimGroup* g, uint32_t screen,
