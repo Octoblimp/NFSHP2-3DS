@@ -76,7 +76,10 @@
 #include "characterinfo.h"
 #include "collision.h"
 #include "collisionbody.h"
+#include "configitems.h"
+#include "difficultyinfo.h"
 #include "drivingchoice.h"
+#include "drivinglocation.h"
 #include "edisplay.h"
 #include "eenvmap.h"
 #include "elight.h"
@@ -1189,6 +1192,31 @@ static void fredChangeFlow(int32_t state)
     bgf_change_state(&g_flow, state, BGF_NONE);
 }
 
+static void logConfigLine(const char* line)
+{
+    logLine("%s", line);
+}
+
+// The port's config file (configitems.h), in place of LoadConfigItems'
+// joylog: its words, and SkipFE as R held sets it. No file, no change.
+static void readConfigItems(void)
+{
+    static char text[4096];
+    FILE* f = fopen(CONFIG_ITEMS_FILE, "rb");
+    size_t n;
+    int set;
+
+    if (f == NULL)
+        return;
+    n = fread(text, 1, sizeof text - 1, f);
+    fclose(f);
+    text[n] = '\0';
+    set = config_items_apply_text(text, &g_flow.skipFE, logConfigLine);
+    logLine("config: %d items from %s", set, CONFIG_ITEMS_FILE);
+    if (g_flow.skipFE)
+        logLine("SkipFE: on");
+}
+
 // What StartRace leaves in TheRaceParameters: the race, then a line a
 // driver.
 static void logRaceStart(void)
@@ -2191,6 +2219,10 @@ static void loadGlobalCarInfo(UIBundle* b)
         // LoaderAcidFX: GLOBALB's 111 emitter datas, then its 112 library
         // emitters onto WorldEffects (acidsys.c).
         taken += loader_acid_fx(c);
+        // LoaderDifficultyInfo, GLOBALB's last chunk: TheDifficultyInfo,
+        // the AI's skill tables and the catchup knees. Without it every
+        // SpeedFactor is 0 and an AI racer's desired speed with it.
+        taken += loader_difficulty_info(c);
         c += 8 + size;
     }
     logPrintf("car data: %d chunks, %d skins, %d characters, %d tracks; "
@@ -2826,6 +2858,61 @@ static void logRaceState(void)
                     c->pCarDriver ? (double)c->pCarDriver->Brake : -1.0,
                     c->pCarDriver ? (double)c->pCarDriver->Steering : -1.0,
                     bodies, dynamic, (double)WorldTimeElapsed);
+        }
+    }
+    // Each AI racer: where it is, its modes, the action it is carrying
+    // out and what its PsychoDriver is asked for and does.
+    if (w) {
+        int i;
+
+        for (i = 0; i < (int)w->TotalNumCars && i < WORLD_MAX_CARS; i++) {
+            Car* c = w->CarTable[i];
+            const AICarController* ai;
+            const PsychoDriver* d;
+
+            if (!c || c->TheControlMode != AI_CONTROL) continue;
+            ai = car_ai_controller(c);
+            d  = (const PsychoDriver*)(const void*)c->pCarDriver;
+            logLine("race: AI car %d at %.1f %.1f %.1f, speed %.2f, mode %d, "
+                    "action %d, stand %d; wants %.2f in %.2f, throttle %.2f "
+                    "brake %.2f steer %.2f",
+                    i, (double)c->State.Position.x,
+                    (double)c->State.Position.y, (double)c->State.Position.z,
+                    (double)c->State.ForwardSpeed, (int)c->TheMovementMode,
+                    ai && ai->CurrentAction ? (int)ai->CurrentAction->Type
+                                            : -1,
+                    ai ? (int)ai->BrakeStanding : -1,
+                    d ? (double)d->DesiredSpeed : -1.0,
+                    d ? (double)d->TimeToGetToDesiredSpeed : -1.0,
+                    d ? (double)d->Base.Throttle : -1.0,
+                    d ? (double)d->Base.Brake : -1.0,
+                    d ? (double)d->Base.Steering : -1.0);
+            if (ai) {
+                const DrivingLocation* l = ai->CurrentDrivingLocation;
+                int32_t sk = c->MyDriver ? c->MyDriver->SkillLevel : -99;
+                int lineSpeed = -1;
+
+                if (l && l->pRoute && l->pRoutePoint
+                    && l->DrivingLine >= 0
+                    && l->DrivingLine < TRP_NUM_DRIVING_LINES)
+                    lineSpeed = ((const uint8_t*)l->pRoutePoint)[
+                        offsetof(TrackRoutePoint, DrivingLineSpeeds)
+                        + l->DrivingLine];
+                logLine("race: AI car %d: route %p point %p line %d speed "
+                        "byte %d, uses line %d, skill %d factor %.3f, "
+                        "boost %.3f, next think %.2f",
+                        i, l ? (void*)l->pRoute : NULL,
+                        l ? (void*)l->pRoutePoint : NULL,
+                        l ? (int)l->DrivingLine : -9, lineSpeed,
+                        ai->CurrentAction
+                            ? (int)ai->CurrentAction->UseDrivingLineSpeed : -1,
+                        (int)sk,
+                        (sk >= 0 && sk < 10)
+                            ? (double)TheDifficultyInfo.AISkillLevel[sk]
+                                  .SpeedFactor : -1.0,
+                        (double)c->State.BoostFactor,
+                        (double)ai->SecondsBeforeNextActionEvaluation);
+            }
         }
     }
     logLine("race: track drew %d of %d (%d sky), %d tris; %s",
@@ -3583,6 +3670,7 @@ int main(int argc, char** argv)
         g_flow.skipFE = 1;
         logLine("SkipFE: R held at boot");
     }
+    readConfigItems();
     gCurrLanguageFn = currLanguage;
     // LoadGlobalChunks' first pack, DynTextures, and its LOADING, which is
     // waited on before the frame. Retail sets English between the table

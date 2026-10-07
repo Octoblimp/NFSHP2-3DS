@@ -15943,3 +15943,65 @@ checker still runs clean, and the CIA builds.
   with `sdmc:/nfshp2_gputiming.txt`, how the nebula and the smoke look,
   whether the light-blue wedge over the Opel's roof is still there, and
   that their Old 3DS now shows the message.
+
+## Session 40 (2026-10-07) -- 11g-1: AI racers that drive
+
+### The config file
+
+`sdmc:/nfshp2_config.txt` is the port's own, in the place of the joylog's
+channel 32 that LoadConfigItems reads and only a development kit records.
+Each line is a name from configitems.h and its value, `#` a comment;
+`SkipFE 1` turns SkipFE on as R held at boot does. `config_items_apply_text`
+(configitems.c) parses it and reports each item, and anything it skips,
+through a log callback. main.c's `readConfigItems` runs it at boot, before
+InitFred. With no file nothing changes. It is a test aid: the user wants
+the AI race from the frontend's Hot Pursuit setup (11g-2).
+
+### Why the AI racers did not drive
+
+`SkipFE 1` and `SkipFENumAICars 3` gave a race with three AI racers on
+the grid (drivers 100 to 102, types 43, 35 and 13), and nothing aborted.
+They never moved. A new log line per AI racer showed each one in
+MELLOW_MOVEMENT on JustDrive with RACING reached, and the PsychoDriver
+asked for 0 m/s:
+ExecuteCurrentAction's speed is the line's speed byte (62 there) times
+`AISkillLevel[skill].SpeedFactor` times the BoostFactor, and SpeedFactor
+read 0.000.
+
+TheDifficultyInfo was all zeros. GLOBALB.BUN's last top-level chunk is
+0x34b00 at 0xb8500, 992 bytes. Retail's LoadGlobalChunks hands every
+chunk to LoadChunks, whose slot 25 copies it in. The port's
+`loadGlobalCarInfo` walks GLOBALB itself and offers each chunk to the
+loaders it needs (texture packs, car info, characters, the track info
+table, light list, acid FX), and `loader_difficulty_info` was not one of
+them. It is now, and the boot log's "car data" line counts 9 chunks, not 8.
+GLOBALB's skills read SpeedFactor 0.91 to 0.98, RoutePointVariance 10 to 4,
+Misc (5.0, 0.3, 100000) and TwoPlayerCatchup the four knees
+difficultyinfo.h quotes.
+
+After the fix the three racers leave the grid at full throttle for
+56.4 m/s (62 x 0.91) and race the route: about 680 m out at 40 s,
+switching between JustDrive, AvoidCars and Pass, and the HUD has the
+player 4th of 4. The same empty table had other effects:
+- every frontend opponent's skill came out 0, as StartRace draws it from
+  SkillLevelDistribution's CDF;
+- DecideBoostFactor recalculated each frame (BoostCalculationFrequency 0).
+
+GLOBALB's NisInfo chunk (0x37010) is still dropped: its loader (slot 20)
+is not ported.
+
+### A false lead
+
+In two runs the player's car drove itself. The log showed the analog
+gas, the Cross pressure byte, at 255. joyhid sets that byte only while
+the 3DS A is held, and a third run, with no key sent, stood still at the
+resting 4 (the scanner's 1, x4 for a stiff pedal). It was keyboard input
+reaching Azahar.
+
+### Checks
+
+aicarcontroller (865 scenarios, 0 differ), fred, fredrace, hudfeatures
+and hudrender (each builds configitems.c) and difficulty_check (68
+facts, 11 readers, 0 wrong) still run clean. The CIA builds.
+`docs/formats/difficulty-info.md` has the loading. CONTINUE.md's next
+slice is 11g-2, the Hot Pursuit race from the frontend.

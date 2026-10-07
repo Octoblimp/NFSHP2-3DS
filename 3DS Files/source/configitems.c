@@ -3,6 +3,9 @@
 #include "configitems.h"
 
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "playercam.h"
 
@@ -37,4 +40,125 @@ int32_t MaximumNumAICars = 7;               // gp-23112
 int32_t config_skip_fe(void)
 {
     return gPlayerCamSkipFE != NULL ? *gPlayerCamSkipFE : 0;
+}
+
+// ------------------------------------------------- the port's config file
+
+typedef struct ConfigItem {
+    const char *Name;
+    void       *Word;
+    int         IsFloat;
+} ConfigItem;
+
+static const ConfigItem kConfigItems[] = {
+    { "TrackSelectedInConfigFile",  &TrackSelectedInConfigFile,  0 },
+    { "bVersionE3",                 &bVersionE3,                 0 },
+    { "SkipFENumPlayerCars",        &SkipFENumPlayerCars,        0 },
+    { "SkipFENumAICars",            &SkipFENumAICars,            0 },
+    { "SkipFENumLaps",              &SkipFENumLaps,              0 },
+    { "SkipFEMaxCops",              &SkipFEMaxCops,              0 },
+    { "SkipFETimeUntilCopsAppear",  &SkipFETimeUntilCopsAppear,  1 },
+    { "SkipFETickets",              &SkipFETickets,              0 },
+    { "SkipFERoadBlocks",           &SkipFERoadBlocks,           0 },
+    { "SkipFEHelicopter",           &SkipFEHelicopter,           0 },
+    { "SkipFESpikeStrips",          &SkipFESpikeStrips,          0 },
+    { "SkipFENew624",               &SkipFENew624,               0 },
+    { "SkipFEBeACop",               &SkipFEBeACop,               0 },
+    { "SkipFERearView",             &SkipFERearView,             0 },
+    { "SkipFETrafficDensity",       &SkipFETrafficDensity,       1 },
+    { "SkipFETrafficOncoming",      &SkipFETrafficOncoming,      1 },
+    { "SkipFERaceType",             &SkipFERaceType,             0 },
+    { "SkipFESpeedoMode",           &SkipFESpeedoMode,           0 },
+    { "SkipFEDifficulty",           &SkipFEDifficulty,           0 },
+    { "SkipFEEnableJumpCam",        &SkipFEEnableJumpCam,        0 },
+    { "SkipFEEnableZoneCam",        &SkipFEEnableZoneCam,        0 },
+    { "DefaultPlayer1CarType",      &DefaultPlayer1CarType,      0 },
+    { "DefaultPlayer2CarType",      &DefaultPlayer2CarType,      0 },
+    { "DefaultPlayer1SkinIndex",    &DefaultPlayer1SkinIndex,    0 },
+    { "DefaultPlayer2SkinIndex",    &DefaultPlayer2SkinIndex,    0 },
+    { "ForceAllAICarsToBeThisType", &ForceAllAICarsToBeThisType, 0 },
+    { "MaximumNumAICars",           &MaximumNumAICars,           0 },
+};
+
+static void config_log(ConfigItemsLogFn log, const char *fmt,
+                       const char *a, const char *b)
+{
+    char line[320];
+
+    if (log == NULL)
+        return;
+    snprintf(line, sizeof line, fmt, a, b);
+    log(line);
+}
+
+// One line, NUL-terminated and stripped of its comment.
+static int config_apply_line(char *line, int *skipFE, ConfigItemsLogFn log)
+{
+    char name[64], value[64], extra[2];
+    const ConfigItem *it = NULL;
+    char *end;
+    size_t i;
+    long n;
+    float f;
+    int got = sscanf(line, "%63s %63s %1s", name, value, extra);
+
+    if (got <= 0)
+        return 0;
+    if (got != 2) {
+        config_log(log, "config: skipped \"%s\"%s", line, "");
+        return 0;
+    }
+    if (strcmp(name, "SkipFE") != 0) {
+        for (i = 0; i < sizeof kConfigItems / sizeof kConfigItems[0]; i++)
+            if (strcmp(name, kConfigItems[i].Name) == 0)
+                it = &kConfigItems[i];
+        if (it == NULL) {
+            config_log(log, "config: no item %s%s", name, "");
+            return 0;
+        }
+    }
+    if (it != NULL && it->IsFloat) {
+        f = strtof(value, &end);
+        if (end == value || *end != '\0') {
+            config_log(log, "config: %s: bad value %s", name, value);
+            return 0;
+        }
+        *(float *)it->Word = f;
+    } else {
+        n = strtol(value, &end, 0);
+        if (end == value || *end != '\0') {
+            config_log(log, "config: %s: bad value %s", name, value);
+            return 0;
+        }
+        if (it != NULL)
+            *(int32_t *)it->Word = (int32_t)n;
+        else
+            *skipFE = (int)n;
+    }
+    config_log(log, "config: %s = %s", name, value);
+    return 1;
+}
+
+int config_items_apply_text(const char *text, int *skipFE,
+                            ConfigItemsLogFn log)
+{
+    char line[256];
+    int set = 0;
+
+    while (*text != '\0') {
+        size_t len = strcspn(text, "\r\n");
+        size_t keep = len < sizeof line - 1 ? len : sizeof line - 1;
+        char *hash;
+
+        memcpy(line, text, keep);
+        line[keep] = '\0';
+        hash = strchr(line, '#');
+        if (hash != NULL)
+            *hash = '\0';
+        set += config_apply_line(line, skipFE, log);
+        text += len;
+        while (*text == '\r' || *text == '\n')
+            text++;
+    }
+    return set;
 }

@@ -1,7 +1,7 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 39
-(2026-10-07), after 11f-2, AIDriver.
+Where the next session picks up. Updated in Session 40
+(2026-10-07), after 11g-1, AI racers that drive.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
@@ -12,9 +12,12 @@ decisions, 11e-3, its belt, glue and boost, 11e-4, its horn and
 ExecuteCurrentAction, 11e-5, its Think with Timer::CountDown and
 Race::CanAICarsStartDriving, 11e-6, the BeltMover, 11f-1,
 PsychoDriver, the AI's CarDriver, and 11f-2, AIDriver, the racer's
-controller, are done and checked against retail. Next is 11g, a SkipFE
-race with AI cars in it: every class an AI racer needs is ported, so
-11g runs one and fixes what it meets. The car selector is finished and checked against retail: SC-1
+controller, are done and checked against retail. 11g-1 ran a SkipFE
+race with three AI racers (the port's config file) and fixed what
+stopped them: GLOBALB's DifficultyInfo chunk was never loaded, so every
+skill's SpeedFactor was 0 and the cars sat on the grid. They now race
+the route. Next is 11g-2, the user's way in: a Hot Pursuit race with AI
+racers started from the frontend's Hot Pursuit setup, not SkipFE. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -538,22 +541,56 @@ car's were.
   `tools/aidriver_check.py`: 56131 ops, 25276 lines, 0 differ; 191
   mutations, 184 caught, 7 equivalent. `docs/formats/ai-driver.md` has
   it all.
-- **11g, next: a SkipFE race with AI cars in it.** Every class an AI
-  racer needs is ported: AIDriver with its PsychoDriver, AICarController,
-  the actions, the MellowMover (nDefaultMovementMode) and the BeltMover.
-  - The SkipFE race (R held at boot) takes its AI count from
-    SkipFENumAICars (0), its traffic from SkipFETrafficDensity and its
-    cops from SkipFEMaxCops. Give it AI racers (a config item or a
-    build-time default, without leaving a test-only change in the
-    build the user plays), run it in Azahar
-    (`tools/run_azahar_race.ps1`) and fix what aborts or misbehaves.
-  - Expect the AI racers' car types to need loading
+- **11g-1, done: a SkipFE race with AI racers that drive.**
+  - **The config file.** `sdmc:/nfshp2_config.txt`, the port's own, in
+    place of the joylog's channel 32, which only a development kit
+    records. Each line is a configitems.h name and a value
+    (`SkipFENumAICars 3`), `#` starts a comment, and `SkipFE 1` turns
+    SkipFE on as R held does. main.c's `readConfigItems` reads it at
+    boot, before InitFred. With no file nothing changes, so the build
+    the user plays is as before. It is a test aid only: the user wants
+    the AI race from the frontend (11g-2).
+  - **The fix.** With `SkipFE 1` and `SkipFENumAICars 3` the race came
+    up with three AI racers on the grid, and nothing aborted, but they
+    never moved. Each was on JustDrive in the MellowMover with a
+    desired speed of 0. ExecuteCurrentAction's speed is the line's
+    speed byte times the skill's `SpeedFactor` times the boost, and
+    `SpeedFactor` read 0.000. GLOBALB's last chunk, 0x34b00
+    (DifficultyInfo, 992 bytes), was never loaded: main.c's
+    `loadGlobalCarInfo` offers GLOBALB's chunks to the loaders the port
+    needs, and `loader_difficulty_info` was not among them. It is now
+    ("car data: 9 chunks"). The three racers leave the grid at full
+    throttle for 56 m/s and race the route, about 680 m out at 40 s, on
+    JustDrive, AvoidCars and Pass. The same empty table had made every
+    frontend opponent's skill 0 (StartRace draws it from
+    SkillLevelDistribution) and the boost recalculate every frame.
+    `docs/formats/difficulty-info.md` has it.
+  - main.c's race log has a line per AI racer each second: its place,
+    speed, movement mode, action and its PsychoDriver's inputs, then
+    its route point, line, speed byte, skill, `SpeedFactor`, boost and
+    next think.
+  - GLOBALB's NisInfo chunk (0x37010) is still dropped; its loader
+    (slot 20) is unported.
+  - The player's car drove itself in two Azahar runs: the analog gas
+    (the Cross pressure byte) read 255. That byte is set only while the
+    3DS A is held, and a third run, with no key sent, stood still. It
+    was keyboard input reaching Azahar, not the port.
+- **11g-2, next: the Hot Pursuit race from the frontend.** The user
+  (2026-10-07), on an Azahar run that wandered into Be The Cop's Select
+  Car and the placeholder Select Track: "This still needs to be setup
+  within the hot pursuit cop mode setup lol". The AI race has to start
+  from Main Menu, Hot Pursuit, its setup, car and track, as retail's
+  does, not only from SkipFE.
+  - Map the path first: which of the Hot Pursuit screens are ported
+    and which are placeholders, what Select Track does, and how the
+    flow leaves the frontend for the race (StartRace's 7 AI racers).
+    Match the user's PCSX2 photos of the retail frontend.
+  - A race from the frontend asks for 7 AI racers. It used to stop at
+    the AIDriver seam (an abort); it now builds them, and the rest is
+    untried. Expect the AI racers' car types to need loading
     (SetupCarsForRace's choose_ai_ride picks them) and the seams that
     are still NULL (the horn's BaseCarSound, ReplaySnapshot) to stay
     no-ops.
-  - A race from the frontend asks for 7 AI racers. It used to stop at
-    the AIDriver seam (an abort); it now builds them, and the rest is
-    untried.
   - "The road to the full game" has the way in.
 
 ## Waiting on the device: 13b-4f, the device GPU's cost per model
@@ -4136,7 +4173,8 @@ goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11g, a SkipFE race with AI cars.
+- **Next:** step 11, the racer AI: 11g-2, the Hot Pursuit race with AI
+  racers from the frontend (11g-1's SkipFE race has them driving).
   See "Now" at the top. These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

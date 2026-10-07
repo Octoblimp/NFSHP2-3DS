@@ -64,4 +64,24 @@ extern int32_t MaximumNumAICars;            // gp-23112, 7
 // through gPlayerCamSkipFE, 0 while that is unset.
 int32_t config_skip_fe(void);
 
+// ------------------------------------------------- the port's config file
+//
+// The port's own, in the joylog's place: retail reads these words from a
+// joylog's channel 32, which only a development kit records (joylog.h), so
+// on a retail console they keep the image's values. The port reads a text
+// file instead, CONFIG_ITEMS_FILE, when the card has one. Each line is a
+// name above and its value, "SkipFENumAICars 3"; `#` starts a comment.
+// "SkipFE 1" turns SkipFE on as holding R does. A name it does not know,
+// or a value it cannot read, is reported and skipped. main.c reads it at
+// boot, before InitFred; with no file nothing changes.
+#define CONFIG_ITEMS_FILE "sdmc:/nfshp2_config.txt"
+
+typedef void (*ConfigItemsLogFn)(const char *line);
+
+// Applies `text` (NUL-terminated), each word as it is read; SkipFE goes
+// to *skipFE. `log` (may be NULL) gets a line for each word set and each
+// line skipped. Answers the number of words set.
+int config_items_apply_text(const char *text, int *skipFE,
+                            ConfigItemsLogFn log);
+
 #endif

@@ -136,9 +136,19 @@ These readers are in the port, each checked against retail:
     `RoutePointVariance` and their `SpeedFactor`, the last with the skill
     unclamped (11e-4).
 
-Every other AI field is laid out so its offset is checked. One reader is
-still to come: AIDriver's ShouldWeAvoidThisCar, reading
-`CollisionAvoidanceChance` (11f).
+- AIDriver's ShouldWeAvoidThisCar (`ai-driver.md`) reads
+  `CollisionAvoidanceChance` (11f-2).
+
+Retail loads the chunk at boot. LoadGlobalChunks hands every top-level
+chunk of GLOBALB.BUN to LoadChunks, and slot 25 takes this one, the
+file's last. The port's boot walk does the same work in main.c's
+`loadGlobalCarInfo`, which offers each chunk to the loaders the port
+needs; `loader_difficulty_info` is one of them. Before 11g it was not,
+so the table stayed all zeros. Every `SpeedFactor` was then 0, and so
+was every AI racer's desired speed: the cars sat on the grid on the
+brakes. The skill draw's CDF was all 0 as well, so every frontend
+opponent came out at skill 0. The boot log's "car data" line counts the
+chunk among its 9.
 
 ## Checking it
 

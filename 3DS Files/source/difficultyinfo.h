@@ -20,9 +20,9 @@
 // Everything else is the demo's, 128 bytes on from AISkillLevel and 248
 // from TwoPlayerCatchup.
 //
-// Only TwoPlayerCatchup has a reader in the port, Car's catchup. The AI's
-// tables are laid out so the offsets are checked, and are its task's to
-// read.
+// Car's catchup, FredRace's opponent set-up, AICarController and AIDriver
+// read it. main.c's boot walk of GLOBALB hands the chunk to the loader, as
+// retail's LoadGlobalChunks does through slot 25.
 
 #ifndef DIFFICULTYINFO_H
 #define DIFFICULTYINFO_H
