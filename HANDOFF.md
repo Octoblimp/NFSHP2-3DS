@@ -15849,6 +15849,219 @@ The checker, `tools/psychodriver_check.py`, is new:
 `docs/formats/psycho-driver.md` has the detail, and `car-driver.md`
 links it. Every other checker still runs clean, and the CIA builds.
 
+### Step 11f-2 (begun): AIDriver, read but not yet written
+
+Session 38 committed 11f-1 (e1401ff), then read all of AIDriver.obj
+(0x0012ffc8 to 0x001308a0) before the user stopped for the night. No
+source is written yet. The disassembly is in `out/aidriver_retail.txt`
+(566 lines, gitignored; regenerate it with `python tools/mipsdis.py
+--elf "PS2 Files/Full Game/SLES_507.31" --addr 0x0012ffc8 --count 566`).
+
+**The record**, 736 bytes. AICarController's 720 come first, then the
+demo stab's four fields (type#1382, at 704 to 716 in the demo):
+
+| Offset | Field |
+|---:|---|
+| 720 | `Car *CarToPurposefullyNotAvoid` |
+| 724 | `Timer StartTimeForPurposefullyNotAvoidingCar` |
+| 728 | `Timer VeryStuckProgressTimer` |
+| 732 | `Average *pVeryStuckProgress` |
+
+**The size.** Retail's SetControlMode (0x00131410) bMallocs 736 for both
+AIDriver and TrafficDriver. `carmodes.h` still has the demo's 720.
+`carmode_check` runs the demo's SetControlMode, which asks for 720. So
+when AIDRIVER_SIZE becomes `(int)sizeof(AIDriver)`, map that size back
+to 720 in `tools/src/carmode_test.c`'s malloc hook, as is done for
+RealController and BeltMover. Also update carmode_check's
+`size-aidriver` mutation. The port's `carmodes.c` is the demo's
+SetControlMode; compare it with retail's 0x00131410 some time.
+
+**The table**, `_vt$8AIDriver` at retail 0x002ae328 (the demo's
+0x00291fa8). It has 17 entries, the header included. AIDriver's own
+slots:
+
+| Slot | Address | Method |
+|---:|---|---|
+| 8 | 0x00130090 | destructor |
+| 24 | 0x00130108 | DoSnapshot (leave NULL) |
+| 32 | 0x00130188 | Think |
+| 112 | 0x00130890 | GetRouteNumbersToUse |
+| 120 | 0x00130238 | ChooseNewAction |
+
+Every other slot is AICarController's, in the same places as in
+`aicarcontroller_vt`. Slot 64 is GetAmountOutOfBounds (0x001907b8),
+which ChooseNewAction calls through the table.
+
+**The constructor (0x0012ffc8).**
+1. AICarController's constructor (0x00190140).
+2. Zero 724 and 728, then store the vptr at 8.
+3. bMalloc(624, "PsychoDriver", 0, 16), then PsychoDriver's
+   constructor (0x00139760) on the car.
+4. Zero 532 (CurrentAction), 720 and 724 again, then store the driver
+   at 4.
+5. bMalloc(16, "Very Stuck Progress Average", 0, 16), then
+   `average_init(..., 5)`, stored at 732.
+6. Set 728 to `cvt.w.s(6000.5f)` (gp-32044), which is 6000 ticks, the
+   same as `timer_set_time(1.5f)`.
+7. Car::SetFrictionBoost (0x001315f8, the port's
+   `car_set_friction_boost`) with AIDriverFrictionBoost (gp-23008,
+   1.0f).
+
+**The destructor (0x00130090).**
+1. Store the vptr.
+2. If the driver (at 4) is set, call its destructor through its table
+   (vptr at 556, slot 8) with flags 3.
+3. If 732 is set, call `average_destroy(..., 3)`.
+4. Jump to ~AICarController (0x001903a0) with the caller's flags.
+
+**Think (0x00130188)** takes dt.
+1. SetFrictionBoost(car, AIDriverFrictionBoost).
+2. If 728 is running (not 0 and not 0x7fffffff) and Timer::CountDown(dt)
+   answers 0, then:
+   - set 728 back to 6000;
+   - Average::Record on 732 the value `TheTrackPathManager.TrackLength`
+     (0x0031bc38) × |car->pRacingCar (car+28)->dCurrentLapNumberExact
+     (+24)|.
+3. Tail-call AICarController::Think (0x00191148). This is a direct `j`,
+   not through the table.
+
+**GetRouteNumbersToUse (0x00130890)**: `*first = 0`, `*last = 49`.
+
+**ShouldWeAvoidThisCar (0x001307b0)** takes (car, float). The float is
+unused.
+1. If `1.0 <= (float)(int)(WorldTimer - [724]) * 0.00025f` (gp-32020),
+   clear 720.
+2. If car == 720, answer 0.
+3. Draw r = World::Random(pCurrentWorld, 1.0f) (0x0014e548).
+4. Read the skill: the driver's SkillLevel (`lb 3` of car->MyDriver,
+   car+20), with -2 read as 0 and no other clamp.
+5. If r < TheDifficultyInfo.AISkillLevel[skill].CollisionAvoidanceChance
+   (0x002f0080 + 380 + 28 × skill), answer 1.
+6. Otherwise set 720 to the car and 724 to WorldTimer, and answer 0.
+
+**ChooseNewAction (0x00130238)** takes (AIAction **out, AIActionType
+type).
+
+*A forced type (type != 11)* switches on type - 2 through the jump table
+at 0x002ae300. Each case news an action from AIActionSlotPool (bOMalloc,
+0x00257c80, with no NULL test), stores it in *out and returns:
+- Draft (2): (DraftScore, DraftLifetime).
+- JustDrive (5): (JustDriveScore, JustDriveLifetime).
+- PullOver (6): (PullOverScore, PullOverLifetime, PullOverTimeout at
+  548, the list at 512, the location at 504). It then sets 548 to 1e7
+  (gp-32024).
+- GetUnstuck (7): (GetUnstuckScore, GetUnstuckLifetime, -1.0).
+- AccidentRecovery (10): (AccidentRecoveryScore,
+  AccidentRecoveryLifetime).
+- Every other type, 0, 1, 3, 4, 8, 9 and anything past 11 included:
+  PullOver(PullOverScore, PullOverLifetime,
+  AIActionPullOverStoppedByCopsTimeout = 3.0 (gp-18152), list,
+  location).
+
+*No forced type (11).* There is a DrivingChoice on the stack, Cleared
+(0x00130920, all three words zero). The out slots start as: rb 0, hit
+car 0, avoid car 0, secs 0.0, okay 1, usedPreferred 0, pass car 0, pass
+amount 0.0. Let `cur` be (CurrentAction's Type at 588 and Score at 592),
+or (11, -1) with no action. A step below is skipped when `cur.type` is
+its own type or its score global is below `cur.score`. A step whose
+CalculateScore answers 0 or more (`s`) news its action with score `s`,
+stores it in *out, runs ~DrivingChoice(choice, 2) (a no-op) and returns.
+The steps, in order:
+1. **GetUnstuck.** Only when `(float)(int)(WorldTimer - [544]) ×
+   0.00025 > 6.0`. Run `aigetunstuck_calculate_score(info at 12)`.
+   - The minLifetime is -1.0, unless GetAmountOutOfBounds (slot 64)
+     answers > 0 and pVeryStuckProgress is full (`nSamples == nSlots`)
+     with fAverage < 0.2 (gp-32032); then it is 1.6 (gp-32028).
+   - New GetUnstuck(s, GetUnstuckLifetime, minLifetime), and set 544
+     (LastTimeNonGetUnstuckActionWasCalled) to WorldTimer.
+2. **AvoidRoadBlock.** `aiavoidroadblock_calculate_score(info, &rb)`,
+   then new (s, -1.0, rb).
+3. **IJustGotHit.** `aijustgothit_calculate_score(info, &hit)`, then
+   MaybeHonkAndOrBlinkHeadlights(this, hit, [512]), then new (s, -1.0,
+   hit).
+4. **AvoidCars.** `aiavoidcars_calculate_score(info, &car, &choice,
+   &secs, &okay, &used)`, then MaybeHonk(this, car, [512]). Only if
+   ShouldWeAvoidThisCar(car, secs):
+   - copy the choice into MyCurrentDrivingInformation.MyDrivingChoice
+     (this+492, 12 bytes);
+   - new AvoidCars(s, AvoidCarsLifetime, car, `(float)(uint32)okay`,
+     used, 0).
+   - **This is retail's quirk, keep it:** the bool `okay` goes in as
+     the float secs, `used` as okay, and 0 as usedPreferred. A bool is
+     a word here, converted with the unsigned pattern.
+   - If ShouldWeAvoidThisCar answers 0, fall through to step 5.
+5. **AccidentRecovery.** `aiaccidentrecovery_calculate_score(info)`,
+   then new (s, -1.0).
+6. **Pass.** `aipass_calculate_score(info, &pcar, &choice, &amount)`.
+   Only if ShouldWeAvoidThisCar(pcar, -1.0): copy the choice into 492 as
+   above, then new Pass(s, PassLifetime, pcar, amount).
+7. **JustDrive.** `aijustdrive_calculate_score(info)`. If it answers 0
+   or more, new JustDrive(s, -1.0). Then ~DrivingChoice and return. With
+   a negative score *out is left alone.
+
+**The globals.** These are retail .sdata, which the demo names
+AIAction*Score and *Lifetime. Retail reorders the scores against the
+demo, so go by the gp offset. Only ChooseNewAction reads them (and,
+later, TrafficDriver's). `AIActionJustDriveScore` is already in
+`aiaction.c`; define the rest beside it or in aidriver.c.
+
+| Global | gp offset | Address | Value |
+|---|---|---|---:|
+| AIActionSlotPool | gp-18288 | 0x00331180 | |
+| JustDriveScore | gp-18272 | 0x00331190 | 0 |
+| DraftScore | gp-18268 | 0x00331194 | 200 |
+| PassScore | gp-18264 | 0x00331198 | 300 |
+| NudgeCar | gp-18260 | 0x0033119c | 300 |
+| Block | gp-18256 | 0x003311a0 | 400 |
+| AvoidCars | gp-18252 | 0x003311a4 | 400 |
+| IJustGotHit | gp-18248 | 0x003311a8 | 400 |
+| GetUnstuck | gp-18244 | 0x003311ac | 500 |
+| AccidentRecovery | gp-18240 | 0x003311b0 | 500 |
+| PullOver | gp-18236 | 0x003311b4 | 600 |
+| AvoidRoadBlock | gp-18232 | 0x003311b8 | 600 |
+| PassLifetime | gp-18228 | | 5.0 |
+| DraftLifetime | gp-18224 | | 0 |
+| NudgeCarLifetime | gp-18220 | | 5.0 |
+| JustDriveLifetime | gp-18216 | | 0 |
+| BlockLifetime | gp-18212 | | 5.0 |
+| GetUnstuckLifetime | gp-18208 | | 5.0 |
+| PullOverLifetime | gp-18204 | | 0 |
+| AvoidCarsLifetime | gp-18200 | | 0 |
+| IJustGotHitLifetime | gp-18196 | | 0 |
+| AccidentRecoveryLifetime | gp-18192 | | 0 |
+| AIDriverAvoidCarsImpactTimeThreshold | gp-18168 | | 2.0 (in the port) |
+| PassMaxTimeAheadToMakeAttempt | gp-18164 | | 3.0 |
+| PullOverTrafficCarTimeout | gp-18160 | | -999 |
+| PullOverCrossFinishLineTimeout | gp-18156 | | 15 |
+| PullOverStoppedByCopsTimeout | gp-18152 | | 3.0 |
+
+I was scanning the image for any store to gp-18288..-18136, to confirm
+that nothing writes these, when the session stopped. The scan's script
+crashed on a None label; guard `e.label()` and re-run it.
+
+**The plan for the slice:**
+- Write `aidriver.{c,h}`: AIDRIVER_VTABLE 0x002ae328u,
+  `aidriver_construct` for `gAIDriverCtorFn` (as
+  `realcontroller_construct`), `aidriver_install_vtables`.
+- Wire it into main.c (install the table, set `gAIDriverCtorFn`).
+- Write a standalone checker, `tools/aidriver_check.py` plus
+  `tools/src/aidriver_test.c`, in psychodriver_check's style. Run the
+  retail methods as shipped over Average, Timer::CountDown and
+  DrivingChoice::Clear. Stand in for:
+  - AICarController's constructor, destructor and Think;
+  - PsychoDriver's constructor, with a test driver table whose
+    destructor prints;
+  - each CalculateScore and each action constructor, with their
+    arguments printed;
+  - MaybeHonk, GetAmountOutOfBounds, World::Random, bMalloc and
+    bOMalloc;
+  - SetFrictionBoost (or run it as shipped).
+
+  Print the table slot by slot as retail addresses; DoSnapshot's NULL
+  prints as "null".
+- Then do the mutation pass, docs/formats/ai-driver.md, CONTINUE and
+  HANDOFF, run_all, build_cia.ps1 and the commit.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the

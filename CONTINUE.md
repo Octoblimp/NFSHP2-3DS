@@ -522,7 +522,11 @@ car's were.
 - **11f-2, next: AIDriver**, 0x0012ffc8 to 0x001308a0, about 2.3 KB, of
   which ChooseNewAction is 1400 bytes. Its constructor is
   `gAIDriverCtorFn` in `carmodes.h` and bMallocs the 624-byte
-  PsychoDriver. SetAIDriverModesFromPlayers (0x001cd240) goes with it.
+  PsychoDriver. Session 38 read it all and wrote no code yet: HANDOFF.md's
+  "Step 11f-2 (begun)" has the whole reading, function by function, and
+  `out/aidriver_retail.txt` (gitignored) the disassembly. Start there.
+  SetAIDriverModesFromPlayers (0x001cd240) is already ported, in
+  `racecoord.c`, so it is not part of this slice.
 - 11g: a SkipFE race with AI cars in it. "The road to the full game"
   has the way in.
 
