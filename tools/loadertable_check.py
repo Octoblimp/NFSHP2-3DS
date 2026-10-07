@@ -128,7 +128,8 @@ SOURCES = [HARNESS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "bchunk.c", "trackpath.c", "quickspline.c", "bmem.c", "trackroute.c",
     "polyhedra.c", "vclip.c", "espresso.c", "difficultyinfo.c",
     "texturepack.c", "sun.c", "weatherman.c", "carinfo.c",
-    "characterinfo.c", "acidsys.c", "acidfx.c",
+    "characterinfo.c", "acidsys.c", "acidfx.c", "cameracoord.c",
+    "bprintf.c", "vtable.c",
     "cartypeinfo.c", "langtab.c", "drivetrain.c", "engine.c", "wheel.c",
     "suspension.c", "steering.c", "rigidbody.c", "table.c", "elight.c")]
 
@@ -243,7 +244,7 @@ CLAIMS = {
     30: [0x00039100, 0x00039101, 0x00039102],
 }
 TAKER = {t: k for k, ts in CLAIMS.items() for t in ts}
-PORTED = {0, 1, 2, 4, 5, 6, 9, 11, 14, 16, 18, 19, 23, 26, 29}
+PORTED = {0, 1, 2, 4, 5, 6, 9, 11, 13, 14, 16, 18, 19, 23, 26, 29}
 
 # Retail's: the demo's without PhysPredict, slot 20, and HeliSheet (23) a
 # container. The rest of the guards are the demo's.
@@ -1997,6 +1998,10 @@ MUTATIONS = [
      "UNPORTED(LoaderCops, UnloaderCops, 16,"),
     ("slot-19-unloader-is-loader", BCL, "    UnloaderTrackPath,",
      "    loader_track_path,"),
+    ("slot-13-loader-is-null", BCL, "    loader_cameras,  ",
+     "    loader_null,     "),
+    ("slot-13-unloader-is-null", BCL, "    unloader_cameras,",
+     "    loader_null,"),
     # ---- bchunkload.c: the walks
     ("misses-not-reset", BCL,
      "            c = next_chunk(c);\n            misses = 0;",

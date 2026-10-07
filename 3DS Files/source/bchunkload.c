@@ -6,6 +6,7 @@
 
 #include "acidsys.h"
 #include "bchunk.h"
+#include "cameracoord.h"
 #include "carinfo.h"
 #include "characterinfo.h"
 #include "difficultyinfo.h"
@@ -143,9 +144,6 @@ UNPORTED(LoaderEventManager, UnloaderEventManager, 7, 0x80036000u)
 UNPORTED(LoaderPositionMarkers, UnloaderPositionMarkers, 8, 0x00034013u)
 UNPORTED(LoaderFlailerChunk, UnloaderFlailerChunk, 10, 0x80010200u)
 UNPORTED(LoaderAnimations, UnloaderAnimations, 12, 0x80034008u)
-UNPORTED(LoaderCameras, UnloaderCameras, 13,
-         0x80034405u, 0x80034410u, 0x80034415u, 0x80034420u, 0x80034425u,
-         0x00034492u)
 UNPORTED(LoaderCops, UnloaderCops, 15, 0x80034500u)
 UNPORTED(LoaderBodyDamage, UnloaderBodyDamage, 17, 0x00034030u)
 UNPORTED(LoaderNisInfo, UnloaderNisInfo, 20, 0x00037010u)
@@ -176,7 +174,7 @@ BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     LoaderFlailerChunk,             // 10
     LoaderScenery,                  // 11
     LoaderAnimations,               // 12
-    LoaderCameras,                  // 13
+    loader_cameras,                 // 13
     loader_sun,                     // 14
     LoaderCops,                     // 15
     LoaderCarInfo,                  // 16
@@ -209,7 +207,7 @@ BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
     UnloaderFlailerChunk,           // 10
     UnloaderScenery,                // 11
     UnloaderAnimations,             // 12
-    UnloaderCameras,                // 13
+    unloader_cameras,               // 13
     unloader_sun,                   // 14
     UnloaderCops,                   // 15
     UnloaderCarInfo,                // 16

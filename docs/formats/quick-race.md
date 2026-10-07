@@ -174,3 +174,12 @@ part (11h) and the cops are step 12.
 The race then stayed at COUNTDOWN, since nothing ended the countdown.
 Race::Update (11g-2b, [race-update.md](race-update.md)) does: GO starts
 the race, and the laps and the finish run.
+
+The countdown was then drawn from 1100 m above the track:
+`BeginCountdownCameras` removed the player's mover and, with no
+`CountdownCameraCoordinator` ported, built nothing in its place. With
+the coordinator ported (11g-2c-1,
+[camera-coordinator](camera-coordinator.md)) the 3-2-1 is in the drive
+camera, as on retail. Retail's race start before the countdown, the
+Starting Grid over the fly-by camera and the pre-race camera, comes
+next (11g-2c-2).

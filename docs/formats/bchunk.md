@@ -75,7 +75,7 @@ python tools/chunk_loader_table.py "PS2 Files/NFSHP2.ELF"
 | `0x00034202` | `LoaderSun`               | |
 | `0x00034250` | `LoaderWeatherMan`        | |
 | `0x00034301` | `LoaderCharacterInfo`     | |
-| `0x80034405` | `LoaderCameras`           | container -- Phase 3 task 23 |
+| `0x80034405` | `LoaderCameras`           | container; also takes `0x80034410`, `0x80034415`, `0x80034420`, `0x80034425` and `0x00034492` -- ported, see `camera-coordinator.md` |
 | `0x80034500` | `LoaderCops`              | container -- Phase 4 pursuit |
 | `0x00034600` | `LoaderCarInfo`           | Phase 4 car data |
 | `0x00034700` | `LoaderPhysPredict`       | |

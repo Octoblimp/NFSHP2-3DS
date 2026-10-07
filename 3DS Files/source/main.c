@@ -61,6 +61,7 @@
 #include "bslotpool.h"
 #include "bticker.h"
 #include "camera.h"
+#include "cameracoord.h"
 #include "cammover.h"
 #include "bscreens.h"
 #include "bcarsel.h"
@@ -3184,11 +3185,13 @@ static void raceFrame(void)
     MainLoopTiming.WorldDoTimestep = bGetTicker();
     hangwatch_mark("race: the cameras");
 
-    // MenuSystemTick is bgf_frame's. ReplayScreen::Update and
-    // UpdateCameraCoordinators (0x00199bd0) are not ported: no coordinator
-    // is built yet. sound::Update runs at the top of the frame, and
-    // UpdatePortRumblers has no rumble to drive.
+    // MenuSystemTick is bgf_frame's. ReplayScreen::Update is not ported.
+    // UpdateCameraCoordinators (0x00199bd0) takes the real step
+    // (RealTimeElapsed, retail's gp-19596), as MainLoop gives it.
+    // sound::Update runs at the top of the frame, and UpdatePortRumblers
+    // has no rumble to drive.
     update_players_non_game_state();
+    update_camera_coordinators(RealTimeElapsed);
     update_camera_movers();
     MainLoopTiming.UpdateCameraMovers = bGetTicker();
     update_camera_shakers();
@@ -3419,6 +3422,7 @@ int main(int argc, char** argv)
     aidriver_install_vtables();
     trafficcar_install_vtables();
     trafficdriver_install_vtables();
+    cameracoord_install_vtables();
 
     // Car::SetControlMode reaches the controllers task 26 brings through
     // seams; a NULL one is a class not ported yet, and the arm aborts.
@@ -3432,6 +3436,17 @@ int main(int argc, char** argv)
 
     // TRAFFIC_MOVEMENT's mover (11h-1).
     trafficcar_install_seams();
+
+    // The camera coordinators (11g-2c-1): BeginCountdownCameras builds a
+    // CountdownCameraCoordinator, and Player's and the race coordinator's
+    // deletes, enables and disables go through the coordinators' own.
+    // The countdown finds no COUNTDOWN_n camera on the retail disc, so it
+    // builds no BumperCameraMover (gBumperCameraMoverFn stays NULL) and the
+    // car's drive camera shows the 3-2-1, as retail's does.
+    gCountdownCameraCoordinatorFn = countdown_camera_coordinator_construct;
+    gCameraCoordinatorDeleteFn = camera_coordinator_delete;
+    gCameraCoordinatorEnableFn = camera_coordinator_enable;
+    gCameraCoordinatorDisableFn = camera_coordinator_disable;
 
     // World::DoTimestep's Race::Update and SimulateRaceFinish's
     // Race::FinishCar (11g-2b): the countdown's end, the laps and the

@@ -118,7 +118,7 @@ and "R-TB12" retail's, whose 279 top-level chunks all have a taker.
 | 10 | 10 | FlailerChunk | `80010200` | 3 | 0 | 0 | -- |
 | 11 | 11 | Scenery | `80034100` sections, `34106` zones | 122, 1 | 123 | 123 | `scenery.c` |
 | 12 | 12 | Animations | `80034008` | 20 | 0 | 0 | -- |
-| 13 | 13 | Cameras | `80034405`, `80034410`, `80034415`, `80034420`, `80034425`, `34492` | 1, 1, 1, 0, 1, 1 | 2 | 2 | -- |
+| 13 | 13 | Cameras | `80034405`, `80034410`, `80034415`, `80034420`, `80034425`, `34492` | 1, 1, 1, 0, 1, 1 | 2 | 2 | `cameracoord.c` ([camera-coordinator](camera-coordinator.md)) |
 | 14 | 14 | Sun | `34202` | 1 | 1 | 1 | `sun.c` |
 | 15 | 15 | Cops | `80034500` | 1 | 1 | 1 | -- |
 | 16 | 16 | CarInfo | `34600`, `34601` | 1, 1 | 0 | 0 | `carinfo.c` |

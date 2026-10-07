@@ -16390,3 +16390,87 @@ Azahar; `quietSkip` makes the same picks without the loads. Both are
 port-only flags that `jb_sound_init` leaves 0, so `jukebox_check` still
 runs retail (`jukebox.md`, "The race's music"). The log now notes each
 tune that starts.
+
+## Session 45 (2026-10-07) -- 11g-2c-1, the camera data and the countdown coordinator
+
+The user's photo 4 has retail's 3-2-1 in the drive camera. The port's
+was drawn from 1100 m up: `BeginCountdownCameras` removed the player's
+mover, and with `gCountdownCameraCoordinatorFn` NULL nothing took its
+place.
+
+### What is ported
+
+`cameracoord.c` is CameraCoordinator.obj in part (`camera-coordinator.md`):
+
+- TheCameraLoader, at retail's 2596 bytes. Retail put the two players'
+  NIS lists after the loader's own, 72 bytes more than the demo's record.
+- Its Loader and Unloader, which are slot 13 of the loader table.
+- FindCameraData, FindRandomCameraShake and the NIS keeper (0x0019a3e8,
+  no symbol).
+- CameraDataItems' parser, for types 0, 1 and 2.
+- BaseCameraCoordinator, CameraCoordinatorList and its static
+  constructor (sinit's [40]).
+- UpdateCameraCoordinators and MarkCameraDataAsNeedingToBeReloaded.
+- CountdownCameraCoordinator.
+
+main.c sets the countdown's constructor and the coordinators' delete,
+enable and disable seams. Its race frame now runs UpdateCameraCoordinators
+with the real step, between UpdatePlayersNonGameState and
+UpdateCameraMovers, as MainLoop does.
+
+### What the disc has
+
+There are six kinds of camera chunk:
+
+- each TRACKB's highlights: 112 to 363 cameras, with the vortex;
+- each TRACKB's one fly-by, `PreRace_01`;
+- INGAMEB's four pre-race and eleven post-race cameras, and its nine
+  shakes;
+- the NIS .CAM files' two or three cameras.
+
+No bundle has a COUNTDOWN_n camera. So retail's countdown coordinator
+never builds a BumperCameraMover, and UpdateNonGameState gives the car
+its drive camera through the 3-2-1. The port does the same.
+`gBumperCameraMoverFn` stays NULL until BumperCameraMover is ported,
+which 11g-2c-2's coordinators need.
+
+### The check
+
+`tools/cameracoord_check.py` runs every function above beside retail's
+own. It covers:
+
+- the retail disc's camera chunks: INGAMEB, six tracks, nine more
+  fly-bys, and the NIS files;
+- built edges;
+- 600 random rounds over the coordinators.
+
+The result: 2973 ops, 5925 lines, 0 differ, with 167 mutations, all
+caught.
+
+Two problems in the check itself were fixed:
+
+- The countdown number stub returned 0x80000000 zero-extended, which
+  retail's 64-bit `beq` never matched. mipsemu stubs and call arguments
+  must be passed as `s32(...)` so they arrive sign-extended.
+- One survivor, ul-nis-gt, needed an unload that finds exactly one kept
+  NIS camera.
+
+`loadertable_check` now holds slot 13 as ported, with two new mutations,
+both caught.
+
+### On Azahar
+
+A Hot Pursuit Quick Race (track 13 forwards, car 35) showed the 3-2-1 in
+the drive camera with the cinema bars and the AI racers ahead, then the
+race at 25-29 FPS.
+
+### Next
+
+11g-2c-2, retail's race start before the countdown:
+
+1. PRERACEANIM.LZC and the AnimatedDriver;
+2. BumperCameraMover;
+3. the FlyBy coordinator with the Starting Grid;
+4. the PreRace coordinator.
+
+Then the rear-view mirror.

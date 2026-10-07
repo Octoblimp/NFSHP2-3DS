@@ -4,7 +4,7 @@
 // and the _GLOBAL_$I$ it stands for. sinit_check reads those comments, so
 // their shape is fixed.
 //
-// None of the twenty-six reads anything another one writes -- twenty-five
+// None of the twenty-seven reads anything another one writes -- twenty-six
 // fill Tables, Graphs, cameras, list heads, hashes, shakers, constants and
 // two sets of defaults, and the last builds the slot-pool manager -- so the
 // order is kept because it is the image's, not because a different one
@@ -22,6 +22,7 @@
 #include "acidsys.h"
 #include "aerodynamics.h"
 #include "bslotpool.h"
+#include "cameracoord.h"
 #include "car.h"
 #include "carinfo.h"
 #include "carloader.h"
@@ -63,6 +64,7 @@ void sinit_run(void)
     fred_static_init();         // [34]  0x0017fcd8 _GLOBAL_$I$Fred
     carinfo_static_init();      // [35]  0x00181060 _GLOBAL_$I$FindCarLanguageInfo__F7CarType
     resource_static_init();     // [39]  0x00190040 _GLOBAL_$I$LoaderNull__FP6bChunk
+    cameracoord_static_init();  // [40]  0x00192398 _GLOBAL_$I$CameraCoordinatorList
     rigidbody_static_init();    // [41]  0x00193d20 _GLOBAL_$I$__9RigidBodyP13RigidBodyInfo
     wheel_static_init();        // [44]  0x0019b558 _GLOBAL_$I$SliderPositionsX
     queuedfile_static_init();   // [52]  0x001a3520 _GLOBAL_$I$QueuedFileSlotPool

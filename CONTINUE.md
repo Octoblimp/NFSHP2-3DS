@@ -1,7 +1,8 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 42
-(2026-10-07), after 11g-2b, Race::Update.
+Where the next session picks up. Updated in Session 45
+(2026-10-07), after 11g-2c-1, the camera data and the countdown
+coordinator.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
@@ -23,9 +24,10 @@ traffic's mover, and 11h-2, TrafficDriver, its controller, are done.
 11g-2b, Race::Update, is done: the race from the frontend leaves its
 countdown at GO, the race time runs, the laps count and the cars
 finish. Azahar's run shows lap 1 of 2 with the three AI racers ahead.
-Through the countdown the camera still has no mover, since the
-countdown cameras (gCountdownCameraCoordinatorFn) are unported. Next is
-11g-2c-1, the camera data and the countdown coordinator. The car selector is finished and checked against retail: SC-1
+11g-2c-1, the camera data and the countdown coordinator, is done: the
+3-2-1 is in the drive camera, as on retail. Next is 11g-2c-2,
+retail's race start before the countdown: the Starting Grid over the
+fly-by camera, then the pre-race camera. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -669,16 +671,28 @@ car's were.
     mutations, all caught (7 by a crash). `docs/formats/race-update.md`.
   - On Azahar the quick race now leaves the countdown, and the race runs
     at 29-30 FPS with lap 1 of 2 on the HUD.
+- **11g-2c-1, done: the camera data and the countdown coordinator.**
+  `cameracoord.c` is CameraCoordinator.obj in part (0x00199a98 on):
+  - TheCameraLoader (retail's 2596 bytes) and slot 13 of the loader
+    table, the six camera chunk types;
+  - FindCameraData, FindRandomCameraShake and the NIS keeper;
+  - CameraDataItems' parser;
+  - BaseCameraCoordinator, CameraCoordinatorList (its static
+    constructor is sinit's [40]) and UpdateCameraCoordinators, which
+    main.c's race frame runs after UpdatePlayersNonGameState;
+  - CountdownCameraCoordinator.
+  No bundle on the retail disc has a COUNTDOWN_n camera, so the
+  countdown's coordinator builds no mover and UpdateNonGameState gives
+  the car its drive camera. `gBumperCameraMoverFn` stays NULL until
+  BumperCameraMover is ported.
+  - `cameracoord_check`: 2973 ops, 5925 lines, 0 differ; 167
+    mutations, all caught. `loadertable_check` holds slot 13 as
+    ported (its two slot-13 mutations caught).
+    `docs/formats/camera-coordinator.md`.
+  - On Azahar the 3-2-1 is in the drive camera with the cinema bars
+    and the AI racers ahead, as in the user's photo 4.
 - **Next, in this order:**
-  1. **11g-2c-1, the camera data and the countdown coordinator.**
-     CameraLoader (bchunk slot 13, the six camera chunk types),
-     CameraDataItems' parser, BaseCameraCoordinator and
-     CountdownCameraCoordinator (CameraCoordinator.obj 0x00199a98 on).
-     No COUNTDOWN_n camera is on the disc, so retail's countdown shows
-     the drive camera; the port shows none until RACING. Started:
-     `cameracoord.{c,h}` and `tools/src/cameracoord_test.c` are written
-     but not wired or committed; the checker is next.
-  2. **11g-2c-2 on, the race's start as retail shows it** (the user's
+  1. **11g-2c-2 on, the race's start as retail shows it** (the user's
      photos of 2026-10-07, Session 44). After the loading screen retail
      shows the Starting Grid screen over the flyby camera, then on X the
      pre-race camera (a close-up of the player's car), then the 3-2-1 in
@@ -688,13 +702,13 @@ car's were.
      nothing loads it. In order: who loads PRERACEANIM.LZC (and the
      AnimatedDriver it feeds); BumperCameraMover; the FlyBy coordinator
      with EnableStartRaceScreens' Starting Grid; the PreRace coordinator.
-  3. **The rear-view mirror** (the user's photo 5): SetRearViewMirrorCameraMover
+  2. **The rear-view mirror** (the user's photo 5): SetRearViewMirrorCameraMover
      and the mirror's view and its HUD frame, top centre on the top
      screen.
-  4. **11h-3, TrafficTeleporter** (0x002226f8 on; PlaceNewCar
+  3. **11h-3, TrafficTeleporter** (0x002226f8 on; PlaceNewCar
      0x002228e0, DoTimestep 0x002227e0), which places the traffic.
-  5. Step 12, the cops.
-  6. The PostRace and Demo coordinators.
+  4. Step 12, the cops.
+  5. The PostRace and Demo coordinators.
 
 ## Waiting on the device: 13b-4f, the device GPU's cost per model
 
@@ -4268,15 +4282,16 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-07, after 11g-2b)
+### Where the port stands (2026-10-07, after 11g-2c-1)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer and traffic AI: 11g-2c, the countdown
-  cameras, and 11h-3, the TrafficTeleporter. See "Now" at the top.
+- **Next:** step 11, the racer and traffic AI: 11g-2c-2, retail's race
+  start, then the rear-view mirror and 11h-3, the TrafficTeleporter.
+  See "Now" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
@@ -4302,7 +4317,8 @@ goes in.
   - 11g-2a, the Quick Race from Hot Pursuit's Mode Select;
   - 11h-1, TrafficCar;
   - 11h-2, TrafficDriver;
-  - 11g-2b, Race::Update.
+  - 11g-2b, Race::Update;
+  - 11g-2c-1, the camera data and the countdown coordinator.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2

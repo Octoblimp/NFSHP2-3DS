@@ -27,6 +27,7 @@
 #include "eview.h"
 #include "eviewmatrix.h"
 #include "esolid.h"
+#include "racefinish.h"
 #include "sun.h"
 #include "texturepack.h"
 #include "weatherman.h"
@@ -63,6 +64,16 @@ float CalculateH(uint16_t fov)
     fprintf(stderr, "CalculateH(%u) called\n", (unsigned)fov);
     abort();
     return 0.0f;
+}
+
+// Nor is racefinish.c for cameracoord.c's countdown coordinator, which
+// slot 13's loader never reaches.
+int32_t race_get_countdown_number_to_display(const Race *r)
+{
+    (void)r;
+    fprintf(stderr, "race_get_countdown_number_to_display called\n");
+    abort();
+    return 0;
 }
 
 enum {
@@ -786,7 +797,8 @@ static BChunkLoader saved_unload[BCHUNK_NUM_LOADERS];
 static int unported_slot(int k)
 {
     return !(k == 0 || k == 1 || k == 2 || k == 4 || k == 5 || k == 6
-             || k == 9 || k == 11 || k == 14 || k == 16 || k == 18 || k == 19
+             || k == 9 || k == 11 || k == 13 || k == 14 || k == 16
+             || k == 18 || k == 19
              || k == 22 || k == 25 || k == 28);
 }
 

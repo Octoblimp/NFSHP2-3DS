@@ -1301,6 +1301,14 @@ The camera zones came in Session 37, and `main.c` now sets
 `gPreviewRouteDeleteFn` (`preview_route_delete`). The freeze's and the
 preview's movers are still NULL.
 
+Step 11g-2c-1 ported the coordinators' base and the countdown's
+([camera-coordinator](camera-coordinator.md)). `main.c` now points the
+coordinators' delete, enable and disable, and
+`gCountdownCameraCoordinatorFn`, at `cameracoord.c`. No bundle on the
+retail disc has a `COUNTDOWN_n` camera, so the countdown's coordinator
+builds no mover and `UpdateNonGameState` gives the car its drive camera
+for the 3-2-1, as retail does.
+
 ### Divergences
 
 - **Restoring with nothing saved.** Retail calls `Enable` through a NULL
