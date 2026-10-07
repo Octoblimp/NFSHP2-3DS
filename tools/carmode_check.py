@@ -2411,12 +2411,9 @@ CCH = "3DS Files/source/carcontroller.h"
 CDH = "3DS Files/source/cardriver.h"
 MOVE_DTOR = "CARMOVER_VT_DTOR);" + NL + "        ((DtorFn)e->fn)(vt_this(old, e), "
 CTRL_DTOR = "CARCONTROLLER_VT_DTOR);" + NL + "        ((DtorFn)e->fn)(vt_this(old, e), "
-STPM_SKIP = ("    if (c->TheMovementMode == PHYSICS_MOVEMENT" + NL
-             + "        || c->TheMovementMode == MELLOW_MOVEMENT)" + NL
-             + "        return;" + NL
-             + "    car_set_movement_mode(c, MELLOW_MOVEMENT);")
-CC_SKIP = ("    if (mine->TheMovementMode == PHYSICS_MOVEMENT" + NL
-           + "        || mine->TheMovementMode == MELLOW_MOVEMENT)")
+CC_SKIP = ("    if (car->TheMovementMode == PHYSICS_MOVEMENT" + NL
+           + "        || car->TheMovementMode == MELLOW_MOVEMENT)" + NL
+           + "        return;")
 SETUP_MODES = ("    if (car->TheMovementMode != PHYSICS_MOVEMENT" + NL
                + "        && car->TheMovementMode != MELLOW_MOVEMENT)")
 
@@ -2608,15 +2605,10 @@ MUTATIONS = [
      + "        const VtEntry *e = vt_slot(ctrl->_vtable,",
      "    if (0 && ctrl != NULL) {" + NL
      + "        const VtEntry *e = vt_slot(ctrl->_vtable,"),
-    ("stpm-physics-not-skipped", CMC, STPM_SKIP,
-     "    if (c->TheMovementMode == MELLOW_MOVEMENT)" + NL + "        return;"
-     + NL + "    car_set_movement_mode(c, MELLOW_MOVEMENT);"),
-    ("stpm-mellow-not-skipped", CMC, STPM_SKIP,
-     "    if (c->TheMovementMode == PHYSICS_MOVEMENT)" + NL + "        return;"
-     + NL + "    car_set_movement_mode(c, MELLOW_MOVEMENT);"),
-    ("stpm-goes-physics", CMC,
-     "        return;" + NL + "    car_set_movement_mode(c, MELLOW_MOVEMENT);",
-     "        return;" + NL + "    car_set_movement_mode(c, PHYSICS_MOVEMENT);"),
+    ("stpm-no-fallback", CMC, "    carcontroller_physics_or_mellow(c);",
+     "    (void)0;"),
+    ("stpm-fallback-other", CMC, "    carcontroller_physics_or_mellow(c);",
+     "    carcontroller_physics_or_mellow(other);"),
     ("stpm-controller-slot", CCH,
      "#define CARCONTROLLER_VT_SET_TO_PHYSICS_MODE      88",
      "#define CARCONTROLLER_VT_SET_TO_PHYSICS_MODE      80"),
@@ -2654,12 +2646,19 @@ MUTATIONS = [
     ("cc-snapshot-no-arg", CCC, "(vt_this(d, e), snap);",
      "(vt_this(d, e), NULL);"),
     ("cc-stpm-physics-not-skipped", CCC, CC_SKIP,
-     "    if (mine->TheMovementMode == MELLOW_MOVEMENT)"),
+     "    if (car->TheMovementMode == MELLOW_MOVEMENT)" + NL
+     + "        return;"),
     ("cc-stpm-mellow-not-skipped", CCC, CC_SKIP,
-     "    if (mine->TheMovementMode == PHYSICS_MOVEMENT)"),
+     "    if (car->TheMovementMode == PHYSICS_MOVEMENT)" + NL
+     + "        return;"),
+    ("cc-stpm-goes-physics", CCC,
+     "    car_set_movement_mode(car, car->pPlayer != NULL ? PHYSICS_MOVEMENT"
+     + NL + "                                                    : "
+     "MELLOW_MOVEMENT);",
+     "    car_set_movement_mode(car, PHYSICS_MOVEMENT);"),
     ("cc-stpm-other-car", CCC,
-     "    car_set_movement_mode(mine, MELLOW_MOVEMENT);",
-     "    car_set_movement_mode(car, MELLOW_MOVEMENT);"),
+     "    carcontroller_physics_or_mellow(c->pCar);",
+     "    carcontroller_physics_or_mellow(car);"),
     ("cc-force-boost-no-check", CCC,
      "    if (c->pCar != NULL)" + NL + "        c->pCar->State.BoostFactor = f;",
      "    c->pCar->State.BoostFactor = f;"),
@@ -2684,14 +2683,18 @@ MUTATIONS = [
     ("nc-dtor-no-base", CCC, "    carcontroller_destroy(&c->Base, flags);",
      "    (void)flags;"),
     ("nc-route-not-null", CCC,
-     "nullcontroller_get_current_route(NullController *c)" + NL + "{" + NL
-     + "    (void)c;" + NL + "    return NULL;",
-     "nullcontroller_get_current_route(NullController *c)" + NL + "{" + NL
-     + "    (void)c;" + NL + "    return (TrackRoute *)c;"),
-    ("nc-point-not-null", CCC,
-     "_point(NullController *c)" + NL + "{" + NL + "    (void)c;" + NL
+     "nullcontroller_get_current_route(NullController *c, int find)" + NL
+     + "{" + NL + "    (void)c;" + NL + "    (void)find;" + NL
      + "    return NULL;",
-     "_point(NullController *c)" + NL + "{" + NL + "    (void)c;" + NL
+     "nullcontroller_get_current_route(NullController *c, int find)" + NL
+     + "{" + NL + "    (void)c;" + NL + "    (void)find;" + NL
+     + "    return (TrackRoute *)c;"),
+    ("nc-point-not-null", CCC,
+     "                                                       int find)" + NL
+     + "{" + NL + "    (void)c;" + NL + "    (void)find;" + NL
+     + "    return NULL;",
+     "                                                       int find)" + NL
+     + "{" + NL + "    (void)c;" + NL + "    (void)find;" + NL
      + "    return (TrackRoutePoint *)c;"),
     ("nc-oob-one", CCC, "    return 0.0f;                        // mtc1 zero,$f0",
      "    return 1.0f;                        // mtc1 zero,$f0"),
@@ -3025,8 +3028,8 @@ MUTATIONS = [
      "CAR_RESET_ME_SPEED, 1," + NL + "                                 1.0f);",
      "CAR_RESET_ME_SPEED, 1," + NL + "                                 -1.0f);"),
     ("mv-reset-point-first", CVC, swap(
-        "        route = car_get_route(c);",
-        "        point = car_get_route_point(c);")),
+        "        route = car_get_route(c, 1);",
+        "        point = car_get_route_point(c, 1);")),
     ("mv-pen-zero-ok", CVC, " || pen == 0 || ", " || "),
     ("mv-pen-max-ok", CVC, " || pen == 0x7fffffffu)", ")"),
     ("mv-pen-max-off", CVC, "pen == 0x7fffffffu", "pen == 0x7ffffffeu"),

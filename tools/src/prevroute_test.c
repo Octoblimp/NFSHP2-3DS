@@ -195,15 +195,17 @@ void bFree(void *p)
     printf("  free %s\n", nm(p));
 }
 
-TrackRoute *car_get_route(Car *c)
+TrackRoute *car_get_route(Car *c, int find)
 {
     (void)c;
+    (void)find;
     return car_route;
 }
 
-TrackRoutePoint *car_get_route_point(Car *c)
+TrackRoutePoint *car_get_route_point(Car *c, int find)
 {
     (void)c;
+    (void)find;
     return car_point;
 }
 

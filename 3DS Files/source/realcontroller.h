@@ -97,11 +97,12 @@ void trackedcontroller_set_current_route(TrackedController *c, TrackRoute *r,
 
 // 0x00224500. The manager's slot for the point's own RouteNumber, or NULL
 // with no point.
-TrackRoute *trackedcontroller_get_current_route(TrackedController *c);
+TrackRoute *trackedcontroller_get_current_route(TrackedController *c,
+                                                int find);
 
 // 0x00224738 / 0x00224730.
 TrackRoutePoint *trackedcontroller_get_current_route_point(
-    TrackedController *c);
+    TrackedController *c, int find);
 float trackedcontroller_get_acceleration(TrackedController *c);
 
 // 0x00224668. How far outside the point's road the car is, through the

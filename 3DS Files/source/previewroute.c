@@ -49,8 +49,8 @@ PreviewRoute *preview_route_init(PreviewRoute *pr, struct Car *car,
         16);
     pr->vTrackDirection = car->TheTrackPathCoordinate.PathDirection;
     line = car->pCarTypeInfo->CarClass;
-    r = car_get_route(car);
-    p = car_get_route_point(car);
+    r = car_get_route(car, 1);
+    p = car_get_route_point(car, 1);
     if (r != NULL && p != NULL)
         ok = preview_route_closest_distance(pr, pr->pPoints, r, p, pos, line)
              <= radius;

@@ -175,8 +175,8 @@ float car_move(Car *c, float dt)
     // two statements: C leaves the order of a call's arguments open, and
     // gcc on the host evaluates these two right to left.
     if (c->ResetMe) {
-        route = car_get_route(c);
-        point = car_get_route_point(c);
+        route = car_get_route(c, 1);
+        point = car_get_route_point(c, 1);
         car_reset_to_route_point(c, route, point, CAR_RESET_ME_SPEED, 1,
                                  1.0f);
         c->ResetMe = 0;

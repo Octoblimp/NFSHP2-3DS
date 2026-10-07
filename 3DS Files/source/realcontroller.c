@@ -122,16 +122,19 @@ void trackedcontroller_set_current_route(TrackedController *c, TrackRoute *r,
     c->PrevSpeed = c->Base.pCar->State.VelocityMagnitude;
 }
 
-TrackRoute *trackedcontroller_get_current_route(TrackedController *c)
+TrackRoute *trackedcontroller_get_current_route(TrackedController *c,
+                                                int find)
 {
+    (void)find;
     if (c->RoutePoint == NULL)
         return NULL;
     return route_of(c->RoutePoint);
 }
 
 TrackRoutePoint *trackedcontroller_get_current_route_point(
-    TrackedController *c)
+    TrackedController *c, int find)
 {
+    (void)find;
     return c->RoutePoint;
 }
 

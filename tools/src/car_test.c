@@ -1043,17 +1043,19 @@ static void fk_drive(void *self, float dt)
     printf("    Drive(%s, %.9g)\n", b, (double)dt);
 }
 
-static TrackRoute *fk_route(void *self)
+static TrackRoute *fk_route(void *self, int find)
 {
     char b[32];
+    (void)find;
     name_of(self, b, sizeof b);
     printf("    GetCurrentRoute(%s)\n", b);
     return &g_route;
 }
 
-static TrackRoutePoint *fk_route_point(void *self)
+static TrackRoutePoint *fk_route_point(void *self, int find)
 {
     char b[32];
+    (void)find;
     name_of(self, b, sizeof b);
     printf("    GetCurrentRoutePoint(%s)\n", b);
     return &g_rp;
@@ -1367,8 +1369,8 @@ static void scenario_route(void)
         fresh2();
         g_ctl._vtable = v ? AICARCONTROLLER_VTABLE : REALCONTROLLER_VTABLE;
         printf("  vt %d\n", v);
-        printf("    route is g_route %d\n", car_get_route(&g_car) == &g_route);
-        printf("    point is g_rp %d\n", car_get_route_point(&g_car) == &g_rp);
+        printf("    route is g_route %d\n", car_get_route(&g_car, 1) == &g_route);
+        printf("    point is g_rp %d\n", car_get_route_point(&g_car, 1) == &g_rp);
         for (o = 0; o < 3; o++) {
             g_oob = kOob[o];
             printf("    oob %.9g\n", (double)car_get_amount_out_of_bounds(&g_car));

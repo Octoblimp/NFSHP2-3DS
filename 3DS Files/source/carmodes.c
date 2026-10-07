@@ -230,10 +230,8 @@ void car_set_to_physics_mode(Car *c, Car *other)
         ((SetToPhysicsModeFn)e->fn)(vt_this(ctrl, e), other);
         return;
     }
-    if (c->TheMovementMode == PHYSICS_MOVEMENT
-        || c->TheMovementMode == MELLOW_MOVEMENT)
-        return;
-    car_set_movement_mode(c, MELLOW_MOVEMENT);
+    // Retail's 0x00131800 inlines CarController::SetToPhysicsMode here.
+    carcontroller_physics_or_mellow(c);
 }
 
 void car_set_friction_boost(Car *c, float f)

@@ -525,8 +525,11 @@ float    car_calculate_draft_factor(Car *c);             // 0x001300f0
 // The dispatchers.
 void     car_think(Car *c, float dt);                    // 0x00130180
 void     car_drive(Car *c, float dt);                    // 0x001301d0
-TrackRoute      *car_get_route(Car *c);                  // 0x00131740
-TrackRoutePoint *car_get_route_point(Car *c);            // 0x00131770
+// Retail's GetRoute and GetRoutePoint hand `find` on to the controller,
+// whose AICarController finds where it is first when it has no route; 1
+// from every caller but IsFacingWrongWay.
+TrackRoute      *car_get_route(Car *c, int find);        // 0x00131740
+TrackRoutePoint *car_get_route_point(Car *c, int find);  // 0x00131770
 float    car_get_amount_out_of_bounds(Car *c);           // 0x001317a0
 void     car_update_sound(Car *c);                       // 0x00133480
 int32_t  car_is_collideable(Car *c);                     // 0x001316a0

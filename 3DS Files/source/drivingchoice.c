@@ -198,8 +198,7 @@ int drivingchoice_is_equal_to(const DrivingChoice *d,
 int drivingchoice_is_enough_room(const DrivingChoice *d, NearbyCar *nc,
                                  NearbyCarList *list)
 {
-    // 0x00242b08. Retail's GetRoutePoint takes a bool, 1 here, that only
-    // AICarController's reads (step 11e); car_get_route_point has none yet.
+    // 0x00242b08.
     TrackRoutePoint *rp;
     float room, lat;
 
@@ -210,7 +209,7 @@ int drivingchoice_is_enough_room(const DrivingChoice *d, NearbyCar *nc,
     if (!(car_get_amount_out_of_bounds(d->pCar) < DC_ON_ROAD))
         return 1;
 
-    rp = car_get_route_point(d->pCar);
+    rp = car_get_route_point(d->pCar, 1);
     room = (nc->ApparentHalfSizeL + list->MyHalfSizeL) + DC_ROOM_MARGIN;
     lat = lateral(rp, d->pCar->State.Position.x, d->pCar->State.Position.y);
     if (d->Type == CHOICE_LEFT_SIDE_OF_CAR)

@@ -1171,8 +1171,21 @@ class Model(object):
                                      "its handlers" % what)
             return f
 
+        # Retail's CarController::SetToPhysicsMode (0x001c0100), which the
+        # port follows: the demo's goes to MELLOW_MOVEMENT for any car,
+        # retail's to PHYSICS_MOVEMENT for a player's. The test is on
+        # this->pCar, not the argument.
+        def to_physics(em):
+            car = e.u32(arg(0))
+            if s32(e.u32(car + 36)) in (1, 4):
+                return None
+            emit("  set-movement-mode %s %d"
+                 % (lab(car), 1 if e.u32(car + 24) else 4))
+            return None
+
         e.stub("RadialBlurOff__Fi", blur_off)
         e.stub("SetMovementMode__3Car12MovementMode", movement)
+        e.stub("SetToPhysicsMode__13CarControllerP3Car", to_physics)
         e.stub("AddJoyHandler__F12JoystickPort8JoyEventPF12JoystickPort"
                "8JoyEventUcPv_vPv", joy("AddJoyHandler"))
         e.stub("RemoveJoyHandler__F12JoystickPort8JoyEvent",

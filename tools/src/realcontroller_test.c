@@ -668,11 +668,11 @@ static void call(int32_t fn, int slot, int32_t a, int32_t b, int32_t c,
             break;
         case F_GET_ROUTE:
             printf("  ret %s\n",
-                   label(trackedcontroller_get_current_route(tc)));
+                   label(trackedcontroller_get_current_route(tc, 1)));
             break;
         case F_GET_POINT:
             printf("  ret %s\n",
-                   label(trackedcontroller_get_current_route_point(tc)));
+                   label(trackedcontroller_get_current_route_point(tc, 1)));
             break;
         case F_GET_ACC:
             printf("  ret %08x\n",

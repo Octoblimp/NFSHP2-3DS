@@ -130,10 +130,17 @@ void carcontroller_debug_display(CarController *c);
 // ReplaySnapshot, and vt_slot aborts on it.
 void carcontroller_do_snapshot(CarController *c, void *snap);
 
-// 0x001b60d8. **The argument is not read**: the test and the call are on
-// `this->pCar`. Unless that car's movement mode is PHYSICS_MOVEMENT or
-// MELLOW_MOVEMENT, `j SetMovementMode(pCar, MELLOW_MOVEMENT)`.
+// Retail's 0x001c0100 (the demo's 0x001b60d8). **The argument is not
+// read**: the test and the call are on `this->pCar`, through
+// carcontroller_physics_or_mellow.
 void carcontroller_set_to_physics_mode(CarController *c, struct Car *car);
+
+// Unless the car's movement mode is PHYSICS_MOVEMENT or MELLOW_MOVEMENT,
+// SetMovementMode: PHYSICS_MOVEMENT for a player's car, MELLOW_MOVEMENT for
+// any other. The demo's went to MELLOW_MOVEMENT either way. Retail's
+// CarController::SetToPhysicsMode, which Car::SetToPhysicsMode inlines for
+// a car with no controller.
+void carcontroller_physics_or_mellow(struct Car *car);
 
 // 0x001b6108 / 0x001b6128. pCar->State.BoostFactor, to `f` or to 1.0,
 // when pCar is not NULL. The image tests the CarState's address as well
@@ -167,9 +174,10 @@ void  nullcontroller_think(NullController *c, float dt);          // 0x00134a98
 void  nullcontroller_set_current_route(NullController *c,
                                        TrackRoute *r,
                                        TrackRoutePoint *p);        // 0x00134a90
-TrackRoute *nullcontroller_get_current_route(NullController *c);  // 0x00134a88
+TrackRoute *nullcontroller_get_current_route(NullController *c,
+                                             int find);           // 0x00134a88
 TrackRoutePoint *nullcontroller_get_current_route_point(
-    NullController *c);                                           // 0x00134a80
+    NullController *c, int find);                                 // 0x00134a80
 float nullcontroller_get_amount_out_of_bounds(NullController *c); // 0x00134a70
 void  nullcontroller_find_where_i_am(NullController *c);          // 0x00134a68
 void  nullcontroller_just_reset(NullController *c);               // 0x00134a60

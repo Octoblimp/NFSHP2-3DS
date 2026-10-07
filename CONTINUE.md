@@ -1,13 +1,14 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 38
-(2026-10-06), after 11d-3b, GetUnstuck and AvoidRoadBlock.
+(2026-10-06), after 11e-1, AICarController's first slice.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
-AIPlan and the AIAction base, 11d-1 to 11d-3b, all eleven actions, and
-11e-0, Average at retail's size, are done and checked against retail.
-Next is the rest of 11e, AICarController. The car selector is finished and checked against retail: SC-1
+AIPlan and the AIAction base, 11d-1 to 11d-3b, all eleven actions,
+11e-0, Average at retail's size, and 11e-1, AICarController's record,
+route methods and actions, are done and checked against retail. Next is
+11e-2, the signposts and sticky decisions. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -345,15 +346,58 @@ car's were.
     now: 552 ops, 972 lines, 0 differ; 73 mutations, 72 caught and one
     equivalent. GetLastValue (0x0018fdf8) is new in retail and unused.
     `docs/formats/average.md` has it.
+  - **11e-1 is done: the record, the route methods and the action.**
+    `aicarcontroller.{c,h}` have the 720-byte record, the constructor
+    and destructor, the 17-entry table (Think and DoSnapshot NULL), the
+    route methods, GetNewDrivingLine, JustReset, InterruptAction,
+    GeneratePointsToFulfillAction, SetToPhysicsMode, the line speed (the
+    seam's, from main.c), the boosts and the accessors. Retail's
+    CarController::SetToPhysicsMode (0x001c0100) sends a player's car to
+    physics where the demo's sent every car to mellow; that is
+    `carcontroller_physics_or_mellow`, which Car::SetToPhysicsMode uses
+    too. `car_get_route` and `car_get_route_point` take retail's find
+    flag. The checker is its own, `aicarcontroller_check`, over
+    drivingchoice_check's world (split into
+    `tools/src/drivingchoice_world.inc`), with the port's installed
+    table copied into its test table: 156 scenarios, 24485 ops, 15468
+    lines, 0 differ; 126 mutations, 121 caught, 5 equivalent. Of note:
+    GetNewDrivingLine's relaxed switch can't be seen (BuildDriveTarget
+    builds a valid line from a copy with no switch, and throws an
+    invalid one away), every car IsDriveable meets needs its collision
+    box, and a location with a route and no point is never made.
+    `docs/formats/ai-car-controller.md` has it.
   - Retail's runs from 0x00190140 to about 0x00194058: some 16 KB in
     about 50 functions (`grep AICarController out/retail_syms.txt`).
     Think alone is 2536 bytes, DecideBoostFactor 904 and
-    ExecuteCurrentAction 868. Lay it out in slices by size first, as 11b
-    and 11d were.
-  - `aicarcontroller.h` has the record's head, to CurrentAction at 532.
-    Retail's record is 720 bytes.
-  - `gAICarControllerGetCurrentDrivingLineSpeedFn` in `car.h` is its
-    seam. FindWhereIAm (0x00192f10) is the method the actions call.
+    ExecuteCurrentAction 868. The slices, each checked in
+    `aicarcontroller_check` (over drivingchoice_check's world):
+    - 11e-1 (done): the 720-byte record, constructor, destructor, the table
+      (Think and the snapshot NULL until theirs), the route methods
+      (SetCurrentRoute, GetCurrentRoute and GetCurrentRoutePoint with
+      retail's find flag, GetAmountOutOfBounds, FindWhereIAm,
+      FindClosestTrackRoute, GetNewDrivingLine), JustReset,
+      ClearStickyDecisions, SteerStraightAhead, InterruptAction,
+      GeneratePointsToFulfillAction, SetToPhysicsMode,
+      GetCurrentDrivingLineSpeed (for car.h's seam), the boosts and the
+      small accessors. Retail's Car::GetRoute and GetRoutePoint pass a
+      flag through in a1 (1 from every caller but IsFacingWrongWay's 0),
+      so `car_get_route` and `car_get_route_point` take it too.
+    - **11e-2, next:** FindSignpostIndex, GetStickyIndex, DoStickyDecisions,
+      SignPostDecision (replacing `gAISignPostDecisionFn`) and
+      GetCurrentTrackRoutePoint. The jump table at 0x002b4cb0 is
+      SignPostDecision's.
+    - 11e-3: the belt, the glue and the boost: WeHave/WeNeed/WeCanHave
+      the belt and the glue, GlueOn, GlueOff, GetGlueSpeed,
+      DecideBoostFactor, CalculateDistanceAndPositionBoost.
+    - 11e-4: MaybeHonkAndOrBlinkHeadlights and ExecuteCurrentAction.
+    - 11e-5: Think.
+  - `aicarcontroller.h` has the whole 720-byte record. 684 and 688 are
+    retail's own (TakenSignpostIndex and TakenSignpostTimer, named for
+    what 11e-2's GetCurrentTrackRoutePoint and 11e-4's
+    ExecuteCurrentAction do with them).
+  - `gAICarControllerGetCurrentDrivingLineSpeedFn` in `car.h` is the
+    line speed's seam, set in main.c. drivingchoice_check still stubs
+    FindWhereIAm (0x00192f10) for the actions.
 - 11f: AIDriver, 0x0012ffc8 to 0x001308a0, about 2.3 KB, of which
   ChooseNewAction is 1400 bytes. Its constructor is `gAIDriverCtorFn` in
   `carmodes.h`. SetAIDriverModesFromPlayers (0x001cd240) goes with it.
@@ -3933,14 +3977,14 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-06, after 11d-3b, GetUnstuck and AvoidRoadBlock)
+### Where the port stands (2026-10-06, after 11e-1, AICarController's first slice)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11e, AICarController.
+- **Next:** step 11, the racer AI: 11e-2, AICarController's signposts.
   See "Now" at the top. These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
@@ -3952,7 +3996,9 @@ goes in.
   - 11d-1, the five small actions;
   - 11d-2, Pass and AvoidCars;
   - 11d-3a, PullOver and IJustGotHit;
-  - 11d-3b, GetUnstuck and AvoidRoadBlock.
+  - 11d-3b, GetUnstuck and AvoidRoadBlock;
+  - 11e-0, Average at retail's size;
+  - 11e-1, AICarController's record, route methods and action.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2

@@ -833,8 +833,8 @@ void realdriver_joy_reset_car(JoystickPort port, JoyEvent ev, uint8_t value,
         && gCopManagerGetResetDirectionFn != NULL)
         direction = gCopManagerGetResetDirectionFn(pCopManager);
 
-    route = car_get_route(d->pCar);
-    point = car_get_route_point(d->pCar);
+    route = car_get_route(d->pCar, 1);
+    point = car_get_route_point(d->pCar, 1);
     if (gCarResetToRoutePointFn != NULL)
         gCarResetToRoutePointFn(d->pCar, route, point, speed, 1, direction);
 

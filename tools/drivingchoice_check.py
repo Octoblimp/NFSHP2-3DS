@@ -6238,17 +6238,17 @@ MUTATIONS = [
     M("er-on-road-me",
       "if (!(car_get_amount_out_of_bounds(d->pCar) < DC_ON_ROAD))",
       "if (!(car_get_amount_out_of_bounds(list->MyCar) < DC_ON_ROAD))"),
-    M("er-rp-me", "    rp = car_get_route_point(d->pCar);",
-      "    rp = car_get_route_point(list->MyCar);"),
+    M("er-rp-me", "    rp = car_get_route_point(d->pCar, 1);",
+      "    rp = car_get_route_point(list->MyCar, 1);"),
     M("er-room-mine",
-      "    rp = car_get_route_point(d->pCar);\n"
+      "    rp = car_get_route_point(d->pCar, 1);\n"
       "    room = (nc->ApparentHalfSizeL + list->MyHalfSizeL) + DC_ROOM_MARGIN;",
-      "    rp = car_get_route_point(d->pCar);\n"
+      "    rp = car_get_route_point(d->pCar, 1);\n"
       "    room = nc->ApparentHalfSizeL + DC_ROOM_MARGIN;"),
     M("er-room-its",
-      "    rp = car_get_route_point(d->pCar);\n"
+      "    rp = car_get_route_point(d->pCar, 1);\n"
       "    room = (nc->ApparentHalfSizeL + list->MyHalfSizeL) + DC_ROOM_MARGIN;",
-      "    rp = car_get_route_point(d->pCar);\n"
+      "    rp = car_get_route_point(d->pCar, 1);\n"
       "    room = list->MyHalfSizeL + DC_ROOM_MARGIN;"),
     M("er-lat-xy",
       "lat = lateral(rp, d->pCar->State.Position.x, d->pCar->State.Position.y);",

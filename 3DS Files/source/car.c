@@ -575,8 +575,8 @@ typedef void             (*VtVoidFn)(void *self);
 typedef void             (*VtVoidFloatFn)(void *self, float f);
 typedef int32_t          (*VtBoolFn)(void *self);
 typedef float            (*VtFloatFn)(void *self);
-typedef TrackRoute      *(*VtRouteFn)(void *self);
-typedef TrackRoutePoint *(*VtRoutePointFn)(void *self);
+typedef TrackRoute      *(*VtRouteFn)(void *self, int find);
+typedef TrackRoutePoint *(*VtRoutePointFn)(void *self, int find);
 typedef void             (*VtSoundUpdateFn)(void *self, float a,
                                             uint16_t b, float c);
 
@@ -604,23 +604,23 @@ void car_drive(Car *c, float dt)
 }
 
 // 0x00131740.
-TrackRoute *car_get_route(Car *c)
+TrackRoute *car_get_route(Car *c, int find)
 {
     CarController *ctl = c->pCarController;
     const VtEntry *e = vt_slot(ctl->_vtable,
                                CARCONTROLLER_VT_GET_CURRENT_ROUTE);
 
-    return ((VtRouteFn)e->fn)(vt_this(ctl, e));
+    return ((VtRouteFn)e->fn)(vt_this(ctl, e), find);
 }
 
 // 0x00131770.
-TrackRoutePoint *car_get_route_point(Car *c)
+TrackRoutePoint *car_get_route_point(Car *c, int find)
 {
     CarController *ctl = c->pCarController;
     const VtEntry *e = vt_slot(ctl->_vtable,
                                CARCONTROLLER_VT_GET_CURRENT_ROUTE_POINT);
 
-    return ((VtRoutePointFn)e->fn)(vt_this(ctl, e));
+    return ((VtRoutePointFn)e->fn)(vt_this(ctl, e), find);
 }
 
 // 0x001317a0.
@@ -676,7 +676,7 @@ int32_t car_is_collideable(Car *c)
 // and a NaN -- is facing the wrong way.
 int32_t car_is_facing_wrong_way(Car *c)
 {
-    TrackRoutePoint *rp = car_get_route_point(c);
+    TrackRoutePoint *rp = car_get_route_point(c, 0);
     const bVector4 *fwd = &c->State.BodyMatrix.v0;
     float dot = fwd->x * rp->Direction.x + fwd->y * rp->Direction.y;
 

@@ -39,15 +39,19 @@ void carcontroller_do_snapshot(CarController *c, void *snap)
     ((CarDriverDoSnapshotFn)e->fn)(vt_this(d, e), snap);
 }
 
+void carcontroller_physics_or_mellow(Car *car)
+{
+    if (car->TheMovementMode == PHYSICS_MOVEMENT
+        || car->TheMovementMode == MELLOW_MOVEMENT)
+        return;
+    car_set_movement_mode(car, car->pPlayer != NULL ? PHYSICS_MOVEMENT
+                                                    : MELLOW_MOVEMENT);
+}
+
 void carcontroller_set_to_physics_mode(CarController *c, Car *car)
 {
-    Car *mine = c->pCar;
-
     (void)car;
-    if (mine->TheMovementMode == PHYSICS_MOVEMENT
-        || mine->TheMovementMode == MELLOW_MOVEMENT)
-        return;
-    car_set_movement_mode(mine, MELLOW_MOVEMENT);
+    carcontroller_physics_or_mellow(c->pCar);
 }
 
 void carcontroller_force_boost(CarController *c, float f)
@@ -115,15 +119,18 @@ void nullcontroller_set_current_route(NullController *c, TrackRoute *r,
     (void)c; (void)r; (void)p;
 }
 
-TrackRoute *nullcontroller_get_current_route(NullController *c)
+TrackRoute *nullcontroller_get_current_route(NullController *c, int find)
 {
     (void)c;
+    (void)find;
     return NULL;                        // move v0,zero
 }
 
-TrackRoutePoint *nullcontroller_get_current_route_point(NullController *c)
+TrackRoutePoint *nullcontroller_get_current_route_point(NullController *c,
+                                                       int find)
 {
     (void)c;
+    (void)find;
     return NULL;                        // move v0,zero
 }
 

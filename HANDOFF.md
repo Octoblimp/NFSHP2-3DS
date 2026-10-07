@@ -15315,6 +15315,73 @@ still the demo's, so it came first.
 
 `docs/formats/average.md` has the detail. The CIA builds.
 
+### Step 11e-1: AICarController's record, route methods and action
+
+`aicarcontroller.{c,h}` are new. They have:
+- the whole 720-byte record. Retail's sticky decisions are eight words
+  (the demo's six), and two words of its own follow at 684 and 688, so
+  pDeltaLineSpeed and vPreviousLinePoint sit at 692 and 704;
+- the constructor and destructor;
+- the 17-entry table at retail's 0x002b4d90, with Think (11e-5) and
+  DoSnapshot NULL, and GetRouteNumbersToUse pure;
+- the route methods: SetCurrentRoute, GetCurrentRoute and
+  GetCurrentRoutePoint, GetAmountOutOfBounds, FindWhereIAm,
+  FindClosestTrackRoute and GetNewDrivingLine;
+- JustReset, ClearStickyDecisions, SteerStraightAhead and
+  GetMyDriverNumber;
+- InterruptAction, GeneratePointsToFulfillAction, GetCurrentActionType
+  and ForceMyCurrentAction;
+- SetToPhysicsMode, GetCurrentDrivingLineSpeed (main.c points car.h's
+  seam at it), the boosts and the accessors.
+
+Things retail changed, ported with it:
+- Car::GetRoute and Car::GetRoutePoint pass a find flag to the
+  controller, 1 from every caller but IsFacingWrongWay. The
+  AICarController's getters run FindWhereIAm first when the flag is set
+  and the location is clear. `car_get_route` and `car_get_route_point`
+  take the flag, and so do every controller's getters and the harnesses'
+  fakes.
+- CarController::SetToPhysicsMode (0x001c0100) sends a player's car to
+  physics, where the demo's sent every car to mellow.
+  `carcontroller_physics_or_mellow` has it, and Car::SetToPhysicsMode
+  inlines the same for a car with no controller. carmode_check's
+  mutations follow it.
+- cardriver.h names SetSteerToPoint (72) and ZeroSteeringMemory (120).
+
+The checker is its own, `aicarcontroller_check`, over
+drivingchoice_check's world. The harness's world moved into
+`tools/src/drivingchoice_world.inc`, which both harnesses include. The
+harness copies the port's installed table into its test table, as the
+model copies retail's, and replaces only GetRouteNumbersToUse and
+ChooseNewAction.
+- 156 scenarios, 24485 ops, 15468 lines, 0 differ.
+- 126 mutations: 121 caught, 5 equivalent.
+  - sr-relax, gl-relax and gl-relax0: GetNewDrivingLine's relaxed switch
+    never reaches a target IsDriveable reads. BuildDriveTarget builds a
+    valid line choice from a copy with no switch, and throws an invalid
+    one's target away. s_relax drives the case: cars off the line past
+    29.5 m/s, the grace period over, slower cars ahead.
+  - gl-list: nothing in 11e-1 moves CurrentNearbyCarList off the
+    controller's own list.
+  - gp-ahead: GetCarAhead only reads, and retail drops its answer.
+
+Found along the way:
+- IsDriveable reaches WillIHitThisCar, which needs every car's
+  collision box. The harness segfaulted on a NULL one until every car of
+  the route world was boxed.
+- A location with a route and no point is never made by the game.
+  IsClear tests only the route, so the getters read the NULL point. The
+  script stopped making one.
+- The walk world never filled route slot 0, the first one
+  FindClosestTrackRoute takes past its `bltz`, so fc-neg lived until
+  `number_zero` filed route 0 there.
+
+drivingchoice_check's er-* patterns and carmode_check follow the
+changes. realcontroller_check still runs the demo's image, so it stubs
+CarController::SetToPhysicsMode with retail's. Every
+other checker still runs clean. `docs/formats/ai-car-controller.md` has
+the detail. The CIA builds.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the

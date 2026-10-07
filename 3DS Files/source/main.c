@@ -49,6 +49,7 @@
 #include "acidsys.h"
 #include "aiaction.h"
 #include "aiactions.h"
+#include "aicarcontroller.h"
 #include "bchunk.h"
 #include "bchunkload.h"
 #include "bmem.h"
@@ -3195,10 +3196,16 @@ int main(int argc, char** argv)
     carcollisionbody_install_vtable();
     aiaction_install_vtables();
     aiactions_install_vtables();
+    aicarcontroller_install_vtables();
 
     // Car::SetControlMode reaches the controllers task 26 brings through
     // seams; a NULL one is a class not ported yet, and the arm aborts.
     gRealControllerCtorFn = realcontroller_construct;
+
+    // Car::GetDrivingLineSpeed asks an AI or traffic car's controller,
+    // an AICarController since step 11e-1.
+    gAICarControllerGetCurrentDrivingLineSpeedFn =
+        aicarcontroller_line_speed_seam;
 
     // RealDriver's reset button puts the car back on its route through
     // Car::ResetToRoutePoint, which carreset.c has ported since task 27's
