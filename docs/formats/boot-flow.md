@@ -554,11 +554,30 @@ neither name appears in the 49-entry screen registry below. The first is
 guarded by a predicate that returns 0, and the second is only ever compared
 against, never entered. Dead references both.
 
-`UnlaunchFrontendMenus` (`0x0016ab70`) is the mirror, run when a race starts.
-It switches on `FrontendLaunchType - 2` through a jump table at `0x002966e0`
-and then sets `FrontendLaunchType = (TheRaceParameters.<+24> ||
-TheRaceParameters.<+28>) ? 2 : 3`, which is how a second visit to the frontend
-skips the boot sequence.
+`UnlaunchFrontendMenus` (the demo's `0x0016ab70`, retail's `0x0016fa80`) is
+the mirror, run from `BeginGameFlowUnloadingFrontEnd` when a race starts.
+Retail's, which the port's `bgf_unlaunch_frontend_menus` follows:
+
+1. Pops the stack back to where the game type began: `PopUntil("View Event
+   Tree")` for `Fred.GameType` 8 and 9, `PopUntil("New Main Menu")` for 2 to
+   7 (`slti`, so signed), nothing for the rest. Then `PopScreens(0)`, which
+   pops nothing. `ScreenStack::Print` before and after is a debug dump.
+2. `ChangeToScreen(NULL)` and `SetMainScreen(NULL)`.
+3. `sound::jukebox::Stop` -- the menu's tune ends here, on the way to the
+   loading screen.
+4. `FrontendLaunchType = (TheRaceParameters.AIDemoMode (+24) ||
+   ReplayDemoMode (+28)) ? 2 : 3`, which is how a second visit to the
+   frontend skips the boot sequence.
+5. `StopMovie`, then `tNewSongMonitor::Reset` (+0x100) and, when the list has
+   one (+452), the help menu's Reset. The help menu is not ported.
+
+Until Session 43 the port only left the screen and cleared the stack, so the
+menu's tune played on through the loading screen with its EA TRAX box up.
+The song monitor's Reset is the port's one change (`jukebox.md`): it also
+takes the box down. `tools/bootflow_check.py` runs retail's
+`UnlaunchFrontendMenus` as shipped (`RetailUnlaunch`) over game types -1, 1,
+2, 5, 7, 8, 9 and 10, with each demo flag (`leavegt*`), and with the menus'
+movie playing (`leavemovie`).
 
 ### The predicates
 

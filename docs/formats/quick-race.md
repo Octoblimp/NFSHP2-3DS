@@ -142,7 +142,10 @@ slot pools, waits out the async reads, and ends with
 `closeSelectCar` and `unloadFrontEnd` hooks (main.c unloads FRONTB),
 then changes to `LOADING_TRACK_COMMON`, which [track-flow](track-flow.md)
 takes from there. `tools/bootflow_check.py`'s `leavefe` scenario checks
-the change.
+the change. The screen list's part is retail's `UnlaunchFrontendMenus`
+([boot-flow](boot-flow.md)), which stops the menu's tune before the
+loading screen; the race's own starts six seconds after GO
+([jukebox](jukebox.md), "The race's music").
 
 ## What the race asks for next
 

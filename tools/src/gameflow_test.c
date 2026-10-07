@@ -90,6 +90,10 @@ typedef struct {
     const char* card;     // a kCards row; NULL is "blank"
     int manual;           // the loader in MANUAL mode
     int replays;          // demo replays ConsiderLaunching will start
+    // What UnlaunchFrontendMenus reads: Fred.GameType, and the race's demo
+    // mode -- 1 AIDemoMode, 2 ReplayDemoMode, which the hook answers alike.
+    int gameType;
+    int raceDemo;
 } Scenario;
 
 // A load in flight: what to print when it lands, and its callback.
@@ -315,6 +319,19 @@ static void wJukebox(void* user, int start)
 {
     (void)user;
     printf("jukebox %d\n", start);
+}
+static int wGameType(void* user)
+{
+    return ((World*)user)->sc->gameType;
+}
+static int wRaceDemo(void* user)
+{
+    return ((World*)user)->sc->raceDemo != 0;
+}
+static void wSongMonitorReset(void* user)
+{
+    (void)user;
+    printf("song monitor reset\n");
 }
 static void wEasterEggs(void* user, int start)
 {
@@ -727,6 +744,76 @@ static const Scenario kScenarios[] = {
     { "leavefe", 1, 0, 1, 1, 0, 0, 0, BOOT60 + 270, SIXTIETH,
       {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item1"},
        {BOOT60 + 260, "race"}} },
+    // UnlaunchFrontendMenus over each kind of game: with View Event Tree
+    // and a Quick Race screen pushed over New Main Menu, game types 2 to 7
+    // pop back to the main menu, 8 and 9 to the event tree, and the rest
+    // pop nothing. A demo race comes back with launch type 2, any other 3.
+    { .name = "leavegtm1", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = BOOT60 + 270, .dt = SIXTIETH,
+      .gameType = -1, .raceDemo = 0,
+      .input = {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item1"},
+                {BOOT60 + 256, "pushvet"}, {BOOT60 + 257, "pushqr"},
+                {BOOT60 + 260, "race"}} },
+    { .name = "leavegt1", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = BOOT60 + 270, .dt = SIXTIETH,
+      .gameType = 1, .raceDemo = 0,
+      .input = {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item1"},
+                {BOOT60 + 256, "pushvet"}, {BOOT60 + 257, "pushqr"},
+                {BOOT60 + 260, "race"}} },
+    { .name = "leavegt2", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = BOOT60 + 270, .dt = SIXTIETH,
+      .gameType = 2, .raceDemo = 0,
+      .input = {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item1"},
+                {BOOT60 + 256, "pushvet"}, {BOOT60 + 257, "pushqr"},
+                {BOOT60 + 260, "race"}} },
+    { .name = "leavegt5", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = BOOT60 + 270, .dt = SIXTIETH,
+      .gameType = 5, .raceDemo = 0,
+      .input = {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item1"},
+                {BOOT60 + 256, "pushvet"}, {BOOT60 + 257, "pushqr"},
+                {BOOT60 + 260, "race"}} },
+    { .name = "leavegt7", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = BOOT60 + 270, .dt = SIXTIETH,
+      .gameType = 7, .raceDemo = 0,
+      .input = {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item1"},
+                {BOOT60 + 256, "pushvet"}, {BOOT60 + 257, "pushqr"},
+                {BOOT60 + 260, "race"}} },
+    { .name = "leavegt8", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = BOOT60 + 270, .dt = SIXTIETH,
+      .gameType = 8, .raceDemo = 0,
+      .input = {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item1"},
+                {BOOT60 + 256, "pushvet"}, {BOOT60 + 257, "pushqr"},
+                {BOOT60 + 260, "race"}} },
+    { .name = "leavegt9", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = BOOT60 + 270, .dt = SIXTIETH,
+      .gameType = 9, .raceDemo = 0,
+      .input = {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item1"},
+                {BOOT60 + 256, "pushvet"}, {BOOT60 + 257, "pushqr"},
+                {BOOT60 + 260, "race"}} },
+    { .name = "leavegt10", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = BOOT60 + 270, .dt = SIXTIETH,
+      .gameType = 10, .raceDemo = 0,
+      .input = {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item1"},
+                {BOOT60 + 256, "pushvet"}, {BOOT60 + 257, "pushqr"},
+                {BOOT60 + 260, "race"}} },
+    { .name = "leavegt2d1", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = BOOT60 + 270, .dt = SIXTIETH,
+      .gameType = 2, .raceDemo = 1,
+      .input = {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item1"},
+                {BOOT60 + 256, "pushvet"}, {BOOT60 + 257, "pushqr"},
+                {BOOT60 + 260, "race"}} },
+    { .name = "leavegt8d2", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = BOOT60 + 270, .dt = SIXTIETH,
+      .gameType = 8, .raceDemo = 2,
+      .input = {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item1"},
+                {BOOT60 + 256, "pushvet"}, {BOOT60 + 257, "pushqr"},
+                {BOOT60 + 260, "race"}} },
+    { .name = "leavegt0d1", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = BOOT60 + 270, .dt = SIXTIETH,
+      .gameType = 0, .raceDemo = 1,
+      .input = {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item1"},
+                {BOOT60 + 256, "pushvet"}, {BOOT60 + 257, "pushqr"},
+                {BOOT60 + 260, "race"}} },
     // Force the legal screen, which the retail predicate never allows.
     { "mumbo", 1, 0, 0, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH,
       {{BOOT60 + 12, "mumbo"}} },
@@ -911,6 +998,11 @@ static const Scenario kScenarios[] = {
                 {BOOT60 + 273, "hi3"}, {BOOT60 + 274, "hi9"},
                 {BOOT60 + 275, "item3"}, {BOOT60 + 278, "back"},
                 {BOOT60 + 280, "hi1"}, {BOOT60 + 282, "hi2"}} },
+    // The race asked for from the main menu with its movie playing:
+    // UnlaunchFrontendMenus stops it after the launch type.
+    { .name = "leavemovie", .videoMode = 1, .frontendLaunchType = 1,
+      .frames = BOOT60 + 320, .dt = SIXTIETH, .gameType = 2,
+      .input = {{BOOT60 + 270, "select"}, {BOOT60 + 300, "race"}} },
 };
 #pragma GCC diagnostic pop
 #define NUM_SCENARIOS ((int)(sizeof(kScenarios) / sizeof(kScenarios[0])))
@@ -973,6 +1065,9 @@ static void runScenario(const Scenario* sc)
     hooks.newFileSys              = wNewFileSys;
     hooks.sound                   = wSound;
     hooks.jukebox                 = wJukebox;
+    hooks.songMonitorReset        = wSongMonitorReset;
+    hooks.gameType                = wGameType;
+    hooks.raceDemo                = wRaceDemo;
     hooks.easterEggs              = wEasterEggs;
     hooks.moveBrackets            = wMoveBrackets;
     hooks.setBlurb                = wSetBlurb;
@@ -1089,6 +1184,12 @@ static void runScenario(const Scenario* sc)
                 printf("input mumbo\n");
                 bgf_push_screen(&gf, "New Main Menu");
                 bgf_change_to_screen(&gf, "Legal MumboJumbo", 0);
+            } else if (!strcmp(what, "pushvet")) {
+                printf("input pushvet\n");
+                bgf_push_screen(&gf, "View Event Tree");
+            } else if (!strcmp(what, "pushqr")) {
+                printf("input pushqr\n");
+                bgf_push_screen(&gf, "Quick Race");
             }
         }
         bgf_frame(&gf, sc->dt);

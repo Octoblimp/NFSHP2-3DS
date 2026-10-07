@@ -27,6 +27,18 @@ void bsm_init(BSongMonitor* m, const BSongMonitorHooks* hooks)
     m->titleWidth = 16;
 }
 
+// Retail's Reset deletes the feAlphaAnimation at +20, which nothing makes,
+// and so does nothing. The port's also takes the box down and forgets the
+// tune: UnlaunchFrontendMenus calls it as the jukebox stops, and the box
+// would otherwise sit on the loading screen with the stopped tune's name
+// for the rest of its five seconds. The next tune to start shows it again.
+void bsm_reset(BSongMonitor* m)
+{
+    H->setScreenVisible(H->user, m->screen, 0);
+    m->start = NO_START;
+    m->starts = 0;
+}
+
 // FlailerPrintf's bVSPrintf, which spells a NULL string "(null)".
 static void print_line(BSongMonitor* m, const char* object, const char* fmt,
                        const char* s)

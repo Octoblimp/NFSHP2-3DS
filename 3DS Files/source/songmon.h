@@ -50,7 +50,6 @@ typedef struct {
     int32_t  printed;    // +16, the lines are in for this tune
     // +20 is an feAlphaAnimation the destructor and Reset delete. Nothing in
     // retail makes one, so it is always NULL and neither does anything else.
-    // Reset (0x0016bde8, from UnlaunchFrontendMenus) is not ported for that.
     // The width Update keeps of RECORD_TITLE, gp-21244; only Update reads it.
     int32_t  titleWidth;
     const BSongMonitorHooks* hooks;
@@ -61,3 +60,6 @@ typedef struct {
 void bsm_init(BSongMonitor* m, const BSongMonitorHooks* hooks);
 // Update (0x0016be20).
 void bsm_update(BSongMonitor* m);
+// Reset (0x0016bde8), from UnlaunchFrontendMenus: retail's does nothing
+// (see +20 above); the port's hides the box and forgets the tune.
+void bsm_reset(BSongMonitor* m);

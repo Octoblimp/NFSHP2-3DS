@@ -229,8 +229,15 @@ typedef struct {
     void (*sound)(void* user, int soundEvent);   // MakeFrontendSound
     void (*jukebox)(void* user, int start);      // sound::jukebox::Start/Stop
     // tNewSongMonitor::Update (songmon.h), the EA TRAX box, which
-    // FlailerScreenList::Tick runs after the menus' movie.
+    // FlailerScreenList::Tick runs after the menus' movie; and its Reset
+    // (0x0016bde8), UnlaunchFrontendMenus'.
     void (*songMonitor)(void* user);
+    void (*songMonitorReset)(void* user);
+    // What UnlaunchFrontendMenus reads: Fred.GameType (0x0030c77c), and
+    // whether TheRaceParameters' AIDemoMode (+24) or ReplayDemoMode (+28)
+    // is set. Not traced; no hook answers 0 for both.
+    int (*gameType)(void* user);
+    int (*raceDemo)(void* user);
     // TheEasterEggs (0x0031d7e8), the port's name: retail's ELF has no
     // symbols, and the class is not on the demo disc. Start (0x0024f488)
     // gives it the pad's sixteen button events, 133..148, and Stop
@@ -569,9 +576,13 @@ const char* bgf_stack_top(const BGameFlow* gf);
 // then enter the top of the stack -- which is the last one pushed.
 void bgf_launch_frontend_menus(BGameFlow* gf);
 
-// UnlaunchFrontendMenus (0x0016fa80), the mirror run when a race starts.
-// Sets frontendLaunchType so a second visit skips the boot sequence.
-void bgf_unlaunch_frontend_menus(BGameFlow* gf, int raceInProgress);
+// UnlaunchFrontendMenus (0x0016fa80), the mirror run when a race starts,
+// from BeginGameFlowUnloadingFrontEnd. It pops the stack back to the
+// screen the game type started from, leaves the screen, stops the
+// jukebox, sets frontendLaunchType (2 after an attract race, else 3, so a
+// second visit skips the boot sequence), stops the menus' movie and resets
+// the song monitor.
+void bgf_unlaunch_frontend_menus(BGameFlow* gf);
 
 // The four predicates, all in Frontend.obj and all reading
 // frontendLaunchType, which ships as 1.

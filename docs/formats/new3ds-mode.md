@@ -153,14 +153,14 @@ Two runs of the 13b-3 build: a race on track 12, holding the gas
   worker decodes for 6.1 to 7.0 ms a second and is in its reads for 5.2
   to 7.8 ms a second. That is 0.35 ms of CPU in a 50 ms frame, under 1%
   of core 0.
-- **No music in a race.** The race's `jukebox:` section reads 0.00
-  throughout. The flow stops the jukebox when the menus go
-  (`bgf_unlaunch_frontend_menus`, as retail does), and retail starts it
-  again from the race coordinator's TICK, with DelayedStart(6.0), once
-  the ReplayManager has marked the beginning of time
-  (`race-coordinator.md`). The port has no ReplayManager, and nothing
-  sets `gJukeboxDelayedStartFn`, so a race is silent. This is open, in
-  CONTINUE.md.
+- **No music in a race (fixed in Session 43).** The race's `jukebox:`
+  section read 0.00 throughout. The flow stops the jukebox when the menus
+  go (`bgf_unlaunch_frontend_menus`, as retail does), and retail starts it
+  again from the race coordinator's TICK, with DelayedStart(6.0), once the
+  ReplayManager has marked the beginning of time (`race-coordinator.md`).
+  The port's stand-in ReplayManager now keeps that Timer, and main.c sets
+  the jukebox's seams (`jukebox.md`, "The race's music"), so the race's
+  tune starts six seconds after GO.
 
 **The cores, decided.** The jukebox's worker stays on core 0. At under
 1% of the core, moving it would save 0.35 ms a frame at most. Nothing else outside the draw is worth moving, so 13b-3 moves nothing.

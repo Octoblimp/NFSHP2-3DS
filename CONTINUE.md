@@ -1131,7 +1131,7 @@ bvector_check      27 scenarios,  5721 lines, 0 differ   (23/23 mutations caught
 bmath_check        19 scenarios,  6643 lines, 0 differ   (11/11 mutations caught)
 banim_check        23 scenarios,  2219 lines, 0 differ
 bscreens_check     17 scenarios,  1277 lines, 0 differ
-bootflow_check     48 scenarios, 27964 lines, 0 differ   (187 caught, 3 equivalent)
+bootflow_check     61 scenarios, 46779 lines, 0 differ   (219 mutations; the 25 for UnlaunchFrontendMenus all caught)
 bslotpool_check    18 scenarios,  1025 lines, 0 differ   (47/47 mutations caught)
 geometry_check     30 files,     42047 lines, 0 differ   (53/53 mutations caught)
 texsrc_check       6 packs, 2 levels, 2958 textures, 0 differ
@@ -2973,14 +2973,13 @@ and so replaced every boot.
      checker runs on the same machine: 8m-4a's first run read 57% and
      11 FPS that way, and 100% and 20 FPS idle.
    - The car's sounds (step 14): LoadSoundRegionsInGame and the engine.
-   - **No music in a race** (found in 13b-3). The flow stops the
-     jukebox when the menus go, and retail starts it again from the
-     race coordinator's TICK, `DelayedStart(6.0)`, once the
-     ReplayManager has marked the beginning of time. The port has no
-     ReplayManager, so `rcstates.c` never reaches the call, and nothing
-     sets `gJukeboxDelayedStartFn`. Put it in with step 14, or with the
-     replay's slice: the jukebox's DelayedStart, and the
-     ReplayManager's BeginningOfTime and MarkTheBeginningOfTime.
+   - **Music in a race: done in Session 43.** The flow stops the
+     jukebox when the menus go (retail's UnlaunchFrontendMenus, now
+     ported), and the race coordinator's TICK starts the racing list
+     with `DelayedStart(6.0)` at GO. The stand-in ReplayManager keeps
+     its beginning-of-time Timer for that; main.c sets the jukebox's
+     seams (`docs/formats/jukebox.md`, "The race's music"). The rest of
+     the replay is still unported.
    - The racer AI (step 11), and a SkipFE race with AI cars in it.
 
    The way in is retail's own debug path. With SkipFE (gp-23220) set,
@@ -4325,8 +4324,8 @@ goes in.
   constructor was found to build a PsychoDriver.
 - **The pace:** 80 commits from 2026-09-27 to 2026-10-04, most of them a
   slice each.
-- **Not yet in the count:** the replay, and with it the race's music
-  (see step 14's note). The race runs in real time since 13b-1, at
+- **Not yet in the count:** the replay. The race's music no longer
+  waits on it (Session 43). The race runs in real time since 13b-1, at
   28-30 FPS on Azahar since 13b-4d. Holding 30 is the rest of 13b-4.
   The car selector's 2D is retail's now (SC-1). The car itself is SC-2.
 

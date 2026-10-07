@@ -1651,6 +1651,14 @@ static const BSongMonitorHooks kSongMonitorHooks = {
     smSetScaleX,
 };
 
+// tNewSongMonitor::Reset (0x0016bde8), from UnlaunchFrontendMenus. The
+// port's takes the box down as well (songmon.c).
+static void hookSongMonitorReset(void* user)
+{
+    (void)user;
+    bsm_reset(&g_songMonitor);
+}
+
 static void hookSongMonitor(void* user)
 {
     (void)user;
@@ -1941,6 +1949,55 @@ static void hookJukebox(void* user, int start)
                                g_jukebox.jukebox.curCatNum,
                                g_jukebox.jukebox.curTuneNum)
                 : "no cartridge");
+}
+
+// What UnlaunchFrontendMenus (0x0016fa80) reads: Fred.GameType, for the
+// screen it pops back to, and whether the race is a demo, for the launch
+// type the frontend comes back with.
+static int hookGameType(void* user)
+{
+    (void)user;
+    return (int)Fred.GameType;
+}
+
+static int hookRaceDemo(void* user)
+{
+    (void)user;
+    return RaceParametersAIDemoMode != 0 || RaceParametersReplayDemoMode != 0;
+}
+
+// The race's music. RaceCoordinator's cleanup stops it (sound::jukebox::Stop,
+// 0x001aec90); RACE_IN_PROGRESS's first TICK at RACING starts it six seconds
+// on (DelayedStart, 0x001aec88), which jb_music_update counts down; and
+// RESTART_RACE parks the timer at 9e9 for the next start.
+static void raceJukeboxStop(void)
+{
+    jb_music_stop(&g_jukebox);
+    logLine("jukebox stop: race");
+}
+
+static void raceJukeboxDelayedStart(float seconds)
+{
+    jb_music_delayed_start(&g_jukebox, seconds);
+    logLine("jukebox delayed start: %.1f s", (double)seconds);
+}
+
+// LoadSoundRegionsInGame (0x001ae798), the music's part: with sound up it
+// clears DelayedStart's timer (gp-19028) and sound::Mute's flag (gp-19040)
+// and turns the jukebox to the racing list, category 4, so the race's first
+// tune is the audio options' list 7 -- 14 in a pursuit -- or a random one.
+// Retail then loads the cars' engine regions and calls the callback when
+// they are in; the port has no regions to wait for, so it calls it now.
+static void hookLoadSoundRegionsInGame(void (*done)(intptr_t), intptr_t param)
+{
+    if (g_jukebox.soundEnabled) {
+        g_jukebox.delayedStart = 0.0f;
+        g_jukebox.muted = 0;
+        jb_music_set_selection(&g_jukebox, Fred.AudioOptionsScreenData,
+                               JB_CAT_RACING_MUSIC);
+        logLine("jukebox selection: racing music");
+    }
+    done(param);
 }
 
 // TheEasterEggs' Start and Stop, NewMainMenu's. The 78 codes it listens for
@@ -2772,6 +2829,25 @@ static void replayAddData(ReplayManager* rm, int32_t value, int32_t bits,
     (void)bits;
     (void)channel;
     if (rm->CapturingFlag) replayNoRepeat();
+}
+
+// The beginning of time RACE_IN_PROGRESS's TICK reads, retail's Timer at
+// +92 (replay.h names the demo's head, where +92 is EndOfTime). The
+// stand-in is zeroed, so the first TICK at RACING marks it and starts the
+// race's music six seconds on, as retail's does. Retail's
+// MarkTheBeginningOfTime (0x0013d6f8) also stamps +80, +84 and +96 and
+// begins capturing when there is memory for it; the stand-in captures
+// nothing, so it keeps only the Timer.
+static int32_t replayGetBeginningOfTime(const ReplayManager* rm)
+{
+    int32_t t;
+    memcpy(&t, (const uint8_t*)rm + 92, 4);
+    return t;
+}
+
+static void replayMarkTheBeginningOfTime(ReplayManager* rm)
+{
+    memcpy((uint8_t*)rm + 92, &WorldTimer, 4);
 }
 
 // eDisplayFrame draws what the views hold, and the port's is trackview's
@@ -3681,6 +3757,9 @@ int main(int argc, char** argv)
     // constructor's, and UnlaunchFrontendMenus' Stop.
     hooks.jukebox          = hookJukebox;
     hooks.songMonitor      = hookSongMonitor;
+    hooks.songMonitorReset = hookSongMonitorReset;
+    hooks.gameType         = hookGameType;
+    hooks.raceDemo         = hookRaceDemo;
     hooks.easterEggs       = hookEasterEggs;
     hooks.initSelectCar    = hookCarSelInit;
     hooks.closeSelectCar   = hookCarSelClose;
@@ -3806,6 +3885,15 @@ int main(int argc, char** argv)
     gReplayManagerDestroyFn  = replayStandInDestroy;
     gReplayManagerGetData    = replayGetData;
     gReplayManagerAddData    = replayAddData;
+    gReplayGetBeginningOfTimeFn     = replayGetBeginningOfTime;
+    gReplayMarkTheBeginningOfTimeFn = replayMarkTheBeginningOfTime;
+    // The race's music: the regions hook turns the jukebox to the racing
+    // list as the track loads, the TICK starts it six seconds after GO and
+    // the cleanup stops it.
+    gLoadSoundRegionsInGameFn = hookLoadSoundRegionsInGame;
+    gJukeboxDelayedStartFn    = raceJukeboxDelayedStart;
+    gJukeboxDelayedStartTimer = &g_jukebox.delayedStart;
+    gJukeboxStopFn            = raceJukeboxStop;
     // World's constructor makes its TrafficTeleporter, and its destructor
     // deletes it and any car left on CarList.
     gTrafficTeleporterCtorFn    = traffic_teleporter_construct;

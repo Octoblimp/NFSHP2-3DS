@@ -141,8 +141,34 @@ fade level × the category's volume.
 `tNewSongMonitor` (0x0016bd30 .. 0x0016c214, 24 bytes) is what shows the
 tune. `FlailerScreenList` builds one in its constructor (+0x44) and ticks it
 every frame from `Tick` (+0x7c), after the menus' movie.
-`UnlaunchFrontendMenus` resets it (+0x100). The reset only deletes the alpha
-animation at +20, which nothing ever creates, so the port has no reset.
+`UnlaunchFrontendMenus` resets it (+0x100). Retail's reset only deletes the
+alpha animation at +20, which nothing ever creates, so it does nothing, and
+the box stayed up for the rest of its five seconds over the loading screen
+with the stopped tune's name. The port's `bsm_reset` takes the box down and
+forgets the tune (start 0x7fffffff, starts 0), so the next tune shows its
+name again. That is a change from retail, made at the user's request.
+
+### The race's music
+
+The jukebox stops when the menus go, and the race starts its own:
+
+- `LoadSoundRegionsInGame` (`0x001ae798`), as the track loads, clears
+  `DelayedStart`'s timer (gp-19028) and `Mute`'s flag (gp-19040) with sound
+  up and turns the selection to the racing list (category 4). The first
+  tune is the audio options' list 7 (14 in a pursuit) when that is enabled,
+  else a random skip. main.c's `hookLoadSoundRegionsInGame` does this and
+  calls the callback at once, since the port has no engine regions to load.
+- `RACE_IN_PROGRESS`'s first `TICK` at `RACING` (GO) calls
+  `DelayedStart(6.0)` (`0x001aec88`, the call at `0x0014af60`), so the music
+  starts six seconds after the countdown ends, never during it.
+  `jb_music_update` counts the timer down outside the frontend.
+- `RaceCoordinator`'s cleanup calls `Stop`; `RESTART_RACE` parks the timer
+  at 9e9 for the next start.
+
+That `TICK` reads the replay's beginning of time, `ReplayManager`'s Timer at
++92. The port's stand-in `ReplayManager` is zeroed, so main.c's
+`replayGetBeginningOfTime` and `replayMarkTheBeginningOfTime` keep that one
+Timer in it, and the first `RACING` tick marks it as retail's does.
 
 | offset | field |
 |--------|-------|

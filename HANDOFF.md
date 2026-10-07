@@ -16295,3 +16295,60 @@ CountdownCameraCoordinator) and the harness
 `tools/src/cameracoord_test.c` are written but not wired or committed:
 the checker, the wiring (main.c's seams, sinit's [40], bchunk slot 13,
 the frame's UpdateCameraCoordinators) and the doc are 11g-2c-1's rest.
+
+## Session 43 (2026-10-07) -- the menu's tune stops at the loading screen, the race's starts after GO
+
+The user's notes on the frontend's Quick Race: the menu's tune played on
+through the loading screen with its EA TRAX box up (their image 1), the
+race's music should wait until the 3-2-1 is over, and the countdown
+looked wrong (image 2: the view high over the track, the cinema bars,
+the bottom screen blank). They also showed the race's new top-screen
+assets.
+
+### The menu's tune
+
+The port's `bgf_begin_unloading_frontend` left the screen and cleared
+the stack, where retail's BeginGameFlowUnloadingFrontEnd (0x00168830)
+calls UnlaunchFrontendMenus (0x0016fa80). That one pops back to "View
+Event Tree" (game types 8 and 9) or "New Main Menu" (2 to 7), leaves the
+screen, stops the jukebox, sets FrontendLaunchType (2 after a demo race,
+else 3), stops the movie and resets the song monitor.
+`bgf_unlaunch_frontend_menus` is now retail's, with two new int hooks
+(`gameType`, `raceDemo`) and `songMonitorReset`. Retail's
+tNewSongMonitor::Reset does nothing (it deletes an animation nothing
+makes), so the box would have stayed up for its five seconds; the
+port's `bsm_reset` takes it down, a documented change.
+
+`bootflow_check` runs retail's function as shipped (`RetailUnlaunch`)
+over game types -1, 1, 2, 5, 7, 8, 9 and 10 with each demo flag, and
+with the menus' movie playing: 61 scenarios, 46779 lines, 0 differ. 25
+new mutations, all caught (one, the screen change moved after the
+no-op PopScreens(0), was equivalent and was replaced by one that moves
+it before the pops).
+
+### The race's music
+
+Retail turns the jukebox to the racing list (category 4) in
+LoadSoundRegionsInGame (0x001ae798) and starts it from
+RACE_IN_PROGRESS's first TICK at RACING with DelayedStart(6.0)
+(0x0014af60), once the ReplayManager's Timer at +92 is marked. None of
+that ran: no hook set the selection, the replay stand-in had no Timer,
+and the stop and delayed-start seams were NULL. main.c now has
+`hookLoadSoundRegionsInGame` (the music's part, then the callback at
+once), the replay stand-in's beginning of time, and the seams.
+
+### On Azahar
+
+`run_azahar_quickrace.ps1`: the log has `jukebox stop` and `flow
+unlaunch 3` at the unload and the loading screen has no box;
+`jukebox selection: racing music` as the track loads; `jukebox delayed
+start: 6.0 s` at world frame 183, the first at stage 4 (RACING); and
+the EA TRAX box for the race's first tune at frame 545, six seconds on.
+
+### The countdown
+
+The cinema bars are retail's: `player_determine_hud_features` gives a
+one-player countdown only the bars and the music box. The view is the
+port's: with no countdown coordinator, `choose_camera` leaves the
+player with no mover through the countdown, and the camera sits at its
+default, 1100 m up. That is 11g-2c-1, next.

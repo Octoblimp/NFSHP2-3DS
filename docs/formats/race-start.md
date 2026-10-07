@@ -284,7 +284,9 @@ into a race. Before ChangeGameFlow(LOADING_TRACK_COMMON) it calls:
 UnlaunchFrontendMenus pops the stack by GameType. It also stops the
 jukebox, the movie, the song monitor and the help menu, and sets
 FrontendLaunchType for the way back. The SkipFE path never enters this
-state.
+state. The frontend's Quick Race does, and the port's
+`bgf_begin_unloading_frontend` runs UnlaunchFrontendMenus as retail's
+(`boot-flow.md`).
 
 ## The checks
 

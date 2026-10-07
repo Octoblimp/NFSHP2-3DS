@@ -525,18 +525,33 @@ void bgf_launch_frontend_menus(BGameFlow* gf)
     bgf_change_to_screen(gf, name, 0);
 }
 
-void bgf_unlaunch_frontend_menus(BGameFlow* gf, int raceInProgress)
+// ScreenStack::Print, before and after the pops, is a debug dump.
+void bgf_unlaunch_frontend_menus(BGameFlow* gf)
 {
+    int gameType = gf->hooks.gameType ? gf->hooks.gameType(gf->hooks.user)
+                                      : 0;
+    int demo = gf->hooks.raceDemo ? gf->hooks.raceDemo(gf->hooks.user) : 0;
+
+    // Back to where the game type began: the event tree for 8 and 9
+    // (signed, as `slti` compares), the main menu for 2 to 7, and nowhere
+    // for the rest.
+    if (gameType == 8 || gameType == 9)
+        bgf_pop_until(gf, "View Event Tree");
+    else if (gameType >= 2 && gameType < 8)
+        bgf_pop_until(gf, "New Main Menu");
     bgf_pop_screens(gf, 0);
     bgf_change_to_screen(gf, NULL, 0);
-    // SetMainScreen(NULL) at 0x0016ac3c. The list's pMainScreenName is set
-    // to NULL by the constructor and by this, and by nothing else -- so the
-    // "arriving at the main screen resets the stack" tail of ChangeToScreen
-    // is dead on this build and is not ported.
+    // SetMainScreen(NULL). The list's pMainScreenName is set to NULL by the
+    // constructor and by this, and by nothing else -- so the "arriving at
+    // the main screen resets the stack" tail of ChangeToScreen is dead on
+    // this build and is not ported.
     HOOK_VOID(gf, jukebox, 0);
-    gf->frontendLaunchType = raceInProgress ? 2 : 3;
+    gf->frontendLaunchType = demo ? 2 : 3;
     trace(gf, "unlaunch %d", gf->frontendLaunchType);
     bgf_stop_movie(gf);                // 0x0016fb74, after the launch type
+    HOOK_VOID0(gf, songMonitorReset);
+    // Then tHelpMenu::Reset (0x001e3db8) when the list has a help menu
+    // (+452). The help menu is not ported, so there is none.
 }
 
 void bgf_consider_start_demo_mode(BGameFlow* gf, const uint32_t* timer)
@@ -725,8 +740,7 @@ void bgf_end_loading_frontend(BGameFlow* gf)
 // whose Begin runs on the same pass of ServiceGameFlow.
 void bgf_begin_unloading_frontend(BGameFlow* gf)
 {
-    bgf_change_to_screen(gf, NULL, 0);
-    bgf_reset_stack(gf);
+    bgf_unlaunch_frontend_menus(gf);
     HOOK_VOID0(gf, closeSelectCar);
     HOOK_VOID0(gf, unloadFrontEnd);
     bgf_change_state(gf, BGF_LOADING_TRACK_COMMON, BGF_NONE);

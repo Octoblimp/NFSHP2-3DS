@@ -374,7 +374,9 @@ bytes at the frontend database's +332, copied with `ldl/ldr` into
      ReplayManager's +92) is 0 or unset (`0x7fffffff`), and the stage is
      `RACING`: `MarkTheBeginningOfTime`, and the jukebox's
      `DelayedStart(6.0)`. A `bCountFreeMemory(16)` between the two is
-     unused.
+     unused. The port's ReplayManager is a zeroed stand-in; main.c keeps
+     the Timer at +92 in it, so this starts the race's music six seconds
+     after GO (`jukebox.md`, "The race's music").
   3. If every player has finished, the most recently finished player is
      found. Once that player's `TimeFinishedRacing +
      FinishAnimationLength` is below `WorldTimeFrames` (signed),

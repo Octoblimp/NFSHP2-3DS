@@ -198,6 +198,7 @@ class Flow(object):
         self.autoload = RetailAutoload(self)
         self.movie = RetailMovie(self)
         self.mainmenu = RetailMainMenu(self)
+        self.unlaunch = RetailUnlaunch(self)
 
     # CurrLanguage is the LanguageManager's +0, in the image, where retail's
     # code reads and writes it.
@@ -496,10 +497,11 @@ class Flow(object):
         self.service()
 
     def begin_unloading_frontend(self):
-        # 0x00168830: the unloads, then ChangeGameFlow(LOADING_TRACK_COMMON,
-        # NONE) at 0x00168920.
-        self.change_to_screen(None, 0)
-        self.reset_stack()
+        # 0x00168830: UnlaunchFrontendMenus, retail's (RetailUnlaunch), the
+        # unloads, then ChangeGameFlow(LOADING_TRACK_COMMON, NONE) at
+        # 0x00168920.
+        self.unlaunch.run(self.sc.get("gameType", 0),
+                          self.sc.get("raceDemo", 0))
         self.change_state(LOADING_TRACK_COMMON, NONE)
 
     # -- LaunchFrontendMenus ----------------------------------------------
@@ -1895,6 +1897,104 @@ class RetailMainMenu(object):
             f.change_to_screen(*p)
 
 
+# ------------------------------------------ retail's UnlaunchFrontendMenus
+
+UNLAUNCH = 0x0016fa80                   # UnlaunchFrontendMenus
+GAME_TYPE = FRED + 0x1072c              # Fred.GameType (0x0030c77c)
+RACE_PARAMS = 0x0031a898                # TheRaceParameters
+LAUNCH_TYPE = RETAIL_GP - 21132         # FrontendLaunchType
+
+
+def _nested(e, fn):
+    """fn, which may run retail code of its own, with every register kept
+    for the run it was called from."""
+    kept = (list(e.reg), list(e.fpr), e.hi, e.lo, e.hi1, e.lo1, e.sa,
+            e.fcc, e.limit, e.icount)
+    try:
+        fn()
+    finally:
+        e.reg[:] = kept[0]
+        e.fpr[:] = kept[1]
+        (e.hi, e.lo, e.hi1, e.lo1, e.sa, e.fcc, e.limit,
+         e.icount) = kept[2:]
+
+
+class RetailUnlaunch(object):
+    """UnlaunchFrontendMenus (0x0016fa80), retail's, on the emulated image.
+
+    It runs as it is, and so do PopUntil and PopScreens, on RetailAutoload's
+    list with the Flow's stack copied into its first 388 bytes, over
+    Fred.GameType and TheRaceParameters' AIDemoMode (+24) and ReplayDemoMode
+    (+28) from the scenario: raceDemo 1 is the first, 2 the second.
+    Stubbed: ScreenStack::Print, a debug dump; Pop, the Flow's, which says
+    so, with the copy kept in step; ChangeToScreen, the Flow's;
+    SetMainScreen, not ported; jukebox::Stop, "jukebox 0" as the port's hook
+    says it; StopMovie, RetailMovie's, after "unlaunch" and the launch type
+    the store before it left; and tNewSongMonitor::Reset, "song monitor
+    reset". The tHelpMenu at +452 is NULL: the port has none.
+    """
+
+    def __init__(self, flow):
+        self.flow = flow
+        self.e = retail_emu()
+
+    def run(self, game_type, demo):
+        e, f = self.e, self.flow
+        lst = e.al_list
+
+        def arg(i):
+            return e.reg[4 + i] & 0xffffffff
+
+        def pop(_e):                       # ScreenStack::Pop
+            if e.u32(arg(0) + 384) == 0:
+                return 0
+            f.pop()
+            e.put32(arg(0) + 384, f.index)
+            return arg(0) + NAME_LEN * f.index
+
+        def change(_e):                    # ChangeToScreen
+            name = _cstr(e, arg(1)) if arg(1) else None
+            push = arg(2)
+            _nested(e, lambda: f.change_to_screen(name, push))
+
+        def stop_movie(_e):                # StopMovie, after the store
+            f.frontend_launch_type = s32(e.u32(LAUNCH_TYPE))
+            f.say("unlaunch %d" % f.frontend_launch_type)
+            _nested(e, f.movie.stop)
+
+        for i in range(STACK_DEPTH):
+            name = f.names[i].encode()[:NAME_LEN - 1]
+            e.write(lst + NAME_LEN * i, name + bytes(NAME_LEN - len(name)))
+        e.put32(lst + 384, f.index)
+        e.put32(lst + 452, 0)
+        e.put32(SCREEN_LIST, lst)
+        e.put32(GAME_TYPE, game_type & 0xffffffff)
+        e.put32(RACE_PARAMS + 24, 1 if demo == 1 else 0)
+        e.put32(RACE_PARAMS + 28, 1 if demo == 2 else 0)
+        e.put32(LAUNCH_TYPE, 0xdeadbeef)
+
+        stubs = {
+            0x0016b470: lambda _e: None,                  # ScreenStack::Print
+            0x0016b438: pop,
+            0x0016c4c0: change,
+            0x0016c3a8: lambda _e: None,                  # SetMainScreen
+            0x001aec90: lambda _e: f.say("jukebox 0"),    # jukebox::Stop
+            STOP_MOVIE: stop_movie,
+            0x0016bde8: lambda _e: f.say("song monitor reset"),
+        }
+        saved = dict(e.stubs)
+        for addr, fn in stubs.items():
+            e.stub(addr, fn)
+        try:
+            e.call(UNLAUNCH, limit=100000)
+        finally:
+            e.stubs.clear()
+            e.stubs.update(saved)
+        if e.u32(lst + 384) != f.index:
+            f.say("unlaunch stack %d, the flow's %d"
+                  % (e.u32(lst + 384), f.index))
+
+
 SIXTIETH = 1.0 / 60.0
 
 # BootAutoload takes 365 frames at 1/60 and 8 at a second a frame on a blank
@@ -1959,6 +2059,18 @@ SCENARIOS = [
          haveIntroMovie=0, frames=BOOT60 + 270, dt=SIXTIETH,
          input=[(BOOT60 + 250, "select"), (BOOT60 + 254, "item1"),
                 (BOOT60 + 260, "race")]),
+] + [
+    dict(name="leavegt%s%s" % (str(gt).replace("-", "m"), "d%d" % d if d else ""),
+         videoMode=1, currLanguage=0, skipMovies=1,
+         frontendLaunchType=1, demoModeStatus=0,
+         haveIntroMovie=0, frames=BOOT60 + 270, dt=SIXTIETH,
+         gameType=gt, raceDemo=d,
+         input=[(BOOT60 + 250, "select"), (BOOT60 + 254, "item1"),
+                (BOOT60 + 256, "pushvet"), (BOOT60 + 257, "pushqr"),
+                (BOOT60 + 260, "race")])
+    for gt, d in ((-1, 0), (1, 0), (2, 0), (5, 0), (7, 0), (8, 0), (9, 0),
+                  (10, 0), (2, 1), (8, 2), (0, 1))
+] + [
     dict(name="mumbo", videoMode=1, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 12, "mumbo")]),
@@ -2044,6 +2156,10 @@ SCENARIOS = [
                     (BOOT60 + 273, "hi3"), (BOOT60 + 274, "hi9"),
                     (BOOT60 + 275, "item3"), (BOOT60 + 278, "back"),
                     (BOOT60 + 280, "hi1"), (BOOT60 + 282, "hi2")]),
+    # The race asked for from the main menu with its movie playing.
+    card_row("leavemovie", BOOT60 + 320, dt=SIXTIETH, skipMovies=0,
+             gameType=2,
+             input=[(BOOT60 + 270, "select"), (BOOT60 + 300, "race")]),
 ]
 
 
@@ -2117,6 +2233,10 @@ def run_scenario(sc):
             elif what == "mumbo":
                 f.push("New Main Menu")
                 f.change_to_screen("Legal MumboJumbo", 0)
+            elif what == "pushvet":
+                f.push("View Event Tree")
+            elif what == "pushqr":
+                f.push("Quick Race")
         f.frame(sc["dt"])
         f.service_loads()
         f.service_replay()
@@ -2305,12 +2425,108 @@ MUTATIONS += [
      + "}",
      "    bgf_change_state(gf, BGF_LOADING_TRACK_SPECIFIC, BGF_NONE);" + NL
      + "}"),
-    ("unload-keeps-screen", GF,
-     "    bgf_change_to_screen(gf, NULL, 0);" + NL
-     + "    bgf_reset_stack(gf);" + NL
+    # UnlaunchFrontendMenus, 0x0016fa80.
+    ("unload-no-unlaunch", GF,
+     "    bgf_unlaunch_frontend_menus(gf);" + NL
      + "    HOOK_VOID0(gf, closeSelectCar);",
+     "    HOOK_VOID0(gf, closeSelectCar);"),
+    ("unlaunch-keeps-screen", GF,
+     "    bgf_pop_screens(gf, 0);" + NL
+     + "    bgf_change_to_screen(gf, NULL, 0);",
+     "    bgf_pop_screens(gf, 0);"),
+    ("unlaunch-pops-one", GF,
+     "    bgf_pop_screens(gf, 0);" + NL
+     + "    bgf_change_to_screen(gf, NULL, 0);",
+     "    bgf_pop_screens(gf, 1);" + NL
+     + "    bgf_change_to_screen(gf, NULL, 0);"),
+    ("unlaunch-change-first", GF,
+     "    if (gameType == 8 || gameType == 9)" + NL
+     + "        bgf_pop_until(gf, \"View Event Tree\");" + NL
+     + "    else if (gameType >= 2 && gameType < 8)" + NL
+     + "        bgf_pop_until(gf, \"New Main Menu\");" + NL
+     + "    bgf_pop_screens(gf, 0);" + NL
+     + "    bgf_change_to_screen(gf, NULL, 0);",
+     "    bgf_change_to_screen(gf, NULL, 0);" + NL
+     + "    if (gameType == 8 || gameType == 9)" + NL
+     + "        bgf_pop_until(gf, \"View Event Tree\");" + NL
+     + "    else if (gameType >= 2 && gameType < 8)" + NL
+     + "        bgf_pop_until(gf, \"New Main Menu\");" + NL
+     + "    bgf_pop_screens(gf, 0);"),
+    ("unlaunch-gt8-only", GF,
+     "    if (gameType == 8 || gameType == 9)",
+     "    if (gameType == 8)"),
+    ("unlaunch-gt9-only", GF,
+     "    if (gameType == 8 || gameType == 9)",
+     "    if (gameType == 9)"),
+    ("unlaunch-gt-from1", GF,
+     "    else if (gameType >= 2 && gameType < 8)",
+     "    else if (gameType >= 1 && gameType < 8)"),
+    ("unlaunch-gt-from3", GF,
+     "    else if (gameType >= 2 && gameType < 8)",
+     "    else if (gameType >= 3 && gameType < 8)"),
+    ("unlaunch-gt-to7", GF,
+     "    else if (gameType >= 2 && gameType < 8)",
+     "    else if (gameType >= 2 && gameType < 7)"),
+    ("unlaunch-gt-unbounded", GF,
+     "    else if (gameType >= 2 && gameType < 8)",
+     "    else if (gameType >= 2)"),
+    ("unlaunch-gt-unsigned", GF,
+     "    else if (gameType >= 2 && gameType < 8)",
+     "    else if ((unsigned)gameType - 2u < 6u || gameType < 0)"),
+    ("unlaunch-tree-mainmenu", GF,
+     "        bgf_pop_until(gf, \"View Event Tree\");",
+     "        bgf_pop_until(gf, \"New Main Menu\");"),
+    ("unlaunch-mainmenu-tree", GF,
+     "        bgf_pop_until(gf, \"New Main Menu\");" + NL
+     + "    bgf_pop_screens(gf, 0);",
+     "        bgf_pop_until(gf, \"View Event Tree\");" + NL
+     + "    bgf_pop_screens(gf, 0);"),
+    ("unlaunch-music-plays", GF,
+     "    HOOK_VOID(gf, jukebox, 0);" + NL
+     + "    gf->frontendLaunchType = demo ? 2 : 3;",
+     "    gf->frontendLaunchType = demo ? 2 : 3;"),
+    ("unlaunch-music-late", GF,
+     "    HOOK_VOID(gf, jukebox, 0);" + NL
+     + "    gf->frontendLaunchType = demo ? 2 : 3;" + NL
+     + "    trace(gf, \"unlaunch %d\", gf->frontendLaunchType);",
+     "    gf->frontendLaunchType = demo ? 2 : 3;" + NL
+     + "    trace(gf, \"unlaunch %d\", gf->frontendLaunchType);" + NL
+     + "    HOOK_VOID(gf, jukebox, 0);"),
+    ("unlaunch-demo-swapped", GF,
+     "    gf->frontendLaunchType = demo ? 2 : 3;",
+     "    gf->frontendLaunchType = demo ? 3 : 2;"),
+    ("unlaunch-demo-ignored", GF,
+     "    gf->frontendLaunchType = demo ? 2 : 3;",
+     "    gf->frontendLaunchType = 3;"),
+    ("unlaunch-launch-type-1", GF,
+     "    gf->frontendLaunchType = demo ? 2 : 3;",
+     "    gf->frontendLaunchType = demo ? 2 : 1;"),
+    ("unlaunch-movie-plays", GF,
+     "    bgf_stop_movie(gf);                // 0x0016fb74, after the launch type" + NL,
+     ""),
+    ("unlaunch-movie-first", GF,
+     "    HOOK_VOID(gf, jukebox, 0);" + NL
+     + "    gf->frontendLaunchType = demo ? 2 : 3;" + NL
+     + "    trace(gf, \"unlaunch %d\", gf->frontendLaunchType);" + NL
+     + "    bgf_stop_movie(gf);                // 0x0016fb74, after the launch type",
+     "    bgf_stop_movie(gf);" + NL
+     + "    HOOK_VOID(gf, jukebox, 0);" + NL
+     + "    gf->frontendLaunchType = demo ? 2 : 3;" + NL
+     + "    trace(gf, \"unlaunch %d\", gf->frontendLaunchType);"),
+    ("unlaunch-no-songmon-reset", GF,
+     "    HOOK_VOID0(gf, songMonitorReset);" + NL,
+     ""),
+    ("unlaunch-songmon-first", GF,
+     "    HOOK_VOID(gf, jukebox, 0);" + NL
+     + "    gf->frontendLaunchType",
+     "    HOOK_VOID0(gf, songMonitorReset);" + NL
+     + "    HOOK_VOID(gf, jukebox, 0);" + NL
+     + "    gf->frontendLaunchType"),
+    ("unlaunch-resets-stack", GF,
+     "    bgf_pop_screens(gf, 0);" + NL
+     + "    bgf_change_to_screen(gf, NULL, 0);",
      "    bgf_reset_stack(gf);" + NL
-     + "    HOOK_VOID0(gf, closeSelectCar);"),
+     + "    bgf_change_to_screen(gf, NULL, 0);"),
     # End, 0x001687a8.
     ("end-copyright-left", GF,
      "    objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);",
