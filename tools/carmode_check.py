@@ -982,6 +982,7 @@ def generate(cti):
     w("#define CM_IMG_NULLDRIVER %d" % DRIVER_SIZE)
     w("#define CM_IMG_REALCONTROLLER %d" % 84)
     w("#define CM_IMG_BELTMOVER %d" % 72)
+    w("#define CM_IMG_AIDRIVER %d" % 720)
     w("#define CM_STRAY %d" % STRAY)
     w("#define CM_NORMAL_X 0x%08xu" % pcc.NORMAL[0])
     w("#define CM_NORMAL_Y 0x%08xu" % pcc.NORMAL[1])
@@ -2498,8 +2499,9 @@ MUTATIONS = [
     ("size-realcontroller", CMH,
      "#define REALCONTROLLER_SIZE  ((int)sizeof(RealController))",
      "#define REALCONTROLLER_SIZE  ((int)sizeof(RealController) + 4)"),
-    ("size-aidriver", CMH, "#define AIDRIVER_SIZE        720",
-     "#define AIDRIVER_SIZE        724"),
+    ("size-aidriver", CMH,
+     "#define AIDRIVER_SIZE        ((int)sizeof(AIDriver))",
+     "#define AIDRIVER_SIZE        ((int)sizeof(AIDriver) + 4)"),
     ("size-trafficdriver", CMH, "#define TRAFFICDRIVER_SIZE   720",
      "#define TRAFFICDRIVER_SIZE   724"),
     ("size-copdriver", CMH, "#define COPDRIVER_SIZE        76",

@@ -1,7 +1,7 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 38
-(2026-10-07), after 11f-1, PsychoDriver.
+Where the next session picks up. Updated in Session 39
+(2026-10-07), after 11f-2, AIDriver.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
@@ -10,10 +10,11 @@ AIPlan and the AIAction base, 11d-1 to 11d-3b, all eleven actions,
 route methods and actions, 11e-2, its signposts and sticky
 decisions, 11e-3, its belt, glue and boost, 11e-4, its horn and
 ExecuteCurrentAction, 11e-5, its Think with Timer::CountDown and
-Race::CanAICarsStartDriving, 11e-6, the BeltMover, and 11f-1,
-PsychoDriver, the AI's CarDriver, are done and checked against retail.
-Next is 11f-2, AIDriver, which builds a PsychoDriver as its car's
-driver. The car selector is finished and checked against retail: SC-1
+Race::CanAICarsStartDriving, 11e-6, the BeltMover, 11f-1,
+PsychoDriver, the AI's CarDriver, and 11f-2, AIDriver, the racer's
+controller, are done and checked against retail. Next is 11g, a SkipFE
+race with AI cars in it: every class an AI racer needs is ported, so
+11g runs one and fixes what it meets. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -519,16 +520,41 @@ car's were.
   horn's seams stay NULL until BaseCarSound. `tools/psychodriver_check.py`:
   55673 ops, 49373 lines, 0 differ; 247 mutations, 238 caught, 9
   equivalent. `docs/formats/psycho-driver.md` has it all.
-- **11f-2, next: AIDriver**, 0x0012ffc8 to 0x001308a0, about 2.3 KB, of
-  which ChooseNewAction is 1400 bytes. Its constructor is
-  `gAIDriverCtorFn` in `carmodes.h` and bMallocs the 624-byte
-  PsychoDriver. Session 38 read it all and wrote no code yet: HANDOFF.md's
-  "Step 11f-2 (begun)" has the whole reading, function by function, and
-  `out/aidriver_retail.txt` (gitignored) the disassembly. Start there.
-  SetAIDriverModesFromPlayers (0x001cd240) is already ported, in
-  `racecoord.c`, so it is not part of this slice.
-- 11g: a SkipFE race with AI cars in it. "The road to the full game"
-  has the way in.
+- 11f-2 (done): AIDriver (AIDriver.obj, 0x0012ffc8 to 0x001308a0), in
+  `aidriver.{c,h}`, all but DoSnapshot. The 736-byte record is
+  AICarController's 720, the car it has decided not to avoid with the
+  time it chose, the progress timer and a five-slot Average of the
+  progress. The constructor builds the PsychoDriver; Think records
+  TrackLength x |lap rate| every 1.5 s and jumps to AICarController's;
+  ShouldWeAvoidThisCar spares a car the skill's dice spare for a
+  second; ChooseNewAction news a forced action, or else runs the
+  cascade (GetUnstuck after six seconds, AvoidRoadBlock, IJustGotHit,
+  AvoidCars, AccidentRecovery, Pass, JustDrive), each but JustDrive
+  skipped for the current action's type or a higher score. Retail's
+  AvoidCars quirk is kept: `okay` goes in as the float seconds. The
+  scores and lifetimes are retail `.sdata` nothing writes. main.c
+  installs the table and sets `gAIDriverCtorFn`; AIDRIVER_SIZE is
+  `sizeof(AIDriver)` (carmode_check maps it to the demo's 720).
+  `tools/aidriver_check.py`: 56131 ops, 25276 lines, 0 differ; 191
+  mutations, 184 caught, 7 equivalent. `docs/formats/ai-driver.md` has
+  it all.
+- **11g, next: a SkipFE race with AI cars in it.** Every class an AI
+  racer needs is ported: AIDriver with its PsychoDriver, AICarController,
+  the actions, the MellowMover (nDefaultMovementMode) and the BeltMover.
+  - The SkipFE race (R held at boot) takes its AI count from
+    SkipFENumAICars (0), its traffic from SkipFETrafficDensity and its
+    cops from SkipFEMaxCops. Give it AI racers (a config item or a
+    build-time default, without leaving a test-only change in the
+    build the user plays), run it in Azahar
+    (`tools/run_azahar_race.ps1`) and fix what aborts or misbehaves.
+  - Expect the AI racers' car types to need loading
+    (SetupCarsForRace's choose_ai_ride picks them) and the seams that
+    are still NULL (the horn's BaseCarSound, ReplaySnapshot) to stay
+    no-ops.
+  - A race from the frontend asks for 7 AI racers. It used to stop at
+    the AIDriver seam (an abort); it now builds them, and the rest is
+    untried.
+  - "The road to the full game" has the way in.
 
 ## Waiting on the device: 13b-4f, the device GPU's cost per model
 
@@ -4103,14 +4129,14 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-07, after 11f-1, PsychoDriver)
+### Where the port stands (2026-10-07, after 11f-2, AIDriver)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11f-2, AIDriver.
+- **Next:** step 11, the racer AI: 11g, a SkipFE race with AI cars.
   See "Now" at the top. These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
@@ -4130,7 +4156,8 @@ goes in.
   - 11e-4, AICarController's horn and ExecuteCurrentAction;
   - 11e-5, AICarController's Think;
   - 11e-6, the BeltMover;
-  - 11f-1, PsychoDriver.
+  - 11f-1, PsychoDriver;
+  - 11f-2, AIDriver.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -4142,7 +4169,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a to 11f-1 done) | 2-3 |
+  | 11, the racer and traffic AI (11a to 11f-2 done) | 2 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |
@@ -4150,12 +4177,12 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped; New 3DS only since 2026-10-05) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **23-36** |
+  | **Total** | **23-35** |
 
 - **How far along:** about 35-38 of the road's 58-75 slices are done,
   roughly half. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
-  Read the 23-36 as a floor. Step 11 was put at 4-6 before its slices
+  Read the 23-35 as a floor. Step 11 was put at 4-6 before its slices
   were laid out. They are fourteen, with traffic beside them: 11a,
   11b-1 to 11b-3, 11b-4a and 11b-4b, 11c, 11d-1, 11d-2, 11d-3a and
   11d-3b, and 11e to 11g. 11b was one slice until DrivingChoice's 13 KB

@@ -5,7 +5,8 @@
     CarController::SetToPhysicsMode    0x001c0100
 
 AICarController is the base of AIDriver's and TrafficDriver's controllers
-(steps 11f and on). It keeps four things:
+(steps 11f and on; AIDriver is in [ai-driver](ai-driver.md)). It keeps
+four things:
 
 - the car's DrivingInformation: its nearby cars, where on the route it is,
   and the choice it drives by;
@@ -250,7 +251,7 @@ The small methods:
 - **DebugDisplay** (0x00191138) does nothing.
 - **AboutToFly** (0x00191130) answers 0.
 - **ChooseNewAction** (0x00192780) is `jr ra`. AIDriver and TrafficDriver
-  choose.
+  choose; AIDriver's is in [ai-driver](ai-driver.md).
 
 ## The action
 

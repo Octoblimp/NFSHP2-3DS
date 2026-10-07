@@ -365,9 +365,9 @@ The first mutation pass left nine alive, all gaps in the script:
                 0x001ca8b8, Draft 0x001ca918
 
 The first five of the eleven actions, in `3DS Files/source/aiactions.{c,h}`.
-AIDriver's ChooseNewAction (11f) scores the actions with their static
-CalculateScores, news the best one from the pool and makes it the
-controller's CurrentAction. The DoSnapshots wait on ReplaySnapshot.
+AIDriver's ChooseNewAction (11f-2, [ai-driver](ai-driver.md)) scores the
+actions with their static CalculateScores, news the first worth having
+from the pool and makes it the controller's CurrentAction. The DoSnapshots wait on ReplaySnapshot.
 
 `AIDriverAvoidCarsImpactTimeThreshold` (gp-18168, 2.0f, AIDriver.obj's
 `.sdata`) is defined here, since JustDrive is the first to read it. It is

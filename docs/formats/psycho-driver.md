@@ -303,8 +303,9 @@ Drive (0x00139c48) runs these steps:
 - `psychodriver_static_init` is sinit.c's entry [16].
   `psychodriver_install_vtables` is called from main.c.
 
-No car gets a PsychoDriver in the game yet: AIDriver (11f-2) builds the
-first.
+AIDriver (11f-2, [ai-driver](ai-driver.md)) builds one for each AI
+racer. No car gets one in the game yet: the SkipFE race has no AI racers
+until 11g.
 
 ## The checker
 

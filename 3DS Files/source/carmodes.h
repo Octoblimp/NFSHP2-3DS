@@ -30,6 +30,7 @@
 #include "car.h"
 #include "carcontroller.h"
 #include "carstate.h"
+#include "aidriver.h"          // AIDRIVER_SIZE
 #include "beltmover.h"         // BELTMOVER_SIZE
 #include "physicscar.h"        // CarMover
 #include "realcontroller.h"    // REALCONTROLLER_SIZE
@@ -104,13 +105,15 @@ extern CarControllerCtorFn gCopDriverCtorFn;       // 0x00197d48
 // The image's bMalloc sizes for them, which are each class's mdebug size.
 // Each becomes sizeof() when its class is ported: on a 64-bit host the
 // records are wider. RealController's already has, and is 84 bytes on the
-// console and 160 on a 64-bit host, and BeltMover's 72 on the console.
+// console and 160 on a 64-bit host, BeltMover's 72 on the console and
+// AIDriver's 736 (retail's SetControlMode asks 736 for AIDriver and
+// TrafficDriver; the demo's, which carmode_check runs, 720).
 #define TRAFFICCAR_SIZE       36
 #define DELIVERYMOVER_SIZE   192
 #define COPMOVER_SIZE        112
 #define BELTMOVER_SIZE       ((int)sizeof(BeltMover))
 #define REALCONTROLLER_SIZE  ((int)sizeof(RealController))
-#define AIDRIVER_SIZE        720
+#define AIDRIVER_SIZE        ((int)sizeof(AIDriver))
 #define TRAFFICDRIVER_SIZE   720
 #define COPDRIVER_SIZE        76
 
