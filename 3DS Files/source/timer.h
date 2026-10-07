@@ -39,6 +39,13 @@ float timer_round_seconds(const Timer *t, float f);
 // car's crossings go through it with f = 0.01.
 void timer_round(Timer *t, float f);
 
+// Retail 0x001a3cf0, CountDown(float). A valid timer loses
+// `cvt.w.s(dt * 4000.0f)` ticks -- truncated, no 0.5, unlike SetTime --
+// and stops at 0 where the signed difference went below it; an invalid one
+// (0 or 0x7fffffff) is left alone. Answers whether the timer is still
+// valid afterwards, so a count that reaches 0 answers 0 at once.
+int timer_count_down(Timer *t, float dt);
+
 // A stamp the race has not set: 0 or 0x7fffffff. RacingCar's accessors
 // and the HUD test each crossing with both.
 #define TIMER_UNSET 0x7fffffffu

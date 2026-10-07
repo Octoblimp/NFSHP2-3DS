@@ -414,6 +414,39 @@ extern int32_t SuperEasyAI;
 // cleared.
 void aicarcontroller_execute_current_action(AICarController *c);
 
+// -------------------------------------------------------- the think
+
+// The debug reset's switch (gp-20320, which only the tweaker sets) and
+// angle (gp-13390's halfword, -90 degrees: 0xc000).
+extern int32_t  ResetThisCarsPosition;
+extern uint16_t ThisCarsResetAngle;
+
+// 0x00191148, the table's Think (32). Until Race::CanAICarsStartDriving
+// the car stands: still before the pre-race, and from it on the brake
+// stand, a coin flip's phase on the brakes, revving (SetDesiredSpeed 100),
+// 0.35 to 0.6 s, or off them 1.5 to 2.5 s, in turn, each drawn from the
+// default seed; steering straight ahead either way. Then, with an action
+// but a PullOver, every 1.5 s of ProgressTimer the track's length times
+// the lap's rate goes into pProgress, and a full average under 0.2 resets
+// the car later unless it blinks or a player is within 50 m.
+// RealPhysicsTimer's end goes back to nDefaultMovementMode, or waits
+// another second with a wheel off the ground; OffBeltTimer, while it
+// runs, takes the car off the belt; the glue's and the taken sign's
+// timers count down. The camera's car is put at the debug reset's place
+// when the tweaker asks. Then the list is cleared and the turn decided:
+// an AI racer's one frame in 8 by its place among them, a traffic car's
+// one in 6, anyone else's as SecondsBeforeNextActionEvaluation runs down
+// (0.1 s on each think). With no action every frame is a think. Between
+// thinks a choice beside a player's car in my list builds its target
+// again and gives it to the driver. A think decides the signs, builds the
+// list, finds the route point and, with the location clear, stands
+// straight; else updates the action -- a JustDrive when there is none, a
+// new one when it is done, an interrupting one -- generates its points
+// and executes it (BoringAIForCameraTuningOn keeps a JustDrive), and puts
+// the car on the belt (BeltMover::SetBelt, carmodes.h's seam) while it
+// needs and can have it, off it otherwise.
+void aicarcontroller_think(AICarController *c, float dt);
+
 // -------------------------------------------------------- the physics
 
 // 0x00193650. Off the belt (mode 6), OffBeltTimer 2 s. The mode is

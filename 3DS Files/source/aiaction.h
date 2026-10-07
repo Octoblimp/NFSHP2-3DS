@@ -166,6 +166,11 @@ typedef char aiaction_layout_check[
 // "AIActionSlotPool", gp-18288. Every AIAction is new'd from it.
 extern BSlotPool *AIActionSlotPool;
 
+// AIActionJustDriveScore, gp-18272: the score of the JustDrive
+// AICarController::Think makes when it has no action (and AIDriver's and
+// TrafficDriver's ChooseNewAction read it). Nothing writes it.
+extern int32_t AIActionJustDriveScore;
+
 // 0x001c6028, from EndGameFlowLoadingTrackSpecific: makes the pool.
 void ai_init_ai_plans(void);
 

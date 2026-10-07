@@ -65,6 +65,7 @@ CarMoverCtorFn gTrafficCarCtorFn;
 CarMoverCtorFn gDeliveryMoverCtorFn;
 CarMoverCtorFn gCopMoverCtorFn;
 CarMoverCtorFn gBeltMoverCtorFn;
+BeltMoverSetBeltFn gBeltMoverSetBeltFn;
 
 CarControllerCtorFn gRealControllerCtorFn;
 CarControllerCtorFn gAIDriverCtorFn;

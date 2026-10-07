@@ -25,6 +25,14 @@ eRaceStage race_get_race_stage(const Race *r)
     return *(const eRaceStage *)(const void *)r;
 }
 
+int race_can_ai_cars_start_driving(const Race *r)
+{
+    eRaceStage s = race_get_race_stage(r);
+
+    return s == RACE_STAGE_RACING
+        || (TheRaceParameters.BeACop != 0 && s >= RACE_STAGE_PRERACE);
+}
+
 struct RacingCar *race_get_racing_car(Race *r, struct Car *c)
 {
     (void)r;

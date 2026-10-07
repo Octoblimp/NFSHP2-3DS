@@ -34,6 +34,19 @@ void timer_round(Timer *t, float f)
                                          + 0.5f);
 }
 
+int timer_count_down(Timer *t, float dt)
+{
+    if (timer_is_valid(t)) {
+        // `subu`, so the difference wraps; `bgez` tests it signed.
+        uint32_t v = t->PackedTime - (uint32_t)ee_trunc_w(dt * 4000.0f);
+
+        t->PackedTime = v;
+        if ((int32_t)v < 0)
+            t->PackedTime = 0;
+    }
+    return timer_is_valid(t);
+}
+
 void timer_get_hours_mins_seconds(const Timer *t, int32_t *h, int32_t *m,
                                   int32_t *s, int32_t *ms)
 {

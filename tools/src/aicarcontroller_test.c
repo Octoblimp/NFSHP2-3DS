@@ -22,14 +22,19 @@
 // For 11e-4 it stands in for the drivers' SetDesiredSpeed, SetTarget,
 // StartHonkHorn, StopHonkHorn and IsHonking (the last answering the
 // script), World::Random(int) from the same queue as the float's, and
-// carcollisionbody.c's BoringAIForCameraTuningOn.
+// carcollisionbody.c's BoringAIForCameraTuningOn. For 11e-5 it stands in
+// for BeltMover::SetBelt (carmodes.h's seam), Car::DebugSetPosition,
+// DriveTargetRenderer::SetTargetToRender and the fake actions' three
+// tests, answering the script, and has realtime.c's WorldLoopCounter.
 //
 // A float prints as its bits, every NaN as "nan", and a pointer by what it
 // points at. The ops and every line's format are the checker's.
 #include "drivingchoice_world.inc"
 
 #include "average.h"
+#include "bmath.h"
 #include "bmem.h"
+#include "carmodes.h"
 #include "configitems.h"
 #include "difficultyinfo.h"
 #include "playercam.h"
@@ -94,6 +99,11 @@ const int *gPlayerCamSkipFE;
 // switch.
 static int32_t ish[NCARS];
 int32_t BoringAIForCameraTuningOn;
+
+// 11e-5's: realtime.c's loop counter, carmodes.c's seam (below) and what
+// each fake action's HasExpired, HasFailed and HasBeenAccomplished answer.
+int32_t WorldLoopCounter;
+static int32_t fa_test[NFACTS][3];
 
 // ------------------------------------------------------------ the stubs
 
@@ -210,9 +220,17 @@ static void fk_set_desired_speed(void *self, float speed, float time,
            fx(speed), fx(time), fx(tol), (int)allowed);
 }
 
+// A target that is no one's is Think's own, on its stack: shown whole.
 static void fk_set_target(void *self, const DriveTarget *t)
 {
-    printf("  stg %s %s\n", nm(&cars[driver_index(self)]), nm(t));
+    const char *n = nm(t);
+
+    if (n[0] != '?') {
+        printf("  stg %s %s\n", nm(&cars[driver_index(self)]), n);
+        return;
+    }
+    printf("  stg %s tmp\n", nm(&cars[driver_index(self)]));
+    dump_target(t);
 }
 
 static void fk_start_honk(void *self)
@@ -231,6 +249,53 @@ static int32_t fk_is_honking(void *self)
 
     printf("  ishonk %s\n", nm(&cars[k]));
     return ish[k];
+}
+
+// 11e-5's.
+static void fk_set_belt(CarMover *m)
+{
+    printf("  setbelt %s\n", nm(m));
+}
+
+BeltMoverSetBeltFn gBeltMoverSetBeltFn = fk_set_belt;
+
+// carreset.c's, which would bring the reset with it.
+void car_debug_set_position(Car *c, const bVector3 *pos, float speed,
+                            uint16_t angle)
+{
+    printf("  dsp %s %s %s %s %s %d\n", nm(c), fx(pos->x), fx(pos->y),
+           fx(pos->z), fx(speed), (int)angle);
+}
+
+// drivetargetrenderer.c's, whose renderer drivingchoice_world.inc has.
+void drivetargetrenderer_set_target_to_render(DriveTargetRenderer *r,
+                                              DriveTarget *t)
+{
+    printf("  render %s %s\n", nm(r), nm(t));
+}
+
+static int fk_action_test(void *self, DrivingInformation *i, int which,
+                          const char *tag)
+{
+    int k = fact_index(self);
+
+    printf("  %s %s %s\n", tag, nm(self), nm(i));
+    return fa_test[k][which];
+}
+
+static int fk_has_expired(void *self, DrivingInformation *i)
+{
+    return fk_action_test(self, i, 0, "ahe");
+}
+
+static int fk_has_failed(void *self, DrivingInformation *i)
+{
+    return fk_action_test(self, i, 1, "ahf");
+}
+
+static int fk_has_been_accomplished(void *self, DrivingInformation *i)
+{
+    return fk_action_test(self, i, 2, "ahba");
 }
 
 // ------------------------------------------------------------ the names
@@ -350,6 +415,21 @@ static void ac_reset(void)
     memset(ish, 0, sizeof ish);
     SuperEasyAI = 0;
     BoringAIForCameraTuningOn = 0;
+    // 11e-5's: the loop counter 0, the default seed as bmath.c starts it,
+    // the debug reset off at its angle, an empty car list and car table,
+    // and no fake action expired, failed or accomplished.
+    WorldLoopCounter = 0;
+    bDefaultSeed = 0x12345678u;
+    ResetThisCarsPosition = 0;
+    ThisCarsResetAngle = 0xc000;
+    world.CarList.next = &world.CarList;
+    world.CarList.prev = &world.CarList;
+    world.TotalNumCars = 0;
+    world.AICarPos = 0;
+    world.CopCarPos = 0;
+    world.TrafficCarPos = 0;
+    memset(world.CarTable, 0, sizeof world.CarTable);
+    memset(fa_test, 0, sizeof fa_test);
 }
 
 // ------------------------------------------------------------ the dumps
@@ -602,6 +682,94 @@ static int ac_op4(const char *c, int k, AICarController *a, char **t)
                (unsigned)a->LastRoutePointLookaheadSwitch.PackedTime,
                fx(car->State.BoostFactor));
         dump_ptd(atoi(t[2]));
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+// After a think: the controller, the seed, the debug reset's switch, the
+// car's movement mode, the world's two counts, the action and the fakes.
+static void dump_think(int k)
+{
+    const AIAction *a = ctrls[k].CurrentAction;
+
+    dump_ctrl(k);
+    printf("  T seed %08x rtp %d mode %d ids %d %d\n", (unsigned)bDefaultSeed,
+           (int)ResetThisCarsPosition, (int)cars[k].TheMovementMode,
+           (int)world.CollisionPredictionID,
+           (int)world.PotentialDriveTargetID);
+    if (a != NULL)
+        printf("  T act type %d st %d pt %d\n", (int)a->Type,
+               (int)a->Base.Status, (int)a->PointsToDriveWillExecuteAction);
+    dump_facts();
+}
+
+// 11e-5's ops; 0 for none of them.
+static int ac_op5(const char *c, int k, AICarController *a, char **t, int n)
+{
+    if (strcmp(c, "rs") == 0) {
+        race.RaceStage = k;
+    } else if (strcmp(c, "wlc") == 0) {
+        WorldLoopCounter = k;
+    } else if (strcmp(c, "wt") == 0) {
+        int i;
+
+        world.TotalNumCars = k;
+        world.AICarPos = atoi(t[2]);
+        world.CopCarPos = atoi(t[3]);
+        world.TrafficCarPos = atoi(t[4]);
+        memset(world.CarTable, 0, sizeof world.CarTable);
+        for (i = 0; i < WORLD_MAX_CARS && 5 + i < n; i++)
+            world.CarTable[i] = car_ptr(t[5 + i]);
+    } else if (strcmp(c, "cl") == 0) {
+        // The world's car list, in the script's order, each car in it
+        // rendering and not poofed.
+        CarNode *head = (CarNode *)(void *)&world.CarList, *prev = head;
+        int i;
+
+        for (i = 1; i < n; i++) {
+            Car *car = car_ptr(t[i]);
+
+            prev->next = &car->Link;
+            car->Link.prev = prev;
+            car->RenderingEnabled = 1;
+            car->bPoofed = 0;
+            prev = &car->Link;
+        }
+        prev->next = head;
+        head->prev = prev;
+    } else if (strcmp(c, "seed") == 0) {
+        bDefaultSeed = wh(t[1]);
+    } else if (strcmp(c, "rtp") == 0) {
+        ResetThisCarsPosition = k;
+        ThisCarsResetAngle = (uint16_t)atoi(t[2]);
+    } else if (strcmp(c, "dl") == 0) {
+        rcars[k].dCurrentLapNumberExact = fh(t[2]);
+    } else if (strcmp(c, "pg") == 0) {
+        Average *v = a->pProgress;
+
+        v->nCurrentSlot = (uint8_t)atoi(t[2]);
+        v->nSamples = (uint8_t)atoi(t[3]);
+        v->fTotal = fh(t[4]);
+        v->pData[v->nCurrentSlot] = fh(t[5]);
+    } else if (strcmp(c, "fs") == 0) {
+        facts[k].Base.CanExpire = atoi(t[2]);
+        fa_test[k][0] = atoi(t[3]);
+        fa_test[k][1] = atoi(t[4]);
+        fa_test[k][2] = atoi(t[5]);
+    } else if (strcmp(c, "think") == 0) {
+        aicarcontroller_think(a, fh(t[2]));
+        dump_think(k);
+    } else if (strcmp(c, "tcd") == 0) {
+        Timer tm;
+        int got;
+
+        tm.PackedTime = wh(t[1]);
+        got = timer_count_down(&tm, fh(t[2]));
+        printf("  tcd %d %08x\n", got, (unsigned)tm.PackedTime);
+    } else if (strcmp(c, "cas") == 0) {
+        printf("  cas %d\n", race_can_ai_cars_start_driving(pCurrentRace));
     } else {
         return 0;
     }
@@ -981,6 +1149,16 @@ static void ac_op(char **t, int n)
             a->CurrentRoutePointLookahead = atoi(t[3]);
         else if (strcmp(f, "tt") == 0)
             a->TakenSignpostTimer.PackedTime = wh(t[3]);
+        else if (strcmp(f, "bs") == 0)
+            a->BrakeStandTimer.PackedTime = wh(t[3]);
+        else if (strcmp(f, "bss") == 0)
+            a->BrakeStandTimerStart.PackedTime = wh(t[3]);
+        else if (strcmp(f, "bsg") == 0)
+            a->BrakeStanding = atoi(t[3]);
+        else if (strcmp(f, "pt") == 0)
+            a->ProgressTimer.PackedTime = wh(t[3]);
+        else if (strcmp(f, "secs") == 0)
+            a->SecondsBeforeNextActionEvaluation = fh(t[3]);
         else {
             fprintf(stderr, "bad field %s\n", f);
             exit(2);
@@ -1020,7 +1198,7 @@ static void ac_op(char **t, int n)
         printf("  boost %s lbt %08x cp %s\n", fx(cars[k].State.BoostFactor),
                (unsigned)a->LastBoostCalculationTime.PackedTime,
                nm(a->pCatchupPlayer));
-    } else if (!ac_op4(c, k, a, t)) {
+    } else if (!ac_op4(c, k, a, t) && !ac_op5(c, k, a, t, n)) {
         fprintf(stderr, "bad op %s\n", t[0]);
         exit(2);
     }
@@ -1056,6 +1234,10 @@ int main(int argc, char **argv)
     avt[VT_SLOT(AIACTION_VT_DTOR)].fn = (VtFn)fk_action_dtor;
     avt[VT_SLOT(AIACTION_VT_CALCULATE_POINTS_TO_DRIVE)].fn =
         (VtFn)fk_action_points;
+    avt[VT_SLOT(AIACTION_VT_HAS_EXPIRED)].fn = (VtFn)fk_has_expired;
+    avt[VT_SLOT(AIACTION_VT_HAS_FAILED)].fn = (VtFn)fk_has_failed;
+    avt[VT_SLOT(AIACTION_VT_HAS_BEEN_ACCOMPLISHED)].fn =
+        (VtFn)fk_has_been_accomplished;
     vt_install(AVT, avt, AIACTION_VT_ENTRIES);
     drv_vt[VT_SLOT(CARDRIVER_VT_SET_STEER_TO_POINT)].fn =
         (VtFn)fk_set_steer_to_point;

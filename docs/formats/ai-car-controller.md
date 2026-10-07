@@ -30,10 +30,12 @@ Step 11e ports it in slices:
 | 11e-2 | the signposts and sticky decisions |
 | 11e-3 | the belt, glue and boost decisions |
 | 11e-4 | the honking and ExecuteCurrentAction |
-| 11e-5 | Think |
+| 11e-5 | Think, with Timer::CountDown and Race::CanAICarsStartDriving |
 
-This file has 11e-1 to 11e-4. Two slots still wait: DoSnapshot waits on
-ReplaySnapshot, and Think is 11e-5's.
+This file has 11e-1 to 11e-5. One slot still waits: DoSnapshot, on
+ReplaySnapshot. Think calls BeltMover::SetBelt through carmodes.h's
+`gBeltMoverSetBeltFn` until the BeltMover is ported, and aborts while
+that is NULL.
 
 ## The record, 720 bytes
 
@@ -719,6 +721,132 @@ The look-ahead's draw and SuperEasyAI are retail's alone.
 RoutePointChangeFrequency and RoutePointVariance are read nowhere else
 (`difficulty-info.md`).
 
+## Think
+
+**Think(dt)** (0x00191148, slot 32) is the controller's frame. It is
+the caller of two methods new in retail, Timer::CountDown and
+Race::CanAICarsStartDriving (`race.md`).
+
+1. **Before the start.** Until Race::CanAICarsStartDriving says yes, the
+   car waits:
+   - before the pre-race (RaceStage under 2, signed `slti`), it stands:
+     SetDesiredSpeed(0, 0, 0, 1);
+   - from the pre-race on, it runs the brake stand (below).
+   Then SteerStraightAhead, and Think returns.
+2. **The progress check.** This runs with an action that isn't a
+   PullOver, while ProgressTimer (576) runs, on the step CountDown runs
+   it out:
+   - ProgressTimer is set to 1.5 s again.
+   - pProgress (580, ten slots) records the car's speed round the track:
+     TrackLength x |its RacingCar's dCurrentLapNumberExact|, the lap rate.
+   - PleaseResetMeLater is called when the car isn't blinking, the ring
+     is full, its mean is under 0.2 m/s and no player is within 50 m
+     (World::GetDistanceToClosestPlayer, `<`). So a car stuck for 15 s
+     out of sight is put back.
+3. **The timers.**
+   - **RealPhysicsTimer** (572), on the step it runs out: with under 4
+     wheels down it gets 1 s again, else the car goes back to
+     nDefaultMovementMode.
+   - **OffBeltTimer** (568), while it runs: a car on the belt goes back
+     to nDefaultMovementMode, and the timer counts down.
+   - GlueOnTimer, GlueOffTimer and TakenSignpostTimer count down.
+4. **The debug reset.** It runs for the camera's car
+   (CameraFollowThisCarInstead), with ResetThisCarsPosition (gp-20320)
+   set. The switch is cleared, and Car::DebugSetPosition puts the car at
+   (-890, -332, -78), at speed 0 and angle ThisCarsResetAngle (gp-13390,
+   a halfword).
+   - Retail calls bRefreshTweaker, a call to the host, in between; the
+     port has no host.
+   - DoScreenPrintf and DoSpeedDifferencePrinting reach only
+     BeltMover::DebugScreenPrint and Car::PrintAbove, which ship empty.
+5. **The turn.** SecondsBeforeNextActionEvaluation (524) comes down by
+   `dt`, and my list's NumCarsInArray, MyHalfSizeL and MyHalfSizeD are
+   cleared. Whose turn it is depends on my DriverType:
+   - **An AI racer (2):** my turn when `WorldLoopCounter % 8` (C's
+     signed remainder) is under CopCarPos - AICarPos, and the World's
+     CarTable at AICarPos plus it is my car.
+   - **A traffic car (3):** the same with `% 6`, TotalNumCars -
+     TrafficCarPos and TrafficCarPos.
+   - **Anyone else:** my turn once SecondsBeforeNextActionEvaluation is
+     0 or less. Retail compares it with the list's MyHalfSizeL, just
+     cleared.
+
+   So the racers think one a frame, eight frames round, and the traffic
+   six. When it isn't my turn and I have an action, Think goes between
+   thinks (below) and returns.
+6. **The think.**
+   1. SecondsBeforeNextActionEvaluation gets 0.1 more.
+   2. DoStickyDecisions runs, then BuildArray, then
+      GetCurrentTrackRoutePoint. BuildArray is handed the greatest of
+      AIActionPassMaxTimeAheadToMakeAttempt,
+      AIDriverAvoidCarsImpactTimeThreshold and AIDriverSecondsToLookAhead,
+      which it doesn't read.
+   3. **A clear location:** SteerStraightAhead, SetDesiredSpeed(0, 0, 0,
+      1), and Think returns with the list still full.
+   4. **The action** (below), then ExecuteCurrentAction.
+   5. **The belt.** When WeNeedTheBelt and WeCanHaveTheBelt, the car goes
+      to BELT_MOVEMENT if it isn't there, and BeltMover::SetBelt runs on
+      its mover. Otherwise a car on the belt goes back to
+      nDefaultMovementMode.
+   6. **The render.** The camera's car hands TheDriveTargetRenderer's
+      SetTargetToRender its CarDriver, cast as a DriveTarget. Nothing reads
+      it while RenderDriveTargetPoints is off.
+   7. The list's NumCarsInArray, MyHalfSizeL and MyHalfSizeD are cleared
+      again.
+
+### The action
+
+The think's action comes from the first of these that holds:
+
+- **BoringAIForCameraTuningOn (gp-22580).**
+  - No action: a new JustDrive.
+  - A JustDrive: its own CalculatePointsToDrive runs.
+  - Any other action: it is deleted, and ChooseNewAction(JustDrive)
+    replaces it.
+
+  That is all; the points aren't generated.
+- **No action:** `new AIActionJustDrive(AIActionJustDriveScore, -1)`.
+  The slot comes from AIActionSlotPool by bOMalloc. AIActionJustDriveScore
+  is gp-18272, 0.
+- **Otherwise:** UpdateStatus runs.
+  - A done action (a success, a failure, or expired where it can expire)
+    is deleted, and ChooseNewAction(none) gives the next.
+  - Else InterruptAction may answer one to take its place.
+
+Then GeneratePointsToFulfillAction runs on the action.
+
+### Between thinks
+
+This runs only for a choice beside a car (5 and 6) whose car has a
+player.
+1. BuildArray runs.
+2. When GetNearbyCar finds the choice's car in my list:
+   BuildDriveTarget(choice, target, location, list, 0, 0, TowardsLine),
+   then the driver's SetTarget (64), then the render as above.
+
+The target is a DriveTarget on the stack, built and destroyed around it.
+
+### The brake stand
+
+The brake stand keeps three fields:
+- BrakeStanding (560), whether the car is on the brakes;
+- BrakeStandTimer (552), the phase's length;
+- BrakeStandTimerStart (556), the phase's start.
+
+It runs like this:
+1. When BrakeStandTimer isn't running, BrakeStanding is a coin flip:
+   bRandom(2) on bDefaultSeed.
+2. Else BrakeStanding flips once the phase's length in seconds is less
+   than the seconds since its start (WorldTimer less the start, signed).
+3. On either, a new phase is drawn:
+   - on the brakes, bRandom(0.25) + 0.35 s;
+   - off them, bRandom(1) + 1.5 s.
+   The start becomes WorldTimer.
+4. SetDesiredSpeed(100 on the brakes, else 0; 0, 0, 1).
+
+SetRaceStage clears an AI driver's EBrake only on RACING (`race.md`), so
+the brake stand asks for speed while the car is still held.
+
 ## Checking it
 
     python tools/aicarcontroller_check.py
@@ -749,7 +877,12 @@ the table. Everything beneath those methods runs as shipped too:
 - from 11e-4, the car's HonkAndOrBlinkHeadlights and
   UpdateHeadlightsAndHorn, DoWeCareAboutThisCar, GetNearbyCar,
   TrackRoute::GetPointNumber, Signpost::GetNewRoutePoint, CompareDistances
-  and AIAction::ClearPointsToDrive.
+  and AIAction::ClearPointsToDrive;
+- from 11e-5, Timer::CountDown, Race::CanAICarsStartDriving,
+  NearbyCarList::BuildArray, AIAction::UpdateStatus, Average::Record,
+  Car::IsBlinking, bRandom's two over bDefaultSeed, and a new
+  AIActionJustDrive: its constructor, its tests, its
+  CalculatePointsToDrive and its destructor.
 
 The stand-ins each print a line:
 
@@ -778,6 +911,16 @@ The stand-ins each print a line:
   answering the script's flag for the car.
 - World::Random(int) (0x0014e520), answering the float's queue as words,
   so the two draw in turn from one queue.
+- From 11e-5:
+  - bOMalloc (0x00257c80), answering drivingchoice_check's action block,
+    where Think's new JustDrive goes;
+  - BeltMover::SetBelt (0x00204990), with the mover;
+  - Car::DebugSetPosition (0x00133338), with the car, the place, the
+    speed and the angle;
+  - DriveTargetRenderer::SetTargetToRender (0x001cb600);
+  - bRefreshTweaker (0x0025d2c8), a call to the host, silent;
+  - the fake actions' HasBeenAccomplished (40), HasFailed (48) and
+    HasExpired (56), answering the script's.
 
 The 11e-3 ops fill the rest as memory: the players and their speed-ratio
 Averages, the RacingCars, the race parameters' fields, TheDifficultyInfo
@@ -896,9 +1039,44 @@ own.
   - The race is a cop race or not, and a fifth of the rounds let
     DecideBoostFactor set the BoostFactor to 1 first.
 
-The check gives 738 scenarios, 125785 ops, 110422 lines, 0 differ.
+11e-5's, from their own random seed:
 
-Its mutation pass has 522 mutations: 509 caught and 13 equivalent.
+- **s_think (120):** Think frame after frame on my car among the walk
+  world's others, five to ten rounds each.
+  - A fifth of the rounds come before the start: standing, or the brake
+    stand with its timer a tick either side of the time since its start,
+    not running, or past it.
+  - The rest race:
+    - the progress check with its timer a tick either side of running
+      out, the ring one sample short of full and full, its mean at 0.2
+      and an ulp either side, and a player at 50 m and either side;
+    - every timer a tick either side of running out, at 0x7fffffff and
+      negative;
+    - the debug reset for the camera's car or another;
+    - an AI racer's and a traffic car's turn, with the loop counter at
+      each remainder and the CarTable's slot mine or not, and anyone
+      else's on its clock either side of 0;
+    - between thinks beside a player's car or not;
+    - the location clear;
+    - each action's way to done, interrupted, and
+      BoringAIForCameraTuningOn's three.
+  - Half the racing rounds are the belt's, failing at most one of
+    WeCanHaveTheBelt's eleven tests (`gate_picker`), so the belt is
+    taken, kept, refused and left.
+  - Half the rounds that start with no action think again at once, so
+    the JustDrive just made meets InterruptAction with a fact scored at
+    its own score (0) or just past it.
+  - Sign 0 always lies 300 to 2000 m ahead and the rest behind me, so
+    DoStickyDecisions ends.
+- **s_tcd (6):** Timer::CountDown over steps of every size and sign, on
+  timers a tick either side of running out, wrapping, at 0x7fffffff and
+  not running.
+- **s_cas (1):** Race::CanAICarsStartDriving at every stage, in a cop
+  race or not.
+
+The check gives 865 scenarios, 173272 ops, 170252 lines, 0 differ.
+
+Its mutation pass has 654 mutations: 639 caught and 15 equivalent.
 - 11e-2's share is 100: 96 caught (sp-ret by crashing the harness) and 4
   equivalent.
 - 11e-3's is 181: 177 caught (5 by crashing the harness) and 4
@@ -906,9 +1084,14 @@ Its mutation pass has 522 mutations: 509 caught and 13 equivalent.
 - 11e-4's is 115, all caught (mh-list and eca-clear by crashing the
   harness). They cover car.c's HonkAndOrBlinkHeadlights and
   UpdateHeadlightsAndHorn too.
+- 11e-5's is 132: 130 caught (cas-cop-or, th-start, th-stand-return and
+  ta-int-set by crashing the harness) and 2 equivalent. They cover
+  timer.c's CountDown and race.c's CanAICarsStartDriving too.
 - ct-glue and ct-catchup carry a line of context, as GlueOff and
   DecideBoostFactor repeat their lines. dbf-freq-u carries one too, as
-  ExecuteCurrentAction's look-ahead repeats its cast.
+  ExecuteCurrentAction's look-ahead repeats its cast. Since 11e-5,
+  ct-progress, gl-list, eca-sds-order and eca-freq-u carry one, as Think
+  repeats their lines.
 
 | Mutation | Why it's equivalent |
 |----------|---------------------|
@@ -922,6 +1105,8 @@ Its mutation pass has 522 mutations: 509 caught and 13 equivalent.
 | wcb-race-le, dbf-early-le | the race clock is whole ticks, and none rounds to 30 s exactly: 120000 ticks is 30.000002 and 119999 is 29.99975 |
 | dbf-ratio-allowed | pCatchupPlayer is cleared before the catchup and set only past its `!allowed` return |
 | dbf-ratio-over | at a ratio of exactly 1 the row's value is multiplied by 0 |
+| bt-extra | BuildDriveTarget never reads its two floats |
+| bt-move | between thinks the target is built only once GetNearbyCar has found the choice's car, so IsValid passes and BuildDriveTargetAroundCar fills up parallel to the line whatever the movement |
 
 Some things the checker found along the way:
 
@@ -951,6 +1136,13 @@ Some things the checker found along the way:
   (above).
 - **The action type is signed.** WeCanHaveTheGlue's PullOver test is
   signed, so a type of -1 goes on to the speed ratio.
+- **Retail's car offsets.** BuildArray reads a car's RenderingEnabled as
+  a byte at 1192 (`lb`) and Car::IsPoofed the word at 2160, past the
+  demo's 1160 and 2120. The model reads retail's; the port's Car keeps
+  its own layout.
+- **The JustDrive's score.** It is read only when a later think's
+  InterruptAction compares it, so a JustDrive made one think and
+  compared the next is what tells its score.
 
 Not scripted:
 
@@ -968,4 +1160,11 @@ Not scripted:
   decision into nSignpostIndex with every slot used;
 - the glue with no player, or with the glued car's player gone (retail
   reads through both);
-- GetGlueSpeed with the glue off (it reads pGlueCar's RacingCar).
+- GetGlueSpeed with the glue off (it reads pGlueCar's RacingCar);
+- from 11e-5, ChooseNewAction answering NULL where Think goes on to the
+  action's points or its execution (both read through it);
+- a CarTable slot before the table (a negative loop counter's remainder);
+- a choice beside a car of NULL (retail reads address 24);
+- a sign within the look-ahead when Think runs DoStickyDecisions, which
+  11e-2's scenarios cover;
+- BuildArray with no list owner.

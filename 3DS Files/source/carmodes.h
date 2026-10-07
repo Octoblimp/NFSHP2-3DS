@@ -88,6 +88,12 @@ extern CarMoverCtorFn gDeliveryMoverCtorFn;    // 0x001f0b80
 extern CarMoverCtorFn gCopMoverCtorFn;         // 0x00196f00
 extern CarMoverCtorFn gBeltMoverCtorFn;        // 0x001f1ca8
 
+// BeltMover::SetBelt, 0x00204990: AICarController::Think's, each think
+// it keeps the belt (BeltMover::Move is the other caller). NULL until
+// the BeltMover is ported, when Think aborts rather than go on.
+typedef void (*BeltMoverSetBeltFn)(CarMover *m);
+extern BeltMoverSetBeltFn gBeltMoverSetBeltFn;
+
 extern CarControllerCtorFn gRealControllerCtorFn;  // 0x00224740
 extern CarControllerCtorFn gAIDriverCtorFn;        // 0x0012e810
 extern CarControllerCtorFn gTrafficDriverCtorFn;   // 0x00183f70

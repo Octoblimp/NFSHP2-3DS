@@ -206,6 +206,12 @@ extern RaceParameters TheRaceParameters;
 // RaceParameters::GetDriverInfo(int), 0x001edb28: driver `i`, unchecked.
 struct DriverInfo *race_parameters_get_driver_info(int32_t i);
 
+// Race::CanAICarsStartDriving, retail 0x00149078 (new in retail): racing,
+// or, for You're The Cop (TheRaceParameters.BeACop), from the pre-race on
+// -- the stage signed against 2 (`slti`). AICarController::Think holds
+// its car at the line until it does.
+int race_can_ai_cars_start_driving(const Race *r);
+
 // ------------------------------------------------------------- RacingCar
 
 struct Car;

@@ -15628,6 +15628,89 @@ has the detail, under "The horn and ExecuteCurrentAction"; `car.md` has
 retail's honk and lights, and `difficulty-info.md` the new readers. The
 CIA builds.
 
+### Step 11e-5: AICarController's Think
+
+`aicarcontroller.c` gains Think (0x00191148), the controller's frame, and
+installs it in slot 32. `timer.c` gains Timer::CountDown (0x001a3cf0) and
+`race.c` Race::CanAICarsStartDriving (0x00149078), both new in retail.
+
+- **CountDown(dt).** A timer of 0 or 0x7fffffff is left alone. Otherwise
+  `(int)(dt * 4000)` ticks come off by a wrapping `subu`, a negative
+  result becomes 0, and it answers whether the timer is still running.
+- **CanAICarsStartDriving.** RaceStage is RACING (4), or a cop race
+  (BeACop, 0x0031ab0c) is at the pre-race (2) or later.
+- **Think(dt).**
+  - **Before the start:** before the pre-race SetDesiredSpeed(0, 0, 0,
+    1); from it on, the brake stand: BrakeStanding (560) drawn by
+    `bRandom(2)` when BrakeStandTimer (552) isn't running, flipped once
+    the phase's length is under the time since BrakeStandTimerStart
+    (556); each phase `bRandom(0.25) + 0.35` s on the brakes or
+    `bRandom(1) + 1.5` s off; speed 100 on the brakes, else 0. Then
+    SteerStraightAhead, and it returns.
+  - **The progress check:** an action that isn't a PullOver, when
+    ProgressTimer (576) runs out on this step: 1.5 s again, the ten-slot
+    pProgress records TrackLength x |dCurrentLapNumberExact|, and
+    PleaseResetMeLater when the car isn't blinking, the ring is full, its
+    mean is under 0.2 and no player is within 50 m.
+  - **The timers:** RealPhysicsTimer, run out, gets 1 s more under 4
+    wheels down, else the default mode; OffBeltTimer, running, takes a
+    car off the belt and counts down; GlueOn, GlueOff and TakenSignpost
+    count down.
+  - **The debug reset** for the camera's car with ResetThisCarsPosition
+    (gp-20320): cleared, and DebugSetPosition at (-890, -332, -78), speed
+    0, angle gp-13390's halfword (the 0xc000 the start-up code stores).
+  - **The turn:** SecondsBeforeNextActionEvaluation comes down by dt and
+    the list is cleared. An AI racer thinks when `WorldLoopCounter % 8` is
+    under CopCarPos - AICarPos and the CarTable's slot there is its car, a
+    traffic car the same by 6 from TrafficCarPos, anyone else when its
+    seconds are 0 or less. Not its turn, with an action: between thinks
+    (a choice beside a player's car is steered round it again when it's
+    still in the list), and it returns.
+  - **The think:** 0.1 s more, DoStickyDecisions, BuildArray,
+    GetCurrentTrackRoutePoint; a clear location stands and steers
+    straight. Else the action: BoringAIForCameraTuningOn's JustDrive; a
+    new JustDrive (AIActionJustDriveScore, -1) by bOMalloc for none;
+    else UpdateStatus, a done one deleted for ChooseNewAction's next, or
+    InterruptAction's answer. Then GeneratePointsToFulfillAction,
+    ExecuteCurrentAction, the belt (WeNeedTheBelt and WeCanHaveTheBelt
+    put the car in BELT_MOVEMENT and SetBelt; else a belted car goes to
+    the default mode), SetTargetToRender for the camera's car, and the
+    list cleared again.
+- **The belt's seam.** BeltMover::SetBelt is carmodes.h's
+  `gBeltMoverSetBeltFn`, NULL until the BeltMover is ported; Think aborts
+  if it would call it then. No AI car is made in the game yet (AIDriver
+  is 11f), so nothing reaches it.
+
+The checker:
+- **The stand-ins.** bOMalloc (0x00257c80), answering the action block;
+  BeltMover::SetBelt; Car::DebugSetPosition;
+  DriveTargetRenderer::SetTargetToRender; bRefreshTweaker, silent; and the
+  fake actions' three tests. Under them BuildArray, UpdateStatus,
+  Average::Record, IsBlinking, bRandom's two and a real AIActionJustDrive
+  run as shipped.
+- **Retail's car offsets.** BuildArray reads RenderingEnabled as a byte
+  at 1192 and IsPoofed the word at 2160, past the demo's 1160 and 2120;
+  the model's constants were the demo's until the first diff showed it.
+- **The scenarios.** s_think (120), s_tcd (6) and s_cas (1), from their
+  own seed. s_think's rounds run before the start and racing, every
+  timer a tick either side of running out, the turns at the loop
+  counter's edges, between thinks, the location clear, each action's way
+  to done, interrupted and BoringAI's three. Half the racing rounds are
+  the belt's, failing at most one of its eleven tests (`gate_picker`), and
+  half the rounds that start with no action think again at once, so the
+  new JustDrive's score meets InterruptAction.
+- 865 scenarios, 173272 ops, 170252 lines, 0 differ.
+- 654 mutations: 639 caught, 15 equivalent. 11e-5's 132 are 130 caught
+  (4 by crashing the harness) and 2 equivalent: bt-extra
+  (BuildDriveTarget never reads its floats) and bt-move (between thinks
+  the choice is valid, and a side-of-car build fills up parallel
+  whatever the movement). ct-progress, gl-list, eca-sds-order and
+  eca-freq-u carry a line of context, as Think repeats their lines.
+
+Every other checker still runs clean. `docs/formats/ai-car-controller.md`
+has the detail, under "Think", and `race.md` has CountDown and
+CanAICarsStartDriving. The CIA builds.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the

@@ -3,6 +3,8 @@
 #include "aicarcontroller.h"
 
 #include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "aiactions.h"
@@ -14,6 +16,7 @@
 #include "configitems.h"
 #include "difficultyinfo.h"
 #include "drivetarget.h"
+#include "drivetargetrenderer.h"
 #include "drivingchoice.h"
 #include "eefpu.h"
 #include "graph.h"
@@ -42,6 +45,12 @@ int32_t nLastGlueReason;
 // gp-20120, retail's alone: the pause debug menu's "Super easy AI" switch
 // (0x00174544) and the replay's special event 6 (0x00170548) set it.
 int32_t SuperEasyAI;
+
+// Think's debug reset (gp-20320, and the halfword at gp-13390 that
+// _GLOBAL_$I$sRankHeadings sets to -90 degrees, 0xffa60000 / 360): only
+// the tweaker sets the switch, and Think clears it.
+int32_t  ResetThisCarsPosition;
+uint16_t ThisCarsResetAngle = 0xc000;
 
 // gp-29940 and gp-29928, the constructor's and JustReset's: -1/140, so
 // each car's first evaluation is staggered by its index.
@@ -189,6 +198,34 @@ int32_t SuperEasyAI;
 #define AICC_DEFAULT_LINE_SPEED   30.0f
 #define AICC_COP_SPEED            0.75f
 
+// Think. Before the start a car stands on the brakes, revving (100 m/s,
+// `lui 0x42c8`), for bRandom(0.25) + 0.35 s (gp-29876, gp-29868), then
+// rolls off them for bRandom(1) + 1.5 s (`lui 0x3fc0`), in turn; each
+// phase's length is BrakeStandTimer's ticks, its start
+// BrakeStandTimerStart, WorldTimer through seconds (gp-29872, gp-29864).
+#define AICC_BRAKE_STAND_SPEED   100.0f
+#define AICC_BRAKE_STAND_RANGE   0.25f
+#define AICC_BRAKE_STAND_ADD     0.349999994f
+#define AICC_ROLL_RANGE          1.0f
+#define AICC_ROLL_ADD            1.5f
+// Every 1.5 s (gp-29860, 6000.5 already in ticks, as the constructor's)
+// the progress takes the track's length times the lap's rate; a full
+// average under 0.2 (gp-29856) resets a car 50 m (`lui 0x4248`) or more
+// from every player. RealPhysicsTimer runs out into another second
+// (gp-29852, 4000.5) while a wheel is off the ground. A car whose turn is
+// its own clock's thinks every 0.1 s (gp-29844). The debug reset puts the
+// car at (-890, -332, -78) (gp-29848, `lui 0xc3a6`, `lui 0xc29c`).
+#define AICC_PROGRESS_MIN           0.200000003f
+#define AICC_PROGRESS_PLAYER_RANGE  50.0f
+#define AICC_REAL_PHYSICS_AGAIN_SECONDS 1.0f
+#define AICC_THINK_INTERVAL         0.100000001f
+#define AICC_RESET_X              (-890.0f)
+#define AICC_RESET_Y              (-332.0f)
+#define AICC_RESET_Z              (-78.0f)
+// An AI racer thinks on one frame in 8, a traffic car on one in 6.
+#define AICC_RACER_TURNS   8
+#define AICC_TRAFFIC_TURNS 6
+
 typedef void       (*DriverFn)(void *self);
 typedef void       (*DriverPointFn)(void *self, bVector2 *p);
 typedef void       (*ActionDtorFn)(void *self, int32_t flags);
@@ -229,6 +266,14 @@ static void choose_new_action(AICarController *c, AIAction **out,
                                AICARCONTROLLER_VT_CHOOSE_NEW_ACTION);
 
     ((AICarControllerChooseFn)e->fn)(vt_this(c, e), out, type);
+}
+
+static void generate_points(AICarController *c, AIAction *a)
+{
+    const VtEntry *e = vt_slot(c->Base._vtable,
+                               AICARCONTROLLER_VT_GENERATE_POINTS_TO_FULFILL_ACTION);
+
+    ((AICarControllerGenerateFn)e->fn)(vt_this(c, e), a);
 }
 
 static void find_where_i_am(AICarController *c)
@@ -1454,6 +1499,296 @@ void aicarcontroller_execute_current_action(AICarController *c)
     aiaction_clear_points_to_drive(c->CurrentAction);
 }
 
+// -------------------------------------------------------- the think
+
+static void set_desired_speed(AICarController *c, float speed, float time,
+                              float tol, int32_t allowed)
+{
+    CarDriver *d = c->Base.Driver;
+    const VtEntry *e = vt_slot(d->_vtable, CARDRIVER_VT_SET_DESIRED_SPEED);
+
+    ((DriverDesiredSpeedFn)e->fn)(vt_this(d, e), speed, time, tol, allowed);
+}
+
+// BeltMover::SetBelt, through carmodes.h's seam until the BeltMover is
+// ported.
+static void set_belt(CarMover *m)
+{
+    if (gBeltMoverSetBeltFn == NULL) {
+        fprintf(stderr, "aicarcontroller: BeltMover::SetBelt is not ported\n");
+        abort();
+    }
+    gBeltMoverSetBeltFn(m);
+}
+
+// The look-ahead BuildArray is given, which it does not read.
+static float list_look_ahead(void)
+{
+    return max_s(max_s(AIActionPassMaxTimeAheadToMakeAttempt,
+                       AIDriverAvoidCarsImpactTimeThreshold),
+                 AIDriverSecondsToLookAhead);
+}
+
+// Before the start, from the pre-race on: on the brakes and off them in
+// turn, the first phase a coin flip, each next as BrakeStandTimer runs out.
+static void brake_stand(AICarController *c)
+{
+    int draw = 0;
+    float f, add;
+
+    if (!timer_is_valid(&c->BrakeStandTimer)) {
+        c->BrakeStanding = bRandomI(2, &bDefaultSeed) != 0;
+        draw = 1;
+    } else if ((float)(int32_t)c->BrakeStandTimer.PackedTime
+                   * AICC_TICKS_TO_SECONDS
+               < (float)(int32_t)((uint32_t)WorldTimer
+                                  - c->BrakeStandTimerStart.PackedTime)
+                     * AICC_TICKS_TO_SECONDS) {
+        c->BrakeStanding ^= 1;
+        draw = 1;
+    }
+    if (draw) {
+        if (c->BrakeStanding) {
+            f = bRandomF(AICC_BRAKE_STAND_RANGE, &bDefaultSeed);
+            add = AICC_BRAKE_STAND_ADD;
+        } else {
+            f = bRandomF(AICC_ROLL_RANGE, &bDefaultSeed);
+            add = AICC_ROLL_ADD;
+        }
+        timer_set_time(&c->BrakeStandTimer, f + add);
+        timer_set_time(&c->BrakeStandTimerStart,
+                       (float)WorldTimer * AICC_TICKS_TO_SECONDS);
+    }
+    set_desired_speed(c, c->BrakeStanding ? AICC_BRAKE_STAND_SPEED : 0.0f,
+                      0.0f, 0.0f, 1);
+}
+
+// Whether this frame is my turn: an AI racer's when the loop counter's
+// remainder by 8 is my place among the AI racers, a traffic car's by 6
+// among the traffic, anyone else's when my own clock has run down. The
+// remainders are C's, signed.
+static int my_turn(AICarController *c, Car *car)
+{
+    World *w = pCurrentWorld;
+    int32_t m;
+
+    switch (car->MyDriver->TheDriverType) {
+    case DRIVER_TYPE_AI_RACER:
+        m = WorldLoopCounter % AICC_RACER_TURNS;
+        return m < w->CopCarPos - w->AICarPos
+            && w->CarTable[w->AICarPos + m] == car;
+    case DRIVER_TYPE_TRAFFIC_CAR:
+        m = WorldLoopCounter % AICC_TRAFFIC_TURNS;
+        return m < w->TotalNumCars - w->TrafficCarPos
+            && w->CarTable[w->TrafficCarPos + m] == car;
+    default:
+        // Against the list's MyHalfSizeL, just cleared: 0.
+        return c->SecondsBeforeNextActionEvaluation <= 0.0f;
+    }
+}
+
+// `new AIActionJustDrive(AIActionJustDriveScore, -1)`, the slot from
+// AIActionSlotPool by bOMalloc, inline.
+static AIAction *new_just_drive(void)
+{
+    return &aijustdrive_init((AIActionJustDrive *)aiaction_new(),
+                             AIActionJustDriveScore, -1.0f)->Base;
+}
+
+// Done: gone, a success, a failure, or expired where it can.
+static int action_done(const AIAction *a)
+{
+    return a == NULL || aiplan_success(&a->Base) || aiplan_failure(&a->Base)
+        || aiplan_is_expired(&a->Base);
+}
+
+// The action for this think, and its points.
+static void think_action(AICarController *c)
+{
+    DrivingInformation *info = &c->MyCurrentDrivingInformation;
+    AIAction *a = c->CurrentAction;
+
+    if (BoringAIForCameraTuningOn) {
+        // A JustDrive, its points by its own CalculatePointsToDrive.
+        if (a == NULL) {
+            c->CurrentAction = new_just_drive();
+        } else if (a->Type == AIACTION_JUST_DRIVE) {
+            action_calculate_points(a, info);
+        } else {
+            delete_action(a);
+            c->CurrentAction = NULL;
+            choose_new_action(c, &c->CurrentAction, AIACTION_JUST_DRIVE);
+        }
+        return;
+    }
+    if (a == NULL) {
+        c->CurrentAction = new_just_drive();
+    } else {
+        aiaction_update_status(a, info);
+        a = c->CurrentAction;
+        if (action_done(a)) {
+            AIAction *next = NULL;
+
+            if (a != NULL)
+                delete_action(a);
+            c->CurrentAction = NULL;
+            choose_new_action(c, &next, AIACTION_NONE);
+            c->CurrentAction = next;
+        } else {
+            AIAction *n = aicarcontroller_interrupt_action(c);
+
+            if (n != NULL) {
+                if (c->CurrentAction != NULL)
+                    delete_action(c->CurrentAction);
+                c->CurrentAction = n;
+            }
+        }
+    }
+    generate_points(c, c->CurrentAction);
+}
+
+// The camera's car shows its driver -- the CarDriver itself, as retail
+// passes it, not a DriveTarget; with RenderDriveTargetPoints off nothing
+// reads it.
+static void render_target(AICarController *c)
+{
+    if (aicarcontroller_get_my_driver_number(c) == CameraFollowThisCarInstead)
+        drivetargetrenderer_set_target_to_render(
+            &TheDriveTargetRenderer, (DriveTarget *)(void *)c->Base.Driver);
+}
+
+// Not my turn: a choice beside a player's car is steered round it again
+// from where it is now, when it is still in my list.
+static void between_thinks(AICarController *c)
+{
+    DriveTarget t;
+    CarDriver *d;
+    const VtEntry *e;
+
+    if (!drivingchoice_type_is_side_of_car(c->CurrentDrivingChoice->Type)
+        || c->CurrentDrivingChoice->pCar->pPlayer == NULL)
+        return;
+    drivetarget_init(&t);
+    nearbycarlist_build_array(c->CurrentNearbyCarList,
+                              c->CurrentDrivingLocation, list_look_ahead());
+    if (nearbycarlist_get_nearby_car(c->CurrentNearbyCarList,
+                                     c->CurrentDrivingChoice->pCar)
+        != NULL) {
+        drivingchoice_build_drive_target(c->CurrentDrivingChoice, &t,
+                                         c->CurrentDrivingLocation,
+                                         c->CurrentNearbyCarList, 0.0f, 0.0f,
+                                         MOVEMENT_TOWARDS_LINE);
+        d = c->Base.Driver;
+        e = vt_slot(d->_vtable, CARDRIVER_VT_SET_TARGET);
+        ((DriverTargetFn)e->fn)(vt_this(d, e), &t);
+        render_target(c);
+    }
+    drivetarget_destroy(&t);
+}
+
+void aicarcontroller_think(AICarController *c, float dt)
+{
+    // 0x00191148.
+    Car *car = c->Base.pCar;
+    NearbyCarList *list;
+    AIAction *a;
+
+    if (!race_can_ai_cars_start_driving(pCurrentRace)) {
+        // `slti` 2: before the pre-race the car only stands.
+        if (race_get_race_stage(pCurrentRace) < RACE_STAGE_PRERACE)
+            set_desired_speed(c, 0.0f, 0.0f, 0.0f, 1);
+        else
+            brake_stand(c);
+        aicarcontroller_steer_straight_ahead(c);
+        return;
+    }
+
+    a = c->CurrentAction;
+    if (a != NULL && a->Type != AIACTION_PULL_OVER
+        && timer_is_valid(&c->ProgressTimer)
+        && !timer_count_down(&c->ProgressTimer, dt)) {
+        int near;
+
+        timer_set_time(&c->ProgressTimer, AICC_PROGRESS_SECONDS);
+        average_record(c->pProgress,
+                       TheTrackPathManager.TrackLength
+                           * fabsf(car->pRacingCar->dCurrentLapNumberExact));
+        near = world_get_distance_to_closest_player(pCurrentWorld,
+                                                    &car->State.Position)
+               < AICC_PROGRESS_PLAYER_RANGE;
+        if (!car_is_blinking(car)
+            && c->pProgress->nSamples == c->pProgress->nSlots
+            && c->pProgress->fAverage < AICC_PROGRESS_MIN && !near)
+            car_please_reset_me_later(car);
+    }
+
+    if (timer_is_valid(&c->RealPhysicsTimer)
+        && !timer_count_down(&c->RealPhysicsTimer, dt)) {
+        if (car->State.nWheelsTouchingGround < 4)
+            timer_set_time(&c->RealPhysicsTimer,
+                           AICC_REAL_PHYSICS_AGAIN_SECONDS);
+        else
+            car_set_movement_mode(car, nDefaultMovementMode);
+    }
+    if (timer_is_valid(&c->OffBeltTimer)) {
+        if (car->TheMovementMode == BELT_MOVEMENT)
+            car_set_movement_mode(car, nDefaultMovementMode);
+        timer_count_down(&c->OffBeltTimer, dt);
+    }
+    timer_count_down(&c->GlueOnTimer, dt);
+    timer_count_down(&c->GlueOffTimer, dt);
+    timer_count_down(&c->TakenSignpostTimer, dt);
+
+    // Retail's DoScreenPrintf and DoSpeedDifferencePrinting reach only
+    // BeltMover::DebugScreenPrint and Car::PrintAbove, which ship empty.
+    if (CameraFollowThisCarInstead == car->DriverNumber
+        && ResetThisCarsPosition) {
+        bVector3 p = { AICC_RESET_X, AICC_RESET_Y, AICC_RESET_Z, 0.0f };
+
+        // Then bRefreshTweaker, a funk call to the host, which the port
+        // does not have.
+        ResetThisCarsPosition = 0;
+        car_debug_set_position(car, &p, 0.0f, ThisCarsResetAngle);
+    }
+
+    list = c->CurrentNearbyCarList;
+    c->SecondsBeforeNextActionEvaluation -= dt;
+    list->NumCarsInArray = 0;
+    list->MyHalfSizeL = 0.0f;
+    list->MyHalfSizeD = 0.0f;
+    if (!my_turn(c, car) && c->CurrentAction != NULL) {
+        between_thinks(c);
+        return;
+    }
+
+    c->SecondsBeforeNextActionEvaluation += AICC_THINK_INTERVAL;
+    aicarcontroller_do_sticky_decisions(c);
+    nearbycarlist_build_array(c->CurrentNearbyCarList,
+                              c->CurrentDrivingLocation, list_look_ahead());
+    aicarcontroller_get_current_track_route_point(c, NULL);
+    if (drivinglocation_is_clear(c->CurrentDrivingLocation)) {
+        aicarcontroller_steer_straight_ahead(c);
+        set_desired_speed(c, 0.0f, 0.0f, 0.0f, 1);
+        return;
+    }
+    think_action(c);
+    aicarcontroller_execute_current_action(c);
+
+    if (aicarcontroller_we_need_the_belt(c)
+        && aicarcontroller_we_can_have_the_belt(c)) {
+        if (c->Base.pCar->TheMovementMode != BELT_MOVEMENT)
+            car_set_movement_mode(c->Base.pCar, BELT_MOVEMENT);
+        set_belt(c->Base.pCar->pCarMover);
+    } else if (c->Base.pCar->TheMovementMode == BELT_MOVEMENT) {
+        car_set_movement_mode(c->Base.pCar, nDefaultMovementMode);
+    }
+    render_target(c);
+    list = c->CurrentNearbyCarList;
+    list->MyHalfSizeD = 0.0f;
+    list->NumCarsInArray = 0;
+    list->MyHalfSizeL = 0.0f;
+}
+
 // -------------------------------------------------------- the physics
 
 void aicarcontroller_set_to_physics_mode(AICarController *c, Car *car)
@@ -1547,13 +1882,13 @@ DrivingLocation *aicarcontroller_get_current_driving_location(
 #define E(f) { 0, 0, (VtFn)(f) }
 
 // _vt$15AICarController, retail's 0x002b4d90. DoSnapshot waits on
-// ReplaySnapshot, Think is step 11e-5's, and GetRouteNumbersToUse is pure.
+// ReplaySnapshot, and GetRouteNumbersToUse is pure.
 static const VtEntry aicarcontroller_vt[AICARCONTROLLER_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(aicarcontroller_destroy),                       //   8  0x001903a0
     E(aicarcontroller_debug_display),                 //  16  0x00191138
     { 0, 0, NULL },                                   //  24  0x00190438
-    { 0, 0, NULL },                                   //  32  0x00191148
+    E(aicarcontroller_think),                         //  32  0x00191148
     E(aicarcontroller_set_current_route),             //  40  0x00190670
     E(aicarcontroller_get_current_route),             //  48  0x00190708
     E(aicarcontroller_get_current_route_point),       //  56  0x00190760

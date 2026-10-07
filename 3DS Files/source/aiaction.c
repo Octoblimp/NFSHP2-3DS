@@ -35,6 +35,7 @@
 #define AIA_SECONDS_TO_TICKS    4000.0f       // lui 0x457a
 
 BSlotPool *AIActionSlotPool;
+int32_t    AIActionJustDriveScore;
 
 // `max.s`, fs then ft, as collision.c has it.
 static float max_s(float fs, float ft)

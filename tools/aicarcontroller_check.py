@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Cross-check 3DS Files/source/aicarcontroller.c -- the AI car controller,
-steps 11e-1 to 11e-4's parts of it -- against the retail image, run in
+steps 11e-1 to 11e-5's parts of it -- against the retail image, run in
 mipsemu.
 
 The model is retail's image, over drivingchoice_check.py's world: its cars,
@@ -23,7 +23,12 @@ WeCanHaveTheBelt, WeHaveTheGlue, WeNeedTheGlue, WeCanHaveTheGlue, GlueOn,
 GlueOff, GetGlueSpeed, DecideBoostFactor and
 CalculateDistanceAndPositionBoost; and 11e-4's
 MaybeHonkAndOrBlinkHeadlights and ExecuteCurrentAction, with the car's
-HonkAndOrBlinkHeadlights and UpdateHeadlightsAndHorn beside them.
+HonkAndOrBlinkHeadlights and UpdateHeadlightsAndHorn beside them; and
+11e-5's Think, with Timer::CountDown and Race::CanAICarsStartDriving, and
+under it NearbyCarList::BuildArray, AIAction::UpdateStatus,
+Average::Record, Car::IsBlinking, bRandom's two over bDefaultSeed and a new
+AIActionJustDrive (its constructor, tests, CalculatePointsToDrive and
+destructor) as shipped.
 SignPostDecision runs as shipped wherever it is reached, DrivingChoice::AdvancePoint too, as main.c points
 drivingchoice.h's seam at the port's. Under them everything the port
 has runs as shipped too: the Average's constructor and destructor,
@@ -71,7 +76,16 @@ questions in the same order:
     target, StartHonkHorn (88) and StopHonkHorn (96), with the car, and
     IsHonking (104), with the car, answering the script's flag for it;
   World::Random(int) (0x0014e520): the world and the range, answering the
-    float's queue as words, so the two draw from one queue in turn.
+    float's queue as words, so the two draw from one queue in turn;
+  for 11e-5, bOMalloc (0x00257c80): the pool, answering
+    drivingchoice_check's action block (ab), where Think's new JustDrive
+    goes; BeltMover::SetBelt (0x00204990): the mover;
+    Car::DebugSetPosition (0x00133338): the car, the place, the speed and
+    the angle; DriveTargetRenderer::SetTargetToRender (0x001cb600): the
+    renderer (tdr for TheDriveTargetRenderer) and the target;
+    bRefreshTweaker (0x0025d2c8), a call to the host, silent; and the fake
+    actions' HasBeenAccomplished (40), HasFailed (48) and HasExpired (56):
+    the action and the information, answering the script's.
 SuperEasyAI and BoringAIForCameraTuningOn are words the script sets.
 11e-3's players (PLR), their speed-ratio Averages, the RacingCars, the
 coordinator's state, the race parameters' fields, TheDifficultyInfo and
@@ -121,6 +135,8 @@ AICC = "3DS Files/source/aicarcontroller.c"
 PLAYER_H = "3DS Files/source/player.h"
 CCC = "3DS Files/source/carcontroller.c"
 CAR_C = "3DS Files/source/car.c"
+TIMER_C = "3DS Files/source/timer.c"
+RACE_C = "3DS Files/source/race.c"
 SOURCES = [HARNESS] + dcc.SOURCES[1:] + ["3DS Files/source/" + f for f in (
     "aicarcontroller.c", "carcontroller.c", "average.c", "timer.c",
     "difficultyinfo.c", "configitems.c")]
@@ -154,6 +170,8 @@ F = {
     # 11e-4's, and the car's honk and its UpdateHeadlightsAndHorn.
     "mh": 0x00192fa8, "eca": 0x001932e8, "honk": 0x00134130,
     "uh": 0x00134198,
+    # 11e-5's: Think, Timer::CountDown and Race::CanAICarsStartDriving.
+    "think": 0x00191148, "tcd": 0x001a3cf0, "cas": 0x00149078,
 }
 BMALLOC = 0x002577c0
 BFREE = 0x00257850
@@ -227,7 +245,8 @@ W_PPOS = 336                      # World's PlayerPositions, 16 bytes each
 A_BOOST = 584                     # an action's AllowedToUseBoost
 # The controller's fields %kf sets.
 KF = {"lbt": 564, "ob": 568, "rp": 572, "glue": 588, "on": 592, "off": 596,
-      "bias": 604, "ba": 640, "cp": 644, "lrs": 536, "la": 540, "tt": 688}
+      "bias": 604, "ba": 640, "cp": 644, "lrs": 536, "la": 540, "tt": 688,
+      "bs": 552, "bss": 556, "bsg": 560, "pt": 576, "secs": 524}
 
 # 11e-4's. The car's horn and headlights, by retail's offsets from
 # WantToBlinkHeadlights: the honk and two-honk words, the start, the on,
@@ -252,6 +271,35 @@ A_PTD = 32
 A_SPEED, A_TIME, A_TOL, A_USE, A_ALLOWED = 564, 568, 572, 576, 580
 T_WPC, T_WPT, T_LEN, T_LPS = 504, 508, 512, 516
 TP_SPEEDS = 90                    # a route point's DrivingLineSpeeds
+
+# 11e-5's. bOMalloc, which Think's new JustDrive takes its slot from (AB,
+# as the harness's bSlotOMalloc); BeltMover::SetBelt, Car::DebugSetPosition,
+# DriveTargetRenderer::SetTargetToRender and bRefreshTweaker, stubbed; and
+# the globals Think reads.
+BOMALLOC = 0x00257c80
+SET_BELT = 0x00204990
+DEBUG_SET_POS = 0x00133338
+SET_TARGET_TO_RENDER = 0x001cb600
+REFRESH_TWEAKER = 0x0025d2c8
+TDR = 0x00314630                  # TheDriveTargetRenderer
+G5 = {
+    "RESET": dcc.GP - 20320,      # ResetThisCarsPosition
+    "ANGLE": dcc.GP - 13390,      # ThisCarsResetAngle, a halfword
+    "LOOP": dcc.GP - 19552,       # WorldLoopCounter
+    "SEED": dcc.GP - 14472,       # bDefaultSeed
+}
+STUB_AHBA = 0x010c2450            # the fake actions' HasBeenAccomplished
+STUB_AHF = 0x010c2460             # (40), HasFailed (48) and HasExpired
+STUB_AHE = 0x010c2470             # (56)
+TCD = 0x010c2480                  # CountDown's timer
+# The World's car counts and table, a car's rendering byte and poofed
+# word, a RacingCar's dCurrentLapNumberExact, an action's CanExpire and
+# Status.
+W_TOTAL, W_AIPOS, W_COPPOS, W_TRAFFICPOS, W_TABLE = 28, 32, 36, 40, 44
+W_MAX_CARS = 14
+C_RENDER, C_POOFED = 1192, 2160   # retail's, past the demo's 1160, 2120
+RC_DLAP = 24
+A_CAN, A_STATUS = 0, 12
 
 # The controller, by retail's offsets.
 K_SIZE = 720
@@ -428,6 +476,33 @@ def fact_at(i):
 # %eca k i               ExecuteCurrentAction, then the look-ahead, its
 #                        time, the BoostFactor and fake action i's target
 #
+# 11e-5's. Set up:
+# %rs s                  the race's RaceStage
+# %wlc v                 WorldLoopCounter
+# %wt total ai cop traffic c0 .. c13  the World's TotalNumCars, AICarPos,
+#                        CopCarPos and TrafficCarPos, and its CarTable (each
+#                        a car, -1 NULL)
+# %cl k ..               the World's car list, the cars in turn, each
+#                        rendering and not poofed (none: empty)
+# %seed w                bDefaultSeed
+# %rtp v angle           ResetThisCarsPosition and ThisCarsResetAngle
+# %dl k f                car k's RacingCar's dCurrentLapNumberExact
+# %pg k cur n total d    controller k's progress Average: its slot, its
+#                        count, its total and the slot's sample
+# %fs i can exp fail acc fake action i's CanExpire and what its HasExpired,
+#                        HasFailed and HasBeenAccomplished answer
+# %kf k field v          as 11e-4's, with bs and bss (the brake stand's
+#                        timers), bsg (BrakeStanding), pt (ProgressTimer)
+#                        and secs (SecondsBeforeNextActionEvaluation)
+# The calls:
+# %think k dt            Think, then the controller, the seed, the debug
+#                        reset's switch, the car's mode, the world's two
+#                        counts, the action's type, status and answer, and
+#                        the fakes'
+# %tcd w dt              Timer::CountDown on a timer of w, then its answer
+#                        and the timer
+# %cas                   Race::CanAICarsStartDriving on pCurrentRace
+#
 # Not scripted: a find on a controller whose table is vK and whose
 # location is clear (retail's slot 112 is __pure_virtual), a route number
 # over 99 (retail reads on past the manager's table), FindClosestTrackRoute
@@ -448,7 +523,13 @@ def fact_at(i):
 # list (the port reads through NULL where retail reads address 12; an AI
 # car's DoWeCareAboutThisCar turns it away), ExecuteCurrentAction with no
 # current action, a taken sign with no new route, and a skill whose
-# SpeedFactor lies outside TheDifficultyInfo (below -13 or past 21).
+# SpeedFactor lies outside TheDifficultyInfo (below -13 or past 21). From
+# 11e-5: ChooseNewAction answering NULL where Think goes on to the action's
+# points or its execution (both read through it), a CarTable slot before
+# the table (a negative loop counter's remainder past AICarPos or
+# TrafficCarPos), a choice beside a car of NULL (retail reads address 24),
+# a sign within the look-ahead when Think runs DoStickyDecisions, which
+# 11e-2's scenarios cover, and BuildArray beside no list owner.
 
 # Distances either side of the ones that matter.
 SECS = (0.0, 0.5, 1.5, 2.0, 3.0, -1.0, 0.000125, 0.0001, 1e6, 1e9, -1e9,
@@ -2192,6 +2273,394 @@ def s_execute(rnd):
     return ops
 
 
+# ---------------------------------------------------------------- 11e-5's
+
+THINK_DTS = (1.0 / 30.0, 1.0 / 60.0, 0.1, 0.05, 0.0, 0.25, 0.0333)
+THINK_TYPES = (0, 1, 2, 3, 4, 5, 5, 6, 6, 7, 8, 9, 10)
+# UpdateStatus's three answers: HasExpired, HasFailed, HasBeenAccomplished.
+THINK_TESTS = ((0, 0, 0),) * 5 + ((1, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1),
+                                  (1, 1, 0), (1, 0, 1), (0, 1, 1), (1, 1, 1))
+TCD_DTS = (0.0, 1.0 / 30.0, 1.0 / 60.0, 0.1, 0.25, 1.0, -0.1, -1.0, 1e6,
+           -1e6, 1e9, -1e9, 0.000125, 0.00025, 0.0002499, 0.0005)
+
+
+def ticks_of(dt):
+    """CountDown's step: dt x 4000, truncated toward zero, as the EE's
+    `cvt.w.s` saturates."""
+    v = int(f32(f32(dt) * f32(4000.0)))
+    return max(-0x80000000, min(0x7fffffff, v))
+
+
+def after_count(v, dt):
+    """What CountDown leaves of a timer of v after a step of dt."""
+    if v in (0, 0x7fffffff):
+        return v
+    n = (v - ticks_of(dt)) & M32
+    return 0 if n >= 0x80000000 else n
+
+
+def count_timer(rnd, dt, out=None):
+    """A timer running out on this step or a tick either side of it, a long
+    one, one the step leaves at 0x7fffffff, a negative one, or one not
+    running; with `out`, one the step leaves not running (True) or running
+    (False)."""
+    tr = ticks_of(dt)
+    vs = [v & M32 for v in (0, 0x7fffffff, tr, tr, tr + 1, max(tr - 1, 1),
+                            tr + 4000, 0x7fffffff + tr, 0x80000000,
+                            0xffffffff, 1)]
+    if out is not None:
+        vs = [v for v in vs if (after_count(v, dt) in (0, 0x7fffffff)) == out]
+    return rnd.choice(vs)
+
+
+def c_rem(a, b):
+    """C's remainder, with the dividend's sign."""
+    r = abs(a) % b
+    return -r if a < 0 else r
+
+
+def mean_edge(ns):
+    """The totals either side of a mean of 0.2 over ns samples: the last
+    under it and the first not."""
+    lim = f32(0.2)
+    t = f32(lim * ns)
+    while f32(t / ns) >= lim:
+        t = below(t)
+    while f32(above(t) / ns) < lim:
+        t = above(t)
+    return t, above(t)
+
+
+def think_signs(rnd, w, mine):
+    """The signs each past the look-ahead's 250 m clamp or behind me, never
+    within it, so that DoStickyDecisions decides none and stops at the
+    first ahead (sign 0 always is); a decision on one more than 10 m
+    behind goes."""
+    nsg = max(w.nsign, rnd.choice((1, 2, 3, 4)))
+    ops = []
+    for i in range(nsg):
+        if i == 0 or rnd.random() < 0.5:
+            d = f32(mine + rnd.uniform(300.0, 2000.0))
+        else:
+            d = f32(mine - rnd.choice((rnd.uniform(0.01, 9.0), 10.0,
+                                       rnd.uniform(11.0, 800.0))))
+        ops.append("%%S %d %s" % (i, h(d)))
+    ops.append("%%NS %d" % nsg)
+    return ops, nsg
+
+
+def brake_ops(rnd, now):
+    """The brake stand's timers: not running (a coin flip's phase), or the
+    phase's length a tick either side of the time since it started; the
+    phase either way, and the seed."""
+    ticks = rnd.randrange(1400, 10000)
+    since = rnd.choice((ticks - 1, ticks, ticks + 1, ticks, 0,
+                        rnd.randrange(0, 20000), -5))
+    ops = ["%%kf 0 bs %08x" % rnd.choice((ticks, ticks, ticks, 0,
+                                          0x7fffffff)),
+           "%%kf 0 bss %08x" % ((now - since) & M32),
+           "%%kf 0 bsg %d" % rnd.choice((0, 1, 1, 0, 2))]
+    if rnd.random() < 0.5:
+        ops.append("%%seed %08x" % rnd.getrandbits(32))
+    return ops
+
+
+def turn_ops(rnd, dtype, others):
+    """The world's car table and loop counter for an AI racer (a frame in
+    8) or a traffic car (a frame in 6): the counter's C remainder against
+    the count of them a car either side, and my car at that slot of the
+    table or another or none. A negative counter's slot is before the
+    first's, which is placed far enough on to stay in the table."""
+    n = 8 if dtype == 2 else 6
+    loop = rnd.choice((0, 1, 5, 7, 8, 13, 100, 12345, 0x7fffffff, -1, -5, -8,
+                       -13, -0x80000000, rnd.randrange(1 << 20)))
+    m = c_rem(loop, n)
+    base = rnd.randint(max(0, -m), W_MAX_CARS - 1 - max(m, 0))
+    diff = rnd.choice((m + 1, m + 1, m, m - 1, m + rnd.randint(1, 8), -1, 0,
+                       W_MAX_CARS))
+    table = [rnd.choice([-1, -1] + others) for _ in range(W_MAX_CARS)]
+    if rnd.random() < 0.65:
+        table[base + m] = 0
+    elif rnd.random() < 0.5:
+        table[rnd.randrange(W_MAX_CARS)] = 0
+    total, ai, cop, traffic = (rnd.randrange(W_MAX_CARS + 1),
+                               rnd.randrange(W_MAX_CARS),
+                               rnd.randrange(W_MAX_CARS),
+                               rnd.randrange(W_MAX_CARS))
+    if dtype == 2:
+        ai, cop = base, base + diff
+    else:
+        traffic, total = base, base + diff
+    return ["%%wlc %d" % loop,
+            "%%wt %d %d %d %d %s" % (total, ai, cop, traffic,
+                                     " ".join("%d" % v for v in table))]
+
+
+def progress_ops(rnd, dt):
+    """ProgressTimer either side of running out, and the progress Average
+    full or not (nine samples fill it with this one), its mean after this
+    sample a float either side of 0.2 with nothing recorded or dropped, or
+    a lap's rate over the track's length recorded over any slot."""
+    ops = ["%%kf 0 pt %08x" % count_timer(rnd, dt)]
+    n = rnd.choice((10, 10, 9, 8, 0, 4))
+    cur = rnd.randrange(10)
+    if rnd.random() < 0.5:
+        lo, hi = mean_edge(min(n + 1, 10) or 1)
+        ops.append("%%dl 0 %s" % h(rnd.choice((0.0, -0.0))))
+        ops.append("%%pg 0 %d %d %s %s" % (cur, n, h(rnd.choice((lo, hi, hi))),
+                                          h(0.0)))
+    else:
+        ops.append("%%dl 0 %s" % h(f32(rnd.choice(
+            (0.5, -0.5, 1.75, -0.0001, rnd.uniform(-3.0, 3.0))))))
+        ops.append("%%pg 0 %d %d %s %s" % (
+            cur, n, h(f32(rnd.uniform(-5.0, 50.0))),
+            h(f32(rnd.uniform(-5.0, 50.0)))))
+    return ops
+
+
+def player_ops(rnd, me):
+    """The two players' positions: 50 m from me along an axis and a float
+    either side, or further, or anywhere about."""
+    ops = []
+    for i in range(2):
+        ax = rnd.randrange(3)
+        p = list(me)
+        c = rnd.random()
+        if c < 0.4:
+            x = f32(me[ax] + 50.0 * rnd.choice((1, -1)))
+            p[ax] = rnd.choice((x, below(x), above(x)))
+        elif c < 0.75:
+            p[ax] = f32(me[ax] + rnd.choice((130.0, 200.0, -300.0, 1000.0)))
+        else:
+            p[ax] = f32(me[ax] + rnd.uniform(-150.0, 150.0))
+        ops.append(vec_op("%wp", i, p))
+    return ops
+
+
+THINK_BELT_GATES = ("np", "demo", "ob", "rp", "fs", "nw", "act", "skill",
+                    "range", "race", "bm")
+BELT_GO_TYPES = (0, 1, 2, 3, 4, 5)
+
+
+def fake_op(rnd, i, types):
+    # A score of 1 lands just past a JustDrive's (AIActionJustDriveScore,
+    # gp-18272, 0).
+    return "%%fa %d %d %d %d %d" % (i, rnd.choice(types),
+                                    rnd.choice((0, 1, 100, 300, 600)),
+                                    rnd.choice((1, 1, 0)), rnd.choice((0, 1)))
+
+
+def belt_players(rnd, me, far):
+    """The two players, the nearer 120 m from me and a float either side,
+    or nearer still."""
+    d0 = (rnd.choice((120.0, above(120.0), 300.0, 1000.0)) if far
+          else rnd.choice((below(120.0), 119.0, 50.0, 10.0, 0.0)))
+    ops = []
+    for j, slot in enumerate(rnd.sample((0, 1), 2)):
+        d = d0 if j == 0 else rnd.choice((d0, 1000.0, 5000.0))
+        ax = rnd.randrange(3)
+        p = list(me)
+        p[ax] = f32(me[ax] + d * rnd.choice((1, -1)))
+        ops.append(vec_op("%wp", slot, p))
+    return ops
+
+
+def think_round(rnd, others, me, dn):
+    """One Think: before the start, on the brake stand or standing; or
+    racing, past the progress check, the timers, the debug reset, the turn
+    and between thinks, or a think over the action, its points, its
+    execution and the belt. Every other round is the belt's, failing at
+    most one of WeCanHaveTheBelt's tests (gate_picker)."""
+    dt = f32(rnd.choice(THINK_DTS))
+    now = rnd.randrange(1 << 20, 1 << 24)
+    ops = ["G TIMER %08x" % now]
+    if rnd.random() < 0.2:
+        cop = rnd.choice((0, 0, 1))
+        stage = (rnd.choice((0, 1, 2, 2, 3, 3, 5, -1)) if not cop
+                 else rnd.choice((0, 1, -1)))
+        ops += ["%%rs %d" % stage,
+                "%%rp 0 0 %d 0 00000000 00000000" % cop]
+        ops += brake_ops(rnd, now)
+        ops.append("%%think 0 %s" % h(dt))
+        return ops
+    cop = rnd.choice((0, 0, 0, 1))
+    ops += ["%%rs %d" % (4 if not cop else rnd.choice((2, 3, 4, 5))),
+            "%%rp 0 0 %d 0 00000000 00000000" % cop]
+    belt = rnd.random() < 0.5
+    if belt:
+        ok = gate_picker(rnd, THINK_BELT_GATES)
+    else:
+        ok = lambda g: rnd.random() < 0.75
+    # The queue, and in a belt round its actions of a kind the belt takes
+    # or refuses.
+    q = [rnd.randrange(NFACTS) for _ in range(3)]
+    types = (BELT_GO_TYPES if ok("act") else BELT_STOP) if belt else None
+    if types:
+        for i in sorted(set(q)):
+            ops.append(fake_op(rnd, i, types))
+    ops.append("%%q %s" % " ".join("%d" % i for i in q))
+    # The action: none, a fake (now and then of a new type) answering
+    # UpdateStatus's tests, or whatever the last think left.
+    c = rnd.random()
+    if c < 0.15:
+        ops.append("%cur 0 -1")
+    elif c < 0.75:
+        i = rnd.randrange(NFACTS)
+        if types:
+            ops.append(fake_op(rnd, i, types))
+        elif rnd.random() < 0.4:
+            ops.append(fake_op(rnd, i, THINK_TYPES))
+        ops.append("%%cur 0 %d" % i)
+        ops.append("%%fs %d %d %d %d %d" % ((i, rnd.choice((0, 1)))
+                                           + rnd.choice(THINK_TESTS)))
+    ops.append("%%bai %d" % rnd.choice((0, 0, 0, 0, 1)))
+    ops += progress_ops(rnd, dt)
+    if belt:
+        ops += belt_players(rnd, me, ok("range"))
+    else:
+        ops += player_ops(rnd, me)
+    if rnd.random() < 0.4:
+        ops.append("@bk 0 %08x %s" % (
+            (now - rnd.choice((0, 1000, 3999, 4000, 4001, -1000))) & M32
+            if rnd.random() < 0.7 else rnd.choice((0, 0x7fffffff)),
+            h(f32(rnd.choice((0.0, 0.25, 1.0, 2.0))))))
+    # RealPhysicsTimer and the wheels down, OffBeltTimer and the mode, the
+    # glue's and the taken sign's timers.
+    ops.append("%%kf 0 rp %08x" % count_timer(rnd, dt, ok("rp")))
+    ops.append("%%fsw 0 %s %d" % (
+        h(rnd.choice((f32(5.0), above(5.0), f32(30.0))) if ok("fs")
+          else rnd.choice((below(5.0), f32(0.0), f32(-10.0)))),
+        rnd.choice((4, 4, 3, 1, 5)) if ok("nw") else rnd.choice((0, -1))))
+    ops.append("%%kf 0 ob %08x" % count_timer(rnd, dt, ok("ob")))
+    ops.append("%%mm 0 %d" % rnd.choice((6, 6, 4, 1, 0)))
+    for f in ("on", "off", "tt"):
+        if rnd.random() < 0.5:
+            ops.append("%%kf 0 %s %08x" % (f, count_timer(rnd, dt)))
+    # The debug reset, for the camera's car or another.
+    ops.append("G CAM %08x" % (rnd.choice((dn, dn, M32, dn + 1)) & M32))
+    if rnd.random() < 0.25:
+        ops.append("%%rtp %d %d" % (rnd.choice((1, 1, -1, 0)),
+                                    rnd.choice((0xc000, 0, 12345))))
+    # The turn.
+    dtype = rnd.choice((2, 2, 3, 3, 0, 1, 4))
+    ops.append("%%dt 0 %d" % dtype)
+    if dtype in (2, 3):
+        ops += turn_ops(rnd, dtype, others)
+    ops.append("%%kf 0 secs %s" % h(rnd.choice(
+        (dt, below(dt), above(dt), 0.0, f32(-0.5), f32(0.1), f32(1.0),
+         f32(dt + 0.1)))))
+    # Between thinks: a choice beside a player's car or not.
+    if rnd.random() < 0.5:
+        if others and rnd.random() < 0.7:
+            k = rnd.choice(others)
+            ops.append("%%ch 0 %d %d %d" % (rnd.choice((5, 6)), k,
+                                            rnd.choice((0, 1))))
+            ops.append("%%pl %d %d" % (k, rnd.choice((1, 1, 0))))
+        else:
+            ops.append("%%ch 0 %d %d %d" % (rnd.choice((0, 1, 2, 3, 4, 7)),
+                                            rnd.choice([-1] + others),
+                                            rnd.choice((0, 1))))
+    if rnd.random() < 0.15:
+        ops.append("%%cl %s" % " ".join(
+            "%d" % k for k in rnd.sample([0] + others,
+                                         rnd.randrange(len(others) + 2))))
+    # The location cleared now and then, and the routes FindWhereIAm may
+    # take.
+    if rnd.random() < 0.12:
+        ops.append("%L 0 -1 -1 -1 0")
+    if rnd.random() < 0.15:
+        ops.append("%%rn 0 %d %d" % rnd.choice(((0, 99), (0, 0), (0, 49))))
+    # The belt's other tests.
+    ops.append("%%np 0 %d" % (rnd.choice((3, 4, 20)) if ok("np")
+                              else rnd.choice((0, 2, -1))))
+    ops.append("%%RC %d" % (rnd.choice((0, 0, 3, 9, 7)) if ok("demo")
+                            else 8))
+    ops.append("%%rt 0 %08x" % (rnd.choice((T30, T30 + 1, 10 * T30))
+                                if ok("race")
+                                else rnd.choice((T30 - 1, 0, T30 // 2,
+                                                 0xffffffff, 0x80000000))))
+    ops.append("@sk 0 %d" % (rnd.choice((-3, -1, 0, 5, 9)) if ok("skill")
+                             else -2))
+    ops.append("%%bm %d" % (rnd.choice((1, 1, 2, -1)) if ok("bm") else 0))
+    ops.append("%%think 0 %s" % h(dt))
+    # Half the rounds that began with no action think again at once, so the
+    # JustDrive this one made meets InterruptAction with a fact scored at
+    # its own score (AIActionJustDriveScore, 0) or just past it.
+    if c < 0.15 and rnd.random() < 0.5:
+        i = rnd.randrange(NFACTS)
+        ops += ["%%fa %d %d %d %d %d" % (i, rnd.choice(THINK_TYPES),
+                                         rnd.choice((1, 1, 0, 2)),
+                                         rnd.choice((1, 1, 0)),
+                                         rnd.choice((0, 1))),
+                "%%q %d %d %d" % (i, rnd.randrange(NFACTS),
+                                  rnd.randrange(NFACTS)),
+                "%%think 0 %s" % h(dt)]
+    return ops
+
+
+def s_think(rnd):
+    """Think, frame after frame, on my car (0) in the walk world, the
+    others about it in the world's car list: before the start (standing,
+    or the brake stand's phases at their edges from the default seed), and
+    racing, over the progress check, every timer either side of running
+    out, the debug reset, an AI racer's and a traffic car's turn at the
+    loop counter's edges and anyone else's on its clock, between thinks
+    beside a player's car, the location clear, each action's way to done,
+    interrupted, BoringAIForCameraTuningOn's three, and the belt taken,
+    kept, refused and left."""
+    w, sizes, others = route_world(rnd, nsigns=rnd.choice((0, 0, 2)))
+    ops = w.ops
+    v = w.cars[0]
+    me = tuple(f32(v[a]) for a in ("px", "py", "pz"))
+    mine = f32(rnd.uniform(0.0, 1000.0))
+    so, nsg = think_signs(rnd, w, mine)
+    ops += so
+    ops.append("%%d 0 %s" % h(mine))
+    ops.append("%%si 0 %d" % rnd.randrange(nsg))
+    if rnd.random() < 0.4:
+        ops.append(sticky_words(rnd, nsg, dsd=True))
+    for k in others:
+        ops.append("%%d %d %s" % (k, h(f32(mine + rnd.uniform(-60.0,
+                                                               60.0)))))
+    ops.append("G TLEN %s" % h(f32(rnd.choice((0.0, 5000.0, 20000.0)))))
+    ops += ["%rc 0 1 00000000", "%kf 0 ba 0"]
+    for i in range(NFACTS):
+        ops.append("%%fa %d %d %d %d %d" % (
+            i, rnd.choice(THINK_TYPES), rnd.choice((0, 100, 300, 500, 600)),
+            rnd.choice((1, 1, 0)), rnd.choice((0, 1))))
+    ops.append("%%rn 0 %d %d" % rnd.choice(((0, 99), (0, 99), (0, 99),
+                                            (0, 0))))
+    ops.append("%%cl %s" % " ".join(
+        "%d" % k for k in rnd.sample([0] + others, len(others) + 1)))
+    for _ in range(rnd.randrange(5, 11)):
+        ops += think_round(rnd, others, me, v["dn"])
+    return ops
+
+
+def s_tcd(rnd):
+    """Timer::CountDown over steps of every size and sign, timers either
+    side of running out, wrapping and not running."""
+    ops = []
+    for _ in range(rnd.randrange(10, 20)):
+        dt = f32(rnd.choice(TCD_DTS + (rnd.uniform(-1.0, 1.0),)))
+        tr = ticks_of(dt)
+        ops.append("%%tcd %08x %s" % (rnd.choice(
+            (0, 0x7fffffff, 1, 0x80000000, 0xffffffff, 0x7ffffffe,
+             rnd.getrandbits(32), tr, tr + 1, tr - 1,
+             0x7fffffff + tr)) & M32, h(dt)))
+    return ops
+
+
+def s_cas():
+    """Race::CanAICarsStartDriving at every stage, BeACop or not."""
+    ops = []
+    for s in (-1, 0, 1, 2, 3, 4, 5, 6, 0x7fffffff, -0x80000000):
+        for cop in (0, 1, -1, 2):
+            ops += ["%%rs %d" % s,
+                    "%%rp 0 0 %d 0 00000000 00000000" % cop, "%cas"]
+    return ops
+
+
 N_BUILD = 40
 N_WHERE = 30
 N_LINE = 16
@@ -2211,6 +2680,8 @@ N_CATCHUP = 30
 N_HONK = 60
 N_LIGHTS = 30
 N_EXECUTE = 80
+N_THINK = 120
+N_TCD = 6
 
 
 def script():
@@ -2259,6 +2730,13 @@ def script():
         sc.append(s_lights(rnd))
     for _ in range(N_EXECUTE):
         sc.append(s_execute(rnd))
+    rnd = random.Random(0x11e5)
+    _PICK.seed(0x11e5)
+    for _ in range(N_THINK):
+        sc.append(s_think(rnd))
+    for _ in range(N_TCD):
+        sc.append(s_tcd(rnd))
+    sc.append(s_cas())
     return sc
 
 
@@ -2317,6 +2795,17 @@ class Model(dcc.Model):
         e.stub(STUB_ISH, self.s_ish)
         e.stub(WORLD_RANDOM_I, self.s_irandom)
         self.ish = {}
+        # 11e-5's: bOMalloc, SetBelt, DebugSetPosition, SetTargetToRender
+        # and bRefreshTweaker, and the fake actions' three tests.
+        e.stub(BOMALLOC, self.s_omalloc)
+        e.stub(SET_BELT, self.s_setbelt)
+        e.stub(DEBUG_SET_POS, self.s_dsp)
+        e.stub(SET_TARGET_TO_RENDER, self.s_render)
+        e.stub(REFRESH_TWEAKER, self.s_tweak)
+        e.stub(STUB_AHE, lambda em: self.s_atest(em, 0, "ahe"))
+        e.stub(STUB_AHF, lambda em: self.s_atest(em, 1, "ahf"))
+        e.stub(STUB_AHBA, lambda em: self.s_atest(em, 2, "ahba"))
+        self.fa_test = {}
 
     # ---- names -----------------------------------------------------------
 
@@ -2467,9 +2956,16 @@ class Model(dcc.Model):
             fx(em.fpr[14]), s32(em.reg[5])))
 
     def s_stg(self, em):
+        """A target that is no one's is Think's own, on its stack: shown
+        whole."""
         k = self.driver_car(em)
-        self.emit("  stg %s %s" % (self.name(car_at(k)),
-                                   self.name(em.reg[5])))
+        t = em.reg[5] & M32
+        n = self.name(t)
+        if not n.startswith("?"):
+            self.emit("  stg %s %s" % (self.name(car_at(k)), n))
+            return
+        self.emit("  stg %s tmp" % self.name(car_at(k)))
+        self.dump_target(t)
 
     def s_hon(self, em):
         self.emit("  honkon %s" % self.name(car_at(self.driver_car(em))))
@@ -2490,6 +2986,34 @@ class Model(dcc.Model):
             v = self.rq[self.ri]
             self.ri += 1
         return v
+
+    def s_omalloc(self, em):
+        self.emit("  omalloc %s" % self.name(em.reg[4]))
+        return dcc.AB
+
+    def s_setbelt(self, em):
+        self.emit("  setbelt %s" % self.name(em.reg[4]))
+
+    def s_dsp(self, em):
+        r, w = em.reg, self.w
+        p = r[5] & M32
+        self.emit("  dsp %s %s %s %s %s %d" % (
+            self.name(r[4]), fx(w(p)), fx(w(p + 4)), fx(w(p + 8)),
+            fx(em.fpr[12]), r[6] & 0xffff))
+
+    def s_render(self, em):
+        r = em.reg
+        tdr = "tdr" if r[4] & M32 == TDR else self.name(r[4])
+        self.emit("  render %s %s" % (tdr, self.name(r[5])))
+
+    def s_tweak(self, em):
+        pass
+
+    def s_atest(self, em, which, tag):
+        a = em.reg[4] & M32
+        i = self.fact_index(a)
+        self.emit("  %s %s %s" % (tag, self.name(a), self.name(em.reg[5])))
+        return self.fa_test.get(i, (0, 0, 0))[which] & M32
 
     # ---- the world -------------------------------------------------------
 
@@ -2545,6 +3069,23 @@ class Model(dcc.Model):
         for g in G4.values():
             e.put32(g, 0)
         self.ish = {}
+        # 11e-5's: the fake actions' three tests, the loop counter 0, the
+        # default seed as the image starts it, the debug reset off at its
+        # angle, an empty car list and car table, and no test answering.
+        e.put32(AVT + 40 + 4, STUB_AHBA)
+        e.put32(AVT + 48 + 4, STUB_AHF)
+        e.put32(AVT + 56 + 4, STUB_AHE)
+        e.put32(G5["LOOP"], 0)
+        e.put32(G5["SEED"], 0x12345678)
+        e.put32(G5["RESET"], 0)
+        struct.pack_into("<H", e.mem, G5["ANGLE"], 0xc000)
+        e.put32(WORLD, WORLD)
+        e.put32(WORLD + 4, WORLD)
+        for off in (W_TOTAL, W_AIPOS, W_COPPOS, W_TRAFFICPOS):
+            e.put32(WORLD + off, 0)
+        e.mem[WORLD + W_TABLE:WORLD + W_TABLE + 4 * W_MAX_CARS] = bytes(
+            4 * W_MAX_CARS)
+        self.fa_test = {}
 
     # ---- the dumps -------------------------------------------------------
 
@@ -2657,6 +3198,22 @@ class Model(dcc.Model):
             i, s8(self.e.mem[p]), s32(w(p + T_WPC)), s32(w(p + T_WPT)),
             fx(w(p + T_LEN)), s8(self.e.mem[p + T_LPS])))
 
+    def dump_think(self, k):
+        """After a think: the controller, the seed, the debug reset's
+        switch, the car's movement mode, the world's two counts, the action
+        and the fakes."""
+        w = self.w
+        self.dump_ctrl(k)
+        self.emit("  T seed %08x rtp %d mode %d ids %d %d" % (
+            w(G5["SEED"]), s32(w(G5["RESET"])), s32(w(car_at(k) + C_MODE)),
+            s32(w(WORLD + dcc.W_ID)), s32(w(WORLD + dcc.W_PDT_ID))))
+        act = w(ctrl_at(k) + K_ACTION)
+        if act:
+            self.emit("  T act type %d st %d pt %d" % (
+                s32(w(act + A_TYPE)), s32(w(act + A_STATUS)),
+                s32(w(act + A_PT))))
+        self.dump_facts()
+
     # ---- the ops ---------------------------------------------------------
 
     def hl_of(self, k, s):
@@ -2668,7 +3225,9 @@ class Model(dcc.Model):
     def pct(self, t):
         e, w = self.e, self.w
         c = t[0][1:]
-        k = int(t[1]) if len(t) > 1 else 0
+        # %seed's and %tcd's first word is hex, where the harness's atoi
+        # reads 0 or its leading digits; neither reads k.
+        k = int(t[1]) if len(t) > 1 and c not in ("seed", "tcd") else 0
         a = ctrl_at(k) if 0 <= k < NCARS else ctrl_at(0)
         car = car_at(k) if 0 <= k < NCARS else 0
         if c == "d":
@@ -2962,7 +3521,7 @@ class Model(dcc.Model):
                 e.put32(a + KF[f], self.car_ptr(v))
             elif f == "cp":
                 e.put32(a + KF[f], self.plr_at(int(v)))
-            elif f in ("ba", "la"):
+            elif f in ("ba", "la", "bsg"):
                 e.put32(a + KF[f], int(v) & M32)
             else:
                 e.put32(a + KF[f], int(v, 16))
@@ -3054,6 +3613,60 @@ class Model(dcc.Model):
                 s32(w(a + K_LA)), w(a + KF["lrs"]), fx(w(car + C_BOOST))))
             self.dump_ptd(int(t[2]))
         else:
+            return self.pct5(c, k, a, car, t)
+        return True
+
+    def pct5(self, c, k, a, car, t):
+        """11e-5's ops; False for none of them."""
+        e, w = self.e, self.w
+        if c == "rs":
+            e.put32(RACE, k & M32)
+        elif c == "wlc":
+            e.put32(G5["LOOP"], k & M32)
+        elif c == "wt":
+            for off, v in zip((W_TOTAL, W_AIPOS, W_COPPOS, W_TRAFFICPOS),
+                              t[1:5]):
+                e.put32(WORLD + off, int(v) & M32)
+            e.mem[WORLD + W_TABLE:WORLD + W_TABLE + 4 * W_MAX_CARS] = bytes(
+                4 * W_MAX_CARS)
+            for i, v in enumerate(t[5:5 + W_MAX_CARS]):
+                e.put32(WORLD + W_TABLE + 4 * i, self.car_ptr(v))
+        elif c == "cl":
+            nodes = [WORLD] + [car_at(int(v)) for v in t[1:]]
+            for i, nd in enumerate(nodes):
+                e.put32(nd, nodes[(i + 1) % len(nodes)])
+                e.put32(nd + 4, nodes[i - 1])
+            for nd in nodes[1:]:
+                e.mem[nd + C_RENDER] = 1
+                e.put32(nd + C_POOFED, 0)
+        elif c == "seed":
+            e.put32(G5["SEED"], int(t[1], 16))
+        elif c == "rtp":
+            e.put32(G5["RESET"], k & M32)
+            struct.pack_into("<H", e.mem, G5["ANGLE"], int(t[2]) & 0xffff)
+        elif c == "dl":
+            e.put32(RCARS + RC_STRIDE * k + RC_DLAP, int(t[2], 16))
+        elif c == "pg":
+            p = w(a + K_PROG)
+            cur = int(t[2]) & 0xff
+            e.mem[p + 1] = cur
+            e.mem[p + 2] = int(t[3]) & 0xff
+            e.put32(p + 4, int(t[4], 16))
+            e.put32(w(p + 12) + 4 * cur, int(t[5], 16))
+        elif c == "fs":
+            e.put32(fact_at(k) + A_CAN, int(t[2]) & M32)
+            self.fa_test[k] = (int(t[3]), int(t[4]), int(t[5]))
+        elif c == "think":
+            self.call(F["think"], a, f12=int(t[2], 16))
+            self.dump_think(k)
+        elif c == "tcd":
+            e.put32(TCD, int(t[1], 16))
+            got = self.call(F["tcd"], TCD, f12=int(t[2], 16))
+            self.emit("  tcd %d %08x" % (s32(got), w(TCD)))
+        elif c == "cas":
+            got = self.call(F["cas"], w(GLOBALS["RACE"]))
+            self.emit("  cas %d" % s32(got))
+        else:
             return False
         return True
 
@@ -3113,8 +3726,8 @@ MUTATIONS = [
       "    c->LastBoostCalculationTime", "    c->LastBoostCalculationTime"),
     M("ct-glue", "    c->pGlueCar = NULL;\n    c->GlueOnTimer.PackedTime = 0;",
       "    c->GlueOnTimer.PackedTime = 0;"),
-    M("ct-progress", "    timer_set_time(&c->ProgressTimer, AICC_PROGRESS_SECONDS);",
-      "    timer_set_time(&c->ProgressTimer, AICC_OFF_BELT_SECONDS);"),
+    M("ct-progress", "    timer_set_time(&c->ProgressTimer, AICC_PROGRESS_SECONDS);\n    c->pProgress",
+      "    timer_set_time(&c->ProgressTimer, AICC_OFF_BELT_SECONDS);\n    c->pProgress"),
     M("ct-avg10", "                           CAR_MEMORY_POOL), 10);",
       "                           CAR_MEMORY_POOL), 11);"),
     M("ct-avg5", "                           CAR_MEMORY_POOL), 5);",
@@ -3239,8 +3852,8 @@ MUTATIONS = [
       "                    0.5f, 0.0f,"),
     M("gl-move", "                    MOVEMENT_TOWARDS_LINE)) {",
       "                    MOVEMENT_PARALLEL_TO_LINE)) {"),
-    M("gl-list", "                    c->CurrentNearbyCarList, 0.0f,",
-      "                    &c->MyCurrentDrivingInformation.MyNearbyCarList, 0.0f,"),
+    M("gl-list", "                    c->CurrentNearbyCarList, 0.0f,\n                    AIDriverAvoid",
+      "                    &c->MyCurrentDrivingInformation.MyNearbyCarList, 0.0f,\n                    AIDriverAvoid"),
     M("gl-found", "                found = 1;", "                found = 0;"),
     M("gl-line", "                *line = drivingchoice_get_driving_line(type, c->Base.pCar);\n"
       "                break;", "                break;"),
@@ -3973,8 +4586,8 @@ MUTATIONS = [
       "        speed *= c->Base.pCar->State.BoostFactor;\n"),
     M("eca-line-allowed", "        tol = a->DesiredSpeedTolerance;\n        allowed = a->AllowedToUseThrottleAndBrake;\n    }\n    d = c->Base.Driver;",
       "        tol = a->DesiredSpeedTolerance;\n    }\n    d = c->Base.Driver;"),
-    M("eca-sds-order", "    ((DriverDesiredSpeedFn)e->fn)(vt_this(d, e), speed, time, tol, allowed);",
-      "    ((DriverDesiredSpeedFn)e->fn)(vt_this(d, e), speed, tol, time, allowed);"),
+    M("eca-sds-order", "    ((DriverDesiredSpeedFn)e->fn)(vt_this(d, e), speed, time, tol, allowed);\n    aiaction_clear",
+      "    ((DriverDesiredSpeedFn)e->fn)(vt_this(d, e), speed, tol, time, allowed);\n    aiaction_clear"),
     M("eca-clear-ptd", "    aiaction_clear_points_to_drive(c->CurrentAction);\n}", "}"),
     M("eca-sign", "    if (c->TakenSignpostIndex != -1) {", "    if (c->TakenSignpostIndex > 0) {"),
     M("eca-sign-line", "                                 &SignpostArray[c->TakenSignpostIndex]),\n                             l->DrivingLine);",
@@ -3991,8 +4604,8 @@ MUTATIONS = [
       "        && TheDifficultyInfo.Misc.RoutePointChangeFrequency\n               <= (float)"),
     M("eca-freq-time", "                                  - c->LastRoutePointLookaheadSwitch.PackedTime)\n                     * AICC_TICKS_TO_SECONDS) {",
       "                                  - c->LastBoostCalculationTime.PackedTime)\n                     * AICC_TICKS_TO_SECONDS) {"),
-    M("eca-freq-u", "               < (float)(int32_t)((uint32_t)WorldTimer\n",
-      "               < (float)((uint32_t)WorldTimer\n"),
+    M("eca-freq-u", "               < (float)(int32_t)((uint32_t)WorldTimer\n                                  - c->LastRoutePoint",
+      "               < (float)((uint32_t)WorldTimer\n                                  - c->LastRoutePoint"),
     M("eca-var", "        int32_t v = TheDifficultyInfo.AISkillLevel[skill].RoutePointVariance\n                    + 1;",
       "        int32_t v = TheDifficultyInfo.AISkillLevel[skill].RoutePointVariance\n                    + 2;"),
     M("eca-var-2", "            world_random_i(pCurrentWorld, 2 * v) - v;", "            world_random_i(pCurrentWorld, v) - v;"),
@@ -4013,6 +4626,139 @@ MUTATIONS = [
       "        + (ptrdiff_t)sizeof(SkillLevelEntry) * (skill < 0 ? 0 : skill)\n"),
     M("eca-factor-field", "        + offsetof(SkillLevelEntry, SpeedFactor));",
       "        + offsetof(SkillLevelEntry, SpeedFactor) + 4);"),
+    # 11e-5's: Timer::CountDown, Race::CanAICarsStartDriving and Think.
+    M("tcd-valid", "    if (timer_is_valid(t)) {\n        // `subu`", "    if (1) {\n        // `subu`", rel=TIMER_C),
+    M("tcd-neg1", "        if ((int32_t)v < 0)\n            t->PackedTime = 0;", "        if ((int32_t)v < -1)\n            t->PackedTime = 0;", rel=TIMER_C),
+    M("tcd-unsigned", "        if ((int32_t)v < 0)\n            t->PackedTime = 0;", "        if (v > 0xfffffff0u)\n            t->PackedTime = 0;", rel=TIMER_C),
+    M("tcd-round", "(uint32_t)ee_trunc_w(dt * 4000.0f);", "(uint32_t)ee_trunc_w(dt * 4000.0f + 0.5f);", rel=TIMER_C),
+    M("tcd-rate", "(uint32_t)ee_trunc_w(dt * 4000.0f);", "(uint32_t)ee_trunc_w(dt * 4001.0f);", rel=TIMER_C),
+    M("tcd-return", "            t->PackedTime = 0;\n    }\n    return timer_is_valid(t);", "            t->PackedTime = 0;\n    }\n    return t->PackedTime != 0;", rel=TIMER_C),
+    M("cas-racing", "    return s == RACE_STAGE_RACING\n", "    return s >= RACE_STAGE_RACING\n", rel=RACE_C),
+    M("cas-cop-stage", "&& s >= RACE_STAGE_PRERACE);", "&& s > RACE_STAGE_PRERACE);", rel=RACE_C),
+    M("cas-cop-or", "(TheRaceParameters.BeACop != 0 && s >= RACE_STAGE_PRERACE)", "(TheRaceParameters.BeACop != 0 || s >= RACE_STAGE_PRERACE)", rel=RACE_C),
+    M("cas-cop-pos", "(TheRaceParameters.BeACop != 0 && s", "(TheRaceParameters.BeACop > 0 && s", rel=RACE_C),
+    M("th-start", "    if (!race_can_ai_cars_start_driving(pCurrentRace)) {", "    if (0) {"),
+    M("th-prerace-le", "        if (race_get_race_stage(pCurrentRace) < RACE_STAGE_PRERACE)", "        if (race_get_race_stage(pCurrentRace) <= RACE_STAGE_PRERACE)"),
+    M("th-prerace-u", "        if (race_get_race_stage(pCurrentRace) < RACE_STAGE_PRERACE)", "        if ((uint32_t)race_get_race_stage(pCurrentRace) < RACE_STAGE_PRERACE)"),
+    M("th-stand-allowed", "            set_desired_speed(c, 0.0f, 0.0f, 0.0f, 1);\n        else\n            brake_stand(c);", "            set_desired_speed(c, 0.0f, 0.0f, 0.0f, 0);\n        else\n            brake_stand(c);"),
+    M("th-stand-straight", "            brake_stand(c);\n        aicarcontroller_steer_straight_ahead(c);\n", "            brake_stand(c);\n"),
+    M("th-stand-return", "        aicarcontroller_steer_straight_ahead(c);\n        return;\n    }\n\n    a = c->CurrentAction;", "        aicarcontroller_steer_straight_ahead(c);\n    }\n\n    a = c->CurrentAction;"),
+    M("bs-valid", "    if (!timer_is_valid(&c->BrakeStandTimer)) {", "    if (c->BrakeStandTimer.PackedTime == 0) {"),
+    M("bs-coin", "        c->BrakeStanding = bRandomI(2, &bDefaultSeed) != 0;", "        c->BrakeStanding = 1;"),
+    M("bs-coin-3", "        c->BrakeStanding = bRandomI(2, &bDefaultSeed) != 0;", "        c->BrakeStanding = bRandomI(3, &bDefaultSeed) != 0;"),
+    M("bs-le", "               < (float)(int32_t)((uint32_t)WorldTimer\n                                  - c->BrakeStandTimerStart.PackedTime)", "               <= (float)(int32_t)((uint32_t)WorldTimer\n                                  - c->BrakeStandTimerStart.PackedTime)"),
+    M("bs-since", "                                  - c->BrakeStandTimerStart.PackedTime)\n                     * AICC_TICKS_TO_SECONDS) {\n        c->BrakeStanding ^= 1;", "                                  - c->BrakeStandTimer.PackedTime)\n                     * AICC_TICKS_TO_SECONDS) {\n        c->BrakeStanding ^= 1;"),
+    M("bs-since-u", "               < (float)(int32_t)((uint32_t)WorldTimer\n                                  - c->BrakeStandTimerStart.PackedTime)", "               < (float)((uint32_t)WorldTimer\n                                  - c->BrakeStandTimerStart.PackedTime)"),
+    M("bs-toggle", "        c->BrakeStanding ^= 1;", "        c->BrakeStanding = !c->BrakeStanding;"),
+    M("bs-toggle-none", "        c->BrakeStanding ^= 1;\n", ""),
+    M("bs-phase", "        if (c->BrakeStanding) {\n            f = bRandomF(AICC_BRAKE_STAND_RANGE", "        if (!c->BrakeStanding) {\n            f = bRandomF(AICC_BRAKE_STAND_RANGE"),
+    M("bs-range", "#define AICC_BRAKE_STAND_RANGE   0.25f", "#define AICC_BRAKE_STAND_RANGE   0.375f"),
+    M("bs-add", "#define AICC_BRAKE_STAND_ADD     0.349999994f", "#define AICC_BRAKE_STAND_ADD     0.375f"),
+    M("bs-roll-range", "#define AICC_ROLL_RANGE          1.0f", "#define AICC_ROLL_RANGE          1.25f"),
+    M("bs-roll-add", "#define AICC_ROLL_ADD            1.5f", "#define AICC_ROLL_ADD            1.625f"),
+    M("bs-set", "        timer_set_time(&c->BrakeStandTimer, f + add);\n", "        timer_set_time(&c->BrakeStandTimer, f);\n"),
+    M("bs-start", "        timer_set_time(&c->BrakeStandTimerStart,\n                       (float)WorldTimer * AICC_TICKS_TO_SECONDS);\n", ""),
+    M("bs-speed", "#define AICC_BRAKE_STAND_SPEED   100.0f", "#define AICC_BRAKE_STAND_SPEED   99.0f"),
+    M("bs-speed-phase", "    set_desired_speed(c, c->BrakeStanding ? AICC_BRAKE_STAND_SPEED : 0.0f,", "    set_desired_speed(c, c->BrakeStanding ? 0.0f : AICC_BRAKE_STAND_SPEED,"),
+    M("bs-allowed", "                      0.0f, 0.0f, 1);\n}\n\n// Whether this frame", "                      0.0f, 0.0f, 0);\n}\n\n// Whether this frame"),
+    M("pg-act", "    if (a != NULL && a->Type != AIACTION_PULL_OVER\n", "    if ((a == NULL || a->Type != AIACTION_PULL_OVER)\n"),
+    M("pg-type", "    if (a != NULL && a->Type != AIACTION_PULL_OVER\n", "    if (a != NULL\n"),
+    M("pg-valid", "        && timer_is_valid(&c->ProgressTimer)\n", ""),
+    M("pg-count", "        && !timer_count_down(&c->ProgressTimer, dt)) {", "        && timer_count_down(&c->ProgressTimer, dt)) {"),
+    M("pg-secs", "        timer_set_time(&c->ProgressTimer, AICC_PROGRESS_SECONDS);\n        average_record", "        timer_set_time(&c->ProgressTimer, 1.75f);\n        average_record"),
+    M("pg-abs", "                           * fabsf(car->pRacingCar->dCurrentLapNumberExact));", "                           * car->pRacingCar->dCurrentLapNumberExact);"),
+    M("pg-len", "                       TheTrackPathManager.TrackLength\n                           * fabsf(", "                       1.0f\n                           * fabsf("),
+    M("pg-near-le", "               < AICC_PROGRESS_PLAYER_RANGE;", "               <= AICC_PROGRESS_PLAYER_RANGE;"),
+    M("pg-range", "#define AICC_PROGRESS_PLAYER_RANGE  50.0f", "#define AICC_PROGRESS_PLAYER_RANGE  50.5f"),
+    M("pg-blink", "        if (!car_is_blinking(car)\n", "        if (1\n"),
+    M("pg-full", "            && c->pProgress->nSamples == c->pProgress->nSlots\n", "            && c->pProgress->nSamples + 1 >= c->pProgress->nSlots\n"),
+    M("pg-full-none", "            && c->pProgress->nSamples == c->pProgress->nSlots\n", ""),
+    M("pg-min-le", "            && c->pProgress->fAverage < AICC_PROGRESS_MIN && !near)", "            && c->pProgress->fAverage <= AICC_PROGRESS_MIN && !near)"),
+    M("pg-min", "#define AICC_PROGRESS_MIN           0.200000003f", "#define AICC_PROGRESS_MIN           0.25f"),
+    M("pg-near", "            && c->pProgress->fAverage < AICC_PROGRESS_MIN && !near)", "            && c->pProgress->fAverage < AICC_PROGRESS_MIN)"),
+    M("pg-reset", "            car_please_reset_me_later(car);\n    }\n\n    if (timer_is_valid(&c->RealPhysicsTimer)", "            ;\n    }\n\n    if (timer_is_valid(&c->RealPhysicsTimer)"),
+    M("rp-valid", "    if (timer_is_valid(&c->RealPhysicsTimer)\n        && !timer_count_down", "    if (!timer_count_down"),
+    M("rp-wheels", "        if (car->State.nWheelsTouchingGround < 4)", "        if (car->State.nWheelsTouchingGround < 3)"),
+    M("rp-again", "#define AICC_REAL_PHYSICS_AGAIN_SECONDS 1.0f", "#define AICC_REAL_PHYSICS_AGAIN_SECONDS 1.25f"),
+    M("rp-mode", "            car_set_movement_mode(car, nDefaultMovementMode);\n    }\n    if (timer_is_valid(&c->OffBeltTimer)) {", "            car_set_movement_mode(car, PHYSICS_MOVEMENT);\n    }\n    if (timer_is_valid(&c->OffBeltTimer)) {"),
+    M("ob-valid", "    if (timer_is_valid(&c->OffBeltTimer)) {", "    if (1) {"),
+    M("ob-mode", "        if (car->TheMovementMode == BELT_MOVEMENT)\n            car_set_movement_mode(car, nDefaultMovementMode);\n        timer_count_down", "        if (1)\n            car_set_movement_mode(car, nDefaultMovementMode);\n        timer_count_down"),
+    M("ob-count", "        timer_count_down(&c->OffBeltTimer, dt);\n", ""),
+    M("glue-on-count", "    timer_count_down(&c->GlueOnTimer, dt);\n", ""),
+    M("glue-off-count", "    timer_count_down(&c->GlueOffTimer, dt);\n", ""),
+    M("tt-count", "    timer_count_down(&c->TakenSignpostTimer, dt);\n", ""),
+    M("rtp-cam", "    if (CameraFollowThisCarInstead == car->DriverNumber\n        && ResetThisCarsPosition) {", "    if (ResetThisCarsPosition) {"),
+    M("rtp-switch", "    if (CameraFollowThisCarInstead == car->DriverNumber\n        && ResetThisCarsPosition) {", "    if (CameraFollowThisCarInstead == car->DriverNumber) {"),
+    M("rtp-clear", "        ResetThisCarsPosition = 0;\n", ""),
+    M("rtp-x", "#define AICC_RESET_X              (-890.0f)", "#define AICC_RESET_X              (-889.0f)"),
+    M("rtp-y", "#define AICC_RESET_Y              (-332.0f)", "#define AICC_RESET_Y              (-331.0f)"),
+    M("rtp-z", "#define AICC_RESET_Z              (-78.0f)", "#define AICC_RESET_Z              (-77.0f)"),
+    M("rtp-angle", "        car_debug_set_position(car, &p, 0.0f, ThisCarsResetAngle);", "        car_debug_set_position(car, &p, 0.0f, 0xc000);"),
+    M("rtp-speed", "        car_debug_set_position(car, &p, 0.0f, ThisCarsResetAngle);", "        car_debug_set_position(car, &p, 1.0f, ThisCarsResetAngle);"),
+    M("th-secs-sub", "    c->SecondsBeforeNextActionEvaluation -= dt;\n", ""),
+    M("th-start-n", "    list->NumCarsInArray = 0;\n    list->MyHalfSizeL = 0.0f;\n    list->MyHalfSizeD = 0.0f;\n    if (!my_turn", "    list->MyHalfSizeL = 0.0f;\n    list->MyHalfSizeD = 0.0f;\n    if (!my_turn"),
+    M("th-start-hl", "    list->NumCarsInArray = 0;\n    list->MyHalfSizeL = 0.0f;\n    list->MyHalfSizeD = 0.0f;\n    if (!my_turn", "    list->NumCarsInArray = 0;\n    list->MyHalfSizeD = 0.0f;\n    if (!my_turn"),
+    M("th-start-hd", "    list->NumCarsInArray = 0;\n    list->MyHalfSizeL = 0.0f;\n    list->MyHalfSizeD = 0.0f;\n    if (!my_turn", "    list->NumCarsInArray = 0;\n    list->MyHalfSizeL = 0.0f;\n    if (!my_turn"),
+    M("turn-8", "#define AICC_RACER_TURNS   8", "#define AICC_RACER_TURNS   7"),
+    M("turn-6", "#define AICC_TRAFFIC_TURNS 6", "#define AICC_TRAFFIC_TURNS 5"),
+    M("turn-racer-u", "        m = WorldLoopCounter % AICC_RACER_TURNS;", "        m = (int32_t)((uint32_t)WorldLoopCounter % AICC_RACER_TURNS);"),
+    M("turn-traffic-u", "        m = WorldLoopCounter % AICC_TRAFFIC_TURNS;", "        m = (int32_t)((uint32_t)WorldLoopCounter % AICC_TRAFFIC_TURNS);"),
+    M("turn-racer-le", "        return m < w->CopCarPos - w->AICarPos\n", "        return m <= w->CopCarPos - w->AICarPos\n"),
+    M("turn-racer-table", "            && w->CarTable[w->AICarPos + m] == car;", "            && w->CarTable[w->AICarPos + m] != NULL;"),
+    M("turn-racer-count", "        return m < w->CopCarPos - w->AICarPos\n", "        return m < w->TotalNumCars - w->AICarPos\n"),
+    M("turn-traffic-le", "        return m < w->TotalNumCars - w->TrafficCarPos\n", "        return m <= w->TotalNumCars - w->TrafficCarPos\n"),
+    M("turn-traffic-table", "            && w->CarTable[w->TrafficCarPos + m] == car;", "            && w->CarTable[w->TrafficCarPos + m] != NULL;"),
+    M("turn-traffic-count", "        return m < w->TotalNumCars - w->TrafficCarPos\n", "        return m < w->CopCarPos - w->TrafficCarPos\n"),
+    M("turn-secs-lt", "        return c->SecondsBeforeNextActionEvaluation <= 0.0f;", "        return c->SecondsBeforeNextActionEvaluation < 0.0f;"),
+    M("turn-racer-type", "    case DRIVER_TYPE_AI_RACER:\n        m = WorldLoopCounter", "    case DRIVER_TYPE_COP:\n        m = WorldLoopCounter"),
+    M("turn-act", "    if (!my_turn(c, car) && c->CurrentAction != NULL) {", "    if (!my_turn(c, car)) {"),
+    M("th-interval", "#define AICC_THINK_INTERVAL         0.100000001f", "#define AICC_THINK_INTERVAL         0.125f"),
+    M("th-secs-add", "    c->SecondsBeforeNextActionEvaluation += AICC_THINK_INTERVAL;\n", ""),
+    M("th-sticky", "    aicarcontroller_do_sticky_decisions(c);\n    nearbycarlist_build_array", "    nearbycarlist_build_array"),
+    M("th-build", "    nearbycarlist_build_array(c->CurrentNearbyCarList,\n                              c->CurrentDrivingLocation, list_look_ahead());\n    aicarcontroller_get_current_track_route_point", "    aicarcontroller_get_current_track_route_point"),
+    M("th-gct", "    aicarcontroller_get_current_track_route_point(c, NULL);\n", ""),
+    M("th-clear-straight", "    if (drivinglocation_is_clear(c->CurrentDrivingLocation)) {\n        aicarcontroller_steer_straight_ahead(c);\n", "    if (drivinglocation_is_clear(c->CurrentDrivingLocation)) {\n"),
+    M("th-clear-allowed", "        aicarcontroller_steer_straight_ahead(c);\n        set_desired_speed(c, 0.0f, 0.0f, 0.0f, 1);\n        return;", "        aicarcontroller_steer_straight_ahead(c);\n        set_desired_speed(c, 0.0f, 0.0f, 0.0f, 0);\n        return;"),
+    M("th-clear-return", "        set_desired_speed(c, 0.0f, 0.0f, 0.0f, 1);\n        return;\n    }\n    think_action(c);", "        set_desired_speed(c, 0.0f, 0.0f, 0.0f, 1);\n        list->NumCarsInArray = 0;\n        return;\n    }\n    think_action(c);"),
+    M("ta-boring", "    if (BoringAIForCameraTuningOn) {", "    if (0) {"),
+    M("ta-boring-type", "        } else if (a->Type == AIACTION_JUST_DRIVE) {", "        } else if (a->Type == AIACTION_PULL_OVER) {"),
+    M("ta-boring-calc", "            action_calculate_points(a, info);\n        } else {", "            ;\n        } else {"),
+    M("ta-boring-del", "            delete_action(a);\n            c->CurrentAction = NULL;\n            choose_new_action(c, &c->CurrentAction, AIACTION_JUST_DRIVE);", "            c->CurrentAction = NULL;\n            choose_new_action(c, &c->CurrentAction, AIACTION_JUST_DRIVE);"),
+    M("ta-boring-choose", "            choose_new_action(c, &c->CurrentAction, AIACTION_JUST_DRIVE);", "            choose_new_action(c, &c->CurrentAction, AIACTION_NONE);"),
+    M("ta-boring-return", "        }\n        return;\n    }\n    if (a == NULL) {", "        }\n    } else\n    if (a == NULL) {"),
+    M("ta-null-jd", "    if (a == NULL) {\n        c->CurrentAction = new_just_drive();\n    } else {", "    if (a == NULL) {\n        choose_new_action(c, &c->CurrentAction, AIACTION_JUST_DRIVE);\n    } else {"),
+    M("ta-update", "        aiaction_update_status(a, info);\n", ""),
+    M("ta-done-exp", "    return a == NULL || aiplan_success(&a->Base) || aiplan_failure(&a->Base)\n        || aiplan_is_expired(&a->Base);", "    return a == NULL || aiplan_success(&a->Base) || aiplan_failure(&a->Base);"),
+    M("ta-done-fail", "    return a == NULL || aiplan_success(&a->Base) || aiplan_failure(&a->Base)\n", "    return a == NULL || aiplan_success(&a->Base)\n"),
+    M("ta-done-succ", "    return a == NULL || aiplan_success(&a->Base) || aiplan_failure(&a->Base)\n", "    return a == NULL || aiplan_failure(&a->Base)\n"),
+    M("ta-done-exp-status", "        || aiplan_is_expired(&a->Base);", "        || a->Base.Status == STATUS_EXPIRED;"),
+    M("ta-done-del", "            if (a != NULL)\n                delete_action(a);\n", ""),
+    M("ta-done-type", "            choose_new_action(c, &next, AIACTION_NONE);", "            choose_new_action(c, &next, AIACTION_DRAFT);"),
+    M("ta-int", "            if (n != NULL) {\n                if (c->CurrentAction != NULL)\n                    delete_action(c->CurrentAction);\n", "            if (n != NULL) {\n"),
+    M("ta-int-set", "                c->CurrentAction = n;\n", "                delete_action(n);\n"),
+    M("ta-int-none", "            AIAction *n = aicarcontroller_interrupt_action(c);", "            AIAction *n = NULL;"),
+    M("ta-gen", "    generate_points(c, c->CurrentAction);\n}", "}"),
+    M("jd-arg", "                           AIActionJustDriveScore, -1.0f)->Base;", "                           AIActionJustDriveScore, 1.0f)->Base;"),
+    M("jd-score", "                           AIActionJustDriveScore, -1.0f)->Base;", "                           AIActionJustDriveScore + 1, -1.0f)->Base;"),
+    M("th-exec", "    think_action(c);\n    aicarcontroller_execute_current_action(c);\n", "    think_action(c);\n"),
+    M("belt-need", "    if (aicarcontroller_we_need_the_belt(c)\n        && aicarcontroller_we_can_have_the_belt(c)) {", "    if (aicarcontroller_we_can_have_the_belt(c)) {"),
+    M("belt-can", "    if (aicarcontroller_we_need_the_belt(c)\n        && aicarcontroller_we_can_have_the_belt(c)) {", "    if (aicarcontroller_we_need_the_belt(c)) {"),
+    M("belt-mode", "        if (c->Base.pCar->TheMovementMode != BELT_MOVEMENT)\n            car_set_movement_mode(c->Base.pCar, BELT_MOVEMENT);", "        car_set_movement_mode(c->Base.pCar, BELT_MOVEMENT);"),
+    M("belt-set", "        set_belt(c->Base.pCar->pCarMover);\n", ""),
+    M("belt-off", "    } else if (c->Base.pCar->TheMovementMode == BELT_MOVEMENT) {", "    } else {"),
+    M("belt-off-mode", "        car_set_movement_mode(c->Base.pCar, nDefaultMovementMode);\n    }\n    render_target(c);", "        car_set_movement_mode(c->Base.pCar, PHYSICS_MOVEMENT);\n    }\n    render_target(c);"),
+    M("rt-cam", "    if (aicarcontroller_get_my_driver_number(c) == CameraFollowThisCarInstead)", "    if (aicarcontroller_get_my_driver_number(c) != CameraFollowThisCarInstead)"),
+    M("rt-end", "    render_target(c);\n    list = c->CurrentNearbyCarList;", "    list = c->CurrentNearbyCarList;"),
+    M("th-end-n", "    list->MyHalfSizeD = 0.0f;\n    list->NumCarsInArray = 0;\n    list->MyHalfSizeL = 0.0f;\n}", "    list->MyHalfSizeD = 0.0f;\n    list->MyHalfSizeL = 0.0f;\n}"),
+    M("th-end-hl", "    list->MyHalfSizeD = 0.0f;\n    list->NumCarsInArray = 0;\n    list->MyHalfSizeL = 0.0f;\n}", "    list->MyHalfSizeD = 0.0f;\n    list->NumCarsInArray = 0;\n}"),
+    M("th-end-hd", "    list->MyHalfSizeD = 0.0f;\n    list->NumCarsInArray = 0;\n    list->MyHalfSizeL = 0.0f;\n}", "    list->NumCarsInArray = 0;\n    list->MyHalfSizeL = 0.0f;\n}"),
+    M("bt-side", "    if (!drivingchoice_type_is_side_of_car(c->CurrentDrivingChoice->Type)\n        || c->CurrentDrivingChoice->pCar->pPlayer == NULL)", "    if (c->CurrentDrivingChoice->pCar == NULL\n        || c->CurrentDrivingChoice->pCar->pPlayer == NULL)"),
+    M("bt-player", "        || c->CurrentDrivingChoice->pCar->pPlayer == NULL)\n        return;", "        || c->CurrentDrivingChoice->pCar == NULL)\n        return;"),
+    M("bt-build", "                              c->CurrentDrivingLocation, list_look_ahead());\n    if (nearbycarlist_get_nearby_car", "                              c->CurrentDrivingLocation, list_look_ahead());\n    c->CurrentNearbyCarList->NumCarsInArray = 0;\n    if (nearbycarlist_get_nearby_car"),
+    M("bt-extra", "                                         c->CurrentNearbyCarList, 0.0f, 0.0f,", "                                         c->CurrentNearbyCarList, 1.0f, 0.0f,"),
+    M("bt-move", "                                         MOVEMENT_TOWARDS_LINE);", "                                         MOVEMENT_TOWARDS_LINE + 1);"),
+    M("bt-target", "        ((DriverTargetFn)e->fn)(vt_this(d, e), &t);\n        render_target(c);", "        render_target(c);"),
+    M("bt-render", "        ((DriverTargetFn)e->fn)(vt_this(d, e), &t);\n        render_target(c);", "        ((DriverTargetFn)e->fn)(vt_this(d, e), &t);"),
 ]
 
 EQUIVALENT = {
@@ -4060,6 +4806,14 @@ EQUIVALENT = {
         "At a speed ratio of exactly 1 the row's value is multiplied by "
         "ratio - 1, 0, and the rows hold finite values, so either row gives "
         "1.",
+    "bt-extra":
+        "BuildDriveTarget never reads its two floats; IsDriveable's caller "
+        "passes them on unread too.",
+    "bt-move":
+        "Between thinks the target is built only once GetNearbyCar has found "
+        "the choice's car, so IsValid passes and a side-of-car choice goes to "
+        "BuildDriveTargetAroundCar, which fills up parallel to the line "
+        "whatever the movement.",
 }
 
 

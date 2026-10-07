@@ -57,9 +57,11 @@ run it compiles `racerun.h` with devkitARM and asserts
 | `0x00147e88` | `Race::AddRacingCar(Car *)`, 100 bytes (8d) |
 | `0x00147ef0` | `Race::SetRaceStage(eRaceStage)`, 464 bytes (8d) |
 | `0x00148218` | `Race::SortRacingCarsByLeadership`, 264 bytes (8d) |
+| `0x00149078` | `Race::CanAICarsStartDriving`, new in retail (11e-5) |
 | `0x001485e0` | `Race::SetupGhostCars`, empty |
 | `0x001493b8` | `RacingCar::RacingCar`, 272 bytes |
 | `0x001494c8` | `TimeAroundTrackTable::~TimeAroundTrackTable`, 28 bytes |
+| `0x001a3cf0` | `Timer::CountDown(float)`, new in retail (11e-5) |
 | `0x001a3d70` | `Timer::RoundSeconds(float)`, 180 bytes, the demo's `0x00199af8` (8d) |
 | `0x001a3e28` | `Timer::Round(float)`, 80 bytes, new in retail (8d) |
 | gp-22272 | `pCurrentRace`, `0x003301f0` (the demo's was `0x003232f8`) |
@@ -477,6 +479,26 @@ n. Two cars with one order, or an order past the field, swap forever.
 4000 + 0.5)`. To a hundredth, a time goes to a multiple of 40 ticks, and
 the ceiling makes up for `f * 4000` not being exact. The truncations are
 `eefpu.h`'s `ee_trunc_w`, which saturates as the EE does.
+
+## `Timer::CountDown` and `Race::CanAICarsStartDriving`
+
+Both are new in retail, and AICarController::Think is their caller
+(`ai-car-controller.md`). The port's are `timer_count_down` (timer.c)
+and `race_can_ai_cars_start_driving` (race.c). aicarcontroller_check
+tests them.
+
+`Timer::CountDown(dt)` counts a running timer down by `dt` seconds:
+1. A timer of 0 or 0x7fffffff isn't running and is left alone.
+2. Otherwise `(int)(dt * 4000)` ticks come off it, truncated with no
+   rounding (`ee_trunc_w`), by a wrapping `subu`.
+3. A result negative as a signed word becomes 0.
+4. It answers whether the timer is still running (IsValid), so a step
+   that lands on 0x7fffffff answers 0 too.
+
+`Race::CanAICarsStartDriving()` answers whether `RaceStage` is `RACING`
+(4). In a cop race (TheRaceParameters' BeACop, `0x0031ab0c`, not 0), it
+also answers yes from the pre-race (2) on, so the cops roll before the
+racers.
 
 ## The checker
 
