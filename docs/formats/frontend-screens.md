@@ -410,6 +410,10 @@ the 15th frame after the select.
 
 ## `StartQuickRace` (`0x00203ae0`)
 
+This is the demo's. Retail's (`0x00216c18`) also sets the defaults first,
+puts the player at the back of the grid, gives a car and starts the race;
+[quick-race](quick-race.md) has it, and it is what the port runs.
+
 Twenty-five stores into `TheRaceParameters`, plus three fields outside it.
 Every one maps to a named field of `RaceParameters` in the `.mdebug` type
 info -- which it did not, until `tools/mdebug_stabs_scan.py` stopped dropping
@@ -453,10 +457,7 @@ Quick Race started from the cops-on screen gets three AI cars, four cops and
 grid slot 2, and one started from the cops-off screen gets seven cars, no
 cops and grid slot 8.
 
-The track number and `Point2Point` come out of the track database, which is
-Phase 4's. The port carries the block verbatim with those two as 0 and hands
-it to a hook, so nothing has to be re-derived when there is somewhere to put
-it.
+The track number and `Point2Point` come out of the track database.
 
 ## What the port does with this
 
@@ -473,7 +474,7 @@ screen, a movie, the menu or the race goes out through `BScreensHooks`, and
 | `startMovie` / `stopMovie` | logged; no panel movie is on the disc |
 | `jukebox` | logged |
 | `displayOptionsStart` | logged |
-| `startQuickRace` | logged, field by field |
+| `startQuickRace` | retail's `StartQuickRace` (`quickrace.c`), then the race logged |
 
 Two small additions were needed underneath: `bui_set_text_language`, because
 `tAnimatedBlurb::NewText` changes which row of the language table a text

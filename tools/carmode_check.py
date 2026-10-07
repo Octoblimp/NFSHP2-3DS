@@ -975,14 +975,16 @@ def generate(cti):
     w("#define CM_DSPEED1 0x%08xu" % fb(DSPEED[1]))
     w("#define CM_FAKE_VT 0x%08xu" % FAKE_VT)
     w("#define CM_FAKE_VT_DRIVER 0x%08xu" % FAKE_VT_DRIVER)
-    # The image's sizes for the five records the port allocates itself,
+    # The image's sizes for the eight records the port allocates itself,
     # which the harness's log shows in place of the host's.
     w("#define CM_IMG_PHYSICSCAR %d" % pcc.PC_SIZE)
     w("#define CM_IMG_NULLCONTROLLER %d" % 12)
     w("#define CM_IMG_NULLDRIVER %d" % DRIVER_SIZE)
     w("#define CM_IMG_REALCONTROLLER %d" % 84)
     w("#define CM_IMG_BELTMOVER %d" % 72)
+    w("#define CM_IMG_TRAFFICCAR %d" % 36)
     w("#define CM_IMG_AIDRIVER %d" % 720)
+    w("#define CM_IMG_TRAFFICDRIVER %d" % 720)
     w("#define CM_STRAY %d" % STRAY)
     w("#define CM_NORMAL_X 0x%08xu" % pcc.NORMAL[0])
     w("#define CM_NORMAL_Y 0x%08xu" % pcc.NORMAL[1])
@@ -2487,8 +2489,9 @@ MUTATIONS = [
     ("mover-flags-1", CMC, [
         ("    mem = bMalloc(size, name, 0, CAR_MEMORY_POOL);",
          "    mem = bMalloc(size, name, 1, CAR_MEMORY_POOL);", 1)]),
-    ("size-trafficcar", CMH, "#define TRAFFICCAR_SIZE       36",
-     "#define TRAFFICCAR_SIZE       40"),
+    ("size-trafficcar", CMH,
+     "#define TRAFFICCAR_SIZE       ((int)sizeof(TrafficCar))",
+     "#define TRAFFICCAR_SIZE       ((int)sizeof(TrafficCar) + 4)"),
     ("size-deliverymover", CMH, "#define DELIVERYMOVER_SIZE   192",
      "#define DELIVERYMOVER_SIZE   196"),
     ("size-copmover", CMH, "#define COPMOVER_SIZE        112",
@@ -2502,8 +2505,9 @@ MUTATIONS = [
     ("size-aidriver", CMH,
      "#define AIDRIVER_SIZE        ((int)sizeof(AIDriver))",
      "#define AIDRIVER_SIZE        ((int)sizeof(AIDriver) + 4)"),
-    ("size-trafficdriver", CMH, "#define TRAFFICDRIVER_SIZE   720",
-     "#define TRAFFICDRIVER_SIZE   724"),
+    ("size-trafficdriver", CMH,
+     "#define TRAFFICDRIVER_SIZE   ((int)sizeof(TrafficDriver))",
+     "#define TRAFFICDRIVER_SIZE   ((int)sizeof(TrafficDriver) + 4)"),
     ("size-copdriver", CMH, "#define COPDRIVER_SIZE        76",
      "#define COPDRIVER_SIZE        80"),
     ("pool-not-16", CMH, "#define CAR_MEMORY_POOL 16",

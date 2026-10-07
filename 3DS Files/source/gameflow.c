@@ -716,12 +716,20 @@ void bgf_end_loading_frontend(BGameFlow* gf)
     bgf_launch_frontend_menus(gf);
 }
 
+// BeginGameFlowUnloadingFrontEnd, 0x00168830. StartRace asks for it from
+// IN_FRONTEND. Retail waits for the GPU, then UnlaunchFrontendMenus,
+// CloseMoviePlayer, CloseSelectCarScreen and TheCarLoader's
+// UnloadEverything, the frontend's sounds, car effects and sound regions,
+// every frontend resource file, the languages, the demo replay's file and
+// the slot pools; it waits for the disc and asks for LOADING_TRACK_COMMON,
+// whose Begin runs on the same pass of ServiceGameFlow.
 void bgf_begin_unloading_frontend(BGameFlow* gf)
 {
     bgf_change_to_screen(gf, NULL, 0);
     bgf_reset_stack(gf);
     HOOK_VOID0(gf, closeSelectCar);
     HOOK_VOID0(gf, unloadFrontEnd);
+    bgf_change_state(gf, BGF_LOADING_TRACK_COMMON, BGF_NONE);
 }
 
 // ------------------------------------------------------- TitleMoviesToPlay
@@ -1568,10 +1576,12 @@ static void mainMenuEvent(BGameFlow* gf, BScreenMessage msg,
             switch (data->itemHash) {
                 case BGF_ITEM_MENUITEM_1:
                     gf->copsOn = 1;
+                    HOOK_VOID(gf, setPolice, 1);
                     bgf_change_to_screen(gf, "Cops On Mode Select", 1);
                     break;
                 case BGF_ITEM_MENUITEM_2:
                     gf->copsOn = 0;
+                    HOOK_VOID(gf, setPolice, 0);
                     bgf_change_to_screen(gf, "Cops Off Mode Select", 1);
                     break;
                 case BGF_ITEM_MENUITEM_3:

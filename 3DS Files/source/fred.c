@@ -151,6 +151,15 @@ void fpi_set_car_availability(FrontendPlayerInfo *p, int32_t status,
     cs->nSkins = 1;
 }
 
+int32_t fpi_get_car_status(const FrontendPlayerInfo *p, int32_t type)
+{
+    int32_t status;
+
+    memcpy(&status, (const uint8_t *)p + type * (int32_t)sizeof(CarStatus),
+           sizeof status);
+    return status;
+}
+
 // 0x001879b8. The skin is looked for among those offered; with none
 // offered, or not among them, the first is taken, and with a negative
 // count the one asked for stands. The image reads the bytes from +4 for

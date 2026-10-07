@@ -1,7 +1,8 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 40
-(2026-10-07), after 11g-1, AI racers that drive.
+Where the next session picks up. Updated in Session 41
+(2026-10-07), after 11g-2a, the Quick Race from Hot Pursuit's Mode
+Select, 11h-1, TrafficCar, and 11h-2, TrafficDriver.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
@@ -16,8 +17,15 @@ controller, are done and checked against retail. 11g-1 ran a SkipFE
 race with three AI racers (the port's config file) and fixed what
 stopped them: GLOBALB's DifficultyInfo chunk was never loaded, so every
 skill's SpeedFactor was 0 and the cars sat on the grid. They now race
-the route. Next is 11g-2, the user's way in: a Hot Pursuit race with AI
-racers started from the frontend's Hot Pursuit setup, not SkipFE. The car selector is finished and checked against retail: SC-1
+the route. 11g-2a, the user's way in, is done: Quick Race on Hot
+Pursuit's Mode Select starts the race as retail's StartQuickRace does,
+and Azahar reaches RACING with three AI racers. 11h-1, TrafficCar, the
+traffic's mover, and 11h-2, TrafficDriver, its controller, are done.
+The race from the frontend then sticks in the countdown: Race::Update
+(gRaceUpdateFn) and the countdown cameras
+(gCountdownCameraCoordinatorFn) are unported, so the AI racers wait
+and the camera has no mover. Next is 11g-2b, Race::Update, then 11g-2c,
+the countdown cameras. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -575,23 +583,80 @@ car's were.
     (the Cross pressure byte) read 255. That byte is set only while the
     3DS A is held, and a third run, with no key sent, stood still. It
     was keyboard input reaching Azahar, not the port.
-- **11g-2, next: the Hot Pursuit race from the frontend.** The user
-  (2026-10-07), on an Azahar run that wandered into Be The Cop's Select
-  Car and the placeholder Select Track: "This still needs to be setup
-  within the hot pursuit cop mode setup lol". The AI race has to start
-  from Main Menu, Hot Pursuit, its setup, car and track, as retail's
-  does, not only from SkipFE.
-  - Map the path first: which of the Hot Pursuit screens are ported
-    and which are placeholders, what Select Track does, and how the
-    flow leaves the frontend for the race (StartRace's 7 AI racers).
-    Match the user's PCSX2 photos of the retail frontend.
-  - A race from the frontend asks for 7 AI racers. It used to stop at
-    the AIDriver seam (an abort); it now builds them, and the rest is
-    untried. Expect the AI racers' car types to need loading
-    (SetupCarsForRace's choose_ai_ride picks them) and the seams that
-    are still NULL (the horn's BaseCarSound, ReplaySnapshot) to stay
-    no-ops.
-  - "The road to the full game" has the way in.
+- **11g-2a, done: Quick Race from Hot Pursuit's Mode Select.** The
+  user (2026-10-07), on an Azahar run that wandered into Be The Cop's
+  Select Car and the placeholder Select Track: "This still needs to be
+  setup within the hot pursuit cop mode setup lol". Quick Race is the
+  first item of both Mode Selects, and the shortest way in.
+  - `quickrace.c` is retail's StartQuickRace (0x00216c18), with
+    PickTrackNumberForExpressGame, the track locks and
+    FrontendPlayerInfo::GetCarStatus: the defaults, the express game,
+    the pick's track, 3 AI racers and 4 cops for Hot Pursuit (7 and 0
+    for World Racing), the player at the back of the grid, traffic at
+    0.33, 2 laps, a car from GenerateRandomRideInfo, then StartRace.
+    `bscreens.c`'s startQuickRace hands it the screen's transmission
+    flag, and New Main Menu's two items set the police flag
+    (`MainMenuOpts[1]`) as retail's do. `docs/formats/quick-race.md`.
+  - BeginGameFlowUnloadingFrontEnd now asks for LOADING_TRACK_COMMON,
+    so the flow leaves the frontend. `world_add_traffic_car` places no
+    traffic car while PlaceNewCar is a NULL seam (it aborted), as a
+    NULL AddCopCarToRace places no cop.
+  - `fredrace_check` runs retail's as shipped (`s_quickrace`,
+    `s_tracklocks`) and now mutates through mutpar: 3958 ops, 71235
+    lines, 0 differ; 296 mutations, 291 caught (2 by a hung harness),
+    5 equivalent.
+  - `tools/run_azahar_quickrace.ps1` plays it on Azahar: the title, Hot
+    Pursuit (`-CopsOff` for World Racing), A on Quick Race. Azahar runs
+    the frontend at about 57%, and a single press was lost twice, so
+    each press is repeated until the log shows the game took it. The
+    run: track 31 backwards, 3 AI racers, 4 cops, car 37, 14 drivers
+    (the 6 traffic cars and the 4 cops are not placed), RACING with 4
+    cars at 30 FPS.
+  - **What it showed: the race never leaves the countdown.** It sits
+    at stage 3 (COUNTDOWN) for good, the AI racers wait in
+    CanAICarsStartDriving (action -1), and the view hangs at 0, 0,
+    1100 over the track. Two seams are NULL:
+    - Race::Update (0x00148a78, called by World::DoTimestep at
+      0x0014e20c; the port's `gRaceUpdateFn`) sets RACING once
+      GetCountdownNumberToDisplay is 4. It also runs the lap counts,
+      the best lap, the finish and the leadership, which the SkipFE
+      race (it starts at RACING) has never had either. That is 11g-2b.
+    - While the race counts down, `choose_camera` asks for the
+      countdown cameras, whose coordinator
+      (`gCountdownCameraCoordinatorFn`) is NULL, so the player has no
+      camera mover until RACING. That is 11g-2c.
+- **11h-1, done: TrafficCar, the traffic's mover.** `trafficcar.c` is
+  retail's TrafficCar.obj (0x00167a08 to 0x00168098) but DoSnapshot: a
+  bicycle on the ground plane, the speed from the pedals through two
+  Tables, held between 0 and 55 mph, and the CarState written
+  outright. Its start-up code is sinit's [28]
+  (`_GLOBAL_$I$TrafficAccelerationTable`). `trafficcar_check`: 7947
+  ops, 10693 lines, 0 differ; 148 mutations, 145 caught (6 by a
+  crash), 3 equivalent. `docs/formats/traffic-car.md`.
+- **11h-2, done: TrafficDriver, the traffic's controller.**
+  `trafficdriver.c` is retail's TrafficDriver.obj (0x0018c380 to
+  0x0018d070) but DoSnapshot, the table at 0x002b4730: an
+  AICarController with a PsychoDriver and a Think of its own. A traffic
+  car thinks on the odd frames of twelve whose half is its place among
+  the traffic. It keeps the best of six actions: GetUnstuck (2 s after
+  the last), AccidentRecovery, IJustGotHit, AvoidCars (with AIDriver's
+  quirk), PullOver and JustDrive. Each is tried while the best so far is
+  below its global. AvoidCars and PullOver take the car off its belt.
+  Its speed stays under 24.59 m/s, under 0.328 m/s a metre to the next
+  hairpin sign (whose route it takes within 10 m), and under 10 m/s
+  through a bend. `trafficdriver_check`: 72743 ops, 31387 lines, 0
+  differ; 230 mutations, 226 caught (11 by a crash), 4 equivalent.
+  carmode_check maps its 736 to the demo's 720 (size-trafficdriver
+  caught). `docs/formats/traffic-driver.md`. No traffic car is built
+  yet: the TrafficTeleporter (11h-3) places them.
+- **Next, in this order:**
+  1. **11g-2b, Race::Update** (0x00148a78; `gRaceUpdateFn`), so the
+     race leaves the countdown and the laps, the finish and the
+     leadership run.
+  2. **11g-2c, the countdown cameras** (CountdownCameraCoordinator).
+  3. **11h-3, TrafficTeleporter** (0x002226f8 on; PlaceNewCar
+     0x002228e0, DoTimestep 0x002227e0), which places the traffic.
+  4. Step 12, the cops.
 
 ## Waiting on the device: 13b-4f, the device GPU's cost per model
 
@@ -4166,16 +4231,17 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-07, after 11f-2, AIDriver)
+### Where the port stands (2026-10-07, after 11g-2a, 11h-1 and 11h-2)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11g-2, the Hot Pursuit race with AI
-  racers from the frontend (11g-1's SkipFE race has them driving).
-  See "Now" at the top. These are done:
+- **Next:** step 11, the racer and traffic AI: 11g-2b, Race::Update,
+  which takes the race from the frontend out of its countdown, 11g-2c,
+  the countdown cameras, and 11h-3, the TrafficTeleporter. See "Now"
+  at the top. These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
   - 11b-2, DrivingChoice's small methods and the walk;
@@ -4195,7 +4261,11 @@ goes in.
   - 11e-5, AICarController's Think;
   - 11e-6, the BeltMover;
   - 11f-1, PsychoDriver;
-  - 11f-2, AIDriver.
+  - 11f-2, AIDriver;
+  - 11g-1, a SkipFE race with AI racers that drive;
+  - 11g-2a, the Quick Race from Hot Pursuit's Mode Select;
+  - 11h-1, TrafficCar;
+  - 11h-2, TrafficDriver.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -4207,7 +4277,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a to 11f-2 done) | 2 |
+  | 11, the racer and traffic AI (11a to 11h-2 done) | 3 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |
@@ -4215,12 +4285,12 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped; New 3DS only since 2026-10-05) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **23-35** |
+  | **Total** | **24-36** |
 
-- **How far along:** about 35-38 of the road's 58-75 slices are done,
+- **How far along:** about 36-39 of the road's 60-75 slices are done,
   roughly half. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
-  Read the 23-35 as a floor. Step 11 was put at 4-6 before its slices
+  Read the 24-36 as a floor. Step 11 was put at 4-6 before its slices
   were laid out. They are fourteen, with traffic beside them: 11a,
   11b-1 to 11b-3, 11b-4a and 11b-4b, 11c, 11d-1, 11d-2, 11d-3a and
   11d-3b, and 11e to 11g. 11b was one slice until DrivingChoice's 13 KB

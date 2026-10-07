@@ -26,6 +26,7 @@
 #include "fredrace.h"
 #include "playercam.h"
 #include "playersettings.h"
+#include "quickrace.h"
 #include "raceparams.h"
 #include "realtime.h"
 #include "track.h"
@@ -109,6 +110,30 @@ static void audioDefaults(uint8_t *ao)
 }
 
 static void fakeKo(FrontendDatabase *f) { emit("fake %s", flabel(f)); }
+
+// The event trees' answers, by tree, the track's byte and the direction's
+// low bit, as the model's stubs keep them.
+#define NTREES 8
+static int32_t treeReward[NTREES][256][2];
+static int32_t treeUnlocked[NTREES][256][2];
+
+static int32_t trackIsAReward(int32_t tree, int32_t track, int32_t dir)
+{
+    int32_t v = treeReward[tree][(uint8_t)track][dir & 1];
+
+    emit("ta %d %d %d -> %d", (int)tree, (int)track, (int)dir, (int)v);
+    return v;
+}
+
+static int32_t treeIsTrackUnlocked(int32_t tree, int32_t track, int32_t dir)
+{
+    int32_t v = treeUnlocked[tree][(uint8_t)track][dir & 1];
+
+    emit("tu %d %d %d -> %d", (int)tree, (int)track, (int)dir, (int)v);
+    return v;
+}
+
+static void stopMovie(void) { emit("sm"); }
 
 static int32_t status(void)
 {
@@ -514,6 +539,9 @@ int main(int argc, char **argv)
     gEventRewardCarsUnlockedFn = rewardCars;
     gFredGameFlowStateFn = gameFlowState;
     gFredChangeGameFlowFn = changeGameFlow;
+    gEventTreeTrackIsARewardFn = trackIsAReward;
+    gEventTreeIsTrackUnlockedFn = treeIsTrackUnlocked;
+    gQuickRaceStopMovieFn = stopMovie;
 
     while (fgets(line, sizeof line, f)) {
         char op[8] = "";
@@ -755,6 +783,36 @@ int main(int argc, char **argv)
         } else if (!strcmp(op, "RI")) {
             sscanf(rest, "%d %d %d %d", &p, &q, &r, &s);
             ride_info_init(&scrRide, p, q, r, s);
+        } else if (!strcmp(op, "tn")) {
+            sscanf(rest, "%d", &p);
+            gNumEventTrees = p;
+            continue;
+        } else if (!strcmp(op, "ta") || !strcmp(op, "tu")) {
+            sscanf(rest, "%d %d %d %lld", &p, &q, &r, &v);
+            if (op[1] == 'a')
+                treeReward[p][(uint8_t)q][r & 1] = (int32_t)v;
+            else
+                treeUnlocked[p][(uint8_t)q][r & 1] = (int32_t)v;
+            continue;
+        } else if (!strcmp(op, "QR")) {
+            sscanf(rest, "%d", &p);
+            start_quick_race(p);
+        } else if (!strcmp(op, "PT")) {
+            ExpressTrack pick;
+
+            pick_track_number_for_express_game(&pick);
+            emit("PT -> %d %d", (int)pick.Track, (int)pick.Direction);
+        } else if (!strcmp(op, "IU")) {
+            // In turn: the seams print as they are asked.
+            sscanf(rest, "%d %d", &p, &q);
+            r = (int)is_track_unlocked(p, q);
+            s = (int)is_track_an_event_reward(p, q);
+            t = (int)event_tree_is_track_unlocked(p, q);
+            emit("IU -> %d %d %d", r, s, t);
+        } else if (!strcmp(op, "CS")) {
+            sscanf(rest, "%d", &p);
+            emit("CS -> %d",
+                 (int)fpi_get_car_status(&Fred.FrontendPlayers[0], p));
         } else if (!strcmp(op, "GT")) {
             sscanf(rest, "%d", &p);
             emit("GT -> %d %d %d", (int)fred_use_the_race_event(fk(p)),

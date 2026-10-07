@@ -4,7 +4,7 @@
 // and the _GLOBAL_$I$ it stands for. sinit_check reads those comments, so
 // their shape is fixed.
 //
-// None of the twenty-five reads anything another one writes -- twenty-four
+// None of the twenty-six reads anything another one writes -- twenty-five
 // fill Tables, Graphs, cameras, list heads, hashes, shakers, constants and
 // two sets of defaults, and the last builds the slot-pool manager -- so the
 // order is kept because it is the image's, not because a different one
@@ -43,6 +43,7 @@
 #include "sky.h"
 #include "terraintype.h"
 #include "track.h"
+#include "trafficcar.h"
 #include "wheel.h"
 
 void sinit_run(void)
@@ -58,6 +59,7 @@ void sinit_run(void)
     track_static_init();        // [22]  0x00150938 _GLOBAL_$I$TrackPositionMarkerList
     joyevent_static_init();     // [23]  0x00152588 _GLOBAL_$I$EventNodeSlotPool
     shake_static_init();        // [24]  0x001537b8 _GLOBAL_$I$bShakeTest
+    trafficcar_static_init();   // [28]  0x001635f0 _GLOBAL_$I$TrafficAccelerationTable
     fred_static_init();         // [34]  0x0017fcd8 _GLOBAL_$I$Fred
     carinfo_static_init();      // [35]  0x00181060 _GLOBAL_$I$FindCarLanguageInfo__F7CarType
     resource_static_init();     // [39]  0x00190040 _GLOBAL_$I$LoaderNull__FP6bChunk

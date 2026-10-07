@@ -13,7 +13,9 @@ The screen-list scaffolding underneath -- `ChangeToScreen`, the stack, the
 message pump -- is not written twice: `tools/bootflow_check.py` already
 proved that half, and this imports its `Flow` and adds three screens to the
 registry. What is written twice is everything new: which item does what, when
-the exit animation is over, and what `StartQuickRace` fills in.
+the exit animation is over, and what Quick Race hands `StartQuickRace`.
+Retail's `StartQuickRace` (0x00216c18) is quickrace.c's, which
+`tools/fredrace_check.py` runs against the image.
 
 What this does NOT check is layout: whether `MI_3_MASK` really is the box
 around the third label is a question about `FRONTB.BUN`, and
@@ -320,23 +322,8 @@ class Screens(bf.Flow):
     def hook_display_start(self):
         self.say("hook display start")
 
-    def hook_quick_race(self, p):
-        self.say("hook quickrace type %d cars %d track %d traffic %.2f %.2f "
-                 "race %d p2p %d laps %d ai %d start %d train %d obj %d %d"
-                 % (p["gameType"], p["fredNumPlayerCars"], p["trackNumber"],
-                    p["trafficDensity"], p["trafficOncoming"], p["raceType"],
-                    p["point2Point"], p["numLapsInRace"], p["numAICars"],
-                    p["playerStartPosition"], p["trainingLinesEnabled"],
-                    p["hasObjective"], p["objectiveCleared"]))
-        self.say("hook quickrace tree %d maxcops %d tickets %d blocks %d "
-                 "spikes %d heli %d arrest %d copblocks %d chopper %d "
-                 "copstr %d oppstr %d boost %d %.1f %.1f gearbox %d"
-                 % (p["eventTreeRace"], p["maxCops"], p["tickets"],
-                    p["roadBlocks"], p["spikeStrips"], p["helicopter"],
-                    p["ticketsBeforeArrest"], p["numBeACopRoadBlocks"],
-                    p["numBeACopChoppers"], p["copStrength"],
-                    p["opponentStrength"], p["boost"], p["boostScale"][0],
-                    p["boostScale"][1], p["transmissionType"]))
+    def hook_quick_race(self, transmission):
+        self.say("hook quickrace transmission %d" % transmission)
 
     # -- shared ----------------------------------------------------------
     @staticmethod
@@ -377,39 +364,13 @@ class Screens(bf.Flow):
             data["noise"] = noise
         return done != 0
 
-    # -- StartQuickRace (0x00203ae0) -------------------------------------
-    def quick_race_params(self, transmission):
-        cops = 1 if self.cops_on else 0
-        return {
-            "trackNumber": 0,               # PickTrackNumberForExpressGame
-            "trafficDensity": 0.33, "trafficOncoming": 0.5,
-            "raceType": 1,
-            "point2Point": 0,               # GetTrackInfo(track)[67]
-            "numLapsInRace": 2, "numPlayerCars": 1,
-            "numAICars": 3 if cops else 7,
-            "playerStartPosition": 2 if cops else 8,
-            "trainingLinesEnabled": 0, "hasObjective": 0,
-            "objectiveCleared": 1,
-            "eventTreeRace": 0,
-            "maxCops": 4 if cops else 0,
-            "tickets": cops, "roadBlocks": cops, "spikeStrips": cops,
-            "helicopter": cops,
-            "ticketsBeforeArrest": 2 if cops else 0,
-            "numBeACopRoadBlocks": 0, "numBeACopChoppers": 0,
-            "copStrength": 1, "opponentStrength": 1,
-            "boost": 1, "boostScale": [1.0, 1.0],
-            "gameType": FRED_EXPRESS, "fredNumPlayerCars": 1,
-            "transmissionType": 1 if transmission else 0,
-        }
-
+    # -- StartQuickRace (0x00216c18) -------------------------------------
+    # Retail's is quickrace.c's, checked by fredrace_check.py; the screen
+    # hands it the transmission button's state and nothing else.
     def start_quick_race(self, inst):
-        p = self.quick_race_params(inst["transmission"])
-        self.hook_movie_stop()
-        self.say("quickrace cops=%d transmission=%d aicars=%d maxcops=%d "
-                 "start=%d" % (1 if self.cops_on else 0,
-                               p["transmissionType"], p["numAICars"],
-                               p["maxCops"], p["playerStartPosition"]))
-        self.hook_quick_race(p)
+        self.say("quickrace cops=%d transmission=%d"
+                 % (1 if self.cops_on else 0, inst["transmission"]))
+        self.hook_quick_race(inst["transmission"])
 
     # -- the two Mode Selects ---------------------------------------------
     def mode_construct(self, cfg, inst, screen):

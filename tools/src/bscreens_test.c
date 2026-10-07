@@ -109,24 +109,10 @@ static void hDisplayStart(void* user)
     printf("hook display start\n");
 }
 
-static void hQuickRace(void* user, const BQuickRace* p)
+static void hQuickRace(void* user, int transmission)
 {
     (void)user;
-    printf("hook quickrace type %d cars %d track %d traffic %.2f %.2f "
-           "race %d p2p %d laps %d ai %d start %d train %d obj %d %d\n",
-           p->gameType, p->fredNumPlayerCars, p->trackNumber,
-           (double)p->trafficDensity, (double)p->trafficOncoming,
-           p->raceType, p->point2Point, p->numLapsInRace, p->numAICars,
-           p->playerStartPosition, p->trainingLinesEnabled,
-           p->hasObjective, p->objectiveCleared);
-    printf("hook quickrace tree %d maxcops %d tickets %d blocks %d "
-           "spikes %d heli %d arrest %d copblocks %d chopper %d "
-           "copstr %d oppstr %d boost %d %.1f %.1f gearbox %d\n",
-           p->eventTreeRace, p->maxCops, p->tickets, p->roadBlocks,
-           p->spikeStrips, p->helicopter, p->ticketsBeforeArrest,
-           p->numBeACopRoadBlocks, p->numBeACopChoppers, p->copStrength,
-           p->opponentStrength, p->boost, (double)p->boostScale[0],
-           (double)p->boostScale[1], p->transmissionType);
+    printf("hook quickrace transmission %d\n", transmission);
 }
 
 // -------------------------------------------------- the Flailer bundle

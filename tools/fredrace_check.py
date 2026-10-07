@@ -20,6 +20,11 @@ The model is the image. These run as shipped:
     (0x001edb40), the eliminated drivers' restore (0x001edc50) and
     elimination (0x001edbc8), the model count (0x001ede08) and
     GetLocationIndex;
+  * the Mode Selects' StartQuickRace (0x00216c18), with the express
+    game's track pick (0x00216aa8), IsTrackUnlocked (0x0024b760),
+    IsTrackAnEventReward (0x001ffaa8), EventTreeIsTrackUnlocked
+    (0x001ffb18), MakeChallengeCarsAvailable, SetCarAvailability,
+    AssignCarOfType and GetCarStatus (0x00187958);
   * and under them bRandom, bSetRandomSeed, GetSkinInfo, GetNumSkins,
     GetSkinNumber, GetTrackInfo, GetCharacterInfo and its hash lookup,
     bStrICmp, bStrCmp and bStringHash; InitFred, RaceParameters'
@@ -32,8 +37,11 @@ GetRaceIndex, DriverEliminated and the starting positions (0x002022c0),
 EventTrack::SetRace, the knockout's start positions and ranks, the
 tournament's UserRank, the event tree, its event and the event's word and
 opponents, MaybeSetSelectedCarForMultiTrackEvent, TheDemoModeReplay's two
-calls, the reward-car count (0x001ff978) and ChangeGameFlow. The script
-sets what each answers. IsCarUnlocked, GetTranslatedString and the audio
+calls, the reward-car count (0x001ff978) and ChangeGameFlow, and for the
+quick race FlailerScreenList::StopMovie and EventTree's TrackIsAReward
+and IsTrackUnlocked, over a list of trees the script sizes at gp-16712.
+The script sets what each answers. bMalloc is a bump allocator and bFree
+does nothing: the pick's list nodes are the image's alone. IsCarUnlocked, GetTranslatedString and the audio
 options' defaults answer as fred_check's do, silently. The harness
 (tools/src/fredrace_test.c) runs the port over the same script.
 
@@ -57,14 +65,17 @@ the seed.
 """
 import argparse
 import os
+import random
 import struct
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
+import mutpar
 import physicscar_check as pcc
 import retail_model
 from mipsemu import M32, s32
@@ -83,7 +94,7 @@ SOURCES = [HARNESS, FRR, RPC, CFC] + [
         "bticker.c", "joylog.c", "timer.c", "track.c",
         "terraintype.c", "cartrack.c", "carstate.c", "emath.c", "bmatrix.c",
         "terraintypetab.c", "bslotpool.c", "bvector.c", "bmath.c",
-        "bmathtab.c", "bchunk.c", "p32.c")]
+        "bmathtab.c", "bchunk.c", "p32.c", "quickrace.c")]
 
 HARNESS_TIMEOUT = 600
 GLOBALB = ROOT / "extracted-retail" / "GLOBAL" / "GLOBALB.BUN"
@@ -166,6 +177,19 @@ REPLAY_UNLOAD = 0x0013f0c0
 REWARD_CARS = 0x001ff978
 CHANGE_FLOW = 0x001680d8
 
+START_QUICK = 0x00216c18
+PICK_TRACK = 0x00216aa8
+IS_UNLOCKED = 0x0024b760
+IS_REWARD = 0x001ffaa8
+TREES_UNLOCKED = 0x001ffb18
+CAR_STATUS = 0x00187958
+STOP_MOVIE = 0x0016d0a0
+TREE_REWARD = 0x001ff6c8          # EventTree::TrackIsAReward
+TREE_UNLOCKED = 0x001ff5c8        # EventTree::IsTrackUnlocked
+BMALLOC = 0x002577c0
+BFREE = 0x00257850
+TREE_LIST = GP - 16712            # the event trees' bList
+
 G_CARS = GP - 20616               # CarTypeInfoArray
 G_SKINS = GP - 20612              # the skin table
 G_NSKINS = GP - 20608
@@ -200,6 +224,8 @@ OPP = 0x01432000
 KO = 0x01433000
 TS = 0x01434000
 ALT = 0x01500000                  # the second FrontendDatabase
+TREES = 0x01440000                # the event trees' nodes, 16 bytes each
+PICK = 0x01420100                 # the pick's 16-byte answer
 
 CAR_REC = 1376
 TRK_REC = 164
@@ -220,6 +246,7 @@ TORQUE = 704
 IS_VALID, P2P, HIGH_SCORE_INDEX, COP_HASH = 64, 67, 70, 84
 
 # FrontendDatabase.
+COPS_ON = 32                      # MainMenuOpts[1]
 DISPLAY = 332
 HIGH_SCORES = 1720
 NUM_TOTAL_TIMES, NUM_LAP_TIMES = 7200, 800
@@ -996,10 +1023,82 @@ def s_holes(ch):
     return s.ops
 
 
+def s_quickrace(ch):
+    """StartQuickRace (0x00216c18) as the Mode Selects call it: Hot
+    Pursuit's and World Racing's over gearbox words and seeds, the cops word
+    at odd values; the config file's track with the default car, track 0,
+    one the table lacks (its record is read at NULL) and a point to point;
+    the pick alone over seeds; GetCarStatus; and quick races over a filled
+    database."""
+    s = base(ch)
+    for cops, trans, seed in ((1, 0, 1), (0, 1, 2), (1, -1, 0xdeadbeef),
+                              (0, 2, 0x80000000), (-1, 0, 7),
+                              (2, 0x100, 12345), (0, 0, 99), (1, 1, 31337)):
+        s.op("v", "seed", seed)
+        s.fr(0, COPS_ON, 4, cops)
+        s.op("QR", trans)
+    # Twenty more draws of the random ride.
+    for i in range(20):
+        s.op("v", "seed", (i * 0x2545f491 + 3) & M32)
+        s.op("QR", 0)
+    s.op("v", "track", 21)
+    s.op("QR", 0)
+    s.op("v", "dp1type", 13)
+    s.op("v", "dp1skin", 3)
+    s.fr(0, COPS_ON, 4, 0)
+    s.op("QR", 1)
+    for track in (23, 0, 99, 66):
+        s.op("v", "track", track)
+        s.op("QR", 0)
+    s.op("v", "track", -1)
+    for i in range(24):
+        s.op("v", "seed", (i * 0x9e3779b9 + 1) & M32)
+        s.op("PT")
+    for t in (0, 1, 13, 37, 63, 64, 70):
+        s.op("CS", t)
+    for fill, seed in (("ff", 5), ("5a", 0x1234)):
+        s.setup(fill, seed)
+        s.op("QR", 3)
+        s.fr(0, COPS_ON, 4, 0)
+        s.op("QR", 0)
+    return s.ops
+
+
+def s_tracklocks(ch):
+    """The express game's pick under the event trees: one, three and five
+    trees, each setting tracks aside as rewards (the answers any word) and
+    unlocking some of them, then none again. IsTrackUnlocked and the two
+    loops alone over tracks from -1 to 200 both ways, the pick over seeds
+    and a quick race under each."""
+    rnd = random.Random(0x216aa8)
+    s = base(ch)
+    for n in (1, 3, 5, 0):
+        s.op("tn", n)
+        for tree in range(n):
+            for track in range(-2, 72):
+                for d in (0, 1):
+                    if rnd.random() < 0.25:
+                        s.op("ta", tree, track, d, rnd.choice(
+                            (1, 2, -1, 0x100, 0x80000000)))
+                    if rnd.random() < 0.5:
+                        s.op("tu", tree, track, d, rnd.choice(
+                            (1, 3, -1, 0x10000)))
+        for track in (-1, 0, 1, 5, 17, 33, 54, 65, 70, 127, 200):
+            for d in (0, 1):
+                s.op("IU", track, d)
+        for i in range(6):
+            s.op("v", "seed", rnd.getrandbits(32))
+            s.op("PT")
+        s.fr(0, COPS_ON, 4, n & 1)
+        s.op("QR", 0)
+    return s.ops
+
+
 def script():
     ch = globalb_chunks()
     return [s_skipfe(ch), s_gametypes(ch), s_ai(ch), s_cops(ch),
-            s_helpers(ch), s_positions(ch), s_patterns(ch), s_holes(ch)]
+            s_helpers(ch), s_positions(ch), s_patterns(ch), s_holes(ch),
+            s_quickrace(ch), s_tracklocks(ch)]
 
 
 def encode(scenarios):
@@ -1052,12 +1151,20 @@ class Model(object):
             REWARD_CARS: lambda e: self.answer("rw -> %d", self.reward),
             CHANGE_FLOW: lambda e: self.say("cg %d %d" % (
                 s32(e.reg[4]), s32(e.reg[5]))),
+            STOP_MOVIE: lambda e: self.say("sm"),
+            TREE_REWARD: lambda e: self.tree_answer("ta", self.reward_tab),
+            TREE_UNLOCKED: lambda e: self.tree_answer("tu",
+                                                      self.unlocked_tab),
+            BMALLOC: lambda e: e.alloc(max(s32(e.reg[4]), 0) + 16, align=16),
+            BFREE: lambda e: None,
         }
         for a, fn in stubs.items():
             e.stub(a, fn)
         self.status = self.race_index = self.user_rank = 0
         self.word = self.reward = 0
         self.tree = 0
+        self.reward_tab = {}
+        self.unlocked_tab = {}
         self.ko = [0, 0]
         self.elim = {}
         self.shown_fred = bytes(FRED_SIZE)
@@ -1067,6 +1174,7 @@ class Model(object):
         self.shown_di = [""] * NUM_DI
         self.shown = {}
         e.put32(TREE + 52, OPP)
+        self.set_trees(0)
 
     def emit(self, s):
         if not self.quiet:
@@ -1101,6 +1209,23 @@ class Model(object):
         v = self.ko[p] if p in (0, 1) else 0
         self.emit("ko %d -> %d" % (p, v))
         return v
+
+    def tree_answer(self, tag, tab):
+        e = self.e
+        tree = ((e.reg[4] & M32) - TREES) // 16
+        track, d = s32(e.reg[5]), s32(e.reg[6])
+        v = tab.get((tree, track & 0xff, d & 1), 0)
+        self.emit("%s %d %d %d -> %d" % (tag, tree, track, d, v))
+        return v
+
+    def set_trees(self, n):
+        """The bList at gp-16712 over n nodes: next at 0, prev at 4."""
+        e = self.e
+        nodes = [TREES + 16 * i for i in range(n)]
+        ring = [TREE_LIST] + nodes
+        for i, a in enumerate(ring):
+            e.put32(a, ring[(i + 1) % len(ring)])
+            e.put32(a + 4, ring[i - 1])
 
     def event_number(self, e):
         self.emit("en %d" % s32(e.reg[5]))
@@ -1399,6 +1524,30 @@ class Model(object):
                 elif op == "RI":
                     ty, sk, da, vd = map(int, a)
                     self.call(RIDE_INIT, RIDE, ty, sk, da, vd)
+                elif op == "tn":
+                    self.set_trees(int(a[0]))
+                    continue
+                elif op in ("ta", "tu"):
+                    tree, track, d, v = map(int, a)
+                    tab = self.reward_tab if op == "ta" else self.unlocked_tab
+                    tab[(tree, track & 0xff, d & 1)] = s32(v & M32)
+                    continue
+                elif op == "QR":
+                    self.call(START_QUICK, int(a[0]))
+                elif op == "PT":
+                    e.write(PICK, bytes(16))
+                    self.call(PICK_TRACK, PICK)
+                    self.emit("PT -> %d %d" % (s32(e.u32(PICK + 8)),
+                                               s32(e.u32(PICK + 12))))
+                elif op == "IU":
+                    t_, d = int(a[0]), int(a[1])
+                    self.emit("IU -> %d %d %d" % (
+                        self.call(IS_UNLOCKED, t_, d),
+                        self.call(IS_REWARD, t_, d),
+                        self.call(TREES_UNLOCKED, t_, d)))
+                elif op == "CS":
+                    self.emit("CS -> %d" % s32(self.call(
+                        CAR_STATUS, FRED + FPI, int(a[0]))))
                 elif op == "GT":
                     k = self.fk(a[0])
                     self.emit("GT -> %d %d %d" % (
@@ -1408,6 +1557,19 @@ class Model(object):
                     raise SystemExit("bad op %r" % (t,))
                 self.print_state()
         return self.out
+
+
+# The line the mutations start at, spelt so that this one does not match.
+MUTATIONS_HEADER = "# " + "=" * 60 + " the mutations" + NL
+
+
+def model_cached(sc):
+    """Model().run(sc), or its last transcript when nothing it reads has
+    changed (tools/mutpar.py): the script, the tools, the ELF and
+    GLOBALB.BUN."""
+    return mutpar.model_cached(encode(sc).splitlines(),
+                               lambda s: Model().run(sc), data=(GLOBALB,),
+                               cut=MUTATIONS_HEADER)
 
 
 # ================================================================ the build
@@ -1441,6 +1603,10 @@ diff = pcc.diff
 
 def M(name, before, after, rel=FRR):
     return (name, rel, before, after)
+
+
+QRC = "3DS Files/source/quickrace.c"
+FRC = "3DS Files/source/fred.c"
 
 
 MUTATIONS = [
@@ -1877,16 +2043,193 @@ MUTATIONS = [
       "return loc == 5 ? 4 : loc - 1;", RPC),
     M("loc_num", "return rp->TrackNumber / 10;",
       "return rp->TrackNumber / 11;", RPC),
+    # The quick race.
+    M("qr_no_defaults", "race_parameters_init_with_defaults(rp);\n    if",
+      "(void)rp;\n    if", QRC),
+    M("qr_no_stop", "        gQuickRaceStopMovieFn();", "        ;", QRC),
+    M("qr_stop_after", "    if (gQuickRaceStopMovieFn != NULL)\n"
+      "        gQuickRaceStopMovieFn();\n    cops = f->MainMenuOpts[1];",
+      "    cops = f->MainMenuOpts[1];", QRC),
+    M("qr_cops_word", "cops = f->MainMenuOpts[1];",
+      "cops = f->MainMenuOpts[0];", QRC),
+    M("qr_gametype", "f->GameType = GAME_TYPE_EXPRESS;", "f->GameType = 1;",
+      QRC),
+    M("qr_np", "f->NumPlayerCars = 1;", "f->NumPlayerCars = 2;", QRC),
+    M("qr_track", "rp->TrackNumber = pick.Track;",
+      "rp->TrackNumber = pick.Track + 1;", QRC),
+    M("qr_dir", "rp->TrackDirection = (eTrackDirection)pick.Direction;",
+      "rp->TrackDirection = (eTrackDirection)0;", QRC),
+    M("qr_info", "ti = track_get_info(pick.Track);",
+      "ti = track_get_info(pick.Track + 1);", QRC),
+    M("qr_tod", "ti != NULL ? ti->TimeOfDay : 0;",
+      "ti != NULL ? ti->TimeOfDay + 1 : 0;", QRC),
+    M("qr_tod_null", "ti != NULL ? ti->TimeOfDay : 0;",
+      "ti != NULL ? ti->TimeOfDay : 1;", QRC),
+    M("qr_p2p", "ti != NULL ? ti->Point2Point : 0;",
+      "ti != NULL ? !ti->Point2Point : 0;", QRC),
+    M("qr_p2p_null", "ti != NULL ? ti->Point2Point : 0;",
+      "ti != NULL ? ti->Point2Point : 1;", QRC),
+    M("qr_ai_cops", "rp->NumAICars = cops != 0 ? 3 : 7;",
+      "rp->NumAICars = cops != 0 ? 4 : 7;", QRC),
+    M("qr_ai_world", "rp->NumAICars = cops != 0 ? 3 : 7;",
+      "rp->NumAICars = cops != 0 ? 3 : 6;", QRC),
+    M("qr_ai_test", "rp->NumAICars = cops != 0 ? 3 : 7;",
+      "rp->NumAICars = cops > 0 ? 3 : 7;", QRC),
+    M("qr_grid", "(int8_t)((uint8_t)rp->NumAICars + 1);",
+      "(int8_t)((uint8_t)rp->NumAICars + 2);", QRC),
+    M("qr_grid_0", "(int8_t)((uint8_t)rp->NumAICars + 1);",
+      "(int8_t)((uint8_t)rp->NumAICars);", QRC),
+    M("qr_boost1", "rp->BoostScale[1] = 1.0f;", "rp->BoostScale[1] = 0.5f;",
+      QRC),
+    M("qr_maxcops", "cops != 0 ? 4 : 0;", "cops != 0 ? 3 : 0;", QRC),
+    M("qr_tickets", "cops != 0 ? 2 : 0;", "cops != 0 ? 1 : 0;", QRC),
+    M("qr_tickets_off", "cops != 0 ? 2 : 0;", "cops != 0 ? 2 : 1;", QRC),
+    M("qr_density", "rp->TrafficDensity = 0.33f;",
+      "rp->TrafficDensity = 0.34f;", QRC),
+    M("qr_oncoming", "rp->TrafficOncoming = 0.5f;",
+      "rp->TrafficOncoming = 0.33f;", QRC),
+    M("qr_boost0", "rp->BoostScale[0] = 1.0f;", "rp->BoostScale[0] = 2.0f;",
+      QRC),
+    M("qr_copstr", "rp->CopStrength = 1;", "rp->CopStrength = 2;", QRC),
+    M("qr_racetype", "rp->RaceType = 1;", "rp->RaceType = 0;", QRC),
+    M("qr_laps", "rp->NumLapsInRace = 2;", "rp->NumLapsInRace = 3;", QRC),
+    M("qr_treerace", "rp->EventTreeRace = 0;", "rp->EventTreeRace = 1;",
+      QRC),
+    M("qr_oppstr", "rp->OpponentStrength = 1;", "rp->OpponentStrength = 0;",
+      QRC),
+    M("qr_boost", "rp->Boost = 1;", "rp->Boost = 0;", QRC),
+    M("qr_rp_np", "rp->NumPlayerCars = 1;", "rp->NumPlayerCars = 2;", QRC),
+    M("qr_roadblocks", "rp->bRoadBlocks = cops;",
+      "rp->bRoadBlocks = cops != 0;", QRC),
+    M("qr_spikes", "rp->bSpikeStrips = cops;", "rp->bSpikeStrips = 1;", QRC),
+    M("qr_new624", "rp->New624 = cops;", "rp->New624 = cops != 0;", QRC),
+    M("qr_heli", "rp->bHelicopter = cops;", "rp->bHelicopter = 0;", QRC),
+    M("qr_bac_rb", "rp->nNumBeACopRoadBlocks = 0;",
+      "rp->nNumBeACopRoadBlocks = cops;", QRC),
+    M("qr_bac_ch", "rp->nNumBeACopChoppers = 0;",
+      "rp->nNumBeACopChoppers = cops;", QRC),
+    M("qr_ticketsflag", "rp->bTickets = cops;", "rp->bTickets = 1;", QRC),
+    M("qr_objective", "rp->HasObjective = 0;", "rp->HasObjective = 1;", QRC),
+    M("qr_sobjective", "rp->sObjective[0] = 0;", "rp->sObjective[0] = 'x';",
+      QRC),
+    M("qr_training", "rp->TrainingLinesEnabled = 0;",
+      "rp->TrainingLinesEnabled = 1;", QRC),
+    M("qr_no_challenge", "fred_make_challenge_cars_available(f);",
+      "(void)f;", QRC),
+    M("qr_config_test", "    fred_make_challenge_cars_available(f);\n"
+      "    if (TrackSelectedInConfigFile >= 0) {",
+      "    fred_make_challenge_cars_available(f);\n"
+      "    if (TrackSelectedInConfigFile > 0) {", QRC),
+    M("qr_config_status", "fpi_set_car_availability(p0, CAR_STATUS_AVAILABLE,",
+      "fpi_set_car_availability(p0, 1,", QRC),
+    M("qr_config_skins", "DefaultPlayer1CarType, -1, 1);",
+      "DefaultPlayer1CarType, 1, 1);", QRC),
+    M("qr_config_dash", "DefaultPlayer1CarType, -1, 1);",
+      "DefaultPlayer1CarType, -1, 0);", QRC),
+    M("qr_config_type", "fpi_assign_car_of_type(p0, f->GameType, "
+      "DefaultPlayer1CarType,",
+      "fpi_assign_car_of_type(p0, f->GameType, DefaultPlayer2CarType,", QRC),
+    M("qr_config_skin", "(uint32_t)DefaultPlayer1SkinIndex, 0);",
+      "(uint32_t)DefaultPlayer1SkinIndex + 1, 0);", QRC),
+    M("qr_config_mode", "fpi_assign_car_of_type(p0, f->GameType, "
+      "DefaultPlayer1CarType,",
+      "fpi_assign_car_of_type(p0, 0, DefaultPlayer1CarType,", QRC),
+    M("qr_ride_type", "ride.Type = -1;", "ride.Type = 0;", QRC),
+    M("qr_ride_usage", "generate_random_ride_info(&ride, CAR_USAGE_TYPE_RACING,",
+      "generate_random_ride_info(&ride, 1,", QRC),
+    M("qr_ride_status", "while (fpi_get_car_status(p0, ride.Type) != "
+      "CAR_STATUS_AVAILABLE);",
+      "while (0);", QRC),
+    M("qr_ride_skin", "(uint32_t)(int32_t)ride.SkinNumber, 0);",
+      "(uint32_t)(int32_t)ride.SkinNumber + 1, 0);", QRC),
+    M("qr_ride_dash", "(uint32_t)(int32_t)ride.SkinNumber, 0);",
+      "(uint32_t)(int32_t)ride.SkinNumber, 1);", QRC),
+    M("qr_trans", "(int8_t)(transmission != 0);", "(int8_t)transmission;",
+      QRC),
+    M("qr_trans_sign", "(int8_t)(transmission != 0);",
+      "(int8_t)(transmission > 0);", QRC),
+    M("qr_no_start", "    fred_start_race(f);\n}", "    (void)f;\n}", QRC),
+    # The pick.
+    M("pk_config_test", "    if (TrackSelectedInConfigFile >= 0) {\n"
+      "        out->Track", "    if (TrackSelectedInConfigFile > 0) {\n"
+      "        out->Track", QRC),
+    M("pk_config_dir", "out->Track = TrackSelectedInConfigFile;\n"
+      "        out->Direction = 0;",
+      "out->Track = TrackSelectedInConfigFile;\n"
+      "        out->Direction = 1;", QRC),
+    M("pk_last", "for (i = 0; i <= HighestTrackNumber; i++)",
+      "for (i = 0; i < HighestTrackNumber; i++)", QRC),
+    M("pk_same", "is_track_unlocked(ti->SameAsTrackNumber, direction)",
+      "is_track_unlocked(ti->TrackNumber, direction)", QRC),
+    M("pk_number", "list[n].Track = ti->TrackNumber;",
+      "list[n].Track = ti->SameAsTrackNumber;", QRC),
+    M("pk_dir", "list[n].Direction = direction;",
+      "list[n].Direction = 1 - direction;", QRC),
+    M("pk_order", "for (direction = 0; direction < 2; direction++)",
+      "for (direction = 1; direction >= 0; direction--)", QRC),
+    M("pk_one_dir", "for (direction = 0; direction < 2; direction++)",
+      "for (direction = 0; direction < 1; direction++)", QRC),
+    M("pk_lock", "if (!is_track_unlocked(ti->SameAsTrackNumber, direction))",
+      "if (0)", QRC),
+    M("pk_random", "*out = list[bRandomI(n, &bDefaultSeed)];",
+      "*out = list[n - 1 - bRandomI(n, &bDefaultSeed)];", QRC),
+    M("pk_random_n", "*out = list[bRandomI(n, &bDefaultSeed)];",
+      "*out = list[bRandomI(n > 1 ? n - 1 : n, &bDefaultSeed)];", QRC),
+    # The locks.
+    M("lk_reward_ret", "            return 1;\n    return 0;\n}",
+      "            return 2;\n    return 0;\n}", QRC),
+    M("lk_reward_first", "    for (tree = 0; tree < gNumEventTrees; tree++)\n"
+      "        if (tree_track_is_a_reward",
+      "    for (tree = 1; tree < gNumEventTrees; tree++)\n"
+      "        if (tree_track_is_a_reward", QRC),
+    M("lk_unlocked_tree", "    for (tree = 0; tree < gNumEventTrees; tree++) {",
+      "    for (tree = 1; tree < gNumEventTrees; tree++) {", QRC),
+    M("lk_skip", "        if (!tree_track_is_a_reward(tree, track, "
+      "direction))\n            continue;",
+      "        if (0)\n            continue;", QRC),
+    M("lk_bool", "gEventTreeIsTrackUnlockedFn(tree, track, direction) != 0;",
+      "gEventTreeIsTrackUnlockedFn(tree, track, direction);", QRC),
+    M("lk_tree_arg", "gEventTreeIsTrackUnlockedFn(tree, track, direction) "
+      "!= 0;", "gEventTreeIsTrackUnlockedFn(0, track, direction) != 0;", QRC),
+    M("lk_none", "        return gEventTreeIsTrackUnlockedFn(tree, track, "
+      "direction) != 0;\n    }\n    return 1;",
+      "        return gEventTreeIsTrackUnlockedFn(tree, track, "
+      "direction) != 0;\n    }\n    return 0;", QRC),
+    M("lk_unlocked", "        return event_tree_is_track_unlocked(track, "
+      "direction);\n    return 1;",
+      "        return 1;\n    return 1;", QRC),
+    M("lk_unlocked_else", "        return event_tree_is_track_unlocked(track, "
+      "direction);\n    return 1;",
+      "        return event_tree_is_track_unlocked(track, "
+      "direction);\n    return 0;", QRC),
+    M("cs_index", "(const uint8_t *)p + type * (int32_t)sizeof(CarStatus)",
+      "(const uint8_t *)p + (type + 1) * (int32_t)sizeof(CarStatus)", FRC),
 ]
 
 EQUIVALENT = {
     # The driver being placed is in the table with StartingPosition 0 until
     # it is given one, so slot 0 is always held and the search moves on.
     "cp_pos1": "the driver being placed holds slot 0 itself",
+    # StartQuickRace's GameType is 2 and its NumPlayerCars 1, so StartRace,
+    # which it always ends with, sets BoostScale[0] from the difficulty
+    # table, and EventTreeRace from the GameType, over what it stored;
+    # nothing between reads either.
+    "qr_boost0": "StartRace sets BoostScale[0] again for the express game",
+    "qr_treerace": "StartRace sets EventTreeRace again",
+    # GenerateRandomRideInfo writes the ride's Type whenever a racing car
+    # has a chance at the track's location, which on the disc every
+    # location has; the -1 is read only when none has, and then the loop
+    # asks the status of the word before the table.
+    "qr_ride_type": "the draw always writes Type with the disc's cars",
+    # MakeChallengeCarsAvailable, which StartQuickRace calls just before the
+    # draw, sets bDashAvailable 0 on every car with geometry, and the draw
+    # takes only cars with geometry, so the dash asked for is never given.
+    "qr_ride_dash": "MakeChallengeCarsAvailable has just cleared every "
+                    "drawable car's bDashAvailable",
 }
 
 
-def mutate_pass(only=None):
+def mutate_pass(only=None, jobs=None):
     todo = [m for m in MUTATIONS if only is None or m[0] in only]
     if only:
         unknown = set(only) - {m[0] for m in MUTATIONS}
@@ -1894,90 +2237,30 @@ def mutate_pass(only=None):
             print("no such mutation: %s" % ", ".join(sorted(unknown)))
             return 1
     hostbuild.recover()
-    m = Model()
     sc = script()
-    base = m.run(sc)
-    caught, survived, missing, equivalent = 0, [], [], []
+    base = model_cached(sc)
     scdir = tempfile.TemporaryDirectory()
     scp = Path(scdir.name) / "scenarios.txt"
     scp.write_text(encode(sc))
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
         out = Path(tmp) / "base.txt"
+        t0 = time.monotonic()
         run_harness(exe, scp, out)
-        if diff(base, out.read_text().splitlines(), quiet=True):
+        took = time.monotonic() - t0
+        got = out.read_text().splitlines()
+        if diff(base, got, quiet=True):
             print("base already differs -- fix that before mutating")
             return 1
+        print("base: %d lines, 0 differ" % len(got), flush=True)
 
-    for mut in todo:
-        name, rel, before, after = mut
-        path = ROOT / rel
-        text = path.read_text(encoding="utf-8", newline="")
-        crlf = "\r\n" in text
-        probe = before.replace(NL, "\r\n") if crlf else before
-        repl = after.replace(NL, "\r\n") if crlf else after
-        if text.count(probe) != 1:
-            missing.append(name)
-            print("  %-36s PATTERN %s" % (
-                name, "NOT FOUND" if not text.count(probe) else "NOT UNIQUE"))
-            continue
-        new = text.replace(probe, repl, 1)
-        try:
-            hostbuild.write_source(path, new)
-            with tempfile.TemporaryDirectory() as tmp:
-                try:
-                    exe = build_harness(tmp)
-                except SystemExit:
-                    print("  %-36s did not compile (caught)" % name)
-                    caught += 1
-                    continue
-                out = Path(tmp) / "m.txt"
-                rc = run_harness(exe, scp, out)
-                if rc == pcc.HARNESS_HUNG:
-                    print("  %-36s hung the harness (caught)" % name)
-                    caught += 1
-                    continue
-                if rc != 0:
-                    print("  %-36s crashed the harness (caught)" % name)
-                    caught += 1
-                    continue
-                n = diff(base, out.read_text().splitlines(), quiet=True)
-                if n:
-                    print("  %-36s caught, %d lines" % (name, n))
-                    caught += 1
-                elif name in EQUIVALENT:
-                    print("  %-36s survived, equivalent by construction"
-                          % name)
-                    equivalent.append(name)
-                else:
-                    print("  %-36s SURVIVED" % name)
-                    survived.append(name)
-        finally:
-            try:
-                hostbuild.write_source(path, text)
-            except OSError:
-                sys.exit("could not restore %s -- it still holds the "
-                         "mutation %s. Put the original line back before "
-                         "trusting anything printed above." % (rel, name))
+    limit = mutpar.timeout_for(took)
+    tally = mutpar.run_pass(
+        todo, SOURCES, "fredrace_test",
+        lambda exe, out: mutpar.run_exe([exe, scp], out, limit),
+        base, diff, EQUIVALENT, jobs)
     scdir.cleanup()
-
-    real = [m for m in todo if m[0] not in missing]
-    holes = [s for s in survived if s not in EQUIVALENT]
-    ran = {m[0] for m in todo}
-    stale = [n for n in EQUIVALENT
-             if n not in equivalent and n not in missing
-             and (n in ran or only is None)]
-    if missing:
-        print("%d PATTERN NOT FOUND -- the tally above is over %d of %d"
-              % (len(missing), len(real), len(todo)))
-    print("%d mutations, %d caught, %d equivalent, %d unexplained"
-          % (len(real), caught, len(equivalent), len(holes)))
-    for name in holes:
-        print("  unexplained: %s" % name)
-    for name in stale:
-        print("  listed as equivalent but %s: %s"
-              % ("caught" if name in ran else "names no mutation", name))
-    return 1 if (holes or missing or stale) else 0
+    return mutpar.summarize(todo, only, EQUIVALENT, tally)
 
 
 def main():
@@ -1985,15 +2268,18 @@ def main():
     ap.add_argument("--mutate", action="store_true")
     ap.add_argument("--only", metavar="NAME,...",
                     help="with --mutate, only these mutations")
+    ap.add_argument("--jobs", type=int, metavar="N",
+                    help="with --mutate, mutants at once (default %d)"
+                    % mutpar.JOBS)
     ap.add_argument("--dump", metavar="PREFIX")
     args = ap.parse_args()
 
     if args.mutate:
-        sys.exit(mutate_pass(args.only.split(",") if args.only else None))
+        sys.exit(mutate_pass(args.only.split(",") if args.only else None,
+                             args.jobs))
 
-    m = Model()
     sc = script()
-    lines = m.run(sc)
+    lines = model_cached(sc)
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
         scp = Path(tmp) / "scenarios.txt"

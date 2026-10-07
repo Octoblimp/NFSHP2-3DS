@@ -219,6 +219,12 @@ void fpi_set_character_info(FrontendPlayerInfo *p, const CharacterInfo *ci);
 void fpi_set_car_availability(FrontendPlayerInfo *p, int32_t status,
                               int32_t type, int32_t skin, int32_t dash);
 
+// FrontendPlayerInfo::GetCarStatus, 0x00187958: the word at 24 x `type`
+// in the record, the car's nStatus, with no range test. StartQuickRace
+// asks it of a type of -1 when GenerateRandomRideInfo finds no car, and
+// reads the 24 bytes before the record, as the image does.
+int32_t fpi_get_car_status(const FrontendPlayerInfo *p, int32_t type);
+
 // FrontendPlayerInfo::AssignCarOfType, 0x00187a68, through BuildRideInfo
 // (0x001879b8): the mode's ride is the car with `skin` if the car offers
 // it, else its first skin, and the dash only if asked for, offered and

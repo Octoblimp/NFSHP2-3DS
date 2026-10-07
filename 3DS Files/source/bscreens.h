@@ -105,49 +105,6 @@ typedef enum {
     BSCR_GRAY_HIDE    = 2,   // clear ENABLED and make the object INVISIBLE
 } BScrGrayMode;
 
-// RaceParameters (768 bytes at 0x00312520), the fields StartQuickRace
-// (0x00203ae0) writes, with the struct's own names from the .mdebug type
-// info and the byte offset each one lives at. Phase 4 owns the race; this
-// block is what the frontend hands it, and the port carries it verbatim so
-// nothing has to be re-derived later.
-//
-// `cops` below is Fred.MainMenuOpts.mPolice (0x002f3fdc), which is the same
-// flag NewMainMenu set to pick between the two Mode Selects -- BGameFlow's
-// `copsOn`.
-typedef struct {
-    int   trackNumber;           // +0    PickTrackNumberForExpressGame()
-    float trafficDensity;        // +16   0.33
-    float trafficOncoming;       // +20   0.5
-    int   raceType;              // +32   1
-    int   point2Point;           // +40   GetTrackInfo(track)[67]
-    int   numLapsInRace;         // +44   2
-    int   numPlayerCars;         // +48   1
-    int   numAICars;             // +52   cops ? 3 : 7
-    int   playerStartPosition;   // +60   cops ? 2 : 8   (a char[2], [0] only)
-    int   trainingLinesEnabled;  // +76   0
-    int   hasObjective;          // +80   0
-    int   objectiveCleared;      // +84   sObjective[0] = 0
-    int   eventTreeRace;         // +600  0
-    int   maxCops;               // +604  cops ? 4 : 0
-    int   tickets;               // +608  cops
-    int   roadBlocks;            // +612  cops
-    int   spikeStrips;           // +616  cops
-    int   helicopter;            // +620  cops
-    int   ticketsBeforeArrest;   // +632  cops ? 2 : 0
-    int   numBeACopRoadBlocks;   // +636  0
-    int   numBeACopChoppers;     // +640  0
-    int   copStrength;           // +644  1
-    int   opponentStrength;      // +736  1
-    int   boost;                 // +740  1
-    float boostScale[2];         // +744  1.0, 1.0
-
-    // Not in RaceParameters: Fred.GameType / Fred.NumPlayerCars, and the
-    // one thing the screen's own joystick handler contributes.
-    int   gameType;              // Fred.GameType      = FRED_EXPRESS_GAME
-    int   fredNumPlayerCars;     // Fred.NumPlayerCars = 1
-    int   transmissionType;      // cPlayerSettings.TransmissionType
-} BQuickRace;
-
 // Everything these screens do to the outside world. All of it is optional.
 typedef struct {
     void* user;
@@ -178,8 +135,10 @@ typedef struct {
     void (*jukebox)(void* user, int start);          // sound::jukebox::Start
     void (*displayOptionsStart)(void* user);         // 0x001e0508
 
-    // StartQuickRace (0x00203ae0), minus the race itself.
-    void (*startQuickRace)(void* user, const BQuickRace* p);
+    // StartQuickRace (0x00216c18, quickrace.h), with the transmission
+    // button's state the screen keeps. It stops the panel movie, fills
+    // TheRaceParameters and starts the race.
+    void (*startQuickRace)(void* user, int transmission);
 } BScreensHooks;
 
 // How long each screen takes to leave used to be a constant here, worked
@@ -278,8 +237,3 @@ void bscr_options_callback(BGameFlow* gf, BScreenMessage msg,
 #define BSCR_JOY_SELECT_TRANSMISSION 23
 void bscr_joy(BScreens* s, int port, int joyEvent, int pressed);
 
-// StartQuickRace's parameter block, without starting anything. Exposed so
-// the cross-check can diff it field by field.
-void bscr_quick_race_params(const BScreens* s, int transmission,
-                            int trackNumber, int point2Point,
-                            BQuickRace* out);

@@ -722,6 +722,11 @@ static const Scenario kScenarios[] = {
     { "mainmenu", 1, 0, 1, 1, 0, 0, 0, BOOT60 + 280, SIXTIETH,
       {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item3"},
        {BOOT60 + 258, "back"}, {BOOT60 + 262, "item1"}} },
+    // Hot Pursuit, then a race: StartRace's ask for UNLOADING_FRONTEND,
+    // whose Begin leaves the screens and asks for LOADING_TRACK_COMMON.
+    { "leavefe", 1, 0, 1, 1, 0, 0, 0, BOOT60 + 270, SIXTIETH,
+      {{BOOT60 + 250, "select"}, {BOOT60 + 254, "item1"},
+       {BOOT60 + 260, "race"}} },
     // Force the legal screen, which the retail predicate never allows.
     { "mumbo", 1, 0, 0, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH,
       {{BOOT60 + 12, "mumbo"}} },
@@ -1075,6 +1080,11 @@ static void runScenario(const Scenario* sc)
                 // ... and down again, as the race's end clears it.
                 printf("input outgame\n");
                 w.inGame = 0;
+            } else if (!strcmp(what, "race")) {
+                // StartRace from the frontend: ChangeGameFlow(
+                // UNLOADING_FRONTEND, NONE).
+                printf("input race\n");
+                bgf_change_state(&gf, BGF_UNLOADING_FRONTEND, BGF_NONE);
             } else if (!strcmp(what, "mumbo")) {
                 printf("input mumbo\n");
                 bgf_push_screen(&gf, "New Main Menu");

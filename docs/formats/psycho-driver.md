@@ -5,7 +5,8 @@ with its start-up code `_GLOBAL_$I$PidProportionalData` (0x0013ab68) and
 `_vt$12PsychoDriver` (0x002aec50). AIDrivingInfo.obj's two SteerStraight
 functions (0x001cd148, 0x001cd1d8) come with it, as only its
 CalcSteerToPoint calls them. This is step 11f-1. AIDriver's constructor
-and TrafficDriver's each bMalloc one (624 bytes) and build it on their car.
+and TrafficDriver's ([traffic-driver](traffic-driver.md)) each bMalloc one
+(624 bytes) and build it on their car.
 
 Ported to `3DS Files/source/psychodriver.{c,h}`, all but DoSnapshot
 (0x00139980), which waits on ReplaySnapshot. Cross-checked by

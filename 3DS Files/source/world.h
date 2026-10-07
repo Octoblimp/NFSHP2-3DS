@@ -260,7 +260,8 @@ void world_verify_debug_checksums(World *w);
 // test of their own pointer. Here each call is a pointer, and a NULL one is
 // skipped -- all but FinishMovement, which moves a car to where its
 // collisions left it, so a step without it is not a step, and a NULL one
-// aborts. PlaceNewCar is AddTrafficCar's, and aborts the same way.
+// aborts. PlaceNewCar is AddTrafficCar's; a NULL one places no traffic
+// car, as raceinit.c's NULL AddCopCarToRace places no cop.
 extern void (*gTrafficTeleporterDoTimestepFn)(struct TrafficTeleporter *t,
                                               float dt);    // 0x0020e6f8
 extern void (*gGlobalCopThinkFn)(float dt);                 // 0x002139d0

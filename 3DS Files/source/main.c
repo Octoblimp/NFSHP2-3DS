@@ -131,6 +131,7 @@
 #include "playerzone.h"
 #include "previewroute.h"
 #include "queuedfile.h"
+#include "quickrace.h"
 #include "race.h"
 #include "racecoord.h"
 #include "raceparams.h"
@@ -154,6 +155,8 @@
 #include "weatherman.h"
 #include "trackflow.h"
 #include "trackview.h"
+#include "trafficcar.h"
+#include "trafficdriver.h"
 #include "traffictele.h"
 #include "uirender.h"
 #include "warp.h"
@@ -1954,18 +1957,40 @@ static void hookDisplayOptionsStart(void* user)
     logLine("display options snapshot");
 }
 
-// StartQuickRace's parameter block arrives complete; what it feeds -- the
-// track database and the race itself -- is Phase 4. Print it, so the one
-// thing the frontend produces is visible before there is anywhere to put it.
-static void hookStartQuickRace(void* user, const BQuickRace* p)
+// Quick Race: retail's StartQuickRace (quickrace.h) fills the race and
+// calls StartRace, whose ChangeGameFlow takes the flow out of the frontend.
+// StopMovie inside it is the screen list's.
+static void quickRaceStopMovie(void)
+{
+    bgf_stop_movie(&g_flow);
+}
+
+static void hookStartQuickRace(void* user, int transmission)
 {
     (void)user;
     bootNote("quick race");
-    logLine("quickrace track=%d laps=%d ai=%d start=%d maxcops=%d "
-            "tickets=%d boost=%d gearbox=%s",
-            p->trackNumber, p->numLapsInRace, p->numAICars,
-            p->playerStartPosition, p->maxCops, p->ticketsBeforeArrest,
-            p->boost, p->transmissionType ? "manual" : "automatic");
+    gQuickRaceStopMovieFn = quickRaceStopMovie;
+    start_quick_race(transmission);
+    logLine("quickrace: track %d %s, time of day %d, %d AI, grid %d, "
+            "%d cops, car %d skin %d, gearbox %s",
+            (int)TheRaceParameters.TrackNumber,
+            TheRaceParameters.TrackDirection ? "backwards" : "forwards",
+            (int)TheRaceParameters.TrackTimeOfDay,
+            (int)TheRaceParameters.NumAICars,
+            (int)TheRaceParameters.PlayerStartPosition[0],
+            (int)TheRaceParameters.nMaxCops,
+            (int)Fred.FrontendPlayers[0].RideInfoByGameMode[Fred.GameType].Type,
+            (int)Fred.FrontendPlayers[0].RideInfoByGameMode[Fred.GameType]
+                .SkinNumber,
+            transmission ? "manual" : "automatic");
+    logRaceStart();
+}
+
+// NewMainMenu's CopsOn, where retail keeps it.
+static void hookSetPolice(void* user, int copsOn)
+{
+    (void)user;
+    Fred.MainMenuOpts[1] = copsOn;
 }
 
 // ---------------------------------------------------------------- 3DS glue
@@ -3291,15 +3316,21 @@ int main(int argc, char** argv)
     beltmover_install_vtables();
     psychodriver_install_vtables();
     aidriver_install_vtables();
+    trafficcar_install_vtables();
+    trafficdriver_install_vtables();
 
     // Car::SetControlMode reaches the controllers task 26 brings through
     // seams; a NULL one is a class not ported yet, and the arm aborts.
     gRealControllerCtorFn = realcontroller_construct;
     gAIDriverCtorFn = aidriver_construct;
+    gTrafficDriverCtorFn = trafficdriver_construct;
 
     // BELT_MOVEMENT's mover, its SetBelt for AICarController::Think and
     // its slope for CalculateMaxAcceleration (11e-6).
     beltmover_install_seams();
+
+    // TRAFFIC_MOVEMENT's mover (11h-1).
+    trafficcar_install_seams();
 
     // Car::GetDrivingLineSpeed asks an AI or traffic car's controller,
     // an AICarController since step 11e-1.
@@ -3646,6 +3677,7 @@ int main(int argc, char** argv)
     hooks.easterEggs       = hookEasterEggs;
     hooks.initSelectCar    = hookCarSelInit;
     hooks.closeSelectCar   = hookCarSelClose;
+    hooks.setPolice        = hookSetPolice;
     hooks.unloadFrontEnd   = hookUnloadFrontEnd;
     hooks.moveBrackets     = hookMoveBrackets;   // NewMainMenu's highlight
     hooks.setBlurb         = hookSetBlurb;

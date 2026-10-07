@@ -228,58 +228,15 @@ static void kitTick(BScreens* s, BScreenInstance* inst)
     banim_slide_animate(a, &inst->slideIn);
 }
 
-void bscr_quick_race_params(const BScreens* s, int transmission,
-                            int trackNumber, int point2Point,
-                            BQuickRace* out)
-{
-    // Fred.MainMenuOpts.mPolice, the same flag that picked the Mode Select.
-    int cops = (s && s->gf) ? (s->gf->copsOn != 0) : 0;
-
-    memset(out, 0, sizeof(*out));
-    out->trackNumber          = trackNumber;
-    out->trafficDensity       = 0.33f;
-    out->trafficOncoming      = 0.5f;
-    out->raceType             = 1;
-    out->point2Point          = point2Point;
-    out->numLapsInRace        = 2;
-    out->numPlayerCars        = 1;
-    out->numAICars            = cops ? 3 : 7;
-    out->playerStartPosition  = cops ? 2 : 8;
-    out->trainingLinesEnabled = 0;
-    out->hasObjective         = 0;
-    out->objectiveCleared     = 1;
-    out->eventTreeRace        = 0;
-    out->maxCops              = cops ? 4 : 0;
-    out->tickets              = cops;
-    out->roadBlocks           = cops;
-    out->spikeStrips          = cops;
-    out->helicopter           = cops;
-    out->ticketsBeforeArrest  = cops ? 2 : 0;
-    out->numBeACopRoadBlocks  = 0;
-    out->numBeACopChoppers    = 0;
-    out->copStrength          = 1;
-    out->opponentStrength     = 1;
-    out->boost                = 1;
-    out->boostScale[0]        = 1.0f;
-    out->boostScale[1]        = 1.0f;
-    out->gameType             = BSCR_FRED_EXPRESS_GAME;
-    out->fredNumPlayerCars    = 1;
-    out->transmissionType     = transmission ? 1 : 0;
-}
-
-// StartQuickRace (0x00203ae0). The track pick (PickTrackNumberForExpressGame,
-// 0x00203530) and Point2Point (GetTrackInfo(track)[67]) come out of the
-// track database, which Phase 4 owns, so they arrive as 0 here and the
-// parameter block is handed over as-is.
+// StartQuickRace (0x00216c18) is quickrace.c's: the Mode Select hands it
+// the transmission button's state (+628) and it does the rest, the panel
+// movie's stop among it.
 static void startQuickRace(BScreens* s, BScreenInstance* inst)
 {
-    BQuickRace p;
-    bscr_quick_race_params(s, inst->transmission, 0, 0, &p);
-    HOOK0(s, stopMovie);
-    trace(s, "quickrace cops=%d transmission=%d aicars=%d maxcops=%d start=%d",
-          s->gf ? (s->gf->copsOn != 0) : 0, p.transmissionType,
-          p.numAICars, p.maxCops, p.playerStartPosition);
-    if (s->hooks.startQuickRace) s->hooks.startQuickRace(s->hooks.user, &p);
+    trace(s, "quickrace cops=%d transmission=%d",
+          s->gf ? (s->gf->copsOn != 0) : 0, inst->transmission);
+    if (s->hooks.startQuickRace)
+        s->hooks.startQuickRace(s->hooks.user, inst->transmission);
 }
 
 // ------------------------------------------------------- the two Mode Selects

@@ -263,6 +263,10 @@ typedef struct {
     // carloader.h). Neither is traced: the boot transcript predates them.
     void (*initSelectCar)(void* user);
     void (*closeSelectCar)(void* user);
+    // NewMainMenu's Hot Pursuit and World Racing store CopsOn in
+    // Fred.MainMenuOpts.mPolice (0x002fc070), which StartQuickRace reads;
+    // the flow keeps its own copy in copsOn. Not traced.
+    void (*setPolice)(void* user, int copsOn);
     // Then its FindResourceFile(1) / UnloadResourceFile loop, which hands
     // back FRONTB, the frontend's one resource file (frontres.h). Not
     // traced either.

@@ -146,13 +146,15 @@ Eight of the classes these two tables build belong to task 26:
 - **Movers:** TrafficCar, DeliveryMover, CopMover, BeltMover.
 - **Controllers:** RealController, AIDriver, TrafficDriver, CopDriver.
 
-Three are ported: RealController ([real-controller.md](real-controller.md)),
-BeltMover ([belt-mover.md](belt-mover.md), step 11e-6) and AIDriver
-([ai-driver.md](ai-driver.md), step 11f-2). main.c sets their seams at
+Five are ported: RealController ([real-controller.md](real-controller.md)),
+BeltMover ([belt-mover.md](belt-mover.md), step 11e-6), AIDriver
+([ai-driver.md](ai-driver.md), step 11f-2), TrafficCar
+([traffic-car.md](traffic-car.md), step 11h-1) and TrafficDriver
+([traffic-driver.md](traffic-driver.md), step 11h-2). main.c sets their seams at
 boot, and their `_SIZE` constants are `sizeof`. **Retail's SetControlMode
 (0x00131410) asks 736 for AIDriver and TrafficDriver**, where the demo's
-table above has 720; carmode_check runs the demo's and maps AIDriver's
-size back.
+table above has 720; carmode_check runs the demo's and maps both sizes
+back.
 
 Car allocates each one itself and hands the memory to the constructor, so
 the port does the same. It calls the constructor through a pointer:

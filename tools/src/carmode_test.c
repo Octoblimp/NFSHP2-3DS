@@ -326,7 +326,7 @@ static void *hook_malloc(int size, const char *name, int flags, int pool)
         return p;
     }
     memset(p, 0xa5, (size_t)size);
-    // The six records the port has are its own size; the log shows the
+    // The eight records the port has are its own size; the log shows the
     // image's, so a wrong size still shows.
     if (strcmp(name, "PhysicsCar") == 0 && size == (int)sizeof(PhysicsCar)) {
         t = &pct_PhysicsCar;
@@ -346,10 +346,18 @@ static void *hook_malloc(int size, const char *name, int flags, int pool)
                && size == (int)sizeof(BeltMover)) {
         // Ported too (11e-6), and a stand-in here like RealController.
         shown = CM_IMG_BELTMOVER;
+    } else if (strcmp(name, "TrafficCar") == 0
+               && size == (int)sizeof(TrafficCar)) {
+        // Ported (11h-1), and a stand-in here too.
+        shown = CM_IMG_TRAFFICCAR;
     } else if (strcmp(name, "AIDriver") == 0
                && size == (int)sizeof(AIDriver)) {
         // Ported (11f-2): retail's 736, the demo's 720, which this runs.
         shown = CM_IMG_AIDRIVER;
+    } else if (strcmp(name, "TrafficDriver") == 0
+               && size == (int)sizeof(TrafficDriver)) {
+        // Ported (11h-2): retail's 736 and the demo's 720 too.
+        shown = CM_IMG_TRAFFICDRIVER;
     }
     g_nalloc++;
     snprintf(nm, sizeof nm, "%s#%d", name, g_nalloc);

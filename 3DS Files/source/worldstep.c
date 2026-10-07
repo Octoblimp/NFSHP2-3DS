@@ -291,8 +291,10 @@ void world_add_traffic_car(World *w, DriverInfo *info)
     Car *c;
     Car *tail;
 
+    // Until TrafficTeleporter is ported (11h) the race has no traffic, as
+    // it has no cops while AddCopCarToRace is a NULL seam.
     if (gTrafficTeleporterPlaceNewCarFn == NULL)
-        world_fail("TrafficTeleporter::PlaceNewCar is not ported");
+        return;
     c = gTrafficTeleporterPlaceNewCarFn(w->Teleporter, info);
     if (c == NULL)
         return;

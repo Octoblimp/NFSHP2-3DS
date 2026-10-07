@@ -496,8 +496,11 @@ class Flow(object):
         self.service()
 
     def begin_unloading_frontend(self):
+        # 0x00168830: the unloads, then ChangeGameFlow(LOADING_TRACK_COMMON,
+        # NONE) at 0x00168920.
         self.change_to_screen(None, 0)
         self.reset_stack()
+        self.change_state(LOADING_TRACK_COMMON, NONE)
 
     # -- LaunchFrontendMenus ----------------------------------------------
     def should_see_title_sequence(self):
@@ -1951,6 +1954,11 @@ SCENARIOS = [
          haveIntroMovie=0, frames=BOOT60 + 280, dt=SIXTIETH,
          input=[(BOOT60 + 250, "select"), (BOOT60 + 254, "item3"),
                 (BOOT60 + 258, "back"), (BOOT60 + 262, "item1")]),
+    dict(name="leavefe", videoMode=1, currLanguage=0, skipMovies=1,
+         frontendLaunchType=1, demoModeStatus=0,
+         haveIntroMovie=0, frames=BOOT60 + 270, dt=SIXTIETH,
+         input=[(BOOT60 + 250, "select"), (BOOT60 + 254, "item1"),
+                (BOOT60 + 260, "race")]),
     dict(name="mumbo", videoMode=1, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 12, "mumbo")]),
@@ -2104,6 +2112,8 @@ def run_scenario(sc):
                 f.in_game = 1
             elif what == "outgame":
                 f.in_game = 0
+            elif what == "race":
+                f.change_state(UNLOADING_FRONTEND, NONE)
             elif what == "mumbo":
                 f.push("New Main Menu")
                 f.change_to_screen("Legal MumboJumbo", 0)
@@ -2285,6 +2295,22 @@ MUTATIONS += [
     ("sounds-wrong-state", GF,
      "    bgf_change_state(gf, BGF_IN_FRONTEND, BGF_NONE);",
      "    bgf_change_state(gf, BGF_UNLOADING_FRONTEND, BGF_NONE);"),
+    # BeginGameFlowUnloadingFrontEnd's last call, 0x00168920.
+    ("unload-stays", GF,
+     "    HOOK_VOID0(gf, unloadFrontEnd);" + NL
+     + "    bgf_change_state(gf, BGF_LOADING_TRACK_COMMON, BGF_NONE);",
+     "    HOOK_VOID0(gf, unloadFrontEnd);"),
+    ("unload-wrong-state", GF,
+     "    bgf_change_state(gf, BGF_LOADING_TRACK_COMMON, BGF_NONE);" + NL
+     + "}",
+     "    bgf_change_state(gf, BGF_LOADING_TRACK_SPECIFIC, BGF_NONE);" + NL
+     + "}"),
+    ("unload-keeps-screen", GF,
+     "    bgf_change_to_screen(gf, NULL, 0);" + NL
+     + "    bgf_reset_stack(gf);" + NL
+     + "    HOOK_VOID0(gf, closeSelectCar);",
+     "    bgf_reset_stack(gf);" + NL
+     + "    HOOK_VOID0(gf, closeSelectCar);"),
     # End, 0x001687a8.
     ("end-copyright-left", GF,
      "    objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);",

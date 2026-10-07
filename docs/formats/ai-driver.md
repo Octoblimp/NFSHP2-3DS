@@ -107,7 +107,8 @@ The constructor's 6000 is the only way in.
 ## GetRouteNumbersToUse (0x00130890)
 
 `*first = 0` and `*last = 49`. AICarController's slot is pure; AIDriver
-and TrafficDriver each fill it.
+and TrafficDriver (50 to 59 or 60 to 69, see
+[traffic-driver](traffic-driver.md)) each fill it.
 
 ## ShouldWeAvoidThisCar (0x001307b0)
 

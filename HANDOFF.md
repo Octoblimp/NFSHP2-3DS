@@ -16005,3 +16005,204 @@ and hudrender (each builds configitems.c) and difficulty_check (68
 facts, 11 readers, 0 wrong) still run clean. The CIA builds.
 `docs/formats/difficulty-info.md` has the loading. CONTINUE.md's next
 slice is 11g-2, the Hot Pursuit race from the frontend.
+
+
+## Session 41 (2026-10-07) -- 11g-2a, the Quick Race from the frontend, 11h-1, TrafficCar, and 11h-2, TrafficDriver
+
+### 11g-2a: Quick Race from Hot Pursuit's Mode Select
+
+The user wants the AI race reached as a player reaches it, from the
+frontend's Hot Pursuit setup, not SkipFE. Quick Race, the first item of
+both Mode Selects, is the shortest way there. Retail's StartQuickRace
+(0x00216c18) is not the demo's (0x00203ae0), which bscreens.c had
+followed: the demo put the player at grid 2 or 8, set no defaults, gave
+no car and never started the race.
+
+- `quickrace.{c,h}` are retail's StartQuickRace,
+  PickTrackNumberForExpressGame (0x00216aa8), IsTrackUnlocked,
+  IsTrackAnEventReward and EventTreeIsTrackUnlocked, with
+  FrontendPlayerInfo::GetCarStatus (0x00187958, `fpi_get_car_status` in
+  fred.c, which reads the 24 bytes before the record for a type of -1, as
+  the image does). The race: InitWithDefaults, the panel movie stopped,
+  the express game, the pick's track and its time of day and
+  Point2Point, 3 AI racers and 4 cops with 2 tickets for Hot Pursuit (7
+  and none for World Racing), the player at the back of the grid,
+  traffic 0.33 and 0.5 oncoming, 2 laps, a car from
+  GenerateRandomRideInfo with the transmission the screen's button held,
+  then FrontendDatabase::StartRace.
+- `bscreens.c`'s startQuickRace hands the transmission flag to the hook,
+  and main.c's hook runs `start_quick_race` and logs the race. New Main
+  Menu's two items store the police flag (Fred.MainMenuOpts[1]), which
+  StartQuickRace reads, through gameflow's new `setPolice` hook.
+- BeginGameFlowUnloadingFrontEnd (0x00168830) asks for
+  LOADING_TRACK_COMMON, so the flow leaves the frontend; it had stopped
+  at UNLOADING_FRONTEND.
+- `world_add_traffic_car` places no car while PlaceNewCar is a NULL seam
+  (it aborted), as raceinit.c's NULL AddCopCarToRace places no cop. The
+  race asks for 6 traffic cars; TrafficTeleporter (11h-3) places them.
+- `fredrace_check` runs retail's as shipped (`s_quickrace` and
+  `s_tracklocks`), and its mutation pass now goes through mutpar: 3958
+  ops, 71235 lines, 0 differ; 296 mutations, 291 caught (2 by hanging the
+  harness), 5 equivalent: cp_pos1, qr_boost0, qr_treerace, qr_ride_type
+  and qr_ride_dash (MakeChallengeCarsAvailable clears bDashAvailable on
+  every car that can be drawn). bootflow, bscreens and gameflow follow
+  the hook's new shape. `docs/formats/quick-race.md`.
+
+### On Azahar
+
+`tools/run_azahar_quickrace.ps1` boots the .3dsx, picks English, skips
+the intro, presses START, A on Hot Pursuit and A on Quick Race
+(`-CopsOff` takes World Racing). The first two runs lost a press: once
+the A on Quick Race, once the START on the title. Azahar runs the
+frontend at about 57% here, idle or not, and a frame that opens a movie
+or a screen can outlast the 140 ms press. Each press is now repeated
+until the log shows the game took it (`Press-Until`).
+
+The third run passed: track 31 backwards, 3 AI racers (skills 6, 3, 5),
+4 cops, car 37, 14 drivers; the frontend unloads, both track loads run,
+and the flow reaches RACING with 4 cars at 29.9 FPS. Then it sticks:
+
+- The race stays at stage 3, COUNTDOWN. Retail ends the countdown in
+  Race::Update (0x00148a78), which World::DoTimestep calls at
+  0x0014e20c: with the stage at COUNTDOWN and
+  GetCountdownNumberToDisplay at 4, SetRaceStage(RACING). The port's
+  seam for it, `gRaceUpdateFn`, is NULL. The AI racers wait in
+  CanAICarsStartDriving (no action), and the player's car is held at the
+  line. Race::Update also runs UpdateGhostCar, the lap counts, the best
+  lap, the finishes, SortRacingCarsByLeadership and MonitorLeadership;
+  the SkipFE race, which starts at RACING, has never had those either.
+- The player has no camera mover (the log's `mover -1`, the view at 0,
+  0, 1100 over the whole track). Player's `choose_camera` asks for the
+  countdown cameras while the race counts down, and
+  `gCountdownCameraCoordinatorFn` is NULL, so nothing is built. At
+  RACING it would take the drive camera.
+
+Those are 11g-2b and 11g-2c.
+
+### 11h-1: TrafficCar
+
+`trafficcar.{c,h}` are retail's TrafficCar.obj (0x00167a08 to
+0x00168098) but DoSnapshot. The traffic's mover keeps its own place on
+the ground plane, its heading and its speed, and moves as a bicycle:
+straight on with the wheel nearly centred, else round the circle the
+steering and the wheelbase make. The pedals set the speed through two
+Tables, held between 0 and 55 mph, and the mover writes the CarState
+outright. sinit's [28] (`_GLOBAL_$I$TrafficAccelerationTable`, 0x001635f0)
+builds the Tables. main.c installs the table and sets `gTrafficCarCtorFn`;
+`TRAFFICCAR_SIZE` is `sizeof(TrafficCar)`.
+
+`tools/trafficcar_check.py`: 7947 ops, 10693 lines, 0 differ; 148
+mutations, 145 caught (6 by a crash), 3 equivalent.
+`docs/formats/traffic-car.md` has the detail; car-modes.md links it.
+
+### 11h-2: TrafficDriver
+
+`trafficdriver.{c,h}` are retail's TrafficDriver.obj (0x0018c380 to
+0x0018d070) but DoSnapshot, with `_vt$13TrafficDriver` at 0x002b4730:
+the controller SetControlMode builds for a car under TRAFFIC_CONTROL.
+The record is AICarController's 720 and PickLowNumberedRoutes, rounded
+to 736, which retail's SetControlMode asks for (the demo's 720 had a
+CurrentAction of its own). The table is AICarController's but for the
+destructor, DoSnapshot, Think, JustReset and GetRouteNumbersToUse.
+
+- The constructor builds a PsychoDriver (624, pool 16) for the driver.
+  It sets ForceCurrentAction to 11, PickLowNumberedRoutes to 1 and no
+  action, and staggers the clock by CarIndex x -1/70 s.
+- Think runs the clock down, then decides whether this frame is the
+  car's turn:
+  - a traffic car (driver type 3): the odd frames of WorldLoopCounter's
+    twelve (`div`/`mfhi`, so a negative counter's remainder is
+    negative) whose half is its place after TrafficCarPos in the
+    world's CarTable; the clock is not read;
+  - any other driver type: the clock run out (`<= 0`).
+
+  Then it runs the sticky decisions, adds 0.2 s to the clock, builds the
+  nearby cars and gets the route point, and stops if the location is
+  clear.
+- With no action it makes a JustDrive. Otherwise the action's status,
+  and then the cascade from its Score (-1 when it is time to change).
+  Each step is tried while the best so far is below its global, and
+  taken (the old action deleted, flags 3) when it scores above:
+  1. GetUnstuck, only more than 2 s (8000 ticks are exactly 2.0) after
+     the last, stamped;
+  2. AccidentRecovery;
+  3. IJustGotHit, with a honk after the delete;
+  4. AvoidCars, with AIDriver's quirk (okay as the float seconds,
+     unsigned; used as okay; 0), the choice copied, a honk, and off the
+     belt (TRAFFIC_MOVEMENT to MELLOW_MOVEMENT);
+  5. PullOver, with the -999 traffic timeout, the nearby list and the
+     location, and off the belt;
+  6. JustDrive.
+
+  Then the choice's driving line (types 1 to 4) through GetDrivingLine,
+  SetDrivingLine(0) and HighlightDrivingLine when it changes, and
+  ExecuteCurrentAction by `jal`. Retail's PrintAbove call (when
+  CameraFollowDefaultCar is 0) is empty and left out.
+- JustReset sets PickLowNumberedRoutes from MyDrivingLocation's route
+  (`(uint32)(n - 50) < 10`), deletes the action, clears the sticky
+  decisions, makes a JustDrive and executes it.
+- ExecuteCurrentAction calculates the action's points and shows them for
+  the camera's car. It works out the speed, gives the driver the target
+  and then the speed, time, tolerance and AllowedToUseThrottleAndBrake,
+  and clears the points.
+- CalculateDesiredSpeed scans from the location's point for the first
+  hairpin sign that is not a backwards one. The scan stops after 75 m,
+  19 points or the route's end. A hairpin gives a most of 0.32782 x the
+  distance and a tolerance of 2. Within 10 m the sign's route is taken,
+  and PickLowNumberedRoutes becomes `RouteNumber < 60` (-1 with no
+  route). With three points or more, a bend whose halves' normalized
+  dot is under 0.64 gives 10 and 2. The most is then floored at 10. The
+  speed is the action's own or, with UseDrivingLineSpeed, the most with
+  no time, and is capped at the most. 75 x 0.32782 is the top speed,
+  24.5865.
+- SetDirection stores the bool. Nothing in retail calls it.
+
+main.c installs the table and sets `gTrafficDriverCtorFn`.
+`TRAFFICDRIVER_SIZE` is `sizeof(TrafficDriver)`, and carmode_check's
+malloc hook maps it back to the demo's 720 (size-trafficdriver caught).
+No traffic car is built yet: the TrafficTeleporter (11h-3) places them.
+
+`tools/trafficdriver_check.py` runs retail's methods in mipsemu. Running
+as shipped under them:
+
+- DrivingLocation's IsClear, SetRoute, SetDrivingLine and
+  SetRelaxedSwitch;
+- the sign lookups and DrivingChoice::Clear;
+- GetMyDriverNumber, IsDrivingLine, PrintAbove and bNormalize.
+
+The AICarController calls, PsychoDriver, the six CalculateScores and
+the six action constructors are stood in for on both sides, and print.
+The scenarios:
+
+- the turns over counters -30 to 30 and the extremes, in eighteen world
+  layouts;
+- each gate a point either side, each global moved, and the order;
+- the 8000-tick edge, AvoidCars' okay through the unsigned conversion,
+  and the belt in every mode;
+- the hairpin scan at its 10 m, 75 m, 19-point and route-end edges, with
+  each kind of sign and a route not loaded;
+- the bend's cosine in 241 steps and at exactly 0.64 (out = (16,
+  sqrt(369)));
+- JustReset over the route numbers;
+- 400 random rounds.
+
+72743 ops, 31387 lines, 0 differ. The mutation pass: 230 mutations,
+226 caught (11 by a crash) and 4 equivalent:
+
+- fallback: the action is never NULL after the cascade;
+- cs-bend-most: max(most, 10) follows;
+- cs-dls-speed: the most never passes 24.5865;
+- cs-n-unsigned: a DriveTarget has at most 20 points.
+
+The dump shows a location's point only when it has a route. Retail's
+GetNewRoutePoint gives 1064 + 112 x NewPoint off a NULL route, where the
+port gives NULL, and nothing reads it. `docs/formats/traffic-driver.md`
+has the detail; car-modes.md, ai-car-controller.md, ai-driver.md and
+psycho-driver.md link it.
+
+### Checks
+
+Every checker runs clean (bfont, bmenu, bsnd, bui and langtab need file
+arguments; sndbank and texpack are left out): fredrace, bootflow,
+bscreens, gameflow, carmode, trafficcar, trafficdriver, sinit and the
+rest. The CIA builds.
