@@ -184,7 +184,12 @@ For each solid, the loader then does four things in order:
    - If the solid is vertex animated (flag `0x10`), the frames of the
      animation are solids of one name, one after another. The first frame
      takes a 272-byte eVertexAnimator from its slot pool, with a frame rate
-     of 30 and itself in `SolidTable[0]`. Each later frame joins that
+     of 30 and itself in `SolidTable[0]`. `eInitSlotPools` (`0x0010a008`,
+     in `eInitEngine`) makes that pool at boot: 16 slots, the default flags
+     (it grows), at gp-25192. The port made it only when the track viewer
+     started, so a race from the frontend, whose track loads first, wrote
+     its animators through NULL (track 62, Session 44); main.c now makes it
+     beside the model pool. Each later frame joins that
      animator's table, up to 64 frames, and shares the first frame's
      animator and rigid animation.
    - If the solid is not vertex animated, and a solid of its name is

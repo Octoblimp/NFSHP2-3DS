@@ -678,11 +678,23 @@ car's were.
      the drive camera; the port shows none until RACING. Started:
      `cameracoord.{c,h}` and `tools/src/cameracoord_test.c` are written
      but not wired or committed; the checker is next.
-  2. **11h-3, TrafficTeleporter** (0x002226f8 on; PlaceNewCar
+  2. **11g-2c-2 on, the race's start as retail shows it** (the user's
+     photos of 2026-10-07, Session 44). After the loading screen retail
+     shows the Starting Grid screen over the flyby camera, then on X the
+     pre-race camera (a close-up of the player's car), then the 3-2-1 in
+     the drive camera, then the HUD with the rear-view mirror. The port
+     goes straight to the countdown, because RaceCoordinator::InitForRace
+     enters CAMERA_FLYBY only when GLOBAL\PRERACEANIM.LZC is loaded, and
+     nothing loads it. In order: who loads PRERACEANIM.LZC (and the
+     AnimatedDriver it feeds); BumperCameraMover; the FlyBy coordinator
+     with EnableStartRaceScreens' Starting Grid; the PreRace coordinator.
+  3. **The rear-view mirror** (the user's photo 5): SetRearViewMirrorCameraMover
+     and the mirror's view and its HUD frame, top centre on the top
+     screen.
+  4. **11h-3, TrafficTeleporter** (0x002226f8 on; PlaceNewCar
      0x002228e0, DoTimestep 0x002227e0), which places the traffic.
-  3. Step 12, the cops.
-  4. BumperCameraMover with the PreRace, PostRace, Demo and FlyBy
-     coordinators, which use the camera data.
+  5. Step 12, the cops.
+  6. The PostRace and Demo coordinators.
 
 ## Waiting on the device: 13b-4f, the device GPU's cost per model
 

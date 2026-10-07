@@ -16352,3 +16352,41 @@ one-player countdown only the bars and the music box. The view is the
 port's: with no countdown coordinator, `choose_camera` leaves the
 player with no mover through the countdown, and the camera sits at its
 default, 1100 m up. That is 11g-2c-1, next.
+
+## Session 44 (2026-10-07) -- Quick Race draws its track and car, the race's tune is random
+
+The user: Quick Race is meant to pick a random track and car, and the
+race's music a random tune. They also sent PCSX2 photos of retail's race
+start (the Starting Grid over the flyby camera, the pre-race close-up,
+the 3-2-1 in the drive camera, and the HUD's rear-view mirror), which
+CONTINUE.md now orders first.
+
+### The seed
+
+Every boot's Quick Race was track 31 backwards in car 37: retail's
+SeedRandomNumber (0x0012ee30) was never ported, so `bDefaultSeed` kept
+0x12345678. main.c's `seedRandomNumber` is retail's (the ticker plus
+0x12345678, logged to the joylog, or the joylog's when replaying), run
+where InitializeEverything runs it, before the config file. On Azahar two
+boots drew track 25 forwards in car 19, then track 62 backwards in car 39
+(`quick-race.md`).
+
+### Track 62 and the vertex animators
+
+Track 62 from the frontend wrote through NULL (47 unmapped accesses in
+LoaderSolidList): its vertex-animated solids took animators from a pool
+the port made only when the track viewer started. Retail's eInitSlotPools
+(0x0010a008) makes it at boot, so main.c now does, beside the model pool
+(`loader-table.md`). Track 62 from the frontend then ran clean.
+
+### The race's tune
+
+Retail opens the first race of each boot with list 7, "Going Down On It",
+or list 14, "One Little Victory (Inst)", in a pursuit, then goes down the
+list. At the user's request `randomRaceOpener` skips that first pick, so
+the race's first tune comes from the jukebox's own random skip. Retail's
+skip loads every tune it passes, which stalled a race frame for 1.1 s on
+Azahar; `quietSkip` makes the same picks without the loads. Both are
+port-only flags that `jb_sound_init` leaves 0, so `jukebox_check` still
+runs retail (`jukebox.md`, "The race's music"). The log now notes each
+tune that starts.

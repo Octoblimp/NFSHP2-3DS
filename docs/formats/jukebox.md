@@ -158,6 +158,9 @@ The jukebox stops when the menus go, and the race starts its own:
   tune is the audio options' list 7 (14 in a pursuit) when that is enabled,
   else a random skip. main.c's `hookLoadSoundRegionsInGame` does this and
   calls the callback at once, since the port has no engine regions to load.
+  On the retail cartridge list 7 is "Going Down On It" and list 14 "One
+  Little Victory (Inst)", so retail opens the first race of every boot
+  with the same tune, and each later race with the next on the list.
 - `RACE_IN_PROGRESS`'s first `TICK` at `RACING` (GO) calls
   `DelayedStart(6.0)` (`0x001aec88`, the call at `0x0014af60`), so the music
   starts six seconds after the countdown ends, never during it.
@@ -169,6 +172,21 @@ That `TICK` reads the replay's beginning of time, `ReplayManager`'s Timer at
 +92. The port's stand-in `ReplayManager` is zeroed, so main.c's
 `replayGetBeginningOfTime` and `replayMarkTheBeginningOfTime` keep that one
 Timer in it, and the first `RACING` tick marks it as retail's does.
+
+Two changes from retail, both main.c's to set and both left 0 by
+`jb_sound_init`, which is retail and what `tools/jukebox_check.py` runs:
+
+- **`randomRaceOpener`** (the user's request, Session 44): `Start` skips the
+  racing list's first pick (list 7 or 14), so the race's first tune comes
+  from the random skip -- `bRandom(tunes)` on a seed of the VBlank count,
+  once a boot -- and the later ones follow it in order, as retail's do.
+- **`quietSkip`**: retail's skip calls `Advance` once per tune skipped, and
+  each Advance stops the tune, picks the next and loads it. In a race that
+  stalled a frame for 1.1 s on Azahar. With `quietSkip` the skip makes the
+  picks alone (`PickNextTune`, the only part that outlives the next
+  Advance), so it ends on the same tune without loading the others.
+
+The log notes each tune that starts (`jukebox playing:`).
 
 | offset | field |
 |--------|-------|

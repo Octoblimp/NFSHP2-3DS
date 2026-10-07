@@ -680,6 +680,13 @@ void jb_music_start(JBSound* s, const uint8_t* ao, int arg)
         return;
     }
     int idx = jb_first_pick(s);
+    // A change from retail, at the user's request: retail opens the first
+    // race of every boot with the same tune ("Going Down On It", or "One
+    // Little Victory (Inst)" with cops). With randomRaceOpener the racing
+    // list starts through the random skip below instead.
+    if (s->randomRaceOpener && s->jukebox.soundCategory == 4) {
+        idx = -1;
+    }
     const uint8_t* e = idx >= 0 ? ao + JB_AO_TUNE_LIST + 4 * idx : NULL;
     if (e && (jb_genre_bit((int8_t)e[3]) & ao[JB_AO_GENRE_MASK]) && e[2]) {
         jb_start_tune(p, (uint32_t)(int32_t)(int8_t)e[0],
@@ -693,8 +700,19 @@ void jb_music_start(JBSound* s, const uint8_t* ao, int arg)
             uint32_t tunes = p->curCatNum < p->numCategories
                 ? p->category[p->curCatNum].numTunes : 0;
             int32_t n = bRandomI((int32_t)tunes, &seed);
-            while (n-- > 0) {
-                jb_advance(p);
+            if (s->quietSkip) {
+                // Each Advance would stop the tune, pick the next and load
+                // it; only the pick outlives the next one. Advance does
+                // nothing without a cartridge, and StartPlaying picks
+                // nothing without a sample.
+                uint32_t c, t;
+                while (n-- > 0 && jb_is_cartridge_loaded(p) && p->sample) {
+                    (void)jb_pick_next_tune(p, &c, &t);
+                }
+            } else {
+                while (n-- > 0) {
+                    jb_advance(p);
+                }
             }
             s->firstAdvance = 0;
         }

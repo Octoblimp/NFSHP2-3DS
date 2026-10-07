@@ -107,6 +107,18 @@ at 8 and the direction at 12. The port's `ExpressTrack` is the last two.
 no track unlocked the count is 0 and the image's divide traps; the port
 answers track 0 forwards there.
 
+The seed is `SeedRandomNumber`'s (`0x0012ee30`), which `InitializeEverything`
+runs after `InitJoylog` and before `LoadConfig`: `bGetTicker() + 0x12345678`,
+logged to the joylog with `AddData(seed, 32, 0)`, or the joylog's own
+(`GetData(32, 0)`) when one is replaying. Then `bSetRandomSeed(seed,
+&bDefaultSeed)`. Until Session 44 the port never ran it, so `bDefaultSeed`
+kept its 0x12345678 and every boot's Quick Race drew the same track and car
+(track 31 backwards, car 37). main.c's `seedRandomNumber` is retail's, run
+at the same point, and the log has `seed:`. The car's draw is
+`GenerateRandomRideInfo`'s, on the same seed. Both draw only among the
+unlocked tracks and the available cars, which on a fresh profile are few,
+so two boots can still land on the same pair.
+
 ## The track locks
 
 `IsTrackUnlocked(track, direction)` (`0x0024b760`) is 1 unless

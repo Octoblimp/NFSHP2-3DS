@@ -160,6 +160,14 @@ typedef struct {
     char        trackName[JB_NAME_MAX];     // 0x003138a8
     const char* track[16];                  // 0x00334208
     const JBWorld* world;
+    // The port's: nonzero skips the race's fixed first tune (list 7, or 14
+    // in a pursuit), so it comes from the random skip like any other start.
+    // jb_sound_init leaves it 0, which is retail; main.c sets it.
+    int         randomRaceOpener;
+    // The port's too: nonzero makes the random skip move the playlist's
+    // pointers alone, to the same tune, instead of starting and stopping
+    // each tune it skips (a second's stall in a race on Azahar).
+    int         quietSkip;
 } JBSound;
 
 // ------------------------------------------------------------ the player

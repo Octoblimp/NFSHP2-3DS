@@ -54,6 +54,7 @@
 #include "bchunk.h"
 #include "bchunkload.h"
 #include "beltmover.h"
+#include "bmath.h"
 #include "bmem.h"
 #include "bmenu.h"
 #include "bsnd.h"
@@ -110,6 +111,7 @@
 #include "hudtach.h"
 #include "trackmap.h"
 #include "joyevent.h"
+#include "joylog.h"
 #include "joyhid.h"
 #include "joypad.h"
 #include "jbstream.h"
@@ -1199,6 +1201,28 @@ static void fredChangeFlow(int32_t state)
 static void logConfigLine(const char* line)
 {
     logLine("%s", line);
+}
+
+// SeedRandomNumber (0x0012ee30), which InitializeEverything runs after
+// InitJoylog and before LoadConfig. The seed is the ticker plus 0x12345678,
+// which AddData logs to the joylog, or the joylog's own when one is
+// replaying; on a retail console Joylog::Init leaves pRepeat NULL, so the
+// ticker it is and the log takes nothing. Every draw on bDefaultSeed comes
+// after it -- Quick Race's track (PickTrackNumberForExpressGame) and car
+// (GenerateRandomRideInfo) among them -- so without it each boot drew the
+// same ones.
+static void seedRandomNumber(void)
+{
+    uint32_t seed;
+
+    if (Joylog_ReplayingFlag) {
+        seed = (uint32_t)Joylog_GetData(32, 0);
+    } else {
+        seed = bGetTicker() + 0x12345678u;
+        Joylog_AddData((int32_t)seed, 32, 0);
+    }
+    bSetRandomSeed(seed, &bDefaultSeed);
+    logLine("seed: %08lx", (unsigned long)seed);
 }
 
 // The port's config file (configitems.h), in place of LoadConfigItems'
@@ -3531,7 +3555,12 @@ int main(int argc, char** argv)
     // memory is the track viewer's to ask for: 5 MB the frontend never
     // touches. eFixUpTables looks every solid's textures up through
     // GetTextureInfo; left NULL, a race's track draws with none.
+    // eInitSlotPools (0x0010a008) makes the eVertexAnimator pool (272
+    // bytes, 16 slots, gp-25192) here too: LoaderSolidList takes one for
+    // the first frame of every vertex-animated solid, and a race from the
+    // frontend loads its track's before the track viewer starts.
     emodel_init_slot_pool();
+    esolid_init_slot_pool();
     gEModelInitFn     = emodel_init;
     gEModelDestroyFn  = emodel_delete;
     gGetTextureInfoFn = texturepack_get_texture_info;
@@ -3670,6 +3699,8 @@ int main(int argc, char** argv)
                           : &kNoJukeboxHost,
                   &kJukeboxWorld);
     jb_load_cartridge(&g_jukebox.jukebox, "SOUND\\JukeboxM.JBC", false);
+    g_jukebox.randomRaceOpener = 1;     // jukebox.md, "The race's music"
+    g_jukebox.quietSkip = 1;
     jb_default_category_volumes(&g_jukebox);
     logPrintf("Jukebox: %s, %u tunes\n",
               jb_is_cartridge_loaded(&g_jukebox.jukebox) ? "loaded" : "none",
@@ -3788,6 +3819,7 @@ int main(int argc, char** argv)
         g_flow.skipFE = 1;
         logLine("SkipFE: R held at boot");
     }
+    seedRandomNumber();
     readConfigItems();
     gCurrLanguageFn = currLanguage;
     // LoadGlobalChunks' first pack, DynTextures, and its LOADING, which is
@@ -4158,6 +4190,19 @@ int main(int argc, char** argv)
         jb_music_update(&g_jukebox, Fred.AudioOptionsScreenData,
                         WorldTimeElapsed);
         if (soundUp) jbstream_poll(&g_jukebox.jukebox);
+        {
+            // The log's note of each tune that starts, the race's too.
+            static uint32_t lastTune = 0xffffffffu;
+            const JBPlayer* jp = &g_jukebox.jukebox;
+            uint32_t tune = jp->statePlay == JB_PLAYING
+                ? (jp->curCatNum << 16) | jp->curTuneNum : 0xffffffffu;
+            if (tune != lastTune && tune != 0xffffffffu) {
+                logLine("jukebox playing: %s",
+                        jb_tune_name(&g_jukebox.jukebox, jp->curCatNum,
+                                     jp->curTuneNum));
+            }
+            lastTune = tune;
+        }
         MainLoopTiming.UpdateSound = bGetTicker();
 
         // MainLoop's clocks (0x0012f378). It prepares the real step at the
