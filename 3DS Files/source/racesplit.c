@@ -28,6 +28,12 @@ Timer *racingcar_get_last_start_line_crossing_time(struct RacingCar *rc)
                           pCurrentRace->StartLineBoundaryNumber);
 }
 
+Timer *racingcar_get_last_finish_line_crossing_time(struct RacingCar *rc)
+{
+    return boundary_timer(rc->BoundaryCrossingTimes,
+                          pCurrentRace->FinishLineBoundaryNumber);
+}
+
 Timer *racingcar_get_last_lap_time(struct RacingCar *rc)
 {
     return boundary_timer(rc->RunningTimes,

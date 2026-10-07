@@ -16206,3 +16206,92 @@ Every checker runs clean (bfont, bmenu, bsnd, bui and langtab need file
 arguments; sndbank and texpack are left out): fredrace, bootflow,
 bscreens, gameflow, carmode, trafficcar, trafficdriver, sinit and the
 rest. The CIA builds.
+
+## Session 42 (2026-10-07) -- 11g-2b, Race::Update
+
+### What it fixes
+
+Session 41's race from the frontend stayed at COUNTDOWN for good:
+World::DoTimestep's call to Race::Update (0x00148a78, from 0x0014e20c)
+went through `gRaceUpdateFn`, which was NULL. Update is what sets
+RACING once GetCountdownNumberToDisplay reaches 4 (GO), and it also runs
+the race time, the laps, the finishes and the leadership. The SkipFE
+race starts at RACING, so it had never had any of those.
+
+### The port
+
+- `raceupdate.{c,h}` are retail's Race::Update, both FinishCars (by
+  index, 0x001485f0, and by car, 0x00149250), GetLeadingUnfinishedCar,
+  GetFinisher, GetNextFinishRank, MonitorLeadership, MaybeSaveGhostCarData
+  and UpdateGhostCar, with the race time projection that is new in
+  retail (0x001473f8, no name; the demo's FinishCar has none of it).
+- `playerfinish.{c,h}` are Player::SetFinishedRacing (0x00176650; the
+  demo's 0x001700d0 has no near-car count).
+- racesplit.c adds RacingCar::GetLastFinishLineCrossingTime (0x00147558),
+  and aicarcontroller.h the pull-over at 0x001908d8 (PULL_OVER forced,
+  the timeout `min.s`'d with AIActionPullOverCrossFinishLineTimeout,
+  15.0).
+- main.c sets `gRaceUpdateFn` and `gRaceFinishCarFn` (SimulateRaceFinish's).
+- What Update does, in order: the countdown's end; the race time
+  (`Timer::Round`ed); UpdateGhostCar; each unfinished car's lap counts
+  and a player's best lap (signed); the forced finish (the player cop's
+  win or loss through the cop manager); SortRacingCarsByLeadership and
+  MonitorLeadership; the lap knockout; the time trial; the laps led (a
+  halfword that wraps); the finish at NumLapsInRace; LapFinishedSpeech.
+  Each loop re-reads the count and the car, so a car finished in one
+  loop is finished for the next.
+- FinishCar: the cop's times, the place (the next rank and the finish
+  line's time, or a projected time for a car short of the laps), the
+  reason, the exact lap, the count, RecordResults; for a player's car
+  SetFinishedRacing and SetControlMode(AI_CONTROL); every AI-controlled
+  car then pulls over; BlinkBlinkPoof on a blink.
+- The image reads past the five boundary arrays for a boundary out of
+  [0, 4], and indexes `pRacingCars[prev - 1]` unchecked in
+  MonitorLeadership. The port reads 0 and skips; neither happens in a
+  sorted field. RegisterInterestingEvent is called on a NULL
+  `pReplayManager` unchecked; the port tests it, as carfinish.c does.
+- The speech, ClearEventQueue, TriggerFinishLineSound, the ghost
+  samples and bWriteToFile are NULL seams until speech (task 26), the
+  sound and the ghosts come; NULL does nothing. Retail's SetupGhostCars
+  is empty, so no ghost is ever made.
+
+### The checker
+
+`tools/raceupdate_check.py` runs the 12 functions as shipped, with
+GetCountdownNumberToDisplay, AreAllPlayersFinishedRacing, the
+accessors, the pull-over, Timer::SetTime, Round and bSin under them;
+UpdateLapCounts, SortRacingCarsByLeadership, SetRaceStage,
+SetControlMode, BlinkBlinkPoof, the replay and results calls, the
+speech and sound, the ghost data and the file write are stood in on
+both sides. 997307 ops, 73230 lines, 0 differ. The mutation pass: 161
+mutations, all caught, 7 by a crash, none equivalent. Four needed a
+scenario of their own after the first pass (a saturated best time over
+laps 0, Round's half for two truncations, a car taken out of 30 m by z
+alone). `docs/formats/race-update.md` has the detail; race.md,
+race-coordinator.md, world.md, player.md, quick-race.md,
+ai-car-controller.md and ai-driver.md link it.
+
+### On Azahar
+
+`tools/run_azahar_quickrace.ps1`: track 31 backwards, 3 AI racers, car
+37, the flow at RACING, and now the race past the countdown: the HUD
+reads lap 1 of 2 and a running time, the player 4th of 4 with the AI
+racers ahead and driving (mode 6, actions JustDrive and Pass), 29.8 FPS.
+The countdown itself still has no camera mover: that is the countdown
+coordinator, 11g-2c.
+
+### 11g-2c begun
+
+CameraCoordinator.obj (0x00199a98 to 0x0019c0d0) was read for the
+countdown cameras. CountdownCameraCoordinator::Update looks up
+`COUNTDOWN_%d` in the camera data and builds a BumperCameraMover on it.
+A scan of every retail bundle found no camera named COUNTDOWN_n (the
+highlights in INGAMEB and the TRACKBs, and the NIS .CAM containers), so
+retail's coordinator never builds a mover, and `choose_camera` falls
+back to the drive camera through the countdown. `cameracoord.{c,h}`
+(the CameraLoader at 0x00310370 with bchunk slot 13's six types, the
+CameraDataItems parser, BaseCameraCoordinator and
+CountdownCameraCoordinator) and the harness
+`tools/src/cameracoord_test.c` are written but not wired or committed:
+the checker, the wiring (main.c's seams, sinit's [40], bchunk slot 13,
+the frame's UpdateCameraCoordinators) and the doc are 11g-2c-1's rest.

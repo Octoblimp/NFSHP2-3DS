@@ -212,7 +212,7 @@ The copy is taken first because a move can re-sort the list.
 11. emProcessAllEvents; CarList sorted by CarListCheckFlip;
     UpdatePlayersGameState; rain_TimeStep; ServiceFernFlatteners;
     ServiceTweakerDamage; ServiceTrackRouteEditor; and Race::Update, if
-    there is a race.
+    there is a race ([race-update.md](race-update.md)).
 
 ## The constructor and the destructor
 

@@ -155,3 +155,7 @@ where `World::AddTrafficCar` aborted on the unported
 as `AddCopCarToRace`'s does, so the race runs with its AI racers and
 without traffic or cops until those are ported: traffic is step 11's last
 part (11h) and the cops are step 12.
+
+The race then stayed at COUNTDOWN, since nothing ended the countdown.
+Race::Update (11g-2b, [race-update.md](race-update.md)) does: GO starts
+the race, and the laps and the finish run.

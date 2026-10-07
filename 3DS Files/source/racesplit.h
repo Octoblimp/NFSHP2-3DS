@@ -3,6 +3,7 @@
 //
 //   RacingCar::GetFinishReasonId              0x00146788    24 bytes
 //   RacingCar::GetLastStartLineCrossingTime   0x00147540    24 bytes
+//   RacingCar::GetLastFinishLineCrossingTime  0x00147558    24 bytes
 //   RacingCar::GetLastLapTime                 0x00147570    24 bytes
 //   RacingCar::GetBestLapTime                 0x00147588    24 bytes
 //   RacingCar::GetPreviousBestLapTime         0x001475a0    24 bytes
@@ -23,6 +24,10 @@
 // for a number out of [0, 4]; the port hands back a Timer of 0, which
 // every caller takes as unset.
 Timer *racingcar_get_last_start_line_crossing_time(struct RacingCar *rc);
+
+// 0x00147558: BoundaryCrossingTimes at the race's FinishLineBoundaryNumber,
+// the same way. Race::FinishCar times a finished car by it.
+Timer *racingcar_get_last_finish_line_crossing_time(struct RacingCar *rc);
 
 // The car's RunningTimes at the race's FinishLineBoundaryNumber, the same
 // way.

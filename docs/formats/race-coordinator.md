@@ -451,7 +451,8 @@ Retail's active demo disc ends the race between steps 6 and 7 instead
 (`SetEndReason`, `ChangeState(NONE)`, `SendMessage(QUIT_RACE)`). The port
 drops that branch.
 
-`SimulateRaceFinish` calls `FinishCar(i, 0, false, NORMAL_COMPLETION)` on
+`SimulateRaceFinish` calls `FinishCar(i, 0, false, NORMAL_COMPLETION)`
+([race-update.md](race-update.md), through `gRaceFinishCarFn`) on
 each racing car whose `FinishReason` is still 0, then
 `SortRacingCarsByLeadership`. `NumRacingCars` is re-read only after a car
 is finished. `NotifyTheRaceIsOver` calls `TheRaceEvent.RecordResults`

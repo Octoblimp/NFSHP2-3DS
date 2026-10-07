@@ -257,6 +257,9 @@ AIActionJustDriveScore (gp-18272, 0) is `aiaction.c`'s.
 | AIActionPullOverStoppedByCopsTimeout | -18152 | 3.0 |
 | AIDriverFrictionBoost | -23008 | 1.0 |
 
+AIActionPullOverCrossFinishLineTimeout is read by Race::FinishCar's
+pull-over (0x001908d8) instead ([race-update.md](race-update.md)).
+
 AIDriverAvoidCarsImpactTimeThreshold (gp-18168, 2.0) is `aiactions.c`'s
 and AIActionPassMaxTimeAheadToMakeAttempt (gp-18164, 3.0) `nearbycar.c`'s,
 where their readers are.

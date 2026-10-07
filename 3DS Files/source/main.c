@@ -134,6 +134,7 @@
 #include "quickrace.h"
 #include "race.h"
 #include "racecoord.h"
+#include "raceupdate.h"
 #include "raceparams.h"
 #include "rcpost.h"
 #include "rcstates.h"
@@ -3331,6 +3332,12 @@ int main(int argc, char** argv)
 
     // TRAFFIC_MOVEMENT's mover (11h-1).
     trafficcar_install_seams();
+
+    // World::DoTimestep's Race::Update and SimulateRaceFinish's
+    // Race::FinishCar (11g-2b): the countdown's end, the laps and the
+    // finishes.
+    gRaceUpdateFn = race_update;
+    gRaceFinishCarFn = race_finish_car;
 
     // Car::GetDrivingLineSpeed asks an AI or traffic car's controller,
     // an AICarController since step 11e-1.

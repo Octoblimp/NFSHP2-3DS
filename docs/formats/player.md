@@ -301,6 +301,9 @@ it in order:
 The demo cleared `MyCar` first. Retail stores through `MyCar` without
 testing it; the port skips a NULL car.
 
+`SetFinishedRacing`, which the race's `FinishCar` calls for a player's
+car, is in [race-update.md](race-update.md).
+
 ## `NISOverlayManager`
 
 The HUD overlay a ticket, an arrest or a bust plays over. 56 bytes in

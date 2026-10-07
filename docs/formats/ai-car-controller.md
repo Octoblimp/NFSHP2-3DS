@@ -62,7 +62,7 @@ vPreviousLinePoint move from 676 and 688 to 692 and 704.
 | 536 | LastRoutePointLookaheadSwitch, a Timer |
 | 540 | CurrentRoutePointLookahead |
 | 544 | LastTimeNonGetUnstuckActionWasCalled |
-| 548 | PullOverTimeout |
+| 548 | PullOverTimeout (a finishing car's pull-over takes it down to 15; [race-update.md](race-update.md)) |
 | 552, 556 | BrakeStandTimer, BrakeStandTimerStart |
 | 560 | BrakeStanding, a bool |
 | 564 | LastBoostCalculationTime |

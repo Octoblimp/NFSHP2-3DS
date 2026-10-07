@@ -130,6 +130,18 @@ static inline AICarController *car_ai_controller(Car *c)
     return (AICarController *)(void *)c->pCarController;
 }
 
+// 0x001908d8, new in retail (24 bytes): ForceCurrentAction PULL_OVER and
+// PullOverTimeout the lesser of the two (`min.s`, the old timeout first).
+// Race::FinishCar calls it with AIActionPullOverCrossFinishLineTimeout.
+static inline void aicarcontroller_force_pull_over(AICarController *c,
+                                                   float timeout)
+{
+    float old = c->PullOverTimeout;
+
+    c->ForceCurrentAction = AIACTION_PULL_OVER;
+    c->PullOverTimeout = timeout < old ? timeout : old;
+}
+
 // _vt$15AICarController, retail's 0x002b4d90 (the port keys it by the
 // demo's, carcontroller.h's AICARCONTROLLER_VTABLE). CarController's
 // thirteen slots and three of its own: 112 GetRouteNumbersToUse (pure:

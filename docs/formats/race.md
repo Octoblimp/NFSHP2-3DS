@@ -462,7 +462,8 @@ for the sort and on every pass for the positions.
 
 The sort ends only when the finishing orders are distinct and within 1 ..
 n. Two cars with one order, or an order past the field, swap forever.
-`FinishCar` (`0x00148740`, not ported yet) is what gives out the orders.
+`FinishCar` (`0x001485f0`, [race-update.md](race-update.md)) is what
+gives out the orders.
 
 ## `Timer::Round`
 
