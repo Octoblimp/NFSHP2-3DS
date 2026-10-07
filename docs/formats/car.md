@@ -196,15 +196,19 @@ The traffic-car test at `0x00134144` comes before the poof test and before
 whatever its other two fields say. `ShouldSoundEffectsBeGenerated`, four
 addresses later, has no such test.
 
-### `HonkAndOrBlinkHeadlights` sums `On + Off + On`, with the old durations
+### `HonkAndOrBlinkHeadlights` sums `(On + Off) + SecondOn`, with the old durations
 
 The guard is that the previous request's whole cycle has already elapsed,
 so a second honk inside the first one is dropped rather than queued.
-`0x0013252c` adds Off to On and `0x00132534` adds On again — all of it
-before the new durations are stored, so the guard is measured against the
-request that is still running. Two thirds of a cycle, or the same sum with
-the incoming durations, is a different guard, and both mutations are
-caught.
+The demo's `0x0013252c` adds Off to On and `0x00132534` adds On again.
+Retail's (`0x00134130`) takes the second on phase's duration as a third
+float, `f14`, stores it in `HeadlightsAndHornSecondOnDuration` (2088) and
+adds that in place of the second On. All of it is summed before the new
+durations are stored, so the guard is measured against the request that
+is still running. Two thirds of a cycle, or the same sum with the
+incoming durations, is a different guard, and both mutations are caught.
+Its only caller is AICarController's MaybeHonkAndOrBlinkHeadlights
+(`ai-car-controller.md`), which draws all three durations.
 
 ### `GetForwardAcceleration` returns a magnitude below the threshold
 
@@ -560,11 +564,15 @@ to get wrong:
   axis (`BodyMatrix` row 0, `Car+144` and `+148`) dotted with the route
   point's direction in the ground plane, and `0 < dot` means right way. A
   car exactly across the road is facing the wrong way, and so is a NaN.
-- **`UpdateHeadlightsAndHorn`** skips player cars entirely. The request is
-  on, off, on from the stamp. During the *off* phase `lit` is
-  `WantTwoHonksAndOrBlinks == 0` (`sltiu a0,v0,1`), so a single request
-  stays lit straight through the gap and only a double one goes dark;
-  after the second on phase it is simply off. The lights are
+- **`UpdateHeadlightsAndHorn`** (retail's `0x00134198`) skips player cars
+  entirely. The request is on, off, second on from the stamp. During the
+  *off* phase `lit` is `WantTwoHonksAndOrBlinks == 0` (`sltiu a0,v0,1`),
+  so a single request stays lit straight through the gap and only a double
+  one goes dark. Retail's gap ends `On` after the first phase, not `Off`:
+  `0x001341ec` compares the time past the first phase with On, still in
+  `f3`, where the demo's compared it with Off. The second phase is lit
+  while that time less Off is under SecondOn, and after it the car is
+  simply off. The lights are
   `(lit && WantToBlink) ? 1 : (ForceHeadlightsOn != 0)`. The horn is
   edge-driven through the driver — `IsHonking` first, then `Start` or
   `Stop` only on a change — and **`pCarDriver` is reloaded before the

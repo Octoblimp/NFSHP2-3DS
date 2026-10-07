@@ -32,7 +32,7 @@ Step 11e ports it in slices:
 | 11e-4 | the honking and ExecuteCurrentAction |
 | 11e-5 | Think |
 
-This file has 11e-1 to 11e-3. Two slots still wait: DoSnapshot waits on
+This file has 11e-1 to 11e-4. Two slots still wait: DoSnapshot waits on
 ReplaySnapshot, and Think is 11e-5's.
 
 ## The record, 720 bytes
@@ -626,6 +626,99 @@ The pCatchupPlayer and BoostScale are that player's.
 PrintBoostCalculationForAllCars and PrintBoostCalculationForThisCar
 (gp-20128, gp-20124) are read, but their prints are gone from retail.
 
+## The horn and ExecuteCurrentAction
+
+### The horn
+
+**MaybeHonkAndOrBlinkHeadlights(car, list)** (0x00192fa8) decides whether
+my car honks, flashes its lights or both at `car`, a car about me. `list`
+is the nearby-car list the caller is working through.
+
+1. **The gates.** It returns for a cop's or a traffic car's `car` (its
+   CarTypeInfo's UsageType less 1, unsigned, under 2). It returns unless
+   the race coordinator is in AIDemoMode (state 8) or `car` is REAL
+   controlled, so in a race only the players' cars are honked at.
+2. **The car's entry.** GetNearbyCar finds `car` in my own list
+   (CurrentNearbyCarList). An AI car (control 2) goes on only if
+   DoWeCareAboutThisCar(entry, list) passes, and it answers 0 for a NULL
+   entry. A traffic car (3) goes on with no test. Any other control
+   returns.
+3. **The draws**, in this order, each World::Random on pCurrentWorld:
+   - `on = (R(0.4) + 0.3) - 0.2`;
+   - `off = (R(0.2) + 0.15) - 0.1`;
+   - `second = (R(0.4) + 0.3) - 0.2`;
+   - `two = R(1) < 0.5`.
+4. **The chance**, by the entry's closing speed `vy` (its Velocity.y):
+   - over 50 m/s, 1, with `two` set and `second` 0.6 longer;
+   - else, for my traffic driver (DriverType 3) and `vy` under -3, 1;
+   - else, for a `car` with a player, 0.75;
+   - else 0.075 with under 6 cars in `list`, or 0.05.
+5. `honk = R(1) < chance`. Only with `honk` is the blink drawn: `blink =
+   R(1) < 0.9` over 50 m/s, else `R(1) < 0.5`. Without it `blink` is 0, so
+   a car never flashes without honking.
+6. It ends in my car's HonkAndOrBlinkHeadlights(on, off, second, blink,
+   honk, two), which takes the request only once the last one's cycle is
+   over (`car.md`).
+
+The demo's HonkAndOrBlinkHeadlights took two durations and ran the first
+twice. Retail's third, `second`, is the second on phase's, and the car
+stores it at 2088. The port's car.c takes it as retail does.
+
+### ExecuteCurrentAction
+
+**ExecuteCurrentAction** (0x001932e8) hands the current action to my
+driver.
+
+1. The driver's SetTarget (slot 64) gets the action's PointsToDrive.
+2. DecideBoostFactor runs.
+3. **The speed.** The driver's SetDesiredSpeed (slot 56) takes a speed,
+   a time to reach it, a tolerance and whether the throttle and brake may
+   be used. They come from the first of these that holds:
+
+   | Case | Speed | Time | Tolerance | Allowed |
+   |------|-------|------|-----------|---------|
+   | the location clear | 0 | 0 | 0 | 1 |
+   | SuperEasyAI (gp-20120, retail's alone) | 15 | 0 | 10 | 1 |
+   | BoringAIForCameraTuningOn (gp-22580) | the location's point's line speed | 0 | 0 | 1 |
+   | the action's UseDrivingLineSpeed (576) clear | the action's DesiredSpeed (564) | 568 | 572 | 580 |
+   | otherwise | the line speed below | 0 | 572 | 580 |
+
+4. ClearPointsToDrive empties the action's target: NumPoints and Length
+   0, both pick times 0 and LastPointToScore -1.
+
+**The line speed** is a route point's DrivingLineSpeeds byte for the
+location's line (90 + line, so line -1 reads the byte before):
+
+- With a sign taken (TakenSignpostIndex not -1), it is the byte of the
+  sign's GetNewRoutePoint, with no SpeedFactor. Retail also asks
+  CompareDistances for the sign's distance from my car and drops the
+  answer.
+- Else, while TakenSignpostTimer is set, it is 99999.
+- Else it comes from the point CurrentRoutePointLookahead (540) on from
+  the location's:
+  - **The look-ahead.** For a skill of 0 to 9 (unsigned, so a careful
+    driver's -2 never draws), once more than RoutePointChangeFrequency
+    (980) seconds have passed since LastRoutePointLookaheadSwitch (536),
+    the look-ahead is drawn again: `v` is the skill's RoutePointVariance
+    byte (392 + 28 x skill) plus 1, the look-ahead `Random(2v) - v`
+    (World::Random(int), 0 to 2v - 1), and the switch's time becomes
+    WorldTimer.
+  - The point's index is the location's point number plus the
+    look-ahead, clamped to the route's first and last points (`pmaxw`
+    with 0, then `pminw`).
+  - A speed of 0.001 or less (as `fabsf`) is read as 30.
+  - The speed is multiplied by the skill's SpeedFactor (368 + 28 x skill
+    + 16), with the skill unclamped: -2 reads PositionRatioUnderOne's
+    float at 328.
+
+Then, on this way alone, a cop race (BeACop, or SkipFE with
+SkipFEBeACop) takes 0.75 of it, and the car's BoostFactor (992)
+multiplies it. The sign's and the timer's speeds are scaled the same way.
+
+The look-ahead's draw and SuperEasyAI are retail's alone.
+RoutePointChangeFrequency and RoutePointVariance are read nowhere else
+(`difficulty-info.md`).
+
 ## Checking it
 
     python tools/aicarcontroller_check.py
@@ -652,7 +745,11 @@ the table. Everything beneath those methods runs as shipped too:
   reaches retail's through DrivingChoice::AdvancePoint;
 - from 11e-3, the Graph, Linear and Table, World::GetDistanceToClosestPlayer,
   Race::GetRacingCar and the coordinator's state. The model builds the
-  glue's Graph with the image's own start-up code.
+  glue's Graph with the image's own start-up code;
+- from 11e-4, the car's HonkAndOrBlinkHeadlights and
+  UpdateHeadlightsAndHorn, DoWeCareAboutThisCar, GetNearbyCar,
+  TrackRoute::GetPointNumber, Signpost::GetNewRoutePoint, CompareDistances
+  and AIAction::ClearPointsToDrive.
 
 The stand-ins each print a line:
 
@@ -676,6 +773,11 @@ The stand-ins each print a line:
   SignpostGracePeriod is -1 until the script sets it.
 - The test driver table's GetDesiredSpeed (136), answering the script's
   speed for the car.
+- From 11e-4, the test driver table's SetDesiredSpeed (56), SetTarget (64),
+  StartHonkHorn (88), StopHonkHorn (96) and IsHonking (104), the last
+  answering the script's flag for the car.
+- World::Random(int) (0x0014e520), answering the float's queue as words,
+  so the two draw in turn from one queue.
 
 The 11e-3 ops fill the rest as memory: the players and their speed-ratio
 Averages, the RacingCars, the race parameters' fields, TheDifficultyInfo
@@ -761,15 +863,52 @@ own.
   drawn from 1 to 8, ties among them, so the split falls each side of
   each car.
 
-The check gives 568 scenarios, 95996 ops, 75041 lines, 0 differ.
+11e-4's, from their own random seed:
 
-Its mutation pass has 407 mutations: 394 caught and 13 equivalent.
+- **s_honk (60):** MaybeHonkAndOrBlinkHeadlights, six to eleven rounds on
+  my car among one to five others. Each round fails at most one of its
+  early outs (`gate_picker`): the car's usage, the race state or its
+  control, my control, the car missing from my list (or past its count)
+  and DoWeCareAboutThisCar's edge, which falls exactly at `-(D + half
+  size + bias)`.
+  - The closing speed sits at 50 and -3 m/s and an ulp either side, with
+    my driver a traffic car's or not, the car a player's or not and the
+    list's count round 6.
+  - Each draw lands at its chance and an ulp either side.
+  - The last request's whole cycle lies a tick either side of the time
+    since it started, so the new one is taken or dropped.
+  - Three rounds in ten then run UpdateHeadlightsAndHorn with the driver
+    honking or not.
+- **s_lights (30):** HonkAndOrBlinkHeadlights and UpdateHeadlightsAndHorn
+  on their own: each phase's edge a tick either side, the clock behind the
+  stamp, every flag at 0, 1 and past, and now and then a player's car.
+- **s_execute (80):** ExecuteCurrentAction over three routes and up to
+  four signs, down each of its ways: the location clear, SuperEasyAI,
+  BoringAIForCameraTuningOn, the action's own speed, a taken sign, the
+  sign timer and the line's speed.
+  - The skill runs from -13 to 21, and the line from -1 to 21.
+  - RoutePointChangeFrequency lies a tick either side of the time since
+    the switch, with that time negative too.
+  - The look-ahead is drawn to land the point before the first, at either
+    end and past the last.
+  - The speed byte is 0, 1, 30 or 255, and TheDifficultyInfo is filled
+    with floats, so a skill off the table reads something.
+  - The race is a cop race or not, and a fifth of the rounds let
+    DecideBoostFactor set the BoostFactor to 1 first.
+
+The check gives 738 scenarios, 125785 ops, 110422 lines, 0 differ.
+
+Its mutation pass has 522 mutations: 509 caught and 13 equivalent.
 - 11e-2's share is 100: 96 caught (sp-ret by crashing the harness) and 4
   equivalent.
 - 11e-3's is 181: 177 caught (5 by crashing the harness) and 4
   equivalent.
+- 11e-4's is 115, all caught (mh-list and eca-clear by crashing the
+  harness). They cover car.c's HonkAndOrBlinkHeadlights and
+  UpdateHeadlightsAndHorn too.
 - ct-glue and ct-catchup carry a line of context, as GlueOff and
-  DecideBoostFactor repeat their lines.
+  DecideBoostFactor repeat their lines. dbf-freq-u carries one too, as
+  ExecuteCurrentAction's look-ahead repeats its cast.
 
 | Mutation | Why it's equivalent |
 |----------|---------------------|

@@ -507,9 +507,11 @@ int32_t  car_should_sound_effects_be_generated(Car *c);  // 0x00134188
 int32_t  car_should_visual_effects_be_generated(Car *c); // 0x00134130
 float    car_get_forward_acceleration(Car *c);           // 0x00133db8
 void     car_honk_and_or_blink_headlights(Car *c, float onDuration,
-                                          float offDuration, int32_t blink,
-                                          int32_t honk, int32_t two);
-                                                         // 0x00132508
+                                          float offDuration,
+                                          float secondOnDuration,
+                                          int32_t blink, int32_t honk,
+                                          int32_t two);
+                                                // retail 0x00134130
 void     car_turn_wipers_on_for_duration(Car *c, int32_t on, int32_t off);
                                                          // 0x001319c0
 void     car_world_to_car(Car *c, bVector2 *out, const bVector2 *in);
@@ -534,7 +536,7 @@ float    car_get_amount_out_of_bounds(Car *c);           // 0x001317a0
 void     car_update_sound(Car *c);                       // 0x00133480
 int32_t  car_is_collideable(Car *c);                     // 0x001316a0
 int32_t  car_is_facing_wrong_way(Car *c);                // 0x001318b8
-void     car_update_headlights_and_horn(Car *c);         // 0x00132568
+void     car_update_headlights_and_horn(Car *c); // retail 0x00134198
 
 // The borrowed fields, second helping.
 void     car_get_car_space_bounding_box(Car *c, bVector3 *min, bVector3 *max);

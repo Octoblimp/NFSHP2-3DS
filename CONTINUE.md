@@ -1,16 +1,17 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 38
-(2026-10-06), after 11e-3, AICarController's belt, glue and boost.
+(2026-10-06), after 11e-4, AICarController's horn and
+ExecuteCurrentAction.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
 AIPlan and the AIAction base, 11d-1 to 11d-3b, all eleven actions,
 11e-0, Average at retail's size, 11e-1, AICarController's record,
 route methods and actions, 11e-2, its signposts and sticky
-decisions, and 11e-3, its belt, glue and boost, are done and checked
-against retail. Next is 11e-4, MaybeHonkAndOrBlinkHeadlights and
-ExecuteCurrentAction. The car selector is finished and checked against retail: SC-1
+decisions, 11e-3, its belt, glue and boost, and 11e-4, its horn and
+ExecuteCurrentAction, are done and checked against retail. Next is
+11e-5, AICarController::Think. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -410,6 +411,30 @@ car's were.
     mutations, 394 caught, 13 equivalent (11e-3's 181: 177 caught, 4
     equivalent, two of them the 30 s clock no whole tick count reaches
     exactly).
+  - **11e-4 is done: the horn and ExecuteCurrentAction.**
+    MaybeHonkAndOrBlinkHeadlights (0x00192fa8) honks only at a player's
+    car (or any in AIDemoMode) that isn't a cop's or traffic's, and only
+    from an AI car that cares about it (DoWeCareAboutThisCar) or a
+    traffic car. It draws on, off and second durations and the two-honk
+    flag, then a chance by the closing speed (over 50 m/s, or a traffic
+    driver closing under -3, is 1), a player (0.75) or the list's count
+    (0.075 under 6, else 0.05), and the blink only with the honk.
+    Retail's car takes the second on phase's duration as a third float
+    (Car+2088, the port's 2176): car.c's HonkAndOrBlinkHeadlights and
+    UpdateHeadlightsAndHorn are retail's now (0x00134130, 0x00134198),
+    with the cycle `(On + Off) + SecondOn` and the gap ending On after
+    the first phase. ExecuteCurrentAction (0x001932e8) sets the driver's
+    target to the action's points, runs DecideBoostFactor and sets the
+    desired speed: 0 with the location clear, 15 within 10 for
+    SuperEasyAI (gp-20120), the point's line speed for
+    BoringAIForCameraTuningOn, the action's own four, or the line speed
+    (the taken sign's new point's, 99999 on the sign timer, or the point
+    CurrentRoutePointLookahead on, redrawn every RoutePointChangeFrequency
+    s within RoutePointVariance + 1 by World::Random(int), times the
+    unclamped skill's SpeedFactor), times 0.75 in a cop race and the
+    BoostFactor; then ClearPointsToDrive. 738 scenarios, 125785 ops,
+    110422 lines, 0 differ; 522 mutations, 509 caught, 13 equivalent
+    (11e-4's 115 all caught, with car.c's honk and lights among them).
   - Retail's runs from 0x00190140 to about 0x00194058: some 16 KB in
     about 50 functions (`grep AICarController out/retail_syms.txt`).
     Think alone is 2536 bytes, DecideBoostFactor 904 and
@@ -435,12 +460,128 @@ car's were.
       DecideBoostFactor, CalculateDistanceAndPositionBoost. Of these
       only the belt's WeNeed and WeCanHave (Think's) and DecideBoostFactor
       (ExecuteCurrentAction's) have callers in retail.
-    - **11e-4, next:** MaybeHonkAndOrBlinkHeadlights and
-      ExecuteCurrentAction (which reads RoutePointChangeFrequency and
-      RoutePointVariance, and calls DecideBoostFactor). The start-up
-      code at 0x00193f00 that builds the glue Graph also stores 0xc000
-      at gp-13390; find out whose that is when a slice reads it.
-    - 11e-5: Think.
+    - 11e-4 (done): MaybeHonkAndOrBlinkHeadlights and
+      ExecuteCurrentAction, with car.c's honk and lights moved to
+      retail's. The start-up code at 0x00193f00 that builds the glue
+      Graph also stores 0xc000 at gp-13390; find out whose that is when
+      a slice reads it.
+    - **11e-5, next: Think** (0x00191148, 2536 bytes; the demo's at
+      0x00188940 is 2592). It calls, besides the controller's own
+      (SteerStraightAhead, GetMyDriverNumber, GetCurrentTrackRoutePoint,
+      DoStickyDecisions, the belt's WeNeed and WeCanHave, InterruptAction,
+      ExecuteCurrentAction): Timer::CountDown (0x001a3cf0, five times,
+      not in the port yet), Car::IsBlinking, SetMovementMode,
+      PleaseResetMeLater and DebugSetPosition, NearbyCarList::BuildArray
+      and GetNearbyCar, DrivingLocation::IsClear, DrivingChoice::
+      BuildDriveTarget and DrivingChoiceTypeIsSideOfCar, the DriveTarget
+      constructor and destructor, DriveTargetRenderer::SetTargetToRender,
+      AIAction::UpdateStatus, AIActionJustDrive's constructor through
+      bOMalloc, Average::Record, World::GetDistanceToClosestPlayer,
+      Race::CanAICarsStartDriving (not in the port), BeltMover::SetBelt
+      and DebugScreenPrint (the BeltMover isn't ported; gBeltMoverCtorFn
+      is its seam), PrintAbove, bRefreshTweaker, fptodp and two calls at
+      0x0025a488 and 0x0025a4a8 (bRandom(int) and bRandom(float) on
+      bDefaultSeed, retail's gp-14472 = 0x00332068; bmath's bRandomI/F).
+      Session 38 read it whole (retail in `out/think_retail.txt`, the
+      demo's in `out/think_demo.txt`, both regenerable with
+      `tools/retaildis.py --addr 0x00191148 --count 634` and
+      `tools/mipsdis.py Think__15AICarControllerf`). What it does, s1 =
+      this, f20 = dt:
+      1. **Not started yet.** Race::CanAICarsStartDriving(pCurrentRace)
+         (0x00149078, 52 bytes, same as the demo's): true for race state
+         4, or with TheRaceParameters.BeACop (0x0031ab0c) and state 2 or
+         more. Not started and state under 2: SetDesiredSpeed(0, 0, 0, 1)
+         (driver slot 56), SteerStraightAhead, return. State 2 or more:
+         the brake stand at the line. BrakeStandTimer (552) holds a
+         duration in ticks, BrakeStandTimerStart (556) its start
+         (`(int)((float)WorldTimer x c(gp-29864) x 4000 + 0.5)`) and
+         BrakeStanding (560) the flag. With 552 clear (0 or 0x7fffffff)
+         the flag is drawn, `bRandom(2) != 0`; once the duration is past
+         the time since 556 (both as `(float)(int) x c(gp-29872)`) it is
+         flipped. Each draw sets 552 to `(int)((f0 + f1) x 4000 + 0.5)`,
+         f0 `bRandom(0.25)` and f1 c(gp-29876) (c(gp-29868) on a flip)
+         with the flag on, or `bRandom(1.0)` and 1.5 with it off. Then
+         SetDesiredSpeed(flag ? 100 : 0, 0, 0, 1), SteerStraightAhead and
+         return.
+      2. **The progress check.** With an action whose Type (588) isn't 6
+         and ProgressTimer (576) valid, once Timer::CountDown(576, dt)
+         answers 0: 576 = `(int)c(gp-29860)`; Average::Record(pProgress
+         580, |car->28->24| x the float at 0x0031bc38, TheTrackPathManager's
+         first word); near = World::GetDistanceToClosestPlayer(
+         pCurrentWorld, car+96) < 50. Not IsBlinking, the Average full
+         (byte 2 == byte 0), its mean (8) under c(gp-29856) and no player
+         near: Car::PleaseResetMeLater.
+      3. **The timers.** RealPhysicsTimer (572), when valid and run out
+         by CountDown: re-armed to `(int)c(gp-29852)` while car+956 (the
+         wheels down?) is under 4, else SetMovementMode(car,
+         nDefaultMovementMode). OffBeltTimer (568), when valid: a car in
+         mode 6 (the belt, car+36) goes to nDefaultMovementMode, then
+         CountDown. Then CountDown on GlueOnTimer (592), GlueOffTimer
+         (596) and TakenSignpostTimer (688).
+      4. **The debug.** DoScreenPrintf (gp-23064), CameraFollowDefaultCar
+         (gp-21532) clear, my number == CameraFollowThisCarInstead
+         (gp-21528) and mode 6: BeltMover::DebugScreenPrint (empty, 8
+         bytes). DoSpeedDifferencePrinting (gp-20224) and the location
+         set: PrintAbove. CameraFollowThisCarInstead == car->CarIndex and
+         ResetThisCarsPosition (gp-20320): bRefreshTweaker, clear it, and
+         DebugSetPosition(car, (c(gp-29848), -332, -78), 0, gp-13390's
+         halfword). So gp-13390, the 0xc000 the start-up code stores, is
+         that debug reset's angle.
+      5. **Whose turn.** SecondsBeforeNextActionEvaluation (524) -= dt;
+         the list's words 4, 456 and 460 are zeroed. An AI racer
+         (car->MyDriver->TheDriverType 2) thinks when `WorldLoopCounter
+         (gp-19552) % 8` (C's, toward 0) is under CopCarPos -
+         AICarPos (World 36 - 32) and CarTable[AICarPos + i] (World 44 +
+         4 x ...) is this car; a traffic car (3) the same with `% 6` and
+         TrafficCarPos (40) to TotalNumCars (28); any other when 524 is
+         0 or less. Not its turn with an action: step 7. Not its turn
+         with none: it thinks anyway.
+      6. **The think.** 524 += c(gp-29844); DoStickyDecisions;
+         NearbyCarList::BuildArray(list, location, max(max(
+         AIActionPassMaxTimeAheadToMakeAttempt gp-18164,
+         AIDriverAvoidCarsImpactTimeThreshold gp-18168),
+         AIDriverSecondsToLookAhead gp-20328)); GetCurrentTrackRoutePoint
+         (this, 0). The location clear: SteerStraightAhead,
+         SetDesiredSpeed(0, 0, 0, 1), return. BoringAIForCameraTuningOn:
+         no action makes a JustDrive (bOMalloc(AIActionSlotPool gp-18288),
+         `__17AIActionJustDriveif`(-1.0, AIActionJustDriveScore
+         gp-18272)); an action of type 5 gets its CalculatePointsToDrive
+         (action table 24) on this+12; any other is deleted (table 8,
+         flags 3) and ChooseNewAction(this, &532, 5) (controller table
+         120); then straight to ExecuteCurrentAction. Otherwise: no action
+         makes a JustDrive; else AIAction::UpdateStatus(action, this+12),
+         and an action that is done (NULL, Status (12) 1 or 2, or 3 with
+         its word 0 set) is deleted and replaced by ChooseNewAction(&tmp,
+         11); one that isn't is replaced by InterruptAction's answer, if
+         any (the old one deleted). Then GeneratePointsToFulfillAction
+         (controller table 128) and ExecuteCurrentAction. The belt:
+         WeNeedTheBelt and WeCanHaveTheBelt put a car not in mode 6 into
+         it (SetMovementMode 6) and call BeltMover::SetBelt(car+48, the
+         mover); a car in mode 6 that may not have it goes to
+         nDefaultMovementMode. My number == CameraFollowThisCarInstead:
+         DriveTargetRenderer::SetTargetToRender(&TheDriveTargetRenderer
+         0x00314630, the driver). The list's 460, 4 and 456 are zeroed.
+      7. **Between thinks**, with an action: when the choice's type
+         IsSideOfCar and the choice's car (choice+4) has a player
+         (car+24): a DriveTarget on the stack, BuildArray as above,
+         GetNearbyCar(list, that car), and if it is there
+         BuildDriveTarget(choice, &dt, location, list, 0.0, ...) and the
+         driver's SetTarget (slot 64), SetTargetToRender for the camera's
+         car, then ~DriveTarget(&dt, 2).
+      What the port still lacks for it: Timer::CountDown (0x001a3cf0,
+      128 bytes, same as the demo's): a valid timer loses `(int)(dt x
+      4000)` ticks, stops at 0 (stored 0), and the answer is whether it
+      is still valid. Race::CanAICarsStartDriving (above). The BeltMover
+      (0x00204098 to about 0x002055c4, some 5.5 KB; constructor 776,
+      Move 1572, SetBelt 156, FindCoordinates 628), behind
+      gBeltMoverCtorFn: SetBelt can be a seam until it is ported, as the
+      belt runs only for AI cars over 120 m from every player. In the
+      checker, stub SetBelt (0x00204990), bOMalloc (0x00257c80) and the
+      debug calls; SetMovementMode is already stubbed. The demo's Think
+      is the same shape (it also called AIAction::GetLateralDistance,
+      gone from retail). Plan: 11e-5a CountDown and
+      CanAICarsStartDriving, 11e-5b Think with the belt as a seam, and
+      the BeltMover as its own slice before 11g's race.
   - `aicarcontroller.h` has the whole 720-byte record. 684 and 688 are
     retail's own (TakenSignpostIndex and TakenSignpostTimer, named for
     what 11e-2's SignPostDecision and GetCurrentTrackRoutePoint and
@@ -4027,15 +4168,14 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-06, after 11e-2, AICarController's signposts)
+### Where the port stands (2026-10-06, after 11e-4, AICarController's horn and ExecuteCurrentAction)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer AI: 11e-4, AICarController's
-  MaybeHonkAndOrBlinkHeadlights and ExecuteCurrentAction.
+- **Next:** step 11, the racer AI: 11e-5, AICarController's Think.
   See "Now" at the top. These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
@@ -4051,7 +4191,8 @@ goes in.
   - 11e-0, Average at retail's size;
   - 11e-1, AICarController's record, route methods and action;
   - 11e-2, AICarController's signposts and sticky decisions;
-  - 11e-3, AICarController's belt, glue and boost.
+  - 11e-3, AICarController's belt, glue and boost;
+  - 11e-4, AICarController's horn and ExecuteCurrentAction.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -4063,7 +4204,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a to 11e-3 done) | 3-5 |
+  | 11, the racer and traffic AI (11a to 11e-4 done) | 3-5 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |

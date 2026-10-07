@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Cross-check 3DS Files/source/aicarcontroller.c -- the AI car controller,
-steps 11e-1 to 11e-3's parts of it -- against the retail image, run in
+steps 11e-1 to 11e-4's parts of it -- against the retail image, run in
 mipsemu.
 
 The model is retail's image, over drivingchoice_check.py's world: its cars,
@@ -21,8 +21,10 @@ GetStickyIndex, DoStickyDecisions, SignPostDecision and
 GetCurrentTrackRoutePoint; and 11e-3's WeHaveTheBelt, WeNeedTheBelt,
 WeCanHaveTheBelt, WeHaveTheGlue, WeNeedTheGlue, WeCanHaveTheGlue, GlueOn,
 GlueOff, GetGlueSpeed, DecideBoostFactor and
-CalculateDistanceAndPositionBoost. SignPostDecision runs as shipped wherever it is
-reached, DrivingChoice::AdvancePoint too, as main.c points
+CalculateDistanceAndPositionBoost; and 11e-4's
+MaybeHonkAndOrBlinkHeadlights and ExecuteCurrentAction, with the car's
+HonkAndOrBlinkHeadlights and UpdateHeadlightsAndHorn beside them.
+SignPostDecision runs as shipped wherever it is reached, DrivingChoice::AdvancePoint too, as main.c points
 drivingchoice.h's seam at the port's. Under them everything the port
 has runs as shipped too: the Average's constructor and destructor,
 Signpost::GetIndex, the route manager's table, DistanceIsWithinRoute,
@@ -30,7 +32,10 @@ FindClosestPoint, GetPosition, the DrivingLocation, DrivingChoice and
 DrivingInformation methods, IsDriveable and all beneath it,
 GetCarAhead and HighlightDrivingLine, and 11e-3's Graph, Linear, Table,
 World::GetDistanceToClosestPlayer, Race::GetRacingCar and the
-RaceCoordinator's state. The glue's Graph is built by the image's own
+RaceCoordinator's state, and 11e-4's DoWeCareAboutThisCar,
+NearbyCarList::GetNearbyCar, TrackRoute::GetPointNumber,
+Signpost::GetNewRoutePoint, AIAction::ClearPointsToDrive and the timers.
+The glue's Graph is built by the image's own
 start-up code (_GLOBAL_$I$sRankHeadings) in the model.
 
 **The stand-ins**, each printing a line, so both sides must ask the same
@@ -60,7 +65,14 @@ questions in the same order:
   GetTrackInfo (0x00153420): the track number, answering a TrackInfo of
     the script's, its SignpostGracePeriod -1 until set;
   the test driver table's GetDesiredSpeed (136): the car, answering the
-    script's speed for it.
+    script's speed for it;
+  for 11e-4, the test driver table's SetDesiredSpeed (56), with the car,
+    the three floats and the flag, SetTarget (64), with the car and the
+    target, StartHonkHorn (88) and StopHonkHorn (96), with the car, and
+    IsHonking (104), with the car, answering the script's flag for it;
+  World::Random(int) (0x0014e520): the world and the range, answering the
+    float's queue as words, so the two draw from one queue in turn.
+SuperEasyAI and BoringAIForCameraTuningOn are words the script sets.
 11e-3's players (PLR), their speed-ratio Averages, the RacingCars, the
 coordinator's state, the race parameters' fields, TheDifficultyInfo and
 the World's PlayerPositions are memory the script fills. WeCanHaveTheGlue's
@@ -71,7 +83,7 @@ A float prints as its bits, a NaN as "nan", and a pointer by what it is,
 as drivingchoice_check names them, with these added: kn3, kl3 and kc3 car
 3's controller's own list, location and choice, ke3:5 its list's sixth
 entry, m4 the fifth block bMalloc handed out, fa2 the third fake
-action and P1 car 1's player. vK is _vt$15AICarController, vT the test table, vC
+action, pt2 its PointsToDrive and P1 car 1's player. vK is _vt$15AICarController, vT the test table, vC
 drivingchoice_check's, vB _vt$13CarController and vF the actions'.
 
     python tools/aicarcontroller_check.py
@@ -108,6 +120,7 @@ HARNESS = "tools/src/aicarcontroller_test.c"
 AICC = "3DS Files/source/aicarcontroller.c"
 PLAYER_H = "3DS Files/source/player.h"
 CCC = "3DS Files/source/carcontroller.c"
+CAR_C = "3DS Files/source/car.c"
 SOURCES = [HARNESS] + dcc.SOURCES[1:] + ["3DS Files/source/" + f for f in (
     "aicarcontroller.c", "carcontroller.c", "average.c", "timer.c",
     "difficultyinfo.c", "configitems.c")]
@@ -138,6 +151,9 @@ F = {
     "whg": 0x00190c78, "wng": 0x00190c88, "wcg": 0x00190c90,
     "gon": 0x00190f38, "goff": 0x00190fb8, "ggs": 0x00190ff8,
     "dbf": 0x001928f0, "cdp": 0x00192c78,
+    # 11e-4's, and the car's honk and its UpdateHeadlightsAndHorn.
+    "mh": 0x00192fa8, "eca": 0x001932e8, "honk": 0x00134130,
+    "uh": 0x00134198,
 }
 BMALLOC = 0x002577c0
 BFREE = 0x00257850
@@ -211,7 +227,31 @@ W_PPOS = 336                      # World's PlayerPositions, 16 bytes each
 A_BOOST = 584                     # an action's AllowedToUseBoost
 # The controller's fields %kf sets.
 KF = {"lbt": 564, "ob": 568, "rp": 572, "glue": 588, "on": 592, "off": 596,
-      "bias": 604, "ba": 640, "cp": 644}
+      "bias": 604, "ba": 640, "cp": 644, "lrs": 536, "la": 540, "tt": 688}
+
+# 11e-4's. The car's horn and headlights, by retail's offsets from
+# WantToBlinkHeadlights: the honk and two-honk words, the start, the on,
+# second and off durations, the forcing and the headlights' state.
+C_HONK = 2068
+H_BLINK, H_HONK, H_TWO, H_START = 0, 4, 8, 12
+H_ON, H_SECOND, H_OFF, H_FORCE, H_STATE = 16, 20, 24, 28, 32
+WORLD_RANDOM_I = 0x0014e520       # World::Random(int)
+G4 = {
+    "EASY": dcc.GP - 20120,       # SuperEasyAI, retail's alone
+    "BORING": dcc.GP - 22580,     # BoringAIForCameraTuningOn
+}
+STUB_SDS = 0x010b34c0             # the drivers' SetDesiredSpeed (56),
+STUB_STG = 0x010b34d0             # SetTarget (64), StartHonkHorn (88),
+STUB_HON = 0x010b34e0             # StopHonkHorn (96) and IsHonking (104)
+STUB_HOFF = 0x010b34f0
+STUB_ISH = 0x010c2440
+DVT_STUBS4 = ((56, STUB_SDS), (64, STUB_STG), (88, STUB_HON),
+              (96, STUB_HOFF), (104, STUB_ISH))
+# An action's PointsToDrive and speed fields, and the target's.
+A_PTD = 32
+A_SPEED, A_TIME, A_TOL, A_USE, A_ALLOWED = 564, 568, 572, 576, 580
+T_WPC, T_WPT, T_LEN, T_LPS = 504, 508, 512, 516
+TP_SPEEDS = 90                    # a route point's DrivingLineSpeeds
 
 # The controller, by retail's offsets.
 K_SIZE = 720
@@ -363,6 +403,31 @@ def fact_at(i):
 #                        RacingCars
 # %dbf k                 DecideBoostFactor
 #
+# 11e-4's. Set up:
+# %ctl k m / %dt k t     car k's control mode / its driver's type
+# %hk k blink honk two start on second off force  car k's horn and
+#                        headlights (the start and the floats in hex)
+# %ish k v               what car k's driver's IsHonking answers
+# %ad i use speed time tol allowed  fake action i's UseDrivingLineSpeed,
+#                        DesiredSpeed, TimeToGetToDesiredSpeed,
+#                        DesiredSpeedTolerance and AllowedToUseThrottleAndBrake
+# %at i n len            fake action i's PointsToDrive: NumPoints, Length,
+#                        and its two pick times and LastPointToScore set
+# %sea v / %bai v        SuperEasyAI / BoringAIForCameraTuningOn
+# %lsp r j line v        route r's point j's speed byte for the line
+# %kf k field v          as 11e-3's, with lrs (the look-ahead switch's
+#                        time), la (the look-ahead) and tt (the
+#                        TakenSignpostTimer)
+# The calls:
+# %mh k car lst          MaybeHonkAndOrBlinkHeadlights on the car, with the
+#                        list (0) or controller k's own (1), then car k's horn
+# %hr k on off second blink honk two  car k's HonkAndOrBlinkHeadlights,
+#                        then its horn
+# %uh k                  car k's UpdateHeadlightsAndHorn, then its
+#                        HeadlightsState
+# %eca k i               ExecuteCurrentAction, then the look-ahead, its
+#                        time, the BoostFactor and fake action i's target
+#
 # Not scripted: a find on a controller whose table is vK and whose
 # location is clear (retail's slot 112 is __pure_virtual), a route number
 # over 99 (retail reads on past the manager's table), FindClosestTrackRoute
@@ -379,6 +444,11 @@ def fact_at(i):
 # where the glue or the boost reads its RacingCar, a skill over 9 (past
 # AISkillLevel), a place gap past eight either way (past the position
 # boosts), and a velocity whose squares underflow (the EE flushes them).
+# From 11e-4: MaybeHonk for a traffic car whose nearby car isn't in the
+# list (the port reads through NULL where retail reads address 12; an AI
+# car's DoWeCareAboutThisCar turns it away), ExecuteCurrentAction with no
+# current action, a taken sign with no new route, and a skill whose
+# SpeedFactor lies outside TheDifficultyInfo (below -13 or past 21).
 
 # Distances either side of the ones that matter.
 SECS = (0.0, 0.5, 1.5, 2.0, 3.0, -1.0, 0.000125, 0.0001, 1e6, 1e9, -1e9,
@@ -1794,6 +1864,334 @@ def s_boost(rnd, catchup=False):
     return ops
 
 
+# ---- 11e-4's: the horn and ExecuteCurrentAction
+
+HONK_GATES = ("usage", "real", "mine", "list", "care")
+HONK_PASSING = f32(50.0)
+HONK_CLOSING = f32(-3.0)
+
+
+def ticks_round(x):
+    """The tick counts either side of x seconds: the last whose time,
+    (float)(int)t * TICK, is not past x, and the one after it."""
+    x = f32(x)
+    t = int(x / TICK)
+    while f32(f32(float(t)) * TICK) > x:
+        t -= 1
+    while f32(f32(float(t + 1)) * TICK) <= x:
+        t += 1
+    return t, t + 1
+
+
+def secs_of(t):
+    return f32(f32(float(t)) * TICK)
+
+
+def durations(rnd):
+    return tuple(f32(rnd.choice((0.0, 0.25, 0.5, 0.75, 0.3, 0.125,
+                                 rnd.uniform(0.0, 1.2))))
+                 for _ in range(3))
+
+
+def hk_op(rnd, k, start, on, sec, off):
+    return "%%hk %d %d %d %d %08x %s %s %s %d" % (
+        k, rnd.choice((0, 1, 1, 3)), rnd.choice((0, 1, 1, -2)),
+        rnd.choice((0, 1, 1, 5)), start & M32, h(on), h(sec), h(off),
+        rnd.choice((0, 0, 1, -1)))
+
+
+def honk_guard(rnd, k, now):
+    """The last request on car k, its whole cycle either side of the time
+    since it started, so that a new one is taken or dropped."""
+    on, off, sec = durations(rnd)
+    cycle = f32(f32(on + off) + sec)
+    lo, hi = ticks_round(cycle)
+    ticks = rnd.choice((lo, hi, lo, hi, rnd.randrange(0, 10000), -5,
+                        0x7fffffff))
+    return hk_op(rnd, k, now - ticks, on, sec, off)
+
+
+def honk_draws(rnd, chance, blink):
+    """MaybeHonk's six draws: on, off and second within their ranges, then
+    the two-honk, honk and blink draws round 0.5, the chance and the
+    blink's."""
+    def at(x):
+        x = f32(x)
+        return rnd.choice((x, below(x), above(x), x, below(x),
+                           f32(rnd.random())))
+    ds = [f32(rnd.choice((0.0, rnd.uniform(0.0, 0.4)))),
+          f32(rnd.choice((0.0, rnd.uniform(0.0, 0.2)))),
+          f32(rnd.choice((0.0, rnd.uniform(0.0, 0.4)))),
+          at(0.5), at(chance), at(blink)]
+    return "%%rnd 6 %s" % " ".join(h(d) for d in ds)
+
+
+def honk_round(rnd, n):
+    """One MaybeHonkAndOrBlinkHeadlights, failing at most one of its early
+    outs (gate_picker): the car's usage, the race or its control, my
+    control, the car missing from my list and DoWeCareAboutThisCar's edge;
+    then the chance from its closing speed round 50 and -3 m/s, a traffic
+    driver, a player and the list's count round 6, each draw round it."""
+    ok = gate_picker(rnd, HONK_GATES)
+    now = rnd.randrange(0, 1 << 22)
+    ops = ["G TIMER %08x" % now]
+    other = rnd.randrange(1, n)
+    ops.append("@ut %d %d" % (other, rnd.choice((0, 3, 4, -1, 0x7fffffff))
+                              if ok("usage") else rnd.choice((1, 2))))
+    if ok("real"):
+        st, ctl = rnd.choice(((8, rnd.choice((0, 1, 2, 3))),
+                              (rnd.choice((0, 3, 7, 9)), 1)))
+    else:
+        st, ctl = rnd.choice((0, 3, 7, 9)), rnd.choice((0, 2, 3, 4))
+    ops.append("%%RC %d" % st)
+    ops.append("%%ctl %d %d" % (other, ctl))
+    mine = rnd.choice((2, 2, 3)) if ok("mine") else rnd.choice((0, 1, 4))
+    ops.append("%%ctl 0 %d" % mine)
+    dtype = rnd.choice((3, 3, 0, 1, 2, 4))
+    ops.append("%%dt 0 %d" % dtype)
+    pl = rnd.random() < 0.3
+    ops.append("%%pl %d %d" % (other, int(pl)))
+    # My own list, which GetNearbyCar searches: a traffic car's must hold
+    # the car, which past the count is not in it.
+    cnt = rnd.choice((5, 6, 5, 6, 1, 3, 7, 12))
+    in_list = ok("list") or mine == 3
+    cars_in = [rnd.choice([-1] + [c for c in range(n) if c != other])
+               for _ in range(min(16, cnt + 2))]
+    if in_list:
+        at_ = rnd.randrange(cnt)
+        cars_in[at_] = other
+        if rnd.random() < 0.3 and at_ + 1 < len(cars_in):
+            cars_in[rnd.randrange(at_ + 1, len(cars_in))] = other
+    elif rnd.random() < 0.5 and cnt < len(cars_in):
+        cars_in[cnt] = other
+    hd = f32(rnd.choice((0.9, 1.0, 2.2, 0.5)))
+    D = f32(rnd.choice((1.0, 0.9, 2.25, 0.75, 1.5)))
+    vy = f32(rnd.choice((50.0, above(50.0), below(50.0), -3.0, below(-3.0),
+                         above(-3.0), 0.0, 20.0, -20.0, 80.0, -0.0)))
+    # The list the call is given: the global one, or my own; the global
+    # one, after the copy, its car, count and half size changed.
+    lst = rnd.choice((0, 1))
+    pme, pcnt, phd = 0, cnt, hd
+    if lst == 0 and rnd.random() < 0.7:
+        pme = 0 if ok("care") or rnd.random() < 0.5 else other
+        pcnt = rnd.choice((5, 6, 0, -1, 16, cnt))
+        phd = f32(rnd.choice((0.9, 1.0, 2.2, 0.5, hd)))
+    bias = -0.5 if pl else 0.0
+    edge = -f32(f32(D + phd) + bias)
+    if ok("care"):
+        py = rnd.choice((above(edge), above(edge), f32(edge + 3.0),
+                         f32(rnd.uniform(edge, 60.0))))
+    else:
+        py = rnd.choice((edge, below(edge), f32(edge - 2.0)))
+    ops.append("N 0 %d %s %s" % (cnt, h(f32(2.2)), h(hd)))
+    first = True
+    for i, c in enumerate(cars_in):
+        if c == other and first:
+            first = False
+            ops.append("E %d %s %s %s %s %s %s %d" % (
+                i, h(f32(rnd.uniform(-5.0, 5.0))), h(py),
+                h(f32(rnd.uniform(-5.0, 5.0))), h(vy), h(f32(2.0)), h(D), c))
+        else:
+            ops.append("E %d %s %s %s %s %s %s %d" % (
+                i, h(f32(rnd.uniform(-5.0, 5.0))),
+                h(f32(rnd.uniform(-60.0, 60.0))),
+                h(f32(rnd.uniform(-5.0, 5.0))),
+                h(f32(rnd.uniform(-60.0, 60.0))), h(f32(2.0)),
+                h(f32(rnd.choice((1.0, 0.9)))), c))
+    ops.append("%J 0")
+    if (pme, pcnt, phd) != (0, cnt, hd):
+        ops.append("N %d %d %s %s" % (pme, pcnt, h(f32(2.2)), h(phd)))
+    if HONK_PASSING < vy:
+        chance = 1.0
+    elif dtype == 3 and vy < HONK_CLOSING:
+        chance = 1.0
+    elif pl:
+        chance = 0.75
+    else:
+        chance = 0.0750000030 if pcnt < 6 else 0.0500000007
+    blink = 0.899999976 if HONK_PASSING < vy else 0.5
+    ops.append(honk_draws(rnd, chance, blink))
+    ops.append(honk_guard(rnd, 0, now))
+    ops.append("%%mh 0 %d %d" % (other, lst))
+    if rnd.random() < 0.3:
+        ops.append("%%ish 0 %d" % rnd.choice((0, 1)))
+        ops.append("%uh 0")
+    return ops
+
+
+def s_honk(rnd):
+    """MaybeHonkAndOrBlinkHeadlights, round after round on my car (0) and
+    the cars about, into HonkAndOrBlinkHeadlights as shipped."""
+    w = World(rnd)
+    n = rnd.randint(2, 6)
+    for k in range(n):
+        w.car(k, act=-1, pl=0)
+    ops = w.ops + ["%NS 0", "%n 0", "%dr 0"]
+    for _ in range(rnd.randrange(6, 12)):
+        ops += honk_round(rnd, n)
+    return ops
+
+
+def s_lights(rnd):
+    """HonkAndOrBlinkHeadlights and UpdateHeadlightsAndHorn on their own:
+    the request's guard either side, each phase of the cycle at its edges,
+    the time run backwards, the driver honking or not and a player's car
+    passed over."""
+    w = World(rnd)
+    n = rnd.randint(1, 3)
+    for k in range(n):
+        w.car(k, act=-1, pl=0)
+    ops = w.ops + ["%NS 0"]
+    for _ in range(rnd.randrange(8, 16)):
+        k = rnd.randrange(n)
+        now = rnd.randrange(0, 1 << 22)
+        ops.append("G TIMER %08x" % now)
+        if rnd.random() < 0.4:
+            ops.append(honk_guard(rnd, k, now))
+            on, off, sec = durations(rnd)
+            ops.append("%%hr %d %s %s %s %d %d %d" % (
+                k, h(on), h(off), h(sec), rnd.choice((0, 1, 1, 4)),
+                rnd.choice((0, 1, 1, -1)), rnd.choice((0, 1, 1, 3))))
+        else:
+            on, off, sec = durations(rnd)
+            t1 = f32(on + on)
+            edge = rnd.choice((on, t1, f32(f32(t1 - on) + off),
+                               f32(f32(on + off) + sec)))
+            lo, hi = ticks_round(edge)
+            ticks = rnd.choice((lo, hi, lo - 1, hi + 1, -7,
+                                rnd.randrange(0, 12000)))
+            ops.append(hk_op(rnd, k, now - ticks, on, sec, off))
+        ops.append("%%pl %d %d" % (k, int(rnd.random() < 0.15)))
+        ops.append("%%ish %d %d" % (k, rnd.choice((0, 1, 2))))
+        ops.append("%%uh %d" % k)
+    return ops
+
+
+EXEC_PATHS = ("clear", "easy", "boring", "own", "own", "sign", "timer",
+              "line", "line", "line", "line")
+EXEC_SKILLS = tuple(range(10)) + (-1, 10, -13, 21, -2, 15, 0, 9)
+EXEC_LINES = tuple(range(LINES)) + (-1, 21)
+
+
+def exec_diff(rnd):
+    """TheDifficultyInfo filled with floats, as each skill's SpeedFactor
+    and whatever a skill outside the table reads in its place."""
+    words = [fbits(f32(rnd.uniform(-2.0, 2.0))) for _ in range(DIFF_SIZE // 4)]
+    return ["%%dw %d %s" % (off, " ".join(
+        "%08x" % v for v in words[off // 4:off // 4 + 16]))
+        for off in range(0, DIFF_SIZE, 64)]
+
+
+def exec_round(rnd, sizes, nsigns):
+    """One ExecuteCurrentAction down one of its ways: the location clear,
+    SuperEasyAI, BoringAIForCameraTuningOn, the action's own speed, the
+    taken sign's point, TakenSignpostTimer's 99999 and the line's speed,
+    the look-ahead drawn again either side of RoutePointChangeFrequency,
+    the point clamped either end, a zero speed, a cop race and the boost
+    either kept or set by DecideBoostFactor."""
+    path = rnd.choice(EXEC_PATHS)
+    now = rnd.randrange(1 << 20, 1 << 23)
+    ops = ["G TIMER %08x" % now]
+    kr = rnd.randrange(len(sizes))
+    np_ = sizes[kr]
+    j = rnd.randrange(np_)
+    line = rnd.choice(EXEC_LINES)
+    if path == "clear":
+        ops.append("%%L 0 -1 -1 %d 00000000" % line)
+    else:
+        ops.append("%%L 0 %d %d %d %08x" % (kr, j, line,
+                                            rnd.choice((0, now))))
+    sea = rnd.choice((1, -1, 2)) if path == "easy" else 0
+    bai = rnd.choice((1, -1, 2)) if path == "boring" else 0
+    if path == "clear":
+        sea, bai = rnd.choice((0, 1)), rnd.choice((0, 1))
+    elif path == "easy":
+        bai = rnd.choice((0, 1))
+    ops.append("%%sea %d" % sea)
+    ops.append("%%bai %d" % bai)
+    if path == "own":
+        use = 0
+    elif path in ("clear", "easy", "boring"):
+        use = rnd.choice((0, 1))
+    else:
+        use = rnd.choice((1, 1, 2, -1))
+    ops.append("%%ad 0 %d %s %s %s %d" % (
+        use, h(f32(rnd.uniform(-5.0, 80.0))), h(f32(rnd.uniform(0.0, 3.0))),
+        h(f32(rnd.choice((0.0, 1.0, rnd.uniform(0.0, 10.0))))),
+        rnd.choice((0, 1, 1, 2))))
+    ops.append("%%at 0 %d %s" % (rnd.choice((0, 1, 5, 20)),
+                                 h(f32(rnd.uniform(0.0, 300.0)))))
+    ops.append("%%ts 0 %d" % (rnd.randrange(nsigns) if path == "sign"
+                              else -1))
+    ops.append("%%kf 0 tt %08x" % (
+        rnd.choice((1, now, 0x80000000, 5, 0xffffffff)) if path == "timer"
+        else rnd.choice((0, 0x7fffffff))))
+    skill = rnd.choice(EXEC_SKILLS)
+    ops.append("@sk 0 %d" % skill)
+    # The look-ahead: the frequency either side of the time since its
+    # switch, the variance's byte with the bytes after it set.
+    freq = f32(rnd.choice((0.5, 0.25, 1.0, 2.0, 0.0, -1.0,
+                           rnd.uniform(0.1, 5.0))))
+    ops.append("%%dw 980 %s" % h(freq))
+    lo, hi = ticks_round(freq) if freq >= 0 else (-1, 0)
+    since = rnd.choice((lo, hi, lo, hi, 0, rnd.randrange(0, 40000), -3))
+    ops.append("%%kf 0 lrs %08x" % ((now - since) & M32))
+    var = rnd.choice((0, 1, 2, 5, 255, rnd.randrange(256)))
+    if 0 <= skill < NSKILLS:
+        ops.append("%%dw %d %08x" % (392 + SKILL_STRIDE * skill,
+                                     var | rnd.getrandbits(24) << 8))
+    drawn = 0 <= skill < NSKILLS and freq < secs_of(since)
+    la = rnd.choice((-j - 1, -j, np_ - 1 - j, np_ - j,
+                     rnd.randint(-j - 3, np_ - j + 3), 0))
+    v = var + 1
+    if drawn:
+        answer = la + v
+        if rnd.random() < 0.15:
+            answer = rnd.choice((0, 2 * v - 1, 2 * v, -1))
+        ops.append("%%rnd 1 %08x" % (answer & M32))
+        ops.append("%%kf 0 la %d" % rnd.randint(-5, 5))
+    else:
+        ops.append("%%rnd 1 %08x" % rnd.randrange(0, 50))
+        ops.append("%%kf 0 la %d" % la)
+    if path == "line" and 0 <= line < LINES:
+        i = min(max(j + la, 0), np_ - 1)
+        ops.append("%%lsp %d %d %d %d" % (kr, i, line, rnd.choice(
+            (0, 0, 1, 30, 255, rnd.randrange(256)))))
+    ops.append("%%rp 0 0 %d 0 0 0" % rnd.choice((0, 0, 1, 2)))
+    ops.append("%%sfe %d %d" % (rnd.choice((0, 0, 1)), rnd.choice((0, 1))))
+    ops.append("%%bf 0 %s" % h(f32(rnd.choice(
+        (1.0, 0.5, 1.25, 0.0, rnd.uniform(0.8, 1.2))))))
+    if rnd.random() < 0.2:
+        # DecideBoostFactor sets the boost to 1 first.
+        ops += ["%rc 0 1 00000000", "%kf 0 ba 1", "%dc 1",
+                "%dw 984 00000000", "%%kf 0 lbt %08x" % (now - 1)]
+    else:
+        ops.append("%rc 0 x")
+    ops.append("%eca 0 0")
+    return ops
+
+
+def s_execute(rnd):
+    """ExecuteCurrentAction, round after round, on my car (0) over three
+    routes and a few signs leading on to them."""
+    w = World(rnd)
+    sizes = []
+    rns = rnd.sample(range(0, 60), 3)
+    for k in range(3):
+        sizes.append(rnd.randint(3, 14))
+        w.route(k, sizes[k], rns[k])
+    nsigns = rnd.randint(1, 4)
+    for _ in range(nsigns):
+        k2 = rnd.randrange(3)
+        w.sign(k2, rnd.randrange(sizes[k2]))
+    w.car(0, act=-1, pl=0)
+    ops = w.ops + ["%NS 0", "%n 0", "%dr 0", "%fa 0 0 0 0 0", "%cur 0 0"]
+    ops += exec_diff(rnd)
+    for _ in range(rnd.randrange(6, 12)):
+        ops += exec_round(rnd, sizes, nsigns)
+    return ops
+
+
 N_BUILD = 40
 N_WHERE = 30
 N_LINE = 16
@@ -1810,6 +2208,9 @@ N_BELT = 40
 N_GLUE = 60
 N_BOOST = 60
 N_CATCHUP = 30
+N_HONK = 60
+N_LIGHTS = 30
+N_EXECUTE = 80
 
 
 def script():
@@ -1850,6 +2251,14 @@ def script():
         sc.append(s_boost(rnd))
     for _ in range(N_CATCHUP):
         sc.append(s_boost(rnd, catchup=True))
+    rnd = random.Random(0x11e4)
+    _PICK.seed(0x11e4)
+    for _ in range(N_HONK):
+        sc.append(s_honk(rnd))
+    for _ in range(N_LIGHTS):
+        sc.append(s_lights(rnd))
+    for _ in range(N_EXECUTE):
+        sc.append(s_execute(rnd))
     return sc
 
 
@@ -1899,6 +2308,15 @@ class Model(dcc.Model):
         self.gds = {}
         self.plrs = set()
         self.call(GLUE_CTOR)
+        # 11e-4's: the drivers' SetDesiredSpeed, SetTarget and horn, and
+        # World::Random(int).
+        e.stub(STUB_SDS, self.s_sds)
+        e.stub(STUB_STG, self.s_stg)
+        e.stub(STUB_HON, self.s_hon)
+        e.stub(STUB_HOFF, self.s_hoff)
+        e.stub(STUB_ISH, self.s_ish)
+        e.stub(WORLD_RANDOM_I, self.s_irandom)
+        self.ish = {}
 
     # ---- names -----------------------------------------------------------
 
@@ -1927,6 +2345,9 @@ class Model(dcc.Model):
         if (FACTS <= a < FACTS + FACT_SIZE * NFACTS
                 and (a - FACTS) % FACT_SIZE == 0):
             return "fa%d" % ((a - FACTS) // FACT_SIZE)
+        off = a - (FACTS + A_PTD)
+        if 0 <= off < FACT_SIZE * NFACTS and off % FACT_SIZE == 0:
+            return "pt%d" % (off // FACT_SIZE)
         if (PLR <= a < PLR + PLR_STRIDE * NCARS
                 and (a - PLR) % PLR_STRIDE == 0):
             return "P%d" % ((a - PLR) // PLR_STRIDE)
@@ -2039,6 +2460,37 @@ class Model(dcc.Model):
         self.emit("  gds %s" % self.name(car_at(k)))
         em.fpr[0] = self.gds.get(k, 0)
 
+    def s_sds(self, em):
+        k = self.driver_car(em)
+        self.emit("  sds %s %s %s %s %d" % (
+            self.name(car_at(k)), fx(em.fpr[12]), fx(em.fpr[13]),
+            fx(em.fpr[14]), s32(em.reg[5])))
+
+    def s_stg(self, em):
+        k = self.driver_car(em)
+        self.emit("  stg %s %s" % (self.name(car_at(k)),
+                                   self.name(em.reg[5])))
+
+    def s_hon(self, em):
+        self.emit("  honkon %s" % self.name(car_at(self.driver_car(em))))
+
+    def s_hoff(self, em):
+        self.emit("  honkoff %s" % self.name(car_at(self.driver_car(em))))
+
+    def s_ish(self, em):
+        k = self.driver_car(em)
+        self.emit("  ishonk %s" % self.name(car_at(k)))
+        return self.ish.get(k, 0) & M32
+
+    def s_irandom(self, em):
+        self.emit("  irandom %d %d" % (int(em.reg[4] & M32 == WORLD),
+                                       s32(em.reg[5])))
+        v = 0
+        if self.ri < len(self.rq):
+            v = self.rq[self.ri]
+            self.ri += 1
+        return v
+
     # ---- the world -------------------------------------------------------
 
     def reset(self):
@@ -2086,6 +2538,13 @@ class Model(dcc.Model):
         e.mem[WORLD + W_PPOS:WORLD + W_PPOS + 32] = bytes(32)
         self.gds = {}
         self.plrs = set()
+        # 11e-4's: the drivers' speed, target and horn, no driver honking,
+        # both debug switches off.
+        for off, stub in DVT_STUBS4:
+            e.put32(DVT + off + 4, stub)
+        for g in G4.values():
+            e.put32(g, 0)
+        self.ish = {}
 
     # ---- the dumps -------------------------------------------------------
 
@@ -2181,6 +2640,22 @@ class Model(dcc.Model):
             a = fact_at(i)
             if self.w(a + A_VPTR):
                 self.emit("  fa%d pt %d" % (i, s32(self.w(a + A_PT))))
+
+    def dump_honk(self, k):
+        w = self.w
+        p = car_at(k) + C_HONK
+        self.emit("  H blink %d honk %d two %d start %08x on %s second %s "
+                  "off %s" % (s32(w(p + H_BLINK)), s32(w(p + H_HONK)),
+                              s32(w(p + H_TWO)), w(p + H_START),
+                              fx(w(p + H_ON)), fx(w(p + H_SECOND)),
+                              fx(w(p + H_OFF))))
+
+    def dump_ptd(self, i):
+        w = self.w
+        p = fact_at(i) + A_PTD
+        self.emit("  E pt%d n %d wpc %d wpt %d len %s lps %d" % (
+            i, s8(self.e.mem[p]), s32(w(p + T_WPC)), s32(w(p + T_WPT)),
+            fx(w(p + T_LEN)), s8(self.e.mem[p + T_LPS])))
 
     # ---- the ops ---------------------------------------------------------
 
@@ -2487,7 +2962,7 @@ class Model(dcc.Model):
                 e.put32(a + KF[f], self.car_ptr(v))
             elif f == "cp":
                 e.put32(a + KF[f], self.plr_at(int(v)))
-            elif f == "ba":
+            elif f in ("ba", "la"):
                 e.put32(a + KF[f], int(v) & M32)
             else:
                 e.put32(a + KF[f], int(v, 16))
@@ -2518,6 +2993,66 @@ class Model(dcc.Model):
             self.emit("  boost %s lbt %08x cp %s" % (
                 fx(w(car + C_BOOST)), w(a + KF["lbt"]),
                 self.name(w(a + KF["cp"]))))
+        else:
+            return self.pct4(c, k, a, car, t)
+        return True
+
+    def pct4(self, c, k, a, car, t):
+        """11e-4's ops; False for none of them."""
+        e, w = self.e, self.w
+        if c == "ctl":
+            e.put32(car + dcc.C_CTL, int(t[2]) & M32)
+        elif c == "dt":
+            e.put32(dcc.DRIVERS + dcc.DRIVER_STRIDE * k + dcc.DRV_TYPE,
+                    int(t[2]) & M32)
+        elif c == "hk":
+            p = car + C_HONK
+            for off, v in zip((H_BLINK, H_HONK, H_TWO), t[2:5]):
+                e.put32(p + off, int(v) & M32)
+            e.put32(p + H_START, int(t[5], 16))
+            for off, v in zip((H_ON, H_SECOND, H_OFF), t[6:9]):
+                e.put32(p + off, int(v, 16))
+            e.put32(p + H_FORCE, int(t[9]) & M32)
+        elif c == "ish":
+            self.ish[k] = int(t[2])
+        elif c == "mh":
+            lst = LIST if int(t[3]) == 0 else a + K_LIST
+            self.call(F["mh"], a, self.car_ptr(t[2]), lst)
+            self.dump_honk(k)
+        elif c == "hr":
+            self.call(F["honk"], car, int(t[5]) & M32, int(t[6]) & M32,
+                      int(t[7]) & M32, f12=int(t[2], 16), f13=int(t[3], 16),
+                      f14=int(t[4], 16))
+            self.dump_honk(k)
+        elif c == "uh":
+            self.call(F["uh"], car)
+            self.emit("  L state %d" % s32(w(car + C_HONK + H_STATE)))
+        elif c == "ad":
+            f = fact_at(k)
+            e.put32(f + A_USE, int(t[2]) & M32)
+            e.put32(f + A_SPEED, int(t[3], 16))
+            e.put32(f + A_TIME, int(t[4], 16))
+            e.put32(f + A_TOL, int(t[5], 16))
+            e.put32(f + A_ALLOWED, int(t[6]) & M32)
+        elif c == "at":
+            p = fact_at(k) + A_PTD
+            e.mem[p] = int(t[2]) & 0xff
+            e.put32(p + T_LEN, int(t[3], 16))
+            e.put32(p + T_WPC, 5)
+            e.put32(p + T_WPT, 7)
+            e.mem[p + T_LPS] = 3
+        elif c == "sea":
+            e.put32(G4["EASY"], k & M32)
+        elif c == "bai":
+            e.put32(G4["BORING"], k & M32)
+        elif c == "lsp":
+            e.mem[route_at(k) + dcc.RT_HEADER + dcc.RT_POINT * int(t[2])
+                  + TP_SPEEDS + int(t[3])] = int(t[4]) & 0xff
+        elif c == "eca":
+            self.call(F["eca"], a)
+            self.emit("  E la %d lrs %08x boost %s" % (
+                s32(w(a + K_LA)), w(a + KF["lrs"]), fx(w(car + C_BOOST))))
+            self.dump_ptd(int(t[2]))
         else:
             return False
         return True
@@ -3237,7 +3772,9 @@ MUTATIONS = [
       "    early = (float)pCurrentRace->RaceTime.PackedTime"),
     M("dbf-freq", "    if (!(TheDifficultyInfo.Misc.BoostCalculationFrequency\n          < (float)",
       "    if (!(TheDifficultyInfo.Misc.BoostCalculationFrequency\n          <= (float)"),
-    M("dbf-freq-u", "          < (float)(int32_t)((uint32_t)WorldTimer\n",
+    M("dbf-freq-u", "    if (!(TheDifficultyInfo.Misc.BoostCalculationFrequency\n"
+      "          < (float)(int32_t)((uint32_t)WorldTimer\n",
+      "    if (!(TheDifficultyInfo.Misc.BoostCalculationFrequency\n"
       "          < (float)((uint32_t)WorldTimer\n"),
     M("dbf-lbt", "    c->LastBoostCalculationTime.PackedTime = (uint32_t)WorldTimer;\n", ""),
     M("dbf-cp-null", "    c->pCatchupPlayer = NULL;\n    if (!CarControllerDisableCatchup",
@@ -3292,6 +3829,190 @@ MUTATIONS = [
     M("pl-max-le", "    return a->nSlots == a->nSamples && f < p->fMaxSpeedRatio;",
       "    return a->nSlots == a->nSamples && f <= p->fMaxSpeedRatio;", rel=PLAYER_H),
     M("pl-ratio", "    return p->pAverageSpeedRatio->fAverage;", "    return 1.0f;", rel=PLAYER_H),
+    # 11e-4's. MaybeHonkAndOrBlinkHeadlights.
+    M("mh-usage", "    if ((uint32_t)(car->pCarTypeInfo->UsageType - CAR_USAGE_TYPE_COP) < 2)",
+      "    if ((uint32_t)(car->pCarTypeInfo->UsageType - CAR_USAGE_TYPE_COP) < 1)"),
+    M("mh-usage-signed", "    if ((uint32_t)(car->pCarTypeInfo->UsageType - CAR_USAGE_TYPE_COP) < 2)",
+      "    if ((int32_t)(car->pCarTypeInfo->UsageType - CAR_USAGE_TYPE_COP) < 2)"),
+    M("mh-demo", "            != RCSTATE_AI_DEMO_MODE\n        && car->TheControlMode != REAL_CONTROL)",
+      "            == RCSTATE_AI_DEMO_MODE\n        && car->TheControlMode != REAL_CONTROL)"),
+    M("mh-demo-or", "            != RCSTATE_AI_DEMO_MODE\n        && car->TheControlMode != REAL_CONTROL)",
+      "            != RCSTATE_AI_DEMO_MODE\n        || car->TheControlMode != REAL_CONTROL)"),
+    M("mh-real-mine", "            != RCSTATE_AI_DEMO_MODE\n        && car->TheControlMode != REAL_CONTROL)",
+      "            != RCSTATE_AI_DEMO_MODE\n        && c->Base.pCar->TheControlMode != REAL_CONTROL)"),
+    M("mh-list", "    nc = nearbycarlist_get_nearby_car(c->CurrentNearbyCarList, car);",
+      "    nc = nearbycarlist_get_nearby_car(list, car);"),
+    M("mh-care", "        if (!ai_do_we_care_about_this_car(nc, list))\n            return;",
+      "        if (nc == NULL)\n            return;"),
+    M("mh-care-list", "        if (!ai_do_we_care_about_this_car(nc, list))",
+      "        if (!ai_do_we_care_about_this_car(nc, c->CurrentNearbyCarList))"),
+    M("mh-traffic", "    } else if (me->TheControlMode != TRAFFIC_CONTROL) {\n        return;",
+      "    } else if (me->TheControlMode != TRAFFIC_CONTROL && nc == NULL) {\n        return;"),
+    M("mh-ai", "    if (me->TheControlMode == AI_CONTROL) {\n        if (!ai_do_we_care",
+      "    if (me->TheControlMode == AI_CONTROL && nc == NULL) {\n        if (!ai_do_we_care"),
+    M("mh-on-range", "#define AICC_HONK_ON_RANGE   0.400000006f", "#define AICC_HONK_ON_RANGE   0.5f"),
+    M("mh-on-add", "#define AICC_HONK_ON_ADD     0.300000012f", "#define AICC_HONK_ON_ADD     0.3125f"),
+    M("mh-on-less", "#define AICC_HONK_ON_LESS    0.200000003f", "#define AICC_HONK_ON_LESS    0.1875f"),
+    M("mh-off-range", "#define AICC_HONK_OFF_RANGE  0.200000003f", "#define AICC_HONK_OFF_RANGE  0.25f"),
+    M("mh-off-add", "#define AICC_HONK_OFF_ADD    0.150000006f", "#define AICC_HONK_OFF_ADD    0.15625f"),
+    M("mh-off-less", "#define AICC_HONK_OFF_LESS   0.100000001f", "#define AICC_HONK_OFF_LESS   0.09375f"),
+    M("mh-off-order", "    off = (world_random_f(pCurrentWorld, AICC_HONK_OFF_RANGE)\n           + AICC_HONK_OFF_ADD) - AICC_HONK_OFF_LESS;",
+      "    off = world_random_f(pCurrentWorld, AICC_HONK_OFF_RANGE)\n           + (AICC_HONK_OFF_ADD - AICC_HONK_OFF_LESS);"),
+    M("mh-second-range", "    second = (world_random_f(pCurrentWorld, AICC_HONK_ON_RANGE)",
+      "    second = (world_random_f(pCurrentWorld, AICC_HONK_OFF_RANGE)"),
+    M("mh-twice", "    two = world_random_f(pCurrentWorld, 1.0f) < AICC_HONK_TWICE;",
+      "    two = world_random_f(pCurrentWorld, 1.0f) <= AICC_HONK_TWICE;"),
+    M("mh-twice-val", "#define AICC_HONK_TWICE          0.5f", "#define AICC_HONK_TWICE          0.5625f"),
+    M("mh-twice-range", "    two = world_random_f(pCurrentWorld, 1.0f) < AICC_HONK_TWICE;",
+      "    two = world_random_f(pCurrentWorld, 2.0f) < AICC_HONK_TWICE;"),
+    M("mh-passing", "    if (AICC_HONK_PASSING < nc->Velocity.y) {\n        chance = 1.0f;",
+      "    if (AICC_HONK_PASSING <= nc->Velocity.y) {\n        chance = 1.0f;"),
+    M("mh-passing-val", "#define AICC_HONK_PASSING        50.0f", "#define AICC_HONK_PASSING        50.5f"),
+    M("mh-passing-x", "    if (AICC_HONK_PASSING < nc->Velocity.y) {\n        chance = 1.0f;",
+      "    if (AICC_HONK_PASSING < nc->Velocity.x) {\n        chance = 1.0f;"),
+    M("mh-passing-chance", "    if (AICC_HONK_PASSING < nc->Velocity.y) {\n        chance = 1.0f;",
+      "    if (AICC_HONK_PASSING < nc->Velocity.y) {\n        chance = 0.875f;"),
+    M("mh-passing-two", "        two = 1;\n        second += AICC_HONK_PASSING_SECOND;",
+      "        second += AICC_HONK_PASSING_SECOND;"),
+    M("mh-passing-second", "        two = 1;\n        second += AICC_HONK_PASSING_SECOND;",
+      "        two = 1;"),
+    M("mh-passing-second-val", "#define AICC_HONK_PASSING_SECOND 0.600000024f",
+      "#define AICC_HONK_PASSING_SECOND 0.625f"),
+    M("mh-traffic-type", "    } else if (me->MyDriver->TheDriverType == DRIVER_TYPE_TRAFFIC_CAR",
+      "    } else if (car->MyDriver->TheDriverType == DRIVER_TYPE_TRAFFIC_CAR"),
+    M("mh-traffic-type-no", "    } else if (me->MyDriver->TheDriverType == DRIVER_TYPE_TRAFFIC_CAR\n               && nc",
+      "    } else if (1\n               && nc"),
+    M("mh-closing", "               && nc->Velocity.y < AICC_HONK_CLOSING) {",
+      "               && nc->Velocity.y <= AICC_HONK_CLOSING) {"),
+    M("mh-closing-val", "#define AICC_HONK_CLOSING        (-3.0f)", "#define AICC_HONK_CLOSING        (-2.5f)"),
+    M("mh-closing-chance", "               && nc->Velocity.y < AICC_HONK_CLOSING) {\n        chance = 1.0f;",
+      "               && nc->Velocity.y < AICC_HONK_CLOSING) {\n        chance = 0.875f;"),
+    M("mh-player", "    } else if (car->pPlayer != NULL) {", "    } else if (me->pPlayer != NULL) {"),
+    M("mh-player-val", "#define AICC_HONK_PLAYER         0.75f", "#define AICC_HONK_PLAYER         0.8125f"),
+    M("mh-few", "        chance = list->NumCarsInArray < AICC_HONK_FEW_CARS ? AICC_HONK_FEW",
+      "        chance = list->NumCarsInArray <= AICC_HONK_FEW_CARS ? AICC_HONK_FEW"),
+    M("mh-few-list", "        chance = list->NumCarsInArray < AICC_HONK_FEW_CARS ? AICC_HONK_FEW",
+      "        chance = c->CurrentNearbyCarList->NumCarsInArray < AICC_HONK_FEW_CARS ? AICC_HONK_FEW"),
+    M("mh-few-val", "#define AICC_HONK_FEW            0.0750000030f", "#define AICC_HONK_FEW            0.0625f"),
+    M("mh-many-val", "#define AICC_HONK_MANY           0.0500000007f", "#define AICC_HONK_MANY           0.0625f"),
+    M("mh-honk-le", "    honk = world_random_f(pCurrentWorld, 1.0f) < chance;",
+      "    honk = world_random_f(pCurrentWorld, 1.0f) <= chance;"),
+    M("mh-blink-gate", "    if (honk) {\n        chance = AICC_HONK_PASSING", "    if (1) {\n        chance = AICC_HONK_PASSING"),
+    M("mh-blink-passing", "        chance = AICC_HONK_PASSING < nc->Velocity.y ? AICC_BLINK_PASSING",
+      "        chance = AICC_HONK_PASSING <= nc->Velocity.y ? AICC_BLINK_PASSING"),
+    M("mh-blink-passing-val", "#define AICC_BLINK_PASSING       0.899999976f", "#define AICC_BLINK_PASSING       0.875f"),
+    M("mh-blink-val", "#define AICC_BLINK               0.5f", "#define AICC_BLINK               0.5625f"),
+    M("mh-blink-le", "        blink = world_random_f(pCurrentWorld, 1.0f) < chance;",
+      "        blink = world_random_f(pCurrentWorld, 1.0f) <= chance;"),
+    M("mh-args", "    car_honk_and_or_blink_headlights(c->Base.pCar, on, off, second, blink,\n                                     honk, two);",
+      "    car_honk_and_or_blink_headlights(c->Base.pCar, on, off, second, honk,\n                                     blink, two);"),
+    M("mh-args-dur", "    car_honk_and_or_blink_headlights(c->Base.pCar, on, off, second, blink,",
+      "    car_honk_and_or_blink_headlights(c->Base.pCar, on, second, off, blink,"),
+    M("mh-car", "    car_honk_and_or_blink_headlights(c->Base.pCar, on, off, second, blink,",
+      "    car_honk_and_or_blink_headlights(car, on, off, second, blink,"),
+    # HonkAndOrBlinkHeadlights and UpdateHeadlightsAndHorn, car.c's.
+    M("ch-guard-le", "    if (cycle < elapsed) {\n        c->WantTwoHonksAndOrBlinks",
+      "    if (cycle <= elapsed) {\n        c->WantTwoHonksAndOrBlinks", rel=CAR_C),
+    M("ch-cycle", "                  + c->HeadlightsAndHornOffDuration\n                  + c->HeadlightsAndHornSecondOnDuration;",
+      "                  + c->HeadlightsAndHornOffDuration;", rel=CAR_C),
+    M("ch-cycle-on", "    float cycle = c->HeadlightsAndHornOnDuration\n                  + c->HeadlightsAndHornOffDuration",
+      "    float cycle = c->HeadlightsAndHornOffDuration", rel=CAR_C),
+    M("ch-store-second", "        c->HeadlightsAndHornSecondOnDuration = secondOnDuration;\n", "", rel=CAR_C),
+    M("ch-store-start", "        c->HeadlightsAndHornStartTime        = WorldTimer;\n", "", rel=CAR_C),
+    M("ch-store-two", "        c->WantTwoHonksAndOrBlinks           = two;\n", "", rel=CAR_C),
+    M("uh-player", "    if (c->pPlayer)\n        return;\n\n    elapsed =", "    elapsed =", rel=CAR_C),
+    M("uh-on-le", "    if (elapsed < on) {\n        lit = 1;", "    if (elapsed <= on) {\n        lit = 1;", rel=CAR_C),
+    M("uh-gap", "        if (t < on)\n            lit = (c->WantTwoHonksAndOrBlinks == 0);",
+      "        if (t < c->HeadlightsAndHornOffDuration)\n            lit = (c->WantTwoHonksAndOrBlinks == 0);", rel=CAR_C),
+    M("uh-gap-le", "        if (t < on)\n            lit = (c->WantTwoHonksAndOrBlinks == 0);",
+      "        if (t <= on)\n            lit = (c->WantTwoHonksAndOrBlinks == 0);", rel=CAR_C),
+    M("uh-two", "            lit = (c->WantTwoHonksAndOrBlinks == 0);", "            lit = (c->WantTwoHonksAndOrBlinks != 0);", rel=CAR_C),
+    M("uh-second-le", "                   < c->HeadlightsAndHornSecondOnDuration);",
+      "                   <= c->HeadlightsAndHornSecondOnDuration);", rel=CAR_C),
+    M("uh-second-off", "            lit = (t - c->HeadlightsAndHornOffDuration\n",
+      "            lit = (t\n", rel=CAR_C),
+    M("uh-force", "                         ? 1 : (c->ForceHeadlightsOn != 0);", "                         ? 1 : 0;", rel=CAR_C),
+    M("uh-blink", "    c->HeadlightsState = (lit && c->WantToBlinkHeadlights)",
+      "    c->HeadlightsState = (lit)", rel=CAR_C),
+    M("uh-honk-lit", "    honk = lit ? (c->WantToHonkHorn != 0) : 0;", "    honk = c->WantToHonkHorn != 0;", rel=CAR_C),
+    M("uh-edge-on", "    if (honk) {\n        if (((VtBoolFn)e->fn)(vt_this(d, e)))\n            return;\n",
+      "    if (honk) {\n", rel=CAR_C),
+    M("uh-edge-off", "        if (!((VtBoolFn)e->fn)(vt_this(d, e)))\n            return;\n", "", rel=CAR_C),
+    # ExecuteCurrentAction.
+    M("eca-target", "    ((DriverTargetFn)e->fn)(vt_this(d, e), &c->CurrentAction->PointsToDrive);",
+      "    ((DriverTargetFn)e->fn)(vt_this(d, e), &c->Base.Driver->MyDriveTarget);"),
+    M("eca-boost", "    aicarcontroller_decide_boost_factor(c);\n    l = c->CurrentDrivingLocation;",
+      "    l = c->CurrentDrivingLocation;"),
+    M("eca-clear", "    if (drivinglocation_is_clear(l)) {\n        // 0, 0, 0", "    if (0) {\n        // 0, 0, 0"),
+    M("eca-allowed", "    float speed = 0.0f, time = 0.0f, tol = 0.0f;\n    int32_t allowed = 1;",
+      "    float speed = 0.0f, time = 0.0f, tol = 0.0f;\n    int32_t allowed = 0;"),
+    M("eca-easy-speed", "#define AICC_SUPER_EASY_SPEED     15.0f", "#define AICC_SUPER_EASY_SPEED     15.5f"),
+    M("eca-easy-tol", "#define AICC_SUPER_EASY_TOLERANCE 10.0f", "#define AICC_SUPER_EASY_TOLERANCE 10.5f"),
+    M("eca-easy-first", "    } else if (SuperEasyAI) {", "    } else if (SuperEasyAI && !BoringAIForCameraTuningOn) {"),
+    M("eca-boring", "    } else if (BoringAIForCameraTuningOn) {\n        speed = line_speed_at(l->pRoutePoint, l->DrivingLine);",
+      "    } else if (BoringAIForCameraTuningOn) {\n        speed = line_speed_at(l->pRoutePoint, 0);"),
+    M("eca-boring-tol", "        speed = line_speed_at(l->pRoutePoint, l->DrivingLine);\n    } else if",
+      "        speed = line_speed_at(l->pRoutePoint, l->DrivingLine);\n        tol = a->DesiredSpeedTolerance;\n    } else if"),
+    M("eca-own-use", "    } else if (!a->UseDrivingLineSpeed) {", "    } else if (a->UseDrivingLineSpeed != 1) {"),
+    M("eca-own-speed", "        speed = a->DesiredSpeed;\n        time =", "        speed = 0.0f;\n        time ="),
+    M("eca-own-time", "        time = a->TimeToGetToDesiredSpeed;\n", ""),
+    M("eca-own-tol", "        tol = a->DesiredSpeedTolerance;\n        allowed = a->AllowedToUseThrottleAndBrake;\n    } else {",
+      "        allowed = a->AllowedToUseThrottleAndBrake;\n    } else {"),
+    M("eca-own-allowed", "        allowed = a->AllowedToUseThrottleAndBrake;\n    } else {", "    } else {"),
+    M("eca-line-time", "        speed = action_line_speed(c, l);\n",
+      "        speed = action_line_speed(c, l);\n        time = a->TimeToGetToDesiredSpeed;\n"),
+    M("eca-cop", "        if (TheRaceParameters.BeACop || (config_skip_fe() && SkipFEBeACop))",
+      "        if (TheRaceParameters.BeACop)"),
+    M("eca-cop-sfe", "        if (TheRaceParameters.BeACop || (config_skip_fe() && SkipFEBeACop))",
+      "        if (TheRaceParameters.BeACop || (config_skip_fe() || SkipFEBeACop))"),
+    M("eca-cop-skip", "        if (TheRaceParameters.BeACop || (config_skip_fe() && SkipFEBeACop))",
+      "        if (TheRaceParameters.BeACop || SkipFEBeACop)"),
+    M("eca-cop-val", "#define AICC_COP_SPEED            0.75f", "#define AICC_COP_SPEED            0.8125f"),
+    M("eca-line-boost", "        speed *= c->Base.pCar->State.BoostFactor;\n", ""),
+    M("eca-line-tol", "        speed *= c->Base.pCar->State.BoostFactor;\n        tol = a->DesiredSpeedTolerance;\n",
+      "        speed *= c->Base.pCar->State.BoostFactor;\n"),
+    M("eca-line-allowed", "        tol = a->DesiredSpeedTolerance;\n        allowed = a->AllowedToUseThrottleAndBrake;\n    }\n    d = c->Base.Driver;",
+      "        tol = a->DesiredSpeedTolerance;\n    }\n    d = c->Base.Driver;"),
+    M("eca-sds-order", "    ((DriverDesiredSpeedFn)e->fn)(vt_this(d, e), speed, time, tol, allowed);",
+      "    ((DriverDesiredSpeedFn)e->fn)(vt_this(d, e), speed, tol, time, allowed);"),
+    M("eca-clear-ptd", "    aiaction_clear_points_to_drive(c->CurrentAction);\n}", "}"),
+    M("eca-sign", "    if (c->TakenSignpostIndex != -1) {", "    if (c->TakenSignpostIndex > 0) {"),
+    M("eca-sign-line", "                                 &SignpostArray[c->TakenSignpostIndex]),\n                             l->DrivingLine);",
+      "                                 &SignpostArray[c->TakenSignpostIndex]),\n                             0);"),
+    M("eca-sign-factor", "                             l->DrivingLine);\n    }\n    if (timer_is_valid",
+      "                             l->DrivingLine) * speed_factor(skill);\n    }\n    if (timer_is_valid"),
+    M("eca-timer", "    if (timer_is_valid(&c->TakenSignpostTimer))\n        return AICC_SIGN_TIMER_SPEED;",
+      "    if (c->TakenSignpostTimer.PackedTime != 0)\n        return AICC_SIGN_TIMER_SPEED;"),
+    M("eca-timer-val", "#define AICC_SIGN_TIMER_SPEED     99999.0f", "#define AICC_SIGN_TIMER_SPEED     9999.0f"),
+    M("eca-timer-factor", "        return AICC_SIGN_TIMER_SPEED;", "        return AICC_SIGN_TIMER_SPEED * speed_factor(skill);"),
+    M("eca-skill-signed", "    if ((uint32_t)skill < 10\n", "    if (skill < 10\n"),
+    M("eca-skill-9", "    if ((uint32_t)skill < 10\n", "    if ((uint32_t)skill < 9\n"),
+    M("eca-freq-le", "        && TheDifficultyInfo.Misc.RoutePointChangeFrequency\n               < (float)",
+      "        && TheDifficultyInfo.Misc.RoutePointChangeFrequency\n               <= (float)"),
+    M("eca-freq-time", "                                  - c->LastRoutePointLookaheadSwitch.PackedTime)\n                     * AICC_TICKS_TO_SECONDS) {",
+      "                                  - c->LastBoostCalculationTime.PackedTime)\n                     * AICC_TICKS_TO_SECONDS) {"),
+    M("eca-freq-u", "               < (float)(int32_t)((uint32_t)WorldTimer\n",
+      "               < (float)((uint32_t)WorldTimer\n"),
+    M("eca-var", "        int32_t v = TheDifficultyInfo.AISkillLevel[skill].RoutePointVariance\n                    + 1;",
+      "        int32_t v = TheDifficultyInfo.AISkillLevel[skill].RoutePointVariance\n                    + 2;"),
+    M("eca-var-2", "            world_random_i(pCurrentWorld, 2 * v) - v;", "            world_random_i(pCurrentWorld, v) - v;"),
+    M("eca-var-sub", "            world_random_i(pCurrentWorld, 2 * v) - v;", "            world_random_i(pCurrentWorld, 2 * v);"),
+    M("eca-switch-time", "        c->LastRoutePointLookaheadSwitch.PackedTime = (uint32_t)WorldTimer;\n", ""),
+    M("eca-la", "    i = troute_get_point_number(r, l->pRoutePoint)\n        + c->CurrentRoutePointLookahead;",
+      "    i = troute_get_point_number(r, l->pRoutePoint);"),
+    M("eca-clamp0", "    i = i < 0 ? 0 : i;\n", ""),
+    M("eca-clamp-last", "    last = r->NumPoints - 1;", "    last = r->NumPoints - 2;"),
+    M("eca-clamp-last-le", "    i = last < i ? last : i;", "    i = last <= i ? last - 1 : i;"),
+    M("eca-zero", "    if (fabsf(speed) <= AICC_NO_LINE_SPEED)\n        speed = AICC_DEFAULT_LINE_SPEED;",
+      "    if (0)\n        speed = AICC_DEFAULT_LINE_SPEED;"),
+    M("eca-zero-val", "#define AICC_DEFAULT_LINE_SPEED   30.0f", "#define AICC_DEFAULT_LINE_SPEED   30.5f"),
+    M("eca-zero-line", "    speed = line_speed_at(&r->TrackRoutePointTable[i], l->DrivingLine);",
+      "    speed = line_speed_at(&r->TrackRoutePointTable[i], 0);"),
+    M("eca-factor", "    return speed * speed_factor(skill);", "    return speed;"),
+    M("eca-factor-clamp", "        + (ptrdiff_t)sizeof(SkillLevelEntry) * skill\n",
+      "        + (ptrdiff_t)sizeof(SkillLevelEntry) * (skill < 0 ? 0 : skill)\n"),
+    M("eca-factor-field", "        + offsetof(SkillLevelEntry, SpeedFactor));",
+      "        + offsetof(SkillLevelEntry, SpeedFactor) + 4);"),
 ]
 
 EQUIVALENT = {

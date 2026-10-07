@@ -10,6 +10,7 @@
 #include "bmem.h"
 #include "cardriver.h"
 #include "carmodes.h"
+#include "collisionbody.h"
 #include "configitems.h"
 #include "difficultyinfo.h"
 #include "drivetarget.h"
@@ -37,6 +38,10 @@ static const bVector2 glue_boost_points[2] = {
 Graph gGlueBoostGraph = { glue_boost_points, 2 };
 int32_t CarControllerDisableCatchup;
 int32_t nLastGlueReason;
+
+// gp-20120, retail's alone: the pause debug menu's "Super easy AI" switch
+// (0x00174544) and the replay's special event 6 (0x00170548) set it.
+int32_t SuperEasyAI;
 
 // gp-29940 and gp-29928, the constructor's and JustReset's: -1/140, so
 // each car's first evaluation is staggered by its index.
@@ -146,6 +151,44 @@ int32_t nLastGlueReason;
 #define AICC_BOOST_GAP_SCALE         0.00999999978f
 #define AICC_BOOST_SPEED_LIMIT       0.0500000007f
 
+// MaybeHonkAndOrBlinkHeadlights' three durations, each (Random(range) +
+// add) - less: the two on phases 0.1 to 0.5 s (gp-29804, gp-29800,
+// gp-29796), the gap 0.05 to 0.25 s (gp-29796 again, gp-29792, gp-29788).
+#define AICC_HONK_ON_RANGE   0.400000006f
+#define AICC_HONK_ON_ADD     0.300000012f
+#define AICC_HONK_ON_LESS    0.200000003f
+#define AICC_HONK_OFF_RANGE  0.200000003f
+#define AICC_HONK_OFF_ADD    0.150000006f
+#define AICC_HONK_OFF_LESS   0.100000001f
+// A car passing me at more than 50 m/s (`lui 0x4248`) is honked at twice,
+// the second on phase 0.6 s longer (gp-29784), and flashed at 0.9 of the
+// time (gp-29772), where any other honk flashes at half. A traffic car
+// honks at a car it closes on at more than 3 m/s (`lui 0xc040`), anyone
+// at a player 0.75 of the time (`lui 0x3f40`) and at anyone else 0.075
+// with fewer than six cars in the list, 0.05 with more (gp-29780,
+// gp-29776).
+#define AICC_HONK_PASSING        50.0f
+#define AICC_HONK_PASSING_SECOND 0.600000024f
+#define AICC_HONK_CLOSING        (-3.0f)
+#define AICC_HONK_PLAYER         0.75f
+#define AICC_HONK_FEW_CARS       6
+#define AICC_HONK_FEW            0.0750000030f
+#define AICC_HONK_MANY           0.0500000007f
+#define AICC_BLINK_PASSING       0.899999976f
+#define AICC_BLINK               0.5f
+#define AICC_HONK_TWICE          0.5f
+
+// ExecuteCurrentAction: SuperEasyAI's 15 m/s within 10 (`lui 0x4170`,
+// `lui 0x4120`); 99999 with TakenSignpostTimer set (gp-29768); a line speed
+// of 0.001 or less (gp-29760) is 30 (`lui 0x41f0`); and a cop race's 0.75
+// (`lui 0x3f40`).
+#define AICC_SUPER_EASY_SPEED     15.0f
+#define AICC_SUPER_EASY_TOLERANCE 10.0f
+#define AICC_SIGN_TIMER_SPEED     99999.0f
+#define AICC_NO_LINE_SPEED        0.00100000005f
+#define AICC_DEFAULT_LINE_SPEED   30.0f
+#define AICC_COP_SPEED            0.75f
+
 typedef void       (*DriverFn)(void *self);
 typedef void       (*DriverPointFn)(void *self, bVector2 *p);
 typedef void       (*ActionDtorFn)(void *self, int32_t flags);
@@ -154,6 +197,12 @@ typedef void       (*SetRouteFn)(void *self, TrackRoute *r,
                                  TrackRoutePoint *p);
 typedef void       (*ControllerFn)(void *self);
 typedef float      (*DriverSpeedFn)(void *self);
+typedef void       (*DriverTargetFn)(void *self, const DriveTarget *t);
+// Retail's SetDesiredSpeed (56): the speed, the time to reach it, the
+// tolerance and whether the throttle and brake may be used.
+typedef void       (*DriverDesiredSpeedFn)(void *self, float speed,
+                                           float time, float tolerance,
+                                           int32_t allowed);
 
 // ------------------------------------------------------------ dispatch
 
@@ -1167,6 +1216,64 @@ void aicarcontroller_decide_boost_factor(AICarController *c)
     car->State.BoostFactor = boost;
 }
 
+// -------------------------------------------------------- the horn
+
+void aicarcontroller_maybe_honk_and_or_blink_headlights(AICarController *c,
+                                                        Car *car,
+                                                        NearbyCarList *list)
+{
+    // 0x00192fa8. The car's entry is looked up in my own list. An AI car's
+    // DoWeCareAboutThisCar turns a NULL one away; a traffic car's isn't
+    // tested, as every caller's car is in its list.
+    Car *me;
+    NearbyCar *nc;
+    float on, off, second, chance;
+    int32_t blink = 0, honk, two;
+
+    if ((uint32_t)(car->pCarTypeInfo->UsageType - CAR_USAGE_TYPE_COP) < 2)
+        return;                         // a cop's or a traffic car's
+    if (racecoordinator_get_current_state(pRaceCoordinator)
+            != RCSTATE_AI_DEMO_MODE
+        && car->TheControlMode != REAL_CONTROL)
+        return;
+    nc = nearbycarlist_get_nearby_car(c->CurrentNearbyCarList, car);
+    me = c->Base.pCar;
+    if (me->TheControlMode == AI_CONTROL) {
+        if (!ai_do_we_care_about_this_car(nc, list))
+            return;
+    } else if (me->TheControlMode != TRAFFIC_CONTROL) {
+        return;
+    }
+    on = (world_random_f(pCurrentWorld, AICC_HONK_ON_RANGE) + AICC_HONK_ON_ADD)
+         - AICC_HONK_ON_LESS;
+    off = (world_random_f(pCurrentWorld, AICC_HONK_OFF_RANGE)
+           + AICC_HONK_OFF_ADD) - AICC_HONK_OFF_LESS;
+    second = (world_random_f(pCurrentWorld, AICC_HONK_ON_RANGE)
+              + AICC_HONK_ON_ADD) - AICC_HONK_ON_LESS;
+    two = world_random_f(pCurrentWorld, 1.0f) < AICC_HONK_TWICE;
+    if (AICC_HONK_PASSING < nc->Velocity.y) {
+        chance = 1.0f;
+        two = 1;
+        second += AICC_HONK_PASSING_SECOND;
+    } else if (me->MyDriver->TheDriverType == DRIVER_TYPE_TRAFFIC_CAR
+               && nc->Velocity.y < AICC_HONK_CLOSING) {
+        chance = 1.0f;
+    } else if (car->pPlayer != NULL) {
+        chance = AICC_HONK_PLAYER;
+    } else {
+        chance = list->NumCarsInArray < AICC_HONK_FEW_CARS ? AICC_HONK_FEW
+                                                          : AICC_HONK_MANY;
+    }
+    honk = world_random_f(pCurrentWorld, 1.0f) < chance;
+    if (honk) {
+        chance = AICC_HONK_PASSING < nc->Velocity.y ? AICC_BLINK_PASSING
+                                                    : AICC_BLINK;
+        blink = world_random_f(pCurrentWorld, 1.0f) < chance;
+    }
+    car_honk_and_or_blink_headlights(c->Base.pCar, on, off, second, blink,
+                                     honk, two);
+}
+
 // -------------------------------------------------------- the action
 
 void aicarcontroller_choose_new_action(AICarController *c, AIAction **out,
@@ -1238,6 +1345,113 @@ void aicarcontroller_force_my_current_action(AICarController *c,
 {
     // 0x00194020.
     c->ForceCurrentAction = type;
+}
+
+// A route point's speed byte for a line, at 90 + line; for line -1 the
+// byte before, the last offset's high byte.
+static float line_speed_at(const TrackRoutePoint *p, int32_t line)
+{
+    return (float)*((const uint8_t *)p
+                    + offsetof(TrackRoutePoint, DrivingLineSpeeds) + line);
+}
+
+// AISkillLevel[skill].SpeedFactor with the skill as it is: retail forms
+// 368 + 28 * skill + 16 from the table's start with no clamp, so a careful
+// driver's -2 reads PositionRatioUnderOne's float at 328.
+static float speed_factor(int32_t skill)
+{
+    return *(const float *)(const void *)(
+        (const char *)&TheDifficultyInfo
+        + offsetof(DifficultyInfo, AISkillLevel)
+        + (ptrdiff_t)sizeof(SkillLevelEntry) * skill
+        + offsetof(SkillLevelEntry, SpeedFactor));
+}
+
+// ExecuteCurrentAction's speed for an action that drives at the line's:
+// the taken sign's new point's, 99999 while TakenSignpostTimer is set, or
+// the point CurrentRoutePointLookahead on from the location's (a 0 read as
+// 30) times the skill's SpeedFactor. A skill of 0 to 9 draws the look-ahead
+// again every RoutePointChangeFrequency seconds, within its
+// RoutePointVariance plus one either way.
+static float action_line_speed(AICarController *c, const DrivingLocation *l)
+{
+    int32_t skill = c->Base.pCar->MyDriver->SkillLevel;
+    TrackRoute *r;
+    int32_t i, last;
+    float speed;
+
+    if (c->TakenSignpostIndex != -1) {
+        // Retail then asks CompareDistances for the sign's distance from
+        // my car's and drops the answer.
+        return line_speed_at(signpost_get_new_route_point(
+                                 &SignpostArray[c->TakenSignpostIndex]),
+                             l->DrivingLine);
+    }
+    if (timer_is_valid(&c->TakenSignpostTimer))
+        return AICC_SIGN_TIMER_SPEED;
+    if ((uint32_t)skill < 10
+        && TheDifficultyInfo.Misc.RoutePointChangeFrequency
+               < (float)(int32_t)((uint32_t)WorldTimer
+                                  - c->LastRoutePointLookaheadSwitch.PackedTime)
+                     * AICC_TICKS_TO_SECONDS) {
+        int32_t v = TheDifficultyInfo.AISkillLevel[skill].RoutePointVariance
+                    + 1;
+
+        c->CurrentRoutePointLookahead =
+            world_random_i(pCurrentWorld, 2 * v) - v;
+        c->LastRoutePointLookaheadSwitch.PackedTime = (uint32_t)WorldTimer;
+    }
+    // `pmaxw` with 0, then `pminw` with the last point.
+    r = l->pRoute;
+    i = troute_get_point_number(r, l->pRoutePoint)
+        + c->CurrentRoutePointLookahead;
+    i = i < 0 ? 0 : i;
+    last = r->NumPoints - 1;
+    i = last < i ? last : i;
+    speed = line_speed_at(&r->TrackRoutePointTable[i], l->DrivingLine);
+    if (fabsf(speed) <= AICC_NO_LINE_SPEED)
+        speed = AICC_DEFAULT_LINE_SPEED;
+    return speed * speed_factor(skill);
+}
+
+void aicarcontroller_execute_current_action(AICarController *c)
+{
+    // 0x001932e8.
+    CarDriver *d = c->Base.Driver;
+    const VtEntry *e = vt_slot(d->_vtable, CARDRIVER_VT_SET_TARGET);
+    DrivingLocation *l;
+    AIAction *a;
+    float speed = 0.0f, time = 0.0f, tol = 0.0f;
+    int32_t allowed = 1;
+
+    ((DriverTargetFn)e->fn)(vt_this(d, e), &c->CurrentAction->PointsToDrive);
+    aicarcontroller_decide_boost_factor(c);
+    l = c->CurrentDrivingLocation;
+    a = c->CurrentAction;
+    if (drivinglocation_is_clear(l)) {
+        // 0, 0, 0 and the throttle allowed.
+    } else if (SuperEasyAI) {
+        speed = AICC_SUPER_EASY_SPEED;
+        tol = AICC_SUPER_EASY_TOLERANCE;
+    } else if (BoringAIForCameraTuningOn) {
+        speed = line_speed_at(l->pRoutePoint, l->DrivingLine);
+    } else if (!a->UseDrivingLineSpeed) {
+        speed = a->DesiredSpeed;
+        time = a->TimeToGetToDesiredSpeed;
+        tol = a->DesiredSpeedTolerance;
+        allowed = a->AllowedToUseThrottleAndBrake;
+    } else {
+        speed = action_line_speed(c, l);
+        if (TheRaceParameters.BeACop || (config_skip_fe() && SkipFEBeACop))
+            speed *= AICC_COP_SPEED;
+        speed *= c->Base.pCar->State.BoostFactor;
+        tol = a->DesiredSpeedTolerance;
+        allowed = a->AllowedToUseThrottleAndBrake;
+    }
+    d = c->Base.Driver;
+    e = vt_slot(d->_vtable, CARDRIVER_VT_SET_DESIRED_SPEED);
+    ((DriverDesiredSpeedFn)e->fn)(vt_this(d, e), speed, time, tol, allowed);
+    aiaction_clear_points_to_drive(c->CurrentAction);
 }
 
 // -------------------------------------------------------- the physics

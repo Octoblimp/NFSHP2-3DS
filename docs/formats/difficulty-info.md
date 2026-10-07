@@ -109,6 +109,7 @@ instructions that fix the layout, as `difficulty_check` holds them:
 | | `0x00192e9c`, `0x00192ea4` | `lwc1 ...,176`, `112` | the position boosts |
 | ExecuteCurrentAction | `0x0019344c` | `lwc1 $f1,980(a1)` | `RoutePointChangeFrequency` at 980 |
 | | `0x0019347c` | `lbu s0,392(v0)` | `RoutePointVariance` at 24 of a skill |
+| | `0x00193550` | `lwc1 $f0,384(v1)` | `SpeedFactor` at 16 of a skill, unclamped |
 | StartSkipFEGame | `0x00184cec` | `addiu a1,a1,648` | `AINonExplicitMode` at 648 |
 | StartDemoDiscGame, StartRace | `0x00184f48`, `0x001851e4` | `lwc1 $f0,648(...)` | `BoostScale`, 20-byte rows |
 | SetupCarsForRace | `0x00185ad0` | `lwc1 $f0,708(a0)` | `SkillLevelDistribution` at 60 |
@@ -131,13 +132,13 @@ These readers are in the port, each checked against retail:
     `SlowFactor` and the two position-ratio tables (11e-3).
   - CalculateDistanceAndPositionBoost reads `MaxDistanceForBoost`, the
     two distance graphs and the two position-boost rows (11e-3).
+  - ExecuteCurrentAction reads `RoutePointChangeFrequency`, the skills'
+    `RoutePointVariance` and their `SpeedFactor`, the last with the skill
+    unclamped (11e-4).
 
-Every other AI field is laid out so its offset is checked. These are
-still to come:
-- ExecuteCurrentAction's `RoutePointChangeFrequency` and
-  `RoutePointVariance` (11e-4);
-- AIDriver's ShouldWeAvoidThisCar, reading `CollisionAvoidanceChance`
-  (11f).
+Every other AI field is laid out so its offset is checked. One reader is
+still to come: AIDriver's ShouldWeAvoidThisCar, reading
+`CollisionAvoidanceChance` (11f).
 
 ## Checking it
 

@@ -37,10 +37,14 @@ traffic-car test at 0x00134144 comes before the poof test and before
 RenderingEnabled is loaded, so a traffic car answers false whatever its
 other two fields say.
 
-**HonkAndOrBlinkHeadlights sums `On + Off + On`, with the OLD
-durations.** 0x0013252c adds Off to On and 0x00132534 adds On again, all
-before the new values are stored. Two thirds of a cycle, or the new
-durations, is a different guard.
+**HonkAndOrBlinkHeadlights sums `(On + Off) + SecondOn`, with the OLD
+durations.** Retail's 0x00134154 adds Off to On and 0x00134160 adds the
+second on phase's duration, all before the new values are stored. The
+demo's `On + Off + On`, two thirds of a cycle, or the new durations, is a
+different guard. The honk and the headlights are retail's (0x00134130 and
+0x00134198): retail takes the second duration as a third float, where the
+demo's ran the first twice, and its UpdateHeadlightsAndHorn ends the gap
+On after the first phase, not Off.
 
 **GetForwardAcceleration below the threshold returns a magnitude.** The
 `c.lt.s` at 0x00133dc0 sends speeds under 0.1 to a plain `sqrt` of the
@@ -283,18 +287,20 @@ def forward_acceleration(mag, v, a):
     return fadd(fadd(fmul(nx, a[0]), fmul(ny, a[1])), fmul(nz, a[2]))
 
 
-def honk(car, now, on, off, blink, hk, two):
-    """0x00132508. `car` is a dict and is updated in place."""
+def honk(car, now, on, off, second, blink, hk, two):
+    """Retail's 0x00134130. `car` is a dict and is updated in place."""
     dt = f32(float(i32(now - car["start"])))
     elapsed = fmul(dt, TICK)
-    # 0x0013252c  add.s $f0,$f3,$f0 then 0x00132534 add.s $f0,$f0,$f3
-    cycle = fadd(fadd(car["on"], car["off"]), car["on"])
-    # 0x00132538  c.lt.s $f0,$f1  -- cycle < elapsed
+    # 0x00134154  add.s $f0,$f0,$f2 (On + Off), then 0x00134160
+    # add.s $f0,$f0,$f4 (+ SecondOn, retail's 2088)
+    cycle = fadd(fadd(car["on"], car["off"]), car["second"])
+    # 0x00134164  c.lt.s $f0,$f1  -- cycle < elapsed
     if cycle < elapsed:
         car["two"] = two
         car["start"] = now
         car["on"] = on
         car["off"] = off
+        car["second"] = second
         car["blink"] = blink
         car["honk"] = hk
 
@@ -506,8 +512,8 @@ def model():
 
     emit("[honk tick]")
     _c = {"start": 0, "on": f32(0.0), "off": f32(0.99999994),
-          "blink": 0, "honk": 0, "two": 0}
-    honk(_c, 4000, f32(0.75), f32(0.125), 1, 1, 1)
+          "second": f32(0.0), "blink": 0, "honk": 0, "two": 0}
+    honk(_c, 4000, f32(0.75), f32(0.125), f32(0.375), 1, 1, 1)
     emit("  cycle 0.99999994 -> honk %d on %s" % (_c["honk"], g9(_c["on"])))
 
     emit("[wheels on ground]")
@@ -571,29 +577,36 @@ def model():
     starts = [0, 1000, 40000, -4000]
     old_ons = [f32(0.0), f32(0.5), f32(2.0)]
     old_offs = [f32(0.0), f32(0.25), f32(1.0)]
+    # -1 is the constructor's SecondOn.
+    old_seconds = [f32(0.0), f32(0.75), f32(-1.0)]
 
     emit("[honk]")
     for now in nows:
         for st in starts:
             for oon in old_ons:
                 for ooff in old_offs:
-                    car = {"start": st, "on": oon, "off": ooff,
-                           "blink": 0, "honk": 0, "two": 0}
-                    honk(car, now, f32(0.75), f32(0.125), 1, 1, 1)
-                    emit("  now %-12d start %-12d old %s %s"
-                         % (now, st, g9(oon), g9(ooff)))
-                    emit("    -> start %-12d on %s off %s blink %d "
-                         "honk %d two %d"
-                         % (car["start"], g9(car["on"]), g9(car["off"]),
-                            car["blink"], car["honk"], car["two"]))
+                    for osec in old_seconds:
+                        car = {"start": st, "on": oon, "off": ooff,
+                               "second": osec,
+                               "blink": 0, "honk": 0, "two": 0}
+                        honk(car, now, f32(0.75), f32(0.125), f32(0.375),
+                             1, 1, 1)
+                        emit("  now %-12d start %-12d old %s %s %s"
+                             % (now, st, g9(oon), g9(ooff), g9(osec)))
+                        emit("    -> start %-12d on %s off %s second %s "
+                             "blink %d honk %d two %d"
+                             % (car["start"], g9(car["on"]), g9(car["off"]),
+                                g9(car["second"]), car["blink"],
+                                car["honk"], car["two"]))
 
     emit("[honk drop]")
-    car = {"start": 0, "on": f32(5.0), "off": f32(5.0),
+    car = {"start": 0, "on": f32(5.0), "off": f32(5.0), "second": f32(5.0),
            "blink": 9, "honk": 8, "two": 7}
-    honk(car, 0, f32(0.75), f32(0.125), 1, 1, 1)
-    emit("  blink %d honk %d two %d on %s off %s start %d"
+    honk(car, 0, f32(0.75), f32(0.125), f32(0.375), 1, 1, 1)
+    emit("  blink %d honk %d two %d on %s off %s second %s start %d"
          % (car["blink"], car["honk"], car["two"],
-            g9(car["on"]), g9(car["off"]), car["start"]))
+            g9(car["on"]), g9(car["off"]), g9(car["second"]),
+            car["start"]))
 
     # -- wipers -------------------------------------------------------------
     frames = [0, 100, 500, -50]
@@ -1191,17 +1204,21 @@ def model_slice2():
             emit("    -> %d" % (0 if 0.0 < dot else 1))
 
     # -- headlights ---------------------------------------------------------
-    def lights(now, start, on, off, two, blink, hk, force, honking, dname,
-               dname2=None):
+    # Retail's 0x00134198.
+    def lights(now, start, on, off, second, two, blink, hk, force, honking,
+               dname, dname2=None):
         elapsed = fmul(f32(float(i32(now - start))), TICK)
         if elapsed < on:
             lit = 1
         else:
             t = fsub(elapsed, on)
-            if t < off:
+            # 0x001341ec  c.lt.s $f2,$f3 -- f3 still On, where the demo's
+            # 0x001325c0 compared with Off
+            if t < on:
                 lit = 1 if two == 0 else 0          # sltiu a0,v0,1
             else:
-                lit = 1 if fsub(t, off) < on else 0
+                # 0x0013420c  t - Off, 0x00134210  < SecondOn (2088)
+                lit = 1 if fsub(t, off) < second else 0
         state = 1 if (lit and blink != 0) else (1 if force != 0 else 0)
         honk = (1 if hk != 0 else 0) if lit else 0
         emit("    IsHonking(%s) = %d" % (dname, honking))
@@ -1214,7 +1231,8 @@ def model_slice2():
         return state
 
     emit("[headlights]")
-    for tk in (0, 1000, 2000, 2500, 3000, 4000, 5000, 8000, -400):
+    for tk in (0, 1000, 2000, 2500, 3000, 3500, 4000, 4250, 4500, 4750,
+               5000, 8000, -400):
         for two in (0, 1):
             for bl in (0, 1):
                 for hk in (0, 5):
@@ -1223,7 +1241,8 @@ def model_slice2():
                             emit("  t %d two %d blink %d honk %d force %d "
                                  "is %d" % (tk, two, bl, hk, fo, hs))
                             st = lights(50000 + tk, 50000, f32(0.5),
-                                        f32(0.25), two, 7 if bl else 0, hk,
+                                        f32(0.25), f32(0.375), two,
+                                        7 if bl else 0, hk,
                                         2 if fo else 0, hs, drv[0])
                             emit("    lights %d" % st)
 
@@ -1235,8 +1254,8 @@ def model_slice2():
     emit("[headlights reload]")
     for h in (0, 1):
         emit("  honk %d" % h)
-        lights(0, 0, f32(1.0), 0.0, 0, 0, h, 0, 0 if h else 1, drv[0],
-               drv[1])
+        lights(0, 0, f32(1.0), 0.0, 0.0, 0, 0, h, 0, 0 if h else 1,
+               drv[0], drv[1])
 
     # -- bbox ---------------------------------------------------------------
     lo = [f32(x) for x in (-1.5, -2.5, -0.25, 11.0)]
@@ -1949,14 +1968,17 @@ MUTATIONS = [
     ("honk-cycle-on-plus-off", CC,
      "    float cycle = c->HeadlightsAndHornOnDuration" + NL +
      "                  + c->HeadlightsAndHornOffDuration" + NL +
-     "                  + c->HeadlightsAndHornOnDuration;",
+     "                  + c->HeadlightsAndHornSecondOnDuration;",
      "    float cycle = c->HeadlightsAndHornOnDuration" + NL +
      "                  + c->HeadlightsAndHornOffDuration;"),
     ("honk-cycle-two-offs", CC,
      "                  + c->HeadlightsAndHornOffDuration" + NL +
-     "                  + c->HeadlightsAndHornOnDuration;",
+     "                  + c->HeadlightsAndHornSecondOnDuration;",
      "                  + c->HeadlightsAndHornOffDuration" + NL +
      "                  + c->HeadlightsAndHornOffDuration;"),
+    ("honk-cycle-demo", CC,
+     "                  + c->HeadlightsAndHornSecondOnDuration;",
+     "                  + c->HeadlightsAndHornOnDuration;"),
     ("honk-guard-le", CC,
      "    if (cycle < elapsed) {",
      "    if (cycle <= elapsed) {"),
@@ -1964,16 +1986,22 @@ MUTATIONS = [
      "    if (cycle < elapsed) {",
      "    if (elapsed < cycle) {"),
     ("honk-no-stamp", CC,
-     "        c->HeadlightsAndHornStartTime   = WorldTimer;",
-     "        c->HeadlightsAndHornStartTime   = 0;"),
+     "        c->HeadlightsAndHornStartTime        = WorldTimer;",
+     "        c->HeadlightsAndHornStartTime        = 0;"),
     ("honk-swaps-durations", CC,
-     "        c->HeadlightsAndHornOnDuration  = onDuration;" + NL +
-     "        c->HeadlightsAndHornOffDuration = offDuration;",
-     "        c->HeadlightsAndHornOnDuration  = offDuration;" + NL +
-     "        c->HeadlightsAndHornOffDuration = onDuration;"),
+     "        c->HeadlightsAndHornOnDuration       = onDuration;" + NL +
+     "        c->HeadlightsAndHornOffDuration      = offDuration;",
+     "        c->HeadlightsAndHornOnDuration       = offDuration;" + NL +
+     "        c->HeadlightsAndHornOffDuration      = onDuration;"),
+    ("honk-second-is-on", CC,
+     "        c->HeadlightsAndHornSecondOnDuration = secondOnDuration;",
+     "        c->HeadlightsAndHornSecondOnDuration = onDuration;"),
+    ("honk-drops-second", CC,
+     "        c->HeadlightsAndHornSecondOnDuration = secondOnDuration;" + NL,
+     ""),
     ("honk-drops-two", CC,
-     "        c->WantTwoHonksAndOrBlinks      = two;",
-     "        c->WantTwoHonksAndOrBlinks      = 0;"),
+     "        c->WantTwoHonksAndOrBlinks           = two;",
+     "        c->WantTwoHonksAndOrBlinks           = 0;"),
     ("honk-elapsed-unsigned", CC,
      "    float elapsed = (float)(int32_t)((uint32_t)WorldTimer",
      "    float elapsed = (float)(uint32_t)((uint32_t)WorldTimer"),
@@ -2201,8 +2229,8 @@ MUTATIONS = [
      "    ((VtVoidFloatFn)e->fn)(vt_this(d, e), dt);",
      "    ((VtVoidFloatFn)e->fn)(d, dt);"),
     ("route-no-delta", CC,
-     "    return ((VtRouteFn)e->fn)(vt_this(ctl, e));",
-     "    return ((VtRouteFn)e->fn)(ctl);"),
+     "    return ((VtRouteFn)e->fn)(vt_this(ctl, e), find);",
+     "    return ((VtRouteFn)e->fn)(ctl, find);"),
     ("route-point-takes-route", CC,
      "                               CARCONTROLLER_VT_GET_CURRENT_ROUTE_POINT);",
      "                               CARCONTROLLER_VT_GET_CURRENT_ROUTE);"),
@@ -2254,11 +2282,21 @@ MUTATIONS = [
     ("lights-gap-inverted", CC,
      "            lit = (c->WantTwoHonksAndOrBlinks == 0);",
      "            lit = (c->WantTwoHonksAndOrBlinks != 0);"),
+    ("lights-gap-off", CC,
+     "        if (t < on)" + NL,
+     "        if (t < c->HeadlightsAndHornOffDuration)" + NL),
     ("lights-second-le", CC,
-     "            lit = (t - c->HeadlightsAndHornOffDuration < on);",
-     "            lit = (t - c->HeadlightsAndHornOffDuration <= on);"),
+     "                   < c->HeadlightsAndHornSecondOnDuration);",
+     "                   <= c->HeadlightsAndHornSecondOnDuration);"),
+    ("lights-second-on", CC,
+     "                   < c->HeadlightsAndHornSecondOnDuration);",
+     "                   < on);"),
+    ("lights-second-from-on", CC,
+     "            lit = (t - c->HeadlightsAndHornOffDuration" + NL,
+     "            lit = (t - on" + NL),
     ("lights-second-off", CC,
-     "            lit = (t - c->HeadlightsAndHornOffDuration < on);",
+     "            lit = (t - c->HeadlightsAndHornOffDuration" + NL +
+     "                   < c->HeadlightsAndHornSecondOnDuration);",
      "            lit = 0;"),
     ("lights-blink-unlit", CC,
      "    c->HeadlightsState = (lit && c->WantToBlinkHeadlights)",
@@ -2344,8 +2382,8 @@ MUTATIONS = [
      "#define SOUND3D_VT_UPDATE 24",
      "#define SOUND3D_VT_UPDATE 32"),
     ("world-13-cars", WH,
-     "#define WORLD_MAX_CARS 14",
-     "#define WORLD_MAX_CARS 13"),
+     "#define WORLD_MAX_CARS    14",
+     "#define WORLD_MAX_CARS    13"),
 
     # -- the registry -------------------------------------------------------
     ("vt-count-inclusive", VTC,
@@ -2762,7 +2800,7 @@ for _m in MUTATIONS:
 write_source = hostbuild.write_source
 
 
-def mutate_pass():
+def mutate_pass(only=None):
     base_model = model()
     survived, missing, equivalent, caught = [], [], [], 0
 
@@ -2775,6 +2813,8 @@ def mutate_pass():
             return 1
 
     for name, rel, before, after in MUTATIONS:
+        if only and name not in only:
+            continue
         path = ROOT / rel
         text = path.read_text(encoding="utf-8", newline="")
 
@@ -2828,16 +2868,18 @@ def mutate_pass():
                          "mutation %s. Put the original line back before "
                          "trusting anything printed above." % (rel, name))
 
-    real = [m for m in MUTATIONS if m[0] not in missing]
+    run = [m for m in MUTATIONS if not only or m[0] in only]
+    real = [m for m in run if m[0] not in missing]
     holes = [s for s in survived if s not in EQUIVALENT]
     # An entry whose mutant was caught is a wrong reason, not a spare one.
     stale = [n for n in EQUIVALENT
-             if n not in equivalent and n not in missing]
+             if n not in equivalent and n not in missing
+             and (not only or n in only)]
     # A pattern that is not found is dropped from the denominator below, so
     # without this the tally line reads clean while a mutation never ran.
     if missing:
         print("%d PATTERN NOT FOUND -- the tally below is over %d of %d"
-              % (len(missing), len(real), len(MUTATIONS)))
+              % (len(missing), len(real), len(run)))
     print("%d mutations, %d caught, %d equivalent, %d unexplained"
           % (len(real), caught, len(equivalent), len(holes)))
     for name in holes:
@@ -2852,11 +2894,19 @@ def mutate_pass():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mutate", action="store_true")
+    ap.add_argument("--only", metavar="NAMES",
+                    help="with --mutate, run only these comma-separated "
+                         "mutations")
     ap.add_argument("--dump", metavar="DIR")
     args = ap.parse_args()
 
     if args.mutate:
-        sys.exit(mutate_pass())
+        only = set(args.only.split(",")) if args.only else None
+        if only:
+            unknown = only - {m[0] for m in MUTATIONS}
+            if unknown:
+                sys.exit("no such mutation: %s" % ", ".join(sorted(unknown)))
+        sys.exit(mutate_pass(only))
 
     lines = model()
     with tempfile.TemporaryDirectory() as tmp:

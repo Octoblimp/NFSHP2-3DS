@@ -324,7 +324,8 @@ static void scenario_blink_tick(void)
 }
 
 // HonkAndOrBlinkHeadlights' guard is `cycle < elapsed`, so a cycle of
-// exactly 0.99999994f -- On + Off + On with On at zero -- fires on the
+// exactly 0.99999994f -- On + Off + SecondOn with On and SecondOn at
+// zero -- fires on the
 // correct word and does not fire on the wrong one. The opposite way
 // round from the blink, and deliberately: the two call sites read the
 // constant from different gp displacements in the image.
@@ -336,7 +337,8 @@ static void scenario_honk_tick(void)
     g_car.HeadlightsAndHornStartTime = 0;
     g_car.HeadlightsAndHornOnDuration = 0.0f;
     g_car.HeadlightsAndHornOffDuration = 0.99999994f;
-    car_honk_and_or_blink_headlights(&g_car, 0.75f, 0.125f, 1, 1, 1);
+    g_car.HeadlightsAndHornSecondOnDuration = 0.0f;
+    car_honk_and_or_blink_headlights(&g_car, 0.75f, 0.125f, 0.375f, 1, 1, 1);
     printf("  cycle 0.99999994 -> honk %d on %.9g\n",
            (int)g_car.WantToHonkHorn,
            (double)g_car.HeadlightsAndHornOnDuration);
@@ -480,30 +482,39 @@ static void scenario_honk(void)
     static const int32_t kStart[4] = { 0, 1000, 40000, -4000 };
     static const float kOldOn[3] = { 0.0f, 0.5f, 2.0f };
     static const float kOldOff[3] = { 0.0f, 0.25f, 1.0f };
-    int n, s, a, b;
+    // -1 is the constructor's SecondOn.
+    static const float kOldSecond[3] = { 0.0f, 0.75f, -1.0f };
+    int n, s, a, b, q;
 
     printf("[honk]\n");
     for (n = 0; n < 4; n++) {
         for (s = 0; s < 4; s++) {
             for (a = 0; a < 3; a++) {
                 for (b = 0; b < 3; b++) {
-                    fresh();
-                    WorldTimer = kNow[n];
-                    g_car.HeadlightsAndHornStartTime = kStart[s];
-                    g_car.HeadlightsAndHornOnDuration = kOldOn[a];
-                    g_car.HeadlightsAndHornOffDuration = kOldOff[b];
-                    car_honk_and_or_blink_headlights(&g_car, 0.75f, 0.125f,
-                                                     1, 1, 1);
-                    printf("  now %-12d start %-12d old %.9g %.9g\n",
-                           kNow[n], kStart[s], kOldOn[a], kOldOff[b]);
-                    printf("    -> start %-12d on %.9g off %.9g blink %d "
-                           "honk %d two %d\n",
-                           (int)g_car.HeadlightsAndHornStartTime,
-                           g_car.HeadlightsAndHornOnDuration,
-                           g_car.HeadlightsAndHornOffDuration,
-                           (int)g_car.WantToBlinkHeadlights,
-                           (int)g_car.WantToHonkHorn,
-                           (int)g_car.WantTwoHonksAndOrBlinks);
+                    for (q = 0; q < 3; q++) {
+                        fresh();
+                        WorldTimer = kNow[n];
+                        g_car.HeadlightsAndHornStartTime = kStart[s];
+                        g_car.HeadlightsAndHornOnDuration = kOldOn[a];
+                        g_car.HeadlightsAndHornOffDuration = kOldOff[b];
+                        g_car.HeadlightsAndHornSecondOnDuration =
+                            kOldSecond[q];
+                        car_honk_and_or_blink_headlights(&g_car, 0.75f,
+                                                         0.125f, 0.375f,
+                                                         1, 1, 1);
+                        printf("  now %-12d start %-12d old %.9g %.9g "
+                               "%.9g\n", kNow[n], kStart[s], kOldOn[a],
+                               kOldOff[b], kOldSecond[q]);
+                        printf("    -> start %-12d on %.9g off %.9g "
+                               "second %.9g blink %d honk %d two %d\n",
+                               (int)g_car.HeadlightsAndHornStartTime,
+                               g_car.HeadlightsAndHornOnDuration,
+                               g_car.HeadlightsAndHornOffDuration,
+                               g_car.HeadlightsAndHornSecondOnDuration,
+                               (int)g_car.WantToBlinkHeadlights,
+                               (int)g_car.WantToHonkHorn,
+                               (int)g_car.WantTwoHonksAndOrBlinks);
+                    }
                 }
             }
         }
@@ -518,15 +529,18 @@ static void scenario_honk(void)
     g_car.HeadlightsAndHornStartTime = 0;
     g_car.HeadlightsAndHornOnDuration = 5.0f;
     g_car.HeadlightsAndHornOffDuration = 5.0f;
+    g_car.HeadlightsAndHornSecondOnDuration = 5.0f;
     g_car.WantToBlinkHeadlights = 9;
     g_car.WantToHonkHorn = 8;
     g_car.WantTwoHonksAndOrBlinks = 7;
-    car_honk_and_or_blink_headlights(&g_car, 0.75f, 0.125f, 1, 1, 1);
-    printf("  blink %d honk %d two %d on %.9g off %.9g start %d\n",
+    car_honk_and_or_blink_headlights(&g_car, 0.75f, 0.125f, 0.375f, 1, 1, 1);
+    printf("  blink %d honk %d two %d on %.9g off %.9g second %.9g "
+           "start %d\n",
            (int)g_car.WantToBlinkHeadlights, (int)g_car.WantToHonkHorn,
            (int)g_car.WantTwoHonksAndOrBlinks,
            g_car.HeadlightsAndHornOnDuration,
            g_car.HeadlightsAndHornOffDuration,
+           g_car.HeadlightsAndHornSecondOnDuration,
            (int)g_car.HeadlightsAndHornStartTime);
 }
 
@@ -1464,18 +1478,21 @@ static void scenario_wrong_way(void)
 
 static void scenario_headlights(void)
 {
-    // Ticks since the stamp, with on 0.5 s and off 0.25 s: inside the first
-    // on phase, both edges of the gap, the second on phase and its end, and
-    // a clock behind the stamp.
-    static const int32_t kTicks[9] = {
-        0, 1000, 2000, 2500, 3000, 4000, 5000, 8000, -400
+    // Ticks since the stamp, with on 0.5 s, off 0.25 s and second on
+    // 0.375 s: inside the first on phase, both edges of the gap (retail's,
+    // On long, and the demo's, Off), the second on phase and its end
+    // (retail's at 4500, and 4750 and 5000 past it), and a clock behind
+    // the stamp.
+    static const int32_t kTicks[13] = {
+        0, 1000, 2000, 2500, 3000, 3500, 4000, 4250, 4500, 4750, 5000,
+        8000, -400
     };
     static const int32_t kHonk[2] = { 0, 5 };
     static const int32_t kIs[2] = { 0, 3 };
     int t, two, bl, h, fo, is;
 
     printf("[headlights]\n");
-    for (t = 0; t < 9; t++)
+    for (t = 0; t < 13; t++)
     for (two = 0; two < 2; two++)
     for (bl = 0; bl < 2; bl++)
     for (h = 0; h < 2; h++)
@@ -1486,6 +1503,7 @@ static void scenario_headlights(void)
         g_car.HeadlightsAndHornStartTime = 50000;
         g_car.HeadlightsAndHornOnDuration = 0.5f;
         g_car.HeadlightsAndHornOffDuration = 0.25f;
+        g_car.HeadlightsAndHornSecondOnDuration = 0.375f;
         g_car.WantTwoHonksAndOrBlinks = two;
         g_car.WantToBlinkHeadlights = bl ? 7 : 0;
         g_car.WantToHonkHorn = kHonk[h];

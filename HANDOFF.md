@@ -15551,6 +15551,83 @@ Every other checker still runs clean. `docs/formats/ai-car-controller.md`
 has the detail, under "The belt, the glue and the boost", and
 `difficulty-info.md` lists the port's readers. The CIA builds.
 
+### Step 11e-4: AICarController's horn and ExecuteCurrentAction
+
+`aicarcontroller.c` gains MaybeHonkAndOrBlinkHeadlights (0x00192fa8) and
+ExecuteCurrentAction (0x001932e8). `car.c`'s HonkAndOrBlinkHeadlights and
+UpdateHeadlightsAndHorn move to retail's (0x00134130, 0x00134198).
+
+- **MaybeHonkAndOrBlinkHeadlights(car, list).**
+  - It returns for a cop's or a traffic car's `car` (UsageType - 1,
+    unsigned, under 2), and unless the coordinator is in AIDemoMode or
+    `car` is REAL controlled.
+  - `car`'s entry comes from my own list. An AI car goes on only when
+    DoWeCareAboutThisCar(entry, list) passes (0 for NULL), a traffic car
+    always, any other control never.
+  - The draws: `on = (R(0.4) + 0.3) - 0.2`, `off = (R(0.2) + 0.15) -
+    0.1`, `second` as `on`, `two = R(1) < 0.5`.
+  - The chance: over 50 m/s closing, 1, with `two` set and `second` 0.6
+    longer; a traffic driver closing under -3, 1; a car with a player,
+    0.75; else 0.075 under 6 cars in `list`, or 0.05.
+  - `honk = R(1) < chance`, and only then `blink = R(1) < 0.9` (over
+    50 m/s) or `0.5`. My car's HonkAndOrBlinkHeadlights takes them.
+- **The car's honk and lights.** Retail takes the second on phase's
+  duration as a third float and keeps it at Car+2088 (the port's 2176).
+  The guard's cycle is `(On + Off) + SecondOn`, with the old durations.
+  UpdateHeadlightsAndHorn's gap ends On after the first phase, not Off
+  (0x001341ec compares with f3, still On), and the second phase is lit
+  while the time past the first, less Off, is under SecondOn. car_check's
+  model and its fixtures follow: 3500 to 4750 ticks join the lights' grid,
+  the old SecondOn runs over 0, 0.75 and the constructor's -1, and
+  honk-cycle-demo, honk-second-is-on, honk-drops-second, lights-gap-off,
+  lights-second-on and lights-second-from-on are new mutations.
+- **ExecuteCurrentAction.**
+  - The driver's SetTarget (slot 64) gets the action's PointsToDrive,
+    then DecideBoostFactor runs.
+  - SetDesiredSpeed (slot 56) gets (speed, time, tolerance, allowed):
+    (0, 0, 0, 1) with the location clear; (15, 0, 10, 1) for SuperEasyAI
+    (gp-20120, retail's alone); (the location's point's line speed, 0, 0,
+    1) for BoringAIForCameraTuningOn (gp-22580); the action's own four
+    (564, 568, 572, 580) with UseDrivingLineSpeed clear; else (the line
+    speed, 0, 572, 580).
+  - The line speed: with a sign taken, its GetNewRoutePoint's byte for
+    the line (CompareDistances is asked and dropped); else 99999 while
+    TakenSignpostTimer runs; else the byte at the location's point plus
+    CurrentRoutePointLookahead, clamped to the route, 0.001 or less read
+    as 30, times the skill's SpeedFactor with the skill unclamped. A
+    skill of 0 to 9 (unsigned) redraws the look-ahead once
+    RoutePointChangeFrequency (980) is under the seconds since
+    LastRoutePointLookaheadSwitch: `Random(2v) - v` with `v` the
+    skill's RoutePointVariance byte plus 1. A cop race takes 0.75 of the
+    line speed, and the BoostFactor multiplies it.
+  - ClearPointsToDrive ends it.
+
+The checker:
+- **The stand-ins.** The driver table's SetDesiredSpeed, SetTarget,
+  StartHonkHorn, StopHonkHorn and IsHonking, and World::Random(int)
+  (0x0014e520), which answers the float's queue as words.
+  SuperEasyAI and BoringAIForCameraTuningOn are words the script sets.
+- **The scenarios.** s_honk (60), s_lights (30) and s_execute (80), from
+  their own seed.
+  - s_honk's rounds fail at most one early out (`gate_picker`), put the
+    closing speed at 50 and -3 m/s and an ulp either side, each draw at
+    its chance and either side, and the last request's cycle a tick
+    either side of its age.
+  - s_lights puts each phase's edge a tick either side.
+  - s_execute runs each of ExecuteCurrentAction's ways over skills -13
+    to 21 and lines -1 to 21, the frequency a tick either side of the
+    time since the switch, and the look-ahead to either end and past.
+- 738 scenarios, 125785 ops, 110422 lines, 0 differ.
+- 522 mutations: 509 caught, 13 equivalent. 11e-4's 115 are all caught
+  (mh-list and eca-clear by crashing the harness), car.c's honk and
+  lights among them. dbf-freq-u carries a line of context, as the
+  look-ahead repeats its cast.
+
+Every other checker still runs clean. `docs/formats/ai-car-controller.md`
+has the detail, under "The horn and ExecuteCurrentAction"; `car.md` has
+retail's honk and lights, and `difficulty-info.md` the new readers. The
+CIA builds.
+
 ### With the user
 
 - `3DS Files/NFSHP2-3DS.3dsx` and `.cia` are from 2fc77fc. Ask for the

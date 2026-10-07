@@ -1,5 +1,5 @@
 // Host harness for 3DS Files/source/aicarcontroller.c, the AI car
-// controller (steps 11e-1 to 11e-3). Runs the op script tools/aicarcontroller_check.py
+// controller (steps 11e-1 to 11e-4). Runs the op script tools/aicarcontroller_check.py
 // writes and prints the transcript it diffs against the retail image, run
 // in mipsemu over the same script.
 //
@@ -19,6 +19,10 @@
 // does. For 11e-3 it has full players (player.c's PlayerPlayersByNumber
 // with them), each car's RacingCar, a race coordinator, playercam.c's
 // SkipFE pointer and the drivers' GetDesiredSpeed, answering the script.
+// For 11e-4 it stands in for the drivers' SetDesiredSpeed, SetTarget,
+// StartHonkHorn, StopHonkHorn and IsHonking (the last answering the
+// script), World::Random(int) from the same queue as the float's, and
+// carcollisionbody.c's BoringAIForCameraTuningOn.
 //
 // A float prints as its bits, every NaN as "nan", and a pointer by what it
 // points at. The ops and every line's format are the checker's.
@@ -68,6 +72,7 @@ static VtEntry avt[AIACTION_VT_ENTRIES];
 static TrackInfo tinfo;
 #define NRANDOM 16
 static float rq[NRANDOM];
+static uint32_t rqw[NRANDOM];   // the same words, for World::Random(int)
 static int nrq, irq;
 
 // 11e-3's: each car's player and its speed ratio's Average, its RacingCar,
@@ -84,6 +89,11 @@ static float gds[NCARS];
 // player.c's and playercam.c's.
 struct Player *PlayerPlayersByNumber[2];
 const int *gPlayerCamSkipFE;
+
+// 11e-4's: what each driver's IsHonking answers, and carcollisionbody.c's
+// switch.
+static int32_t ish[NCARS];
+int32_t BoringAIForCameraTuningOn;
 
 // ------------------------------------------------------------ the stubs
 
@@ -172,6 +182,12 @@ float world_random_f(World *w, float f)
     return irq < nrq ? rq[irq++] : 0.0f;
 }
 
+int32_t world_random_i(World *w, int32_t range)
+{
+    printf("  irandom %d %d\n", w == &world, (int)range);
+    return irq < nrq ? (int32_t)rqw[irq++] : 0;
+}
+
 // track.c's, which would bring the track's loading with it.
 TrackInfo *track_get_info(int i)
 {
@@ -185,6 +201,36 @@ static float fk_get_desired_speed(void *self)
 
     printf("  gds %s\n", nm(&cars[k]));
     return gds[k];
+}
+
+static void fk_set_desired_speed(void *self, float speed, float time,
+                                 float tol, int32_t allowed)
+{
+    printf("  sds %s %s %s %s %d\n", nm(&cars[driver_index(self)]),
+           fx(speed), fx(time), fx(tol), (int)allowed);
+}
+
+static void fk_set_target(void *self, const DriveTarget *t)
+{
+    printf("  stg %s %s\n", nm(&cars[driver_index(self)]), nm(t));
+}
+
+static void fk_start_honk(void *self)
+{
+    printf("  honkon %s\n", nm(&cars[driver_index(self)]));
+}
+
+static void fk_stop_honk(void *self)
+{
+    printf("  honkoff %s\n", nm(&cars[driver_index(self)]));
+}
+
+static int32_t fk_is_honking(void *self)
+{
+    int k = driver_index(self);
+
+    printf("  ishonk %s\n", nm(&cars[k]));
+    return ish[k];
 }
 
 // ------------------------------------------------------------ the names
@@ -227,6 +273,11 @@ static const char *ac_nm(const void *p, char *b)
         sprintf(b, "fa%d", i);
         return b;
     }
+    for (i = 0; i < NFACTS; i++)
+        if (p == &facts[i].PointsToDrive) {
+            sprintf(b, "pt%d", i);
+            return b;
+        }
     if ((i = index_in(p, plr, sizeof plr[0], NCARS)) >= 0) {
         sprintf(b, "P%d", i);
         return b;
@@ -295,6 +346,10 @@ static void ac_reset(void)
     TheRaceParameters.BoostScale[1] = 0.0f;
     memset(&TheDifficultyInfo, 0, sizeof TheDifficultyInfo);
     memset(world.PlayerPositions, 0, sizeof world.PlayerPositions);
+    // 11e-4's: no driver honking, both debug switches off.
+    memset(ish, 0, sizeof ish);
+    SuperEasyAI = 0;
+    BoringAIForCameraTuningOn = 0;
 }
 
 // ------------------------------------------------------------ the dumps
@@ -431,6 +486,29 @@ static void dump_glue(int k)
     printf("\n");
 }
 
+static void dump_honk(int k)
+{
+    const Car *c = &cars[k];
+
+    printf("  H blink %d honk %d two %d start %08x on %s second %s off %s\n",
+           (int)c->WantToBlinkHeadlights, (int)c->WantToHonkHorn,
+           (int)c->WantTwoHonksAndOrBlinks,
+           (unsigned)c->HeadlightsAndHornStartTime,
+           fx(c->HeadlightsAndHornOnDuration),
+           fx(c->HeadlightsAndHornSecondOnDuration),
+           fx(c->HeadlightsAndHornOffDuration));
+}
+
+static void dump_ptd(int i)
+{
+    const DriveTarget *t = &facts[i].PointsToDrive;
+
+    printf("  E pt%d n %d wpc %d wpt %d len %s lps %d\n", i, (int)t->NumPoints,
+           (int)t->WhichPointIPickedCalculationTime,
+           (int)t->WhichPointIPickedTime, fx(t->Length),
+           (int)t->LastPointToScore);
+}
+
 static void dump_facts(void)
 {
     int i;
@@ -457,6 +535,77 @@ static DrivingLocation *hl_of(int k, const char *s)
     if (h < 0)
         return NULL;
     return h == 0 ? &loc : ctrls[k].CurrentDrivingLocation;
+}
+
+// 11e-4's ops; 0 for none of them.
+static int ac_op4(const char *c, int k, AICarController *a, char **t)
+{
+    Car *car = &cars[k];
+
+    if (strcmp(c, "ctl") == 0) {
+        car->TheControlMode = (ControlMode)atoi(t[2]);
+    } else if (strcmp(c, "dt") == 0) {
+        drivers[k].TheDriverType = (DriverType)atoi(t[2]);
+    } else if (strcmp(c, "hk") == 0) {
+        car->WantToBlinkHeadlights = atoi(t[2]);
+        car->WantToHonkHorn = atoi(t[3]);
+        car->WantTwoHonksAndOrBlinks = atoi(t[4]);
+        car->HeadlightsAndHornStartTime = (int32_t)wh(t[5]);
+        car->HeadlightsAndHornOnDuration = fh(t[6]);
+        car->HeadlightsAndHornSecondOnDuration = fh(t[7]);
+        car->HeadlightsAndHornOffDuration = fh(t[8]);
+        car->ForceHeadlightsOn = atoi(t[9]);
+    } else if (strcmp(c, "ish") == 0) {
+        ish[k] = atoi(t[2]);
+    } else if (strcmp(c, "mh") == 0) {
+        NearbyCarList *l = atoi(t[3]) == 0
+                           ? &list
+                           : &a->MyCurrentDrivingInformation.MyNearbyCarList;
+
+        aicarcontroller_maybe_honk_and_or_blink_headlights(a, car_ptr(t[2]),
+                                                           l);
+        dump_honk(k);
+    } else if (strcmp(c, "hr") == 0) {
+        car_honk_and_or_blink_headlights(car, fh(t[2]), fh(t[3]), fh(t[4]),
+                                         atoi(t[5]), atoi(t[6]), atoi(t[7]));
+        dump_honk(k);
+    } else if (strcmp(c, "uh") == 0) {
+        car_update_headlights_and_horn(car);
+        printf("  L state %d\n", (int)car->HeadlightsState);
+    } else if (strcmp(c, "ad") == 0) {
+        AIAction *f = &facts[k];
+
+        f->UseDrivingLineSpeed = atoi(t[2]);
+        f->DesiredSpeed = fh(t[3]);
+        f->TimeToGetToDesiredSpeed = fh(t[4]);
+        f->DesiredSpeedTolerance = fh(t[5]);
+        f->AllowedToUseThrottleAndBrake = atoi(t[6]);
+    } else if (strcmp(c, "at") == 0) {
+        DriveTarget *p = &facts[k].PointsToDrive;
+
+        p->NumPoints = (int8_t)atoi(t[2]);
+        p->Length = fh(t[3]);
+        p->WhichPointIPickedCalculationTime = 5;
+        p->WhichPointIPickedTime = 7;
+        p->LastPointToScore = 3;
+    } else if (strcmp(c, "sea") == 0) {
+        SuperEasyAI = k;
+    } else if (strcmp(c, "bai") == 0) {
+        BoringAIForCameraTuningOn = k;
+    } else if (strcmp(c, "lsp") == 0) {
+        routes[k].TrackRoutePointTable[atoi(t[2])]
+            .DrivingLineSpeeds[atoi(t[3])] = (uint8_t)atoi(t[4]);
+    } else if (strcmp(c, "eca") == 0) {
+        aicarcontroller_execute_current_action(a);
+        printf("  E la %d lrs %08x boost %s\n",
+               (int)a->CurrentRoutePointLookahead,
+               (unsigned)a->LastRoutePointLookaheadSwitch.PackedTime,
+               fx(car->State.BoostFactor));
+        dump_ptd(atoi(t[2]));
+    } else {
+        return 0;
+    }
+    return 1;
 }
 
 static void ac_op(char **t, int n)
@@ -682,8 +831,10 @@ static void ac_op(char **t, int n)
         int i;
 
         nrq = irq = 0;
-        for (i = 0; i < k && i < NRANDOM && 2 + i < n; i++)
+        for (i = 0; i < k && i < NRANDOM && 2 + i < n; i++) {
+            rqw[nrq] = wh(t[2 + i]);
             rq[nrq++] = fh(t[2 + i]);
+        }
     } else if (strcmp(c, "tg") == 0) {
         tinfo.SignpostGracePeriod = k;
     } else if (strcmp(c, "tn") == 0) {
@@ -824,6 +975,12 @@ static void ac_op(char **t, int n)
             a->bBoostAllowed = atoi(t[3]);
         else if (strcmp(f, "cp") == 0)
             a->pCatchupPlayer = plr_ptr(t[3]);
+        else if (strcmp(f, "lrs") == 0)
+            a->LastRoutePointLookaheadSwitch.PackedTime = wh(t[3]);
+        else if (strcmp(f, "la") == 0)
+            a->CurrentRoutePointLookahead = atoi(t[3]);
+        else if (strcmp(f, "tt") == 0)
+            a->TakenSignpostTimer.PackedTime = wh(t[3]);
         else {
             fprintf(stderr, "bad field %s\n", f);
             exit(2);
@@ -863,7 +1020,7 @@ static void ac_op(char **t, int n)
         printf("  boost %s lbt %08x cp %s\n", fx(cars[k].State.BoostFactor),
                (unsigned)a->LastBoostCalculationTime.PackedTime,
                nm(a->pCatchupPlayer));
-    } else {
+    } else if (!ac_op4(c, k, a, t)) {
         fprintf(stderr, "bad op %s\n", t[0]);
         exit(2);
     }
@@ -906,6 +1063,12 @@ int main(int argc, char **argv)
         (VtFn)fk_zero_steering_memory;
     drv_vt[VT_SLOT(CARDRIVER_VT_GET_DESIRED_SPEED)].fn =
         (VtFn)fk_get_desired_speed;
+    drv_vt[VT_SLOT(CARDRIVER_VT_SET_DESIRED_SPEED)].fn =
+        (VtFn)fk_set_desired_speed;
+    drv_vt[VT_SLOT(CARDRIVER_VT_SET_TARGET)].fn = (VtFn)fk_set_target;
+    drv_vt[VT_SLOT(CARDRIVER_VT_START_HONK_HORN)].fn = (VtFn)fk_start_honk;
+    drv_vt[VT_SLOT(CARDRIVER_VT_STOP_HONK_HORN)].fn = (VtFn)fk_stop_honk;
+    drv_vt[VT_SLOT(CARDRIVER_VT_IS_HONKING)].fn = (VtFn)fk_is_honking;
     vt_install(DVT, drv_vt, CARDRIVER_VT_ENTRIES);
     nm_more = ac_nm;
     reset_more = ac_reset;

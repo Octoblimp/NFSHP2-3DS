@@ -248,15 +248,19 @@ float car_get_forward_acceleration(Car *c)
 
 // --------------------------------------------------- the horn and the lights
 
-// 0x00132508. A request, not an action: it records what the car wants and
-// UpdateHeadlightsAndHorn acts on it. The guard is that the previous
-// request's whole cycle -- on, off, on -- has already elapsed, so a second
-// honk inside the first one is dropped rather than queued.
+// Retail's 0x00134130 (the demo's 0x00132508). A request, not an action:
+// it records what the car wants and UpdateHeadlightsAndHorn acts on it.
+// The guard is that the previous request's whole cycle -- on, off, second
+// on -- has already elapsed, so a second honk inside the first one is
+// dropped rather than queued.
 //
-// The cycle is `On + Off + On` and it is summed in that order, with the
-// *old* durations, before the new ones are stored.
+// Retail takes the second on phase's duration as a third float (f14), where
+// the demo's ran the first's twice. The cycle is `(On + Off) + SecondOn`,
+// summed in that order, with the *old* durations, before the new ones are
+// stored. Its only caller is AICarController's MaybeHonkAndOrBlinkHeadlights.
 void car_honk_and_or_blink_headlights(Car *c, float onDuration,
-                                      float offDuration, int32_t blink,
+                                      float offDuration,
+                                      float secondOnDuration, int32_t blink,
                                       int32_t honk, int32_t two)
 {
     float elapsed = (float)(int32_t)((uint32_t)WorldTimer
@@ -264,15 +268,16 @@ void car_honk_and_or_blink_headlights(Car *c, float onDuration,
                     * CAR_TICK_SECONDS;
     float cycle = c->HeadlightsAndHornOnDuration
                   + c->HeadlightsAndHornOffDuration
-                  + c->HeadlightsAndHornOnDuration;
+                  + c->HeadlightsAndHornSecondOnDuration;
 
     if (cycle < elapsed) {
-        c->WantTwoHonksAndOrBlinks      = two;
-        c->HeadlightsAndHornStartTime   = WorldTimer;
-        c->HeadlightsAndHornOnDuration  = onDuration;
-        c->HeadlightsAndHornOffDuration = offDuration;
-        c->WantToBlinkHeadlights        = blink;
-        c->WantToHonkHorn               = honk;
+        c->WantTwoHonksAndOrBlinks           = two;
+        c->HeadlightsAndHornStartTime        = WorldTimer;
+        c->HeadlightsAndHornOnDuration       = onDuration;
+        c->HeadlightsAndHornOffDuration      = offDuration;
+        c->HeadlightsAndHornSecondOnDuration = secondOnDuration;
+        c->WantToBlinkHeadlights             = blink;
+        c->WantToHonkHorn                    = honk;
     }
 }
 
@@ -683,16 +688,21 @@ int32_t car_is_facing_wrong_way(Car *c)
     return (0.0f < dot) ? 0 : 1;
 }
 
-// 0x00132568. Acts on what car_honk_and_or_blink_headlights asked for.
-// Player cars are skipped entirely.
+// Retail's 0x00134198 (the demo's 0x00132568). Acts on what
+// car_honk_and_or_blink_headlights asked for. Player cars are skipped
+// entirely.
 //
-// The request is a cycle of on, off, on, measured from the stamp, and `lit`
-// says whether this moment is in an on phase. Two things about it are easy
-// to get backwards:
+// The request is a cycle of on, off, second on, measured from the stamp,
+// and `lit` says whether this moment is in an on phase. Three things about
+// it are easy to get backwards:
 //
 //   * during the *off* phase, `lit` is `WantTwoHonksAndOrBlinks == 0`. A
 //     single request stays on straight through the gap, and only a double
 //     one goes dark in it.
+//   * retail's gap ends `On` after the first phase, not `Off`: 0x001341ec
+//     compares the time past the first phase with On (f3, still loaded),
+//     where the demo's compared it with Off. The second phase is then lit
+//     while the time past the first, less Off, is under SecondOn.
 //   * after the second on phase the answer is simply off -- the elapsed
 //     time is not reduced modulo anything.
 //
@@ -718,10 +728,11 @@ void car_update_headlights_and_horn(Car *c)
         lit = 1;
     } else {
         t = elapsed - on;
-        if (t < c->HeadlightsAndHornOffDuration)
+        if (t < on)
             lit = (c->WantTwoHonksAndOrBlinks == 0);
         else
-            lit = (t - c->HeadlightsAndHornOffDuration < on);
+            lit = (t - c->HeadlightsAndHornOffDuration
+                   < c->HeadlightsAndHornSecondOnDuration);
     }
 
     c->HeadlightsState = (lit && c->WantToBlinkHeadlights)

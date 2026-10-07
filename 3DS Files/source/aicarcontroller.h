@@ -14,8 +14,9 @@
 // SignPostDecision among them (main.c points drivingchoice.h's seam at
 // it). 11e-3 has the belt, the glue and the boost: whether the car may
 // go on the belt or glue itself to a player, the glued speed, and the
-// catchup boost. The honking and ExecuteCurrentAction are 11e-4's, and
-// Think 11e-5's. AIAction is in aiaction.h (11c).
+// catchup boost. 11e-4 has the honking and ExecuteCurrentAction, which
+// hands the action's points and speed to the driver. Think is 11e-5's.
+// AIAction is in aiaction.h (11c).
 // docs/formats/ai-car-controller.md has the detail.
 //
 // The offsets are retail's. They agree with the demo's stab (type#1344,
@@ -351,6 +352,24 @@ void aicarcontroller_calculate_distance_and_position_boost(
 // SlowFactor. Into the car's BoostFactor.
 void aicarcontroller_decide_boost_factor(AICarController *c);
 
+// -------------------------------------------------------- the horn
+
+// 0x00192fa8. Whether my car honks or flashes at `car`. Not at a cop or
+// a traffic car, nor at anyone but a player's car outside the AI demo;
+// an AI car only at one DoWeCareAboutThisCar over `list` passes, and a
+// car that is neither AI nor traffic not at all. Four draws make the
+// request: each on phase 0.1 to 0.5 s, the gap 0.05 to 0.25 s, and two
+// honks half the time. A car passing at more than 50 m/s is always
+// honked at twice, the second on 0.6 s longer, and flashed at 0.9 of the
+// time; a traffic car always honks at one it closes on at more than
+// 3 m/s; any car honks at a player 0.75 of the time, at anyone else 0.075
+// with fewer than six in `list`, 0.05 with more. A honk flashes half the
+// time. Then Car::HonkAndOrBlinkHeadlights, which drops the request while
+// the last one runs.
+void aicarcontroller_maybe_honk_and_or_blink_headlights(AICarController *c,
+                                                        Car *car,
+                                                        NearbyCarList *list);
+
 // -------------------------------------------------------- the action
 
 // 0x00192780. `jr ra`: AIDriver's and TrafficDriver's choose.
@@ -378,6 +397,22 @@ AIActionType aicarcontroller_get_current_action_type(AICarController *c);
 // 0x00194020.
 void aicarcontroller_force_my_current_action(AICarController *c,
                                              AIActionType type);
+
+// gp-20120, retail's alone: the pause debug menu's "Super easy AI".
+extern int32_t SuperEasyAI;
+
+// 0x001932e8. The driver's target is the action's points; the boost is
+// decided; then the driver's desired speed: none with the location clear,
+// 15 m/s within 10 for SuperEasyAI, the line's speed at the location for
+// BoringAIForCameraTuningOn, else the action's. An action using the
+// line's speed takes the taken sign's new point's, or 99999 while
+// TakenSignpostTimer is set, or the line's at the point
+// CurrentRoutePointLookahead on (30 for 0) times the skill's SpeedFactor;
+// 0.75 of it in a cop race, times the BoostFactor, in no time. The
+// look-ahead is drawn again within the skill's RoutePointVariance every
+// RoutePointChangeFrequency seconds. Last, the action's points are
+// cleared.
+void aicarcontroller_execute_current_action(AICarController *c);
 
 // -------------------------------------------------------- the physics
 
