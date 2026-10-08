@@ -115,7 +115,7 @@ static int32_t            nisWords[2][32];
 static eView              views[NUM_VIEWS];
 static Race               race;
 static RaceCoordinator    coord;
-static uint8_t            copManager[312];
+static tCopManager        copManager;
 static uint8_t            track[16];
 static int32_t            egg4;
 static int                curPlayer;
@@ -653,12 +653,12 @@ static void set_global(char **a, int n)
     else if (!strcmp(k, "frames")) RealTimeFrames = (int32_t)v;
     else if (!strcmp(k, "egg")) egg4 = (int32_t)v;
     else if (!strcmp(k, "cop"))
-        pCopManager = v ? (tCopManager *)(void *)copManager : NULL;
+        pCopManager = v ? &copManager : NULL;
     else if (!strcmp(k, "pull") && n >= 4) {
-        uint8_t *pl = copManager + 88 + 28 * v;
-        int32_t  act = inum(a[2]), busted = inum(a[3]);
-        memcpy(pl + 12, &act, 4);
-        memcpy(pl + 24, &busted, 4);
+        tCarPulloverInfo *pl = &copManager.CarPullovers[v];
+
+        pl->bActive = inum(a[2]);
+        pl->bShouldDisplayBustedText = inum(a[3]);
     } else if (!strcmp(k, "byn") && n >= 3) {
         int32_t who = inum(a[2]);
         PlayerPlayersByNumber[v] = who < 0 ? NULL : players[who];

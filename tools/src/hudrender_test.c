@@ -157,7 +157,7 @@ static float              lapExact;
 static int                curPlayer;
 
 // The cop manager's bytes, as aligned as its pointers need.
-static uint64_t           copStore[10600 / 8];
+static uint64_t           copStore[(sizeof(tCopManager) + 7) / 8];
 #define COP_BYTES ((uint8_t *)copStore)
 #define COP_MGR   ((tCopManager *)(void *)copStore)
 
@@ -971,7 +971,7 @@ static void set_cop(const char *n, char **a, int na)
                          ? num(a[0]) : 0;
 
     if (!strcmp(n, "on")) pCopManager = v ? COP_MGR : NULL;
-    else if (!strcmp(n, "new0")) h->New0 = (int32_t)v;
+    else if (!strcmp(n, "new0")) h->nBeACopNumRoadBlocks = (int32_t)v;
     else if (!strcmp(n, "pci")) h->nPlayerCopIndex = (int32_t)v;
     else if (!strcmp(n, "cop") && na >= 2) {
         int32_t pi = inum(a[1]);
@@ -1036,7 +1036,7 @@ static void set_global(char **a, int n)
     else if (!strcmp(k, "egg")) egg4 = (int32_t)v;
     else if (!strcmp(k, "cop")) pCopManager = v ? COP_MGR : NULL;
     else if (!strcmp(k, "pull") && n >= 4) {
-        uint8_t *pl = COP_BYTES + 88 + 28 * v;
+        uint8_t *pl = COP_BYTES + COPMANAGER_PULLOVERS + 28 * v;
         int32_t  act = inum(a[2]), busted = inum(a[3]);
         memcpy(pl + 12, &act, 4);
         memcpy(pl + 24, &busted, 4);

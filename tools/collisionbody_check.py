@@ -4725,8 +4725,8 @@ MUTATIONS = [
        "            gPortRumbleImpactFn(car->pPlayer->JoyPort, amount * CAR_DAMAGE_SCALE);", CCB),
     _m("ccb_ad_no_cop_test", "    if (pCopManager != NULL) {", "    if (1) {", CCB),
     _m("ccb_ad_cop_never", "    if (pCopManager != NULL) {", "    if (0) {", CCB),
-    _m("ccb_ad_cop_scaled", "        gCopManagerMonitorImpactFn(pCopManager, b->pCar, amount);",
-       "        gCopManagerMonitorImpactFn(pCopManager, b->pCar, amount * CAR_DAMAGE_SCALE);", CCB),
+    _m("ccb_ad_cop_scaled", "        gCopManagerMonitorImpactFn(pCopManager, b, amount);",
+       "        gCopManagerMonitorImpactFn(pCopManager, b, amount * CAR_DAMAGE_SCALE);", CCB),
 
     # AnimateCollisionReaction
     _m("ccb_an_no_driver", "    if (ad != NULL) {", "    if (0) {", CCB),

@@ -17418,3 +17418,56 @@ the cache, so it waits for a map that needs it.
 
 The user: "When you're done doing whatever, move on to cops and cop
 mode." Step 12, the cops.
+
+## Session 56 (2026-10-08) -- 12a, the cop manager
+
+Step 12's first slice: tCopManager, retail's copmgr.obj, without the
+cops it manages. `copmgr.c` and `copmgr.h` are new; `copmanager.h` has
+the whole 10516-byte record. `docs/formats/cop-manager.md` has the
+layout, the chunks, the constructor's order and the hits.
+
+### What it does
+
+- **The chunks.** LoaderCops is bundle slot 15. It keeps pointers to
+  the container's radar traps, roadblock spots and landmarks, which the
+  manager reads in place. Every retail track has one: 20 to 39 traps,
+  43 to 62 roadblock spots, 0 to 34 landmarks.
+- **The manager.** InitCops builds it when `nMaxCops` is above 0, and
+  CleanupCops runs its destructor through its table. The constructor
+  makes the three slot pools, the roadblock and radar-trap spots, the
+  speakers' queue, the radar traps' spawn timers and Be A Cop's
+  counters. The destructor deletes the pursuits, the cops and the spike
+  strips, then the pools.
+- **The hits.** Retail's AddDamage ends differently from the demo's:
+  under 1.0 nothing, then MonitorImpact with whether any of the body's
+  collisions is two cars'. The seam `gCopManagerMonitorImpactFn` now
+  takes the body (`copmgr_car_impact`). Without this, a collision in a
+  race with cops would have aborted on the NULL seam.
+- MonitorImpact: in Be A Cop, hits on the chased car add to its damage;
+  otherwise a hard hit on an AI cop's car disables it once its grace
+  timer has run out. The disable (tAICop::DisableMyCar) is 12b's.
+
+### Checked
+
+- `copmanager_check`: 2291 operations over every track's cop chunks,
+  the constructor at each strength with Be A Cop on and off, the spots,
+  the speakers, the pursuits, the destructor, and the hits on six cars
+  in both branches. 23342 lines, 0 differ.
+- Its `--mutate` now runs through `mutpar`, out of the tree: 156
+  mutations, 155 caught, 1 equivalent (a NaN that AddDamage's 1.0 gate
+  keeps out).
+- Retail's InitSpeedTrapStructures reads an uninitialised stack slot
+  when its route search misses; the model clears it, and the port
+  starts it at NULL.
+- carmode, collisionbody, drivecam, drivingchoice, hudanim,
+  hudfeatures, hudrender, nearbycar, realcontroller, realdriver and
+  trackmap: 0 differ.
+- Azahar, SkipFE on track 12 with 3 AI and SkipFEMaxCops 3
+  (`nfshp2_config.txt.cops`): RACING for a minute with the gas held,
+  30 FPS, speed 99-100%, nothing in stderr. The HUD's pursuit meter and
+  radar show; no cop is on the road yet.
+
+### Next
+
+12b: the cops themselves -- tCop, tAICop and tPlayerCop, CreateCop and
+AddCopCarToRace, so the three cops are put on the track.

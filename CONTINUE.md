@@ -1,7 +1,8 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 54
-(2026-10-08): the AI pack runs at 20 FPS with all eight cars in view
+Where the next session picks up. Updated in Session 56
+(2026-10-08): 12a, the cop manager, is done ("First" below).
+Session 54 (2026-10-08): the AI pack runs at 20 FPS with all eight cars in view
 (commits 569dfde and ba9ef1f), which the user accepted; see "First"
 below. Session 53 (2026-10-08) took out the mid-race hitches
 (3b62e00). Session 52
@@ -92,13 +93,36 @@ of what is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
-## First: step 12, the cops and cop mode (Session 55)
+## First: step 12, the cops and cop mode (Session 56)
 
 The user, 2026-10-08: "When you're done doing whatever, move on to cops
 and cop mode." The texture memory work is done (2f0a300, HANDOFF's
 Session 55): a cache that evicts the least recently drawn, and about
 4 MB of textures in VRAM. The skins' padding (e) waits for a map that
 needs it. TRACKB12 still wants a look on the device.
+
+Step 12 is retail's copmgr.obj, cop.obj, copdriver.obj, coputil.obj and
+pursuit.obj, on a 10 KB manager. Its slices:
+
+- **12a, done (Session 56):** tCopManager's record, LoaderCops, the
+  constructor and destructor, InitCops and CleanupCops, the roadblock
+  and radar-trap spots, the speakers' queue, FindLandmark, the pursuit
+  ids, GetCopByCar and MonitorImpact, with retail's AddDamage tail
+  (`docs/formats/cop-manager.md`). A race with cops builds the manager
+  and runs at 30 FPS; no cop is on the road yet.
+- **12b:** tCop, tAICop and tPlayerCop's constructors and destructors,
+  CreateCop, AddCopCarToRace (`gAddCopCarToRaceFn`), `0x002276a0` (the
+  cop cars' largest size), the zone permissions, tAICop::DisableMyCar
+  (`gAICopDisableMyCarFn`, which aborts while NULL).
+- **12c** CopMover; **12d** CopDriver; **12e** tTrackGraph;
+  **12f** Think and GlobalCopThink (`gGlobalCopThinkFn`);
+  **12g** tAICop::Think; **12h, 12i** tPursuit; **12j** roadblocks and
+  spike strips; **12k** the helicopter; **12l** pullovers and Busted;
+  **12m** Be A Cop; **12n** the radar detector's intensity.
+
+The test config for a race with cops is parked as
+`nfshp2_config.txt.cops` (SkipFE, track 12, 3 AI, traffic 0.5,
+SkipFEMaxCops 3).
 
 The AI pack's cost is closed. The user's asks, 2026-10-08, were "sluggish
 until I get away from all the AI racers" and "still hitching when all

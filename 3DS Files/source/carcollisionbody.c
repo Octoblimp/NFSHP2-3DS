@@ -304,7 +304,7 @@ void carcollisionbody_add_damage(CarCollisionBody *b, bVector3 *at,
                             "no tCopManager::MonitorImpact\n");
             abort();
         }
-        gCopManagerMonitorImpactFn(pCopManager, b->pCar, amount);
+        gCopManagerMonitorImpactFn(pCopManager, b, amount);
     }
 }
 

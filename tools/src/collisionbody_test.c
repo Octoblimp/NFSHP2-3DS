@@ -1241,9 +1241,10 @@ static void stub_rumble(int32_t port, float amount)
     printf("  rumble port %d amount %08x\n", port, bits(amount));
 }
 
-static void stub_monitor(struct tCopManager *m, struct Car *c, float amount)
+static void stub_monitor(struct tCopManager *m, struct CarCollisionBody *b,
+                         float amount)
 {
-    printf("  monitor-impact %s %s amount %08x\n", label(m), label(c),
+    printf("  monitor-impact %s %s amount %08x\n", label(m), label(b->pCar),
            bits(amount));
 }
 

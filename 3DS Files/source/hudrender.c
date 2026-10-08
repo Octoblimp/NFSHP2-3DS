@@ -891,7 +891,7 @@ static void render_be_the_cop(struct Player *p, tCopManager *m)
     for (; i < 3; i++)
         set_bitmap_colour(p->pFlailerBeTheCopHelicopter[i], COLOUR_BTC_LEFT);
 
-    used = h->New0;
+    used = h->nBeACopNumRoadBlocks;
     for (i = 0; i < used && i < 3; i++)
         set_bitmap_colour(p->pFlailerBeTheCopRoadblock[i], COLOUR_BTC_USED);
     if (i < used)

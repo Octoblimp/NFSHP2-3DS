@@ -9,6 +9,7 @@
 #include "cameracoord.h"
 #include "carinfo.h"
 #include "characterinfo.h"
+#include "copmgr.h"
 #include "difficultyinfo.h"
 #include "elight.h"
 #include "esolid.h"
@@ -144,7 +145,6 @@ UNPORTED(LoaderEventManager, UnloaderEventManager, 7, 0x80036000u)
 UNPORTED(LoaderPositionMarkers, UnloaderPositionMarkers, 8, 0x00034013u)
 UNPORTED(LoaderFlailerChunk, UnloaderFlailerChunk, 10, 0x80010200u)
 UNPORTED(LoaderAnimations, UnloaderAnimations, 12, 0x80034008u)
-UNPORTED(LoaderCops, UnloaderCops, 15, 0x80034500u)
 UNPORTED(LoaderBodyDamage, UnloaderBodyDamage, 17, 0x00034030u)
 UNPORTED(LoaderNisInfo, UnloaderNisInfo, 20, 0x00037010u)
 UNPORTED(LoaderSoundScape, UnloaderSoundScape, 21, 0x80038000u)
@@ -176,7 +176,7 @@ BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     LoaderAnimations,               // 12
     loader_cameras,                 // 13
     loader_sun,                     // 14
-    LoaderCops,                     // 15
+    copmgr_loader,                  // 15
     LoaderCarInfo,                  // 16
     LoaderBodyDamage,               // 17
     LoaderTrackRoutes,              // 18
@@ -209,7 +209,7 @@ BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
     UnloaderAnimations,             // 12
     unloader_cameras,               // 13
     unloader_sun,                   // 14
-    UnloaderCops,                   // 15
+    copmgr_unloader,                // 15
     UnloaderCarInfo,                // 16
     UnloaderBodyDamage,             // 17
     UnloaderTrackRoutes,            // 18

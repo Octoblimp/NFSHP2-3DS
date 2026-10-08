@@ -82,6 +82,7 @@
 #include "collision.h"
 #include "collisionbody.h"
 #include "configitems.h"
+#include "copmgr.h"
 #include "difficultyinfo.h"
 #include "drivingchoice.h"
 #include "drivinglocation.h"
@@ -3779,6 +3780,7 @@ int main(int argc, char** argv)
     carcollisionbody_install_vtable();
     aiaction_install_vtables();
     aiactions_install_vtables();
+    copmgr_install_vtables();
     aicarcontroller_install_vtables();
     beltmover_install_vtables();
     psychodriver_install_vtables();
@@ -4367,6 +4369,13 @@ int main(int argc, char** argv)
     gTrafficTeleporterPlaceNewCarFn = traffic_teleporter_place_new_car;
     gTrafficTeleporterDoTimestepFn  = traffic_teleporter_do_timestep;
     gCarDestroyFn                   = car_destruct;
+    // World's constructor makes the cop manager when the race has cops,
+    // and its destructor deletes it (copmgr.h).
+    gInitCopsFn    = copmgr_init_cops;
+    gCleanupCopsFn = copmgr_cleanup_cops;
+    // A collision tells it of hits on the cars it is watching.
+    gCopManagerMonitorImpactFn = copmgr_car_impact;
+    gCopManagerGetCopByCarFn   = copmanager_get_cop_by_car;
     logPrintf("car loader: pool %s\n", LoadedCarSlotPool ? "up" : "missing");
 
     // The blurb moves to the bottom screen, so the top screen stops drawing

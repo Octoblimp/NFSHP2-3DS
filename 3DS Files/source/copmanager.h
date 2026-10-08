@@ -1,11 +1,15 @@
-// copmanager -- the global that points at tCopManager, the two lookups the
-// drive camera makes through it, and the HUD's busted-text test.
+// copmanager -- tCopManager, the cops' records and the chunks they load
+// from, and the queries the HUD, the cameras and the AI make of them.
 //
-// tCopManager is 10472 bytes (.mdebug type#5615) and task 26's: the
-// pursuit, the roadblocks, the helicopter, Be A Cop's siren. Ported code
-// reads the pointer, to test it and hand it to seams, and the few fields
-// below in place, so the struct stays incomplete. tCop and tPursuit are
-// the prefixes the drive camera reads; task 26 finishes them.
+// tCopManager is retail's copmgr.obj (0x002235f8 .. 0x00228fc8). The demo's
+// is 10472 bytes (.mdebug type#5615); retail's is 10516, with a word at the
+// front, six pursuit slots and a word after PursuitList, and four words
+// near the end. The layout below is retail's, checked on a 32-bit target.
+//
+// This file and copmanager.c keep what other code reads: the records, the
+// pointer, and the small queries (copmanager.c links into many checkers,
+// so it stays free of the track). The manager's building and running are
+// copmgr.c's, on copmgr.h.
 
 #ifndef COPMANAGER_H
 #define COPMANAGER_H
@@ -22,44 +26,137 @@ typedef struct tCopManager tCopManager;
 typedef struct tPursuit tPursuit;
 typedef struct tCop tCop;
 
-// The demo's type#1303 (type#2424 in .mdebug) is 120 bytes: a roadblock a
-// pursuit called. These are the fields read so far, at the demo's
-// offsets, which retail's code reads them at too: the minimap's two, and
-// the two cops, the route and its point, the spike belt, the escape lane
-// and the distance round the track that AIActionAvoidRoadBlock reads. The
-// rest are bytes. The offsets are retail's only where a pointer is 4
-// bytes.
+// ------------------------------------------------------- the cop chunks
+//
+// LoaderCops (0x00227dc0) takes the container 0x80034500 and keeps a
+// pointer to each of its three children's data, which the manager reads
+// in place: the radar traps (0x34510), the roadblock spots (0x34520) and
+// the landmarks (0x34530). Each is a count, then the records.
+
+// .mdebug type#2056, 32 bytes.
+typedef struct RadarTrapInfo {
+    char     Name[16];                  //  0
+    bVector2 Centre;                    // 16
+    int32_t  BeACopSpawnSpot;           // 24  Be A Cop starts here
+    int32_t  BeACopReverseSpawnSpot;    // 28  and here run backwards
+} RadarTrapInfo;
+
+// type#2062. Traps[NumRadarTraps].
+typedef struct RadarTrapChunk {
+    uint32_t      NumRadarTraps;        //  0
+    RadarTrapInfo Traps[1];             //  4
+} RadarTrapChunk;
+
+// type#2072, 28 bytes. The bitfields share the word at 24, LSB first;
+// the bits above 6 are whatever the tool left there.
+typedef struct RoadblockInfo {
+    char     Name[16];                  //  0
+    bVector2 Centre;                    // 16
+    uint32_t Bits;                      // 24
+} RoadblockInfo;
+
+#define ROADBLOCKINFO_DIRECTION(b)   ((b) & 3u)          // 0 both, 1 fwd, 2 rev
+#define ROADBLOCKINFO_SPIKESIDE(b)   (((b) >> 2) & 3u)
+#define ROADBLOCKINFO_DIFFICULTY(b)  (((b) >> 4) & 3u)
+#define ROADBLOCKINFO_CLOSURE(b)     (((b) >> 6) & 1u)   // RoadClosureSpot
+
+// type#2078. Roadblocks[NumRoadblocks].
+typedef struct RoadblockInfoChunk {
+    uint32_t      NumRoadblocks;        //  0
+    RoadblockInfo Roadblocks[1];        //  4
+} RoadblockInfoChunk;
+
+// type#2042, 60 bytes: an area of the track by a polygon.
+typedef struct Landmark {
+    int32_t  NumVerts;                  //  0
+    bVector2 VertsForArea[6];           //  4
+    int32_t  LandmarkType;              // 52  what the cops call it
+    int32_t  IsUncloakTrigger;          // 56
+} Landmark;
+
+// type#2049. LandmarkArray[NumLandmarks].
+typedef struct LandmarkChunk {
+    uint32_t NumLandmarks;              //  0
+    Landmark LandmarkArray[1];          //  4
+} LandmarkChunk;
+
+typedef char landmark_size_check[sizeof(Landmark) == 60 ? 1 : -1];
+typedef char radartrapinfo_size_check[sizeof(RadarTrapInfo) == 32 ? 1 : -1];
+typedef char roadblockinfo_size_check[sizeof(RoadblockInfo) == 28 ? 1 : -1];
+
+// tCopManager's statics, gp-15656, gp-15652 and gp-15648 (0x00331bc8,
+// 0x00331bcc, 0x00331bd0): the chunks' data, NULL with no chunk.
+extern LandmarkChunk      *LandmarkData;
+extern RadarTrapChunk     *SpeedTrapData;
+extern RoadblockInfoChunk *RoadblockData;
+
+// ---------------------------------------------------------- the records
+
 struct stAICop;
 struct TrackRoute;
 struct TrackRoutePoint;
 
+// type#2424, 120 bytes: a spot a roadblock can be set at. The manager
+// keeps one for each usable RoadblockInfo; a pursuit points at the one it
+// called.
 typedef struct tRoadBlock {
     struct stAICop *cops[2];            //   0  NULL for none
-    uint8_t  Unported8[20];             //   8  pos, ang
+    bVector4 pos;                       //   8
+    int32_t  ang;                       //  24
     uint16_t aTrackMapIconAngle;        //  28  a BAM
-    uint8_t  Unported30[6];             //  30  Name at 32
+    uint16_t Pad30;                     //  30
+    const RoadblockInfo *Name;          //  32  the record, whose name leads
     struct TrackRoutePoint *RoutePoint; //  36
     struct TrackRoute *Route;           //  40
-    uint8_t  Unported44[8];             //  44  fRoadWidth, nSpikeSide
+    float    fRoadWidth;                //  44  the point's two widths
+    int32_t  nSpikeSide;                //  48
     bVector2 v2SpikeBeltPos;            //  52
-    uint8_t  Unported60[8];             //  60  v2SpikeBeltVec
-    bVector2 v2Position;                //  68
-    uint8_t  Unported76[16];            //  76  D, L
+    bVector2 v2SpikeBeltVec;            //  60
+    bVector2 v2Position;                //  68  on the road at the record
+    bVector2 D;                         //  76  along the road
+    bVector2 L;                         //  84  across it, D turned right
     bVector2 v2EscapeLane;              //  92
     float    fDistanceAroundTrack;      // 100
-    uint8_t  Unported104[16];           // 104
+    int32_t  nIndexIntoLoadedData;      // 104
+    int32_t  Difficulty;                // 108
+    uint32_t Flags;                     // 112  1: a road closure
+    uint32_t CopSpeaker;                // 116
 } tRoadBlock;                           // 120
 
 #if UINTPTR_MAX == 0xFFFFFFFFu
 typedef char troadblock_layout_check[
-    (offsetof(tRoadBlock, aTrackMapIconAngle) == 28
+    (offsetof(tRoadBlock, pos) == 8
+     && offsetof(tRoadBlock, aTrackMapIconAngle) == 28
+     && offsetof(tRoadBlock, Name) == 32
      && offsetof(tRoadBlock, RoutePoint) == 36
      && offsetof(tRoadBlock, Route) == 40
      && offsetof(tRoadBlock, v2SpikeBeltPos) == 52
      && offsetof(tRoadBlock, v2Position) == 68
+     && offsetof(tRoadBlock, D) == 76
      && offsetof(tRoadBlock, v2EscapeLane) == 92
      && offsetof(tRoadBlock, fDistanceAroundTrack) == 100
+     && offsetof(tRoadBlock, CopSpeaker) == 116
      && sizeof(tRoadBlock) == 120) ? 1 : -1];
+#endif
+
+// type#5556, 28 bytes: a radar trap's spot.
+typedef struct tSpeedTrap {
+    tCop    *cop;                       //  0  the cop sitting in it, or NULL
+    bVector2 v2Position;                //  4
+    uint16_t ang;                       // 12  the road's heading, a BAM
+    uint16_t Pad14;                     // 14
+    const RadarTrapInfo *Name;          // 16  the record, whose name leads
+    float    fDistanceAroundTrack;      // 20
+    uint32_t Flags;                     // 24  1 Be A Cop's, 2 reversed
+} tSpeedTrap;                           // 28
+
+#define SPEEDTRAP_BEACOP          1u
+#define SPEEDTRAP_BEACOP_REVERSE  2u
+
+#if UINTPTR_MAX == 0xFFFFFFFFu
+typedef char tspeedtrap_layout_check[
+    (offsetof(tSpeedTrap, ang) == 12 && offsetof(tSpeedTrap, Name) == 16
+     && sizeof(tSpeedTrap) == 28) ? 1 : -1];
 #endif
 
 // eLogicState, .mdebug t1052.
@@ -74,97 +171,122 @@ typedef int32_t eLogicState;
 #define LS_CAUGHT_SPEEDER   ((eLogicState)7)
 #define LS_GUARD_LOCATION   ((eLogicState)8)
 
-// The demo's type#5558 is 32 bytes; these are its first five words.
-// PullOver's CalculateScore (0x001c8400) reads DesiredLogicState at 16.
+// eLogicSubState, .mdebug L52663.
+typedef int32_t eLogicSubState;
+#define LSS_NONE                     ((eLogicSubState)0)
+#define LSS_PURSUIT_FOLLOW           ((eLogicSubState)1)
+#define LSS_FOLLOW_OFFSET            ((eLogicSubState)2)
+#define LSS_LOW_SPEED_CLOSE_FOLLOW   ((eLogicSubState)3)
+#define LSS_FOLLOW_BACKWARDS         ((eLogicSubState)4)
+#define LSS_FLANK                    ((eLogicSubState)5)
+#define LSS_BUMP                     ((eLogicSubState)6)
+#define LSS_BLOCK                    ((eLogicSubState)7)
+#define LSS_GET_AHEAD                ((eLogicSubState)8)
+#define LSS_ACQUIRE                  ((eLogicSubState)9)
+#define LSS_STOP                     ((eLogicSubState)10)
+#define LSS_LIMBO_DISABLED           ((eLogicSubState)11)
+#define LSS_LIMBO_READY              ((eLogicSubState)12)
+#define LSS_CAUGHTSPEEDER_TICKETING  ((eLogicSubState)13)
+#define LSS_CAUGHTSPEEDER_WAITING    ((eLogicSubState)14)
+
+// type#5558, 32 bytes: tCop, the base of tAICop and tPlayerCop. The
+// vptr is the image's table address (vtable.h): 8 the destructor, 16
+// IsAIControlled (pure here; tAICop's 1, tPlayerCop's 0), 24 Think, 32
+// DoSnapshot.
 struct tCop {
-    tPursuit   *pMyPursuit;             //  0 NULL while not chasing
-    struct Car *pMyCar;                 //  4
-    int32_t     nCopNumber;             //  8
-    eLogicState LogicState;             // 12
-    eLogicState DesiredLogicState;      // 16
+    tPursuit      *pMyPursuit;          //  0 NULL while not chasing
+    struct Car    *pMyCar;              //  4
+    int32_t        nCopNumber;          //  8
+    eLogicState    LogicState;          // 12
+    eLogicState    DesiredLogicState;   // 16
+    eLogicSubState LogicSubState;       // 20
+    eLogicSubState DesiredLogicSubState;// 24
+    uint32_t       vptr;                // 28
 };
+
+#define TCOP_VT_DTOR              8
+#define TCOP_VT_IS_AI_CONTROLLED  16
+#define TCOP_VT_THINK             24
+#define TCOP_VT_SNAPSHOT          32
 
 #if UINTPTR_MAX == 0xFFFFFFFFu
 typedef char tcop_layout_check[
     (offsetof(struct tCop, pMyCar) == 4
-     && offsetof(struct tCop, DesiredLogicState) == 16) ? 1 : -1];
+     && offsetof(struct tCop, DesiredLogicState) == 16
+     && offsetof(struct tCop, vptr) == 28 && sizeof(struct tCop) == 32)
+    ? 1 : -1];
 #endif
+
+// tAICop, retail's 96 bytes (the demo's type#5547 is 76): a tCop, then
+// what is read of it so far. Retail's word 32 is new: seconds left before
+// a hard hit can disable the car. Think counts it down by the frame's
+// time while it is above 0, and teleporting the car sets it to 3.
+typedef struct tAICopHead {
+    struct tCop Base;                   //  0
+    float       New32;                  // 32
+} tAICopHead;
 
 // bTNode<tPursuit>: a pursuit's links in the manager's PursuitList. The
 // list's own node is the sentinel, so the last pursuit's Next is the list.
+// bTList<tSpikeStrip> is the same two words.
 typedef struct tPursuitNode {
     struct tPursuitNode *Next;          //  0
     struct tPursuitNode *Prev;          //  4
 } tPursuitNode;
 
-// The demo's type#1640 is 1216 bytes; retail's is longer and these are
-// the words read so far, at retail's offsets on a 32-bit target. The
-// demo's nHUDPursuitLevel was at 1112.
+// The demo's type#1640 is 1216 bytes; retail's is 1600 (its slot pool's
+// slot), and these are the words read so far, at retail's offsets on a
+// 32-bit target. The demo's nHUDPursuitLevel was at 1112.
 struct tPursuit {
     tPursuitNode Node;                  //    0
     uint8_t     Unported8[8];           //    8
     struct Car *pChasedCar;             //   16, the demo's 20
     tRoadBlock *pRoadBlock;             //   20, the demo's 24; NULL for none
-    uint8_t     Unported24[1468];       //   24
+    uint8_t     Unported24[1456];       //   24
+    // Retail's: the manager's PursuitsById slot, from 0x002244a0.
+    int8_t      nPursuitId;             // 1480
+    uint8_t     Unported1481[11];       // 1481
     int32_t     nHUDPursuitLevel;       // 1492  the HUD's pursuit meter
     uint8_t     Unported1496[64];       // 1496
     // Retail's. RenderHud lights one more Be The Cop roadblock, in the
     // "on its way" colour, while it is set.
     int32_t     New1560;                // 1560
+    uint8_t     Unported1564[28];       // 1564
+    uint32_t    vptr;                   // 1592  0x002bd460: 8 the destructor
+    uint8_t     Unported1596[4];        // 1596
 };
+
+#define TPURSUIT_VT_DTOR  8
 
 #if UINTPTR_MAX == 0xFFFFFFFFu
 typedef char tpursuit_layout_check[
     (offsetof(struct tPursuit, pChasedCar) == 16
      && offsetof(struct tPursuit, pRoadBlock) == 20
+     && offsetof(struct tPursuit, nPursuitId) == 1480
      && offsetof(struct tPursuit, nHUDPursuitLevel) == 1492
-     && offsetof(struct tPursuit, New1560) == 1560) ? 1 : -1];
+     && offsetof(struct tPursuit, New1560) == 1560
+     && offsetof(struct tPursuit, vptr) == 1592
+     && sizeof(struct tPursuit) == 1600) ? 1 : -1];
 #endif
 
-// gp-15620, 0x00331bec (the demo's gp-16500). NULL outside a race with
-// cops, and NULL in the port until tCopManager exists.
-extern tCopManager *pCopManager;
+// tSpikeStrip, 2304 bytes in retail: a stinger on the road, in the
+// manager's SpikeStripList. Its links and its table so far.
+typedef struct tSpikeStrip {
+    tPursuitNode Node;                  //    0
+    uint8_t     Unported8[2280];        //    8
+    uint32_t    vptr;                   // 2288  8 the destructor
+    uint8_t     Unported2292[12];       // 2292
+} tSpikeStrip;
 
-// tCopManager's head as Player::SetInputMode and RenderHud read it,
-// inline: the demo's nPlayerCopIndex, Cops[7] and PursuitList were at 8,
-// 12 and 40, and retail's are a word later. Retail's word at 0 is new;
-// RenderHud lights that many of Be The Cop's roadblocks as used. On a
-// 64-bit host the head ends at 88, where the pullovers start, so their
-// byte offsets hold there too.
-typedef struct tCopManagerHead {
-    int32_t  New0;                        //  0
-    int32_t  nNumAICops;                  //  4  PullOver's score walks these
-    int32_t  nNumCops;                    //  8
-    int32_t  nPlayerCopIndex;             // 12  -1 for none
-    tCop    *Cops[7];                     // 16
-    tPursuitNode PursuitList;             // 44  bTList<tPursuit>
-} tCopManagerHead;
+#define TSPIKESTRIP_VT_DTOR  8
 
 #if UINTPTR_MAX == 0xFFFFFFFFu
-typedef char tcopmanagerhead_layout_check[
-    (offsetof(tCopManagerHead, Cops) == 16
-     && offsetof(tCopManagerHead, PursuitList) == 44) ? 1 : -1];
+typedef char tspikestrip_layout_check[
+    (offsetof(tSpikeStrip, vptr) == 2288 && sizeof(tSpikeStrip) == 2304)
+    ? 1 : -1];
 #endif
 
-static inline tCopManagerHead *copmanager_head(tCopManager *m)
-{
-    return (tCopManagerHead *)(void *)m;
-}
-
-// Be A Cop's player cop: Cops[nPlayerCopIndex], or NULL for -1. Retail
-// then reads the cop's pMyCar with no test, through NULL when there is
-// none; the port's callers test. A NULL manager has none here.
-static inline tCop *copmanager_get_player_cop(tCopManager *m)
-{
-    const tCopManagerHead *h = (const tCopManagerHead *)(const void *)m;
-
-    if (h == NULL || h->nPlayerCopIndex == -1)
-        return NULL;
-    return h->Cops[h->nPlayerCopIndex];
-}
-
 // tCarPulloverInfo (type#5538), 28 bytes: a car a cop has pulled over.
-// tCopManager holds eight, CarPullovers, at 88 in retail (the demo's 56).
 typedef struct tCarPulloverInfo {
     int32_t nCopIndex;                    //  0
     float   fHoldTimer;                   //  4
@@ -178,15 +300,124 @@ typedef struct tCarPulloverInfo {
 typedef char tcarpulloverinfo_size_check[
     sizeof(tCarPulloverInfo) == 28 ? 1 : -1];
 
-#define COPMANAGER_PULLOVERS        88
-#define COPMANAGER_NUM_PULLOVERS    8
+// Deque<unsigned int,4> (type#5604), 28 bytes: the speakers' voice ids,
+// popped from the head and pushed back at the tail. Full tells a full
+// ring from an empty one, both with Head == Tail.
+typedef struct CopSpeakerDeque {
+    uint32_t Data[4];                   //  0
+    int32_t  Head;                      // 16
+    int32_t  Tail;                      // 20
+    int32_t  Full;                      // 24
+} CopSpeakerDeque;
 
-// Words past the pullovers, by retail's byte offset; none holds a pointer.
-// Each is the demo's named field 32 bytes on.
-#define COPMANAGER_CHOPPER_BUSY     312    // bChopperBusy, an int
-#define COPMANAGER_CAR_DAMAGE       10420  // fCarDamage[14], by CarIndex
-#define COPMANAGER_BEACOP_TIME      10480  // fBeACopTime, seconds
-#define COPMANAGER_BEACOP_CHOPPERS  10492  // nBeACopNumChopperAttacks
+#define COPMANAGER_MAX_COPS          7
+#define COPMANAGER_MAX_PURSUITS      6
+#define COPMANAGER_NUM_PULLOVERS     8
+#define COPMANAGER_MAX_ROADBLOCKS    64
+#define COPMANAGER_MAX_SPEEDTRAPS    64
+#define COPMANAGER_NUM_CARS          14
+
+// ---------------------------------------------------------- tCopManager
+
+struct tCopManager {
+    int32_t   nBeACopNumRoadBlocks;     //     0  the demo's 10456
+    int32_t   nNumAICops;               //     4
+    int32_t   nNumCops;                 //     8
+    int32_t   nPlayerCopIndex;          //    12  -1 for none
+    tCop     *Cops[COPMANAGER_MAX_COPS];//    16
+    tPursuitNode PursuitList;           //    44  bTList<tPursuit>
+    // Retail's: each pursuit by its id, tPursuit's byte at 1480, which
+    // 0x002244a0 hands out and 0x00224560 clears.
+    tPursuit *PursuitsById[COPMANAGER_MAX_PURSUITS];  // 52
+    tPursuit *New76;                    //    76  a pursuit, deleted first
+    tPursuitNode SpikeStripList;        //    80  bTList<tSpikeStrip>
+    tCarPulloverInfo CarPullovers[COPMANAGER_NUM_PULLOVERS];   // 88
+    int32_t   bChopperBusy;             //   312
+    int32_t   nNumRoadBlocks;           //   316
+    tRoadBlock RoadBlocks[COPMANAGER_MAX_ROADBLOCKS];          // 320
+    int32_t   RealRoadBlockIndexFromDataIndex[64];             // 8000
+    int32_t   nNumSpeedTraps;           //  8256
+    tSpeedTrap SpeedTraps[COPMANAGER_MAX_SPEEDTRAPS];          // 8260
+    int32_t   RealSpeedTrapIndexFromDataIndex[64];             // 10052
+    CopSpeakerDeque CopSpeakers;        // 10308
+    uint32_t  BeACopId;                 // 10336
+    float     TimeSinceLastSpeech;      // 10340
+    float     MaxSpeechGapTime;         // 10344
+    float     fSupervisorTimer;         // 10348
+    uint32_t  SpeechFillerCookie;       // 10352
+    float     fPursuableTimer[8];       // 10356
+    float     fSpeedTrapSpawnTimer[8];  // 10388
+    float     fCarDamage[COPMANAGER_NUM_CARS];                 // 10420
+    int32_t   nDifficultyLevel;         // 10476  0, 1 or 2
+    float     fBeACopTime;              // 10480  seconds
+    int32_t   bBeACopAlreadySaidLookOutForSpeeders;            // 10484
+    int32_t   New10488;                 // 10488
+    int32_t   nBeACopNumChopperAttacks; // 10492
+    int32_t   nBeACopNumArrestsMade;    // 10496
+    int32_t   New10500;                 // 10500
+    // Retail's (0x002276a0): the first cop car's Xdim and Ydim, x 1.1.
+    float     fMaxCopCarXdim;           // 10504
+    float     fMaxCopCarYdim;           // 10508
+    uint32_t  vptr;                     // 10512  0x002bd280
+};                                      // 10516
+
+#define TCOPMANAGER_VTABLE  0x002bd280u
+#define TCOPMANAGER_SIZE    10516
+
+#if UINTPTR_MAX == 0xFFFFFFFFu
+typedef char tcopmanager_layout_check[
+    (offsetof(tCopManager, Cops) == 16
+     && offsetof(tCopManager, PursuitList) == 44
+     && offsetof(tCopManager, PursuitsById) == 52
+     && offsetof(tCopManager, SpikeStripList) == 80
+     && offsetof(tCopManager, CarPullovers) == 88
+     && offsetof(tCopManager, bChopperBusy) == 312
+     && offsetof(tCopManager, RoadBlocks) == 320
+     && offsetof(tCopManager, RealRoadBlockIndexFromDataIndex) == 8000
+     && offsetof(tCopManager, nNumSpeedTraps) == 8256
+     && offsetof(tCopManager, SpeedTraps) == 8260
+     && offsetof(tCopManager, RealSpeedTrapIndexFromDataIndex) == 10052
+     && offsetof(tCopManager, CopSpeakers) == 10308
+     && offsetof(tCopManager, BeACopId) == 10336
+     && offsetof(tCopManager, fPursuableTimer) == 10356
+     && offsetof(tCopManager, fCarDamage) == 10420
+     && offsetof(tCopManager, nDifficultyLevel) == 10476
+     && offsetof(tCopManager, nBeACopNumChopperAttacks) == 10492
+     && offsetof(tCopManager, fMaxCopCarXdim) == 10504
+     && offsetof(tCopManager, vptr) == 10512
+     && sizeof(tCopManager) == TCOPMANAGER_SIZE) ? 1 : -1];
+#endif
+
+// gp-15620, 0x00331bec (the demo's gp-16500). NULL outside a race with
+// cops.
+extern tCopManager *pCopManager;
+
+// The code written before the manager was whole reads its head through
+// this name; it is the manager.
+typedef tCopManager tCopManagerHead;
+
+static inline tCopManagerHead *copmanager_head(tCopManager *m)
+{
+    return m;
+}
+
+// Be A Cop's player cop: Cops[nPlayerCopIndex], or NULL for -1. Retail
+// then reads the cop's pMyCar with no test, through NULL when there is
+// none; the port's callers test. A NULL manager has none here.
+static inline tCop *copmanager_get_player_cop(tCopManager *m)
+{
+    if (m == NULL || m->nPlayerCopIndex == -1)
+        return NULL;
+    return m->Cops[m->nPlayerCopIndex];
+}
+
+// Byte offsets, for the harnesses that poke a manager by them.
+#define COPMANAGER_PULLOVERS        offsetof(tCopManager, CarPullovers)
+#define COPMANAGER_CHOPPER_BUSY     offsetof(tCopManager, bChopperBusy)
+#define COPMANAGER_CAR_DAMAGE       offsetof(tCopManager, fCarDamage)
+#define COPMANAGER_BEACOP_TIME      offsetof(tCopManager, fBeACopTime)
+#define COPMANAGER_BEACOP_CHOPPERS  offsetof(tCopManager, \
+                                             nBeACopNumChopperAttacks)
 
 // The word at 960 of the World's Chopper that 0x00224ec0 wants 0 before
 // a helicopter can be called (hudrender.c's can_call_helicopter).

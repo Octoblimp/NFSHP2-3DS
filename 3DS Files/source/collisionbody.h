@@ -778,13 +778,14 @@ extern int32_t WilliamsAITuningMode;
 // What an impulse reaches that the port does not have yet. The damage, the
 // pursuit and the driver's animation change what happens next, so a NULL
 // seam that is reached aborts, as car.h's AnimatedDriver seams do; nothing
-// sets pCarDamage, pCopManager or pAnimatedDriver yet. The rumble and the
-// force feedback are only felt, so a NULL one is skipped.
+// sets pCarDamage or pAnimatedDriver yet. The rumble and the force
+// feedback are only felt, so a NULL one is skipped.
 //
 //   CarDamage::AddDamage           0x001aba30  BodyDamage, the markers, the
 //                                              glass, the effects, and
 //                                              ApplyDamage
-//   tCopManager::MonitorImpact     0x00213ff0  the pursuit (task 26)
+//   tCopManager::MonitorImpact     0x00213ff0  the pursuit: copmgr.c's
+//                                              copmgr_car_impact
 //   AnimatedDriver::BeginCollision 0x0019fa20  the render path (task 29)
 //   PortRumbleImpact               0x00152fa0  PortRumble, a small envelope
 //   Car::StartForceImpact          0x00133160  PortPlayCrash
@@ -798,8 +799,15 @@ struct tCopManager;
 
 typedef void (*CarDamageAddDamageFn)(struct CarDamage *d, const bVector3 *at,
                                      float amount);
+// The demo calls MonitorImpact(car, amount) whenever there is a cop
+// manager. Retail (0x001d84bc) only calls it for an amount of 1 or more,
+// with a third word: whether one of the body's collisions is two cars'.
+// The seam takes the body so that copmgr.c can do both; this file keeps
+// the demo's test of the manager, which is retail's too.
+struct CarCollisionBody;
 typedef void (*CopManagerMonitorImpactFn)(struct tCopManager *m,
-                                          struct Car *c, float amount);
+                                          struct CarCollisionBody *b,
+                                          float amount);
 typedef void (*AnimatedDriverBeginCollisionFn)(struct AnimatedDriver *d,
                                                int32_t type,
                                                int32_t priority);
