@@ -6,7 +6,7 @@ SLES_507.31.
 cartridge (cJukeboxCartridge), the player (cJukeboxPlayer, the one at
 0x003115d0), sound::jukebox's Start, Stop, DelayedStart, IsPlaying,
 SetSelection and the track-string getters, SaveVolumesForSpeech and the
-saved-volume getter (0x001ae028), sound::Update, and
+saved-volume getter (0x001ae028), sound::Update, sound::Mute, and
 DataAudioOptionsScreen's SetAudioDataFromSound, InitWithDefaults (with
 GenreMgr::Populate) and the apply at 0x001ef120 -- on Fred's own block at
 0x002fc0e4. The harness (tools/src/jukebox_test.c) runs jukebox.c's.
@@ -33,7 +33,7 @@ menu tune, runs the callbacks through play end, fade end and the buffer
 events, the first-pick one-shots in the menu, a race and a pursuit, the
 random first advance, the pause rules under each music volume, the
 delayed start through sound::Update paused, muted and in the frontend,
-the playlist's statuses and genre mask, and each assert. After an op the
+sound::Mute under each enable and category volume, the playlist's statuses and genre mask, and each assert. After an op the
 harness and the model print the same lines; `dump` prints the player,
 its categories and tunes, the sound statics and Fred's 176 bytes.
 
@@ -97,7 +97,7 @@ F = {
     "genre": 0x001aef80, "status": 0x001aefd0, "current": 0x001af040,
     "savedvol": 0x001ae028, "saved": 0x001af7e0,
     "defvol": 0x001afab8,
-    "soundupdate": 0x001af4c0,
+    "soundupdate": 0x001af4c0, "mute": 0x001af850,
     "fromsound": 0x001eef60, "defaults": 0x001ef1c8, "apply": 0x001ef120,
 }
 TRACK = ("artist", "trackname", "label", "genre")
@@ -121,6 +121,10 @@ SILENT = [
     0x002092a0, 0x001cebf0,         # sound3d_oneshot, sound_scape
     0x002157c0, 0x002778f8,         # SpeechNoise, bSound::Update
     0x001ae110, 0x00278190,         # UpdateVolumeMuffler, bSound::SetMode
+    # sound::Mute's other callees: the speech and its noise, the scapes,
+    # the car sounds, the one-shots, the collisions and the chopper.
+    0x0020a2b0, 0x002158a0, 0x001cebf8, 0x001af6f8, 0x00209320,
+    0x001e51c0, 0x001ead80,
 ]
 ALLOCS = [0x002577c0, 0x0025e608, 0x0025e580, 0x00275c88]
 
@@ -274,6 +278,21 @@ def script():
                 ext(["setcatvol|4|" + v4, "setcatvol|5|" + v5, "saved",
                      "state|%d" % st, "stopj", "mstart", "misplaying"])
     ext(["setcatvol|4|3f800000", "setcatvol|5|3f800000", "saved"])
+    # sound::Mute, the pause's: the flag, and the jukebox's Pause by the
+    # volume of its category, up, down to nothing and below, under each
+    # enable; and stopped, with no sample to pause.
+    for se, me in ((0, 1), (1, 0), (1, 1)):
+        a("enable|%d|%d" % (se, me))
+        for cat in (5, 4):
+            a("select|%d" % cat)
+            for v in ("3f000000", "0", "bf800000"):
+                a("setcatvol|%d|%s" % (cat, v))
+                for on in (1, 0, 2):
+                    ext(["starttune|0|1|1", "event|4", "update",
+                         "mute|%d" % on, "dump"])
+            a("setcatvol|%d|3f800000" % cat)
+    ext(["enable|1|1", "stopj", "mute|1", "dump", "mute|0", "dump",
+         "muted|0", "select|5"])
     # DelayedStart through sound::Update.
     ext(["stopj", "delayed|3fc00000", "dt|3f000000", "state|6",
          "soundupdate", "dump", "paused|1", "soundupdate", "dump",
@@ -396,6 +415,7 @@ class Model(object):
         self.speech = e.alloc(64)
         self.locals = e.alloc(64)
         self.strbuf = e.alloc(256)
+        self.chopper = e.alloc(32)
         e.put32(self.vtable + 12, self.dtor)
         for a in SILENT:
             e.stub(a, lambda em: 0)
@@ -647,6 +667,15 @@ class Model(object):
                 self.vol[arg(1)] = fl(2)
         elif o == "soundupdate":
             self.call("soundupdate")
+        elif o == "mute":
+            # Mute reads TheChopperManager's chopper (+24) with no test of
+            # the manager; Update's test of it wants it NULL.
+            keep = e.u32(CHOPPER)
+            e.put32(CHOPPER, self.chopper)
+            try:
+                self.call("mute", arg(1))
+            finally:
+                e.put32(CHOPPER, keep)
         elif o == "state":
             e.put32(STATE, arg(1))
         elif o == "cops":
@@ -1294,9 +1323,26 @@ MUTATIONS = [
        "ao[JB_AO_AUDIO_MODE]);"),
     _m("apply-mode-sign", "return (int16_t)(ao[JB_AO_AUDIO_MODE]",
        "return (uint16_t)(ao[JB_AO_AUDIO_MODE]"),
+    _m("mute-sound", "    if (!s->soundEnabled) return;\n    s->muted = on;",
+       "    s->muted = on;"),
+    _m("mute-flag", "    s->muted = on;\n    if (s->musicEnabled) {",
+       "    if (s->musicEnabled) {"),
+    _m("mute-music", "    s->muted = on;\n    if (s->musicEnabled) {",
+       "    s->muted = on;\n    if (1) {"),
+    _m("mute-flag-late", "    s->muted = on;\n    if (s->musicEnabled) {",
+       "    if (s->musicEnabled) {\n        s->muted = on;"),
+    _m("mute-strict", "int pause = 0.0f < jb_get_category_volume",
+       "int pause = 0.0f <= jb_get_category_volume"),
+    _m("mute-cat", "jb_get_category_volume(s, p->soundCategory)\n",
+       "jb_get_category_volume(s, 5)\n"),
+    _m("mute-down", "? on : (on ? on : 1);", "? on : 1;"),
+    _m("mute-down-on", "? on : (on ? on : 1);", "? on : on;"),
+    _m("mute-up", "? on : (on ? on : 1);", "? (on ? on : 1) : (on ? on : 1);"),
 ]
 EQUIVALENT = {
-    "copy-name-cap": "a name off the cartridge is at most 84 bytes, a "
+    "mute-down": "with the category at nothing `on ? on : 1` is nonzero "
+                 "either way, and cJukeboxPlayer::Pause takes a bool",
+    "copy-name-cap":"a name off the cartridge is at most 84 bytes, a "
                      "category's 60; only a name made by hand reaches 96",
     "getcatvol-bound": "every caller asks for a category 0 to 6",
     "select-col-menu": "SetSelection is only ever called with 4 or 5",

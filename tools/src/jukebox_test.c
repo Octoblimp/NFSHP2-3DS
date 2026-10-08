@@ -288,6 +288,8 @@ static void run(void)
         g_paused = (int)num(1);
     } else if (!strcmp(op, "muted")) {
         snd.muted = (int)num(1);
+    } else if (!strcmp(op, "mute")) {
+        jb_sound_mute(&snd, (int)num(1));
     } else if (!strcmp(op, "dt")) {
         g_dt = fnum(1);
     } else if (!strcmp(op, "enable")) {

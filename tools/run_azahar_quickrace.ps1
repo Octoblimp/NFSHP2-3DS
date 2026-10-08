@@ -13,6 +13,11 @@
 # Usage:
 #   powershell -File tools/run_azahar_quickrace.ps1
 #   powershell -File tools/run_azahar_quickrace.ps1 -CopsOff -WatchSeconds 60
+#   powershell -File tools/run_azahar_quickrace.ps1 -Presses "77:3,65:2"
+#
+# -Presses are single presses, "key:seconds" apart, the first -PressAfter
+# seconds into RACING, with a shot after each (run_azahar_race.ps1's; the
+# key codes are listed there). The watch starts after the last.
 
 param(
     [int]$WatchSeconds = 40,      # after the flow reaches RACING
@@ -21,7 +26,9 @@ param(
     [string]$AzaharExe = "C:\Program Files\Azahar\azahar.exe",
     [string]$Target3dsx = "",
     [string]$OutDir = "",
-    [switch]$CopsOff              # World Racing's Quick Race, not Hot Pursuit's
+    [switch]$CopsOff,             # World Racing's Quick Race, not Hot Pursuit's
+    [string]$Presses = "",
+    [double]$PressAfter = 6
 )
 
 $ErrorActionPreference = "Stop"
@@ -245,6 +252,21 @@ if ($quick) {
     $racing = Wait-ForLog "flow state RACING" 90
     Write-Host ("  RACING: {0}" -f $racing)
 }
+if ($racing -and $Presses -ne "") {
+    Start-Sleep -Milliseconds ([int]($PressAfter * 1000))
+    $i = 0
+    foreach ($p in $Presses.Split(",")) {
+        if (-not (Alive)) { break }
+        $kv = $p.Split(":")
+        $vk = [int]$kv[0]
+        $wait = if ($kv.Count -gt 1) { [double]$kv[1] } else { 2.0 }
+        $i++
+        [Hp2Cap]::PressKey($hwnd, $vk)
+        Write-Host ("  [{0,5:N1}s] press {1}" -f (Elapsed), $vk)
+        Start-Sleep -Milliseconds ([int]($wait * 1000))
+        Shot ("press-{0}-{1}" -f $i, $vk)
+    }
+}
 if ($racing) {
     $end = (Get-Date).AddSeconds($WatchSeconds)
     $n = 0
@@ -280,7 +302,7 @@ else                    { $verdict = "PASS (a race from the frontend, still runn
 
 Write-Host ""
 Write-Host "=== race start and flow ==="
-$dbg | Where-Object { $_ -match "quickrace|race start|  driver|flow (want|state|begin|end)|abort|assert|fatal" } |
+$dbg | Where-Object { $_ -match "quickrace|race start|  driver|flow (want|state|begin|end|change|enter)|popup|mute|not ported|track detached|abort|assert|fatal" } |
     Select-Object -Last 60 | ForEach-Object { Write-Host $_ }
 Write-Host ""
 Write-Host "=== AI racers (last 12) ==="

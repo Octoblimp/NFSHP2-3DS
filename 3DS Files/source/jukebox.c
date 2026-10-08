@@ -750,6 +750,19 @@ bool jb_music_is_playing(JBSound* s)
     return playing && 0.0f < jb_saved_volume(s, 4);
 }
 
+void jb_sound_mute(JBSound* s, int on)
+{
+    if (!s->soundEnabled) return;
+    s->muted = on;
+    if (s->musicEnabled) {
+        JBPlayer* p = &s->jukebox;
+        // A category turned down to nothing stays paused either way.
+        int pause = 0.0f < jb_get_category_volume(s, p->soundCategory)
+                    ? on : (on ? on : 1);
+        jb_pause(p, (uint32_t)pause);
+    }
+}
+
 // 0x002b6300: whether a tune plays, by its status (the rows) and the list
 // (the columns: the menu, a race, a pursuit). Status 0 never plays, 1 only
 // in a pursuit, 2 in a race, 3 in the menu, 4 in the menu and races, 5

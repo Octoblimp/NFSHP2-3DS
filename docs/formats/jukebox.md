@@ -13,9 +13,9 @@ Ported to `3DS Files/source/jukebox.{c,h}`, free of `<3ds.h>`. The 3DS half
 Cross-checked by:
 
 - `tools/jukebox_check.py` against `tools/src/jukebox_test.c`: retail's
-  code in mipsemu next to the port, 952 ops, with a fake sample on both
-  sides and two made-up cartridges plus the retail one. `--mutate` runs 283
-  mutations of `jukebox.c`; four are equivalent by construction (listed in
+  code in mipsemu next to the port, 1263 ops, with a fake sample on both
+  sides and two made-up cartridges plus the retail one. `--mutate` runs 292
+  mutations of `jukebox.c`; five are equivalent by construction (listed in
   the checker's `EQUIVALENT`).
 - `tools/jbstream_check.py` against `tools/src/jbstream_test.c`: the stream
   decoder against `tools/audio_convert.py`'s ADPCM decoder on real tunes,
@@ -84,6 +84,12 @@ The status is a number, 0 to 5, and says which lists a tune is on
 
 The retail tunes are 4 (the vocal ones), 2 (the instrumentals and remixes)
 and 0. So the main menu picks among the eight 4s.
+
+The first tune of each list is fixed, once a boot (0x001aea40): the
+playlist's entry 5 in the menu ("Fever for the Flava"), 7 in a race, 14
+in a pursuit. After that, each list carries on from where the jukebox
+is. So the menu after a race plays the next menu tune, not the opener
+again.
 
 ## How it runs
 
@@ -167,6 +173,11 @@ The jukebox stops when the menus go, and the race starts its own:
   `jb_music_update` counts the timer down outside the frontend.
 - `RaceCoordinator`'s cleanup calls `Stop`; `RESTART_RACE` parks the timer
   at 9e9 for the next start.
+- The pause menu calls `sound::Mute` (`0x001af850`, `jb_sound_mute`):
+  1 as it comes up, 0 on Resume. With sound up it sets `Mute`'s flag
+  (gp-19040). With music up it pauses the player on `on`. If the
+  player's category volume is at nothing, it stays paused either way.
+  See [pause-menu.md](pause-menu.md).
 
 That `TICK` reads the replay's beginning of time, `ReplayManager`'s Timer at
 +92. The port's stand-in `ReplayManager` is zeroed, so main.c's

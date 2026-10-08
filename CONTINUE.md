@@ -1,7 +1,7 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 47
-(2026-10-07), after 11g-2c-2b, the Starting Grid.
+Where the next session picks up. Updated in Session 48
+(2026-10-07), after 11g-2d, the pause menu.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
@@ -27,8 +27,9 @@ finish. Azahar's run shows lap 1 of 2 with the three AI racers ahead.
 3-2-1 is in the drive camera, as on retail. 11g-2c-2a, the fly-by
 camera (TrackFlyCameraMover and FlyByCameraCoordinator), and 11g-2c-2b,
 the Starting Grid over it, are done: a quick race from the frontend
-shows the grid over the fly-by, and A goes on to the countdown. Next
-is the pause menu (the user's ask, 2026-10-07), then 11g-2c-2c, the
+shows the grid over the fly-by, and A goes on to the countdown.
+11g-2d, the pause menu (the user's ask, 2026-10-07), is done: START
+pauses, and Resume, Restart and Quit work. Next is 11g-2c-2c, the
 pre-race camera. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
@@ -737,28 +738,58 @@ car's were.
     1538 of its 2448 lines.
   - **Open:** grey specks show over the grid's backdrop along far road
     lines. Their cause is not known; look for them on the device.
-  - **The pause menu is missing.** START in a race posts
-    REQUEST_PAUSE. rcpost's PAUSE then changes to "Pause Menu", which
-    no kScreens row has. The race stays paused with no screen and no
-    way out (see "Next", item 1).
+- **11g-2d, done: the pause menu** (the user's ask, 2026-10-07).
+  - `pausemenu.c` is retail's PAUSE_MAIN module (0x00170560 to
+    0x001710f4): PauseMenu (56 bytes) with EnterPause, ExitPause,
+    Activate, DeActivate, MaybeRestart, MaybeQuit, MaybeResume and
+    MenuCallback; PauseMenuCallback; ChooseWhoSelectedMenuItem; and
+    tHighlightAnimation's new HandleMessage (0x00248ae0), the bloom.
+  - `jukebox.c` adds sound::Mute (0x001af850), `jb_sound_mute`, for
+    RCSTATE_PAUSE's mute.
+  - main.c registers "Pause Menu" (0x605d2bf1) and fills the pause
+    seams. `flowInput` now runs after `raceFrame` in a race, as
+    retail's GenerateJoyEvents does, so the START that pauses does not
+    also unpause. `flowChangeToScreen` keeps the screen up when asked
+    for one not ported (Pause Options, Race Objective, the BAC
+    controls). `flowBeginUnloadingTrackCommon` hides every INGAMEB and
+    FRONTB screen, so the Quit popup (KEEP_VISIBLE, drawn from FRONTB's
+    POPUP) no longer stays over the frontend (the user's screenshot).
+  - **The check:** `pausemenu_check`: 14633 ops, 28698 lines, 0
+    differ; 198 mutations, all caught. `jukebox_check`: 1263 ops, 7061
+    lines, 0 differ; 292 mutations, 287 caught, 5 equivalent.
+    `docs/formats/pause-menu.md`.
+  - **On Azahar:** the menu draws and mutes the music; Resume unmutes;
+    Restart works with Cancel and OK; Quit unloads to the frontend
+    (from SkipFE to the language screen, as retail's
+    frontendLaunchType 1 does; from a quick race to the New Main Menu).
+    The linear heap is back to 68926 KB free once the track detaches
+    (69397 at boot).
+  - **The music after a quit is retail's.** "Fever for the Flava" opens
+    the menu once a boot (jukebox.c's `jb_first_pick`, 0x001aea40);
+    later visits carry on down the menu list. The user found that odd
+    (2026-10-07); a port option like `randomRaceOpener` could reopen
+    the menu with it every time if they want.
+  - **Left of the pause:** Pause Options with its audio and display
+    pages (0x00171180 to 0x00173e30), Race Objective and the BAC
+    controls (0x00171a28 to 0x00172068). Until then those items do
+    nothing.
 - **Next, in this order:**
-  1. **The pause menu, next** (the user's ask, 2026-10-07): INGAMEB's
-     pause screens, from rcpost's ChangeToScreen("Pause Menu", 1). At
-     least Resume and Quit, so START in a race is not a dead end.
-  2. **11g-2c-2c, the pre-race camera** (the user's photo 2, a close-up
+  1. **11g-2c-2c, the pre-race camera** (the user's photo 2, a close-up
      of the player's car after X). trackflow.c's Part3 already loads
      PRERACEANIM.LZC on the frontend's path. What is left:
      - BumperCameraMover (0x00158800, 1116 bytes);
      - the PreRace coordinator (0x0019ad78);
      - the AnimatedDriver that PRERACEANIM feeds.
      Until then PRERACE ends at once.
-  3. **The rear-view mirror** (the user's photo 5):
+  2. **The rear-view mirror** (the user's photo 5):
      SetRearViewMirrorCameraMover, plus the mirror's view and its HUD
      frame, top centre on the top screen.
-  4. **11h-3, TrafficTeleporter** (0x002226f8 on; PlaceNewCar
+  3. **11h-3, TrafficTeleporter** (0x002226f8 on; PlaceNewCar
      0x002228e0, DoTimestep 0x002227e0), which places the traffic.
-  5. Step 12, the cops.
-  6. The PostRace and Demo coordinators.
+  4. Step 12, the cops.
+  5. The PostRace and Demo coordinators.
+  6. The pause's other screens (Pause Options and its pages, Race
+     Objective, the BAC controls), with the frontend's.
 
 ## Waiting on the device: 13b-4f, the device GPU's cost per model
 
@@ -4332,15 +4363,14 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-07, after 11g-2c-2b)
+### Where the port stands (2026-10-07, after 11g-2d)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** the pause menu (the user's ask), then step 11's
-  11g-2c-2c, the pre-race camera, the rear-view mirror and 11h-3, the
+- **Next:** step 11's 11g-2c-2c, the pre-race camera, the rear-view mirror and 11h-3, the
   TrafficTeleporter.
   See "Now" at the top.
   These are done:
@@ -4371,7 +4401,8 @@ goes in.
   - 11g-2b, Race::Update;
   - 11g-2c-1, the camera data and the countdown coordinator;
   - 11g-2c-2a, the fly-by camera;
-  - 11g-2c-2b, the Starting Grid.
+  - 11g-2c-2b, the Starting Grid;
+  - 11g-2d, the pause menu.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2

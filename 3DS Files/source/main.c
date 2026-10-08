@@ -121,6 +121,7 @@
 #include "avimovie.h"
 #include "mainloop.h"
 #include "mellowmover.h"
+#include "pausemenu.h"
 #include "physcomp.h"
 #include "physicscar.h"
 #include "physicssystem.h"
@@ -303,6 +304,10 @@ static const BScreenConfig kScreens[] = {
       pre_race_stats_callback },
     { "Pre Race Letterbox",      STARTRACE_SCREEN_LETTERBOX,
       pre_race_letterbox_callback },
+    // RCSTATE_PAUSE's (pausemenu.c). Options, the objective, the cop
+    // controls and the debug menu it leads to are not ported yet.
+    { "Pause Menu",              PAUSE_MENU_SCREEN,
+      pause_menu_callback },
 };
 #define NUM_SCREENS ((int)(sizeof(kScreens) / sizeof(kScreens[0])))
 
@@ -343,10 +348,30 @@ static void flowBeginUnloadingTrackSpecific(BGameFlow* gf)
     BeginGameFlowUnloadingTrackSpecific();
 }
 
+// FRONTB and INGAMEB as the UI holds them: both read at boot and kept.
+// Retail loads FRONTB with the frontend and INGAMEB with the track's
+// common files, and unloads each with them.
+static UIBundle* g_frontBundle;
+static UIBundle* g_ingameBundle;
+
+// A bundle's screens as its load leaves them: every one down.
+static void hideBundleScreens(UIBundle* b)
+{
+    if (b == NULL || !b->hasUI) return;
+    for (uint32_t i = 0; i < b->ui.numScreens; i++)
+        b->ui.screens[i].visible = false;
+}
+
 static void flowBeginUnloadingTrackCommon(BGameFlow* gf)
 {
     gTrackFlowGameFlow = gf;
     BeginGameFlowUnloadingTrackCommon();
+    // INGAMEB's screens go with its file, and the frontend that loads next
+    // has FRONTB's all down. Here both stay, and a find takes FRONTB's of
+    // the three screens they share: Quit Race's popup, KEEP_VISIBLE, is
+    // FRONTB's POPUP, still up. The LOADING screen is GLOBALB's.
+    hideBundleScreens(g_ingameBundle);
+    hideBundleScreens(g_frontBundle);
 }
 
 // GameFlowStateInfoTable, retail's 0x002faea0. IN_FRONTEND and RACING are
@@ -424,10 +449,10 @@ static GeoView g_geo;
 // the texture packs' indexes ride along.
 static TrackView g_track;
 
-// The frontend's 3D view, the car select's (trackview_attach_frontend),
-// and FRONTB as the UI holds it, whose engine half frontres loads.
+// The frontend's 3D view, the car select's (trackview_attach_frontend).
+// FRONTB as the UI holds it, whose engine half frontres loads, is with
+// INGAMEB's, above.
 static TrackView g_feView;
-static UIBundle* g_frontBundle;
 
 // ------------------------------------------------------- the run log
 //
@@ -3416,8 +3441,17 @@ static int32_t track_fly_mover_is_finished(CameraMover* m)
 // ChangeToScreen (0x0014cc78) for the race's code: the flow's, which hides
 // and unactivates the screen up, pushes it when asked, and activates the
 // new one with its menu, which then has the pad.
+//
+// The port's guard: a screen with no kScreens row would be a change to
+// nothing, with the race paused under it. The pause menu's Options, View
+// Objective and View Cop Controls are such screens until they are ported,
+// so for them the screen up stays, and the log says which was asked for.
 static void flowChangeToScreen(const char* name, int32_t push)
 {
+    if (name != NULL && name[0] && bgf_find_screen(&g_flow, name) == NULL) {
+        logLine("race: screen \"%s\" not ported, the screen up stays", name);
+        return;
+    }
     bgf_change_to_screen(&g_flow, name, push);
 }
 
@@ -3431,6 +3465,121 @@ static const char* startRaceTranslate(int32_t id)
 static const char* startRaceTranslateString(const char* s)
 {
     return hookCarSelTranslateString(&g_boot, s);
+}
+
+// ------------------------------------------------------- the pause menu
+//
+// pausemenu.c's seams. ThePauseMenu is the coordinator's, made on its
+// bMalloc; the screen and its popups are the flow's.
+
+static struct PauseMenu* pauseMenuNew(void* mem)
+{
+    return pause_menu_construct((PauseMenu*)mem);
+}
+
+// GrayMenuItem (0x0016d198), in retail's argument order.
+static void pauseGrayMenuItem(uint32_t item, int32_t mode, uint32_t screen)
+{
+    hookGrayMenuItem(&g_boot, screen, item, (BScrGrayMode)mode);
+}
+
+// SummonPopup on TheFlailerScreenList: the flow's. The popup's answer goes
+// to the parent's callback, the Pause Menu's.
+static void pauseSummonPopup(const BPopupConfig* cfg)
+{
+    if (bpopup_summon(&g_flow, cfg) < 0)
+        logLine("pause: no popup free");
+}
+
+static const struct BScreenConfig* flowCurrentScreen(void)
+{
+    return g_flow.screen;
+}
+
+// The bloom draws with the flow's animation kit, on the flow's clock.
+static BAnim* pauseMenuAnim(void)
+{
+    banim_set_clock(g_flow.anim, (int32_t)g_flow.realTimer,
+                    g_flow.realElapsed);
+    return g_flow.anim;
+}
+
+// ChangeGameFlow (0x001680d8) for RCSTATE_NONE: Quit Race's unloading, and
+// NEXT_RACE's.
+static void raceChangeGameFlow(int32_t desired, int32_t pending)
+{
+    logLine("race: change game flow %d pending %d", (int)desired,
+            (int)pending);
+    bgf_change_state(&g_flow, desired, pending);
+}
+
+// sound::Mute (0x001af850): the pause's, and RESTART_RACE's unmute.
+static void raceSoundMute(int32_t on)
+{
+    jb_sound_mute(&g_jukebox, on);
+    logLine("sound mute %d", (int)on);
+}
+
+// FlailerScreenList::JoyHandler and FlailerMenu's: this frame's presses to
+// the popups, the screen up and its menu. Nonzero when one went anywhere.
+static int flowInput(u32 kDown)
+{
+    int redraw = 0;
+
+    // A popup that is up has each event before the screen and its menu,
+    // and takes every one -- the memory card's messages ignore SELECT and
+    // BACK, but the title underneath does not get them either.
+    u32 flowDown = kDown;
+    if (bpopup_any_active(&g_flow)) {
+        static const struct { u32 key; BJoyEvent ev; } kPopupBinds[] = {
+            { KEY_START, BJOY_START },
+            { KEY_B,     BJOY_MENU_BACK },
+        };
+        for (int i = 0; i < NUM_BINDS; i++)
+            if ((kDown & kBinds[i].key)
+                && bpopup_joy(&g_flow, 0, kBinds[i].ev, 1))
+                flowDown &= ~kBinds[i].key;
+        for (int i = 0; i < 2; i++)
+            if ((kDown & kPopupBinds[i].key)
+                && bpopup_joy(&g_flow, 0, kPopupBinds[i].ev, 1))
+                flowDown &= ~kPopupBinds[i].key;
+        if (flowDown != kDown) redraw = 1;
+    }
+    // START goes through the menu, as FlailerMenu's JoyHandler takes it:
+    // the screen has it as SCREEN_START_BUTTON first, and unless the screen
+    // consumes it, the current item has it as a select. That second half
+    // is how START leaves PRESS START and skips the NFS intro; the title
+    // screen only swallows the click.
+    if (flowDown & KEY_START) {
+        if (g_boot.hasMenu) {
+            bmenu_joy(&g_boot.menu, 0, BJOY_START, true);
+        } else {
+            bgf_screen_event(&g_flow, BMSG_SCREEN_START_BUTTON, 0);
+        }
+        redraw = 1;
+    }
+    // FlailerScreenList::JoyHandler's BACK: the screen hears
+    // SCREEN_BACK_BUTTON first and may veto the pop.
+    if (flowDown & KEY_B) {
+        bgf_back_button(&g_flow, 0);
+        redraw = 1;
+    }
+    // JOY_EVENT_MAIN_MENU_SELECT_TRANSMISSION. The Mode Selects register a
+    // handler for it and do nothing but remember whether it is down;
+    // StartQuickRace reads that at the moment it runs. So it is a held
+    // button, not a pressed one, and the state goes through every frame
+    // rather than on an edge.
+    bscr_joy(&g_uiScreens, 0, BSCR_JOY_SELECT_TRANSMISSION,
+             (hidKeysHeld() & KEY_X) ? 1 : 0);
+
+    if (g_boot.hasMenu) {
+        for (int i = 0; i < NUM_BINDS; i++) {
+            if (!(flowDown & kBinds[i].key)) continue;
+            bmenu_joy(&g_boot.menu, 0, kBinds[i].ev, true);
+            redraw = 1;
+        }
+    }
+    return redraw;
 }
 
 int main(int argc, char** argv)
@@ -3511,12 +3660,29 @@ int main(int argc, char** argv)
     // The screens over the fly-by (11g-2c-2b, startrace.c): CAMERA_FLYBY's
     // ACTIVATE and UNACTIVATE put them up and take them down through the
     // flow's ChangeToScreen, which the pause's "Pause Menu" also goes
-    // through (not registered: the pause menu is not ported).
+    // through.
     gEnableStartRaceScreensFn = enable_start_race_screens;
     gDisableStartRaceScreensFn = disable_start_race_screens;
     gChangeToScreenFn = flowChangeToScreen;
     gStartRaceTranslateFn = startRaceTranslate;
     gStartRaceTranslateStringFn = startRaceTranslateString;
+
+    // The pause menu (pausemenu.c): the coordinator makes ThePauseMenu,
+    // RCSTATE_PAUSE enters and leaves it, and mutes the music under it.
+    // One pad, no rumble and no instant replay: the filter, the force and
+    // the snapshot count stay NULL. RESTART_RACE and QUIT_RACE go through
+    // RCSTATE_NONE, QUIT_RACE on to the unloading.
+    gPauseMenuCtorFn = pauseMenuNew;
+    gPauseMenuDestroyFn = pause_menu_destroy;
+    gPauseMenuEnterPauseFn = pause_menu_enter_pause;
+    gPauseMenuExitPauseFn = pause_menu_exit_pause;
+    gGrayMenuItemFn = pauseGrayMenuItem;
+    gSummonPopupFn = pauseSummonPopup;
+    gFlailerCurrentScreenFn = flowCurrentScreen;
+    gPauseTranslateFn = startRaceTranslate;
+    gPauseMenuAnimFn = pauseMenuAnim;
+    gChangeGameFlowFn = raceChangeGameFlow;
+    gSoundMuteFn = raceSoundMute;
 
     // World::DoTimestep's Race::Update and SimulateRaceFinish's
     // Race::FinishCar (11g-2b): the countdown's end, the laps and the
@@ -3950,6 +4116,7 @@ int main(int argc, char** argv)
     // than behind the loader; and INGAMEB, which the track viewer shares.
     g_frontBundle = addBundle(&ui, BUNDLE_FRONTEND);
     UIBundle* ingameBundle = addBundle(&ui, BUNDLE_INGAME);
+    g_ingameBundle = ingameBundle;
     gElInFrontendFn      = elInFrontend;
     gElCarSelectActiveFn = bcarsel_active;
     // InitializeEverything's InitCarLoader (0x001b0260), after the
@@ -4360,60 +4527,10 @@ int main(int argc, char** argv)
 
         if (mode == MODE_FLOW) {
             // ---- the boot flow
-            // FlailerScreenList::JoyHandler: a popup that is up has each
-            // event before the screen and its menu, and takes every one --
-            // the memory card's messages ignore SELECT and BACK, but the
-            // title underneath does not get them either.
-            u32 flowDown = kDown;
-            if (bpopup_any_active(&g_flow)) {
-                static const struct { u32 key; BJoyEvent ev; } kPopupBinds[] = {
-                    { KEY_START, BJOY_START },
-                    { KEY_B,     BJOY_MENU_BACK },
-                };
-                for (int i = 0; i < NUM_BINDS; i++)
-                    if ((kDown & kBinds[i].key)
-                        && bpopup_joy(&g_flow, 0, kBinds[i].ev, 1))
-                        flowDown &= ~kBinds[i].key;
-                for (int i = 0; i < 2; i++)
-                    if ((kDown & kPopupBinds[i].key)
-                        && bpopup_joy(&g_flow, 0, kPopupBinds[i].ev, 1))
-                        flowDown &= ~kPopupBinds[i].key;
-                if (flowDown != kDown) redraw = 1;
-            }
-            // START goes through the menu, as FlailerMenu's JoyHandler takes
-            // it: the screen has it as SCREEN_START_BUTTON first, and unless
-            // the screen consumes it, the current item has it as a select.
-            // That second half is how START leaves PRESS START and skips
-            // the NFS intro; the title screen only swallows the click.
-            if (flowDown & KEY_START) {
-                if (g_boot.hasMenu) {
-                    bmenu_joy(&g_boot.menu, 0, BJOY_START, true);
-                } else {
-                    bgf_screen_event(&g_flow, BMSG_SCREEN_START_BUTTON, 0);
-                }
-                redraw = 1;
-            }
-            // FlailerScreenList::JoyHandler's BACK: the screen hears
-            // SCREEN_BACK_BUTTON first and may veto the pop.
-            if (flowDown & KEY_B) {
-                bgf_back_button(&g_flow, 0);
-                redraw = 1;
-            }
-            // JOY_EVENT_MAIN_MENU_SELECT_TRANSMISSION. The Mode Selects
-            // register a handler for it and do nothing but remember whether
-            // it is down; StartQuickRace reads that at the moment it runs.
-            // So it is a held button, not a pressed one, and the state goes
-            // through every frame rather than on an edge.
-            bscr_joy(&g_uiScreens, 0, BSCR_JOY_SELECT_TRANSMISSION,
-                     (hidKeysHeld() & KEY_X) ? 1 : 0);
-
-            if (g_boot.hasMenu) {
-                for (int i = 0; i < NUM_BINDS; i++) {
-                    if (!(flowDown & kBinds[i].key)) continue;
-                    bmenu_joy(&g_boot.menu, 0, kBinds[i].ev, true);
-                    redraw = 1;
-                }
-            }
+            // In the frontend the screens have the pad before the flow's
+            // pass. A race's have it after the coordinator's queue and
+            // the players' events, below.
+            if (!raceUp && flowInput(kDown)) redraw = 1;
 
             // MainLoop: one pass of the flow per frame, by the real step.
             // bgf_frame is the flow's service and the menus' tick both.
@@ -4427,8 +4544,18 @@ int main(int argc, char** argv)
             MainLoopTiming.UpdateCameraMovers = MainLoopTiming.ServiceGameFlow;
             if (raceUp && pRaceCoordinator != NULL) {
                 raceFrame();
+                // GenerateJoyEvents hands the Flailer and the players the
+                // same events, after ExecuteQueuedMessages: the START that
+                // resumes the race posts the unpause, and the players,
+                // still paused, let it go. Before the queue it would be
+                // racing again by the players' turn, and pause again.
+                if (flowInput(kDown)) redraw = 1;
                 hangwatch_mark("race: the track's attach");
                 (void)raceAttachTrack();
+            } else if (raceUp) {
+                // The coordinator went in the flow's pass (Quit Race's
+                // unloading): the pad is the screen's that is up.
+                if (flowInput(kDown)) redraw = 1;
             } else if (g_flow.current == BGF_IN_FRONTEND) {
                 // MainLoop's UpdateCameraMovers, which raceFrame makes in
                 // a race; in the frontend the car select's camera is the
@@ -4440,7 +4567,10 @@ int main(int argc, char** argv)
             // before anything else can read it.
             if (pRaceCoordinator == NULL && g_track.attached) {
                 trackview_free(&g_track);
-                logLine("race: track detached");
+                struct mallinfo mi = mallinfo();
+                logLine("race: track detached (heap: %lu KB used; linear "
+                        "%lu KB free)", (unsigned long)mi.uordblks / 1024,
+                        (unsigned long)linearSpaceFree() / 1024);
             }
 
             // This used to be five lines of console on the bottom screen.

@@ -16656,3 +16656,108 @@ The user asked for the pause menu next (2026-10-07), so it comes before
 2. 11g-2c-2c: BumperCameraMover, the PreRace coordinator and the
    AnimatedDriver.
 3. The rear-view mirror.
+
+## Session 48 (2026-10-07) -- 11g-2d, the pause menu
+
+The user asked for the pause menu before the pre-race camera. START in a
+race paused it with no screen and no way out.
+
+### What is ported
+
+- `pausemenu.c` (0x00170560 to 0x001710f4), retail's PAUSE_MAIN:
+  - PauseMenu, 56 bytes: the constructor and destructor, EnterPause,
+    ExitPause, Activate, DeActivate, AllPlayerJoysticksPluggedIn,
+    CheckJoysticks, MaybeRestart, MaybeQuit, MaybeResume and
+    MenuCallback;
+  - PauseMenuCallback, the screen's callback;
+  - ChooseWhoSelectedMenuItem;
+  - tHighlightAnimation's new HandleMessage (0x00248ae0), which moves
+    and animates the bloom.
+- `jukebox.c`: sound::Mute (0x001af850) as `jb_sound_mute`. It pauses
+  the music, and with the category's volume at nothing keeps it paused
+  either way.
+- **The wiring in main.c:**
+  - "Pause Menu" (0x605d2bf1) is added to kScreens[];
+  - the pause seams: the menu's constructor, destructor, EnterPause and
+    ExitPause, GrayMenuItem, SummonPopup, the current screen, the
+    translate, the bloom's BAnim, ChangeGameFlow and Mute.
+  - SetScreenFilterPort, PortStopForce, the replay's snapshot count and
+    the type-changed handlers' restore stay NULL. There is one pad and
+    no rumble, and with no replay View Replay stays grayed.
+
+### Three fixes along the way
+
+- **The input order.** The first run paused and unpaused on the same
+  START. Retail's GenerateJoyEvents runs after ExecuteQueuedMessages and
+  gives the same events to the Flailer and the players. The port read
+  the screens' input before the race frame, so the menu was up in time
+  to see the START that put it up. The screens' input is now
+  `flowInput`, which runs after `raceFrame` in a race and before the
+  flow's frame otherwise.
+- **Screens not yet ported.** Options, View Objective and View Cop
+  Controls change to screens no kScreens row has. The flow took the
+  menu down and left nothing. `flowChangeToScreen` now keeps the screen
+  up and logs "not ported".
+- **The Quit popup over the frontend** (the user's screenshot: QUIT
+  RACE over Language Options). The Quit popup is KEEP_VISIBLE, so
+  retail leaves it up over the unloading. Retail then unloads INGAMEB
+  with the track's common files. The port keeps FRONTB and INGAMEB
+  from boot, and POPUP (0x037f3133) is in both. `uirender_find_screen`
+  finds FRONTB's first, so the popup stayed drawn over the frontend.
+  `flowBeginUnloadingTrackCommon` now hides every screen of both
+  bundles, which is what dropping them does in retail.
+
+### Things that look wrong but are retail
+
+- **Quitting a SkipFE race lands on the language screen.**
+  frontendLaunchType is 1 from boot, and only UnlaunchFrontendMenus
+  writes it. SkipFE never ran that, so the frontend runs its boot
+  stages: autoload, language, title. A race from the frontend returns
+  to the New Main Menu (game types 2 to 7) or the event tree (8, 9).
+- **A different tune in the menu after a quit** (the user noticed).
+  The jukebox's first pick (0x001aea40) plays "Fever for the Flava"
+  once a boot. Later menu visits carry on down the menu list.
+  `jukebox_check` runs this from retail's code.
+- **The gap in the menu.** A hidden item keeps its place, so a quick
+  race's menu has a space where View Objective and View Cop Controls
+  would be.
+- **"Player1" and "Speedster" taking turns on the HUD after a restart.**
+  That is hudrender's name alternation, every 500 frames.
+
+### The check
+
+- `tools/pausemenu_check.py`: retail's PAUSE_MAIN in RetailEmu, with
+  every call it makes stubbed and printing on both sides. 14633 ops,
+  28698 lines, 0 differ. 198 mutations, all caught.
+- `tools/jukebox_check.py` gains sound::Mute under each enable, both
+  categories, three volumes, and `on` at 0, 1 and 2. 1263 ops, 7061
+  lines, 0 differ. Of 292 mutations, 287 are caught and 5 are
+  equivalent. The new equivalent one is `mute-down`: with the volume
+  at nothing, `on ? on : 1` and 1 are both true, and
+  cJukeboxPlayer::Pause takes a bool.
+
+### On Azahar
+
+`run_azahar_race.ps1` and `run_azahar_quickrace.ps1` gain `-Presses`,
+single key presses after RACING with a shot after each.
+
+- The menu draws over the race and mutes the music.
+- Resume unmutes, and the race goes on with no second pause.
+- Restart: Cancel brings the menu back; OK restarts the race.
+- Quit: UNLOADING_TRACK_SPECIFIC, UNLOADING_TRACK_COMMON,
+  LOADING_FRONTEND, IN_FRONTEND, with no popup left over. From a quick
+  race it lands on the New Main Menu.
+- The memory comes back. The linear heap is 69397 KB free at boot,
+  23844 KB in the race, and 68926 KB once the track detaches. The log
+  line now prints it.
+
+### Next
+
+1. 11g-2c-2c: BumperCameraMover (0x00158800), the PreRace coordinator
+   (0x0019ad78) and the AnimatedDriver.
+2. The rear-view mirror.
+3. 11h-3, TrafficTeleporter.
+4. Step 12, the cops.
+5. The PostRace and Demo coordinators.
+6. The pause's other screens (Pause Options and its pages, Race
+   Objective, the BAC controls) go with the frontend's screens.

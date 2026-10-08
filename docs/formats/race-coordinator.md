@@ -581,6 +581,9 @@ the replay's sound for the highlights, and `EndCurrentHighlightTime`
   - Any other reason is taken and does nothing.
 - Anything else answers 0.
 
+The menu itself, and what main.c does around it, is in
+[pause-menu.md](pause-menu.md).
+
 ### `RCSTATE_POSTRACE`
 
 - `ACTIVATE`:

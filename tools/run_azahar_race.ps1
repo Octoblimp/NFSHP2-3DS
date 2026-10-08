@@ -17,10 +17,18 @@
 #   powershell -File tools/run_azahar_race.ps1 -HoldKeys 65,70 -ShotSeconds 1
 #                                    # a circle to the left, a shot a second
 #
+#   powershell -File tools/run_azahar_race.ps1 -Presses "77:3,71:1,65:3"
+#                                    # START, down, A: the pause menu
+#
 # -HoldKeys are virtual-key codes in Azahar's default keyboard profile (A is
-# 65, B 83, the D-pad's left and right F 70 and H 72), held from the moment
-# the flow enters RACING until the run ends. They are posted again every
-# 150 ms, as R is, so a press Azahar drops does not end the hold.
+# 65, B 83, START 77, the D-pad's up, down, left and right T 84, G 71, F 70
+# and H 72), held from the moment the flow enters RACING until the run
+# ends. They are posted again every 150 ms, as R is, so a press Azahar
+# drops does not end the hold.
+#
+# -Presses are single presses, "key:seconds" apart, the first -PressAfter
+# seconds into RACING, with a shot after each. The watch starts after the
+# last.
 
 param(
     [int]$WatchSeconds = 30,      # after the race start, before the last shot
@@ -29,7 +37,9 @@ param(
     [string]$Target3dsx = "",
     [string]$OutDir = "",
     [int[]]$HoldKeys = @(),
-    [double]$ShotSeconds = 5      # between the shots while racing
+    [double]$ShotSeconds = 5,     # between the shots while racing
+    [string]$Presses = "",
+    [double]$PressAfter = 6
 )
 
 $ErrorActionPreference = "Stop"
@@ -173,9 +183,28 @@ $loop = Wait-ForLog "entering main loop" 60
 Write-Host ("  SkipFE: {0}  race start: {1}  main loop: {2}" -f $skip, $race, $loop)
 Shot "race-start"
 
-if ($HoldKeys.Count -gt 0) {
+if ($HoldKeys.Count -gt 0 -or $Presses -ne "") {
     $racing = Wait-ForLog "flow state RACING" 60
     Write-Host ("  RACING: {0}; holding {1}" -f $racing, ($HoldKeys -join ","))
+}
+
+# A press is held for 150 ms: the race reads the pad at 30 a second.
+if ($Presses -ne "") {
+    Start-Sleep -Milliseconds ([int]($PressAfter * 1000))
+    $i = 0
+    foreach ($p in $Presses.Split(",")) {
+        if (-not (Alive)) { break }
+        $kv = $p.Split(":")
+        $vk = [int]$kv[0]
+        $wait = if ($kv.Count -gt 1) { [double]$kv[1] } else { 2.0 }
+        $i++
+        [Hp2Race]::KeyDown($hwnd, $vk)
+        Start-Sleep -Milliseconds 150
+        [Hp2Race]::KeyUp($hwnd, $vk)
+        Write-Host ("  [{0,5:N1}s] press {1}" -f (Elapsed), $vk)
+        Start-Sleep -Milliseconds ([int]($wait * 1000))
+        Shot ("press-{0}-{1}" -f $i, $vk)
+    }
 }
 
 $end = (Get-Date).AddSeconds($WatchSeconds)
@@ -197,7 +226,7 @@ Write-Host ""
 Write-Host "Shots in $OutDir"
 if (Test-Path $debugLog) {
     Write-Host "--- nfshp2_debug.txt (race lines) ---"
-    Select-String -Path $debugLog -Pattern "SkipFE|race start|  driver|flow (want|state|begin|end|load)|carloader|resource|streamed|global chunks|abort|assert|fatal" |
+    Select-String -Path $debugLog -Pattern "SkipFE|race start|  driver|flow (want|state|begin|end|load)|carloader|resource|streamed|global chunks|pause|popup|mute|not ported|change game flow|track detached|abort|assert|fatal" |
         Select-Object -Last 80 |
         ForEach-Object { Write-Host ("  " + $_.Line) }
 }

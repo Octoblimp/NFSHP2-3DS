@@ -239,6 +239,12 @@ void jb_music_start(JBSound* s, const uint8_t* fredAudio, int arg);
 void jb_music_stop(JBSound* s);                           // 0x001aec90
 void jb_music_delayed_start(JBSound* s, float seconds);   // 0x001aec88
 bool jb_music_is_playing(JBSound* s);                     // 0x001aecb0
+// sound::Mute (0x001af850), the music's share: with sound up, the flag
+// jb_music_update reads, and the jukebox paused -- always, when its
+// category's volume is 0. Retail then mutes the speech, the soundscape,
+// the cars, the one-shots, the collisions and the chopper, which the port
+// does not have.
+void jb_sound_mute(JBSound* s, int on);
 // SetSelection (0x001af050): the bSound category, then every tune on the
 // list turned on or off by its status and genre.
 void jb_music_set_selection(JBSound* s, const uint8_t* fredAudio, int cat);
