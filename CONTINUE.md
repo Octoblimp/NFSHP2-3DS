@@ -1,7 +1,8 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 52
-(2026-10-08), after two graphics fixes: a second car of the player's
+Where the next session picks up. Updated in Session 53
+(2026-10-08): see "First: the AI pack's cost" below. Session 52
+(2026-10-08) made two graphics fixes: a second car of the player's
 type drew its wheels alone (eDuplicateSolid was a NULL seam; ported,
 d110c44), and skins went missing on TRACKB45 (the upload's scratch now
 comes from the linear heap). Then 11h-3, the TrafficTeleporter
@@ -87,6 +88,35 @@ which waits on the device. "Where the port stands" below has the count
 of what is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
+
+## First: the AI pack's cost (Session 53)
+
+The user's ask, 2026-10-08: the race is "sluggish until I get away from
+all the AI racers", and "still hitching when all the AI cars are in the
+view at once".
+
+- The mid-race hitches are gone: `trackview_prepare` bakes and uploads
+  everything at the load (commit 3b62e00).
+- What is left is a steady 15 FPS while the pack is in view.
+  - The cars stage is 18 ms against 2.7 ms without the pack.
+  - Each lit batch writes 453 command words.
+  - The shadows' strips each send their state again.
+- HANDOFF's Session 53 has the profile and the plan: one shbin for
+  geosolid and geolit, the lit uniforms sent only when changed, and the
+  strips' state kept.
+- Then the order stands:
+  1. The rest of the texture memory work: b, the cache; c, the spare
+     VRAM; e, the skins' padding. TRACKB12 needs checking on the device.
+  2. Step 12, the cops.
+  3. AnimatedDriver.
+  4. The PostRace and Demo coordinators.
+  5. Pause's other screens.
+  6. Task 37.
+  7. TRACKB45's speed.
+
+The SD card's race config for testing is parked as
+`nfshp2_config.txt.track45` (SkipFE, track 45, 7 AI, traffic 0.5).
+Rename it to `nfshp2_config.txt` for a forced race.
 
 ## Now: step 11, the racer AI
 

@@ -289,3 +289,24 @@ than half the frame (25 of 50 ms), and step 13b-4 starts on the models.
 
 13b-4's cuts, and the frames after each, are in `draw-cuts.md`. After
 13b-4e the race on Azahar runs at 27.5 to 30 FPS, with a draw of 23 ms.
+
+## The cars stage's parts (Session 53)
+
+The `cars:` line follows the models'. It gives the cars
+carrenderinfo_render drew past its cull, a frame, and the milliseconds
+of each part of the player's view's cars stage:
+
+- **setup:** the cull, the light context, the flares and the driver.
+- **shadows:** the hull's and the grid's, built and put on the lists.
+- **body:** the body, the mirrors, the plates and the scuffs.
+- **wheels:** the tyres, their blur, the brakes and the wipers.
+- **lists:** the solid list and both alpha lists, which draw the
+  shadows' strips, the held batches and the sprites.
+
+The mirror's cars are left out of the parts: the mirror has its own
+stage. The models' line gives each view's lit batches' words in
+brackets after its words.
+
+On track 45 at the start, with eight cars in view: setup 0.2, shadows
+4.1, body 3.4, wheels 3.0, lists 7.4 ms. The 143 lit batches wrote 453
+words each, about half the view's 127,676.

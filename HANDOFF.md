@@ -17181,3 +17181,91 @@ heap 96 MB, linear 80 MB. There is no larger mode. The split is what
 can move: the race uses about 45 MB of the malloc heap, so about 30 MB
 can go to the linear heap (LINEAR_WANT). heapcfg.c's step-down finds
 what the kernel will give in one block.
+
+## Session 53 (2026-10-08) -- the mid-race hitches, and the AI pack's cost
+
+### The texture formats (commit 3b62e00)
+
+- `texpack.c` stores a mip chain in the smallest of RGBA8, RGB8, LA8 and
+  L8 that holds its texels exactly (`texpack_format`, a scan of every
+  texel). It also gains `texpack_chain_bytes` and
+  `texpack_upload_chain_as`. Lossless, as the user asked.
+- `texpack_check --chain --packed` compares the stored chain against
+  the Python decoder: TEX12LOCATION, 396 of 396 match, 21 scrolling
+  textures, 0 differ.
+- `heapcfg.c`: LINEAR_WANT is 112 MB. The race uses about 45 MB of the
+  malloc heap, so about 30 MB moves to the linear heap.
+
+### The hitches (the user's ask: "I want them eliminated")
+
+- **The cause.** The cars' solids were baked on their first draw, and
+  their textures uploaded then too (render_model, model_solid,
+  bake_solid, resolve_textures, load_texture). So were the textures
+  that a replacement table, a rename or a first draw reaches. One frame
+  took up to 237 ms.
+- **The fix.** `trackview_prepare` runs once the track is attached:
+  1. It bakes every ModelList model.
+  2. It uploads every frame of each flipbook a solid uses.
+  3. It uploads every other pack texture with pixels, smallest first,
+     while TEX_RESERVE plus PREPARE_RESERVE (6 MB each) stay free and
+     128 slots are left.
+
+  `raceAttachTrack` waits up to 150 frames for the streamed packs before
+  it runs.
+- **The log.** main.c logs `race: prepared in ...`. Whenever a bake or
+  an upload happens later, it logs `race: made N bakes ... and N
+  uploads ..., the longest X ms: <names>`.
+- **On Azahar.** Track 45 with eight cars and traffic:
+  - The prepare took 4228 ms: 407 uploads, 17 left out (12.3 MB), 700
+    textures, and 12.5 MB of linear heap free.
+  - In the race: 0 late bakes or uploads.
+  - Worst frames 67-74 ms, against 237 before.
+- **The cost.** The load is about 4 s longer. An upload is about 13 ms
+  of CPU on Azahar. The texel scan is done once an upload now, not
+  three times.
+
+### The AI pack's cost (open; the user's ask)
+
+The user's words: "sluggish until I get away from all the AI racers",
+then "still hitching when all the AI cars are in the view at once". It
+is no hitch now, but a steady 15 FPS while the pack is in view, and 30
+once it is gone.
+
+The frame profiler gained a `cars:` line and counts the lit batches'
+command words (frameprof.h). Track 45's start on Azahar, eight cars in
+view:
+
+- **The frame.** 66.7 ms: draw 48 ms, models 16.6 ms, cars 18.2 ms.
+  Later, with the pack gone: cars 2.7 ms.
+- **The cars stage.** Setup 0.2, shadows 4.1, body 3.4, wheels 3.0, and
+  the lists 7.4 ms.
+- **The lit batches.** 143 lit batches wrote 64,740 of the view's
+  127,676 command words: **453 words each**. A scenery batch writes
+  about 43.
+
+The causes, read from the code:
+
+- **The lit batches' state.** Every one runs `bind_lit` in
+  georender.c, which forgets the run, binds geolit and resends about 25
+  uniforms.
+  - geolit and geosolid are separate DVLBs, so each switch between them
+    makes citro3d upload the other's shader code again
+    (C3DiF_VshCode).
+  - Most of those uniforms are the same for every batch of a model.
+- **The shadows.** Each car makes about 18 strips: the hull's fan and
+  edge, and the grid's three. Each strip in `georender_draw_strip`
+  forgets the run and sends the program, the buffers, about 13
+  uniforms and the combiner before one small draw. The shadow's CPU
+  side also asks the topology for 20 to 30 elevations a car.
+
+The plan, in order:
+
+1. Build geosolid and geolit into one shbin (picasso takes both files),
+   so they share one DVLP and a switch sends no code. Check it with
+   check_shbin and on the device: see the PICA freeze notes.
+2. Keep the lit uniforms last sent, and send only what changed. Keep the
+   run's state across lit batches instead of forgetting it.
+3. Strips: keep their state between strips with the same texture, pass
+   and model-view, so each costs only its draw. Or join a car's strips
+   into one draw.
+4. Measure again with the `cars:` line and the lit words.
