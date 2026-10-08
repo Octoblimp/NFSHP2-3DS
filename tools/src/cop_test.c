@@ -1,6 +1,8 @@
 // Harness for tools/cop_check.py: runs the checker's script on cop.c --
 // tCop, tPlayerCop and tAICop's constructors and destructors, the setters,
-// ClearPursuit, ClearSpeedTrap, DisableMyCar and the zones -- and on
+// ClearPursuit, ClearSpeedTrap, DisableMyCar, the zones and the drive
+// target (IsNearPursuitTarget, InitializeDriveTarget, UpdateDriveTarget)
+// -- and on
 // copmgr.c's CreateCop, 0x002276a0 and AddCopCarToRace, and prints what
 // the model prints for the retail image. See the checker's docstring.
 //
@@ -20,10 +22,12 @@
 #include "cartypeinfo.h"
 #include "collision.h"
 #include "collisionbody.h"
+#include "cardriver.h"
 #include "configitems.h"
 #include "cop.h"
 #include "copdriver.h"
 #include "copmgr.h"
+#include "drivetarget.h"
 #include "race.h"
 #include "topology.h"
 #include "trackmap.h"
@@ -75,6 +79,8 @@ static void name(const void *p, const char *fmt, int k)
 static char symbuf[8][32];
 static int  symnext;
 
+static int route_sym(const void *p, char *b);
+
 static const char *sym(const void *p)
 {
     char     *b = symbuf[symnext++ & 7];
@@ -88,6 +94,8 @@ static const char *sym(const void *p)
     for (i = nnames - 1; i >= 0; i--)
         if (names[i].p == p)
             return names[i].name;
+    if (route_sym(p, b))
+        return b;
     if (pCopManager != NULL) {
         const tSpeedTrap *t = pCopManager->SpeedTraps;
         const tSpeedTrap *q = (const tSpeedTrap *)p;
@@ -111,7 +119,6 @@ static void *block(size_t size)
 // -------------------------------------------- what cop.c and copmgr.c reach
 
 RaceParameters   TheRaceParameters;
-TrackPathManager TheTrackPathManager;
 World           *pCurrentWorld;
 float            SkipFETimeUntilCopsAppear;
 
@@ -128,7 +135,36 @@ static int         nm, no, nk, nr;
 static int         respk = -2;
 static tCop       *disabling;
 
+// The drive target's world: three routes of real points, each car's
+// driver, and the rules the route stand-ins answer by.
+#define NQ    3
+#define QPTS  40
+static TrackRoute qroutes[NQ];
+static int        qcount[NQ], qlink[NQ];
+static CarDriver  drivers[NCARS];
+static int        car_q[NCARS], car_i[NCARS];
+static int        nearq[16][3], nnear, near_at;
+static bVector2   dtpos;
+
 static void *kinds_p[MAX_NAMES];
+
+// A route point's name, Q<route>.p<point>, into b.
+static int route_sym(const void *p, char *b)
+{
+    int i;
+
+    for (i = 0; i < NQ; i++) {
+        const uint8_t *t = (const uint8_t *)qroutes[i].TrackRoutePointTable;
+        const uint8_t *q = (const uint8_t *)p;
+
+        if (q >= t && q < t + QPTS * 112 && (q - t) % 112 == 0) {
+            snprintf(b, 32, "Q%d.p%d", i, (int)((q - t) / 112));
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static char  kinds_k[MAX_NAMES][8];
 static int   nkinds;
 
@@ -190,13 +226,114 @@ void bDeleteSlotPool(BSlotPool *pool)
     unreached("bDeleteSlotPool");
 }
 
+static TrackRoutePoint *qpoint(int q, int i)
+{
+    if (q < 0 || i < 0)
+        return NULL;
+    return &qroutes[q].TrackRoutePointTable[i];
+}
+
+// The next answer from the script's queue -- the last again once it runs
+// out, and 0 with info untouched when it is empty: the return, and the
+// route and point it leaves (q -1 both NULL, -2 untouched).
 int ai_get_nearest_route_point(NearestRoutePointInfo *info,
                                const bVector2 *pos, RoutesToSearch which,
                                int flags, float distanceAround)
 {
-    (void)info; (void)pos; (void)which; (void)flags; (void)distanceAround;
-    unreached("ai_get_nearest_route_point");
-    return 0;
+    int r = 0;
+
+    printf("  nearest %08x %08x %d %d %08x", fb(pos->x), fb(pos->y),
+           (int)which, flags, fb(distanceAround));
+    if (nnear > 0) {
+        const int *a = nearq[near_at < nnear ? near_at : nnear - 1];
+
+        near_at++;
+        r = a[0];
+        if (a[1] == -1) {
+            info->Route = NULL;
+            info->Point = NULL;
+        } else if (a[1] >= 0) {
+            info->Route = &qroutes[a[1]];
+            info->Point = qpoint(a[1], a[2]);
+        }
+    }
+    printf(" -> %d %s", r, sym(info->Route));
+    printf(" %s\n", sym(info->Point));
+    return r;
+}
+
+// One point on, along the route; off its end to point 0 of the route it
+// links to, or to a NULL point.
+void ai_get_next_route_point(NearestRoutePointInfo *info)
+{
+    int q, i = -1;
+
+    printf("  next %s", sym(info->Route));
+    printf(" %s", sym(info->Point));
+    for (q = 0; q < NQ; q++)
+        if (info->Route == &qroutes[q])
+            break;
+    if (q < NQ && info->Point != NULL) {
+        const uint8_t *t = (const uint8_t *)qroutes[q].TrackRoutePointTable;
+        const uint8_t *u = (const uint8_t *)info->Point;
+
+        if (u >= t && u < t + QPTS * 112 && (u - t) % 112 == 0)
+            i = (int)((u - t) / 112);
+    }
+    if (q == NQ || i < 0) {
+        info->Point = NULL;
+    } else if (i + 1 < qcount[q]) {
+        info->Point = qpoint(q, i + 1);
+    } else if (qlink[q] >= 0) {
+        info->Route = &qroutes[qlink[q]];
+        info->Point = qpoint(qlink[q], 0);
+    } else {
+        info->Point = NULL;
+    }
+    printf(" -> %s", sym(info->Route));
+    printf(" %s\n", sym(info->Point));
+}
+
+static int car_k(const Car *c)
+{
+    int k;
+
+    for (k = 0; k < NCARS; k++)
+        if (c == &cars[k])
+            return k;
+    return -1;
+}
+
+TrackRoute *car_get_route(Car *c, int find)
+{
+    int k = car_k(c);
+    TrackRoute *r = k >= 0 && car_q[k] >= 0 ? &qroutes[car_q[k]] : NULL;
+
+    printf("  getroute %s %d -> %s\n", sym(c), find, sym(r));
+    return r;
+}
+
+TrackRoutePoint *car_get_route_point(Car *c, int find)
+{
+    int k = car_k(c);
+    TrackRoutePoint *p = k >= 0 ? qpoint(car_q[k], car_i[k]) : NULL;
+
+    printf("  getrp %s %d -> %s\n", sym(c), find, sym(p));
+    return p;
+}
+
+void drivetarget_clear(DriveTarget *t, Car *car, float speed)
+{
+    printf("  dtclear %s", sym(t));
+    printf(" %s %08x\n", sym(car), fb(speed));
+}
+
+void drivetarget_add_point3(DriveTarget *t, const bVector3 *p, int8_t route,
+                            int16_t rpn, int8_t dl, int check, Car *car)
+{
+    printf("  addpt %s %08x %08x %08x %d %d %d %d", sym(t), fb(p->x),
+           fb(p->y), fb(p->z), route, rpn, dl, check);
+    printf(" %s\n", sym(car));
 }
 
 void topology_init(TopologyCoordinate *tc)
@@ -216,19 +353,6 @@ void topology_destroy(TopologyCoordinate *tc)
 {
     (void)tc;
     unreached("topology_destroy");
-}
-
-void trackpath_coord_init_at(TrackPathCoordinate *c, const bVector2 *pos)
-{
-    (void)c; (void)pos;
-    unreached("trackpath_coord_init_at");
-}
-
-void trpoint_get_position2(const TrackRoutePoint *p, bVector2 *o, float d,
-                           float l)
-{
-    (void)p; (void)o; (void)d; (void)l;
-    unreached("trpoint_get_position2");
 }
 
 float world_random_f(World *w, float f)
@@ -400,7 +524,7 @@ static void dump_cop(int k, tCop *c)
         printf("C%d ai %08x st %s rb %08x sst %08x %08x %08x dl %08x %08x "
                "%08x %08x flank %08x", k, fb(a->New32), sym(a->pMySpeedTrap),
                (uint32_t)a->nMyRoadBlockIndex, fb(a->fSubStateTimer),
-               fb(a->New48), fb(a->New52), fb(a->MyDLOffset.x),
+               fb(a->New48.x), fb(a->New48.y), fb(a->MyDLOffset.x),
                fb(a->MyDLOffset.y), fb(a->New64), fb(a->New68),
                fb(a->fFlankSide));
         printf(" route %s", sym(a->RouteInfo.Route));
@@ -694,6 +818,80 @@ static void op(char **a, int na)
             r = taicop_construct(c, info(a[2]), (int32_t)num(a[3]));
         m->Cops[k] = c;
         printf("%s %d -> %s\n", o, k, sym(r));
+    } else if (!strcmp(o, "qroute")) {
+        int q = atoi(a[1]);
+
+        qroutes[q].RouteNumber = (int16_t)atoi(a[2]);
+        qcount[q] = atoi(a[3]);
+        qlink[q] = atoi(a[4]);
+    } else if (!strcmp(o, "qpt")) {
+        uint8_t *pt = (uint8_t *)qpoint(atoi(a[1]), atoi(a[2]));
+        int      j;
+
+        for (j = 0; j < 28; j++) {
+            uint32_t w = hex(a[3 + j]);
+
+            memcpy(pt + 4 * j, &w, 4);
+        }
+    } else if (!strcmp(o, "nearq")) {
+        int j;
+
+        nnear = (na - 1) / 3;
+        near_at = 0;
+        for (j = 0; j < nnear; j++) {
+            nearq[j][0] = atoi(a[1 + 3 * j]);
+            nearq[j][1] = atoi(a[2 + 3 * j]);
+            nearq[j][2] = atoi(a[3 + 3 * j]);
+        }
+    } else if (!strcmp(o, "carq")) {
+        int k = atoi(a[1]);
+
+        car_q[k] = atoi(a[2]);
+        car_i[k] = atoi(a[3]);
+    } else if (!strcmp(o, "mycar")) {
+        int k = atoi(a[2]);
+
+        m->Cops[atoi(a[1])]->pMyCar = k >= 0 ? &cars[k] : NULL;
+    } else if (!strcmp(o, "dl")) {
+        tAICop *c = (tAICop *)(void *)m->Cops[atoi(a[1])];
+
+        c->MyDLOffset.x = bf(hex(a[2]));
+        c->MyDLOffset.y = bf(hex(a[3]));
+        c->nDrivingLineIndex = (int32_t)num(a[4]);
+    } else if (!strcmp(o, "rinfo")) {
+        tAICop *c = (tAICop *)(void *)m->Cops[atoi(a[1])];
+        int     q = atoi(a[2]);
+
+        c->RouteInfo.Route = q >= 0 ? &qroutes[q] : NULL;
+        c->RouteInfo.Point = qpoint(q, atoi(a[3]));
+    } else if (!strcmp(o, "lss")) {
+        m->Cops[atoi(a[1])]->LogicSubState = (eLogicSubState)num(a[2]);
+    } else if (!strcmp(o, "wpos")) {
+        Car *c = &cars[atoi(a[1])];
+
+        c->State.Position.x = bf(hex(a[2]));
+        c->State.Position.y = bf(hex(a[3]));
+    } else if (!strcmp(o, "isnear")) {
+        printf("isnear %s -> %d\n", a[1], taicop_is_near_pursuit_target(
+                   (tAICop *)(void *)m->Cops[atoi(a[1])]));
+    } else if (!strcmp(o, "initdt") || !strcmp(o, "upddt")) {
+        tAICop *c = (tAICop *)(void *)m->Cops[atoi(a[1])];
+
+        if (!strcmp(o, "initdt")) {
+            taicop_initialize_drive_target(c);
+        } else {
+            dtpos.x = bf(hex(a[2]));
+            dtpos.y = bf(hex(a[3]));
+            taicop_update_drive_target(c, &dtpos, (int32_t)num(a[4]));
+        }
+        printf("%s %s ri %s", o, a[1], sym(c->RouteInfo.Route));
+        printf(" %s", sym(c->RouteInfo.Point));
+        if (c->Base.pMyCar != NULL) {
+            const DriveTarget *t = &c->Base.pMyCar->pCarDriver->MyDriveTarget;
+
+            printf(" pt0 %08x %08x", fb(t->Points[0].x), fb(t->Points[0].y));
+        }
+        printf("\n");
     } else if (!strcmp(o, "new")) {
         printf("new -> %s\n", sym(taicop_new()));
     } else if (!strcmp(o, "del")) {
@@ -724,8 +922,18 @@ int main(int argc, char **argv)
     name(player_token, "PL", 0);
     name(dmg_token, "DMG", 0);
     name(&world, "W", 0);
-    for (i = 0; i < NCARS; i++)
+    for (i = 0; i < NCARS; i++) {
         name(&cars[i], "A%d", i);
+        name(&drivers[i], "V%d", i);
+        memset(&drivers[i], 0xcd, sizeof drivers[i]);
+        cars[i].pCarDriver = &drivers[i];
+        car_q[i] = -1;
+        car_i[i] = -1;
+    }
+    for (i = 0; i < NQ; i++) {
+        name(&qroutes[i], "Q%d", i);
+        qlink[i] = -1;
+    }
     for (i = 0; i < 4; i++) {
         name(&types[i], "T%d", i);
         name(&dinfo[i], "D%d", i);
@@ -740,13 +948,13 @@ int main(int argc, char **argv)
     cop_install_vtables();
     copmgr_install_vtables();
     while (fgets(line, sizeof line, f) != NULL) {
-        char *a[32], *s = line;
+        char *a[64], *s = line;
         int   na = 0;
 
         line[strcspn(line, "\r\n")] = 0;
         if (line[0] == 0)
             continue;
-        while (na < 32) {
+        while (na < 64) {
             a[na++] = s;
             s = strchr(s, '|');
             if (s == NULL)

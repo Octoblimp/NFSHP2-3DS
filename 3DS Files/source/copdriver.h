@@ -4,10 +4,12 @@
 // CopMover is the mover a cop car rides when no player is near: no
 // physics, just a speed and a heading (eCMS_STEERING) or a velocity
 // (eCMS_TRANSLATING) eased towards what the CopDriver asks for, held to the
-// ground under the car. It is all here but DoSnapshot. CopDriver is the
-// record alone so far: tAICop's constructor (cop.c) sets a new cop car's
-// driver to parked and gives it the cop's number. Its constructor and
-// Think are step 12's later slices. See docs/formats/cop-mover.md.
+// ground under the car. CopDriver is the controller that asks: parked,
+// patrolling along the cop's own drive target, chasing (steering for a
+// point on the pursuit's targets, or translating alongside the chased car
+// when close and as fast), or backing up when stuck. Both are all here but
+// DoSnapshot and CopDriver's CollisionAvoidance, which nothing calls. See
+// docs/formats/cop-mover.md and docs/formats/cop-driver.md.
 
 #ifndef COPDRIVER_H
 #define COPDRIVER_H
@@ -17,6 +19,7 @@
 
 #include "bvector.h"
 #include "carcontroller.h"
+#include "drivetarget.h"
 #include "physicscar.h"    // CarMover
 
 struct Car;
@@ -50,6 +53,72 @@ typedef char copdriver_layout_check[
      && offsetof(CopDriver, nCarClass) == 72 && sizeof(CopDriver) == 76)
     ? 1 : -1];
 #endif
+
+// _vt$9CopDriver, 0x002b5998, TrackedController's layout: its own
+// destructor (0x001a1e30) and Think (0x001a2110), DoSnapshot (0x001a2b58,
+// not ported: a NULL entry), and the rest TrackedController's and
+// CarController's.
+#define COPDRIVER_VTABLE     0x002b5998u
+
+// A DLOffset: x along the drive target, y across it (to the right of the
+// way it runs).
+typedef bVector2 DLOffset;
+
+// 0x001a1ce8, `__9CopDriverP3Car`. A TrackedController with its own
+// table, and a NullDriver for its Driver (bMalloc'd as "NullDriver" and
+// built as CarDriver's constructor builds one, with DesiredGear -1).
+// Parked, StateBeforeGettingStuck parked, SubState 1, both timers 0, no
+// cop (-1), the steer target at the origin, and patrolling at 65 mph.
+// nCarClass by the car type's Type: 0 for 32, 1 for 33, 2 for 34, 3 for
+// 31 and 4 for 4; any other leaves it as it was.
+CopDriver *copdriver_init(CopDriver *d, struct Car *car);
+
+// carmodes.h's CarControllerCtorFn: the constructor on memory Car
+// allocated.
+CarController *copdriver_construct(void *mem, struct Car *car);
+
+// 0x001a1e30: its own vptr, `delete` the Driver through its table (flags
+// 3), then ~TrackedController with this call's flags.
+void copdriver_destroy(CopDriver *d, int32_t flags);
+
+// 0x001a2110. TrackedController's Think, then, on COP_MOVEMENT only, the
+// state's asks of the car's CopMover. See docs/formats/cop-driver.md.
+void copdriver_think(CopDriver *d, float dt);
+
+// 0x001a1e90. Where the cop steers in a pursuit, by its sub-state: a point
+// on the pursuit's near or far drive target, or on one built along the
+// chased car's route or its own. Nothing without a pursuit.
+void copdriver_get_pursuit_target_point(CopDriver *d, bVector2 *out);
+
+// 0x001a2a90. After a collision, while patrolling or chasing: under 2 m/s
+// the stuck timer climbs, and past 1 s the car is stuck. Otherwise the
+// timer goes back to 0.
+int32_t copdriver_are_we_stuck(CopDriver *d, float dt);
+
+// 0x001a2c30, `FindDriveTargetPointByDistance`. Finds the segment of `t`
+// that `pos` lies alongside, from the last, and the point `dist` on from
+// it along the target, moved by `off` along and across the segment it is
+// on; *lateral is how far `pos` is across from it. Returns 1, or 0 with
+// the second point (the first, for fewer than two) and *lateral unset.
+int32_t copdriver_find_point_by_distance(bVector2 *out, float *lateral,
+                                         const DriveTarget *t,
+                                         const bVector2 *pos, float dist,
+                                         const DLOffset *off);
+
+// 0x001a2ef0, `GetDriveTargetPointByDLOffsetFromStart`. Walks back from
+// the target's last point off->x along it and moves off->y across the
+// segment it ends on. Fewer than two points give the last.
+void copdriver_get_point_by_dl_offset_from_start(bVector2 *out,
+                                                 const DriveTarget *t,
+                                                 const DLOffset *off);
+
+// The inline accessors, 0x001a32d0 .. 0x001a32e8. GetRouteNumbersToUse is
+// empty.
+void copdriver_get_route_numbers_to_use(CopDriver *d, int32_t *a,
+                                        int32_t *b);
+void copdriver_set_patrol_speed(CopDriver *d, float s);
+void copdriver_set_state(CopDriver *d, eCopDriverStates s);
+void copdriver_set_cop_index(CopDriver *d, int32_t n);
 
 // ------------------------------------------------------------- CopMover
 
@@ -150,5 +219,9 @@ void copmover_install_vtables(void);
 
 // Points carmodes.h's gCopMoverCtorFn at this file.
 void copmover_install_seams(void);
+
+// CopDriver's, likewise, and gCopDriverCtorFn.
+void copdriver_install_vtables(void);
+void copdriver_install_seams(void);
 
 #endif

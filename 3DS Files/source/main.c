@@ -3787,6 +3787,7 @@ int main(int argc, char** argv)
     aicarcontroller_install_vtables();
     beltmover_install_vtables();
     copmover_install_vtables();
+    copdriver_install_vtables();
     psychodriver_install_vtables();
     aidriver_install_vtables();
     trafficcar_install_vtables();
@@ -3807,8 +3808,9 @@ int main(int argc, char** argv)
     trafficcar_install_seams();
 
     // COP_MOVEMENT's mover (12c), which a cop car rides away from the
-    // players.
+    // players, and the CopDriver that steers it (12d).
     copmover_install_seams();
+    copdriver_install_seams();
 
     // The camera coordinators (11g-2c-1): BeginCountdownCameras builds a
     // CountdownCameraCoordinator, and Player's and the race coordinator's

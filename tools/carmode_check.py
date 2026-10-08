@@ -984,6 +984,7 @@ def generate(cti):
     w("#define CM_IMG_BELTMOVER %d" % 72)
     w("#define CM_IMG_TRAFFICCAR %d" % 36)
     w("#define CM_IMG_COPMOVER %d" % 112)
+    w("#define CM_IMG_COPDRIVER %d" % 76)
     w("#define CM_IMG_AIDRIVER %d" % 720)
     w("#define CM_IMG_TRAFFICDRIVER %d" % 720)
     w("#define CM_STRAY %d" % STRAY)
@@ -2510,8 +2511,9 @@ MUTATIONS = [
     ("size-trafficdriver", CMH,
      "#define TRAFFICDRIVER_SIZE   ((int)sizeof(TrafficDriver))",
      "#define TRAFFICDRIVER_SIZE   ((int)sizeof(TrafficDriver) + 4)"),
-    ("size-copdriver", CMH, "#define COPDRIVER_SIZE        76",
-     "#define COPDRIVER_SIZE        80"),
+    ("size-copdriver", CMH,
+     "#define COPDRIVER_SIZE       ((int)sizeof(CopDriver))",
+     "#define COPDRIVER_SIZE       ((int)sizeof(CopDriver) + 4)"),
     ("pool-not-16", CMH, "#define CAR_MEMORY_POOL 16",
      "#define CAR_MEMORY_POOL 0"),
 

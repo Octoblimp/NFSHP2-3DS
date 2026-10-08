@@ -9,12 +9,11 @@
 // mover Car.obj emits for a car nothing moves. The four are declared in
 // car.h with the rest of Car; this header is what they build.
 //
-// **Two of the twelve things the two tables build are not ported.** The
-// mover DeliveryMover is task 26's and the controller CopDriver step 12's;
-// RealController, BeltMover, CopMover, TrafficCar, AIDriver and
-// TrafficDriver are ported (realcontroller.h, beltmover.h, copdriver.h,
-// trafficcar.h, aidriver.h, trafficdriver.h), and main.c sets their seams
-// at boot. Car allocates
+// **One of the twelve things the two tables build is not ported**: the
+// mover DeliveryMover, task 26's. RealController, BeltMover, CopMover,
+// CopDriver, TrafficCar, AIDriver and TrafficDriver are ported
+// (realcontroller.h, beltmover.h, copdriver.h, trafficcar.h, aidriver.h,
+// trafficdriver.h), and main.c sets their seams at boot. Car allocates
 // each itself -- `bMalloc(size, name, 0, 16)` -- and calls its constructor
 // with (memory, car), so the port does the same and reaches the
 // constructor through a seam below. A NULL seam is an object the port
@@ -34,7 +33,7 @@
 #include "carstate.h"
 #include "aidriver.h"          // AIDRIVER_SIZE
 #include "beltmover.h"         // BELTMOVER_SIZE
-#include "copdriver.h"         // COPMOVER_SIZE
+#include "copdriver.h"         // COPMOVER_SIZE, COPDRIVER_SIZE
 #include "physicscar.h"        // CarMover
 #include "realcontroller.h"    // REALCONTROLLER_SIZE
 #include "trafficcar.h"        // TRAFFICCAR_SIZE
@@ -112,8 +111,8 @@ extern CarControllerCtorFn gCopDriverCtorFn;       // 0x00197d48
 // records are wider. RealController's already has, and is 84 bytes on the
 // console and 160 on a 64-bit host, BeltMover's 72 on the console,
 // CopMover's 128 (retail's; the demo's, which carmode_check runs, 112),
-// TrafficCar's 36 and AIDriver's and TrafficDriver's 736 (retail's
-// SetControlMode asks 736 for each; the demo's 720).
+// CopDriver's 76, TrafficCar's 36 and AIDriver's and TrafficDriver's 736
+// (retail's SetControlMode asks 736 for each; the demo's 720).
 #define TRAFFICCAR_SIZE       ((int)sizeof(TrafficCar))
 #define DELIVERYMOVER_SIZE   192
 #define COPMOVER_SIZE        ((int)sizeof(CopMover))
@@ -121,7 +120,7 @@ extern CarControllerCtorFn gCopDriverCtorFn;       // 0x00197d48
 #define REALCONTROLLER_SIZE  ((int)sizeof(RealController))
 #define AIDRIVER_SIZE        ((int)sizeof(AIDriver))
 #define TRAFFICDRIVER_SIZE   ((int)sizeof(TrafficDriver))
-#define COPDRIVER_SIZE        76
+#define COPDRIVER_SIZE       ((int)sizeof(CopDriver))
 
 // The memory pool every one of Car's bMallocs names.
 #define CAR_MEMORY_POOL 16

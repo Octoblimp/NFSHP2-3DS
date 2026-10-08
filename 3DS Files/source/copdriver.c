@@ -6,15 +6,21 @@
 #include <stddef.h>
 
 #include "bmath.h"
+#include "bmem.h"
 #include "car.h"
 #include "cardriver.h"
-#include "carmodes.h"          // gCopMoverCtorFn
+#include "carmodes.h"          // gCopMoverCtorFn, gCopDriverCtorFn
 #include "carstate.h"
 #include "cartypeinfo.h"
+#include "cop.h"
 #include "copmanager.h"        // pCopManager
+#include "coputil.h"
+#include "drivetarget.h"
 #include "eefpu.h"
 #include "emath.h"
+#include "realcontroller.h"
 #include "topology.h"
+#include "trackroute.h"
 #include "vtable.h"
 
 // ------------------------------------------------------------ the tuning
@@ -516,6 +522,719 @@ void copmover_set_state(CopMover *m, eCopMoverState s)
     m->State = s;
 }
 
+// ============================================================= CopDriver
+
+// The .lit4 constants CopDriver reads, gp-29468 .. gp-29440, the pursuit
+// file's gp-15596, and the ones the code builds with `lui`. gp-29460 and
+// gp-29452 are both the mph factor and gp-29456 and gp-29448 both 1.1:
+// each of Think's two arms reads its own.
+#define CD_PATROL_SPEED     29.056772232055664f  // gp-29468  41e87445 65 mph
+#define CD_TRANSLATE_SPEED  13.410818099975586f  // gp-29464  415692b6 30 mph
+#define CD_MPS_TO_MPH       2.236999988555908f   // gp-29460  400f2b02
+#define CD_SPEED_UP         1.100000023841858f   // gp-29456  3f8ccccd
+#define CD_SLOW_SPEED       8.940545082092285f   // gp-29444  410f0c79 20 mph
+#define CD_BACK_UP_SPEED    -8.940545082092285f  // gp-29440  c10f0c79
+#define CD_HISTORY_EARLY    0.25f                // 3e800000
+#define CD_HISTORY_LATE     0.6499999761581421f  // gp-15596  3f266666
+#define CD_TARGET_DIST      20.0f                // 41a00000
+#define CD_TRANSLATE_DIST   40.0f                // 42200000
+#define CD_TURN_THROTTLE    4.0f                 // 40800000
+#define CD_BACK_UP_TIME     2.0f                 // 40000000
+#define CD_STUCK_SPEED      2.0f                 // 40000000
+#define CD_STUCK_TIME       1.0f                 // 3f800000
+#define CD_ACQUIRE_LANE     2.5f                 // 40200000
+#define CD_ACQUIRE_MPH      60.0f                // 42700000
+#define CD_QUARTER_TURN     16384.0f             // 46800000
+
+// 0x00310ef8, by tCopManager::nDifficultyLevel (2 when the chased car has
+// no player): how far past the driving line's own speed a chasing cop may
+// go.
+static const float CopLineSpeedScale[3] = {
+    1.149999976158142f,                          // 3f933333
+    1.2000000476837158f,                         // 3f99999a
+    1.25f                                        // 3fa00000
+};
+
+typedef void (*DriverDtorFn)(void *self, int32_t flags);
+// Retail's SetDesiredSpeed (56): the speed, the time to reach it, the
+// tolerance and whether the throttle and brake may be used.
+typedef void (*DriverDesiredSpeedFn)(void *self, float speed, float time,
+                                     float tolerance, int32_t allowed);
+
+// The cop this car is: Cops[nCopIndex], always a tAICop.
+static tAICop *cop_of(const CopDriver *d)
+{
+    return (tAICop *)(void *)pCopManager->Cops[d->nCopIndex];
+}
+
+static const bVector2 *car_pos(const Car *car)
+{
+    return (const bVector2 *)(const void *)&car->State.Position;
+}
+
+// How far the car is across its route point, to the right:
+// (p - rp) . (Dir.y, -Dir.x), the two products taken apart.
+static float route_lateral(Car *car)
+{
+    const TrackRoutePoint *rp = car_get_route_point(car, 1);
+
+    return (car->State.Position.x - rp->Position.x) * rp->Direction.y
+         - (car->State.Position.y - rp->Position.y) * rp->Direction.x;
+}
+
+CopDriver *copdriver_init(CopDriver *d, Car *car)
+{
+    CarDriver *drv;
+
+    trackedcontroller_init(&d->Base, car);
+    d->Base.Base._vtable = COPDRIVER_VTABLE;
+
+    // A NullDriver, with CarDriver's constructor inline and the table
+    // changed after.
+    drv = (CarDriver *)bMalloc((int)sizeof(NullDriver), "NullDriver", 0,
+                               CAR_MEMORY_POOL);
+    cardriver_init(drv);
+
+    d->fStuckTimer = 0.0f;
+    drv->_vtable = NULLDRIVER_VTABLE;
+    drv->NitroFlag = 0;
+    d->nCopIndex = -1;
+    // `lwc1 $f1,48(s2)`: the 0 just stored, read back for both words.
+    d->v2SteerTarget.x = d->fStuckTimer;
+    d->fPatrolSpeed = CD_PATROL_SPEED;
+    d->StateBeforeGettingStuck = eCDS_PARKED;
+    d->Base.Base.Driver = drv;
+    drv->DesiredGear = -1;
+    d->fBackingUpTimer = 0.0f;
+    d->v2SteerTarget.y = d->fStuckTimer;
+    d->SubState = 1;
+    d->State = eCDS_PARKED;
+
+    switch (d->Base.Base.pCar->pCarTypeInfo->Type) {
+    case 32:
+        d->nCarClass = 0;
+        break;
+    case 33:
+        d->nCarClass = 1;
+        break;
+    case 34:
+        d->nCarClass = 2;
+        break;
+    case 31:
+        d->nCarClass = 3;
+        break;
+    case 4:
+        d->nCarClass = 4;
+        break;
+    default:
+        break;
+    }
+    return d;
+}
+
+CarController *copdriver_construct(void *mem, Car *car)
+{
+    return &copdriver_init((CopDriver *)mem, car)->Base.Base;
+}
+
+void copdriver_destroy(CopDriver *d, int32_t flags)
+{
+    CarDriver *drv;
+
+    d->Base.Base._vtable = COPDRIVER_VTABLE;
+    drv = d->Base.Base.Driver;
+    if (drv != NULL) {
+        const VtEntry *e = vt_slot(drv->_vtable, CARDRIVER_VT_DTOR);
+
+        ((DriverDtorFn)e->fn)(vt_this(drv, e), 3);
+    }
+    trackedcontroller_destroy(&d->Base, flags);
+}
+
+// ------------------------------------------------------- the two walkers
+
+int32_t copdriver_find_point_by_distance(bVector2 *out, float *lateral,
+                                         const DriveTarget *t,
+                                         const bVector2 *pos, float dist,
+                                         const DLOffset *off)
+{
+    const bVector3 *p = t->Points;
+    int32_t         n = t->NumPoints;
+    int32_t         found = 0;
+    int32_t         i;
+
+    if (n == 1) {
+        float dx = pos->x - p[0].x, dy = pos->y - p[0].y;
+
+        if (sqrtf(dx * dx + dy * dy) <= dist) {
+            out->x = p[0].x;
+            out->y = p[0].y;
+            found = 1;
+            *lateral = 0.0f;
+        }
+    } else if (n != 0) {
+        // From the last segment back, the first that pos is alongside.
+        for (i = n - 2; i >= 0; i--) {
+            float dx = p[i + 1].x - p[i].x;
+            float dy = p[i + 1].y - p[i].y;
+            float len = sqrtf(dx * dx + dy * dy);
+            float ux = dx, uy = dy, along, acc;
+            int32_t j;
+
+            if (len != 0.0f) {
+                float inv = ee_div(1.0f, len);
+
+                uy = dy * inv;
+                ux = dx * inv;
+            }
+            along = (pos->x - p[i].x) * ux + (pos->y - p[i].y) * uy;
+            if (!(0.0f <= along && along < len))
+                continue;
+
+            // Then on from where pos is, a segment at a time, to `dist`.
+            acc = -along;
+            for (j = i; j < n - 1; j++) {
+                float sx = p[j + 1].x - p[j].x;
+                float sy = p[j + 1].y - p[j].y;
+                float seg = sqrtf(sx * sx + sy * sy);
+
+                acc += seg;
+                if (dist <= acc) {
+                    float inv = ee_div(1.0f, seg);
+                    float over = acc - dist;
+                    float vx = sx * inv, vy = sy * inv;
+
+                    out->x = ((p[j + 1].x - vx * over) + vx * off->x)
+                             + vy * off->y;
+                    out->y = ((p[j + 1].y - vy * over) + vy * off->x)
+                             + -vx * off->y;
+                    *lateral = fabsf((pos->x - out->x) * vy
+                                     + (pos->y - out->y) * -vx);
+                    found = 1;
+                    break;
+                }
+            }
+            break;
+        }
+    }
+    if (!found) {
+        const bVector3 *q = &p[n >= 2 ? 1 : 0];
+
+        out->y = q->y;
+        out->x = q->x;
+    }
+    return found;
+}
+
+void copdriver_get_point_by_dl_offset_from_start(bVector2 *out,
+                                                 const DriveTarget *t,
+                                                 const DLOffset *off)
+{
+    int32_t n = t->NumPoints;
+    // `addu a1,a1,n*16`: Points[n - 1], whatever n is.
+    const bVector3 *a = (const bVector3 *)(const void *)
+        ((const uint8_t *)t + n * 16);
+    const bVector3 *b = a;
+    float acc = 0.0f, dx, dy, d, px, py, l;
+
+    if (n < 2) {
+        out->x = a->x;
+        out->y = a->y;
+        return;
+    }
+
+    // Back from the last point while the length so far is within off->x:
+    // b is the nearer end of the segment it stops in, a the farther.
+    if (0.0f <= off->x) {
+        int32_t left = n - 1;
+        const bVector3 *next = a;
+
+        for (;;) {
+            float ex, ey;
+
+            a = next;
+            ex = a->x - b->x;
+            ey = a->y - b->y;
+            acc += sqrtf(ex * ex + ey * ey);
+            if (--left < 0)
+                break;
+            next = a - 1;
+            if (!(acc <= off->x))
+                break;
+            b = a;
+        }
+    }
+
+    dy = b->y - a->y;
+    dx = b->x - a->x;
+    d = sqrtf(dx * dx + dy * dy);
+    if (0.0f < d) {
+        float s = ee_div(acc - off->x, d);
+
+        dy = dy * s;
+        dx = dx * s;
+    }
+    out->x = a->x + dx;
+    out->y = a->y + dy;
+
+    // Then off->y across: (dy, -dx) of the segment, made a unit.
+    px = b->y - a->y;
+    py = -(b->x - a->x);
+    l = sqrtf(px * px + py * py);
+    if (l != 0.0f) {
+        py = ee_div(py, l);
+        px = ee_div(px, l);
+    }
+    out->x = out->x + px * off->y;
+    out->y = out->y + py * off->y;
+}
+
+// ----------------------------------------------------------- the pursuit
+
+void copdriver_get_pursuit_target_point(CopDriver *d, bVector2 *out)
+{
+    tAICop    *cop = cop_of(d);
+    tPursuit  *p = cop->Base.pMyPursuit;
+    Car       *chased, *car;
+    CarDriver *drv;
+    DLOffset   none, off;
+    float      lateral;
+
+    if (p == NULL)
+        return;
+    chased = p->pChasedCar;
+    none.x = 0.0f;
+    none.y = 0.0f;
+    drv = d->Base.Base.Driver;
+
+    switch (cop->Base.LogicSubState) {
+    case LSS_LOW_SPEED_CLOSE_FOLLOW:
+    case LSS_FOLLOW_BACKWARDS:
+    case LSS_FLANK:
+    case LSS_BUMP:
+    case LSS_BLOCK:
+    case LSS_GET_AHEAD:
+    case LSS_LIMBO_READY: {
+        float dx, dy;
+
+        // The pursuit's own targets: within 20 m of the chased car the
+        // near one, from its start; else the far one, 20 m on from here.
+        // Either is copied into the driver's.
+        car = d->Base.Base.pCar;
+        d->SubState = 1;
+        dy = car->State.Position.y - chased->State.Position.y;
+        dx = car->State.Position.x - chased->State.Position.x;
+        if (sqrtf(dx * dx + dy * dy) < CD_TARGET_DIST) {
+            drivetarget_assign(&drv->MyDriveTarget, &p->NearDriveTarget);
+            copdriver_get_point_by_dl_offset_from_start(
+                out, &p->NearDriveTarget, &cop->New48);
+        } else {
+            drivetarget_assign(&drv->MyDriveTarget, &p->FarDriveTarget);
+            copdriver_find_point_by_distance(
+                out, &lateral, &p->FarDriveTarget, car_pos(d->Base.Base.pCar),
+                CD_TARGET_DIST, &cop->New48);
+        }
+        break;
+    }
+    case LSS_ACQUIRE:
+        // Along the chased car's route, as far across it as the car is.
+        d->SubState = 0;
+        taicop_initialize_drive_target(cop);
+        taicop_update_drive_target(cop, car_pos(chased), 0);
+        drv = d->Base.Base.Driver;
+        off.x = 0.0f;
+        off.y = route_lateral(chased);
+        copdriver_find_point_by_distance(out, &lateral, &drv->MyDriveTarget,
+                                         car_pos(chased), CD_TARGET_DIST,
+                                         &off);
+        break;
+    case LSS_STOP:
+        d->SubState = 0;
+        taicop_initialize_drive_target(cop);
+        taicop_update_drive_target(cop, car_pos(chased), 0);
+        copdriver_find_point_by_distance(out, &lateral, &drv->MyDriveTarget,
+                                         car_pos(chased), CD_TARGET_DIST,
+                                         &none);
+        break;
+    case LSS_LIMBO_DISABLED:
+        // Along its own route.
+        d->SubState = 0;
+        taicop_initialize_drive_target(cop);
+        taicop_update_drive_target(cop, car_pos(d->Base.Base.pCar), 0);
+        copdriver_find_point_by_distance(
+            out, &lateral, &d->Base.Base.Driver->MyDriveTarget,
+            car_pos(d->Base.Base.pCar), CD_TARGET_DIST, &none);
+        break;
+    default:
+        break;
+    }
+}
+
+int32_t copdriver_are_we_stuck(CopDriver *d, float dt)
+{
+    if (!car_in_recent_collision(d->Base.Base.pCar))
+        return 0;
+    switch (d->State) {
+    case eCDS_PATROLLING:
+    case eCDS_PURSUIT:
+        if (!(d->Base.Base.pCar->State.VelocityMagnitude < CD_STUCK_SPEED)) {
+            d->fStuckTimer = 0.0f;
+            return 0;
+        }
+        d->fStuckTimer = d->fStuckTimer + dt;
+        return CD_STUCK_TIME < d->fStuckTimer;
+    case eCDS_DISABLED:
+    case eCDS_PARKED:
+    case eCDS_BACKING_UP:
+        d->fStuckTimer = 0.0f;
+        return 0;
+    default:
+        return 0;
+    }
+}
+
+// ----------------------------------------------------------------- Think
+
+// DISABLED: everything off and the brakes full on, and the driver's
+// SetDesiredSpeed (a NullDriver's does nothing) asked for its Throttle
+// over 10 s.
+static void think_disabled(CopDriver *d, CopMover *m)
+{
+    CarDriver     *drv = d->Base.Base.Driver;
+    const VtEntry *e;
+
+    m->fMaxBrakingAccel = 2.0f;
+    m->fDesiredSpeed = 0.0f;
+    drv->Throttle = 0.0f;
+    drv->EBrake = 1.0f;
+    drv->SportGear = -1;
+    drv->Brake = 1.0f;
+    drv->Steering = 0;
+    drv->DesiredGear = -1;
+    m->State = eCMS_STEERING;
+    e = vt_slot(drv->_vtable, CARDRIVER_VT_SET_DESIRED_SPEED);
+    ((DriverDesiredSpeedFn)e->fn)(vt_this(drv, e), drv->Throttle, 10.0f,
+                                  drv->Throttle, 1);
+}
+
+// PATROLLING's and BACKING_UP's tail (0x001a2a4c): steer for the steer
+// target at `speed`, the throttle held to 4 m/s/s.
+static void steer_at_target(CopDriver *d, CopMover *m, float speed)
+{
+    const Car *car = d->Base.Base.pCar;
+    bVector2   to;
+    bPolar     pol;
+
+    to.x = d->v2SteerTarget.x - car->State.Position.x;
+    to.y = d->v2SteerTarget.y - car->State.Position.y;
+    bToPolar(&pol, &to);
+    m->aDesiredFacingAngle = pol.a;
+    m->fMaxThrottleAccel = CD_TURN_THROTTLE;
+    m->fDesiredSpeed = speed;
+}
+
+// Close behind and as fast: a velocity, the chased car's (its history's
+// for a player's, at the speed it had 0.65 s back) plus the way to the
+// target, the part along the cop's own velocity and the part across it
+// each weighted, and stretched by `extra`.
+static void pursue_translating(CopDriver *d, tAICop *cop, tPursuit *p,
+                               Car *chased, CopMover *m, const bVector2 *to)
+{
+    float    along = 1.0f, across = 1.5f, extra = 0.0f, proj, len;
+    bVector2 v, u, a, q;
+    bVector3 want;
+    Car     *car;
+
+    m->State = eCMS_TRANSLATING;
+    if (chased->pPlayer != NULL) {
+        bVector2 w;
+        float    n0;
+
+        tpursuithistory_velocity_at(&w, &p->History, CD_HISTORY_EARLY);
+        v = w;
+        n0 = sqrtf(w.x * w.x + w.y * w.y);
+        if (0.0f < n0) {
+            float s;
+
+            tpursuithistory_velocity_at(&w, &p->History, CD_HISTORY_LATE);
+            s = ee_div(sqrtf(w.x * w.x + w.y * w.y), n0);
+            v.x = v.x * s;
+            v.y = v.y * s;
+        }
+    } else {
+        v.x = chased->State.Velocity.x;
+        v.y = chased->State.Velocity.y;
+    }
+
+    switch (cop->Base.LogicSubState) {
+    case LSS_BLOCK:
+    case LSS_STOP:
+        along = 1.5f;
+        extra = 3.0f;
+        break;
+    case LSS_GET_AHEAD:
+        extra = 3.0f;
+        across = 10.0f;
+        break;
+    case LSS_ACQUIRE: {
+        float lc = route_lateral(chased);
+        float lm = route_lateral(d->Base.Base.pCar);
+        float s;
+
+        if (fabsf(lc - lm) <= CD_ACQUIRE_LANE) {
+            if (chased->State.ForwardSpeed * CD_MPS_TO_MPH < CD_ACQUIRE_MPH) {
+                v.x = 0.0f;
+                v.y = 0.0f;
+                break;
+            }
+            s = 0.5f;
+        } else {
+            s = CD_SPEED_UP;
+        }
+        v.x = v.x * s;
+        v.y = v.y * s;
+        break;
+    }
+    case LSS_LIMBO_READY:
+        m->fMaxBrakingAccel = 14.0f;
+        across = 3.0f;
+        break;
+    default:
+        break;
+    }
+
+    car = d->Base.Base.pCar;
+    bNormalize2(&u, (const bVector2 *)(const void *)&car->State.Velocity);
+    proj = to->x * u.x + to->y * u.y;
+    a.y = u.y * proj;
+    a.x = u.x * proj;
+    q.y = to->y - a.y;
+    q.x = to->x - a.x;
+    want.z = 0.0f;
+    if (cop->Base.LogicSubState == LSS_LIMBO_READY) {
+        want.x = 0.0f;
+        want.y = 0.0f;
+    } else {
+        want.y = (a.y * along + q.y * across) + v.y;
+        want.x = (a.x * along + q.x * across) + v.x;
+    }
+    len = sqrtf(dot3(&want, &want));
+    if (0.0f < len) {
+        float s = ee_div(len + extra, len);
+
+        want.x = want.x * s;
+        want.y = want.y * s;
+    }
+    // The image stores the quadword and then a 0 over z; its fourth word is
+    // the stack's, and the port leaves `pad` as it was.
+    m->v3DesiredVelocity.x = want.x;
+    m->v3DesiredVelocity.y = want.y;
+    m->v3DesiredVelocity.z = 0.0f;
+}
+
+// Otherwise: a heading for the target and a speed by the sub-state, held
+// to the cop's route point's driving line speed (for the slower class of
+// the two cars) times the strength's scale, and to 20 mph while the chased
+// car is more than a quarter turn off the cop's heading.
+static void pursue_steering(CopDriver *d, tAICop *cop, Car *chased,
+                            CopMover *m, const bVector2 *to, float dist,
+                            float ch_speed)
+{
+    const TrackRoutePoint *rp;
+    bPolar  pol;
+    float   speed = 0.0f, lim;
+    int32_t cls, cc, lvl;
+
+    m->State = eCMS_STEERING;
+    bToPolar(&pol, to);
+    m->aDesiredFacingAngle = pol.a;
+
+    switch (cop->Base.LogicSubState) {
+    case LSS_LOW_SPEED_CLOSE_FOLLOW:
+    case LSS_FOLLOW_BACKWARDS:
+    case LSS_BUMP:
+    case LSS_BLOCK:
+    case LSS_GET_AHEAD:
+        speed = dist + ch_speed;
+        break;
+    case LSS_FLANK:
+        speed = dist * 5.0f + ch_speed;
+        break;
+    case LSS_ACQUIRE: {
+        float lc = route_lateral(chased);
+        float lm = route_lateral(d->Base.Base.pCar);
+
+        if (fabsf(lc - lm) <= CD_ACQUIRE_LANE) {
+            if (chased->State.ForwardSpeed * CD_MPS_TO_MPH < CD_ACQUIRE_MPH)
+                speed = 0.0f;
+            else
+                speed = ch_speed * 0.5f;
+        } else {
+            speed = ch_speed * CD_SPEED_UP;
+        }
+        break;
+    }
+    case LSS_STOP:
+        speed = ch_speed * CD_SPEED_UP;
+        break;
+    case LSS_LIMBO_DISABLED:
+        speed = m->fBaseMaxSpeed;
+        break;
+    default:
+        break;
+    }
+
+    cls = d->nCarClass;
+    cc = chased->pCarTypeInfo->CarClass;
+    if (cc < cls)
+        cls = cc;
+    rp = car_get_route_point(d->Base.Base.pCar, 1);
+    lvl = chased->pPlayer != NULL ? pCopManager->nDifficultyLevel : 2;
+    lim = trpoint_get_driving_line_speed(rp, cls) * CopLineSpeedScale[lvl];
+    speed = min_f(lim, speed);
+
+    if (CD_SLOW_SPEED < speed) {
+        const Car *car = d->Base.Base.pCar;
+        bVector2   ahead;
+        bPolar     pc;
+        int16_t    turn;
+
+        ahead.x = chased->State.Position.x - car->State.Position.x;
+        ahead.y = chased->State.Position.y - car->State.Position.y;
+        bToPolar(&pc, &ahead);
+        turn = (int16_t)(uint16_t)(pc.a - d->Base.Base.pCar->State.Angle);
+        if (CD_QUARTER_TURN < fabsf((float)turn) && 1.0f < pc.r)
+            speed = CD_SLOW_SPEED;
+    }
+    m->fDesiredSpeed = speed;
+}
+
+// PURSUIT: steer for GetPursuitTargetPoint's point, or, within 40 m of the
+// chased car, going its way and at 30 mph or more, translate.
+static void think_pursuit(CopDriver *d, tAICop *cop, tPursuit *p,
+                          Car *chased, CopMover *m)
+{
+    float     ch_speed = chased->State.VelocityMagnitude;
+    float     dx, dy, dist, dot;
+    bVector2  to;
+    Car      *car;
+
+    copdriver_get_pursuit_target_point(d, &d->v2SteerTarget);
+    car = d->Base.Base.pCar;
+    to.x = d->v2SteerTarget.x - car->State.Position.x;
+    to.y = d->v2SteerTarget.y - car->State.Position.y;
+    // (The image works out |to| here too, and drops it.)
+    dx = car->State.Position.x - chased->State.Position.x;
+    dy = car->State.Position.y - chased->State.Position.y;
+    dist = sqrtf(dx * dx + dy * dy);
+    dot = chased->State.Velocity.x * car->State.Velocity.x
+        + chased->State.Velocity.y * car->State.Velocity.y;
+
+    if (dist < CD_TRANSLATE_DIST && 0.0f < dot
+        && CD_TRANSLATE_SPEED <= car->State.VelocityMagnitude)
+        pursue_translating(d, cop, p, chased, m, &to);
+    else
+        pursue_steering(d, cop, chased, m, &to, dist, ch_speed);
+}
+
+void copdriver_think(CopDriver *d, float dt)
+{
+    Car       *car;
+    tAICop    *cop;
+    tPursuit  *p;
+    Car       *chased;
+    CopMover  *m;
+    CarDriver *drv;
+    float      lateral;
+
+    trackedcontroller_think(&d->Base, dt);
+    car = d->Base.Base.pCar;
+    // The image reads Cops[nCopIndex] before this test; the port, after.
+    if (car->TheMovementMode != COP_MOVEMENT)
+        return;
+    cop = cop_of(d);
+    p = cop->Base.pMyPursuit;
+    chased = p != NULL ? p->pChasedCar : NULL;
+    m = (CopMover *)(void *)car->pCarMover;
+    drv = d->Base.Base.Driver;
+
+    if (copdriver_are_we_stuck(d, dt) && !taicop_is_near_pursuit_target(cop)) {
+        d->StateBeforeGettingStuck = d->State;
+        d->State = eCDS_BACKING_UP;
+        d->fBackingUpTimer = CD_BACK_UP_TIME;
+    }
+    m->fMaxBrakingAccel = CM_BRAKING_ACCEL;
+    copmover_reset_max_throttle_accel(m);
+
+    switch (d->State) {
+    case eCDS_DISABLED:
+        think_disabled(d, m);
+        break;
+    case eCDS_PARKED:
+        m->fDesiredSpeed = 0.0f;
+        m->State = eCMS_STEERING;
+        break;
+    case eCDS_PATROLLING:
+        // Along the cop's own drive target (its AI's), 20 m on.
+        m->State = eCMS_STEERING;
+        copdriver_find_point_by_distance(&d->v2SteerTarget, &lateral,
+                                         &drv->MyDriveTarget,
+                                         car_pos(d->Base.Base.pCar),
+                                         CD_TARGET_DIST, &cop->New48);
+        steer_at_target(d, m, d->fPatrolSpeed);
+        break;
+    case eCDS_PURSUIT:
+        if (p != NULL)
+            think_pursuit(d, cop, p, chased, m);
+        break;
+    case eCDS_BACKING_UP:
+        // For 2 s, in reverse at 20 mph towards where it was going, then
+        // back to that.
+        d->fBackingUpTimer = d->fBackingUpTimer - dt;
+        if (d->fBackingUpTimer < 0.0f) {
+            d->State = d->StateBeforeGettingStuck;
+            break;
+        }
+        if (d->StateBeforeGettingStuck == eCDS_PATROLLING)
+            copdriver_find_point_by_distance(
+                &d->v2SteerTarget, &lateral,
+                &d->Base.Base.Driver->MyDriveTarget,
+                car_pos(d->Base.Base.pCar), CD_TARGET_DIST, &cop->New48);
+        else if (d->StateBeforeGettingStuck == eCDS_PURSUIT)
+            copdriver_get_pursuit_target_point(d, &d->v2SteerTarget);
+        m->State = eCMS_STEERING;
+        steer_at_target(d, m, CD_BACK_UP_SPEED);
+        break;
+    default:
+        break;
+    }
+}
+
+// ------------------------------------------------------------- accessors
+
+void copdriver_get_route_numbers_to_use(CopDriver *d, int32_t *a,
+                                        int32_t *b)
+{
+    (void)d;
+    (void)a;
+    (void)b;
+}
+
+void copdriver_set_patrol_speed(CopDriver *d, float s)
+{
+    d->fPatrolSpeed = s;
+}
+
+void copdriver_set_state(CopDriver *d, eCopDriverStates s)
+{
+    d->State = s;
+}
+
+void copdriver_set_cop_index(CopDriver *d, int32_t n)
+{
+    d->nCopIndex = n;
+}
+
 // ------------------------------------------------------------ the entries
 
 static void vt_CopMover_dtor(void *self, int32_t flags)
@@ -544,4 +1263,47 @@ void copmover_install_vtables(void)
 void copmover_install_seams(void)
 {
     gCopMoverCtorFn = copmover_construct;
+}
+
+static void vt_CopDriver_dtor(void *self, int32_t flags)
+{
+    copdriver_destroy((CopDriver *)self, flags);
+}
+
+static void vt_CopDriver_Think(void *self, float dt)
+{
+    copdriver_think((CopDriver *)self, dt);
+}
+
+#define E(f) { 0, 0, (VtFn)(f) }
+
+// _vt$9CopDriver, 0x002b5998. Its own destructor and Think, DoSnapshot not
+// ported yet, and the rest TrackedController's and CarController's.
+static const VtEntry copdriver_vt[CARCONTROLLER_VT_ENTRIES] = {
+    { 0, 0, NULL },
+    E(vt_CopDriver_dtor),                           //   8  0x001a1e30
+    E(carcontroller_debug_display),                 //  16  0x001c0198
+    { 0, 0, NULL },                                 //  24  0x001a2b58
+    E(vt_CopDriver_Think),                          //  32  0x001a2110
+    E(trackedcontroller_set_current_route),         //  40  0x0023a178
+    E(trackedcontroller_get_current_route),         //  48  0x0023a198
+    E(trackedcontroller_get_current_route_point),   //  56  0x0023a3d0
+    E(trackedcontroller_get_amount_out_of_bounds),  //  64  0x0023a300
+    E(trackedcontroller_find_where_i_am),           //  72  0x0023a1c8
+    E(trackedcontroller_just_reset),                //  80  0x0023a2f8
+    E(carcontroller_set_to_physics_mode),           //  88  0x001c0100
+    E(carcontroller_force_boost),                   //  96  0x001c0140
+    E(carcontroller_release_boost),                 // 104  0x001c0160
+};
+
+#undef E
+
+void copdriver_install_vtables(void)
+{
+    vt_install(COPDRIVER_VTABLE, copdriver_vt, CARCONTROLLER_VT_ENTRIES);
+}
+
+void copdriver_install_seams(void)
+{
+    gCopDriverCtorFn = copdriver_construct;
 }

@@ -12,14 +12,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "bmem.h"
 #include "car.h"
+#include "carcontroller.h"
 #include "cardriver.h"
 #include "carmodes.h"
 #include "carstate.h"
 #include "cartypeinfo.h"
+#include "cop.h"
 #include "copdriver.h"
 #include "copmanager.h"
+#include "coputil.h"
+#include "drivetarget.h"
+#include "realcontroller.h"
 #include "topology.h"
+#include "trackroute.h"
 #include "vtable.h"
 
 // ------------------------------------------------------------- the world
@@ -161,6 +168,55 @@ void carmover_destroy(CarMover *m, int32_t flags)
 {
     printf("  cmdtor %s %d %08x\n", lab(m), flags, (unsigned)m->_vtable);
 }
+
+// CopDriver's, the other half of copdriver.c (12d), which
+// copdriver_check checks and this script never reaches.
+CarControllerCtorFn gCopDriverCtorFn;
+
+static void unreached(const char *f)
+{
+    fprintf(stderr, "copmover_test: %s reached\n", f);
+    exit(3);
+}
+
+#define UNREACHED(ret, name, args)  ret name args { unreached(#name); exit(3); }
+
+UNREACHED(void *, bMalloc, (int size, const char *name, int flags, int pool))
+UNREACHED(TrackRoutePoint *, car_get_route_point, (Car *c, int find))
+UNREACHED(int32_t, car_in_recent_collision, (struct Car *c))
+UNREACHED(void, carcontroller_debug_display, (CarController *c))
+UNREACHED(void, carcontroller_force_boost, (CarController *c, float f))
+UNREACHED(void, carcontroller_release_boost, (CarController *c))
+UNREACHED(void, carcontroller_set_to_physics_mode,
+          (CarController *c, struct Car *k))
+UNREACHED(void, cardriver_init, (CarDriver *d))
+UNREACHED(DriveTarget *, drivetarget_assign,
+          (DriveTarget *dst, const DriveTarget *src))
+UNREACHED(void, taicop_initialize_drive_target, (tAICop *c))
+UNREACHED(int32_t, taicop_is_near_pursuit_target, (const tAICop *c))
+UNREACHED(void, taicop_update_drive_target,
+          (tAICop *c, const bVector2 *pos, int32_t keep))
+UNREACHED(bVector2 *, tpursuithistory_velocity_at,
+          (bVector2 *out, const tPursuitHistory *h, float t))
+UNREACHED(void, trackedcontroller_destroy,
+          (TrackedController *c, int32_t flags))
+UNREACHED(void, trackedcontroller_find_where_i_am, (TrackedController *c))
+UNREACHED(float, trackedcontroller_get_amount_out_of_bounds,
+          (TrackedController *c))
+UNREACHED(TrackRoute *, trackedcontroller_get_current_route,
+          (TrackedController *c, int find))
+UNREACHED(TrackRoutePoint *, trackedcontroller_get_current_route_point,
+          (TrackedController *c, int find))
+UNREACHED(TrackedController *, trackedcontroller_init,
+          (TrackedController *c, struct Car *k))
+UNREACHED(void, trackedcontroller_just_reset, (TrackedController *c))
+UNREACHED(void, trackedcontroller_set_current_route,
+          (TrackedController *c, TrackRoute *r, TrackRoutePoint *p))
+UNREACHED(void, trackedcontroller_think, (TrackedController *c, float dt))
+UNREACHED(float, trpoint_get_driving_line_speed,
+          (const TrackRoutePoint *p, int line))
+
+#undef UNREACHED
 
 // ------------------------------------------------------------ the fields
 

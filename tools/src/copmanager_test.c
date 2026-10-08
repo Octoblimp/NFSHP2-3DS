@@ -22,6 +22,7 @@
 #include "configitems.h"
 #include "cop.h"
 #include "copmgr.h"
+#include "drivetarget.h"
 #include "race.h"
 #include "topology.h"
 #include "trackmap.h"
@@ -326,6 +327,55 @@ void bSlotFree(BSlotPool *pool, void *slot)
 {
     (void)pool; (void)slot;
     unreached("bSlotFree");
+}
+
+// The drive target's (12d), which cop_check checks.
+TrackRoute *car_get_route(Car *c, int find)
+{
+    (void)c; (void)find;
+    unreached("car_get_route");
+    return NULL;
+}
+
+TrackRoutePoint *car_get_route_point(Car *c, int find)
+{
+    (void)c; (void)find;
+    unreached("car_get_route_point");
+    return NULL;
+}
+
+void ai_get_next_route_point(NearestRoutePointInfo *info)
+{
+    (void)info;
+    unreached("ai_get_next_route_point");
+}
+
+float trpoint_get_driving_line_offset(const TrackRoutePoint *p, int line)
+{
+    (void)p; (void)line;
+    unreached("trpoint_get_driving_line_offset");
+    return 0.0f;
+}
+
+void trpoint_get_position3(const TrackRoutePoint *p, bVector3 *o, float d,
+                           float l)
+{
+    (void)p; (void)o; (void)d; (void)l;
+    unreached("trpoint_get_position3");
+}
+
+void drivetarget_clear(DriveTarget *t, Car *car, float speed)
+{
+    (void)t; (void)car; (void)speed;
+    unreached("drivetarget_clear");
+}
+
+void drivetarget_add_point3(DriveTarget *t, const bVector3 *p, int8_t route,
+                            int16_t rpn, int8_t dl, int check, Car *car)
+{
+    (void)t; (void)p; (void)route; (void)rpn; (void)dl; (void)check;
+    (void)car;
+    unreached("drivetarget_add_point3");
 }
 
 static void disable_my_car(tCop *cop, int32_t b)

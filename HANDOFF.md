@@ -17584,3 +17584,81 @@ the tuning, Move step by step, and the check.
 12d, CopDriver: its constructor (`0x001a1ce8`, `gCopDriverCtorFn`) and
 Think, after which `gAddCopCarToRaceFn` can be bound and the cops built
 in a race.
+
+## Session 57 (2026-10-08) -- 12d, CopDriver
+
+CopDriver, the controller half of retail's copdriver.obj: what an AI
+cop's car gets under COP_CONTROL. It drives the car through CopMover
+(12c). With it come tAICop's drive target in `cop.c`, CarInRecentCollision
+in a new `coputil.c`, and tPursuit's two drive targets and its history,
+laid out in `copmanager.h` with the history's VelocityAt.
+`docs/formats/cop-driver.md` is new; `cops.md` has the drive target.
+
+### What it does
+
+- **The record**, 76 bytes in both images: a TrackedController, the
+  state, the state before getting stuck, the sub-state, two timers, the
+  patrol speed (65 mph), the cop's number, the steer target and the car
+  class. The constructor gives it a NullDriver.
+- **Think**: TrackedController's, then on COP_MOVEMENT only:
+  - stuck (in a collision, under 2 m/s, for 1 s) and not within 20 m of
+    the chased car, it backs up for 2 s at 20 mph;
+  - DISABLED brakes to a stop; PARKED wants no speed;
+  - PATROLLING steers for the point 20 m along its drive target, at the
+    patrol speed;
+  - PURSUIT, within 40 m of the chased car, going its way and at
+    30 mph or more, *translates*: a velocity, the chased car's (a
+    player's from the pursuit's history) plus the way to the target,
+    weighted by the sub-state. Otherwise it *steers* for the target at
+    a speed by the sub-state. That speed is held to the route's driving
+    line speed times 1.15 to 1.25, and to 20 mph while the chased car
+    is more than a quarter turn off.
+- **GetPursuitTargetPoint** takes the pursuit's near or far drive
+  target, or builds its own along the chased car's route (ACQUIRE,
+  STOP) or its own (LIMBO_DISABLED).
+- **tAICop's drive target.** IsNearPursuitTarget is the 20 m test.
+  InitializeDriveTarget picks a route point by the state asked for: on
+  patrol, the nearest oncoming point if it's on the road (else the
+  nearest racing one); in pursuit, the chased car's or its own.
+  UpdateDriveTarget walks the point up to a position, at most ten
+  steps, starting once more from InitializeDriveTarget at exactly ten.
+  Then it lays twenty points down the route at the cop's offset and
+  driving line.
+- main.c installs CopDriver's table and binds `gCopDriverCtorFn`;
+  `COPDRIVER_SIZE` is `sizeof(CopDriver)`. `gAddCopCarToRaceFn` stays
+  NULL: a cop on the road needs Think (12f, 12g), and Hot Pursuit races
+  would reach tAICop's NULL Think. Nothing changes in a race yet.
+
+### Checked
+
+- `copdriver_check` (new): 21727 operations: the constructor, the two
+  walkers, AreWeStuck, GetPursuitTargetPoint, and Think in every state
+  and sub-state, with the edges (40 m, a dot of 0, exactly 30 mph,
+  NaN, -0 and infinite speeds, the backing-up timer landing on 0).
+  29413 lines, 0 differ. `--mutate`: 232 mutations, 226 caught, 6
+  equivalent.
+- `cop_check`, grown to 3103 operations, adds the drive target. Three
+  routes of real points are laid out as retail's, with stand-ins for
+  GetNearestRoutePoint, GetNextRoutePoint, GetRoute and GetRoutePoint,
+  and TrackRoutePoint::GetPosition runs as shipped. The cases cover:
+  the widths exactly; walks just short of, on and just past each
+  point; route ends, links and loops; and the restart at exactly ten
+  by each answer. 17105 lines, 0 differ. `--mutate`: 232 mutations
+  (93 new), 230 caught, 2 equivalent (the new one: the restart at
+  `n >= 10`, since the loop's top only sees 0 or 10).
+- carmode maps CopDriver's host size back to the image's 76 (its size
+  mutation caught). copmanager's and copmover's harnesses stand in
+  for the calls they never reach. carmode, copmover, copmanager,
+  copdriver, hudanim, hudcop, hudfeatures, hudrender, realcontroller,
+  realdriver, trackmap, beltmover, aicarcontroller, aidriver, carinit,
+  collisionbody, physcomp, physicscar, raceinit, trafficcar,
+  trafficdriver, traffictele, drivecam, drivingchoice, nearbycar,
+  raceupdate, hudscore, racecore, racerun, airoute, cardriver and
+  drivetarget: 0 differ.
+- The CIA builds.
+
+### Next
+
+12e, tTrackGraph; then 12f, the cops' Think and GlobalCopThink, and
+12g, tAICop::Think. After those, bind `gAddCopCarToRaceFn` and put the
+cops on the road.

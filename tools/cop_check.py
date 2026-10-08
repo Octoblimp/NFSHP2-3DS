@@ -7,12 +7,25 @@ and destructor (0x0022d418), tPlayerCop's (0x0022d548, 0x0022d5b0),
 tAICop's (0x0022db20, 0x0022dcc0) with its operator new (0x00230d78) and
 delete (0x00230d68), the three setters, ClearPursuit (0x0022e510),
 ClearSpeedTrap (0x0022e558), DisableMyCar (0x00230ac8), the zone
-permissions (0x0022f770, 0x0022f810, 0x0022f850) and the two
+permissions (0x0022f770, 0x0022f810, 0x0022f850), the two
 IsAIControlled (0x00230d60, 0x00230d98), reached through the image's own
-tables (0x002bd6e8, 0x002bd6c0, 0x002bd698). Then copmgr.obj's CreateCop
+tables (0x002bd6e8, 0x002bd6c0, 0x002bd698), and the drive target:
+IsNearPursuitTarget (0x00230bf8), InitializeDriveTarget (0x00230638) and
+UpdateDriveTarget (0x002307d0), with TrackRoutePoint::GetPosition
+(0x001c1408) run as shipped under it. Then copmgr.obj's CreateCop
 (0x002272e8), 0x002276a0 (the cop cars' largest size) and
 AddCopCarToRace (0x00227d78). The harness (tools/src/cop_test.c) runs
-cop.c, copmgr.c, copmanager.c and vtable.c and prints the same lines.
+cop.c, copmgr.c, copmanager.c, trackroute.c and vtable.c and prints the
+same lines.
+
+**The drive target's world** is three routes of real points, laid out as
+retail's (a 1064-byte header, then 112-byte points), each car's driver,
+and four stand-ins answering by rules the script sets:
+GetNearestRoutePoint (a queue of answers: the return and the route and
+point it leaves), GetNextRoutePoint (a point on; off a route's end, point
+0 of the route it links to, or NULL), and Car::GetRoute and
+GetRoutePoint (a route and point per car). DriveTarget::Clear and
+AddPointToTarget are logged with their arguments.
 
 **The stubs**, logged and answered by the same rule on both sides: both
 bMallocs (a block of 0xcd), __builtin_delete, bOMalloc and bFree on the
@@ -35,7 +48,9 @@ both sides log it as `malloc2`.
     python tools/cop_check.py --dump out/cop
 """
 import argparse
+import math
 import os
+import random
 import struct
 import subprocess
 import sys
@@ -57,8 +72,15 @@ HARNESS = "tools/src/cop_test.c"
 COP = "3DS Files/source/cop.c"
 COPMGR = "3DS Files/source/copmgr.c"
 SOURCES = [HARNESS, COP, COPMGR, "3DS Files/source/copmanager.c",
+           "3DS Files/source/trackroute.c",
+           "3DS Files/source/trackpath.c",
+           "3DS Files/source/quickspline.c",
+           "3DS Files/source/bchunk.c",
+           "3DS Files/source/emath.c",
            "3DS Files/source/vtable.c", "3DS Files/source/bmath.c",
-           "3DS Files/source/bmathtab.c"]
+           "3DS Files/source/bmathtab.c",
+           "3DS Files/source/bvector.c",
+           "3DS Files/source/bmatrix.c"]
 HARNESS_TIMEOUT = 60
 
 # ================================================================ the image
@@ -88,6 +110,9 @@ F_ZGET = 0x0022f850
 F_CREATE = 0x002272e8
 F_MAXDIM = 0x002276a0
 F_ADD = 0x00227d78
+F_ISNEAR = 0x00230bf8
+F_INITDT = 0x00230638
+F_UPDDT = 0x002307d0
 
 S_MALLOC = 0x002577c0
 S_MALLOC2 = 0x00257690
@@ -101,6 +126,12 @@ S_RESET = 0x00132eb8
 S_RMCOP = 0x0022c740
 S_RMSPK = 0x0022c990
 S_WRECK = 0x001b5bc8
+S_NEAREST = 0x001cb7a0
+S_NEXT = 0x001cb960
+S_GETROUTE = 0x001332a8
+S_GETRP = 0x001332d8
+S_DTCLEAR = 0x0021bbb0
+S_ADDPT = 0x0021c2b8
 
 VT_TCOP = 0x002bd6e8
 VT_PCOP = 0x002bd6c0
@@ -119,6 +150,20 @@ BODY = 480
 MGR_SIZE = 10516
 PURSUIT_SIZE = 64
 NPURSUITS = 4
+CAR_DRIVER = 44
+DRIVER_SIZE = 560
+NQ, QPTS = 3, 40                        # the routes, and points each
+Q_HDR, Q_PT = 1064, 112
+
+
+def s8(v):
+    v &= 0xff
+    return v - 0x100 if v & 0x80 else v
+
+
+def s16(v):
+    v &= 0xffff
+    return v - 0x10000 if v & 0x8000 else v
 
 
 def fbits(f):
@@ -153,6 +198,189 @@ def traps(recs):
     s = ["ntraps|%d" % len(recs)]
     for i, (x, y, ang, flags) in enumerate(recs):
         s.append("trap|%d|%s|%s|%d|%d" % (i, F(x), F(y), ang, flags))
+    return s
+
+
+def H(f):
+    """A float's bits, as the hex word the route ops take."""
+    return "%08x" % fbits(f)
+
+
+def route_points(rnd, n, start, heading, step=10.0, wiggle=12.0):
+    """n route points along a wandering line: each a TrackRoutePoint's 28
+    words, Direction the unit way to the next."""
+    pos = [start]
+    h = heading
+    for i in range(n):
+        h += rnd.uniform(-wiggle, wiggle)
+        d = step * rnd.uniform(0.6, 1.4)
+        x, y = pos[-1]
+        pos.append((x + d * math.cos(math.radians(h)),
+                    y + d * math.sin(math.radians(h))))
+    pts = []
+    dist = rnd.uniform(0.0, 500.0)
+    for i in range(n):
+        (x, y), (nx, ny) = pos[i], pos[i + 1]
+        ln = math.hypot(nx - x, ny - y)
+        words = [H(x), H(y), H(rnd.uniform(-3.0, 3.0)), H((nx - x) / ln),
+                 H((ny - y) / ln), H(ln), H(rnd.uniform(3.0, 9.0)),
+                 H(rnd.uniform(3.0, 9.0)), H(rnd.uniform(-0.1, 0.1)),
+                 H(rnd.uniform(-0.1, 0.1)), H(dist),
+                 "%08x" % rnd.getrandbits(32)]
+        dist += ln
+        offs = [rnd.randrange(-32768, 32768) for _ in range(21)]
+        speeds = [rnd.randrange(256) for _ in range(21)] + [rnd.randrange(256)]
+        raw = struct.pack("<21h", *offs) + bytes(speeds)
+        words += ["%08x" % w for w in struct.unpack("<16I", raw)]
+        pts.append(words)
+    return pts, pos
+
+
+def drive_target_script():
+    """IsNearPursuitTarget, InitializeDriveTarget and UpdateDriveTarget,
+    on two AI cops (cop 0 in A1 chasing A2 through U0, cop 1 in A3)."""
+    rnd = random.Random(1213)
+    s = types() + fresh()
+    s += ["acop|0|0|4", "acop|1|1|5", "mycar|0|1", "mycar|1|3",
+          "pursuit|0|2", "setp|0|0", "pursuit|1|-1"]
+    # Q0 links on to Q1; Q1 ends; Q2, route 200 (-56 as a byte), loops.
+    paths = {}
+    for q, (num, cnt, link, start, hd) in enumerate((
+            (5, 12, 1, (0.0, 0.0), 0.0),
+            (9, 30, -1, (130.0, 5.0), 10.0),
+            (200, 3, 2, (-50.0, 40.0), 95.0))):
+        s.append("qroute|%d|%d|%d|%d" % (q, num, cnt, link))
+        pts, pos = route_points(rnd, cnt, start, hd)
+        paths[q] = pos
+        for i, w in enumerate(pts):
+            s.append("qpt|%d|%d|%s" % (q, i, "|".join(w)))
+
+    # ---- IsNearPursuitTarget: no pursuit, then about 20 m
+    s += ["setp|0|-1", "isnear|0", "setp|0|0"]
+    s.append("wpos|1|%s|%s" % (H(0.0), H(0.0)))
+    for x, y in ((0.0, 0.0), (19.99, 0.0), (20.0, 0.0), (12.0, -16.0),
+                 (-12.0, 16.0), (20.01, 0.0), (0.0, -19.999998),
+                 (14.142135, 14.142136), (300.0, -2.0), (float("nan"), 0.0),
+                 (float("inf"), 0.0), (-0.0, -0.0)):
+        s += ["wpos|2|%s|%s" % (H(x), H(y)), "isnear|0"]
+    s.append("wpos|1|%s|%s" % (H(5.0), H(-7.0)))
+    for x, y in ((17.0, 9.0), (-7.0, -23.0), (5.0, 12.9), (24.99, -7.0),
+                 (5.0, -7.0), (-7.0, 5.0), (25.0, 13.0)):
+        s += ["wpos|2|%s|%s" % (H(x), H(y)), "isnear|0"]
+
+    # ---- InitializeDriveTarget
+    s.append("wpos|1|%s|%s" % (H(3.0), H(1.0)))
+    s.append("wpos|2|%s|%s" % (H(40.0), H(-2.0)))
+    s += ["carq|1|0|2", "carq|2|1|4", "carq|3|2|1"]
+    s.append("rinfo|0|1|7")
+    # Not on patrol or in pursuit: only the clear.
+    for ds in (0, 1, 2, 3, 4, 7, 8, -1):
+        s += ["setds|0|%d" % ds, "lss|0|9", "rinfo|0|1|7", "initdt|0"]
+    # On patrol, not following an offset: straight to the racing routes.
+    for lss in (0, 1, 3, 9, -1):
+        s += ["setds|0|5", "lss|0|%d" % lss, "nearq|1|0|5|0|1|3",
+              "initdt|0"]
+    # Following an offset: the oncoming point found, across the car's own
+    # route point within its width or not, left and right.
+    s += ["setds|0|5", "lss|0|2"]
+    for found, q, i in ((0, 1, 3), (1, 2, 0), (1, 2, 1), (1, 2, 2),
+                        (1, 0, 2), (1, 0, 3), (1, 1, 0), (1, 1, 11),
+                        (-1, 0, 4), (0, -1, 0), (1, 1, 29)):
+        s += ["nearq|%d|%d|%d|0|0|6" % (found, q, i), "initdt|0"]
+    s.append("carq|1|0|2")
+    # Hot pursuit: by the sub-state.
+    s += ["setds|0|6"]
+    for lss in list(range(0, 14)) + [-1, 100]:
+        s += ["lss|0|%d" % lss, "rinfo|0|1|7", "initdt|0"]
+    # Cars with no route.
+    s += ["carq|2|-1|-1", "lss|0|9", "initdt|0", "lss|0|10", "initdt|0",
+          "carq|1|-1|-1", "lss|0|11", "initdt|0", "carq|2|1|4",
+          "carq|1|0|2"]
+
+    # ---- UpdateDriveTarget, keeping the route point: just the target
+    s.append("dl|0|%s|%s|-1" % (H(0.0), H(0.0)))
+    for line, dx, dy in ((-1, 0.0, 0.0), (-1, 1.5, -2.25), (0, 0.0, 0.0),
+                         (3, -0.75, 1.0), (20, 2.0, 0.5), (7, -0.0, -0.0)):
+        s.append("dl|0|%s|%s|%d" % (H(dx), H(dy), line))
+        for q, i in ((0, 0), (0, 5), (0, 11), (1, 0), (1, 15), (1, 29),
+                     (2, 0), (2, 2)):
+            s += ["rinfo|0|%d|%d" % (q, i),
+                  "upddt|0|%s|%s|1" % (H(1.0), H(2.0))]
+    s.append("dl|0|%s|%s|-1" % (H(0.5), H(-1.0)))
+    for keep in (2, -1):
+        s += ["rinfo|0|0|3", "upddt|0|%s|%s|%d" % (H(1.0), H(2.0), keep)]
+        x0, y0 = paths[1][5]
+        x1, y1 = paths[1][6]
+        s += ["rinfo|0|1|0", "upddt|0|%s|%s|%d" % (
+            H((x0 + x1) / 2), H((y0 + y1) / 2), keep)]
+
+    # ---- UpdateDriveTarget, moving the route point up to pos first
+    s += ["setds|0|5", "lss|0|2", "nearq|1|1|0", "carq|1|0|2"]
+    path = paths[1]
+    for start in (0, 3, 18, 25):
+        for k in range(start, min(start + 16, 30)):
+            # just short of point k, on it, and just past it
+            x0, y0 = path[k]
+            x1, y1 = path[k + 1]
+            for f in (-0.01, 0.0, 0.01, 0.5):
+                px = x0 + (x1 - x0) * f
+                py = y0 + (y1 - y0) * f
+                s += ["rinfo|0|1|%d" % start,
+                      "upddt|0|%s|%s|0" % (H(px), H(py))]
+    # Past the route's end: the steps stop on the last point.
+    x, y = path[30]
+    s += ["rinfo|0|1|20", "upddt|0|%s|%s|0" % (H(x + 50.0), H(y))]
+    # Ten steps exactly from the start: InitializeDriveTarget, once, by
+    # each answer.
+    for ans in ("1|1|0", "1|1|9", "1|1|10", "1|1|12", "0|1|5", "1|0|0",
+                "1|2|1"):
+        for k in (9, 10, 11):
+            x0, y0 = path[k]
+            x1, y1 = path[k + 1]
+            s += ["nearq|" + ans, "rinfo|0|1|0",
+                  "upddt|0|%s|%s|0" % (H((x0 + x1) / 2), H((y0 + y1) / 2))]
+    # Across Q0's end into Q1, and round Q2's loop.
+    p0 = paths[0]
+    s += ["rinfo|0|0|8", "upddt|0|%s|%s|0" % (H(p0[11][0] + 1.0),
+                                               H(p0[11][1]))]
+    p2 = paths[2]
+    s += ["nearq|1|2|0", "rinfo|0|2|0", "upddt|0|%s|%s|0" % (
+        H(p2[3][0] + 5.0), H(p2[3][1] + 5.0))]
+    # Random positions near the routes.
+    for run in range(60):
+        q = rnd.choice((0, 1, 1, 2))
+        pth = paths[q]
+        k = rnd.randrange(len(pth))
+        s.append("dl|0|%s|%s|%d" % (H(rnd.uniform(-3, 3)),
+                                    H(rnd.uniform(-3, 3)),
+                                    rnd.choice((-1, 0, 5, 20))))
+        s.append("nearq|1|%d|%d" % (q, rnd.randrange(3)))
+        s.append("rinfo|0|%d|%d" % (q, rnd.randrange(max(1, k))))
+        s.append("upddt|0|%s|%s|%d" % (
+            H(pth[k][0] + rnd.uniform(-8, 8)),
+            H(pth[k][1] + rnd.uniform(-8, 8)), rnd.choice((0, 0, 1))))
+
+    # ---- InitializeDriveTarget's width test exactly: Q2 rebuilt, the
+    # car on p0 and the oncoming point p1 across it
+    def flat(i, x, y, dx, dy, lw, rw):
+        w = [H(x), H(y), H(0.0), H(dx), H(dy), H(10.0), H(lw), H(rw)]
+        return "qpt|2|%d|%s" % (i, "|".join(w + ["00000000"] * 20))
+
+    s += ["setds|0|5", "lss|0|2", "carq|1|2|0", "isnear|1"]
+    edge = (-6.0, -6.0000005, -5.9999995, 4.0, 4.0000005, 3.9999998, 0.0,
+            -0.0, 100.0, -100.0, float("nan"))
+    for ox, oy in ((0.0, 0.0), (10.0, -20.0)):
+        for dx, dy in ((1.0, 0.0), (0.0, 1.0), (0.6, 0.8)):
+            for lw, rw in ((4.0, 6.0), (6.0, 4.0), (-1.0, 6.0), (4.0, -1.0),
+                           (0.0, 0.0)):
+                s.append(flat(0, ox, oy, dx, dy, lw, rw))
+                for d in edge:
+                    # across the car's point: (3, d) square to x, (-d, 3)
+                    # to y
+                    x, y = (3.0, d) if dy == 0.0 else (-d, 3.0)
+                    s += [flat(1, ox + x, oy + y, 1.0, 0.0, 5.0, 5.0),
+                          "nearq|1|2|1|0|0|6", "initdt|0"]
+    s.append("dump")
     return s
 
 
@@ -268,6 +496,9 @@ def script():
         s += ["setp|1|0", "respk|1", "disable|1|1", "dump"]
         s += ["setp|1|0", "respk|-2", "state|2|5", "cpos|2|0|0",
               "setp|2|1", "disable|2|1", "dump"]
+
+    # ---- the drive target
+    s += drive_target_script()
     return s
 
 
@@ -308,6 +539,24 @@ class Model(object):
         for k, p in enumerate(self.pursuits):
             e.write(p, b"\xcd" * PURSUIT_SIZE)
             self.names[p] = "U%d" % k
+        self.drivers = []
+        for k, c in enumerate(self.cars):
+            d = self.block(DRIVER_SIZE)
+            self.names[d] = "V%d" % k
+            e.put32(c + CAR_DRIVER, d)
+            self.drivers.append(d)
+        self.qr = []
+        for k in range(NQ):
+            q = self.block(Q_HDR + QPTS * Q_PT, 0)
+            self.names[q] = "Q%d" % k
+            self.qr.append(q)
+        self.qcount = [0] * NQ
+        self.qlink = [-1] * NQ
+        self.car_q = [-1] * NCARS
+        self.car_i = [-1] * NCARS
+        self.nearq = []
+        self.near_at = 0
+        self.dtpos = e.alloc(16, align=16)
         self.m = 0
         for a, fn in ((S_MALLOC, self.s_malloc), (S_MALLOC2, self.s_malloc2),
                       (S_DELETE, self.s_delete), (S_OMALLOC, self.s_omalloc),
@@ -315,7 +564,10 @@ class Model(object):
                       (S_CTRLMODE, self.s_ctrlmode),
                       (S_MOVEMODE, self.s_movemode), (S_RESET, self.s_reset),
                       (S_RMCOP, self.s_rmcop), (S_RMSPK, self.s_rmspk),
-                      (S_WRECK, self.s_wreck)):
+                      (S_WRECK, self.s_wreck), (S_NEAREST, self.s_nearest),
+                      (S_NEXT, self.s_next), (S_GETROUTE, self.s_getroute),
+                      (S_GETRP, self.s_getrp), (S_DTCLEAR, self.s_dtclear),
+                      (S_ADDPT, self.s_addpt)):
             e.stub(a, fn)
         e.put32(G_COPPOOL, self.pool)
 
@@ -330,6 +582,10 @@ class Model(object):
             return "cd"
         if v in self.names:
             return self.names[v]
+        for k, q in enumerate(self.qr):
+            t = q + Q_HDR
+            if t <= v < t + QPTS * Q_PT and (v - t) % Q_PT == 0:
+                return "Q%d.p%d" % (k, (v - t) // Q_PT)
         if self.m and self.m + 8260 <= v < self.m + 8260 + 28 * 64:
             k, r = divmod(v - self.m - 8260, 28)
             if r == 0:
@@ -431,6 +687,86 @@ class Model(object):
 
     def s_wreck(self, em):
         self.emit("  wreck %s" % self.sym(em.reg[4]))
+
+    def qpoint(self, q, i):
+        if q < 0 or i < 0:
+            return 0
+        return self.qr[q] + Q_HDR + Q_PT * i
+
+    def s_nearest(self, em):
+        e = self.e
+        info, pos = em.reg[4] & M32, em.reg[5] & M32
+        line = "  nearest %08x %08x %d %d %08x" % (
+            e.u32(pos), e.u32(pos + 4), s32(em.reg[6]), s32(em.reg[7]),
+            em.fpr[12] & M32)
+        r = 0
+        if self.nearq:
+            a = self.nearq[min(self.near_at, len(self.nearq) - 1)]
+            self.near_at += 1
+            r = a[0]
+            if a[1] == -1:
+                e.put32(info, 0)
+                e.put32(info + 4, 0)
+            elif a[1] >= 0:
+                e.put32(info, self.qr[a[1]])
+                e.put32(info + 4, self.qpoint(a[1], a[2]))
+        self.emit("%s -> %d %s %s" % (line, r, self.sym(e.u32(info)),
+                                      self.sym(e.u32(info + 4))))
+        return r
+
+    def s_next(self, em):
+        e = self.e
+        info = em.reg[4] & M32
+        route, pt = e.u32(info), e.u32(info + 4)
+        line = "  next %s %s" % (self.sym(route), self.sym(pt))
+        q = self.qr.index(route) if route in self.qr else NQ
+        i = -1
+        if q < NQ and pt:
+            t = self.qr[q] + Q_HDR
+            if t <= pt < t + QPTS * Q_PT and (pt - t) % Q_PT == 0:
+                i = (pt - t) // Q_PT
+        if q == NQ or i < 0:
+            e.put32(info + 4, 0)
+        elif i + 1 < self.qcount[q]:
+            e.put32(info + 4, self.qpoint(q, i + 1))
+        elif self.qlink[q] >= 0:
+            e.put32(info, self.qr[self.qlink[q]])
+            e.put32(info + 4, self.qpoint(self.qlink[q], 0))
+        else:
+            e.put32(info + 4, 0)
+        self.emit("%s -> %s %s" % (line, self.sym(e.u32(info)),
+                                   self.sym(e.u32(info + 4))))
+
+    def car_k(self, car):
+        car &= M32
+        return self.cars.index(car) if car in self.cars else -1
+
+    def s_getroute(self, em):
+        k = self.car_k(em.reg[4])
+        r = self.qr[self.car_q[k]] if k >= 0 and self.car_q[k] >= 0 else 0
+        self.emit("  getroute %s %d -> %s" % (self.sym(em.reg[4]),
+                                              s32(em.reg[5]), self.sym(r)))
+        return r
+
+    def s_getrp(self, em):
+        k = self.car_k(em.reg[4])
+        r = self.qpoint(self.car_q[k], self.car_i[k]) if k >= 0 else 0
+        self.emit("  getrp %s %d -> %s" % (self.sym(em.reg[4]),
+                                           s32(em.reg[5]), self.sym(r)))
+        return r
+
+    def s_dtclear(self, em):
+        self.emit("  dtclear %s %s %08x" % (self.sym(em.reg[4]),
+                                            self.sym(em.reg[5]),
+                                            em.fpr[12] & M32))
+
+    def s_addpt(self, em):
+        e = self.e
+        v = em.reg[5] & M32
+        self.emit("  addpt %s %08x %08x %08x %d %d %d %d %s" % (
+            self.sym(em.reg[4]), e.u32(v), e.u32(v + 4), e.u32(v + 8),
+            s8(em.reg[6]), s16(em.reg[7]), s8(em.reg[8]), s32(em.reg[9]),
+            self.sym(em.reg[10])))
 
     # ---- the dump
 
@@ -665,6 +1001,59 @@ class Model(object):
                 r = e.call(F_ACOP, c, info(a[2]), v(3), limit=2000000)
             e.put32(self.m + 16 + 4 * k, c)
             self.emit("%s %d -> %s" % (o, k, self.sym(r)))
+        elif o == "qroute":
+            q = int(a[1])
+            e.write(self.qr[q] + 10, struct.pack("<h", int(a[2])))
+            self.qcount[q] = int(a[3])
+            self.qlink[q] = int(a[4])
+        elif o == "qpt":
+            pt = self.qpoint(int(a[1]), int(a[2]))
+            for j in range(28):
+                e.put32(pt + 4 * j, int(a[3 + j], 16))
+        elif o == "nearq":
+            self.nearq = [(int(a[1 + 3 * j]), int(a[2 + 3 * j]),
+                           int(a[3 + 3 * j])) for j in range((len(a) - 1) // 3)]
+            self.near_at = 0
+        elif o == "carq":
+            k = int(a[1])
+            self.car_q[k] = int(a[2])
+            self.car_i[k] = int(a[3])
+        elif o == "mycar":
+            k = int(a[2])
+            e.put32(self.cop(int(a[1])) + 4, self.cars[k] if k >= 0 else 0)
+        elif o == "dl":
+            c = self.cop(int(a[1]))
+            e.put32(c + 56, int(a[2], 16))
+            e.put32(c + 60, int(a[3], 16))
+            e.put32(c + 92, v(4))
+        elif o == "rinfo":
+            c, q = self.cop(int(a[1])), int(a[2])
+            e.put32(c + 76, self.qr[q] if q >= 0 else 0)
+            e.put32(c + 80, self.qpoint(q, int(a[3])))
+        elif o == "lss":
+            e.put32(self.cop(int(a[1])) + 20, v(2))
+        elif o == "wpos":
+            c = self.cars[int(a[1])]
+            e.put32(c + CAR_POS, int(a[2], 16))
+            e.put32(c + CAR_POS + 4, int(a[3], 16))
+        elif o == "isnear":
+            self.emit("isnear %s -> %d" % (
+                a[1], e.call(F_ISNEAR, self.cop(int(a[1])))))
+        elif o in ("initdt", "upddt"):
+            c = self.cop(int(a[1]))
+            if o == "initdt":
+                e.call(F_INITDT, c, limit=200000)
+            else:
+                e.put32(self.dtpos, int(a[2], 16))
+                e.put32(self.dtpos + 4, int(a[3], 16))
+                e.call(F_UPDDT, c, self.dtpos, v(4), limit=2000000)
+            line = "%s %s ri %s %s" % (o, a[1], self.sym(e.u32(c + 76)),
+                                       self.sym(e.u32(c + 80)))
+            car = e.u32(c + 4)
+            if car:
+                d = e.u32(car + CAR_DRIVER)
+                line += " pt0 %08x %08x" % (e.u32(d + 16), e.u32(d + 20))
+            self.emit(line)
         elif o == "new":
             self.emit("new -> %s" % self.sym(e.call(F_NEW)))
         elif o == "del":
@@ -772,8 +1161,12 @@ MUTATIONS = [
 
     # ---- tAICop's constructor
     ("acop_rb_index", C, "    c->nMyRoadBlockIndex = 0;\n", ""),
-    ("acop_route", C, "    c->RouteInfo.Route = NULL;\n", ""),
-    ("acop_point", C, "    c->RouteInfo.Point = NULL;\n", ""),
+    ("acop_route", C,
+     "    c->nMyRoadBlockIndex = 0;\n    c->RouteInfo.Route = NULL;\n",
+     "    c->nMyRoadBlockIndex = 0;\n"),
+    ("acop_point", C,
+     "    c->RouteInfo.Point = NULL;\n    c->fSubStateTimer = 0.0f;\n",
+     "    c->fSubStateTimer = 0.0f;\n"),
     ("acop_substate_timer", C, "    c->fSubStateTimer = 0.0f;\n", ""),
     ("acop_no_vptr", C,
      "    c->fSubStateTimer = 0.0f;\n    c->Base.vptr = TAICOP_VTABLE;",
@@ -834,8 +1227,8 @@ MUTATIONS = [
     ("acop_phys_time", C, "    c->fSecondsInPhysicsMode = 0.0f;\n", ""),
     ("acop_desired_disabled", C, "    c->Base.DesiredLogicState = LS_LIMBO;",
      "    c->Base.DesiredLogicState = LS_DISABLED;"),
-    ("acop_n52", C, "    c->New52 = 0.0f;\n", ""),
-    ("acop_n48", C, "    c->New48 = 0.0f;\n", ""),
+    ("acop_n52", C, "    c->New48.y = 0.0f;\n", ""),
+    ("acop_n48", C, "    c->New48.x = 0.0f;\n", ""),
     ("acop_dl_y", C, "    c->MyDLOffset.y = 0.0f;\n", ""),
     ("acop_dl_x", C, "    c->MyDLOffset.x = 0.0f;\n", ""),
     ("acop_flank", C, "    c->fFlankSide = 0.0f;\n", ""),
@@ -1024,11 +1417,223 @@ MUTATIONS = [
     ("add_beacop_0", M,
      "        copmanager_create_cop(pCopManager, info, beACop);",
      "        copmanager_create_cop(pCopManager, info, 0);"),
+
+    # ---- IsNearPursuitTarget
+    ("isn_no_null", C, "    if (p == NULL)\n        return 0;\n    ch = p->pChasedCar;",
+     "    ch = p->pChasedCar;"),
+    ("isn_null_1", C, "    if (p == NULL)\n        return 0;\n    ch = p->pChasedCar;",
+     "    if (p == NULL)\n        return 1;\n    ch = p->pChasedCar;"),
+    ("isn_le", C, "    return sqrtf(dx * dx + dy * dy) < 20.0f;",
+     "    return sqrtf(dx * dx + dy * dy) <= 20.0f;"),
+    ("isn_dist", C, "    return sqrtf(dx * dx + dy * dy) < 20.0f;",
+     "    return sqrtf(dx * dx + dy * dy) < 19.999f;"),
+    ("isn_dx_y", C, "    dx = ch->State.Position.x - mine->State.Position.x;",
+     "    dx = ch->State.Position.x - mine->State.Position.y;"),
+    ("isn_dy_x", C, "    dy = ch->State.Position.y - mine->State.Position.y;",
+     "    dy = ch->State.Position.x - mine->State.Position.y;"),
+    ("isn_no_dy", C, "    return sqrtf(dx * dx + dy * dy) < 20.0f;",
+     "    return sqrtf(dx * dx + dx * dy) < 20.0f;"),
+    ("isn_no_sqrt", C, "    return sqrtf(dx * dx + dy * dy) < 20.0f;",
+     "    return dx * dx + dy * dy < 20.0f;"),
+
+    # ---- InitializeDriveTarget
+    ("init_keep_point", C,
+     "    c->RouteInfo.Point = NULL;\n    c->RouteInfo.Route = NULL;\n\n    if (c->Base.DesiredLogicState == LS_DRIVING_ON_PATROL) {",
+     "    c->RouteInfo.Route = NULL;\n\n    if (c->Base.DesiredLogicState == LS_DRIVING_ON_PATROL) {"),
+    ("init_keep_route", C,
+     "    c->RouteInfo.Point = NULL;\n    c->RouteInfo.Route = NULL;\n\n    if (c->Base.DesiredLogicState == LS_DRIVING_ON_PATROL) {",
+     "    c->RouteInfo.Point = NULL;\n\n    if (c->Base.DesiredLogicState == LS_DRIVING_ON_PATROL) {"),
+    ("init_patrol_state", C,
+     "    if (c->Base.DesiredLogicState == LS_DRIVING_ON_PATROL) {",
+     "    if (c->Base.LogicState == LS_DRIVING_ON_PATROL) {"),
+    ("init_patrol_le", C,
+     "    if (c->Base.DesiredLogicState == LS_DRIVING_ON_PATROL) {",
+     "    if (c->Base.DesiredLogicState <= LS_DRIVING_ON_PATROL) {"),
+    ("init_follow_ne", C,
+     "        if (c->Base.LogicSubState == LSS_FOLLOW_OFFSET)\n            ok =",
+     "        if (c->Base.LogicSubState != LSS_FOLLOW_OFFSET)\n            ok ="),
+    ("init_follow_desired", C,
+     "        if (c->Base.LogicSubState == LSS_FOLLOW_OFFSET)\n            ok =",
+     "        if (c->Base.DesiredLogicSubState == LSS_FOLLOW_OFFSET)\n            ok ="),
+    ("init_oncoming_racing", C, "ONCOMING_TRAFFIC_ROUTES, 2, 0.0f);",
+     "ALL_RACING_ROUTES, 2, 0.0f);"),
+    ("init_oncoming_flags", C, "ONCOMING_TRAFFIC_ROUTES, 2, 0.0f);",
+     "ONCOMING_TRAFFIC_ROUTES, 0, 0.0f);"),
+    ("init_oncoming_dist", C, "ONCOMING_TRAFFIC_ROUTES, 2, 0.0f);",
+     "ONCOMING_TRAFFIC_ROUTES, 2, 1.0f);"),
+    ("init_rp_find", C,
+     "car_get_route_point(c->Base.pMyCar, 1);\n            const TrackRoutePoint *pt",
+     "car_get_route_point(c->Base.pMyCar, 0);\n            const TrackRoutePoint *pt"),
+    ("init_lat_dx", C,
+     "            float lat = (pt->Position.x - rp->Position.x) * rp->Direction.y",
+     "            float lat = (pt->Position.x - rp->Position.x) * rp->Direction.x"),
+    ("init_lat_dy", C,
+     "                      - (pt->Position.y - rp->Position.y) * rp->Direction.x;",
+     "                      - (pt->Position.y - rp->Position.y) * rp->Direction.y;"),
+    ("init_lat_plus", C,
+     "                      - (pt->Position.y - rp->Position.y) * rp->Direction.x;",
+     "                      + (pt->Position.y - rp->Position.y) * rp->Direction.x;"),
+    ("init_lat_px", C,
+     "            float lat = (pt->Position.x - rp->Position.x) * rp->Direction.y",
+     "            float lat = (pt->Position.x - rp->Position.y) * rp->Direction.y"),
+    ("init_lat_le", C, "            if (lat < 0.0f) {\n                lat = -lat;",
+     "            if (lat <= 0.0f) {\n                lat = -lat;"),
+    ("init_lat_no_abs", C, "                lat = -lat;\n", ""),
+    ("init_left_right", C, "                w = rp->LeftWidth;",
+     "                w = rp->RightWidth;"),
+    ("init_right_left", C, "                w = rp->RightWidth;",
+     "                w = rp->LeftWidth;"),
+    ("init_w_le", C, "            if (w < lat)\n                ok = 0;",
+     "            if (w <= lat)\n                ok = 0;"),
+    ("init_w_nan", C, "            if (w < lat)\n                ok = 0;",
+     "            if (!(lat <= w))\n                ok = 0;"),
+    ("init_no_return", C, "            if (ok)\n                return;\n", ""),
+    ("init_no_racing", C,
+     "        ai_get_nearest_route_point(&c->RouteInfo, pos, ALL_RACING_ROUTES, 2,\n                                   0.0f);\n",
+     ""),
+    ("init_racing_oncoming", C,
+     "        ai_get_nearest_route_point(&c->RouteInfo, pos, ALL_RACING_ROUTES, 2,\n                                   0.0f);\n",
+     "        ai_get_nearest_route_point(&c->RouteInfo, pos, ONCOMING_TRAFFIC_ROUTES, 2,\n                                   0.0f);\n"),
+    ("init_racing_flags", C,
+     "        ai_get_nearest_route_point(&c->RouteInfo, pos, ALL_RACING_ROUTES, 2,\n                                   0.0f);\n",
+     "        ai_get_nearest_route_point(&c->RouteInfo, pos, ALL_RACING_ROUTES, 1,\n                                   0.0f);\n"),
+    ("init_racing_dist", C,
+     "        ai_get_nearest_route_point(&c->RouteInfo, pos, ALL_RACING_ROUTES, 2,\n                                   0.0f);\n",
+     "        ai_get_nearest_route_point(&c->RouteInfo, pos, ALL_RACING_ROUTES, 2,\n                                   2.0f);\n"),
+    ("init_hot_any", C,
+     "    } else if (c->Base.DesiredLogicState == LS_HOT_PURSUIT) {\n        Car *car;",
+     "    } else {\n        Car *car;"),
+    ("init_hot_state", C,
+     "    } else if (c->Base.DesiredLogicState == LS_HOT_PURSUIT) {\n        Car *car;",
+     "    } else if (c->Base.LogicState == LS_HOT_PURSUIT) {\n        Car *car;"),
+    ("init_hot_desired_sub", C, "        switch (c->Base.LogicSubState) {\n        case LSS_ACQUIRE:",
+     "        switch (c->Base.DesiredLogicSubState) {\n        case LSS_ACQUIRE:"),
+    ("init_no_stop", C, "        case LSS_ACQUIRE:\n        case LSS_STOP:\n",
+     "        case LSS_ACQUIRE:\n"),
+    ("init_no_acquire", C, "        case LSS_ACQUIRE:\n        case LSS_STOP:\n",
+     "        case LSS_STOP:\n"),
+    ("init_follow_too", C, "        case LSS_ACQUIRE:\n        case LSS_STOP:\n",
+     "        case LSS_ACQUIRE:\n        case LSS_STOP:\n        case LSS_FOLLOW_OFFSET:\n"),
+    ("init_limbo_ready", C, "        case LSS_LIMBO_DISABLED:\n",
+     "        case LSS_LIMBO_DISABLED:\n        case LSS_LIMBO_READY:\n"),
+    ("init_limbo_chased", C,
+     "            c->RouteInfo.Route = car_get_route(c->Base.pMyCar, 1);\n            car = c->Base.pMyCar;",
+     "            c->RouteInfo.Route = car_get_route(c->Base.pMyPursuit->pChasedCar, 1);\n            car = c->Base.pMyCar;"),
+    ("init_limbo_point_chased", C,
+     "            c->RouteInfo.Route = car_get_route(c->Base.pMyCar, 1);\n            car = c->Base.pMyCar;",
+     "            c->RouteInfo.Route = car_get_route(c->Base.pMyCar, 1);\n            car = c->Base.pMyPursuit->pChasedCar;"),
+    ("init_limbo_find", C,
+     "            c->RouteInfo.Route = car_get_route(c->Base.pMyCar, 1);",
+     "            c->RouteInfo.Route = car_get_route(c->Base.pMyCar, 0);"),
+    ("init_acq_own", C,
+     "            c->RouteInfo.Route = car_get_route(c->Base.pMyPursuit->pChasedCar,\n                                               1);\n            car = c->Base.pMyPursuit->pChasedCar;",
+     "            c->RouteInfo.Route = car_get_route(c->Base.pMyCar,\n                                               1);\n            car = c->Base.pMyPursuit->pChasedCar;"),
+    ("init_acq_point_own", C,
+     "                                               1);\n            car = c->Base.pMyPursuit->pChasedCar;",
+     "                                               1);\n            car = c->Base.pMyCar;"),
+    ("init_acq_find", C,
+     "            c->RouteInfo.Route = car_get_route(c->Base.pMyPursuit->pChasedCar,\n                                               1);",
+     "            c->RouteInfo.Route = car_get_route(c->Base.pMyPursuit->pChasedCar,\n                                               0);"),
+    ("init_default_own", C, "        default:\n            return;\n        }\n        c->RouteInfo.Point",
+     "        default:\n            car = c->Base.pMyCar;\n            break;\n        }\n        c->RouteInfo.Point"),
+    ("init_point_find", C, "        c->RouteInfo.Point = car_get_route_point(car, 1);",
+     "        c->RouteInfo.Point = car_get_route_point(car, 0);"),
+    ("init_no_point", C, "        c->RouteInfo.Point = car_get_route_point(car, 1);\n", ""),
+
+    # ---- UpdateDriveTarget
+    ("past_dx_y", C, "    return (pos->x - pt->Position.x) * pt->Direction.x",
+     "    return (pos->x - pt->Position.x) * pt->Direction.y"),
+    ("past_minus", C, "         + (pos->y - pt->Position.y) * pt->Direction.y;",
+     "         - (pos->y - pt->Position.y) * pt->Direction.y;"),
+    ("past_py_x", C, "         + (pos->y - pt->Position.y) * pt->Direction.y;",
+     "         + (pos->y - pt->Position.x) * pt->Direction.y;"),
+    ("upd_walk_keep", C, "    if (keep == 0) {\n        int32_t again = 0;",
+     "    if (keep != 1) {\n        int32_t again = 0;"),
+    ("upd_walk_neg", C, "    if (keep == 0) {\n        int32_t again = 0;",
+     "    if (keep <= 0) {\n        int32_t again = 0;"),
+    ("upd_restart_9", C, "            if (n == 10) {\n                taicop_initialize_drive_target(c);",
+     "            if (n == 9) {\n                taicop_initialize_drive_target(c);"),
+    ("upd_restart_ge", C, "            if (n == 10) {\n                taicop_initialize_drive_target(c);",
+     "            if (n >= 10) {\n                taicop_initialize_drive_target(c);"),
+    ("upd_no_restart", C, "                taicop_initialize_drive_target(c);\n", ""),
+    ("upd_n_kept", C, "                again = 1;\n                n = 0;\n", "                again = 1;\n"),
+    ("upd_break_again", C, "            if (n != 10 || again)\n                break;",
+     "            if (n != 10 || !again)\n                break;"),
+    ("upd_break_only_n", C, "            if (n != 10 || again)\n                break;",
+     "            if (n != 10 || n == 10)\n                break;"),
+    ("upd_first_le", C,
+     "            if (0.0f < past_point(pos, c->RouteInfo.Point) && n++ < 10) {",
+     "            if (0.0f <= past_point(pos, c->RouteInfo.Point) && n++ < 10) {"),
+    ("upd_first_no_count", C,
+     "            if (0.0f < past_point(pos, c->RouteInfo.Point) && n++ < 10) {",
+     "            if (0.0f < past_point(pos, c->RouteInfo.Point) && n < 10) {"),
+    ("upd_first_skip", C,
+     "            if (0.0f < past_point(pos, c->RouteInfo.Point) && n++ < 10) {",
+     "            if (n++ < 10) {"),
+    ("upd_while_le", C,
+     "                } while (0.0f < past_point(pos, c->RouteInfo.Point)\n                         && n++ < 10);",
+     "                } while (0.0f <= past_point(pos, c->RouteInfo.Point)\n                         && n++ < 10);"),
+    ("upd_while_9", C,
+     "                } while (0.0f < past_point(pos, c->RouteInfo.Point)\n                         && n++ < 10);",
+     "                } while (0.0f < past_point(pos, c->RouteInfo.Point)\n                         && n++ < 9);"),
+    ("upd_while_11", C,
+     "                } while (0.0f < past_point(pos, c->RouteInfo.Point)\n                         && n++ < 10);",
+     "                } while (0.0f < past_point(pos, c->RouteInfo.Point)\n                         && n++ <= 10);"),
+    ("upd_while_once", C,
+     "                } while (0.0f < past_point(pos, c->RouteInfo.Point)\n                         && n++ < 10);",
+     "                } while (0);"),
+    ("upd_next_null", C,
+     "                    if (info.Point != NULL)\n                        c->RouteInfo = info;",
+     "                    c->RouteInfo = info;"),
+    ("upd_next_point_only", C,
+     "                    if (info.Point != NULL)\n                        c->RouteInfo = info;",
+     "                    if (info.Point != NULL)\n                        c->RouteInfo.Point = info.Point;"),
+    ("upd_clear_car", C, "    drivetarget_clear(t, NULL, 0.0f);",
+     "    drivetarget_clear(t, c->Base.pMyCar, 0.0f);"),
+    ("upd_clear_speed", C, "    drivetarget_clear(t, NULL, 0.0f);",
+     "    drivetarget_clear(t, NULL, 1.0f);"),
+    ("upd_no_clear", C, "    drivetarget_clear(t, NULL, 0.0f);\n", ""),
+    ("upd_info_stale", C, "    drivetarget_clear(t, NULL, 0.0f);\n    info = c->RouteInfo;\n",
+     "    drivetarget_clear(t, NULL, 0.0f);\n"),
+    ("upd_19", C, "    for (i = 0; i < 20; ) {", "    for (i = 0; i < 19; ) {"),
+    ("upd_21", C, "    for (i = 0; i < 20; ) {", "    for (i = 0; i <= 20; ) {"),
+    ("upd_l_x", C, "        float    l = c->MyDLOffset.y;", "        float    l = c->MyDLOffset.x;"),
+    ("upd_line_any", C, "        if (c->nDrivingLineIndex != -1)\n            l +=",
+     "        if (c->nDrivingLineIndex > 0)\n            l +="),
+    ("upd_line_sub", C, "            l += trpoint_get_driving_line_offset(info.Point,",
+     "            l -= trpoint_get_driving_line_offset(info.Point,"),
+    ("upd_line_none", C, "            l += trpoint_get_driving_line_offset(info.Point,",
+     "            l = trpoint_get_driving_line_offset(info.Point,"),
+    ("upd_pos_swap", C, "        trpoint_get_position3(info.Point, &v, c->MyDLOffset.x, l);",
+     "        trpoint_get_position3(info.Point, &v, l, c->MyDLOffset.x);"),
+    ("upd_pos_route_point", C, "        trpoint_get_position3(info.Point, &v, c->MyDLOffset.x, l);",
+     "        trpoint_get_position3(c->RouteInfo.Point, &v, c->MyDLOffset.x, l);"),
+    ("upd_route_own", C,
+     "        drivetarget_add_point3(t, &v, (int8_t)info.Route->RouteNumber,",
+     "        drivetarget_add_point3(t, &v, (int8_t)c->RouteInfo.Route->RouteNumber,"),
+    ("upd_ptnum", C, "                                                                info.Point),",
+     "                                                                info.Point) + 1,"),
+    ("upd_ptnum_own", C, "                                                                info.Point),",
+     "                                                                c->RouteInfo.Point),"),
+    ("upd_dl_1", C, "                               0, 0, NULL);", "                               1, 0, NULL);"),
+    ("upd_check_1", C, "                               0, 0, NULL);", "                               0, 1, NULL);"),
+    ("upd_car", C, "                               0, 0, NULL);",
+     "                               0, 0, c->Base.pMyCar);"),
+    ("upd_no_next", C, "        ai_get_next_route_point(&info);\n        i++;",
+     "        i++;"),
+    ("upd_no_end", C, "        i++;\n        if (info.Point == NULL)\n            break;\n", "        i++;\n"),
+    ("upd_pt0_keep", C, "    if (keep == 0) {\n        t->Points[0].y = pos->y;",
+     "    if (keep != 1) {\n        t->Points[0].y = pos->y;"),
+    ("upd_pt0_y_x", C, "        t->Points[0].y = pos->y;", "        t->Points[0].y = pos->x;"),
+    ("upd_pt0_no_x", C, "        t->Points[0].x = pos->x;\n", ""),
+    ("upd_pt0_no_y", C, "        t->Points[0].y = pos->y;\n", ""),
 ]
 
 EQUIVALENT = {
     "adtor_no_vptr": "tCop's destructor, run straight after, stores its own "
                      "table over tAICop's",
+    "upd_restart_ge": "the loop's top sees n at 0 or 10 only: it goes round "
+                      "again only when n is 10",
 }
 
 

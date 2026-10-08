@@ -1,8 +1,9 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 56
-(2026-10-08): 12a, the cop manager, and 12b, the cops' records and
-constructors, are done ("First" below).
+Where the next session picks up. Updated in Session 57
+(2026-10-08): 12d, CopDriver and tAICop's drive target, is done; 12a to
+12c (the cop manager, the cops, CopMover) were Session 56's ("First"
+below).
 Session 54 (2026-10-08): the AI pack runs at 20 FPS with all eight cars in view
 (commits 569dfde and ba9ef1f), which the user accepted; see "First"
 below. Session 53 (2026-10-08) took out the mid-race hitches
@@ -127,12 +128,20 @@ pursuit.obj, on a 10 KB manager. Its slices:
   (`docs/formats/cop-mover.md`). `gCopMoverCtorFn` is bound;
   `COPMOVER_SIZE` is `sizeof`, retail's 128. Nothing builds one until
   CopDriver does.
-- **12d** CopDriver (`0x001a1ce8` on), then bind `gAddCopCarToRaceFn =
-  copmgr_add_cop_car_to_race` in `main.c`; **12e** tTrackGraph;
-  **12f** Think and GlobalCopThink (`gGlobalCopThinkFn`);
-  **12g** tAICop::Think; **12h, 12i** tPursuit; **12j** roadblocks and
-  spike strips; **12k** the helicopter; **12l** pullovers and Busted;
-  **12m** Be A Cop; **12n** the radar detector's intensity.
+- **12d, done (Session 57):** CopDriver, the controller an AI cop's
+  car gets (`docs/formats/cop-driver.md`), with tAICop's drive target
+  (IsNearPursuitTarget, InitializeDriveTarget, UpdateDriveTarget;
+  `cops.md`), CarInRecentCollision (`coputil.c`), and tPursuit's near
+  and far drive targets and history (`copmanager.h`).
+  `gCopDriverCtorFn` is bound. `gAddCopCarToRaceFn` stays NULL until
+  the cops can think (12f, 12g): a Hot Pursuit race would otherwise
+  reach tAICop's NULL Think.
+- **Next: 12e** tTrackGraph; **12f** Think and GlobalCopThink
+  (`gGlobalCopThinkFn`); **12g** tAICop::Think, then bind
+  `gAddCopCarToRaceFn = copmgr_add_cop_car_to_race` in `main.c`;
+  **12h, 12i** tPursuit; **12j** roadblocks and spike strips; **12k**
+  the helicopter; **12l** pullovers and Busted; **12m** Be A Cop;
+  **12n** the radar detector's intensity.
 
 The test config for a race with cops is parked as
 `nfshp2_config.txt.cops` (SkipFE, track 12, 3 AI, traffic 0.5,
@@ -4560,8 +4569,8 @@ goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a, 12b and 12c are done, 12d
-  (CopDriver) is next. See "First" at the top.
+- **Next:** step 12, the cops: 12a to 12d are done, 12e
+  (tTrackGraph) is next. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

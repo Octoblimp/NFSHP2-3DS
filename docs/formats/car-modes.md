@@ -146,13 +146,15 @@ Eight of the classes these two tables build belong to task 26:
 - **Movers:** TrafficCar, DeliveryMover, CopMover, BeltMover.
 - **Controllers:** RealController, AIDriver, TrafficDriver, CopDriver.
 
-Six are ported: RealController ([real-controller.md](real-controller.md)),
+Seven are ported: RealController ([real-controller.md](real-controller.md)),
 BeltMover ([belt-mover.md](belt-mover.md), step 11e-6), AIDriver
 ([ai-driver.md](ai-driver.md), step 11f-2), TrafficCar
 ([traffic-car.md](traffic-car.md), step 11h-1), TrafficDriver
-([traffic-driver.md](traffic-driver.md), step 11h-2) and CopMover
-([cop-mover.md](cop-mover.md), step 12c). main.c sets their seams at
-boot, and their `_SIZE` constants are `sizeof`. CopMover is 128 bytes in
+([traffic-driver.md](traffic-driver.md), step 11h-2), CopMover
+([cop-mover.md](cop-mover.md), step 12c) and CopDriver
+([cop-driver.md](cop-driver.md), step 12d). Only DeliveryMover is left.
+main.c sets their seams at boot, and their `_SIZE` constants are
+`sizeof`. CopMover is 128 bytes in
 retail and 112 in the demo, which carmode_check runs. **Retail's SetControlMode
 (0x00131410) asks 736 for AIDriver and TrafficDriver**, where the demo's
 table above has 720; carmode_check runs the demo's and maps both sizes

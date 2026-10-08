@@ -47,8 +47,8 @@ typedef struct tAICop {
     tSpeedTrap  *pMySpeedTrap;          // 36
     int32_t      nMyRoadBlockIndex;     // 40
     float        fSubStateTimer;        // 44
-    float        New48;                 // 48
-    float        New52;                 // 52
+    bVector2     New48;                 // 48 the offset CopDriver's
+                                        //    pursuit points take
     bVector2     MyDLOffset;            // 56
     float        New64;                 // 64 6.0 from the constructor
     float        New68;                 // 68 3.0
@@ -116,6 +116,26 @@ void taicop_clear_speed_trap(tAICop *c);
 // seam gAICopDisableMyCarFn.
 void taicop_disable_my_car(tAICop *c, int32_t b);
 void cop_disable_my_car(tCop *c, int32_t b);
+
+// IsNearPursuitTarget, 0x00230bf8: in a pursuit, and within 20 m of the
+// chased car.
+int32_t taicop_is_near_pursuit_target(const tAICop *c);
+
+// InitializeDriveTarget, 0x00230638: where RouteInfo starts. On patrol
+// (asked for, DesiredLogicState), the nearest oncoming traffic route's
+// point when following an offset (LogicSubState 2) and that point is
+// within the car's route's width, else the nearest racing route's. In a
+// hot pursuit, the chased car's route and point for ACQUIRE and STOP and
+// the cop's own for LIMBO_DISABLED. Otherwise none.
+void taicop_initialize_drive_target(tAICop *c);
+
+// UpdateDriveTarget, 0x002307d0: rebuilds the car driver's target as the
+// 20 route points on from RouteInfo, at MyDLOffset (and the driving line's
+// offset, with one). Unless `keep` is set, RouteInfo first steps on past
+// `pos` (at most ten points; ten exactly starts it again once from
+// InitializeDriveTarget), and the target's first point becomes `pos`.
+void taicop_update_drive_target(tAICop *c, const bVector2 *pos,
+                                int32_t keep);
 
 // The cops' cooperation zones. InitZonePermissionTable (0x0022f770)
 // fills nZonePermissionTable[6][6] (0x0031c5c8), which

@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "bvector.h"
+#include "drivetarget.h"
 
 struct Car;
 
@@ -225,6 +226,27 @@ typedef struct tPursuitNode {
     struct tPursuitNode *Prev;          //  4
 } tPursuitNode;
 
+// tPursuitHistory, retail's 368 bytes (new in retail; the constructor is
+// 0x0022cee0, the table 0x002bd470): the chased car's last 30 velocities,
+// newest first, and the seconds each lasted. Update (0x0022cf90) shifts
+// them down a place and puts the newest at 0; nCount climbs to 30.
+// VelocityAt (0x0022d080) reads it.
+typedef struct tPursuitHistory {
+    int32_t  nCount;                    //   0
+    bVector2 v2Velocity[30];            //   4
+    float    fTime[30];                 // 244
+    uint32_t vptr;                      // 364  0x002bd470
+} tPursuitHistory;                      // 368
+
+#define TPURSUITHISTORY_VTABLE 0x002bd470u
+
+#if UINTPTR_MAX == 0xFFFFFFFFu
+typedef char tpursuithistory_layout_check[
+    (offsetof(tPursuitHistory, fTime) == 244
+     && offsetof(tPursuitHistory, vptr) == 364
+     && sizeof(tPursuitHistory) == 368) ? 1 : -1];
+#endif
+
 // The demo's type#1640 is 1216 bytes; retail's is 1600 (its slot pool's
 // slot), and these are the words read so far, at retail's offsets on a
 // 32-bit target. The demo's nHUDPursuitLevel was at 1112.
@@ -233,7 +255,15 @@ struct tPursuit {
     uint8_t     Unported8[8];           //    8
     struct Car *pChasedCar;             //   16, the demo's 20
     tRoadBlock *pRoadBlock;             //   20, the demo's 24; NULL for none
-    uint8_t     Unported24[1456];       //   24
+    uint8_t     Unported24[24];         //   24
+    // The constructor's (0x00228fc8): the points ahead of the chased car,
+    // which CopDriver steers along when it is far from it, and the ones
+    // right behind it, which it takes when within 20 m. The pursuit's Think
+    // fills both.
+    DriveTarget FarDriveTarget;         //   48
+    DriveTarget NearDriveTarget;        //  576
+    tPursuitHistory History;            // 1104 the chased car's velocities
+    uint8_t     Unported1472[8];        // 1472
     // Retail's: the manager's PursuitsById slot, from 0x002244a0.
     int8_t      nPursuitId;             // 1480
     uint8_t     Unported1481[11];       // 1481
@@ -253,6 +283,9 @@ struct tPursuit {
 typedef char tpursuit_layout_check[
     (offsetof(struct tPursuit, pChasedCar) == 16
      && offsetof(struct tPursuit, pRoadBlock) == 20
+     && offsetof(struct tPursuit, FarDriveTarget) == 48
+     && offsetof(struct tPursuit, NearDriveTarget) == 576
+     && offsetof(struct tPursuit, History) == 1104
      && offsetof(struct tPursuit, nPursuitId) == 1480
      && offsetof(struct tPursuit, nHUDPursuitLevel) == 1492
      && offsetof(struct tPursuit, New1560) == 1560
@@ -461,5 +494,15 @@ tRoadBlock *copmanager_get_active_road_block(tCopManager *m, int32_t i);
 // NULL seam finds no cop.
 extern tCop *(*gCopManagerGetCopByCarFn)(tCopManager *m, struct Car *c);
 extern tCop *(*gCopManagerGetCopByChaseFn)(tCopManager *m, struct Car *c);
+
+// 0x0022d080, the history's VelocityAt (new in retail): the velocity `t`
+// seconds back. It walks the times from the newest, and in the first
+// whose running total reaches `t` (unless it is the last kept) puts the
+// velocity at the start of it plus its slope -- the change to the next
+// older one over its own time -- times the total less the *newest* time,
+// fTime[0], whichever entry it is. Past the end, or with nothing kept, it
+// is the newest, v2Velocity[0], as it is when the last kept is the one.
+bVector2 *tpursuithistory_velocity_at(bVector2 *out, const tPursuitHistory *h,
+                                      float t);
 
 #endif

@@ -10,11 +10,14 @@
 #include "bmem.h"
 #include "bslotpool.h"
 #include "car.h"
+#include "cardriver.h"
 #include "carinit.h"
 #include "carmodes.h"
 #include "cartypeinfo.h"
 #include "copdriver.h"
 #include "copmgr.h"
+#include "drivetarget.h"
+#include "trackroute.h"
 #include "vtable.h"
 #include "world.h"
 
@@ -156,8 +159,8 @@ tAICop *taicop_construct(tAICop *c, struct DriverInfo *info, int32_t n)
 
     c->fSecondsInPhysicsMode = 0.0f;
     c->Base.DesiredLogicState = LS_LIMBO;
-    c->New52 = 0.0f;
-    c->New48 = 0.0f;
+    c->New48.y = 0.0f;
+    c->New48.x = 0.0f;
     c->MyDLOffset.y = 0.0f;
     c->MyDLOffset.x = 0.0f;
     c->fFlankSide = 0.0f;
@@ -244,6 +247,143 @@ void taicop_disable_my_car(tAICop *c, int32_t b)
 void cop_disable_my_car(tCop *c, int32_t b)
 {
     taicop_disable_my_car((tAICop *)(void *)c, b);
+}
+
+// ---------------------------------------------------- the drive target
+
+int32_t taicop_is_near_pursuit_target(const tAICop *c)
+{
+    const tPursuit *p = c->Base.pMyPursuit;
+    const Car      *ch, *mine;
+    float           dx, dy;
+
+    if (p == NULL)
+        return 0;
+    ch = p->pChasedCar;
+    mine = c->Base.pMyCar;
+    dy = ch->State.Position.y - mine->State.Position.y;
+    dx = ch->State.Position.x - mine->State.Position.x;
+    return sqrtf(dx * dx + dy * dy) < 20.0f;
+}
+
+void taicop_initialize_drive_target(tAICop *c)
+{
+    bVector2 *pos = (bVector2 *)(void *)&c->Base.pMyCar->State.Position;
+    int32_t   ok = 0;
+
+    c->RouteInfo.Point = NULL;
+    c->RouteInfo.Route = NULL;
+
+    if (c->Base.DesiredLogicState == LS_DRIVING_ON_PATROL) {
+        if (c->Base.LogicSubState == LSS_FOLLOW_OFFSET)
+            ok = ai_get_nearest_route_point(&c->RouteInfo, pos,
+                                            ONCOMING_TRAFFIC_ROUTES, 2, 0.0f);
+        if (ok) {
+            const TrackRoutePoint *rp = car_get_route_point(c->Base.pMyCar, 1);
+            const TrackRoutePoint *pt = c->RouteInfo.Point;
+            float lat = (pt->Position.x - rp->Position.x) * rp->Direction.y
+                      - (pt->Position.y - rp->Position.y) * rp->Direction.x;
+            float w;
+
+            if (lat < 0.0f) {
+                lat = -lat;
+                w = rp->LeftWidth;
+            } else {
+                w = rp->RightWidth;
+            }
+            if (w < lat)
+                ok = 0;
+            if (ok)
+                return;
+        }
+        ai_get_nearest_route_point(&c->RouteInfo, pos, ALL_RACING_ROUTES, 2,
+                                   0.0f);
+    } else if (c->Base.DesiredLogicState == LS_HOT_PURSUIT) {
+        Car *car;
+
+        switch (c->Base.LogicSubState) {
+        case LSS_ACQUIRE:
+        case LSS_STOP:
+            c->RouteInfo.Route = car_get_route(c->Base.pMyPursuit->pChasedCar,
+                                               1);
+            car = c->Base.pMyPursuit->pChasedCar;
+            break;
+        case LSS_LIMBO_DISABLED:
+            c->RouteInfo.Route = car_get_route(c->Base.pMyCar, 1);
+            car = c->Base.pMyCar;
+            break;
+        default:
+            return;
+        }
+        c->RouteInfo.Point = car_get_route_point(car, 1);
+    }
+}
+
+// (pos - pt) . pt's direction: above 0 once pos is past pt.
+static float past_point(const bVector2 *pos, const TrackRoutePoint *pt)
+{
+    return (pos->x - pt->Position.x) * pt->Direction.x
+         + (pos->y - pt->Position.y) * pt->Direction.y;
+}
+
+void taicop_update_drive_target(tAICop *c, const bVector2 *pos,
+                                int32_t keep)
+{
+    DriveTarget          *t = &c->Base.pMyCar->pCarDriver->MyDriveTarget;
+    NearestRoutePointInfo info;
+    int32_t               i;
+
+    if (keep == 0) {
+        int32_t again = 0;
+        int32_t n = 0;
+
+        // n counts the tests passed, one past the steps taken. Exactly ten
+        // (the tenth step and then no further) starts again, once; more
+        // (stuck on a route's last point) does not.
+        for (;;) {
+            if (n == 10) {
+                taicop_initialize_drive_target(c);
+                again = 1;
+                n = 0;
+            }
+            if (0.0f < past_point(pos, c->RouteInfo.Point) && n++ < 10) {
+                do {
+                    info = c->RouteInfo;
+                    ai_get_next_route_point(&info);
+                    if (info.Point != NULL)
+                        c->RouteInfo = info;
+                } while (0.0f < past_point(pos, c->RouteInfo.Point)
+                         && n++ < 10);
+            }
+            if (n != 10 || again)
+                break;
+        }
+    }
+
+    drivetarget_clear(t, NULL, 0.0f);
+    info = c->RouteInfo;
+    for (i = 0; i < 20; ) {
+        bVector3 v;
+        float    l = c->MyDLOffset.y;
+
+        if (c->nDrivingLineIndex != -1)
+            l += trpoint_get_driving_line_offset(info.Point,
+                                                 c->nDrivingLineIndex);
+        trpoint_get_position3(info.Point, &v, c->MyDLOffset.x, l);
+        drivetarget_add_point3(t, &v, (int8_t)info.Route->RouteNumber,
+                               (int16_t)troute_get_point_number(info.Route,
+                                                                info.Point),
+                               0, 0, NULL);
+        ai_get_next_route_point(&info);
+        i++;
+        if (info.Point == NULL)
+            break;
+    }
+
+    if (keep == 0) {
+        t->Points[0].y = pos->y;
+        t->Points[0].x = pos->x;
+    }
 }
 
 // ------------------------------------------------------------ the zones

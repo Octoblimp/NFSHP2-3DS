@@ -3,6 +3,7 @@
 #include "copmanager.h"
 
 #include "car.h"
+#include "eefpu.h"
 
 tCopManager *pCopManager;       // 0x00331bec
 
@@ -75,4 +76,34 @@ tRoadBlock *copmanager_get_active_road_block(tCopManager *m, int32_t i)
         k++;
     }
     return NULL;
+}
+
+bVector2 *tpursuithistory_velocity_at(bVector2 *out, const tPursuitHistory *h,
+                                      float t)
+{
+    bVector2 r = h->v2Velocity[0];
+    float    acc = 0.0f;
+    int32_t  i;
+
+    for (i = 0; i < h->nCount; i++) {
+        float ft = h->fTime[i];
+
+        acc += ft;
+        if (t <= acc) {
+            if (i < h->nCount - 1) {
+                const bVector2 *a = &h->v2Velocity[i];
+                const bVector2 *b = &h->v2Velocity[i + 1];
+                float dx, dy;
+
+                acc -= h->fTime[0];
+                dx = ee_div(a->x - b->x, ft);
+                dy = ee_div(a->y - b->y, ft);
+                r.x = a->x + dx * acc;
+                r.y = a->y + dy * acc;
+            }
+            break;
+        }
+    }
+    *out = r;
+    return out;
 }
