@@ -627,14 +627,16 @@ bool texpack_upload_chain(const TexPack* tp, const TexInfo* ti, int base,
                                    out);
 }
 
-bool texpack_upload_chain_as(const TexPack* tp, const TexInfo* ti, int base,
-                             TexPackFormat f, C3D_Tex* out)
+static bool upload_chain(const TexPack* tp, const TexInfo* ti, int base,
+                         TexPackFormat f, C3D_Tex* out, bool vram)
 {
     uint32_t pw, ph;
     int      n = texpack_chain(ti, base, &pw, &ph);
     size_t   cap = texpack_decode_size(ti, base);
     uint8_t* level[TEXPACK_CHAIN_MAX];
+    uint8_t* build = NULL;
     uint8_t* scratch;
+    u32      total = 0;
     bool     ok, linear;
 
     if (n < 1 || pw > 1024 || ph > 1024 || cap == 0) return false;
@@ -642,24 +644,42 @@ bool texpack_upload_chain_as(const TexPack* tp, const TexInfo* ti, int base,
     // The made levels are made in the texture itself, from the level
     // above it there: a 512x320 car skin took 1.25 MB of the heap padded
     // and halved beside it, which the heap did not have once a race had
-    // loaded, and the car drew without its paint (2026-10-05).
+    // loaded, and the car drew without its paint (2026-10-05). One in
+    // VRAM is made in a linear copy of itself.
     C3D_TexInitParams p = { (u16)pw, (u16)ph, (u8)(n - 1),
-                            texpack_gpu_format(f), GPU_TEX_2D, false };
+                            texpack_gpu_format(f), GPU_TEX_2D, vram };
     if (!C3D_TexInitWithParams(out, NULL, p)) return false;
+    if (vram) {
+        total = C3D_TexCalcTotalSize(out->size, out->maxLevel);
+        build = (uint8_t*)linearAlloc(total);
+        if (!build) {
+            C3D_TexDelete(out);
+            return false;
+        }
+    }
     scratch = (uint8_t*)scratch_alloc(cap, &linear);
     if (!scratch) {
+        if (build) linearFree(build);
         C3D_TexDelete(out);
         return false;
     }
     for (int i = 0; i < n; i++)
-        level[i] = (uint8_t*)C3D_TexGetImagePtr(out, out->data, i, NULL);
+        level[i] = (uint8_t*)C3D_TexGetImagePtr(out, build ? build : out->data,
+                                                i, NULL);
     ok = texpack_chain_tiled_as(tp, ti, base, f, level, scratch, cap);
     scratch_free(scratch, linear);
+    if (ok && build) {
+        // C3D_TexLoadImage's copy into VRAM, the whole chain at once: its
+        // levels lie one after another, as they do in the texture.
+        GSPGPU_FlushDataCache(build, total);
+        C3D_SyncTextureCopy((u32*)build, 0, (u32*)out->data, 0, total, 8);
+    }
+    if (build) linearFree(build);
     if (!ok) {
         C3D_TexDelete(out);
         return false;
     }
-    C3D_TexFlush(out);
+    if (!vram) C3D_TexFlush(out);
 
     // The record's filters. MMIN 2-5 are GL's NEAREST_MIPMAP_NEAREST,
     // NEAREST_MIPMAP_LINEAR, LINEAR_MIPMAP_NEAREST and
@@ -672,5 +692,17 @@ bool texpack_upload_chain_as(const TexPack* tp, const TexInfo* ti, int base,
                                     ? GPU_LINEAR : GPU_NEAREST);
     C3D_TexSetWrap(out, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     return true;
+}
+
+bool texpack_upload_chain_as(const TexPack* tp, const TexInfo* ti, int base,
+                             TexPackFormat f, C3D_Tex* out)
+{
+    return upload_chain(tp, ti, base, f, out, false);
+}
+
+bool texpack_upload_chain_vram(const TexPack* tp, const TexInfo* ti, int base,
+                               TexPackFormat f, C3D_Tex* out)
+{
+    return upload_chain(tp, ti, base, f, out, true);
 }
 #endif

@@ -2992,7 +2992,8 @@ static bool raceAttachTrack(void)
     logLine("race: prepared in %.0f ms after %d frames' wait (%d still "
             "streaming): %d models, %d bakes, %d uploads (%d past the "
             "models', %d left out, %lu KB), %d flipbook frames; %d other "
-            "solids, %d textures, %lu KB linear free, %lu KB heap free",
+            "solids, %d textures (%d in VRAM, %lu KB, %lu KB of VRAM "
+            "free), %lu KB linear free, %lu KB heap free",
             ticksMs(svcGetSystemTick() - t0), waits, racePacksStreaming(),
             g_track.preparedModels, g_track.bakes - bakes,
             g_track.uploads - uploads, g_track.preparedTextures,
@@ -3000,6 +3001,8 @@ static bool raceAttachTrack(void)
             (unsigned long)g_track.preparedSkippedKB,
             g_track.frameUploads - frames,
             g_track.numOther, g_track.numTextures,
+            g_track.vramTextures, (unsigned long)g_track.vramKB,
+            (unsigned long)vramSpaceFree() / 1024,
             (unsigned long)linearSpaceFree() / 1024,
             (unsigned long)(g_heapInfo.heapGot - mallinfo().uordblks)
                 / 1024);
@@ -3199,11 +3202,12 @@ static void logRaceState(void)
             (double)RealTimeElapsed, (long)FrameCounter,
             (unsigned long)eFrameCounter);
     logLine("race: other solids %d (%d failed, %d dropped), textures %d "
-            "(%d missing, %d reduced, %d unchained), deferred %d dropped; "
-            "strips %d (%d dropped); %lu KB linear free",
+            "(%d missing, %d reduced, %d unchained, %d evicted), deferred "
+            "%d dropped; strips %d (%d dropped); %lu KB linear free",
             g_track.numOther, g_track.otherFailed, g_track.otherDropped,
             g_track.numTextures, g_track.missingTextures,
             g_track.reducedTextures, g_track.unchainedTextures,
+            g_track.evictedTextures,
             g_track.deferredDropped,
             g_track.stripsDrawn, g_track.stripsDropped,
             (unsigned long)linearSpaceFree() / 1024);
@@ -3246,7 +3250,7 @@ static void logRaceState(void)
             for (i = 0; i < g_track.numTextures; i++) {
                 const TrackTex* t = &g_track.texture[i];
 
-                if (!t->valid && t->info) {
+                if (!t->valid && !t->evicted && t->info) {
                     logLine("race: texture %.24s missing, pixels %p, "
                             "%ux%u, %d bits, %lu KB linear free",
                             t->info->DebugName,

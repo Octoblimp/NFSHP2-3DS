@@ -69,6 +69,11 @@ static const char* const kTexFormats[TRACKVIEW_NUM_TEXFILES] = {
 // worse than a level-1 one that does not.
 #define TEX_RESERVE  (6u * 1024u * 1024u)
 
+// VRAM a texture upload leaves behind. The render targets are all made at
+// boot (main.c: the screens', the envmap's and the mirror's), so the rest
+// of VRAM's 6 MB is the textures' but for this.
+#define VRAM_RESERVE (512u * 1024u)
+
 // The fields of view the camera is given. 9102 is aBaselineFovZ, 50
 // degrees, which is the one the near plane is scaled against, so the near
 // plane comes out as the camera's own.
@@ -319,19 +324,37 @@ static void add_ticks(TrackView* v, uint64_t* total, uint64_t t0)
     }
 }
 
+// The prepare's uploads go to VRAM while it has room, and the rest to the
+// linear heap. VRAM is the faster for the GPU to read, and the linear heap
+// is what the race runs short of (Session 52). citro3d copies into VRAM
+// with the GPU's transfer engine, which a frame queues for its end
+// (texpack_upload_chain_vram), and the prepare runs between frames.
+static bool vram_room(const TrackView* v, size_t bytes)
+{
+    return v->vramOk && vramSpaceFree() >= bytes + VRAM_RESERVE;
+}
+
+static bool in_vram(const C3D_Tex* tex)
+{
+    uintptr_t a = (uintptr_t)tex->data;
+
+    return a >= OS_VRAM_VADDR && a < OS_VRAM_VADDR + OS_VRAM_SIZE;
+}
+
 static bool upload_now(TrackView* v, const TrackTex* t, C3D_Tex* out,
-                       int fmt);
+                       int fmt, bool single);
 
 // The pixels `t`'s TextureInfo points at now, at `t->level`, into `out`:
-// the mip chain, or the one level when the chain will not fit. The chain
-// is in the smallest format that holds its texels (texpack_format), which
-// is one a flipbook's frames each have their own of. `fmt` is that format
-// when the caller has it, or -1: finding it is a pass over every texel.
+// the mip chain, or with `single` the one level when the chain will not
+// fit. The chain is in the smallest format that holds its texels
+// (texpack_format), which is one a flipbook's frames each have their own
+// of. `fmt` is that format when the caller has it, or -1: finding it is a
+// pass over every texel.
 static bool upload_texture(TrackView* v, const TrackTex* t, C3D_Tex* out,
-                           int fmt)
+                           int fmt, bool single)
 {
     uint64_t t0 = svcGetSystemTick();
-    bool     ok = upload_now(v, t, out, fmt);
+    bool     ok = upload_now(v, t, out, fmt, single);
 
     v->uploads++;
     add_ticks(v, &v->uploadTicks, t0);
@@ -347,22 +370,27 @@ static bool upload_texture(TrackView* v, const TrackTex* t, C3D_Tex* out,
 }
 
 static bool upload_now(TrackView* v, const TrackTex* t, C3D_Tex* out,
-                       int fmt)
+                       int fmt, bool single)
 {
-    TexPack  tp;
-    TexInfo  e;
-    uint32_t w, h;
-    uint8_t  tilable = t->info->TilableUV;
+    TexPack       tp;
+    TexInfo       e;
+    uint32_t      w, h;
+    uint8_t       tilable = t->info->TilableUV;
+    TexPackFormat f;
+    size_t        bytes;
 
     if (!texture_source(t->info, &tp, &e)
         || !texpack_level(&e, t->level, &w, &h, NULL, NULL)) {
         return false;
     }
-    if (!texpack_upload_chain_as(&tp, &e, t->level,
-                                 fmt >= 0 ? (TexPackFormat)fmt
-                                          : texpack_format(&tp, &e, t->level),
-                                 out)) {
-        if (!texpack_upload(&tp, &e, t->level, out)) {
+    f     = fmt >= 0 ? (TexPackFormat)fmt : texpack_format(&tp, &e, t->level);
+    bytes = texpack_chain_bytes(&e, t->level, f);
+    if (vram_room(v, bytes)
+        && texpack_upload_chain_vram(&tp, &e, t->level, f, out)) {
+        v->vramTextures++;
+        v->vramKB += (uint32_t)(bytes >> 10);
+    } else if (!texpack_upload_chain_as(&tp, &e, t->level, f, out)) {
+        if (!single || !texpack_upload(&tp, &e, t->level, out)) {
             return false;
         }
         v->unchainedTextures++;
@@ -385,11 +413,128 @@ static bool upload_now(TrackView* v, const TrackTex* t, C3D_Tex* out,
 
 // A texture whose TextureInfo had no pixels yet is tried again once it
 // has them: loader_texture_pack writes ImageData into a record that the
-// tables may already point at. One that had them and would not upload
-// is not tried again until it is forgotten.
-static bool retry_texture(const TrackTex* t)
+// tables may already point at. So is one the cache let go of, and one
+// that found no room, from its retryAt on. One that had pixels and would
+// not upload for another reason is not tried again until it is forgotten.
+static bool retry_texture(const TrackView* v, const TrackTex* t)
 {
-    return !t->valid && t->ownImage == NULL && t->info->ImageData != NULL;
+    return !t->valid && t->info->ImageData != NULL
+           && (t->ownImage == NULL || t->evicted
+               || (t->retryAt != 0 && v->cacheClock >= t->retryAt));
+}
+
+// ------------------------------------------------------- the texture cache
+//
+// The linear heap holds what the race draws, and on a big map with many
+// cars it can run short: a texture that would not fit was uploaded at a
+// smaller mip level, or not at all, and never tried again. Now room is
+// made first, at the full size, by letting go of the textures drawn
+// longest ago: the prepare's guesses that nothing drew first, then the
+// least recently drawn. A texture let go of keeps its pixels in its pack,
+// in the main heap, and is uploaded again the next time it is asked for:
+// its slots let go of it too, so follow_table resolves them again before
+// the model draws (retry_texture).
+//
+// A texture drawn this frame or the last is never let go of: the GPU may
+// still read it. begin_frame, and the frontend's draw, move the clock. One
+// that found no room even so is tried again a second later, when the view
+// has moved on.
+#define CACHE_KEEP_FRAMES  2u
+#define CACHE_RETRY_FRAMES 30u
+
+static void touch(TrackView* v, TrackTex* t)
+{
+    t->lastUse = v->cacheClock;
+}
+
+static bool evictable(const TrackView* v, const TrackTex* t)
+{
+    return t->valid && t->lastUse + CACHE_KEEP_FRAMES <= v->cacheClock;
+}
+
+// `t`'s pixels let go of: its own chain and its flipbook frames', and the
+// solids' slots that draw it.
+static void evict(TrackView* v, TrackTex* t)
+{
+    int i, k;
+
+    C3D_TexDelete(&t->own);
+    for (i = 0; i < v->numFrames;) {
+        if (v->frame[i].owner == t) {
+            C3D_TexDelete(&v->frame[i].tex);
+            v->frame[i] = v->frame[--v->numFrames];
+        } else {
+            i++;
+        }
+    }
+    for (i = 0; i < v->numSolids + v->numOther; i++) {
+        TrackSolid* r = &v->info[i];
+
+        if (!r->slot || !r->tex) {
+            continue;
+        }
+        for (k = 0; k < v->solid[i].numTextures; k++) {
+            if (r->tex[k] == t) {
+                r->slot[k].tex = NULL;
+            }
+        }
+    }
+    memset(&t->own, 0, sizeof t->own);
+    memset(&t->tex, 0, sizeof t->tex);
+    t->valid   = false;
+    t->evicted = true;
+    v->evictedTextures++;
+}
+
+// The texture in the linear heap drawn longest ago let go of. False when
+// none may go. One in VRAM gives the linear heap nothing back.
+static bool evict_lru(TrackView* v)
+{
+    TrackTex* lru = NULL;
+    int       i;
+
+    for (i = 0; i < v->numTextures; i++) {
+        TrackTex* t = &v->texture[i];
+
+        if (evictable(v, t) && !in_vram(&t->own)
+            && (!lru || t->lastUse < lru->lastUse)) {
+            lru = t;
+        }
+    }
+    if (!lru) {
+        return false;
+    }
+    evict(v, lru);
+    return true;
+}
+
+// Room for `bytes` on top of TEX_RESERVE, made by letting go of the
+// textures drawn longest ago. False when what may go is not enough; what
+// went has gone.
+static bool make_room(TrackView* v, size_t bytes)
+{
+    while (linearSpaceFree() < bytes + TEX_RESERVE) {
+        if (!evict_lru(v)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// `t` into `out` as upload_texture puts it, with room made for the chain.
+// Room by the count is not room in one piece: the heap's holes may each be
+// too small for it. So the least recently drawn go, one at a time, until
+// it goes in; its one level alone is the last resort. `t` must not be one
+// that may go, and `out` must not be in v->frame, which evict compacts.
+static bool upload_room(TrackView* v, const TrackTex* t, C3D_Tex* out,
+                        int fmt)
+{
+    bool ok = upload_texture(v, t, out, fmt, false);
+
+    while (!ok && evict_lru(v)) {
+        ok = upload_texture(v, t, out, fmt, false);
+    }
+    return ok || upload_texture(v, t, out, fmt, true);
 }
 
 static TrackTex* load_texture(TrackView* v, const TextureInfo* info)
@@ -400,8 +545,10 @@ static TrackTex* load_texture(TrackView* v, const TextureInfo* info)
     uint32_t  w = 0, h = 0;
     int       level;
     int       fmt = -1;
+    size_t    bytes = 0;
 
-    if (t && !retry_texture(t)) {
+    if (t && !retry_texture(v, t)) {
+        touch(v, t);
         return t;
     }
     if (!t) {
@@ -422,28 +569,31 @@ static TrackTex* load_texture(TrackView* v, const TextureInfo* info)
 
     // The largest level whose chain leaves the reserve behind, in the
     // format it is stored in. A track's textures at level 0 are 34-42 MB
-    // with their chains as RGBA8, and 29-34 MB so (2026-10-08).
+    // with their chains as RGBA8, and 29-34 MB so (2026-10-08). The cache
+    // makes room for level 0 first; a smaller level is the last resort.
     for (level = 0; level < (int)e.levels; level++) {
-        size_t bytes;
-
         if (!texpack_level(&e, level, &w, &h, NULL, NULL)) {
             continue;
         }
         fmt   = (int)texpack_format(&tp, &e, level);
         bytes = texpack_chain_bytes(&e, level, (TexPackFormat)fmt);
-        if (linearSpaceFree() >= bytes + TEX_RESERVE) {
+        if (linearSpaceFree() >= bytes + TEX_RESERVE || vram_room(v, bytes)
+            || (level == 0 && make_room(v, bytes))) {
             break;
         }
     }
     if (level >= (int)e.levels) {
         v->missingTextures++;
+        t->retryAt = v->cacheClock + CACHE_RETRY_FRAMES;
         return t;
     }
     t->level = (uint8_t)level;
-    if (!upload_texture(v, t, &t->own, fmt)) {
+    if (!upload_room(v, t, &t->own, fmt)) {
         v->missingTextures++;
+        t->retryAt = v->cacheClock + CACHE_RETRY_FRAMES;
         return t;
     }
+    touch(v, t);
     t->tex        = t->own;
     t->ownImage   = t->image   = info->ImageData;
     t->ownPalette = t->palette = info->PaletteData;
@@ -561,6 +711,13 @@ static void follow_table(TrackView* v, int index)
     if (!r->slot || !r->tex) {
         return;
     }
+    // The solid's own textures are in use first: making room for one it
+    // lacks lets go of none it is about to draw.
+    for (k = 0; k < s->numTextures; k++) {
+        if (r->tex[k]) {
+            touch(v, r->tex[k]);
+        }
+    }
     for (k = 0; k < s->numTextures; k++) {
         const TextureInfo* info = table_texture(s, k);
         const TrackTex*    t    = r->tex[k];
@@ -568,7 +725,7 @@ static void follow_table(TrackView* v, int index)
         // A retried texture another solid made valid is taken up too.
         if (t ? t->info != info
                     || (t->valid ? r->slot[k].tex != &t->tex
-                                 : retry_texture(t))
+                                 : retry_texture(v, t))
               : info != NULL) {
             resolve_slot(v, r, k, info);
         }
@@ -610,13 +767,17 @@ static void follow_flipbooks(TrackView* v)
             }
         }
         if (!f) {
+            C3D_Tex tex;
+
+            // One drawn of late has room made, as load_texture's do.
             if (v->numFrames >= TRACKVIEW_MAX_FRAMES
-                || !upload_texture(v, t, &v->frame[v->numFrames].tex,
-                                   -1)) {
+                || !(evictable(v, t) ? upload_texture(v, t, &tex, -1, true)
+                                     : upload_room(v, t, &tex, -1))) {
                 v->frameFails++;
                 continue;
             }
             f          = &v->frame[v->numFrames++];
+            f->tex     = tex;
             f->owner   = t;
             f->image   = image;
             f->palette = palette;
@@ -755,6 +916,7 @@ static int find_other(TrackView* v, const eSolid* s)
 // it (pStackedActiveTexture). The port does not stack them.
 static void note_use(TrackView* v, TrackTex* t)
 {
+    t->lastUse = v->cacheClock;
     if (t->stamp != v->frameStamp) {
         t->stamp    = v->frameStamp;
         t->firstUse = v->texUses++;
@@ -1438,7 +1600,7 @@ static void prepare_flipbooks(TrackView* v)
                     if (v->numFrames >= TRACKVIEW_MAX_FRAMES
                         || !upload_texture(v, &tt,
                                            &v->frame[v->numFrames].tex,
-                                           -1)) {
+                                           -1, true)) {
                         v->frameFails++;
                         continue;
                     }
@@ -1500,6 +1662,8 @@ void trackview_prepare(TrackView* v)
     // Each model as eModel::Render's first draw of it makes it: the solid
     // baked, the replacement table applied, the textures up. Every LOD of
     // every car, its tires, mirrors, plates and dash, and its damage's.
+    // Their textures are the first into VRAM: the ones drawn the most.
+    v->vramOk = true;
     for (n = ModelList.next; n != &ModelList; n = n->next) {
         (void)model_solid(v, (eModel*)(void*)n);
         v->preparedModels++;
@@ -1542,8 +1706,9 @@ void trackview_prepare(TrackView* v)
         const TrackTex* t;
 
         if (v->numTextures >= TRACKVIEW_MAX_TEXTURES - PREPARE_SLOTS
-            || linearSpaceFree()
-                   < cand[k].bytes + TEX_RESERVE + PREPARE_RESERVE) {
+            || (linearSpaceFree()
+                    < cand[k].bytes + TEX_RESERVE + PREPARE_RESERVE
+                && !vram_room(v, cand[k].bytes))) {
             v->preparedSkipped++;
             v->preparedSkippedKB += cand[k].bytes >> 10;
             continue;
@@ -1554,6 +1719,7 @@ void trackview_prepare(TrackView* v)
         }
     }
     free(cand);
+    v->vramOk       = false;
     v->prepared     = true;
     v->lateNames[0] = '\0';
 }
@@ -2867,6 +3033,7 @@ static void begin_frame(TrackView* v)
     // The GPU is done with the last frame by now, so the screen quads'
     // ring starts again, before any view of this one draws a quad.
     georender_quads_rewind();
+    v->cacheClock++;
     eSwapFrameMallocBuffers();
     MaybeChangeViewMode();
     if (EnableEnvMapViews) {
@@ -3530,6 +3697,7 @@ bool trackview_draw_frontend(TrackView* v, void (*render)(void*),
     // matrices from its camera, which SelectCarCameraMover moves. The
     // frontend culls nothing.
     georender_quads_rewind();
+    v->cacheClock++;
     eSwapFrameMallocBuffers();
     MaybeChangeViewMode();
     eview_set_max_z(view->pRenderTarget0);

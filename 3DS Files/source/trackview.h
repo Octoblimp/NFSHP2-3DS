@@ -125,6 +125,10 @@ typedef struct {
     bool     sorted;            // ApplyAlphaSorting
     uint32_t stamp;             // the frame that last used it,
     uint16_t firstUse;          // and where in that frame it was first used
+    uint32_t lastUse;           // the texture cache's clock when last drawn
+    bool     evicted;           // let go of for room: uploaded again when
+                                // next asked for (trackview.c's cache)
+    uint32_t retryAt;           // found no room: tried again from this clock
 } TrackTex;
 
 // A flipbook frame's pixels, uploaded for `owner` the first time it
@@ -248,6 +252,7 @@ typedef struct {
     int  numDeferred;
     uint16_t deferredSeq;       // the next one's seq, for the whole frame
     uint32_t frameStamp;
+    uint32_t cacheClock;        // a frame each, for the texture cache
     uint16_t texUses;
     TrackDeferred deferred[TRACKVIEW_MAX_DEFERRED];
     TrackStrip      strips[TRACKVIEW_MAX_STRIPS];
@@ -314,6 +319,7 @@ typedef struct {
     int  missingTextures;       // no TextureInfo, or one that would not upload
     int  reducedTextures;       // uploaded below level 0 for want of room
     int  unchainedTextures;     // uploads with no mip chain, for want of room
+    int  evictedTextures;       // let go of for room, least recently drawn first
     int  defaultedHashes;       // table names GetTextureInfo gave the default
     uint32_t defaulted[TRACKVIEW_MAX_TEXTURES];
     int  frameUploads;          // flipbook frames uploaded so far
@@ -333,6 +339,9 @@ typedef struct {
     int  preparedSkipped;
     uint32_t preparedSkippedKB; // their chains at level 0
     bool prepared;
+    bool vramOk;                // the prepare's uploads may go to VRAM,
+    int  vramTextures;          // and these did,
+    uint32_t vramKB;            // in this much of it
     // The names of what was uploaded after it, for the race's line to log
     // and empty: "" when nothing was.
     char lateNames[256];

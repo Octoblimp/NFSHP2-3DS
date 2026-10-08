@@ -278,6 +278,14 @@ bool texpack_upload(const TexPack* tp, const TexInfo* ti, int level,
 bool texpack_upload_chain_as(const TexPack* tp, const TexInfo* ti, int base,
                              TexPackFormat f, C3D_Tex* out);
 
+// As texpack_upload_chain_as(), into VRAM, which the CPU does not write:
+// the chain is built in a linear copy, which the GPU's transfer engine
+// copies over whole (C3D_SyncTextureCopy) before the copy is given back.
+// Outside a frame only: inside one, citro3d queues the transfer for the
+// frame's end. The linear heap lends the chain's size for the while.
+bool texpack_upload_chain_vram(const TexPack* tp, const TexInfo* ti, int base,
+                               TexPackFormat f, C3D_Tex* out);
+
 // texpack_upload_chain_as() in the format texpack_format() picks.
 bool texpack_upload_chain(const TexPack* tp, const TexInfo* ti, int base,
                           C3D_Tex* out);
