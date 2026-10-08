@@ -31,6 +31,8 @@
 //            trackview's begin_frame: the frame memory, the views'
 //            matrices, and scenery_do_culling for every view
 //   envmap   the six cube views drawn, and the fold to the sphere map
+//   mirror   the rear-view mirror's view, 3, drawn into its target, and
+//            its frame
 //   sky      StuffSky and its lists
 //   models   scenery_stuff_scenery: eModel::Render for each model the
 //            cull kept, its batches drawn or put on the lists
@@ -48,8 +50,8 @@
 // the decode is CPU time: a read sleeps in the kernel (step 13b-3).
 //
 // trackview's render_model, eModel::Render, counts what it draws (step
-// 13b-4): FrameProfDraw.models, the player's view's [0] and the envmap's
-// faces' [1]. Its line follows the frame's. Timing its parts cost 5 ms a
+// 13b-4): FrameProfDraw.models, the player's view's [0], the envmap's
+// faces' [1] and the mirror's [2]. Its line follows the frame's. Timing its parts cost 5 ms a
 // frame on Azahar, a system tick read being an SVC, so it is not timed.
 //
 // A line has the frame rate, the mean frame and the longest, each phase's
@@ -88,6 +90,7 @@ enum {
 enum {
     FRAMEPROF_CULL,
     FRAMEPROF_ENVMAP,
+    FRAMEPROF_MIRROR,
     FRAMEPROF_SKY,
     FRAMEPROF_MODELS,
     FRAMEPROF_SCENERY,
@@ -118,14 +121,15 @@ typedef struct FrameProfTicks {
     uint32_t end[FRAMEPROF_STAMPED];
     uint32_t jukeboxDecode;     // the jukebox worker's, this frame
     uint32_t jukeboxRead;
-    uint32_t models[2][FRAMEPROF_M_COUNT];  // the view's, the envmap's
+    uint32_t models[3][FRAMEPROF_M_COUNT];  // the view's, the envmap's,
+                                            // the mirror's
 } FrameProfTicks;
 
 extern FrameProfTicks FrameProfDraw;
 
 #define FRAMEPROF_STAMP(stage) (FrameProfDraw.end[(stage)] = bGetTicker())
 
-// The draw's stages in the sums: prep, the eight stamped, and submit.
+// The draw's stages in the sums: prep, the nine stamped, and submit.
 #define FRAMEPROF_DRAW_STAGES (FRAMEPROF_STAMPED + 2)
 
 typedef struct FrameProf {
@@ -135,7 +139,7 @@ typedef struct FrameProf {
     uint64_t stage[FRAMEPROF_DRAW_STAGES];
     uint64_t jukeboxDecode;
     uint64_t jukeboxRead;
-    uint64_t models[2][FRAMEPROF_M_COUNT];
+    uint64_t models[3][FRAMEPROF_M_COUNT];
     uint32_t worst;                     // the longest frame, EE ticks
     float    c3dCpuMs;                  // summed
     float    c3dGpuMs;

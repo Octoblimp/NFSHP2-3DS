@@ -1,7 +1,7 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 50
-(2026-10-07), after 11g-2c-2c-2, BumperCameraMover.
+Where the next session picks up. Updated in Session 51
+(2026-10-07), after 11g-2e, the rear-view mirror.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
@@ -32,7 +32,9 @@ shows the grid over the fly-by, and A goes on to the countdown.
 pauses, and Resume, Restart and Quit work. 11g-2c-2c-1, the pre-race
 coordinator, and 11g-2c-2c-2, BumperCameraMover, are done: after the
 grid's A the camera flies INGAMEB's four close-ups round the cars, then
-the 3-2-1. Next is the rear-view mirror. The car selector is finished and checked against retail: SC-1
+the 3-2-1. 11g-2e, the rear-view mirror, is done: view 3 draws into
+its own target and shows top centre in retail's frame. Next is 11h-3,
+the TrafficTeleporter. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -810,20 +812,45 @@ car's were.
   - **On Azahar:** the quick race goes grid, A, the close-ups round the
     yellow player car (each about 1.5 s), the 3-2-1 and lap 1. The
     close-ups run at 30 FPS.
+- **11g-2e, done: the rear-view mirror** (the user's photo 5).
+  - New `rvmcam.c`: RearViewMirrorCameraMover (0x00158f78 on, vtable
+    0x002b1b50) and Player::SetRearViewMirrorCameraMover (0x001767a8).
+    main.c points `gPlayerSetRearViewMirrorCameraMoverFn` at it, so the
+    HUD's HUD_REAR_VIEW_MIRROR puts the mover on view 3, and the view
+    mode turns target 7 on. `camera_mover_get_target` is public now.
+  - `trackview_draw_mirror` draws view 3 into a 256 by 64 texture
+    (`georender_mirror_*`) after the envmap: the sky, the scenery and
+    the cars (not the player's), then DisplayRVMImages' frame and mask
+    (0x0010ec70). `display_rvms` puts it on the top screen at retail's
+    GS (160, 20) to (352, 84), mirrored and blended by the mask's alpha
+    (DisplayRVMs, 0x0010edc8). `setup_view` sets target 7 as retail's
+    SetScreenBuffers does (run in mipsemu: 1.5 and 1.08 aspect, black
+    background).
+  - The projection takes in a quarter more across than retail's,
+    because the top screen is 5:3 where the PS2's is 4:3.
+  - The frame profiler has a `mirror` stage and a third `models:` half.
+  - **The check:** `tools/rvmcam_check.py` with
+    `tools/src/rvmcam_test.c`: 7 scenarios, 2088 ops, 9863 lines, 0
+    differ; 52 mutations, 51 caught, 1 equivalent.
+    `docs/formats/camera.md`, "The rear-view mirror".
+  - **On Azahar:** the SkipFE race shows the mirror top centre in its
+    frame, upright and mirrored, without the player's car. It draws 81
+    to 128 models (the view 225 to 313) in 3.7 to 5.2 ms of CPU, and
+    the race holds 29 to 30 FPS. The device's cost is not measured; if
+    it is too much, draw the mirror every other frame.
+  - **Left:** the sun, the NIS objects and the effects in the mirror's
+    view, which retail draws there too.
 - **Task 37, Local Wireless (multi-card) play,** is in TASKS.md (the
   user's ask, 2026-10-07). It comes after the single-player race is
   whole.
 - **Next, in this order:**
-  1. **The rear-view mirror** (the user's photo 5):
-     SetRearViewMirrorCameraMover, plus the mirror's view and its HUD
-     frame, top centre on the top screen.
-  2. **11h-3, TrafficTeleporter** (0x002226f8 on; PlaceNewCar
+  1. **11h-3, TrafficTeleporter** (0x002226f8 on; PlaceNewCar
      0x002228e0, DoTimestep 0x002227e0), which places the traffic.
-  3. Step 12, the cops.
-  4. The AnimatedDriver that PRERACEANIM.LZC feeds (trackflow.c's Part3
+  2. Step 12, the cops.
+  3. The AnimatedDriver that PRERACEANIM.LZC feeds (trackflow.c's Part3
      loads it), so the driver moves in the close-ups.
-  5. The PostRace and Demo coordinators.
-  6. The pause's other screens (Pause Options and its pages, Race
+  4. The PostRace and Demo coordinators.
+  5. The pause's other screens (Pause Options and its pages, Race
      Objective, the BAC controls), with the frontend's.
 
 ## Waiting on the device: 13b-4f, the device GPU's cost per model
@@ -4398,15 +4425,14 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-07, after 11g-2c-2c-2)
+### Where the port stands (2026-10-07, after 11g-2e)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** the rear-view mirror and step 11's 11h-3, the
-  TrafficTeleporter.
+- **Next:** step 11's 11h-3, the TrafficTeleporter.
   See "Now" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
@@ -4439,7 +4465,8 @@ goes in.
   - 11g-2c-2b, the Starting Grid;
   - 11g-2d, the pause menu;
   - 11g-2c-2c-1, the pre-race coordinator;
-  - 11g-2c-2c-2, BumperCameraMover.
+  - 11g-2c-2c-2, BumperCameraMover;
+  - 11g-2e, the rear-view mirror.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2

@@ -125,6 +125,10 @@ int   camera_mover_is_exterior_view(CameraMover *m);
 int   camera_mover_is_looking_back(CameraMover *m);
 float camera_mover_get_wall_gap(CameraMover *m);
 
+// The base's GetTarget (0x0015fcb0): the camera's target. The mirror's
+// mover keeps it.
+const bVector3 *camera_mover_get_target(CameraMover *m);
+
 // Retail's 0x001576e8 (the demo's 0x001544f0). It sets the base vtable. A
 // ViewID of -1 leaves the mover detached and disabled; any other value takes
 // the view and its camera, sets the camera's far plane to 10000 (gp-31292;

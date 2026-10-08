@@ -90,6 +90,7 @@ static TrackView*      s_draw;      // the viewer StuffScenery draws for
 static C3D_Mtx         s_proj;
 static const bMatrix4* s_worldView;
 static bool            s_envFace;   // drawing into the environment map
+static bool            s_mirrorView; // drawing into the rear-view mirror
 
 // A Z rect StuffSun asked for, and the target it is in the pixels of.
 typedef struct {
@@ -1244,8 +1245,10 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
     uint64_t    now = 0, lit = 0;
     uint16_t    f[GEO_MAX_BATCHES];
     int         i, b, numTextures, held = 0, indices = 0;
-    // The frame profiler's counts (frameprof.h): the view's or the envmap's.
-    uint32_t*   prof = FrameProfDraw.models[s_envFace ? 1 : 0];
+    // The frame profiler's counts (frameprof.h): the view's, the envmap's
+    // or the mirror's.
+    uint32_t*   prof = FrameProfDraw.models[s_envFace    ? 1
+                                            : s_mirrorView ? 2 : 0];
     uint32_t    words;
 
     if (!v || m->Solid == NULL) {
@@ -1631,9 +1634,15 @@ static void jump_to_stop(TrackView* v, int stop)
 // VIDEO_MODE 1. MaybeChangeViewMode cuts player 1's scissor from the frame's
 // and makes view 1 active; with nothing on any mover list the mode is 0,
 // which draws player 1 alone, as 1 does.
+//
+// The mirror's target, 7, is SetScreenBuffers' too (0x001064c8), the same
+// in every video mode: 256 by 64, PSMCT32 over PSMZ16S, its aspect ratios
+// 1.5 and 1.08, and cleared to 0x80000000, black with an alpha of 1.0.
+// MaybeChangeViewMode gives it its scissor in view mode 2.
 static void setup_view(void)
 {
     eRenderTarget* rt = eGetRenderTarget(1);
+    eRenderTarget* rvm = eGetRenderTarget(7);
 
     MainDraw0Context->ScissorW = ScreenWidth;
     MainDraw0Context->ScissorH = ScreenHeight;
@@ -1644,6 +1653,17 @@ static void setup_view(void)
     // The PICA's depth buffer is 24 bits, as PSMZ24's is, so the sun draws
     // at a MaxZ of 16777215.
     rt->ZBufferMode    = GS_PSMZ24;
+    rvm->FrameWidth       = TRACKVIEW_MIRROR_W;
+    rvm->FrameHeight      = TRACKVIEW_MIRROR_H;
+    rvm->AspectRatioX     = 1.5f;
+    rvm->AspectRatioY     = 1.08f;
+    rvm->AspectRatio2DX   = 0.8f;
+    rvm->AspectRatio2DY   = 0.94f;
+    rvm->FovBias          = 1.0f;
+    rvm->BackgroundColour = 0x80000000u;
+    rvm->ClearBackground  = 1;
+    // Its depth is the PICA's 24 bits here, as player 1's is.
+    rvm->ZBufferMode      = GS_PSMZ24;
     MaybeChangeViewMode();
 }
 
@@ -2618,6 +2638,7 @@ void trackview_capture_names(const TrackView* v)
 static void begin_frame(TrackView* v)
 {
     eView* view = eGetView(EVIEW_ID_PLAYER1);
+    eView* rvm  = eGetView(EVIEW_ID_PLAYER1_RVM);
     int    i;
 
     // The GPU is done with the last frame by now, so the screen quads'
@@ -2630,6 +2651,11 @@ static void begin_frame(TrackView* v)
     }
     eview_set_max_z(view->pRenderTarget0);
     eview_calculate_view_matrices(view, 0.0f, 0.0f, 0.0f);
+    // The mirror's, while it has a mover and so its target.
+    if (rvm->Active && rvm->pRenderTarget0->Active) {
+        eview_set_max_z(rvm->pRenderTarget0);
+        eview_calculate_view_matrices(rvm, 0.0f, 0.0f, 0.0f);
+    }
     for (i = 0; i < 6; i++) {
         eView* ev = EnvMapViews[i];
 
@@ -2820,6 +2846,223 @@ void trackview_draw_envmap(TrackView* v)
     hangwatch_gpu_stage("the envmap's fold");
 }
 
+// ------------------------------------------------------ the rear-view mirror
+
+bool trackview_mirror_init(void)
+{
+    return georender_mirror_init(TRACKVIEW_MIRROR_W, TRACKVIEW_MIRROR_H);
+}
+
+// ePoly::Render for a poly in the mirror's target, as render_epoly has it
+// for the top screen's: the half pixel past the middle, the GS's whole
+// pixels, the strip's V0, V1, V3, V2 and the blend for a semitransparent
+// texture alone. The target is the texture's own pixels here. `mask` has
+// the fragment's alpha go into the target as the GS's does, which
+// DisplayRVMs blends the mirror by.
+static void mirror_epoly(TrackView* v, const ePoly* p, TextureInfo* info,
+                         bool mask)
+{
+    static const uint8_t kStrip[4] = { 0, 1, 3, 2 };
+    const float          halfW = (float)(TRACKVIEW_MIRROR_W >> 1);
+    const float          offX  = GS_CENTRE - halfW;
+    const float          offY  = GS_CENTRE - (float)(TRACKVIEW_MIRROR_H >> 1);
+    TrackTex*            t;
+    GeoTexture           gt;
+    GeoRenderVertex      q[4];
+    int                  i;
+
+    t = load_texture(v, info);
+    if (t == NULL || !t->valid) {
+        return;
+    }
+    if (gpuCmdBufSize - gpuCmdBufOffset < CMDBUF_GUARD_WORDS) {
+        v->cmdSkipped++;
+        return;
+    }
+    gt.tex        = &t->tex;
+    gt.uvScale[0] = t->uvScale[0];
+    gt.uvScale[1] = t->uvScale[1];
+    gt.pass       = t->pass;
+    memset(q, 0, sizeof q);
+    for (i = 0; i < 4; i++) {
+        const int n = kStrip[i];
+        float     x = p->Vertices[n].x;
+        float     y = p->Vertices[n].y;
+
+        if (halfW < x) {
+            x += -0.5f;
+        }
+        q[i].pos[0] = floorf(x + offX) - offX;
+        q[i].pos[1] = floorf(y + offY) - offY;
+        q[i].st[0]  = p->UVs[n][0] / p->UVs[n][2];
+        q[i].st[1]  = p->UVs[n][1] / p->UVs[n][2];
+        memcpy(q[i].colour, p->Colours[n], 4);
+    }
+    georender_draw_mirror_quad(q, &gt,
+                               info->IsAnySemitransparencyFlag
+                                   ? t->pass.blend : GEO_BLEND_NONE,
+                               mask);
+}
+
+// DisplayRVMImages (retail 0x0010ec70), for view 3 alone: with both of
+// its textures, it marks RVM_MASK semitransparent, and for the view and
+// its target active draws two polys over the target from (1, -14) to
+// (257, 76), mirrored left to right, at the target's MaxZ. RVM is the
+// frame and the glass's tint, black with a quarter's alpha inside;
+// RVM_MASK, added, leaves the colour and writes the alpha: 1 inside the
+// glass and its frame, 0 past them.
+static void display_rvm_images(TrackView* v, eRenderTarget* rt)
+{
+    static const float kXY[4][2] = {
+        { 1.0f, -14.0f }, { 257.0f, -14.0f }, { 257.0f, 76.0f },
+        { 1.0f, 76.0f },
+    };
+    static const float kUV[4][2] = {
+        { 1.0f, 0.0f }, { 0.0f, 0.0f }, { 0.0f, 1.0f }, { 1.0f, 1.0f },
+    };
+    TextureInfo* frame = (TextureInfo*)pTextureInfoRVMInfo;
+    TextureInfo* mask  = (TextureInfo*)pTextureInfoRVMMask;
+    ePoly        p;
+    int          i;
+
+    if (frame == NULL || mask == NULL) {
+        return;
+    }
+    mask->IsAnySemitransparencyFlag = 1;
+    epoly_init(&p);
+    p.ApplyAspectRatio = 0;
+    for (i = 0; i < 4; i++) {
+        p.Vertices[i].x = kXY[i][0];
+        p.Vertices[i].y = kXY[i][1];
+        p.Vertices[i].z = rt->MaxZ;
+        p.UVs[i][0]     = kUV[i][0];
+        p.UVs[i][1]     = kUV[i][1];
+    }
+    mirror_epoly(v, &p, frame, false);
+    mirror_epoly(v, &p, mask, true);
+}
+
+// View 3's share of eDisplayFrame, into target 7: retail's loop draws its
+// sky, scenery and cars with view 0's and the others' (0x00112a38 ..
+// 0x0011363c), without the fog (eattach_fog's views are 1 and 2) or the
+// track routes, then DisplayRVMImages after the cars' alpha lists. Here
+// the view is drawn whole before the top screen is, as the envmap's are.
+// Its sun and effects are not drawn into it yet.
+//
+// Retail's projection puts x at H AspectRatioX x / z and y at H
+// AspectRatioY y / z in the target's pixels, and DisplayRVMs shows the
+// 256 by 64 in 192 by 64 GS pixels of a 4:3 screen. The top screen's HUD
+// takes the PS2's 512 by 448 to 400 by 240, which is 5:3: the mirror is a
+// quarter wider for its height there than on the PS2's screen, and so
+// takes in a quarter more across, for the world in it to keep its shape.
+void trackview_draw_mirror(TrackView* v)
+{
+    eView*         view = eGetView(EVIEW_ID_PLAYER1_RVM);
+    eRenderTarget* rt   = view->pRenderTarget0;
+    uint32_t       bg, a, clear;
+    float          tanx, tany;
+    int            drawn;
+
+    v->mirrorDrawn  = false;
+    v->mirrorModels = 0;
+    if (!v->loaded || !FrameMemoryBuffer[0]) {
+        return;
+    }
+    if (!v->frameBegun) {
+        begin_frame(v);
+    }
+    if (view->pCamera == NULL || !view->Active || !rt->Active
+        || view->H <= 0.0f) {
+        return;
+    }
+    if (gpuCmdBufSize - gpuCmdBufOffset < CMDBUF_GUARD_WORDS) {
+        return;
+    }
+    // The GS's 0xAABBGGRR, with 0x80 for an alpha of one.
+    bg    = rt->BackgroundColour;
+    a     = (bg >> 24) * 2u;
+    clear = (bg & 0xffu) << 24 | (bg >> 8 & 0xffu) << 16
+          | (bg >> 16 & 0xffu) << 8 | (a > 0xffu ? 0xffu : a);
+    if (!georender_mirror_begin(clear)) {
+        return;
+    }
+    s_draw       = v;
+    s_mirrorView = true;
+    v->listFrame = false;
+    capture_offscreen(true);
+    georender_set_light(0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+    georender_set_fog(NULL, 0);
+
+    tanx = 1.25f * (float)rt->ScissorW * 0.5f / (view->H * rt->AspectRatioX);
+    tany = (float)rt->ScissorH * 0.5f / (view->H * rt->AspectRatioY);
+    Mtx_Persp(&s_proj, 2.0f * atanf(tany), tanx / tany, view->NearZ,
+              view->FarZ, false);
+    s_worldView = view->WorldViewMatrix;
+    begin_view(v);
+    drawn = v->drawn;
+
+    georender_set_zwrite(false);
+    hangwatch_mark("the mirror's sky");
+    StuffSky(view);
+    draw_deferred(v, true);
+    georender_set_zwrite(true);
+    hangwatch_mark("the mirror's scenery");
+    georender_run_begin();
+    scenery_stuff_scenery(&v->cull, view);
+    georender_run_end();
+    draw_deferred(v, false);
+    hangwatch_mark("the mirror's cars");
+    georender_run_begin();
+    render_cars(view);
+    draw_deferred(v, false);
+    draw_deferred(v, true);
+    georender_run_end();
+    display_rvm_images(v, rt);
+
+    v->mirrorModels = v->drawn - drawn;
+    v->mirrorDrawn  = true;
+    s_draw          = NULL;
+    s_mirrorView    = false;
+    capture_offscreen(false);
+    hangwatch_gpu_stage("the mirror");
+}
+
+// DisplayRVMs (retail 0x0010edc8), for view 0 after its scene and before
+// the HUD: target 7 at GS (160, 20) to (352, 84) of the 512 by 448, its
+// UVs mirrored left to right, blended by the alpha DisplayRVMImages left.
+// The top screen has the 512 by 448 as its 400 by 240.
+static void display_rvms(TrackView* v)
+{
+    static const float kX[4] = { 160.0f, 352.0f, 160.0f, 352.0f };
+    static const float kY[4] = { 20.0f, 20.0f, 84.0f, 84.0f };
+    static const float kS[4] = { 1.0f, 0.0f, 1.0f, 0.0f };
+    static const float kT[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
+    const C3D_Tex*  tex = georender_mirror_texture();
+    GeoTexture      gt;
+    GeoRenderVertex q[4];
+    int             i;
+
+    if (!v->mirrorDrawn || tex == NULL) {
+        return;
+    }
+    if (gpuCmdBufSize - gpuCmdBufOffset < CMDBUF_GUARD_WORDS) {
+        return;
+    }
+    memset(&gt, 0, sizeof gt);
+    gt.tex        = (C3D_Tex*)tex;
+    gt.uvScale[0] = 1.0f;
+    gt.uvScale[1] = 1.0f;
+    memset(q, 0, sizeof q);
+    for (i = 0; i < 4; i++) {
+        q[i].pos[0] = kX[i] * (400.0f / 512.0f);
+        q[i].pos[1] = kY[i] * (240.0f / 448.0f);
+        q[i].st[0]  = kS[i];
+        q[i].st[1]  = kT[i];
+        memset(q[i].colour, 0x80, 4);
+    }
+    georender_draw_quad(q, &gt, GEO_BLEND_ALPHA, -1.0f);
+}
+
 void trackview_draw(TrackView* v)
 {
     eView* view = eGetView(EVIEW_ID_PLAYER1);
@@ -2939,6 +3182,8 @@ void trackview_draw(TrackView* v)
     // the alpha test is put back off and the blend back to its own, and
     // the fog off.
     georender_set_fog(NULL, 0);
+    // The mirror, after the view's scene and before the HUD (0x00113af4).
+    display_rvms(v);
     C3D_AlphaTest(false, GPU_ALWAYS, 0);
     C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA,
                    GPU_ONE_MINUS_SRC_ALPHA, GPU_SRC_ALPHA,

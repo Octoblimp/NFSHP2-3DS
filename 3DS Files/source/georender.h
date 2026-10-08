@@ -272,6 +272,30 @@ bool georender_envmap_ready(void);
 // CARSELECTENVMAP instead of target 14.
 void georender_set_env_texture(const C3D_Tex* tex);
 
+// The rear-view mirror's target, retail's target 7: a texture `width` by
+// `height` in VRAM, RGBA8 as target 7's PSMCT32 is, with a depth buffer
+// of its own. False when there is no room; true again for the same size.
+bool georender_mirror_init(int width, int height);
+
+// The mirror's target cleared to `clear` (red in the top byte, as RGBA8)
+// and its depth to the far plane's, and bound to be drawn on. Call it
+// between C3D_FrameBegin and the top screen's C3D_FrameDrawOn. False when
+// there is no target.
+bool georender_mirror_begin(uint32_t clear);
+
+// The mirror's texture, for the top screen to draw; NULL until the mirror
+// has drawn into it.
+const C3D_Tex* georender_mirror_texture(void);
+
+// A quad in the mirror target's pixels, x right to its width and y down to
+// its height, as georender_draw_quad draws one on the top screen, but with
+// no depth test and no alpha test. With `sourceAlpha` the target's alpha
+// takes the quad's, as the GS writes a fragment's alpha under any ALPHA_1;
+// the colour blends by `blend` either way.
+bool georender_draw_mirror_quad(const GeoRenderVertex v[4],
+                                const GeoTexture* gt, uint8_t blend,
+                                bool sourceAlpha);
+
 // eSetZWriteState(int), 0x001029c0: with it off, nothing drawn writes the
 // depth buffer, whatever its texture's pass says. eDisplayFrame turns it
 // off for the sky. It starts on.

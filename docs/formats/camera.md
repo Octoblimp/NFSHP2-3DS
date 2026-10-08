@@ -1676,6 +1676,163 @@ the jump the user's lap took at x = -1200. The run held the gas.
   "HUGE AIR +250".
 - **The frame rate** stayed at 30 FPS throughout.
 
+## The rear-view mirror
+
+Player 1's mirror is view 3 (`EVIEW_ID_PLAYER1_RVM`) drawn into render
+target 7, then put on the screen at the top centre. Slice 11g-2e ports
+it. The mover is in `rvmcam.c`, the draw in `trackview.c` and the
+target in `georender.c`. The addresses are retail's.
+
+### The mover
+
+`RearViewMirrorCameraMover` (`CM_REAR_VIEW_MIRROR`, 48 bytes, vtable
+`0x002b1b50`) looks back out of the player's car.
+
+- **The constructor** (`0x00158f78`) keeps the car. Unless
+  `Camera::StopUpdating` is set, it also sets the camera's
+  `CarNotToRender` to the car and its `RenderDash` to 0, so the mirror
+  never shows the player's own car.
+- **`Update`** (`0x00158ff8`) builds the matrix from the car:
+  - It moves the world on to the car's `GeometryPosition`.
+  - It turns it by the transpose of `BodyMatrix`, given a quarter turn
+    about x and then about y.
+  - It adds `RVMOffsetInCar`, (0, 0.5, 0), to the translation, in the
+    camera's own frame.
+  - It sets the field of view to 20000 (110 degrees), the far plane to
+    192 and the near plane to 0.75.
+  - The view's shake goes on the matrix, and the camera takes it by
+    `RealTimeElapsed`.
+- **`GetCarToFollow`** (`0x0015fb08`) returns the car.
+
+`Player::SetRearViewMirrorCameraMover` (`0x001767a8`) does nothing for a
+player with no mirror view. In a two-player race `RearViewMirrorViewID`
+is 0. Otherwise it:
+
+1. deletes the player's mover;
+2. deletes the first mover on the view;
+3. makes a new one if it is turning the mirror on.
+
+`SetHudFeatures` calls it through `gPlayerSetRearViewMirrorCameraMoverFn`
+whenever `HUD_REAR_VIEW_MIRROR` changes. The HUD has that flag while the
+driver's `RearViewMirror` is set and the player is not looking back
+(`DetermineHudFeatures`). A SkipFE race takes `RearViewMirror` from
+`SkipFERearView`, which is 1. A frontend race sets it to 1.
+
+### The view and its target
+
+With a mover on views 1 and 3, `eUpdateViewMode` gives view mode 2.
+`MaybeChangeViewMode` then gives view 3 the mirror's 256 by 64 scissor
+and makes the view and target 7 active. The cull gives the view a cull
+info of its own, and `UpdateCameraMovers` moves it with the others.
+
+Retail's `SetScreenBuffers` (`0x001064c8`) sets target 7 the same in
+every video mode. The values below came from running it in mipsemu,
+because the targets are `.bss` on the disc:
+
+| Field | Value |
+|---|---|
+| Size | 256 by 64, PSMCT32 over PSMZ16S |
+| `AspectRatioX`, `AspectRatioY` | 1.5, 1.08 |
+| `AspectRatio2DX`, `AspectRatio2DY` | 0.8, 0.94 |
+| `FovBias` | 1 |
+| `BackgroundColour`, `ClearBackground` | `0x80000000` (black, alpha 1), 1 |
+
+`setup_view` sets the same, but its depth is the PICA's 24 bits.
+`begin_frame` makes view 3's matrices while it and its target are
+active. Retail's `CalculateViewMatricies` makes them for views 0 to 9.
+
+### The draw
+
+Retail draws views 0 to 3 a pass at a time in `eDisplayFrame`. View 3
+gets:
+
+- the sky;
+- the scenery, the NIS objects and `StuffSun`;
+- the clans and the effects;
+- no track routes;
+- no fog, since `eattach_fog` does views 1 and 2 alone;
+- `RenderCars`.
+
+After the cars' alpha lists, `DisplayRVMImages` (`0x0010ec70`) draws the
+mirror's frame over the target. It runs for view 3 alone, with both
+textures, and with the view and its target active. It marks RVM_MASK
+semitransparent, then draws two ePolys with the same corners:
+
+| | V0 | V1 | V2 | V3 |
+|---|---|---|---|---|
+| x, y | 1, -14 | 257, -14 | 257, 76 | 1, 76 |
+| u, v | 1, 0 | 0, 0 | 0, 1 | 1, 1 |
+
+The UVs mirror the image left to right. `ApplyAspectRatio` is 0 and z is
+the target's `MaxZ`. Render's half-pixel step and whole pixels put the
+quad over x 1 to 256 and y -14 to 76.
+
+Both textures are in `GLOBAL/INGAMEB.BUN`, in the pack at `0xd0b80`:
+
+- **RVM** (`0x0000dbd4`, `pTextureInfoRVMInfo`) is 128 by 64 at 8 bits.
+  It is black. Inside the glass its alpha is 0x20, a quarter tint. The
+  frame is opaque, and outside it is clear. It blends by its alpha
+  (AlphaBits 0x44).
+- **RVM_MASK** (`0xcf29d0df`, `pTextureInfoRVMMask`) is also black, with
+  an alpha of 1 inside the glass and its frame and 0 outside. It is
+  added (AlphaBits 0x48), so it leaves the colour alone. The GS writes
+  each fragment's alpha into a PSMCT32 target whatever ALPHA_1 says, so
+  this poly leaves the mask's alpha in target 7.
+
+`DisplayRVMs` (`0x0010edc8`) runs with view 0 after the scene, with the
+Z writes off and before the HUD's layers (`0x00113af4`). It draws target
+7's texture at GS (160, 20) to (352, 84) of the 512 by 448 screen. The
+UVs are mirrored again, so the frame reads the right way round, and the
+blend is by the target's alpha. The glass shows the view, darkened by a
+quarter, and nothing shows outside the frame.
+
+### In the port
+
+- **`trackview_draw_mirror`** draws view 3 whole into a 256 by 64 RGBA8
+  texture with a 24-bit depth buffer (`georender_mirror_*`). It runs
+  after the envmap's faces and before the top screen. In order, it draws:
+  the sky with the Z writes off; the scenery; the solid list;
+  `render_cars` and both lists; then `DisplayRVMImages`' two polys
+  (`mirror_epoly`). The mask's poly writes its own alpha into the
+  target (`set_blend_source_alpha`).
+- **`display_rvms`** comes at the end of `trackview_draw`, before
+  citro2d's HUD. It draws the texture at retail's rectangle, taken to
+  the top screen's 400 by 240: (125, 10.7) to (275, 45). It blends by
+  alpha.
+- **The projection.** Retail's puts x at `H AspectRatioX x / z` and y at
+  `H AspectRatioY y / z`, in the target's pixels. On the PS2's 4:3
+  screen, the 256 by 64 shows in 192 by 64 GS pixels. The HUD takes the
+  512 by 448 to the 5:3 top screen, which makes the mirror a quarter
+  wider for its height. So the port's projection takes in a quarter
+  more across, `1.25 * 128 / (H * 1.5)` at unit depth, and the world in
+  the mirror keeps its shape. The cull's half-width, 128 / H, covers it.
+- **The frame profiler** has a `mirror` stage and a third `models:` half
+  (`frame-profiler.md`).
+
+The sun, the NIS objects and the effects are not drawn into the mirror
+yet. Retail's view 3 has them.
+
+### On Azahar
+
+The SkipFE race on track 12 shows the mirror top centre, in its frame.
+The image is upright and mirrored:
+the road on the car's left shows on the mirror's left. The player's car
+is not in it.
+
+The mirror draws 81 to 128 models a frame, 15000 to 17000 command words
+and 45000 to 48000 indices. The view draws 225 to 313. On Azahar the
+pass takes 3.7 to 5.2 ms of the CPU, and the race holds 29 to 30 FPS.
+The device's cost is not measured yet. If it is too much, the fallback
+is to draw the mirror every other frame.
+
+### The check
+
+`tools/rvmcam_check.py` with `tools/src/rvmcam_test.c` runs the mover
+and `SetRearViewMirrorCameraMover` on retail's image against the port.
+
+    python tools/rvmcam_check.py           # 7 scenarios, 2088 ops, 9863 lines, 0 differ
+    python tools/rvmcam_check.py --mutate  # 52 mutations, 51 caught, 1 equivalent
+
 ## Divergences from the disc
 
 Each of these is in the source as a comment at the point it happens.

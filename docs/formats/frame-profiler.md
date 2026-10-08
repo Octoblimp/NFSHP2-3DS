@@ -145,6 +145,7 @@ Each second of a race, `frameprof` logs a line (wrapped here):
   | prep | the waits: the track's attach, the log, the blurb |
   | cull | after the waits: the sun's Z rects read back, then `begin_frame`: the frame's memory, the views' matrices, and `scenery_do_culling` for every view |
   | envmap | the cars' cube map: its six views drawn, and the fold to the sphere map |
+  | mirror | the rear-view mirror's view, 3, drawn into its target, and its frame (since 11g-2e) |
   | sky | StuffSky and its lists drawn |
   | models | `scenery_stuff_scenery`: eModel::Render for each model the cull kept, its batches drawn or put on the lists |
   | scenery | StuffSun, and the scenery's solid list drawn |
@@ -177,7 +178,8 @@ Since 13b-4 a `models:` line follows each `frame:` line, with
     held, 22772 words
 
 - **view** is the player's view, and **envmap** the faces the envmap
-  drew. Each is a mean a frame: the models rendered, the batches drawn
+  drew. Since 11g-2e a third half, **mirror**, is the rear-view mirror's
+  view. Each is a mean a frame: the models rendered, the batches drawn
   in the model's own call, the lit batches, the batches held for the
   lists, and the GPU command words the models wrote.
 - It has no times. A tick read is an SVC, and timing each model's parts

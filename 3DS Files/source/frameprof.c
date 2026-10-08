@@ -60,7 +60,7 @@ void frameprof_add(FrameProf *fp, const MainLoopTimingStats *t,
     fp->stage[FRAMEPROF_SUBMIT] += t->DisplayFrame - prev;
     fp->jukeboxDecode += d->jukeboxDecode;
     fp->jukeboxRead += d->jukeboxRead;
-    for (s = 0; s < 2 * FRAMEPROF_M_COUNT; s++)
+    for (s = 0; s < 3 * FRAMEPROF_M_COUNT; s++)
         fp->models[s / FRAMEPROF_M_COUNT][s % FRAMEPROF_M_COUNT] +=
             d->models[s / FRAMEPROF_M_COUNT][s % FRAMEPROF_M_COUNT];
 
@@ -102,7 +102,7 @@ bool frameprof_line(FrameProf *fp, char *buf, size_t n)
     len = snprintf(buf, n,
              "frame: %.1f fps, %.1f ms, worst %.1f; sound %.1f, flow %.1f, "
              "race %.1f, world %.1f, cameras %.1f, draw %.1f, loads %.1f; "
-             "draw: prep %.1f, cull %.1f, envmap %.1f, sky %.1f, "
+             "draw: prep %.1f, cull %.1f, envmap %.1f, mirror %.1f, sky %.1f, "
              "models %.1f, scenery %.1f, cars %.1f, hud %.1f, bottom %.1f, "
              "submit %.1f; "
              "waits: vsync %.1f, gpu %.1f; jukebox: decode %.2f, "
@@ -120,6 +120,7 @@ bool frameprof_line(FrameProf *fp, char *buf, size_t n)
              mean_ms(fp, fp->stage[FRAMEPROF_PREP]),
              mean_ms(fp, fp->stage[FRAMEPROF_CULL]),
              mean_ms(fp, fp->stage[FRAMEPROF_ENVMAP]),
+             mean_ms(fp, fp->stage[FRAMEPROF_MIRROR]),
              mean_ms(fp, fp->stage[FRAMEPROF_SKY]),
              mean_ms(fp, fp->stage[FRAMEPROF_MODELS]),
              mean_ms(fp, fp->stage[FRAMEPROF_SCENERY]),
@@ -141,7 +142,11 @@ bool frameprof_line(FrameProf *fp, char *buf, size_t n)
         if (len > 0 && (size_t)len < n)
             len += snprintf(buf + len, n - len, "; envmap ");
         if (len > 0 && (size_t)len < n)
-            models_part(fp, 1, buf + len, n - len);
+            len += models_part(fp, 1, buf + len, n - len);
+        if (len > 0 && (size_t)len < n)
+            len += snprintf(buf + len, n - len, "; mirror ");
+        if (len > 0 && (size_t)len < n)
+            models_part(fp, 2, buf + len, n - len);
     }
     frameprof_reset(fp);
     return true;

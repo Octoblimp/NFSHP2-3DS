@@ -16966,3 +16966,85 @@ letterbox, each about 1.5 s, at 30 FPS.
 5. The PostRace and Demo coordinators.
 6. The pause's other screens.
 7. Later: task 37, Local Wireless play.
+
+## Session 51 (2026-10-07) -- 11g-2e, the rear-view mirror
+
+The race now has retail's rear-view mirror, top centre on the top
+screen, as in the user's photo 5.
+
+### What is ported
+
+- **The mover.** New `rvmcam.c` and `rvmcam.h`:
+  RearViewMirrorCameraMover (0x00158f78 on, vtable 0x002b1b50, 48
+  bytes) and Player::SetRearViewMirrorCameraMover (0x001767a8). The
+  camera sits 0.5 up in the car, looks back with a 110-degree field of
+  view and a far plane of 192, and leaves the player's car out.
+  `camera_mover_get_target` is public now, for its vtable.
+- **The seam.** main.c sets `gPlayerSetRearViewMirrorCameraMoverFn`.
+  The HUD's HUD_REAR_VIEW_MIRROR puts the mover on view 3, and
+  `eUpdateViewMode`'s mode 2 turns target 7 on.
+- **The target.** `setup_view` sets target 7 as retail's
+  SetScreenBuffers (0x001064c8) does. The targets are `.bss` on the
+  disc, so the values came from running it in mipsemu with GetVideoMode
+  stubbed: 256 by 64, aspect 1.5 and 1.08, 2D aspect 0.8 and 0.94, a
+  black background with alpha 1, the same in every video mode.
+  `begin_frame` makes view 3's matrices while it is active.
+- **The draw.** `trackview_draw_mirror` draws view 3 into a 256 by 64
+  RGBA8 texture with its own depth (`georender_mirror_init`, `_begin`,
+  `_texture`). It runs after the envmap. It draws the sky, the scenery
+  and the cars, with no fog. Then it draws DisplayRVMImages' two polys
+  (0x0010ec70): RVM, the frame and the glass's quarter tint, and
+  RVM_MASK, whose alpha goes into the target
+  (`set_blend_source_alpha`).
+- **The composite.** `display_rvms`, DisplayRVMs (0x0010edc8), puts
+  the texture on the top screen after the scene and before citro2d's
+  HUD. It sits at retail's GS (160, 20) to (352, 84), which is (125,
+  10.7) to (275, 45) on the top screen. Its UVs are mirrored, and it
+  is blended by that alpha.
+- **The projection.** It takes in a quarter more across than retail's.
+  The HUD stretches the PS2's 4:3 to the top screen's 5:3, so this keeps
+  the world's shape in the mirror.
+- **The frame profiler.** It has a `mirror` stage and a third
+  `models:` half.
+
+`docs/formats/camera.md`, "The rear-view mirror", has the whole of it.
+
+### The check
+
+`tools/rvmcam_check.py` runs the mover and
+SetRearViewMirrorCameraMover on SLES_507.31's own code beside the
+port. The harness is `tools/src/rvmcam_test.c`.
+
+- **Scenarios:** 7.
+- **Result:** 2088 ops, 9863 lines, 0 differ.
+- **Mutations:** 52. 51 are caught and 1 is equivalent.
+
+The draw has no checker. Its numbers are retail's, read from
+DisplayRVMImages, DisplayRVMs and the emulated SetScreenBuffers.
+
+### On Azahar
+
+The SkipFE race on track 12 shows the mirror in its frame. The image is
+upright and mirrored: the road on the car's left is on the mirror's
+left. The player's car is not in it.
+
+- **What it draws:** 81 to 128 models a frame, against the view's 225
+  to 313.
+- **What it costs on Azahar:** 3.7 to 5.2 ms of the CPU. The race
+  holds 29 to 30 FPS.
+- **On the device:** not measured yet. If the mirror costs too much,
+  the fallback is to draw it every other frame.
+
+### Left
+
+The sun, the NIS objects and the effects in the mirror's view, which
+retail draws there too.
+
+### Next
+
+1. 11h-3, TrafficTeleporter.
+2. Step 12, the cops.
+3. The AnimatedDriver, so the driver moves in the close-ups.
+4. The PostRace and Demo coordinators.
+5. The pause's other screens.
+6. Later: task 37, Local Wireless play.

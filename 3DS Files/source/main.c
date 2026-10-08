@@ -61,6 +61,7 @@
 #include "bslotpool.h"
 #include "bticker.h"
 #include "bumpercam.h"
+#include "rvmcam.h"
 #include "camera.h"
 #include "cameracoord.h"
 #include "cammover.h"
@@ -3668,6 +3669,11 @@ int main(int argc, char** argv)
     gPreRaceCameraIsFinishedFn = prerace_camera_coordinator_is_finished;
     gBumperCameraMoverFn = bumper_camera_mover_construct;
     gBumperCameraMoverIsFinishedFn = bumper_camera_mover_is_finished_fn;
+    // The rear-view mirror: SetHudFeatures puts its mover on view 3
+    // while the HUD has HUD_REAR_VIEW_MIRROR, which turns target 7 on;
+    // trackview_draw_mirror draws the view into it.
+    gPlayerSetRearViewMirrorCameraMoverFn =
+        player_set_rear_view_mirror_camera_mover;
     // The screens over the fly-by (11g-2c-2b, startrace.c): CAMERA_FLYBY's
     // ACTIVATE and UNACTIVATE put them up and take them down through the
     // flow's ChangeToScreen, which the pause's "Pause Menu" also goes
@@ -4357,6 +4363,9 @@ int main(int argc, char** argv)
     } else if (!trackview_envmap_init()) {
         logPrintf("georender: no room for the environment map\n");
     }
+    if (!trackview_mirror_init()) {
+        logPrintf("georender: no room for the rear-view mirror\n");
+    }
     if (!geoview_init(&g_geo)) {
         logPrintf("geoview: %s\n", g_geo.note);
     } else {
@@ -4656,6 +4665,8 @@ int main(int argc, char** argv)
                 trackview_read_depth(&g_track, top);
                 trackview_draw_envmap(&g_track);
                 FRAMEPROF_STAMP(FRAMEPROF_ENVMAP);
+                trackview_draw_mirror(&g_track);
+                FRAMEPROF_STAMP(FRAMEPROF_MIRROR);
                 C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
                                       __builtin_bswap32(sky), 0);
                 C3D_FrameDrawOn(top);

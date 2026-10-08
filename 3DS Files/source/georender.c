@@ -146,7 +146,16 @@ static bool              s_sphereFolded;
 // the car select's CARSELECTENVMAP, or NULL.
 static const C3D_Tex*    s_envOverride;
 
+// The rear-view mirror's target, retail's target 7: its texture in VRAM,
+// a target over it with a depth buffer of its own, and its size.
+static C3D_Tex           s_mirrorTex;
+static C3D_RenderTarget* s_mirror;
+static int               s_mirrorW;
+static int               s_mirrorH;
+static bool              s_mirrorDrawn;
+
 static void free_envmap(void);
+static void free_mirror(void);
 static void set_fog_row(int id, const C3D_Mtx* projection);
 
 // The screen quads' ring, and the top screen's pixels as clip space.
@@ -291,6 +300,7 @@ void georender_exit(void)
     s_sprites = NULL;
     C3D_TexDelete(&s_noFogTex);
     free_envmap();
+    free_mirror();
     shaderProgramFree(&s_foldProgram);
     DVLB_Free(s_foldDvlb);
     s_foldDvlb = NULL;
@@ -996,6 +1006,36 @@ static void set_blend(uint8_t blend)
     }
 }
 
+// set_blend's colour, with the target's alpha the fragment's own: the GS
+// writes a fragment's alpha into a PSMCT32 target whatever ALPHA_1 says,
+// and the mirror's target is read again by it.
+static void set_blend_source_alpha(uint8_t blend)
+{
+    GPU_BLENDEQUATION eq  = GPU_BLEND_ADD;
+    GPU_BLENDFACTOR   src = GPU_ONE;
+    GPU_BLENDFACTOR   dst = GPU_ZERO;
+
+    set_blend(blend);
+    switch (blend) {
+    case GEO_BLEND_ALPHA:
+        src = GPU_SRC_ALPHA;
+        dst = GPU_ONE_MINUS_SRC_ALPHA;
+        break;
+    case GEO_BLEND_ADD:
+        src = GPU_SRC_ALPHA;
+        dst = GPU_ONE;
+        break;
+    case GEO_BLEND_SUBTRACT:
+        eq  = GPU_BLEND_REVERSE_SUBTRACT;
+        src = GPU_SRC_ALPHA;
+        dst = GPU_ONE;
+        break;
+    default:
+        break;
+    }
+    C3D_AlphaBlend(eq, GPU_BLEND_ADD, src, dst, GPU_ONE, GPU_ZERO);
+}
+
 static void set_pass(GeoPass pass)
 {
     set_blend(pass.blend);
@@ -1354,6 +1394,67 @@ void georender_envmap_face(int face, uint32_t clear, bool draw)
     s_envDone |= 1u << face;
 }
 
+// --------------------------------------------------------------- the mirror
+
+static void free_mirror(void)
+{
+    if (s_mirror) {
+        C3D_RenderTargetDelete(s_mirror);
+        s_mirror = NULL;
+    }
+    if (s_mirrorTex.data) {
+        C3D_TexDelete(&s_mirrorTex);
+    }
+    memset(&s_mirrorTex, 0, sizeof s_mirrorTex);
+    s_mirrorW     = 0;
+    s_mirrorH     = 0;
+    s_mirrorDrawn = false;
+}
+
+// RGBA8 over D24S8, the cube's faces' pair: 64 KB of each at 256 by 64.
+// Read bilinear and clamped, as the target's TextureInfo has the GS read
+// it (MMag 1, MMin 2).
+bool georender_mirror_init(int width, int height)
+{
+    if (s_mirror) {
+        return s_mirrorW == width && s_mirrorH == height;
+    }
+    if (!s_ready) {
+        return false;
+    }
+    if (!C3D_TexInitVRAM(&s_mirrorTex, (u16)width, (u16)height, GPU_RGBA8)) {
+        memset(&s_mirrorTex, 0, sizeof s_mirrorTex);
+        return false;
+    }
+    s_mirror = C3D_RenderTargetCreateFromTex(&s_mirrorTex, GPU_TEXFACE_2D, 0,
+                                             GPU_RB_DEPTH24_STENCIL8);
+    if (!s_mirror) {
+        free_mirror();
+        return false;
+    }
+    C3D_TexSetFilter(&s_mirrorTex, GPU_LINEAR, GPU_LINEAR);
+    C3D_TexSetWrap(&s_mirrorTex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+    s_mirrorW = width;
+    s_mirrorH = height;
+    return true;
+}
+
+bool georender_mirror_begin(uint32_t clear)
+{
+    if (!s_ready || !s_mirror) {
+        return false;
+    }
+    C3D_RenderTargetClear(s_mirror, C3D_CLEAR_ALL, clear, 0);
+    C3D_FrameDrawOn(s_mirror);
+    s_mirrorDrawn = true;
+    return true;
+}
+
+const C3D_Tex* georender_mirror_texture(void)
+{
+    return s_mirrorDrawn ? &s_mirrorTex : NULL;
+}
+
 // ------------------------------------------------------- the screen quads
 
 void georender_quads_rewind(void)
@@ -1365,7 +1466,7 @@ void georender_quads_rewind(void)
 
 static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                              const C3D_Mtx* screen, uint8_t blend,
-                             bool alphaTest, float depth)
+                             bool alphaTest, float depth, bool sourceAlpha)
 {
     GeoRenderVertex* dst;
     C3D_BufInfo*     buf;
@@ -1429,7 +1530,11 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
     } else {
         alpha_test(false, 0);
     }
-    set_blend(blend);
+    if (sourceAlpha) {
+        set_blend_source_alpha(blend);
+    } else {
+        set_blend(blend);
+    }
     C3D_DepthTest(true, depth >= 0.0f ? GPU_GEQUAL : GPU_ALWAYS,
                   GPU_WRITE_COLOR);
     draw_arrays(GPU_TRIANGLE_STRIP, s_numQuads * 4, 4, gt->tex, "quad");
@@ -1446,7 +1551,7 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
 bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                          uint8_t blend, float depth)
 {
-    return draw_screen_quad(v, gt, &s_screen, blend, true, depth);
+    return draw_screen_quad(v, gt, &s_screen, blend, true, depth, false);
 }
 
 bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
@@ -1462,7 +1567,8 @@ bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
         C3D_TexEnvInit(C3D_GetTexEnv(i));
     }
     Mtx_OrthoTilt(&screen, 0.0f, width, height, 0.0f, 1.0f, -1.0f, true);
-    return draw_screen_quad(v, gt, &screen, GEO_BLEND_ALPHA, false, -1.0f);
+    return draw_screen_quad(v, gt, &screen, GEO_BLEND_ALPHA, false, -1.0f,
+                            false);
 }
 
 bool georender_draw_hud_quad_w(const GeoRenderVertex v[4],
@@ -1485,7 +1591,22 @@ bool georender_draw_hud_quad_w(const GeoRenderVertex v[4],
         screen.r[i].z = screen.r[i].w;
         screen.r[i].w = 0.0f;
     }
-    return draw_screen_quad(v, gt, &screen, blend, alphaTest, -1.0f);
+    return draw_screen_quad(v, gt, &screen, blend, alphaTest, -1.0f, false);
+}
+
+bool georender_draw_mirror_quad(const GeoRenderVertex v[4],
+                                const GeoTexture* gt, uint8_t blend,
+                                bool sourceAlpha)
+{
+    C3D_Mtx screen;
+
+    if (!s_mirror) {
+        return false;
+    }
+    // A texture's rows are its own, not a screen's turned on its side.
+    Mtx_Ortho(&screen, 0.0f, (float)s_mirrorW, (float)s_mirrorH, 0.0f, 1.0f,
+              -1.0f, false);
+    return draw_screen_quad(v, gt, &screen, blend, false, -1.0f, sourceAlpha);
 }
 
 // ------------------------------------------------------------- the strips

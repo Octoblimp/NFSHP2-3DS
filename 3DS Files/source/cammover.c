@@ -35,7 +35,7 @@ float camera_mover_get_wall_gap(CameraMover *m) { (void)m; return 0.7f; }
 static void *base_get_car_to_follow(CameraMover *m) { (void)m; return 0; }
 
 // 0x0015fcb0.
-static const bVector3 *base_get_target(CameraMover *m)
+const bVector3 *camera_mover_get_target(CameraMover *m)
 {
     return &m->pCamera->CurrentKey.Target;
 }
@@ -55,7 +55,7 @@ const CameraMoverVtbl CameraMoverBaseVtbl = {
     camera_mover_enable,
     camera_mover_disable,
     base_get_car_to_follow,
-    base_get_target,
+    camera_mover_get_target,
 };
 
 // Retail's 0x001576e8.

@@ -96,6 +96,8 @@
 #define TRACKVIEW_MAX_SHARED_CHUNKS 8   // their packs and flipbooks: 4
 #define TRACKVIEW_MAX_FRAMES   64       // flipbook frames past the first: 46
 #define TRACKVIEW_ROUTE        1        // the racing route the stops are on
+#define TRACKVIEW_MIRROR_W     256      // the rear-view mirror's target, 7
+#define TRACKVIEW_MIRROR_H     64
 #define TRACKVIEW_FLAILER_POLYS 128     // a frame's minimap; one race's is ~60
 #define TRACKVIEW_STOPS        24       // how many stops round it
 #define TRACKVIEW_MAX_DEFERRED 1024     // batches held back for the alpha pass
@@ -265,6 +267,8 @@ typedef struct {
     bool frameBegun;            // trackview_draw_envmap began this frame
     int  envFaces;              // environment views drawn this frame
     int  envDrawn;              // and the models drawn into them
+    bool mirrorDrawn;           // the mirror's view drew this frame
+    int  mirrorModels;          // the models drawn into it
 
     // --- the sun: what StuffSun drew and asked for, the frame just drawn.
     int   sunQuads;             // quads ePoly::Render drew
@@ -397,7 +401,8 @@ void trackview_input(TrackView* v, uint32_t kDown, uint32_t kHeld, int cpx,
                      int cpy, float dt);
 
 // The frame: view 1's matrices, the cull, and StuffScenery into the bound
-// render target, which must have a depth buffer; then StuffSun; then, as
+// render target, which must have a depth buffer; then StuffSun; then the
+// rear-view mirror, when trackview_draw_mirror drew it; then, as
 // eDisplayFrame ends, the flipbooks' next frames.
 void trackview_draw(TrackView* v);
 
@@ -426,6 +431,17 @@ bool trackview_envmap_init(void);
 // and the top target's C3D_FrameDrawOn, before trackview_draw; it leaves
 // the sphere map's target, or a face's, bound.
 void trackview_draw_envmap(TrackView* v);
+
+// The rear-view mirror's target, 256 by 64 as retail's target 7. False if
+// there is no room; the race then has no mirror.
+bool trackview_mirror_init(void);
+
+// The rear-view mirror's view, 3, into its target, when the view and the
+// target are active -- with a RearViewMirrorCameraMover on it, view mode 2
+// -- and then the mirror's frame over it (DisplayRVMImages). After
+// trackview_draw_envmap and before the top target's C3D_FrameDrawOn;
+// trackview_draw puts the mirror on the top screen (DisplayRVMs).
+void trackview_draw_mirror(TrackView* v);
 
 // The Z rects StuffSun asked for in the frame before, out of `target`'s
 // depth buffer and into their SunZBuffers, the way the PS2's transfer
