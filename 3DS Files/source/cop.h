@@ -5,10 +5,10 @@
 // and its logic states. tPlayerCop is Be A Cop's, on the player's own car.
 // tAICop makes its own car, a CopDriver drives it, and Think moves it
 // through the logic states. So far the constructors and destructors, the
-// small setters, the zone permissions, DisableMyCar, the drive target and
-// tAICop::Think with its transitions and the limbo, disabled and guard
-// logic are ported; DoSnapshot and the other logic are step 12's later
-// slices (docs/formats/cops.md).
+// small setters, the zone permissions, DisableMyCar, the drive target,
+// tAICop::Think with its transitions, and the limbo, disabled, guard,
+// radar-trap, roadblock and patrol logic are ported; DoSnapshot and the
+// chases' logic are step 12's later slices (docs/formats/cops.md).
 
 #ifndef COP_H
 #define COP_H
@@ -196,18 +196,57 @@ void taicop_do_limbo_logic(tAICop *c);
 void taicop_do_disabled_logic(tAICop *c);
 void taicop_do_guard_location_logic(tAICop *c);
 
+// Teleport(bVector2 *, unsigned short), 0x0022de70: a cop with a car puts
+// it in COP_MOVEMENT and resets it, stopped, to (x, y, 0) facing `ang`.
+// SetSpeedTrap (0x0022ded8): the trap and its cop each other's, the car
+// teleported to the trap, and LS_SPEED_TRAP asked for. SetRoadBlock
+// (0x0022df18): on pursuit `p`, at roadblock spot `i`, the car teleported
+// there, and LS_ROAD_BLOCK asked for.
+void taicop_teleport(tAICop *c, const bVector2 *pos, uint16_t ang);
+void taicop_set_speed_trap(tAICop *c, tSpeedTrap *t);
+void taicop_set_road_block(tAICop *c, tRoadBlock *rb, tPursuit *p,
+                           int32_t i);
+
+// IsValidPursuitTarget(Car *, bool), 0x0022ea88: not the player cop's car,
+// not pulled over, its fPursuableTimer not above 0; then yes if it caused
+// a collision just now (CarCausedRecentCollision), else, with `b` set, if
+// it goes faster than 80 mph either way or a pursuit has it already.
+// CanPatrollerSeeThisCar(Car *), 0x0022ed68: within 50 m of the cop's car,
+// moving, and at least 20 m on along its own heading from it -- going
+// away ahead of the cop.
+int32_t taicop_is_valid_pursuit_target(tAICop *c, struct Car *car,
+                                       int32_t b);
+int32_t taicop_can_patroller_see_this_car(const tAICop *c,
+                                          const struct Car *car);
+
+// The radar trap's, the roadblock's and the patrol's logic.
+//   InitSpeedTrapLogic (0x0022e798): off its pursuit, then parked -- sub-
+//     state NONE, off the map, stopped, the driver PARKED, the matrix out
+//     of date, lights and siren off -- with 15 s before it may give up.
+//   InitRoadBlockLogic (0x0022ebc0): the same parking with lights 1, its
+//     pursuit and timer untouched.
+//   DoSpeedTrapLogic (0x0022e838): holds position. Once the timer is out,
+//     no player within 250 m asks for LS_LIMBO and ends it. A car more
+//     than 1 cm or 100 BAM off its trap goes back to it if CanTeleport
+//     says so. Then each racer and player within 45 m in x and y and
+//     2.5 m in z that IsValidPursuitTarget (fast enough or chased) and
+//     the manager's RequestPursuit allow asks for LS_HOT_PURSUIT.
+//   DoRoadBlockLogic (0x0022ec38): holds position; a car off its spot of
+//     its pursuit's roadblock goes back the same way; New32 to 3 s.
+//   DoDrivingOnPatrolLogic (0x0022ee50): no offsets; the drive target on
+//     from the car's place; LS_LIMBO with no player within 250 m; else
+//     the trap's search, with the fast-or-chased test only for a car
+//     CanPatrollerSeeThisCar.
+void taicop_init_speed_trap_logic(tAICop *c);
+void taicop_init_road_block_logic(tAICop *c);
+void taicop_do_speed_trap_logic(tAICop *c);
+void taicop_do_road_block_logic(tAICop *c);
+void taicop_do_driving_on_patrol_logic(tAICop *c);
+
 // The rest of the logic, not ported yet: NULL seams that do nothing, so a
-// cop asked for one of these states sits in it. Nothing asks yet: the
-// speed traps (12j) and the pursuits (12h) do. InitSpeedTrapLogic
-// (0x0022e798), InitRoadBlockLogic (0x0022ebc0), DoSpeedTrapLogic
-// (0x0022e838), DoRoadBlockLogic (0x0022ec38), DoDrivingOnPatrolLogic
-// (0x0022ee50), DoHotPursuitLogic (0x0022ff58), DoCaughtSpeederLogic
-// (0x002303c8); and tPlayerCop::Think (0x0022d5c8), Be A Cop's, 12m.
-extern void (*gAICopInitSpeedTrapLogicFn)(tAICop *c);
-extern void (*gAICopInitRoadBlockLogicFn)(tAICop *c);
-extern void (*gAICopDoSpeedTrapLogicFn)(tAICop *c);
-extern void (*gAICopDoRoadBlockLogicFn)(tAICop *c);
-extern void (*gAICopDoDrivingOnPatrolLogicFn)(tAICop *c);
+// cop asked for one of these states sits in it. DoHotPursuitLogic
+// (0x0022ff58) and DoCaughtSpeederLogic (0x002303c8), 12g-3; and
+// tPlayerCop::Think (0x0022d5c8), Be A Cop's, 12m.
 extern void (*gAICopDoHotPursuitLogicFn)(tAICop *c);
 extern void (*gAICopDoCaughtSpeederLogicFn)(tAICop *c);
 extern void (*gPlayerCopThinkFn)(tPlayerCop *c);
@@ -234,6 +273,12 @@ extern float fCopMassTable[3];
 extern void (*gPursuitRemoveCopFromPursuitFn)(tPursuit *p, tCop *c);
 extern void (*gPursuitRemovePrimarySpeakerFn)(tPursuit *p, int32_t b);
 extern void (*gCarDamageWreckFn)(void *damage);
+
+// tCopManager::RequestPursuit(tCop *, Car *), 0x00225078, 12h: nonzero
+// when the cop may chase the car. NULL grants none, so no patrol or radar
+// trap starts a chase yet.
+extern int32_t (*gCopManagerRequestPursuitFn)(tCopManager *m, tCop *c,
+                                              struct Car *car);
 
 // The three tables, for main.c.
 void cop_install_vtables(void);

@@ -102,8 +102,11 @@ struct TrackRoutePoint;
 // called.
 typedef struct tRoadBlock {
     struct stAICop *cops[2];            //   0  NULL for none
-    bVector4 pos;                       //   8
-    int32_t  ang;                       //  24
+    // Where each cop's car stands, and its heading (a BAM): the .mdebug's
+    // bVector4 pos and int ang, which DoRoadBlockLogic and SetRoadBlock
+    // read as two bVector2s and two shorts.
+    bVector2 CopPos[2];                 //   8
+    uint16_t CopAng[2];                 //  24
     uint16_t aTrackMapIconAngle;        //  28  a BAM
     uint16_t Pad30;                     //  30
     const RoadblockInfo *Name;          //  32  the record, whose name leads
@@ -126,7 +129,7 @@ typedef struct tRoadBlock {
 
 #if UINTPTR_MAX == 0xFFFFFFFFu
 typedef char troadblock_layout_check[
-    (offsetof(tRoadBlock, pos) == 8
+    (offsetof(tRoadBlock, CopPos) == 8 && offsetof(tRoadBlock, CopAng) == 24
      && offsetof(tRoadBlock, aTrackMapIconAngle) == 28
      && offsetof(tRoadBlock, Name) == 32
      && offsetof(tRoadBlock, RoutePoint) == 36

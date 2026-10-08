@@ -16,6 +16,8 @@
 #include "bmem.h"
 #include "bslotpool.h"
 #include "car.h"
+#include "collision.h"
+#include "collisionbody.h"
 #include "copmanager.h"
 #include "copmgr.h"
 #include "coputil.h"
@@ -243,6 +245,40 @@ tSpeedTrap *copmanager_get_speed_trap_from_loaded_data_index(tCopManager *m,
 
     printf("  stget %s %d -> %s\n", sym(m), i, has ? sym(&sts[i]) : "0");
     return has ? &sts[i] : NULL;
+}
+
+// coputil.c's CarCausedRecentCollision's, which the script never reaches.
+static void unreached(const char *f)
+{
+    fprintf(stderr, "trackgraph_test: %s reached\n", f);
+    exit(3);
+}
+
+struct Collision *collisionbody_get_collision(CollisionBody *b, int32_t i)
+{
+    (void)b; (void)i;
+    unreached("collisionbody_get_collision");
+    return NULL;
+}
+
+int32_t collision_is_two_car_collision(Collision *c)
+{
+    (void)c;
+    unreached("collision_is_two_car_collision");
+    return 0;
+}
+
+void collision_get_colliding_cars(Collision *c, Car **car1, Car **car2)
+{
+    (void)c; (void)car1; (void)car2;
+    unreached("collision_get_colliding_cars");
+}
+
+int32_t car_is_car_in_front(Car *c, Car *other, uint16_t angle)
+{
+    (void)c; (void)other; (void)angle;
+    unreached("car_is_car_in_front");
+    return 0;
 }
 
 static float path_distance(const bVector2 *pos)

@@ -23,6 +23,7 @@
 #include "configitems.h"
 #include "cop.h"
 #include "copmgr.h"
+#include "coputil.h"
 #include "drivetarget.h"
 #include "drivetargetrenderer.h"
 #include "race.h"
@@ -322,6 +323,20 @@ Car *car_construct(Car *c, DriverInfo *driver, const bVector3 *pos,
 {
     (void)c; (void)driver; (void)pos; (void)angle; (void)dist;
     unreached("car_construct");
+    return NULL;
+}
+
+int32_t can_teleport(Car *car, const bVector2 *dest)
+{
+    (void)car; (void)dest;
+    unreached("can_teleport");
+    return 0;
+}
+
+Car *car_caused_recent_collision(Car *car)
+{
+    (void)car;
+    unreached("car_caused_recent_collision");
     return NULL;
 }
 
@@ -644,8 +659,9 @@ static void dump(void)
 
         printf("M rb%02d %s", k, sym(r->cops[0]));
         printf(" %s pos ", sym(r->cops[1]));
-        hexwords(&r->pos, 4);
-        printf(" ang %08x icon %04x %04x name %s", (uint32_t)r->ang,
+        hexwords(r->CopPos, 4);
+        printf(" ang %08x icon %04x %04x name %s",
+               (uint32_t)r->CopAng[0] | (uint32_t)r->CopAng[1] << 16,
                r->aTrackMapIconAngle, r->Pad30, sym(r->Name));
         printf(" pt %s", sym(r->RoutePoint));
         printf(" rt %s w %08x side %d belt ", sym(r->Route),

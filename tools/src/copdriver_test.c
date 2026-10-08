@@ -18,6 +18,7 @@
 #include "carmodes.h"
 #include "carstate.h"
 #include "cartypeinfo.h"
+#include "collision.h"
 #include "collisionbody.h"
 #include "cop.h"
 #include "copdriver.h"
@@ -346,6 +347,34 @@ void carmover_destroy(CarMover *m, int32_t flags)
 {
     (void)m; (void)flags;
     never("cmdtor");
+}
+
+// coputil.c's CarCausedRecentCollision's, which CopDriver doesn't call.
+struct Collision *collisionbody_get_collision(CollisionBody *b, int32_t i)
+{
+    (void)b; (void)i;
+    never("get_collision");
+    return NULL;
+}
+
+int32_t collision_is_two_car_collision(Collision *c)
+{
+    (void)c;
+    never("two_car_collision");
+    return 0;
+}
+
+void collision_get_colliding_cars(Collision *c, Car **car1, Car **car2)
+{
+    (void)c; (void)car1; (void)car2;
+    never("colliding_cars");
+}
+
+int32_t car_is_car_in_front(Car *c, Car *other, uint16_t angle)
+{
+    (void)c; (void)other; (void)angle;
+    never("in_front");
+    return 0;
 }
 
 // The NullDriver's table: its destructor and SetDesiredSpeed, logged.

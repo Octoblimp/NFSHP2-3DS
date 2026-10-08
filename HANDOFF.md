@@ -17879,3 +17879,77 @@ two higher.
 ### Next
 
 12g-2: the patrol and the radar-trap and roadblock logics.
+
+## Session 58, continued (2026-10-08) -- 12g-2, the radar traps, roadblocks and patrols
+
+The logic of three of tAICop's states, ported from retail into
+`cop.c`, with two more `coputil.obj` helpers in `coputil.c`.
+`docs/formats/cops.md` has a new section, "Radar traps, roadblocks and
+patrols".
+
+### What it does
+
+- **Teleport** (`0x0022de70`): COP_MOVEMENT, then ResetToPosition at
+  (x, y, 0), speed 0. **SetSpeedTrap** (`0x0022ded8`) and
+  **SetRoadBlock** (`0x0022df18`) link the cop to its spot, teleport it
+  there, and ask for SPEED_TRAP or ROAD_BLOCK.
+- **InitSpeedTrapLogic** (`0x0022e798`) and **InitRoadBlockLogic**
+  (`0x0022ebc0`) park the car (stopped, off the map, the driver
+  PARKED). The trap clears its pursuit, waits 15 s, and has its lights
+  off. The roadblock keeps its pursuit and has lights 1. HandleState-
+  Transitions now calls both directly.
+- **DoSpeedTrapLogic** (`0x0022e838`) holds still. Once its 15 s are up
+  with no player within 250 m, it goes to limbo. Otherwise it goes back
+  to its spot when it is 1 cm or 100 BAM off and CanTeleport allows it,
+  and searches.
+- **DoRoadBlockLogic** (`0x0022ec38`) holds still and goes back to its
+  spot the same way. It keeps the grace timer at 3 s.
+- **DoDrivingOnPatrolLogic** (`0x0022ee50`) clears the offsets, updates
+  the drive target, goes to limbo with no player within 250 m, and
+  otherwise searches.
+- **The search** looks at the players' and racers' cars within 45 m in
+  x and y, and 2.5 m in z. It checks **IsValidPursuitTarget**
+  (`0x0022ea88`): not Be A Cop's car, not pulled over, not inside its
+  pursuable time; then a car that caused a crash, one above 80 mph, or
+  one already chased. A patrol also needs **CanPatrollerSeeThisCar**
+  (`0x0022ed68`): within 50 m, moving, and 20 m on along its own way of
+  travel. Then tCopManager::RequestPursuit (`0x00225078`, the new NULL
+  seam `gCopManagerRequestPursuitFn`) is asked, and a granted chase
+  means HOT_PURSUIT.
+- **CanTeleport** (`0x00230ff0`): no player within 250 m of the car or
+  of the spot, and no other car within 15 m of the car.
+  **CarCausedRecentCollision** (`0x00231118`): the first two-car
+  collision this frame whose other car is stopped, or in front and
+  slower.
+- **tRoadBlock**: the `.mdebug`'s `bVector4 pos` and `int ang` are read
+  as two cops' spots and headings, so `copmanager.h` now has
+  `CopPos[2]` and `CopAng[2]` there, with the same offsets.
+
+The game plays the same as before: RequestPursuit grants nothing and no
+cop leaves limbo yet.
+
+### Checked
+
+- `cop_check` adds all of it on Think's rig, with a world of four cars,
+  per-car collision tables, IsCarInFront's answers, a queue of player
+  distances, the pullovers, pursuable timers, player cop, pursuit list
+  and roadblocks, and RequestPursuit's answer. It runs 300690
+  operations, 60866 lines, 0 differ. `--mutate`: 543 mutations, 540
+  caught, 3 equivalent (none new). 120 of them are new. Ten older ones
+  were anchored again: five whose lines the new code repeats, and five
+  that pointed at the seams now gone.
+- `copmanager_test.c` stands in for CanTeleport and CarCausedRecent-
+  Collision, and `copdriver_test.c` and `trackgraph_test.c` for the
+  collision calls `coputil.c` now makes. Each aborts if reached.
+  copmanager (25100 lines), copdriver (29413) and trackgraph (246035)
+  have 0 differ, as do aidriver, carmode, collisionbody, copmover,
+  drivecam, hudanim, hudcop, hudfeatures, hudrender, hudscore,
+  raceupdate, realdriver, trackmap and world.
+- The CIA builds. `run_azahar_quickrace.ps1 -HoldKeys 65`, the
+  frontend's Hot Pursuit Quick Race with 4 cops, gives PASS at 30 FPS,
+  Speed 100%, with the AI racing and no cop on screen.
+
+### Next
+
+12g-3: DoHotPursuitLogic and DoCaughtSpeederLogic. Then 12h, tPursuit,
+starting with RequestPursuit.

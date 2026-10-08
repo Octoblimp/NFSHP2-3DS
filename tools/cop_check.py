@@ -73,6 +73,7 @@ COP = "3DS Files/source/cop.c"
 COPMGR = "3DS Files/source/copmgr.c"
 SOURCES = [HARNESS, COP, COPMGR, "3DS Files/source/copmanager.c",
            "3DS Files/source/trackroute.c",
+           "3DS Files/source/coputil.c",
            "3DS Files/source/trackpath.c",
            "3DS Files/source/quickspline.c",
            "3DS Files/source/bchunk.c",
@@ -144,10 +145,28 @@ S_DIST = 0x0014e3e8                     # World's 2D distance to a player
 S_REPAIR = 0x001b5c20                   # CarDamage's repair
 S_PTHINK = 0x0022d5c8                   # tPlayerCop::Think
 S_NDSPEED = 0x00136bd8                  # NullDriver::SetDesiredSpeed
-LOGIC = ((0x0022e798, "istrap"), (0x0022ebc0, "iroad"),
-         (0x0022e838, "strap"), (0x0022ec38, "road"),
-         (0x0022ee50, "patrol"), (0x0022ff58, "hot"),
-         (0x002303c8, "caught"))
+LOGIC = ((0x0022ff58, "hot"), (0x002303c8, "caught"))
+
+# 12g-2's: the radar trap's, roadblock's and patrol's logic, and coputil's
+# two it reaches.
+F_TELE = 0x0022de70
+F_SETTRAP = 0x0022ded8
+F_SETRB = 0x0022df18
+F_VALID = 0x0022ea88
+F_SEE = 0x0022ed68
+F_ISTRAP = 0x0022e798
+F_IROAD = 0x0022ebc0
+F_STRAP = 0x0022e838
+F_ROAD = 0x0022ec38
+F_PATROL = 0x0022ee50
+F_CANTELE = 0x00230ff0
+F_CAUSED = 0x00231118
+S_REQP = 0x00225078                     # tCopManager::RequestPursuit
+S_GETCOL = 0x001d6f38                   # CollisionBody::GetCollision
+S_TWOCAR = 0x0021eb20                   # Collision::IsTwoCarCollision
+S_CARS = 0x0021eb48                     # Collision::GetCollidingCars
+S_INFRONT = 0x00133898                  # Car::IsCarInFront
+NCOLS = 8
 VT_NULLDRIVER = 0x002ae7c0
 DTR = 0x00314630                        # TheDriveTargetRenderer
 G_WTE = GP - 19560                      # WorldTimeElapsed
@@ -186,12 +205,12 @@ CAR_FIELDS = {
     "move": (CAR_MOVE, "w"), "mode": (CAR_MODE, "w"), "drvnum": (10, "h"),
     "idx": (CAR_INDEX, "h"), "mv": (1088, "w"), "render": (CAR_RENDER, "b"),
     "lights": (CAR_LIGHTS, "w"), "siren": (CAR_SIREN, "w"),
-    "vis": (CAR_VIS, "w")}
+    "vis": (CAR_VIS, "w"), "z": (CAR_POS + 8, "f")}
 DRIVER_FIELDS = {"steer": (528, "h"), "thr": (532, "f"), "brk": (536, "f"),
                  "eb": (540, "f"), "dg": (544, "w"), "sg": (548, "w")}
 COP_FIELDS = {"n32": 32, "sst": 44, "phys": 84, "delay": 88, "n48x": 48,
               "n48y": 52, "dlx": 56, "dly": 60, "n64": 64, "n68": 68,
-              "ls": 12, "ds": 16, "lss": 20, "dlss": 24}
+              "ls": 12, "ds": 16, "lss": 20, "dlss": 24, "rbi": 40}
 MOVER_AIRBORNE = 112
 NQ, QPTS = 3, 40                        # the routes, and points each
 Q_HDR, Q_PT = 1064, 112
@@ -712,6 +731,326 @@ def think_script():
               "g|camf|%x" % rnd.choice((7, 0xffffffff))]
         if rnd.random() < 0.3:
             s += ["setp|0|0"]
+        s += ["strap|0|0"]
+        for _ in range(rnd.randrange(1, 4)):
+            s += ["think|0", "tdump|0"]
+    return s
+
+
+def lprep():
+    """prep(), and 12g-2's world put back: the cars where they start, all
+    four counted, no queued distances, no pursuits granted, no
+    collisions, no pullovers, timers or player cop, nothing chased."""
+    s = prep()
+    for j, (x, y) in enumerate(((10.0, 20.0), (-30.0, 5.5), (0.0, 0.0),
+                                (74.0, 0.0))):
+        s += ["wpos|%d|%s|%s" % (j, H(x), H(y)), "cf|%d|z|%s" % (j, H(0.0)),
+              "cf|%d|fwd|%s" % (j, H(4.5)), "cf|%d|vx|%s" % (j, H(3.0)),
+              "cf|%d|vy|%s" % (j, H(4.0)), "cf|%d|ang|0" % j,
+              "coll|%d|0" % j]
+    s += ["wcount|4|4", "distq", "g|reqp|0", "front|clear", "pidx|-1",
+          "plist", "prb|0|-1", "prb|1|-1", "af|0|rbi|0"]
+    for j in range(8):
+        s += ["pull|%d|0" % j, "ptimer|%d|0" % j]
+    return s
+
+
+def logic_script():
+    """12g-2: Teleport, SetSpeedTrap and SetRoadBlock, IsValidPursuitTarget
+    and CanPatrollerSeeThisCar, the radar trap's, roadblock's and patrol's
+    logic, and coputil's CanTeleport and CarCausedRecentCollision. AI cop 0
+    drives world car A1 at (-30, 5.5), as in think_script; car indices
+    0, 3, 5 and 7."""
+    rnd = random.Random(1222)
+    s = types() + fresh()
+    s += ["wcar|0|0|%s|%s|1|2" % (F(10.0), F(20.0)),
+          "wcar|1|3|%s|%s|0|0" % (F(-30.0), F(5.5)),
+          "wcar|2|5|%s|%s|0|1" % (F(0.0), F(0.0)),
+          "wcar|3|7|%s|%s|1|3" % (F(74.0), F(0.0))]
+    s += traps([(1.0, 2.0, 0, 0), (-30.0, 5.5, 100, 4),
+                (-30.0, 5.5, 65436, 0), (0.0, 0.0, 0, 0)])
+    s += ["acop|0|0|4", "mycar|0|1", "rig|0", "rig|1", "rig|2", "rig|3",
+          "pursuit|0|2", "pursuit|1|0", "pursuit|2|1", "pursuit|3|-1"]
+    for q, (num, cnt, link, start, hd) in enumerate((
+            (5, 12, 1, (-40.0, 5.0), 0.0),
+            (9, 30, -1, (130.0, 5.0), 10.0),
+            (200, 3, 2, (-50.0, 40.0), 95.0))):
+        s.append("qroute|%d|%d|%d|%d" % (q, num, cnt, link))
+        pts, _ = route_points(rnd, cnt, start, hd)
+        for i, w in enumerate(pts):
+            s.append("qpt|%d|%d|%s" % (q, i, "|".join(w)))
+    s += ["carq|1|0|2", "nearq|1|0|1"]
+    s += ["rbspot|5|0|%s|%s|0" % (H(-30.0), H(5.5)),
+          "rbspot|5|1|%s|%s|40000" % (H(-25.0), H(9.0)),
+          "rbspot|6|0|%s|%s|65535" % (H(-30.01), H(5.5)),
+          "rbspot|6|1|%s|%s|32768" % (H(1000.0), H(-1000.0))]
+
+    # ---- Teleport, SetSpeedTrap, SetRoadBlock
+    for x, y, ang in ((1.5, -2.25, 0), (-30.0, 5.5, 65535),
+                      (1e10, -1e10, 32768), (NAN, -0.0, 12345)):
+        s += lprep() + ["tele|0|%s|%s|%d" % (H(x), H(y), ang), "tdump|0"]
+    s += lprep() + ["mycar|0|-1", "tele|0|%s|%s|7" % (H(1.0), H(2.0)),
+                    "mycar|0|1"]
+    for t in (0, 1, 2):
+        s += lprep() + ["strap|0|-1", "settrap|0|%d" % t, "tdump|0", "dump"]
+    for r, k, i in ((5, 0, 0), (5, 1, 1), (6, -1, 1), (6, 3, 0)):
+        s += lprep() + ["setp|0|-1", "setrb|0|%d|%d|%d" % (r, k, i),
+                        "tdump|0"]
+
+    # ---- IsValidPursuitTarget
+    base = 80.0 / 2.237
+    for j in range(4):
+        for b in (0, 1, 2, -1):
+            for fwd in (0.0, base, ulps(base, 1), ulps(base, -1), -base,
+                        -ulps(base, 1), 100.0, -100.0, NAN, 1e20):
+                s += lprep() + ["cf|%d|fwd|%s" % (j, H(fwd)),
+                                "valid|0|%d|%d" % (j, b)]
+        # Pulled over, or its pursuable timer running.
+        idx = (0, 3, 5, 7)[j]
+        for pull in (1, 0x100, -1):
+            s += lprep() + ["pull|%d|%d" % (idx, pull & M32),
+                            "cf|%d|fwd|%s" % (j, H(100.0)),
+                            "valid|0|%d|1" % j]
+        for t in (1.0, 1e-30, 0.0, -0.0, -1.0, NAN, INF):
+            s += lprep() + ["ptimer|%d|%s" % (idx, H(t)),
+                            "cf|%d|fwd|%s" % (j, H(100.0)),
+                            "valid|0|%d|1" % j]
+        # Chased already.
+        for pl in (["plist|0"], ["plist|1"], ["plist|0|1|2"],
+                   ["plist|3|2"], ["plist|1|3"]):
+            for b in (0, 1):
+                s += lprep() + pl + ["cf|%d|fwd|%s" % (j, H(1.0)),
+                                     "valid|0|%d|%d" % (j, b)]
+    # The player cop's own car, and no cop at its index.
+    s += lprep() + ["pcop|2|9|0"]
+    for pidx in (2, 5, -1, 0):
+        for j in (0, 1):
+            s += ["pidx|%d" % pidx, "cf|%d|fwd|%s" % (j, H(100.0)),
+                  "valid|0|%d|1" % j]
+    s += ["dtor|2|0"]
+    s += lprep() + ["pcop|2|9|0", "mycar|2|-1", "pidx|2", "valid|0|1|1",
+                    "valid|0|0|1", "dtor|2|0"]
+    # A collision it caused: yes at once, past the pullover tests.
+    s += lprep() + ["coll|0|1|1:0:2", "cf|2|fwd|%s" % H(0.0),
+                    "cf|0|fwd|%s" % H(0.0), "valid|0|0|0", "valid|0|0|1",
+                    "pull|0|1", "valid|0|0|1"]
+
+    # ---- CarCausedRecentCollision
+    colls = [
+        ["0"], ["1", "0:1:2"], ["1", "1:1:2"], ["1", "1:2:1"],
+        ["1", "1:1:-1"], ["1", "1:-1:1"], ["1", "1:1:1"],
+        ["2", "1:1:-1", "1:1:2"], ["3", "0:1:2", "1:1:2", "1:3:1"],
+        ["2", "1:1:3", "1:1:2", "1:1:0"], ["-1", "1:1:2"],
+        ["8"] + ["1:1:%d" % (k % 4) for k in range(8)],
+        ["4", "1:0:1", "0:1:3", "1:1:3", "1:2:1"]]
+    for c in colls:
+        for o_fwd, my_fwd, front in ((0.0, 4.5, 0), (-0.0, 4.5, 0),
+                                     (3.0, 4.5, 1), (3.0, 4.5, 0),
+                                     (4.5, 4.5, 1), (ulps(4.5, -1), 4.5, 1),
+                                     (-1.0, 4.5, 1), (NAN, 4.5, 1),
+                                     (3.0, NAN, 1), (1e-30, 0.0, 1),
+                                     (-1e-30, 4.5, 1)):
+            s += lprep() + ["coll|1|%s" % "|".join(c)]
+            for k in (0, 2, 3):
+                s += ["cf|%d|fwd|%s" % (k, H(o_fwd)),
+                      "front|1|%d|%d" % (k, front)]
+            s += ["cf|1|fwd|%s" % H(my_fwd), "caused|1"]
+    # Ahead, but only one of them.
+    s += lprep() + ["coll|1|3|1:1:0|1:1:2|1:3:1", "cf|0|fwd|%s" % H(3.0),
+                    "cf|2|fwd|%s" % H(3.0), "cf|3|fwd|%s" % H(3.0),
+                    "front|1|3|1", "caused|1", "front|1|2|1", "caused|1",
+                    "front|1|0|1", "caused|1", "caused|0", "caused|2"]
+
+    # ---- CanPatrollerSeeThisCar: car A2 off cop car A1 at (-30, 5.5)
+    for dx, dy in ((20.0, 0.0), (ulps(20.0, -1), 0.0), (ulps(20.0, 1), 0.0),
+                   (49.99, 0.0), (50.0, 0.0), (ulps(50.0, -1), 0.0),
+                   (-20.0, 0.0), (0.0, 0.0), (12.0, 16.0), (16.0, 12.0),
+                   (35.0, 35.0), (35.4, 35.4), (-30.0, 30.0), (0.0, 25.0),
+                   (NAN, 0.0)):
+        for vx, vy in ((1.0, 0.0), (0.0, 0.0), (-1.0, 0.0), (0.6, 0.8),
+                       (0.8, 0.6), (30.0, 40.0), (0.0, 1.0), (NAN, 1.0),
+                       (1e18, 1e18), (-0.0, -0.0), (3.0, -4.0)):
+            s += lprep() + ["wpos|2|%s|%s" % (H(-30.0 + dx), H(5.5 + dy)),
+                            "cf|2|vx|%s" % H(vx), "cf|2|vy|%s" % H(vy),
+                            "see|0|2"]
+
+    # ---- CanTeleport, car A1 to a spot: both players far, and no car
+    # within 15 m of it (itself not counted)
+    for dq in ((300.0, 300.0), (100.0, 300.0), (300.0, 100.0),
+               (250.0, 250.0), (ulps(250.0, -1), 300.0),
+               (300.0, ulps(250.0, -1)), (NAN, NAN), (INF, 300.0)):
+        s += lprep() + ["distq|%s|%s" % (H(dq[0]), H(dq[1])),
+                        "canteleport|1|%s|%s" % (H(1.0), H(2.0))]
+    for x, y in ((-15.0, 5.5), (-15.01, 5.5), (ulps(-15.0, 1), 5.5),
+                 (-30.0, 20.5), (-30.0, 20.6), (-39.0, 17.5),
+                 (-41.0, 16.5)):
+        for total in (0, 1, 2, 3, 4, -1):
+            s += lprep() + ["wpos|2|%s|%s" % (H(x), H(y)),
+                            "wcount|%d|4" % total,
+                            "distq|%s|%s" % (H(300.0), H(300.0)),
+                            "canteleport|1|%s|%s" % (H(-15.0), H(5.5))]
+    s += lprep() + ["wpos|0|%s|%s" % (H(-30.0), H(5.5)),
+                    "distq|%s|%s" % (H(300.0), H(300.0)),
+                    "canteleport|1|%s|%s" % (H(0.0), H(0.0))]
+
+    # ---- InitSpeedTrapLogic and InitRoadBlockLogic
+    for op in ("listrap", "liroad"):
+        for pu in (-1, 0):
+            s += lprep() + ["setp|0|%d" % pu, "af|0|lss|5",
+                            "af|0|sst|%s" % H(2.5), "%s|0" % op, "tdump|0"]
+
+    # ---- DoSpeedTrapLogic
+    # The timer and the players: no distance asked while it runs.
+    for sst in (1.0, 0.0, -0.0, -1.0, NAN, 1e-30):
+        for dist in (100.0, 250.0, ulps(250.0, -1), NAN, 300.0):
+            s += lprep() + ["strap|0|1", "af|0|ls|3", "af|0|ds|3",
+                            "af|0|sst|%s" % H(sst), "g|dist|%s" % H(dist),
+                            "lstrap|0", "tdump|0"]
+    # Off its spot: 1 cm, 100 BAM, and CanTeleport's answer.
+    for dx, ang in ((0.0, 0), (0.01, 0), (ulps(0.01, 1), 0),
+                    (ulps(0.01, -1), 0), (-0.01, 0), (-0.0101, 0),
+                    (0.0, 100), (0.0, 0xffff), (0.0, 65535 - 100),
+                    (0.0, 0x8000), (0.0, 0x7fff), (5.0, 50), (0.0, 150),
+                    (0.0, 50), (NAN, 0)):
+        for t in (1, 2):
+            for dq in ((300.0, 300.0), (300.0, 10.0)):
+                s += lprep() + ["strap|0|%d" % t, "af|0|ls|3",
+                                "af|0|ds|3", "af|0|sst|%s" % H(1.0),
+                                "wpos|1|%s|%s" % (H(-30.0 + dx), H(5.5)),
+                                "cf|1|ang|%x" % ang,
+                                "distq|%s|%s" % (H(dq[0]), H(dq[1])),
+                                "lstrap|0", "tdump|0"]
+    s += lprep() + ["strap|0|0", "af|0|sst|%s" % H(1.0),
+                    "distq|%s|%s" % (H(300.0), H(300.0)), "lstrap|0",
+                    "tdump|0"]
+    # Exactly 1 cm off trap 3 at the origin, and either side.
+    for x in (0.01, -0.01, ulps(0.01, 1), ulps(0.01, -1), 0.0):
+        for y in (0.0, 0.01):
+            s += lprep() + ["strap|0|3", "af|0|sst|%s" % H(1.0),
+                            "wpos|1|%s|%s" % (H(x), H(y)),
+                            "distq|%s|%s" % (H(300.0), H(300.0)),
+                            "lstrap|0", "tdump|0"]
+    # The search: 45 m in x and y, 2.5 m in z, the target test and the
+    # manager's answer.
+    for x, y, z in ((-10.0, 5.5, 0.0), (15.0, 5.5, 0.0),
+                    (ulps(15.0, -1), 5.5, 0.0), (-30.0, 50.5, 0.0),
+                    (-30.0, 50.4, 0.0), (-10.0, 5.5, 2.5),
+                    (-10.0, 5.5, ulps(2.5, -1)), (-10.0, 5.5, -2.4),
+                    (-10.0, 5.5, -3.0), (-10.0, 5.5, NAN),
+                    (NAN, 5.5, 0.0)):
+        for fwd in (100.0, 1.0):
+            for reqp in (0, 1):
+                s += lprep() + ["strap|0|1", "af|0|ls|3", "af|0|ds|3",
+                                "af|0|sst|%s" % H(1.0), "cf|1|ang|64",
+                                "wpos|2|%s|%s" % (H(x), H(y)),
+                                "cf|2|z|%s" % H(z),
+                                "cf|2|fwd|%s" % H(fwd),
+                                "g|reqp|%d" % reqp, "lstrap|0", "tdump|0"]
+    # The count, read once; its own car is in the table too.
+    for coppos in (0, 1, 2, 3, 4, -1):
+        s += lprep() + ["strap|0|1", "af|0|ls|3", "af|0|ds|3",
+                        "af|0|sst|%s" % H(1.0), "cf|1|ang|64",
+                        "wpos|0|%s|%s" % (H(-20.0), H(5.5)),
+                        "wpos|2|%s|%s" % (H(-10.0), H(5.5)),
+                        "wpos|3|%s|%s" % (H(-30.0), H(6.0)),
+                        "cf|0|fwd|%s" % H(100.0), "cf|1|fwd|%s" % H(100.0),
+                        "cf|2|fwd|%s" % H(100.0), "cf|3|fwd|%s" % H(100.0),
+                        "wcount|4|%d" % coppos, "g|reqp|1",
+                        "lstrap|0", "tdump|0"]
+
+    # ---- DoRoadBlockLogic
+    for pu, rb in ((-1, -1), (0, -1), (0, 5), (1, 6), (2, 5)):
+        for rbi in (0, 1):
+            for dx, ang in ((0.0, 0), (0.02, 0), (0.0, 0x9c40),
+                            (5.0, 0x9c40), (-0.01, 0xffff)):
+                for dq in ((300.0, 300.0), (10.0, 300.0)):
+                    s += lprep() + ["setp|0|%d" % pu, "prb|0|5",
+                                    "prb|1|6", "prb|2|-1",
+                                    "prb|%d|%d" % (max(pu, 0), rb),
+                                    "af|0|rbi|%d" % rbi, "af|0|ls|4",
+                                    "af|0|ds|4", "af|0|n32|%s" % H(0.5),
+                                    "wpos|1|%s|%s" % (H(-30.0 + dx),
+                                                      H(5.5)),
+                                    "cf|1|ang|%x" % ang,
+                                    "distq|%s|%s" % (H(dq[0]), H(dq[1])),
+                                    "lroad|0", "tdump|0"]
+
+    # ---- DoDrivingOnPatrolLogic
+    for dist in (100.0, ulps(250.0, -1), 250.0, NAN):
+        s += lprep() + ["af|0|ds|5", "af|0|dlx|%s" % H(1.5),
+                        "af|0|dly|%s" % H(-2.5),
+                        "af|0|n48x|%s" % H(0.75), "af|0|n48y|%s" % H(-1.0),
+                        "rinfo|0|0|1", "nearq|1|0|1",
+                        "g|dist|%s" % H(dist), "lpatrol|0", "tdump|0"]
+    # Who it sees: ahead and going away, or not; fast or slow.
+    for x, y, vx, vy, fwd in ((-5.0, 5.5, 1.0, 0.0, 1.0),
+                              (-5.0, 5.5, -1.0, 0.0, 1.0),
+                              (-5.0, 5.5, 1.0, 0.0, 100.0),
+                              (-5.0, 5.5, -1.0, 0.0, 100.0),
+                              (-15.0, 5.5, 1.0, 0.0, 1.0),
+                              (-50.0, 5.5, -1.0, 0.0, 1.0),
+                              (-30.0, 30.0, 0.0, 1.0, 1.0),
+                              (-30.0, 30.0, 0.0, 0.0, 1.0)):
+        for reqp in (0, 1):
+            for pl in ([], ["plist|1"]):
+                s += lprep() + pl + ["rinfo|0|0|1", "nearq|1|0|1",
+                                     "pursuit|1|2",
+                                     "wpos|2|%s|%s" % (H(x), H(y)),
+                                     "cf|2|vx|%s" % H(vx),
+                                     "cf|2|vy|%s" % H(vy),
+                                     "cf|2|fwd|%s" % H(fwd),
+                                     "g|reqp|%d" % reqp, "lpatrol|0",
+                                     "tdump|0", "pursuit|1|0"]
+
+    # ---- through Think: into each and on
+    for st, extra in ((3, ["strap|0|1"]), (4, ["setp|0|0", "prb|0|5"]),
+                      (5, ["rinfo|0|0|1", "nearq|1|0|1"])):
+        for ls in (1, st):
+            s += lprep() + extra + ["af|0|ls|%d" % ls, "af|0|ds|%d" % st,
+                                    "g|reqp|1", "cf|2|fwd|%s" % H(100.0),
+                                    "wpos|2|%s|%s" % (H(-10.0), H(5.5)),
+                                    "think|0", "tdump|0", "think|0",
+                                    "tdump|0"]
+
+    # ---- at random
+    for run in range(300):
+        s += lprep()
+        st = rnd.choice((3, 4, 5))
+        s += ["af|0|ls|%d" % rnd.choice((st, st, 1)), "af|0|ds|%d" % st,
+              "strap|0|%d" % rnd.choice((0, 1, 2)),
+              "setp|0|%d" % rnd.choice((-1, 0, 1, 2)),
+              "prb|0|%d" % rnd.choice((-1, 5, 6)),
+              "prb|1|%d" % rnd.choice((-1, 5, 6)),
+              "prb|2|%d" % rnd.choice((-1, 5, 6)),
+              "af|0|rbi|%d" % rnd.choice((0, 1)),
+              "rinfo|0|0|%d" % rnd.randrange(4), "nearq|1|0|1",
+              "af|0|sst|%s" % H(rnd.choice((0.0, rnd.uniform(-1.0, 3.0)))),
+              "g|dist|%s" % H(rnd.uniform(150.0, 350.0)),
+              "g|reqp|%d" % rnd.choice((0, 1)),
+              "cf|1|ang|%x" % rnd.choice((0, 64, 100, 0x9c40, 0xffff,
+                                          rnd.randrange(0x10000))),
+              "wpos|1|%s|%s" % (H(rnd.choice((-30.0, -25.0,
+                                              rnd.uniform(-40.0, -20.0)))),
+                                H(rnd.choice((5.5, 9.0,
+                                              rnd.uniform(0.0, 10.0)))))]
+        if rnd.random() < 0.5:
+            s += ["distq|%s|%s" % (H(rnd.choice((300.0, 100.0))),
+                                   H(rnd.choice((300.0, 100.0))))]
+        for j in (0, 2, 3):
+            s += ["wpos|%d|%s|%s" % (j, H(rnd.uniform(-80.0, 20.0)),
+                                     H(rnd.uniform(-20.0, 30.0))),
+                  "cf|%d|z|%s" % (j, H(rnd.choice((0.0, 1.0, 3.0)))),
+                  "cf|%d|fwd|%s" % (j, H(rnd.choice((1.0, 40.0, -40.0)))),
+                  "cf|%d|vx|%s" % (j, H(rnd.uniform(-30.0, 30.0))),
+                  "cf|%d|vy|%s" % (j, H(rnd.uniform(-30.0, 30.0)))]
+        if rnd.random() < 0.3:
+            s += ["plist|%d" % rnd.choice((0, 1, 2))]
+        if rnd.random() < 0.3:
+            k = rnd.choice((0, 2, 3))
+            s += ["coll|%d|1|1:%d:%d" % (k, k, rnd.choice((0, 1, 2, 3))),
+                  "front|%d|%d|1" % (k, rnd.choice((0, 1, 2, 3)))]
+        if rnd.random() < 0.2:
+            s += ["ptimer|%d|%s" % (rnd.choice((0, 5, 7)), H(1.0))]
         for _ in range(rnd.randrange(1, 4)):
             s += ["think|0", "tdump|0"]
     return s
@@ -835,6 +1174,9 @@ def script():
 
     # ---- Think
     s += think_script()
+
+    # ---- the radar traps, roadblocks and patrols
+    s += logic_script()
     return s
 
 
@@ -877,7 +1219,20 @@ class Model(object):
                          for _ in range(NPURSUITS)]
         for k, p in enumerate(self.pursuits):
             e.write(p, b"\xcd" * PURSUIT_SIZE)
+            e.put32(p + 20, 0)
             self.names[p] = "U%d" % k
+        e.write(self.world, bytes(128))
+        self.distq = []
+        self.reqp = 0
+        self.cbs = {}
+        self.colls = [[] for _ in range(NCARS)]
+        self.coltok = {}
+        for j in range(NCARS):
+            for i in range(NCOLS):
+                t = e.alloc(16, align=16)
+                self.coltok[t] = (j, i)
+                self.names[t] = "X%d" % (10 * j + i)
+        self.front = {}
         self.drivers = []
         for k, c in enumerate(self.cars):
             d = self.block(DRIVER_SIZE)
@@ -911,7 +1266,9 @@ class Model(object):
                       (S_COLLOFF, self.s_colloff),
                       (S_EBRAKE, self.s_ebrake), (S_DIST, self.s_dist),
                       (S_REPAIR, self.s_repair), (S_PTHINK, self.s_pthink),
-                      (S_NDSPEED, self.s_ndspeed)):
+                      (S_NDSPEED, self.s_ndspeed), (S_REQP, self.s_reqp),
+                      (S_GETCOL, self.s_getcol), (S_TWOCAR, self.s_twocar),
+                      (S_CARS, self.s_cars), (S_INFRONT, self.s_infront)):
             e.stub(a, fn)
         for a, n in LOGIC:
             e.stub(a, lambda em, n=n: self.emit(
@@ -1052,9 +1409,52 @@ class Model(object):
     def s_dist(self, em):
         e = self.e
         pos = em.reg[5] & M32
+        r = self.distq.pop(0) if self.distq else self.dist
         self.emit("  dist %s %08x %08x -> %08x" % (
-            self.sym(em.reg[4]), e.u32(pos), e.u32(pos + 4), self.dist))
-        em.fpr[0] = self.dist
+            self.sym(em.reg[4]), e.u32(pos), e.u32(pos + 4), r))
+        em.fpr[0] = r
+
+    def s_reqp(self, em):
+        self.emit("  reqp %s %s %s -> %d" % (
+            self.sym(em.reg[4]), self.sym(em.reg[5]), self.sym(em.reg[6]),
+            s32(self.reqp)))
+        return self.reqp
+
+    def car_or_0(self, k):
+        return self.cars[k] if k >= 0 else 0
+
+    def s_getcol(self, em):
+        body, i = em.reg[4] & M32, s32(em.reg[5])
+        j = self.cbs.get(body, -1)
+        r = 0
+        if j >= 0 and 0 <= i < NCOLS:
+            r = [t for t, ji in self.coltok.items() if ji == (j, i)][0]
+        self.emit("  getcol %s %d -> %s" % (self.sym(body), i, self.sym(r)))
+        return r
+
+    def coll(self, col):
+        j, i = self.coltok[col & M32]
+        lst = self.colls[j]
+        return lst[i] if i < len(lst) else (0, -1, -1)
+
+    def s_twocar(self, em):
+        two = self.coll(em.reg[4])[0]
+        self.emit("  twocar %s -> %d" % (self.sym(em.reg[4]), two))
+        return two
+
+    def s_cars(self, em):
+        _, a, b = self.coll(em.reg[4])
+        self.e.put32(em.reg[5] & M32, self.car_or_0(a))
+        self.e.put32(em.reg[6] & M32, self.car_or_0(b))
+        self.emit("  cars %s -> %s %s" % (
+            self.sym(em.reg[4]), self.sym(self.car_or_0(a)),
+            self.sym(self.car_or_0(b))))
+
+    def s_infront(self, em):
+        r = self.front.get((self.car_k(em.reg[4]), self.car_k(em.reg[5])), 0)
+        self.emit("  infront %s %s %d -> %d" % (
+            self.sym(em.reg[4]), self.sym(em.reg[5]), em.reg[6] & 0xffff, r))
+        return r
 
     def s_repair(self, em):
         self.emit("  repair %s" % self.sym(em.reg[4]))
@@ -1224,9 +1624,10 @@ class Model(object):
         c = self.cop(k)
         u = lambda off: e.u32(c + off)                    # noqa: E731
         o("T%d cop ls %08x %08x lss %08x %08x n32 %08x sst %08x n48 %08x "
-          "%08x n64 %08x %08x phys %08x delay %08x pu %s st %s"
+          "%08x n64 %08x %08x phys %08x delay %08x pu %s st %s rbi %08x"
           % (k, u(12), u(16), u(20), u(24), u(32), u(44), u(48), u(52),
-             u(64), u(68), u(84), u(88), self.sym(u(0)), self.sym(u(36))))
+             u(64), u(68), u(84), u(88), self.sym(u(0)), self.sym(u(36)),
+             u(40)))
         car = u(4)
         w = lambda off: e.u32(car + off)                  # noqa: E731
         idx = s16(e.u16(car + CAR_INDEX))
@@ -1295,6 +1696,12 @@ class Model(object):
         elif o == "mgr":
             m = self.m = self.block(MGR_SIZE)
             self.names[m] = "MG"
+            # The pursuit list empty, no pullovers, no pursuable timers.
+            e.put32(m + 44, m + 44)
+            e.put32(m + 48, m + 44)
+            for j in range(8):
+                e.put32(m + 100 + 28 * j, 0)
+                e.put32(m + 10356 + 4 * j, 0)
             e.put32(m + 4, 0)
             e.put32(m + 8, 0)
             e.put32(m + 12, M32)
@@ -1467,6 +1874,7 @@ class Model(object):
             self.names[k] = "KJ%d" % j
             self.names[mv] = "MV%d" % j
             self.names[cb] = "CB%d" % j
+            self.cbs[cb] = j
             e.put32(mv + MOVER_AIRBORNE, 0)
             e.put32(car + CAR_CTRL, k)
             e.put32(car + CAR_MOVER, mv)
@@ -1498,6 +1906,8 @@ class Model(object):
                 e.put32(G_WTE, x)
             elif a[1] == "camf":
                 e.put32(G_CAMF, x)
+            elif a[1] == "reqp":
+                self.reqp = x
             else:
                 self.dist = x
         elif o == "mdmg":
@@ -1513,6 +1923,84 @@ class Model(object):
             self.emit("mmt %s" % a[1])
         elif o == "tdump":
             self.tdump(int(a[1]))
+        elif o == "wcount":
+            e.put32(self.world + 28, v(1))
+            e.put32(self.world + 36, v(2))
+        elif o == "distq":
+            self.distq = [int(x, 16) for x in a[1:]]
+        elif o == "coll":
+            j = int(a[1])
+            e.write(e.u32(self.cars[j] + CAR_BODY) + 18,
+                    bytes([int(a[2]) & 0xff]))
+            self.colls[j] = [tuple(int(x) for x in t.split(":"))
+                             for t in a[3:]]
+        elif o == "front":
+            if a[1] == "clear":
+                self.front = {}
+            else:
+                self.front[(int(a[1]), int(a[2]))] = int(a[3])
+        elif o == "pidx":
+            e.put32(self.m + 12, v(1))
+        elif o == "pull":
+            e.put32(self.m + 100 + 28 * int(a[1]), v(2))
+        elif o == "ptimer":
+            e.put32(self.m + 10356 + 4 * int(a[1]), int(a[2], 16))
+        elif o == "plist":
+            head = self.m + 44
+            prev = head
+            for t in a[1:]:
+                pu = self.pursuits[int(t)]
+                e.put32(prev, pu)
+                e.put32(pu + 4, prev)
+                prev = pu
+            e.put32(prev, head)
+            e.put32(head + 4, prev)
+        elif o == "prb":
+            r = int(a[2])
+            e.put32(self.pursuits[int(a[1])] + 20,
+                    self.m + 320 + 120 * r if r >= 0 else 0)
+        elif o == "rbspot":
+            rb = self.m + 320 + 120 * int(a[1])
+            i = int(a[2])
+            e.put32(rb + 8 + 8 * i, int(a[3], 16))
+            e.put32(rb + 12 + 8 * i, int(a[4], 16))
+            e.write(rb + 24 + 2 * i, struct.pack("<H", int(a[5]) & 0xffff))
+        elif o == "tele":
+            e.put32(self.dtpos, int(a[2], 16))
+            e.put32(self.dtpos + 4, int(a[3], 16))
+            e.call(F_TELE, self.cop(int(a[1])), self.dtpos, v(4))
+            self.emit("tele %s" % a[1])
+        elif o == "settrap":
+            e.call(F_SETTRAP, self.cop(int(a[1])),
+                   self.m + 8260 + 28 * int(a[2]))
+            self.emit("settrap %s %s" % (a[1], a[2]))
+        elif o == "setrb":
+            k = int(a[3])
+            e.call(F_SETRB, self.cop(int(a[1])),
+                   self.m + 320 + 120 * int(a[2]),
+                   self.pursuits[k] if k >= 0 else 0, v(4))
+            self.emit("setrb %s %s %s %s" % (a[1], a[2], a[3], a[4]))
+        elif o == "valid":
+            r = e.call(F_VALID, self.cop(int(a[1])), self.cars[int(a[2])],
+                       v(3), limit=200000)
+            self.emit("valid %s %s %s -> %d" % (a[1], a[2], a[3], r & 0xff))
+        elif o == "see":
+            r = e.call(F_SEE, self.cop(int(a[1])), self.cars[int(a[2])])
+            self.emit("see %s %s -> %d" % (a[1], a[2], s32(r)))
+        elif o in ("listrap", "liroad", "lstrap", "lroad", "lpatrol"):
+            f = {"listrap": F_ISTRAP, "liroad": F_IROAD, "lstrap": F_STRAP,
+                 "lroad": F_ROAD, "lpatrol": F_PATROL}[o]
+            e.call(f, self.cop(int(a[1])), limit=2000000)
+            self.emit("%s %s" % (o, a[1]))
+        elif o == "canteleport":
+            e.put32(self.dtpos, int(a[2], 16))
+            e.put32(self.dtpos + 4, int(a[3], 16))
+            r = e.call(F_CANTELE, self.cars[int(a[1])], self.dtpos,
+                       limit=200000)
+            self.emit("canteleport %s -> %d" % (a[1], s32(r)))
+        elif o == "caused":
+            r = e.call(F_CAUSED, self.cars[int(a[1])], limit=200000)
+            self.emit("caused %s -> %s" % (a[1], self.sym(r)))
         elif o == "new":
             self.emit("new -> %s" % self.sym(e.call(F_NEW)))
         elif o == "del":
@@ -1565,7 +2053,311 @@ def write_script(d, lines):
 # ============================================================= mutations
 
 C, M = COP, COPMGR
+CU = "3DS Files/source/coputil.c"
 MUTATIONS = [
+    # ---- 12g-2: Teleport, SetSpeedTrap, SetRoadBlock
+    ("tele_no_null", C,
+     "    if (car == NULL)\n        return;\n    car_set_movement_mode(car, COP_MOVEMENT);",
+     "    car_set_movement_mode(car, COP_MOVEMENT);"),
+    ("tele_no_mode", C,
+     "    car_set_movement_mode(car, COP_MOVEMENT);\n    // Retail's stack",
+     "    // Retail's stack"),
+    ("tele_mellow", C,
+     "    car_set_movement_mode(car, COP_MOVEMENT);\n    // Retail's stack",
+     "    car_set_movement_mode(car, MELLOW_MOVEMENT);\n    // Retail's stack"),
+    ("tele_xy_swap", C, "    v.x = pos->x;\n    v.y = pos->y;\n",
+     "    v.x = pos->y;\n    v.y = pos->x;\n"),
+    ("tele_z", C, "    v.z = 0.0f;\n    car_reset_to_position",
+     "    v.z = pos->y;\n    car_reset_to_position"),
+    ("tele_speed", C, "car_reset_to_position(car, &v, 0.0f, ang);",
+     "car_reset_to_position(car, &v, 1.0f, ang);"),
+    ("settrap_no_ptr", C,
+     "    c->pMySpeedTrap = t;\n    t->cop = &c->Base;\n",
+     "    t->cop = &c->Base;\n"),
+    ("settrap_no_cop", C,
+     "    t->cop = &c->Base;\n    taicop_teleport(c, &t->v2Position",
+     "    taicop_teleport(c, &t->v2Position"),
+    ("settrap_no_tele", C,
+     "    taicop_teleport(c, &t->v2Position, t->ang);\n", ""),
+    ("settrap_state", C,
+     "    tcop_set_desired_logic_state(&c->Base, LS_SPEED_TRAP);\n}",
+     "    tcop_set_desired_logic_state(&c->Base, LS_ROAD_BLOCK);\n}"),
+    ("setrb_no_pursuit", C,
+     "    tcop_set_pursuit(&c->Base, p);\n    c->nMyRoadBlockIndex = i;\n",
+     "    c->nMyRoadBlockIndex = i;\n"),
+    ("setrb_no_index", C,
+     "    c->nMyRoadBlockIndex = i;\n    taicop_teleport(c, &rb->CopPos[i]",
+     "    taicop_teleport(c, &rb->CopPos[i]"),
+    ("setrb_spot0", C,
+     "    taicop_teleport(c, &rb->CopPos[i], rb->CopAng[i]);\n    tcop_set",
+     "    taicop_teleport(c, &rb->CopPos[0], rb->CopAng[i]);\n    tcop_set"),
+    ("setrb_ang0", C,
+     "    taicop_teleport(c, &rb->CopPos[i], rb->CopAng[i]);\n    tcop_set",
+     "    taicop_teleport(c, &rb->CopPos[i], rb->CopAng[0]);\n    tcop_set"),
+    ("setrb_state", C,
+     "    tcop_set_desired_logic_state(&c->Base, LS_ROAD_BLOCK);\n}",
+     "    tcop_set_desired_logic_state(&c->Base, LS_GUARD_LOCATION);\n}"),
+
+    # ---- IsValidPursuitTarget
+    ("valid_no_player", C, "    if (car == pcar)\n        return 0;\n", ""),
+    ("valid_player_nonnull", C,
+     " && m->Cops[m->nPlayerCopIndex] != NULL)\n        pcar", ")\n        pcar"),
+    ("valid_no_pull", C, "    if (pl[idx].bActive != 0)\n        return 0;\n",
+     ""),
+    ("valid_pull_byte", C, "    if (pl[idx].bActive != 0)",
+     "    if ((pl[idx].bActive & 0xff) != 0)"),
+    ("valid_timer_le", C, "    if (0.0f < m->fPursuableTimer[idx])",
+     "    if (0.0f <= m->fPursuableTimer[idx])"),
+    ("valid_timer_ne", C, "    if (0.0f < m->fPursuableTimer[idx])",
+     "    if (m->fPursuableTimer[idx] != 0.0f)"),
+    ("valid_no_coll", C,
+     "    if (car_caused_recent_collision(car) != NULL)\n        return 1;\n",
+     ""),
+    ("valid_coll_0", C,
+     "    if (car_caused_recent_collision(car) != NULL)\n        return 1;\n",
+     "    if (car_caused_recent_collision(car) != NULL)\n        return 0;\n"),
+    ("valid_no_b", C, "    if (!b)\n        return 0;\n", ""),
+    ("valid_fast_le", C, "    if (COP_FAST_MPH < fabsf(",
+     "    if (COP_FAST_MPH <= fabsf("),
+    ("valid_fast_noabs", C,
+     "fabsf(car->State.ForwardSpeed * COP_MPS_TO_MPH)",
+     "(car->State.ForwardSpeed * COP_MPS_TO_MPH)"),
+    ("valid_fast_0", C, "COP_MPS_TO_MPH))\n        return 1;",
+     "COP_MPS_TO_MPH))\n        return 0;"),
+    ("valid_no_pursued", C,
+     "    return copmanager_is_being_pursued(m, car) != NULL;",
+     "    return 0;"),
+    ("valid_pursued_1", C,
+     "    return copmanager_is_being_pursued(m, car) != NULL;",
+     "    return 1;"),
+
+    # ---- CanPatrollerSeeThisCar
+    ("see_range_le", C, "    if (!(sqrtf(dx * dx + dy * dy) < COP_SIGHT_RANGE))",
+     "    if (!(sqrtf(dx * dx + dy * dy) <= COP_SIGHT_RANGE))"),
+    ("see_still_1", C, "    if (!(0.0f < s))\n        return 0;",
+     "    if (!(0.0f < s))\n        return 1;"),
+    ("see_ahead_lt", C, "COP_SIGHT_AHEAD <= vx", "COP_SIGHT_AHEAD < vx"),
+    ("see_dot_x", C, "vx * inv * dx + vy * inv * dy", "vx * inv * dx"),
+    ("see_dot_swap", C, "vx * inv * dx + vy * inv * dy",
+     "vx * inv * dy + vy * inv * dx"),
+    ("see_no_norm", C, "vx * inv * dx + vy * inv * dy", "vx * dx + vy * dy"),
+    ("see_flip", C,
+     "    float      dy = car->State.Position.y - mine->State.Position.y;\n"
+     "    float      dx = car->State.Position.x - mine->State.Position.x;",
+     "    float      dy = mine->State.Position.y - car->State.Position.y;\n"
+     "    float      dx = mine->State.Position.x - car->State.Position.x;"),
+
+    # ---- the two Init logics
+    ("park_keep_lss", C,
+     "    c->Base.LogicSubState = LSS_NONE;\n    car->bVisibleOnTrackMap = 0;\n"
+     "    car->State.ForwardSpeed = 0.0f;\n",
+     "    car->bVisibleOnTrackMap = 0;\n    car->State.ForwardSpeed = 0.0f;\n"),
+    ("park_keep_vis", C,
+     "    car->bVisibleOnTrackMap = 0;\n    car->State.ForwardSpeed = 0.0f;\n",
+     "    car->State.ForwardSpeed = 0.0f;\n"),
+    ("park_keep_fwd", C,
+     "    car->State.ForwardSpeed = 0.0f;\n    ((CopDriver *)", "    ((CopDriver *)"),
+    ("park_patrolling", C,
+     "->State = eCDS_PARKED;\n    car->State.Velocity.x = 0.0f;",
+     "->State = eCDS_PATROLLING;\n    car->State.Velocity.x = 0.0f;"),
+    ("park_keep_vx", C, "    car->State.Velocity.x = 0.0f;\n", ""),
+    ("park_keep_vy", C, "    car->State.Velocity.y = 0.0f;\n", ""),
+    ("park_keep_vz", C, "    car->State.Velocity.z = 0.0f;\n", ""),
+    ("park_keep_vmag", C, "    car->State.VelocityMagnitude = 0.0f;\n}", "}"),
+    ("istrap_no_clear", C, "    taicop_clear_pursuit(c);\n    park(c);",
+     "    park(c);"),
+    ("istrap_timer", C, "    c->fSubStateTimer = COP_TRAP_WAIT;",
+     "    c->fSubStateTimer = 10.0f;"),
+    ("istrap_keep_mv", C,
+     "    car->State.MatrixValid = 0;\n    set_cop_lights(car, 0);",
+     "    set_cop_lights(car, 0);"),
+    ("istrap_lights", C,
+     "    set_cop_lights(car, 0);\n    car->TheSirenMode = SIREN_MODE_NONE;\n}\n\nvoid taicop_init_road",
+     "    set_cop_lights(car, 1);\n    car->TheSirenMode = SIREN_MODE_NONE;\n}\n\nvoid taicop_init_road"),
+    ("istrap_keep_siren", C,
+     "    car->TheSirenMode = SIREN_MODE_NONE;\n}\n\nvoid taicop_init_road",
+     "}\n\nvoid taicop_init_road"),
+    ("iroad_lights", C,
+     "    set_cop_lights(car, 1);\n    car->State.MatrixValid = 0;",
+     "    set_cop_lights(car, 0);\n    car->State.MatrixValid = 0;"),
+    ("iroad_keep_mv", C,
+     "    set_cop_lights(car, 1);\n    car->State.MatrixValid = 0;",
+     "    set_cop_lights(car, 1);"),
+    ("iroad_keep_siren", C,
+     "    car->TheSirenMode = SIREN_MODE_NONE;\n}\n\n// A car more", "}\n\n// A car more"),
+    ("iroad_timer", C, "    park(c);\n    car = c->Base.pMyCar;\n    set_cop_lights(car, 1);",
+     "    park(c);\n    c->fSubStateTimer = COP_TRAP_WAIT;\n    car = c->Base.pMyCar;\n"
+     "    set_cop_lights(car, 1);"),
+    ("iroad_clears", C, "    park(c);\n    car = c->Base.pMyCar;\n    set_cop_lights(car, 1);",
+     "    taicop_clear_pursuit(c);\n    park(c);\n    car = c->Base.pMyCar;\n"
+     "    set_cop_lights(car, 1);"),
+
+    # ---- back to the spot
+    ("ret_spot_le", C, "    if (!(COP_OFF_SPOT < sqrtf(", "    if (!(COP_OFF_SPOT <= sqrtf("),
+    ("ret_ang_le", C, "|| COP_OFF_HEADING < da))", "|| COP_OFF_HEADING <= da))"),
+    ("ret_and", C, "dy * dy) || COP_OFF_HEADING", "dy * dy) && COP_OFF_HEADING"),
+    ("ret_no_abs", C, "fabsf((float)(int16_t)(uint16_t)(ang - car->State.Angle))",
+     "((float)(int16_t)(uint16_t)(ang - car->State.Angle))"),
+    ("ret_unsigned", C, "fabsf((float)(int16_t)(uint16_t)(ang - car->State.Angle))",
+     "fabsf((float)(uint16_t)(ang - car->State.Angle))"),
+    ("ret_no_can", C, "    return can_teleport(car, spot);", "    return 1;"),
+    ("ret_never", C, "    return can_teleport(car, spot);", "    return 0;"),
+
+    # ---- the search
+    ("search_total", C, "    int32_t n = pCurrentWorld->CopCarPos;",
+     "    int32_t n = pCurrentWorld->TotalNumCars;"),
+    ("search_xy_le", C, "< COP_SEARCH_XY))", "<= COP_SEARCH_XY))"),
+    ("search_z_le", C, "              < COP_SEARCH_Z))", "              <= COP_SEARCH_Z))"),
+    ("search_z_noabs", C, "fabsf(o->State.Position.z - mine->State.Position.z)",
+     "(o->State.Position.z - mine->State.Position.z)"),
+    ("search_see_1", C, "        b = see ? taicop_can_patroller_see_this_car(c, o) : 1;",
+     "        b = 1;"),
+    ("search_see_0", C, "        b = see ? taicop_can_patroller_see_this_car(c, o) : 1;",
+     "        b = see ? taicop_can_patroller_see_this_car(c, o) : 0;"),
+    ("search_no_reqp", C,
+     "            && gCopManagerRequestPursuitFn != NULL\n"
+     "            && gCopManagerRequestPursuitFn(pCopManager, &c->Base, o))",
+     "            && gCopManagerRequestPursuitFn != NULL)"),
+    ("search_break", C,
+     "            tcop_set_desired_logic_state(&c->Base, LS_HOT_PURSUIT);\n    }",
+     "        {\n            tcop_set_desired_logic_state(&c->Base, LS_HOT_PURSUIT);\n"
+     "            break;\n        }\n    }"),
+    ("search_state", C,
+     "            tcop_set_desired_logic_state(&c->Base, LS_HOT_PURSUIT);\n    }",
+     "            tcop_set_desired_logic_state(&c->Base, LS_CAUGHT_SPEEDER);\n    }"),
+
+    # ---- DoSpeedTrapLogic
+    ("strap_no_hold", C,
+     "    taicop_hold_position(c);\n    if (c->fSubStateTimer <= 0.0f\n",
+     "    if (c->fSubStateTimer <= 0.0f\n"),
+    ("strap_timer_lt", C, "    if (c->fSubStateTimer <= 0.0f\n",
+     "    if (c->fSubStateTimer < 0.0f\n"),
+    ("strap_no_timer", C, "    if (c->fSubStateTimer <= 0.0f\n", "    if (1\n"),
+    ("strap_dist_le", C,
+     "&c->Base.pMyCar->State.Position) < COP_FAR_FROM_PLAYERS)) {",
+     "&c->Base.pMyCar->State.Position) <= COP_FAR_FROM_PLAYERS)) {"),
+    ("strap_no_return", C,
+     "        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);\n        return;\n    }\n    t = ",
+     "        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);\n    }\n    t = "),
+    ("strap_disabled", C,
+     "        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);\n        return;\n    }\n    t = ",
+     "        tcop_set_desired_logic_state(&c->Base, LS_DISABLED);\n        return;\n    }\n    t = "),
+    ("strap_no_tele", C,
+     "        taicop_teleport(c, &c->pMySpeedTrap->v2Position,\n"
+     "                        c->pMySpeedTrap->ang);\n", "        ;\n"),
+    ("strap_no_search", C, "    search(c, 0);\n}", "}"),
+    ("strap_search_see", C, "    search(c, 0);\n}", "    search(c, 1);\n}"),
+
+    # ---- DoRoadBlockLogic
+    ("road_no_hold", C, "    taicop_hold_position(c);\n    p = c->Base.pMyPursuit;",
+     "    p = c->Base.pMyPursuit;"),
+    ("road_no_rb_test", C, "    if (p != NULL && p->pRoadBlock != NULL) {",
+     "    if (p != NULL) {"),
+    ("road_no_grace", C, "    c->New32 = COP_ROADBLOCK_GRACE;\n}", "}"),
+    ("road_grace_1", C, "    c->New32 = COP_ROADBLOCK_GRACE;\n}",
+     "    c->New32 = 1.0f;\n}"),
+    ("road_grace_inside", C,
+     "                            rb->CopAng[c->nMyRoadBlockIndex]);\n    }\n"
+     "    c->New32 = COP_ROADBLOCK_GRACE;\n}",
+     "                            rb->CopAng[c->nMyRoadBlockIndex]);\n"
+     "        c->New32 = COP_ROADBLOCK_GRACE;\n    }\n}"),
+    ("road_spot0", C,
+     "        if (should_return(c, &rb->CopPos[i], rb->CopAng[i]))",
+     "        if (should_return(c, &rb->CopPos[0], rb->CopAng[0]))"),
+    ("road_tele0", C,
+     "            taicop_teleport(c, &rb->CopPos[c->nMyRoadBlockIndex],\n"
+     "                            rb->CopAng[c->nMyRoadBlockIndex]);",
+     "            taicop_teleport(c, &rb->CopPos[0],\n"
+     "                            rb->CopAng[0]);"),
+    ("road_no_tele", C,
+     "            taicop_teleport(c, &rb->CopPos[c->nMyRoadBlockIndex],\n"
+     "                            rb->CopAng[c->nMyRoadBlockIndex]);",
+     "            ;"),
+
+    # ---- DoDrivingOnPatrolLogic
+    ("patrol_keep_dlx", C, "    c->MyDLOffset.x = 0.0f;\n    c->New48.y = 0.0f;\n",
+     "    c->New48.y = 0.0f;\n"),
+    ("patrol_keep_n48y", C,
+     "    c->MyDLOffset.x = 0.0f;\n    c->New48.y = 0.0f;\n    c->New48.x = 0.0f;\n",
+     "    c->MyDLOffset.x = 0.0f;\n    c->New48.x = 0.0f;\n"),
+    ("patrol_keep_n48x", C,
+     "    c->New48.x = 0.0f;\n    c->MyDLOffset.y = 0.0f;\n    taicop_update",
+     "    c->MyDLOffset.y = 0.0f;\n    taicop_update"),
+    ("patrol_keep_dly", C, "    c->MyDLOffset.y = 0.0f;\n    taicop_update_drive_target(",
+     "    taicop_update_drive_target("),
+    ("patrol_keep_route", C,
+     "&c->Base.pMyCar->State.Position,\n        0);",
+     "&c->Base.pMyCar->State.Position,\n        1);"),
+    ("patrol_no_update", C,
+     "    taicop_update_drive_target(\n        c, (const bVector2 *)(const void *)"
+     "&c->Base.pMyCar->State.Position,\n        0);\n", ""),
+    ("patrol_dist_le", C,
+     "          < COP_FAR_FROM_PLAYERS)) {\n        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);\n"
+     "        return;\n    }\n    search(c, 1);",
+     "          <= COP_FAR_FROM_PLAYERS)) {\n        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);\n"
+     "        return;\n    }\n    search(c, 1);"),
+    ("patrol_no_return", C,
+     "        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);\n"
+     "        return;\n    }\n    search(c, 1);",
+     "        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);\n"
+     "    }\n    search(c, 1);"),
+    ("patrol_search0", C, "    search(c, 1);\n}", "    search(c, 0);\n}"),
+
+    # ---- reached through HandleStateTransitions and Think
+    ("hst_no_istrap", C, "        taicop_init_speed_trap_logic(c);\n", ""),
+    ("think_no_strap", C, "        taicop_do_speed_trap_logic(c);\n", ""),
+    ("think_no_road", C, "        taicop_do_road_block_logic(c);\n", ""),
+    ("think_no_patrol", C, "        taicop_do_driving_on_patrol_logic(c);\n", ""),
+
+    # ---- coputil: CanTeleport
+    ("ctele_no_car", CU,
+     "    if (world_get_distance_to_closest_player_2d(\n"
+     "            w, (const bVector2 *)(const void *)&car->State.Position) < 250.0f)\n"
+     "        return 0;\n", ""),
+    ("ctele_car_le", CU,
+     "(const bVector2 *)(const void *)&car->State.Position) < 250.0f)",
+     "(const bVector2 *)(const void *)&car->State.Position) <= 250.0f)"),
+    ("ctele_dest_le", CU, "dest)\n        < 250.0f)", "dest)\n        <= 250.0f)"),
+    ("ctele_no_dest", CU,
+     "    if (world_get_distance_to_closest_player_2d(pCurrentWorld, dest)\n"
+     "        < 250.0f)\n        return 0;\n", ""),
+    ("ctele_self", CU, "        if (o == car)\n            continue;\n", ""),
+    ("ctele_near_le", CU,
+     "        dy = car->State.Position.y - o->State.Position.y;\n"
+     "        if (sqrtf(dx * dx + dy * dy) < 15.0f)",
+     "        dy = car->State.Position.y - o->State.Position.y;\n"
+     "        if (sqrtf(dx * dx + dy * dy) <= 15.0f)"),
+    ("ctele_dest_pos", CU,
+     "        dx = car->State.Position.x - o->State.Position.x;",
+     "        dx = dest->x - o->State.Position.x;"),
+    ("ctele_coppos", CU, "    n = w->TotalNumCars;", "    n = w->CopCarPos;"),
+    ("ctele_end_0", CU, "    return 1;\n}\n\n// Retail walks", "    return 0;\n}\n\n// Retail walks"),
+
+    # ---- coputil: CarCausedRecentCollision
+    ("caused_any_coll", CU, "            if (collision_is_two_car_collision(col)) {",
+     "            if (1) {"),
+    ("caused_other_c2", CU, "                other = c1 == car ? c2 : c1;",
+     "                other = c2;"),
+    ("caused_other_ne", CU, "                other = c1 == car ? c2 : c1;",
+     "                other = c1 != car ? c2 : c1;"),
+    ("caused_null_skips", CU, "        if (other == NULL)\n            return NULL;",
+     "        if (other == NULL && i >= b->NumCollisions)\n            return NULL;\n"
+     "        if (other == NULL)\n            continue;"),
+    ("caused_no_stopped", CU,
+     "        if (other->State.ForwardSpeed == 0.0f)\n            return other;\n", ""),
+    ("caused_angle", CU, "car_is_car_in_front(car, other, 8192)",
+     "car_is_car_in_front(car, other, 4096)"),
+    ("caused_front_swap", CU, "car_is_car_in_front(car, other, 8192)",
+     "car_is_car_in_front(other, car, 8192)"),
+    ("caused_any_sign", CU, "            && 0.0f <= other->State.ForwardSpeed\n", ""),
+    ("caused_slower_le", CU,
+     "            && other->State.ForwardSpeed < car->State.ForwardSpeed)",
+     "            && other->State.ForwardSpeed <= car->State.ForwardSpeed)"),
+    ("caused_from1", CU, "    int32_t        i = 0;\n\n    for (;;) {",
+     "    int32_t        i = 1;\n\n    for (;;) {"),
+    ("caused_n_unsigned", CU, "        while (i < b->NumCollisions) {",
+     "        while (i < (uint8_t)b->NumCollisions) {"),
+
     # ---- tCop
     ("tcop_no_number", C, "    c->nCopNumber = n;\n", ""),
     ("tcop_keeps_pursuit", C,
@@ -1696,10 +2488,17 @@ MUTATIONS = [
      "    c->Base.DesiredLogicState = LS_LIMBO;"),
     ("acop_desired_disabled", C, "    c->Base.DesiredLogicState = LS_LIMBO;",
      "    c->Base.DesiredLogicState = LS_DISABLED;"),
-    ("acop_n52", C, "    c->New48.y = 0.0f;\n", ""),
-    ("acop_n48", C, "    c->New48.x = 0.0f;\n", ""),
-    ("acop_dl_y", C, "    c->MyDLOffset.y = 0.0f;\n", ""),
-    ("acop_dl_x", C, "    c->MyDLOffset.x = 0.0f;\n", ""),
+    ("acop_n52", C,
+     "    c->Base.DesiredLogicState = LS_LIMBO;\n    c->New48.y = 0.0f;\n",
+     "    c->Base.DesiredLogicState = LS_LIMBO;\n"),
+    ("acop_n48", C,
+     "    c->New48.x = 0.0f;\n    c->MyDLOffset.y = 0.0f;\n    c->MyDLOffset.x",
+     "    c->MyDLOffset.y = 0.0f;\n    c->MyDLOffset.x"),
+    ("acop_dl_y", C,
+     "    c->MyDLOffset.y = 0.0f;\n    c->MyDLOffset.x = 0.0f;\n",
+     "    c->MyDLOffset.x = 0.0f;\n"),
+    ("acop_dl_x", C, "    c->MyDLOffset.x = 0.0f;\n    c->fFlankSide",
+     "    c->fFlankSide"),
     ("acop_flank", C, "    c->fFlankSide = 0.0f;\n", ""),
     ("acop_delay", C,
      "    c->fMovementModeSwitchDelay = 0.0f;\n    c->nDrivingLineIndex = 0;",
@@ -2155,11 +2954,11 @@ MUTATIONS = [
      "    case LS_LIMBO:\n        taicop_do_guard_location_logic(c);"),
     ("think_disabled_limbo", C, "    case LS_DISABLED:\n        taicop_do_disabled_logic(c);",
      "    case LS_DISABLED:\n        taicop_do_limbo_logic(c);"),
-    ("think_strap_road", C, "        run_logic(gAICopDoSpeedTrapLogicFn, c);",
-     "        run_logic(gAICopDoRoadBlockLogicFn, c);"),
-    ("think_road_patrol", C, "        run_logic(gAICopDoRoadBlockLogicFn, c);",
-     "        run_logic(gAICopDoDrivingOnPatrolLogicFn, c);"),
-    ("think_patrol_hot", C, "        run_logic(gAICopDoDrivingOnPatrolLogicFn, c);",
+    ("think_strap_road", C, "        taicop_do_speed_trap_logic(c);",
+     "        taicop_do_road_block_logic(c);"),
+    ("think_road_patrol", C, "        taicop_do_road_block_logic(c);",
+     "        taicop_do_driving_on_patrol_logic(c);"),
+    ("think_patrol_hot", C, "        taicop_do_driving_on_patrol_logic(c);",
      "        run_logic(gAICopDoHotPursuitLogicFn, c);"),
     ("think_hot_caught", C, "        run_logic(gAICopDoHotPursuitLogicFn, c);",
      "        run_logic(gAICopDoCaughtSpeederLogicFn, c);"),
@@ -2400,12 +3199,12 @@ MUTATIONS = [
      "    case LS_SPEED_TRAP:\n        copmanager_reset_all_damage(pCopManager, car);\n",
      "    case LS_SPEED_TRAP:\n"),
     ("hst_strap_init_road", C,
-     "            gAICopInitSpeedTrapLogicFn(c);", "            gAICopInitRoadBlockLogicFn(c);"),
+     "        taicop_init_speed_trap_logic(c);", "        taicop_init_road_block_logic(c);"),
     ("hst_road_no_reset", C,
      "    case LS_ROAD_BLOCK:\n        copmanager_reset_all_damage(pCopManager, car);\n",
      "    case LS_ROAD_BLOCK:\n"),
     ("hst_road_init_none", C,
-     "        if (gAICopInitRoadBlockLogicFn != NULL)\n            gAICopInitRoadBlockLogicFn(c);\n", ""),
+     "        taicop_init_road_block_logic(c);\n", ""),
     ("hst_patrol_keeps_pursuit", C,
      "    case LS_DRIVING_ON_PATROL:\n        taicop_clear_pursuit(c);\n",
      "    case LS_DRIVING_ON_PATROL:\n"),
@@ -2512,8 +3311,8 @@ MUTATIONS = [
      "          < COP_FAR_FROM_PLAYERS))\n        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);",
      "          <= COP_FAR_FROM_PLAYERS))\n        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);"),
     ("dis_far_nan", C,
-     "    if (!(world_get_distance_to_closest_player_2d(pCurrentWorld,\n              (const bVector2 *)(const void *)&c->Base.pMyCar->State.Position)\n          < COP_FAR_FROM_PLAYERS))",
-     "    if (world_get_distance_to_closest_player_2d(pCurrentWorld,\n              (const bVector2 *)(const void *)&c->Base.pMyCar->State.Position)\n          >= COP_FAR_FROM_PLAYERS)"),
+     "    if (!(world_get_distance_to_closest_player_2d(pCurrentWorld,\n              (const bVector2 *)(const void *)&c->Base.pMyCar->State.Position)\n          < COP_FAR_FROM_PLAYERS))\n        tcop",
+     "    if (world_get_distance_to_closest_player_2d(pCurrentWorld,\n              (const bVector2 *)(const void *)&c->Base.pMyCar->State.Position)\n          >= COP_FAR_FROM_PLAYERS)\n        tcop"),
     ("dis_far_200", C, "#define COP_FAR_FROM_PLAYERS 250.0f", "#define COP_FAR_FROM_PLAYERS 200.0f"),
     ("dis_to_patrol", C,
      "        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);\n}\n\nvoid taicop_do_guard",

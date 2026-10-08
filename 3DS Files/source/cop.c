@@ -18,6 +18,7 @@
 #include "collisionbody.h"
 #include "copdriver.h"
 #include "copmgr.h"
+#include "coputil.h"
 #include "drivetarget.h"
 #include "drivetargetrenderer.h"
 #include "drivetrain.h"
@@ -33,6 +34,7 @@ float   fCopMassTable[3] = { 1.5f, 1.75f, 2.0f };
 void (*gPursuitRemoveCopFromPursuitFn)(tPursuit *p, tCop *c);
 void (*gPursuitRemovePrimarySpeakerFn)(tPursuit *p, int32_t b);
 void (*gCarDamageWreckFn)(void *damage);
+int32_t (*gCopManagerRequestPursuitFn)(tCopManager *m, tCop *c, Car *car);
 
 static void unported(const char *name)
 {
@@ -394,11 +396,6 @@ void taicop_update_drive_target(tAICop *c, const bVector2 *pos,
 
 // ---------------------------------------------------------------- Think
 
-void (*gAICopInitSpeedTrapLogicFn)(tAICop *c);
-void (*gAICopInitRoadBlockLogicFn)(tAICop *c);
-void (*gAICopDoSpeedTrapLogicFn)(tAICop *c);
-void (*gAICopDoRoadBlockLogicFn)(tAICop *c);
-void (*gAICopDoDrivingOnPatrolLogicFn)(tAICop *c);
 void (*gAICopDoHotPursuitLogicFn)(tAICop *c);
 void (*gAICopDoCaughtSpeederLogicFn)(tAICop *c);
 void (*gPlayerCopThinkFn)(tPlayerCop *c);
@@ -414,6 +411,15 @@ void (*gPlayerCopThinkFn)(tPlayerCop *c);
 #define COP_OFFSET_RATE_X    6.0f        // 40c00000, gp-15536
 #define COP_OFFSET_RATE_Y    3.0f        // 40400000, gp-15532
 #define COP_FAR_FROM_PLAYERS 250.0f      // 437a0000
+#define COP_TRAP_WAIT        15.0f       // 41700000
+#define COP_OFF_SPOT         0.01f       // 3c23d70a, gp-26908 and gp-26900
+#define COP_OFF_HEADING      100.0f      // 42c80000, in BAM
+#define COP_SEARCH_XY        45.0f       // 42340000
+#define COP_SEARCH_Z         2.5f        // 40200000
+#define COP_FAST_MPH         80.0f       // 42a00000, by gp-26904's 2.237
+#define COP_ROADBLOCK_GRACE  3.0f        // 40400000
+#define COP_SIGHT_RANGE      50.0f       // 42480000
+#define COP_SIGHT_AHEAD      20.0f       // 41a00000
 
 // gp-13336, a u16 that _GLOBAL_$I$fNearFollowDistances (0x00230d00) sets
 // at start-up to 1820, 10 degrees as a BAM: how far the car's velocity
@@ -486,6 +492,223 @@ void taicop_do_disabled_logic(tAICop *c)
 void taicop_do_guard_location_logic(tAICop *c)
 {
     taicop_hold_position(c);
+}
+
+// ------------------------------------- radar traps, roadblocks, patrols
+
+void taicop_teleport(tAICop *c, const bVector2 *pos, uint16_t ang)
+{
+    Car     *car = c->Base.pMyCar;
+    bVector3 v;
+
+    if (car == NULL)
+        return;
+    car_set_movement_mode(car, COP_MOVEMENT);
+    // Retail's stack vector: x, y and 0; its w is left as it was.
+    memset(&v, 0, sizeof v);
+    v.x = pos->x;
+    v.y = pos->y;
+    v.z = 0.0f;
+    car_reset_to_position(car, &v, 0.0f, ang);
+}
+
+void taicop_set_speed_trap(tAICop *c, tSpeedTrap *t)
+{
+    c->pMySpeedTrap = t;
+    t->cop = &c->Base;
+    taicop_teleport(c, &t->v2Position, t->ang);
+    tcop_set_desired_logic_state(&c->Base, LS_SPEED_TRAP);
+}
+
+void taicop_set_road_block(tAICop *c, tRoadBlock *rb, tPursuit *p,
+                           int32_t i)
+{
+    tcop_set_pursuit(&c->Base, p);
+    c->nMyRoadBlockIndex = i;
+    taicop_teleport(c, &rb->CopPos[i], rb->CopAng[i]);
+    tcop_set_desired_logic_state(&c->Base, LS_ROAD_BLOCK);
+}
+
+int32_t taicop_is_valid_pursuit_target(tAICop *c, Car *car, int32_t b)
+{
+    tCopManager            *m = pCopManager;
+    const tCarPulloverInfo *pl = (const tCarPulloverInfo *)(const void *)
+        ((const uint8_t *)m + COPMANAGER_PULLOVERS);
+    int16_t                 idx = car->CarIndex;
+    Car                    *pcar = NULL;
+
+    (void)c;
+    if (m->nPlayerCopIndex != -1 && m->Cops[m->nPlayerCopIndex] != NULL)
+        pcar = m->Cops[m->nPlayerCopIndex]->pMyCar;
+    if (car == pcar)
+        return 0;
+    if (pl[idx].bActive != 0)
+        return 0;
+    if (0.0f < m->fPursuableTimer[idx])
+        return 0;
+    if (car_caused_recent_collision(car) != NULL)
+        return 1;
+    if (!b)
+        return 0;
+    if (COP_FAST_MPH < fabsf(car->State.ForwardSpeed * COP_MPS_TO_MPH))
+        return 1;
+    return copmanager_is_being_pursued(m, car) != NULL;
+}
+
+int32_t taicop_can_patroller_see_this_car(const tAICop *c, const Car *car)
+{
+    const Car *mine = c->Base.pMyCar;
+    float      vx = car->State.Velocity.x, vy = car->State.Velocity.y;
+    float      dy = car->State.Position.y - mine->State.Position.y;
+    float      dx = car->State.Position.x - mine->State.Position.x;
+    float      s, inv;
+
+    if (!(sqrtf(dx * dx + dy * dy) < COP_SIGHT_RANGE))
+        return 0;
+    s = sqrtf(vx * vx + vy * vy);
+    if (!(0.0f < s))
+        return 0;
+    inv = 1.0f / s;
+    return COP_SIGHT_AHEAD <= vx * inv * dx + vy * inv * dy;
+}
+
+// What the two Init logics share: no sub-state, off the map, stopped and
+// parked. Retail's `sqc2` of the zero velocity takes its w from the
+// stack; the port's is left as it was.
+static void park(tAICop *c)
+{
+    Car *car = c->Base.pMyCar;
+
+    c->Base.LogicSubState = LSS_NONE;
+    car->bVisibleOnTrackMap = 0;
+    car->State.ForwardSpeed = 0.0f;
+    ((CopDriver *)(void *)car->pCarController)->State = eCDS_PARKED;
+    car->State.Velocity.x = 0.0f;
+    car->State.Velocity.y = 0.0f;
+    car->State.Velocity.z = 0.0f;
+    car->State.VelocityMagnitude = 0.0f;
+}
+
+void taicop_init_speed_trap_logic(tAICop *c)
+{
+    Car *car;
+
+    taicop_clear_pursuit(c);
+    park(c);
+    c->fSubStateTimer = COP_TRAP_WAIT;
+    car = c->Base.pMyCar;
+    car->State.MatrixValid = 0;
+    set_cop_lights(car, 0);
+    car->TheSirenMode = SIREN_MODE_NONE;
+}
+
+void taicop_init_road_block_logic(tAICop *c)
+{
+    Car *car;
+
+    park(c);
+    car = c->Base.pMyCar;
+    set_cop_lights(car, 1);
+    car->State.MatrixValid = 0;
+    car->TheSirenMode = SIREN_MODE_NONE;
+}
+
+// A car more than 1 cm or 100 BAM off its spot, with CanTeleport's leave
+// to go back to it.
+static int should_return(const tAICop *c, const bVector2 *spot,
+                         uint16_t ang)
+{
+    Car  *car = c->Base.pMyCar;
+    float dx = spot->x - car->State.Position.x;
+    float dy = spot->y - car->State.Position.y;
+    float da = fabsf((float)(int16_t)(uint16_t)(ang - car->State.Angle));
+
+    if (!(COP_OFF_SPOT < sqrtf(dx * dx + dy * dy) || COP_OFF_HEADING < da))
+        return 0;
+    return can_teleport(car, spot);
+}
+
+// The racers' and players' cars, CarTable up to CopCarPos (read once),
+// within 45 m of the cop's car in x and y and 2.5 m in z: each that
+// IsValidPursuitTarget and RequestPursuit allow asks for a chase. `see`
+// gives the target test's flag through CanPatrollerSeeThisCar, else 1.
+static void search(tAICop *c, int see)
+{
+    int32_t n = pCurrentWorld->CopCarPos;
+    int32_t i;
+
+    for (i = 0; i < n; i++) {
+        Car  *mine = c->Base.pMyCar;
+        Car  *o = pCurrentWorld->CarTable[i];
+        float dx = o->State.Position.x - mine->State.Position.x;
+        float dy = o->State.Position.y - mine->State.Position.y;
+        int32_t b;
+
+        if (!(sqrtf(dx * dx + dy * dy) < COP_SEARCH_XY))
+            continue;
+        if (!(fabsf(o->State.Position.z - mine->State.Position.z)
+              < COP_SEARCH_Z))
+            continue;
+        b = see ? taicop_can_patroller_see_this_car(c, o) : 1;
+        if (taicop_is_valid_pursuit_target(c, o, b)
+            && gCopManagerRequestPursuitFn != NULL
+            && gCopManagerRequestPursuitFn(pCopManager, &c->Base, o))
+            tcop_set_desired_logic_state(&c->Base, LS_HOT_PURSUIT);
+    }
+}
+
+void taicop_do_speed_trap_logic(tAICop *c)
+{
+    const tSpeedTrap *t;
+
+    taicop_hold_position(c);
+    if (c->fSubStateTimer <= 0.0f
+        && !(world_get_distance_to_closest_player_2d(pCurrentWorld,
+                 (const bVector2 *)(const void *)
+                 &c->Base.pMyCar->State.Position) < COP_FAR_FROM_PLAYERS)) {
+        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);
+        return;
+    }
+    t = c->pMySpeedTrap;
+    if (should_return(c, &t->v2Position, t->ang))
+        taicop_teleport(c, &c->pMySpeedTrap->v2Position,
+                        c->pMySpeedTrap->ang);
+    search(c, 0);
+}
+
+void taicop_do_road_block_logic(tAICop *c)
+{
+    const tPursuit *p;
+
+    taicop_hold_position(c);
+    p = c->Base.pMyPursuit;
+    if (p != NULL && p->pRoadBlock != NULL) {
+        const tRoadBlock *rb = p->pRoadBlock;
+        int32_t           i = c->nMyRoadBlockIndex;
+
+        if (should_return(c, &rb->CopPos[i], rb->CopAng[i]))
+            taicop_teleport(c, &rb->CopPos[c->nMyRoadBlockIndex],
+                            rb->CopAng[c->nMyRoadBlockIndex]);
+    }
+    c->New32 = COP_ROADBLOCK_GRACE;
+}
+
+void taicop_do_driving_on_patrol_logic(tAICop *c)
+{
+    c->MyDLOffset.x = 0.0f;
+    c->New48.y = 0.0f;
+    c->New48.x = 0.0f;
+    c->MyDLOffset.y = 0.0f;
+    taicop_update_drive_target(
+        c, (const bVector2 *)(const void *)&c->Base.pMyCar->State.Position,
+        0);
+    if (!(world_get_distance_to_closest_player_2d(pCurrentWorld,
+              (const bVector2 *)(const void *)&c->Base.pMyCar->State.Position)
+          < COP_FAR_FROM_PLAYERS)) {
+        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);
+        return;
+    }
+    search(c, 1);
 }
 
 void taicop_movement_mode_transitions(tAICop *c)
@@ -618,13 +841,11 @@ void taicop_handle_state_transitions(tAICop *c, eLogicState from,
     }
     case LS_SPEED_TRAP:
         copmanager_reset_all_damage(pCopManager, car);
-        if (gAICopInitSpeedTrapLogicFn != NULL)
-            gAICopInitSpeedTrapLogicFn(c);
+        taicop_init_speed_trap_logic(c);
         break;
     case LS_ROAD_BLOCK:
         copmanager_reset_all_damage(pCopManager, car);
-        if (gAICopInitRoadBlockLogicFn != NULL)
-            gAICopInitRoadBlockLogicFn(c);
+        taicop_init_road_block_logic(c);
         break;
     case LS_DRIVING_ON_PATROL:
         taicop_clear_pursuit(c);
@@ -712,13 +933,13 @@ void taicop_think(tAICop *c)
         taicop_do_disabled_logic(c);
         break;
     case LS_SPEED_TRAP:
-        run_logic(gAICopDoSpeedTrapLogicFn, c);
+        taicop_do_speed_trap_logic(c);
         break;
     case LS_ROAD_BLOCK:
-        run_logic(gAICopDoRoadBlockLogicFn, c);
+        taicop_do_road_block_logic(c);
         break;
     case LS_DRIVING_ON_PATROL:
-        run_logic(gAICopDoDrivingOnPatrolLogicFn, c);
+        taicop_do_driving_on_patrol_logic(c);
         break;
     case LS_HOT_PURSUIT:
         run_logic(gAICopDoHotPursuitLogicFn, c);

@@ -1,9 +1,11 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 58
-(2026-10-08): 12g-1, tAICop::Think, is done, and a race with cops now
-makes their cars, which wait in limbo until patrols and chases are
-ported. 12d to 12f (CopDriver and the drive target, the track graph,
+Where the next session picks up. Updated in Session 58, continued
+(2026-10-08): 12g-2, the radar traps', roadblocks' and patrols' logic,
+is done. The cops' cars still wait in limbo until the pursuits (12h)
+and the radar traps (12j) ask them out. 12g-1, tAICop::Think, was
+Session 58's first slice; it made a race with cops make their cars.
+12d to 12f (CopDriver and the drive target, the track graph,
 the manager's Think) were Session 57's; 12a to 12c (the cop manager,
 the cops, CopMover) Session 56's ("First" below).
 Session 54 (2026-10-08): the AI pack runs at 20 FPS with all eight cars in view
@@ -166,12 +168,23 @@ pursuit.obj, on a 10 KB manager. Its slices:
   and tPlayerCop's Think (`gPlayerCopThinkFn`) are NULL seams that do
   nothing. `eefpu.h` has `ee_mul` (the EE's FLT_MAX for an overflowing
   product), and `mipsemu.py` its `eemul` twin.
-- **Next: 12g-2** the patrol (DoDrivingOnPatrolLogic, `0x0022ee50`) and
-  the radar traps and roadblocks' Init and Do logics (`0x0022e798`,
-  `0x0022e838`, `0x0022ebc0`, `0x0022ec38`), naming sub-state 1 on the
-  way; **12g-3** DoHotPursuitLogic (`0x0022ff58`, its table at
-  `0x002bd670`) and DoCaughtSpeederLogic (`0x002303c8`); **12h, 12i**
-  tPursuit; **12j** SpawnSpeedTraps, roadblocks and spike strips;
+- **12g-2, done (Session 58, continued):** the radar traps', roadblocks'
+  and patrols' Init and Do logics, Teleport, SetSpeedTrap and
+  SetRoadBlock, IsValidPursuitTarget and CanPatrollerSeeThisCar in
+  `cop.c`, and CanTeleport and CarCausedRecentCollision in `coputil.c`
+  (`docs/formats/cops.md`, "Radar traps, roadblocks and patrols").
+  tRoadBlock's `pos` and `ang` are now `CopPos[2]` and `CopAng[2]`, as
+  the code reads them. The searches ask tCopManager::RequestPursuit
+  through `gCopManagerRequestPursuitFn`, a NULL seam that grants no
+  chase until 12h. Only the hot pursuit and caught speeder logics are
+  still seams. None of these logics use sub-state 1, so it stays
+  unnamed.
+- **Next: 12g-3** DoHotPursuitLogic (`0x0022ff58`, its table at
+  `0x002bd670`, the pursuit sub-logics from `0x0022f000`) and
+  DoCaughtSpeederLogic (`0x002303c8`), with DoSegmentsIntersect
+  (`0x00230f00`) if they need it; **12h, 12i** tPursuit, starting with
+  RequestPursuit (`0x00225078`) to bind `gCopManagerRequestPursuitFn`;
+  **12j** SpawnSpeedTraps, roadblocks and spike strips;
   **12k** the helicopter; **12l** pullovers and Busted; **12m** Be A
   Cop; **12n** the radar detector's intensity. Nothing takes a cop out
   of limbo until 12j's SpawnSpeedTraps or 12h's pursuits, so the cops
@@ -4603,9 +4616,8 @@ goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a to 12g-1 are done, 12g-2 (the
-  patrol and the radar-trap and roadblock logics) is next. See "First"
-  at the top.
+- **Next:** step 12, the cops: 12a to 12g-2 are done, 12g-3 (the hot
+  pursuit and caught speeder logics) is next. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
