@@ -9,8 +9,8 @@
 
 #include "georender.h"
 #include "capture.h"
+#include "c3dwrap.h"
 #include "geofold_shbin.h"
-#include "geolit_shbin.h"
 #include "geosolid_shbin.h"
 #include "hangwatch.h"
 
@@ -58,6 +58,8 @@ static C3D_Mtx s_modelView;
 static struct {
     bool           on;
     bool           bound;       // s_program, s_attr and the frame's uniforms
+    bool           lit;         // s_litProgram and s_attr (bind_lit)
+    bool           strip;       // the strips' program, light and combiner
     C3D_Mtx        projection;  // which they were sent for
     bool           mvSet;
     C3D_Mtx        modelView;
@@ -76,6 +78,12 @@ static void run_forget(void)
 {
     bool on = s_run.on;
 
+    // The strips leave the first stage's scale at 2 for the strips after
+    // them (bind_strips). What draws next sets its own combiner, but not
+    // always its scale.
+    if (s_run.strip) {
+        C3D_TexEnvScale(C3D_GetTexEnv(0), C3D_Both, GPU_TEVSCALE_1);
+    }
     memset(&s_run, 0, sizeof s_run);
     s_run.on       = on;
     s_run.combiner = -1;
@@ -104,8 +112,8 @@ void georender_run_end(void)
     run_forget();
 }
 
-// geolit.v.pica, the lit strips' and the environment passes'.
-static DVLB_s*         s_litDvlb;
+// geolit.v.pica, the lit strips' and the environment passes': the second
+// DVLE of geosolid's shbin (Makefile).
 static shaderProgram_s s_litProgram;
 static int s_lProjection = -1;
 static int s_lModelView  = -1;
@@ -183,18 +191,14 @@ bool georender_init(void)
     }
 
     s_dvlb = DVLB_ParseFile((u32*)geosolid_shbin, geosolid_shbin_size);
-    if (!s_dvlb) {
+    if (!s_dvlb || s_dvlb->numDVLE < 2) {
         return false;
     }
     shaderProgramInit(&s_program);
     shaderProgramSetVsh(&s_program, &s_dvlb->DVLE[0]);
 
-    s_litDvlb = DVLB_ParseFile((u32*)geolit_shbin, geolit_shbin_size);
-    if (!s_litDvlb) {
-        return false;
-    }
     shaderProgramInit(&s_litProgram);
-    shaderProgramSetVsh(&s_litProgram, &s_litDvlb->DVLE[0]);
+    shaderProgramSetVsh(&s_litProgram, &s_dvlb->DVLE[1]);
 #define LIT_UNIFORM(name) \
     shaderInstanceGetUniformLocation(s_litProgram.vertexShader, name)
     s_lProjection = LIT_UNIFORM("projection");
@@ -305,8 +309,6 @@ void georender_exit(void)
     DVLB_Free(s_foldDvlb);
     s_foldDvlb = NULL;
     shaderProgramFree(&s_litProgram);
-    DVLB_Free(s_litDvlb);
-    s_litDvlb = NULL;
     shaderProgramFree(&s_program);
     DVLB_Free(s_dvlb);
     s_dvlb  = NULL;
@@ -633,46 +635,54 @@ void georender_set_light(float x, float y, float z,
     s_run.bound   = false;
 }
 
-// The program, the vertex buffer and the uniforms, which every batch of a
-// mesh shares. In a run the program, the attributes and the uniforms that
-// change only with the camera, the light and the fog go once, and the
-// model-view when it changes. Every mesh's buffer has the same layout, so
-// after the run's first, a mesh's buffer is where it starts: one register
-// in place of citro3d's twelve buffers.
-static void bind_mesh(const GeoMesh* mesh)
+// Buffer 0 at `vbo`. Every buffer the run draws from has the same layout,
+// so once a draw has sent citro3d's buffers, one register moves buffer 0
+// to any other: in place of citro3d's twelve buffers.
+static void bind_buffer(const void* vbo)
 {
     C3D_BufInfo* buf;
 
+    if (s_run.bufSet) {
+        GPUCMD_AddWrite(GPUREG_ATTRIBBUFFER0_OFFSET,
+                        osConvertVirtToPhys(vbo) - s_run.bufBase);
+        return;
+    }
+    buf = C3D_GetBufInfo();
+    BufInfo_Init(buf);
+    BufInfo_Add(buf, vbo, sizeof(GeoRenderVertex), 4, 0x3210);
+    // citro3d sends these with the next draw, and only then can a write of
+    // the offset follow them: the draw sets s_run.bufSet.
+    s_run.bufBase = buf->base_paddr;
+}
+
+// The program, the vertex buffer and the uniforms, which every batch of a
+// mesh shares. In a run the program, the attributes and the uniforms that
+// change only with the camera, the light and the fog go once, and the
+// model-view when it changes; a mesh's buffer is bind_buffer's one
+// register.
+static void bind_mesh(const GeoMesh* mesh)
+{
     if (!s_run.bound
         || memcmp(&s_run.projection, &s_projection, sizeof s_projection)) {
         C3D_BindProgram(&s_program);
         C3D_SetAttrInfo(&s_attr);
-        C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uProjection, &s_projection);
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightVec,
-                      s_lightVec[0], s_lightVec[1], s_lightVec[2], 0.0f);
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightClr,
-                      s_lightClr[0], s_lightClr[1], s_lightClr[2], 1.0f);
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uAmbient,
-                      s_ambient, s_ambient, s_ambient, 1.0f);
+        c3d_unif_mtx(s_uProjection, &s_projection);
+        c3d_unif_set(s_uLightVec,
+                     s_lightVec[0], s_lightVec[1], s_lightVec[2], 0.0f);
+        c3d_unif_set(s_uLightClr,
+                     s_lightClr[0], s_lightClr[1], s_lightClr[2], 1.0f);
+        c3d_unif_set(s_uAmbient, s_ambient, s_ambient, s_ambient, 1.0f);
         set_fog_row(s_uFogRow, &s_projection);
         s_run.bound      = s_run.on;
+        s_run.lit        = false;
+        s_run.strip      = false;
         s_run.projection = s_projection;
     }
 
-    if (s_run.bufSet) {
-        GPUCMD_AddWrite(GPUREG_ATTRIBBUFFER0_OFFSET,
-                        osConvertVirtToPhys(mesh->vbo) - s_run.bufBase);
-    } else {
-        buf = C3D_GetBufInfo();
-        BufInfo_Init(buf);
-        BufInfo_Add(buf, mesh->vbo, sizeof(GeoRenderVertex), 4, 0x3210);
-        // citro3d sends these with the next draw (draw_batch), and only
-        // then can a write of the offset follow them.
-        s_run.bufBase = buf->base_paddr;
-    }
+    bind_buffer(mesh->vbo);
     if (!s_run.mvSet
         || memcmp(&s_run.modelView, &s_modelView, sizeof s_modelView)) {
-        C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uModelView, &s_modelView);
+        c3d_unif_mtx(s_uModelView, &s_modelView);
         s_run.mvSet     = s_run.on;
         s_run.modelView = s_modelView;
     }
@@ -740,6 +750,7 @@ static void draw_id(GPU_Primitive_t prim, int first, int count,
 
     s_run.combiner = -1;
     s_run.passSet  = false;
+    s_run.strip    = false;
     s_fogApplied   = ~0u;
     set_blend(s_blend);
     alpha_test(s_atOn, s_atRef);
@@ -794,7 +805,7 @@ static void set_combiner(const GeoTexture* gt, int uvScale, bool gs,
     }
     if (!cached || !s_run.uvSet || s_run.uvScale[0] != u
         || s_run.uvScale[1] != v) {
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, uvScale, u, v, 0.0f, 1.0f);
+        c3d_unif_set(uvScale, u, v, 0.0f, 1.0f);
         s_run.uvSet      = cached;
         s_run.uvScale[0] = u;
         s_run.uvScale[1] = v;
@@ -944,8 +955,7 @@ static void set_fog_row(int id, const C3D_Mtx* projection)
     float b = fog_s(0.0f) - a * s_fogFar;
     const C3D_FVec* w = &projection->r[3];
 
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, id, a * w->x, a * w->y, a * w->z,
-                  a * w->w + b);
+    c3d_unif_set(id, a * w->x, a * w->y, a * w->z, a * w->w + b);
 }
 
 // Every row of the texture is the same, so a texel's byte is its column's
@@ -1036,6 +1046,12 @@ static void set_blend_source_alpha(uint8_t blend)
     C3D_AlphaBlend(eq, GPU_BLEND_ADD, src, dst, GPU_ONE, GPU_ZERO);
 }
 
+static bool same_pass(GeoPass a, GeoPass b)
+{
+    return a.blend == b.blend && a.noDepthWrite == b.noDepthWrite
+           && a.noAlphaTest == b.noAlphaTest;
+}
+
 static void set_pass(GeoPass pass)
 {
     set_blend(pass.blend);
@@ -1082,9 +1098,7 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
         }
         gt   = batch_texture(b, textures, numTextures);
         pass = gt ? gt->pass : opaque;
-        if (!set || pass.blend != last.blend
-            || pass.noDepthWrite != last.noDepthWrite
-            || pass.noAlphaTest != last.noAlphaTest) {
+        if (!set || !same_pass(pass, last)) {
             set_pass(pass);
             last = pass;
             set  = true;
@@ -1103,41 +1117,49 @@ void georender_set_zwrite(bool on)
 
 // ---------------------------------------------------------- the lit strips
 
-static void set_vec(int id, const float v[4])
-{
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, id, v[0], v[1], v[2], v[3]);
-}
-
 // geolit's program, the mesh's vertices, and the batch's light.
+//
+// One shbin holds geolit and geosolid (Makefile), so the switch between
+// them sends no shader code, and the uniforms they share are in the same
+// registers. c3d_unif_* sends only what the GPU does not hold, and most of
+// a car's batches share their light. In a run the buffers, the cull, the
+// pass, the combiner and the texture stand; what bind_mesh and the strips
+// keep of the uniforms they send is forgotten, so they go through the
+// cache again (step 13b-5).
 static void bind_lit(const GeoMesh* mesh, const GeoLighting* L)
 {
-    C3D_BufInfo* buf;
-    int          i;
+    int i;
 
-    // geolit's program and uniforms replace what a run has sent.
-    run_forget();
-    C3D_BindProgram(&s_litProgram);
-    C3D_SetAttrInfo(&s_attr);
-    buf = C3D_GetBufInfo();
-    BufInfo_Init(buf);
-    BufInfo_Add(buf, mesh->vbo, sizeof(GeoRenderVertex), 4, 0x3210);
-
-    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_lProjection, &s_projection);
-    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_lModelView,  &s_modelView);
-    for (i = 0; i < 3; i++) {
-        set_vec(s_lLightDir + i, L->lightDir[i]);
-        set_vec(s_lDifClr + i,   L->difClr[i]);
-        set_vec(s_lSpecClr + i,  L->specClr[i]);
-        set_vec(s_lEnvCol + i,   L->envCol[i]);
+    s_run.bound = false;
+    s_run.mvSet = false;
+    s_run.uvSet = false;
+    s_run.strip = false;
+    if (!s_run.lit) {
+        C3D_BindProgram(&s_litProgram);
+        C3D_SetAttrInfo(&s_attr);
+        s_run.lit = s_run.on;
     }
-    set_vec(s_lAmbient,   L->ambient);
-    set_vec(s_lEye,       L->eye);
-    set_vec(s_lPowParams, L->powParams);
-    set_vec(s_lFresnel,   L->fresnel);
+    bind_buffer(mesh->vbo);
+
+    c3d_unif_mtx(s_lProjection, &s_projection);
+    c3d_unif_mtx(s_lModelView,  &s_modelView);
+    for (i = 0; i < 3; i++) {
+        c3d_unif_vec(s_lLightDir + i, L->lightDir[i]);
+        c3d_unif_vec(s_lDifClr + i,   L->difClr[i]);
+        c3d_unif_vec(s_lSpecClr + i,  L->specClr[i]);
+        c3d_unif_vec(s_lEnvCol + i,   L->envCol[i]);
+    }
+    c3d_unif_vec(s_lAmbient,   L->ambient);
+    c3d_unif_vec(s_lEye,       L->eye);
+    c3d_unif_vec(s_lPowParams, L->powParams);
+    c3d_unif_vec(s_lFresnel,   L->fresnel);
     set_fog_row(s_lFogRow, &s_projection);
-    C3D_BoolUnifSet(GPU_VERTEX_SHADER, s_lEnvPass,  false);
-    C3D_BoolUnifSet(GPU_VERTEX_SHADER, s_lGlossEnv, false);
-    C3D_CullFace(GPU_CULL_NONE);
+    c3d_unif_bool(s_lEnvPass,  false);
+    c3d_unif_bool(s_lGlossEnv, false);
+    if (!s_run.culled) {
+        C3D_CullFace(GPU_CULL_NONE);
+        s_run.culled = s_run.on;
+    }
 }
 
 void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
@@ -1148,6 +1170,7 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     const GeoTexture*    gt;
     C3D_TexEnv*          env;
     const C3D_Tex*       sphere;
+    GeoPass              pass;
 
     if (!s_ready || !mesh->vbo || bi < 0 || bi >= mesh->numBatches
         || mesh->batch[bi].count <= 0) {
@@ -1156,13 +1179,20 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     b  = &mesh->batch[bi];
     gt = batch_texture(b, textures, numTextures);
 
-    // The strip, with the lighter's colour or its own.
+    // The strip, with the lighter's colour or its own. In a run, the pass
+    // and the combiner go only when they differ from the last batch's.
     if (L->lit) {
         bind_lit(mesh, L);
-        set_pass(gt ? gt->pass : opaque);
-        set_combiner(gt, s_lUvScale, true, false);
+        pass = gt ? gt->pass : opaque;
+        if (!s_run.passSet || !same_pass(pass, s_run.pass)) {
+            set_pass(pass);
+            s_run.passSet = s_run.on;
+            s_run.pass    = pass;
+        }
+        set_combiner(gt, s_lUvScale, true, s_run.on);
         draw_prims(GPU_TRIANGLES, b->first, b->count, mesh->ibo,
                    gt ? gt->tex : NULL, "lit");
+        s_run.bufSet = s_run.on;
     } else {
         georender_draw_mask(mesh, textures, numTextures, (uint64_t)1 << bi);
     }
@@ -1179,8 +1209,8 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     if (!L->lit) {
         bind_lit(mesh, L);
     }
-    C3D_BoolUnifSet(GPU_VERTEX_SHADER, s_lEnvPass,  true);
-    C3D_BoolUnifSet(GPU_VERTEX_SHADER, s_lGlossEnv, L->gloss);
+    c3d_unif_bool(s_lEnvPass,  true);
+    c3d_unif_bool(s_lGlossEnv, L->gloss);
     C3D_TexBind(0, (C3D_Tex*)sphere);
     env = C3D_GetTexEnv(0);
     C3D_TexEnvInit(env);
@@ -1204,6 +1234,11 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     alpha_test(false, 0);
     draw_prims(GPU_TRIANGLES, b->first, b->count, mesh->ibo, sphere,
                "env pass");
+    // Its combiner, texture and pass are no batch's.
+    s_run.combiner = -1;
+    s_run.tex      = NULL;
+    s_run.passSet  = false;
+    s_run.bufSet   = s_run.on;
 }
 
 // --------------------------------------------------- the environment map
@@ -1489,13 +1524,12 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
     BufInfo_Add(buf, s_quads, sizeof(GeoRenderVertex), 4, 0x3210);
 
     // The vertex colour and nothing else: no light, and an ambient of one.
-    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uProjection, screen);
-    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uModelView,  &s_identity);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightVec, 0.0f, 0.0f, 1.0f, 0.0f);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightClr, 0.0f, 0.0f, 0.0f, 1.0f);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uAmbient,  1.0f, 1.0f, 1.0f, 1.0f);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale,
-                  gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
+    c3d_unif_mtx(s_uProjection, screen);
+    c3d_unif_mtx(s_uModelView,  &s_identity);
+    c3d_unif_set(s_uLightVec, 0.0f, 0.0f, 1.0f, 0.0f);
+    c3d_unif_set(s_uLightClr, 0.0f, 0.0f, 0.0f, 1.0f);
+    c3d_unif_set(s_uAmbient,  1.0f, 1.0f, 1.0f, 1.0f);
+    c3d_unif_set(s_uUvScale, gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
 
     // Every fragment at `depth`: the Z-buffer's map with a scale of 0 and
     // the depth as its offset. The fog's distance is the view's depth
@@ -1506,11 +1540,9 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                   / (s_fogNear + depth * (s_fogFar - s_fogNear));
 
         C3D_DepthMap(true, 0.0f, depth);
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uFogRow, 0.0f, 0.0f, 0.0f,
-                      fog_s(u));
+        c3d_unif_set(s_uFogRow, 0.0f, 0.0f, 0.0f, fog_s(u));
     } else {
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uFogRow, 0.0f, 0.0f, 0.0f,
-                      fog_s(1.0f));
+        c3d_unif_set(s_uFogRow, 0.0f, 0.0f, 0.0f, fog_s(1.0f));
     }
 
     // The GS's modulate is Ct * Cv >> 7, so a vertex colour of 0x80 is 1.0
@@ -1611,51 +1643,80 @@ bool georender_draw_mirror_quad(const GeoRenderVertex v[4],
 
 // ------------------------------------------------------------- the strips
 
-bool georender_draw_strip(const GeoRenderVertex* v, int n, const GeoTexture* gt)
+// The strips' program, buffer, light and combiner. In a run the strips
+// after the first keep them, and send only their texture, uniforms and
+// pass where they differ from the last strip's: a car's shadow is some
+// eighteen strips (step 13b-5). What bind_mesh and bind_lit keep of the
+// program and the uniforms goes; the buffers stand.
+static void bind_strips(void)
 {
-    GeoRenderVertex* dst;
-    C3D_BufInfo*     buf;
-    C3D_TexEnv*      env;
+    C3D_TexEnv* env;
 
-    if (!s_ready || !s_strips || n < 3 || !gt || !gt->tex
-        || s_numStripVerts + n > GEO_STRIP_RING) {
-        return false;
-    }
-    run_forget();
-    dst = &s_strips[s_numStripVerts];
-    memcpy(dst, v, (size_t)n * sizeof *dst);
-
+    s_run.bound    = false;
+    s_run.lit      = false;
+    s_run.mvSet    = false;
+    s_run.uvSet    = false;
+    s_run.combiner = -1;
     C3D_BindProgram(&s_program);
     C3D_SetAttrInfo(&s_attr);
-    buf = C3D_GetBufInfo();
-    BufInfo_Init(buf);
-    BufInfo_Add(buf, s_strips, sizeof(GeoRenderVertex), 4, 0x3210);
+    bind_buffer(s_strips);
 
     // The vertex colour and nothing else, as the screen quads have it.
-    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uProjection, &s_projection);
-    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uModelView,  &s_modelView);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightVec, 0.0f, 0.0f, 1.0f, 0.0f);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightClr, 0.0f, 0.0f, 0.0f, 1.0f);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uAmbient,  1.0f, 1.0f, 1.0f, 1.0f);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale,
-                  gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
-    set_fog_row(s_uFogRow, &s_projection);
+    c3d_unif_set(s_uLightVec, 0.0f, 0.0f, 1.0f, 0.0f);
+    c3d_unif_set(s_uLightClr, 0.0f, 0.0f, 0.0f, 1.0f);
+    c3d_unif_set(s_uAmbient,  1.0f, 1.0f, 1.0f, 1.0f);
 
     // The colour and its alpha are the GS's, 0x80 for 1.0, so the
     // combiner doubles both, as it does for the screen quads.
-    C3D_TexBind(0, gt->tex);
     env = C3D_GetTexEnv(0);
     C3D_TexEnvInit(env);
     C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
     C3D_TexEnvFunc(env, C3D_Both, GPU_MODULATE);
     C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_2);
 
-    C3D_CullFace(GPU_CULL_NONE);
-    set_pass(gt->pass);
+    if (!s_run.culled) {
+        C3D_CullFace(GPU_CULL_NONE);
+        s_run.culled = s_run.on;
+    }
+    s_run.strip = s_run.on;
+}
+
+bool georender_draw_strip(const GeoRenderVertex* v, int n, const GeoTexture* gt)
+{
+    GeoRenderVertex* dst;
+
+    if (!s_ready || !s_strips || n < 3 || !gt || !gt->tex
+        || s_numStripVerts + n > GEO_STRIP_RING) {
+        return false;
+    }
+    dst = &s_strips[s_numStripVerts];
+    memcpy(dst, v, (size_t)n * sizeof *dst);
+
+    if (!s_run.strip) {
+        bind_strips();
+    }
+    c3d_unif_mtx(s_uProjection, &s_projection);
+    c3d_unif_mtx(s_uModelView,  &s_modelView);
+    c3d_unif_set(s_uUvScale, gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
+    set_fog_row(s_uFogRow, &s_projection);
+    if (!s_run.on || s_run.tex != gt->tex) {
+        C3D_TexBind(0, gt->tex);
+        s_run.tex = s_run.on ? gt->tex : NULL;
+    }
+    if (!s_run.passSet || !same_pass(gt->pass, s_run.pass)) {
+        set_pass(gt->pass);
+        s_run.passSet = s_run.on;
+        s_run.pass    = gt->pass;
+    }
     draw_arrays(GPU_TRIANGLE_STRIP, s_numStripVerts, n, gt->tex, "strip");
     s_numStripVerts += n;
+    s_run.bufSet = s_run.on;
 
-    C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_1);
+    // Out of a run, nothing keeps the strips' combiner: what draws next
+    // sets its own, but not always its scale.
+    if (!s_run.on) {
+        C3D_TexEnvScale(C3D_GetTexEnv(0), C3D_Both, GPU_TEVSCALE_1);
+    }
     return true;
 }
 
@@ -1693,15 +1754,13 @@ bool georender_draw_sprites(const GeoRenderVertex* v, int n,
     BufInfo_Add(buf, s_sprites, sizeof(GeoRenderVertex), 4, 0x3210);
 
     // The vertex colour and nothing else, as the screen quads have it.
-    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uProjection, &s_spriteScreen);
-    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uModelView,  &s_identity);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightVec, 0.0f, 0.0f, 1.0f, 0.0f);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uLightClr, 0.0f, 0.0f, 0.0f, 1.0f);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uAmbient,  1.0f, 1.0f, 1.0f, 1.0f);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uUvScale,
-                  gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
-    C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uFogRow, 0.0f, 0.0f, 0.0f,
-                  fog_s(1.0f));
+    c3d_unif_mtx(s_uProjection, &s_spriteScreen);
+    c3d_unif_mtx(s_uModelView,  &s_identity);
+    c3d_unif_set(s_uLightVec, 0.0f, 0.0f, 1.0f, 0.0f);
+    c3d_unif_set(s_uLightClr, 0.0f, 0.0f, 0.0f, 1.0f);
+    c3d_unif_set(s_uAmbient,  1.0f, 1.0f, 1.0f, 1.0f);
+    c3d_unif_set(s_uUvScale, gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
+    c3d_unif_set(s_uFogRow, 0.0f, 0.0f, 0.0f, fog_s(1.0f));
     // No fog: unit 1 keeps all of the colour for the draw.
     if (s_fog != NULL && s_noFogTex.data) {
         C3D_TexBind(1, &s_noFogTex);

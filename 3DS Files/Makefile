@@ -65,7 +65,8 @@ LDFLAGS	=	-specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map) \
 # citro3d's uniform upload, skipped when nothing changed: see c3dwrap.c.
 C3DWRAP	:=	-Wl,--wrap=C3D_UpdateUniforms \
 			-Wl,--wrap=C3Di_LoadShaderUniforms \
-			-Wl,--wrap=C3Di_DirtyUniforms
+			-Wl,--wrap=C3Di_DirtyUniforms \
+			-Wl,--wrap=C3D_BindProgram
 
 LIBS	:= -lcitro2d -lcitro3d -lctru -lm
 
@@ -94,7 +95,9 @@ CFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
 CPPFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
 SFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
 BINFILES	:=	$(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))
-PICAFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.v.pica)))
+# geolit.v.pica is linked into geosolid's shbin (see the shader rule).
+PICAFILES	:=	$(filter-out geolit.v.pica,\
+			$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.v.pica))))
 
 #---------------------------------------------------------------------------------
 ifeq ($(strip $(CPPFILES)),)
@@ -229,7 +232,13 @@ endef
 %.shbin.o %_shbin.h : %.v.pica
 #---------------------------------------------------------------------------------
 	@echo $(notdir $<)
-	@$(call shader-as,$<)
+	@$(call shader-as,$< $(filter-out $<,$(filter %.v.pica,$^)))
+
+# geolit.v.pica links into geosolid's shbin, after it: one DVLP for both,
+# so citro3d sends no shader code when the race switches between them, and
+# picasso gives the uniforms they share the same registers (step 13b-5).
+# DVLE 0 is geosolid's, 1 geolit's.
+geosolid.shbin.o geosolid_shbin.h : geolit.v.pica
 
 -include $(DEPSDIR)/*.d
 

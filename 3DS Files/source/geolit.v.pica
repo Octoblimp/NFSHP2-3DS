@@ -58,8 +58,11 @@
 ; every path, the unused w of outtex and z and w of outfog too: the PICA
 ; freezes otherwise (see geosolid.v.pica).
 
-.entry vmain
-.proc vmain
+; The Makefile links this file into geosolid's shbin, after it: one
+; program, so no shader code is sent when the race switches between the
+; two. picasso wants each proc's name its own, so this one is vlit.
+.entry vlit
+.proc vlit
     ; Position, as geosolid.v.pica does it, so the two passes meet the
     ; depth buffer at the same depth.
     mov r0.xyz, inpos
