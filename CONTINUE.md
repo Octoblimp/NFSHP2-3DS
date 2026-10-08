@@ -4,7 +4,9 @@ Where the next session picks up. Updated in Session 52
 (2026-10-08), after two graphics fixes: a second car of the player's
 type drew its wheels alone (eDuplicateSolid was a NULL seam; ported,
 d110c44), and skins went missing on TRACKB45 (the upload's scratch now
-comes from the linear heap).
+comes from the linear heap). Then 11h-3, the TrafficTeleporter
+(cd443d0), and B in a race no longer pops the frontend's stack
+(f539fdf).
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
@@ -36,8 +38,11 @@ pauses, and Resume, Restart and Quit work. 11g-2c-2c-1, the pre-race
 coordinator, and 11g-2c-2c-2, BumperCameraMover, are done: after the
 grid's A the camera flies INGAMEB's four close-ups round the cars, then
 the 3-2-1. 11g-2e, the rear-view mirror, is done: view 3 draws into
-its own target and shows top centre in retail's frame. Next is 11h-3,
-the TrafficTeleporter. The car selector is finished and checked against retail: SC-1
+its own target and shows top centre in retail's frame. 11h-3, the
+TrafficTeleporter, is done: the traffic is placed on its routes, and
+moved out of sight at densities of 0.4 and up. Next is the texture
+memory work (the user's ask, 2026-10-08, "Next, in this order" below),
+then step 12, the cops. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -659,8 +664,8 @@ car's were.
   through a bend. `trafficdriver_check`: 72743 ops, 31387 lines, 0
   differ; 230 mutations, 226 caught (11 by a crash), 4 equivalent.
   carmode_check maps its 736 to the demo's 720 (size-trafficdriver
-  caught). `docs/formats/traffic-driver.md`. No traffic car is built
-  yet: the TrafficTeleporter (11h-3) places them.
+  caught). `docs/formats/traffic-driver.md`. The TrafficTeleporter
+  (11h-3) places them.
 - **11g-2b, done: Race::Update.** `raceupdate.c` is retail's
   Race::Update (0x00148a78), both FinishCars, the finders,
   MonitorLeadership, the ghost car's capture, replay and save, and the
@@ -843,12 +848,56 @@ car's were.
     it is too much, draw the mirror every other frame.
   - **Left:** the sun, the NIS objects and the effects in the mirror's
     view, which retail draws there too.
+  - **Broken late in a long race (2026-10-08):** the frame and the mask
+    were gone and the main view showed through. RVM and RVM_MASK had
+    failed to upload, with the linear heap down to 6 MB, and a texture
+    that fails is not tried again. The texture memory work fixes it.
+- **11h-3, done: the TrafficTeleporter** (commit cd443d0).
+  - `traffictele.c` is retail's TrafficTeleporter.obj (0x002226f8 to
+    0x002232c0) but DoSnapshot. `airouteplan.c` is
+    GuessTargetDestinations (0x001cbb70), the route walk it asks.
+    `carrenderinfo.c` gains Car::SwitchSkin (0x0011e588),
+    UpdateSkinTextures and UpdateTextureInfo for the repaint.
+  - **The check:** `traffictele_check`: 7563 ops, 0 differ; 180
+    mutations, 178 caught, 2 equivalent. `carrenderinfo_check`: 327
+    scenarios, 108561 lines, 0 differ; 175 mutations, 173 caught.
+    `docs/formats/traffic-teleporter.md`; ai-route.md has
+    GuessTargetDestinations.
+  - **On Azahar:** Quick Race on track 24 places its six traffic cars,
+    all drawn, and with the gas held the player passes four of them at 10
+    to 42 m. Quick Race's density is 0.33, under the 0.4 below which
+    DoTimestep moves nothing, so its traffic stays where it was put
+    and drives its routes. No car starts within 2000 of the start line.
+- **B in a race, fixed** (commit f539fdf). B is the brake and the
+  port's BACK. With no screen up in a race, retail has no screen-list
+  handler at all (ChangeToScreen, 0x0016c4c0), but `flowInput` passed B
+  on, and it popped the stack to New Main Menu under the race. The
+  user's "S" in Azahar. pause-menu.md has it.
 - **Task 37, Local Wireless (multi-card) play,** is in TASKS.md (the
   user's ask, 2026-10-07). It comes after the single-player race is
   whole.
 - **Next, in this order:**
-  1. **11h-3, TrafficTeleporter** (0x002226f8 on; PlaceNewCar
-     0x002228e0, DoTimestep 0x002227e0), which places the traffic.
+  1. **The texture memory work** (the user's ask, 2026-10-08: every
+     texture loads on every map, done globally and not per track).
+     HANDOFF's Session 52 has the research. Every texture is RGBA8 now,
+     padded to powers of two with a full chain, and on a big map the
+     linear heap runs out: whatever loads last fails and is never tried
+     again (the mirror's frame, OPEL_SKIN1 on track 12, TRACKB45's
+     skins). In order:
+     a. lossless format per texture at upload: RGB8 for the opaque, L8
+        and LA8 for the gray, and so on. Exact, so nothing changes on
+        screen; 13-21% off the tracks, 25% off the cars;
+     b. a texture cache with a budget: the least recently drawn are
+        evicted and uploaded again from the pixels kept in the main
+        heap when drawn, so a missing texture is never final;
+     c. the VRAM left over after the frame buffers;
+     d. on the device (the CIA's 178 MB, memory type 7, which the user
+        confirmed): LINEAR_WANT up from 80 MB to about 112, the malloc
+        heap down from 96 to about 66. The race uses about 45 MB of
+        it. Azahar's .3dsx (124 MB) is unchanged by it;
+     e. later, the car skins' power-of-two padding (38%).
+     Pre-decoding offline is out: memory is the limit, not the CPU, and
+     the card holds retail's files only. ETC1 is out: it is lossy.
   2. Step 12, the cops.
   3. The AnimatedDriver that PRERACEANIM.LZC feeds (trackflow.c's Part3
      loads it), so the driver moves in the close-ups.
@@ -4425,14 +4474,14 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-07, after 11g-2e)
+### Where the port stands (2026-10-08, after 11h-3)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 11's 11h-3, the TrafficTeleporter.
+- **Next:** the texture memory work, then step 12, the cops.
   See "Now" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
@@ -4466,7 +4515,8 @@ goes in.
   - 11g-2d, the pause menu;
   - 11g-2c-2c-1, the pre-race coordinator;
   - 11g-2c-2c-2, BumperCameraMover;
-  - 11g-2e, the rear-view mirror.
+  - 11g-2e, the rear-view mirror;
+  - 11h-3, the TrafficTeleporter.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2
@@ -4478,7 +4528,7 @@ goes in.
   |---|---|
   | 13b, New 3DS mode and 30 FPS | 1 |
   | 10, the retail pass | 4-6 |
-  | 11, the racer and traffic AI (11a to 11h-2 done) | 2 |
+  | 11, the racer and traffic AI (11a to 11h-3 done) | 1 |
   | 12, the cops | 4-6 |
   | 14, the sounds | 2-3 |
   | 16, the frontend | 6-10 |
@@ -4486,12 +4536,12 @@ goes in.
   | 18, every track and car | 1-2 |
   | 19, Old 3DS performance (dropped; New 3DS only since 2026-10-05) | 0 |
   | 20, the split-screen decision and the final CIA | 1-2 |
-  | **Total** | **23-35** |
+  | **Total** | **22-34** |
 
 - **How far along:** about 37-40 of the road's 60-75 slices are done,
   roughly half. The estimates run low. Step 13 was put at 1-2 slices
   and took 10, and step 8 took eighteen commits (8a to 8l) for its 2-3.
-  Read the 23-35 as a floor. Step 11 was put at 4-6 before its slices
+  Read the 22-34 as a floor. Step 11 was put at 4-6 before its slices
   were laid out. They are fourteen, with traffic beside them: 11a,
   11b-1 to 11b-3, 11b-4a and 11b-4b, 11c, 11d-1, 11d-2, 11d-3a and
   11d-3b, and 11e to 11g. 11b was one slice until DrivingChoice's 13 KB

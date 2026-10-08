@@ -17099,3 +17099,85 @@ was a missing skin on 2026-10-05 (commit 0355be5), and it was again.
 - **The main heap is short on the big tracks:** 1.5 to 3.4 MB free.
   bMalloc aborts when it fails, so big buffers that can live in linear
   memory should move there.
+
+### 11h-3, the TrafficTeleporter (commit cd443d0)
+
+- **What.** `traffictele.c` is retail's TrafficTeleporter.obj
+  (0x002226f8 .. 0x002232c0) but DoSnapshot. PlaceNewCar puts each
+  traffic car on a random point of routes 50-69 that no player can see
+  (250 round the track) and no car is near (100), and keeps 2000 off
+  the start line in the race's first 20 s. DoTimestep wakes every 1-16
+  s and moves the next car out of sight to 250 or more ahead of a
+  random player, with a new skin. `airouteplan.c` is
+  GuessTargetDestinations (0x001cbb70), the walk it asks.
+  `carrenderinfo.c` gains Car::SwitchSkin and the two it calls.
+- **The check.** `traffictele_check`: 7563 ops, 0 differ; 180
+  mutations, 178 caught, 2 equivalent (each with its reason in the
+  script). `carrenderinfo_check`: 327 scenarios, 108561 lines, 0
+  differ; the 12 new mutations are caught (175, 173 caught, 2
+  equivalent).
+- **On Azahar.** The user saw no traffic in the first runs. It was
+  there, all drawn, but 198 m and more from the player. Quick Race's
+  density is 0.33, under DoTimestep's 0.4, so no car is ever moved and
+  the traffic drives where it was put, none of it near the start line.
+  A 150 s run on track 24 with the gas held passed four of the six
+  cars at 10 to 42 m
+  (cd443d0's message says 8, a misread of the log).
+
+### The mirror without its frame
+
+The user's photos showed the mirror late in a long race with no frame
+and the main view through it. The log had RVM and RVM_MASK, and 40-odd
+other textures, failing to upload with 6 MB of linear heap left.
+`trackview.c`'s load_texture takes the largest mip level that leaves
+6 MB free, and a texture that fails is not tried again. On track 13
+forwards the mirror was right. Not fixed yet: it is the texture memory
+work below. `main.c` logs each missing texture now ("race: texture
+... missing").
+
+### B in a race (commit f539fdf)
+
+The user pressed S (Azahar's B, the brake) and the frontend's Hot
+Pursuit menu came up over the race. `flowInput` passed B to
+`bgf_back_button` with no screen up, and it popped the stack to New
+Main Menu. Retail only has the screen list's JoyHandler while a screen
+is up (ChangeToScreen, 0x0016c4c0, adds it out of none and removes it
+at none). The run script's held A then picked Quick Race, and the
+second race's load aborted in bMalloc (CARS\DIABLO\GEOMETRY.LZC, 5
+MB free). `flowInput` now passes nothing with no screen. On Azahar two
+B presses mid-race brake, and the race goes on.
+
+### The texture memory: the research (the user's ask)
+
+The user asked for every texture to load on every map, done globally.
+`texbudget.py` (the session's scratchpad) priced every retail texture
+as the port uploads it now (RGBA8, padded to powers of two, the chain
+down to 8) and in the smallest exact PICA200 format:
+
+| Set | Now | Lossless | |
+|---|---:|---:|---:|
+| TEX11-16 | 39.9 MB | 31.4 MB | 79% |
+| TEX21-26 | 33.7-34.4 MB | 29-29.9 MB | 86-87% |
+| TEX31-36 | 39.1-40.7 MB | 31.3-32.6 MB | 80% |
+| TEX41-46 | 38.4 MB | 32.2 MB | 84% |
+| TEX61-66 | 41.6-42 MB | 33.2-33.5 MB | 80% |
+| CARS/TEXTURES.BIN | 266.3 MB | 198.6 MB | 75% |
+| DYNTEX | 17.3 MB | 10.5 MB | 61% |
+| GLOBALB | 4.1 MB | 2.6 MB | 63% |
+
+The tracks are mostly RGB8, then RGBA8, LA8 and L8. The 162 car skins
+512 wide are all RGB8, with 38% of them padding. PS2 alpha 0x7F is
+opaque (254 doubled).
+
+The plan, in CONTINUE's "Next": the format per texture, a cache with a
+budget, the spare VRAM, LINEAR_WANT on the device, then the skins'
+padding. Pre-decoding offline would not help: memory is the limit, the
+decoded texels are 3-8 times the PS2's 4- and 8-bit ones, and the card
+holds retail's files only. ETC1 is lossy.
+
+**The memory mode.** The user confirmed the CIA's 178 MB on their New
+3DS XL, and the device logs agree: memory type 7, grant 182272 KB,
+heap 96 MB, linear 80 MB. There is no larger mode. The split is what
+can move: the race uses about 45 MB of the malloc heap, so about 30 MB
+can go to the linear heap (LINEAR_WANT). heapcfg.c's step-down finds
+what the kernel will give in one block.
