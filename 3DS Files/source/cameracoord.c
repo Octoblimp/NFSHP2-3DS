@@ -17,6 +17,9 @@ bNode CameraCoordinatorList;                    // gp-19920
 
 CameraMover *(*gBumperCameraMoverFn)(void *mem, int32_t viewID,
                                      struct Car *car, CameraDataItems *cd);
+CameraMover *(*gTrackFlyCameraMoverFn)(void *mem, int32_t viewID,
+                                       CameraDataItems *cd, struct Car *car);
+int32_t (*gTrackFlyCameraMoverIsFinishedFn)(CameraMover *m);
 
 typedef void (*CoordinatorDtorFn)(void *c, int32_t flags);
 typedef void (*CoordinatorUpdateFn)(void *c, float dt);
@@ -545,6 +548,87 @@ void countdown_camera_coordinator_update(CountdownCameraCoordinator *c,
     c->CurrentCountdownNumber = n;
 }
 
+// ------------------------------------------------------------ the fly-by
+
+FlyByCameraCoordinator *flyby_camera_coordinator_init(
+    FlyByCameraCoordinator *c, int32_t viewID)
+{
+    // 0x0019abd8.
+    camera_coordinator_init(&c->Base, viewID);
+    c->Base._vtable = FLYBYCAMERACOORDINATOR_VTABLE;
+    c->CurrVortexCount = TheCameraLoader.VortexCount;
+    c->CurrentlyActiveCameraData = -1;
+    c->FlyByCameraIndex = 0;
+    return c;
+}
+
+void *flyby_camera_coordinator_construct(void *mem, int32_t viewID)
+{
+    return flyby_camera_coordinator_init((FlyByCameraCoordinator *)mem,
+                                         viewID);
+}
+
+void flyby_camera_coordinator_destroy(FlyByCameraCoordinator *c,
+                                      int32_t flags)
+{
+    // 0x0019ac28.
+    c->Base._vtable = FLYBYCAMERACOORDINATOR_VTABLE;
+    camera_coordinator_destroy(&c->Base, flags);
+}
+
+int32_t flyby_camera_coordinator_is_finished(void *c)
+{
+    // 0x0019ac40.
+    (void)c;
+    return TheCameraLoader.NumFlyByCameras == 0;
+}
+
+void flyby_camera_coordinator_update(FlyByCameraCoordinator *c, float dt)
+{
+    // 0x0019ac50.
+    int32_t viewID = c->Base.ViewID;
+    CameraMover *m;
+    CameraDataItems cd;
+    int32_t idx;
+    int need;
+
+    (void)dt;
+    if (c->CurrentlyActiveCameraData == -1
+        || c->Base.NeedToReloadCameraData != 0) {
+        need = 1;
+        c->Base.NeedToReloadCameraData = 0;
+    } else {
+        m = c->Base.pCameraMover;
+        if (m == NULL || m->Type != CM_TRACK_FLY)
+            need = 1;
+        else
+            need = gTrackFlyCameraMoverIsFinishedFn == NULL
+                   || gTrackFlyCameraMoverIsFinishedFn(m) != 0;
+    }
+    if (!need)
+        return;
+
+    idx = c->FlyByCameraIndex;
+    if (!(idx < TheCameraLoader.NumFlyByCameras)) {
+        c->FlyByCameraIndex = 0;
+        idx = 0;
+    }
+    c->CurrVortexCount++;
+    camera_data_items_parse(&cd, TheCameraLoader.FlyByCameraData[idx]);
+    if (c->Base.pCameraMover != NULL) {
+        delete_mover(c->Base.pCameraMover);
+        c->Base.pCameraMover = NULL;
+    }
+    if (gTrackFlyCameraMoverFn != NULL) {
+        void *mem = bMalloc(412, "TrackFlyCameraMover", 0, 16);
+
+        c->Base.pCameraMover = gTrackFlyCameraMoverFn(mem, viewID, &cd, NULL);
+    }
+    idx = c->FlyByCameraIndex;
+    c->CurrentlyActiveCameraData = idx;
+    c->FlyByCameraIndex = idx + 1;
+}
+
 // ------------------------------------------------------------- the tables
 
 #define E(f) { 0, 0, (VtFn)(f) }
@@ -563,6 +647,13 @@ static const VtEntry countdown_vt[CAMERACOORDINATOR_VT_ENTRIES] = {
     E(countdown_camera_coordinator_update),           //  16  0x0019b1a0
 };
 
+// _vt$22FlyByCameraCoordinator, 0x002b52c8.
+static const VtEntry flyby_vt[CAMERACOORDINATOR_VT_ENTRIES] = {
+    { 0, 0, NULL },
+    E(flyby_camera_coordinator_destroy),              //   8  0x0019ac28
+    E(flyby_camera_coordinator_update),               //  16  0x0019ac50
+};
+
 #undef E
 
 void cameracoord_install_vtables(void)
@@ -570,5 +661,7 @@ void cameracoord_install_vtables(void)
     vt_install(BASECAMERACOORDINATOR_VTABLE, base_vt,
                CAMERACOORDINATOR_VT_ENTRIES);
     vt_install(COUNTDOWNCAMERACOORDINATOR_VTABLE, countdown_vt,
+               CAMERACOORDINATOR_VT_ENTRIES);
+    vt_install(FLYBYCAMERACOORDINATOR_VTABLE, flyby_vt,
                CAMERACOORDINATOR_VT_ENTRIES);
 }

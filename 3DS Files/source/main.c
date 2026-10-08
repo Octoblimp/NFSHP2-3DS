@@ -153,6 +153,7 @@
 #include "texturestream.h"
 #include "topology.h"
 #include "track.h"
+#include "trackflycam.h"
 #include "sky.h"
 #include "sun.h"
 #include "efog.h"
@@ -3380,6 +3381,20 @@ static void* topologyOfCarState(void* cs)
     return ((CarState*)cs)->pTopologyCoordinate;
 }
 
+// FlyByCameraCoordinator::Update's `new TrackFlyCameraMover` and its
+// IsFinished, on the mover's base.
+static CameraMover* track_fly_mover_new(void* mem, int32_t viewID,
+                                        CameraDataItems* cd, struct Car* car)
+{
+    return &track_fly_camera_mover_init((TrackFlyCameraMover*)mem, viewID,
+                                        cd, car)->base;
+}
+
+static int32_t track_fly_mover_is_finished(CameraMover* m)
+{
+    return track_fly_camera_mover_is_finished((const TrackFlyCameraMover*)m);
+}
+
 int main(int argc, char** argv)
 {
     (void)argc; (void)argv;
@@ -3447,6 +3462,11 @@ int main(int argc, char** argv)
     gCameraCoordinatorDeleteFn = camera_coordinator_delete;
     gCameraCoordinatorEnableFn = camera_coordinator_enable;
     gCameraCoordinatorDisableFn = camera_coordinator_disable;
+    // The fly-by coordinator's TrackFlyCameraMover (11g-2c-2a). The
+    // CAMERA_FLYBY state does not build the coordinator yet: it waits on
+    // it until the Starting Grid's X, which is 11g-2c-2b.
+    gTrackFlyCameraMoverFn = track_fly_mover_new;
+    gTrackFlyCameraMoverIsFinishedFn = track_fly_mover_is_finished;
 
     // World::DoTimestep's Race::Update and SimulateRaceFinish's
     // Race::FinishCar (11g-2b): the countdown's end, the laps and the

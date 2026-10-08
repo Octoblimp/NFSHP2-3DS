@@ -16474,3 +16474,82 @@ race at 25-29 FPS.
 4. the PreRace coordinator.
 
 Then the rear-view mirror.
+
+## Session 46 (2026-10-07) -- 11g-2c-2a, the fly-by camera
+
+The user's photo 2 has retail's Starting Grid over a slow camera that
+flies along the track. That camera is the fly-by: RCSTATE_CAMERA_FLYBY
+makes a FlyByCameraCoordinator on view 1, and the coordinator flies the
+track's fly-by cameras with a TrackFlyCameraMover.
+
+### What is ported
+
+- `trackflycam.c`, TrackFlyCameraMover (412 bytes): its constructor
+  (0x00159d08), destructor, Update (0x00159e98), IsFinished (0x0015a2a0),
+  GetTarget and GetCarToFollow, and its table (0x002b1a50).
+  - It builds four clamped splines (eye, bank, look, and the 32-entry
+    FOV table), all with a table size of 16384.
+  - Each parameter steps at `speed * dt * 25`, or follows the car's share
+    of the area when the record locks it.
+  - With no car the field of view is 13020, 71.5 degrees.
+- `cameracoord.c` adds FlyByCameraCoordinator (40 bytes): its
+  constructor (0x0019abd8), destructor, IsFinished (0x0019ac40), Update
+  (0x0019ac50) and its table (0x002b52c8).
+  - Update builds the next fly-by when there is none yet, the data are
+    marked, the mover is not a track fly, or the mover is finished. Then
+    it moves on to the next, wrapping round.
+  - IsFinished is true only with no fly-bys loaded. So with a track
+    loaded, CAMERA_FLYBY ends only on RC_SKIP, which the Starting Grid
+    posts on X (PreRaceStats::HandleEvent).
+
+main.c sets the mover's two seams. The race coordinator's fly-by seams
+(`gFlyByCameraCoordinatorCtorFn`, `gFlyByCameraIsFinishedFn`) stay NULL.
+With them set and no grid to skip it, the race would sit in the fly-by
+for ever. They go in with the grid, 11g-2c-2b.
+
+### What the disc has
+
+Fifteen fly-bys: each track bundle's `PreRace_01`. Every one:
+
+- is type 2;
+- has 2 to 23 eye points and 8 look points;
+- has eye speeds of 0.0025 to 0.025;
+- has a field of view of 71.5 degrees;
+- locks nothing to a car.
+
+### The check
+
+- `tools/trackflycam_check.py` runs the mover beside retail's, with the
+  splines, the camera and bATan as shipped. It covers the 15 disc
+  fly-bys, built records with cars, locks and ISO FOVs, and the edges.
+  - The result: 25 scenarios, 14170 ops, 39418 lines, 0 differ.
+  - There are 84 mutations, all caught. Five survivors needed a
+    scenario of edges: a lock set with no car, a frozen camera under a
+    no-car mover, and an eye within 2 of the look.
+- `tools/cameracoord_check.py` adds the fly-by coordinator. It runs over
+  each disc fly-by, built cameras with 160 random steps, and the edges,
+  with a stand-in mover that prints the record it is given.
+  - The result: 3970 ops, 9251 lines, 0 differ.
+  - There are 209 mutations: 206 caught and 3 equivalent. The
+    equivalent ones are the destructor's table store (the base
+    overwrites it first), clearing the mover before the new one is
+    stored, and re-reading the index (it already equals `idx`).
+  - Three countdown mutations had patterns that also matched the
+    fly-by's lines. They now anchor on the countdown's own context.
+
+### On Azahar
+
+Nothing changes on screen: the coordinator is not made until the grid
+is in.
+
+### Next
+
+1. 11g-2c-2b: the Starting Grid. That is tStartRaceScreenManager and
+   PreRaceStats (INGAMEB 89b2fc0f), drawn in-game, whose X posts
+   RC_SKIP. With it, the race seams for the fly-by go in, and with them
+   gEnable/DisableStartRaceScreensFn. CAMERA_FLYBY is entered only when
+   PRERACEANIM.LZC is loaded, so whoever loads it is part of this step
+   or the next.
+2. 11g-2c-2c: BumperCameraMover, the PreRace coordinator and the
+   AnimatedDriver.
+3. The rear-view mirror.

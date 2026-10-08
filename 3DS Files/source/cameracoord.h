@@ -1,7 +1,7 @@
 // cameracoord -- CameraCoordinator.obj (0x00199a98 .. 0x0019c0d0), in
 // part: the coordinators' base and their list, TheCameraLoader and the
-// camera chunks it keeps, the CameraDataItems parser, and
-// CountdownCameraCoordinator.
+// camera chunks it keeps, the CameraDataItems parser, and the Countdown
+// and FlyBy coordinators.
 //
 // A camera coordinator owns a CameraMover and swaps it as the race goes
 // on. Each one is on CameraCoordinatorList from its constructor to its
@@ -17,10 +17,11 @@
 // never builds a mover: the player's UpdateNonGameState then gives the car
 // its drive camera, all through the countdown.
 //
-// Not ported here: the Demo, FlyBy, PreRace, PostRace and NIS coordinators
-// (0x0019a440 .. 0x0019b6a4) and BumperCameraMover, which four of them
-// build. Written up in docs/formats/camera-coordinator.md and checked on
-// retail's image by tools/cameracoord_check.py.
+// FlyByCameraCoordinator is here too, building its movers through
+// gTrackFlyCameraMoverFn. Not ported here: the Demo, PreRace, PostRace and
+// NIS coordinators (0x0019a440 .. 0x0019b6a4) and BumperCameraMover, which
+// four of them build. Written up in docs/formats/camera-coordinator.md and
+// checked on retail's image by tools/cameracoord_check.py.
 #ifndef CAMERACOORD_H
 #define CAMERACOORD_H
 
@@ -260,7 +261,69 @@ void countdown_camera_coordinator_destroy(CountdownCameraCoordinator *c,
 void countdown_camera_coordinator_update(CountdownCameraCoordinator *c,
                                          float dt);
 
-// The two tables, into vtable.h's registry. main.c calls it at boot.
+// ------------------------------------------------------------ the fly-by
+
+// FlyByCameraCoordinator, 40 bytes (racecoordinator.cpp's bMalloc). The
+// race coordinator's CAMERA_FLYBY state builds one on view 1, behind the
+// Starting Grid: it flies each of the track's fly-by cameras in turn with
+// a TrackFlyCameraMover and no car, and starts again from the first.
+typedef struct FlyByCameraCoordinator {
+    BaseCameraCoordinator Base;              //  0
+    int32_t CurrentlyActiveCameraData;       // 28  -1 until the first
+    int32_t FlyByCameraIndex;                // 32  the next to fly
+    int32_t CurrVortexCount;                 // 36
+} FlyByCameraCoordinator;
+
+#if UINTPTR_MAX == 0xffffffffu
+typedef char flybycoord_layout_check[
+    (offsetof(FlyByCameraCoordinator, CurrentlyActiveCameraData) == 28
+     && offsetof(FlyByCameraCoordinator, CurrVortexCount) == 36
+     && sizeof(FlyByCameraCoordinator) == 40) ? 1 : -1];
+#endif
+
+// _vt$22FlyByCameraCoordinator.
+#define FLYBYCAMERACOORDINATOR_VTABLE 0x002b52c8u
+
+// What FlyByCameraCoordinator::Update builds and asks: TrackFlyCameraMover's
+// constructor (0x00159d08) on 412 bytes of bMalloc's, with the
+// coordinator's view, the camera's data and no car, and the mover's
+// IsFinished (0x0015a2a0). main.c points them at trackflycam.c. With the
+// constructor NULL nothing is allocated and the coordinator has no mover;
+// with IsFinished NULL its mover counts as finished.
+extern CameraMover *(*gTrackFlyCameraMoverFn)(void *mem, int32_t viewID,
+                                              CameraDataItems *cd,
+                                              struct Car *car);
+extern int32_t (*gTrackFlyCameraMoverIsFinishedFn)(CameraMover *m);
+
+// 0x0019abd8. The base's constructor, the fly-by's table, the loader's
+// VortexCount, no camera yet (-1) and the first to fly next. No Update.
+FlyByCameraCoordinator *flyby_camera_coordinator_init(
+    FlyByCameraCoordinator *c, int32_t viewID);
+
+// The constructor as rcstates.c's gFlyByCameraCoordinatorCtorFn calls it,
+// on the 40 bytes it bMallocs.
+void *flyby_camera_coordinator_construct(void *mem, int32_t viewID);
+
+// 0x0019ac28: the fly-by's table, then the base's destructor.
+void flyby_camera_coordinator_destroy(FlyByCameraCoordinator *c,
+                                      int32_t flags);
+
+// 0x0019ac40. Whether the track has no fly-by camera; the coordinator
+// itself is not read. The CAMERA_FLYBY state waits on it, so a track with
+// a fly-by stays on it until the Starting Grid's X skips it.
+int32_t flyby_camera_coordinator_is_finished(void *c);
+
+// 0x0019ac50. A new mover is built when there has been none yet or the
+// camera data are marked for a reload (the mark is cleared), when the
+// coordinator has no mover or one of another type, or when its
+// TrackFlyCameraMover is finished. The index goes back to 0 once it is not
+// below the fly-by count (it is not bounded below), the vortex count goes
+// up by one, the camera is parsed, the old mover is deleted, and the new
+// one is built on it. The index flown is kept and the next is one on. dt
+// is unread.
+void flyby_camera_coordinator_update(FlyByCameraCoordinator *c, float dt);
+
+// The tables, into vtable.h's registry. main.c calls it at boot.
 void cameracoord_install_vtables(void);
 
 #endif

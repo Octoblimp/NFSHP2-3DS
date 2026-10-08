@@ -1,8 +1,7 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 45
-(2026-10-07), after 11g-2c-1, the camera data and the countdown
-coordinator.
+Where the next session picks up. Updated in Session 46
+(2026-10-07), after 11g-2c-2a, the fly-by camera.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
@@ -25,9 +24,11 @@ traffic's mover, and 11h-2, TrafficDriver, its controller, are done.
 countdown at GO, the race time runs, the laps count and the cars
 finish. Azahar's run shows lap 1 of 2 with the three AI racers ahead.
 11g-2c-1, the camera data and the countdown coordinator, is done: the
-3-2-1 is in the drive camera, as on retail. Next is 11g-2c-2,
-retail's race start before the countdown: the Starting Grid over the
-fly-by camera, then the pre-race camera. The car selector is finished and checked against retail: SC-1
+3-2-1 is in the drive camera, as on retail. 11g-2c-2a, the fly-by
+camera (TrackFlyCameraMover and FlyByCameraCoordinator), is ported and
+checked, and waits on the Starting Grid to be switched on. Next is
+11g-2c-2b, the Starting Grid over the fly-by, then 11g-2c-2c, the
+pre-race camera. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -691,6 +692,22 @@ car's were.
     `docs/formats/camera-coordinator.md`.
   - On Azahar the 3-2-1 is in the drive camera with the cinema bars
     and the AI racers ahead, as in the user's photo 4.
+- **11g-2c-2a, done: the fly-by camera.**
+  - `trackflycam.c` is TrackFlyCameraMover (0x00159d08 on, 412 bytes):
+    the eye, bank, look and FOV splines, IsFinished, Update.
+  - `cameracoord.c` adds FlyByCameraCoordinator (0x0019abd8 on, 40
+    bytes). It flies the loader's fly-bys in turn, each to its end. Its
+    IsFinished is true only with no fly-bys, so CAMERA_FLYBY ends only
+    on RC_SKIP from the Starting Grid's X.
+  - main.c sets `gTrackFlyCameraMoverFn` and
+    `gTrackFlyCameraMoverIsFinishedFn`. The race coordinator's
+    `gFlyByCameraCoordinatorCtorFn` and `gFlyByCameraIsFinishedFn` stay
+    NULL until 11g-2c-2b: without the grid the state would never end.
+  - `trackflycam_check`: 25 scenarios, 14170 ops, 39418 lines, 0
+    differ; 84 mutations, all caught. `cameracoord_check`: 3970 ops,
+    9251 lines, 0 differ; 209 mutations, 206 caught, 3 equivalent.
+    `docs/formats/camera-coordinator.md`, "The fly-by".
+  - Nothing changes on screen yet.
 - **Next, in this order:**
   1. **11g-2c-2 on, the race's start as retail shows it** (the user's
      photos of 2026-10-07, Session 44). After the loading screen retail
@@ -699,9 +716,12 @@ car's were.
      the drive camera, then the HUD with the rear-view mirror. The port
      goes straight to the countdown, because RaceCoordinator::InitForRace
      enters CAMERA_FLYBY only when GLOBAL\PRERACEANIM.LZC is loaded, and
-     nothing loads it. In order: who loads PRERACEANIM.LZC (and the
-     AnimatedDriver it feeds); BumperCameraMover; the FlyBy coordinator
-     with EnableStartRaceScreens' Starting Grid; the PreRace coordinator.
+     nothing loads it. In order: 11g-2c-2b, the Starting Grid
+     (tStartRaceScreenManager, PreRaceStats on INGAMEB 89b2fc0f, X posts
+     RC_SKIP) and wiring the fly-by coordinator's two race seams; then
+     11g-2c-2c, who loads PRERACEANIM.LZC (and the AnimatedDriver it
+     feeds), BumperCameraMover (0x00158800, 1116 bytes) and the PreRace
+     coordinator (0x0019ad78).
   2. **The rear-view mirror** (the user's photo 5): SetRearViewMirrorCameraMover
      and the mirror's view and its HUD frame, top centre on the top
      screen.
@@ -4282,15 +4302,15 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-07, after 11g-2c-1)
+### Where the port stands (2026-10-07, after 11g-2c-2a)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer and traffic AI: 11g-2c-2, retail's race
-  start, then the rear-view mirror and 11h-3, the TrafficTeleporter.
+- **Next:** step 11, the racer and traffic AI: 11g-2c-2b and 2c,
+  retail's race start, then the rear-view mirror and 11h-3, the TrafficTeleporter.
   See "Now" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
@@ -4318,7 +4338,8 @@ goes in.
   - 11h-1, TrafficCar;
   - 11h-2, TrafficDriver;
   - 11g-2b, Race::Update;
-  - 11g-2c-1, the camera data and the countdown coordinator.
+  - 11g-2c-1, the camera data and the countdown coordinator;
+  - 11g-2c-2a, the fly-by camera.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2

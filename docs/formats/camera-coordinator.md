@@ -246,6 +246,112 @@ Before this step the port had no coordinator. `BeginCountdownCameras` then
 removed the player's mover and built nothing, so the countdown was drawn
 from the default view, 1100 m above the track.
 
+## The fly-by
+
+The fly-by is the slow camera that plays behind the Starting Grid, after
+the loading screen and before the pre-race camera. The race coordinator's
+`RCSTATE_CAMERA_FLYBY` makes the coordinator on view 1 when it activates
+(`bMalloc` of 40) and deletes it when `RCSTATE_PRERACE` activates.
+
+### `FlyByCameraCoordinator`, 40 bytes
+
+| Offset | Field |
+|---:|---|
+| 0 | `BaseCameraCoordinator` |
+| 28 | `CurrentlyActiveCameraData`, -1 until the first is built |
+| 32 | `FlyByCameraIndex`, the next to fly |
+| 36 | `CurrVortexCount` |
+
+The table is `_vt$22FlyByCameraCoordinator` (`0x002b52c8`).
+
+- **Constructor** (`0x0019abd8`). It runs the base's constructor and sets:
+  - the fly-by's table;
+  - `CurrVortexCount` to the loader's `VortexCount` (+2592);
+  - the active camera to -1;
+  - the index to 0.
+
+  It does not update.
+- **Destructor** (`0x0019ac28`) puts the fly-by's table back and runs the
+  base's destructor.
+- **`IsFinished`** (`0x0019ac40`) is true only when the loader has no
+  fly-by cameras (`NumFlyByCameras`, +2052, is 0). It never looks at the
+  coordinator.
+- **`Update`** (`0x0019ac50`) never reads `dt`. It builds a new camera when
+  any of these holds:
+  - no camera is active yet (-1);
+  - the data are marked for reloading (it clears the mark);
+  - there is no mover, or its type is not `CM_TRACK_FLY` (9);
+  - the mover's `IsFinished` is true.
+
+  Otherwise it does nothing. To build, it:
+  1. wraps the index to 0 when it is not below `NumFlyByCameras`;
+  2. adds 1 to `CurrVortexCount`;
+  3. parses `FlyByCameraData[index]` (+2056);
+  4. deletes the mover, if any, and clears it;
+  5. builds a `TrackFlyCameraMover` (412 bytes of `bMalloc`, named
+     `TrackFlyCameraMover`) on the view, with no car;
+  6. makes the index the active camera and adds 1 to the index.
+
+So with fly-bys loaded the coordinator never finishes. `RCSTATE_CAMERA_FLYBY`
+leaves only on `RC_SKIP`, which the Starting Grid posts when X is pressed
+(`PreRaceStats::HandleEvent`). Until the grid is ported the port does not
+make the coordinator, as the state would never end.
+
+### `TrackFlyCameraMover`, 412 bytes
+
+| Offset | Field |
+|---:|---|
+| 0 | `CameraMover`, type 9 |
+| 44 | `CameraDataItems`, the parsed record |
+| 208 | eye spline |
+| 256 | bank spline |
+| 304 | look spline |
+| 352 | FOV spline, over the record's 32-entry table |
+| 400 | `EyeSplineParam` |
+| 404 | `LookSplineParam` |
+| 408 | `CarToFollow` |
+
+The table is `0x002b1a50`: the base's, but for the destructor, Update,
+GetCarToFollow and GetTarget.
+
+- **Constructor** (`0x00159d08`). It copies the record and builds the four
+  clamped splines with a table size of 16384:
+  - eye and bank over the eye points;
+  - look over the look points;
+  - the FOV over 32 entries.
+
+  It zeroes both parameters and gives the camera the record's near and far
+  clips.
+- **Destructor** (`0x00159de8`). Unless the camera has stopped updating, it
+  zeroes the focal distance and depth of field. It sets `ClearVelocity`,
+  then destroys the four splines and the base.
+- **`IsFinished`** (`0x0015a2a0`). The eye and the look are each done when
+  their speed is 0 or their parameter has reached the last point. The mover
+  is finished when both are done.
+- **`Update`** (`0x00159e98`). Each parameter steps by
+  `speed * dt * 25`, or, with a car and the record's lock, is set to its
+  share of the area between the record's two area percentages. Each is
+  held at its last point. Then:
+  - the eye, look and bank are read off the splines, and the bank rolls the
+    up vector;
+  - with a car, the field of view comes from the FOV table at the car's
+    share between the two percentages, as an angle or, with `IsFOVIso`,
+    kept the same size at the car's distance;
+  - with no car the field of view is 13020 (71.5 degrees);
+  - the focal distance is the eye's distance from the look, at least 2,
+    with a depth of field of 30;
+  - the look-at matrix is set on the camera.
+
+### The disc's fly-bys
+
+Every track bundle has its fly-bys in the camera chunk. All of them:
+
+- are type 2, named `PreRace_01`;
+- have 2 to 23 eye points and 8 look points;
+- have eye speeds of 0.0025 to 0.025;
+- have a field of view of 71.5 degrees;
+- lock nothing to a car.
+
 ## The port
 
 - **Loader table.** `bchunkload.c` puts `loader_cameras` and
@@ -264,6 +370,11 @@ from the default view, 1100 m above the track.
 - **`gBumperCameraMoverFn`** stays NULL until `BumperCameraMover` is
   ported. While it is NULL, a found countdown camera builds nothing. The
   retail disc never gets that far.
+- **The fly-by.** `main.c` points `gTrackFlyCameraMoverFn` and
+  `gTrackFlyCameraMoverIsFinishedFn` at `trackflycam.c`. The race
+  coordinator's `gFlyByCameraCoordinatorCtorFn` and
+  `gFlyByCameraIsFinishedFn` stay NULL until the Starting Grid can post
+  `RC_SKIP`.
 
 ## The check
 
@@ -294,8 +405,23 @@ The chunks come from two sources:
 
 There are also 600 random rounds over the coordinators.
 
-The run gives 2973 ops and 5925 lines, with 0 differences. The mutation
-pass catches all 167 of its mutations.
+The fly-by coordinator is run over each disc fly-by, over built cameras of
+types 2, 1 and 7 with 160 random steps, and over its edges. The
+`TrackFlyCameraMover` stand-in prints the record it is given, and its
+`IsFinished` returns a set value.
+
+The run gives 3970 ops and 9251 lines, with 0 differences. The mutation
+pass has 209 mutations. It catches 206, and 3 are equivalent:
+
+- the fly-by destructor's table store, which the base's overwrites first;
+- clearing the mover before the new one is stored over it;
+- re-reading the index, which equals `idx` there.
+
+`tools/trackflycam_check.py` runs `TrackFlyCameraMover` beside retail's,
+with the splines, the camera and `bATan` run as shipped. It covers each of
+the 15 disc fly-bys, built records with cars and locks, and the edges. It
+gives 25 scenarios, 14170 ops and 39418 lines, with 0 differences, and
+catches all 84 of its mutations.
 
 `tools/loadertable_check.py` holds slot 13 as ported. Its two
 `slot-13-*` mutations are caught.

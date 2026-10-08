@@ -3,8 +3,8 @@ code.
 
 CameraCoordinator.obj, in part: the coordinators' base and their list,
 TheCameraLoader and the camera chunks it keeps, the CameraDataItems parser
-and CountdownCameraCoordinator. The oracle is SLES_507.31 itself, run in
-tools/mipsemu.py:
+and the Countdown and FlyBy coordinators. The oracle is SLES_507.31
+itself, run in tools/mipsemu.py:
 
 - the list's static constructor (0x0019c058) and CameraLoader's own
   (0x00199c80); LoaderCameras and UnloaderCameras (0x0019a398, 0x0019a3c0)
@@ -18,6 +18,9 @@ tools/mipsemu.py:
 - CountdownCameraCoordinator's constructor (0x0019b130), destructor
   (0x0019b188) and Update (0x0019b1a0), and the two tables (0x002b52f8,
   0x002b5298) the destructor slots and Update are called through;
+- FlyByCameraCoordinator's constructor (0x0019abd8), destructor
+  (0x0019ac28), IsFinished (0x0019ac40) and Update (0x0019ac50), and its
+  table (0x002b52c8);
 - run as shipped under them: bSPrintf, bStrICmp, bRandom over bDefaultSeed
   and bNode's destructor (0x00114e70).
 
@@ -27,6 +30,9 @@ Stood in on both sides, each call printing a line:
   BumperCameraMover's constructor (0x00158800), which prints its memory,
     view and car and what the parser set of its CameraDataItems, and gives
     the mover a test table;
+  TrackFlyCameraMover's constructor (0x00159d08), the same with the
+    mover's type set to 9 as well, and its IsFinished (0x0015a2a0),
+    which prints the mover and answers the script's word;
   a test CameraMover table (vptr at +40) whose deleting destructor (8),
     Enable (96) and Disable (104) print, and a test coordinator table
     (FCVT) whose destructor (8) and Update (16) print;
@@ -98,9 +104,16 @@ CD_DTOR = 0x0019b188
 CD_UPDATE = 0x0019b1a0
 BASE_VT = 0x002b52f8
 CD_VT = 0x002b5298
+FB_CTOR = 0x0019abd8
+FB_DTOR = 0x0019ac28
+FB_FIN = 0x0019ac40
+FB_UPDATE = 0x0019ac50
+FB_VT = 0x002b52c8
 
 COUNTDOWN = 0x001480c0
 BUMPER = 0x00158800
+TF_CTOR = 0x00159d08
+TF_FIN = 0x0015a2a0
 BMALLOC = 0x002577c0
 BFREE = 0x00257850
 BDELETE = 0x00114e98
@@ -136,7 +149,8 @@ SLACK = 16
  OP_DUMPL, OP_POKEL, OP_POKEP, OP_SEED, OP_SHAKE, OP_FIND, OP_KEEP,
  OP_PARSE, OP_CCNEW, OP_CDNEW, OP_CCDEL, OP_CCDELETE, OP_RAWDTOR,
  OP_DISABLE, OP_ENABLE, OP_MARK, OP_UPDATE, OP_CDUPDATE, OP_SETMOVER,
- OP_SETF, OP_CD, OP_JUNKK, OP_DUMPK) = range(30)
+ OP_SETF, OP_CD, OP_JUNKK, OP_DUMPK, OP_FBNEW, OP_FBUPDATE, OP_FBFIN,
+ OP_TFFIN, OP_MTYPE) = range(35)
 
 ARGS = {OP_TAG: 1, OP_JUNKL: 1, OP_INITL: 0, OP_SINIT: 0, OP_LOAD: 1,
         OP_UNLOAD: 1, OP_DUMPL: 0, OP_POKEL: 2, OP_POKEP: 3, OP_SEED: 1,
@@ -144,19 +158,21 @@ ARGS = {OP_TAG: 1, OP_JUNKL: 1, OP_INITL: 0, OP_SINIT: 0, OP_LOAD: 1,
         OP_CDNEW: 3, OP_CCDEL: 2, OP_CCDELETE: 1, OP_RAWDTOR: 3,
         OP_DISABLE: 1, OP_ENABLE: 1, OP_MARK: 0, OP_UPDATE: 1,
         OP_CDUPDATE: 2, OP_SETMOVER: 2, OP_SETF: 3, OP_CD: 1, OP_JUNKK: 2,
-        OP_DUMPK: 0}
+        OP_DUMPK: 0, OP_FBNEW: 2, OP_FBUPDATE: 2, OP_FBFIN: 1, OP_TFFIN: 1,
+        OP_MTYPE: 2}
 
 # OP_POKEL's fields, OP_POKEP's lists and OP_SETF's fields.
 (L_HL, L_FB, L_PRE, L_POST, L_NIS, L_PN0, L_PN1, L_SHAKES,
- L_SHAKEP) = range(9)
+ L_SHAKEP, L_VORTEXN) = range(10)
 LIST_HL, LIST_FB, LIST_PRE, LIST_POST, LIST_NIS, LIST_PN0, LIST_PN1 = range(7)
-F_DISABLED, F_VIEW, F_NEED, F_NUMBER, F_VPTR, F_PLAYER = range(6)
+(F_DISABLED, F_VIEW, F_NEED, F_NUMBER, F_VPTR, F_PLAYER, F_ACTIVE, F_INDEX,
+ F_VCOUNT) = range(9)
 
 # TheCameraLoader: each list's count and its pointers, retail's offsets.
 LISTS = (("hl", 0, 4, 512), ("fb", 2052, 2056, 32), ("pre", 2184, 2188, 32),
          ("post", 2316, 2320, 32), ("nis", 2448, 2452, 8),
          ("pn0", 2484, 2492, 8), ("pn1", 2488, 2524, 8))
-POKEL_OFF = (0, 2052, 2184, 2316, 2448, 2484, 2488, 2556, 2560)
+POKEL_OFF = (0, 2052, 2184, 2316, 2448, 2484, 2488, 2556, 2560, 2592)
 SHAKES_N, SHAKES_P, VORTEX, VORTEX_N = 2556, 2560, 2576, 2592
 
 # The chunks.
@@ -881,12 +897,138 @@ def coordinator_scenarios(sc, rnd):
     sc.op(OP_DUMPL)
 
 
+def flyby_scenarios(sc, rnd):
+    # Each disc fly-by, flown as the race flies it, on view 1: built at
+    # the first Update, kept while its mover runs, built again each time
+    # it finishes or the data are marked, and with the bundle unloaded
+    # the coordinator is finished.
+    base = 0x300000
+    if DISC.exists():
+        fly_bys = [(t[0], t[2]) for t in TRACKS] + list(FLY_BYS)
+        for i, (name, off) in enumerate(fly_bys):
+            sc.tag("flyby, %s" % name)
+            sc.fresh()
+            sc.op(OP_SINIT)
+            sc.op(OP_JUNKK, 0, 0xa5)
+            sc.op(OP_POKEL, L_VORTEXN, (5, 0, -2, 112)[i % 4])
+            sc.load(base, chunk_at(disc("TRACKS/" + name), off))
+            sc.op(OP_FBNEW, 0, 1)
+            sc.op(OP_DUMPK)
+            sc.op(OP_FBFIN, 0)
+            for fin in (0, 0, 0, 1, 0, 2, -1, 0):
+                sc.op(OP_TFFIN, fin)
+                sc.op(OP_UPDATE, fb(1.0 / 30))
+                sc.op(OP_DUMPK)
+            sc.op(OP_MARK)
+            sc.op(OP_FBUPDATE, 0, fb(1.0 / 60))
+            sc.op(OP_DUMPK)
+            sc.op(OP_DISABLE, 0)
+            sc.op(OP_UPDATE, fb(1.0 / 30))
+            sc.op(OP_ENABLE, 0)
+            sc.op(OP_UNLOAD, base)
+            sc.op(OP_FBFIN, 0)
+            sc.op(OP_TFFIN, 1)
+            sc.op(OP_UPDATE, fb(1.0 / 30))
+            sc.op(OP_DUMPK)
+            sc.op(OP_CCDELETE, 0)
+            sc.op(OP_DUMPK)
+
+    # Four cameras of types 2, 2, 1 and 7, two fly-bys and a countdown
+    # on the list, and their fields and movers set by hand between the
+    # updates: the index past the end, the active camera back to -1,
+    # stand-in movers of type 9 and others, the count cut.
+    sc.tag("flyby, built")
+    sc.fresh(0x00)
+    sc.op(OP_SINIT)
+    kids = [(FLY_BY_C, cam(t, "PreRace_%02d" % (i + 1),
+                           cam_words(rnd, t, (0, 0, 2 + i, 8))))
+            for i, t in enumerate((2, 2, 1, 7))]
+    sc.load(base, build(base, FLY_BY, kids))
+    for k, b in ((0, 0xa5), (1, 0x00), (2, 0x5c)):
+        sc.op(OP_JUNKK, k, b)
+    sc.op(OP_POKEL, L_VORTEXN, 17)
+    sc.op(OP_FBNEW, 0, 1)
+    sc.op(OP_FBNEW, 1, -3)
+    sc.op(OP_CD, 3)
+    sc.op(OP_CDNEW, 2, 0, 0)
+    sc.op(OP_DUMPK)
+    for step in range(160):
+        r = rnd.random()
+        k = rnd.choice((0, 1))
+        if r < 0.12:
+            sc.op(OP_TFFIN, rnd.choice((0, 0, 1, 2, -1, 0x100)))
+        elif r < 0.3:
+            sc.op(OP_FBUPDATE, k, fb(rnd.choice((1.0 / 30, 0.0, -1.0))))
+        elif r < 0.42:
+            sc.op(OP_UPDATE, fb(1.0 / 30))
+        elif r < 0.47:
+            sc.op(OP_MARK)
+        elif r < 0.53:
+            sc.setf(k, F_INDEX, rnd.choice((0, 1, 2, 3, 4, 5, 99)))
+        elif r < 0.58:
+            sc.setf(k, F_ACTIVE, rnd.choice((-1, 0, 2, -2)))
+        elif r < 0.61:
+            sc.setf(k, F_VCOUNT, rnd.choice((-5, 0, 1000)))
+        elif r < 0.70:
+            m = rnd.randrange(NMOVERS)
+            sc.op(OP_MTYPE, m, rnd.choice((9, 9, 8, 0, 10)))
+            sc.op(OP_SETMOVER, k, rnd.choice((m, m, -1)))
+        elif r < 0.74:
+            sc.op(OP_POKEL, L_FB, rnd.choice((4, 4, 2, 1, 0, -1)))
+        elif r < 0.78:
+            sc.op(rnd.choice((OP_DISABLE, OP_ENABLE)), k)
+        elif r < 0.84:
+            sc.op(OP_FBFIN, k)
+        elif r < 0.88:
+            sc.setf(k, F_NEED, rnd.choice((0, 1, -1)))
+        else:
+            sc.op(OP_DUMPK)
+    sc.op(OP_DUMPK)
+    sc.op(OP_RAWDTOR, 1, 0, 2)
+    sc.op(OP_DUMPK)
+    sc.op(OP_CCDEL, 0, 1)
+    sc.op(OP_CCDELETE, 2)
+    sc.op(OP_DUMPK)
+
+    # A running fly-by mover, not finished and the data not marked, kept
+    # only once a camera is active: -1 builds, any other active camera
+    # (-2 among them) keeps it. And the count's sign: finished at 0 only.
+    sc.tag("flyby, edges")
+    sc.fresh(0x00)
+    sc.op(OP_SINIT)
+    sc.load(base + 0x40000, build(base + 0x40000, FLY_BY, kids))
+    sc.op(OP_JUNKK, 0, 0)
+    sc.op(OP_FBNEW, 0, 2)
+    sc.op(OP_MTYPE, 1, 9)
+    sc.op(OP_TFFIN, 0)
+    for active in (-1, -2, 7, 0, -1, 0x7fffffff, -0x80000000):
+        sc.op(OP_SETMOVER, 0, 1)
+        sc.setf(0, F_ACTIVE, active)
+        sc.setf(0, F_NEED, 0)
+        sc.op(OP_FBUPDATE, 0, fb(1.0 / 30))
+        sc.op(OP_DUMPK)
+    for n in (-1, 0, 1, -2, -0x80000000, 4):
+        sc.op(OP_POKEL, L_FB, n)
+        sc.op(OP_FBFIN, 0)
+    sc.op(OP_CCDELETE, 0)
+    sc.op(OP_DUMPK)
+    # The raw destructor with each of the flags, over a mover and none.
+    for flags in (0, 1, 2, 3):
+        sc.op(OP_SINIT)
+        sc.op(OP_JUNKK, 3, 0)
+        sc.op(OP_FBNEW, 3, 4)
+        sc.op(OP_SETMOVER, 3, -1 if flags & 1 else 2)
+        sc.op(OP_RAWDTOR, 3, flags, 2)
+        sc.op(OP_DUMPK)
+
+
 def script():
     sc = Script()
     rnd = random.Random(0xcc0de)
     coordinator_scenarios(sc, rnd)
     built_scenarios(sc, rnd)
     retail_scenarios(sc)
+    flyby_scenarios(sc, rnd)
     return sc
 
 
@@ -900,6 +1042,8 @@ class Model(object):
         self.heap = []                  # (addr, label)
         self.junk = -1
         self.number = 0
+        self.tf_fin = 0
+        self.flyby = set()              # k a fly-by, for the dump
         e.mem[ARENA:ARENA + ARENA_SIZE] = bytes(ARENA_SIZE)
         for base, n in ((KS, 0x1000), (MOVERS, 0x1000), (PLAYERS, 0x1000),
                         (CARS, 0x1000), (RACE, 0x100), (FMVT, 0x1000),
@@ -989,6 +1133,19 @@ class Model(object):
             e.put32(arg(0) + 40, FMVT)
             return arg(0)
 
+        def trackfly(em):
+            self.emit("  trackfly %s view %d car %s"
+                      % (self.label(arg(0)), s32(arg(1)),
+                         self.label(arg(3))))
+            self.dump_cd("  trackfly cd", arg(2), read_only=True)
+            e.put32(arg(0) + 40, FMVT)
+            e.put32(arg(0) + 8, 9)
+            return arg(0)
+
+        def trackfly_fin(em):
+            self.emit("  trackfly fin %s" % self.label(arg(0)))
+            return s32(self.tf_fin)
+
         def mover_dtor(em):
             self.emit("  mover dtor %s" % self.label(arg(0)))
             if arg(1) & 1:
@@ -1012,6 +1169,8 @@ class Model(object):
         e.stub(BDELETE, free)
         e.stub(COUNTDOWN, countdown)
         e.stub(BUMPER, bumper)
+        e.stub(TF_CTOR, trackfly)
+        e.stub(TF_FIN, trackfly_fin)
         e.stub(FMVT_DTOR, mover_dtor)
         e.stub(FMVT_ENABLE, mover_enable)
         e.stub(FMVT_DISABLE, mover_disable)
@@ -1070,10 +1229,16 @@ class Model(object):
                   + "".join(" " + x for x in back))
         for i in range(NK):
             k = KS + 0x100 * i
-            self.emit("  k%d %s %s %s %08x %08x %08x %08x %s %08x" % (
+            head = "  k%d %s %s %s %08x %08x %08x %08x" % (
                 i, self.label(w(k)), self.label(w(k + 4)),
                 self.label(w(k + 8)), w(k + 12), w(k + 16), w(k + 20),
-                w(k + 24), self.label(w(k + 28)), w(k + 32)))
+                w(k + 24))
+            if i in self.flyby:
+                self.emit(head + " fb %08x %08x %08x" % (
+                    w(k + 28), w(k + 32), w(k + 36)))
+            else:
+                self.emit(head + " %s %08x" % (self.label(w(k + 28)),
+                                               w(k + 32)))
 
     # ---- the run ---------------------------------------------------------
 
@@ -1157,11 +1322,13 @@ class Model(object):
             elif code == OP_CCNEW:
                 k, view = a
                 self.emit("ccnew k%d %d" % (k, s32(view)))
+                self.flyby.discard(k)
                 r = e.call(CC_CTOR, KS + 0x100 * k, s32(view))
                 self.emit("ccnew -> %s" % self.label(r))
             elif code == OP_CDNEW:
                 k, view, p = a
                 self.emit("cdnew k%d %d p%d" % (k, s32(view), p))
+                self.flyby.discard(k)
                 r = e.call(CD_CTOR, KS + 0x100 * k, s32(view),
                            PLAYERS + 0x100 * (p & 1))
                 self.emit("cdnew -> %s" % self.label(r))
@@ -1175,7 +1342,7 @@ class Model(object):
             elif code == OP_RAWDTOR:
                 k, flags, which = a
                 self.emit("rawdtor k%d %d %d" % (k, s32(flags), which))
-                e.call(CD_DTOR if which else CC_DTOR, KS + 0x100 * k,
+                e.call((CC_DTOR, CD_DTOR, FB_DTOR)[which], KS + 0x100 * k,
                        s32(flags))
             elif code == OP_DISABLE:
                 self.emit("disable k%d" % a[0])
@@ -1205,15 +1372,36 @@ class Model(object):
                 if f == F_PLAYER:
                     e.put32(c + 28, PLAYERS + 0x100 * (v & 1))
                 else:
-                    e.put32(c + (12, 16, 20, 32, 24)[f], v)
+                    e.put32(c + (12, 16, 20, 32, 24, None, 28, 32,
+                                 36)[f], v)
             elif code == OP_CD:
                 self.number = a[0]
             elif code == OP_JUNKK:
                 k, b = a
                 c = KS + 0x100 * k
                 e.mem[c:c + 0x100] = bytes([b & 0xff]) * 0x100
+                self.flyby.discard(k)
             elif code == OP_DUMPK:
                 self.dump_coordinators()
+            elif code == OP_FBNEW:
+                k, view = a
+                self.emit("fbnew k%d %d" % (k, s32(view)))
+                r = e.call(FB_CTOR, KS + 0x100 * k, s32(view))
+                self.flyby.add(k)
+                self.emit("fbnew -> %s" % self.label(r))
+            elif code == OP_FBUPDATE:
+                k, dt = a
+                self.emit("fbupdate k%d %08x" % (k, dt))
+                e.fpr[12] = dt
+                e.call(FB_UPDATE, KS + 0x100 * k)
+            elif code == OP_FBFIN:
+                r = e.call(FB_FIN, KS + 0x100 * a[0])
+                self.emit("fbfin k%d -> %d" % (a[0], s32(r)))
+            elif code == OP_TFFIN:
+                self.tf_fin = a[0]
+            elif code == OP_MTYPE:
+                m, t = a
+                e.put32(MOVERS + 0x100 * (m % NMOVERS) + 8, t)
             else:
                 raise ValueError("op %d" % code)
         return self.out
@@ -1510,13 +1698,13 @@ MUTATIONS = [
     M("ct-update", "    countdown_camera_coordinator_update(c, 0.0f);\n", ""),
     M("ct-ret", "    return c;\n}\n\nCountdownCameraCoordinator *countdown_camera_coordinator_construct",
       "    return NULL;\n}\n\nCountdownCameraCoordinator *countdown_camera_coordinator_construct"),
-    M("ctd-flags", "camera_coordinator_destroy(&c->Base, flags);",
-      "camera_coordinator_destroy(&c->Base, 0);"),
+    M("ctd-flags", "camera_coordinator_destroy(&c->Base, flags);\n}\n\nvoid countdown",
+      "camera_coordinator_destroy(&c->Base, 0);\n}\n\nvoid countdown"),
     M("cu-same", "    if (n == c->CurrentCountdownNumber)\n        return;\n", ""),
-    M("cu-del", "        delete_mover(c->Base.pCameraMover);\n        c->Base.pCameraMover = NULL;",
-      "        c->Base.pCameraMover = NULL;"),
-    M("cu-clear", "        delete_mover(c->Base.pCameraMover);\n        c->Base.pCameraMover = NULL;",
-      "        delete_mover(c->Base.pCameraMover);"),
+    M("cu-del", "        delete_mover(c->Base.pCameraMover);\n        c->Base.pCameraMover = NULL;\n    }\n    b_snprintf",
+      "        c->Base.pCameraMover = NULL;\n    }\n    b_snprintf"),
+    M("cu-clear", "        delete_mover(c->Base.pCameraMover);\n        c->Base.pCameraMover = NULL;\n    }\n    b_snprintf",
+      "        delete_mover(c->Base.pCameraMover);\n    }\n    b_snprintf"),
     M("cu-fmt", '"COUNTDOWN_%d"', '"COUNTDOWN %d"'),
     M("cu-null", "if (data != NULL && gBumperCameraMoverFn != NULL) {",
       "if (gBumperCameraMoverFn != NULL) {"),
@@ -1535,9 +1723,93 @@ MUTATIONS = [
     M("vt-base-dtor", "E(camera_coordinator_destroy),", "{ 0, 0, NULL },"),
     M("vt-cd-dtor", "E(countdown_camera_coordinator_destroy),", "{ 0, 0, NULL },"),
     M("vt-cd-update", "E(countdown_camera_coordinator_update),", "{ 0, 0, NULL },"),
+    # -- the fly-by ---------------------------------------------------------------
+    M("fb-init", "    camera_coordinator_init(&c->Base, viewID);\n    c->Base._vtable = FLYBY",
+      "    camera_coordinator_init(&c->Base, 0);\n    c->Base._vtable = FLYBY"),
+    M("fb-vt", "    c->Base._vtable = FLYBYCAMERACOORDINATOR_VTABLE;\n    c->CurrVortexCount",
+      "    c->Base._vtable = COUNTDOWNCAMERACOORDINATOR_VTABLE;\n    c->CurrVortexCount"),
+    M("fb-vortex", "    c->CurrVortexCount = TheCameraLoader.VortexCount;\n",
+      "    c->CurrVortexCount = 0;\n"),
+    M("fb-active", "    c->CurrentlyActiveCameraData = -1;\n    c->FlyByCameraIndex = 0;",
+      "    c->CurrentlyActiveCameraData = 0;\n    c->FlyByCameraIndex = 0;"),
+    M("fb-index", "    c->CurrentlyActiveCameraData = -1;\n    c->FlyByCameraIndex = 0;",
+      "    c->CurrentlyActiveCameraData = -1;\n    c->FlyByCameraIndex = 1;"),
+    M("fb-ret", "    return c;\n}\n\nvoid *flyby_camera_coordinator_construct",
+      "    return NULL;\n}\n\nvoid *flyby_camera_coordinator_construct"),
+    M("fbd-vt", "    c->Base._vtable = FLYBYCAMERACOORDINATOR_VTABLE;\n    camera_coordinator_destroy",
+      "    camera_coordinator_destroy"),
+    M("fbd-flags", "    camera_coordinator_destroy(&c->Base, flags);\n}\n\nint32_t flyby",
+      "    camera_coordinator_destroy(&c->Base, 0);\n}\n\nint32_t flyby"),
+    M("fbd-base", "    camera_coordinator_destroy(&c->Base, flags);\n}\n\nint32_t flyby",
+      "}\n\nint32_t flyby"),
+    M("fbf-eq", "return TheCameraLoader.NumFlyByCameras == 0;",
+      "return TheCameraLoader.NumFlyByCameras <= 0;"),
+    M("fbf-not", "return TheCameraLoader.NumFlyByCameras == 0;",
+      "return TheCameraLoader.NumFlyByCameras != 0;"),
+    M("fu-view", "    int32_t viewID = c->Base.ViewID;\n    CameraMover *m;",
+      "    int32_t viewID = 1;\n    CameraMover *m;"),
+    M("fu-first", "    if (c->CurrentlyActiveCameraData == -1\n",
+      "    if (c->CurrentlyActiveCameraData < 0\n"),
+    M("fu-first-off", "    if (c->CurrentlyActiveCameraData == -1\n        || ",
+      "    if (0\n        || "),
+    M("fu-reload", "        || c->Base.NeedToReloadCameraData != 0) {",
+      "        || c->Base.NeedToReloadCameraData > 0) {"),
+    M("fu-reload-off", "        || c->Base.NeedToReloadCameraData != 0) {",
+      "        ) {"),
+    M("fu-clear", "        need = 1;\n        c->Base.NeedToReloadCameraData = 0;\n",
+      "        need = 1;\n"),
+    M("fu-null", "        if (m == NULL || m->Type != CM_TRACK_FLY)\n            need = 1;",
+      "        if (m == NULL)\n            need = 1;"),
+    M("fu-type", "        if (m == NULL || m->Type != CM_TRACK_FLY)\n            need = 1;",
+      "        if (m == NULL || m->Type < CM_TRACK_FLY)\n            need = 1;"),
+    M("fu-fin", "|| gTrackFlyCameraMoverIsFinishedFn(m) != 0;",
+      "|| gTrackFlyCameraMoverIsFinishedFn(m) > 0;"),
+    M("fu-fin-off", "|| gTrackFlyCameraMoverIsFinishedFn(m) != 0;",
+      "|| 0;"),
+    M("fu-need", "    if (!need)\n        return;\n\n    idx = c->FlyByCameraIndex;",
+      "    idx = c->FlyByCameraIndex;"),
+    M("fu-wrap", "    if (!(idx < TheCameraLoader.NumFlyByCameras)) {",
+      "    if (!(idx <= TheCameraLoader.NumFlyByCameras)) {"),
+    M("fu-wrap-idx", "        c->FlyByCameraIndex = 0;\n        idx = 0;",
+      "        idx = 0;"),
+    M("fu-wrap-local", "        c->FlyByCameraIndex = 0;\n        idx = 0;",
+      "        c->FlyByCameraIndex = 0;"),
+    M("fu-vortex", "    c->CurrVortexCount++;\n", ""),
+    M("fu-vortex2", "    c->CurrVortexCount++;\n", "    c->CurrVortexCount += 2;\n"),
+    M("fu-parse", "camera_data_items_parse(&cd, TheCameraLoader.FlyByCameraData[idx]);",
+      "camera_data_items_parse(&cd, TheCameraLoader.FlyByCameraData[0]);"),
+    M("fu-del", "        delete_mover(c->Base.pCameraMover);\n        c->Base.pCameraMover = NULL;\n    }\n    if (gTrackFly",
+      "        c->Base.pCameraMover = NULL;\n    }\n    if (gTrackFly"),
+    M("fu-del-clear", "        delete_mover(c->Base.pCameraMover);\n        c->Base.pCameraMover = NULL;\n    }\n    if (gTrackFly",
+      "        delete_mover(c->Base.pCameraMover);\n    }\n    if (gTrackFly"),
+    M("fu-size", "bMalloc(412,", "bMalloc(408,"),
+    M("fu-name", '"TrackFlyCameraMover", 0, 16', '"TrackFlyCamera", 0, 16'),
+    M("fu-pool", '"TrackFlyCameraMover", 0, 16', '"TrackFlyCameraMover", 0, 0'),
+    M("fu-flags", '"TrackFlyCameraMover", 0, 16', '"TrackFlyCameraMover", 1, 16'),
+    M("fu-mview", "gTrackFlyCameraMoverFn(mem, viewID, &cd, NULL);",
+      "gTrackFlyCameraMoverFn(mem, 0, &cd, NULL);"),
+    M("fu-mkeep", "        c->Base.pCameraMover = gTrackFlyCameraMoverFn(mem, viewID, &cd, NULL);",
+      "        (void)gTrackFlyCameraMoverFn(mem, viewID, &cd, NULL);"),
+    M("fu-reidx", "    idx = c->FlyByCameraIndex;\n    c->CurrentlyActiveCameraData = idx;",
+      "    c->CurrentlyActiveCameraData = idx;"),
+    M("fu-active", "    c->CurrentlyActiveCameraData = idx;\n    c->FlyByCameraIndex = idx + 1;",
+      "    c->FlyByCameraIndex = idx + 1;"),
+    M("fu-next", "    c->FlyByCameraIndex = idx + 1;\n}", "    c->FlyByCameraIndex = idx;\n}"),
+    M("vt-fb-dtor", "E(flyby_camera_coordinator_destroy),", "{ 0, 0, NULL },"),
+    M("vt-fb-update", "E(flyby_camera_coordinator_update),", "{ 0, 0, NULL },"),
+    M("vt-fb-install", "    vt_install(FLYBYCAMERACOORDINATOR_VTABLE, flyby_vt,\n               CAMERACOORDINATOR_VT_ENTRIES);\n", ""),
 ]
 
 EQUIVALENT = {
+    # BaseCameraCoordinator's destructor stores its own table first, so
+    # the fly-by's store before it is overwritten before anything reads it.
+    "fbd-vt": "the base destructor stores its table first",
+    # main.c sets gTrackFlyCameraMoverFn before any coordinator is made,
+    # so the cleared pointer is always overwritten by the new mover's.
+    "fu-del-clear": "the mover seam is always set, so the pointer is rebuilt",
+    # After the wrap idx and FlyByCameraIndex are equal, and nothing in
+    # between (the parse, the delete, the mover) writes the coordinator.
+    "fu-reidx": "idx already equals FlyByCameraIndex",
 }
 
 for _name in EQUIVALENT:

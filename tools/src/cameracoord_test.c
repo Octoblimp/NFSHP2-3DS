@@ -24,15 +24,18 @@ enum {
     OP_DUMPL, OP_POKEL, OP_POKEP, OP_SEED, OP_SHAKE, OP_FIND, OP_KEEP,
     OP_PARSE, OP_CCNEW, OP_CDNEW, OP_CCDEL, OP_CCDELETE, OP_RAWDTOR,
     OP_DISABLE, OP_ENABLE, OP_MARK, OP_UPDATE, OP_CDUPDATE, OP_SETMOVER,
-    OP_SETF, OP_CD, OP_JUNKK, OP_DUMPK
+    OP_SETF, OP_CD, OP_JUNKK, OP_DUMPK, OP_FBNEW, OP_FBUPDATE, OP_FBFIN,
+    OP_TFFIN, OP_MTYPE
 };
 
 // The loader's fields OP_POKEL sets, and the lists OP_POKEP writes into.
-enum { L_HL, L_FB, L_PRE, L_POST, L_NIS, L_PN0, L_PN1, L_SHAKES, L_SHAKEP };
+enum { L_HL, L_FB, L_PRE, L_POST, L_NIS, L_PN0, L_PN1, L_SHAKES, L_SHAKEP,
+       L_VORTEXN };
 enum { LIST_HL, LIST_FB, LIST_PRE, LIST_POST, LIST_NIS, LIST_PN0, LIST_PN1 };
 
 // A coordinator's fields OP_SETF sets.
-enum { F_DISABLED, F_VIEW, F_NEED, F_NUMBER, F_VPTR, F_PLAYER };
+enum { F_DISABLED, F_VIEW, F_NEED, F_NUMBER, F_VPTR, F_PLAYER, F_ACTIVE,
+       F_INDEX, F_VCOUNT };
 
 #define ARENA_SIZE (4u << 20)
 #define NEAR       0x100000
@@ -49,8 +52,13 @@ static uint8_t *arena;
 
 static union {
     CountdownCameraCoordinator c;
+    FlyByCameraCoordinator f;
     unsigned char b[0x100];
 } ks[NK];
+
+// Which kind each coordinator's dump prints it as: a fly-by's from
+// OP_FBNEW, any other's from OP_CCNEW, OP_CDNEW and OP_JUNKK.
+static int is_flyby[NK];
 
 static CameraMover   movers[NMOVERS];
 static struct Player players[2];
@@ -62,6 +70,7 @@ static int nheap;
 
 static int     junk_byte = -1;
 static int32_t countdown_number;
+static int32_t trackfly_finished;
 
 // What the linked files leave to the game.
 Race *pCurrentRace;
@@ -242,6 +251,22 @@ static CameraMover *bumper(void *mem, int32_t viewID, struct Car *car,
     dump_cd_read("  bumper cd", cd);
     ((CameraMover *)mem)->vtbl = &fake_mover_vt;
     return (CameraMover *)mem;
+}
+
+static CameraMover *trackfly(void *mem, int32_t viewID,
+                             CameraDataItems *cd, struct Car *car)
+{
+    printf("  trackfly %s view %d car %s\n", lab(mem), viewID, lab(car));
+    dump_cd_read("  trackfly cd", cd);
+    ((CameraMover *)mem)->vtbl = &fake_mover_vt;
+    ((CameraMover *)mem)->Type = CM_TRACK_FLY;
+    return (CameraMover *)mem;
+}
+
+static int32_t trackfly_is_finished(CameraMover *m)
+{
+    printf("  trackfly fin %s\n", lab(m));
+    return trackfly_finished;
 }
 
 static void fake_dtor(void *c, int32_t flags)
@@ -445,14 +470,23 @@ static void dump_coordinators(void)
     for (i = 0; i < NK; i++) {
         const CountdownCameraCoordinator *c = &ks[i].c;
 
+        const FlyByCameraCoordinator *f = &ks[i].f;
+
         printf("  k%d %s %s %s", i, lab(c->Base.Node.next),
                lab(c->Base.Node.prev), lab(c->Base.pCameraMover));
         word(&c->Base.Disabled);
         word(&c->Base.ViewID);
         word(&c->Base.NeedToReloadCameraData);
         word(&c->Base._vtable);
-        printf(" %s", lab(c->pPlayer));
-        word(&c->CurrentCountdownNumber);
+        if (is_flyby[i]) {
+            printf(" fb");
+            word(&f->CurrentlyActiveCameraData);
+            word(&f->FlyByCameraIndex);
+            word(&f->CurrVortexCount);
+        } else {
+            printf(" %s", lab(c->pPlayer));
+            word(&c->CurrentCountdownNumber);
+        }
         printf("\n");
     }
 }
@@ -540,6 +574,8 @@ int main(int argc, char **argv)
     cameracoord_install_vtables();
     vt_install(FAKE_COORD_VT, fake_coord_vt, CAMERACOORDINATOR_VT_ENTRIES);
     gBumperCameraMoverFn = bumper;
+    gTrackFlyCameraMoverFn = trackfly;
+    gTrackFlyCameraMoverIsFinishedFn = trackfly_is_finished;
     pCurrentRace = (Race *)(void *)race_mem;
     for (i = 0; i < NMOVERS; i++)
         movers[i].vtbl = &fake_mover_vt;
@@ -606,6 +642,7 @@ int main(int argc, char **argv)
             case L_PN1:     cl->NumPlayerNisCameras[1] = v; break;
             case L_SHAKES:  cl->NumCameraShakes = v; break;
             case L_SHAKEP:  cl->Shakes = at(v); break;
+            case L_VORTEXN: cl->VortexCount = v; break;
             default:
                 fprintf(stderr, "loader field %d\n", f);
                 return 2;
@@ -670,6 +707,8 @@ int main(int argc, char **argv)
             BaseCameraCoordinator *r;
 
             printf("ccnew k%d %d\n", k, view);
+            (void)k_of(k);
+            is_flyby[k] = 0;
             r = camera_coordinator_init(k_of(k), view);
             printf("ccnew -> %s\n", lab(r));
             break;
@@ -679,6 +718,8 @@ int main(int argc, char **argv)
             CountdownCameraCoordinator *r;
 
             printf("cdnew k%d %d p%d\n", k, view, p);
+            (void)k_of(k);
+            is_flyby[k] = 0;
             r = countdown_camera_coordinator_init(
                 (CountdownCameraCoordinator *)(void *)k_of(k), view,
                 &players[p & 1]);
@@ -703,7 +744,10 @@ int main(int argc, char **argv)
         case OP_RAWDTOR: {
             int32_t k = next(), flags = next(), which = next();
             printf("rawdtor k%d %d %d\n", k, flags, which);
-            if (which)
+            if (which == 2)
+                flyby_camera_coordinator_destroy(
+                    (FlyByCameraCoordinator *)(void *)k_of(k), flags);
+            else if (which)
                 countdown_camera_coordinator_destroy(
                     (CountdownCameraCoordinator *)(void *)k_of(k), flags);
             else
@@ -757,6 +801,16 @@ int main(int argc, char **argv)
             case F_NUMBER:   c->CurrentCountdownNumber = v; break;
             case F_VPTR:     c->Base._vtable = (uint32_t)v; break;
             case F_PLAYER:   c->pPlayer = &players[v & 1]; break;
+            case F_ACTIVE:
+                ((FlyByCameraCoordinator *)(void *)c)
+                    ->CurrentlyActiveCameraData = v;
+                break;
+            case F_INDEX:
+                ((FlyByCameraCoordinator *)(void *)c)->FlyByCameraIndex = v;
+                break;
+            case F_VCOUNT:
+                ((FlyByCameraCoordinator *)(void *)c)->CurrVortexCount = v;
+                break;
             default:
                 fprintf(stderr, "coordinator field %d\n", f);
                 return 2;
@@ -770,11 +824,45 @@ int main(int argc, char **argv)
             int32_t k = next(), b = next() & 0xff;
             (void)k_of(k);
             memset(&ks[k], b, sizeof ks[0]);
+            is_flyby[k] = 0;
             break;
         }
         case OP_DUMPK:
             dump_coordinators();
             break;
+        case OP_FBNEW: {
+            int32_t k = next(), view = next();
+            FlyByCameraCoordinator *r;
+
+            printf("fbnew k%d %d\n", k, view);
+            r = flyby_camera_coordinator_init(
+                (FlyByCameraCoordinator *)(void *)k_of(k), view);
+            is_flyby[k] = 1;
+            printf("fbnew -> %s\n", lab(r));
+            break;
+        }
+        case OP_FBUPDATE: {
+            int32_t k = next();
+            float dt = fbits((uint32_t)next());
+            printf("fbupdate k%d %08x\n", k, bitsf(dt));
+            flyby_camera_coordinator_update(
+                (FlyByCameraCoordinator *)(void *)k_of(k), dt);
+            break;
+        }
+        case OP_FBFIN: {
+            int32_t k = next();
+            printf("fbfin k%d -> %d\n", k,
+                   flyby_camera_coordinator_is_finished(k_of(k)));
+            break;
+        }
+        case OP_TFFIN:
+            trackfly_finished = next();
+            break;
+        case OP_MTYPE: {
+            int32_t m = next(), t = next();
+            movers[m % NMOVERS].Type = (CameraMoverType)t;
+            break;
+        }
         default:
             fprintf(stderr, "op %d\n", op);
             return 2;
