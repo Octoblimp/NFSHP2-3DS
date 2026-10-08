@@ -119,6 +119,15 @@ extern float fDisablingImpactMagnitudeTable[3];
 // aborts.
 extern void (*gAICopDisableMyCarFn)(tCop *cop, int32_t b);
 
+// ResetAllDamage, 0x00228750: `car` made whole -- its blown tires fixed,
+// its fCarDamage 0, fTractionBoostOverride 1, its CarDamage repaired, and
+// a player's RealDriver let off its e-brake stop. The repair is
+// CarDamage's 0x001b5c20 (BodyDamage::RepairAllDamage, then
+// RethinkDamage), not ported: gCarDamageRepairAllFn, which aborts NULL
+// where retail would call it. No port car has a CarDamage yet.
+void copmanager_reset_all_damage(tCopManager *m, struct Car *car);
+extern void (*gCarDamageRepairAllFn)(void *damage);
+
 // CreateCop, 0x002272e8. Be A Cop (`beACop` nonzero): a tPlayerCop on
 // the world's first car, after the AI cops, and that car to the first
 // radar trap flagged for the race's direction, if one is. Otherwise a

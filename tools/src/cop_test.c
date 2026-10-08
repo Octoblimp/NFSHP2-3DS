@@ -1,10 +1,11 @@
 // Harness for tools/cop_check.py: runs the checker's script on cop.c --
 // tCop, tPlayerCop and tAICop's constructors and destructors, the setters,
-// ClearPursuit, ClearSpeedTrap, DisableMyCar, the zones and the drive
+// ClearPursuit, ClearSpeedTrap, DisableMyCar, the zones, the drive
 // target (IsNearPursuitTarget, InitializeDriveTarget, UpdateDriveTarget)
-// -- and on
-// copmgr.c's CreateCop, 0x002276a0 and AddCopCarToRace, and prints what
-// the model prints for the retail image. See the checker's docstring.
+// and tAICop::Think with its transitions and the limbo, disabled and
+// guard logic -- and on copmgr.c's CreateCop, 0x002276a0,
+// AddCopCarToRace and ResetAllDamage, and prints what the model prints
+// for the retail image. See the checker's docstring.
 //
 //     cop_test script.txt > out.txt
 
@@ -28,8 +29,10 @@
 #include "copdriver.h"
 #include "copmgr.h"
 #include "drivetarget.h"
+#include "drivetargetrenderer.h"
 #include "race.h"
 #include "racecoord.h"
+#include "realdriver.h"
 #include "realtime.h"
 #include "topology.h"
 #include "trackgraph.h"
@@ -125,11 +128,20 @@ RaceParameters   TheRaceParameters;
 World           *pCurrentWorld;
 float            SkipFETimeUntilCopsAppear;
 
-// copmgr.c's Think reaches these; nothing here runs it.
+// copmgr.c's Think reaches these; nothing here runs it. tAICop::Think
+// reads WorldTimeElapsed.
 float            WorldTimeElapsed;
 Race            *pCurrentRace;
 RaceCoordinator *pRaceCoordinator;
 tTrackGraph     *TheTrackGraph;
+
+// tAICop::Think's: the camera's car, and the renderer it hands the car's
+// target to.
+int32_t             CameraFollowThisCarInstead = -1;
+DriveTargetRenderer TheDriveTargetRenderer;
+
+// What World's distance to the nearest player answers, from the script.
+static float dist_answer;
 
 void trackgraph_uncloak_all_edges(tTrackGraph *g)
 {
@@ -140,9 +152,31 @@ void trackgraph_uncloak_all_edges(tTrackGraph *g)
 float world_get_distance_to_closest_player_2d(const World *w,
                                               const bVector2 *pos)
 {
-    (void)w;
-    (void)pos;
-    abort();
+    printf("  dist %s %08x %08x -> %08x\n", sym(w), fb(pos->x), fb(pos->y),
+           fb(dist_answer));
+    return dist_answer;
+}
+
+void drivetargetrenderer_set_target_to_render(DriveTargetRenderer *r,
+                                              DriveTarget *t)
+{
+    printf("  render %s", sym(r));
+    printf(" %s\n", sym(t));
+}
+
+void collisionbody_enable_collisions(CollisionBody *b)
+{
+    printf("  collon %s\n", sym(b));
+}
+
+void collisionbody_disable_collisions(CollisionBody *b)
+{
+    printf("  colloff %s\n", sym(b));
+}
+
+void realdriver_force_ebrake_stop(RealDriver *d, int32_t on)
+{
+    printf("  ebrake %s %08x\n", sym(d), (uint32_t)on);
 }
 
 #define NCARS 4
@@ -463,6 +497,40 @@ static void wreck(void *damage)
     printf("  wreck %s\n", sym(damage));
 }
 
+static void repair(void *damage)
+{
+    printf("  repair %s\n", sym(damage));
+}
+
+// The logic not ported yet, each logged by its name.
+static void logic(const char *what, tAICop *c)
+{
+    printf("  logic %s %s\n", what, sym(c));
+}
+
+static void l_istrap(tAICop *c) { logic("istrap", c); }
+static void l_iroad(tAICop *c) { logic("iroad", c); }
+static void l_strap(tAICop *c) { logic("strap", c); }
+static void l_road(tAICop *c) { logic("road", c); }
+static void l_patrol(tAICop *c) { logic("patrol", c); }
+static void l_hot(tAICop *c) { logic("hot", c); }
+static void l_caught(tAICop *c) { logic("caught", c); }
+
+static void pthink(tPlayerCop *c)
+{
+    printf("  pthink %s\n", sym(c));
+}
+
+// The NullDriver's table, for the cars' drivers: SetDesiredSpeed, logged.
+static void nd_speed(void *self, float speed, float time, float tol,
+                     int32_t allowed)
+{
+    printf("  ndspeed %s %08x %08x %08x %d\n", sym(self), fb(speed), fb(time),
+           fb(tol), allowed);
+}
+
+static VtEntry nd_vt[CARDRIVER_VT_ENTRIES];
+
 // ---------------------------------------------------------- the dump
 
 // Python's " ".join: nothing for none.
@@ -622,6 +690,168 @@ static void dump(void)
     for (k = 0; k < 7; k++)
         if (m->Cops[k] != NULL)
             dump_cop(k, m->Cops[k]);
+}
+
+// What tAICop::Think touches: the cop, its car and the car's driver.
+static void tdump(int k)
+{
+    tAICop    *a = (tAICop *)(void *)pCopManager->Cops[k];
+    Car       *car = a->Base.pMyCar;
+    CarDriver *d;
+
+    printf("T%d cop ls %08x %08x lss %08x %08x n32 %08x sst %08x n48 %08x "
+           "%08x n64 %08x %08x phys %08x delay %08x pu %s",
+           k, (uint32_t)a->Base.LogicState, (uint32_t)a->Base.DesiredLogicState,
+           (uint32_t)a->Base.LogicSubState,
+           (uint32_t)a->Base.DesiredLogicSubState, fb(a->New32),
+           fb(a->fSubStateTimer), fb(a->New48.x), fb(a->New48.y),
+           fb(a->New64), fb(a->New68), fb(a->fSecondsInPhysicsMode),
+           fb(a->fMovementModeSwitchDelay), sym(a->Base.pMyPursuit));
+    printf(" st %s\n", sym(a->pMySpeedTrap));
+    printf("T%d car render %02x lights %08x siren %08x vis %08x move %08x "
+           "vel %08x %08x %08x vmag %08x mv %08x blown %02x %02x rumble %08x "
+           "trac %08x cdmg %08x\n",
+           k, (uint8_t)car->RenderingEnabled, word(&car->CopLights),
+           (uint32_t)car->TheSirenMode, (uint32_t)car->bVisibleOnTrackMap,
+           (uint32_t)car->TheMovementMode, fb(car->State.Velocity.x),
+           fb(car->State.Velocity.y), fb(car->State.Velocity.z),
+           fb(car->State.VelocityMagnitude), (uint32_t)car->State.MatrixValid,
+           car->BlownTireBits, car->NumBlownTires,
+           fb(car->fBlownTireControllerRumbleTimer),
+           fb(car->fTractionBoostOverride),
+           fb(pCopManager->fCarDamage[car->CarIndex]));
+    d = car->pCarDriver;
+    printf("T%d drv steer %04x thr %08x brk %08x eb %08x dg %08x sg %08x "
+           "ctl %08x", k, d->Steering, fb(d->Throttle), fb(d->Brake),
+           fb(d->EBrake), (uint32_t)d->DesiredGear, (uint32_t)d->SportGear,
+           (uint32_t)((CopDriver *)(void *)car->pCarController)->State);
+    printf(" ri %s", sym(a->RouteInfo.Route));
+    printf(" %s n %02x pt0 %08x %08x\n", sym(a->RouteInfo.Point),
+           (uint8_t)d->MyDriveTarget.NumPoints,
+           fb(d->MyDriveTarget.Points[0].x), fb(d->MyDriveTarget.Points[0].y));
+}
+
+// A field of a world car, by name: v is a float's bits, or the value.
+static void car_field(Car *c, const char *f, uint32_t v)
+{
+    float x = bf(v);
+    int   i;
+
+    if (!strcmp(f, "upz"))
+        c->State.BodyMatrix.v2.z = x;
+    else if (!strcmp(f, "vmag"))
+        c->State.VelocityMagnitude = x;
+    else if (!strcmp(f, "fwd"))
+        c->State.ForwardSpeed = x;
+    else if (!strcmp(f, "vx"))
+        c->State.Velocity.x = x;
+    else if (!strcmp(f, "vy"))
+        c->State.Velocity.y = x;
+    else if (!strcmp(f, "vz"))
+        c->State.Velocity.z = x;
+    else if (!strcmp(f, "wx"))
+        c->State.AngularVelocity.x = x;
+    else if (!strcmp(f, "wy"))
+        c->State.AngularVelocity.y = x;
+    else if (!strcmp(f, "wz"))
+        c->State.AngularVelocity.z = x;
+    else if (!strcmp(f, "ang"))
+        c->State.Angle = (uint16_t)v;
+    else if (!strcmp(f, "wheels"))
+        for (i = 0; i < 4; i++)
+            c->State.WheelTouchingGround[i] = (int8_t)(v >> (8 * i));
+    else if (!strcmp(f, "blown"))
+        c->BlownTireBits = (uint8_t)v;
+    else if (!strcmp(f, "nblown"))
+        c->NumBlownTires = (uint8_t)v;
+    else if (!strcmp(f, "rumble"))
+        c->fBlownTireControllerRumbleTimer = x;
+    else if (!strcmp(f, "trac"))
+        c->fTractionBoostOverride = x;
+    else if (!strcmp(f, "move"))
+        c->TheMovementMode = (MovementMode)v;
+    else if (!strcmp(f, "mode"))
+        c->TheControlMode = (ControlMode)v;
+    else if (!strcmp(f, "drvnum"))
+        c->DriverNumber = (int16_t)v;
+    else if (!strcmp(f, "idx"))
+        c->CarIndex = (int16_t)v;
+    else if (!strcmp(f, "mv"))
+        c->State.MatrixValid = (int32_t)v;
+    else if (!strcmp(f, "air"))
+        ((CopMover *)(void *)c->pCarMover)->bIsAirborne = (int32_t)v;
+    else if (!strcmp(f, "render"))
+        c->RenderingEnabled = (int8_t)v;
+    else if (!strcmp(f, "lights"))
+        memcpy(&c->CopLights, &v, 4);
+    else if (!strcmp(f, "siren"))
+        c->TheSirenMode = (SirenMode)v;
+    else if (!strcmp(f, "vis"))
+        c->bVisibleOnTrackMap = (int32_t)v;
+    else if (!strcmp(f, "dmg"))
+        c->pCarDamage = v ? (CarDamage *)(void *)dmg_token : NULL;
+    else {
+        fprintf(stderr, "unknown car field %s\n", f);
+        exit(2);
+    }
+}
+
+static void driver_field(CarDriver *d, const char *f, uint32_t v)
+{
+    if (!strcmp(f, "steer"))
+        d->Steering = (uint16_t)v;
+    else if (!strcmp(f, "thr"))
+        d->Throttle = bf(v);
+    else if (!strcmp(f, "brk"))
+        d->Brake = bf(v);
+    else if (!strcmp(f, "eb"))
+        d->EBrake = bf(v);
+    else if (!strcmp(f, "dg"))
+        d->DesiredGear = (Gear)v;
+    else if (!strcmp(f, "sg"))
+        d->SportGear = (Gear)v;
+    else {
+        fprintf(stderr, "unknown driver field %s\n", f);
+        exit(2);
+    }
+}
+
+static void cop_field(tAICop *c, const char *f, uint32_t v)
+{
+    float x = bf(v);
+
+    if (!strcmp(f, "n32"))
+        c->New32 = x;
+    else if (!strcmp(f, "sst"))
+        c->fSubStateTimer = x;
+    else if (!strcmp(f, "phys"))
+        c->fSecondsInPhysicsMode = x;
+    else if (!strcmp(f, "delay"))
+        c->fMovementModeSwitchDelay = x;
+    else if (!strcmp(f, "n48x"))
+        c->New48.x = x;
+    else if (!strcmp(f, "n48y"))
+        c->New48.y = x;
+    else if (!strcmp(f, "dlx"))
+        c->MyDLOffset.x = x;
+    else if (!strcmp(f, "dly"))
+        c->MyDLOffset.y = x;
+    else if (!strcmp(f, "n64"))
+        c->New64 = x;
+    else if (!strcmp(f, "n68"))
+        c->New68 = x;
+    else if (!strcmp(f, "ls"))
+        c->Base.LogicState = (eLogicState)v;
+    else if (!strcmp(f, "ds"))
+        c->Base.DesiredLogicState = (eLogicState)v;
+    else if (!strcmp(f, "lss"))
+        c->Base.LogicSubState = (eLogicSubState)v;
+    else if (!strcmp(f, "dlss"))
+        c->Base.DesiredLogicSubState = (eLogicSubState)v;
+    else {
+        fprintf(stderr, "unknown cop field %s\n", f);
+        exit(2);
+    }
 }
 
 // ---------------------------------------------------------- the ops
@@ -915,6 +1145,59 @@ static void op(char **a, int na)
             printf(" pt0 %08x %08x", fb(t->Points[0].x), fb(t->Points[0].y));
         }
         printf("\n");
+    } else if (!strcmp(o, "rig")) {
+        // A world car made ready for a cop to drive: a CopDriver, a
+        // CopMover not in the air, a collision body, and its driver on
+        // the NullDriver's table.
+        int        j = atoi(a[1]);
+        Car       *c = &cars[j];
+        CopDriver *k = block(sizeof(CopDriver));
+        CopMover  *mv = block(sizeof(CopMover));
+        void      *cb = block(64);
+
+        name(k, "KJ%d", j);
+        name(mv, "MV%d", j);
+        name(cb, "CB%d", j);
+        mv->bIsAirborne = 0;
+        c->pCarController = (CarController *)(void *)k;
+        c->pCarMover = (CarMover *)(void *)mv;
+        c->pDynamicCollisionBody = cb;
+        drivers[j]._vtable = NULLDRIVER_VTABLE;
+    } else if (!strcmp(o, "cf")) {
+        car_field(&cars[atoi(a[1])], a[2], hex(a[3]));
+    } else if (!strcmp(o, "df")) {
+        driver_field(&drivers[atoi(a[1])], a[2], hex(a[3]));
+    } else if (!strcmp(o, "kf")) {
+        ((CopDriver *)(void *)cars[atoi(a[1])].pCarController)->State =
+            (eCopDriverStates)hex(a[2]);
+    } else if (!strcmp(o, "af")) {
+        cop_field((tAICop *)(void *)m->Cops[atoi(a[1])], a[2], hex(a[3]));
+    } else if (!strcmp(o, "g")) {
+        if (!strcmp(a[1], "wte"))
+            WorldTimeElapsed = bf(hex(a[2]));
+        else if (!strcmp(a[1], "camf"))
+            CameraFollowThisCarInstead = (int32_t)hex(a[2]);
+        else
+            dist_answer = bf(hex(a[2]));
+    } else if (!strcmp(o, "mdmg")) {
+        m->fCarDamage[atoi(a[1])] = bf(hex(a[2]));
+    } else if (!strcmp(o, "think")) {
+        tCop          *c = m->Cops[atoi(a[1])];
+        const VtEntry *e = slot(c, TCOP_VT_THINK);
+
+        ((void (*)(void *))e->fn)(vt_this(c, e));
+        printf("think %s\n", a[1]);
+    } else if (!strcmp(o, "hst")) {
+        taicop_handle_state_transitions(
+            (tAICop *)(void *)m->Cops[atoi(a[1])], (eLogicState)num(a[2]),
+            (eLogicState)num(a[3]));
+        printf("hst %s %s %s\n", a[1], a[2], a[3]);
+    } else if (!strcmp(o, "mmt")) {
+        taicop_movement_mode_transitions(
+            (tAICop *)(void *)m->Cops[atoi(a[1])]);
+        printf("mmt %s\n", a[1]);
+    } else if (!strcmp(o, "tdump")) {
+        tdump(atoi(a[1]));
     } else if (!strcmp(o, "new")) {
         printf("new -> %s\n", sym(taicop_new()));
     } else if (!strcmp(o, "del")) {
@@ -968,6 +1251,18 @@ int main(int argc, char **argv)
     gPursuitRemoveCopFromPursuitFn = rmcop;
     gPursuitRemovePrimarySpeakerFn = rmspk;
     gCarDamageWreckFn = wreck;
+    gCarDamageRepairAllFn = repair;
+    gAICopInitSpeedTrapLogicFn = l_istrap;
+    gAICopInitRoadBlockLogicFn = l_iroad;
+    gAICopDoSpeedTrapLogicFn = l_strap;
+    gAICopDoRoadBlockLogicFn = l_road;
+    gAICopDoDrivingOnPatrolLogicFn = l_patrol;
+    gAICopDoHotPursuitLogicFn = l_hot;
+    gAICopDoCaughtSpeederLogicFn = l_caught;
+    gPlayerCopThinkFn = pthink;
+    name(&TheDriveTargetRenderer, "DTR", 0);
+    nd_vt[CARDRIVER_VT_SET_DESIRED_SPEED / 8].fn = (VtFn)nd_speed;
+    vt_install(NULLDRIVER_VTABLE, nd_vt, CARDRIVER_VT_ENTRIES);
     cop_install_vtables();
     copmgr_install_vtables();
     while (fgets(line, sizeof line, f) != NULL) {

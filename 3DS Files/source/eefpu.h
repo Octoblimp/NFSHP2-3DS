@@ -1,5 +1,6 @@
-// eefpu -- the R5900 FPU's float-to-int conversion, its divide by zero and
-// its square root of a negative, as the port spells them.
+// eefpu -- the R5900 FPU's float-to-int conversion, its divide by zero, its
+// overflowing product and its square root of a negative, as the port spells
+// them.
 //
 // Not a port of any object. bmath.h and emath.h are faithful ports of
 // bMath.obj and eMath.obj and own no invented functions, so a helper that
@@ -70,6 +71,26 @@ static inline float ee_div(float a, float b)
         return q;
     }
     return a / b;
+}
+
+// `mul.s` past FLT_MAX.
+//
+// IEEE gives an infinity. The R5900 has none: a product too big is FLT_MAX
+// by its sign (and sets an overflow flag nothing reads). It matters where
+// ee_div's FLT_MAX is multiplied on, and then by zero: FLT_MAX times 0 is
+// 0, where an infinity times 0 is a NaN. tools/mipsemu.py's `eemul` is the
+// model's side, and its `eemul_pcs` finds the sites. The first is
+// tAICop::Think's smoothing of its offset: a part already where it is
+// wanted is 0/0, times the rate and then the frame's time.
+static inline float ee_mul(float a, float b)
+{
+    float p = a * b;
+
+    if (p > 3.40282347e+38f)
+        return 3.40282347e+38f;
+    if (p < -3.40282347e+38f)
+        return -3.40282347e+38f;
+    return p;
 }
 
 // `sqrt.s` of a negative.

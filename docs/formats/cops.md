@@ -7,7 +7,10 @@ that holds them is `cop-manager.md`'s. Slice 12b ports the records, the
 constructors and destructors, the small setters, the zone permissions
 and DisableMyCar, and the manager's CreateCop and AddCopCarToRace.
 Slice 12d adds tAICop's drive target, which CopDriver steers along.
-Think, DoSnapshot and the pursuit logic are the later slices.
+Slice 12g-1 adds tAICop's Think: its state changes, its movement modes,
+and the logic of the three states that hold still (limbo, disabled and
+guarding a place), with the manager's ResetAllDamage. The other states'
+logic, DoSnapshot and the pursuits are the later slices.
 
 | function | address | port |
 |----------|---------|------|
@@ -36,6 +39,16 @@ Think, DoSnapshot and the pursuit logic are the later slices.
 | tCopManager::CreateCop | `0x002272e8` | `copmanager_create_cop` |
 | (new) the cop cars' largest size | `0x002276a0` | `copmanager_calculate_max_cop_car_dimensions` |
 | AddCopCarToRace | `0x00227d78` | `copmgr_add_cop_car_to_race` |
+| tAICop::Think | `0x0022df88` | `taicop_think`, in the table |
+| tAICop::HandleStateTransitions | `0x0022e1f0` | `taicop_handle_state_transitions` |
+| tAICop::MovementModeTransitions | `0x0022e578` | `taicop_movement_mode_transitions` |
+| (new) hold position | `0x00230a60` | `taicop_hold_position` |
+| tAICop::DoLimboLogic | `0x00230570` | `taicop_do_limbo_logic` |
+| tAICop::DoDisabledLogic | `0x002305c8` | `taicop_do_disabled_logic` |
+| tAICop::DoGuardLocationLogic | `0x00230bf0` | `taicop_do_guard_location_logic` |
+| tPlayerCop::Think | `0x0022d5c8` | the seam `gPlayerCopThinkFn`, in the table |
+| ResetAllDamage | `0x00228750` | `copmanager_reset_all_damage` |
+| Car::GetNumWheelsOnGround | `0x001cad80` | `num_wheels_on_ground`, static in `cop.c` |
 
 The cop.obj functions are in `cop.c`, declared in `cop.h`; the three
 manager ones are in `copmgr.c`. `copdriver.c` has CopDriver, the
@@ -92,7 +105,7 @@ retail; only the names moved.
 The tables: tCop's at `0x002bd6e8`, tPlayerCop's at `0x002bd6c0` and
 tAICop's at `0x002bd698`. Slot 8 is the destructor, 16 IsAIControlled,
 24 Think and 32 DoSnapshot. tCop's last three are `__pure_virtual`.
-Think and DoSnapshot abort as not ported until 12f and 12g.
+DoSnapshot still aborts as not ported; nothing in a race reaches it yet.
 
 ## Making the cops
 
@@ -218,6 +231,111 @@ and the point's number in the route, driving line 0, no check and no
 car. With keep 0 the target's first point is then set to `pos`, in x
 and y.
 
+## Think
+
+The manager's Think (`cop-manager.md`) calls each cop's Think through its
+table, slot 24, once a frame. tPlayerCop's is Be A Cop's (12m), so its
+entry calls `gPlayerCopThinkFn` when that is bound.
+
+**tAICop::Think:**
+
+1. The grace timer at 32 counts down while above 0 (it can end below 0).
+2. If the camera follows this car (`CameraFollowThisCarInstead` is its
+   DriverNumber), the drive target renderer is pointed at the car's
+   drive target (`0x001cb600`).
+3. MovementModeTransitions.
+4. On its side or roof (the body's up vector, `BodyMatrix.v2.z`, at or
+   below 0.1) and below 10 mph (`VelocityMagnitude x 2.237`): DisableMyCar
+   with 1. Then, with any tire blown (`BlownTireBits`): DisableMyCar with
+   0. Both can happen in one frame. The flag only matters in a chase of a
+   player within 75 m, where it goes to RemovePrimarySpeaker.
+5. The sub-state's timer counts down and stops at 0. A NaN stays.
+6. If the state asked for is not the state, HandleStateTransitions from
+   one to the other, and the state becomes the one asked for.
+7. The state's logic: limbo, disabled and guard below; radar trap,
+   roadblock, patrol, hot pursuit and caught speeder through
+   `gAICopDo...LogicFn`, which do nothing while NULL (12g-2 on).
+8. The offset at 48 eases toward `MyDLOffset`: each part steps by its
+   sign times its rate (64: 6 a second across, 68: 3 along) times the
+   frame's time, or takes the rest of the way when that is nearer
+   (`|rest| < |step|`). Both rates are set back to 6 and 3 afterwards,
+   so a logic can change them for one frame only.
+
+A part already in place divides 0 by 0. On the EE that is FLT_MAX, and
+FLT_MAX times the rate is FLT_MAX again (the EE has no infinity: an
+overflowing `mul.s` gives FLT_MAX by its sign). Times a frame of 0 it is
+0, where IEEE's infinity times 0 is a NaN. The port spells the divide
+`ee_div` and both products `ee_mul` (`eefpu.h`), so the part stays put
+either way.
+
+**MovementModeTransitions** switches a cop's car between COP_MOVEMENT,
+the cheap mover it uses away from the players (`cop-mover.md`), and the
+others. It does nothing with no mover (limbo) or when DISABLED is asked
+for.
+
+- *Not in COP_MOVEMENT* (physics, or mellow after a jump): the time in
+  physics mode (84) goes up by the frame. While it is below 0 (or NaN),
+  nothing else happens. Then the switch's delay (88) is reset to 0.1 s if
+  the car is unsettled: fewer than four wheels down, or skidding (its
+  velocity's heading, `bToPolar`, more than 1820 BAM (10 degrees) off the
+  car's angle either way, at above 17.88109 m/s), or spinning (the
+  angular velocity's length above 1). The delay counts down, and at 0
+  or below it is set to 0 and the car goes back to COP_MOVEMENT.
+- *In COP_MOVEMENT:* the time in physics mode goes to 0. If the cop
+  mover says the car is in the air (`bIsAirborne`, 112), its upward speed
+  is held to 2 m/s, `VelocityMagnitude` is taken again, `MatrixValid` is
+  cleared and the delay set to 0.1 s. The car goes to MELLOW_MOVEMENT,
+  and its driver to automatic, no brake, full throttle, no e-brake,
+  straight wheels, and SetDesiredSpeed(forward speed, 0.5 s, tolerance 0,
+  allowed) through its table.
+
+1820 is gp-13336, a u16 that a static initializer
+(`_GLOBAL_$I$fNearFollowDistances`, `0x00230d00`) sets at start-up; the
+image itself holds 0 there. The difference is taken as a 16-bit angle,
+signed, and its size compared unsigned, so -32768 counts as 32768.
+
+**HandleStateTransitions(from, to)** sets the sub-state's timer to 0,
+then:
+
+| leaving | does |
+|---------|------|
+| DISABLED | ResetAllDamage |
+| LIMBO | collisions back on, the car drawn, COP_MOVEMENT, ResetAllDamage |
+| SPEED_TRAP | ClearSpeedTrap |
+
+| entering | does |
+|----------|------|
+| LIMBO | ClearPursuit; off the map, siren off, lights 0; no mover; the driver parked; collisions off; not drawn. Sub-state LIMBO_DISABLED with a 1 s timer from DISABLED, otherwise LIMBO_READY |
+| DISABLED | ClearSpeedTrap, ClearPursuit; the driver disabled; sub-state NONE; siren broken, lights 1, off the map; MELLOW_MOVEMENT; the car's driver to throttle 0, brake 0.3, e-brake 1, both gears automatic, straight wheels, then SetDesiredSpeed(0, 10 s, tolerance 0) |
+| SPEED_TRAP | ResetAllDamage, then InitSpeedTrapLogic |
+| ROAD_BLOCK | ResetAllDamage, then InitRoadBlockLogic |
+| DRIVING_ON_PATROL | ClearPursuit; off the map; InitializeDriveTarget, then UpdateDriveTarget from the car's place with keep 0; the driver patrolling; lights 0, siren off |
+| HOT_PURSUIT | lights 2; the driver in pursuit; PURSUIT_FOLLOW asked for; siren 1; on the map; sub-state NONE |
+| CAUGHT_SPEEDER | the pursuit set to NULL (not ClearPursuit: the pursuit keeps the cop); the driver parked; sub-state CAUGHTSPEEDER_TICKETING; lights 1; on the map; siren off |
+| GUARD_LOCATION | ClearSpeedTrap, ClearPursuit, ResetAllDamage; the driver parked; lights 0; sub-state NONE; off the map; siren off |
+
+The lights are a word store at 2056, as the constructor's, so the three
+bytes after `CopLights` go to 0 too. The two Init logics are seams
+(`gAICopInit...LogicFn`) that do nothing while NULL.
+
+**Holding still.** Retail's `0x00230a60` clears the car's driver's drive
+target (`Clear(NULL, 0)`, when there is a driver) and adds the car's own
+place as its one point: route -1, point -1, driving line -1, no check, no
+car. Retail adds the point without testing the driver. DoLimboLogic
+holds, then turns LIMBO_DISABLED into LIMBO_READY once the timer is
+exactly 0. DoDisabledLogic holds, then asks for LIMBO once no player is
+within 250 m (`0x0014e3e8`, which a NaN also passes). DoGuardLocationLogic
+only holds.
+
+**ResetAllDamage** (`copmgr.c`) makes a car whole: FixBlownTires
+(`0x00135120`: the rumble timer, `BlownTireBits` and `NumBlownTires` to
+0), `fTractionBoostOverride` 1, the manager's `fCarDamage[CarIndex]` 0,
+the CarDamage repaired if the car has one (`0x001b5c20`, through
+`gCarDamageRepairAllFn`), and, for a player's car (REAL_CONTROL), the
+RealDriver's e-brake stop let off. Retail's ForceEBrakeStop
+(`0x0013b558`) takes a float and stores it at 580, where the port keeps
+an int; the call passes 0, so the bits are the same.
+
 ## The zones
 
 The cops share the space around a suspect in six zones. The table
@@ -243,19 +361,26 @@ get ahead 1, or 2; block 0; the rest 6.
 Not ported yet, so NULL, and each aborts where retail would call it:
 tPursuit::RemoveCopFromPursuit (`gPursuitRemoveCopFromPursuitFn`) and
 RemovePrimarySpeaker (`gPursuitRemovePrimarySpeakerFn`), 12h and 12i;
-CarDamage's wreck (`gCarDamageWreckFn`), which no car reaches while
-CarDamage isn't built.
+CarDamage's wreck (`gCarDamageWreckFn`) and repair
+(`gCarDamageRepairAllFn`), which no car reaches while CarDamage isn't
+built.
+
+Not ported yet, and doing nothing while NULL: the two Init logics and
+five Do logics (`gAICopInitSpeedTrapLogicFn` and on), 12g-2 and 12g-3,
+and tPlayerCop's Think (`gPlayerCopThinkFn`), 12m.
 
 `main.c` binds `gAICopDisableMyCarFn` to `cop_disable_my_car`,
-`gCopMoverCtorFn` (COP_MOVEMENT's mover, 12c) and `gCopDriverCtorFn`
-(COP_CONTROL's controller, 12d). It does not bind `gAddCopCarToRaceFn`
-yet: a cop on the road needs the cops' Think (12f, 12g). Until then race
-setup passes the cops over, as it did before.
+`gCopMoverCtorFn` (COP_MOVEMENT's mover, 12c), `gCopDriverCtorFn`
+(COP_CONTROL's controller, 12d), and since 12g-1 `gAddCopCarToRaceFn`.
+So a race with cops makes their cars. Each starts in limbo and stays
+there: not drawn, parked, not colliding, off the map. Nothing asks a cop
+out of limbo until the radar traps (12j) and the pursuits (12h) are in.
+A Hot Pursuit quick race in Azahar runs at 30 fps with its four.
 
 ## The check
 
 `tools/cop_check.py` runs retail's code in mipsemu and the port in
-`tools/src/cop_test.c` on 3103 operations:
+`tools/src/cop_test.c` on 154967 operations:
 
 - the zones: the table, every request in 0..6 both ways, on a garbled
   table, and every sub-state with eight sides (NaN, -0 and the
@@ -280,7 +405,29 @@ setup passes the cops over, as it did before.
     it. The walk runs on, just short of and just past each point, past
     a route's end, across a link, and round a loop. It covers the
     restart at exactly ten by each answer, every driving line, and
-    random runs.
+    random runs;
+- Think (12g-1), on an AI cop with a rigged car (a CopDriver, a cop
+  mover and a collision body, and a NullDriver as the car's driver):
+  - HandleStateTransitions for every pair of states from -1 to 9;
+  - MovementModeTransitions in every mode, at the edges of each test:
+    the wheels, the skid angle swept through 1820 both ways and at
+    -32768, the speed one bit either side, spins of every direction,
+    the delay counting down, and in the air;
+  - Think: the grace timer, the camera, on its roof and blown tires in
+    four states (one bit either side of 0.1 and of 10 mph, NaN), in a
+    chase of a player near by, the sub-state's timer with NaN, -0 and
+    the infinities, each state staying and coming from limbo, limbo's
+    wait, disabled's 250 m, the offset's easing (a part in place, rates
+    of 0, negative and FLT_MAX, frames of 0 and below 0, the tie between
+    the step and the rest), tPlayerCop's through the table, a cop's life
+    from limbo through patrol, a chase and disabled, and 400 random runs.
+
+Think's world adds stand-ins for the drive target renderer, the
+collisions' on and off, ForceEBrakeStop, the distance to the nearest
+player (an answer the script sets), the CarDamage repair, the seven
+logics, tPlayerCop's Think and the NullDriver's SetDesiredSpeed, each
+logged. The model runs with `eediv`, `eesqrt` and `eemul`, and gp-13336
+set to 1820 as the start-up code would.
 
 The drive target's world is three routes of real points, in retail's
 layout (a 1064-byte header, then 112-byte points). Each car has a
@@ -295,18 +442,20 @@ driver. Four stand-ins answer by rules the script sets:
 DriveTarget's Clear and AddPointToTarget are logged.
 TrackRoutePoint::GetPosition runs as shipped.
 
-17105 lines, 0 differ. `--mutate`: 232 mutations, 230 caught, and two
-equivalent:
+36680 lines, 0 differ. `--mutate`: 423 mutations, 420 caught, and
+three equivalent:
 
 - tAICop's destructor storing its own table, which tCop's overwrites
   straight after;
 - UpdateDriveTarget's restart at `n >= 10` for `n == 10`. The loop's top
-  only sees n at 0 or 10.
+  only sees n at 0 or 10;
+- DoLimboLogic's `timer == 0` as `<= 0`: Think has just stopped the
+  timer at 0, and HandleStateTransitions only sets 0 or 1.
 
-`copmanager_check` links `cop.c` too (23342 lines, 0 differ). Its
+`copmanager_check` links `cop.c` too (25100 lines, 0 differ). Its
 harness, and copmover's (which links all of `copdriver.c`), stand in
-for the drive target's and CopDriver's calls with ones that abort if
-reached. carmode (which now maps CopDriver's host size back to 76),
+for the drive target's, CopDriver's and Think's calls with ones that
+abort if reached. carmode (which now maps CopDriver's host size back to 76),
 copdriver, copmover, collisionbody, drivecam, drivingchoice, hudanim,
 hudfeatures, hudrender, nearbycar, realcontroller, realdriver, trackmap,
 raceupdate, hudcop, hudscore, aidriver, aicarcontroller, beltmover,

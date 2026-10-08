@@ -46,6 +46,12 @@ console carries on where an IEEE machine goes NaN. `eediv_pcs` collects
 each instruction that took the path, so a checker can say which sites the
 port has to spell with ee_div.
 
+`eemul=True` is the same for a product too big: `mul.s` gives the EE's
++/-FLT_MAX where IEEE rounds to an infinity. That is eefpu.h's ee_mul, and
+`eemul_pcs` collects the sites. tAICop::Think is the first: ee_div's
+FLT_MAX times a rate, and then times a frame of no time, is 0 on the EE
+and a NaN on an IEEE machine.
+
 `eesqrt=True` is the same for a square root: `sqrt.s`, `vsqrt` and
 `vrsqrt` of a negative take the root of its magnitude, as the EE does
 (raising an invalid flag nothing reads), where IEEE has a NaN. That is
@@ -170,11 +176,14 @@ class Emu(object):
     RAM = 32 << 20
     RETURN = 0x0FFFFFF0        # sentinel return address: run() stops here
 
-    def __init__(self, path=ELF, ieee=False, eediv=False, eesqrt=False):
+    def __init__(self, path=ELF, ieee=False, eediv=False, eesqrt=False,
+                 eemul=False):
         self.elf = Elf(path)
         self.ieee = ieee
         self.eediv = eediv
         self.eediv_pcs = set()
+        self.eemul = eemul
+        self.eemul_pcs = set()
         self.eesqrt = eesqrt
         self.eesqrt_pcs = set()
         self.mem = bytearray(self.RAM)
@@ -662,6 +671,9 @@ class Emu(object):
                 put(sa, f(rd) - f(rt))
             elif fn == 0x02:
                 put(sa, f(rd) * f(rt))
+                if self.eemul and self.fpr[sa] & 0x7FFFFFFF == 0x7F800000:
+                    self.eemul_pcs.add(pc)
+                    self.fpr[sa] = (self.fpr[sa] & 0x80000000) | 0x7F7FFFFF
             elif fn == 0x03:
                 if self.eediv and not self.fpr[rt] & 0x7F800000:
                     self.eediv_pcs.add(pc)

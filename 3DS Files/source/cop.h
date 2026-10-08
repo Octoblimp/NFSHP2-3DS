@@ -5,9 +5,10 @@
 // and its logic states. tPlayerCop is Be A Cop's, on the player's own car.
 // tAICop makes its own car, a CopDriver drives it, and Think moves it
 // through the logic states. So far the constructors and destructors, the
-// small setters, the zone permissions and DisableMyCar are ported; Think,
-// DoSnapshot and the logic are step 12's later slices
-// (docs/formats/cops.md).
+// small setters, the zone permissions, DisableMyCar, the drive target and
+// tAICop::Think with its transitions and the limbo, disabled and guard
+// logic are ported; DoSnapshot and the other logic are step 12's later
+// slices (docs/formats/cops.md).
 
 #ifndef COP_H
 #define COP_H
@@ -136,6 +137,80 @@ void taicop_initialize_drive_target(tAICop *c);
 // InitializeDriveTarget), and the target's first point becomes `pos`.
 void taicop_update_drive_target(tAICop *c, const bVector2 *pos,
                                 int32_t keep);
+
+// tAICop::Think, 0x0022df88, table slot 24, once a frame from the cop
+// manager's Think. In order: New32 counts down while above 0; the camera's
+// car shows its driver's target; MovementModeTransitions; a car on its
+// side or roof (BodyMatrix.v2.z at most 0.1) below 10 mph is disabled
+// (DisableMyCar(1)), and so is one with a tire blown (DisableMyCar(0));
+// fSubStateTimer counts down to 0; a new DesiredLogicState goes through
+// HandleStateTransitions; the state's logic runs; and New48 eases toward
+// MyDLOffset, x at New64 and y at New68 a second, both set again to 6
+// and 3.
+void taicop_think(tAICop *c);
+
+// HandleStateTransitions(from, to), 0x0022e1f0. fSubStateTimer goes to 0.
+// Leaving DISABLED resets the car's damage (tCopManager::ResetAllDamage);
+// leaving LIMBO turns its collisions and rendering back on, puts it in
+// COP_MOVEMENT and resets its damage; leaving SPEED_TRAP lets the trap go.
+// Entering:
+//   LIMBO        off its pursuit, hidden from the map, siren and lights
+//                off, no movement, the driver parked, collisions off, not
+//                rendered; LIMBO_DISABLED with a 1 s timer from DISABLED,
+//                else LIMBO_READY.
+//   DISABLED     off its trap and pursuit, the driver disabled, siren
+//                broken, lights 1, MELLOW_MOVEMENT, and the car's driver
+//                braking (0.3, the e-brake full on) for 0 over 10 s.
+//   SPEED_TRAP   damage reset, then InitSpeedTrapLogic.
+//   ROAD_BLOCK   damage reset, then InitRoadBlockLogic.
+//   PATROL       off its pursuit, the drive target from the car's place,
+//                the driver patrolling, lights and siren off.
+//   HOT_PURSUIT  lights 2, siren 1, on the map, the driver pursuing, sub-
+//                state NONE asking for PURSUIT_FOLLOW.
+//   CAUGHT_SPEEDER  no pursuit, the driver parked, CAUGHTSPEEDER_TICKETING,
+//                lights 1, on the map, siren off.
+//   GUARD        off its trap and pursuit, damage reset, the driver parked,
+//                lights, map and siren off, sub-state NONE.
+void taicop_handle_state_transitions(tAICop *c, eLogicState from,
+                                     eLogicState to);
+
+// MovementModeTransitions, 0x0022e578: between the cheap COP_MOVEMENT and
+// the real simulation. Nothing with no movement or DISABLED asked for. Off
+// COP_MOVEMENT fSecondsInPhysicsMode counts up (below 0, or NaN, nothing
+// more happens), and a car with all four wheels down, not skidding (velocity more than 10
+// degrees off its heading above 17.88 m/s) and turning at no more than
+// 1 rad/s goes back to COP_MOVEMENT after 0.1 s more of that. In
+// COP_MOVEMENT, a car its CopMover has airborne goes to MELLOW_MOVEMENT,
+// its upward speed held to 2 m/s and its matrix out of date, with the
+// driver at full throttle keeping its forward speed.
+void taicop_movement_mode_transitions(tAICop *c);
+
+// Retail's 0x00230a60, with no demo twin: the car's driver's drive target
+// cleared and set to the car's own place. DoLimboLogic (0x00230570) holds
+// position and moves LIMBO_DISABLED on to LIMBO_READY once its timer is
+// out. DoDisabledLogic (0x002305c8) holds position and asks for LIMBO once
+// no player is within 250 m. DoGuardLocationLogic (0x00230bf0) holds
+// position.
+void taicop_hold_position(tAICop *c);
+void taicop_do_limbo_logic(tAICop *c);
+void taicop_do_disabled_logic(tAICop *c);
+void taicop_do_guard_location_logic(tAICop *c);
+
+// The rest of the logic, not ported yet: NULL seams that do nothing, so a
+// cop asked for one of these states sits in it. Nothing asks yet: the
+// speed traps (12j) and the pursuits (12h) do. InitSpeedTrapLogic
+// (0x0022e798), InitRoadBlockLogic (0x0022ebc0), DoSpeedTrapLogic
+// (0x0022e838), DoRoadBlockLogic (0x0022ec38), DoDrivingOnPatrolLogic
+// (0x0022ee50), DoHotPursuitLogic (0x0022ff58), DoCaughtSpeederLogic
+// (0x002303c8); and tPlayerCop::Think (0x0022d5c8), Be A Cop's, 12m.
+extern void (*gAICopInitSpeedTrapLogicFn)(tAICop *c);
+extern void (*gAICopInitRoadBlockLogicFn)(tAICop *c);
+extern void (*gAICopDoSpeedTrapLogicFn)(tAICop *c);
+extern void (*gAICopDoRoadBlockLogicFn)(tAICop *c);
+extern void (*gAICopDoDrivingOnPatrolLogicFn)(tAICop *c);
+extern void (*gAICopDoHotPursuitLogicFn)(tAICop *c);
+extern void (*gAICopDoCaughtSpeederLogicFn)(tAICop *c);
+extern void (*gPlayerCopThinkFn)(tPlayerCop *c);
 
 // The cops' cooperation zones. InitZonePermissionTable (0x0022f770)
 // fills nZonePermissionTable[6][6] (0x0031c5c8), which

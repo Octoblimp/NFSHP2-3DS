@@ -1,9 +1,11 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 57
-(2026-10-08): 12e, the track graph, is done, after 12d (CopDriver and
-tAICop's drive target); 12a to 12c (the cop manager, the cops, CopMover)
-were Session 56's ("First" below).
+Where the next session picks up. Updated in Session 58
+(2026-10-08): 12g-1, tAICop::Think, is done, and a race with cops now
+makes their cars, which wait in limbo until patrols and chases are
+ported. 12d to 12f (CopDriver and the drive target, the track graph,
+the manager's Think) were Session 57's; 12a to 12c (the cop manager,
+the cops, CopMover) Session 56's ("First" below).
 Session 54 (2026-10-08): the AI pack runs at 20 FPS with all eight cars in view
 (commits 569dfde and ba9ef1f), which the user accepted; see "First"
 below. Session 53 (2026-10-08) took out the mid-race hitches
@@ -152,11 +154,28 @@ pursuit.obj, on a 10 KB manager. Its slices:
   `copmanager.c`. tPursuit::Update, the supervisor's test, the speech,
   SpawnSpeedTraps, MonitorSpikeBelts, EndPullover and BeACopThink are
   NULL seams that do nothing (`docs/formats/cop-manager.md`).
-- **Next: 12g** tAICop::Think (`0x0022df88`), then bind
-  `gAddCopCarToRaceFn = copmgr_add_cop_car_to_race` in `main.c`;
-  **12h, 12i** tPursuit; **12j** roadblocks and spike strips; **12k**
-  the helicopter; **12l** pullovers and Busted; **12m** Be A Cop;
-  **12n** the radar detector's intensity.
+- **12g-1, done (Session 58):** tAICop::Think (`0x0022df88`) with
+  HandleStateTransitions, MovementModeTransitions, the limbo, disabled
+  and guard logics (they hold position), and the manager's
+  ResetAllDamage (`docs/formats/cops.md`, "Think"). The sub-states are
+  in retail's numbering (b94f189): two values the demo lacks sit at 1
+  and 2, so PURSUIT_FOLLOW is 3 and CAUGHTSPEEDER_WAITING 16.
+  `gAddCopCarToRaceFn` is bound: a Hot Pursuit race makes its four cop
+  cars, each in limbo (not drawn, parked, not colliding), and still runs
+  at 30 FPS. The seven state logics (`gAICopInit...`/`gAICopDo...LogicFn`)
+  and tPlayerCop's Think (`gPlayerCopThinkFn`) are NULL seams that do
+  nothing. `eefpu.h` has `ee_mul` (the EE's FLT_MAX for an overflowing
+  product), and `mipsemu.py` its `eemul` twin.
+- **Next: 12g-2** the patrol (DoDrivingOnPatrolLogic, `0x0022ee50`) and
+  the radar traps and roadblocks' Init and Do logics (`0x0022e798`,
+  `0x0022e838`, `0x0022ebc0`, `0x0022ec38`), naming sub-state 1 on the
+  way; **12g-3** DoHotPursuitLogic (`0x0022ff58`, its table at
+  `0x002bd670`) and DoCaughtSpeederLogic (`0x002303c8`); **12h, 12i**
+  tPursuit; **12j** SpawnSpeedTraps, roadblocks and spike strips;
+  **12k** the helicopter; **12l** pullovers and Busted; **12m** Be A
+  Cop; **12n** the radar detector's intensity. Nothing takes a cop out
+  of limbo until 12j's SpawnSpeedTraps or 12h's pursuits, so the cops
+  stay unseen until then.
 
 The test config for a race with cops is parked as
 `nfshp2_config.txt.cops` (SkipFE, track 12, 3 AI, traffic 0.5,
@@ -4584,8 +4603,9 @@ goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a to 12f are done, 12g
-  (tAICop::Think) is next. See "First" at the top.
+- **Next:** step 12, the cops: 12a to 12g-1 are done, 12g-2 (the
+  patrol and the radar-trap and roadblock logics) is next. See "First"
+  at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

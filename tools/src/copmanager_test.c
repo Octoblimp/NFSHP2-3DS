@@ -24,8 +24,10 @@
 #include "cop.h"
 #include "copmgr.h"
 #include "drivetarget.h"
+#include "drivetargetrenderer.h"
 #include "race.h"
 #include "racecoord.h"
+#include "realdriver.h"
 #include "realtime.h"
 #include "topology.h"
 #include "trackgraph.h"
@@ -402,6 +404,36 @@ void drivetarget_add_point3(DriveTarget *t, const bVector3 *p, int8_t route,
     (void)t; (void)p; (void)route; (void)rpn; (void)dl; (void)check;
     (void)car;
     unreached("drivetarget_add_point3");
+}
+
+// tAICop::Think's and ResetAllDamage's (12g). The script's cops think
+// through this harness's own tables, so these are never reached.
+int32_t             CameraFollowThisCarInstead = -1;
+DriveTargetRenderer TheDriveTargetRenderer;
+
+void drivetargetrenderer_set_target_to_render(DriveTargetRenderer *r,
+                                              DriveTarget *t)
+{
+    (void)r; (void)t;
+    unreached("drivetargetrenderer_set_target_to_render");
+}
+
+void collisionbody_enable_collisions(CollisionBody *b)
+{
+    (void)b;
+    unreached("collisionbody_enable_collisions");
+}
+
+void collisionbody_disable_collisions(CollisionBody *b)
+{
+    (void)b;
+    unreached("collisionbody_disable_collisions");
+}
+
+void realdriver_force_ebrake_stop(RealDriver *d, int32_t on)
+{
+    (void)d; (void)on;
+    unreached("realdriver_force_ebrake_stop");
 }
 
 static void disable_my_car(tCop *cop, int32_t b)

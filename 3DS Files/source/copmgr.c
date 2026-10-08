@@ -20,6 +20,7 @@
 #include "cop.h"
 #include "race.h"
 #include "racecoord.h"
+#include "realdriver.h"
 #include "realtime.h"
 #include "topology.h"
 #include "trackgraph.h"
@@ -440,6 +441,30 @@ void copmgr_car_impact(tCopManager *m, struct CarCollisionBody *b,
         } while (i < cb->NumCollisions && twoCar == 0);
     }
     copmanager_monitor_impact(m, b->pCar, amount, twoCar);
+}
+
+void (*gCarDamageRepairAllFn)(void *damage);
+
+void copmanager_reset_all_damage(tCopManager *m, Car *car)
+{
+    // Retail's FixBlownTires, 0x00135120: the three stores. The demo's
+    // (carrace.c's car_fix_blown_tires) let a RealDriver off its e-brake
+    // stop as well, which retail does below instead.
+    car->fBlownTireControllerRumbleTimer = 0.0f;
+    car->BlownTireBits = 0;
+    car->NumBlownTires = 0;
+    car->fTractionBoostOverride = 1.0f;
+    m->fCarDamage[car->CarIndex] = 0.0f;
+    if (car->pCarDamage != NULL) {
+        if (gCarDamageRepairAllFn == NULL) {
+            fprintf(stderr, "copmanager_reset_all_damage: "
+                            "no CarDamage repair (0x001b5c20)\n");
+            abort();
+        }
+        gCarDamageRepairAllFn(car->pCarDamage);
+    }
+    if (car->TheControlMode == REAL_CONTROL)
+        realdriver_force_ebrake_stop((RealDriver *)(void *)car->pCarDriver, 0);
 }
 
 // ------------------------------------------------------ the cops

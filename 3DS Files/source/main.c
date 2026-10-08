@@ -144,6 +144,7 @@
 #include "quickrace.h"
 #include "race.h"
 #include "racecoord.h"
+#include "raceinit.h"
 #include "raceupdate.h"
 #include "raceparams.h"
 #include "rcpost.h"
@@ -4394,6 +4395,9 @@ int main(int argc, char** argv)
     gCopManagerGetCopByCarFn   = copmanager_get_cop_by_car;
     // A hard enough hit on an AI cop's car disables it (cop.h).
     gAICopDisableMyCarFn       = cop_disable_my_car;
+    // The race's cop drivers each get a car, in limbo -- unseen, parked,
+    // not colliding -- until patrols and chases are ported (copmgr.h).
+    gAddCopCarToRaceFn         = copmgr_add_cop_car_to_race;
     // World's step thinks for the cops, and uncloaks the graph's cloaked
     // edges once a racer reaches a landmark that says to (copmgr.h).
     gGlobalCopThinkFn          = copmgr_global_cop_think;

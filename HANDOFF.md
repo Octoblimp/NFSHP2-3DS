@@ -17807,3 +17807,75 @@ tPursuit's AboutToSaySomething and NotInChasingState in
 
 12g, tAICop::Think (`0x0022df88`), and then bind `gAddCopCarToRaceFn`
 so the cops reach the road.
+
+## Session 58 (2026-10-08) -- 12g-1, tAICop::Think
+
+Retail's tAICop::Think and what it runs on its own, in `cop.c`, with
+ResetAllDamage in `copmgr.c`. `docs/formats/cops.md` has a new Think
+section. Before it, b94f189 put the logic sub-states in retail's
+numbering: retail has two values the demo's `.mdebug` lacks, at 1 and
+2 (2 is PATROL_ONCOMING; 1 is not named yet), so every later name is
+two higher.
+
+### What it does
+
+- **Think** (`0x0022df88`, slot 24): the grace timer at 32 counts down;
+  the camera's car shows its drive target; MovementModeTransitions; a
+  car on its side or roof below 10 mph, or with a tire blown, is
+  disabled (DisableMyCar with 1 or 0); the sub-state's timer counts
+  down to 0; a state change goes through HandleStateTransitions; the
+  state's logic runs; and the offset at 48 eases toward MyDLOffset at
+  6 and 3 a second.
+- **MovementModeTransitions** (`0x0022e578`): off COP_MOVEMENT, after
+  the time in physics mode is past 0, a 0.1 s delay that restarts while
+  the car has a wheel up, skids (more than 10 degrees off its heading
+  above 17.88 m/s) or spins (above a radian a second); at its end, back
+  to COP_MOVEMENT. On COP_MOVEMENT, a car the cop mover says is in the
+  air drops to MELLOW_MOVEMENT with its upward speed held to 2 m/s and
+  its driver on full throttle.
+- **HandleStateTransitions** (`0x0022e1f0`): what leaving DISABLED,
+  LIMBO and SPEED_TRAP undoes, and what entering each of the eight
+  states sets: the collisions, drawing, the mover, the driver's state,
+  the lights, the siren, the map and the sub-state. The doc has the
+  table.
+- **The three still states.** Limbo, disabled and guarding hold the car
+  where it is (retail's `0x00230a60`). Limbo turns LIMBO_DISABLED into
+  LIMBO_READY when its 1 s is up; disabled asks for limbo once no
+  player is within 250 m.
+- **ResetAllDamage** (`0x00228750`): the blown tires fixed, the
+  traction boost 1, the manager's damage 0, the CarDamage repaired (a
+  seam that aborts; no port car has one yet), and a player's e-brake
+  stop let off.
+- **The EE's products.** A part of the offset already in place divides
+  0 by 0, FLT_MAX on the EE, and the EE's `mul.s` gives FLT_MAX again
+  where IEEE has an infinity. Times a frame of 0 that is 0 on the EE and
+  a NaN on the 3DS. `eefpu.h` has `ee_mul` for it, and `mipsemu.py` an
+  `eemul` option that collects the sites (only this one so far).
+- **Seams.** The seven state logics and tPlayerCop's Think are NULL and
+  do nothing; CarDamage's repair aborts if reached.
+- **The cops' cars.** `main.c` now binds `gAddCopCarToRaceFn`, so a race
+  with cops makes them: each starts in limbo and stays there, since
+  nothing asks a cop out yet.
+
+### Checked
+
+- `cop_check` adds Think, HandleStateTransitions for every pair of
+  states, MovementModeTransitions at every test's edges, the three
+  still logics and ResetAllDamage: 154967 operations, 36680 lines,
+  0 differ. `--mutate`: 423 mutations, 420 caught, 3 equivalent (the
+  new one: DoLimboLogic's `== 0` as `<= 0`, since Think has just
+  stopped the timer at 0). Eleven older mutations matched the new code
+  too and are anchored again.
+- The tdump line now has the cop's route point and the drive target's
+  count and first point, which `hst_patrol_keep` needed.
+- `copmanager_test.c` stands in for Think's new calls (never reached:
+  its cops think through its own tables): 25100 lines, 0 differ. bmath,
+  bvector, car, drivetrain, physicscar, copdriver and copmover also have
+  0 differ.
+- The CIA builds. `run_azahar_quickrace.ps1`, the frontend's Hot
+  Pursuit Quick Race with 4 cops, ran 40 s with the gas held: PASS at
+  30 FPS, Speed 100%, the cop car's model loaded and no cop on screen.
+
+### Next
+
+12g-2: the patrol and the radar-trap and roadblock logics.

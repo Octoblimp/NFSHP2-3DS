@@ -133,6 +133,27 @@ S_GETRP = 0x001332d8
 S_DTCLEAR = 0x0021bbb0
 S_ADDPT = 0x0021c2b8
 
+# tAICop::Think's, and what it reaches.
+F_HST = 0x0022e1f0
+F_MMT = 0x0022e578
+S_RENDER = 0x001cb600                   # DriveTargetRenderer::SetTargetToRender
+S_COLLON = 0x001d6f18                   # CollisionBody, collisions on
+S_COLLOFF = 0x001d6f08                  # and off
+S_EBRAKE = 0x0013b558                   # RealDriver::ForceEBrakeStop
+S_DIST = 0x0014e3e8                     # World's 2D distance to a player
+S_REPAIR = 0x001b5c20                   # CarDamage's repair
+S_PTHINK = 0x0022d5c8                   # tPlayerCop::Think
+S_NDSPEED = 0x00136bd8                  # NullDriver::SetDesiredSpeed
+LOGIC = ((0x0022e798, "istrap"), (0x0022ebc0, "iroad"),
+         (0x0022e838, "strap"), (0x0022ec38, "road"),
+         (0x0022ee50, "patrol"), (0x0022ff58, "hot"),
+         (0x002303c8, "caught"))
+VT_NULLDRIVER = 0x002ae7c0
+DTR = 0x00314630                        # TheDriveTargetRenderer
+G_WTE = GP - 19560                      # WorldTimeElapsed
+G_CAMF = GP - 21528                     # CameraFollowThisCarInstead
+G_SKID = GP - 13336                     # the u16 its static initializer sets
+
 VT_TCOP = 0x002bd6e8
 VT_PCOP = 0x002bd6c0
 VT_ACOP = 0x002bd698
@@ -152,6 +173,26 @@ PURSUIT_SIZE = 64
 NPURSUITS = 4
 CAR_DRIVER = 44
 DRIVER_SIZE = 560
+CAR_MOVER, CAR_BODY = 48, 52
+# The world cars' fields Think reads and writes, at retail's offsets: the
+# `cf` op's names, each with its width (f a float, w a word, h a half, b
+# a byte).
+CAR_FIELDS = {
+    "upz": (184, "f"), "vmag": (964, "f"), "fwd": (960, "f"),
+    "vx": (112, "f"), "vy": (116, "f"), "vz": (120, "f"),
+    "wx": (208, "f"), "wy": (212, "f"), "wz": (216, "f"),
+    "ang": (932, "h"), "wheels": (848, "w"), "blown": (2124, "b"),
+    "nblown": (2125, "b"), "rumble": (2128, "f"), "trac": (1116, "f"),
+    "move": (CAR_MOVE, "w"), "mode": (CAR_MODE, "w"), "drvnum": (10, "h"),
+    "idx": (CAR_INDEX, "h"), "mv": (1088, "w"), "render": (CAR_RENDER, "b"),
+    "lights": (CAR_LIGHTS, "w"), "siren": (CAR_SIREN, "w"),
+    "vis": (CAR_VIS, "w")}
+DRIVER_FIELDS = {"steer": (528, "h"), "thr": (532, "f"), "brk": (536, "f"),
+                 "eb": (540, "f"), "dg": (544, "w"), "sg": (548, "w")}
+COP_FIELDS = {"n32": 32, "sst": 44, "phys": 84, "delay": 88, "n48x": 48,
+              "n48y": 52, "dlx": 56, "dly": 60, "n64": 64, "n68": 68,
+              "ls": 12, "ds": 16, "lss": 20, "dlss": 24}
+MOVER_AIRBORNE = 112
 NQ, QPTS = 3, 40                        # the routes, and points each
 Q_HDR, Q_PT = 1064, 112
 
@@ -384,6 +425,298 @@ def drive_target_script():
     return s
 
 
+def ulps(f, n):
+    """The float32 n steps on from f (back, for n below 0)."""
+    b = fbits(f)
+    if f < 0:
+        n = -n
+    return struct.unpack("<f", struct.pack("<I", b + n))[0]
+
+
+NAN, INF = float("nan"), float("inf")
+
+
+def prep(k=0, j=1):
+    """Every field tAICop::Think reads or writes, on cop k and its car j,
+    set to something to see it change."""
+    s = []
+    for name, val in (("upz", H(1.0)), ("vmag", H(5.0)), ("fwd", H(4.5)),
+                      ("vx", H(3.0)), ("vy", H(4.0)), ("vz", H(0.5)),
+                      ("wx", H(0.1)), ("wy", H(0.2)), ("wz", H(0.3)),
+                      ("ang", "0"), ("wheels", "01010101"), ("blown", "0"),
+                      ("nblown", "3"), ("rumble", H(0.75)),
+                      ("trac", H(1.5)), ("move", "1"), ("mode", "4"),
+                      ("drvnum", "7"), ("mv", "1"), ("render", "5"),
+                      ("lights", "11223344"), ("siren", "9"), ("vis", "7"),
+                      ("air", "0"), ("dmg", "0")):
+        s.append("cf|%d|%s|%s" % (j, name, val))
+    for name, val in (("steer", "1234"), ("thr", H(0.25)), ("brk", H(0.5)),
+                      ("eb", H(0.125)), ("dg", "3"), ("sg", "2")):
+        s.append("df|%d|%s|%s" % (j, name, val))
+    s.append("kf|%d|9" % j)
+    s.append("dl|%d|%s|%s|-1" % (k, H(0.0), H(0.0)))
+    for name, val in (("n32", H(0.0)), ("sst", H(0.0)), ("phys", H(0.0)),
+                      ("delay", H(0.0)), ("n48x", H(0.0)), ("n48y", H(0.0)),
+                      ("n64", H(6.0)), ("n68", H(3.0)), ("ls", "1"),
+                      ("ds", "1"), ("lss", "e"), ("dlss", "0")):
+        s.append("af|%d|%s|%s" % (k, name, val))
+    s += ["setp|%d|-1" % k, "strap|%d|-1" % k, "g|wte|%s" % H(1.0 / 30),
+          "g|camf|ffffffff", "g|dist|%s" % H(100.0),
+          "mdmg|0|%s" % H(0.125), "mdmg|1|%s" % H(0.25),
+          "mdmg|3|%s" % H(0.5)]
+    return s
+
+
+def think_script():
+    """tAICop::Think, HandleStateTransitions and MovementModeTransitions,
+    on AI cop 0 in world car A1, made ready by `rig`, with routes for the
+    patrol's drive target; and tPlayerCop's Think through the table."""
+    rnd = random.Random(1215)
+    s = types() + fresh()
+    s += ["wcar|0|0|%s|%s|1|2" % (F(10.0), F(20.0)),
+          "wcar|1|3|%s|%s|0|0" % (F(-30.0), F(5.5)),
+          "wcar|2|5|%s|%s|0|1" % (F(0.0), F(0.0)),
+          "wcar|3|7|%s|%s|1|3" % (F(74.0), F(0.0))]
+    s += traps([(1.0, 2.0, 0, 0), (3.0, 4.0, 100, 4)])
+    s += ["acop|0|0|4", "mycar|0|1", "rig|1", "pursuit|0|2"]
+    for q, (num, cnt, link, start, hd) in enumerate((
+            (5, 12, 1, (0.0, 0.0), 0.0),
+            (9, 30, -1, (130.0, 5.0), 10.0),
+            (200, 3, 2, (-50.0, 40.0), 95.0))):
+        s.append("qroute|%d|%d|%d|%d" % (q, num, cnt, link))
+        pts, _ = route_points(rnd, cnt, start, hd)
+        for i, w in enumerate(pts):
+            s.append("qpt|%d|%d|%s" % (q, i, "|".join(w)))
+    s += ["carq|1|0|2", "nearq|1|1|0"]
+
+    # ---- HandleStateTransitions, every way out and in
+    for frm in (-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9):
+        for to in (-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9):
+            s += prep() + ["af|0|ds|%x" % (to & M32), "setp|0|0",
+                           "strap|0|1", "af|0|sst|%s" % H(2.5),
+                           "af|0|lss|63", "af|0|dlss|62",
+                           "hst|0|%d|%d" % (frm, to), "tdump|0"]
+    # A car with a damage model; a player's car; on patrol following an
+    # offset.
+    for frm, to in ((2, 1), (1, 5), (3, 4), (8, 8), (2, 3), (1, 7)):
+        for mode, dmg in ((1, 1), (1, 0), (4, 1), (0, 0)):
+            s += prep() + ["cf|1|mode|%x" % mode, "cf|1|dmg|%d" % dmg,
+                           "cf|1|blown|5", "cf|1|idx|1", "af|0|ds|%d" % to,
+                           "hst|0|%d|%d" % (frm, to), "tdump|0"]
+    s += prep() + ["af|0|ds|5", "af|0|lss|2", "nearq|1|2|1|0|0|6",
+                   "hst|0|1|5", "tdump|0", "nearq|1|1|0"]
+
+    # ---- MovementModeTransitions
+    # No movement, or DISABLED asked for: nothing.
+    for move, ds in ((0, 1), (0, 2), (1, 2), (5, 2), (4, 2), (0, 5)):
+        s += prep() + ["cf|1|move|%d" % move, "af|0|ds|%d" % ds,
+                       "af|0|phys|%s" % H(-3.0), "cf|1|air|1",
+                       "af|0|delay|%s" % H(0.05), "mmt|0", "tdump|0"]
+    # Off COP_MOVEMENT: the time in physics first.
+    for move in (1, 2, 3, 4, 6, 7, -1):
+        for phys, wte in ((-1.0, 0.5), (-0.5, 0.5), (-0.6, 0.5),
+                          (0.0, 0.0), (NAN, 0.1), (2.0, 0.1), (-INF, 1.0),
+                          (-0.0, -0.0), (1.0, -1.0), (1.0, -1.5)):
+            s += prep() + ["cf|1|move|%x" % (move & M32),
+                           "af|0|phys|%s" % H(phys), "g|wte|%s" % H(wte),
+                           "af|0|delay|%s" % H(0.05), "mmt|0", "tdump|0"]
+    # The wheels on the ground.
+    for wheels in ("01010101", "00010101", "01000101", "01010001",
+                   "01010100", "ff010101", "80808080", "00000000",
+                   "7f017f01", "000000ff"):
+        for delay in (0.05, 0.5):
+            s += prep() + ["cf|1|wheels|%s" % wheels,
+                           "af|0|delay|%s" % H(delay), "mmt|0", "tdump|0"]
+    # Skidding: the velocity's heading against the car's, past 10 degrees
+    # at more than 17.88109 m/s. Each axis and a diagonal, against
+    # headings around each quarter.
+    skid = 17.88109
+    for vx, vy in ((10.0, 0.0), (0.0, 10.0), (-10.0, 0.0), (0.0, -10.0),
+                   (7.0, 7.0), (-3.0, 9.0), (0.0, 0.0)):
+        for base in (0, 0x4000, 0x8000, 0xc000, 0x2000, 0xa000):
+            for off in (-1822, -1821, -1820, -1819, -5, 0, 5, 1819, 1820,
+                        1821, 1822, 0x7fff, 0x8000, 0x8001):
+                for vmag in (skid, ulps(skid, 1)):
+                    s += prep() + ["cf|1|vx|%s" % H(vx), "cf|1|vy|%s" % H(vy),
+                                   "cf|1|ang|%x" % ((base + off) & 0xffff),
+                                   "cf|1|vmag|%s" % H(vmag),
+                                   "af|0|delay|%s" % H(0.5), "mmt|0",
+                                   "tdump|0"]
+    for vmag in (ulps(skid, -1), 0.0, 100.0, -100.0, NAN, INF):
+        s += prep() + ["cf|1|vx|%s" % H(10.0), "cf|1|vy|%s" % H(0.0),
+                       "cf|1|ang|8000", "cf|1|vmag|%s" % H(vmag),
+                       "af|0|delay|%s" % H(0.5), "mmt|0", "tdump|0"]
+    # Spinning: faster than a radian a second.
+    for w in ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, -1.0, 0.0),
+              (ulps(1.0, 1), 0.0, 0.0), (0.0, 0.0, ulps(-1.0, 1)),
+              (0.6, 0.8, 0.0), (0.5, 0.5, 0.70710677), (0.5, 0.5, 0.7071068),
+              (0.999, 0.0, 0.0), (NAN, 0.0, 0.0), (0.0, INF, 0.0),
+              (0.0, 0.0, 0.0), (-0.0, -0.0, -0.0), (1e20, 1e20, 1e20)):
+        s += prep() + ["cf|1|wx|%s" % H(w[0]), "cf|1|wy|%s" % H(w[1]),
+                       "cf|1|wz|%s" % H(w[2]), "af|0|delay|%s" % H(0.5),
+                       "mmt|0", "tdump|0"]
+    # Spins around a radian a second, each way round the sum.
+    srnd = random.Random(77)
+    for _ in range(120):
+        v = [srnd.gauss(0.0, 1.0) for _ in range(3)]
+        n = math.sqrt(sum(x * x for x in v))
+        v = [x / n * srnd.choice((1.0, 1.0, ulps(1.0, 1), ulps(1.0, -1)))
+             for x in v]
+        s += prep() + ["cf|1|wx|%s" % H(v[0]), "cf|1|wy|%s" % H(v[1]),
+                       "cf|1|wz|%s" % H(v[2]), "af|0|delay|%s" % H(0.5),
+                       "mmt|0", "tdump|0"]
+    # The delay's countdown, to the switch.
+    for delay, wte in ((0.3, 0.1), (0.1, 0.1), (0.2, 0.1), (NAN, 0.1),
+                       (0.0, 0.0), (-1.0, 0.0), (0.05, -0.1), (INF, 1.0),
+                       (0.1, 0.0)):
+        s += prep() + ["af|0|delay|%s" % H(delay), "g|wte|%s" % H(wte)]
+        s += ["mmt|0", "tdump|0"] * 4
+    # On COP_MOVEMENT: the time in physics back to 0, and an airborne car
+    # dropped to MELLOW_MOVEMENT.
+    for air in (0, 1, -1, 0x100):
+        s += prep() + ["cf|1|move|5", "af|0|phys|%s" % H(7.5),
+                       "cf|1|air|%x" % (air & M32), "mmt|0", "tdump|0"]
+    for vz in (3.0, 2.0, ulps(2.0, 1), ulps(2.0, -1), 1.0, -5.0, NAN, INF,
+               -INF, 0.0):
+        for fwd in (4.5, -2.0):
+            s += prep() + ["cf|1|move|5", "cf|1|air|1",
+                           "cf|1|vz|%s" % H(vz), "cf|1|fwd|%s" % H(fwd),
+                           "af|0|delay|%s" % H(0.75), "mmt|0", "tdump|0"]
+    s += prep() + ["cf|1|move|5", "cf|1|air|1", "cf|1|vx|%s" % H(1e20),
+                   "cf|1|vy|%s" % H(1e20), "cf|1|vz|%s" % H(1e20), "mmt|0",
+                   "tdump|0"]
+
+    # ---- Think
+    # New32's countdown.
+    for n32 in (1.0, 0.0, -1.0, NAN, 1e-30, 0.01, -0.0, INF):
+        s += prep() + ["af|0|n32|%s" % H(n32), "g|wte|%s" % H(0.25),
+                       "think|0", "tdump|0"]
+    # The camera's car shows its target.
+    for camf, drvnum in ((7, 7), (8, 7), (-1, -1), (-1, 7), (0x10007, 7),
+                         (0xffff, -1)):
+        s += prep() + ["g|camf|%x" % (camf & M32),
+                       "cf|1|drvnum|%x" % (drvnum & 0xffff), "think|0",
+                       "tdump|0"]
+    # On its side or roof and all but stopped, or a tire blown: disabled.
+    base = 10.0 / 2.237
+    for st in (5, 1, 2, 6):
+        for upz in (0.1, ulps(0.1, 1), ulps(0.1, -1), -1.0, NAN, 1.0, 0.0):
+            for vmag in [ulps(base, n) for n in range(-3, 4)] + [0.0, NAN]:
+                s += prep() + ["af|0|ls|%d" % st, "af|0|ds|%d" % st,
+                               "cf|1|upz|%s" % H(upz),
+                               "cf|1|vmag|%s" % H(vmag), "think|0",
+                               "tdump|0"]
+        for blown in (0, 1, 0x80, 0xff, 0x10):
+            s += prep() + ["af|0|ls|%d" % st, "af|0|ds|%d" % st,
+                           "cf|1|blown|%x" % blown, "cf|1|dmg|1", "think|0",
+                           "tdump|0"]
+    # In a chase of a player 42.5 m off: RemovePrimarySpeaker's flag is 1
+    # when on its roof, 0 for a tire.
+    s += ["pursuit|1|0"]
+    for upz, blown in ((0.05, 0), (1.0, 1), (0.05, 4)):
+        s += prep() + ["af|0|ls|6", "af|0|ds|6", "setp|0|1",
+                       "cf|1|upz|%s" % H(upz), "cf|1|vmag|%s" % H(0.0),
+                       "cf|1|blown|%x" % blown, "think|0", "tdump|0"]
+    # The sub-state's timer.
+    for sst in (1.0, 0.1, 0.0, NAN, -0.0, 0.25, -5.0, INF):
+        for wte in (0.25, 0.0, -0.0):
+            s += prep() + ["af|0|sst|%s" % H(sst), "g|wte|%s" % H(wte),
+                           "af|0|lss|5", "think|0", "tdump|0"]
+    # Each state, staying in it and coming into it from limbo.
+    for st in (-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9):
+        for ls in (st, 1):
+            s += prep() + ["af|0|ls|%x" % (ls & M32),
+                           "af|0|ds|%x" % (st & M32), "setp|0|0",
+                           "strap|0|0", "think|0", "tdump|0"]
+    # Limbo: out of DISABLED's wait.
+    for sst, lss in ((0.25, 13), (0.3, 13), (0.0, 13), (0.25, 14),
+                     (0.25, 12), (NAN, 13), (-0.0, 13)):
+        s += prep() + ["af|0|sst|%s" % H(sst), "af|0|lss|%x" % lss,
+                       "g|wte|%s" % H(0.25), "think|0", "tdump|0"]
+    # Disabled: back to limbo once 250 m from every player.
+    for dist in (100.0, 249.99998, 250.0, 250.00002, NAN, INF, -1.0):
+        s += prep() + ["af|0|ls|2", "af|0|ds|2", "g|dist|%s" % H(dist),
+                       "think|0", "tdump|0", "think|0", "tdump|0"]
+    # The offset easing to MyDLOffset.
+    for dl, n48, rate, wte in (
+            ((1.0, -1.0), (0.0, 0.0), (6.0, 3.0), 1.0 / 30),
+            ((0.1, -0.05), (0.0, 0.0), (6.0, 3.0), 1.0 / 30),
+            ((0.0, 0.0), (0.0, 0.0), (6.0, 3.0), 1.0 / 30),
+            ((0.0, 0.0), (0.0, 0.0), (6.0, 3.0), 0.0),
+            ((2.0, 2.0), (2.0, 2.0), (6.0, 3.0), 0.0),
+            ((-0.0, 0.0), (0.0, -0.0), (6.0, 3.0), 0.5),
+            ((5.0, -5.0), (-5.0, 5.0), (0.0, 0.0), 0.1),
+            ((5.0, -5.0), (-5.0, 5.0), (-6.0, -3.0), 0.1),
+            ((5.0, -5.0), (-5.0, 5.0), (6.0, 3.0), -0.1),
+            ((1e-40, -1e-40), (0.0, 0.0), (6.0, 3.0), 0.1),
+            ((NAN, INF), (0.0, 0.0), (6.0, 3.0), 0.1),
+            ((3.0, 3.0), (0.0, 0.0), (3.4e38, 3.4e38), 2.0),
+            ((0.0, 0.0), (0.0, 0.0), (3.4e38, 3.4e38), 2.0),
+            ((0.2, 0.1), (0.0, 0.0), (6.0, 3.0), ulps(1.0 / 30, 1)),
+            ((0.2, 0.1), (0.0, 0.0), (6.0, 3.0), 0.0333),
+            # a step exactly the rest, against it or with it
+            ((3.0, -1.5), (0.0, 0.0), (-6.0, -3.0), 0.5),
+            ((3.0, -1.5), (0.0, 0.0), (6.0, 3.0), -0.5),
+            ((3.0, -1.5), (0.0, 0.0), (6.0, 3.0), 0.5)):
+        s += prep() + ["af|0|dlx|%s" % H(dl[0]), "af|0|dly|%s" % H(dl[1]),
+                       "af|0|n48x|%s" % H(n48[0]),
+                       "af|0|n48y|%s" % H(n48[1]),
+                       "af|0|n64|%s" % H(rate[0]),
+                       "af|0|n68|%s" % H(rate[1]), "g|wte|%s" % H(wte)]
+        s += ["think|0", "tdump|0"] * 3
+    # tPlayerCop's Think, through its table.
+    s += ["pcop|2|3|0", "think|2"]
+
+    # ---- a cop's life: limbo, patrol, a chase, disabled and back
+    s += prep() + ["think|0", "tdump|0", "af|0|ds|5", "think|0", "tdump|0",
+                   "think|0", "af|0|ds|6", "setp|0|0", "think|0", "tdump|0",
+                   "cf|1|blown|1", "cf|1|dmg|1", "think|0", "tdump|0",
+                   "cf|1|blown|0", "think|0", "tdump|0", "g|dist|%s" % H(300.0),
+                   "think|0", "tdump|0", "think|0", "tdump|0", "af|0|ds|8",
+                   "think|0", "tdump|0", "af|0|ds|7", "think|0", "tdump|0"]
+
+    # ---- at random
+    for run in range(400):
+        s += prep()
+        ls = rnd.choice((1, 2, 3, 4, 5, 6, 7, 8))
+        ds = rnd.choice((ls, ls, rnd.choice((1, 2, 3, 4, 5, 6, 7, 8))))
+        s += ["af|0|ls|%d" % ls, "af|0|ds|%d" % ds,
+              "af|0|lss|%x" % rnd.choice((0, 2, 3, 13, 14, 15)),
+              "cf|1|move|%d" % rnd.choice((0, 1, 4, 5, 5)),
+              "cf|1|air|%d" % rnd.choice((0, 0, 1)),
+              "cf|1|wheels|%s" % rnd.choice(("01010101", "01010101",
+                                              "00010101")),
+              "cf|1|upz|%s" % H(rnd.choice((1.0, 0.5, 0.05, -0.3))),
+              "cf|1|vmag|%s" % H(rnd.uniform(0.0, 30.0)),
+              "cf|1|vx|%s" % H(rnd.uniform(-30.0, 30.0)),
+              "cf|1|vy|%s" % H(rnd.uniform(-30.0, 30.0)),
+              "cf|1|vz|%s" % H(rnd.uniform(-3.0, 3.0)),
+              "cf|1|wx|%s" % H(rnd.uniform(-1.0, 1.0)),
+              "cf|1|wy|%s" % H(rnd.uniform(-1.0, 1.0)),
+              "cf|1|wz|%s" % H(rnd.uniform(-1.0, 1.0)),
+              "cf|1|ang|%x" % rnd.randrange(0x10000),
+              "cf|1|blown|%x" % rnd.choice((0, 0, 0, 2)),
+              "cf|1|mode|%d" % rnd.choice((1, 4)),
+              "cf|1|dmg|%d" % rnd.choice((0, 1)),
+              "af|0|n32|%s" % H(rnd.choice((0.0, rnd.uniform(-1.0, 3.0)))),
+              "af|0|sst|%s" % H(rnd.choice((0.0, rnd.uniform(-1.0, 3.0)))),
+              "af|0|phys|%s" % H(rnd.uniform(-1.0, 3.0)),
+              "af|0|delay|%s" % H(rnd.uniform(-0.1, 0.3)),
+              "af|0|dlx|%s" % H(rnd.uniform(-4.0, 4.0)),
+              "af|0|dly|%s" % H(rnd.uniform(-4.0, 4.0)),
+              "af|0|n48x|%s" % H(rnd.uniform(-4.0, 4.0)),
+              "af|0|n48y|%s" % H(rnd.uniform(-4.0, 4.0)),
+              "g|wte|%s" % H(rnd.choice((1.0 / 30, 1.0 / 60,
+                                         rnd.uniform(0.0, 0.1)))),
+              "g|dist|%s" % H(rnd.uniform(150.0, 350.0)),
+              "g|camf|%x" % rnd.choice((7, 0xffffffff))]
+        if rnd.random() < 0.3:
+            s += ["setp|0|0"]
+        for _ in range(rnd.randrange(1, 4)):
+            s += ["think|0", "tdump|0"]
+    return s
+
+
 def script():
     s = types()
     s += ["info|0|0", "info|1|1", "info|2|2", "info|3|3", "info|-1|1"]
@@ -499,6 +832,9 @@ def script():
 
     # ---- the drive target
     s += drive_target_script()
+
+    # ---- Think
+    s += think_script()
     return s
 
 
@@ -506,9 +842,12 @@ def script():
 
 class Model(object):
     def __init__(self):
-        e = self.e = retail_model.emu(retail=True, ieee=True)
+        e = self.e = retail_model.emu(retail=True, ieee=True, eediv=True,
+                                      eesqrt=True, eemul=True)
         self.out = []
-        self.names = {}
+        self.dist = 0
+        e.write(G_SKID, struct.pack("<H", 1820))
+        self.names = {DTR: "DTR"}
         self.kinds = {}
         self.nm = self.no = self.nk = self.nr = 0
         self.infos = {}
@@ -567,8 +906,16 @@ class Model(object):
                       (S_WRECK, self.s_wreck), (S_NEAREST, self.s_nearest),
                       (S_NEXT, self.s_next), (S_GETROUTE, self.s_getroute),
                       (S_GETRP, self.s_getrp), (S_DTCLEAR, self.s_dtclear),
-                      (S_ADDPT, self.s_addpt)):
+                      (S_ADDPT, self.s_addpt), (S_RENDER, self.s_render),
+                      (S_COLLON, self.s_collon),
+                      (S_COLLOFF, self.s_colloff),
+                      (S_EBRAKE, self.s_ebrake), (S_DIST, self.s_dist),
+                      (S_REPAIR, self.s_repair), (S_PTHINK, self.s_pthink),
+                      (S_NDSPEED, self.s_ndspeed)):
             e.stub(a, fn)
+        for a, n in LOGIC:
+            e.stub(a, lambda em, n=n: self.emit(
+                "  logic %s %s" % (n, self.sym(em.reg[4]))))
         e.put32(G_COPPOOL, self.pool)
 
     def emit(self, line):
@@ -687,6 +1034,38 @@ class Model(object):
 
     def s_wreck(self, em):
         self.emit("  wreck %s" % self.sym(em.reg[4]))
+
+    def s_render(self, em):
+        self.emit("  render %s %s" % (self.sym(em.reg[4]),
+                                      self.sym(em.reg[5])))
+
+    def s_collon(self, em):
+        self.emit("  collon %s" % self.sym(em.reg[4]))
+
+    def s_colloff(self, em):
+        self.emit("  colloff %s" % self.sym(em.reg[4]))
+
+    def s_ebrake(self, em):
+        self.emit("  ebrake %s %08x" % (self.sym(em.reg[4]),
+                                        em.fpr[12] & M32))
+
+    def s_dist(self, em):
+        e = self.e
+        pos = em.reg[5] & M32
+        self.emit("  dist %s %08x %08x -> %08x" % (
+            self.sym(em.reg[4]), e.u32(pos), e.u32(pos + 4), self.dist))
+        em.fpr[0] = self.dist
+
+    def s_repair(self, em):
+        self.emit("  repair %s" % self.sym(em.reg[4]))
+
+    def s_pthink(self, em):
+        self.emit("  pthink %s" % self.sym(em.reg[4]))
+
+    def s_ndspeed(self, em):
+        self.emit("  ndspeed %s %08x %08x %08x %d" % (
+            self.sym(em.reg[4]), em.fpr[12] & M32, em.fpr[13] & M32,
+            em.fpr[14] & M32, s32(em.reg[5])))
 
     def qpoint(self, q, i):
         if q < 0 or i < 0:
@@ -840,14 +1219,39 @@ class Model(object):
             o("C%d drv %s" % (k, " ".join("%08x" % e.u32(d + 36 + 4 * j)
                                           for j in range(10))))
 
+    def tdump(self, k):
+        e, o = self.e, self.emit
+        c = self.cop(k)
+        u = lambda off: e.u32(c + off)                    # noqa: E731
+        o("T%d cop ls %08x %08x lss %08x %08x n32 %08x sst %08x n48 %08x "
+          "%08x n64 %08x %08x phys %08x delay %08x pu %s st %s"
+          % (k, u(12), u(16), u(20), u(24), u(32), u(44), u(48), u(52),
+             u(64), u(68), u(84), u(88), self.sym(u(0)), self.sym(u(36))))
+        car = u(4)
+        w = lambda off: e.u32(car + off)                  # noqa: E731
+        idx = s16(e.u16(car + CAR_INDEX))
+        o("T%d car render %02x lights %08x siren %08x vis %08x move %08x "
+          "vel %08x %08x %08x vmag %08x mv %08x blown %02x %02x rumble %08x "
+          "trac %08x cdmg %08x"
+          % (k, e.u8(car + CAR_RENDER), w(CAR_LIGHTS), w(CAR_SIREN),
+             w(CAR_VIS), w(CAR_MOVE), w(112), w(116), w(120), w(964),
+             w(1088), e.u8(car + 2124), e.u8(car + 2125), w(2128), w(1116),
+             e.u32(self.m + 10420 + 4 * idx)))
+        d = w(CAR_DRIVER)
+        o("T%d drv steer %04x thr %08x brk %08x eb %08x dg %08x sg %08x "
+          "ctl %08x ri %s %s n %02x pt0 %08x %08x"
+          % (k, e.u16(d + 528), e.u32(d + 532), e.u32(d + 536),
+             e.u32(d + 540), e.u32(d + 544), e.u32(d + 548),
+             e.u32(w(CAR_CTRL) + 36), self.sym(u(76)), self.sym(u(80)),
+             e.u8(d), e.u32(d + 16), e.u32(d + 20)))
+
     # ---- the script
 
-    def vcall(self, c, slot, *args):
+    def vcall(self, c, slot, *args, limit=200000):
         e = self.e
         vt = e.u32(c + 28)
         delta = struct.unpack("<h", e.read(vt + slot, 2))[0]
-        return e.call(e.u32(vt + slot + 4), c + delta, *args,
-                      limit=200000)
+        return e.call(e.u32(vt + slot + 4), c + delta, *args, limit=limit)
 
     def op(self, a):
         e, o = self.e, a[0]
@@ -1054,6 +1458,61 @@ class Model(object):
                 d = e.u32(car + CAR_DRIVER)
                 line += " pt0 %08x %08x" % (e.u32(d + 16), e.u32(d + 20))
             self.emit(line)
+        elif o == "rig":
+            j = int(a[1])
+            car = self.cars[j]
+            k = self.block(76)
+            mv = self.block(128)
+            cb = self.block(64)
+            self.names[k] = "KJ%d" % j
+            self.names[mv] = "MV%d" % j
+            self.names[cb] = "CB%d" % j
+            e.put32(mv + MOVER_AIRBORNE, 0)
+            e.put32(car + CAR_CTRL, k)
+            e.put32(car + CAR_MOVER, mv)
+            e.put32(car + CAR_BODY, cb)
+            e.put32(self.drivers[j] + 556, VT_NULLDRIVER)
+        elif o in ("cf", "df"):
+            j, name, x = int(a[1]), a[2], int(a[3], 16)
+            if o == "cf" and name == "air":
+                e.put32(e.u32(self.cars[j] + CAR_MOVER) + MOVER_AIRBORNE, x)
+            elif o == "cf" and name == "dmg":
+                e.put32(self.cars[j] + CAR_DAMAGE, self.dmg if x else 0)
+            else:
+                off, kind = (CAR_FIELDS if o == "cf" else DRIVER_FIELDS)[name]
+                at = (self.cars[j] if o == "cf" else self.drivers[j]) + off
+                if kind in "fw":
+                    e.put32(at, x)
+                elif kind == "h":
+                    e.write(at, struct.pack("<H", x & 0xffff))
+                else:
+                    e.write(at, bytes([x & 0xff]))
+        elif o == "kf":
+            e.put32(e.u32(self.cars[int(a[1])] + CAR_CTRL) + 36,
+                    int(a[2], 16))
+        elif o == "af":
+            e.put32(self.cop(int(a[1])) + COP_FIELDS[a[2]], int(a[3], 16))
+        elif o == "g":
+            x = int(a[2], 16)
+            if a[1] == "wte":
+                e.put32(G_WTE, x)
+            elif a[1] == "camf":
+                e.put32(G_CAMF, x)
+            else:
+                self.dist = x
+        elif o == "mdmg":
+            e.put32(self.m + 10420 + 4 * int(a[1]), int(a[2], 16))
+        elif o == "think":
+            self.vcall(self.cop(int(a[1])), 24, limit=2000000)
+            self.emit("think %s" % a[1])
+        elif o == "hst":
+            e.call(F_HST, self.cop(int(a[1])), v(2), v(3), limit=2000000)
+            self.emit("hst %s %s %s" % (a[1], a[2], a[3]))
+        elif o == "mmt":
+            e.call(F_MMT, self.cop(int(a[1])), limit=200000)
+            self.emit("mmt %s" % a[1])
+        elif o == "tdump":
+            self.tdump(int(a[1]))
         elif o == "new":
             self.emit("new -> %s" % self.sym(e.call(F_NEW)))
         elif o == "del":
@@ -1167,12 +1626,16 @@ MUTATIONS = [
     ("acop_point", C,
      "    c->RouteInfo.Point = NULL;\n    c->fSubStateTimer = 0.0f;\n",
      "    c->fSubStateTimer = 0.0f;\n"),
-    ("acop_substate_timer", C, "    c->fSubStateTimer = 0.0f;\n", ""),
+    ("acop_substate_timer", C,
+     "    c->fSubStateTimer = 0.0f;\n    c->Base.vptr = TAICOP_VTABLE;",
+     "    c->Base.vptr = TAICOP_VTABLE;"),
     ("acop_no_vptr", C,
      "    c->fSubStateTimer = 0.0f;\n    c->Base.vptr = TAICOP_VTABLE;",
      "    c->fSubStateTimer = 0.0f;"),
-    ("acop_clears_trap", C, "    c->fSubStateTimer = 0.0f;\n",
-     "    c->fSubStateTimer = 0.0f;\n    c->pMySpeedTrap = NULL;\n"),
+    ("acop_clears_trap", C,
+     "    c->fSubStateTimer = 0.0f;\n    c->Base.vptr = TAICOP_VTABLE;",
+     "    c->fSubStateTimer = 0.0f;\n    c->pMySpeedTrap = NULL;\n"
+     "    c->Base.vptr = TAICOP_VTABLE;"),
     ("acop_car_pool", C,
      "\"Car (cop)\", 0, CAR_MEMORY_POOL);", "\"Car (cop)\", 0, 0);"),
     ("acop_car_angle", C, "car_construct(car, info, &origin, 0, -1.0f);",
@@ -1216,15 +1679,21 @@ MUTATIONS = [
     ("acop_list_no_tail", C, "    w->CarList.prev = car;\n", ""),
     ("acop_ctrl_ai", C, "    car_set_control_mode(car, COP_CONTROL);",
      "    car_set_control_mode(car, AI_CONTROL);"),
-    ("acop_drv_state", C, "    drv->State = eCDS_PARKED;",
-     "    drv->State = eCDS_PATROLLING;"),
-    ("acop_drv_no_state", C, "    drv->State = eCDS_PARKED;\n", ""),
+    ("acop_drv_state", C, "    drv->State = eCDS_PARKED;\n    drv->nCopIndex",
+     "    drv->State = eCDS_PATROLLING;\n    drv->nCopIndex"),
+    ("acop_drv_no_state", C, "    drv->State = eCDS_PARKED;\n    drv->nCopIndex",
+     "    drv->nCopIndex"),
     ("acop_drv_index", C, "    drv->nCopIndex = c->Base.nCopNumber;",
      "    drv->nCopIndex = 0;"),
-    ("acop_move_physics", C, "    car_set_movement_mode(car, eNO_MOVEMENT);",
-     "    car_set_movement_mode(car, COP_MOVEMENT);"),
-    ("acop_rendering", C, "    car->RenderingEnabled = 0;\n", ""),
-    ("acop_phys_time", C, "    c->fSecondsInPhysicsMode = 0.0f;\n", ""),
+    ("acop_move_physics", C,
+     "    car_set_movement_mode(car, eNO_MOVEMENT);\n    car->RenderingEnabled = 0;\n\n",
+     "    car_set_movement_mode(car, COP_MOVEMENT);\n    car->RenderingEnabled = 0;\n\n"),
+    ("acop_rendering", C,
+     "    car->RenderingEnabled = 0;\n\n    c->fSecondsInPhysicsMode",
+     "\n    c->fSecondsInPhysicsMode"),
+    ("acop_phys_time", C,
+     "    c->fSecondsInPhysicsMode = 0.0f;\n    c->Base.DesiredLogicState = LS_LIMBO;",
+     "    c->Base.DesiredLogicState = LS_LIMBO;"),
     ("acop_desired_disabled", C, "    c->Base.DesiredLogicState = LS_LIMBO;",
      "    c->Base.DesiredLogicState = LS_DISABLED;"),
     ("acop_n52", C, "    c->New48.y = 0.0f;\n", ""),
@@ -1232,15 +1701,20 @@ MUTATIONS = [
     ("acop_dl_y", C, "    c->MyDLOffset.y = 0.0f;\n", ""),
     ("acop_dl_x", C, "    c->MyDLOffset.x = 0.0f;\n", ""),
     ("acop_flank", C, "    c->fFlankSide = 0.0f;\n", ""),
-    ("acop_delay", C, "    c->fMovementModeSwitchDelay = 0.0f;\n", ""),
+    ("acop_delay", C,
+     "    c->fMovementModeSwitchDelay = 0.0f;\n    c->nDrivingLineIndex = 0;",
+     "    c->nDrivingLineIndex = 0;"),
     ("acop_line", C, "    c->nDrivingLineIndex = 0;\n", ""),
     ("acop_n64", C, "    c->New64 = 6.0f;", "    c->New64 = 3.0f;"),
     ("acop_n68", C, "    c->New68 = 3.0f;", "    c->New68 = 6.0f;"),
-    ("acop_visible", C, "    car->bVisibleOnTrackMap = 0;\n", ""),
+    ("acop_visible", C,
+     "    car->bVisibleOnTrackMap = 0;\n    car->TheSirenMode = 0;",
+     "    car->TheSirenMode = 0;"),
     ("acop_siren", C, "    car->TheSirenMode = 0;\n", ""),
     ("acop_lights", C, "    car->CopLights = 0;\n", ""),
     ("acop_lights_byte", C,
-     "    memset(car->_hole2025, 0, sizeof car->_hole2025);\n", ""),
+     "    memset(car->_hole2025, 0, sizeof car->_hole2025);\n"
+     "    init_zone_permission_table();", "    init_zone_permission_table();"),
     ("acop_no_zones", C,
      "    init_zone_permission_table();\n    c->New32 = 0.0f;",
      "    c->New32 = 0.0f;"),
@@ -1270,7 +1744,10 @@ MUTATIONS = [
      "    return 1;"),
 
     # ---- ClearPursuit, ClearSpeedTrap
-    ("clearp_keeps", C, "        tcop_set_pursuit(&c->Base, NULL);\n", ""),
+    ("clearp_keeps", C,
+     "        gPursuitRemoveCopFromPursuitFn(c->Base.pMyPursuit, &c->Base);\n"
+     "        tcop_set_pursuit(&c->Base, NULL);\n",
+     "        gPursuitRemoveCopFromPursuitFn(c->Base.pMyPursuit, &c->Base);\n"),
     ("clearp_no_remove", C,
      "        gPursuitRemoveCopFromPursuitFn(c->Base.pMyPursuit, &c->Base);\n",
      ""),
@@ -1627,6 +2104,451 @@ MUTATIONS = [
     ("upd_pt0_y_x", C, "        t->Points[0].y = pos->y;", "        t->Points[0].y = pos->x;"),
     ("upd_pt0_no_x", C, "        t->Points[0].x = pos->x;\n", ""),
     ("upd_pt0_no_y", C, "        t->Points[0].y = pos->y;\n", ""),
+    # ---- tAICop::Think
+    ("think_n32_le", C, "    if (0.0f < c->New32)\n        c->New32 =",
+     "    if (0.0f <= c->New32)\n        c->New32 ="),
+    ("think_n32_always", C, "    if (0.0f < c->New32)\n        c->New32 =",
+     "    if (1)\n        c->New32 ="),
+    ("think_n32_plus", C, "        c->New32 = c->New32 - WorldTimeElapsed;",
+     "        c->New32 = c->New32 + WorldTimeElapsed;"),
+    ("think_cam_ne", C, "    if (CameraFollowThisCarInstead == car->DriverNumber)",
+     "    if (CameraFollowThisCarInstead != car->DriverNumber)"),
+    ("think_cam_index", C, "    if (CameraFollowThisCarInstead == car->DriverNumber)",
+     "    if (CameraFollowThisCarInstead == car->CarIndex)"),
+    ("think_cam_u16", C, "    if (CameraFollowThisCarInstead == car->DriverNumber)",
+     "    if (CameraFollowThisCarInstead == (uint16_t)car->DriverNumber)"),
+    ("think_no_mmt", C, "    taicop_movement_mode_transitions(c);\n\n    // On its side",
+     "\n    // On its side"),
+    ("upset_lt", C, "    if (car->State.BodyMatrix.v2.z <= COP_UPRIGHT_Z",
+     "    if (car->State.BodyMatrix.v2.z < COP_UPRIGHT_Z"),
+    ("upset_y", C, "    if (car->State.BodyMatrix.v2.z <= COP_UPRIGHT_Z",
+     "    if (car->State.BodyMatrix.v2.y <= COP_UPRIGHT_Z"),
+    ("upset_mph_le", C, "        && car->State.VelocityMagnitude * COP_MPS_TO_MPH < COP_UPSET_MPH)",
+     "        && car->State.VelocityMagnitude * COP_MPS_TO_MPH <= COP_UPSET_MPH)"),
+    ("upset_no_mph", C, "        && car->State.VelocityMagnitude * COP_MPS_TO_MPH < COP_UPSET_MPH)",
+     "        && car->State.VelocityMagnitude < COP_UPSET_MPH)"),
+    ("upset_or", C, "COP_UPRIGHT_Z\n        && car->State.VelocityMagnitude",
+     "COP_UPRIGHT_Z\n        || car->State.VelocityMagnitude"),
+    ("upset_flag0", C, "        taicop_disable_my_car(c, 1);\n    if (c->Base.pMyCar->BlownTireBits",
+     "        taicop_disable_my_car(c, 0);\n    if (c->Base.pMyCar->BlownTireBits"),
+    ("blown_flag1", C, "    if (c->Base.pMyCar->BlownTireBits != 0)\n        taicop_disable_my_car(c, 0);",
+     "    if (c->Base.pMyCar->BlownTireBits != 0)\n        taicop_disable_my_car(c, 1);"),
+    ("blown_ignored", C, "    if (c->Base.pMyCar->BlownTireBits != 0)\n        taicop_disable_my_car(c, 0);\n",
+     ""),
+    ("blown_count", C, "    if (c->Base.pMyCar->BlownTireBits != 0)",
+     "    if (c->Base.pMyCar->NumBlownTires != 0)"),
+    ("sst_le", C, "    if (t < 0.0f)\n        c->fSubStateTimer = 0.0f;",
+     "    if (t <= 0.0f)\n        c->fSubStateTimer = 0.0f;"),
+    ("sst_no_clamp", C, "    if (t < 0.0f)\n        c->fSubStateTimer = 0.0f;\n", ""),
+    ("sst_no_count", C, "    t = c->fSubStateTimer - WorldTimeElapsed;",
+     "    t = c->fSubStateTimer;"),
+    ("think_trans_always", C,
+     "    if (c->Base.LogicState != c->Base.DesiredLogicState) {\n        taicop_handle_state_transitions",
+     "    {\n        taicop_handle_state_transitions"),
+    ("think_trans_swapped", C,
+     "        taicop_handle_state_transitions(c, c->Base.LogicState,\n                                        c->Base.DesiredLogicState);",
+     "        taicop_handle_state_transitions(c, c->Base.DesiredLogicState,\n                                        c->Base.LogicState);"),
+    ("think_no_state_store", C,
+     "        c->Base.LogicState = c->Base.DesiredLogicState;\n    }\n    switch",
+     "    }\n    switch"),
+    ("think_limbo_guard", C, "    case LS_LIMBO:\n        taicop_do_limbo_logic(c);",
+     "    case LS_LIMBO:\n        taicop_do_guard_location_logic(c);"),
+    ("think_disabled_limbo", C, "    case LS_DISABLED:\n        taicop_do_disabled_logic(c);",
+     "    case LS_DISABLED:\n        taicop_do_limbo_logic(c);"),
+    ("think_strap_road", C, "        run_logic(gAICopDoSpeedTrapLogicFn, c);",
+     "        run_logic(gAICopDoRoadBlockLogicFn, c);"),
+    ("think_road_patrol", C, "        run_logic(gAICopDoRoadBlockLogicFn, c);",
+     "        run_logic(gAICopDoDrivingOnPatrolLogicFn, c);"),
+    ("think_patrol_hot", C, "        run_logic(gAICopDoDrivingOnPatrolLogicFn, c);",
+     "        run_logic(gAICopDoHotPursuitLogicFn, c);"),
+    ("think_hot_caught", C, "        run_logic(gAICopDoHotPursuitLogicFn, c);",
+     "        run_logic(gAICopDoCaughtSpeederLogicFn, c);"),
+    ("think_caught_none", C, "        run_logic(gAICopDoCaughtSpeederLogicFn, c);\n", ""),
+    ("think_guard_none", C, "    case LS_GUARD_LOCATION:\n        taicop_do_guard_location_logic(c);\n",
+     "    case LS_GUARD_LOCATION:\n"),
+    ("think_default_limbo", C, "        taicop_do_guard_location_logic(c);\n        break;\n    default:\n        break;",
+     "        taicop_do_guard_location_logic(c);\n        break;\n    default:\n        taicop_do_limbo_logic(c);\n        break;"),
+    ("ease_x_signed", C, "    if (fabsf(dx) < fabsf(sx))", "    if (dx < sx)"),
+    ("ease_x_le", C, "    if (fabsf(dx) < fabsf(sx))", "    if (fabsf(dx) <= fabsf(sx))"),
+    ("ease_y_le", C, "    if (fabsf(dy) < fabsf(sy))", "    if (fabsf(dy) <= fabsf(sy))"),
+    ("ease_x_rate_y", C,
+     "    sx = ee_mul(ee_mul(ee_div(dx, fabsf(dx)), c->New64), WorldTimeElapsed);",
+     "    sx = ee_mul(ee_mul(ee_div(dx, fabsf(dx)), c->New68), WorldTimeElapsed);"),
+    ("ease_y_rate_x", C,
+     "    sy = ee_mul(ee_mul(ee_div(dy, fabsf(dy)), c->New68), WorldTimeElapsed);",
+     "    sy = ee_mul(ee_mul(ee_div(dy, fabsf(dy)), c->New64), WorldTimeElapsed);"),
+    ("ease_no_wte", C,
+     "    sx = ee_mul(ee_mul(ee_div(dx, fabsf(dx)), c->New64), WorldTimeElapsed);",
+     "    sx = ee_mul(ee_div(dx, fabsf(dx)), c->New64);"),
+    ("ease_plain_div", C,
+     "    sx = ee_mul(ee_mul(ee_div(dx, fabsf(dx)), c->New64), WorldTimeElapsed);",
+     "    sx = ee_mul(ee_mul(dx / fabsf(dx), c->New64), WorldTimeElapsed);"),
+    ("ease_plain_mul", C,
+     "    sy = ee_mul(ee_mul(ee_div(dy, fabsf(dy)), c->New68), WorldTimeElapsed);",
+     "    sy = ee_div(dy, fabsf(dy)) * c->New68 * WorldTimeElapsed;"),
+    ("ease_x_always_step", C,
+     "        c->New48.x = c->New48.x + dx;\n    else",
+     "        c->New48.x = c->New48.x + sx;\n    else"),
+    ("ease_y_always_rest", C,
+     "    else\n        c->New48.y = c->New48.y + sy;",
+     "    else\n        c->New48.y = c->New48.y + dy;"),
+    ("ease_dy_from_x", C, "    dy = c->MyDLOffset.y - c->New48.y;",
+     "    dy = c->MyDLOffset.y - c->New48.x;"),
+    ("ease_dx_sign", C, "    dx = c->MyDLOffset.x - c->New48.x;",
+     "    dx = c->New48.x - c->MyDLOffset.x;"),
+    ("ease_n64_3", C, "    c->New64 = COP_OFFSET_RATE_X;", "    c->New64 = COP_OFFSET_RATE_Y;"),
+    ("ease_n68_kept", C, "    c->New68 = COP_OFFSET_RATE_Y;\n}", "}"),
+    ("ease_rate_x_5", C, "#define COP_OFFSET_RATE_X    6.0f", "#define COP_OFFSET_RATE_X    5.0f"),
+
+    # ---- MovementModeTransitions
+    ("mmt_none_runs", C,
+     "    if (mode == eNO_MOVEMENT || c->Base.DesiredLogicState == LS_DISABLED)",
+     "    if (c->Base.DesiredLogicState == LS_DISABLED)"),
+    ("mmt_disabled_runs", C,
+     "    if (mode == eNO_MOVEMENT || c->Base.DesiredLogicState == LS_DISABLED)",
+     "    if (mode == eNO_MOVEMENT)"),
+    ("mmt_disabled_state", C,
+     "    if (mode == eNO_MOVEMENT || c->Base.DesiredLogicState == LS_DISABLED)",
+     "    if (mode == eNO_MOVEMENT || c->Base.LogicState == LS_DISABLED)"),
+    ("mmt_phys_minus", C, "        float t = c->fSecondsInPhysicsMode + WorldTimeElapsed;",
+     "        float t = c->fSecondsInPhysicsMode - WorldTimeElapsed;"),
+    ("mmt_phys_no_store", C,
+     "        c->fSecondsInPhysicsMode = t;\n        if (!(0.0f <= t))",
+     "        if (!(0.0f <= t))"),
+    ("mmt_phys_lt", C, "        if (!(0.0f <= t))\n            return;",
+     "        if (!(0.0f < t))\n            return;"),
+    ("mmt_phys_nan", C, "        if (!(0.0f <= t))\n            return;",
+     "        if (t < 0.0f)\n            return;"),
+    ("mmt_phys_no_wait", C, "        if (!(0.0f <= t))\n            return;\n", ""),
+    ("mmt_wheels_3", C, "        if (num_wheels_on_ground(car) < 4) {",
+     "        if (num_wheels_on_ground(car) < 3) {"),
+    ("mmt_wheels_pos", C, "        if (car->State.WheelTouchingGround[i] != 0)",
+     "        if (car->State.WheelTouchingGround[i] > 0)"),
+    ("mmt_wheels_3_only", C, "    for (i = 0; i < 4; i++)\n        if (car->State.WheelTouchingGround",
+     "    for (i = 0; i < 3; i++)\n        if (car->State.WheelTouchingGround"),
+    ("mmt_skid_le", C, "            if (COP_SKID_ANGLE < (uint16_t)off",
+     "            if (COP_SKID_ANGLE <= (uint16_t)off"),
+    ("mmt_skid_angle", C, "#define COP_SKID_ANGLE       1820",
+     "#define COP_SKID_ANGLE       1821"),
+    ("mmt_skid_or", C, "                && COP_SKID_SPEED < car->State.VelocityMagnitude)",
+     "                || COP_SKID_SPEED < car->State.VelocityMagnitude)"),
+    ("mmt_skid_speed_le", C, "                && COP_SKID_SPEED < car->State.VelocityMagnitude)",
+     "                && COP_SKID_SPEED <= car->State.VelocityMagnitude)"),
+    ("mmt_skid_speed_fwd", C, "                && COP_SKID_SPEED < car->State.VelocityMagnitude)",
+     "                && COP_SKID_SPEED < car->State.ForwardSpeed)"),
+    ("mmt_skid_no_abs", C, "            if (off < 0)\n                off = -off;\n", ""),
+    ("mmt_skid_unsigned", C,
+     "            off = (int16_t)(uint16_t)(pol.a - car->State.Angle);",
+     "            off = (uint16_t)(pol.a - car->State.Angle);"),
+    ("mmt_skid_steer", C,
+     "            off = (int16_t)(uint16_t)(pol.a - car->State.Angle);",
+     "            off = (int16_t)(uint16_t)(pol.a - car->State.SteeringAngle);"),
+    ("mmt_skid_no_spin", C,
+     "                reset = 1;\n            else if (COP_SPIN_RATE",
+     "                reset = 1;\n            else if (0 && COP_SPIN_RATE"),
+    ("mmt_spin_le", C, "            else if (COP_SPIN_RATE\n                     < sqrtf(",
+     "            else if (COP_SPIN_RATE\n                     <= sqrtf("),
+    ("mmt_spin_no_z", C,
+     "                     < sqrtf((w->x * w->x + w->y * w->y) + w->z * w->z))",
+     "                     < sqrtf(w->x * w->x + w->y * w->y))"),
+    ("mmt_spin_order", C,
+     "                     < sqrtf((w->x * w->x + w->y * w->y) + w->z * w->z))",
+     "                     < sqrtf(w->x * w->x + (w->y * w->y + w->z * w->z)))"),
+    ("mmt_no_reset_delay", C,
+     "        if (reset)\n            c->fMovementModeSwitchDelay = COP_SWITCH_DELAY;\n", ""),
+    ("mmt_reset_switches", C,
+     "        if (reset)\n            c->fMovementModeSwitchDelay = COP_SWITCH_DELAY;\n",
+     "        if (reset)\n            c->fMovementModeSwitchDelay = 0.0f;\n"),
+    ("mmt_delay_lt", C, "        if (t <= 0.0f) {\n            c->fMovementModeSwitchDelay = 0.0f;",
+     "        if (t < 0.0f) {\n            c->fMovementModeSwitchDelay = 0.0f;"),
+    ("mmt_delay_no_count", C, "        t = c->fMovementModeSwitchDelay - WorldTimeElapsed;",
+     "        t = c->fMovementModeSwitchDelay;"),
+    ("mmt_delay_no_zero", C,
+     "            c->fMovementModeSwitchDelay = 0.0f;\n            car_set_movement_mode(car, COP_MOVEMENT);",
+     "            car_set_movement_mode(car, COP_MOVEMENT);"),
+    ("mmt_switch_mellow", C,
+     "            c->fMovementModeSwitchDelay = 0.0f;\n            car_set_movement_mode(car, COP_MOVEMENT);",
+     "            c->fMovementModeSwitchDelay = 0.0f;\n            car_set_movement_mode(car, MELLOW_MOVEMENT);"),
+    ("mmt_cop_phys_kept", C,
+     "    c->fSecondsInPhysicsMode = 0.0f;\n    if (((CopMover", "    if (((CopMover"),
+    ("mmt_air_ignored", C,
+     "    if (((CopMover *)(void *)car->pCarMover)->bIsAirborne == 0)\n        return;\n",
+     "    return;\n"),
+    ("mmt_air_any", C,
+     "    if (((CopMover *)(void *)car->pCarMover)->bIsAirborne == 0)\n        return;\n",
+     ""),
+    ("mmt_air_clamp_abs", C, "        if (COP_AIRBORNE_MAX_Z < v->z)",
+     "        if (COP_AIRBORNE_MAX_Z < fabsf(v->z))"),
+    ("mmt_air_no_clamp", C, "        if (COP_AIRBORNE_MAX_Z < v->z)\n            v->z = COP_AIRBORNE_MAX_Z;\n", ""),
+    ("mmt_air_clamp_1", C, "#define COP_AIRBORNE_MAX_Z   2.0f", "#define COP_AIRBORNE_MAX_Z   1.0f"),
+    ("mmt_air_mag_old", C,
+     "        car->State.VelocityMagnitude =\n            sqrtf((v->x * v->x + v->y * v->y) + v->z * v->z);\n", ""),
+    ("mmt_air_mag_2d", C,
+     "            sqrtf((v->x * v->x + v->y * v->y) + v->z * v->z);",
+     "            sqrtf(v->x * v->x + v->y * v->y);"),
+    ("mmt_air_mv", C, "        car->State.MatrixValid = 0;\n", ""),
+    ("mmt_air_delay", C,
+     "        c->fMovementModeSwitchDelay = COP_SWITCH_DELAY;\n        car_set_movement_mode(car, MELLOW_MOVEMENT);",
+     "        car_set_movement_mode(car, MELLOW_MOVEMENT);"),
+    ("mmt_air_physics", C,
+     "        c->fMovementModeSwitchDelay = COP_SWITCH_DELAY;\n        car_set_movement_mode(car, MELLOW_MOVEMENT);",
+     "        c->fMovementModeSwitchDelay = COP_SWITCH_DELAY;\n        car_set_movement_mode(car, PHYSICS_MOVEMENT);"),
+    ("mmt_air_gear", C, "        d->DesiredGear = AUTOMATIC;\n        d->Brake = 0.0f;",
+     "        d->Brake = 0.0f;"),
+    ("mmt_air_brake", C, "        d->DesiredGear = AUTOMATIC;\n        d->Brake = 0.0f;",
+     "        d->DesiredGear = AUTOMATIC;"),
+    ("mmt_air_throttle", C, "        d->Throttle = 1.0f;", "        d->Throttle = 0.0f;"),
+    ("mmt_air_ebrake", C, "        d->Throttle = 1.0f;\n        d->EBrake = 0.0f;",
+     "        d->Throttle = 1.0f;"),
+    ("mmt_air_steer", C, "        d->EBrake = 0.0f;\n        d->Steering = 0;", "        d->EBrake = 0.0f;"),
+    ("mmt_air_speed_vmag", C,
+     "        set_desired_speed(d, car->State.ForwardSpeed, 0.5f, d->Brake);",
+     "        set_desired_speed(d, car->State.VelocityMagnitude, 0.5f, d->Brake);"),
+    ("mmt_air_time", C,
+     "        set_desired_speed(d, car->State.ForwardSpeed, 0.5f, d->Brake);",
+     "        set_desired_speed(d, car->State.ForwardSpeed, 1.0f, d->Brake);"),
+    ("mmt_air_tol", C,
+     "        set_desired_speed(d, car->State.ForwardSpeed, 0.5f, d->Brake);",
+     "        set_desired_speed(d, car->State.ForwardSpeed, 0.5f, d->Throttle);"),
+
+    # ---- HandleStateTransitions
+    ("hst_no_sst", C, "    c->fSubStateTimer = 0.0f;\n\n    // Leaving.", "\n    // Leaving."),
+    ("hst_from_disabled_kept", C,
+     "    if (from == LS_DISABLED) {\n        copmanager_reset_all_damage(pCopManager, car);\n",
+     "    if (from == LS_DISABLED) {\n"),
+    ("hst_from_limbo_coll", C,
+     "        collisionbody_enable_collisions(&car->pDynamicCollisionBody->Dynamic.Body);\n", ""),
+    ("hst_from_limbo_render", C,
+     "        car->RenderingEnabled = 1;\n        car_set_movement_mode(car, COP_MOVEMENT);",
+     "        car_set_movement_mode(car, COP_MOVEMENT);"),
+    ("hst_from_limbo_mellow", C,
+     "        car->RenderingEnabled = 1;\n        car_set_movement_mode(car, COP_MOVEMENT);",
+     "        car->RenderingEnabled = 1;\n        car_set_movement_mode(car, MELLOW_MOVEMENT);"),
+    ("hst_from_limbo_no_reset", C,
+     "        car_set_movement_mode(car, COP_MOVEMENT);\n        copmanager_reset_all_damage(pCopManager, car);\n    } else if (from == LS_SPEED_TRAP) {",
+     "        car_set_movement_mode(car, COP_MOVEMENT);\n    } else if (from == LS_SPEED_TRAP) {"),
+    ("hst_from_strap_kept", C,
+     "    } else if (from == LS_SPEED_TRAP) {\n        taicop_clear_speed_trap(c);\n",
+     "    } else if (from == LS_SPEED_TRAP) {\n"),
+    ("hst_from_road_clears", C, "    } else if (from == LS_SPEED_TRAP) {",
+     "    } else if (from == LS_SPEED_TRAP || from == LS_ROAD_BLOCK) {"),
+    ("hst_limbo_keeps_pursuit", C,
+     "    case LS_LIMBO:\n        taicop_clear_pursuit(c);\n", "    case LS_LIMBO:\n"),
+    ("hst_limbo_vis", C,
+     "        taicop_clear_pursuit(c);\n        car->bVisibleOnTrackMap = 0;\n        car->TheSirenMode = SIREN_MODE_NONE;\n        set_cop_lights(car, 0);\n        car_set_movement_mode(car, eNO_MOVEMENT);",
+     "        taicop_clear_pursuit(c);\n        car->TheSirenMode = SIREN_MODE_NONE;\n        set_cop_lights(car, 0);\n        car_set_movement_mode(car, eNO_MOVEMENT);"),
+    ("hst_limbo_siren", C,
+     "        car->TheSirenMode = SIREN_MODE_NONE;\n        set_cop_lights(car, 0);\n        car_set_movement_mode(car, eNO_MOVEMENT);",
+     "        set_cop_lights(car, 0);\n        car_set_movement_mode(car, eNO_MOVEMENT);"),
+    ("hst_limbo_lights_byte", C,
+     "        set_cop_lights(car, 0);\n        car_set_movement_mode(car, eNO_MOVEMENT);",
+     "        car->CopLights = 0;\n        car_set_movement_mode(car, eNO_MOVEMENT);"),
+    ("hst_limbo_move", C, "        car_set_movement_mode(car, eNO_MOVEMENT);\n        drv->State = eCDS_PARKED;",
+     "        drv->State = eCDS_PARKED;"),
+    ("hst_limbo_drv", C, "        car_set_movement_mode(car, eNO_MOVEMENT);\n        drv->State = eCDS_PARKED;",
+     "        car_set_movement_mode(car, eNO_MOVEMENT);\n        drv->State = eCDS_DISABLED;"),
+    ("hst_limbo_coll", C,
+     "        collisionbody_disable_collisions(\n            &car->pDynamicCollisionBody->Dynamic.Body);\n", ""),
+    ("hst_limbo_render", C,
+     "        car->RenderingEnabled = 0;\n        if (from == LS_DISABLED) {",
+     "        if (from == LS_DISABLED) {"),
+    ("hst_limbo_from_any", C,
+     "        if (from == LS_DISABLED) {\n            c->Base.LogicSubState = LSS_LIMBO_DISABLED;",
+     "        if (from != LS_DISABLED) {\n            c->Base.LogicSubState = LSS_LIMBO_DISABLED;"),
+    ("hst_limbo_timer", C, "            c->fSubStateTimer = 1.0f;", "            c->fSubStateTimer = 0.5f;"),
+    ("hst_limbo_no_timer", C, "            c->fSubStateTimer = 1.0f;\n", ""),
+    ("hst_limbo_ready", C,
+     "        } else {\n            c->Base.LogicSubState = LSS_LIMBO_READY;\n        }",
+     "        } else {\n            c->Base.LogicSubState = LSS_NONE;\n        }"),
+    ("hst_dis_keeps_trap", C,
+     "        taicop_clear_speed_trap(c);\n        taicop_clear_pursuit(c);\n        drv->State = eCDS_DISABLED;",
+     "        taicop_clear_pursuit(c);\n        drv->State = eCDS_DISABLED;"),
+    ("hst_dis_keeps_pursuit", C,
+     "        taicop_clear_pursuit(c);\n        drv->State = eCDS_DISABLED;",
+     "        drv->State = eCDS_DISABLED;"),
+    ("hst_dis_drv", C, "        drv->State = eCDS_DISABLED;\n        c->Base.LogicSubState = LSS_NONE;",
+     "        drv->State = eCDS_PARKED;\n        c->Base.LogicSubState = LSS_NONE;"),
+    ("hst_dis_lss", C,
+     "        drv->State = eCDS_DISABLED;\n        c->Base.LogicSubState = LSS_NONE;\n",
+     "        drv->State = eCDS_DISABLED;\n"),
+    ("hst_dis_siren", C, "        car->TheSirenMode = SIREN_MODE_BROKEN;",
+     "        car->TheSirenMode = SIREN_MODE_NONE;"),
+    ("hst_dis_lights", C,
+     "        car->TheSirenMode = SIREN_MODE_BROKEN;\n        set_cop_lights(car, 1);",
+     "        car->TheSirenMode = SIREN_MODE_BROKEN;\n        set_cop_lights(car, 2);"),
+    ("hst_dis_vis", C,
+     "        set_cop_lights(car, 1);\n        car->bVisibleOnTrackMap = 0;\n        car_set_movement_mode(car, MELLOW_MOVEMENT);",
+     "        set_cop_lights(car, 1);\n        car_set_movement_mode(car, MELLOW_MOVEMENT);"),
+    ("hst_dis_move", C,
+     "        car->bVisibleOnTrackMap = 0;\n        car_set_movement_mode(car, MELLOW_MOVEMENT);\n        d = car->pCarDriver;",
+     "        car->bVisibleOnTrackMap = 0;\n        d = car->pCarDriver;"),
+    ("hst_dis_thr", C, "        d->Throttle = 0.0f;\n        d->Brake = COP_DISABLED_BRAKE;",
+     "        d->Brake = COP_DISABLED_BRAKE;"),
+    ("hst_dis_brake", C, "        d->Brake = COP_DISABLED_BRAKE;", "        d->Brake = 1.0f;"),
+    ("hst_dis_ebrake", C, "        d->EBrake = 1.0f;\n        d->SportGear", "        d->EBrake = 0.0f;\n        d->SportGear"),
+    ("hst_dis_sport", C, "        d->SportGear = AUTOMATIC;\n", ""),
+    ("hst_dis_steer", C, "        d->SportGear = AUTOMATIC;\n        d->Steering = 0;",
+     "        d->SportGear = AUTOMATIC;"),
+    ("hst_dis_gear", C, "        d->Steering = 0;\n        d->DesiredGear = AUTOMATIC;\n        set_desired_speed(d, d->Throttle",
+     "        d->Steering = 0;\n        set_desired_speed(d, d->Throttle"),
+    ("hst_dis_speed_time", C, "        set_desired_speed(d, d->Throttle, 10.0f, d->Throttle);",
+     "        set_desired_speed(d, d->Throttle, 0.5f, d->Throttle);"),
+    ("hst_dis_speed_brake", C, "        set_desired_speed(d, d->Throttle, 10.0f, d->Throttle);",
+     "        set_desired_speed(d, d->Brake, 10.0f, d->Throttle);"),
+    ("hst_dis_no_speed", C, "        set_desired_speed(d, d->Throttle, 10.0f, d->Throttle);\n", ""),
+    ("hst_strap_no_reset", C,
+     "    case LS_SPEED_TRAP:\n        copmanager_reset_all_damage(pCopManager, car);\n",
+     "    case LS_SPEED_TRAP:\n"),
+    ("hst_strap_init_road", C,
+     "            gAICopInitSpeedTrapLogicFn(c);", "            gAICopInitRoadBlockLogicFn(c);"),
+    ("hst_road_no_reset", C,
+     "    case LS_ROAD_BLOCK:\n        copmanager_reset_all_damage(pCopManager, car);\n",
+     "    case LS_ROAD_BLOCK:\n"),
+    ("hst_road_init_none", C,
+     "        if (gAICopInitRoadBlockLogicFn != NULL)\n            gAICopInitRoadBlockLogicFn(c);\n", ""),
+    ("hst_patrol_keeps_pursuit", C,
+     "    case LS_DRIVING_ON_PATROL:\n        taicop_clear_pursuit(c);\n",
+     "    case LS_DRIVING_ON_PATROL:\n"),
+    ("hst_patrol_vis", C,
+     "        taicop_clear_pursuit(c);\n        car->bVisibleOnTrackMap = 0;\n        taicop_initialize_drive_target(c);",
+     "        taicop_clear_pursuit(c);\n        taicop_initialize_drive_target(c);"),
+    ("hst_patrol_no_init", C,
+     "        car->bVisibleOnTrackMap = 0;\n        taicop_initialize_drive_target(c);\n",
+     "        car->bVisibleOnTrackMap = 0;\n"),
+    ("hst_patrol_no_update", C,
+     "        taicop_update_drive_target(\n            c, (const bVector2 *)(const void *)&car->State.Position, 0);\n", ""),
+    ("hst_patrol_keep", C,
+     "            c, (const bVector2 *)(const void *)&car->State.Position, 0);",
+     "            c, (const bVector2 *)(const void *)&car->State.Position, 1);"),
+    ("hst_patrol_drv", C, "        drv->State = eCDS_PATROLLING;", "        drv->State = eCDS_PARKED;"),
+    ("hst_patrol_lights", C,
+     "        drv->State = eCDS_PATROLLING;\n        set_cop_lights(car, 0);\n",
+     "        drv->State = eCDS_PATROLLING;\n"),
+    ("hst_patrol_siren", C,
+     "        set_cop_lights(car, 0);\n        car->TheSirenMode = SIREN_MODE_NONE;\n        break;\n    case LS_HOT_PURSUIT:",
+     "        set_cop_lights(car, 0);\n        break;\n    case LS_HOT_PURSUIT:"),
+    ("hst_hot_lights", C, "        set_cop_lights(car, 2);\n        drv->State = eCDS_PURSUIT;",
+     "        set_cop_lights(car, 1);\n        drv->State = eCDS_PURSUIT;"),
+    ("hst_hot_drv", C, "        drv->State = eCDS_PURSUIT;", "        drv->State = eCDS_PATROLLING;"),
+    ("hst_hot_dlss", C, "        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;",
+     "        c->Base.LogicSubState = LSS_PURSUIT_FOLLOW;"),
+    ("hst_hot_siren", C, "        car->TheSirenMode = SIREN_MODE_01;", "        car->TheSirenMode = SIREN_MODE_02;"),
+    ("hst_hot_vis", C,
+     "        car->TheSirenMode = SIREN_MODE_01;\n        car->bVisibleOnTrackMap = 1;",
+     "        car->TheSirenMode = SIREN_MODE_01;"),
+    ("hst_hot_lss", C,
+     "        car->bVisibleOnTrackMap = 1;\n        c->Base.LogicSubState = LSS_NONE;\n        break;\n    case LS_CAUGHT_SPEEDER:",
+     "        car->bVisibleOnTrackMap = 1;\n        break;\n    case LS_CAUGHT_SPEEDER:"),
+    ("hst_caught_clears", C,
+     "    case LS_CAUGHT_SPEEDER:\n        tcop_set_pursuit(&c->Base, NULL);",
+     "    case LS_CAUGHT_SPEEDER:\n        taicop_clear_pursuit(c);"),
+    ("hst_caught_keeps", C,
+     "    case LS_CAUGHT_SPEEDER:\n        tcop_set_pursuit(&c->Base, NULL);\n",
+     "    case LS_CAUGHT_SPEEDER:\n"),
+    ("hst_caught_drv", C,
+     "        tcop_set_pursuit(&c->Base, NULL);\n        drv->State = eCDS_PARKED;",
+     "        tcop_set_pursuit(&c->Base, NULL);\n        drv->State = eCDS_PURSUIT;"),
+    ("hst_caught_lss", C, "        c->Base.LogicSubState = LSS_CAUGHTSPEEDER_TICKETING;",
+     "        c->Base.LogicSubState = LSS_CAUGHTSPEEDER_WAITING;"),
+    ("hst_caught_lights", C,
+     "        c->Base.LogicSubState = LSS_CAUGHTSPEEDER_TICKETING;\n        set_cop_lights(car, 1);",
+     "        c->Base.LogicSubState = LSS_CAUGHTSPEEDER_TICKETING;\n        set_cop_lights(car, 2);"),
+    ("hst_caught_vis", C,
+     "        set_cop_lights(car, 1);\n        car->bVisibleOnTrackMap = 1;\n        car->TheSirenMode = SIREN_MODE_NONE;\n        break;\n    case LS_GUARD",
+     "        set_cop_lights(car, 1);\n        car->TheSirenMode = SIREN_MODE_NONE;\n        break;\n    case LS_GUARD"),
+    ("hst_caught_siren", C,
+     "        car->bVisibleOnTrackMap = 1;\n        car->TheSirenMode = SIREN_MODE_NONE;\n        break;\n    case LS_GUARD",
+     "        car->bVisibleOnTrackMap = 1;\n        break;\n    case LS_GUARD"),
+    ("hst_guard_keeps_trap", C,
+     "    case LS_GUARD_LOCATION:\n        taicop_clear_speed_trap(c);\n",
+     "    case LS_GUARD_LOCATION:\n"),
+    ("hst_guard_keeps_pursuit", C,
+     "        taicop_clear_speed_trap(c);\n        taicop_clear_pursuit(c);\n        copmanager_reset_all_damage(pCopManager, car);\n        drv->State = eCDS_PARKED;",
+     "        taicop_clear_speed_trap(c);\n        copmanager_reset_all_damage(pCopManager, car);\n        drv->State = eCDS_PARKED;"),
+    ("hst_guard_no_reset", C,
+     "        copmanager_reset_all_damage(pCopManager, car);\n        drv->State = eCDS_PARKED;\n        set_cop_lights(car, 0);",
+     "        drv->State = eCDS_PARKED;\n        set_cop_lights(car, 0);"),
+    ("hst_guard_drv", C,
+     "        drv->State = eCDS_PARKED;\n        set_cop_lights(car, 0);\n        c->Base.LogicSubState = LSS_NONE;",
+     "        set_cop_lights(car, 0);\n        c->Base.LogicSubState = LSS_NONE;"),
+    ("hst_guard_lights", C,
+     "        set_cop_lights(car, 0);\n        c->Base.LogicSubState = LSS_NONE;\n        car->bVisibleOnTrackMap = 0;",
+     "        c->Base.LogicSubState = LSS_NONE;\n        car->bVisibleOnTrackMap = 0;"),
+    ("hst_guard_lss", C,
+     "        c->Base.LogicSubState = LSS_NONE;\n        car->bVisibleOnTrackMap = 0;\n        car->TheSirenMode = SIREN_MODE_NONE;\n        break;\n    default:",
+     "        car->bVisibleOnTrackMap = 0;\n        car->TheSirenMode = SIREN_MODE_NONE;\n        break;\n    default:"),
+    ("hst_guard_vis", C,
+     "        car->bVisibleOnTrackMap = 0;\n        car->TheSirenMode = SIREN_MODE_NONE;\n        break;\n    default:",
+     "        car->TheSirenMode = SIREN_MODE_NONE;\n        break;\n    default:"),
+    ("hst_guard_siren", C,
+     "        car->bVisibleOnTrackMap = 0;\n        car->TheSirenMode = SIREN_MODE_NONE;\n        break;\n    default:",
+     "        car->bVisibleOnTrackMap = 0;\n        break;\n    default:"),
+
+    # ---- the limbo, disabled and guard logic
+    ("hold_no_clear", C, "        drivetarget_clear((DriveTarget *)(void *)d, NULL, 0.0f);\n",
+     "        ;\n"),
+    ("hold_clear_car", C, "        drivetarget_clear((DriveTarget *)(void *)d, NULL, 0.0f);",
+     "        drivetarget_clear((DriveTarget *)(void *)d, car, 0.0f);"),
+    ("hold_route_0", C,
+     "    drivetarget_add_point3((DriveTarget *)(void *)d, &car->State.Position, -1,\n                           -1, -1, 0, NULL);",
+     "    drivetarget_add_point3((DriveTarget *)(void *)d, &car->State.Position, 0,\n                           -1, -1, 0, NULL);"),
+    ("hold_check_1", C,
+     "                           -1, -1, 0, NULL);",
+     "                           -1, -1, 1, NULL);"),
+    ("hold_car", C,
+     "                           -1, -1, 0, NULL);",
+     "                           -1, -1, 0, car);"),
+    ("limbo_ready_any", C,
+     "    if (c->Base.LogicSubState == LSS_LIMBO_DISABLED\n        && c->fSubStateTimer == 0.0f)",
+     "    if (c->fSubStateTimer == 0.0f)"),
+    ("limbo_ready_now", C,
+     "    if (c->Base.LogicSubState == LSS_LIMBO_DISABLED\n        && c->fSubStateTimer == 0.0f)",
+     "    if (c->Base.LogicSubState == LSS_LIMBO_DISABLED)"),
+    ("limbo_ready_le", C, "        && c->fSubStateTimer == 0.0f)",
+     "        && c->fSubStateTimer <= 0.0f)"),
+    ("limbo_ready_none", C, "        c->Base.LogicSubState = LSS_LIMBO_READY;\n}",
+     "        c->Base.LogicSubState = LSS_NONE;\n}"),
+    ("dis_far_le", C,
+     "          < COP_FAR_FROM_PLAYERS))\n        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);",
+     "          <= COP_FAR_FROM_PLAYERS))\n        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);"),
+    ("dis_far_nan", C,
+     "    if (!(world_get_distance_to_closest_player_2d(pCurrentWorld,\n              (const bVector2 *)(const void *)&c->Base.pMyCar->State.Position)\n          < COP_FAR_FROM_PLAYERS))",
+     "    if (world_get_distance_to_closest_player_2d(pCurrentWorld,\n              (const bVector2 *)(const void *)&c->Base.pMyCar->State.Position)\n          >= COP_FAR_FROM_PLAYERS)"),
+    ("dis_far_200", C, "#define COP_FAR_FROM_PLAYERS 250.0f", "#define COP_FAR_FROM_PLAYERS 200.0f"),
+    ("dis_to_patrol", C,
+     "        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);\n}\n\nvoid taicop_do_guard",
+     "        tcop_set_desired_logic_state(&c->Base, LS_DRIVING_ON_PATROL);\n}\n\nvoid taicop_do_guard"),
+    ("dis_no_hold", C,
+     "void taicop_do_disabled_logic(tAICop *c)\n{\n    taicop_hold_position(c);\n",
+     "void taicop_do_disabled_logic(tAICop *c)\n{\n"),
+    ("guard_no_hold", C,
+     "void taicop_do_guard_location_logic(tAICop *c)\n{\n    taicop_hold_position(c);\n}",
+     "void taicop_do_guard_location_logic(tAICop *c)\n{\n    (void)c;\n}"),
+    ("pthink_none", C,
+     "    if (gPlayerCopThinkFn != NULL)\n        gPlayerCopThinkFn((tPlayerCop *)self);",
+     "    (void)self;"),
+
+    # ---- ResetAllDamage
+    ("rad_rumble", M, "    car->fBlownTireControllerRumbleTimer = 0.0f;\n", ""),
+    ("rad_bits", M, "    car->BlownTireBits = 0;\n    car->NumBlownTires = 0;\n",
+     "    car->NumBlownTires = 0;\n"),
+    ("rad_num", M, "    car->BlownTireBits = 0;\n    car->NumBlownTires = 0;\n",
+     "    car->BlownTireBits = 0;\n"),
+    ("rad_traction", M, "    car->fTractionBoostOverride = 1.0f;", "    car->fTractionBoostOverride = 0.0f;"),
+    ("rad_cdmg_kept", M, "    m->fCarDamage[car->CarIndex] = 0.0f;\n", ""),
+    ("rad_cdmg_idx0", M, "    m->fCarDamage[car->CarIndex] = 0.0f;", "    m->fCarDamage[0] = 0.0f;"),
+    ("rad_no_repair", M, "        gCarDamageRepairAllFn(car->pCarDamage);\n", ""),
+    ("rad_repair_any", M, "    if (car->pCarDamage != NULL) {\n        if (gCarDamageRepairAllFn == NULL) {",
+     "    if (1) {\n        if (gCarDamageRepairAllFn == NULL) {"),
+    ("rad_ebrake_any", M,
+     "    if (car->TheControlMode == REAL_CONTROL)\n        realdriver_force_ebrake_stop",
+     "    if (1)\n        realdriver_force_ebrake_stop"),
+    ("rad_ebrake_never", M,
+     "    if (car->TheControlMode == REAL_CONTROL)\n        realdriver_force_ebrake_stop((RealDriver *)(void *)car->pCarDriver, 0);\n",
+     ""),
+    ("rad_ebrake_on", M,
+     "        realdriver_force_ebrake_stop((RealDriver *)(void *)car->pCarDriver, 0);",
+     "        realdriver_force_ebrake_stop((RealDriver *)(void *)car->pCarDriver, 1);"),
 ]
 
 EQUIVALENT = {
@@ -1634,6 +2556,9 @@ EQUIVALENT = {
                      "table over tAICop's",
     "upd_restart_ge": "the loop's top sees n at 0 or 10 only: it goes round "
                       "again only when n is 10",
+    "limbo_ready_le": "Think has just clamped fSubStateTimer to 0 or above "
+                      "(or left a NaN), and HandleStateTransitions sets 0 or "
+                      "1: never below 0 here",
 }
 
 
