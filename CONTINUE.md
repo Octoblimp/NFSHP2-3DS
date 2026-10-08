@@ -143,9 +143,16 @@ pursuit.obj, on a 10 KB manager. Its slices:
   With it, `coputil.c`'s GetForwardTrackDistance and
   IsTeleportLocationClear. `gInitTrackGraphFn` and
   `gCleanupTrackGraphFn` are bound: every World builds the graph.
-- **Next: 12f** Think and GlobalCopThink
-  (`gGlobalCopThinkFn`, which calls UncloakAllEdges); **12g**
-  tAICop::Think, then bind
+- **12f, done (Session 57):** tCopManager::Think and GlobalCopThink,
+  now bound to `gGlobalCopThinkFn`: TimeBasedSpeech,
+  SupervisorActivate, PursuitManagement, FindPlayerPursuit,
+  MonitorPullovers, ReclaimPatrollers, the pursuable timers, each
+  cop's Think through its table, and the landmark that uncloaks the
+  graph. tPursuit's AboutToSaySomething and NotInChasingState are in
+  `copmanager.c`. tPursuit::Update, the supervisor's test, the speech,
+  SpawnSpeedTraps, MonitorSpikeBelts, EndPullover and BeACopThink are
+  NULL seams that do nothing (`docs/formats/cop-manager.md`).
+- **Next: 12g** tAICop::Think (`0x0022df88`), then bind
   `gAddCopCarToRaceFn = copmgr_add_cop_car_to_race` in `main.c`;
   **12h, 12i** tPursuit; **12j** roadblocks and spike strips; **12k**
   the helicopter; **12l** pullovers and Busted; **12m** Be A Cop;
@@ -4577,8 +4584,8 @@ goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a to 12e are done, 12f
-  (Think and GlobalCopThink) is next. See "First" at the top.
+- **Next:** step 12, the cops: 12a to 12f are done, 12g
+  (tAICop::Think) is next. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

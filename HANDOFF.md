@@ -17730,3 +17730,80 @@ IsTeleportLocationClear. `docs/formats/track-graph.md` is new.
 12f, the cops' Think and GlobalCopThink (`gGlobalCopThinkFn`; it calls
 UncloakAllEdges); then 12g, tAICop::Think, and bind
 `gAddCopCarToRaceFn`.
+
+## Session 57, continued (2026-10-08) -- 12f, the cops' Think
+
+Retail's tCopManager::Think and GlobalCopThink, in `copmgr.c`, with
+tPursuit's AboutToSaySomething and NotInChasingState in
+`copmanager.c`. `docs/formats/cop-manager.md` has a new Think section.
+
+### What it does
+
+- **GlobalCopThink** (`0x00227cf8`) is now bound to
+  `gGlobalCopThinkFn`, so World's step calls it every frame. It runs
+  the manager's Think if there is one. While the track graph has a
+  cloaked edge, the first player or racer inside a landmark with
+  IsUncloakTrigger uncloaks every edge.
+- **Think** (`0x002246d0`) runs, in order:
+  - TimeBasedSpeech, SupervisorActivate and PursuitManagement;
+  - in Be A Cop, ReclaimPatrollers; otherwise SpawnSpeedTraps, then,
+    once the race clock has started, the eight pursuable timers counted
+    down to 0;
+  - MonitorSpikeBelts and MonitorPullovers;
+  - each cop's Think through slot 24 of its table;
+  - BeACopThink, in Be A Cop.
+- **The speech filler.** TimeBasedSpeech counts TimeSinceLastSpeech up
+  outside the replays. Past MaxSpeechGapTime, the player's pursuit says
+  a filler, unless the supervisor is about to speak, the pursuit has
+  something of its own to say (AboutToSaySomething), or it is not
+  chasing. The gap is then drawn again: 9 + bRandom(3), 4 more in Be A
+  Cop.
+- **The supervisor.** SupervisorActivate counts fSupervisorTimer down.
+  At 0 it opens the first pursuit of a player's car that it can.
+- **The rest.** PursuitManagement deletes the pursuits whose Update
+  says they are over. MonitorPullovers ends the pullovers whose hold
+  timer runs out. ReclaimPatrollers sends Be A Cop's patrol cars 250 or
+  more from both players to LS_LIMBO.
+- **Seams.** Each of these is NULL and does nothing for now:
+  - tPursuit::Update and the supervisor's test (12h);
+  - the speech calls and the speech manager's playback state (not
+    ported);
+  - SpawnSpeedTraps and MonitorSpikeBelts (12j);
+  - EndPullover (12l);
+  - BeACopThink (12m).
+- **tPursuit.** `copmanager.h` now places PursuitState,
+  nHUDPursuitLevel, fPursuitStateTimer, fRoadBlockSpawnTimer and
+  ChopperState: from 1104 on, retail's fields are 380 bytes later than
+  the demo's (the chopper 384). The ePursuitState and eChopperState
+  enums are new.
+
+### Checked
+
+- `copmanager_check` adds Think and everything it runs:
+  - each AboutToSaySomething test at its boundaries;
+  - both ways of FindPlayerPursuit;
+  - TimeBasedSpeech in RC states 0 to 10;
+  - the supervisor's timers;
+  - PursuitManagement deleting some pursuits, then all;
+  - eight pullovers;
+  - ReclaimPatrollers around 250;
+  - Think with Be A Cop on and off and the race clock signed;
+  - GlobalCopThink over the made chunk whose L1 and L3 uncloak.
+
+  3322 operations, 25100 lines, 0 differ. `--mutate`: 271 mutations,
+  267 caught and 4 equivalent (three are NaN or -0.0 cases, listed in
+  the doc). Two older mutations, `ctor_pursuable_kept` and
+  `initcops_nonzero`, matched twice in the source; both are made
+  unique.
+- `cop_test.c` stands in for what Think reaches, since `cop_check`
+  links `copmgr.c` without the world, race or graph. It still matches:
+  3103 operations, 0 differ. The other checkers that link the cop
+  files have 0 differ.
+- The CIA builds. `run_azahar_quickrace.ps1`, the frontend's Hot
+  Pursuit Quick Race with 4 cops, ran 40 s with the gas held: PASS at
+  30 FPS and Speed 100%.
+
+### Next
+
+12g, tAICop::Think (`0x0022df88`), and then bind `gAddCopCarToRaceFn`
+so the cops reach the road.

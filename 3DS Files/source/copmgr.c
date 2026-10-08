@@ -19,7 +19,10 @@
 #include "configitems.h"
 #include "cop.h"
 #include "race.h"
+#include "racecoord.h"
+#include "realtime.h"
 #include "topology.h"
+#include "trackgraph.h"
 #include "trackmap.h"
 #include "trackpath.h"
 #include "trackroute.h"
@@ -640,6 +643,227 @@ void copmgr_cleanup_cops(void)
 
         ((DtorFn)e->fn)(vt_this(m, e), 3);
         pCopManager = NULL;
+    }
+}
+
+// ------------------------------------------------------------ Think
+
+int32_t (*gPursuitUpdateFn)(tPursuit *p);
+int32_t (*gPursuitCanSupervisorInitiateFn)(tPursuit *p);
+void    (*gPursuitSuperInitiatesFn)(tPursuit *p);
+void    (*gSayFillerSpeechFn)(tPursuit *p, uint32_t *cookie);
+int32_t (*gCopSpeechPlaybackStateFn)(void);
+void    (*gCopManagerSpawnSpeedTrapsFn)(tCopManager *m);
+void    (*gCopManagerMonitorSpikeBeltsFn)(tCopManager *m);
+void    (*gCopManagerEndPulloverFn)(tCopManager *m, int32_t i);
+void    (*gCopManagerBeACopThinkFn)(tCopManager *m);
+
+typedef void (*ThinkFn)(void *self);
+
+// The test TimeBasedSpeech and SupervisorActivate open with: an instant or
+// automatic replay, the post-race, or (out of line, 0x001369a8) the replay
+// demo.
+static int32_t replaying(void)
+{
+    RCState s = pRaceCoordinator->CurrentRCState;
+
+    return s == RCSTATE_INSTANT_REPLAY || s == RCSTATE_POSTRACE
+        || s == RCSTATE_AUTO_REPLAY || s == RCSTATE_REPLAY_DEMO_MODE;
+}
+
+static int32_t chases_player(const tPursuit *p)
+{
+    return p->pChasedCar->pPlayer != NULL;
+}
+
+void copmanager_set_next_speech_filler_gap(tCopManager *m)
+{
+    m->MaxSpeechGapTime = bRandomF(3.0f, &bDefaultSeed) + 9.0f;
+    if (TheRaceParameters.BeACop != 0)
+        m->MaxSpeechGapTime = m->MaxSpeechGapTime + 4.0f;
+}
+
+tPursuit *copmanager_find_player_pursuit(tCopManager *m)
+{
+    tPursuitNode *n;
+
+    if (TheRaceParameters.BeACop != 0) {
+        tCop *c;
+
+        if (m->nPlayerCopIndex == -1)
+            return NULL;
+        c = m->Cops[m->nPlayerCopIndex];
+        return c != NULL ? c->pMyPursuit : NULL;
+    }
+    for (n = m->PursuitList.Next; n != &m->PursuitList; n = n->Next)
+        if (chases_player((tPursuit *)(void *)n))
+            return (tPursuit *)(void *)n;
+    return NULL;
+}
+
+void copmanager_time_based_speech(tCopManager *m)
+{
+    tPursuit *p;
+    float     t;
+
+    if (replaying())
+        return;
+    if (gCopSpeechPlaybackStateFn != NULL
+        && gCopSpeechPlaybackStateFn() != 0) {
+        m->TimeSinceLastSpeech = 0.0f;
+        return;
+    }
+    if (m->PursuitList.Next == &m->PursuitList) {
+        m->TimeSinceLastSpeech = 0.0f;
+        return;
+    }
+    t = m->TimeSinceLastSpeech + WorldTimeElapsed;
+    m->TimeSinceLastSpeech = t;
+    if (!(m->MaxSpeechGapTime < t))
+        return;
+    p = copmanager_find_player_pursuit(m);
+    if (p == NULL || 0.0f < m->fSupervisorTimer
+        || tpursuit_about_to_say_something(p)
+        || tpursuit_not_in_chasing_state(p)) {
+        m->TimeSinceLastSpeech = 0.0f;
+        return;
+    }
+    if (gSayFillerSpeechFn != NULL)
+        gSayFillerSpeechFn(p, &m->SpeechFillerCookie);
+    m->TimeSinceLastSpeech = 0.0f;
+    copmanager_set_next_speech_filler_gap(m);
+}
+
+void copmanager_supervisor_activate(tCopManager *m)
+{
+    tPursuitNode *n;
+    float         t;
+
+    if (replaying())
+        return;
+    if (!(0.0f < m->fSupervisorTimer))
+        return;
+    t = m->fSupervisorTimer - WorldTimeElapsed;
+    m->fSupervisorTimer = t;
+    if (!(t <= 0.0f))
+        return;
+    m->fSupervisorTimer = 0.0f;
+    for (n = m->PursuitList.Next; n != &m->PursuitList; n = n->Next) {
+        tPursuit *p = (tPursuit *)(void *)n;
+
+        if (!chases_player(p))
+            continue;
+        if (gPursuitCanSupervisorInitiateFn == NULL
+            || gPursuitCanSupervisorInitiateFn(p) == 0)
+            continue;
+        if (gPursuitSuperInitiatesFn != NULL)
+            gPursuitSuperInitiatesFn(p);
+        return;
+    }
+}
+
+void copmanager_pursuit_management(tCopManager *m)
+{
+    tPursuitNode *n = m->PursuitList.Next;
+
+    while (n != &m->PursuitList) {
+        tPursuitNode *next = n->Next;
+        tPursuit     *p = (tPursuit *)(void *)n;
+
+        if (gPursuitUpdateFn != NULL && gPursuitUpdateFn(p) != 0)
+            copmanager_delete_pursuit(m, p);
+        n = next;
+    }
+}
+
+void copmanager_monitor_pullovers(tCopManager *m)
+{
+    int32_t i;
+
+    for (i = 0; i < COPMANAGER_NUM_PULLOVERS; i++) {
+        tCarPulloverInfo *pl = &m->CarPullovers[i];
+
+        if (pl->bActive == 0 || pl->bPlayNIS != 0)
+            continue;
+        pl->fHoldTimer = pl->fHoldTimer - WorldTimeElapsed;
+        if (pl->fHoldTimer < 0.0f && gCopManagerEndPulloverFn != NULL)
+            gCopManagerEndPulloverFn(m, i);
+    }
+}
+
+void copmanager_reclaim_patrollers(tCopManager *m)
+{
+    int32_t i;
+
+    for (i = 0; i < m->nNumAICops; i++) {
+        tCop *c = m->Cops[i];
+
+        if (c->DesiredLogicState != LS_DRIVING_ON_PATROL)
+            continue;
+        if (world_get_distance_to_closest_player_2d(pCurrentWorld,
+                (const bVector2 *)(const void *)&c->pMyCar->State.Position)
+            < 250.0f)
+            continue;
+        tcop_set_desired_logic_state(c, LS_LIMBO);
+    }
+}
+
+void copmanager_think(tCopManager *m)
+{
+    int32_t i;
+
+    copmanager_time_based_speech(m);
+    copmanager_supervisor_activate(m);
+    copmanager_pursuit_management(m);
+    if (TheRaceParameters.BeACop != 0) {
+        copmanager_reclaim_patrollers(m);
+    } else {
+        if (gCopManagerSpawnSpeedTrapsFn != NULL)
+            gCopManagerSpawnSpeedTrapsFn(m);
+        // Timer(0.0f) against the race clock, signed.
+        if (0 < (int32_t)pCurrentRace->RaceTime.PackedTime)
+            for (i = 0; i < 8; i++) {
+                float t = m->fPursuableTimer[i];
+
+                if (0.0f < t) {
+                    t = t - WorldTimeElapsed;
+                    m->fPursuableTimer[i] = t;
+                    if (t < 0.0f)
+                        m->fPursuableTimer[i] = 0.0f;
+                }
+            }
+    }
+    if (gCopManagerMonitorSpikeBeltsFn != NULL)
+        gCopManagerMonitorSpikeBeltsFn(m);
+    copmanager_monitor_pullovers(m);
+    for (i = 0; i < m->nNumCops; i++) {
+        tCop          *c = m->Cops[i];
+        const VtEntry *e = vt_slot(c->vptr, TCOP_VT_THINK);
+
+        ((ThinkFn)e->fn)(vt_this(c, e));
+    }
+    if (TheRaceParameters.BeACop != 0 && gCopManagerBeACopThinkFn != NULL)
+        gCopManagerBeACopThinkFn(m);
+}
+
+void copmgr_global_cop_think(float dt)
+{
+    int32_t i;
+
+    (void)dt;
+    if (pCopManager != NULL)
+        copmanager_think(pCopManager);
+    if (TheTrackGraph->bHasCloakedEdge == 0)
+        return;
+    for (i = 0; i < pCurrentWorld->CopCarPos; i++) {
+        const Car *c = pCurrentWorld->CarTable[i];
+        Landmark  *l = copmgr_find_landmark(
+            (const bVector2 *)(const void *)&c->State.Position);
+
+        if (l != NULL && l->IsUncloakTrigger != 0) {
+            trackgraph_uncloak_all_edges(TheTrackGraph);
+            return;
+        }
     }
 }
 

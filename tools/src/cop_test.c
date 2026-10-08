@@ -29,7 +29,10 @@
 #include "copmgr.h"
 #include "drivetarget.h"
 #include "race.h"
+#include "racecoord.h"
+#include "realtime.h"
 #include "topology.h"
+#include "trackgraph.h"
 #include "trackmap.h"
 #include "trackpath.h"
 #include "trackroute.h"
@@ -121,6 +124,26 @@ static void *block(size_t size)
 RaceParameters   TheRaceParameters;
 World           *pCurrentWorld;
 float            SkipFETimeUntilCopsAppear;
+
+// copmgr.c's Think reaches these; nothing here runs it.
+float            WorldTimeElapsed;
+Race            *pCurrentRace;
+RaceCoordinator *pRaceCoordinator;
+tTrackGraph     *TheTrackGraph;
+
+void trackgraph_uncloak_all_edges(tTrackGraph *g)
+{
+    (void)g;
+    abort();
+}
+
+float world_get_distance_to_closest_player_2d(const World *w,
+                                              const bVector2 *pos)
+{
+    (void)w;
+    (void)pos;
+    abort();
+}
 
 #define NCARS 4
 

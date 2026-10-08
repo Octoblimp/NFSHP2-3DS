@@ -30,6 +30,17 @@ AddCopCarToRace that make them, are `cops.md`'s (12b on).
 | GetCopByCar | `0x00224f70` | `copmanager_get_cop_by_car` |
 | MonitorImpact | `0x00228310` | `copmanager_monitor_impact` |
 | CarCollisionBody::AddDamage's tail | `0x001d84c4` | `copmgr_car_impact` |
+| GlobalCopThink | `0x00227cf8` | `copmgr_global_cop_think` (12f) |
+| Think | `0x002246d0` | `copmanager_think` |
+| TimeBasedSpeech | `0x00225660` | `copmanager_time_based_speech` |
+| SetNextSpeechFillerGap | `0x00225780` | `copmanager_set_next_speech_filler_gap` |
+| SupervisorActivate | `0x00225308` | `copmanager_supervisor_activate` |
+| PursuitManagement | `0x00225bd0` | `copmanager_pursuit_management` |
+| FindPlayerPursuit | `0x002257e0` | `copmanager_find_player_pursuit` |
+| MonitorPullovers | `0x00226e70` | `copmanager_monitor_pullovers` |
+| ReclaimPatrollers | `0x00224e00` | `copmanager_reclaim_patrollers` |
+| tPursuit::NotInChasingState | `0x002295c8` | `tpursuit_not_in_chasing_state` (copmanager.c) |
+| tPursuit::AboutToSaySomething | `0x0022b9e8` | `tpursuit_about_to_say_something` (copmanager.c) |
 
 All are in `copmgr.c`, declared in `copmgr.h`. The records and the
 small queries the HUD, cameras and AI already used stay in
@@ -173,6 +184,84 @@ MonitorImpact (`0x00228310`):
 Retail reads the player's cop as `Cops[nPlayerCopIndex]` with no test of
 -1; the port finds none.
 
+## Think (12f)
+
+World's step calls GlobalCopThink every frame (`gGlobalCopThinkFn`,
+which `main.c` binds). It runs the manager's Think if there is one.
+Then, while the track graph has a cloaked edge, it looks at the world's
+cars before CopCarPos (the players and the racers). The first of them
+inside a landmark with IsUncloakTrigger (FindLandmark) uncloaks every
+edge (`trackgraph.md`). The frame's seconds are passed but not read.
+
+Think runs, in this order:
+
+1. TimeBasedSpeech, SupervisorActivate and PursuitManagement.
+2. In Be A Cop, ReclaimPatrollers. Otherwise SpawnSpeedTraps, then,
+   once the race clock has started (its packed time above 0, signed),
+   each of the eight fPursuableTimers above 0 down by WorldTimeElapsed,
+   clamped at 0.
+3. MonitorSpikeBelts and MonitorPullovers.
+4. Each of the nNumCops cops' Think, slot 24 of its table.
+5. In Be A Cop, BeACopThink.
+
+RenderDebugInfo (`0x00227c48`) and `0x00224498`, which Think also
+calls, are empty.
+
+- **The replay test.** TimeBasedSpeech and SupervisorActivate return
+  at once in RC states 4 (instant replay), 5 (automatic replay), 7
+  (post-race) and 9 (the replay demo, tested out of line at
+  `0x001369a8`).
+- **TimeBasedSpeech.** With the speech manager playing, or no pursuit,
+  TimeSinceLastSpeech goes to 0. Otherwise it counts up by
+  WorldTimeElapsed. Once it is past MaxSpeechGapTime, the player's
+  pursuit (FindPlayerPursuit) says its filler. That needs a pursuit,
+  fSupervisorTimer not above 0, AboutToSaySomething false and
+  NotInChasingState false. The count goes back to 0 either way, and
+  after a filler SetNextSpeechFillerGap draws the next gap: 9 plus
+  bRandom(3.0) on bDefaultSeed, 4 more in Be A Cop.
+- **AboutToSaySomething** is true when any of these holds:
+  fRoadBlockSpawnTimer is above 8; the pursuit is at LEVEL0; it is at
+  LEVEL2 with fPursuitStateTimer under 13; the chased car's
+  BlownTireBits (a signed byte) is nonzero; the pursuit's roadblock
+  is under 150 from the car, on x and y alone; the chopper is
+  CHOPPER_REQUESTED.
+  **NotInChasingState** is SPEEDER_CAUGHT or END_PURSUIT_GIVE_UP.
+- **SupervisorActivate.** A positive fSupervisorTimer counts down. The
+  frame it reaches 0 or below, it is set to 0, and the first pursuit
+  of a player's car that the supervisor can open (`0x0022aaf0`) gets
+  SuperInitiates. Only one does.
+- **PursuitManagement** runs each pursuit's Update (`0x00229288`) and
+  deletes (`0x00224560`) any that says it is over. It takes the next
+  link before the update.
+- **FindPlayerPursuit.** In Be A Cop it is the player's cop's
+  pMyPursuit, or NULL for index -1 or no cop. Otherwise it is the
+  first pursuit whose chased car has a pPlayer.
+- **MonitorPullovers.** Each active pullover not in its NIS counts
+  fHoldTimer down by WorldTimeElapsed, and ends (EndPullover,
+  `0x00225878`) while the timer is below 0.
+- **ReclaimPatrollers.** Each of the nNumAICops cops asked for
+  LS_DRIVING_ON_PATROL that is not within 250 of a player is sent to
+  LS_LIMBO. The distance is World::GetDistanceToClosestPlayer's
+  bVector2 form, `0x0014e3e8`.
+
+Later slices port what Think reaches, and until then each is a seam
+that does nothing (or returns 0) while NULL:
+
+| what | address | seam | slice |
+|------|---------|------|-------|
+| tPursuit::Update | `0x00229288` | `gPursuitUpdateFn` | 12h |
+| the supervisor's test | `0x0022aaf0` | `gPursuitCanSupervisorInitiateFn` | 12h |
+| SuperInitiates, SayFillerSpeech | `0x0022b908`, `0x00231760` | `gPursuitSuperInitiatesFn`, `gSayFillerSpeechFn` | speech |
+| the speech manager's previousSedPlaybackState | gp-15624 + 1452 | `gCopSpeechPlaybackStateFn` | speech |
+| SpawnSpeedTraps, MonitorSpikeBelts | `0x00224a20`, `0x00227758` | `gCopManagerSpawnSpeedTrapsFn`, `gCopManagerMonitorSpikeBeltsFn` | 12j |
+| EndPullover | `0x00225878` | `gCopManagerEndPulloverFn` | 12l |
+| BeACopThink | `0x00227f30` | `gCopManagerBeACopThinkFn` | 12m |
+
+tPursuit's fields from 1104 on are 380 bytes further on in retail than
+in the demo; the chopper's state is 384 further on. `copmanager.h` has
+PursuitState (1484), nHUDPursuitLevel (1492), fPursuitStateTimer
+(1524), fRoadBlockSpawnTimer (1532) and ChopperState (1580).
+
 ## The check
 
 `tools/copmanager_check.py` runs retail's code in mipsemu and the port
@@ -182,12 +271,36 @@ chunks through the loader, the constructor at each strength, Be A Cop
 on and off, the spots' tables, the speaker queue, the pursuit ids and
 deletions, the destructor, and the hits on six cars (AI cops, a player
 cop, a racer, an AI car) in both branches, with two-car collisions and
-amounts at each threshold. 23342 lines, 0 differ.
+amounts at each threshold.
 
-`--mutate` runs out of the tree through `mutpar`: 156 mutations, 155
-caught, and one equivalent. That one turns the AI branch's
-`!(table <= amount)` into `table > amount`, which differs only for NaN,
-and AddDamage never passes MonitorImpact an amount under 1.0.
+12f adds Think and what it runs:
+
+- every AboutToSaySomething branch at its boundaries, with NaN and the
+  infinities;
+- FindPlayerPursuit both ways;
+- TimeBasedSpeech in each RC state, with the speech manager busy and
+  each reason not to speak;
+- SupervisorActivate's timer and its first-eligible pursuit;
+- PursuitManagement deleting some pursuits, then all;
+- eight pullovers;
+- ReclaimPatrollers around 250;
+- Think with Be A Cop on and off, the race clock signed, and the
+  pursuable timers;
+- GlobalCopThink on the made chunk whose landmarks L1 and L3 uncloak.
+
+The cops' Think, the pursuits' Update and the other seams are logging
+stand-ins on both sides. 3322 operations, 25100 lines, 0 differ.
+
+`--mutate` runs out of the tree through `mutpar`: 271 mutations, 267
+caught, and four equivalent:
+
+- One turns the AI branch's `!(table <= amount)` into `table > amount`.
+  That differs only for NaN, and AddDamage never passes MonitorImpact
+  an amount under 1.0.
+- Two are a NaN timer less the frame's seconds: it is the same NaN,
+  stored back (fSupervisorTimer, fPursuableTimer).
+- One clamps a pursuable timer at `<= 0`: a timer above 0, less the
+  frame's seconds, is never -0.0.
 
 The checkers that link `copmgr.c`, `copmanager.c` or
 `carcollisionbody.c` still have 0 differ: carmode, collisionbody,

@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "airoute.h"
+#include "bmath.h"
 #include "bmem.h"
 #include "bslotpool.h"
 #include "car.h"
@@ -24,7 +25,10 @@
 #include "copmgr.h"
 #include "drivetarget.h"
 #include "race.h"
+#include "racecoord.h"
+#include "realtime.h"
 #include "topology.h"
+#include "trackgraph.h"
 #include "trackmap.h"
 #include "trackpath.h"
 #include "trackroute.h"
@@ -106,9 +110,18 @@ RaceParameters   TheRaceParameters;
 TrackPathManager TheTrackPathManager;
 World           *pCurrentWorld;
 float            SkipFETimeUntilCopsAppear;
+float            WorldTimeElapsed;
+Race            *pCurrentRace;
+RaceCoordinator *pRaceCoordinator;
+tTrackGraph     *TheTrackGraph;
 
 static int32_t         skipfe;
-static uint8_t         world_token[64];
+static World           world_token;
+static Race            the_race;
+static RaceCoordinator the_rc;
+static tTrackGraph     the_graph;
+static uint32_t        dist_bits;
+static int32_t         speech_state;
 static TrackRoutePoint pts[16];
 static TrackRoute      routes[3];
 static int32_t         npts;
@@ -239,6 +252,19 @@ float world_random_f(World *w, float f)
 {
     printf("  random %s %08x\n", sym(w), fb(f));
     return bf(fb(f) ^ 0x00300000u);
+}
+
+float world_get_distance_to_closest_player_2d(const World *w,
+                                              const bVector2 *p)
+{
+    printf("  dist %s %08x %08x -> %08x\n", sym(w), fb(p->x), fb(p->y),
+           dist_bits);
+    return bf(dist_bits);
+}
+
+void trackgraph_uncloak_all_edges(tTrackGraph *g)
+{
+    printf("  uncloak %s\n", g == &the_graph ? "G" : "?");
 }
 
 int32_t is_point_in_poly(const bVector2 *p, const bVector2 *poly, int32_t n)
@@ -425,16 +451,96 @@ static int32_t playercop_is_ai(void *self)
     return 0;
 }
 
+// Think, 0x0022df88 and 0x0022d5c8, which the model stubs.
+static void aicop_think(void *self)
+{
+    printf("  aicop think %s\n", sym(self));
+}
+
+static void playercop_think(void *self)
+{
+    printf("  playercop think %s\n", sym(self));
+}
+
 static const VtEntry aicop_vt[] = { {0, 0, NULL},
                                     {0, 0, (VtFn)aicop_dtor},
-                                    {0, 0, (VtFn)aicop_is_ai} };
+                                    {0, 0, (VtFn)aicop_is_ai},
+                                    {0, 0, (VtFn)aicop_think} };
 static const VtEntry playercop_vt[] = { {0, 0, NULL},
                                         {0, 0, (VtFn)playercop_dtor},
-                                        {0, 0, (VtFn)playercop_is_ai} };
+                                        {0, 0, (VtFn)playercop_is_ai},
+                                        {0, 0, (VtFn)playercop_think} };
 static const VtEntry spike_vt[] = { {0, 0, NULL},
                                     {0, 0, (VtFn)spike_dtor} };
 
 static tPursuit *pursuits[16];
+static int32_t   updates[16], cansupers[16];
+static uint8_t   player_token[16];
+
+static int pursuit_index(const tPursuit *p)
+{
+    int u;
+
+    for (u = 0; u < 16; u++)
+        if (pursuits[u] == p)
+            return u;
+    return -1;
+}
+
+// ---------------------------------------------------- Think's seams
+
+static int32_t pursuit_update(tPursuit *p)
+{
+    int u = pursuit_index(p);
+
+    printf("  update U%d -> %d\n", u, updates[u]);
+    return updates[u];
+}
+
+static int32_t can_super(tPursuit *p)
+{
+    int u = pursuit_index(p);
+
+    printf("  cansuper U%d -> %d\n", u, cansupers[u]);
+    return cansupers[u];
+}
+
+static void super_initiates(tPursuit *p)
+{
+    printf("  superinit U%d\n", pursuit_index(p));
+}
+
+// The cookie's retail offset in the manager when it is the manager's.
+static void filler(tPursuit *p, uint32_t *cookie)
+{
+    printf("  filler U%d %d\n", pursuit_index(p),
+           cookie == &pCopManager->SpeechFillerCookie ? 10352 : -1);
+}
+
+static int32_t speech_playback(void)
+{
+    return speech_state;
+}
+
+static void spawn_speed_traps(tCopManager *m)
+{
+    printf("  spawnst %s\n", sym(m));
+}
+
+static void spike_belts(tCopManager *m)
+{
+    printf("  spikebelts %s\n", sym(m));
+}
+
+static void end_pullover(tCopManager *m, int32_t i)
+{
+    printf("  endpull %s %d\n", sym(m), i);
+}
+
+static void beacop_think(tCopManager *m)
+{
+    printf("  beacopthink %s\n", sym(m));
+}
 
 static void link_tail(tPursuitNode *list, tPursuitNode *node)
 {
@@ -610,6 +716,169 @@ static void put_chunk(int k, const char *hexs)
     chunks[k].size = n;
 }
 
+// The manager's fields Think reads and writes, by name.
+static void *mfield(tCopManager *m, const char *f)
+{
+    int k;
+
+    if (!strcmp(f, "tsls"))     return &m->TimeSinceLastSpeech;
+    if (!strcmp(f, "gap"))      return &m->MaxSpeechGapTime;
+    if (!strcmp(f, "super"))    return &m->fSupervisorTimer;
+    if (!strcmp(f, "aicops"))   return &m->nNumAICops;
+    if (sscanf(f, "pursuable%d", &k) == 1)
+        return &m->fPursuableTimer[k];
+    if (sscanf(f, "pulltimer%d", &k) == 1)
+        return &m->CarPullovers[k].fHoldTimer;
+    if (sscanf(f, "pullactive%d", &k) == 1)
+        return &m->CarPullovers[k].bActive;
+    if (sscanf(f, "pullnis%d", &k) == 1)
+        return &m->CarPullovers[k].bPlayNIS;
+    fprintf(stderr, "no manager field %s\n", f);
+    exit(2);
+}
+
+static int think_op(tCopManager *m, char **a)
+{
+    const char *o = a[0];
+
+    if (!strcmp(o, "t")) {
+        const char *g = a[1];
+        uint32_t    v = num(a[2]);
+
+        if (!strcmp(g, "wte"))
+            WorldTimeElapsed = bf(v);
+        else if (!strcmp(g, "racetime"))
+            the_race.RaceTime.PackedTime = v;
+        else if (!strcmp(g, "rc"))
+            the_rc.CurrentRCState = (RCState)v;
+        else if (!strcmp(g, "speech"))
+            speech_state = (int32_t)v;
+        else if (!strcmp(g, "cloaked"))
+            the_graph.bHasCloakedEdge = (int32_t)v;
+        else if (!strcmp(g, "copcarpos"))
+            world_token.CopCarPos = (int32_t)v;
+        else if (!strcmp(g, "dist"))
+            dist_bits = v;
+        else if (!strcmp(g, "seed"))
+            bDefaultSeed = v;
+        else if (!strcmp(g, "mgr")) {
+            // Hides the manager from GlobalCopThink, and brings it back.
+            static tCopManager *hidden;
+
+            if (v == 0 && pCopManager != NULL) {
+                hidden = pCopManager;
+                pCopManager = NULL;
+            } else if (v != 0 && pCopManager == NULL) {
+                pCopManager = hidden;
+            }
+        } else
+            return 0;
+    } else if (!strcmp(o, "wcar")) {
+        world_token.CarTable[atoi(a[1])] = &cars[atoi(a[2])];
+    } else if (!strcmp(o, "pst")) {
+        tPursuit *p = pursuits[atoi(a[1])];
+
+        p->PursuitState = (ePursuitState)num(a[2]);
+        p->fPursuitStateTimer = bf(num(a[3]));
+        p->fRoadBlockSpawnTimer = bf(num(a[4]));
+        p->ChopperState = (eChopperState)num(a[5]);
+    } else if (!strcmp(o, "prb")) {
+        int k = atoi(a[2]);
+
+        pursuits[atoi(a[1])]->pRoadBlock = k >= 0 ? &m->RoadBlocks[k] : NULL;
+    } else if (!strcmp(o, "rbpos")) {
+        tRoadBlock *r = &m->RoadBlocks[atoi(a[1])];
+
+        r->v2Position.x = bf(num(a[2]));
+        r->v2Position.y = bf(num(a[3]));
+    } else if (!strcmp(o, "blown")) {
+        cars[atoi(a[1])].BlownTireBits = (uint8_t)num(a[2]);
+    } else if (!strcmp(o, "player")) {
+        cars[atoi(a[1])].pPlayer =
+            num(a[2]) ? (Player *)(void *)player_token : NULL;
+    } else if (!strcmp(o, "update")) {
+        updates[atoi(a[1])] = (int32_t)num(a[2]);
+    } else if (!strcmp(o, "cansuper")) {
+        cansupers[atoi(a[1])] = (int32_t)num(a[2]);
+    } else if (!strcmp(o, "mset")) {
+        uint32_t v = num(a[2]);
+
+        memcpy(mfield(m, a[1]), &v, 4);
+    } else if (!strcmp(o, "cset")) {
+        m->Cops[atoi(a[1])]->DesiredLogicState = (eLogicState)num(a[2]);
+    } else if (!strcmp(o, "copstates")) {
+        int k;
+
+        printf("copstates");
+        for (k = 0; k < 7; k++)
+            if (m->Cops[k] != NULL)
+                printf(" %d", m->Cops[k]->DesiredLogicState);
+            else
+                printf(" -");
+        printf("\n");
+    } else if (!strcmp(o, "mstate")) {
+        int k;
+
+        printf("mstate %08x %08x %08x %08x pur", fb(m->TimeSinceLastSpeech),
+               fb(m->MaxSpeechGapTime), fb(m->fSupervisorTimer),
+               m->SpeechFillerCookie);
+        for (k = 0; k < 8; k++)
+            printf(" %08x", fb(m->fPursuableTimer[k]));
+        printf(" hold");
+        for (k = 0; k < 8; k++)
+            printf(" %08x", fb(m->CarPullovers[k].fHoldTimer));
+        printf("\n");
+    } else if (!strcmp(o, "plist")) {
+        tPursuitNode *n;
+
+        printf("plist");
+        for (n = m->PursuitList.Next; n != &m->PursuitList; n = n->Next)
+            printf(" %s", sym(n));
+        printf("\n");
+    } else if (!strcmp(o, "think")) {
+        copmanager_think(m);
+        printf("think\n");
+    } else if (!strcmp(o, "global")) {
+        copmgr_global_cop_think(bf(num(a[1])));
+        printf("global\n");
+    } else if (!strcmp(o, "tbs")) {
+        copmanager_time_based_speech(m);
+        printf("tbs\n");
+    } else if (!strcmp(o, "supervisor")) {
+        copmanager_supervisor_activate(m);
+        printf("supervisor\n");
+    } else if (!strcmp(o, "pm")) {
+        copmanager_pursuit_management(m);
+        printf("pm\n");
+    } else if (!strcmp(o, "fpp")) {
+        tPursuit *p = copmanager_find_player_pursuit(m);
+
+        printf("fpp -> %s\n", sym(p));
+    } else if (!strcmp(o, "gapnext")) {
+        copmanager_set_next_speech_filler_gap(m);
+        printf("gapnext\n");
+    } else if (!strcmp(o, "pulls")) {
+        copmanager_monitor_pullovers(m);
+        printf("pulls\n");
+    } else if (!strcmp(o, "reclaim")) {
+        copmanager_reclaim_patrollers(m);
+        printf("reclaim\n");
+    } else if (!strcmp(o, "about")) {
+        int u = atoi(a[1]);
+
+        printf("about U%d -> %d\n", u,
+               tpursuit_about_to_say_something(pursuits[u]));
+    } else if (!strcmp(o, "notchasing")) {
+        int u = atoi(a[1]);
+
+        printf("notchasing U%d -> %d\n", u,
+               tpursuit_not_in_chasing_state(pursuits[u]));
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
 static void op(char **a, int na)
 {
     const char  *o = a[0];
@@ -634,7 +903,7 @@ static void op(char **a, int na)
         *rp_field(a[1]) = (int32_t)num(a[2]);
     } else if (!strcmp(o, "g")) {
         if (!strcmp(a[1], "world"))
-            pCurrentWorld = num(a[2]) ? (World *)(void *)world_token : NULL;
+            pCurrentWorld = num(a[2]) ? &world_token : NULL;
         else if (!strcmp(a[1], "skipfe"))
             skipfe = (int32_t)num(a[2]);
         else if (!strcmp(a[1], "skipfetime"))
@@ -790,6 +1059,8 @@ static void op(char **a, int na)
         name(s, "S%d", k);
         link_tail(&m->SpikeStripList, &s->Node);
         s->vptr = VT_SPIKE;
+    } else if (think_op(m, a)) {
+        // Think's (12f).
     } else {
         fprintf(stderr, "unknown op %s\n", o);
         exit(2);
@@ -815,12 +1086,24 @@ int main(int argc, char **argv)
         name(&pts[i], "P%d", i);
     for (i = 0; i < 3; i++)
         name(&routes[i], "R%d", i);
-    name(world_token, "W%d", 0);
+    name(&world_token, "W%d", 0);
+    pCurrentRace = &the_race;
+    pRaceCoordinator = &the_rc;
+    TheTrackGraph = &the_graph;
+    gPursuitUpdateFn = pursuit_update;
+    gPursuitCanSupervisorInitiateFn = can_super;
+    gPursuitSuperInitiatesFn = super_initiates;
+    gSayFillerSpeechFn = filler;
+    gCopSpeechPlaybackStateFn = speech_playback;
+    gCopManagerSpawnSpeedTrapsFn = spawn_speed_traps;
+    gCopManagerMonitorSpikeBeltsFn = spike_belts;
+    gCopManagerEndPulloverFn = end_pullover;
+    gCopManagerBeACopThinkFn = beacop_think;
     gCopSpeechAllocateVoicesFn = voices;
     gCopSpeechFlushQueueFn = flush;
     vt_install(VT_PURSUIT, pursuit_vt, 2);
-    vt_install(VT_AICOP, aicop_vt, 3);
-    vt_install(VT_PLAYERCOP, playercop_vt, 3);
+    vt_install(VT_AICOP, aicop_vt, 4);
+    vt_install(VT_PLAYERCOP, playercop_vt, 4);
     for (i = 0; i < NCARS; i++) {
         bodies[i].pCar = &cars[i];
         name(&cars[i], "A%d", i);

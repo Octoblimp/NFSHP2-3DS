@@ -247,6 +247,22 @@ typedef char tpursuithistory_layout_check[
      && sizeof(tPursuitHistory) == 368) ? 1 : -1];
 #endif
 
+// ePursuitState, .mdebug t3282.
+typedef int32_t ePursuitState;
+#define EPS_LEVEL0                 ((ePursuitState)0)
+#define EPS_LEVEL1                 ((ePursuitState)1)
+#define EPS_LEVEL2                 ((ePursuitState)2)
+#define EPS_LEVEL3                 ((ePursuitState)3)
+#define EPS_SPEEDER_CAUGHT         ((ePursuitState)4)
+#define EPS_END_PURSUIT_GIVE_UP    ((ePursuitState)5)
+
+// eChopperState, .mdebug t3285.
+typedef int32_t eChopperState;
+#define ECS_NO_CHOPPER             ((eChopperState)0)
+#define ECS_CHOPPER_REQUESTED      ((eChopperState)1)
+#define ECS_CHOPPER_INFLIGHT       ((eChopperState)2)
+#define ECS_CHOPPER_ATTACKING      ((eChopperState)3)
+
 // The demo's type#1640 is 1216 bytes; retail's is 1600 (its slot pool's
 // slot), and these are the words read so far, at retail's offsets on a
 // 32-bit target. The demo's nHUDPursuitLevel was at 1112.
@@ -266,13 +282,22 @@ struct tPursuit {
     uint8_t     Unported1472[8];        // 1472
     // Retail's: the manager's PursuitsById slot, from 0x002244a0.
     int8_t      nPursuitId;             // 1480
-    uint8_t     Unported1481[11];       // 1481
+    uint8_t     Unported1481[3];        // 1481
+    // The demo's fields from 1104 on are here 380 bytes later.
+    ePursuitState PursuitState;         // 1484, the demo's 1104
+    uint8_t     Unported1488[4];        // 1488
     int32_t     nHUDPursuitLevel;       // 1492  the HUD's pursuit meter
-    uint8_t     Unported1496[64];       // 1496
+    uint8_t     Unported1496[28];       // 1496
+    float       fPursuitStateTimer;     // 1524, the demo's 1144
+    uint8_t     Unported1528[4];        // 1528
+    float       fRoadBlockSpawnTimer;   // 1532, the demo's 1152
+    uint8_t     Unported1536[24];       // 1536
     // Retail's. RenderHud lights one more Be The Cop roadblock, in the
     // "on its way" colour, while it is set.
     int32_t     New1560;                // 1560
-    uint8_t     Unported1564[28];       // 1564
+    uint8_t     Unported1564[16];       // 1564
+    eChopperState ChopperState;         // 1580, the demo's 1196
+    uint8_t     Unported1584[8];        // 1584
     uint32_t    vptr;                   // 1592  0x002bd460: 8 the destructor
     uint8_t     Unported1596[4];        // 1596
 };
@@ -287,8 +312,12 @@ typedef char tpursuit_layout_check[
      && offsetof(struct tPursuit, NearDriveTarget) == 576
      && offsetof(struct tPursuit, History) == 1104
      && offsetof(struct tPursuit, nPursuitId) == 1480
+     && offsetof(struct tPursuit, PursuitState) == 1484
      && offsetof(struct tPursuit, nHUDPursuitLevel) == 1492
+     && offsetof(struct tPursuit, fPursuitStateTimer) == 1524
+     && offsetof(struct tPursuit, fRoadBlockSpawnTimer) == 1532
      && offsetof(struct tPursuit, New1560) == 1560
+     && offsetof(struct tPursuit, ChopperState) == 1580
      && offsetof(struct tPursuit, vptr) == 1592
      && sizeof(struct tPursuit) == 1600) ? 1 : -1];
 #endif
@@ -504,5 +533,17 @@ extern tCop *(*gCopManagerGetCopByChaseFn)(tCopManager *m, struct Car *c);
 // is the newest, v2Velocity[0], as it is when the last kept is the one.
 bVector2 *tpursuithistory_velocity_at(bVector2 *out, const tPursuitHistory *h,
                                       float t);
+
+// tPursuit::NotInChasingState, 0x002295c8: the speeder caught, or the
+// pursuit given up.
+int32_t tpursuit_not_in_chasing_state(const tPursuit *p);
+
+// tPursuit::AboutToSaySomething, 0x0022b9e8: 1 while the cops have
+// something of their own to say -- a roadblock spawn timer over 8,
+// LEVEL0, LEVEL2's first 13 s, a blown tyre on the chased car (its
+// BlownTireBits read as a signed byte), the pursuit's roadblock within
+// 150 of it (`sqrt.s` of the squares summed x, then y), or a helicopter
+// asked for. The chased car must be there.
+int32_t tpursuit_about_to_say_something(const tPursuit *p);
 
 #endif

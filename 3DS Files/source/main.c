@@ -4394,6 +4394,9 @@ int main(int argc, char** argv)
     gCopManagerGetCopByCarFn   = copmanager_get_cop_by_car;
     // A hard enough hit on an AI cop's car disables it (cop.h).
     gAICopDisableMyCarFn       = cop_disable_my_car;
+    // World's step thinks for the cops, and uncloaks the graph's cloaked
+    // edges once a racer reaches a landmark that says to (copmgr.h).
+    gGlobalCopThinkFn          = copmgr_global_cop_think;
     logPrintf("car loader: pool %s\n", LoadedCarSlotPool ? "up" : "missing");
 
     // The blurb moves to the bottom screen, so the top screen stops drawing

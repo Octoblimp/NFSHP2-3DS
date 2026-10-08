@@ -140,6 +140,77 @@ void copmgr_add_cop_car_to_race(struct DriverInfo *info, int32_t beACop);
 extern void (*gCopSpeechAllocateVoicesFn)(void);
 extern void (*gCopSpeechFlushQueueFn)(void);
 
+// ------------------------------------------------------------ Think
+
+// GlobalCopThink, 0x00227cf8, the seam gGlobalCopThinkFn (World's step):
+// the manager's Think if there is one. Then, while the track graph has a
+// cloaked edge, the first of the world's cars before CopCarPos (the
+// players and the racers) inside a landmark with IsUncloakTrigger
+// uncloaks every edge. TheTrackGraph and LandmarkData must be there.
+void copmgr_global_cop_think(float dt);
+
+// tCopManager::Think, 0x002246d0, in order: TimeBasedSpeech,
+// SupervisorActivate, PursuitManagement; in Be A Cop ReclaimPatrollers,
+// else SpawnSpeedTraps and, once the race clock has started, the eight
+// fPursuableTimers down by the frame's seconds to 0; MonitorSpikeBelts,
+// MonitorPullovers, each cop's Think through its table, and in Be A Cop
+// BeACopThink. RenderDebugInfo (0x00227c48) and 0x00224498 are empty.
+void copmanager_think(tCopManager *m);
+
+// TimeBasedSpeech, 0x00225660. Outside the replays and the post-race,
+// with the speech manager quiet and a pursuit on, TimeSinceLastSpeech
+// counts up; past MaxSpeechGapTime, the player's pursuit, when the
+// supervisor and the pursuit have nothing to say and it is still a
+// chase, says its filler and the gap is drawn again. Each other way the
+// count goes back to 0.
+void copmanager_time_based_speech(tCopManager *m);
+
+// SetNextSpeechFillerGap, 0x00225780: 9 s plus bRandom(3) on bDefaultSeed,
+// 4 more in Be A Cop.
+void copmanager_set_next_speech_filler_gap(tCopManager *m);
+
+// SupervisorActivate, 0x00225308. Outside the replays and the post-race,
+// fSupervisorTimer counts down from above 0; the frame it reaches 0, the
+// first pursuit of a player's car that the supervisor can open, does.
+void copmanager_supervisor_activate(tCopManager *m);
+
+// PursuitManagement, 0x00225bd0: each pursuit's Update, and those that
+// say they are over deleted (0x00224560).
+void copmanager_pursuit_management(tCopManager *m);
+
+// FindPlayerPursuit, 0x002257e0: in Be A Cop the player's cop's pursuit
+// (NULL for no cop), else the first pursuit of a player's car.
+tPursuit *copmanager_find_player_pursuit(tCopManager *m);
+
+// MonitorPullovers, 0x00226e70: each active pullover not in its NIS
+// counts fHoldTimer down, and ends (EndPullover) once it is below 0.
+void copmanager_monitor_pullovers(tCopManager *m);
+
+// ReclaimPatrollers, 0x00224e00, Be A Cop's: an AI cop out on patrol 250
+// or more from both players (World::GetDistanceToClosestPlayer, the
+// two-dimensional form) is sent to LS_LIMBO.
+void copmanager_reclaim_patrollers(tCopManager *m);
+
+// What Think reaches that later slices port. NULL seams do nothing, and
+// return 0.
+//   - tPursuit::Update (0x00229288): nonzero when the pursuit is over.
+//   - 0x0022aaf0, the supervisor's test: the chased car can be told
+//     (GetExactDescription is not -1) and the pursuit is at LEVEL2 or 3.
+//   - SuperInitiates (0x0022b908) and SayFillerSpeech (0x00231760), the
+//     speech manager's.
+//   - The speech manager's previousSedPlaybackState, its word at 1452.
+//   - SpawnSpeedTraps (0x00224a20) and MonitorSpikeBelts (0x00227758),
+//     12j; EndPullover (0x00225878), 12l; BeACopThink (0x00227f30), 12m.
+extern int32_t (*gPursuitUpdateFn)(tPursuit *p);
+extern int32_t (*gPursuitCanSupervisorInitiateFn)(tPursuit *p);
+extern void    (*gPursuitSuperInitiatesFn)(tPursuit *p);
+extern void    (*gSayFillerSpeechFn)(tPursuit *p, uint32_t *cookie);
+extern int32_t (*gCopSpeechPlaybackStateFn)(void);
+extern void    (*gCopManagerSpawnSpeedTrapsFn)(tCopManager *m);
+extern void    (*gCopManagerMonitorSpikeBeltsFn)(tCopManager *m);
+extern void    (*gCopManagerEndPulloverFn)(tCopManager *m, int32_t i);
+extern void    (*gCopManagerBeACopThinkFn)(tCopManager *m);
+
 // Registers tCopManager's table, 0x002bd280.
 void copmgr_install_vtables(void);
 

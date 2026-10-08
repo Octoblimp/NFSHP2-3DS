@@ -126,6 +126,39 @@ S_GETCOLL = 0x001d6f38
 S_TWOCAR = 0x0021eb20
 S_DISABLE = 0x00230ac8
 
+# Think (12f), its pieces, and what it reaches that later slices port.
+F_THINK = 0x002246d0
+F_GLOBAL = 0x00227cf8
+F_TBS = 0x00225660
+F_SUPER = 0x00225308
+F_PM = 0x00225bd0
+F_FPP = 0x002257e0
+F_GAP = 0x00225780
+F_PULLS = 0x00226e70
+F_RECLAIM = 0x00224e00
+F_ABOUT = 0x0022b9e8
+F_NOTCHASING = 0x002295c8
+S_UPDATE = 0x00229288
+S_CANSUPER = 0x0022aaf0
+S_SUPERINIT = 0x0022b908
+S_FILLER = 0x00231760
+S_SPAWNST = 0x00224a20
+S_SPIKEBELTS = 0x00227758
+S_ENDPULL = 0x00225878
+S_BEACOPTHINK = 0x00227f30
+S_DIST2D = 0x0014e3e8
+S_UNCLOAK = 0x0024e3b8
+S_THINKS = {0x0022df88: "aicop", 0x0022d5c8: "playercop"}
+G_WTE = GP - 19560                      # WorldTimeElapsed
+G_RACE = GP - 22272                     # pCurrentRace
+G_RC = GP - 22216                       # pRaceCoordinator
+G_SPEECH = GP - 15624                   # the cop speech manager
+G_GRAPH = GP - 14840                    # TheTrackGraph
+G_SEED = GP - 14472                     # bDefaultSeed
+WORLD_SIZE = 5936
+CAR_BLOWN = 2124                        # BlownTireBits
+MFIELDS = {"tsls": 10340, "gap": 10344, "super": 10348, "aicops": 4}
+
 VT_PURSUIT = 0x002bd460
 VT_AICOP = 0x002bd698
 VT_PLAYERCOP = 0x002bd6c0
@@ -413,6 +446,201 @@ def script(chunks, made):
     s += track(0) + ["spike|3", "cleanup"]
     s += ["cleanup"]
     s += impacts()
+    s += thinks(m["order"])
+    return s
+
+
+NAN, INF = float("nan"), float("inf")
+
+
+def thinks(order):
+    """Think and what it runs (12f)."""
+    def pst(u, state, t1524=0.0, t1532=0.0, chopper=0):
+        return "pst|%d|%d|%s|%s|%d" % (u, state, F(t1524), F(t1532),
+                                         chopper)
+
+    def calm(u, car, player=1):
+        # Pursuit u of car `car`, with nothing to say: LEVEL1, no
+        # roadblock, no chopper.
+        return ["chase|%d|%d" % (u, car), "player|%d|%d" % (car, player),
+                "blown|%d|0" % car, "prb|%d|-1" % u, pst(u, 1)]
+
+    def mf(name, f):
+        return "mset|%s|%s" % (name, F(f))
+
+    def car(k, x, y):
+        return "car|%d|%d|1|%s|%s" % (k, k, F(x), F(y))
+
+    quiet = ([mf("tsls", 0.0), mf("gap", 10.0), mf("super", 0.0),
+              "mset|aicops|0", "copn|0", "copidx|-1"]
+             + ["mset|pullactive%d|0" % k for k in range(8)]
+             + [mf("pursuable%d" % k, 0.0) for k in range(8)])
+    s = ["t|wte|%s" % F(0.5), "t|racetime|0", "t|rc|0", "t|speech|0",
+         "t|cloaked|0", "t|copcarpos|0", "t|dist|%s" % F(0.0),
+         "t|seed|0x12345678", "g|world|1", "polyhit|-1"]
+    s += [car(k, 0.0, 0.0) for k in range(NCARS)]
+
+    # ---- AboutToSaySomething and NotInChasingState
+    s += track(0) + quiet + ["pursuit|0|0"] + calm(0, 1)
+    for state, t1, t2, ch in (
+            (1, 0.0, 0.0, 0), (1, 0.0, 8.0, 0), (1, 0.0, 8.000001, 0),
+            (1, 0.0, NAN, 0), (1, 0.0, INF, 0), (1, 0.0, -1e30, 0),
+            (0, 99.0, 0.0, 0), (2, 13.0, 0.0, 0), (2, 12.999999, 0.0, 0),
+            (2, NAN, 0.0, 0), (2, -INF, 0.0, 0), (3, 1.0, 0.0, 0),
+            (3, 12.0, 0.0, 0), (4, 1.0, 0.0, 0), (5, 1.0, 0.0, 0),
+            (6, 1.0, 0.0, 0), (-1, 1.0, 0.0, 0), (0x7fffffff, 1.0, 0.0, 0),
+            (-2147483644, 1.0, 0.0, 0), (1, 0.0, 0.0, 1),
+            (1, 0.0, 0.0, 2), (1, 0.0, 0.0, 3), (1, 0.0, 0.0, -1),
+            (4, 1.0, 9.0, 1), (5, 20.0, 0.0, 1)):
+        s += [pst(0, state, t1, t2, ch), "about|0", "notchasing|0"]
+    s += [pst(0, 1)]
+    for b in (1, 0x80, 0x40, 0xff, 0):
+        s += ["blown|1|%d" % b, "about|0"]
+    s += ["prb|0|5"]
+    for cx, cy, rx, ry in ((0.0, 0.0, 149.99, 0.0), (0.0, 0.0, 150.0, 0.0),
+                           (0.0, 0.0, 90.0, 120.0), (0.0, 0.0, 89.99, 120.0),
+                           (0.0, 0.0, NAN, 0.0), (0.0, 0.0, -149.9, 0.0),
+                           (0.0, 0.0, 0.0, -150.0001), (0.0, 0.0, INF, 0.0),
+                           (100.0, 100.0, 200.0, 200.0),
+                           (100.0, 100.0, 200.0, 250.0),
+                           (-50.0, 30.0, -50.0, 30.0),
+                           (0.0, 200.0, 0.0, 200.0)):
+        s += [car(1, cx, cy), "rbpos|5|%s|%s" % (F(rx), F(ry)), "about|0"]
+    s += ["prb|0|63", "rbpos|63|%s|%s" % (F(1e6), F(0.0)), "about|0",
+          "prb|0|-1", car(1, 0.0, 0.0), "about|0"]
+
+    # ---- FindPlayerPursuit
+    s += ["fpp", "player|1|0", "fpp"]
+    s += ["pursuit|1|1"] + calm(1, 2, 0) + ["pursuit|2|2"] + calm(2, 3)
+    s += ["fpp", "player|1|1", "fpp", "player|1|0"]
+    s += ["rp|BeACop|1", "fpp", "copidx|3", "fpp", "cop|0|player",
+          "copp|0|1", "copidx|0", "fpp", "copp|0|-1", "fpp", "copp|0|2",
+          "fpp", "rp|BeACop|0", "fpp"]
+
+    # ---- TimeBasedSpeech, U2 the player's pursuit
+    for rc in range(11):
+        s += ["t|rc|%d" % rc, mf("tsls", 1.0), "tbs", "mstate"]
+    s += ["t|rc|0"]
+    for sp in (1, -1, 0x100, 0):
+        s += ["t|speech|%d" % sp, mf("tsls", 1.0), "tbs", "mstate"]
+    s += [mf("tsls", 9.0), "tbs", "mstate", "tbs", "mstate", "tbs",
+          "mstate"]
+    for name, f in (("super", 0.001), ("super", NAN), ("super", -1.0),
+                    ("super", -0.0), ("super", INF), ("super", 0.0)):
+        s += [mf(name, f), mf("tsls", 100.0), "tbs", "mstate"]
+    for setup in ([pst(2, 1, 0.0, 0.0, 1)], [pst(2, 4)], [pst(2, 5)],
+                  [pst(2, 0)], [pst(2, 2, 20.0)], [pst(2, 3)],
+                  ["blown|3|4"], ["blown|3|0", "player|3|0"],
+                  ["player|3|1", "player|2|1"], ["player|2|0"]):
+        s += setup + [mf("tsls", 100.0), "tbs", "mstate"]
+    for tsls, gap, w in ((NAN, 10.0, 0.5), (100.0, NAN, 0.5),
+                         (1.0, 10.0, NAN), (1.0, 10.0, INF),
+                         (1.0, -INF, 0.0), (10.0, 10.0, 0.0),
+                         (-INF, 10.0, INF), (1.0, 10.0, -20.0)):
+        s += [mf("tsls", tsls), mf("gap", gap), "t|wte|%s" % F(w), "tbs",
+              "mstate"]
+    s += ["t|wte|%s" % F(0.5), mf("gap", 10.0)]
+    # Be A Cop: the player's cop's pursuit, whatever it chases.
+    s += ["rp|BeACop|1", "copp|0|1", mf("tsls", 100.0), "tbs", "mstate",
+          "copidx|-1", mf("tsls", 100.0), "tbs", "mstate", "copidx|0",
+          "rp|BeACop|0"]
+    for seed in (0x12345678, 0, 0xffffffff, 0x80000000):
+        s += ["t|seed|%d" % seed, "gapnext", "mstate", "gapnext", "mstate",
+              "rp|BeACop|1", "gapnext", "mstate", "rp|BeACop|0"]
+
+    # ---- SupervisorActivate: U0 (not a player's), U2, U3
+    s += ["pursuit|3|3"] + calm(3, 4) + calm(2, 3)
+    s += ["cansuper|0|1", "cansuper|2|0", "cansuper|3|1"]
+    for rc in (4, 5, 7, 9, 0):
+        s += ["t|rc|%d" % rc, mf("super", 0.25), "supervisor", "mstate"]
+    for f, w in ((0.0, 0.5), (-1.0, 0.5), (NAN, 0.5), (-0.0, 0.5),
+                 (1.0, 0.5), (0.5, 0.5), (0.25, 0.5), (INF, INF),
+                 (1e-30, 0.0), (1e-30, -1.0), (2.0, NAN)):
+        s += [mf("super", f), "t|wte|%s" % F(w), "supervisor", "mstate"]
+    s += ["t|wte|%s" % F(0.5)]
+    s += ["cansuper|3|0", mf("super", 0.25), "supervisor", "mstate"]
+    s += ["cansuper|2|-7", mf("super", 0.25), "supervisor", "mstate"]
+    s += ["cansuper|2|0", "player|1|1", "cansuper|0|1", mf("super", 0.25),
+          "supervisor", "player|1|0"]
+
+    # ---- PursuitManagement
+    s += ["plist", "update|0|0", "update|1|1", "update|2|0", "update|3|-1",
+          "pm", "plist", "pm", "plist", "update|0|1", "update|2|1", "pm",
+          "plist", "pm", "fpp", mf("tsls", 1.0), "tbs", "mstate",
+          mf("super", 0.25), "supervisor", "mstate"]
+    s += ["pursuit|0|1"] + calm(0, 1) + ["update|0|1", "pm", "plist"]
+    s += ["pursuit|0|0"] + calm(0, 1) + ["pursuit|1|1"] + calm(1, 2)
+    s += ["update|0|0", "update|1|1", "pm", "plist", "update|0|1", "pm",
+          "plist"]
+
+    # ---- MonitorPullovers
+    for k, (act, nis, t) in enumerate(((0, 0, 1.0), (1, 0, 1.0),
+                                       (1, 0, 0.5), (1, 0, 0.25),
+                                       (1, 1, 0.25), (2, 0, NAN),
+                                       (1, 0, -INF), (-1, 0, -0.0))):
+        s += ["mset|pullactive%d|%d" % (k, act),
+              "mset|pullnis%d|%d" % (k, nis), mf("pulltimer%d" % k, t)]
+    s += ["pulls", "mstate", "pulls", "mstate", "mset|pullnis4|0", "pulls",
+          "mstate", "t|wte|%s" % F(-1.0), "pulls", "mstate",
+          "t|wte|%s" % F(0.5)]
+    s += ["mset|pullactive%d|0" % k for k in range(8)]
+
+    # ---- ReclaimPatrollers
+    s += ["cop|0|ai", "cop|1|ai", "cop|2|player", "cop|3|ai"]
+    s += ["copcar|%d|%d" % (k, k) for k in range(4)]
+    s += [car(k, 10.0 * k, -5.0 * k) for k in range(4)]
+    for d, n in ((249.99, 3), (250.0, 3), (NAN, 3), (1e9, 3), (-1.0, 3),
+                 (0.0, 3), (INF, 4), (300.0, 0), (300.0, 1), (300.0, -1)):
+        s += ["cset|0|5", "cset|1|6", "cset|2|5", "cset|3|5",
+              "t|dist|%s" % F(d), "mset|aicops|%d" % n, "reclaim",
+              "copstates"]
+    s += ["cset|0|1", "cset|1|0", "cset|2|8", "cset|3|4",
+          "mset|aicops|4", "t|dist|%s" % F(1e9), "reclaim", "copstates",
+          "mset|aicops|0"]
+    s += ["cleanup"]
+
+    # ---- Think
+    s += track(0) + quiet
+    s += ["pursuit|4|0"] + calm(4, 1) + ["cansuper|4|1", "update|4|0"]
+    pursuable = [mf("pursuable%d" % k, f) for k, f in enumerate(
+        (1.0, 0.25, 0.5, -0.0, -1.0, NAN, INF, 3.0))]
+    s += pursuable + ["think", "mstate"]
+    for rt in (1, 1, 0xffffffff, 0x80000000, 0x7fffffff, 0):
+        s += pursuable + ["t|racetime|%d" % rt, "think", "mstate", "think",
+                          "mstate"]
+    s += ["t|racetime|1", "t|wte|%s" % F(-2.0), "think", "mstate",
+          "t|wte|%s" % F(0.5)]
+    s += ["cop|0|ai", "cop|1|player", "cop|2|ai", "cop|3|ai"]
+    s += ["copcar|%d|%d" % (k, k) for k in range(4)]
+    for n in (1, 3, 4):
+        s += ["copn|%d" % n, "think"]
+    s += [mf("super", 0.25), mf("tsls", 100.0), "mset|pullactive2|1",
+          "mset|pullnis2|0", mf("pulltimer2", 0.25), "think", "mstate"]
+    s += ["rp|BeACop|1", "mset|aicops|2", "cset|0|5", "cset|2|5",
+          "t|dist|%s" % F(300.0), mf("super", 0.25), mf("tsls", 100.0),
+          "copidx|1", "copp|1|4", mf("pulltimer2", 0.25), "think",
+          "mstate", "copstates"]
+    s += ["update|4|1", "think", "plist", "copidx|-1", "think",
+          "rp|BeACop|0", "cset|0|5", "think", "copstates", "copn|0",
+          "mset|aicops|0", "think"]
+    s += ["cleanup"]
+
+    # ---- GlobalCopThink, on the chunk whose L1 and L3 uncloak
+    s += track(order) + quiet + ["global|%s" % F(0.5)]
+    s += ["t|mgr|0", "global|%s" % F(0.5), "t|cloaked|1", "global|0",
+          "t|copcarpos|3", "wcar|0|0", "wcar|1|3", "wcar|2|5"]
+    s += [car(0, 1.0, 2.0), car(3, -7.0, 11.0), car(5, 300.0, 4.0)]
+    for hit in (-1, 0, 1, 2, 3, 7):
+        s += ["polyhit|%d" % hit, "global|%s" % F(0.5)]
+    for n, hit in ((0, 1), (-1, 1), (1, 1), (2, 2), (1, -1)):
+        s += ["t|copcarpos|%d" % n, "polyhit|%d" % hit, "global|0"]
+    for x, y in ((0.0, 0.0), (5.0, 5.0), (3.0, 4.0), (2.0, 1.0),
+                 (17.0, 6.0), (-4.0, 9.0)):
+        s += ["t|copcarpos|3", "polyhit|-1", car(0, x, y), car(3, y, x),
+              "global|0"]
+    s += ["t|mgr|1", "t|cloaked|-1", "polyhit|3", "global|%s" % F(0.5),
+          "t|cloaked|0", "global|0", "polyhit|-1", "t|copcarpos|0",
+          "cleanup"]
     return s
 
 
@@ -509,8 +737,38 @@ class Model(object):
         self.routes = e.alloc(64 * 3, align=16)
         for i in range(3):
             self.names[self.routes + 64 * i] = "R%d" % i
-        self.world = e.alloc(64, align=16)
+        self.world = e.alloc(WORLD_SIZE, align=16)
+        e.write(self.world, bytes(WORLD_SIZE))
         self.names[self.world] = "W0"
+        # Think's: a race, a race coordinator, the speech manager and the
+        # track graph, all zero.
+        self.race = e.alloc(64, align=16)
+        self.rc = e.alloc(64, align=16)
+        self.speech = e.alloc(1472, align=16)
+        self.graph = e.alloc(64, align=16)
+        for p, n, g in ((self.race, 64, G_RACE), (self.rc, 64, G_RC),
+                        (self.speech, 1472, G_SPEECH),
+                        (self.graph, 64, G_GRAPH)):
+            e.write(p, bytes(n))
+            e.put32(g, p)
+        self.player_token = e.alloc(16, align=16)
+        self.updates = {}
+        self.cansupers = {}
+        self.dist_bits = 0
+        self.hidden_mgr = 0
+        for a, fn in ((S_UPDATE, self.s_update),
+                      (S_CANSUPER, self.s_cansuper),
+                      (S_SUPERINIT, self.s_superinit),
+                      (S_FILLER, self.s_filler),
+                      (S_SPAWNST, self.logm("spawnst")),
+                      (S_SPIKEBELTS, self.logm("spikebelts")),
+                      (S_ENDPULL, self.s_endpull),
+                      (S_BEACOPTHINK, self.logm("beacopthink")),
+                      (S_DIST2D, self.s_dist),
+                      (S_UNCLOAK, self.s_uncloak)):
+            e.stub(a, fn)
+        for a, kind in S_THINKS.items():
+            e.stub(a, self.think_stub(kind))
         for a, fn in ((S_MALLOC, self.s_malloc), (S_DELETE, self.s_delete),
                       (S_NEWPOOL, self.s_newpool),
                       (S_DELPOOL, self.s_delpool),
@@ -686,6 +944,56 @@ class Model(object):
 
     def s_disable(self, em):
         self.emit("  disable %s %d" % (self.sym(em.reg[4]), s32(em.reg[5])))
+
+    def pursuit_index(self, p):
+        for u, a in self.pursuits.items():
+            if a == p & M32:
+                return u
+        return -1
+
+    def s_update(self, em):
+        u = self.pursuit_index(em.reg[4])
+        v = self.updates.get(u, 0)
+        self.emit("  update U%d -> %d" % (u, v))
+        return v
+
+    def s_cansuper(self, em):
+        u = self.pursuit_index(em.reg[4])
+        v = self.cansupers.get(u, 0)
+        self.emit("  cansuper U%d -> %d" % (u, v))
+        return v
+
+    def s_superinit(self, em):
+        self.emit("  superinit U%d" % self.pursuit_index(em.reg[4]))
+
+    def s_filler(self, em):
+        m = self.e.u32(G_COPMGR)
+        self.emit("  filler U%d %d" % (self.pursuit_index(em.reg[4]),
+                                      s32((em.reg[5] - m) & M32)))
+
+    def logm(self, what):
+        def fn(em):
+            self.emit("  %s %s" % (what, self.sym(em.reg[4])))
+        return fn
+
+    def s_endpull(self, em):
+        self.emit("  endpull %s %d" % (self.sym(em.reg[4]), s32(em.reg[5])))
+
+    def s_dist(self, em):
+        e = self.e
+        pos = em.reg[5] & M32
+        self.emit("  dist %s %08x %08x -> %08x" % (
+            self.sym(em.reg[4]), e.u32(pos), e.u32(pos + 4), self.dist_bits))
+        em.fpr[0] = self.dist_bits
+
+    def s_uncloak(self, em):
+        self.emit("  uncloak %s" % (
+            "G" if em.reg[4] & M32 == self.graph else "?"))
+
+    def think_stub(self, kind):
+        def fn(em):
+            self.emit("  %s think %s" % (kind, self.sym(em.reg[4])))
+        return fn
 
     def dtor_stub(self, kind):
         def fn(em):
@@ -932,8 +1240,119 @@ class Model(object):
             self.names[p] = "S%d" % k
             self.link_tail(m + 80, p)
             e.put32(p + 2288, VT_SPIKE)
-        else:
+        elif not self.think_op(a, m):
             raise ValueError(o)
+
+    def mfield(self, f):
+        if f in MFIELDS:
+            return MFIELDS[f]
+        for name, base, step in (("pursuable", 10356, 4),
+                                 ("pulltimer", 88 + 4, 28),
+                                 ("pullactive", 88 + 12, 28),
+                                 ("pullnis", 88 + 16, 28)):
+            if f.startswith(name):
+                return base + step * int(f[len(name):])
+        raise ValueError(f)
+
+    def think_op(self, a, m):
+        """Think's ops (12f); False for none of them."""
+        e = self.e
+        o = a[0]
+        v = lambda j: int(a[j], 0) & M32        # noqa: E731
+        if o == "t":
+            g, val = a[1], v(2)
+            if g == "wte":
+                e.put32(G_WTE, val)
+            elif g == "racetime":
+                e.put32(self.race + 16, val)
+            elif g == "rc":
+                e.put32(self.rc, val)
+            elif g == "speech":
+                e.put32(self.speech + 1452, val)
+            elif g == "cloaked":
+                e.put32(self.graph + 8, val)
+            elif g == "copcarpos":
+                e.put32(self.world + 36, val)
+            elif g == "dist":
+                self.dist_bits = val
+            elif g == "seed":
+                e.put32(G_SEED, val)
+            elif g == "mgr":
+                if val == 0 and m != 0:
+                    self.hidden_mgr = m
+                    e.put32(G_COPMGR, 0)
+                elif val != 0 and m == 0:
+                    e.put32(G_COPMGR, self.hidden_mgr)
+            else:
+                return False
+        elif o == "wcar":
+            e.put32(self.world + 44 + 4 * int(a[1]), self.cars[int(a[2])])
+        elif o == "pst":
+            p = self.pursuits[int(a[1])]
+            for off, j in ((1484, 2), (1524, 3), (1532, 4), (1580, 5)):
+                e.put32(p + off, v(j))
+        elif o == "prb":
+            k = int(a[2])
+            e.put32(self.pursuits[int(a[1])] + 20,
+                    m + 320 + 120 * k if k >= 0 else 0)
+        elif o == "rbpos":
+            r = m + 320 + 120 * int(a[1])
+            e.put32(r + 68, v(2))
+            e.put32(r + 72, v(3))
+        elif o == "blown":
+            e.write(self.cars[int(a[1])] + CAR_BLOWN, bytes([v(2) & 0xff]))
+        elif o == "player":
+            e.put32(self.cars[int(a[1])] + CAR_PLAYER,
+                    self.player_token if v(2) else 0)
+        elif o == "update":
+            self.updates[int(a[1])] = s32(v(2))
+        elif o == "cansuper":
+            self.cansupers[int(a[1])] = s32(v(2))
+        elif o == "mset":
+            e.put32(m + self.mfield(a[1]), v(2))
+        elif o == "cset":
+            e.put32(e.u32(m + 16 + 4 * int(a[1])) + 16, v(2))
+        elif o == "copstates":
+            out = []
+            for k in range(7):
+                c = e.u32(m + 16 + 4 * k)
+                out.append("%d" % s32(e.u32(c + 16)) if c else "-")
+            self.emit("copstates " + " ".join(out))
+        elif o == "mstate":
+            self.emit("mstate %s pur %s hold %s" % (
+                " ".join("%08x" % e.u32(m + 10340 + 4 * k) for k in range(4)),
+                " ".join("%08x" % e.u32(m + 10356 + 4 * k) for k in range(8)),
+                " ".join("%08x" % e.u32(m + 88 + 28 * k + 4)
+                         for k in range(8))))
+        elif o == "plist":
+            out, n = [], e.u32(m + 44)
+            while n != (m + 44) & M32:
+                out.append(self.sym(n))
+                n = e.u32(n)
+            self.emit("plist" + "".join(" " + t for t in out))
+        elif o == "think":
+            e.call(F_THINK, m, limit=2000000)
+            self.emit("think")
+        elif o == "global":
+            e.fpr[12] = v(1)
+            e.call(F_GLOBAL, limit=2000000)
+            self.emit("global")
+        elif o in ("tbs", "supervisor", "pm", "gapnext", "pulls", "reclaim"):
+            f = {"tbs": F_TBS, "supervisor": F_SUPER, "pm": F_PM,
+                 "gapnext": F_GAP, "pulls": F_PULLS,
+                 "reclaim": F_RECLAIM}[o]
+            e.call(f, m, limit=2000000)
+            self.emit(o)
+        elif o == "fpp":
+            self.emit("fpp -> %s" % self.sym(e.call(F_FPP, m)))
+        elif o in ("about", "notchasing"):
+            u = int(a[1])
+            r = e.call(F_ABOUT if o == "about" else F_NOTCHASING,
+                       self.pursuits[u])
+            self.emit("%s U%d -> %d" % (o, u, r))
+        else:
+            return False
+        return True
 
     def put_chunk(self, k, raw):
         p = self.e.alloc(len(raw) + 16, align=16)
@@ -984,6 +1403,7 @@ def write_script(d, lines):
 # ============================================================= mutations
 
 C = COPMGR
+CM = "3DS Files/source/copmanager.c"
 MUTATIONS = [
     # ---- LoaderCops and UnloaderCops
     ("loader_any_id", C,
@@ -1257,8 +1677,8 @@ MUTATIONS = [
      "        pl->bActive = 0;\n",
      "        pl->bActive = 0;\n        pl->bShouldDisplayBustedText = 0;\n"),
     ("ctor_pursuable_kept", C,
-     "        m->fPursuableTimer[i] = 0.0f;\n",
-     ""),
+     "        pl->bActive = 0;\n        m->fPursuableTimer[i] = 0.0f;\n",
+     "        pl->bActive = 0;\n"),
     ("ctor_hold_kept", C,
      "        pl->fHoldTimer = 0.0f;\n",
      ""),
@@ -1343,8 +1763,8 @@ MUTATIONS = [
 
     # ---- InitCops and CleanupCops
     ("initcops_nonzero", C,
-     "    if (TheRaceParameters.nMaxCops > 0)",
-     "    if (TheRaceParameters.nMaxCops != 0)"),
+     "    if (TheRaceParameters.nMaxCops > 0)\n        pCopManager",
+     "    if (TheRaceParameters.nMaxCops != 0)\n        pCopManager"),
     ("initcops_name", C,
      '"CopMgr", 0,',
      '"CopManager", 0,'),
@@ -1489,9 +1909,338 @@ MUTATIONS = [
     ("ci_no_twocar", C,
      "    copmanager_monitor_impact(m, b->pCar, amount, twoCar);",
      "    copmanager_monitor_impact(m, b->pCar, amount, 0);"),
+
+    # ---- 12f: NotInChasingState and AboutToSaySomething
+    ("nc_le2", CM, "EPS_SPEEDER_CAUGHT) < 2u;", "EPS_SPEEDER_CAUGHT) <= 2u;"),
+    ("nc_lt1", CM, "EPS_SPEEDER_CAUGHT) < 2u;", "EPS_SPEEDER_CAUGHT) < 1u;"),
+    ("nc_signed", CM, "    return (uint32_t)(p->PursuitState - EPS_SPEEDER_CAUGHT) < 2u;",
+     "    return p->PursuitState - EPS_SPEEDER_CAUGHT < 2;"),
+    ("ab_rb_le", CM, "    if (8.0f < p->fRoadBlockSpawnTimer)",
+     "    if (8.0f <= p->fRoadBlockSpawnTimer)"),
+    ("ab_rb_7", CM, "    if (8.0f < p->fRoadBlockSpawnTimer)",
+     "    if (7.0f < p->fRoadBlockSpawnTimer)"),
+    ("ab_rb_nan", CM, "    if (8.0f < p->fRoadBlockSpawnTimer)",
+     "    if (!(p->fRoadBlockSpawnTimer <= 8.0f))"),
+    ("ab_no_rb", CM,
+     "    if (8.0f < p->fRoadBlockSpawnTimer)\n        return 1;\n", ""),
+    ("ab_no_level0", CM,
+     "    if (p->PursuitState == EPS_LEVEL0)\n        return 1;\n", ""),
+    ("ab_level1", CM, "    if (p->PursuitState == EPS_LEVEL0)",
+     "    if (p->PursuitState == EPS_LEVEL1)"),
+    ("ab_l2_le", CM, "p->fPursuitStateTimer < 13.0f)",
+     "p->fPursuitStateTimer <= 13.0f)"),
+    ("ab_l2_nan", CM, "p->fPursuitStateTimer < 13.0f)",
+     "!(13.0f <= p->fPursuitStateTimer))"),
+    ("ab_l2_any", CM,
+     "    if (p->PursuitState == EPS_LEVEL2 && p->fPursuitStateTimer",
+     "    if (p->PursuitState >= EPS_LEVEL2 && p->fPursuitStateTimer"),
+    ("ab_l2_no_state", CM,
+     "    if (p->PursuitState == EPS_LEVEL2 && p->fPursuitStateTimer",
+     "    if (p->fPursuitStateTimer"),
+    ("ab_no_blown", CM,
+     "    if ((int8_t)car->BlownTireBits != 0)\n        return 1;\n", ""),
+    ("ab_blown_pos", CM, "    if ((int8_t)car->BlownTireBits != 0)",
+     "    if ((int8_t)car->BlownTireBits > 0)"),
+    ("ab_blown_bit0", CM, "    if ((int8_t)car->BlownTireBits != 0)",
+     "    if (car->BlownTireBits & 1)"),
+    ("ab_rbd_le", CM, "dy * dy) < 150.0f)", "dy * dy) <= 150.0f)"),
+    ("ab_rbd_nan", CM, "        if (sqrtf(dx * dx + dy * dy) < 150.0f)",
+     "        if (!(sqrtf(dx * dx + dy * dy) >= 150.0f))"),
+    ("ab_rbd_x", CM, "        if (sqrtf(dx * dx + dy * dy) < 150.0f)",
+     "        if (sqrtf(dx * dx) < 150.0f)"),
+    ("ab_rbd_sign", CM,
+     "        float dy = p->pRoadBlock->v2Position.y - car->State.Position.y;",
+     "        float dy = p->pRoadBlock->v2Position.y + car->State.Position.y;"),
+    ("ab_rbd_yx", CM,
+     "        float dy = p->pRoadBlock->v2Position.y - car->State.Position.y;",
+     "        float dy = p->pRoadBlock->v2Position.y - car->State.Position.x;"),
+    ("ab_no_rbd", CM, "    if (p->pRoadBlock != NULL) {",
+     "    if (0) {"),
+    ("ab_chopper_any", CM, "    return p->ChopperState == ECS_CHOPPER_REQUESTED;",
+     "    return p->ChopperState != ECS_NO_CHOPPER;"),
+    ("ab_chopper_inflight", CM,
+     "    return p->ChopperState == ECS_CHOPPER_REQUESTED;",
+     "    return p->ChopperState == ECS_CHOPPER_INFLIGHT;"),
+    ("ab_chopper_0", CM, "    return p->ChopperState == ECS_CHOPPER_REQUESTED;",
+     "    return 0;"),
+
+    # ---- 12f: the replay test, FindPlayerPursuit, the filler gap
+    ("rp_no_4", C, "    return s == RCSTATE_INSTANT_REPLAY || ",
+     "    return "),
+    ("rp_no_7", C, "|| s == RCSTATE_POSTRACE\n", "\n"),
+    ("rp_no_5", C, "        || s == RCSTATE_AUTO_REPLAY || ", "        || "),
+    ("rp_no_9", C, " || s == RCSTATE_REPLAY_DEMO_MODE;", ";"),
+    ("rp_6", C, " || s == RCSTATE_REPLAY_DEMO_MODE;",
+     " || s == RCSTATE_REPLAY_DEMO_MODE || s == 6;"),
+    ("cp_null", C, "    return p->pChasedCar->pPlayer != NULL;",
+     "    return p->pChasedCar != NULL;"),
+    ("gap_9", C, "bRandomF(3.0f, &bDefaultSeed) + 9.0f;",
+     "bRandomF(3.0f, &bDefaultSeed) + 8.0f;"),
+    ("gap_range", C, "bRandomF(3.0f, &bDefaultSeed) + 9.0f;",
+     "bRandomF(4.0f, &bDefaultSeed) + 9.0f;"),
+    ("gap_no_beacop", C,
+     "        m->MaxSpeechGapTime = m->MaxSpeechGapTime + 4.0f;", ""),
+    ("gap_beacop_3", C, "m->MaxSpeechGapTime + 4.0f;",
+     "m->MaxSpeechGapTime + 3.0f;"),
+    ("gap_beacop_inv", C,
+     "    m->MaxSpeechGapTime = bRandomF(3.0f, &bDefaultSeed) + 9.0f;\n"
+     "    if (TheRaceParameters.BeACop != 0)",
+     "    m->MaxSpeechGapTime = bRandomF(3.0f, &bDefaultSeed) + 9.0f;\n"
+     "    if (TheRaceParameters.BeACop == 0)"),
+    ("fpp_idx_any", C, "        if (m->nPlayerCopIndex == -1)\n"
+     "            return NULL;\n", ""),
+    ("fpp_beacop_list", C, "        return c != NULL ? c->pMyPursuit : NULL;",
+     "        (void)c;"),
+    ("fpp_last", C,
+     "        if (chases_player((tPursuit *)(void *)n))\n"
+     "            return (tPursuit *)(void *)n;\n    return NULL;",
+     "    {\n        tPursuit *r = NULL;\n"
+     "        for (n = m->PursuitList.Next; n != &m->PursuitList; "
+     "n = n->Next)\n"
+     "            if (chases_player((tPursuit *)(void *)n))\n"
+     "                r = (tPursuit *)(void *)n;\n        return r;\n"
+     "    }\n    return NULL;"),
+    ("fpp_any", C,
+     "        if (chases_player((tPursuit *)(void *)n))\n"
+     "            return (tPursuit *)(void *)n;",
+     "        return (tPursuit *)(void *)n;"),
+
+    # ---- 12f: TimeBasedSpeech
+    ("tbs_no_replay", C,
+     "    if (replaying())\n        return;\n"
+     "    if (gCopSpeechPlaybackStateFn != NULL",
+     "    if (gCopSpeechPlaybackStateFn != NULL"),
+    ("tbs_speech_keep", C,
+     "        && gCopSpeechPlaybackStateFn() != 0) {\n"
+     "        m->TimeSinceLastSpeech = 0.0f;\n",
+     "        && gCopSpeechPlaybackStateFn() != 0) {\n"),
+    ("tbs_speech_pos", C, "        && gCopSpeechPlaybackStateFn() != 0) {",
+     "        && gCopSpeechPlaybackStateFn() > 0) {"),
+    ("tbs_empty_keep", C,
+     "    if (m->PursuitList.Next == &m->PursuitList) {\n"
+     "        m->TimeSinceLastSpeech = 0.0f;\n",
+     "    if (m->PursuitList.Next == &m->PursuitList) {\n"),
+    ("tbs_empty_count", C,
+     "    if (m->PursuitList.Next == &m->PursuitList) {\n"
+     "        m->TimeSinceLastSpeech = 0.0f;\n        return;\n    }\n"
+     "    t = m->TimeSinceLastSpeech",
+     "    t = m->TimeSinceLastSpeech"),
+    ("tbs_le", C, "    if (!(m->MaxSpeechGapTime < t))",
+     "    if (!(m->MaxSpeechGapTime <= t))"),
+    ("tbs_nan", C, "    if (!(m->MaxSpeechGapTime < t))",
+     "    if (t <= m->MaxSpeechGapTime)"),
+    ("tbs_no_store", C,
+     "    t = m->TimeSinceLastSpeech + WorldTimeElapsed;\n"
+     "    m->TimeSinceLastSpeech = t;\n",
+     "    t = m->TimeSinceLastSpeech + WorldTimeElapsed;\n"),
+    ("tbs_super_ge", C, "    if (p == NULL || 0.0f < m->fSupervisorTimer",
+     "    if (p == NULL || 0.0f <= m->fSupervisorTimer"),
+    ("tbs_super_nan", C, "    if (p == NULL || 0.0f < m->fSupervisorTimer",
+     "    if (p == NULL || !(m->fSupervisorTimer <= 0.0f)"),
+    ("tbs_no_super", C, "    if (p == NULL || 0.0f < m->fSupervisorTimer",
+     "    if (p == NULL"),
+    ("tbs_no_about", C,
+     "        || tpursuit_about_to_say_something(p)\n", "\n"),
+    ("tbs_no_notchasing", C,
+     "        || tpursuit_not_in_chasing_state(p)) {", ") {"),
+    ("tbs_fail_keep", C,
+     "        || tpursuit_not_in_chasing_state(p)) {\n"
+     "        m->TimeSinceLastSpeech = 0.0f;\n",
+     "        || tpursuit_not_in_chasing_state(p)) {\n"),
+    ("tbs_said_keep", C,
+     "        gSayFillerSpeechFn(p, &m->SpeechFillerCookie);\n"
+     "    m->TimeSinceLastSpeech = 0.0f;\n",
+     "        gSayFillerSpeechFn(p, &m->SpeechFillerCookie);\n"),
+    ("tbs_no_gap", C,
+     "    m->TimeSinceLastSpeech = 0.0f;\n"
+     "    copmanager_set_next_speech_filler_gap(m);\n",
+     "    m->TimeSinceLastSpeech = 0.0f;\n"),
+    ("tbs_no_filler", C,
+     "        gSayFillerSpeechFn(p, &m->SpeechFillerCookie);",
+     "        (void)p;"),
+
+    # ---- 12f: SupervisorActivate
+    ("sv_no_replay", C,
+     "    if (replaying())\n        return;\n"
+     "    if (!(0.0f < m->fSupervisorTimer))",
+     "    if (!(0.0f < m->fSupervisorTimer))"),
+    ("sv_ge", C, "    if (!(0.0f < m->fSupervisorTimer))",
+     "    if (!(0.0f <= m->fSupervisorTimer))"),
+    ("sv_nan", C, "    if (!(0.0f < m->fSupervisorTimer))",
+     "    if (m->fSupervisorTimer <= 0.0f)"),
+    ("sv_lt", C, "    if (!(t <= 0.0f))\n        return;\n"
+     "    m->fSupervisorTimer = 0.0f;",
+     "    if (!(t < 0.0f))\n        return;\n"
+     "    m->fSupervisorTimer = 0.0f;"),
+    ("sv_t_nan", C, "    if (!(t <= 0.0f))\n        return;\n"
+     "    m->fSupervisorTimer = 0.0f;",
+     "    if (0.0f < t)\n        return;\n"
+     "    m->fSupervisorTimer = 0.0f;"),
+    ("sv_no_zero", C, "        return;\n    m->fSupervisorTimer = 0.0f;\n",
+     "        return;\n"),
+    ("sv_no_store", C, "    t = m->fSupervisorTimer - WorldTimeElapsed;\n"
+     "    m->fSupervisorTimer = t;\n",
+     "    t = m->fSupervisorTimer - WorldTimeElapsed;\n"),
+    ("sv_any_car", C, "        if (!chases_player(p))\n            continue;\n"
+     "        if (gPursuitCanSupervisorInitiateFn == NULL",
+     "        if (gPursuitCanSupervisorInitiateFn == NULL"),
+    ("sv_no_test", C, "            || gPursuitCanSupervisorInitiateFn(p) == 0)",
+     "            || 0)"),
+    ("sv_all", C, "            gPursuitSuperInitiatesFn(p);\n        return;\n",
+     "            gPursuitSuperInitiatesFn(p);\n"),
+
+    # ---- 12f: PursuitManagement
+    ("pm_none", C, "        if (gPursuitUpdateFn != NULL && gPursuitUpdateFn(p) != 0)\n"
+     "            copmanager_delete_pursuit(m, p);",
+     "        if (gPursuitUpdateFn != NULL)\n            gPursuitUpdateFn(p);"),
+    ("pm_pos", C, "gPursuitUpdateFn(p) != 0)", "gPursuitUpdateFn(p) > 0)"),
+    ("pm_stop", C, "            copmanager_delete_pursuit(m, p);\n        n = next;",
+     "        {\n            copmanager_delete_pursuit(m, p);\n"
+     "            break;\n        }\n        n = next;"),
+
+    # ---- 12f: MonitorPullovers
+    ("pl_no_active", C, "        if (pl->bActive == 0 || pl->bPlayNIS != 0)",
+     "        if (pl->bPlayNIS != 0)"),
+    ("pl_no_nis", C, "        if (pl->bActive == 0 || pl->bPlayNIS != 0)",
+     "        if (pl->bActive == 0)"),
+    ("pl_active1", C, "        if (pl->bActive == 0 || pl->bPlayNIS != 0)",
+     "        if (pl->bActive != 1 || pl->bPlayNIS != 0)"),
+    ("pl_le", C, "        if (pl->fHoldTimer < 0.0f && gCopManagerEndPulloverFn",
+     "        if (pl->fHoldTimer <= 0.0f && gCopManagerEndPulloverFn"),
+    ("pl_nan", C, "        if (pl->fHoldTimer < 0.0f && gCopManagerEndPulloverFn",
+     "        if (!(pl->fHoldTimer >= 0.0f) && gCopManagerEndPulloverFn"),
+    ("pl_add", C, "        pl->fHoldTimer = pl->fHoldTimer - WorldTimeElapsed;",
+     "        pl->fHoldTimer = pl->fHoldTimer + WorldTimeElapsed;"),
+    ("pl_seven", C,
+     "    for (i = 0; i < COPMANAGER_NUM_PULLOVERS; i++) {\n"
+     "        tCarPulloverInfo *pl = &m->CarPullovers[i];\n\n"
+     "        if (pl->bActive == 0",
+     "    for (i = 0; i < COPMANAGER_NUM_PULLOVERS - 1; i++) {\n"
+     "        tCarPulloverInfo *pl = &m->CarPullovers[i];\n\n"
+     "        if (pl->bActive == 0"),
+    ("pl_idx", C, "            gCopManagerEndPulloverFn(m, i);",
+     "            gCopManagerEndPulloverFn(m, 0);"),
+
+    # ---- 12f: ReclaimPatrollers
+    ("rc_all_cops", C, "    for (i = 0; i < m->nNumAICops; i++) {\n"
+     "        tCop *c = m->Cops[i];\n\n"
+     "        if (c->DesiredLogicState != LS_DRIVING_ON_PATROL)",
+     "    for (i = 0; i < m->nNumAICops + 1 && i < 4; i++) {\n"
+     "        tCop *c = m->Cops[i];\n\n"
+     "        if (c->DesiredLogicState != LS_DRIVING_ON_PATROL)"),
+    ("rc_any_state", C,
+     "        if (c->DesiredLogicState != LS_DRIVING_ON_PATROL)\n"
+     "            continue;\n", ""),
+    ("rc_pursuit", C,
+     "        if (c->DesiredLogicState != LS_DRIVING_ON_PATROL)\n"
+     "            continue;",
+     "        if (c->DesiredLogicState != LS_HOT_PURSUIT)\n"
+     "            continue;"),
+    ("rc_le", C, "            < 250.0f)\n            continue;\n"
+     "        tcop_set_desired_logic_state(c, LS_LIMBO);",
+     "            <= 250.0f)\n            continue;\n"
+     "        tcop_set_desired_logic_state(c, LS_LIMBO);"),
+    ("rc_200", C, "            < 250.0f)\n            continue;\n"
+     "        tcop_set_desired_logic_state(c, LS_LIMBO);",
+     "            < 200.0f)\n            continue;\n"
+     "        tcop_set_desired_logic_state(c, LS_LIMBO);"),
+    ("rc_disabled", C, "        tcop_set_desired_logic_state(c, LS_LIMBO);",
+     "        tcop_set_desired_logic_state(c, LS_DISABLED);"),
+
+    # ---- 12f: Think
+    ("th_no_tbs", C, "    copmanager_time_based_speech(m);\n"
+     "    copmanager_supervisor_activate(m);", "    copmanager_supervisor_activate(m);"),
+    ("th_no_super", C, "    copmanager_supervisor_activate(m);\n"
+     "    copmanager_pursuit_management(m);", "    copmanager_pursuit_management(m);"),
+    ("th_no_pm", C, "    copmanager_pursuit_management(m);\n"
+     "    if (TheRaceParameters.BeACop != 0) {",
+     "    if (TheRaceParameters.BeACop != 0) {"),
+    ("th_pm_first", C, "    copmanager_time_based_speech(m);\n"
+     "    copmanager_supervisor_activate(m);\n"
+     "    copmanager_pursuit_management(m);\n",
+     "    copmanager_pursuit_management(m);\n"
+     "    copmanager_time_based_speech(m);\n"
+     "    copmanager_supervisor_activate(m);\n"),
+    ("th_super_first", C, "    copmanager_time_based_speech(m);\n"
+     "    copmanager_supervisor_activate(m);\n",
+     "    copmanager_supervisor_activate(m);\n"
+     "    copmanager_time_based_speech(m);\n"),
+    ("th_no_reclaim", C, "        copmanager_reclaim_patrollers(m);\n"
+     "    } else {", "    } else {"),
+    ("th_reclaim_always", C, "        copmanager_reclaim_patrollers(m);\n"
+     "    } else {\n",
+     "        copmanager_reclaim_patrollers(m);\n"
+     "    } else {\n        copmanager_reclaim_patrollers(m);\n"),
+    ("th_no_spawnst", C, "            gCopManagerSpawnSpeedTrapsFn(m);",
+     "            (void)0;"),
+    ("th_race_ge", C, "        if (0 < (int32_t)pCurrentRace->RaceTime.PackedTime)",
+     "        if (0 <= (int32_t)pCurrentRace->RaceTime.PackedTime)"),
+    ("th_race_unsigned", C,
+     "        if (0 < (int32_t)pCurrentRace->RaceTime.PackedTime)",
+     "        if (0 < pCurrentRace->RaceTime.PackedTime)"),
+    ("th_race_none", C,
+     "        if (0 < (int32_t)pCurrentRace->RaceTime.PackedTime)",
+     "        if (1)"),
+    ("th_pur_ge", C, "                if (0.0f < t) {", "                if (0.0f <= t) {"),
+    ("th_pur_nan", C, "                if (0.0f < t) {",
+     "                if (!(t <= 0.0f)) {"),
+    ("th_pur_le", C, "                    if (t < 0.0f)\n"
+     "                        m->fPursuableTimer[i] = 0.0f;",
+     "                    if (t <= 0.0f)\n"
+     "                        m->fPursuableTimer[i] = 0.0f;"),
+    ("th_pur_noclamp", C, "                    if (t < 0.0f)\n"
+     "                        m->fPursuableTimer[i] = 0.0f;", ""),
+    ("th_pur_seven", C, "            for (i = 0; i < 8; i++) {",
+     "            for (i = 0; i < 7; i++) {"),
+    ("th_pur_add", C, "                    t = t - WorldTimeElapsed;",
+     "                    t = t + WorldTimeElapsed;"),
+    ("th_no_spikes", C, "        gCopManagerMonitorSpikeBeltsFn(m);",
+     "        (void)0;"),
+    ("th_no_pulls", C, "    copmanager_monitor_pullovers(m);\n"
+     "    for (i = 0; i < m->nNumCops; i++) {",
+     "    for (i = 0; i < m->nNumCops; i++) {"),
+    ("th_cops_ai", C, "    for (i = 0; i < m->nNumCops; i++) {\n"
+     "        tCop          *c",
+     "    for (i = 0; i < m->nNumAICops; i++) {\n"
+     "        tCop          *c"),
+    ("th_cops_less", C, "    for (i = 0; i < m->nNumCops; i++) {\n"
+     "        tCop          *c",
+     "    for (i = 1; i < m->nNumCops; i++) {\n"
+     "        tCop          *c"),
+    ("th_no_cop_think", C, "        ((ThinkFn)e->fn)(vt_this(c, e));",
+     "        (void)e;"),
+    ("th_beacop_always", C,
+     "    if (TheRaceParameters.BeACop != 0 && gCopManagerBeACopThinkFn != NULL)",
+     "    if (gCopManagerBeACopThinkFn != NULL)"),
+    ("th_beacop_never", C,
+     "    if (TheRaceParameters.BeACop != 0 && gCopManagerBeACopThinkFn != NULL)",
+     "    if (0)"),
+
+    # ---- 12f: GlobalCopThink
+    ("gt_no_think", C, "        copmanager_think(pCopManager);", "        (void)0;"),
+    ("gt_no_cloaked", C, "    if (TheTrackGraph->bHasCloakedEdge == 0)\n"
+     "        return;\n", ""),
+    ("gt_cloaked_1", C, "    if (TheTrackGraph->bHasCloakedEdge == 0)",
+     "    if (TheTrackGraph->bHasCloakedEdge != 1)"),
+    ("gt_all_cars", C, "    for (i = 0; i < pCurrentWorld->CopCarPos; i++) {",
+     "    for (i = 0; i < pCurrentWorld->CopCarPos + 1 && i < 3; i++) {"),
+    ("gt_first_car", C, "    for (i = 0; i < pCurrentWorld->CopCarPos; i++) {",
+     "    for (i = 0; i < pCurrentWorld->CopCarPos && i < 1; i++) {"),
+    ("gt_any_land", C, "        if (l != NULL && l->IsUncloakTrigger != 0) {",
+     "        if (l != NULL) {"),
+    ("gt_keep_going", C, "            trackgraph_uncloak_all_edges(TheTrackGraph);\n"
+     "            return;",
+     "            trackgraph_uncloak_all_edges(TheTrackGraph);"),
 ]
 
 EQUIVALENT = {
+    "sv_nan": "a NaN fSupervisorTimer less the frame's seconds is the same "
+              "NaN, stored back, and !(NaN <= 0) returns at once; every "
+              "other timer takes the same branch either way",
+    "th_pur_nan": "a NaN fPursuableTimer less the frame's seconds is the "
+                  "same NaN, stored back, and NaN < 0 is false",
+    "th_pur_le": "the timer was above 0, so less the frame's seconds it is "
+                 "never -0.0, and at +0.0 both store +0.0",
     "mi_ai_table_nan": "MonitorImpact's one caller, AddDamage, passes only "
                        "amounts of 1.0 or more, so the AI branch never sees "
                        "a NaN, and for the rest the two tests agree",

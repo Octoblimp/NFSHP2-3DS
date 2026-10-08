@@ -2,6 +2,8 @@
 
 #include "copmanager.h"
 
+#include <math.h>
+
 #include "car.h"
 #include "eefpu.h"
 
@@ -106,4 +108,32 @@ bVector2 *tpursuithistory_velocity_at(bVector2 *out, const tPursuitHistory *h,
     }
     *out = r;
     return out;
+}
+
+int32_t tpursuit_not_in_chasing_state(const tPursuit *p)
+{
+    return (uint32_t)(p->PursuitState - EPS_SPEEDER_CAUGHT) < 2u;
+}
+
+int32_t tpursuit_about_to_say_something(const tPursuit *p)
+{
+    const Car *car;
+
+    if (8.0f < p->fRoadBlockSpawnTimer)
+        return 1;
+    if (p->PursuitState == EPS_LEVEL0)
+        return 1;
+    if (p->PursuitState == EPS_LEVEL2 && p->fPursuitStateTimer < 13.0f)
+        return 1;
+    car = p->pChasedCar;
+    if ((int8_t)car->BlownTireBits != 0)
+        return 1;
+    if (p->pRoadBlock != NULL) {
+        float dx = p->pRoadBlock->v2Position.x - car->State.Position.x;
+        float dy = p->pRoadBlock->v2Position.y - car->State.Position.y;
+
+        if (sqrtf(dx * dx + dy * dy) < 150.0f)
+            return 1;
+    }
+    return p->ChopperState == ECS_CHOPPER_REQUESTED;
 }
