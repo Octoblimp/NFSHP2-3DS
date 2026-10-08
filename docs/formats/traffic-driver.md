@@ -265,8 +265,9 @@ overrides the hairpin's most, even a smaller one.
 
 - `trafficdriver_install_vtables` is called from main.c, and main.c sets
   `gTrafficDriverCtorFn = trafficdriver_construct`.
-- **The game does not make one yet.** Traffic cars come from the
-  TrafficTeleporter (11h-3), which is not ported.
+- The TrafficTeleporter (11h-3,
+  [traffic-teleporter.md](traffic-teleporter.md)) places the traffic cars,
+  and `Car::SetControlMode`'s TRAFFIC_CONTROL gives each one of these.
 
 ## The checker
 

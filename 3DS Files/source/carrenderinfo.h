@@ -259,6 +259,22 @@ void carrenderinfo_delete(CarRenderInfo *ri, int32_t flags);
 // in game, and the five replacements that carry the skin.
 void carrenderinfo_switch_skin(CarRenderInfo *ri, RideInfo *ride);
 
+// CarRenderInfo::UpdateTextureInfo(eReplacementTextureTable *), 0x0011fed0:
+// the entry's texture looked up again by its NewNameHash, the default
+// standing in for a missing one.
+void carrenderinfo_update_texture_info(CarRenderInfo *ri,
+                                       eReplacementTextureTable *t);
+
+// CarRenderInfo::UpdateSkinTextures, 0x0011ff08: UpdateTextureInfo on the
+// five entries SwitchSkin renames -- both skin entries, the first two
+// damageable ones and the first tyre one.
+void carrenderinfo_update_skin_textures(CarRenderInfo *ri);
+
+// Car::SwitchSkin(unsigned int), 0x0011e588, in this object on the disc:
+// the ride's SkinNumber set, then CarRenderInfo's SwitchSkin and
+// UpdateSkinTextures. TrafficTeleporter repaints a traffic car with it.
+void car_switch_skin(Car *c, uint32_t skin);
+
 // CarRenderInfo::UpdateCarReplacementTextures, 0x0011ff68: the windows'
 // and the lights' textures from the car's breakable-item damage, the
 // broken-light mask, and the three bodies' tables reconnected.

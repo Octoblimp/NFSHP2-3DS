@@ -166,10 +166,10 @@ Pursuit's sets 4 cops. Neither had been asked for before: the SkipFE race
 (the shipped words: no traffic, no cops) never placed a traffic car. The
 first Azahar run loaded the race and stopped at the first traffic car,
 where `World::AddTrafficCar` aborted on the unported
-`TrafficTeleporter::PlaceNewCar`. That seam now places nothing when NULL,
-as `AddCopCarToRace`'s does, so the race runs with its AI racers and
-without traffic or cops until those are ported: traffic is step 11's last
-part (11h) and the cops are step 12.
+`TrafficTeleporter::PlaceNewCar`. That seam then placed nothing when
+NULL, as `AddCopCarToRace`'s does, so the race ran with its AI racers and
+without traffic or cops. The traffic is now ported (11h,
+[traffic-teleporter.md](traffic-teleporter.md)); the cops are step 12.
 
 The race then stayed at COUNTDOWN, since nothing ended the countdown.
 Race::Update (11g-2b, [race-update.md](race-update.md)) does: GO starts

@@ -778,6 +778,13 @@ static void run_build(int idx, const Build *b)
         printf("S\n");
         carrenderinfo_switch_skin(&g_ri, &g_ride2);
         break;
+    case 'C':
+        set_ride(&g_ride2, b->args);
+        g_car.pRideInfo = &g_ride2;
+        g_car.pRenderInfo = &g_ri;
+        printf("C\n");
+        car_switch_skin(&g_car, b->args[5]);
+        break;
     case 'U':
         g_dmg.BreakableCarItemDamageAmounts = b->args[0];
         printf("U\n");

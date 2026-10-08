@@ -16,7 +16,10 @@ Cross-checked by `tools/carrenderinfo_check.py` against
 | Car::InitRenderInfo(RideInfo *) | 0x0011dc80 | 1536 |
 | CarRenderInfo::CarRenderInfo(RideInfo *, Car *) | 0x0011e860 | 4700 |
 | CarRenderInfo::~CarRenderInfo | 0x0011fac0 | 928 |
+| Car::SwitchSkin(unsigned int) | 0x0011e588 | 56 |
 | CarRenderInfo::SwitchSkin(RideInfo *) | 0x0011fe60 | 108 |
+| CarRenderInfo::UpdateTextureInfo(eReplacementTextureTable *) | 0x0011fed0 | 56 |
+| CarRenderInfo::UpdateSkinTextures | 0x0011ff08 | 96 |
 | CarRenderInfo::UpdateCarReplacementTextures | 0x0011ff68 | 456 |
 | CarRenderInfo::CreateCarLightFlares | 0x00120360 | 632 |
 | the part culler's InitPart | 0x0011d580 | 200 |
@@ -128,22 +131,23 @@ ten lines differed.
 
 ## The check
 
-`python tools/carrenderinfo_check.py` runs 321 scenarios over 105544 lines
+`python tools/carrenderinfo_check.py` runs 327 scenarios over 108561 lines
 and 0 differ.
 
 Each scenario builds a world: four car types, a skin table, solids with
 texture and light-material tables, position markers, and the textures that
 are loaded. It then makes a render info by InitRenderInfo, or by the
 constructor alone with a car or without one. After that it may switch the
-skin, update the damage's textures, make the flares again or destroy the
-render info.
+skin (CarRenderInfo's SwitchSkin, or Car::SwitchSkin with the ride's
+skin byte set first), update the damage's textures, make the flares again
+or destroy the render info.
 
 After each step both sides print the record field by field. The lists are
 walked, then come the solids' tables, the textures' rendering orders, the
 model list, the cull table and the random seed.
 
-`--mutate` runs 163 mutations over carrenderinfo.c and the four helpers:
-161 are caught and 2 are equivalent.
+`--mutate` runs 175 mutations over carrenderinfo.c and the four helpers:
+173 are caught and 2 are equivalent.
 
 - `em-attach-apply` drops AttachReplacementTextureTable's second apply.
   ReconnectTextureTable has already applied the table, so the second one

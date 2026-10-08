@@ -355,9 +355,10 @@ Everything the step calls outside World.obj that the port does not have
 is a seam in `world.h`: the teleporter, the cops, the helicopter, the
 effects, the events, the rain, the race and five Car methods. A NULL
 seam is skipped, except FinishMovement, which aborts. A NULL PlaceNewCar
-places no traffic car, as a NULL AddCopCarToRace places no cop: Quick
-Race asks for traffic (TrafficDensity 0.33), and until TrafficTeleporter
-is ported (11h) its race runs without (see [quick-race](quick-race.md)).
+places no traffic car, as a NULL AddCopCarToRace places no cop. main.c
+sets the teleporter's four seams to the port's TrafficTeleporter (11h-3,
+[traffic-teleporter.md](traffic-teleporter.md)), so Quick Race's traffic
+(TrafficDensity 0.33) is placed.
 Smokeable::Break and DeleteFarAwaySmokeableCollisionBodies are
 `smokeable.h`'s: Break aborts when NULL and is reached, and the delete is
 skipped.

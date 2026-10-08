@@ -14,6 +14,12 @@
 #   powershell -File tools/run_azahar_quickrace.ps1
 #   powershell -File tools/run_azahar_quickrace.ps1 -CopsOff -WatchSeconds 60
 #   powershell -File tools/run_azahar_quickrace.ps1 -Presses "77:3,65:2"
+#   powershell -File tools/run_azahar_quickrace.ps1 -HoldKeys 65
+#                                    # A, the gas, held while racing
+#
+# -HoldKeys are held from RACING (after -Presses, if any) until the run
+# ends, posted again every 150 ms (run_azahar_race.ps1's; the codes are
+# listed there).
 #
 # -Presses are single presses, "key:seconds" apart, the first -PressAfter
 # seconds into RACING, with a shot after each (run_azahar_race.ps1's; the
@@ -28,7 +34,8 @@ param(
     [string]$OutDir = "",
     [switch]$CopsOff,             # World Racing's Quick Race, not Hot Pursuit's
     [string]$Presses = "",
-    [double]$PressAfter = 6
+    [double]$PressAfter = 6,
+    [int[]]$HoldKeys = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -91,6 +98,8 @@ public class Hp2Cap {
     public struct RECT { public int Left, Top, Right, Bottom; }
     public const uint WM_KEYDOWN = 0x0100;
     public const uint WM_KEYUP = 0x0101;
+    public static void KeyDown(IntPtr h, int vk) { PostMessage(h, WM_KEYDOWN, (IntPtr)vk, IntPtr.Zero); }
+    public static void KeyUp(IntPtr h, int vk) { PostMessage(h, WM_KEYUP, (IntPtr)vk, IntPtr.Zero); }
     public static void PressKey(IntPtr h, int vk) {
         PostMessage(h, WM_KEYDOWN, (IntPtr)vk, IntPtr.Zero);
         // Azahar runs well under 60 fps while texture packs decode; a shorter
@@ -270,11 +279,17 @@ if ($racing -and $Presses -ne "") {
 if ($racing) {
     $end = (Get-Date).AddSeconds($WatchSeconds)
     $n = 0
+    $nextShot = Get-Date
     while ((Get-Date) -lt $end -and (Alive)) {
-        $n++
-        Shot ("race-{0}" -f $n)
-        Start-Sleep -Milliseconds ([int]($ShotSeconds * 1000))
+        foreach ($k in $HoldKeys) { [Hp2Cap]::KeyDown($hwnd, $k) }
+        if ((Get-Date) -ge $nextShot) {
+            $n++
+            Shot ("race-{0}" -f $n)
+            $nextShot = (Get-Date).AddSeconds($ShotSeconds)
+        }
+        Start-Sleep -Milliseconds 150
     }
+    foreach ($k in $HoldKeys) { [Hp2Cap]::KeyUp($hwnd, $k) }
 }
 
 $survived = Alive

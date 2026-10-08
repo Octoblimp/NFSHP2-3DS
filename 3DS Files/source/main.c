@@ -3088,6 +3088,35 @@ static void logRaceState(void)
             }
         }
     }
+    // The traffic: where TrafficTeleporter put each car, or last moved it,
+    // and its clock.
+    if (w) {
+        int i;
+
+        for (i = w->TrafficCarPos;
+             i < (int)w->TotalNumCars && i < WORLD_MAX_CARS; i++) {
+            const Car* c = w->CarTable[i];
+
+            if (!c) continue;
+            logLine("race: traffic car %d at %.1f %.1f %.1f, DAT %.1f, speed "
+                    "%.2f, mode %d, control %d, drawn %d, skin %d",
+                    i, (double)c->State.Position.x,
+                    (double)c->State.Position.y, (double)c->State.Position.z,
+                    (double)c->TheTrackPathCoordinate.DistanceAroundTrack,
+                    (double)c->State.ForwardSpeed, (int)c->TheMovementMode,
+                    (int)c->TheControlMode, (int)c->RenderingEnabled,
+                    c->pRideInfo ? (int)c->pRideInfo->SkinNumber : -99);
+        }
+        if (w->Teleporter)
+            logLine("race: teleporter next in %.2f, last %d, totals %u "
+                    "and %u",
+                    (double)w->Teleporter->TimeUntilTeleport,
+                    (int)w->Teleporter->LastCar,
+                    (unsigned)w->Teleporter->ForwardTotals[
+                        TRAFFIC_ROUTES_EACH - 1],
+                    (unsigned)w->Teleporter->BackwardTotals[
+                        TRAFFIC_ROUTES_EACH - 1]);
+    }
     logLine("race: track drew %d of %d (%d sky), %d tris; %s",
             g_track.drawn, g_track.drawInfos, g_track.skyDrawn,
             g_track.drawnTris, g_track.note);
@@ -3116,6 +3145,33 @@ static void logRaceState(void)
             g_track.reducedTextures, g_track.unchainedTextures,
             g_track.deferredDropped,
             g_track.stripsDrawn, g_track.stripsDropped);
+    {
+        // Each time more are missing: which, and whether they had pixels
+        // (none is a pack not streamed in; with them, no room or no
+        // upload), and the mirror's two.
+        static int lastMissing;
+        int        i;
+
+        if (g_track.missingTextures != lastMissing) {
+            lastMissing = g_track.missingTextures;
+            for (i = 0; i < g_track.numTextures; i++) {
+                const TrackTex* t = &g_track.texture[i];
+
+                if (!t->valid && t->info) {
+                    logLine("race: texture %.24s missing, pixels %p, "
+                            "%ux%u, %d bits, %lu KB linear free",
+                            t->info->DebugName,
+                            (const void*)t->info->ImageData,
+                            (unsigned)t->info->Width,
+                            (unsigned)t->info->Height,
+                            (int)t->info->BitDepth,
+                            (unsigned long)linearSpaceFree() / 1024);
+                }
+            }
+            logLine("race: RVM %p, RVM_MASK %p", pTextureInfoRVMInfo,
+                    pTextureInfoRVMMask);
+        }
+    }
     {
         // The effects: WorldEffects' auto emitters and active groups, the
         // particles RenderEffects found visible, and the sprites drawn.
@@ -4200,10 +4256,13 @@ int main(int argc, char** argv)
     gJukeboxDelayedStartTimer = &g_jukebox.delayedStart;
     gJukeboxStopFn            = raceJukeboxStop;
     // World's constructor makes its TrafficTeleporter, and its destructor
-    // deletes it and any car left on CarList.
-    gTrafficTeleporterCtorFn    = traffic_teleporter_construct;
-    gTrafficTeleporterDestroyFn = traffic_teleporter_destroy;
-    gCarDestroyFn               = car_destruct;
+    // deletes it and any car left on CarList. AddTrafficCar places each
+    // traffic car with it, and World's step moves them out of sight.
+    gTrafficTeleporterCtorFn        = traffic_teleporter_construct;
+    gTrafficTeleporterDestroyFn     = traffic_teleporter_destroy;
+    gTrafficTeleporterPlaceNewCarFn = traffic_teleporter_place_new_car;
+    gTrafficTeleporterDoTimestepFn  = traffic_teleporter_do_timestep;
+    gCarDestroyFn                   = car_destruct;
     logPrintf("car loader: pool %s\n", LoadedCarSlotPool ? "up" : "missing");
 
     // The blurb moves to the bottom screen, so the top screen stops drawing

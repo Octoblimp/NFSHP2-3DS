@@ -8,10 +8,12 @@
 
 A NearestRoutePointInfo is a route and a point on it. It answers "where on
 the route network is this?". These four functions live in the AI's utility
-object, with the route planners (GuessTargetDestinations,
-ReturnToLastBranch, FindRoutesToTarget, FindPointsToTarget and
-FindNearbySignpost), which are not ported yet. Three other free functions
-from the same object are in `drivetarget.c`.
+object, with the route planners. Of those, GuessTargetDestinations is
+ported, in `airouteplan.{c,h}` (below), for the TrafficTeleporter
+([traffic-teleporter.md](traffic-teleporter.md)). ReturnToLastBranch,
+FindRoutesToTarget, FindPointsToTarget and FindNearbySignpost are not
+yet. Three other free functions from the same object are in
+`drivetarget.c`.
 
 The port is `3DS Files/source/airoute.{c,h}`. It is cross-checked by
 `tools/airoute_check.py` against `tools/src/airoute_test.c`, with the image
@@ -131,6 +133,55 @@ The point must not be NULL. The image would read the byte at 44 of address
    off the end of a route it reads address 0. The port stops there.
 7. If the new point is within 8 of the **start** (`c.lt.s`, so exactly 8
    is not), a third step.
+
+## GuessTargetDestinations
+
+    0x001cbb70  GuessTargetDestinations(NearestRoutePointInfo *, unsigned,
+                                        TrackRoute *, TrackRoutePoint *,
+                                        float, int)
+
+It walks the route network from a point, forwards or back, and returns up
+to `count` points `dist` on, in `out[0 ..]`. The TrafficTeleporter asks it
+for one point 250 on, then 50 on from each. The port is
+`airouteplan.{c,h}`, checked by `traffictele_check.py`
+([traffic-teleporter.md](traffic-teleporter.md)), which runs it both under
+TryToTeleportCar and alone.
+
+**The walk.** Each point walked takes its Length off the distance left.
+Walking back, the start's Length is added first. A point counts once the
+distance left goes below 0. It is written out, and when that makes
+`count` the walk returns. Otherwise that path is done.
+
+A point with a signpost that applies stops the plain step. A Backwards
+sign applies only walking back, and any other sign only walking
+forwards. What happens depends on the sign:
+
+| Sign | |
+|-----:|---|
+| 3, stop | The distance left is -1, so this point counts next time round, even with no Length. |
+| 2, always take | The walk goes down the sign's route to its point. |
+| 0, faster | The walk splits. The way on and the branch both go at the front of the ring, the branch last, so it comes off first. |
+| 1, 4 .. 7 | The walk splits. The way on goes at the front, the branch at the back. |
+
+Down a sign, the distance left at the new point is the old one, plus the
+signed point's Length, less how far the new point lies along the signed
+point's direction.
+
+A point with its Posted bit clear ends the path, and so does either end of
+the route.
+
+**The ring.** The paths still to walk are a ring of 20 on the image's
+stack, each a route, a point and the distance left (12 bytes, copied with
+`ldl`/`ldr`). A push that fills it sets Full, and while Full nothing more
+goes on: what would have is dropped. When a path ends, the next one comes
+off the front. With the ring empty, the walk returns what it found.
+
+**The two guards.** Each give 0, whatever was found by then:
+
+- the 71st path coming off the ring;
+- a step past 0x11800.
+
+With no route or no point, it returns 0 at once.
 
 ## What the port does not follow
 

@@ -5,8 +5,9 @@ the retail image itself, run in mipsemu.
 
 The model is the image: Car::InitRenderInfo (0x0011dc80), CarRenderInfo's
 constructor (0x0011e860) and destructor (0x0011fac0), SwitchSkin,
-UpdateCarReplacementTextures, CreateCarLightFlares and the culler's
-InitPart run as shipped, and so does all they call that is pure or already
+Car::SwitchSkin (0x0011e588) with UpdateSkinTextures and
+UpdateTextureInfo under it, UpdateCarReplacementTextures,
+CreateCarLightFlares and the culler's InitPart run as shipped, and so does all they call that is pure or already
 ported: GetSkinInfo, GetUsedCarTextureInfo, eFindPositionMarker, eFindSolid,
 eModel's Init, UnInit, ReconnectSolid, ReconnectTextureTable,
 ApplyReplacementTextureTable, AttachReplacementTextureTable, RenameTexture,
@@ -82,6 +83,7 @@ INIT_RI = 0x0011dc80
 CTOR = 0x0011e860
 DTOR = 0x0011fac0
 SWITCH = 0x0011fe60
+CAR_SWITCH = 0x0011e588
 UCRT = 0x0011ff68
 FLARES = 0x00120360
 INIT_PART = 0x0011d580
@@ -502,6 +504,12 @@ def script():
         sc.append(build(0, act=("S", 0, 1, s, 1, 0)))
     sc.append(build(0, act=("S", 1, 0, 1, 0, 1)))
     sc.append(build(2, act=("S", 3, 2, 5, 1, 0)))
+    # Car::SwitchSkin: the ride's skin byte set first, so the ride's own
+    # skin (1, 0 below) is never the one used.
+    for s in (0, 2, 5, 0x102):
+        sc.append(build(0, act=("C", 0, 1, 1, 1, 0, s)))
+    sc.append(build(2, act=("C", 3, 2, 0, 1, 1, 4)))
+    sc.append(build(0, mode=1, act=("C", 1, 0, 1, 0, 1, 2)))
     for bits in (0, 0xffffffff, 2 << 8, (2 << 12) | (2 << 14), 0x55555555,
                  0xaaaaaaaa):
         sc.append(build(0, act=("U", bits)))
@@ -991,6 +999,15 @@ class Model(object):
             self.emit("S")
             self.fill_stack()
             e.call(SWITCH, RI, RIDE2, limit=1000000)
+        elif a[0] == "C":
+            e.write(RIDE2, struct.pack("<i4b", a[1], *[
+                s32(x) if -128 <= s32(x) < 128 else s32(x) - 256
+                for x in a[2:6]]))
+            e.put32(CAR + 16, RIDE2)
+            e.put32(CAR + 1200, RI)
+            self.emit("C")
+            self.fill_stack()
+            e.call(CAR_SWITCH, CAR, a[6] & M32, limit=1000000)
         elif a[0] == "U":
             e.put32(DMG + 204, a[1])
             self.emit("U")
@@ -1083,6 +1100,34 @@ diff = pcc.diff
 # ============================================================ the mutations
 
 MUTATIONS = [
+    ("cs-skin", CRC, "    c->pRideInfo->SkinNumber = (int8_t)skin;" + NL, ""),
+    ("cs-ride", CRC,
+     "    carrenderinfo_switch_skin(c->pRenderInfo, c->pRideInfo);",
+     "    carrenderinfo_switch_skin(c->pRenderInfo, c->pRenderInfo->pRideInfo);"),
+    ("cs-update", CRC,
+     "    carrenderinfo_update_skin_textures(c->pRenderInfo);" + NL + "}",
+     "}"),
+    ("cs-order", CRC,
+     "    carrenderinfo_switch_skin(c->pRenderInfo, c->pRideInfo);" + NL
+     + "    carrenderinfo_update_skin_textures(c->pRenderInfo);",
+     "    carrenderinfo_update_skin_textures(c->pRenderInfo);" + NL
+     + "    carrenderinfo_switch_skin(c->pRenderInfo, c->pRideInfo);"),
+    ("ust-skin1", CRC, "&ri->SkinReplacementTextureTable[1]);",
+     "&ri->SkinReplacementTextureTable[0]);"),
+    ("ust-skin0", CRC, "&ri->SkinReplacementTextureTable[0]);",
+     "&ri->SkinReplacementTextureTable[1]);"),
+    ("ust-dmg0", CRC, "ri, &ri->DamageableSkinReplacementTextureTable[0]);",
+     "ri, &ri->DamageableSkinReplacementTextureTable[2]);"),
+    ("ust-dmg1", CRC, "ri, &ri->DamageableSkinReplacementTextureTable[1]);",
+     "ri, &ri->DamageableSkinReplacementTextureTable[0]);"),
+    ("ust-tire", CRC, "&ri->TireReplacementTextureTable[0]);",
+     "&ri->TireReplacementTextureTable[1]);"),
+    ("uti-hash", CRC, "get_texture_info(t->NewNameHash, 1, 0);",
+     "get_texture_info(t->OldNameHash, 1, 0);"),
+    ("uti-dflt", CRC, "get_texture_info(t->NewNameHash, 1, 0);",
+     "get_texture_info(t->NewNameHash, 0, 0);"),
+    ("uti-inc", CRC, "get_texture_info(t->NewNameHash, 1, 0);",
+     "get_texture_info(t->NewNameHash, 1, 1);"),
     # the tables
     ("flare-dir-row7", CRC, "{ 0.95f,  0.0f, 0.0f }", "{ 0.9f,  0.0f, 0.0f }"),
     ("flare-dir-row1", CRC, "{  1.0f,  0.0f, 0.0f }, { -1.0f, 0.0f, 0.0f },",

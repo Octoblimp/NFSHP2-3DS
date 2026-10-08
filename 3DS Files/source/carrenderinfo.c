@@ -264,6 +264,31 @@ void carrenderinfo_switch_skin(CarRenderInfo *ri, RideInfo *ride)
         u->ReplaceSkinHash;
 }
 
+void carrenderinfo_update_texture_info(CarRenderInfo *ri,
+                                       eReplacementTextureTable *t)
+{
+    (void)ri;
+    t->pTextureInfo = get_texture_info(t->NewNameHash, 1, 0);
+}
+
+void carrenderinfo_update_skin_textures(CarRenderInfo *ri)
+{
+    carrenderinfo_update_texture_info(ri, &ri->SkinReplacementTextureTable[0]);
+    carrenderinfo_update_texture_info(ri, &ri->SkinReplacementTextureTable[1]);
+    carrenderinfo_update_texture_info(
+        ri, &ri->DamageableSkinReplacementTextureTable[0]);
+    carrenderinfo_update_texture_info(
+        ri, &ri->DamageableSkinReplacementTextureTable[1]);
+    carrenderinfo_update_texture_info(ri, &ri->TireReplacementTextureTable[0]);
+}
+
+void car_switch_skin(Car *c, uint32_t skin)
+{
+    c->pRideInfo->SkinNumber = (int8_t)skin;
+    carrenderinfo_switch_skin(c->pRenderInfo, c->pRideInfo);
+    carrenderinfo_update_skin_textures(c->pRenderInfo);
+}
+
 // 0x00124d38 on the car's damage: item i's level, the two bits at 2i.
 static uint32_t item_damage_level(const CarRenderInfo *ri, int32_t item)
 {
