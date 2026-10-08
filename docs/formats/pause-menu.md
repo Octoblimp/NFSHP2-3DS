@@ -129,13 +129,26 @@ Five seams are left NULL, and each does nothing:
 - `gRestoreTypeChangedHandlersFn`.
 - the `gFED*` seams.
 
-### Three things main.c had to change
+### Four things main.c had to change
 
 **The input order.** Retail's `GenerateJoyEvents` runs after
 `ExecuteQueuedMessages`. It hands the same pad events to the Flailer and
 then to the players. So in a race main.c reads the pad for the screens
 (`flowInput`) after `raceFrame`, not before. If the order is the other way
 round, the START that pauses also reaches the menu, which unpauses at once.
+
+**No screen, no screen events.** `FlailerScreenList::ChangeToScreen`
+(0x0016c4c0) adds the list's JoyHandler for its sixteen events when a
+screen comes up out of none. When the list is left with none
+(0x0016c5d4) it removes the handler. While the car races there is no screen,
+between Pre Race Stats going and the pause coming up. So the popups, the
+screen and its menu hear nothing. `flowInput` once passed every press on
+regardless. B, the brake, is also the port's BACK, and it popped the
+frontend's stack under the race: to New Main Menu, whose A then
+started a second race and ran the heap out (2026-10-08). `flowInput` now
+passes nothing while `g_flow.screen` is NULL. It also drops a BACK when
+the same frame's START left no screen, as `RemoveEvent` clears the queued
+one.
 
 **Screens not yet ported.** `flowChangeToScreen` keeps the current screen
 up when it is asked for one the flow does not have. It logs "screen not

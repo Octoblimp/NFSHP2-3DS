@@ -3584,24 +3584,32 @@ static int flowInput(u32 kDown)
 {
     int redraw = 0;
 
+    // ChangeToScreen (0x0016c4c0) adds the list's JoyHandler for its
+    // sixteen events when a screen comes up out of none, and removes it
+    // when the list is left with none (0x0016c5d4). So with no screen up --
+    // a race, from Pre Race Stats going until the pause -- the popups, the
+    // screen and its menu hear nothing, and BACK cannot pop the frontend's
+    // stack under the race.
+    u32 listDown = g_flow.screen ? kDown : 0;
+
     // A popup that is up has each event before the screen and its menu,
     // and takes every one -- the memory card's messages ignore SELECT and
     // BACK, but the title underneath does not get them either.
-    u32 flowDown = kDown;
-    if (bpopup_any_active(&g_flow)) {
+    u32 flowDown = listDown;
+    if (listDown && bpopup_any_active(&g_flow)) {
         static const struct { u32 key; BJoyEvent ev; } kPopupBinds[] = {
             { KEY_START, BJOY_START },
             { KEY_B,     BJOY_MENU_BACK },
         };
         for (int i = 0; i < NUM_BINDS; i++)
-            if ((kDown & kBinds[i].key)
+            if ((listDown & kBinds[i].key)
                 && bpopup_joy(&g_flow, 0, kBinds[i].ev, 1))
                 flowDown &= ~kBinds[i].key;
         for (int i = 0; i < 2; i++)
-            if ((kDown & kPopupBinds[i].key)
+            if ((listDown & kPopupBinds[i].key)
                 && bpopup_joy(&g_flow, 0, kPopupBinds[i].ev, 1))
                 flowDown &= ~kPopupBinds[i].key;
-        if (flowDown != kDown) redraw = 1;
+        if (flowDown != listDown) redraw = 1;
     }
     // START goes through the menu, as FlailerMenu's JoyHandler takes it:
     // the screen has it as SCREEN_START_BUTTON first, and unless the screen
@@ -3617,8 +3625,10 @@ static int flowInput(u32 kDown)
         redraw = 1;
     }
     // FlailerScreenList::JoyHandler's BACK: the screen hears
-    // SCREEN_BACK_BUTTON first and may veto the pop.
-    if (flowDown & KEY_B) {
+    // SCREEN_BACK_BUTTON first and may veto the pop. A START that left no
+    // screen took the handler with it, and RemoveEvent cleared the frame's
+    // queued BACK.
+    if ((flowDown & KEY_B) && g_flow.screen) {
         bgf_back_button(&g_flow, 0);
         redraw = 1;
     }
