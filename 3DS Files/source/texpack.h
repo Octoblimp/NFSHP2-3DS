@@ -152,12 +152,114 @@ bool texpack_chain_tiled(const TexPack* tp, const TexInfo* ti, int base,
                          uint32_t* const level[], uint8_t* scratch,
                          size_t scratchCap);
 
+// --- the format a chain is stored in ---
+//
+// Every texel decodes to RGBA8888, but most textures need less of it: one
+// whose texels are all opaque needs no alpha, and one whose texels are all
+// gray needs one colour. texpack_format() picks the smallest of four
+// PICA200 formats that holds the texels exactly, and the chain is stored in
+// it. The levels made for the chain are 2x2 means, which keep a texture
+// opaque and gray. On the disc this is a fifth off a track's textures and a
+// quarter off the cars' (2026-10-08), with nothing different on screen.
+//
+// Opaque is a decoded alpha of 254 or 255, the PS2's 0x7f or 0x80 doubled:
+// most of the disc's opaque art has 0x7f. Without an alpha channel the
+// PICA200 reads 255, which is one step in 255 where it is blended at all.
+typedef enum {
+    TEXPACK_FMT_RGBA8,          // GPU_RGBA8: a texel is (a, b, g, r)
+    TEXPACK_FMT_RGB8,           // GPU_RGB8: (b, g, r), alpha 255
+    TEXPACK_FMT_LA8,            // GPU_LA8: (a, l), red, green and blue l
+    TEXPACK_FMT_L8              // GPU_L8: (l), alpha 255
+} TexPackFormat;
+
+static inline uint32_t texpack_format_bytes(TexPackFormat f)
+{
+    return f == TEXPACK_FMT_RGBA8 ? 4u
+         : f == TEXPACK_FMT_RGB8  ? 3u
+         : f == TEXPACK_FMT_LA8   ? 2u : 1u;
+}
+
+// Texel i of a level stored in format f, as the PICA200 reads it: one word,
+// (r << 24) | (g << 16) | (b << 8) | a.
+static inline uint32_t texpack_texel_get(const uint8_t* lvl, uint32_t i,
+                                         TexPackFormat f)
+{
+    const uint8_t* p = lvl + (size_t)i * texpack_format_bytes(f);
+    uint32_t       l;
+
+    switch (f) {
+    case TEXPACK_FMT_RGBA8:
+        return p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16)
+             | ((uint32_t)p[3] << 24);
+    case TEXPACK_FMT_RGB8:
+        return 0xffu | ((uint32_t)p[0] << 8) | ((uint32_t)p[1] << 16)
+             | ((uint32_t)p[2] << 24);
+    case TEXPACK_FMT_LA8:
+        l = p[1];
+        return p[0] | (l << 8) | (l << 16) | (l << 24);
+    default:
+        l = p[0];
+        return 0xffu | (l << 8) | (l << 16) | (l << 24);
+    }
+}
+
+// And its store: the word's red is a gray format's l.
+static inline void texpack_texel_put(uint8_t* lvl, uint32_t i,
+                                     TexPackFormat f, uint32_t t)
+{
+    uint8_t* p = lvl + (size_t)i * texpack_format_bytes(f);
+
+    switch (f) {
+    case TEXPACK_FMT_RGBA8:
+        p[0] = (uint8_t)t;
+        p[1] = (uint8_t)(t >> 8);
+        p[2] = (uint8_t)(t >> 16);
+        p[3] = (uint8_t)(t >> 24);
+        break;
+    case TEXPACK_FMT_RGB8:
+        p[0] = (uint8_t)(t >> 8);
+        p[1] = (uint8_t)(t >> 16);
+        p[2] = (uint8_t)(t >> 24);
+        break;
+    case TEXPACK_FMT_LA8:
+        p[0] = (uint8_t)t;
+        p[1] = (uint8_t)(t >> 24);
+        break;
+    default:
+        p[0] = (uint8_t)(t >> 24);
+        break;
+    }
+}
+
+// The format for the disc's levels `base` to `base + count - 1`, those of
+// them the texture has: the four channels unless every texel the decode
+// reads from them is opaque, or gray. An index the CLUT has no entry for
+// reads entry 0, as in texpack_decode().
+TexPackFormat texpack_format_levels(const TexPack* tp, const TexInfo* ti,
+                                    int base, int count);
+
+// The format for the chain from `base`: the disc's levels it takes.
+TexPackFormat texpack_format(const TexPack* tp, const TexInfo* ti, int base);
+
+// The bytes the chain from `base` takes in format f, or 0.
+size_t texpack_chain_bytes(const TexInfo* ti, int base, TexPackFormat f);
+
+// texpack_chain_tiled() in format f: level[i] is (w >> i) x (h >> i)
+// texels of texpack_format_bytes(f) each. RGBA8 is texpack_chain_tiled().
+bool texpack_chain_tiled_as(const TexPack* tp, const TexInfo* ti, int base,
+                            TexPackFormat f, uint8_t* const level[],
+                            uint8_t* scratch, size_t scratchCap);
+
 #ifdef __3DS__
 #include <citro3d.h>
 
-// Decodes level `level` and uploads it as a C3D_Tex in GPU_RGBA8, tiling into
-// the 3DS's 8x8 Morton order on the way. The texture is allocated here and
-// belongs to the caller (C3D_TexDelete).
+// The GPU_TEXCOLOR of a format.
+GPU_TEXCOLOR texpack_gpu_format(TexPackFormat f);
+
+// Decodes level `level` and uploads it as a C3D_Tex in the format
+// texpack_format_levels() picks for it, tiling into the 3DS's 8x8 Morton
+// order on the way. The texture is allocated here and belongs to the caller
+// (C3D_TexDelete).
 //
 // The PICA200 only takes power-of-two dimensions and most of these textures
 // are not: 292 of FRONTB.BUN's 397, and LOADING (512x184) and TOP_BORDER
@@ -170,9 +272,13 @@ bool texpack_upload(const TexPack* tp, const TexInfo* ti, int level,
                     C3D_Tex* out);
 
 // As texpack_upload(), with the whole chain from level `base` in one
-// GPU_RGBA8 texture and the record's MMAG/MMIN filters. A third larger
+// texture of format f and the record's MMAG/MMIN filters. A third larger
 // than level `base` alone, in the linear heap; the heap takes only what
 // texpack_upload() takes, the decoded level.
+bool texpack_upload_chain_as(const TexPack* tp, const TexInfo* ti, int base,
+                             TexPackFormat f, C3D_Tex* out);
+
+// texpack_upload_chain_as() in the format texpack_format() picks.
 bool texpack_upload_chain(const TexPack* tp, const TexInfo* ti, int base,
                           C3D_Tex* out);
 #endif

@@ -20,6 +20,12 @@ Usage:
 --chain compares the PICA200 mip chain texpack_upload_chain() builds from
 --level instead: the disc's levels padded to powers of two, then 2x2 means
 down to 8 texels, with a cut-out texture's alpha kept to its two values.
+
+--chain --packed compares the chain as texpack_upload_chain() stores it: in
+the smallest of RGBA8, RGB8, LA8 and L8 that holds the texels of the disc's
+levels it takes (texpack_format), read back as the PICA200 reads that format.
+Here the format comes from the decoded images: opaque is alpha 254 or 255,
+gray is red, green and blue equal, and a format without alpha reads 255.
 """
 import argparse
 import subprocess
@@ -37,9 +43,10 @@ SOURCES = ["tools/src/texpack_test.c",
            "3DS Files/source/bchunk.c"]
 
 
-def run_c(exe, path, pack, level, chain=False):
+def run_c(exe, path, pack, level, chain=False, packed=False):
     r = subprocess.run([str(exe), str(path), str(pack), "--level", str(level)]
-                       + (["--chain"] if chain else []),
+                       + (["--chain"] if chain else [])
+                       + (["--packed"] if packed else []),
                        capture_output=True, text=True)
     if r.returncode:
         sys.stderr.write(r.stderr)
@@ -95,8 +102,27 @@ def half(img, cw, ch, cutout):
     return out
 
 
-def chain(t, data, base):
-    """texpack_upload_chain()'s levels, concatenated, or None."""
+def chain_format(t, data, base, n, levels):
+    """texpack_format(): the smallest exact format for the disc's levels
+    base .. base + n - 1, from their decoded images."""
+    opaque = gray = True
+    for lv in range(base, min(base + n, levels)):
+        d = tc.decode(t, data, level=lv)
+        if not d:
+            break
+        img = d[2]
+        if opaque and min(img[3::4]) < 254:
+            opaque = False
+        if gray and (img[0::4] != img[1::4] or img[1::4] != img[2::4]):
+            gray = False
+    if gray:
+        return "L8" if opaque else "LA8"
+    return "RGB8" if opaque else "RGBA8"
+
+
+def chain(t, data, base, packed=False):
+    """texpack_upload_chain()'s levels, concatenated, or None; with
+    `packed`, (format, levels as the PICA200 reads them back)."""
     levels = min(7, max(1, t["levels"]))
     if base >= levels:
         return None
@@ -105,6 +131,7 @@ def chain(t, data, base):
     n, side = 1, min(pw, ph)
     while side > 8 and n < 8:
         n, side = n + 1, side >> 1
+    fmt = chain_format(t, data, base, n, levels) if packed else "RGBA8"
     out, prev, cut = bytearray(), None, 0
     for i in range(n):
         cw, ch = pw >> i, ph >> i
@@ -119,12 +146,17 @@ def chain(t, data, base):
             img = half(prev, cw, ch, cut)
         if i == 0:
             cut = cutout_alpha(img)
+        if fmt in ("RGB8", "L8"):
+            # No alpha stored: the PICA200 reads 255, and the level below
+            # is made from that.
+            img = bytearray(img)
+            img[3::4] = b"\xff" * (len(img) // 4)
         out += img
         prev = img
-    return out
+    return (fmt, out) if packed else out
 
 
-def run_py(path, pack, level, use_chain=False):
+def run_py(path, pack, level, use_chain=False, packed=False):
     buf = Path(path).read_bytes()
     packs = list(tc.find_packs(buf))
     if pack >= len(packs):
@@ -134,13 +166,18 @@ def run_py(path, pack, level, use_chain=False):
     print("python pack '%s': %d textures" % (name, len(info) // tc.RECORD_SIZE))
     out, scroll = {}, {}
     for i, t in enumerate(tc.textures(info)):
+        fmt = None
         if use_chain:
-            img = chain(t, data, level)
+            img = chain(t, data, level, packed)
+            if packed and img is not None:
+                fmt, img = img
         else:
             got = tc.decode(t, data, level=level)
             img = got and got[2]
         crc = ("skip" if img is None
                else "%08x" % (zlib.crc32(img) & 0xFFFFFFFF))
+        if fmt and img is not None:
+            crc = "%s:%s" % (fmt, crc)
         out[i] = (t["name"], "%d" % t["scroll_type"], crc)
         if t["scroll_type"]:
             scroll[i] = scroll_fields(t)
@@ -168,14 +205,17 @@ def main():
     ap.add_argument("--pack", type=int, default=0)
     ap.add_argument("--level", type=int, default=0)
     ap.add_argument("--chain", action="store_true")
+    ap.add_argument("--packed", action="store_true")
     ap.add_argument("--max-report", type=int, default=20)
     args = ap.parse_args()
 
     with tempfile.TemporaryDirectory() as tmp:
         exe = hostbuild.build(tmp, SOURCES, 'texpack_test')
-        c, cscroll = run_c(exe, args.file, args.pack, args.level, args.chain)
+        c, cscroll = run_c(exe, args.file, args.pack, args.level, args.chain,
+                           args.packed)
 
-    p, pscroll = run_py(args.file, args.pack, args.level, args.chain)
+    p, pscroll = run_py(args.file, args.pack, args.level, args.chain,
+                        args.packed)
 
     keys = sorted(set(c) | set(p))
     same = skipped = 0

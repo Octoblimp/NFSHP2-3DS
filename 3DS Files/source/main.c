@@ -2921,18 +2921,57 @@ static void replayMarkTheBeginningOfTime(ReplayManager* rm)
     memcpy((uint8_t*)rm + 92, &WorldTimer, 4);
 }
 
+// The packs' ranges still being read in: CarLoader's skins and the HUD's,
+// which the race's first frames bring. By LoadingCompleted, and not by
+// NumNotYetLoadedTextureDatas, which a callback's range leaves one up
+// (texturestream.c).
+static int racePacksStreaming(void)
+{
+    int    n = 0;
+    bNode* p;
+
+    for (p = TexturePackList.next; p != &TexturePackList; p = p->next) {
+        const TexturePack* tp = (const TexturePack*)(void*)p;
+        const bNode*       d;
+
+        for (d = tp->LoadedTextureDataList.next;
+             d != &tp->LoadedTextureDataList; d = d->next) {
+            if (!((const LoadedTextureData*)(const void*)d)
+                     ->LoadingCompleted) {
+                n++;
+            }
+        }
+    }
+    return n;
+}
+
+static double ticksMs(uint64_t ticks)
+{
+    return (double)ticks * 1000.0 / SYSCLOCK_ARM11;
+}
+
 // eDisplayFrame draws what the views hold, and the port's is trackview's
 // draw. In a race it draws the track the flow loaded: TRACKB<n>.LZC, which
 // the resource system read and the loaders have already run over, so
 // trackview reads and loads nothing and the camera is the race's. It is
-// attached on the first frame of a race. The Begin of loading renamed the
+// attached on the first frame of a race whose streamed textures are in,
+// and everything the race can draw is made then (trackview_prepare): a
+// bake or an upload mid-race is a hitch. The Begin of loading renamed the
 // file for hot chunking, so it goes by its .BUN name.
 static bool raceAttachTrack(void)
 {
+    static int    waits;
     char          name[32];
     ResourceFile* rf;
+    uint64_t      t0;
+    int           bakes, uploads, frames;
 
     if (g_track.loaded) return g_track.attached;
+    // A few frames, and no more than 150 of them.
+    if (racePacksStreaming() > 0 && waits < 150) {
+        waits++;
+        return false;
+    }
     snprintf(name, sizeof name, "TRACKS\\TRACKB%d.BUN",
              (int)RaceParametersTrackNumber);
     rf = find_resource_file(name);
@@ -2944,6 +2983,27 @@ static bool raceAttachTrack(void)
         return false;
     }
     logTrackView("attached to");
+    t0      = svcGetSystemTick();
+    bakes   = g_track.bakes;
+    uploads = g_track.uploads;
+    frames  = g_track.frameUploads;
+    trackview_prepare(&g_track);
+    logLine("race: prepared in %.0f ms after %d frames' wait (%d still "
+            "streaming): %d models, %d bakes, %d uploads (%d past the "
+            "models', %d left out, %lu KB), %d flipbook frames; %d other "
+            "solids, %d textures, %lu KB linear free, %lu KB heap free",
+            ticksMs(svcGetSystemTick() - t0), waits, racePacksStreaming(),
+            g_track.preparedModels, g_track.bakes - bakes,
+            g_track.uploads - uploads, g_track.preparedTextures,
+            g_track.preparedSkipped,
+            (unsigned long)g_track.preparedSkippedKB,
+            g_track.frameUploads - frames,
+            g_track.numOther, g_track.numTextures,
+            (unsigned long)linearSpaceFree() / 1024,
+            (unsigned long)(g_heapInfo.heapGot - mallinfo().uordblks)
+                / 1024);
+    g_track.worstTicks = 0;
+    waits = 0;
     {
         bNode* n;
 
@@ -3139,12 +3199,40 @@ static void logRaceState(void)
             (unsigned long)eFrameCounter);
     logLine("race: other solids %d (%d failed, %d dropped), textures %d "
             "(%d missing, %d reduced, %d unchained), deferred %d dropped; "
-            "strips %d (%d dropped)",
+            "strips %d (%d dropped); %lu KB linear free",
             g_track.numOther, g_track.otherFailed, g_track.otherDropped,
             g_track.numTextures, g_track.missingTextures,
             g_track.reducedTextures, g_track.unchainedTextures,
             g_track.deferredDropped,
-            g_track.stripsDrawn, g_track.stripsDropped);
+            g_track.stripsDrawn, g_track.stripsDropped,
+            (unsigned long)linearSpaceFree() / 1024);
+    {
+        // What the race baked and uploaded since the last line: after
+        // trackview_prepare, each one is a hitch.
+        static int      lastBakes, lastUploads;
+        static uint64_t lastBakeTicks, lastUploadTicks;
+
+        if (g_track.bakes < lastBakes || g_track.uploads < lastUploads) {
+            // Another race's view: trackview_free starts the counts again.
+            lastBakes = lastUploads = 0;
+            lastBakeTicks = lastUploadTicks = 0;
+        }
+        if (g_track.bakes != lastBakes || g_track.uploads != lastUploads) {
+            logLine("race: made %d bakes in %.1f ms and %d uploads in "
+                    "%.1f ms, the longest %.1f ms: %s",
+                    g_track.bakes - lastBakes,
+                    ticksMs(g_track.bakeTicks - lastBakeTicks),
+                    g_track.uploads - lastUploads,
+                    ticksMs(g_track.uploadTicks - lastUploadTicks),
+                    ticksMs(g_track.worstTicks), g_track.lateNames);
+        }
+        g_track.lateNames[0] = '\0';
+        lastBakes          = g_track.bakes;
+        lastUploads        = g_track.uploads;
+        lastBakeTicks      = g_track.bakeTicks;
+        lastUploadTicks    = g_track.uploadTicks;
+        g_track.worstTicks = 0;
+    }
     {
         // Each time more are missing: which, and whether they had pixels
         // (none is a pack not streamed in; with them, no room or no
@@ -4828,7 +4916,7 @@ int main(int argc, char** argv)
 
                 jbstream_busy(&decode, &read);
                 if (g_track.attached) {
-                    char line[1024];
+                    char line[1536];
 
                     FrameProfDraw.jukeboxDecode = decode - jbDecode;
                     FrameProfDraw.jukeboxRead = read - jbRead;

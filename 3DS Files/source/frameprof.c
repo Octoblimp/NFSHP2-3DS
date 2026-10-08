@@ -63,6 +63,8 @@ void frameprof_add(FrameProf *fp, const MainLoopTimingStats *t,
     for (s = 0; s < 3 * FRAMEPROF_M_COUNT; s++)
         fp->models[s / FRAMEPROF_M_COUNT][s % FRAMEPROF_M_COUNT] +=
             d->models[s / FRAMEPROF_M_COUNT][s % FRAMEPROF_M_COUNT];
+    for (s = 0; s < FRAMEPROF_C_COUNT; s++)
+        fp->cars[s] += d->cars[s];
 
     fp->total += frame;
     if (frame > fp->worst)
@@ -85,10 +87,11 @@ static int models_part(const FrameProf *fp, int v, char *buf, size_t n)
 
     return snprintf(buf, n,
                     "%.0f models, %.0f batches at once, %.0f lit, %.0f held, "
-                    "%.0f words, %.0f indices",
+                    "%.0f words (%.0f lit), %.0f indices",
                     m[FRAMEPROF_M_MODELS] / f, m[FRAMEPROF_M_NOW] / f,
                     m[FRAMEPROF_M_LIT] / f, m[FRAMEPROF_M_HELD] / f,
-                    m[FRAMEPROF_M_WORDS] / f, m[FRAMEPROF_M_INDICES] / f);
+                    m[FRAMEPROF_M_WORDS] / f, m[FRAMEPROF_M_LIT_WORDS] / f,
+                    m[FRAMEPROF_M_INDICES] / f);
 }
 
 bool frameprof_line(FrameProf *fp, char *buf, size_t n)
@@ -146,8 +149,18 @@ bool frameprof_line(FrameProf *fp, char *buf, size_t n)
         if (len > 0 && (size_t)len < n)
             len += snprintf(buf + len, n - len, "; mirror ");
         if (len > 0 && (size_t)len < n)
-            models_part(fp, 2, buf + len, n - len);
+            len += models_part(fp, 2, buf + len, n - len);
     }
+    if (len > 0 && (size_t)len < n)
+        snprintf(buf + len, n - len,
+                 "\ncars: %.1f drawn; setup %.1f, shadows %.1f, body %.1f, "
+                 "wheels %.1f, lists %.1f",
+                 (double)fp->cars[FRAMEPROF_C_CARS] / fp->frames,
+                 mean_ms(fp, fp->cars[FRAMEPROF_C_SETUP]),
+                 mean_ms(fp, fp->cars[FRAMEPROF_C_SHADOWS]),
+                 mean_ms(fp, fp->cars[FRAMEPROF_C_BODY]),
+                 mean_ms(fp, fp->cars[FRAMEPROF_C_WHEELS]),
+                 mean_ms(fp, fp->cars[FRAMEPROF_C_LISTS]));
     frameprof_reset(fp);
     return true;
 }

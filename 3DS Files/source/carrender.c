@@ -12,6 +12,7 @@
 #include "collisionbody.h"
 #include "eframe.h"
 #include "emath.h"
+#include "frameprof.h"
 #include "gameflow.h"
 #include "realtime.h"
 #include "scenerycull.h"
@@ -1074,6 +1075,8 @@ void carrenderinfo_render(CarRenderInfo *ri, eView *view,
     uint32_t disable_env, disable_env_tires, body_flags;
     float size, dist, bias, dx, dy, dz;
     void *body0_solid;
+    // The frame profiler's parts (frameprof.h), from here.
+    uint32_t prof_since = bGetTicker();
 
     pixels = eview_get_pixel_size_sphere(view, position, 3.0f);
     if (eGetCurrentViewMode() == 3)
@@ -1186,6 +1189,9 @@ void carrenderinfo_render(CarRenderInfo *ri, eView *view,
         && car->DriverRenderingEnabled)
         render_driver(ri, view, car, biased_local_world, light_context, size);
 
+    FrameProfDraw.cars[FRAMEPROF_C_CARS]++;
+    FRAMEPROF_CAR_PART(FRAMEPROF_C_SETUP, &prof_since);
+
     // ---- the shadows
     body0_solid = ri->Body[0].Solid;
     hull_Origin = *position;
@@ -1203,6 +1209,7 @@ void carrenderinfo_render(CarRenderInfo *ri, eView *view,
              && !ri->PartCuller[CULLABLE_CAR_PART_SHADOW].State[2]))
         render_grid_shadow(ri, position, local_world, biased_identity,
                            light_context, topo, fe);
+    FRAMEPROF_CAR_PART(FRAMEPROF_C_SHADOWS, &prof_since);
 
     // ---- the body, the mirrors, the plates and the scuffs
     {
@@ -1240,6 +1247,7 @@ void carrenderinfo_render(CarRenderInfo *ri, eView *view,
         && 0.02f < bodydamage_get_visible_total_damage(&car_damage->TheBodyDamage))
         model_render(&ri->Scuffs, biased_local_world, NULL,
                      extra_render_flags);
+    FRAMEPROF_CAR_PART(FRAMEPROF_C_BODY, &prof_since);
 
     // Front wheels turned between 6 and 354 degrees are seen whatever the
     // culler says.
@@ -1397,4 +1405,5 @@ void carrenderinfo_render(CarRenderInfo *ri, eView *view,
             model_render(w, m, NULL, 0);
         }
     }
+    FRAMEPROF_CAR_PART(FRAMEPROF_C_WHEELS, &prof_since);
 }

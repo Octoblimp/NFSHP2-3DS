@@ -253,18 +253,6 @@ static TrackTex* find_texture(TrackView* v, const TextureInfo* info)
     return NULL;
 }
 
-// The linear heap texpack_upload_chain takes for `e` from `level` down.
-static uint32_t chain_bytes(const TexInfo* e, int level)
-{
-    uint32_t w, h, bytes = 0;
-    int      i, n = texpack_chain(e, level, &w, &h);
-
-    for (i = 0; i < n; i++) {
-        bytes += (w >> i) * (h >> i) * 4u;
-    }
-    return bytes;
-}
-
 // What decides where and how a strip draws: see trackview_draw and
 // georender.h's GeoBlend.
 static GeoPass texture_pass(const TextureInfo* info)
@@ -320,9 +308,46 @@ static bool texture_source(const TextureInfo* info, TexPack* tp, TexInfo* e)
     return true;
 }
 
+// A bake's or an upload's time onto its total, and onto the longest's.
+static void add_ticks(TrackView* v, uint64_t* total, uint64_t t0)
+{
+    uint64_t d = svcGetSystemTick() - t0;
+
+    *total += d;
+    if (d > v->worstTicks) {
+        v->worstTicks = d;
+    }
+}
+
+static bool upload_now(TrackView* v, const TrackTex* t, C3D_Tex* out,
+                       int fmt);
+
 // The pixels `t`'s TextureInfo points at now, at `t->level`, into `out`:
-// the mip chain, or the one level when the chain will not fit.
-static bool upload_texture(TrackView* v, const TrackTex* t, C3D_Tex* out)
+// the mip chain, or the one level when the chain will not fit. The chain
+// is in the smallest format that holds its texels (texpack_format), which
+// is one a flipbook's frames each have their own of. `fmt` is that format
+// when the caller has it, or -1: finding it is a pass over every texel.
+static bool upload_texture(TrackView* v, const TrackTex* t, C3D_Tex* out,
+                           int fmt)
+{
+    uint64_t t0 = svcGetSystemTick();
+    bool     ok = upload_now(v, t, out, fmt);
+
+    v->uploads++;
+    add_ticks(v, &v->uploadTicks, t0);
+    if (v->prepared) {
+        size_t len = strlen(v->lateNames);
+
+        if (len + 28 < sizeof v->lateNames) {
+            snprintf(v->lateNames + len, sizeof v->lateNames - len, "%s%.24s",
+                     len ? " " : "", t->info->DebugName);
+        }
+    }
+    return ok;
+}
+
+static bool upload_now(TrackView* v, const TrackTex* t, C3D_Tex* out,
+                       int fmt)
 {
     TexPack  tp;
     TexInfo  e;
@@ -333,7 +358,10 @@ static bool upload_texture(TrackView* v, const TrackTex* t, C3D_Tex* out)
         || !texpack_level(&e, t->level, &w, &h, NULL, NULL)) {
         return false;
     }
-    if (!texpack_upload_chain(&tp, &e, t->level, out)) {
+    if (!texpack_upload_chain_as(&tp, &e, t->level,
+                                 fmt >= 0 ? (TexPackFormat)fmt
+                                          : texpack_format(&tp, &e, t->level),
+                                 out)) {
         if (!texpack_upload(&tp, &e, t->level, out)) {
             return false;
         }
@@ -371,6 +399,7 @@ static TrackTex* load_texture(TrackView* v, const TextureInfo* info)
     TexInfo   e;
     uint32_t  w = 0, h = 0;
     int       level;
+    int       fmt = -1;
 
     if (t && !retry_texture(t)) {
         return t;
@@ -391,17 +420,17 @@ static TrackTex* load_texture(TrackView* v, const TextureInfo* info)
     }
     t->ownImage = info->ImageData;
 
-    // The largest level whose chain leaves the reserve behind. The whole
-    // track at level 0 is 28.9 MB as RGBA8 and about 38 MB with its chains,
-    // which a New 3DS has room for and an Old one, with the bundle
-    // resident beside it, does not.
+    // The largest level whose chain leaves the reserve behind, in the
+    // format it is stored in. A track's textures at level 0 are 34-42 MB
+    // with their chains as RGBA8, and 29-34 MB so (2026-10-08).
     for (level = 0; level < (int)e.levels; level++) {
-        uint32_t bytes;
+        size_t bytes;
 
         if (!texpack_level(&e, level, &w, &h, NULL, NULL)) {
             continue;
         }
-        bytes = chain_bytes(&e, level);
+        fmt   = (int)texpack_format(&tp, &e, level);
+        bytes = texpack_chain_bytes(&e, level, (TexPackFormat)fmt);
         if (linearSpaceFree() >= bytes + TEX_RESERVE) {
             break;
         }
@@ -411,7 +440,7 @@ static TrackTex* load_texture(TrackView* v, const TextureInfo* info)
         return t;
     }
     t->level = (uint8_t)level;
-    if (!upload_texture(v, t, &t->own)) {
+    if (!upload_texture(v, t, &t->own, fmt)) {
         v->missingTextures++;
         return t;
     }
@@ -582,7 +611,8 @@ static void follow_flipbooks(TrackView* v)
         }
         if (!f) {
             if (v->numFrames >= TRACKVIEW_MAX_FRAMES
-                || !upload_texture(v, t, &v->frame[v->numFrames].tex)) {
+                || !upload_texture(v, t, &v->frame[v->numFrames].tex,
+                                   -1)) {
                 v->frameFails++;
                 continue;
             }
@@ -633,20 +663,26 @@ static void batch_centres(TrackSolid* r)
 static void bake_solid(TrackView* v, int index)
 {
     TrackSolid* r = &v->info[index];
+    uint64_t    t0;
 
     if (r->baked || r->failed) {
         return;
     }
+    t0 = svcGetSystemTick();
+    v->bakes++;
     if (!georender_bake(&v->solid[index], &r->mesh)) {
         r->failed = true;
+        add_ticks(v, &v->bakeTicks, t0);
         return;
     }
     r->baked = true;
     v->bakedSolids++;
     v->bakedTris     += r->mesh.numTris;
     v->skippedStrips += r->mesh.skippedStrips;
-    resolve_textures(v, index);
     batch_centres(r);
+    add_ticks(v, &v->bakeTicks, t0);
+    // Its textures' uploads are timed as uploads.
+    resolve_textures(v, index);
 }
 
 // ------------------------------------------------------------ other solids
@@ -1186,13 +1222,16 @@ static void lighting_for(GeoLighting* L, const eLightContext* lc,
 static void draw_lit_batch(TrackView* v, int solid, int batch,
                            const void* light, uint16_t f)
 {
-    TrackSolid* r = &v->info[solid];
+    TrackSolid* r     = &v->info[solid];
+    uint32_t    words = gpuCmdBufOffset;
     GeoLighting L;
 
     lighting_for(&L, (const eLightContext*)light, &v->solid[solid],
                  r->mesh.batch[batch].lightMaterial, f);
     georender_draw_lit(&r->mesh, r->slot,
                        r->slot ? v->solid[solid].numTextures : 0, batch, &L);
+    FrameProfDraw.models[s_envFace ? 1 : s_mirrorView ? 2 : 0]
+                        [FRAMEPROF_M_LIT_WORDS] += gpuCmdBufOffset - words;
 }
 
 // The solid an eModel draws, baked, with its table followed: the track's,
@@ -1333,6 +1372,190 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
                      matrix == &eMathIdentityMatrix ? "*" : "");
         }
     }
+}
+
+// ---------------------------------------------------------------- preparing
+
+// What trackview_prepare's uploads past the models' leave free: of the
+// linear heap, on top of TEX_RESERVE, and of the texture table. A texture
+// a race draws is never the one that goes short for one it might.
+#define PREPARE_RESERVE (6u * 1024u * 1024u)
+#define PREPARE_SLOTS   128
+
+// Every frame a flipbook's record can show, uploaded as follow_flipbooks
+// would the first time it showed it: frame k shows frame k + n's pixels,
+// for every n (UpdateTextureAnimations). Only the records a solid uses
+// and that are up already.
+static void prepare_flipbooks(TrackView* v)
+{
+    bNode* n;
+    int    i, j, k, f;
+
+    for (n = TextureAnimPackList.next; n != &TextureAnimPackList;
+         n = n->next) {
+        const TextureAnimPack* p = (const TextureAnimPack*)(void*)n;
+
+        for (i = 0; i < p->NumTextureAnims; i++) {
+            const TextureAnim* a = &p->TextureAnimTable[i];
+
+            if (!a->Valid) {
+                continue;
+            }
+            for (k = 0; k < a->NumFrames; k++) {
+                TrackTex* t =
+                    find_texture(v, a->TextureAnimTable[k].pTextureInfo);
+
+                if (!t || !t->valid) {
+                    continue;
+                }
+                for (j = 0; j < a->NumFrames; j++) {
+                    const TextureAnimEntry* e = &a->TextureAnimTable[j];
+                    TextureInfo             src;
+                    TrackTex                tt;
+                    TrackFrame*             fr;
+
+                    if (e->OriginalImageData == t->ownImage
+                        && e->OriginalPaletteData == t->ownPalette) {
+                        continue;
+                    }
+                    for (f = 0; f < v->numFrames; f++) {
+                        if (v->frame[f].owner == t
+                            && v->frame[f].image == e->OriginalImageData
+                            && v->frame[f].palette == e->OriginalPaletteData) {
+                            break;
+                        }
+                    }
+                    if (f < v->numFrames) {
+                        continue;
+                    }
+                    // The record as it will be when it shows frame j: a
+                    // copy, so nothing the game reads is touched.
+                    src             = *t->info;
+                    src.ImageData   = e->OriginalImageData;
+                    src.PaletteData = e->OriginalPaletteData;
+                    tt              = *t;
+                    tt.info         = &src;
+                    if (v->numFrames >= TRACKVIEW_MAX_FRAMES
+                        || !upload_texture(v, &tt,
+                                           &v->frame[v->numFrames].tex,
+                                           -1)) {
+                        v->frameFails++;
+                        continue;
+                    }
+                    fr          = &v->frame[v->numFrames++];
+                    fr->owner   = t;
+                    fr->image   = e->OriginalImageData;
+                    fr->palette = e->OriginalPaletteData;
+                    v->frameUploads++;
+                }
+            }
+        }
+    }
+}
+
+// A record that is one of a flipbook's frames. Only the ones a solid
+// uses are uploaded, with every frame they show (prepare_flipbooks): one
+// made valid besides would have follow_flipbooks upload its frames too.
+static bool in_flipbook(const TextureInfo* info)
+{
+    const bNode* n;
+    int          i, k;
+
+    for (n = TextureAnimPackList.next; n != &TextureAnimPackList;
+         n = n->next) {
+        const TextureAnimPack* p = (const TextureAnimPack*)(const void*)n;
+
+        for (i = 0; i < p->NumTextureAnims; i++) {
+            const TextureAnim* a = &p->TextureAnimTable[i];
+
+            for (k = 0; k < a->NumFrames; k++) {
+                if (a->TextureAnimTable[k].pTextureInfo == info) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+typedef struct {
+    const TextureInfo* info;
+    uint32_t           bytes;       // its chain at level 0 as RGBA8
+} PrepareTex;
+
+static int prepare_cmp(const void* a, const void* b)
+{
+    uint32_t x = ((const PrepareTex*)a)->bytes;
+    uint32_t y = ((const PrepareTex*)b)->bytes;
+
+    return x < y ? -1 : x > y;
+}
+
+void trackview_prepare(TrackView* v)
+{
+    bNode*      n;
+    int         k, numCands = 0, maxCands = 0;
+    PrepareTex* cand;
+
+    // Each model as eModel::Render's first draw of it makes it: the solid
+    // baked, the replacement table applied, the textures up. Every LOD of
+    // every car, its tires, mirrors, plates and dash, and its damage's.
+    for (n = ModelList.next; n != &ModelList; n = n->next) {
+        (void)model_solid(v, (eModel*)(void*)n);
+        v->preparedModels++;
+    }
+    prepare_flipbooks(v);
+
+    // Then the rest of every pack's textures that have pixels: what a
+    // replacement table (a traffic car's next skin), a rename (lights,
+    // damage) or a first draw (the HUD's, the sun's, the effects')
+    // reaches later. The smallest first, so that what the room leaves out
+    // is the fewest: sized as RGBA8, which is never less than they take.
+    for (n = TexturePackList.next; n != &TexturePackList; n = n->next) {
+        maxCands += ((const TexturePack*)(void*)n)->NumTextures;
+    }
+    cand = maxCands ? (PrepareTex*)malloc((size_t)maxCands * sizeof *cand)
+                    : NULL;
+    for (n = TexturePackList.next; cand && n != &TexturePackList;
+         n = n->next) {
+        const TexturePack* p = (const TexturePack*)(void*)n;
+
+        for (k = 0; k < p->NumTextures && numCands < maxCands; k++) {
+            const TextureInfo* info = &p->pTextureInfo[k];
+            TexPack            tp;
+            TexInfo            e;
+
+            if (info->ImageData == NULL || find_texture(v, info)
+                || in_flipbook(info) || !texture_source(info, &tp, &e)) {
+                continue;
+            }
+            cand[numCands].info  = info;
+            cand[numCands].bytes =
+                (uint32_t)texpack_chain_bytes(&e, 0, TEXPACK_FMT_RGBA8);
+            numCands++;
+        }
+    }
+    if (numCands > 1) {
+        qsort(cand, (size_t)numCands, sizeof *cand, prepare_cmp);
+    }
+    for (k = 0; k < numCands; k++) {
+        const TrackTex* t;
+
+        if (v->numTextures >= TRACKVIEW_MAX_TEXTURES - PREPARE_SLOTS
+            || linearSpaceFree()
+                   < cand[k].bytes + TEX_RESERVE + PREPARE_RESERVE) {
+            v->preparedSkipped++;
+            v->preparedSkippedKB += cand[k].bytes >> 10;
+            continue;
+        }
+        t = load_texture(v, cand[k].info);
+        if (t && t->valid) {
+            v->preparedTextures++;
+        }
+    }
+    free(cand);
+    v->prepared     = true;
+    v->lateNames[0] = '\0';
 }
 
 // ------------------------------------------------------------------ loading
@@ -2960,6 +3183,7 @@ void trackview_draw_mirror(TrackView* v)
     eView*         view = eGetView(EVIEW_ID_PLAYER1_RVM);
     eRenderTarget* rt   = view->pRenderTarget0;
     uint32_t       bg, a, clear;
+    uint32_t       profCars[FRAMEPROF_C_COUNT];
     float          tanx, tany;
     int            drawn;
 
@@ -3012,11 +3236,15 @@ void trackview_draw_mirror(TrackView* v)
     georender_run_end();
     draw_deferred(v, false);
     hangwatch_mark("the mirror's cars");
+    // The frame profiler's car parts are the player's view's: the mirror
+    // has its own stage.
+    memcpy(profCars, FrameProfDraw.cars, sizeof profCars);
     georender_run_begin();
     render_cars(view);
     draw_deferred(v, false);
     draw_deferred(v, true);
     georender_run_end();
+    memcpy(FrameProfDraw.cars, profCars, sizeof profCars);
     display_rvm_images(v, rt);
 
     v->mirrorModels = v->drawn - drawn;
@@ -3065,8 +3293,9 @@ static void display_rvms(TrackView* v)
 
 void trackview_draw(TrackView* v)
 {
-    eView* view = eGetView(EVIEW_ID_PLAYER1);
-    float  tanx, fovy;
+    eView*   view = eGetView(EVIEW_ID_PLAYER1);
+    float    tanx, fovy;
+    uint32_t profSince;
 
     if (!v->loaded || !FrameMemoryBuffer[0]) {
         return;
@@ -3163,9 +3392,11 @@ void trackview_draw(TrackView* v)
     hangwatch_mark("the cars begun");
     georender_run_begin();
     render_cars(view);
+    profSince = bGetTicker();
     draw_deferred(v, false);
     draw_deferred(v, true);
     georender_run_end();
+    FRAMEPROF_CAR_PART(FRAMEPROF_C_LISTS, &profSince);
     hangwatch_gpu_stage("the cars and the alpha lists");
     FRAMEPROF_STAMP(FRAMEPROF_CARS);
     if (v->listFrame) {

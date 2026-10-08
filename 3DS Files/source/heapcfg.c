@@ -139,14 +139,15 @@ NfsHeapInfo g_heapInfo;
 // larger than that, whatever the grant.
 #define HEAP_AREA   ((u32)(OS_HEAP_AREA_END - OS_HEAP_AREA_BEGIN))
 
-// The linear heap's ask, under the bank's ceiling (step 13b-3). A race on
-// track 12 uses 43MB of it: 13b-2's log has 33.6MB free of 76 once the
-// track is in. The malloc heap is the tighter of the two, with ~10MB to
-// spare in a race. So a grant larger than HEAP_WANT plus this gives the
-// malloc heap the rest, up to its window: on a New 3DS's 178MB, the
-// linear heap gets 80MB and the malloc heap 96MB. A grant of 124MB or
-// less divides as it did before (the .3dsx on a New 3DS, an Old 3DS).
-#define LINEAR_WANT (80u * 1024 * 1024)
+// The linear heap's ask, under the bank's ceiling (step 13b-3). Every
+// texture, VBO and sound buffer is in it, and a big map's textures with
+// the cars' ran out Azahar's ~75MB: whatever loaded last went missing,
+// the mirror's frame among them (2026-10-08). A race takes about 45MB of the
+// malloc heap (2.7MB free of 48 on Azahar with track 24 in). So on a New
+// 3DS's 178MB the linear heap gets 112MB and the malloc heap the ~66MB
+// left. A grant of 160MB or less gives the malloc heap HEAP_WANT and the
+// linear heap the rest, as before (the .3dsx on a New 3DS, ~75MB).
+#define LINEAR_WANT (112u * 1024 * 1024)
 
 // FCRAM is organised in 128MB physical banks (Old3DS has one at 0x20000000,
 // New3DS adds a second above it). A physically contiguous block cannot cross

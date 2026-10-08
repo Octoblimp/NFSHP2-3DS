@@ -318,6 +318,24 @@ typedef struct {
     uint32_t defaulted[TRACKVIEW_MAX_TEXTURES];
     int  frameUploads;          // flipbook frames uploaded so far
     int  frameFails;            // and the ones that would not
+    // Every bake and upload so far, with its time in system ticks and the
+    // longest one's: what a race makes after trackview_prepare is a
+    // hitch, and its line says what each second made (2026-10-08).
+    int      bakes;
+    int      uploads;
+    uint64_t bakeTicks;
+    uint64_t uploadTicks;
+    uint64_t worstTicks;
+    // trackview_prepare's: the models it went over, the textures it
+    // uploaded past theirs, and the ones it left for want of room.
+    int  preparedModels;
+    int  preparedTextures;
+    int  preparedSkipped;
+    uint32_t preparedSkippedKB; // their chains at level 0
+    bool prepared;
+    // The names of what was uploaded after it, for the race's line to log
+    // and empty: "" when nothing was.
+    char lateNames[256];
     int  loadMs;
     char note[64];
 } TrackView;
@@ -356,6 +374,15 @@ bool trackview_load(TrackView* v);
 // or loaded; the solids are found in `data` and baked as trackview_load
 // bakes them, and the camera is left to the race's movers.
 bool trackview_attach(TrackView* v, uint8_t* data, size_t len);
+
+// The race's whole load of drawing, made before its first frame: every
+// model on ModelList baked, its replacement table applied and its
+// textures uploaded, as its first draw would; then every texture with
+// pixels in every pack, a car's other skins, lights and damage and the
+// HUD's and the effects' among them, while the linear heap and the table
+// have room to spare. What is left is made as it is drawn, as before. A
+// bake or upload mid-race was a hitch: 237 ms for one car (2026-10-08).
+void trackview_prepare(TrackView* v);
 
 // The frontend's view, which has no track: every solid it draws is an
 // other one (the car select's platform, out of FRONTB.BUN, and the

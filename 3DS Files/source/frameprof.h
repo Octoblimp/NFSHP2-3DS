@@ -53,6 +53,11 @@
 // 13b-4): FrameProfDraw.models, the player's view's [0], the envmap's
 // faces' [1] and the mirror's [2]. Its line follows the frame's. Timing its parts cost 5 ms a
 // frame on Azahar, a system tick read being an SVC, so it is not timed.
+// It counts the lit batches' command words apart too.
+//
+// The cars stage is timed by its parts, a few ticks a car (step 13b-5):
+// FrameProfDraw.cars, carrenderinfo_render's and trackview's. Its line
+// follows the models'.
 //
 // A line has the frame rate, the mean frame and the longest, each phase's
 // mean in milliseconds, the draw's stages, the two waits, citro3d's own two
@@ -109,7 +114,22 @@ enum {
     FRAMEPROF_M_WORDS,      // GPU command words written
     FRAMEPROF_M_INDICES,    // the batches' indices, three a triangle,
                             // held ones too
+    FRAMEPROF_M_LIT_WORDS,  // the words the lit batches wrote
     FRAMEPROF_M_COUNT
+};
+
+// The cars stage's parts in a frame, EE ticks summed over the cars; and
+// the cars carrenderinfo_render drew.
+enum {
+    FRAMEPROF_C_SETUP,      // carrenderinfo_render up to the shadows: the
+                            // cull, the light context, the flares, the
+                            // driver
+    FRAMEPROF_C_SHADOWS,    // the hull's and the grid's
+    FRAMEPROF_C_BODY,       // the body, the mirrors, the plates, the scuffs
+    FRAMEPROF_C_WHEELS,     // the tyres, their blur, the brakes, the wipers
+    FRAMEPROF_C_LISTS,      // the solid list and both alpha lists
+    FRAMEPROF_C_CARS,       // a count: the cars drawn past the cull
+    FRAMEPROF_C_COUNT
 };
 
 // One frame's draw: the ticks around the two waits, and each stamped
@@ -123,11 +143,20 @@ typedef struct FrameProfTicks {
     uint32_t jukeboxRead;
     uint32_t models[3][FRAMEPROF_M_COUNT];  // the view's, the envmap's,
                                             // the mirror's
+    uint32_t cars[FRAMEPROF_C_COUNT];
 } FrameProfTicks;
 
 extern FrameProfTicks FrameProfDraw;
 
 #define FRAMEPROF_STAMP(stage) (FrameProfDraw.end[(stage)] = bGetTicker())
+
+// A car part's ticks since `*since`, which moves on to now.
+#define FRAMEPROF_CAR_PART(part, since)                                   \
+    do {                                                                  \
+        uint32_t frameprof_now_ = bGetTicker();                           \
+        FrameProfDraw.cars[(part)] += frameprof_now_ - *(since);          \
+        *(since) = frameprof_now_;                                        \
+    } while (0)
 
 // The draw's stages in the sums: prep, the nine stamped, and submit.
 #define FRAMEPROF_DRAW_STAGES (FRAMEPROF_STAMPED + 2)
@@ -140,6 +169,7 @@ typedef struct FrameProf {
     uint64_t jukeboxDecode;
     uint64_t jukeboxRead;
     uint64_t models[3][FRAMEPROF_M_COUNT];
+    uint64_t cars[FRAMEPROF_C_COUNT];
     uint32_t worst;                     // the longest frame, EE ticks
     float    c3dCpuMs;                  // summed
     float    c3dGpuMs;
@@ -157,7 +187,8 @@ void frameprof_add(FrameProf *fp, const MainLoopTimingStats *t,
                    float c3dCpuMs, float c3dGpuMs);
 
 // Once the frames add up to a second: the line into buf, the sums reset,
-// and true. The models' line follows the frame's, after a newline.
+// and true. The models' line follows the frame's, after a newline, and
+// the cars' the models'.
 bool frameprof_line(FrameProf *fp, char *buf, size_t n);
 
 #endif

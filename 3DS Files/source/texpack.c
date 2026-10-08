@@ -363,18 +363,114 @@ uint8_t texpack_cutout_alpha(const uint8_t* rgba, size_t texels)
     return hi;
 }
 
-// A decoded w x h image into a cw x ch level, its right column and bottom
-// row repeated over the rest, as texpack_upload() pads.
-static void tile_padded(uint32_t* dst, const uint8_t* rgba, uint32_t w,
-                        uint32_t h, uint32_t cw, uint32_t ch)
+// --- the format ------------------------------------------------------------
+
+// Whether an (r, g, b, raw PS2 alpha) texel is opaque and gray.
+static inline void classify(const uint8_t* c, bool* opaque, bool* gray)
+{
+    if (c[3] < 0x7f) *opaque = false;          // alpha_ps2() under 254
+    if (c[0] != c[1] || c[1] != c[2]) *gray = false;
+}
+
+static TexPackFormat format_of(bool opaque, bool gray)
+{
+    return gray ? (opaque ? TEXPACK_FMT_L8 : TEXPACK_FMT_LA8)
+                : (opaque ? TEXPACK_FMT_RGB8 : TEXPACK_FMT_RGBA8);
+}
+
+TexPackFormat texpack_format_levels(const TexPack* tp, const TexInfo* ti,
+                                    int base, int count)
+{
+    bool opaque = true, gray = true;
+    int  end = base + count < (int)ti->levels ? base + count
+                                              : (int)ti->levels;
+
+    if (ti->bpp == 32) {
+        for (int l = base; l < end && (opaque || gray); l++) {
+            uint32_t w, h, off, bytes;
+            if (!texpack_level(ti, l, &w, &h, &off, &bytes)) break;
+            size_t at = (size_t)ti->pixelOff + off;
+            if (at + bytes > tp->dataSize) break;
+            for (size_t i = 0; i < (size_t)w * h; i++)
+                classify(tp->data + at + i * 4, &opaque, &gray);
+        }
+        return format_of(opaque, gray);
+    }
+    if (ti->bpp != 4 && ti->bpp != 8) return TEXPACK_FMT_RGBA8;
+    if ((size_t)ti->clutOff + ti->clutBytes > tp->dataSize)
+        return TEXPACK_FMT_RGBA8;
+
+    const uint8_t* clut    = tp->data + ti->clutOff;
+    uint32_t       entries = ti->clutBytes / 4;
+    if (entries == 0 || entries > 256) return TEXPACK_FMT_RGBA8;
+
+    // Every entry first: most CLUTs are all one kind, and then which of
+    // them the levels use does not matter.
+    for (uint32_t e = 0; e < entries; e++)
+        classify(clut + e * 4, &opaque, &gray);
+    if (opaque && gray) return TEXPACK_FMT_L8;
+
+    // Otherwise the entries the levels use. The unswizzle is a permutation
+    // of a level's indices, as is the CSM1 swap of the CLUT's, so these are
+    // the level's bytes or nibbles in any order, through the same mapping.
+    bool used[256] = { false };
+    for (int l = base; l < end; l++) {
+        uint32_t w, h, off, bytes;
+        if (!texpack_level(ti, l, &w, &h, &off, &bytes)) break;
+        size_t at = (size_t)ti->pixelOff + off;
+        if (at + bytes > tp->dataSize) break;
+        const uint8_t* px = tp->data + at;
+        for (uint32_t s = 0; s < w * h; s++) {
+            uint32_t idx;
+            if (ti->bpp == 8) {
+                if (s >= bytes) break;
+                idx = px[s];
+            } else {
+                if ((s >> 1) >= bytes) break;
+                idx = (px[s >> 1] >> ((s & 1) * 4)) & 0xf;
+            }
+            if (idx >= entries) idx = 0;
+            if (ti->bpp == 8 && (idx & 0x18u) != 0 && (idx & 0x18u) != 0x18u
+                && (idx ^ 0x18u) < entries)
+                idx ^= 0x18u;
+            used[idx] = true;
+        }
+    }
+    opaque = gray = true;
+    for (uint32_t e = 0; e < entries; e++)
+        if (used[e]) classify(clut + e * 4, &opaque, &gray);
+    return format_of(opaque, gray);
+}
+
+TexPackFormat texpack_format(const TexPack* tp, const TexInfo* ti, int base)
+{
+    return texpack_format_levels(tp, ti, base, texpack_chain(ti, base, NULL,
+                                                             NULL));
+}
+
+size_t texpack_chain_bytes(const TexInfo* ti, int base, TexPackFormat f)
+{
+    uint32_t pw, ph;
+    int      n = texpack_chain(ti, base, &pw, &ph);
+    size_t   bytes = 0;
+
+    for (int i = 0; i < n; i++)
+        bytes += (size_t)(pw >> i) * (ph >> i) * texpack_format_bytes(f);
+    return bytes;
+}
+
+// A decoded w x h image into a cw x ch level of format f, its right column
+// and bottom row repeated over the rest, as texpack_upload() pads.
+static void tile_padded(uint8_t* dst, TexPackFormat f, const uint8_t* rgba,
+                        uint32_t w, uint32_t h, uint32_t cw, uint32_t ch)
 {
     for (uint32_t y = 0; y < ch; y++) {
         const uint8_t* row = rgba + (size_t)(y < h ? y : h - 1) * w * 4;
         for (uint32_t x = 0; x < cw; x++) {
             const uint8_t* s = row + (size_t)(x < w ? x : w - 1) * 4;
-            dst[texpack_tiled_index(x, y, cw)] =
-                ((uint32_t)s[3]) | ((uint32_t)s[2] << 8)
-              | ((uint32_t)s[1] << 16) | ((uint32_t)s[0] << 24);
+            texpack_texel_put(dst, texpack_tiled_index(x, y, cw), f,
+                              ((uint32_t)s[3]) | ((uint32_t)s[2] << 8)
+                            | ((uint32_t)s[1] << 16) | ((uint32_t)s[0] << 24));
         }
     }
 }
@@ -382,6 +478,21 @@ static void tile_padded(uint32_t* dst, const uint8_t* rgba, uint32_t w,
 bool texpack_chain_tiled(const TexPack* tp, const TexInfo* ti, int base,
                          uint32_t* const level[], uint8_t* scratch,
                          size_t scratchCap)
+{
+    uint8_t* bytes[TEXPACK_CHAIN_MAX];
+    int      n = texpack_chain(ti, base, NULL, NULL);
+
+    // GPU_RGBA8's (a, b, g, r) is the word on a little-endian host, as on
+    // the 3DS.
+    for (int i = 0; i < n; i++)
+        bytes[i] = (uint8_t*)level[i];
+    return texpack_chain_tiled_as(tp, ti, base, TEXPACK_FMT_RGBA8, bytes,
+                                  scratch, scratchCap);
+}
+
+bool texpack_chain_tiled_as(const TexPack* tp, const TexInfo* ti, int base,
+                            TexPackFormat f, uint8_t* const level[],
+                            uint8_t* scratch, size_t scratchCap)
 {
     uint32_t pw, ph, w, h;
     int      n = texpack_chain(ti, base, &pw, &ph);
@@ -396,7 +507,7 @@ bool texpack_chain_tiled(const TexPack* tp, const TexInfo* ti, int base,
             && w <= cw && h <= ch
             && texpack_decode(tp, ti, base + i, scratch, scratchCap)) {
             if (i == 0) cutout = texpack_cutout_alpha(scratch, (size_t)w * h);
-            tile_padded(level[i], scratch, w, h, cw, ch);
+            tile_padded(level[i], f, scratch, w, h, cw, ch);
             continue;
         }
         if (i == 0) return false;
@@ -406,13 +517,15 @@ bool texpack_chain_tiled(const TexPack* tp, const TexInfo* ti, int base,
         // TEX12LOCATION). A cut-out texture's levels keep its two alphas:
         // of the disc's, 99% of texels with 3 or 4 opaque parents are
         // opaque, 70% with 2, and 0.2% with 1. So half or more is opaque.
-        // The four texels under one are four words in a row, x then y.
+        // The four texels under one are four in a row, x then y. A format
+        // with no alpha reads 255 there, and stores none of what is made.
         for (uint32_t y = 0; y < ch; y++) {
             for (uint32_t x = 0; x < cw; x++) {
-                const uint32_t* s = level[i - 1]
-                                  + texpack_tiled_index(2 * x, 2 * y, 2 * cw);
-                uint32_t        d = 0;
+                uint32_t k = texpack_tiled_index(2 * x, 2 * y, 2 * cw);
+                uint32_t s[4], d = 0;
 
+                for (int j = 0; j < 4; j++)
+                    s[j] = texpack_texel_get(level[i - 1], k + j, f);
                 for (int c = 0; c < 32; c += 8) {
                     uint32_t sum = ((s[0] >> c) & 0xff) + ((s[1] >> c) & 0xff)
                                  + ((s[2] >> c) & 0xff) + ((s[3] >> c) & 0xff);
@@ -422,7 +535,8 @@ bool texpack_chain_tiled(const TexPack* tp, const TexInfo* ti, int base,
                         v = sum >= 2u * cutout ? cutout : 0;
                     d |= v << c;
                 }
-                level[i][texpack_tiled_index(x, y, cw)] = d;
+                texpack_texel_put(level[i], texpack_tiled_index(x, y, cw), f,
+                                  d);
             }
         }
     }
@@ -454,6 +568,16 @@ static void scratch_free(void* p, bool linear)
     else free(p);
 }
 
+GPU_TEXCOLOR texpack_gpu_format(TexPackFormat f)
+{
+    switch (f) {
+    case TEXPACK_FMT_RGB8: return GPU_RGB8;
+    case TEXPACK_FMT_LA8:  return GPU_LA8;
+    case TEXPACK_FMT_L8:   return GPU_L8;
+    default:               return GPU_RGBA8;
+    }
+}
+
 bool texpack_upload(const TexPack* tp, const TexInfo* ti, int level,
                     C3D_Tex* out)
 {
@@ -468,10 +592,12 @@ bool texpack_upload(const TexPack* tp, const TexInfo* ti, int level,
     // the image goes in the top-left of a power-of-two allocation and the
     // rest stays transparent. The caller scales by the image size and takes
     // UVs against out->width/out->height, which are the padded ones.
-    uint32_t aw = pot_ceil(w), ah = pot_ceil(h);
-    bool     linear;
+    uint32_t      aw = pot_ceil(w), ah = pot_ceil(h);
+    TexPackFormat f = texpack_format_levels(tp, ti, level, 1);
+    bool          linear;
 
-    if (!C3D_TexInit(out, (u16)aw, (u16)ah, GPU_RGBA8)) return false;
+    if (!C3D_TexInit(out, (u16)aw, (u16)ah, texpack_gpu_format(f)))
+        return false;
     uint8_t* rgba = (uint8_t*)scratch_alloc((size_t)w * h * 4, &linear);
     if (!rgba) {
         C3D_TexDelete(out);
@@ -486,7 +612,7 @@ bool texpack_upload(const TexPack* tp, const TexInfo* ti, int level,
     // The padding repeats the edge texel rather than being cleared, so that
     // GPU_LINEAR at the image's right and bottom edges blends with a copy of
     // itself -- exactly what CLAMP_TO_EDGE did before, and no seam.
-    tile_padded((uint32_t*)out->data, rgba, w, h, aw, ah);
+    tile_padded((uint8_t*)out->data, f, rgba, w, h, aw, ah);
     C3D_TexFlush(out);
     C3D_TexSetFilter(out, GPU_LINEAR, GPU_LINEAR);
     C3D_TexSetWrap(out, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
@@ -497,12 +623,19 @@ bool texpack_upload(const TexPack* tp, const TexInfo* ti, int level,
 bool texpack_upload_chain(const TexPack* tp, const TexInfo* ti, int base,
                           C3D_Tex* out)
 {
-    uint32_t  pw, ph;
-    int       n = texpack_chain(ti, base, &pw, &ph);
-    size_t    cap = texpack_decode_size(ti, base);
-    uint32_t* level[TEXPACK_CHAIN_MAX];
-    uint8_t*  scratch;
-    bool      ok, linear;
+    return texpack_upload_chain_as(tp, ti, base, texpack_format(tp, ti, base),
+                                   out);
+}
+
+bool texpack_upload_chain_as(const TexPack* tp, const TexInfo* ti, int base,
+                             TexPackFormat f, C3D_Tex* out)
+{
+    uint32_t pw, ph;
+    int      n = texpack_chain(ti, base, &pw, &ph);
+    size_t   cap = texpack_decode_size(ti, base);
+    uint8_t* level[TEXPACK_CHAIN_MAX];
+    uint8_t* scratch;
+    bool     ok, linear;
 
     if (n < 1 || pw > 1024 || ph > 1024 || cap == 0) return false;
 
@@ -510,8 +643,8 @@ bool texpack_upload_chain(const TexPack* tp, const TexInfo* ti, int base,
     // above it there: a 512x320 car skin took 1.25 MB of the heap padded
     // and halved beside it, which the heap did not have once a race had
     // loaded, and the car drew without its paint (2026-10-05).
-    C3D_TexInitParams p = { (u16)pw, (u16)ph, (u8)(n - 1), GPU_RGBA8,
-                            GPU_TEX_2D, false };
+    C3D_TexInitParams p = { (u16)pw, (u16)ph, (u8)(n - 1),
+                            texpack_gpu_format(f), GPU_TEX_2D, false };
     if (!C3D_TexInitWithParams(out, NULL, p)) return false;
     scratch = (uint8_t*)scratch_alloc(cap, &linear);
     if (!scratch) {
@@ -519,8 +652,8 @@ bool texpack_upload_chain(const TexPack* tp, const TexInfo* ti, int base,
         return false;
     }
     for (int i = 0; i < n; i++)
-        level[i] = (uint32_t*)C3D_TexGetImagePtr(out, out->data, i, NULL);
-    ok = texpack_chain_tiled(tp, ti, base, level, scratch, cap);
+        level[i] = (uint8_t*)C3D_TexGetImagePtr(out, out->data, i, NULL);
+    ok = texpack_chain_tiled_as(tp, ti, base, f, level, scratch, cap);
     scratch_free(scratch, linear);
     if (!ok) {
         C3D_TexDelete(out);
