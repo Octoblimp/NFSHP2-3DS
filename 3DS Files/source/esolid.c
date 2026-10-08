@@ -7,6 +7,7 @@
 
 #include "bchunk.h"
 #include "bmath.h"
+#include "bmem.h"
 #include "eefpu.h"
 #include "texturepack.h"
 
@@ -22,6 +23,7 @@
 
 // eSolid's Flags.
 #define SOLID_DUPLICATE_NAME    0x0002u
+#define SOLID_DUPLICATED        0x0004u
 #define SOLID_VERTEX_ANIMATED   0x0010u
 
 BSlotPool *eVertexAnimatorSlotPool;
@@ -30,6 +32,7 @@ int32_t eDisableFixUpTables;
 int32_t eDirtySolids;
 int32_t eDirtyTextures;
 int32_t eDirtyAnimations;
+int32_t MemoryUsedByDuplicatedSolids;
 
 void *pTextureInfoRVMInfo;
 void *pTextureInfoRVMMask;
@@ -270,6 +273,77 @@ int unloader_solid_list(uint8_t *chunk)
         eDirtySolids = 1;
     }
     return 1;
+}
+
+void esolid_change_name(eSolid *s, const char *name)
+{
+    // bStrCpy is as unbounded as strcpy. The disc's longest name made
+    // here, "%s_SCUFFS%d" on an 11-letter base, is 20 bytes with its NUL,
+    // and Name has 24.
+    strcpy(s->Name, name);
+    s->NameHash = bchunk_hash(name);
+}
+
+void eduplicate_solid(const char *from, const char *to)
+{
+    eSolid *src = (eSolid *)eFindSolid(bchunk_hash(from));
+    eSolid *s;
+    bNode *last;
+    uint8_t *data;
+    eStripEntry *table;
+
+    if (src == NULL)
+        return;
+    s = (eSolid *)bMalloc((int)sizeof(eSolid), "DuplicatedSolid", 0, 16);
+    *s = *src;
+    last = SolidList.prev;
+    last->next = &s->Node;
+    SolidList.prev = &s->Node;
+    s->Node.prev = last;
+    s->Node.next = &SolidList;
+
+    data = (uint8_t *)bMalloc((int)src->SizeofStripEntryData,
+                              "DuplicatedStripEntryData", 0, 16);
+    memcpy(data, src->StripEntryDataStart, src->SizeofStripEntryData);
+    s->StripEntryDataStart = data;
+    MemoryUsedByDuplicatedSolids += (int32_t)src->SizeofStripEntryData;
+
+    table = (eStripEntry *)bMalloc(src->NumStrips * (int)sizeof(eStripEntry),
+                                   "DuplicatedStripEntryTable", 0, 16);
+    memcpy(table, src->StripEntryTable,
+           (size_t)src->NumStrips * sizeof(eStripEntry));
+    s->StripEntryTable = table;
+    MemoryUsedByDuplicatedSolids += src->NumStrips * 64;
+
+    esolid_fix_strip_entry_table(s, data, (int32_t)src->SizeofStripEntryData,
+                                 (uint8_t *)src->StripEntryDataStart);
+    s->Flags |= SOLID_DUPLICATED;
+    esolid_change_name(s, to);
+}
+
+void edelete_all_duplicated_solids(void)
+{
+    bNode *n, *next;
+
+    for (n = SolidList.next; n != &SolidList; n = next) {
+        eSolid *s = (eSolid *)(void *)n;
+
+        next = n->next;
+        if (!(s->Flags & SOLID_DUPLICATED))
+            continue;
+        if (s->StripEntryDataStart != NULL)
+            bFree(s->StripEntryDataStart);
+        MemoryUsedByDuplicatedSolids -= (int32_t)s->SizeofStripEntryData;
+        s->StripEntryDataStart = NULL;
+        if (s->StripEntryTable != NULL)
+            bFree(s->StripEntryTable);
+        MemoryUsedByDuplicatedSolids -= s->NumStrips * 64;
+        s->StripEntryTable = NULL;
+        n->prev->next = n->next;
+        n->next->prev = n->prev;
+        // ~eSolid with 3 is ~bNode's delete.
+        bFree(s);
+    }
 }
 
 void efix_up_tables(void)

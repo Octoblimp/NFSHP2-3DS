@@ -195,6 +195,35 @@ void esolid_fix_light_material_table(eSolid *s);
 int loader_solid_list(uint8_t *chunk);
 int unloader_solid_list(uint8_t *chunk);
 
+// MemoryUsedByDuplicatedSolids (retail gp-24928, the demo's 0x00322850):
+// the strip data and strip tables eDuplicateSolid has copied, in bytes.
+// The 192-byte solids are not counted.
+extern int32_t MemoryUsedByDuplicatedSolids;
+
+// eSolid::ChangeName(const char *), retail 0x00104030: bStrCpy into Name,
+// and NameHash the name's bStringHash.
+void esolid_change_name(eSolid *s, const char *name);
+
+// eDuplicateSolid(const char *, const char *), retail 0x00103bf0: a copy
+// of the solid named `from`, named `to`, for the second car of a type
+// (trackflow.h's gEDuplicateSolidFn). Nothing when there is no such solid.
+// The copy is the eSolid copy constructor's (retail 0x00114bb0: every
+// field) in a bMalloc'd 192 bytes, "DuplicatedSolid", put on SolidList's
+// tail. Its strip data ("DuplicatedStripEntryData") and its strip table
+// ("DuplicatedStripEntryTable") are copies too, each bMalloc'd with pool
+// 16 and added to MemoryUsedByDuplicatedSolids, and FixStripEntryTable
+// moves each strip's Data onto the copied data. The texture and light
+// material tables, the animation tree, the rigid animation and the vertex
+// animator stay the original's. Then Flags gets 4 and ChangeName(to).
+void eduplicate_solid(const char *from, const char *to);
+
+// eDeleteAllDuplicatedSolids, retail 0x00103d58 (gEDeleteAllDuplicated-
+// SolidsFn): every solid on SolidList with Flags 4 has its strip data and
+// strip table bFree'd (each when not NULL) and taken off
+// MemoryUsedByDuplicatedSolids, both pointers cleared, and is taken off
+// the list and bFree'd. The dirty flags are left alone.
+void edelete_all_duplicated_solids(void);
+
 // eFixUpTables, retail 0x00103e68 (the demo's 0x00103790). Nothing while
 // eDisableFixUpTables is set. With solids or textures dirty: with textures
 // dirty, every solid's texture table, STs and mip K again; then every

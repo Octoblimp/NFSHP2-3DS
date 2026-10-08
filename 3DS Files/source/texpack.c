@@ -433,6 +433,27 @@ bool texpack_chain_tiled(const TexPack* tp, const TexInfo* ti, int base,
 #include <3ds.h>
 #include <stdlib.h>
 
+// The decode scratch comes from the linear heap, which has megabytes to
+// spare once a race has loaded, where the main heap can be down to 1.5 MB
+// and that in pieces: six cars' 512x320 skins, 640 KB of scratch each,
+// went missing on TRACKB45 with traffic in the race, and those cars drew
+// as their reflection alone (2026-10-07). The main heap is the fallback.
+// Each caller asks for it after making the texture, so that giving it
+// back leaves no hole below the texture.
+static void* scratch_alloc(size_t n, bool* linear)
+{
+    void* p = linearAlloc(n);
+
+    *linear = p != NULL;
+    return p != NULL ? p : malloc(n);
+}
+
+static void scratch_free(void* p, bool linear)
+{
+    if (linear) linearFree(p);
+    else free(p);
+}
+
 bool texpack_upload(const TexPack* tp, const TexInfo* ti, int level,
                     C3D_Tex* out)
 {
@@ -448,15 +469,17 @@ bool texpack_upload(const TexPack* tp, const TexInfo* ti, int level,
     // rest stays transparent. The caller scales by the image size and takes
     // UVs against out->width/out->height, which are the padded ones.
     uint32_t aw = pot_ceil(w), ah = pot_ceil(h);
+    bool     linear;
 
-    uint8_t* rgba = (uint8_t*)malloc((size_t)w * h * 4);
-    if (!rgba) return false;
-    if (!texpack_decode(tp, ti, level, rgba, (size_t)w * h * 4)) {
-        free(rgba);
+    if (!C3D_TexInit(out, (u16)aw, (u16)ah, GPU_RGBA8)) return false;
+    uint8_t* rgba = (uint8_t*)scratch_alloc((size_t)w * h * 4, &linear);
+    if (!rgba) {
+        C3D_TexDelete(out);
         return false;
     }
-    if (!C3D_TexInit(out, (u16)aw, (u16)ah, GPU_RGBA8)) {
-        free(rgba);
+    if (!texpack_decode(tp, ti, level, rgba, (size_t)w * h * 4)) {
+        scratch_free(rgba, linear);
+        C3D_TexDelete(out);
         return false;
     }
 
@@ -467,7 +490,7 @@ bool texpack_upload(const TexPack* tp, const TexInfo* ti, int level,
     C3D_TexFlush(out);
     C3D_TexSetFilter(out, GPU_LINEAR, GPU_LINEAR);
     C3D_TexSetWrap(out, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
-    free(rgba);
+    scratch_free(rgba, linear);
     return true;
 }
 
@@ -479,7 +502,7 @@ bool texpack_upload_chain(const TexPack* tp, const TexInfo* ti, int base,
     size_t    cap = texpack_decode_size(ti, base);
     uint32_t* level[TEXPACK_CHAIN_MAX];
     uint8_t*  scratch;
-    bool      ok;
+    bool      ok, linear;
 
     if (n < 1 || pw > 1024 || ph > 1024 || cap == 0) return false;
 
@@ -487,18 +510,18 @@ bool texpack_upload_chain(const TexPack* tp, const TexInfo* ti, int base,
     // above it there: a 512x320 car skin took 1.25 MB of the heap padded
     // and halved beside it, which the heap did not have once a race had
     // loaded, and the car drew without its paint (2026-10-05).
-    scratch = (uint8_t*)malloc(cap);
-    if (!scratch) return false;
     C3D_TexInitParams p = { (u16)pw, (u16)ph, (u8)(n - 1), GPU_RGBA8,
                             GPU_TEX_2D, false };
-    if (!C3D_TexInitWithParams(out, NULL, p)) {
-        free(scratch);
+    if (!C3D_TexInitWithParams(out, NULL, p)) return false;
+    scratch = (uint8_t*)scratch_alloc(cap, &linear);
+    if (!scratch) {
+        C3D_TexDelete(out);
         return false;
     }
     for (int i = 0; i < n; i++)
         level[i] = (uint32_t*)C3D_TexGetImagePtr(out, out->data, i, NULL);
     ok = texpack_chain_tiled(tp, ti, base, level, scratch, cap);
-    free(scratch);
+    scratch_free(scratch, linear);
     if (!ok) {
         C3D_TexDelete(out);
         return false;

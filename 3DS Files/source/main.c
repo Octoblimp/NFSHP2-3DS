@@ -4145,6 +4145,10 @@ int main(int argc, char** argv)
     gUnloadResourceFileFn     = resUnloadFile;
     gFindResourceFileFn       = resFindByType;
     gFindResourceFileByNameFn = resFindByName;
+    // GameFlowLoadingTrackCommonPart2's copies of the solids a second car
+    // of a type draws and dents, and the Begin of unloading's delete.
+    gEDuplicateSolidFn             = eduplicate_solid;
+    gEDeleteAllDuplicatedSolidsFn  = edelete_all_duplicated_solids;
     gSetFlailerScreenVisibilityFn = raceScreenVisibility;
     // The Flailer runtime (flailer.h) behind the race's object calls: the
     // Player's HUD lookups, the countdown's, and the NIS overlay's BUSTED.
