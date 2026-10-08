@@ -16553,3 +16553,106 @@ is in.
 2. 11g-2c-2c: BumperCameraMover, the PreRace coordinator and the
    AnimatedDriver.
 3. The rear-view mirror.
+
+## Session 47 (2026-10-07) -- 11g-2c-2b, the Starting Grid
+
+The user's photo 1 shows retail's "Starting Grid" over the fly-by:
+- each racer's name and car by starting position, the player's in
+  orange;
+- the track's name under the title;
+- "X next" bottom left.
+
+X ends the fly-by. This is retail's PRERACE_STATS module, and it is what
+switches the fly-by on: with the grid in, CAMERA_FLYBY has something to
+end it.
+
+### What is ported
+
+- `startrace.c` (0x001e27b8 to 0x001e3b40):
+  - tStartRaceScreenManager (24 bytes, retail's 0x0031a3e0): the three
+    NeedToSee tests, AddScreen, Enable, Disable and the three free
+    functions on it.
+  - PreRaceStats (400 bytes):
+    - its three builds: default, tournament and knockout;
+    - GetStatsForRacePosition;
+    - the constructor, which fills POS_n, NAME_n, TYPE_n and STATUS_n
+      by starting position and sets the track's name and "Race n of m";
+    - the destructor, HandleEvent and the screen's callback.
+  - PreRaceLetterboxCallback.
+  - From the track select: GetTheRightTrackLanguageID and 0x001dc5d8.
+- `fredrace.h`: IsMultiTrack (0x00184248).
+- **A bmenu fix.** FlailerMenuItem::JoyHandler (retail 0x00169d98)
+  stores the JoyEvent in the callback data's Param for every item
+  message. `bmenu.c` had left Param alone. The grid needs the value:
+  START reaches its off-screen MENUITEM_1 as a SELECT with Param 7 and
+  must not skip; X arrives with 9 and does skip. `bmenu_check` now
+  prints Param, and passes on the demo's FRONTB, retail's FRONTB and
+  retail's INGAMEB.
+- **The wiring in main.c:**
+  - "Pre Race Stats" (0x89b2fc0f) and "Pre Race Letterbox"
+    (0xa3e1bc36) are added to kScreens[];
+  - the fly-by coordinator's two race seams;
+  - Enable and Disable;
+  - ChangeToScreen on the flow;
+  - the two translates, which are the car selector's.
+
+RaceEvent is not ported. Its three seams stay NULL, which a quick race
+never reads.
+
+### The check
+
+`tools/startrace_check.py` runs the module from retail's image, with its
+stubs printing on both sides.
+
+- **Ops:** 4817, giving 18822 lines, 0 differ.
+- **Mutations:** 197.
+  - 193 are caught, 11 of them by a crash or a hang.
+  - 4 are equivalent. One is Enable's `Screens[0]` store, because a
+    screen is always added after it. The other three are fields the
+    constructor's memset has already zeroed.
+
+### On Azahar
+
+The quick race went from loading to the grid over the fly-by, with the
+cinema bars (`0x49c15518`): Desert Heat II, with Mika, Wayne, Ashley and
+Player1 on BMW M5 in orange. The run went like this:
+
+1. CAMERA_FLYBY held for 20 s (FlyByCameraCoordinator::IsFinished is
+   true only with no fly-bys).
+2. The script's first A sent the grid a SELECT, which posted RC_SKIP.
+3. PRERACE ended at once, because it has no coordinator yet.
+4. The countdown ran, and the race went on to lap 1 of 2.
+
+The race ran at 30 FPS throughout.
+
+Two things came up along the way:
+
+- **The log.** The flow traced every screen's TICK, every frame: 1538
+  of the log's 2448 lines. main.c's trace hook now drops it, and the
+  host harness still sees it.
+- **Specks.** Grey specks of 150 to 210 show over the grid's backdrop,
+  along far road lines and sign edges. That is brighter than anything
+  under the backdrop could be after it. Nothing is drawn on the top
+  screen after the Flailer layers, and the UI draws with the depth test
+  off. Not explained yet; look for it on the device.
+
+### The pause menu
+
+START in a race is JOY_EVENT_PAUSE. The player's handler posts
+REQUEST_PAUSE, and rcpost's PAUSE state calls ChangeToScreen("Pause
+Menu", 1). Now that ChangeToScreen is wired, the flow takes the race's
+screen down and finds no "Pause Menu" row. The race stays paused with no
+screen and no way out. Before this session the seam was NULL, which
+left the same pause with no screen.
+
+The user asked for the pause menu next (2026-10-07), so it comes before
+11g-2c-2c.
+
+### Next
+
+1. The pause menu: INGAMEB's pause screens (PAUSE_OPTIONS,
+   PAUSE_AUDIO, PAUSE_DISPLAY and the menu itself) and their callbacks,
+   so that Resume, Restart and Quit work.
+2. 11g-2c-2c: BumperCameraMover, the PreRace coordinator and the
+   AnimatedDriver.
+3. The rear-view mirror.

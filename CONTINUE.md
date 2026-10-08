@@ -1,7 +1,7 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 46
-(2026-10-07), after 11g-2c-2a, the fly-by camera.
+Where the next session picks up. Updated in Session 47
+(2026-10-07), after 11g-2c-2b, the Starting Grid.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
@@ -25,9 +25,10 @@ countdown at GO, the race time runs, the laps count and the cars
 finish. Azahar's run shows lap 1 of 2 with the three AI racers ahead.
 11g-2c-1, the camera data and the countdown coordinator, is done: the
 3-2-1 is in the drive camera, as on retail. 11g-2c-2a, the fly-by
-camera (TrackFlyCameraMover and FlyByCameraCoordinator), is ported and
-checked, and waits on the Starting Grid to be switched on. Next is
-11g-2c-2b, the Starting Grid over the fly-by, then 11g-2c-2c, the
+camera (TrackFlyCameraMover and FlyByCameraCoordinator), and 11g-2c-2b,
+the Starting Grid over it, are done: a quick race from the frontend
+shows the grid over the fly-by, and A goes on to the countdown. Next
+is the pause menu (the user's ask, 2026-10-07), then 11g-2c-2c, the
 pre-race camera. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
@@ -707,28 +708,57 @@ car's were.
     differ; 84 mutations, all caught. `cameracoord_check`: 3970 ops,
     9251 lines, 0 differ; 209 mutations, 206 caught, 3 equivalent.
     `docs/formats/camera-coordinator.md`, "The fly-by".
-  - Nothing changes on screen yet.
+- **11g-2c-2b, done: the Starting Grid over the fly-by.**
+  - `startrace.c` is retail's PRERACE_STATS module (0x001e27b8 to
+    0x001e3b40):
+    - tStartRaceScreenManager: Enable picks this race's screens, then
+      Disable and ReadyToSkip;
+    - PreRaceStats, the grid: a line for each racer by starting
+      position, the knockout's and the tournament's lines, the track's
+      name and "Race n of m";
+    - its HandleEvent: SELECT posts RC_SKIP unless START made it;
+    - the letterbox's callback.
+    The Blurb and the two-player You're The Cop screen are not ported.
+  - **A bmenu fix:** FlailerMenuItem's JoyHandler puts the JoyEvent in
+    the item message's Param (retail 0x00169d98). The port never had,
+    and the grid tells START from A by it. `bmenu_check` passes on
+    FRONTB (demo and retail) and on INGAMEB.
+  - main.c registers "Pre Race Stats" and "Pre Race Letterbox". It sets
+    the fly-by coordinator's two race seams, the screens' two, the
+    flow's ChangeToScreen and the two translates. RaceEvent's seams stay
+    NULL.
+  - **The check:** `startrace_check`: 4817 ops, 18822 lines, 0 differ;
+    197 mutations, 193 caught (11 by a crash or hang), 4 equivalent.
+    `docs/formats/start-race-screens.md`.
+  - **On Azahar:** the grid draws over the fly-by with the cinema bars
+    (Desert Heat II, the player's row in orange). CAMERA_FLYBY holds for
+    20 s, until the script's A, then the countdown and the race follow.
+    The flow's per-frame TICK no longer goes to the card's log; it was
+    1538 of its 2448 lines.
+  - **Open:** grey specks show over the grid's backdrop along far road
+    lines. Their cause is not known; look for them on the device.
+  - **The pause menu is missing.** START in a race posts
+    REQUEST_PAUSE. rcpost's PAUSE then changes to "Pause Menu", which
+    no kScreens row has. The race stays paused with no screen and no
+    way out (see "Next", item 1).
 - **Next, in this order:**
-  1. **11g-2c-2 on, the race's start as retail shows it** (the user's
-     photos of 2026-10-07, Session 44). After the loading screen retail
-     shows the Starting Grid screen over the flyby camera, then on X the
-     pre-race camera (a close-up of the player's car), then the 3-2-1 in
-     the drive camera, then the HUD with the rear-view mirror. The port
-     goes straight to the countdown, because RaceCoordinator::InitForRace
-     enters CAMERA_FLYBY only when GLOBAL\PRERACEANIM.LZC is loaded, and
-     nothing loads it. In order: 11g-2c-2b, the Starting Grid
-     (tStartRaceScreenManager, PreRaceStats on INGAMEB 89b2fc0f, X posts
-     RC_SKIP) and wiring the fly-by coordinator's two race seams; then
-     11g-2c-2c, who loads PRERACEANIM.LZC (and the AnimatedDriver it
-     feeds), BumperCameraMover (0x00158800, 1116 bytes) and the PreRace
-     coordinator (0x0019ad78).
-  2. **The rear-view mirror** (the user's photo 5): SetRearViewMirrorCameraMover
-     and the mirror's view and its HUD frame, top centre on the top
-     screen.
-  3. **11h-3, TrafficTeleporter** (0x002226f8 on; PlaceNewCar
+  1. **The pause menu, next** (the user's ask, 2026-10-07): INGAMEB's
+     pause screens, from rcpost's ChangeToScreen("Pause Menu", 1). At
+     least Resume and Quit, so START in a race is not a dead end.
+  2. **11g-2c-2c, the pre-race camera** (the user's photo 2, a close-up
+     of the player's car after X). trackflow.c's Part3 already loads
+     PRERACEANIM.LZC on the frontend's path. What is left:
+     - BumperCameraMover (0x00158800, 1116 bytes);
+     - the PreRace coordinator (0x0019ad78);
+     - the AnimatedDriver that PRERACEANIM feeds.
+     Until then PRERACE ends at once.
+  3. **The rear-view mirror** (the user's photo 5):
+     SetRearViewMirrorCameraMover, plus the mirror's view and its HUD
+     frame, top centre on the top screen.
+  4. **11h-3, TrafficTeleporter** (0x002226f8 on; PlaceNewCar
      0x002228e0, DoTimestep 0x002227e0), which places the traffic.
-  4. Step 12, the cops.
-  5. The PostRace and Demo coordinators.
+  5. Step 12, the cops.
+  6. The PostRace and Demo coordinators.
 
 ## Waiting on the device: 13b-4f, the device GPU's cost per model
 
@@ -4302,15 +4332,16 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-07, after 11g-2c-2a)
+### Where the port stands (2026-10-07, after 11g-2c-2b)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
   and 36.
-- **Next:** step 11, the racer and traffic AI: 11g-2c-2b and 2c,
-  retail's race start, then the rear-view mirror and 11h-3, the TrafficTeleporter.
+- **Next:** the pause menu (the user's ask), then step 11's
+  11g-2c-2c, the pre-race camera, the rear-view mirror and 11h-3, the
+  TrafficTeleporter.
   See "Now" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
@@ -4339,7 +4370,8 @@ goes in.
   - 11h-2, TrafficDriver;
   - 11g-2b, Race::Update;
   - 11g-2c-1, the camera data and the countdown coordinator;
-  - 11g-2c-2a, the fly-by camera.
+  - 11g-2c-2a, the fly-by camera;
+  - 11g-2c-2b, the Starting Grid.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2

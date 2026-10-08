@@ -216,7 +216,11 @@ static bool item_joy(BMenu* m, int port, BJoyEvent ev)
         default: return false;
     }
 
+    // Each case stores the event in Param (`sw s2,24(sp)`; retail's copy
+    // is 0x00169d98), which is how a screen tells START's SELECT from the
+    // select button's: the Starting Grid skips the fly-by on one only.
     BScreenCallbackData d = item_data(m, m->current, port);
+    d.param = (int32_t)ev;
     d.noise = noise;
     send(m, msg, &d, true);
     return true;

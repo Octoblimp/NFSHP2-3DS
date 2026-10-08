@@ -38,6 +38,16 @@ int32_t fred_is_challenge_game(const FrontendDatabase *f);
 // 0x00185618: GameTypes 8 and 9, the event trees.
 int32_t fred_is_event_game(const FrontendDatabase *f);
 
+// IsMultiTrack, 0x00184248: TheRaceParameters.RaceType 4 or 5, signed
+// (`slti`). It reads nothing of the database.
+static inline int32_t fred_is_multi_track(const FrontendDatabase *f)
+{
+    int32_t t = TheRaceParameters.RaceType;
+
+    (void)f;
+    return t < 6 && t >= 4;
+}
+
 // FrontendPlayerInfo::GetSelectedRideInfo, 0x00187af8: the ride the
 // player picked for game type `gameType`, unchecked.
 RideInfo *fpi_get_selected_ride_info(FrontendPlayerInfo *p, int32_t gameType);

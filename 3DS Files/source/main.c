@@ -148,6 +148,7 @@
 #include "resource.h"
 #include "sinit.h"
 #include "shake.h"
+#include "startrace.h"
 #include "terraintype.h"
 #include "texturepack.h"
 #include "texturestream.h"
@@ -292,6 +293,16 @@ static const BScreenConfig kScreens[] = {
     // to be ported.
     { "Language Options",        0x632b068eu,   // LanguageOptionsScreen
       bgf_language_screen_callback },
+
+    // The race's, in INGAMEB: the screens EnableStartRaceScreens puts over
+    // the fly-by (startrace.c). The Starting Grid is every race's but You're
+    // The Cop's and Free Run's; the letterbox is up when no other is. The
+    // Blurb and the two-player cop screen are not ported, and no race the
+    // port starts asks for them.
+    { "Pre Race Stats",          STARTRACE_SCREEN_STATS,
+      pre_race_stats_callback },
+    { "Pre Race Letterbox",      STARTRACE_SCREEN_LETTERBOX,
+      pre_race_letterbox_callback },
 };
 #define NUM_SCREENS ((int)(sizeof(kScreens) / sizeof(kScreens[0])))
 
@@ -1282,6 +1293,13 @@ static void hookTrace(void* user, const char* line)
                 (unsigned long)(g_heapInfo.heapGot - mi.uordblks) / 1024,
                 (unsigned long)linearSpaceFree() / 1024);
         return;
+    }
+    // A screen's TICK is every frame's, and would be most of the log: the
+    // host harness reads the trace whole, the card only what changes.
+    if (strncmp(line, "msg ", 4) == 0) {
+        const char* n = strrchr(line, ' ');
+
+        if (n && atoi(n + 1) == BMSG_SCREEN_TICK) return;
     }
     logLine("flow %s", line);
 }
@@ -3395,6 +3413,26 @@ static int32_t track_fly_mover_is_finished(CameraMover* m)
     return track_fly_camera_mover_is_finished((const TrackFlyCameraMover*)m);
 }
 
+// ChangeToScreen (0x0014cc78) for the race's code: the flow's, which hides
+// and unactivates the screen up, pushes it when asked, and activates the
+// new one with its menu, which then has the pad.
+static void flowChangeToScreen(const char* name, int32_t push)
+{
+    bgf_change_to_screen(&g_flow, name, push);
+}
+
+// The Starting Grid's two GetTranslatedStrings, into the car select's
+// ring: the grid prints each car's name before it asks for the next.
+static const char* startRaceTranslate(int32_t id)
+{
+    return hookCarSelTranslate(&g_boot, id);
+}
+
+static const char* startRaceTranslateString(const char* s)
+{
+    return hookCarSelTranslateString(&g_boot, s);
+}
+
 int main(int argc, char** argv)
 {
     (void)argc; (void)argv;
@@ -3462,11 +3500,23 @@ int main(int argc, char** argv)
     gCameraCoordinatorDeleteFn = camera_coordinator_delete;
     gCameraCoordinatorEnableFn = camera_coordinator_enable;
     gCameraCoordinatorDisableFn = camera_coordinator_disable;
-    // The fly-by coordinator's TrackFlyCameraMover (11g-2c-2a). The
-    // CAMERA_FLYBY state does not build the coordinator yet: it waits on
-    // it until the Starting Grid's X, which is 11g-2c-2b.
+    // The fly-by coordinator's TrackFlyCameraMover (11g-2c-2a), and the
+    // coordinator itself (11g-2c-2b): CAMERA_FLYBY builds it on view 1
+    // and waits on it, which with the track's fly-bys loaded is until the
+    // Starting Grid's select posts RC_SKIP.
     gTrackFlyCameraMoverFn = track_fly_mover_new;
     gTrackFlyCameraMoverIsFinishedFn = track_fly_mover_is_finished;
+    gFlyByCameraCoordinatorCtorFn = flyby_camera_coordinator_construct;
+    gFlyByCameraIsFinishedFn = flyby_camera_coordinator_is_finished;
+    // The screens over the fly-by (11g-2c-2b, startrace.c): CAMERA_FLYBY's
+    // ACTIVATE and UNACTIVATE put them up and take them down through the
+    // flow's ChangeToScreen, which the pause's "Pause Menu" also goes
+    // through (not registered: the pause menu is not ported).
+    gEnableStartRaceScreensFn = enable_start_race_screens;
+    gDisableStartRaceScreensFn = disable_start_race_screens;
+    gChangeToScreenFn = flowChangeToScreen;
+    gStartRaceTranslateFn = startRaceTranslate;
+    gStartRaceTranslateStringFn = startRaceTranslateString;
 
     // World::DoTimestep's Race::Update and SimulateRaceFinish's
     // Race::FinishCar (11g-2b): the countdown's end, the laps and the

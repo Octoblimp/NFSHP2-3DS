@@ -104,9 +104,9 @@ class Menu:
         return None
 
     # -- callback traffic ------------------------------------------------
-    def _send(self, msg, item, port, noise=0):
+    def _send(self, msg, item, port, noise=0, param=0):
         h = self.items[item]["hash"] if 0 <= item < len(self.items) else 0
-        self.out.append("msg %d %08x %d %d" % (msg, h, port, noise))
+        self.out.append("msg %d %08x %d %d %d" % (msg, h, port, param, noise))
         return 0                        # the trace callback consumes nothing
 
     # -- colour ----------------------------------------------------------
@@ -205,7 +205,8 @@ class Menu:
         if ev not in table:
             return False
         msg, noise = table[ev]
-        self._send(msg, self.current, port, noise)
+        # FlailerMenuItem's handler puts the event in Param, every case.
+        self._send(msg, self.current, port, noise, ev)
         return True
 
     def _menu_joy(self, port, ev):

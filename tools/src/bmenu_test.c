@@ -50,8 +50,8 @@ static void trace(BMenu* m, BScreenMessage msg, BScreenCallbackData* data,
 {
     (void)m;
     (void)user;
-    printf("msg %d %08x %d %d\n", (int)msg, data->itemHash, data->port,
-           data->noise);
+    printf("msg %d %08x %d %d %d\n", (int)msg, data->itemHash, data->port,
+           data->param, data->noise);
 }
 
 static void dump(BMenu* m, const char* label)
