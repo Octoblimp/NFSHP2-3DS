@@ -167,6 +167,7 @@
 #include "efog.h"
 #include "weatherman.h"
 #include "trackflow.h"
+#include "trackgraph.h"
 #include "trackview.h"
 #include "trafficcar.h"
 #include "trafficdriver.h"
@@ -3788,6 +3789,7 @@ int main(int argc, char** argv)
     beltmover_install_vtables();
     copmover_install_vtables();
     copdriver_install_vtables();
+    trackgraph_install_vtables();
     psychodriver_install_vtables();
     aidriver_install_vtables();
     trafficcar_install_vtables();
@@ -4383,6 +4385,10 @@ int main(int argc, char** argv)
     // and its destructor deletes it (copmgr.h).
     gInitCopsFn    = copmgr_init_cops;
     gCleanupCopsFn = copmgr_cleanup_cops;
+    // And the racing routes' graph, which the cops search for roadblock
+    // and radar-trap spots (trackgraph.h).
+    gInitTrackGraphFn    = trackgraph_init;
+    gCleanupTrackGraphFn = trackgraph_cleanup;
     // A collision tells it of hits on the cars it is watching.
     gCopManagerMonitorImpactFn = copmgr_car_impact;
     gCopManagerGetCopByCarFn   = copmanager_get_cop_by_car;

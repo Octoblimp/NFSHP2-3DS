@@ -17662,3 +17662,71 @@ laid out in `copmanager.h` with the history's VelocityAt.
 12e, tTrackGraph; then 12f, the cops' Think and GlobalCopThink, and
 12g, tAICop::Think. After those, bind `gAddCopCarToRaceFn` and put the
 cops on the road.
+
+## Session 57, continued (2026-10-08) -- 12e, the track graph
+
+Retail's TrackGraph.obj, in a new `trackgraph.{c,h}`: the racing routes
+as a graph, which the cops search for roadblock and radar-trap spots.
+With it come two more of `coputil.obj`, GetForwardTrackDistance and
+IsTeleportLocationClear. `docs/formats/track-graph.md` is new.
+
+### What it does
+
+- **The records.** Retail's edge is 48 bytes, the demo's 40 with two
+  words before the lists: the cloaked argument and a NoHelisheet flag.
+  So the graph is 23216 bytes, not 20016. Vertex[100], Edge[400], the
+  table at 0x002bf3d8 (slot 8, the destructor), and two slot pools of
+  128 twelve-byte infos.
+- **The constructor** takes a vertex for each signposted point of
+  routes 0 to 48, skipping a Backwards sign that is not a Stop. The
+  edges depend on the sign:
+  - a Stop that is not Backwards gets none;
+  - AlwaysTake and a Backwards Stop get one, down the sign's route;
+  - any other sign gets two: one down the vertex's own route, and one
+    down the sign's, cloaked as the sign is.
+
+  Each edge runs to the next signposted point that is a vertex, where
+  GetVertexNumber matches either the point or a sign's target. It
+  takes every spot on the way, both ends included. Last come the
+  backward edges, and a swap that puts first the one on the forward
+  edge's route.
+- **The searches.** FindRoadBlock and FindSpeedTrap find the car's
+  edge by its route and point, then walk forward (To vertex, first
+  forward edge) or back (From vertex, first backward edge), five edges
+  at most. They take the first spot whose forward track distance
+  is in [fMin, fMax). A roadblock must also be clear to teleport to:
+  at least 250 from both players and 15 from every car.
+- **Two of retail's reads off the end.** Neither happens on any retail
+  track; a survey of all 30 found none:
+  - A dead-end edge's backward pass lands its number in
+    bHasCloakedEdge. The port does the same.
+  - A forward walk from a dead-end edge reads the word before the
+    block. The port stops there instead.
+- main.c installs the table and binds `gInitTrackGraphFn` and
+  `gCleanupTrackGraphFn`, so World's constructor builds the graph after
+  InitCops and its destructor frees it. Nothing searches it yet; 12j's
+  roadblocks and the radar traps will.
+
+### Checked
+
+- `trackgraph_check` (new) builds the graph of all 30 retail tracks,
+  9 made by hand (dead ends, every sign type with Backwards and
+  Cloaked, swaps, signs to traffic and missing routes) and 300 random
+  ones. Each graph is dumped whole. The run then:
+  - looks up vertices and edges at and past the route ends;
+  - runs about 15000 finds both ways over ranges with NaN and the
+    infinities, plus exact-boundary, wrap and five-edge finds;
+  - uncloaks, and tears down by CleanupTrackGraph and by the destructor
+    with flags 0, 1 and 2.
+
+  325904 operations, 246035 lines, 0 differ. `--mutate`: 102 mutations,
+  all caught.
+- `copdriver_check` links `world.c` now, for IsTeleportLocationClear:
+  21727 operations, 0 differ.
+- The CIA builds.
+
+### Next
+
+12f, the cops' Think and GlobalCopThink (`gGlobalCopThinkFn`; it calls
+UncloakAllEdges); then 12g, tAICop::Think, and bind
+`gAddCopCarToRaceFn`.
