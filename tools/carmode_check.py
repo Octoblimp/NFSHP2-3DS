@@ -983,6 +983,7 @@ def generate(cti):
     w("#define CM_IMG_REALCONTROLLER %d" % 84)
     w("#define CM_IMG_BELTMOVER %d" % 72)
     w("#define CM_IMG_TRAFFICCAR %d" % 36)
+    w("#define CM_IMG_COPMOVER %d" % 112)
     w("#define CM_IMG_AIDRIVER %d" % 720)
     w("#define CM_IMG_TRAFFICDRIVER %d" % 720)
     w("#define CM_STRAY %d" % STRAY)
@@ -2494,8 +2495,9 @@ MUTATIONS = [
      "#define TRAFFICCAR_SIZE       ((int)sizeof(TrafficCar) + 4)"),
     ("size-deliverymover", CMH, "#define DELIVERYMOVER_SIZE   192",
      "#define DELIVERYMOVER_SIZE   196"),
-    ("size-copmover", CMH, "#define COPMOVER_SIZE        112",
-     "#define COPMOVER_SIZE        116"),
+    ("size-copmover", CMH,
+     "#define COPMOVER_SIZE        ((int)sizeof(CopMover))",
+     "#define COPMOVER_SIZE        ((int)sizeof(CopMover) + 4)"),
     ("size-beltmover", CMH,
      "#define BELTMOVER_SIZE       ((int)sizeof(BeltMover))",
      "#define BELTMOVER_SIZE       ((int)sizeof(BeltMover) + 4)"),

@@ -121,7 +121,13 @@ pursuit.obj, on a 10 KB manager. Its slices:
   on the road needs Think. tPursuit's RemoveCopFromPursuit and
   RemovePrimarySpeaker, and CarDamage's wreck, are NULL seams that
   abort.
-- **12c** CopMover; **12d** CopDriver, then bind `gAddCopCarToRaceFn =
+- **12c, done (Session 56):** CopMover, the mover a cop car rides away
+  from the players: STEERING (a speed along a heading) and TRANSLATING (a
+  velocity), held to the ground and sat on five height samples
+  (`docs/formats/cop-mover.md`). `gCopMoverCtorFn` is bound;
+  `COPMOVER_SIZE` is `sizeof`, retail's 128. Nothing builds one until
+  CopDriver does.
+- **12d** CopDriver (`0x001a1ce8` on), then bind `gAddCopCarToRaceFn =
   copmgr_add_cop_car_to_race` in `main.c`; **12e** tTrackGraph;
   **12f** Think and GlobalCopThink (`gGlobalCopThinkFn`);
   **12g** tAICop::Think; **12h, 12i** tPursuit; **12j** roadblocks and
@@ -4554,8 +4560,8 @@ goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a and 12b are done, 12c (CopMover)
-  is next. See "First" at the top.
+- **Next:** step 12, the cops: 12a, 12b and 12c are done, 12d
+  (CopDriver) is next. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

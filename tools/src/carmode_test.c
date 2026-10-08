@@ -31,6 +31,7 @@
 #include "cardamage.h"
 #include "collision.h"
 #include "collisionbody.h"
+#include "copdriver.h"
 #include "copmanager.h"
 #include "difficultyinfo.h"
 #include "engine.h"
@@ -326,7 +327,7 @@ static void *hook_malloc(int size, const char *name, int flags, int pool)
         return p;
     }
     memset(p, 0xa5, (size_t)size);
-    // The eight records the port has are its own size; the log shows the
+    // The nine records the port has are its own size; the log shows the
     // image's, so a wrong size still shows.
     if (strcmp(name, "PhysicsCar") == 0 && size == (int)sizeof(PhysicsCar)) {
         t = &pct_PhysicsCar;
@@ -350,6 +351,10 @@ static void *hook_malloc(int size, const char *name, int flags, int pool)
                && size == (int)sizeof(TrafficCar)) {
         // Ported (11h-1), and a stand-in here too.
         shown = CM_IMG_TRAFFICCAR;
+    } else if (strcmp(name, "CopMover") == 0
+               && size == (int)sizeof(CopMover)) {
+        // Ported (12c): retail's 128, the demo's 112, which this runs.
+        shown = CM_IMG_COPMOVER;
     } else if (strcmp(name, "AIDriver") == 0
                && size == (int)sizeof(AIDriver)) {
         // Ported (11f-2): retail's 736, the demo's 720, which this runs.

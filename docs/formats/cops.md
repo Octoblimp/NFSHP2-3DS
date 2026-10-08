@@ -35,7 +35,8 @@ Think, DoSnapshot and the pursuit logic are the later slices.
 
 The cop.obj functions are in `cop.c`, declared in `cop.h`; the three
 manager ones are in `copmgr.c`. `copdriver.h` has CopDriver's record
-for 12d.
+for 12d, and CopMover, the mover a cop car rides away from the players
+(12c, `copdriver.c`; see [cop-mover.md](cop-mover.md)).
 
 ## The records
 
@@ -159,9 +160,10 @@ RemovePrimarySpeaker (`gPursuitRemovePrimarySpeakerFn`), 12h and 12i;
 CarDamage's wreck (`gCarDamageWreckFn`), which no car reaches while
 CarDamage isn't built.
 
-`main.c` binds `gAICopDisableMyCarFn` to `cop_disable_my_car`. It does
-not bind `gAddCopCarToRaceFn` yet: COP_CONTROL needs CopDriver's
-constructor (12d), and a cop on the road needs Think. Until then race
+`main.c` binds `gAICopDisableMyCarFn` to `cop_disable_my_car`, and
+`gCopMoverCtorFn` (COP_MOVEMENT's mover, 12c). It does not bind
+`gAddCopCarToRaceFn` yet: COP_CONTROL needs CopDriver's constructor
+(12d), and a cop on the road needs Think. Until then race
 setup passes the cops over, as it did before.
 
 ## The check

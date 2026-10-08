@@ -104,7 +104,7 @@ table and runs the tail on that dead controller. The port aborts instead.
 | 2 `TRAFFIC_MOVEMENT` | TrafficCar | `__10TrafficCarP3Car` | bMalloc 36 | 0 |
 | 3 `DELIVERY_MOVEMENT` | DeliveryMover | `__13DeliveryMoverP3Car` | bMalloc 192 | 0 |
 | 4 `MELLOW_MOVEMENT` | MellowMover | its own | MellowMoverSlotPool | 1 |
-| 5 `COP_MOVEMENT` | CopMover | `__8CopMoverP3Car` | bMalloc 112 | 0 |
+| 5 `COP_MOVEMENT` | CopMover | `__8CopMoverP3Car` | bMalloc 112 (retail's 128) | 0 |
 | 6 `BELT_MOVEMENT` | BeltMover | `__9BeltMoverP3Car` | bMalloc 72 | 0 |
 
 **PhysicsMode** is the collision body's field at +84. It is set to 1 for
@@ -146,12 +146,14 @@ Eight of the classes these two tables build belong to task 26:
 - **Movers:** TrafficCar, DeliveryMover, CopMover, BeltMover.
 - **Controllers:** RealController, AIDriver, TrafficDriver, CopDriver.
 
-Five are ported: RealController ([real-controller.md](real-controller.md)),
+Six are ported: RealController ([real-controller.md](real-controller.md)),
 BeltMover ([belt-mover.md](belt-mover.md), step 11e-6), AIDriver
 ([ai-driver.md](ai-driver.md), step 11f-2), TrafficCar
-([traffic-car.md](traffic-car.md), step 11h-1) and TrafficDriver
-([traffic-driver.md](traffic-driver.md), step 11h-2). main.c sets their seams at
-boot, and their `_SIZE` constants are `sizeof`. **Retail's SetControlMode
+([traffic-car.md](traffic-car.md), step 11h-1), TrafficDriver
+([traffic-driver.md](traffic-driver.md), step 11h-2) and CopMover
+([cop-mover.md](cop-mover.md), step 12c). main.c sets their seams at
+boot, and their `_SIZE` constants are `sizeof`. CopMover is 128 bytes in
+retail and 112 in the demo, which carmode_check runs. **Retail's SetControlMode
 (0x00131410) asks 736 for AIDriver and TrafficDriver**, where the demo's
 table above has 720; carmode_check runs the demo's and maps both sizes
 back.

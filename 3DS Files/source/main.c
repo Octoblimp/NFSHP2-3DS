@@ -83,6 +83,7 @@
 #include "collisionbody.h"
 #include "configitems.h"
 #include "cop.h"
+#include "copdriver.h"
 #include "copmgr.h"
 #include "difficultyinfo.h"
 #include "drivingchoice.h"
@@ -3785,6 +3786,7 @@ int main(int argc, char** argv)
     cop_install_vtables();
     aicarcontroller_install_vtables();
     beltmover_install_vtables();
+    copmover_install_vtables();
     psychodriver_install_vtables();
     aidriver_install_vtables();
     trafficcar_install_vtables();
@@ -3803,6 +3805,10 @@ int main(int argc, char** argv)
 
     // TRAFFIC_MOVEMENT's mover (11h-1).
     trafficcar_install_seams();
+
+    // COP_MOVEMENT's mover (12c), which a cop car rides away from the
+    // players.
+    copmover_install_seams();
 
     // The camera coordinators (11g-2c-1): BeginCountdownCameras builds a
     // CountdownCameraCoordinator, and Player's and the race coordinator's

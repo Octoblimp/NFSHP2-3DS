@@ -17522,3 +17522,65 @@ records, the constructor's order, DisableMyCar and the zones.
 
 12c, CopMover (copdriver.obj's mover), then 12d, CopDriver, after which
 `gAddCopCarToRaceFn` can be bound and the cops built in a race.
+
+## Session 56, continued (2026-10-08) -- 12c, CopMover
+
+CopMover, the mover half of retail's copdriver.obj: what a cop car rides
+when no player is near enough for physics. `copdriver.c` is new, and
+`copdriver.h` has the record. `docs/formats/cop-mover.md` has the record,
+the tuning, Move step by step, and the check.
+
+### What it does
+
+- **Two states.** STEERING turns the heading towards the one wanted, at
+  a rate the speed sets, and brakes or accelerates the speed towards the
+  one wanted. TRANSLATING eases a velocity towards the one wanted: the
+  part along the velocity brakes or accelerates, and the part across it
+  is held to 35 m/s/s and its change to 150. The heading follows the
+  velocity. CopDriver asks for TRANSLATING only at 13.41 m/s or more.
+- **Braking** climbs a ramp (retail's new word at 64) at two a second,
+  and the most it may brake scales with it. The driver's Brake shows it
+  past 0.3 of the most, or with the ramp full.
+- **The throttle's most** falls from fMaxThrottleAccel (by car type,
+  11.25 to 15) to nothing at the top speed. The top speed is 84.935 m/s
+  less 10 or 5 mph for the easier strengths. Past the throttle's most,
+  the car's nitro flag is set.
+- **Held to the ground.** Up to 4 m/s into the ground's normal is taken
+  off; more puts the car in the air. On the ground it is sat on five
+  height samples, tipped to their slopes, unless they span more than
+  2 m. The wheels turn at the speed, on the road, with nothing on them.
+- **The record** is retail's 128 bytes (the demo's is 112). The port's
+  bVector3 is word-aligned, so the image's padding at 12 is spelled out.
+  The ARM build's layout check caught it.
+- main.c installs the table and binds `gCopMoverCtorFn`;
+  `COPMOVER_SIZE` is `sizeof(CopMover)`. Nothing builds one until
+  CopDriver (12d) asks for COP_MOVEMENT.
+
+### Checked
+
+- `copmover_check` (new): 12535 operations -- the constructor on 12 car
+  types, ResetMaxThrottleAccel, the accessors, CalculateFacingAngle over
+  a grid of 1320, both states through braking, accelerating, reversing,
+  the top speed, no ground, into the ground, steps and slopes, twelve
+  random runs, and the edges (NaN heights, a slope that rounds apart,
+  exactly 4 m/s into the ground, braking at exactly 0.3, a denormal
+  velocity). 30782 lines, 0 differ.
+- Its `--mutate`: 188 mutations, 173 caught, 15 equivalent (13 `<`
+  against `<=` where the two meet, two independent stores, and a word
+  GetElevation doesn't read).
+- **The image's min.s and max.s** keep the first operand unless the
+  second compares past it, so a NaN gives the first; the port's helpers
+  are written that way. **The stand-still in TRANSLATING** divides by a
+  zero length; on the EE the products saturate, on an IEEE host they go
+  to NaN, as the IEEE oracle does. CopDriver shouldn't reach it.
+- carmode (with CopMover's size now `sizeof`, and its mutation caught),
+  cop, copmanager, beltmover, aicarcontroller, aidriver, carinit,
+  collisionbody, hudcop, physcomp, physicscar, raceinit, realcontroller,
+  trafficcar, trafficdriver and traffictele: 0 differ.
+- The CIA builds.
+
+### Next
+
+12d, CopDriver: its constructor (`0x001a1ce8`, `gCopDriverCtorFn`) and
+Think, after which `gAddCopCarToRaceFn` can be bound and the cops built
+in a race.
