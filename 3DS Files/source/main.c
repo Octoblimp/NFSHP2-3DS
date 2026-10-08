@@ -60,6 +60,7 @@
 #include "bsnd.h"
 #include "bslotpool.h"
 #include "bticker.h"
+#include "bumpercam.h"
 #include "camera.h"
 #include "cameracoord.h"
 #include "cammover.h"
@@ -3643,8 +3644,8 @@ int main(int argc, char** argv)
     // CountdownCameraCoordinator, and Player's and the race coordinator's
     // deletes, enables and disables go through the coordinators' own.
     // The countdown finds no COUNTDOWN_n camera on the retail disc, so it
-    // builds no BumperCameraMover (gBumperCameraMoverFn stays NULL) and the
-    // car's drive camera shows the 3-2-1, as retail's does.
+    // builds no BumperCameraMover and the car's drive camera shows the
+    // 3-2-1, as retail's does.
     gCountdownCameraCoordinatorFn = countdown_camera_coordinator_construct;
     gCameraCoordinatorDeleteFn = camera_coordinator_delete;
     gCameraCoordinatorEnableFn = camera_coordinator_enable;
@@ -3658,11 +3659,15 @@ int main(int argc, char** argv)
     gFlyByCameraCoordinatorCtorFn = flyby_camera_coordinator_construct;
     gFlyByCameraIsFinishedFn = flyby_camera_coordinator_is_finished;
     // The pre-race coordinator (11g-2c-2c): PRERACE builds it on view 1
-    // once the grid is gone and waits on it. Until BumperCameraMover is in,
-    // it flies its four cameras with no mover, a frame each, and finishes.
-    // No car has an AnimatedDriver yet, so the animation seam stays NULL.
+    // once the grid is gone and waits on it, flying INGAMEB's four
+    // pre-race cameras round the cars it picked, each on a
+    // BumperCameraMover (11g-2c-2c-2) until both its splines run out. The
+    // countdown's COUNTDOWN_n cameras would use the same mover. No car has
+    // an AnimatedDriver yet, so the animation seam stays NULL.
     gPreRaceCameraCoordinatorCtorFn = prerace_camera_coordinator_construct;
     gPreRaceCameraIsFinishedFn = prerace_camera_coordinator_is_finished;
+    gBumperCameraMoverFn = bumper_camera_mover_construct;
+    gBumperCameraMoverIsFinishedFn = bumper_camera_mover_is_finished_fn;
     // The screens over the fly-by (11g-2c-2b, startrace.c): CAMERA_FLYBY's
     // ACTIVATE and UNACTIVATE put them up and take them down through the
     // flow's ChangeToScreen, which the pause's "Pause Menu" also goes

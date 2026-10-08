@@ -16904,3 +16904,65 @@ and events). It comes after the single-player race is whole.
 5. The PostRace and Demo coordinators.
 6. The pause's other screens.
 7. Later: task 37, Local Wireless play.
+
+## Session 50 (2026-10-07) -- 11g-2c-2c-2, BumperCameraMover
+
+BumperCameraMover is the camera that flies each pre-race close-up. With
+it in, the pre-race the user missed in Session 49 ("I didn't see the
+camera") shows.
+
+### What is ported
+
+New `bumpercam.c` and `bumpercam.h` (0x00158800 on, and the wall
+routine 0x00157c60; 1116 bytes, table 0x002b1bd0, type 5). Session
+49's decode held up. See "`BumperCameraMover`, 1116 bytes" in
+`docs/formats/camera-coordinator.md`.
+
+- The constructor, destructor, IsFinished, GetTarget and GetCarToFollow.
+- Update: the eye and look in the car's frame, the road noise, the
+  ground, the bank, the field of view (as an angle or kept the same
+  size), the focal distance and the depth of field.
+- The wall routine, for a race that is racing: the countdown's cameras
+  would reach it, the pre-race's never do.
+- main.c sets `gBumperCameraMoverFn` and
+  `gBumperCameraMoverIsFinishedFn`. The AnimatedDriver's seam stays NULL.
+
+### The check
+
+`tools/bumpercam_check.py` runs the port beside SLES_507.31's own code.
+The harness is `tools/src/bumpercam_test.c`.
+
+- **Run as shipped:** the splines, the camera, the matrix code, `bATan`
+  and `IsGameFlowPaused`.
+- **Stood in, printing each call:** the topology coordinate, the
+  elevation, the road noise, the car's box, the wall offset and the
+  look-at offset.
+- **Scenarios:** 16, among them INGAMEB's four records, locks, the
+  iso field of view, the ground, the walls and long random runs.
+- **Result:** 15038 ops, 37485 lines, 0 differ.
+- **Mutations:** 145. 143 are caught; 2 are equivalent (the inverse's
+  last 1 and the exact halving).
+
+Two things the image does that the port mirrors:
+
+- The road noise's fourth lane is a stack word the image never writes.
+  The model zeroes the stack under the mover before each Update, and
+  the port's lane is 0.
+- GetElevation is given the eye in the car's frame, and the iso field
+  of view's distance is from the car's world Position.
+
+### On Azahar
+
+A quick race went from the grid's A through the close-ups to the
+3-2-1 and lap 1. The close-ups circle the player's yellow car with the
+letterbox, each about 1.5 s, at 30 FPS.
+
+### Next
+
+1. The rear-view mirror.
+2. 11h-3, TrafficTeleporter.
+3. Step 12, the cops.
+4. The AnimatedDriver, so the driver moves in the close-ups.
+5. The PostRace and Demo coordinators.
+6. The pause's other screens.
+7. Later: task 37, Local Wireless play.

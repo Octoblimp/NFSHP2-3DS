@@ -234,10 +234,11 @@ void update_camera_coordinators(float dt);
 // ------------------------------------------------------------ the countdown
 
 // What CountdownCameraCoordinator::Update builds for a number with camera
-// data: BumperCameraMover's constructor (0x00158800) on 1116 bytes of
-// bMalloc's, with the coordinator's view and its player's car. Not ported:
-// NULL, and then nothing is allocated and the coordinator has no mover.
-// The retail disc never gets this far.
+// data, and PreRaceCameraCoordinator::Update for each of its cameras:
+// BumperCameraMover's constructor (0x00158800, bumpercam.c) on 1116 bytes
+// of bMalloc's, with the coordinator's view and the car. With it NULL
+// nothing is allocated and the coordinator has no mover. The retail disc
+// never gets this far in the countdown.
 extern CameraMover *(*gBumperCameraMoverFn)(void *mem, int32_t viewID,
                                             struct Car *car,
                                             CameraDataItems *cd);

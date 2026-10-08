@@ -1,7 +1,7 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 49
-(2026-10-07), after 11g-2c-2c-1, the pre-race coordinator.
+Where the next session picks up. Updated in Session 50
+(2026-10-07), after 11g-2c-2c-2, BumperCameraMover.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
@@ -30,8 +30,9 @@ the Starting Grid over it, are done: a quick race from the frontend
 shows the grid over the fly-by, and A goes on to the countdown.
 11g-2d, the pause menu (the user's ask, 2026-10-07), is done: START
 pauses, and Resume, Restart and Quit work. 11g-2c-2c-1, the pre-race
-coordinator, is done. Next is 11g-2c-2c-2, BumperCameraMover, the
-camera that draws the pre-race close-up. The car selector is finished and checked against retail: SC-1
+coordinator, and 11g-2c-2c-2, BumperCameraMover, are done: after the
+grid's A the camera flies INGAMEB's four close-ups round the cars, then
+the 3-2-1. Next is the rear-view mirror. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -793,23 +794,34 @@ car's were.
     `docs/formats/camera-coordinator.md`, "The pre-race".
   - **On Azahar:** the quick race goes from the grid's A through
     PRERACE (rc 3, stage 3) to the countdown and lap 1, at 30 FPS.
+- **11g-2c-2c-2, done: BumperCameraMover.**
+  - New `bumpercam.c` (0x00158800 on, 1116 bytes, table 0x002b1bd0,
+    type 5): the constructor, destructor, IsFinished, GetTarget and
+    Update, with the wall routine (0x00157c60) for a race that is
+    racing. The eye and look are in the car's frame, the eye shaken by
+    the road noise and held 0.7 over the ground.
+  - main.c points `gBumperCameraMoverFn` and
+    `gBumperCameraMoverIsFinishedFn` at it. The AnimatedDriver's seam
+    stays NULL: the driver does not move yet.
+  - **The check:** `tools/bumpercam_check.py` with
+    `tools/src/bumpercam_test.c`: 16 scenarios, 15038 ops, 37485 lines,
+    0 differ; 145 mutations, 143 caught, 2 equivalent.
+    `docs/formats/camera-coordinator.md`, "`BumperCameraMover`".
+  - **On Azahar:** the quick race goes grid, A, the close-ups round the
+    yellow player car (each about 1.5 s), the 3-2-1 and lap 1. The
+    close-ups run at 30 FPS.
 - **Task 37, Local Wireless (multi-card) play,** is in TASKS.md (the
   user's ask, 2026-10-07). It comes after the single-player race is
   whole.
 - **Next, in this order:**
-  1. **11g-2c-2c-2, BumperCameraMover** (0x00158800, 1116 bytes, table
-     0x002b1bd0; the user's photo 2, a close-up of the player's car
-     after X). Its decode is in HANDOFF's Session 49. A new
-     `bumpercam.c` with `tools/bumpercam_check.py`, modelled on
-     trackflycam's, then main.c's two seams. The AnimatedDriver that
-     PRERACEANIM.LZC feeds (trackflow.c's Part3 loads it) comes after;
-     until then the driver does not move.
-  2. **The rear-view mirror** (the user's photo 5):
+  1. **The rear-view mirror** (the user's photo 5):
      SetRearViewMirrorCameraMover, plus the mirror's view and its HUD
      frame, top centre on the top screen.
-  3. **11h-3, TrafficTeleporter** (0x002226f8 on; PlaceNewCar
+  2. **11h-3, TrafficTeleporter** (0x002226f8 on; PlaceNewCar
      0x002228e0, DoTimestep 0x002227e0), which places the traffic.
-  4. Step 12, the cops.
+  3. Step 12, the cops.
+  4. The AnimatedDriver that PRERACEANIM.LZC feeds (trackflow.c's Part3
+     loads it), so the driver moves in the close-ups.
   5. The PostRace and Demo coordinators.
   6. The pause's other screens (Pause Options and its pages, Race
      Objective, the BAC controls), with the frontend's.
@@ -4386,15 +4398,15 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-07, after 11g-2c-2c-1)
+### Where the port stands (2026-10-07, after 11g-2c-2c-2)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 11's 11g-2c-2c-2, BumperCameraMover (the pre-race
-  camera), the rear-view mirror and 11h-3, the TrafficTeleporter.
+- **Next:** the rear-view mirror and step 11's 11h-3, the
+  TrafficTeleporter.
   See "Now" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
@@ -4426,7 +4438,8 @@ goes in.
   - 11g-2c-2a, the fly-by camera;
   - 11g-2c-2b, the Starting Grid;
   - 11g-2d, the pause menu;
-  - 11g-2c-2c-1, the pre-race coordinator.
+  - 11g-2c-2c-1, the pre-race coordinator;
+  - 11g-2c-2c-2, BumperCameraMover.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2

@@ -424,6 +424,80 @@ three follow the player, each on the next pre-race camera. The pre-race
 cameras are INGAMEB's four, `Cam_01` to `Cam_04`; the tracks' bundles
 have none.
 
+### `BumperCameraMover`, 1116 bytes
+
+| Offset | Field |
+|---:|---|
+| 0 | `CameraMover`, type 5 |
+| 44 | `CameraDataItems`, the parsed record |
+| 208 | eye spline |
+| 256 | bank spline |
+| 304 | `EyeSplineParam` |
+| 308 | look spline |
+| 356 | `LookSplineParam` |
+| 360 | FOV spline, over the record's 32-entry table |
+| 408 | `CarToFollow` |
+| 412 | `TheTopologyCoordinate` |
+
+The table is `0x002b1bd0`: the base's, but for the destructor, Update,
+GetCarToFollow (`0x0015fb10`) and GetTarget (`0x001589a8`). GetTarget is
+the car's `GeometryPosition`, or the camera's target with no car.
+
+- **Constructor** (`0x00158800`). It takes the view, the car and the
+  record. It copies the record, builds the four clamped splines as the
+  fly-by's do (table size 16384), zeroes both parameters and builds its
+  topology coordinate. Unless the camera has stopped updating, it clears
+  the camera's `CarNotToRender` and `RenderDash` and sets the field of
+  view to 13020. It always sets the record's near and far clips.
+- **Destructor** (`0x00158910`). Unless the camera has stopped updating, it
+  zeroes the focal distance and depth of field. It destroys the topology
+  coordinate, the four splines (FOV, look, bank, eye) and the base.
+- **`IsFinished`** (`0x001589c8`) is the fly-by's: the eye and the look
+  are each done when their speed is 0 or their parameter has reached the
+  last point.
+- **`Update`** (`0x00158a68`) does nothing while the game flow is paused.
+  Otherwise:
+  1. The car's place round the track, p, is `RatioAroundTrack`, or 1 less
+     it when the race runs backwards (each through `* 100 * 0.01`).
+  2. The area share is p between the record's two area percentages, with a
+     floor of 0 and no ceiling. Each parameter steps by `speed * dt * 25`,
+     or with the record's lock is set to its last point times the share.
+     Each is held at its last point.
+  3. The eye and the look point are in the car's frame. The world goes into
+     it off the car's `GeometryPosition`, turned by the transpose of its
+     `BodyMatrix`.
+  4. The eye comes off its spline, plus the road noise times 0.877. The
+     noise is read at the car's `Position` and 1 back and 1 forward in y,
+     on dirt. Its fourth lane is never written in the image; the port's
+     is 0.
+  5. The eye is held at least 0.7 over `GetElevation` at the eye, through
+     the mover's own coordinate. The eye passed is still in the car's
+     frame.
+  6. The look and bank come off their splines, the bank rolls the up
+     vector, and the look-at matrix goes behind the world's.
+  7. The field of view comes from the FOV table at p's share between the
+     two percentages, clamped to 0 to 1. As an angle it is `deg *
+     182.044449`. With `IsFOVIso` it is kept the same size at the eye's
+     distance from the car's world `Position` (at least 1), against the
+     car-frame eye.
+  8. The target distance is the eye's from the look, and the focal
+     distance the same but at least 2. The depth of field is 7.5. All
+     three are skipped while the camera has stopped updating, as is the
+     field of view.
+  9. With the race `RACING`, the wall routine (`0x00157c60`) moves the eye
+     off the walls. It finds the eye from the matrix's inverse and, around
+     the midpoint of the eye and the car, sets a coordinate of its own. The
+     wall offset (`0x00157930`) moves the eye. If that leaves it nearer the
+     car than the car-space box's half-width plus 0.7, it is lifted on to
+     that sphere. The look-at offset (`0x00157b60`) then turns the matrix
+     to keep the car where it was on screen.
+  10. The matrix goes on the camera.
+
+INGAMEB's four records each run about 1.5 seconds at 30 frames a second.
+The eye has 3 points at 0.05333, so it takes 45 frames. The look ends
+no later, so the four take about 6 seconds in all. The race is not racing
+in the pre-race, so the wall routine never runs there.
+
 ## The port
 
 - **Loader table.** `bchunkload.c` puts `loader_cameras` and
@@ -439,21 +513,20 @@ have none.
   - `gCameraCoordinatorDisableFn`.
 
   `racecoord.c`, `rcstates.c` and `rcpost.c` use the same delete seam.
-- **`gBumperCameraMoverFn`** stays NULL until `BumperCameraMover` is
-  ported. While it is NULL, a found countdown camera builds nothing. The
-  retail disc never gets that far.
+- **`gBumperCameraMoverFn`** points at `bumpercam.c` since 11g-2c-2c-2.
+  A found countdown camera would build the mover too. The retail disc
+  never gets that far.
 - **The fly-by.** `main.c` points `gTrackFlyCameraMoverFn` and
   `gTrackFlyCameraMoverIsFinishedFn` at `trackflycam.c`. Since the
   Starting Grid (11g-2c-2b), the race coordinator's
   `gFlyByCameraCoordinatorCtorFn` and `gFlyByCameraIsFinishedFn` point at
   the fly-by coordinator.
 - **The pre-race.** `main.c` points `gPreRaceCameraCoordinatorCtorFn` and
-  `gPreRaceCameraIsFinishedFn` at the pre-race coordinator. Until
-  `BumperCameraMover` is ported, `gBumperCameraMoverFn` and
-  `gBumperCameraMoverIsFinishedFn` are NULL: the coordinator builds no
-  mover, so it moves on every frame and finishes after four frames. No car
-  has an `AnimatedDriver` yet, so `gAnimatedDriverBeginAPreRaceAnimationFn`
-  is NULL too.
+  `gPreRaceCameraIsFinishedFn` at the pre-race coordinator, and
+  `gBumperCameraMoverFn` and `gBumperCameraMoverIsFinishedFn` at
+  `bumpercam.c`. The coordinator flies the four close-ups round the cars
+  it picked. No car has an `AnimatedDriver` yet, so
+  `gAnimatedDriverBeginAPreRaceAnimationFn` is NULL.
 
 ## The check
 
@@ -510,6 +583,33 @@ with the splines, the camera and `bATan` run as shipped. It covers each of
 the 15 disc fly-bys, built records with cars and locks, and the edges. It
 gives 25 scenarios, 14170 ops and 39418 lines, with 0 differences, and
 catches all 84 of its mutations.
+
+`tools/bumpercam_check.py` runs `BumperCameraMover` beside retail's. The
+splines, the camera, the matrix code, `bATan` and `IsGameFlowPaused` run as
+shipped. These are stood in on both sides, and each call prints a line:
+
+- the topology coordinate's constructor and destructor;
+- `SetInterestBBox`;
+- `GetElevation`, which returns a set height;
+- `GetRoadNoise`, which cycles through three set values;
+- `GetCarSpaceBoundingBox`;
+- the wall offset and the look-at offset.
+
+The model zeroes the stack under the mover before each Update, so the
+noise's unwritten lane is 0 on both sides. The checker covers:
+
+- INGAMEB's four records, run to the end and then with the race racing;
+- built records with locks, `IsFOVIso`, ground near the eye, walls round
+  cars of every size and long random runs;
+- pause, `StopUpdating`, both track directions, and construction with
+  and without a car.
+
+It gives 16 scenarios, 15038 ops and 37485 lines, with 0 differences. Of
+its 145 mutations it catches 143, and 2 are equivalent:
+
+- the wall routine's eye pad: the inverse's fourth row ends in exactly 1;
+- the midpoint's order: halving is exact, so `a/2 + b/2` and `(a + b)/2`
+  round alike.
 
 `tools/loadertable_check.py` holds slot 13 as ported. Its two
 `slot-13-*` mutations are caught.
