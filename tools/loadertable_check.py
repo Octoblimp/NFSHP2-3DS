@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Cross-check 3DS Files/source/bchunkload.c, esolid.c and emodel.c -- the
 table of 30 chunk loaders with the two walks that hand a file's chunks to
-them, LoaderSolidList and its unloader, eFixUpTables, and eModel.obj's
-list half -- against the image itself, run in mipsemu.
+them, LoaderSolidList and its unloader, eFixUpTables, eDuplicateSolid and
+eDeleteAllDuplicatedSolids, and eModel.obj's list half -- against the
+image itself, run in mipsemu.
 
 The model is the image: TraverseChunks, TraverseChunksBackwards,
 LoadChunks, UnloadChunks, PostLoadFixup and HotChunksPostLoadFixup, the
 image's own LoaderTable and UnloaderTable, LoaderSolidList,
 UnloaderSolidList, eSolid's FixStripEntryTable, FixTextureTable and
-FixLightMaterialTable, eFixUpTables, eFindSolid, and eModel's Init, UnInit,
+FixLightMaterialTable, eFixUpTables, eFindSolid, eDuplicateSolid,
+eSolid::ChangeName, eDeleteAllDuplicatedSolids, and eModel's Init, UnInit,
 ReconnectSolid, ReconnectTextureTable, ApplyReplacementTextureTable,
 ReconnectAllModels and deleting destructor all run as shipped. The harness
 runs the same op script on the port and prints the same lines.
@@ -63,6 +65,8 @@ prints as the record it points into -- s12 for solid 12, se/sd/tt/tr/lf/
 ra/lm/hd for its strips, strip data, texture table, animation tree,
 labelled frames, rigid animation, light materials and list header -- with
 an offset in disc bytes, or as bN.cK for buffer N's K-th top-level chunk.
+A solid eDuplicateSolid made is dsN, and its strip table and strip data
+dseN and dsdN, until eDeleteAllDuplicatedSolids forgets them.
 A disc list keeps its file offset mod 16, so every pad is the file's.
 
 **The claims.** Every type on the retail disc, the guards' other
@@ -91,7 +95,10 @@ with and without flag 0x20, a rigid animation and its trigger, over nine
 seeds; the ramp at fourteen sizes, widths and palettes; and every solid
 list of the retail disc's files but the tracks, and of TRACKB12's and
 TRACKB61's, loaded, fixed up and unloaded, with models on each track's
-names and three on the waving flag's.
+names and three on the waving flag's; and the copies a race makes of the
+Viper's and the bus's bodies and scuffs, for two more of each car, with a
+copy's copy, a name copied twice and a solid that is not there, models on
+the copies, eFixUpTables over them, and their delete, twice.
 
     python tools/loadertable_check.py
     python tools/loadertable_check.py --mutate [--only a,b]
@@ -107,6 +114,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bhash
 import hostbuild
 import physicscar_check as pcc
 import retail_model
@@ -194,7 +202,12 @@ SYM = dict(
     mrtt="ReconnectTextureTable__6eModel",
     mapply="ApplyReplacementTextureTable__6eModel",
     mall="ReconnectAllModels__Fv",
+    dup="eDuplicateSolid__FPCcT0",
+    deldup="eDeleteAllDuplicatedSolids__Fv",
 )
+
+# MemoryUsedByDuplicatedSolids, the demo's (retail gp-24928, 0x0032f790).
+DUPMEM = 0x00322850
 
 # The thunks' own loaders, whose guard is the thunk's, and the topology
 # tree's, which TrackGeometry's hands every type it does not know.
@@ -274,7 +287,7 @@ RETAIL_TABLES = Tables(RNSLOTS, RCLAIMS, RTAKER, RPORTED)
  OP_SET, OP_DUMP, OP_MNEW, OP_MINIT, OP_MUNINIT, OP_MDELETE, OP_MRECON,
  OP_MRTT, OP_MAPPLY, OP_MALL, OP_MPOKE, OP_MDUMP, OP_REPL, OP_RENT,
  OP_FIND, OP_MATRIX, OP_RAMP, OP_RAMPDUMP, OP_SEED, OP_MARK,
- OP_RELEASE) = range(35)
+ OP_RELEASE, OP_DUP, OP_DELDUP) = range(37)
 
 ARGS = {OP_TAG: 1, OP_BUF: 1, OP_BULK: 2, OP_OPEN: 1, OP_CLOSE: 0,
         OP_BUFEND: 0, OP_CLAIMS: 0, OP_CLAIM: 3, OP_SWAP: 1,
@@ -282,10 +295,14 @@ ARGS = {OP_TAG: 1, OP_BUF: 1, OP_BULK: 2, OP_OPEN: 1, OP_CLOSE: 0,
         OP_DUMP: 0, OP_MNEW: 1, OP_MINIT: 2, OP_MUNINIT: 1, OP_MDELETE: 2,
         OP_MRECON: 1, OP_MRTT: 1, OP_MAPPLY: 1, OP_MALL: 0, OP_MPOKE: 3,
         OP_MDUMP: 1, OP_REPL: 2, OP_RENT: 8, OP_FIND: 1, OP_MATRIX: 4,
-        OP_RAMP: 3, OP_RAMPDUMP: 1, OP_SEED: 1, OP_MARK: 0, OP_RELEASE: 0}
+        OP_RAMP: 3, OP_RAMPDUMP: 1, OP_SEED: 1, OP_MARK: 0, OP_RELEASE: 0,
+        OP_DUP: 2, OP_DELDUP: 0}
 
-K_S, K_SE, K_SD, K_TT, K_TR, K_LF, K_RA, K_LM, K_HD = range(9)
-KIND = ["s", "se", "sd", "tt", "tr", "lf", "ra", "lm", "hd"]
+(K_S, K_SE, K_SD, K_TT, K_TR, K_LF, K_RA, K_LM, K_HD, K_DS, K_DSE,
+ K_DSD) = range(12)
+KIND = ["s", "se", "sd", "tt", "tr", "lf", "ra", "lm", "hd", "ds", "dse",
+        "dsd"]
+DUP_KINDS = (K_DS, K_DSE, K_DSD)
 # child type -> (kind, padded, entry size)
 CHILD = {0x00034003: (K_S, True, 192), 0x00034004: (K_SE, True, 64),
          0x00034005: (K_SD, True, 1), 0x00034006: (K_TT, False, 8),
@@ -312,6 +329,11 @@ class Script(object):
     def tag(self, s):
         self.tags.append(s)
         self.op(OP_TAG, len(self.tags) - 1)
+
+    def string(self, s):
+        """A string an op names by its number, printed by no tag."""
+        self.tags.append(s)
+        return len(self.tags) - 1
 
     def leaf(self, type_, data):
         data = bytes(data)
@@ -775,6 +797,63 @@ def scenario_disc_lists(sc, files, seed=None):
                 sc.op(OP_MDELETE, 100 + i, 3)
             sc.op(OP_DUMP)
         sc.op(OP_RELEASE)
+
+
+def scenario_duplicates(sc, files):
+    """The copies GameFlowLoadingTrackCommonPart2 makes for the second and
+    later car of a type, over the Viper's and the bus's lists in one
+    buffer: each body half and the scuffs for instances 1 and 7, the bus's
+    scuffs that are not there, a copy's copy, a name copied twice; the
+    finds, models on three copies, eFixUpTables with the solids dirty, and
+    the delete, a second delete with nothing left, a copy after it and its
+    delete, and the lists unloaded."""
+    got = dict(files)
+    viper = got.get("CARS/VIPERGTS/GEOMETRY.BIN")
+    bus = got.get("CARS/BUS/GEOMETRY.BIN")
+    if viper is None or bus is None:
+        return
+    sc.tag("dup: the Viper's and the bus's copies")
+    sc.op(OP_MARK)
+    lists = [(d, pos, s) for d in (viper, bus)
+             for t, pos, s in top_chunks(d) if t == SOLID_LIST]
+    b = Buf(sc, lists[0][1] % 16)
+    for d, pos, s in lists:
+        emit_disc_list(b, d, pos, s)
+    b.end()
+    sc.op(OP_LOAD, 0, 0)
+    sc.op(OP_FIXUP, 1)
+
+    def dup(frm, to):
+        sc.op(OP_DUP, sc.string(frm), sc.string(to))
+
+    for inst in (1, 7):
+        for part in ("A", "B"):
+            dup("VIPERGTS_" + part, "VIPERGTS_%s%d" % (part, inst))
+        dup("VIPERGTS_SCUFFS", "VIPERGTS_SCUFFS%d" % inst)
+    for part in ("A", "B", "SCUFFS"):
+        dup("BUS_" + part, "BUS_%s1" % part)
+    dup("VIPERGTS_A1", "VIPERGTS_A3")
+    dup("VIPERGTS_A", "VIPERGTS_A1")
+    for name in ("VIPERGTS_A", "VIPERGTS_A1", "VIPERGTS_A3",
+                 "VIPERGTS_SCUFFS7", "BUS_B1", "BUS_SCUFFS1"):
+        sc.op(OP_FIND, bhash.bhash(name))
+    for i, name in enumerate(("VIPERGTS_A7", "VIPERGTS_B7", "BUS_A1")):
+        sc.op(OP_MNEW, 200 + i)
+        sc.op(OP_MINIT, 200 + i, bhash.bhash(name))
+    sc.op(OP_SET, 1, 1)
+    sc.op(OP_FIXUP, 0)
+    sc.op(OP_DUMP)
+    for i in range(3):
+        sc.op(OP_MDELETE, 200 + i, 3)
+    sc.op(OP_DELDUP)
+    sc.op(OP_DUMP)
+    sc.op(OP_DELDUP)
+    dup("VIPERGTS_A", "VIPERGTS_A2")
+    sc.op(OP_DELDUP)
+    sc.op(OP_LOAD, 1, 0)
+    sc.op(OP_FIXUP, 1)
+    sc.op(OP_DUMP)
+    sc.op(OP_RELEASE)
 
 
 def scenario_sun(sc, files):
@@ -1310,6 +1389,7 @@ def retail_script(files=None):
     scenario_random(sc)
     scenario_ramp(sc)
     scenario_disc_lists(sc, retail_disc_subset(files), seed=0x5eed5eed)
+    scenario_duplicates(sc, files)
     # Last but the claims: it leaves its list loaded.
     scenario_frames(sc)
     # The claims run on an image of their own, and the harness's loaders
@@ -1340,6 +1420,7 @@ class Model(object):
         self.SUN_INFO = e.data(SUN_INFO)
         self.SUN_POS = RSUN_POS if retail else SUN_POS
         self.SEED = e.data(SEED)
+        self.DUPMEM = e.data(DUPMEM)
         self.WEATHER_LISTS = [e.data(a) for a in WEATHER_LISTS]
         # The demo has no ramp, which prints as null.
         self.TI_PTRS = RTI_PTRS if retail else (
@@ -1715,13 +1796,14 @@ class Model(object):
                 " %08x=%s" % (u(lm + 8 * i), L(u(lm + 8 * i + 4)))
                 for i in range(nlm)))
         se = u(s + 176)
-        if self.is_rec(se, K_SE):
+        if self.is_rec(se, K_SE) or self.is_rec(se, K_DSE):
             d = u(s + 180)
             sz = u(s + 60)
             parts = []
             for i in range(nstrips):
                 x = u(se + 64 * i + 8)
-                if self.is_rec(d, K_SD) and d <= x < d + sz:
+                if ((self.is_rec(d, K_SD) or self.is_rec(d, K_DSD))
+                        and d <= x < d + sz):
                     parts.append(" +%x" % (x - d))
                 else:
                     parts.append(" " + L(x))
@@ -1799,6 +1881,61 @@ class Model(object):
         for m in self.walk_list(self.MODELLIST, "models"):
             self.dump_model(m)
         self.emit("  pools va %d model %d" % (self.va_count, self.model_count))
+
+    # ---- the copies ------------------------------------------------------
+
+    def dup(self, frm, to):
+        """eDuplicateSolid, and its copy named, with its name: whether the
+        strip data and the strip table, but each strip's Data, are the first
+        solid of the name's, as the copy's own walk finds it. The disc's
+        strip data comes as sizes, all 0, so the first solid's is given a
+        pattern first."""
+        e, u = self.e, self.e.u32
+        h = bhash.bhash(frm)
+        src = u(self.SOLIDLIST)
+        while src != self.SOLIDLIST and u(src + 8) != h:
+            src = u(src)
+        if src != self.SOLIDLIST:
+            d, sz = u(src + 180), u(src + 60)
+            e.mem[d:d + sz] = bytes((i * 7 + 3) & 0xff for i in range(sz))
+        ps = []
+        for s in (frm, to):
+            raw = s.encode("latin-1") + b"\0"
+            p = e.alloc(len(raw), 16)
+            e.mem[p:p + len(raw)] = raw
+            ps.append(p)
+        tail = u(self.SOLIDLIST + 4)
+        self.call("dup", *ps)
+        s = u(self.SOLIDLIST + 4)
+        line = "  dup %s %s" % (frm, to)
+        if s != tail and src != self.SOLIDLIST:
+            n, sz = self.s16(s + 52), u(s + 60)
+            se, d = u(s + 176), u(s + 180)
+            self.add_rec(s, 192, K_DS)
+            self.add_rec(se, 64 * n, K_DSE)
+            self.add_rec(d, sz, K_DSD)
+            sse, sd = u(src + 176), u(src + 180)
+            same = e.mem[d:d + sz] == e.mem[sd:sd + sz]
+            tbl = all(e.mem[se + 64 * i:se + 64 * i + 8]
+                      == e.mem[sse + 64 * i:sse + 64 * i + 8]
+                      and e.mem[se + 64 * i + 12:se + 64 * i + 64]
+                      == e.mem[sse + 64 * i + 12:sse + 64 * i + 64]
+                      for i in range(n))
+            name = bytes(e.mem[s + 16:s + 40]).split(b"\0")[0]
+            line += " %s %s from %s data %s tbl %s" % (
+                self.label(s), name.decode("latin-1"), self.label(src),
+                "same" if same else "differs", "same" if tbl else "differs")
+        elif s != tail:
+            line += " %s from none" % self.label(s)
+        self.emit(line + " mem %d" % s32(u(self.DUPMEM)))
+
+    def deldup(self):
+        """eDeleteAllDuplicatedSolids, and the copies' names forgotten."""
+        self.call("deldup")
+        keep = [i for i, r in enumerate(self.recs) if r[2] not in DUP_KINDS]
+        self.recs = [self.recs[i] for i in keep]
+        self.rec_starts = [self.rec_starts[i] for i in keep]
+        self.emit("  deldup mem %d" % s32(self.e.u32(self.DUPMEM)))
 
     # ---- the run ---------------------------------------------------------
 
@@ -1935,6 +2072,10 @@ class Model(object):
                 self.mark = e._heap
             elif code == OP_RELEASE:
                 self.release(self.mark)
+            elif code == OP_DUP:
+                self.dup(sc.tags[a[0]], sc.tags[a[1]])
+            elif code == OP_DELDUP:
+                self.deldup()
             else:
                 raise ValueError("op %d" % code)
         return self.out
@@ -2362,6 +2503,42 @@ MUTATIONS = [
      "    if (flags & 2)\n        bSlotFree(eModelSlotPool, m);"),
     ("delete-no-uninit", EMC, "    emodel_uninit(m);\n    // ~bTNode",
      "    // ~bTNode"),
+    # ---- esolid.c: eDuplicateSolid and eDeleteAllDuplicatedSolids
+    ("dup-at-head", ESC,
+     "    last = SolidList.prev;\n    last->next = &s->Node;\n"
+     "    SolidList.prev = &s->Node;\n    s->Node.prev = last;\n"
+     "    s->Node.next = &SolidList;",
+     "    last = SolidList.next;\n    last->prev = &s->Node;\n"
+     "    SolidList.next = &s->Node;\n    s->Node.next = last;\n"
+     "    s->Node.prev = &SolidList;"),
+    ("dup-data-short", ESC,
+     "    memcpy(data, src->StripEntryDataStart, src->SizeofStripEntryData);",
+     "    memcpy(data, src->StripEntryDataStart,"
+     " src->SizeofStripEntryData / 2);"),
+    ("dup-table-short", ESC,
+     "           (size_t)src->NumStrips * sizeof(eStripEntry));",
+     "           (size_t)(src->NumStrips - 1) * sizeof(eStripEntry));"),
+    ("dup-strips-unfixed", ESC, "    esolid_fix_strip_entry_table(s, data,",
+     "    if (0) esolid_fix_strip_entry_table(s, data,"),
+    ("dup-data-uncounted", ESC,
+     "    MemoryUsedByDuplicatedSolids += (int32_t)src->SizeofStripEntryData;",
+     ";"),
+    ("dup-table-uncounted", ESC,
+     "    MemoryUsedByDuplicatedSolids += src->NumStrips * 64;", ";"),
+    ("dup-unflagged", ESC, "    s->Flags |= SOLID_DUPLICATED;", ";"),
+    ("dup-old-hash", ESC, "    s->NameHash = bchunk_hash(name);", ";"),
+    ("dup-old-name", ESC, "    strcpy(s->Name, name);", ";"),
+    ("deldup-data-uncounted", ESC,
+     "    MemoryUsedByDuplicatedSolids -= (int32_t)s->SizeofStripEntryData;",
+     ";"),
+    ("deldup-table-uncounted", ESC,
+     "    MemoryUsedByDuplicatedSolids -= s->NumStrips * 64;", ";"),
+    ("deldup-wrong-flag", ESC, "if (!(s->Flags & SOLID_DUPLICATED))",
+     "if (!(s->Flags & SOLID_DUPLICATE_NAME))"),
+    ("deldup-first-only", ESC,
+     "            continue;\n        if (s->StripEntryDataStart != NULL)",
+     "            continue;\n        next = &SolidList;\n"
+     "        if (s->StripEntryDataStart != NULL)"),
 ]
 
 EQUIVALENT = {

@@ -76,17 +76,29 @@ int32_t race_get_countdown_number_to_display(const Race *r)
     return 0;
 }
 
+// Nor are player.c and configitems.c, whose players and
+// TunePreRaceSequence the pre-race coordinator reads.
+struct Player;
+int32_t        PlayerNumPlayers;
+struct Player *PlayerPlayersByNumber[2];
+struct Player *PlayerPlayersByIndex[2];
+int32_t        TunePreRaceSequence;
+
 enum {
     OP_TAG, OP_BUF, OP_LEAF, OP_BULK, OP_OPEN, OP_CLOSE, OP_BUFEND,
     OP_CLAIMS, OP_CLAIM, OP_SWAP, OP_TRAVERSE, OP_LOAD, OP_CALL, OP_FIXUP,
     OP_SET, OP_DUMP, OP_MNEW, OP_MINIT, OP_MUNINIT, OP_MDELETE, OP_MRECON,
     OP_MRTT, OP_MAPPLY, OP_MALL, OP_MPOKE, OP_MDUMP, OP_REPL, OP_RENT,
-    OP_FIND, OP_MATRIX, OP_RAMP, OP_RAMPDUMP, OP_SEED, OP_MARK, OP_RELEASE
+    OP_FIND, OP_MATRIX, OP_RAMP, OP_RAMPDUMP, OP_SEED, OP_MARK, OP_RELEASE,
+    OP_DUP, OP_DELDUP
 };
 
-enum { K_S, K_SE, K_SD, K_TT, K_TR, K_LF, K_RA, K_LM, K_HD, NKIND };
+enum {
+    K_S, K_SE, K_SD, K_TT, K_TR, K_LF, K_RA, K_LM, K_HD, K_DS, K_DSE, K_DSD,
+    NKIND
+};
 static const char *const KIND[NKIND] = {
-    "s", "se", "sd", "tt", "tr", "lf", "ra", "lm", "hd"
+    "s", "se", "sd", "tt", "tr", "lf", "ra", "lm", "hd", "ds", "dse", "dsd"
 };
 
 #define MAX_BUF     256
@@ -864,14 +876,15 @@ static void dump_solid(const eSolid *s)
                    L(t[i].LightMaterial));
         printf("\n");
     }
-    if (region_is(s->StripEntryTable, K_SE)) {
+    if (region_is(s->StripEntryTable, K_SE)
+        || region_is(s->StripEntryTable, K_DSE)) {
         const eStripEntry *e = s->StripEntryTable;
         const uint8_t *d = s->StripEntryDataStart;
 
         label(own, sizeof own, d);
         printf("   sd");
         for (i = 0; i < s->NumStrips; i++) {
-            if (region_is(d, K_SD) && e[i].Data >= d
+            if ((region_is(d, K_SD) || region_is(d, K_DSD)) && e[i].Data >= d
                 && e[i].Data < d + s->SizeofStripEntryData)
                 printf(" +%x", (unsigned)(e[i].Data - d));
             else
@@ -989,6 +1002,88 @@ static void dump(void)
            eVertexAnimatorSlotPool
                ? (int)eVertexAnimatorSlotPool->numAllocatedSlots : -1,
            eModelSlotPool ? (int)eModelSlotPool->numAllocatedSlots : -1);
+}
+
+// ----------------------------------------------------------- the copies
+
+static void add_rec(int kind, const void *p, size_t size, int desz, int hesz)
+{
+    Region r;
+
+    r.p = p;
+    r.size = size;
+    r.kind = kind;
+    r.idx = kind_count[kind]++;
+    r.desz = desz;
+    r.hesz = hesz;
+    add_region(&recs, r);
+}
+
+// eduplicate_solid, and its copy named, with its name: whether the strip
+// data and the strip table, but each strip's Data, are the first solid of
+// the name's, as the copy's own walk finds it. The disc's strip data comes
+// as sizes, all 0, so the first solid's is given a pattern first.
+static void dup(const char *from, const char *to)
+{
+    uint32_t h = bchunk_hash(from);
+    bNode   *n, *tail = SolidList.prev;
+    eSolid  *src = NULL, *s;
+
+    for (n = SolidList.next; n != &SolidList; n = n->next) {
+        if (((eSolid *)(void *)n)->NameHash == h) {
+            src = (eSolid *)(void *)n;
+            break;
+        }
+    }
+    if (src != NULL) {
+        uint8_t *d = src->StripEntryDataStart;
+        uint32_t k;
+
+        for (k = 0; k < src->SizeofStripEntryData; k++)
+            d[k] = (uint8_t)(k * 7 + 3);
+    }
+    eduplicate_solid(from, to);
+    s = (eSolid *)(void *)SolidList.prev;
+    printf("  dup %s %s", from, to);
+    if (&s->Node != tail && src != NULL) {
+        const eStripEntry *se = s->StripEntryTable,
+                          *sse = src->StripEntryTable;
+        int same, tbl = 1, i;
+
+        add_rec(K_DS, s, sizeof(eSolid), 192, (int)sizeof(eSolid));
+        add_rec(K_DSE, se, (size_t)s->NumStrips * sizeof(eStripEntry), 64,
+                (int)sizeof(eStripEntry));
+        add_rec(K_DSD, s->StripEntryDataStart, s->SizeofStripEntryData, 1,
+                1);
+        same = memcmp(s->StripEntryDataStart, src->StripEntryDataStart,
+                      s->SizeofStripEntryData) == 0;
+        for (i = 0; i < s->NumStrips; i++) {
+            eStripEntry a = se[i], b = sse[i];
+
+            a.Data = b.Data = NULL;
+            if (memcmp(&a, &b, sizeof a) != 0)
+                tbl = 0;
+        }
+        printf(" %s %.24s from %s data %s tbl %s", L(s), s->Name, L(src),
+               same ? "same" : "differs", tbl ? "same" : "differs");
+    } else if (&s->Node != tail) {
+        printf(" %s from none", L(s));
+    }
+    printf(" mem %d\n", (int)MemoryUsedByDuplicatedSolids);
+}
+
+// edelete_all_duplicated_solids, and the copies' names forgotten.
+static void deldup(void)
+{
+    int i, k = 0;
+
+    edelete_all_duplicated_solids();
+    for (i = 0; i < recs.n; i++)
+        if (recs.r[i].kind != K_DS && recs.r[i].kind != K_DSE
+            && recs.r[i].kind != K_DSD)
+            recs.r[k++] = recs.r[i];
+    recs.n = k;
+    printf("  deldup mem %d\n", (int)MemoryUsedByDuplicatedSolids);
 }
 
 // ---------------------------------------------------------------- main
@@ -1365,6 +1460,15 @@ int main(int argc, char **argv)
         }
         case OP_SEED:
             bDefaultSeed = (uint32_t)next();
+            break;
+        case OP_DUP: {
+            const char *from = tags[next()];
+
+            dup(from, tags[next()]);
+            break;
+        }
+        case OP_DELDUP:
+            deldup();
             break;
         case OP_MARK:
         case OP_RELEASE:
