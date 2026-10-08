@@ -92,7 +92,13 @@ of what is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
-## First: the texture memory work (Session 54)
+## First: step 12, the cops and cop mode (Session 55)
+
+The user, 2026-10-08: "When you're done doing whatever, move on to cops
+and cop mode." The texture memory work is done (2f0a300, HANDOFF's
+Session 55): a cache that evicts the least recently drawn, and about
+4 MB of textures in VRAM. The skins' padding (e) waits for a map that
+needs it. TRACKB12 still wants a look on the device.
 
 The AI pack's cost is closed. The user's asks, 2026-10-08, were "sluggish
 until I get away from all the AI racers" and "still hitching when all
@@ -112,14 +118,12 @@ the AI cars are in the view at once".
 - `docs/formats/draw-cuts.md`, 13b-6, lists the next cuts for then.
 
 The order now:
-  1. The rest of the texture memory work: b, the cache; c, the spare
-     VRAM; e, the skins' padding. TRACKB12 needs checking on the device.
-  2. Step 12, the cops.
-  3. AnimatedDriver.
-  4. The PostRace and Demo coordinators.
-  5. Pause's other screens.
-  6. Task 37.
-  7. TRACKB45's speed.
+  1. Step 12, the cops and cop mode.
+  2. AnimatedDriver.
+  3. The PostRace and Demo coordinators.
+  4. Pause's other screens.
+  5. Task 37.
+  6. TRACKB45's speed.
 
 The SD card's race config for testing is parked as
 `nfshp2_config.txt.track45` (SkipFE, track 45, 7 AI, traffic 0.5).

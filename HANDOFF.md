@@ -17341,3 +17341,80 @@ The order stands. First the rest of the texture memory work:
 - TRACKB12 checked on the device.
 
 Then step 12, the cops.
+
+## Session 55 (2026-10-08) -- the texture cache and the spare VRAM
+
+The user's ask: "so no matter the map or circumstances, all textures
+load and they all load perfectly", done globally. Steps a and d were
+3b62e00 (the formats, LINEAR_WANT 112 MB). This session did b and c
+(commit 2f0a300).
+
+### b, the texture cache (trackview.c)
+
+- Before, a texture that would not fit went in at a smaller mip level
+  or not at all, and was never tried again.
+- Now `load_texture` makes room at level 0 first (`make_room`): the
+  textures in the linear heap drawn longest ago are let go of
+  (`evict_lru`, `evict`). The prepare's guesses that nothing drew go
+  first. An evicted texture keeps its pixels in its pack. Its slots are
+  cleared, so `follow_table` uploads it again when it is next drawn
+  (`retry_texture`).
+- Room by the count is not room in one piece. When the chain will not
+  go in, more go one at a time until it does (`upload_room`). One level
+  without a chain is the last resort. Flipbook frames of a texture drawn
+  of late do the same.
+- A texture that finds no room is tried again 30 frames later
+  (`retryAt`), not never.
+- The clock: `cacheClock` moves once a race frame (begin_frame) and once
+  a frontend frame. `note_use`, `load_texture` and `follow_table` stamp
+  `lastUse`; `follow_table` stamps all of a solid's textures before it
+  loads any, so none it is about to draw goes. Nothing drawn this frame
+  or the last goes (CACHE_KEEP_FRAMES).
+- The log's race line gains "evicted". A texture missing for room is
+  still listed; an evicted one is not.
+
+### c, the spare VRAM
+
+- During `trackview_prepare` (between frames, `vramOk`), an upload goes
+  to VRAM while it leaves 512 KB (VRAM_RESERVE). The screens', envmap's
+  and mirror's targets are all made at boot, so VRAM's other textures
+  never compete with them.
+- `texpack_upload_chain_vram` builds the chain in a linear copy, then
+  copies it whole with `C3D_SyncTextureCopy`, as `C3D_TexLoadImage`
+  does. Outside a frame citro3d waits for the copy. Inside one it would
+  queue it, so mid-race uploads stay in the linear heap.
+- `evict_lru` skips textures in VRAM: they give the linear heap nothing.
+- The prepare's line gains "(N in VRAM, KB, KB of VRAM free)".
+
+### On Azahar
+
+| | Before | After |
+|---|---|---|
+| Track 12, 7 AI: textures | 733 | 745 |
+| left out by the prepare | 18 (10.9 MB) | 5 (6.1 MB) |
+| in VRAM | 0 | 39 (3.9 MB) |
+| Track 45, 7 AI: left out | 17 (12.3 MB) | 4 (6.8 MB) |
+| in VRAM | 0 | 58 (3.9 MB) |
+| the prepare | 4.2-4.4 s | 5.1 s |
+
+Both races: 0 missing, 0 reduced, 0 late uploads, 30 FPS with the
+pack out of view.
+
+**The squeeze test (not committed).** At frame 90 every texture that
+could go was let go of, then the linear heap was held down with 1 MB
+blocks. The first version lost VAUXHALL_SKIN8 and ELISE_SKIN2 with 13 MB
+free: no hole was big enough, and the one retry looked only at the
+count. With `upload_room`: 0 missing and 0 reduced. 213 more textures
+went for room over the run; CL55AMG_SKIN3 went in on its fourth try.
+
+### e, the skins' padding: left
+
+A 512x320 skin is padded to 512x512. Cutting that means splitting each
+car's batches at v = 256, or packing other textures into the padding
+with a UV offset. Neither is needed while every map's textures fit with
+the cache, so it waits for a map that needs it.
+
+### Next
+
+The user: "When you're done doing whatever, move on to cops and cop
+mode." Step 12, the cops.
