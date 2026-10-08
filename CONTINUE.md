@@ -1,7 +1,10 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 53
-(2026-10-08): see "First: the AI pack's cost" below. Session 52
+Where the next session picks up. Updated in Session 54
+(2026-10-08): the AI pack runs at 20 FPS with all eight cars in view
+(commits 569dfde and ba9ef1f), which the user accepted; see "First"
+below. Session 53 (2026-10-08) took out the mid-race hitches
+(3b62e00). Session 52
 (2026-10-08) made two graphics fixes: a second car of the player's
 type drew its wheels alone (eDuplicateSolid was a NULL seam; ported,
 d110c44), and skins went missing on TRACKB45 (the upload's scratch now
@@ -89,22 +92,26 @@ of what is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
-## First: the AI pack's cost (Session 53)
+## First: the texture memory work (Session 54)
 
-The user's ask, 2026-10-08: the race is "sluggish until I get away from
-all the AI racers", and "still hitching when all the AI cars are in the
-view at once".
+The AI pack's cost is closed. The user's asks, 2026-10-08, were "sluggish
+until I get away from all the AI racers" and "still hitching when all
+the AI cars are in the view at once".
 
-- The mid-race hitches are gone: `trackview_prepare` bakes and uploads
-  everything at the load (commit 3b62e00).
-- What is left is a steady 15 FPS while the pack is in view.
-  - The cars stage is 18 ms against 2.7 ms without the pack.
-  - Each lit batch writes 453 command words.
-  - The shadows' strips each send their state again.
-- HANDOFF's Session 53 has the profile and the plan: one shbin for
-  geosolid and geolit, the lit uniforms sent only when changed, and the
-  strips' state kept.
-- Then the order stands:
+- The hitches are gone: `trackview_prepare` bakes and uploads
+  everything at the load (3b62e00).
+- Track 45 with eight cars in view runs at 20 FPS (15 before), and 30
+  with the pack gone. Two commits did it:
+  - 569dfde: one shbin, and the lit batches' and strips' state sent
+    only when it changes;
+  - ba9ef1f: citro3d's draws written in one go, in c3dwrap.c. The log's
+    `c3d: indexed draws written here` and `c3d: array draws written
+    here` say its self-check passed.
+- The user: "20 to 30 isn't a big difference and I'm willing to let it
+  slide. May need more optimizations later for cops, helicopters etc."
+- `docs/formats/draw-cuts.md`, 13b-6, lists the next cuts for then.
+
+The order now:
   1. The rest of the texture memory work: b, the cache; c, the spare
      VRAM; e, the skins' padding. TRACKB12 needs checking on the device.
   2. Step 12, the cops.

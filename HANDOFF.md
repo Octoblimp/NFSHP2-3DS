@@ -17269,3 +17269,75 @@ The plan, in order:
    and model-view, so each costs only its draw. Or join a car's strips
    into one draw.
 4. Measure again with the `cars:` line and the lit words.
+
+## Session 54 (2026-10-08) -- the AI pack, from 15 FPS to 20
+
+### The lit batches and the strips (commit 569dfde)
+
+Session 53's plan, steps 1 to 3. The details are in
+`docs/formats/draw-cuts.md`, 13b-5.
+
+- geolit is linked into geosolid's shbin.
+- c3dwrap.c's uniform cache sends only what changed.
+- The lit batches and the strips keep the run's state.
+
+Each lit batch now writes about 248 words, against 453 before. The
+frame stayed at 15 FPS.
+
+### "STILL REALLY BAD LAG": the battery
+
+The user's laptop was on battery. Azahar ran at Speed 38 to 69%, with a
+host frame of 25 to 44 ms. Plugged in, the same build read 100% with a
+6 to 8 ms host frame. The user: "RUNS JUST FINE! With all the AI cars
+in the scene at once it definitely runs a lot better, but its still
+not 30 FPS". The `azahar-speed-limit` memory has the battery note.
+
+### Where the time went
+
+A pair of timers round render_model's draw (taken out before the
+commit) showed georender's calls were most of the cost:
+
+- The view's draw: 16.9 ms for about 1,470 batches.
+- The cars' models: 5.6 ms.
+- The envmap and the mirror: 3.1 ms and 2.7 ms.
+
+That is about 11 us, or 3,000 instructions, a batch. Disassembly put
+about 700 of a draw's instructions in citro3d writing its 15 registers
+one GPUCMD_Add at a time.
+
+### Citro3d's draws in one go (commit ba9ef1f)
+
+c3dwrap.c wraps `C3D_DrawElements`, `C3D_DrawArrays` and `GPUCMD_Add`
+(the Makefile's C3DWRAP). A draw is written from a template after
+citro3d's own `C3Di_UpdateContext`. The first draw of each kind is
+citro3d's, compared word for word with the template, and the
+context's head is checked, before any draw is written here. Both
+checks pass on Azahar: `c3d: indexed draws written here` and `c3d:
+array draws written here`.
+
+Track 45's start with eight cars in view:
+
+- 15 FPS (66.6 ms) became 19.7 to 20.1 FPS (about 50 ms).
+- The CPU's frame went from about 50 ms to about 40.
+- With the pack gone: 29.6 to 29.9 FPS.
+
+The table is in draw-cuts.md, 13b-6.
+
+The user: "It now runs at 20 FPS with all AI cars in view! That's
+pretty respectable. 20 to 30 isn't a big difference and I'm willing to
+let it slide. May need more optimizations later for cops, helicopters
+etc. though." So the AI pack's cost is closed at 20 FPS. draw-cuts.md
+lists the next cuts for when the cops need them: the shadows' strips
+joined into one draw, the lists, the matrix upload, the world and the
+cull.
+
+### Next
+
+The order stands. First the rest of the texture memory work:
+
+- b, the cache;
+- c, the spare VRAM;
+- e, the skins' padding;
+- TRACKB12 checked on the device.
+
+Then step 12, the cops.

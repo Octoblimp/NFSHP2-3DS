@@ -391,3 +391,90 @@ runs at 804 MHz with its L2 cache, so the same work should take well
 under these times there. Only a New 3DS's `frame:` lines can say how
 much. On Azahar, what is left to cut is the models (9.2), the envmap
 (6.2), the cull (2.7) and the cars (2.6), and the long frames' spikes.
+
+## 13b-5: the lit batches and the strips (commit 569dfde)
+
+Session 53's profile of track 45's start, eight cars in view: a frame
+of 66.7 ms, the cars stage 18.2 ms with its lists 7.4, and each lit
+batch 453 command words against a scenery batch's 43.
+
+- geolit is linked into geosolid's shbin (the Makefile hands picasso
+  both files): one DVLP with two DVLEs, so a switch between the two
+  programs sends no shader code, and the uniforms they share sit in the
+  same registers.
+- `c3d_unif_set`, `_vec`, `_mtx` and `_bool` (c3dwrap.c) leave a
+  uniform alone when citro3d's copy holds its value for a register the
+  GPU has. `__wrap_C3D_BindProgram` skips the program already bound.
+- `bind_lit` keeps the run: the program, the attributes, the cull, the
+  pass and the combiner stand between lit batches. `bind_strips` does
+  the same for the strips.
+
+The lit batches went from 453 words each to about 248, the view's words
+from 127,676 to about 104,700, and the lists from 7.4 ms to 4.3. The
+frame stayed at 15 FPS: about 50 ms of CPU, still over two blanks.
+
+## 13b-6: citro3d's draws in one go (commit ba9ef1f)
+
+A pair of timers round render_model's draw (taken out again) put the
+view's draw at 16.9 ms for about 660 models and 1,470 batches: about
+11 us a batch, or about 3,000 instructions at Azahar's instruction a
+tick. Disassembled, `C3D_DrawElements` writes 15 single registers, each
+through libctru's `GPUCMD_Add` at about 40 instructions: about 700 a
+draw before any state. `C3D_DrawArrays` writes 11. The words are the
+same every time but for the indices' offset and the count.
+
+- `__wrap_C3D_DrawElements` (triangles) and `__wrap_C3D_DrawArrays`
+  bring the state up to date with `C3Di_UpdateContext`, as citro3d's
+  do. They then copy the draw's 30 or 22 words from a template, patch
+  in the offset, count and first vertex, and set `C3DiF_DrawUsed` in
+  the context's flags. `C3DiContextHead` is citro3d 1.7.1's
+  `C3D_Context` (devkitPro's, 2023-10-28) up to its buffers.
+- **The self-check.** The first draw of each kind is citro3d's own,
+  after a `C3Di_UpdateContext` so that it writes nothing else. Its
+  words must match the template's, and the context's head must hold:
+  the flags show Active and DrawUsed, the command buffer lies inside
+  the context's, and the buffers' base is BufInfo_Init's 0x18000000.
+  Otherwise that kind stays citro3d's. The log says which:
+  `c3d: indexed draws written here` and `c3d: array draws written
+  here`, or `citro3d's (its words differ)`.
+- `__wrap_GPUCMD_Add` writes a single register's two words itself;
+  anything longer is libctru's.
+- `__wrap_C3D_UpdateUniforms` returns at once for the geometry shader
+  while the program bound has none.
+
+On Azahar at Speed 100%, track 45's start with eight cars in view, the
+range of each second's line over a run:
+
+| | 13b-5 | 13b-6 |
+|---|---|---|
+| models | 17 | 10.3 to 11.7 |
+| envmap | 3.3 | 1.7 to 2.1 |
+| mirror | 3.1 | 1.9 to 2.4 |
+| cars | 15 | 11.5 to 14.3 |
+| the draw | | 33.0 to 36.0 |
+| the CPU's frame | about 50 ms | about 40 ms |
+| the frame | 66.6 ms | 49.8 to 50.9 ms |
+| FPS | 15 | 19.7 to 20.1 |
+
+With the pack gone it runs at 29.6 to 29.9 FPS. The user, 2026-10-08:
+"It now runs at 20 FPS with all AI cars in view! That's pretty
+respectable." They let the last 10 FPS go for now; the cops and the
+helicopter may need more.
+
+### What is left, for when the cops need it
+
+From the same profile, with eight cars in view:
+
+- **The cars' shadows, 4.1 ms.** Each car's hull fan is a draw a quad
+  (about 15), with three edge strips and the grid's strips after it,
+  each through `georender_draw_strip`. The CPU side also asks the
+  topology for 20 to 30 elevations a car. Joining a car's shadow strips
+  into one draw in trackview's strip layer cuts the draws.
+- **The lists, 3.3 ms.** `draw_deferred` sorts, then draws each held
+  batch alone with its own model-view.
+- **A model's matrix.** When a model-view changes, citro3d's
+  `C3D_UpdateUniforms` walks the 96 dirty bytes one at a time: about
+  1,000 times a frame. An upload of the port's own would scan a word at
+  a time. It would keep its own mask of the registers ever sent, for
+  `C3Di_DirtyUniforms` after the HOME menu.
+- **The world, 5 ms, and the cull, 3.6.**
