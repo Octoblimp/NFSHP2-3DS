@@ -36,6 +36,7 @@ int32_t DefaultPlayer1SkinIndex = 1;        // gp-23128
 int32_t DefaultPlayer2SkinIndex = 1;        // gp-23124
 int32_t ForceAllAICarsToBeThisType = -1;    // gp-23116
 int32_t MaximumNumAICars = 7;               // gp-23112
+int32_t TunePreRaceSequence;                // gp-23108
 
 int32_t config_skip_fe(void)
 {
@@ -78,6 +79,7 @@ static const ConfigItem kConfigItems[] = {
     { "DefaultPlayer2SkinIndex",    &DefaultPlayer2SkinIndex,    0 },
     { "ForceAllAICarsToBeThisType", &ForceAllAICarsToBeThisType, 0 },
     { "MaximumNumAICars",           &MaximumNumAICars,           0 },
+    { "TunePreRaceSequence",        &TunePreRaceSequence,        0 },
 };
 
 static void config_log(ConfigItemsLogFn log, const char *fmt,

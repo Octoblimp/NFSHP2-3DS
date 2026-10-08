@@ -8,7 +8,10 @@
 #include "bmath.h"
 #include "bmem.h"
 #include "bprintf.h"
+#include "car.h"
+#include "configitems.h"
 #include "player.h"
+#include "race.h"
 #include "racefinish.h"
 #include "vtable.h"
 
@@ -20,6 +23,8 @@ CameraMover *(*gBumperCameraMoverFn)(void *mem, int32_t viewID,
 CameraMover *(*gTrackFlyCameraMoverFn)(void *mem, int32_t viewID,
                                        CameraDataItems *cd, struct Car *car);
 int32_t (*gTrackFlyCameraMoverIsFinishedFn)(CameraMover *m);
+int32_t (*gBumperCameraMoverIsFinishedFn)(CameraMover *m);
+void (*gAnimatedDriverBeginAPreRaceAnimationFn)(AnimatedDriver *d);
 
 typedef void (*CoordinatorDtorFn)(void *c, int32_t flags);
 typedef void (*CoordinatorUpdateFn)(void *c, float dt);
@@ -629,6 +634,139 @@ void flyby_camera_coordinator_update(FlyByCameraCoordinator *c, float dt)
     c->FlyByCameraIndex = idx + 1;
 }
 
+// ---------------------------------------------------------- the pre-race
+
+// Race::GetRacingCar(int): NULL past the race's count. Not bounded below.
+static struct RacingCar *racing_car(Race *r, int32_t i)
+{
+    return i < r->NumRacingCars ? r->pRacingCars[i] : NULL;
+}
+
+PreRaceCameraCoordinator *prerace_camera_coordinator_init(
+    PreRaceCameraCoordinator *c, int32_t viewID)
+{
+    // 0x0019ad78.
+    struct Car **cars = c->PreRaceCarsToCycle;
+    int32_t n, i;
+
+    camera_coordinator_init(&c->Base, viewID);
+    c->PreRaceCurrCarCycleIndex = 0;
+    c->PreRaceCameraIndex = -1;
+    c->CurrentlyActiveCameraData = -1;
+    c->CurrVortexCount = TheCameraLoader.VortexCount;
+    c->PreRaceCurrNumCamerasCycled = 0;
+    c->FinishedFlag = 0;
+    c->Base._vtable = PRERACECAMERACOORDINATOR_VTABLE;
+    if (RaceParametersBeACop) {
+        if (PlayerNumPlayers == 2) {
+            cars[0] = PlayerPlayersByNumber[0]->MyCar;
+            cars[1] = PlayerPlayersByNumber[1]->MyCar;
+            n = 2;
+        } else {
+            // i % count from 1 on; the first is racing car 0, undivided.
+            cars[0] = racing_car(pCurrentRace, 0)->pCar;
+            for (i = 1; i < 4; i++)
+                cars[i] = racing_car(pCurrentRace,
+                                     i % pCurrentRace->NumRacingCars)->pCar;
+            n = 4;
+        }
+    } else if (PlayerNumPlayers == 2) {
+        cars[0] = racing_car(pCurrentRace, 0)->pCar;
+        cars[1] = PlayerPlayersByNumber[0]->MyCar;
+        cars[2] = PlayerPlayersByNumber[1]->MyCar;
+        cars[3] = PlayerPlayersByNumber[0]->MyCar;
+        n = 4;
+    } else {
+        cars[0] = racing_car(pCurrentRace, 0)->pCar;
+        cars[1] = PlayerPlayersByIndex[0]->MyCar;
+        cars[2] = PlayerPlayersByIndex[0]->MyCar;
+        cars[3] = PlayerPlayersByIndex[0]->MyCar;
+        n = 4;
+    }
+    c->PreRaceNumCarsToCycle = n;
+    c->PreRaceNumCamerasToCycle = n;
+    return c;
+}
+
+void *prerace_camera_coordinator_construct(void *mem, int32_t viewID)
+{
+    return prerace_camera_coordinator_init((PreRaceCameraCoordinator *)mem,
+                                           viewID);
+}
+
+void prerace_camera_coordinator_destroy(PreRaceCameraCoordinator *c,
+                                        int32_t flags)
+{
+    // 0x0019af90.
+    c->Base._vtable = PRERACECAMERACOORDINATOR_VTABLE;
+    camera_coordinator_destroy(&c->Base, flags);
+}
+
+int32_t prerace_camera_coordinator_is_finished(void *c)
+{
+    // 0x0019c098.
+    return ((PreRaceCameraCoordinator *)c)->FinishedFlag;
+}
+
+void prerace_camera_coordinator_update(PreRaceCameraCoordinator *c,
+                                       float dt)
+{
+    // 0x0019afa8.
+    struct Car *car = c->PreRaceCarsToCycle[c->PreRaceCurrCarCycleIndex];
+    int32_t viewID = c->Base.ViewID;
+    CameraMover *m;
+    CameraDataItems cd;
+    int32_t idx;
+    int need;
+
+    (void)dt;
+    if (c->CurrentlyActiveCameraData == -1
+        || c->Base.NeedToReloadCameraData != 0) {
+        need = 1;
+        c->Base.NeedToReloadCameraData = 0;
+    } else {
+        m = c->Base.pCameraMover;
+        if (m == NULL)
+            need = 1;
+        else
+            need = gBumperCameraMoverIsFinishedFn == NULL
+                   || gBumperCameraMoverIsFinishedFn(m) != 0;
+    }
+    if (!need)
+        return;
+
+    if (c->Base.pCameraMover != NULL) {
+        delete_mover(c->Base.pCameraMover);
+        c->Base.pCameraMover = NULL;
+    }
+    if (c->PreRaceCurrNumCamerasCycled == c->PreRaceNumCarsToCycle
+        && TunePreRaceSequence == 0) {
+        c->FinishedFlag = 1;
+        return;
+    }
+    idx = c->PreRaceCurrCarCycleIndex + 1;
+    c->PreRaceCurrCarCycleIndex = idx;
+    if (idx == c->PreRaceNumCarsToCycle)
+        c->PreRaceCurrCarCycleIndex = 0;
+    idx = c->PreRaceCameraIndex + 1;
+    c->PreRaceCameraIndex = idx;
+    if (!(idx < TheCameraLoader.NumPreRaceCameras))
+        c->PreRaceCameraIndex = 0;
+    if (car->pAnimatedDriver != NULL
+        && gAnimatedDriverBeginAPreRaceAnimationFn != NULL)
+        gAnimatedDriverBeginAPreRaceAnimationFn(car->pAnimatedDriver);
+    c->CurrVortexCount++;
+    camera_data_items_parse(
+        &cd, TheCameraLoader.PreRaceCameraData[c->PreRaceCameraIndex]);
+    if (gBumperCameraMoverFn != NULL) {
+        void *mem = bMalloc(1116, "BumperCameraMover", 0, 16);
+
+        c->Base.pCameraMover = gBumperCameraMoverFn(mem, viewID, car, &cd);
+    }
+    c->PreRaceCurrNumCamerasCycled++;
+    c->CurrentlyActiveCameraData = c->PreRaceCameraIndex;
+}
+
 // ------------------------------------------------------------- the tables
 
 #define E(f) { 0, 0, (VtFn)(f) }
@@ -654,6 +792,13 @@ static const VtEntry flyby_vt[CAMERACOORDINATOR_VT_ENTRIES] = {
     E(flyby_camera_coordinator_update),               //  16  0x0019ac50
 };
 
+// _vt$24PreRaceCameraCoordinator, 0x002b52b0.
+static const VtEntry prerace_vt[CAMERACOORDINATOR_VT_ENTRIES] = {
+    { 0, 0, NULL },
+    E(prerace_camera_coordinator_destroy),            //   8  0x0019af90
+    E(prerace_camera_coordinator_update),             //  16  0x0019afa8
+};
+
 #undef E
 
 void cameracoord_install_vtables(void)
@@ -663,5 +808,7 @@ void cameracoord_install_vtables(void)
     vt_install(COUNTDOWNCAMERACOORDINATOR_VTABLE, countdown_vt,
                CAMERACOORDINATOR_VT_ENTRIES);
     vt_install(FLYBYCAMERACOORDINATOR_VTABLE, flyby_vt,
+               CAMERACOORDINATOR_VT_ENTRIES);
+    vt_install(PRERACECAMERACOORDINATOR_VTABLE, prerace_vt,
                CAMERACOORDINATOR_VT_ENTRIES);
 }

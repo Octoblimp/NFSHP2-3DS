@@ -26,6 +26,10 @@
 // MaximumNumAICars, the AI count StartRace allows (the demo's names, at the
 // demo's places after DefaultPlayer2SkinIndex less the one gp-23120 holds,
 // AllCarsAvailableInCarSelectScreen).
+//
+// The next word, TunePreRaceSequence, keeps PreRaceCameraCoordinator
+// cycling its cameras when it is set, for tuning them; at 0 the pre-race
+// ends once each car has had its camera.
 
 #ifndef CONFIGITEMS_H
 #define CONFIGITEMS_H
@@ -59,6 +63,7 @@ extern int32_t DefaultPlayer1SkinIndex;     // gp-23128, 1
 extern int32_t DefaultPlayer2SkinIndex;     // gp-23124, 1
 extern int32_t ForceAllAICarsToBeThisType;  // gp-23116, -1
 extern int32_t MaximumNumAICars;            // gp-23112, 7
+extern int32_t TunePreRaceSequence;         // gp-23108, 0
 
 // SkipFE as the image reads it, `lw -23220(gp)`: gameflow's skipFE
 // through gPlayerCamSkipFE, 0 while that is unset.

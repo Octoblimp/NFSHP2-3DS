@@ -3657,6 +3657,12 @@ int main(int argc, char** argv)
     gTrackFlyCameraMoverIsFinishedFn = track_fly_mover_is_finished;
     gFlyByCameraCoordinatorCtorFn = flyby_camera_coordinator_construct;
     gFlyByCameraIsFinishedFn = flyby_camera_coordinator_is_finished;
+    // The pre-race coordinator (11g-2c-2c): PRERACE builds it on view 1
+    // once the grid is gone and waits on it. Until BumperCameraMover is in,
+    // it flies its four cameras with no mover, a frame each, and finishes.
+    // No car has an AnimatedDriver yet, so the animation seam stays NULL.
+    gPreRaceCameraCoordinatorCtorFn = prerace_camera_coordinator_construct;
+    gPreRaceCameraIsFinishedFn = prerace_camera_coordinator_is_finished;
     // The screens over the fly-by (11g-2c-2b, startrace.c): CAMERA_FLYBY's
     // ACTIVATE and UNACTIVATE put them up and take them down through the
     // flow's ChangeToScreen, which the pause's "Pause Menu" also goes

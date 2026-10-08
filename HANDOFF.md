@@ -16761,3 +16761,146 @@ single key presses after RACING with a shot after each.
 5. The PostRace and Demo coordinators.
 6. The pause's other screens (Pause Options and its pages, Race
    Objective, the BAC controls) go with the frontend's screens.
+
+## Session 49 (2026-10-07) -- 11g-2c-2c-1, the pre-race coordinator
+
+The pre-race is the close-up of the cars after the Starting Grid (the
+user's photo 2). Retail builds it from two pieces:
+
+- PreRaceCameraCoordinator, which picks the cars and the cameras;
+- BumperCameraMover, which flies each camera.
+
+This session ported the first. The second is next.
+
+### What is ported
+
+`cameracoord.c` adds PreRaceCameraCoordinator (0x0019ad78 to 0x0019c0d0,
+188 bytes, table 0x002b52b0). See "The pre-race" in
+`docs/formats/camera-coordinator.md`.
+
+- **The cars.** Racing car 0 first, then the player three times. Be A
+  Cop takes racing cars 1 to 3 (mod the count). Two players take player
+  1, player 2, player 1, and Be A Cop with two players takes only the two
+  players.
+- **Update.** It moves on when no camera is active, on a reload, with no
+  mover or when the mover is finished. It deletes the mover, finishes
+  after n cameras unless `TunePreRaceSequence` is set, steps the car and
+  camera indices, starts the driver's pre-race animation, parses the
+  camera and builds a BumperCameraMover on the car read before the step.
+- `configitems.c` gains `TunePreRaceSequence` (gp-23108), with its row in
+  the config file's table.
+- main.c sets `gPreRaceCameraCoordinatorCtorFn` and
+  `gPreRaceCameraIsFinishedFn`. The mover's two seams and the
+  AnimatedDriver's stay NULL, so for now the coordinator ends after four
+  frames with nothing drawn. The user saw no camera on Azahar and asked
+  why; BumperCameraMover is what draws it.
+
+### The check
+
+`tools/cameracoord_check.py` and `tools/src/cameracoord_test.c` gain a
+world of 6 cars, 8 racing cars, 4 drivers, the race and the players.
+
+- **Ops:** 6400, giving 13655 lines, 0 differ.
+- **Mutations:** 293.
+  - 289 are caught.
+  - 4 are equivalent. The new one is the pre-race destructor's table
+    store, which the base's overwrites first.
+
+The constructor runs every mix of Be A Cop, 0 to 3 players and 1 to 5
+racing cars that picks differently. Update runs 400 random steps, then to
+the end, then its edges.
+
+### On Azahar
+
+The quick race went from the grid's A through PRERACE (rc 3, stage 3) to
+the countdown and lap 1 of 2, at 30 FPS.
+
+### Task 37
+
+The user asked for Local Wireless (multi-card) play. It is TASKS.md's
+task 37: each console loads from its own card and sends only small
+packets each frame (positions, rotation, speed, physics vectors, inputs
+and events). It comes after the single-player race is whole.
+
+### BumperCameraMover's decode, for the next session
+
+- **Size and table.** 1116 bytes, table 0x002b1bd0, type 5, constructor
+  0x00158800. The table holds:
+  - dtor 0x00158910;
+  - Update 0x00158a68;
+  - GetCarToFollow 0x0015fb10 (+112);
+  - GetTarget 0x001589a8 (+120): the car's +80, or the camera's target
+    with no car.
+- **Layout:**
+
+  | Offset | Field |
+  |---:|---|
+  | 0 | base |
+  | 44 | CameraDataItems, 164 bytes |
+  | 208 | EyeSpline |
+  | 256 | BankSpline |
+  | 304 | EyeParam |
+  | 308 | LookSpline |
+  | 356 | LookParam |
+  | 360 | FOVSpline |
+  | 408 | CarToFollow |
+  | 412 | TopologyCoordinate |
+
+- **Constructor.**
+  1. `camera_mover_init(viewID, 5)`, the table, the record copied.
+  2. Four type-0 splines with a table of 16384: eye (NumEye, EyeVerts),
+     bank (NumEye, BankVerts), look (NumLook, LookVerts), FOV (32,
+     FOVTable).
+  3. Both params 0, CarToFollow, and the TopologyCoordinate built.
+  4. If the camera is updating: CarNotToRender NULL, RenderDash 0, FOV
+     13020.
+  5. Near and far clips from the record, always.
+- **Destructor.** The table back. If the camera is updating, the focal
+  distance and the depth of field to 0. Then the TC's dtor(2), the FOV,
+  look, bank and eye splines' dtor(2), and the base's.
+- **IsFinished** (0x001589c8). The eye is done if EyeSpeed is 0 or
+  NumEye-1 <= EyeParam, and the look the same way; it returns eyeDone ?
+  lookDone : 0.
+- **Update.**
+  1. Return if paused.
+  2. pct is the car's track percent; area = max(0, (pct-MinArea) /
+     (MaxArea-MinArea)).
+  3. The eye, then the look: the param is locked to (N-1)*area, or
+     param + speed*WTE*25 clamped to N-1.
+  4. M is the identity with row 3 = -(car+80); T is the transposed
+     BodyMatrix; W = eMulMatrix(M, T).
+  5. eye = EyeSpline(EyeParam), plus road noise times 0.877 at (pos.x,
+     pos.y), then y-1, then y+2; the w lane is 0.
+  6. elev = GetElevation + 0.7, and eye.z is held up to it.
+  7. look = LookSpline(LookParam); bank = BankSpline(EyeParam).
+  8. up = ComputeBankedUpVector with (u16)trunc(bank.x).
+  9. L = LookAt(eye, look, up); R = W x L.
+  10. span = clamp01((pct-MinP)/(MaxP-MinP)); fov = FOVSpline(span*31).
+  11. With IsFOVIso: dist = max(|eye - car+96|, 1) and bam = (u16)(bATan(
+      dist, fov.x*0.25) << 1). Otherwise bam = (u16)trunc(fov.x *
+      182.044449). If updating, FOV = bam.
+  12. dist = |eye - look|. If updating: TargetDistance = dist, focal =
+      max(2, dist), DOF = 7.5.
+  13. With RaceStage 4, the wall routine 0x00157c60(m, &R, car).
+  14. SetCameraMatrix(cam, &R, RealTimeElapsed).
+- **The wall routine** (0x00157c60).
+  1. inv = invert(mat); eye = inv's row 3; geo = car+80.
+  2. mid = 0.5 eye + 0.5 geo; r = 0.5 |geo-eye| + 0.5.
+  3. A local TC, SetInterestBBox(&mid, r).
+  4. o = mat x geo; off = (o.x/o.z, o.y/o.z).
+  5. camera_wall_offset (drivecam.c has it); eye += its out.
+  6. d = eye - geo; dist = |d|.
+  7. GetCarSpaceBoundingBox; f = max(max.x, |min.x|) + 0.7. If dist < f,
+     eye.z = geo.z + ee_sqrt(f^2 - (d.x^2 + d.y^2)).
+  8. camera_look_at_offset(mat, &eye, geo, &off).
+  9. The TC's dtor(2).
+
+### Next
+
+1. 11g-2c-2c-2, BumperCameraMover, then the AnimatedDriver.
+2. The rear-view mirror.
+3. 11h-3, TrafficTeleporter.
+4. Step 12, the cops.
+5. The PostRace and Demo coordinators.
+6. The pause's other screens.
+7. Later: task 37, Local Wireless play.

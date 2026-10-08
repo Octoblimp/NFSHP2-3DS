@@ -1,7 +1,7 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 48
-(2026-10-07), after 11g-2d, the pause menu.
+Where the next session picks up. Updated in Session 49
+(2026-10-07), after 11g-2c-2c-1, the pre-race coordinator.
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
@@ -29,8 +29,9 @@ camera (TrackFlyCameraMover and FlyByCameraCoordinator), and 11g-2c-2b,
 the Starting Grid over it, are done: a quick race from the frontend
 shows the grid over the fly-by, and A goes on to the countdown.
 11g-2d, the pause menu (the user's ask, 2026-10-07), is done: START
-pauses, and Resume, Restart and Quit work. Next is 11g-2c-2c, the
-pre-race camera. The car selector is finished and checked against retail: SC-1
+pauses, and Resume, Restart and Quit work. 11g-2c-2c-1, the pre-race
+coordinator, is done. Next is 11g-2c-2c-2, BumperCameraMover, the
+camera that draws the pre-race close-up. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
 effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
 13b-4f, the device GPU's cost per model, waits on the user's timing
@@ -773,14 +774,36 @@ car's were.
     pages (0x00171180 to 0x00173e30), Race Objective and the BAC
     controls (0x00171a28 to 0x00172068). Until then those items do
     nothing.
+- **11g-2c-2c-1, done: the pre-race coordinator.**
+  - `cameracoord.c` adds PreRaceCameraCoordinator (0x0019ad78 on, 188
+    bytes). Its constructor picks the cars: racing car 0, then the
+    player three times (Be A Cop and two players pick otherwise). Its
+    Update flies INGAMEB's four pre-race cameras in turn, each on the
+    next car, building a BumperCameraMover through
+    `gBumperCameraMoverFn`. It finishes after four, unless the config
+    item `TunePreRaceSequence` (gp-23108, now in configitems.c) is set.
+  - main.c sets the race coordinator's
+    `gPreRaceCameraCoordinatorCtorFn` and `gPreRaceCameraIsFinishedFn`.
+    `gBumperCameraMoverFn`, `gBumperCameraMoverIsFinishedFn` and
+    `gAnimatedDriverBeginAPreRaceAnimationFn` stay NULL: with no mover
+    the coordinator moves on every frame and ends after four frames, so
+    nothing shows yet (the user, 2026-10-07: "I didn't see the camera").
+  - **The check:** `cameracoord_check`: 6400 ops, 13655 lines, 0
+    differ; 293 mutations, 289 caught, 4 equivalent.
+    `docs/formats/camera-coordinator.md`, "The pre-race".
+  - **On Azahar:** the quick race goes from the grid's A through
+    PRERACE (rc 3, stage 3) to the countdown and lap 1, at 30 FPS.
+- **Task 37, Local Wireless (multi-card) play,** is in TASKS.md (the
+  user's ask, 2026-10-07). It comes after the single-player race is
+  whole.
 - **Next, in this order:**
-  1. **11g-2c-2c, the pre-race camera** (the user's photo 2, a close-up
-     of the player's car after X). trackflow.c's Part3 already loads
-     PRERACEANIM.LZC on the frontend's path. What is left:
-     - BumperCameraMover (0x00158800, 1116 bytes);
-     - the PreRace coordinator (0x0019ad78);
-     - the AnimatedDriver that PRERACEANIM feeds.
-     Until then PRERACE ends at once.
+  1. **11g-2c-2c-2, BumperCameraMover** (0x00158800, 1116 bytes, table
+     0x002b1bd0; the user's photo 2, a close-up of the player's car
+     after X). Its decode is in HANDOFF's Session 49. A new
+     `bumpercam.c` with `tools/bumpercam_check.py`, modelled on
+     trackflycam's, then main.c's two seams. The AnimatedDriver that
+     PRERACEANIM.LZC feeds (trackflow.c's Part3 loads it) comes after;
+     until then the driver does not move.
   2. **The rear-view mirror** (the user's photo 5):
      SetRearViewMirrorCameraMover, plus the mirror's view and its HUD
      frame, top centre on the top screen.
@@ -4363,15 +4386,15 @@ That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
-### Where the port stands (2026-10-07, after 11g-2d)
+### Where the port stands (2026-10-07, after 11g-2c-2c-1)
 
 - **Done:** steps 1-9 and 13. One car drives the retail track at the
   retail start, lit, with the chase camera. The HUD shows the race on
   both screens with its animations, and the minimap on the bottom one.
-  Tasks 1-25 and 32-35 are closed: 29 of 36. The open ones are 26-31
-  and 36.
-- **Next:** step 11's 11g-2c-2c, the pre-race camera, the rear-view mirror and 11h-3, the
-  TrafficTeleporter.
+  Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
+  36 and 37.
+- **Next:** step 11's 11g-2c-2c-2, BumperCameraMover (the pre-race
+  camera), the rear-view mirror and 11h-3, the TrafficTeleporter.
   See "Now" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
@@ -4402,7 +4425,8 @@ goes in.
   - 11g-2c-1, the camera data and the countdown coordinator;
   - 11g-2c-2a, the fly-by camera;
   - 11g-2c-2b, the Starting Grid;
-  - 11g-2d, the pause menu.
+  - 11g-2d, the pause menu;
+  - 11g-2c-2c-1, the pre-race coordinator.
   13b-4f, the device GPU's cost per model, waits on the device's timing
   run. The car selector (SC-1 to SC-3) is done, the nebula and the
   effect system with it. 13b-1 (the real clock and the pacing), 13b-2

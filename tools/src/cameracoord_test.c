@@ -1,7 +1,9 @@
 // Harness for tools/cameracoord_check.py: runs the checker's op script on
 // the port and prints what the model prints for the image. The ops, their
 // arguments and every line's format are the checker's; this file only
-// carries them out, and stands in for what the checker stubs.
+// carries them out, and stands in for what the checker stubs: the
+// players, the race, its racing cars and the cars are the harness's
+// own, set by OP_WORLD.
 //
 //     cameracoord_test ops.bin > out.txt
 
@@ -14,6 +16,8 @@
 #include "bmath.h"
 #include "bmem.h"
 #include "cameracoord.h"
+#include "car.h"
+#include "configitems.h"
 #include "player.h"
 #include "race.h"
 #include "racefinish.h"
@@ -25,7 +29,7 @@ enum {
     OP_PARSE, OP_CCNEW, OP_CDNEW, OP_CCDEL, OP_CCDELETE, OP_RAWDTOR,
     OP_DISABLE, OP_ENABLE, OP_MARK, OP_UPDATE, OP_CDUPDATE, OP_SETMOVER,
     OP_SETF, OP_CD, OP_JUNKK, OP_DUMPK, OP_FBNEW, OP_FBUPDATE, OP_FBFIN,
-    OP_TFFIN, OP_MTYPE
+    OP_TFFIN, OP_MTYPE, OP_PRNEW, OP_PRUPDATE, OP_PRFIN, OP_WORLD
 };
 
 // The loader's fields OP_POKEL sets, and the lists OP_POKEP writes into.
@@ -35,12 +39,25 @@ enum { LIST_HL, LIST_FB, LIST_PRE, LIST_POST, LIST_NIS, LIST_PN0, LIST_PN1 };
 
 // A coordinator's fields OP_SETF sets.
 enum { F_DISABLED, F_VIEW, F_NEED, F_NUMBER, F_VPTR, F_PLAYER, F_ACTIVE,
-       F_INDEX, F_VCOUNT };
+       F_INDEX, F_VCOUNT, F_PRCYCLED, F_PRCAM, F_PRCARIDX, F_PRNCARS,
+       F_PRFIN, F_PRVCOUNT, F_PRSLOT };
+
+// What OP_WORLD sets: the players, the race and its racing cars, the
+// cars' drivers, TunePreRaceSequence and BumperCameraMover::IsFinished's
+// answer.
+enum { W_NPLAYERS, W_BYNUMBER, W_BYINDEX, W_COP, W_TUNE, W_NRACING,
+       W_RACING, W_RCCAR, W_MYCAR, W_DRIVER, W_BMFIN };
+
+// Which kind each coordinator's dump prints it as.
+enum { KIND_CD, KIND_FB, KIND_PR };
 
 #define ARENA_SIZE (4u << 20)
 #define NEAR       0x100000
 #define NK         8
 #define NMOVERS    4
+#define NCARS      6
+#define NRC        8
+#define NDRV       4
 #define MAX_HEAP   4096
 #define SLACK      16
 
@@ -53,17 +70,20 @@ static uint8_t *arena;
 static union {
     CountdownCameraCoordinator c;
     FlyByCameraCoordinator f;
-    unsigned char b[0x100];
+    PreRaceCameraCoordinator r;
+    unsigned char b[0x200];
 } ks[NK];
 
-// Which kind each coordinator's dump prints it as: a fly-by's from
-// OP_FBNEW, any other's from OP_CCNEW, OP_CDNEW and OP_JUNKK.
-static int is_flyby[NK];
+// A fly-by's from OP_FBNEW, a pre-race's from OP_PRNEW, a countdown's
+// from OP_CCNEW, OP_CDNEW and OP_JUNKK.
+static int kind[NK];
 
 static CameraMover   movers[NMOVERS];
 static struct Player players[2];
-static char          cars[2][16];
-static char          race_mem[16];
+static struct Car    cars[NCARS];
+static struct RacingCar rcars[NRC];
+static char          drivers[NDRV][16];
+static Race          race;
 
 static struct { void *p; size_t span; } heap[MAX_HEAP];
 static int nheap;
@@ -71,9 +91,15 @@ static int nheap;
 static int     junk_byte = -1;
 static int32_t countdown_number;
 static int32_t trackfly_finished;
+static int32_t bumper_finished;
 
 // What the linked files leave to the game.
 Race *pCurrentRace;
+RaceParameters TheRaceParameters;
+int32_t        PlayerNumPlayers;
+struct Player *PlayerPlayersByNumber[2];
+struct Player *PlayerPlayersByIndex[2];
+int32_t        TunePreRaceSequence;
 
 // ---------------------------------------------------------------- input
 
@@ -167,17 +193,27 @@ static const char *lab(const void *a)
             snprintf(buf, 48, "m%d", i);
             return buf;
         }
-    for (i = 0; i < 2; i++) {
+    for (i = 0; i < 2; i++)
         if (a == &players[i]) {
             snprintf(buf, 48, "p%d", i);
             return buf;
         }
-        if (a == cars[i]) {
+    for (i = 0; i < NCARS; i++)
+        if (a == &cars[i]) {
             snprintf(buf, 48, "car%d", i);
             return buf;
         }
-    }
-    if (a == race_mem)
+    for (i = 0; i < NRC; i++)
+        if (a == &rcars[i]) {
+            snprintf(buf, 48, "rc%d", i);
+            return buf;
+        }
+    for (i = 0; i < NDRV; i++)
+        if (a == drivers[i]) {
+            snprintf(buf, 48, "d%d", i);
+            return buf;
+        }
+    if (a == &race)
         return "race";
     for (i = 0; i < nheap; i++)
         if (a == heap[i].p) {
@@ -267,6 +303,17 @@ static int32_t trackfly_is_finished(CameraMover *m)
 {
     printf("  trackfly fin %s\n", lab(m));
     return trackfly_finished;
+}
+
+static int32_t bumper_is_finished(CameraMover *m)
+{
+    printf("  bumper fin %s\n", lab(m));
+    return bumper_finished;
+}
+
+static void prerace_anim(AnimatedDriver *d)
+{
+    printf("  prerace anim %s\n", lab(d));
 }
 
 static void fake_dtor(void *c, int32_t flags)
@@ -401,12 +448,10 @@ static void dump_cd_read(const char *head, const CameraDataItems *cd)
 }
 
 // A list of pointers, runs of one label merged.
-static void dump_list(const char *name, int32_t count, char *const *list,
-                      int n)
+static void print_runs(const void *const *list, int n)
 {
     int i = 0;
 
-    printf("  %s %d:", name, count);
     while (i < n) {
         char first[48];
         int  j = i + 1;
@@ -420,6 +465,13 @@ static void dump_list(const char *name, int32_t count, char *const *list,
             printf(" %s", first);
         i = j;
     }
+}
+
+static void dump_list(const char *name, int32_t count, char *const *list,
+                      int n)
+{
+    printf("  %s %d:", name, count);
+    print_runs((const void *const *)list, n);
     printf("\n");
 }
 
@@ -471,6 +523,7 @@ static void dump_coordinators(void)
         const CountdownCameraCoordinator *c = &ks[i].c;
 
         const FlyByCameraCoordinator *f = &ks[i].f;
+        const PreRaceCameraCoordinator *r = &ks[i].r;
 
         printf("  k%d %s %s %s", i, lab(c->Base.Node.next),
                lab(c->Base.Node.prev), lab(c->Base.pCameraMover));
@@ -478,11 +531,23 @@ static void dump_coordinators(void)
         word(&c->Base.ViewID);
         word(&c->Base.NeedToReloadCameraData);
         word(&c->Base._vtable);
-        if (is_flyby[i]) {
+        if (kind[i] == KIND_FB) {
             printf(" fb");
             word(&f->CurrentlyActiveCameraData);
             word(&f->FlyByCameraIndex);
             word(&f->CurrVortexCount);
+        } else if (kind[i] == KIND_PR) {
+            printf(" pr");
+            word(&r->CurrentlyActiveCameraData);
+            word(&r->CurrVortexCount);
+            word(&r->PreRaceNumCamerasToCycle);
+            word(&r->PreRaceCurrNumCamerasCycled);
+            word(&r->PreRaceCameraIndex);
+            word(&r->PreRaceNumCarsToCycle);
+            print_runs((const void *const *)r->PreRaceCarsToCycle,
+                       PRERACE_CARS_TO_CYCLE);
+            word(&r->PreRaceCurrCarCycleIndex);
+            word(&r->FinishedFlag);
         } else {
             printf(" %s", lab(c->pPlayer));
             word(&c->CurrentCountdownNumber);
@@ -576,11 +641,22 @@ int main(int argc, char **argv)
     gBumperCameraMoverFn = bumper;
     gTrackFlyCameraMoverFn = trackfly;
     gTrackFlyCameraMoverIsFinishedFn = trackfly_is_finished;
-    pCurrentRace = (Race *)(void *)race_mem;
+    gBumperCameraMoverIsFinishedFn = bumper_is_finished;
+    gAnimatedDriverBeginAPreRaceAnimationFn = prerace_anim;
+    pCurrentRace = &race;
     for (i = 0; i < NMOVERS; i++)
         movers[i].vtbl = &fake_mover_vt;
-    for (i = 0; i < 2; i++)
-        players[i].MyCar = (struct Car *)(void *)cars[i];
+    for (i = 0; i < 2; i++) {
+        players[i].MyCar = &cars[i];
+        PlayerPlayersByNumber[i] = &players[i];
+        PlayerPlayersByIndex[i] = &players[i];
+    }
+    PlayerNumPlayers = 1;
+    race.NumRacingCars = 1;
+    for (i = 0; i < NRC; i++) {
+        rcars[i].pCar = &cars[i % NCARS];
+        race.pRacingCars[i] = &rcars[i];
+    }
 
     while (rd < end) {
         int32_t op = next();
@@ -708,7 +784,7 @@ int main(int argc, char **argv)
 
             printf("ccnew k%d %d\n", k, view);
             (void)k_of(k);
-            is_flyby[k] = 0;
+            kind[k] = KIND_CD;
             r = camera_coordinator_init(k_of(k), view);
             printf("ccnew -> %s\n", lab(r));
             break;
@@ -719,7 +795,7 @@ int main(int argc, char **argv)
 
             printf("cdnew k%d %d p%d\n", k, view, p);
             (void)k_of(k);
-            is_flyby[k] = 0;
+            kind[k] = KIND_CD;
             r = countdown_camera_coordinator_init(
                 (CountdownCameraCoordinator *)(void *)k_of(k), view,
                 &players[p & 1]);
@@ -744,7 +820,10 @@ int main(int argc, char **argv)
         case OP_RAWDTOR: {
             int32_t k = next(), flags = next(), which = next();
             printf("rawdtor k%d %d %d\n", k, flags, which);
-            if (which == 2)
+            if (which == 3)
+                prerace_camera_coordinator_destroy(
+                    (PreRaceCameraCoordinator *)(void *)k_of(k), flags);
+            else if (which == 2)
                 flyby_camera_coordinator_destroy(
                     (FlyByCameraCoordinator *)(void *)k_of(k), flags);
             else if (which)
@@ -811,6 +890,34 @@ int main(int argc, char **argv)
             case F_VCOUNT:
                 ((FlyByCameraCoordinator *)(void *)c)->CurrVortexCount = v;
                 break;
+            case F_PRCYCLED:
+                ((PreRaceCameraCoordinator *)(void *)c)
+                    ->PreRaceCurrNumCamerasCycled = v;
+                break;
+            case F_PRCAM:
+                ((PreRaceCameraCoordinator *)(void *)c)
+                    ->PreRaceCameraIndex = v;
+                break;
+            case F_PRCARIDX:
+                ((PreRaceCameraCoordinator *)(void *)c)
+                    ->PreRaceCurrCarCycleIndex = v;
+                break;
+            case F_PRNCARS:
+                ((PreRaceCameraCoordinator *)(void *)c)
+                    ->PreRaceNumCarsToCycle = v;
+                break;
+            case F_PRFIN:
+                ((PreRaceCameraCoordinator *)(void *)c)->FinishedFlag = v;
+                break;
+            case F_PRVCOUNT:
+                ((PreRaceCameraCoordinator *)(void *)c)
+                    ->CurrVortexCount = v;
+                break;
+            case F_PRSLOT:
+                ((PreRaceCameraCoordinator *)(void *)c)
+                    ->PreRaceCarsToCycle[(v >> 4) & 31] =
+                    &cars[(v & 15) % NCARS];
+                break;
             default:
                 fprintf(stderr, "coordinator field %d\n", f);
                 return 2;
@@ -824,7 +931,7 @@ int main(int argc, char **argv)
             int32_t k = next(), b = next() & 0xff;
             (void)k_of(k);
             memset(&ks[k], b, sizeof ks[0]);
-            is_flyby[k] = 0;
+            kind[k] = KIND_CD;
             break;
         }
         case OP_DUMPK:
@@ -837,7 +944,7 @@ int main(int argc, char **argv)
             printf("fbnew k%d %d\n", k, view);
             r = flyby_camera_coordinator_init(
                 (FlyByCameraCoordinator *)(void *)k_of(k), view);
-            is_flyby[k] = 1;
+            kind[k] = KIND_FB;
             printf("fbnew -> %s\n", lab(r));
             break;
         }
@@ -861,6 +968,61 @@ int main(int argc, char **argv)
         case OP_MTYPE: {
             int32_t m = next(), t = next();
             movers[m % NMOVERS].Type = (CameraMoverType)t;
+            break;
+        }
+        case OP_PRNEW: {
+            int32_t k = next(), view = next();
+            PreRaceCameraCoordinator *r;
+
+            printf("prnew k%d %d\n", k, view);
+            r = prerace_camera_coordinator_init(
+                (PreRaceCameraCoordinator *)(void *)k_of(k), view);
+            kind[k] = KIND_PR;
+            printf("prnew -> %s\n", lab(r));
+            break;
+        }
+        case OP_PRUPDATE: {
+            int32_t k = next();
+            float dt = fbits((uint32_t)next());
+            printf("prupdate k%d %08x\n", k, bitsf(dt));
+            prerace_camera_coordinator_update(
+                (PreRaceCameraCoordinator *)(void *)k_of(k), dt);
+            break;
+        }
+        case OP_PRFIN: {
+            int32_t k = next();
+            printf("prfin k%d -> %d\n", k,
+                   prerace_camera_coordinator_is_finished(k_of(k)));
+            break;
+        }
+        case OP_WORLD: {
+            int32_t w = next(), a = next(), v = next();
+
+            switch (w) {
+            case W_NPLAYERS: PlayerNumPlayers = a; break;
+            case W_BYNUMBER:
+                PlayerPlayersByNumber[a & 1] = &players[v & 1];
+                break;
+            case W_BYINDEX:
+                PlayerPlayersByIndex[a & 1] = &players[v & 1];
+                break;
+            case W_COP:      TheRaceParameters.BeACop = a; break;
+            case W_TUNE:     TunePreRaceSequence = a; break;
+            case W_NRACING:  race.NumRacingCars = a; break;
+            case W_RACING:
+                race.pRacingCars[a % NRC] = v < 0 ? NULL : &rcars[v % NRC];
+                break;
+            case W_RCCAR:    rcars[a % NRC].pCar = &cars[v % NCARS]; break;
+            case W_MYCAR:    players[a & 1].MyCar = &cars[v % NCARS]; break;
+            case W_DRIVER:
+                cars[a % NCARS].pAnimatedDriver = v < 0 ? NULL
+                    : (AnimatedDriver *)(void *)drivers[v % NDRV];
+                break;
+            case W_BMFIN:    bumper_finished = a; break;
+            default:
+                fprintf(stderr, "world %d\n", w);
+                return 2;
+            }
             break;
         }
         default:

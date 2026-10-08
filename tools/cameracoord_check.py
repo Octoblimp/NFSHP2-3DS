@@ -3,8 +3,8 @@ code.
 
 CameraCoordinator.obj, in part: the coordinators' base and their list,
 TheCameraLoader and the camera chunks it keeps, the CameraDataItems parser
-and the Countdown and FlyBy coordinators. The oracle is SLES_507.31
-itself, run in tools/mipsemu.py:
+and the Countdown, FlyBy and PreRace coordinators. The oracle is
+SLES_507.31 itself, run in tools/mipsemu.py:
 
 - the list's static constructor (0x0019c058) and CameraLoader's own
   (0x00199c80); LoaderCameras and UnloaderCameras (0x0019a398, 0x0019a3c0)
@@ -21,6 +21,10 @@ itself, run in tools/mipsemu.py:
 - FlyByCameraCoordinator's constructor (0x0019abd8), destructor
   (0x0019ac28), IsFinished (0x0019ac40) and Update (0x0019ac50), and its
   table (0x002b52c8);
+- PreRaceCameraCoordinator's constructor (0x0019ad78), destructor
+  (0x0019af90), Update (0x0019afa8) and IsFinished (0x0019c098), and its
+  table (0x002b52b0), over each way it picks its cars: Be A Cop or not,
+  one player or two, and as many racing cars as the script sets;
 - run as shipped under them: bSPrintf, bStrICmp, bRandom over bDefaultSeed
   and bNode's destructor (0x00114e70).
 
@@ -33,11 +37,19 @@ Stood in on both sides, each call printing a line:
   TrackFlyCameraMover's constructor (0x00159d08), the same with the
     mover's type set to 9 as well, and its IsFinished (0x0015a2a0),
     which prints the mover and answers the script's word;
+  BumperCameraMover::IsFinished (0x001589c8), the same;
+  AnimatedDriver::BeginAPreRaceAnimation (0x0019c078), which prints the
+    driver;
   a test CameraMover table (vptr at +40) whose deleting destructor (8),
     Enable (96) and Disable (104) print, and a test coordinator table
     (FCVT) whose destructor (8) and Update (16) print;
   bMalloc (0x002577c0) and the frees (bFree 0x00257850, __builtin_delete
     0x00114e98): a block filled with 0xcd, named h0, h1, ...
+
+The players (gp-20936 .. gp-20920), Be A Cop (0x0031ab0c),
+TunePreRaceSequence (gp-23108), the race's racing cars, their cars and the
+cars' drivers (+1204) are the script's, in test memory on the image's side
+and the harness's own structs on the port's.
 
 The chunks are the retail disc's -- INGAMEB's pre-race, post-race and
 shake chunks, TRACKB's highlights and fly-bys, the eight NIS .CAM files --
@@ -109,6 +121,13 @@ FB_DTOR = 0x0019ac28
 FB_FIN = 0x0019ac40
 FB_UPDATE = 0x0019ac50
 FB_VT = 0x002b52c8
+PR_CTOR = 0x0019ad78
+PR_DTOR = 0x0019af90
+PR_UPDATE = 0x0019afa8
+PR_FIN = 0x0019c098
+PR_VT = 0x002b52b0
+BM_FIN = 0x001589c8
+PR_ANIM = 0x0019c078                    # BeginAPreRaceAnimation
 
 COUNTDOWN = 0x001480c0
 BUMPER = 0x00158800
@@ -123,6 +142,11 @@ LOADER_SIZE = 2596
 LIST = GP - 19920                   # CameraCoordinatorList
 RACE_GP = -22272                    # pCurrentRace
 SEED_GP = -14472                    # bDefaultSeed
+NPLAYERS_GP = -20920                # NumPlayers
+BYNUMBER_GP = -20936                # PlayersByNumber[2]
+BYINDEX_GP = -20928                 # PlayersByIndex[2]
+TUNE_GP = -23108                    # TunePreRaceSequence
+COP = 0x0031ab0c                    # TheRaceParameters.BeACop
 
 # The world.
 ARENA = 0x01000000
@@ -133,14 +157,20 @@ NK = 8
 MOVERS = 0x01E01000                 # m0..m3
 NMOVERS = 4
 PLAYERS = 0x01E02000                # p0, p1: MyCar at +4
-CARS = 0x01E03000                   # car0, car1
-RACE = 0x01E04000
+CARS = 0x01E03000                   # car0 .. car5, the driver at +1204
+NCARS = 6
+RACE = 0x01E04000                   # +24 NumRacingCars, +1572 pRacingCars
+RACE_SIZE = 0x800
 FMVT = 0x01E05000                   # the test mover table
 FMVT_DTOR = 0x01E05800
 FMVT_ENABLE = 0x01E05810
 FMVT_DISABLE = 0x01E05820
 CD = 0x01E06000                     # OP_PARSE's CameraDataItems
 FCVT = 0x01e0b000                   # the test coordinator table
+RCARS = 0x01E07000                  # rc0 .. rc7: pCar at +0
+NRC = 8
+DRIVERS = 0x01E08000                # d0 .. d3
+NDRV = 4
 FCVT_DTOR = 0x01E0B800
 FCVT_UPDATE = 0x01E0B810
 SLACK = 16
@@ -150,7 +180,8 @@ SLACK = 16
  OP_PARSE, OP_CCNEW, OP_CDNEW, OP_CCDEL, OP_CCDELETE, OP_RAWDTOR,
  OP_DISABLE, OP_ENABLE, OP_MARK, OP_UPDATE, OP_CDUPDATE, OP_SETMOVER,
  OP_SETF, OP_CD, OP_JUNKK, OP_DUMPK, OP_FBNEW, OP_FBUPDATE, OP_FBFIN,
- OP_TFFIN, OP_MTYPE) = range(35)
+ OP_TFFIN, OP_MTYPE, OP_PRNEW, OP_PRUPDATE, OP_PRFIN,
+ OP_WORLD) = range(39)
 
 ARGS = {OP_TAG: 1, OP_JUNKL: 1, OP_INITL: 0, OP_SINIT: 0, OP_LOAD: 1,
         OP_UNLOAD: 1, OP_DUMPL: 0, OP_POKEL: 2, OP_POKEP: 3, OP_SEED: 1,
@@ -159,14 +190,23 @@ ARGS = {OP_TAG: 1, OP_JUNKL: 1, OP_INITL: 0, OP_SINIT: 0, OP_LOAD: 1,
         OP_DISABLE: 1, OP_ENABLE: 1, OP_MARK: 0, OP_UPDATE: 1,
         OP_CDUPDATE: 2, OP_SETMOVER: 2, OP_SETF: 3, OP_CD: 1, OP_JUNKK: 2,
         OP_DUMPK: 0, OP_FBNEW: 2, OP_FBUPDATE: 2, OP_FBFIN: 1, OP_TFFIN: 1,
-        OP_MTYPE: 2}
+        OP_MTYPE: 2, OP_PRNEW: 2, OP_PRUPDATE: 2, OP_PRFIN: 1,
+        OP_WORLD: 3}
 
 # OP_POKEL's fields, OP_POKEP's lists and OP_SETF's fields.
 (L_HL, L_FB, L_PRE, L_POST, L_NIS, L_PN0, L_PN1, L_SHAKES,
  L_SHAKEP, L_VORTEXN) = range(10)
 LIST_HL, LIST_FB, LIST_PRE, LIST_POST, LIST_NIS, LIST_PN0, LIST_PN1 = range(7)
 (F_DISABLED, F_VIEW, F_NEED, F_NUMBER, F_VPTR, F_PLAYER, F_ACTIVE, F_INDEX,
- F_VCOUNT) = range(9)
+ F_VCOUNT, F_PRCYCLED, F_PRCAM, F_PRCARIDX, F_PRNCARS, F_PRFIN, F_PRVCOUNT,
+ F_PRSLOT) = range(16)
+# Where OP_SETF writes each field; F_PLAYER and F_PRSLOT are worked out.
+SETF_OFF = (12, 16, 20, 32, 24, None, 28, 32, 36, 40, 44, 180, 48, 184, 32,
+            None)
+# OP_WORLD's: the players, the race and its racing cars, the cars'
+# drivers, TunePreRaceSequence and BumperCameraMover::IsFinished's answer.
+(W_NPLAYERS, W_BYNUMBER, W_BYINDEX, W_COP, W_TUNE, W_NRACING, W_RACING,
+ W_RCCAR, W_MYCAR, W_DRIVER, W_BMFIN) = range(11)
 
 # TheCameraLoader: each list's count and its pointers, retail's offsets.
 LISTS = (("hl", 0, 4, 512), ("fb", 2052, 2056, 32), ("pre", 2184, 2188, 32),
@@ -1022,6 +1062,265 @@ def flyby_scenarios(sc, rnd):
         sc.op(OP_DUMPK)
 
 
+def world(sc, w, a=0, v=0):
+    sc.op(OP_WORLD, w, a, v)
+
+
+def world_reset(sc):
+    """The players, the race and the drivers as both sides start: one
+    player, p0 and p1 by number and by index, not Be A Cop, no tuning, one
+    racing car, rc i on car i mod 6, no drivers, IsFinished 0."""
+    world(sc, W_NPLAYERS, 1)
+    for i in range(2):
+        world(sc, W_BYNUMBER, i, i)
+        world(sc, W_BYINDEX, i, i)
+        world(sc, W_MYCAR, i, i)
+    world(sc, W_COP, 0)
+    world(sc, W_TUNE, 0)
+    world(sc, W_NRACING, 1)
+    for i in range(NRC):
+        world(sc, W_RACING, i, i)
+        world(sc, W_RCCAR, i, i % NCARS)
+    for i in range(NCARS):
+        world(sc, W_DRIVER, i, -1)
+    world(sc, W_BMFIN, 0)
+
+
+def prerace_world(sc, rnd):
+    """A random race for a new coordinator: Be A Cop or not, 0 to 3
+    players, 1 to 8 racing cars on random cars, the players in either
+    order, and some cars with drivers. The number of cars it will cycle."""
+    cop = rnd.choice((0, 1, 1, -1))
+    players = rnd.choice((1, 2, 2, 0, 3))
+    world(sc, W_COP, cop)
+    world(sc, W_NPLAYERS, players)
+    world(sc, W_NRACING, rnd.randrange(1, NRC + 1))
+    for i in range(NRC):
+        world(sc, W_RACING, i, rnd.randrange(NRC))
+        world(sc, W_RCCAR, i, rnd.randrange(NCARS))
+    order = rnd.choice(((0, 1), (1, 0)))
+    for i in range(2):
+        world(sc, W_BYNUMBER, i, order[i])
+        world(sc, W_BYINDEX, i, rnd.choice((order[i], 1 - order[i])))
+        world(sc, W_MYCAR, i, rnd.randrange(NCARS))
+    for i in range(NCARS):
+        world(sc, W_DRIVER, i, rnd.choice((-1, -1, 0, 1, 2, 3)))
+    return 2 if cop and players == 2 else 4
+
+
+def prerace_scenarios(sc, rnd):
+    base = 0x300000
+    # INGAMEB's four pre-race cameras, flown as the race flies them on
+    # view 1 for each way the cars are picked: none to three players (only
+    # two counts as two), with and without Be A Cop, and the cop's racing
+    # cars 1 to 5 deep. Each
+    # mover is kept until it is finished; once as many have flown as there
+    # are cars, the coordinator is finished.
+    if DISC.exists():
+        pre = chunk_at(disc(INGAMEB[0]), INGAMEB[1][0][0])
+        for cop, players, racing in ((0, 1, 1), (0, 2, 3), (1, 1, 5),
+                                     (1, 2, 4), (1, 1, 3), (1, 1, 1),
+                                     (1, 1, 4), (0, 3, 2), (0, 0, 1),
+                                     (1, 3, 2)):
+            sc.tag("prerace, disc, cop %d, %d players, %d racing"
+                   % (cop, players, racing))
+            sc.fresh()
+            sc.op(OP_SINIT)
+            world_reset(sc)
+            sc.op(OP_JUNKK, 0, 0xa5)
+            sc.op(OP_POKEL, L_VORTEXN, 3 + racing)
+            sc.load(base, pre)
+            world(sc, W_COP, cop)
+            world(sc, W_NPLAYERS, players)
+            world(sc, W_NRACING, racing)
+            world(sc, W_BYNUMBER, 0, 1)
+            world(sc, W_BYNUMBER, 1, 0)
+            for i in range(racing):
+                world(sc, W_RCCAR, i, (i + 2) % NCARS)
+            for car, d in ((0, 0), (2, 1), (3, 2), (5, 3)):
+                world(sc, W_DRIVER, car, d)
+            sc.op(OP_PRNEW, 0, 1)
+            sc.op(OP_DUMPK)
+            sc.op(OP_PRFIN, 0)
+            for fin in (0, 0, 1, 0, 2, 1, -1, 0, 1, 1, 1, 1, 1):
+                world(sc, W_BMFIN, fin)
+                sc.op(OP_UPDATE, fb(1.0 / 30))
+                sc.op(OP_PRFIN, 0)
+                sc.op(OP_DUMPK)
+            sc.op(OP_CCDELETE, 0)
+            sc.op(OP_DUMPK)
+
+    # Five built cameras of types 1, 1, 2, 0 and 7, two pre-race
+    # coordinators and a countdown on the list, and the race, the
+    # coordinators' fields, the movers and the camera count changed at
+    # random between the updates. Now and then a coordinator is deleted
+    # and built again on a new race.
+    sc.tag("prerace, built")
+    world_reset(sc)
+    sc.fresh(0x00)
+    sc.op(OP_SINIT)
+    kids = [(PRE_C, cam(t, "Cam_%02d" % (i + 1),
+                        cam_words(rnd, t, (0, 0, 2 + i, 3 + i))))
+            for i, t in enumerate((1, 1, 2, 0, 7))]
+    sc.load(base, build(base, PRE_RACE, kids))
+    for k, b in ((0, 0xa5), (1, 0x00), (2, 0x5c)):
+        sc.op(OP_JUNKK, k, b)
+    sc.op(OP_POKEL, L_VORTEXN, 9)
+    ncars = {}
+    ncars[0] = prerace_world(sc, rnd)
+    sc.op(OP_PRNEW, 0, 1)
+    ncars[1] = prerace_world(sc, rnd)
+    sc.op(OP_PRNEW, 1, 0)
+    sc.op(OP_CD, 3)
+    sc.op(OP_CDNEW, 2, 0, 0)
+    sc.op(OP_DUMPK)
+    for step in range(400):
+        r = rnd.random()
+        k = rnd.choice((0, 1))
+        if r < 0.10:
+            world(sc, W_BMFIN, rnd.choice((0, 0, 1, 1, 2, -1, 0x100)))
+        elif r < 0.27:
+            sc.op(OP_PRUPDATE, k, fb(rnd.choice((1.0 / 30, 0.0, -1.0))))
+        elif r < 0.38:
+            sc.op(OP_UPDATE, fb(1.0 / 30))
+        elif r < 0.41:
+            sc.op(OP_MARK)
+        elif r < 0.45:
+            world(sc, W_TUNE, rnd.choice((0, 0, 1, -1)))
+        elif r < 0.49:
+            world(sc, W_DRIVER, rnd.randrange(NCARS),
+                  rnd.choice((-1, 0, 1, 2, 3)))
+        elif r < 0.53:
+            sc.setf(k, F_ACTIVE, rnd.choice((-1, 0, 2, -2)))
+        elif r < 0.57:
+            sc.setf(k, F_PRCAM, rnd.choice((-1, 0, 1, 3, 4, 99)))
+        elif r < 0.60:
+            sc.setf(k, F_PRCYCLED, rnd.choice((0, 1, 2, 4, 99, -1)))
+        elif r < 0.63:
+            sc.setf(k, F_PRCARIDX, rnd.randrange(ncars[k]))
+        elif r < 0.65:
+            sc.setf(k, F_PRFIN, rnd.choice((0, 1, 2, -1)))
+        elif r < 0.67:
+            sc.setf(k, F_PRVCOUNT, rnd.choice((-5, 0, 1000)))
+        elif r < 0.72:
+            m = rnd.randrange(NMOVERS)
+            sc.op(OP_SETMOVER, k, rnd.choice((m, m, -1)))
+        elif r < 0.75:
+            sc.op(OP_POKEL, L_PRE, rnd.choice((5, 5, 4, 2, 1, 0, -1)))
+        elif r < 0.78:
+            sc.op(rnd.choice((OP_DISABLE, OP_ENABLE)), k)
+        elif r < 0.83:
+            sc.op(OP_PRFIN, k)
+        elif r < 0.86:
+            sc.setf(k, F_NEED, rnd.choice((0, 1, -1)))
+        elif r < 0.89:
+            sc.op(OP_CCDELETE, k)
+            ncars[k] = prerace_world(sc, rnd)
+            sc.op(OP_PRNEW, k, rnd.choice((1, 0, -3)))
+        else:
+            sc.op(OP_DUMPK)
+    sc.op(OP_DUMPK)
+    sc.op(OP_CCDEL, 0, 1)
+    sc.op(OP_CCDELETE, 1)
+    sc.op(OP_CCDELETE, 2)
+    sc.op(OP_DUMPK)
+
+    # The finish: two Be A Cop players, so two cars. Each update finishes
+    # its mover; the third finds two flown and finishes, and keeps doing so
+    # until TunePreRaceSequence is set (1, then -1), when it cycles on, the
+    # cars wrapping at two and the cameras at the count.
+    sc.tag("prerace, finish")
+    world_reset(sc)
+    sc.fresh(0x00)
+    sc.op(OP_SINIT)
+    sc.load(base + 0x40000, build(base + 0x40000, PRE_RACE, kids))
+    sc.op(OP_JUNKK, 0, 0)
+    world(sc, W_COP, 1)
+    world(sc, W_NPLAYERS, 2)
+    world(sc, W_MYCAR, 1, 3)
+    world(sc, W_DRIVER, 3, 2)
+    world(sc, W_BMFIN, 1)
+    sc.op(OP_PRNEW, 0, 1)
+    for tune in (0, 0, 0, 0, 1, 1, 1, 1, 1, 1, -1, -1, 0, 0):
+        world(sc, W_TUNE, tune)
+        sc.op(OP_PRUPDATE, 0, fb(1.0 / 30))
+        sc.op(OP_PRFIN, 0)
+        sc.op(OP_DUMPK)
+    # The car count set by hand: 0 finishes at once; 3 of 4 wraps the cars
+    # at 3; 6, over slots 4 and 5 filled, at 6; and past it, from 7, the
+    # index runs on through slots 8 to 10.
+    for ncar, start, slots, steps in ((0, 0, (), 2), (3, 1, (), 6),
+                                      (6, 3, (4, 5), 6),
+                                      (6, 7, (7, 8, 9, 10), 3)):
+        world(sc, W_COP, 0)
+        world(sc, W_NPLAYERS, 1)
+        world(sc, W_TUNE, 0)
+        sc.op(OP_CCDELETE, 0)
+        sc.op(OP_JUNKK, 0, 0)
+        sc.op(OP_PRNEW, 0, 1)
+        for s in slots:
+            sc.setf(0, F_PRSLOT, s * 16 + s % NCARS)
+        sc.setf(0, F_PRNCARS, ncar)
+        sc.setf(0, F_PRCARIDX, start)
+        if ncar:
+            world(sc, W_TUNE, 1)
+        for _ in range(steps):
+            sc.op(OP_PRUPDATE, 0, fb(1.0 / 30))
+            sc.op(OP_DUMPK)
+        world(sc, W_TUNE, 0)
+        sc.op(OP_PRUPDATE, 0, fb(1.0 / 30))
+        sc.op(OP_PRFIN, 0)
+        sc.op(OP_DUMPK)
+    # Cycled against the car count, not the camera count: the two apart.
+    sc.op(OP_CCDELETE, 0)
+    sc.op(OP_PRNEW, 0, 1)
+    sc.setf(0, F_PRNCARS, 2)
+    for _ in range(4):
+        sc.op(OP_PRUPDATE, 0, fb(1.0 / 30))
+        sc.op(OP_PRFIN, 0)
+        sc.op(OP_DUMPK)
+    for v in (0, 1, 2, -1, 0x7fffffff):
+        sc.setf(0, F_PRFIN, v)
+        sc.op(OP_PRFIN, 0)
+    sc.op(OP_CCDELETE, 0)
+    sc.op(OP_DUMPK)
+
+    # A running mover, not finished and the data not marked, kept only
+    # once a camera is active; the camera index past the count, at -1 and
+    # with the count at 0 and below.
+    sc.tag("prerace, edges")
+    sc.op(OP_SINIT)
+    sc.op(OP_JUNKK, 1, 0)
+    world(sc, W_BMFIN, 0)
+    world(sc, W_TUNE, 1)
+    sc.op(OP_PRNEW, 1, 2)
+    for active in (-1, -2, 7, 0, -1, 0x7fffffff, -0x80000000):
+        sc.op(OP_SETMOVER, 1, 2)
+        sc.setf(1, F_ACTIVE, active)
+        sc.setf(1, F_NEED, 0)
+        sc.op(OP_PRUPDATE, 1, fb(1.0 / 30))
+        sc.op(OP_DUMPK)
+    for n, at in ((5, 4), (5, 1), (5, 3), (5, 99), (5, -1), (0, 2),
+                  (-1, 0), (1, 0), (2, 1), (2, 0)):
+        sc.op(OP_POKEL, L_PRE, n)
+        sc.setf(1, F_PRCAM, at)
+        sc.op(OP_SETMOVER, 1, -1)
+        sc.op(OP_PRUPDATE, 1, fb(1.0 / 30))
+        sc.op(OP_DUMPK)
+    world(sc, W_TUNE, 0)
+    sc.op(OP_CCDELETE, 1)
+    sc.op(OP_DUMPK)
+    # The raw destructor with each of the flags, over a mover and none.
+    for flags in (0, 1, 2, 3):
+        sc.op(OP_SINIT)
+        sc.op(OP_JUNKK, 3, 0)
+        sc.op(OP_PRNEW, 3, 4)
+        sc.op(OP_SETMOVER, 3, -1 if flags & 1 else 2)
+        sc.op(OP_RAWDTOR, 3, flags, 3)
+        sc.op(OP_DUMPK)
+    world_reset(sc)
+
+
 def script():
     sc = Script()
     rnd = random.Random(0xcc0de)
@@ -1029,6 +1328,7 @@ def script():
     built_scenarios(sc, rnd)
     retail_scenarios(sc)
     flyby_scenarios(sc, rnd)
+    prerace_scenarios(sc, random.Random(0x9e4ace))
     return sc
 
 
@@ -1043,17 +1343,28 @@ class Model(object):
         self.junk = -1
         self.number = 0
         self.tf_fin = 0
-        self.flyby = set()              # k a fly-by, for the dump
+        self.bm_fin = 0
+        self.kind = {}                  # k: 1 a fly-by, 2 a pre-race
         e.mem[ARENA:ARENA + ARENA_SIZE] = bytes(ARENA_SIZE)
         for base, n in ((KS, 0x1000), (MOVERS, 0x1000), (PLAYERS, 0x1000),
-                        (CARS, 0x1000), (RACE, 0x100), (FMVT, 0x1000),
-                        (CD, 0x1000), (FCVT, 0x1000)):
+                        (CARS, 0x1000), (RACE, RACE_SIZE), (FMVT, 0x1000),
+                        (CD, 0x1000), (FCVT, 0x1000), (RCARS, 0x1000),
+                        (DRIVERS, 0x1000)):
             e.mem[base:base + n] = bytes(n)
         for i in range(NMOVERS):
             e.put32(MOVERS + 0x100 * i + 40, FMVT)
         for i in range(2):
             e.put32(PLAYERS + 0x100 * i + 4, CARS + 0x100 * i)
+            e.put32(GP + BYNUMBER_GP + 4 * i, PLAYERS + 0x100 * i)
+            e.put32(GP + BYINDEX_GP + 4 * i, PLAYERS + 0x100 * i)
+        e.put32(GP + NPLAYERS_GP, 1)
+        e.put32(COP, 0)
+        e.put32(GP + TUNE_GP, 0)
         e.put32(GP + RACE_GP, RACE)
+        e.put32(RACE + 24, 1)
+        for i in range(NRC):
+            e.put32(RCARS + 0x100 * i, CARS + 0x100 * (i % NCARS))
+            e.put32(RACE + 1572 + 4 * i, RCARS + 0x100 * i)
         for slot, fn in ((8, FMVT_DTOR), (96, FMVT_ENABLE),
                          (104, FMVT_DISABLE)):
             e.put32(FMVT + slot + 4, fn)
@@ -1086,8 +1397,15 @@ class Model(object):
         for i in range(2):
             if a == PLAYERS + 0x100 * i:
                 return "p%d" % i
+        for i in range(NCARS):
             if a == CARS + 0x100 * i:
                 return "car%d" % i
+        for i in range(NRC):
+            if a == RCARS + 0x100 * i:
+                return "rc%d" % i
+        for i in range(NDRV):
+            if a == DRIVERS + 0x100 * i:
+                return "d%d" % i
         if a == RACE:
             return "race"
         for base, lab in self.heap:
@@ -1146,6 +1464,13 @@ class Model(object):
             self.emit("  trackfly fin %s" % self.label(arg(0)))
             return s32(self.tf_fin)
 
+        def bumper_fin(em):
+            self.emit("  bumper fin %s" % self.label(arg(0)))
+            return s32(self.bm_fin)
+
+        def prerace_anim(em):
+            self.emit("  prerace anim %s" % self.label(arg(0)))
+
         def mover_dtor(em):
             self.emit("  mover dtor %s" % self.label(arg(0)))
             if arg(1) & 1:
@@ -1171,6 +1496,8 @@ class Model(object):
         e.stub(BUMPER, bumper)
         e.stub(TF_CTOR, trackfly)
         e.stub(TF_FIN, trackfly_fin)
+        e.stub(BM_FIN, bumper_fin)
+        e.stub(PR_ANIM, prerace_anim)
         e.stub(FMVT_DTOR, mover_dtor)
         e.stub(FMVT_ENABLE, mover_enable)
         e.stub(FMVT_DISABLE, mover_disable)
@@ -1195,21 +1522,26 @@ class Model(object):
             s.append(" " + (self.label(v) if ptr else "%08x" % v))
         self.emit("".join(s))
 
+    @staticmethod
+    def runs(labs):
+        """The labels, runs of one merged, each after a space."""
+        s, i, n = "", 0, len(labs)
+        while i < n:
+            j = i + 1
+            while j < n and labs[j] == labs[i]:
+                j += 1
+            s += " %s*%d" % (labs[i], j - i) if j - i > 1 else \
+                " %s" % labs[i]
+            i = j
+        return s
+
     def dump_loader(self):
         w = self.w
         self.emit("loader")
         for name, cnt, lst, n in LISTS:
             labs = [self.label(w(LOADER + lst + 4 * i)) for i in range(n)]
-            s = "  %s %d:" % (name, s32(w(LOADER + cnt)))
-            i = 0
-            while i < n:
-                j = i + 1
-                while j < n and labs[j] == labs[i]:
-                    j += 1
-                s += " %s*%d" % (labs[i], j - i) if j - i > 1 else \
-                    " %s" % labs[i]
-                i = j
-            self.emit(s)
+            self.emit("  %s %d:" % (name, s32(w(LOADER + cnt)))
+                      + self.runs(labs))
         self.emit("  shakes %d %s vortex %s %d" % (
             s32(w(LOADER + SHAKES_N)), self.label(w(LOADER + SHAKES_P)),
             " ".join(fx(w(LOADER + VORTEX + 4 * i)) for i in range(4)),
@@ -1233,9 +1565,16 @@ class Model(object):
                 i, self.label(w(k)), self.label(w(k + 4)),
                 self.label(w(k + 8)), w(k + 12), w(k + 16), w(k + 20),
                 w(k + 24))
-            if i in self.flyby:
+            if self.kind.get(i) == 1:
                 self.emit(head + " fb %08x %08x %08x" % (
                     w(k + 28), w(k + 32), w(k + 36)))
+            elif self.kind.get(i) == 2:
+                cars = [self.label(w(k + 52 + 4 * j)) for j in range(32)]
+                self.emit(head + " pr"
+                          + "".join(" %08x" % w(k + o)
+                                    for o in (28, 32, 36, 40, 44, 48))
+                          + self.runs(cars)
+                          + " %08x %08x" % (w(k + 180), w(k + 184)))
             else:
                 self.emit(head + " %s %08x" % (self.label(w(k + 28)),
                                                w(k + 32)))
@@ -1251,6 +1590,35 @@ class Model(object):
 
     def at(self, off):
         return 0 if s32(off) == -1 else ARENA + off
+
+    def world(self, wh, a, v):
+        e = self.e
+        if wh == W_NPLAYERS:
+            e.put32(GP + NPLAYERS_GP, a & M32)
+        elif wh == W_BYNUMBER:
+            e.put32(GP + BYNUMBER_GP + 4 * (a & 1), PLAYERS + 0x100 * (v & 1))
+        elif wh == W_BYINDEX:
+            e.put32(GP + BYINDEX_GP + 4 * (a & 1), PLAYERS + 0x100 * (v & 1))
+        elif wh == W_COP:
+            e.put32(COP, a & M32)
+        elif wh == W_TUNE:
+            e.put32(GP + TUNE_GP, a & M32)
+        elif wh == W_NRACING:
+            e.put32(RACE + 24, a & M32)
+        elif wh == W_RACING:
+            e.put32(RACE + 1572 + 4 * (a % NRC),
+                    0 if v < 0 else RCARS + 0x100 * (v % NRC))
+        elif wh == W_RCCAR:
+            e.put32(RCARS + 0x100 * (a % NRC), CARS + 0x100 * (v % NCARS))
+        elif wh == W_MYCAR:
+            e.put32(PLAYERS + 0x100 * (a & 1) + 4, CARS + 0x100 * (v % NCARS))
+        elif wh == W_DRIVER:
+            e.put32(CARS + 0x100 * (a % NCARS) + 1204,
+                    0 if v < 0 else DRIVERS + 0x100 * (v % NDRV))
+        elif wh == W_BMFIN:
+            self.bm_fin = a
+        else:
+            raise ValueError("world %d" % wh)
 
     # The ints the script hands a call go in sign-extended, as the EE's
     # registers hold them.
@@ -1322,13 +1690,13 @@ class Model(object):
             elif code == OP_CCNEW:
                 k, view = a
                 self.emit("ccnew k%d %d" % (k, s32(view)))
-                self.flyby.discard(k)
+                self.kind.pop(k, None)
                 r = e.call(CC_CTOR, KS + 0x100 * k, s32(view))
                 self.emit("ccnew -> %s" % self.label(r))
             elif code == OP_CDNEW:
                 k, view, p = a
                 self.emit("cdnew k%d %d p%d" % (k, s32(view), p))
-                self.flyby.discard(k)
+                self.kind.pop(k, None)
                 r = e.call(CD_CTOR, KS + 0x100 * k, s32(view),
                            PLAYERS + 0x100 * (p & 1))
                 self.emit("cdnew -> %s" % self.label(r))
@@ -1342,8 +1710,8 @@ class Model(object):
             elif code == OP_RAWDTOR:
                 k, flags, which = a
                 self.emit("rawdtor k%d %d %d" % (k, s32(flags), which))
-                e.call((CC_DTOR, CD_DTOR, FB_DTOR)[which], KS + 0x100 * k,
-                       s32(flags))
+                e.call((CC_DTOR, CD_DTOR, FB_DTOR, PR_DTOR)[which],
+                       KS + 0x100 * k, s32(flags))
             elif code == OP_DISABLE:
                 self.emit("disable k%d" % a[0])
                 e.call(CC_DISABLE, KS + 0x100 * a[0])
@@ -1371,23 +1739,25 @@ class Model(object):
                 c = KS + 0x100 * k
                 if f == F_PLAYER:
                     e.put32(c + 28, PLAYERS + 0x100 * (v & 1))
+                elif f == F_PRSLOT:
+                    e.put32(c + 52 + 4 * ((v >> 4) & 31),
+                            CARS + 0x100 * ((v & 15) % NCARS))
                 else:
-                    e.put32(c + (12, 16, 20, 32, 24, None, 28, 32,
-                                 36)[f], v)
+                    e.put32(c + SETF_OFF[f], v)
             elif code == OP_CD:
                 self.number = a[0]
             elif code == OP_JUNKK:
                 k, b = a
                 c = KS + 0x100 * k
                 e.mem[c:c + 0x100] = bytes([b & 0xff]) * 0x100
-                self.flyby.discard(k)
+                self.kind.pop(k, None)
             elif code == OP_DUMPK:
                 self.dump_coordinators()
             elif code == OP_FBNEW:
                 k, view = a
                 self.emit("fbnew k%d %d" % (k, s32(view)))
                 r = e.call(FB_CTOR, KS + 0x100 * k, s32(view))
-                self.flyby.add(k)
+                self.kind[k] = 1
                 self.emit("fbnew -> %s" % self.label(r))
             elif code == OP_FBUPDATE:
                 k, dt = a
@@ -1402,6 +1772,22 @@ class Model(object):
             elif code == OP_MTYPE:
                 m, t = a
                 e.put32(MOVERS + 0x100 * (m % NMOVERS) + 8, t)
+            elif code == OP_PRNEW:
+                k, view = a
+                self.emit("prnew k%d %d" % (k, s32(view)))
+                r = e.call(PR_CTOR, KS + 0x100 * k, s32(view))
+                self.kind[k] = 2
+                self.emit("prnew -> %s" % self.label(r))
+            elif code == OP_PRUPDATE:
+                k, dt = a
+                self.emit("prupdate k%d %08x" % (k, dt))
+                e.fpr[12] = dt
+                e.call(PR_UPDATE, KS + 0x100 * k)
+            elif code == OP_PRFIN:
+                r = e.call(PR_FIN, KS + 0x100 * a[0])
+                self.emit("prfin k%d -> %d" % (a[0], s32(r)))
+            elif code == OP_WORLD:
+                self.world(a[0], s32(a[1]), s32(a[2]))
             else:
                 raise ValueError("op %d" % code)
         return self.out
@@ -1448,6 +1834,27 @@ diff = pcc.diff
 
 def M(name, before, after):
     return (name, CC, before, after)
+
+
+def MB(name, block, old, new):
+    """`old` changed to `new` inside `block`, which is unique where `old`
+    alone is not: the fly-by's and the pre-race's Updates open alike."""
+    assert block.count(old) == 1, name
+    return M(name, block, block.replace(old, new))
+
+
+# The two Updates up to their test, the same but for the first lines.
+UPDATE_TEST = ("    int32_t viewID = c->Base.ViewID;\n    CameraMover *m;\n"
+               "    CameraDataItems cd;\n    int32_t idx;\n    int need;\n\n"
+               "    (void)dt;\n"
+               "    if (c->CurrentlyActiveCameraData == -1\n"
+               "        || c->Base.NeedToReloadCameraData != 0) {\n"
+               "        need = 1;\n"
+               "        c->Base.NeedToReloadCameraData = 0;\n")
+FU_TOP = "    // 0x0019ac50.\n" + UPDATE_TEST
+PRU_TOP = ("    // 0x0019afa8.\n"
+           "    struct Car *car = c->PreRaceCarsToCycle[c->PreRaceCurrCarCycleIndex];\n"
+           + UPDATE_TEST)
 
 
 MUTATIONS = [
@@ -1709,10 +2116,13 @@ MUTATIONS = [
     M("cu-null", "if (data != NULL && gBumperCameraMoverFn != NULL) {",
       "if (gBumperCameraMoverFn != NULL) {"),
     M("cu-parse", "        camera_data_items_parse(&cd, data);\n", ""),
-    M("cu-size", "bMalloc(1116,", "bMalloc(1112,"),
-    M("cu-name", '"BumperCameraMover", 0, 16', '"BumperCamera", 0, 16'),
-    M("cu-pool", '"BumperCameraMover", 0, 16', '"BumperCameraMover", 0, 0'),
-    M("cu-flags", '"BumperCameraMover", 0, 16', '"BumperCameraMover", 1, 16'),
+    M("cu-size", "        mem = bMalloc(1116,", "        mem = bMalloc(1112,"),
+    M("cu-name", '        mem = bMalloc(1116, "BumperCameraMover", 0, 16',
+      '        mem = bMalloc(1116, "BumperCamera", 0, 16'),
+    M("cu-pool", '        mem = bMalloc(1116, "BumperCameraMover", 0, 16',
+      '        mem = bMalloc(1116, "BumperCameraMover", 0, 0'),
+    M("cu-flags", '        mem = bMalloc(1116, "BumperCameraMover", 0, 16',
+      '        mem = bMalloc(1116, "BumperCameraMover", 1, 16'),
     M("cu-view", "mem, c->Base.ViewID, c->pPlayer->MyCar, &cd);",
       "mem, 0, c->pPlayer->MyCar, &cd);"),
     M("cu-car", "mem, c->Base.ViewID, c->pPlayer->MyCar, &cd);",
@@ -1728,8 +2138,8 @@ MUTATIONS = [
       "    camera_coordinator_init(&c->Base, 0);\n    c->Base._vtable = FLYBY"),
     M("fb-vt", "    c->Base._vtable = FLYBYCAMERACOORDINATOR_VTABLE;\n    c->CurrVortexCount",
       "    c->Base._vtable = COUNTDOWNCAMERACOORDINATOR_VTABLE;\n    c->CurrVortexCount"),
-    M("fb-vortex", "    c->CurrVortexCount = TheCameraLoader.VortexCount;\n",
-      "    c->CurrVortexCount = 0;\n"),
+    M("fb-vortex", "FLYBYCAMERACOORDINATOR_VTABLE;\n    c->CurrVortexCount = TheCameraLoader.VortexCount;\n",
+      "FLYBYCAMERACOORDINATOR_VTABLE;\n    c->CurrVortexCount = 0;\n"),
     M("fb-active", "    c->CurrentlyActiveCameraData = -1;\n    c->FlyByCameraIndex = 0;",
       "    c->CurrentlyActiveCameraData = 0;\n    c->FlyByCameraIndex = 0;"),
     M("fb-index", "    c->CurrentlyActiveCameraData = -1;\n    c->FlyByCameraIndex = 0;",
@@ -1746,18 +2156,20 @@ MUTATIONS = [
       "return TheCameraLoader.NumFlyByCameras <= 0;"),
     M("fbf-not", "return TheCameraLoader.NumFlyByCameras == 0;",
       "return TheCameraLoader.NumFlyByCameras != 0;"),
-    M("fu-view", "    int32_t viewID = c->Base.ViewID;\n    CameraMover *m;",
-      "    int32_t viewID = 1;\n    CameraMover *m;"),
-    M("fu-first", "    if (c->CurrentlyActiveCameraData == -1\n",
-      "    if (c->CurrentlyActiveCameraData < 0\n"),
-    M("fu-first-off", "    if (c->CurrentlyActiveCameraData == -1\n        || ",
-      "    if (0\n        || "),
-    M("fu-reload", "        || c->Base.NeedToReloadCameraData != 0) {",
-      "        || c->Base.NeedToReloadCameraData > 0) {"),
-    M("fu-reload-off", "        || c->Base.NeedToReloadCameraData != 0) {",
-      "        ) {"),
-    M("fu-clear", "        need = 1;\n        c->Base.NeedToReloadCameraData = 0;\n",
-      "        need = 1;\n"),
+    MB("fu-view", FU_TOP, "    int32_t viewID = c->Base.ViewID;\n",
+       "    int32_t viewID = 1;\n"),
+    MB("fu-first", FU_TOP, "    if (c->CurrentlyActiveCameraData == -1\n",
+       "    if (c->CurrentlyActiveCameraData < 0\n"),
+    MB("fu-first-off", FU_TOP,
+       "    if (c->CurrentlyActiveCameraData == -1\n        || ",
+       "    if (0\n        || "),
+    MB("fu-reload", FU_TOP, "        || c->Base.NeedToReloadCameraData != 0) {",
+       "        || c->Base.NeedToReloadCameraData > 0) {"),
+    MB("fu-reload-off", FU_TOP,
+       "        || c->Base.NeedToReloadCameraData != 0) {", "        ) {"),
+    MB("fu-clear", FU_TOP,
+       "        need = 1;\n        c->Base.NeedToReloadCameraData = 0;\n",
+       "        need = 1;\n"),
     M("fu-null", "        if (m == NULL || m->Type != CM_TRACK_FLY)\n            need = 1;",
       "        if (m == NULL)\n            need = 1;"),
     M("fu-type", "        if (m == NULL || m->Type != CM_TRACK_FLY)\n            need = 1;",
@@ -1774,8 +2186,10 @@ MUTATIONS = [
       "        idx = 0;"),
     M("fu-wrap-local", "        c->FlyByCameraIndex = 0;\n        idx = 0;",
       "        c->FlyByCameraIndex = 0;"),
-    M("fu-vortex", "    c->CurrVortexCount++;\n", ""),
-    M("fu-vortex2", "    c->CurrVortexCount++;\n", "    c->CurrVortexCount += 2;\n"),
+    M("fu-vortex", "    c->CurrVortexCount++;\n    camera_data_items_parse(&cd,",
+      "    camera_data_items_parse(&cd,"),
+    M("fu-vortex2", "    c->CurrVortexCount++;\n    camera_data_items_parse(&cd,",
+      "    c->CurrVortexCount += 2;\n    camera_data_items_parse(&cd,"),
     M("fu-parse", "camera_data_items_parse(&cd, TheCameraLoader.FlyByCameraData[idx]);",
       "camera_data_items_parse(&cd, TheCameraLoader.FlyByCameraData[0]);"),
     M("fu-del", "        delete_mover(c->Base.pCameraMover);\n        c->Base.pCameraMover = NULL;\n    }\n    if (gTrackFly",
@@ -1798,6 +2212,148 @@ MUTATIONS = [
     M("vt-fb-dtor", "E(flyby_camera_coordinator_destroy),", "{ 0, 0, NULL },"),
     M("vt-fb-update", "E(flyby_camera_coordinator_update),", "{ 0, 0, NULL },"),
     M("vt-fb-install", "    vt_install(FLYBYCAMERACOORDINATOR_VTABLE, flyby_vt,\n               CAMERACOORDINATOR_VT_ENTRIES);\n", ""),
+
+    # -- PreRaceCameraCoordinator's constructor ---------------------------------
+    M("pri-base", "    camera_coordinator_init(&c->Base, viewID);\n    c->PreRaceCurrCarCycleIndex = 0;",
+      "    c->PreRaceCurrCarCycleIndex = 0;"),
+    M("pri-caridx", "    c->PreRaceCurrCarCycleIndex = 0;\n    c->PreRaceCameraIndex = -1;",
+      "    c->PreRaceCurrCarCycleIndex = 1;\n    c->PreRaceCameraIndex = -1;"),
+    M("pri-camidx", "    c->PreRaceCameraIndex = -1;", "    c->PreRaceCameraIndex = 0;"),
+    M("pri-active", "    c->CurrentlyActiveCameraData = -1;\n    c->CurrVortexCount = TheCameraLoader.VortexCount;\n    c->PreRace",
+      "    c->CurrentlyActiveCameraData = 0;\n    c->CurrVortexCount = TheCameraLoader.VortexCount;\n    c->PreRace"),
+    M("pri-vortex", "    c->CurrVortexCount = TheCameraLoader.VortexCount;\n    c->PreRaceCurrNumCamerasCycled = 0;",
+      "    c->CurrVortexCount = 0;\n    c->PreRaceCurrNumCamerasCycled = 0;"),
+    M("pri-cycled", "    c->PreRaceCurrNumCamerasCycled = 0;\n    c->FinishedFlag = 0;",
+      "    c->PreRaceCurrNumCamerasCycled = 1;\n    c->FinishedFlag = 0;"),
+    M("pri-fin", "    c->FinishedFlag = 0;\n    c->Base._vtable", "    c->FinishedFlag = 1;\n    c->Base._vtable"),
+    M("pri-vt", "    c->Base._vtable = PRERACECAMERACOORDINATOR_VTABLE;\n    if (RaceParametersBeACop)",
+      "    c->Base._vtable = BASECAMERACOORDINATOR_VTABLE;\n    if (RaceParametersBeACop)"),
+    M("pri-cop", "    if (RaceParametersBeACop) {", "    if (!RaceParametersBeACop) {"),
+    M("pri-cop-pos", "    if (RaceParametersBeACop) {", "    if (RaceParametersBeACop > 0) {"),
+    M("pri-cop-2p", "        if (PlayerNumPlayers == 2) {\n            cars[0]",
+      "        if (PlayerNumPlayers >= 2) {\n            cars[0]"),
+    M("pri-cop-c0", "            cars[0] = PlayerPlayersByNumber[0]->MyCar;\n            cars[1]",
+      "            cars[0] = PlayerPlayersByIndex[0]->MyCar;\n            cars[1]"),
+    M("pri-cop-c1", "            cars[1] = PlayerPlayersByNumber[1]->MyCar;\n            n = 2;",
+      "            cars[1] = PlayerPlayersByIndex[1]->MyCar;\n            n = 2;"),
+    M("pri-cop-n2", "            n = 2;", "            n = 1;"),
+    M("pri-cop-rc0", "            cars[0] = racing_car(pCurrentRace, 0)->pCar;\n            for",
+      "            cars[0] = racing_car(pCurrentRace, 1 % pCurrentRace->NumRacingCars)->pCar;\n            for"),
+    M("pri-cop-loop", "            for (i = 1; i < 4; i++)", "            for (i = 1; i < 3; i++)"),
+    M("pri-cop-mod", "                                     i % pCurrentRace->NumRacingCars)->pCar;",
+      "                                     (i + 1) % pCurrentRace->NumRacingCars)->pCar;"),
+    M("pri-cop-n4", "            n = 4;\n        }\n    } else if", "            n = 3;\n        }\n    } else if"),
+    M("pri-2p", "    } else if (PlayerNumPlayers == 2) {", "    } else if (PlayerNumPlayers >= 2) {"),
+    M("pri-2p-c0", "        cars[0] = racing_car(pCurrentRace, 0)->pCar;\n        cars[1] = PlayerPlayersByNumber[0]->MyCar;",
+      "        cars[0] = PlayerPlayersByNumber[1]->MyCar;\n        cars[1] = PlayerPlayersByNumber[0]->MyCar;"),
+    M("pri-2p-c1", "        cars[1] = PlayerPlayersByNumber[0]->MyCar;\n        cars[2]",
+      "        cars[1] = PlayerPlayersByIndex[0]->MyCar;\n        cars[2]"),
+    M("pri-2p-c2", "        cars[2] = PlayerPlayersByNumber[1]->MyCar;\n        cars[3]",
+      "        cars[2] = PlayerPlayersByNumber[0]->MyCar;\n        cars[3]"),
+    M("pri-2p-c3", "        cars[3] = PlayerPlayersByNumber[0]->MyCar;", "        cars[3] = PlayerPlayersByNumber[1]->MyCar;"),
+    M("pri-2p-n", "        cars[3] = PlayerPlayersByNumber[0]->MyCar;\n        n = 4;",
+      "        cars[3] = PlayerPlayersByNumber[0]->MyCar;\n        n = 3;"),
+    M("pri-1p-c0", "        cars[0] = racing_car(pCurrentRace, 0)->pCar;\n        cars[1] = PlayerPlayersByIndex[0]->MyCar;",
+      "        cars[0] = PlayerPlayersByIndex[0]->MyCar;\n        cars[1] = PlayerPlayersByIndex[0]->MyCar;"),
+    M("pri-1p-c1", "        cars[1] = PlayerPlayersByIndex[0]->MyCar;\n        cars[2]",
+      "        cars[1] = PlayerPlayersByNumber[0]->MyCar;\n        cars[2]"),
+    M("pri-1p-c2", "        cars[2] = PlayerPlayersByIndex[0]->MyCar;\n        cars[3]",
+      "        cars[2] = PlayerPlayersByIndex[1]->MyCar;\n        cars[3]"),
+    M("pri-1p-c3", "        cars[3] = PlayerPlayersByIndex[0]->MyCar;", "        cars[3] = PlayerPlayersByIndex[1]->MyCar;"),
+    M("pri-1p-n", "        cars[3] = PlayerPlayersByIndex[0]->MyCar;\n        n = 4;",
+      "        cars[3] = PlayerPlayersByIndex[0]->MyCar;\n        n = 2;"),
+    M("pri-ncars", "    c->PreRaceNumCarsToCycle = n;", "    c->PreRaceNumCarsToCycle = 4;"),
+    M("pri-ncams", "    c->PreRaceNumCamerasToCycle = n;", "    c->PreRaceNumCamerasToCycle = 0;"),
+
+    # -- its destructor and IsFinished -------------------------------------------
+    M("prd-vt", "    c->Base._vtable = PRERACECAMERACOORDINATOR_VTABLE;\n    camera_coordinator_destroy",
+      "    camera_coordinator_destroy"),
+    M("prd-flags", "    camera_coordinator_destroy(&c->Base, flags);\n}\n\nint32_t prerace",
+      "    camera_coordinator_destroy(&c->Base, 0);\n}\n\nint32_t prerace"),
+    M("prd-base", "    camera_coordinator_destroy(&c->Base, flags);\n}\n\nint32_t prerace",
+      "}\n\nint32_t prerace"),
+    M("prf-zero", "return ((PreRaceCameraCoordinator *)c)->FinishedFlag;", "return 0;"),
+    M("prf-bool", "return ((PreRaceCameraCoordinator *)c)->FinishedFlag;",
+      "return ((PreRaceCameraCoordinator *)c)->FinishedFlag != 0;"),
+
+    # -- its Update ----------------------------------------------------------------
+    MB("pru-car", PRU_TOP, "c->PreRaceCarsToCycle[c->PreRaceCurrCarCycleIndex]",
+       "c->PreRaceCarsToCycle[0]"),
+    MB("pru-view", PRU_TOP, "    int32_t viewID = c->Base.ViewID;\n",
+       "    int32_t viewID = 1;\n"),
+    MB("pru-first", PRU_TOP, "    if (c->CurrentlyActiveCameraData == -1\n",
+       "    if (c->CurrentlyActiveCameraData < 0\n"),
+    MB("pru-first-off", PRU_TOP,
+       "    if (c->CurrentlyActiveCameraData == -1\n        || ",
+       "    if (0\n        || "),
+    MB("pru-reload", PRU_TOP, "        || c->Base.NeedToReloadCameraData != 0) {",
+       "        || c->Base.NeedToReloadCameraData > 0) {"),
+    MB("pru-reload-off", PRU_TOP,
+       "        || c->Base.NeedToReloadCameraData != 0) {", "        ) {"),
+    MB("pru-clear", PRU_TOP,
+       "        need = 1;\n        c->Base.NeedToReloadCameraData = 0;\n",
+       "        need = 1;\n"),
+    M("pru-null", "        if (m == NULL)\n            need = 1;\n        else\n            need = gBumper",
+      "        if (0)\n            need = 1;\n        else\n            need = gBumper"),
+    M("pru-fin", "|| gBumperCameraMoverIsFinishedFn(m) != 0;", "|| gBumperCameraMoverIsFinishedFn(m) > 0;"),
+    M("pru-fin-off", "|| gBumperCameraMoverIsFinishedFn(m) != 0;", "|| 0;"),
+    M("pru-need", "    if (!need)\n        return;\n\n    if (c->Base.pCameraMover != NULL) {",
+      "    if (c->Base.pCameraMover != NULL) {"),
+    M("pru-del", "        delete_mover(c->Base.pCameraMover);\n        c->Base.pCameraMover = NULL;\n    }\n    if (c->PreRace",
+      "        c->Base.pCameraMover = NULL;\n    }\n    if (c->PreRace"),
+    M("pru-del-clear", "        delete_mover(c->Base.pCameraMover);\n        c->Base.pCameraMover = NULL;\n    }\n    if (c->PreRace",
+      "        delete_mover(c->Base.pCameraMover);\n    }\n    if (c->PreRace"),
+    M("pru-done", "    if (c->PreRaceCurrNumCamerasCycled == c->PreRaceNumCarsToCycle\n",
+      "    if (c->PreRaceCurrNumCamerasCycled >= c->PreRaceNumCarsToCycle\n"),
+    M("pru-done-cams", "    if (c->PreRaceCurrNumCamerasCycled == c->PreRaceNumCarsToCycle\n",
+      "    if (c->PreRaceCurrNumCamerasCycled == c->PreRaceNumCamerasToCycle\n"),
+    M("pru-tune", "        && TunePreRaceSequence == 0) {", "        && 1) {"),
+    M("pru-tune-sign", "        && TunePreRaceSequence == 0) {", "        && TunePreRaceSequence <= 0) {"),
+    M("pru-finflag", "        c->FinishedFlag = 1;\n        return;", "        return;"),
+    M("pru-finret", "        c->FinishedFlag = 1;\n        return;\n    }", "        c->FinishedFlag = 1;\n    }"),
+    M("pru-caridx", "    idx = c->PreRaceCurrCarCycleIndex + 1;", "    idx = c->PreRaceCurrCarCycleIndex + 2;"),
+    M("pru-caridx-store", "    c->PreRaceCurrCarCycleIndex = idx;\n    if (idx == c->PreRaceNumCarsToCycle)",
+      "    if (idx == c->PreRaceNumCarsToCycle)"),
+    M("pru-carwrap", "    if (idx == c->PreRaceNumCarsToCycle)", "    if (idx >= c->PreRaceNumCarsToCycle)"),
+    M("pru-carwrap-cams", "    if (idx == c->PreRaceNumCarsToCycle)", "    if (idx == c->PreRaceNumCamerasToCycle)"),
+    M("pru-carwrap-val", "        c->PreRaceCurrCarCycleIndex = 0;", "        c->PreRaceCurrCarCycleIndex = 1;"),
+    M("pru-camidx", "    idx = c->PreRaceCameraIndex + 1;", "    idx = c->PreRaceCameraIndex + 2;"),
+    M("pru-camidx-store", "    c->PreRaceCameraIndex = idx;\n    if (!(idx <",
+      "    if (!(idx <"),
+    M("pru-camwrap", "    if (!(idx < TheCameraLoader.NumPreRaceCameras))",
+      "    if (!(idx <= TheCameraLoader.NumPreRaceCameras))"),
+    M("pru-camwrap-val", "        c->PreRaceCameraIndex = 0;", "        c->PreRaceCameraIndex = 1;"),
+    M("pru-anim", "    if (car->pAnimatedDriver != NULL\n", "    if (car->pAnimatedDriver == NULL\n"),
+    M("pru-anim-off", "        gAnimatedDriverBeginAPreRaceAnimationFn(car->pAnimatedDriver);",
+      "        ;"),
+    M("pru-anim-car", "        gAnimatedDriverBeginAPreRaceAnimationFn(car->pAnimatedDriver);",
+      "        gAnimatedDriverBeginAPreRaceAnimationFn(c->PreRaceCarsToCycle[c->PreRaceCurrCarCycleIndex]->pAnimatedDriver);"),
+    M("pru-vortex", "    c->CurrVortexCount++;\n    camera_data_items_parse(\n", "    camera_data_items_parse(\n"),
+    M("pru-vortex2", "    c->CurrVortexCount++;\n    camera_data_items_parse(\n",
+      "    c->CurrVortexCount += 2;\n    camera_data_items_parse(\n"),
+    M("pru-parse", "&cd, TheCameraLoader.PreRaceCameraData[c->PreRaceCameraIndex]);",
+      "&cd, TheCameraLoader.PreRaceCameraData[0]);"),
+    M("pru-parse-idx", "&cd, TheCameraLoader.PreRaceCameraData[c->PreRaceCameraIndex]);",
+      "&cd, TheCameraLoader.PreRaceCameraData[idx]);"),
+    M("pru-size", "void *mem = bMalloc(1116,", "void *mem = bMalloc(1112,"),
+    M("pru-name", 'void *mem = bMalloc(1116, "BumperCameraMover", 0, 16);',
+      'void *mem = bMalloc(1116, "BumperCamera", 0, 16);'),
+    M("pru-pool", 'void *mem = bMalloc(1116, "BumperCameraMover", 0, 16);',
+      'void *mem = bMalloc(1116, "BumperCameraMover", 0, 0);'),
+    M("pru-flags", 'void *mem = bMalloc(1116, "BumperCameraMover", 0, 16);',
+      'void *mem = bMalloc(1116, "BumperCameraMover", 1, 16);'),
+    M("pru-mview", "gBumperCameraMoverFn(mem, viewID, car, &cd);", "gBumperCameraMoverFn(mem, 1, car, &cd);"),
+    M("pru-mcar", "gBumperCameraMoverFn(mem, viewID, car, &cd);",
+      "gBumperCameraMoverFn(mem, viewID, c->PreRaceCarsToCycle[c->PreRaceCurrCarCycleIndex], &cd);"),
+    M("pru-mkeep", "        c->Base.pCameraMover = gBumperCameraMoverFn(mem, viewID, car, &cd);",
+      "        (void)gBumperCameraMoverFn(mem, viewID, car, &cd);"),
+    M("pru-cycled", "    c->PreRaceCurrNumCamerasCycled++;\n", ""),
+    M("pru-active", "    c->CurrentlyActiveCameraData = c->PreRaceCameraIndex;\n}",
+      "    c->CurrentlyActiveCameraData = idx;\n}"),
+    M("pru-active-off", "    c->CurrentlyActiveCameraData = c->PreRaceCameraIndex;\n}", "}"),
+    M("vt-pr-dtor", "E(prerace_camera_coordinator_destroy),", "{ 0, 0, NULL },"),
+    M("vt-pr-update", "E(prerace_camera_coordinator_update),", "{ 0, 0, NULL },"),
+    M("vt-pr-install", "    vt_install(PRERACECAMERACOORDINATOR_VTABLE, prerace_vt,\n               CAMERACOORDINATOR_VT_ENTRIES);\n", ""),
 ]
 
 EQUIVALENT = {
@@ -1810,6 +2366,8 @@ EQUIVALENT = {
     # After the wrap idx and FlyByCameraIndex are equal, and nothing in
     # between (the parse, the delete, the mover) writes the coordinator.
     "fu-reidx": "idx already equals FlyByCameraIndex",
+    # The same for the pre-race's destructor.
+    "prd-vt": "the base destructor stores its table first",
 }
 
 for _name in EQUIVALENT:

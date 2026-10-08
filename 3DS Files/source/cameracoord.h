@@ -1,7 +1,7 @@
 // cameracoord -- CameraCoordinator.obj (0x00199a98 .. 0x0019c0d0), in
 // part: the coordinators' base and their list, TheCameraLoader and the
-// camera chunks it keeps, the CameraDataItems parser, and the Countdown
-// and FlyBy coordinators.
+// camera chunks it keeps, the CameraDataItems parser, and the Countdown,
+// FlyBy and PreRace coordinators.
 //
 // A camera coordinator owns a CameraMover and swaps it as the race goes
 // on. Each one is on CameraCoordinatorList from its constructor to its
@@ -18,10 +18,11 @@
 // its drive camera, all through the countdown.
 //
 // FlyByCameraCoordinator is here too, building its movers through
-// gTrackFlyCameraMoverFn. Not ported here: the Demo, PreRace, PostRace and
-// NIS coordinators (0x0019a440 .. 0x0019b6a4) and BumperCameraMover, which
-// four of them build. Written up in docs/formats/camera-coordinator.md and
-// checked on retail's image by tools/cameracoord_check.py.
+// gTrackFlyCameraMoverFn, and PreRaceCameraCoordinator, building its
+// through gBumperCameraMoverFn. Not ported here: the Demo, PostRace and
+// NIS coordinators (0x0019a440 .. 0x0019b6a4). Written up in
+// docs/formats/camera-coordinator.md and checked on retail's image by
+// tools/cameracoord_check.py.
 #ifndef CAMERACOORD_H
 #define CAMERACOORD_H
 
@@ -32,6 +33,7 @@
 #include "cammover.h"
 #include "trackcarcam.h"
 
+struct AnimatedDriver;
 struct Car;
 struct Player;
 
@@ -322,6 +324,93 @@ int32_t flyby_camera_coordinator_is_finished(void *c);
 // one is built on it. The index flown is kept and the next is one on. dt
 // is unread.
 void flyby_camera_coordinator_update(FlyByCameraCoordinator *c, float dt);
+
+// ---------------------------------------------------------- the pre-race
+
+// PreRaceCameraCoordinator, 188 bytes (the demo's type#2361, retail's the
+// same). The race coordinator's PRERACE state builds one on view 1 once the
+// Starting Grid is gone: it puts a BumperCameraMover on each of a few cars
+// in turn, on INGAMEB's pre-race cameras one after another, and once it
+// has flown as many cameras as it has cars it is finished and the
+// countdown starts.
+#define PRERACE_CARS_TO_CYCLE 32
+
+typedef struct PreRaceCameraCoordinator {
+    BaseCameraCoordinator Base;                      //   0
+    int32_t      CurrentlyActiveCameraData;          //  28  -1 until the first
+    int32_t      CurrVortexCount;                    //  32
+    int32_t      PreRaceNumCamerasToCycle;           //  36
+    int32_t      PreRaceCurrNumCamerasCycled;        //  40
+    int32_t      PreRaceCameraIndex;                 //  44  the last flown
+    int32_t      PreRaceNumCarsToCycle;              //  48
+    struct Car  *PreRaceCarsToCycle[PRERACE_CARS_TO_CYCLE]; // 52
+    int32_t      PreRaceCurrCarCycleIndex;           // 180  the next car
+    int32_t      FinishedFlag;                       // 184
+} PreRaceCameraCoordinator;
+
+#if UINTPTR_MAX == 0xffffffffu
+typedef char preracecoord_layout_check[
+    (offsetof(PreRaceCameraCoordinator, CurrentlyActiveCameraData) == 28
+     && offsetof(PreRaceCameraCoordinator, PreRaceCarsToCycle) == 52
+     && offsetof(PreRaceCameraCoordinator, PreRaceCurrCarCycleIndex) == 180
+     && offsetof(PreRaceCameraCoordinator, FinishedFlag) == 184
+     && sizeof(PreRaceCameraCoordinator) == 188) ? 1 : -1];
+#endif
+
+// _vt$24PreRaceCameraCoordinator.
+#define PRERACECAMERACOORDINATOR_VTABLE 0x002b52b0u
+
+// What PreRaceCameraCoordinator::Update asks and calls, by name, not by a
+// table: BumperCameraMover::IsFinished (0x001589c8) on its mover, and
+// AnimatedDriver::BeginAPreRaceAnimation (0x0019c078, QueueRandomAnimations
+// with 12, 13 and 2) on the car's driver, when it has one. With IsFinished
+// NULL a mover counts as finished; with the animation NULL nothing is
+// queued. The mover is built through gBumperCameraMoverFn.
+extern int32_t (*gBumperCameraMoverIsFinishedFn)(CameraMover *m);
+extern void (*gAnimatedDriverBeginAPreRaceAnimationFn)(
+    struct AnimatedDriver *d);
+
+// 0x0019ad78. The base's constructor; no camera yet (-1 for both the
+// active one and the index), the first car next, none cycled, not
+// finished, the loader's VortexCount and the pre-race table. Then the cars:
+//
+//   - Be A Cop, two players: the two players' cars, by number;
+//   - Be A Cop, otherwise: the racing cars 0 to 3, each modulo how many
+//     there are (retail divides by the count, so it needs one);
+//   - two players: racing car 0, then players 0, 1 and 0 by number;
+//   - otherwise: racing car 0, then player 0 by index three times.
+//
+// A racing car past the race's count is NULL, and its car is read through
+// it. As many cameras to cycle as cars. No Update.
+PreRaceCameraCoordinator *prerace_camera_coordinator_init(
+    PreRaceCameraCoordinator *c, int32_t viewID);
+
+// The constructor as rcstates.c's gPreRaceCameraCoordinatorCtorFn calls it,
+// on the 188 bytes it bMallocs.
+void *prerace_camera_coordinator_construct(void *mem, int32_t viewID);
+
+// 0x0019af90: the pre-race table, then the base's destructor.
+void prerace_camera_coordinator_destroy(PreRaceCameraCoordinator *c,
+                                        int32_t flags);
+
+// 0x0019c098: FinishedFlag, which rcstates.c's gPreRaceCameraIsFinishedFn
+// reads.
+int32_t prerace_camera_coordinator_is_finished(void *c);
+
+// 0x0019afa8. The car at the cycle index is read first. A new mover is
+// wanted when there has been none yet or the camera data are marked for a
+// reload (the mark is cleared), when the coordinator has no mover, or when
+// its mover is finished; no type is checked. The old mover is deleted.
+// Once as many cameras as cars have been flown, unless
+// TunePreRaceSequence is set, the coordinator is finished and builds
+// nothing. Otherwise the cycle index goes on one (back to 0 at the car
+// count), the camera index goes on one (back to 0 once it is not below the
+// pre-race count), the car's driver begins a pre-race animation, the
+// vortex count goes up by one, and a BumperCameraMover is built on that
+// camera for that car. One more is cycled, and the camera is the active
+// one. dt is unread.
+void prerace_camera_coordinator_update(PreRaceCameraCoordinator *c,
+                                       float dt);
 
 // The tables, into vtable.h's registry. main.c calls it at boot.
 void cameracoord_install_vtables(void);

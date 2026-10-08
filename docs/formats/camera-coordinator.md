@@ -15,10 +15,12 @@ Step 11g-2c-1 ported part of it, in `3DS Files/source/cameracoord.c`:
 - the coordinators' base and their list;
 - `CountdownCameraCoordinator`.
 
+11g-2c-2a added `FlyByCameraCoordinator`, and 11g-2c-2c-1
+`PreRaceCameraCoordinator`.
+
 These are not ported yet:
 
-- the Demo, FlyBy, PreRace, PostRace and NIS coordinators
-  (`0x0019a440` .. `0x0019b6a4`);
+- the Demo, PostRace and NIS coordinators;
 - `BumperCameraMover` (`0x00158800`), which four of them build.
 
 `tools/cameracoord_check.py` runs the port beside retail's own code (see
@@ -352,6 +354,76 @@ Every track bundle has its fly-bys in the camera chunk. All of them:
 - have a field of view of 71.5 degrees;
 - lock nothing to a car.
 
+## The pre-race
+
+The pre-race is the close-up of the cars on the grid, after the Starting
+Grid and before the 3-2-1. `RCSTATE_PRERACE` makes the coordinator on
+view 1 when it activates (`bMalloc` of 188) and waits on its `IsFinished`.
+
+### `PreRaceCameraCoordinator`, 188 bytes
+
+| Offset | Field |
+|---:|---|
+| 0 | `BaseCameraCoordinator` |
+| 28 | `CurrentlyActiveCameraData`, -1 until the first is built |
+| 32 | `CurrVortexCount` |
+| 36 | `PreRaceNumCamerasToCycle` |
+| 40 | `PreRaceCurrNumCamerasCycled` |
+| 44 | `PreRaceCameraIndex`, -1 before the first |
+| 48 | `PreRaceNumCarsToCycle` |
+| 52 | `PreRaceCarsToCycle[32]` |
+| 180 | `PreRaceCurrCarCycleIndex` |
+| 184 | `FinishedFlag` |
+
+The table is `_vt$24PreRaceCameraCoordinator` (`0x002b52b0`).
+
+- **Constructor** (`0x0019ad78`). It runs the base's constructor, zeroes
+  the car index, the count cycled and the flag, and sets the camera index
+  and the active camera to -1. `CurrVortexCount` is the loader's
+  `VortexCount`. Then it picks the cars:
+
+  | Race | Cars | n |
+  |---|---|---:|
+  | Be A Cop, two players | player 1's, player 2's | 2 |
+  | Be A Cop, otherwise | racing car 0, then racing cars 1 % k, 2 % k, 3 % k | 4 |
+  | Two players | racing car 0, player 1's, player 2's, player 1's | 4 |
+  | Otherwise | racing car 0, then the first player's three times | 4 |
+
+  k is the race's `NumRacingCars`; `Race::GetRacingCar` gives NULL past
+  it. "Player n" is `PlayersByNumber`, and "the first player" is
+  `PlayersByIndex[0]`. Be A Cop is `RaceParameters`+628. Both counts are
+  set to n.
+- **Destructor** (`0x0019af90`) puts its table back and runs the base's.
+- **`IsFinished`** (`0x0019c098`) returns `FinishedFlag`.
+- **`Update`** (`0x0019afa8`) never reads `dt`. It reads the car at the car
+  index first. It moves on when any of these holds:
+  - no camera is active yet (-1);
+  - the data are marked for reloading (it clears the mark);
+  - there is no mover;
+  - the mover's `IsFinished` is true. Unlike the fly-by, it does not look
+    at the mover's type.
+
+  Otherwise it does nothing. To move on, it:
+  1. deletes the mover, if any, and clears it;
+  2. sets `FinishedFlag` and stops, if it has cycled n cameras and
+     `TunePreRaceSequence` (gp-23108, a config item) is 0;
+  3. steps the car index, back to 0 at n;
+  4. steps the camera index, back to 0 when it is not below
+     `NumPreRaceCameras`;
+  5. starts a pre-race animation on the car's driver, if it has one
+     (`AnimatedDriver::BeginAPreRaceAnimation`, `0x0019c078`);
+  6. adds 1 to `CurrVortexCount`;
+  7. parses `PreRaceCameraData[camera index]`;
+  8. builds a `BumperCameraMover` (1116 bytes of `bMalloc`, named
+     `BumperCameraMover`) on the view, following the car read first;
+  9. adds 1 to the count cycled and makes the camera index the active
+     camera.
+
+So the first camera follows racing car 0. With one player the other
+three follow the player, each on the next pre-race camera. The pre-race
+cameras are INGAMEB's four, `Cam_01` to `Cam_04`; the tracks' bundles
+have none.
+
 ## The port
 
 - **Loader table.** `bchunkload.c` puts `loader_cameras` and
@@ -371,10 +443,17 @@ Every track bundle has its fly-bys in the camera chunk. All of them:
   ported. While it is NULL, a found countdown camera builds nothing. The
   retail disc never gets that far.
 - **The fly-by.** `main.c` points `gTrackFlyCameraMoverFn` and
-  `gTrackFlyCameraMoverIsFinishedFn` at `trackflycam.c`. The race
-  coordinator's `gFlyByCameraCoordinatorCtorFn` and
-  `gFlyByCameraIsFinishedFn` stay NULL until the Starting Grid can post
-  `RC_SKIP`.
+  `gTrackFlyCameraMoverIsFinishedFn` at `trackflycam.c`. Since the
+  Starting Grid (11g-2c-2b), the race coordinator's
+  `gFlyByCameraCoordinatorCtorFn` and `gFlyByCameraIsFinishedFn` point at
+  the fly-by coordinator.
+- **The pre-race.** `main.c` points `gPreRaceCameraCoordinatorCtorFn` and
+  `gPreRaceCameraIsFinishedFn` at the pre-race coordinator. Until
+  `BumperCameraMover` is ported, `gBumperCameraMoverFn` and
+  `gBumperCameraMoverIsFinishedFn` are NULL: the coordinator builds no
+  mover, so it moves on every frame and finishes after four frames. No car
+  has an `AnimatedDriver` yet, so `gAnimatedDriverBeginAPreRaceAnimationFn`
+  is NULL too.
 
 ## The check
 
@@ -410,10 +489,19 @@ types 2, 1 and 7 with 160 random steps, and over its edges. The
 `TrackFlyCameraMover` stand-in prints the record it is given, and its
 `IsFinished` returns a set value.
 
-The run gives 3970 ops and 9251 lines, with 0 differences. The mutation
-pass has 209 mutations. It catches 206, and 3 are equivalent:
+The pre-race coordinator is run over a world of 6 cars, 8 racing cars and
+4 drivers. Its constructor is run with every mix of Be A Cop, 0 to 3
+players and 1 to 5 racing cars that picks differently. Its `Update` is run
+for 400 random steps with the reload mark, the mover's `IsFinished` and
+`TunePreRaceSequence` set at random, then through to the end and over its
+edges. The `BumperCameraMover` stand-ins print the car they are given and
+return a set `IsFinished`.
+
+The run gives 6400 ops and 13655 lines, with 0 differences. The mutation
+pass has 293 mutations. It catches 289, and 4 are equivalent:
 
 - the fly-by destructor's table store, which the base's overwrites first;
+- the pre-race destructor's, for the same reason;
 - clearing the mover before the new one is stored over it;
 - re-reading the index, which equals `idx` there.
 

@@ -2292,6 +2292,22 @@ phases.
         full frontend (step 16), the saves (step 17) and every track and
         car (step 18).
 
+37. [ ] **Local Wireless (multi-card) play.** Asked for on 2026-10-07. Two
+        3DS consoles, each with the game and the retail files on its own
+        SD card, race each other over local wireless.
+        - Each console loads the track, the cars, their textures and the
+          music from its own card, so no file data goes over the air.
+        - Only small packets go between them, every frame: each car's
+          position, rotation, speed and physics vectors; the pad inputs
+          (steering, gas, brake); and game events, such as a spike strip
+          hit or a cop spawned.
+        - Retail's two-player mode is split-screen on one PS2 (task 30).
+          Here each player has a console. The two-player paths already
+          ported (PlayersByNumber, the two views, the pre-race camera's
+          two-player cars) are where the second player would come in,
+          driven by the other console's packets.
+        - Not started. It comes after the single-player race is whole.
+
 ### The retail frontend
 
 Asked for on 2026-09-28. The user sent seven PCSX2 photos of the retail
