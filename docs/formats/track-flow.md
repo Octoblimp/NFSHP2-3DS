@@ -255,8 +255,10 @@ The globals, at retail's addresses: `InGameFlag` (`0x00330540`),
 **Not on the device yet.** Nothing enters `LOADING_TRACK_COMMON`: the
 frontend's race start is not ported. Before it can, the device needs the
 texture pack streaming behind `LoadTexturesFromFile` and a
-`pHudTexturePack`, `LoadSoundRegionsInGame`, `eDuplicateSolid` and
-`eDeleteAllDuplicatedSolids`, the demo replay's file, and the eggs.
+`pHudTexturePack`, `LoadSoundRegionsInGame`, the demo replay's file,
+and the eggs. `eDuplicateSolid` and `eDeleteAllDuplicatedSolids` are
+ported (Session 52, [loader-table](loader-table.md)); before that a
+second car of the player's type drew its wheels alone.
 
 ### The viewer
 

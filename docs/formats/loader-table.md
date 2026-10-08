@@ -7,6 +7,9 @@
     retail's UnloaderTable          0x003102f8                   30 slots
     LoaderSolidList, its unloader   0x00102ff0 .. 0x00103514   1,312 bytes
     eFixUpTables, FixStripEntryTable 0x00103790 .. 0x00103918    392 bytes
+    retail's eDuplicateSolid        0x00103bf0
+    retail's eDeleteAllDuplicatedSolids 0x00103d58
+    retail's eSolid::ChangeName     0x00104030
     retail's eFixUpTables           0x00103e68
     retail's falloff ramp           0x00103260 .. 0x001033bc     348 bytes
     retail's ReconnectSolid         0x0010c5e8 .. 0x0010c680     152 bytes
@@ -15,9 +18,8 @@
     eFindSolid, eModel's list half  0x0010b1f8 .. 0x0010b444,   888 bytes
                                     0x0010b528, 0x0010b7b0 and 0x00114918
 
-Between the unloader and eFixUpTables, `eDuplicateSolid`,
-`eDeleteAllDuplicatedSolids` and `eCalcAutoK` are not ported, and neither
-are eModel's `AttachReplacementTextureTable` and `RenameTexture`.
+Between the unloader and eFixUpTables, `eCalcAutoK` is not ported, and
+neither are eModel's `AttachReplacementTextureTable` and `RenameTexture`.
 
 A bundle is read whole and loaded in place. `LoadChunks` walks its top
 level and gives each chunk to the loader that takes it. Unloading walks
@@ -260,6 +262,42 @@ power, plus (1 - power) times the bits of 1.0, and back. At the power of
 ones reach the 0.01 floor. A loop of `Width` (36, read signed) empty
 passes comes first and does nothing.
 
+## The copies -- eDuplicateSolid
+
+The second and later car of a type draws its body from copies of the
+type's solids. GameFlowLoadingTrackCommonPart2 makes them
+([track-flow](track-flow.md)): `%s_A` and `%s_B` as `%s_A%d` and
+`%s_B%d` for a car that can be dented, and `%s_SCUFFS` as `%s_SCUFFS%d`.
+Without them that car has no body, only its wheels.
+
+**`eDuplicateSolid(from, to)`** (retail `0x00103bf0`):
+
+1. `eFindSolid(bStringHash(from))`; nothing when there is none.
+2. A 192-byte copy of the eSolid, `bMalloc(192, "DuplicatedSolid", 0,
+   16)` and the copy constructor (`0x00114bb0`, every field), linked at
+   `SolidList`'s tail.
+3. Copies of the strip data (`"DuplicatedStripEntryData"`,
+   `SizeofStripEntryData` bytes) and of the strip table
+   (`"DuplicatedStripEntryTable"`, 64 bytes a strip), each with pool 16
+   and added to `MemoryUsedByDuplicatedSolids` (gp-24928). The 192 bytes
+   are not counted.
+4. `FixStripEntryTable` moves each strip's `Data` onto the copied data.
+5. Flags gets `4`, and `ChangeName(to)` (`0x00104030`) copies the name
+   (`bStrCpy`, unbounded; the disc's longest, `CORVETTECOP_SCUFFS7`, is
+   20 bytes of the 24) and sets `NameHash`.
+
+The texture and light-material tables, the animation tree, the rigid
+animation and the vertex animator stay the original's.
+
+**`eDeleteAllDuplicatedSolids()`** (retail `0x00103d58`), from the
+Begin of unloading: every solid on `SolidList` with flag `4` has its
+strip data and strip table freed (each when not NULL) and taken off the
+counter, both pointers cleared, and is unlinked and freed. The dirty
+flags are left alone.
+
+The port's are in `esolid.c`; `main.c` points trackflow's
+`gEDuplicateSolidFn` and `gEDeleteAllDuplicatedSolidsFn` at them.
+
 ## eModel's list half
 
 An eModel is a name and a pointer to the solid of that name.
@@ -384,3 +422,11 @@ The scenarios cover:
 - **The sun.** TRACKB12's own sun chunk is loaded and unloaded through both
   tables at each misalignment, then at version 1. Each dump shows SunInfo
   and SunPosition.
+- **The copies.** The Viper's and the bus's lists in one buffer: the
+  body halves and scuffs copied for instances 1 and 7, the bus's scuffs
+  that are not there, a copy's copy and a name copied twice. Each copy
+  prints its name, its source, whether its strip data (given a pattern
+  first, as the disc's comes as sizes) and its strip table but each
+  `Data` are the source's, and the counter. Then finds, models on three
+  copies, eFixUpTables with the solids dirty, the delete, a second
+  delete with nothing left, one more copy and its delete.

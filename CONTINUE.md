@@ -1,7 +1,10 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 51
-(2026-10-07), after 11g-2e, the rear-view mirror.
+Where the next session picks up. Updated in Session 52
+(2026-10-08), after two graphics fixes: a second car of the player's
+type drew its wheels alone (eDuplicateSolid was a NULL seam; ported,
+d110c44), and skins went missing on TRACKB45 (the upload's scratch now
+comes from the linear heap).
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
@@ -2554,8 +2557,7 @@ and so replaced every boot.
      8), through wrappers that set `gTrackFlowGameFlow` first.
      `trackview_free` runs the Begin of unloading with it NULL, so the
      viewer neither changes the flow nor unloads the frontend's speech.
-   - New seams, NULL on the device: eFlashScreen, eDuplicateSolid,
-     eDeleteAllDuplicatedSolids, DemoModeReplayLoad,
+   - New seams, NULL on the device: eFlashScreen, DemoModeReplayLoad,
      LoadSoundRegionsInGame, SetRenderEggFromEasterEggs, ResetRenderEggs
      and ClearTemporaryEasterEggs. A NULL load seam runs its callback at
      once, so the chain still reaches RACING.
@@ -3237,10 +3239,8 @@ and so replaced every boot.
        AdvanceWorldTime.
      - The items below.
    - LoadSoundRegionsInGame (`0x001ae798`), or its NULL;
-   - eDuplicateSolid (`0x00103bf0`: the eSolid copy constructor
-     `0x001147f0`, ChangeName `0x00103918`, FixStripEntryTable and the
-     solid list at gp-25712) and eDeleteAllDuplicatedSolids
-     (`0x00103d58`), for a second car of a type;
+   - eDuplicateSolid and eDeleteAllDuplicatedSolids: **done**, Session
+     52 (`esolid.c`, `docs/formats/loader-table.md`);
    - the RaceCoordinator built in `main.c` (`gNewRaceCoordinatorFn`) and
      its seams set where the port has the class;
    - the main loop's UpdateCameraMovers and UpdateCameraShakers, and the
@@ -4887,6 +4887,13 @@ Ordered roughly by how much time it costs to rediscover.
   straight to `.shbin.o` plus a `_shbin.h`, no extra target needed.
 
 ## Carried over, still open
+
+* **TRACKB45 at 15-20 FPS on Azahar (Session 52).** 45-50 ms of CPU
+  draw: about 550 models in view (15 ms) and eight cars close up at LOD 0
+  (17 ms), about 1,194 batches. For the speed work.
+* **The main heap is short on the big tracks (Session 52):** 1.5 to
+  3.4 MB free with traffic. bMalloc aborts on a failure, so move big
+  buffers that can live in linear memory there.
 
 * **The half-texel UV inset.** `RenderSingleFlailerBitmap` insets every
   corner by half a texel of the padded size before adding the scroll offset;

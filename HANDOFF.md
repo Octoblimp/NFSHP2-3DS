@@ -17048,3 +17048,54 @@ retail draws there too.
 4. The PostRace and Demo coordinators.
 5. The pause's other screens.
 6. Later: task 37, Local Wireless play.
+
+## Session 52 (2026-10-08) -- two graphics faults, and 11h-3, the TrafficTeleporter
+
+### The car with only its wheels
+
+The user saw their car lose its body mid-race, all but the wheels.
+
+- **The cause.** A car that can be dented and has an InstanceIndex above
+  0 draws its body from `%s_A%d` and `%s_B%d` (carrenderinfo.c). The
+  player's car always can be dented (fredrace.c), so it gets those names
+  whenever an AI drives the same type ahead of it in the list.
+  GameFlowLoadingTrackCommonPart2 makes the copies through
+  `gEDuplicateSolidFn`, which was NULL, so Body[0] had no solid.
+- **The fix (commit d110c44).** `esolid.c` has eDuplicateSolid (retail
+  0x00103bf0), eSolid::ChangeName (0x00104030) and
+  eDeleteAllDuplicatedSolids (0x00103d58), and `main.c` sets both seams.
+  `docs/formats/loader-table.md`, "The copies", has the detail.
+- **The check (commit 5b098db).** `loadertable_check` copies the
+  Viper's and the bus's solids as a race does and runs retail's code
+  beside the port: retail image 37,558 ops, 49,626 lines, 0 differ. Its
+  13 new mutations are all caught. The harness had stopped linking when
+  cameracoord.c began to read the players (Session 49); it defines them
+  now.
+
+### The see-through car
+
+Then the car looked like chrome you could see through. The same look
+was a missing skin on 2026-10-05 (commit 0355be5), and it was again.
+
+- **The cause.** `texpack_upload` and `texpack_upload_chain` decoded
+  into a `w*h*4` scratch from the main heap. On TRACKB45 with traffic the
+  heap was down to about 1.5 MB, in pieces, and six cars' 512x320 skins
+  (640 KB of scratch each) failed. A car with no skin draws its
+  reflection alone.
+- **The fix (commit d110c44).** The scratch comes from the linear heap
+  first, which has megabytes spare, and is asked for after the texture,
+  so freeing it leaves no hole below the texture. The main heap is the
+  fallback.
+- **On Azahar.** A forced race on track 45 with eight Vipers (the
+  player's is instance 7, `VIPERGTS_A7`): 0 textures missing, every car
+  painted, 3,372 KB of main heap free.
+
+### Found on the way
+
+- **TRACKB45 runs at 15-20 FPS on Azahar.** The draw takes 45-50 ms of
+  CPU: about 550 models in view (15 ms), and eight cars close to the
+  camera at LOD 0 (17 ms), in about 1,194 batches. It is a frame-rate
+  problem of its own, for the speed work.
+- **The main heap is short on the big tracks:** 1.5 to 3.4 MB free.
+  bMalloc aborts when it fails, so big buffers that can live in linear
+  memory should move there.
