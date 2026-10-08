@@ -2,8 +2,8 @@
 // 0x002315cc): teleport checks, collision tests, top speeds, angles and
 // cubics. CarInRecentCollision is here for CopDriver, GetForwardTrackDistance
 // and IsTeleportLocationClear for the track graph, and CanTeleport and
-// CarCausedRecentCollision for the cops' logic (12g-2); the rest come
-// with the chases.
+// CarCausedRecentCollision for the cops' logic (12g-2), DidTheseCarsCollide
+// for the chase's (12g-3); the rest come with the chases.
 
 #ifndef COPUTIL_H
 #define COPUTIL_H
@@ -35,6 +35,12 @@ int32_t can_teleport(struct Car *car, const bVector2 *dest);
 // it; that car, or NULL. A two-car collision with no other car ends the
 // search.
 struct Car *car_caused_recent_collision(struct Car *car);
+
+// DidTheseCarsCollide(Car *, Car *), 0x00231268: 1 when one of car a's
+// two-car collisions this frame is with car b. As in
+// CarCausedRecentCollision, a two-car collision with no other car ends
+// the search, with 0.
+int32_t did_these_cars_collide(struct Car *a, struct Car *b);
 
 // CarInRecentCollision, 0x00231258: 1 when the car's dynamic collision
 // body has a collision this frame (its NumCollisions byte, signed, is not

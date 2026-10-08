@@ -3,8 +3,10 @@
 // ClearPursuit, ClearSpeedTrap, DisableMyCar, the zones, the drive
 // target (IsNearPursuitTarget, InitializeDriveTarget, UpdateDriveTarget),
 // tAICop::Think with its transitions and the limbo, disabled and guard
-// logic, and the radar trap's, roadblock's and patrol's logic with
-// coputil.c's CanTeleport and CarCausedRecentCollision -- and on
+// logic, the radar trap's, roadblock's and patrol's logic with
+// coputil.c's CanTeleport and CarCausedRecentCollision, and the chase:
+// the hot pursuit and caught speeder logic, ReturnToPatrol and
+// GetBestFlankSide, with coputil.c's DidTheseCarsCollide -- and on
 // copmgr.c's CreateCop, 0x002276a0, AddCopCarToRace and ResetAllDamage,
 // and prints what the model prints for the retail image. See the
 // checker's docstring.
@@ -22,6 +24,7 @@
 #include "bslotpool.h"
 #include "car.h"
 #include "carinit.h"
+#include "carstate.h"
 #include "cartypeinfo.h"
 #include "collision.h"
 #include "collisionbody.h"
@@ -195,7 +198,7 @@ static World       world;
 static Car         cars[NCARS];
 static CarTypeInfo types[4];
 static DriverInfo  dinfo[4];
-static tPursuit    pursuits[4];
+static tPursuit    pursuits[5];
 static uint8_t     player_token[16], dmg_token[16], pool_token[16];
 static int         info_type[5];               // by DriverInfo, NULL first
 static int         nm, no, nk, nr;
@@ -422,11 +425,40 @@ void topology_destroy(TopologyCoordinate *tc)
     unreached("topology_destroy");
 }
 
+// World::Random's answers and CarState::WorldToCar's, from the script,
+// each queue in turn and round again (0 for an empty one).
+static int32_t  randi_q[16];
+static uint32_t randf_q[16], w2c_q[16][2];
+static int      nrandi, randi_at, nrandf, randf_at, nw2c, w2c_at;
+
+int32_t world_random_i(World *w, int32_t range)
+{
+    int32_t r = nrandi ? randi_q[randi_at++ % nrandi] : 0;
+
+    printf("  randi %s %d -> %d\n", sym(w), range, r);
+    return r;
+}
+
 float world_random_f(World *w, float f)
 {
-    (void)w; (void)f;
-    unreached("world_random_f");
-    return 0.0f;
+    uint32_t r = nrandf ? randf_q[randf_at++ % nrandf] : 0;
+
+    printf("  randf %s %08x -> %08x\n", sym(w), fb(f), r);
+    return bf(r);
+}
+
+void carstate_world_to_car2(CarState *s, bVector2 *out, const bVector2 *in)
+{
+    const uint32_t *r = w2c_q[nw2c ? w2c_at++ % nw2c : 0];
+    int             k;
+
+    for (k = 0; k < NCARS; k++)
+        if (s == &cars[k].State)
+            break;
+    out->x = bf(nw2c ? r[0] : 0);
+    out->y = bf(nw2c ? r[1] : 0);
+    printf("  w2c A%d %08x %08x -> %08x %08x\n", k, fb(in->x), fb(in->y),
+           fb(out->x), fb(out->y));
 }
 
 int32_t is_point_in_poly(const bVector2 *p, const bVector2 *poly, int32_t n)
@@ -568,23 +600,40 @@ static void repair(void *damage)
     printf("  repair %s\n", sym(damage));
 }
 
-// The logic not ported yet, each logged by its name.
-static void logic(const char *what, tAICop *c)
-{
-    printf("  logic %s %s\n", what, sym(c));
-}
-
-static void l_hot(tAICop *c) { logic("hot", c); }
-static void l_caught(tAICop *c) { logic("caught", c); }
-
 static uint32_t reqp_answer;
 
+// A pursuit granted is U4's, chasing the car, with the cop its primary.
 static int32_t reqp(tCopManager *mm, tCop *c, Car *car)
 {
     printf("  reqp %s", sym(mm));
     printf(" %s", sym(c));
     printf(" %s -> %d\n", sym(car), (int32_t)reqp_answer);
+    if (reqp_answer) {
+        pursuits[4].pChasedCar = car;
+        pursuits[4].Cops[0] = c;
+        pursuits[4].Cops[1] = NULL;
+        c->pMyPursuit = &pursuits[4];
+    }
     return (int32_t)reqp_answer;
+}
+
+// The chased car's collision body's table: SetToPhysicsMode and
+// ApplyImpulse, logged.
+#define CB_VT 0x00fe0000u
+
+static VtEntry cb_vt[COLLISIONBODY_VT_ENTRIES];
+
+static void cb_physmode(void *self, CollisionBody *other)
+{
+    printf("  physmode %s", sym(self));
+    printf(" %s\n", sym(other));
+}
+
+static void cb_impulse(void *self, bVector3 *j, bVector3 *at)
+{
+    printf("  impulse %s %08x %08x %08x %08x at %08x %08x %08x\n", sym(self),
+           fb(j->x), fb(j->y), fb(j->z), fb(j->pad), fb(at->x), fb(at->y),
+           fb(at->z));
 }
 
 static Car *car_or_null(int k)
@@ -783,8 +832,10 @@ static void tdump(int k)
            fb(a->fSubStateTimer), fb(a->New48.x), fb(a->New48.y),
            fb(a->New64), fb(a->New68), fb(a->fSecondsInPhysicsMode),
            fb(a->fMovementModeSwitchDelay), sym(a->Base.pMyPursuit));
-    printf(" st %s rbi %08x\n", sym(a->pMySpeedTrap),
-           (uint32_t)a->nMyRoadBlockIndex);
+    printf(" st %s rbi %08x dl %08x %08x flank %08x line %08x\n",
+           sym(a->pMySpeedTrap), (uint32_t)a->nMyRoadBlockIndex,
+           fb(a->MyDLOffset.x), fb(a->MyDLOffset.y), fb(a->fFlankSide),
+           (uint32_t)a->nDrivingLineIndex);
     printf("T%d car render %02x lights %08x siren %08x vis %08x move %08x "
            "vel %08x %08x %08x vmag %08x mv %08x blown %02x %02x rumble %08x "
            "trac %08x cdmg %08x\n",
@@ -869,6 +920,8 @@ static void car_field(Car *c, const char *f, uint32_t v)
         c->pCarDamage = v ? (CarDamage *)(void *)dmg_token : NULL;
     else if (!strcmp(f, "z"))
         c->State.Position.z = x;
+    else if (!strcmp(f, "dat"))
+        c->TheTrackPathCoordinate.DistanceAroundTrack = x;
     else {
         fprintf(stderr, "unknown car field %s\n", f);
         exit(2);
@@ -929,6 +982,10 @@ static void cop_field(tAICop *c, const char *f, uint32_t v)
         c->Base.DesiredLogicSubState = (eLogicSubState)v;
     else if (!strcmp(f, "rbi"))
         c->nMyRoadBlockIndex = (int32_t)v;
+    else if (!strcmp(f, "flank"))
+        c->fFlankSide = x;
+    else if (!strcmp(f, "line"))
+        c->nDrivingLineIndex = (int32_t)v;
     else {
         fprintf(stderr, "unknown cop field %s\n", f);
         exit(2);
@@ -986,6 +1043,8 @@ static void op(char **a, int na)
     } else if (!strcmp(o, "rp")) {
         if (!strcmp(a[1], "dir"))
             TheRaceParameters.TrackDirection = (int32_t)num(a[2]);
+        else if (!strcmp(a[1], "cs"))
+            TheRaceParameters.CopStrength = (int32_t)num(a[2]);
         else
             TheRaceParameters.nMaxCops = (int32_t)num(a[2]);
     } else if (!strcmp(o, "world")) {
@@ -1240,7 +1299,7 @@ static void op(char **a, int na)
         Car       *c = &cars[j];
         CopDriver *k = block(sizeof(CopDriver));
         CopMover  *mv = block(sizeof(CopMover));
-        void      *cb = block(64);
+        void      *cb = block(96);
 
         name(k, "KJ%d", j);
         name(mv, "MV%d", j);
@@ -1249,6 +1308,7 @@ static void op(char **a, int na)
         c->pCarController = (CarController *)(void *)k;
         c->pCarMover = (CarMover *)(void *)mv;
         c->pDynamicCollisionBody = cb;
+        ((CollisionBody *)cb)->_vtable = CB_VT;
         drivers[j]._vtable = NULLDRIVER_VTABLE;
     } else if (!strcmp(o, "cf")) {
         car_field(&cars[atoi(a[1])], a[2], hex(a[3]));
@@ -1394,6 +1454,60 @@ static void op(char **a, int na)
         Car *r = car_caused_recent_collision(&cars[atoi(a[1])]);
 
         printf("caused %s -> %s\n", a[1], sym(r));
+    } else if (!strcmp(o, "pcops")) {
+        tPursuit *p = &pursuits[atoi(a[1])];
+        int       j;
+
+        for (j = 0; j < 2; j++) {
+            int c = atoi(a[2 + j]);
+
+            p->Cops[j] = c >= 0 ? m->Cops[c] : NULL;
+        }
+    } else if (!strcmp(o, "mdiff")) {
+        m->nDifficultyLevel = (int32_t)num(a[1]);
+    } else if (!strcmp(o, "pflags")) {
+        pursuits[atoi(a[1])].BehaviourFlags = hex(a[2]);
+    } else if (!strcmp(o, "tlen")) {
+        TheTrackPathManager.TrackLength = bf(hex(a[1]));
+    } else if (!strcmp(o, "randi")) {
+        int j;
+
+        nrandi = na - 1;
+        randi_at = 0;
+        for (j = 0; j < nrandi; j++)
+            randi_q[j] = (int32_t)num(a[1 + j]);
+    } else if (!strcmp(o, "randf")) {
+        int j;
+
+        nrandf = na - 1;
+        randf_at = 0;
+        for (j = 0; j < nrandf; j++)
+            randf_q[j] = hex(a[1 + j]);
+    } else if (!strcmp(o, "w2c")) {
+        int j;
+
+        nw2c = (na - 1) / 2;
+        w2c_at = 0;
+        for (j = 0; j < nw2c; j++) {
+            w2c_q[j][0] = hex(a[1 + 2 * j]);
+            w2c_q[j][1] = hex(a[2 + 2 * j]);
+        }
+    } else if (!strcmp(o, "lhot") || !strcmp(o, "lcaught")
+               || !strcmp(o, "rtp")) {
+        tAICop *c = (tAICop *)(void *)m->Cops[atoi(a[1])];
+
+        if (!strcmp(o, "lhot"))
+            taicop_do_hot_pursuit_logic(c);
+        else if (!strcmp(o, "lcaught"))
+            taicop_do_caught_speeder_logic(c);
+        else
+            taicop_return_to_patrol(c);
+        printf("%s %s\n", o, a[1]);
+    } else if (!strcmp(o, "bfs")) {
+        float r = taicop_get_best_flank_side(
+            (tAICop *)(void *)m->Cops[atoi(a[1])], &cars[atoi(a[2])]);
+
+        printf("bfs %s %s -> %08x\n", a[1], a[2], fb(r));
     } else if (!strcmp(o, "new")) {
         printf("new -> %s\n", sym(taicop_new()));
     } else if (!strcmp(o, "del")) {
@@ -1439,9 +1553,14 @@ int main(int argc, char **argv)
     for (i = 0; i < 4; i++) {
         name(&types[i], "T%d", i);
         name(&dinfo[i], "D%d", i);
+    }
+    for (i = 0; i < 5; i++) {
         name(&pursuits[i], "U%d", i);
         memset(&pursuits[i], 0xcd, sizeof pursuits[i]);
         pursuits[i].pRoadBlock = NULL;
+        pursuits[i].Cops[0] = NULL;
+        pursuits[i].Cops[1] = NULL;
+        pursuits[i].BehaviourFlags = 0;
     }
     for (i = 0; i < NCARS * NCOLS; i++)
         name(coltok[i / NCOLS][i % NCOLS], "X%d", 10 * (i / NCOLS) + i % NCOLS);
@@ -1451,13 +1570,14 @@ int main(int argc, char **argv)
     gPursuitRemovePrimarySpeakerFn = rmspk;
     gCarDamageWreckFn = wreck;
     gCarDamageRepairAllFn = repair;
-    gAICopDoHotPursuitLogicFn = l_hot;
     gCopManagerRequestPursuitFn = reqp;
-    gAICopDoCaughtSpeederLogicFn = l_caught;
     gPlayerCopThinkFn = pthink;
     name(&TheDriveTargetRenderer, "DTR", 0);
     nd_vt[CARDRIVER_VT_SET_DESIRED_SPEED / 8].fn = (VtFn)nd_speed;
     vt_install(NULLDRIVER_VTABLE, nd_vt, CARDRIVER_VT_ENTRIES);
+    cb_vt[COLLISIONBODY_VT_SET_TO_PHYSICS_MODE / 8].fn = (VtFn)cb_physmode;
+    cb_vt[COLLISIONBODY_VT_APPLY_IMPULSE / 8].fn = (VtFn)cb_impulse;
+    vt_install(CB_VT, cb_vt, COLLISIONBODY_VT_ENTRIES);
     cop_install_vtables();
     copmgr_install_vtables();
     while (fgets(line, sizeof line, f) != NULL) {

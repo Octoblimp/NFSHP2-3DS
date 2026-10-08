@@ -23,6 +23,7 @@
 #include "drivetargetrenderer.h"
 #include "drivetrain.h"
 #include "eefpu.h"
+#include "race.h"
 #include "realtime.h"
 #include "trackroute.h"
 #include "vtable.h"
@@ -396,8 +397,6 @@ void taicop_update_drive_target(tAICop *c, const bVector2 *pos,
 
 // ---------------------------------------------------------------- Think
 
-void (*gAICopDoHotPursuitLogicFn)(tAICop *c);
-void (*gAICopDoCaughtSpeederLogicFn)(tAICop *c);
 void (*gPlayerCopThinkFn)(tPlayerCop *c);
 
 #define COP_UPRIGHT_Z        0.1f        // 3dcccccd, gp-26932
@@ -711,6 +710,566 @@ void taicop_do_driving_on_patrol_logic(tAICop *c)
     search(c, 1);
 }
 
+// ------------------------------------------------------------- the chase
+
+#define COP_PATROL_RACING    13.410818f  // 415692b6, gp-26860: 30 mph
+#define COP_GIVE_UP          450.0f      // 43e10000
+#define COP_FAR_BEHIND       -180.0f     // c3340000
+#define COP_AHEAD            6.0f        // 40c00000
+#define COP_CHASE_MPH        20.0f       // 41a00000
+#define COP_SLOW_MPH         5.0f        // 40a00000
+#define COP_FOLLOW_RANGE     21.0f       // 41a80000
+#define COP_CLOSE_RANGE      20.0f       // 41a00000
+#define COP_STOP_RANGE       10.0f       // 41200000, gp-15592
+#define COP_FOLLOW_PRIMARY   6.5f        // 40d00000, gp-15544
+#define COP_FOLLOW_OTHER     13.0f       // 41500000, gp-15540
+#define COP_FOLLOW_SIDE      2.5f        // 40200000
+#define COP_LOW_SPEED_X      6.0f        // 40c00000
+#define COP_LANE             3.0f        // 40400000
+#define COP_AT_OFFSET        0.01f       // 3c23d70a, gp-26892 and gp-26888
+#define COP_DRAW_UP          15.0f       // 41700000
+#define COP_ITS_WAY          1.0f        // 3f800000
+#define COP_FOLLOW_TIME      3.0f        // 40400000
+#define COP_OFFSET_TIME      2.0f        // 40000000
+#define COP_FLANK_TIME       2.25f       // 40100000
+#define COP_BUMP_TIME        1.75f       // 3fe00000
+#define COP_BUMP_MID         0.875f      // 3f600000
+#define COP_BUMP_HIT         0.4375f     // 3ee00000
+#define COP_BACK_OFF_TIME    1.25f       // 3fa00000
+#define COP_STOP_TIME        0.5f        // 3f000000
+#define COP_PULL_RATE        100.0f      // 42c80000
+#define COP_FRONT_ARC        16384       // 90 degrees as a BAM
+#define COP_SIDE_ARC         24576       // 135 degrees
+
+// The three tables the sub-logics copy to the stack and index: by
+// World::Random(3), the share of the flank side FOLLOW_BACKWARDS sidles to
+// (0x002bd5a0); by the chase's level, BUMP's push (0x002bd5f0) and the
+// range of PURSUIT_FOLLOW's draw for a flank (0x002bd628).
+static const float kBackOffShare[3] = { 1.0f, 0.5f, 0.25f };
+static const float kBumpPush[3] = { 7.0f, 10.0f, 15.0f };
+static const float kFlankDraw[3] = { 3.0f, 2.0f, 1.0f };
+
+void taicop_return_to_patrol(tAICop *c)
+{
+    tcop_set_desired_logic_state(&c->Base, LS_DRIVING_ON_PATROL);
+    c->Base.LogicSubState =
+        COP_PATROL_RACING < c->Base.pMyCar->State.ForwardSpeed
+            ? LSS_PATROL_RACING : LSS_PATROL_ONCOMING;
+}
+
+float taicop_get_best_flank_side(tAICop *c, Car *ch)
+{
+    const TrackRoutePoint *rp;
+    bVector2               local;
+    float                  lat;
+    int                    left, right, level;
+
+    // GetRoute's answer goes unused.
+    car_get_route(ch, 1);
+    rp = car_get_route_point(ch, 1);
+    lat = (ch->State.Position.x - rp->Position.x) * rp->Direction.y
+        - (ch->State.Position.y - rp->Position.y) * rp->Direction.x;
+    left = -rp->LeftWidth - lat <= -COP_LANE;
+    right = COP_LANE <= rp->RightWidth - lat;
+    carstate_world_to_car2(&ch->State, &local,
+                           (const bVector2 *)(const void *)
+                           &c->Base.pMyCar->State.Position);
+    level = fabsf(local.y) < COP_FOLLOW_SIDE;
+    if (local.x < 0.0f) {
+        if (left)
+            return -1.0f;
+    } else if (right) {
+        return 1.0f;
+    }
+    if (level)
+        return 0.0f;
+    if (right)
+        return 1.0f;
+    if (left)
+        return -1.0f;
+    return 0.0f;
+}
+
+// The chased car's distance from the cop's in x and y.
+static float chase_distance(const tAICop *c, const Car *ch)
+{
+    const Car *mine = c->Base.pMyCar;
+    float      dx = ch->State.Position.x - mine->State.Position.x;
+    float      dy = ch->State.Position.y - mine->State.Position.y;
+
+    return sqrtf(dx * dx + dy * dy);
+}
+
+// The cop's car against the chased car round the track, CompareDistances
+// of their DistanceAroundTracks: above 0 with the cop ahead.
+static float track_gap(const tAICop *c, const Car *ch)
+{
+    return trackpath_compare_distances(
+        &TheTrackPathManager,
+        c->Base.pMyCar->TheTrackPathCoordinate.DistanceAroundTrack,
+        ch->TheTrackPathCoordinate.DistanceAroundTrack);
+}
+
+// The chased car's speed, in mph and not made positive.
+static float chased_mph(const Car *ch)
+{
+    return ch->State.ForwardSpeed * COP_MPS_TO_MPH;
+}
+
+// Whether the cop is its chase's primary, Cops[0].
+static int is_primary(const tAICop *c)
+{
+    return c->Base.pMyPursuit->Cops[0] == &c->Base;
+}
+
+static float follow_distance(const tAICop *c)
+{
+    return is_primary(c) ? COP_FOLLOW_PRIMARY : COP_FOLLOW_OTHER;
+}
+
+// tCopManager's level for a player's car, else 2, the hardest.
+static int32_t chase_level(const Car *ch)
+{
+    return ch->pPlayer != NULL ? pCopManager->nDifficultyLevel : 2;
+}
+
+// New48 within 1 cm of MyDLOffset, x and then y.
+static int at_offset(const tAICop *c)
+{
+    return fabsf(c->New48.x - c->MyDLOffset.x) <= COP_AT_OFFSET
+        && fabsf(c->New48.y - c->MyDLOffset.y) <= COP_AT_OFFSET;
+}
+
+// A car's velocity along its route point's way.
+static float along_route(const Car *car, const TrackRoutePoint *rp)
+{
+    return car->State.Velocity.x * rp->Direction.x
+         + car->State.Velocity.y * rp->Direction.y;
+}
+
+// How far round from the chased car's heading the cop's car is, seen from
+// the chased car: 0 dead ahead, 32768 dead behind. `r` gets the distance.
+static uint32_t angle_off(const tAICop *c, const Car *ch, float *r)
+{
+    const Car *mine = c->Base.pMyCar;
+    bVector2   v;
+    bPolar     p;
+    int32_t    d;
+
+    v.x = mine->State.Position.x - ch->State.Position.x;
+    v.y = mine->State.Position.y - ch->State.Position.y;
+    bToPolar(&p, &v);
+    d = (int16_t)(uint16_t)(p.a - ch->State.Angle);
+    *r = p.r;
+    return (uint16_t)(d < 0 ? -d : d);
+}
+
+// The zone the chase's other cop holds. Retail reads the flank side at
+// +72 whatever the cop, which for a 52-byte tPlayerCop is past its end;
+// the port reads it from tAICops only, and takes 0 for Be A Cop's.
+static int32_t other_zone(const tCop *o)
+{
+    float side = 0.0f;
+
+    if (o->vptr == TAICOP_VTABLE)
+        side = ((const tAICop *)(const void *)o)->fFlankSide;
+    return get_zone_from_sub_state(o->LogicSubState, side);
+}
+
+typedef void (*BodyOtherFn)(void *self, CollisionBody *other);
+typedef void (*BodyImpulseFn)(void *self, bVector3 *j, bVector3 *at);
+
+// 0x0022f8d8. Behind the chased car, 6.5 m for the primary and 13 m for
+// the other cop. Further than 21 m, the other cop keeps 2.5 m to the
+// side. Closer, a draw under 1 from World::Random(3, 2 or 1) with the
+// timer run out, no knock between the two cars, a side to flank on and
+// the other cop's zone allowing it asks for FOLLOW_OFFSET on that side;
+// and a chased car under 20 mph either way, for LOW_SPEED_CLOSE_FOLLOW.
+static void follow(tAICop *c, eLogicSubState old, Car *ch)
+{
+    float side;
+
+    if (old != c->Base.LogicSubState) {
+        c->fSubStateTimer = COP_FOLLOW_TIME;
+        c->MyDLOffset.x = follow_distance(c);
+        c->MyDLOffset.y = 0.0f;
+    }
+    if (!(chase_distance(c, ch) < COP_FOLLOW_RANGE)) {
+        c->fSubStateTimer = COP_FOLLOW_TIME;
+        c->MyDLOffset.x = follow_distance(c);
+        c->MyDLOffset.y = is_primary(c) ? 0.0f : COP_FOLLOW_SIDE;
+        return;
+    }
+    if (c->MyDLOffset.x == 0.0f)
+        c->MyDLOffset.x = follow_distance(c);
+    if (world_random_f(pCurrentWorld, kFlankDraw[chase_level(ch)]) < 1.0f
+        && c->fSubStateTimer == 0.0f
+        && !did_these_cars_collide(c->Base.pMyCar, ch)
+        && (side = taicop_get_best_flank_side(c, ch)) != 0.0f) {
+        tPursuit *p = c->Base.pMyPursuit;
+        tCop     *o = p->Cops[0] == &c->Base ? p->Cops[1] : p->Cops[0];
+
+        if (o == NULL || o->pMyCar == NULL
+            || request_zone_permission(
+                   get_zone_from_sub_state(LSS_FOLLOW_OFFSET, side),
+                   other_zone(o))) {
+            c->fFlankSide = side;
+            c->Base.DesiredLogicSubState = LSS_FOLLOW_OFFSET;
+        }
+    }
+    if (fabsf(chased_mph(ch)) < COP_CHASE_MPH)
+        c->Base.DesiredLogicSubState = LSS_LOW_SPEED_CLOSE_FOLLOW;
+}
+
+// 0x0022f1d8. 6.5 m behind and 3 m out on the flank side. A side no
+// longer best goes back to PURSUIT_FOLLOW. With the timer run out and the
+// offset reached: a knock starts the timer again; otherwise a cop within
+// 135 degrees of the chased car's nose, or 15 m of it, asks for FLANK,
+// and one further back for PURSUIT_FOLLOW.
+static void follow_offset(tAICop *c, eLogicSubState old, Car *ch)
+{
+    uint32_t da;
+    float    r;
+
+    if (old != c->Base.LogicSubState)
+        c->fSubStateTimer = COP_OFFSET_TIME;
+    c->MyDLOffset.x = COP_FOLLOW_PRIMARY;
+    c->MyDLOffset.y = c->fFlankSide * COP_LANE;
+    if (taicop_get_best_flank_side(c, ch) != c->fFlankSide) {
+        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;
+        return;
+    }
+    if (c->fSubStateTimer != 0.0f || !at_offset(c))
+        return;
+    if (did_these_cars_collide(c->Base.pMyCar, ch)) {
+        c->fSubStateTimer = COP_OFFSET_TIME;
+        return;
+    }
+    da = angle_off(c, ch, &r);
+    if (da < COP_SIDE_ARC || !(COP_DRAW_UP < r))
+        c->Base.DesiredLogicSubState = LSS_FLANK;
+    else
+        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;
+}
+
+// 0x0022fb68. 6 m behind, in line. Above 20 mph the chased car is
+// followed again; under 5 mph and within 10 m, the cop asks for STOP.
+static void low_speed_close_follow(tAICop *c, eLogicSubState old, Car *ch)
+{
+    float s;
+
+    if (old != c->Base.LogicSubState) {
+        c->MyDLOffset.y = 0.0f;
+        c->MyDLOffset.x = COP_LOW_SPEED_X;
+    }
+    s = fabsf(chased_mph(ch));
+    if (COP_CHASE_MPH < s)
+        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;
+    if (s < COP_SLOW_MPH && chase_distance(c, ch) < COP_STOP_RANGE)
+        c->Base.DesiredLogicSubState = LSS_STOP;
+}
+
+// 0x0022f000, a chased car going against its route. Within 20 m the
+// primary keeps 6.5 m back, and with its timer run out sidles a share
+// (World::Random(3) of 1, 0.5 or 0.25) toward the best flank side for
+// 1.25 s; further off it drops the offsets. The other cop keeps 13 m back
+// within 20 m, else 0, and 2.5 m to the side. Under 5 mph and within 10 m
+// asks for STOP; a chased car back on its way, above 1 m/s along its
+// route, for PURSUIT_FOLLOW.
+static void follow_backwards(tAICop *c, eLogicSubState old, Car *ch)
+{
+    float d = chase_distance(c, ch);
+
+    (void)old;
+    if (is_primary(c)) {
+        if (d < COP_CLOSE_RANGE) {
+            c->MyDLOffset.x = COP_FOLLOW_PRIMARY;
+            if (c->fSubStateTimer == 0.0f) {
+                float   side = taicop_get_best_flank_side(c, ch);
+                int32_t i = world_random_i(pCurrentWorld, 3);
+
+                c->fSubStateTimer = COP_BACK_OFF_TIME;
+                c->MyDLOffset.y = kBackOffShare[i] * side;
+            }
+        } else {
+            c->MyDLOffset.x = 0.0f;
+            c->MyDLOffset.y = 0.0f;
+        }
+    } else {
+        c->MyDLOffset.x = d < COP_CLOSE_RANGE ? COP_FOLLOW_OTHER : 0.0f;
+        c->MyDLOffset.y = COP_FOLLOW_SIDE;
+    }
+    if (fabsf(chased_mph(ch)) < COP_SLOW_MPH && d < COP_STOP_RANGE)
+        c->Base.DesiredLogicSubState = LSS_STOP;
+    if (COP_ITS_WAY < along_route(ch, car_get_route_point(ch, 1)))
+        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;
+}
+
+// 0x0022f398. Level with the chased car, 3 m out on the flank side, for
+// 2.25 s at a time. A side no longer best goes back to FOLLOW_OFFSET. A
+// cop in front of the chased car's flank (within 90 degrees of its nose)
+// picks the next move by the chase's behaviour bit 4: a player's car
+// without it is got ahead of, and with it bumped, but for a 2-in-15 draw
+// that sends the primary ahead; another car is left alone without it,
+// and with it bumped but for the same draw. With the timer run out and
+// the offset reached, the timer starts again, and a cop fallen back past
+// 135 degrees asks for FOLLOW_OFFSET.
+static void flank(tAICop *c, eLogicSubState old, Car *ch)
+{
+    uint32_t da;
+    float    r;
+    int      front;
+
+    if (old != c->Base.LogicSubState) {
+        c->MyDLOffset.x = 0.0f;
+        c->fSubStateTimer = COP_FLANK_TIME;
+        c->MyDLOffset.y = c->fFlankSide * COP_LANE;
+    }
+    if (taicop_get_best_flank_side(c, ch) != c->fFlankSide) {
+        c->Base.DesiredLogicSubState = LSS_FOLLOW_OFFSET;
+        return;
+    }
+    da = angle_off(c, ch, &r);
+    front = da < COP_FRONT_ARC;
+    if (front) {
+        uint32_t f = c->Base.pMyPursuit->BehaviourFlags;
+
+        if (ch->pPlayer != NULL) {
+            if (!(f & 4))
+                c->Base.DesiredLogicSubState = LSS_GET_AHEAD;
+            else if ((uint32_t)world_random_i(pCurrentWorld, 15) < 2
+                     && is_primary(c))
+                c->Base.DesiredLogicSubState = LSS_GET_AHEAD;
+            else
+                c->Base.DesiredLogicSubState = LSS_BUMP;
+        } else if (f & 4) {
+            c->Base.DesiredLogicSubState =
+                (uint32_t)world_random_i(pCurrentWorld, 15) < 2
+                    ? LSS_GET_AHEAD : LSS_BUMP;
+        }
+    }
+    if (c->fSubStateTimer != 0.0f || !at_offset(c))
+        return;
+    c->fSubStateTimer = COP_FLANK_TIME;
+    if (!front && !(da < COP_SIDE_ARC))
+        c->Base.DesiredLogicSubState = LSS_FOLLOW_OFFSET;
+}
+
+// 0x0022f598. Swings in at the chased car's flank over 1.75 s, the side
+// offset going from 3 m in to 0 at half time and back out, pulled 100 a
+// second. Time up, back to FLANK. With CopStrength not 2 and a knock
+// between the two cars, a knock in the last quarter shoves the chased car
+// away from the cop, by 7, 10 or 15 for the chase's level -- the car in
+// physics mode first, and not at all with it not moving -- and either way
+// sends the cop back to FLANK.
+static void bump(tAICop *c, eLogicSubState old, Car *ch)
+{
+    int32_t   lvl = chase_level(ch);
+    float     t, s;
+    Car      *mine;
+    bVector3  j, at;
+    float     q, k;
+
+    if (old != c->Base.LogicSubState)
+        c->fSubStateTimer = COP_BUMP_TIME;
+    t = c->fSubStateTimer;
+    c->MyDLOffset.x = 0.0f;
+    c->New68 = COP_PULL_RATE;
+    c->New64 = COP_PULL_RATE;
+    s = fabsf(t - COP_BUMP_MID);
+    c->MyDLOffset.y = ((s + s) / COP_BUMP_TIME) * (c->fFlankSide * COP_LANE);
+    if (t == 0.0f) {
+        c->Base.DesiredLogicSubState = LSS_FLANK;
+        return;
+    }
+    if (TheRaceParameters.CopStrength == 2
+        || !did_these_cars_collide(c->Base.pMyCar, ch))
+        return;
+    if (!(c->fSubStateTimer < COP_BUMP_HIT)) {
+        c->Base.DesiredLogicSubState = LSS_FLANK;
+        return;
+    }
+
+    // The VU0's normalise of the way from the cop to the chased car, all
+    // four lanes, then times the push; the point of the impulse is 0.
+    mine = c->Base.pMyCar;
+    j.x = ch->State.Position.x - mine->State.Position.x;
+    j.y = ch->State.Position.y - mine->State.Position.y;
+    j.z = ch->State.Position.z - mine->State.Position.z;
+    j.pad = ch->State.Position.pad - mine->State.Position.pad;
+    q = ee_div(1.0f, sqrtf((j.x * j.x + j.y * j.y) + j.z * j.z));
+    k = kBumpPush[lvl];
+    j.x = j.x * q * k;
+    j.y = j.y * q * k;
+    j.z = j.z * q * k;
+    j.pad = j.pad * q * k;
+    at.x = 0.0f;
+    at.y = 0.0f;
+    at.z = 0.0f;
+    at.pad = 0.0f;
+    if (ch->TheMovementMode != eNO_MOVEMENT) {
+        CollisionBody *b = &ch->pDynamicCollisionBody->Dynamic.Body;
+        const VtEntry *e;
+
+        e = vt_slot(b->_vtable, COLLISIONBODY_VT_SET_TO_PHYSICS_MODE);
+        ((BodyOtherFn)e->fn)(vt_this(b, e), NULL);
+        e = vt_slot(b->_vtable, COLLISIONBODY_VT_APPLY_IMPULSE);
+        ((BodyImpulseFn)e->fn)(vt_this(b, e), &j, &at);
+    }
+    c->Base.DesiredLogicSubState = LSS_FLANK;
+}
+
+// 0x0022fc20. In line ahead of the chased car, on no driving line, pulled
+// 100 a second. A cop fallen behind follows again. One still ahead, with
+// the chased car above 20 mph by its VelocityMagnitude, going against its
+// route and over 20 m off, asks for FOLLOW_BACKWARDS. Either way a chased
+// car under 20 mph more than 10 m off asks for LOW_SPEED_CLOSE_FOLLOW.
+static void block(tAICop *c, eLogicSubState old, Car *ch)
+{
+    float d;
+
+    if (old != c->Base.LogicSubState) {
+        c->MyDLOffset.x = 0.0f;
+        c->nDrivingLineIndex = -1;
+    }
+    c->MyDLOffset.x = 0.0f;
+    c->New68 = COP_PULL_RATE;
+    c->New64 = COP_PULL_RATE;
+    c->MyDLOffset.y = 0.0f;
+    d = chase_distance(c, ch);
+    if (track_gap(c, ch) < 0.0f) {
+        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;
+    } else {
+        const TrackRoutePoint *rp = car_get_route_point(ch, 1);
+
+        if (COP_CHASE_MPH
+                < fabsf(ch->State.VelocityMagnitude * COP_MPS_TO_MPH)
+            && along_route(ch, rp) < 0.0f && COP_CLOSE_RANGE < d)
+            c->Base.DesiredLogicSubState = LSS_FOLLOW_BACKWARDS;
+    }
+    if (fabsf(chased_mph(ch)) < COP_CHASE_MPH && COP_STOP_RANGE < d)
+        c->Base.DesiredLogicSubState = LSS_LOW_SPEED_CLOSE_FOLLOW;
+}
+
+// 0x0022fee0. Once, on the way in: no driving line, and the side offset
+// where the cop's car is across its own route point.
+static void get_ahead(tAICop *c, eLogicSubState old, Car *ch)
+{
+    Car                   *mine;
+    const TrackRoutePoint *rp;
+
+    (void)ch;
+    if (old == c->Base.LogicSubState)
+        return;
+    c->MyDLOffset.x = 0.0f;
+    rp = car_get_route_point(c->Base.pMyCar, 1);
+    mine = c->Base.pMyCar;
+    c->nDrivingLineIndex = -1;
+    c->MyDLOffset.y = (mine->State.Position.x - rp->Position.x)
+                          * rp->Direction.y
+                    - (mine->State.Position.y - rp->Position.y)
+                          * rp->Direction.x;
+}
+
+// 0x0022fdb0. Driving line 0 and no offsets, until the cop is back within
+// 180 m of the chased car.
+static void acquire(tAICop *c, eLogicSubState old, Car *ch)
+{
+    if (old != c->Base.LogicSubState) {
+        c->nDrivingLineIndex = 0;
+        c->MyDLOffset.x = 0.0f;
+        c->MyDLOffset.y = 0.0f;
+    }
+    if (COP_FAR_BEHIND < track_gap(c, ch))
+        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;
+}
+
+// 0x0022fe28. On the chased car for half a second; then one moving off,
+// above 5 mph or more than 10 m away, is followed close again.
+static void stop(tAICop *c, eLogicSubState old, Car *ch)
+{
+    if (old != c->Base.LogicSubState) {
+        c->MyDLOffset.x = 0.0f;
+        c->fSubStateTimer = COP_STOP_TIME;
+        c->MyDLOffset.y = 0.0f;
+    }
+    if (c->fSubStateTimer <= 0.0f
+        && (COP_SLOW_MPH < fabsf(chased_mph(ch))
+            || COP_STOP_RANGE < chase_distance(c, ch)))
+        c->Base.DesiredLogicSubState = LSS_LOW_SPEED_CLOSE_FOLLOW;
+}
+
+void taicop_do_hot_pursuit_logic(tAICop *c)
+{
+    eLogicSubState old = c->Base.LogicSubState;
+    // Retail reads the chased car with no test of the pursuit.
+    Car           *ch = c->Base.pMyPursuit->pChasedCar;
+    float          gap;
+
+    if (old != c->Base.DesiredLogicSubState)
+        c->Base.LogicSubState = c->Base.DesiredLogicSubState;
+    gap = track_gap(c, ch);
+    if (COP_GIVE_UP <= fabsf(gap)) {
+        taicop_return_to_patrol(c);
+        taicop_clear_pursuit(c);
+        return;
+    }
+    if (gap <= COP_FAR_BEHIND)
+        c->Base.DesiredLogicSubState = LSS_ACQUIRE;
+    else if (COP_AHEAD <= gap && COP_CHASE_MPH <= chased_mph(ch))
+        c->Base.DesiredLogicSubState =
+            along_route(ch, car_get_route_point(ch, 1)) < 0.0f
+                ? LSS_FOLLOW_BACKWARDS : LSS_BLOCK;
+    switch (c->Base.LogicSubState) {
+    case LSS_PURSUIT_FOLLOW:
+        follow(c, old, ch);
+        break;
+    case LSS_FOLLOW_OFFSET:
+        follow_offset(c, old, ch);
+        break;
+    case LSS_LOW_SPEED_CLOSE_FOLLOW:
+        low_speed_close_follow(c, old, ch);
+        break;
+    case LSS_FOLLOW_BACKWARDS:
+        follow_backwards(c, old, ch);
+        break;
+    case LSS_FLANK:
+        flank(c, old, ch);
+        break;
+    case LSS_BUMP:
+        bump(c, old, ch);
+        break;
+    case LSS_BLOCK:
+        block(c, old, ch);
+        break;
+    case LSS_GET_AHEAD:
+        get_ahead(c, old, ch);
+        break;
+    case LSS_ACQUIRE:
+        acquire(c, old, ch);
+        break;
+    case LSS_STOP:
+        stop(c, old, ch);
+        break;
+    default:
+        break;
+    }
+}
+
+void taicop_do_caught_speeder_logic(tAICop *c)
+{
+    taicop_hold_position(c);
+    if (c->Base.LogicSubState != LSS_CAUGHTSPEEDER_WAITING)
+        return;
+    if (!(world_get_distance_to_closest_player_2d(pCurrentWorld,
+              (const bVector2 *)(const void *)&c->Base.pMyCar->State.Position)
+          < COP_FAR_FROM_PLAYERS))
+        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);
+    else if (c->fSubStateTimer == 0.0f)
+        taicop_return_to_patrol(c);
+    search(c, 0);
+}
+
 void taicop_movement_mode_transitions(tAICop *c)
 {
     Car         *car = c->Base.pMyCar;
@@ -888,12 +1447,6 @@ void taicop_handle_state_transitions(tAICop *c, eLogicState from,
     }
 }
 
-static void run_logic(void (*fn)(tAICop *c), tAICop *c)
-{
-    if (fn != NULL)
-        fn(c);
-}
-
 void taicop_think(tAICop *c)
 {
     Car  *car;
@@ -942,10 +1495,10 @@ void taicop_think(tAICop *c)
         taicop_do_driving_on_patrol_logic(c);
         break;
     case LS_HOT_PURSUIT:
-        run_logic(gAICopDoHotPursuitLogicFn, c);
+        taicop_do_hot_pursuit_logic(c);
         break;
     case LS_CAUGHT_SPEEDER:
-        run_logic(gAICopDoCaughtSpeederLogicFn, c);
+        taicop_do_caught_speeder_logic(c);
         break;
     case LS_GUARD_LOCATION:
         taicop_do_guard_location_logic(c);

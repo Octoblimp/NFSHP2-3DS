@@ -243,12 +243,29 @@ void taicop_do_speed_trap_logic(tAICop *c);
 void taicop_do_road_block_logic(tAICop *c);
 void taicop_do_driving_on_patrol_logic(tAICop *c);
 
-// The rest of the logic, not ported yet: NULL seams that do nothing, so a
-// cop asked for one of these states sits in it. DoHotPursuitLogic
-// (0x0022ff58) and DoCaughtSpeederLogic (0x002303c8), 12g-3; and
-// tPlayerCop::Think (0x0022d5c8), Be A Cop's, 12m.
-extern void (*gAICopDoHotPursuitLogicFn)(tAICop *c);
-extern void (*gAICopDoCaughtSpeederLogicFn)(tAICop *c);
+// The chase (docs/formats/cops.md, "The chase").
+//   DoHotPursuitLogic (0x0022ff58): the sub-state on to the one asked for;
+//     the cop's car against the chased car round the track: 450 m either
+//     way gives the chase up (ReturnToPatrol, then ClearPursuit), 180 m
+//     behind asks for ACQUIRE, and 6 m ahead of a car above 20 mph asks
+//     for FOLLOW_BACKWARDS if it goes against its route, else BLOCK. Then
+//     the sub-state's logic, PURSUIT_FOLLOW to STOP, through the table at
+//     0x002bd670, told the sub-state the frame began with.
+//   DoCaughtSpeederLogic (0x002303c8): holds position. While WAITING, no
+//     player within 250 m asks for LS_LIMBO, else a timer run out goes
+//     back to the patrol; then the radar trap's search.
+//   ReturnToPatrol (0x00230cb0): LS_DRIVING_ON_PATROL asked for, the sub-
+//     state PATROL_RACING above 30 mph and PATROL_ONCOMING below.
+//   GetBestFlankSide (0x00230248): which side of the chased car the cop
+//     can draw up on, 1 or -1, or 0 -- by where the cop is beside it, and
+//     the road's room (3 m) left and right of it at its route point.
+void  taicop_do_hot_pursuit_logic(tAICop *c);
+void  taicop_do_caught_speeder_logic(tAICop *c);
+void  taicop_return_to_patrol(tAICop *c);
+float taicop_get_best_flank_side(tAICop *c, struct Car *ch);
+
+// tPlayerCop::Think (0x0022d5c8), Be A Cop's, 12m: a NULL seam that does
+// nothing.
 extern void (*gPlayerCopThinkFn)(tPlayerCop *c);
 
 // The cops' cooperation zones. InitZonePermissionTable (0x0022f770)

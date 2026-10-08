@@ -17953,3 +17953,80 @@ cop leaves limbo yet.
 
 12g-3: DoHotPursuitLogic and DoCaughtSpeederLogic. Then 12h, tPursuit,
 starting with RequestPursuit.
+
+## Session 58, continued (2026-10-08) -- 12g-3, the chase
+
+The hot pursuit and caught speeder logics, ported from retail into
+`cop.c`. DidTheseCarsCollide is added to `coputil.c`.
+`docs/formats/cops.md` has a new section, "The chase".
+
+### What it does
+
+- **DoHotPursuitLogic** (`0x0022ff58`) takes up the sub-state asked
+  for, then measures the gap round the track (CompareDistances).
+  - 450 m either way: ReturnToPatrol and ClearPursuit.
+  - 180 m behind: ACQUIRE.
+  - 6 m ahead of a car at 20 mph or more: FOLLOW_BACKWARDS if it's going
+    against its route, else BLOCK.
+  - Then it runs the sub-state's logic.
+- **The ten sub-logics** (`0x0022f000` to `0x0022fee0`):
+  - follow behind, 6.5 m for the primary and 13 m for the other cop;
+  - draw for a flank, if the other cop's zone allows it;
+  - pull out 3 m to the side, come level, then bump the chased car or
+    get ahead of it, by the pursuit's behaviour bit 4 and a 2-in-15
+    draw;
+  - BUMP shoves the chased car through its collision body's physics
+    mode and impulse, by 7, 10 or 15 for the level;
+  - block ahead, follow a car going backwards, follow close when slow,
+    and stop on it.
+- **ReturnToPatrol** (`0x00230cb0`): DRIVING_ON_PATROL, racing above
+  30 mph and oncoming below.
+- **GetBestFlankSide** (`0x00230248`): the side with 3 m of road free.
+  The cop's own side comes first, then 0 when it is level within
+  2.5 m.
+- **DoCaughtSpeederLogic** (`0x002303c8`): holds still. In WAITING it
+  goes to limbo with no player within 250 m, or back on patrol when its
+  timer is 0; then it searches.
+- **DidTheseCarsCollide** (`0x00231268`): whether this frame's two-car
+  collisions include the other car.
+- The other cop's flank side is read from AI cops only. Retail reads it
+  past the end of a tPlayerCop; the side never counts in a sub-state a
+  player's cop holds.
+- `gAICopDoHotPursuitLogicFn` and `gAICopDoCaughtSpeederLogicFn` are
+  gone: Think calls the logics straight.
+
+The game plays the same as before: RequestPursuit grants nothing yet,
+so no cop is in a chase.
+
+### Checked
+
+- `cop_check` adds the chase on the same rig. The script queues
+  World::Random's and WorldToCar's answers, and logs the chased car's
+  physics mode and impulse through its body's table. CompareDistances,
+  bToPolar and DidTheseCarsCollide run as shipped.
+  - Each test is checked one bit either side and with NaN, plus 500
+    random runs.
+  - 756972 operations, 93019 lines, 0 differ.
+  - `--mutate`: 724 mutations, 719 caught, 5 equivalent. 181 of them
+    are new, and two of the new equivalents are explained in the doc.
+    14 older ones were anchored again where the chase repeats their
+    lines.
+- One mutant (`rtp_ge`) showed the 30 mph boundary wasn't tested. The
+  constant's comment and the test both had 0x41569446, but retail's
+  gp-26860 is 0x415692b6 (13.410818). The port's value was right; the
+  comment and the test now say 0x415692b6.
+- `copmanager_test.c` stands in for World::Random(int), WorldToCar,
+  CompareDistances and DidTheseCarsCollide; each aborts if reached.
+- These have 0 differ: copmanager (25100 lines), copdriver, trackgraph,
+  aidriver, carmode, collisionbody, copmover, drivecam, hudanim, hudcop,
+  hudfeatures, hudrender, hudscore, raceupdate, realdriver, trackmap and
+  world.
+- The CIA builds. `run_azahar_quickrace.ps1 -HoldKeys 65`, the
+  frontend's Hot Pursuit Quick Race with 4 cops, gives PASS at 30 FPS,
+  Speed 100%, with the AI racing.
+
+### Next
+
+12h: tPursuit, starting with RequestPursuit (`0x00225078`), which binds
+`gCopManagerRequestPursuitFn`, and the pursuit's constructor
+(`0x00228fc8`).

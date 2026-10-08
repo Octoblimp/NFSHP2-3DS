@@ -98,6 +98,32 @@ Car *car_caused_recent_collision(Car *car)
     }
 }
 
+int32_t did_these_cars_collide(Car *a, Car *b)
+{
+    CollisionBody *body = &a->pDynamicCollisionBody->Dynamic.Body;
+    int32_t        i = 0;
+
+    for (;;) {
+        Car *other = NULL;
+
+        while (i < body->NumCollisions) {
+            Collision *col = collisionbody_get_collision(body, i++);
+
+            if (collision_is_two_car_collision(col)) {
+                Car *c1, *c2;
+
+                collision_get_colliding_cars(col, &c1, &c2);
+                other = c1 == a ? c2 : c1;
+                break;
+            }
+        }
+        if (other == NULL)
+            return 0;
+        if (other == b)
+            return 1;
+    }
+}
+
 int32_t car_in_recent_collision(Car *car)
 {
     return car->pDynamicCollisionBody->Dynamic.Body.NumCollisions != 0;

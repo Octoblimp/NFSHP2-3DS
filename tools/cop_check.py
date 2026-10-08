@@ -145,7 +145,6 @@ S_DIST = 0x0014e3e8                     # World's 2D distance to a player
 S_REPAIR = 0x001b5c20                   # CarDamage's repair
 S_PTHINK = 0x0022d5c8                   # tPlayerCop::Think
 S_NDSPEED = 0x00136bd8                  # NullDriver::SetDesiredSpeed
-LOGIC = ((0x0022ff58, "hot"), (0x002303c8, "caught"))
 
 # 12g-2's: the radar trap's, roadblock's and patrol's logic, and coputil's
 # two it reaches.
@@ -166,6 +165,18 @@ S_GETCOL = 0x001d6f38                   # CollisionBody::GetCollision
 S_TWOCAR = 0x0021eb20                   # Collision::IsTwoCarCollision
 S_CARS = 0x0021eb48                     # Collision::GetCollidingCars
 S_INFRONT = 0x00133898                  # Car::IsCarInFront
+
+# 12g-3's: the chase, and what it reaches.
+F_HOT = 0x0022ff58                      # DoHotPursuitLogic
+F_CAUGHT = 0x002303c8                   # DoCaughtSpeederLogic
+F_RTP = 0x00230cb0                      # ReturnToPatrol
+F_BFS = 0x00230248                      # GetBestFlankSide
+S_RANDI = 0x0014e520                    # World::Random(int)
+S_RANDF = 0x0014e548                    # World::Random(float)
+S_W2C = 0x001c0b18                      # CarState::WorldToCar, 2D
+TPM = 0x0031bc38                        # TheTrackPathManager, TrackLength 0
+RP_CS = 648                             # TheRaceParameters.CopStrength
+CB_PHYSMODE, CB_IMPULSE = 112, 128      # its slots
 NCOLS = 8
 VT_NULLDRIVER = 0x002ae7c0
 DTR = 0x00314630                        # TheDriveTargetRenderer
@@ -188,8 +199,8 @@ NCARS = 4
 TYPE_SIZE = 576
 BODY = 480
 MGR_SIZE = 10516
-PURSUIT_SIZE = 64
-NPURSUITS = 4
+PURSUIT_SIZE = 1600
+NPURSUITS = 5
 CAR_DRIVER = 44
 DRIVER_SIZE = 560
 CAR_MOVER, CAR_BODY = 48, 52
@@ -205,12 +216,13 @@ CAR_FIELDS = {
     "move": (CAR_MOVE, "w"), "mode": (CAR_MODE, "w"), "drvnum": (10, "h"),
     "idx": (CAR_INDEX, "h"), "mv": (1088, "w"), "render": (CAR_RENDER, "b"),
     "lights": (CAR_LIGHTS, "w"), "siren": (CAR_SIREN, "w"),
-    "vis": (CAR_VIS, "w"), "z": (CAR_POS + 8, "f")}
+    "vis": (CAR_VIS, "w"), "z": (CAR_POS + 8, "f"), "dat": (2036, "f")}
 DRIVER_FIELDS = {"steer": (528, "h"), "thr": (532, "f"), "brk": (536, "f"),
                  "eb": (540, "f"), "dg": (544, "w"), "sg": (548, "w")}
 COP_FIELDS = {"n32": 32, "sst": 44, "phys": 84, "delay": 88, "n48x": 48,
               "n48y": 52, "dlx": 56, "dly": 60, "n64": 64, "n68": 68,
-              "ls": 12, "ds": 16, "lss": 20, "dlss": 24, "rbi": 40}
+              "ls": 12, "ds": 16, "lss": 20, "dlss": 24, "rbi": 40,
+              "flank": 72, "line": 92}
 MOVER_AIRBORNE = 112
 NQ, QPTS = 3, 40                        # the routes, and points each
 Q_HDR, Q_PT = 1064, 112
@@ -506,7 +518,8 @@ def think_script():
         pts, _ = route_points(rnd, cnt, start, hd)
         for i, w in enumerate(pts):
             s.append("qpt|%d|%d|%s" % (q, i, "|".join(w)))
-    s += ["carq|1|0|2", "nearq|1|1|0"]
+    s += ["carq|1|0|2", "nearq|1|1|0", "carq|0|0|5", "carq|2|1|3",
+          "carq|3|0|7"]
 
     # ---- HandleStateTransitions, every way out and in
     for frm in (-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9):
@@ -622,11 +635,13 @@ def think_script():
         for upz in (0.1, ulps(0.1, 1), ulps(0.1, -1), -1.0, NAN, 1.0, 0.0):
             for vmag in [ulps(base, n) for n in range(-3, 4)] + [0.0, NAN]:
                 s += prep() + ["af|0|ls|%d" % st, "af|0|ds|%d" % st,
+                               "setp|0|%d" % (0 if st == 6 else -1),
                                "cf|1|upz|%s" % H(upz),
                                "cf|1|vmag|%s" % H(vmag), "think|0",
                                "tdump|0"]
         for blown in (0, 1, 0x80, 0xff, 0x10):
             s += prep() + ["af|0|ls|%d" % st, "af|0|ds|%d" % st,
+                           "setp|0|%d" % (0 if st == 6 else -1),
                            "cf|1|blown|%x" % blown, "cf|1|dmg|1", "think|0",
                            "tdump|0"]
     # In a chase of a player 42.5 m off: RemovePrimarySpeaker's flag is 1
@@ -731,6 +746,9 @@ def think_script():
               "g|camf|%x" % rnd.choice((7, 0xffffffff))]
         if rnd.random() < 0.3:
             s += ["setp|0|0"]
+        elif 6 in (ls, ds):
+            # the chase reads its pursuit unchecked
+            s += ["setp|0|0"]
         s += ["strap|0|0"]
         for _ in range(rnd.randrange(1, 4)):
             s += ["think|0", "tdump|0"]
@@ -779,7 +797,8 @@ def logic_script():
         pts, _ = route_points(rnd, cnt, start, hd)
         for i, w in enumerate(pts):
             s.append("qpt|%d|%d|%s" % (q, i, "|".join(w)))
-    s += ["carq|1|0|2", "nearq|1|0|1"]
+    s += ["carq|1|0|2", "nearq|1|0|1", "carq|0|0|5", "carq|2|1|3",
+          "carq|3|0|7"]
     s += ["rbspot|5|0|%s|%s|0" % (H(-30.0), H(5.5)),
           "rbspot|5|1|%s|%s|40000" % (H(-25.0), H(9.0)),
           "rbspot|6|0|%s|%s|65535" % (H(-30.01), H(5.5)),
@@ -1056,6 +1075,452 @@ def logic_script():
     return s
 
 
+def chase_pt(i, x, y, dx, dy, lw, rw):
+    """Route Q2's point i, the chased cars': at (x, y), on the way
+    (dx, dy), lw wide to the left and rw to the right."""
+    w = [H(x), H(y), H(0.0), H(dx), H(dy), H(10.0), H(lw), H(rw)]
+    return "qpt|2|%d|%s" % (i, "|".join(w + ["00000000"] * 20))
+
+
+def cprep(ls=6, lss=3, dlss=None):
+    """lprep(), and the chase's world put back: cop 0 in state `ls`
+    chasing A2 -- at the origin, nobody's -- in U0 as its primary; cop 1
+    an AI cop in A3 following on the right, and cop 2 the player's,
+    neither in the chase; nothing drawn, no track length, every car level
+    round the track, at 5 m/s by its VelocityMagnitude and moving;
+    CopStrength 0, level 1, no behaviour bits; and A2's route point under
+    it, along x and 5 m wide each side."""
+    s = lprep()
+    s += ["wcar|2|5|%s|%s|0|1" % (H(0.0), H(0.0)), "randi", "randf", "w2c",
+          "tlen|0", "rp|cs|0", "mdiff|1", "pursuit|0|2", "pcops|0|0|-1",
+          "pflags|0|0", "setp|0|0", "af|0|ls|%x" % (ls & M32),
+          "af|0|ds|%x" % (ls & M32), "af|0|lss|%x" % (lss & M32),
+          "af|0|dlss|%x" % ((lss if dlss is None else dlss) & M32),
+          "af|0|flank|%s" % H(0.0), "mycar|1|3", "af|1|lss|3",
+          "af|1|flank|%s" % H(1.0), "lss|2|0",
+          chase_pt(0, 0.0, 0.0, 1.0, 0.0, 5.0, 5.0)]
+    for j in range(4):
+        s += ["cf|%d|dat|%s" % (j, H(0.0)), "cf|%d|vmag|%s" % (j, H(5.0)),
+              "cf|%d|move|1" % j]
+    return s
+
+
+def b2f(b):
+    return struct.unpack("<f", struct.pack("<I", b))[0]
+
+
+def chase_script():
+    """12g-3: the chase -- ReturnToPatrol, GetBestFlankSide, the hot
+    pursuit logic's way in and each of its ten sub-logics, the caught
+    speeder logic, and both through Think. Cop 0 drives A1, as in
+    logic_script; the chased car is A2 at the origin, and cop 0's car is
+    moved round it. Cop 1 is an AI cop in A3 and cop 2 a player's cop in
+    A0, each the chase's other cop when put in U0's Cops."""
+    rnd = random.Random(1233)
+    s = types() + fresh()
+    s += ["wcar|0|0|%s|%s|1|2" % (F(10.0), F(20.0)),
+          "wcar|1|3|%s|%s|0|0" % (F(-30.0), F(5.5)),
+          "wcar|2|5|%s|%s|0|1" % (F(0.0), F(0.0)),
+          "wcar|3|7|%s|%s|1|3" % (F(74.0), F(0.0))]
+    s += traps([(1.0, 2.0, 0, 0), (-30.0, 5.5, 100, 4)])
+    s += ["acop|0|0|4", "mycar|0|1", "rig|0", "rig|1", "rig|2", "rig|3",
+          "acop|1|0|5", "mycar|1|3", "pcop|2|9|0", "pursuit|1|0",
+          "pursuit|2|1", "pursuit|3|-1", "pursuit|4|-1"]
+    for q, (num, cnt, link, start, hd) in enumerate((
+            (5, 12, 1, (-40.0, 5.0), 0.0),
+            (9, 30, -1, (130.0, 5.0), 10.0))):
+        s.append("qroute|%d|%d|%d|%d" % (q, num, cnt, link))
+        pts, _ = route_points(rnd, cnt, start, hd)
+        for i, w in enumerate(pts):
+            s.append("qpt|%d|%d|%s" % (q, i, "|".join(w)))
+    s += ["qroute|2|200|4|-1",
+          chase_pt(1, 10.0, 20.0, 0.0, 1.0, 4.0, 6.0),
+          chase_pt(2, -30.0, 5.5, 1.0, 0.0, 5.0, 5.0),
+          chase_pt(3, 74.0, 0.0, -1.0, 0.0, 6.0, 4.0),
+          "carq|0|2|1", "carq|1|0|2", "carq|2|2|0", "carq|3|2|3",
+          "nearq|1|0|1"]
+    mph20 = 20.0 / 2.237
+    mph5 = 5.0 / 2.237
+
+    def cop_at(x, y):
+        return "wpos|1|%s|%s" % (H(x), H(y))
+
+    def run(extra, n=1):
+        return extra + ["lhot|0", "tdump|0"] * n
+
+    # ---- ReturnToPatrol: racing on above 30 mph
+    racing = b2f(0x415692b6)
+    for fwd in (racing, ulps(racing, 1), ulps(racing, -1), 0.0, -20.0,
+                100.0, NAN):
+        s += cprep() + ["cf|1|fwd|%s" % H(fwd), "rtp|0", "tdump|0"]
+
+    # ---- GetBestFlankSide: the lanes either side of the chased car, and
+    # where cop 0's car is from it
+    s += cprep()
+    for dx, dy in ((1.0, 0.0), (0.6, 0.8)):
+        for lw, rw in ((5.0, 5.0), (3.0, 3.0), (ulps(3.0, -1), 5.0),
+                       (5.0, ulps(3.0, -1)), (0.0, 0.0), (3.0, 0.0),
+                       (0.0, 3.0), (NAN, 5.0), (-1.0, 9.0)):
+            for off in (0.0, 0.5, -0.5, 2.0):
+                for lx, ly in ((-1.0, 0.0), (1.0, 0.0), (0.0, 0.0),
+                               (-0.0, 0.0), (-1.0, 2.5),
+                               (1.0, ulps(2.5, -1)), (1.0, -2.5),
+                               (-1.0, -2.4), (NAN, 0.0), (1.0, NAN)):
+                    s += [chase_pt(0, 0.0, off, dx, dy, lw, rw),
+                          "w2c|%s|%s" % (H(lx), H(ly)), "bfs|0|2"]
+
+    # ---- the way in: the gap round the track, above 0 with cop 0 ahead;
+    # the chased car's speed and its way along its route. No sub-state,
+    # so nothing more.
+    for tlen, mine, theirs in (
+            (0.0, 0.0, 0.0), (0.0, 450.0, 0.0), (0.0, ulps(450.0, -1), 0.0),
+            (0.0, 0.0, 450.0), (0.0, 0.0, ulps(450.0, -1)),
+            (0.0, 451.0, 0.0), (0.0, -180.0, 0.0),
+            (0.0, ulps(-180.0, 1), 0.0), (0.0, ulps(-180.0, -1), 0.0),
+            (0.0, -181.0, 0.0), (0.0, 0.0, 180.0), (0.0, 6.0, 0.0),
+            (0.0, ulps(6.0, -1), 0.0), (0.0, 5.0, 0.0), (0.0, 100.0, 0.0),
+            (0.0, -0.0, 0.0), (0.0, NAN, 0.0), (0.0, INF, 0.0),
+            (1000.0, 990.0, 10.0), (1000.0, 10.0, 990.0),
+            (1000.0, 1000.0, 0.0), (1000.0, 750.0, 250.0),
+            (1000.0, 0.0, 500.0), (1000.0, 300.0, 0.0),
+            (3000.0, 2900.0, 100.0)):
+        for fwd, vx in ((100.0, 3.0), (100.0, -3.0), (100.0, 0.0),
+                        (100.0, -0.0), (-100.0, -3.0), (mph20, -3.0),
+                        (ulps(mph20, 1), 3.0), (ulps(mph20, -1), 3.0),
+                        (0.0, 3.0)):
+            s += cprep(lss=0) + run([
+                "tlen|%s" % H(tlen), "cf|1|dat|%s" % H(mine),
+                "cf|2|dat|%s" % H(theirs), "cf|2|fwd|%s" % H(fwd),
+                "cf|2|vx|%s" % H(vx), "cf|2|vy|%s" % H(0.0)])
+    # The sub-state taken up, or not.
+    for lss, dlss in ((0, 0), (3, 3), (0, 3), (3, 0), (12, 5), (5, 12),
+                      (13, 3), (3, 13), (-1, 3), (16, 16), (2, 1)):
+        s += cprep(lss=lss, dlss=dlss) + run([])
+
+    # ---- PURSUIT_FOLLOW
+    # Coming in or staying; primary, the other cop or alone; 21 m off or
+    # nearer; MyDLOffset.x 0 or not.
+    for lss in (0, 3):
+        for cops in ((0, -1), (1, 0), (-1, -1), (2, 0)):
+            for x in (-21.0, ulps(-21.0, -1), ulps(-21.0, 1), -10.0, NAN):
+                for dlx in (0.0, -0.0, 5.0):
+                    s += cprep(lss=lss, dlss=3) + run([
+                        "pcops|0|%d|%d" % cops, cop_at(x, 0.0),
+                        "af|0|dlx|%s" % H(dlx), "af|0|dly|%s" % H(1.0),
+                        "af|0|sst|%s" % H(1.0), "cf|2|fwd|%s" % H(100.0)])
+    # The draw for a flank, from a base that takes it.
+    fbase = [cop_at(-10.0, 0.0), "cf|2|fwd|%s" % H(100.0),
+             "randf|%s" % H(0.5), "af|0|sst|%s" % H(0.0),
+             "w2c|%s|%s" % (H(1.0), H(0.0))]
+    variants = [[]]
+    variants += [["randf|%s" % H(r)]
+                 for r in (1.0, ulps(1.0, -1), NAN, 0.0, -1.0, INF)]
+    variants += [["wcar|2|5|%s|%s|1|1" % (H(0.0), H(0.0)), "mdiff|%d" % d]
+                 for d in (0, 1, 2)]
+    variants += [["af|0|sst|%s" % H(t)] for t in (0.5, -0.0, 1e-30, NAN)]
+    variants += [["coll|1|1|1:1:2"], ["coll|1|1|1:1:0"],
+                 ["coll|1|2|1:1:0|1:2:1"], ["coll|1|1|0:1:2"],
+                 ["coll|1|1|1:2:1"], ["coll|1|0|1:1:2"]]
+    variants += [["w2c|%s|%s" % (H(-1.0), H(0.0))],
+                 ["w2c|%s|%s" % (H(0.0), H(1.0))],
+                 [chase_pt(0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0)],
+                 [chase_pt(0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0),
+                  "w2c|%s|%s" % (H(1.0), H(3.0))],
+                 [chase_pt(0, 0.0, 0.0, 1.0, 0.0, 5.0, 0.0)],
+                 [chase_pt(0, 0.0, 0.0, 1.0, 0.0, 0.0, 5.0),
+                  "w2c|%s|%s" % (H(-1.0), H(0.0))]]
+    for lss1 in (0, 3, 4, 5, 7, 8, 9, 10, 11, 12):
+        for fl in (1.0, -1.0, 0.0, -0.0):
+            for cops in ("0|1", "1|0"):
+                variants.append(["pcops|0|%s" % cops, "af|1|lss|%x" % lss1,
+                                 "af|1|flank|%s" % H(fl)])
+    for lx in (1.0, -1.0):
+        for lss1 in (4, 7, 8, 10):
+            for fl in (1.0, -1.0):
+                variants.append(["w2c|%s|%s" % (H(lx), H(0.0)),
+                                 "pcops|0|0|1", "af|1|lss|%x" % lss1,
+                                 "af|1|flank|%s" % H(fl)])
+    variants += [["pcops|0|0|1", "mycar|1|-1"], ["pcops|0|1|0", "mycar|1|-1"],
+                 ["pcops|0|0|1", "mycar|1|-1", "af|1|lss|9"],
+                 ["pcops|0|1|0", "mycar|1|-1", "af|1|lss|9"]]
+    for lss2 in (0, 3, 5, 9, 11, 12):
+        variants += [["pcops|0|0|2", "lss|2|%d" % lss2],
+                     ["pcops|0|2|0", "lss|2|%d" % lss2]]
+    for fwd in (mph20, ulps(mph20, 1), ulps(mph20, -1), -100.0, 0.0, NAN,
+                -mph20, -ulps(mph20, -1)):
+        variants += [["cf|2|fwd|%s" % H(fwd)],
+                     ["cf|2|fwd|%s" % H(fwd), cop_at(-30.0, 0.0)]]
+    for v in variants:
+        s += cprep(lss=3) + run(fbase + v)
+
+    # ---- FOLLOW_OFFSET: 6.5 m back and 3 m out on the flank side
+    def obase(fl=1.0):
+        return ["af|0|flank|%s" % H(fl), "w2c|%s|%s" % (H(fl), H(0.0)),
+                "af|0|sst|%s" % H(0.0), "af|0|n48x|%s" % H(6.5),
+                "af|0|n48y|%s" % H(3.0 * fl), cop_at(-10.0, 0.0)]
+    for lss in (0, 4):
+        for fl in (1.0, -1.0):
+            s += cprep(lss=lss, dlss=4) + run(obase(fl))
+    variants = [["w2c|%s|%s" % (H(-1.0), H(0.0))],
+                ["af|0|flank|%s" % H(0.0),
+                 chase_pt(0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0)],
+                ["af|0|flank|%s" % H(0.0)]]
+    variants += [["af|0|sst|%s" % H(t)] for t in (0.5, -0.0, NAN)]
+    for n48x in (6.51, 6.49, 6.509999, 6.5099998, 6.490001, NAN):
+        variants.append(["af|0|n48x|%s" % H(n48x)])
+    for n48y in (3.01, 2.99, 3.0099998, 2.9900002, NAN):
+        variants.append(["af|0|n48y|%s" % H(n48y)])
+    variants += [["coll|1|1|1:1:2"], ["coll|1|1|1:1:3"]]
+    for v in variants:
+        s += cprep(lss=4) + run(obase() + v)
+    # Where cop 0's car is: round the chased car, and the chased car's
+    # heading.
+    for ang in (0, 0x4000, 0xc000, 0x2000):
+        for r in (10.0, 15.0, ulps(15.0, 1), 30.0):
+            for k in range(16):
+                t = math.radians(22.5 * k)
+                s += cprep(lss=4) + run(obase() + [
+                    cop_at(r * math.cos(t), r * math.sin(t)),
+                    "cf|2|ang|%x" % ang])
+
+    # ---- LOW_SPEED_CLOSE_FOLLOW: 6 m back, until the chased car is above
+    # 20 mph, or stops within 10 m
+    for lss in (0, 5):
+        for fwd in (mph20, ulps(mph20, 1), ulps(mph20, -1), mph5,
+                    ulps(mph5, 1), ulps(mph5, -1), 0.0, -100.0, 100.0, NAN,
+                    -mph5):
+            for x in (-10.0, ulps(-10.0, 1), ulps(-10.0, -1), -5.0, -30.0):
+                s += cprep(lss=lss, dlss=5) + run([
+                    "cf|2|fwd|%s" % H(fwd), cop_at(x, 0.0)])
+
+    # ---- FOLLOW_BACKWARDS
+    for cops in ((0, -1), (1, 0)):
+        for x in (-20.0, ulps(-20.0, 1), ulps(-20.0, -1), -5.0, -40.0):
+            for sst in (0.0, 0.5):
+                for ri in (0, 1, 2):
+                    for side in ([], ["w2c|%s|%s" % (H(-1.0), H(0.0))],
+                                 [chase_pt(0, 0.0, 0.0, 1.0, 0.0, 0.0,
+                                           0.0)]):
+                        s += cprep(lss=6) + run([
+                            "pcops|0|%d|%d" % cops, cop_at(x, 0.0),
+                            "af|0|sst|%s" % H(sst), "randi|%d" % ri,
+                            "w2c|%s|%s" % (H(1.0), H(0.0)),
+                            "cf|2|vx|%s" % H(-3.0), "cf|2|vy|%s" % H(0.0),
+                            "cf|2|fwd|%s" % H(-100.0)] + side)
+    for fwd in (mph5, ulps(mph5, 1), ulps(mph5, -1), 0.0, -mph5,
+                -ulps(mph5, -1), 100.0):
+        for x in (-10.0, ulps(-10.0, 1), ulps(-10.0, -1), -5.0):
+            for vx in (-3.0, 1.0, ulps(1.0, 1), 2.0, NAN):
+                s += cprep(lss=6) + run([
+                    cop_at(x, 0.0), "af|0|sst|%s" % H(1.0),
+                    "cf|2|vx|%s" % H(vx), "cf|2|vy|%s" % H(0.0),
+                    "cf|2|fwd|%s" % H(fwd)])
+
+    # ---- FLANK: level with the chased car, out on the flank side
+    def kbase(fl=1.0):
+        return ["af|0|flank|%s" % H(fl), "w2c|%s|%s" % (H(fl), H(0.0)),
+                "af|0|sst|%s" % H(1.0), "af|0|dly|%s" % H(3.0 * fl),
+                "af|0|n48y|%s" % H(3.0 * fl)]
+    for lss in (0, 7):
+        for fl in (1.0, -1.0):
+            s += cprep(lss=lss, dlss=7) + run(kbase(fl))
+    s += cprep(lss=7) + run(kbase() + ["w2c|%s|%s" % (H(-1.0), H(0.0))])
+    pos8 = ((10.0, 0.0), (0.0, 10.0), (-10.0, 0.0), (0.0, -10.0),
+            (7.0, 7.0), (-7.0, 7.0), (-7.0, -7.0), (7.0, -7.0))
+    for x, y in pos8:
+        for player in (0, 1):
+            for flags in (0, 4, 0xfb, 0xffffffff):
+                for ri in (0, 1, 2):
+                    for cops in ((0, -1), (1, 0)):
+                        s += cprep(lss=7) + run(kbase() + [
+                            "wcar|2|5|%s|%s|%d|1" % (H(0.0), H(0.0),
+                                                     player),
+                            cop_at(x, y), "pflags|0|%x" % flags,
+                            "randi|%d" % ri, "pcops|0|%d|%d" % cops])
+    # The timer, the offset and how far back, from beside or behind.
+    for x, y in pos8 + ((0.0, 10.0), (-10.0, 10.0)):
+        for ang in (0, 1, 0xffff, 2, 0xfffe):
+            for sst, n48x in ((0.0, 0.0), (0.0, 0.02), (0.5, 0.0),
+                              (-0.0, 0.01)):
+                s += cprep(lss=7) + run(kbase() + [
+                    cop_at(x, y), "cf|2|ang|%x" % ang,
+                    "af|0|sst|%s" % H(sst), "af|0|n48x|%s" % H(n48x),
+                    "pflags|0|4"])
+
+    # ---- BUMP
+    for lss in (0, 8):
+        for sst in (1.75, 0.875, 0.4375, ulps(0.4375, -1), 0.1, 0.0, -0.0,
+                    NAN, 3.0, -1.0):
+            for cs, coll in ((0, "coll|1|1|1:1:2"), (2, "coll|1|1|1:1:2"),
+                             (0, "coll|1|1|1:1:0"), (1, "coll|1|1|1:2:1")):
+                for fl in (1.0, -1.0):
+                    s += cprep(lss=lss, dlss=8) + run([
+                        "af|0|sst|%s" % H(sst), "rp|cs|%d" % cs, coll,
+                        "af|0|flank|%s" % H(fl), cop_at(-3.0, 1.0),
+                        "cf|1|z|%s" % H(0.5)])
+    for player, d in ((0, 1), (1, 0), (1, 1), (1, 2)):
+        for move in (0, 1, 5):
+            for x, y, z in ((-3.0, 1.0, 0.5), (0.0, 0.0, 0.0),
+                            (4.0, -3.0, -1.0), (1e-3, 0.0, 0.0),
+                            (-30.0, 40.0, 2.0)):
+                s += cprep(lss=8) + run([
+                    "wcar|2|5|%s|%s|%d|1" % (H(0.0), H(0.0), player),
+                    "mdiff|%d" % d, "cf|2|move|%d" % move,
+                    "af|0|sst|%s" % H(0.25), "coll|1|1|1:1:2",
+                    "af|0|flank|%s" % H(1.0), cop_at(x, y),
+                    "cf|1|z|%s" % H(z)])
+
+    # ---- BLOCK
+    for lss in (0, 9):
+        for mine, theirs in ((0.0, 0.0), (0.0, 10.0), (-0.0, 0.0),
+                             (5.0, 0.0), (0.0, 179.0), (0.0, 1e-3)):
+            s += cprep(lss=lss, dlss=9) + run([
+                "cf|1|dat|%s" % H(mine), "cf|2|dat|%s" % H(theirs),
+                "cf|2|vmag|%s" % H(100.0), "cf|2|vx|%s" % H(-3.0),
+                "cf|2|fwd|%s" % H(100.0), cop_at(-30.0, 0.0)])
+    for vmag in (100.0, mph20, ulps(mph20, 1), ulps(mph20, -1), -100.0, 5.0):
+        for vx in (-3.0, 3.0, -0.0):
+            for x in (-30.0, -20.0, ulps(-20.0, 1), ulps(-20.0, -1), -15.0):
+                s += cprep(lss=9) + run([
+                    "cf|2|vmag|%s" % H(vmag), "cf|2|vx|%s" % H(vx),
+                    "cf|2|vy|%s" % H(0.0), "cf|2|fwd|%s" % H(100.0),
+                    cop_at(x, 0.0)])
+    for fwd in (mph20, ulps(mph20, 1), ulps(mph20, -1), -mph20, 0.0, 100.0,
+                NAN):
+        for x in (-10.0, ulps(-10.0, 1), ulps(-10.0, -1), -5.0, -30.0):
+            s += cprep(lss=9) + run(["cf|2|fwd|%s" % H(fwd), cop_at(x, 0.0)])
+
+    # ---- GET_AHEAD: once, on the way in
+    for lss in (0, 10):
+        for x, y in ((-30.0, 5.5), (-25.0, 9.0), (-40.0, 0.0), (NAN, 0.0)):
+            s += cprep(lss=lss, dlss=10) + run([cop_at(x, y)])
+
+    # ---- ACQUIRE: until back within 180 m
+    for lss in (0, 11):
+        for mine in (-180.0, ulps(-180.0, 1), ulps(-180.0, -1), -100.0,
+                     -300.0, 0.0, NAN):
+            s += cprep(lss=lss, dlss=11) + run(["cf|1|dat|%s" % H(mine)])
+
+    # ---- STOP
+    for lss in (0, 12):
+        for sst in (0.0, -0.0, 0.25, -1.0, NAN):
+            for fwd in (mph5, ulps(mph5, 1), ulps(mph5, -1), -mph5, 0.0):
+                for x in (-10.0, ulps(-10.0, -1), -5.0):
+                    s += cprep(lss=lss, dlss=12) + run([
+                        "af|0|sst|%s" % H(sst), "cf|2|fwd|%s" % H(fwd),
+                        cop_at(x, 0.0)])
+
+    # ---- DoCaughtSpeederLogic: held; WAITING goes back on patrol when
+    # its time is up, or to limbo 250 m from every player, and looks round
+    for lss in (15, 16, 0, 14):
+        for dist in (100.0, 250.0, ulps(250.0, -1), NAN):
+            for sst in (0.0, 1.0, -0.0):
+                for fwd in (20.0, 1.0):
+                    s += cprep(ls=7, lss=lss) + [
+                        "g|dist|%s" % H(dist), "af|0|sst|%s" % H(sst),
+                        "cf|1|fwd|%s" % H(fwd), "lcaught|0", "tdump|0"]
+    for reqp in (0, 1):
+        for fwd in (100.0, 1.0):
+            for sst in (0.0, 1.0):
+                s += cprep(ls=7, lss=16) + [
+                    "setp|0|-1", "g|reqp|%d" % reqp, "af|0|sst|%s" % H(sst),
+                    "wpos|2|%s|%s" % (H(-10.0), H(5.5)),
+                    "cf|2|fwd|%s" % H(fwd), "lcaught|0", "tdump|0"]
+
+    # ---- through Think
+    # From patrol into a chase: A2 seen going fast, the pursuit granted.
+    for wte in (0.5, 1.0 / 30):
+        s += cprep(ls=5, lss=1) + [
+            "setp|0|-1", "rinfo|0|0|1", "g|reqp|1", "g|wte|%s" % H(wte),
+            "cf|2|fwd|%s" % H(100.0), "wpos|2|%s|%s" % (H(-10.0), H(5.5)),
+            "randf|%s" % H(0.5), "w2c|%s|%s" % (H(1.0), H(0.0))]
+        s += ["think|0", "tdump|0"] * 10
+    # Caught: ticketing, then waiting, then back on patrol or in limbo.
+    for dist in (100.0, 300.0):
+        s += cprep() + ["af|0|ds|7", "g|wte|%s" % H(0.5),
+                        "g|dist|%s" % H(dist), "rinfo|0|0|1"]
+        s += ["think|0", "tdump|0"] * 2
+        s += ["lss|0|16"] + ["think|0", "tdump|0"] * 4
+    # The gap opening: back on patrol.
+    for wte in (0.5, 0.0):
+        s += cprep() + ["cf|1|dat|%s" % H(500.0), "g|wte|%s" % H(wte),
+                        "rinfo|0|0|1", "cf|1|fwd|%s" % H(20.0)]
+        s += ["think|0", "tdump|0"] * 3
+
+    # ---- at random
+    for runno in range(500):
+        lss = rnd.choice((3, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0))
+        dlss = rnd.choice((lss, lss, rnd.choice((3, 4, 5, 6, 7, 8, 9, 10, 11,
+                                                 12))))
+        s += cprep(lss=lss, dlss=dlss)
+        a = rnd.uniform(0.0, 2.0 * math.pi)
+        r = rnd.choice((rnd.uniform(0.0, 12.0), rnd.uniform(0.0, 25.0),
+                        rnd.uniform(15.0, 40.0)))
+        h = rnd.uniform(0.0, 2.0 * math.pi)
+        fl = rnd.choice((-1.0, 0.0, 1.0))
+        dlx = rnd.choice((0.0, 6.5, 13.0, rnd.uniform(-3.0, 13.0)))
+        dly = rnd.choice((0.0, 3.0 * fl, 2.5, rnd.uniform(-4.0, 4.0)))
+        ch_dat = rnd.uniform(0.0, 1000.0)
+        gap = rnd.choice((rnd.uniform(-20.0, 20.0), rnd.uniform(-250.0, 50.0),
+                          rnd.uniform(-500.0, 500.0)))
+        s += ["wcar|2|5|%s|%s|%d|1" % (H(0.0), H(0.0), rnd.choice((0, 1))),
+              cop_at(r * math.cos(a), r * math.sin(a)),
+              "cf|1|z|%s" % H(rnd.uniform(-1.0, 1.0)),
+              "cf|2|z|%s" % H(rnd.uniform(-1.0, 1.0)),
+              "cf|2|ang|%x" % rnd.randrange(0x10000),
+              "cf|2|fwd|%s" % H(rnd.choice((rnd.uniform(-40.0, 40.0),
+                                             rnd.uniform(0.0, 10.0), 100.0))),
+              "cf|2|vmag|%s" % H(rnd.uniform(0.0, 40.0)),
+              "cf|2|vx|%s" % H(rnd.uniform(-30.0, 30.0)),
+              "cf|2|vy|%s" % H(rnd.uniform(-30.0, 30.0)),
+              "cf|1|fwd|%s" % H(rnd.uniform(0.0, 40.0)),
+              "cf|2|move|%d" % rnd.choice((0, 1, 1, 5)),
+              "mdiff|%d" % rnd.randrange(3),
+              "rp|cs|%d" % rnd.choice((0, 1, 2)),
+              "pflags|0|%x" % rnd.choice((0, 4, 0xffffffff, 0xfb)),
+              "tlen|%s" % H(rnd.choice((0.0, 1000.0, 3000.0))),
+              "cf|2|dat|%s" % H(ch_dat), "cf|1|dat|%s" % H(ch_dat + gap),
+              chase_pt(0, rnd.uniform(-3.0, 3.0), rnd.uniform(-3.0, 3.0),
+                       math.cos(h), math.sin(h), rnd.uniform(0.0, 8.0),
+                       rnd.uniform(0.0, 8.0)),
+              "af|0|flank|%s" % H(fl), "af|0|dlx|%s" % H(dlx),
+              "af|0|dly|%s" % H(dly),
+              "af|0|n48x|%s" % H(dlx + rnd.choice((0.0, 0.0, 0.005, -0.005,
+                                                   0.02,
+                                                   rnd.uniform(-2.0, 2.0)))),
+              "af|0|n48y|%s" % H(dly + rnd.choice((0.0, 0.0, 0.005, 0.02,
+                                                   rnd.uniform(-2.0, 2.0)))),
+              "af|0|sst|%s" % H(rnd.choice((0.0, 0.0, 0.3,
+                                            rnd.uniform(0.0, 3.0)))),
+              "af|0|line|%x" % (rnd.choice((-1, 0, 2)) & M32),
+              "pcops|0|%d|%d" % rnd.choice(((0, -1), (0, 1), (1, 0), (0, 2),
+                                            (2, 0), (-1, -1))),
+              "af|1|lss|%x" % rnd.randrange(13),
+              "af|1|flank|%s" % H(rnd.choice((-1.0, 0.0, 1.0))),
+              "mycar|1|%d" % rnd.choice((3, 3, -1)),
+              "lss|2|%d" % rnd.choice((0, 3, 5, 9, 11, 12)),
+              "randi|%s" % "|".join(str(rnd.randrange(3)) for _ in range(4)),
+              "randf|%s" % "|".join(H(rnd.choice((0.5, 0.99, 1.0, 1.5, 0.0)))
+                                    for _ in range(3)),
+              "w2c|%s" % "|".join("%s|%s" % (H(rnd.uniform(-5.0, 5.0)),
+                                             H(rnd.uniform(-4.0, 4.0)))
+                                  for _ in range(3)),
+              "rinfo|0|0|%d" % rnd.randrange(4),
+              "g|dist|%s" % H(rnd.uniform(150.0, 350.0)),
+              "g|reqp|%d" % rnd.choice((0, 1)),
+              "g|wte|%s" % H(rnd.choice((1.0 / 30, 0.25,
+                                         rnd.uniform(0.0, 0.5))))]
+        if rnd.random() < 0.3:
+            s += ["coll|1|1|1:1:%d" % rnd.choice((0, 2, 3))]
+        if rnd.random() < 0.5:
+            for _ in range(rnd.randrange(1, 4)):
+                s += ["setp|0|0", "lhot|0", "tdump|0"]
+        else:
+            for _ in range(rnd.randrange(1, 5)):
+                s += ["think|0", "tdump|0"]
+    return s
+
+
 def script():
     s = types()
     s += ["info|0|0", "info|1|1", "info|2|2", "info|3|3", "info|-1|1"]
@@ -1177,6 +1642,9 @@ def script():
 
     # ---- the radar traps, roadblocks and patrols
     s += logic_script()
+
+    # ---- the chase
+    s += chase_script()
     return s
 
 
@@ -1219,7 +1687,8 @@ class Model(object):
                          for _ in range(NPURSUITS)]
         for k, p in enumerate(self.pursuits):
             e.write(p, b"\xcd" * PURSUIT_SIZE)
-            e.put32(p + 20, 0)
+            for off in (20, 28, 32, 1588):
+                e.put32(p + off, 0)
             self.names[p] = "U%d" % k
         e.write(self.world, bytes(128))
         self.distq = []
@@ -1252,6 +1721,17 @@ class Model(object):
         self.near_at = 0
         self.dtpos = e.alloc(16, align=16)
         self.m = 0
+        self.randi = []
+        self.randf = []
+        self.w2c = []
+        self.randi_at = self.randf_at = self.w2c_at = 0
+        # The chased car's body's table, two entries logged by their stubs.
+        vt = self.cbvt = self.block(256)
+        code = self.block(256)
+        for slot, fn in ((CB_PHYSMODE, self.s_physmode),
+                         (CB_IMPULSE, self.s_impulse)):
+            e.write(vt + slot, struct.pack("<hhI", 0, 0, code + slot))
+            e.stub(code + slot, fn)
         for a, fn in ((S_MALLOC, self.s_malloc), (S_MALLOC2, self.s_malloc2),
                       (S_DELETE, self.s_delete), (S_OMALLOC, self.s_omalloc),
                       (S_SFREE, self.s_sfree), (S_CARCTOR, self.s_carctor),
@@ -1268,11 +1748,10 @@ class Model(object):
                       (S_REPAIR, self.s_repair), (S_PTHINK, self.s_pthink),
                       (S_NDSPEED, self.s_ndspeed), (S_REQP, self.s_reqp),
                       (S_GETCOL, self.s_getcol), (S_TWOCAR, self.s_twocar),
-                      (S_CARS, self.s_cars), (S_INFRONT, self.s_infront)):
+                      (S_CARS, self.s_cars), (S_INFRONT, self.s_infront),
+                      (S_RANDI, self.s_randi), (S_RANDF, self.s_randf),
+                      (S_W2C, self.s_w2c)):
             e.stub(a, fn)
-        for a, n in LOGIC:
-            e.stub(a, lambda em, n=n: self.emit(
-                "  logic %s %s" % (n, self.sym(em.reg[4]))))
         e.put32(G_COPPOOL, self.pool)
 
     def emit(self, line):
@@ -1418,7 +1897,57 @@ class Model(object):
         self.emit("  reqp %s %s %s -> %d" % (
             self.sym(em.reg[4]), self.sym(em.reg[5]), self.sym(em.reg[6]),
             s32(self.reqp)))
+        if self.reqp:
+            # A pursuit granted is U4's, chasing the car, with the cop its
+            # primary.
+            u4, cop = self.pursuits[4], em.reg[5] & M32
+            self.e.put32(u4 + 16, em.reg[6] & M32)
+            self.e.put32(u4 + 28, cop)
+            self.e.put32(u4 + 32, 0)
+            self.e.put32(cop, u4)
         return self.reqp
+
+    def s_randi(self, em):
+        r = 0
+        if self.randi:
+            r = self.randi[self.randi_at % len(self.randi)]
+            self.randi_at += 1
+        self.emit("  randi %s %d -> %d" % (self.sym(em.reg[4]),
+                                           s32(em.reg[5]), r))
+        return r & M32
+
+    def s_randf(self, em):
+        r = 0
+        if self.randf:
+            r = self.randf[self.randf_at % len(self.randf)]
+            self.randf_at += 1
+        self.emit("  randf %s %08x -> %08x" % (self.sym(em.reg[4]),
+                                               em.fpr[12] & M32, r))
+        em.fpr[0] = r
+
+    def s_w2c(self, em):
+        e = self.e
+        x = y = 0
+        if self.w2c:
+            x, y = self.w2c[self.w2c_at % len(self.w2c)]
+            self.w2c_at += 1
+        st, out, vin = (em.reg[r] & M32 for r in (4, 5, 6))
+        e.put32(out, x)
+        e.put32(out + 4, y)
+        self.emit("  w2c A%d %08x %08x -> %08x %08x" % (
+            self.car_k(st - 64) if self.car_k(st - 64) >= 0 else NCARS,
+            e.u32(vin), e.u32(vin + 4), x, y))
+
+    def s_physmode(self, em):
+        self.emit("  physmode %s %s" % (self.sym(em.reg[4]),
+                                        self.sym(em.reg[5])))
+
+    def s_impulse(self, em):
+        e = self.e
+        j, at = em.reg[5] & M32, em.reg[6] & M32
+        self.emit("  impulse %s %08x %08x %08x %08x at %08x %08x %08x" % (
+            self.sym(em.reg[4]), e.u32(j), e.u32(j + 4), e.u32(j + 8),
+            e.u32(j + 12), e.u32(at), e.u32(at + 4), e.u32(at + 8)))
 
     def car_or_0(self, k):
         return self.cars[k] if k >= 0 else 0
@@ -1624,10 +2153,11 @@ class Model(object):
         c = self.cop(k)
         u = lambda off: e.u32(c + off)                    # noqa: E731
         o("T%d cop ls %08x %08x lss %08x %08x n32 %08x sst %08x n48 %08x "
-          "%08x n64 %08x %08x phys %08x delay %08x pu %s st %s rbi %08x"
+          "%08x n64 %08x %08x phys %08x delay %08x pu %s st %s rbi %08x "
+          "dl %08x %08x flank %08x line %08x"
           % (k, u(12), u(16), u(20), u(24), u(32), u(44), u(48), u(52),
              u(64), u(68), u(84), u(88), self.sym(u(0)), self.sym(u(36)),
-             u(40)))
+             u(40), u(56), u(60), u(72), u(92)))
         car = u(4)
         w = lambda off: e.u32(car + off)                  # noqa: E731
         idx = s16(e.u16(car + CAR_INDEX))
@@ -1671,7 +2201,8 @@ class Model(object):
         elif o == "info":
             self.infos[info(a[1])] = int(a[2])
         elif o == "rp":
-            e.put32(RP + {"dir": RP_DIR, "maxcops": RP_MAXCOPS}[a[1]], v(2))
+            e.put32(RP + {"dir": RP_DIR, "maxcops": RP_MAXCOPS,
+                          "cs": RP_CS}[a[1]], v(2))
         elif o == "world":
             w = self.world
             e.put32(w, w)
@@ -1870,7 +2401,8 @@ class Model(object):
             car = self.cars[j]
             k = self.block(76)
             mv = self.block(128)
-            cb = self.block(64)
+            cb = self.block(96)
+            e.put32(cb + 80, self.cbvt)
             self.names[k] = "KJ%d" % j
             self.names[mv] = "MV%d" % j
             self.names[cb] = "CB%d" % j
@@ -2001,6 +2533,35 @@ class Model(object):
         elif o == "caused":
             r = e.call(F_CAUSED, self.cars[int(a[1])], limit=200000)
             self.emit("caused %s -> %s" % (a[1], self.sym(r)))
+        elif o == "pcops":
+            pu = self.pursuits[int(a[1])]
+            for j in range(2):
+                c = int(a[2 + j])
+                e.put32(pu + 28 + 4 * j, self.cop(c) if c >= 0 else 0)
+        elif o == "mdiff":
+            e.put32(self.m + 10476, v(1))
+        elif o == "pflags":
+            e.put32(self.pursuits[int(a[1])] + 1588, int(a[2], 16))
+        elif o == "tlen":
+            e.put32(TPM, int(a[1], 16))
+        elif o == "randi":
+            self.randi = [int(x, 0) for x in a[1:]]
+            self.randi_at = 0
+        elif o == "randf":
+            self.randf = [int(x, 16) for x in a[1:]]
+            self.randf_at = 0
+        elif o == "w2c":
+            self.w2c = [(int(a[1 + 2 * j], 16), int(a[2 + 2 * j], 16))
+                        for j in range((len(a) - 1) // 2)]
+            self.w2c_at = 0
+        elif o in ("lhot", "lcaught", "rtp"):
+            f = {"lhot": F_HOT, "lcaught": F_CAUGHT, "rtp": F_RTP}[o]
+            e.call(f, self.cop(int(a[1])), limit=2000000)
+            self.emit("%s %s" % (o, a[1]))
+        elif o == "bfs":
+            e.call(F_BFS, self.cop(int(a[1])), self.cars[int(a[2])],
+                   limit=200000)
+            self.emit("bfs %s %s -> %08x" % (a[1], a[2], e.fpr[0] & M32))
         elif o == "new":
             self.emit("new -> %s" % self.sym(e.call(F_NEW)))
         elif o == "del":
@@ -2230,9 +2791,12 @@ MUTATIONS = [
     ("strap_no_hold", C,
      "    taicop_hold_position(c);\n    if (c->fSubStateTimer <= 0.0f\n",
      "    if (c->fSubStateTimer <= 0.0f\n"),
-    ("strap_timer_lt", C, "    if (c->fSubStateTimer <= 0.0f\n",
-     "    if (c->fSubStateTimer < 0.0f\n"),
-    ("strap_no_timer", C, "    if (c->fSubStateTimer <= 0.0f\n", "    if (1\n"),
+    ("strap_timer_lt", C,
+     "    if (c->fSubStateTimer <= 0.0f\n        && !(world_get",
+     "    if (c->fSubStateTimer < 0.0f\n        && !(world_get"),
+    ("strap_no_timer", C,
+     "    if (c->fSubStateTimer <= 0.0f\n        && !(world_get",
+     "    if (1\n        && !(world_get"),
     ("strap_dist_le", C,
      "&c->Base.pMyCar->State.Position) < COP_FAR_FROM_PLAYERS)) {",
      "&c->Base.pMyCar->State.Position) <= COP_FAR_FROM_PLAYERS)) {"),
@@ -2245,8 +2809,12 @@ MUTATIONS = [
     ("strap_no_tele", C,
      "        taicop_teleport(c, &c->pMySpeedTrap->v2Position,\n"
      "                        c->pMySpeedTrap->ang);\n", "        ;\n"),
-    ("strap_no_search", C, "    search(c, 0);\n}", "}"),
-    ("strap_search_see", C, "    search(c, 0);\n}", "    search(c, 1);\n}"),
+    ("strap_no_search", C,
+     "                        c->pMySpeedTrap->ang);\n    search(c, 0);\n}",
+     "                        c->pMySpeedTrap->ang);\n}"),
+    ("strap_search_see", C,
+     "                        c->pMySpeedTrap->ang);\n    search(c, 0);\n}",
+     "                        c->pMySpeedTrap->ang);\n    search(c, 1);\n}"),
 
     # ---- DoRoadBlockLogic
     ("road_no_hold", C, "    taicop_hold_position(c);\n    p = c->Base.pMyPursuit;",
@@ -2334,8 +2902,9 @@ MUTATIONS = [
     ("ctele_end_0", CU, "    return 1;\n}\n\n// Retail walks", "    return 0;\n}\n\n// Retail walks"),
 
     # ---- coputil: CarCausedRecentCollision
-    ("caused_any_coll", CU, "            if (collision_is_two_car_collision(col)) {",
-     "            if (1) {"),
+    ("caused_any_coll", CU,
+     "collisionbody_get_collision(b, i++);\n\n            if (collision_is_two_car_collision(col)) {",
+     "collisionbody_get_collision(b, i++);\n\n            if (1) {"),
     ("caused_other_c2", CU, "                other = c1 == car ? c2 : c1;",
      "                other = c2;"),
     ("caused_other_ne", CU, "                other = c1 == car ? c2 : c1;",
@@ -2353,8 +2922,9 @@ MUTATIONS = [
     ("caused_slower_le", CU,
      "            && other->State.ForwardSpeed < car->State.ForwardSpeed)",
      "            && other->State.ForwardSpeed <= car->State.ForwardSpeed)"),
-    ("caused_from1", CU, "    int32_t        i = 0;\n\n    for (;;) {",
-     "    int32_t        i = 1;\n\n    for (;;) {"),
+    ("caused_from1", CU,
+     "Dynamic.Body;\n    int32_t        i = 0;\n\n    for (;;) {\n        Car *other = NULL;\n\n        while (i < b->",
+     "Dynamic.Body;\n    int32_t        i = 1;\n\n    for (;;) {\n        Car *other = NULL;\n\n        while (i < b->"),
     ("caused_n_unsigned", CU, "        while (i < b->NumCollisions) {",
      "        while (i < (uint8_t)b->NumCollisions) {"),
 
@@ -2503,7 +3073,8 @@ MUTATIONS = [
     ("acop_delay", C,
      "    c->fMovementModeSwitchDelay = 0.0f;\n    c->nDrivingLineIndex = 0;",
      "    c->nDrivingLineIndex = 0;"),
-    ("acop_line", C, "    c->nDrivingLineIndex = 0;\n", ""),
+    ("acop_line", C, "    c->nDrivingLineIndex = 0;\n    c->New64 = 6.0f;",
+     "    c->New64 = 6.0f;"),
     ("acop_n64", C, "    c->New64 = 6.0f;", "    c->New64 = 3.0f;"),
     ("acop_n68", C, "    c->New68 = 3.0f;", "    c->New68 = 6.0f;"),
     ("acop_visible", C,
@@ -2622,12 +3193,13 @@ MUTATIONS = [
      "        return side < 0.0f ? 2 : 1;"),
     ("zone_flank_le", C, "        return side < 0.0f ? 1 : 2;",
      "        return side <= 0.0f ? 1 : 2;"),
-    ("zone_bump_6", C, "    case LSS_BUMP:\n", ""),
+    ("zone_bump_6", C, "    case LSS_FLANK:\n    case LSS_BUMP:\n",
+     "    case LSS_FLANK:\n"),
     ("zone_ahead_6", C, "    case LSS_GET_AHEAD:\n        return side", "        return side"),
     ("zone_block", C, "    case LSS_BLOCK:\n        return 0;",
      "    case LSS_BLOCK:\n        return 6;"),
-    ("zone_close_4", C, "    case LSS_PURSUIT_FOLLOW:\n",
-     "    case LSS_LOW_SPEED_CLOSE_FOLLOW:\n    case LSS_PURSUIT_FOLLOW:\n"),
+    ("zone_close_4", C, "    case LSS_PURSUIT_FOLLOW:\n        return 4;",
+     "    case LSS_LOW_SPEED_CLOSE_FOLLOW:\n    case LSS_PURSUIT_FOLLOW:\n        return 4;"),
     ("zone_default_0", C, "        // LOW_SPEED_CLOSE_FOLLOW, FOLLOW_BACKWARDS, ACQUIRE, STOP, the rest.\n        return 6;",
      "        return 0;"),
 
@@ -2703,10 +3275,12 @@ MUTATIONS = [
      "    return sqrtf(dx * dx + dy * dy) <= 20.0f;"),
     ("isn_dist", C, "    return sqrtf(dx * dx + dy * dy) < 20.0f;",
      "    return sqrtf(dx * dx + dy * dy) < 19.999f;"),
-    ("isn_dx_y", C, "    dx = ch->State.Position.x - mine->State.Position.x;",
-     "    dx = ch->State.Position.x - mine->State.Position.y;"),
-    ("isn_dy_x", C, "    dy = ch->State.Position.y - mine->State.Position.y;",
-     "    dy = ch->State.Position.x - mine->State.Position.y;"),
+    ("isn_dx_y", C,
+     "    dx = ch->State.Position.x - mine->State.Position.x;\n    return sqrtf(dx * dx + dy * dy) < 20.0f;",
+     "    dx = ch->State.Position.x - mine->State.Position.y;\n    return sqrtf(dx * dx + dy * dy) < 20.0f;"),
+    ("isn_dy_x", C,
+     "    dy = ch->State.Position.y - mine->State.Position.y;\n    dx = ch",
+     "    dy = ch->State.Position.x - mine->State.Position.y;\n    dx = ch"),
     ("isn_no_dy", C, "    return sqrtf(dx * dx + dy * dy) < 20.0f;",
      "    return sqrtf(dx * dx + dx * dy) < 20.0f;"),
     ("isn_no_sqrt", C, "    return sqrtf(dx * dx + dy * dy) < 20.0f;",
@@ -2959,10 +3533,11 @@ MUTATIONS = [
     ("think_road_patrol", C, "        taicop_do_road_block_logic(c);",
      "        taicop_do_driving_on_patrol_logic(c);"),
     ("think_patrol_hot", C, "        taicop_do_driving_on_patrol_logic(c);",
-     "        run_logic(gAICopDoHotPursuitLogicFn, c);"),
-    ("think_hot_caught", C, "        run_logic(gAICopDoHotPursuitLogicFn, c);",
-     "        run_logic(gAICopDoCaughtSpeederLogicFn, c);"),
-    ("think_caught_none", C, "        run_logic(gAICopDoCaughtSpeederLogicFn, c);\n", ""),
+     "        taicop_do_hot_pursuit_logic(c);"),
+    ("think_hot_caught", C, "        taicop_do_hot_pursuit_logic(c);",
+     "        taicop_do_caught_speeder_logic(c);"),
+    ("think_caught_none", C, "        taicop_do_caught_speeder_logic(c);\n",
+     ""),
     ("think_guard_none", C, "    case LS_GUARD_LOCATION:\n        taicop_do_guard_location_logic(c);\n",
      "    case LS_GUARD_LOCATION:\n"),
     ("think_default_limbo", C, "        taicop_do_guard_location_logic(c);\n        break;\n    default:\n        break;",
@@ -3229,8 +3804,9 @@ MUTATIONS = [
     ("hst_hot_lights", C, "        set_cop_lights(car, 2);\n        drv->State = eCDS_PURSUIT;",
      "        set_cop_lights(car, 1);\n        drv->State = eCDS_PURSUIT;"),
     ("hst_hot_drv", C, "        drv->State = eCDS_PURSUIT;", "        drv->State = eCDS_PATROLLING;"),
-    ("hst_hot_dlss", C, "        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;",
-     "        c->Base.LogicSubState = LSS_PURSUIT_FOLLOW;"),
+    ("hst_hot_dlss", C,
+     "        drv->State = eCDS_PURSUIT;\n        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;",
+     "        drv->State = eCDS_PURSUIT;\n        c->Base.LogicSubState = LSS_PURSUIT_FOLLOW;"),
     ("hst_hot_siren", C, "        car->TheSirenMode = SIREN_MODE_01;", "        car->TheSirenMode = SIREN_MODE_02;"),
     ("hst_hot_vis", C,
      "        car->TheSirenMode = SIREN_MODE_01;\n        car->bVisibleOnTrackMap = 1;",
@@ -3308,11 +3884,11 @@ MUTATIONS = [
     ("limbo_ready_none", C, "        c->Base.LogicSubState = LSS_LIMBO_READY;\n}",
      "        c->Base.LogicSubState = LSS_NONE;\n}"),
     ("dis_far_le", C,
-     "          < COP_FAR_FROM_PLAYERS))\n        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);",
-     "          <= COP_FAR_FROM_PLAYERS))\n        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);"),
+     "          < COP_FAR_FROM_PLAYERS))\n        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);\n}\n\nvoid taicop_do_guard",
+     "          <= COP_FAR_FROM_PLAYERS))\n        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);\n}\n\nvoid taicop_do_guard"),
     ("dis_far_nan", C,
-     "    if (!(world_get_distance_to_closest_player_2d(pCurrentWorld,\n              (const bVector2 *)(const void *)&c->Base.pMyCar->State.Position)\n          < COP_FAR_FROM_PLAYERS))\n        tcop",
-     "    if (world_get_distance_to_closest_player_2d(pCurrentWorld,\n              (const bVector2 *)(const void *)&c->Base.pMyCar->State.Position)\n          >= COP_FAR_FROM_PLAYERS)\n        tcop"),
+     "    taicop_hold_position(c);\n    if (!(world_get_distance_to_closest_player_2d(pCurrentWorld,\n              (const bVector2 *)(const void *)&c->Base.pMyCar->State.Position)\n          < COP_FAR_FROM_PLAYERS))\n        tcop",
+     "    taicop_hold_position(c);\n    if (world_get_distance_to_closest_player_2d(pCurrentWorld,\n              (const bVector2 *)(const void *)&c->Base.pMyCar->State.Position)\n          >= COP_FAR_FROM_PLAYERS)\n        tcop"),
     ("dis_far_200", C, "#define COP_FAR_FROM_PLAYERS 250.0f", "#define COP_FAR_FROM_PLAYERS 200.0f"),
     ("dis_to_patrol", C,
      "        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);\n}\n\nvoid taicop_do_guard",
@@ -3348,6 +3924,437 @@ MUTATIONS = [
     ("rad_ebrake_on", M,
      "        realdriver_force_ebrake_stop((RealDriver *)(void *)car->pCarDriver, 0);",
      "        realdriver_force_ebrake_stop((RealDriver *)(void *)car->pCarDriver, 1);"),
+    # 12g-3: the chase.
+    ("rtp_ge", C, "COP_PATROL_RACING < c->Base.pMyCar->State.ForwardSpeed",
+     "COP_PATROL_RACING <= c->Base.pMyCar->State.ForwardSpeed"),
+    ("rtp_swap", C, "? LSS_PATROL_RACING : LSS_PATROL_ONCOMING;",
+     "? LSS_PATROL_ONCOMING : LSS_PATROL_RACING;"),
+    ("rtp_ds", C,
+     "    tcop_set_desired_logic_state(&c->Base, LS_DRIVING_ON_PATROL);\n    c->Base.LogicSubState =",
+     "    tcop_set_desired_logic_state(&c->Base, LS_LIMBO);\n    c->Base.LogicSubState ="),
+    ("bfs_lat_sign", C,
+     "    lat = (ch->State.Position.x - rp->Position.x) * rp->Direction.y\n        - (ch",
+     "    lat = (ch->State.Position.x - rp->Position.x) * rp->Direction.y\n        + (ch"),
+    ("bfs_left_lt", C, "left = -rp->LeftWidth - lat <= -COP_LANE;",
+     "left = -rp->LeftWidth - lat < -COP_LANE;"),
+    ("bfs_right_lt", C, "right = COP_LANE <= rp->RightWidth - lat;",
+     "right = COP_LANE < rp->RightWidth - lat;"),
+    ("bfs_left_rw", C, "left = -rp->LeftWidth - lat",
+     "left = -rp->RightWidth - lat"),
+    ("bfs_level_le", C, "level = fabsf(local.y) < COP_FOLLOW_SIDE;",
+     "level = fabsf(local.y) <= COP_FOLLOW_SIDE;"),
+    ("bfs_x_le", C, "    if (local.x < 0.0f) {\n        if (left)",
+     "    if (local.x <= 0.0f) {\n        if (left)"),
+    ("bfs_no_level", C, "    if (level)\n        return 0.0f;\n", ""),
+    ("bfs_left_first", C,
+     "    if (right)\n        return 1.0f;\n    if (left)\n        return -1.0f;\n    return 0.0f;",
+     "    if (left)\n        return -1.0f;\n    if (right)\n        return 1.0f;\n    return 0.0f;"),
+    ("bfs_w2c_own", C,
+     "                           &c->Base.pMyCar->State.Position);\n    level",
+     "                           &ch->State.Position);\n    level"),
+    ("bfs_no_getroute", C, "    car_get_route(ch, 1);\n", ""),
+    ("bfs_rp_mine", C, "    rp = car_get_route_point(ch, 1);\n    lat",
+     "    rp = car_get_route_point(c->Base.pMyCar, 1);\n    lat"),
+    ("cd_dx_twice", C, "    return sqrtf(dx * dx + dy * dy);",
+     "    return sqrtf(dx * dx + dx * dx);"),
+    ("gap_swap", C,
+     "        c->Base.pMyCar->TheTrackPathCoordinate.DistanceAroundTrack,\n        ch->TheTrackPathCoordinate.DistanceAroundTrack);",
+     "        ch->TheTrackPathCoordinate.DistanceAroundTrack,\n        c->Base.pMyCar->TheTrackPathCoordinate.DistanceAroundTrack);"),
+    ("mph_abs", C, "    return ch->State.ForwardSpeed * COP_MPS_TO_MPH;",
+     "    return fabsf(ch->State.ForwardSpeed) * COP_MPS_TO_MPH;"),
+    ("mph_vmag", C, "    return ch->State.ForwardSpeed * COP_MPS_TO_MPH;",
+     "    return ch->State.VelocityMagnitude * COP_MPS_TO_MPH;"),
+    ("prim_cops1", C, "    return c->Base.pMyPursuit->Cops[0] == &c->Base;",
+     "    return c->Base.pMyPursuit->Cops[1] == &c->Base;"),
+    ("fd_swap", C,
+     "    return is_primary(c) ? COP_FOLLOW_PRIMARY : COP_FOLLOW_OTHER;",
+     "    return is_primary(c) ? COP_FOLLOW_OTHER : COP_FOLLOW_PRIMARY;"),
+    ("lvl_eq", C, "    return ch->pPlayer != NULL ? pCopManager->nDifficultyLevel : 2;",
+     "    return ch->pPlayer == NULL ? pCopManager->nDifficultyLevel : 2;"),
+    ("lvl_1", C, "    return ch->pPlayer != NULL ? pCopManager->nDifficultyLevel : 2;",
+     "    return ch->pPlayer != NULL ? pCopManager->nDifficultyLevel : 1;"),
+    ("ato_lt", C, "    return fabsf(c->New48.x - c->MyDLOffset.x) <= COP_AT_OFFSET",
+     "    return fabsf(c->New48.x - c->MyDLOffset.x) < COP_AT_OFFSET"),
+    ("ato_or", C, "        && fabsf(c->New48.y - c->MyDLOffset.y) <= COP_AT_OFFSET;",
+     "        || fabsf(c->New48.y - c->MyDLOffset.y) <= COP_AT_OFFSET;"),
+    ("ato_yx", C, "        && fabsf(c->New48.y - c->MyDLOffset.y) <= COP_AT_OFFSET;",
+     "        && fabsf(c->New48.y - c->MyDLOffset.x) <= COP_AT_OFFSET;"),
+    ("ar_sign", C, "         + car->State.Velocity.y * rp->Direction.y;",
+     "         - car->State.Velocity.y * rp->Direction.y;"),
+    ("ao_vsign", C, "    v.x = mine->State.Position.x - ch->State.Position.x;",
+     "    v.x = ch->State.Position.x - mine->State.Position.x;"),
+    ("ao_noabs", C, "    return (uint16_t)(d < 0 ? -d : d);",
+     "    return (uint16_t)d;"),
+    ("ao_unsigned", C, "    d = (int16_t)(uint16_t)(p.a - ch->State.Angle);",
+     "    d = (uint16_t)(p.a - ch->State.Angle);"),
+    ("oz_zero", C,
+     "        side = ((const tAICop *)(const void *)o)->fFlankSide;",
+     "        side = 0.0f;"),
+    ("f_entry_sst", C,
+     "        c->fSubStateTimer = COP_FOLLOW_TIME;\n        c->MyDLOffset.x = follow_distance(c);\n        c->MyDLOffset.y = 0.0f;\n    }",
+     "        c->fSubStateTimer = COP_OFFSET_TIME;\n        c->MyDLOffset.x = follow_distance(c);\n        c->MyDLOffset.y = 0.0f;\n    }"),
+    ("f_entry_dly", C,
+     "        c->MyDLOffset.x = follow_distance(c);\n        c->MyDLOffset.y = 0.0f;\n    }",
+     "        c->MyDLOffset.x = follow_distance(c);\n    }"),
+    ("f_range_le", C, "    if (!(chase_distance(c, ch) < COP_FOLLOW_RANGE)) {",
+     "    if (!(chase_distance(c, ch) <= COP_FOLLOW_RANGE)) {"),
+    ("f_far_side", C,
+     "        c->MyDLOffset.y = is_primary(c) ? 0.0f : COP_FOLLOW_SIDE;",
+     "        c->MyDLOffset.y = is_primary(c) ? COP_FOLLOW_SIDE : 0.0f;"),
+    ("f_far_no_sst", C,
+     "        c->fSubStateTimer = COP_FOLLOW_TIME;\n        c->MyDLOffset.x = follow_distance(c);\n        c->MyDLOffset.y = is_primary",
+     "        c->MyDLOffset.x = follow_distance(c);\n        c->MyDLOffset.y = is_primary"),
+    ("f_far_no_return", C,
+     "        c->MyDLOffset.y = is_primary(c) ? 0.0f : COP_FOLLOW_SIDE;\n        return;",
+     "        c->MyDLOffset.y = is_primary(c) ? 0.0f : COP_FOLLOW_SIDE;"),
+    ("f_dlx_ne", C,
+     "    if (c->MyDLOffset.x == 0.0f)\n        c->MyDLOffset.x = follow_distance(c);",
+     "    if (c->MyDLOffset.x != 0.0f)\n        c->MyDLOffset.x = follow_distance(c);"),
+    ("f_draw_le", C, "kFlankDraw[chase_level(ch)]) < 1.0f",
+     "kFlankDraw[chase_level(ch)]) <= 1.0f"),
+    ("f_draw_table", C, "kFlankDraw[chase_level(ch)]) < 1.0f",
+     "kBumpPush[chase_level(ch)]) < 1.0f"),
+    ("f_sst_ne", C,
+     "        && c->fSubStateTimer == 0.0f\n        && !did_these_cars_collide",
+     "        && c->fSubStateTimer != 0.0f\n        && !did_these_cars_collide"),
+    ("f_no_collide", C,
+     "        && !did_these_cars_collide(c->Base.pMyCar, ch)\n        && (side",
+     "        && (side"),
+    ("f_side_any", C,
+     "        && (side = taicop_get_best_flank_side(c, ch)) != 0.0f) {",
+     "        && ((side = taicop_get_best_flank_side(c, ch)), 1)) {"),
+    ("f_other_first", C,
+     "        tCop     *o = p->Cops[0] == &c->Base ? p->Cops[1] : p->Cops[0];",
+     "        tCop     *o = p->Cops[0];"),
+    ("f_o_nocar", C, "        if (o == NULL || o->pMyCar == NULL\n",
+     "        if (o == NULL\n"),
+    ("f_zone_lss", C,
+     "                   get_zone_from_sub_state(LSS_FOLLOW_OFFSET, side),",
+     "                   get_zone_from_sub_state(LSS_FLANK, side),"),
+    ("f_zone_swap", C,
+     "                   get_zone_from_sub_state(LSS_FOLLOW_OFFSET, side),\n                   other_zone(o))) {",
+     "                   other_zone(o),\n                   get_zone_from_sub_state(LSS_FOLLOW_OFFSET, side))) {"),
+    ("f_no_flank_set", C,
+     "            c->fFlankSide = side;\n            c->Base.DesiredLogicSubState = LSS_FOLLOW_OFFSET;",
+     "            c->Base.DesiredLogicSubState = LSS_FOLLOW_OFFSET;"),
+    ("f_slow_le", C,
+     "    if (fabsf(chased_mph(ch)) < COP_CHASE_MPH)\n        c->Base.DesiredLogicSubState = LSS_LOW_SPEED_CLOSE_FOLLOW;\n}",
+     "    if (fabsf(chased_mph(ch)) <= COP_CHASE_MPH)\n        c->Base.DesiredLogicSubState = LSS_LOW_SPEED_CLOSE_FOLLOW;\n}"),
+    ("f_slow_noabs", C,
+     "    if (fabsf(chased_mph(ch)) < COP_CHASE_MPH)\n        c->Base.DesiredLogicSubState = LSS_LOW_SPEED_CLOSE_FOLLOW;\n}",
+     "    if (chased_mph(ch) < COP_CHASE_MPH)\n        c->Base.DesiredLogicSubState = LSS_LOW_SPEED_CLOSE_FOLLOW;\n}"),
+    ("fo_entry_sst", C,
+     "        c->fSubStateTimer = COP_OFFSET_TIME;\n    c->MyDLOffset.x = COP_FOLLOW_PRIMARY;",
+     "        c->fSubStateTimer = COP_FOLLOW_TIME;\n    c->MyDLOffset.x = COP_FOLLOW_PRIMARY;"),
+    ("fo_dlx", C,
+     "    c->MyDLOffset.x = COP_FOLLOW_PRIMARY;\n    c->MyDLOffset.y = c->fFlankSide * COP_LANE;\n    if (taicop_get_best_flank_side(c, ch) != c->fFlankSide) {\n        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;",
+     "    c->MyDLOffset.x = COP_FOLLOW_OTHER;\n    c->MyDLOffset.y = c->fFlankSide * COP_LANE;\n    if (taicop_get_best_flank_side(c, ch) != c->fFlankSide) {\n        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;"),
+    ("fo_dly", C,
+     "    c->MyDLOffset.y = c->fFlankSide * COP_LANE;\n    if (taicop_get_best_flank_side(c, ch) != c->fFlankSide) {\n        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;",
+     "    c->MyDLOffset.y = c->fFlankSide * COP_FOLLOW_SIDE;\n    if (taicop_get_best_flank_side(c, ch) != c->fFlankSide) {\n        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;"),
+    ("fo_side_no_return", C,
+     "        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;\n        return;\n    }\n    if (c->fSubStateTimer != 0.0f || !at_offset(c))\n        return;\n    if (did",
+     "        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;\n    }\n    if (c->fSubStateTimer != 0.0f || !at_offset(c))\n        return;\n    if (did"),
+    ("fo_or_and", C,
+     "    if (c->fSubStateTimer != 0.0f || !at_offset(c))\n        return;\n    if (did",
+     "    if (c->fSubStateTimer != 0.0f && !at_offset(c))\n        return;\n    if (did"),
+    ("fo_collide_sst", C,
+     "        c->fSubStateTimer = COP_OFFSET_TIME;\n        return;\n    }\n    da = angle_off",
+     "        c->fSubStateTimer = COP_FLANK_TIME;\n        return;\n    }\n    da = angle_off"),
+    ("fo_collide_no_return", C,
+     "        c->fSubStateTimer = COP_OFFSET_TIME;\n        return;\n    }\n    da = angle_off",
+     "        c->fSubStateTimer = COP_OFFSET_TIME;\n    }\n    da = angle_off"),
+    ("fo_arc_le", C, "    if (da < COP_SIDE_ARC || !(COP_DRAW_UP < r))",
+     "    if (da <= COP_SIDE_ARC || !(COP_DRAW_UP < r))"),
+    ("fo_r_le", C, "    if (da < COP_SIDE_ARC || !(COP_DRAW_UP < r))",
+     "    if (da < COP_SIDE_ARC || !(COP_DRAW_UP <= r))"),
+    ("fo_and", C, "    if (da < COP_SIDE_ARC || !(COP_DRAW_UP < r))",
+     "    if (da < COP_SIDE_ARC && !(COP_DRAW_UP < r))"),
+    ("fo_front_arc", C, "    if (da < COP_SIDE_ARC || !(COP_DRAW_UP < r))",
+     "    if (da < COP_FRONT_ARC || !(COP_DRAW_UP < r))"),
+    ("lscf_entry", C,
+     "        c->MyDLOffset.y = 0.0f;\n        c->MyDLOffset.x = COP_LOW_SPEED_X;",
+     "        c->MyDLOffset.y = 0.0f;\n        c->MyDLOffset.x = COP_FOLLOW_PRIMARY;"),
+    ("lscf_fast_le", C, "    if (COP_CHASE_MPH < s)\n",
+     "    if (COP_CHASE_MPH <= s)\n"),
+    ("lscf_slow_le", C,
+     "    if (s < COP_SLOW_MPH && chase_distance(c, ch) < COP_STOP_RANGE)",
+     "    if (s <= COP_SLOW_MPH && chase_distance(c, ch) < COP_STOP_RANGE)"),
+    ("lscf_range_le", C,
+     "    if (s < COP_SLOW_MPH && chase_distance(c, ch) < COP_STOP_RANGE)",
+     "    if (s < COP_SLOW_MPH && chase_distance(c, ch) <= COP_STOP_RANGE)"),
+    ("lscf_noabs", C, "    s = fabsf(chased_mph(ch));", "    s = chased_mph(ch);"),
+    ("fb_close_le", C,
+     "        if (d < COP_CLOSE_RANGE) {\n            c->MyDLOffset.x = COP_FOLLOW_PRIMARY;",
+     "        if (d <= COP_CLOSE_RANGE) {\n            c->MyDLOffset.x = COP_FOLLOW_PRIMARY;"),
+    ("fb_sst_ne", C,
+     "            if (c->fSubStateTimer == 0.0f) {\n                float   side",
+     "            if (c->fSubStateTimer != 0.0f) {\n                float   side"),
+    ("fb_rand2", C, "world_random_i(pCurrentWorld, 3);",
+     "world_random_i(pCurrentWorld, 2);"),
+    ("fb_sst_val", C, "                c->fSubStateTimer = COP_BACK_OFF_TIME;",
+     "                c->fSubStateTimer = COP_STOP_TIME;"),
+    ("fb_share_sign", C, "                c->MyDLOffset.y = kBackOffShare[i] * side;",
+     "                c->MyDLOffset.y = -kBackOffShare[i] * side;"),
+    ("fb_share_table", C, "                c->MyDLOffset.y = kBackOffShare[i] * side;",
+     "                c->MyDLOffset.y = kFlankDraw[i] * side;"),
+    ("fb_far_keep_y", C,
+     "            c->MyDLOffset.x = 0.0f;\n            c->MyDLOffset.y = 0.0f;\n        }\n    } else {",
+     "            c->MyDLOffset.x = 0.0f;\n        }\n    } else {"),
+    ("fb_far_keep_x", C,
+     "            c->MyDLOffset.x = 0.0f;\n            c->MyDLOffset.y = 0.0f;\n        }\n    } else {",
+     "            c->MyDLOffset.y = 0.0f;\n        }\n    } else {"),
+    ("fb_other_close", C,
+     "        c->MyDLOffset.x = d < COP_CLOSE_RANGE ? COP_FOLLOW_OTHER : 0.0f;",
+     "        c->MyDLOffset.x = d < COP_CLOSE_RANGE ? COP_FOLLOW_PRIMARY : 0.0f;"),
+    ("fb_other_close_le", C,
+     "        c->MyDLOffset.x = d < COP_CLOSE_RANGE ? COP_FOLLOW_OTHER : 0.0f;",
+     "        c->MyDLOffset.x = d <= COP_CLOSE_RANGE ? COP_FOLLOW_OTHER : 0.0f;"),
+    ("fb_other_side", C,
+     "        c->MyDLOffset.y = COP_FOLLOW_SIDE;\n    }\n    if (fabsf(chased_mph(ch)) < COP_SLOW_MPH",
+     "        c->MyDLOffset.y = -COP_FOLLOW_SIDE;\n    }\n    if (fabsf(chased_mph(ch)) < COP_SLOW_MPH"),
+    ("fb_stop_le", C,
+     "    if (fabsf(chased_mph(ch)) < COP_SLOW_MPH && d < COP_STOP_RANGE)",
+     "    if (fabsf(chased_mph(ch)) <= COP_SLOW_MPH && d < COP_STOP_RANGE)"),
+    ("fb_stop_d_le", C,
+     "    if (fabsf(chased_mph(ch)) < COP_SLOW_MPH && d < COP_STOP_RANGE)",
+     "    if (fabsf(chased_mph(ch)) < COP_SLOW_MPH && d <= COP_STOP_RANGE)"),
+    ("fb_stop_noabs", C,
+     "    if (fabsf(chased_mph(ch)) < COP_SLOW_MPH && d < COP_STOP_RANGE)",
+     "    if (chased_mph(ch) < COP_SLOW_MPH && d < COP_STOP_RANGE)"),
+    ("fb_way_le", C,
+     "    if (COP_ITS_WAY < along_route(ch, car_get_route_point(ch, 1)))",
+     "    if (COP_ITS_WAY <= along_route(ch, car_get_route_point(ch, 1)))"),
+    ("fb_way_zero", C,
+     "    if (COP_ITS_WAY < along_route(ch, car_get_route_point(ch, 1)))",
+     "    if (0.0f < along_route(ch, car_get_route_point(ch, 1)))"),
+    ("fb_order", C,
+     "    if (fabsf(chased_mph(ch)) < COP_SLOW_MPH && d < COP_STOP_RANGE)\n        c->Base.DesiredLogicSubState = LSS_STOP;\n    if (COP_ITS_WAY < along_route(ch, car_get_route_point(ch, 1)))\n        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;",
+     "    if (COP_ITS_WAY < along_route(ch, car_get_route_point(ch, 1)))\n        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;\n    if (fabsf(chased_mph(ch)) < COP_SLOW_MPH && d < COP_STOP_RANGE)\n        c->Base.DesiredLogicSubState = LSS_STOP;"),
+    ("k_entry_dlx", C,
+     "        c->MyDLOffset.x = 0.0f;\n        c->fSubStateTimer = COP_FLANK_TIME;",
+     "        c->MyDLOffset.x = COP_FOLLOW_PRIMARY;\n        c->fSubStateTimer = COP_FLANK_TIME;"),
+    ("k_entry_sst", C,
+     "        c->MyDLOffset.x = 0.0f;\n        c->fSubStateTimer = COP_FLANK_TIME;",
+     "        c->MyDLOffset.x = 0.0f;\n        c->fSubStateTimer = COP_BUMP_TIME;"),
+    ("k_entry_dly", C,
+     "        c->fSubStateTimer = COP_FLANK_TIME;\n        c->MyDLOffset.y = c->fFlankSide * COP_LANE;\n    }",
+     "        c->fSubStateTimer = COP_FLANK_TIME;\n        c->MyDLOffset.y = c->fFlankSide * COP_FOLLOW_SIDE;\n    }"),
+    ("k_side_target", C,
+     "        c->Base.DesiredLogicSubState = LSS_FOLLOW_OFFSET;\n        return;\n    }\n    da = angle_off(c, ch, &r);\n    front",
+     "        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;\n        return;\n    }\n    da = angle_off(c, ch, &r);\n    front"),
+    ("k_side_no_return", C,
+     "        c->Base.DesiredLogicSubState = LSS_FOLLOW_OFFSET;\n        return;\n    }\n    da = angle_off(c, ch, &r);\n    front",
+     "        c->Base.DesiredLogicSubState = LSS_FOLLOW_OFFSET;\n    }\n    da = angle_off(c, ch, &r);\n    front"),
+    ("k_front_le", C, "    front = da < COP_FRONT_ARC;",
+     "    front = da <= COP_FRONT_ARC;"),
+    ("k_front_side", C, "    front = da < COP_FRONT_ARC;",
+     "    front = da < COP_SIDE_ARC;"),
+    ("k_flag_bit", C, "            if (!(f & 4))", "            if (!(f & 2))"),
+    ("k_player_nf", C,
+     "            if (!(f & 4))\n                c->Base.DesiredLogicSubState = LSS_GET_AHEAD;",
+     "            if (!(f & 4))\n                c->Base.DesiredLogicSubState = LSS_BUMP;"),
+    ("k_rand14", C,
+     "            else if ((uint32_t)world_random_i(pCurrentWorld, 15) < 2",
+     "            else if ((uint32_t)world_random_i(pCurrentWorld, 14) < 2"),
+    ("k_rand_lt3", C,
+     "            else if ((uint32_t)world_random_i(pCurrentWorld, 15) < 2",
+     "            else if ((uint32_t)world_random_i(pCurrentWorld, 15) < 3"),
+    ("k_rand_lt1", C,
+     "            else if ((uint32_t)world_random_i(pCurrentWorld, 15) < 2",
+     "            else if ((uint32_t)world_random_i(pCurrentWorld, 15) < 1"),
+    ("k_noprim", C, "                     && is_primary(c))\n", ")\n"),
+    ("k_player_bump", C,
+     "            else\n                c->Base.DesiredLogicSubState = LSS_BUMP;",
+     "            else\n                c->Base.DesiredLogicSubState = LSS_FLANK;"),
+    ("k_nonplayer_noflag", C, "        } else if (f & 4) {", "        } else {"),
+    ("k_nonplayer_swap", C, "                    ? LSS_GET_AHEAD : LSS_BUMP;",
+     "                    ? LSS_BUMP : LSS_GET_AHEAD;"),
+    ("k_nonplayer_lt3", C,
+     "                (uint32_t)world_random_i(pCurrentWorld, 15) < 2\n                    ? LSS_GET_AHEAD",
+     "                (uint32_t)world_random_i(pCurrentWorld, 15) < 3\n                    ? LSS_GET_AHEAD"),
+    ("k_or_and", C,
+     "    if (c->fSubStateTimer != 0.0f || !at_offset(c))\n        return;\n    c->fSubStateTimer = COP_FLANK_TIME;",
+     "    if (c->fSubStateTimer != 0.0f && !at_offset(c))\n        return;\n    c->fSubStateTimer = COP_FLANK_TIME;"),
+    ("k_no_restart", C,
+     "    c->fSubStateTimer = COP_FLANK_TIME;\n    if (!front", "    if (!front"),
+    ("k_back_le", C, "    if (!front && !(da < COP_SIDE_ARC))",
+     "    if (!front && !(da <= COP_SIDE_ARC))"),
+    ("k_back_arc", C, "    if (!front && !(da < COP_SIDE_ARC))",
+     "    if (!front && !(da < COP_FRONT_ARC + 4096))"),
+    ("k_back_target", C,
+     "    if (!front && !(da < COP_SIDE_ARC))\n        c->Base.DesiredLogicSubState = LSS_FOLLOW_OFFSET;",
+     "    if (!front && !(da < COP_SIDE_ARC))\n        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;"),
+    ("b_entry", C,
+     "        c->fSubStateTimer = COP_BUMP_TIME;\n    t = c->fSubStateTimer;",
+     "        c->fSubStateTimer = COP_FLANK_TIME;\n    t = c->fSubStateTimer;"),
+    ("b_rate", C,
+     "    c->New68 = COP_PULL_RATE;\n    c->New64 = COP_PULL_RATE;\n    s = fabsf",
+     "    c->New68 = COP_PULL_RATE;\n    c->New64 = COP_LANE;\n    s = fabsf"),
+    ("b_mid", C, "    s = fabsf(t - COP_BUMP_MID);", "    s = t - COP_BUMP_MID;"),
+    ("b_dly", C,
+     "    c->MyDLOffset.y = ((s + s) / COP_BUMP_TIME) * (c->fFlankSide * COP_LANE);",
+     "    c->MyDLOffset.y = (s / COP_BUMP_TIME) * (c->fFlankSide * COP_LANE);"),
+    ("b_dlx", C,
+     "    c->MyDLOffset.x = 0.0f;\n    c->New68 = COP_PULL_RATE;\n    c->New64 = COP_PULL_RATE;\n    s = fabsf",
+     "    c->MyDLOffset.x = 1.0f;\n    c->New68 = COP_PULL_RATE;\n    c->New64 = COP_PULL_RATE;\n    s = fabsf"),
+    ("b_t_le", C,
+     "    if (t == 0.0f) {\n        c->Base.DesiredLogicSubState = LSS_FLANK;",
+     "    if (t <= 0.0f) {\n        c->Base.DesiredLogicSubState = LSS_FLANK;"),
+    ("b_cs1", C, "    if (TheRaceParameters.CopStrength == 2\n",
+     "    if (TheRaceParameters.CopStrength == 1\n"),
+    ("b_cs_and", C,
+     "    if (TheRaceParameters.CopStrength == 2\n        || !did_these",
+     "    if (TheRaceParameters.CopStrength == 2\n        && !did_these"),
+    ("b_hit_le", C, "    if (!(c->fSubStateTimer < COP_BUMP_HIT)) {",
+     "    if (!(c->fSubStateTimer <= COP_BUMP_HIT)) {"),
+    ("b_hit_t", C, "    if (!(c->fSubStateTimer < COP_BUMP_HIT)) {",
+     "    if (!(c->fSubStateTimer < COP_BUMP_MID)) {"),
+    ("b_hit_no_return", C,
+     "        c->Base.DesiredLogicSubState = LSS_FLANK;\n        return;\n    }\n\n    // The VU0",
+     "        c->Base.DesiredLogicSubState = LSS_FLANK;\n    }\n\n    // The VU0"),
+    ("b_dir", C, "    j.x = ch->State.Position.x - mine->State.Position.x;",
+     "    j.x = mine->State.Position.x - ch->State.Position.x;"),
+    ("b_z0", C, "    j.z = ch->State.Position.z - mine->State.Position.z;",
+     "    j.z = 0.0f;"),
+    ("b_norm_noz", C, "sqrtf((j.x * j.x + j.y * j.y) + j.z * j.z)",
+     "sqrtf(j.x * j.x + j.y * j.y)"),
+    ("b_push", C, "    k = kBumpPush[lvl];", "    k = kFlankDraw[lvl];"),
+    ("b_push_y", C, "    j.y = j.y * q * k;", "    j.y = j.y * q;"),
+    ("b_at", C, "    at.x = 0.0f;\n    at.y = 0.0f;", "    at.x = 1.0f;\n    at.y = 0.0f;"),
+    ("b_move", C, "    if (ch->TheMovementMode != eNO_MOVEMENT) {", "    if (1) {"),
+    ("b_nophys", C,
+     "        e = vt_slot(b->_vtable, COLLISIONBODY_VT_SET_TO_PHYSICS_MODE);\n        ((BodyOtherFn)e->fn)(vt_this(b, e), NULL);\n",
+     ""),
+    ("b_noimpulse", C,
+     "        ((BodyImpulseFn)e->fn)(vt_this(b, e), &j, &at);\n", ""),
+    ("b_after", C,
+     "    c->Base.DesiredLogicSubState = LSS_FLANK;\n}\n\n// 0x0022fc20",
+     "}\n\n// 0x0022fc20"),
+    ("bl_entry_line", C,
+     "        c->nDrivingLineIndex = -1;\n    }\n    c->MyDLOffset.x = 0.0f;\n    c->New68",
+     "        c->nDrivingLineIndex = 0;\n    }\n    c->MyDLOffset.x = 0.0f;\n    c->New68"),
+    ("bl_rate", C,
+     "    c->New68 = COP_PULL_RATE;\n    c->New64 = COP_PULL_RATE;\n    c->MyDLOffset.y = 0.0f;\n    d =",
+     "    c->New68 = COP_PULL_RATE;\n    c->New64 = COP_LANE;\n    c->MyDLOffset.y = 0.0f;\n    d ="),
+    ("bl_dly", C,
+     "    c->MyDLOffset.y = 0.0f;\n    d = chase_distance(c, ch);\n    if (track_gap",
+     "    d = chase_distance(c, ch);\n    if (track_gap"),
+    ("bl_gap_le", C, "    if (track_gap(c, ch) < 0.0f) {",
+     "    if (track_gap(c, ch) <= 0.0f) {"),
+    ("bl_vmag_fwd", C, "fabsf(ch->State.VelocityMagnitude * COP_MPS_TO_MPH)",
+     "fabsf(ch->State.ForwardSpeed * COP_MPS_TO_MPH)"),
+    ("bl_vmag_le", C, "        if (COP_CHASE_MPH\n                < fabsf",
+     "        if (COP_CHASE_MPH\n                <= fabsf"),
+    ("bl_along_le", C, "            && along_route(ch, rp) < 0.0f && COP_CLOSE_RANGE < d)",
+     "            && along_route(ch, rp) <= 0.0f && COP_CLOSE_RANGE < d)"),
+    ("bl_close_le", C, "            && along_route(ch, rp) < 0.0f && COP_CLOSE_RANGE < d)",
+     "            && along_route(ch, rp) < 0.0f && COP_CLOSE_RANGE <= d)"),
+    ("bl_lscf_le", C,
+     "    if (fabsf(chased_mph(ch)) < COP_CHASE_MPH && COP_STOP_RANGE < d)",
+     "    if (fabsf(chased_mph(ch)) <= COP_CHASE_MPH && COP_STOP_RANGE < d)"),
+    ("bl_lscf_d_le", C,
+     "    if (fabsf(chased_mph(ch)) < COP_CHASE_MPH && COP_STOP_RANGE < d)",
+     "    if (fabsf(chased_mph(ch)) < COP_CHASE_MPH && COP_STOP_RANGE <= d)"),
+    ("bl_else", C,
+     "        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;\n    } else {\n        const TrackRoutePoint *rp",
+     "        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;\n    }\n    {\n        const TrackRoutePoint *rp"),
+    ("ga_always", C,
+     "    if (old == c->Base.LogicSubState)\n        return;\n    c->MyDLOffset.x = 0.0f;\n    rp",
+     "    c->MyDLOffset.x = 0.0f;\n    rp"),
+    ("ga_rp_ch", C, "    rp = car_get_route_point(c->Base.pMyCar, 1);\n    mine",
+     "    rp = car_get_route_point(ch, 1);\n    mine"),
+    ("ga_line0", C, "    c->nDrivingLineIndex = -1;\n    c->MyDLOffset.y = (mine",
+     "    c->nDrivingLineIndex = 0;\n    c->MyDLOffset.y = (mine"),
+    ("ga_lat_sign", C,
+     "                    - (mine->State.Position.y - rp->Position.y)",
+     "                    + (mine->State.Position.y - rp->Position.y)"),
+    ("aq_line", C, "        c->nDrivingLineIndex = 0;\n        c->MyDLOffset.x = 0.0f;",
+     "        c->nDrivingLineIndex = -1;\n        c->MyDLOffset.x = 0.0f;"),
+    ("aq_le", C, "    if (COP_FAR_BEHIND < track_gap(c, ch))",
+     "    if (COP_FAR_BEHIND <= track_gap(c, ch))"),
+    ("aq_target", C,
+     "        c->Base.DesiredLogicSubState = LSS_PURSUIT_FOLLOW;\n}\n\n// 0x0022fe28",
+     "        c->Base.DesiredLogicSubState = LSS_FOLLOW_OFFSET;\n}\n\n// 0x0022fe28"),
+    ("st_sst", C,
+     "        c->fSubStateTimer = COP_STOP_TIME;\n        c->MyDLOffset.y = 0.0f;\n    }\n    if (c->fSubStateTimer <= 0.0f",
+     "        c->fSubStateTimer = COP_BUMP_HIT;\n        c->MyDLOffset.y = 0.0f;\n    }\n    if (c->fSubStateTimer <= 0.0f"),
+    ("st_lt", C, "    if (c->fSubStateTimer <= 0.0f\n        && (COP_SLOW_MPH",
+     "    if (c->fSubStateTimer < 0.0f\n        && (COP_SLOW_MPH"),
+    ("st_mph_le", C, "        && (COP_SLOW_MPH < fabsf(chased_mph(ch))",
+     "        && (COP_SLOW_MPH <= fabsf(chased_mph(ch))"),
+    ("st_noabs", C, "        && (COP_SLOW_MPH < fabsf(chased_mph(ch))",
+     "        && (COP_SLOW_MPH < chased_mph(ch)"),
+    ("st_or_and", C, "            || COP_STOP_RANGE < chase_distance(c, ch)))",
+     "            && COP_STOP_RANGE < chase_distance(c, ch)))"),
+    ("st_d_le", C, "            || COP_STOP_RANGE < chase_distance(c, ch)))",
+     "            || COP_STOP_RANGE <= chase_distance(c, ch)))"),
+    ("h_noupdate", C,
+     "    if (old != c->Base.DesiredLogicSubState)\n        c->Base.LogicSubState = c->Base.DesiredLogicSubState;\n    gap",
+     "    gap"),
+    ("h_giveup_lt", C, "    if (COP_GIVE_UP <= fabsf(gap)) {",
+     "    if (COP_GIVE_UP < fabsf(gap)) {"),
+    ("h_giveup_noabs", C, "    if (COP_GIVE_UP <= fabsf(gap)) {",
+     "    if (COP_GIVE_UP <= gap) {"),
+    ("h_giveup_noclear", C,
+     "        taicop_return_to_patrol(c);\n        taicop_clear_pursuit(c);\n        return;",
+     "        taicop_return_to_patrol(c);\n        return;"),
+    ("h_giveup_no_return", C,
+     "        taicop_return_to_patrol(c);\n        taicop_clear_pursuit(c);\n        return;",
+     "        taicop_return_to_patrol(c);\n        taicop_clear_pursuit(c);"),
+    ("h_behind_lt", C, "    if (gap <= COP_FAR_BEHIND)", "    if (gap < COP_FAR_BEHIND)"),
+    ("h_ahead_lt", C, "    else if (COP_AHEAD <= gap && COP_CHASE_MPH <= chased_mph(ch))",
+     "    else if (COP_AHEAD < gap && COP_CHASE_MPH <= chased_mph(ch))"),
+    ("h_ahead_mph_lt", C,
+     "    else if (COP_AHEAD <= gap && COP_CHASE_MPH <= chased_mph(ch))",
+     "    else if (COP_AHEAD <= gap && COP_CHASE_MPH < chased_mph(ch))"),
+    ("h_ahead_abs", C,
+     "    else if (COP_AHEAD <= gap && COP_CHASE_MPH <= chased_mph(ch))",
+     "    else if (COP_AHEAD <= gap && COP_CHASE_MPH <= fabsf(chased_mph(ch)))"),
+    ("h_way_le", C,
+     "            along_route(ch, car_get_route_point(ch, 1)) < 0.0f\n                ? LSS_FOLLOW_BACKWARDS",
+     "            along_route(ch, car_get_route_point(ch, 1)) <= 0.0f\n                ? LSS_FOLLOW_BACKWARDS"),
+    ("h_way_swap", C, "                ? LSS_FOLLOW_BACKWARDS : LSS_BLOCK;",
+     "                ? LSS_BLOCK : LSS_FOLLOW_BACKWARDS;"),
+    ("h_sw_follow", C, "    case LSS_PURSUIT_FOLLOW:\n        follow(c, old, ch);",
+     "    case LSS_PURSUIT_FOLLOW:\n        follow_offset(c, old, ch);"),
+    ("h_sw_offset", C, "        follow_offset(c, old, ch);\n        break;\n    case LSS_LOW",
+     "        break;\n    case LSS_LOW"),
+    ("h_sw_lscf", C, "        low_speed_close_follow(c, old, ch);\n        break;", "        break;"),
+    ("h_sw_fb", C, "        follow_backwards(c, old, ch);\n        break;", "        break;"),
+    ("h_sw_flank", C, "        flank(c, old, ch);\n        break;", "        bump(c, old, ch);\n        break;"),
+    ("h_sw_bump", C, "        bump(c, old, ch);\n        break;", "        break;"),
+    ("h_sw_block", C, "        block(c, old, ch);\n        break;", "        break;"),
+    ("h_sw_get_ahead", C, "        get_ahead(c, old, ch);\n        break;", "        break;"),
+    ("h_sw_acquire", C, "        acquire(c, old, ch);\n        break;", "        break;"),
+    ("h_sw_stop", C, "        stop(c, old, ch);\n        break;", "        break;"),
+    ("c_nohold", C,
+     "    taicop_hold_position(c);\n    if (c->Base.LogicSubState != LSS_CAUGHTSPEEDER_WAITING)",
+     "    if (c->Base.LogicSubState != LSS_CAUGHTSPEEDER_WAITING)"),
+    ("c_lss", C,
+     "    if (c->Base.LogicSubState != LSS_CAUGHTSPEEDER_WAITING)\n        return;",
+     "    if (c->Base.LogicSubState != LSS_CAUGHTSPEEDER_TICKETING)\n        return;"),
+    ("c_dist_le", C,
+     "          < COP_FAR_FROM_PLAYERS))\n        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);\n    else if",
+     "          <= COP_FAR_FROM_PLAYERS))\n        tcop_set_desired_logic_state(&c->Base, LS_LIMBO);\n    else if"),
+    ("c_else", C,
+     "    else if (c->fSubStateTimer == 0.0f)\n        taicop_return_to_patrol(c);",
+     "    if (c->fSubStateTimer == 0.0f)\n        taicop_return_to_patrol(c);"),
+    ("c_sst_ne", C,
+     "    else if (c->fSubStateTimer == 0.0f)\n        taicop_return_to_patrol(c);",
+     "    else if (c->fSubStateTimer != 0.0f)\n        taicop_return_to_patrol(c);"),
+    ("c_search1", C, "        taicop_return_to_patrol(c);\n    search(c, 0);",
+     "        taicop_return_to_patrol(c);\n    search(c, 1);"),
+    ("c_nosearch", C, "        taicop_return_to_patrol(c);\n    search(c, 0);",
+     "        taicop_return_to_patrol(c);"),
+    ("dtc_other_c2", CU, "                other = c1 == a ? c2 : c1;",
+     "                other = c2;"),
+    ("dtc_first_only", CU, "        if (other == b)\n            return 1;\n    }",
+     "        return other == b;\n    }"),
+    ("dtc_any", CU, "collisionbody_get_collision(body, i++);\n\n            if (collision_is_two_car_collision(col)) {",
+     "collisionbody_get_collision(body, i++);\n\n            if (1) {"),
+    ("dtc_le", CU, "        while (i < body->NumCollisions) {\n            Collision *col = collisionbody_get_collision(body, i++);\n\n            if (collision_is_two_car_collision(col)) {\n                Car *c1, *c2;",
+     "        while (i <= body->NumCollisions) {\n            Collision *col = collisionbody_get_collision(body, i++);\n\n            if (collision_is_two_car_collision(col)) {\n                Car *c1, *c2;"),
 ]
 
 EQUIVALENT = {
@@ -3358,6 +4365,10 @@ EQUIVALENT = {
     "limbo_ready_le": "Think has just clamped fSubStateTimer to 0 or above "
                       "(or left a NaN), and HandleStateTransitions sets 0 or "
                       "1: never below 0 here",
+    "bfs_left_first": "the fall-through comes with left false (x < 0) or "
+                      "right false: never both true",
+    "f_zone_lss": "zones 1 and 3, and 2 and 5, have the same column in "
+                  "the permission table",
 }
 
 

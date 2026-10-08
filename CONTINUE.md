@@ -1,10 +1,12 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 58, continued
-(2026-10-08): 12g-2, the radar traps', roadblocks' and patrols' logic,
-is done. The cops' cars still wait in limbo until the pursuits (12h)
-and the radar traps (12j) ask them out. 12g-1, tAICop::Think, was
-Session 58's first slice; it made a race with cops make their cars.
+(2026-10-08): 12g-3, the chase (the hot pursuit and caught speeder
+logics), is done, so all of tAICop's logic is in. The cops' cars still
+wait in limbo until the pursuits (12h) and the radar traps (12j) ask
+them out. 12g-2 (the radar traps', roadblocks' and patrols' logic) and
+12g-1 (tAICop::Think, which made a race with cops make their cars) were
+Session 58's earlier slices.
 12d to 12f (CopDriver and the drive target, the track graph,
 the manager's Think) were Session 57's; 12a to 12c (the cop manager,
 the cops, CopMover) Session 56's ("First" below).
@@ -179,12 +181,21 @@ pursuit.obj, on a 10 KB manager. Its slices:
   chase until 12h. Only the hot pursuit and caught speeder logics are
   still seams. None of these logics use sub-state 1, so it stays
   unnamed.
-- **Next: 12g-3** DoHotPursuitLogic (`0x0022ff58`, its table at
-  `0x002bd670`, the pursuit sub-logics from `0x0022f000`) and
-  DoCaughtSpeederLogic (`0x002303c8`), with DoSegmentsIntersect
-  (`0x00230f00`) if they need it; **12h, 12i** tPursuit, starting with
-  RequestPursuit (`0x00225078`) to bind `gCopManagerRequestPursuitFn`;
-  **12j** SpawnSpeedTraps, roadblocks and spike strips;
+- **12g-3, done (Session 58, continued):** DoHotPursuitLogic and its ten
+  sub-logics, ReturnToPatrol and GetBestFlankSide, and
+  DoCaughtSpeederLogic in `cop.c`; DidTheseCarsCollide in `coputil.c`
+  (`docs/formats/cops.md`, "The chase"). Think calls both logics
+  straight, so `gAICopDoHotPursuitLogicFn` and
+  `gAICopDoCaughtSpeederLogicFn` are gone. No cop reaches them until
+  RequestPursuit grants a chase. DoSegmentsIntersect (`0x00230f00`) was
+  not needed.
+- **Next: 12h, 12i** tPursuit, starting with RequestPursuit
+  (`0x00225078`) to bind `gCopManagerRequestPursuitFn`. It makes a
+  pursuit through two small unnamed helpers (`0x002244a0`, a free slot
+  in the manager's list at 52; `0x002244e0`, bOMalloc from gp-15644's
+  pool, `tPursuit::tPursuit` at `0x00228fc8`, and the list link at 44).
+  Then StartPursuitSpeech or JoinPursuitSpeech, Player::LoadNextNis
+  with GetNumTickets, and SetPursuit. **12j** SpawnSpeedTraps, roadblocks and spike strips;
   **12k** the helicopter; **12l** pullovers and Busted; **12m** Be A
   Cop; **12n** the radar detector's intensity. Nothing takes a cop out
   of limbo until 12j's SpawnSpeedTraps or 12h's pursuits, so the cops
@@ -4616,8 +4627,8 @@ goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a to 12g-2 are done, 12g-3 (the hot
-  pursuit and caught speeder logics) is next. See "First" at the top.
+- **Next:** step 12, the cops: 12a to 12g-3 are done, 12h (tPursuit,
+  starting with RequestPursuit) is next. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

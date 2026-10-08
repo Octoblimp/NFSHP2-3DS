@@ -1384,7 +1384,7 @@ MUTATIONS = [
     ("st_flank", C, "    case LSS_FLANK:\n    case LSS_BUMP:\n        speed = dist + ch_speed;",
      "    case LSS_BUMP:\n        speed = dist + ch_speed;"),
     ("st_bump", C, "    case LSS_BUMP:\n        speed = dist + ch_speed;",
-     "    case LSS_RETAIL_1:\n        speed = dist + ch_speed;"),
+     "    case LSS_PATROL_RACING:\n        speed = dist + ch_speed;"),
     ("st_follow", C, "        speed = dist + ch_speed;", "        speed = dist - ch_speed;"),
     ("st_close", C, "        speed = dist * 5.0f + ch_speed;", "        speed = dist * 4.0f + ch_speed;"),
     ("st_block_lane", C, "        if (fabsf(lc - lm) <= CD_BLOCK_LANE) {\n            if (chased->State.ForwardSpeed * CD_MPS_TO_MPH < CD_BLOCK_MPH)\n                speed = 0.0f;",

@@ -451,6 +451,35 @@ void realdriver_force_ebrake_stop(RealDriver *d, int32_t on)
     unreached("realdriver_force_ebrake_stop");
 }
 
+// The chase's (12g-3), which cop_check checks.
+int32_t world_random_i(World *w, int32_t range)
+{
+    (void)w; (void)range;
+    unreached("world_random_i");
+    return 0;
+}
+
+void carstate_world_to_car2(CarState *s, bVector2 *out, const bVector2 *in)
+{
+    (void)s; (void)out; (void)in;
+    unreached("carstate_world_to_car2");
+}
+
+float trackpath_compare_distances(const TrackPathManager *m, float a,
+                                  float b)
+{
+    (void)m; (void)a; (void)b;
+    unreached("trackpath_compare_distances");
+    return 0.0f;
+}
+
+int32_t did_these_cars_collide(Car *a, Car *b)
+{
+    (void)a; (void)b;
+    unreached("did_these_cars_collide");
+    return 0;
+}
+
 static void disable_my_car(tCop *cop, int32_t b)
 {
     printf("  disable %s %d\n", sym(cop), b);

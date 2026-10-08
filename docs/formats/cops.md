@@ -445,6 +445,170 @@ Past the last collision it is NULL.
 
 Sub-state 1 is still unnamed: none of these logics use it.
 
+## The chase
+
+The hot pursuit logic (`0x0022ff58`) runs a cop in LS_HOT_PURSUIT. Its
+sub-states are the ten from PURSUIT_FOLLOW (3) to STOP (12). The chased
+car is the pursuit's `pChasedCar` (16); retail reads it without testing
+the pursuit. Each call:
+
+1. A sub-state asked for last time becomes the sub-state. The one
+   before is kept as `old`; each sub-logic sets itself up when `old`
+   differs.
+2. The gap round the track is TrackPathManager::CompareDistances
+   (`0x00208598`) of the cop's DistanceAroundTrack against the chased
+   car's. It is above 0 with the cop ahead.
+   - 450 m or more either way: ReturnToPatrol, then ClearPursuit, and
+     nothing else.
+   - 180 m or more behind (-180 counts): ask for ACQUIRE.
+   - Otherwise, 6 m or more ahead with the chased car at 20 mph or more
+     (signed, `ForwardSpeed x 2.237`): ask for FOLLOW_BACKWARDS if its
+     velocity runs against its route point's way (Car::GetRoutePoint),
+     else BLOCK.
+3. The sub-state's logic runs. A sub-logic asks for its next sub-state;
+   it takes over on the next call.
+
+Some terms the sub-logics share:
+
+- *Primary*: the pursuit's `Cops[0]` (28). The other cop is `Cops[1]`.
+- *Distance*: the two cars apart in x and y.
+- *Level*: tCopManager's `nDifficultyLevel` (10476) for a player's car;
+  2 for any other.
+- *At the offset*: the eased offset (`New48`) within 1 cm of
+  `MyDLOffset`, in x and then y.
+- *Angle off*: bToPolar of the chased car to the cop's car, less the
+  chased car's heading, as a signed 16-bit angle, made positive. It is
+  0 with the cop dead ahead and 32768 dead behind. The polar's distance
+  comes too.
+
+**ReturnToPatrol** (`0x00230cb0`) asks for DRIVING_ON_PATROL. It sets
+the sub-state outright to PATROL_RACING, above 30 mph (13.410818 m/s,
+gp-26860), else PATROL_ONCOMING.
+
+**GetBestFlankSide(car)** (`0x00230248`) answers -1 (left), 1 (right)
+or 0. It first calls Car::GetRoute(1) on the chased car and ignores the
+answer, then takes Car::GetRoutePoint(1). It works out the chased car's
+place across that point:
+`(x - px) * dy - (y - py) * dx`.
+
+- *Left* is free when `-LeftWidth - lateral <= -3`.
+- *Right* is free when `3 <= RightWidth - lateral`.
+
+The cop's car is put in the chased car's frame (CarState::WorldToCar,
+`0x001c0b18`).
+
+1. If the cop is behind it (x below 0), a free left answers -1. If it
+   is level or ahead, a free right answers 1.
+2. Otherwise, a cop within 2.5 m to either side answers 0.
+3. Otherwise, a free right answers 1 and a free left -1, else 0.
+
+**The sub-logics:**
+
+- **PURSUIT_FOLLOW** (`0x0022f8d8`). On the way in: 3 s on the timer,
+  and in line behind, 6.5 m for the primary and 13 m for the other.
+  - At 21 m or further: the timer is set to 3 s again, and the cop
+    stays behind, the other cop 2.5 m to the side. Nothing else.
+  - A back offset of 0 is set again.
+  - A flank is tried when all of these hold:
+    - World::Random(float) of 3, 2 or 1 (by the level) draws under 1;
+    - the timer is exactly 0;
+    - the two cars didn't knock (DidTheseCarsCollide);
+    - GetBestFlankSide finds a side.
+  - The other cop's zone must then allow it: no other cop, or one with
+    no car, always does. FOLLOW_OFFSET's zone for that side goes to
+    RequestZonePermission against the zone the other cop holds. The
+    side is kept (`fFlankSide`, 72) and FOLLOW_OFFSET asked for.
+  - Either way, a chased car under 20 mph either way asks for
+    LOW_SPEED_CLOSE_FOLLOW.
+- **FOLLOW_OFFSET** (`0x0022f1d8`). 2 s on the way in. 6.5 m behind,
+  3 m out on the flank side.
+  - A best side that is not the flank side asks for PURSUIT_FOLLOW.
+  - Then, with the timer at 0 and the offset reached:
+    - a knock sets 2 s again;
+    - otherwise FLANK, within 135 degrees of the chased car's nose or
+      within 15 m (the polar's distance);
+    - else PURSUIT_FOLLOW.
+- **LOW_SPEED_CLOSE_FOLLOW** (`0x0022fb68`). On the way in, 6 m behind
+  in line. Above 20 mph either way it asks for PURSUIT_FOLLOW. Under
+  5 mph and within 10 m it asks for STOP.
+- **FOLLOW_BACKWARDS** (`0x0022f000`).
+  - Within 20 m, the primary keeps 6.5 m back. When its timer is 0 it
+    takes the best side and a World::Random(3) draw. It sidles over
+    that share of the side (1, 0.5 or 0.25), for 1.25 s.
+  - Further off, the primary drops both offsets.
+  - The other cop keeps 13 m back within 20 m (else 0), and 2.5 m to
+    the side.
+  - Under 5 mph either way and within 10 m, it asks for STOP.
+  - Then, above 1 m/s along its route point's way, it asks for
+    PURSUIT_FOLLOW.
+- **FLANK** (`0x0022f398`). On the way in: level (back offset 0), 3 m
+  out on the flank side, 2.25 s.
+  - A best side that is not the flank side asks for FOLLOW_OFFSET, and
+    nothing else.
+  - A cop within 90 degrees of the chased car's nose picks by the
+    pursuit's behaviour bit 4 (`BehaviourFlags`, 1588):
+    - a player's car, bit clear: GET_AHEAD;
+    - a player's car, bit set: BUMP, but GET_AHEAD for the primary when
+      World::Random(15) draws under 2;
+    - another car, bit set: GET_AHEAD on that draw, else BUMP;
+    - another car, bit clear: nothing.
+  - Then, with the timer at 0 and the offset reached, the timer is set
+    to 2.25 s again. A cop past 90 degrees that is also at 135 or more
+    asks for FOLLOW_OFFSET.
+- **BUMP** (`0x0022f598`). 1.75 s on the way in. The cop swings in on
+  the flank side: the side offset is `|t - 0.875| x 2 / 1.75` of 3 m,
+  in to 0 at half time and back out. The back offset is 0, and both
+  pull rates (`New64` and `New68`) are 100.
+  - With the timer at 0 it asks for FLANK, and nothing else.
+  - With CopStrength not 2 (`TheRaceParameters`, 648) and a knock: a
+    knock before the last quarter (the timer at 0.4375 or more) asks
+    for FLANK.
+  - A knock later shoves the chased car first. The way from the cop's
+    car to it is normalised, all four lanes as the VU0 does, and times
+    7, 10 or 15 by the level. Unless the chased car has no movement,
+    its collision body goes to physics mode (slot 112, NULL), then
+    takes the impulse at 0 (slot 128). Then the cop asks for FLANK.
+- **BLOCK** (`0x0022fc20`). On the way in, no driving line (-1). No
+  offsets, both pull rates 100.
+  - A cop behind (a gap below 0) asks for PURSUIT_FOLLOW.
+  - Otherwise, it asks for FOLLOW_BACKWARDS when all three hold: the
+    chased car is above 20 mph by its `VelocityMagnitude`; it is going
+    against its route point's way; and it is more than 20 m off.
+  - Either way, under 20 mph either way and more than 10 m off asks for
+    LOW_SPEED_CLOSE_FOLLOW.
+- **GET_AHEAD** (`0x0022fee0`). Only on the way in: back offset 0, no
+  driving line, and a side offset of the cop's own place across its own
+  route point.
+- **ACQUIRE** (`0x0022fdb0`). On the way in: driving line 0, no offsets.
+  Within 180 m (a gap above -180) it asks for PURSUIT_FOLLOW.
+- **STOP** (`0x0022fe28`). On the way in: no offsets, 0.5 s. Once the
+  timer is at or below 0, a chased car above 5 mph either way, or more
+  than 10 m off, asks for LOW_SPEED_CLOSE_FOLLOW.
+
+The shares, pushes and draws are three tables the sub-logics copy to the
+stack: `0x002bd5a0` (1, 0.5, 0.25), `0x002bd5f0` (7, 10, 15) and
+`0x002bd628` (3, 2, 1).
+
+**The other cop's zone.** Retail reads the other cop's flank side at
++72 whatever the cop. For Be A Cop's 52-byte tPlayerCop that is past its
+end. The port reads it from AI cops only, and takes 0 for the player's.
+The side only counts in FOLLOW_OFFSET, FLANK, BUMP and GET_AHEAD. A
+player's cop is never in those.
+
+**DoCaughtSpeederLogic** (`0x002303c8`) holds still. Only in WAITING
+(16) does it go on:
+
+- with no player within 250 m (a NaN distance counts) it asks for
+  LIMBO;
+- else, with its timer exactly 0, ReturnToPatrol.
+
+Then it searches with the flag 0. TICKETING (15) does nothing but hold.
+
+**DidTheseCarsCollide(a, b)** (`0x00231268`, `coputil.c`) walks a's
+collisions this frame. `NumCollisions` is read at each step. For each
+two-car one it takes the other car (the first of the pair unless that
+is a). It is 1 at the first that is b, and 0 when the walk ends.
+
 ## The zones
 
 The cops share the space around a suspect in six zones. The table
@@ -474,12 +638,11 @@ CarDamage's wreck (`gCarDamageWreckFn`) and repair
 (`gCarDamageRepairAllFn`), which no car reaches while CarDamage isn't
 built.
 
-Not ported yet, and doing nothing while NULL: the hot pursuit and caught
-speeder logics (`gAICopDoHotPursuitLogicFn` and
-`gAICopDoCaughtSpeederLogicFn`), 12g-3, and tPlayerCop's Think
+Not ported yet, and doing nothing while NULL: tPlayerCop's Think
 (`gPlayerCopThinkFn`), 12m. tCopManager::RequestPursuit
 (`gCopManagerRequestPursuitFn`, 12h) grants nothing while NULL, so a
-search finds no chase.
+search finds no chase. The hot pursuit and caught speeder logics (12g-3)
+are now called straight from Think, but no cop reaches them before 12h.
 
 `main.c` binds `gAICopDisableMyCarFn` to `cop_disable_my_car`,
 `gCopMoverCtorFn` (COP_MOVEMENT's mover, 12c), `gCopDriverCtorFn`
@@ -493,7 +656,7 @@ did before 12g-2.
 ## The check
 
 `tools/cop_check.py` runs retail's code in mipsemu and the port in
-`tools/src/cop_test.c` on 300690 operations:
+`tools/src/cop_test.c` on 756972 operations:
 
 - the zones: the table, every request in 0..6 both ways, on a garbled
   table, and every sub-state with eight sides (NaN, -0 and the
@@ -555,18 +718,49 @@ did before 12g-2.
     the manager's answer, and counts from 0 to 4 and -1;
   - DoRoadBlockLogic with no pursuit, no roadblock, and both spots;
   - DoDrivingOnPatrolLogic's 250 m, and whom it sees, granted or not;
-  - each through Think, and 300 random runs.
+  - each through Think, and 300 random runs;
+- the chase (12g-3), on the same rig. A2 is the chased car, at the
+  origin on a route point of its own; cop 1 is an AI cop in A3, and
+  cop 2 the player's:
+  - ReturnToPatrol one bit either side of 30 mph, and at 0, backing
+    and NaN;
+  - GetBestFlankSide on 720 cases: lanes either side of each width,
+    the cop either side of the car and of 2.5 m, and NaN;
+  - the way in, with gaps either side of 450 m, -180 m and 6 m, both
+    ways, with and without a track length (so CompareDistances wraps),
+    speeds either side of 20 mph, and both ways along the route;
+  - each sub-logic on the way in and staying. That covers each test
+    one bit either side and with NaN; the draws (World::Random's
+    answers queued by the script); the other cop's zone for each
+    sub-state and side, as primary and not, with no car, and as the
+    player's cop; knocks or none; the behaviour bit; each level; and
+    CopStrength 0 to 2. Bumps are run with the chased car moving and
+    not;
+  - DoCaughtSpeederLogic in TICKETING, WAITING and two other
+    sub-states, at 250 m (one bit under, and NaN), with its timer at 0,
+    -0 and 1, and its search granted or not;
+  - both logics through Think, and 500 random runs.
 
 Think's world adds stand-ins for the drive target renderer, the
 collisions' on and off, ForceEBrakeStop, the distance to the nearest
 player (an answer the script sets, or a queue of them), the CarDamage
-repair, the two logics still to come, tPlayerCop's Think and the
-NullDriver's SetDesiredSpeed, each logged. 12g-2 adds the world's car
+repair, tPlayerCop's Think and the NullDriver's SetDesiredSpeed, each
+logged. 12g-2 adds the world's car
 count and table, each car's collisions (GetCollision,
 IsTwoCarCollision and GetCollidingCars on a table the script sets),
 Car::IsCarInFront's answers, Car::ResetToPosition, and RequestPursuit's
-answer. The model runs with `eediv`, `eesqrt` and `eemul`, and gp-13336
-set to 1820 as the start-up code would.
+answer. 12g-3 adds:
+
+- World::Random's int and float answers, each a queue the script sets;
+- CarState::WorldToCar's answers, a queue too;
+- the chased car's collision body's physics mode and impulse, through
+  its table, logged;
+- a granted RequestPursuit puts the cop in U4 as its primary.
+
+CompareDistances, bToPolar and DidTheseCarsCollide run as shipped, on
+TheTrackPathManager's track length. The model runs with `eediv`,
+`eesqrt` and `eemul`, and gp-13336 set to 1820 as the start-up code
+would.
 
 The drive target's world is three routes of real points, in retail's
 layout (a 1064-byte header, then 112-byte points). Each car has a
@@ -581,22 +775,28 @@ driver. Four stand-ins answer by rules the script sets:
 DriveTarget's Clear and AddPointToTarget are logged.
 TrackRoutePoint::GetPosition runs as shipped.
 
-60866 lines, 0 differ. `--mutate`: 543 mutations, 540 caught, and
-three equivalent:
+93019 lines, 0 differ. `--mutate`: 724 mutations, 719 caught, and
+five equivalent:
 
 - tAICop's destructor storing its own table, which tCop's overwrites
   straight after;
 - UpdateDriveTarget's restart at `n >= 10` for `n == 10`. The loop's top
   only sees n at 0 or 10;
 - DoLimboLogic's `timer == 0` as `<= 0`: Think has just stopped the
-  timer at 0, and HandleStateTransitions only sets 0 or 1.
+  timer at 0, and HandleStateTransitions only sets 0 or 1;
+- GetBestFlankSide's last tests in either order. The fall-through comes
+  with left not free (behind) or right not free, never both free;
+- PURSUIT_FOLLOW's zone as FLANK's. Zones 1 and 3, and 2 and 5, have
+  the same column in the permission table.
 
 `copmanager_check` links `cop.c` too (25100 lines, 0 differ). Its
 harness, and copmover's (which links all of `copdriver.c`), stand in
 for the drive target's, CopDriver's and Think's calls with ones that
 abort if reached. Since 12g-2, copmanager's also stands in for
 CanTeleport and CarCausedRecentCollision that way, and copdriver's and
-trackgraph's for the collision calls `coputil.c` now makes. carmode (which now maps CopDriver's host size back to 76),
+trackgraph's for the collision calls `coputil.c` now makes. Since 12g-3,
+copmanager's also stands in for World::Random(int), WorldToCar,
+CompareDistances and DidTheseCarsCollide. carmode (which now maps CopDriver's host size back to 76),
 copdriver, copmover, collisionbody, drivecam, drivingchoice, hudanim,
 hudfeatures, hudrender, nearbycar, realcontroller, realdriver, trackmap,
 raceupdate, hudcop, hudscore, aidriver, aicarcontroller, beltmover,

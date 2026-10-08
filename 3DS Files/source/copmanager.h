@@ -182,11 +182,13 @@ typedef int32_t eLogicState;
 // DoPursuitFollowLogic and on in the enum's order to 12,
 // DoPursuitStopLogic.
 // HandleStateTransitions sets 13 or 14 entering limbo and 15 when it
-// catches a speeder. Retail's patrol tests 2 for routes against the
-// traffic (cop.c), so that one is named for it; 1 is not named yet.
+// catches a speeder. The two new ones are the patrol's: ReturnToPatrol
+// (0x00230cb0) gives 1 to a car going faster than 30 mph and 2 to the
+// rest, and InitializeDriveTarget looks for a route against the traffic
+// on 2 and takes the racing routes on 1.
 typedef int32_t eLogicSubState;
 #define LSS_NONE                     ((eLogicSubState)0)
-#define LSS_RETAIL_1                 ((eLogicSubState)1)
+#define LSS_PATROL_RACING            ((eLogicSubState)1)
 #define LSS_PATROL_ONCOMING          ((eLogicSubState)2)
 #define LSS_PURSUIT_FOLLOW           ((eLogicSubState)3)
 #define LSS_FOLLOW_OFFSET            ((eLogicSubState)4)
@@ -284,7 +286,11 @@ struct tPursuit {
     uint8_t     Unported8[8];           //    8
     struct Car *pChasedCar;             //   16, the demo's 20
     tRoadBlock *pRoadBlock;             //   20, the demo's 24; NULL for none
-    uint8_t     Unported24[24];         //   24
+    uint8_t     Unported24[4];          //   24
+    // The demo's Cops[2], 4 bytes on: the chase's two cops, the first the
+    // primary. The cops' hot pursuit logic reads them.
+    struct tCop *Cops[2];               //   28, the demo's 32
+    uint8_t     Unported36[12];         //   36
     // The constructor's (0x00228fc8): the points ahead of the chased car,
     // which CopDriver steers along when it is far from it, and the ones
     // right behind it, which it takes when within 20 m. The pursuit's Think
@@ -310,7 +316,11 @@ struct tPursuit {
     int32_t     New1560;                // 1560
     uint8_t     Unported1564[16];       // 1564
     eChopperState ChopperState;         // 1580, the demo's 1196
-    uint8_t     Unported1584[8];        // 1584
+    uint8_t     Unported1584[4];        // 1584
+    // The demo's: AllowBehaviour and DisallowBehaviour (0x002184c8 and
+    // 0x002184b0 in the demo) set and clear its bits. The cops' flank
+    // tests 4.
+    uint32_t    BehaviourFlags;         // 1588, the demo's 1204
     uint32_t    vptr;                   // 1592  0x002bd460: 8 the destructor
     uint8_t     Unported1596[4];        // 1596
 };
@@ -321,6 +331,7 @@ struct tPursuit {
 typedef char tpursuit_layout_check[
     (offsetof(struct tPursuit, pChasedCar) == 16
      && offsetof(struct tPursuit, pRoadBlock) == 20
+     && offsetof(struct tPursuit, Cops) == 28
      && offsetof(struct tPursuit, FarDriveTarget) == 48
      && offsetof(struct tPursuit, NearDriveTarget) == 576
      && offsetof(struct tPursuit, History) == 1104
@@ -331,6 +342,7 @@ typedef char tpursuit_layout_check[
      && offsetof(struct tPursuit, fRoadBlockSpawnTimer) == 1532
      && offsetof(struct tPursuit, New1560) == 1560
      && offsetof(struct tPursuit, ChopperState) == 1580
+     && offsetof(struct tPursuit, BehaviourFlags) == 1588
      && offsetof(struct tPursuit, vptr) == 1592
      && sizeof(struct tPursuit) == 1600) ? 1 : -1];
 #endif
