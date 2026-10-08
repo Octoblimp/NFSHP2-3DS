@@ -1,5 +1,5 @@
 // citro3d's uniforms and program binds, sent only when they change (step
-// 13b-4, 13b-5). See c3dwrap.c.
+// 13b-4, 13b-5), and its draws written in one go (13b-6). See c3dwrap.c.
 
 #ifndef C3DWRAP_H
 #define C3DWRAP_H
@@ -16,5 +16,9 @@ void c3d_unif_set(int id, float x, float y, float z, float w);
 void c3d_unif_vec(int id, const float v[4]);
 void c3d_unif_mtx(int id, const C3D_Mtx* m);
 void c3d_unif_bool(int id, bool on);
+
+// Where to say, once each, whether the indexed and the array draws are
+// written by c3dwrap.c or left to citro3d.
+void c3d_lean_log(void (*fn)(const char* fmt, ...));
 
 #endif

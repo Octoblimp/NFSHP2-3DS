@@ -62,11 +62,15 @@ ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map) \
 			$(C3DWRAP)
 
-# citro3d's uniform upload, skipped when nothing changed: see c3dwrap.c.
+# citro3d's uniform upload, skipped when nothing changed, and its draws
+# written in one go: see c3dwrap.c.
 C3DWRAP	:=	-Wl,--wrap=C3D_UpdateUniforms \
 			-Wl,--wrap=C3Di_LoadShaderUniforms \
 			-Wl,--wrap=C3Di_DirtyUniforms \
-			-Wl,--wrap=C3D_BindProgram
+			-Wl,--wrap=C3D_BindProgram \
+			-Wl,--wrap=C3D_DrawElements \
+			-Wl,--wrap=C3D_DrawArrays \
+			-Wl,--wrap=GPUCMD_Add
 
 LIBS	:= -lcitro2d -lcitro3d -lctru -lm
 

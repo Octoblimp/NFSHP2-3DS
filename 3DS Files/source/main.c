@@ -60,6 +60,7 @@
 #include "bsnd.h"
 #include "bslotpool.h"
 #include "bticker.h"
+#include "c3dwrap.h"
 #include "bumpercam.h"
 #include "rvmcam.h"
 #include "camera.h"
@@ -4132,6 +4133,7 @@ int main(int argc, char** argv)
     // cull keeps, each with its own matrices, and the default's 256 KB is
     // about 500 of them; GPUCMD_Add drops what does not fit without a word.
     C3D_Init(C3D_DEFAULT_CMDBUF_SIZE * 4);
+    c3d_lean_log(logLine);
     C2D_Init(C2D_DEFAULT_MAX_OBJECTS);
     C2D_Prepare();
     C3D_RenderTarget* top = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8,
