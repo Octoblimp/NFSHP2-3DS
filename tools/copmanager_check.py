@@ -69,7 +69,8 @@ SD = Path(os.environ.get("APPDATA", "")) / "Azahar" / "sdmc" / "NFSHP2"
 
 HARNESS = "tools/src/copmanager_test.c"
 COPMGR = "3DS Files/source/copmgr.c"
-SOURCES = [HARNESS, COPMGR, "3DS Files/source/copmanager.c",
+SOURCES = [HARNESS, COPMGR, "3DS Files/source/cop.c",
+           "3DS Files/source/copmanager.c",
            "3DS Files/source/vtable.c", "3DS Files/source/bmath.c",
            "3DS Files/source/bmathtab.c"]
 HARNESS_TIMEOUT = 60
@@ -1460,10 +1461,10 @@ MUTATIONS = [
      "        if (((int32_t (*)(void *))e->fn)(vt_this(cop, e)) == 0)\n            return;",
      "        (void)e;"),
     ("mi_timer_lt", C,
-     "    if (((tAICopHead *)(void *)cop)->New32 <= 0.0f) {",
-     "    if (((tAICopHead *)(void *)cop)->New32 < 0.0f) {"),
+     "    if (((tAICop *)(void *)cop)->New32 <= 0.0f) {",
+     "    if (((tAICop *)(void *)cop)->New32 < 0.0f) {"),
     ("mi_timer_ignored", C,
-     "    if (((tAICopHead *)(void *)cop)->New32 <= 0.0f) {",
+     "    if (((tAICop *)(void *)cop)->New32 <= 0.0f) {",
      "    if (1) {"),
     ("mi_disable_0", C,
      "        gAICopDisableMyCarFn(cop, 1);", "        gAICopDisableMyCarFn(cop, 0);"),

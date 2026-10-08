@@ -1,7 +1,8 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 56
-(2026-10-08): 12a, the cop manager, is done ("First" below).
+(2026-10-08): 12a, the cop manager, and 12b, the cops' records and
+constructors, are done ("First" below).
 Session 54 (2026-10-08): the AI pack runs at 20 FPS with all eight cars in view
 (commits 569dfde and ba9ef1f), which the user accepted; see "First"
 below. Session 53 (2026-10-08) took out the mid-race hitches
@@ -110,11 +111,18 @@ pursuit.obj, on a 10 KB manager. Its slices:
   ids, GetCopByCar and MonitorImpact, with retail's AddDamage tail
   (`docs/formats/cop-manager.md`). A race with cops builds the manager
   and runs at 30 FPS; no cop is on the road yet.
-- **12b:** tCop, tAICop and tPlayerCop's constructors and destructors,
-  CreateCop, AddCopCarToRace (`gAddCopCarToRaceFn`), `0x002276a0` (the
-  cop cars' largest size), the zone permissions, tAICop::DisableMyCar
-  (`gAICopDisableMyCarFn`, which aborts while NULL).
-- **12c** CopMover; **12d** CopDriver; **12e** tTrackGraph;
+- **12b, done (Session 56):** tCop, tAICop and tPlayerCop's records,
+  constructors and destructors, the setters, ClearPursuit and
+  ClearSpeedTrap, CreateCop, AddCopCarToRace, `0x002276a0` (the cop
+  cars' largest size), the zone permissions, and tAICop::DisableMyCar,
+  now bound to `gAICopDisableMyCarFn` (`docs/formats/cops.md`).
+  `gAddCopCarToRaceFn` stays NULL until 12d: COP_CONTROL needs
+  CopDriver's constructor (`0x001a1ce8`, `gCopDriverCtorFn`), and a cop
+  on the road needs Think. tPursuit's RemoveCopFromPursuit and
+  RemovePrimarySpeaker, and CarDamage's wreck, are NULL seams that
+  abort.
+- **12c** CopMover; **12d** CopDriver, then bind `gAddCopCarToRaceFn =
+  copmgr_add_cop_car_to_race` in `main.c`; **12e** tTrackGraph;
   **12f** Think and GlobalCopThink (`gGlobalCopThinkFn`);
   **12g** tAICop::Think; **12h, 12i** tPursuit; **12j** roadblocks and
   spike strips; **12k** the helicopter; **12l** pullovers and Busted;
@@ -4546,8 +4554,8 @@ goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** the texture memory work, then step 12, the cops.
-  See "Now" at the top.
+- **Next:** step 12, the cops: 12a and 12b are done, 12c (CopMover)
+  is next. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

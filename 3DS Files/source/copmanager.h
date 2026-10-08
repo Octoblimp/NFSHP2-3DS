@@ -217,15 +217,6 @@ typedef char tcop_layout_check[
     ? 1 : -1];
 #endif
 
-// tAICop, retail's 96 bytes (the demo's type#5547 is 76): a tCop, then
-// what is read of it so far. Retail's word 32 is new: seconds left before
-// a hard hit can disable the car. Think counts it down by the frame's
-// time while it is above 0, and teleporting the car sets it to 3.
-typedef struct tAICopHead {
-    struct tCop Base;                   //  0
-    float       New32;                  // 32
-} tAICopHead;
-
 // bTNode<tPursuit>: a pursuit's links in the manager's PursuitList. The
 // list's own node is the sentinel, so the last pursuit's Next is the list.
 // bTList<tSpikeStrip> is the same two words.

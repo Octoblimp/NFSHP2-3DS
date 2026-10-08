@@ -15,7 +15,9 @@
 #include "car.h"
 #include "collision.h"
 #include "collisionbody.h"
+#include "cartypeinfo.h"
 #include "configitems.h"
+#include "cop.h"
 #include "race.h"
 #include "topology.h"
 #include "trackmap.h"
@@ -409,7 +411,7 @@ void copmanager_monitor_impact(tCopManager *m, struct Car *c, float amount,
         if (((int32_t (*)(void *))e->fn)(vt_this(cop, e)) == 0)
             return;
     }
-    if (((tAICopHead *)(void *)cop)->New32 <= 0.0f) {
+    if (((tAICop *)(void *)cop)->New32 <= 0.0f) {
         if (gAICopDisableMyCarFn == NULL) {
             fprintf(stderr, "copmanager_monitor_impact: "
                             "no tAICop::DisableMyCar\n");
@@ -435,6 +437,66 @@ void copmgr_car_impact(tCopManager *m, struct CarCollisionBody *b,
         } while (i < cb->NumCollisions && twoCar == 0);
     }
     copmanager_monitor_impact(m, b->pCar, amount, twoCar);
+}
+
+// ------------------------------------------------------ the cops
+
+void copmanager_create_cop(tCopManager *m, struct DriverInfo *info,
+                           int32_t beACop)
+{
+    if (beACop != 0) {
+        tCop       **slot = &m->Cops[m->nNumAICops];
+        Car         *car;
+        tPlayerCop  *pc;
+        uint32_t     mask;
+        int32_t      i;
+
+        m->nPlayerCopIndex = m->nNumAICops;
+        car = pCurrentWorld->CarTable[0];
+        // bMalloc(52, 16), the two-argument one, with no name.
+        pc = (tPlayerCop *)bMalloc((int)sizeof(tPlayerCop), "tPlayerCop", 0,
+                                   16);
+        *slot = &tplayercop_construct(pc, car, m->nPlayerCopIndex)->Base;
+        mask = TheRaceParameters.TrackDirection == 0 ? SPEEDTRAP_BEACOP
+                                                     : SPEEDTRAP_BEACOP_REVERSE;
+        for (i = 0; i < m->nNumSpeedTraps; i++) {
+            const tSpeedTrap *st = &m->SpeedTraps[i];
+
+            if (st->Flags & mask) {
+                bVector3 pos;
+
+                memset(&pos, 0, sizeof pos);
+                pos.x = st->v2Position.x;
+                pos.y = st->v2Position.y;
+                car_reset_to_position(car, &pos, 0.0f,
+                                      (uint16_t)(st->ang - 32000));
+                break;
+            }
+        }
+    } else {
+        tCop  **slot = &m->Cops[m->nNumAICops];
+        tAICop *c = (tAICop *)taicop_new();
+
+        *slot = &taicop_construct(c, info, m->nNumAICops)->Base;
+        m->nNumAICops++;
+    }
+    m->nNumCops++;
+}
+
+void copmanager_calculate_max_cop_car_dimensions(tCopManager *m)
+{
+    const RigidBodyInfo *body = &m->Cops[0]->pMyCar->pCarTypeInfo->Body;
+
+    m->fMaxCopCarXdim = body->Xdim * 1.1f;
+    m->fMaxCopCarYdim = body->Ydim * 1.1f;
+}
+
+void copmgr_add_cop_car_to_race(struct DriverInfo *info, int32_t beACop)
+{
+    if (TheRaceParameters.nMaxCops > 0) {
+        copmanager_create_cop(pCopManager, info, beACop);
+        copmanager_calculate_max_cop_car_dimensions(pCopManager);
+    }
 }
 
 // ------------------------------------------------- the manager itself

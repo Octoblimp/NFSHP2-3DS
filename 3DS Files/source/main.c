@@ -82,6 +82,7 @@
 #include "collision.h"
 #include "collisionbody.h"
 #include "configitems.h"
+#include "cop.h"
 #include "copmgr.h"
 #include "difficultyinfo.h"
 #include "drivingchoice.h"
@@ -3781,6 +3782,7 @@ int main(int argc, char** argv)
     aiaction_install_vtables();
     aiactions_install_vtables();
     copmgr_install_vtables();
+    cop_install_vtables();
     aicarcontroller_install_vtables();
     beltmover_install_vtables();
     psychodriver_install_vtables();
@@ -4376,6 +4378,8 @@ int main(int argc, char** argv)
     // A collision tells it of hits on the cars it is watching.
     gCopManagerMonitorImpactFn = copmgr_car_impact;
     gCopManagerGetCopByCarFn   = copmanager_get_cop_by_car;
+    // A hard enough hit on an AI cop's car disables it (cop.h).
+    gAICopDisableMyCarFn       = cop_disable_my_car;
     logPrintf("car loader: pool %s\n", LoadedCarSlotPool ? "up" : "missing");
 
     // The blurb moves to the bottom screen, so the top screen stops drawing

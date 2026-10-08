@@ -4,8 +4,8 @@ tCopManager is retail's copmgr.obj, `0x002235f8` .. `0x00228fc8`. It
 owns the cops, their pursuits, the roadblock and radar-trap spots, the
 pulled-over cars and Be A Cop's counters. Slice 12a ports its record,
 its chunks, its building and teardown, and the hit test the car's
-collisions call. The cops themselves, their pursuits and their thinking
-are 12b onwards.
+collisions call. The cops themselves, and the manager's CreateCop and
+AddCopCarToRace that make them, are `cops.md`'s (12b on).
 
 | function | address | port |
 |----------|---------|------|
@@ -63,7 +63,7 @@ target. The parts:
 | 10420 | `fCarDamage[14]` | Be A Cop's suspect damage, by CarIndex |
 | 10476 | `nDifficultyLevel` | 0, 1 or 2, from CopStrength |
 | 10480 .. 10500 | Be A Cop's time, counters, and two new words | |
-| 10504, 10508 | `fMaxCopCarXdim`, `fMaxCopCarYdim` | retail's, set by `0x002276a0` (12b) |
+| 10504, 10508 | `fMaxCopCarXdim`, `fMaxCopCarYdim` | retail's: the first cop's car's size by 1.1, from `0x002276a0` (`cops.md`) |
 | 10512 | vptr | `0x002bd280`; slot 8 the destructor |
 
 The slot pools are statics: PursuitSlotPool (1600-byte slots, six),
@@ -166,9 +166,9 @@ MonitorImpact (`0x00228310`):
   AI cop drives (its slot 16, IsAIControlled, says 1), disables that
   car once the cop's grace timer (tAICop's word at 32) has run out.
   tAICop::Think counts the timer down; a teleport sets it to 3 s. The
-  disable is tAICop::DisableMyCar (`0x00230ac8`), the seam
-  `gAICopDisableMyCarFn`, which comes with the AI cop in 12b; a NULL
-  seam aborts, and only an AI cop can reach it.
+  disable is tAICop::DisableMyCar (`0x00230ac8`, `cops.md`), the seam
+  `gAICopDisableMyCarFn`, which `main.c` binds to `cop.c`'s; only an
+  AI cop can reach it.
 
 Retail reads the player's cop as `Cops[nPlayerCopIndex]` with no test of
 -1; the port finds none.
@@ -176,7 +176,8 @@ Retail reads the player's cop as `Cops[nPlayerCopIndex]` with no test of
 ## The check
 
 `tools/copmanager_check.py` runs retail's code in mipsemu and the port
-in `tools/src/copmanager_test.c` on 2291 operations: every track's cop
+(`copmgr.c`, and `cop.c`, which it now needs to link) in
+`tools/src/copmanager_test.c` on 2291 operations: every track's cop
 chunks through the loader, the constructor at each strength, Be A Cop
 on and off, the spots' tables, the speaker queue, the pursuit ids and
 deletions, the destructor, and the hits on six cars (AI cops, a player

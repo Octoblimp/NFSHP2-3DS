@@ -23,7 +23,7 @@ extern BSlotPool *SpikeStripSlotPool;
 // Their slots, retail's sizeof(tPursuit), sizeof(tAICop) and
 // sizeof(tSpikeStrip).
 #define TPURSUIT_SLOT_SIZE     1600
-#define TAICOP_SLOT_SIZE       96
+#define TAICOP_SLOT_SIZE       96   // cop.h checks it on the console
 #define TSPIKESTRIP_SLOT_SIZE  2304
 
 // LoaderCops, 0x00227dc0, and UnloaderCops, 0x00227e78: the container
@@ -114,9 +114,26 @@ void copmgr_car_impact(tCopManager *m, struct CarCollisionBody *b,
 // hit that disables an AI cop's car or wrecks Be A Cop's suspect.
 extern float fDisablingImpactMagnitudeTable[3];
 
-// tAICop::DisableMyCar(bool), 0x00230ac8, not ported. Reached by
-// MonitorImpact only with an AI cop; NULL aborts.
+// tAICop::DisableMyCar(bool), 0x00230ac8: cop.c's taicop_disable_my_car,
+// which main.c binds. Reached by MonitorImpact only with an AI cop; NULL
+// aborts.
 extern void (*gAICopDisableMyCarFn)(tCop *cop, int32_t b);
+
+// CreateCop, 0x002272e8. Be A Cop (`beACop` nonzero): a tPlayerCop on
+// the world's first car, after the AI cops, and that car to the first
+// radar trap flagged for the race's direction, if one is. Otherwise a
+// tAICop out of CopSlotPool for `info`. Either way nNumCops goes up.
+struct DriverInfo;
+void copmanager_create_cop(tCopManager *m, struct DriverInfo *info,
+                           int32_t beACop);
+
+// Retail's 0x002276a0: fMaxCopCarXdim and fMaxCopCarYdim, the first
+// cop's car's width and length by 1.1.
+void copmanager_calculate_max_cop_car_dimensions(tCopManager *m);
+
+// AddCopCarToRace, 0x00227d78, the seam gAddCopCarToRaceFn: with
+// nMaxCops above 0, CreateCop and then 0x002276a0.
+void copmgr_add_cop_car_to_race(struct DriverInfo *info, int32_t beACop);
 
 // The cop speech manager (gp-15624), not ported: AllocateVoices
 // (0x0020a288) and FlushQueue (0x0020a230). NULL seams do nothing.

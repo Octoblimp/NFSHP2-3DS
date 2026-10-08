@@ -16,9 +16,11 @@
 #include "bmem.h"
 #include "bslotpool.h"
 #include "car.h"
+#include "carinit.h"
 #include "collision.h"
 #include "collisionbody.h"
 #include "configitems.h"
+#include "cop.h"
 #include "copmgr.h"
 #include "race.h"
 #include "topology.h"
@@ -277,6 +279,53 @@ int32_t collision_is_two_car_collision(Collision *c)
 
     printf("  twocar %d -> %d\n", i, colls[i]);
     return colls[i];
+}
+
+// cop.c's, which the script never reaches.
+static void unreached(const char *f)
+{
+    fprintf(stderr, "copmanager_test: %s reached\n", f);
+    exit(3);
+}
+
+Car *car_construct(Car *c, DriverInfo *driver, const bVector3 *pos,
+                   uint16_t angle, float dist)
+{
+    (void)c; (void)driver; (void)pos; (void)angle; (void)dist;
+    unreached("car_construct");
+    return NULL;
+}
+
+void car_set_control_mode(Car *c, ControlMode mode)
+{
+    (void)c; (void)mode;
+    unreached("car_set_control_mode");
+}
+
+void car_set_movement_mode(Car *c, MovementMode mode)
+{
+    (void)c; (void)mode;
+    unreached("car_set_movement_mode");
+}
+
+void car_reset_to_position(Car *c, const bVector3 *pos, float speed,
+                           uint16_t angle)
+{
+    (void)c; (void)pos; (void)speed; (void)angle;
+    unreached("car_reset_to_position");
+}
+
+void *bSlotOMalloc(BSlotPool *pool)
+{
+    (void)pool;
+    unreached("bSlotOMalloc");
+    return NULL;
+}
+
+void bSlotFree(BSlotPool *pool, void *slot)
+{
+    (void)pool; (void)slot;
+    unreached("bSlotFree");
 }
 
 static void disable_my_car(tCop *cop, int32_t b)
@@ -638,9 +687,9 @@ static void op(char **a, int na)
         printf("delpursuit %d\n", u);
     } else if (!strcmp(o, "cop")) {
         int   k = atoi(a[1]);
-        tCop *c = malloc(sizeof(tAICopHead));
+        tCop *c = malloc(sizeof(tAICop));
 
-        memset(c, 0xcd, sizeof(tAICopHead));
+        memset(c, 0xcd, sizeof(tAICop));
         name(c, "C%d", k);
         c->vptr = !strcmp(a[2], "ai") ? VT_AICOP : VT_PLAYERCOP;
         m->Cops[k] = c;
@@ -658,7 +707,7 @@ static void op(char **a, int na)
 
         m->Cops[atoi(a[1])]->pMyPursuit = u >= 0 ? pursuits[u] : NULL;
     } else if (!strcmp(o, "copt")) {
-        ((tAICopHead *)(void *)m->Cops[atoi(a[1])])->New32 = bf(num(a[2]));
+        ((tAICop *)(void *)m->Cops[atoi(a[1])])->New32 = bf(num(a[2]));
     } else if (!strcmp(o, "copn")) {
         m->nNumCops = (int32_t)num(a[1]);
     } else if (!strcmp(o, "copidx")) {

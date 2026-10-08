@@ -17471,3 +17471,54 @@ layout, the chunks, the constructor's order and the hits.
 
 12b: the cops themselves -- tCop, tAICop and tPlayerCop, CreateCop and
 AddCopCarToRace, so the three cops are put on the track.
+
+## Session 56, continued (2026-10-08) -- 12b, the cops
+
+The cops themselves, retail's cop.obj: their records, constructors and
+destructors, and the manager's CreateCop and AddCopCarToRace. `cop.c`,
+`cop.h` and `copdriver.h` are new. `docs/formats/cops.md` has the
+records, the constructor's order, DisableMyCar and the zones.
+
+### What it does
+
+- **The records.** tCop (32 bytes) was already in `copmanager.h`.
+  tPlayerCop is 52 and tAICop 96 (the demo's is 76; retail added the
+  grace timer and four words). CopDriver's 76-byte record is in
+  `copdriver.h` for 12d. `copmanager.h`'s stand-in, tAICopHead, is gone.
+- **CreateCop.** An AI cop comes out of CopSlotPool and builds its own
+  car, appended to the world's CarList. Its car type's mass goes to
+  1.5, 1.75 or 2.0 by the cops' strength, with the inertia scaled to
+  match; the car gets COP_CONTROL (a parked CopDriver with the cop's
+  number), no mover, and isn't drawn. Be A Cop's tPlayerCop sits on
+  the player's car and moves it to the first radar trap flagged for the
+  race's direction.
+- **AddCopCarToRace** is CreateCop then `0x002276a0`, the first cop's
+  car's size by 1.1.
+- **DisableMyCar** is bound to `gAICopDisableMyCarFn`: wreck the damage,
+  give the chased player's radar traps 10 s more, leave the pursuit, ask
+  for LS_DISABLED.
+- **The zones**: the six-by-six table and the sub-states' zones.
+- `gAddCopCarToRaceFn` is still NULL, so race setup passes the cops over
+  as before: COP_CONTROL needs CopDriver's constructor (12d), and the
+  cops need Think. Nothing changes in a race yet.
+
+### Checked
+
+- `cop_check` (new): 1012 operations -- the zones, AddCopCarToRace and
+  CreateCop at each strength on four car types, Be A Cop in four
+  directions on six sets of radar traps, each constructor and
+  destructor through the tables, the setters and the two clears, and
+  DisableMyCar in every state, at the 75 m edge, with the speaker
+  removal moving the cop. 2565 lines, 0 differ.
+- Its `--mutate`: 139 mutations, 138 caught, 1 equivalent (tAICop's
+  destructor's table store, which tCop's overwrites).
+- `copmanager_check` now links `cop.c`: 23342 lines, 0 differ.
+- carmode, collisionbody, drivecam, drivingchoice, hudanim,
+  hudfeatures, hudrender, nearbycar, realcontroller, realdriver,
+  trackmap, raceupdate, hudcop, hudscore and aidriver: 0 differ.
+- The CIA builds.
+
+### Next
+
+12c, CopMover (copdriver.obj's mover), then 12d, CopDriver, after which
+`gAddCopCarToRaceFn` can be bound and the cops built in a race.
