@@ -542,8 +542,8 @@ void copmover_set_state(CopMover *m, eCopMoverState s)
 #define CD_BACK_UP_TIME     2.0f                 // 40000000
 #define CD_STUCK_SPEED      2.0f                 // 40000000
 #define CD_STUCK_TIME       1.0f                 // 3f800000
-#define CD_ACQUIRE_LANE     2.5f                 // 40200000
-#define CD_ACQUIRE_MPH      60.0f                // 42700000
+#define CD_BLOCK_LANE     2.5f                 // 40200000
+#define CD_BLOCK_MPH      60.0f                // 42700000
 #define CD_QUARTER_TURN     16384.0f             // 46800000
 
 // 0x00310ef8, by tCopManager::nDifficultyLevel (2 when the chased car has
@@ -808,13 +808,13 @@ void copdriver_get_pursuit_target_point(CopDriver *d, bVector2 *out)
     drv = d->Base.Base.Driver;
 
     switch (cop->Base.LogicSubState) {
+    case LSS_PURSUIT_FOLLOW:
+    case LSS_FOLLOW_OFFSET:
     case LSS_LOW_SPEED_CLOSE_FOLLOW:
     case LSS_FOLLOW_BACKWARDS:
     case LSS_FLANK:
     case LSS_BUMP:
-    case LSS_BLOCK:
-    case LSS_GET_AHEAD:
-    case LSS_LIMBO_READY: {
+    case LSS_STOP: {
         float dx, dy;
 
         // The pursuit's own targets: within 20 m of the chased car the
@@ -836,7 +836,7 @@ void copdriver_get_pursuit_target_point(CopDriver *d, bVector2 *out)
         }
         break;
     }
-    case LSS_ACQUIRE:
+    case LSS_BLOCK:
         // Along the chased car's route, as far across it as the car is.
         d->SubState = 0;
         taicop_initialize_drive_target(cop);
@@ -848,7 +848,7 @@ void copdriver_get_pursuit_target_point(CopDriver *d, bVector2 *out)
                                          car_pos(chased), CD_TARGET_DIST,
                                          &off);
         break;
-    case LSS_STOP:
+    case LSS_GET_AHEAD:
         d->SubState = 0;
         taicop_initialize_drive_target(cop);
         taicop_update_drive_target(cop, car_pos(chased), 0);
@@ -856,7 +856,7 @@ void copdriver_get_pursuit_target_point(CopDriver *d, bVector2 *out)
                                          car_pos(chased), CD_TARGET_DIST,
                                          &none);
         break;
-    case LSS_LIMBO_DISABLED:
+    case LSS_ACQUIRE:
         // Along its own route.
         d->SubState = 0;
         taicop_initialize_drive_target(cop);
@@ -967,22 +967,22 @@ static void pursue_translating(CopDriver *d, tAICop *cop, tPursuit *p,
     }
 
     switch (cop->Base.LogicSubState) {
-    case LSS_BLOCK:
-    case LSS_STOP:
+    case LSS_FLANK:
+    case LSS_GET_AHEAD:
         along = 1.5f;
         extra = 3.0f;
         break;
-    case LSS_GET_AHEAD:
+    case LSS_BUMP:
         extra = 3.0f;
         across = 10.0f;
         break;
-    case LSS_ACQUIRE: {
+    case LSS_BLOCK: {
         float lc = route_lateral(chased);
         float lm = route_lateral(d->Base.Base.pCar);
         float s;
 
-        if (fabsf(lc - lm) <= CD_ACQUIRE_LANE) {
-            if (chased->State.ForwardSpeed * CD_MPS_TO_MPH < CD_ACQUIRE_MPH) {
+        if (fabsf(lc - lm) <= CD_BLOCK_LANE) {
+            if (chased->State.ForwardSpeed * CD_MPS_TO_MPH < CD_BLOCK_MPH) {
                 v.x = 0.0f;
                 v.y = 0.0f;
                 break;
@@ -995,7 +995,7 @@ static void pursue_translating(CopDriver *d, tAICop *cop, tPursuit *p,
         v.y = v.y * s;
         break;
     }
-    case LSS_LIMBO_READY:
+    case LSS_STOP:
         m->fMaxBrakingAccel = 14.0f;
         across = 3.0f;
         break;
@@ -1011,7 +1011,7 @@ static void pursue_translating(CopDriver *d, tAICop *cop, tPursuit *p,
     q.y = to->y - a.y;
     q.x = to->x - a.x;
     want.z = 0.0f;
-    if (cop->Base.LogicSubState == LSS_LIMBO_READY) {
+    if (cop->Base.LogicSubState == LSS_STOP) {
         want.x = 0.0f;
         want.y = 0.0f;
     } else {
@@ -1050,22 +1050,22 @@ static void pursue_steering(CopDriver *d, tAICop *cop, Car *chased,
     m->aDesiredFacingAngle = pol.a;
 
     switch (cop->Base.LogicSubState) {
-    case LSS_LOW_SPEED_CLOSE_FOLLOW:
+    case LSS_PURSUIT_FOLLOW:
+    case LSS_FOLLOW_OFFSET:
     case LSS_FOLLOW_BACKWARDS:
+    case LSS_FLANK:
     case LSS_BUMP:
-    case LSS_BLOCK:
-    case LSS_GET_AHEAD:
         speed = dist + ch_speed;
         break;
-    case LSS_FLANK:
+    case LSS_LOW_SPEED_CLOSE_FOLLOW:
         speed = dist * 5.0f + ch_speed;
         break;
-    case LSS_ACQUIRE: {
+    case LSS_BLOCK: {
         float lc = route_lateral(chased);
         float lm = route_lateral(d->Base.Base.pCar);
 
-        if (fabsf(lc - lm) <= CD_ACQUIRE_LANE) {
-            if (chased->State.ForwardSpeed * CD_MPS_TO_MPH < CD_ACQUIRE_MPH)
+        if (fabsf(lc - lm) <= CD_BLOCK_LANE) {
+            if (chased->State.ForwardSpeed * CD_MPS_TO_MPH < CD_BLOCK_MPH)
                 speed = 0.0f;
             else
                 speed = ch_speed * 0.5f;
@@ -1074,10 +1074,10 @@ static void pursue_steering(CopDriver *d, tAICop *cop, Car *chased,
         }
         break;
     }
-    case LSS_STOP:
+    case LSS_GET_AHEAD:
         speed = ch_speed * CD_SPEED_UP;
         break;
-    case LSS_LIMBO_DISABLED:
+    case LSS_ACQUIRE:
         speed = m->fBaseMaxSpeed;
         break;
     default:

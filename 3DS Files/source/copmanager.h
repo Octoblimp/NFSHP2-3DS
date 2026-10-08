@@ -172,23 +172,33 @@ typedef int32_t eLogicState;
 #define LS_CAUGHT_SPEEDER   ((eLogicState)7)
 #define LS_GUARD_LOCATION   ((eLogicState)8)
 
-// eLogicSubState, .mdebug L52663.
+// eLogicSubState in retail's numbering. The demo's .mdebug (L52663)
+// lists NONE, then PURSUIT_FOLLOW at 1 through CAUGHTSPEEDER_WAITING at
+// 14. Retail added two values at 1 and 2: its DoHotPursuitLogic jumps
+// through a table (0x002bd670) indexed by sub-state - 3, sending 3 to
+// DoPursuitFollowLogic and on in the enum's order to 12,
+// DoPursuitStopLogic.
+// HandleStateTransitions sets 13 or 14 entering limbo and 15 when it
+// catches a speeder. Retail's patrol tests 2 for routes against the
+// traffic (cop.c), so that one is named for it; 1 is not named yet.
 typedef int32_t eLogicSubState;
 #define LSS_NONE                     ((eLogicSubState)0)
-#define LSS_PURSUIT_FOLLOW           ((eLogicSubState)1)
-#define LSS_FOLLOW_OFFSET            ((eLogicSubState)2)
-#define LSS_LOW_SPEED_CLOSE_FOLLOW   ((eLogicSubState)3)
-#define LSS_FOLLOW_BACKWARDS         ((eLogicSubState)4)
-#define LSS_FLANK                    ((eLogicSubState)5)
-#define LSS_BUMP                     ((eLogicSubState)6)
-#define LSS_BLOCK                    ((eLogicSubState)7)
-#define LSS_GET_AHEAD                ((eLogicSubState)8)
-#define LSS_ACQUIRE                  ((eLogicSubState)9)
-#define LSS_STOP                     ((eLogicSubState)10)
-#define LSS_LIMBO_DISABLED           ((eLogicSubState)11)
-#define LSS_LIMBO_READY              ((eLogicSubState)12)
-#define LSS_CAUGHTSPEEDER_TICKETING  ((eLogicSubState)13)
-#define LSS_CAUGHTSPEEDER_WAITING    ((eLogicSubState)14)
+#define LSS_RETAIL_1                 ((eLogicSubState)1)
+#define LSS_PATROL_ONCOMING          ((eLogicSubState)2)
+#define LSS_PURSUIT_FOLLOW           ((eLogicSubState)3)
+#define LSS_FOLLOW_OFFSET            ((eLogicSubState)4)
+#define LSS_LOW_SPEED_CLOSE_FOLLOW   ((eLogicSubState)5)
+#define LSS_FOLLOW_BACKWARDS         ((eLogicSubState)6)
+#define LSS_FLANK                    ((eLogicSubState)7)
+#define LSS_BUMP                     ((eLogicSubState)8)
+#define LSS_BLOCK                    ((eLogicSubState)9)
+#define LSS_GET_AHEAD                ((eLogicSubState)10)
+#define LSS_ACQUIRE                  ((eLogicSubState)11)
+#define LSS_STOP                     ((eLogicSubState)12)
+#define LSS_LIMBO_DISABLED           ((eLogicSubState)13)
+#define LSS_LIMBO_READY              ((eLogicSubState)14)
+#define LSS_CAUGHTSPEEDER_TICKETING  ((eLogicSubState)15)
+#define LSS_CAUGHTSPEEDER_WAITING    ((eLogicSubState)16)
 
 // type#5558, 32 bytes: tCop, the base of tAICop and tPlayerCop. The
 // vptr is the image's table address (vtable.h): 8 the destructor, 16

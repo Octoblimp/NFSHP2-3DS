@@ -275,7 +275,7 @@ void taicop_initialize_drive_target(tAICop *c)
     c->RouteInfo.Route = NULL;
 
     if (c->Base.DesiredLogicState == LS_DRIVING_ON_PATROL) {
-        if (c->Base.LogicSubState == LSS_FOLLOW_OFFSET)
+        if (c->Base.LogicSubState == LSS_PATROL_ONCOMING)
             ok = ai_get_nearest_route_point(&c->RouteInfo, pos,
                                             ONCOMING_TRAFFIC_ROUTES, 2, 0.0f);
         if (ok) {
@@ -302,13 +302,13 @@ void taicop_initialize_drive_target(tAICop *c)
         Car *car;
 
         switch (c->Base.LogicSubState) {
-        case LSS_ACQUIRE:
-        case LSS_STOP:
+        case LSS_BLOCK:
+        case LSS_GET_AHEAD:
             c->RouteInfo.Route = car_get_route(c->Base.pMyPursuit->pChasedCar,
                                                1);
             car = c->Base.pMyPursuit->pChasedCar;
             break;
-        case LSS_LIMBO_DISABLED:
+        case LSS_ACQUIRE:
             c->RouteInfo.Route = car_get_route(c->Base.pMyCar, 1);
             car = c->Base.pMyCar;
             break;
@@ -412,18 +412,18 @@ int32_t request_zone_permission(int32_t a, int32_t b)
 int32_t get_zone_from_sub_state(eLogicSubState s, float side)
 {
     switch (s) {
-    case LSS_LOW_SPEED_CLOSE_FOLLOW:
+    case LSS_PURSUIT_FOLLOW:
         return 4;
-    case LSS_FOLLOW_BACKWARDS:
+    case LSS_FOLLOW_OFFSET:
         return side < 0.0f ? 3 : 5;
-    case LSS_BLOCK:
+    case LSS_FLANK:
+    case LSS_BUMP:
     case LSS_GET_AHEAD:
-    case LSS_STOP:
         return side < 0.0f ? 1 : 2;
-    case LSS_ACQUIRE:
+    case LSS_BLOCK:
         return 0;
     default:
-        // LSS_FLANK, LSS_BUMP, the two limbo ones, and the rest.
+        // LOW_SPEED_CLOSE_FOLLOW, FOLLOW_BACKWARDS, ACQUIRE, STOP, the rest.
         return 6;
     }
 }

@@ -123,10 +123,10 @@ int32_t taicop_is_near_pursuit_target(const tAICop *c);
 
 // InitializeDriveTarget, 0x00230638: where RouteInfo starts. On patrol
 // (asked for, DesiredLogicState), the nearest oncoming traffic route's
-// point when following an offset (LogicSubState 2) and that point is
+// point in LSS_PATROL_ONCOMING (2) when that point is
 // within the car's route's width, else the nearest racing route's. In a
-// hot pursuit, the chased car's route and point for ACQUIRE and STOP and
-// the cop's own for LIMBO_DISABLED. Otherwise none.
+// hot pursuit, the chased car's route and point for BLOCK and GET_AHEAD
+// and the cop's own for ACQUIRE. Otherwise none.
 void taicop_initialize_drive_target(tAICop *c);
 
 // UpdateDriveTarget, 0x002307d0: rebuilds the car driver's target as the

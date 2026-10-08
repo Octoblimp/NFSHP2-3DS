@@ -75,8 +75,8 @@ reads its own copy.
 | `lui` | 40800000 | 4 | the throttle while steering for a target |
 | `lui` | 40000000 | 2 | the backing-up time; the stuck speed |
 | `lui` | 3f800000 | 1 | the stuck time |
-| `lui` | 40200000 | 2.5 | ACQUIRE's lane |
-| `lui` | 42700000 | 60 | ACQUIRE's mph |
+| `lui` | 40200000 | 2.5 | BLOCK's lane |
+| `lui` | 42700000 | 60 | BLOCK's mph |
 | `lui` | 46800000 | 16384 | a quarter turn, BAM |
 
 **How far past the line's speed.** The table at 0x00310ef8 scales the
@@ -144,28 +144,28 @@ at 30 mph or more, it translates. Otherwise it steers.
    history: the velocity 0.25 s back, scaled to the length the velocity
    had 0.65 s back (if the first is not 0).
 2. By the sub-state:
-   - BLOCK and STOP: along 1.5, and 3 m/s extra;
-   - GET_AHEAD: across 10, and 3 extra;
-   - ACQUIRE: if the two cars are within 2.5 m across their route points
+   - FLANK and GET_AHEAD: along 1.5, and 3 m/s extra;
+   - BUMP: across 10, and 3 extra;
+   - BLOCK: if the two cars are within 2.5 m across their route points
      of each other, then below 60 mph no velocity, else half; further
      apart, 1.1 times;
-   - LIMBO_READY: braking at 14, across 3.
+   - STOP: braking at 14, across 3.
 3. The way to the target is split along the cop's own velocity (made a
    unit with bNormalize) and across it. The velocity wanted is
    `along x (the along part) + across x (the rest) + the chased
    velocity`; along is 1 and across 1.5 unless the sub-state set them.
-   LIMBO_READY wants none. The result is lengthened by the extra, and z
+   STOP wants none. The result is lengthened by the extra, and z
    is 0.
 
 **Steering.** The mover's STEERING state, with the heading for the
 target and a speed by the sub-state:
 
-- LOW_SPEED_CLOSE_FOLLOW, FOLLOW_BACKWARDS, BUMP, BLOCK, GET_AHEAD: the
+- PURSUIT_FOLLOW, FOLLOW_OFFSET, FOLLOW_BACKWARDS, FLANK, BUMP: the
   distance to the chased car plus its speed;
-- FLANK: five times the distance plus its speed;
-- ACQUIRE: as above, 0, half or 1.1 times its speed;
-- STOP: 1.1 times its speed;
-- LIMBO_DISABLED: the mover's base top speed;
+- LOW_SPEED_CLOSE_FOLLOW: five times the distance plus its speed;
+- BLOCK: as above, 0, half or 1.1 times its speed;
+- GET_AHEAD: 1.1 times its speed;
+- ACQUIRE: the mover's base top speed;
 - the rest: 0.
 
 The speed is then held to the cop's route point's driving line speed,
@@ -177,17 +177,17 @@ the cop's heading (and more than 1 m away), it is 20 mph.
 
 0x001a1e90, `(out)`. Without a pursuit it leaves `out` alone.
 
-- **LOW_SPEED_CLOSE_FOLLOW, FOLLOW_BACKWARDS, FLANK, BUMP, BLOCK,
-  GET_AHEAD, LIMBO_READY:** the pursuit's own targets, with SubState 1.
+- **PURSUIT_FOLLOW, FOLLOW_OFFSET, LOW_SPEED_CLOSE_FOLLOW,
+  FOLLOW_BACKWARDS, FLANK, BUMP, STOP:** the pursuit's own targets, with SubState 1.
   Within 20 m of the chased car the driver's drive target becomes the
   pursuit's near one, and the point is GetDriveTargetPointByDLOffset
   FromStart on it. Further away it becomes the far one, and the point
   is 20 m along it from the cop. Both are offset by `New48`.
-- **ACQUIRE:** SubState 0. InitializeDriveTarget and UpdateDriveTarget
+- **BLOCK:** SubState 0. InitializeDriveTarget and UpdateDriveTarget
   along the chased car, then the point 20 m along from it, as far across
   as the chased car is across its route point.
-- **STOP:** the same, with no offset.
-- **LIMBO_DISABLED:** the same along the cop's own car.
+- **GET_AHEAD:** the same, with no offset.
+- **ACQUIRE:** the same along the cop's own car.
 
 ## The two walkers
 
@@ -256,7 +256,7 @@ script's 21727 operations:
   - patrolling;
   - getting stuck and backing up, to 0 exactly;
   - pursuit steering by sub-state and class, and the quarter turn;
-  - pursuit translating, ACQUIRE's lanes, and the history;
+  - pursuit translating, BLOCK's lanes, and the history;
   - the edges: 40 m, a dot of 0, exactly 30 mph, NaN, -0 and infinite
     speeds, and DISABLED from a car that was driving;
   - random runs.
@@ -269,7 +269,7 @@ equivalent:
   doesn't run; a zero-length segment's unit is never read;
 - translating with a zero velocity wanted: 0, or NaN with the extra, either
   way;
-- LIMBO_READY's across, which is never read since it wants no velocity
+- STOP's across, which is never read since it wants no velocity
   (the image skips it too, at 0x001a25fc and 0x001a2664);
 - at exactly 20 mph, the clamp to 20 mph sets the speed it already has.
 

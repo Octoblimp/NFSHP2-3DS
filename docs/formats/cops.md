@@ -57,6 +57,38 @@ grace timer at 32, the two words at 48 and the two at 64 (6 and 3 from
 the constructor). Each record has a compile-time check of its offsets on
 a 32-bit target.
 
+**The sub-states.** The demo's `.mdebug` (L52663) lists NONE, then
+PURSUIT_FOLLOW at 1 through CAUGHTSPEEDER_WAITING at 14. Retail has
+two more values at 1 and 2, so every name after NONE is two higher:
+
+| value | name |
+|------:|------|
+| 0 | NONE |
+| 1 | not named yet |
+| 2 | PATROL_ONCOMING: patrolling on a route against the traffic |
+| 3 | PURSUIT_FOLLOW |
+| 4 | FOLLOW_OFFSET |
+| 5 | LOW_SPEED_CLOSE_FOLLOW |
+| 6 | FOLLOW_BACKWARDS |
+| 7 | FLANK |
+| 8 | BUMP |
+| 9 | BLOCK |
+| 10 | GET_AHEAD |
+| 11 | ACQUIRE |
+| 12 | STOP |
+| 13 | LIMBO_DISABLED |
+| 14 | LIMBO_READY |
+| 15 | CAUGHTSPEEDER_TICKETING |
+| 16 | CAUGHTSPEEDER_WAITING |
+
+The evidence: DoHotPursuitLogic (0x0022ff58) jumps through a table at
+0x002bd670 by sub-state - 3, and its entries are the pursuit logics in
+the enum's order, DoPursuitFollowLogic first and DoPursuitStopLogic
+tenth. HandleStateTransitions enters limbo with 13 (from DISABLED) or 14,
+and a caught speeder with 15. Patrol's InitializeDriveTarget takes the
+oncoming routes in 2. Every value in the port was checked against
+retail; only the names moved.
+
 The tables: tCop's at `0x002bd6e8`, tPlayerCop's at `0x002bd6c0` and
 tAICop's at `0x002bd698`. Slot 8 is the destructor, 16 IsAIControlled,
 24 Think and 32 DoSnapshot. tCop's last three are `__pure_virtual`.
@@ -150,7 +182,7 @@ pursuit it is 0.
 **InitializeDriveTarget** clears RouteInfo, then finds a route point by
 the logic state *asked for*:
 
-- **LS_DRIVING_ON_PATROL.** In LSS_FOLLOW_OFFSET, the nearest point on
+- **LS_DRIVING_ON_PATROL.** In LSS_PATROL_ONCOMING, the nearest point on
   the oncoming traffic routes (GetNearestRoutePoint, flags 2, distance
   0). It is kept if it is within the road across the car's own route
   point (`Car::GetRoutePoint(1)`). How far across is
@@ -158,9 +190,9 @@ the logic state *asked for*:
   its size must be within LeftWidth, otherwise within RightWidth. A NaN
   passes. If the point is not kept, in any other sub-state, or when
   nothing was found, it is the nearest point on all the racing routes.
-- **LS_HOT_PURSUIT.** By the sub-state. ACQUIRE and STOP take the chased
+- **LS_HOT_PURSUIT.** By the sub-state. BLOCK and GET_AHEAD take the chased
   car's route and route point (`GetRoute(1)`, `GetRoutePoint(1)`),
-  LIMBO_DISABLED the cop's own car's. Any other leaves RouteInfo clear.
+  ACQUIRE the cop's own car's. Any other leaves RouteInfo clear.
 - Any other state leaves it clear.
 
 **UpdateDriveTarget(pos, keep).** With keep 0, the route point is first
@@ -202,9 +234,9 @@ allowed. InitZonePermissionTable fills it:
 | 4 | 1 | 1 | 1 | 1 | 0 | 1 |
 | 5 | 1 | 1 | 0 | 1 | 1 | 0 |
 
-GetZoneFromSubState gives a pursuit sub-state's zone: low-speed close
-follow 4; follow backwards 3, or 5 when `side` is not below 0; block,
-get ahead and stop 1, or 2; acquire 0; the rest 6.
+GetZoneFromSubState gives a pursuit sub-state's zone: pursuit follow
+4; follow offset 3, or 5 when `side` is not below 0; flank, bump and
+get ahead 1, or 2; block 0; the rest 6.
 
 ## Seams
 
