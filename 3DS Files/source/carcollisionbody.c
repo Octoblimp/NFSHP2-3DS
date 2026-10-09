@@ -360,10 +360,21 @@ int32_t carcollisionbody_are_collisions_enabled(CollisionBody *b)
 }
 
 // `c.lt.s` then `mov.s` on true: a NaN inverse mass is answered as it is.
+//
+// With no RigidBody the port answers 0, as a static body does. That is a
+// car in COP_MOVEMENT or TRAFFIC_MOVEMENT, such as a cop a collision put in
+// MELLOW_MOVEMENT and its own logic (taicop_movement_mode_transitions) put
+// back before the Player's knock test read the collision. Retail reads
+// through NULL, the PS2's word at 0x11C; the 3DS would abort. The knock
+// test only asks whether the answer is under 500, and any car's is.
 float carcollisionbody_get_mass_inverse(CollisionBody *b)
 {
-    float m = car_rb((CarCollisionBody *)b)->Mass_inv;
+    const RigidBody *rb = car_rb((CarCollisionBody *)b);
+    float m;
 
+    if (rb == NULL)
+        return 0.0f;
+    m = rb->Mass_inv;
     if (CAR_MASS_INVERSE_MAX < m)
         m = CAR_MASS_INVERSE_MAX;
     return m;

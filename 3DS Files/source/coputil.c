@@ -4,9 +4,11 @@
 
 #include <math.h>
 
+#include "bmath.h"
 #include "car.h"
 #include "collision.h"
 #include "collisionbody.h"
+#include "eefpu.h"
 #include "trackpath.h"
 #include "world.h"
 
@@ -146,4 +148,14 @@ int32_t did_these_cars_collide(Car *a, Car *b)
 int32_t car_in_recent_collision(Car *car)
 {
     return car->pDynamicCollisionBody->Dynamic.Body.NumCollisions != 0;
+}
+
+void rotate_vector(bVector2 *out, const bVector2 *v, float deg)
+{
+    float s, c;
+    float x = v->x, y = v->y;
+
+    bSinCos(&s, &c, (uint16_t)(ee_trunc_w(deg * 65536.0f) / 360));
+    out->y = y * c - x * s;
+    out->x = x * c + y * s;
 }

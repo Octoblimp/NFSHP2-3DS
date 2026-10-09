@@ -1363,6 +1363,11 @@ def car_methods_section(sc, rnd):
         sc.op(OP_DYN_PTRS, K(0), 1, 1)
         sc.op(OP_VCALL, K(0), VT_MASSINV)
         sc.op(OP_VCALL, K(0), VT_INERTIA)
+    # No RigidBody: the port answers 0. Retail reads the word at 0x11C,
+    # which in the model's memory is 0 (checked in vcall), as the port's.
+    sc.op(OP_DYN_PTRS, K(0), 1, -1)
+    sc.op(OP_VCALL, K(0), VT_MASSINV)
+    sc.op(OP_DYN_PTRS, K(0), 1, 1)
     sc.dump()
 
     sc.tag("CarCollisionBody: AreCollisionsEnabled and IsBlinking")
@@ -3021,6 +3026,11 @@ class Model(object):
             go(this, self.inv)
             self.emit(head + "ok")
         elif slot in (VT_MAXBACKUP, VT_MASSINV, VT_BOUNCE, VT_FRICTION):
+            # A car's body with no RigidBody: retail reads Mass_inv at
+            # 0x11C, which the port answers as 0 (carcollisionbody.c).
+            if slot == VT_MASSINV and e.u32(b + 80) == VT_CAR \
+                    and e.u32(b + 96) == 0:
+                assert e.u32(0x11c) == 0, "the model's word at 0x11c"
             go(this)
             self.emit(head + "%08x" % self.ret_f())
         elif slot in (VT_MOVE, VT_BACKUP):
@@ -4776,6 +4786,12 @@ MUTATIONS = [
        "        if (gCarStartForceImpactFn != NULL) {", "        if (1) {", CCB),
     _m("ccb_an_force_world", "        to_car_frame(b, &local, j);\n        if (gCarStartForceImpactFn",
        "        local = *j;\n        if (gCarStartForceImpactFn", CCB),
+
+    # the port's guard on a body with no RigidBody
+    _m("ccb_mi_no_rb_guard", "    if (rb == NULL)\n        return 0.0f;\n    m =",
+       "    m =", CCB),
+    _m("ccb_mi_no_rb_value", "    if (rb == NULL)\n        return 0.0f;\n    m =",
+       "    if (rb == NULL)\n        return 1.0f;\n    m =", CCB),
 
     # the rest of the table's own
     _m("ccb_enabled_no_boring",

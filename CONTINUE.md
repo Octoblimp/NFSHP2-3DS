@@ -1,9 +1,16 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 60 (2026-10-09):
-12k-1, the helicopter's sheet, is done. Each track's ground polygons
-for the helicopter now load through slot 23, and FindZValue finds the
-height under a point (`docs/formats/helisheet.md`). Before it, 12j-2b
+12k-2, the helicopter's object, is done. `chopper.c` builds and frees
+the Chopper. It follows and attacks a car, finds the bombing run's
+target spot, and places the helicopter in the world and takes it out
+(`docs/formats/chopper.md`). Nothing calls it until 12k-7. The same
+slice guards a car's collision body with no RigidBody: a cop's hit on
+the player read through NULL in the knock test (`carcollisionbody.c`).
+Before it, 12k-1 loaded the helicopter's sheet. Each track's ground
+polygons for the helicopter now load through slot 23, and FindZValue
+finds the height under a point (`docs/formats/helisheet.md`). Before
+it, 12j-2b
 drew the spike strips. The belt's pieces are
 WorldObjects, now drawn in the player's view and the rear-view mirror
 (`docs/formats/cop-manager.md`, "Drawing the strips"). Before that, 12j-2a
@@ -328,18 +335,39 @@ pursuit.obj, on a 10 KB manager. Its slices:
     what the rest of `copmgr.c` calls. Demo 1,617 lines, retail 49,626,
     0 differ; 156 mutations, 154 caught, 2 equivalent.
   - Azahar: a Hot Pursuit quick race at 30 FPS and Speed 100%.
-- **Next: 12k-2**, the Chopper object (`chopper.c`). That is its
-  constructor (`0x001e7a90`), destructor and ClearVariables, plus
-  FollowThisCar, AttackCar, AdjustBombTarget, ShiftTarget,
-  FindUnobstructedSpot, FindGroundHeight, Place/RemoveChopperInWorld,
-  ChopperBehindCar, RotateToChopperCoord, GetMaxDeceleration and
-  AbortBombingRun.
-  - Retail's Chopper is 976 bytes. The demo's fields after its
-    TopologyCoordinate are 144 further on, up to Timeout (820).
-    Retail adds words at 824 and 828, a matrix at 848, and moves Speed
-    on to 912. EmitDust is at 956, followed by a new word at 960.
-  - FindUnobstructedSpot reads its flags word on a miss without
-    FindZValue having written it (stack garbage on the first try).
+- **12k-2, done (Session 60):** the Chopper object, in `chopper.c`.
+  That is the constructor (`0x001e7a90`), destructor and
+  ClearVariables, plus FollowThisCar, AttackCar, AdjustBombTarget,
+  ShiftTarget and FindUnobstructedSpot. Also FindGroundHeight,
+  Place/RemoveChopperInWorld and ChopperBehindCar. Then
+  RotateToChopperCoord (with coputil's RotateVector, `0x002313e0`),
+  GetMaxDeceleration and AbortBombingRun. Then Mute, UpdateSound, the
+  two route-point finders, CalcMatrix and the WorldObject's update.
+  - Retail's Chopper is 976 bytes: the layout is in `chopper.h` and
+    `docs/formats/chopper.md`. The bombing runs' table (`0x0031a7c8`)
+    has five rows; the demo's enum has four types.
+  - The port's divergences: no ChopperSound unless
+    `gCreateChopperSoundFn` is set (task 29), with every call through
+    it skipped; and FindUnobstructedSpot's flags word starts at 0,
+    where retail's first miss reads its stack.
+  - `tools/chopper_check.py`: 3,667 ops, 25,881 lines, 0 differ; 213
+    mutations, all caught. A yaw just under 180 (180 - 359/65536)
+    catches CalcMatrix's `< 0` against `< 1`.
+  - **The knock fix.** Azahar's first run logged sixteen unmapped
+    reads at 0x11C in carcollisionbody_get_mass_inverse. The user saw
+    a cop hit them. A cop that a collision puts in MELLOW_MOVEMENT can
+    go back to COP_MOVEMENT before the Player's knock test reads the
+    collision, and then its body has no RigidBody. Retail reads the
+    PS2's word at 0x11C; the 3DS would abort. The port answers 0, as a
+    static body does, and the knock test (under 500?) is unchanged.
+    `tools/collisionbody_check.py` asks a car body with no RigidBody
+    for its mass: 0 differ, and the guard's two mutations are caught.
+- **Next: the light flares.** The user saw a chasing cop with no
+  flashing lights (2026-10-09). carrender.c's render_light_flares
+  works out every flare's strength, the cop's red, blue and white
+  patterns included. It draws through `gERenderLightFlareFn`, and
+  nothing sets that: eRenderLightFlare is not ported, so no headlight,
+  brake light or cop light flare draws.
   - Then:
     - 12k-3, the planning;
     - 12k-4, flying;
@@ -4779,9 +4807,10 @@ each class shows what it reaches.
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
 That was about 41-60 slices to the full game when the table was set.
-After 12k-1 (2026-10-09), about 27-40 are left, and the count has run
+After 12k-2 (2026-10-09), about 27-40 are left, and the count has run
 low before:
-- step 12's: 12k-2 to 12k-7, 12l, 12m and 12n;
+- the light flares (eRenderLightFlare), which nothing drew;
+- step 12's: 12k-3 to 12k-7, 12l, 12m and 12n;
 - steps 10, 14, 14b, 16, 17, 18 and 20.
 
 The replay (`ReplaySnapshot` and every `DoSnapshot`) is not in the
@@ -4794,8 +4823,8 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a to 12k-1 are done, 12k-2
-  (the helicopter's object) is next. See "First" at the top.
+- **Next:** the light flares, then step 12's 12k-3 (the helicopter's
+  planning): 12a to 12k-2 are done. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

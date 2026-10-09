@@ -18647,3 +18647,93 @@ point. `docs/formats/helisheet.md` has the details.
 12k-2: the Chopper object. Its constructor, destructor and
 ClearVariables come first, then the small methods around following
 and attacking a car.
+
+## Session 60, continued (2026-10-09) -- 12k-2, the helicopter's object
+
+The Chopper is built, freed, and does the small things around a chase:
+following and attacking a car, finding the bombing run's target, and
+going in and out of the world. `docs/formats/chopper.md` has the
+details. Nothing calls it yet; 12k-7 binds the seams.
+
+### What it does
+
+- **`chopper.h`:** retail's 976-byte layout, with a 32-bit layout check.
+  The demo's fields after its TopologyCoordinate are 144 further on, up
+  to Timeout (820). Retail adds StuckTime (824), TotalSalvos (828), a
+  matrix at 848 and New960 (960, egg 5). The plans, move modes, attack
+  types and munitions; the bombing runs' table, BombRunBehaviours
+  (`0x0031a7c8`), with a fifth row the demo's enum lacks; and the
+  ChopperSound's table slots.
+- **`chopper.c`:**
+  - The constructor (`0x001e7a90`). The TopologyCoordinate, the dust
+    list and the TP. A WorldObject named "TRACK_HELICOPTER". The sound
+    through `gCreateChopperSoundFn`. The dust emitters of
+    "XEM_HELI_DUST". Then ClearVariables and EATING_DONUTS, with New960
+    set when neither demo mode is on and egg 5 is.
+  - The destructor (`0x001e7b80`) and ClearVariables (`0x001e7c38`).
+  - FollowThisCar (`0x001e7f80`) and AttackCar (`0x001e8040`).
+  - AdjustBombTarget (`0x001e8140`), ShiftTarget (`0x001e81d8`) and
+    FindUnobstructedSpot (`0x001e82c0`).
+  - FindGroundHeight, Place/RemoveChopperInWorld and ChopperBehindCar.
+  - RotateToChopperCoord, GetMaxDeceleration, AbortBombingRun, Mute
+    and UpdateSound.
+  - FindChopperPointFromScratch and FindChopperRoutePoint.
+  - CalcMatrix (`0x001ea3f8`) and the WorldObject's update
+    (`0x001ea578`).
+- **`coputil.c`:** RotateVector (`0x002313e0`). It reads both parts
+  before writing, so `out` may be `v`.
+- **The divergences:**
+  - No ChopperSound unless the seam is set, and then every call
+    through it is skipped. Retail calls it unguarded except in the
+    destructor.
+  - FindUnobstructedSpot's flags word starts at 0. Retail's first miss
+    reads whatever its stack held.
+
+### Checked
+
+- `tools/chopper_check.py` runs retail's functions in mipsemu, with
+  emath's rotations, bSinCos and bIdentity real on both sides. The
+  rest (the topology, the TP, the WorldObject, the emitters, the
+  routes, signposts, FindZValue and the sound's table) are stubs that
+  log and answer from the script. Every field is compared after each
+  call, the pad included. The model shares the two divergences: it
+  lends retail a silent sound, and zeroes the flags word on entry.
+  3,667 ops, 25,881 lines, 0 differ. 213 mutations, all caught. The
+  first pass left `mx_lt` (CalcMatrix's `yaw < 0` as `< 1`): adding 360
+  is a whole turn in BAM, so only a yaw whose sum with 360 rounds up
+  tells them apart. 180 - 359/65536 does.
+- The CIA builds.
+
+### The knock fix
+
+The first Azahar run (on AC, Speed 100%) raced, then logged sixteen
+unmapped reads at 0x11C, PC `0x001298F4`:
+carcollisionbody_get_mass_inverse through a NULL RigidBody. The user,
+watching, saw a cop hit them. Only one PC faulted, so it was the
+Player's knock test in `hudscore.c`, which asks both bodies of the
+player's collision for their inverse mass.
+
+A cop in COP_MOVEMENT has no RigidBody. On contact, CarController's
+SetToPhysicsMode (`0x001c0100`) puts it in MELLOW_MOVEMENT, but
+taicop_movement_mode_transitions can put it back before the knock test
+reads that collision. Retail would read the PS2's word at 0x11C; on a
+3DS it is a data abort. The port answers 0, as a static body does.
+The knock test only asks whether the other body's inverse mass is under
+500, and any car's is at most 0.769, so the score is unchanged.
+
+`tools/collisionbody_check.py` now asks a car body with no RigidBody for
+its mass. The model's word at 0x11C is 0, which the checker asserts.
+35,427 lines, 0 differ. The new mutations `ccb_mi_no_rb_guard` and
+`ccb_mi_no_rb_value` are caught.
+
+### Not yet
+
+- The rerun after the fix: the laptop was on battery (status 1), and
+  Azahar stalled on the language screen. It waits for AC.
+- The user also saw the cop's lights not flashing. The flares are
+  worked out in carrender.c, but `gERenderLightFlareFn` is never set:
+  eRenderLightFlare is not ported, so no flare draws. It is next.
+
+### Next
+
+The light flares, then 12k-3, the helicopter's planning.

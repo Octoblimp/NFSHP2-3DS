@@ -814,6 +814,13 @@ its one caller in Car.obj.
 **GetMassInverse** (0x001cdb78, slot 152) is the RigidBody's, clamped to
 1/1.3 with `c.lt.s`, so a NaN is answered as it is.
 
+Retail reads through `pBody` without a check. A car in COP_MOVEMENT or
+TRAFFIC_MOVEMENT has none: a cop a collision put in MELLOW_MOVEMENT can be
+put back by its own logic before the Player's knock test reads that
+collision. Retail then reads the PS2's word at 0x11C. The port answers 0, as
+a static body does; the knock test only asks whether the answer is under
+500, and any car's is.
+
 **GetInertiaTensorInverse** (0x001cdba0, slot 160) writes `I_body_inv`'s
 first three rows times 0.4, all four lanes, into
 `ScaledInverseInertiaTensor`, copies the fourth row, and answers that
@@ -1267,6 +1274,8 @@ cover:
 - the constants and Dynamic's slots, all through the car's table;
 - GetMassInverse and GetInertiaTensorInverse over eight inverse masses:
   4, the bound, one ulp either side of it, 0, -1, NaN and infinity;
+- GetMassInverse with no RigidBody. The model's word at 0x11C is 0, which
+  the checker asserts, so retail answers the port's 0;
 - AreCollisionsEnabled with each switch at 1, -1 and 0, and with the body
   disabled;
 - IsBlinking over six pairs of answers. The stubs' logs show where it
@@ -1420,11 +1429,11 @@ stops if any division but CollisionImpulse's friction (0x001cb278) divides
 by zero, or if that one never does.
 
 ```
-collisionbody_check  81 scenarios, 1572 ops, 35426 lines, 89 dumps, 0 differ
+collisionbody_check  81 scenarios, 1573 ops, 35427 lines, 89 dumps, 0 differ
                      TrackPolygon bodies on TRACKB12 polygons 2 11 1553 1543 40 220 734
 ```
 
-`--mutate` runs 646 mutations: 622 are caught and 24 are
+`--mutate` runs 648 mutations: 624 are caught and 24 are
 equivalent, with 0 unexplained. `--only NAME,...` runs just those. The
 twenty-four are:
 

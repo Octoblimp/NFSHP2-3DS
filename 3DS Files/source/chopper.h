@@ -1,14 +1,27 @@
-// chopper -- the police helicopter's head, as far as the orbit camera
-// reads it.
+// chopper -- Chopper.obj, the police helicopter (retail 0x001e7a90 ..
+// 0x001eae04), and the bombing runs' table.
 //
-// Chopper is task 26's. The demo's is 752 bytes (.mdebug type#2444), and
-// retail's is longer: its TopologyCoordinate is 704 bytes where the
-// demo's was 560, so everything after it is 144 further on, and it keeps
-// a matrix at 848 where the demo's GetMatrix built one.
-// OrbitCarCameraMover::Update (0x00158298) reads Plan, CurrentPos and
-// Matrix through World's Helicopter. The rest are holes, and the struct
-// is left open at the end like player.h's: nothing in the port builds a
-// chopper yet, so World's Helicopter stays NULL.
+// Chopper is task 26's, and 12k ports it in slices. The demo's is 752
+// bytes (.mdebug type#2444); retail's is 976:
+//   - its TopologyCoordinate is 704 bytes where the demo's was 560, so
+//     everything after it is 144 further on;
+//   - two words follow Timeout (824 and 828, the port's names below);
+//   - a matrix sits at 848, built by CalcMatrix (0x001ea3f8), where the
+//     demo's GetMatrix built one on each call;
+//   - and a word follows EmitDust (960), set by the constructor when Easter
+//     egg 5 is on.
+//
+// 12k-2 has the object: the constructor and destructor, ClearVariables,
+// following and attacking a car, finding the bombing run's target spot,
+// and placing the helicopter in the world and taking it out. Planning
+// (12k-3), flying (12k-4), drawing and dust (12k-5), the bombing run
+// itself (12k-6) and tPursuit's UpdateChopper (12k-7) come after.
+//
+// The ChopperSound is task 29's. The port builds none unless
+// gCreateChopperSoundFn is set, and then every call through it is
+// skipped; retail calls through it unguarded except in the destructor.
+//
+// Cross-check: tools/chopper_check.py. Write-up: docs/formats/chopper.md.
 
 #ifndef CHOPPER_H
 #define CHOPPER_H
@@ -16,9 +29,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "blist.h"
 #include "bmatrix.h"
 #include "bvector.h"
+#include "sound3d.h"
 #include "topology.h"
+#include "trackpath.h"
+#include "trackroute.h"
+#include "worldobject.h"
+
+struct Car;
 
 // ChopperPlan, .mdebug t5264.
 typedef int32_t ChopperPlan;
@@ -30,28 +50,221 @@ typedef int32_t ChopperPlan;
 #define CHOPPLAN_END_CHASE        ((ChopperPlan)5)
 #define CHOPPLAN_EATING_DONUTS    ((ChopperPlan)6)
 
+// ChopperMoveMode, .mdebug t1451.
+typedef int32_t ChopperMoveMode;
+#define CHOPMOVE_PURSUIT          ((ChopperMoveMode)0)
+#define CHOPMOVE_ROTATE           ((ChopperMoveMode)1)
+
+// ChopperAttackType, .mdebug t5266. The demo has four. Retail's table has
+// a fifth row, which the port names by its number.
+typedef int32_t ChopperAttackType;
+#define CHOPATTACK_ROCKET         ((ChopperAttackType)0)
+#define CHOPATTACK_SMOKE_BOMB_1   ((ChopperAttackType)1)
+#define CHOPATTACK_SMOKE_BOMB_2   ((ChopperAttackType)2)
+#define CHOPATTACK_SPIKE_BELT     ((ChopperAttackType)3)
+#define CHOPATTACK_4              ((ChopperAttackType)4)
+#define CHOPATTACK_NUM            5
+
+// MunitionType, .mdebug t3606.
+typedef int32_t MunitionType;
+#define CM_ROCKET                 ((MunitionType)0)
+#define CM_SMOKEBOMB              ((MunitionType)1)
+#define CM_DROPPED_SPIKES         ((MunitionType)2)
+
+// BombRunBehaviour, 32 bytes (.mdebug type#3607): one row a ChopperAttack-
+// Type, indexed unchecked.
+typedef struct BombRunBehaviour {
+    MunitionType Type;          //  0
+    float        Ahead;         //  4  seconds of the car's speed
+    float        Velocity;      //  8
+    float        Adjust;        // 12
+    int32_t      SalvoSize;     // 16
+    int32_t      NumSalvos;     // 20
+    float        SalvoSpread;   // 24
+    float        SalvoDelay;    // 28
+} BombRunBehaviour;
+
+typedef char bombrunbehaviour_size_check[
+    sizeof(BombRunBehaviour) == 32 ? 1 : -1];
+
+// Retail's table, 0x0031a7c8.
+extern const BombRunBehaviour BombRunBehaviours[CHOPATTACK_NUM];
+
 struct Chopper {
-    void              *pChopperSound;   //   0  xsSound3d *
-    void              *WorldObj;        //   4
-    TopologyCoordinate TopologyCoord;   //   8
-    uint8_t            _hole712[16];    // 712  DustEmitters .. CurrentCar
-    ChopperPlan        Plan;            // 728
-    uint8_t            _hole732[100];   // 732  MoveMode .. Timeout
-    bVector3           CurrentPos;      // 832
-    bMatrix4           Matrix;          // 848  retail's
-    // ... to the end.
-};
+    Sound3d            *pChopperSound;      //   0  ChopperSound *
+    WorldObject        *WorldObj;           //   4  "TRACK_HELICOPTER"
+    TopologyCoordinate  TopologyCoord;      //   8
+    bNode               DustEmitters;       // 712  bTList<AcidEmitter>
+    float               TimeUntilThink;     // 720
+    struct Car         *CurrentCar;         // 724
+    ChopperPlan         Plan;               // 728
+    ChopperMoveMode     MoveMode;           // 732
+    TrackRoute         *ChopperRoute;       // 736
+    TrackRoutePoint    *ChopperPoint;       // 740
+    TrackRoute         *TargetRoute;        // 744
+    TrackRoutePoint    *TargetPoint;        // 748
+    TrackPathCoordinate TP;                 // 752
+    float               TargetDistance;     // 792
+    TrackRoute         *OldCarRoute;        // 796
+    TrackRoutePoint    *OldCarPoint;        // 800
+    ChopperAttackType   BombRunType;        // 804
+    int32_t             NumSalvosReleased;  // 808
+    float               TimeUntilNextSalvo; // 812
+    int32_t             NextLauncher;       // 816
+    float               Timeout;            // 820
+    float               StuckTime;          // 824  retail's
+    int32_t             TotalSalvos;        // 828  retail's
+    bVector3            CurrentPos;         // 832
+    bMatrix4            Matrix;             // 848  retail's
+    float               Speed;              // 912
+    bVector2            Acceleration;       // 916
+    float               Roll;               // 924
+    float               DesiredRoll;        // 928
+    float               Yaw;                // 932
+    float               Pitch;              // 936
+    float               DesiredPitch;       // 940
+    float               RotRate;            // 944
+    float               ZVelocity;          // 948
+    float               GroundZ;            // 952
+    int32_t             EmitDust;           // 956  bool
+    int32_t             New960;             // 960  retail's: egg 5
+    uint8_t             _pad964[12];        // 964
+};                                          // 976
 
-// Two pointers lead and the TopologyCoordinate's table widens on a 64-bit
-// host, so the offsets are counted from its size there.
-#define CHOPPER_PLAN_AT (2 * sizeof(void *) + TOPOLOGY_SIZEOF + 16)
-
+#if UINTPTR_MAX == 0xFFFFFFFFu
 typedef char chopper_layout_check[
-    (offsetof(struct Chopper, TopologyCoord) == 2 * sizeof(void *)
-     && offsetof(struct Chopper, Plan) == CHOPPER_PLAN_AT
-     && offsetof(struct Chopper, CurrentPos) == CHOPPER_PLAN_AT + 104
-     && offsetof(struct Chopper, Matrix) == CHOPPER_PLAN_AT + 120
-     && (sizeof(void *) != 4 || CHOPPER_PLAN_AT == 728))
-    ? 1 : -1];
+    (offsetof(struct Chopper, TopologyCoord) == 8
+     && offsetof(struct Chopper, DustEmitters) == 712
+     && offsetof(struct Chopper, Plan) == 728
+     && offsetof(struct Chopper, TP) == 752
+     && offsetof(struct Chopper, TargetDistance) == 792
+     && offsetof(struct Chopper, Timeout) == 820
+     && offsetof(struct Chopper, TotalSalvos) == 828
+     && offsetof(struct Chopper, CurrentPos) == 832
+     && offsetof(struct Chopper, Matrix) == 848
+     && offsetof(struct Chopper, Speed) == 912
+     && offsetof(struct Chopper, Roll) == 924
+     && offsetof(struct Chopper, GroundZ) == 952
+     && offsetof(struct Chopper, New960) == 960
+     && sizeof(struct Chopper) == 976) ? 1 : -1];
+#endif
+
+// ChopperSound's table. Its first base is Sound3d, so the vptr is the
+// Sound3d's at +28.
+#define CHOPPERSOUND_VTABLE       0x002bc2a8u
+#define CHOPPERSOUND_VT_DTOR      8     // (this, flags)
+#define CHOPPERSOUND_VT_ACTIVATE  16    // (this, bool)
+#define CHOPPERSOUND_VT_UPDATE    24    // (this, float, uint16, float)
+#define CHOPPERSOUND_VT_MUTE      32    // (this, int)
+
+// sound::CreateChopperSound(Chopper *), 0x00215098. NULL (the default)
+// builds none.
+extern Sound3d *(*gCreateChopperSoundFn)(struct Chopper *h);
+
+// The timeout ClearVariables and AttackCar set, 0x41c80000.
+#define CHOPPER_TIMEOUT 25.0f
+
+// -------------------------------------------------------------- the object
+
+// Chopper::Chopper(), 0x001e7a90, in place on `mem`, which it returns:
+//   - the TopologyCoordinate, the dust list (empty) and the TP;
+//   - WorldObj, a WorldObject from WorldObjectSlotPool named
+//     "TRACK_HELICOPTER", with no matrix and lighting;
+//   - pChopperSound, from gCreateChopperSoundFn;
+//   - the dust emitters, afxGetEmitters of "XEM_HELI_DUST";
+//   - ClearVariables, then Plan EATING_DONUTS;
+//   - New960 1 when neither AIDemoMode nor ReplayDemoMode is set and egg 5
+//     is on (raceinit.h's gEggIsOnFn).
+struct Chopper *chopper_construct(void *mem);
+
+// Chopper::~Chopper(), 0x001e7b80: the dust emitters deleted; the sound
+// and WorldObj, each when set, through their destructors with 3; and with
+// bit 0 of `flags` the block back to the heap (bFree).
+void chopper_destruct(struct Chopper *h, int32_t flags);
+
+// 0x001e7c38. Every field after the TP back to its start: zeroes, except
+// Matrix (the identity) and Timeout (25). The TP is reset at CurrentPos,
+// which is zero by then.
+void chopper_clear_variables(struct Chopper *h);
+
+// 0x001e7f80. With New960 set, the car becomes the player's (World's
+// CarTable[0]) whatever it was, NULL included. 0 with no HeliSheet or no
+// signposts. With no car: from START_CHASE or EATING_DONUTS, CurrentCar
+// NULL and EATING_DONUTS; otherwise END_CHASE. With a car: only from
+// EATING_DONUTS or START_CHASE, CurrentCar it and START_CHASE; otherwise
+// 0. Each change also zeroes TimeUntilThink and returns 1.
+int32_t chopper_follow_this_car(struct Chopper *h, struct Car *car);
+
+// 0x001e8040. Only in PURSUIT: a BOMBING_RUN of that type starts, from the
+// distance to the car (negative when the helicopter is behind it), at the
+// helicopter's own point, with the car's route and point remembered. Then
+// AdjustBombTarget, and 1. Otherwise FollowThisCar(CurrentCar) when there
+// is one, and 0.
+int32_t chopper_attack_car(struct Chopper *h, ChopperAttackType type);
+
+// 0x001e8140. The run's lead is Ahead seconds of the car's speed, at least
+// 100. A target nearer than that less 24 is shifted to it, then moved on
+// to open ground.
+void chopper_adjust_bomb_target(struct Chopper *h);
+
+// 0x001e81d8. TargetDistance becomes `dist`. Of up to five points
+// `dist + 24` on along the car's route, the first not marked
+// TRP_NO_HELISHEET becomes the target; with none, the target stays.
+void chopper_shift_target(struct Chopper *h, float dist);
+
+// 0x001e82c0. From the target on, point by point, while the HeliSheet's
+// polygon under the point has flag bit 0; each step adds the point's
+// Length to TargetDistance.
+void chopper_find_unobstructed_spot(struct Chopper *h);
+
+// 0x001e8358. GroundZ, the ground's height under (CurrentPos.x,
+// CurrentPos.y, GroundZ); returns its terrain type.
+int32_t chopper_find_ground_height(struct Chopper *h);
+
+// 0x001e83b0. Sound on; CurrentPos (pos, z); Yaw the car's heading in
+// degrees; Pitch, Roll, their targets and Speed zero; the TP reset there;
+// the interest box 1 round it; GroundZ from the car's height, then the
+// ground's; the helicopter's route point found afresh; the matrix built.
+void chopper_place_in_world(struct Chopper *h, const bVector2 *pos, float z);
+
+// 0x001e84a8. WorldObj disabled, the sound off, the interest box cleared.
+void chopper_remove_from_world(struct Chopper *h);
+
+// 0x001e84f0. 1 when the TP's distance round the track is at or behind the
+// car's (TrackPathManager::CompareDistances <= 0).
+int32_t chopper_behind_car(struct Chopper *h);
+
+// 0x001e8540. `v` turned by 360 - Yaw degrees into `out`.
+void chopper_rotate_to_chopper_coord(struct Chopper *h, bVector2 *out,
+                                     const bVector2 *v);
+
+// 0x001e8560. -120 heading to or at a stakeout, else -60.
+float chopper_get_max_deceleration(const struct Chopper *h);
+
+// 0x001eadf0. A BOMBING_RUN becomes PURSUIT.
+void chopper_abort_bombing_run(struct Chopper *h);
+
+// 0x001ead80 / 0x001eadb0. The sound's Mute(i), and its Update(1, 0, 1).
+void chopper_mute(struct Chopper *h, int32_t i);
+void chopper_update_sound(struct Chopper *h);
+
+// 0x001e8798. The nearest route point to CurrentPos over the racing
+// routes (GetNearestRoutePoint, flags 6); when found, ChopperRoute and
+// Point.
+void chopper_find_point_from_scratch(struct Chopper *h);
+
+// 0x001e87e8. ChopperRoute's closest point within 24, flags 6. Failing
+// that, when ChopperPoint has a signpost, the sign's new route's. Failing
+// both, FindChopperPointFromScratch.
+void chopper_find_route_point(struct Chopper *h);
+
+// 0x001ea3f8. Matrix: a scale of 1.1 (gp-27984) on x, y and z, turned by
+// Roll on x, 360 - Pitch on y and 180 - Yaw (plus 360 below 0) on z, each
+// in BAM (degrees * 65536 truncated, then / 360), with CurrentPos raised
+// by 2.3 (gp-27980) as its translation.
+void chopper_calc_matrix(struct Chopper *h);
+
+// 0x001ea578. Matrix to WorldObj's, and WorldObj enabled.
+void chopper_update_world_object(struct Chopper *h);
 
 #endif

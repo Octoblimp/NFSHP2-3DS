@@ -3,8 +3,9 @@
 // cubics. CarInRecentCollision is here for CopDriver, GetForwardTrackDistance
 // and IsTeleportLocationClear for the track graph, and CanTeleport and
 // CarCausedRecentCollision for the cops' logic (12g-2), DidTheseCarsCollide
-// for the chase's (12g-3); the rest come with the chases. GetTopSpeed is
-// pursuit.c's, its only caller's.
+// for the chase's (12g-3), and RotateVector for the helicopter (12k-2);
+// the rest come with the chases. GetTopSpeed is pursuit.c's, its only
+// caller's.
 
 #ifndef COPUTIL_H
 #define COPUTIL_H
@@ -55,5 +56,11 @@ int32_t did_these_cars_collide(struct Car *a, struct Car *b);
 // body has a collision this frame (its NumCollisions byte, signed, is not
 // 0).
 int32_t car_in_recent_collision(struct Car *car);
+
+// RotateVector(bVector2 *, bVector2 *, float), 0x002313e0: `v` turned
+// by `deg` degrees into `out`, which may be `v`. The angle goes to BAM as
+// (int)(deg * 65536) / 360, and bSinCos gives both; then
+// out.y = y cos - x sin and out.x = x cos + y sin.
+void rotate_vector(bVector2 *out, const bVector2 *v, float deg);
 
 #endif
