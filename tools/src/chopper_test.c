@@ -85,6 +85,7 @@ static uint32_t         q_zflags[NPOINTS];
 static int32_t          q_near;
 static NearestRoutePointInfo q_near_info;
 static TrackRoutePoint *q_closest[NROUTES];
+static TrackRoutePoint *q_ahead[NROUTES];
 static TrackRoute      *q_newroute;
 static int              sound_on = 1;
 // The sheet away from the points: boxes, the first holding a spot wins.
@@ -518,6 +519,28 @@ TrackRoutePoint *troute_find_closest_point(TrackRoute *r, const bVector2 *pos,
     return q_closest[i];
 }
 
+TrackRoutePoint *troute_find_closest_point_ahead(TrackRoute *r,
+                                                 const bVector2 *pos,
+                                                 TrackRoutePoint *start)
+{
+    int i = (int)(r - routes);
+
+    printf("  ahead %s %s %08x %08x %s\n", pname(r), pname(pos),
+           fb(pos->x), fb(pos->y), pname(start));
+    if (i < 0 || i >= NROUTES) {
+        fprintf(stderr, "chopper_test: not a route\n");
+        exit(2);
+    }
+    return q_ahead[i];
+}
+
+// 12k-6's; here, what the run stands at when it fires.
+void chopper_fire_salvo(struct Chopper *h)
+{
+    printf("  fire_salvo %s %d %d %d\n", pname(h), h->BombRunType,
+           h->NumSalvosReleased, h->TotalSalvos);
+}
+
 Signpost *trpoint_get_signpost(const TrackRoutePoint *p)
 {
     printf("  get_sign %s\n", pname(p));
@@ -751,6 +774,9 @@ static void set_field(char **t)
     } else if (!strcmp(f, "target")) {
         h->TargetRoute = (TrackRoute *)byname(t[2]);
         h->TargetPoint = (TrackRoutePoint *)byname(t[3]);
+    } else if (!strcmp(f, "old")) {
+        h->OldCarRoute = (TrackRoute *)byname(t[2]);
+        h->OldCarPoint = (TrackRoutePoint *)byname(t[3]);
     } else {
         fprintf(stderr, "chopper_test: no field %s\n", f);
         exit(2);
@@ -796,6 +822,8 @@ static void answer(char **t, int n)
         q_near_info.Point = (TrackRoutePoint *)byname(t[4]);
     } else if (!strcmp(q, "closest"))
         q_closest[atoi(t[2])] = (TrackRoutePoint *)byname(t[3]);
+    else if (!strcmp(q, "ahead"))
+        q_ahead[atoi(t[2])] = (TrackRoutePoint *)byname(t[3]);
     else if (!strcmp(q, "newroute"))
         q_newroute = (TrackRoute *)byname(t[2]);
     else if (!strcmp(q, "sound"))
@@ -945,6 +973,19 @@ static void run(char **t, int n)
     } else if (!strcmp(op, "point")) {
         point_op(t);
         return;
+    } else if (!strcmp(op, "carvel")) {
+        Car *c = &cars[atoi(t[1])];
+
+        c->State.Velocity.x = fh(t[2]);
+        c->State.Velocity.y = fh(t[3]);
+        c->State.Velocity.z = fh(t[4]);
+        return;
+    } else if (!strcmp(op, "width")) {
+        TrackRoutePoint *p = PT(atoi(t[1]));
+
+        p->LeftWidth = fh(t[2]);
+        p->RightWidth = fh(t[3]);
+        return;
     } else if (!strcmp(op, "sign")) {
         uint32_t w = hx(t[2]);
 
@@ -1003,6 +1044,12 @@ static void run(char **t, int n)
         printf("  ret %d\n", chopper_test_location(h, fh(t[1]), fh(t[2])));
     else if (!strcmp(op, "bythink"))
         printf("  ret %08x\n", fb(chopper_adjust_by_think_time(h, fh(t[1]))));
+    else if (!strcmp(op, "clever"))
+        chopper_clever_pursuit_plan(h, &tgt, atoi(t[1]), hx(t[2]));
+    else if (!strcmp(op, "bombrun"))
+        chopper_bomb_run_logic(h, &tgt);
+    else if (!strcmp(op, "hlp"))
+        printf("  ret %d\n", chopper_high_level_planning(h, &tgt));
     else {
         fprintf(stderr, "chopper_test: no op %s\n", op);
         exit(2);

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cross-check 3DS Files/source/chopper.c, the police helicopter's object
-(12k-2) and its chase logic (12k-3a), against the retail image,
-SLES_507.31, run in mipsemu.
+(12k-2), its chase logic (12k-3a) and its plans (12k-3b), against the
+retail image, SLES_507.31, run in mipsemu.
 
 **The model** is retail's own code: Chopper's constructor (0x001e7a90),
 destructor (0x001e7b80), ClearVariables (0x001e7c38), FollowThisCar
@@ -23,10 +23,12 @@ FollowRoute (0x001e8a98), BeginStakeout (0x001e8ce8), HangoutNearHere
 CalcMinRouteFollowDistance (0x001e8f40), AdjustTargetInBounds
 (0x001e8f70), ChopperOnDifferentFork (0x001e90f0), AdjustTargetLocal
 (0x001e9368), TestLocation (0x001e98d0) and AdjustByThinkTime
-(0x001e9940); bStringHash and the bombing runs' table (0x0031a7c8) as
-shipped. The harness
-(tools/src/chopper_test.c) runs chopper.c, coputil.c, emath.c, bmath.c
-and bmatrix.c and prints the same lines.
+(0x001e9940); the plans, CleverPursuitPlan (0x001e9150), BombRunLogic
+(0x001e9398) and HighLevelPlanning (0x001e9648) with bScaleAdd
+(0x002589d8) under it; bStringHash and the bombing runs' table
+(0x0031a7c8) as shipped. The harness (tools/src/chopper_test.c) runs
+chopper.c, coputil.c, emath.c, bmath.c, bmatrix.c and bvector.c and
+prints the same lines.
 
 **The stubs**, logged and answered by the same rule on both sides: the
 TopologyCoordinate's constructor, destructor, SetInterestBBox,
@@ -37,10 +39,11 @@ afxGetEmitters and afxDeleteEmitters; HasSignposts; Car::GetRoute and
 GetRoutePoint; GuessTargetDestinations, GetNextRoutePoint and
 GetNearestRoutePoint; FindNearbySignpost and FindPointsToTarget;
 HeliSheet::FindZValue, answered per point or by boxes of the plane;
-TrackRoute::FindClosestPoint and GetRelativePoint;
-TrackRoutePoint::GetSignpost and GetPosition; Signpost::GetNewRoute and
-GetNewRoutePoint; and sound::CreateChopperSound, whose sound's table is
-the checker's own, with a this-adjustment of 8. The routes' points are
+TrackRoute::FindClosestPoint, FindClosestPointAhead and
+GetRelativePoint; TrackRoutePoint::GetSignpost and GetPosition;
+Signpost::GetNewRoute and GetNewRoutePoint; Chopper::FireSalvo (12k-6's),
+which logs the run's type and counts; and sound::CreateChopperSound,
+whose sound's table is the checker's own, with a this-adjustment of 8. The routes' points are
 inside their tables, so BeginStakeout's indexes are the image's own.
 
 **The port's divergences**, which the model is made to share:
@@ -56,6 +59,9 @@ inside their tables, so BeginStakeout's indexes are the image's own.
     is IEEE and would shrink them to the least denormal and stay. A
     hook after the image's FindZValue (0x001e8f04) ends the model's loop
     by the same rule.
+  - BombRunLogic skips the car's progress when its point or the last one
+    is NULL, where the image reads address 0 for the position. A hook at
+    the image's compare of the two (0x001e93c8) makes them equal then.
 
 **Compared** are the stubs' logs, each method's result, and after each
 call every field of the helicopter at retail's offsets, the padding
@@ -73,7 +79,13 @@ helicopter's matrix at angles round the circle and past it; and runs the
 chase logic over four routes with signs of every kind (always-take,
 backwards, no-stakeout), boxes of sheet with gaps between them, forks
 behind the helicopter, lists of points ahead that do and do not reach
-the target, and targets near, far, off the sheet and NaN.
+the target, and targets near, far, off the sheet and NaN; and the plans
+from every plan, with the timeout either side of its tick, the car's
+spot on and off the sheet over each flag, the car's progress forward,
+back, onto another route and to and from NULL, the helicopter either
+side of the road's edges and the target's reach, each bomb type to its
+last salvo with the sheet and the ground height either side, and the
+stakeout either side of its give-up and reach distances.
 
     python tools/chopper_check.py
     python tools/chopper_check.py --mutate [--only a,b]
@@ -105,7 +117,7 @@ CHOP = "3DS Files/source/chopper.c"
 COPUTIL = "3DS Files/source/coputil.c"
 SOURCES = [HARNESS, CHOP, COPUTIL, "3DS Files/source/emath.c",
            "3DS Files/source/bmath.c", "3DS Files/source/bmathtab.c",
-           "3DS Files/source/bmatrix.c",
+           "3DS Files/source/bmatrix.c", "3DS Files/source/bvector.c",
            "3DS Files/source/vtable.c"]
 HARNESS_TIMEOUT = 60
 
@@ -158,6 +170,10 @@ F_LOCAL = 0x001e9368
 F_TESTLOC = 0x001e98d0
 F_BYTHINK = 0x001e9940
 HANGOUT_MISS = 0x001e8f04               # its `beql` after FindZValue
+F_CLEVER = 0x001e9150
+F_BOMBRUN = 0x001e9398
+F_HLP = 0x001e9648
+BOMB_NULL = 0x001e93c8                  # its `beq` of the car's points
 
 S_TOPO_CTOR = 0x00151c28
 S_TOPO_DTOR = 0x00151c70
@@ -189,6 +205,8 @@ S_RELPT = 0x001c1910
 S_NEARBY = 0x001cc838
 S_PTT = 0x001cc5d0
 S_GETPOS = 0x001c1390
+S_AHEAD = 0x001c1d30
+S_FIRE = 0x001ea8c0
 S_SNDNEW = 0x00215098
 
 CHOPPER_SIZE = 976
@@ -258,6 +276,7 @@ class Model:
         self.zhit = [0] * NPOINTS
         self.zflags = [0] * NPOINTS
         self.closest = [0] * NROUTES
+        self.ahead = [0] * NROUTES
         self.boxes = []                 # (x0, y0, x1, y1, z, flags)
         self.end = [0] * NPOINTS
         self.signto = [None] * NPOINTS
@@ -478,6 +497,20 @@ class Model:
                                           s32(r[6]), fx(e.f(13))))
             return self.closest[i]
 
+        def ahead(e):
+            i = self.routes.index(r[4] & M32)
+            p = r[5] & M32
+            L("ahead %s %s %08x %08x %s" % (n(r[4]), n(p), e.u32(p),
+                                            e.u32(p + 4), n(r[6])))
+            return self.ahead[i]
+
+        # 12k-6's; here, what the run stands at when it fires.
+        def fire(e):
+            h = r[4] & M32
+            L("fire_salvo %s %d %d %d" % (n(h), s32(e.u32(h + 804)),
+                                          s32(e.u32(h + 808)),
+                                          s32(e.u32(h + 828))))
+
         def getsign(e):
             L("get_sign %s" % n(r[4]))
             return self.signs[self.pidx(r[4])]
@@ -566,6 +599,12 @@ class Model:
                     and not abs(e.f(21)) >= FLT_MIN):
                 r[2] = 1
 
+        # BombRunLogic with the car's point or the last one NULL: the port
+        # skips the progress, where the image reads address 0.
+        def bomb_null(e):
+            if (r[17] & M32) == 0 or (r[2] & M32) == 0:
+                r[17] = r[2]
+
         for a, f in ((S_TOPO_CTOR, topo_ctor), (S_TOPO_DTOR, topo_dtor),
                      (S_BBOX, bbox), (S_CLEARBB, clearbb), (S_ELEV, elev),
                      (S_TP_CTOR, tp_ctor), (S_TP_RESET, tp_reset),
@@ -579,10 +618,12 @@ class Model:
                      (S_GETSIGN, getsign), (S_NEWROUTE, newroute),
                      (S_NEWPOINT, newpoint), (S_RELPT, relpt),
                      (S_NEARBY, nearby), (S_PTT, ptt), (S_GETPOS, getpos),
+                     (S_AHEAD, ahead), (S_FIRE, fire),
                      (S_SNDNEW, sndnew)):
             e.stub(a, f)
         e.hook(F_SPOT, spot_entry)
         e.hook(HANGOUT_MISS, hangout_miss)
+        e.hook(BOMB_NULL, bomb_null)
 
     # ---- the dump ---------------------------------------------------------
 
@@ -652,6 +693,16 @@ class Model:
             e.put32(p + 44, int(t[5], 16))
             e.put32(p + 12, int(t[6], 16))
             e.put32(p + 16, int(t[7], 16))
+            return
+        if op == "carvel":
+            c = self.cars[int(t[1])]
+            for k in range(3):
+                e.put32(c + 112 + 4 * k, int(t[2 + k], 16))
+            return
+        if op == "width":
+            p = self.points[int(t[1])]
+            e.put32(p + 24, int(t[2], 16))
+            e.put32(p + 28, int(t[3], 16))
             return
         if op == "sign":
             e.put32(self.signs[int(t[1])], int(t[2], 16))
@@ -772,6 +823,13 @@ class Model:
             e.set_f(12, bitsf(int(t[1], 16)))
             e.call(F_BYTHINK, h)
             self.log("ret %08x" % (e.fpr[0] & M32))
+        elif op == "clever":
+            e.call(F_CLEVER, h, T, int(t[1]), int(t[2], 16))
+        elif op == "bombrun":
+            e.call(F_BOMBRUN, h, T)
+        elif op == "hlp":
+            self.log("ret %d" % self.with_sound(
+                lambda: e.call(F_HLP, h, T)))
         else:
             raise SystemExit("no op %s" % op)
         self.dump()
@@ -815,6 +873,9 @@ class Model:
         elif f == "target":
             e.put32(h + 744, self.addr(t[2]))
             e.put32(h + 748, self.addr(t[3]))
+        elif f == "old":
+            e.put32(h + 796, self.addr(t[2]))
+            e.put32(h + 800, self.addr(t[3]))
         else:
             raise SystemExit("no field %s" % f)
 
@@ -848,6 +909,8 @@ class Model:
             q["near_info"] = (self.addr(t[3]), self.addr(t[4]))
         elif k == "closest":
             self.closest[int(t[2])] = self.addr(t[3])
+        elif k == "ahead":
+            self.ahead[int(t[2])] = self.addr(t[3])
         elif k == "newroute":
             q["newroute"] = self.addr(t[2])
         elif k == "sound":
@@ -1376,11 +1439,273 @@ def chase(rng):
             + chase_bounds(rng))
 
 
+# ---- 12k-3b's plans --------------------------------------------------------
+#
+# P_i's direction is (cos 0.7i, sin 0.7i); a spot k to its right is
+# P_i + k * (dir.y, -dir.x), whose cross with the direction is k.
+
+def RIGHT(i, k):
+    x, y = PP(i)
+    return (x + k * math.sin(0.7 * i), y - k * math.cos(0.7 * i))
+
+
+def CAR(i, x, y, vel=10.0, z=5.0):
+    return "car|%d|%s|%s|%s|0|%s|%s" % (i, F(x), F(y), F(z), F(vel),
+                                         F(500.0))
+
+
+def plans_world():
+    """Points to follow, stake out and fork from, as answers."""
+    return (["q|ptt|1|R0|P2|R0|P3|R0|P4|R0|P5",
+             "q|ptt|2|R0|P3|R0|P4",
+             "q|ptt|8|R1|P9|R1|P10|R1|P11",
+             "q|ptt|20|R3|P21|R3|P22",
+             "q|signto|3|R2|P14", "q|signto|10|R3|P19",
+             "q|signto|17|R1|P8", SIGN(3, 0x10), SIGN(10, 0x00),
+             "q|closest|0|P3", "q|closest|1|P10", "q|closest|2|P14",
+             "q|closest|3|P19"] + forks())
+
+
+def plans_clever():
+    out = ["new", "set|car|C1", "set|chop|R0|P1", POS(*PP(1)),
+           "q|zbox", BOX(-1e9, -1e9, 1e9, 1e9), "q|cmp|%s" % F(-12.0)]
+    out += plans_world()
+    # The early way out: climbing or falling, off the sheet or over flag 2.
+    for zv in (0.0, -0.0, 25.0, float("nan")):
+        for on in (0, 1, 2):
+            for fl in (0, 1, 2, 3, 0xfffffffd):
+                out += ["set|zv|%s" % F(zv), T(7.0, 8.0, 2.0),
+                        "q|carroute|1|R0|P3", "q|ahead|0|NULL",
+                        "set|speed|%s" % F(25.0),
+                        "clever|%d|%x" % (on, fl)]
+    out.append("set|zv|%s" % F(0.0))
+    # The car's point, and the point ahead of the spot.
+    cars = [("NULL", "P3", "NULL"), ("R0", "NULL", "NULL"),
+            ("NULL", "NULL", "NULL"), ("R0", "P3", "NULL"),
+            ("R0", "P3", "P4"), ("R0", "P2", "NULL"), ("R0", "P3", "P2"),
+            ("R1", "P7", "NULL"), ("R1", "P8", "P9"), ("R2", "P13", "P14"),
+            ("R3", "P20", "P22"), ("R3", "P19", "NULL")]
+    chops = [(0, 1), (1, 8), (3, 20)]
+    k = 0
+    for ro, po, ah in cars:
+        for on in (0, 1):
+            for speed in (0.0, 20.0, 20.0001, 1000.0, float("nan")):
+                for off in ((10.0, 5.0), (150.0, -40.0)):
+                    r, c = chops[k % 3]
+                    x, y = PP(c)
+                    out.append("q|zbox")
+                    if k % 4:
+                        out.append(BOX(-1e9, -1e9, 1e9, 1e9))
+                    out += ["set|chop|R%d|P%d" % (r, c), POS(x, y),
+                            "q|cmp|%s" % F((-12.0, 5.0)[k % 2]),
+                            "q|carroute|1|%s|%s" % (ro, po)]
+                    if ro != "NULL":
+                        out.append("q|ahead|%s|%s" % (ro[1:], ah))
+                    out += ["set|speed|%s" % F(speed), "set|plan|0",
+                            T(x + off[0], y + off[1], 3.0),
+                            "clever|%d|%x" % (on, (0, 1)[k % 2])]
+                    k += 1
+    # Least distance 30: the spot exactly 30 away (18, 24), or just in.
+    out += ["q|zbox", BOX(-1e9, -1e9, 1e9, 1e9), "set|chop|R0|P1",
+            POS(*PP(1)), "q|carroute|1|R0|P3", "q|ahead|0|P4",
+            "set|speed|%s" % F(0.0)]
+    for dx in (18.0, 17.99):
+        for on in (0, 1):
+            out += [T(PP(1)[0] + dx, PP(1)[1] + 24.0), "clever|%d|0" % on]
+    out += ["q|zbox", "del|3"]
+    return out
+
+
+def plans_bombrun(rng):
+    out = ["new", "set|car|C1", "set|chop|R0|P1", "set|target|R0|P2",
+           "q|guess|R0|P2|R0|P3", CAR(1, 0.0, 0.0),
+           "width|1|%s|%s" % (F(6.0), F(6.0))] + plans_world()
+    # The car's progress since the last time. Each point is its route's,
+    # as GetRoute and GetRoutePoint give them: another's index would be
+    # the harness's memory layout.
+    moves = [("R0|P3", "R0|P3"), ("R0|P4", "R0|P2"), ("R0|P2", "R0|P5"),
+             ("R1|P8", "R0|P5"), ("R0|NULL", "R0|P3"), ("R0|P3", "R0|NULL"),
+             ("R0|NULL", "R0|NULL"), ("R1|P3", "R0|P3"),
+             ("NULL|P3", "R0|P5"), ("R2|P13", "R2|P15"),
+             ("R2|P15", "R2|P13"), ("R1|P9", "R1|P9")]
+    for now, old in moves:
+        for td in (500.0, 0.0, float("nan")):
+            out += ["q|carroute|1|" + now, "set|old|" + old,
+                    "set|td|%s" % F(td), "set|plan|4", "set|bomb|1",
+                    "set|salvos|1", "set|nsalvo|%s" % F(5.0),
+                    "set|timeout|%s" % F(5.0), POS(*PP(1)), "bombrun"]
+    # Over the road at P1, its widths 4 and 6, a spot k to its right.
+    out += ["q|carroute|1|R0|P3", "set|old|R0|P3"]
+    for k in (0.0, -0.0, 5.0, -5.0, 3.9, 4.0, 4.1, -3.9, -4.0, -4.1, 6.0,
+              -6.0, float("nan")):
+        for lw, rw in ((4.0, 6.0), (6.0, 4.0), (0.0, 0.0), (0.0, 6.0),
+                       (6.0, 0.0)):
+            out += ["width|1|%s|%s" % (F(lw), F(rw)), "q|zbox",
+                    BOX(-1e9, -1e9, 1e9, 1e9), "q|elev|%s|3" % F(15.0),
+                    "set|plan|4", "set|bomb|2", "set|salvos|0",
+                    "set|nsalvo|%s" % F(5.0), "set|td|%s" % F(500.0),
+                    "set|timeout|%s" % F(5.0), POS(*RIGHT(1, k)),
+                    "bombrun"]
+    # The reach to the target, P2: exactly 30 from it, or just in, and
+    # within 30 of the helicopter's P1 alone. P1's road is wide enough to
+    # fire from anywhere here.
+    out.append("width|1|%s|%s" % (F(50.0), F(50.0)))
+    x1, y1 = PP(1)
+    x2, y2 = PP(2)
+    for pos in ((x2 + 18.0, y2 + 24.0), (x2 + 17.99, y2 + 24.0),
+                (x2 + 30.0, y2), (x2 - 29.99, y2), (x1 - 25.0, y1),
+                (float("nan"), y2)):
+        out += ["set|plan|4", "set|bomb|2", "set|salvos|0",
+                "set|target|R0|P2", "set|td|%s" % F(500.0),
+                "set|timeout|%s" % F(5.0), POS(*pos), "bombrun"]
+    out.append("width|1|%s|%s" % (F(4.0), F(6.0)))
+    # The salvos' clock, the sheet and the height, each type to its last
+    # salvo.
+    for typ in range(5):
+        for salvos in range(-1, [1, 8, 3, 1, 2][typ] + 1):
+            for nsalvo in (0.05, 0.1, 0.15, -0.0, float("nan")):
+                for hit, elev in ((1, 10.0), (1, 9.5), (0, 15.0),
+                                  (1, float("nan")), (1, 15.0)):
+                    out.append("q|zbox")
+                    if hit:
+                        out.append(BOX(-1e9, -1e9, 1e9, 1e9, 2.0, 1))
+                    out += ["q|elev|%s|%d" % (F(elev), typ),
+                            "set|plan|4", "set|bomb|%d" % typ,
+                            "set|salvos|%d" % salvos, "set|total|%d" % typ,
+                            "set|nsalvo|%s" % F(nsalvo),
+                            "set|timeout|%s" % F((5.0, 0.0)[salvos % 2]),
+                            "set|td|%s" % F(500.0), POS(*PP(1)),
+                            "bombrun"]
+    # The timeout, with no salvo to fire.
+    for to in (0.0, -0.0, 5.0, float("nan"), 1e-45):
+        out += ["q|zbox", "set|plan|4", "set|bomb|0", "set|salvos|0",
+                "set|timeout|%s" % F(to), POS(500.0, 500.0), "bombrun"]
+    # Mixed.
+    for _ in range(120):
+        now, old = rng.choice(moves)
+        typ = rng.randrange(5)
+        out.append("q|zbox")
+        if rng.random() < 0.7:
+            out.append(BOX(-1e9, -1e9, 1e9, 1e9))
+        out += ["q|carroute|1|" + now, "set|old|" + old,
+                CAR(1, rng.uniform(-100, 100), rng.uniform(-100, 100),
+                    rng.choice((0.0, 30.0, 80.0))),
+                "width|1|%s|%s" % (F(rng.uniform(0, 8)),
+                                   F(rng.uniform(0, 8))),
+                "q|elev|%s|1" % F(rng.choice((10.0, 12.0, 30.0))),
+                "set|plan|4", "set|bomb|%d" % typ,
+                "set|salvos|%d" % rng.randrange(-1, 4),
+                "set|nsalvo|%s" % F(rng.choice((0.05, 0.2, 1.0))),
+                "set|td|%s" % F(rng.uniform(-50, 300)),
+                "set|timeout|%s" % F(rng.choice((0.0, 0.1, 5.0))),
+                POS(*RIGHT(1, rng.uniform(-8, 8))), "bombrun"]
+    out += ["q|zbox", "del|3"]
+    return out
+
+
+def plans_hlp(rng):
+    out = ["new", "set|car|C1", "set|chop|R0|P1", "set|target|R0|P2",
+           "q|near|1|R2|P15", "q|carroute|1|R0|P3", "q|ahead|0|P4",
+           "width|1|%s|%s" % (F(4.0), F(6.0)), "q|elev|%s|3" % F(4.5),
+           "q|cmp|%s" % F(-12.0)] + plans_world()
+    # Every plan, the timeout's tick, on or off the sheet; the car's spot
+    # 0.3 s on is (3, 6), 50 from the helicopter.
+    for plan in range(-1, 8):
+        for to in (0.05, 0.1, 0.15, 5.0, float("nan"), 0.0):
+            for fl in (None, 0, 2, 1):
+                out.append("q|zbox")
+                if fl is not None:
+                    out.append(BOX(2.0, 5.0, 4.0, 7.0, 37.25, fl))
+                out += [CAR(1, 0.0, 0.0), "carvel|1|%s|%s|%s" % (
+                    F(10.0), F(20.0), F(-3.0)), "set|car|C1",
+                    "set|chop|R0|P1", "set|target|R0|P2",
+                    "set|plan|%d" % plan,
+                    "set|timeout|%s" % F(to), "set|zv|%s" % F(0.0),
+                    "set|speed|%s" % F(25.0), "set|bomb|1",
+                    "set|salvos|0", "set|td|%s" % F(500.0),
+                    "set|old|R0|P3", POS(33.0, 46.0, 30.0),
+                    T(-7.0, -8.0, 9.0), "hlp"]
+    # The stakeout: given up within 60 of the car's spot, reached within
+    # 30 of its point, P2.
+    x2, y2 = PP(2)
+    for plan in (1, 2):
+        for pos in ((3.0 + 36.0, 6.0 + 48.0), (3.0 + 35.99, 6.0 + 48.0),
+                    (x2 + 18.0, y2 + 24.0), (x2 + 17.99, y2 + 24.0),
+                    (x2, y2), (-200.0, 300.0)):
+            for fl in (None, 0):
+                for to in (5.0, 0.1):
+                    out.append("q|zbox")
+                    if fl is not None:
+                        out.append(BOX(2.0, 5.0, 4.0, 7.0, 0.0, fl))
+                    out += ["set|plan|%d" % plan, "set|target|R0|P2",
+                            "set|timeout|%s" % F(to), "set|chop|R0|P1",
+                            POS(*pos), "hlp"]
+    # The chopper's point: kept, from the sign's route, or from scratch.
+    for cl in ("P1", "NULL"):
+        for chop in ("R0|P1", "R0|P3"):
+            out += ["q|closest|0|%s" % cl, "q|zbox",
+                    BOX(-1e9, -1e9, 1e9, 1e9), "set|chop|" + chop,
+                    "set|plan|0", "set|timeout|%s" % F(5.0),
+                    POS(*PP(1)), "hlp"]
+    out.append("q|closest|0|P3")
+    # End chase with no car.
+    for z in (180.0, 40.0):
+        out += ["q|zbox", BOX(-1e9, -1e9, 1e9, 1e9, 30.0, 0),
+                "set|car|NULL", "set|plan|5", "set|chop|R0|P1",
+                POS(-30.0, 7.0, z), "set|timeout|%s" % F(1.0), "hlp"]
+    out.append("set|car|C1")
+    # Mixed.
+    for _ in range(200):
+        plan = rng.choice((0, 0, 1, 2, 3, 4, 5, 6))
+        out.append("q|zbox")
+        bx = rng.random()
+        if bx < 0.5:
+            out.append(BOX(-1e9, -1e9, 1e9, 1e9, rng.uniform(-200, 200),
+                           rng.choice((0, 0, 1, 2, 3))))
+        elif bx < 0.8:
+            x0, y0 = rng.uniform(-60, 60), rng.uniform(-60, 60)
+            out.append(BOX(x0, y0, x0 + rng.uniform(0, 60),
+                           y0 + rng.uniform(0, 60), rng.uniform(0, 80),
+                           rng.choice((0, 1, 2))))
+        r, c = rng.choice(((0, 1), (1, 8), (3, 20), (0, 2)))
+        x, y = PP(c)
+        out += [CAR(1, rng.uniform(-80, 80), rng.uniform(-80, 80),
+                    rng.choice((0.0, 30.0, 60.0))),
+                "carvel|1|%s|%s|%s" % (F(rng.uniform(-60, 60)),
+                                       F(rng.uniform(-60, 60)),
+                                       F(rng.uniform(-5, 5))),
+                "q|carroute|1|%s" % rng.choice(("R0|P3", "R0|P2", "R1|P8",
+                                                "R3|P20", "R2|P13",
+                                                "NULL|P3")),
+                "q|ahead|%d|%s" % (rng.randrange(NROUTES),
+                                   rng.choice(("NULL", "P4", "P9", "P22"))),
+                "q|cmp|%s" % F(rng.choice((-12.0, 5.0))),
+                "q|elev|%s|2" % F(rng.choice((4.5, 15.0, 25.0))),
+                "set|chop|R%d|P%d" % (r, c), "set|plan|%d" % plan,
+                "set|timeout|%s" % F(rng.choice((0.05, 0.1, 3.0, 30.0))),
+                "set|zv|%s" % F(rng.choice((0.0, 0.0, 4.0))),
+                "set|speed|%s" % F(rng.choice((0.0, 25.0, 300.0, 1000.0))),
+                "set|bomb|%d" % rng.randrange(5),
+                "set|salvos|%d" % rng.randrange(0, 3),
+                "set|nsalvo|%s" % F(rng.choice((0.05, 0.5))),
+                "set|td|%s" % F(rng.uniform(-20, 300)),
+                "set|old|%s" % rng.choice(("R0|P3", "R0|P1", "R1|P9")),
+                POS(x + rng.uniform(-40, 40), y + rng.uniform(-40, 40),
+                    rng.uniform(5, 200)),
+                T(rng.uniform(-50, 50), rng.uniform(-50, 50), 4.0), "hlp"]
+    out += ["q|zbox", "del|3"]
+    return out
+
+
+def plans(rng):
+    return plans_clever() + plans_bombrun(rng) + plans_hlp(rng)
+
+
 def script():
     rng = random.Random(0xc40)
     return (setup() + life() + follows() + attacks(rng) + shifts()
             + spots() + world_ops(rng) + routes() + matrices(rng)
-            + chase(random.Random(0x3a)))
+            + chase(random.Random(0x3a)) + plans(random.Random(0x3b)))
 
 
 # ================================================================= running
@@ -1596,8 +1921,8 @@ MUTATIONS = [
     ("att_ret1", C, "    chopper_adjust_bomb_target(h);\n    return 1;",
      "    chopper_adjust_bomb_target(h);\n    return 2;"),
     # ---- AdjustBombTarget
-    ("adj_type", C, "&BombRunBehaviours[h->BombRunType]",
-     "&BombRunBehaviours[h->BombRunType & 3]"),
+    ("adj_type", C, "&BombRunBehaviours[h->BombRunType];\n    float ahead",
+     "&BombRunBehaviours[h->BombRunType & 3];\n    float ahead"),
     ("adj_ahead", C, "b->Ahead * h->CurrentCar->State.VelocityMagnitude",
      "b->Ahead + h->CurrentCar->State.VelocityMagnitude"),
     ("adj_min_cmp", C, "if (ahead < BOMB_MIN_AHEAD)",
@@ -1652,10 +1977,11 @@ MUTATIONS = [
     # ---- FindUnobstructedSpot
     ("sp_route", C, "info.Route = h->TargetRoute;",
      "info.Route = h->ChopperRoute;"),
-    ("sp_sheet", C, "helisheet_find_z_value(TheHeliSheet,\n",
-     "helisheet_find_z_value(NULL,\n"),
+    ("sp_sheet", C, "        helisheet_find_z_value(TheHeliSheet,\n",
+     "        helisheet_find_z_value(NULL,\n"),
     ("sp_bit", C, "if ((flags & 1) == 0)", "if ((flags & 3) == 0)"),
-    ("sp_flags0", C, "    uint32_t flags = 0;", "    uint32_t flags = 1;"),
+    ("sp_flags0", C, "    uint32_t flags = 0;\n\n",
+     "    uint32_t flags = 1;\n\n"),
     ("sp_len", C, "h->TargetDistance + info.Point->Length;",
      "h->TargetDistance - info.Point->Length;"),
     ("sp_store_r", C, "    h->TargetRoute = info.Route;\n"
@@ -1988,7 +2314,10 @@ MUTATIONS = [
      "#define STAKEOUT_RADIUS    300.0f"),
     ("bs_closest_r", C, "c = troute_find_closest_point(h->TargetRoute,",
      "c = troute_find_closest_point(h->ChopperRoute,"),
-    ("bs_c_null", C, "if (c != NULL && point_index", "if (point_index"),
+    # Dropping the check would index NULL, whose value is the harness's
+    # memory layout; the mutant takes the other way on NULL instead.
+    ("bs_c_null", C, "if (c != NULL && point_index",
+     "if (c == NULL || point_index"),
     ("bs_idx_le", C, "                         < point_index(h->TargetRoute, c)",
      "                         <= point_index(h->TargetRoute, c)"),
     ("bs_idx_gt", C, "                         < point_index(h->TargetRoute, c)",
@@ -2001,8 +2330,9 @@ MUTATIONS = [
     ("bs_plan", C, "    h->Plan = CHOPPLAN_HEAD_TO_STAKEOUT;\n", ""),
     ("bs_timeout", C, "#define STAKEOUT_TIMEOUT   60.0f",
      "#define STAKEOUT_TIMEOUT   50.0f"),
-    ("bs_fwd", C, "chopper_follow_route(h, t, h->TargetRoute, h->TargetPoint, 1);",
-     "chopper_follow_route(h, t, h->TargetRoute, h->TargetPoint, 0);"),
+    ("bs_fwd", C, "STAKEOUT_TIMEOUT;\n    chopper_follow_route(h, t, "
+     "h->TargetRoute, h->TargetPoint, 1);", "STAKEOUT_TIMEOUT;\n"
+     "    chopper_follow_route(h, t, h->TargetRoute, h->TargetPoint, 0);"),
     # ---- HangoutNearHere and BailToPointNearChopper
     ("ho_dx", C, "float dx = t->Location.x - point->Position.x;",
      "float dx = point->Position.x - t->Location.x;"),
@@ -2121,6 +2451,356 @@ MUTATIONS = [
     ("rv_bam", U, "(uint16_t)(ee_trunc_w(deg * 65536.0f) / 360)",
      "(uint16_t)(ee_trunc_w(deg * 65536.0f) / 361)"),
     ("rv_sc", U, "bSinCos(&s, &c,", "bSinCos(&c, &s,"),
+    # ---- 12k-3b: the plans' constants
+    ("hl_tick", C, "#define PLAN_TICK          0.1f",
+     "#define PLAN_TICK          0.2f"),
+    ("hl_lead", C, "#define PLAN_LEAD          0.3f",
+     "#define PLAN_LEAD          0.25f"),
+    ("hl_giveup", C, "#define STAKEOUT_GIVE_UP   60.0f",
+     "#define STAKEOUT_GIVE_UP   60.5f"),
+    ("hl_reach", C, "#define STAKEOUT_REACH     30.0f",
+     "#define STAKEOUT_REACH     30.5f"),
+    ("hl_wait", C, "#define STAKEOUT_WAIT      45.0f",
+     "#define STAKEOUT_WAIT      44.0f"),
+    ("cp_leadspeed", C, "#define PURSUIT_LEAD_SPEED 20.0f",
+     "#define PURSUIT_LEAD_SPEED 19.99f"),
+    ("br_tick", C, "#define SALVO_TICK         0.1f",
+     "#define SALVO_TICK         0.2f"),
+    ("br_reach", C, "#define BOMB_REACH         30.0f",
+     "#define BOMB_REACH         30.5f"),
+    ("br_height", C, "#define BOMB_HEIGHT        10.0f",
+     "#define BOMB_HEIGHT        10.5f"),
+    # ---- CleverPursuitPlan
+    ("cp_zv", C, "if (!(h->ZVelocity == 0.0f) && ((flags & 2) || !on_sheet))",
+     "if ((h->ZVelocity == 0.0f) && ((flags & 2) || !on_sheet))"),
+    ("cp_flag2", C, "&& ((flags & 2) || !on_sheet)) {",
+     "&& ((flags & 1) || !on_sheet)) {"),
+    ("cp_or", C, "&& ((flags & 2) || !on_sheet)) {",
+     "&& ((flags & 2) && !on_sheet)) {"),
+    ("cp_on", C, "&& ((flags & 2) || !on_sheet)) {",
+     "&& ((flags & 2) || on_sheet)) {"),
+    ("cp_ey", C, "!on_sheet)) {\n        t->Location.y = h->CurrentPos.y;\n",
+     "!on_sheet)) {\n"),
+    ("cp_ey_x", C, "!on_sheet)) {\n        t->Location.y = h->CurrentPos.y;\n",
+     "!on_sheet)) {\n        t->Location.y = h->CurrentPos.x;\n"),
+    ("cp_ex", C, "        t->Location.x = h->CurrentPos.x;\n        return;\n"
+     "    }\n    near =", "        return;\n    }\n    near ="),
+    ("cp_eret", C, "        t->Location.x = h->CurrentPos.x;\n        return;\n"
+     "    }\n    near =", "        t->Location.x = h->CurrentPos.x;\n    }\n"
+     "    near ="),
+    ("cp_near", C, "    near = distance_to(h, &t->Location)\n           <",
+     "    near = distance_to(h, &t->Location)\n           <="),
+    ("cp_rnull", C, "if (route == NULL || point == NULL) {\n"
+     "        chopper_bail_to_point_near_chopper",
+     "if (route == NULL && point == NULL) {\n"
+     "        chopper_bail_to_point_near_chopper"),
+    ("cp_rnull_r", C, "if (route == NULL || point == NULL) {\n"
+     "        chopper_bail_to_point_near_chopper",
+     "if (point == NULL) {\n        chopper_bail_to_point_near_chopper"),
+    ("cp_bail", C, "        chopper_bail_to_point_near_chopper(h, t);\n"
+     "        return;\n    }\n    ahead =", "        return;\n    }\n"
+     "    ahead ="),
+    ("cp_ahead_arg", C, "troute_find_closest_point_ahead(route, &t->Location, "
+     "point);", "troute_find_closest_point_ahead(route, &t->Location, "
+     "h->ChopperPoint);"),
+    ("cp_ahead_use", C, "    if (ahead != NULL)\n        point = ahead;\n", ""),
+    ("cp_onsheet", C, "    if (on_sheet) {\n        if (near) {",
+     "    if (!on_sheet) {\n        if (near) {"),
+    ("cp_near1", C, "    if (on_sheet) {\n        if (near) {",
+     "    if (on_sheet) {\n        if (!near) {"),
+    ("cp_lead_le", C, "if (PURSUIT_LEAD_SPEED < h->Speed) {",
+     "if (PURSUIT_LEAD_SPEED <= h->Speed) {"),
+    ("cp_along_dx", C, "(t->Location.x - point->Position.x)\n"
+     "                            * point->Direction.x",
+     "(t->Location.x - point->Position.x)\n"
+     "                            * point->Direction.y"),
+    ("cp_along_dy", C, "(t->Location.y - point->Position.y)\n"
+     "                              * point->Direction.y;",
+     "(t->Location.y - point->Position.y)\n"
+     "                              * point->Direction.x;"),
+    ("cp_along_px", C, "along = (t->Location.x - point->Position.x)",
+     "along = (t->Location.x - point->Position.y)"),
+    ("cp_along_py", C, "+ (t->Location.y - point->Position.y)\n",
+     "+ (t->Location.y - point->Position.x)\n"),
+    ("cp_along_add", C, "+ (t->Location.y - point->Position.y)\n",
+     "- (t->Location.y - point->Position.y)\n"),
+    ("cp_gp2_l", C, "trpoint_get_position2(point, &t->Location, along, 0.0f);",
+     "trpoint_get_position2(point, &t->Location, along, 1.0f);"),
+    ("cp_gp2_d", C, "trpoint_get_position2(point, &t->Location, along, 0.0f);",
+     "trpoint_get_position2(point, &t->Location, -along, 0.0f);"),
+    ("cp_gp2", C, "                trpoint_get_position2(point, &t->Location, "
+     "along, 0.0f);\n", ""),
+    ("cp_lead_ret", C, "along, 0.0f);\n            }\n            return;\n",
+     "along, 0.0f);\n            }\n"),
+    ("cp_nohs", C, "} else if (point->Bits & TRP_NO_HELISHEET) {",
+     "} else if (!(point->Bits & TRP_NO_HELISHEET)) {"),
+    ("cp_nohs_bit", C, "} else if (point->Bits & TRP_NO_HELISHEET) {",
+     "} else if (point->Bits & 0x8000) {"),
+    ("cp_stake1", C, "TRP_NO_HELISHEET) {\n        chopper_begin_stakeout(h, t, "
+     "route, point);\n", "TRP_NO_HELISHEET) {\n"),
+    ("cp_stake1_ret", C, "        chopper_begin_stakeout(h, t, route, point);\n"
+     "        return;\n    }\n    if (chopper_on_different_fork",
+     "        chopper_begin_stakeout(h, t, route, point);\n    }\n"
+     "    if (chopper_on_different_fork"),
+    ("cp_fork", C, "if (chopper_on_different_fork(h, route, point)) {",
+     "if (!chopper_on_different_fork(h, route, point)) {"),
+    ("cp_fork_stake", C, "different_fork(h, route, point)) {\n"
+     "        chopper_begin_stakeout(h, t, route, point);\n",
+     "different_fork(h, route, point)) {\n"),
+    ("cp_fork_ret", C, "        chopper_begin_stakeout(h, t, route, point);\n"
+     "        return;\n    }\n    if (near)",
+     "        chopper_begin_stakeout(h, t, route, point);\n    }\n"
+     "    if (near)"),
+    ("cp_near2", C, "    if (near)\n        chopper_hangout_near_here(",
+     "    if (!near)\n        chopper_hangout_near_here("),
+    ("cp_hang_pt", C, "chopper_hangout_near_here(h, t, route, point);",
+     "chopper_hangout_near_here(h, t, route, h->ChopperPoint);"),
+    ("cp_follow_fwd", C, "chopper_follow_route(h, t, route, point, "
+     "chopper_behind_car(h));", "chopper_follow_route(h, t, route, point, "
+     "!chopper_behind_car(h));"),
+    ("cp_follow_pt", C, "chopper_follow_route(h, t, route, point, "
+     "chopper_behind_car(h));", "chopper_follow_route(h, t, route, "
+     "h->ChopperPoint, chopper_behind_car(h));"),
+    # ---- BombRunLogic
+    ("br_pt_arg", C, "car_get_route_point(h->CurrentCar, FIND_ROUTE);\n"
+     "    // The port's", "car_get_route_point(h->CurrentCar, 0);\n"
+     "    // The port's"),
+    ("br_same", C, "if (point != h->OldCarPoint && point != NULL && "
+     "h->OldCarPoint != NULL) {", "if (point != NULL && h->OldCarPoint != "
+     "NULL) {"),
+    ("br_null_pt", C, "if (point != h->OldCarPoint && point != NULL && "
+     "h->OldCarPoint != NULL) {", "if (point != h->OldCarPoint && "
+     "h->OldCarPoint != NULL) {"),
+    ("br_null_old", C, "if (point != h->OldCarPoint && point != NULL && "
+     "h->OldCarPoint != NULL) {", "if (point != h->OldCarPoint && "
+     "point != NULL) {"),
+    ("br_route_arg", C, "        route = car_get_route(h->CurrentCar, "
+     "FIND_ROUTE);\n        d =", "        route = car_get_route(h->CurrentCar, "
+     "0);\n        d ="),
+    ("br_dx", C, "d = point->Position.x - h->OldCarPoint->Position.x;",
+     "d = point->Position.x - h->OldCarPoint->Position.y;"),
+    ("br_dy", C, "across = point->Position.y - h->OldCarPoint->Position.y;",
+     "across = point->Position.y - h->OldCarPoint->Position.x;"),
+    ("br_sqrt", C, "        d = sqrtf(d * d + across * across);\n        if (route",
+     "        d = sqrtf(d * d + across * d);\n        if (route"),
+    ("br_rt", C, "if (route != h->OldCarRoute\n            || point_index",
+     "if (route == h->OldCarRoute\n            || point_index"),
+    ("br_or", C, "            || point_index(route, h->OldCarPoint) < ",
+     "            && point_index(route, h->OldCarPoint) < "),
+    ("br_lt", C, "point_index(route, h->OldCarPoint) < point_index(route, "
+     "point))", "point_index(route, h->OldCarPoint) > point_index(route, "
+     "point))"),
+    ("br_neg", C, "            d = -d;\n        h->OldCarPoint = point;",
+     "            d = d;\n        h->OldCarPoint = point;"),
+    ("br_oldpt", C, "        h->OldCarPoint = point;\n        h->TargetDistance",
+     "        h->TargetDistance"),
+    ("br_td", C, "h->TargetDistance = h->TargetDistance + d;",
+     "h->TargetDistance = h->TargetDistance - d;"),
+    ("br_oldrt", C, "        h->OldCarRoute = route;\n    }\n"
+     "    chopper_adjust_bomb_target(h);", "    }\n"
+     "    chopper_adjust_bomb_target(h);"),
+    ("br_adjust", C, "    }\n    chopper_adjust_bomb_target(h);\n"
+     "    if (h->NumSalvosReleased > 0) {", "    }\n"
+     "    if (h->NumSalvosReleased > 0) {"),
+    ("br_salvos", C, "if (h->NumSalvosReleased > 0) {",
+     "if (h->NumSalvosReleased >= 0) {"),
+    ("br_tuns", C, "h->TimeUntilNextSalvo = h->TimeUntilNextSalvo - SALVO_TICK;",
+     "h->TimeUntilNextSalvo = h->TimeUntilNextSalvo + SALVO_TICK;"),
+    ("br_fire1", C, "fire = h->TimeUntilNextSalvo < 0.0f;",
+     "fire = h->TimeUntilNextSalvo <= 0.0f;"),
+    ("br_reach_le", C, "&h->TargetPoint->Position) < BOMB_REACH) {",
+     "&h->TargetPoint->Position) <= BOMB_REACH) {"),
+    ("br_reach_pt", C, "&h->TargetPoint->Position) < BOMB_REACH) {",
+     "&h->ChopperPoint->Position) < BOMB_REACH) {"),
+    ("br_cp", C, "        cp = h->ChopperPoint;\n", "        cp = h->TargetPoint;\n"),
+    ("br_ax", C, "across = (h->CurrentPos.x - cp->Position.x) * cp->Direction.y",
+     "across = (h->CurrentPos.x - cp->Position.x) * cp->Direction.x"),
+    ("br_ax_p", C, "across = (h->CurrentPos.x - cp->Position.x) * "
+     "cp->Direction.y", "across = (h->CurrentPos.x - cp->Position.y) * "
+     "cp->Direction.y"),
+    ("br_ay", C, "- (h->CurrentPos.y - cp->Position.y) * cp->Direction.x;",
+     "+ (h->CurrentPos.y - cp->Position.y) * cp->Direction.x;"),
+    ("br_ay_p", C, "- (h->CurrentPos.y - cp->Position.y) * cp->Direction.x;",
+     "- (h->CurrentPos.y - cp->Position.x) * cp->Direction.x;"),
+    ("br_ay_d", C, "- (h->CurrentPos.y - cp->Position.y) * cp->Direction.x;",
+     "- (h->CurrentPos.y - cp->Position.y) * cp->Direction.y;"),
+    ("br_side", C, "if (0.0f < across)\n            across = across - "
+     "cp->RightWidth;", "if (0.0f <= across)\n            across = across - "
+     "cp->RightWidth;"),
+    ("br_side_flip", C, "if (0.0f < across)\n            across = across - "
+     "cp->RightWidth;", "if (across < 0.0f)\n            across = across - "
+     "cp->RightWidth;"),
+    ("br_rw", C, "across = across - cp->RightWidth;",
+     "across = across - cp->LeftWidth;"),
+    ("br_lw", C, "across = -(across + cp->LeftWidth);",
+     "across = -(across + cp->RightWidth);"),
+    ("br_lw_neg", C, "across = -(across + cp->LeftWidth);",
+     "across = (across + cp->LeftWidth);"),
+    ("br_fire2", C, "fire = across < 0.0f;", "fire = across <= 0.0f;"),
+    ("br_fire_or", C, "if (fire && helisheet_find_z_value(TheHeliSheet,",
+     "if (fire || helisheet_find_z_value(TheHeliSheet,"),
+    ("br_fire_not", C, "if (fire && helisheet_find_z_value(TheHeliSheet,",
+     "if (!fire && helisheet_find_z_value(TheHeliSheet,"),
+    ("br_sheet", C, "if (fire && helisheet_find_z_value(TheHeliSheet,",
+     "if (fire && !helisheet_find_z_value(TheHeliSheet,"),
+    ("br_ground", C, "        chopper_find_ground_height(h);\n"
+     "        if (h->CurrentPos.z - h->GroundZ <= BOMB_HEIGHT) {",
+     "        if (h->CurrentPos.z - h->GroundZ <= BOMB_HEIGHT) {"),
+    ("br_height_lt", C, "if (h->CurrentPos.z - h->GroundZ <= BOMB_HEIGHT) {",
+     "if (h->CurrentPos.z - h->GroundZ < BOMB_HEIGHT) {"),
+    ("br_fire_call", C, "            chopper_fire_salvo(h);\n", ""),
+    ("br_n", C, "            h->NumSalvosReleased++;\n", ""),
+    ("br_total", C, "            h->TotalSalvos++;\n", ""),
+    ("br_order", C, "            chopper_fire_salvo(h);\n"
+     "            h->NumSalvosReleased++;\n", "            h->NumSalvosReleased++;\n"
+     "            chopper_fire_salvo(h);\n"),
+    ("br_btype", C, "            b = &BombRunBehaviours[h->BombRunType];\n"
+     "            h->Timeout", "            b = &BombRunBehaviours[1];\n"
+     "            h->Timeout"),
+    ("br_timeout", C, "            h->Timeout = CHOPPER_TIMEOUT;\n"
+     "            h->TimeUntilNextSalvo = b->SalvoDelay;",
+     "            h->TimeUntilNextSalvo = b->SalvoDelay;"),
+    ("br_delay", C, "h->TimeUntilNextSalvo = b->SalvoDelay;",
+     "h->TimeUntilNextSalvo = b->SalvoSpread;"),
+    ("br_nsalvos", C, "if (!(h->NumSalvosReleased < b->NumSalvos)) {",
+     "if (!(h->NumSalvosReleased <= b->NumSalvos)) {"),
+    ("br_last_plan", C, "b->NumSalvos)) {\n                h->Plan = "
+     "CHOPPLAN_PURSUIT;\n", "b->NumSalvos)) {\n"),
+    ("br_last_ret", C, "                h->Plan = CHOPPLAN_PURSUIT;\n"
+     "                return;\n", "                h->Plan = "
+     "CHOPPLAN_PURSUIT;\n"),
+    ("br_to", C, "    if (h->Timeout == 0.0f) {\n        h->Plan = "
+     "CHOPPLAN_PURSUIT;\n        return;\n    }\n    chopper_follow_route(h, t, "
+     "h->TargetRoute", "    if (h->Timeout != 0.0f) {\n        h->Plan = "
+     "CHOPPLAN_PURSUIT;\n        return;\n    }\n    chopper_follow_route(h, t, "
+     "h->TargetRoute"),
+    ("br_to_plan", C, "        h->Plan = CHOPPLAN_PURSUIT;\n        return;\n"
+     "    }\n    chopper_follow_route(h, t, h->TargetRoute, h->TargetPoint, 1);"
+     "\n}", "        return;\n    }\n    chopper_follow_route(h, t, "
+     "h->TargetRoute, h->TargetPoint, 1);\n}"),
+    ("br_to_ret", C, "        h->Plan = CHOPPLAN_PURSUIT;\n        return;\n"
+     "    }\n    chopper_follow_route(h, t, h->TargetRoute, h->TargetPoint, 1);"
+     "\n}", "        h->Plan = CHOPPLAN_PURSUIT;\n    }\n"
+     "    chopper_follow_route(h, t, h->TargetRoute, h->TargetPoint, 1);\n}"),
+    ("br_follow_fwd", C, "    }\n    chopper_follow_route(h, t, "
+     "h->TargetRoute, h->TargetPoint, 1);\n}", "    }\n"
+     "    chopper_follow_route(h, t, h->TargetRoute, h->TargetPoint, 0);\n}"),
+    ("br_follow", C, "    }\n    chopper_follow_route(h, t, h->TargetRoute, "
+     "h->TargetPoint, 1);\n}", "    }\n}"),
+    # ---- HighLevelPlanning
+    ("hl_on_init", C, "    int32_t on_sheet = 0;\n    uint32_t flags = 0;",
+     "    int32_t on_sheet = 1;\n    uint32_t flags = 0;"),
+    ("hl_flags_init", C, "    uint32_t flags = 0;\n    float z = 0.0f;",
+     "    uint32_t flags = 2;\n    float z = 0.0f;"),
+    ("hl_z_init", C, "    uint32_t flags = 0;\n    float z = 0.0f;",
+     "    uint32_t flags = 0;\n    float z = 1.0f;"),
+    ("hl_to", C, "h->Timeout = h->Timeout - PLAN_TICK;",
+     "h->Timeout = h->Timeout + PLAN_TICK;"),
+    ("hl_clamp", C, "    if (h->Timeout < 0.0f)\n        h->Timeout = 0.0f;\n"
+     "    if (h->Plan != CHOPPLAN_END_CHASE) {",
+     "    if (h->Plan != CHOPPLAN_END_CHASE) {"),
+    ("hl_clamp_val", C, "        h->Timeout = 0.0f;\n    if (h->Plan != "
+     "CHOPPLAN_END_CHASE) {", "        h->Timeout = -0.0f;\n    if (h->Plan "
+     "!= CHOPPLAN_END_CHASE) {"),
+    ("hl_end", C, "    if (h->Plan != CHOPPLAN_END_CHASE) {\n        bScaleAdd2",
+     "    if (h->Plan != CHOPPLAN_EATING_DONUTS) {\n        bScaleAdd2"),
+    ("hl_lead_v", C, "&h->CurrentCar->State.Velocity,\n                   "
+     "PLAN_LEAD);", "&h->CurrentCar->State.Position,\n                   "
+     "PLAN_LEAD);"),
+    ("hl_lead_p", C, "                   (const bVector2 *)&h->CurrentCar->"
+     "State.Position,\n", "                   (const bVector2 *)&h->"
+     "CurrentCar->State.Velocity,\n"),
+    ("hl_zv_flags", C, "&t->Location, &z,\n                                  "
+     "        &flags);", "&t->Location, &z,\n                              "
+     "            NULL);"),
+    ("hl_on", C, "on_sheet = helisheet_find_z_value(TheHeliSheet, &t->Location",
+     "on_sheet = !helisheet_find_z_value(TheHeliSheet, &t->Location"),
+    ("hl_frp", C, "    if (h->Plan != CHOPPLAN_START_CHASE)\n"
+     "        chopper_find_route_point(h);", "    if (h->Plan != "
+     "CHOPPLAN_END_CHASE)\n        chopper_find_route_point(h);"),
+    ("hl_frp_rm", C, "        chopper_find_route_point(h);\n"
+     "    t->DesiredSpeed = -1.0f;", "    t->DesiredSpeed = -1.0f;"),
+    ("hl_ds", C, "    t->DesiredSpeed = -1.0f;\n    switch (h->Plan) {",
+     "    t->DesiredSpeed = 1.0f;\n    switch (h->Plan) {"),
+    ("hl_bomb", C, "    case CHOPPLAN_BOMBING_RUN:\n        chopper_bomb_run_logic"
+     "(h, t);\n", "    case CHOPPLAN_BOMBING_RUN:\n"),
+    ("hl_bomb_brk", C, "        chopper_bomb_run_logic(h, t);\n        break;\n",
+     "        chopper_bomb_run_logic(h, t);\n"),
+    ("hl_case_at", C, "    case CHOPPLAN_HEAD_TO_STAKEOUT:\n"
+     "    case CHOPPLAN_AT_STAKEOUT:\n", "    case CHOPPLAN_HEAD_TO_STAKEOUT:\n"),
+    ("hl_case_head", C, "    case CHOPPLAN_HEAD_TO_STAKEOUT:\n"
+     "    case CHOPPLAN_AT_STAKEOUT:\n", "    case CHOPPLAN_AT_STAKEOUT:\n"),
+    ("hl_st_on", C, "if (on_sheet && (distance_to(h, &t->Location) < "
+     "STAKEOUT_GIVE_UP", "if (!on_sheet && (distance_to(h, &t->Location) < "
+     "STAKEOUT_GIVE_UP"),
+    ("hl_st_and", C, "if (on_sheet && (distance_to(h, &t->Location) < "
+     "STAKEOUT_GIVE_UP", "if (on_sheet || (distance_to(h, &t->Location) < "
+     "STAKEOUT_GIVE_UP"),
+    ("hl_st_lt", C, "&t->Location) < STAKEOUT_GIVE_UP\n",
+     "&t->Location) <= STAKEOUT_GIVE_UP\n"),
+    ("hl_st_or", C, "                         || h->Timeout == 0.0f)) {",
+     "                         && h->Timeout == 0.0f)) {"),
+    ("hl_st_to", C, "                         || h->Timeout == 0.0f)) {",
+     "                         || h->Timeout != 0.0f)) {"),
+    ("hl_st_plan", C, "            h->Plan = CHOPPLAN_PURSUIT;\n            break;"
+     "\n        }\n        if (h->Plan != CHOPPLAN_HEAD_TO_STAKEOUT)",
+     "            break;\n        }\n        if (h->Plan != "
+     "CHOPPLAN_HEAD_TO_STAKEOUT)"),
+    ("hl_st_head", C, "if (h->Plan != CHOPPLAN_HEAD_TO_STAKEOUT)\n            "
+     "break;", "if (h->Plan != CHOPPLAN_AT_STAKEOUT)\n            break;"),
+    ("hl_st_reach_le", C, "&h->TargetPoint->Position) < STAKEOUT_REACH) {",
+     "&h->TargetPoint->Position) <= STAKEOUT_REACH) {"),
+    ("hl_st_reach_pt", C, "&h->TargetPoint->Position) < STAKEOUT_REACH) {",
+     "&h->ChopperPoint->Position) < STAKEOUT_REACH) {"),
+    ("hl_st_at", C, "            h->Plan = CHOPPLAN_AT_STAKEOUT;\n",
+     "            h->Plan = CHOPPLAN_HEAD_TO_STAKEOUT;\n"),
+    ("hl_st_wait", C, "            h->Timeout = STAKEOUT_WAIT;\n", ""),
+    ("hl_st_lx", C, "            t->Location.x = h->TargetPoint->Position.x;\n",
+     ""),
+    ("hl_st_ly", C, "            t->Location.y = h->TargetPoint->Position.y;\n",
+     "            t->Location.y = h->TargetPoint->Position.x;\n"),
+    ("hl_st_follow_fwd", C, "            chopper_follow_route(h, t, "
+     "h->TargetRoute, h->TargetPoint, 1);\n        }",
+     "            chopper_follow_route(h, t, h->TargetRoute, h->TargetPoint, "
+     "0);\n        }"),
+    ("hl_st_follow", C, "        } else {\n            chopper_follow_route(h, "
+     "t, h->TargetRoute, h->TargetPoint, 1);\n        }", "        }"),
+    ("hl_sc_ret", C, "        if (chopper_start_chase_logic(h, t, on_sheet, "
+     "flags, z))\n            return 1;", "        if (chopper_start_chase_"
+     "logic(h, t, on_sheet, flags, z))\n            return 0;"),
+    ("hl_sc_z", C, "chopper_start_chase_logic(h, t, on_sheet, flags, z)",
+     "chopper_start_chase_logic(h, t, on_sheet, flags, 0.0f)"),
+    ("hl_sc_fl", C, "chopper_start_chase_logic(h, t, on_sheet, flags, z)",
+     "chopper_start_chase_logic(h, t, on_sheet, 0, z)"),
+    ("hl_sc_on", C, "chopper_start_chase_logic(h, t, on_sheet, flags, z)",
+     "chopper_start_chase_logic(h, t, 1, flags, z)"),
+    ("hl_sc_brk", C, "            return 1;\n        break;\n"
+     "    case CHOPPLAN_END_CHASE:", "            return 1;\n"
+     "    case CHOPPLAN_END_CHASE:"),
+    ("hl_ec_ret", C, "        if (chopper_end_chase_logic(h, t))\n"
+     "            return 1;", "        if (chopper_end_chase_logic(h, t))\n"
+     "            return 0;"),
+    ("hl_ec_rm", C, "        if (chopper_end_chase_logic(h, t))\n"
+     "            return 1;\n", ""),
+    ("hl_pur", C, "    if (h->Plan == CHOPPLAN_PURSUIT)\n"
+     "        chopper_clever_pursuit_plan", "    if (h->Plan != "
+     "CHOPPLAN_PURSUIT)\n        chopper_clever_pursuit_plan"),
+    ("hl_pur_fl", C, "chopper_clever_pursuit_plan(h, t, on_sheet, flags);",
+     "chopper_clever_pursuit_plan(h, t, on_sheet, 0);"),
+    ("hl_pur_on", C, "chopper_clever_pursuit_plan(h, t, on_sheet, flags);",
+     "chopper_clever_pursuit_plan(h, t, 1, flags);"),
+    ("hl_inb", C, "    chopper_adjust_target_in_bounds(h, t);\n"
+     "    chopper_adjust_target_local(h, t);\n    return 0;",
+     "    chopper_adjust_target_local(h, t);\n    return 0;"),
+    ("hl_local", C, "    chopper_adjust_target_in_bounds(h, t);\n"
+     "    chopper_adjust_target_local(h, t);\n    return 0;",
+     "    chopper_adjust_target_in_bounds(h, t);\n    return 0;"),
+    ("hl_order", C, "    chopper_adjust_target_in_bounds(h, t);\n"
+     "    chopper_adjust_target_local(h, t);\n    return 0;",
+     "    chopper_adjust_target_local(h, t);\n"
+     "    chopper_adjust_target_in_bounds(h, t);\n    return 0;"),
+    ("hl_ret", C, "    chopper_adjust_target_local(h, t);\n    return 0;\n}",
+     "    chopper_adjust_target_local(h, t);\n    return 1;\n}"),
 ]
 
 EQUIVALENT = {
@@ -2129,6 +2809,14 @@ EQUIVALENT = {
               "give k",
     "pi_ushift": "as pi_div: d is 112k, 16k is below 2^31, and the shift's "
                  "sign never shows",
+    "hl_on_init": "on_sheet is read only by the stakeouts, START_CHASE and "
+                  "PURSUIT, each after FindZValue set it; END_CHASE skips "
+                  "the call and never ends in PURSUIT",
+    "hl_flags_init": "flags is read only after a hit, which sets it, or by "
+                     "CleverPursuitPlan's `(flags & 2) || !on_sheet` and "
+                     "StartChaseLogic, which with on_sheet 0 never look",
+    "hl_z_init": "as hl_flags_init: z goes only to StartChaseLogic, which "
+                 "returns 1 before it with on_sheet 0",
 }
 
 

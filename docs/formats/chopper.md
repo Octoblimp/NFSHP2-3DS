@@ -10,10 +10,10 @@ helicopter. The port has it in `chopper.{c,h}`, in slices:
 | 12k-1 | the HeliSheet it flies over (`helisheet.md`) |
 | 12k-2 | the object, following and attacking a car, the target spot, placing it in the world (this page) |
 | 12k-3a | the chase logic under the plans (this page) |
-| 12k-3b | the plans: CleverPursuitPlan and HighLevelPlanning |
+| 12k-3b | the plans: HighLevelPlanning, CleverPursuitPlan and BombRunLogic (this page) |
 | 12k-4 | flying |
 | 12k-5 | drawing, dust and the ChopperSound |
-| 12k-6 | the bombing run |
+| 12k-6 | the salvos: FireSalvo and its launch (`chopperfire.c`) |
 | 12k-7 | tPursuit's UpdateChopper and the manager's methods |
 
 Retail's ELF is stripped. The names are the demo's (`Chopper.obj`), and
@@ -320,6 +320,94 @@ AdjustByThinkTime(f)                    0x001e9940
 - **The signpost's word.** Its Flags byte is bits 8 to 15: the sign is
   the low three bits, BACKWARDS bit 3 and NO_STAKEOUT bit 4.
 
+## Planning
+
+12k-3b ports the three functions above the chase logic. Think
+(`0x001e9d48`, 12k-4) calls HighLevelPlanning once every 0.1 s. Its
+caller, Fly (`0x001ea7d0`), skips Think while the helicopter is
+EATING_DONUTS. That is the one plan in which CurrentCar may be NULL, so
+the planning always has a car to read, except in END_CHASE, which never
+reads it.
+
+```
+HighLevelPlanning(t)                    0x001e9648
+    Timeout = max(Timeout - 0.1, 0)                         (gp-28036)
+    unless END_CHASE:
+        t->Location = the car's Position + 0.3 * its Velocity  (gp-28032)
+        on_sheet = FindZValue(t->Location), giving z and flags
+    unless START_CHASE: FindChopperRoutePoint()
+    t->DesiredSpeed = -1
+    BOMBING_RUN: BombRunLogic(t)
+    HEAD_TO_STAKEOUT, AT_STAKEOUT:
+        if on_sheet and (t within 60 or Timeout == 0): Plan = PURSUIT
+        else if HEAD_TO_STAKEOUT:
+            if TargetPoint within 30:
+                Plan = AT_STAKEOUT; Timeout = 45
+                t->Location = TargetPoint's position
+            else: FollowRoute(t, Target, 1)
+    START_CHASE: if StartChaseLogic(t, on_sheet, flags, z): return 1
+    END_CHASE: if EndChaseLogic(t): return 1
+    if PURSUIT: CleverPursuitPlan(t, on_sheet, flags)
+    AdjustTargetInBounds(t); AdjustTargetLocal(t); return 0
+
+CleverPursuitPlan(t, on_sheet, flags)   0x001e9150
+    if ZVelocity != 0 and (flags bit 1 or !on_sheet):
+        t->Location = CurrentPos; return
+    near = t within CalcMinRouteFollowDistance(t)
+    (route, point) = the car's
+    if either is NULL: BailToPointNearChopper(t); return
+    point = FindClosestPointAhead(route, t->Location, point), if any
+    if on_sheet:
+        if near:
+            if Speed > 20:
+                t->Location = point's GetPosition(t's offset along its
+                                                  Direction, 0)
+            return
+    else if point has TRP_NO_HELISHEET:
+        BeginStakeout(t, route, point); return
+    if ChopperOnDifferentFork(route, point):
+        BeginStakeout(t, route, point); return
+    if near: HangoutNearHere(t, route, point)
+    else: FollowRoute(t, route, point, ChopperBehindCar())
+
+BombRunLogic(t)                         0x001e9398
+    point = the car's point
+    if point is not OldCarPoint:
+        d = the distance from OldCarPoint to point
+        if the car's route is not OldCarRoute, or OldCarPoint's index is
+        below point's: d = -d
+        TargetDistance += d; (OldCarRoute, OldCarPoint) = the car's
+    AdjustBombTarget()
+    if NumSalvosReleased > 0:
+        TimeUntilNextSalvo -= 0.1; fire = it is below 0      (gp-28040)
+    else if TargetPoint is within 30:
+        a = the helicopter's offset from ChopperPoint across its
+            Direction, (dir.y, -dir.x), so right is positive
+        fire = (a - RightWidth if a > 0, else -(a + LeftWidth)) < 0
+    if fire and FindZValue(CurrentPos) hits:
+        FindGroundHeight()
+        if CurrentPos.z - GroundZ <= 10:
+            FireSalvo(); NumSalvosReleased++; TotalSalvos++
+            Timeout = 25; TimeUntilNextSalvo = the type's SalvoDelay
+            if NumSalvosReleased >= the type's NumSalvos:
+                Plan = PURSUIT; return
+    if Timeout == 0: Plan = PURSUIT; return
+    FollowRoute(t, Target, 1)
+```
+
+- **The car's lead** is a bScaleAdd (`0x002589d8`), which writes y before
+  x. The port's bScaleAdd2 keeps that order.
+- **z and flags** live on HighLevelPlanning's stack, and FindZValue
+  leaves them alone on a miss. Nothing reads them then. CleverPursuitPlan
+  returns early, or never tests flags, when on_sheet is 0, and
+  StartChaseLogic returns 1 before it looks. The port starts both at 0.
+- **Indexes** are BeginStakeout's (above). The car's two points come
+  from GetRoute and GetRoutePoint together, so both are in the route's
+  table whenever the routes match.
+- **FireSalvo** (`0x001ea8c0`) is 12k-6's. Until then, `chopperfire.c`
+  has a placeholder that fires nothing. The run still counts its salvos
+  and ends after the last one.
+
 ## The port
 
 - **No sound unless it is set.** The ChopperSound is task 29's. The port
@@ -332,23 +420,34 @@ AdjustByThinkTime(f)                    0x001e9940
   so every try is at the point itself, and the image tries it for ever
   if it is off the sheet. An IEEE float would shrink to the least
   denormal and stay there. The port leaves the target at that last try.
+- **BombRunLogic skips the car's progress** when the car's point or
+  OldCarPoint is NULL. The image only compares the two, then reads both
+  positions, so a NULL point reads address 0.
 
 ## The cross-check
 
 `tools/chopper_check.py` runs retail's functions in mipsemu against
 `chopper.c` and `coputil.c`'s RotateVector, with emath's rotations,
-bSinCos and bIdentity real on both sides. Everything else is a stub that
-logs its arguments and answers from the script: the TopologyCoordinate,
-the TrackPathCoordinate, the WorldObject, the AcidFX emitters, the routes
-and signposts, the planners (FindNearbySignpost, FindPointsToTarget),
-the HeliSheet's FindZValue, and the sound's table. FindZValue answers per
+bSinCos, bIdentity and bScaleAdd real on both sides. Everything else is
+a stub that logs its arguments and answers from the script: the
+TopologyCoordinate, the TrackPathCoordinate, the WorldObject, the AcidFX
+emitters, the routes and signposts (FindClosestPointAhead among them),
+the planners (FindNearbySignpost, FindPointsToTarget), the HeliSheet's
+FindZValue, FireSalvo, and the sound's table. FindZValue answers per
 point or by boxes of the plane. The routes' points sit inside their
 tables, so BeginStakeout's indexes are the image's own. After each call
 it compares every field at retail's offsets, the pad included, and the
 ChopperTarget.
 
-The model shares the port's three divergences:
+The model shares the port's four divergences:
 - it lends retail a silent sound when the port has none;
 - it zeroes the flags word on entry to FindUnobstructedSpot;
 - a hook after HangoutNearHere's FindZValue (`0x001e8f04`) ends the loop
-  by the port's rule.
+  by the port's rule;
+- a hook at BombRunLogic's compare of the car's points (`0x001e93c8`)
+  makes them equal when either is NULL.
+
+Five mutations survive by construction. Two are in BeginStakeout's
+index arithmetic, which only ever sees points inside the table. The
+other three are HighLevelPlanning's starting on_sheet, flags and z,
+which nothing reads unless FindZValue has set them.

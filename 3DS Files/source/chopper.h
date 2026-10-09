@@ -16,9 +16,11 @@
 // and placing the helicopter in the world and taking it out. 12k-3a has
 // the chase logic under the planning: arriving and leaving, following a
 // route, staking out a signpost, hanging about near a point and keeping
-// the target over the sheet. The plans themselves (12k-3b), flying
-// (12k-4), drawing and dust (12k-5), the bombing run itself (12k-6) and
-// tPursuit's UpdateChopper (12k-7) come after.
+// the target over the sheet. 12k-3b has the plans over them:
+// HighLevelPlanning, CleverPursuitPlan and BombRunLogic. Flying (12k-4),
+// drawing and dust (12k-5), the salvos (FireSalvo and the munitions it
+// launches, 12k-6, in chopperfire.c) and tPursuit's UpdateChopper (12k-7)
+// come after.
 //
 // The ChopperSound is task 29's. The port builds none unless
 // gCreateChopperSoundFn is set, and then every call through it is
@@ -380,5 +382,53 @@ int32_t chopper_test_location(struct Chopper *h, float x, float y);
 
 // 0x001e9940. f * 100.
 float chopper_adjust_by_think_time(struct Chopper *h, float f);
+
+// ---- the plans (12k-3b)
+
+// 0x001e9150. The PURSUIT plan. Still moving up or down, and over a flag-2
+// polygon or off the sheet, it holds where it is. Otherwise, from the
+// first of the car's points on that the target has not passed
+// (FindClosestPointAhead), or the car's own:
+//   - on the sheet and within CalcMinRouteFollowDistance: above speed 20,
+//     the target is moved onto the point's line, along it;
+//   - off the sheet at a TRP_NO_HELISHEET point, or on a different fork:
+//     BeginStakeout there;
+//   - else HangoutNearHere when near, or FollowRoute, forwards when the
+//     helicopter is behind the car.
+// With no route or point for the car, BailToPointNearChopper.
+void chopper_clever_pursuit_plan(struct Chopper *h, ChopperTarget *t,
+                                 int32_t on_sheet, uint32_t flags);
+
+// 0x001e9398. The BOMBING_RUN plan. The car's progress since the last
+// call goes into TargetDistance: less when it moved forward or to another
+// route. Then AdjustBombTarget. A salvo is due when the last one's delay
+// has run out (gp-28040 a call), or, before the first, when the
+// helicopter is within 30 of the target and over the road at its own
+// point. It fires (FireSalvo) when it is over the sheet and within 10 of
+// the ground: Timeout back to 25, the next delay from the table, and
+// PURSUIT after the last. PURSUIT too when Timeout has run out; else
+// FollowRoute to the target.
+//
+// The port's: with the car's point or the last one NULL, the progress is
+// skipped and the old point kept. The image reads address 0.
+void chopper_bomb_run_logic(struct Chopper *h, ChopperTarget *t);
+
+// 0x001e9648. The plans, once a think. Timeout less 0.1 (gp-28036), not
+// below 0. The target, unless ending the chase: the car's position plus
+// 0.3 (gp-28032) of its velocity, and whether that is over the sheet.
+// FindChopperRoutePoint unless starting the chase. DesiredSpeed -1, then
+// by plan:
+//   - BOMBING_RUN: BombRunLogic;
+//   - HEAD_TO_STAKEOUT and AT_STAKEOUT: PURSUIT once the target is on the
+//     sheet and within 60 or Timeout has run out. Heading there, it
+//     arrives within 30 of the stakeout's point (AT_STAKEOUT, Timeout 45,
+//     the target the point) or follows the route to it;
+//   - START_CHASE and END_CHASE: their logic, and 1 when it says so.
+// PURSUIT, as it is by then, runs CleverPursuitPlan. Then
+// AdjustTargetInBounds and AdjustTargetLocal, and 0.
+int32_t chopper_high_level_planning(struct Chopper *h, ChopperTarget *t);
+
+// 0x001ea8c0, in chopperfire.c. One salvo of the run's munitions: 12k-6's.
+void chopper_fire_salvo(struct Chopper *h);
 
 #endif

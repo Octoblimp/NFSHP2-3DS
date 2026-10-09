@@ -18949,3 +18949,87 @@ them in pseudocode.
 gp-28032 (0.3) and FindZValue, then calls StartChaseLogic. It calls
 BombRunLogic (`0x001e9398`, 12k-6, a stub until then) and takes gp-28036
 (0.1) off Timeout.
+
+## Session 60, continued (2026-10-09) -- 12k-3b, the plans
+
+The helicopter's three plans are now in `chopper.{c,h}`:
+HighLevelPlanning, CleverPursuitPlan and BombRunLogic. They sit on top
+of 12k-3a's chase logic. `docs/formats/chopper.md` ("Planning") has
+them in pseudocode.
+
+### What it does
+
+- **HighLevelPlanning** runs every 0.1 s:
+  - takes 0.1 off Timeout;
+  - looks 0.3 s ahead of the car (bScaleAdd, y before x) and asks the
+    sheet about that spot;
+  - finds its own route point;
+  - runs the plan, then AdjustTargetInBounds and AdjustTargetLocal.
+  - A stakeout gives up for PURSUIT once the car's spot is on the sheet
+    and within 60, or the time is out. Heading to one, it arrives
+    within 30 of the point and waits 45.
+- **CleverPursuitPlan:**
+  - holds still while climbing or falling off the sheet;
+  - with no car point, bails to a point near the helicopter;
+  - otherwise takes the car's point ahead of the spot.
+  - On the sheet and near, it leads the car along the road above 20.
+  - Off the sheet, a TRP_NO_HELISHEET point, or a different fork, means
+    a stakeout. Otherwise it hangs out near the point, or follows the
+    route.
+- **BombRunLogic:**
+  - Adds the car's progress to TargetDistance, negative forwards or
+    onto another route, then calls AdjustBombTarget.
+  - Fires the first salvo within 30 of the target when it is over the
+    road at its own point (its offset across, less RightWidth or
+    LeftWidth, below 0). Later salvos fire on the SalvoDelay clock.
+  - A salvo needs the sheet below and at most 10 over the ground. Each
+    resets Timeout to 25, and the last one, or a timeout, means
+    PURSUIT.
+- **FireSalvo** is 12k-6's. `chopperfire.c` holds a placeholder that
+  fires nothing.
+- **The divergence:** BombRunLogic skips the car's progress when either
+  point is NULL. The image reads address 0 for the position.
+- **No NULL car:** Fly (`0x001ea7d0`) returns before Think in
+  EATING_DONUTS, the one plan in which FollowThisCar(NULL) leaves
+  CurrentCar NULL. END_CHASE never reads the car.
+
+### Checked
+
+- `tools/chopper_check.py` runs the three plans in mipsemu, with
+  bScaleAdd (`0x002589d8`) and the port's bvector.c real on both sides.
+  - New stubs: FindClosestPointAhead (`0x001c1d30`) and FireSalvo
+    (`0x001ea8c0`).
+  - New ops: `carvel`, `width`, `clever`, `bombrun`, `hlp`, and
+    `set|old`.
+  - A hook at `0x001e93c8` gives the model the port's NULL rule.
+- 31,633 ops, 279,448 lines, 0 differ. Of 524 mutations, 519 are
+  caught and 5 are equivalent.
+  - The 3 new equivalents are HighLevelPlanning's starting on_sheet,
+    flags and z. FindZValue sets them before anything reads them.
+  - The first run differed on cases whose old point was outside its
+    own route's table. Such an index is the harness's memory layout,
+    and GetRoute and GetRoutePoint never give that pair, so the cases
+    went.
+  - **bs_c_null** (12k-3a) began to survive. Dropping BeginStakeout's
+    NULL check indexes NULL, which also depends on the harness's
+    layout, and the new code moved it. The mutant now takes the other
+    way on NULL, which the stakeout cases catch.
+  - Survivors of the first pass, killed by new cases:
+    - the target's reach (P2 had moved under an earlier
+      AdjustBombTarget);
+    - a road with one width 0.
+- The CIA builds. `check_3dsx` and `check_shbin` pass.
+- Azahar, on AC: the first run ended when the window was closed by
+  accident. The rerun was a quick race with cops, PASS at 30.0 fps.
+
+### Next
+
+12k-4, flying:
+- Think (`0x001e9d48`) calls HighLevelPlanning, then HoverTime
+  (`0x001e9b30`), bATan and MakeRelativeAngle.
+- SetXAccel (`0x001e9950`) reads gp-28028 (0.1).
+- Fly (`0x001ea7d0`):
+  - calls `0x001ea6c8` and MunitionEffectsHandler::DoTimestep;
+  - thinks every gp-27972 seconds;
+  - moves with `0x001e9ee8` and `0x001ea3b0`;
+  - goes to END_CHASE after 0.5 s stuck.

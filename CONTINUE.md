@@ -1,10 +1,12 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 60 (2026-10-09):
-12k-3a is done: the helicopter's chase logic, the sixteen functions
-under its plans (StartChaseLogic .. AdjustByThinkTime, in `chopper.c`;
-`docs/formats/chopper.md`, "The chase logic"). Before it, 12k-3's first
-part: the route planners the helicopter follows
+12k-3b is done: the helicopter's plans, HighLevelPlanning,
+CleverPursuitPlan and BombRunLogic (`chopper.c`;
+`docs/formats/chopper.md`, "Planning"). Before them, 12k-3a: the
+helicopter's chase logic, the sixteen functions under its plans
+(StartChaseLogic .. AdjustByThinkTime; "The chase logic"). Before that,
+12k-3's first part: the route planners the helicopter follows
 (ReturnToLastBranch, FindRoutesToTarget, FindPointsToTarget and
 FindNearbySignpost, in `airouteplan.c`; `docs/formats/ai-route.md`).
 Before them, the light flares. Cars' headlights, brake and reverse lights
@@ -418,19 +420,38 @@ pursuit.obj, on a 10 KB manager. Its slices:
     index done by a divide, and by an unsigned shift.
   - Azahar, on AC: a quick race with cops, PASS at 29.9 fps. Nothing
     calls the chase logic until 12k-3b.
-- **Next: 12k-3b**, the plans: CleverPursuitPlan (`0x001e9150`) and
-  HighLevelPlanning (`0x001e9648`).
-  - HighLevelPlanning finds the car's spot with bScaleAdd by gp-28032
-    (0.3) and FindZValue, then calls StartChaseLogic. It takes gp-28036
-    (0.1) off Timeout and calls BombRunLogic (`0x001e9398`, 12k-6).
-  - CleverPursuitPlan calls BeginStakeout, ChopperBehindCar,
-    FollowRoute and HangoutNearHere.
-  - The gp constants still unread: gp-28040 0.1, gp-28036 0.1,
-    gp-28032 0.3, and gp-28028 0.1 (SetXAccel, 12k-4).
+- **12k-3b, done (Session 60):** the plans in `chopper.c`,
+  HighLevelPlanning (`0x001e9648`), CleverPursuitPlan (`0x001e9150`) and
+  BombRunLogic (`0x001e9398`).
+  - FireSalvo (`0x001ea8c0`) is a placeholder in the new
+    `chopperfire.c` until 12k-6; the run still counts its salvos.
+  - The divergence: BombRunLogic skips the car's progress when the
+    car's point or OldCarPoint is NULL, where the image reads address 0.
+  - Fly (`0x001ea7d0`) skips Think in EATING_DONUTS, the one plan
+    whose CurrentCar may be NULL, so the planning always has a car.
+  - `tools/chopper_check.py`: 31,633 ops, 279,448 lines, 0 differ. Of
+    524 mutations, 519 are caught and 5 are equivalent: 12k-3a's two,
+    and HighLevelPlanning's starting on_sheet, flags and z, which
+    nothing reads unless FindZValue set them.
+  - Azahar, on AC: a quick race with cops, PASS at 30.0 fps. Nothing
+    calls the plans until 12k-4's Think.
+- **Next: 12k-4**, flying, in `chopper.c`:
+  - Think (`0x001e9d48`): MoveMode = 0, HighLevelPlanning, and a return
+    if it gives 1. Then HoverTime (`0x001e9b30`), bATan and
+    MakeRelativeAngle.
+  - SetXAccel (`0x001e9950`), gp-28028 (0.1).
+  - Fly, at `0x001ea7d0`:
+    - it calls `0x001ea6c8`, then MunitionEffectsHandler::DoTimestep;
+    - it returns in EATING_DONUTS;
+    - TimeUntilThink drops by dt, and below 0 it gains gp-27972 and
+      Think runs;
+    - unless START_CHASE, it moves with `0x001e9ee8` and `0x001ea3b0`.
+      A failed move adds dt to StuckTime, and 0.5 s stuck means
+      END_CHASE.
   - Then:
-    - 12k-4, flying;
     - 12k-5, drawing, dust and ChopperSound;
-    - 12k-6, the bombing run;
+    - 12k-6, the salvos: FireSalvo (`0x001ea8c0`) and its launch
+      (`0x001eab70`, with a replay event), into `chopperfire.c`;
     - 12k-7, tPursuit's UpdateChopper (`0x00229678`) and the
       manager's chopper methods. These bind the seams:
       gChopperCtorFn, gChopperDestroyFn, gChopperFlyFn,
@@ -4865,9 +4886,9 @@ each class shows what it reaches.
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
 That was about 41-60 slices to the full game when the table was set.
-After 12k-3a (2026-10-09), about 26-39 are left, and the count has
+After 12k-3b (2026-10-09), about 25-38 are left, and the count has
 run low before:
-- step 12's: 12k-3b, 12k-4 to 12k-7, 12l, 12m and 12n;
+- step 12's: 12k-4 to 12k-7, 12l, 12m and 12n;
 - steps 10, 14, 14b, 16, 17, 18 and 20.
 
 The replay (`ReplaySnapshot` and every `DoSnapshot`) is not in the
@@ -4880,9 +4901,9 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12's 12k-3b (the helicopter's plans): 12a to 12k-2,
-  the light flares, 12k-3's planners and 12k-3a are done. See "First"
-  at the top.
+- **Next:** step 12's 12k-4 (the helicopter's flying): 12a to 12k-2,
+  the light flares, 12k-3's planners, 12k-3a and 12k-3b are done. See
+  "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

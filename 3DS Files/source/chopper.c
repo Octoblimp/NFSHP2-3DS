@@ -12,6 +12,7 @@
 #include "bchunk.h"
 #include "bmem.h"
 #include "bslotpool.h"
+#include "bvector.h"
 #include "car.h"
 #include "coputil.h"
 #include "eefpu.h"
@@ -787,4 +788,197 @@ float chopper_adjust_by_think_time(struct Chopper *h, float f)
 {
     (void)h;
     return f * THINK_SCALE;
+}
+
+// -------------------------------------------------------------- the plans
+
+// HighLevelPlanning: what it takes off Timeout each time, gp-28036, and how
+// far ahead of the car it looks, in seconds of its velocity, gp-28032.
+#define PLAN_TICK          0.1f
+#define PLAN_LEAD          0.3f
+
+// The stakeout: given up within 0x42700000 of the car's spot, reached
+// within 0x41f00000 of its point, and waited at for 0x42340000.
+#define STAKEOUT_GIVE_UP   60.0f
+#define STAKEOUT_REACH     30.0f
+#define STAKEOUT_WAIT      45.0f
+
+// CleverPursuitPlan's speed above which it leads the car, 0x41a00000.
+#define PURSUIT_LEAD_SPEED 20.0f
+
+// BombRunLogic: the salvos' clock, gp-28040; the reach to the target,
+// 0x41f00000; and the most the helicopter may be over the ground to fire,
+// 0x41200000.
+#define SALVO_TICK         0.1f
+#define BOMB_REACH         30.0f
+#define BOMB_HEIGHT        10.0f
+
+void chopper_clever_pursuit_plan(struct Chopper *h, ChopperTarget *t,
+                                 int32_t on_sheet, uint32_t flags)
+{
+    TrackRoute *route;
+    TrackRoutePoint *point, *ahead;
+    float along;
+    int near;
+
+    if (!(h->ZVelocity == 0.0f) && ((flags & 2) || !on_sheet)) {
+        t->Location.y = h->CurrentPos.y;
+        t->Location.x = h->CurrentPos.x;
+        return;
+    }
+    near = distance_to(h, &t->Location)
+           < chopper_calc_min_route_follow_distance(h, t);
+    route = car_get_route(h->CurrentCar, FIND_ROUTE);
+    point = car_get_route_point(h->CurrentCar, FIND_ROUTE);
+    if (route == NULL || point == NULL) {
+        chopper_bail_to_point_near_chopper(h, t);
+        return;
+    }
+    ahead = troute_find_closest_point_ahead(route, &t->Location, point);
+    if (ahead != NULL)
+        point = ahead;
+    if (on_sheet) {
+        if (near) {
+            if (PURSUIT_LEAD_SPEED < h->Speed) {
+                along = (t->Location.x - point->Position.x)
+                            * point->Direction.x
+                        + (t->Location.y - point->Position.y)
+                              * point->Direction.y;
+                trpoint_get_position2(point, &t->Location, along, 0.0f);
+            }
+            return;
+        }
+    } else if (point->Bits & TRP_NO_HELISHEET) {
+        chopper_begin_stakeout(h, t, route, point);
+        return;
+    }
+    if (chopper_on_different_fork(h, route, point)) {
+        chopper_begin_stakeout(h, t, route, point);
+        return;
+    }
+    if (near)
+        chopper_hangout_near_here(h, t, route, point);
+    else
+        chopper_follow_route(h, t, route, point, chopper_behind_car(h));
+}
+
+void chopper_bomb_run_logic(struct Chopper *h, ChopperTarget *t)
+{
+    const BombRunBehaviour *b;
+    TrackRoutePoint *point, *cp;
+    TrackRoute *route;
+    float d, across, z;
+    int fire = 0;
+
+    point = car_get_route_point(h->CurrentCar, FIND_ROUTE);
+    // The port's: the image reads address 0 for a NULL point.
+    if (point != h->OldCarPoint && point != NULL && h->OldCarPoint != NULL) {
+        route = car_get_route(h->CurrentCar, FIND_ROUTE);
+        d = point->Position.x - h->OldCarPoint->Position.x;
+        across = point->Position.y - h->OldCarPoint->Position.y;
+        d = sqrtf(d * d + across * across);
+        if (route != h->OldCarRoute
+            || point_index(route, h->OldCarPoint) < point_index(route, point))
+            d = -d;
+        h->OldCarPoint = point;
+        h->TargetDistance = h->TargetDistance + d;
+        h->OldCarRoute = route;
+    }
+    chopper_adjust_bomb_target(h);
+    if (h->NumSalvosReleased > 0) {
+        h->TimeUntilNextSalvo = h->TimeUntilNextSalvo - SALVO_TICK;
+        fire = h->TimeUntilNextSalvo < 0.0f;
+    } else if (distance_to(h, &h->TargetPoint->Position) < BOMB_REACH) {
+        // Within the road at the helicopter's point.
+        cp = h->ChopperPoint;
+        across = (h->CurrentPos.x - cp->Position.x) * cp->Direction.y
+                 - (h->CurrentPos.y - cp->Position.y) * cp->Direction.x;
+        if (0.0f < across)
+            across = across - cp->RightWidth;
+        else
+            across = -(across + cp->LeftWidth);
+        fire = across < 0.0f;
+    }
+    if (fire && helisheet_find_z_value(TheHeliSheet,
+                                       (const bVector2 *)&h->CurrentPos, &z,
+                                       NULL)) {
+        chopper_find_ground_height(h);
+        if (h->CurrentPos.z - h->GroundZ <= BOMB_HEIGHT) {
+            chopper_fire_salvo(h);
+            h->NumSalvosReleased++;
+            h->TotalSalvos++;
+            b = &BombRunBehaviours[h->BombRunType];
+            h->Timeout = CHOPPER_TIMEOUT;
+            h->TimeUntilNextSalvo = b->SalvoDelay;
+            if (!(h->NumSalvosReleased < b->NumSalvos)) {
+                h->Plan = CHOPPLAN_PURSUIT;
+                return;
+            }
+        }
+    }
+    if (h->Timeout == 0.0f) {
+        h->Plan = CHOPPLAN_PURSUIT;
+        return;
+    }
+    chopper_follow_route(h, t, h->TargetRoute, h->TargetPoint, 1);
+}
+
+int32_t chopper_high_level_planning(struct Chopper *h, ChopperTarget *t)
+{
+    int32_t on_sheet = 0;
+    uint32_t flags = 0;
+    float z = 0.0f;
+
+    h->Timeout = h->Timeout - PLAN_TICK;
+    if (h->Timeout < 0.0f)
+        h->Timeout = 0.0f;
+    if (h->Plan != CHOPPLAN_END_CHASE) {
+        bScaleAdd2(&t->Location,
+                   (const bVector2 *)&h->CurrentCar->State.Position,
+                   (const bVector2 *)&h->CurrentCar->State.Velocity,
+                   PLAN_LEAD);
+        on_sheet = helisheet_find_z_value(TheHeliSheet, &t->Location, &z,
+                                          &flags);
+    }
+    if (h->Plan != CHOPPLAN_START_CHASE)
+        chopper_find_route_point(h);
+    t->DesiredSpeed = -1.0f;
+    switch (h->Plan) {
+    case CHOPPLAN_BOMBING_RUN:
+        chopper_bomb_run_logic(h, t);
+        break;
+    case CHOPPLAN_HEAD_TO_STAKEOUT:
+    case CHOPPLAN_AT_STAKEOUT:
+        if (on_sheet && (distance_to(h, &t->Location) < STAKEOUT_GIVE_UP
+                         || h->Timeout == 0.0f)) {
+            h->Plan = CHOPPLAN_PURSUIT;
+            break;
+        }
+        if (h->Plan != CHOPPLAN_HEAD_TO_STAKEOUT)
+            break;
+        if (distance_to(h, &h->TargetPoint->Position) < STAKEOUT_REACH) {
+            h->Plan = CHOPPLAN_AT_STAKEOUT;
+            h->Timeout = STAKEOUT_WAIT;
+            t->Location.x = h->TargetPoint->Position.x;
+            t->Location.y = h->TargetPoint->Position.y;
+        } else {
+            chopper_follow_route(h, t, h->TargetRoute, h->TargetPoint, 1);
+        }
+        break;
+    case CHOPPLAN_START_CHASE:
+        if (chopper_start_chase_logic(h, t, on_sheet, flags, z))
+            return 1;
+        break;
+    case CHOPPLAN_END_CHASE:
+        if (chopper_end_chase_logic(h, t))
+            return 1;
+        break;
+    default:
+        break;
+    }
+    if (h->Plan == CHOPPLAN_PURSUIT)
+        chopper_clever_pursuit_plan(h, t, on_sheet, flags);
+    chopper_adjust_target_in_bounds(h, t);
+    chopper_adjust_target_local(h, t);
+    return 0;
 }
