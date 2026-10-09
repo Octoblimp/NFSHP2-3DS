@@ -86,6 +86,8 @@
 #include "copdriver.h"
 #include "copmgr.h"
 #include "pursuit.h"
+#include "pursuitchopper.h"
+#include "chopper.h"
 #include "barricade.h"
 #include "difficultyinfo.h"
 #include "drivingchoice.h"
@@ -3248,6 +3250,31 @@ static void logRaceState(void)
                 "sheet %d polys", objects, on, strips,
                 TheHeliSheet != NULL ? TheHeliSheet->NumPolys : -1);
     }
+    if (pCopManager != NULL) {
+        // The chases, the first one's helicopter side, and the helicopter.
+        const tPursuitNode*   n;
+        const tPursuit*       first = NULL;
+        const struct Chopper* h = pCurrentWorld != NULL
+                                      ? pCurrentWorld->Helicopter : NULL;
+        int                   chases = 0;
+
+        for (n = pCopManager->PursuitList.Next;
+             n != &pCopManager->PursuitList; n = n->Next) {
+            if (chases++ == 0)
+                first = (const tPursuit*)(const void*)n;
+        }
+        logLine("race: chases %d, first behaviours %08lx chopper state %d "
+                "timer %.1f; helicopter %s plan %d at %.0f %.0f %.0f, busy "
+                "%d", chases,
+                first != NULL ? (unsigned long)first->BehaviourFlags : 0ul,
+                first != NULL ? (int)first->ChopperState : -1,
+                first != NULL ? (double)first->fChopperAttackTimer : 0.0,
+                h != NULL ? "up" : "none", h != NULL ? (int)h->Plan : -1,
+                h != NULL ? (double)h->CurrentPos.x : 0.0,
+                h != NULL ? (double)h->CurrentPos.y : 0.0,
+                h != NULL ? (double)h->CurrentPos.z : 0.0,
+                (int)pCopManager->bChopperBusy);
+    }
     {
         // What the race baked and uploaded since the last line: after
         // trackview_prepare, each one is a hitch.
@@ -4470,6 +4497,21 @@ int main(int argc, char** argv)
     // World's step thinks for the cops, and uncloaks the graph's cloaked
     // edges once a racer reaches a landmark that says to (copmgr.h).
     gGlobalCopThinkFn          = copmgr_global_cop_think;
+    // The helicopter (12k): made with a race's cops and deleted with the
+    // race, flown in World's step, asked for by each chase that may have
+    // one and sent at its chased car (pursuitchopper.h), drawn with the
+    // world objects. Be A Cop's requests ask for it and for a roadblock
+    // (playerinput.h). Its attacks drop nothing until its munitions
+    // (12k-6).
+    gChopperCtorFn                      = chopper_construct;
+    gChopperDestroyFn                   = chopper_destruct;
+    gChopperFlyFn                       = chopper_fly;
+    gChopperNew960Fn                    = pursuitchopper_new960;
+    gChopperFollowThisCarFn             = pursuitchopper_follow_this_car;
+    gPursuitUpdateChopperFn             = tpursuit_update_chopper;
+    gCopManagerBeACopRequestChopperFn   = tcopmanager_be_a_cop_request_chopper;
+    gCopManagerBeACopRequestRoadBlockFn =
+        tcopmanager_be_a_cop_request_road_block;
     logPrintf("car loader: pool %s\n", LoadedCarSlotPool ? "up" : "missing");
 
     // The blurb moves to the bottom screen, so the top screen stops drawing

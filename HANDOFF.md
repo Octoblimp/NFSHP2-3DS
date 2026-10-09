@@ -19139,3 +19139,52 @@ in pseudocode.
 IsChopperAvailable and BeACopRequestChopper, and the seams bound, so
 the helicopter joins a chase. CONTINUE's "Next: 12k-7" has them
 decoded.
+
+## Session 62, continued (2026-10-09) -- 12k-7, the helicopter in the chase
+
+### Done
+
+- `pursuitchopper.c` / `.h`, new: the chase's side of the helicopter,
+  apart from `pursuit.c` and `copmgr.c` because it calls `chopper.c`.
+  - **IsChopperAvailable** (`0x00224ec0`): World's helicopter, the
+    race's word at 624, the helicopter's 960 clear and bChopperBusy
+    clear.
+  - **RequestChopper** (`0x00224f00`): the same gates but 960, and in
+    Be A Cop an attack left; it sets bChopperBusy and takes an attack
+    off while any are left.
+  - **BeACopRequestChopper** and **BeACopRequestRoadBlock**
+    (`0x002287d8`, `0x002288c8`): the player cop's chase gets 0x1e0 or
+    0x18, and "BeACopRequestOk" or "BeACopRequestFailed" plays.
+  - **UpdateChopper** (`0x00229678`): the request with the rotor
+    speech, REQUESTED 10 s, INFLIGHT 5 s with the confirm (or Be A
+    Cop's "not available"), ATTACKING 15 s and FollowThisCar, then an
+    attack every fChopperNextAttackTime (down by 2 to 6): spike belt,
+    rocket or a smoke bomb by the behaviours, the tyres and
+    World::Random. fChaseDirection -1 aborts the bombing run.
+  - **IsChopperNearCar** (`0x0022bab8`): ATTACKING and under 200 in xy.
+  - The speech manager's three calls are seams, NULL until task 29.
+- `main.c` binds the helicopter's seams: the constructor, destructor
+  and Fly, the two `pursuit.c` used, UpdateChopper, and Be A Cop's two
+  requests. A race with cops now has its helicopter, drawn with the
+  world objects once it is out. A new "race: chases" log line has the
+  first chase's helicopter state and the helicopter's plan and place.
+- `docs/formats/pursuit.md`, "The helicopter (12k-7)", with its check;
+  the Seams list updated.
+
+### Checked
+
+- `tools/pursuitchopper_check.py` runs the six in mipsemu against
+  `tools/src/pursuitchopper_test.c`, with the speaker, the speeches,
+  AbortBombingRun, FollowThisCar, AttackCar, World::Random,
+  GetInGameSample and bSample::Play logged on both sides.
+- 136,412 ops, 36,879 lines, 0 differ. 107 mutations, all caught (four
+  survivors on the first pass were script gaps in Be A Cop's requests,
+  closed with the other behaviour bits and unequal counts).
+- The CIA builds. `check_3dsx` and `check_shbin` pass. Azahar, on AC: a
+  quick race with cops, PASS at 30.0 fps over 150 s. The helicopter is
+  made and idles (plan 6); the three chases stayed at behaviours 0x20f,
+  since 0x20 comes only from a dodged roadblock at level 3.
+
+### Next
+
+12l: pullovers and Busted (CreatePullover, `0x00226f30`).

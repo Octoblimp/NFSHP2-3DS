@@ -19,9 +19,10 @@
 // the target over the sheet. 12k-3b has the plans over them:
 // HighLevelPlanning, CleverPursuitPlan and BombRunLogic. 12k-4a has the
 // flying under them, Think, and 12k-4b Fly, the moving and the dust.
-// The sound (12k-5), the salvos (FireSalvo and the munitions it
-// launches, 12k-6, in chopperfire.c) and tPursuit's UpdateChopper (12k-7)
-// come after.
+// 12k-7 has the chase's side, tPursuit's UpdateChopper and the manager's
+// requests, in pursuitchopper.c. The sound (12k-5, after step 14's
+// Sound3d) and the salvos (FireSalvo and the munitions it launches,
+// 12k-6, in chopperfire.c, after step 14b's Smokeable) come after.
 //
 // The ChopperSound is task 29's. The port builds none unless
 // gCreateChopperSoundFn is set, and then every call through it is

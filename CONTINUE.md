@@ -1,10 +1,15 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 62 (2026-10-09):
-12k-4b is done: the helicopter's moving, Fly, MoveChopper, DrawChopper
+12k-7 is done: the helicopter in the chase. tPursuit's UpdateChopper,
+the manager's IsChopperAvailable and RequestChopper and Be A Cop's two
+requests are in `pursuitchopper.c` (`docs/formats/pursuit.md`, "The
+helicopter"), and the helicopter's seams are bound: a race with cops
+has its helicopter, and a chase that asks for it sends it at the chased
+car. Before it, 12k-4b: the helicopter's moving, Fly, MoveChopper, DrawChopper
 and the dust (`chopper.c`; `docs/formats/chopper.md`, "Moving"). 12k-5
 (the ChopperSound) moves to step 14 and 12k-6 (the salvos' munitions,
-which are Smokeables) after step 14b, so 12k-7 is next. Before it,
+which are Smokeables) after step 14b, so 12k-7 came next. Before it,
 12k-4a: the helicopter's flying, Think and the seven functions under it
 (SetXAccel .. SubtractFromYaw, with coputil's MakeRelativeAngle;
 "Flying"). Before it, 12k-3b: the helicopter's plans, HighLevelPlanning,
@@ -497,50 +502,32 @@ pursuit.obj, on a 10 KB manager. Its slices:
     CurrentPos.z) / +8), +8) with xy by Yaw (`0x001eacb0`), from the
     SmokeBomb pool (gp-18436) or DroppedSpikes' (gp-18432), and
     LaunchBomb (`0x001bfe90`).
-- **Next: 12k-7**, the helicopter in the chase:
-  - tPursuit::UpdateChopper (`0x00229678`, 760 bytes), which Update
-    already calls through `gPursuitUpdateChopperFn`:
-    - a pChopper whose New960 is set: nothing;
-    - no pChopper, behaviour 0x20 and IsChopperAvailable
-      (`0x00224ec0`): raiseRotorRequest (`0x0020af50`: the cop speaker,
-      and |fSupervisorTimer| <= gp-27068, 0.001), REQUESTED, the attack
-      timer at 10, and pChopper = RequestChopper (`0x00224f00`), whose
-      TotalSalvos (828) is zeroed. In Be A Cop behaviour 0x20 is
-      cleared;
-    - NO_CHOPPER returns. fChaseDirection -1 outside REQUESTED aborts
-      the bombing run (`0x001eadf0`): INFLIGHT, the timer at 10;
-    - the timer drops by the world's dt (gp-19560). Below 0:
-      REQUESTED goes INFLIGHT with raiseRotorConfirm (`0x0020afa0`)
-      and 5 s, or with no chopper back to NO_CHOPPER, with
-      raiseDispatchHelicopterNA (`0x0020b828`, BeACopId) in Be A Cop;
-      INFLIGHT goes ATTACKING with 15 s and FollowThisCar(the chased
-      car); ATTACKING takes fChopperNextAttackTime as the timer, and
-      that drops by 2 to at least 6;
-    - the attack: SMOKE_BOMB_1; with behaviour 0x80 and the chased
-      car's byte at 2124 clear, Random(2) == 0 makes it SPIKE_BELT;
-      else after a run that was not a rocket, with 0x100 and that byte
-      clear, Random(2) == 0 makes it ROCKET; else with 0x40,
-      Random(2) picks SMOKE_BOMB_2 or 1. A chopper on another car
-      follows the chased one instead of attacking.
-  - tCopManager's RequestChopper (`0x00224f00`): the World's helicopter
-    when the race has one (RaceParameters' New624), it is not busy, and
-    in Be A Cop attacks are left. It sets bChopperBusy and takes one
-    from nBeACopNumChopperAttacks when any are left, in either mode.
-    IsChopperAvailable (`0x00224ec0`) is `hudrender.c`'s
-    can_call_helicopter, which moves to the manager.
-  - BeACopRequestChopper (`0x002287d8`): the player cop's pursuit, with
-    no pChopper and behaviour 0x20 clear, gets 0x1e0, and the
-    "-11688" sample plays when attacks are left; anything else plays
-    "-11672" (strings at `0x002bd258` and `0x002bd268`, through
-    GetInGameSample and bSample::Play(1, 0, 0)). BeACopRequestRoadBlock
-    (`0x002288c8`) is its twin on pRoadBlock and bits 8 / 0x18.
-  - IsChopperNearCar (`0x0022bab8`, under 200 in xy while ATTACKING) is
-    the speech fillers'; GetNumChopperAttacksAvailable and
-    GetChopperState have no callers.
-  - Then bind the seams: gChopperCtorFn, gChopperDestroyFn,
-    gChopperFlyFn, gChopperNew960Fn, gChopperFollowThisCarFn,
-    gPursuitUpdateChopperFn and gCopManagerBeACopRequestChopperFn. The
-    helicopter then flies in a chase, dropping nothing until 12k-6.
+- **12k-7, done (Session 62):** the helicopter in the chase, in
+  `pursuitchopper.c`: tPursuit's UpdateChopper (`0x00229678`) and
+  IsChopperNearCar (`0x0022bab8`), and tCopManager's IsChopperAvailable
+  (`0x00224ec0`), RequestChopper (`0x00224f00`), BeACopRequestChopper
+  (`0x002287d8`) and BeACopRequestRoadBlock (`0x002288c8`). The speech
+  manager's raiseRotorRequest, raiseRotorConfirm and
+  raiseDispatchHelicopterNA are seams, NULL until task 29.
+  `docs/formats/pursuit.md`, "The helicopter", has them.
+  - The divergence: Be A Cop's requests take the player cop through
+    `copmanager_get_player_cop`, so no cop is no chase; retail reads the
+    cop with no test.
+  - `hudrender.c` keeps its own copy of IsChopperAvailable
+    (`can_call_helicopter`), the same test, so its harness need not
+    link `chopper.c`.
+  - `tools/pursuitchopper_check.py`: 136,412 ops, 36,879 lines, 0
+    differ. 107 mutations, all caught.
+  - `main.c` binds gChopperCtorFn, gChopperDestroyFn, gChopperFlyFn,
+    gChopperNew960Fn, gChopperFollowThisCarFn, gPursuitUpdateChopperFn
+    and Be A Cop's two request seams. A new "race: chases" log line has
+    the first chase's helicopter side and the helicopter's plan and
+    place.
+  - Azahar, on AC: a quick race with cops, PASS at 30.0 fps, the
+    helicopter made and idle (plan 6). A chase asks for it only after a
+    dodged roadblock at level 3 (RoadBlockDefeated), which the run did
+    not reach.
+- **Next: 12l**, pullovers and Busted (CreatePullover, `0x00226f30`).
 
   After 12k:
   - **12l** pullovers and Busted (CreatePullover, `0x00226f30`);
@@ -4970,9 +4957,9 @@ each class shows what it reaches.
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
 That was about 41-60 slices to the full game when the table was set.
-After 12k-4b (2026-10-09), about 23-36 are left, and the count has
+After 12k-7 (2026-10-09), about 22-35 are left, and the count has
 run low before:
-- step 12's: 12k-7, 12l, 12m and 12n, with 12k-6 after step 14b;
+- step 12's: 12l, 12m and 12n, with 12k-6 after step 14b;
 - steps 10, 14, 14b, 16, 17, 18 and 20.
 
 The replay (`ReplaySnapshot` and every `DoSnapshot`) is not in the
@@ -4985,9 +4972,9 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12's 12k-7 (the helicopter in the chase):
+- **Next:** step 12's 12l (pullovers and Busted):
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
-  12k-4a and 12k-4b are done. See
+  12k-4a, 12k-4b and 12k-7 are done. See
   "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;

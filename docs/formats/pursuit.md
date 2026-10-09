@@ -17,7 +17,8 @@ logic: asking for one, watching the chased car get by, and taking it
 down. Slice 12i-2 makes the roadblock: the cops for it, its layout
 across the road, and its barrels. Slice 12i-3 ports retail's e-brake
 stop into RealDriver (see [real-driver](real-driver.md)). The helicopter
-is 12k's and the pullover 12l's.
+is 12k's (the chase's side of it, 12k-7, is under The helicopter) and
+the pullover 12l's.
 
 | function | address | port |
 |----------|---------|------|
@@ -623,6 +624,92 @@ Fade gives each barrel the time and marks its collision body as fading
 BlinkBlinkPoof on each spike strip in the manager's list whose
 roadblock id (24) matches.
 
+## The helicopter (12k-7)
+
+`pursuitchopper.c` has the chase's side of the helicopter. It sits apart
+from `pursuit.c` and `copmgr.c` because it calls `chopper.c`
+([chopper](chopper.md)), which their checkers' harnesses do not link.
+
+| function | address | port |
+|----------|---------|------|
+| tCopManager::IsChopperAvailable | `0x00224ec0` | `tcopmanager_is_chopper_available` |
+| tCopManager::RequestChopper | `0x00224f00` | `tcopmanager_request_chopper` |
+| tCopManager::BeACopRequestChopper | `0x002287d8` | `tcopmanager_be_a_cop_request_chopper` |
+| tCopManager::BeACopRequestRoadBlock | `0x002288c8` | `tcopmanager_be_a_cop_request_road_block` |
+| tPursuit::UpdateChopper | `0x00229678` | `tpursuit_update_chopper` |
+| tPursuit::IsChopperNearCar | `0x0022bab8` | `tpursuit_is_chopper_near_car` |
+
+There is one helicopter, World's (24), which InitCars makes for a race
+with cops. It is available when the race allows one (RaceParameters'
+word at 624), its own word at 960 (egg 5's) is clear and so is the
+manager's bChopperBusy (312). RequestChopper takes it and sets
+bChopperBusy; in Be A Cop only while an attack is left
+(nBeACopNumChopperAttacks, 10492). Each request takes one attack off
+while any are left, Be A Cop or not.
+
+A chase asks for it with behaviour 0x20, which RoadBlockDefeated sets at
+LEVEL3's FOLLOW_BACKWARDS (see the roadblocks). UpdateChopper, once a
+step from Update:
+
+1. A helicopter whose word at 960 is set is left alone.
+2. With none, behaviour 0x20 and one available: raiseRotorRequest with
+   the cop speaker and whether the supervisor's timer (10348) is within
+   0.001 (gp-27068) of 0; then REQUESTED for 10 s, and RequestChopper.
+   A helicopter got has its TotalSalvos (828) zeroed. Be A Cop clears
+   0x20 again, so it asks once.
+3. NO_CHOPPER stops there.
+4. fChaseDirection -1 outside REQUESTED aborts the bombing run:
+   INFLIGHT, 10 s.
+5. The timer (1536) drops by WorldTimeElapsed. Below 0:
+   - REQUESTED, with the helicopter: raiseRotorConfirm and INFLIGHT for
+     5 s. Without one, Be A Cop gives raiseDispatchHelicopterNA with
+     Be A Cop's id (10336) and NO_CHOPPER; any other chase waits on,
+     the timer under 0.
+   - INFLIGHT: ATTACKING for 15 s, and FollowThisCar on the chased car.
+   - ATTACKING: the next wait is fChopperNextAttackTime (1540), which
+     then drops by 2 to no less than 6. The attack is a spike belt when
+     the chase allows one (0x80), the chased car's tyres are whole and
+     World::Random(2) gives 0; else a rocket the same way (0x100),
+     unless the last run (BombRunType, 804) was a rocket; else, with
+     0x40, Random(2) picks smoke bomb 2 (not 0) or 1; else smoke bomb
+     1. A helicopter following another car is sent at the chased one,
+     the attack picked and dropped; otherwise AttackCar.
+
+The attacks are `chopper.h`'s: rocket 0, smoke bombs 1 and 2, spike
+belt 3.
+
+Be A Cop's two requests (the D-Pad's, `playerinput.c`) read the player
+cop's chase, Cops[nPlayerCopIndex]'s first word. The helicopter's: a
+chase with no helicopter and no 0x20 gets behaviours 0x1e0 (asked for,
+every attack allowed), and "BeACopRequestOk" plays when an attack is
+left; anything else plays "BeACopRequestFailed". The roadblock's is the
+same with no pRoadBlock and behaviour 8 clear, giving 0x18, and
+nBeACopNumRoadBlocks (0). The samples are GetInGameSample's, played at
+full volume. Retail reads the cop with no test; the port's
+`copmanager_get_player_cop` gives NULL for none, and no cop is no
+chase.
+
+IsChopperNearCar, for the speech fillers (task 29): ATTACKING, with a
+helicopter, under 200 from the chased car in x and y.
+
+The speech manager's three calls are `pursuitchopper.h`'s seams, NULL
+until the speech manager (task 29).
+
+### Its check
+
+`tools/pursuitchopper_check.py` runs the six in mipsemu against
+`tools/src/pursuitchopper_test.c`. GetCopSpeaker, the three speeches,
+AbortBombingRun, FollowThisCar, AttackCar, World::Random (a scripted
+queue), GetInGameSample and bSample::Play are logged on both sides. The
+script walks the manager's gates (the world's helicopter, 624, 960,
+bChopperBusy, Be A Cop and attacks from -1 to 2), Be A Cop's requests
+over the chase, its helicopter or roadblock, the behaviours and both
+counts, the request's gates with the supervisor's timer at the 0.001
+edges, each state's run-out with and without the abort, the next
+attack's floor, the attacks over the behaviours, tyres, last run and
+draws, the near test at its 200 edge and at random, and forty chases
+over time: 36879 lines, 0 differ. 107 mutations, all caught.
+
 ## Seams
 
 Bound in `main.c` since 12h-1:
@@ -652,6 +739,16 @@ Bound since 12j-2a: `gCopManagerAddSpikeStripFn`, to
 strip, and the strip blinks out when the roadblock goes. Since 12j-2b
 its pieces are drawn (`cop-manager.md`).
 
+Bound since 12k-7, the helicopter: `gChopperCtorFn`,
+`gChopperDestroyFn` and `gChopperFlyFn` to `chopper.c`;
+`gChopperNew960Fn`, `gChopperFollowThisCarFn` and
+`gPursuitUpdateChopperFn` to `pursuitchopper.c`; and Be A Cop's
+`gCopManagerBeACopRequestChopperFn` and
+`gCopManagerBeACopRequestRoadBlockFn`. A race with cops now has its
+helicopter, drawn with the world objects once it is out, and a chase
+that asks for it sends it at the chased car. Its attacks drop nothing
+until its munitions (12k-6).
+
 Not bound yet:
 
 - The cop speech manager's calls do nothing while NULL:
@@ -671,15 +768,11 @@ Not bound yet:
 - RealDriver::ForceEBrakeStop, `gRealDriverForceEBrakeStopFn`, does
   nothing while NULL. `main.c` binds it since 12i-3, which ported
   retail's float timer into RealDriver.
-- Update's later slices do nothing while NULL: CreatePullover (12l)
-  and UpdateChopper (12k). So a caught car is not pulled over.
+- Update's CreatePullover (12l) does nothing while NULL, so a caught
+  car is not pulled over.
 - So does `gPlayerLoadNextNisFn`, the Busted NIS (12l).
-- These abort if reached:
-  - the helicopter's word at 960 and FollowThisCar (12k);
-  - the barrels' delete and the body's fade byte (the smokeables
-    step).
-
-  Nothing makes a helicopter or a barrel before then.
+- The barrels' delete and the body's fade byte abort if reached (the
+  smokeables step). Nothing makes a barrel before then.
 
 ## The check
 
