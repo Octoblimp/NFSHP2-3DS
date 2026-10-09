@@ -87,6 +87,12 @@ int32_t copmanager_find_free_pursuit_id(const tCopManager *m);
 // destructor through its table with flags 3. NULL does nothing.
 void copmanager_delete_pursuit(tCopManager *m, tPursuit *p);
 
+// DeleteRoadBlockSpikeStrips, 0x00227be8: each spike strip of the
+// roadblock with loaded-data index `i` blinks away (BlinkBlinkPoof,
+// 0x00241880, 12j; NULL aborts).
+void copmanager_delete_road_block_spike_strips(tCopManager *m, int32_t i);
+extern void (*gSpikeStripBlinkBlinkPoofFn)(tSpikeStrip *s);
+
 // GetCopByCar, 0x00224f70: the first of the nNumCops cops driving `c`,
 // or NULL. Each of them is read without a test.
 tCop *copmanager_get_cop_by_car(tCopManager *m, struct Car *c);
@@ -177,6 +183,11 @@ void copmanager_time_based_speech(tCopManager *m);
 // SetNextSpeechFillerGap, 0x00225780: 9 s plus bRandom(3) on bDefaultSeed,
 // 4 more in Be A Cop.
 void copmanager_set_next_speech_filler_gap(tCopManager *m);
+
+// The test TimeBasedSpeech, SupervisorActivate and PossibleCallSupervisor
+// open with: an instant or automatic replay, the post-race, or (out of
+// line, 0x001369a8) the replay demo.
+int32_t copmanager_replaying(void);
 
 // SupervisorActivate, 0x00225308. Outside the replays and the post-race,
 // fSupervisorTimer counts down from above 0; the frame it reaches 0, the

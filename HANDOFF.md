@@ -18030,3 +18030,93 @@ so no cop is in a chase.
 12h: tPursuit, starting with RequestPursuit (`0x00225078`), which binds
 `gCopManagerRequestPursuitFn`, and the pursuit's constructor
 (`0x00228fc8`).
+
+## Session 59 (2026-10-08) -- 12h-1, tPursuit
+
+tPursuit's object and how a chase is granted, ported from retail into
+the new `pursuit.c`, with retail's BarricadeManager in `barricade.c`.
+Also new: `docs/formats/pursuit.md`.
+
+### What it does
+
+- **The records:** tPursuitHistory's and tRoadBlockStateMachine's
+  constructors and destructors, and the state machine's
+  DisbandRoadBlock.
+- **The constructor** (`0x00228fc8`):
+  - builds the drive targets, the history, the state machine and the
+    barricades;
+  - sets the timers, and the roadblock spawn time by difficulty;
+  - measures the chased car's top speed (GetTopSpeed, `0x00231338`);
+  - takes a speaker: Be A Cop's, or one from the queue for a player;
+  - starts at LEVEL0, or LEVEL3 in the AI demo.
+- **The destructor** (`0x00229198`) releases the cops and gives back a
+  player's speakers. It sets the id to -2, deletes the barricades, and
+  frees the slot.
+- **The states:** SwitchPursuitState, its timer (the table at
+  0x0031c570, scaled by the race's length) and DoStateTransition.
+  LEVEL2 and LEVEL3 may call the supervisor (PossibleCallSupervisor).
+  Giving up backs the cops off, scores BEAT_THE_COPS and releases them.
+- **The cops:** ReleaseAllCops, DisbandRoadBlock, RemoveCopFromPursuit,
+  IsCopInPursuit and SelectPrimaryCop.
+- **The speakers:** GetCopSpeaker, GetSecondaryCopSpeaker,
+  IsPlayerInvolved, RemovePrimarySpeaker and
+  RoadBlockEncounteredRecently.
+- **The one-liners** at `0x0022d210`..`0x0022d338`.
+- **The manager's:**
+  - RequestPursuit (`0x00225078`), with the limits for split screen,
+    one player, AI cars and Be A Cop;
+  - NewPursuit (`0x002244e0`);
+  - DeleteRoadBlockSpikeStrips (`0x00227be8`).
+- **BarricadeManager** (new in retail): ten barrel ids and fade
+  timers. It has a constructor, a destructor that deletes the barrels,
+  and Fade.
+
+Two retail quirks are kept:
+
+- ReleaseAllCops releases only the first of two cops.
+- An empty speaker queue hands the constructor 0x41a00000. That is
+  ReserveCopSpeaker's leftover a2, the first word of the constructor's
+  copy of {20, 15, 10}.
+
+`main.c` binds `gPursuitRemoveCopFromPursuitFn` and
+`gPursuitRemovePrimarySpeakerFn`, and installs the two tables.
+`gCopManagerRequestPursuitFn` stays NULL until Update is in (12h-2), so
+no chase is made yet and the game plays as before.
+
+The cop speech calls and the Busted NIS do nothing while NULL. These
+abort if reached, and nothing reaches them yet:
+
+- the helicopter's (12k);
+- the barrels' delete and fade byte (12i);
+- BlinkBlinkPoof (12j).
+
+### Checked
+
+- New `tools/pursuit_check.py` with `tools/src/pursuit_test.c`. It sets
+  up:
+  - a manager, six cars and eight cops;
+  - four roadblocks, six spike strips, two helicopters and sixteen
+    bodies.
+
+  It runs every function above at its edges, RequestPursuit last.
+  22906 operations, 51040 lines, 0 differ.
+- `--mutate`: 265 mutations, 262 caught, 3 equivalent (in the doc).
+  - The first pass left 20 alive. They needed a speaker queue with
+    room, a fresh LEVEL2 switch, and a roadblock cop near the chased
+    car. They also needed a chased car off the origin, the exact 30
+    boundary, and barrels in the last place and below -1.
+- The run found two harness bugs:
+  - the pursuits outgrew the harness's tables;
+  - the model passed -1 zero-extended to DeleteRoadBlockSpikeStrips,
+    which compares 64-bit registers.
+- These still have 0 differ: carmode, cop, copdriver, copmanager,
+  copmover, drivecam, hudfeatures, hudrender, raceupdate and
+  trackgraph.
+- The CIA builds.
+- `run_azahar_quickrace.ps1 -HoldKeys 65`: PASS, a race from the
+  frontend at 30 FPS and Speed 100%, with the AI racing and the HUD up.
+
+### Next
+
+12h-2: tPursuit::Update (`0x00229288`) and its helpers. Then bind
+`gCopManagerRequestPursuitFn`, so the cops chase.

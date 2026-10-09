@@ -341,6 +341,29 @@ void copmanager_delete_pursuit(tCopManager *m, tPursuit *p)
     ((DtorFn)e->fn)(vt_this(p, e), 3);
 }
 
+void (*gSpikeStripBlinkBlinkPoofFn)(tSpikeStrip *s);
+
+void copmanager_delete_road_block_spike_strips(tCopManager *m, int32_t i)
+{
+    tPursuitNode *list = &m->SpikeStripList;
+    tPursuitNode *n = list->Next;
+
+    while (n != list) {
+        tPursuitNode *next = n->Next;
+        tSpikeStrip  *s = (tSpikeStrip *)(void *)n;
+
+        if (s->nRoadBlockID == i) {
+            if (gSpikeStripBlinkBlinkPoofFn == NULL) {
+                fprintf(stderr, "copmgr: tSpikeStrip::BlinkBlinkPoof"
+                        " is not ported\n");
+                abort();
+            }
+            gSpikeStripBlinkBlinkPoofFn(s);
+        }
+        n = next;
+    }
+}
+
 // ------------------------------------------------------ the impacts
 
 tCop *copmanager_get_cop_by_car(tCopManager *m, struct Car *c)
@@ -685,10 +708,7 @@ void    (*gCopManagerBeACopThinkFn)(tCopManager *m);
 
 typedef void (*ThinkFn)(void *self);
 
-// The test TimeBasedSpeech and SupervisorActivate open with: an instant or
-// automatic replay, the post-race, or (out of line, 0x001369a8) the replay
-// demo.
-static int32_t replaying(void)
+int32_t copmanager_replaying(void)
 {
     RCState s = pRaceCoordinator->CurrentRCState;
 
@@ -731,7 +751,7 @@ void copmanager_time_based_speech(tCopManager *m)
     tPursuit *p;
     float     t;
 
-    if (replaying())
+    if (copmanager_replaying())
         return;
     if (gCopSpeechPlaybackStateFn != NULL
         && gCopSpeechPlaybackStateFn() != 0) {
@@ -764,7 +784,7 @@ void copmanager_supervisor_activate(tCopManager *m)
     tPursuitNode *n;
     float         t;
 
-    if (replaying())
+    if (copmanager_replaying())
         return;
     if (!(0.0f < m->fSupervisorTimer))
         return;

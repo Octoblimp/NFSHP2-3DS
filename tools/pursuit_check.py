@@ -1,0 +1,2219 @@
+#!/usr/bin/env python3
+"""Cross-check 3DS Files/source/pursuit.c, tPursuit's making and
+unmaking, against the retail image, SLES_507.31, run in mipsemu.
+
+**The model** is retail's own copmgr.obj: the new 0x002244e0 (a pursuit
+out of the slot pool and onto the list) and so tPursuit's constructor
+(0x00228fc8) with GetTopSpeed, tPursuitHistory's and the roadblock state
+machine's constructors and the barricades' (0x0024ef88) under it, and
+SwitchPursuitState (0x00229fe8) with its state time (0x00229f70) and
+PossibleCallSupervisor; DoStateTransition, GetSpeedMPHOrKPH,
+ReleaseAllCops with the chopper's release (0x0022a310), DisbandRoadBlock
+with DeleteRoadBlockSpikeStrips and the barrels' fade (0x0024f1e0),
+RemoveCopFromPursuit, IsCopInPursuit, RemovePrimarySpeaker,
+RoadBlockEncounteredRecently, SelectPrimaryCop, the two speakers,
+IsPlayerInvolved, the one-liners (0x0022d210 to 0x0022d338),
+RequestPursuit (0x00225078), and DeletePursuit (0x00224560) into the
+destructor (0x00229198) and the barricades' (0x0024efd8). The cop
+manager's speakers, GetNumTickets, the free id, bRandom, bStringHash,
+IsReplayDemoMode and the cops' IsAIControlled run as shipped. The harness
+(tools/src/pursuit_test.c) runs pursuit.c, barricade.c, copmgr.c,
+copmanager.c, vtable.c and bmath.c and prints the same lines.
+
+**The stubs**, logged and answered by the same rule on both sides: the
+slot pool's alloc and free, bMalloc (a block of 0xcd) and
+__builtin_delete, DriveTarget's constructor and destructor,
+GetAccelerationTable and Table::GetValue (huge below a cut speed, then a
+scripted value), Player::StartScore and LoadNextNis, the cop speech
+manager's raise calls and tPursuit's own three speeches, tAICop's
+ReturnToPatrol, tCop's SetPursuit and SetDesiredLogicState (which store
+as well), Chopper::FollowThisCar, tSpikeStrip::BlinkBlinkPoof,
+FindCollisionBody (a body for most ids), FindSmokeableInfo and the
+barrel's delete (0x0021ef88).
+
+**Compared** are the stubs' logs and, on `dump`, every field of a pursuit
+at retail's offsets but the drive targets, which only the stubs touch,
+its barricades', the manager's lists, speakers, timers and seed, the
+cops' pursuits and logic states, and the bodies the fade marked.
+
+    python tools/pursuit_check.py
+    python tools/pursuit_check.py --mutate [--only a,b]
+    python tools/pursuit_check.py --dump out/pursuit
+"""
+import argparse
+import os
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hostbuild                        # noqa: E402
+import mutpar                           # noqa: E402
+import physicscar_check as pcc          # noqa: E402
+import retail_model                     # noqa: E402
+from mipsemu import M32, s32            # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+NL = chr(10)
+
+HARNESS = "tools/src/pursuit_test.c"
+PURSUIT = "3DS Files/source/pursuit.c"
+BARRICADE = "3DS Files/source/barricade.c"
+COPMGR = "3DS Files/source/copmgr.c"
+SOURCES = [HARNESS, PURSUIT, BARRICADE, COPMGR,
+           "3DS Files/source/copmanager.c", "3DS Files/source/vtable.c",
+           "3DS Files/source/bmath.c", "3DS Files/source/bmathtab.c"]
+HARNESS_TIMEOUT = 60
+
+# ================================================================ the image
+
+GP = retail_model.RETAIL_GP
+RP = 0x0031a898                         # TheRaceParameters
+TRACKLEN = 0x0031bc38                   # TheTrackPathManager.TrackLength
+G_POOL = GP - 15644                     # PursuitSlotPool
+G_COPMGR = GP - 15620
+G_SPEECH = GP - 15624
+G_SPAWN = GP - 15600                    # fRoadBlockSpawnTime
+G_RC = GP - 22216                       # pRaceCoordinator
+G_WORLD = GP - 22120                    # pCurrentWorld
+G_SEED = GP - 14472                     # bDefaultSeed
+
+F_NEW = 0x002244e0
+F_REQ = 0x00225078
+F_SUPER = 0x002253e8
+F_DEL = 0x00224560
+F_DSS = 0x00227be8
+F_DTOR = 0x00229198
+F_RBR = 0x00229dd8
+F_SEL = 0x00229ed0
+F_STATETIME = 0x00229f70
+F_SWITCH = 0x00229fe8
+F_TRANS = 0x0022a190
+F_SPEED = 0x0022a220
+F_RELEASE = 0x0022a260
+F_SPK1 = 0x0022ab30
+F_SPK2 = 0x0022ab70
+F_PI = 0x0022bbd8
+F_DISBAND = 0x0022c5a0
+F_REMOVE = 0x0022c740
+F_ISIN = 0x0022c920
+F_RPS = 0x0022c990
+F_TOP = 0x00231338
+F_BFADE = 0x0024f1e0
+F_ONE = {"addcop": 0x0022d210, "numcops": 0x0022d230, "id": 0x0022d238,
+         "rbstate": 0x0022d240, "dir": 0x0022d248, "chst": 0x0022d250,
+         "over": 0x0022d258, "called": 0x0022d268, "needed": 0x0022d270,
+         "other": 0x0022d2a8, "primcar": 0x0022d2c0, "prim": 0x0022d2e0,
+         "allowed": 0x0022d2f0, "disallowall": 0x0022d300,
+         "disallow": 0x0022d308, "allow": 0x0022d320,
+         "landmark": 0x0022d330, "hud": 0x0022d338}
+
+S_OMALLOC = 0x00257c80
+S_SLOTFREE = 0x00257ca0
+S_MALLOC = 0x002577c0
+S_DELETE = 0x00114e98
+S_DT_CTOR = 0x0021b918
+S_DT_DTOR = 0x0021b988
+S_ACCTAB = 0x00188dd8
+S_GETVALUE = 0x0018f838
+S_SCORE = 0x0017e3b0
+S_NIS = 0x001761e8
+S_PATROL = 0x00230cb0
+S_SETPURSUIT = 0x0022d530
+S_DESIRED = 0x0022d538
+S_FINDBODY = 0x001d6ee8
+S_FINDSMOKE = 0x0021f8f8
+S_BARREL_DEL = 0x0021ef88
+S_FOLLOW = 0x001e7f80
+S_POOF = 0x00241880
+S_SPEECH = {0x0022afb8: "start", 0x0022b288: "join", 0x0022b788: "backoff"}
+S_RAISE2 = {0x0020aa90: "tow", 0x0020a9b0: "crash", 0x0020aa00: "flat"}
+S_SUPERREQ = 0x0020b4b0
+
+VT_AICOP = 0x002bd698
+VT_PLAYERCOP = 0x002bd6c0
+
+RP_FIELDS = {"Point2Point": 40, "NumLaps": 44, "NumPlayerCars": 48,
+             "bRoadBlocks": 612, "BeACop": 628}
+RP_UNITS = 749
+
+MGR_SIZE = 10516
+PURSUIT_SIZE = 1600
+WORLD_SIZE = 5936
+CAR_SIZE = 2304
+CAR_INDEX, CAR_CTI, CAR_RIDE, CAR_PLAYER, CAR_RACING = 8, 12, 16, 24, 28
+CAR_POS, CAR_VEL, CAR_BLOWN = 96, 960, 2124
+CTI_SIZE, CTI_MASS, CTI_DRAG = 1024, 480, 752
+NCARS, NCOPS, NRBS, NSTRIPS, NCHOPPERS, NBODIES = 6, 8, 4, 6, 2, 16
+COP_SIZE, RB_SIZE, STRIP_SIZE, CHOPPER_SIZE, BODY_SIZE = (128, 120, 32,
+                                                          1024, 1136)
+
+MFIELDS = {"diff": 10476, "beacop": 10336, "super": 10348, "busy": 312,
+           "pcidx": 12, "head": 10324, "tail": 10328, "full": 10332}
+PFIELDS = {"state": 1484, "ncops": 1476, "chst": 1580, "primary": 1496,
+           "secondary": 1500, "backup": 1516, "maxchase": 8,
+           "rbtimer": 1532, "flags": 1588, "landmark": 1504,
+           "rbstate": 1560}
+
+
+def fbits(f):
+    return struct.unpack("<I", struct.pack("<f", f))[0]
+
+
+def F(f):
+    return "0x%08x" % fbits(f)
+
+
+def s16(v):
+    v &= 0xffff
+    return v - 0x10000 if v & 0x8000 else v
+
+
+def s8(v):
+    v &= 0xff
+    return v - 0x100 if v & 0x80 else v
+
+
+# ================================================================== model
+
+class Model(object):
+    def __init__(self):
+        e = self.e = retail_model.emu(retail=True, ieee=True)
+        self.out = []
+        self.names = {}
+        self.pursuits = []
+        self.blocks = 0
+        a = lambda n: e.alloc(n, align=16)      # noqa: E731
+        self.m = a(MGR_SIZE)
+        e.put32(G_COPMGR, self.m)
+        self.names[self.m + 44] = "M.plist"
+        self.names[self.m + 80] = "M.slist"
+        self.world = a(WORLD_SIZE)
+        e.write(self.world, bytes(WORLD_SIZE))
+        e.put32(G_WORLD, self.world)
+        self.rc = a(64)
+        e.write(self.rc, bytes(64))
+        e.put32(G_RC, self.rc)
+        self.pool = a(16)
+        self.names[self.pool] = "pool"
+        e.put32(G_POOL, self.pool)
+        e.put32(G_SPEECH, a(16))
+        self.smoke = a(64)
+        self.tabtok = a(16 * 8)
+        self.cut = [0] * 8
+        self.low = [0] * 8
+        self.cars = []
+        for k in range(NCARS):
+            c, cti, ride, racing = a(CAR_SIZE), a(CTI_SIZE), a(16), a(32)
+            for p, n in ((c, CAR_SIZE), (cti, CTI_SIZE), (ride, 16),
+                         (racing, 32)):
+                e.write(p, bytes(n))
+            e.put32(c + CAR_CTI, cti)
+            e.put32(c + CAR_RIDE, ride)
+            e.put32(c + CAR_RACING, racing)
+            self.names[c] = "A%d" % k
+            self.cars.append(c)
+        self.players = []
+        for k in range(2):
+            p = a(16)
+            self.names[p] = "P%d" % k
+            self.players.append(p)
+
+        def many(n, size, fmt):
+            out = []
+            for k in range(n):
+                p = a(size)
+                e.write(p, bytes(size))
+                self.names[p] = fmt % k
+                out.append(p)
+            return out
+        self.cops = many(NCOPS, COP_SIZE, "C%d")
+        self.rbs = many(NRBS, RB_SIZE, "R%d")
+        self.strips = many(NSTRIPS, STRIP_SIZE, "S%d")
+        self.choppers = many(NCHOPPERS, CHOPPER_SIZE, "H%d")
+        self.bodies = many(NBODIES, BODY_SIZE, "Y%d")
+
+        for addr, fn in ((S_OMALLOC, self.s_omalloc),
+                         (S_SLOTFREE, self.s_slotfree),
+                         (S_MALLOC, self.s_malloc),
+                         (S_DELETE, self.log1("delete")),
+                         (S_DT_CTOR, self.s_dt_ctor),
+                         (S_DT_DTOR, self.log1("dt destroy")),
+                         (S_ACCTAB, self.s_acctab),
+                         (S_GETVALUE, self.s_getvalue),
+                         (S_SCORE, self.s_score), (S_NIS, self.s_nis),
+                         (S_PATROL, self.log1("patrol")),
+                         (S_SETPURSUIT, self.s_setpursuit),
+                         (S_DESIRED, self.s_desired),
+                         (S_FINDBODY, self.s_findbody),
+                         (S_FINDSMOKE, lambda em: self.smoke),
+                         (S_BARREL_DEL, self.s_barrel_del),
+                         (S_FOLLOW, self.s_follow),
+                         (S_POOF, self.log1("poof")),
+                         (S_SUPERREQ, self.s_superreq)):
+            e.stub(addr, fn)
+        for addr, what in S_SPEECH.items():
+            e.stub(addr, self.log1("speech " + what))
+        for addr, what in S_RAISE2.items():
+            e.stub(addr, self.raise2(what))
+        self.reset()
+
+    def emit(self, line):
+        self.out.append(line)
+
+    def sym(self, v):
+        v &= M32
+        if v == 0:
+            return "0"
+        if v == 0xcdcdcdcd:
+            return "cd"
+        return self.names.get(v, "?")
+
+    # ---- stubs
+
+    def log1(self, what):
+        def fn(em):
+            self.emit("  %s %s" % (what, self.sym(em.reg[4])))
+        return fn
+
+    def s_omalloc(self, em):
+        e = self.e
+        p = e.alloc(PURSUIT_SIZE, align=16)
+        e.write(p, b"\xcd" * PURSUIT_SIZE)
+        u = len(self.pursuits)
+        self.names[p] = "U%d" % u
+        self.names[p + 48] = "U%d.far" % u
+        self.names[p + 576] = "U%d.near" % u
+        self.pursuits.append(p)
+        self.emit("  slotalloc %s -> U%d" % (self.sym(em.reg[4]), u))
+        return p
+
+    def s_slotfree(self, em):
+        self.emit("  slotfree %s %s" % (self.sym(em.reg[4]),
+                                        self.sym(em.reg[5])))
+
+    def s_malloc(self, em):
+        e = self.e
+        size = s32(em.reg[4])
+        p = e.alloc(size, align=16)
+        e.write(p, b"\xcd" * size)
+        n = "B%d" % self.blocks
+        self.blocks += 1
+        self.names[p] = n
+        self.emit("  malloc %d %s %d %d -> %s" % (
+            size, self.cstr(em.reg[5] & M32), s32(em.reg[6]),
+            s32(em.reg[7]), n))
+        return p
+
+    def s_dt_ctor(self, em):
+        self.emit("  dt init %s" % self.sym(em.reg[4]))
+        return em.reg[4]
+
+    def s_acctab(self, em):
+        t = s32(em.reg[4])
+        self.emit("  acctab %d" % t)
+        return self.tabtok + 16 * (t & 7)
+
+    def s_getvalue(self, em):
+        k = ((em.reg[4] & M32) - self.tabtok) // 16
+        v = em.fpr[12] & M32
+        r = self.low[k] if v >= self.cut[k] else 0x7f000000
+        self.emit("  accel T%d %08x -> %08x" % (k, v, r))
+        em.fpr[0] = r
+
+    def s_score(self, em):
+        self.emit("  score %s %d" % (self.sym(em.reg[4]), s32(em.reg[5])))
+
+    def s_nis(self, em):
+        self.emit("  nis %s %s %s %d" % (
+            self.sym(em.reg[4]), self.sym(em.reg[5]), self.sym(em.reg[6]),
+            s32(em.reg[7])))
+
+    def s_setpursuit(self, em):
+        c, p = em.reg[4] & M32, em.reg[5] & M32
+        self.emit("  setpursuit %s %s" % (self.sym(c), self.sym(p)))
+        self.e.put32(c, p)
+
+    def s_desired(self, em):
+        c, s = em.reg[4] & M32, em.reg[5] & M32
+        self.emit("  desired %s %d" % (self.sym(c), s32(s)))
+        self.e.put32(c + 16, s)
+
+    def s_findbody(self, em):
+        i = s32(em.reg[4])
+        b = self.bodies[i] if 0 <= i < NBODIES and i % 3 != 2 else 0
+        self.emit("  findbody %d -> %s" % (i, self.sym(b)))
+        return b
+
+    def s_barrel_del(self, em):
+        ok = "" if em.reg[5] & M32 == self.smoke else " ?info"
+        self.emit("  barrel delete %d%s" % (s32(em.reg[4]), ok))
+
+    def s_follow(self, em):
+        self.emit("  follow %s %s" % (self.sym(em.reg[4]),
+                                      self.sym(em.reg[5])))
+
+    def raise2(self, what):
+        def fn(em):
+            self.emit("  speech %s %08x %08x" % (what, em.reg[5] & M32,
+                                                 em.reg[6] & M32))
+        return fn
+
+    def s_superreq(self, em):
+        self.emit("  speech super %08x" % (em.reg[5] & M32))
+
+    def cstr(self, a):
+        b = self.e.read(a, 64)
+        return b.split(b"\0")[0].decode("latin-1")
+
+    # ---- the dumps
+
+    def dump(self, u):
+        e = self.e
+        p = self.pursuits[u]
+        w = lambda o: e.u32(p + o)              # noqa: E731
+        i = lambda o: s32(e.u32(p + o))         # noqa: E731
+        sy = lambda o: self.sym(w(o))           # noqa: E731
+        o = self.emit
+        o("U%d node %s %s max %d %d chased %s rb %s chopper %s cops %s %s "
+          "pad %s" % (u, sy(0), sy(4), i(8), i(12), sy(16), sy(20), sy(24),
+                      sy(28), sy(32), e.read(p + 36, 12).hex()))
+        h = p + 1104
+        o("U%d hist %d v %s t %s vptr %08x" % (
+            u, s32(e.u32(h)),
+            " ".join("%08x" % e.u32(h + 4 + 4 * k) for k in range(60)),
+            " ".join("%08x" % e.u32(h + 244 + 4 * k) for k in range(30)),
+            e.u32(h + 364)))
+        o("U%d bar %s ncops %d id %d pad %s state %d sub %d hud %d "
+          "spk %08x %08x lm %d joined %d hit %d backup %d" % (
+              u, sy(1472), i(1476), s8(e.u8(p + 1480)),
+              e.read(p + 1481, 3).hex(), i(1484), i(1488), i(1492),
+              w(1496), w(1500), i(1504), i(1508), i(1512), i(1516)))
+        o("U%d f %s" % (u, " ".join("%08x" % w(1520 + 4 * k)
+                                    for k in range(10))))
+        o("U%d rbsm %d %08x %08x %d %s chst %d rbc %d flags %08x vptr %08x "
+          "pad %s" % (u, i(1560), w(1564), w(1568), i(1572), sy(1576),
+                      i(1580), i(1584), w(1588), w(1592),
+                      e.read(p + 1596, 4).hex()))
+        b = w(1472)
+        if b not in (0, 0xcdcdcdcd):
+            o("%s ids %s t %s vptr %08x" % (
+                self.sym(b),
+                " ".join(str(s16(e.u16(b + 2 * k))) for k in range(10)),
+                " ".join("%08x" % e.u32(b + 20 + 4 * k) for k in range(10)),
+                e.u32(b + 60)))
+
+    def mdump(self):
+        e = self.e
+        m = self.m
+        w = lambda o: e.u32(m + o)              # noqa: E731
+        self.emit("M plist %s %s byid %s spk %s %d %d %d beacop %08x "
+                  "super %08x busy %d spawn %08x" % (
+                      self.sym(w(44)), self.sym(w(48)),
+                      " ".join(self.sym(w(52 + 4 * k)) for k in range(6)),
+                      " ".join("%08x" % w(10308 + 4 * k) for k in range(4)),
+                      s32(w(10324)), s32(w(10328)), s32(w(10332)),
+                      w(10336), w(10348), s32(w(312)), e.u32(G_SPAWN)))
+        self.emit("M timers %s st %s seed %08x" % (
+            " ".join("%08x" % w(10356 + 4 * k) for k in range(8)),
+            " ".join("%08x" % w(10388 + 4 * k) for k in range(8)),
+            e.u32(G_SEED)))
+
+    def cdump(self):
+        e = self.e
+        self.emit("C %s rb %s" % (
+            " ".join("%s/%d" % (self.sym(e.u32(c)), s32(e.u32(c + 16)))
+                     for c in self.cops),
+            " ".join("%s/%s" % (self.sym(e.u32(r)), self.sym(e.u32(r + 4)))
+                     for r in self.rbs)))
+
+    def fades(self):
+        e = self.e
+        hit = []
+        for k, b in enumerate(self.bodies):
+            if e.u8(b + 1123):
+                hit.append(str(k))
+                e.write(b + 1123, b"\0")
+        self.emit("fades" + "".join(" " + h for h in hit))
+
+    # ---- the ops
+
+    def reset(self):
+        e = self.e
+        m = self.m
+        e.write(m, bytes(MGR_SIZE))
+        for lst in (m + 44, m + 80):
+            e.put32(lst, lst)
+            e.put32(lst + 4, lst)
+        e.put32(m + 12, M32)
+        for c in self.cops:
+            e.write(c, bytes(COP_SIZE))
+        for r in self.rbs:
+            e.write(r, bytes(RB_SIZE))
+        for b in self.bodies:
+            e.write(b, bytes(BODY_SIZE))
+
+    def cop(self, s):
+        k = int(s, 0)
+        return self.cops[k] if k >= 0 else 0
+
+    def car(self, s):
+        k = int(s, 0)
+        return self.cars[k] if k >= 0 else 0
+
+    def u(self, p):
+        return self.pursuits.index(p) if p in self.pursuits else -1
+
+    def listed(self):
+        """The pursuits on the manager's list, in its order."""
+        e = self.e
+        lst = self.m + 44
+        out, n = [], e.u32(lst)
+        while n != lst and len(out) < 64:
+            out.append(n)
+            n = e.u32(n)
+        return out
+
+    def pursuit_tok(self, s):
+        """U<n>'s number, or L<k>, the k-th on the manager's list."""
+        if s.startswith("L"):
+            ps = self.listed()
+            k = int(s[1:])
+            return ps[k] if k < len(ps) else 0
+        try:
+            k = int(s, 0)
+        except ValueError:
+            return 0
+        return self.pursuits[k] if 0 <= k < len(self.pursuits) else 0
+
+    def op(self, a):
+        e = self.e
+        o = a[0]
+        v = lambda j: int(a[j], 0) & M32        # noqa: E731
+        m = self.m
+        p = self.pursuit_tok(a[1]) if len(a) > 1 else 0
+        call = lambda f, *args: e.call(f, *args, limit=2000000)  # noqa
+        if o == "reset":
+            self.reset()
+        elif o == "rp":
+            if a[1] == "Units":
+                e.write(RP + RP_UNITS, bytes([v(2) & 0xff]))
+            else:
+                e.put32(RP + RP_FIELDS[a[1]], v(2))
+        elif o == "g":
+            g = {"tracklen": TRACKLEN, "rc": self.rc, "seed": G_SEED,
+                 "copcarpos": self.world + 36}[a[1]]
+            e.put32(g, v(2))
+        elif o == "m":
+            f = a[1]
+            k = int(f[-1]) if f[-1].isdigit() else 0
+            if f in MFIELDS:
+                e.put32(m + MFIELDS[f], v(2))
+            elif f.startswith("spk"):
+                e.put32(m + 10308 + 4 * k, v(2))
+            elif f.startswith("pur"):
+                e.put32(m + 10356 + 4 * k, v(2))
+            elif f.startswith("stt"):
+                e.put32(m + 10388 + 4 * k, v(2))
+            elif f.startswith("tix"):
+                e.write(m + 88 + 28 * k + 8, bytes([v(2) & 0xff]))
+            elif f.startswith("mcop"):
+                e.put32(m + 16 + 4 * k, self.cop(a[2]))
+            else:
+                raise ValueError(f)
+        elif o == "car":
+            k = int(a[1])
+            c = self.cars[k]
+            pl = int(a[3])
+            e.write(c + CAR_INDEX, struct.pack("<h", s16(v(2))))
+            e.put32(c + CAR_PLAYER, self.players[pl] if pl >= 0 else 0)
+            e.put32(c + CAR_POS, v(4))
+            e.put32(c + CAR_POS + 4, v(5))
+            e.put32(c + CAR_VEL, v(6))
+            e.write(c + CAR_BLOWN, bytes([v(7) & 0xff]))
+            e.write(e.u32(c + CAR_RACING) + 18, struct.pack("<h", s16(v(8))))
+            e.put32(e.u32(c + CAR_RIDE), v(9))
+            cti = e.u32(c + CAR_CTI)
+            e.put32(cti + CTI_DRAG, v(10))
+            e.put32(cti + CTI_MASS, v(11))
+        elif o == "acc":
+            k = int(a[1])
+            self.cut[k], self.low[k] = v(2), v(3)
+        elif o == "cop":
+            c = self.cops[int(a[1])]
+            e.put32(c, 0)
+            e.put32(c + 4, self.car(a[3]))
+            e.put32(c + 16, 0)
+            e.put32(c + 28, VT_AICOP if a[2] == "ai" else VT_PLAYERCOP)
+        elif o == "rb":
+            r = self.rbs[int(a[1])]
+            e.put32(r, self.cop(a[2]))
+            e.put32(r + 4, self.cop(a[3]))
+            e.put32(r + 104, v(4))
+            e.put32(r + 116, v(5))
+        elif o == "strip":
+            s = self.strips[int(a[1])]
+            e.put32(s + 24, v(2))
+            lst = m + 80
+            prev = e.u32(lst + 4)
+            e.put32(s, lst)
+            e.put32(s + 4, prev)
+            e.put32(prev, s)
+            e.put32(lst + 4, s)
+        elif o == "chopper":
+            e.put32(self.choppers[int(a[1])] + 960, v(2))
+        elif o == "pset":
+            f, val = a[2], v(3)
+            k = s32(val)
+            if f in PFIELDS:
+                e.put32(p + PFIELDS[f], val)
+            elif f in ("cop0", "cop1"):
+                e.put32(p + (28 if f == "cop0" else 32),
+                        self.cops[k] if k >= 0 else 0)
+            elif f == "rb":
+                e.put32(p + 20, self.rbs[k] if k >= 0 else 0)
+            elif f == "chopper":
+                e.put32(p + 24, self.choppers[k] if k >= 0 else 0)
+            elif f == "chased":
+                e.put32(p + 16, self.cars[k] if k >= 0 else 0)
+            else:
+                raise ValueError(f)
+        elif o == "barrel":
+            b = e.u32(p + 1472)
+            e.write(b + 2 * int(a[2]), struct.pack("<h", s16(v(3))))
+        elif o == "new":
+            q = call(F_NEW, m, v(1), self.car(a[2])) & M32
+            if len(a) > 3 and self.u(q) != int(a[3]):
+                raise ValueError("new made U%d, the script says U%s"
+                                 % (self.u(q), a[3]))
+            self.emit("new %d %s -> %s" % (s32(v(1)),
+                                           self.sym(self.car(a[2])),
+                                           self.sym(q)))
+        elif o == "req":
+            r = call(F_REQ, m, self.cop(a[1]), self.car(a[2]))
+            self.emit("req %s %s -> %d" % (self.sym(self.cop(a[1])),
+                                           self.sym(self.car(a[2])), r))
+        elif o == "sw":
+            call(F_SWITCH, p, v(2))
+            self.emit("sw U%d %d" % (self.u(p), s32(v(2))))
+        elif o == "st":
+            e.fpr[12] = v(1)
+            call(F_STATETIME)
+            self.emit("st %08x -> %08x" % (v(1), e.fpr[0] & M32))
+        elif o == "trans":
+            self.emit("trans U%d -> %d" % (self.u(p), call(F_TRANS, p)))
+        elif o == "speed":
+            call(F_SPEED, p)
+            self.emit("speed U%d -> %08x" % (self.u(p), e.fpr[0] & M32))
+        elif o == "release":
+            call(F_RELEASE, p)
+            self.emit("release U%d" % self.u(p))
+        elif o == "disband":
+            call(F_DISBAND, p, v(2))
+            self.emit("disband U%d %d" % (self.u(p), v(2)))
+        elif o == "remove":
+            r = call(F_REMOVE, p, self.cop(a[2]))
+            self.emit("remove U%d %s -> %d" % (self.u(p),
+                                               self.sym(self.cop(a[2])), r))
+        elif o == "isin":
+            r = call(F_ISIN, p, self.cop(a[2]))
+            self.emit("isin U%d %s -> %d" % (self.u(p),
+                                             self.sym(self.cop(a[2])), r))
+        elif o == "rps":
+            call(F_RPS, p, v(2))
+            self.emit("rps U%d %d" % (self.u(p), v(2)))
+        elif o == "rbr":
+            self.emit("rbr U%d -> %d" % (self.u(p), call(F_RBR, p)))
+        elif o == "sel":
+            call(F_SEL, p)
+            self.emit("sel U%d" % self.u(p))
+        elif o in ("spk1", "spk2"):
+            r = call(F_SPK1 if o == "spk1" else F_SPK2, p) & M32
+            self.emit("%s U%d -> %08x" % (o, self.u(p), r))
+        elif o == "pi":
+            self.emit("pi U%d -> %d" % (self.u(p), call(F_PI, p)))
+        elif o == "super":
+            call(F_SUPER, m, p)
+            self.emit("super U%d" % self.u(p))
+        elif o == "del":
+            call(F_DEL, m, p)
+            self.emit("del U%d" % self.u(p))
+        elif o == "dtor":
+            call(F_DTOR, p, v(2))
+            self.emit("dtor U%d %d" % (self.u(p), v(2)))
+        elif o == "top":
+            call(F_TOP, self.car(a[1]))
+            self.emit("top %s -> %08x" % (self.sym(self.car(a[1])),
+                                          e.fpr[0] & M32))
+        elif o == "dss":
+            call(F_DSS, m, s32(v(1)))   # an int: sign-extended
+            self.emit("dss %d" % s32(v(1)))
+        elif o == "bfade":
+            e.fpr[12] = v(2)
+            call(F_BFADE, e.u32(p + 1472))
+            self.emit("bfade U%d %08x" % (self.u(p), v(2)))
+        elif o == "ol":
+            self.one_liner(a[1], self.pursuit_tok(a[2]),
+                           a[3] if len(a) > 3 else None)
+        elif o == "dump":
+            self.dump(self.u(p))
+        elif o == "ldump":
+            for q in self.listed():
+                self.dump(self.u(q))
+        elif o == "mdump":
+            self.mdump()
+        elif o == "cdump":
+            self.cdump()
+        elif o == "fades":
+            self.fades()
+        else:
+            raise ValueError(o)
+
+    def one_liner(self, f, p, arg):
+        e = self.e
+        r = e.call(F_ONE[f], p, self.arg_for(f, arg), limit=1000)
+        if f in ("addcop", "disallowall", "disallow", "allow"):
+            self.emit(f)
+        elif f == "dir":
+            self.emit("dir %08x" % (e.fpr[0] & M32))
+        elif f == "other":
+            self.emit("other %s" % self.sym(r))
+        else:
+            self.emit("%s %d" % (f, r))
+
+    def arg_for(self, f, arg):
+        if arg is None:
+            return 0
+        if f in ("addcop", "other", "prim"):
+            return self.cop(arg)
+        if f == "primcar":
+            return self.car(arg)
+        return int(arg, 0) & M32
+
+    def run(self, lines):
+        for line in lines:
+            self.op(line.split("|"))
+        return self.out
+
+
+def model(lines):
+    return Model().run(lines)
+
+
+# ================================================================== script
+
+INF, NAN = float("inf"), float("nan")
+
+
+def car(k, index, player, x=0.0, y=0.0, vel=0.0, blown=0, finish=0,
+        typ=0, drag=0.4, mass=1500.0):
+    return "car|%d|%d|%d|%s|%s|%s|%d|%d|%d|%s|%s" % (
+        k, index, player, F(x), F(y), F(vel), blown, finish, typ, F(drag),
+        F(mass))
+
+
+def rp(**kw):
+    return ["rp|%s|%d" % (k, v) for k, v in kw.items()]
+
+
+def m(**kw):
+    out = []
+    for k, v in kw.items():
+        out.append("m|%s|%s" % (k, F(v) if isinstance(v, float) else v))
+    return out
+
+
+def pset(u, **kw):
+    out = []
+    for k, v in kw.items():
+        out.append("pset|%d|%s|%s" % (u, k, F(v) if isinstance(v, float)
+                                      else v))
+    return out
+
+
+def speakers(*data, head=0, tail=0, full=1):
+    s = ["m|spk%d|0x%x" % (k, d) for k, d in enumerate(data)]
+    return s + ["m|head|%d" % head, "m|tail|%d" % tail, "m|full|%d" % full]
+
+
+class Script(object):
+    """The ops, with the pursuits' numbers kept as the stubs hand them
+    out."""
+
+    def __init__(self):
+        self.s = []
+        self.n = 0
+
+    def add(self, *ops):
+        for o in ops:
+            if isinstance(o, list):
+                self.s += o
+            else:
+                self.s.append(o)
+
+    def new(self, pid, car_k, dump=True):
+        u = self.n
+        self.n += 1
+        self.add("new|%d|%d|%d" % (pid, car_k, u))
+        if dump:
+            self.add("dump|%d" % u, "mdump")
+        return u
+
+    def base(self, **kw):
+        """A fresh manager: medium difficulty, speakers 0x10.. queued, the
+        supervisor timer off, one player, roadblocks on, the race running."""
+        self.add("reset", m(diff=1, beacop="0x77", super=0.0))
+        self.add(speakers(0x10, 0x11, 0x12, 0x13))
+        self.add(rp(Point2Point=0, NumLaps=3, NumPlayerCars=1,
+                    bRoadBlocks=1, BeACop=0, Units=0))
+        self.add("g|rc|0", "g|copcarpos|0", "g|tracklen|%s" % F(5000.0))
+        for k, v in kw.items():
+            self.add(m(**{k: v}))
+
+
+def cars_std():
+    # A0 the player, A1 a second player, A2-A5 AI cars.
+    return [car(0, 0, 0, 0.0, 0.0, 30.0, typ=0, drag=2.0, mass=1000.0),
+            car(1, 1, 1, 100.0, 0.0, 12.5, typ=1),
+            car(2, 2, -1, 10.0, 10.0, 44.0, typ=2),
+            car(3, 3, -1, -40.0, 5.0, 0.0, typ=3),
+            car(4, 4, -1, 25.0, -25.0, 61.0, typ=4, drag=2.0, mass=1000.0),
+            car(5, 7, -1, 0.0, 0.0, 1.0, typ=5)]
+
+
+def script():
+    S = Script()
+    S.add("g|seed|0x12345678")
+    # The tables: 0 low past 50, 1 never low, 2 a NaN, 3 at once, 4 low
+    # past 80, 5 an infinity past 30, 6 low at exactly 100 km/h, 7 -0.
+    for k, cut, low in ((0, F(50.0), F(0.0)), (1, "0xffffffff", F(0.0)),
+                        (2, "0", "0x7fc00000"), (3, "0", F(-1.0)),
+                        (4, F(80.0), F(5.0)), (5, F(30.0), F(INF)),
+                        (6, F(27.77777862548828), F(0.0)),
+                        (7, F(60.0), "0x80000000")):
+        S.add("acc|%d|%s|%s" % (k, cut, low))
+    S.add(cars_std())
+    S.add("cop|0|ai|2", "cop|1|ai|3", "cop|2|player|1", "cop|3|ai|4",
+          "cop|4|ai|5", "cop|5|player|0", "cop|6|ai|-1", "cop|7|ai|2")
+
+    # ---- the top speeds
+    for k in range(NCARS):
+        S.add("top|%d" % k)
+    for typ in range(8):
+        for drag, mass in ((0.4, 1500.0), (2.0, 1000.0), (0.0, 1.0),
+                           (1.0, 0.0), (-1.0, 1.0), (NAN, 1.0)):
+            S.add(car(5, 7, -1, typ=typ, drag=drag, mass=mass), "top|5")
+    S.add(car(5, 7, -1, 0.0, 0.0, 1.0, typ=5))
+
+    # ---- the constructor: difficulty, Be A Cop, player, AI, none, demo
+    S.base()
+    for diff in (0, 1, 2):
+        S.add(m(diff=diff))
+        S.new(diff, 0)
+        S.new(diff + 3, 2)
+    S.base()
+    S.add(rp(BeACop=1))
+    S.new(0, 0)
+    S.new(1, 3)
+    S.new(-1, -1)
+    S.add(rp(BeACop=0))
+    S.new(2, -1)
+    S.add("g|rc|8")
+    S.new(3, 2)
+    S.new(4, 0)
+    S.add(m(super=-50.0))
+    S.new(5, 1)
+    S.add(speakers(0x20, 0x21, 0x22, 0x23, head=1, tail=1, full=0))
+    S.new(0, 0)                          # the speakers empty
+    S.add("g|rc|0", "g|seed|0x00000001")
+    S.add("mdump")
+
+    # ---- the state times
+    for p2p, laps, length in ((0, 3, 5000.0), (1, 3, 5000.0),
+                              (0, 1, 13999.999), (0, 1, 14000.0),
+                              (0, 7, 6000.0), (0, 9, 6000.0),
+                              (1, 9, 42000.001), (0, 0, 1e9),
+                              (0, -3, 20000.0), (0, 2, NAN), (0, 2, INF),
+                              (0, 2, -INF), (1, 0, 30000.0)):
+        S.add(rp(Point2Point=p2p, NumLaps=laps),
+              "g|tracklen|%s" % F(length))
+        for f in (30.0, 20.0, 40.0, 300.0, 10.0, 100000.0, 0.0, -1.0, NAN):
+            S.add("st|%s" % F(f))
+    S.add(rp(Point2Point=0, NumLaps=3), "g|tracklen|%s" % F(5000.0))
+
+    # ---- the states, each way in
+    for beacop in (0, 1):
+        for chased in (0, 2):
+            S.base(super=-50.0)
+            S.add(rp(BeACop=beacop))
+            u = S.new(1, chased, dump=False)
+            for st in (0, 1, 2, 3, 4, 3, 2, 1, 0):
+                S.add("sw|%d|%d" % (u, st), "dump|%d" % u)
+            S.add(pset(u, flags=0))
+            for st in (4, 1, 0, 3):
+                S.add("sw|%d|%d" % (u, st), "dump|%d" % u)
+            # Straight to LEVEL2 with nothing allowed and no backup yet.
+            S.add(pset(u, flags=0, backup=0), "sw|%d|2" % u, "dump|%d" % u)
+            S.add("sw|%d|5" % u, "dump|%d" % u, "mdump", "cdump")
+    # The supervisor's gates.
+    for rc in (0, 4, 5, 7, 9, 8, 3):
+        for timer in (-50.0, -50.0009, -49.999, -50.002, -51.0, 7.0, NAN):
+            for rb in (0, 1):
+                for seed in (1, 2, 0x12345678, 0xdeadbeef):
+                    S.base(super=timer)
+                    S.add(rp(bRoadBlocks=rb), "g|seed|0x%x" % seed)
+                    u = S.new(0, 0, dump=False)
+                    S.add("g|rc|%d" % rc, "sw|%d|2" % u, "mdump")
+                    S.add(m(super=timer), "sw|%d|3" % u, "mdump",
+                          "g|rc|0")
+    S.base(super=-50.0)
+    u = S.new(0, 3, dump=False)
+    S.add("super|%d" % u, "mdump")
+    S.add(pset(u, primary="0x5"), "super|%d" % u, "mdump")
+    S.add(m(super=-50.0), pset(u, primary="0x5", rb=1), "rb|1|-1|-1|0|0x99",
+          "super|%d" % u, "mdump")
+    S.add(m(super=-50.0), "g|seed|7", pset(u, chased=0), "super|%d" % u,
+          "mdump")
+    for seed in range(6):
+        S.add(m(super=-50.0), "g|seed|%d" % seed, pset(u, rb=-1),
+              "super|%d" % u, "mdump")
+    # The give-up, with and without a player, on each car index.
+    for k in range(NCARS):
+        S.base()
+        S.add("m|pur%d|%s" % (k if k < 5 else 7, F(3.0)))
+        u = S.new(2, k, dump=False)
+        S.add("cop|0|ai|2", "cop|2|player|1", pset(u, ncops=2, cop0=0,
+                                                   cop1=2))
+        S.add("sw|%d|5" % u, "dump|%d" % u, "mdump", "cdump")
+
+    # ---- the transitions
+    S.base()
+    u = S.new(0, 2, dump=False)
+    for st in (0, 1, 2, 3, 4, 5, 6, -1):
+        S.add(pset(u, state=st), "trans|%d" % u, "dump|%d" % u)
+    S.add(pset(u, state=0), "trans|%d" % u, "trans|%d" % u,
+          "trans|%d" % u, "trans|%d" % u, "dump|%d" % u)
+
+    # ---- the speeds
+    S.base()
+    u0 = S.new(0, 0, dump=False)
+    u2 = S.new(1, 2, dump=False)
+    for units in (0, 1, -1, 2):
+        S.add(rp(Units=units))
+        for vel in (0.0, 30.0, -12.5, 1e30, NAN, INF):
+            S.add(car(0, 0, 0, vel=vel, typ=0, drag=2.0, mass=1000.0),
+                  car(2, 2, -1, 10.0, 10.0, vel, typ=2),
+                  "speed|%d" % u0, "speed|%d" % u2)
+    S.add(rp(Units=0), cars_std())
+
+    # ---- releasing the cops
+    for ncops, c0, c1 in ((0, -1, -1), (1, 0, -1), (1, 2, -1), (2, 0, 1),
+                          (2, 2, 0), (2, 0, 2), (2, -1, 1), (1, -1, -1),
+                          (2, 3, 3)):
+        for chopper, word in ((-1, 0), (0, 0), (1, 5)):
+            S.base()
+            S.add("cop|0|ai|2", "cop|1|ai|3", "cop|2|player|1",
+                  "cop|3|ai|4")
+            u = S.new(0, 0, dump=False)
+            S.add(m(busy=1), "chopper|1|%d" % word)
+            S.add(pset(u, ncops=ncops, cop0=c0, cop1=c1, chopper=chopper,
+                       chst=2))
+            S.add("release|%d" % u, "dump|%d" % u, "mdump", "cdump")
+    # With a roadblock too.
+    S.base()
+    S.add("cop|0|ai|2", "cop|1|ai|3", "cop|3|ai|4", "rb|0|1|3|4|0x31",
+          "strip|0|4", "strip|1|2", "strip|2|4")
+    u = S.new(0, 0, dump=False)
+    S.add(pset(u, ncops=1, cop0=0, rb=0), "release|%d" % u, "dump|%d" % u,
+          "mdump", "cdump", "fades")
+    # Its cop near the chased car: released with no ask to join.
+    S.base()
+    S.add(car(3, 3, -1, 5.0, -5.0, typ=3), "cop|1|ai|3", "rb|0|1|-1|4|0x31")
+    u = S.new(0, 0, dump=False)
+    S.add(pset(u, rb=0), "release|%d" % u, "dump|%d" % u, "mdump", "cdump",
+          cars_std())
+
+    # ---- disbanding
+    for chased in (0, 2):
+        for beacop in (0, 1):
+            for players in (1, 2):
+                for secondary, room in (("0x5", 0), ("0x44", 0),
+                                        ("0x5", 1), ("0x44", 1)):
+                    for b in (0, 1):
+                        S.base()
+                        S.add(rp(BeACop=beacop, NumPlayerCars=players))
+                        S.add("cop|0|ai|2", "cop|1|ai|3", "cop|3|ai|4",
+                              "rb|1|0|3|7|0x31", "strip|0|7", "strip|1|3",
+                              "strip|2|7", "strip|3|-1")
+                        u = S.new(3, chased, dump=False)
+                        if room:
+                            S.add(speakers(0x10, 0x11, 0x12, 0x13, head=1,
+                                           tail=3, full=0))
+                        S.add(pset(u, rb=1, secondary=secondary,
+                                   rbstate=2))
+                        S.add("barrel|%d|0|4" % u, "barrel|%d|3|5" % u,
+                              "barrel|%d|9|0" % u, "barrel|%d|5|-7" % u)
+                        S.add("disband|%d|%d" % (u, b), "dump|%d" % u,
+                              "mdump", "cdump", "fades")
+    # The distances to the chased car, and the asks that follow.
+    for x, y, ox, oy in ((0.0, 0.0, 0.0, 0.0), (29.99, 0.0, 0.0, 0.0),
+                         (30.0, 0.0, 0.0, 0.0), (21.2, 21.2, 0.0, 0.0),
+                         (21.3, 21.3, 0.0, 0.0), (NAN, 0.0, 0.0, 0.0),
+                         (-29.0, -5.0, 0.0, 0.0), (3.0, -20.0, 40.0, -7.0),
+                         (-25.0, 12.0, -60.0, 33.0)):
+        for give_up in (0, 1):
+            S.base()
+            S.add(car(0, 0, 0, ox, oy, 30.0, typ=0, drag=2.0, mass=1000.0))
+            S.add(car(3, 3, -1, ox + x, oy + y, typ=3),
+                  car(4, 4, -1, ox - x, oy + y, typ=4, drag=2.0,
+                      mass=1000.0))
+            S.add("cop|1|ai|3", "cop|3|ai|4", "rb|2|1|3|9|0x51")
+            u = S.new(0, 0, dump=False)
+            S.add(pset(u, rb=2))
+            if give_up:
+                S.add(pset(u, state=5))
+            S.add("disband|%d|1" % u, "dump|%d" % u, "mdump", "cdump")
+    S.add(cars_std())
+    # A cop only in the roadblock's second place, and an empty one.
+    S.base()
+    S.add("cop|3|ai|4", "rb|0|-1|3|1|0x61", "rb|1|-1|-1|2|0x62")
+    u = S.new(0, 0, dump=False)
+    S.add(pset(u, rb=0), "disband|%d|1" % u, "dump|%d" % u, "cdump")
+    S.add(pset(u, rb=1), "disband|%d|0" % u, "dump|%d" % u, "cdump",
+          "mdump")
+    S.add("disband|%d|1" % u, "dump|%d" % u)
+
+    # ---- removing a cop, and looking for one
+    S.base()
+    S.add("cop|0|ai|2", "cop|1|ai|3", "cop|2|player|1", "cop|3|ai|4")
+    for ncops, c0, c1, rb, who in ((2, 0, 1, -1, 0), (2, 0, 1, -1, 1),
+                                   (2, 0, 1, -1, 3), (1, 0, 1, -1, 1),
+                                   (2, 0, 1, 0, 2), (2, 0, 1, 0, 3),
+                                   (2, -1, 1, -1, 1), (0, 0, 1, 0, 0),
+                                   (2, 1, 1, -1, 1), (2, 0, 1, 0, -1),
+                                   (2, -1, 1, -1, -1), (2, 0, -1, 0, -1),
+                                   (3, 0, 1, -1, 1), (-1, 0, 1, 0, 2)):
+        u = S.new(0, 2, dump=False)
+        S.add("rb|0|2|3|1|0x7", pset(u, ncops=ncops, cop0=c0, cop1=c1,
+                                      rb=rb))
+        S.add("isin|%d|%d" % (u, who), "remove|%d|%d" % (u, who),
+              "isin|%d|%d" % (u, who), "dump|%d" % u, "cdump")
+    # A cop both chasing and in the roadblock, and one in both its places.
+    for ncops, c0, c1, rbcops, who in ((2, 0, 2, "2|3", 2),
+                                       (1, 3, -1, "3|2", 3),
+                                       (0, -1, -1, "3|3", 3),
+                                       (1, 0, -1, "1|1", 1)):
+        u = S.new(0, 2, dump=False)
+        S.add("rb|0|%s|1|0x7" % rbcops, pset(u, ncops=ncops, cop0=c0,
+                                             cop1=c1, rb=0))
+        S.add("remove|%d|%d" % (u, who), "isin|%d|%d" % (u, who),
+              "dump|%d" % u, "cdump")
+
+    # ---- the primary speaker
+    for chased in (0, 2):
+        for blown in (0, 1, 0x80):
+            for chst in (0, 1):
+                for timer in (0.0, 11.0, 11.0001, 26.0, 26.001):
+                    S.base(diff=1)
+                    S.add(car(0, 0, 0, blown=blown, typ=0, drag=2.0,
+                              mass=1000.0),
+                          car(2, 2, -1, 10.0, 10.0, 44.0, blown=blown,
+                              typ=2))
+                    u = S.new(0, chased, dump=False)
+                    S.add(pset(u, chst=chst, rbtimer=timer), "rbr|%d" % u)
+    S.add(cars_std())
+    for secondary, ncops in (("0x5", 0), ("0x5", 1), ("0x5", 2),
+                             ("0x44", 0), ("0x44", 3)):
+        for b in (0, 1):
+            for seed in (1, 2, 3, 5, 0xcafe):
+                S.base()
+                S.add("g|seed|0x%x" % seed)
+                u = S.new(0, 0, dump=False)
+                S.add(pset(u, secondary=secondary, ncops=ncops,
+                           rbtimer=0.0))
+                S.add("rps|%d|%d" % (u, b), "dump|%d" % u, "mdump")
+    S.base()
+    u = S.new(0, 2, dump=False)
+    S.add("rps|%d|1" % u, "dump|%d" % u, "mdump")
+    S.add(car(0, 0, 0, blown=1, typ=0, drag=2.0, mass=1000.0))
+    u = S.new(1, 0, dump=False)
+    S.add("rps|%d|1" % u, "dump|%d" % u, "mdump", cars_std())
+
+    # ---- the primary cop
+    S.base()
+    S.add("cop|0|ai|2", "cop|1|ai|3", "cop|3|ai|4", "cop|4|ai|5")
+    for c0, c1, cx, cy in ((0, 1, 0.0, 0.0), (1, 0, 0.0, 0.0),
+                           (0, 3, 0.0, 0.0), (3, 0, 0.0, 0.0),
+                           (0, -1, 0.0, 0.0), (-1, 1, 0.0, 0.0),
+                           (3, 4, 0.0, 0.0), (4, 3, 0.0, 0.0),
+                           (0, 3, -14.0, 7.5), (0, 3, -14.0, 7.6),
+                           (1, 4, 1000.0, 0.0), (1, 4, NAN, 0.0)):
+        S.add(car(0, 0, 0, cx, cy, typ=0, drag=2.0, mass=1000.0))
+        u = S.new(0, 0, dump=False)
+        S.add(pset(u, cop0=c0, cop1=c1), "sel|%d" % u, "dump|%d" % u)
+    # The second's distance by its own y; and 40 against 10, exactly 30.
+    S.add(car(0, 0, 0, -40.0, 0.0, typ=0, drag=2.0, mass=1000.0))
+    u = S.new(0, 0, dump=False)
+    S.add(pset(u, cop0=3, cop1=1), "sel|%d" % u, "dump|%d" % u)
+    S.add(car(0, 0, 0, 0.0, 0.0, typ=0, drag=2.0, mass=1000.0),
+          car(2, 2, -1, 0.0, 40.0, 44.0, typ=2),
+          car(4, 4, -1, 0.0, 10.0, 61.0, typ=4, drag=2.0, mass=1000.0))
+    for c0, c1 in ((0, 3), (3, 0)):
+        u = S.new(0, 0, dump=False)
+        S.add(pset(u, cop0=c0, cop1=c1), "sel|%d" % u, "dump|%d" % u)
+    S.add(cars_std())
+
+    # ---- the speakers, and who is involved
+    S.base()
+    u = S.new(0, 2, dump=False)
+    S.add(pset(u, primary="0x5", secondary="0x5"), "spk1|%d" % u,
+          "spk2|%d" % u, "rb|3|-1|-1|0|0x93", pset(u, rb=3), "spk1|%d" % u)
+    S.add(pset(u, primary="0x4"), "spk1|%d" % u, pset(u, primary="0x6"),
+          "spk1|%d" % u, pset(u, secondary="0x0"), "spk2|%d" % u)
+    S.add(pset(u, primary="0x5", rb=-1), speakers(1, 2, 3, 4, head=2,
+                                                   tail=2, full=0),
+          "spk1|%d" % u, "spk2|%d" % u, speakers(9, 8, 7, 6, head=3),
+          "spk1|%d" % u, "spk2|%d" % u)
+    for beacop in (0, 1):
+        S.add(rp(BeACop=beacop), "pi|%d" % u, pset(u, chased=0),
+              "pi|%d" % u, pset(u, chased=2))
+    S.add(rp(BeACop=0))
+
+    # ---- the one-liners
+    S.base()
+    u = S.new(4, 0, dump=False)
+    S.add("cop|0|ai|2", "cop|1|ai|3")
+    S.add("ol|numcops|%d" % u, "ol|addcop|%d|0" % u, "ol|numcops|%d" % u,
+          "ol|addcop|%d|1" % u, "ol|numcops|%d" % u, "ol|id|%d" % u,
+          "ol|rbstate|%d" % u, "ol|dir|%d" % u, "ol|chst|%d" % u,
+          "ol|over|%d" % u, "ol|called|%d" % u, "ol|landmark|%d" % u,
+          "ol|hud|%d" % u, "dump|%d" % u)
+    for c in (0, 1, 2, -1):
+        S.add("ol|other|%d|%d" % (u, c), "ol|prim|%d|%d" % (u, c))
+    for k in (2, 3, 0, -1):
+        S.add("ol|primcar|%d|%d" % (u, k))
+    S.add(pset(u, cop0=-1), "ol|primcar|%d|-1" % u, "ol|primcar|%d|2" % u,
+          "ol|other|%d|-1" % u, pset(u, cop0=0))
+    for ncops, maxc, backup in ((0, 0, 0), (1, 2, 1), (1, 2, 0), (2, 2, 1),
+                                (1, 1, 1), (3, 2, 1), (-1, 0, 0)):
+        S.add(pset(u, ncops=ncops, maxchase=maxc, backup=backup),
+              "ol|needed|%d" % u, "ol|called|%d" % u)
+    for st in (0, 4, 5, 6):
+        S.add(pset(u, state=st), "ol|over|%d" % u)
+    S.add(pset(u, flags="0x20f"))
+    for bit in ("0x1", "0x4", "0x10", "0x200", "0xffffffff", "0"):
+        S.add("ol|allowed|%d|%s" % (u, bit))
+    S.add("ol|disallow|%d|0x5" % u, "ol|allowed|%d|0xffffffff" % u,
+          "ol|allow|%d|0x80000000" % u, "ol|allowed|%d|0xffffffff" % u,
+          "ol|disallow|%d|0x30" % u, "ol|allowed|%d|0xffffffff" % u,
+          "ol|allow|%d|0x80000002" % u, "ol|allowed|%d|0xffffffff" % u,
+          "ol|disallowall|%d" % u, "ol|allowed|%d|0xffffffff" % u,
+          pset(u, landmark=-7), "ol|landmark|%d" % u, "dump|%d" % u)
+    for rbstate, chst in ((1, 2), (2, 1), (-1, 3)):
+        S.add(pset(u, rbstate=rbstate, chst=chst), "ol|rbstate|%d" % u,
+              "ol|chst|%d" % u)
+
+    # ---- deleting, and the destructor
+    for chased, secondary, barrels, room in (
+            (0, "0x5", (), 0), (0, "0x44", ((0, 0), (3, 7)), 0),
+            (2, "0x44", ((0, 3), (3, 4), (6, 5)), 0),
+            (1, "0x5", ((0, 1),), 0), (0, "0x5", ((9, 6), (4, -2)), 1),
+            (0, "0x44", (), 1), (2, "0x5", ((9, 1),), 1),
+            (2, "0x44", (), 1)):
+        S.base()
+        S.add("cop|0|ai|2", "cop|2|player|1", "cop|3|ai|4",
+              "rb|0|3|-1|2|0x71", "strip|0|2")
+        if room:
+            S.add(speakers(0x10, 0x11, 0x12, 0x13, head=2, tail=3, full=0))
+        u = S.new(2, chased, dump=False)
+        v = S.new(3, 4, dump=False)
+        S.add(pset(u, ncops=2, cop0=0, cop1=2, rb=0, secondary=secondary))
+        for slot, bid in barrels:
+            S.add("barrel|%d|%d|%d" % (u, slot, bid))
+        S.add("del|%d" % u, "dump|%d" % u, "dump|%d" % v, "mdump",
+              "cdump", "fades")
+        S.add("del|%d" % v, "dump|%d" % v, "mdump")
+    # A player's chase with no roadblock and no secondary speaker.
+    S.base()
+    S.add(speakers(0x10, 0x11, 0x12, 0x13, head=2, tail=3, full=0))
+    u = S.new(2, 0, dump=False)
+    S.add(pset(u, primary="0x33"), "del|%d" % u, "dump|%d" % u, "mdump")
+    S.base()
+    u = S.new(1, 0, dump=False)
+    S.add("dtor|%d|0" % u, "dump|%d" % u, "mdump")
+    u = S.new(5, 2, dump=False)
+    S.add("barrel|%d|1|9" % u, "dtor|%d|2" % u, "dump|%d" % u, "mdump")
+    u = S.new(-1, 3, dump=False)
+    S.add("mdump", "del|%d" % u, "dump|%d" % u, "mdump")
+    S.add("del|-1", "mdump")
+
+    # ---- the spike strips and the barrels' fade
+    S.base()
+    for k, rid in enumerate((3, -1, 3, 0, 7, 3)):
+        S.add("strip|%d|%d" % (k, rid))
+    for i in (3, -1, 0, 5, 7, 3):
+        S.add("dss|%d" % i)
+    u = S.new(0, 0, dump=False)
+    for slot, bid in ((0, 0), (1, 1), (2, 2), (4, 15), (6, 16), (7, -2),
+                      (9, 13)):
+        S.add("barrel|%d|%d|%d" % (u, slot, bid))
+    for t in (2.0, 0.0, -1.0, NAN, 1e30):
+        S.add("bfade|%d|%s" % (u, F(t)), "dump|%d" % u, "fades")
+    S.add("mdump")
+    # ---- asking for a chase
+    def asks(beacop, players, copcarpos=0):
+        S.base()
+        S.add(rp(BeACop=beacop, NumPlayerCars=players),
+              "g|copcarpos|%d" % copcarpos, "m|tix0|3", "m|tix1|-2",
+              "m|tix2|5", "m|tix7|1")
+        S.add("cop|0|ai|2", "cop|1|ai|3", "cop|2|player|1", "cop|3|ai|4",
+              "cop|4|ai|5", "cop|5|player|0", "cop|6|ai|-1", "cop|7|ai|2")
+
+    def reqs(*pairs):
+        for c, k in pairs:
+            S.add("req|%d|%d" % (c, k), "mdump")
+
+    sweep = ((0, 0), (1, 0), (3, 0), (1, 2), (3, 2), (4, 3), (0, 4),
+             (4, 4), (7, 5), (6, 5), (0, 1), (1, 1), (3, 1), (2, 1))
+    for beacop, players, ccp in ((0, 1, 0), (0, 1, 3), (0, 1, 2),
+                                 (0, 1, 4), (0, 2, 0), (0, 3, 5),
+                                 (0, 0, 0)):
+        asks(beacop, players, ccp)
+        reqs(*sweep)
+        S.add("ldump", "cdump")
+    # A chase given up on, and the second cop on an AI car.
+    asks(0, 1)
+    reqs((0, 2))
+    S.add("pset|L0|state|5")
+    reqs((1, 2), (1, 3), (3, 3), (4, 4), (4, 5))
+    S.add("ldump", "cdump")
+    # The player's second cop: only once the first called for backup, and
+    # not with the World's CopCarPos at 3 or more.
+    asks(0, 1)
+    reqs((0, 0), (1, 0))
+    S.add("pset|L0|backup|1")
+    reqs((1, 0), (3, 0))
+    S.add("pset|L0|ncops|1", "g|copcarpos|3")
+    reqs((3, 0))
+    S.add("pset|L0|ncops|0")
+    reqs((3, 0))
+    S.add("ldump", "cdump")
+    # A finished car, and each finish reason.
+    for reason in (1, -1, 0x100, 0):
+        asks(0, 1)
+        S.add(car(3, 3, -1, -40.0, 5.0, finish=reason, typ=3))
+        reqs((1, 3))
+        S.add("ldump")
+    S.add(cars_std())
+    # Be A Cop: only the player's cop, a new chase each time.
+    for pcidx, slot_cop in ((2, 5), (2, 0), (-1, 5), (6, 2)):
+        asks(1, 1)
+        S.add("m|pcidx|%d" % pcidx, "m|mcop2|%d" % slot_cop,
+              "m|mcop6|%d" % slot_cop)
+        reqs((5, 3), (5, 3), (0, 3), (2, 0), (5, 1))
+        S.add("ldump", "cdump")
+    # Split screen.
+    asks(0, 2)
+    reqs((0, 0), (1, 0), (3, 2), (4, 3), (4, 2), (7, 1), (1, 1))
+    S.add("pset|L1|ncops|0")
+    reqs((4, 2), (4, 3))
+    S.add("ldump", "cdump")
+
+    return S.s
+
+
+# ================================================================== build
+
+def build_harness(tmp, name="pursuit_test"):
+    return hostbuild.build(tmp, SOURCES, name=name)
+
+
+def run_harness(exe, sc_path, out_path):
+    try:
+        with open(out_path, "w") as fh:
+            r = subprocess.run([str(exe), str(sc_path)], stdout=fh,
+                               stderr=subprocess.PIPE, text=True,
+                               timeout=HARNESS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        print("harness hung, killed after %d s" % HARNESS_TIMEOUT)
+        return pcc.HARNESS_HUNG
+    if r.returncode != 0:
+        print("harness exited %d" % r.returncode)
+        if r.stderr:
+            print(r.stderr[:2000])
+    return r.returncode
+
+
+diff = pcc.diff
+
+
+def write_script(d, lines):
+    sc = Path(d) / "script.txt"
+    sc.write_text(NL.join(lines) + NL)
+    return sc
+
+
+# ============================================================= mutations
+
+P = PURSUIT
+B = BARRICADE
+C = COPMGR
+MUTATIONS = [
+    # ---- the small records
+    ("hist_count", P,
+     "    h->nCount = 0;\n    return h;",
+     "    h->nCount = 1;\n    return h;"),
+    ("hist_time", P,
+     "        h->fTime[i] = 0.0f;\n",
+     "        h->fTime[i] = 1.0f;\n"),
+    ("hist_29", P,
+     "    for (i = 0; i < 30; i++) {\n        h->v2Velocity",
+     "    for (i = 0; i < 29; i++) {\n        h->v2Velocity"),
+    ("hist_dtor_free", P,
+     "    h->vptr = TPURSUITHISTORY_VTABLE;\n    if (flags & 1)",
+     "    h->vptr = TPURSUITHISTORY_VTABLE;\n    if (flags & 2)"),
+    ("rbsm_pursuit", P,
+     "    s->pPursuit = p;\n",
+     "    s->pPursuit = NULL;\n"),
+    ("rbsm_state", P,
+     "    s->State = ERBS_NONE;\n    s->SpeechFlags = 0;",
+     "    s->State = (eRoadBlockState)1;\n    s->SpeechFlags = 0;"),
+    ("rbsm_flags", P,
+     "    s->SpeechFlags = 0;\n",
+     "    s->SpeechFlags = 1;\n"),
+    ("rbsm_count", P,
+     "    s->nRoadBlockCount = 0;\n    return s;",
+     "    s->nRoadBlockCount = 1;\n    return s;"),
+    ("rbsm_dtor_free", P,
+     "{\n    if (flags & 1)\n        bFree(s);",
+     "{\n    if (flags & 2)\n        bFree(s);"),
+    ("rbsm_disband_state", P,
+     "{\n    s->State = ERBS_NONE;\n}",
+     "{\n    s->State = (eRoadBlockState)1;\n}"),
+
+    # ---- GetTopSpeed
+    ("top_start", P,
+     "    float              v = 27.77777862548828f;",
+     "    float              v = 27.0f;"),
+    ("top_limit", P,
+     "    while (v < 111.11111450195312f) {",
+     "    while (v < 110.0f) {"),
+    ("top_drag_once", P,
+     "        if (a < v * v * ti->Aero.Drag / ti->Body.Mass)",
+     "        if (a < v * ti->Aero.Drag / ti->Body.Mass)"),
+    ("top_mass_times", P,
+     "        if (a < v * v * ti->Aero.Drag / ti->Body.Mass)",
+     "        if (a < v * v * ti->Aero.Drag * ti->Body.Mass)"),
+    ("top_le", P,
+     "        if (a < v * v * ti->Aero.Drag / ti->Body.Mass)",
+     "        if (a <= v * v * ti->Aero.Drag / ti->Body.Mass)"),
+    ("top_step", P,
+     "        v = v + 1.388888955116272f;",
+     "        v = v + 1.5f;"),
+    ("top_no_less_step", P,
+     "    return v - 1.388888955116272f;",
+     "    return v;"),
+
+    # ---- the constructor
+    ("reserve_empty_0", P,
+     "        return 0x41a00000u;",
+     "        return 0;"),
+    ("reserve_full_ignored", P,
+     "    if (d->Full == 0 && d->Tail == d->Head)",
+     "    if (d->Tail == d->Head)"),
+    ("ctor_id", P,
+     "    p->nPursuitId = id;",
+     "    p->nPursuitId = (int8_t)(id + 1);"),
+    ("ctor_ncops", P,
+     "    p->nNumCops = 0;\n    p->nHUDPursuitLevel = 0;",
+     "    p->nNumCops = 1;\n    p->nHUDPursuitLevel = 0;"),
+    ("ctor_rbcount", P,
+     "    p->nRoadblockCount = 0;",
+     "    p->nRoadblockCount = 1;"),
+    ("ctor_catch", P,
+     "    p->fCatchCarTimer = 2.0f;",
+     "    p->fCatchCarTimer = 2.5f;"),
+    ("ctor_disband", P,
+     "    p->fRoadBlockDisbandTimer = 3.5f;",
+     "    p->fRoadBlockDisbandTimer = 3.0f;"),
+    ("ctor_spawn_easy", P,
+     "fRoadBlockSpawnTimes[pCopManager->nDifficultyLevel];",
+     "fRoadBlockSpawnTimes[0];"),
+    ("ctor_spawn_table", P,
+     "{ 20.0f, 15.0f, 10.0f }",
+     "{ 20.0f, 15.0f, 12.0f }"),
+    ("ctor_spawntimer", P,
+     "    p->fRoadBlockSpawnTimer = 0.0f;\n    p->fChopperAttackTimer",
+     "    p->fRoadBlockSpawnTimer = 1.0f;\n    p->fChopperAttackTimer"),
+    ("ctor_chopper_attack", P,
+     "    p->fChopperAttackTimer = 10.0f;",
+     "    p->fChopperAttackTimer = 12.0f;"),
+    ("ctor_chopper_next", P,
+     "    p->fChopperNextAttackTime = 12.0f;",
+     "    p->fChopperNextAttackTime = 10.0f;"),
+    ("ctor_secondary", P,
+     "    p->SecondaryCopSpeaker = COP_SPEAKER_NONE;\n    p->Cops[1] = NULL;",
+     "    p->SecondaryCopSpeaker = 1;\n    p->Cops[1] = NULL;"),
+    ("ctor_cops1", P,
+     "    p->Cops[1] = NULL;\n    p->Cops[0] = NULL;",
+     "    p->Cops[0] = NULL;"),
+    ("ctor_cops0", P,
+     "    p->Cops[1] = NULL;\n    p->Cops[0] = NULL;",
+     "    p->Cops[1] = NULL;"),
+    ("ctor_landmark", P,
+     "    p->CurrentLandmark = 0;",
+     "    p->CurrentLandmark = 1;"),
+    ("ctor_joined", P,
+     "    p->bAlreadyJoined = 0;",
+     "    p->bAlreadyJoined = 1;"),
+    ("ctor_hit", P,
+     "    p->bAlreadyBeenHit = 0;",
+     "    p->bAlreadyBeenHit = 1;"),
+    ("ctor_backup", P,
+     "    p->bAlreadyCalledForBackup = 0;\n    p->pRoadBlock",
+     "    p->bAlreadyCalledForBackup = 1;\n    p->pRoadBlock"),
+    ("ctor_rb", P,
+     "    p->pRoadBlock = NULL;\n    p->BehaviourFlags = 0;",
+     "    p->BehaviourFlags = 0;"),
+    ("ctor_flags", P,
+     "    p->BehaviourFlags = 0;\n    p->pChopper",
+     "    p->BehaviourFlags = 0x100;\n    p->pChopper"),
+    ("ctor_chopper", P,
+     "    p->pChopper = NULL;\n    p->ChopperState = ECS_NO_CHOPPER;\n    // With",
+     "    p->ChopperState = ECS_NO_CHOPPER;\n    // With"),
+    ("ctor_chst", P,
+     "    p->ChopperState = ECS_NO_CHOPPER;\n    // With",
+     "    p->ChopperState = (eChopperState)1;\n    // With"),
+    ("ctor_no_topspeed", P,
+     "        p->fChasedCarTopSpeed = get_top_speed(p->pChasedCar);",
+     "        p->fChasedCarTopSpeed = 0.0f;"),
+    ("ctor_beacop_ignored", P,
+     "        if (TheRaceParameters.BeACop != 0)\n"
+     "            p->PrimaryCopSpeaker = pCopManager->BeACopId;",
+     "        if (0)\n"
+     "            p->PrimaryCopSpeaker = pCopManager->BeACopId;"),
+    ("ctor_ai_reserves", P,
+     "        else if (p->pChasedCar->pPlayer != NULL)\n"
+     "            p->PrimaryCopSpeaker = reserve_speaker_in_ctor();",
+     "        else\n"
+     "            p->PrimaryCopSpeaker = reserve_speaker_in_ctor();"),
+    ("ctor_demo_level2", P,
+     "        tpursuit_switch_state(p, EPS_LEVEL3);\n    else",
+     "        tpursuit_switch_state(p, EPS_LEVEL2);\n    else"),
+    ("ctor_level1", P,
+     "    else\n        tpursuit_switch_state(p, EPS_LEVEL0);",
+     "    else\n        tpursuit_switch_state(p, EPS_LEVEL1);"),
+    ("ctor_chasedir_timer", P,
+     "    p->fChaseDirectionTimer = 0.0f;",
+     "    p->fChaseDirectionTimer = 1.0f;"),
+    ("ctor_chasedir", P,
+     "    p->fChaseDirection = 1.0f;",
+     "    p->fChaseDirection = -1.0f;"),
+    ("ctor_new1556", P,
+     "    p->New1556 = 10.0f;",
+     "    p->New1556 = 12.0f;"),
+    ("ctor_bmalloc_align", P,
+     "                                    0, 16));",
+     "                                    0, 0));"),
+
+    # ---- the destructor
+    ("dtor_no_release", P,
+     "    p->vptr = TPURSUIT_VTABLE;\n    tpursuit_release_all_cops(p);",
+     "    p->vptr = TPURSUIT_VTABLE;"),
+    ("dtor_ai_releases", P,
+     "    if (p->pChasedCar->pPlayer != NULL) {\n"
+     "        copmanager_release_cop_speaker(pCopManager, p->PrimaryCopSpeaker);",
+     "    if (1) {\n"
+     "        copmanager_release_cop_speaker(pCopManager, p->PrimaryCopSpeaker);"),
+    ("dtor_secondary_always", P,
+     "        if (p->SecondaryCopSpeaker != COP_SPEAKER_NONE)\n"
+     "            copmanager_release_cop_speaker(pCopManager,\n",
+     "        if (1)\n"
+     "            copmanager_release_cop_speaker(pCopManager,\n"),
+    ("dtor_id", P,
+     "    p->nPursuitId = -2;",
+     "    p->nPursuitId = -1;"),
+    ("dtor_bar_keep", P,
+     "        ((DtorFn)e->fn)(vt_this(b, e), 3);",
+     "        ((DtorFn)e->fn)(vt_this(b, e), 2);"),
+    ("dtor_rbsm_flags", P,
+     "    trbsm_destruct(&p->RoadBlockStateMachine, 2);",
+     "    trbsm_destruct(&p->RoadBlockStateMachine, 3);"),
+    ("dtor_hist_flags", P,
+     "    tpursuithistory_destruct(&p->History, 2);",
+     "    tpursuithistory_destruct(&p->History, 3);"),
+    ("dtor_dt_order", P,
+     "    drivetarget_destroy(&p->NearDriveTarget);\n"
+     "    drivetarget_destroy(&p->FarDriveTarget);",
+     "    drivetarget_destroy(&p->FarDriveTarget);\n"
+     "    drivetarget_destroy(&p->NearDriveTarget);"),
+    ("dtor_no_free", P,
+     "    if (flags & 1)\n        bSlotFree(PursuitSlotPool, p);",
+     "    if (flags & 2)\n        bSlotFree(PursuitSlotPool, p);"),
+
+    # ---- the states
+    ("state_p2p", P,
+     "    if (TheRaceParameters.Point2Point == 0)",
+     "    if (TheRaceParameters.Point2Point != 0)"),
+    ("state_laps", P,
+     "    float laps = 1.0f;",
+     "    float laps = 2.0f;"),
+    ("state_hi", P,
+     "    if (42000.0f < len)\n        len = 42000.0f;",
+     "    if (40000.0f < len)\n        len = 40000.0f;"),
+    ("state_lo", P,
+     "    if (len < 14000.0f)\n        len = 14000.0f;",
+     "    if (len < 15000.0f)\n        len = 15000.0f;"),
+    ("state_quarter", P,
+     "len * 1.7857142665889114e-05f + 0.25f",
+     "len * 1.7857142665889114e-05f + 0.5f"),
+    ("state_scale", P,
+     "len * 1.7857142665889114e-05f + 0.25f",
+     "len * 1.8e-05f + 0.25f"),
+    ("table_level0", P,
+     "    30.0f, 20.0f, 40.0f, 300.0f, 10.0f, 100000.0f",
+     "    20.0f, 20.0f, 40.0f, 300.0f, 10.0f, 100000.0f"),
+    ("table_level3", P,
+     "    30.0f, 20.0f, 40.0f, 300.0f, 10.0f, 100000.0f",
+     "    30.0f, 20.0f, 40.0f, 200.0f, 10.0f, 100000.0f"),
+    ("table_giveup", P,
+     "    30.0f, 20.0f, 40.0f, 300.0f, 10.0f, 100000.0f",
+     "    30.0f, 20.0f, 40.0f, 300.0f, 10.0f, 10000.0f"),
+    ("sw_l0_hud", P,
+     "        p->nHUDPursuitLevel = 1;\n        p->PursuitSubState = LSS_NONE;",
+     "        p->nHUDPursuitLevel = 2;\n        p->PursuitSubState = LSS_NONE;"),
+    ("sw_l0_sub", P,
+     "        p->PursuitSubState = LSS_NONE;\n",
+     "        p->PursuitSubState = LSS_PURSUIT_FOLLOW;\n"),
+    ("sw_l0_flags", P,
+     "        p->BehaviourFlags |= 0x2u;",
+     "        p->BehaviourFlags |= 0x3u;"),
+    ("sw_l1_flags", P,
+     "        p->BehaviourFlags |= 0x3u;",
+     "        p->BehaviourFlags |= 0x1u;"),
+    ("sw_l1_sub", P,
+     "        p->PursuitSubState = LSS_PURSUIT_FOLLOW;",
+     "        p->PursuitSubState = LSS_FOLLOW_OFFSET;"),
+    ("sw_l1_backup", P,
+     "        p->PursuitSubState = LSS_PURSUIT_FOLLOW;\n"
+     "        p->bAlreadyCalledForBackup = 1;\n",
+     "        p->PursuitSubState = LSS_PURSUIT_FOLLOW;\n"),
+    ("sw_l1_hud", P,
+     "        p->nHUDPursuitLevel = 2;",
+     "        p->nHUDPursuitLevel = 3;"),
+    ("sw_l2_flags", P,
+     "        p->BehaviourFlags |= 0x7u;",
+     "        p->BehaviourFlags |= 0x6u;"),
+    ("sw_l2_backup", P,
+     "        p->BehaviourFlags |= 0x7u;\n        p->bAlreadyCalledForBackup = 1;",
+     "        p->BehaviourFlags |= 0x7u;"),
+    ("sw_l2_hud", P,
+     "        p->nHUDPursuitLevel = 3;",
+     "        p->nHUDPursuitLevel = 2;"),
+    ("sw_l2_sub", P,
+     "        p->PursuitSubState = LSS_FOLLOW_OFFSET;\n",
+     "        p->PursuitSubState = LSS_FOLLOW_BACKWARDS;\n"),
+    ("sw_l2_nosuper", P,
+     "        p->PursuitSubState = LSS_FOLLOW_OFFSET;\n"
+     "        copmanager_possible_call_supervisor(pCopManager, p);\n",
+     "        p->PursuitSubState = LSS_FOLLOW_OFFSET;\n"),
+    ("sw_l3_flags", P,
+     "        p->BehaviourFlags |= 0x20fu;",
+     "        p->BehaviourFlags |= 0x00fu;"),
+    ("sw_l3_backup", P,
+     "        p->BehaviourFlags |= 0x20fu;\n        p->bAlreadyCalledForBackup = 1;",
+     "        p->BehaviourFlags |= 0x20fu;"),
+    ("sw_l3_hud", P,
+     "        p->nHUDPursuitLevel = 4;",
+     "        p->nHUDPursuitLevel = 3;"),
+    ("sw_l3_sub", P,
+     "        p->PursuitSubState = LSS_FOLLOW_BACKWARDS;\n",
+     "        p->PursuitSubState = LSS_FOLLOW_OFFSET;\n"),
+    ("sw_l3_nosuper", P,
+     "        p->PursuitSubState = LSS_FOLLOW_BACKWARDS;\n"
+     "        copmanager_possible_call_supervisor(pCopManager, p);\n",
+     "        p->PursuitSubState = LSS_FOLLOW_BACKWARDS;\n"),
+    ("sw_caught_hud", P,
+     "    case EPS_SPEEDER_CAUGHT:\n        p->nHUDPursuitLevel = 0;",
+     "    case EPS_SPEEDER_CAUGHT:\n        p->nHUDPursuitLevel = 1;"),
+    ("sw_giveup_hud", P,
+     "    case EPS_END_PURSUIT_GIVE_UP:\n        p->nHUDPursuitLevel = 0;",
+     "    case EPS_END_PURSUIT_GIVE_UP:\n        p->nHUDPursuitLevel = 1;"),
+    ("sw_giveup_no_speech", P,
+     "            if (gPursuitBackOffSpeechFn != NULL)\n",
+     "            if (0)\n"),
+    ("sw_giveup_no_score", P,
+     "            player_start_score(pl, SCORING_BEAT_THE_COPS);\n",
+     ""),
+    ("sw_giveup_score", P,
+     "            player_start_score(pl, SCORING_BEAT_THE_COPS);\n",
+     "            player_start_score(pl, SCORING_BEAT_THE_COPS + 1);\n"),
+    ("sw_giveup_pursuable", P,
+     "        pCopManager->fPursuableTimer[car->CarIndex] = 999999.0f;",
+     "        pCopManager->fPursuableTimer[car->CarIndex] = 99999.0f;"),
+    ("sw_giveup_trap", P,
+     "        pCopManager->fSpeedTrapSpawnTimer[car->CarIndex] = 999999.0f;\n"
+     "        tpursuit_release_all_cops(p);",
+     "        pCopManager->fSpeedTrapSpawnTimer[car->CarIndex] = 99999.0f;\n"
+     "        tpursuit_release_all_cops(p);"),
+    ("sw_giveup_norelease", P,
+     "        pCopManager->fSpeedTrapSpawnTimer[car->CarIndex] = 999999.0f;\n"
+     "        tpursuit_release_all_cops(p);\n",
+     "        pCopManager->fSpeedTrapSpawnTimer[car->CarIndex] = 999999.0f;\n"),
+
+    # ---- DoStateTransition
+    ("trans_l0", P,
+     "        to = EPS_LEVEL1;",
+     "        to = EPS_LEVEL2;"),
+    ("trans_l1", P,
+     "        to = EPS_LEVEL2;\n        break;",
+     "        to = EPS_LEVEL3;\n        break;"),
+    ("trans_resets_same", P,
+     "    if (to != s && !over)",
+     "    if (!over)"),
+    ("trans_caught", P,
+     "        to = EPS_SPEEDER_CAUGHT;",
+     "        to = EPS_LEVEL3;"),
+    ("trans_over", P,
+     "        over = 1;",
+     "        over = 0;"),
+
+    # ---- GetSpeedMPHOrKPH
+    ("speed_kph", P,
+     "        return v * 3.5999999046325684f;",
+     "        return v * 3.5f;"),
+    ("speed_mph", P,
+     "    return v * 2.236999988555908f;",
+     "    return v * 2.2f;"),
+    ("speed_ai_units", P,
+     "    if (car->pPlayer != NULL\n",
+     "    if (1\n"),
+    ("speed_units", P,
+     "        && TheRaceParameters.GlobalDisplaySettings.Units != 0)",
+     "        && TheRaceParameters.GlobalDisplaySettings.Units == 0)"),
+
+    # ---- ReleaseAllCops and the chopper
+    ("chopper_960", P,
+     "    if (gChopperNew960Fn(p->pChopper) != 0)",
+     "    if (gChopperNew960Fn(p->pChopper) == 0)"),
+    ("chopper_busy", P,
+     "    pCopManager->bChopperBusy = 0;",
+     "    pCopManager->bChopperBusy = 1;"),
+    ("chopper_follow", P,
+     "    gChopperFollowThisCarFn(p->pChopper, NULL);",
+     "    gChopperFollowThisCarFn(p->pChopper, p->pChasedCar);"),
+    ("chopper_state", P,
+     "    p->ChopperState = ECS_NO_CHOPPER;\n    p->pChopper = NULL;\n}",
+     "    p->pChopper = NULL;\n}"),
+    ("chopper_ptr", P,
+     "    p->ChopperState = ECS_NO_CHOPPER;\n    p->pChopper = NULL;\n}",
+     "    p->ChopperState = ECS_NO_CHOPPER;\n}"),
+    ("release_both", P,
+     "    for (i = 0; i < p->nNumCops; i++) {\n        tCop          *c",
+     "    for (i = p->nNumCops - 1; i >= 0; i--) {\n        tCop          *c"),
+    ("release_ai_test", P,
+     "        if (((IsAIControlledFn)e->fn)(vt_this(c, e)) != 0)",
+     "        if (((IsAIControlledFn)e->fn)(vt_this(c, e)) == 0)"),
+    ("release_no_remove", P,
+     "        tpursuit_remove_cop_from_pursuit(p, c);\n        e = vt_slot",
+     "        e = vt_slot"),
+    ("release_no_disband", P,
+     "    tpursuit_disband_road_block(p, 0);\n    release_chopper(p);",
+     "    release_chopper(p);"),
+    ("release_disband_b", P,
+     "    tpursuit_disband_road_block(p, 0);",
+     "    tpursuit_disband_road_block(p, 1);"),
+    ("release_no_chopper", P,
+     "    tpursuit_disband_road_block(p, 0);\n    release_chopper(p);",
+     "    tpursuit_disband_road_block(p, 0);"),
+
+    # ---- DisbandRoadBlock
+    ("disband_one", P,
+     "    for (i = 0; i < 2; i++) {\n        tCop *c = (tCop *)",
+     "    for (i = 0; i < 1; i++) {\n        tCop *c = (tCop *)"),
+    ("disband_no_remove", P,
+     "        tpursuit_remove_cop_from_pursuit(p, c);\n"
+     "        taicop_return_to_patrol((tAICop *)(void *)c);\n        if (b) {",
+     "        taicop_return_to_patrol((tAICop *)(void *)c);\n        if (b) {"),
+    ("disband_no_patrol", P,
+     "        taicop_return_to_patrol((tAICop *)(void *)c);\n        if (b) {",
+     "        if (b) {"),
+    ("disband_b", P,
+     "        if (b) {\n            Car  *ch",
+     "        if (!b) {\n            Car  *ch"),
+    ("disband_dist", P,
+     "            if (sqrtf(dx * dx + dy * dy) < 30.0f",
+     "            if (sqrtf(dx * dx + dy * dy) < 25.0f"),
+    ("disband_dy", P,
+     "            float dy = ch->State.Position.y - mine->State.Position.y;",
+     "            float dy = ch->State.Position.x - mine->State.Position.y;"),
+    ("disband_ignore_request", P,
+     "                && copmanager_request_pursuit(pCopManager, c, ch) != 0)",
+     "                && (copmanager_request_pursuit(pCopManager, c, ch), 1))"),
+    ("disband_no_hot", P,
+     "                tcop_set_desired_logic_state(c, LS_HOT_PURSUIT);",
+     "                ;"),
+    ("disband_pi", P,
+     "    if (tpursuit_is_player_involved(p)) {",
+     "    if (1) {"),
+    ("disband_ai_secondary", P,
+     "        if (p->pChasedCar->pPlayer != NULL\n"
+     "            && p->SecondaryCopSpeaker == COP_SPEAKER_NONE",
+     "        if (1\n"
+     "            && p->SecondaryCopSpeaker == COP_SPEAKER_NONE"),
+    ("disband_secondary_set", P,
+     "            && p->SecondaryCopSpeaker == COP_SPEAKER_NONE\n",
+     "            && p->SecondaryCopSpeaker != COP_SPEAKER_NONE\n"),
+    ("disband_split", P,
+     "            && TheRaceParameters.NumPlayerCars == 1)",
+     "            && TheRaceParameters.NumPlayerCars >= 1)"),
+    ("disband_spk", P,
+     "            p->SecondaryCopSpeaker = p->pRoadBlock->CopSpeaker;",
+     "            p->SecondaryCopSpeaker = 7;"),
+    ("disband_strip_id", P,
+     "        pCopManager, p->pRoadBlock->nIndexIntoLoadedData);",
+     "        pCopManager, p->pRoadBlock->nIndexIntoLoadedData + 1);"),
+    ("disband_fade_t", P,
+     "    barricademanager_fade(p->pBarricades, 2.0f);",
+     "    barricademanager_fade(p->pBarricades, 3.0f);"),
+    ("disband_rb_kept", P,
+     "    p->pRoadBlock = NULL;\n    trbsm_disband_road_block",
+     "    trbsm_disband_road_block"),
+    ("disband_no_rbsm", P,
+     "    trbsm_disband_road_block(&p->RoadBlockStateMachine);\n}",
+     "}"),
+
+    # ---- RemoveCopFromPursuit and IsCopInPursuit
+    ("remove_no_null", P,
+     "    if (c == NULL)\n        return 0;\n    for (i = 0; i < p->nNumCops",
+     "    for (i = 0; i < p->nNumCops"),
+    ("remove_no_dec", P,
+     "        p->nNumCops--;\n",
+     ""),
+    ("remove_no_shift", P,
+     "        if (p->Cops[0] == NULL) {\n            p->Cops[0] = p->Cops[1];",
+     "        if (0) {\n            p->Cops[0] = p->Cops[1];"),
+    ("remove_shift_keep", P,
+     "            p->Cops[1] = NULL;\n        }\n        found = 1;",
+     "        }\n        found = 1;"),
+    ("remove_rb_too", P,
+     "    if (!found && p->pRoadBlock != NULL) {",
+     "    if (p->pRoadBlock != NULL) {"),
+    ("remove_rb_one", P,
+     "        for (i = 0; i < 2 && !found; i++) {",
+     "        for (i = 0; i < 1 && !found; i++) {"),
+    ("remove_rb_both", P,
+     "        for (i = 0; i < 2 && !found; i++) {",
+     "        for (i = 0; i < 2; i++) {"),
+    ("remove_rb_clear", P,
+     "                rb->cops[i] = NULL;\n",
+     ""),
+    ("remove_no_setp", P,
+     "    if (found)\n        tcop_set_pursuit(c, NULL);",
+     "    if (0)\n        tcop_set_pursuit(c, NULL);"),
+    ("remove_ret", P,
+     "    return found;\n}\n\nint32_t tpursuit_is_cop_in_pursuit",
+     "    return 1;\n}\n\nint32_t tpursuit_is_cop_in_pursuit"),
+    ("isin_two", P,
+     "    for (i = 0; i < p->nNumCops; i++)\n        if (p->Cops[i] == c)",
+     "    for (i = 0; i < 2; i++)\n        if (p->Cops[i] == c)"),
+    ("isin_rb0", P,
+     "            if ((const tCop *)(const void *)p->pRoadBlock->cops[i] == c)",
+     "            if ((const tCop *)(const void *)p->pRoadBlock->cops[0] == c)"),
+    ("isin_no_rb", P,
+     "    if (p->pRoadBlock != NULL)\n        for (i = 0; i < 2; i++)",
+     "    if (0)\n        for (i = 0; i < 2; i++)"),
+
+    # ---- RemovePrimarySpeaker
+    ("rps_ai", P,
+     "    if (p->pChasedCar->pPlayer == NULL)\n        return;\n"
+     "    if (tpursuit_road_block",
+     "    if (tpursuit_road_block"),
+    ("rps_recent", P,
+     "    if (tpursuit_road_block_encountered_recently(p))\n        return;",
+     "    if (0)\n        return;"),
+    ("rps_no_release", P,
+     "    copmanager_release_cop_speaker(pCopManager, was);\n",
+     ""),
+    ("rps_secondary_kept", P,
+     "        p->PrimaryCopSpeaker = p->SecondaryCopSpeaker;\n"
+     "        p->SecondaryCopSpeaker = COP_SPEAKER_NONE;",
+     "        p->PrimaryCopSpeaker = p->SecondaryCopSpeaker;"),
+    ("rps_lt1", P,
+     "    } else if (p->nNumCops < 2) {",
+     "    } else if (p->nNumCops < 1) {"),
+    ("rps_current", P,
+     "        p->PrimaryCopSpeaker = copmanager_reserve_cop_speaker(pCopManager);\n"
+     "    }\n    if (b) {",
+     "        p->PrimaryCopSpeaker = copmanager_get_current_cop_speaker(pCopManager);\n"
+     "    }\n    if (b) {"),
+    ("rps_b", P,
+     "    if (b) {\n        if ((uint32_t)bRandomI",
+     "    if (!b) {\n        if ((uint32_t)bRandomI"),
+    ("rps_tow_odds", P,
+     "bRandomI(10, &bDefaultSeed) < 2u",
+     "bRandomI(10, &bDefaultSeed) < 3u"),
+    ("rps_tow_range", P,
+     "bRandomI(10, &bDefaultSeed) < 2u",
+     "bRandomI(5, &bDefaultSeed) < 2u"),
+    ("rps_tow_args", P,
+     "                gSpeechRaiseCrashTowFn(was, p->PrimaryCopSpeaker);",
+     "                gSpeechRaiseCrashTowFn(p->PrimaryCopSpeaker, was);"),
+    ("rps_crash_args", P,
+     "            gSpeechRaiseCrashFn(was, p->PrimaryCopSpeaker);",
+     "            gSpeechRaiseCrashFn(was, was);"),
+    ("rps_flat_args", P,
+     "        gSpeechRaiseFlatTireFn(was, p->PrimaryCopSpeaker);",
+     "        gSpeechRaiseFlatTireFn(p->PrimaryCopSpeaker, was);"),
+
+    # ---- RoadBlockEncounteredRecently and SelectPrimaryCop
+    ("rbr_blown_bit0", P,
+     "    if ((int8_t)p->pChasedCar->BlownTireBits != 0)",
+     "    if ((p->pChasedCar->BlownTireBits & 1) != 0)"),
+    ("rbr_double", P,
+     "        t = t + t;",
+     "        t = t + 4.0f;"),
+    ("rbr_chopper_state", P,
+     "    if (p->ChopperState == ECS_CHOPPER_REQUESTED)",
+     "    if (p->ChopperState != ECS_CHOPPER_REQUESTED)"),
+    ("rbr_four", P,
+     "    return t - 4.0f < p->fRoadBlockSpawnTimer;",
+     "    return t - 3.0f < p->fRoadBlockSpawnTimer;"),
+    ("rbr_le", P,
+     "    return t - 4.0f < p->fRoadBlockSpawnTimer;",
+     "    return t - 4.0f <= p->fRoadBlockSpawnTimer;"),
+    ("rbr_global", P,
+     "    t = fRoadBlockSpawnTime;\n",
+     "    t = 20.0f;\n"),
+    ("sel_null_a", P,
+     "    if (a == NULL || b == NULL)\n        return;",
+     "    if (b == NULL)\n        return;"),
+    ("sel_null_b", P,
+     "    if (a == NULL || b == NULL)\n        return;",
+     "    if (a == NULL)\n        return;"),
+    ("sel_30", P,
+     "    if (30.0f < da - db) {",
+     "    if (20.0f < da - db) {"),
+    ("sel_le", P,
+     "    if (30.0f < da - db) {",
+     "    if (30.0f <= da - db) {"),
+    ("sel_dir", P,
+     "    if (30.0f < da - db) {",
+     "    if (30.0f < db - da) {"),
+    ("sel_by", P,
+     "    dy = car->State.Position.y - cb->State.Position.y;",
+     "    dy = car->State.Position.y - cb->State.Position.x;"),
+    ("sel_ax", P,
+     "    dx = car->State.Position.x - ca->State.Position.x;",
+     "    dx = car->State.Position.x - ca->State.Position.y;"),
+    ("sel_swap_half", P,
+     "        p->Cops[1] = a;\n        p->Cops[0] = b;",
+     "        p->Cops[0] = b;"),
+
+    # ---- the speakers
+    ("spk_primary", P,
+     "    if (p->PrimaryCopSpeaker != COP_SPEAKER_NONE)\n",
+     "    if (0)\n"),
+    ("spk_rb", P,
+     "    if (p->pRoadBlock != NULL)\n        return p->pRoadBlock->CopSpeaker;",
+     "    if (0)\n        return p->pRoadBlock->CopSpeaker;"),
+    ("spk_current", P,
+     "        return p->pRoadBlock->CopSpeaker;\n"
+     "    return copmanager_get_current_cop_speaker(pCopManager);",
+     "        return p->pRoadBlock->CopSpeaker;\n    return 0;"),
+    ("spk2_secondary", P,
+     "    if (p->SecondaryCopSpeaker != COP_SPEAKER_NONE)\n"
+     "        return p->SecondaryCopSpeaker;",
+     "    if (0)\n        return p->SecondaryCopSpeaker;"),
+    ("spk2_current", P,
+     "        return p->SecondaryCopSpeaker;\n"
+     "    return copmanager_get_current_cop_speaker(pCopManager);",
+     "        return p->SecondaryCopSpeaker;\n    return 0;"),
+    ("pi_no_beacop", P,
+     "    return p->pChasedCar->pPlayer != NULL || TheRaceParameters.BeACop != 0;",
+     "    return p->pChasedCar->pPlayer != NULL;"),
+    ("pi_no_player", P,
+     "    return p->pChasedCar->pPlayer != NULL || TheRaceParameters.BeACop != 0;",
+     "    return TheRaceParameters.BeACop != 0;"),
+
+    # ---- the one-liners
+    ("ol_addcop_slot", P,
+     "    p->Cops[p->nNumCops] = c;\n    p->nNumCops++;\n}\n",
+     "    p->Cops[0] = c;\n    p->nNumCops++;\n}\n"),
+    ("ol_addcop_noinc", P,
+     "    p->Cops[p->nNumCops] = c;\n    p->nNumCops++;\n}\n",
+     "    p->Cops[p->nNumCops] = c;\n}\n"),
+    ("ol_numcops", P,
+     "    return p->nNumCops;\n}",
+     "    return p->nMaxChaseCops;\n}"),
+    ("ol_id", P,
+     "    return p->nPursuitId;",
+     "    return p->nPursuitId + 1;"),
+    ("ol_rbstate", P,
+     "    return p->RoadBlockStateMachine.State;",
+     "    return (eRoadBlockState)0;"),
+    ("ol_dir", P,
+     "    return p->fChaseDirection;",
+     "    return p->fChaseDirectionTimer;"),
+    ("ol_chst", P,
+     "    return p->ChopperState;",
+     "    return ECS_NO_CHOPPER;"),
+    ("ol_over", P,
+     "    return p->PursuitState == EPS_END_PURSUIT_GIVE_UP;",
+     "    return p->PursuitState == EPS_SPEEDER_CAUGHT;"),
+    ("ol_called", P,
+     "    return p->bAlreadyCalledForBackup;\n}",
+     "    return p->bAlreadyJoined;\n}"),
+    ("ol_needed_zero", P,
+     "    if (p->nNumCops == 0)\n        return 1;",
+     "    if (p->nNumCops == 0)\n        return 0;"),
+    ("ol_needed_le", P,
+     "    return p->nNumCops < p->nMaxChaseCops && p->bAlreadyCalledForBackup",
+     "    return p->nNumCops <= p->nMaxChaseCops && p->bAlreadyCalledForBackup"),
+    ("ol_needed_nobackup", P,
+     "    return p->nNumCops < p->nMaxChaseCops && p->bAlreadyCalledForBackup != 0;",
+     "    return p->nNumCops < p->nMaxChaseCops;"),
+    ("ol_other", P,
+     "    return p->Cops[0] == c ? p->Cops[1] : p->Cops[0];",
+     "    return p->Cops[1] == c ? p->Cops[0] : p->Cops[1];"),
+    ("ol_primcar", P,
+     "    return p->Cops[0] != NULL && p->Cops[0]->pMyCar == car;",
+     "    return p->Cops[0] != NULL && p->Cops[0]->pMyCar != car;"),
+    ("ol_primcar_null", P,
+     "    return p->Cops[0] != NULL && p->Cops[0]->pMyCar == car;",
+     "    return p->Cops[0] == NULL || p->Cops[0]->pMyCar == car;"),
+    ("ol_prim", P,
+     "    return p->Cops[0] == c;",
+     "    return p->Cops[1] == c;"),
+    ("ol_allowed", P,
+     "    return (int32_t)(p->BehaviourFlags & a);",
+     "    return (p->BehaviourFlags & a) != 0;"),
+    ("ol_disallowall", P,
+     "    p->BehaviourFlags = 0;\n}",
+     "    p->BehaviourFlags = 1;\n}"),
+    ("ol_disallow", P,
+     "    p->BehaviourFlags &= ~a;",
+     "    p->BehaviourFlags ^= a;"),
+    ("ol_allow", P,
+     "    p->BehaviourFlags |= a;",
+     "    p->BehaviourFlags ^= a;"),
+    ("ol_landmark", P,
+     "    return p->CurrentLandmark;",
+     "    return p->CurrentLandmark + 1;"),
+    ("ol_hud", P,
+     "    return p->nHUDPursuitLevel;",
+     "    return p->nHUDPursuitLevel + 1;"),
+
+    # ---- NewPursuit
+    ("new_id_pos", P,
+     "    if ((int8_t)id >= 0)\n",
+     "    if ((int8_t)id > 0)\n"),
+    ("new_byid0", P,
+     "        m->PursuitsById[(int8_t)id] = p;",
+     "        m->PursuitsById[0] = p;"),
+    ("new_id_arg", P,
+     "    tpursuit_construct(p, (int8_t)id, car);",
+     "    tpursuit_construct(p, (int8_t)(id + 1), car);"),
+    ("new_prev", P,
+     "    p->Node.Prev = tail;",
+     "    p->Node.Prev = list;"),
+    ("new_next", P,
+     "    p->Node.Next = list;",
+     "    p->Node.Next = tail;"),
+    ("new_no_listprev", P,
+     "    list->Prev = &p->Node;\n",
+     ""),
+    ("new_no_tailnext", P,
+     "    tail->Next = &p->Node;\n",
+     ""),
+
+    # ---- RequestPursuit
+    ("req_finished_pos", P,
+     "    if (car->pRacingCar->FinishReason != 0)",
+     "    if (car->pRacingCar->FinishReason > 0)"),
+    ("req_finished_byte", P,
+     "    if (car->pRacingCar->FinishReason != 0)",
+     "    if ((int8_t)car->pRacingCar->FinishReason != 0)"),
+    ("req_beacop_any", P,
+     "        if (c == copmanager_get_player_cop(m)) {",
+     "        if (1) {"),
+    ("req_beacop_chase", P,
+     "            maxChase = 1;\n            maxBlock = 2;\n            ok = 1;",
+     "            maxChase = 2;\n            maxBlock = 2;\n            ok = 1;"),
+    ("req_beacop_block", P,
+     "            maxChase = 1;\n            maxBlock = 2;\n            ok = 1;",
+     "            maxChase = 1;\n            maxBlock = 1;\n            ok = 1;"),
+    ("req_ai_count", P,
+     "            if (q->pChasedCar->pPlayer == NULL)\n                ai++;",
+     "            if (q->pChasedCar->pPlayer != NULL)\n                ai++;"),
+    ("req_giveup", P,
+     "    if (p != NULL && p->PursuitState == EPS_END_PURSUIT_GIVE_UP)",
+     "    if (p != NULL && p->PursuitState == EPS_SPEEDER_CAUGHT)"),
+    ("req_split", P,
+     "    if (TheRaceParameters.NumPlayerCars >= 2) {",
+     "    if (TheRaceParameters.NumPlayerCars > 2) {"),
+    ("req_split_chase", P,
+     "            maxChase = 1;\n            if (car->pPlayer != NULL) {",
+     "            maxChase = 2;\n            if (car->pPlayer != NULL) {"),
+    ("req_split_block", P,
+     "                maxBlock = 1;\n                ok = found ? p->nNumCops < 1 : 1;",
+     "                maxBlock = 2;\n                ok = found ? p->nNumCops < 1 : 1;"),
+    ("req_split_player_ok", P,
+     "                ok = found ? p->nNumCops < 1 : 1;",
+     "                ok = found ? p->nNumCops < 2 : 1;"),
+    ("req_split_ai_block", P,
+     "                maxBlock = 0;\n                ok = found ? p->nNumCops < 1 : ai == 0;",
+     "                maxBlock = 1;\n                ok = found ? p->nNumCops < 1 : ai == 0;"),
+    ("req_split_ai_new", P,
+     "                ok = found ? p->nNumCops < 1 : ai == 0;",
+     "                ok = found ? p->nNumCops < 1 : ai < 2;"),
+    ("req_split_ai_found", P,
+     "                ok = found ? p->nNumCops < 1 : ai == 0;",
+     "                ok = found ? p->nNumCops < 2 : ai == 0;"),
+    ("req_ccp4", P,
+     "            maxChase = pCurrentWorld->CopCarPos < 3 ? 2 : 1;",
+     "            maxChase = pCurrentWorld->CopCarPos < 4 ? 2 : 1;"),
+    ("req_ccp2", P,
+     "            maxChase = pCurrentWorld->CopCarPos < 3 ? 2 : 1;",
+     "            maxChase = pCurrentWorld->CopCarPos < 2 ? 2 : 1;"),
+    ("req_player_block", P,
+     "            maxChase = pCurrentWorld->CopCarPos < 3 ? 2 : 1;\n"
+     "            maxBlock = 2;",
+     "            maxChase = pCurrentWorld->CopCarPos < 3 ? 2 : 1;\n"
+     "            maxBlock = 1;"),
+    ("req_player_first", P,
+     "            if (!found || p->nNumCops == 0)",
+     "            if (!found)"),
+    ("req_player_max", P,
+     "                ok = p->nNumCops < maxChase\n",
+     "                ok = p->nNumCops <= maxChase\n"),
+    ("req_player_backup", P,
+     "                     && p->bAlreadyCalledForBackup != 0;",
+     "                     && p->bAlreadyCalledForBackup == 0;"),
+    ("req_ai_chase", P,
+     "            maxChase = 1;\n            maxBlock = 0;\n            // The demo",
+     "            maxChase = 2;\n            maxBlock = 0;\n            // The demo"),
+    ("req_ai_block", P,
+     "            maxBlock = 0;\n            // The demo",
+     "            maxBlock = 1;\n            // The demo"),
+    ("req_ai_one", P,
+     "            ok = found ? p->nNumCops < 1 : ai < 2;",
+     "            ok = found ? p->nNumCops < 1 : ai < 1;"),
+    ("req_ai_three", P,
+     "            ok = found ? p->nNumCops < 1 : ai < 2;",
+     "            ok = found ? p->nNumCops < 1 : ai < 3;"),
+    ("req_ai_found", P,
+     "            ok = found ? p->nNumCops < 1 : ai < 2;",
+     "            ok = found ? p->nNumCops < 2 : ai < 2;"),
+    ("req_new_id0", P,
+     "        p = copmanager_new_pursuit(m, copmanager_find_free_pursuit_id(m),",
+     "        p = copmanager_new_pursuit(m, 0,"),
+    ("req_no_start_speech", P,
+     "        if (gPursuitStartSpeechFn != NULL)\n",
+     "        if (0)\n"),
+    ("req_pl_chased", P,
+     "        pl = (TheRaceParameters.BeACop != 0 ? c->pMyCar\n"
+     "                                             : p->pChasedCar)->pPlayer;",
+     "        pl = p->pChasedCar->pPlayer;"),
+    ("req_pl_cop", P,
+     "        pl = (TheRaceParameters.BeACop != 0 ? c->pMyCar\n"
+     "                                             : p->pChasedCar)->pPlayer;",
+     "        pl = c->pMyCar->pPlayer;"),
+    ("req_no_nis", P,
+     "        if (pl != NULL) {\n            Car    *mine",
+     "        if (0) {\n            Car    *mine"),
+    ("req_nis_cop", P,
+     "                gPlayerLoadNextNisFn(pl, p->pChasedCar, mine, tickets);",
+     "                gPlayerLoadNextNisFn(pl, p->pChasedCar, NULL, tickets);"),
+    ("req_nis_tickets", P,
+     "            int32_t tickets = copmanager_get_num_tickets(m, p->pChasedCar);",
+     "            int32_t tickets = 0;"),
+    ("req_no_join", P,
+     "    } else if (gPursuitJoinSpeechFn != NULL) {",
+     "    } else if (0) {"),
+    ("req_maxchase", P,
+     "    p->nMaxChaseCops = maxChase;",
+     "    p->nMaxChaseCops = maxChase + 1;"),
+    ("req_maxblock", P,
+     "    p->nMaxRoadBlockCops = maxBlock;",
+     "    p->nMaxRoadBlockCops = maxBlock + 1;"),
+    ("req_slot0", P,
+     "    p->Cops[p->nNumCops] = c;\n    p->nNumCops++;\n    tcop_set_pursuit",
+     "    p->Cops[0] = c;\n    p->nNumCops++;\n    tcop_set_pursuit"),
+    ("req_no_inc", P,
+     "    p->Cops[p->nNumCops] = c;\n    p->nNumCops++;\n    tcop_set_pursuit",
+     "    p->Cops[p->nNumCops] = c;\n    tcop_set_pursuit"),
+    ("req_no_setp", P,
+     "    tcop_set_pursuit(c, p);\n    return ok;",
+     "    return ok;"),
+    ("req_ret2", P,
+     "    tcop_set_pursuit(c, p);\n    return ok;",
+     "    tcop_set_pursuit(c, p);\n    return 2;"),
+
+    # ---- PossibleCallSupervisor
+    ("super_replay", P,
+     "    if (copmanager_replaying())\n        return;",
+     "    if (0)\n        return;"),
+    ("super_eps", P,
+     "<= 0.0010000000474974513f",
+     "<= 0.01f"),
+    ("super_lt", P,
+     "<= 0.0010000000474974513f",
+     "< 0.0010000000474974513f"),
+    ("super_minus50", P,
+     "fabsf(m->fSupervisorTimer - -50.0f)",
+     "fabsf(m->fSupervisorTimer - -49.0f)"),
+    ("super_rb", P,
+     "    if (TheRaceParameters.bRoadBlocks == 0)\n        return;",
+     "    if (0)\n        return;"),
+    ("super_ai", P,
+     "    if (p->pChasedCar->pPlayer == NULL)\n        return;\n"
+     "    if (bRandomI(2",
+     "    if (bRandomI(2"),
+    ("super_odds", P,
+     "    if (bRandomI(2, &bDefaultSeed) != 0)",
+     "    if (bRandomI(2, &bDefaultSeed) == 0)"),
+    ("super_range", P,
+     "    if (bRandomI(2, &bDefaultSeed) != 0)",
+     "    if (bRandomI(3, &bDefaultSeed) != 0)"),
+    ("super_set", P,
+     "    m->fSupervisorTimer = 7.0f;",
+     "    m->fSupervisorTimer = 8.0f;"),
+    ("super_spk2", P,
+     "        uint32_t s = tpursuit_get_cop_speaker(p);",
+     "        uint32_t s = tpursuit_get_secondary_cop_speaker(p);"),
+
+    # ---- BarricadeManager
+    ("bar_ctor_barrel", B,
+     "        b->nBarrel[i] = -1;\n",
+     "        b->nBarrel[i] = 0;\n"),
+    ("bar_ctor_timer", B,
+     "        b->fFadeTimer[i] = -1.0f;",
+     "        b->fFadeTimer[i] = 0.0f;"),
+    ("bar_ctor_short", B,
+     "    for (i = 0; i < BARRICADE_MAX_BARRELS; i++) {\n        b->nBarrel[i] = -1;",
+     "    for (i = 0; i < BARRICADE_MAX_BARRELS - 1; i++) {\n"
+     "        b->nBarrel[i] = -1;"),
+    ("bar_dtor_neg", B,
+     "        if (b->nBarrel[i] == -1)\n            continue;\n"
+     "        if (gBarricadeDeleteBarrelFn",
+     "        if (b->nBarrel[i] < 0)\n            continue;\n"
+     "        if (gBarricadeDeleteBarrelFn"),
+    ("bar_dtor_short", B,
+     "    b->vptr = BARRICADEMANAGER_VTABLE;\n"
+     "    for (i = 0; i < BARRICADE_MAX_BARRELS; i++) {\n"
+     "        if (b->nBarrel[i] == -1)",
+     "    b->vptr = BARRICADEMANAGER_VTABLE;\n"
+     "    for (i = 0; i < BARRICADE_MAX_BARRELS - 1; i++) {\n"
+     "        if (b->nBarrel[i] == -1)"),
+    ("bar_dtor_free", B,
+     "    if (flags & 1)\n        bFree(b);",
+     "    if (flags & 2)\n        bFree(b);"),
+    ("bar_fade_neg", B,
+     "        if (b->nBarrel[i] == -1)\n            continue;\n"
+     "        b->fFadeTimer[i] = t;",
+     "        if (b->nBarrel[i] < 0)\n            continue;\n"
+     "        b->fFadeTimer[i] = t;"),
+    ("bar_fade_t", B,
+     "        b->fFadeTimer[i] = t;",
+     "        b->fFadeTimer[i] = t + 1.0f;"),
+    ("bar_fade_nobody", B,
+     "        if (body != NULL) {",
+     "        if (0) {"),
+    ("bar_fade_find", B,
+     "        body = collisionbody_find(b->nBarrel[i]);",
+     "        body = collisionbody_find(i);"),
+
+    # ---- DeleteRoadBlockSpikeStrips
+    ("dss_ne", C,
+     "        if (s->nRoadBlockID == i) {",
+     "        if (s->nRoadBlockID != i) {"),
+    ("dss_first", C,
+     "            gSpikeStripBlinkBlinkPoofFn(s);\n        }\n        n = next;",
+     "            gSpikeStripBlinkBlinkPoofFn(s);\n            break;\n        }\n"
+     "        n = next;"),
+]
+
+EQUIVALENT = {
+    "super_lt": "the timer less -50 is exact within 25 of -50 (Sterbenz), "
+                "so a multiple of 2^-18, which 0.001f is not; further off "
+                "it is 25 or more: never equal",
+    "bar_dtor_free": "the barricades' one caller, the pursuit's "
+                     "destructor, passes 3",
+    "remove_rb_too": "the roadblock's loop runs only while !found, so a "
+                     "cop found in Cops skips it either way",
+}
+
+
+def mutate_pass(only=None, jobs=None):
+    todo = [mu for mu in MUTATIONS if only is None or mu[0] in only]
+    if only:
+        unknown = set(only) - {mu[0] for mu in MUTATIONS}
+        if unknown:
+            print("no such mutation: %s" % ", ".join(sorted(unknown)))
+            return 1
+    lines = script()
+    base = model(lines)
+    indir = tempfile.TemporaryDirectory()
+    scp = write_script(indir.name, lines)
+    with tempfile.TemporaryDirectory() as tmp:
+        exe = build_harness(tmp)
+        out = Path(tmp) / "base.txt"
+        t0 = time.monotonic()
+        run_harness(exe, scp, out)
+        took = time.monotonic() - t0
+        got = out.read_text(encoding="latin-1").splitlines()
+        if diff(base, got, quiet=True):
+            print("base already differs -- fix that before mutating")
+            return 1
+        print("base: %d lines, 0 differ" % len(got), flush=True)
+
+    limit = mutpar.timeout_for(took)
+    tally = mutpar.run_pass(
+        todo, SOURCES, "pursuit_test",
+        lambda exe, out: mutpar.run_exe([exe, scp], out, limit),
+        base, diff, EQUIVALENT, jobs)
+    indir.cleanup()
+    return mutpar.summarize(todo, only, EQUIVALENT, tally)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--mutate", action="store_true")
+    ap.add_argument("--only", metavar="NAME,...",
+                    help="with --mutate, only these mutations")
+    ap.add_argument("--jobs", type=int, metavar="N",
+                    help="with --mutate, mutants at once (default %d)"
+                    % mutpar.JOBS)
+    ap.add_argument("--dump", metavar="PREFIX")
+    args = ap.parse_args()
+
+    if args.mutate:
+        sys.exit(mutate_pass(args.only.split(",") if args.only else None,
+                             args.jobs))
+
+    lines = script()
+    got = model(lines)
+    with tempfile.TemporaryDirectory() as tmp:
+        exe = build_harness(tmp)
+        scp = write_script(tmp, lines)
+        out = Path(tmp) / "harness.txt"
+        rc = run_harness(exe, scp, out)
+        harness = out.read_text(encoding="latin-1").splitlines()
+
+    if args.dump:
+        d = Path(args.dump)
+        d.parent.mkdir(parents=True, exist_ok=True)
+        d.with_suffix(".model").write_text(NL.join(got) + NL)
+        d.with_suffix(".harness").write_text(NL.join(harness) + NL)
+
+    n = diff(got, harness)
+    print("%d ops, %d lines, %d differ" % (len(lines), len(harness), n))
+    sys.exit(1 if (n or rc) else 0)
+
+
+if __name__ == "__main__":
+    main()

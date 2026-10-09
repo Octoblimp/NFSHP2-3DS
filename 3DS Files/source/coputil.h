@@ -3,7 +3,8 @@
 // cubics. CarInRecentCollision is here for CopDriver, GetForwardTrackDistance
 // and IsTeleportLocationClear for the track graph, and CanTeleport and
 // CarCausedRecentCollision for the cops' logic (12g-2), DidTheseCarsCollide
-// for the chase's (12g-3); the rest come with the chases.
+// for the chase's (12g-3); the rest come with the chases. GetTopSpeed is
+// pursuit.c's, its only caller's.
 
 #ifndef COPUTIL_H
 #define COPUTIL_H

@@ -1,10 +1,12 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 58, continued
-(2026-10-08): 12g-3, the chase (the hot pursuit and caught speeder
-logics), is done, so all of tAICop's logic is in. The cops' cars still
-wait in limbo until the pursuits (12h) and the radar traps (12j) ask
-them out. 12g-2 (the radar traps', roadblocks' and patrols' logic) and
+Where the next session picks up. Updated in Session 59 (2026-10-08):
+12h-1, tPursuit's object and RequestPursuit, is done
+(`docs/formats/pursuit.md`). RequestPursuit stays unbound until
+12h-2 ports the pursuit's Update, so the cops' cars still wait in limbo
+until the pursuits (12h-2) and the radar traps (12j) ask them out.
+Session 58, continued: 12g-3, the chase (the hot pursuit and caught
+speeder logics), so all of tAICop's logic is in. 12g-2 (the radar traps', roadblocks' and patrols' logic) and
 12g-1 (tAICop::Think, which made a race with cops make their cars) were
 Session 58's earlier slices.
 12d to 12f (CopDriver and the drive target, the track graph,
@@ -189,13 +191,36 @@ pursuit.obj, on a 10 KB manager. Its slices:
   `gAICopDoCaughtSpeederLogicFn` are gone. No cop reaches them until
   RequestPursuit grants a chase. DoSegmentsIntersect (`0x00230f00`) was
   not needed.
-- **Next: 12h, 12i** tPursuit, starting with RequestPursuit
-  (`0x00225078`) to bind `gCopManagerRequestPursuitFn`. It makes a
-  pursuit through two small unnamed helpers (`0x002244a0`, a free slot
-  in the manager's list at 52; `0x002244e0`, bOMalloc from gp-15644's
-  pool, `tPursuit::tPursuit` at `0x00228fc8`, and the list link at 44).
-  Then StartPursuitSpeech or JoinPursuitSpeech, Player::LoadNextNis
-  with GetNumTickets, and SetPursuit. **12j** SpawnSpeedTraps, roadblocks and spike strips;
+- **12h-1, done (Session 59):** `pursuit.c` and `barricade.c`. They
+  hold tPursuit's constructor and destructor, its states and their
+  timers, the cops joining and leaving, the speakers and the
+  one-liners. With them: RequestPursuit, NewPursuit,
+  PossibleCallSupervisor, DeleteRoadBlockSpikeStrips, GetTopSpeed and
+  retail's new BarricadeManager (`docs/formats/pursuit.md`).
+  - `main.c` binds RemoveCopFromPursuit and RemovePrimarySpeaker.
+  - `gCopManagerRequestPursuitFn` stays NULL: a granted chase would
+    need the pursuit's Update, which nothing calls yet.
+  - Retail quirks kept: ReleaseAllCops releases only the first of two
+    cops. An empty speaker queue gives the constructor 0x41a00000
+    (its a2, 20.0f).
+- **Next: 12h-2** tPursuit::Update (`0x00229288`), and with it bind
+  `gCopManagerRequestPursuitFn` and the manager's Update seam. Update
+  runs these:
+  - the barrels' fade countdown (`0x0024f268`) and FindLandmark;
+  - the chase direction, from GetRoutePoint;
+  - the top speed and cop limits;
+  - UpdateDriveTargets (`0x0022a360`) and SelectPrimaryCop;
+  - ShouldPursuitBeCalledOff (`0x0022c2d0`) and the state timer;
+  - NotInChasingState, IsChasedCarStoppable (`0x0022bea0`) with
+    CreatePullover (12l);
+  - the roadblock state machine's Update (`0x0022cdd8`),
+    UpdateRoadBlocks (`0x00229b58`) and UpdateChopper (`0x00229678`);
+  - by state: Level0SubStates (`0x002295d8`, DeclarePursuitSpeech and
+    RaiseBackupSpeech) and DoEarlyChaseCollisionCheck.
+
+  Split it: Update and the small helpers first, with UpdateDriveTargets
+  next, and the roadblock and chopper parts as seams for 12i and 12k.
+  **12i** roadblocks; **12j** SpawnSpeedTraps, roadblocks and spike strips;
   **12k** the helicopter; **12l** pullovers and Busted; **12m** Be A
   Cop; **12n** the radar detector's intensity. Nothing takes a cop out
   of limbo until 12j's SpawnSpeedTraps or 12h's pursuits, so the cops
@@ -4627,8 +4652,8 @@ goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a to 12g-3 are done, 12h (tPursuit,
-  starting with RequestPursuit) is next. See "First" at the top.
+- **Next:** step 12, the cops: 12a to 12h-1 are done, 12h-2 (tPursuit's
+  Update) is next. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

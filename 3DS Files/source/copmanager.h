@@ -278,80 +278,139 @@ typedef int32_t eChopperState;
 #define ECS_CHOPPER_INFLIGHT       ((eChopperState)2)
 #define ECS_CHOPPER_ATTACKING      ((eChopperState)3)
 
+// eRoadBlockState, .mdebug t3286.
+typedef int32_t eRoadBlockState;
+#define ERBS_NONE                  ((eRoadBlockState)0)
+#define ERBS_CALLED_FOR_ROAD_BLOCK ((eRoadBlockState)1)
+#define ERBS_ROAD_BLOCK_SET        ((eRoadBlockState)2)
+
+// tRoadBlockStateMachine, .mdebug type#3288, 20 bytes: a pursuit's
+// roadblock from the call to the cops in place. The constructor
+// (0x0022cc00) keeps the pursuit and zeroes State, SpeechFlags and
+// nRoadBlockCount; DisbandRoadBlock (0x0022cdd0) sets State back to
+// ERBS_NONE. RenderHud lights one more Be The Cop roadblock, in the "on
+// its way" colour, while State is not ERBS_NONE.
+typedef struct tRoadBlockStateMachine {
+    eRoadBlockState State;              //  0
+    float           fStateTimer;        //  4
+    uint32_t        SpeechFlags;        //  8
+    int32_t         nRoadBlockCount;    // 12
+    tPursuit       *pPursuit;           // 16
+} tRoadBlockStateMachine;               // 20
+
+struct BarricadeManager;
+struct Chopper;
+
 // The demo's type#1640 is 1216 bytes; retail's is 1600 (its slot pool's
-// slot), and these are the words read so far, at retail's offsets on a
-// 32-bit target. The demo's nHUDPursuitLevel was at 1112.
+// slot). The constructor (0x00228fc8) writes every field below, and these
+// are retail's offsets on a 32-bit target. Retail moved the demo's fields
+// from PursuitState on 380 bytes later, past the History and two words it
+// added, and added two more words at 1556 and 1584.
 struct tPursuit {
     tPursuitNode Node;                  //    0
-    uint8_t     Unported8[8];           //    8
+    int32_t     nMaxChaseCops;          //    8  RequestPursuit's
+    int32_t     nMaxRoadBlockCops;      //   12
     struct Car *pChasedCar;             //   16, the demo's 20
     tRoadBlock *pRoadBlock;             //   20, the demo's 24; NULL for none
-    uint8_t     Unported24[4];          //   24
+    struct Chopper *pChopper;           //   24
     // The demo's Cops[2], 4 bytes on: the chase's two cops, the first the
     // primary. The cops' hot pursuit logic reads them.
     struct tCop *Cops[2];               //   28, the demo's 32
-    uint8_t     Unported36[12];         //   36
-    // The constructor's (0x00228fc8): the points ahead of the chased car,
-    // which CopDriver steers along when it is far from it, and the ones
-    // right behind it, which it takes when within 20 m. The pursuit's Think
-    // fills both.
+    uint8_t     Pad36[12];              //   36  to align the drive targets
+    // The points ahead of the chased car, which CopDriver steers along
+    // when it is far from it, and the ones right behind it, which it
+    // takes when within 20 m. The pursuit's Think fills both.
     DriveTarget FarDriveTarget;         //   48
     DriveTarget NearDriveTarget;        //  576
     tPursuitHistory History;            // 1104 the chased car's velocities
-    uint8_t     Unported1472[8];        // 1472
-    // Retail's: the manager's PursuitsById slot, from 0x002244a0.
+    // Retail's: the roadblock's barrels, made by the constructor.
+    struct BarricadeManager *pBarricades; // 1472
+    int32_t     nNumCops;               // 1476
+    // Retail's: the manager's PursuitsById slot, from 0x002244a0, and -2
+    // once destroyed.
     int8_t      nPursuitId;             // 1480
-    uint8_t     Unported1481[3];        // 1481
-    // The demo's fields from 1104 on are here 380 bytes later.
+    uint8_t     Pad1481[3];             // 1481
     ePursuitState PursuitState;         // 1484, the demo's 1104
-    uint8_t     Unported1488[4];        // 1488
+    eLogicSubState PursuitSubState;     // 1488
     int32_t     nHUDPursuitLevel;       // 1492  the HUD's pursuit meter
-    uint8_t     Unported1496[28];       // 1496
+    uint32_t    PrimaryCopSpeaker;      // 1496  5 for none
+    uint32_t    SecondaryCopSpeaker;    // 1500  5 for none
+    int32_t     CurrentLandmark;        // 1504
+    int32_t     bAlreadyJoined;         // 1508
+    int32_t     bAlreadyBeenHit;        // 1512
+    int32_t     bAlreadyCalledForBackup;// 1516
+    float       fCatchCarTimer;         // 1520
     float       fPursuitStateTimer;     // 1524, the demo's 1144
-    uint8_t     Unported1528[4];        // 1528
+    float       fRoadBlockDisbandTimer; // 1528
     float       fRoadBlockSpawnTimer;   // 1532, the demo's 1152
-    uint8_t     Unported1536[24];       // 1536
-    // Retail's. RenderHud lights one more Be The Cop roadblock, in the
-    // "on its way" colour, while it is set.
-    int32_t     New1560;                // 1560
-    uint8_t     Unported1564[16];       // 1564
+    float       fChopperAttackTimer;    // 1536
+    float       fChopperNextAttackTime; // 1540
+    float       fChasedCarTopSpeed;     // 1544  GetTopSpeed's
+    float       fChaseDirection;        // 1548
+    float       fChaseDirectionTimer;   // 1552
+    float       New1556;                // 1556  retail's: 10 from the start
+    tRoadBlockStateMachine RoadBlockStateMachine; // 1560
     eChopperState ChopperState;         // 1580, the demo's 1196
-    uint8_t     Unported1584[4];        // 1584
-    // The demo's: AllowBehaviour and DisallowBehaviour (0x002184c8 and
-    // 0x002184b0 in the demo) set and clear its bits. The cops' flank
-    // tests 4.
+    int32_t     nRoadblockCount;        // 1584
+    // AllowBehaviour (0x0022d320), DisallowBehaviour (0x0022d308) and
+    // DisallowAllBehaviours (0x0022d300) set and clear its bits, and
+    // SwitchPursuitState adds to them. The cops' flank tests 4.
     uint32_t    BehaviourFlags;         // 1588, the demo's 1204
     uint32_t    vptr;                   // 1592  0x002bd460: 8 the destructor
-    uint8_t     Unported1596[4];        // 1596
+    uint8_t     Pad1596[4];             // 1596  quadword round-up
 };
 
+#define TPURSUIT_VTABLE   0x002bd460u
 #define TPURSUIT_VT_DTOR  8
 
+// The speakers' "none".
+#define COP_SPEAKER_NONE  5u
+
 #if UINTPTR_MAX == 0xFFFFFFFFu
+typedef char troadblockstatemachine_layout_check[
+    (offsetof(tRoadBlockStateMachine, pPursuit) == 16
+     && sizeof(tRoadBlockStateMachine) == 20) ? 1 : -1];
+
 typedef char tpursuit_layout_check[
-    (offsetof(struct tPursuit, pChasedCar) == 16
+    (offsetof(struct tPursuit, nMaxChaseCops) == 8
+     && offsetof(struct tPursuit, pChasedCar) == 16
      && offsetof(struct tPursuit, pRoadBlock) == 20
+     && offsetof(struct tPursuit, pChopper) == 24
      && offsetof(struct tPursuit, Cops) == 28
      && offsetof(struct tPursuit, FarDriveTarget) == 48
      && offsetof(struct tPursuit, NearDriveTarget) == 576
      && offsetof(struct tPursuit, History) == 1104
+     && offsetof(struct tPursuit, pBarricades) == 1472
+     && offsetof(struct tPursuit, nNumCops) == 1476
      && offsetof(struct tPursuit, nPursuitId) == 1480
      && offsetof(struct tPursuit, PursuitState) == 1484
      && offsetof(struct tPursuit, nHUDPursuitLevel) == 1492
+     && offsetof(struct tPursuit, PrimaryCopSpeaker) == 1496
+     && offsetof(struct tPursuit, CurrentLandmark) == 1504
+     && offsetof(struct tPursuit, bAlreadyCalledForBackup) == 1516
+     && offsetof(struct tPursuit, fCatchCarTimer) == 1520
      && offsetof(struct tPursuit, fPursuitStateTimer) == 1524
      && offsetof(struct tPursuit, fRoadBlockSpawnTimer) == 1532
-     && offsetof(struct tPursuit, New1560) == 1560
+     && offsetof(struct tPursuit, fChasedCarTopSpeed) == 1544
+     && offsetof(struct tPursuit, New1556) == 1556
+     && offsetof(struct tPursuit, RoadBlockStateMachine) == 1560
      && offsetof(struct tPursuit, ChopperState) == 1580
+     && offsetof(struct tPursuit, nRoadblockCount) == 1584
      && offsetof(struct tPursuit, BehaviourFlags) == 1588
      && offsetof(struct tPursuit, vptr) == 1592
      && sizeof(struct tPursuit) == 1600) ? 1 : -1];
 #endif
 
 // tSpikeStrip, 2304 bytes in retail: a stinger on the road, in the
-// manager's SpikeStripList. Its links and its table so far.
+// manager's SpikeStripList. Its links, the roadblock it belongs to
+// (.mdebug t1896's nRoadBlockID, the loaded data's index) and its table
+// so far.
 typedef struct tSpikeStrip {
     tPursuitNode Node;                  //    0
-    uint8_t     Unported8[2280];        //    8
+    bVector2    v2Start;                //    8
+    bVector2    v2End;                  //   16
+    int32_t     nRoadBlockID;           //   24
+    uint8_t     Unported28[2260];       //   28
     uint32_t    vptr;                   // 2288  8 the destructor
     uint8_t     Unported2292[12];       // 2292
 } tSpikeStrip;
@@ -360,7 +419,8 @@ typedef struct tSpikeStrip {
 
 #if UINTPTR_MAX == 0xFFFFFFFFu
 typedef char tspikestrip_layout_check[
-    (offsetof(tSpikeStrip, vptr) == 2288 && sizeof(tSpikeStrip) == 2304)
+    (offsetof(tSpikeStrip, nRoadBlockID) == 24
+     && offsetof(tSpikeStrip, vptr) == 2288 && sizeof(tSpikeStrip) == 2304)
     ? 1 : -1];
 #endif
 
