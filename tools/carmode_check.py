@@ -1279,8 +1279,9 @@ class Model(mmc.Model):
         self.say("sound blowout %s" % self.label(em.reg[4] & M32))
 
     def on_ebrake(self, em):
-        self.say("ebrake drv=%s on=%d" % (self.label(em.reg[4] & M32),
-                                          s32(em.reg[5])))
+        # The demo's int, against the port's float: 0 is 0 in both.
+        self.say("ebrake drv=%s on=%08x" % (self.label(em.reg[4] & M32),
+                                            em.reg[5] & M32))
 
     def on_pursued(self, em):
         self.say("pursued mgr=%s car=%s -> %d" % (
@@ -3188,7 +3189,7 @@ MUTATIONS = [
      + "        return;" + NL, ""),
     ("fix-inverted", CRR, "    if (mode != REAL_CONTROL)",
      "    if (mode == REAL_CONTROL)"),
-    ("fix-ebrake-on", CRR, "c->pCarDriver, 0);", "c->pCarDriver, 1);"),
+    ("fix-ebrake-on", CRR, "c->pCarDriver, 0.0f);", "c->pCarDriver, 1.0f);"),
     ("blow-num-kept", CRR, "    c->NumBlownTires = 0;" + NL
      + "    c->fBlownTireControllerRumbleTimer = CAR_",
      "    c->fBlownTireControllerRumbleTimer = CAR_"),

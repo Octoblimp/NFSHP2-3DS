@@ -67,7 +67,7 @@ void car_fix_blown_tires(Car *c)
     c->fBlownTireControllerRumbleTimer = 0.0f;
     if (mode != REAL_CONTROL)
         return;
-    realdriver_force_ebrake_stop((RealDriver *)(void *)c->pCarDriver, 0);
+    realdriver_force_ebrake_stop((RealDriver *)(void *)c->pCarDriver, 0.0f);
 }
 
 // 0x00133368. `tires` is a mask, bit i for wheel i. The count is rebuilt

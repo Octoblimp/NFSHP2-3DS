@@ -18341,3 +18341,54 @@ and `barricade.c`. `docs/formats/pursuit.md` has a new section,
 12i-3: retail's RealDriver ForceEBrakeStop(float) (`0x0013b558`), which
 binds `gRealDriverForceEBrakeStopFn`. Then 12j, SpawnSpeedTraps and the
 spike strips.
+
+## Session 59, continued (2026-10-08) -- 12i-3, retail's e-brake stop
+
+RealDriver's forced e-brake stop, ported from retail into
+`realdriver.c`. `docs/formats/real-driver.md` has the details.
+
+### What it does
+
+- **ForcedEBrakeStop** (580) is now a float, retail's seconds left. The
+  demo's was an on/off int.
+- **ForceEBrakeStop** (`0x0013b558`) stores it.
+- **DoThrottleBrakeReverse** (`0x0013bb40`) first runs it down by dt.
+  While time is left and `|ForwardSpeed|` is over 20 mph (8.940545,
+  `gp-31532`), the e-brake is pinned at 1 and the throttle at 0.
+  Otherwise the timer is cleared and the pedals are read. The rest of
+  the function is the demo's.
+- `main.c` binds `gRealDriverForceEBrakeStopFn`. MonitorRoadBlock's
+  5 s stop for a player who hits a roadblock cop now brakes.
+- ResetAllDamage, and the demo's car_fix_blown_tires (which has no
+  caller), pass 0.0f.
+- The harness stand-ins in carmode, cop, copmanager and pursuit take
+  the float. carmode and cop print its bits, and three of their
+  mutations quote the new calls.
+
+### Checked
+
+- `tools/realdriver_check.py` adds a retail run. `OP_RETAIL` sends the
+  model's later ops to a retail emulator (the harness ignores it). There
+  the constructor, ForceEBrakeStop and DoThrottleBrakeReverse run as
+  shipped, and SetLowGear runs through retail's vtable. `OP_EBDUMP`
+  prints what DoThrottleBrakeReverse touches.
+  - The scenario covers the setter over odd bits and a grid of timers,
+    frame times and speeds one ulp either side of 20 mph. It also runs
+    timed countdowns of 5 s and 3.5 s.
+  - The demo scenarios keep the stop at 0, where the int and the float
+    agree.
+  - Result: 199214 operations, 45443 lines, 0 differ.
+- `--mutate`: 140 mutations, 136 caught, four equivalent (the old four).
+  All eighteen new ones were caught on the first pass.
+- carmode, cop, copdriver, copmanager, pursuit, realcontroller and
+  sinit: 0 differ or 0 problems. cop's `rad_ebrake_*` (three) and
+  carmode's `fix-ebrake-on` are caught.
+- The CIA builds.
+- `run_azahar_quickrace.ps1 -HoldKeys 65`: PASS. A Hot Pursuit quick
+  race from the frontend ran at 30 FPS and Speed 100%, on AC.
+
+### Next
+
+12j-1: SpawnSpeedTraps (`0x00224a20`) and FindCopForSpeedTrap
+(`0x00224838`), which bind `gCopManagerSpawnSpeedTrapsFn`, so the cops
+leave limbo for their radar traps. Then 12j-2, the spike strips.

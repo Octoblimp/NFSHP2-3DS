@@ -487,7 +487,8 @@ void copmanager_reset_all_damage(tCopManager *m, Car *car)
         gCarDamageRepairAllFn(car->pCarDamage);
     }
     if (car->TheControlMode == REAL_CONTROL)
-        realdriver_force_ebrake_stop((RealDriver *)(void *)car->pCarDriver, 0);
+        realdriver_force_ebrake_stop((RealDriver *)(void *)car->pCarDriver,
+                                     0.0f);
 }
 
 // ------------------------------------------------------ the cops

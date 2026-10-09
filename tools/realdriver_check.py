@@ -38,6 +38,16 @@ agreeing on zero.
 player, the cop manager, the replay manager, the sound, the route and point,
 the two drivers, the position and velocity vectors, the target.
 
+**The retail run.** Retail's ForcedEBrakeStop is a float timer, where the
+demo's is an on/off int, so the port has retail's ForceEBrakeStop
+(0x0013b558) and DoThrottleBrakeReverse (0x0013bb40). The demo scenarios
+keep the stop at 0, where the two agree, and a last scenario runs on the
+retail image: OP_RETAIL routes the ops after it to a retail emulator
+(the harness ignores it), where the constructor (0x0013ad90, its
+DriveTarget calls silent), the setter and DoThrottleBrakeReverse run as
+shipped, and OP_EBDUMP prints what DoThrottleBrakeReverse reads and
+writes.
+
 Scenarios: the tunables and tables as built, and the vtable slot by slot;
 GetValue and InverseLookup over every table; the constructor over two fills;
 the small methods; the handlers' registration; every pedal handler over its
@@ -45,7 +55,8 @@ own events and others, then a fuzz; the gearbox in every mode; the reset,
 the horn and the nitro over their guards; DoThrottleBrakeReverse and DoBrake
 over a grid; DoSteering over random states and held-stick sequences; Drive
 over random states and nitro transitions; every vtable slot through the
-table; a fuzz of everything interleaved; and the destructor.
+table; a fuzz of everything interleaved; the destructor; and, on retail,
+the e-brake stop over a grid and as timed countdowns.
 
     python tools/realdriver_check.py
     python tools/realdriver_check.py --mutate
@@ -63,6 +74,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import physicscar_check as pcc
+import retail_model
 from mipsemu import Emu, M32, s32
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -209,7 +221,7 @@ D = {name: i for i, (name, _, _) in enumerate(DRVF)}
 
 (OP_TAG, OP_FILL, OP_INIT, OP_DUMP, OP_CARF, OP_DRVF, OP_GLOB, OP_PTR,
  OP_ANSWER, OP_MASK, OP_CALL, OP_HANDLER, OP_VT, OP_TABLE, OP_INV,
- OP_STATIC, OP_TARGET) = range(17)
+ OP_STATIC, OP_TARGET, OP_RETAIL, OP_EBDUMP) = range(19)
 
 (F_DESTROY, F_DRIVE, F_ADD, F_REMOVE, F_DISABLE_SL, F_ENABLE_SL, F_SET_MANUAL,
  F_SET_LOW_GEAR, F_FORCE_EBRAKE, F_RESET_JOY, F_DO_STEERING, F_DTBR,
@@ -320,7 +332,29 @@ VT_SLOTS = [8, 16, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128,
 ARGS = {OP_TAG: 1, OP_FILL: 2, OP_INIT: 1, OP_DUMP: 1, OP_CARF: 2,
         OP_DRVF: 3, OP_GLOB: 2, OP_PTR: 2, OP_ANSWER: 2, OP_MASK: 1,
         OP_CALL: 5, OP_HANDLER: 5, OP_VT: 5, OP_TABLE: 2, OP_INV: 2,
-        OP_STATIC: 0, OP_TARGET: 1}
+        OP_STATIC: 0, OP_TARGET: 1, OP_RETAIL: 1, OP_EBDUMP: 1}
+
+# ---- the retail run --------------------------------------------------------
+
+R_GP = retail_model.RETAIL_GP
+R_CTOR = 0x0013ad90
+R_DT_CTOR = 0x0021b918          # DriveTarget's constructor and Clear: the
+R_DT_CLEAR = 0x0021bbb0         # e-brake run never reads the target
+R_FORCE_EBRAKE = 0x0013b558
+R_DTBR = 0x0013bb40
+R_REPLAY_EVENT = 0x0013e270     # RegisterInterestingEvent
+R_VT_RD = 0x002aee30
+R_REPLAY = R_GP - 22440         # pReplayManager
+# The tunables DoThrottleBrakeReverse reads. 0.6, 0.2 and 20 mph
+# (gp-31528, gp-31524, gp-31532) are literals.
+R_GLOBS = {"WorldLoopCounter": R_GP - 19552,
+           "MaxSpeedForReverse": R_GP - 22480,
+           "MinSpeedForThrottle": R_GP - 22476,
+           "MinSpeedForThrottleWhenReversing": R_GP - 22472}
+# Retail's State is at car+64 too, but ForwardSpeed is 4 bytes on.
+R_CARF = {"ForwardSpeed": CAR + 960, "VelocityMagnitude": CAR + 964,
+          "Throttle": CAR + 972}
+R_CALLS = (F_FORCE_EBRAKE, F_DTBR)
 
 
 def fb(x):
@@ -842,7 +876,11 @@ def scenario_dtbr(sc, rnd):
               -1.9999998, 0.0, -0.0, 0.5, 0.50000006, 0.49999997, 10.0]
     vms = [10.0, 10.000001, 50.0, 0.0]
     for _ in range(3000):
-        sc.drvf(0, "ForcedEBrakeStop", rnd.choice((0, 0, 0, 1)))
+        # The demo's flag is an int and the port's a float timer, which
+        # agree only at 0; the retail run covers the rest. The draw is
+        # kept so the stream after it is the same.
+        rnd.choice((0, 0, 0, 1))
+        sc.drvf(0, "ForcedEBrakeStop", 0)
         sc.drvf(0, "EBrakeInput", rnd.choice(inputs))
         sc.drvf(0, "ThrottleInput", rnd.choice(inputs))
         sc.drvf(0, "BrakeInput", rnd.choice(inputs))
@@ -1004,11 +1042,10 @@ def scenario_drive(sc, rnd):
     sc.carf("ForwardSpeed", 20.0)
     for wlc in (6, 7, 15):
         for eb in (0.0, 1.0):
-            for forced in (0, 1):
-                sc.glob("WorldLoopCounter", wlc)
-                sc.drvf(0, "EBrakeInput", eb)
-                sc.drvf(0, "ForcedEBrakeStop", forced)
-                sc.call(F_DRIVE, 0, 1.0 / 60.0)
+            sc.glob("WorldLoopCounter", wlc)
+            sc.drvf(0, "EBrakeInput", eb)
+            sc.drvf(0, "ForcedEBrakeStop", 0)
+            sc.call(F_DRIVE, 0, 1.0 / 60.0)
     sc.glob("WorldLoopCounter", 100000)
     sc.drvf(0, "EBrakeInput", 0.0)
     sc.drvf(0, "ForcedEBrakeStop", 0)
@@ -1094,6 +1131,101 @@ def scenario_teardown(sc):
     sc.op(OP_PTR, P_PLAYER, 1)
 
 
+def ebrake_frame(sc, dt, timer=None, fs=None, vm=None, eb=None, th=None,
+                 br=None, rev=None, dg=None, mt=None, wlc=None):
+    for name, v in (("ForcedEBrakeStop", timer), ("EBrakeInput", eb),
+                    ("ThrottleInput", th), ("BrakeInput", br),
+                    ("Reversing", rev), ("DesiredGear", dg),
+                    ("ManualTransmission", mt)):
+        if v is not None:
+            sc.drvf(0, name, v)
+    if fs is not None:
+        sc.carf("ForwardSpeed", fs)
+    if vm is not None:
+        sc.carf("VelocityMagnitude", vm)
+    if wlc is not None:
+        sc.glob("WorldLoopCounter", wlc)
+    sc.call(F_DTBR, 0, dt, dump=False)
+    sc.op(OP_EBDUMP, 0)
+
+
+def scenario_retail_ebrake(sc, rnd):
+    """Retail's e-brake stop, on the retail image. Last: the model does
+    not come back."""
+    nan, inf = float("nan"), float("inf")
+    mph20 = fb(8.940545082092285)                   # 0x410f0c79
+    sc.op(OP_RETAIL, 1)
+    sc.tag("retail: the constructor and the setter")
+    sc.op(OP_MASK, ALL_SEAMS)
+    sc.op(OP_PTR, P_REPLAY, 1)
+    for name, v in (("WorldLoopCounter", 100000), ("MaxSpeedForReverse", 0.5),
+                    ("MinSpeedForThrottle", -30.0),
+                    ("MinSpeedForThrottleWhenReversing", -2.0)):
+        sc.glob(name, v)
+    for name in ("ForwardSpeed", "VelocityMagnitude", "Throttle"):
+        sc.carf(name, 0.0)
+    fresh(sc, 0, 0xA5)
+    sc.op(OP_EBDUMP, 0)
+    for v in (5.0, 3.5, 0.0, -0.0, -1.0, 1, 0x80000001, nan, inf, -inf,
+              1e30, 0x7FFFFFFF, -1):
+        sc.call(F_FORCE_EBRAKE, 0, v, dump=False)
+        sc.op(OP_EBDUMP, 0)
+
+    sc.tag("retail: throttle, brake, reverse")
+    timers = [0.0, -0.0, 5.0, 3.5, 1.0 / 60.0, 0.016666668, 0.01666666,
+              1.0 / 30.0, 1, 0x80000001, 1e-30, -1.0, inf, -inf, nan, 0.5,
+              1.0, 0.03333334, 0.033333328]
+    dts = [1.0 / 60.0, 1.0 / 30.0, 0.0, -0.0, 1.0, 5.0, -1.0 / 60.0, nan,
+           inf, 1, 0.016666668]
+    speeds = [0.0, -0.0, mph20, mph20 + 1, mph20 - 1, mph20 | 0x80000000,
+              (mph20 + 1) | 0x80000000, (mph20 - 1) | 0x80000000, 20.0,
+              -20.0, 40.0, -40.0, nan, inf, -inf, 0.5, 0.50000006, -2.0,
+              -2.0000002, -30.0, -30.000002, 10.0, 1e30]
+    inputs = [0.0, 0.1, 0.2, 0.5, 0.6, 0.6000001, 0.7, 1.0, 0.45, 0.25]
+    vms = [10.0, 10.000001, 50.0, 0.0]
+    for _ in range(3000):
+        if rnd.random() < 0.1:
+            sc.op(OP_MASK, rnd.choice((0, ALL_SEAMS)))
+        if rnd.random() < 0.05:
+            sc.op(OP_PTR, P_REPLAY, rnd.randrange(2))
+        ebrake_frame(sc, rnd.choice(dts), timer=rnd.choice(timers),
+                     fs=rnd.choice(speeds), vm=rnd.choice(vms),
+                     eb=rnd.choice(inputs), th=rnd.choice(inputs),
+                     br=rnd.choice(inputs), rev=rnd.choice((0, 1, 2)),
+                     dg=rnd.choice((0, -1, 3, -2)), mt=rnd.choice((0, 1, 2)),
+                     wlc=rnd.choice((7, 15, 8, 100000, -1, 1023, 0x7FFFFFFF)))
+    sc.op(OP_MASK, ALL_SEAMS)
+    sc.op(OP_PTR, P_REPLAY, 1)
+
+    # MonitorRoadBlock's 5 s and the munitions' 3.5 s, run down a frame at
+    # a time: at speed, while the speed falls through 20 mph, and with the
+    # timer set again on the way.
+    sc.tag("retail: the countdowns")
+    for stop, dt, speed in (
+            (5.0, 1.0 / 60.0, lambda k: 25.0),
+            (3.5, 1.0 / 30.0, lambda k: -25.0),
+            (5.0, 1.0 / 30.0, lambda k: 30.0 - 0.25 * k),
+            (3.5, 1.0 / 60.0, lambda k: -12.0 + 0.05 * k),
+            (0.1, 1.0 / 60.0, lambda k: 20.0)):
+        sc.call(F_FORCE_EBRAKE, 0, stop, dump=False)
+        wlc = 1000
+        frames = int(stop / dt) + 4
+        for k in range(frames):
+            wlc += 1
+            ebrake_frame(sc, dt, fs=speed(k), vm=abs(speed(k)),
+                         eb=0.0, th=1.0, br=0.0, rev=0, dg=3, mt=0, wlc=wlc)
+    sc.call(F_FORCE_EBRAKE, 0, 5.0, dump=False)
+    for k in range(200):
+        if k in (40, 41, 120):
+            sc.call(F_FORCE_EBRAKE, 0, rnd.choice((5.0, 3.5, 0.5)),
+                    dump=False)
+        ebrake_frame(sc, rnd.choice((1.0 / 60.0, 1.0 / 30.0)),
+                     fs=rfloat(rnd, -40, 40, (20.0, -20.0, 0.0)),
+                     vm=rnd.choice(vms), eb=rnd.choice(inputs),
+                     th=rnd.choice(inputs), br=rnd.choice(inputs),
+                     wlc=1000 + k)
+
+
 def script():
     rnd = random.Random(0x5EA1)
     sc = Script()
@@ -1115,6 +1247,7 @@ def script():
     scenario_vtable(sc)
     scenario_chaos(sc, rnd)
     scenario_teardown(sc)
+    scenario_retail_ebrake(sc, rnd)
     return sc
 
 
@@ -1131,6 +1264,7 @@ class Model(object):
         pcc.retail_clear(e)
         self.mask = ALL_SEAMS
         self.ans = [1, 0, 0, 1, fb(-1.0)]
+        self.retail = None
         self.glob_addr = [e.addr_of(a) for _, a in GLOBS]
         self.table_addr = [e.addr_of(t) for t in TABLES]
         self.fn = {k: e.addr_of(v) for k, v in FN_SYM.items()}
@@ -1286,7 +1420,7 @@ class Model(object):
         u8, u16, u32 = e.u8, e.u16, e.u32
         self.emit(
             "d%d st %04x th %08x br %08x eb %08x dg %d sg %d ni %d vt %s "
-            "car %s port %d ha %d sl %d stop %d feb %d ps %d mt %d js %d %d "
+            "car %s port %d ha %d sl %d stop %d feb %08x ps %d mt %d js %d %d "
             "si %08x jt %d %d %d ti %08x jb %d %d %d bi %08x jr %d %d "
             "ri %08x je %d %d ei %08x lnr %d rev %d tgt %08x | cth %08x "
             "cl %d sm %d psyc %08x"
@@ -1294,7 +1428,7 @@ class Model(object):
                s32(u32(d + 544)), s32(u32(d + 548)), s32(u32(d + 552)),
                self.vtname(u32(d + 556)), self.label(u32(d + 560)),
                s32(u32(d + 564)), s32(u32(d + 568)), s32(u32(d + 572)),
-               s32(u32(d + 576)), s32(u32(d + 580)), s32(u32(d + 584)),
+               s32(u32(d + 576)), u32(d + 580), s32(u32(d + 584)),
                s32(u32(d + 588)), u8(d + 592), u8(d + 593), u32(d + 596),
                u8(d + 600), u8(d + 601), u8(d + 602), u32(d + 604),
                u8(d + 608), u8(d + 609), u8(d + 610), u32(d + 612),
@@ -1331,6 +1465,12 @@ class Model(object):
         emit = self.emit
         for o in sc.ops:
             code, a = o[0], o[1:]
+            if code == OP_RETAIL:
+                self.retail = RetailRun(self) if a[0] else None
+                continue
+            if self.retail is not None and code not in (OP_TAG, OP_MASK):
+                self.retail.op(code, a)
+                continue
             if code == OP_TAG:
                 emit("[%s]" % sc.tags[a[0]])
             elif code == OP_FILL:
@@ -1381,6 +1521,8 @@ class Model(object):
                 self.static()
             elif code == OP_TARGET:
                 e.write(TGT, target_bytes(a[0]))
+            elif code == OP_EBDUMP:
+                emit(ebdump(e, a[0], STATE + 904, self.vtname, self.label))
             else:
                 raise ValueError("op %d" % code)
         return self.out
@@ -1453,6 +1595,70 @@ class Model(object):
             self.emit("vret %08x" % e.fpr[0])
         elif vslot == 160:
             self.emit("vret %s" % self.label(r))
+
+
+def ebdump(e, slot, cth, vtname, label):
+    d = DRV[slot]
+    u32 = e.u32
+    return ("e%d th %08x br %08x eb %08x dg %d feb %08x rev %d ei %08x "
+            "ti %08x bi %08x mt %d vt %s car %s | cth %08x"
+            % (slot, u32(d + 532), u32(d + 536), u32(d + 540),
+               s32(u32(d + 544)), u32(d + 580), s32(u32(d + 636)),
+               u32(d + 628), u32(d + 604), u32(d + 612), s32(u32(d + 588)),
+               vtname(u32(d + 556)), label(u32(d + 560)), u32(cth)))
+
+
+class RetailRun(object):
+    """The retail image, for the ops the e-brake stop reads. Anything
+    else raises: its fields were never set here."""
+
+    def __init__(self, m):
+        self.m = m
+        e = self.e = retail_model.RetailEmu(ieee=True)
+        e.mem[CAR:CAR + 0x1000] = bytes([FILL]) * 0x1000
+        e.put32(R_REPLAY, RM)
+        e.stub(R_DT_CTOR, lambda em: None)
+        e.stub(R_DT_CLEAR, lambda em: None)
+
+        def replay(em):
+            if m.on("replay-event"):
+                p = em.reg[5] & M32
+                name = e.mem[p:e.mem.index(b"\0", p)].decode("latin-1")
+                m.emit("  seam replay-event %s %08x %s"
+                       % (m.label(em.reg[4] & M32), em.fpr[12], name))
+
+        e.stub(R_REPLAY_EVENT, replay)
+
+    def vtname(self, v):
+        return "rd" if v == R_VT_RD else "%08x" % v
+
+    def op(self, code, a):
+        e = self.e
+        if code == OP_FILL:
+            d = DRV[a[0]]
+            e.mem[d:d + DRV_SIZE] = bytes([a[1] & 0xFF]) * DRV_SIZE
+        elif code == OP_INIT:
+            e.call(R_CTOR, DRV[a[0]], CAR)
+        elif code == OP_EBDUMP:
+            self.m.emit(ebdump(e, a[0], R_CARF["Throttle"], self.vtname,
+                               self.m.label))
+        elif code == OP_CARF:
+            e.put32(R_CARF[CARF[a[0]][0]], a[1])
+        elif code == OP_DRVF:
+            _, off, w = DRVF[a[1]]
+            assert w == 4, DRVF[a[1]]
+            e.put32(DRV[a[0]] + off, a[2])
+        elif code == OP_GLOB:
+            e.put32(R_GLOBS[GLOBS[a[0]][0]], a[1])
+        elif code == OP_PTR and a[0] == P_REPLAY:
+            e.put32(R_REPLAY, RM if a[1] else 0)
+        elif code == OP_CALL and a[0] in R_CALLS:
+            fn, slot, x = a[0], a[1], a[2]
+            d = DRV[slot]
+            e.fpr[12] = x & M32
+            e.call(R_FORCE_EBRAKE if fn == F_FORCE_EBRAKE else R_DTBR, d)
+        else:
+            raise ValueError("op %d %r has no retail run" % (code, a))
 
 
 def model(sc):
@@ -1679,6 +1885,41 @@ MUTATIONS = [
     ("dtbr-lowgear", RDC, "        if (d->Base.DesiredGear == RD_GEAR_REVERSE)" + NL
      + "            call_void_slot(d, CARDRIVER_VT_SET_LOW_GEAR);", ""),
     ("dtbr-state", RDC, "    car->State.Throttle = d->Base.Throttle;" + NL, ""),
+
+    # -- retail's e-brake timer (12i-3), which only the retail run reaches -----
+    ("ctor-feb", RDC, "    d->ForcedEBrakeStop   = 0.0f;" + NL,
+     "    d->ForcedEBrakeStop   = 1.0f;" + NL),
+    ("feb-set-int", RDC, "    d->ForcedEBrakeStop = t;" + NL,
+     "    d->ForcedEBrakeStop = (float)(int32_t)t;" + NL),
+    ("feb-set-abs", RDC, "    d->ForcedEBrakeStop = t;" + NL,
+     "    d->ForcedEBrakeStop = fabsf(t);" + NL),
+    ("feb-dt-add", RDC, "    left = d->ForcedEBrakeStop - dt;",
+     "    left = d->ForcedEBrakeStop + dt;"),
+    ("feb-no-dt", RDC, "    left = d->ForcedEBrakeStop - dt;",
+     "    left = d->ForcedEBrakeStop;"),
+    ("feb-no-store", RDC, "    d->ForcedEBrakeStop = left;" + NL, ""),
+    ("feb-left-le", RDC, "    if (0.0f < left && ", "    if (0.0f <= left && "),
+    ("feb-no-left", RDC, "    if (0.0f < left && ", "    if ("),
+    ("feb-no-speed", RDC, "    if (0.0f < left && 8.940545082092285f < fabsf(fs)) {",
+     "    if (0.0f < left) {"),
+    ("feb-or", RDC, "    if (0.0f < left && 8.940545082092285f",
+     "    if (0.0f < left || 8.940545082092285f"),
+    ("feb-mph-le", RDC, "8.940545082092285f < fabsf(fs)",
+     "8.940545082092285f <= fabsf(fs)"),
+    ("feb-mph-ulp", RDC, "8.940545082092285f < fabsf(fs)",
+     "8.940546035766602f < fabsf(fs)"),
+    ("feb-no-abs", RDC, "8.940545082092285f < fabsf(fs)",
+     "8.940545082092285f < fs"),
+    ("feb-vm", RDC, "    fs   = car->State.ForwardSpeed;" + NL,
+     "    fs   = car->State.VelocityMagnitude;" + NL),
+    ("feb-no-clear", RDC, "        d->ForcedEBrakeStop = 0.0f;" + NL, ""),
+    ("feb-clear-neg", RDC, "        d->ForcedEBrakeStop = 0.0f;" + NL,
+     "        d->ForcedEBrakeStop = -0.0f;" + NL),
+    ("feb-forced-eb", RDC, "        d->Base.EBrake = 1.0f;" + NL + "        t = 0.0f;",
+     "        d->Base.EBrake = d->EBrakeInput;" + NL + "        t = 0.0f;"),
+    ("dtbr-eb-input", RDC, "        d->Base.EBrake = d->EBrakeInput;" + NL
+     + "        t = d->ThrottleInput;",
+     "        d->Base.EBrake = 0.0f;" + NL + "        t = d->ThrottleInput;"),
     ("brake-ebrake", RDC, "    if (0.5f < d->EBrakeInput" + NL,
      "    if (0.5f <= d->EBrakeInput" + NL),
 

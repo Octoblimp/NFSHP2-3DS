@@ -1,13 +1,15 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 59, continued
-(2026-10-08): 12i-2, making a roadblock, is done, and CreateRoadBlock
-is bound (`docs/formats/pursuit.md`, "Making a roadblock"). A chase
-that asks for a roadblock now gets one: its cops are sent to their
-spots, with no barrels (the smokeables are not ported, step 14b) and
-no spike strip (12j). Before it, 12i-1 ported the roadblocks' running
-logic, 12h-2 tPursuit::Update and 12h-1 tPursuit's object and
-RequestPursuit. The cops' cars still wait
+(2026-10-08): 12i-3, retail's e-brake stop, is done. RealDriver's
+ForcedEBrakeStop is retail's float timer, and MonitorRoadBlock's 5 s
+stop is bound (`docs/formats/real-driver.md`). Before it, 12i-2 made
+the roadblock (`docs/formats/pursuit.md`, "Making a roadblock"): a
+chase that asks for one gets its cops sent to their spots, with no
+barrels (the smokeables are not ported, step 14b) and no spike strip
+(12j). 12i-1 ported the roadblocks' running logic, 12h-2
+tPursuit::Update and 12h-1 tPursuit's object and RequestPursuit. The
+cops' cars still wait
 in limbo until something asks them out: a patrol's or radar trap's
 search (12j's SpawnSpeedTraps) is what starts a chase.
 Session 58, continued: 12g-3, the chase (the hot pursuit and caught
@@ -250,14 +252,27 @@ pursuit.obj, on a 10 KB manager. Its slices:
     nothing, so no barrel) and spawn (aborts if reached), step 14b.
   - Retail quirks kept: the escape lane's spot is half a lane past
     the lane, and a closed left lane doubles the right one.
-- **Next: 12i-3**, retail's RealDriver ForceEBrakeStop(float)
-  (`0x0013b558`), which binds `gRealDriverForceEBrakeStopFn`.
+- **12i-3, done (Session 59):** retail's e-brake stop in
+  `realdriver.c`. ForcedEBrakeStop (580) is a float, the seconds left.
+  ForceEBrakeStop (`0x0013b558`) stores it, and DoThrottleBrakeReverse
+  (`0x0013bb40`) runs it down by dt. It holds the e-brake while time is
+  left and the car is faster than 20 mph, then clears.
+  - `main.c` binds `gRealDriverForceEBrakeStopFn`, so a player who
+    hits a roadblock cop is braked for up to 5 s.
+  - `realdriver_check` has a retail run for it (`OP_RETAIL`); the demo
+    scenarios keep the stop at 0.
+- **Next: 12j-1**, SpawnSpeedTraps (`0x00224a20`) and
+  FindCopForSpeedTrap (`0x00224838`), which bind
+  `gCopManagerSpawnSpeedTrapsFn` and take cops out of limbo.
   Then:
-  - **12j** SpawnSpeedTraps and spike strips (AddSpikeStrip,
-    `0x002276d0`, and tSpikeStrip's constructor, `0x00241378`);
+  - **12j-2** spike strips (AddSpikeStrip, `0x002276d0`, and
+    tSpikeStrip's constructor, `0x00241378`);
   - **12k** the helicopter (UpdateChopper, `0x00229678`);
   - **12l** pullovers and Busted (CreatePullover, `0x00226f30`);
-  - **12m** Be A Cop;
+  - **12m** Be A Cop. The user's controls (2026-10-08): in Be A Cop
+    the D-Pad triggers the cop's options (the helicopter, backup and
+    the like) and the Circle Pad drives. In a racer's race the D-Pad is
+    just another directional control;
   - **12n** the radar detector's intensity.
 
   Nothing takes a cop out of limbo until 12j's SpawnSpeedTraps, so the
@@ -4690,8 +4705,8 @@ goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a to 12i-2 are done, 12i-3 (retail's
-  ForceEBrakeStop) is next. See "First" at the top.
+- **Next:** step 12, the cops: 12a to 12i-3 are done, 12j-1
+  (SpawnSpeedTraps) is next. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

@@ -406,10 +406,8 @@ extern void (*gSpeechRaiseDispatchRoadBlockNAFn)(uint32_t speaker);
 extern void (*gCollisionSoundPlayBustRoadBlockFn)(const bVector3 *pos);
 
 // Retail's RealDriver::ForceEBrakeStop(float) (0x0013b558): the e-brake
-// held on for `t` seconds while the car is moving. The port's RealDriver
-// is still the demo's, whose ForceEBrakeStop takes an on/off int, so
-// MonitorRoadBlock goes through this until RealDriver's retail pass
-// (12i-3). NULL does not brake.
+// held on for `t` seconds while the car is faster than 20 mph. main.c
+// binds realdriver_force_ebrake_stop (12i-3); NULL does not brake.
 struct RealDriver;
 extern void (*gRealDriverForceEBrakeStopFn)(struct RealDriver *d, float t);
 

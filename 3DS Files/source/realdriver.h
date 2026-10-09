@@ -46,7 +46,7 @@ typedef struct RealDriver {
     int32_t      HandlersAdded;               // 568
     int32_t      StartLineState;              // 572
     int32_t      StopRightNow;                // 576
-    int32_t      ForcedEBrakeStop;            // 580
+    float        ForcedEBrakeStop;            // 580  retail's seconds left
     int32_t      bPowerSlide;                 // 584  a bool stored as a word
     int32_t      ManualTransmission;          // 588  0 auto, 1 manual, 2 sport
     uint8_t      JoySteeringDigital;          // 592  128 is centred
@@ -182,7 +182,9 @@ void realdriver_disable_start_line_state(RealDriver *d);  // 0x00139568
 void realdriver_enable_start_line_state(RealDriver *d);   // 0x0013ac40
 void realdriver_set_manual_transmission(RealDriver *d, int32_t m); // 0x00139598
 void realdriver_set_low_gear(RealDriver *d);              // 0x001395d8
-void realdriver_force_ebrake_stop(RealDriver *d, int32_t on);      // 0x00139760
+// Retail's (0x0013b558): the e-brake held for `t` seconds while the car
+// is faster than 20 mph. The demo's (0x00139760) took an on/off int.
+void realdriver_force_ebrake_stop(RealDriver *d, float t);
 void realdriver_reset_joy_values(RealDriver *d);          // 0x00139768
 void realdriver_do_steering(RealDriver *d, float dt, JoystickPort port); // 0x00139838
 void realdriver_do_throttle_brake_reverse(RealDriver *d, float dt);// 0x00139d48

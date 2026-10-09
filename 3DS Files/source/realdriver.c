@@ -154,7 +154,7 @@ void realdriver_init(RealDriver *d, Car *car)
     d->StartLineState     = 1;
     d->Base.DesiredGear   = RD_GEAR_AUTO;
     d->StopRightNow       = 0;
-    d->ForcedEBrakeStop   = 0;
+    d->ForcedEBrakeStop   = 0.0f;
     d->bPowerSlide        = 0;
     d->ManualTransmission = RD_AUTOMATIC;
     d->Reversing          = 0;
@@ -267,9 +267,9 @@ void realdriver_set_low_gear(RealDriver *d)
                                                               : RD_GEAR_AUTO;
 }
 
-void realdriver_force_ebrake_stop(RealDriver *d, int32_t on)
+void realdriver_force_ebrake_stop(RealDriver *d, float t)
 {
-    d->ForcedEBrakeStop = on;
+    d->ForcedEBrakeStop = t;
 }
 
 void realdriver_reset_joy_values(RealDriver *d)
@@ -615,20 +615,25 @@ void realdriver_joy_ebrake(JoystickPort port, JoyEvent ev, uint8_t value,
 void realdriver_do_throttle_brake_reverse(RealDriver *d, float dt)
 {
     Car  *car = d->pCar;
-    float t, b, fs, fwd, rev, brake;
+    float t, b, fs, fwd, rev, brake, left;
 
-    (void)dt;
-
-    if (d->ForcedEBrakeStop) {
+    // Retail's timer (0x0013bb60): it runs down by dt, and the e-brake
+    // holds while time is left and the car is faster than 20 mph (gp-31532,
+    // 0x410f0c79). Once either fails the timer is cleared. The demo's int
+    // flag held the e-brake for as long as it was set.
+    left = d->ForcedEBrakeStop - dt;
+    fs   = car->State.ForwardSpeed;
+    d->ForcedEBrakeStop = left;
+    if (0.0f < left && 8.940545082092285f < fabsf(fs)) {
         d->Base.EBrake = 1.0f;
         t = 0.0f;
     } else {
+        d->ForcedEBrakeStop = 0.0f;
         d->Base.EBrake = d->EBrakeInput;
         t = d->ThrottleInput;
     }
 
-    b  = d->BrakeInput;
-    fs = car->State.ForwardSpeed;
+    b = d->BrakeInput;
 
     // gp-31620, 0x0032106c: 0.6 (0x3f19999a), a literal and not the
     // BrakingSpeed global beside it, which has the same value.

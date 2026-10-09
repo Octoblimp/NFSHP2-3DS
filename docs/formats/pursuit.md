@@ -15,8 +15,9 @@ asks. Slice 12h-2 ports Update (`0x00229288`), each chase's step, and
 the state machines under it. Slice 12i-1 ports the roadblock's running
 logic: asking for one, watching the chased car get by, and taking it
 down. Slice 12i-2 makes the roadblock: the cops for it, its layout
-across the road, and its barrels. The e-brake stop is 12i-3's, the
-helicopter 12k's and the pullover 12l's.
+across the road, and its barrels. Slice 12i-3 ports retail's e-brake
+stop into RealDriver (see [real-driver](real-driver.md)). The helicopter
+is 12k's and the pullover 12l's.
 
 | function | address | port |
 |----------|---------|------|
@@ -427,7 +428,8 @@ player's car, it looks for the first of the roadblock's two cops whose
 car the chased car has hit:
 
 - A car under REAL_CONTROL gets RealDriver::ForceEBrakeStop for 5 s,
-  through `gRealDriverForceEBrakeStopFn` (12i-3).
+  through `gRealDriverForceEBrakeStopFn`. Since 12i-3 that holds the
+  e-brake for up to 5 s while the car is faster than 20 mph.
 - An AI_CONTROL car in PHYSICS_MOVEMENT or MELLOW_MOVEMENT has its
   PsychoDriver's EBrakeTimer set to 4 s.
 - Above 40 mph either way (17.881 m/s, gp-26948), when the player's
@@ -662,8 +664,8 @@ Not bound yet:
   so no barrel spawns. The smokeables' spawn, `gSmokeableSpawnFn`,
   aborts if reached. Both wait for the smokeables step.
 - RealDriver::ForceEBrakeStop, `gRealDriverForceEBrakeStopFn`, does
-  nothing while NULL. The port's RealDriver is still the demo's; 12i-3
-  ports retail's and binds it.
+  nothing while NULL. `main.c` binds it since 12i-3, which ported
+  retail's float timer into RealDriver.
 - Update's later slices do nothing while NULL: CreatePullover (12l)
   and UpdateChopper (12k). So a caught car is not pulled over.
 - So does `gPlayerLoadNextNisFn`, the Busted NIS (12l).

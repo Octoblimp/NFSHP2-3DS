@@ -800,9 +800,9 @@ void car_reset_to_position(Car *c, const bVector3 *pos, float speed,
     unreached("car_reset_to_position");
 }
 
-void realdriver_force_ebrake_stop(RealDriver *d, int32_t on)
+void realdriver_force_ebrake_stop(RealDriver *d, float t)
 {
-    (void)d; (void)on;
+    (void)d; (void)t;
     unreached("realdriver_force_ebrake_stop");
 }
 

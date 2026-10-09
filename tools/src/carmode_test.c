@@ -1467,9 +1467,10 @@ static int     g_nline;
 
 // RealDriver::ForceEBrakeStop is realdriver.c's, which is not linked here;
 // the model stubs the image's, and each side logs the call.
-void realdriver_force_ebrake_stop(RealDriver *d, int32_t on)
+// The demo's took an int and retail's a float; 0 has the same bits.
+void realdriver_force_ebrake_stop(RealDriver *d, float t)
 {
-    printf("ebrake drv=%s on=%d\n", label(d), (int)on);
+    printf("ebrake drv=%s on=%08x\n", label(d), (unsigned)bf(t));
 }
 
 static void fake_effect(Car *c, CarEffect fx, float scale, int32_t where,

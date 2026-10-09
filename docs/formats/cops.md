@@ -349,8 +349,9 @@ only holds.
 the CarDamage repaired if the car has one (`0x001b5c20`, through
 `gCarDamageRepairAllFn`), and, for a player's car (REAL_CONTROL), the
 RealDriver's e-brake stop let off. Retail's ForceEBrakeStop
-(`0x0013b558`) takes a float and stores it at 580, where the port keeps
-an int; the call passes 0, so the bits are the same.
+(`0x0013b558`) takes a float and stores it at 580; the call passes 0.
+The port's has been retail's since 12i-3 (see
+[real-driver](real-driver.md)).
 
 ## Radar traps, roadblocks and patrols
 

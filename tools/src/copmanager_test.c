@@ -445,9 +445,9 @@ void collisionbody_disable_collisions(CollisionBody *b)
     unreached("collisionbody_disable_collisions");
 }
 
-void realdriver_force_ebrake_stop(RealDriver *d, int32_t on)
+void realdriver_force_ebrake_stop(RealDriver *d, float t)
 {
-    (void)d; (void)on;
+    (void)d; (void)t;
     unreached("realdriver_force_ebrake_stop");
 }
 

@@ -4413,6 +4413,7 @@ int main(int argc, char** argv)
     gCopManagerRequestPursuitFn = copmanager_request_pursuit;
     gPursuitUpdateFn            = tpursuit_update;
     gPursuitCreateRoadBlockFn   = tpursuit_create_road_block;
+    gRealDriverForceEBrakeStopFn = realdriver_force_ebrake_stop;
     gPursuitUpdateRoadBlocksFn  = tpursuit_update_road_blocks;
     // The race's cop drivers each get a car, in limbo -- unseen, parked,
     // not colliding -- until patrols and chases are ported (copmgr.h).

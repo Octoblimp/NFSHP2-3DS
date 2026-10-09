@@ -22,7 +22,7 @@ CarDriver's, at 556 (see [car-driver](car-driver.md)).
 | 568 | HandlersAdded | int32_t |
 | 572 | StartLineState | int32_t, 1 holds the brake on the grid |
 | 576 | StopRightNow | int32_t |
-| 580 | ForcedEBrakeStop | int32_t |
+| 580 | ForcedEBrakeStop | float, retail's seconds left (the demo's int) |
 | 584 | bPowerSlide | int32_t, a bool |
 | 588 | ManualTransmission | 0 auto, 1 manual, 2 sport |
 | 592, 593 | JoySteeringDigital, Analog | uint8_t, 128 centred |
@@ -105,9 +105,28 @@ which holds the same value and is never read. The latch clears once the
 car is going forward faster than -2. The reverse is doubled and capped at
 1. It takes the throttle, with `DesiredGear` 0, when it is more than 0.2
 over the forward pedal. Otherwise the forward pedal is the throttle, and a
-car in reverse is put back in low gear through the vtable.
-`ForcedEBrakeStop` pins the e-brake at 1 and the throttle at 0. The result
+car in reverse is put back in low gear through the vtable. The result
 is also written to `CarState::Throttle`.
+
+**The e-brake stop is retail's** (12i-3). The demo's `ForcedEBrakeStop`
+is an on/off int, and while it is set the e-brake is held. Retail's is a
+float, the seconds left:
+
+* `ForceEBrakeStop` (`0x0013b558`) stores it.
+* DoThrottleBrakeReverse (`0x0013bb40`) first runs it down by dt and
+  stores what is left.
+* While time is left and the car is going faster than 20 mph either way
+  (`|ForwardSpeed|` over 8.940545, `gp-31532`, `0x410f0c79`), the e-brake
+  is pinned at 1 and the throttle at 0.
+* Otherwise the timer is cleared to 0 and the pedals are read. So a stop
+  ends when its time runs out or when the car slows under 20 mph,
+  whichever comes first.
+
+The rest of retail's function is the demo's. Retail's callers are
+MonitorRoadBlock (5 s, see [pursuit](pursuit.md)), Munition's
+ExplodeWarhead (3.5 s), and tCopManager's ResetAllDamage and the
+pullover's end (0, to let go). `main.c` binds the setter to
+`gRealDriverForceEBrakeStopFn`.
 
 An e-brake over 0.5, at over 10 m/s, logs a replay event, "EBrake", on
 every eighth `WorldLoopCounter`. The image loads `pReplayManager` straight
@@ -242,8 +261,8 @@ constructor (0x00224788). `RealController` is the controller that
 ## Cross-check
 
 ```
-python tools/realdriver_check.py            # 152455 ops, 41163 lines, 0 differ
-python tools/realdriver_check.py --mutate   # 122 mutations, 118 caught, 4 equivalent
+python tools/realdriver_check.py            # 199214 ops, 45443 lines, 0 differ
+python tools/realdriver_check.py --mutate   # 140 mutations, 136 caught, 4 equivalent
 ```
 
 The model runs every RealDriver method but DoSnapshot as shipped in
@@ -281,7 +300,21 @@ The scenarios cover:
 * DoThrottleBrakeReverse and DoBrake over a grid;
 * DoSteering over random states and held-stick sequences;
 * Drive over random states and nitro transitions;
-* every vtable slot, a fuzz of everything interleaved, and the teardown.
+* every vtable slot, a fuzz of everything interleaved, and the teardown;
+* on the retail image, the e-brake stop: the constructor, the setter over
+  odd bits, DoThrottleBrakeReverse over a grid (timers, frame times and
+  speeds one ulp either side of 20 mph), and timed countdowns.
+
+**The retail run** (12i-3). The demo scenarios keep `ForcedEBrakeStop`
+at 0, the one value where the demo's int and retail's float agree. The
+last scenario starts with `OP_RETAIL`, which the harness ignores and
+which sends the model's ops after it to a retail emulator. There the
+constructor (`0x0013ad90`, with DriveTarget's constructor and Clear
+silent), ForceEBrakeStop and DoThrottleBrakeReverse run as shipped, with
+retail's offsets (`ForwardSpeed` at car+960) and tunables. So does
+SetLowGear, through retail's vtable (`0x002aee30`). `OP_EBDUMP` prints
+only what DoThrottleBrakeReverse reads and writes, since the rest of the
+driver is not set there.
 
 **Seven mutants survived the first pass.** Three were real gaps in the
 script:
@@ -312,3 +345,8 @@ Four are equivalent:
 * **`steer-out-sign`.** At cur = 0 the curve is clamped to MinArg 0.1,
   whose entry is 0.0. The output is a zero of one sign or the other, and
   `cvt.w.s` makes both 0.
+
+At 12i-3, eighteen mutations were added for retail's e-brake stop: the
+constructor's clear, the setter, the countdown, both tests and the
+20 mph constant one ulp up, and the clear. The first pass caught all of
+them.

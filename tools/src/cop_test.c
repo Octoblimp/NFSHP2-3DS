@@ -187,9 +187,9 @@ void collisionbody_disable_collisions(CollisionBody *b)
     printf("  colloff %s\n", sym(b));
 }
 
-void realdriver_force_ebrake_stop(RealDriver *d, int32_t on)
+void realdriver_force_ebrake_stop(RealDriver *d, float t)
 {
-    printf("  ebrake %s %08x\n", sym(d), (uint32_t)on);
+    printf("  ebrake %s %08x\n", sym(d), fb(t));
 }
 
 #define NCARS NCARS_

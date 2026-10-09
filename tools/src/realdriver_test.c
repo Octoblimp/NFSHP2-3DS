@@ -43,7 +43,7 @@ int32_t WorldLoopCounter = 100000;
 enum {
     OP_TAG, OP_FILL, OP_INIT, OP_DUMP, OP_CARF, OP_DRVF, OP_GLOB, OP_PTR,
     OP_ANSWER, OP_MASK, OP_CALL, OP_HANDLER, OP_VT, OP_TABLE, OP_INV,
-    OP_STATIC, OP_TARGET
+    OP_STATIC, OP_TARGET, OP_RETAIL, OP_EBDUMP
 };
 
 enum {
@@ -404,7 +404,7 @@ static void set_drvf(RealDriver *d, int32_t field, int32_t v)
     case 4:  d->HandlersAdded = v; break;
     case 5:  d->StartLineState = v; break;
     case 6:  d->StopRightNow = v; break;
-    case 7:  d->ForcedEBrakeStop = v; break;
+    case 7:  d->ForcedEBrakeStop = f; break;
     case 8:  d->bPowerSlide = v; break;
     case 9:  d->ManualTransmission = v; break;
     case 10: d->SteeringInput = f; break;
@@ -482,7 +482,7 @@ static void dump(int slot)
     char        buf[16];
 
     printf("d%d st %04x th %08x br %08x eb %08x dg %d sg %d ni %d vt %s "
-           "car %s port %d ha %d sl %d stop %d feb %d ps %d mt %d js %d %d "
+           "car %s port %d ha %d sl %d stop %d feb %08x ps %d mt %d js %d %d "
            "si %08x jt %d %d %d ti %08x jb %d %d %d bi %08x jr %d %d "
            "ri %08x je %d %d ei %08x lnr %d rev %d tgt %08x | cth %08x "
            "cl %d sm %d psyc %08x\n",
@@ -492,7 +492,7 @@ static void dump(int slot)
            (int)d->Base.NitroFlag, vtname(d->Base._vtable, buf),
            label(d->pCar), (int)d->Port, (int)d->HandlersAdded,
            (int)d->StartLineState, (int)d->StopRightNow,
-           (int)d->ForcedEBrakeStop, (int)d->bPowerSlide,
+           bitsf(d->ForcedEBrakeStop), (int)d->bPowerSlide,
            (int)d->ManualTransmission, d->JoySteeringDigital,
            d->JoySteeringAnalog, bitsf(d->SteeringInput),
            d->JoyThrottleDigital, d->JoyThrottleAnalog,
@@ -504,6 +504,24 @@ static void dump(int slot)
            (int)d->Reversing, fnv(&d->Base.MyDriveTarget, TGT_SIZE),
            bitsf(car.State.Throttle), (int)car.CopLights,
            (int)car.TheSirenMode, bitsf(PowerSlideYawCoef));
+}
+
+// What DoThrottleBrakeReverse reads and writes, for the retail run: the
+// rest of the driver is not set there.
+static void ebdump(int slot)
+{
+    RealDriver *d = &drv[slot];
+    char        buf[16];
+
+    printf("e%d th %08x br %08x eb %08x dg %d feb %08x rev %d ei %08x "
+           "ti %08x bi %08x mt %d vt %s car %s | cth %08x\n",
+           slot, bitsf(d->Base.Throttle), bitsf(d->Base.Brake),
+           bitsf(d->Base.EBrake), (int)d->Base.DesiredGear,
+           bitsf(d->ForcedEBrakeStop), (int)d->Reversing,
+           bitsf(d->EBrakeInput), bitsf(d->ThrottleInput),
+           bitsf(d->BrakeInput), (int)d->ManualTransmission,
+           vtname(d->Base._vtable, buf), label(d->pCar),
+           bitsf(car.State.Throttle));
 }
 
 static const struct {
@@ -613,7 +631,7 @@ static void call(int32_t fn, int slot, int32_t a, int32_t b, int32_t c)
     case F_ENABLE_SL:     realdriver_enable_start_line_state(d); break;
     case F_SET_MANUAL:    realdriver_set_manual_transmission(d, a); break;
     case F_SET_LOW_GEAR:  realdriver_set_low_gear(d); break;
-    case F_FORCE_EBRAKE:  realdriver_force_ebrake_stop(d, a); break;
+    case F_FORCE_EBRAKE:  realdriver_force_ebrake_stop(d, fbits(a)); break;
     case F_RESET_JOY:     realdriver_reset_joy_values(d); break;
     case F_DO_STEERING:   realdriver_do_steering(d, fbits(a), b); break;
     case F_DTBR:          realdriver_do_throttle_brake_reverse(d, fbits(a));
@@ -873,6 +891,13 @@ int main(int argc, char **argv)
                 b[i] = (uint8_t)(seed + 13 * i + (i >> 5));
             break;
         }
+        case OP_RETAIL:
+            // The model's switch to the retail image; the port has one.
+            (void)next();
+            break;
+        case OP_EBDUMP:
+            ebdump(next());
+            break;
         default:
             fprintf(stderr, "op %d\n", (int)op);
             return 2;
