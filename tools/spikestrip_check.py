@@ -111,6 +111,17 @@ S_ZONE = 0x00177c88
 S_SCORE = 0x0017e3b0
 S_PURSUED = 0x00227438
 S_PULL = 0x00226f30
+S_PIXEL = 0x00107600                    # eView::GetPixelSize(bVector3 *, f)
+S_CURVIEW = 0x00107ca8                  # eGetCurrentView
+S_CLASSIFY = 0x0010ccb0                 # ClassifyAABB
+S_LIGHT = 0x00115978                    # elSetupLightContext
+S_MRENDER = 0x0010dc80                  # eModel::Render
+F_RENDER = 0x001cd998                   # WorldObject::Render
+F_RENDERALL = 0x001cdb20                # RenderWorldObjects
+G_FPOS = GP - 19388                     # CurrentBufferPos
+G_FEND = GP - 19384                     # CurrentBufferEnd
+G_FFAIL = GP - 19372                    # FrameMallocFailed
+G_FAMOUNT = GP - 19368                  # FrameMallocFailAmount
 
 NCARS = 6
 NCOPS = 7
@@ -121,6 +132,9 @@ STRIP_SIZE = 2304
 EL0, EL_SIZE = 48, 112
 BOOST_DELTA = 16
 VT_BOOST = 96
+FRAME_SIZE = 4096
+NVIEWS, VIEW_SIZE, CAMERA_SIZE = 2, 128, 464
+NSOLIDS, SOLID_SIZE = 4, 192
 
 C_DRIVER, C_PLAYER, C_RACING, C_CTL = 20, 24, 28, 40
 C_POS, C_VEL, C_BODY, C_WHEEL = 96, 112, 144, 240
@@ -160,6 +174,10 @@ class Model(object):
         self.dist = [0] * NCARS
         self.blinking = [0] * NCARS
         self.pursued = [0] * NCARS
+        self.models, self.pixq, self.clsq = [], [], []
+        self.curview = 0
+        self.fbase = e.alloc(FRAME_SIZE, align=16)
+        e.write(self.fbase, bytes(FRAME_SIZE))
 
         def tok(n, size=16):
             p = e.alloc(size, align=16)
@@ -208,6 +226,19 @@ class Model(object):
             self.ctls.append(ctl)
             self.drivers.append(drv)
         self.cops = [tok("T%d" % i, 128) for i in range(NCOPS)]
+        self.views = []
+        for k in range(NVIEWS):
+            v = tok("V%d" % k, VIEW_SIZE)
+            e.put32(v + 56, tok("K%d" % k, CAMERA_SIZE))
+            e.put32(v + 68, tok("V%d.wv" % k, 64))
+            e.put32(v + 80, tok("V%d.clip" % k, 64))
+            self.views.append(v)
+        self.solids = []
+        for k in range(NSOLIDS):
+            s = tok("L%d" % k, SOLID_SIZE)
+            self.names[s + 64] = "L%d.min" % k
+            self.names[s + 80] = "L%d.max" % k
+            self.solids.append(s)
         for a, fn in ((S_OMALLOC, self.s_omalloc), (S_FREE, self.s_free),
                       (S_NEWPOOL, self.s_newpool),
                       (S_DELPOOL, self.s_delpool),
@@ -216,7 +247,11 @@ class Model(object):
                       (S_BLINK, self.s_blink), (S_EMUL, self.s_emul),
                       (S_DSI, self.s_dsi), (S_BLOW, self.s_blow),
                       (S_ZONE, self.s_zone), (S_SCORE, self.s_score),
-                      (S_PURSUED, self.s_pursued), (S_PULL, self.s_pull)):
+                      (S_PURSUED, self.s_pursued), (S_PULL, self.s_pull),
+                      (S_PIXEL, self.s_pixel), (S_CURVIEW, self.s_curview),
+                      (S_CLASSIFY, self.s_classify),
+                      (S_LIGHT, self.s_light),
+                      (S_MRENDER, self.s_mrender)):
             e.stub(a, fn)
 
     def mreset(self):
@@ -232,6 +267,8 @@ class Model(object):
             return "0"
         if v == 0xcdcdcdcd:
             return "cd"
+        if self.fbase <= v < self.fbase + FRAME_SIZE:
+            return "F+%d" % (v - self.fbase)
         return self.names.get(v, "?")
 
     def pool(self, v):
@@ -264,7 +301,10 @@ class Model(object):
             n = len(self.strips)
             self.names[p] = "S%d" % n
             for k in range(20):
-                self.names[p + EL0 + EL_SIZE * k] = "S%d.%d" % (n, k)
+                el = p + EL0 + EL_SIZE * k
+                self.names[el] = "S%d.%d" % (n, k)
+                self.names[el + 32] = "S%d.%d.m" % (n, k)
+                self.names[el + 80] = "S%d.%d.p" % (n, k)
             self.names[p + 8] = "S%d.start" % n
             self.names[p + 16] = "S%d.end" % n
             self.strips.append(p)
@@ -272,6 +312,7 @@ class Model(object):
             p = self.block(32)
             self.names[p] = "E%d" % self.nmodels
             self.nmodels += 1
+            self.models.append(p)
         else:
             p = self.block(4096)
             self.names[p] = "B%d" % self.nblocks
@@ -376,6 +417,38 @@ class Model(object):
     def s_boost(self, em):
         self.emit("  boost %s %08x" % (self.sym(em.reg[4]), em.fpr[12]
                                        & M32))
+
+    def s_pixel(self, em):
+        v = self.pixq.pop(0) if self.pixq else 100
+        p = em.reg[5] & M32
+        self.emit("  pix %s %s%s %08x -> %d" % (
+            self.sym(em.reg[4]), self.sym(p), self.words(p, 3),
+            em.fpr[12] & M32, v))
+        return v
+
+    def s_curview(self, em):
+        self.emit("  curview -> %s" % self.sym(self.curview))
+        return self.curview
+
+    def s_classify(self, em):
+        v = self.clsq.pop(0) if self.clsq else 1
+        self.emit("  classify %s %s%s -> %d" % (
+            self.sym(em.reg[4]), self.sym(em.reg[5]),
+            self.words(em.reg[6] & M32, 16), v))
+        return v
+
+    def s_light(self, em):
+        lc, m, hack, eye, view = (em.reg[r] & M32 for r in (4, 5, 6, 7, 8))
+        self.emit("  light %s %s%s %s%s %s" % (
+            self.sym(lc), self.sym(m), self.words(m, 16), self.sym(hack),
+            self.words(eye, 4), self.sym(view)))
+        return 1
+
+    def s_mrender(self, em):
+        m = em.reg[5] & M32
+        self.emit("  mrender %s %s%s %s %d" % (
+            self.sym(em.reg[4]), self.sym(m), self.words(m, 16),
+            self.sym(em.reg[6]), s32(em.reg[7])))
 
     # ---- dumps
 
@@ -560,6 +633,8 @@ class Model(object):
             p = self.block(EL_SIZE)
             n = "X%d" % len(self.elems)
             self.names[p] = n
+            self.names[p + 32] = n + ".m"
+            self.names[p + 80] = n + ".p"
             self.elems.append(p)
             self.emit("elem %s" % n)
             e.call(F_ECTOR, p)
@@ -571,6 +646,8 @@ class Model(object):
             p = self.block(96)
             n = "O%d" % len(self.wos)
             self.names[p] = n
+            self.names[p + 32] = n + ".m"
+            self.names[p + 80] = n + ".p"
             self.wos.append(p)
             mp = 0
             if a[3] != "none":
@@ -596,6 +673,48 @@ class Model(object):
             self.emit("wo %s%s" % (self.sym(p), self.wo_fields(p)))
         elif o == "cars":
             self.dump_cars()
+        elif o == "view":
+            # view|k|eye x|y|z|the WorldScreenClipMatrix's 16 words
+            v = self.views[int(a[1], 0)]
+            cam, clip = e.u32(v + 56), e.u32(v + 80)
+            for i in range(3):
+                e.put32(cam + 64 + 4 * i, int(a[2 + i], 16))
+            for i in range(16):
+                e.put32(clip + 4 * i, int(a[5 + i], 16))
+        elif o == "curview":
+            self.curview = self.views[int(a[1], 0)]
+        elif o == "frame":
+            # frame|start|room|failed|amount
+            pos = self.fbase + int(a[1], 0)
+            e.put32(G_FPOS, pos)
+            e.put32(G_FEND, pos + int(a[2], 0))
+            e.put32(G_FFAIL, int(a[3], 0))
+            e.put32(G_FAMOUNT, int(a[4], 0))
+        elif o == "fdump":
+            self.emit("frame pos %d end %d failed %d amount %d" % (
+                e.u32(G_FPOS) - self.fbase, e.u32(G_FEND) - self.fbase,
+                s32(e.u32(G_FFAIL)), e.u32(G_FAMOUNT)))
+        elif o == "msolid":
+            s = int(a[2], 0)
+            e.put32(e.u32(self.wos[int(a[1], 0)] + 8) + 12,
+                    self.solids[s] if s >= 0 else 0)
+        elif o == "allsolid":
+            for m in self.models:
+                e.put32(m + 12, self.solids[int(a[1], 0)])
+        elif o == "pix":
+            self.pixq.append(int(a[1], 0))
+        elif o == "cls":
+            self.clsq.append(int(a[1], 0))
+        elif o == "wen":
+            e.put32(self.wos[int(a[1], 0)] + 12, int(a[2], 0))
+        elif o == "render":
+            i, k = int(a[1], 0), int(a[2], 0)
+            self.emit("render O%d V%d" % (i, k))
+            e.call(F_RENDER, self.wos[i], self.views[k])
+        elif o == "renderall":
+            k = int(a[1], 0)
+            self.emit("renderall V%d" % k)
+            e.call(F_RENDERALL, self.views[k])
         else:
             raise ValueError("unknown op %s" % o)
 
@@ -821,9 +940,63 @@ def monitors():
     return s
 
 
+def rendering():
+    o = sum(1 for x in world_objects() if x.startswith("wo|"))
+    a, b, c, d = o, o + 1, o + 2, o + 3
+
+    def view(k, eye, base, step):
+        return ["view|%d|%s|%s" % (
+            k, "|".join(F(v) for v in eye),
+            "|".join(F(base + step * i) for i in range(16)))]
+
+    def mat(i):
+        return "|".join(F(0.25 * j - 1.0 + 3.0 * i) for j in range(16))
+
+    def r(i, k):
+        return ["render|%d|%d" % (i, k)]
+
+    s = view(0, (12.5, -7.25, 3.0), 0.5, 0.25)
+    s += view(1, (-40.0, 8.5, -1.5), -2.0, 0.375)
+    s += ["curview|0", "frame|0|%d|0|0" % 4096]
+    # Unlit, lit, lit by a negative, and one with no matrix.
+    s += ["wo|51515151|0|" + mat(0), "wo|52525252|1|" + mat(1),
+          "wo|53535353|-3|" + mat(2), "wo|54545454|0|none"]
+    # No solid: out of sight, once it is big enough to ask.
+    s += r(a, 0) + ["pix|1"] + r(a, 0) + ["fdump"]
+    s += ["msolid|%d|0" % a, "msolid|%d|1" % b, "msolid|%d|2" % c,
+          "msolid|%d|3" % d]
+    # The pixel size at its boundary, at 0, below it and at the ends.
+    for px in (1, 2, -5, 0, 3, 0x7fffffff, -0x80000000):
+        s += ["pix|%d" % px] + r(a, 0)
+    s += ["fdump"]
+    # ClassifyAABB's answers; the current view not the one drawn.
+    for cl in (0, 1, 2, -1):
+        s += ["cls|%d" % cl] + r(a, 1)
+    s += ["curview|1"] + r(a, 0) + r(b, 0) + ["curview|0"] + r(b, 1)
+    s += r(c, 1) + r(c, 0) + ["fdump"]
+    s += ["cls|0"] + r(b, 0) + ["pix|1"] + r(c, 0)
+    s += ["msolid|%d|-1" % b] + r(b, 0) + ["msolid|%d|1" % b]
+    # Frame memory: the matrix's 64 bytes and the light context's 288,
+    # each failing with room for exactly that and drawing with a byte more.
+    for start, room, obj in ((16, 64, a), (16, 65, a), (0, 0, a),
+                             (0, 64, b), (32, 352, b), (32, 353, b),
+                             (48, 65, b), (48, 128, c), (0, 1, a)):
+        s += ["frame|%d|%d|0|%d" % (start, room, start * 3)] + r(obj, 0)
+        s += ["fdump"]
+    # Already failed this frame; the amount wraps.
+    s += ["frame|0|10|1|4294967200"] + r(b, 0) + r(a, 0) + ["fdump"]
+    # RenderWorldObjects: the strips' pieces, then these four, some off.
+    s += ["allsolid|2", "wen|%d|0" % a, "wen|%d|2" % b, "wen|%d|-1" % c,
+          "wen|%d|1" % d]
+    s += ["frame|0|4096|0|0", "pix|1", "cls|0", "renderall|0", "fdump"]
+    s += ["frame|0|4096|0|0", "curview|1", "renderall|0", "fdump"]
+    s += ["frame|0|2048|0|0", "renderall|1", "fdump", "curview|0"]
+    return s
+
+
 def script():
-    s = world_objects() + laying() + lifetimes() + monitors()
-    s += ["closewo", "list", "initwo", "list"]
+    s = world_objects() + laying() + lifetimes() + monitors() + rendering()
+    s += ["closewo", "list", "renderall|0", "initwo", "list"]
     return s
 
 
@@ -1136,6 +1309,60 @@ MUTATIONS = [
      "        gCopManagerCreatePulloverFn(m, NULL, car, 1);"),
     ("boost_no_delta", S, "    ((ForceBoostFn)e->fn)(vt_this(ctl, e), f);",
      "    ((ForceBoostFn)e->fn)(ctl, f);"),
+    # ---- WorldObject::Render, RenderWorldObjects
+    ("ren_pix_le", W, "20.0f) < 2)", "20.0f) <= 2)"),
+    ("ren_pix_lt1", W, "20.0f) < 2)", "20.0f) < 1)"),
+    ("ren_pix_radius", W, "20.0f)", "20.5f)"),
+    ("ren_pix_point", W, "&o->Matrix.v3", "&o->Matrix.v2"),
+    ("ren_pix_curview", W, "            view, (const bVector3 *)",
+     "            eGetCurrentView(), (const bVector3 *)"),
+    ("ren_vis_nosolid", W, "    if (s == NULL)\n        return 0;",
+     "    if (s == NULL)\n        return 1;"),
+    ("ren_vis_wv", W, "eGetCurrentView()->WorldScreenClipMatrix",
+     "eGetCurrentView()->WorldViewMatrix"),
+    ("ren_vis_order", W,
+     "eMulMatrix(&clip, matrix, eGetCurrentView()->WorldScreenClipMatrix);",
+     "eMulMatrix(&clip, eGetCurrentView()->WorldScreenClipMatrix, matrix);"),
+    ("ren_vis_gt0", W, "&clip) != 0;", "&clip) > 0;"),
+    ("ren_vis_eq2", W, "&clip) != 0;", "&clip) == 2;"),
+    ("ren_vis_minmax", W, "&s->AABBMin, &s->AABBMax",
+     "&s->AABBMax, &s->AABBMin"),
+    ("ren_frame_48", W, "eframe_malloc(64)", "eframe_malloc(48)"),
+    ("ren_light_256", W, "eframe_malloc(288)", "eframe_malloc(256)"),
+    ("ren_no_copy", W, "    *m = o->Matrix;\n", ""),
+    ("ren_m_fail", W, "    if (m == NULL)\n        return;\n",
+     "    if (m == NULL)\n        m = &o->Matrix;\n"),
+    ("ren_lit_inverted", W, "if (o->AddLighting == 0) {",
+     "if (o->AddLighting != 0) {"),
+    ("ren_lit_positive", W, "if (o->AddLighting == 0) {",
+     "if (o->AddLighting <= 0) {"),
+    ("ren_lc_fail", W, "    if (lc == NULL)\n        return;\n", ""),
+    ("ren_eye_w", W, "    eye.w = 1.0f;", "    eye.w = 0.0f;"),
+    ("ren_eye_x", W, "eye.x = cam->CurrentKey.Position.x;",
+     "eye.x = cam->CurrentKey.Position.y;"),
+    ("ren_eye_z", W, "eye.z = cam->CurrentKey.Position.z;",
+     "eye.z = cam->CurrentKey.Direction.z;"),
+    ("ren_hack_clip", W, "view->WorldViewMatrix, &eye",
+     "view->WorldScreenClipMatrix, &eye"),
+    ("ren_light_curview", W, "&eye, view);", "&eye, eGetCurrentView());"),
+    ("ren_light_world", W, "el_setup_light_context(lc, m,",
+     "el_setup_light_context(lc, &o->Matrix,"),
+    ("ren_flags_4", W, "gEModelRenderFn(m, matrix, light, 0);",
+     "gEModelRenderFn(m, matrix, light, 4);"),
+    ("ren_lit_no_lc", W, "model_render((eModel *)o->pModel, m, lc);",
+     "model_render((eModel *)o->pModel, m, NULL);"),
+    ("ren_unlit_world", W, "model_render((eModel *)o->pModel, m, NULL);",
+     "model_render((eModel *)o->pModel, &o->Matrix, NULL);"),
+    ("all_enabled_gt0", W, "if (o->Enabled != 0)", "if (o->Enabled > 0)"),
+    ("all_enabled_eq1", W, "if (o->Enabled != 0)", "if (o->Enabled == 1)"),
+    ("all_every", W,
+     "        if (o->Enabled != 0)\n            worldobject_render(o, view);",
+     "        worldobject_render(o, view);"),
+    ("all_curview", W, "            worldobject_render(o, view);",
+     "            worldobject_render(o, eGetCurrentView());"),
+    ("all_reverse", W,
+     "n = WorldObjectList.next; n != &WorldObjectList; n = n->next",
+     "n = WorldObjectList.prev; n != &WorldObjectList; n = n->prev"),
 ]
 
 EQUIVALENT = {

@@ -1,10 +1,12 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 60 (2026-10-09):
-12j-2a, the spike strips' logic, is done. A roadblock with spikes lays
-its strip, and a car whose wheels cross it has those tires blown
-(`docs/formats/cop-manager.md`, "Spike strips"). The belt's pieces are
-WorldObjects that nothing draws yet: that is 12j-2b. Before it, 12j-1
+12j-2b, drawing the spike strips, is done. The belt's pieces are
+WorldObjects, now drawn in the player's view and the rear-view mirror
+(`docs/formats/cop-manager.md`, "Drawing the strips"). Before it, 12j-2a
+made the strips' logic: a roadblock with spikes lays its strip, and a
+car whose wheels cross it has those tires blown
+(`docs/formats/cop-manager.md`, "Spike strips"). Before that, 12j-1
 made the radar traps: the manager's SpawnSpeedTraps sends a cop out of
 limbo to a radar trap ahead of a racer (`docs/formats/cop-manager.md`,
 "Radar traps"). Before that, 12i-3
@@ -290,17 +292,25 @@ pursuit.obj, on a 10 KB manager. Its slices:
   - `tools/spikestrip_check.py`: 3193 lines, 0 differ; 116 mutations,
     115 caught, one equivalent. `trackgraph_check` checks
     DoSegmentsIntersect alone, its 20 mutations all caught.
-- **Next: 12j-2b**, drawing the belt: WorldObject::Render
-  (`0x001cd998`) and RenderWorldObjects (`0x001cdb20`). eDisplayFrame
-  calls RenderWorldObjects for views 1 to 3 (the rear-view mirror too,
-  not the envmap), after StuffSun and RenderPlayers and before the
-  flailers and RenderEffects. Render skips an object under 2 pixels
-  (GetPixelSize, radius 20) or out of view (eModel::IsVisible,
-  `0x0010cea8`), copies the matrix to frame memory and calls
-  eModel::Render (`0x0010dc80`), with a light context when AddLighting
-  is set. SPIKEBELT_00 is in GLOBAL/INGAMEB.BUN.
+- **12j-2b, done (Session 60):** drawing the belt, in
+  `worldobject.c`: WorldObject::Render (`0x001cd998`), with
+  eModel::IsVisible (`0x0010cea8`), and RenderWorldObjects
+  (`0x001cdb20`).
+  - `trackview.c` sets the current view (eSetCurrentView) and draws
+    the world objects after StuffSun and before the effects, in the
+    player's view and the rear-view mirror.
+  - SPIKEBELT_00 is in INGAMEB.BUN's solid list eLabInGame, which the
+    port never loaded. `load_shared_packs` now loads INGAMEB's three
+    solid lists, once, with the first track: the loader's relocation
+    is not safe to repeat.
+  - The race log counts the world objects and the strips.
+  - `tools/spikestrip_check.py`: 742 operations, 6337 lines, 0 differ;
+    32 more mutations, all caught.
+  - A test build laid three strips ahead of the player in Azahar: the
+    belts lay across the road, with the spikes upright, at 30 FPS.
+- **Next: 12k**, the helicopter: tPursuit's UpdateChopper
+  (`0x00229678`), a NULL seam (`gPursuitUpdateChopperFn`) since 12h-2.
   Then:
-  - **12k** the helicopter (UpdateChopper, `0x00229678`);
   - **12l** pullovers and Busted (CreatePullover, `0x00226f30`);
   - **12m** Be A Cop. The user's controls (2026-10-08): in Be A Cop
     the D-Pad triggers the cop's options (the helicopter, backup and
@@ -4728,9 +4738,9 @@ each class shows what it reaches.
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
 That was about 41-60 slices to the full game when the table was set.
-After 12j-2a (2026-10-09), about 23-36 are left, and the count has run
+After 12j-2b (2026-10-09), about 22-35 are left, and the count has run
 low before:
-- step 12's five (12j-2b, 12k, 12l, 12m, 12n);
+- step 12's four (12k, 12l, 12m, 12n);
 - steps 10, 14, 14b, 16, 17, 18 and 20.
 
 The replay (`ReplaySnapshot` and every `DoSnapshot`) is not in the
@@ -4743,8 +4753,8 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a to 12j-2a are done, 12j-2b
-  (drawing the spike strips) is next. See "First" at the top.
+- **Next:** step 12, the cops: 12a to 12j-2b are done, 12k
+  (the helicopter) is next. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

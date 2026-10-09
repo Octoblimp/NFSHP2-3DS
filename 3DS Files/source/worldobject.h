@@ -1,9 +1,10 @@
 // worldobject -- WorldObject, a model placed in the world by a matrix
 // (`WorldObject:Tt361=s96`), retail's 0x001cd760 .. 0x001cdd40: the
-// constructor and destructor, and InitWorldObjects / CloseWorldObjects,
-// which make and empty WorldObjectList's pool. Render and
-// RenderWorldObjects, which draw each enabled one after the cars, are the
-// renderer's and come with 12j-2b.
+// constructor and destructor, InitWorldObjects / CloseWorldObjects, which
+// make and empty WorldObjectList's pool, and Render / RenderWorldObjects,
+// which draw each enabled one. eDisplayFrame draws them in each player
+// view and the rear-view mirror, after StuffSun and before the effects;
+// trackview.c makes that call.
 //
 // The callers so far: the spike strips (spikestrip.h), whose twenty belt
 // pieces are WorldObjects built in place inside the strip; and OBB's debug
@@ -69,6 +70,24 @@ void init_world_objects(void);
 // image also tests the first object for NULL, which a list of objects
 // never holds (and on which it would spin); the port leaves the test out.
 void close_world_objects(void);
+
+struct eView;
+
+// WorldObject::Render(eView *), 0x001cd998. Nothing for an object under 2
+// pixels across (GetPixelSize of the matrix's position, radius 20) or out
+// of sight (eModel::IsVisible, 0x0010cea8: a solid, and ClassifyAABB of
+// its box through the matrix and the *current* view's
+// WorldScreenClipMatrix not 0). The matrix is copied to frame memory and
+// the model drawn there (eModel::Render, scenerycull.h's gEModelRenderFn,
+// which aborts when unset) with flags 0: with no light context when
+// AddLighting is 0, else with one from frame memory too, set up for the
+// copy, the view's WorldViewMatrix and its camera's position with w 1.
+// Frame memory running out draws nothing.
+void worldobject_render(WorldObject *o, struct eView *view);
+
+// RenderWorldObjects(eView *), 0x001cdb20: Render for each Enabled object
+// on WorldObjectList, in order, the next read after each.
+void render_world_objects(struct eView *view);
 
 // `new (WorldObjectSlotPool) WorldObject(hash, matrix, add_lighting)`:
 // bOMalloc from WorldObjectSlotPool and the constructor. Unbound so far:

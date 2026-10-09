@@ -649,8 +649,8 @@ smokeables) and no spike strip (12j).
 Bound since 12j-2a: `gCopManagerAddSpikeStripFn`, to
 `copmanager_add_spike_strip`, and `gSpikeStripBlinkBlinkPoofFn`, to
 `tspikestrip_blink_blink_poof`. A roadblock with bit 0x10 now lays its
-strip, and the strip blinks out when the roadblock goes. Its pieces are
-not drawn until 12j-2b.
+strip, and the strip blinks out when the roadblock goes. Since 12j-2b
+its pieces are drawn (`cop-manager.md`).
 
 Not bound yet:
 

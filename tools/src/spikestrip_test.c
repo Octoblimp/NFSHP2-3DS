@@ -16,15 +16,22 @@
 #include "car.h"
 #include "carcontroller.h"
 #include "copmanager.h"
+#include "camera.h"
 #include "copmgr.h"
 #include "coputil.h"
+#include "eframe.h"
+#include "elight.h"
 #include "emath.h"
+#include "emodel.h"
+#include "eview.h"
+#include "eviewmatrix.h"
 #include "hudscore.h"
 #include "playerzone.h"
 #include "pursuit.h"
 #include "race.h"
 #include "realtime.h"
 #include "scenery.h"
+#include "scenerycull.h"
 #include "spikestrip.h"
 #include "topology.h"
 #include "vtable.h"
@@ -36,6 +43,9 @@
 #define MAXBLK  64
 #define FAKE_VT 0x00500000u
 #define BOOST_DELTA 16
+#define NVIEWS  2
+#define NSOLIDS 4
+#define MAXMODELS 2048
 
 static uint32_t fb(float f)
 {
@@ -73,6 +83,9 @@ static struct {
 } names[MAX_NAMES];
 static int nnames;
 
+// Frame memory, named by its offset.
+static _Alignas(16) uint8_t farena[4096];
+
 static void name(const void *p, const char *s)
 {
     if (nnames == MAX_NAMES) {
@@ -93,6 +106,15 @@ static const char *sym(const void *p)
         return "0";
     if (u == (uintptr_t)0xcdcdcdcdcdcdcdcdull)
         return "cd";
+    if ((const uint8_t *)p >= farena
+        && (const uint8_t *)p < farena + sizeof farena) {
+        static char b[4][24];
+        static int  r;
+
+        r = (r + 1) & 3;
+        snprintf(b[r], sizeof b[r], "F+%d", (int)((const uint8_t *)p - farena));
+        return b[r];
+    }
     for (i = nnames - 1; i >= 0; i--)
         if (names[i].p == p)
             return names[i].name;
@@ -110,6 +132,23 @@ void (*gEModelInitFn)(eModel *m, uint32_t name_hash);
 void (*gEModelDestroyFn)(eModel *m, int32_t flags);
 void (*gCopManagerCreatePulloverFn)(tCopManager *m, tPursuit *p,
                                     struct Car *car, int32_t b);
+void (*gEModelRenderFn)(eModel *m, bMatrix4 *matrix, void *light,
+                        uint32_t flags);
+uint8_t  *CurrentBufferPos;
+uint8_t  *CurrentBufferEnd;
+int32_t   FrameMallocFailed;
+uint32_t  FrameMallocFailAmount;
+
+static eView    views[NVIEWS];
+static Camera   cams[NVIEWS];
+static bMatrix4 wvs[NVIEWS], clips[NVIEWS];
+static eSolid   solids[NSOLIDS];
+static eView   *cur_view;
+static eModel  *models[MAXMODELS];
+
+// The answers GetPixelSize and ClassifyAABB give, in order.
+static int32_t pixq[256], clsq[256];
+static int     pixq_n, pixq_i, clsq_n, clsq_i;
 
 static uint8_t tok_ssp[16], tok_emp[16], tok_wop[16], tok_pursuit[16];
 static uint8_t players[NCARS][16], racers[NCARS][16];
@@ -180,8 +219,14 @@ void *bSlotOMalloc(BSlotPool *pool)
         name(s, b);
         name(&s->Node, b);
         for (k = 0; k < TSPIKESTRIP_MAX_ELEMENTS; k++) {
+            WorldObject *w = &s->Elements[k].Base;
+
             snprintf(b, sizeof b, "S%d.%d", nstrips, k);
             name(&s->Elements[k], b);
+            snprintf(b, sizeof b, "S%d.%d.m", nstrips, k);
+            name(&w->Matrix, b);
+            snprintf(b, sizeof b, "S%d.%d.p", nstrips, k);
+            name(&w->Matrix.v3, b);
         }
         snprintf(b, sizeof b, "S%d.start", nstrips);
         name(&s->v2Start, b);
@@ -192,6 +237,11 @@ void *bSlotOMalloc(BSlotPool *pool)
         snprintf(b, sizeof b, "S%d", nstrips - 1);
     } else if (pool == (BSlotPool *)(void *)tok_emp) {
         p = block(sizeof(eModel));
+        if (nmodels == MAXMODELS) {
+            fprintf(stderr, "too many models\n");
+            exit(2);
+        }
+        models[nmodels] = p;
         snprintf(b, sizeof b, "E%d", nmodels++);
         name(p, b);
     } else {
@@ -323,6 +373,52 @@ void eMulMatrix(bMatrix4 *o, const bMatrix4 *m1, const bMatrix4 *m2)
     for (i = 0; i < 16; i++)
         r[i] = a[i] * 3u + b[15 - i];
     memcpy(o, r, 64);
+}
+
+int32_t eview_get_pixel_size_sphere(eView *view, const bVector3 *p, float r)
+{
+    int32_t v = pixq_i < pixq_n ? pixq[pixq_i++] : 100;
+
+    printf("  pix %s %s", sym(view), sym(p));
+    words(p, 3);
+    printf(" %08x -> %d\n", fb(r), (int)v);
+    return v;
+}
+
+eView *eGetCurrentView(void)
+{
+    printf("  curview -> %s\n", sym(cur_view));
+    return cur_view;
+}
+
+int32_t scenery_classify_aabb(const bVector4 *min, const bVector4 *max,
+                              const bMatrix4 *clip)
+{
+    int32_t v = clsq_i < clsq_n ? clsq[clsq_i++] : 1;
+
+    printf("  classify %s %s", sym(min), sym(max));
+    words(clip, 16);
+    printf(" -> %d\n", (int)v);
+    return v;
+}
+
+int el_setup_light_context(eLightContext *lc, const bMatrix4 *local_world,
+                           const bMatrix4 *hack, const bVector4 *eye,
+                           eView *view)
+{
+    printf("  light %s %s", sym(lc), sym(local_world));
+    words(local_world, 16);
+    printf(" %s", sym(hack));
+    words(eye, 4);
+    printf(" %s\n", sym(view));
+    return 1;
+}
+
+static void mrender(eModel *m, bMatrix4 *matrix, void *light, uint32_t flags)
+{
+    printf("  mrender %s %s", sym(m), sym(matrix));
+    words(matrix, 16);
+    printf(" %s %d\n", sym(light), (int)flags);
 }
 
 int32_t do_segments_intersect(const bVector2 *p, const bVector2 *d,
@@ -512,6 +608,7 @@ static void op(char **a, int na)
 {
     const char *o = a[0];
     tCopManager *m = &the_mgr;
+    int          i;
 
     (void)na;
     if (!strcmp(o, "wte")) {
@@ -596,8 +693,12 @@ static void op(char **a, int na)
 
         snprintf(b, sizeof b, "X%d", nelems);
         name(e, b);
+        snprintf(b, sizeof b, "X%d.m", nelems);
+        name(&e->Base.Matrix, b);
+        snprintf(b, sizeof b, "X%d.p", nelems);
+        name(&e->Base.Matrix.v3, b);
         elems[nelems++] = e;
-        printf("elem %s\n", b);
+        printf("elem %s\n", sym(e));
         tspikestriprenderelement_construct(e);
     } else if (!strcmp(o, "edel")) {
         tSpikeStripRenderElement *e = elems[num(a[1])];
@@ -614,12 +715,16 @@ static void op(char **a, int na)
 
         snprintf(b, sizeof b, "O%d", nwos);
         name(w, b);
+        snprintf(b, sizeof b, "O%d.m", nwos);
+        name(&w->Matrix, b);
+        snprintf(b, sizeof b, "O%d.p", nwos);
+        name(&w->Matrix.v3, b);
         wos[nwos++] = w;
         if (strcmp(a[3], "none")) {
             setf(&mx.v0.x, a + 3, 16);
             mp = &mx;
         }
-        printf("wo %s\n", b);
+        printf("wo %s\n", sym(w));
         worldobject_construct(w, hex(a[1]), mp, (int32_t)num(a[2]));
     } else if (!strcmp(o, "wonull")) {
         wos[num(a[1])]->pModel = NULL;
@@ -638,6 +743,45 @@ static void op(char **a, int na)
         printf("\n");
     } else if (!strcmp(o, "cars")) {
         dump_cars();
+    } else if (!strcmp(o, "view")) {
+        int k = (int)num(a[1]);
+
+        cams[k].CurrentKey.Position.x = bf(hex(a[2]));
+        cams[k].CurrentKey.Position.y = bf(hex(a[3]));
+        cams[k].CurrentKey.Position.z = bf(hex(a[4]));
+        setf(&clips[k].v0.x, a + 5, 16);
+    } else if (!strcmp(o, "curview")) {
+        cur_view = &views[num(a[1])];
+    } else if (!strcmp(o, "frame")) {
+        CurrentBufferPos = farena + num(a[1]);
+        CurrentBufferEnd = CurrentBufferPos + num(a[2]);
+        FrameMallocFailed = (int32_t)num(a[3]);
+        FrameMallocFailAmount = num(a[4]);
+    } else if (!strcmp(o, "fdump")) {
+        printf("frame pos %d end %d failed %d amount %u\n",
+               (int)(CurrentBufferPos - farena),
+               (int)(CurrentBufferEnd - farena), (int)FrameMallocFailed,
+               FrameMallocFailAmount);
+    } else if (!strcmp(o, "msolid")) {
+        int s = (int)num(a[2]);
+
+        ((eModel *)wos[num(a[1])]->pModel)->Solid
+            = s >= 0 ? (void *)&solids[s] : NULL;
+    } else if (!strcmp(o, "allsolid")) {
+        for (i = 0; i < nmodels; i++)
+            models[i]->Solid = &solids[num(a[1])];
+    } else if (!strcmp(o, "pix")) {
+        pixq[pixq_n++] = (int32_t)num(a[1]);
+    } else if (!strcmp(o, "cls")) {
+        clsq[clsq_n++] = (int32_t)num(a[1]);
+    } else if (!strcmp(o, "wen")) {
+        wos[num(a[1])]->Enabled = (int32_t)num(a[2]);
+    } else if (!strcmp(o, "render")) {
+        printf("render O%d V%d\n", (int)num(a[1]), (int)num(a[2]));
+        worldobject_render(wos[num(a[1])], &views[num(a[2])]);
+    } else if (!strcmp(o, "renderall")) {
+        printf("renderall V%d\n", (int)num(a[1]));
+        render_world_objects(&views[num(a[1])]);
     } else {
         fprintf(stderr, "unknown op %s\n", o);
         exit(2);
@@ -666,6 +810,28 @@ int main(int argc, char **argv)
     gEModelInitFn = model_init;
     gEModelDestroyFn = model_destroy;
     gCopManagerCreatePulloverFn = create_pullover;
+    gEModelRenderFn = mrender;
+    for (i = 0; i < NVIEWS; i++) {
+        views[i].pCamera = &cams[i];
+        views[i].WorldViewMatrix = &wvs[i];
+        views[i].WorldScreenClipMatrix = &clips[i];
+        snprintf(b, sizeof b, "V%d", i);
+        name(&views[i], b);
+        snprintf(b, sizeof b, "K%d", i);
+        name(&cams[i], b);
+        snprintf(b, sizeof b, "V%d.wv", i);
+        name(&wvs[i], b);
+        snprintf(b, sizeof b, "V%d.clip", i);
+        name(&clips[i], b);
+    }
+    for (i = 0; i < NSOLIDS; i++) {
+        snprintf(b, sizeof b, "L%d", i);
+        name(&solids[i], b);
+        snprintf(b, sizeof b, "L%d.min", i);
+        name(&solids[i].AABBMin, b);
+        snprintf(b, sizeof b, "L%d.max", i);
+        name(&solids[i].AABBMax, b);
+    }
     the_mgr.SpikeStripList.Next = the_mgr.SpikeStripList.Prev
         = &the_mgr.SpikeStripList;
     name(&the_mgr, "M");

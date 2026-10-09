@@ -5,7 +5,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "camera.h"
+#include "eframe.h"
+#include "elight.h"
+#include "emath.h"
+#include "emodel.h"
+#include "eview.h"
+#include "eviewmatrix.h"
 #include "scenery.h"
+#include "scenerycull.h"
 
 bNode      WorldObjectList = { &WorldObjectList, &WorldObjectList };
 BSlotPool *WorldObjectSlotPool;
@@ -83,4 +91,72 @@ void close_world_objects(void)
         worldobject_destruct((WorldObject *)(void *)WorldObjectList.next, 3);
     bDeleteSlotPool(WorldObjectSlotPool);
     WorldObjectSlotPool = NULL;
+}
+
+static void model_render(eModel *m, bMatrix4 *matrix, void *light)
+{
+    if (gEModelRenderFn == NULL) {
+        fprintf(stderr, "eModel::Render reached with no seam set\n");
+        abort();
+    }
+    gEModelRenderFn(m, matrix, light, 0);
+}
+
+// eModel::IsVisible(bMatrix4 *), 0x0010cea8, whose one caller so far is
+// here.
+static int32_t model_is_visible(const eModel *m, const bMatrix4 *matrix)
+{
+    const eSolid *s = (const eSolid *)m->Solid;
+    bMatrix4      clip;
+
+    if (s == NULL)
+        return 0;
+    eMulMatrix(&clip, matrix, eGetCurrentView()->WorldScreenClipMatrix);
+    return scenery_classify_aabb(&s->AABBMin, &s->AABBMax, &clip) != 0;
+}
+
+// The model is read again for the draw. The light context's block is
+// taken after the matrix's, so it fails alone.
+void worldobject_render(WorldObject *o, eView *view)
+{
+    bMatrix4      *m;
+    eLightContext *lc;
+    bVector4       eye;
+    const Camera  *cam;
+
+    if (eview_get_pixel_size_sphere(
+            view, (const bVector3 *)(const void *)&o->Matrix.v3, 20.0f) < 2)
+        return;
+    if (!model_is_visible((const eModel *)o->pModel, &o->Matrix))
+        return;
+    m = (bMatrix4 *)eframe_malloc(64);
+    if (m == NULL)
+        return;
+    *m = o->Matrix;
+    if (o->AddLighting == 0) {
+        model_render((eModel *)o->pModel, m, NULL);
+        return;
+    }
+    lc = (eLightContext *)eframe_malloc(288);
+    if (lc == NULL)
+        return;
+    cam = view->pCamera;
+    eye.x = cam->CurrentKey.Position.x;
+    eye.y = cam->CurrentKey.Position.y;
+    eye.z = cam->CurrentKey.Position.z;
+    eye.w = 1.0f;
+    el_setup_light_context(lc, m, view->WorldViewMatrix, &eye, view);
+    model_render((eModel *)o->pModel, m, lc);
+}
+
+void render_world_objects(eView *view)
+{
+    bNode *n;
+
+    for (n = WorldObjectList.next; n != &WorldObjectList; n = n->next) {
+        WorldObject *o = (WorldObject *)(void *)n;
+
+        if (o->Enabled != 0)
+            worldobject_render(o, view);
+    }
 }

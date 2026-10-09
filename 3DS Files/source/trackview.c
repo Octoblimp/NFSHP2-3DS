@@ -37,6 +37,7 @@
 #include "trackflow.h"
 #include "trackroute.h"
 #include "weatherman.h"
+#include "worldobject.h"
 
 // The track's files, named from its number as the game names them from
 // RaceParameters.TrackNumber (retail 0x0031a898, the demo's 0x00312520).
@@ -1828,10 +1829,21 @@ static size_t whole_chunks(const uint8_t* data, size_t len)
     return (size_t)(c - data);
 }
 
+// Whether INGAMEB's solid lists are in: see load_shared_packs.
+static bool s_sharedSolids;
+
 // The packs in the bundles the UI already holds, GLOBALB.BUN and
 // INGAMEB.BUN: the boot and LOADING_TRACK_COMMON's, loaded before anything
 // of the track's. Slot 2's loader is offered every top-level chunk and
 // takes the packs and flipbooks; the rest of those bundles is the UI's.
+//
+// Slot 4's, LoaderSolidList, takes INGAMEB's three solid lists, in the
+// file's order among the packs: eLabInGame's (SPIKEBELT_00, the markers,
+// ROADBLOCK_BARREL, SMOKEBOMB, ...) and the two of drivers. GLOBALB has
+// none. The loader moves each strip's data pointer on by where the data
+// is, and the port keeps INGAMEB for the session where retail reads it
+// afresh, so the lists go in once, with the first track, and stay. Each
+// track's eFixUpTables points their texture tables at its packs again.
 static void load_shared_packs(TrackView* v)
 {
     int i;
@@ -1844,8 +1856,13 @@ static void load_shared_packs(TrackView* v)
             if (v->numSharedChunks < TRACKVIEW_MAX_SHARED_CHUNKS
                 && loader_texture_pack(c)) {
                 v->sharedChunk[v->numSharedChunks++] = c;
+            } else if (!s_sharedSolids) {
+                loader_solid_list(c);
             }
         }
+    }
+    if (v->numShared > 0) {
+        s_sharedSolids = true;
     }
 }
 
@@ -3377,6 +3394,8 @@ void trackview_draw_mirror(TrackView* v)
     if (!georender_mirror_begin(clear)) {
         return;
     }
+    // eDisplayFrame makes each view current before its chain (0x001131fc).
+    eSetCurrentView(view);
     s_draw       = v;
     s_mirrorView = true;
     v->listFrame = false;
@@ -3400,6 +3419,12 @@ void trackview_draw_mirror(TrackView* v)
     hangwatch_mark("the mirror's scenery");
     georender_run_begin();
     scenery_stuff_scenery(&v->cull, view);
+    georender_run_end();
+    // RenderWorldObjects (0x001cdb20) for the mirror too: the spike
+    // strips' belts. The mirror has no sun, so they follow the scenery.
+    hangwatch_mark("the mirror's world objects");
+    georender_run_begin();
+    render_world_objects(view);
     georender_run_end();
     draw_deferred(v, false);
     hangwatch_mark("the mirror's cars");
@@ -3483,6 +3508,9 @@ void trackview_draw(TrackView* v)
     // Prelit: the vertex colour and nothing else.
     georender_set_light(0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
 
+    // eDisplayFrame makes each view current before its chain (0x001131fc):
+    // WorldObject::Render culls by the current view's clip matrix.
+    eSetCurrentView(view);
     s_draw        = v;
     s_worldView   = view->WorldViewMatrix;
     v->drawn        = 0;
@@ -3531,10 +3559,11 @@ void trackview_draw(TrackView* v)
     FRAMEPROF_STAMP(FRAMEPROF_MODELS);
 
     // Then StuffSun (0x00112ecc), after DrawNisObjects, which has nothing
-    // to draw here. Its quads draw at once; see render_epoly. Then the
-    // effects (RenderEffects, FrameEffects' and WorldEffects'), whose
-    // sprites wait on the lists, and the scenery's chain ends with
-    // AttachSolidPolys alone (0x001134a4).
+    // to draw here. Its quads draw at once; see render_epoly. Then
+    // RenderWorldObjects (0x001cdb20, after RenderPlayers): the spike
+    // strips' belts. Then the effects (RenderEffects, FrameEffects' and
+    // WorldEffects'), whose sprites wait on the lists, and the scenery's
+    // chain ends with AttachSolidPolys alone (0x001134a4).
     v->sunQuads       = 0;
     v->sunQuadsFailed = 0;
     georender_set_fog(s_fogOn ? &s_skyFog : NULL, s_fogColour);
@@ -3543,6 +3572,10 @@ void trackview_draw(TrackView* v)
     StuffSun(view);
     s_quadTarget = NULL;
     georender_set_fog(s_fogOn ? &s_fog : NULL, s_fogColour);
+    hangwatch_mark("the world objects begun");
+    georender_run_begin();
+    render_world_objects(view);
+    georender_run_end();
     render_effects(view);
     georender_run_begin();
     draw_deferred(v, false);

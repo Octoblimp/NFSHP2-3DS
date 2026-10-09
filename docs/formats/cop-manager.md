@@ -400,10 +400,71 @@ side of p's line q and q + e lie; if their product is above 0 (or NaN),
 the answer is 0. Then the same for p and p + d against q's line. So
 segments on one line count as crossing even when apart, as retail's do.
 
-The pieces are WorldObjects, but nothing draws WorldObjectList yet.
-That is 12j-2b: Render (`0x001cd998`) and RenderWorldObjects
-(`0x001cdb20`), after the cars. The default constructor (`0x00241308`)
-and DoSnapshot (`0x00241898`) are the replay's.
+The default constructor (`0x00241308`) and DoSnapshot (`0x00241898`)
+are the replay's.
+
+## Drawing the strips (12j-2b)
+
+The pieces are drawn as WorldObjects. `worldobject.c` has Render
+(`0x001cd998`) and RenderWorldObjects (`0x001cdb20`).
+
+**RenderWorldObjects** walks WorldObjectList in order and renders each
+object whose Enabled is not 0. It reads the next link after each.
+
+**Render** draws nothing when:
+
+1. the object is under 2 pixels across: GetPixelSize (`0x00107600`)
+   of the matrix's position, with radius 20, is below 2;
+2. eModel::IsVisible (`0x0010cea8`) fails. That needs a solid, and
+   ClassifyAABB of the solid's box through the matrix times the
+   *current* view's WorldScreenClipMatrix (not the view passed in)
+   must not be 0.
+
+Otherwise the matrix is copied into 64 bytes of frame memory and the
+model is drawn there with flags 0:
+
+- when AddLighting is 0, with no light context;
+- otherwise with a 288-byte light context, also from frame memory. It
+  is set up (elSetupLightContext) for the copy, the view's
+  WorldViewMatrix and the eye: the camera's CurrentKey position, with
+  w 1.
+
+If either block fails, nothing draws. The light context's block is
+taken after the matrix's, so it can fail alone.
+
+**Where.** eDisplayFrame's per-view chain makes the view current
+(`0x001131fc`), then runs:
+
+1. StuffSun;
+2. the clans, the debug draws and the camera movers;
+3. the players;
+4. RenderWorldObjects (`0x0011334c`);
+5. the flailers, the light flares and the effects.
+
+`trackview.c` matches that:
+
+- `trackview_draw` sets the current view, then draws the world objects
+  after StuffSun and before `render_effects`.
+- `trackview_draw_mirror` does the same after the mirror's scenery,
+  since the mirror has no sun.
+
+**The model.** SPIKEBELT_00 is in INGAMEB.BUN's first solid list,
+eLabInGame, with the markers, SMOKEBOMB, ROCKET, ROADBLOCK_BARREL, the
+bush shakes and TICKETBOOK. The bundle has two more lists, of drivers.
+The port had only loaded INGAMEB's texture packs.
+
+`load_shared_packs` now offers its other chunks to LoaderSolidList.
+The loader moves each strip's data pointer by where the data sits, so
+loading a second time would move it again. INGAMEB stays resident, so
+the lists are loaded once, with the first track, and stay. Each track's
+eFixUpTables points their texture tables at its packs again.
+
+A test build laid three strips ahead of the player in Azahar. The log
+read "world objects 60 (45 on), spike strips 3". The red and white
+belts lay across the road and the spikes stood upright. 30 FPS held.
+The one hitch in that run was the minimap's textures uploading, not the
+belts. `main.c`'s race log now counts the world objects (and how many
+are on) and the strips.
 
 ## The check
 
@@ -512,6 +573,28 @@ ForcePullOver and bStringHash run as shipped. The script covers:
 638 operations, 3193 lines, 0 differ. `--mutate`: 116 mutations, 115
 caught, one equivalent. That one divides the plain way: it differs from
 the EE's divide only for a zero length, where the count is 0 either way.
+
+12j-2b adds Render and RenderWorldObjects. Five more stand-ins, logged
+and answered the same way:
+
+- GetPixelSize, from a queue;
+- eGetCurrentView;
+- ClassifyAABB, from a queue;
+- elSetupLightContext;
+- eModel::Render.
+
+The script gives each side two views with cameras, world-view and clip
+matrices, four solids and a 4 KB frame arena, then covers:
+
+- unlit and lit objects (AddLighting 1 and -3), and one with no solid;
+- pixel sizes at 1, 2, -5, 0, 3, INT_MAX and INT_MIN;
+- ClassifyAABB answering 0, 1, 2 and -1;
+- the current view not the one drawn;
+- frame memory with room for neither block, one or both, at each
+  boundary, with the fail amount wrapping;
+- RenderWorldObjects over objects with Enabled 0, 2, -1 and 1.
+
+742 operations, 6337 lines, 0 differ. 32 more mutations, all caught.
 
 DoSegmentsIntersect is a stand-in there and is checked on its own in
 `tools/trackgraph_check.py`. Segments are crossed, touched at an end,

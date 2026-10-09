@@ -3221,6 +3221,24 @@ static void logRaceState(void)
             g_track.stripsDrawn, g_track.stripsDropped,
             (unsigned long)linearSpaceFree() / 1024);
     {
+        const bNode*        n;
+        const tPursuitNode* s;
+        int                 objects = 0, on = 0, strips = 0;
+
+        for (n = WorldObjectList.next; n != &WorldObjectList; n = n->next) {
+            objects++;
+            on += ((const WorldObject*)(const void*)n)->Enabled != 0;
+        }
+        if (pCopManager != NULL) {
+            for (s = pCopManager->SpikeStripList.Next;
+                 s != &pCopManager->SpikeStripList; s = s->Next) {
+                strips++;
+            }
+        }
+        logLine("race: world objects %d (%d on), spike strips %d", objects,
+                on, strips);
+    }
+    {
         // What the race baked and uploaded since the last line: after
         // trackview_prepare, each one is a hitch.
         static int      lastBakes, lastUploads;

@@ -18527,3 +18527,62 @@ tires of a car that drives over it. `docs/formats/cop-manager.md`,
 12j-2b: drawing the belt. That is WorldObject::Render (`0x001cd998`)
 and RenderWorldObjects (`0x001cdb20`), in the main view and the
 rear-view mirror, after StuffSun and before the effects.
+
+## Session 60, continued (2026-10-09) -- 12j-2b, drawing the spike strips
+
+The spike strips' belts are now drawn. `docs/formats/cop-manager.md`,
+"Drawing the strips (12j-2b)", has the details.
+
+### What it does
+
+- **`worldobject.c`:** WorldObject::Render (`0x001cd998`) and
+  RenderWorldObjects (`0x001cdb20`).
+  - Render skips an object under 2 pixels across (GetPixelSize,
+    radius 20) or out of the current view (eModel::IsVisible,
+    `0x0010cea8`, ported here).
+  - It copies the matrix to frame memory and draws the model there,
+    with a light context when AddLighting is set.
+- **`trackview.c`:**
+  - Both the player's view and the rear-view mirror now set the current
+    view, as eDisplayFrame does.
+  - Both draw the world objects after StuffSun (in the mirror, after
+    the scenery) and before the effects.
+  - `load_shared_packs` loads INGAMEB.BUN's three solid lists (the
+    in-game models, SPIKEBELT_00 among them, and two of drivers),
+    once, with the first track.
+- **`main.c`:** the race log counts the world objects, how many are on,
+  and the strips.
+
+### Checked
+
+- `tools/spikestrip_check.py` now runs Render and RenderWorldObjects
+  too. The new stand-ins are:
+  - GetPixelSize;
+  - eGetCurrentView;
+  - ClassifyAABB;
+  - elSetupLightContext;
+  - eModel::Render.
+
+  It also uses a frame arena. The new cases are:
+  - each pixel boundary;
+  - each ClassifyAABB answer;
+  - a current view that is not the drawn one;
+  - each frame-memory shortfall;
+  - Enabled values of 0, 2, -1 and 1.
+
+  742 operations, 6337 lines, 0 differ. The 32 new mutations were all
+  caught.
+- A test build laid three strips ahead of the player.
+  - The belts lay across the road and the spikes stood upright.
+  - The log read "world objects 60 (45 on), spike strips 3".
+  - It held 30 FPS. The run's one hitch was the minimap's textures
+    uploading, not the belts.
+  - That code was then taken out.
+- The clean CIA builds.
+- `run_azahar_quickrace.ps1 -HoldKeys 65`: PASS. A Hot Pursuit quick
+  race from the frontend ran at 30 FPS and Speed 100%, on AC.
+
+### Next
+
+12k: the helicopter. That is tPursuit's UpdateChopper (`0x00229678`),
+a NULL seam since 12h-2.
