@@ -2077,6 +2077,15 @@ is citro3d and owns the top.
           grant), and core 2 for the streams where the profile says so.
         - **13b-4:** only the cuts the profile demands, keeping retail's
           look. Any cut that changes the look goes to the user first.
+        - **The user's playtest on the device, 2026-10-09: heavy scenes
+          lag.** On the desert track, near the end, where the yellow neon
+          signs point left and the dust/fog effect is, the race slows
+          down. It is playable, but more than expected, and a little worse
+          with the helicopter in the chase. There are no logs (they were
+          wiped). To do soon: run the timing build there (13b-2's
+          profiler) and see what costs -- the models in view, the dust and
+          fog sprites (`acidsys.c`), the signs, the helicopter's model and
+          its light -- then cut by the profile, keeping retail's look.
 
 ## Phase 5 -- Polish
 

@@ -128,7 +128,7 @@ and "R-TB12" retail's, whose 279 top-level chunks all have a taker.
 | 18 | 18 | TrackRoutes | `34121` routes, `34122` signposts | 1, 1 | 2 | 2 | `trackroute.c` |
 | 19 | 19 | TrackPath | `80034147` | 1 | 1 | 1 | `trackpath.c` |
 | -- | 20 | PhysPredict | `34700` | 1 | 0 | -- | gone in retail |
-| 20 | 21 | NisInfo | `37010` | 1 | 0 | 0 | -- |
+| 20 | 21 | NisInfo | `37010` | 1 | 0 | 0 | `nisinfo.c` |
 | 21 | 22 | SoundScape | `80038000` | 1 | 1 | 1 | -- |
 | 22 | 23 | CharacterInfo | `34300`, `34301` | 1, 1 | 0 | 0 | `characterinfo.c` |
 | 23 | 24 | HeliSheet | retail `80034800`; the demo's `34800` | 1 | 1 | 1 | `helisheet.c` ([helisheet](helisheet.md)) |

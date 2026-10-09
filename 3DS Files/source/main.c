@@ -87,6 +87,10 @@
 #include "copmgr.h"
 #include "pursuit.h"
 #include "pursuitchopper.h"
+#include "pullover.h"
+#include "nisinfo.h"
+#include "nismanager.h"
+#include "playernis.h"
 #include "chopper.h"
 #include "barricade.h"
 #include "difficultyinfo.h"
@@ -2408,12 +2412,16 @@ static void loadGlobalCarInfo(UIBundle* b)
         // the AI's skill tables and the catchup knees. Without it every
         // SpeedFactor is 0 and an AI racer's desired speed with it.
         taken += loader_difficulty_info(c);
+        // LoaderNisInfo: the 8 ticket and arrest NISes' records (nisinfo.h).
+        // Without them every NIS is 0 frames long and a pullover's ends at
+        // once.
+        taken += loader_nis_info(c);
         c += 8 + size;
     }
-    logPrintf("car data: %d chunks, %d skins, %d characters, %d tracks; "
-              "%d texture chunks\n",
+    logPrintf("car data: %d chunks, %d skins, %d characters, %d tracks, "
+              "%d NISes; %d texture chunks\n",
               taken, (int)NumSkinInfo, (int)NumCharacterInfo,
-              (int)HighestTrackNumber, packs);
+              (int)HighestTrackNumber, (int)NumNisInfos, packs);
 }
 
 static const char* messageName(BScreenMessage msg)
@@ -3284,6 +3292,23 @@ static void logRaceState(void)
                 h != NULL ? (double)h->CurrentPos.y : 0.0,
                 h != NULL ? (double)h->CurrentPos.z : 0.0,
                 (int)pCopManager->bChopperBusy);
+        if (p != NULL && p->MyCar != NULL) {
+            // Player 0's pullover NIS (12l-2): playing or not, which NIS
+            // and camera, when it ends, the next of each kind, and the
+            // tickets so far.
+            const NisManager* nm = p->pNisManager;
+
+            logLine("race: player NIS %s, playing %d nis %d cam %d end %ld, "
+                    "next ticket %d arrest %d, tickets %d",
+                    nm != NULL ? "up" : "none",
+                    nm != NULL ? (int)nm->Playing : 0,
+                    nm != NULL ? (int)nm->NisNumber : -1,
+                    nm != NULL ? (int)nm->CamNumber : -1,
+                    nm != NULL ? (long)nm->EndTime : 0l,
+                    (int)p->TicketNisIndex, (int)p->ArrestNisIndex,
+                    (int)copmanager_get_num_tickets(pCopManager,
+                                                    p->MyCar));
+        }
     }
     if (pCurrentWorld != NULL) {
         // The cop cars, those with their lights on, and their red, blue
@@ -4556,6 +4581,25 @@ int main(int argc, char** argv)
     gCopManagerBeACopRequestChopperFn   = tcopmanager_be_a_cop_request_chopper;
     gCopManagerBeACopRequestRoadBlockFn =
         tcopmanager_be_a_cop_request_road_block;
+    // The pullovers (12l): a chase or a spike strip that stops its car pulls
+    // it over, a ticket or an arrest, and the cop manager's think ends each
+    // one when its hold runs out or its NIS finishes (pullover.h).
+    gCopManagerCreatePulloverFn = copmanager_create_pullover;
+    gCopManagerEndPulloverFn    = copmanager_end_pullover;
+    // A player's pullover plays the next ticket or arrest NIS (12l-2): each
+    // player gets a NisManager and its shuffled NISes, and World's step
+    // runs UpdatePlayersGameState, which ends the NIS once its time is up
+    // and calls the pullover's callback, and keeps the wrong-way flag, the
+    // trouble watch and the speed ratio (playernis.h). The NIS player --
+    // Load, the posing, the animation and its camera -- is not ported, so
+    // the view stays on the stopped car under the TICKET or ARREST overlay.
+    gNewNisManagerFn               = nismanager_new;
+    gDeleteNisManagerFn            = nismanager_delete;
+    gNisManagerIsPlayingFn         = nismanager_is_playing;
+    gNisManagerStopFn              = nismanager_stop;
+    gPlayerCreateRandomNisArrayFn  = player_create_random_nis_array;
+    gPlayerPlayNextNisFn           = player_play_next_nis;
+    gUpdatePlayersGameStateFn      = player_update_players_game_state;
     logPrintf("car loader: pool %s\n", LoadedCarSlotPool ? "up" : "missing");
 
     // The blurb moves to the bottom screen, so the top screen stops drawing

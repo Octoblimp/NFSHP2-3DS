@@ -547,10 +547,54 @@ pursuit.obj, on a 10 KB manager. Its slices:
     the rear-view mirror, and the player's brake lights glowing.
   - The "race: cop cars" log line counts the cops, those with lights
     on, their flares, and the flares asked for and drawn.
-- **Next: 12l**, pullovers and Busted (CreatePullover, `0x00226f30`).
+- **12l-1, done (Session 63):** the pullovers, in `pullover.c`:
+  tCopManager's CreatePullover (`0x00226f30`), EndPullover
+  (`0x00225878`) and the NIS's callback to it (`0x00225868`),
+  GetArrestingOfficer (`0x00225c40`) and RemoveSpeedTrapsForCar
+  (`0x00228538`), tAICop::DoneWritingTicket (`0x00230c58`), and the
+  Player's StartBustedDisplay and StopBustedDisplay (`0x00228f08`,
+  `0x00228f00`). `docs/formats/pullover.md` has them.
+  - A chase that stops its car, or a spike strip, pulls it over. A
+    player gets a ticket, or an arrest at nNumTicketsBeforeArrest; an
+    arrest finishes the car's race.
+  - The speech calls (raiseRacerCaught, the pull-over event, Be A Cop's
+    arrests, AITicketSpeech) are seams for step 14.
+  - `tools/pullover_check.py`: 212,448 ops, 161,773 lines, 0 differ.
+    145 mutations, all caught.
+- **12l-2, done (Session 63):** the ticket and arrest NISes' timing.
+  `docs/formats/nis.md` has them.
+  - `nisinfo.c`: LoaderNisInfo (slot 20) and the three lookups.
+  - `nismanager.c`: the NisManager's constructor and destructor, Start,
+    Stop and Unload.
+  - `playernis.c`: PlayNextNis, ServiceNis, CreateRandomNisArray,
+    UpdateGameState with DetectWrongWay, IsAllowedToReset and
+    ChooseToDisplayReset, and UpdatePlayersGameState.
+  - `player.h`: retail's 180 and 184 are the trouble watch's
+    fTroubleSpeed and tTroubleSpeedTimer, where they were New180 and
+    tZoneSoundTimer.
+  - `main.c` now gives GLOBALB's NIS chunk to `loader_nis_info`. Without
+    it every NIS was 0 frames long. The "car data:" line counts 8 NISes.
+  - The NIS player is not ported: Load, the posing, the animation, the
+    NIS camera and LoadNextNis (`0x001761e8`). The view stays on the
+    stopped car under the camcorder overlay for the NIS's time.
+  - `tools/nis_check.py`: 17,748 ops, 40,372 lines, 0 differ. 97
+    mutations, 96 caught, 1 equivalent.
+  - `tools/playernis_check.py`: 173,532 ops, 89,260 lines, 0 differ.
+    150 mutations, 147 caught, 3 equivalent.
+  - `loadertable_check.py` (slot 20) and `player_check.py` (the renamed
+    fields): 0 differ.
+  - Azahar 2126.2, on AC: a Hot Pursuit quick race on track 26, PASS at
+    30 fps. The chase caught the stopped player, and NIS_Ticket04 played
+    on camera 1 for 282 world frames under REC, the date, the time and
+    BUSTED!. The car came back blinking with one ticket. The log's
+    "race: player NIS" line follows the NIS.
+  - `run_azahar_quickrace.ps1 -HoldPlan` runs holds in turn. The user,
+    2026-10-09: no braking in these runs.
+- **Next: step 14, the audio in full.** The user, 2026-10-09: after 12l,
+  the engines, sirens, cop speech and radio, and the world's sounds,
+  before anything else.
 
-  After 12k:
-  - **12l** pullovers and Busted (CreatePullover, `0x00226f30`);
+  After step 14:
   - **12m** Be A Cop. The user's controls (2026-10-08): in Be A Cop
     the D-Pad triggers the cop's options (the helicopter, backup and
     the like) and the Circle Pad drives. In a racer's race the D-Pad is
@@ -1452,6 +1496,12 @@ own cost about 1.44, the texture cache clears about 0.35.
      the hang; the user's "lossless only" is about the disc's textures).
   3. Each draw's own cost: fewer state changes between batches.
   4. On the CPU: the envmap (6.2 ms on Azahar), the cull (2.7).
+- **The user's playtest, 2026-10-09: heavy scenes lag** (TASKS.md
+  task 28). On the device, on the desert track near the end, where the
+  yellow neon signs point left and the dust/fog effect is, the race
+  slows down. It is playable but more than expected, and a little worse
+  with the helicopter. No logs. Soon: profile it there with the timing
+  build and cut what the profile shows, keeping retail's look.
 - Then the road beyond 13b: the retail pass, the AI, the cops, the
   sounds (memory: cars-racing-over-menus).
 
@@ -4979,7 +5029,8 @@ each class shows what it reaches.
 That was about 41-60 slices to the full game when the table was set.
 After 12k-7 (2026-10-09), about 22-35 are left, and the count has
 run low before:
-- step 12's: 12l, 12m and 12n, with 12k-6 after step 14b;
+- step 12's: 12m and 12n, with 12k-6 after step 14b, and the NIS
+  player;
 - steps 10, 14, 14b, 16, 17, 18 and 20.
 
 The replay (`ReplaySnapshot` and every `DoSnapshot`) is not in the
@@ -4992,9 +5043,9 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12's 12l (pullovers and Busted):
+- **Next:** step 14, the audio in full. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
-  12k-4a, 12k-4b and 12k-7 are done. See
+  12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See
   "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;

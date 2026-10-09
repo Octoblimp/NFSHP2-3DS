@@ -27,6 +27,7 @@
 #include "eview.h"
 #include "eviewmatrix.h"
 #include "epositionmarker.h"
+#include "nisinfo.h"
 #include "esolid.h"
 #include "racefinish.h"
 #include "sun.h"
@@ -811,7 +812,7 @@ static int unported_slot(int k)
 {
     return !(k == 0 || k == 1 || k == 2 || k == 4 || k == 5 || k == 6
              || k == 8 || k == 9 || k == 11 || k == 13 || k == 14 || k == 16
-             || k == 15 || k == 18 || k == 19
+             || k == 15 || k == 18 || k == 19 || k == 20
              || k == 22 || k == 23 || k == 25 || k == 28);
 }
 
@@ -1102,7 +1103,9 @@ static uint8_t *chunk_ptr(int32_t idx)
 // than the header -- a loader in its place reads the sizes and faults; 4
 // is a position-marker chunk of one record, linked first for the
 // unloader, and the list after the call must hold just it (the loader)
-// or nothing (the unloader).
+// or nothing (the unloader); 5 is a NIS table chunk of 479 bytes, loaded
+// first for the unloader, and the table after the call must be its two
+// records (the loader) or empty (the unloader).
 static void matrix(int table, int slot, uint32_t type, int mode)
 {
     static uint8_t raw[512];
@@ -1124,6 +1127,12 @@ static void matrix(int table, int slot, uint32_t type, int mode)
         memcpy(c, w, sizeof w);
         if (table)
             (void)loader_position_markers(c);
+    } else if (mode == 5) {
+        uint32_t w[2] = { NIS_INFO_CHUNK_ID, 479 };
+
+        memcpy(c, w, sizeof w);
+        if (table)
+            (void)loader_nis_info(c);
     } else if (mode == 2) {
         uint32_t w[4] = { 0x80034000u, 60, 0x00034001u, 52 };
 
@@ -1148,6 +1157,16 @@ static void matrix(int table, int slot, uint32_t type, int mode)
             printf("  list wrong\n");
         h->next = h;
         h->prev = h;
+    }
+    if (mode == 5) {
+        int ok = table ? NisInfoTable == NULL && NumNisInfos == 0
+                       : NisInfoTable == (NisInfo *)(void *)(c + 8)
+                         && NumNisInfos == 2;
+
+        if (!ok)
+            printf("  nis wrong\n");
+        NisInfoTable = NULL;
+        NumNisInfos = 0;
     }
     if (unported_slot(slot) && r) {
         if (seam_rec.set != 1 || seam_rec.slot != slot

@@ -768,9 +768,11 @@ Not bound yet:
 - RealDriver::ForceEBrakeStop, `gRealDriverForceEBrakeStopFn`, does
   nothing while NULL. `main.c` binds it since 12i-3, which ported
   retail's float timer into RealDriver.
-- Update's CreatePullover (12l) does nothing while NULL, so a caught
-  car is not pulled over.
-- So does `gPlayerLoadNextNisFn`, the Busted NIS (12l).
+- Update's CreatePullover is bound since 12l, so a caught car is pulled
+  over ([pullover](pullover.md)).
+- `gPlayerLoadNextNisFn`, Player::LoadNextNis (`0x001761e8`), loads
+  the NIS ahead of time. It is the NIS player's and does nothing while
+  NULL ([nis](nis.md)).
 - The barrels' delete and the body's fade byte abort if reached (the
   smokeables step). Nothing makes a barrel before then.
 

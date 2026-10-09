@@ -255,7 +255,7 @@ that does nothing (or returns 0) while NULL:
 | the speech manager's previousSedPlaybackState | gp-15624 + 1452 | `gCopSpeechPlaybackStateFn` | speech |
 | SpawnSpeedTraps | `0x00224a20` | `gCopManagerSpawnSpeedTrapsFn` | 12j-1, bound (below) |
 | MonitorSpikeBelts | `0x00227758` | `gCopManagerMonitorSpikeBeltsFn` | 12j-2a, bound (below) |
-| EndPullover | `0x00225878` | `gCopManagerEndPulloverFn` | 12l |
+| EndPullover | `0x00225878` | `gCopManagerEndPulloverFn` | 12l, bound ([pullover](pullover.md)) |
 | BeACopThink | `0x00227f30` | `gCopManagerBeACopThinkFn` | 12m |
 
 tPursuit's fields from 1104 on are 380 bytes further on in retail than
@@ -391,8 +391,8 @@ each strip, the next one read first:
    - Outside it, a player's car or an AI racer that is not being chased
      is pulled over.
 
-The pull-over is CreatePullover, `pursuit.h`'s seam, which does
-nothing while NULL (12l). So far a blown car only slows.
+The pull-over is CreatePullover, `pursuit.h`'s seam, which `main.c`
+binds since 12l ([pullover](pullover.md)).
 
 **DoSegmentsIntersect** (`0x00230f00`, `coputil.c`) takes p, d, q and
 e: the segments p to p + d and q to q + e. Two cross products tell which

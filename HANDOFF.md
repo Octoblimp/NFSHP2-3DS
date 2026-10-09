@@ -19232,3 +19232,65 @@ decoded.
 ### Next
 
 12l: pullovers and Busted (CreatePullover, `0x00226f30`).
+
+## Session 63 (2026-10-09) -- 12l, the pullovers and the NISes
+
+### Done
+
+- `pullover.c` (12l-1): tCopManager's CreatePullover (`0x00226f30`),
+  EndPullover (`0x00225878`) and the NIS's callback (`0x00225868`),
+  GetArrestingOfficer (`0x00225c40`), RemoveSpeedTrapsForCar
+  (`0x00228538`), tAICop::DoneWritingTicket (`0x00230c58`), and the
+  Player's StartBustedDisplay and StopBustedDisplay. `main.c` binds
+  `gCopManagerCreatePulloverFn` and `gCopManagerEndPulloverFn`, so a
+  chase that stops its car, or a spike strip, pulls it over. The speech
+  calls are seams for step 14.
+- `nisinfo.c`, `nismanager.c` and `playernis.c` (12l-2):
+  - the NIS table (LoaderNisInfo in slot 20, and its lookups);
+  - the NisManager's record, Start, Stop and Unload;
+  - the Player's PlayNextNis, ServiceNis and CreateRandomNisArray;
+  - UpdateGameState, with DetectWrongWay, IsAllowedToReset and
+    ChooseToDisplayReset, and UpdatePlayersGameState.
+
+  `main.c` binds the manager's new, delete, IsPlaying and Stop, and
+  CreateRandomNisArray, PlayNextNis and UpdatePlayersGameState.
+- `player.h`: retail's 180 and 184 are the trouble watch's speed and
+  timer (fTroubleSpeed, tTroubleSpeedTimer), where they were New180 and
+  tZoneSoundTimer.
+- The first Azahar pullover's NIS ended at once: the port gives
+  GLOBALB's chunks to its loaders by hand, and `loader_nis_info` was not
+  on the list, so NisInfoTable stayed NULL and every NIS was 0 frames.
+  `loadGlobalCarInfo` now takes it, and "car data:" counts 8 NISes.
+- `main.c` logs "race: player NIS" once a second: the manager, Playing,
+  the NIS, the camera, EndTime, the next indices and the tickets.
+- `run_azahar_quickrace.ps1 -HoldPlan "key:seconds,..."` runs holds in
+  turn. The user watches these runs and asked for no braking.
+- Docs: `nis.md` and `pullover.md` (new), with `cop-manager.md`,
+  `pursuit.md` and `loader-table.md` brought up to date.
+
+The NIS player is not ported: Load, the posing, the animation, the NIS
+camera and Player::LoadNextNis (`0x001761e8`). The view stays on the
+stopped car under the camcorder overlay for the NIS's time.
+
+### Checked
+
+- `tools/pullover_check.py`: 212,448 ops, 161,773 lines, 0 differ. 145
+  mutations, all caught.
+- `tools/nis_check.py`: 17,748 ops, 40,372 lines, 0 differ. 97
+  mutations, 96 caught, 1 equivalent.
+- `tools/playernis_check.py`: 173,532 ops, 89,260 lines, 0 differ. 150
+  mutations, 147 caught, 3 equivalent (the fold's edge, the lookup that
+  cannot miss, and 3.0f out of 0.00025 ticks).
+- `loadertable_check.py` (retail 37,558 ops, 49,626 lines) and
+  `player_check.py` (515,143 lines): 0 differ.
+- The CIA builds; `check_3dsx` and `check_shbin` pass.
+- Azahar 2126.2, on AC: a Hot Pursuit quick race on track 26, PASS at
+  30 fps. The chase caught the stopped player, and NIS_Ticket04 played
+  on camera 1 for 282 world frames under REC, the date, the time and
+  BUSTED!. The car came back blinking with one ticket, and the race went
+  on.
+
+### Next
+
+Step 14, the audio in full: engines, sirens, cop speech and radio, and
+the world's sounds (the user, 2026-10-09). Then 12m (Be A Cop) and 12n.

@@ -430,7 +430,7 @@ static const Field playerFields[] = {
     FW(tIgnoreNextPovChange, 1), FW(fFreezeZoneDelayTimer, 1),
     FP(pAverageSpeedRatio, 1), FW(tAverageSpeedTimer, 1),
     FW(fMaxSpeedRatio, 1), FW(LastTimeCarInTrouble, 1),
-    FW(TimeToDisplayResetPrompt, 1), FW(New180, 1), FW(tZoneSoundTimer, 1),
+    FW(TimeToDisplayResetPrompt, 1), FW(fTroubleSpeed, 1), FW(tTroubleSpeedTimer, 1),
     FW(DrivingControls, 1), FW(nGlueCount, 1), FW(PlayerInputMode, 1),
     FP(pCameraMover, 1), FP(pSavedCameraMover, 1),
     FP(pSavedCameraMover2, 1), FP(pRVMCameraMover, 1),

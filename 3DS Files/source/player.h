@@ -63,7 +63,8 @@ struct VisibleDrivingLine;
 #define PLAYER_DC_EBRAKE    0x10u
 
 struct Player {
-    void        (*NisFinishedCallback)(void *);  //    0
+    // PlayNextNis's `done`, called with NisFinishedCallbackParam.
+    void        (*NisFinishedCallback)(int32_t); //    0
     struct Car   *MyCar;                         //    4
     JoystickPort  JoyPort;                       //    8
     int32_t       JoyType;                       //   12
@@ -93,10 +94,10 @@ struct Player {
     float         fMaxSpeedRatio;                //  168
     Timer         LastTimeCarInTrouble;          //  172
     Timer         TimeToDisplayResetPrompt;      //  176
-    // Retail's two. FillInRaceOverMessages reads the float; RequestZone
-    // and ClearZoneSound the Timer.
-    float         New180;                        //  180
-    Timer         tZoneSoundTimer;               //  184
+    // Retail's two, the trouble watch's (playernis.h): the speed in mph
+    // at its last sample, and when that was. Nothing else reads them.
+    float         fTroubleSpeed;                 //  180
+    Timer         tTroubleSpeedTimer;            //  184
     uint32_t      DrivingControls;               //  188  PLAYER_DC_*
     int32_t       nGlueCount;                    //  192
     int32_t       PlayerInputMode;               //  196

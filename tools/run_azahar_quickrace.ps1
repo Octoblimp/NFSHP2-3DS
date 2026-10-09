@@ -21,6 +21,12 @@
 # ends, posted again every 150 ms (run_azahar_race.ps1's; the codes are
 # listed there).
 #
+# -HoldPlan is a list of holds, "key:seconds" each, run in turn from RACING
+# (after -Presses) before -HoldKeys and the watch: "65:30,0:20" holds the
+# gas for 30 seconds and then nothing for 20. A key of 0 holds nothing.
+# The user watches these runs: no brake (83), which stops the car and then
+# reverses it.
+#
 # -Presses are single presses, "key:seconds" apart, the first -PressAfter
 # seconds into RACING, with a shot after each (run_azahar_race.ps1's; the
 # key codes are listed there). The watch starts after the last.
@@ -35,7 +41,8 @@ param(
     [switch]$CopsOff,             # World Racing's Quick Race, not Hot Pursuit's
     [string]$Presses = "",
     [double]$PressAfter = 6,
-    [int[]]$HoldKeys = @()
+    [int[]]$HoldKeys = @(),
+    [string]$HoldPlan = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -276,9 +283,29 @@ if ($racing -and $Presses -ne "") {
         Shot ("press-{0}-{1}" -f $i, $vk)
     }
 }
+$n = 0
+if ($racing -and $HoldPlan -ne "") {
+    foreach ($h in $HoldPlan.Split(",")) {
+        if (-not (Alive)) { break }
+        $kv = $h.Split(":")
+        $vk = [int]$kv[0]
+        $holdEnd = (Get-Date).AddSeconds([double]$kv[1])
+        Write-Host ("  [{0,5:N1}s] hold {1} for {2} s" -f (Elapsed), $vk, $kv[1])
+        $nextShot = Get-Date
+        while ((Get-Date) -lt $holdEnd -and (Alive)) {
+            if ($vk -ne 0) { [Hp2Cap]::KeyDown($hwnd, $vk) }
+            if ((Get-Date) -ge $nextShot) {
+                $n++
+                Shot ("hold-{0}-{1}" -f $vk, $n)
+                $nextShot = (Get-Date).AddSeconds($ShotSeconds)
+            }
+            Start-Sleep -Milliseconds 150
+        }
+        if ($vk -ne 0) { [Hp2Cap]::KeyUp($hwnd, $vk) }
+    }
+}
 if ($racing) {
     $end = (Get-Date).AddSeconds($WatchSeconds)
-    $n = 0
     $nextShot = Get-Date
     while ((Get-Date) -lt $end -and (Alive)) {
         foreach ($k in $HoldKeys) { [Hp2Cap]::KeyDown($hwnd, $k) }
@@ -323,6 +350,19 @@ Write-Host ""
 Write-Host "=== AI racers (last 12) ==="
 $dbg | Where-Object { $_ -match "^race: AI car" } | Select-Object -Last 12 |
     ForEach-Object { Write-Host $_ }
+Write-Host ""
+Write-Host "=== chases and the player's NIS (changes) ==="
+# One line per change of each kind, so a long watch stays readable.
+$lastChase = ""; $lastNis = ""; $changes = @()
+foreach ($l in ($dbg | Where-Object { $_ -match "^race: (chases|player NIS)" })) {
+    if ($l -match "^race: chases") {
+        $k = $l -replace "timer [-0-9.]+", "" -replace "at [-0-9. ]+, busy", "busy"
+        if ($k -ne $lastChase) { $changes += $l; $lastChase = $k }
+    } elseif ($l -ne $lastNis) {
+        $changes += $l; $lastNis = $l
+    }
+}
+$changes | Select-Object -Last 40 | ForEach-Object { Write-Host $_ }
 Write-Host ""
 Write-Host "=== nfshp2_debug.txt (last 20) ==="
 $dbg | Select-Object -Last 20 | ForEach-Object { Write-Host $_ }

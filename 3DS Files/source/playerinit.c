@@ -99,7 +99,7 @@ struct Player *player_init(struct Player *p, JoystickPort port,
     p->tAverageSpeedTimer.PackedTime = 0;
     p->LastTimeCarInTrouble.PackedTime = 0;
     p->TimeToDisplayResetPrompt.PackedTime = 0;
-    p->tZoneSoundTimer.PackedTime = 0;
+    p->tTroubleSpeedTimer.PackedTime = 0;
     p->RadarTimer.PackedTime = 0;
     topology_init(&p->Topology);
     nisoverlay_init(&p->mFlailerNIS);
@@ -256,7 +256,7 @@ struct Player *player_init(struct Player *p, JoystickPort port,
         p->pHudAnimations[i] = NULL;
     p->LastRacePosition = 0;
     p->bCollisionDetected = 0;
-    p->New180 = 0.0f;
+    p->fTroubleSpeed = 0.0f;
     // CameraDataItems is 164 bytes in retail and not ported yet. The FOV
     // table is a new[] of 32 entries with nothing to construct.
     p->myCD = (struct CameraDataItems *)bMalloc(164, PLAYER_CPP, 531, 16);

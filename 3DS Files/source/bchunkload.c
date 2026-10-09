@@ -15,6 +15,7 @@
 #include "epositionmarker.h"
 #include "esolid.h"
 #include "helisheet.h"
+#include "nisinfo.h"
 #include "polyhedra.h"
 #include "scenery.h"
 #include "sun.h"
@@ -147,7 +148,6 @@ UNPORTED(LoaderEventManager, UnloaderEventManager, 7, 0x80036000u)
 UNPORTED(LoaderFlailerChunk, UnloaderFlailerChunk, 10, 0x80010200u)
 UNPORTED(LoaderAnimations, UnloaderAnimations, 12, 0x80034008u)
 UNPORTED(LoaderBodyDamage, UnloaderBodyDamage, 17, 0x00034030u)
-UNPORTED(LoaderNisInfo, UnloaderNisInfo, 20, 0x00037010u)
 UNPORTED(LoaderSoundScape, UnloaderSoundScape, 21, 0x80038000u)
 UNPORTED(LoaderEventTree, UnloaderEventTree, 24, 0x80034a00u)
 UNPORTED(LoaderLanguage, UnloaderLanguage, 26, 0x00039000u)
@@ -180,7 +180,7 @@ BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     LoaderBodyDamage,               // 17
     LoaderTrackRoutes,              // 18
     loader_track_path,              // 19
-    LoaderNisInfo,                  // 20
+    loader_nis_info,                // 20
     LoaderSoundScape,               // 21
     LoaderCharacterInfo,            // 22
     loader_heli_sheet,              // 23
@@ -213,7 +213,7 @@ BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
     UnloaderBodyDamage,             // 17
     UnloaderTrackRoutes,            // 18
     UnloaderTrackPath,              // 19
-    UnloaderNisInfo,                // 20
+    unloader_nis_info,              // 20
     UnloaderSoundScape,             // 21
     UnloaderCharacterInfo,          // 22
     unloader_heli_sheet,            // 23
