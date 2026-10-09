@@ -79,7 +79,7 @@ python tools/chunk_loader_table.py "PS2 Files/NFSHP2.ELF"
 | `0x80034500` | `LoaderCops`              | container -- Phase 4 pursuit |
 | `0x00034600` | `LoaderCarInfo`           | Phase 4 car data |
 | `0x00034700` | `LoaderPhysPredict`       | |
-| `0x00034800` | `LoaderHeliSheet`         | pursuit helicopter |
+| `0x00034800` | `LoaderHeliSheet`         | pursuit helicopter; retail's is the container `0x80034800` -- ported, see `helisheet.md` |
 | `0x80034a00` | `LoaderEventTree`         | container |
 | `0x00034b00` | `LoaderDifficultyInfo`    | |
 | `0x80035000` | `LoaderAcidFX`            | container -- particle/FX system; also takes `0x80035010` and `0x00035021` |

@@ -112,8 +112,8 @@ and "R-TB12" retail's, whose 279 top-level chunks all have a taker.
 | 2 | 2 | TexturePack | `b0300001`, `b0300100` | 10, 10 | 0 | 0 | `texturepack.c` |
 | 3 | 3 | FontInfo | `15010`, `30200` | 11, 0 | 0 | 0 | -- |
 | 4 | 4 | SolidList | `80034000` | 110 | 65 | 10 | `esolid.c` |
-| 5 | 5 | LightList | `80034015`, `80034019`, `3401c`, `3401e` | 1, 1, 0, 1 | 2 | 2 | -- |
-| 6 | 6 | AcidFX | `80035000`, `80035010`, `35020`, `35021` | 0, 0, 2, 2 | 2 | 2 | -- |
+| 5 | 5 | LightList | `80034015`, `80034019`, `3401c`, `3401e` | 1, 1, 0, 1 | 2 | 2 | `elight.c` |
+| 6 | 6 | AcidFX | `80035000`, `80035010`, `35020`, `35021` | 0, 0, 2, 2 | 2 | 2 | `acidsys.c` |
 | 7 | 7 | EventManager | `80036000` | 1 | 1 | 1 | -- |
 | 8 | 8 | PositionMarkers | `34013` | 27 | 0 | 0 | -- |
 | 9 | 9 | CollisionVolumes | `80034020` | 16 | 1 | 1 | `polyhedra.c` |
@@ -130,8 +130,8 @@ and "R-TB12" retail's, whose 279 top-level chunks all have a taker.
 | -- | 20 | PhysPredict | `34700` | 1 | 0 | -- | gone in retail |
 | 20 | 21 | NisInfo | `37010` | 1 | 0 | 0 | -- |
 | 21 | 22 | SoundScape | `80038000` | 1 | 1 | 1 | -- |
-| 22 | 23 | CharacterInfo | `34300`, `34301` | 1, 1 | 0 | 0 | -- |
-| 23 | 24 | HeliSheet | retail `80034800`; the demo's `34800` | 1 | 1 | 1 | -- |
+| 22 | 23 | CharacterInfo | `34300`, `34301` | 1, 1 | 0 | 0 | `characterinfo.c` |
+| 23 | 24 | HeliSheet | retail `80034800`; the demo's `34800` | 1 | 1 | 1 | `helisheet.c` ([helisheet](helisheet.md)) |
 | 24 | 25 | EventTree | `80034a00` | 4 | 0 | 0 | -- |
 | 25 | 26 | DifficultyInfo | `34b00` | 1 | 0 | 0 | `difficultyinfo.c` |
 | 26 | 27 | Language | `39000` | 8 | 0 | 0 | -- |
@@ -140,6 +140,12 @@ and "R-TB12" retail's, whose 279 top-level chunks all have a taker.
 | 29 | 30 | DemoModeReplay | `39100`, `39101`, `39102` | 5, 24, 5 | 0 | 0 | -- |
 
 The demo's TRACKB12 has 497 top-level chunks and retail's 279, and every one has a taker.
+
+Slots 15 (Cops) and 23 (HeliSheet) link whole objects. The harness
+gets `tools/src/loadertable_copstubs.c`, which stands in for what the
+rest of `copmgr.c` calls and exits if any of it is reached; the check
+only walks the cop container. The checker had not linked since 12a wired
+slot 15; 12k-1 brought it back with slot 23.
 
 In the port, a slot marked "--" is only its guard. It takes the same types
 as the image's slot and hands the chunk to `gUnportedLoaderFn(slot, unload,
@@ -386,9 +392,9 @@ each disc file's heap is given back once it is unloaded (`OP_MARK`,
 `OP_RELEASE`). The disc scenario takes every file but the tracks, and of
 the tracks TRACKB12 and TRACKB61, whose waving flag has flag `0x20`.
 
-The check runs 219 ops and prints 1,722 lines on the demo image, and
-37,334 ops and 49,070 lines on the retail one, with 0 differ. Of the 139
-mutations, 137 are caught and 2 are equivalent by construction:
+The check runs 178 ops and prints 1,617 lines on the demo image, and
+37,558 ops and 49,626 lines on the retail one, with 0 differ. Of the 156
+mutations, 154 are caught and 2 are equivalent by construction:
 
 - `load-size0`: `LoadChunks`' size test only ever saves a walk of nothing.
 - `unload-count-kept`: an animator's count is not read again once the

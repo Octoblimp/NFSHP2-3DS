@@ -18586,3 +18586,64 @@ The spike strips' belts are now drawn. `docs/formats/cop-manager.md`,
 
 12k: the helicopter. That is tPursuit's UpdateChopper (`0x00229678`),
 a NULL seam since 12h-2.
+
+## Session 60, continued (2026-10-09) -- 12k-1, the helicopter's sheet
+
+The HeliSheet now loads, and FindZValue answers the height under a
+point. `docs/formats/helisheet.md` has the details.
+
+### What it does
+
+- **`helisheet.c`:** LoaderHeliSheet (`0x001ebd20`), UnloaderHeliSheet
+  (`0x001ebd80`) and HeliSheet::FindZValue (`0x001ebad8`), with
+  HeliPoly's PointInPoly (`0x001eb6a8`) and ZValue (`0x001eb840`).
+  - Retail's chunk is a container, `0x80034800`, of the 536-byte sheet
+    (`0x34801`) and the 64-byte polygons (`0x34802`).
+  - The loader points TheHeliSheet at the first child's data, and the
+    sheet's Polys at the second's, rounded up to 16 in memory. The count
+    is the second child's size, less that pad, over 64. The port loads
+    bundles 128-aligned, so the pad is the file's.
+  - FindZValue tries the three most recent polygons, then the bucket of
+    the point's x: forward while a polygon starts at or before x, then
+    back while one could still reach it.
+- **`bchunkload.c`:** slot 23 is the port's loader and unloader.
+- **`main.c`:** the race log's world-objects line ends with the sheet's
+  polygon count.
+
+### Checked
+
+- `tools/helisheet_check.py` runs retail's three functions with nothing
+  stubbed. The cases are:
+  - every container on the card, at its own misalignment and then the
+    first at the others: centres, corners, edges, diagonals and random
+    points;
+  - runs over the recent three;
+  - edits for corner counts, buckets, widths and ids;
+  - one sheet per edge of the search, edited so that only that edge
+    decides.
+
+  54,570 ops, 38,140 lines, 0 differ. 50 mutations, all caught. The
+  first pass left four survivors (the last bucket's clamp, the forward
+  `<=`, the backward run's start and its `<=`), and the edge cases
+  catch them.
+- `tools/loadertable_check.py` had not linked since 12a put
+  `copmgr_loader` in slot 15. It now links `helisheet.c` and `copmgr.c`,
+  with `tools/src/loadertable_copstubs.c` standing in for the rest of
+  what `copmgr.c` calls (each stub exits if reached). Slots 15 and 23
+  count as ported. Demo 178 ops and 1,617 lines; retail 37,558 ops and
+  49,626 lines; 0 differ. 156 mutations, 154 caught, 2 equivalent.
+  - The stale mutations `cops-slot`, `helisheet-demo-type` and
+    `helisheet-slot` were rewritten for the tables as they are.
+  - `helisheet-unloader-loads` is new.
+- `docs/formats/loader-table.md` also had slots 5, 6 and 22 as
+  unported. They are `elight.c`, `acidsys.c` and `characterinfo.c`.
+- The CIA builds.
+- `run_azahar_quickrace.ps1 -HoldKeys 65`: PASS. A Hot Pursuit quick
+  race on track 16 ran at 30 FPS and Speed 100%, on AC. The log read
+  "heli sheet 897 polys", the file's count.
+
+### Next
+
+12k-2: the Chopper object. Its constructor, destructor and
+ClearVariables come first, then the small methods around following
+and attacking a car.

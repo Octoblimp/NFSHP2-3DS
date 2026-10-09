@@ -13,6 +13,7 @@
 #include "difficultyinfo.h"
 #include "elight.h"
 #include "esolid.h"
+#include "helisheet.h"
 #include "polyhedra.h"
 #include "scenery.h"
 #include "sun.h"
@@ -148,8 +149,6 @@ UNPORTED(LoaderAnimations, UnloaderAnimations, 12, 0x80034008u)
 UNPORTED(LoaderBodyDamage, UnloaderBodyDamage, 17, 0x00034030u)
 UNPORTED(LoaderNisInfo, UnloaderNisInfo, 20, 0x00037010u)
 UNPORTED(LoaderSoundScape, UnloaderSoundScape, 21, 0x80038000u)
-// Retail made the sheet a container, 0x80034800 of 0x34801 and 0x34802.
-UNPORTED(LoaderHeliSheet, UnloaderHeliSheet, 23, 0x80034800u)
 UNPORTED(LoaderEventTree, UnloaderEventTree, 24, 0x80034a00u)
 UNPORTED(LoaderLanguage, UnloaderLanguage, 26, 0x00039000u)
 UNPORTED(LoaderSmokeables, UnloaderSmokeables, 27, 0x00034026u, 0x00034027u)
@@ -184,7 +183,7 @@ BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     LoaderNisInfo,                  // 20
     LoaderSoundScape,               // 21
     LoaderCharacterInfo,            // 22
-    LoaderHeliSheet,                // 23
+    loader_heli_sheet,              // 23
     LoaderEventTree,                // 24
     loader_difficulty_info,         // 25
     LoaderLanguage,                 // 26
@@ -217,7 +216,7 @@ BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
     UnloaderNisInfo,                // 20
     UnloaderSoundScape,             // 21
     UnloaderCharacterInfo,          // 22
-    UnloaderHeliSheet,              // 23
+    unloader_heli_sheet,            // 23
     UnloaderEventTree,              // 24
     UnloaderDifficultyInfo,         // 25
     UnloaderLanguage,               // 26

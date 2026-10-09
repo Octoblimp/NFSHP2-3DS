@@ -108,6 +108,7 @@
 #include "capture.h"
 #include "hangwatch.h"
 #include "heapcfg.h"
+#include "helisheet.h"
 #include "logwriter.h"
 #include "geoview.h"
 #include "georender.h"
@@ -3235,8 +3236,9 @@ static void logRaceState(void)
                 strips++;
             }
         }
-        logLine("race: world objects %d (%d on), spike strips %d", objects,
-                on, strips);
+        logLine("race: world objects %d (%d on), spike strips %d, heli "
+                "sheet %d polys", objects, on, strips,
+                TheHeliSheet != NULL ? TheHeliSheet->NumPolys : -1);
     }
     {
         // What the race baked and uploaded since the last line: after

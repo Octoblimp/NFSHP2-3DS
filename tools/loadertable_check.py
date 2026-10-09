@@ -124,12 +124,13 @@ ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
 
 HARNESS = "tools/src/loadertable_test.c"
+STUBS = "tools/src/loadertable_copstubs.c"
 BCL = "3DS Files/source/bchunkload.c"
 BCH = "3DS Files/source/bchunkload.h"
 ESC = "3DS Files/source/esolid.c"
 ESH = "3DS Files/source/esolid.h"
 EMC = "3DS Files/source/emodel.c"
-SOURCES = [HARNESS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
+SOURCES = [HARNESS, STUBS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "scenery.c", "emath.c", "bmath.c", "bmathtab.c", "bmatrix.c",
     "bvector.c", "race.c", "track.c", "terraintype.c", "cartrack.c",
     "carstate.c", "terraintypetab.c", "bslotpool.c", "bticker.c", "p32.c",
@@ -139,7 +140,8 @@ SOURCES = [HARNESS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "characterinfo.c", "acidsys.c", "acidfx.c", "cameracoord.c",
     "bprintf.c", "vtable.c",
     "cartypeinfo.c", "langtab.c", "drivetrain.c", "engine.c", "wheel.c",
-    "suspension.c", "steering.c", "rigidbody.c", "table.c", "elight.c")]
+    "suspension.c", "steering.c", "rigidbody.c", "table.c", "elight.c",
+    "helisheet.c", "copmgr.c", "cop.c", "copmanager.c", "timer.c")]
 
 HARNESS_TIMEOUT = 600
 EXTRACTED = ROOT / "extracted"
@@ -257,7 +259,7 @@ CLAIMS = {
     30: [0x00039100, 0x00039101, 0x00039102],
 }
 TAKER = {t: k for k, ts in CLAIMS.items() for t in ts}
-PORTED = {0, 1, 2, 4, 5, 6, 9, 11, 13, 14, 16, 18, 19, 23, 26, 29}
+PORTED = {0, 1, 2, 4, 5, 6, 9, 11, 13, 14, 16, 18, 19, 23, 24, 26, 29}
 
 # Retail's: the demo's without PhysPredict, slot 20, and HeliSheet (23) a
 # container. The rest of the guards are the demo's.
@@ -2135,8 +2137,8 @@ MUTATIONS = [
     ("sun-type", "3DS Files/source/sun.h",
      "#define SUN_CHUNK_ID      0x00034202u",
      "#define SUN_CHUNK_ID      0x00034203u"),
-    ("cops-slot", BCL, "UNPORTED(LoaderCops, UnloaderCops, 15,",
-     "UNPORTED(LoaderCops, UnloaderCops, 16,"),
+    ("cops-slot", BCL, "    copmgr_unloader,                // 15",
+     "    UnloaderCarInfo,                // 15"),
     ("slot-19-unloader-is-loader", BCL, "    UnloaderTrackPath,",
      "    loader_track_path,"),
     ("slot-13-loader-is-null", BCL, "    loader_cameras,  ",
@@ -2177,12 +2179,14 @@ MUTATIONS = [
      "LoaderTable, BCHUNK_NUM_LOADERS - 1);"),
     ("load-demo-count", BCH, "#define BCHUNK_NUM_LOADERS 30",
      "#define BCHUNK_NUM_LOADERS 31"),
-    ("helisheet-demo-type", BCL,
-     "UNPORTED(LoaderHeliSheet, UnloaderHeliSheet, 23, 0x80034800u)",
-     "UNPORTED(LoaderHeliSheet, UnloaderHeliSheet, 23, 0x00034800u)"),
-    ("helisheet-slot", BCL,
-     "UNPORTED(LoaderHeliSheet, UnloaderHeliSheet, 23,",
-     "UNPORTED(LoaderHeliSheet, UnloaderHeliSheet, 24,"),
+    ("helisheet-demo-type", "3DS Files/source/helisheet.h",
+     "#define HELISHEET_CHUNK_ID   0x80034800u",
+     "#define HELISHEET_CHUNK_ID   0x00034800u"),
+    ("helisheet-slot", BCL, "    unloader_heli_sheet,            // 23",
+     "    UnloaderEventTree,              // 23"),
+    ("helisheet-unloader-loads", BCL,
+     "    unloader_heli_sheet,            // 23",
+     "    loader_heli_sheet,              // 23"),
     ("nis-demo-slot", BCL,
      "UNPORTED(LoaderNisInfo, UnloaderNisInfo, 20,",
      "UNPORTED(LoaderNisInfo, UnloaderNisInfo, 21,"),

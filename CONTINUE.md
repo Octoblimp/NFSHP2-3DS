@@ -1,9 +1,12 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 60 (2026-10-09):
-12j-2b, drawing the spike strips, is done. The belt's pieces are
+12k-1, the helicopter's sheet, is done. Each track's ground polygons
+for the helicopter now load through slot 23, and FindZValue finds the
+height under a point (`docs/formats/helisheet.md`). Before it, 12j-2b
+drew the spike strips. The belt's pieces are
 WorldObjects, now drawn in the player's view and the rear-view mirror
-(`docs/formats/cop-manager.md`, "Drawing the strips"). Before it, 12j-2a
+(`docs/formats/cop-manager.md`, "Drawing the strips"). Before that, 12j-2a
 made the strips' logic: a roadblock with spikes lays its strip, and a
 car whose wheels cross it has those tires blown
 (`docs/formats/cop-manager.md`, "Spike strips"). Before that, 12j-1
@@ -308,9 +311,47 @@ pursuit.obj, on a 10 KB manager. Its slices:
     32 more mutations, all caught.
   - A test build laid three strips ahead of the player in Azahar: the
     belts lay across the road, with the spikes upright, at 30 FPS.
-- **Next: 12k**, the helicopter: tPursuit's UpdateChopper
-  (`0x00229678`), a NULL seam (`gPursuitUpdateChopperFn`) since 12h-2.
-  Then:
+- **12k-1, done (Session 60):** the HeliSheet, in `helisheet.c`:
+  LoaderHeliSheet (`0x001ebd20`), UnloaderHeliSheet and
+  HeliSheet::FindZValue (`0x001ebad8`), with PointInPoly and ZValue.
+  - Slot 23 of the LoaderTable now loads it. Retail's chunk is a
+    container, `0x80034800`, of the 536-byte sheet and the polygons.
+    The polygon count is worked out from the second child's size, less
+    a pad to 16 in memory.
+  - The race log's world-objects line ends with the sheet's polygon
+    count: 897 on track 16, as in the file.
+  - `tools/helisheet_check.py`: every container on the card, at each
+    misalignment, plus edits for each edge of the search. 54,570 ops,
+    38,140 lines, 0 differ; 50 mutations, all caught.
+  - `tools/loadertable_check.py` had not linked since 12a wired slot
+    15. It links again, with `tools/src/loadertable_copstubs.c` for
+    what the rest of `copmgr.c` calls. Demo 1,617 lines, retail 49,626,
+    0 differ; 156 mutations, 154 caught, 2 equivalent.
+  - Azahar: a Hot Pursuit quick race at 30 FPS and Speed 100%.
+- **Next: 12k-2**, the Chopper object (`chopper.c`). That is its
+  constructor (`0x001e7a90`), destructor and ClearVariables, plus
+  FollowThisCar, AttackCar, AdjustBombTarget, ShiftTarget,
+  FindUnobstructedSpot, FindGroundHeight, Place/RemoveChopperInWorld,
+  ChopperBehindCar, RotateToChopperCoord, GetMaxDeceleration and
+  AbortBombingRun.
+  - Retail's Chopper is 976 bytes. The demo's fields after its
+    TopologyCoordinate are 144 further on, up to Timeout (820).
+    Retail adds words at 824 and 828, a matrix at 848, and moves Speed
+    on to 912. EmitDust is at 956, followed by a new word at 960.
+  - FindUnobstructedSpot reads its flags word on a miss without
+    FindZValue having written it (stack garbage on the first try).
+  - Then:
+    - 12k-3, the planning;
+    - 12k-4, flying;
+    - 12k-5, drawing, dust and ChopperSound;
+    - 12k-6, the bombing run;
+    - 12k-7, tPursuit's UpdateChopper (`0x00229678`) and the
+      manager's chopper methods. These bind the seams:
+      gChopperCtorFn, gChopperDestroyFn, gChopperFlyFn,
+      gChopperNew960Fn, gChopperFollowThisCarFn,
+      gPursuitUpdateChopperFn and gCopManagerBeACopRequestChopperFn.
+
+  After 12k:
   - **12l** pullovers and Busted (CreatePullover, `0x00226f30`);
   - **12m** Be A Cop. The user's controls (2026-10-08): in Be A Cop
     the D-Pad triggers the cop's options (the helicopter, backup and
@@ -4738,9 +4779,9 @@ each class shows what it reaches.
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
 That was about 41-60 slices to the full game when the table was set.
-After 12j-2b (2026-10-09), about 22-35 are left, and the count has run
+After 12k-1 (2026-10-09), about 27-40 are left, and the count has run
 low before:
-- step 12's four (12k, 12l, 12m, 12n);
+- step 12's: 12k-2 to 12k-7, 12l, 12m and 12n;
 - steps 10, 14, 14b, 16, 17, 18 and 20.
 
 The replay (`ReplaySnapshot` and every `DoSnapshot`) is not in the
@@ -4753,8 +4794,8 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a to 12j-2b are done, 12k
-  (the helicopter) is next. See "First" at the top.
+- **Next:** step 12, the cops: 12a to 12k-1 are done, 12k-2
+  (the helicopter's object) is next. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
