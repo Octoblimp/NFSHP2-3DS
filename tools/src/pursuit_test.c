@@ -1,7 +1,8 @@
 // Harness for tools/pursuit_check.py: runs the checker's script on
 // pursuit.c -- tPursuit's constructor and destructor, its state switch and
 // the calls under it, RequestPursuit and the supervisor call, the Update
-// and its helpers -- with barricade.c and copmgr.c's spike strips and
+// and its helpers, the roadblocks' Update, Monitor, Defeated and Request
+// -- with barricade.c and copmgr.c's spike strips and
 // landmarks, and prints what the model prints for the retail image. See
 // the checker's docstring.
 //
@@ -31,12 +32,16 @@
 #include "coputil.h"
 #include "drivetarget.h"
 #include "hudscore.h"
+#include "player.h"
 #include "playerhud.h"
+#include "playerzone.h"
+#include "psychodriver.h"
 #include "pursuit.h"
 #include "race.h"
 #include "racecoord.h"
 #include "raceparams.h"
 #include "realdriver.h"
+#include "replay.h"
 #include "table.h"
 #include "topology.h"
 #include "trackgraph.h"
@@ -125,7 +130,7 @@ static Car              cars[NCARS];
 static CarTypeInfo      ctis[NCARS];
 static RideInfo         rides[NCARS];
 static RacingCar        rcars[NCARS];
-static uint8_t          players[2][16];
+static Player           players[2];
 static tCop             cops[NCOPS];
 static tRoadBlock       rbs[NRBS];
 static tSpikeStrip      strips[NSTRIPS];
@@ -153,6 +158,15 @@ static union {
     LandmarkChunk c;
     uint8_t       b[sizeof(LandmarkChunk) + NLANDMARKS * sizeof(Landmark)];
 } landmarks;
+// The roadblocks': each car's controller (a PsychoDriver, for the AI's
+// e-brake timer), each roadblock's route point, the replay manager, and
+// what RequestZone and World::Random answer.
+static PsychoDriver     pdrivers[NCARS];
+static TrackRoutePoint  rbpts[NRBS];
+static uint8_t          replay_token[16];
+ReplayManager          *pReplayManager;
+static int32_t          zone_answer[2];
+static int32_t          rand_answer;
 
 static void unreached(const char *f)
 {
@@ -418,6 +432,46 @@ static void update_road_blocks(tPursuit *p)
     printf("  updaterbs %s\n", sym(p));
 }
 
+static void tire_blow(uint32_t s, int32_t b)
+{
+    printf("  speech tireblow %08x %d\n", s, (int)b);
+}
+
+static void rb_failed(tPursuit *p, int32_t b)
+{
+    printf("  speech rbfailed %s %d\n", sym(p), (int)b);
+}
+
+static void another_rb(uint32_t s, int32_t b)
+{
+    printf("  speech another %08x %d\n", s, (int)b);
+}
+
+static void spike_request(uint32_t s, int32_t b)
+{
+    printf("  speech spikereq %08x %d\n", s, (int)b);
+}
+
+static void rb_request(uint32_t s, int32_t b)
+{
+    printf("  speech rbreq %08x %d\n", s, (int)b);
+}
+
+static void rb_na(uint32_t s)
+{
+    printf("  speech rbna %08x\n", s);
+}
+
+static void bust(const bVector3 *pos)
+{
+    printf("  bust %08x %08x\n", fb(pos->x), fb(pos->y));
+}
+
+static void ebrake_stop(struct RealDriver *d, float t)
+{
+    printf("  ebrakestop %s %08x\n", sym(d), fb(t));
+}
+
 static void update_chopper(tPursuit *p)
 {
     printf("  updatechopper %s\n", sym(p));
@@ -474,10 +528,46 @@ TrackRoutePoint *car_get_route_point(Car *c, int find)
 
 int32_t player_is_nis_playing(const struct Player *p)
 {
-    int k = (int)((const uint8_t (*)[16])(const void *)p - players);
+    int k = (int)(p - players);
 
     printf("  nisplaying %s -> %d\n", sym(p), (int)nisplay[k]);
     return nisplay[k];
+}
+
+// ---- the roadblocks'
+
+int32_t player_request_zone(struct Player *p, int32_t zone, int32_t force,
+                            int32_t sound, int32_t muffle)
+{
+    int32_t r = zone_answer[p - players];
+
+    printf("  zone %s %d %d %d %d -> %d\n", sym(p), (int)zone, (int)force,
+           (int)sound, (int)muffle, (int)r);
+    return r;
+}
+
+void ReplayManager_RegisterInterestingEvent(ReplayManager *rm, float value,
+                                            const char *description)
+{
+    printf("  replay %s %08x %s\n", sym(rm), fb(value), description);
+}
+
+int32_t world_random_i(World *w, int32_t range)
+{
+    printf("  random%s %d -> %d\n", w == &the_world ? "" : " ?w",
+           (int)range, (int)rand_answer);
+    return rand_answer;
+}
+
+// coputil.c's, which trackgraph_check runs against the image; the rest of
+// coputil.c is stubbed here.
+float get_forward_track_distance(float a, float b)
+{
+    float d = a - b;
+
+    if (d < 0.0f)
+        d += TheTrackPathManager.TrackLength;
+    return d;
 }
 
 // Each stub keeps the target's points as a plain list: an add puts the
@@ -810,6 +900,17 @@ static void mvdump(void)
     printf("\n");
 }
 
+// The manager's Be A Cop roadblocks and each controller's e-brake timer.
+static void rbdump(void)
+{
+    int i;
+
+    printf("RB nrb %d eb", (int)the_mgr.nBeACopNumRoadBlocks);
+    for (i = 0; i < NCARS; i++)
+        printf(" %08x", fb(pdrivers[i].EBrakeTimer));
+    printf("\n");
+}
+
 // --------------------------------------------------------------- the ops
 
 static uint32_t num(const char *s)
@@ -871,6 +972,9 @@ static void reset(void)
     freerun = 0;
     nextrb = -1;
     landmarks.c.NumLandmarks = 0;
+    memset(pdrivers, 0, sizeof pdrivers);
+    memset(zone_answer, 0, sizeof zone_answer);
+    rand_answer = 0;
 }
 
 static void mset(const char *f, uint32_t v)
@@ -908,6 +1012,8 @@ static void mset(const char *f, uint32_t v)
         m->CarPullovers[k].bActive = (int32_t)v;
     else if (strncmp(f, "mcop", 4) == 0)
         m->Cops[k] = (int32_t)v < 0 ? NULL : &cops[v];
+    else if (strcmp(f, "nrb") == 0)
+        m->nBeACopNumRoadBlocks = (int32_t)v;
     else
         unreached(f);
 }
@@ -967,6 +1073,12 @@ static void pset(tPursuit *p, const char *f, uint32_t v)
         p->fChaseDirectionTimer = bf(v);
     else if (strcmp(f, "n1556") == 0)
         p->New1556 = bf(v);
+    else if (strcmp(f, "dbtimer") == 0)
+        p->fRoadBlockDisbandTimer = bf(v);
+    else if (strcmp(f, "rbcount") == 0)
+        p->nRoadblockCount = i;
+    else if (strcmp(f, "rbflags") == 0)
+        p->RoadBlockStateMachine.SpeechFlags = v;
     else
         unreached(f);
 }
@@ -1049,6 +1161,10 @@ static void op(char **a, int na)
             TheRaceParameters.bTickets = v;
         else if (strcmp(a[1], "RaceType") == 0)
             TheRaceParameters.RaceType = v;
+        else if (strcmp(a[1], "bHelicopter") == 0)
+            TheRaceParameters.bHelicopter = v;
+        else if (strcmp(a[1], "New624") == 0)
+            TheRaceParameters.New624 = v;
         else
             unreached(a[1]);
     } else if (strcmp(o, "g") == 0) {
@@ -1070,6 +1186,10 @@ static void op(char **a, int na)
             bDefaultSeed = v;
         else if (strcmp(a[1], "copcarpos") == 0)
             the_world.CopCarPos = (int32_t)v;
+        else if (strcmp(a[1], "spawn") == 0)
+            fRoadBlockSpawnTime = bf(v);
+        else if (strcmp(a[1], "rand") == 0)
+            rand_answer = (int32_t)v;
         else
             unreached(a[1]);
     } else if (strcmp(o, "m") == 0) {
@@ -1080,7 +1200,7 @@ static void op(char **a, int na)
         int  pl = (int)(int32_t)num(a[3]);
 
         c->CarIndex = (int16_t)num(a[2]);
-        c->pPlayer = pl < 0 ? NULL : (Player *)(void *)players[pl];
+        c->pPlayer = pl < 0 ? NULL : &players[pl];
         c->State.Position.x = bf(num(a[4]));
         c->State.Position.y = bf(num(a[5]));
         c->State.ForwardSpeed = bf(num(a[6]));
@@ -1101,6 +1221,46 @@ static void op(char **a, int na)
         drivers[k].TheDriverType = (DriverType)num(a[7]);
         c->TheMovementMode = (MovementMode)num(a[8]);
         rcars[k].FinishedLapNumberExact = bf(num(a[9]));
+    } else if (strcmp(o, "car3") == 0) {
+        Car *c = &cars[num(a[1])];
+
+        c->TheControlMode = (ControlMode)num(a[2]);
+        c->TheTrackPathCoordinate.DistanceAroundTrack = bf(num(a[3]));
+        c->State.Position.z = bf(num(a[4]));
+    } else if (strcmp(o, "pcar") == 0) {
+        players[num(a[1])].MyCar = car_arg(a[2]);
+    } else if (strcmp(o, "zone") == 0) {
+        zone_answer[num(a[1])] = (int32_t)num(a[2]);
+    } else if (strcmp(o, "rb2") == 0) {
+        int              k = (int)num(a[1]);
+        tRoadBlock      *r = &rbs[k];
+        TrackRoutePoint *q = &rbpts[k];
+
+        r->v2Position.x = bf(num(a[2]));
+        r->v2Position.y = bf(num(a[3]));
+        r->fRoadWidth = bf(num(a[4]));
+        r->fDistanceAroundTrack = bf(num(a[5]));
+        r->RoutePoint = q;
+        q->Position.x = bf(num(a[6]));
+        q->Position.y = bf(num(a[7]));
+        q->Direction.x = bf(num(a[8]));
+        q->Direction.y = bf(num(a[9]));
+    } else if (strcmp(o, "urb") == 0) {
+        tpursuit_update_road_blocks(p);
+        printf("urb U%d\n", pursuit_index(p));
+    } else if (strcmp(o, "mrb") == 0) {
+        printf("mrb U%d -> %d\n", pursuit_index(p),
+               (int)tpursuit_monitor_road_block(p));
+    } else if (strcmp(o, "rbd") == 0) {
+        tpursuit_road_block_defeated(p, (int32_t)num(a[2]));
+        printf("rbd U%d %d\n", pursuit_index(p), (int)num(a[2]));
+    } else if (strcmp(o, "rrb") == 0) {
+        trbsm_request_road_block(&p->RoadBlockStateMachine);
+        printf("rrb U%d\n", pursuit_index(p));
+    } else if (strcmp(o, "eb") == 0) {
+        pdrivers[num(a[1])].EBrakeTimer = bf(num(a[2]));
+    } else if (strcmp(o, "rbdump") == 0) {
+        rbdump();
     } else if (strcmp(o, "cflags") == 0) {
         int k = (int)num(a[1]);
 
@@ -1350,10 +1510,14 @@ int main(int argc, char **argv)
         cars[i].pRacingCar = &rcars[i];
         cars[i].MyDriver = &drivers[i];
         cars[i].pCarMover = (CarMover *)(void *)&movers[i];
+        cars[i].pCarDriver = (CarDriver *)(void *)&pdrivers[i];
         name(&cars[i], "A%d", i);
+        name(&pdrivers[i], "D%d", i);
     }
     for (i = 0; i < 2; i++)
-        name(players[i], "P%d", i);
+        name(&players[i], "P%d", i);
+    pReplayManager = (ReplayManager *)(void *)replay_token;
+    name(replay_token, "RM", 0);
     for (i = 0; i < NCOPS; i++)
         name(&cops[i], "C%d", i);
     for (i = 0; i < NRBS; i++)
@@ -1390,6 +1554,14 @@ int main(int argc, char **argv)
     gPursuitCreateRoadBlockFn = create_road_block;
     gPursuitUpdateRoadBlocksFn = update_road_blocks;
     gPursuitUpdateChopperFn = update_chopper;
+    gSpeechRaiseSpikeStripTireBlowFn = tire_blow;
+    gPursuitRoadblockFailedSpeechFn = rb_failed;
+    gSpeechRaiseRequestAnotherRoadblockFn = another_rb;
+    gSpeechRaiseSpikeStripRequestFn = spike_request;
+    gSpeechRaiseRoadblockRequestFn = rb_request;
+    gSpeechRaiseDispatchRoadBlockNAFn = rb_na;
+    gCollisionSoundPlayBustRoadBlockFn = bust;
+    gRealDriverForceEBrakeStopFn = ebrake_stop;
     reset();
     while (fgets(line, sizeof line, f) != NULL) {
         char *a[64], *s = line;

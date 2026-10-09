@@ -20,7 +20,11 @@ Level0SubStates, ShouldPursuitBeCalledOff, UpdateDriveTargets with
 tPursuitHistory::Update, the roadblock state machine's Update, the
 barrels' count down (0x0024f268), DoEarlyChaseCollisionCheck,
 IsChasedCarStoppable, and the manager's IsCopNearby, FindLandmark and
-DidRecentlyCollideWithCop. The cop
+DidRecentlyCollideWithCop. Then the roadblocks: UpdateRoadBlocks
+(0x00229b58, run straight rather than through the Update's stub),
+MonitorRoadBlock, RoadBlockDefeated and the roadblock state machine's
+RequestRoadBlock, with GetRealDistanceAroundTrack (Car+2036) and
+GetForwardTrackDistance as shipped. The cop
 manager's speakers, GetNumTickets, the free id, bRandom, bStringHash,
 IsReplayDemoMode and the cops' IsAIControlled run as shipped. The harness
 (tools/src/pursuit_test.c) runs pursuit.c, barricade.c, copmgr.c,
@@ -43,7 +47,12 @@ SetPoint2 (which store as well), tPursuit's Declare, Backup and
 BeginCollision speeches, the speech manager's raisePursuitCopHit and
 raiseSuspectCrashTraffic, CreatePullover, CreateRoadBlock (which sets the
 pursuit's roadblock from a scripted one), UpdateRoadBlocks and
-UpdateChopper.
+UpdateChopper. For the roadblocks also: the five roadblock speeches and
+tPursuit's RoadblockFailedSpeech, RealDriver::ForceEBrakeStop(float),
+Player::RequestZone (a scripted answer per player),
+PlayBustRoadBlock, ReplayManager::RegisterInterestingEvent and
+World::Random (a scripted answer). DemoDiscManager.bActive is 0. Each
+car's controller is a block whose e-brake timer (592) `rbdump` prints.
 
 **Compared** are the stubs' logs and, on `dump`, every field of a pursuit
 at retail's offsets but the drive targets, its barricades', the manager's lists, speakers, timers and seed, the
@@ -184,12 +193,30 @@ G_LANDMARKS = GP - 15656
 G_DT = GP - 19560                       # WorldTimeElapsed
 NLANDMARKS = 4
 
+# The roadblocks'.
+F_URB = S_UPDATERBS
+F_MRB = 0x0022c390
+F_RBD = 0x00229970
+F_RRB = 0x0022cc38
+S_TIREBLOW = 0x0020b460
+S_RBFAILED = 0x0022b3f8
+S_RBSPEECH = {0x0020b190: "another", 0x0020b2f0: "spikereq",
+              0x0020b140: "rbreq"}
+S_RBNA = 0x0020b7e8
+S_BUST = 0x001e5688
+S_EBRAKE = 0x0013b558
+S_ZONE = 0x00177c88
+S_REPLAY = 0x0013e270
+S_RANDOM = 0x0014e520
+G_REPLAY = GP - 22440                   # pReplayManager
+DEMO_ACTIVE = 0x002effe0                # DemoDiscManager.bActive
+
 VT_AICOP = 0x002bd698
 VT_PLAYERCOP = 0x002bd6c0
 
 RP_FIELDS = {"RaceType": 32, "Point2Point": 40, "NumLaps": 44,
              "NumPlayerCars": 48, "bTickets": 608, "bRoadBlocks": 612,
-             "BeACop": 628}
+             "bHelicopter": 620, "New624": 624, "BeACop": 628}
 RP_UNITS = 749
 
 MGR_SIZE = 10516
@@ -198,9 +225,11 @@ WORLD_SIZE = 5936
 CAR_SIZE = 2304
 CAR_INDEX, CAR_CTI, CAR_RIDE, CAR_DRIVER, CAR_PLAYER, CAR_RACING = (
     8, 12, 16, 20, 24, 28)
-CAR_MODE, CAR_MOVER = 36, 48
+CAR_CTRL, CAR_MODE, CAR_CDRIVER, CAR_MOVER = 32, 36, 44, 48
 CAR_POS, CAR_VELOCITY, CAR_UPZ = 96, 112, 184
 CAR_FWD, CAR_VELMAG, CAR_BLOWN, CAR_JRF = 960, 964, 2124, 2140
+CAR_DAT = 2036                          # GetRealDistanceAroundTrack's
+PDRIVER_SIZE, PDRIVER_EBRAKE, RPT_SIZE = 640, 592, 112
 RACING_SIZE = 48
 CTI_SIZE, CTI_MASS, CTI_DRAG = 1024, 480, 752
 NCARS, NCOPS, NRBS, NSTRIPS, NCHOPPERS, NBODIES = 6, 8, 4, 6, 2, 16
@@ -209,13 +238,14 @@ COP_SIZE, RB_SIZE, STRIP_SIZE, CHOPPER_SIZE, BODY_SIZE = (128, 120, 32,
 
 MFIELDS = {"diff": 10476, "beacop": 10336, "super": 10348, "busy": 312,
            "pcidx": 12, "head": 10324, "tail": 10328, "full": 10332,
-           "ncops": 8}
+           "ncops": 8, "nrb": 0}
 PFIELDS = {"state": 1484, "ncops": 1476, "chst": 1580, "primary": 1496,
            "secondary": 1500, "backup": 1516, "maxchase": 8,
            "rbtimer": 1532, "flags": 1588, "landmark": 1504,
            "rbstate": 1560, "rbsmt": 1564, "sub": 1488, "timer": 1524,
            "hit": 1512, "catch": 1520, "top": 1544, "dir": 1548,
-           "dirt": 1552, "n1556": 1556}
+           "dirt": 1552, "n1556": 1556, "dbtimer": 1528, "rbcount": 1584,
+           "rbflags": 1568}
 
 
 def fbits(f):
@@ -269,6 +299,7 @@ class Model(object):
         self.cut = [0] * 8
         self.low = [0] * 8
         self.cars, self.drivers, self.movers, self.routepts = [], [], [], []
+        self.pdrivers = []
         for k in range(NCARS):
             c, cti, ride, racing = (a(CAR_SIZE), a(CTI_SIZE), a(16),
                                     a(RACING_SIZE))
@@ -282,6 +313,10 @@ class Model(object):
             e.put32(c + CAR_RACING, racing)
             e.put32(c + CAR_DRIVER, drv)
             e.put32(c + CAR_MOVER, mover)
+            pd = a(PDRIVER_SIZE)
+            e.put32(c + CAR_CDRIVER, pd)
+            self.names[pd] = "D%d" % k
+            self.pdrivers.append(pd)
             self.names[c] = "A%d" % k
             self.cars.append(c)
             self.drivers.append(drv)
@@ -310,6 +345,11 @@ class Model(object):
         self.strips = many(NSTRIPS, STRIP_SIZE, "S%d")
         self.choppers = many(NCHOPPERS, CHOPPER_SIZE, "H%d")
         self.bodies = many(NBODIES, BODY_SIZE, "Y%d")
+        self.rbpts = many(NRBS, RPT_SIZE, "RQ%d")
+        self.replay = a(16)
+        self.names[self.replay] = "RM"
+        e.put32(G_REPLAY, self.replay)
+        e.put32(DEMO_ACTIVE, 0)
 
         for addr, fn in ((S_OMALLOC, self.s_omalloc),
                          (S_SLOTFREE, self.s_slotfree),
@@ -346,8 +386,16 @@ class Model(object):
                          (S_UPDATECHOPPER, self.log1("updatechopper")),
                          (S_COLLSPEECH, self.s_collspeech),
                          (S_COPHIT, self.speech2("cophit")),
-                         (S_TRAFFIC, self.speech2("traffic"))):
+                         (S_TRAFFIC, self.speech2("traffic")),
+                         (S_TIREBLOW, self.speech2("tireblow")),
+                         (S_RBFAILED, self.s_rbfailed),
+                         (S_RBNA, self.s_rbna), (S_BUST, self.s_bust),
+                         (S_EBRAKE, self.s_ebrake), (S_ZONE, self.s_zone),
+                         (S_REPLAY, self.s_replay),
+                         (S_RANDOM, self.s_random)):
             e.stub(addr, fn)
+        for addr, what in S_RBSPEECH.items():
+            e.stub(addr, self.speech2(what))
         for addr, what in S_SPEECH.items():
             e.stub(addr, self.log1("speech " + what))
         for addr, what in S_RAISE2.items():
@@ -564,6 +612,48 @@ class Model(object):
                                                s32(em.reg[6])))
         return fn
 
+    # ---- the roadblocks' stubs
+
+    def s_rbfailed(self, em):
+        self.emit("  speech rbfailed %s %d" % (self.sym(em.reg[4]),
+                                               s32(em.reg[5])))
+
+    def s_rbna(self, em):
+        self.emit("  speech rbna %08x" % (em.reg[5] & M32))
+
+    def s_bust(self, em):
+        pos = em.reg[4] & M32
+        self.emit("  bust %08x %08x" % (self.e.u32(pos),
+                                        self.e.u32(pos + 4)))
+
+    def s_ebrake(self, em):
+        self.emit("  ebrakestop %s %08x" % (self.sym(em.reg[4]),
+                                            em.fpr[12] & M32))
+
+    def s_zone(self, em):
+        k = self.players.index(em.reg[4] & M32)
+        self.emit("  zone %s %d %d %d %d -> %d" % (
+            self.sym(em.reg[4]), s32(em.reg[5]), s32(em.reg[6]),
+            s32(em.reg[7]), s32(em.reg[8]), self.zone[k]))
+        return self.zone[k]
+
+    def s_replay(self, em):
+        self.emit("  replay %s %08x %s" % (self.sym(em.reg[4]),
+                                           em.fpr[12] & M32,
+                                           self.cstr(em.reg[5] & M32)))
+
+    def s_random(self, em):
+        ok = "" if em.reg[4] & M32 == self.world else " ?w"
+        self.emit("  random%s %d -> %d" % (ok, s32(em.reg[5]), self.rand))
+        return self.rand
+
+    def rbdump(self):
+        e = self.e
+        self.emit("RB nrb %d eb%s" % (
+            s32(e.u32(self.m)),
+            "".join(" %08x" % e.u32(d + PDRIVER_EBRAKE)
+                    for d in self.pdrivers)))
+
     def cstr(self, a):
         b = self.e.read(a, 64)
         return b.split(b"\0")[0].decode("latin-1")
@@ -679,6 +769,10 @@ class Model(object):
         self.freerun = 0
         self.nextrb = -1
         e.put32(self.landmarks, 0)
+        for d in self.pdrivers:
+            e.write(d, bytes(PDRIVER_SIZE))
+        self.zone = [0, 0]
+        self.rand = 0
 
     def cop(self, s):
         k = int(s, 0)
@@ -731,10 +825,12 @@ class Model(object):
             self.freerun = s32(v(2))
         elif o == "g" and a[1] == "nextrb":
             self.nextrb = s32(v(2))
+        elif o == "g" and a[1] == "rand":
+            self.rand = s32(v(2))
         elif o == "g":
             g = {"tracklen": TRACKLEN, "rc": self.rc, "seed": G_SEED,
                  "copcarpos": self.world + 36, "dt": G_DT,
-                 "landmarks": self.landmarks}[a[1]]
+                 "landmarks": self.landmarks, "spawn": G_SPAWN}[a[1]]
             e.put32(g, v(2))
         elif o == "m":
             f = a[1]
@@ -781,6 +877,46 @@ class Model(object):
             e.put32(self.drivers[k] + 8, v(7))
             e.put32(c + CAR_MODE, v(8))
             e.put32(e.u32(c + CAR_RACING) + 32, v(9))
+        elif o == "car3":
+            c = self.cars[int(a[1])]
+            e.put32(c + CAR_CTRL, v(2))
+            e.put32(c + CAR_DAT, v(3))
+            e.put32(c + CAR_POS + 8, v(4))
+        elif o == "pcar":
+            e.put32(self.players[int(a[1])] + 4, self.car(a[2]))
+        elif o == "zone":
+            self.zone[int(a[1])] = s32(v(2))
+        elif o == "rb2":
+            k = int(a[1])
+            r, q = self.rbs[k], self.rbpts[k]
+            e.put32(r + 68, v(2))
+            e.put32(r + 72, v(3))
+            e.put32(r + 44, v(4))
+            e.put32(r + 100, v(5))
+            e.put32(r + 36, q)
+            e.put32(q, v(6))
+            e.put32(q + 4, v(7))
+            e.put32(q + 12, v(8))
+            e.put32(q + 16, v(9))
+        elif o == "urb":
+            st = e.stubs.pop(F_URB)
+            try:
+                call(F_URB, p)
+            finally:
+                e.stubs[F_URB] = st
+            self.emit("urb U%d" % self.u(p))
+        elif o == "mrb":
+            self.emit("mrb U%d -> %d" % (self.u(p), s32(call(F_MRB, p))))
+        elif o == "rbd":
+            call(F_RBD, p, v(2))
+            self.emit("rbd U%d %d" % (self.u(p), v(2)))
+        elif o == "rrb":
+            call(F_RRB, p + 1560)
+            self.emit("rrb U%d" % self.u(p))
+        elif o == "eb":
+            e.put32(self.pdrivers[int(a[1])] + PDRIVER_EBRAKE, v(2))
+        elif o == "rbdump":
+            self.rbdump()
         elif o == "cflags":
             k = int(a[1])
             self.blink[k], self.poofed[k] = s32(v(2)), s32(v(3))
@@ -1987,6 +2123,245 @@ def update_frames_script(S):
           car2(0, velmag=1.0), pset(u, catch=0.25))
     frames(u, 2)
     S.add(cars_std(), cars2_std())
+
+    rb_script(S)
+
+
+def car3(k, ctrl=None, dat=0.0, z=0.0):
+    """The control mode (REAL for the players, AI for the rest), the
+    distance around the track and the height."""
+    if ctrl is None:
+        ctrl = 1 if k < 2 else 2
+    return "car3|%d|%d|%s|%s" % (k, ctrl, F(dat), F(z))
+
+
+def rb2(k, x=50.0, y=0.0, width=12.0, dat=1000.0, rpx=40.0, rpy=0.0,
+        dx=1.0, dy=0.0):
+    """A roadblock's spot, road width and distance around the track, and
+    its route point's position and direction."""
+    return "rb2|%d|%s" % (k, "|".join(F(f) for f in (
+        x, y, width, dat, rpx, rpy, dx, dy)))
+
+
+def c0(x=0.0, y=0.0, vel=30.0, blown=0):
+    """A0, the player's car, moved."""
+    return car(0, 0, 0, x, y, vel, blown=blown, typ=0, drag=2.0,
+               mass=1000.0)
+
+
+def rb_script(S):
+    """The roadblocks: RequestRoadBlock, MonitorRoadBlock,
+    RoadBlockDefeated and UpdateRoadBlocks. The roadblock R0's cops C3
+    and C4 ride A3 and A4, more than 30 from where the chased car goes,
+    so that DisbandRoadBlock asks for no pursuit."""
+    def setup(chased=0, beacop=0, players=1, laps=3, p2p=0, rb=True):
+        S.base()
+        S.add(rp(BeACop=beacop, NumPlayerCars=players, NumLaps=laps,
+                 Point2Point=p2p, bTickets=1, RaceType=0, bHelicopter=0,
+                 New624=0))
+        S.add(cars_std(), cars2_std(), "pcar|0|0", "pcar|1|1")
+        S.add([car3(k) for k in range(NCARS)])
+        S.add("cop|3|ai|3", "cop|4|ai|4", "rb|0|3|4|2|0x71", rb2(0))
+        u = S.new(0, chased, dump=False)
+        if rb:
+            S.add(pset(u, rb=0))
+        S.add(dt(0.5), "g|spawn|%s" % F(20.0), pset(u, dir=1.0))
+        return u
+
+    def after(u):
+        S.add("dump|%d" % u, "rbdump")
+
+    # ---- RequestRoadBlock
+    for beacop in (0, 1):
+        u = setup(beacop=beacop)
+        for st in (1, -1, 2):
+            S.add(pset(u, rbstate=st), "rrb|%d" % u)
+            after(u)
+        cases = []
+        for sf in (0, 1, 3, 2):
+            for beh in (0, 0x10, 0x18, 8, 0xffffffff):
+                cases.append((sf, beh, 0.0, 3))
+        for sup in (0.001, 0.0011, -0.001, -0.0011, NAN, INF, 0.00099):
+            for sf, beh in ((0, 0), (0, 0x10), (1, 0)):
+                cases.append((sf, beh, sup, 3))
+        for nrb in (0, 1, -1, 7):
+            cases += [(0, 8, 0.0, nrb), (1, 8, 0.0, nrb)]
+        for sf, beh, sup, nrb in cases:
+            S.add(pset(u, rbstate=0, rbsmt=-1.0, rbflags=sf, flags=beh),
+                  m(super=sup, nrb=nrb), "rrb|%d" % u)
+            after(u)
+        # The speaker: the primary's, the roadblock's, the manager's.
+        for prim, rb in (("0x33", 0), ("0x0", 0), ("0x0", -1),
+                         ("0xffffffff", -1), ("0xffffffff", 0)):
+            S.add(pset(u, rbstate=0, rbflags=0, flags=0, primary=prim,
+                       rb=rb), "rrb|%d" % u)
+            after(u)
+
+    # ---- MonitorRoadBlock
+    u = setup()
+    for x, y in ((50.0, 0.0), (55.0, 0.0), (55.0001, 0.0), (56.0, 0.0),
+                 (61.9, 0.0), (62.0, 0.0), (70.0, 0.0), (45.0, 0.0),
+                 (44.0, 0.0), (56.0, 5.0), (56.0, 11.9), (56.0, -6.0),
+                 (NAN, 0.0)):
+        for d in (1.0, -1.0, 0.0, NAN, 2.0):
+            S.add(c0(x, y), pset(u, dir=d), "mrb|%d" % u)
+    for x in (55.0, 56.0, 60.0, 44.0):
+        for w in (12.0, 6.0, 0.0, NAN):
+            S.add(rb2(0, width=w, dx=0.6, dy=0.8, rpy=-3.0), c0(x, 1.0),
+                  "mrb|%d" % u)
+    # The roadblock off its route point's line, the road along x: only
+    # the along-the-road parts count.
+    for x in (5.0, 6.0, 4.0, 15.0, 16.0, -5.0, -6.0):
+        for d in (1.0, -1.0):
+            S.add(rb2(0, x=0.0, y=10.0, width=20.0, rpx=0.0, rpy=0.0),
+                  c0(x, 10.0), pset(u, dir=d), "mrb|%d" % u)
+    S.add(pset(u, dir=1.0))
+    S.add(rb2(0), c0(56.0, 0.0, blown=1), "mrb|%d" % u, c0(56.0, 0.0),
+          "mrb|%d" % u, "rbdump")
+    # The cops' cars hit: the e-brake, the zone and the bust.
+    for ctrl, mode in ((1, 1), (2, 1), (2, 4), (2, 0), (2, 5), (2, 6),
+                       (0, 1), (3, 4), (4, 1)):
+        for pair in ((0, 3), (0, 4), (3, 0)):
+            S.add(car3(0, ctrl=ctrl), "eb|0|0",
+                  car2(0, drv=0, mode=mode), "collide|%d|%d|1" % pair,
+                  "mrb|%d" % u, "rbdump", "collide|%d|%d|0" % pair)
+    S.add(car3(0), car2(0, drv=0, mode=1), "collide|0|3|1",
+          "collide|0|4|1")
+    for fwd in (30.0, 17.88109016418457, 17.881092, -30.0, -17.0, NAN,
+                INF):
+        for zone in (0, 1, -1):
+            S.add(c0(56.0, 0.0, fwd), "zone|0|%d" % zone, "mrb|%d" % u)
+    S.add("collide|0|3|0", "collide|0|4|0")
+    for c_a, c_b in ((-1, 4), (3, -1), (-1, -1)):
+        S.add("rb|0|%d|%d|2|0x71" % (c_a, c_b), "collide|0|4|1",
+              "collide|0|3|1", c0(56.0, 0.0), "mrb|%d" % u)
+    S.add("collide|0|3|0", "collide|0|4|0")
+    # A chase of an AI car: no player, no brake.
+    u = setup(chased=2)
+    S.add(car(2, 2, -1, 56.0, 0.0, 44.0, typ=2), "collide|2|3|1",
+          "mrb|%d" % u, "rbdump")
+
+    # ---- RoadBlockDefeated
+    def defeat(u, b=1, **kw):
+        S.add(pset(u, **kw), "rbd|%d|%d" % (u, b))
+        after(u)
+
+    for chased, beacop in ((0, 0), (2, 0), (2, 1), (0, 1)):
+        u = setup(chased=chased, beacop=beacop)
+        for b in (0, 1):
+            defeat(u, b)
+        for n in range(-1, 8):
+            for heli in (0, 1):
+                S.add(rp(bHelicopter=heli))
+                defeat(u, rbcount=n, flags=0)
+    # Called off near the end of a long race: a player's car only.
+    for chased, lapx, beacop in ((0, 3.8, 0), (0, 2.0, 0), (2, 3.8, 1),
+                                 (0, 3.8, 1)):
+        u = setup(chased=chased, laps=4, beacop=beacop)
+        S.add(car2(chased, lapx=lapx, drv=0 if chased < 2 else 2))
+        defeat(u)
+        S.add("mdump")
+    # The replay event: the first cop's car near the dodging car, fast.
+    for vm, x3, z3 in ((25.0, 19.9, 0.0), (25.0, 20.0, 0.0),
+                       (20.0, 10.0, 0.0), (20.0001, 10.0, 0.0),
+                       (NAN, 10.0, 0.0), (25.0, 12.0, 15.9),
+                       (25.0, 12.0, 16.0), (25.0, NAN, 0.0),
+                       (25.0, -19.0, -5.0)):
+        u = setup()
+        S.add(car2(0, velmag=vm), car(3, 3, -1, x3, 0.0, 0.0, typ=3),
+              car3(3, z=z3))
+        defeat(u)
+    u = setup()
+    S.add(car2(0, velmag=25.0), car(3, 3, -1, 5.0, 0.0, 0.0, typ=3))
+    defeat(u, rb=-1)
+    S.add("rb|0|-1|3|2|0x71")
+    defeat(u, rb=0)
+    # The player's own car, not the chased one, is the one measured.
+    u = setup()
+    S.add(car2(0, velmag=25.0), car2(5, velmag=1.0),
+          car(3, 3, -1, 5.0, 0.0, 0.0, typ=3), "pcar|0|5")
+    defeat(u)
+    S.add("pcar|0|0")
+    # Following backwards: a longer wait, two laps or two times in three.
+    for beacop, sub, p2p, laps, rnd, n624 in (
+            (0, 6, 0, 2, 0, 0), (0, 6, 0, 3, 0, 1), (0, 6, 0, 3, 1, 1),
+            (0, 6, 0, 3, 2, 1), (0, 6, 0, 3, -1, 1), (0, 6, 0, 3, 0, 0),
+            (0, 6, 1, 2, 0, 1), (0, 6, 1, 2, 5, 1), (0, 6, 1, 1, 0, 0),
+            (0, 5, 0, 2, 0, 1), (0, 7, 0, 2, 0, 1), (1, 6, 0, 2, 0, 1),
+            (0, 6, 0, 3, 0x7fffffff, 1)):
+        u = setup(beacop=beacop, laps=laps, p2p=p2p)
+        S.add("g|rand|%d" % rnd, rp(New624=n624))
+        defeat(u, sub=sub, rbtimer=3.0, flags=0x8)
+
+    # ---- UpdateRoadBlocks
+    def urb(u, n=1):
+        for _ in range(n):
+            S.add("urb|%d" % u)
+            after(u)
+        S.add("cdump", "fades", "mdump")
+
+    # No roadblock: the spawn timer, and a call for one with behaviour 8.
+    for beacop, rbs, chased, blown, timer, flags in (
+            (0, 1, 0, 0, 3.0, 0), (0, 1, 0, 0, 0.2, 0), (0, 1, 0, 0, 0.5, 0),
+            (0, 1, 0, 0, NAN, 8), (0, 1, 0, 0, 0.5, 8), (0, 1, 0, 0, 0.6, 8),
+            (0, 0, 0, 0, 0.5, 8), (0, 1, 0, 1, 0.5, 8), (0, 1, 2, 0, 0.5, 8),
+            (1, 0, 2, 1, 9.0, 8), (1, 1, 0, 0, 9.0, 0), (0, 1, 0, 0, -2.0, 8),
+            (0, 1, 0, 0, 0.5, 0xfffffff7)):
+        u = setup(chased=chased, beacop=beacop, rb=False)
+        S.add(rp(bRoadBlocks=rbs))
+        if blown:
+            S.add(car(chased, chased, 0 if chased < 2 else -1, 0.0, 0.0,
+                      30.0, blown=blown, typ=chased))
+        S.add(pset(u, rbtimer=timer, flags=flags))
+        urb(u, 2)
+    # A spawn timer of -0 stays -0 with no time gone.
+    u = setup(rb=False)
+    S.add(pset(u, rbtimer=-0.0), dt(0.0))
+    urb(u)
+    # A blown tyre: the roadblock goes, with the speech for an AI racer in
+    # Be A Cop.
+    for chased, beacop, drv in ((0, 0, 0), (2, 0, 2), (2, 1, 2), (2, 1, 1),
+                                (0, 1, 2)):
+        u = setup(chased=chased, beacop=beacop)
+        S.add(car(chased, chased, 0 if chased < 2 else -1, 0.0, 0.0, 30.0,
+                  blown=2, typ=chased),
+              car2(chased, drv=drv), pset(u, dbtimer=5.0, flags=8))
+        urb(u)
+    # A roadblock cop near the car when it goes: it asks to chase.
+    u = setup()
+    S.add(car(4, 4, -1, 20.0, 0.0, 61.0, typ=4, drag=2.0, mass=1000.0),
+          c0(0.0, 0.0, blown=2), pset(u, dbtimer=5.0))
+    urb(u)
+    u = setup()
+    S.add(car(4, 4, -1, 40.0, 0.0, 61.0, typ=4, drag=2.0, mass=1000.0),
+          c0(56.0, 0.0), pset(u, dbtimer=5.0))
+    urb(u)
+    u = setup()
+    S.add(car(4, 4, -1, 10.0, 0.0, 61.0, typ=4, drag=2.0, mass=1000.0),
+          car3(0, dat=1101.0), pset(u, dbtimer=0.5))
+    urb(u)
+    # Got by: defeated, disbanded and the spawn timer started again.
+    for flags in (0, 8):
+        u = setup()
+        S.add(c0(56.0, 0.0), pset(u, dbtimer=5.0, flags=flags))
+        urb(u, 2)
+    # Got by in Be A Cop, behaviour 8: asked for again at once.
+    u = setup(beacop=1)
+    S.add(c0(56.0, 0.0), pset(u, dbtimer=5.0, flags=8), m(nrb=2))
+    urb(u, 2)
+    # The disband timer, and the car far past the roadblock.
+    for d, dat, dbt in ((1.0, 1100.0, 0.5), (1.0, 1101.0, 0.5),
+                        (1.0, 2100.0, 0.5), (1.0, 2099.99, 0.5),
+                        (1.0, 1101.0, 0.50001), (1.0, 1101.0, 0.0),
+                        (1.0, 1101.0, -3.0), (1.0, 1101.0, NAN),
+                        (-1.0, 900.0, 0.5), (-1.0, 899.0, 0.5),
+                        (-1.0, 4000.0, 0.5), (NAN, 899.0, 0.5),
+                        (0.0, 1101.0, 0.5), (1.0, NAN, 0.5),
+                        (1.0, 6200.0, 0.5), (2.0, 1101.0, 0.5),
+                        (2.0, 899.0, 0.5)):
+        u = setup()
+        S.add(car3(0, dat=dat), pset(u, dir=d, dbtimer=dbt, flags=8))
+        urb(u, 2)
 
 
 # ================================================================== build
@@ -3439,6 +3814,310 @@ MUTATIONS = [
     ("u_default", P,
      "    default:\n        return 0;\n    }\n}",
      "    default:\n        return 1;\n    }\n}"),
+    # ---- 12i-1, the roadblocks
+    ("rr_state", P,
+     "    if (s->State != ERBS_NONE)\n        return;\n    if (s->SpeechFlags & 1u) {",
+     "    if (s->State != ERBS_NONE && 0)\n        return;\n    if (s->SpeechFlags & 1u) {"),
+    ("rr_flag1", P,
+     "    if (s->SpeechFlags & 1u) {",
+     "    if (s->SpeechFlags & 2u) {"),
+    ("rr_another_bac", P,
+     "        if (TheRaceParameters.BeACop != 0) {\n            spk = tpursuit_get_cop_speaker(p);",
+     "        if (TheRaceParameters.BeACop == 0) {\n            spk = tpursuit_get_cop_speaker(p);"),
+    ("rr_quiet_le", P,
+     "<= 0.0010000000474974513f;",
+     "< 0.0010000000474974513f;"),
+    ("rr_quiet_abs", P,
+     "return fabsf(pCopManager->fSupervisorTimer) <=",
+     "return (pCopManager->fSupervisorTimer) <="),
+    ("rr_spike_bit", P,
+     "        if (p->BehaviourFlags & 0x10u) {\n            if (gSpeechRaiseSpikeStripRequestFn",
+     "        if (p->BehaviourFlags & 0x08u) {\n            if (gSpeechRaiseSpikeStripRequestFn"),
+    ("rr_spike_swap", P,
+     "                gSpeechRaiseSpikeStripRequestFn(spk, supervisor_quiet());",
+     "                gSpeechRaiseRoadblockRequestFn(spk, supervisor_quiet());"),
+    ("rr_set_flag", P,
+     "        s->SpeechFlags |= 1u;",
+     "        s->SpeechFlags |= 2u;"),
+    ("rr_clear8", P,
+     "        p->BehaviourFlags &= ~8u;",
+     "        p->BehaviourFlags &= ~0x10u;"),
+    ("rr_nrb_test", P,
+     "if (pCopManager->nBeACopNumRoadBlocks != 0) {",
+     "if (pCopManager->nBeACopNumRoadBlocks > 0) {"),
+    ("rr_nrb_dec", P,
+     "            pCopManager->nBeACopNumRoadBlocks--;",
+     "            pCopManager->nBeACopNumRoadBlocks -= 0;"),
+    ("rr_na_id", P,
+     "gSpeechRaiseDispatchRoadBlockNAFn(pCopManager->BeACopId);",
+     "gSpeechRaiseDispatchRoadBlockNAFn(0);"),
+    ("rr_refused", P,
+     "            refused = 1;",
+     "            refused = 0;"),
+    ("rr_timer", P,
+     "        s->fStateTimer = 8.0f;",
+     "        s->fStateTimer = 7.0f;"),
+    ("rr_state1", P,
+     "        s->State = ERBS_CALLED_FOR_ROAD_BLOCK;\n        s->fStateTimer = 8.0f;",
+     "        s->State = (eRoadBlockState)2;\n        s->fStateTimer = 8.0f;"),
+    ("mr_blown", P,
+     "    if ((int8_t)car->BlownTireBits != 0)\n        return 0;\n    pl = car->pPlayer;",
+     "    if (0)\n        return 0;\n    pl = car->pPlayer;"),
+    ("mr_pl", P,
+     "    if (pl != NULL) {\n        for (i = 0; i < 2; i++) {",
+     "    if (pl == NULL) {\n        for (i = 0; i < 2; i++) {"),
+    ("mr_loop1", P,
+     "    if (pl != NULL) {\n        for (i = 0; i < 2; i++) {",
+     "    if (pl != NULL) {\n        for (i = 0; i < 1; i++) {"),
+    ("mr_collide_args", P,
+     "!did_these_cars_collide(p->pChasedCar, c->pMyCar))",
+     "!did_these_cars_collide(c->pMyCar, p->pChasedCar))"),
+    ("mr_real", P,
+     "            if (car->TheControlMode == REAL_CONTROL) {",
+     "            if (car->TheControlMode != REAL_CONTROL) {"),
+    ("mr_ebrake_t", P,
+     "(struct RealDriver *)(void *)car->pCarDriver, 5.0f);",
+     "(struct RealDriver *)(void *)car->pCarDriver, 4.0f);"),
+    ("mr_ai", P,
+     "            } else if (car->TheControlMode == AI_CONTROL\n",
+     "            } else if (car->TheControlMode == TRAFFIC_CONTROL\n"),
+    ("mr_phys", P,
+     "&& (car->TheMovementMode == PHYSICS_MOVEMENT\n",
+     "&& (car->TheMovementMode == COP_MOVEMENT\n"),
+    ("mr_mellow", P,
+     "|| car->TheMovementMode == MELLOW_MOVEMENT)) {",
+     "|| car->TheMovementMode == BELT_MOVEMENT)) {"),
+    ("mr_ai_t", P,
+     "->EBrakeTimer =\n                    4.0f;",
+     "->EBrakeTimer =\n                    5.0f;"),
+    ("mr_mph", P,
+     "if (17.88109016418457f < fabsf(car->State.ForwardSpeed)",
+     "if (17.88109016418457f <= fabsf(car->State.ForwardSpeed)"),
+    ("mr_abs", P,
+     "17.88109016418457f < fabsf(car->State.ForwardSpeed)",
+     "17.88109016418457f < (car->State.ForwardSpeed)"),
+    ("mr_zone_args", P,
+     "&& player_request_zone(pl, 1, 0, 1, 1)",
+     "&& player_request_zone(pl, 1, 1, 1, 1)"),
+    ("mr_zone_test", P,
+     "&& player_request_zone(pl, 1, 0, 1, 1)",
+     "&& !player_request_zone(pl, 1, 0, 1, 1)"),
+    ("mr_break", P,
+     "                    &p->pChasedCar->State.Position);\n            break;",
+     "                    &p->pChasedCar->State.Position);\n            continue;"),
+    ("mr_width", P,
+     "if (!(sqrtf(dx * dx + dy * dy) < rb->fRoadWidth))",
+     "if (!(sqrtf(dx * dx + dy * dy) <= rb->fRoadWidth))"),
+    ("mr_dx", P,
+     "    dx = rb->v2Position.x - car->State.Position.x;\n    dy = rb->v2Position.y",
+     "    dx = rb->v2Position.y - car->State.Position.x;\n    dy = rb->v2Position.y"),
+    ("mr_dy", P,
+     "    dy = rb->v2Position.y - car->State.Position.y;\n    if (!(sqrtf",
+     "    dy = rb->v2Position.y - car->State.Position.x;\n    if (!(sqrtf"),
+    ("mr_mine_x", P,
+     "mine = (car->State.Position.x - rp->Position.x) * rp->Direction.x",
+     "mine = (car->State.Position.x - rp->Position.x) * rp->Direction.y"),
+    ("mr_mine_y", P,
+     "         + (car->State.Position.y - rp->Position.y) * rp->Direction.y;",
+     "         + (car->State.Position.y - rp->Position.x) * rp->Direction.y;"),
+    ("mr_theirs_x", P,
+     "theirs = (rb->v2Position.x - rp->Position.x) * rp->Direction.x",
+     "theirs = (rb->v2Position.x - rp->Position.y) * rp->Direction.x"),
+    ("mr_theirs_y", P,
+     "           + (rb->v2Position.y - rp->Position.y) * rp->Direction.y;",
+     "           + (rb->v2Position.y - rp->Position.y) * rp->Direction.x;"),
+    ("mr_5", P,
+     "return 5.0f < p->fChaseDirection * (mine - theirs);",
+     "return 5.0f <= p->fChaseDirection * (mine - theirs);"),
+    ("mr_dir", P,
+     "return 5.0f < p->fChaseDirection * (mine - theirs);",
+     "return 5.0f < (mine - theirs);"),
+    ("rd_involved", P,
+     "    if (tpursuit_is_player_involved(p)) {\n        pl = p->pChasedCar->pPlayer;",
+     "    if (!tpursuit_is_player_involved(p)) {\n        pl = p->pChasedCar->pPlayer;"),
+    ("rd_calloff_pl", P,
+     "if (pl != NULL && tpursuit_should_pursuit_be_called_off(p)) {",
+     "if (tpursuit_should_pursuit_be_called_off(p)) {"),
+    ("rd_give", P,
+     "            tpursuit_switch_state(p, EPS_END_PURSUIT_GIVE_UP);\n        } else {",
+     "            tpursuit_switch_state(p, (ePursuitState)4);\n        } else {"),
+    ("rd_failed_b", P,
+     "gPursuitRoadblockFailedSpeechFn(p, b);",
+     "gPursuitRoadblockFailedSpeechFn(p, 1);"),
+    ("rd_score_pl", P,
+     "            if (pl != NULL) {\n                player_start_score(pl, SCORING_DODGE_ROADBLOCK);",
+     "            if (pl == NULL) {\n                player_start_score(pl, SCORING_DODGE_ROADBLOCK);"),
+    ("rd_score", P,
+     "player_start_score(pl, SCORING_DODGE_ROADBLOCK);",
+     "player_start_score(pl, SCORING_DODGE_ROADBLOCK + 1);"),
+    ("rd_beacop", P,
+     "            if (TheRaceParameters.BeACop == 0\n                && p->PursuitSubState == LSS_FOLLOW_BACKWARDS) {",
+     "            if (TheRaceParameters.BeACop != 0\n                && p->PursuitSubState == LSS_FOLLOW_BACKWARDS) {"),
+    ("rd_sub", P,
+     "                && p->PursuitSubState == LSS_FOLLOW_BACKWARDS) {",
+     "                && p->PursuitSubState == LSS_FOLLOW_BACKWARDS + 1) {"),
+    ("rd_p2p", P,
+     "                           ? 1 : TheRaceParameters.NumLapsInRace;",
+     "                           ? 2 : TheRaceParameters.NumLapsInRace;"),
+    ("rd_p2p_test", P,
+     "                laps = TheRaceParameters.Point2Point != 0\n",
+     "                laps = TheRaceParameters.Point2Point == 0\n"),
+    ("rd_laps2", P,
+     "                if (laps == 2\n",
+     "                if (laps == 3\n"),
+    ("rd_rand_range", P,
+     "world_random_i(pCurrentWorld, 3) < 2u",
+     "world_random_i(pCurrentWorld, 4) < 2u"),
+    ("rd_rand_lt", P,
+     "world_random_i(pCurrentWorld, 3) < 2u",
+     "world_random_i(pCurrentWorld, 3) < 3u"),
+    ("rd_rand_signed", P,
+     "((uint32_t)world_random_i(pCurrentWorld, 3) < 2u",
+     "((int32_t)world_random_i(pCurrentWorld, 3) < 2"),
+    ("rd_n624", P,
+     "&& TheRaceParameters.New624 != 0)) {",
+     "&& TheRaceParameters.New624 == 0)) {"),
+    ("rd_or", P,
+     "                if (laps == 2\n                    ||",
+     "                if (laps == 2\n                    &&"),
+    ("rd_add", P,
+     "                    p->fRoadBlockSpawnTimer += fRoadBlockSpawnTime;",
+     "                    p->fRoadBlockSpawnTimer = fRoadBlockSpawnTime;"),
+    ("rd_0x20", P,
+     "                    p->BehaviourFlags |= 0x20u;",
+     "                    p->BehaviourFlags |= 0x40u;"),
+    ("rd_5", P,
+     "    if (p->nRoadblockCount >= 5)\n",
+     "    if (p->nRoadblockCount > 5)\n"),
+    ("rd_0x80", P,
+     "    if (p->nRoadblockCount >= 5)\n        p->BehaviourFlags |= 0x80u;",
+     "    if (p->nRoadblockCount >= 5)\n        p->BehaviourFlags |= 0x08u;"),
+    ("rd_3", P,
+     "    else if (p->nRoadblockCount < 3)\n",
+     "    else if (p->nRoadblockCount <= 3)\n"),
+    ("rd_0x40", P,
+     "    else if (p->nRoadblockCount < 3)\n        p->BehaviourFlags |= 0x40u;",
+     "    else if (p->nRoadblockCount < 3)\n        p->BehaviourFlags |= 0x20u;"),
+    ("rd_heli", P,
+     "    else if (TheRaceParameters.bHelicopter != 0)\n",
+     "    else if (TheRaceParameters.bHelicopter == 0)\n"),
+    ("rd_0x110", P,
+     "        p->BehaviourFlags |= 0x110u;",
+     "        p->BehaviourFlags |= 0x100u;"),
+    ("rp_cop0", P,
+     "    if (rb == NULL || rb->cops[0] == NULL)\n        return;",
+     "    if (rb == NULL || rb->cops[1] == NULL)\n        return;"),
+    ("rp_vel", P,
+     "    if (!(20.0f < car->State.VelocityMagnitude))",
+     "    if (!(20.0f <= car->State.VelocityMagnitude))"),
+    ("rp_car", P,
+     "    car = pl->MyCar;\n",
+     "    car = p->pChasedCar;\n"),
+    ("rp_cop", P,
+     "    cop = ((const tCop *)(const void *)rb->cops[0])->pMyCar;",
+     "    cop = ((const tCop *)(const void *)rb->cops[1])->pMyCar;"),
+    ("rp_dist", P,
+     "if (sqrtf(dx * dx + dy * dy + dz * dz) < 20.0f",
+     "if (sqrtf(dx * dx + dy * dy + dz * dz) <= 20.0f"),
+    ("rp_dz", P,
+     "if (sqrtf(dx * dx + dy * dy + dz * dz) < 20.0f",
+     "if (sqrtf(dx * dx + dy * dy) < 20.0f"),
+    ("rp_value", P,
+     "ReplayManager_RegisterInterestingEvent(pReplayManager, 10.0f,",
+     "ReplayManager_RegisterInterestingEvent(pReplayManager, 11.0f,"),
+    ("ur_blown", P,
+     "        if ((int8_t)car->BlownTireBits != 0) {\n            if (car->MyDriver",
+     "        if ((int8_t)car->BlownTireBits == 0) {\n            if (car->MyDriver"),
+    ("ur_ai", P,
+     "car->MyDriver->TheDriverType == DRIVER_TYPE_AI_RACER\n                && TheRaceParameters.BeACop != 0\n                && gSpeechRaiseSpikeStripTireBlowFn",
+     "car->MyDriver->TheDriverType != DRIVER_TYPE_AI_RACER\n                && TheRaceParameters.BeACop != 0\n                && gSpeechRaiseSpikeStripTireBlowFn"),
+    ("ur_bac", P,
+     "                && TheRaceParameters.BeACop != 0\n                && gSpeechRaiseSpikeStripTireBlowFn",
+     "                && TheRaceParameters.BeACop == 0\n                && gSpeechRaiseSpikeStripTireBlowFn"),
+    ("ur_tb_args", P,
+     "gSpeechRaiseSpikeStripTireBlowFn(pCopManager->BeACopId, 0);",
+     "gSpeechRaiseSpikeStripTireBlowFn(pCopManager->BeACopId, 1);"),
+    ("ur_tb_disband", P,
+     "BeACopId, 0);\n            tpursuit_disband_road_block(p, 1);",
+     "BeACopId, 0);\n            tpursuit_disband_road_block(p, 0);"),
+    ("ur_monitor_b", P,
+     "if (p->pRoadBlock != NULL && tpursuit_monitor_road_block(p))\n        road_block_passed(p, 1);",
+     "if (p->pRoadBlock != NULL && tpursuit_monitor_road_block(p))\n        road_block_passed(p, 0);"),
+    ("rbp_timer", P,
+     "    p->fRoadBlockSpawnTimer = fRoadBlockSpawnTime;\n    if ((int8_t)p->pChasedCar->BlownTireBits == 0)",
+     "    p->fRoadBlockSpawnTimer = 0.0f;\n    if ((int8_t)p->pChasedCar->BlownTireBits == 0)"),
+    ("rbp_blown", P,
+     "    if ((int8_t)p->pChasedCar->BlownTireBits == 0)\n        tpursuit_road_block_defeated(p, b);",
+     "    if ((int8_t)p->pChasedCar->BlownTireBits != 0)\n        tpursuit_road_block_defeated(p, b);"),
+    ("rbp_disband", P,
+     "        tpursuit_road_block_defeated(p, b);\n    tpursuit_disband_road_block(p, 1);",
+     "        tpursuit_road_block_defeated(p, b);\n    tpursuit_disband_road_block(p, 0);"),
+    ("ur_dt", P,
+     "t = p->fRoadBlockDisbandTimer - WorldTimeElapsed;",
+     "t = p->fRoadBlockDisbandTimer + WorldTimeElapsed;"),
+    ("ur_le", P,
+     "        if (!(t <= 0.0f))\n            return;",
+     "        if (!(t < 0.0f))\n            return;"),
+    ("ur_zero", P,
+     "        p->fRoadBlockDisbandTimer = 0.0f;\n        rbd",
+     "        p->fRoadBlockDisbandTimer = 1.0f;\n        rbd"),
+    ("ur_dir1", P,
+     "        if (p->fChaseDirection == 1.0f)\n",
+     "        if (p->fChaseDirection > 0.0f)\n"),
+    ("ur_fwd1", P,
+     "d = get_forward_track_distance(rbd + 100.0f, dat);",
+     "d = get_forward_track_distance(dat, rbd + 100.0f);"),
+    ("ur_fwd1_100", P,
+     "d = get_forward_track_distance(rbd + 100.0f, dat);",
+     "d = get_forward_track_distance(rbd + 10.0f, dat);"),
+    ("ur_fwd2", P,
+     "d = get_forward_track_distance(dat + 100.0f, rbd);",
+     "d = get_forward_track_distance(rbd + 100.0f, dat);"),
+    ("ur_08", P,
+     "if (!(TheTrackPathManager.TrackLength * 0.800000011920929f < d))",
+     "if (!(TheTrackPathManager.TrackLength * 0.800000011920929f <= d))"),
+    ("ur_08_val", P,
+     "TheTrackPathManager.TrackLength * 0.800000011920929f < d",
+     "TheTrackPathManager.TrackLength * 0.7f < d"),
+    ("ur_far_b", P,
+     "        road_block_passed(p, 0);\n",
+     "        road_block_passed(p, 1);\n"),
+    ("ur_bac_zero", P,
+     "    } else if (TheRaceParameters.BeACop != 0) {\n        p->fRoadBlockSpawnTimer = 0.0f;",
+     "    } else if (TheRaceParameters.BeACop != 0) {\n        p->fRoadBlockSpawnTimer = 1.0f;"),
+    ("ur_bac_else", P,
+     "    } else if (TheRaceParameters.BeACop != 0) {\n        p->fRoadBlockSpawnTimer = 0.0f;",
+     "    } else if (TheRaceParameters.BeACop == 0) {\n        p->fRoadBlockSpawnTimer = 0.0f;"),
+    ("ur_spawn_dt", P,
+     "t = p->fRoadBlockSpawnTimer - WorldTimeElapsed;",
+     "t = p->fRoadBlockSpawnTimer + WorldTimeElapsed;"),
+    ("ur_spawn_lt", P,
+     "        if (t < 0.0f)\n            p->fRoadBlockSpawnTimer = 0.0f;",
+     "        if (t <= 0.0f)\n            p->fRoadBlockSpawnTimer = 0.0f;"),
+    ("ur_req_rb", P,
+     "    if (p->pRoadBlock != NULL || !(p->BehaviourFlags & 8u))\n        return;",
+     "    if (p->pRoadBlock != NULL || !(p->BehaviourFlags & 0x10u))\n        return;"),
+    ("ur_req_has_rb", P,
+     "    if (p->pRoadBlock != NULL || !(p->BehaviourFlags & 8u))\n        return;",
+     "    if (!(p->BehaviourFlags & 8u))\n        return;"),
+    ("ur_req_bac", P,
+     "    if (TheRaceParameters.BeACop != 0\n        || (TheRaceParameters.bRoadBlocks != 0",
+     "    if (TheRaceParameters.BeACop == 0\n        || (TheRaceParameters.bRoadBlocks != 0"),
+    ("ur_req_rbs", P,
+     "        || (TheRaceParameters.bRoadBlocks != 0\n",
+     "        || (TheRaceParameters.bRoadBlocks == 0\n"),
+    ("ur_req_blown", P,
+     "            && (int8_t)p->pChasedCar->BlownTireBits == 0\n            && tpursuit_is_player_involved(p)",
+     "            && (int8_t)p->pChasedCar->BlownTireBits != 0\n            && tpursuit_is_player_involved(p)"),
+    ("ur_req_pi", P,
+     "            && tpursuit_is_player_involved(p)\n            && p->fRoadBlockSpawnTimer <= 0.0f))",
+     "            && p->fRoadBlockSpawnTimer <= 0.0f))"),
+    ("ur_req_le", P,
+     "            && p->fRoadBlockSpawnTimer <= 0.0f))",
+     "            && p->fRoadBlockSpawnTimer < 0.0f))"),
+    ("ur_has_rb", P,
+     "    if (p->pRoadBlock != NULL && tpursuit_monitor_road_block(p))",
+     "    if (p->pRoadBlock != NULL && !tpursuit_monitor_road_block(p))"),
 ]
 
 EQUIVALENT = {
@@ -3449,6 +4128,9 @@ EQUIVALENT = {
                      "destructor, passes 3",
     "remove_rb_too": "the roadblock's loop runs only while !found, so a "
                      "cop found in Cops skips it either way",
+    "ur_req_has_rb": "with a roadblock, UpdateRoadBlocks either returns "
+                     "or disbands it before the request, so the test "
+                     "always sees NULL there",
 }
 
 

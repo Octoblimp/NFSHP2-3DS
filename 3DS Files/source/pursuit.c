@@ -19,10 +19,14 @@
 #include "coputil.h"
 #include "drivetarget.h"
 #include "hudscore.h"
+#include "player.h"
 #include "playerhud.h"
+#include "playerzone.h"
+#include "psychodriver.h"
 #include "race.h"
 #include "racecoord.h"
 #include "raceparams.h"
+#include "replay.h"
 #include "table.h"
 #include "trackpath.h"
 #include "trackroute.h"
@@ -59,6 +63,14 @@ void (*gCopManagerCreatePulloverFn)(tCopManager *m, tPursuit *p,
 void (*gPursuitCreateRoadBlockFn)(tPursuit *p);
 void (*gPursuitUpdateRoadBlocksFn)(tPursuit *p);
 void (*gPursuitUpdateChopperFn)(tPursuit *p);
+void (*gSpeechRaiseSpikeStripTireBlowFn)(uint32_t speaker, int32_t b);
+void (*gPursuitRoadblockFailedSpeechFn)(tPursuit *p, int32_t b);
+void (*gSpeechRaiseRequestAnotherRoadblockFn)(uint32_t speaker, int32_t b);
+void (*gSpeechRaiseSpikeStripRequestFn)(uint32_t speaker, int32_t b);
+void (*gSpeechRaiseRoadblockRequestFn)(uint32_t speaker, int32_t b);
+void (*gSpeechRaiseDispatchRoadBlockNAFn)(uint32_t speaker);
+void (*gCollisionSoundPlayBustRoadBlockFn)(const bVector3 *pos);
+void (*gRealDriverForceEBrakeStopFn)(struct RealDriver *d, float t);
 
 // fCopCaptureRadius, gp-15592: 10.0, which nothing writes.
 #define PURSUIT_CAPTURE_RADIUS  10.0f
@@ -1052,6 +1064,232 @@ int32_t tpursuit_update(tPursuit *p)
     default:
         return 0;
     }
+}
+
+// ------------------------------------------------------ the roadblocks
+
+// The bool each request speech takes: the supervisor's timer at 0 (within
+// gp-26944's 0.001), so no supervisor is on the air.
+static int32_t supervisor_quiet(void)
+{
+    return fabsf(pCopManager->fSupervisorTimer) <= 0.0010000000474974513f;
+}
+
+void trbsm_request_road_block(tRoadBlockStateMachine *s)
+{
+    tPursuit *p = s->pPursuit;
+    uint32_t  spk;
+    int32_t   refused = 0;
+
+    if (s->State != ERBS_NONE)
+        return;
+    if (s->SpeechFlags & 1u) {
+        if (TheRaceParameters.BeACop != 0) {
+            spk = tpursuit_get_cop_speaker(p);
+            if (gSpeechRaiseRequestAnotherRoadblockFn != NULL)
+                gSpeechRaiseRequestAnotherRoadblockFn(spk,
+                                                      supervisor_quiet());
+        }
+    } else {
+        spk = tpursuit_get_cop_speaker(p);
+        if (p->BehaviourFlags & 0x10u) {
+            if (gSpeechRaiseSpikeStripRequestFn != NULL)
+                gSpeechRaiseSpikeStripRequestFn(spk, supervisor_quiet());
+        } else if (gSpeechRaiseRoadblockRequestFn != NULL) {
+            gSpeechRaiseRoadblockRequestFn(spk, supervisor_quiet());
+        }
+        s->SpeechFlags |= 1u;
+    }
+    if (TheRaceParameters.BeACop != 0) {
+        p->BehaviourFlags &= ~8u;
+        if (pCopManager->nBeACopNumRoadBlocks != 0) {
+            pCopManager->nBeACopNumRoadBlocks--;
+        } else {
+            if (gSpeechRaiseDispatchRoadBlockNAFn != NULL)
+                gSpeechRaiseDispatchRoadBlockNAFn(pCopManager->BeACopId);
+            refused = 1;
+        }
+    }
+    if (!refused) {
+        s->State = ERBS_CALLED_FOR_ROAD_BLOCK;
+        s->fStateTimer = 8.0f;
+    }
+}
+
+int32_t tpursuit_monitor_road_block(tPursuit *p)
+{
+    Car    *car = p->pChasedCar;
+    Player *pl;
+    tRoadBlock *rb;
+    const TrackRoutePoint *rp;
+    float   dx, dy, mine, theirs;
+    int32_t i;
+
+    if ((int8_t)car->BlownTireBits != 0)
+        return 0;
+    pl = car->pPlayer;
+    if (pl != NULL) {
+        for (i = 0; i < 2; i++) {
+            tCop *c = (tCop *)(void *)p->pRoadBlock->cops[i];
+
+            if (c == NULL
+                || !did_these_cars_collide(p->pChasedCar, c->pMyCar))
+                continue;
+            car = p->pChasedCar;
+            if (car->TheControlMode == REAL_CONTROL) {
+                if (gRealDriverForceEBrakeStopFn != NULL)
+                    gRealDriverForceEBrakeStopFn(
+                        (struct RealDriver *)(void *)car->pCarDriver, 5.0f);
+            } else if (car->TheControlMode == AI_CONTROL
+                       && (car->TheMovementMode == PHYSICS_MOVEMENT
+                           || car->TheMovementMode == MELLOW_MOVEMENT)) {
+                ((PsychoDriver *)(void *)car->pCarDriver)->EBrakeTimer =
+                    4.0f;
+            }
+            // gp-26948: 40 mph.
+            if (17.88109016418457f < fabsf(car->State.ForwardSpeed)
+                && player_request_zone(pl, 1, 0, 1, 1)
+                && gCollisionSoundPlayBustRoadBlockFn != NULL)
+                gCollisionSoundPlayBustRoadBlockFn(
+                    &p->pChasedCar->State.Position);
+            break;
+        }
+    }
+    car = p->pChasedCar;
+    rb = p->pRoadBlock;
+    dx = rb->v2Position.x - car->State.Position.x;
+    dy = rb->v2Position.y - car->State.Position.y;
+    if (!(sqrtf(dx * dx + dy * dy) < rb->fRoadWidth))
+        return 0;
+    rp = rb->RoutePoint;
+    mine = (car->State.Position.x - rp->Position.x) * rp->Direction.x
+         + (car->State.Position.y - rp->Position.y) * rp->Direction.y;
+    theirs = (rb->v2Position.x - rp->Position.x) * rp->Direction.x
+           + (rb->v2Position.y - rp->Position.y) * rp->Direction.y;
+    return 5.0f < p->fChaseDirection * (mine - theirs);
+}
+
+// A player's car that got by close to the roadblock's first cop at speed:
+// an instant replay worth keeping.
+static void dodge_replay_event(const tPursuit *p, const Player *pl)
+{
+    const tRoadBlock *rb = p->pRoadBlock;
+    const Car *car, *cop;
+    float dx, dy, dz;
+
+    if (rb == NULL || rb->cops[0] == NULL)
+        return;
+    car = pl->MyCar;
+    if (!(20.0f < car->State.VelocityMagnitude))
+        return;
+    cop = ((const tCop *)(const void *)rb->cops[0])->pMyCar;
+    dx = cop->State.Position.x - car->State.Position.x;
+    dy = cop->State.Position.y - car->State.Position.y;
+    dz = cop->State.Position.z - car->State.Position.z;
+    // The image calls it with no test; the port has no ReplayManager yet.
+    if (sqrtf(dx * dx + dy * dy + dz * dz) < 20.0f
+        && pReplayManager != NULL)
+        ReplayManager_RegisterInterestingEvent(pReplayManager, 10.0f,
+                                               "DodgeRoadblock");
+}
+
+void tpursuit_road_block_defeated(tPursuit *p, int32_t b)
+{
+    Player *pl;
+    int32_t laps;
+
+    if (tpursuit_is_player_involved(p)) {
+        pl = p->pChasedCar->pPlayer;
+        if (pl != NULL && tpursuit_should_pursuit_be_called_off(p)) {
+            tpursuit_switch_state(p, EPS_END_PURSUIT_GIVE_UP);
+        } else {
+            if (gPursuitRoadblockFailedSpeechFn != NULL)
+                gPursuitRoadblockFailedSpeechFn(p, b);
+            if (pl != NULL) {
+                player_start_score(pl, SCORING_DODGE_ROADBLOCK);
+                dodge_replay_event(p, pl);
+            }
+            // Retail reads DemoDiscManager.bActive first, and with it set
+            // goes straight to New624; the port has no demo disc.
+            if (TheRaceParameters.BeACop == 0
+                && p->PursuitSubState == LSS_FOLLOW_BACKWARDS) {
+                laps = TheRaceParameters.Point2Point != 0
+                           ? 1 : TheRaceParameters.NumLapsInRace;
+                if (laps == 2
+                    || ((uint32_t)world_random_i(pCurrentWorld, 3) < 2u
+                        && TheRaceParameters.New624 != 0)) {
+                    p->fRoadBlockSpawnTimer += fRoadBlockSpawnTime;
+                    p->BehaviourFlags |= 0x20u;
+                }
+            }
+        }
+    }
+    if (p->nRoadblockCount >= 5)
+        p->BehaviourFlags |= 0x80u;
+    else if (p->nRoadblockCount < 3)
+        p->BehaviourFlags |= 0x40u;
+    else if (TheRaceParameters.bHelicopter != 0)
+        p->BehaviourFlags |= 0x110u;
+}
+
+// The roadblock got by and gone, with its spawn timer started again.
+static void road_block_passed(tPursuit *p, int32_t b)
+{
+    p->fRoadBlockSpawnTimer = fRoadBlockSpawnTime;
+    if ((int8_t)p->pChasedCar->BlownTireBits == 0)
+        tpursuit_road_block_defeated(p, b);
+    tpursuit_disband_road_block(p, 1);
+}
+
+void tpursuit_update_road_blocks(tPursuit *p)
+{
+    Car  *car;
+    float t, rbd, dat, d;
+
+    if (p->pRoadBlock != NULL) {
+        car = p->pChasedCar;
+        if ((int8_t)car->BlownTireBits != 0) {
+            if (car->MyDriver->TheDriverType == DRIVER_TYPE_AI_RACER
+                && TheRaceParameters.BeACop != 0
+                && gSpeechRaiseSpikeStripTireBlowFn != NULL)
+                gSpeechRaiseSpikeStripTireBlowFn(pCopManager->BeACopId, 0);
+            tpursuit_disband_road_block(p, 1);
+        }
+    }
+    if (p->pRoadBlock != NULL && tpursuit_monitor_road_block(p))
+        road_block_passed(p, 1);
+    if (p->pRoadBlock != NULL) {
+        t = p->fRoadBlockDisbandTimer - WorldTimeElapsed;
+        p->fRoadBlockDisbandTimer = t;
+        if (!(t <= 0.0f))
+            return;
+        p->fRoadBlockDisbandTimer = 0.0f;
+        rbd = p->pRoadBlock->fDistanceAroundTrack;
+        dat = p->pChasedCar->TheTrackPathCoordinate.DistanceAroundTrack;
+        if (p->fChaseDirection == 1.0f)
+            d = get_forward_track_distance(rbd + 100.0f, dat);
+        else
+            d = get_forward_track_distance(dat + 100.0f, rbd);
+        // gp-27064: 0.8.
+        if (!(TheTrackPathManager.TrackLength * 0.800000011920929f < d))
+            return;
+        road_block_passed(p, 0);
+    } else if (TheRaceParameters.BeACop != 0) {
+        p->fRoadBlockSpawnTimer = 0.0f;
+    } else {
+        t = p->fRoadBlockSpawnTimer - WorldTimeElapsed;
+        p->fRoadBlockSpawnTimer = t;
+        if (t < 0.0f)
+            p->fRoadBlockSpawnTimer = 0.0f;
+    }
+    if (p->pRoadBlock != NULL || !(p->BehaviourFlags & 8u))
+        return;
+    if (TheRaceParameters.BeACop != 0
+        || (TheRaceParameters.bRoadBlocks != 0
+            && (int8_t)p->pChasedCar->BlownTireBits == 0
+            && tpursuit_is_player_involved(p)
+            && p->fRoadBlockSpawnTimer <= 0.0f))
+        trbsm_request_road_block(&p->RoadBlockStateMachine);
 }
 
 // --------------------------------------- tCopManager's, making pursuits

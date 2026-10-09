@@ -4409,9 +4409,10 @@ int main(int argc, char** argv)
     gPursuitRemoveCopFromPursuitFn = pursuit_remove_cop_seam;
     gPursuitRemovePrimarySpeakerFn = tpursuit_remove_primary_speaker;
     // A cop asking to chase a car, and each chase's step in the manager's
-    // Think, over once it returns nonzero (pursuit.h).
+    // Think, over once it returns nonzero, with its roadblocks (pursuit.h).
     gCopManagerRequestPursuitFn = copmanager_request_pursuit;
     gPursuitUpdateFn            = tpursuit_update;
+    gPursuitUpdateRoadBlocksFn  = tpursuit_update_road_blocks;
     // The race's cop drivers each get a car, in limbo -- unseen, parked,
     // not colliding -- until patrols and chases are ported (copmgr.h).
     gAddCopCarToRaceFn         = copmgr_add_cop_car_to_race;

@@ -1,9 +1,11 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 59 (2026-10-08):
-12h-2, tPursuit::Update, is done, and RequestPursuit and Update are
-bound (`docs/formats/pursuit.md`, "The Update"). Before it, 12h-1
-ported tPursuit's object and RequestPursuit. The cops' cars still wait
+Where the next session picks up. Updated in Session 59, continued
+(2026-10-08): 12i-1, the roadblocks' running logic, is done, and
+UpdateRoadBlocks is bound (`docs/formats/pursuit.md`, "The
+roadblocks"). A chase now asks for a roadblock, but none is made until
+12i-2's CreateRoadBlock. Before it, 12h-2 ported tPursuit::Update and
+12h-1 tPursuit's object and RequestPursuit. The cops' cars still wait
 in limbo until something asks them out: a patrol's or radar trap's
 search (12j's SpawnSpeedTraps) is what starts a chase.
 Session 58, continued: 12g-3, the chase (the hot pursuit and caught
@@ -221,10 +223,26 @@ pursuit.obj, on a 10 KB manager. Its slices:
 
   12h-1's GetSpeedMPHOrKPH read VelocityMagnitude; retail reads
   ForwardSpeed (car+960), now fixed.
-- **Next: 12i** roadblocks: CreateRoadBlock (`0x00229e30`),
-  UpdateRoadBlocks (`0x00229b58`) and the barrels' spawn
-  (`0x0024f0a8`).
+- **12i-1, done (Session 59):** the roadblocks' running logic in
+  `pursuit.c`: RequestRoadBlock (`0x0022cc38`), MonitorRoadBlock
+  (`0x0022c390`), RoadBlockDefeated (`0x00229970`) and UpdateRoadBlocks
+  (`0x00229b58`).
+  - `main.c` binds `gPursuitUpdateRoadBlocksFn`.
+  - New NULL seams that do nothing: six roadblock speeches, the bust
+    sound, and RealDriver::ForceEBrakeStop
+    (`gRealDriverForceEBrakeStopFn`, 12i-3).
+  - An AI car that hits a roadblock cop gets its PsychoDriver's
+    EBrakeTimer set to 4 s, the timer's second writer
+    (`psycho-driver.md`).
+  - The DodgeRoadblock replay event is skipped while `pReplayManager`
+    is NULL. The demo disc's branch in RoadBlockDefeated is left out.
+- **Next: 12i-2**, making a roadblock: CreateRoadBlock (`0x00229e30`),
+  the manager's roadblock setup and FindCopsForRoadBlock, the layout,
+  and the barrels' spawn (`0x0024f0a8`). It binds
+  `gPursuitCreateRoadBlockFn`.
   Then:
+  - **12i-3** retail's RealDriver ForceEBrakeStop(float)
+    (`0x0013b558`), which binds `gRealDriverForceEBrakeStopFn`;
   - **12j** SpawnSpeedTraps and spike strips;
   - **12k** the helicopter (UpdateChopper, `0x00229678`);
   - **12l** pullovers and Busted (CreatePullover, `0x00226f30`);
@@ -4660,8 +4678,8 @@ goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a to 12h-2 are done, 12i (roadblocks)
-  is next. See "First" at the top.
+- **Next:** step 12, the cops: 12a to 12i-1 are done, 12i-2 (making
+  roadblocks) is next. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

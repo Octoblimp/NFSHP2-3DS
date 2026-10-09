@@ -7,7 +7,8 @@
 // and the two calls under it are tCopManager's, but are here with what
 // they make, so copmgr.c's harnesses need none of this; IsCopNearby and
 // DidRecentlyCollideWithCop are here with IsChasedCarStoppable for the
-// same reason. The roadblocks (12i) and the helicopter (12k) are seams.
+// same reason. Making a roadblock (12i-2) and the helicopter (12k) are
+// seams.
 
 #ifndef PURSUIT_H
 #define PURSUIT_H
@@ -154,7 +155,7 @@ int32_t  tpursuit_get_pursuit_level_for_hud(const tPursuit *p);
 //     the next state at 0;
 //   - while still chasing, a car the cops can stop is pulled over: the
 //     pullover (12l), SPEEDER_CAUGHT and every cop released;
-//   - the roadblock state machine, the roadblocks (12i) and the
+//   - the roadblock state machine, UpdateRoadBlocks and the
 //     helicopter (12k); then, outside Be A Cop, LEVEL0's speeches and the
 //     early collision check through LEVEL1, and END_PURSUIT_GIVE_UP is
 //     over.
@@ -187,7 +188,7 @@ void tpursuithistory_update(tPursuitHistory *h, bVector2 *out,
 
 // tRoadBlockStateMachine's Update, 0x0022cdd8: the timer down to 0 while
 // there is a state, and a called-for roadblock made (CreateRoadBlock,
-// 12i) once it is 0, the state ROAD_BLOCK_SET if one was.
+// 12i-2) once it is 0, the state ROAD_BLOCK_SET if one was.
 void trbsm_update(tRoadBlockStateMachine *s);
 
 // DoEarlyChaseCollisionCheck, 0x0022aba0: the first time a player's car
@@ -219,6 +220,45 @@ int32_t tpursuit_is_chased_car_stoppable(tPursuit *p);
 int32_t copmanager_is_cop_nearby(tCopManager *m, struct Car *car, float d);
 int32_t copmanager_did_recently_collide_with_cop(tCopManager *m,
                                                  struct Car *car);
+
+// ------------------------------------------------------ the roadblocks
+
+// tRoadBlockStateMachine's RequestRoadBlock, 0x0022cc38: with no state,
+// the cops' first call for a roadblock (a spike strip's with behaviour
+// 0x10) or, in Be A Cop, the call for another, each with the supervisor's
+// timer at 0 as its bool. Be A Cop also takes the behaviour 8 away and
+// spends one of the manager's roadblocks, or says there is none and
+// calls nothing. Otherwise CALLED_FOR_ROAD_BLOCK, 8 s on its timer.
+void trbsm_request_road_block(tRoadBlockStateMachine *s);
+
+// MonitorRoadBlock, 0x0022c390: 1 once the chased car, its tyres whole,
+// is within the roadblock's road width of its spot and more than 5 m
+// past it along the road (its route point's direction, by
+// fChaseDirection). A player's car that hits one of the roadblock's cops
+// first is braked: a RealDriver's ForceEBrakeStop for 5 s, an AI car's
+// e-brake timer (PsychoDriver's, under physics or mellow movement) 4 s;
+// and above 40 mph, if the player's zone 1 is granted, the bust sound.
+int32_t tpursuit_monitor_road_block(tPursuit *p);
+
+// RoadBlockDefeated(bool), 0x00229970: when a player is in the chase,
+// either the chase given up (a player's car, ShouldPursuitBeCalledOff)
+// or the failed speech, a player's DODGE ROADBLOCK score (and a replay
+// event if it got by the first cop within 20 m above 20 m/s), and, while
+// the cops follow backwards outside Be A Cop, a longer wait for the next
+// roadblock and behaviour 0x20 on a two-lap race or, two times in three,
+// with New624. Then the behaviours by nRoadblockCount: 0x40 under three,
+// 0x80 from five, 0x110 between with the helicopter on.
+void tpursuit_road_block_defeated(tPursuit *p, int32_t b);
+
+// UpdateRoadBlocks, 0x00229b58. A roadblock goes on a blown tyre (with
+// the tyre speech for an AI car in Be A Cop), once MonitorRoadBlock says
+// it was got by, or when its disband timer has run out and the car is
+// more than 0.8 of the track past it; each but the tyre is defeated (with
+// a whole tyre) and starts the spawn timer again. With none, the spawn
+// timer runs down (held at 0 in Be A Cop), and with behaviour 8 the
+// pursuit asks for one: always in Be A Cop, else with roadblocks on, the
+// tyres whole, a player in the chase and the timer out.
+void tpursuit_update_road_blocks(tPursuit *p);
 
 // --------------------------------------- tCopManager's, making pursuits
 
@@ -282,17 +322,45 @@ extern void (*gSpeechRaisePursuitCopHitFn)(uint32_t speaker, int32_t where);
 extern void (*gSpeechRaiseSuspectCrashTrafficFn)(uint32_t speaker,
                                                  int32_t b);
 
-// What Update reaches that later slices port; NULL does nothing.
+// What Update reaches; NULL does nothing.
 //   - tCopManager::CreatePullover (0x00226f30), 12l: the caught car
 //     pulled over, with 1.
-//   - CreateRoadBlock (0x00229e30) and UpdateRoadBlocks (0x00229b58),
-//     12i. Nothing calls for a roadblock before UpdateRoadBlocks is in.
+//   - CreateRoadBlock (0x00229e30), 12i-2.
+//   - UpdateRoadBlocks (0x00229b58): main.c binds
+//     tpursuit_update_road_blocks.
 //   - UpdateChopper (0x00229678), 12k.
 extern void (*gCopManagerCreatePulloverFn)(tCopManager *m, tPursuit *p,
                                            struct Car *car, int32_t b);
 extern void (*gPursuitCreateRoadBlockFn)(tPursuit *p);
 extern void (*gPursuitUpdateRoadBlocksFn)(tPursuit *p);
 extern void (*gPursuitUpdateChopperFn)(tPursuit *p);
+
+// The roadblocks' speeches, the same: raiseSpikeStripTireBlow
+// (0x0020b460, Be A Cop's id and 0), RoadblockFailedSpeech (0x0022b3f8,
+// tPursuit's own, with RoadBlockDefeated's bool), raiseRequestAnother-
+// Roadblock (0x0020b190), raiseSpikeStripRequest (0x0020b2f0) and
+// raiseRoadblockRequest (0x0020b140), each with the speaker and the
+// supervisor's bool, and raiseDispatchRoadBlockNA (0x0020b7e8, Be A Cop's
+// id).
+extern void (*gSpeechRaiseSpikeStripTireBlowFn)(uint32_t speaker, int32_t b);
+extern void (*gPursuitRoadblockFailedSpeechFn)(tPursuit *p, int32_t b);
+extern void (*gSpeechRaiseRequestAnotherRoadblockFn)(uint32_t speaker,
+                                                     int32_t b);
+extern void (*gSpeechRaiseSpikeStripRequestFn)(uint32_t speaker, int32_t b);
+extern void (*gSpeechRaiseRoadblockRequestFn)(uint32_t speaker, int32_t b);
+extern void (*gSpeechRaiseDispatchRoadBlockNAFn)(uint32_t speaker);
+
+// collision_sound::PlayBustRoadBlock (0x001e5688), at the chased car's
+// position: task 29's sounds. NULL is silent.
+extern void (*gCollisionSoundPlayBustRoadBlockFn)(const bVector3 *pos);
+
+// Retail's RealDriver::ForceEBrakeStop(float) (0x0013b558): the e-brake
+// held on for `t` seconds while the car is moving. The port's RealDriver
+// is still the demo's, whose ForceEBrakeStop takes an on/off int, so
+// MonitorRoadBlock goes through this until RealDriver's retail pass
+// (12i-3). NULL does not brake.
+struct RealDriver;
+extern void (*gRealDriverForceEBrakeStopFn)(struct RealDriver *d, float t);
 
 // The helicopter (12k): its word at 960, and FollowThisCar (0x001e7f80).
 // Nothing sets pChopper before then; NULL aborts.

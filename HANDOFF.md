@@ -18205,3 +18205,63 @@ ForwardSpeed.
 
 12i: roadblocks. CreateRoadBlock (`0x00229e30`), UpdateRoadBlocks
 (`0x00229b58`) and the barrels' spawn (`0x0024f0a8`).
+
+## Session 59, continued (2026-10-08) -- 12i-1, the roadblocks' running logic
+
+What a chase does with its roadblock once it has one, ported from
+retail into `pursuit.c`. `docs/formats/pursuit.md` has a new section,
+"The roadblocks".
+
+### What it does
+
+- **RequestRoadBlock** (`0x0022cc38`): the state machine, at NONE, has
+  the cop ask for a spike strip or a roadblock, once. In Be A Cop it
+  spends one of the manager's roadblocks, or dispatch says none is left.
+  The machine then waits 8 s at CALLED_FOR_ROAD_BLOCK.
+- **MonitorRoadBlock** (`0x0022c390`): a player's car that hits a
+  roadblock cop is braked. A real driver gets ForceEBrakeStop for 5 s,
+  an AI car's PsychoDriver 4 s on its e-brake timer. Above 40 mph, and
+  with the zone's say-so, the bust sound plays. The car has got by when
+  it is within the road's width and more than 5 past the roadblock
+  along the route, the chase's way.
+- **RoadBlockDefeated** (`0x00229970`): the chase gives up near the
+  end of a long race, or else the failed-roadblock speech, the
+  DODGE_ROADBLOCK score and the replay's DodgeRoadblock event. A chase
+  following backwards waits longer for the next one. The roadblock
+  count sets behaviour bit 0x80, 0x40, or 0x110 with the helicopter.
+- **UpdateRoadBlocks** (`0x00229b58`): a blown tyre takes the roadblock
+  down. A car that got by, or that is 100 to 100 + a fifth of the
+  track past it when the disband timer runs out, passes it. With none,
+  the spawn timer runs down and a new one is asked for.
+- `main.c` binds `gPursuitUpdateRoadBlocksFn`. Nothing makes a
+  roadblock before 12i-2, so a race plays as before.
+- New NULL seams: six speeches, the bust sound, and
+  RealDriver::ForceEBrakeStop. The port's RealDriver is still the
+  demo's, which has no float ForceEBrakeStop. 12i-3 ports retail's and
+  binds it.
+
+### Checked
+
+- `tools/pursuit_check.py` grows a roadblocks script, last. Each car
+  has a PsychoDriver block, each roadblock a route point, and
+  UpdateRoadBlocks runs unstubbed: 42681 operations, 74272 lines, 0
+  differ.
+- `--mutate`: 526 mutations, 522 caught and four equivalent. Of the
+  101 new ones, three survived the first pass:
+  - `mr_mellow`: the e-brake timer was never cleared between the
+    collision cases, so MELLOW's 4 s hid behind PHYSICS's. A new op,
+    `eb`, clears it, and a BELT_MOVEMENT case joins them.
+  - `mr_theirs_y`: every roadblock sat on its route point's line. New
+    cases put it 10 off a road along x.
+  - `ur_req_has_rb` is equivalent: every earlier step returns or
+    takes the roadblock down.
+- cop, copdriver and psychodriver still have 0 differ.
+- The CIA builds.
+- `run_azahar_quickrace.ps1 -HoldKeys 65`: PASS. A Hot Pursuit quick
+  race from the frontend, with 4 cops, ran at 30 FPS and Speed 100%.
+
+### Next
+
+12i-2: making a roadblock. CreateRoadBlock (`0x00229e30`), the
+manager's setup and FindCopsForRoadBlock, the layout, and the barrels'
+spawn (`0x0024f0a8`). Then 12i-3, retail's RealDriver ForceEBrakeStop.

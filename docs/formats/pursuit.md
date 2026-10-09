@@ -12,8 +12,10 @@ Slice 12h-1 ports the object and how a chase is granted: the
 constructor and destructor, the state switch and its timers, the cops
 joining and leaving, the speakers, and the one-liners the cops' logic
 asks. Slice 12h-2 ports Update (`0x00229288`), each chase's step, and
-the state machines under it. The roadblock and helicopter calls are
-12i's and 12k's, the pullover 12l's.
+the state machines under it. Slice 12i-1 ports the roadblock's running
+logic: asking for one, watching the chased car get by, and taking it
+down. Making a roadblock is 12i-2's, the helicopter 12k's and the
+pullover 12l's.
 
 | function | address | port |
 |----------|---------|------|
@@ -60,6 +62,10 @@ the state machines under it. The roadblock and helicopter calls are
 | tCopManager::IsCopNearby | `0x00225d30` | `copmanager_is_cop_nearby` |
 | tCopManager::DidRecentlyCollideWithCop | `0x002286b8` | `copmanager_did_recently_collide_with_cop` |
 | (the barrels' fades counted down) | `0x0024f268` | `barricademanager_count_down` |
+| tRoadBlockStateMachine::RequestRoadBlock | `0x0022cc38` | `trbsm_request_road_block` |
+| MonitorRoadBlock | `0x0022c390` | `tpursuit_monitor_road_block` |
+| RoadBlockDefeated | `0x00229970` | `tpursuit_road_block_defeated` |
+| UpdateRoadBlocks | `0x00229b58` | `tpursuit_update_road_blocks` |
 
 ## The record
 
@@ -369,6 +375,101 @@ RoadBlockEncounteredRecently (`0x00229dd8`) is true:
 - when the roadblock spawn timer is past the spawn time less 4. The
   spawn time is doubled while a helicopter is requested.
 
+## The roadblocks (12i-1)
+
+Update calls UpdateRoadBlocks (`0x00229b58`) through
+`gPursuitUpdateRoadBlocksFn`, after the roadblock state machine has
+stepped. In order:
+
+1. With a roadblock and a blown tyre, the roadblock is disbanded (with
+   1). In Be A Cop, when the chased car is an AI racer's, the player's
+   cop first says the spike strip burst it (`0x0020b460`, with 0).
+2. With a roadblock still there that MonitorRoadBlock says the car has
+   got by, the roadblock is passed with 1.
+3. With a roadblock still there, its disband timer counts down by the
+   frame's seconds. Until it reaches 0 or less, Update stops here. Then
+   it is set to 0, and the roadblock is passed with 0 when the car has
+   left it behind. That means the forward track distance (a less b,
+   plus the track's length when below 0) is more than 0.8 of the
+   track's length (gp-27064). With the chase direction 1, a is 100
+   past the roadblock and b is the car. Otherwise a is 100 past the car
+   and b is the roadblock. So the car is 100 to 100 plus a fifth of the
+   track past the roadblock, the chase's way. Otherwise Update stops
+   here. A roadblock passed here goes straight on to step 5.
+4. With no roadblock at step 3, including one steps 1 and 2 took down,
+   in Be A Cop the spawn timer is set to 0. Otherwise it counts down by
+   the frame's seconds and stops at 0.
+5. With still no roadblock and behaviour bit 8, a roadblock is asked
+   for (RequestRoadBlock). In Be A Cop it is always asked for.
+   Otherwise roadblocks must be on, the tyres whole, a player involved
+   and the spawn timer 0 or less.
+
+Passing a roadblock sets the spawn timer to the manager's
+fRoadBlockSpawnTime. Without a blown tyre, RoadBlockDefeated runs with
+the same `b`. Then the roadblock is disbanded (with 1). Step 5's "no
+roadblock" always holds: each earlier step either stops Update or
+leaves no roadblock.
+
+MonitorRoadBlock (`0x0022c390`) says no with a tyre blown. For a
+player's car, it looks for the first of the roadblock's two cops whose
+car the chased car has hit:
+
+- A car under REAL_CONTROL gets RealDriver::ForceEBrakeStop for 5 s,
+  through `gRealDriverForceEBrakeStopFn` (12i-3).
+- An AI_CONTROL car in PHYSICS_MOVEMENT or MELLOW_MOVEMENT has its
+  PsychoDriver's EBrakeTimer set to 4 s.
+- Above 40 mph either way (17.881 m/s, gp-26948), when the player's
+  zone request (1, 0, 1, 1, `0x00177c88`) agrees, the bust sound plays
+  at the car (`0x001e5688`).
+
+Only the first such cop counts. Then, to have got by, the car must be
+within the road's width of the roadblock's spot, on the ground plane.
+It must also be more than 5 past it, the chase's way. "Past" is the
+car's distance along the roadblock's route point's direction, less the
+roadblock's own.
+
+RoadBlockDefeated (`0x00229970`) acts only when a player is involved:
+
+- When a player's car's chase should be called off
+  (ShouldPursuitBeCalledOff), the chase gives up.
+- Otherwise the roadblock-failed speech runs (`0x0022b3f8`, with `b`).
+  - A player's car scores DODGE_ROADBLOCK.
+  - When the player's own car (MyCar, which need not be the chased
+    one) goes faster than 20 m/s within 20 of the first cop's car, in
+    3D, the replay keeps it: RegisterInterestingEvent, 10 s,
+    "DodgeRoadblock". Retail calls it with no test. The port skips it
+    while `pReplayManager` is NULL.
+  - Outside Be A Cop, a chase in LSS_FOLLOW_BACKWARDS waits longer for
+    the next roadblock: the spawn timer gets another
+    fRoadBlockSpawnTime, and behaviour bit 0x20 is set. This happens
+    in a 2-lap race, or (other lap counts) when World::Random(3) is
+    below 2 with New624 set. A point-to-point race counts as 1 lap.
+  - Retail reads DemoDiscManager.bActive first, and with it set skips
+    the lap test. The port has no demo disc.
+
+Whether or not a player is involved, it then sets a behaviour bit by
+the roadblock count:
+
+| count | bits set |
+|-------|----------|
+| 5 or more | 0x80 |
+| under 3 | 0x40 |
+| 3 or 4, with bHelicopter | 0x110 |
+
+RequestRoadBlock (`0x0022cc38`) is the state machine's, and acts only
+at NONE:
+
+- The first time (speech flag 1 clear), the cop's speaker asks for a
+  spike strip (behaviour bit 0x10, `0x0020b2f0`) or a roadblock
+  (`0x0020b140`), and the flag is set. Later asks speak only in Be A
+  Cop: request another roadblock (`0x0020b190`). Each takes 1 while the
+  supervisor's timer is within 0.001 of 0 (gp-26944).
+- In Be A Cop, behaviour bit 8 is cleared and one of the manager's Be A
+  Cop roadblocks is used up. With none left, dispatch says none is
+  available (`0x0020b7e8`, BeACopId) and the machine stays at NONE.
+- Otherwise the machine goes to CALLED_FOR_ROAD_BLOCK, with 8 s on its
+  timer. When the timer runs out it calls CreateRoadBlock (12i-2).
+
 ## The barrels and spike strips
 
 The BarricadeManager's destructor deletes each barrel still there
@@ -393,6 +494,10 @@ Bound since 12h-2: `gCopManagerRequestPursuitFn`, to
 `tpursuit_update`. Cops now start chases in a race, and each chase runs
 its Update.
 
+Bound since 12i-1: `gPursuitUpdateRoadBlocksFn`, to
+`tpursuit_update_road_blocks`. A chase now asks for roadblocks, but
+none appears before 12i-2 binds CreateRoadBlock.
+
 Not bound yet:
 
 - The cop speech manager's calls do nothing while NULL:
@@ -400,11 +505,17 @@ Not bound yet:
   raiseCrash, raiseFlatTire and raiseSuperRequest. Update's speeches do
   the same: DeclarePursuitSpeech, RaiseBackupSpeech,
   BeginPursuitCollisionSpeech, raisePursuitCopHit and
-  raiseSuspectCrashTraffic.
+  raiseSuspectCrashTraffic. The roadblocks' speeches do the same:
+  raiseSpikeStripTireBlow, the roadblock-failed speech,
+  raiseRequestAnotherRoadblock, raiseSpikeStripRequest,
+  raiseRoadblockRequest and raiseDispatchRoadBlockNA. So does the
+  bust sound (CollisionSound::PlayBustRoadBlock).
+- RealDriver::ForceEBrakeStop, `gRealDriverForceEBrakeStopFn`, does
+  nothing while NULL. The port's RealDriver is still the demo's; 12i-3
+  ports retail's and binds it.
 - Update's later slices do nothing while NULL: CreatePullover (12l),
-  CreateRoadBlock and UpdateRoadBlocks (12i), and UpdateChopper (12k).
-  So nothing calls for a roadblock yet, and a caught car is not pulled
-  over.
+  CreateRoadBlock (12i-2) and UpdateChopper (12k). So a roadblock is
+  asked for but never made, and a caught car is not pulled over.
 - So does `gPlayerLoadNextNisFn`, the Busted NIS (12l).
 - These abort if reached:
   - the helicopter's word at 960 and FollowThisCar (12k);
@@ -489,14 +600,37 @@ cover:
   - the early check by state;
   - the landmarks;
   - Be A Cop with the chase direction at the dot product's 0 edge;
-- RequestPursuit, last: seven configurations, each with 14 asks, then
+- RequestPursuit: seven configurations, each with 14 asks, then
   the give-up, backup, CopCarPos, each finish reason, Be A Cop with the
-  player's cop in four places, and split screen.
+  player's cop in four places, and split screen;
+- the roadblocks, last (12i-1). Each car has a PsychoDriver block (its
+  e-brake timer dumped), each roadblock a route point. The replay
+  manager, the zone request, World::Random and the new speeches are
+  logging stand-ins. UpdateRoadBlocks runs unstubbed, and
+  GetForwardTrackDistance is coputil's copy:
+  - RequestRoadBlock over the states, the speech flag, five behaviour
+    sets, seven supervisor timers around 0.001 (NaN, the infinity),
+    and four Be A Cop roadblock counts, each in and out of Be A Cop,
+    and the three speakers;
+  - MonitorRoadBlock over 13 spots by five chase directions, around
+    the width and the 5 edge. Then a diagonal road at four widths, a
+    roadblock off its route point's line, and a blown tyre. Then nine
+    control and movement modes by three collision pairs, the 40 mph
+    edge by three zone answers, missing cops, and an AI car's chase;
+  - RoadBlockDefeated for four chased cars and Be A Cop, nine
+    roadblock counts with the helicopter on and off, the call-off near
+    a 4-lap race's end, the replay event's speed, distance and height
+    edges, the player's own car, and 13 follow-backwards cases over
+    laps, point-to-point, New624 and the random answer;
+  - UpdateRoadBlocks with no roadblock (the timer's edges, -0 and a
+    zero frame), a blown tyre in and out of Be A Cop, a cop near enough
+    to join the chase, got by, and the disband timer by distance and
+    chase direction (including 2.0).
 
-35524 operations, 66839 lines, 0 differ.
+42681 operations, 74272 lines, 0 differ.
 
-`--mutate` runs out of the tree through `mutpar`: 425 mutations, 422
-caught and three equivalent:
+`--mutate` runs out of the tree through `mutpar`: 526 mutations, 522
+caught and four equivalent:
 
 - `super_lt` (`<=` to `<` against 0.001): within 25 of -50 the timer
   less -50 is exact (Sterbenz), so it is a multiple of 2^-18, which
@@ -505,8 +639,13 @@ caught and three equivalent:
 - `bar_dtor_free`: the barricades' one caller passes 3.
 - `remove_rb_too`: the roadblock's loop runs only while nothing is
   found, so a cop found in Cops skips it either way.
+- `ur_req_has_rb` (UpdateRoadBlocks' request without its roadblock
+  test): every earlier step either returns or takes the roadblock
+  down, so the test always sees NULL.
 
 The checkers that link `copmgr.c` still have 0 differ: carmode, cop,
 copdriver, copmanager, copmover, drivecam, hudfeatures, hudrender,
 raceupdate and trackgraph (12h-1). After 12h-2, cop and copdriver, the
 other two that link `pursuit.c`, still have 0 differ.
+After 12i-1, cop, copdriver and psychodriver (whose e-brake note
+moved) still have 0 differ.

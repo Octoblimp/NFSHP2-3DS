@@ -151,8 +151,10 @@ floor of -0.94.
 - **SetLowGear** sets DesiredGear -1.
 - **StepOnItJeeves** (no caller) sets EBrake 0, Throttle 1 and Brake 0.
 - **SetMaxThrottle** (no caller) and **SetEBrakeTimer** (0x0013ad08, no
-  caller) store their float. Drive's countdown is the only other store to
-  the timer, so the e-brake never comes on in the game.
+  caller) store their float. The timer's other stores are Drive's
+  countdown and tPursuit::MonitorRoadBlock's 4 s, made inline, for a
+  player's car under AI control that hits a roadblock's cop
+  (`pursuit.md`).
 - **GetSteerToPoint** and **SetSteerToPoint** read and write the point.
   The setter stores y first.
 

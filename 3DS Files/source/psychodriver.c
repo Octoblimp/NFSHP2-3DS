@@ -676,8 +676,9 @@ bVector2 *psychodriver_get_steer_to_point(PsychoDriver *d)
 
 void psychodriver_set_ebrake_timer(PsychoDriver *d, float f)
 {
-    // 0x0013ad08, which nothing calls: the only other store to the timer
-    // is Drive's own countdown, so the e-brake never comes on in the game.
+    // 0x0013ad08, which nothing calls. The timer's other stores are
+    // Drive's own countdown and MonitorRoadBlock's 4 s (pursuit.c), inline,
+    // for a player's car under AI control that hits a roadblock's cop.
     d->EBrakeTimer = f;
 }
 
