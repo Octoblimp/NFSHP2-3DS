@@ -19188,3 +19188,47 @@ decoded.
 ### Next
 
 12l: pullovers and Busted (CreatePullover, `0x00226f30`).
+
+## Session 62, continued (2026-10-09) -- the position markers (the light bars)
+
+### Done
+
+- The user reported that the cop light bars did not light. The new
+  "race: cop cars" log line showed why: "4, 2 lights on, 0 cop flares;
+  flares asked 0" -- no car had a flare. CreateCarLightFlares makes them
+  from the car's position markers (eFindPositionMarker by the model's
+  type hash), and the loader that puts the markers on
+  `PositionMarkerList` was an unported slot (8, chunk 0x34013).
+- `epositionmarker.c`: LoaderPositionMarkers (`0x001a7e90`) links each
+  32-byte record, after the payload's pad to 16, onto the list's tail;
+  UnloaderPositionMarkers (`0x001a7f08`) unlinks them. The count is the
+  size past the pad over the record (sizeof, which the layout check
+  holds to 32 on the 3DS). `bchunkload.c` has them in slot 8 of both
+  tables.
+- `main.c`: the flare seam counts the flares asked for and drawn, and
+  the "race: cop cars" line reports them with the cops' flares.
+- Docs: `car-render-info.md` "The position markers", `light-flare.md`,
+  `loader-table.md`'s slot 8.
+
+### Checked
+
+- `tools/positionmarker_check.py` (new) runs the loader, the unloader
+  and eFindPositionMarker in mipsemu against
+  `tools/src/positionmarker_test.c`, whose records are rebuilt at the
+  host's size: the guard, one chunk at each word misalignment with 0 to
+  7 records and tails of 0 to 31, random loads and unloads over eight
+  chunks with searches, and all 44 disc chunks. 12,145 ops, 14,676
+  lines, 0 differ. 27 mutations, all caught.
+- `tools/loadertable_check.py`: slot 8 is ported now; its matrix calls
+  both tables' slot 8 on a one-record chunk and checks the list. Demo
+  1,617 lines and retail 49,626 lines, 0 differ; the two new mutations
+  (slot 8's unloader a loader, its loader null) are caught.
+- The CIA builds; `check_3dsx` and `check_shbin` pass. Azahar, on AC,
+  two Hot Pursuit quick races, PASS at 30 fps: "cop cars 4, 2 lights on,
+  24 cop flares; flares asked 188 drawn 94". The shots show the
+  chasing cop's red, white and blue bar in the rear-view mirror and the
+  player's brake lights glowing.
+
+### Next
+
+12l: pullovers and Busted (CreatePullover, `0x00226f30`).

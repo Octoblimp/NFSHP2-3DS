@@ -12,6 +12,7 @@
 #include "copmgr.h"
 #include "difficultyinfo.h"
 #include "elight.h"
+#include "epositionmarker.h"
 #include "esolid.h"
 #include "helisheet.h"
 #include "polyhedra.h"
@@ -143,7 +144,6 @@ static int take(const uint32_t *types, size_t n, int slot, int unload,
 
 UNPORTED(LoaderFontInfo, UnloaderFontInfo, 3, 0x00015010u, 0x00030200u)
 UNPORTED(LoaderEventManager, UnloaderEventManager, 7, 0x80036000u)
-UNPORTED(LoaderPositionMarkers, UnloaderPositionMarkers, 8, 0x00034013u)
 UNPORTED(LoaderFlailerChunk, UnloaderFlailerChunk, 10, 0x80010200u)
 UNPORTED(LoaderAnimations, UnloaderAnimations, 12, 0x80034008u)
 UNPORTED(LoaderBodyDamage, UnloaderBodyDamage, 17, 0x00034030u)
@@ -168,7 +168,7 @@ BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     loader_light_list,              //  5
     loader_acid_fx,                 //  6
     LoaderEventManager,             //  7
-    LoaderPositionMarkers,          //  8
+    loader_position_markers,        //  8
     loader_collision_volumes,       //  9
     LoaderFlailerChunk,             // 10
     LoaderScenery,                  // 11
@@ -201,7 +201,7 @@ BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
     unloader_light_list,            //  5
     unloader_acid_fx,               //  6
     UnloaderEventManager,           //  7
-    UnloaderPositionMarkers,        //  8
+    unloader_position_markers,      //  8
     unloader_collision_volumes,     //  9
     UnloaderFlailerChunk,           // 10
     UnloaderScenery,                // 11

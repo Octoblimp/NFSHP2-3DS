@@ -165,6 +165,35 @@ that catches it:
 
 Two patterns were also fixed after that first pass.
 
+## The position markers
+
+A car's markers come from the 0x34013 chunk at the head of its
+GEOMETRY.BIN: 32-byte records (a bNode, NameHash, TypeHash, a position
+and Param) after the payload's pad to 16. The retail disc has 44 of these
+chunks, one per car, 956 markers in all. LoaderPositionMarkers
+(`0x001a7e90`, loader slot 8) links each record in place onto the tail of
+`PositionMarkerList` (gp-19328), in order, and UnloaderPositionMarkers
+(`0x001a7f08`) unlinks them. The count is what of the chunk's size is left
+past the pad, shifted down by 5, so a size short of its pad wraps to a
+count near 2^27 -- no chunk on the disc has one.
+
+Both are in `epositionmarker.c` since Session 62. Before then slot 8 was
+an unported one that only handed the chunk on, so the list stayed empty:
+CreateCarLightFlares found no marker, and no car had a flare -- no
+headlights, brake lights or cop light bar -- and InitRenderInfo made no
+emitter position from a marker.
+
+`tools/positionmarker_check.py` runs the two and eFindPositionMarker in
+mipsemu against `tools/src/positionmarker_test.c`, whose records are
+rebuilt at the host's size after the same pad. The script covers the
+guard's neighbours, one chunk at each word misalignment with 0 to 7
+records and tails of 0 to 31 bytes, random loads and unloads over eight
+chunks with searches from the head and from linked records, and all 44
+disc chunks loaded together, searched by every type and name, unloaded
+out of order and loaded again: 12,145 ops, 14,676 lines, 0 differ. 27
+mutations, all caught. `loadertable_check.py` calls slot 8 of both tables
+on a chunk of one record and checks the list after each.
+
 ## What is not ported
 
 These go through seams, and a NULL seam is skipped:

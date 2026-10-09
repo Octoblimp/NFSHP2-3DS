@@ -148,6 +148,12 @@ Until this slice, `gERenderLightFlareFn` was NULL, so no car's lights
 glowed. The cop lights did not flash, and the headlights and brakes
 showed no glow.
 
+Even then the cars had no flares to draw until Session 62: the
+position-marker loader (slot 8) was not ported, so CreateCarLightFlares
+found none of a car's markers. With it, each car gets its flares from the
+GEOMETRY.BIN's markers (see [car-render-info](car-render-info.md), "The
+position markers").
+
 ## The port
 
 - **The Type.** Retail indexes the types' table with the signed Type and

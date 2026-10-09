@@ -3,15 +3,16 @@
 // art tools leave in a bundle, for where a car's lights shine from and
 // where its smoke and sparks come out.
 //
-//   eFindPositionMarker   0x001a7f78   124 bytes
+//   LoaderPositionMarkers     0x001a7e90   120 bytes
+//   UnloaderPositionMarkers   0x001a7f08   112 bytes
+//   eFindPositionMarker       0x001a7f78   124 bytes
 //
-// The loader that puts a bundle's markers on the list, LoaderPositionMarkers
-// (0x001a7e90, chunk 0x34013, loader slot 8), is not ported yet, so the
-// list stays empty and a search finds nothing. When it is, it links each
-// 32-byte record in place by the bNode at its start, as LoaderSolidList
-// does solids.
+// The loader (chunk 0x34013, loader slot 8) links each 32-byte record of
+// a bundle's chunk in place by the bNode at its start, as LoaderSolidList
+// does solids; every car's GEOMETRY.BIN starts with one.
 //
-// Cross-check: tools/carrenderinfo_check.py. Write-up:
+// Cross-checks: tools/positionmarker_check.py (the loader and unloader),
+// tools/carrenderinfo_check.py (the search). Write-up:
 // docs/formats/car-render-info.md.
 
 #ifndef EPOSITIONMARKER_H
@@ -51,5 +52,13 @@ extern bNode PositionMarkerList;
 // one, any marker of that type matches. With neither, NULL at once.
 ePositionMarker *eFindPositionMarker(uint32_t name_hash, uint32_t type_hash,
                                      ePositionMarker *prev);
+
+// LoaderPositionMarkers(bChunk *), 0x001a7e90: a 0x34013 chunk's records,
+// from its payload rounded up to 16, onto the list's tail in order;
+// returns 1, or 0 for any other chunk. The count is what of the size is
+// left past that pad, over the record. UnloaderPositionMarkers,
+// 0x001a7f08, takes the same records off again.
+int loader_position_markers(uint8_t *chunk);
+int unloader_position_markers(uint8_t *chunk);
 
 #endif

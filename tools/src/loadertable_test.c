@@ -26,6 +26,7 @@
 #include "emodel.h"
 #include "eview.h"
 #include "eviewmatrix.h"
+#include "epositionmarker.h"
 #include "esolid.h"
 #include "racefinish.h"
 #include "sun.h"
@@ -809,7 +810,7 @@ static BChunkLoader saved_unload[BCHUNK_NUM_LOADERS];
 static int unported_slot(int k)
 {
     return !(k == 0 || k == 1 || k == 2 || k == 4 || k == 5 || k == 6
-             || k == 9 || k == 11 || k == 13 || k == 14 || k == 16
+             || k == 8 || k == 9 || k == 11 || k == 13 || k == 14 || k == 16
              || k == 15 || k == 18 || k == 19
              || k == 22 || k == 23 || k == 25 || k == 28);
 }
@@ -1098,7 +1099,10 @@ static uint8_t *chunk_ptr(int32_t idx)
 // One slot on one type. Mode 0 is a bare chunk, the type and zeros; 1 is a
 // take without the call; 2 is a header-only solid list; 3 is a chunk of size
 // 0 whose payload is 0xa5s, for a ported unloader, which reads no further
-// than the header -- a loader in its place reads the sizes and faults.
+// than the header -- a loader in its place reads the sizes and faults; 4
+// is a position-marker chunk of one record, linked first for the
+// unloader, and the list after the call must hold just it (the loader)
+// or nothing (the unloader).
 static void matrix(int table, int slot, uint32_t type, int mode)
 {
     static uint8_t raw[512];
@@ -1114,6 +1118,12 @@ static void matrix(int table, int slot, uint32_t type, int mode)
     if (mode == 3) {
         memcpy(c, &type, 4);
         memset(c + 4, 0, 4);
+    } else if (mode == 4) {
+        uint32_t w[2] = { 0x00034013u, 8 + (uint32_t)sizeof(ePositionMarker) };
+
+        memcpy(c, w, sizeof w);
+        if (table)
+            (void)loader_position_markers(c);
     } else if (mode == 2) {
         uint32_t w[4] = { 0x80034000u, 60, 0x00034001u, 52 };
 
@@ -1128,6 +1138,17 @@ static void matrix(int table, int slot, uint32_t type, int mode)
     in_matrix = 0;
     printf("  m %d %d %08x %s\n", table, slot, (unsigned)type,
            r ? "take" : "no");
+    if (mode == 4) {
+        bNode *m = (bNode *)(void *)(c + 16), *h = &PositionMarkerList;
+        int ok = table ? h->next == h && h->prev == h
+                       : h->next == m && h->prev == m && m->next == h
+                         && m->prev == h;
+
+        if (!ok)
+            printf("  list wrong\n");
+        h->next = h;
+        h->prev = h;
+    }
     if (unported_slot(slot) && r) {
         if (seam_rec.set != 1 || seam_rec.slot != slot
             || seam_rec.unload != table || seam_rec.chunk != c)

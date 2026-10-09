@@ -2353,10 +2353,20 @@ static void setup_light_context_seam(eLightContext* lc,
 }
 
 // CarRenderInfo::Render's eRenderLightFlare, whose answer it does not read.
+// The cars' flares asked for and drawn since the race log's last line,
+// and of them the cops' red, blue and white (types 4 to 6).
+static int s_flaresAsked, s_flaresDrawn, s_copFlaresAsked, s_copFlaresDrawn;
+
 static void render_light_flare_seam(eView* view, eLightFlare* flare,
                                     bMatrix4* local_world, float intensity)
 {
-    (void)el_render_light_flare(view, flare, local_world, intensity);
+    int cop = flare->Type >= 4 && flare->Type <= 6;
+    int drew = el_render_light_flare(view, flare, local_world, intensity);
+
+    s_flaresAsked++;
+    s_flaresDrawn += drew != 0;
+    s_copFlaresAsked += cop;
+    s_copFlaresDrawn += cop && drew != 0;
 }
 
 // LoadGlobalChunks' LoadResourceFile hands every top-level chunk of GLOBALB
@@ -3274,6 +3284,40 @@ static void logRaceState(void)
                 h != NULL ? (double)h->CurrentPos.y : 0.0,
                 h != NULL ? (double)h->CurrentPos.z : 0.0,
                 (int)pCopManager->bChopperBusy);
+    }
+    if (pCurrentWorld != NULL) {
+        // The cop cars, those with their lights on, and their red, blue
+        // and white flares; then the flares drawn since the last line.
+        int cops = 0, lit = 0, copFlares = 0, i;
+
+        for (i = 0; i < pCurrentWorld->TotalNumCars && i < WORLD_MAX_CARS;
+             i++) {
+            const Car*   c = pCurrentWorld->CarTable[i];
+            const bNode* n;
+            DriverType   t;
+
+            if (c == NULL || c->MyDriver == NULL)
+                continue;
+            t = c->MyDriver->TheDriverType;
+            if (t != DRIVER_TYPE_COP && t != DRIVER_TYPE_SUPER_COP)
+                continue;
+            cops++;
+            lit += c->CopLights != 0;
+            if (c->pRenderInfo == NULL)
+                continue;
+            for (n = c->pRenderInfo->LightFlareList.next;
+                 n != &c->pRenderInfo->LightFlareList; n = n->next) {
+                const eLightFlare* f = (const eLightFlare*)(const void*)n;
+
+                copFlares += f->Type >= 4 && f->Type <= 6;
+            }
+        }
+        logLine("race: cop cars %d, %d lights on, %d cop flares; flares "
+                "asked %d drawn %d, cop asked %d drawn %d", cops, lit,
+                copFlares, s_flaresAsked, s_flaresDrawn, s_copFlaresAsked,
+                s_copFlaresDrawn);
+        s_flaresAsked = s_flaresDrawn = 0;
+        s_copFlaresAsked = s_copFlaresDrawn = 0;
     }
     {
         // What the race baked and uploaded since the last line: after

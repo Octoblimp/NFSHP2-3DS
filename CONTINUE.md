@@ -1,7 +1,10 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 62 (2026-10-09):
-12k-7 is done: the helicopter in the chase. tPursuit's UpdateChopper,
+the cars' light flares now show -- the cop light bars, headlights and
+brake lights -- since the position-marker loader (slot 8) is ported
+(`epositionmarker.c`; `docs/formats/car-render-info.md`, "The position
+markers"). Before it, 12k-7: the helicopter in the chase. tPursuit's UpdateChopper,
 the manager's IsChopperAvailable and RequestChopper and Be A Cop's two
 requests are in `pursuitchopper.c` (`docs/formats/pursuit.md`, "The
 helicopter"), and the helicopter's seams are bound: a race with cops
@@ -527,6 +530,23 @@ pursuit.obj, on a 10 KB manager. Its slices:
     helicopter made and idle (plan 6). A chase asks for it only after a
     dodged roadblock at level 3 (RoadBlockDefeated), which the run did
     not reach.
+- **The position markers, done (Session 62):** the user's report
+  (2026-10-09) that the cop light bars did not light. No car had any
+  flare: the position-marker loader (chunk 0x34013, slot 8) was never
+  ported, so `PositionMarkerList` stayed empty and CreateCarLightFlares
+  found nothing. LoaderPositionMarkers (`0x001a7e90`) and
+  UnloaderPositionMarkers (`0x001a7f08`) are now in `epositionmarker.c`
+  and in both tables. Each car's GEOMETRY.BIN starts with one (44
+  chunks, 956 markers on the disc).
+  - `tools/positionmarker_check.py`: 12,145 ops, 14,676 lines, 0
+    differ; 27 mutations, all caught. `loadertable_check.py` calls slot
+    8 of both tables on a one-record chunk and checks the list (2 more
+    mutations, caught); 49,626 retail lines, 0 differ.
+  - Azahar, on AC: a Hot Pursuit quick race, PASS at 30 fps; 24 cop
+    flares on the 4 cops, the chasing cop's red, white and blue bar in
+    the rear-view mirror, and the player's brake lights glowing.
+  - The "race: cop cars" log line counts the cops, those with lights
+    on, their flares, and the flares asked for and drawn.
 - **Next: 12l**, pullovers and Busted (CreatePullover, `0x00226f30`).
 
   After 12k:

@@ -78,8 +78,11 @@ takes the type in a slot whose object is ported, whose loader would load
 it: there it prints `take` from CLAIMS below, and CLAIMS is what the model
 checks. The unloaders in those slots, but Scenery's and TexturePack's, are
 called, on a chunk of size 0 and a payload of 0xa5s that a loader would
-fault on. An unported slot must also hand the chunk it takes to
-gUnportedLoaderFn, once, with its slot and table.
+fault on. PositionMarkers' two (slot 8) are called on a chunk of one
+record, the unloader's linked first, and the list must hold just that
+record after the loader and nothing after the unloader. An unported slot
+must also hand the chunk it takes to gUnportedLoaderFn, once, with its
+slot and table.
 
 Scenarios, demo: the walks over a probe table, both ways, over ranges,
 with a chunk nobody takes and the walk after it, with two takers and with
@@ -141,7 +144,8 @@ SOURCES = [HARNESS, STUBS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "bprintf.c", "vtable.c",
     "cartypeinfo.c", "langtab.c", "drivetrain.c", "engine.c", "wheel.c",
     "suspension.c", "steering.c", "rigidbody.c", "table.c", "elight.c",
-    "helisheet.c", "copmgr.c", "cop.c", "copmanager.c", "timer.c")]
+    "helisheet.c", "copmgr.c", "cop.c", "copmanager.c", "timer.c",
+    "epositionmarker.c")]
 
 HARNESS_TIMEOUT = 600
 EXTRACTED = ROOT / "extracted"
@@ -259,7 +263,8 @@ CLAIMS = {
     30: [0x00039100, 0x00039101, 0x00039102],
 }
 TAKER = {t: k for k, ts in CLAIMS.items() for t in ts}
-PORTED = {0, 1, 2, 4, 5, 6, 9, 11, 13, 14, 16, 18, 19, 23, 24, 26, 29}
+PORTED = {0, 1, 2, 4, 5, 6, 8, 9, 11, 13, 14, 16, 18, 19, 23, 24, 26,
+          29}
 
 # Retail's: the demo's without PhysPredict, slot 20, and HeliSheet (23) a
 # container. The rest of the guards are the demo's.
@@ -600,6 +605,10 @@ def scenario_matrix(sc, files, tables):
                     pass
                 elif slot == 4:
                     mode = 2
+                elif slot == 8:
+                    # A size-0 position-marker chunk's count wraps (its
+                    # pad is past its end), so the slot gets one record.
+                    mode = 4
                 elif slot in tables.ported:
                     # Scenery's unloader unlinks what its loader linked,
                     # and TexturePack's destroys the pack its header names,
@@ -2124,6 +2133,10 @@ MUTATIONS = [
      "for (i = 1; i < n; i++) {"),
     ("unported-unload-flag", BCL, "slot, 1, c);", "slot, 0, c);"),
     ("slot-6-is-7", BCL, "    loader_acid_fx,", "    LoaderEventManager,"),
+    ("slot-8-unloader-loads", BCL, "    unloader_position_markers,      //  8",
+     "    loader_position_markers,        //  8"),
+    ("slot-8-loader-is-null", BCL, "    loader_position_markers,        //  8",
+     "    loader_null,                    //  8"),
     ("unloader-14-loads", BCL, "    unloader_sun,", "    loader_sun,"),
     ("unloader-16-takes-none", BCL, "    return unloader_car_info(c);",
      "    return 0;"),
