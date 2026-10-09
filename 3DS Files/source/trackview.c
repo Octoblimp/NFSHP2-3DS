@@ -17,6 +17,7 @@
 #include "efog.h"
 #include "eframe.h"
 #include "elight.h"
+#include "elightflare.h"
 #include "emath.h"
 #include "emodel.h"
 #include "epoly.h"
@@ -138,6 +139,8 @@ static float      s_depthFar  = TRACK_FAR;
 #define GS_CENTRE 2048.0f
 
 static void render_epoly(ePoly* p, TextureInfo* info, int flags);
+static void render_epoly_3d(ePoly* p, TextureInfo* info, bMatrix4* m,
+                            int flags);
 static void transfer_zbuffer_rect(uint8_t* dst, int x, int y, int w, int h);
 static float depth_of_gs_z(float g);
 static void target_to_screen(float x, float y, int targetW, int targetH,
@@ -2225,6 +2228,7 @@ bool trackview_load(TrackView* v)
     eDisableFixUpTables = 1;
     gEModelRenderFn = render_model;
     gEPolyRenderFn  = render_epoly;
+    gEPolyRender3DFn = render_epoly_3d;
     gEStripFns      = kStripFns;
     gExStripFns     = kExStripFns;
     gETransferZBufferRectFn = transfer_zbuffer_rect;
@@ -2273,6 +2277,7 @@ bool trackview_attach(TrackView* v, uint8_t* data, size_t len)
     }
     gEModelRenderFn = render_model;
     gEPolyRenderFn  = render_epoly;
+    gEPolyRender3DFn = render_epoly_3d;
     gEStripFns      = kStripFns;
     gExStripFns     = kExStripFns;
     gETransferZBufferRectFn = transfer_zbuffer_rect;
@@ -2320,6 +2325,9 @@ void trackview_free(TrackView* v)
         }
         if (gEPolyRenderFn == render_epoly) {
             gEPolyRenderFn = NULL;
+        }
+        if (gEPolyRender3DFn == render_epoly_3d) {
+            gEPolyRender3DFn = NULL;
         }
         if (gEStripFns.Begin == strip_begin) {
             memset(&gEStripFns, 0, sizeof gEStripFns);
@@ -2666,6 +2674,38 @@ static void render_epoly(ePoly* p, TextureInfo* info, int flags)
     v->sunAt[0] = mx;
     v->sunAt[1] = my;
     v->sunAlpha = p->Colours[0][3];
+}
+
+// ePoly::Render3D (retail 0x0010ff88), for the light flares: the poly in
+// the matrix's space, a strip of V0, V1, V3, V2. It goes where eEndStrip's
+// packet goes, the texture's list or the alpha sort by V0's z, so here it
+// is a strip of four. Its last argument is not read.
+static void render_epoly_3d(ePoly* p, TextureInfo* info, bMatrix4* m,
+                            int flags)
+{
+    static const uint8_t kStrip[4] = { 0, 1, 3, 2 };
+    int                  i;
+
+    (void)flags;
+    if (info == NULL || !strip_begin(info, 4, m)) {
+        return;
+    }
+    for (i = 0; i < 4; i++) {
+        const int k = kStrip[i];
+        bVector3  at;
+
+        at.x   = p->Vertices[k].x;
+        at.y   = p->Vertices[k].y;
+        at.z   = p->Vertices[k].z;
+        at.pad = 0.0f;
+        strip_add_vertex(&at);
+        strip_add_colour((uint32_t)p->Colours[k][0]
+                         | (uint32_t)p->Colours[k][1] << 8
+                         | (uint32_t)p->Colours[k][2] << 16
+                         | (uint32_t)p->Colours[k][3] << 24);
+        strip_add_uv(p->UVs[k][0], p->UVs[k][1]);
+    }
+    strip_end();
 }
 
 // Render's packet for each queued poly, as render_epoly has it -- the
@@ -3422,10 +3462,13 @@ void trackview_draw_mirror(TrackView* v)
     georender_run_end();
     // RenderWorldObjects (0x001cdb20) for the mirror too: the spike
     // strips' belts. The mirror has no sun, so they follow the scenery.
+    // Then the tunnels' light flares (0x00116778), which wait on the
+    // lists.
     hangwatch_mark("the mirror's world objects");
     georender_run_begin();
     render_world_objects(view);
     georender_run_end();
+    el_render_world_light_flares(view);
     draw_deferred(v, false);
     hangwatch_mark("the mirror's cars");
     // The frame profiler's car parts are the player's view's: the mirror
@@ -3561,9 +3604,11 @@ void trackview_draw(TrackView* v)
     // Then StuffSun (0x00112ecc), after DrawNisObjects, which has nothing
     // to draw here. Its quads draw at once; see render_epoly. Then
     // RenderWorldObjects (0x001cdb20, after RenderPlayers): the spike
-    // strips' belts. Then the effects (RenderEffects, FrameEffects' and
-    // WorldEffects'), whose sprites wait on the lists, and the scenery's
-    // chain ends with AttachSolidPolys alone (0x001134a4).
+    // strips' belts. Then the tunnels' light flares
+    // (eRenderWorldLightFlares, 0x00116778) and the effects
+    // (RenderEffects, FrameEffects' and WorldEffects'), which wait on the
+    // lists, and the scenery's chain ends with AttachSolidPolys alone
+    // (0x001134a4).
     v->sunQuads       = 0;
     v->sunQuadsFailed = 0;
     georender_set_fog(s_fogOn ? &s_skyFog : NULL, s_fogColour);
@@ -3576,6 +3621,7 @@ void trackview_draw(TrackView* v)
     georender_run_begin();
     render_world_objects(view);
     georender_run_end();
+    el_render_world_light_flares(view);
     render_effects(view);
     georender_run_begin();
     draw_deferred(v, false);
@@ -3745,6 +3791,7 @@ bool trackview_draw_frontend(TrackView* v, void (*render)(void*),
 
     // The seams the race's view sets too, and lets go of when it is freed.
     gEModelRenderFn = render_model;
+    gEPolyRender3DFn = render_epoly_3d;
     gEStripFns      = kStripFns;
     gExStripFns     = kExStripFns;
     s_draw        = v;

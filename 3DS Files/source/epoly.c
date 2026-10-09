@@ -3,6 +3,8 @@
 #include "epoly.h"
 
 void (*gEPolyRenderFn)(ePoly *p, TextureInfo *tex, int flags);
+void (*gEPolyRender3DFn)(ePoly *p, TextureInfo *tex, bMatrix4 *local_world,
+                         int flags);
 
 void epoly_init(ePoly *p)
 {

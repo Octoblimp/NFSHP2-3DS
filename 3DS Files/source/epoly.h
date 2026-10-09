@@ -27,6 +27,18 @@
 //   ApplyAlphaSorting is set. Otherwise it goes on the texture's list.
 // - It draws a strip in the order V0, V1, V3, V2.
 //
+// ePoly::Render3D (retail 0x0010ff88, the demo's 0x0010ea60) is the same
+// poly in a model's space instead, drawn through a local-to-world matrix.
+// It is a seam too, and trackview.c's draws it as a strip. What it does:
+// - It draws nothing for a NULL texture.
+// - It lays out the four vertices, colours and UVs for the VU1 in the
+//   order V0, V1, V3, V2, a strip, and only their x, y and z.
+// - The packet goes on the texture's list with the matrix, or on the
+//   alpha sort when the texture's ApplyAlphaSorting is set, by V0's z
+//   through the view's WorldViewMatrix -- V0 as it is, not through the
+//   matrix. That is eEndStrip's.
+// - Its last argument is not read.
+//
 // The destructor (retail 0x00114db8, the demo's 0x001149f0) runs
 // bTNode's, then bNode's, and neither does anything to a poly on the
 // stack. The port has no call for it.
@@ -39,6 +51,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "bmatrix.h"
 #include "bvector.h"
 #include "texturepack.h"
 
@@ -88,5 +101,9 @@ void epoly_init(ePoly *p);
 
 // ePoly::Render(TextureInfo *, int). NULL draws nothing.
 extern void (*gEPolyRenderFn)(ePoly *p, TextureInfo *tex, int flags);
+
+// ePoly::Render3D(TextureInfo *, bMatrix4 *, int). NULL draws nothing.
+extern void (*gEPolyRender3DFn)(ePoly *p, TextureInfo *tex,
+                                bMatrix4 *local_world, int flags);
 
 #endif

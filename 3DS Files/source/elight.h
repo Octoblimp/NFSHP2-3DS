@@ -9,8 +9,8 @@
 // A track's bundle holds one light pack (0x80034015): a header, an AABB
 // tree over the lights, and the lights, 96 bytes each. Every leaf of the
 // tree lists the lights whose spheres reach into it. The track's flares
-// (0x80034019) are a second list, drawn by eRenderWorldLightFlares, which
-// is not ported. GLOBALB.BUN starts with the light materials (0x3401e):
+// (0x80034019) are a second list, drawn by eRenderWorldLightFlares
+// (elightflare.h). GLOBALB.BUN starts with the light materials (0x3401e):
 // 49 of them, 320 bytes each, one per kind of surface -- car paint, glass,
 // chrome, rubber -- with two sets of numbers, one for the frontend and one
 // in game.

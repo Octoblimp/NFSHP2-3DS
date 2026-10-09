@@ -93,6 +93,7 @@
 #include "edisplay.h"
 #include "eenvmap.h"
 #include "elight.h"
+#include "elightflare.h"
 #include "emath.h"
 #include "emodel.h"
 #include "esolid.h"
@@ -2349,6 +2350,13 @@ static void setup_light_context_seam(eLightContext* lc,
     el_setup_light_context(lc, local_world, hack, eye, view);
 }
 
+// CarRenderInfo::Render's eRenderLightFlare, whose answer it does not read.
+static void render_light_flare_seam(eView* view, eLightFlare* flare,
+                                    bMatrix4* local_world, float intensity)
+{
+    (void)el_render_light_flare(view, flare, local_world, intensity);
+}
+
 // LoadGlobalChunks' LoadResourceFile hands every top-level chunk of GLOBALB
 // to LoadChunks, slots 2 and 16 among them: LoaderTexturePack, whose pack
 // and flipbooks stay on TexturePackList for the whole game -- CARBOTTOM,
@@ -4069,6 +4077,12 @@ int main(int argc, char** argv)
     el_init();
     gElGetLightMaterialFn  = get_light_material_seam;
     gElSetupLightContextFn = setup_light_context_seam;
+
+    // The flares' half: PostLoadFixup's eLightUpdateTextures finds the
+    // three flare textures in GLOBALB, and CarRenderInfo::Render draws each
+    // lit flare of a car through eRenderLightFlare.
+    gELightUpdateTexturesFn = el_update_textures;
+    gERenderLightFlareFn    = render_light_flare_seam;
 
     // Car's constructor builds the car's render info through
     // Car::InitRenderInfo, and its destructor deletes it -- carrenderinfo.c

@@ -250,8 +250,9 @@ Every matrix and light context that Render hands on comes from
 `eframe_malloc`. The calls come in retail's order and at retail's sizes, and
 when one fails, what it was for is skipped. The renderer is reached through
 seams, each of them skipped when NULL: eModel::Render (`gEModelRenderFn`),
-the two strip builders (`gEStripFns`, `gExStripFns`), the light flares and
-the animated driver.
+the two strip builders (`gEStripFns`, `gExStripFns`), the light flares
+(`gERenderLightFlareFn`, bound to elightflare.c's eRenderLightFlare, see
+[light-flare](light-flare.md)) and the animated driver.
 
 ### Where the port differs
 

@@ -37,7 +37,8 @@ LoaderTable slot 5 (`LoaderLightList` 0x00114f38, `UnloaderLightList`
 | 0x0003401e | GLOBALB.BUN's light materials: version 1 at +8, the count at +12, and the 320-byte `eLightMaterial`s from +16 |
 
 The loader links a light pack into `eLightPackList` (gp-24264), a flare
-pack into `eLightFlarePackList` (gp-24272) with its flares on its own list,
+pack into `eLightFlarePackList` (gp-24272) with its flares on its own list
+(drawn by eRenderWorldLightFlares, see [light-flare](light-flare.md)),
 and each material into `eLightMaterialList` (gp-24256). It builds each
 material's DMA data as it goes. The material named "Default" (hash
 0x2c420d64) becomes `eDefaultLightMaterial` (gp-24248). Until then, that

@@ -18737,3 +18737,67 @@ its mass. The model's word at 0x11C is 0, which the checker asserts.
 ### Next
 
 The light flares, then 12k-3, the helicopter's planning.
+
+## Session 60, continued (2026-10-09) -- the light flares
+
+The cop lights did not flash because no light flare drew at all:
+carrender.c worked out each flare's strength and called
+`gERenderLightFlareFn`, which nothing set. This slice ports the drawing
+half of `eLight.obj` (`0x00116118` .. `0x00116820`) and binds it.
+`docs/formats/light-flare.md` has the details.
+
+### What it does
+
+- **`elightflare.{c,h}`:**
+  - Retail's nine parts (`0x002d6080`, 60 bytes: sizes, colours, the
+    facing's power, how far toward the camera, the scale clamps, the
+    texture) and the ten types' pairs (`0x002d62d8`). The demo's table
+    was 64 bytes in another order, so these were read from the image.
+  - eLightUpdateTextures: HEADLIGHTFLAREINNER, HEADLIGHTFLAREOUTER and
+    HEADLIGHTGLOW from GLOBALB.
+  - eRenderLightFlare: it takes the flare to the world, clips it with
+    `vclipw`'s rule, and finds the facing (its magnitude for Flags bit
+    0, the cops' red and blue) and the depth over H. Then it draws the
+    type's parts.
+  - The part: pow(facing, Power) from the float's bits, times the
+    intensity. The size and colours run from min to max by that, the
+    centre is moved toward the camera, and the scale is clamped. A
+    square goes to ePoly::Render3D.
+  - eRenderWorldLightFlares: while InGameFlag is set, every pack's
+    flares through the identity at intensity 1.
+- **`epoly.{c,h}`:** `gEPolyRender3DFn`, ePoly::Render3D's seam.
+- **`trackview.c`:** `render_epoly_3d`, Render3D as eEndStrip's packet:
+  a strip V0, V1, V3, V2 through `strip_begin` .. `strip_end`, so it
+  sorts and blends as retail's does. It is bound wherever
+  `gEPolyRenderFn` is. `el_render_world_light_flares` runs after the
+  world objects, in the main view (before the effects) and the mirror.
+- **`main.c`:** `gELightUpdateTexturesFn` and `gERenderLightFlareFn`.
+- **The divergence:** a Type outside 0..9 draws nothing and still
+  answers 1. Retail indexes the table with the signed Type unchecked.
+
+### Checked
+
+- `tools/lightflare_check.py` runs retail's four functions and ePoly's
+  constructor. GetTextureInfo and Render3D are logged stubs, and a hook
+  gives retail the port's Type guard. The script covers:
+  - every texture combination and NULL arguments;
+  - each clip plane by one ulp;
+  - every type, flag and facing, and intensities below 0 and past 1;
+  - depths either side of each scale clamp, and a flare at the eye;
+  - the world's packs;
+  - 400 random flares on random cars through random views.
+
+  The result is 3,143 ops, 5,499 lines and 0 differ, with 1,034 polys
+  drawn. All 96 mutations are caught, on the first pass.
+- The CIA builds. `check_3dsx` and `check_shbin` pass.
+
+### Not yet
+
+- The Azahar run. The laptop was on battery (status 1, 34%), so it
+  waits for AC. It is also 12k-2's rerun after the knock fix. Look for
+  the cops' red and blue flashing, the headlights' glow, and the
+  tunnels' lamps.
+
+### Next
+
+12k-3, the helicopter's planning.

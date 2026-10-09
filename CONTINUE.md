@@ -1,7 +1,11 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 60 (2026-10-09):
-12k-2, the helicopter's object, is done. `chopper.c` builds and frees
+the light flares are done. Cars' headlights, brake and reverse lights
+and the cops' red, blue and white now glow, and the tunnels' lamps too
+(`elightflare.c`, `docs/formats/light-flare.md`). Nothing had drawn
+them: eRenderLightFlare was not ported, so the cop lights did not
+flash. Before it, 12k-2, the helicopter's object. `chopper.c` builds and frees
 the Chopper. It follows and attacks a car, finds the bombing run's
 target spot, and places the helicopter in the world and takes it out
 (`docs/formats/chopper.md`). Nothing calls it until 12k-7. The same
@@ -362,14 +366,27 @@ pursuit.obj, on a 10 KB manager. Its slices:
     static body does, and the knock test (under 500?) is unchanged.
     `tools/collisionbody_check.py` asks a car body with no RigidBody
     for its mass: 0 differ, and the guard's two mutations are caught.
-- **Next: the light flares.** The user saw a chasing cop with no
-  flashing lights (2026-10-09). carrender.c's render_light_flares
-  works out every flare's strength, the cop's red, blue and white
-  patterns included. It draws through `gERenderLightFlareFn`, and
-  nothing sets that: eRenderLightFlare is not ported, so no headlight,
-  brake light or cop light flare draws.
+- **The light flares, done (Session 60):** `elightflare.c`.
+  eLightUpdateTextures (`0x00116488`), eRenderLightFlare
+  (`0x001164f0`) with its part renderer (`0x00116118`), and
+  eRenderWorldLightFlares (`0x00116778`); retail's nine parts
+  (`0x002d6080`, 60 bytes each) and ten types (`0x002d62d8`).
+  - Bound: PostLoadFixup's `gELightUpdateTexturesFn`, CarRenderInfo's
+    `gERenderLightFlareFn` (main.c), and ePoly::Render3D as the new
+    `gEPolyRender3DFn`, which trackview.c draws as a four-vertex strip
+    through the strip builder (`render_epoly_3d`). The world's flares
+    (the tunnels' `EF_TunnelA`) draw after the world objects, in the
+    main view and the mirror.
+  - The divergence: a Type outside 0..9 draws nothing (retail indexes
+    the table unchecked).
+  - `tools/lightflare_check.py`: 3,143 ops, 5,499 lines, 0 differ,
+    1,034 polys drawn; 96 mutations, all caught.
+  - **Not yet:** the Azahar run. The laptop was on battery (status 1,
+    34%) at the end of the slice. That run is also 12k-2's rerun
+    after the knock fix. Look for the cops' flashing red and blue, and
+    the headlights' glow.
+- **Next: 12k-3**, the helicopter's planning.
   - Then:
-    - 12k-3, the planning;
     - 12k-4, flying;
     - 12k-5, drawing, dust and ChopperSound;
     - 12k-6, the bombing run;
@@ -4807,9 +4824,8 @@ each class shows what it reaches.
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
 That was about 41-60 slices to the full game when the table was set.
-After 12k-2 (2026-10-09), about 27-40 are left, and the count has run
-low before:
-- the light flares (eRenderLightFlare), which nothing drew;
+After the light flares (2026-10-09), about 27-40 are left, and the
+count has run low before:
 - step 12's: 12k-3 to 12k-7, 12l, 12m and 12n;
 - steps 10, 14, 14b, 16, 17, 18 and 20.
 
@@ -4823,8 +4839,8 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** the light flares, then step 12's 12k-3 (the helicopter's
-  planning): 12a to 12k-2 are done. See "First" at the top.
+- **Next:** step 12's 12k-3 (the helicopter's planning): 12a to 12k-2
+  and the light flares are done. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;
