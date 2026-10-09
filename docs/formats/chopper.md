@@ -12,8 +12,8 @@ helicopter. The port has it in `chopper.{c,h}`, in slices:
 | 12k-3a | the chase logic under the plans (this page) |
 | 12k-3b | the plans: HighLevelPlanning, CleverPursuitPlan and BombRunLogic (this page) |
 | 12k-4a | flying: Think and its helpers (this page) |
-| 12k-4b | Fly and MoveChopper |
-| 12k-5 | drawing, dust and the ChopperSound |
+| 12k-4b | moving: Fly, MoveChopper, DrawChopper and the dust (this page) |
+| 12k-5 | the ChopperSound |
 | 12k-6 | the salvos: FireSalvo and its launch (`chopperfire.c`) |
 | 12k-7 | tPursuit's UpdateChopper and the manager's methods |
 
@@ -485,7 +485,86 @@ MakeRelativeAngle(deg)                  0x00231478, coputil
   would loop for ever, in the image and the port, but nothing passes one:
   bATan's answer is a 16-bit angle and Yaw stays within a turn.
 - **The rest**: CalcChopperRotation and SubtractFromYaw are MoveChopper's
-  (12k-4b). Nothing calls Think until Fly is ported.
+  (below), and Fly calls Think.
+
+## Moving
+
+12k-4b ports Fly, the helicopter's step, and what it calls: the egg's
+follow (DoTweakerTriggers), MoveChopper, DrawChopper and the dust. World
+calls Fly once a step through `gChopperFlyFn`, which 12k-7 binds.
+
+```
+Fly(dt)                                 0x001ea7d0
+    DoTweakerTriggers(); TheMunitionEffectsHandler->DoTimestep(dt)
+    if Plan == EATING_DONUTS: return
+    TimeUntilThink -= dt
+    if TimeUntilThink < 0: TimeUntilThink += 0.1; Think()     (gp-27972)
+    if Plan == START_CHASE: return
+    moved = MoveChopper(dt); DrawChopper(dt)
+    if moved: StuckTime = 0
+    else:
+        StuckTime += dt
+        if StuckTime >= 0.5: StuckTime = 0; Plan = END_CHASE
+
+DoTweakerTriggers()                     0x001ea6c8
+    if New960 and CurrentCar != World's car 0: FollowThisCar(car 0)
+    then the tweaker's two triggers (left out, below)
+
+MoveChopper(dt)                         0x001e9ee8
+    if MoveMode == ROTATE:
+        SubtractFromYaw(RotRate * dt)
+        if |ZVelocity| > 0.001:                               (gp-28000)
+            CurrentPos.z += ZVelocity * dt
+            if falling and the sheet under it is higher: land on it
+    else:
+        a = Acceleration * dt
+        Speed = (Speed + a.x), within 0 .. 100
+        DesiredPitch = Speed * 0.15, at most 20               (gp-27996)
+        if |a.y| > 0.001 and Speed > 1:                       (gp-27992)
+            deg = bATan(Speed, a.y) in degrees, 360 less from 180
+            SubtractFromYaw(deg * dt)
+        side = ChopperPoint is left of the nose (RotateToChopperCoord y > 0)
+        try up to 4 times:
+            step = RotateVector((Speed, 0), Yaw) * dt
+            if the sheet holds CurrentPos + step: take it and its flags
+            on the 4th miss: stay, at CurrentPos.z, with flags 0
+            else TimeUntilThink = 0; SubtractFromYaw(side ? 5 : -5)
+        z = the sheet's if |ZVelocity| <= 0.001 (gp-27988), else as ROTATE's
+        EmitDust = flag bit 0 clear
+        SetInterestBBox(CurrentPos, 1, step); FindGroundHeight()
+        TP.UpdatePosition(CurrentPos)
+    CalcChopperRotation(20 * dt, DesiredPitch, Pitch); the same for Roll
+    CalcMatrix(); return 0 after 4 misses, else 1
+
+DrawChopper(dt)                         0x001ea3b0
+    the WorldObject's update (0x001ea578)
+    if EmitDust: TriggerDustEmitter(dt)
+
+TriggerDustEmitter(dt)                  0x001ea5c0
+    s = (11 - (CurrentPos.z - GroundZ)) * 0.1                (gp-27976)
+    unless s > 0: return; s at most 1
+    each dust emitter: LocalWorld = identity at (CurrentPos.xy, GroundZ)
+        WorldEffects.TriggerEmitter(it, -s * dt, no car)
+```
+
+- **Turning in place** (ROTATE) is at RotRate degrees a second, and the
+  helicopter only moves up or down.
+- **Off the sheet**, a step tries again 5 degrees toward ChopperPoint's
+  side and zeroes TimeUntilThink, so Think runs on the next step. After
+  four misses it stays where it is. Fly counts that as stuck, and half a
+  second stuck ends the chase.
+- **The pitch's cap** of 20 is never reached: the speed is at most 100,
+  and 0.15 of it is 15.
+- **The dust** is full at a height of 1 or less over the ground and
+  stops at 11. A negative time step is TriggerEmitter's burst: `s * dt`
+  seconds of particles, whether the emitter is on or not.
+- **The tweaker's triggers** (gp-17172: follow car 0, or none outside
+  EATING_DONUTS; gp-17168: drop a smoke bomb under car 0) are set only by
+  the debug tweaker. The code only reads and zeroes them, and they are
+  0 on the disc. The port leaves them out.
+- **The munitions' step** goes to TheMunitionEffectsHandler (gp-18384),
+  which InitMunitions sets. The munitions are 12k-6's, so the port calls
+  `gMunitionEffectsDoTimestepFn` instead, and nothing while it is NULL.
 
 ## The port
 
@@ -502,6 +581,9 @@ MakeRelativeAngle(deg)                  0x00231478, coputil
 - **BombRunLogic skips the car's progress** when the car's point or
   OldCarPoint is NULL. The image only compares the two, then reads both
   positions, so a NULL point reads address 0.
+- **A NULL ChopperPoint is on neither side** in MoveChopper, so a miss
+  turns right. The image reads its position at address 0.
+- **The munitions' step is a seam** (see Moving) until 12k-6.
 
 ## The cross-check
 
@@ -509,25 +591,28 @@ MakeRelativeAngle(deg)                  0x00231478, coputil
 `chopper.c` and `coputil.c`'s RotateVector and MakeRelativeAngle, with
 emath's rotations, bSinCos, bATan, bIdentity and bScaleAdd real on both
 sides. Everything else is a stub that logs its arguments and answers
-from the script: the
-TopologyCoordinate, the TrackPathCoordinate, the WorldObject, the AcidFX
-emitters, the routes and signposts (FindClosestPointAhead among them),
-the planners (FindNearbySignpost, FindPointsToTarget), the HeliSheet's
-FindZValue, FireSalvo, and the sound's table. FindZValue answers per
-point or by boxes of the plane. The routes' points sit inside their
-tables, so BeginStakeout's indexes are the image's own. After each call
-it compares every field at retail's offsets, the pad included, and the
-ChopperTarget.
+from the script: the TopologyCoordinate, the TrackPathCoordinate, the
+WorldObject, the AcidFX emitters, the routes and signposts
+(FindClosestPointAhead among them), the planners (FindNearbySignpost,
+FindPointsToTarget), the HeliSheet's FindZValue, FireSalvo, the
+munitions' step, WorldEffects' TriggerEmitter (which logs the emitter's
+LocalWorld), and the sound's table. FindZValue answers per point or by
+boxes of the plane. The routes' points sit inside their tables, so
+BeginStakeout's indexes are the image's own. After each call it compares
+every field at retail's offsets, the pad included, and the ChopperTarget.
 
-The model shares the port's four divergences:
+The model shares the port's five divergences:
 - it lends retail a silent sound when the port has none;
 - it zeroes the flags word on entry to FindUnobstructedSpot;
 - a hook after HangoutNearHere's FindZValue (`0x001e8f04`) ends the loop
   by the port's rule;
 - a hook at BombRunLogic's compare of the car's points (`0x001e93c8`)
-  makes them equal when either is NULL.
+  makes them equal when either is NULL;
+- a hook where MoveChopper holds ChopperPoint (`0x001ea104`) points a
+  NULL one at the helicopter's own spot, which is on neither side.
 
 Five mutations survive by construction. Two are in BeginStakeout's
 index arithmetic, which only ever sees points inside the table. The
 other three are HighLevelPlanning's starting on_sheet, flags and z,
-which nothing reads unless FindZValue has set them.
+which nothing reads unless FindZValue has set them. MoveChopper's pitch
+cap has no mutation, since nothing reaches it (see Moving).

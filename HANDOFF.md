@@ -19082,3 +19082,60 @@ has them in pseudocode.
 
 12k-4b, Fly, DoTweakerTriggers' egg part, MoveChopper, DrawChopper and
 TriggerDustEmitter. CONTINUE's "Next: 12k-4b" has them decoded.
+
+## Session 62 (2026-10-09) -- 12k-4b, the moving
+
+Fly, the helicopter's step, and what it calls are now in
+`chopper.{c,h}`: DoTweakerTriggers' egg part, MoveChopper, DrawChopper
+and TriggerDustEmitter. `docs/formats/chopper.md` ("Moving") has them
+in pseudocode.
+
+### What it does
+
+- **Fly** runs the munitions' step, then, outside EATING_DONUTS, Think
+  every 0.1 s, and outside START_CHASE the move and the draw. Half a
+  second of failed moves ends the chase.
+- **MoveChopper:** ROTATE turns on the spot at RotRate and only goes
+  up or down. PURSUIT speeds up to at most 100, pitches by 0.15 of
+  the speed, yaws toward the sideways acceleration, and steps along
+  the nose. A step off the sheet turns 5 degrees toward ChopperPoint's
+  side and asks Think to run next step; after four misses it stays.
+  The pitch and roll ease at 20 a second, then CalcMatrix.
+- **The dust:** under 11 over the ground, where the sheet's flag bit
+  0 is clear, the dust emitters burst at the ground below, full at 1.
+- **DoTweakerTriggers:** with egg 5 (New960), the helicopter follows
+  car 0. The tweaker's own two triggers are debug and left out.
+- **Divergences:** a NULL ChopperPoint is on neither side, where the
+  image reads address 0; the munitions' step is a seam,
+  `gMunitionEffectsDoTimestepFn`, until 12k-6.
+
+### Checked
+
+- `tools/chopper_check.py` runs the five in mipsemu, with RotateVector,
+  bATan and bIdentity real on both sides. The TrackPathCoordinate's
+  UpdatePosition, WorldEffects' TriggerEmitter (with the emitter's
+  LocalWorld) and the munitions' step are logged stubs. A hook at
+  `0x001ea104` models the NULL ChopperPoint.
+  - New ops: `emitters`, `move`, `draw`, `dustemit`, `tweak` and `fly`.
+- 86,504 ops, 821,720 lines, 0 differ on the first run. Every block of
+  the five is reached but the pitch cap, which nothing can reach.
+- Of 741 mutations, 736 are caught and 5 are equivalent, all from
+  earlier slices. Ten older patterns that the new code repeats now
+  carry more context.
+- The CIA builds. `check_3dsx` and `check_shbin` pass. Azahar, on AC: a
+  quick race with cops, PASS at 30.0 fps.
+
+### The order changes
+
+- 12k-5, the ChopperSound, is a Sound3d. No in-race sound is ported, so
+  it goes to step 14 with the car and world sounds.
+- 12k-6, the salvos: FireSalvo's Rocket, SmokeBomb and DroppedSpikes
+  are Smokeables (Munition, DroppedBomb), and Smokeable is step 14b.
+  CONTINUE keeps FireSalvo and its launch decoded for then.
+
+### Next
+
+12k-7: tPursuit::UpdateChopper, the manager's RequestChopper,
+IsChopperAvailable and BeACopRequestChopper, and the seams bound, so
+the helicopter joins a chase. CONTINUE's "Next: 12k-7" has them
+decoded.

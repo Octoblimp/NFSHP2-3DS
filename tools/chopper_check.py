@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Cross-check 3DS Files/source/chopper.c, the police helicopter's object
 (12k-2), its chase logic (12k-3a), its plans (12k-3b) and its flying
-(12k-4a), against the retail image, SLES_507.31, run in mipsemu.
+(12k-4a and 12k-4b), against the retail image, SLES_507.31, run in
+mipsemu.
 
 **The model** is retail's own code: Chopper's constructor (0x001e7a90),
 destructor (0x001e7b80), ClearVariables (0x001e7c38), FollowThisCar
@@ -29,24 +30,31 @@ CalcMinRouteFollowDistance (0x001e8f40), AdjustTargetInBounds
 (0x001e9a20), SetRotateTarget (0x001e9ae8), HoverTime (0x001e9b30),
 CheckMomentumWithinBounds (0x001e9c68), Think (0x001e9d48),
 CalcChopperRotation (0x001e9e40) and SubtractFromYaw (0x001e9e80), with
-bATan (0x0025a890) and MakeRelativeAngle (0x00231478) under them;
-bStringHash and the bombing runs' table (0x0031a7c8) as shipped. The
-harness (tools/src/chopper_test.c) runs chopper.c, coputil.c, emath.c,
-bmath.c, bmatrix.c and bvector.c and prints the same lines.
+bATan (0x0025a890) and MakeRelativeAngle (0x00231478) under them, and
+Fly (0x001ea7d0), DoTweakerTriggers (0x001ea6c8), MoveChopper
+(0x001e9ee8), DrawChopper (0x001ea3b0) and TriggerDustEmitter
+(0x001ea5c0) over them; bStringHash and the bombing runs' table
+(0x0031a7c8) as shipped. The harness (tools/src/chopper_test.c) runs
+chopper.c, coputil.c, emath.c, bmath.c, bmatrix.c and bvector.c and
+prints the same lines.
 
 **The stubs**, logged and answered by the same rule on both sides: the
-TopologyCoordinate's constructor, destructor, SetInterestBBox,
-ClearInterestBBox and GetElevation; the TrackPathCoordinate's
-constructor, ResetPosition and the manager's CompareDistances; bOMalloc,
-__builtin_delete, and WorldObject's constructor and destructor;
-afxGetEmitters and afxDeleteEmitters; HasSignposts; Car::GetRoute and
+TopologyCoordinate's constructor, destructor, SetInterestBBox (with the
+step it is given), ClearInterestBBox and GetElevation; the
+TrackPathCoordinate's constructor, ResetPosition and UpdatePosition, and
+the manager's CompareDistances; bOMalloc, __builtin_delete, and
+WorldObject's constructor and destructor; afxGetEmitters and
+afxDeleteEmitters, and AcidEffectSystem::TriggerEmitter, which logs the
+emitter's LocalWorld; HasSignposts; Car::GetRoute and
 GetRoutePoint; GuessTargetDestinations, GetNextRoutePoint and
 GetNearestRoutePoint; FindNearbySignpost and FindPointsToTarget;
 HeliSheet::FindZValue, answered per point or by boxes of the plane;
 TrackRoute::FindClosestPoint, FindClosestPointAhead and
 GetRelativePoint; TrackRoutePoint::GetSignpost and GetPosition;
 Signpost::GetNewRoute and GetNewRoutePoint; Chopper::FireSalvo (12k-6's),
-which logs the run's type and counts; and sound::CreateChopperSound,
+which logs the run's type and counts, and MunitionEffectsHandler's
+DoTimestep (12k-6's too, a seam in the port that the harness sets); and
+sound::CreateChopperSound,
 whose sound's table is the checker's own, with a this-adjustment of 8.
 The routes' points are inside their tables, so BeginStakeout's indexes
 are the image's own.
@@ -67,6 +75,10 @@ are the image's own.
   - BombRunLogic skips the car's progress when its point or the last one
     is NULL, where the image reads address 0 for the position. A hook at
     the image's compare of the two (0x001e93c8) makes them equal then.
+  - MoveChopper takes a NULL ChopperPoint as on neither side, where the
+    image reads address 0 for its position. A hook where the image holds
+    the point (0x001ea104) points it at the helicopter's own spot then,
+    on neither side too.
 
 **Compared** are the stubs' logs, each method's result, and after each
 call every field of the helicopter at retail's offsets, the padding
@@ -96,7 +108,13 @@ bound and wrap, NaN among them, from every plan; hovering either side of
 its speed, reach and acceleration, at headings round the circle; every
 mix of the three momentum probes on and off the sheet; and Think from
 each plan's ending, over targets round the helicopter at speeds either
-side of turning on the spot.
+side of turning on the spot; and the moving: turning in place and falling
+to the sheet either side of still, speeds either side of 0 and the top,
+yaws either side of their least step and speed, misses that turn toward
+the route point's side, each side and neither, up to giving up, the dust
+either side of its height over 0 to 3 emitters, the egg's follow, and
+Fly from each plan with the think time and StuckTime either side of
+their ticks, and runs of steps over boxes of sheet.
 
     python tools/chopper_check.py
     python tools/chopper_check.py --mutate [--only a,b]
@@ -194,6 +212,13 @@ F_THINK = 0x001e9d48
 F_CALCROT = 0x001e9e40
 F_SUBYAW = 0x001e9e80
 F_RELANGLE = 0x00231478
+# 12k-4b's moving
+F_MOVE = 0x001e9ee8
+F_DRAW = 0x001ea3b0
+F_DUST = 0x001ea5c0
+F_TWEAK = 0x001ea6c8
+F_FLY = 0x001ea7d0
+MOVE_NULL = 0x001ea104                  # ChopperPoint in v0
 
 S_TOPO_CTOR = 0x00151c28
 S_TOPO_DTOR = 0x00151c70
@@ -228,6 +253,10 @@ S_GETPOS = 0x001c1390
 S_AHEAD = 0x001c1d30
 S_FIRE = 0x001ea8c0
 S_SNDNEW = 0x00215098
+S_TPUPD = 0x002087f8
+S_TRIGGER = 0x00127700
+S_MUNSTEP = 0x001bfa38
+WFX = 0x002ef640                        # WorldEffects
 
 CHOPPER_SIZE = 976
 CAR_SIZE = 2304
@@ -282,6 +311,8 @@ class Model:
         self.wo = self.block(96, "WO")
         self.snd = self.block(32, "SND")
         self.pool = self.block(16, "WOP")
+        self.emit = [self.block(192, "E%d" % i) for i in range(4)]
+        self.names[WFX] = "WFX"
         e.put32(G_WOP, self.pool)
         self.names[TPM] = "TPM"
         self.eggs = self.block(400, None)
@@ -382,10 +413,11 @@ class Model:
             L("topo_dtor %s" % n(r[4]))
 
         def bbox(e):
-            p = r[5] & M32
-            L("topo_bbox %s %s %s %s %s %s" % (
+            p, v = r[5] & M32, r[6] & M32
+            L("topo_bbox %s %s %s %s %s %s%s" % (
                 n(r[4]), n(p), fx(self.f32(p)), fx(self.f32(p + 4)),
-                fx(e.f(12)), n(r[6])))
+                fx(e.f(12)), n(v),
+                " %08x %08x" % (e.u32(v), e.u32(v + 4)) if v else ""))
 
         def clearbb(e):
             L("topo_clear %s" % n(r[4]))
@@ -412,6 +444,20 @@ class Model:
             L("tp_reset %s %s %s %s" % (n(a), n(p), fx(self.f32(p)),
                                         fx(self.f32(p + 4))))
             e.put32(a + 8, 0)
+
+        def tpupd(e):
+            p = r[5] & M32
+            L("tp_update %s %s %s %s" % (n(r[4]), n(p), fx(self.f32(p)),
+                                         fx(self.f32(p + 4))))
+
+        def trigger(e):
+            em = r[5] & M32
+            L("trigger %s %s %s %s " % (n(r[4]), n(em), fx(e.f(12)),
+                                        n(r[6])) + " ".join(
+                "%08x" % e.u32(em + 48 + 4 * k) for k in range(16)))
+
+        def munstep(e):
+            L("mun_step %s" % fx(e.f(12)))
 
         def cmp(e):
             L("tp_cmp %s %s %s" % (n(r[4]), fx(e.f(12)), fx(e.f(13))))
@@ -607,6 +653,13 @@ class Model:
         def nothing(e):
             return None
 
+        # MoveChopper with ChopperPoint NULL: the port's side is neither,
+        # where the image reads address 0. The helicopter's own spot is
+        # on neither side too.
+        def move_null(e):
+            if (r[2] & M32) == 0:
+                r[2] = (self.H + 832) & M32
+
         # The flags word FindZValue writes: 0 to start with, as the port's.
         def spot_entry(e):
             e.put32((r[29] - 80 + 16) & M32, 0)
@@ -639,11 +692,13 @@ class Model:
                      (S_NEWPOINT, newpoint), (S_RELPT, relpt),
                      (S_NEARBY, nearby), (S_PTT, ptt), (S_GETPOS, getpos),
                      (S_AHEAD, ahead), (S_FIRE, fire),
-                     (S_SNDNEW, sndnew)):
+                     (S_SNDNEW, sndnew), (S_TPUPD, tpupd),
+                     (S_TRIGGER, trigger), (S_MUNSTEP, munstep)):
             e.stub(a, f)
         e.hook(F_SPOT, spot_entry)
         e.hook(HANGOUT_MISS, hangout_miss)
         e.hook(BOMB_NULL, bomb_null)
+        e.hook(MOVE_NULL, move_null)
 
     # ---- the dump ---------------------------------------------------------
 
@@ -677,6 +732,11 @@ class Model:
             e.u32(self.T + 4 * k) for k in range(3)))
 
     # ---- the ops ----------------------------------------------------------
+
+    def wo_line(self):
+        e = self.e
+        self.log("wo %d " % s32(e.u32(self.wo + 12)) + " ".join(
+            "%08x" % e.u32(self.wo + 32 + 4 * k) for k in range(16)))
 
     def with_sound(self, fn):
         """Retail calls the sound unguarded; with none, the port skips the
@@ -793,8 +853,7 @@ class Model:
             e.call(F_MATRIX, h)
         elif op == "wobj":
             e.call(F_WOBJ, h)
-            self.log("wo %d " % s32(e.u32(self.wo + 12)) + " ".join(
-                "%08x" % e.u32(self.wo + 32 + 4 * k) for k in range(16)))
+            self.wo_line()
         elif op == "set":
             self.set_field(t)
         elif op == "start":
@@ -882,6 +941,30 @@ class Model:
         elif op == "subyaw":
             e.set_f(12, bitsf(int(t[1], 16)))
             e.call(F_SUBYAW, h)
+        elif op == "emitters":
+            prev = h + 712
+            for a in self.emit[:int(t[1])]:
+                e.put32(prev, a)
+                e.put32(a + 4, prev)
+                prev = a
+            e.put32(prev, h + 712)
+            e.put32(h + 716, prev)
+        elif op == "move":
+            e.set_f(12, bitsf(int(t[1], 16)))
+            self.log("ret %d" % e.call(F_MOVE, h))
+        elif op == "draw":
+            e.set_f(12, bitsf(int(t[1], 16)))
+            e.call(F_DRAW, h)
+            self.wo_line()
+        elif op == "dustemit":
+            e.set_f(12, bitsf(int(t[1], 16)))
+            e.call(F_DUST, h)
+        elif op == "tweak":
+            e.call(F_TWEAK, h)
+        elif op == "fly":
+            e.set_f(12, bitsf(int(t[1], 16)))
+            self.with_sound(lambda: e.call(F_FLY, h))
+            self.wo_line()
         else:
             raise SystemExit("no op %s" % op)
         self.dump()
@@ -1953,12 +2036,235 @@ def flying(rng):
             + fly_think(rng))
 
 
+# ---- 12k-4b's moving --------------------------------------------------------
+
+def EASE():
+    return ["set|dpitch|%s" % F(12.0), "set|pitch|%s" % F(-2.0),
+            "set|droll|%s" % F(-7.0), "set|roll|%s" % F(3.0)]
+
+
+def move_rotate():
+    out = ["new", "set|car|C1", "set|chop|R0|P1", "q|elev|%s|3" % F(4.5)]
+    # ROTATE: the turn, and z either side of still, falling to the sheet,
+    # which is below, at and above where it ends.
+    for zv in (0.0, -0.0, 0.001, -0.001, 0.0010001, -0.0010001, 5.0, -5.0,
+               -50.0, NAN):
+        for sheet_z in (None, 10.0, 25.0, 29.0, 29.9):
+            for dt in (0.033333335, 1.0, 0.0):
+                out.append("q|zbox")
+                if sheet_z is not None:
+                    out.append(BOX(-1e9, -1e9, 1e9, 1e9, sheet_z, 1))
+                out += [POS(10.0, 20.0, 30.0), "set|mm|1",
+                        "set|rot|%s" % F(45.0), "set|yaw|%s" % F(350.0),
+                        "set|zv|%s" % F(zv)] + EASE() + ["move|%s" % F(dt)]
+    for rot in (-200.0, -0.0, 33.5, 400.0, NAN):
+        out += ["set|mm|1", "set|rot|%s" % F(rot), "set|yaw|%s" % F(10.0),
+                "set|zv|%s" % F(0.0)] + EASE() + ["move|%s" % F(0.5)]
+    out += ["q|sheet|0", POS(10.0, 20.0, 30.0), "set|mm|1",
+            "set|zv|%s" % F(-5.0), "move|%s" % F(1.0), "q|sheet|1",
+            "q|zbox", "del|3"]
+    return out
+
+
+def move_pursuit(rng):
+    out = ["new", "set|car|C1", "set|chop|R0|P1", "q|elev|%s|3" % F(4.5)]
+    plane = BOX(-1e9, -1e9, 1e9, 1e9, 12.0, 0)
+
+    def case(speed=10.0, ax=0.0, ay=0.0, dt=0.1, yaw=30.0, zv=0.0,
+             chop="R0|P1", pos=(10.0, 20.0, 30.0), boxes=(plane,), mm=0):
+        return (["q|zbox"] + list(boxes)
+                + [POS(*pos), "set|mm|%d" % mm, "set|speed|%s" % F(speed),
+                   ACC(ax, ay), "set|yaw|%s" % F(yaw), "set|zv|%s" % F(zv),
+                   "set|chop|%s" % chop, "set|think|%s" % F(0.7),
+                   "set|dust|7"] + EASE() + ["move|%s" % F(dt)])
+    # The speed within 0 .. 100, and the pitch it wants.
+    for sp in (0.0, -0.0, 50.0, 99.0, 100.0, 120.0, -3.0, NAN):
+        for ax in (0.0, -0.0, -40.0, 15.0, 1e3, NAN):
+            for dt in (0.1, 1.0):
+                out += case(speed=sp, ax=ax, dt=dt, mm=(0, 7)[dt > 0.5])
+    # The yaw from the sideways step, either side of its least step and
+    # speed, and past 180.
+    for sp in (0.5, 1.0, 1.0000001, 2.0, 50.0, NAN):
+        for ay in (0.0, 0.001, 0.0010001, -0.001, -0.0010001, 0.5, -0.5,
+                   30.0, -30.0, 1e4, -1e4, NAN):
+            for dt in (1.0, 0.05):
+                out += case(speed=sp, ay=ay, dt=dt)
+    # Misses: from (0, y) facing 0 at 10 a second for 1, the tries end at
+    # y, y + 0.87, y + 1.74 and y + 2.59 turning left, or as much less
+    # turning right. P1 (-40, 4) is on the left from (0, 2), P0 (-50, 1)
+    # on the right; from (0, 4) P1 is dead behind, on neither side, as a
+    # NULL point is.
+    for chop, y in (("R0|P1", 2.0), ("R0|P0", 2.0), ("R0|NULL", 2.0),
+                    ("R0|P1", 4.0)):
+        for k in (-0.5, 0.4, 1.3, 2.2, 3.0):
+            for fl in (0, 1):
+                for left in (BOX(-100.0, y + k, 100.0, 100.0, 14.0, fl),
+                             BOX(-100.0, -100.0, 100.0, y - k, 14.0, fl)):
+                    for zv in (0.0, -3.0):
+                        out += case(chop=chop, pos=(0.0, y, 30.0), yaw=0.0,
+                                    dt=1.0, boxes=(left,), zv=zv)
+    # The height after a step: the sheet's when still, else moving, and
+    # falling no lower than the sheet; and the polygon's flags.
+    for zv in (0.0, -0.0, 0.001, -0.001, 0.0010001, -0.0010001, 3.0, -3.0,
+               -30.0, NAN):
+        for z in (30.0, 13.0, 13.5, 12.0):
+            for fl in (0, 1, 2, 3):
+                out += case(zv=zv, pos=(10.0, 20.0, z), dt=0.5,
+                            boxes=(BOX(-1e9, -1e9, 1e9, 1e9, 12.0, fl),))
+    # Giving up off the sheet.
+    for zv in (0.0, -3.0, 3.0):
+        out += case(zv=zv, boxes=())
+    # Mixed.
+    for _ in range(400):
+        boxes = []
+        for _ in range(rng.randrange(0, 4)):
+            x0, y0 = rng.uniform(-15, 10), rng.uniform(-15, 10)
+            boxes.append(BOX(x0, y0, x0 + rng.uniform(0, 12),
+                             y0 + rng.uniform(0, 12), rng.uniform(0, 40),
+                             rng.randrange(4)))
+        out += case(speed=rng.choice((0.0, 0.5, 5.0, rng.uniform(0, 120))),
+                    ax=rng.uniform(-60, 20), ay=rng.uniform(-40, 40),
+                    dt=rng.choice((0.033333335, 0.1, 0.5, 1.0)),
+                    yaw=rng.uniform(0, 360),
+                    zv=rng.choice((0.0, 0.0, 4.0, -4.0, -25.0)),
+                    chop=rng.choice(("R0|P1", "R0|P0", "R0|NULL", "R1|P8",
+                                     "R2|P13")),
+                    pos=(rng.uniform(-5, 5), rng.uniform(-5, 5),
+                         rng.uniform(5, 40)), boxes=boxes)
+    out += ["q|zbox", "del|3"]
+    return out
+
+
+def move_dust():
+    out = ["new", "set|car|C1"]
+    # The share of the dust from its height over the ground, over none to
+    # three emitters.
+    for n in (0, 1, 3):
+        out.append("emitters|%d" % n)
+        for h in (11.0, 10.99, 10.0, 5.0, 1.0, 0.0, -0.5, -5.0, 12.0, 1e9,
+                  NAN):
+            for dt in (0.1, 0.0, 1.0):
+                out += [POS(3.0, -4.0, 20.0 + h), "set|gz|%s" % F(20.0),
+                        "dustemit|%s" % F(dt)]
+    # DrawChopper: the WorldObject, and the dust only with EmitDust.
+    for dust in (0, 1, 2):
+        out += ["set|dust|%d" % dust, POS(3.0, -4.0, 25.0),
+                "set|gz|%s" % F(20.0), "draw|%s" % F(0.1)]
+    out += ["emitters|0", "del|3"]
+    return out
+
+
+def move_tweak():
+    out = ["new"]
+    for n960 in (0, 1):
+        for car in ("C0", "C1", "NULL"):
+            for plan in range(7):
+                out += ["set|n960|%d" % n960, "set|car|%s" % car,
+                        "set|plan|%d" % plan, "set|think|%s" % F(0.7),
+                        "tweak"]
+    out += ["q|sheet|0", "set|n960|1", "set|car|C1", "set|plan|6",
+            "set|think|%s" % F(0.7), "tweak", "q|sheet|1", "del|3"]
+    return out
+
+
+def fly_state(rng):
+    """A random world and helicopter, as fly_think's mixed cases."""
+    plan = rng.choice((0, 0, 1, 2, 3, 4, 5, 6))
+    out = ["q|zbox"]
+    bx = rng.random()
+    if bx < 0.5:
+        out.append(BOX(-1e9, -1e9, 1e9, 1e9, rng.uniform(-200, 200),
+                       rng.choice((0, 0, 1, 2, 3))))
+    elif bx < 0.8:
+        x0, y0 = rng.uniform(-60, 60), rng.uniform(-60, 60)
+        out.append(BOX(x0, y0, x0 + rng.uniform(0, 60),
+                       y0 + rng.uniform(0, 60), rng.uniform(0, 80),
+                       rng.choice((0, 1, 2))))
+    r, c = rng.choice(((0, 1), (1, 8), (3, 20), (0, 2)))
+    x, y = PP(c)
+    out += [CARH(1, rng.uniform(-80, 80), rng.uniform(-80, 80),
+                 rng.randrange(65536)),
+            "carvel|1|%s|%s|%s" % (F(rng.uniform(-60, 60)),
+                                   F(rng.uniform(-60, 60)),
+                                   F(rng.uniform(-5, 5))),
+            "q|carroute|1|%s" % rng.choice(("R0|P3", "R0|P2", "R1|P8",
+                                            "R3|P20", "R2|P13", "NULL|P3")),
+            "q|ahead|%d|%s" % (rng.randrange(NROUTES),
+                               rng.choice(("NULL", "P4", "P9", "P22"))),
+            "q|elev|%s|2" % F(rng.choice((4.5, 15.0, 25.0))),
+            "set|chop|R%d|P%d" % (r, c), "set|plan|%d" % plan,
+            "set|timeout|%s" % F(rng.choice((0.05, 0.1, 3.0, 30.0))),
+            "set|zv|%s" % F(rng.choice((0.0, 0.0, 4.0, -25.0))),
+            "set|speed|%s" % F(rng.choice((0.0, 0.0005, 25.0, 300.0))),
+            ACC(rng.uniform(-60, 20), rng.uniform(-30, 30)),
+            "set|yaw|%s" % F(rng.uniform(0, 360)),
+            "set|bomb|%d" % rng.randrange(5),
+            "set|salvos|%d" % rng.randrange(0, 3),
+            "set|nsalvo|%s" % F(rng.choice((0.05, 0.5))),
+            "set|td|%s" % F(rng.uniform(-20, 300)),
+            "set|old|%s" % rng.choice(("R0|P3", "R0|P1", "R1|P9")),
+            "set|think|%s" % F(rng.choice((0.0, 0.05, 0.3))),
+            "set|stuck|%s" % F(rng.choice((0.0, 0.3, 0.45))),
+            "set|n960|%d" % rng.choice((0, 0, 0, 1)),
+            POS(x + rng.uniform(-40, 40), y + rng.uniform(-40, 40),
+                rng.uniform(5, 200)), "set|mm|7"]
+    return out
+
+
+def move_fly(rng):
+    out = ["new", "set|car|C1", "set|chop|R0|P1", "set|target|R0|P2",
+           "q|near|1|R2|P15", "q|carroute|1|R0|P3", "q|ahead|0|P4",
+           "width|1|%s|%s" % (F(4.0), F(6.0)), "q|elev|%s|3" % F(4.5),
+           "q|cmp|%s" % F(-12.0)] + plans_world() + ["emitters|2"]
+    plane = BOX(-1e9, -1e9, 1e9, 1e9, 12.0, 0)
+
+    def still(plan, think, stuck):
+        return [CARH(1, 40.0, 30.0, 16384),
+                "carvel|1|%s|%s|%s" % (F(5.0), F(0.0), F(0.0)),
+                "set|plan|%d" % plan, "set|mm|0", "set|n960|0",
+                "set|think|%s" % F(think), "set|stuck|%s" % F(stuck),
+                "set|timeout|%s" % F(5.0), "set|chop|R0|P1",
+                POS(10.0, 20.0, 30.0), "set|speed|%s" % F(10.0),
+                ACC(0.0, 0.0), "set|zv|%s" % F(0.0),
+                "set|yaw|%s" % F(30.0)]
+    # Each plan, the think time either side of the step, on and off the
+    # sheet.
+    for plan in range(7):
+        for think in (0.2, 0.1, 0.05, 0.0, -0.01, NAN):
+            for boxes in ((plane,), ()):
+                out += (["q|zbox"] + list(boxes) + still(plan, think, 0.2)
+                        + ["fly|%s" % F(0.1)])
+    # StuckTime either side of 0.5, every move off the sheet and no Think.
+    for stuck in (0.0, 0.25, 0.39, 0.4, 0.41, 0.5, NAN):
+        for dt in (0.1, 0.25):
+            out += (["q|zbox"] + still(0, 5.0, stuck)
+                    + ["fly|%s" % F(dt)])
+    out += ["q|zbox", plane] + still(0, 5.0, 0.45) + ["fly|%s" % F(0.1)]
+    # The egg's word: Fly follows World's car 0 first.
+    for plan in (6, 3, 0):
+        out += still(plan, 5.0, 0.0) + ["set|n960|1", "set|car|C1",
+                                        "fly|%s" % F(0.1)]
+    # Runs of steps.
+    for _ in range(60):
+        out += fly_state(rng)
+        for _ in range(8):
+            out.append("fly|%s" % F(rng.choice((0.033333335, 0.016666668,
+                                                0.1))))
+    out += ["q|zbox", "emitters|0", "set|n960|0", "set|car|C1", "del|3"]
+    return out
+
+
+def moving(rng):
+    return (move_rotate() + move_pursuit(rng) + move_dust() + move_tweak()
+            + move_fly(rng))
+
+
 def script():
     rng = random.Random(0xc40)
     return (setup() + life() + follows() + attacks(rng) + shifts()
             + spots() + world_ops(rng) + routes() + matrices(rng)
             + chase(random.Random(0x3a)) + plans(random.Random(0x3b))
-            + flying(random.Random(0x4a)))
+            + flying(random.Random(0x4a)) + moving(random.Random(0x4b)))
 
 
 # ================================================================= running
@@ -2081,7 +2387,8 @@ MUTATIONS = [
     ("clr_dpitch", C, "    h->DesiredPitch = 0.0f;\n    h->RotRate",
      "    h->RotRate"),
     ("clr_rot", C, "    h->RotRate = 0.0f;\n", ""),
-    ("clr_zv", C, "    h->ZVelocity = 0.0f;\n", ""),
+    ("clr_zv", C, "    h->ZVelocity = 0.0f;\n    h->GroundZ",
+     "    h->GroundZ"),
     ("clr_gz", C, "    h->GroundZ = 0.0f;\n", ""),
     ("clr_dust", C, "    h->EmitDust = 0;\n", ""),
     ("clr_td", C, "    h->TargetDistance = 0.0f;\n", ""),
@@ -2093,11 +2400,11 @@ MUTATIONS = [
     ("clr_nsalvo", C, "    h->TimeUntilNextSalvo = 0.0f;\n    h->TotalSalvos",
      "    h->TotalSalvos"),
     ("clr_total", C, "    h->TotalSalvos = 0;\n", ""),
-    ("clr_stuck", C, "    h->StuckTime = 0.0f;\n", ""),
+    ("clr_stuck", C, "    h->StuckTime = 0.0f;\n}", "}"),
     # ---- FollowThisCar
     ("fol_n960", C, "if (h->New960 != 0)", "if (h->New960 == 0)"),
-    ("fol_table", C, "car = pCurrentWorld->CarTable[0];",
-     "car = pCurrentWorld->CarTable[1];"),
+    ("fol_table", C, "        car = pCurrentWorld->CarTable[0];",
+     "        car = pCurrentWorld->CarTable[1];"),
     ("fol_sheet", C, "if (TheHeliSheet == NULL || !signposts_present())",
      "if (!signposts_present())"),
     ("fol_signs", C, "if (TheHeliSheet == NULL || !signposts_present())",
@@ -2115,8 +2422,8 @@ MUTATIONS = [
     ("fol_eat", C, "            h->Plan = CHOPPLAN_EATING_DONUTS;\n"
      "        } else {", "            h->Plan = CHOPPLAN_START_CHASE;\n"
      "        } else {"),
-    ("fol_end", C, "h->Plan = CHOPPLAN_END_CHASE;",
-     "h->Plan = CHOPPLAN_PURSUIT;"),
+    ("fol_end", C, "            h->Plan = CHOPPLAN_END_CHASE;",
+     "            h->Plan = CHOPPLAN_PURSUIT;"),
     ("fol_ne_eat", C, "if (h->Plan != CHOPPLAN_EATING_DONUTS\n"
      "            && h->Plan != CHOPPLAN_START_CHASE)",
      "if (h->Plan != CHOPPLAN_START_CHASE)"),
@@ -2260,7 +2567,8 @@ MUTATIONS = [
     # ---- Place and Remove
     ("pl_act", C, "    sound_activate(h, 1);\n", "    sound_activate(h, 0);\n"),
     ("pl_x", C, "h->CurrentPos.x = pos->x;", "h->CurrentPos.x = pos->y;"),
-    ("pl_z", C, "h->CurrentPos.z = z;", "h->CurrentPos.z = z + 1.0f;"),
+    ("pl_z", C, "h->CurrentPos.z = z;\n    h->Pitch",
+     "h->CurrentPos.z = z + 1.0f;\n    h->Pitch"),
     ("pl_pitch", C, "    h->Pitch = 0.0f;\n    h->DesiredPitch = 0.0f;\n"
      "    h->Roll = 0.0f;", "    h->DesiredPitch = 0.0f;\n    h->Roll = 0.0f;"),
     ("pl_dpitch", C, "    h->DesiredPitch = 0.0f;\n    h->Roll = 0.0f;",
@@ -2371,8 +2679,14 @@ MUTATIONS = [
      "    eRotateY(&m, &m, deg_to_bam(360.0f - h->Pitch));\n",
      "    eRotateY(&m, &m, deg_to_bam(360.0f - h->Pitch));\n"
      "    eRotateX(&m, &m, deg_to_bam(h->Roll));\n"),
-    ("mx_tx", C, "m.v3.x = h->CurrentPos.x;", "m.v3.x = h->CurrentPos.y;"),
-    ("mx_ty", C, "m.v3.y = h->CurrentPos.y;", "m.v3.y = h->CurrentPos.x;"),
+    ("mx_tx", C, "m.v3.x = h->CurrentPos.x;\n    m.v3.y = h->CurrentPos.y;\n"
+     "    m.v3.z = h->CurrentPos.z + CHOPPER_RAISE;",
+     "m.v3.x = h->CurrentPos.y;\n    m.v3.y = h->CurrentPos.y;\n"
+     "    m.v3.z = h->CurrentPos.z + CHOPPER_RAISE;"),
+    ("mx_ty", C, "m.v3.y = h->CurrentPos.y;\n"
+     "    m.v3.z = h->CurrentPos.z + CHOPPER_RAISE;",
+     "m.v3.y = h->CurrentPos.x;\n"
+     "    m.v3.z = h->CurrentPos.z + CHOPPER_RAISE;"),
     ("mx_tz", C, "m.v3.z = h->CurrentPos.z + CHOPPER_RAISE;",
      "m.v3.z = h->CurrentPos.z;"),
     ("mx_store", C, "    h->Matrix = m;\n", "    h->Matrix.v3 = m.v3;\n"),
@@ -2405,7 +2719,8 @@ MUTATIONS = [
      "#define CHASE_HEIGHT       100.0f"),
     ("sc_plan", C, "    h->Plan = CHOPPLAN_PURSUIT;\n    h->EmitDust",
      "    h->EmitDust"),
-    ("sc_dust", C, "(int32_t)((flags ^ 1) & 1)", "(int32_t)(flags & 1)"),
+    ("sc_dust", C, "(int32_t)((flags ^ 1) & 1);\n    h->ZVelocity",
+     "(int32_t)(flags & 1);\n    h->ZVelocity"),
     ("sc_drop", C, "#define CHASE_DROP         -25.0f",
      "#define CHASE_DROP         25.0f"),
     ("sc_ret", C, "    h->ZVelocity = CHASE_DROP;\n    return 0;",
@@ -3261,6 +3576,237 @@ MUTATIONS = [
     ("sy_sub2", C, "h->Yaw = y - FULL_TURN;", "h->Yaw = y + FULL_TURN;"),
     ("sy_full", C, "#define FULL_TURN          360.0f",
      "#define FULL_TURN          361.0f"),
+    # ---- MoveChopper: ROTATE
+    ("mv_rot_mode", C, "if (h->MoveMode == CHOPMOVE_ROTATE) {\n"
+     "        chopper_subtract_from_yaw(h, h->RotRate * dt);",
+     "if (h->MoveMode != CHOPMOVE_ROTATE) {\n"
+     "        chopper_subtract_from_yaw(h, h->RotRate * dt);"),
+    ("mv_rot_dt", C, "chopper_subtract_from_yaw(h, h->RotRate * dt);",
+     "chopper_subtract_from_yaw(h, h->RotRate);"),
+    ("mv_rot_neg", C, "chopper_subtract_from_yaw(h, h->RotRate * dt);",
+     "chopper_subtract_from_yaw(h, -h->RotRate * dt);"),
+    ("mv_rot_still", C, "if (!(fabsf(zv) <= ROTATE_STILL)) {",
+     "if (!(fabsf(zv) < ROTATE_STILL)) {"),
+    ("mv_rot_abs", C, "if (!(fabsf(zv) <= ROTATE_STILL)) {",
+     "if (!(zv <= ROTATE_STILL)) {"),
+    ("mv_rot_still_val", C, "#define ROTATE_STILL       0.001f",
+     "#define ROTATE_STILL       0.002f"),
+    ("mv_rot_z", C, "h->CurrentPos.z = h->CurrentPos.z + zv * dt;\n"
+     "            if (zv < 0.0f\n",
+     "h->CurrentPos.z = h->CurrentPos.z - zv * dt;\n"
+     "            if (zv < 0.0f\n"),
+    ("mv_rot_fall", C, "if (zv < 0.0f\n                && helisheet",
+     "if (zv > 0.0f\n                && helisheet"),
+    ("mv_rot_find", C, "                && helisheet_find_z_value(TheHeliSheet,",
+     "                && !helisheet_find_z_value(TheHeliSheet,"),
+    ("mv_rot_lt", C, "                && h->CurrentPos.z < z) {",
+     "                && h->CurrentPos.z <= z) {"),
+    ("mv_rot_clamp", C, "                && h->CurrentPos.z < z) {\n"
+     "                h->CurrentPos.z = z;\n",
+     "                && h->CurrentPos.z < z) {\n"),
+    ("mv_rot_zv0", C, "                h->ZVelocity = 0.0f;\n"
+     "            }\n        }\n    } else {",
+     "            }\n        }\n    } else {"),
+    # ---- MoveChopper: PURSUIT's speed, pitch and yaw
+    ("mv_acc_x", C, "acc.x = dt * h->Acceleration.x;",
+     "acc.x = h->Acceleration.x;"),
+    ("mv_acc_y", C, "acc.y = dt * h->Acceleration.y;",
+     "acc.y = h->Acceleration.y;"),
+    ("mv_speed_add", C, "h->Speed = h->Speed + acc.x;",
+     "h->Speed = h->Speed - acc.x;"),
+    ("mv_speed_lo", C, "if (h->Speed < 0.0f)\n            h->Speed = 0.0f;",
+     "if (h->Speed <= 0.0f)\n            h->Speed = 0.0f;"),
+    ("mv_speed_lo_val", C, "            h->Speed = 0.0f;\n        else if",
+     "            h->Speed = 1.0f;\n        else if"),
+    ("mv_top_val", C, "#define TOP_SPEED          100.0f",
+     "#define TOP_SPEED          99.0f"),
+    ("mv_top_store", C, "            h->Speed = TOP_SPEED;\n", ""),
+    ("mv_pitch", C, "h->DesiredPitch = h->Speed * PITCH_SCALE;",
+     "h->DesiredPitch = h->Speed;"),
+    ("mv_pitch_val", C, "#define PITCH_SCALE        0.15f",
+     "#define PITCH_SCALE        0.16f"),
+    ("mv_yaw_still", C, "if (!(fabsf(acc.y) <= YAW_STEP_MIN)",
+     "if (!(fabsf(acc.y) < YAW_STEP_MIN)"),
+    ("mv_yaw_abs", C, "if (!(fabsf(acc.y) <= YAW_STEP_MIN)",
+     "if (!(acc.y <= YAW_STEP_MIN)"),
+    ("mv_yaw_min_val", C, "#define YAW_STEP_MIN       0.001f",
+     "#define YAW_STEP_MIN       0.002f"),
+    ("mv_yaw_speed", C, "&& YAW_SPEED_MIN < h->Speed) {",
+     "&& YAW_SPEED_MIN <= h->Speed) {"),
+    ("mv_yaw_speed_val", C, "#define YAW_SPEED_MIN      1.0f",
+     "#define YAW_SPEED_MIN      2.0f"),
+    ("mv_yaw_and", C, "<= YAW_STEP_MIN) && YAW_SPEED_MIN",
+     "<= YAW_STEP_MIN) || YAW_SPEED_MIN"),
+    ("mv_atan_swap", C, "bATan(h->Speed, acc.y)", "bATan(acc.y, h->Speed)"),
+    ("mv_wrap", C, "            if (FULL_TURN / 2.0f <= deg)\n"
+     "                deg = deg - FULL_TURN;\n", ""),
+    ("mv_yaw_dt", C, "chopper_subtract_from_yaw(h, deg * dt);",
+     "chopper_subtract_from_yaw(h, deg);"),
+    # ---- MoveChopper: the side and the tries
+    ("mv_null", C, "        if (h->ChopperPoint != NULL) {",
+     "        if (h->ChopperPoint != NULL && 0) {"),
+    ("mv_side_x", C, "d.x = h->ChopperPoint->Position.x - h->CurrentPos.x;",
+     "d.x = h->ChopperPoint->Position.x;"),
+    ("mv_side_y", C, "d.y = h->ChopperPoint->Position.y - h->CurrentPos.y;",
+     "d.y = h->ChopperPoint->Position.y;"),
+    ("mv_side_rot", C, "            chopper_rotate_to_chopper_coord(h, &d, &d);\n"
+     "            side", "            side"),
+    ("mv_side_lt", C, "side = 0.0f < d.y;", "side = 0.0f <= d.y;"),
+    ("mv_side_sign", C, "side ? MISS_TURN : -MISS_TURN",
+     "side ? -MISS_TURN : MISS_TURN"),
+    ("mv_miss_val", C, "#define MISS_TURN          5.0f",
+     "#define MISS_TURN          6.0f"),
+    ("mv_tries", C, "#define MOVE_TRIES         4",
+     "#define MOVE_TRIES         3"),
+    ("mv_tries_post", C, "if (++tries == MOVE_TRIES) {",
+     "if (tries++ == MOVE_TRIES) {"),
+    ("mv_think0", C, "            h->TimeUntilThink = 0.0f;\n"
+     "            chopper_subtract_from_yaw(h, side",
+     "            chopper_subtract_from_yaw(h, side"),
+    ("mv_v_y", C, "            v.y = 0.0f;\n", "            v.y = 1.0f;\n"),
+    ("mv_vel_dt_x", C, "vel.x = vel.x * dt;", "vel.x = vel.x;"),
+    ("mv_vel_dt_y", C, "vel.y = vel.y * dt;", "vel.y = vel.y;"),
+    ("mv_pos_x", C, "pos.x = h->CurrentPos.x + vel.x;",
+     "pos.x = h->CurrentPos.x - vel.x;"),
+    ("mv_pos_y", C, "pos.y = h->CurrentPos.y + vel.y;",
+     "pos.y = h->CurrentPos.y - vel.y;"),
+    ("mv_giveup_x", C, "                pos.x = h->CurrentPos.x;\n",
+     "                pos.x = h->CurrentPos.x + 1.0f;\n"),
+    ("mv_giveup_y", C, "                pos.y = h->CurrentPos.y;\n",
+     "                pos.y = h->CurrentPos.y + 1.0f;\n"),
+    ("mv_giveup_z", C, "                z = h->CurrentPos.z;\n",
+     "                z = 0.0f;\n"),
+    ("mv_giveup_flags", C, "                flags = 0;\n",
+     "                flags = 1;\n"),
+    ("mv_store_x", C, "        h->CurrentPos.x = pos.x;\n", ""),
+    ("mv_store_y", C, "        h->CurrentPos.y = pos.y;\n", ""),
+    # ---- MoveChopper: the height and the rest
+    ("mv_z_still", C, "if (fabsf(zv) <= FLY_STILL) {",
+     "if (fabsf(zv) < FLY_STILL) {"),
+    ("mv_z_abs", C, "if (fabsf(zv) <= FLY_STILL) {", "if (zv <= FLY_STILL) {"),
+    ("mv_fly_still_val", C, "#define FLY_STILL          0.001f",
+     "#define FLY_STILL          0.002f"),
+    ("mv_z_sheet", C, "        if (fabsf(zv) <= FLY_STILL) {\n"
+     "            h->CurrentPos.z = z;\n",
+     "        if (fabsf(zv) <= FLY_STILL) {\n"),
+    ("mv_z_add", C, "h->CurrentPos.z = h->CurrentPos.z + zv * dt;\n"
+     "            if (zv < 0.0f && h->CurrentPos.z < z) {",
+     "h->CurrentPos.z = h->CurrentPos.z - zv * dt;\n"
+     "            if (zv < 0.0f && h->CurrentPos.z < z) {"),
+    ("mv_z_fall", C, "if (zv < 0.0f && h->CurrentPos.z < z) {",
+     "if (zv > 0.0f && h->CurrentPos.z < z) {"),
+    ("mv_z_lt", C, "if (zv < 0.0f && h->CurrentPos.z < z) {",
+     "if (zv < 0.0f && h->CurrentPos.z <= z) {"),
+    ("mv_z_zv0", C, "                h->ZVelocity = 0.0f;\n            }\n"
+     "        }\n        h->EmitDust",
+     "            }\n        }\n        h->EmitDust"),
+    ("mv_dust", C, "h->EmitDust = (int32_t)((flags ^ 1) & 1);\n        topology",
+     "h->EmitDust = (int32_t)(flags & 1);\n        topology"),
+    ("mv_bbox_r", C, "#define INTEREST_RADIUS    1.0f",
+     "#define INTEREST_RADIUS    2.0f"),
+    ("mv_bbox_vel", C, "INTEREST_RADIUS, &vel);", "INTEREST_RADIUS, &v);"),
+    ("mv_ground", C, "        chopper_find_ground_height(h);\n"
+     "        trackpath_coord_update_position", "        "
+     "trackpath_coord_update_position"),
+    ("mv_tp", C, "        trackpath_coord_update_position(&h->TP,\n"
+     "                                        (const bVector2 *)&h->CurrentPos);\n",
+     ""),
+    ("mv_ease_val", C, "#define EASE_RATE          20.0f",
+     "#define EASE_RATE          10.0f"),
+    ("mv_ease_dt", C, "step = dt * EASE_RATE;", "step = EASE_RATE;"),
+    ("mv_ease_pitch", C, "&h->DesiredPitch, &h->Pitch);",
+     "&h->DesiredRoll, &h->Pitch);"),
+    ("mv_ease_roll", C, "    chopper_calc_chopper_rotation(h, step, "
+     "&h->DesiredRoll, &h->Roll);\n", ""),
+    ("mv_matrix", C, "    chopper_calc_matrix(h);\n    return tries",
+     "    return tries"),
+    ("mv_ret", C, "return tries != MOVE_TRIES;", "return 1;"),
+    # ---- TriggerDustEmitter
+    ("td_h", C, "#define DUST_HEIGHT        11.0f",
+     "#define DUST_HEIGHT        12.0f"),
+    ("td_scale", C, "#define DUST_SCALE         0.1f",
+     "#define DUST_SCALE         0.2f"),
+    ("td_sub", C, "(DUST_HEIGHT - (h->CurrentPos.z - h->GroundZ))",
+     "(DUST_HEIGHT - (h->CurrentPos.z + h->GroundZ))"),
+    ("td_ident", C, "    bIdentity(&m);\n    s = (DUST",
+     "    m = h->Matrix;\n    s = (DUST"),
+    ("td_vx", C, "m.v3.x = h->CurrentPos.x;\n    m.v3.y = h->CurrentPos.y;\n"
+     "    m.v3.z = h->GroundZ;", "m.v3.x = h->CurrentPos.y;\n"
+     "    m.v3.y = h->CurrentPos.y;\n    m.v3.z = h->GroundZ;"),
+    ("td_vy", C, "m.v3.y = h->CurrentPos.y;\n    m.v3.z = h->GroundZ;",
+     "m.v3.y = h->CurrentPos.x;\n    m.v3.z = h->GroundZ;"),
+    ("td_vz", C, "m.v3.z = h->GroundZ;", "m.v3.z = h->CurrentPos.z;"),
+    ("td_pos", C, "if (!(0.0f < s))\n        return;",
+     "if (!(0.0f <= s))\n        return;"),
+    ("td_nan", C, "if (!(0.0f < s))\n        return;",
+     "if (s <= 0.0f)\n        return;"),
+    ("td_max", C, "if (1.0f < s)\n        s = 1.0f;",
+     "if (2.0f < s)\n        s = 1.0f;"),
+    ("td_neg", C, "e, -s * dt, NULL);", "e, s * dt, NULL);"),
+    ("td_dt", C, "e, -s * dt, NULL);", "e, -s, NULL);"),
+    ("td_order", C, "for (n = h->DustEmitters.next; n != &h->DustEmitters; "
+     "n = n->next) {", "for (n = h->DustEmitters.prev; n != "
+     "&h->DustEmitters; n = n->prev) {"),
+    ("td_store", C, "        e->LocalWorld = m;\n", ""),
+    ("td_car", C, "e, -s * dt, NULL);", "e, -s * dt, h->CurrentCar);"),
+    # ---- DrawChopper, DoTweakerTriggers and Fly
+    ("dr_wo", C, "    chopper_update_world_object(h);\n    if (h->EmitDust",
+     "    if (h->EmitDust"),
+    ("dr_dust", C, "if (h->EmitDust != 0)\n        chopper_trigger",
+     "if (h->EmitDust == 0)\n        chopper_trigger"),
+    ("tw_n960", C, "if (h->New960 != 0 && h->CurrentCar != car)",
+     "if (h->CurrentCar != car)"),
+    ("tw_cur", C, "if (h->New960 != 0 && h->CurrentCar != car)",
+     "if (h->New960 != 0)"),
+    ("tw_and", C, "if (h->New960 != 0 && h->CurrentCar != car)",
+     "if (h->New960 != 0 || h->CurrentCar != car)"),
+    ("tw_car", C, "struct Car *car = pCurrentWorld->CarTable[0];\n\n"
+     "    if (h->New960", "struct Car *car = pCurrentWorld->CarTable[1];\n\n"
+     "    if (h->New960"),
+    ("fl_tweak", C, "    chopper_do_tweaker_triggers(h);\n    if (gMunition",
+     "    if (gMunition"),
+    ("fl_mun", C, "        gMunitionEffectsDoTimestepFn(dt);\n",
+     "        gMunitionEffectsDoTimestepFn(0.0f);\n"),
+    ("fl_mun_order", C, "    if (gMunitionEffectsDoTimestepFn != NULL)\n"
+     "        gMunitionEffectsDoTimestepFn(dt);\n"
+     "    if (h->Plan == CHOPPLAN_EATING_DONUTS)\n        return;\n",
+     "    if (h->Plan == CHOPPLAN_EATING_DONUTS)\n        return;\n"
+     "    if (gMunitionEffectsDoTimestepFn != NULL)\n"
+     "        gMunitionEffectsDoTimestepFn(dt);\n"),
+    ("fl_donuts", C, "if (h->Plan == CHOPPLAN_EATING_DONUTS)\n        return;\n"
+     "    h->TimeUntilThink", "if (0)\n        return;\n"
+     "    h->TimeUntilThink"),
+    ("fl_think_sub", C, "h->TimeUntilThink = h->TimeUntilThink - dt;",
+     "h->TimeUntilThink = h->TimeUntilThink + dt;"),
+    ("fl_think_lt", C, "    if (h->TimeUntilThink < 0.0f) {\n"
+     "        h->TimeUntilThink = h->TimeUntilThink + THINK_PERIOD;",
+     "    if (h->TimeUntilThink <= 0.0f) {\n"
+     "        h->TimeUntilThink = h->TimeUntilThink + THINK_PERIOD;"),
+    ("fl_period", C, "#define THINK_PERIOD       0.1f",
+     "#define THINK_PERIOD       0.2f"),
+    ("fl_period_set", C, "h->TimeUntilThink = h->TimeUntilThink + THINK_PERIOD;",
+     "h->TimeUntilThink = THINK_PERIOD;"),
+    ("fl_think", C, "        chopper_think(h);\n    }\n"
+     "    if (h->Plan == CHOPPLAN_START_CHASE)",
+     "    }\n    if (h->Plan == CHOPPLAN_START_CHASE)"),
+    ("fl_start", C, "if (h->Plan == CHOPPLAN_START_CHASE)\n        return;\n"
+     "    moved", "if (0)\n        return;\n    moved"),
+    ("fl_draw", C, "    chopper_draw(h, dt);\n    if (moved)",
+     "    if (moved)"),
+    ("fl_moved", C, "    if (moved) {", "    if (!moved) {"),
+    ("fl_stuck0", C, "        h->StuckTime = 0.0f;\n        return;\n    }",
+     "        return;\n    }"),
+    ("fl_stuck_add", C, "h->StuckTime = h->StuckTime + dt;",
+     "h->StuckTime = dt;"),
+    ("fl_stuck_le", C, "if (STUCK_LIMIT <= h->StuckTime) {",
+     "if (STUCK_LIMIT < h->StuckTime) {"),
+    ("fl_stuck_val", C, "#define STUCK_LIMIT        0.5f",
+     "#define STUCK_LIMIT        0.6f"),
+    ("fl_stuck_reset", C, "        h->StuckTime = 0.0f;\n"
+     "        h->Plan = CHOPPLAN_END_CHASE;\n    }\n}",
+     "        h->Plan = CHOPPLAN_END_CHASE;\n    }\n}"),
+    ("fl_end", C, "        h->Plan = CHOPPLAN_END_CHASE;\n    }\n}",
+     "        h->Plan = CHOPPLAN_START_CHASE;\n    }\n}"),
 ]
 
 EQUIVALENT = {

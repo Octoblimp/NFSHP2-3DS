@@ -4,11 +4,12 @@
 // emath.c's rotations, bmath.c's bSinCos and bATan, bmatrix.c's bIdentity
 // and bvector.c's bScaleAdd under it, over the checker's script.
 // Everything else the Chopper calls is a stub here that logs its
-// arguments and answers from the script, as the model's stubs
-// do. Pointers print as names: H for the helicopter (H.topo, H.dust,
-// H.tp and H.pos for its parts), T for the ChopperTarget, C0.. for cars,
-// R0.. routes, P0.. points, S0.. signposts, and SND, WO, WOP, SHEET, TPM
-// and WORLD; anything else is "?".
+// arguments and answers from the script, as the model's stubs do, and
+// the munitions' seam logs its step. Pointers print as names: H for the
+// helicopter (H.topo, H.dust, H.tp and H.pos for its parts), T for the
+// ChopperTarget, C0.. for cars, R0.. routes, P0.. points, S0..
+// signposts, E0.. dust emitters, and SND, WO, WOP, SHEET, TPM, WORLD and
+// WFX (WorldEffects); anything else is "?".
 //
 // The points sit in their routes' tables, PER_ROUTE to a route, because
 // BeginStakeout compares two points' indices worked out from their
@@ -55,6 +56,7 @@ World            *pCurrentWorld;
 HeliSheet        *TheHeliSheet;
 BSlotPool        *WorldObjectSlotPool;
 TrackPathManager  TheTrackPathManager;
+AcidEffectSystem  WorldEffects;
 RaceParameters    TheRaceParameters;
 EggIsOnFn         gEggIsOnFn;
 
@@ -69,6 +71,7 @@ static Sound3d         snd;
 static char            pool;
 static struct Chopper  chopper;
 static struct Chopper *H;
+static AcidEmitter     emit[4];
 
 // ------------------------------------------------------- the answers
 
@@ -167,6 +170,13 @@ static const char *pname(const void *p)
             return b;
         }
     }
+    for (i = 0; i < 4; i++)
+        if (p == (const void *)&emit[i]) {
+            sprintf(b, "E%d", i);
+            return b;
+        }
+    if (p == (const void *)&WorldEffects)
+        return "WFX";
     if (p == (const void *)&snd)
         return "SND";
     if (p == (const void *)&wo)
@@ -323,8 +333,11 @@ void topology_destroy(TopologyCoordinate *tc)
 void topology_set_interest_bbox(TopologyCoordinate *tc, const bVector2 *pos,
                                 float r, const bVector2 *vel)
 {
-    printf("  topo_bbox %s %s %08x %08x %08x %s\n", pname(tc), pname(pos),
+    printf("  topo_bbox %s %s %08x %08x %08x %s", pname(tc), pname(pos),
            fb(pos->x), fb(pos->y), fb(r), pname(vel));
+    if (vel != NULL)
+        printf(" %08x %08x", fb(vel->x), fb(vel->y));
+    printf("\n");
 }
 
 void topology_clear_interest_bbox(TopologyCoordinate *tc)
@@ -357,6 +370,13 @@ void trackpath_coord_reset_position(TrackPathCoordinate *c,
     printf("  tp_reset %s %s %08x %08x\n", pname(c), pname(pos),
            fb(pos->x), fb(pos->y));
     c->pTrackPoint = NULL;
+}
+
+void trackpath_coord_update_position(TrackPathCoordinate *c,
+                                     const bVector2 *pos)
+{
+    printf("  tp_update %s %s %08x %08x\n", pname(c), pname(pos),
+           fb(pos->x), fb(pos->y));
 }
 
 float trackpath_compare_distances(const TrackPathManager *m, float a,
@@ -400,6 +420,23 @@ void afx_get_emitters(bNode *list, uint32_t group_hash)
 void afx_delete_emitters(bNode *list)
 {
     printf("  afx_del %s\n", pname(list));
+}
+
+void acid_system_trigger_emitter(AcidEffectSystem *s, AcidEmitter *e,
+                                 float time_step, void *car)
+{
+    int i;
+
+    printf("  trigger %s %s %08x %s", pname(s), pname(e), fb(time_step),
+           pname(car));
+    for (i = 0; i < 16; i++)
+        printf(" %08x", fb(((const float *)&e->LocalWorld)[i]));
+    printf("\n");
+}
+
+static void mun_step(float dt)
+{
+    printf("  mun_step %08x\n", fb(dt));
 }
 
 int signposts_present(void)
@@ -896,6 +933,16 @@ static NearestRoutePointInfo info_of(char **t)
     return info;
 }
 
+static void print_wo(void)
+{
+    int i;
+
+    printf("  wo %d", wo.Enabled);
+    for (i = 0; i < 16; i++)
+        printf(" %08x", fb(((const float *)&wo.Matrix)[i]));
+    printf("\n");
+}
+
 static void run(char **t, int n)
 {
     const char *op = t[0];
@@ -956,13 +1003,8 @@ static void run(char **t, int n)
     else if (!strcmp(op, "matrix"))
         chopper_calc_matrix(h);
     else if (!strcmp(op, "wobj")) {
-        int i;
-
         chopper_update_world_object(h);
-        printf("  wo %d", wo.Enabled);
-        for (i = 0; i < 16; i++)
-            printf(" %08x", fb(((const float *)&wo.Matrix)[i]));
-        printf("\n");
+        print_wo();
     } else if (!strcmp(op, "set"))
         set_field(t);
     else if (!strcmp(op, "q")) {
@@ -1078,7 +1120,30 @@ static void run(char **t, int n)
         printf("  same %08x\n", fb(s));
     } else if (!strcmp(op, "subyaw"))
         chopper_subtract_from_yaw(h, fh(t[1]));
-    else {
+    else if (!strcmp(op, "emitters")) {
+        bNode *prev = &h->DustEmitters;
+        int i;
+
+        for (i = 0; i < atoi(t[1]); i++) {
+            prev->next = &emit[i].Node;
+            emit[i].Node.prev = prev;
+            prev = &emit[i].Node;
+        }
+        prev->next = &h->DustEmitters;
+        h->DustEmitters.prev = prev;
+    } else if (!strcmp(op, "move"))
+        printf("  ret %d\n", chopper_move(h, fh(t[1])));
+    else if (!strcmp(op, "draw")) {
+        chopper_draw(h, fh(t[1]));
+        print_wo();
+    } else if (!strcmp(op, "dustemit"))
+        chopper_trigger_dust_emitter(h, fh(t[1]));
+    else if (!strcmp(op, "tweak"))
+        chopper_do_tweaker_triggers(h);
+    else if (!strcmp(op, "fly")) {
+        chopper_fly(h, fh(t[1]));
+        print_wo();
+    } else {
         fprintf(stderr, "chopper_test: no op %s\n", op);
         exit(2);
     }
@@ -1112,6 +1177,7 @@ int main(int argc, char **argv)
     world.CarTable[0] = &cars[0];
     WorldObjectSlotPool = (BSlotPool *)(void *)&pool;
     gEggIsOnFn = egg;
+    gMunitionEffectsDoTimestepFn = mun_step;
     while (fgets(line, sizeof line, f) != NULL) {
         char *e = line + strlen(line);
         int n;

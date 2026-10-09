@@ -1,10 +1,13 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 61 (2026-10-09):
-12k-4a is done: the helicopter's flying, Think and the seven functions
-under it (SetXAccel .. SubtractFromYaw, with coputil's
-MakeRelativeAngle; `chopper.c`; `docs/formats/chopper.md`, "Flying").
-Before it, 12k-3b: the helicopter's plans, HighLevelPlanning,
+Where the next session picks up. Updated in Session 62 (2026-10-09):
+12k-4b is done: the helicopter's moving, Fly, MoveChopper, DrawChopper
+and the dust (`chopper.c`; `docs/formats/chopper.md`, "Moving"). 12k-5
+(the ChopperSound) moves to step 14 and 12k-6 (the salvos' munitions,
+which are Smokeables) after step 14b, so 12k-7 is next. Before it,
+12k-4a: the helicopter's flying, Think and the seven functions under it
+(SetXAccel .. SubtractFromYaw, with coputil's MakeRelativeAngle;
+"Flying"). Before it, 12k-3b: the helicopter's plans, HighLevelPlanning,
 CleverPursuitPlan and BombRunLogic ("Planning"). Before them, 12k-3a: the
 helicopter's chase logic, the sixteen functions under its plans
 (StartChaseLogic .. AdjustByThinkTime; "The chase logic"). Before that,
@@ -449,38 +452,95 @@ pursuit.obj, on a 10 KB manager. Its slices:
     632 mutations, 627 are caught and 5 are equivalent, the earlier
     slices' five.
   - Nothing calls Think until Fly (12k-4b).
-- **Next: 12k-4b**, Fly and the moving, in `chopper.c`:
-  - Fly (`0x001ea7d0`): DoTweakerTriggers (`0x001ea6c8`), then
-    MunitionEffectsHandler::DoTimestep (gp-18384's, 12k-6: a seam until
-    then). It returns in EATING_DONUTS. TimeUntilThink drops by dt;
-    below 0 it gains gp-27972 (0.1) and Think runs. Unless START_CHASE,
-    MoveChopper and DrawChopper; a failed move adds dt to StuckTime, and
-    0.5 s of it means StuckTime 0 and END_CHASE. A good one zeroes it.
-  - DoTweakerTriggers: with New960 (egg 5), FollowThisCar of World's
-    car at +44 when CurrentCar is not it. Its two tweaker triggers
-    (gp-17172, gp-17168) are only ever read or zeroed in code: debug,
-    left out.
-  - MoveChopper (`0x001e9ee8`, 1212 bytes): ROTATE turns by RotRate and
-    falls to the sheet; PURSUIT speeds up (0 .. 100), pitches (0.15 of
-    the speed, at most 20), yaws toward the sideways acceleration, and
-    steps by RotateVector(Speed, Yaw) * dt, turning 5 degrees toward
-    ChopperPoint's side on a miss (TimeUntilThink 0), up to 4 tries.
-    Then EmitDust, SetInterestBBox, FindGroundHeight, the TP's
-    UpdatePosition, the pitch and roll eased at 20 a second, and
-    CalcMatrix. Gives 0 after 4 misses.
-  - DrawChopper (`0x001ea3b0`): the WorldObject update (`0x001ea578`)
-    and, with EmitDust, TriggerDustEmitter (`0x001ea5c0`): the emitters
-    at (CurrentPos.x, y, GroundZ), triggered for -(11 - height) * 0.1 *
-    dt, the share within 0 .. 1.
-  - Then:
-    - 12k-5, drawing, dust and ChopperSound;
-    - 12k-6, the salvos: FireSalvo (`0x001ea8c0`) and its launch
-      (`0x001eab70`, with a replay event), into `chopperfire.c`;
-    - 12k-7, tPursuit's UpdateChopper (`0x00229678`) and the
-      manager's chopper methods. These bind the seams:
-      gChopperCtorFn, gChopperDestroyFn, gChopperFlyFn,
-      gChopperNew960Fn, gChopperFollowThisCarFn,
-      gPursuitUpdateChopperFn and gCopManagerBeACopRequestChopperFn.
+- **12k-4b, done (Session 62):** the moving in `chopper.c`: Fly
+  (`0x001ea7d0`), DoTweakerTriggers' egg part (`0x001ea6c8`),
+  MoveChopper (`0x001e9ee8`), DrawChopper (`0x001ea3b0`) and
+  TriggerDustEmitter (`0x001ea5c0`).
+  - The divergences: a NULL ChopperPoint is on neither side in
+    MoveChopper, where the image reads address 0, and the munitions'
+    step is the seam `gMunitionEffectsDoTimestepFn` until 12k-6. The
+    tweaker's two triggers are debug, and left out.
+  - `tools/chopper_check.py`: 86,504 ops, 821,720 lines, 0 differ. Of
+    741 mutations, 736 are caught and 5 are equivalent, the earlier
+    slices' five. MoveChopper's pitch cap of 20 is never reached (the
+    speed is at most 100, and 0.15 of it is 15), so it has none.
+  - Azahar, on AC: a quick race with cops, PASS at 30.0 fps. Nothing
+    calls Fly until 12k-7.
+- **12k-5 moves to step 14.** The ChopperSound (CreateChopperSound
+  `0x00215098`: bMalloc(48) and the constructor `0x00214d68`; table
+  `0x002bc2a8`) is a Sound3d, and no in-race sound is ported yet. Until
+  then `gCreateChopperSoundFn` stays NULL and the helicopter is silent.
+- **12k-6 moves after step 14b.** FireSalvo's munitions are
+  Smokeables: Munition (`0x001be6c8`) and DroppedBomb (`0x001beae0`)
+  under Rocket (`0x001bf340`), SmokeBomb (`0x001beb90`) and
+  DroppedSpikes (`0x001bee88`), with the MunitionEffectsHandler
+  (`0x001bf980` .. `0x001bfad0`). They need the Smokeable base (step
+  14b) first. What FireSalvo does, decoded:
+  - FireSalvo (`0x001ea8c0`) copies Matrix and takes the row of
+    `0x0031a7c8` (32 bytes each) for BombRunType: +0 the kind (0
+    rocket, 1 SmokeBomb, else DroppedSpikes), +8, +12, +16 the count
+    n, +24 the spread.
+  - n == 1, a rocket: m.v3.z -= gp-27968, and an offset (gp-27964,
+    gp-27960) whose y is gp-27956 from NextLauncher 2 on and negated
+    for an odd one, rotated by Yaw onto m.v3.xy. NextLauncher counts
+    to 4 and wraps.
+  - n == 1, a bomb: m.v3.z -= gp-27952; with a spread f > 0, f =
+    World::Random(f) - f / 2 (`0x0014e548`). Then Launch(f, m).
+  - n > 1: (0, -(n - 1)) by Yaw onto m.v3.xy, the step that times
+    -2 / n, m.v3.z -= gp-27948, f = -(spread / 2) * (n - 1); n times
+    Launch(f, m), then m.v3.xy += step and f += spread.
+  - Launch (`0x001eab70`): a replay event (gp-22440, 4.0, string
+    `0x002b98e0`) for a car whose +24 is set and +964 over 30. A
+    rocket aims at the car's position (`0x001ead08`, the row's +8 as
+    the speed): Rocket from its pool (gp-18440) and LaunchRocket
+    (`0x001bf528`). A bomb's velocity is (+12, f / ((GroundZ -
+    CurrentPos.z) / +8), +8) with xy by Yaw (`0x001eacb0`), from the
+    SmokeBomb pool (gp-18436) or DroppedSpikes' (gp-18432), and
+    LaunchBomb (`0x001bfe90`).
+- **Next: 12k-7**, the helicopter in the chase:
+  - tPursuit::UpdateChopper (`0x00229678`, 760 bytes), which Update
+    already calls through `gPursuitUpdateChopperFn`:
+    - a pChopper whose New960 is set: nothing;
+    - no pChopper, behaviour 0x20 and IsChopperAvailable
+      (`0x00224ec0`): raiseRotorRequest (`0x0020af50`: the cop speaker,
+      and |fSupervisorTimer| <= gp-27068, 0.001), REQUESTED, the attack
+      timer at 10, and pChopper = RequestChopper (`0x00224f00`), whose
+      TotalSalvos (828) is zeroed. In Be A Cop behaviour 0x20 is
+      cleared;
+    - NO_CHOPPER returns. fChaseDirection -1 outside REQUESTED aborts
+      the bombing run (`0x001eadf0`): INFLIGHT, the timer at 10;
+    - the timer drops by the world's dt (gp-19560). Below 0:
+      REQUESTED goes INFLIGHT with raiseRotorConfirm (`0x0020afa0`)
+      and 5 s, or with no chopper back to NO_CHOPPER, with
+      raiseDispatchHelicopterNA (`0x0020b828`, BeACopId) in Be A Cop;
+      INFLIGHT goes ATTACKING with 15 s and FollowThisCar(the chased
+      car); ATTACKING takes fChopperNextAttackTime as the timer, and
+      that drops by 2 to at least 6;
+    - the attack: SMOKE_BOMB_1; with behaviour 0x80 and the chased
+      car's byte at 2124 clear, Random(2) == 0 makes it SPIKE_BELT;
+      else after a run that was not a rocket, with 0x100 and that byte
+      clear, Random(2) == 0 makes it ROCKET; else with 0x40,
+      Random(2) picks SMOKE_BOMB_2 or 1. A chopper on another car
+      follows the chased one instead of attacking.
+  - tCopManager's RequestChopper (`0x00224f00`): the World's helicopter
+    when the race has one (RaceParameters' New624), it is not busy, and
+    in Be A Cop attacks are left. It sets bChopperBusy and takes one
+    from nBeACopNumChopperAttacks when any are left, in either mode.
+    IsChopperAvailable (`0x00224ec0`) is `hudrender.c`'s
+    can_call_helicopter, which moves to the manager.
+  - BeACopRequestChopper (`0x002287d8`): the player cop's pursuit, with
+    no pChopper and behaviour 0x20 clear, gets 0x1e0, and the
+    "-11688" sample plays when attacks are left; anything else plays
+    "-11672" (strings at `0x002bd258` and `0x002bd268`, through
+    GetInGameSample and bSample::Play(1, 0, 0)). BeACopRequestRoadBlock
+    (`0x002288c8`) is its twin on pRoadBlock and bits 8 / 0x18.
+  - IsChopperNearCar (`0x0022bab8`, under 200 in xy while ATTACKING) is
+    the speech fillers'; GetNumChopperAttacksAvailable and
+    GetChopperState have no callers.
+  - Then bind the seams: gChopperCtorFn, gChopperDestroyFn,
+    gChopperFlyFn, gChopperNew960Fn, gChopperFollowThisCarFn,
+    gPursuitUpdateChopperFn and gCopManagerBeACopRequestChopperFn. The
+    helicopter then flies in a chase, dropping nothing until 12k-6.
 
   After 12k:
   - **12l** pullovers and Busted (CreatePullover, `0x00226f30`);
@@ -4900,8 +4960,8 @@ each class shows what it reaches.
 | 12 | The cops and the pursuit: CopManager, the cop drivers, roadblocks and spikes | 4-6 |
 | 13 | ~~The two-screen HUD, to the split decided below~~ done as 8m: 8m-1 to 8m-6c | 10 |
 | 13b | New 3DS mode in full and a steady 30 FPS race (task 28), right after step 13: the real clock and the pacing, a frame profiler, New 3DS mode checked part by part, then only the optimizations the New 3DS needs. Set by the user on 2026-10-03 | 4 |
-| 14 | The car and world sounds and the speech | 2-3 |
-| 14b | The smokeables: FindSmokeableInfo, the spawner (`0x0021ed28`) and delete (`0x0021ef88`), Smokeable's Break and DeleteFarAway, and their collision. The roadblock's barrels wait for it (12i-2) | 1-2 |
+| 14 | The car and world sounds and the speech, and the ChopperSound (12k-5) | 2-3 |
+| 14b | The smokeables: FindSmokeableInfo, the spawner (`0x0021ed28`) and delete (`0x0021ef88`), Smokeable's Break and DeleteFarAway, and their collision. The roadblock's barrels wait for it (12i-2), and the helicopter's munitions (12k-6) come after it | 1-2 |
 | 15 | **A whole race with the AI and the cops.** Steps 10-14 add about 15-23 slices | |
 | 16 | The full frontend from retail: the 44 screens still plain or unregistered (`screen_registry.py --check-port`), the event tree (the career), the tourneys and the car selector | 6-10 |
 | 17 | Save data on the SD card in the memory card's place: Phils Load Save, the autosave, the boot autoload and the options (task 29) | 2-3 |
@@ -4910,9 +4970,9 @@ each class shows what it reaches.
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
 That was about 41-60 slices to the full game when the table was set.
-After 12k-4a (2026-10-09), about 24-37 are left, and the count has
+After 12k-4b (2026-10-09), about 23-36 are left, and the count has
 run low before:
-- step 12's: 12k-4b to 12k-7, 12l, 12m and 12n;
+- step 12's: 12k-7, 12l, 12m and 12n, with 12k-6 after step 14b;
 - steps 10, 14, 14b, 16, 17, 18 and 20.
 
 The replay (`ReplaySnapshot` and every `DoSnapshot`) is not in the
@@ -4925,9 +4985,9 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12's 12k-4b (the helicopter's Fly and MoveChopper):
-  12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b and
-  12k-4a are done. See
+- **Next:** step 12's 12k-7 (the helicopter in the chase):
+  12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
+  12k-4a and 12k-4b are done. See
   "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;

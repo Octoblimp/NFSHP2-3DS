@@ -1155,3 +1155,195 @@ void chopper_subtract_from_yaw(struct Chopper *h, float f)
     else if (FULL_TURN < y)
         h->Yaw = y - FULL_TURN;
 }
+
+// ------------------------------------------------------------------ moving
+
+// MoveChopper: still in z is at most gp-28000 (turning) or gp-27988
+// (flying); the top speed, 0x42c80000; the pitch, gp-27996 of the speed
+// and at most 0x41a00000; no yaw from the sideways step at most gp-27992,
+// or at a speed of 0x3f800000 or less; a miss turns 0x40a00000, and the
+// fourth gives up; the interest box's 1; the ease, 0x41a00000 a second.
+#define ROTATE_STILL       0.001f
+#define FLY_STILL          0.001f
+#define TOP_SPEED          100.0f
+#define PITCH_SCALE        0.15f
+#define PITCH_MAX          20.0f
+#define YAW_STEP_MIN       0.001f
+#define YAW_SPEED_MIN      1.0f
+#define MISS_TURN          5.0f
+#define MOVE_TRIES         4
+#define INTEREST_RADIUS    1.0f
+#define EASE_RATE          20.0f
+
+// TriggerDustEmitter: the dust's height, 0x41300000, and its share a unit
+// below it, gp-27976.
+#define DUST_HEIGHT        11.0f
+#define DUST_SCALE         0.1f
+
+// Fly: Think's period, gp-27972, and StuckTime's limit, 0x3f000000.
+#define THINK_PERIOD       0.1f
+#define STUCK_LIMIT        0.5f
+
+void (*gMunitionEffectsDoTimestepFn)(float dt);
+
+int32_t chopper_move(struct Chopper *h, float dt)
+{
+    bVector2 acc, d, v, vel, pos;
+    float z, zv, step;
+    uint32_t flags;
+    int32_t side, tries = 0;
+
+    if (h->MoveMode == CHOPMOVE_ROTATE) {
+        chopper_subtract_from_yaw(h, h->RotRate * dt);
+        zv = h->ZVelocity;
+        if (!(fabsf(zv) <= ROTATE_STILL)) {
+            h->CurrentPos.z = h->CurrentPos.z + zv * dt;
+            if (zv < 0.0f
+                && helisheet_find_z_value(TheHeliSheet,
+                                          (const bVector2 *)&h->CurrentPos,
+                                          &z, NULL)
+                && h->CurrentPos.z < z) {
+                h->CurrentPos.z = z;
+                h->ZVelocity = 0.0f;
+            }
+        }
+    } else {
+        acc.x = dt * h->Acceleration.x;
+        acc.y = dt * h->Acceleration.y;
+        h->Speed = h->Speed + acc.x;
+        if (h->Speed < 0.0f)
+            h->Speed = 0.0f;
+        else if (TOP_SPEED < h->Speed)
+            h->Speed = TOP_SPEED;
+        h->DesiredPitch = h->Speed * PITCH_SCALE;
+        if (PITCH_MAX < h->DesiredPitch)
+            h->DesiredPitch = PITCH_MAX;
+        if (!(fabsf(acc.y) <= YAW_STEP_MIN) && YAW_SPEED_MIN < h->Speed) {
+            float deg = (float)bATan(h->Speed, acc.y) * BAM_TO_DEG;
+
+            if (FULL_TURN / 2.0f <= deg)
+                deg = deg - FULL_TURN;
+            chopper_subtract_from_yaw(h, deg * dt);
+        }
+        // Which side of the helicopter its route point is. The image reads
+        // the point unguarded; the port takes a NULL one as on neither.
+        side = 0;
+        if (h->ChopperPoint != NULL) {
+            d.x = h->ChopperPoint->Position.x - h->CurrentPos.x;
+            d.y = h->ChopperPoint->Position.y - h->CurrentPos.y;
+            chopper_rotate_to_chopper_coord(h, &d, &d);
+            side = 0.0f < d.y;
+        }
+        for (;;) {
+            v.x = h->Speed;
+            v.y = 0.0f;
+            rotate_vector(&vel, &v, h->Yaw);
+            vel.x = vel.x * dt;
+            vel.y = vel.y * dt;
+            pos.x = h->CurrentPos.x + vel.x;
+            pos.y = h->CurrentPos.y + vel.y;
+            if (helisheet_find_z_value(TheHeliSheet, &pos, &z, &flags))
+                break;
+            if (++tries == MOVE_TRIES) {
+                pos.x = h->CurrentPos.x;
+                pos.y = h->CurrentPos.y;
+                z = h->CurrentPos.z;
+                flags = 0;
+                break;
+            }
+            h->TimeUntilThink = 0.0f;
+            chopper_subtract_from_yaw(h, side ? MISS_TURN : -MISS_TURN);
+        }
+        h->CurrentPos.x = pos.x;
+        h->CurrentPos.y = pos.y;
+        zv = h->ZVelocity;
+        if (fabsf(zv) <= FLY_STILL) {
+            h->CurrentPos.z = z;
+        } else {
+            h->CurrentPos.z = h->CurrentPos.z + zv * dt;
+            if (zv < 0.0f && h->CurrentPos.z < z) {
+                h->CurrentPos.z = z;
+                h->ZVelocity = 0.0f;
+            }
+        }
+        h->EmitDust = (int32_t)((flags ^ 1) & 1);
+        topology_set_interest_bbox(&h->TopologyCoord,
+                                   (const bVector2 *)&h->CurrentPos,
+                                   INTEREST_RADIUS, &vel);
+        chopper_find_ground_height(h);
+        trackpath_coord_update_position(&h->TP,
+                                        (const bVector2 *)&h->CurrentPos);
+    }
+    step = dt * EASE_RATE;
+    chopper_calc_chopper_rotation(h, step, &h->DesiredPitch, &h->Pitch);
+    chopper_calc_chopper_rotation(h, step, &h->DesiredRoll, &h->Roll);
+    chopper_calc_matrix(h);
+    return tries != MOVE_TRIES;
+}
+
+void chopper_trigger_dust_emitter(struct Chopper *h, float dt)
+{
+    bMatrix4 m;
+    bNode *n;
+    float s;
+
+    bIdentity(&m);
+    s = (DUST_HEIGHT - (h->CurrentPos.z - h->GroundZ)) * DUST_SCALE;
+    m.v3.x = h->CurrentPos.x;
+    m.v3.y = h->CurrentPos.y;
+    m.v3.z = h->GroundZ;
+    if (!(0.0f < s))
+        return;
+    if (1.0f < s)
+        s = 1.0f;
+    for (n = h->DustEmitters.next; n != &h->DustEmitters; n = n->next) {
+        AcidEmitter *e = (AcidEmitter *)n;
+
+        e->LocalWorld = m;
+        acid_system_trigger_emitter(&WorldEffects, e, -s * dt, NULL);
+    }
+}
+
+void chopper_draw(struct Chopper *h, float dt)
+{
+    chopper_update_world_object(h);
+    if (h->EmitDust != 0)
+        chopper_trigger_dust_emitter(h, dt);
+}
+
+void chopper_do_tweaker_triggers(struct Chopper *h)
+{
+    struct Car *car = pCurrentWorld->CarTable[0];
+
+    if (h->New960 != 0 && h->CurrentCar != car)
+        chopper_follow_this_car(h, car);
+}
+
+void chopper_fly(struct Chopper *h, float dt)
+{
+    int32_t moved;
+
+    chopper_do_tweaker_triggers(h);
+    if (gMunitionEffectsDoTimestepFn != NULL)
+        gMunitionEffectsDoTimestepFn(dt);
+    if (h->Plan == CHOPPLAN_EATING_DONUTS)
+        return;
+    h->TimeUntilThink = h->TimeUntilThink - dt;
+    if (h->TimeUntilThink < 0.0f) {
+        h->TimeUntilThink = h->TimeUntilThink + THINK_PERIOD;
+        chopper_think(h);
+    }
+    if (h->Plan == CHOPPLAN_START_CHASE)
+        return;
+    moved = chopper_move(h, dt);
+    chopper_draw(h, dt);
+    if (moved) {
+        h->StuckTime = 0.0f;
+        return;
+    }
+    h->StuckTime = h->StuckTime + dt;
+    if (STUCK_LIMIT <= h->StuckTime) {
+        h->StuckTime = 0.0f;
+        h->Plan = CHOPPLAN_END_CHASE;
+    }
+}

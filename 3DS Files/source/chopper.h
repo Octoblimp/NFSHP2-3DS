@@ -17,8 +17,9 @@
 // the chase logic under the planning: arriving and leaving, following a
 // route, staking out a signpost, hanging about near a point and keeping
 // the target over the sheet. 12k-3b has the plans over them:
-// HighLevelPlanning, CleverPursuitPlan and BombRunLogic. Flying (12k-4),
-// drawing and dust (12k-5), the salvos (FireSalvo and the munitions it
+// HighLevelPlanning, CleverPursuitPlan and BombRunLogic. 12k-4a has the
+// flying under them, Think, and 12k-4b Fly, the moving and the dust.
+// The sound (12k-5), the salvos (FireSalvo and the munitions it
 // launches, 12k-6, in chopperfire.c) and tPursuit's UpdateChopper (12k-7)
 // come after.
 //
@@ -476,6 +477,52 @@ void chopper_calc_chopper_rotation(struct Chopper *h, float step,
 // 0x001e9e80. Yaw less `f`; then 360 more when that is below 0, or 360
 // less when above 360.
 void chopper_subtract_from_yaw(struct Chopper *h, float f);
+
+// ---- moving (12k-4b)
+
+// MunitionEffectsHandler::DoTimestep (0x001bfa38) on TheMunitionEffectsHandler
+// (gp-18384), which Fly calls each step: the munitions' (12k-6). NULL skips
+// it.
+extern void (*gMunitionEffectsDoTimestepFn)(float dt);
+
+// 0x001e9ee8. One step of `dt`:
+//   - ROTATE turns by RotRate. Moving in z by more than 0.001 (gp-28000)
+//     a second, it moves, and falling, stops on the sheet.
+//   - PURSUIT speeds up by the forward acceleration, within 0 .. 100, and
+//     wants a pitch of 0.15 (gp-27996) of the speed, at most 20. A
+//     sideways step over 0.001 (gp-27992) above a speed of 1 turns it by
+//     bATan(Speed, step) degrees, less 360 from 180, times dt. It steps
+//     Speed along Yaw times dt. Off the sheet it tries again 5 degrees
+//     toward ChopperPoint's side (TimeUntilThink 0), and gives up in place
+//     on the fourth miss. Then z: the sheet's, or moving by ZVelocity and
+//     falling, no lower than the sheet. EmitDust is the polygon's flag
+//     bit 0 clear; SetInterestBBox(pos, 1, step), FindGroundHeight and the
+//     TP's UpdatePosition.
+// Both ease the pitch and roll to their wants at 20 a second (CalcChopper
+// Rotation) and CalcMatrix. 0 after four misses, else 1. A NULL
+// ChopperPoint is on neither side, where the image reads address 0.
+int32_t chopper_move(struct Chopper *h, float dt);
+
+// 0x001ea5c0. The dust emitters' LocalWorld at (CurrentPos.x, y, GroundZ),
+// each triggered in WorldEffects for -(11 - height over the ground) * 0.1
+// (gp-27976) * dt, that share no more than 1; nothing for none.
+void chopper_trigger_dust_emitter(struct Chopper *h, float dt);
+
+// 0x001ea3b0. The WorldObject's update, and with EmitDust the dust.
+void chopper_draw(struct Chopper *h, float dt);
+
+// 0x001ea6c8. With New960, FollowThisCar of World's car 0 when it is not
+// CurrentCar. The image's two tweaker triggers (gp-17172 and gp-17168:
+// follow a car, drop a smoke bomb) are the debug tweaker's alone, never
+// set in code, and are left out.
+void chopper_do_tweaker_triggers(struct Chopper *h);
+
+// 0x001ea7d0. DoTweakerTriggers and the munitions' step; nothing more in
+// EATING_DONUTS. TimeUntilThink less dt, and below 0, 0.1 (gp-27972) more
+// and Think. Unless START_CHASE then: MoveChopper and DrawChopper. A move
+// zeroes StuckTime; a failed one adds dt to it, and from 0.5 it is 0 and
+// the plan END_CHASE.
+void chopper_fly(struct Chopper *h, float dt);
 
 // 0x001ea8c0, in chopperfire.c. One salvo of the run's munitions: 12k-6's.
 void chopper_fire_salvo(struct Chopper *h);
