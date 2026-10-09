@@ -5,11 +5,13 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "barricade.h"
 #include "bmath.h"
 #include "bmem.h"
 #include "bslotpool.h"
+#include "bvector.h"
 #include "car.h"
 #include "carinfo.h"
 #include "cartypeinfo.h"
@@ -28,6 +30,8 @@
 #include "raceparams.h"
 #include "replay.h"
 #include "table.h"
+#include "topology.h"
+#include "trackgraph.h"
 #include "trackpath.h"
 #include "trackroute.h"
 #include "vtable.h"
@@ -1418,6 +1422,235 @@ void copmanager_possible_call_supervisor(tCopManager *m, tPursuit *p)
             gSpeechRaiseSuperRequestFn(s);
     }
     m->fSupervisorTimer = 7.0f;
+}
+
+// ------------------------------------- tCopManager's, making roadblocks
+
+void (*gPursuitRoadBlockSetSpeechFn)(tPursuit *p);
+void (*gCopManagerAddSpikeStripFn)(tCopManager *m, const bVector2 *a,
+                                   const bVector2 *b, int32_t id, float t);
+
+// 0x002bd450, copied to the stack: the escape lane's change by the
+// manager's difficulty.
+static const float fEscapeLaneByDifficulty[3] = { 0.5f, 0.0f, -0.25f };
+
+float tpursuit_calculate_road_block_escape_lane_width(const tPursuit *p)
+{
+    float w;
+
+    switch (p->nRoadblockCount) {
+    case 0:
+        w = 3.75f;
+        break;
+    case 1:
+        w = 3.5f;
+        break;
+    case 2:
+        w = 3.0f;
+        break;
+    default:
+        w = 2.75f;
+        break;
+    }
+    return w + fEscapeLaneByDifficulty[pCopManager->nDifficultyLevel];
+}
+
+int32_t copmanager_find_cops_for_road_block(tCopManager *m, tCop **out,
+                                            int32_t n)
+{
+    int32_t found = 0;
+    int32_t i;
+
+    out[1] = NULL;
+    out[0] = NULL;
+    for (i = 0; i < m->nNumAICops && found != n; i++) {
+        tCop *c = m->Cops[i];
+
+        if (c->LogicState != c->DesiredLogicState)
+            continue;
+        if (world_get_distance_to_closest_player_2d(pCurrentWorld,
+                (const bVector2 *)(const void *)&c->pMyCar->State.Position)
+            < 250.0f)
+            continue;
+        // The jump table at 0x002bd1e0: only a cop in limbo or at a radar
+        // trap, and not one held in limbo.
+        if ((c->DesiredLogicState == LS_LIMBO
+             || c->DesiredLogicState == LS_SPEED_TRAP)
+            && c->LogicSubState != LSS_LIMBO_DISABLED)
+            out[found++] = c;
+    }
+    return found;
+}
+
+// The layouts, 0x0031e938 to 0x0031ea18: the plan's items from the road's
+// left edge across, by what the pursuit calls for and the spike strip's
+// side (nSpikeSide 1, the left).
+static const int32_t RoadBlockOneCopLeft[]     = { 0, 2, 3, 6 };          // e938
+static const int32_t RoadBlockOneCopRight[]    = { 3, 2, 1, 6 };          // e948
+static const int32_t RoadBlockPlain[]          = { 0, 3, 4, 3, 1, 6 };    // e970
+static const int32_t RoadBlockBarrels[]        = { 0, 3, 5, 3, 1, 6 };    // e988
+static const int32_t RoadBlockSpikesLeft[]     = { 0, 2, 3, 4, 3, 6 };    // e9a0
+static const int32_t RoadBlockSpikesRight[]    = { 3, 4, 3, 2, 1, 6 };    // e9b8
+static const int32_t RoadBlockSpikesBarrelsLeft[]  = { 0, 2, 3, 5, 3, 6 };    // e9d0
+static const int32_t RoadBlockSpikesBarrelsRight[] = { 3, 5, 3, 2, 1, 6 };    // e9e8
+static const int32_t RoadBlockSpikesMidRight[] = { 3, 2, 3, 1, 6 };       // ea00
+static const int32_t RoadBlockSpikesMidLeft[]  = { 0, 3, 2, 3, 6 };       // ea18
+
+int32_t copmanager_lay_out_road_block(tCopManager *m, tRoadBlock *rb,
+                                      tPursuit *p)
+{
+    const int32_t         *layout = RoadBlockPlain;
+    const TrackRoutePoint *rp;
+    RoadBlockPlan          q;
+    uint32_t               tok, v;
+    float                  escW, at;
+    int32_t                k = 0;
+
+    (void)m;
+    escW = tpursuit_calculate_road_block_escape_lane_width(p);
+    if ((p->BehaviourFlags & 0x10u) != 0 || p->nMaxRoadBlockCops == 1) {
+        rb->nSpikeSide = (int32_t)ROADBLOCKINFO_SPIKESIDE(
+            RoadblockData->Roadblocks[rb->nIndexIntoLoadedData].Bits);
+        if (rb->nSpikeSide == 0)
+            rb->nSpikeSide = world_random_i(pCurrentWorld, 2) != 0 ? 1 : 2;
+        if (p->nMaxRoadBlockCops == 1)
+            layout = rb->nSpikeSide == 1 ? RoadBlockOneCopLeft
+                                         : RoadBlockOneCopRight;
+        else if (world_random_i(pCurrentWorld, 4) == 0)
+            layout = rb->nSpikeSide == 1 ? RoadBlockSpikesMidRight
+                                         : RoadBlockSpikesMidLeft;
+        else if (TheRaceParameters.bSpikeStrips != 0
+                 && world_random_i(pCurrentWorld, 2) == 0)
+            layout = rb->nSpikeSide == 1 ? RoadBlockSpikesBarrelsLeft
+                                         : RoadBlockSpikesBarrelsRight;
+        else
+            layout = rb->nSpikeSide == 1 ? RoadBlockSpikesLeft
+                                         : RoadBlockSpikesRight;
+    } else if (TheRaceParameters.bSpikeStrips != 0) {
+        layout = RoadBlockBarrels;
+    }
+    roadblockplan_construct(&q);
+    roadblock_build_plan(&q, layout, escW, rb);
+    rp = rb->RoutePoint;
+    at = -rp->LeftWidth;
+    while (roadblockplan_pop(&q, &tok)) {
+        switch (tok) {
+        case RBPLAN_LANE_LEFT:
+        case RBPLAN_LANE_RIGHT: {
+            float lw;
+
+            roadblockplan_pop(&q, &v);
+            memcpy(&lw, &v, sizeof lw);
+            // Retail's: the lane's middle half its width past its end.
+            at += lw;
+            bScaleAdd2(&rb->v2EscapeLane, &rp->Position, &rb->L,
+                       at + lw * 0.5f);
+            break;
+        }
+        case RBPLAN_GAP:
+            at += 0.800000011920929f;               // gp-27104
+            break;
+        case RBPLAN_SPIKES: {
+            float len, half;
+
+            roadblockplan_pop(&q, &v);
+            len = (float)(int32_t)v * 0.6499999761581421f;    // gp-27100
+            half = len * 0.5f;
+            bScaleAdd2(&rb->v2SpikeBeltPos, &rp->Position, &rb->L,
+                       at + half);
+            at += len;
+            rb->v2SpikeBeltVec.y = rb->L.y * half;
+            rb->v2SpikeBeltVec.x = rb->L.x * half;
+            break;
+        }
+        case RBPLAN_COP: {
+            uint16_t ang;
+            float    cw;
+            bPolar   pol;
+
+            roadblockplan_pop(&q, &v);
+            ang = (uint16_t)v;
+            cw = roadblock_cop_car_width(ang);
+            bScaleAdd2(&rb->CopPos[k], &rp->Position, &rb->L, at + cw * 0.5f);
+            at += cw;
+            bToPolar(&pol, &rb->L);
+            // The first faces across the road one way, the second the other.
+            rb->CopAng[k] = (uint16_t)(k == 0 ? pol.a + ang
+                                              : pol.a + 0x8000 - ang);
+            k++;
+            break;
+        }
+        case RBPLAN_BARRELS: {
+            bVector2 b2;
+            bVector3 v3;
+
+            bScaleAdd2(&b2, &rp->Position, &rb->L, at + 3.0f * 0.5f);
+            get_vector_on_track(&v3, &b2);
+            barricademanager_spawn_barrel(p->pBarricades, &v3);
+            at += 3.0f;                             // gp-14816
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    roadblockplan_destruct(&q, 2);
+    return k;
+}
+
+tRoadBlock *copmanager_create_road_block(tCopManager *m, tPursuit *p,
+                                         float dir)
+{
+    tCop       *cops[2];
+    tRoadBlock *rb;
+    int32_t     i, k;
+
+    if (RoadblockData == NULL || TheRaceParameters.bRoadBlocks == 0)
+        return NULL;
+    if (copmanager_find_cops_for_road_block(m, cops, p->nMaxRoadBlockCops)
+        != p->nMaxRoadBlockCops)
+        return NULL;
+    rb = trackgraph_find_road_block(TheTrackGraph, p->pChasedCar, 600.0f,
+                                    TheTrackPathManager.TrackLength * 0.5f,
+                                    dir == 1.0f);
+    if (rb == NULL)
+        return NULL;
+    k = copmanager_lay_out_road_block(m, rb, p);
+    for (i = 0; i < k; i++) {
+        rb->cops[i] = (struct stAICop *)cops[i];
+        taicop_set_road_block((tAICop *)cops[i], rb, p, i);
+    }
+    if ((p->BehaviourFlags & 0x10u) != 0) {
+        bVector2 a, b;
+
+        a.x = rb->v2SpikeBeltPos.x - rb->v2SpikeBeltVec.x;
+        a.y = rb->v2SpikeBeltPos.y - rb->v2SpikeBeltVec.y;
+        b.y = rb->v2SpikeBeltPos.y + rb->v2SpikeBeltVec.y;
+        b.x = rb->v2SpikeBeltPos.x + rb->v2SpikeBeltVec.x;
+        if (gCopManagerAddSpikeStripFn != NULL)
+            gCopManagerAddSpikeStripFn(m, &a, &b, rb->nIndexIntoLoadedData,
+                                       -1.0f);
+    }
+    return rb;
+}
+
+void tpursuit_create_road_block(tPursuit *p)
+{
+    tRoadBlock *rb;
+
+    if (p->nMaxRoadBlockCops == 1)
+        p->BehaviourFlags |= 0x10u;
+    rb = copmanager_create_road_block(pCopManager, p, p->fChaseDirection);
+    p->pRoadBlock = rb;
+    if (rb == NULL)
+        return;
+    p->fRoadBlockDisbandTimer = 3.5f;
+    p->nRoadblockCount++;
+    if (tpursuit_is_player_involved(p)) {
+        p->pRoadBlock->CopSpeaker = copmanager_reserve_cop_speaker(pCopManager);
+        if (gPursuitRoadBlockSetSpeechFn != NULL)
+            gPursuitRoadBlockSetSpeechFn(p);
+    }
 }
 
 // ----------------------------------------------------------- the tables

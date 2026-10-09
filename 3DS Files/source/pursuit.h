@@ -293,6 +293,56 @@ void copmanager_possible_call_supervisor(tCopManager *m, tPursuit *p);
 extern void (*gPlayerLoadNextNisFn)(struct Player *pl, struct Car *chased,
                                     struct Car *cop, int32_t tickets);
 
+// ------------------------------------- tCopManager's, making roadblocks
+
+// CreateRoadBlock, 0x00229e30, which Update reaches through
+// gPursuitCreateRoadBlockFn: a pursuit with one roadblock cop takes the
+// spike strip behaviour 0x10 first. The manager's roadblock is kept in
+// pRoadBlock, NULL or not; a roadblock gets 3.5 s on the disband timer
+// and counts, and with a player in the chase reserves a cop speaker and
+// has RoadBlockSetSpeech said.
+void tpursuit_create_road_block(tPursuit *p);
+
+// CalculateRoadBlockEscapeLaneWidth, 0x0022ca78: by the roadblocks made
+// so far, 3.75, 3.5, 3.0 and then 2.75, plus 0.5, 0 or -0.25 by the
+// manager's difficulty.
+float tpursuit_calculate_road_block_escape_lane_width(const tPursuit *p);
+
+// Retail's 0x00226298, the manager's CreateRoadBlock: with the roadblock
+// data and roadblocks on, and exactly as many cops found as the pursuit
+// may put in a roadblock, the track graph's spot between 600 m and half
+// the track ahead (backwards for any direction but 1.0). Its laid-out
+// cops are set to it in turn, and with behaviour 0x10 the spike strip
+// across the belt (AddSpikeStrip, with the record's index and -1). NULL
+// for none.
+tRoadBlock *copmanager_create_road_block(tCopManager *m, tPursuit *p,
+                                         float dir);
+
+// FindCopsForRoadBlock, 0x00226810 (whose stab says tRoadBlock *, for the
+// two-cop buffer it clears): up to `n` AI cops, settled in their state and
+// 250 m or more from every player, in limbo (not held there) or at a
+// radar trap. Returns how many.
+int32_t copmanager_find_cops_for_road_block(tCopManager *m, tCop **out,
+                                            int32_t n);
+
+// Retail's 0x00226478: the layout picked -- with a spike strip or one cop,
+// by the record's spike side (a random one for none), a random strip in
+// the middle one time in four and, with spike strips on, barrels one time
+// in two of the rest; else barrels with spike strips on, or none --
+// planned (barricade.h) and walked from the road's left edge: the escape
+// lane, the spike belt's middle and half-length, each cop's spot and
+// heading, each barrel spawned on the ground. Returns the cops placed.
+int32_t copmanager_lay_out_road_block(tCopManager *m, tRoadBlock *rb,
+                                      tPursuit *p);
+
+// RoadBlockSetSpeech (0x0022b5d0), tPursuit's, the cop speech manager's
+// side: NULL says nothing. AddSpikeStrip (0x002276d0), the spike strips'
+// (12j): NULL lays none.
+extern void (*gPursuitRoadBlockSetSpeechFn)(tPursuit *p);
+extern void (*gCopManagerAddSpikeStripFn)(tCopManager *m, const bVector2 *a,
+                                          const bVector2 *b, int32_t id,
+                                          float t);
+
 
 // ---------------------------------------------------------- the seams
 
@@ -325,7 +375,8 @@ extern void (*gSpeechRaiseSuspectCrashTrafficFn)(uint32_t speaker,
 // What Update reaches; NULL does nothing.
 //   - tCopManager::CreatePullover (0x00226f30), 12l: the caught car
 //     pulled over, with 1.
-//   - CreateRoadBlock (0x00229e30), 12i-2.
+//   - CreateRoadBlock (0x00229e30): main.c binds
+//     tpursuit_create_road_block.
 //   - UpdateRoadBlocks (0x00229b58): main.c binds
 //     tpursuit_update_road_blocks.
 //   - UpdateChopper (0x00229678), 12k.

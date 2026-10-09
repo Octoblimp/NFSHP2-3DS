@@ -14,8 +14,9 @@ joining and leaving, the speakers, and the one-liners the cops' logic
 asks. Slice 12h-2 ports Update (`0x00229288`), each chase's step, and
 the state machines under it. Slice 12i-1 ports the roadblock's running
 logic: asking for one, watching the chased car get by, and taking it
-down. Making a roadblock is 12i-2's, the helicopter 12k's and the
-pullover 12l's.
+down. Slice 12i-2 makes the roadblock: the cops for it, its layout
+across the road, and its barrels. The e-brake stop is 12i-3's, the
+helicopter 12k's and the pullover 12l's.
 
 | function | address | port |
 |----------|---------|------|
@@ -66,6 +67,17 @@ pullover 12l's.
 | MonitorRoadBlock | `0x0022c390` | `tpursuit_monitor_road_block` |
 | RoadBlockDefeated | `0x00229970` | `tpursuit_road_block_defeated` |
 | UpdateRoadBlocks | `0x00229b58` | `tpursuit_update_road_blocks` |
+| CreateRoadBlock | `0x00229e30` | `tpursuit_create_road_block` |
+| CalculateRoadBlockEscapeLaneWidth | `0x0022ca78` | `tpursuit_calculate_road_block_escape_lane_width` |
+| tCopManager::CreateRoadBlock | `0x00226298` | `copmanager_create_road_block` |
+| (the roadblock laid out) | `0x00226478` | `copmanager_lay_out_road_block` |
+| tCopManager::FindCopsForRoadBlock | `0x00226810` | `copmanager_find_cops_for_road_block` |
+| (a barrel spawned) | `0x0024f0a8` | `barricademanager_spawn_barrel` (barricade.c) |
+| (a cop car's width across the road) | `0x0024fae8` | `roadblock_cop_car_width` (barricade.c) |
+| (the cop cars' angle) | `0x0024fb50` | `roadblock_cop_car_angle` (barricade.c) |
+| (the plan built) | `0x0024fb78` | `roadblock_build_plan` (barricade.c) |
+| (the plan's ring) | `0x00250068` .. `0x00250100` | `roadblockplan_construct` .. `roadblockplan_pop` (barricade.c) |
+| (the plan's static constructor) | `0x00250150` | `RoadBlockCopAngle`'s 8192 (barricade.c) |
 
 ## The record
 
@@ -468,9 +480,138 @@ at NONE:
   Cop roadblocks is used up. With none left, dispatch says none is
   available (`0x0020b7e8`, BeACopId) and the machine stays at NONE.
 - Otherwise the machine goes to CALLED_FOR_ROAD_BLOCK, with 8 s on its
-  timer. When the timer runs out it calls CreateRoadBlock (12i-2).
+  timer. When the timer runs out it calls CreateRoadBlock (below).
+
+## Making a roadblock (12i-2)
+
+CreateRoadBlock (`0x00229e30`) is tPursuit's:
+
+1. With one roadblock cop allowed (nMaxRoadBlockCops 1), behaviour bit
+   0x10 (a spike strip) is set first.
+2. It asks the manager for a roadblock, passing the chase's direction,
+   and keeps what comes back, NULL included.
+3. When there is one, the disband timer is set to 3.5 and the roadblock
+   count goes up.
+4. With a player involved, the roadblock reserves a cop speaker, and
+   RoadBlockSetSpeech (`0x0022b5d0`) speaks.
+
+The manager's CreateRoadBlock (`0x00226298`) returns NULL when:
+
+- no roadblock data is loaded, or roadblocks are off;
+- FindCopsForRoadBlock finds fewer than nMaxRoadBlockCops cops;
+- tTrackGraph::FindRoadBlock finds no spot. It looks 600 to half the
+  track's length from the chased car, ahead for a chase direction of
+  exactly 1.0 and behind for any other.
+
+Otherwise the layout places the cops. Each cop placed is the
+roadblock's and gets tAICop::SetRoadBlock with its index (0 or 1). With
+bit 0x10, AddSpikeStrip (`0x002276d0`, 12j) lays the strip from the
+belt's position less its vector to the position plus it. It takes the
+record's index and a time of -1.
+
+FindCopsForRoadBlock (`0x00226810`) clears both of its slots, then goes
+through the manager's AI cops in order and stops once it has `n`. A cop
+counts when:
+
+- it is settled (its logic state is the desired one);
+- it is 250 m or more from every player, on the ground plane;
+- it wants limbo (but is not held there, LSS_LIMBO_DISABLED) or a radar
+  trap. The jump table at `0x002bd1e0` takes no other state.
+
+The escape lane (`0x0022ca78`) is 3.75 wide for the first roadblock,
+then 3.5, 3.0 and 2.75 for the fourth on. The manager's difficulty adds
+0.5, 0 or -0.25 (`0x002bd450`).
+
+### The layout
+
+The layout (`0x00226478`) picks a list of items across the road from
+its left edge: 0 the left lane, 1 the right lane, 2 a spike strip, 3 a
+cop, 4 a gap, 5 barrels, and 6 the end. The lists are at `0x0031e938`
+to `0x0031ea18`.
+
+A spike strip goes in with bit 0x10 or one cop. Then the record's
+spike side (its bits) picks the list. A side of 0 is chosen with
+World::Random(2): nonzero gives 1, the left.
+
+| roadblock | side 1 | side 2 |
+|-----------|--------|--------|
+| one cop | 0 2 3 | 3 2 1 |
+| strip, Random(4) is 0 | 3 2 3 1 | 0 3 2 3 |
+| strip, bSpikeStrips and Random(2) is 0 | 0 2 3 5 3 | 3 5 3 2 1 |
+| strip, otherwise | 0 2 3 4 3 | 3 4 3 2 1 |
+| no strip, bSpikeStrips | 0 3 5 3 1 | |
+| no strip | 0 3 4 3 1 | |
+
+The plan (`0x0024fb78`) sizes the items to the roadblock's road width
+in two passes. Pass 1 sums the items:
+
+- a lane is the escape lane's width;
+- a gap is 0.8;
+- a strip is 8 segments of 0.65;
+- a cop is its car's width across the road (`0x0024fae8`): |cos| of
+  its angle times the manager's largest cop car length, plus |sin|
+  times its width. The angle starts at RoadBlockCopAngle, 8192 (45
+  degrees), which the plan's static constructor sets;
+- barrels are nothing yet.
+
+Then the room left is shared out:
+
+1. Wider than the road by more than one car, with two cops or more,
+   the last cop goes.
+2. The cars are turned to 45 degrees (`0x0024fb50`). Each adds its
+   width there less its width at the start angle, which is nothing
+   while RoadBlockCopAngle is 8192.
+3. Barrels fill the room left, 3 each, when more than 3 is left. There
+   are at most 10.
+4. Spike strips take the room left in segments of 0.65: n + 8 in all,
+   where n is the room's (truncated). No room (n of 0) keeps the 8.
+   Otherwise the total is held between 3 and 20 segments per strip.
+5. What is left is shared between the lanes. With both lanes, the
+   difference of the route point's two widths moves to the wider side:
+   - the left wider: from the right lane, or the right lane is closed
+     (0), the left getting nothing more;
+   - the right wider: from the left lane, or the left is closed and the
+     right lane is doubled (retail's).
+
+Pass 2 puts the items in a ring of 30 words (29 used; retail's push
+says 0 when it is full, and nothing reads it):
+
+- a lane and its width;
+- a gap;
+- a strip and its share of the segments, the remainder to the last;
+- a cop and its angle, for each cop still kept;
+- a barrels word for each barrel.
+
+The layout walks the ring along the roadblock's L (across the road),
+from the route point less its LeftWidth:
+
+- A lane moves on by its width. The escape lane's spot is half the
+  width past that (retail's: past the lane, not at its middle).
+- A gap moves on 0.8.
+- A strip moves on its segments times 0.65. The belt's spot is its
+  middle, and the belt's vector half its length along L.
+- A cop moves on its car's width at its angle, and its spot is the
+  middle. The first faces L's angle plus the angle, the second L's
+  angle plus 0x8000 less it.
+- A barrel moves on 3. It is spawned at its middle, put on the track
+  (get_vector_on_track).
+
+The layout returns the cops placed.
 
 ## The barrels and spike strips
+
+A barrel's spawn (`0x0024f0a8`) takes the first free slot:
+
+1. FindSmokeableInfo looks up "CS_RoadBlock_Barrel". With none, the
+   slot is skipped, so no barrel spawns.
+2. The info's mass is scaled to 10. The first three rows of its inertia
+   tensor (all four lanes, VU0) are scaled with it.
+3. The smokeable is spawned (`0x0021ed28`): type 0, the hash of
+   "ROADBLOCK_BARREL", the spot, angle 0.
+4. Its id goes in the slot and is returned. With no free slot, -1.
+
+The port has no smokeables yet, so FindSmokeableInfo is NULL: a
+roadblock stands without barrels until the smokeables step.
 
 The BarricadeManager's destructor deletes each barrel still there
 through the smokeables (`0x0021ef88`), then frees itself on flags & 1.
@@ -495,8 +636,12 @@ Bound since 12h-2: `gCopManagerRequestPursuitFn`, to
 its Update.
 
 Bound since 12i-1: `gPursuitUpdateRoadBlocksFn`, to
-`tpursuit_update_road_blocks`. A chase now asks for roadblocks, but
-none appears before 12i-2 binds CreateRoadBlock.
+`tpursuit_update_road_blocks`. A chase now asks for roadblocks.
+
+Bound since 12i-2: `gPursuitCreateRoadBlockFn`, to
+`tpursuit_create_road_block`. An asked-for roadblock is now made: its
+cops are sent to their spots (SetRoadBlock), with no barrels (no
+smokeables) and no spike strip (12j).
 
 Not bound yet:
 
@@ -508,18 +653,24 @@ Not bound yet:
   raiseSuspectCrashTraffic. The roadblocks' speeches do the same:
   raiseSpikeStripTireBlow, the roadblock-failed speech,
   raiseRequestAnotherRoadblock, raiseSpikeStripRequest,
-  raiseRoadblockRequest and raiseDispatchRoadBlockNA. So does the
-  bust sound (CollisionSound::PlayBustRoadBlock).
+  raiseRoadblockRequest and raiseDispatchRoadBlockNA. So does
+  RoadBlockSetSpeech, `gPursuitRoadBlockSetSpeechFn`, and the bust
+  sound (CollisionSound::PlayBustRoadBlock).
+- AddSpikeStrip, `gCopManagerAddSpikeStripFn`, lays nothing while NULL
+  (12j).
+- FindSmokeableInfo, `gFindSmokeableInfoFn`, finds nothing while NULL,
+  so no barrel spawns. The smokeables' spawn, `gSmokeableSpawnFn`,
+  aborts if reached. Both wait for the smokeables step.
 - RealDriver::ForceEBrakeStop, `gRealDriverForceEBrakeStopFn`, does
   nothing while NULL. The port's RealDriver is still the demo's; 12i-3
   ports retail's and binds it.
-- Update's later slices do nothing while NULL: CreatePullover (12l),
-  CreateRoadBlock (12i-2) and UpdateChopper (12k). So a roadblock is
-  asked for but never made, and a caught car is not pulled over.
+- Update's later slices do nothing while NULL: CreatePullover (12l)
+  and UpdateChopper (12k). So a caught car is not pulled over.
 - So does `gPlayerLoadNextNisFn`, the Busted NIS (12l).
 - These abort if reached:
   - the helicopter's word at 960 and FollowThisCar (12k);
-  - the barrels' delete and the body's fade byte (12i);
+  - the barrels' delete and the body's fade byte (the smokeables
+    step);
   - BlinkBlinkPoof (12j).
 
   Nothing makes a helicopter, a barrel or a spike strip before then.
@@ -625,12 +776,44 @@ cover:
   - UpdateRoadBlocks with no roadblock (the timer's edges, -0 and a
     zero frame), a blown tyre in and out of Be A Cop, a cop near enough
     to join the chase, got by, and the disband timer by distance and
-    chase direction (including 2.0).
+    chase direction (including 2.0);
+- the roadblock's making (12i-2). World::GetDistanceToClosestPlayer
+  (a scripted distance per car), FindRoadBlock (a scripted
+  roadblock), SetRoadBlock, get_vector_on_track (a scripted height),
+  FindSmokeableInfo, the smokeables' spawn, AddSpikeStrip and
+  RoadBlockSetSpeech are logging stand-ins. The plan's code, the
+  barrels' spawn, bScaleAdd, bToPolar, bSin and bCos run as shipped,
+  and the plan's static constructor runs once:
+  - the escape lane over seven roadblock counts (-1 and the largest
+    int too) and the three difficulties;
+  - the cop car's width at 12 angles for five car sizes (zero, NaN and
+    negative too), and the 45-degree angle;
+  - the plan for the ten layouts and 22 others (none, lanes alone, one
+    to three cops, two and three strips, two barrels' items, gaps
+    alone, items past 6 and below 0, a ring that fills), on ten road
+    widths (0 and NaN too) by seven splits of the route point. Also
+    four escape lanes (0, -1 and 1e-7 too), five starting angles, and
+    six roads around exactly 3 to spare for barrels (less than 0 too);
+  - FindCopsForRoadBlock for five counts and four manager sizes,
+    distances around 250 (NaN and the infinities too), every desired
+    state by five sub-states, unsettled cops, and mixed lists;
+  - the barrels' spawn with and without the info, all ten slots and
+    an eleventh, three ids, and six masses and tensors (NaN, a tiny
+    and a huge mass too);
+  - the layout over eight behaviour and cop-count sets, the four spike
+    sides, bSpikeStrips and six random answers. Then escape lanes by
+    count and difficulty, five roads (NaN too), the barrels' slots full
+    and no info;
+  - the manager's CreateRoadBlock over ten flag, cop-count and
+    direction sets (NaN, 0 and just over 1 too), a diagonal road, no
+    data, roadblocks off, a cop too near, no spot, and a NaN track;
+  - tPursuit's for two chased cars and Be A Cop, four cop-count and
+    flag sets, with and without a spot, followed backwards, and twice.
 
-42681 operations, 74272 lines, 0 differ.
+58562 operations, 86269 lines, 0 differ.
 
-`--mutate` runs out of the tree through `mutpar`: 526 mutations, 522
-caught and four equivalent:
+`--mutate` runs out of the tree through `mutpar`: 691 mutations, 683
+caught and eight equivalent:
 
 - `super_lt` (`<=` to `<` against 0.001): within 25 of -50 the timer
   less -50 is exact (Sterbenz), so it is a multiple of 2^-18, which
@@ -642,10 +825,22 @@ caught and four equivalent:
 - `ur_req_has_rb` (UpdateRoadBlocks' request without its roadblock
   test): every earlier step either returns or takes the roadblock
   down, so the test always sees NULL.
+- `plan_full_ret` (push's answer changed): its one caller, the builder,
+  never reads it (`0x0024ff14` to `0x0024ffe8`).
+- `plan_pop_mod` (pop's wrap taken out): a plan is filled once from
+  empty before it is read, so the head never passes 29.
+- `bp_diff_lt` and `bp_neg_lt` (the lanes' moves tested against the
+  other lane): with both lanes in the layout, each is the escape lane
+  plus the same share there, so the two are equal.
+
+At 12i-2, four older mutations matched more than once (`ctor_disband`,
+`disband_pi`, `super_eps` and `super_lt`). Each now quotes enough
+around it to be unique, and each is caught or equivalent as before.
 
 The checkers that link `copmgr.c` still have 0 differ: carmode, cop,
 copdriver, copmanager, copmover, drivecam, hudfeatures, hudrender,
 raceupdate and trackgraph (12h-1). After 12h-2, cop and copdriver, the
 other two that link `pursuit.c`, still have 0 differ.
 After 12i-1, cop, copdriver and psychodriver (whose e-brake note
-moved) still have 0 differ.
+moved) still have 0 differ. After 12i-2, cop and copdriver still have
+0 differ.

@@ -24,11 +24,19 @@ DidRecentlyCollideWithCop. Then the roadblocks: UpdateRoadBlocks
 (0x00229b58, run straight rather than through the Update's stub),
 MonitorRoadBlock, RoadBlockDefeated and the roadblock state machine's
 RequestRoadBlock, with GetRealDistanceAroundTrack (Car+2036) and
-GetForwardTrackDistance as shipped. The cop
+GetForwardTrackDistance as shipped. Then the roadblock's making:
+tPursuit::CreateRoadBlock (0x00229e30, run straight rather than through
+the Update's stub), the manager's (0x00226298) with
+FindCopsForRoadBlock, the layout (0x00226478) and
+CalculateRoadBlockEscapeLaneWidth, and the plan's code (0x0024fae8 to
+0x00250150: the cop car's width and angle, the builder, the ring) and
+the barrels' spawn (0x0024f0a8), with bScaleAdd, bToPolar, bSin and bCos
+as shipped; the plan's static constructor (0x00250150) runs once. The cop
 manager's speakers, GetNumTickets, the free id, bRandom, bStringHash,
 IsReplayDemoMode and the cops' IsAIControlled run as shipped. The harness
 (tools/src/pursuit_test.c) runs pursuit.c, barricade.c, copmgr.c,
-copmanager.c, vtable.c and bmath.c and prints the same lines.
+copmanager.c, vtable.c, bmath.c and bvector.c and prints the same
+lines.
 
 **The stubs**, logged and answered by the same rule on both sides: the
 slot pool's alloc and free, bMalloc (a block of 0xcd) and
@@ -51,14 +59,22 @@ UpdateChopper. For the roadblocks also: the five roadblock speeches and
 tPursuit's RoadblockFailedSpeech, RealDriver::ForceEBrakeStop(float),
 Player::RequestZone (a scripted answer per player),
 PlayBustRoadBlock, ReplayManager::RegisterInterestingEvent and
-World::Random (a scripted answer). DemoDiscManager.bActive is 0. Each
+World::Random (a scripted queue, then a scripted answer). For the
+roadblock's making also: World::GetDistanceToClosestPlayer (a scripted
+distance per car), tTrackGraph::FindRoadBlock (a scripted roadblock),
+tAICop::SetRoadBlock, AddSpikeStrip, RoadBlockSetSpeech,
+GetVectorOnTrack (the point at a scripted height), FindSmokeableInfo
+(the one info, or none) and the smokeable's spawn (0x0021ed28, the next
+of a scripted run of ids). DemoDiscManager.bActive is 0. Each
 car's controller is a block whose e-brake timer (592) `rbdump` prints.
 
 **Compared** are the stubs' logs and, on `dump`, every field of a pursuit
 at retail's offsets but the drive targets, its barricades', the manager's lists, speakers, timers and seed, the
 cops' pursuits and logic states, and the bodies the fade marked; on
 `tdump` the drive targets' points, and on `mvdump` the cop movers' base
-speeds.
+speeds; on `rbx` a roadblock's cops, spots, headings, spike side, belt,
+escape lane and speaker, on `sdump` the barrels' info's mass and inertia
+tensor, and on `plan` the plan's ring.
 
     python tools/pursuit_check.py
     python tools/pursuit_check.py --mutate [--only a,b]
@@ -89,7 +105,8 @@ BARRICADE = "3DS Files/source/barricade.c"
 COPMGR = "3DS Files/source/copmgr.c"
 SOURCES = [HARNESS, PURSUIT, BARRICADE, COPMGR,
            "3DS Files/source/copmanager.c", "3DS Files/source/vtable.c",
-           "3DS Files/source/bmath.c", "3DS Files/source/bmathtab.c"]
+           "3DS Files/source/bmath.c", "3DS Files/source/bmathtab.c",
+           "3DS Files/source/bvector.c"]
 HARNESS_TIMEOUT = 60
 
 # ================================================================ the image
@@ -211,12 +228,47 @@ S_RANDOM = 0x0014e520
 G_REPLAY = GP - 22440                   # pReplayManager
 DEMO_ACTIVE = 0x002effe0                # DemoDiscManager.bActive
 
+# The roadblock's making.
+F_CRB = S_CREATERB
+F_MCRB = 0x00226298
+F_FCOPS = 0x00226810
+F_LAY = 0x00226478
+F_ESC = 0x0022ca78
+F_CW = 0x0024fae8
+F_CWA = 0x0024fb50
+F_PLAN = 0x0024fb78
+F_PLAN_CTOR = 0x00250068
+F_PLAN_STATIC = 0x00250150
+F_SPAWNB = 0x0024f0a8
+S_DIST = 0x0014e3e8
+S_FINDRB = 0x0024e880
+S_SETRB = 0x0022df18
+S_ADDSTRIP = 0x002276d0
+S_VOT = 0x001cb350
+S_SPAWN = 0x0021ed28
+S_RBSET = 0x0022b5d0
+G_TRACKGRAPH = GP - 14840
+G_RBDATA = GP - 15648
+G_CANGLE = GP - 13244                   # the plan's cop angle, a short
+NRBINFO, RANDQ = 4, 16
+
+
+def bstringhash(s):
+    h = M32
+    for ch in s.encode("latin-1"):
+        h = (h * 33 + ch) & M32
+    return h
+
+
+BARREL_HASH = bstringhash("CS_RoadBlock_Barrel")
+
 VT_AICOP = 0x002bd698
 VT_PLAYERCOP = 0x002bd6c0
 
 RP_FIELDS = {"RaceType": 32, "Point2Point": 40, "NumLaps": 44,
              "NumPlayerCars": 48, "bTickets": 608, "bRoadBlocks": 612,
-             "bHelicopter": 620, "New624": 624, "BeACop": 628}
+             "bSpikeStrips": 616, "bHelicopter": 620, "New624": 624,
+             "BeACop": 628}
 RP_UNITS = 749
 
 MGR_SIZE = 10516
@@ -238,14 +290,15 @@ COP_SIZE, RB_SIZE, STRIP_SIZE, CHOPPER_SIZE, BODY_SIZE = (128, 120, 32,
 
 MFIELDS = {"diff": 10476, "beacop": 10336, "super": 10348, "busy": 312,
            "pcidx": 12, "head": 10324, "tail": 10328, "full": 10332,
-           "ncops": 8, "nrb": 0}
+           "ncops": 8, "nrb": 0, "naicops": 4, "xdim": 10504,
+           "ydim": 10508}
 PFIELDS = {"state": 1484, "ncops": 1476, "chst": 1580, "primary": 1496,
            "secondary": 1500, "backup": 1516, "maxchase": 8,
            "rbtimer": 1532, "flags": 1588, "landmark": 1504,
            "rbstate": 1560, "rbsmt": 1564, "sub": 1488, "timer": 1524,
            "hit": 1512, "catch": 1520, "top": 1544, "dir": 1548,
            "dirt": 1552, "n1556": 1556, "dbtimer": 1528, "rbcount": 1584,
-           "rbflags": 1568}
+           "rbflags": 1568, "maxrb": 12}
 
 
 def fbits(f):
@@ -294,7 +347,15 @@ class Model(object):
         self.names[self.pool] = "pool"
         e.put32(G_POOL, self.pool)
         e.put32(G_SPEECH, a(16))
-        self.smoke = a(64)
+        self.smoke = a(224)
+        self.names[self.smoke] = "SI"
+        self.rbinfo = a(4 + 28 * NRBINFO)
+        self.graph = a(16)
+        self.names[self.graph] = "TG"
+        e.put32(G_TRACKGRAPH, self.graph)
+        self.plan = a(144)
+        self.layout = a(256)
+        self.buf = a(32)
         self.tabtok = a(16 * 8)
         self.cut = [0] * 8
         self.low = [0] * 8
@@ -364,7 +425,7 @@ class Model(object):
                          (S_SETPURSUIT, self.s_setpursuit),
                          (S_DESIRED, self.s_desired),
                          (S_FINDBODY, self.s_findbody),
-                         (S_FINDSMOKE, lambda em: self.smoke),
+                         (S_FINDSMOKE, self.s_findsmoke),
                          (S_BARREL_DEL, self.s_barrel_del),
                          (S_FOLLOW, self.s_follow),
                          (S_POOF, self.log1("poof")),
@@ -392,7 +453,12 @@ class Model(object):
                          (S_RBNA, self.s_rbna), (S_BUST, self.s_bust),
                          (S_EBRAKE, self.s_ebrake), (S_ZONE, self.s_zone),
                          (S_REPLAY, self.s_replay),
-                         (S_RANDOM, self.s_random)):
+                         (S_RANDOM, self.s_random),
+                         (S_DIST, self.s_dist), (S_FINDRB, self.s_findrb),
+                         (S_SETRB, self.s_setrb),
+                         (S_ADDSTRIP, self.s_addstrip),
+                         (S_VOT, self.s_vot), (S_SPAWN, self.s_spawn),
+                         (S_RBSET, self.log1("speech rbset"))):
             e.stub(addr, fn)
         for addr, what in S_RBSPEECH.items():
             e.stub(addr, self.speech2(what))
@@ -400,6 +466,8 @@ class Model(object):
             e.stub(addr, self.log1("speech " + what))
         for addr, what in S_RAISE2.items():
             e.stub(addr, self.raise2(what))
+        # The plan's static constructor, as the image's start-up runs it.
+        e.call(F_PLAN_STATIC, limit=1000)
         self.reset()
 
     def emit(self, line):
@@ -490,7 +558,8 @@ class Model(object):
         return b
 
     def s_barrel_del(self, em):
-        ok = "" if em.reg[5] & M32 == self.smoke else " ?info"
+        want = self.smoke if self.smokeok else 0
+        ok = "" if em.reg[5] & M32 == want else " ?info"
         self.emit("  barrel delete %d%s" % (s32(em.reg[4]), ok))
 
     def s_follow(self, em):
@@ -644,8 +713,70 @@ class Model(object):
 
     def s_random(self, em):
         ok = "" if em.reg[4] & M32 == self.world else " ?w"
-        self.emit("  random%s %d -> %d" % (ok, s32(em.reg[5]), self.rand))
-        return self.rand
+        if self.randqi < len(self.randq):
+            r = self.randq[self.randqi]
+            self.randqi += 1
+        else:
+            r = self.rand
+        self.emit("  random%s %d -> %d" % (ok, s32(em.reg[5]), r))
+        return r & M32
+
+    # ---- the roadblock's making's stubs
+
+    def s_dist(self, em):
+        ok = "" if em.reg[4] & M32 == self.world else " ?w"
+        pos = em.reg[5] & M32
+        k = self.carno(pos - CAR_POS)
+        r = self.cardist[k] if k >= 0 else 0
+        self.emit("  dist%s %s %08x %08x -> %08x" % (
+            ok, self.sym(self.cars[k]) if k >= 0 else "?", self.e.u32(pos),
+            self.e.u32(pos + 4), r))
+        self.e.fpr[0] = r
+
+    def s_findrb(self, em):
+        r = self.rbs[self.nextrb] if self.nextrb >= 0 else 0
+        self.emit("  findrb %s %s %08x %08x %d -> %s" % (
+            self.sym(em.reg[4]), self.sym(em.reg[5]), em.fpr[12] & M32,
+            em.fpr[13] & M32, s32(em.reg[6]), self.sym(r)))
+        return r
+
+    def s_setrb(self, em):
+        self.emit("  setrb %s %s %s %d" % (
+            self.sym(em.reg[4]), self.sym(em.reg[5]), self.sym(em.reg[6]),
+            s32(em.reg[7])))
+
+    def s_addstrip(self, em):
+        e = self.e
+        pa, pb = em.reg[5] & M32, em.reg[6] & M32
+        self.emit("  addstrip %s %08x %08x %08x %08x %d %08x" % (
+            "M" if em.reg[4] & M32 == self.m else "?", e.u32(pa),
+            e.u32(pa + 4), e.u32(pb), e.u32(pb + 4), s32(em.reg[7]),
+            em.fpr[12] & M32))
+
+    def s_vot(self, em):
+        e = self.e
+        out, pin = em.reg[4] & M32, em.reg[5] & M32
+        x, y = e.u32(pin), e.u32(pin + 4)
+        self.emit("  vot %08x %08x" % (x, y))
+        e.put32(out, x)
+        e.put32(out + 4, y)
+        e.put32(out + 8, self.votz)
+
+    def s_findsmoke(self, em):
+        if em.reg[4] & M32 != BARREL_HASH:
+            self.emit("  ?smokehash %08x" % (em.reg[4] & M32))
+        return self.smoke if self.smokeok else 0
+
+    def s_spawn(self, em):
+        e = self.e
+        pos = em.reg[7] & M32
+        r = self.spawn_next
+        self.spawn_next += 1
+        self.emit("  spawn %d %s %08x %08x %08x %08x %d -> %d" % (
+            s32(em.reg[4]), self.sym(em.reg[5]), em.reg[6] & M32,
+            e.u32(pos), e.u32(pos + 4), e.u32(pos + 8), em.reg[8] & 0xffff,
+            r))
+        return r & M32
 
     def rbdump(self):
         e = self.e
@@ -741,6 +872,43 @@ class Model(object):
                                             e.u32(t + 20 + 16 * i)))
         self.emit(" ".join(parts))
 
+    def rbxdump(self, k):
+        e = self.e
+        r = self.rbs[k]
+        w = lambda o: "%08x" % e.u32(r + o)     # noqa: E731
+        self.emit("RBX R%d cops %s %s pos %s %s %s %s ang %04x %04x side %d "
+                  "belt %s %s vec %s %s esc %s %s spk %s" % (
+                      k, self.sym(e.u32(r)), self.sym(e.u32(r + 4)), w(8),
+                      w(12), w(16), w(20), e.u16(r + 24), e.u16(r + 26),
+                      s32(e.u32(r + 48)), w(52), w(56), w(60), w(64),
+                      w(92), w(96), w(116)))
+
+    def sdump(self):
+        e = self.e
+        s = self.smoke
+        self.emit("SI mass %08x t %s" % (
+            e.u32(s + 32),
+            " ".join("%08x" % e.u32(s + 48 + 4 * k) for k in range(16))))
+
+    def plandump(self):
+        e = self.e
+        q = self.plan
+        head, tail = s32(e.u32(q)), s32(e.u32(q + 4))
+        parts = ["plan h %d t %d" % (head, tail)]
+        i = head
+        while i != tail:
+            tok = e.u32(q + 8 + 4 * i)
+            i = (i + 1) % 30
+            parts.append("%d" % tok)
+            if tok <= 3:
+                if i == tail:
+                    parts.append("end")
+                    break
+                v = e.u32(q + 8 + 4 * i)
+                i = (i + 1) % 30
+                parts[-1] += ":%08x" % (v & 0xffff if tok == 3 else v)
+        self.emit(" ".join(parts))
+
     def mvdump(self):
         self.emit("MV" + "".join(" %08x" % self.e.u32(mv + 52)
                                  for mv in self.movers))
@@ -773,6 +941,14 @@ class Model(object):
             e.write(d, bytes(PDRIVER_SIZE))
         self.zone = [0, 0]
         self.rand = 0
+        self.cardist = [0] * NCARS
+        self.randq, self.randqi = [], 0
+        e.write(self.rbinfo, bytes(4 + 28 * NRBINFO))
+        e.put32(G_RBDATA, 0)
+        e.write(self.smoke, bytes(224))
+        self.smokeok = 1
+        self.spawn_next = 100
+        self.votz = 0
 
     def cop(self, s):
         k = int(s, 0)
@@ -827,6 +1003,14 @@ class Model(object):
             self.nextrb = s32(v(2))
         elif o == "g" and a[1] == "rand":
             self.rand = s32(v(2))
+        elif o == "g" and a[1] == "cangle":
+            e.write(G_CANGLE, struct.pack("<H", v(2) & 0xffff))
+        elif o == "g" and a[1] == "spawnid":
+            self.spawn_next = s32(v(2))
+        elif o == "g" and a[1] == "votz":
+            self.votz = v(2)
+        elif o == "g" and a[1] == "smokeok":
+            self.smokeok = s32(v(2))
         elif o == "g":
             g = {"tracklen": TRACKLEN, "rc": self.rc, "seed": G_SEED,
                  "copcarpos": self.world + 36, "dt": G_DT,
@@ -1129,6 +1313,84 @@ class Model(object):
             self.cdump()
         elif o == "fades":
             self.fades()
+        elif o == "randq":
+            self.randq = [s32(v(j)) for j in range(1, len(a))][:RANDQ]
+            self.randqi = 0
+        elif o == "cdist":
+            self.cardist[int(a[1])] = v(2)
+        elif o == "cls":
+            c = self.cops[int(a[1])]
+            e.put32(c + 12, v(2))
+            e.put32(c + 16, v(3))
+            e.put32(c + 20, v(4))
+        elif o == "rbdata":
+            e.put32(self.rbinfo, v(1))
+            e.put32(G_RBDATA, self.rbinfo if v(1) else 0)
+        elif o == "rbinfo":
+            e.put32(self.rbinfo + 4 + 28 * int(a[1]) + 24, v(2))
+        elif o == "rb3":
+            k = int(a[1])
+            r, q = self.rbs[k], self.rbpts[k]
+            e.put32(r + 84, v(2))
+            e.put32(r + 88, v(3))
+            e.put32(q + 24, v(4))
+            e.put32(q + 28, v(5))
+        elif o == "smoke":
+            e.put32(self.smoke + 32, v(1))
+            for j in range(16):
+                e.put32(self.smoke + 48 + 4 * j, v(2 + j))
+        elif o == "esc":
+            call(F_ESC, p)
+            self.emit("esc U%d -> %08x" % (self.u(p), e.fpr[0] & M32))
+        elif o == "fcops":
+            for j in range(8):
+                e.put32(self.buf + 4 * j, self.cops[7])
+            r = call(F_FCOPS, m, self.buf, v(1))
+            self.emit("fcops %d -> %d %s" % (
+                s32(v(1)), s32(r),
+                " ".join(self.sym(e.u32(self.buf + 4 * j))
+                         for j in range(8))))
+        elif o == "lay":
+            r = call(F_LAY, m, self.rbs[int(a[2])], p)
+            self.emit("lay U%d R%d -> %d" % (self.u(p), int(a[2]), s32(r)))
+        elif o == "mcrb":
+            e.fpr[12] = v(2)
+            r = call(F_MCRB, m, p)
+            self.emit("mcrb U%d %08x -> %s" % (self.u(p), v(2), self.sym(r)))
+        elif o == "crb":
+            st = e.stubs.pop(F_CRB)
+            try:
+                call(F_CRB, p)
+            finally:
+                e.stubs[F_CRB] = st
+            self.emit("crb U%d" % self.u(p))
+        elif o == "plan":
+            toks = [int(t, 0) & M32 for t in a[1].split(",")]
+            for j, t in enumerate(toks):
+                e.put32(self.layout + 4 * j, t)
+            call(F_PLAN_CTOR, self.plan)
+            e.fpr[12] = v(2)
+            call(F_PLAN, self.plan, self.layout, self.rbs[int(a[3])])
+            self.plandump()
+        elif o == "cw":
+            call(F_CW, v(1) & 0xffff)
+            self.emit("cw %d -> %08x" % (v(1) & 0xffff, e.fpr[0] & M32))
+        elif o == "cwa":
+            sc = self.scratch
+            e.write(sc, struct.pack("<H", 1))
+            call(F_CWA, sc)
+            self.emit("cwa -> %d %08x" % (e.u16(sc), e.fpr[0] & M32))
+        elif o == "spawn":
+            sc = self.scratch
+            for j in range(3):
+                e.put32(sc + 4 * j, v(2 + j))
+            e.put32(sc + 12, 0)
+            r = call(F_SPAWNB, e.u32(p + 1472), sc)
+            self.emit("spawnb U%d -> %d" % (self.u(p), s32(r)))
+        elif o == "rbx":
+            self.rbxdump(int(a[1]))
+        elif o == "sdump":
+            self.sdump()
         else:
             raise ValueError(o)
 
@@ -2125,6 +2387,7 @@ def update_frames_script(S):
     S.add(cars_std(), cars2_std())
 
     rb_script(S)
+    make_rb_script(S)
 
 
 def car3(k, ctrl=None, dat=0.0, z=0.0):
@@ -2364,6 +2627,254 @@ def rb_script(S):
         urb(u, 2)
 
 
+LAYOUTS = ["0,2,3,6", "3,2,1,6", "0,3,4,3,1,6", "0,3,5,3,1,6",
+           "0,2,3,4,3,6", "3,4,3,2,1,6", "0,2,3,5,3,6", "3,5,3,2,1,6",
+           "3,2,3,1,6", "0,3,2,3,6"]
+# Past the image's: none, lanes alone, one to three cops, two and three
+# spike strips, two barrels' items, gaps alone, items past 6 and below 0,
+# and a ring that fills.
+PLAN_CUSTOM = ["6", "0,6", "1,6", "0,1,6", "1,0,6", "3,6", "3,3,6",
+               "3,3,3,6", "2,6", "2,2,6", "2,2,2,6", "2,3,2,6", "5,6",
+               "5,5,6", "4,4,6", "7,0,6", "-1,3,6", "0,5,1,6", "2,5,2,6",
+               "2," * 15 + "6", "5,5,5,0,6", "5,2,0,3,4,3,1,6"]
+
+
+def rb3(k, lx=0.0, ly=1.0, lw=6.0, rw=6.0):
+    """A roadblock's across-the-road direction and its route point's two
+    widths."""
+    return "rb3|%d|%s|%s|%s|%s" % (k, F(lx), F(ly), F(lw), F(rw))
+
+
+def smoke(mass=20.0, scale=1.0):
+    """The barrels' info: its mass and a tensor of 1 to 16, scaled."""
+    return "smoke|%s|%s" % (F(mass), "|".join(F((j + 1) * scale)
+                                              for j in range(16)))
+
+
+def make_rb_script(S):
+    """The roadblock's making: the escape lane, the cop car's width, the
+    plan, FindCopsForRoadBlock, the barrels' spawn, the layout, the
+    manager's CreateRoadBlock and tPursuit's."""
+    def setup(chased=0, beacop=0, maxrb=2, flags=0):
+        S.base()
+        S.add(rp(BeACop=beacop, NumPlayerCars=1, NumLaps=3, Point2Point=0,
+                 bTickets=1, RaceType=0, bHelicopter=0, New624=0,
+                 bSpikeStrips=0))
+        S.add(cars_std(), cars2_std(), "pcar|0|0", "pcar|1|1")
+        S.add(m(xdim=2.2, ydim=5.06))
+        u = S.new(0, chased, dump=False)
+        S.add(pset(u, maxrb=maxrb, flags=flags, dir=1.0))
+        return u
+
+    def clear_barrels(u):
+        S.add(["barrel|%d|%d|-1" % (u, k) for k in range(10)])
+
+    # ---- the escape lane
+    u = setup()
+    for n in (-1, 0, 1, 2, 3, 7, 0x7fffffff):
+        for diff in (0, 1, 2):
+            S.add(pset(u, rbcount=n), m(diff=diff), "esc|%d" % u)
+
+    # ---- the cop car's width, and at 45 degrees
+    for xd, yd in ((2.2, 5.06), (0.0, 0.0), (1.0, 3.0), (NAN, 4.0),
+                   (-2.0, 5.0)):
+        S.add(m(xdim=xd, ydim=yd))
+        for ang in (0, 1, 1234, 8192, 16384, 24576, 30000, 32768, 40960,
+                    49152, 57344, 65535):
+            S.add("cw|%d" % ang)
+        S.add("cwa")
+
+    # ---- the plan
+    u = setup()
+    for width in (6.0, 8.5, 10.0, 12.0, 14.0, 20.0, 31.0, 45.0, 0.0, NAN):
+        h = width / 2
+        for lw, rw in ((h, h), (h + 1.0, h - 1.0), (h - 1.0, h + 1.0),
+                       (2.0, width - 2.0), (width, 0.0), (h + 4.0, h - 4.0),
+                       (h - 6.0, h + 6.0)):
+            S.add(rb2(0, width=width), rb3(0, lw=lw, rw=rw))
+            for lay in LAYOUTS + PLAN_CUSTOM:
+                S.add("plan|%s|%s|0" % (lay, F(4.25)))
+            for lay in LAYOUTS[2:4] + ["0,2,3,6", "0,1,6"]:
+                for esc in (2.5, 0.0, -1.0, 1e-07):
+                    S.add("plan|%s|%s|0" % (lay, F(esc)))
+    # The cars at other starting angles.
+    for ang in (0, 4096, 16384, 8193, 32768):
+        S.add("g|cangle|%d" % ang)
+        for width in (8.5, 12.0, 20.0, 31.0):
+            S.add(rb2(0, width=width), rb3(0, lw=width / 2 + 1.0,
+                                           rw=width / 2 - 1.0))
+            for lay in LAYOUTS + ["3,3,3,6", "3,6", "2,2,6"]:
+                S.add("plan|%s|%s|0" % (lay, F(3.25)))
+    S.add("g|cangle|8192")
+    # Barrels with exactly 3 to spare, just under, and roads too narrow
+    # by 3 and more.
+    for width in (3.0, 2.9999998, 6.0, -3.0, -4.0, -6.5):
+        S.add(rb2(0, width=width), rb3(0, lw=width / 2, rw=width / 2))
+        for lay in ("5,6", "5,5,6", "0,5,1,6", "0,3,5,3,1,6"):
+            S.add("plan|%s|%s|0" % (lay, F(0.0)))
+
+    # ---- FindCopsForRoadBlock: C0 to C6 the manager's, riding A0 to A5
+    # (C6 on A0), all settled in limbo and 300 from the players.
+    u = setup()
+    for k in range(7):
+        S.add("cop|%d|ai|%d" % (k, k % 6), "m|mcop%d|%d" % (k, k),
+              "cls|%d|1|1|0" % k)
+    for k in range(NCARS):
+        S.add("cdist|%d|%s" % (k, F(300.0)))
+    S.add(m(naicops=7))
+    for n in (0, 1, 2, 3, -1):
+        S.add("fcops|%d" % n)
+    for naic in (0, 1, 3, -1):
+        S.add(m(naicops=naic), "fcops|2")
+    S.add(m(naicops=7))
+    for d in (249.99998, 250.0, 250.00002, 0.0, -1.0, -300.0, NAN, INF,
+              -INF):
+        S.add("cdist|0|%s" % F(d), "fcops|2", "fcops|1")
+    S.add("cdist|0|%s" % F(300.0))
+    for ds in range(-1, 11):
+        for sub in (0, 13, 12, 14, -1):
+            S.add("cls|0|%d|%d|%d" % (ds, ds, sub), "fcops|1")
+    for ls, ds in ((3, 1), (1, 3), (0, 1), (1, 0), (3, 4)):
+        S.add("cls|0|%d|%d|0" % (ls, ds), "fcops|1")
+    S.add("cls|0|1|1|13", "cls|1|2|2|0", "cls|2|3|3|0", "cls|3|1|1|0",
+          "cdist|3|%s" % F(10.0), "fcops|2", "fcops|-1", "fcops|1")
+    S.add("cls|4|3|3|13", "cls|5|0|0|0", "fcops|2", "fcops|-1")
+
+    # ---- the barrels' spawn
+    u = setup()
+    S.add(smoke(20.0), "g|votz|%s" % F(1.5))
+    for ok in (1, 0):
+        S.add("g|smokeok|%d" % ok, "spawn|%d|%s|%s|%s" % (
+            u, F(1.0), F(-2.0), F(3.5)), "dump|%d" % u, "sdump")
+    S.add("g|smokeok|1")
+    for k in range(11):
+        S.add("spawn|%d|%s|%s|%s" % (u, F(float(k)), F(0.5), F(0.0)))
+    S.add("dump|%d" % u, "sdump")
+    S.add("barrel|%d|3|-1" % u, "barrel|%d|8|-1" % u, "g|spawnid|-1",
+          "spawn|%d|0|0|0" % u, "g|spawnid|0x12345",
+          "spawn|%d|0|0|0" % u, "g|spawnid|0x8000", "spawn|%d|0|0|0" % u,
+          "dump|%d" % u)
+    for mass, scale in ((7.0, 1.0), (-10.0, 0.5), (1e-30, 1.0),
+                        (3e38, 2.0), (10.0, -1.0), (NAN, 1.0)):
+        clear_barrels(u)
+        S.add(smoke(mass, scale), "spawn|%d|0|0|0" % u, "sdump",
+              "spawn|%d|0|0|0" % u, "sdump")
+
+    # ---- the layout: the roadblock R0 on a road 14 wide across its
+    # route point, the records' spike sides 0, 1, 2 and 3.
+    u = setup()
+    S.add("rbdata|4", "rbinfo|0|0xfffffff3", "rbinfo|1|4", "rbinfo|2|8",
+          "rbinfo|3|0xff", "g|votz|%s" % F(-0.5))
+    S.add(rb2(0, x=50.0, y=0.0, width=14.0, rpx=40.0, rpy=3.0),
+          rb3(0, lx=0.6, ly=-0.8, lw=7.5, rw=6.5))
+    for flags, maxrb in ((0, 2), (0x10, 2), (0, 1), (0x10, 1), (0, 0),
+                         (0x10, 0), (0xffffffef, 2), (0xffffffff, 3)):
+        for idx in (0, 1, 2, 3):
+            for spikes in (0, 1):
+                for rq in ((0, 0, 0), (1, 1, 1), (0, 1, 0), (1, 0, 1),
+                           (5, 2, -1), (-1, 0, 0)):
+                    clear_barrels(u)
+                    S.add(smoke(20.0), pset(u, flags=flags, maxrb=maxrb),
+                          rp(bSpikeStrips=spikes),
+                          "rb|0|-1|-1|%d|0x71" % idx,
+                          "randq|%d|%d|%d" % rq, "lay|%d|0" % u, "rbx|0",
+                          "dump|%d" % u, "sdump")
+    # The escape lane's width by the count and difficulty; the road's
+    # width and the point's two; the barrels' slots full.
+    S.add(pset(u, flags=0, maxrb=2), rp(bSpikeStrips=1),
+          "rb|0|-1|-1|1|0x71")
+    for n, diff in ((0, 0), (2, 2), (5, 1)):
+        for width, lw, rw in ((14.0, 7.5, 6.5), (24.0, 10.0, 14.0),
+                              (40.0, 25.0, 15.0), (9.0, 4.5, 4.5),
+                              (NAN, 5.0, 5.0)):
+            clear_barrels(u)
+            S.add(pset(u, rbcount=n), m(diff=diff), smoke(20.0),
+                  rb2(0, x=50.0, y=0.0, width=width, rpx=40.0, rpy=3.0),
+                  rb3(0, lx=-0.8, ly=0.6, lw=lw, rw=rw), "lay|%d|0" % u,
+                  "rbx|0", "dump|%d" % u)
+    S.add(rb2(0, x=50.0, y=0.0, width=40.0, rpx=40.0, rpy=3.0),
+          rb3(0, lx=1.0, ly=0.0, lw=20.0, rw=20.0), "lay|%d|0" % u,
+          "lay|%d|0" % u, "dump|%d" % u)
+    S.add("g|smokeok|0")
+    clear_barrels(u)
+    S.add("lay|%d|0" % u, "dump|%d" % u, "g|smokeok|1")
+
+    # ---- the manager's CreateRoadBlock: C3 and C4 on A3 and A4, the
+    # manager's two AI cops, in limbo and at a radar trap, 300 away.
+    def mgr_setup(**kw):
+        u = setup(**kw)
+        S.add("cop|3|ai|3", "cop|4|ai|4", "m|mcop0|3", "m|mcop1|4",
+              m(naicops=2), "cls|3|1|1|0", "cls|4|3|3|0",
+              "cdist|3|%s" % F(300.0), "cdist|4|%s" % F(300.0))
+        S.add("rbdata|4", "rbinfo|0|0", "rbinfo|1|4", "rbinfo|2|8",
+              "rbinfo|3|0xc")
+        S.add(rb2(1, x=80.0, y=5.0, width=12.0, rpx=70.0, rpy=0.0),
+              rb3(1, lx=0.0, ly=-1.0, lw=6.0, rw=6.0),
+              "rb|1|-1|-1|2|0x55", "g|nextrb|1", smoke(20.0))
+        return u
+
+    def mcrb(u, d=1.0):
+        S.add("mcrb|%d|%s" % (u, F(d)), "rbx|1", "dump|%d" % u, "cdump")
+
+    u = mgr_setup()
+    mcrb(u)
+    for flags, maxrb, d in ((0x10, 2, 1.0), (0, 1, 1.0), (0x10, 1, -1.0),
+                            (0, 0, 1.0), (0x10, 0, NAN), (0, 2, 0.0),
+                            (0, 2, -1.0), (0x10, 2, 1.0000001),
+                            (0xffffffff, 2, 1.0)):
+        u = mgr_setup(flags=flags, maxrb=maxrb)
+        S.add("randq|0|1|0")
+        mcrb(u, d)
+    # A diagonal road: the strip's ends apart both ways.
+    for flags, maxrb in ((0x10, 2), (0, 1)):
+        u = mgr_setup(flags=flags, maxrb=maxrb)
+        S.add(rb3(1, lx=0.6, ly=-0.8, lw=7.0, rw=5.0), "randq|0|1|0")
+        mcrb(u)
+    # None: no data, roadblocks off, a cop too near, none at a spot.
+    u = mgr_setup()
+    S.add("rbdata|0")
+    mcrb(u)
+    u = mgr_setup()
+    S.add(rp(bRoadBlocks=0))
+    mcrb(u)
+    u = mgr_setup()
+    S.add("cdist|4|%s" % F(100.0))
+    mcrb(u)
+    u = mgr_setup(maxrb=1)
+    S.add("cdist|3|%s" % F(100.0))
+    mcrb(u)
+    u = mgr_setup()
+    S.add("g|nextrb|-1")
+    mcrb(u)
+    u = mgr_setup()
+    S.add("g|tracklen|%s" % F(NAN))
+    mcrb(u)
+
+    # ---- tPursuit's CreateRoadBlock
+    def crb(u):
+        S.add("crb|%d" % u, "rbx|1", "dump|%d" % u, "mdump", "cdump")
+
+    for chased, beacop in ((0, 0), (2, 0), (2, 1)):
+        for maxrb, flags in ((1, 0), (2, 0), (2, 0x10), (0, 0x10)):
+            for nextrb in (1, -1):
+                u = mgr_setup(chased=chased, beacop=beacop, maxrb=maxrb,
+                              flags=flags)
+                S.add("g|nextrb|%d" % nextrb, "randq|1|0|0",
+                      pset(u, rbcount=1, dbtimer=0.0, rb=0))
+                crb(u)
+    # Followed backwards: the roadblock looked for behind.
+    u = mgr_setup()
+    S.add(pset(u, dir=-1.0))
+    crb(u)
+    # Twice.
+    u = mgr_setup()
+    S.add(pset(u, rbcount=3))
+    crb(u)
+    crb(u)
+    # (With the speakers used up, ReserveCopSpeaker returns whatever is in
+    # a2: retail's undefined, the port's 0, copmgr.h.)
+
+
 # ================================================================== build
 
 def build_harness(tmp, name="pursuit_test"):
@@ -2476,8 +2987,8 @@ MUTATIONS = [
      "    p->nRoadblockCount = 0;\n    p->fCatchCarTimer = 2.0f;",
      "    p->nRoadblockCount = 0;\n    p->fCatchCarTimer = 2.5f;"),
     ("ctor_disband", P,
-     "    p->fRoadBlockDisbandTimer = 3.5f;",
-     "    p->fRoadBlockDisbandTimer = 3.0f;"),
+     "    p->fRoadBlockDisbandTimer = 3.5f;\n    fRoadBlockSpawnTime",
+     "    p->fRoadBlockDisbandTimer = 3.0f;\n    fRoadBlockSpawnTime"),
     ("ctor_spawn_easy", P,
      "fRoadBlockSpawnTimes[pCopManager->nDifficultyLevel];",
      "fRoadBlockSpawnTimes[0];"),
@@ -2796,8 +3307,8 @@ MUTATIONS = [
      "                tcop_set_desired_logic_state(c, LS_HOT_PURSUIT);",
      "                ;"),
     ("disband_pi", P,
-     "    if (tpursuit_is_player_involved(p)) {",
-     "    if (1) {"),
+     "    if (tpursuit_is_player_involved(p)) {\n        if (p->pChasedCar->pPlayer != NULL\n",
+     "    if (1) {\n        if (p->pChasedCar->pPlayer != NULL\n"),
     ("disband_ai_secondary", P,
      "        if (p->pChasedCar->pPlayer != NULL\n"
      "            && p->SecondaryCopSpeaker == COP_SPEAKER_NONE",
@@ -3201,11 +3712,11 @@ MUTATIONS = [
      "    if (copmanager_replaying())\n        return;",
      "    if (0)\n        return;"),
     ("super_eps", P,
-     "<= 0.0010000000474974513f",
-     "<= 0.01f"),
+     "- -50.0f) <= 0.0010000000474974513f)",
+     "- -50.0f) <= 0.01f)"),
     ("super_lt", P,
-     "<= 0.0010000000474974513f",
-     "< 0.0010000000474974513f"),
+     "- -50.0f) <= 0.0010000000474974513f)",
+     "- -50.0f) < 0.0010000000474974513f)"),
     ("super_minus50", P,
      "fabsf(m->fSupervisorTimer - -50.0f)",
      "fabsf(m->fSupervisorTimer - -49.0f)"),
@@ -4118,6 +4629,502 @@ MUTATIONS = [
     ("ur_has_rb", P,
      "    if (p->pRoadBlock != NULL && tpursuit_monitor_road_block(p))",
      "    if (p->pRoadBlock != NULL && !tpursuit_monitor_road_block(p))"),
+    # ---- the roadblock's making
+    ("sb_skip_used", B,
+     "        if (b->nBarrel[i] != -1)\n            continue;\n        info =",
+     "        if (b->nBarrel[i] == -1)\n            continue;\n        info ="),
+    ("sb_hash", B,
+     "\"CS_RoadBlock_Barrel\"",
+     "\"CS_RoadBlock_Barrels\""),
+    ("sb_mass", B,
+     "f = 10.0f / info->RBI.Mass;",
+     "f = 1.0f / info->RBI.Mass;"),
+    ("sb_mass_mul", B,
+     "        info->RBI.Mass *= f;\n",
+     ""),
+    ("sb_rows", B,
+     "for (r = 0; r < 3; r++) {",
+     "for (r = 0; r < 2; r++) {"),
+    ("sb_v1", B,
+     ": r == 1 ? &info->RBI.InertiaTensor.v1",
+     ": r == 1 ? &info->RBI.InertiaTensor.v2"),
+    ("sb_row_x", B,
+     "            row->x *= f;\n",
+     ""),
+    ("sb_row_w", B,
+     "            row->w *= f;\n",
+     ""),
+    ("sb_hash2", B,
+     "\"ROADBLOCK_BARREL\"",
+     "\"ROADBLOCK_BARRELS\""),
+    ("sb_type", B,
+     "gSmokeableSpawnFn(0, info",
+     "gSmokeableSpawnFn(1, info"),
+    ("sb_ang", B,
+     "pos,\n                               0);",
+     "pos,\n                               1);"),
+    ("sb_store", B,
+     "        b->nBarrel[i] = (int16_t)id;\n        return id;",
+     "        return id;"),
+    ("sb_none", B,
+     "    return -1;\n}\n\nvoid barricademanager_fade",
+     "    return 0;\n}\n\nvoid barricademanager_fade"),
+    ("plan_ctor_tail", B,
+     "    q->Tail = 0;\n    q->vptr = ROADBLOCKPLAN_VTABLE;",
+     "    q->Tail = 1;\n    q->vptr = ROADBLOCKPLAN_VTABLE;"),
+    ("plan_ctor_head", B,
+     "    q->Head = 0;\n    return q;",
+     "    q->Head = 1;\n    return q;"),
+    ("plan_full", B,
+     "    if (next == q->Head)\n        return 0;",
+     "    if (next == q->Head + 1)\n        return 0;"),
+    ("plan_full_ret", B,
+     "    q->Tail = next;\n    return 1;",
+     "    q->Tail = next;\n    return 2;"),
+    ("plan_mod", B,
+     "int32_t next = (q->Tail + 1) % RBPLAN_SIZE;",
+     "int32_t next = (q->Tail + 1) % 29;"),
+    ("plan_pop_empty", B,
+     "    if (q->Head == q->Tail)\n        return 0;",
+     "    if (q->Head == q->Tail + 1)\n        return 0;"),
+    ("plan_pop_mod", B,
+     "q->Head = (q->Head + 1) % RBPLAN_SIZE;",
+     "q->Head = q->Head + 1;"),
+    ("plan_dtor_free", B,
+     "    q->vptr = ROADBLOCKPLAN_VTABLE;\n    if (flags & 1)\n        bFree(q);",
+     "    q->vptr = ROADBLOCKPLAN_VTABLE;\n    if (flags & 2)\n        bFree(q);"),
+    ("plan_angle", B,
+     "uint16_t RoadBlockCopAngle = 8192;",
+     "uint16_t RoadBlockCopAngle = 8191;"),
+    ("cw_abs_cos", B,
+     "fabsf(bCosBam(ang)) * y",
+     "bCosBam(ang) * y"),
+    ("cw_abs_sin", B,
+     "fabsf(bSinBam(ang)) * x",
+     "bSinBam(ang) * x"),
+    ("cw_xy", B,
+     "fabsf(bCosBam(ang)) * y + fabsf(bSinBam(ang)) * x",
+     "fabsf(bCosBam(ang)) * x + fabsf(bSinBam(ang)) * y"),
+    ("cwa_ang", B,
+     "    *ang = 8192;\n",
+     "    *ang = 8191;\n"),
+    ("cwa_width", B,
+     "return roadblock_cop_car_width(8192);",
+     "return roadblock_cop_car_width(8191);"),
+    ("bp_lane_left", B,
+     "            lane[0] = escW;\n            total += escW;",
+     "            lane[1] = escW;\n            total += escW;"),
+    ("bp_lane_left_n", B,
+     "            lane[0] = escW;\n            total += escW;\n            nlanes++;\n",
+     "            lane[0] = escW;\n            total += escW;\n"),
+    ("bp_lane_right_t", B,
+     "            lane[1] = escW;\n            total += escW;",
+     "            lane[1] = escW;"),
+    ("bp_gap", B,
+     "total += 0.800000011920929f;",
+     "total += 0.9f;"),
+    ("bp_spike_seg", B,
+     "total += (float)segs * 0.6499999761581421f;    // gp-26448",
+     "total += (float)segs * 0.6f;"),
+    ("bp_spike_n", B,
+     "            nspikes++;\n",
+     ""),
+    ("bp_cop", B,
+     "            ncops++;\n            total += cw;",
+     "            ncops++;"),
+    ("bp_barrels", B,
+     "            barrels = 1;",
+     "            barrels = 0;"),
+    ("bp_drop_cmp", B,
+     "if (cw < total - road && !(ncops < 2))",
+     "if (total - road < cw && !(ncops < 2))"),
+    ("bp_drop_2", B,
+     "if (cw < total - road && !(ncops < 2))",
+     "if (cw < total - road && !(ncops < 1))"),
+    ("bp_drop_total", B,
+     "        total -= cw;\n        ncops--;",
+     "        ncops--;"),
+    ("bp_drop_n", B,
+     "        total -= cw;\n        ncops--;",
+     "        total -= cw;"),
+    ("bp_45", B,
+     "    total += (float)ncops * (roadblock_cop_car_angle(&ang) - cw);\n",
+     ""),
+    ("bp_45_n", B,
+     "total += (float)ncops * (roadblock_cop_car_angle(&ang) - cw);",
+     "total += (roadblock_cop_car_angle(&ang) - cw);"),
+    ("bp_barrel_cmp", B,
+     "if (barrels && 3.0f < road - total)",
+     "if (barrels && 2.0f < road - total)"),
+    ("bp_barrel_div", B,
+     "n = ee_trunc_w((road - total) / 3.0f);",
+     "n = ee_trunc_w((road - total) / 2.0f);"),
+    ("bp_barrel_cap", B,
+     "        if (!(n < 11))\n            n = 10;",
+     "        if (!(n < 12))\n            n = 11;"),
+    ("bp_barrel_cap9", B,
+     "        if (!(n < 11))\n            n = 10;",
+     "        if (!(n < 11))\n            n = 9;"),
+    ("bp_barrel_total", B,
+     "total += (float)n * 3.0f;",
+     "total += (float)n * 2.0f;"),
+    ("bp_spike_road", B,
+     "n = ee_trunc_w((road - total) * 1.5384615659713745f);",
+     "n = ee_trunc_w((road - total) * 1.5f);"),
+    ("bp_spike_zero", B,
+     "        if (n != 0) {\n            segs = n + 8;",
+     "        if (n > 0) {\n            segs = n + 8;"),
+    ("bp_spike_zero1", B,
+     "        if (n != 0) {\n            segs = n + 8;",
+     "        if (n != 1) {\n            segs = n + 8;"),
+    ("bp_segs", B,
+     "            segs = n + 8;",
+     "            segs = n + 7;"),
+    ("bp_min", B,
+     "                segs = 3 * nspikes;",
+     "                segs = 4 * nspikes;"),
+    ("bp_min_cmp", B,
+     "            if (segs < 3 * nspikes)",
+     "            if (segs < 2 * nspikes)"),
+    ("bp_max", B,
+     "            if (20 * nspikes < segs)",
+     "            if (19 * nspikes < segs)"),
+    ("bp_max_set", B,
+     "                segs = 20 * nspikes;",
+     "                segs = 19 * nspikes;"),
+    ("bp_segs_total", B,
+     "total += (float)(segs - 8) * 0.6499999761581421f;",
+     "total += (float)(segs - 7) * 0.6499999761581421f;"),
+    ("bp_segs_init", B,
+     "nlanes = 0, segs = 8;",
+     "nlanes = 0, segs = 9;"),
+    ("bp_share", B,
+     "share = (road - total) / (float)nlanes;",
+     "share = (road - total) / 2.0f;"),
+    ("bp_one_lane", B,
+     "if (lane[0] == 0.0f || lane[1] == 0.0f) {",
+     "if (lane[0] == 0.0f && lane[1] == 0.0f) {"),
+    ("bp_one_lane0", B,
+     "        lane[1] += share;\n        lane[0] += share;\n    } else {",
+     "        lane[1] += share;\n    } else {"),
+    ("bp_diff", B,
+     "diff = rp->LeftWidth - rp->RightWidth;",
+     "diff = rp->RightWidth - rp->LeftWidth;"),
+    ("bp_two_share", B,
+     "        diff = rp->LeftWidth - rp->RightWidth;\n        lane[1] += share;\n",
+     "        diff = rp->LeftWidth - rp->RightWidth;\n"),
+    ("bp_diff_pos", B,
+     "        if (0.0f < diff) {",
+     "        if (1.0f < diff) {"),
+    ("bp_diff_lt", B,
+     "            if (diff < lane[1]) {",
+     "            if (diff < lane[0]) {"),
+    ("bp_diff_add", B,
+     "                lane[0] += diff;\n                lane[1] -= diff;",
+     "                lane[1] -= diff;"),
+    ("bp_diff_sub", B,
+     "                lane[0] += diff;\n                lane[1] -= diff;",
+     "                lane[0] += diff;"),
+    ("bp_diff_zero", B,
+     "            } else {\n                lane[1] = 0.0f;\n",
+     "            } else {\n                lane[1] = 1.0f;\n"),
+    ("bp_neg_lt", B,
+     "            if (diff < lane[0]) {\n                lane[1] += diff;",
+     "            if (diff < lane[1]) {\n                lane[1] += diff;"),
+    ("bp_neg_add", B,
+     "                lane[1] += diff;\n                lane[0] -= diff;",
+     "                lane[0] -= diff;"),
+    ("bp_neg_sub", B,
+     "                lane[1] += diff;\n                lane[0] -= diff;",
+     "                lane[1] += diff;"),
+    ("bp_double", B,
+     "                lane[0] = 0.0f;\n                lane[1] += lane[1];",
+     "                lane[0] = 0.0f;"),
+    ("bp_double_l0", B,
+     "                lane[0] = 0.0f;\n                lane[1] += lane[1];",
+     "                lane[1] += lane[1];"),
+    ("bp_push_l0", B,
+     "roadblockplan_push(q, float_word(lane[0]));",
+     "roadblockplan_push(q, float_word(lane[1]));"),
+    ("bp_push_l1", B,
+     "roadblockplan_push(q, float_word(lane[1]));",
+     "roadblockplan_push(q, float_word(lane[0]));"),
+    ("bp_push_gap", B,
+     "        case RBPLAN_GAP:\n            roadblockplan_push(q, tok);\n",
+     "        case RBPLAN_GAP:\n"),
+    ("bp_push_div", B,
+     "            n = segs / nspikes;",
+     "            n = segs / 2;"),
+    ("bp_push_nsp", B,
+     "            nspikes--;\n            segs -= n;",
+     "            segs -= n;"),
+    ("bp_push_rem", B,
+     "            nspikes--;\n            segs -= n;",
+     "            nspikes--;"),
+    ("bp_push_cop_n", B,
+     "            if (ncops != 0) {",
+     "            if (1) {"),
+    ("bp_push_cop_dec", B,
+     "                ncops--;\n            }\n",
+     "            }\n"),
+    ("bp_push_bar", B,
+     "for (n = 0; n < nbarrels; n++)",
+     "for (n = 0; n <= nbarrels; n++)"),
+    ("esc_0", P,
+     "        w = 3.75f;",
+     "        w = 3.7f;"),
+    ("esc_1", P,
+     "        w = 3.5f;\n        break;\n    case 2:",
+     "        w = 3.4f;\n        break;\n    case 2:"),
+    ("esc_2", P,
+     "        w = 3.0f;\n        break;\n    default:\n        w = 2.75f;",
+     "        w = 2.9f;\n        break;\n    default:\n        w = 2.75f;"),
+    ("esc_def", P,
+     "        w = 2.75f;",
+     "        w = 2.7f;"),
+    ("esc_case1", P,
+     "        w = 3.75f;\n        break;\n    case 1:",
+     "        w = 3.75f;\n        break;\n    case 3:"),
+    ("esc_tab0", P,
+     "{ 0.5f, 0.0f, -0.25f }",
+     "{ 0.25f, 0.0f, -0.25f }"),
+    ("esc_tab1", P,
+     "{ 0.5f, 0.0f, -0.25f }",
+     "{ 0.5f, 0.25f, -0.25f }"),
+    ("esc_tab2", P,
+     "{ 0.5f, 0.0f, -0.25f }",
+     "{ 0.5f, 0.0f, 0.25f }"),
+    ("fc_clear1", P,
+     "    out[1] = NULL;\n    out[0] = NULL;",
+     "    out[0] = NULL;"),
+    ("fc_clear0", P,
+     "    out[1] = NULL;\n    out[0] = NULL;",
+     "    out[1] = NULL;"),
+    ("fc_found", P,
+     "i < m->nNumAICops && found != n; i++)",
+     "i < m->nNumAICops; i++)"),
+    ("fc_ncops", P,
+     "i < m->nNumAICops && found != n; i++)",
+     "i < m->nNumAICops - 1 && found != n; i++)"),
+    ("fc_state", P,
+     "        tCop *c = m->Cops[i];\n\n        if (c->LogicState != c->DesiredLogicState)\n            continue;\n",
+     "        tCop *c = m->Cops[i];\n\n"),
+    ("fc_dist", P,
+     "            < 250.0f)\n            continue;",
+     "            < 200.0f)\n            continue;"),
+    ("fc_dist_le", P,
+     "            < 250.0f)\n            continue;",
+     "            <= 250.0f)\n            continue;"),
+    ("fc_limbo", P,
+     "        if ((c->DesiredLogicState == LS_LIMBO\n             || c->DesiredLogicState == LS_SPEED_TRAP)",
+     "        if ((c->DesiredLogicState == LS_SPEED_TRAP)"),
+    ("fc_trap", P,
+     "        if ((c->DesiredLogicState == LS_LIMBO\n             || c->DesiredLogicState == LS_SPEED_TRAP)",
+     "        if ((c->DesiredLogicState == LS_LIMBO)"),
+    ("fc_disabled", P,
+     "            && c->LogicSubState != LSS_LIMBO_DISABLED)\n            out[found++] = c;",
+     "            )\n            out[found++] = c;"),
+    ("lay_flag", P,
+     "    if ((p->BehaviourFlags & 0x10u) != 0 || p->nMaxRoadBlockCops == 1) {",
+     "    if ((p->BehaviourFlags & 0x08u) != 0 || p->nMaxRoadBlockCops == 1) {"),
+    ("lay_max1", P,
+     "    if ((p->BehaviourFlags & 0x10u) != 0 || p->nMaxRoadBlockCops == 1) {",
+     "    if ((p->BehaviourFlags & 0x10u) != 0) {"),
+    ("lay_side_bits", P,
+     "RoadblockData->Roadblocks[rb->nIndexIntoLoadedData].Bits",
+     "RoadblockData->Roadblocks[0].Bits"),
+    ("lay_side_rand", P,
+     "world_random_i(pCurrentWorld, 2) != 0 ? 1 : 2;",
+     "world_random_i(pCurrentWorld, 2) != 0 ? 2 : 1;"),
+    ("lay_side_zero", P,
+     "        if (rb->nSpikeSide == 0)\n",
+     "        if (rb->nSpikeSide == 1)\n"),
+    ("lay_one", P,
+     "            layout = rb->nSpikeSide == 1 ? RoadBlockOneCopLeft\n                                         : RoadBlockOneCopRight;",
+     "            layout = rb->nSpikeSide == 1 ? RoadBlockOneCopRight\n                                         : RoadBlockOneCopLeft;"),
+    ("lay_one_cmp", P,
+     "        if (p->nMaxRoadBlockCops == 1)\n            layout",
+     "        if (p->nMaxRoadBlockCops == 2)\n            layout"),
+    ("lay_mid_rand", P,
+     "else if (world_random_i(pCurrentWorld, 4) == 0)",
+     "else if (world_random_i(pCurrentWorld, 4) != 0)"),
+    ("lay_mid_4", P,
+     "else if (world_random_i(pCurrentWorld, 4) == 0)",
+     "else if (world_random_i(pCurrentWorld, 3) == 0)"),
+    ("lay_mid", P,
+     "            layout = rb->nSpikeSide == 1 ? RoadBlockSpikesMidRight\n                                         : RoadBlockSpikesMidLeft;",
+     "            layout = rb->nSpikeSide == 1 ? RoadBlockSpikesMidLeft\n                                         : RoadBlockSpikesMidRight;"),
+    ("lay_sb_bspikes", P,
+     "        else if (TheRaceParameters.bSpikeStrips != 0\n",
+     "        else if (TheRaceParameters.bSpikeStrips == 0\n"),
+    ("lay_sb_rand", P,
+     "                 && world_random_i(pCurrentWorld, 2) == 0)",
+     "                 && world_random_i(pCurrentWorld, 2) != 0)"),
+    ("lay_sb", P,
+     "            layout = rb->nSpikeSide == 1 ? RoadBlockSpikesBarrelsLeft\n                                         : RoadBlockSpikesBarrelsRight;",
+     "            layout = rb->nSpikeSide == 1 ? RoadBlockSpikesBarrelsRight\n                                         : RoadBlockSpikesBarrelsLeft;"),
+    ("lay_s", P,
+     "            layout = rb->nSpikeSide == 1 ? RoadBlockSpikesLeft\n                                         : RoadBlockSpikesRight;",
+     "            layout = rb->nSpikeSide == 1 ? RoadBlockSpikesRight\n                                         : RoadBlockSpikesLeft;"),
+    ("lay_barrels", P,
+     "    } else if (TheRaceParameters.bSpikeStrips != 0) {",
+     "    } else if (TheRaceParameters.bSpikeStrips == 0) {"),
+    ("lay_plain", P,
+     "const int32_t         *layout = RoadBlockPlain;",
+     "const int32_t         *layout = RoadBlockBarrels;"),
+    ("lay_tab_plain", P,
+     "RoadBlockPlain[]          = { 0, 3, 4, 3, 1, 6 };",
+     "RoadBlockPlain[]          = { 0, 3, 3, 1, 6 };"),
+    ("lay_tab_one", P,
+     "RoadBlockOneCopLeft[]     = { 0, 2, 3, 6 };",
+     "RoadBlockOneCopLeft[]     = { 0, 3, 2, 6 };"),
+    ("lay_tab_midl", P,
+     "RoadBlockSpikesMidLeft[]  = { 0, 3, 2, 3, 6 };",
+     "RoadBlockSpikesMidLeft[]  = { 0, 3, 2, 3, 1, 6 };"),
+    ("lay_at", P,
+     "    at = -rp->LeftWidth;",
+     "    at = rp->LeftWidth;"),
+    ("lay_lane_at", P,
+     "            at += lw;\n            bScaleAdd2",
+     "            bScaleAdd2"),
+    ("lay_lane_mid", P,
+     "at + lw * 0.5f);",
+     "at - lw * 0.5f);"),
+    ("lay_lane_pos", P,
+     "            bScaleAdd2(&rb->v2EscapeLane, &rp->Position, &rb->L,",
+     "            bScaleAdd2(&rb->v2EscapeLane, &rp->Position, &rb->D,"),
+    ("lay_gap", P,
+     "at += 0.800000011920929f;",
+     "at += 0.9f;"),
+    ("lay_spike_len", P,
+     "len = (float)(int32_t)v * 0.6499999761581421f;",
+     "len = (float)(int32_t)v * 0.6f;"),
+    ("lay_spike_half", P,
+     "            half = len * 0.5f;",
+     "            half = len * 0.25f;"),
+    ("lay_spike_pos", P,
+     "                       at + half);\n            at += len;",
+     "                       at);\n            at += len;"),
+    ("lay_spike_at", P,
+     "            at += len;\n",
+     "            at += half;\n"),
+    ("lay_spike_vy", P,
+     "rb->v2SpikeBeltVec.y = rb->L.y * half;",
+     "rb->v2SpikeBeltVec.y = rb->L.x * half;"),
+    ("lay_spike_vx", P,
+     "rb->v2SpikeBeltVec.x = rb->L.x * half;",
+     "rb->v2SpikeBeltVec.x = rb->L.x * len;"),
+    ("lay_cop_ang", P,
+     "            cw = roadblock_cop_car_width(ang);",
+     "            cw = roadblock_cop_car_width(0);"),
+    ("lay_cop_pos", P,
+     "at + cw * 0.5f);\n            at += cw;",
+     "at + cw);\n            at += cw;"),
+    ("lay_cop_at", P,
+     "            at += cw;\n            bToPolar",
+     "            bToPolar"),
+    ("lay_cop_a0", P,
+     "k == 0 ? pol.a + ang",
+     "k == 0 ? pol.a - ang"),
+    ("lay_cop_a1", P,
+     ": pol.a + 0x8000 - ang);",
+     ": pol.a - ang);"),
+    ("lay_cop_k0", P,
+     "(uint16_t)(k == 0 ? pol.a",
+     "(uint16_t)(k == 1 ? pol.a"),
+    ("lay_cop_k", P,
+     "            k++;\n            break;",
+     "            break;"),
+    ("lay_bar_mid", P,
+     "at + 3.0f * 0.5f);",
+     "at + 3.0f);"),
+    ("lay_bar_at", P,
+     "            at += 3.0f;                             // gp-14816",
+     "            at += 2.0f;"),
+    ("lay_bar_spawn", P,
+     "            barricademanager_spawn_barrel(p->pBarricades, &v3);\n",
+     ""),
+    ("lay_bar_vot", P,
+     "            get_vector_on_track(&v3, &b2);\n",
+     "            v3.x = b2.x;\n            v3.y = b2.y;\n            v3.z = 0.0f;\n"),
+    ("lay_k0", P,
+     "    int32_t                k = 0;",
+     "    int32_t                k = 1;"),
+    ("crb_data", P,
+     "    if (RoadblockData == NULL || TheRaceParameters.bRoadBlocks == 0)",
+     "    if (TheRaceParameters.bRoadBlocks == 0)"),
+    ("crb_rbs", P,
+     "    if (RoadblockData == NULL || TheRaceParameters.bRoadBlocks == 0)",
+     "    if (RoadblockData == NULL || TheRaceParameters.bRoadBlocks != 0)"),
+    ("crb_found", P,
+     "        != p->nMaxRoadBlockCops)\n        return NULL;",
+     "        > p->nMaxRoadBlockCops)\n        return NULL;"),
+    ("crb_600", P,
+     "p->pChasedCar, 600.0f,",
+     "p->pChasedCar, 500.0f,"),
+    ("crb_half", P,
+     "TheTrackPathManager.TrackLength * 0.5f,",
+     "TheTrackPathManager.TrackLength * 0.25f,"),
+    ("crb_dir", P,
+     "                                    dir == 1.0f);",
+     "                                    dir != 1.0f);"),
+    ("crb_cops", P,
+     "rb->cops[i] = (struct stAICop *)cops[i];",
+     "rb->cops[i] = (struct stAICop *)cops[0];"),
+    ("crb_setrb_i", P,
+     "taicop_set_road_block((tAICop *)cops[i], rb, p, i);",
+     "taicop_set_road_block((tAICop *)cops[i], rb, p, 0);"),
+    ("crb_k", P,
+     "    for (i = 0; i < k; i++) {\n        rb->cops[i]",
+     "    for (i = 0; i < p->nMaxRoadBlockCops; i++) {\n        rb->cops[i]"),
+    ("crb_flag", P,
+     "    if ((p->BehaviourFlags & 0x10u) != 0) {\n        bVector2 a, b;",
+     "    if ((p->BehaviourFlags & 0x08u) != 0) {\n        bVector2 a, b;"),
+    ("crb_ax", P,
+     "a.x = rb->v2SpikeBeltPos.x - rb->v2SpikeBeltVec.x;",
+     "a.x = rb->v2SpikeBeltPos.x + rb->v2SpikeBeltVec.x;"),
+    ("crb_ay", P,
+     "a.y = rb->v2SpikeBeltPos.y - rb->v2SpikeBeltVec.y;",
+     "a.y = rb->v2SpikeBeltPos.y + rb->v2SpikeBeltVec.y;"),
+    ("crb_by", P,
+     "b.y = rb->v2SpikeBeltPos.y + rb->v2SpikeBeltVec.y;",
+     "b.y = rb->v2SpikeBeltPos.y - rb->v2SpikeBeltVec.y;"),
+    ("crb_bx", P,
+     "b.x = rb->v2SpikeBeltPos.x + rb->v2SpikeBeltVec.x;",
+     "b.x = rb->v2SpikeBeltPos.x - rb->v2SpikeBeltVec.x;"),
+    ("crb_strip_id", P,
+     "gCopManagerAddSpikeStripFn(m, &a, &b, rb->nIndexIntoLoadedData,",
+     "gCopManagerAddSpikeStripFn(m, &a, &b, 0,"),
+    ("crb_strip_t", P,
+     "                                       -1.0f);\n    }\n    return rb;",
+     "                                       0.0f);\n    }\n    return rb;"),
+    ("tcrb_max1", P,
+     "    if (p->nMaxRoadBlockCops == 1)\n        p->BehaviourFlags |= 0x10u;",
+     "    if (p->nMaxRoadBlockCops == 2)\n        p->BehaviourFlags |= 0x10u;"),
+    ("tcrb_flag", P,
+     "        p->BehaviourFlags |= 0x10u;\n    rb = copmanager_create_road_block",
+     "        p->BehaviourFlags |= 0x08u;\n    rb = copmanager_create_road_block"),
+    ("tcrb_dir", P,
+     "copmanager_create_road_block(pCopManager, p, p->fChaseDirection);",
+     "copmanager_create_road_block(pCopManager, p, 1.0f);"),
+    ("tcrb_store", P,
+     "    p->pRoadBlock = rb;\n    if (rb == NULL)\n        return;\n    p->fRoadBlockDisbandTimer",
+     "    if (rb == NULL)\n        return;\n    p->pRoadBlock = rb;\n    p->fRoadBlockDisbandTimer"),
+    ("tcrb_timer", P,
+     "    p->fRoadBlockDisbandTimer = 3.5f;\n    p->nRoadblockCount++;",
+     "    p->fRoadBlockDisbandTimer = 3.0f;\n    p->nRoadblockCount++;"),
+    ("tcrb_count", P,
+     "    p->fRoadBlockDisbandTimer = 3.5f;\n    p->nRoadblockCount++;",
+     "    p->fRoadBlockDisbandTimer = 3.5f;"),
+    ("tcrb_pi", P,
+     "    if (tpursuit_is_player_involved(p)) {\n        p->pRoadBlock->CopSpeaker",
+     "    if (!tpursuit_is_player_involved(p)) {\n        p->pRoadBlock->CopSpeaker"),
+    ("tcrb_speaker", P,
+     "        p->pRoadBlock->CopSpeaker = copmanager_reserve_cop_speaker(pCopManager);\n",
+     ""),
+    ("tcrb_speech", P,
+     "        if (gPursuitRoadBlockSetSpeechFn != NULL)\n            gPursuitRoadBlockSetSpeechFn(p);",
+     "        if (0)\n            gPursuitRoadBlockSetSpeechFn(p);"),
 ]
 
 EQUIVALENT = {
@@ -4131,6 +5138,14 @@ EQUIVALENT = {
     "ur_req_has_rb": "with a roadblock, UpdateRoadBlocks either returns "
                      "or disbands it before the request, so the test "
                      "always sees NULL there",
+    "plan_full_ret": "push's one caller, the builder, never reads its "
+                     "answer (0x0024ff14 to 0x0024ffe8)",
+    "plan_pop_mod": "a plan is filled once from empty before it is read, "
+                    "so Tail stays under 30 and Head under Tail: no wrap",
+    "bp_diff_lt": "with both lanes in the layout each is escW plus the "
+                  "same share here, so the two lanes are equal",
+    "bp_neg_lt": "with both lanes in the layout each is escW plus the "
+                 "same share here, so the two lanes are equal",
 }
 
 

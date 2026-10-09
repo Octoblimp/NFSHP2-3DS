@@ -1,11 +1,13 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 59, continued
-(2026-10-08): 12i-1, the roadblocks' running logic, is done, and
-UpdateRoadBlocks is bound (`docs/formats/pursuit.md`, "The
-roadblocks"). A chase now asks for a roadblock, but none is made until
-12i-2's CreateRoadBlock. Before it, 12h-2 ported tPursuit::Update and
-12h-1 tPursuit's object and RequestPursuit. The cops' cars still wait
+(2026-10-08): 12i-2, making a roadblock, is done, and CreateRoadBlock
+is bound (`docs/formats/pursuit.md`, "Making a roadblock"). A chase
+that asks for a roadblock now gets one: its cops are sent to their
+spots, with no barrels (the smokeables are not ported, step 14b) and
+no spike strip (12j). Before it, 12i-1 ported the roadblocks' running
+logic, 12h-2 tPursuit::Update and 12h-1 tPursuit's object and
+RequestPursuit. The cops' cars still wait
 in limbo until something asks them out: a patrol's or radar trap's
 search (12j's SpawnSpeedTraps) is what starts a chase.
 Session 58, continued: 12g-3, the chase (the hot pursuit and caught
@@ -236,14 +238,23 @@ pursuit.obj, on a 10 KB manager. Its slices:
     (`psycho-driver.md`).
   - The DodgeRoadblock replay event is skipped while `pReplayManager`
     is NULL. The demo disc's branch in RoadBlockDefeated is left out.
-- **Next: 12i-2**, making a roadblock: CreateRoadBlock (`0x00229e30`),
-  the manager's roadblock setup and FindCopsForRoadBlock, the layout,
-  and the barrels' spawn (`0x0024f0a8`). It binds
-  `gPursuitCreateRoadBlockFn`.
+- **12i-2, done (Session 59):** making a roadblock, in `pursuit.c`
+  and `barricade.c`: CreateRoadBlock (`0x00229e30`), the manager's
+  (`0x00226298`), FindCopsForRoadBlock (`0x00226810`), the escape
+  lane (`0x0022ca78`), the layout (`0x00226478`) and its ten lists,
+  the plan's code (`0x0024fae8` to `0x00250150`), and the barrels'
+  spawn (`0x0024f0a8`).
+  - `main.c` binds `gPursuitCreateRoadBlockFn`.
+  - New NULL seams: RoadBlockSetSpeech (says nothing), AddSpikeStrip
+    (12j, lays nothing), and the smokeables' FindSmokeableInfo (finds
+    nothing, so no barrel) and spawn (aborts if reached), step 14b.
+  - Retail quirks kept: the escape lane's spot is half a lane past
+    the lane, and a closed left lane doubles the right one.
+- **Next: 12i-3**, retail's RealDriver ForceEBrakeStop(float)
+  (`0x0013b558`), which binds `gRealDriverForceEBrakeStopFn`.
   Then:
-  - **12i-3** retail's RealDriver ForceEBrakeStop(float)
-    (`0x0013b558`), which binds `gRealDriverForceEBrakeStopFn`;
-  - **12j** SpawnSpeedTraps and spike strips;
+  - **12j** SpawnSpeedTraps and spike strips (AddSpikeStrip,
+    `0x002276d0`, and tSpikeStrip's constructor, `0x00241378`);
   - **12k** the helicopter (UpdateChopper, `0x00229678`);
   - **12l** pullovers and Busted (CreatePullover, `0x00226f30`);
   - **12m** Be A Cop;
@@ -4660,6 +4671,7 @@ each class shows what it reaches.
 | 13 | ~~The two-screen HUD, to the split decided below~~ done as 8m: 8m-1 to 8m-6c | 10 |
 | 13b | New 3DS mode in full and a steady 30 FPS race (task 28), right after step 13: the real clock and the pacing, a frame profiler, New 3DS mode checked part by part, then only the optimizations the New 3DS needs. Set by the user on 2026-10-03 | 4 |
 | 14 | The car and world sounds and the speech | 2-3 |
+| 14b | The smokeables: FindSmokeableInfo, the spawner (`0x0021ed28`) and delete (`0x0021ef88`), Smokeable's Break and DeleteFarAway, and their collision. The roadblock's barrels wait for it (12i-2) | 1-2 |
 | 15 | **A whole race with the AI and the cops.** Steps 10-14 add about 15-23 slices | |
 | 16 | The full frontend from retail: the 44 screens still plain or unregistered (`screen_registry.py --check-port`), the event tree (the career), the tourneys and the car selector | 6-10 |
 | 17 | Save data on the SD card in the memory card's place: Phils Load Save, the autosave, the boot autoload and the options (task 29) | 2-3 |
@@ -4667,7 +4679,7 @@ each class shows what it reaches.
 | 19 | ~~Old 3DS performance~~ none: since 2026-10-05 the port is the New 3DS's alone (the user's call). An Old 3DS shows "This port needs a New 3DS" at boot and exits on START (6ac29d1); there is no Old 3DS mode | 0 |
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
-That is about 40-58 slices to the full game. The replay (`ReplaySnapshot`
+That is about 41-60 slices to the full game. The replay (`ReplaySnapshot`
 and every `DoSnapshot`) is not in the count. It is its own slice when it
 goes in.
 
@@ -4678,8 +4690,8 @@ goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a to 12i-1 are done, 12i-2 (making
-  roadblocks) is next. See "First" at the top.
+- **Next:** step 12, the cops: 12a to 12i-2 are done, 12i-3 (retail's
+  ForceEBrakeStop) is next. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

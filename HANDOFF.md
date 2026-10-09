@@ -18265,3 +18265,79 @@ retail into `pursuit.c`. `docs/formats/pursuit.md` has a new section,
 12i-2: making a roadblock. CreateRoadBlock (`0x00229e30`), the
 manager's setup and FindCopsForRoadBlock, the layout, and the barrels'
 spawn (`0x0024f0a8`). Then 12i-3, retail's RealDriver ForceEBrakeStop.
+
+## Session 59, continued (2026-10-08) -- 12i-2, making a roadblock
+
+How a chase's roadblock is made, ported from retail into `pursuit.c`
+and `barricade.c`. `docs/formats/pursuit.md` has a new section,
+"Making a roadblock".
+
+### What it does
+
+- **CreateRoadBlock** (`0x00229e30`), tPursuit's: with one roadblock
+  cop allowed it sets behaviour bit 0x10 (a spike strip), then asks the
+  manager. A roadblock made gets 3.5 s on the disband timer, a count,
+  and with a player involved a cop speaker and RoadBlockSetSpeech.
+- **The manager's CreateRoadBlock** (`0x00226298`): needs the roadblock
+  data, roadblocks on, and nMaxRoadBlockCops cops from
+  **FindCopsForRoadBlock** (`0x00226810`: settled, 250 m or more from
+  every player, in limbo or at a radar trap). FindRoadBlock looks 600
+  to half the track ahead (behind unless the chase direction is 1.0).
+  The cops placed get SetRoadBlock; with bit 0x10, AddSpikeStrip lays
+  the strip.
+- **The layout** (`0x00226478`) picks one of ten lists of lanes, cops,
+  a gap, a spike strip and barrels by the spike side, World::Random and
+  bSpikeStrips. **The plan** (`0x0024fb78`) sizes them to the road: the
+  escape lane (`0x0022ca78`, 3.75 down to 2.75 by the roadblock count,
+  plus 0.5, 0 or -0.25 by difficulty), 0.8 a gap, the cop cars at 45
+  degrees, barrels 3 each (at most 10), strips in 0.65 segments, and
+  the rest to the lanes, the wider side of the road getting more. The
+  layout then walks the plan from the road's left edge and sets the
+  escape lane, the belt, the cops' spots and angles, and spawns the
+  barrels.
+- **A barrel's spawn** (`0x0024f0a8`): the first free slot, the
+  "CS_RoadBlock_Barrel" info's mass scaled to 10 with its tensor, and a
+  smokeable spawned with the "ROADBLOCK_BARREL" hash.
+- `main.c` binds `gPursuitCreateRoadBlockFn`. In a race a chase that
+  asks for a roadblock gets one. The cops are still in limbo until
+  12j's SpawnSpeedTraps, so none shows yet.
+- New NULL seams: RoadBlockSetSpeech, AddSpikeStrip (12j), and the
+  smokeables' FindSmokeableInfo and spawn. The port has no smokeables,
+  so no barrel spawns. A new roadmap step, 14b, ports them; the road to
+  the full game is now about 41-60 slices.
+
+### Checked
+
+- `tools/pursuit_check.py` grows a script for the making, last. The
+  distance to the players, FindRoadBlock, SetRoadBlock,
+  get_vector_on_track, the smokeables, AddSpikeStrip and the speech are
+  logging stand-ins. The plan's code and the barrels' spawn run as
+  shipped: 58562 operations, 86269 lines, 0 differ.
+- Image constants checked against retail: the escape table, the ten
+  lists, the two jump tables (FindCopsForRoadBlock takes states 1 and
+  3 only), 0.8, 0.65, 1/0.65, 3.0, and the cop angle (0 until the
+  static constructor).
+- `--mutate`: 691 mutations, 683 caught and eight equivalent. Of the
+  165 new ones, seven survived the first pass:
+  - `bp_barrel_cmp` (3 to spare for barrels, tested as 2): only exactly
+    3 tells them apart. New plans give roads exactly 3 to spare.
+  - `crb_ax` and `crb_bx`: every strip lay along y. A diagonal road was
+    added to the manager's cases.
+  - `plan_full_ret`, `plan_pop_mod`, `bp_diff_lt` and `bp_neg_lt` are
+    equivalent: nothing reads push's answer, a plan never wraps, and
+    the two lanes are equal where they are compared.
+  - Four older mutations had come to match twice (`ctor_disband`,
+    `disband_pi`, `super_eps`, `super_lt`) and now quote more context.
+- With an empty speaker queue, retail's ReserveCopSpeaker returns its
+  a2 (undefined here) and the port 0, so that case is left out of the
+  script.
+- cop and copdriver still have 0 differ.
+- The CIA builds.
+- `run_azahar_quickrace.ps1 -HoldKeys 65`: PASS. A Hot Pursuit quick
+  race from the frontend, with 4 cops, ran at 30 FPS and Speed 99%.
+
+### Next
+
+12i-3: retail's RealDriver ForceEBrakeStop(float) (`0x0013b558`), which
+binds `gRealDriverForceEBrakeStopFn`. Then 12j, SpawnSpeedTraps and the
+spike strips.

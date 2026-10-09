@@ -22,9 +22,51 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "blist.h"
 #include "collisionbody.h"
 #include "physicssystem.h"
+#include "rigidbody.h"
 #include "timer.h"
+
+// 224 bytes, one for each kind of smokeable, kept on a list at gp-15848
+// that FindSmokeableInfo (0x0021f8f8) walks by NameHash. From the stab,
+//
+//   SmokeableInfo:Tt289=s224!1,020,280;Name:...,64,192;RBI:...,256,640;...
+//
+// so a bTNode base at 0. The roadblock barrels' spawn (barricade.c) is the
+// first reader: it scales RBI's mass and inertia tensor.
+typedef struct SmokeableInfo {
+    bNode    Node;                          //   0  bTNode<SmokeableInfo>
+    char     Name[24];                      //   8
+    RigidBodyInfo RBI;                      //  32
+    uint32_t NameHash;                      // 112
+    uint32_t AnchorEmitterGroupNameHash;    // 116
+    uint32_t DynamicEmitterGroupNameHash;   // 120
+    int32_t  NumChildren;                   // 124
+    struct SmokeableInfo *pChildren[4];     // 128
+    uint32_t ChildNameHashes[4];            // 144
+    float    CenterOfMass[3];               // 160  twelve bytes in the stab
+    float    Padding;                       // 172
+    float    Lifetime;                      // 176
+    float    AnchorStrength;                // 180
+    float    BreakingStrength;              // 184
+    float    Bounciness;                    // 188
+    int32_t  TheTerrainType;                // 192
+    uint32_t TerrainTypeHash;               // 196
+    float    Friction;                      // 200
+    float    Padding2;                      // 204
+    bNode    DynamicEmitterList;            // 208
+    bNode    AnchorEmitterList;             // 216
+} SmokeableInfo;                            // 224
+
+typedef char smokeableinfo_layout_check[
+    (sizeof(void *) != 4
+     || (offsetof(SmokeableInfo, RBI) == 32
+         && offsetof(SmokeableInfo, NameHash) == 112
+         && offsetof(SmokeableInfo, CenterOfMass) == 160
+         && offsetof(SmokeableInfo, TheTerrainType) == 192
+         && offsetof(SmokeableInfo, AnchorEmitterList) == 216
+         && sizeof(SmokeableInfo) == 224)) ? 1 : -1];
 
 typedef struct Smokeable {
     DynamicCollisionBody Dynamic;               //   0
