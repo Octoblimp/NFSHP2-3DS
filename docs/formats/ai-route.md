@@ -8,12 +8,12 @@
 
 A NearestRoutePointInfo is a route and a point on it. It answers "where on
 the route network is this?". These four functions live in the AI's utility
-object, with the route planners. Of those, GuessTargetDestinations is
-ported, in `airouteplan.{c,h}` (below), for the TrafficTeleporter
-([traffic-teleporter.md](traffic-teleporter.md)). ReturnToLastBranch,
-FindRoutesToTarget, FindPointsToTarget and FindNearbySignpost are not
-yet. Three other free functions from the same object are in
-`drivetarget.c`.
+object, with the route planners, which are ported in `airouteplan.{c,h}` (below):
+GuessTargetDestinations for the TrafficTeleporter
+([traffic-teleporter.md](traffic-teleporter.md)), and ReturnToLastBranch,
+FindRoutesToTarget, FindPointsToTarget and FindNearbySignpost for the
+helicopter ([chopper.md](chopper.md)). Three other free functions from the
+same object are in `drivetarget.c`.
 
 The port is `3DS Files/source/airoute.{c,h}`. It is cross-checked by
 `tools/airoute_check.py` against `tools/src/airoute_test.c`, with the image
@@ -183,6 +183,100 @@ off the front. With the ring empty, the walk returns what it found.
 
 With no route or no point, it returns 0 at once.
 
+## The helicopter's planners
+
+    0x001cc130  ReturnToLastBranch(info, branches, routes)
+    0x001cc270  FindRoutesToTarget(start, target route, routes, fwd, heli)
+    0x001cc5d0  FindPointsToTarget(start, target, out, count, fwd, heli)
+    0x001cc838  FindNearbySignpost(info, fwd)
+
+The helicopter (`chopper.c`) follows these. The port is `airouteplan.{c,h}`.
+It is checked by `tools/routeplan_check.py` against
+`tools/src/routeplan_test.c` (below), with the image as the model.
+
+**The deques.** Each is a `Deque<T, 20>`:
+
+| deque | item | size | Front | Back | Full |
+|---|---|---:|---:|---:|---:|
+| routes taken | `TrackRoute *` | 92 | 80 | 84 | 88 |
+| branches not taken | NearestRoutePointInfo | 172 | 160 | 164 | 168 |
+
+The deque is empty when Front == Back with Full clear.
+
+- PushBack writes at Back, steps Back on (wrapping 20 to 0) and sets Full
+  when it meets Front.
+- PushFront steps Front back first (0 to 19), sets Full the same way, then
+  writes.
+- Taking off either end clears Full.
+
+Every caller skips a push when Full, so what would have gone on is
+dropped.
+
+**FindNearbySignpost** steps the point along its route until one has a
+signpost. It returns 1 plus the steps taken, or 0 when it runs off the
+route (the point is then NULL).
+
+**ReturnToLastBranch** returns 0 with no branch left. Otherwise the newest
+branch (at Front) comes off into `info`. Routes come off the back of the
+routes deque until the branch's route is the last, and it returns 1.
+
+**FindRoutesToTarget** searches depth first. The start's route goes on,
+and if it is the target the answer is 1 at once. Then it walks. At a
+signpost that applies (a Backwards sign walking back, any other walking
+forwards):
+
+| the sign names | |
+|---|---|
+| the target | The target goes on. 1. |
+| a route not taken | The route goes on, and the walk goes down the sign. Unless the sign is 2, the point after the sign is kept as a branch, at the front. |
+| a route taken | A sign 2 or 3 sends the walk back to the last branch, as ReturnToLastBranch does. Any other is passed by. |
+
+Then it steps. With `heli`, a point marked TRP_NO_HELISHEET (0x4000)
+also sends the walk back to the last branch. The branch's point is looked
+at next as it is, without a step. Running off a route, or out of
+branches, empties the routes (Back = Front, Full clear) and the answer
+is 0.
+
+**FindPointsToTarget** lists up to `count` points from the start towards
+the target, into `out[0 ..]`, and returns how many.
+
+- When the start is the target, `out` gets the target alone, and it
+  returns 1.
+- With `heli`, a start marked TRP_NO_HELISHEET returns 0.
+
+Each point stepped onto is listed. The list ends:
+
+- at the target;
+- at the end of a route;
+- at a sign 3;
+- at a TRP_NO_HELISHEET point, with `heli`;
+- once `count` are listed (one at least).
+
+A sign 2 is taken, without a step. At any other sign that applies,
+FindRoutesToTarget fills one routes deque that serves the whole call. The
+sign is taken only when it names the route at the deque's front, and an
+empty deque ends the list. That front is the first route ever put on,
+which is the start's. So in practice these signs are passed by. The port
+keeps this.
+
+**What the port does not follow.** None of these happen on a shipped
+track. The checker gives the model the port's answer with a hook at each.
+
+- **ReturnToLastBranch with the routes run out.** The routes can empty
+  before the branch's route turns up. The image then keeps comparing the
+  last route it took off (or, with none, a stale stack word) for ever.
+  The port returns 0.
+- **A branch kept at the end of a route** has no point. The image steps
+  from address 0, and with `heli` reads it. The port takes it as running
+  off the route.
+- **Looking through a full routes deque** (or one whose Back is 0) for a
+  route not there. The image stops only when it lands on Back after a
+  step, before the wrap, so it goes round for ever. The port stops after
+  twenty looks.
+- **A full routes deque** takes no more, so the walk can go round a loop
+  of routes for ever. The port gives up after 0x11800 steps
+  (`ROUTEPLAN_MAX_WALK`), as on running off a route.
+
 ## What the port does not follow
 
 None of these happen on a shipped track. The checker hooks each one in the
@@ -263,3 +357,40 @@ The scenarios cover:
 - track 12's own 17 routes and 56 signs, loaded by the loader: a step and
   an ahead from every one of its 2,535 points, IsValid on and across routes,
   and the search along every racing route with FindWhereIAm's flags.
+
+### The helicopter's planners
+
+    python tools/routeplan_check.py
+    python tools/routeplan_check.py --mutate
+
+`routeplan_check.py` runs the image's four planners in mipsemu against
+`tools/src/routeplan_test.c`. Both sides build the same 24 routes and
+256 signs. A point prints as its route and index, so a step to the
+wrong place shows. The model gets the port's four answers (above) from
+hooks: a step from no point returns no point, an empty routes deque ends
+ReturnToLastBranch, the look stops at twenty, and the walk gives up
+after 0x11800 steps.
+
+The scenarios cover:
+
+- FindNearbySignpost from every point of four routes, both ways;
+- ReturnToLastBranch on full, empty and wrapped deques of both kinds;
+- FindRoutesToTarget at every sign value, Backwards or not, at a target
+  and at routes taken. It also runs back to branches from a sign and from
+  a no-go point, from a branch kept at a route's end, and on fifteen
+  starting deques: full, wrapped, with Back at 0, and with stale items;
+- two routes that send the walk round for ever;
+- a chain of 22 routes that fills both deques, so r20's branch is
+  dropped;
+- a walk whose target turns up on its 0x11800th step, one step either
+  side, and one 1,020 steps on;
+- FindPointsToTarget at every sign, count and target, a target whose
+  route is not its point's, and a no-go start;
+- 1,000 random networks of four routes.
+
+The result is 81,092 ops, 100,285 lines and 0 differ. Of 98 mutations,
+97 are caught and 1 is equivalent: dropping the look's emptiness test,
+which no call reaches. Six survived the first pass. The branches deque
+never filled with four routes, which is why there are 24. No walk ran
+long enough to tell the guard's `>` from `>=`. No target had a route
+other than its point's.

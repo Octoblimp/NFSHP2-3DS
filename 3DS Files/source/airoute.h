@@ -11,8 +11,8 @@
 // do the AI's route planners further up this object.
 //
 // The planners (GuessTargetDestinations, ReturnToLastBranch,
-// FindRoutesToTarget, FindPointsToTarget, FindNearbySignpost) and the rest
-// of the object are not here yet. ai_calculate_look_ahead_distance,
+// FindRoutesToTarget, FindPointsToTarget, FindNearbySignpost) are in
+// airouteplan.c. ai_calculate_look_ahead_distance,
 // ai_straight_line_predict and ai_is_point_ahead_of_car, from the same
 // object, live in drivetarget.c.
 //

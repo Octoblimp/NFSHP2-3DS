@@ -1,7 +1,10 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 60 (2026-10-09):
-the light flares are done. Cars' headlights, brake and reverse lights
+12k-3's first part is done: the route planners the helicopter follows
+(ReturnToLastBranch, FindRoutesToTarget, FindPointsToTarget and
+FindNearbySignpost, in `airouteplan.c`; `docs/formats/ai-route.md`).
+Before them, the light flares. Cars' headlights, brake and reverse lights
 and the cops' red, blue and white now glow, and the tunnels' lamps too
 (`elightflare.c`, `docs/formats/light-flare.md`). Nothing had drawn
 them: eRenderLightFlare was not ported, so the cop lights did not
@@ -381,11 +384,29 @@ pursuit.obj, on a 10 KB manager. Its slices:
     the table unchecked).
   - `tools/lightflare_check.py`: 3,143 ops, 5,499 lines, 0 differ,
     1,034 polys drawn; 96 mutations, all caught.
-  - **Not yet:** the Azahar run. The laptop was on battery (status 1,
-    34%) at the end of the slice. That run is also 12k-2's rerun
-    after the knock fix. Look for the cops' flashing red and blue, and
-    the headlights' glow.
-- **Next: 12k-3**, the helicopter's planning.
+  - **Azahar, on AC (2026-10-09):** 30 fps at 100% speed, the
+    headlights glow, and a pursuit with wanted stars. The user saw the
+    cop's light bar flash. That run was also 12k-2's rerun after the
+    knock fix: no abort. A longer run ended "reached RACING, then
+    died" because the user closed it: the held A stopped them driving.
+- **12k-3's planners, done (Session 60):** `airouteplan.c` gains
+  ReturnToLastBranch (`0x001cc130`), FindRoutesToTarget (`0x001cc270`),
+  FindPointsToTarget (`0x001cc5d0`) and FindNearbySignpost
+  (`0x001cc838`), with the two deques as `RoutePlanRoutes` and
+  `RoutePlanBranches`.
+  - The divergences, none on a shipped track: ReturnToLastBranch with
+    the routes run out answers 0; a branch with no point counts as
+    running off; the look through a full routes deque stops at twenty;
+    the walk gives up after `ROUTEPLAN_MAX_WALK` (0x11800) steps.
+  - `tools/routeplan_check.py`: 81,092 ops, 100,285 lines, 0 differ.
+    Of 98 mutations, 97 are caught and 1 is equivalent.
+  - Nothing calls them until 12k-3a (FollowRoute, the stakeout).
+- **Next: 12k-3a**, the helicopter's chase logic in `chopper.c`:
+  StartChaseLogic (`0x001e8590`) .. AdjustByThinkTime (`0x001e9940`),
+  sixteen functions. The gp constants they read: gp-28048 0.7,
+  gp-28044 0.1, gp-28040 0.1, gp-28036 0.1, gp-28032 0.3,
+  gp-28028 0.1. Then 12k-3b: CleverPursuitPlan (`0x001e9150`) and
+  HighLevelPlanning (`0x001e9648`).
   - Then:
     - 12k-4, flying;
     - 12k-5, drawing, dust and ChopperSound;
@@ -4824,9 +4845,9 @@ each class shows what it reaches.
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
 That was about 41-60 slices to the full game when the table was set.
-After the light flares (2026-10-09), about 27-40 are left, and the
+After 12k-3's planners (2026-10-09), about 27-40 are left, and the
 count has run low before:
-- step 12's: 12k-3 to 12k-7, 12l, 12m and 12n;
+- step 12's: 12k-3a, 12k-3b, 12k-4 to 12k-7, 12l, 12m and 12n;
 - steps 10, 14, 14b, 16, 17, 18 and 20.
 
 The replay (`ReplaySnapshot` and every `DoSnapshot`) is not in the
@@ -4839,8 +4860,9 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12's 12k-3 (the helicopter's planning): 12a to 12k-2
-  and the light flares are done. See "First" at the top.
+- **Next:** step 12's 12k-3a (the helicopter's chase logic): 12a to
+  12k-2, the light flares and 12k-3's planners are done. See "First" at
+  the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

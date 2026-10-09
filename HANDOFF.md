@@ -18801,3 +18801,78 @@ half of `eLight.obj` (`0x00116118` .. `0x00116820`) and binds it.
 ### Next
 
 12k-3, the helicopter's planning.
+
+## Session 60, continued (2026-10-09) -- 12k-3, the route planners
+
+The helicopter follows routes the AI's planners find. Four of them were
+not ported: ReturnToLastBranch, FindRoutesToTarget, FindPointsToTarget
+and FindNearbySignpost. They are now in `airouteplan.{c,h}`, with
+GuessTargetDestinations. `docs/formats/ai-route.md` ("The helicopter's
+planners") has the details.
+
+### The light flares' Azahar run
+
+On AC: 30 fps at 100% speed, the headlights glow, and a pursuit with
+wanted stars. The user saw the cop's light bar flash ("I mean I did see
+a working light bar"). It was also 12k-2's rerun after the knock fix,
+and nothing aborted. A longer `-HoldKeys 65` run reported "reached
+RACING, then died" at 146 s: the user had closed Azahar, because the
+held A kept them from driving. Azahar's log showed a clean shutdown and
+there was no `nfshp2_stderr.txt`. Keep held-key runs short.
+
+### What it does
+
+- **`RoutePlanRoutes`**, `Deque<TrackRoute *, 20>` (92 bytes), and
+  **`RoutePlanBranches`**, `Deque<NearestRoutePointInfo, 20>` (172).
+  Empty is Front == Back with Full clear. Every caller skips a push when
+  Full.
+- **ReturnToLastBranch** takes the newest branch off, then routes off
+  the back until the branch's route is the last.
+- **FindRoutesToTarget** searches depth first. A sign that applies and
+  names a route not taken is followed, the way on kept as a branch
+  unless the sign is 2. A sign 2 or 3 naming a route taken, or a no-go
+  point (`TRP_NO_HELISHEET`) with `heli`, goes back to the last branch.
+  The branch's point is looked at as it is, without a step.
+- **FindPointsToTarget** lists the points towards a target. Its signs
+  other than 2 and 3 ask FindRoutesToTarget, and are taken only when
+  they name the route at the routes deque's front. That is the start's
+  route, so in practice they are passed by. Retail's quirk, kept.
+- **FindNearbySignpost** counts the steps to the next signpost.
+- **The divergences.** None of these happen on a shipped track:
+  - ReturnToLastBranch with the routes run out answers 0. The image
+    compares a stale word for ever.
+  - A branch with no point counts as running off. The image steps from
+    address 0.
+  - The look through a full routes deque stops at twenty. The image's
+    never ends when Back is 0 or the deque is full.
+  - The walk gives up after `ROUTEPLAN_MAX_WALK` (0x11800) steps. The
+    image can walk a loop of routes for ever once the deque is full.
+
+### Checked
+
+- `tools/routeplan_check.py` runs the image's four functions in
+  mipsemu, with GetSignpost, GetNewRoute, GetNewRoutePoint and
+  GetRelativePoint under them as shipped. The harness is
+  `tools/src/routeplan_test.c`. Hooks give the model the port's four
+  answers. Both sides have 24 routes; the 1,000 random networks use
+  four.
+- The result is 81,092 ops, 100,285 lines and 0 differ. Of 98
+  mutations, 97 are caught and 1 is equivalent: the look's emptiness
+  test, which no call reaches. It is the image's own (`0x001cc4ec`).
+  Six survived the first pass, and new scenarios killed the other five:
+  - a chain of 22 routes, which fills the branches;
+  - a walk whose target turns up on its 0x11800th step;
+  - a walk 1,020 steps long;
+  - a target whose route is not its point's.
+- The CIA builds. `check_3dsx` and `check_shbin` pass.
+- Azahar, on AC: a quick race with cops from the frontend, PASS at
+  29.9 fps. Nothing calls the planners yet.
+
+### Next
+
+12k-3a, the helicopter's chase logic in `chopper.c`: StartChaseLogic
+(`0x001e8590`) to AdjustByThinkTime (`0x001e9940`). `chopper_check.py`
+needs stubs for FindNearbySignpost, GetRelativePoint, GetNewRoutePoint,
+FindPointsToTarget, TrackRoutePoint::GetPosition (`0x001c1390`) and
+FindClosestPointAhead (`0x001c1d30`). Then 12k-3b, CleverPursuitPlan and
+HighLevelPlanning.
