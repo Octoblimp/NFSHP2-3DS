@@ -18454,3 +18454,76 @@ The manager's SpawnSpeedTraps (`0x00224a20`) and FindCopForSpeedTrap
 tSpikeStrip's constructor, Init and Update (`0x00241378`,
 `0x002414e8`, `0x002417b8`), with the manager's MonitorSpikeBelts
 (`0x00227758`).
+
+## Session 60 (2026-10-09) -- 12j-2a, the spike strips' logic
+
+A roadblock with spikes now lays its strip, and the strip blows the
+tires of a car that drives over it. `docs/formats/cop-manager.md`,
+"Spike strips (12j-2a)", has the details.
+
+### What it does
+
+- **`spikestrip.c`** (new): tSpikeStrip and its belt pieces, retail's
+  `0x00241308` .. `0x00241ae0`, with the manager's AddSpikeStrip
+  (`0x002276d0`) and MonitorSpikeBelts (`0x00227758`).
+  - The strip lays one piece of SPIKEBELT_00 for each 0.65 of its
+    length on the road, at most twenty, each a WorldObject with its
+    own matrix.
+  - Update counts the lifetime down. When the lifetime ends, or the
+    roadblock goes (BlinkBlinkPoof), the pieces blink for 2 s and
+    the strip is destroyed.
+  - MonitorSpikeBelts tests each car near a player and the strip:
+    each wheel on the ground whose move this frame crosses the strip
+    has its tire blown. A car with no tire blown before reacts:
+    - an AI racer is forced to pull over and slowed (ForceBoost);
+    - a player's car gets the short slow motion;
+    - in Be A Cop, the scores;
+    - outside Be A Cop, an unchased racer is pulled over
+      (CreatePullover, a NULL seam until 12l).
+- **`worldobject.c`** (new): WorldObject's constructor and destructor
+  (`0x001cd760`, `0x001cd828`), InitWorldObjects and CloseWorldObjects.
+  `worldobject.h` now has WorldObjectList and the pool.
+- **`coputil.c`**: DoSegmentsIntersect (`0x00230f00`).
+- `copmanager.h` has the strip's whole layout and the piece's.
+- `main.c` binds `gCopManagerAddSpikeStripFn`,
+  `gCopManagerMonitorSpikeBeltsFn`, `gSpikeStripBlinkBlinkPoofFn`,
+  `gInitWorldObjectsFn` and `gCloseWorldObjectsFn`.
+
+### Checked
+
+- `tools/spikestrip_check.py` (new) runs retail's strip, pieces,
+  WorldObject and the two manager methods in mipsemu against
+  `tools/src/spikestrip_test.c`.
+  - The script covers:
+    - geometry for the count's rounding and the cap;
+    - ends that meet, and belts straight up and down;
+    - lengths whose sum rounds by its order;
+    - a pool that was not zero-filled;
+    - odd lifetimes;
+    - every filter of the monitor at its boundary;
+    - each reaction in and out of Be A Cop.
+  - 638 operations, 3193 lines, 0 differ.
+  - `--mutate`: 116 mutations, 115 caught, one equivalent (the plain
+    divide, which differs only at a zero length, where the count is 0
+    either way).
+  - Along the way the count's constant was found off by one bit: it
+    is `0x3fc4ec4f` (1.5384616), not 1.5384615.
+- `tools/trackgraph_check.py` checks DoSegmentsIntersect on its own:
+  - crossings, touches, ends on a line, overlaps, parallels, tiny and
+    huge values, infinities and NaN, each both ways round;
+  - 240 roundings off the line and 250 at random.
+  - 326426 operations, 246557 lines, 0 differ. Its 20 mutations are all
+    caught.
+- aidriver, carmode, collisionbody, cop, copdriver, copmanager,
+  copmover, drivecam, drivingchoice, hudanim, hudcop, hudfeatures,
+  hudrender, hudscore, nearbycar, pursuit, racecore, racerun,
+  raceupdate, realcontroller, realdriver, trackflow, trackmap and
+  world: 0 differ.
+- The CIA builds.
+- `run_azahar_quickrace.ps1 -HoldKeys 65`: PASS. A Hot Pursuit quick race from the frontend ran at 30 FPS and Speed 100%, on AC.
+
+### Next
+
+12j-2b: drawing the belt. That is WorldObject::Render (`0x001cd998`)
+and RenderWorldObjects (`0x001cdb20`), in the main view and the
+rear-view mirror, after StuffSun and before the effects.

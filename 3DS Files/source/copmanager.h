@@ -20,6 +20,7 @@
 
 #include "bvector.h"
 #include "drivetarget.h"
+#include "worldobject.h"
 
 struct Car;
 
@@ -401,25 +402,50 @@ typedef char tpursuit_layout_check[
      && sizeof(struct tPursuit) == 1600) ? 1 : -1];
 #endif
 
-// tSpikeStrip, 2304 bytes in retail: a stinger on the road, in the
-// manager's SpikeStripList. Its links, the roadblock it belongs to
-// (.mdebug t1896's nRoadBlockID, the loaded data's index) and its table
-// so far.
+// tSpikeStripRenderElement, 112 bytes: one piece of a
+// spike belt, a WorldObject of the model SPIKEBELT_00 with a table after
+// it (0x002be698, the destructor at 8). spikestrip.h has its methods.
+typedef struct tSpikeStripRenderElement {
+    WorldObject Base;                   //   0
+    uint32_t    vptr;                   //  96
+    uint8_t     _pad100[12];            // 100  the quadword round-up
+} tSpikeStripRenderElement;
+
+#define TSPIKESTRIPRENDERELEMENT_VTABLE  0x002be698u
+#define TSPIKESTRIPRENDERELEMENT_VT_DTOR 8
+
+// tSpikeStrip, 2304 bytes (.mdebug type#2778, the demo's the same): a
+// stinger across the road, in the manager's SpikeStripList. Its links, the
+// two ends, the roadblock it belongs to (the loaded data's index), the
+// blink at the end of its life, the seconds it has left, and the belt
+// pieces laid 0.65 apart from end to end, at most twenty. spikestrip.h has
+// the methods.
 typedef struct tSpikeStrip {
-    tPursuitNode Node;                  //    0
+    tPursuitNode Node;                  //    0  bTNode<tSpikeStrip>
     bVector2    v2Start;                //    8
     bVector2    v2End;                  //   16
     int32_t     nRoadBlockID;           //   24
-    uint8_t     Unported28[2260];       //   28
-    uint32_t    vptr;                   // 2288  8 the destructor
-    uint8_t     Unported2292[12];       // 2292
+    int32_t     bIsBlinking;            //   28
+    float       fBlinkTimer;            //   32
+    float       fLifetime;              //   36  above 0 counts down
+    int32_t     nNumElements;           //   40
+    uint8_t     _pad44[4];              //   44
+    tSpikeStripRenderElement Elements[20];  // 48
+    uint32_t    vptr;                   // 2288  0x002be688; 8 the destructor
+    uint8_t     _pad2292[12];           // 2292
 } tSpikeStrip;
 
+#define TSPIKESTRIP_VTABLE   0x002be688u
 #define TSPIKESTRIP_VT_DTOR  8
+#define TSPIKESTRIP_MAX_ELEMENTS 20
 
 #if UINTPTR_MAX == 0xFFFFFFFFu
 typedef char tspikestrip_layout_check[
-    (offsetof(tSpikeStrip, nRoadBlockID) == 24
+    (sizeof(tSpikeStripRenderElement) == 112
+     && offsetof(tSpikeStripRenderElement, vptr) == 96
+     && offsetof(tSpikeStrip, nRoadBlockID) == 24
+     && offsetof(tSpikeStrip, nNumElements) == 40
+     && offsetof(tSpikeStrip, Elements) == 48
      && offsetof(tSpikeStrip, vptr) == 2288 && sizeof(tSpikeStrip) == 2304)
     ? 1 : -1];
 #endif

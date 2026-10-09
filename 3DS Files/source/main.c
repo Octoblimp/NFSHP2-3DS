@@ -158,6 +158,7 @@
 #include "resource.h"
 #include "sinit.h"
 #include "shake.h"
+#include "spikestrip.h"
 #include "startrace.h"
 #include "terraintype.h"
 #include "texturepack.h"
@@ -179,6 +180,7 @@
 #include "warp.h"
 #include "wheel.h"
 #include "world.h"
+#include "worldobject.h"
 
 // The race's frame rates on the HUD (step 13b-2): Player::DisplayDebugInfo's
 // "C: %dfps" and "G: %dfps", with the car's position and odometer, which
@@ -3795,6 +3797,7 @@ int main(int argc, char** argv)
     copmgr_install_vtables();
     cop_install_vtables();
     pursuit_install_vtables();
+    spikestrip_install_vtables();
     barricade_install_vtables();
     aicarcontroller_install_vtables();
     beltmover_install_vtables();
@@ -4417,6 +4420,15 @@ int main(int argc, char** argv)
     gPursuitUpdateRoadBlocksFn  = tpursuit_update_road_blocks;
     // A cop out of limbo to a radar trap ahead of a racer (copmgr.h).
     gCopManagerSpawnSpeedTrapsFn = copmanager_spawn_speed_traps;
+    // A roadblock's spike strip, laid along the road as world objects, and
+    // the manager's watch over the strips: each car whose wheels cross one
+    // has those tires blown (spikestrip.h). The track's load and unload
+    // make and empty the world objects' pool (worldobject.h).
+    gCopManagerAddSpikeStripFn     = copmanager_add_spike_strip;
+    gCopManagerMonitorSpikeBeltsFn = copmanager_monitor_spike_belts;
+    gSpikeStripBlinkBlinkPoofFn    = tspikestrip_blink_blink_poof;
+    gInitWorldObjectsFn            = init_world_objects;
+    gCloseWorldObjectsFn           = close_world_objects;
     // The race's cop drivers each get a car, in limbo -- unseen, parked,
     // not colliding -- until a radar trap or a roadblock calls it out
     // (copmgr.h).

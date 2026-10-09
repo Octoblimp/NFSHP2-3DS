@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Cross-check 3DS Files/source/trackgraph.c, retail's tTrackGraph, and the
-two coputil.c helpers it calls, against the retail image, SLES_507.31, run
-in mipsemu.
+"""Cross-check 3DS Files/source/trackgraph.c, retail's tTrackGraph, the
+two coputil.c helpers it calls and coputil.c's DoSegmentsIntersect, against
+the retail image, SLES_507.31, run in mipsemu.
 
 **The model** is retail's own TrackGraph.obj: InitTrackGraph (0x0024ec40)
 and so the constructor (0x0024dd58) with AddVertex, GetVertexNumber and
@@ -13,7 +13,8 @@ FindEdgeByRouteAndPoint, HasCloakedEdges, GetVertex and GetEdge; and
 FindRoadBlock (0x0024e880) and FindSpeedTrap (0x0024ea68) with
 TrackRoutePoint::GetSignpost, GetForwardTrackDistance (0x00230de8),
 IsTeleportLocationClear (0x00230e18) and World::GetDistanceToClosestPlayer
-(0x0014e3e8) running as shipped. The harness (tools/src/trackgraph_test.c)
+(0x0014e3e8) running as shipped; and DoSegmentsIntersect
+(0x00230f00), the spike strips' test, alone. The harness (tools/src/trackgraph_test.c)
 runs trackgraph.c, coputil.c, world.c and trackroute.c's loader and prints
 the same lines.
 
@@ -43,7 +44,10 @@ and Cloaked on each, NoHelisheet at both ends of an edge) and of a few
 hundred made at random; looks up vertices and edges at every point and
 past both ends; finds roadblocks and radar traps from cars all over each
 graph, both ways, over several ranges, with spots near players and cars;
-uncloaks; and tears the graphs down both ways.
+uncloaks; and tears the graphs down both ways. Segments are crossed,
+touched at their ends, laid end to end, along each other and side by side,
+made tiny, infinite and NaN, put a rounding from the other's line and
+thrown at random.
 
     python tools/trackgraph_check.py
     python tools/trackgraph_check.py --mutate [--only a,b]
@@ -109,6 +113,7 @@ F_GETV = 0x0024ecc0
 F_GETE = 0x0024ecd8
 F_GFTD = 0x00230de8
 F_CLEAR = 0x00230e18
+F_DSI = 0x00230f00
 
 S_MALLOC2 = 0x00257690
 S_DELETE = 0x00114e98
@@ -533,10 +538,88 @@ def coputil_ops(rng):
     return s
 
 
+def f32(x):
+    return struct.unpack("<f", struct.pack("<f", x))[0]
+
+
+def dsi_ops(rng):
+    """DoSegmentsIntersect: p to p + d against q to q + e."""
+    s = []
+
+    def dsi(p, d, q, e):
+        s.append("dsi|" + "|".join(F(v) for v in p + d + q + e))
+
+    NAN, INF = float("nan"), float("inf")
+    for p, d, q, e in (
+            ((0.0, 0.0), (10.0, 0.0), (5.0, -5.0), (0.0, 10.0)),
+            ((0.0, 0.0), (10.0, 0.0), (5.0, 1.0), (0.0, 10.0)),
+            ((0.0, 0.0), (10.0, 0.0), (5.0, -11.0), (0.0, 10.0)),
+            ((0.0, 0.0), (10.0, 0.0), (10.0, -5.0), (0.0, 10.0)),
+            ((0.0, 0.0), (10.0, 0.0), (10.000001, -5.0), (0.0, 10.0)),
+            ((0.0, 0.0), (10.0, 0.0), (-0.000001, -5.0), (0.0, 10.0)),
+            ((0.0, 0.0), (10.0, 0.0), (5.0, 0.0), (0.0, 10.0)),
+            ((0.0, 0.0), (10.0, 0.0), (5.0, -5.0), (0.0, 5.0)),
+            ((0.0, 0.0), (10.0, 0.0), (5.0, -5.0), (0.0, 4.9999995)),
+            ((0.0, 0.0), (10.0, 0.0), (2.0, 0.0), (3.0, 0.0)),
+            ((0.0, 0.0), (10.0, 0.0), (20.0, 0.0), (3.0, 0.0)),
+            ((0.0, 0.0), (10.0, 0.0), (0.0, 1.0), (10.0, 0.0)),
+            ((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)),
+            ((0.0, 0.0), (0.0, 0.0), (3.0, 3.0), (1.0, -2.0)),
+            ((-0.0, 0.0), (0.0, -0.0), (-0.0, -0.0), (-0.0, 0.0)),
+            ((5.0, -5.0), (0.0, 10.0), (0.0, 0.0), (10.0, 0.0)),
+            ((1.0, 1.0), (4.0, 4.0), (1.0, 5.0), (4.0, -4.0)),
+            ((1.0, 1.0), (4.0, 4.0), (6.0, 0.0), (4.0, -4.0)),
+            ((-3.5, 2.25), (7.0, -4.5), (0.0, 0.0), (-2.0, 1.0)),
+            ((0.0, 0.0), (NAN, 0.0), (5.0, -5.0), (0.0, 10.0)),
+            ((0.0, 0.0), (10.0, 0.0), (NAN, -5.0), (0.0, 10.0)),
+            ((0.0, 0.0), (10.0, 0.0), (5.0, -5.0), (0.0, NAN)),
+            ((NAN, 0.0), (10.0, 0.0), (5.0, -5.0), (0.0, 10.0)),
+            ((0.0, 0.0), (INF, 0.0), (5.0, -5.0), (0.0, 10.0)),
+            ((0.0, 0.0), (10.0, 0.0), (5.0, -INF), (0.0, INF)),
+            ((0.0, 0.0), (10.0, 0.0), (5.0, -5.0), (INF, 10.0)),
+            ((0.0, 0.0), (1e30, 1e30), (1e30, 0.0), (-1e30, 1e30)),
+            ((0.0, 0.0), (1e-20, 0.0), (5e-21, -1e-20), (0.0, -1e-20)),
+            ((0.0, 0.0), (1e-20, 0.0), (5e-21, -1e-20), (0.0, 3e-20)),
+            ((0.0, 0.0), (1e20, 0.0), (5e19, -1e20), (0.0, -1e20)),
+            ((0.0, 0.0), (1e-20, 1e-20), (1e-20, 0.0), (-1e-20, 1e-20)),
+            ((1e-30, 0.0), (1e-30, 0.0), (1.5e-30, 1e-30), (0.0, -1e-30)),
+            # An end on the other's line, its side's other end overflowing:
+            # infinity times 0.
+            ((0.0, 0.0), (1e30, 0.0), (5.0, 1e9), (0.0, -1e9)),
+    ):
+        # Each both ways round, so each side's test meets each case.
+        dsi(p, d, q, e)
+        dsi(q, e, p, d)
+    for _ in range(150):
+        dsi(*[(f32(rng.uniform(-60, 60)), f32(rng.uniform(-60, 60)))
+              for _ in range(4)])
+    for _ in range(100):
+        dsi(*[(float(rng.randint(-4, 4)), float(rng.randint(-4, 4)))
+              for _ in range(4)])
+    # q a rounding from p's line, or q + e from it; the sign of each side
+    # is the order the image does its sums in.
+    for k in range(240):
+        p = (f32(rng.uniform(-60, 60)), f32(rng.uniform(-60, 60)))
+        d = (f32(rng.uniform(-30, 30)), f32(rng.uniform(-30, 30)))
+        t = rng.uniform(0.05, 0.95)
+        on = (f32(p[0] + t * d[0]), f32(p[1] + t * d[1]))
+        e = (f32(rng.uniform(-30, 30)), f32(rng.uniform(-30, 30)))
+        if k % 3 == 0:
+            q = on
+        elif k % 3 == 1:
+            q = (f32(on[0] - e[0]), f32(on[1] - e[1]))
+        else:
+            q, e = on, (f32(-rng.uniform(0, 1) * e[0]), e[1])
+        if k % 2:
+            p, d, q, e = q, e, p, d
+        dsi(p, d, q, e)
+    return s
+
+
 def script(blobdir):
     """The script, and the blobs it loads written to `blobdir`."""
     rng = random.Random(0x7247)
-    s = coputil_ops(rng)
+    s = coputil_ops(rng) + dsi_ops(random.Random(0x5e6))
     blobs = []
     for p in sorted(TRACKS.glob("TRACKB*.BUN")):
         blobs.append((p.stem, bun_blob(p), 60))
@@ -590,6 +673,7 @@ class Model(object):
         self.rb_has = [0] * NSPOTS
         self.st_has = [0] * NSPOTS
         self.vec = e.alloc(16, align=16)
+        self.segs = e.alloc(32, align=16)
         for a, fn in ((S_MALLOC2, self.s_malloc2), (S_DELETE, self.s_delete),
                       (S_NEWPOOL, self.s_newpool),
                       (S_DELPOOL, self.s_delpool),
@@ -883,6 +967,12 @@ class Model(object):
             e.put32(self.vec + 4, n(2) & M32)
             self.emit("clear %s %s -> %d" % (a[1], a[2],
                                              e.call(F_CLEAR, self.vec)))
+        elif o == "dsi":
+            for k in range(8):
+                e.put32(self.segs + 4 * k, n(1 + k) & M32)
+            r = e.call(F_DSI, self.segs, self.segs + 8, self.segs + 16,
+                       self.segs + 24)
+            self.emit("dsi %s -> %d" % (" ".join(a[1:9]), r))
         else:
             raise ValueError(o)
 
@@ -1252,6 +1342,66 @@ MUTATIONS = [
     ("clear_car_nan", U,
      "        if (sqrtf(dx * dx + dy * dy) < 15.0f)\n",
      "        if (!(sqrtf(dx * dx + dy * dy) >= 15.0f))\n"),
+    ("dsi_lt_first", U,
+     "    if (!(s0 * s1 <= 0.0f))\n",
+     "    if (!(s0 * s1 < 0.0f))\n"),
+    ("dsi_lt_second", U,
+     "    return s0 * s1 <= 0.0f;\n",
+     "    return s0 * s1 < 0.0f;\n"),
+    ("dsi_nan_first", U,
+     "    if (!(s0 * s1 <= 0.0f))\n",
+     "    if (s0 * s1 > 0.0f)\n"),
+    ("dsi_nan_second", U,
+     "    return s0 * s1 <= 0.0f;\n",
+     "    return !(s0 * s1 > 0.0f);\n"),
+    ("dsi_double_first", U,
+     "    if (!(s0 * s1 <= 0.0f))\n",
+     "    if (!((double)s0 * s1 <= 0.0))\n"),
+    ("dsi_double_second", U,
+     "    return s0 * s1 <= 0.0f;\n",
+     "    return (double)s0 * s1 <= 0.0;\n"),
+    ("dsi_no_second", U,
+     "    return s0 * s1 <= 0.0f;\n",
+     "    return 1;\n"),
+    ("dsi_q2x_minus", U,
+     "    float q2x = q->x + e->x, q2y = q->y + e->y;\n",
+     "    float q2x = q->x - e->x, q2y = q->y + e->y;\n"),
+    ("dsi_q2y_minus", U,
+     "    float q2x = q->x + e->x, q2y = q->y + e->y;\n",
+     "    float q2x = q->x + e->x, q2y = q->y - e->y;\n"),
+    ("dsi_p2y_minus", U,
+     "    p2y = p->y + d->y;\n",
+     "    p2y = p->y - d->y;\n"),
+    ("dsi_s1_q", U,
+     "    s1 = (q2x - p->x) * d->y - (q2y - p->y) * d->x;\n",
+     "    s1 = (q->x - p->x) * d->y - (q2y - p->y) * d->x;\n"),
+    ("dsi_s1_assoc", U,
+     "    s1 = (q2x - p->x) * d->y - (q2y - p->y) * d->x;\n",
+     "    s1 = (q->x - p->x + e->x) * d->y - (q2y - p->y) * d->x;\n"),
+    ("dsi_s1b_assoc", U,
+     "    s1 = (p2x - q->x) * e->y - (p2y - q->y) * e->x;\n",
+     "    s1 = (p2x - q->x) * e->y - (p->y - q->y + d->y) * e->x;\n"),
+    ("dsi_s0_swap", U,
+     "    s0 = (q->x - p->x) * d->y - (q->y - p->y) * d->x;\n",
+     "    s0 = (q->x - p->x) * d->x - (q->y - p->y) * d->y;\n"),
+    ("dsi_s0_sign", U,
+     "    s0 = (q->x - p->x) * d->y - (q->y - p->y) * d->x;\n",
+     "    s0 = (q->y - p->y) * d->x - (q->x - p->x) * d->y;\n"),
+    ("dsi_s0b_sign", U,
+     "    s0 = (p->x - q->x) * e->y - (p->y - q->y) * e->x;\n",
+     "    s0 = (p->y - q->y) * e->x - (p->x - q->x) * e->y;\n"),
+    ("dsi_s0b_e_d", U,
+     "    s0 = (p->x - q->x) * e->y - (p->y - q->y) * e->x;\n",
+     "    s0 = (p->x - q->x) * d->y - (p->y - q->y) * e->x;\n"),
+    ("dsi_s1b_p", U,
+     "    s1 = (p2x - q->x) * e->y - (p2y - q->y) * e->x;\n",
+     "    s1 = (p2x - q->x) * e->y - (p->y - q->y) * e->x;\n"),
+    ("dsi_s0_neg", U,
+     "    s0 = (q->x - p->x) * d->y - (q->y - p->y) * d->x;\n",
+     "    s0 = (p->x - q->x) * d->y - (p->y - q->y) * d->x;\n"),
+    ("dsi_first_return", U,
+     "    if (!(s0 * s1 <= 0.0f))\n        return 0;\n",
+     "    if (!(s0 * s1 <= 0.0f))\n        return 1;\n"),
 ]
 
 EQUIVALENT = {}

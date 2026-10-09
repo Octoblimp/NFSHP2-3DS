@@ -1,9 +1,13 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 59, continued
-(2026-10-08): 12j-1, the radar traps, is done. The manager's
-SpawnSpeedTraps sends a cop out of limbo to a radar trap ahead of a
-racer (`docs/formats/cop-manager.md`, "Radar traps"). Before it, 12i-3
+Where the next session picks up. Updated in Session 60 (2026-10-09):
+12j-2a, the spike strips' logic, is done. A roadblock with spikes lays
+its strip, and a car whose wheels cross it has those tires blown
+(`docs/formats/cop-manager.md`, "Spike strips"). The belt's pieces are
+WorldObjects that nothing draws yet: that is 12j-2b. Before it, 12j-1
+made the radar traps: the manager's SpawnSpeedTraps sends a cop out of
+limbo to a radar trap ahead of a racer (`docs/formats/cop-manager.md`,
+"Radar traps"). Before that, 12i-3
 made RealDriver's ForcedEBrakeStop retail's float timer and bound
 MonitorRoadBlock's 5 s stop (`docs/formats/real-driver.md`). 12i-2 made
 the roadblock (`docs/formats/pursuit.md`, "Making a roadblock"): a
@@ -271,11 +275,30 @@ pursuit.obj, on a 10 KB manager. Its slices:
     racer's tickets against its laps.
   - `copmanager_check` also fixed two mutations that had gone stale
     since 12h-1's rename (`copmanager_replaying`).
-- **Next: 12j-2**, the spike strips: AddSpikeStrip (`0x002276d0`),
-  tSpikeStrip's constructor (`0x00241378`), Init (`0x002414e8`) and
-  Update (`0x002417b8`), and the manager's MonitorSpikeBelts
-  (`0x00227758`). They bind `gCopManagerAddSpikeStripFn` and
-  `gCopManagerMonitorSpikeBeltsFn`, so a roadblock lays its strip.
+- **12j-2a, done (Session 60):** the spike strips' logic, in the new
+  `spikestrip.c` and `worldobject.c`: tSpikeStrip (`0x00241308` ..
+  `0x00241ae0`), its belt pieces, AddSpikeStrip (`0x002276d0`),
+  MonitorSpikeBelts (`0x00227758`), WorldObject's constructor and
+  destructor, InitWorldObjects and CloseWorldObjects, and
+  DoSegmentsIntersect (`0x00230f00`, `coputil.c`).
+  - `main.c` binds `gCopManagerAddSpikeStripFn`,
+    `gCopManagerMonitorSpikeBeltsFn`, `gSpikeStripBlinkBlinkPoofFn`,
+    `gInitWorldObjectsFn` and `gCloseWorldObjectsFn`.
+  - A car whose wheels cross a strip has those tires blown. An AI
+    racer is told to pull over and slowed; a player's car gets the
+    short slow motion. The pull-over itself is CreatePullover (12l).
+  - `tools/spikestrip_check.py`: 3193 lines, 0 differ; 116 mutations,
+    115 caught, one equivalent. `trackgraph_check` checks
+    DoSegmentsIntersect alone, its 20 mutations all caught.
+- **Next: 12j-2b**, drawing the belt: WorldObject::Render
+  (`0x001cd998`) and RenderWorldObjects (`0x001cdb20`). eDisplayFrame
+  calls RenderWorldObjects for views 1 to 3 (the rear-view mirror too,
+  not the envmap), after StuffSun and RenderPlayers and before the
+  flailers and RenderEffects. Render skips an object under 2 pixels
+  (GetPixelSize, radius 20) or out of view (eModel::IsVisible,
+  `0x0010cea8`), copies the matrix to frame memory and calls
+  eModel::Render (`0x0010dc80`), with a light context when AddLighting
+  is set. SPIKEBELT_00 is in GLOBAL/INGAMEB.BUN.
   Then:
   - **12k** the helicopter (UpdateChopper, `0x00229678`);
   - **12l** pullovers and Busted (CreatePullover, `0x00226f30`);
@@ -4705,9 +4728,9 @@ each class shows what it reaches.
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
 That was about 41-60 slices to the full game when the table was set.
-After 12j-1 (2026-10-08), about 24-37 are left, and the count has run
+After 12j-2a (2026-10-09), about 23-36 are left, and the count has run
 low before:
-- step 12's five (12j-2, 12k, 12l, 12m, 12n);
+- step 12's five (12j-2b, 12k, 12l, 12m, 12n);
 - steps 10, 14, 14b, 16, 17, 18 and 20.
 
 The replay (`ReplaySnapshot` and every `DoSnapshot`) is not in the
@@ -4720,8 +4743,8 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a to 12j-1 are done, 12j-2
-  (the spike strips) is next. See "First" at the top.
+- **Next:** step 12, the cops: 12a to 12j-2a are done, 12j-2b
+  (drawing the spike strips) is next. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

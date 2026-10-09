@@ -507,9 +507,10 @@ The manager's CreateRoadBlock (`0x00226298`) returns NULL when:
 
 Otherwise the layout places the cops. Each cop placed is the
 roadblock's and gets tAICop::SetRoadBlock with its index (0 or 1). With
-bit 0x10, AddSpikeStrip (`0x002276d0`, 12j) lays the strip from the
-belt's position less its vector to the position plus it. It takes the
-record's index and a time of -1.
+bit 0x10, AddSpikeStrip (`0x002276d0`, bound since 12j-2a) lays the
+strip from the belt's position less its vector to the position plus
+it. It takes the record's index and a time of -1, so the strip lasts
+until the roadblock goes (`cop-manager.md`, "Spike strips").
 
 FindCopsForRoadBlock (`0x00226810`) clears both of its slots, then goes
 through the manager's AI cops in order and stops once it has `n`. A cop
@@ -645,6 +646,12 @@ Bound since 12i-2: `gPursuitCreateRoadBlockFn`, to
 cops are sent to their spots (SetRoadBlock), with no barrels (no
 smokeables) and no spike strip (12j).
 
+Bound since 12j-2a: `gCopManagerAddSpikeStripFn`, to
+`copmanager_add_spike_strip`, and `gSpikeStripBlinkBlinkPoofFn`, to
+`tspikestrip_blink_blink_poof`. A roadblock with bit 0x10 now lays its
+strip, and the strip blinks out when the roadblock goes. Its pieces are
+not drawn until 12j-2b.
+
 Not bound yet:
 
 - The cop speech manager's calls do nothing while NULL:
@@ -658,8 +665,6 @@ Not bound yet:
   raiseRoadblockRequest and raiseDispatchRoadBlockNA. So does
   RoadBlockSetSpeech, `gPursuitRoadBlockSetSpeechFn`, and the bust
   sound (CollisionSound::PlayBustRoadBlock).
-- AddSpikeStrip, `gCopManagerAddSpikeStripFn`, lays nothing while NULL
-  (12j).
 - FindSmokeableInfo, `gFindSmokeableInfoFn`, finds nothing while NULL,
   so no barrel spawns. The smokeables' spawn, `gSmokeableSpawnFn`,
   aborts if reached. Both wait for the smokeables step.
@@ -672,10 +677,9 @@ Not bound yet:
 - These abort if reached:
   - the helicopter's word at 960 and FollowThisCar (12k);
   - the barrels' delete and the body's fade byte (the smokeables
-    step);
-  - BlinkBlinkPoof (12j).
+    step).
 
-  Nothing makes a helicopter, a barrel or a spike strip before then.
+  Nothing makes a helicopter or a barrel before then.
 
 ## The check
 

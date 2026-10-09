@@ -39,6 +39,25 @@ int32_t is_teleport_location_clear(const bVector2 *p)
     return 1;
 }
 
+// The ends' sums are made first, then each side's two products and
+// their difference, as the image orders them.
+int32_t do_segments_intersect(const bVector2 *p, const bVector2 *d,
+                              const bVector2 *q, const bVector2 *e)
+{
+    float q2x = q->x + e->x, q2y = q->y + e->y;
+    float p2x, p2y, s0, s1;
+
+    s0 = (q->x - p->x) * d->y - (q->y - p->y) * d->x;
+    s1 = (q2x - p->x) * d->y - (q2y - p->y) * d->x;
+    if (!(s0 * s1 <= 0.0f))
+        return 0;
+    p2x = p->x + d->x;
+    p2y = p->y + d->y;
+    s0 = (p->x - q->x) * e->y - (p->y - q->y) * e->x;
+    s1 = (p2x - q->x) * e->y - (p2y - q->y) * e->x;
+    return s0 * s1 <= 0.0f;
+}
+
 int32_t can_teleport(Car *car, const bVector2 *dest)
 {
     World  *w = pCurrentWorld;

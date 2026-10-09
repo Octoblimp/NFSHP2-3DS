@@ -254,7 +254,7 @@ that does nothing (or returns 0) while NULL:
 | SuperInitiates, SayFillerSpeech | `0x0022b908`, `0x00231760` | `gPursuitSuperInitiatesFn`, `gSayFillerSpeechFn` | speech |
 | the speech manager's previousSedPlaybackState | gp-15624 + 1452 | `gCopSpeechPlaybackStateFn` | speech |
 | SpawnSpeedTraps | `0x00224a20` | `gCopManagerSpawnSpeedTrapsFn` | 12j-1, bound (below) |
-| MonitorSpikeBelts | `0x00227758` | `gCopManagerMonitorSpikeBeltsFn` | 12j-2 |
+| MonitorSpikeBelts | `0x00227758` | `gCopManagerMonitorSpikeBeltsFn` | 12j-2a, bound (below) |
 | EndPullover | `0x00225878` | `gCopManagerEndPulloverFn` | 12l |
 | BeACopThink | `0x00227f30` | `gCopManagerBeACopThinkFn` | 12m |
 
@@ -307,6 +307,103 @@ SetSpeedTrap teleports it there and asks for LS_SPEED_TRAP
 (`cops.md`). The car waits 20 s. SpawnSpeedTraps returns there, so it
 places at most one trap a frame. Without a cop or a free trap, the
 car's timer stays where it was, and it tries again on the next frame.
+
+## Spike strips (12j-2a)
+
+`spikestrip.c` has retail's tSpikeStrip (`0x00241308` to `0x00241ae0`)
+and the two manager methods that drive it, AddSpikeStrip and
+MonitorSpikeBelts. `worldobject.c` has the WorldObject they are built
+from (`0x001cd760` to `0x001cd948`). `main.c` binds:
+
+- `gCopManagerAddSpikeStripFn`, so a roadblock with bit 0x10 lays its
+  strip (`pursuit.md`);
+- `gSpikeStripBlinkBlinkPoofFn`, so DeleteRoadBlockSpikeStrips ends
+  the strip when its roadblock goes;
+- `gCopManagerMonitorSpikeBeltsFn`, so Think watches the strips;
+- `gInitWorldObjectsFn` and `gCloseWorldObjectsFn`, so the track's load
+  and unload make and empty WorldObjectSlotPool (128 objects of 96
+  bytes).
+
+**AddSpikeStrip** (`0x002276d0`) takes 2304 bytes from
+SpikeStripSlotPool, builds the strip there and puts it at the head of
+SpikeStripList. A roadblock passes its record's index and a lifetime of
+-1, so its strip never runs out and stays until the roadblock goes.
+
+**The strip.** Its layout is in `copmanager.h`: the links, the two ends,
+the roadblock's id, the blink flag and timer, the lifetime, the count
+and twenty belt pieces. Each piece (`0x002419f8`, 112 bytes) is a
+WorldObject of the model SPIKEBELT_00 with a table after it. It is
+built with no matrix, so it is off, and goes on WorldObjectList's tail.
+The constructor (`0x00241378`) builds all twenty in order, then calls
+Init (`0x002414e8`):
+
+1. The id, the ends and the lifetime are stored. Each end is put on the
+   road (GetVectorOnTrack).
+2. The length is `sqrt((dx*dx + dy*dy) + dz*dz)`, the VU's order. The
+   direction is the end less the start, times `1 / length` (the EE's
+   divide).
+3. The count is the length times 20/13 (`0x3fc4ec4f`), truncated: one
+   piece for each 0.65. Above 20 it is 20.
+4. The pieces run from 0.65 past the start, 0.65 apart. Each one's
+   matrix has the rows: the direction, up x direction normalised (the
+   side), direction x side, and the point with w 1. Each is turned on.
+
+Ends that meet on the road divide by zero the EE's way (FLT_MAX), so
+the direction is 0 and the count 0. Pieces past the count, the blink
+flag and its timer are left as they were; the game's pool zero-fills.
+
+**Update** (`0x002417b8`) returns nonzero when the strip is done:
+
+- Blinking: the timer counts down by WorldTimeElapsed, each piece below
+  the count is flipped on or off, and the strip is done once the timer
+  is at or below 0.
+- Otherwise a lifetime above 0 counts down, and at 0 or below
+  BlinkBlinkPoof (`0x00241880`) starts the blink: the flag set, two
+  seconds on the timer.
+
+The destructor (`0x00241430`) runs the twenty pieces' destructors
+through their tables, last first. Each takes its model back (flags 3)
+and leaves WorldObjectList. With bit 0 the strip's slot goes back.
+
+**MonitorSpikeBelts** (`0x00227758`) reads TotalNumCars once. Then for
+each strip, the next one read first:
+
+1. The strip's Update. A strip that is done is unlinked and destroyed
+   through its table with 3.
+2. Otherwise each car of the world's table is tested if it is within
+   250 of a player (on the ground plane), not blinking, and within 40
+   of the strip's middle.
+3. For each wheel on the ground, the wheel's point is its WheelMatrix
+   times the body's matrix with the position, row 3. Its move is the
+   velocity times WorldTimeElapsed, x and y. If the move crosses the
+   strip (DoSegmentsIntersect, `0x00230f00`), the wheel's bit is set.
+4. If BlownTireBits holds all those bits, nothing happens. Otherwise
+   Car::TriggerTireBlowOut blows them. A car with none blown before
+   then reacts:
+   - An AI racer, outside Be A Cop, is forced to pull over within 3 s,
+     and its controller's ForceBoost gets 0.4. In Be A Cop ForceBoost
+     gets 0.3, 0.4 or 0.5 by difficulty (`0x002bd238`).
+   - Any other car with a player, above 20 forward, requests the short
+     slow-motion zone (4, unforced, with the sound, muffled).
+   - In Be A Cop, the player's own cop car is pulled over and scores
+     BLEW YOUR TIRES; a racer being chased scores the player BLEW THE
+     TIRES.
+   - Outside it, a player's car or an AI racer that is not being chased
+     is pulled over.
+
+The pull-over is CreatePullover, `pursuit.h`'s seam, which does
+nothing while NULL (12l). So far a blown car only slows.
+
+**DoSegmentsIntersect** (`0x00230f00`, `coputil.c`) takes p, d, q and
+e: the segments p to p + d and q to q + e. Two cross products tell which
+side of p's line q and q + e lie; if their product is above 0 (or NaN),
+the answer is 0. Then the same for p and p + d against q's line. So
+segments on one line count as crossing even when apart, as retail's do.
+
+The pieces are WorldObjects, but nothing draws WorldObjectList yet.
+That is 12j-2b: Render (`0x001cd998`) and RenderWorldObjects
+(`0x001cdb20`), after the cars. The default constructor (`0x00241308`)
+and DoSnapshot (`0x00241898`) are the replay's.
 
 ## The check
 
@@ -378,3 +475,48 @@ The checkers that link `copmgr.c`, `copmanager.c` or
 `carcollisionbody.c` still have 0 differ: carmode, collisionbody,
 drivecam, drivingchoice, hudanim, hudfeatures, hudrender, nearbycar,
 realcontroller, realdriver and trackmap.
+
+### The spike strips' check (12j-2a)
+
+`tools/spikestrip_check.py` runs retail's strip, its pieces,
+WorldObject, InitWorldObjects and CloseWorldObjects, AddSpikeStrip and
+MonitorSpikeBelts in mipsemu. The port runs in
+`tools/src/spikestrip_test.c`, which links `spikestrip.c`,
+`worldobject.c` and `vtable.c`.
+
+The stand-ins log and answer by the same rule on both sides:
+
+- the slot pools, with a fill byte the script sets;
+- eModel's Init and destructor;
+- GetVectorOnTrack, from a queue or a rule;
+- the distance to the closest player, IsBlinking, eMulMatrix and
+  DoSegmentsIntersect, from a queue;
+- TriggerTireBlowOut, RequestZone, StartScore, IsBeingPursued and
+  CreatePullover;
+- a controller table whose ForceBoost logs.
+
+ForcePullOver and bStringHash run as shipped. The script covers:
+
+- world objects built with and without a matrix, destroyed with each
+  flag, and the pool made and emptied;
+- sixteen strips laid over geometry chosen for the count's rounding,
+  the 20 cap, ends that meet, belts straight up and straight down, and
+  lengths whose sum rounds by its order;
+- two strips from a pool that was not zero-filled;
+- lifetimes of 0, below 0, NaN, infinite and tiny, through the blink
+  to the end;
+- every MonitorSpikeBelts filter at its boundary, each wheel, bits
+  already blown, and each reaction in and out of Be A Cop at each
+  difficulty.
+
+638 operations, 3193 lines, 0 differ. `--mutate`: 116 mutations, 115
+caught, one equivalent. That one divides the plain way: it differs from
+the EE's divide only for a zero length, where the count is 0 either way.
+
+DoSegmentsIntersect is a stand-in there and is checked on its own in
+`tools/trackgraph_check.py`. Segments are crossed, touched at an end,
+laid end to end, along one line and side by side, and made tiny,
+infinite and NaN, each both ways round. 240 more are set a rounding off
+the other's line, and 250 are random. 326426 operations, 246557 lines, 0 differ. Its 20
+mutations are all caught, including a double-width product (an
+underflow to 0) and the NaN branch on each side.

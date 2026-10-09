@@ -652,7 +652,9 @@ So a race with cops makes their cars. Each starts in limbo and stays
 there: not drawn, parked, not colliding, off the map. Since 12i-2 a
 roadblock calls its cops out of limbo (`pursuit.md`). Since 12j-1 the
 manager's SpawnSpeedTraps sends a ready one to a radar trap ahead of a
-racer (`cop-manager.md`).
+racer (`cop-manager.md`). Since 12j-2a a roadblock with spikes lays its
+strip, and a car whose wheels cross it has those tires blown
+(`cop-manager.md`, "Spike strips").
 A Hot Pursuit quick race in Azahar runs at 30 fps with its four, as it
 did before 12g-2.
 

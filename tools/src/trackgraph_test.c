@@ -516,6 +516,17 @@ static void op(void)
         p.y = Fl(2);
         printf("clear %s %s -> %d\n", fields[1], fields[2],
                is_teleport_location_clear(&p));
+    } else if (strcmp(o, "dsi") == 0) {
+        bVector2 v[4];
+        int      k;
+
+        for (k = 0; k < 4; k++) {
+            v[k].x = Fl(1 + 2 * k);
+            v[k].y = Fl(2 + 2 * k);
+        }
+        printf("dsi %s %s %s %s %s %s %s %s -> %d\n", fields[1], fields[2],
+               fields[3], fields[4], fields[5], fields[6], fields[7],
+               fields[8], do_segments_intersect(&v[0], &v[1], &v[2], &v[3]));
     } else {
         fprintf(stderr, "unknown op %s\n", o);
         exit(2);

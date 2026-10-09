@@ -24,6 +24,14 @@ float get_forward_track_distance(float a, float b);
 // of pCurrentWorld's cars, in x and y; else 1.
 int32_t is_teleport_location_clear(const bVector2 *p);
 
+// DoSegmentsIntersect(bVector2 const &, x4), 0x00230f00: whether the
+// segment from p along d and the one from q along e cross. q and q + e
+// are each crossed with d from p, ((x - p.x) * d.y - (y - p.y) * d.x),
+// and the two products must be at or below 0; then p and p + d the same
+// way with e from q. A touch counts; a NaN anywhere is no crossing.
+int32_t do_segments_intersect(const bVector2 *p, const bVector2 *d,
+                              const bVector2 *q, const bVector2 *e);
+
 // CanTeleport(Car *, bVector2 *), 0x00230ff0: 0 when a player is within
 // 250 m (the two-dimensional distance) of the car or of `dest`, or when
 // any other of pCurrentWorld's cars is within 15 m of the car in x and y;
